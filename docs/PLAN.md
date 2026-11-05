@@ -245,8 +245,8 @@ done
 
 ### 3.4 构建与分发
 
-- **开发**：`go run ./cmd/mygo-agent`；本机无显示器时 `xvfb-run -a`。
-- **打包**：`go tool mygo build`（mygo 自带三平台打包、图标、签名、自动更新能力）；产物为单文件 + 安装包。
+- **开发**：`go run ./cmd/zeokeel`；本机无显示器时 `xvfb-run -a`。
+- **构建/打包**：`scripts/build.sh`（make 目标同名）是唯一入口。所有产物固定落在 `dist/`、文件名固定为 `zeokeel-<goos>-<goarch>[.exe]`（Windows 另加 `-console.exe`）；`make build` 本机、`make build-all` 四目标、`make package-windows` 生成 `dist/zeokeel-windows-amd64.zip` + SHA256SUMS。仓库根目录与包目录不再产生二进制；`make clean` 只清 `dist/`、遗留根二进制与 `*.test`（保留 `.cache/`、`.probe/`、`.evolve/`）。
 - **Linux 产物注意**：purego 的 fakecgo 仍动态链接 glibc，**不能放进 Alpine/scratch**；发布用 glibc 基础镜像或普通发行版。
 - **体积预算**：stripped 目标 ≤ 20MB（mygo 空壳约 9.5MB，加上 editor/markdown/sqlite 预计 13–18MB）。
 

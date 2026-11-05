@@ -8,9 +8,13 @@ credentials*
 .probe/
 
 # Build outputs (large binaries; rebuild, don't commit).
+# Canonical output is dist/ (scripts/build.sh); the repo-root names are kept
+# ignored so legacy or manual `go build ./cmd/zeokeel` runs never get committed.
 dist/
+/build/
 /zeokeel
 /zeokeel.exe
+*.test
 
 # Self-evolution machine-local state (reports live in .evolve/research/).
 .evolve/state/

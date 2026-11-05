@@ -15,6 +15,21 @@
 | C3 | 单进程、单二进制、可交叉编译到 Linux / macOS / Windows |
 | C4 | 测试无显示器可跑；功能与交互验收进 CI（DSH 像素/基线门禁已于 2026-11-05 退役） |
 
+## 构建与产物
+
+所有编译产物只落在 `dist/`，同一目标每次构建同名（不写仓库根目录/包目录）。脚本入口是 `scripts/build.sh`，make 目标与它一一对应：
+
+| 命令 | 产物 |
+| --- | --- |
+| `make build` | `dist/zeokeel-<本机 goos>-<本机 goarch>`（native 单一二进制） |
+| `make build-all` | `dist/zeokeel-{linux-amd64,linux-arm64,darwin-arm64}` + Windows GUI/console 双产物 |
+| `make windows` | `dist/zeokeel-windows-amd64.exe`（GUI）+ `dist/zeokeel-windows-amd64-console.exe`（console） |
+| `make package-windows` | 上述 Windows 双产物 + `dist/zeokeel-windows-amd64.zip` + `dist/SHA256SUMS.txt` |
+| `make build-check` | `go build ./...` 仅编译检查（不产生文件） |
+| `make clean` | 删除 `dist/`、遗留的根目录 `zeokeel`/`zeokeel.exe` 与包内 `*.test`（不动 `.cache/`、`.probe/`、`.evolve/`） |
+
+`sh scripts/build.sh <target>` 支持 `native` / `linux-amd64` / `linux-arm64` / `darwin-arm64` / `windows` / `all` / `package-windows` / `clean` / `check` / `help`。Windows 包说明见 [packaging/windows/README-WINDOWS.txt](packaging/windows/README-WINDOWS.txt)。
+
 ## 文档
 
 - **总体规划（主文档）**：[docs/PLAN.md](docs/PLAN.md)
