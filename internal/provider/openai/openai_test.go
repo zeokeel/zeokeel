@@ -878,7 +878,8 @@ func TestStreamOverallRequestTimeoutIsOptIn(t *testing.T) {
 
 	// An explicit positive Timeout still caps the whole stream and reports a
 	// configurable-timeout hint rather than raw net/http wording.
-	bounded, err := New(Config{BaseURL: srv.URL + "/v1", APIKey: "k", Model: "m", Timeout: 20 * time.Millisecond})
+	bounded, err := New(Config{BaseURL: srv.URL + "/v1", APIKey: "k", Model: "m", Timeout: 20 * time.Millisecond,
+		Retry: &RetryPolicy{MaxRetries: 0}})
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
@@ -894,5 +895,129 @@ func TestStreamOverallRequestTimeoutIsOptIn(t *testing.T) {
 	}
 	if msg := chunks[len(chunks)-1].Err.Error(); !strings.Contains(msg, "timed out") || !strings.Contains(msg, "provider.timeout_seconds") {
 		t.Fatalf("timeout error = %q, want the provider.timeout_seconds hint", msg)
+	}
+}
+
+// TestRetryTransientStatuses proves DSH-style normal retries recover a
+// retryable HTTP failure (5xx) and stop retrying non-transient errors.
+func TestRetryTransientStatuses(t *testing.T) {
+	var calls int
+	p, srv := newTestProvider(t, func(w http.ResponseWriter, r *http.Request) {
+		calls++
+		if calls <= 2 {
+			w.WriteHeader(http.StatusServiceUnavailable)
+			_, _ = io.WriteString(w, "temporarily unavailable")
+			return
+		}
+		writeSSE(t, w, ssePayload(t, map[string]any{
+			"choices": []any{map[string]any{"delta": map[string]any{"content": "ok"}}},
+		}), "data: [DONE]\n\n")
+	})
+	// newTestProvider returns a default provider; build another pointed at the
+	// same server with a fast deterministic retry policy.
+	p, err := New(Config{
+		BaseURL: srv.URL + "/v1", APIKey: "k", Model: "m",
+		Retry: &RetryPolicy{MaxRetries: 3, InitialDelay: time.Millisecond, MaxDelay: 2 * time.Millisecond},
+	})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	ch, err := p.Stream(context.Background(), runtime.Request{})
+	if err != nil {
+		t.Fatalf("Stream after retries: %v", err)
+	}
+	if got := textOf(collect(t, ch)); got != "ok" {
+		t.Fatalf("text = %q, want ok (calls=%d)", got, calls)
+	}
+	if calls != 3 {
+		t.Fatalf("provider calls = %d, want 3", calls)
+	}
+
+	// A non-retryable 400 is returned after exactly one call.
+	calls = 0
+	bad, badSrv := newTestProvider(t, func(w http.ResponseWriter, r *http.Request) {
+		calls++
+		w.WriteHeader(http.StatusBadRequest)
+		_, _ = io.WriteString(w, "bad request")
+	})
+	_ = bad
+	badProv, err := New(Config{
+		BaseURL: badSrv.URL + "/v1", APIKey: "k", Model: "m",
+		Retry: &RetryPolicy{MaxRetries: 3, InitialDelay: time.Millisecond, MaxDelay: 2 * time.Millisecond},
+	})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	if _, err := badProv.Stream(context.Background(), runtime.Request{}); err == nil {
+		t.Fatal("Stream with 400 returned nil error")
+	}
+	if calls != 1 {
+		t.Fatalf("400 provider calls = %d, want 1", calls)
+	}
+}
+
+// TestStreamIdleTimeoutUsesDSHDefaultAndRetriesBeforeOutput proves the idle
+// watchdog reports a TIMEOUT-style failure and that a silent first attempt is
+// retried while a later successful attempt streams normally.
+func TestStreamIdleTimeoutRetriesBeforeOutput(t *testing.T) {
+	var calls int
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls++
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.WriteHeader(http.StatusOK)
+		if f, ok := w.(http.Flusher); ok {
+			f.Flush()
+		}
+		if calls == 1 {
+			// Stay silent past the idle timeout before any data.
+			time.Sleep(150 * time.Millisecond)
+		}
+		_, _ = io.WriteString(w, ssePayload(t, map[string]any{
+			"choices": []any{map[string]any{"delta": map[string]any{"content": "after-retry"}}},
+		}))
+		_, _ = io.WriteString(w, "data: [DONE]\n\n")
+	}))
+	t.Cleanup(srv.Close)
+
+	p, err := New(Config{
+		BaseURL: srv.URL + "/v1", APIKey: "k", Model: "m",
+		StreamIdleTimeout: 30 * time.Millisecond,
+		Retry:             &RetryPolicy{MaxRetries: 1, InitialDelay: time.Millisecond, MaxDelay: time.Millisecond},
+	})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	ch, err := p.Stream(context.Background(), runtime.Request{})
+	if err != nil {
+		t.Fatalf("Stream: %v", err)
+	}
+	chunks := collect(t, ch)
+	if got := textOf(chunks); got != "after-retry" {
+		t.Fatalf("text = %q, want after-retry (calls=%d, chunks=%+v)", got, calls, chunks)
+	}
+	if calls != 2 {
+		t.Fatalf("provider calls = %d, want 2 (first idle attempt retried)", calls)
+	}
+
+	// With retries disabled, the idle timeout is a final error chunk.
+	calls = 0
+	p2, err := New(Config{
+		BaseURL: srv.URL + "/v1", APIKey: "k", Model: "m",
+		StreamIdleTimeout: 30 * time.Millisecond,
+		Retry:             &RetryPolicy{MaxRetries: 0},
+	})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	ch, err = p2.Stream(context.Background(), runtime.Request{})
+	if err != nil {
+		t.Fatalf("Stream: %v", err)
+	}
+	chunks = collect(t, ch)
+	if len(chunks) == 0 || chunks[len(chunks)-1].Err == nil {
+		t.Fatalf("missing idle timeout error: %+v", chunks)
+	}
+	if got := chunks[len(chunks)-1].Err.Error(); !strings.Contains(got, "stream idle timeout") {
+		t.Fatalf("idle timeout error = %q", got)
 	}
 }

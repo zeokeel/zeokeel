@@ -73,6 +73,14 @@ type Config struct {
 	// context and the Stop button bound a long generation, and only the
 	// response header wait is capped. A positive value caps one request.
 	Timeout time.Duration
+	// StreamIdleTimeout bounds how long one streamed read may stay silent.
+	// Zero means DefaultStreamIdleTimeout (300s, DSH's streamIdleTimeoutMs
+	// default); a negative value disables the idle watchdog.
+	StreamIdleTimeout time.Duration
+	// Retry configures transient request recovery. Nil uses
+	// DefaultRetryPolicy (DSH normal mode: five retries, 500ms..10s backoff,
+	// 10% jitter); a non-nil policy with MaxRetries 0 disables retries.
+	Retry *RetryPolicy
 	// Temperature, when non-nil, is sent on every request. A pointer keeps
 	// an explicit 0 distinct from "unset".
 	Temperature *float32
@@ -95,6 +103,8 @@ type Provider struct {
 	temperature     *float32
 	maxTokens       int
 	reasoningEffort string
+	retry           RetryPolicy
+	streamIdle      time.Duration
 }
 
 var _ runtime.Provider = (*Provider)(nil)
@@ -142,6 +152,17 @@ func New(cfg Config) (*Provider, error) {
 		}
 		client = &http.Client{Transport: transport, Timeout: cfg.Timeout}
 	}
+	retry := DefaultRetryPolicy
+	if cfg.Retry != nil {
+		retry = cfg.Retry.normalize()
+	}
+	streamIdle := cfg.StreamIdleTimeout
+	switch {
+	case streamIdle == 0:
+		streamIdle = DefaultStreamIdleTimeout
+	case streamIdle < 0:
+		streamIdle = 0
+	}
 
 	return &Provider{
 		baseURL:         base,
@@ -151,6 +172,8 @@ func New(cfg Config) (*Provider, error) {
 		temperature:     temperature,
 		maxTokens:       cfg.MaxTokens,
 		reasoningEffort: strings.TrimSpace(cfg.ReasoningEffort),
+		retry:           retry,
+		streamIdle:      streamIdle,
 	}, nil
 }
 
@@ -178,37 +201,186 @@ func (p *Provider) Stream(ctx context.Context, req runtime.Request) (<-chan runt
 		return nil, err
 	}
 
-	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, p.baseURL+"/chat/completions", bytes.NewReader(payload))
+	attemptsLeft := p.retry.MaxRetries
+	resp, reqCtx, cancel, err := p.openResponse(ctx, payload, &attemptsLeft, 0)
 	if err != nil {
-		return nil, fmt.Errorf("openai: build request: %w", err)
+		return nil, err
 	}
-	httpReq.Header.Set("Content-Type", "application/json")
-	httpReq.Header.Set("Accept", "text/event-stream")
-	httpReq.Header.Set("User-Agent", UserAgent)
-	if p.apiKey != "" {
-		httpReq.Header.Set("Authorization", "Bearer "+p.apiKey)
-	}
-
-	resp, err := p.client.Do(httpReq)
-	if err != nil {
-		return nil, fmt.Errorf("openai: chat completions: %w", err)
-	}
-	if resp.StatusCode < 200 || resp.StatusCode > 299 {
-		defer resp.Body.Close() //nolint:errcheck // response body
-		snippet, _ := io.ReadAll(io.LimitReader(resp.Body, errorBodyMax))
-		if body := strings.TrimSpace(string(snippet)); body != "" {
-			return nil, fmt.Errorf("openai: chat completions: %s: %s", resp.Status, body)
-		}
-		return nil, fmt.Errorf("openai: chat completions: %s", resp.Status)
-	}
-
 	out := make(chan runtime.Chunk, chunkBuffer)
-	go func() {
-		defer close(out)
-		defer resp.Body.Close() //nolint:errcheck // response body
-		p.readStream(ctx, resp.Body, out)
-	}()
+	go p.streamAttempts(ctx, payload, resp, reqCtx, cancel, out, attemptsLeft)
 	return out, nil
+}
+
+// openResponse performs the request phase: build, send, and validate the HTTP
+// response. Transient transport errors and retryable status codes (408/425/429/
+// 5xx) are retried with the configured bounded backoff; a provider Retry-After
+// header replaces the local delay. Non-retryable failures are returned
+// synchronously, preserving the Provider contract for e.g. auth/validation
+// errors. Each retry consumes one attempt from attemptsLeft.
+func (p *Provider) openResponse(ctx context.Context, payload []byte, attemptsLeft *int, attempt int) (*http.Response, context.Context, context.CancelFunc, error) {
+	for {
+		reqCtx, cancel := context.WithCancel(ctx)
+		httpReq, err := http.NewRequestWithContext(reqCtx, http.MethodPost, p.baseURL+"/chat/completions", bytes.NewReader(payload))
+		if err != nil {
+			cancel()
+			return nil, nil, nil, fmt.Errorf("openai: build request: %w", err)
+		}
+		httpReq.Header.Set("Content-Type", "application/json")
+		httpReq.Header.Set("Accept", "text/event-stream")
+		httpReq.Header.Set("User-Agent", UserAgent)
+		if p.apiKey != "" {
+			httpReq.Header.Set("Authorization", "Bearer "+p.apiKey)
+		}
+
+		resp, err := p.client.Do(httpReq)
+		if err != nil {
+			cancel()
+			if ctx.Err() != nil {
+				return nil, nil, nil, requestFailure(ctx.Err())
+			}
+			if *attemptsLeft <= 0 || !retryableStreamError(err) {
+				return nil, nil, nil, requestFailure(err)
+			}
+			*attemptsLeft--
+			delay := p.delayFor(attempt, "")
+			logRetry(p.retry.MaxRetries-*attemptsLeft, p.retry.MaxRetries, delay, err)
+			attempt++
+			if !sleepCtx(ctx, delay) {
+				return nil, nil, nil, requestFailure(ctx.Err())
+			}
+			continue
+		}
+		if resp.StatusCode >= 200 && resp.StatusCode <= 299 {
+			return resp, reqCtx, cancel, nil
+		}
+		snippet, _ := io.ReadAll(io.LimitReader(resp.Body, errorBodyMax))
+		_ = resp.Body.Close()
+		cancel()
+		body := strings.TrimSpace(string(snippet))
+		var reqErr error
+		if body != "" {
+			reqErr = fmt.Errorf("openai: chat completions: %s: %s", resp.Status, body)
+		} else {
+			reqErr = fmt.Errorf("openai: chat completions: %s", resp.Status)
+		}
+		if *attemptsLeft <= 0 || !retryableStatus(resp.StatusCode) {
+			return nil, nil, nil, reqErr
+		}
+		*attemptsLeft--
+		delay := p.delayFor(attempt, resp.Header.Get("Retry-After"))
+		logRetry(p.retry.MaxRetries-*attemptsLeft, p.retry.MaxRetries, delay, reqErr)
+		attempt++
+		if !sleepCtx(ctx, delay) {
+			return nil, nil, nil, requestFailure(ctx.Err())
+		}
+	}
+}
+
+// streamAttempts reads an established response and retries failures that
+// happened before any visible chunk was forwarded: read-phase transport errors,
+// stream idle timeouts and empty responses. A failure after visible output is
+// final because the transcript cannot retract the partial answer; this is the
+// safe subset of DSH's step-boundary retry for ZeoKeel's streaming UI.
+func (p *Provider) streamAttempts(ctx context.Context, payload []byte, resp *http.Response, reqCtx context.Context, cancel context.CancelFunc, out chan<- runtime.Chunk, attemptsLeft int) {
+	defer close(out)
+	attempt := 0
+	for {
+		if resp == nil {
+			var err error
+			resp, reqCtx, cancel, err = p.openResponse(ctx, payload, &attemptsLeft, attempt)
+			if err != nil {
+				out <- runtime.Chunk{Err: err}
+				return
+			}
+		}
+		attemptCh := make(chan runtime.Chunk, chunkBuffer)
+		var body io.Reader = resp.Body
+		var idle *idleReadWatcher
+		if p.streamIdle > 0 {
+			// The watchdog cancels the request context so the blocked body
+			// read unblocks immediately; readStream reports the idle timeout
+			// instead of the derived cancellation.
+			idle = newIdleReadWatcher(resp.Body, p.streamIdle, cancel)
+			body = idle
+		}
+		go func() {
+			p.readStream(reqCtx, body, attemptCh, idle)
+			close(attemptCh)
+		}()
+
+		emitted := false
+		sawDone := false
+		var failure error
+		for c := range attemptCh {
+			switch {
+			case c.Err != nil:
+				failure = c.Err
+			case c.Done:
+				sawDone = true
+			default:
+				emitted = true
+				select {
+				case out <- c:
+				case <-ctx.Done():
+					cancel()
+					_ = resp.Body.Close()
+					if idle != nil {
+						idle.stop()
+					}
+					return
+				}
+			}
+		}
+		if idle != nil {
+			idle.stop()
+		}
+		cancel()
+		_ = resp.Body.Close()
+
+		if ctx.Err() != nil {
+			return
+		}
+		if failure == nil {
+			if sawDone {
+				out <- runtime.Chunk{Done: true}
+				return
+			}
+			if emitted {
+				// Content was already forwarded: retrying would duplicate it.
+				out <- runtime.Chunk{Err: fmt.Errorf("openai: stream ended without a terminal event")}
+				return
+			}
+			if attemptsLeft > 0 {
+				// The stream closed before any visible output and without a
+				// terminal Done marker (unexpected EOF/transport close): safe
+				// to retry the whole request once per remaining attempt.
+				attemptsLeft--
+				delay := p.delayFor(attempt, "")
+				logRetry(p.retry.MaxRetries-attemptsLeft, p.retry.MaxRetries, delay, fmt.Errorf("empty response"))
+				attempt++
+				if !sleepCtx(ctx, delay) {
+					return
+				}
+				resp = nil
+				continue
+			}
+			out <- runtime.Chunk{Done: true}
+			return
+		}
+		if !emitted && attemptsLeft > 0 && retryableStreamError(failure) {
+			attemptsLeft--
+			delay := p.delayFor(attempt, "")
+			logRetry(p.retry.MaxRetries-attemptsLeft, p.retry.MaxRetries, delay, failure)
+			attempt++
+			if !sleepCtx(ctx, delay) {
+				return
+			}
+			resp = nil
+			continue
+		}
+		out <- runtime.Chunk{Err: failure}
+		return
+	}
 }
 
 // buildRequest encodes req as an OpenAI chat-completions body.

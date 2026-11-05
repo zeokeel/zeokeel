@@ -807,12 +807,32 @@ func buildAgentWithOptions(st *store.Store, root, instruction string, opts regis
 	if n := settingInt(get, "provider.timeout_seconds", "ZEOKEEL_PROVIDER_TIMEOUT_SECONDS", 0, 0, 3600); n > 0 {
 		requestTimeout = n
 	}
+	// DSH defaults: a stream may stay idle for up to 5 minutes, there is no
+	// overall request deadline, and transient failures are retried up to five
+	// times with 500ms..10s exponential backoff and 10% jitter.
+	streamIdleSeconds := settingInt(get, "provider.stream_idle_timeout_seconds",
+		"ZEOKEEL_PROVIDER_STREAM_IDLE_TIMEOUT_SECONDS",
+		int(openai.DefaultStreamIdleTimeout/time.Second), 1, 3600)
+	retryMax := settingInt(get, "provider.retry_max_retries",
+		"ZEOKEEL_PROVIDER_RETRY_MAX_RETRIES", openai.DefaultRetryPolicy.MaxRetries, 0, 10)
+	retryInitialMs := settingInt(get, "provider.retry_initial_ms",
+		"ZEOKEEL_PROVIDER_RETRY_INITIAL_MS", int(openai.DefaultRetryPolicy.InitialDelay/time.Millisecond), 1, 60000)
+	retryMaxMs := settingInt(get, "provider.retry_max_ms",
+		"ZEOKEEL_PROVIDER_RETRY_MAX_MS", int(openai.DefaultRetryPolicy.MaxDelay/time.Millisecond), 1, 300000)
+	retry := &openai.RetryPolicy{
+		MaxRetries:   retryMax,
+		InitialDelay: time.Duration(retryInitialMs) * time.Millisecond,
+		MaxDelay:     time.Duration(retryMaxMs) * time.Millisecond,
+		JitterRatio:  0.1,
+	}
 	prov, err := openai.New(openai.Config{
-		BaseURL:         baseURL,
-		APIKey:          apiKey,
-		Model:           model,
-		ReasoningEffort: reasoningEffort,
-		Timeout:         time.Duration(requestTimeout) * time.Second,
+		BaseURL:           baseURL,
+		APIKey:            apiKey,
+		Model:             model,
+		ReasoningEffort:   reasoningEffort,
+		Timeout:           time.Duration(requestTimeout) * time.Second,
+		StreamIdleTimeout: time.Duration(streamIdleSeconds) * time.Second,
+		Retry:             retry,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("build provider: %w", err)
@@ -873,6 +893,7 @@ func buildAgentWithOptions(st *store.Store, root, instruction string, opts regis
 		zero := float32(0)
 		if p, perr := openai.New(openai.Config{
 			BaseURL: baseURL, APIKey: apiKey, Model: model, Temperature: &zero,
+			Retry: &openai.RetryPolicy{MaxRetries: 0},
 		}); perr == nil {
 			reviewProvider = p
 		} else {

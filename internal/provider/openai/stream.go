@@ -99,7 +99,7 @@ type streamState struct {
 
 // readStream consumes body until the server ends the stream, emits chunks and
 // returns. The caller closes out.
-func (p *Provider) readStream(ctx context.Context, body io.Reader, out chan<- runtime.Chunk) {
+func (p *Provider) readStream(ctx context.Context, body io.Reader, out chan<- runtime.Chunk, idle *idleReadWatcher) {
 	state := &streamState{
 		ctx:   ctx,
 		out:   out,
@@ -133,6 +133,12 @@ func (p *Provider) readStream(ctx context.Context, body io.Reader, out chan<- ru
 	}
 
 	if err := scanner.Err(); err != nil {
+		// An idle watchdog cancels the request context to unblock the body
+		// read; report the timeout rather than the derived cancellation.
+		if idle != nil && idle.TimedOut() {
+			state.fail(idle.TimeoutError())
+			return
+		}
 		if ctxErr := ctx.Err(); ctxErr != nil {
 			state.fail(ctxErr)
 			return
