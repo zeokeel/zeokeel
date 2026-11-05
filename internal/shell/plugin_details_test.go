@@ -30,7 +30,7 @@ func TestPluginsPageHeaderDialogs(t *testing.T) {
 	if err := tt.Click("Plugins"); err != nil {
 		t.Fatalf("click Plugins: %v", err)
 	}
-	if !tt.HasText("Built-in plugin settings") {
+	if !tt.HasText("Built-in plugins") {
 		t.Fatalf("plugins screen missing: %q", tt.Texts())
 	}
 

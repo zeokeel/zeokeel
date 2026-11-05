@@ -46,6 +46,14 @@ type app struct {
 	tray     *mygo.Tray
 	lock     net.Listener
 
+	// shellApp is the UI the window renders. The native menu bar dispatches its
+	// commands through the shell's SetMenuAction hook, so the shell owns the UI
+	// behaviour and this package only owns process-level commands (Quit).
+	shellApp *shell.App
+	// quitApp ends the process. It is a seam: tests replace it so a menu click
+	// never touches the desktop backend.
+	quitApp func()
+
 	// Session services are built lazily on ready. They are optional: if the
 	// store cannot be opened, the app keeps running with the static shell.
 	services  *session.Controller
@@ -93,12 +101,26 @@ func (a *app) acquire() error {
 
 func (a *app) run() error {
 	mygo.App.SetName("ZeoKeel")
+	// Mark the app as quitting before windows close, so the close-to-hide
+	// handlers cannot re-show the main window during shutdown. The menu's Quit
+	// command sets the flag too; this listener covers the other quit paths
+	// (the OS, macOS's own app-menu roles).
+	mygo.App.OnBeforeQuit(func(*mygo.QuitEvent) { a.quitting = true })
+	// Keep the main window's bounds and maximized state in the app's own data
+	// directory instead of mygo's per-app user-data file, so a portable install
+	// (ZEOKEEL_DATA_DIR) carries its window state with it. Call this before the
+	// first window with a StateKey is created, as mygo requires.
+	mygo.App.SetWindowStateStore(newWindowStateStore(DataDir()))
 	mygo.App.WhenReady(func() {
 		// Services are created lazily so a broken data directory cannot
 		// prevent the window and tray from starting; the shell then runs in
 		// its static, history-free mode.
 		a.startServices()
 		shellApp := &shell.App{Ctrl: a.services}
+		a.shellApp = shellApp
+		// Native-menu commands are routed through the shell so it owns the UI
+		// behaviour; this package only implements the process-level commands.
+		shellApp.SetMenuAction(a.handleMenuAction)
 		// Production save-dialog seam for "Download session log". Tests inject
 		// their own path chooser; without a desktop app the shell falls back to
 		// the deterministic workspace path.
@@ -118,6 +140,7 @@ func (a *app) run() error {
 			Height:    1000,
 			MinWidth:  900,
 			MinHeight: 600,
+			StateKey:  windowStateKey,
 			Content:   ui.View(shellApp.View),
 		})
 		if a.services != nil {
@@ -127,11 +150,16 @@ func (a *app) run() error {
 				win.Invalidate()
 			})
 		}
-		// Closing the window hides it; the tray keeps the app alive.
-		a.win.OnClosed(func() {
-			if !a.quitting {
-				a.win.Hide()
+		// Closing the window hides it; the tray keeps the app alive. The close
+		// must be prevented, not just observed: OnClosed runs after the window
+		// is destroyed, when Hide and the tray's Show would be no-ops. During
+		// quit a.quitting is already set, so the windows close for real.
+		a.win.OnClose(func(e *mygo.CloseEvent) {
+			if a.quitting {
+				return
 			}
+			e.PreventDefault()
+			a.win.Hide()
 		})
 		mygo.App.OnWindowAllClosed(func() {
 			if a.quitting || a.win == nil {
@@ -141,6 +169,7 @@ func (a *app) run() error {
 			a.win.Focus()
 		})
 		a.installTray()
+		a.installMenu()
 	})
 	err := mygo.App.Run()
 	a.stopServices()
@@ -397,10 +426,7 @@ func (a *app) installTray() {
 			}
 		}},
 		mygo.Separator(),
-		{Label: "Quit", Click: func(*mygo.MenuItem, *mygo.Window) {
-			a.quitting = true
-			mygo.App.Quit()
-		}},
+		{Label: "Quit", Click: func(*mygo.MenuItem, *mygo.Window) { a.quitApplication() }},
 	})
 	tray, err := mygo.NewTray(mygo.TrayOptions{Title: "ZeoKeel", ToolTip: "ZeoKeel", Menu: menu})
 	if err != nil {

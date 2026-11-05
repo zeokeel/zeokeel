@@ -74,15 +74,17 @@ func (a *App) shellUI() *shellUIState {
 	return actual.(*shellUIState)
 }
 
-// modelsSettingsPage is Settings > Models: the persisted model list, the
-// default marker, and the add/edit/delete actions.
+// modelsSettingsPage is Settings > Models: the brand page heading, the
+// persisted model list as native cards, and the add/edit/delete actions.
 func (a *App) modelsSettingsPage(c *ui.Context, t *design.Tokens) {
-	ui.Column(c).Gap(design.Space3).Children(func() {
-		ui.Row(c).Justify(ui.SpaceBetween).AlignItems(ui.Start).Children(func() {
-			ui.Column(c).Gap(design.Space1).Children(func() {
-				settingsText(c, a.T("models.models"), design.TypeM, t.LabelPrimary).FontWeight(600)
+	th := t.Theme()
+	ui.Column(c).Gap(th.Space(4)).Children(func() {
+		ui.Row(c).Justify(ui.SpaceBetween).AlignItems(ui.Center).
+			Gap(th.Space(4)).Children(func() {
+			ui.Column(c).Grow(1).Gap(th.Space(1)).Children(func() {
+				settingsText(c, a.T("models.models"), design.TypeL, t.LabelPrimary).FontWeight(600)
 				settingsText(c, a.T("models.choose_the_model_the_agent_uses_by_default"),
-					design.TypeXXS, t.LabelTertiary)
+					design.TypeXS, t.LabelTertiary)
 			})
 			a.modelsAddButton(c, t)
 		})
@@ -102,7 +104,7 @@ func (a *App) modelsSettingsPage(c *ui.Context, t *design.Tokens) {
 			a.modelsEmpty(c, t)
 			return
 		}
-		ui.Column(c).Gap(design.Space2).Children(func() {
+		ui.Column(c).Gap(th.Space(2)).Children(func() {
 			for _, model := range models {
 				a.modelRow(c, t, model)
 			}
@@ -113,33 +115,31 @@ func (a *App) modelsSettingsPage(c *ui.Context, t *design.Tokens) {
 
 // modelsEmpty is the empty model list with its call to action.
 func (a *App) modelsEmpty(c *ui.Context, t *design.Tokens) {
-	ui.Column(c).Padding(design.Space6, 0, design.Space6, 0).AlignItems(ui.Center).
-		Gap(design.Space2).Children(func() {
+	th := t.Theme()
+	ui.Column(c).Padding(th.Space(8), 0).AlignItems(ui.Center).
+		Gap(th.Space(2)).Children(func() {
 		settingsText(c, a.T("models.no_models_configured"), design.TypeBody, t.LabelPrimary)
 		settingsText(c, a.T("models.add_a_model_to_choose_it_from_the_composer"),
-			design.TypeXXS, t.LabelTertiary)
+			design.TypeXS, t.LabelTertiary)
 		a.modelsAddButton(c, t)
 	})
 }
 
-// modelsAddButton is the dark "Add model" action. It is a named, focusable
-// button so keyboard and screen-reader users can reach the model editor.
+// modelsAddButton is the native brand "Add model" action: a primary button so
+// keyboard and screen-reader users reach the model editor like any other.
 func (a *App) modelsAddButton(c *ui.Context, t *design.Tokens) {
 	label := a.T("models.add_model")
-	el := ui.Row(c).Height(32).PaddingX(12).Gap(4).Radius(16).
-		Background(t.LabelPrimary).AlignItems(ui.Center).
-		Label(label).Role(ui.RoleButton).Focusable()
-	el.Children(func() {
-		settingsText(c, label, design.TypeXS, t.OnPrimary)
-	})
+	el := ui.PrimaryButton(c, label).Height(t.Theme().Space(9)).Label(label)
 	el.OnClick(func() { a.beginModelAdd() })
 }
 
-// modelRow is one model: name, wire model id, base URL, the default marker
-// and the row actions.
+// modelRow is one model card: name, wire model id, base URL, the default
+// marker and the native row actions.
 func (a *App) modelRow(c *ui.Context, t *design.Tokens, model store.Model) {
-	ui.Row(c).Padding(design.Space3, design.Space3).Gap(design.Space2).
-		Radius(design.RadiusMD).Border(1, t.BorderL2).AlignItems(ui.Center).
+	th := t.Theme()
+	ui.Row(c).Padding(th.Space(3), 0).Gap(th.Space(2)).
+		Radius(th.Radius).Border(1, t.BorderL2).Background(t.BgRaised).
+		AlignItems(ui.Center).
 		Children(func() {
 			ui.Column(c).Grow(1).Gap(2).Children(func() {
 				ui.Row(c).Gap(design.Space2).AlignItems(ui.Center).Children(func() {
@@ -166,16 +166,10 @@ func (a *App) modelRow(c *ui.Context, t *design.Tokens, model store.Model) {
 		})
 }
 
-// modelAction is a small bordered row action. It carries the same accessible
-// label as its text and takes keyboard focus, so Set default/Edit/Delete are
-// not pointer-only.
+// modelAction is a native row action: Set default/Edit/Delete keep their
+// accessible labels, keyboard focus and activation.
 func (a *App) modelAction(c *ui.Context, t *design.Tokens, label string, fn func()) {
-	el := ui.Row(c).Height(28).PaddingX(10).Radius(design.RadiusSM).
-		Border(1, t.BorderL3).AlignItems(ui.Center).
-		Label(label).Role(ui.RoleButton).Focusable()
-	el.Children(func() {
-		settingsText(c, label, design.TypeXS, t.LabelPrimary)
-	})
+	el := ui.Button(c, label).Height(t.Theme().Space(8)).Label(label)
 	el.OnClick(fn)
 }
 
@@ -226,32 +220,36 @@ func (a *App) beginModelEdit(model store.Model) {
 	st.modelDialog = true
 }
 
-// modelDialog is the Add/Edit model form.
+// modelDialog is the Add/Edit model form: the native mygo Form lays the
+// labels beside the controls, and the buttons stay native.
 func (a *App) modelDialog(c *ui.Context, t *design.Tokens) {
+	th := t.Theme()
 	st := a.shellUI()
 	ui.Modal(c, &st.modelDialog, func() {
-		ui.Column(c).Width(480).Gap(design.Space2).Children(func() {
+		ui.Column(c).Width(th.Space(120)).Gap(th.Space(4)).Children(func() {
 			title := a.T("models.add_model")
 			if st.modelDraft.id != "" {
 				title = a.T("models.edit_model")
 			}
-			settingsText(c, title, design.TypeM, t.LabelPrimary).FontWeight(600)
-			a.modelField(c, t, a.T("models.name"), &st.modelDraft.name,
-				"DeepSeek V4.1 Flash", true, false)
-			a.modelField(c, t, a.T("models.base_url"), &st.modelDraft.baseURL,
-				"https://api.deepseek.com", false, false)
-			a.modelField(c, t, a.T("models.api_key"), &st.modelDraft.apiKey,
-				"sk-...", false, true)
-			a.modelField(c, t, a.T("models.model"), &st.modelDraft.model,
-				"deepseek-v4.1-flash", false, false)
-			a.modelField(c, t, a.T("models.reasoning_effort"), &st.modelDraft.effort,
-				a.T("common.high"), false, false)
-			ui.Row(c).Justify(ui.End).Gap(design.Space2).
-				Padding(design.Space2, 0, 0, 0).Children(func() {
+			settingsText(c, title, design.TypeL, t.LabelPrimary).FontWeight(600)
+			ui.Form(c, func() {
+				a.modelField(c, t, a.T("models.name"), &st.modelDraft.name,
+					"DeepSeek V4.1 Flash", true, false)
+				a.modelField(c, t, a.T("models.base_url"), &st.modelDraft.baseURL,
+					"https://api.deepseek.com", false, false)
+				a.modelField(c, t, a.T("models.api_key"), &st.modelDraft.apiKey,
+					"sk-...", false, true)
+				a.modelField(c, t, a.T("models.model"), &st.modelDraft.model,
+					"deepseek-v4.1-flash", false, false)
+				a.modelField(c, t, a.T("models.reasoning_effort"), &st.modelDraft.effort,
+					a.T("common.high"), false, false)
+			})
+			ui.Row(c).Justify(ui.End).Gap(th.Space(2)).
+				Padding(th.Space(2), 0, 0, 0).Children(func() {
 				if ui.Button(c, a.T("models.cancel")).Clicked() {
 					st.modelDialog = false
 				}
-				if ui.Button(c, a.T("models.save")).Clicked() {
+				if ui.PrimaryButton(c, a.T("models.save")).Clicked() {
 					a.confirmModel(c)
 				}
 			})
@@ -259,17 +257,19 @@ func (a *App) modelDialog(c *ui.Context, t *design.Tokens) {
 	})
 }
 
-// modelField is one labelled text input in the model dialog. secret fields
-// (the API key) are masked so the stored credential is never painted on screen.
+// modelField is one labelled text input in the native model form. secret
+// fields (the API key) are masked so the stored credential is never painted on
+// screen.
 func (a *App) modelField(c *ui.Context, t *design.Tokens, label string, value *string, placeholder string, autofocus, secret bool) {
-	settingsText(c, label, design.TypeXXS, t.LabelTertiary)
-	input := ui.TextInput(c, value).Label(label).Placeholder(placeholder)
-	if secret {
-		input = input.Password()
-	}
-	if autofocus {
-		input.AutoFocus()
-	}
+	ui.Field(c, label, func() {
+		input := ui.TextInput(c, value).Label(label).Placeholder(placeholder)
+		if secret {
+			input = input.Password()
+		}
+		if autofocus {
+			input.AutoFocus()
+		}
+	})
 }
 
 // confirmModel validates and persists the model dialog.

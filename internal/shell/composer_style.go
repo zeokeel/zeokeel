@@ -8,7 +8,7 @@ import (
 	"github.com/zeokeel/zeokeel/internal/design"
 )
 
-// composerTextKey implements DSH's composer keys for both live screens:
+// composerTextKey implements the composer keys for both live screens:
 // Enter sends, Shift+Enter breaks the line. Taking the key here keeps the
 // multiline editor from inserting a newline on a plain Enter, and OnSubmit is
 // never involved, so Shift+Enter cannot send.
@@ -59,36 +59,22 @@ func (a *App) composerTextKey(c *ui.Context, home bool) func(k ui.TextKey) bool 
 	}
 }
 
-// sendIdleFill is the disabled Send control's fill in the current theme. It is
-// the accent at 40% over the composer surface: #B2C7F4's role in the light
-// baseline and #4B5E82 in dark, where the old hard-coded #B2C7F4 and BgStrong
-// were both wrong. The static Home, live Home, static Session and live Session
-// all call this one helper.
+// sendIdleFill is a composer Send control's fill while it is disabled: the
+// brand accent at a low opacity over the composer surface, so a disabled Send
+// still belongs to the brand control family instead of the retired pale-blue
+// sample. Home and Session share it, so both composers disable the same way.
 func sendIdleFill(t *design.Tokens) ui.Color {
-	if !t.Dark {
-		// The exact light baseline value; the accent blend is visually the
-		// same but one channel off after 8-bit rounding.
-		return homeSendIdle
-	}
-	return t.Accent.Alpha(0.4).Over(t.BgRaised)
+	return t.Accent.Alpha(0.16).Over(t.BgRaised)
 }
 
-// sendIdleGlyph is the disabled Send arrow: white on the pale light fill,
-// light grey on the dark blue-grey fill, where OnPrimary (#151517) is
-// unreadable.
-func sendIdleGlyph(t *design.Tokens) ui.Color {
-	if t.Dark {
-		return t.LabelTertiary
-	}
-	return t.OnPrimary
-}
+// sendIdleGlyph is the disabled Send glyph: the brand accent, muted by the
+// disabled control's own 50% paint opacity against the idle fill.
+func sendIdleGlyph(t *design.Tokens) ui.Color { return t.Accent }
 
-// switchTrack returns the track and knob colors of an on/off switch. On is
-// the inverse pair DSH paints (light: dark track with a white knob; dark: a
-// near-white track with a dark knob); off is the static pluginSwitch's
-// BorderL3 track with a white knob in both themes. Keeping the white knob in
-// dark matches the baseline (#3B3B3C track, white knob, 11.2:1); returning
-// BgBase for the dark off knob left a 1.22:1 near-invisible control. Plugins,
+// switchTrack returns the track and knob colors of an on/off switch. On uses
+// the inverse pair (light: dark track with a light knob; dark: a near-white
+// track with a dark knob); off uses the BorderL3 track with a white knob in
+// both themes, which stays visible in the dark appearance. Plugins,
 // Automation and Settings all share it so an enabled switch can never look
 // like a disabled one.
 func switchTrack(t *design.Tokens, on bool) (track, knob ui.Color) {

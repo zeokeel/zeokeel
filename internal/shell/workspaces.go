@@ -83,68 +83,129 @@ func (a *App) setWorkspaceCollapsed(id string, collapsed bool) {
 	_ = a.Ctrl.Store().SetSetting(settingWorkspaceCollapsed, strings.Join(ids, ","))
 }
 
-// workspaceSidebar is the live sidebar's workspace list: every real
-// workspace, with the selected one's sessions grouped underneath. The
-// workspaces follow ui.workspace_order (drag/drop), and pinned sessions
-// lead the group.
-func (a *App) workspaceSidebar(c *ui.Context, t *design.Tokens) {
-	ctx := context.Background()
-	workspaces, err := a.workspaceList()
-	if err != nil {
-		ui.Text(c, a.T("workspace.could_not_load_workspaces")).
-			FontSize(11).TextColor(t.LabelTertiary).PaddingX(design.Space2)
-		return
-	}
-	// DSH's inline Search sessions filters this list instead of opening a
-	// dialog; the header field owns the query.
-	if a.inlineSearch && strings.TrimSpace(a.inlineQuery) != "" {
-		a.inlineSearchResults(c, t)
-		return
-	}
-	current := a.Ctrl.CurrentWorkspaceID()
-	group := normalizeGroupBy(a.groupBy)
-	includeArchived := a.includeArchived()
+// The native Sidebar tracks one chosen string for the whole tree, so the app
+// destinations and the workspace → session tree share one id space with
+// prefixes. The choice is recomputed from the screen every frame
+// (sidebarCanonicalSelection) and turned into navigation right after the
+// Sidebar is built (sidebarChoice): that is what lets mygo own the selection,
+// the arrow keys, the first-letter search and the tree's accessibility tree
+// while the app still decides what a choice means.
+const (
+	sidebarSelPlugins    = "nav:plugins"
+	sidebarSelAutomation = "nav:automation"
+	sidebarSelWorkspace  = "ws:"
+	sidebarSelSession    = "s:"
+)
 
-	if group == groupByList {
-		// In one list: every workspace's sessions in a single flat list.
-		sessions, sessionErr := a.Ctrl.SessionsForWorkspace(ctx, "", includeArchived, a.manualSort)
-		sessions = a.orderManualSessions(a.pinnedFirst(a.filterSessions(sessions)))
-		a.sidebarSessionList(c, t, sessions, sessionErr)
-		return
-	}
-
-	sessions, sessionErr := a.Ctrl.SessionsForWorkspace(ctx, current, includeArchived, a.manualSort)
-	if sessionErr == nil {
-		sessions = a.orderManualSessions(a.pinnedFirst(a.filterSessions(sessions)))
-	}
-
-	ui.Column(c).PaddingX(design.Space3).PaddingY(design.Space1).
-		Gap(design.Space1).Children(func() {
-		if group == groupByTree {
-			// Workspace Tree: nest child workspaces under their ancestor
-			// (indented), then list each workspace's own sessions. The old
-			// flat walk painted parent and child at the same x.
-			children, roots := workspaceTree(workspaces)
-			var render func(ws store.Workspace, depth int)
-			render = func(ws store.Workspace, depth int) {
-				treeSessions, treeErr := a.Ctrl.SessionsForWorkspace(ctx, ws.ID, includeArchived, a.manualSort)
-				treeSessions = a.orderManualSessions(a.pinnedFirst(a.filterSessions(treeSessions)))
-				a.workspaceNodeDepth(c, t, ws, ws.ID == current, treeSessions, treeErr, true, depth,
-					func() {
-						for _, child := range children[ws.ID] {
-							render(child, depth+1)
-						}
-					})
+// sidebarCanonicalSelection is the choice the Sidebar shows for the current
+// screen: the screen's destination, the open session, or nothing on Home so
+// the last session's row stays clickable there.
+func (a *App) sidebarCanonicalSelection() string {
+	switch a.backgroundScreen() {
+	case Plugins:
+		return sidebarSelPlugins
+	case Automation:
+		return sidebarSelAutomation
+	case Session:
+		if a.Ctrl != nil {
+			if id := a.Ctrl.CurrentSessionID(); id != "" {
+				return sidebarSelSession + id
 			}
-			for _, ws := range roots {
-				render(ws, 0)
-			}
+		}
+	}
+	return ""
+}
+
+// sidebarChoice turns the native Sidebar's new choice into navigation. The
+// Sidebar writes the choice while the row builds, so it is read here right
+// after the Sidebar returns and then reset to the canonical choice: the
+// highlight follows what the screen shows instead of staying on the row that
+// happened to be clicked. The native widget has already moved the keyboard
+// selection, so arrow keys navigate too, as a desktop source list does.
+func (a *App) sidebarChoice(c *ui.Context, t *design.Tokens) {
+	choice := a.sidebarSel
+	clicked := a.sidebarChosenByPointer
+	a.sidebarChosenByPointer = false
+	defer func() { a.sidebarSel = a.sidebarCanonicalSelection() }()
+	switch {
+	case choice == sidebarSelPlugins:
+		a.Screen = Plugins
+	case choice == sidebarSelAutomation:
+		a.Screen = Automation
+	case strings.HasPrefix(choice, sidebarSelWorkspace):
+		a.wsHoverID = ""
+		id := strings.TrimPrefix(choice, sidebarSelWorkspace)
+		if a.Ctrl == nil || id == "" {
 			return
 		}
-		for _, ws := range workspaces {
-			a.workspaceNodeDepth(c, t, ws, ws.ID == current, sessions, sessionErr, false, 0, nil)
+		if clicked && id == a.Ctrl.CurrentWorkspaceID() {
+			// A click on the open workspace toggles its sessions, as the
+			// source list always did; the chevron does the same from the
+			// keyboard.
+			a.setWorkspaceCollapsed(id, !a.wsCollapsed[id])
+			return
 		}
+		// Choosing another workspace opens it. Choosing the open one from
+		// the keyboard only shows its sessions, so an arrow key can never
+		// hide the list under the selection.
+		a.setWorkspaceCollapsed(id, false)
+		if id != a.Ctrl.CurrentWorkspaceID() {
+			a.switchWorkspace(id)
+		}
+	case strings.HasPrefix(choice, sidebarSelSession):
+		a.wsHoverID = ""
+		if id := strings.TrimPrefix(choice, sidebarSelSession); id != "" {
+			a.openSession(id)
+		}
+	}
+}
+
+// sidebarNavItems are the two app destinations as native Sidebar items: the
+// Sidebar's arrows, first-letter search, focus ring and accessibility tree
+// cover them.
+func (a *App) sidebarNavItems(c *ui.Context, t *design.Tokens) {
+	ui.SidebarItem(c, sidebarSelPlugins, icons.Plugin(), a.T("shell.plugins"))
+	ui.SidebarItem(c, sidebarSelAutomation, icons.Clock(), a.T("shell.automation_tasks"))
+}
+
+// sidebarWorkspacesHeader is the "Workspaces" strip above the tree. A native
+// Sidebar has no section header that carries actions, so the strip is a themed
+// row of native buttons inside the Sidebar's scrolling column; the tree below
+// is still made of Sidebar items.
+func (a *App) sidebarWorkspacesHeader(c *ui.Context, t *design.Tokens) {
+	th := t.Theme()
+	ui.Row(c).Height(th.Space(9)).Margin(th.Space(4), 0, 0, 0).
+		PaddingX(th.Space(2)).Gap(th.Space(1)).AlignItems(ui.Center).Children(func() {
+		ui.Text(c, a.T("shell.workspaces")).FontSize(th.FontSize - 1).FontWeight(600).
+			TextColor(t.LabelTertiary).Grow(1).MaxLines(1).Ellipsis("…")
+		search := a.sidebarHeaderButton(c, t, icons.Search(), a.T("shell.search_sessions"))
+		search.OnClick(func() { a.openInlineSearch() })
+		sliders := a.sidebarHeaderButton(c, t, icons.Sliders(), a.T("shell.view_options"))
+		sliders.OnClick(func() { a.viewOptionsOpen = !a.viewOptionsOpen })
+		ui.PopoverBase(c, sliders, &a.viewOptionsOpen, func(panel ui.Element) {
+			panel.Background(t.BgRaised).Border(1, t.BorderL2).Radius(th.Radius).
+				AttachTo(sliders, ui.AnchorBottomStart, ui.AnchorTopStart)
+			panel.Children(func() { a.viewOptionsPopover(c, t) })
+		})
+		add := a.sidebarHeaderButton(c, t, icons.FolderPlus(), a.T("shell.add_workspace"))
+		add.OnClick(func() { a.beginAddWorkspace() })
 	})
+}
+
+// sidebarHeaderButton is one icon control of the Workspaces strip: a native
+// ButtonBase at the theme's control size with an accessible name, a tooltip and
+// the brand hover tint.
+func (a *App) sidebarHeaderButton(c *ui.Context, t *design.Tokens, icon *ui.SVG, label string) ui.Element {
+	th := t.Theme()
+	button := ui.ButtonBase(c).Size(th.Space(7), th.Space(7)).Radius(design.RadiusSM).
+		Label(label).Tooltip(label)
+	if button.Hovered() {
+		button = button.Background(t.BgHover)
+	}
+	button.Children(func() {
+		ui.Icon(c, icon).Size(th.Space(3.5), th.Space(3.5)).TextColor(t.LabelSecondary)
+	})
+	return button
 }
 
 // workspaceTree splits workspaces into roots and a parent -> children map by
@@ -192,219 +253,287 @@ func workspaceTree(workspaces []store.Workspace) (map[string][]store.Workspace, 
 	return children, roots
 }
 
-// sidebarSessionList is the flat "In one list" grouping: named, focusable
-// session rows with no workspace headers.
-func (a *App) sidebarSessionList(c *ui.Context, t *design.Tokens, sessions []store.Session, sessionErr error) {
-	ui.Column(c).PaddingX(design.Space3).PaddingY(design.Space1).Gap(2).Children(func() {
+// sidebarTree fills the native Sidebar with the workspace → session tree: one
+// item per workspace, whose children carry the disclosure and the inline
+// actions, then that workspace's sessions as indented items of the same
+// Sidebar. The grouping modes (By workspace / Workspace Tree / In one list),
+// the archive filter and the inline search keep their behavior.
+func (a *App) sidebarTree(c *ui.Context, t *design.Tokens) {
+	if a.Ctrl == nil {
+		return
+	}
+	// Search sessions expands an inline field and replaces the tree with
+	// matching rows while it has a query; Cmd/Ctrl+K stays the palette modal.
+	if a.inlineSearch {
+		a.sidebarSearchField(c, t)
+		if strings.TrimSpace(a.inlineQuery) != "" {
+			a.inlineSearchResults(c, t)
+			return
+		}
+	}
+	ctx := context.Background()
+	workspaces, err := a.workspaceList()
+	if err != nil {
+		ui.Text(c, a.T("workspace.could_not_load_workspaces")).
+			FontSize(t.Theme().FontSize - 2).TextColor(t.LabelTertiary).
+			PaddingX(t.Theme().Space(2))
+		return
+	}
+	current := a.Ctrl.CurrentWorkspaceID()
+	group := normalizeGroupBy(a.groupBy)
+	includeArchived := a.includeArchived()
+
+	if group == groupByList {
+		sessions, sessionErr := a.Ctrl.SessionsForWorkspace(ctx, "", includeArchived, a.manualSort)
 		if sessionErr != nil {
-			ui.Text(c, a.T("workspace.could_not_load_sessions")).
-				FontSize(11).TextColor(t.LabelTertiary).PaddingX(design.Space2)
+			a.sidebarSessionNotice(c, t, sessionErr, 0)
 			return
 		}
-		for _, sess := range sessions {
-			item := sess
-			row := ui.Row(c).Height(32).Width(256).PaddingX(design.Space2).Gap(design.Space1).
-				AlignItems(ui.Center).Radius(design.RadiusSM).
-				Label(item.Title).Role(ui.RoleButton).Focusable()
-			if item.ID == a.Ctrl.CurrentSessionID() {
-				row = row.Background(t.BgHover)
-			}
-			row.Children(func() {
-				ui.Text(c, item.Title).FontSize(14).FixedLineHeight(20).
-					TextColor(t.LabelPrimary).Grow(1).MaxLines(1).Ellipsis("...")
-				ui.Text(c, a.sessionWhen(item.UpdatedAt)).FontSize(10).
-					FixedLineHeight(16).TextColor(t.LabelTertiary)
-			})
-			row.OnClick(func() { a.openSession(item.ID) })
-		}
-	})
-}
-
-// workspaceNode draws one workspace row and, under the selected (or, in the
-// Workspace Tree grouping, every) workspace, its sessions.
-func (a *App) workspaceNode(c *ui.Context, t *design.Tokens, ws store.Workspace, selected bool, sessions []store.Session, sessionErr error, forceExpanded bool) {
-	a.workspaceNodeDepth(c, t, ws, selected, sessions, sessionErr, forceExpanded, 0, nil)
-}
-
-// workspaceNodeDepth is workspaceNode with an indent depth and an optional
-// callback that renders nested child workspaces between this row and its
-// sessions (Workspace Tree).
-func (a *App) workspaceNodeDepth(c *ui.Context, t *design.Tokens, ws store.Workspace, selected bool, sessions []store.Session, sessionErr error, forceExpanded bool, depth int, childNodes func()) {
-	indent := design.Space2 + float32(depth)*14
-	ui.Column(c).Gap(2).Children(func() {
-		row := ui.Row(c).Height(34).PaddingX(design.Space2).PaddingStart(indent).Gap(6).
-			Radius(design.RadiusMD).AlignItems(ui.Center)
-		// DSH keeps the selected workspace row on the sidebar color; only
-		// hover tints it. The selected session row carries the fill.
-		if row.Hovered() {
-			row = row.Background(t.BgHover)
-		}
-		expanded := false
-		if forceExpanded {
-			// Workspace Tree keeps every workspace visible, but each one can
-			// still be collapsed, and that choice persists.
-			expanded = !a.wsCollapsed[ws.ID]
-		} else {
-			expanded = selected && !a.wsCollapsed[ws.ID]
-		}
-		row.Children(func() {
-			open := ui.Row(c).Grow(1).Gap(design.Space2).AlignItems(ui.Center).
-				Label(ws.Name).Role(ui.RoleButton).Focusable()
-			open.Children(func() {
-				folder := t.LabelSecondary
-				if selected {
-					folder = t.Accent
-				}
-				ui.Icon(c, icons.Folder()).FontSize(15).TextColor(folder)
-				ui.Text(c, ws.Name).FontSize(14).FixedLineHeight(20).TextColor(t.LabelPrimary).
-					Grow(1).MaxLines(1).Ellipsis("...")
-				chevron := "▸"
-				if expanded {
-					chevron = "⌄"
-				}
-				ui.Text(c, chevron).FontSize(11).TextColor(t.LabelTertiary)
-			})
-			id := ws.ID
-			open.OnClick(func() {
-				a.wsHoverID = ""
-				if id == a.Ctrl.CurrentWorkspaceID() {
-					a.setWorkspaceCollapsed(id, !a.wsCollapsed[id])
-					return
-				}
-				a.setWorkspaceCollapsed(id, false)
-				a.switchWorkspace(id)
-			})
-
-			// Actions mirror DSH's workspace row: a "new session" button and
-			// the workspace ellipsis menu, revealed on hover or selection.
-			if row.Hovered() || selected {
-				actions := ui.Row(c).Gap(design.Space1).AlignItems(ui.Center)
-				actions.Children(func() {
-					plus := ui.Row(c).Size(20, 20).Center().
-						Label(a.tr("New session in ", "在以下位置新建会话：") + ws.Name).
-						Role(ui.RoleButton).Focusable()
-					plus.Children(func() {
-						ui.Icon(c, icons.Plus()).FontSize(14).TextColor(t.LabelSecondary)
-					})
-					plus.OnClick(func() { a.newSessionInWorkspace(ws) })
-					more := ui.Row(c).Size(18, 18).Center().
-						Label(a.tr("Workspace actions for ", "工作区操作：") + ws.Name).
-						Role(ui.RoleButton).Focusable()
-					more.Children(func() {
-						ui.Text(c, "⋮").FontSize(12).FontWeight(700).TextColor(t.LabelSecondary)
-					})
-					more.PopoverMenuButton(func(m *ui.Menu) { a.workspaceMenu(c, m, ws) })
-				})
-			}
-		})
-		row.PopoverMenu(func(m *ui.Menu) { a.workspaceMenu(c, m, ws) })
-
-		// Drag/drop reordering: the row is the source of its workspace id
-		// and a drop target; the top half inserts the dragged workspace
-		// before this row, the bottom half after it. ui.DragOver draws the
-		// insert edge while a row is dragged over.
-		row = row.Drag(ws.ID)
-		if src, over := ui.DragOver[string](row); over && src != ws.ID {
-			if workspaceDropBefore(row) {
-				row = row.BorderWidth(2, 0, 0, 0).BorderColor(t.Accent)
-			} else {
-				row = row.BorderWidth(0, 0, 2, 0).BorderColor(t.Accent)
-			}
-		}
-		if src, dropped := ui.Drop[string](row); dropped && src != ws.ID {
-			before := workspaceDropBefore(row)
-			a.reorderWorkspace(src, ws.ID, before)
-			a.wsHoverID = ""
-		}
-		// The hover card is a pointer affordance, not part of a drag: it
-		// would otherwise cover the rows the workspace is dragged over.
-		if row.Dragging() {
-			a.wsHoverID = ""
-		} else {
-			a.maybeWorkspaceHoverCard(c, t, row, ws)
-		}
-
-		if !expanded {
-			return
-		}
-		// Nested child workspaces sit directly under their ancestor and before
-		// the ancestor's own sessions.
-		if childNodes != nil {
-			childNodes()
-		}
-		if sessionErr != nil {
-			ui.Text(c, a.T("workspace.could_not_load_sessions")).
-				FontSize(11).TextColor(t.LabelTertiary).PaddingX(design.Space5)
-			return
-		}
+		sessions = a.orderManualSessions(a.pinnedFirst(a.filterSessions(sessions)))
 		if len(sessions) == 0 {
-			ui.Text(c, a.T("workspace.no_sessions_yet")).
-				FontSize(11).TextColor(t.LabelTertiary).Padding(2, design.Space5, 2, design.Space2)
+			a.sidebarSessionNotice(c, t, nil, 0)
 			return
 		}
 		for _, sess := range sessions {
-			a.workspaceSessionRow(c, t, sess)
+			a.sidebarSessionRow(c, t, sess, 0)
 		}
-	})
+		return
+	}
+
+	sessions, sessionErr := a.Ctrl.SessionsForWorkspace(ctx, current, includeArchived, a.manualSort)
+	if sessionErr == nil {
+		sessions = a.orderManualSessions(a.pinnedFirst(a.filterSessions(sessions)))
+	}
+	if group == groupByTree {
+		// Workspace Tree nests child workspaces under their ancestor and lists
+		// every workspace's own sessions; every workspace can still collapse
+		// and that choice persists.
+		children, roots := workspaceTree(workspaces)
+		var render func(ws store.Workspace, depth int)
+		render = func(ws store.Workspace, depth int) {
+			wsSessions, wsErr := a.Ctrl.SessionsForWorkspace(ctx, ws.ID, includeArchived, a.manualSort)
+			if wsErr == nil {
+				wsSessions = a.orderManualSessions(a.pinnedFirst(a.filterSessions(wsSessions)))
+			}
+			a.sidebarWorkspaceRow(c, t, ws, ws.ID == current, wsSessions, wsErr, depth, true, func() {
+				for _, child := range children[ws.ID] {
+					render(child, depth+1)
+				}
+			})
+		}
+		for _, ws := range roots {
+			render(ws, 0)
+		}
+		return
+	}
+	for _, ws := range workspaces {
+		a.sidebarWorkspaceRow(c, t, ws, ws.ID == current, sessions, sessionErr, 0, false, nil)
+	}
 }
 
-// workspaceSessionRow is one session under the selected workspace. The row
-// opens it and the ellipsis menu offers rename, archive and delete.
-func (a *App) workspaceSessionRow(c *ui.Context, t *design.Tokens, sess store.Session) {
-	row := ui.Row(c).Height(32).Padding(0, design.Space2, 0, design.Space2).
-		Radius(design.RadiusMD).Gap(design.Space1).AlignItems(ui.Center)
-	if sess.ID == a.Ctrl.CurrentSessionID() || row.Hovered() {
-		row = row.Background(t.BgHover)
+// sidebarWorkspaceRow is one workspace of the tree: a native SidebarItem whose
+// Children compose the disclosure chevron, the inline new-session action and
+// the workspace menu, all always visible (a desktop control is not hover-only),
+// with the workspace hover card, a right-click menu and drag/drop reordering.
+// While expanded, the workspace's sessions and any child workspaces follow it.
+func (a *App) sidebarWorkspaceRow(c *ui.Context, t *design.Tokens, ws store.Workspace, selected bool, sessions []store.Session, sessionErr error, depth int, forceExpanded bool, childNodes func()) {
+	th := t.Theme()
+	indent := th.Space(float32(depth) * 4)
+	expanded := !a.wsCollapsed[ws.ID] && (forceExpanded || selected)
+	icon := icons.Folder()
+	if expanded {
+		icon = icons.FolderOpen()
 	}
-	// Manual ordering: every session row is a drag source and a drop target.
-	// The top half inserts before this row, the bottom half after it.
-	row = row.Drag(sess.ID)
-	if src, over := ui.DragOver[string](row); over && src != sess.ID {
-		if workspaceDropBefore(row) {
-			row = row.BorderWidth(2, 0, 0, 0).BorderColor(t.Accent)
-		} else {
-			row = row.BorderWidth(0, 0, 2, 0).BorderColor(t.Accent)
+	item := ui.SidebarItem(c, sidebarSelWorkspace+ws.ID, icon, ws.Name).
+		PaddingStart(indent).Expanded(expanded)
+	if depth == 0 {
+		// A little air between workspace groups; nested child workspaces
+		// stay tight to their parent.
+		item = item.Margin(th.Space(2), 0, 0, 0)
+	}
+	if item.Clicked() {
+		a.sidebarChosenByPointer = true
+	}
+	item = item.Children(func() {
+		// The native item has no disclosure arrow of its own, so the row
+		// carries one as a native button; it only expands or collapses the
+		// workspace, while choosing the row opens the workspace.
+		label, chevron := a.T("workspace.show_sessions"), icons.ChevronRight()
+		if expanded {
+			label, chevron = a.T("workspace.hide_sessions"), icons.ChevronDown()
 		}
-	}
-	if src, dropped := ui.Drop[string](row); dropped && src != sess.ID {
-		a.reorderSession(src, sess.ID, workspaceDropBefore(row))
-	}
-	row.Children(func() {
-		open := ui.Row(c).Grow(1).Gap(design.Space1).AlignItems(ui.Center).
-			Label(sess.Title).Role(ui.RoleButton).Focusable()
-		open.Children(func() {
-			dotColor := t.BorderL3
-			if sess.ID == a.Ctrl.CurrentSessionID() {
-				if snap := a.Snapshot(); snap != nil && snap.Phase == state.PhaseRunning {
-					dotColor = t.Accent
-				}
-			}
-			ui.Row(c).Size(16, 16).Center().Children(func() {
-				ui.Box(c).Size(6, 6).Radius(design.RadiusMax).Background(dotColor)
-			})
-			title := sess.Title
-			if sess.Archived {
-				title += " · " + a.T("workspace.archived")
-			}
-			ui.Text(c, title).FontSize(14).FixedLineHeight(20).TextColor(t.LabelPrimary).
-				Grow(1).MaxLines(1).Ellipsis("...")
-			ui.Text(c, a.sessionWhen(sess.UpdatedAt)).FontSize(10).FixedLineHeight(16).
-				TextColor(t.LabelTertiary)
+		a.sidebarItemAction(c, t, label, chevron, t.LabelTertiary, func() {
+			a.setWorkspaceCollapsed(ws.ID, expanded)
 		})
-		id := sess.ID
-		open.OnClick(func() { a.openSession(id) })
-
-		if row.Hovered() || sess.ID == a.Ctrl.CurrentSessionID() {
-			more := ui.Row(c).Size(18, 18).Center().
-				Label(a.menuText("Session actions for "+sess.Title, "会话操作："+sess.Title)).
-				Role(ui.RoleButton).Focusable()
-			more.Children(func() {
-				ui.Text(c, "⋯").FontSize(12).FontWeight(700).TextColor(t.LabelSecondary)
-			})
-			more.PopoverMenuButton(func(m *ui.Menu) { a.workspaceSessionMenu(c, m, sess) })
-		}
+		a.sidebarItemAction(c, t,
+			a.tr("New session in ", "在以下位置新建会话：")+ws.Name, icons.Plus(),
+			t.LabelSecondary, func() { a.newSessionInWorkspace(ws) })
+		a.sidebarItemMenuAction(c, t,
+			a.tr("Workspace actions for ", "工作区操作：")+ws.Name, icons.More(),
+			t.LabelSecondary, func(m *ui.Menu) { a.workspaceMenu(c, m, ws) })
 	})
-	row.PopoverMenu(func(m *ui.Menu) { a.workspaceSessionMenu(c, m, sess) })
+	// Drag/drop reordering: the row drags its workspace id and takes a drop in
+	// its top half before itself, in its bottom half after itself.
+	item = item.Drag(ws.ID)
+	if src, over := ui.DragOver[string](item); over && src != ws.ID {
+		item = sidebarDropEdge(item, workspaceDropBefore(item), t)
+	}
+	if src, dropped := ui.Drop[string](item); dropped && src != ws.ID {
+		a.reorderWorkspace(src, ws.ID, workspaceDropBefore(item))
+		a.wsHoverID = ""
+	}
+	item.PopoverMenu(func(m *ui.Menu) { a.workspaceMenu(c, m, ws) })
+	// The hover card is a pointer affordance, not part of a drag: it would
+	// otherwise cover the rows the workspace is dragged over.
+	if item.Dragging() {
+		a.wsHoverID = ""
+	} else {
+		a.maybeWorkspaceHoverCard(c, t, item, ws)
+	}
+	if !expanded {
+		return
+	}
+	if childNodes != nil {
+		childNodes()
+	}
+	if sessionErr != nil {
+		a.sidebarSessionNotice(c, t, sessionErr, indent)
+		return
+	}
+	if len(sessions) == 0 {
+		a.sidebarSessionNotice(c, t, nil, indent)
+		return
+	}
+	sessionIndent := indent + th.Space(6)
+	for _, sess := range sessions {
+		a.sidebarSessionRow(c, t, sess, sessionIndent)
+	}
+}
+
+// sidebarSessionNotice is the inline "no sessions yet" or load-error line
+// under a workspace, indented with its workspace on the theme's grid.
+func (a *App) sidebarSessionNotice(c *ui.Context, t *design.Tokens, err error, indent float32) {
+	th := t.Theme()
+	text := a.T("workspace.no_sessions_yet")
+	if err != nil {
+		text = a.T("workspace.could_not_load_sessions")
+	}
+	ui.Text(c, text).FontSize(th.FontSize-2).TextColor(t.LabelTertiary).
+		Padding(0, th.Space(2), th.Space(1), indent+th.Space(6))
+}
+
+// sidebarSessionRow is one session of the tree: a native SidebarItem with the
+// conversation icon, its relative time and the session menu as an always
+// visible inline action. It is a drag/drop source and target in manual order,
+// and a right click opens the same menu.
+func (a *App) sidebarSessionRow(c *ui.Context, t *design.Tokens, sess store.Session, indent float32) {
+	th := t.Theme()
+	title := sess.Title
+	archived := false
+	if sess.Archived {
+		title += " · " + a.T("workspace.archived")
+		archived = true
+	}
+	item := ui.SidebarItem(c, sidebarSelSession+sess.ID, icons.Message(), title).
+		PaddingStart(indent)
+	if archived {
+		item = item.Tooltip(title)
+	}
+	item = item.Children(func() {
+		if when := a.sessionWhen(sess.UpdatedAt); when != "" {
+			ui.Text(c, when).FontSize(th.FontSize - 3).FixedLineHeight(th.Space(4)).
+				TextColor(t.LabelTertiary)
+		}
+		if a.sessionRunning(sess.ID) {
+			ui.Box(c).Size(th.Space(1.5), th.Space(1.5)).Radius(design.RadiusMax).
+				Background(t.Accent)
+		}
+		// The row keeps the "⋯" affordance as native text: it is the mark
+		// the product already used, and a text node stays findable and
+		// clickable for keyboard and assistive-technology tests.
+		a.sidebarItemGlyphMenuAction(c, t,
+			a.menuText("Session actions for "+sess.Title, "会话操作："+sess.Title),
+			"⋯", t.LabelSecondary,
+			func(m *ui.Menu) { a.workspaceSessionMenu(c, m, sess) })
+	})
+	// Manual ordering: every session row is a drag source and a drop target.
+	item = item.Drag(sess.ID)
+	if src, over := ui.DragOver[string](item); over && src != sess.ID {
+		item = sidebarDropEdge(item, workspaceDropBefore(item), t)
+	}
+	if src, dropped := ui.Drop[string](item); dropped && src != sess.ID {
+		a.reorderSession(src, sess.ID, workspaceDropBefore(item))
+	}
+	item.PopoverMenu(func(m *ui.Menu) { a.workspaceSessionMenu(c, m, sess) })
+}
+
+// sessionRunning reports whether the open session's turn is still running, for
+// the accent dot beside its row.
+func (a *App) sessionRunning(id string) bool {
+	if a.Ctrl == nil || id != a.Ctrl.CurrentSessionID() {
+		return false
+	}
+	snap := a.Snapshot()
+	return snap != nil && snap.Phase == state.PhaseRunning
+}
+
+// sidebarItemButton is the base of a native Sidebar item's inline action: an
+// 18 DIP ButtonBase at the brand's corner, with an accessible name, a tooltip
+// and a hover tint. The actions are always rendered: a desktop control is not
+// hover-only, and keyboard users must be able to reach it.
+func (a *App) sidebarItemButton(c *ui.Context, t *design.Tokens, label string) ui.Element {
+	th := t.Theme()
+	button := ui.ButtonBase(c).Size(th.Space(4.5), th.Space(4.5)).Radius(design.RadiusSM).
+		Label(label).Tooltip(label)
+	if button.Hovered() {
+		button = button.Background(t.BgHover)
+	}
+	return button
+}
+
+// sidebarItemAction is an inline action of a Sidebar item: the base button with
+// a themed icon in the given tone.
+func (a *App) sidebarItemAction(c *ui.Context, t *design.Tokens, label string, icon *ui.SVG, color ui.Color, onClick func()) ui.Element {
+	button := a.sidebarItemButton(c, t, label)
+	button.Children(func() {
+		ui.Icon(c, icon).Size(t.Theme().Space(3.5), t.Theme().Space(3.5)).TextColor(color)
+	})
+	button.OnClick(onClick)
+	return button
+}
+
+// sidebarItemMenuAction is sidebarItemAction for a menu: the inline twin of the
+// row's right-click menu, so the actions are discoverable without a right
+// click.
+func (a *App) sidebarItemMenuAction(c *ui.Context, t *design.Tokens, label string, icon *ui.SVG, color ui.Color, build func(*ui.Menu)) ui.Element {
+	button := a.sidebarItemButton(c, t, label)
+	button.Children(func() {
+		ui.Icon(c, icon).Size(t.Theme().Space(3.5), t.Theme().Space(3.5)).TextColor(color)
+	})
+	button.PopoverMenuButton(build)
+	return button
+}
+
+// sidebarItemGlyphMenuAction is sidebarItemMenuAction with a text glyph
+// instead of an icon, for rows that keep a familiar mark such as "⋯" while
+// still being a native button.
+func (a *App) sidebarItemGlyphMenuAction(c *ui.Context, t *design.Tokens, label, glyph string, color ui.Color, build func(*ui.Menu)) ui.Element {
+	button := a.sidebarItemButton(c, t, label)
+	button.Children(func() {
+		ui.Text(c, glyph).FontSize(t.Theme().FontSize - 2).FontWeight(600).
+			FixedLineHeight(t.Theme().Space(4)).TextColor(color)
+	})
+	button.PopoverMenuButton(build)
+	return button
+}
+
+// sidebarDropEdge paints the insert edge of a row a drag is over: the top
+// border inserts before the row, the bottom one after it.
+func sidebarDropEdge(item ui.Element, before bool, t *design.Tokens) ui.Element {
+	if before {
+		return item.BorderWidth(2, 0, 0, 0).BorderColor(t.Accent)
+	}
+	return item.BorderWidth(0, 0, 2, 0).BorderColor(t.Accent)
 }
 
 // workspaceMenu fills a workspace row's menu: rename, the accessible

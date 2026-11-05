@@ -4,11 +4,13 @@ import "github.com/egoist/mygo/ui"
 
 // Layout helpers keep the screen geometry working at the window's narrow
 // sizes (900x600 minimum) and when the right sidebar takes part of the
-// content column. They read the frame size only; the static App{Ctrl:nil}
-// render still gets its baseline geometry at 1600x1000.
+// content column. They read the frame size only.
 
 const (
-	// sidebarW is the design token's fixed source-list width.
+	// sidebarW is the brand sidebar's source-list column: 280 DIPs, the
+	// width the native Sidebar, the content column and the right panel's
+	// clamp are laid out against. It is a brand layout token (the same 280
+	// design.Sidebar() paints), not a value sampled from another product.
 	sidebarW float32 = 280
 	// minMainW is the narrowest main column the layouts allow before they
 	// start clamping a panel instead. DSH keeps 400px of main content beside
@@ -223,24 +225,28 @@ func (a *App) sessionSidePanelWidth(c *ui.Context) float32 {
 	return width
 }
 
-// sessionComposerWidthFor clamps the 877px session composer to DSH's narrow
-// column: min(877, contentWidth-inset), where the inset is the 212px narrow
-// window inset or the small inset a docked right panel leaves. Its Send and
-// model controls stay visible at 900-1100px and when the right panel is open.
+// sessionComposerWidthFor is the centered Session composer card width: the
+// brand column (sessComposerW, 720 DIPs) clamped by the shared narrow-window
+// insets, so its Send and model controls stay visible at 900-1100px and when
+// the right panel is open.
 func (a *App) sessionComposerWidthFor(c *ui.Context) float32 {
 	w := a.narrowColumnWidth(a.contentWidth(c), sessComposerW)
-	if w < 280 {
-		w = 280
+	if w < minSessionColumnW {
+		w = minSessionColumnW
 	}
 	if avail := a.contentWidth(c); avail > 0 && w > avail {
 		w = avail
 	}
+	if w < 1 {
+		w = 1
+	}
 	return w
 }
 
-// sessionTranscriptWidthFor clamps the 845px transcript column the same way,
-// 32px narrower than the composer as DSH paints it (845 vs 877 at 1600,
-// 329 vs 361 at content 400), so chat and composer stay aligned.
+// sessionTranscriptWidthFor is the centered transcript column: the same brand
+// column as the composer, clamped by the shared narrow-window insets and by
+// the viewport that remains beside the docked Todo/Team panels. Chat and
+// composer stay aligned instead of the old 845/877 fixed pair.
 func (a *App) sessionTranscriptWidthFor(c *ui.Context) float32 {
 	content := a.contentWidth(c)
 	// The side panels are siblings of the transcript inside the content
@@ -250,18 +256,14 @@ func (a *App) sessionTranscriptWidthFor(c *ui.Context) float32 {
 		viewport -= panelW
 	}
 	w := a.narrowColumnWidth(viewport, sessColumnW)
-	if viewport > 0 && a.narrowInsetFor(viewport) < narrowColumnInset {
-		// The transcript keeps DSH's 32px narrower column than the composer:
-		// 329 at content 400, matching baseline 16-session-dark-narrow.
-		if limit := viewport - a.narrowInsetFor(viewport) - 32; w > limit {
-			w = limit
-		}
-	}
-	if w < 280 {
-		w = 280
+	if w < minSessionColumnW {
+		w = minSessionColumnW
 	}
 	if viewport > 0 && w > viewport {
 		w = viewport
+	}
+	if w < 1 {
+		w = 1
 	}
 	return w
 }

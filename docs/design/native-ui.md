@@ -79,27 +79,183 @@
 | 布局 | 内容列 `min(720, 主区宽-80)` = `theme.Space(180)` / `theme.Space(20)`；全部间距/尺寸/圆角走 `Theme.Space/Rem` 与 `design` 网格；删除 909/877 等固定像素 |
 | Composer | 一个 `design.Tokens.Panel` 卡片（`Theme.Radius=10`、`BorderL2` 1px、单层轻阴影、`Space(3)` 内边距），内部用原生 `ui.TextArea`（原生占位/多行/IME/撤销/焦点），输入框自身边框关闭、由卡片承载 hover/焦点态 accent 边框 |
 | Chips | 工作区/模式/权限/模型仍保留手搓 trigger + Popover（菜单承载路径、描述、新增动作等 `Select` 无法表达的产品内容，符合 3.2 允许项），视觉统一重绘为品牌 ghost chip：28 DIP 高、`RadiusSM`、品牌 hover 底色、`Theme` 文字色 |
-| 发送 | 原生 `ui.ButtonBase`（原生焦点/Enter/Space/禁用语义）+ 品牌 accent 填充/圆角；禁用态沿用共享 composer 的 idle 填充（与 Session composer 同一 helper，待 Session 重构时一起品牌化） |
+| 发送 | 原生 `ui.ButtonBase`（原生焦点/Enter/Space/禁用语义）+ 品牌 accent 填充/圆角；禁用态为品牌 accent 低透明度填充（`sendIdleFill`，Home 与 Session 共用，旧 DSH 浅蓝已删除） |
 | 附加控件 | 加号、右侧栏开关改用 `ui.ButtonBase` + 品牌 hover；菜单行高度/宽度/图标尺寸改为 `Theme.Space` 派生 |
 | 截图测试 | `TestRenderHomeNativePreview`（`home_live_test.go`）用 `ui.Render(app.View,1600,1000,1)` 生成浅/深两张，写入本目录 `preview/`，可复现 |
 | 测试 | `go test -count=1 ./internal/shell` 全绿；`TestHomeBrandHero` 钉住品牌文案与无 DSH hero；`TestHomeComposerInputFillsRow` 改为断言输入填满卡片（不再绑定 877 旧几何） |
 
 **遗留（下一阶段）**
 
-1. Session composer 与 Home composer 视觉统一（同一 helper / 组件化）；Session 的发送禁用填充仍是迁移前浅蓝色。
-2. Sidebar / 字标行 / 其它屏仍是旧视觉，按 §4 逐屏原生化。
+1. Session composer 与 Home composer 已完成视觉统一（`composer_native.go` 的共享卡片/输入/发送 helper）；Home 里仍保留一份等价的本地实现，可在下一次编辑 home.go 时收敛到共享文件。
+2. Sidebar / 字标行 / 其它屏仍是旧视觉，按 §5 逐屏原生化。
 3. 权限/模型/工作区 trigger 目前是「品牌化的手搓层」；若后续把菜单简化为纯文字选项，可换成 `ui.Select`/`ui.MenuButton` 拿全键盘/弹出行为。
 4. Home 竖向节奏在 900×600 最小窗口与右侧栏打开时需目视复核（占位/行高会在下一轮密度调整中再评估）。
 
-## 4. 后续逐屏路线
+## 4. Session 屏（第二个原生重构屏，pilot 2）
 
-1. **Home（本轮 pilot）**：验证品牌主题 + 原生控件 + 新布局的观感与测试成本。
-2. **Session**：消息流/工具卡用原生 `Collapsible` + `markdown` 包替换自研 markdown；composer 与 Home 共用新组件。
-3. **Sidebar**：从手搓行换成 `ui.Sidebar`（键盘/首字母/a11y 免费），工作区树用 `SidebarSection`。
-4. **Settings/Plugins/Automation**：原生 `Form`/`Field`/`List`/表格行；设置改为独立窗口（P1）。
-5. **桌面交互 P0/P1**：系统菜单栏、文本可选+右键、操作常显/焦点、系统通知、窗口状态、滚动条/DPI/TextScale（见 [03 报告 §7](../research/03-ux-design.md)）。
+Session 是第二个 pilot 屏（2026-11-05 完成视觉重构），目标是验证「Home 的品牌 composer/令牌体系能否在消息流屏复用」，并把 Session 从 DSH 复刻视觉切换到 ZeoKeel 品牌视觉。
 
-## 5. 验收口径
+![Session 浅色](preview/session-native-light.png)
+
+![Session 深色](preview/session-native-dark.png)
+
+### 4.1 落地要点
+
+| 项 | 实现 |
+| --- | --- |
+| Header | 品牌 header：标题（`TypeBody` 600）+ 模式 chip（复用 `homeChip`）+ 计划模式开关 + 运行/等待/失败相位标签 + More/右侧栏动作（`ButtonBase` ghost）；Chat/Trajectory tabs 改为轻量品牌 tab：`LabelPrimary/Secondary` + 2 DIP accent 底条，仍用 `TabsBase` 保留 RoleTabList/方向键/Checked |
+| 布局 | 删除 `sessHeaderH=76`、`sessGutter`、`877/845/98` 等固定像素：transcript 与 composer 共用品牌列 `sessColumnW = sessComposerW = 180 × Space1`（720 DIPs），header 高度由内容与 28 DIP tab 行（`sessTabsH = 7 × Space1`）决定；窄窗/停靠面板由 layout.go 的共享 clamp 处理 |
+| Composer | 与 Home 共用 `composer_native.go`：`brandComposerCard`（Panel、`Radius=10`、单层轻阴影、Space 网格内边距）+ `brandComposerInput`（原生 `ui.TextArea`，卡片承载 hover/焦点 accent 边框）+ `brandIconButton` + `brandSendButton`；`/` 命令、`@` 提及、附件 chips、Enter/Shift+Enter、审批卡位置全部保留 |
+| 发送/停止 | 原生 `ButtonBase` + accent 填充（运行中为 Stop 方块图标，仍可访问 "Stop"）；空 draft 时禁用并用品牌 accent 低透明度 idle 填充（`sendIdleFill`，Home/Session 统一，删掉旧 DSH `#B2C7F4` 采样与浅蓝禁用态） |
+| 消息流 | 用户消息为品牌 tint 气泡（accent 10% over Surface、`Radius=10`、最大 82% 列宽）；助手消息保留自研 Markdown 渲染（见遗留 1），底部动作条改为时间 + ghost Copy/Retry/反馈 + 完成摘要；工具卡改为 ghost 可点击行 + 品牌 tint 详情块，状态点/图标尺寸全部走 `Theme.Space` 与语义色 |
+| 截图测试 | `TestRenderSessionNativePreview`（`session_live_test.go`）用 live fixture + 一条完成回合的 snapshot（用户气泡、Markdown 回答、两个工具卡、usage）渲染 1600×1000 浅/深两张到本目录 `preview/`，可复现 |
+
+### 4.2 保留与不回退
+
+- 功能：`/` 命令、`@` 提及、附件 chips、Enter/Shift+Enter、排队/中断发送、停止按钮、审批卡（Allow/Always/Deny）、plan review/question/artifact 卡、Todo/Team 面板、右侧栏、Trajectory、usage footer、主题/语言切换。
+- a11y：所有控件保留 Label/Role/Focusable；Tab 键盘可达（含 Chat/Trajectory 方向键）、空 composer 的 Send 不可聚焦、所有原生控件自带焦点语义。
+
+### 4.3 遗留
+
+1. **Markdown 渲染仍为自研**（`internal/shell/markdown.go`，628 行）：本轮只做包围层视觉，未替换为 mygo `ui/markdown`——替换需要重做 markdown 测试与交互（代码块复制/流式），且 markdown.go 不在本轮写入范围；建议单独立项评估。
+2. Trajectory 屏内部行视觉仍是旧样式（本轮只品牌化了 Chat/Trajectory tab 行，trajectory.go 其余部分未动）。
+3. Home 的 composer 仍有一份本地实现（未改成共享 `composer_native.go`）；`homeSendIdle` 旧常量待清理。
+4. 后续逐屏继续：Sidebar → Settings/Plugins/Automation（见 §5）。
+
+## 7. Plugins / Automation 屏（第三批，2026-11-05 完成）
+
+Plugins 与 Automation 是两个"列表页"屏，本轮把它们的 DSH 复刻视觉换成 ZeoKeel 品牌布局：同一套页面列、页头、卡片列表与原生控件；功能保持不变。
+
+![Plugins 浅色](preview/plugins-native-light.png)
+
+![Plugins 深色](preview/plugins-native-dark.png)
+
+![Automation 浅色](preview/automation-native-light.png)
+
+![Automation 深色](preview/automation-native-dark.png)
+
+### 7.1 落地要点
+
+| 项 | 实现 |
+| --- | --- |
+| 页面列 | 两页共用 `nativePageColumn`（Plugins/Automation 各自 `220 units × Space1 = 880 DIP` 上限），窄窗/停靠右侧栏时按 `contentWidth - 96` clamp；删除 DSH 的 960 固定列与 8px 滚动条 gutter |
+| 页头 | 标题 `TypeXL`/600 + 一行说明 `TypeXS`；Plugins 右侧为原生 Refresh（`ButtonBase` ghost + 品牌图标）与 Add plugin（原生 `PrimaryButton` + plus，附一个同样的内置策略菜单箭头）；Automation 右侧为原生 `PrimaryButton`「新建」 |
+| Plugins 列表 | 两个分区（Built-in / Experimental，`TypeM`/600 标题）各一张品牌卡片（`BgRaised` + `BorderL2` + `RadiusLG` + 单层轻阴影）；行高由内容与 `Space(3)` 内边距决定（删除固定 66 行高），图标改为 36×36 品牌 tint 方块 + 20 DIP 单色 line-art（currentColor，`Accent`），删除 50×50 图标砖与 DSH 采样色（`#ADB2B8`/`#6E7278` 等）与彩色 SVG |
+| 行开关 | 统一换成 mygo 原生 `ui.Switch`（品牌主题 accent，键盘/焦点/动画/无障碍随控件免费）；Automation 行、Plugins 行、Settings 内 Built-in plugins 行共用 `pluginSwitchLive`，保留 `Enable <name>` 可访问名与持久化行为 |
+| Automation 列表 | 标题 `TypeXL`/600 + 原生新建按钮；筛选 `All/Enabled/Inactive` 改为原生 `SegmentedBase`（一个 focus group，方向键/Home 可用）；搜索改用原生 `SearchField`（magnifier/清空/IME 随控件）；任务行是品牌卡片：标题 + 提示词摘要 + 计划/下次运行（`Describe`/`next`/`last`）+ 原生 Switch + 原生 `ui.Button` 行操作（立即运行/停用/编辑/删除），窄列自动换行（保留 304 DIP 页面列可用性）；空态用品牌图标 + 原生新建按钮 |
+| 弹层 | About plugins / Add plugin / 实验性 More / 详情编辑 / 数据目录弹层保留全部文案与行为，视觉改为 Modal + `Theme` 字体/间距/圆角；详情编辑主操作改用原生 `PrimaryButton`；数据目录弹层高亮色由 DSH 蓝采样改为品牌 accent tint |
+| 截图测试 | `TestRenderPluginsNativePreview`（`plugins_ui_test.go`）与 `TestRenderAutomationNativePreview`（`automation_ui_test.go`）用 live fixture 渲染 1600×1000 浅/深各一张到本目录 `preview/`，可复现；Automation 预览预置三条不同状态任务 |
+
+### 7.2 保留与不回退
+
+- Plugins：Built-in + Experimental 分组与持久化开关、`View <name>` 打开详情、Configure 详情编辑器（字段/校验/Save/Cancel/Toast）、About plugins、Add plugin 内置策略说明、实验性 More 列表与开关原因提示、Refresh（重载设置与 Toast）、空搜索/滚动/窄窗可达。
+- Automation：标题与 New、All/Enabled/Inactive 筛选、搜索（标题/提示词/cron）、任务行启用开关、立即运行、编辑、停用/启用、删除、计划与下次/上次运行展示、空态、新建/编辑弹层（标题/提示词/计划/启用、cron 校验、保存/取消）。
+- a11y：保留全部 `Label`/`Role`/`Focusable`；原生 Switch/Button/Segmented/SearchField 自带键盘与焦点；`TestPluginsTabReachability` / `TestAutomationTabReachability` 通过；Automation 筛选可用方向键与 Home 在组内移动。
+- 测试：`plugins_ui_test.go`、`plugin_details_test.go`、`automation_ui_test.go` 行为断言保留；仅更新 "Built-in plugins" 分区标题文案断言（分区标题与 Settings 用词统一）。`TestPluginSwitchRendersOnAndOffState` 的旧手搓开关像素断言需由 Lead 在集成时更新（原生开关颜色由主题决定）。
+
+### 7.3 遗留
+
+1. 行列表仍是 `ui.Row`/`ui.Column` 组合而非 `ui.List`（Table 虚拟化）：两页行数固定且很少，原生 Switch/Segmented/SearchField 已接管交互控件；若未来插件/任务数量级增大，可换 `ui.List` 虚拟化。
+2. Settings > Built-in plugins 的 `pluginToggleRow` 视觉仍沿用旧版（设置页由并行任务重构中，本轮只把其中的开关切换为原生 Switch，避免与其改动冲突）。
+3. Automation 行在 304 DIP 宽列下单行内容较紧，后续可评估把"计划/下次运行"折叠为 tooltip。
+
+## 8. Settings 屏（第四批，2026-11-05 完成）
+
+> 交互形态仍是应用内 overlay/modal（独立设置窗口是 P1，见 §5）；本轮只重做品牌视觉与控件层，保留全部设置项与行为。
+
+### 8.1 信息结构（自上而下）
+
+```
+┌ 设置面板（居中、响应式 720–880 × 适配高度，Radius=10） ─────────────────────────┐
+│ 导航列（BgSidebar + 右 1 BorderL2，200 DIP）  │ 页面列（BgRaised）                  │
+│  设置（TypeM/600）                           │ 顶栏（右对齐）：打开配置文件 · 关闭 · X │
+│  通用 / 模型 / 记忆 / 内置插件 / 代理预设 / 关于 │ ┌ 页面标题（TypeL/600）+ 一行说明 ──┐ │
+│  选中：BgHover tint + Accent 图标 + 500 字重   │ │ 分组卡片（BgStrong/Border/Radius10）│ │
+│                                              │ │  行：标题+说明 / 右侧原生控件       │ │
+└──────────────────────────────────────────────┴───────────────────────────────────────┘
+```
+
+### 8.2 落地要点
+
+| 项 | 实现 |
+| --- | --- |
+| 面板 | `settingsPanelSize` 由 `Theme.Space` 派生：宽 `min(880, window-2×32)`、高 `min(760, window-2×32)`，900×600 最小窗内收；删除 800×800 固定面板与 28px 半径，改用品牌 `Radius=10` + 1px `BorderL2` + 单层轻阴影 |
+| 导航 | 宽 `min(200, 面板宽/3)`（删除 188px 固定值），`BgSidebar` 底 + 右侧分隔线；选中项 `BgHover` tint + `Accent` 图标 + 500 字重；`ui.ButtonBase` 提供 hover/press/焦点环/键盘激活 |
+| 分组卡片 | `settingsSection`：`TypeXXS/600` 分区标签 + `BgStrong` 卡片（1px `BorderL2`、`Radius 10`）；`settingsRow` 行内距 `Space(2)`、水平 `Space(4)`、`MinHeight Space(11)`，行分隔线 `BorderL2`，最后一行去线；删除固定 44px 行高、54px header、188px nav 等 DSH 像素 |
+| 原生控件 | `ui.Switch`（Show coding view、disabled 的 Upload session log）；`ui.Select`（Language / Work details / Collapse / Send behavior / Performance & usage，弹出/方向键/Enter/Escape/焦点随控件）；`Form` + `Field` + `ui.TextInput`（Models 编辑弹层，标签右对齐原生表单）；`ui.ButtonBase`（导航/主题卡/动作/字号步进/关闭）与 `ui.PrimaryButton`（Add model、Save） |
+| 字号 | `settingsText` 走 `design` 类型刻度（14 基准）；控件字体随 `Theme.Font`（系统字体栈）；字号控件是品牌 pill（可展开 popover）+ 紧凑步进列 + sliders 更多设置 |
+| 主题卡 | 三张品牌卡：`BgRaised` + `BorderL2`，选中 `Accent.Alpha(0.08)` 填充 + 2px `Accent` 边；保留 `RoleRadio`/`Checked`/`Focusable` 无障碍语义 |
+| 子页 | Models：`TypeL/600` 标题 + 原生 PrimaryButton「Add model」+ 模型卡片（原生按钮 编辑/删除/设为默认，默认徽章 accent tint）；弹层用原生 Form。Memory：品牌标题 + 原生 Refresh/危险色 Clear all + 备注卡片（危险色 Delete）。Built-in plugins / Agent presets / About 复用同一页头与分组容器（内容由并行任务继续品牌化） |
+| 截图测试 | `TestRenderSettingsNativePreview`（`settings_ui_test.go`）用 live fixture 渲染 1600×1000、中文（产品默认语言）浅/深各一张到本目录 `preview/`：`settings-native-light.png`、`settings-native-dark.png`，可复现 |
+
+![Settings 浅色](preview/settings-native-light.png)
+
+![Settings 深色](preview/settings-native-dark.png)
+
+### 8.3 保留与不回退
+
+- 全部设置项与持久化行为保留：权限（含 Auto review 及其说明）、语言、外观（Light/Dark/System）、字号（14/16 与步进）、Work details、自动收起时机、Show coding view（联动 Agent presets 导航与 Session 的 Trajectory）、快捷键编辑器（搜索/重绑/恢复默认）、发送行为、性能与用量、Upload session log（本版本 disabled，点击不持久化）、Models CRUD/默认、Memory（列表/删除/清空/刷新/工作区隔离）、Built-in plugins、Agent presets、About。
+- a11y / 键盘：控件保留 `Label`/`Role`/`Focusable`；原生 Switch/Select 自带键盘、焦点环与展开语义；权限菜单保留选项描述（原生 Select 不能渲染多行描述，见 8.4）；`TestSettingsTabReachability`、`TestPopoverAnchorsExposeExpanded`、`TestModelActionsKeyboardReachable` 通过。
+- 滚动 / 窄窗：body 内 `ui.Scroll` + 令牌内边距，900×600 下最后一行（Upload session log）可滚动到达；header/nav/关闭控件不越界。
+- 测试：`settings_ui_test.go`、`models_ui_test.go`、`memory_ui_test.go` 行为断言全部保留；视觉断言改为品牌面板/主题语义（例如暗色面板改为取 nav 表面像素而不是 DSH 固定坐标）；新增 `TestSettingsNativeControls` 覆盖原生 Select/Switch 的持久化与面板响应式。
+
+### 8.4 遗留 / 取舍
+
+1. 独立设置窗口是 P1（本轮保持应用内 overlay，符合任务范围）。
+2. 权限选择器保留品牌化自定义 popover：原生 `Select` 无法渲染 Auto review 的多行描述，而该描述是 Home/Session 权限菜单共用的产品资产（`TestAutoReviewUISelectorOption`）。
+3. 设置导航保留逐项按钮而非 `ui.Sidebar`：原生 Sidebar 是单一 Tab focus group（roving focus），会回退现有"每个导航项 Tab 可达"的 a11y 验收（`TestSettingsTabReachability`）；若后续接受 roving focus 可迁移。
+4. 字号步进保留自绘 `ButtonBase` 步进列：`14 px` 需作为可展开 popover 的无障碍节点（`TestPopoverAnchorsExposeExpanded`），原生 `Stepper` 只有 spin button 语义，无法承载该 A11y/展开断言。
+5. Built-in plugins / Agent presets / About 的页面内部视觉由 Plugins/Automation 并行任务继续；本轮统一了它们所在的页头、滚动容器与共享 helper（`settingsText`/`settingsFillColor`/`settingsControlColor`）。
+
+## 9. Sidebar（第五批，2026-11-05 完成）
+
+侧栏从 1,232 行的「手搓 DSH 行」换成原生 `ui.Sidebar`：选择、方向键/Home/End/首字母、焦点环、滚动、树的无障碍语义由控件提供；工作区→会话树、行内动作、菜单、拖拽、hover 卡、折叠 rail 全部保留并品牌化。截图见 `preview/`：
+
+![Sidebar 浅色](preview/sidebar-native-light.png)
+
+![Sidebar 深色](preview/sidebar-native-dark.png)
+
+### 9.1 实现要点
+
+| 项 | 实现 |
+| --- | --- |
+| 结构 | 面板 = 品牌行（`mark` 24 + `ZeoKeel` 字标 `Rem(1.25)`/600 + 折叠按钮）+ 品牌主按钮「新建会话」+ **原生 `ui.Sidebar`**（导航项 + Workspaces 标题行 + 工作区树）+ More 账户页脚；全部间距/尺寸/圆角来自 `Theme.Space/Rem/Radius`，删掉 60/252/38/36/34/32/28/14/10 等手调像素 |
+| 选择模型 | 一个 id 空间 `nav:plugins` / `nav:automation` / `ws:<id>` / `s:<id>`；每帧由屏幕重算 canonical choice（`sidebarCanonicalSelection`），`Sidebar.Changed()` 后由 `sidebarChoice` 转成导航再复位。因此高亮跟随「当前屏幕/当前会话」，而点击/方向键都只写一次选择 |
+| 导航 | 插件、自动化任务为原生 `SidebarItem`；选中态、hover、方向键与首字母查找免费 |
+| Workspaces 标题行 | 原生 Sidebar 的 section 标题不能带动作，故用一条品牌化行：`工作区` 标签 + 三个原生 `ButtonBase`（搜索/视图选项/添加工作区），保留原 Popover 挂载与全部 i18n 标签 |
+| 工作区行 | `SidebarItem` + `Children` 组合出「展开/折叠 chevron、＋新会话、⋯工作区菜单」三个**常显**原生按钮（P4：桌面操作不 hover-only，且键盘可 Tab 到）；行仍是拖拽源/落点、右键菜单、hover 卡、`Expanded` 语义 |
+| 会话行 | `SidebarItem` + 缩进（`Space(6)`，按深度叠加）：消息图标、标题、相对时间、运行中 accent 点、`⋯` 会话菜单（原生按钮 + `PopoverMenuButton`）；拖拽排序、右键菜单、`Session actions for …` 可访问名保留 |
+| 展开/折叠 | chevron 按钮切换并持久化（`ui.workspace_collapsed`）；**点击**当前工作区行仍可折叠（保留旧手势），键盘选择只确保展开，避免方向键把列表收起；`Workspace Tree` 模式下子工作区按深度缩进 |
+| 保留行为 | 切换/新建工作区、按工作区/树/单列表分组、归档过滤、搜索入口与内联搜索、视图选项、添加/重命名/删除工作区、新建会话、置顶/归档/重命名/删除会话、复制标题/ID、拖拽排序与菜单里 Move up/down、More 账户菜单、Cmd/Ctrl+B 折叠 rail（图标 rail 重建为原生 ButtonBase + `Theme.Space`） |
+| 测试 | 既有 `workspaces_test`/`sidebar_hover_test`/`chrome_test`/`interaction_test`/a11y Tab 可达性/`home_live_test` 折叠/`menus_test` 全部保留并通过；新增 `TestSidebarNativeSelection`（选中行品牌 tint）、`TestSidebarNativeDisclosure`（chevron 折叠/展开）、`TestSidebarNativeKeyboardNavigation`（Tab 到 Sidebar 后方向键驱动导航）、`TestSidebarNativeGroupingModes`（三种分组模式）、`TestRenderSidebarNativePreview`（浅/深截图，可复现） |
+
+### 9.2 取舍（为什么不是照抄 `SidebarSection`）
+
+1. **工作区不是 `SidebarSection`**：`ui.SidebarSection` 的标题只负责展开/折叠，无法承载「＋新会话 / ⋯工作区菜单」两个行内动作，也无法承担「点击切换工作区」。改为 `SidebarItem` + `Children` 组合原生控件，保住全部行为；层级用缩进表达。
+2. **a11y 树是扁平 item 列表**：`Sidebar` 只把它见过的 `SidebarItem` 作为 level 1 项上报（section 会提供 level 2）。工作区/会话用缩进 + `Expanded`/`Label`（"New session in …"/"Workspace actions for …"）表达关系；若以后需要真正的嵌套树语义，`ui.Tree` 是候选，但它没有选择模型与多动作行（已评估）。
+3. **键盘方向键 = 选择即导航**（Mail/Finder 式）：这是 mygo Sidebar 的语义，也是桌面源列表惯例；为避免「按方向键收起当前工作区」，工作区行的折叠只由点击/chevron 触发。
+4. **会话行的 `⋯` 仍是文本字形**：产品与既有测试以此定位会话菜单；工作区行用图标（chevron/＋/⋯）更接近原生。两者都是原生 `ButtonBase`，a11y/焦点一致。
+5. **hover 卡保留**：它是信息性 affordance（路径/创建时间/复制路径），不是操作；「操作」已全部从 hover-only 改为常显。
+
+### 9.3 遗留
+
+1. 内联搜索的输入行与结果行仍在 `session_search.go`（手搓行/固定 36/256 像素，不在本轮写范围）；后续可换原生 `SearchField`/`List`，约 60 行。
+2. 折叠 rail 的截图未单独产出（`chrome_test` 覆盖行为）；如评审需要可加一张 `sidebar-rail-*.png`。
+3. Sidebar 的树是视觉缩进而非 a11y 嵌套（见 9.2-2）；如需屏幕阅读器读出层级，可在后续把工作区/会话分组成 section 或换 `Tree`。
+
+## 10. 剩余路线（2026-11-05 更新）
+
+已完成：Home、Session、Sidebar、Settings、Plugins、Automation 六屏/区的品牌原生视觉；系统菜单栏与窗口状态持久化（ADR 0003）。
+
+剩余（按优先级）：
+
+1. **其余面板视觉**：Trajectory 屏内部行、右侧栏（Files/Terminal/Start）品牌化、`session_search.go` 内联搜索行/结果行（换原生 `SearchField`/`List`）、todo/team/plan 面板、Home/Session composer 收敛到 `composer_native.go`。
+2. **markdown 换 mygo `ui/markdown`**：流式/表格/代码复制/选中复制随库获得，删除自研 `markdown.go`（单独一项，需回归流式与工具卡）。
+3. **桌面交互 P0 剩余**：文本可选 + 右键 Copy/Select All、系统通知（turn 完成/失败/审批）、滚动条策略、2x DPI 回归、系统 TextScale/HighContrast 接线。
+4. **桌面交互 P1**：设置独立窗口、popover/tooltip 越界与焦点行为、窗口级菜单快捷键补齐、DPI/字体真机矩阵。
+5. **a11y/平台细节**：Sidebar a11y 嵌套（`ui.Tree` 或 section）、纯键盘全流程、VoiceOver/Narrator 冒烟、IME 真机验证。
+
+## 11. 验收口径
 
 | 维度 | 验收 |
 | --- | --- |

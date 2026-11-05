@@ -428,18 +428,17 @@ func (a *App) pluginDialogs(c *ui.Context, t *design.Tokens) {
 // are, the product version and how settings are stored.
 func (a *App) pluginAboutDialog(c *ui.Context, t *design.Tokens) {
 	st := a.pluginUI()
+	th := t.Theme()
 	ui.Modal(c, &st.aboutOpen, func() {
-		ui.Column(c).Width(440).Gap(design.Space3).Children(func() {
-			ui.Text(c, a.pluginLocalized("About plugins", "关于插件")).FontSize(16).FontWeight(600).TextColor(t.LabelPrimary)
-			ui.Text(c, a.pluginLocalized(
+		ui.Column(c).Width(th.Space(110)).Gap(th.Space(3)).Children(func() {
+			nativeText(c, design.TypeM, t.LabelPrimary, a.pluginLocalized("About plugins", "关于插件")).FontWeight(600)
+			nativeText(c, design.TypeXS, t.LabelSecondary, a.pluginLocalized(
 				"Plugins extend the agent with tools for searching, delegation, command execution and the agent loop. Every plugin in this build is built in: there is no third-party registry or installer.",
-				"插件为代理提供搜索、委派、命令执行和代理循环等工具。此版本的所有插件均为内置，没有第三方插件市场或安装器。")).
-				FontSize(13).TextColor(t.LabelSecondary)
-			ui.Text(c, a.pluginLocalized(
+				"插件为代理提供搜索、委派、命令执行和代理循环等工具。此版本的所有插件均为内置，没有第三方插件市场或安装器。"))
+			nativeText(c, design.TypeXS, t.LabelSecondary, a.pluginLocalized(
 				"Toggles and per-plugin settings are stored in the local configuration database and apply from the next turn.",
-				"开关和每个插件的设置保存在本地配置数据库中，并在下一轮生效。")).
-				FontSize(13).TextColor(t.LabelSecondary)
-			ui.Text(c, a.T("about.version")).FontSize(12).TextColor(t.LabelTertiary)
+				"开关和每个插件的设置保存在本地配置数据库中，并在下一轮生效。"))
+			nativeText(c, design.TypeXXS, t.LabelTertiary, a.T("about.version"))
 			ui.Row(c).Justify(ui.End).Children(func() {
 				if ui.Button(c, a.T("menu.close")).Clicked() {
 					st.aboutOpen = false
@@ -453,17 +452,16 @@ func (a *App) pluginAboutDialog(c *ui.Context, t *design.Tokens) {
 // third-party installation path, and the dialog says what to do instead.
 func (a *App) pluginAddDialog(c *ui.Context, t *design.Tokens) {
 	st := a.pluginUI()
+	th := t.Theme()
 	ui.Modal(c, &st.addOpen, func() {
-		ui.Column(c).Width(460).Gap(design.Space3).Children(func() {
-			ui.Text(c, a.T("plugins.add")).FontSize(16).FontWeight(600).TextColor(t.LabelPrimary)
-			ui.Text(c, a.pluginLocalized(
+		ui.Column(c).Width(th.Space(115)).Gap(th.Space(3)).Children(func() {
+			nativeText(c, design.TypeM, t.LabelPrimary, a.T("plugins.add")).FontWeight(600)
+			nativeText(c, design.TypeXS, t.LabelSecondary, a.pluginLocalized(
 				"All plugins are built in to ZeoKeel. This build has no third-party plugin registry, package format or installer, so there is nothing to add from outside the app.",
-				"所有插件均内置于 ZeoKeel。此版本没有第三方插件市场、包格式或安装器，因此无法从外部添加插件。")).
-				FontSize(13).TextColor(t.LabelSecondary)
-			ui.Text(c, a.pluginLocalized(
+				"所有插件均内置于 ZeoKeel。此版本没有第三方插件市场、包格式或安装器，因此无法从外部添加插件。"))
+			nativeText(c, design.TypeXS, t.LabelSecondary, a.pluginLocalized(
 				"Use the built-in plugin rows below to enable or disable a plugin, and \"View\" to change its settings.",
-				"使用下方的内置插件行启用或停用插件，点击“查看”可修改其设置。")).
-				FontSize(13).TextColor(t.LabelSecondary)
+				"使用下方的内置插件行启用或停用插件，点击“查看”可修改其设置。"))
 			ui.Row(c).Justify(ui.End).Children(func() {
 				if ui.Button(c, a.T("menu.close")).Clicked() {
 					st.addOpen = false
@@ -477,17 +475,15 @@ func (a *App) pluginAddDialog(c *ui.Context, t *design.Tokens) {
 // lists every experimental feature and why it is not available yet.
 func (a *App) pluginExperimentalDialog(c *ui.Context, t *design.Tokens) {
 	st := a.pluginUI()
+	th := t.Theme()
 	ui.Modal(c, &st.moreOpen, func() {
-		ui.Column(c).Width(480).Gap(design.Space2).Children(func() {
-			ui.Text(c, a.T("plugins.experimental_plugins")).FontSize(16).FontWeight(600).
-				TextColor(t.LabelPrimary)
+		ui.Column(c).Width(th.Space(120)).Gap(th.Space(2)).Children(func() {
+			nativeText(c, design.TypeM, t.LabelPrimary, a.T("plugins.experimental_plugins")).FontWeight(600)
 			for _, plugin := range experimentalPluginDefs {
 				en, zh := pluginUnsupportedReason(plugin.name)
-				ui.Column(c).Gap(1).Children(func() {
-					ui.Text(c, a.pluginTitle(plugin)).FontSize(13).FontWeight(500).
-						TextColor(t.LabelPrimary)
-					ui.Text(c, a.pluginLocalized(en, zh)).FontSize(12).
-						TextColor(t.LabelTertiary)
+				ui.Column(c).Gap(th.Space(0.5)).Children(func() {
+					nativeText(c, design.TypeXS, t.LabelPrimary, a.pluginTitle(plugin)).FontWeight(500)
+					nativeText(c, design.TypeXXS, t.LabelTertiary, a.pluginLocalized(en, zh))
 				})
 			}
 			ui.Row(c).Justify(ui.End).Children(func() {
@@ -502,15 +498,14 @@ func (a *App) pluginExperimentalDialog(c *ui.Context, t *design.Tokens) {
 // pluginInfoDialog explains one experimental plugin when its name is clicked.
 func (a *App) pluginInfoDialog(c *ui.Context, t *design.Tokens) {
 	st := a.pluginUI()
+	th := t.Theme()
 	ui.Modal(c, &st.infoOpen, func() {
-		ui.Column(c).Width(440).Gap(design.Space3).Children(func() {
-			ui.Text(c, a.pluginRowName(st.infoName)).FontSize(16).FontWeight(600).
-				TextColor(t.LabelPrimary)
-			ui.Text(c, a.pluginRowDesc(pluginRowDescForName(st.infoName))).FontSize(13).
-				TextColor(t.LabelSecondary)
+		ui.Column(c).Width(th.Space(110)).Gap(th.Space(3)).Children(func() {
+			nativeText(c, design.TypeM, t.LabelPrimary, a.pluginRowName(st.infoName)).FontWeight(600)
+			nativeText(c, design.TypeXS, t.LabelSecondary, a.pluginRowDesc(pluginRowDescForName(st.infoName)))
 			en, zh := pluginUnsupportedReason(pluginKeyForLabel(st.infoName))
 			if en != "" {
-				ui.Text(c, a.pluginLocalized(en, zh)).FontSize(12).TextColor(t.LabelTertiary)
+				nativeText(c, design.TypeXXS, t.LabelTertiary, a.pluginLocalized(en, zh))
 			}
 			ui.Row(c).Justify(ui.End).Children(func() {
 				if ui.Button(c, a.T("menu.close")).Clicked() {
@@ -546,17 +541,17 @@ func (a *App) pluginDetailDialog(c *ui.Context, t *design.Tokens) {
 		st.detailOpen = false
 		return
 	}
+	th := t.Theme()
 	ui.Modal(c, &st.detailOpen, func() {
-		ui.Column(c).Width(480).Gap(design.Space3).Children(func() {
-			ui.Text(c, fmt.Sprintf(a.tr("%s settings", "%s设置"), a.pluginDetailTitle(spec))).FontSize(16).FontWeight(600).
-				TextColor(t.LabelPrimary)
-			ui.Text(c, a.pluginDetailDesc(spec)).FontSize(13).TextColor(t.LabelSecondary)
+		ui.Column(c).Width(th.Space(120)).Gap(th.Space(3)).Children(func() {
+			nativeText(c, design.TypeM, t.LabelPrimary,
+				fmt.Sprintf(a.tr("%s settings", "%s设置"), a.pluginDetailTitle(spec))).FontWeight(600)
+			nativeText(c, design.TypeXS, t.LabelSecondary, a.pluginDetailDesc(spec))
 			for _, f := range spec.fields {
-				ui.Column(c).Gap(design.Space1).Children(func() {
+				ui.Column(c).Gap(th.Space(1)).Children(func() {
 					// The visible label carries a colon so the input's exact
 					// accessible label is the only match for the field name.
-					ui.Text(c, a.pluginFieldLabel(f)+":").FontSize(12).
-						TextColor(t.LabelTertiary)
+					nativeText(c, design.TypeXXS, t.LabelTertiary, a.pluginFieldLabel(f)+":")
 					input := st.detailFields[f.key]
 					if input == nil {
 						value := f.def
@@ -569,11 +564,11 @@ func (a *App) pluginDetailDialog(c *ui.Context, t *design.Tokens) {
 					}
 				})
 			}
-			ui.Row(c).Gap(design.Space2).Justify(ui.End).Children(func() {
+			ui.Row(c).Gap(th.Space(2)).Justify(ui.End).Children(func() {
 				if ui.Button(c, a.T("menu.cancel")).Clicked() {
 					st.detailOpen = false
 				}
-				if ui.Button(c, a.T("menu.save")).Clicked() {
+				if ui.PrimaryButton(c, a.T("menu.save")).Clicked() {
 					a.savePluginDetail(c)
 				}
 			})
@@ -589,38 +584,34 @@ func (a *App) pluginDetailDialog(c *ui.Context, t *design.Tokens) {
 // configuration file" while opening a directory.
 func (a *App) pluginConfigDialog(c *ui.Context, t *design.Tokens) {
 	st := a.pluginUI()
+	th := t.Theme()
 	ui.Modal(c, &st.configOpen, func() {
-		ui.Column(c).Width(540).Gap(design.Space3).Children(func() {
+		ui.Column(c).Width(th.Space(135)).Gap(th.Space(3)).Children(func() {
 			// A distinct title from the Settings row's "Open configuration
 			// file" button: the dialog shows the data folder and database,
 			// and reusing that name made two different controls share one
 			// accessible name.
-			ui.Text(c, a.tr("Configuration and database", "配置与数据库")).FontSize(16).
-				FontWeight(600).TextColor(t.LabelPrimary)
-			ui.Text(c, a.tr(
+			nativeText(c, design.TypeM, t.LabelPrimary, a.tr("Configuration and database", "配置与数据库")).FontWeight(600)
+			nativeText(c, design.TypeXS, t.LabelSecondary, a.tr(
 				"ZeoKeel keeps its settings in index.sqlite inside this data folder. Copy the database path, or open the folder in the system file manager.",
-				"ZeoKeel 的设置保存在该数据目录下的 index.sqlite 中。可复制数据库路径，或在系统文件管理器中打开该目录。")).
-				FontSize(13).TextColor(t.LabelSecondary)
-			ui.Text(c, a.tr("Data folder", "数据目录")).FontSize(11).
-				FixedLineHeight(16).TextColor(t.LabelTertiary)
-			ui.Row(c).Padding(design.Space2, design.Space2).Radius(design.RadiusSM).
-				Background(settingsFillColor(t)).Children(func() {
-				ui.Text(c, st.configDir).FontSize(12).TextColor(t.LabelPrimary)
+				"ZeoKeel 的设置保存在该数据目录下的 index.sqlite 中。可复制数据库路径，或在系统文件管理器中打开该目录。"))
+			nativeText(c, design.TypeXXXS, t.LabelTertiary, a.tr("Data folder", "数据目录"))
+			ui.Row(c).Padding(th.Space(2), th.Space(2)).Radius(design.RadiusSM).
+				Background(t.BgStrong).Children(func() {
+				nativeText(c, design.TypeXXS, t.LabelPrimary, st.configDir)
 			})
-			ui.Text(c, a.tr("Database", "数据库")).FontSize(11).
-				FixedLineHeight(16).TextColor(t.LabelTertiary)
+			nativeText(c, design.TypeXXXS, t.LabelTertiary, a.tr("Database", "数据库"))
 			// The database row is tinted so it is the highlighted target the
-			// Copy path action writes.
-			ui.Row(c).Padding(design.Space2, design.Space2).Radius(design.RadiusSM).
-				Background(ui.RGBA(59, 130, 246, 0.10)).
-				Border(1, ui.RGBA(59, 130, 246, 0.30)).Children(func() {
-				ui.Text(c, st.configPath).FontSize(12).TextColor(t.LabelPrimary).
-					MaxLines(2)
+			// Copy path action writes; the tint is the brand accent, not a
+			// sampled blue.
+			ui.Row(c).Padding(th.Space(2), th.Space(2)).Radius(design.RadiusSM).
+				Background(t.Accent.Alpha(0.10)).Border(1, t.Accent.Alpha(0.30)).Children(func() {
+				nativeText(c, design.TypeXXS, t.LabelPrimary, st.configPath).MaxLines(2)
 			})
 			if st.configErr != "" {
-				ui.Text(c, st.configErr).FontSize(12).TextColor(t.WarningText)
+				nativeText(c, design.TypeXXS, t.WarningText, st.configErr)
 			}
-			ui.Row(c).Gap(design.Space2).Justify(ui.End).Children(func() {
+			ui.Row(c).Gap(th.Space(2)).Justify(ui.End).Children(func() {
 				// Each control's accessible name contains its visible text
 				// and is unique in the dialog.
 				copyLabel := a.tr("Copy database path", "复制数据库路径")
@@ -650,7 +641,7 @@ func (a *App) pluginConfigDialog(c *ui.Context, t *design.Tokens) {
 						c.Toast(a.tr("Opened data folder", "已打开数据目录"))
 					}
 				}
-				if ui.Button(c, a.pluginLocalized("Done", "完成")).Clicked() {
+				if ui.PrimaryButton(c, a.pluginLocalized("Done", "完成")).Clicked() {
 					st.configOpen = false
 				}
 			})
@@ -668,24 +659,6 @@ func (a *App) openConfigurationLocation(c *ui.Context) {
 	st.configPath = a.pluginConfigPath()
 	st.configErr = ""
 	st.configOpen = true
-}
-
-// pluginSwitchLive is the visible experimental switch: it keeps the
-// baseline's 36x20 look but carries switch semantics, the "Enable <name>"
-// label and a click handler.
-func (a *App) pluginSwitchLive(c *ui.Context, t *design.Tokens, on bool, label string, toggle func()) {
-	align := ui.Start
-	if on {
-		align = ui.End
-	}
-	track, knob := switchTrack(t, on)
-	sw := ui.Row(c).Width(36).Height(20).Radius(design.RadiusMax).Background(track).
-		Padding(2).AlignItems(ui.Center).Justify(align).
-		Role(ui.RoleSwitch).Checked(on).Label(label).Focusable()
-	sw.Children(func() {
-		ui.Box(c).Width(16).Height(16).Radius(design.RadiusMax).Background(knob)
-	})
-	sw.OnClick(toggle)
 }
 
 // aboutSettingsPage is Settings > About: version, build information, a

@@ -1,6 +1,9 @@
 package shell
 
 import (
+	"image/png"
+	"os"
+	"path/filepath"
 	"sync"
 	"testing"
 
@@ -86,7 +89,7 @@ func TestBuiltinPluginsTogglesPersistAndHook(t *testing.T) {
 	if err := tt.Click("Plugins"); err != nil {
 		t.Fatalf("click Plugins nav: %v", err)
 	}
-	if !tt.HasText("Built-in plugin settings") {
+	if !tt.HasText("Built-in plugins") {
 		t.Fatalf("plugins screen missing: %q", tt.Texts())
 	}
 	tt.Click("Enable Web search")
@@ -121,5 +124,50 @@ func TestPluginAccessorDefaults(t *testing.T) {
 	}
 	if err := h.ctrl.SetPluginEnabled("", true); err == nil {
 		t.Fatal("SetPluginEnabled accepted an empty name")
+	}
+}
+
+// TestRenderPluginsNativePreview renders the Plugins page for brand review:
+// light and dark at the 1600x1000 design size. The PNGs are written to
+// docs/design/preview so the page's look is reproducible from the test.
+func TestRenderPluginsNativePreview(t *testing.T) {
+	dir := filepath.Join("..", "..", "docs", "design", "preview")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatalf("create preview dir: %v", err)
+	}
+	for _, tc := range []struct {
+		name  string
+		theme string
+	}{
+		{"light", session.ThemeLight},
+		{"dark", session.ThemeDark},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			h := newLiveApp(t, &shellProvider{})
+			// Chinese is the product default language; the preview shows the
+			// shipped first-run look.
+			h.app.Language = LangZH
+			if err := h.store.SetSetting(session.SettingTheme, tc.theme); err != nil {
+				t.Fatalf("theme setting: %v", err)
+			}
+			h.app.Screen = Plugins
+			img := ui.Render(h.app.View, 1600, 1000, 1)
+			path := filepath.Join(dir, "plugins-native-"+tc.name+".png")
+			f, err := os.Create(path)
+			if err != nil {
+				t.Fatalf("create %s: %v", path, err)
+			}
+			if err := png.Encode(f, img); err != nil {
+				f.Close()
+				t.Fatalf("encode %s: %v", path, err)
+			}
+			if err := f.Close(); err != nil {
+				t.Fatalf("close %s: %v", path, err)
+			}
+			if fi, err := os.Stat(path); err != nil || fi.Size() == 0 {
+				t.Fatalf("preview %s is empty: %v", path, err)
+			}
+			t.Logf("wrote %s", path)
+		})
 	}
 }

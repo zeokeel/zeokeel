@@ -23,19 +23,20 @@ var (
 	actionBadIcon   = ui.MustParseSVG([]byte(`<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M17 14V2"/><path d="M9 18.12 10 14H4.17a2 2 0 0 1-1.92-2.56l2.33-8A2 2 0 0 1 6.5 2H20a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2h-2.76a2 2 0 0 0-1.79 1.11L12 22a3.13 3.13 0 0 1-3-3.88Z"/></svg>`))
 )
 
-// liveMessageActions is the DSH-style footer under a completed assistant
-// message: the time it first showed at 13px tertiary, 28px Copy/Retry/
-// feedback buttons, and a completion summary. Copy puts the answer on the
-// clipboard, Retry resubmits the last user message, and the feedback buttons
-// persist a local good/bad marker for the message (this build has no
-// feedback transport, so the toast says what was actually stored).
+// liveMessageActions is the brand footer under a completed assistant message:
+// the time it first showed, the ghost Copy/Retry/feedback buttons and a
+// completion summary. Copy puts the answer on the clipboard, Retry resubmits
+// the last user message, and the feedback buttons persist a local good/bad
+// marker for the message (this build has no feedback transport, so the toast
+// says what was actually stored).
 func (a *App) liveMessageActions(c *ui.Context, t *design.Tokens, m state.Message, key string, snap *state.Snapshot) {
 	if a.Ctrl == nil {
 		return
 	}
+	th := t.Theme()
 	shown := a.messageShownAt(key, c.Now())
-	ui.Row(c).Height(28).Gap(design.Space2).AlignItems(ui.Center).Children(func() {
-		ui.Text(c, shown.Format("15:04")).FontSize(13).FixedLineHeight(24).
+	ui.Row(c).Height(th.Space(7)).Gap(th.Space(2)).AlignItems(ui.Center).Children(func() {
+		ui.Text(c, shown.Format("15:04")).FontSize(12).FixedLineHeight(20).
 			TextColor(t.LabelTertiary).NoWrap()
 		copyButton := messageActionButton(c, t, actionCopyIcon, a.menuText("Copy", "复制"))
 		copyButton.OnClick(func() {
@@ -60,7 +61,7 @@ func (a *App) liveMessageActions(c *ui.Context, t *design.Tokens, m state.Messag
 		}
 		if summary := a.completionSummary(snap); summary != "" {
 			ui.Text(c, summary).FontSize(12).FixedLineHeight(20).
-				TextColor(t.LabelTertiary).NoWrap()
+				TextColor(t.LabelTertiary).NoWrap().PaddingX(th.Space(1))
 		}
 	})
 }
@@ -104,13 +105,17 @@ func (a *App) recordMessageFeedback(c *ui.Context, m state.Message, value string
 	c.Toast(a.menuText("Feedback recorded", "反馈已记录"))
 }
 
-// messageActionButton is one 28px subtle action control, as DSH's
-// xzv4MW_action buttons: a rounded icon with an accessible label and tooltip.
+// messageActionButton is one subtle brand action control: a borderless native
+// ButtonBase with the theme's hover tint, an accessible label and a tooltip.
 func messageActionButton(c *ui.Context, t *design.Tokens, icon *ui.SVG, label string) ui.Element {
-	button := ui.Button(c, "").Size(28, 28).Radius(design.RadiusSM).
-		TextColor(t.LabelSecondary).Label(label).Tooltip(label)
+	th := t.Theme()
+	button := ui.ButtonBase(c).Size(th.Space(7), th.Space(7)).Center().
+		Radius(design.RadiusSM).Label(label).Tooltip(label)
+	if button.Hovered() {
+		button = button.Background(t.BgHover)
+	}
 	button.Children(func() {
-		ui.Icon(c, icon).FontSize(14).TextColor(t.LabelSecondary)
+		ui.Icon(c, icon).Size(th.Space(4), th.Space(4)).TextColor(t.LabelSecondary)
 	})
 	return button
 }
@@ -162,7 +167,7 @@ func lastUserText(snap *state.Snapshot) string {
 	return ""
 }
 
-// liveUsageFooter is the composer's usage row: DSH's pill segments for turns,
+// liveUsageFooter is the composer's usage row: pill segments for turns,
 // steps, output tokens, completion time and rate, and cache share. Segments
 // whose numbers the snapshot and view clock cannot supply are omitted rather
 // than invented.
@@ -174,15 +179,16 @@ func (a *App) liveUsageFooter(c *ui.Context, t *design.Tokens, snap *state.Snaps
 	if len(segments) == 0 {
 		return
 	}
-	// The footer is exactly as wide as the composer card and wraps its pills:
-	// at 1200x800 with the docked panel the six detailed segments are wider
-	// than 361px, and the old centered row painted them past the composer
-	// (and behind the right panel) instead of wrapping.
-	ui.Row(c).Width(a.sessionComposerWidthFor(c)).Gap(design.Space3).
+	// The footer is as wide as the composer card and wraps its pills: at
+	// narrow windows with the docked panel the detailed segments are wider
+	// than the card, and wrapping keeps them inside it.
+	th := t.Theme()
+	ui.Row(c).Width(a.sessionComposerWidthFor(c)).Gap(th.Space(2)).
 		Wrap().AlignItems(ui.Center).AlignContent(ui.Center).Justify(ui.Center).
 		Label(a.tr("Session usage", "会话用量")).Children(func() {
 		for _, segment := range segments {
-			ui.Row(c).Height(22).PaddingX(6).Radius(design.RadiusSM).Shrink(0).
+			ui.Row(c).Height(th.Space(6)).PaddingX(th.Space(2)).
+				Radius(design.RadiusSM).Shrink(0).
 				Background(t.BgHover).AlignItems(ui.Center).Children(func() {
 				ui.Text(c, segment).FontSize(12).FixedLineHeight(20).
 					TextColor(t.LabelTertiary).NoWrap()
@@ -191,7 +197,7 @@ func (a *App) liveUsageFooter(c *ui.Context, t *design.Tokens, snap *state.Snaps
 	})
 }
 
-// usageSegments builds the footer's pill labels in DSH's order. Settings >
+// usageSegments builds the footer's pill labels in the footer's order. Settings >
 // General > Performance & usage controls the detail: Detailed (the default)
 // adds the step, output-token, completion-rate and cache segments; Standard
 // keeps only the turn count.
@@ -253,9 +259,8 @@ type toolSummaryCounts struct {
 }
 
 // countToolSummary classifies the session's tool calls for the summary line.
-// The buckets mirror DSH's "Ran commands, read images, called tools" wording:
-// shells and jobs are commands, file and image readers are files, and every
-// other tool is counted generically.
+// The buckets: shells and jobs are commands, file and image readers are
+// files, and every other tool is counted generically.
 func countToolSummary(tools map[string]state.ToolState) toolSummaryCounts {
 	var counts toolSummaryCounts
 	for _, tool := range tools {
@@ -271,7 +276,7 @@ func countToolSummary(tools map[string]state.ToolState) toolSummaryCounts {
 	return counts
 }
 
-// toolSummaryText is the collapsible line above the tool cards.
+// toolSummaryText is the collapsible summary line above the tool cards.
 func (a *App) toolSummaryText(counts toolSummaryCounts) string {
 	parts := make([]string, 0, 3)
 	if a.lang() == LangZH {
@@ -319,14 +324,21 @@ func (a *App) liveToolSummary(c *ui.Context, t *design.Tokens, snap *state.Snaps
 	if label == "" {
 		return
 	}
-	row := ui.Button(c, label).Height(24).PaddingX(0).Gap(design.Space1).
-		AlignItems(ui.Center).Justify(ui.Start).TextColor(t.LabelSecondary)
+	th := t.Theme()
+	row := ui.ButtonBase(c).Height(th.Space(6)).PaddingX(th.Space(1)).
+		Gap(th.Space(1)).Radius(design.RadiusSM).
+		AlignItems(ui.Center).Justify(ui.Start).Label(label)
+	if row.Hovered() {
+		row = row.Background(t.BgHover)
+	}
 	row.Children(func() {
 		caret := "›"
 		if !st.toolSummaryCollapsed {
 			caret = "⌄"
 		}
 		ui.Text(c, caret).FontSize(11).TextColor(t.LabelTertiary).NoWrap()
+		ui.Text(c, label).FontSize(13).FixedLineHeight(20).
+			TextColor(t.LabelSecondary).NoWrap()
 	})
 	if row.Clicked() {
 		st.toolSummaryCollapsed = !st.toolSummaryCollapsed

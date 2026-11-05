@@ -113,8 +113,8 @@ func (a *App) ConversationFontSize() float32 {
 	return conversationTextSize(a.currentSettings())
 }
 
-// ConversationLineHeight returns the matching line box: the baseline's 24px
-// at 14px, 28px at 16px.
+// ConversationLineHeight returns the matching line box: the brand's 24px at
+// 14px, 28px at 16px.
 func (a *App) ConversationLineHeight() float32 {
 	if a.ConversationFontSize() >= float32(session.FontSizeLarge) {
 		return 28
@@ -216,63 +216,71 @@ func (a *App) settingsOverlay(c *ui.Context, t *design.Tokens) {
 	})
 }
 
-// settingsPanelLive draws the same 800x800 panel as the static baseline with
-// live controls. Every row keeps the baseline's geometry; the values and
-// click handlers come from the persisted settings.
+// settingsPanelLive draws the brand settings panel: a centered, responsive
+// surface (720-880 DIPs wide, clamped to the window) with the nav column on
+// the left and the scrolling page on the right. The panel, nav and rows take
+// their color, radius and spacing from the brand theme, not from a sampled
+// reference page.
 func (a *App) settingsPanelLive(c *ui.Context, t *design.Tokens) {
 	if tab := a.shellUI().settingsTab; tab == settingsTabAgentPresets && !a.currentSettings().ShowCodingView {
 		a.shellUI().settingsTab = settingsTabGeneral
 	}
+	th := t.Theme()
 	w, h := settingsPanelSize(c)
 	panel := ui.Row(c).
 		Width(w).Height(h).
 		AlignItems(ui.Stretch).
-		Background(settingsPanelColor(t)).Radius(settingsRadius).Clip().
-		Shadow(0, 0, 0, 0.5, ui.RGBA(0, 0, 0, 0.16)).
-		Shadow(0, 3, 8, 0, ui.RGBA(0, 0, 0, 0.04)).
-		Shadow(0, 0, 20, 0, ui.RGBA(0, 0, 0, 0.05)).
+		Background(settingsPanelColor(t)).Radius(th.Radius).
+		Border(1, t.BorderL2).Clip().
+		Shadow(0, th.Space(4), th.Space(10), 0, ui.RGBA(0, 0, 0, 0.20)).
 		Role(ui.RoleDialog).Label(a.T("settings.settings"))
 	panel.OnClick(func() {})
 	panel.Children(func() {
-		a.settingsNavLive(c, t, h)
+		a.settingsNavLive(c, t)
 		a.settingsBodyLive(c, t)
 	})
 }
 
-// settingsNavLive is the left column, localized but otherwise identical.
-func (a *App) settingsNavLive(c *ui.Context, t *design.Tokens, height float32) {
+// settingsNavLive is the left column: the brand wordmark-sidebar treatment of
+// the settings pages. The nav cells are native button bases, so hover, press,
+// focus ring and keyboard activation come from mygo; each page is its own Tab
+// stop, matching the per-item reachability the settings screens always had.
+func (a *App) settingsNavLive(c *ui.Context, t *design.Tokens) {
+	th := t.Theme()
 	tab := a.shellUI().settingsTab
-	ui.Column(c).Width(settingsNavW).Height(height).
-		Padding(settingsNavTop, settingsNavPad, 0, settingsNavPad).
-		Gap(settingsTitleGap).Children(func() {
-		settingsText(c, a.T("settings.settings"), design.TypeM, t.LabelPrimary).FontWeight(500).PaddingX(design.Space3)
-		ui.Column(c).Gap(design.Space1).Children(func() {
-			a.settingsNavCellLive(c, t, a.T("settings.general"), settingsTabGeneral, tab, settingsIconGear)
-			a.settingsNavCellLive(c, t, a.T("settings.models"), settingsTabModels, tab, settingsIconDatabase)
-			// Memory is a live-only page: its list comes from the store and
-			// the selected workspace, so the static baseline keeps exactly
-			// the four canonical nav cells.
-			if a.Ctrl != nil {
-				a.settingsNavCellLive(c, t, a.memoryText("Memory", "记忆"), settingsTabMemory, tab, memoryIcon)
-			}
-			a.settingsNavCellLive(c, t, a.T("settings.built_in_plugins"), settingsTabBuiltinPlugins, tab, settingsIconSliders)
-			// "Show coding view" also governs whether the Agent presets page
-			// is offered, per the row's description.
-			if a.currentSettings().ShowCodingView {
-				a.settingsNavCellLive(c, t, a.T("settings.agent_presets"), settingsTabAgentPresets, tab, settingsIconPerson)
-			}
-			// About is a live-only page: the DSH baseline settings screenshot
-			// has the four canonical nav cells, so the static pixel path keeps
-			// exactly those while a running app also offers About.
-			if a.Ctrl != nil {
-				a.settingsNavCellLive(c, t, a.T("menu.about"), settingsTabAbout, tab, pluginIconInfo)
-			}
+	_, height := settingsPanelSize(c)
+	ui.Column(c).Width(settingsNavWidth(c)).Height(height).
+		Background(t.BgSidebar).
+		BorderWidth(0, 0, 1, 0).BorderColor(t.BorderL2).
+		Padding(th.Space(4), th.Space(3)).
+		Children(func() {
+			ui.Row(c).Height(th.Space(12)).PaddingX(th.Space(3)).
+				AlignItems(ui.Center).Children(func() {
+				settingsText(c, a.T("settings.settings"), design.TypeM, t.LabelPrimary).
+					FontWeight(600)
+			})
+			ui.Column(c).Gap(th.Space(1)).Children(func() {
+				a.settingsNavCellLive(c, t, a.T("settings.general"), settingsTabGeneral, tab, settingsIconGear)
+				a.settingsNavCellLive(c, t, a.T("settings.models"), settingsTabModels, tab, settingsIconDatabase)
+				// Memory is a live-only page: its list comes from the store
+				// and the selected workspace.
+				if a.Ctrl != nil {
+					a.settingsNavCellLive(c, t, a.memoryText("Memory", "记忆"), settingsTabMemory, tab, memoryIcon)
+				}
+				a.settingsNavCellLive(c, t, a.T("settings.built_in_plugins"), settingsTabBuiltinPlugins, tab, settingsIconSliders)
+				// "Show coding view" also governs whether the Agent presets
+				// page is offered, per the row's description.
+				if a.currentSettings().ShowCodingView {
+					a.settingsNavCellLive(c, t, a.T("settings.agent_presets"), settingsTabAgentPresets, tab, settingsIconPerson)
+				}
+				if a.Ctrl != nil {
+					a.settingsNavCellLive(c, t, a.T("menu.about"), settingsTabAbout, tab, pluginIconInfo)
+				}
+			})
 		})
-	})
 }
 
-// settingsNavCellLive is one nav cell with its click handler. The active cell
-// keeps the baseline tint.
+// settingsNavCellLive is one nav cell with its click handler.
 func (a *App) settingsNavCellLive(c *ui.Context, t *design.Tokens, label string, target, current settingsTab, icon *ui.SVG) {
 	cell := a.settingsNavCell(c, t, label, target == current, icon)
 	cell.OnClick(func() {
@@ -281,25 +289,15 @@ func (a *App) settingsNavCellLive(c *ui.Context, t *design.Tokens, label string,
 	})
 }
 
-// settingsBodyLive is the right column: header actions and the selected page.
+// settingsBodyLive is the right column: the header actions and the scrolling
+// page content. The page itself starts with its own brand heading; the body
+// owns the scroll, the padding and the dialog hosting.
 func (a *App) settingsBodyLive(c *ui.Context, t *design.Tokens) {
+	th := t.Theme()
 	ui.Column(c).Grow(1).Children(func() {
-		ui.Row(c).Height(settingsHeaderH).
-			Padding(settingsHeaderTop, settingsHeaderEnd, 0, 0).
-			Gap(design.Space2).Justify(ui.End).AlignItems(ui.Start).Children(func() {
-			a.settingsOutlineButtonLive(c, t, a.T("settings.open_configuration_file"),
-				func() { a.openConfigurationLocation(c) })
-			// The explicit Close button is a live affordance; the baseline's
-			// header has only the configuration action and the X, so the
-			// static pixel path keeps that exact header.
-			if a.Ctrl != nil {
-				a.settingsOutlineButtonLive(c, t, a.T("menu.close"),
-					func() { a.closeSettings() })
-			}
-			a.settingsCloseLive(c, t)
-		})
+		a.settingsHeaderLive(c, t)
 		ui.Scroll(c).Grow(1).Children(func() {
-			ui.Column(c).Padding(0, settingsOptionsPad, 0, settingsOptionsPad).Children(func() {
+			ui.Column(c).Padding(th.Space(5), th.Space(6)).Gap(th.Space(4)).Children(func() {
 				switch a.shellUI().settingsTab {
 				case settingsTabModels:
 					a.modelsSettingsPage(c, t)
@@ -324,194 +322,210 @@ func (a *App) settingsBodyLive(c *ui.Context, t *design.Tokens) {
 	a.pluginDialogs(c, t)
 }
 
-// settingsRowsLive draws the option list in the baseline order and with the
-// baseline row styles.
+// settingsHeaderLive is the panel's top action bar: the configuration file
+// shortcut, the explicit Close and the X close button, right aligned so the
+// page content keeps the full width below it.
+func (a *App) settingsHeaderLive(c *ui.Context, t *design.Tokens) {
+	th := t.Theme()
+	ui.Row(c).Height(th.Space(14)).
+		Padding(th.Space(2), th.Space(6), 0, th.Space(6)).
+		Gap(th.Space(2)).Justify(ui.End).AlignItems(ui.Center).Children(func() {
+		a.settingsOutlineButtonLive(c, t, a.T("settings.open_configuration_file"),
+			func() { a.openConfigurationLocation(c) })
+		a.settingsOutlineButtonLive(c, t, a.T("menu.close"),
+			func() { a.closeSettings() })
+		a.settingsCloseLive(c, t)
+	})
+}
+
+// settingsSection is one visually grouped block of the General page: a small
+// section label over a brand card that holds the rows. Separators come from
+// the rows themselves, so a group reads as one native form card.
+func (a *App) settingsSection(c *ui.Context, t *design.Tokens, title string, build func()) {
+	th := t.Theme()
+	ui.Column(c).Gap(th.Space(2)).Children(func() {
+		settingsText(c, title, design.TypeXXS, t.LabelTertiary).FontWeight(600)
+		ui.Column(c).Background(t.BgStrong).Border(1, t.BorderL2).
+			Radius(th.Radius).Children(build)
+	})
+}
+
+// settingsRowsLive builds Settings > General as brand groups: General,
+// Appearance, Work details, Behavior and Advanced. Every row keeps its
+// original label, description, accessible name and persisted setting.
 func (a *App) settingsRowsLive(c *ui.Context, t *design.Tokens) {
 	cfg := a.currentSettings()
 
-	a.settingsRow(c, t, a.T("settings.permission"),
-		a.T("settings.choose_the_default_permission_mode_for_new_sessions"),
-		settingsRowStyle{},
-		func() {
-			// A unique accessible name: the session composer behind the modal
-			// also shows "Workspace Write", so the bare value is ambiguous to
-			// accessibility and to the Tester.
-			permission := a.permissionLabel(cfg.Permission)
-			a.settingsSelectorLiveNamed(c, t,
-				a.menuText("Permission, current: ", "权限，当前：")+permission,
-				permission, 172, &a.permissionOpen, []settingsOption{
-					{a.T("settings.full_access"), cfg.Permission == session.PermissionFull,
-						func() { a.updateSettings(c, func(s *session.Settings) { s.Permission = session.PermissionFull }) }, ""},
-					{a.T("settings.workspace_write"), cfg.Permission == session.PermissionWorkspace,
-						func() { a.updateSettings(c, func(s *session.Settings) { s.Permission = session.PermissionWorkspace }) }, ""},
-					{a.T("settings.read_only"), cfg.Permission == session.PermissionAsk,
-						func() { a.updateSettings(c, func(s *session.Settings) { s.Permission = session.PermissionAsk }) }, ""},
-					{a.autoReviewLabel(), cfg.Permission == session.PermissionAutoReview,
-						func() { a.updateSettings(c, func(s *session.Settings) { s.Permission = session.PermissionAutoReview }) },
-						a.autoReviewDescription()},
-				})
-		})
+	a.settingsSection(c, t, a.T("settings.general"), func() {
+		a.settingsRow(c, t, a.T("settings.permission"),
+			a.T("settings.choose_the_default_permission_mode_for_new_sessions"),
+			settingsRowStyle{},
+			func() {
+				// A unique accessible name: the session composer behind the
+				// modal also shows the permission value, so the bare value is
+				// ambiguous to accessibility and to the Tester.
+				permission := a.permissionLabel(cfg.Permission)
+				a.settingsSelectorLiveNamed(c, t,
+					a.menuText("Permission, current: ", "权限，当前：")+permission,
+					permission, &a.permissionOpen, []settingsOption{
+						{a.T("settings.full_access"), cfg.Permission == session.PermissionFull,
+							func() {
+								a.updateSettings(c, func(s *session.Settings) { s.Permission = session.PermissionFull })
+							}, ""},
+						{a.T("settings.workspace_write"), cfg.Permission == session.PermissionWorkspace,
+							func() {
+								a.updateSettings(c, func(s *session.Settings) { s.Permission = session.PermissionWorkspace })
+							}, ""},
+						{a.T("settings.read_only"), cfg.Permission == session.PermissionAsk,
+							func() {
+								a.updateSettings(c, func(s *session.Settings) { s.Permission = session.PermissionAsk })
+							}, ""},
+						{a.autoReviewLabel(), cfg.Permission == session.PermissionAutoReview,
+							func() {
+								a.updateSettings(c, func(s *session.Settings) { s.Permission = session.PermissionAutoReview })
+							},
+							a.autoReviewDescription()},
+					})
+			})
 
-	a.settingsRow(c, t, a.T("settings.language"), "", settingsRowStyle{},
-		func() {
-			language := a.languageLabel(cfg.Language)
-			if a.Ctrl == nil {
-				// The static demo shell resolves to English; the selector must
-				// agree with the English labels around it instead of showing
-				// the live product default (Chinese).
-				language = a.T("settings.language_english")
-			}
-			a.settingsSelectorLive(c, t, language, 105, &a.languageOpen, []settingsOption{
-				{a.T("settings.language_english"), cfg.Language == session.LanguageEnglish,
-					func() { a.updateSettings(c, func(s *session.Settings) { s.Language = session.LanguageEnglish }) }, ""},
-				{a.T("settings.language_chinese"), cfg.Language == session.LanguageChinese,
-					func() { a.updateSettings(c, func(s *session.Settings) { s.Language = session.LanguageChinese }) }, ""},
+		a.settingsRow(c, t, a.T("settings.language"), "", settingsRowStyle{}, func() {
+			a.settingsSelectLive(c, t, cfg.Language, []settingsChoice{
+				{a.T("settings.language_english"), session.LanguageEnglish},
+				{a.T("settings.language_chinese"), session.LanguageChinese},
+			}, func(value string) {
+				a.updateSettings(c, func(s *session.Settings) { s.Language = value })
 			})
 		})
+
+		a.settingsRow(c, t, a.T("settings.keyboard_shortcuts"),
+			a.T("settings.view_and_edit_available_shortcuts_and_input_actions"),
+			settingsRowStyle{last: true},
+			func() {
+				a.settingsActionButtonLive(c, t, a.T("settings.edit_shortcuts"), func() {
+					a.shortcutsQuery = ""
+					a.shortcutEditID = ""
+					a.openShortcutsDialog()
+				})
+			})
+	})
 
 	a.settingsAppearanceLive(c, t, cfg)
 
-	a.settingsRow(c, t, a.T("settings.font_size"),
-		a.T("settings.only_affects_conversation_content"),
-		settingsRowStyle{},
-		func() { a.settingsFontSizeLive(c, t, cfg) })
-
-	a.settingsRow(c, t, a.T("settings.work_details"),
-		a.T("settings.choose_how_much_detail_to_show_for_tool_calls"),
-		settingsRowStyle{},
-		func() {
-			a.settingsSelectorLive(c, t, a.workDetailsLabel(cfg.WorkDetails), 113, &a.workOpen, []settingsOption{
-				{a.T("settings.standard"), cfg.WorkDetails == session.WorkDetailsStandard,
-					func() { a.updateSettings(c, func(s *session.Settings) { s.WorkDetails = session.WorkDetailsStandard }) }, ""},
-				{a.T("settings.detailed"), cfg.WorkDetails == session.WorkDetailsDetailed,
-					func() { a.updateSettings(c, func(s *session.Settings) { s.WorkDetails = session.WorkDetailsDetailed }) }, ""},
-			})
-		})
-
-	a.settingsRow(c, t, a.T("settings.when_to_collapse_work_details"),
-		a.T("settings.choose_when_to_automatically_collapse_work_details"),
-		settingsRowStyle{},
-		func() {
-			a.settingsSelectorLive(c, t, collapseLabel(cfg, a), 156, &a.collapseOpen, []settingsOption{
-				{a.T("settings.on_completion"), cfg.CollapseWorkDetail == session.CollapseOnCompletion, func() {
-					a.updateSettings(c, func(s *session.Settings) { s.CollapseWorkDetail = session.CollapseOnCompletion })
-				}, ""},
-				{a.T("settings.immediately"), cfg.CollapseWorkDetail == session.CollapseImmediately, func() {
-					a.updateSettings(c, func(s *session.Settings) { s.CollapseWorkDetail = session.CollapseImmediately })
-				}, ""},
-			})
-		})
-
-	a.settingsRow(c, t, a.T("settings.show_coding_view"),
-		a.T("settings.shows_trajectory_code_diffs_and_all_agent_presets"),
-		settingsRowStyle{titleLine: 20, descColor: t.LabelSecondary, gap: design.Space6},
-		func() {
-			a.settingsSwitchLive(c, t, cfg.ShowCodingView,
-				a.tr("Toggle show coding view", "切换显示编码视图"), func() {
-					a.updateSettings(c, func(s *session.Settings) { s.ShowCodingView = !s.ShowCodingView })
+	a.settingsSection(c, t, a.T("settings.behavior"), func() {
+		a.settingsRow(c, t, a.T("settings.work_details"),
+			a.T("settings.choose_how_much_detail_to_show_for_tool_calls"),
+			settingsRowStyle{},
+			func() {
+				a.settingsSelectLive(c, t, cfg.WorkDetails, []settingsChoice{
+					{a.T("settings.standard"), session.WorkDetailsStandard},
+					{a.T("settings.detailed"), session.WorkDetailsDetailed},
+				}, func(value string) {
+					a.updateSettings(c, func(s *session.Settings) { s.WorkDetails = value })
 				})
-		})
-
-	a.settingsRow(c, t, a.T("settings.keyboard_shortcuts"),
-		a.T("settings.view_and_edit_available_shortcuts_and_input_actions"),
-		settingsRowStyle{},
-		func() {
-			w := float32(125)
-			if a.lang() == LangZH {
-				w = 150
-			}
-			a.settingsActionButtonLive(c, t, a.T("settings.edit_shortcuts"), w, func() {
-				a.shortcutsQuery = ""
-				a.shortcutEditID = ""
-				a.openShortcutsDialog()
 			})
-		})
 
-	a.settingsRow(c, t, a.T("settings.send_behavior_while_busy"),
-		a.T("settings.what_enter_and_the_send_button_do_while_the_agent_is_running_cmd"),
-		settingsRowStyle{},
-		func() {
-			a.settingsSelectorLive(c, t, sendLabel(cfg, a), 100, &a.sendOpen, []settingsOption{
-				{a.T("settings.queue"), cfg.SendBehavior == session.SendQueue, func() {
-					a.updateSettings(c, func(s *session.Settings) { s.SendBehavior = session.SendQueue })
-				}, ""},
-				{a.T("settings.interrupt"), cfg.SendBehavior == session.SendInterrupt, func() {
-					a.updateSettings(c, func(s *session.Settings) { s.SendBehavior = session.SendInterrupt })
-				}, ""},
+		a.settingsRow(c, t, a.T("settings.when_to_collapse_work_details"),
+			a.T("settings.choose_when_to_automatically_collapse_work_details"),
+			settingsRowStyle{},
+			func() {
+				a.settingsSelectLive(c, t, cfg.CollapseWorkDetail, []settingsChoice{
+					{a.T("settings.on_completion"), session.CollapseOnCompletion},
+					{a.T("settings.immediately"), session.CollapseImmediately},
+				}, func(value string) {
+					a.updateSettings(c, func(s *session.Settings) { s.CollapseWorkDetail = value })
+				})
 			})
-		})
 
-	a.settingsRow(c, t, a.T("settings.performance_usage"),
-		a.T("settings.performance_usage_desc"),
-		settingsRowStyle{},
-		func() {
-			a.settingsSelectorLive(c, t, performanceLabel(cfg, a), 113, &a.performanceOpen, []settingsOption{
-				{a.T("settings.detailed"), cfg.PerformanceUsage == session.PerformanceDetailed, func() {
-					a.updateSettings(c, func(s *session.Settings) { s.PerformanceUsage = session.PerformanceDetailed })
-				}, ""},
-				{a.T("settings.standard"), cfg.PerformanceUsage == session.PerformanceStandard, func() {
-					a.updateSettings(c, func(s *session.Settings) { s.PerformanceUsage = session.PerformanceStandard })
-				}, ""},
-			})
-		})
-
-	desc := a.tr("Not available in this build: no session-log upload endpoint is configured.",
-		"此版本不可用：尚未配置会话日志上传端点。")
-	if a.Ctrl == nil {
-		// The static baseline renderer keeps DSH's original row byte for
-		// byte; it has no services, so there is nothing to upload either way.
-		desc = a.T("settings.upload_session_log_desc")
-	}
-	a.settingsRow(c, t, a.T("settings.upload_session_log"), desc,
-		settingsRowStyle{},
-		func() {
-			if a.Ctrl == nil {
-				a.settingsSwitchLive(c, t, cfg.UploadSessionLog,
-					a.tr("Upload session log", "上传会话日志"), func() {
-						a.updateSettings(c, func(s *session.Settings) { s.UploadSessionLog = !s.UploadSessionLog })
+		a.settingsRow(c, t, a.T("settings.show_coding_view"),
+			a.T("settings.shows_trajectory_code_diffs_and_all_agent_presets"),
+			settingsRowStyle{descColor: t.LabelSecondary},
+			func() {
+				a.settingsSwitchLive(c, t, cfg.ShowCodingView,
+					a.tr("Toggle show coding view", "切换显示编码视图"), func() {
+						a.updateSettings(c, func(s *session.Settings) { s.ShowCodingView = !s.ShowCodingView })
 					})
-				return
-			}
-			// There is no official-API upload path in this build, so the live
-			// switch is disabled: turning it on must not persist a no-op.
-			unavailable := ui.Row(c).Width(36).Height(20).Radius(design.RadiusMax).
-				Padding(2).AlignItems(ui.Center).Justify(ui.Start).
-				Background(t.BgHover).Label(a.tr("Upload session log",
-				"上传会话日志")).Role(ui.RoleSwitch).Disabled(true)
-			unavailable.Children(func() {
-				thumb := t.White
-				if t.Dark {
-					thumb = t.BgBase
-				}
-				ui.Box(c).Width(16).Height(16).Radius(design.RadiusMax).Background(thumb)
 			})
-		})
+
+		a.settingsRow(c, t, a.T("settings.send_behavior_while_busy"),
+			a.T("settings.what_enter_and_the_send_button_do_while_the_agent_is_running_cmd"),
+			settingsRowStyle{},
+			func() {
+				a.settingsSelectLive(c, t, cfg.SendBehavior, []settingsChoice{
+					{a.T("settings.queue"), session.SendQueue},
+					{a.T("settings.interrupt"), session.SendInterrupt},
+				}, func(value string) {
+					a.updateSettings(c, func(s *session.Settings) { s.SendBehavior = value })
+				})
+			})
+
+		a.settingsRow(c, t, a.T("settings.performance_usage"),
+			a.T("settings.performance_usage_desc"),
+			settingsRowStyle{last: true},
+			func() {
+				a.settingsSelectLive(c, t, cfg.PerformanceUsage, []settingsChoice{
+					{a.T("settings.detailed"), session.PerformanceDetailed},
+					{a.T("settings.standard"), session.PerformanceStandard},
+				}, func(value string) {
+					a.updateSettings(c, func(s *session.Settings) { s.PerformanceUsage = value })
+				})
+			})
+	})
+
+	a.settingsSection(c, t, a.T("settings.advanced"), func() {
+		desc := a.tr("Not available in this build: no session-log upload endpoint is configured.",
+			"此版本不可用：尚未配置会话日志上传端点。")
+		a.settingsRow(c, t, a.T("settings.upload_session_log"), desc,
+			settingsRowStyle{last: true},
+			func() {
+				// There is no official-API upload path in this build, so the
+				// switch is disabled: turning it on must not persist a no-op.
+				a.settingsDisabledSwitchLive(c, t, cfg.UploadSessionLog,
+					a.tr("Upload session log", "上传会话日志"))
+			})
+	})
 }
 
-// settingsAppearanceLive is the appearance group with clickable theme cards.
+// settingsAppearanceLive is the appearance group: three theme cards and the
+// conversation font size control, all on the brand surface.
 func (a *App) settingsAppearanceLive(c *ui.Context, t *design.Tokens, cfg session.Settings) {
-	ui.Column(c).Padding(design.Space4, 0, design.Space4, 0).Gap(design.Space2).
-		BorderWidth(0, 0, 1, 0).BorderColor(t.BorderL2).Children(func() {
-		settingsText(c, a.T("settings.appearance"), design.TypeBody, t.LabelPrimary)
-		ui.Row(c).Height(settingsCardH).Gap(design.Space2).Children(func() {
+	th := t.Theme()
+	a.settingsSection(c, t, a.T("settings.appearance"), func() {
+		ui.Row(c).Padding(th.Space(3), th.Space(4)).Gap(th.Space(3)).
+			BorderWidth(0, 0, 1, 0).BorderColor(t.BorderL2).Children(func() {
 			a.settingsThemeCardLive(c, t, a.T("settings.light"), session.ThemeLight, cfg.Theme == session.ThemeLight, settingsIconSun)
 			a.settingsThemeCardLive(c, t, a.T("settings.dark"), session.ThemeDark, cfg.Theme == session.ThemeDark, settingsIconMoon)
 			a.settingsThemeCardLive(c, t, a.T("settings.system"), session.ThemeSystem, cfg.Theme == session.ThemeSystem, settingsIconMonitor)
 		})
+		a.settingsRow(c, t, a.T("settings.font_size"),
+			a.T("settings.only_affects_conversation_content"),
+			settingsRowStyle{last: true},
+			func() { a.settingsFontSizeLive(c, t, cfg) })
 	})
 }
 
-// settingsThemeCardLive is one 183x84 appearance card.
+// settingsThemeCardLive is one brand appearance card: the native radio
+// semantics stay (RoleRadio + Checked + Focusable), while the look is the
+// brand surface, radius and accent.
 func (a *App) settingsThemeCardLive(c *ui.Context, t *design.Tokens, label, value string, selected bool, icon *ui.SVG) {
-	card := ui.Column(c).Grow(1).Height(settingsCardH).
-		Radius(design.RadiusXL).Border(1, settingsCardOutline(t)).
-		Gap(design.Space1).AlignItems(ui.Center).Justify(ui.Center).
+	th := t.Theme()
+	card := ui.Column(c).Grow(1).Height(th.Space(14)).
+		Radius(th.Radius).Border(1, settingsCardOutline(t)).
+		Gap(th.Space(1)).AlignItems(ui.Center).Justify(ui.Center).
 		Label(label).Value(label).Role(ui.RoleRadio).Checked(selected).Focusable()
 	if selected {
-		card = card.Background(settingsFillColor(t)).BorderColor(settingsCardSelectedEdge)
+		card = card.Background(t.Accent.Alpha(0.08)).Border(2, t.Accent)
+	} else {
+		card = card.Background(t.BgRaised)
+		if card.Hovered() {
+			card = card.Background(settingsFillColor(t))
+		}
 	}
 	card.Children(func() {
-		ui.Image(c, icon).Size(16, 16).TextColor(t.LabelPrimary)
+		iconColor := t.LabelSecondary
+		if selected {
+			iconColor = t.Accent
+		}
+		ui.Image(c, icon).Size(th.Space(4), th.Space(4)).TextColor(iconColor)
 		settingsText(c, label, design.TypeBody, t.LabelPrimary)
 	})
 	card.OnClick(func() {
@@ -519,25 +533,65 @@ func (a *App) settingsThemeCardLive(c *ui.Context, t *design.Tokens, label, valu
 	})
 }
 
-// settingsSelectorLive draws the baseline select pill and opens a popover
-// with the options when clicked.
+// settingsChoice is one option of a native settings select: the localized
+// label shown in the popup and the persisted value it writes back.
+type settingsChoice struct {
+	label string
+	value string
+}
+
+// settingsSelectLive draws a mygo native Select for the persisted value: the
+// drop-down, keyboard (arrows/Enter/Escape), focus and a11y come from the
+// control itself. The choice is written back through save on the frame it
+// changes, so the row reads like a native preferences control.
+func (a *App) settingsSelectLive(c *ui.Context, t *design.Tokens, value string, choices []settingsChoice, save func(string)) {
+	th := t.Theme()
+	labels := make([]string, len(choices))
+	current := ""
+	for i, choice := range choices {
+		labels[i] = choice.label
+		if choice.value == value {
+			current = choice.label
+		}
+	}
+	if current == "" && len(labels) > 0 {
+		current = labels[0]
+	}
+	sel := ui.Select(c, &current, labels)
+	sel.Height(th.Space(9)).MinWidth(th.Space(36)).Radius(design.RadiusSM)
+	if sel.Changed() {
+		for _, choice := range choices {
+			if choice.label == current {
+				save(choice.value)
+				return
+			}
+		}
+	}
+}
+
+// settingsSelectorLive draws the branded select trigger for the selectors the
+// native Select cannot express: the permission menu lists descriptions under
+// its options. The popover stays; the chrome is the brand surface.
 func (a *App) settingsSelectorLive(c *ui.Context, t *design.Tokens, label string, w float32, open *bool, options []settingsOption) {
-	a.settingsSelectorLiveNamed(c, t, label, label, w, open, options)
+	a.settingsSelectorLiveNamed(c, t, label, label, open, options)
 }
 
 // settingsSelectorLiveNamed separates the visible value from the accessible
 // name, so a selector can say "Permission, current: Workspace Write" without
 // changing its on-screen text.
-func (a *App) settingsSelectorLiveNamed(c *ui.Context, t *design.Tokens, accessible, label string, w float32, open *bool, options []settingsOption) {
-	el := ui.Row(c).Width(w).Height(settingsControlH).PaddingX(14).
-		Gap(design.Space3).Radius(design.RadiusMD).Background(settingsFillColor(t)).
-		Justify(ui.SpaceBetween).AlignItems(ui.Center).
+func (a *App) settingsSelectorLiveNamed(c *ui.Context, t *design.Tokens, accessible, label string, open *bool, options []settingsOption) {
+	th := t.Theme()
+	el := ui.ButtonBase(c).Height(th.Space(9)).PaddingX(th.Space(3)).
+		Gap(th.Space(2)).MinWidth(th.Space(36)).Justify(ui.SpaceBetween).
+		Radius(design.RadiusSM).
+		Background(settingsControlColor(t)).
 		Label(accessible).Value(label).Role(ui.RolePopUpButton).Focusable()
+	if el.Hovered() {
+		el = el.Background(settingsFillColor(t))
+	}
 	el.Children(func() {
-		// NoWrap rather than MaxLines(1): the baseline shows the full
-		// "Workspace Write" / "On completion" text, not an ellipsis.
 		settingsText(c, label, design.TypeBody, t.LabelPrimary).NoWrap()
-		ui.Image(c, settingsIconChevron).Size(14, 14).TextColor(t.LabelSecondary)
+		ui.Image(c, settingsIconChevron).Size(th.Space(3), th.Space(3)).TextColor(t.LabelSecondary)
 	})
 	el.Expanded(*open)
 	el.OnClick(func() { a.toggleSelector(open) })
@@ -557,13 +611,15 @@ type settingsOption struct {
 // settingsOptionPanel is the popover body; choosing an option closes it and
 // applies the value, which rebuilds the frame.
 func (a *App) settingsOptionPanel(c *ui.Context, t *design.Tokens, open *bool, options []settingsOption) {
-	ui.Column(c).Gap(2).Children(func() {
+	th := t.Theme()
+	ui.Column(c).Gap(1).Children(func() {
 		for _, option := range options {
-			height := float32(30)
+			height := th.Space(8)
 			if option.desc != "" {
-				height = 46
+				height = th.Space(12)
 			}
-			row := ui.Row(c).Height(height).PaddingX(design.Space2).Gap(design.Space2).
+			row := ui.ButtonBase(c).FillWidth().Height(height).
+				PaddingX(th.Space(2)).Gap(th.Space(2)).
 				Radius(design.RadiusSM).AlignItems(ui.Center).
 				Label(option.label).Role(ui.RoleMenuItemRadio).
 				Checked(option.selected).Focusable()
@@ -591,66 +647,74 @@ func (a *App) settingsOptionPanel(c *ui.Context, t *design.Tokens, open *bool, o
 	})
 }
 
-// settingsFontSizeLive is DSH's compact stepper: a 72px value pill with the
-// 17x12 up/down arrows inside its right edge, the "px" unit and the detailed
-// settings expander after it. The whole control is 129px wide, matching the
-// baseline box [1047,467,129,36]; the old version put 20x12 arrow buttons
-// outside the pill and widened the control by ~29px.
+// settingsFontSizeLive is the conversation font size control: a brand value
+// pill that opens the 14/16 choice, the native-styled step arrows and the
+// "More font settings" popover, all on the theme's 4 DIP grid.
 func (a *App) settingsFontSizeLive(c *ui.Context, t *design.Tokens, cfg session.Settings) {
-	el := ui.Row(c).Width(129).Gap(design.Space2).AlignItems(ui.Center)
-	el.Children(func() {
-		pill := ui.Row(c).Width(72).Height(settingsControlH).
-			PaddingEnd(design.Space2).
-			Radius(design.RadiusMD).Background(settingsFillColor(t))
+	th := t.Theme()
+	ui.Row(c).Gap(th.Space(2)).AlignItems(ui.Center).Children(func() {
+		pill := ui.ButtonBase(c).Height(th.Space(9)).PaddingX(th.Space(3)).
+			Gap(th.Space(1)).Radius(design.RadiusSM).
+			Background(settingsControlColor(t)).
+			Label(fontSizeLabel(cfg.FontSize) + " px").
+			Role(ui.RoleButton).Focusable()
+		if pill.Hovered() {
+			pill = pill.Background(settingsFillColor(t))
+		}
 		pill.Children(func() {
-			value := ui.Row(c).Grow(1).Height(settingsControlH).Center().
-				Label(fontSizeLabel(cfg.FontSize) + " px").
-				Role(ui.RoleButton).Focusable()
-			value.Children(func() {
-				settingsText(c, fontSizeLabel(cfg.FontSize), design.TypeBody, t.LabelPrimary)
-			})
-			value.Expanded(a.fontSizeOpen)
-			value.OnClick(func() { a.toggleSelector(&a.fontSizeOpen) })
-			ui.Popover(c, value, &a.fontSizeOpen, func() {
-				a.settingsOptionPanel(c, t, &a.fontSizeOpen, []settingsOption{
-					{"14 px", cfg.FontSize == session.FontSizeSmall, func() {
-						a.updateSettings(c, func(s *session.Settings) { s.FontSize = session.FontSizeSmall })
-					}, ""},
-					{"16 px", cfg.FontSize == session.FontSizeLarge, func() {
-						a.updateSettings(c, func(s *session.Settings) { s.FontSize = session.FontSizeLarge })
-					}, ""},
-				})
-			})
-			// DSH draws both 17x12 step arrows inside the value pill at
-			// x=1094; they are subdued until hover/focus.
-			ui.Column(c).Width(17).Gap(1).Children(func() {
-				inc := ui.Row(c).Size(17, 12).Center().
-					Label(a.pluginLocalized("Increase font size", "增大字号")).
-					Role(ui.RoleButton).Focusable()
-				if inc.Hovered() || inc.Focused() {
-					inc = inc.Background(t.BgHover).Radius(design.RadiusXS)
-				}
-				inc.Children(func() {
-					settingsText(c, "+", design.TypeXXS, t.LabelTertiary)
-				})
-				inc.OnClick(func() { a.stepFontSize(c, 2) })
-				dec := ui.Row(c).Size(17, 12).Center().
-					Label(a.pluginLocalized("Decrease font size", "减小字号")).
-					Role(ui.RoleButton).Focusable()
-				if dec.Hovered() || dec.Focused() {
-					dec = dec.Background(t.BgHover).Radius(design.RadiusXS)
-				}
-				dec.Children(func() {
-					settingsText(c, "−", design.TypeXXS, t.LabelTertiary)
-				})
-				dec.OnClick(func() { a.stepFontSize(c, -2) })
+			settingsText(c, fontSizeLabel(cfg.FontSize), design.TypeBody, t.LabelPrimary)
+			settingsText(c, "px", design.TypeXXS, t.LabelTertiary)
+			ui.Image(c, settingsIconChevron).Size(th.Space(3), th.Space(3)).TextColor(t.LabelSecondary)
+		})
+		pill.Expanded(a.fontSizeOpen)
+		pill.OnClick(func() { a.toggleSelector(&a.fontSizeOpen) })
+		ui.Popover(c, pill, &a.fontSizeOpen, func() {
+			a.settingsOptionPanel(c, t, &a.fontSizeOpen, []settingsOption{
+				{"14 px", cfg.FontSize == session.FontSizeSmall, func() {
+					a.updateSettings(c, func(s *session.Settings) { s.FontSize = session.FontSizeSmall })
+				}, ""},
+				{"16 px", cfg.FontSize == session.FontSizeLarge, func() {
+					a.updateSettings(c, func(s *session.Settings) { s.FontSize = session.FontSizeLarge })
+				}, ""},
 			})
 		})
-		settingsText(c, "px", design.TypeBody, t.LabelSecondary)
-		more := ui.Row(c).Size(24, 24).Center().
-			Label(a.pluginLocalized("More font settings", "更多字体设置")).Role(ui.RoleButton).Focusable()
+		// The step buttons are native button bases: click, keyboard
+		// activation and focus ring come from the control. They sit in one
+		// bordered column, as a desktop stepper does.
+		ui.Column(c).Gap(1).Padding(1).Radius(design.RadiusSM).
+			Border(1, t.BorderL2).Children(func() {
+			inc := ui.ButtonBase(c).Width(th.Space(5)).Height(th.Space(4)).
+				Radius(design.RadiusXS).
+				Label(a.pluginLocalized("Increase font size", "增大字号")).
+				Role(ui.RoleButton).Focusable()
+			if inc.Hovered() || inc.Focused() {
+				inc = inc.Background(t.BgHover)
+			}
+			inc.Children(func() {
+				settingsText(c, "+", design.TypeXXS, t.LabelTertiary)
+			})
+			inc.OnClick(func() { a.stepFontSize(c, 2) })
+			dec := ui.ButtonBase(c).Width(th.Space(5)).Height(th.Space(4)).
+				Radius(design.RadiusXS).
+				Label(a.pluginLocalized("Decrease font size", "减小字号")).
+				Role(ui.RoleButton).Focusable()
+			if dec.Hovered() || dec.Focused() {
+				dec = dec.Background(t.BgHover)
+			}
+			dec.Children(func() {
+				settingsText(c, "−", design.TypeXXS, t.LabelTertiary)
+			})
+			dec.OnClick(func() { a.stepFontSize(c, -2) })
+		})
+		more := ui.ButtonBase(c).Size(th.Space(7), th.Space(7)).
+			Radius(design.RadiusSM).
+			Label(a.pluginLocalized("More font settings", "更多字体设置")).
+			Role(ui.RoleButton).Focusable()
+		if more.Hovered() {
+			more = more.Background(t.BgHover)
+		}
 		more.Children(func() {
-			ui.Image(c, settingsIconChevron).Size(12, 12).TextColor(t.LabelTertiary)
+			ui.Image(c, settingsIconSliders).Size(th.Space(3), th.Space(3)).TextColor(t.LabelTertiary)
 		})
 		more.Expanded(a.pluginUI().fontMoreOpen)
 		more.OnClick(func() {
@@ -659,7 +723,7 @@ func (a *App) settingsFontSizeLive(c *ui.Context, t *design.Tokens, cfg session.
 			a.pluginUI().fontMoreOpen = !opened
 		})
 		ui.Popover(c, more, &a.pluginUI().fontMoreOpen, func() {
-			ui.Column(c).Gap(design.Space2).Children(func() {
+			ui.Column(c).Gap(th.Space(2)).Padding(th.Space(1)).Children(func() {
 				settingsText(c, a.pluginLocalized("More font settings", "更多字体设置"),
 					design.TypeBody, t.LabelPrimary).FontWeight(500)
 				settingsText(c, a.pluginLocalized(
@@ -696,30 +760,34 @@ func (a *App) stepFontSize(c *ui.Context, delta int) {
 	a.updateSettings(c, func(s *session.Settings) { s.FontSize = next })
 }
 
-// settingsSwitchLive is the baseline switch with a click target and an
-// accessible name (the row text alone is not the control).
+// settingsSwitchLive is the native mygo switch with the row's accessible name.
+// The control owns the toggle semantics, focus ring and keyboard activation;
+// the persisted setting is written when it changes.
 func (a *App) settingsSwitchLive(c *ui.Context, t *design.Tokens, on bool, label string, toggle func()) {
-	sw := ui.Row(c).Width(36).Height(20).Radius(design.RadiusMax).
-		Padding(2).AlignItems(ui.Center).Justify(ui.End).
-		Label(label).Role(ui.RoleSwitch).Checked(on).Focusable()
-	track, thumb := switchTrack(t, on)
-	align := ui.Start
-	if on {
-		align = ui.End
+	value := on
+	sw := ui.Switch(c, &value).Label(label)
+	if sw.Changed() {
+		toggle()
 	}
-	sw = sw.Background(track).Justify(align)
-	sw.Children(func() {
-		ui.Box(c).Width(16).Height(16).Radius(design.RadiusMax).Background(thumb)
-	})
-	sw.OnClick(toggle)
 }
 
-// settingsActionButtonLive is a filled 36px button that runs fn.
-func (a *App) settingsActionButtonLive(c *ui.Context, t *design.Tokens, label string, w float32, fn func()) {
-	el := ui.Row(c).Width(w).Height(settingsControlH).
-		Radius(design.RadiusMD).Background(settingsFillColor(t)).
-		Justify(ui.Center).AlignItems(ui.Center).
+// settingsDisabledSwitchLive is a native switch that cannot be turned on: the
+// upload path it controls does not exist in this build.
+func (a *App) settingsDisabledSwitchLive(c *ui.Context, t *design.Tokens, on bool, label string) {
+	value := on
+	ui.Switch(c, &value).Label(label).Disabled(true)
+}
+
+// settingsActionButtonLive is a native-style secondary button that runs fn.
+func (a *App) settingsActionButtonLive(c *ui.Context, t *design.Tokens, label string, fn func()) {
+	th := t.Theme()
+	el := ui.ButtonBase(c).Height(th.Space(9)).PaddingX(th.Space(4)).
+		Radius(design.RadiusSM).Border(1, t.BorderL3).
+		Background(settingsControlColor(t)).
 		Label(label).Role(ui.RoleButton).Focusable()
+	if el.Hovered() {
+		el = el.Background(settingsFillColor(t))
+	}
 	el.Children(func() {
 		settingsText(c, label, design.TypeBody, t.LabelPrimary).NoWrap()
 	})
@@ -728,29 +796,36 @@ func (a *App) settingsActionButtonLive(c *ui.Context, t *design.Tokens, label st
 
 // settingsCloseLive is the header's X button.
 func (a *App) settingsCloseLive(c *ui.Context, t *design.Tokens) {
-	el := ui.Row(c).Width(28).Height(28).Radius(design.RadiusSM).
-		Justify(ui.Center).AlignItems(ui.Center).
+	th := t.Theme()
+	el := ui.ButtonBase(c).Size(th.Space(8), th.Space(8)).
+		Radius(design.RadiusSM).
 		Label(a.tr("Close settings", "关闭设置")).Role(ui.RoleButton).Focusable()
+	if el.Hovered() {
+		el = el.Background(t.BgHover)
+	}
 	el.Children(func() {
-		ui.Image(c, settingsIconClose).Size(14, 14).TextColor(t.LabelPrimary)
+		ui.Image(c, settingsIconClose).Size(th.Space(3.5), th.Space(3.5)).TextColor(t.LabelPrimary)
 	})
 	el.OnClick(func() { a.closeSettings() })
 }
 
-// settingsOutlineButtonLive is the bordered header action with a click
-// handler, used for "Open configuration file" and the explicit Close.
+// settingsOutlineButtonLive is the header's bordered secondary action.
 func (a *App) settingsOutlineButtonLive(c *ui.Context, t *design.Tokens, label string, fn func()) {
-	el := ui.Row(c).Height(28).PaddingX(10).Radius(design.RadiusSM).
-		Border(1, t.BorderL3).AlignItems(ui.Center).
+	th := t.Theme()
+	el := ui.ButtonBase(c).Height(th.Space(8)).PaddingX(th.Space(3)).
+		Radius(design.RadiusSM).Border(1, t.BorderL2).
 		Label(label).Tooltip(label).Role(ui.RoleButton).Focusable()
+	if el.Hovered() {
+		el = el.Background(t.BgHover)
+	}
 	el.Children(func() {
-		settingsText(c, label, design.TypeXXS, t.LabelPrimary)
+		settingsText(c, label, design.TypeXS, t.LabelPrimary).NoWrap()
 	})
 	el.OnClick(fn)
 }
 
 // toggleSelector closes every settings popover, then toggles target. Keeping
-// at most one open matches the baseline's modal behaviour.
+// at most one open matches the modal behaviour.
 func (a *App) toggleSelector(target *bool) {
 	explicit := *target
 	a.closeSelectors()
@@ -781,44 +856,9 @@ func (a *App) permissionLabel(v string) string {
 	}
 }
 
-func (a *App) languageLabel(v string) string {
-	if v == session.LanguageChinese {
-		return a.T("settings.language_chinese")
-	}
-	return a.T("settings.language_english")
-}
-
-func (a *App) workDetailsLabel(v string) string {
-	if v == session.WorkDetailsStandard {
-		return a.T("settings.standard")
-	}
-	return a.T("settings.detailed")
-}
-
 func fontSizeLabel(size int) string {
 	if size >= session.FontSizeLarge {
 		return "16"
 	}
 	return "14"
-}
-
-func collapseLabel(cfg session.Settings, a *App) string {
-	if cfg.CollapseWorkDetail == session.CollapseImmediately {
-		return a.T("settings.immediately")
-	}
-	return a.T("settings.on_completion")
-}
-
-func performanceLabel(cfg session.Settings, a *App) string {
-	if cfg.PerformanceUsage == session.PerformanceStandard {
-		return a.T("settings.standard")
-	}
-	return a.T("settings.detailed")
-}
-
-func sendLabel(cfg session.Settings, a *App) string {
-	if cfg.SendBehavior == session.SendInterrupt {
-		return a.T("settings.interrupt")
-	}
-	return a.T("settings.queue")
 }

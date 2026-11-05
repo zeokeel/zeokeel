@@ -82,13 +82,13 @@ func (a *App) liveTabs(c *ui.Context, t *design.Tokens) {
 		st.tab = int(liveChat)
 	}
 	// TabsBase provides RoleTabList, a horizontal focus group, per-tab
-	// Checked state and the Left/Right/Home/End keys; the custom artwork
-	// below keeps the baseline underline.
-	// The tabs are the static header's 25px row under a 10px gap: the
-	// header's own 76px column carries the bottom border.
+	// Checked state and the Left/Right/Home/End keys; the artwork below is
+	// the brand's quiet tab: label plus a small accent underline.
+	th := t.Theme()
 	tabs := ui.TabsBase(c, &st.tab, n)
-	tabs.List.Height(sessTabsH).Margin(10, 0, 0, 0).Padding(0, 0, 0, 8).
-		Gap(36).AlignItems(ui.Stretch).Children(func() {
+	tabs.List.Height(sessTabsH).Margin(th.Space(2), 0, 0, 0).
+		Padding(0, 0, 0, th.Space(2)).
+		Gap(th.Space(9)).AlignItems(ui.Stretch).Children(func() {
 		a.liveTabButton(c, t, tabs, 0, liveChat, a.T("session.chat"))
 		if n > 1 {
 			a.liveTabButton(c, t, tabs, 1, liveTrajectory, a.T("session.trajectory"))
@@ -99,17 +99,19 @@ func (a *App) liveTabs(c *ui.Context, t *design.Tokens) {
 // liveTabButton draws one header tab through the TabsBase part, which owns
 // selection, checked state and arrow-key navigation.
 func (a *App) liveTabButton(c *ui.Context, t *design.Tokens, tabs ui.TabsParts, index int, target liveTab, label string) {
+	th := t.Theme()
 	active := a.uiState().tab == int(target)
 	row := tabs.Tab(index).Height(sessTabsH).PaddingX(0).Gap(0).
 		Label(label).Transition(design.ColorTransition())
 	row.Children(func() {
 		ui.Column(c).Height(sessTabsH).Justify(ui.SpaceBetween).Children(func() {
 			color := t.LabelSecondary
+			weight := 500
 			if active {
-				color = t.Accent
+				color, weight = t.LabelPrimary, 600
 			}
-			ui.Text(c, label).FontSize(13).FontWeight(500).NoWrap().TextColor(color)
-			bar := ui.Box(c).Height(2)
+			ui.Text(c, label).FontSize(13).FontWeight(weight).NoWrap().TextColor(color)
+			bar := ui.Box(c).Height(th.Space(0.5)).Radius(th.Space(0.25))
 			if active {
 				bar.Background(t.Accent)
 			}

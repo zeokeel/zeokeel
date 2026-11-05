@@ -97,50 +97,48 @@ func (a *App) sessionLive(c *ui.Context, t *design.Tokens, snap *state.Snapshot)
 	})
 }
 
-// liveHeaderPanelIcon is the artwork of the header's right-sidebar control.
-// It is the right-divider panel icon, matching the panel itself and the
-// baseline; PanelLeft put the divider on the wrong side.
+// liveHeaderPanelIcon is the artwork of the header's right-sidebar control,
+// matching the panel it opens.
 var liveHeaderPanelIcon = chromeIconPanelRight
 
-// liveHeader is the static header's 76px block: a 30px title row, the 10px
-// gap and the 25px Chat/Trajectory tabs. Reusing those metrics keeps the live
-// header's bottom border at y=75 like baseline 61-session-chat, instead of the
-// 6px-taller 48+34 header the live path used to paint. The phase label
-// cross-fades its text and its color, as DSH's .1s/.12s state labels do.
+// liveHeader is the brand header: one title row (title, mode chip, plan
+// toggle, phase label and the screen actions) over the Chat/Trajectory tabs.
+// All spacing and heights come from the theme's 4 DIP grid; the phase label
+// keeps its color/content cross-fade while the actions are native buttons.
 func (a *App) liveHeader(c *ui.Context, t *design.Tokens, snap *state.Snapshot) {
+	th := t.Theme()
 	title := a.T("session.new_session")
 	if a.Ctrl != nil {
 		if sess, err := a.Ctrl.CurrentSession(); err == nil && strings.TrimSpace(sess.Title) != "" {
 			title = sess.Title
 		}
 	}
-	ui.Column(c).Height(sessHeaderH).Padding(10, 12, 0, 20).
-		BorderWidth(0, 0, 1, 0).BorderColor(t.BorderL3).Children(func() {
-		ui.Row(c).Height(30).AlignItems(ui.Center).Children(func() {
-			ui.Text(c, title).FontSize(14).FixedLineHeight(20).FontWeight(500).
-				TextColor(t.LabelPrimary).MaxLines(1).Ellipsis("…").PaddingX(8).Margin(-1, 0, 0, 0)
-			ui.Box(c).Width(10)
+	ui.Column(c).Padding(th.Space(2), th.Space(4), 0, th.Space(4)).
+		BorderWidth(0, 0, 1, 0).BorderColor(t.BorderL2).Children(func() {
+		ui.Row(c).Height(th.Space(8)).AlignItems(ui.Center).Children(func() {
+			titleEl := design.Apply(ui.Text(c, title), t.Font(design.TypeBody))
+			titleEl.FontWeight(600).TextColor(t.LabelPrimary).MaxLines(1).Ellipsis("…")
+			ui.Box(c).Width(th.Space(2))
 			mst := a.modeUI()
 			modeText := a.agentModeLabel(a.currentAgentMode())
 			if a.currentAgentMode() == "standard" {
 				modeText = a.T("common.standard_mode")
 			}
-			mode := ui.Row(c).Height(22).Gap(2).AlignItems(ui.Center).
+			mode := homeChip(c, t).
 				Label(modeText).Value(modeText).Role(ui.RolePopUpButton).Focusable()
 			mode.Children(func() {
-				ui.Row(c).Size(16, 16).Center().Children(func() {
-					ui.Icon(c, sessModeIcon).Size(14, 14).TextColor(t.LabelTertiary)
-				})
-				ui.Text(c, modeText).FontSize(12).
-					FixedLineHeight(22).TextColor(t.LabelTertiary).NoWrap()
+				ui.Icon(c, sessModeIcon).Size(th.Space(4), th.Space(4)).TextColor(t.LabelTertiary)
+				ui.Text(c, modeText).FontSize(13).
+					FixedLineHeight(20).TextColor(t.LabelSecondary).NoWrap()
+				ui.Icon(c, homeIconChevron).Size(th.Space(3), th.Space(3)).TextColor(t.LabelTertiary)
 			})
 			mode.Expanded(mst.open)
 			mode.OnClick(func() { mst.open = !mst.open })
 			ui.Popover(c, mode, &mst.open, func() { a.agentModeMenu(c, t, &mst.open) })
 			a.planHeaderToggle(c, t)
-			// DSH shows no status text while idle: the header is title, mode
-			// and actions only. Running/waiting/failed/paused/stopped still
-			// get the cross-fading phase label.
+			// No status text while idle: the header is title, mode and
+			// actions only. Running/waiting/failed/paused/stopped get the
+			// cross-fading phase label.
 			if snap.Phase != state.PhaseIdle {
 				ui.Text(c, a.phaseLabel(snap.Phase)).FontSize(12).Grow(1).
 					TextColor(livePhaseColor(t, snap.Phase)).
@@ -157,15 +155,7 @@ func (a *App) liveHeader(c *ui.Context, t *design.Tokens, snap *state.Snapshot) 
 					// the one canonical "Collapse right sidebar" target.
 					panelLabel = a.tr("Collapse right sidebar header", "收起右侧边栏（标题栏）")
 				}
-				panel := ui.Row(c).Size(28, 28).Radius(design.RadiusSM).Center().
-					Label(panelLabel).Role(ui.RoleButton).Focusable()
-				panel.Children(func() {
-					// The control opens the panel on the right; PanelLeft's
-					// divider is on the wrong side. Use the right-panel artwork
-					// the Home header and the panel's own collapse control draw.
-					ui.Icon(c, liveHeaderPanelIcon).Size(16, 16).TextColor(t.LabelSecondary)
-				})
-				panel.OnClick(func() {
+				brandIconButton(c, t, liveHeaderPanelIcon, panelLabel, func() {
 					if a.rightOpen {
 						a.collapseRightSidebar()
 						return
@@ -210,13 +200,13 @@ func (a *App) liveTranscript(c *ui.Context, t *design.Tokens, snap *state.Snapsh
 	turns := 0
 	ui.Row(c).Grow(1).AlignItems(ui.Stretch).Children(func() {
 		ui.Scroll(c).Grow(1).TrackScroll(&rs.scroll).Children(func() {
-			// DSH centers an 845px message column (baseline 61-session-chat:
-			// x=514 w=845 at 1600x1000), exactly like the static transcript.
-			ui.Row(c).Padding(0, sessGutter, 0, 1).Justify(ui.Center).
+			// The transcript column is the brand column shared with the
+			// composer: one centered measure of comfortable reading width.
+			ui.Row(c).Padding(0, design.Space2).Justify(ui.Center).
 				AlignItems(ui.Start).Children(func() {
 				ui.Column(c).Width(a.sessionTranscriptWidthFor(c)).
 					Label(a.tr("Session transcript", "会话记录")).
-					Padding(design.Space6, 0).Gap(design.Space4).Children(func() {
+					Padding(design.Space6, 0).Gap(design.Space5).Children(func() {
 					for i, m := range snap.Messages {
 						if m.Text == "" {
 							continue
@@ -287,7 +277,7 @@ func (a *App) backToBottomVisible() bool {
 // turnNav is the transcript's turn rail. Each mark asks the next frame to
 // scroll that turn's first message into view, so no control is decorative.
 // The visible rail stays small, but every mark is a named, focusable button
-// with a 24px hit target, as DSH's "Jump to turn N" controls are.
+// with a comfortable hit target.
 func (a *App) turnNav(c *ui.Context, t *design.Tokens, turns int) {
 	ui.Column(c).Width(28).Padding(design.Space6, 0, design.Space2, 0).
 		Gap(design.Space1).AlignItems(ui.Center).Children(func() {
@@ -314,14 +304,21 @@ func (a *App) turnNav(c *ui.Context, t *design.Tokens, turns int) {
 // the streaming assistant message also fades its content as tokens arrive, so
 // new text is not a hard cut, and settles at exactly its rest frame. Assistant
 // text goes through the Markdown renderer; a completed assistant message
-// carries its DSH-style footer below it.
+// carries its action footer below it.
 func (a *App) liveMessage(c *ui.Context, t *design.Tokens, m state.Message, key string, streaming bool, snap *state.Snapshot) ui.Element {
+	th := t.Theme()
 	if m.Role == state.RoleUser {
 		col := ui.Column(c).Key(key).Gap(design.Space1).AlignItems(ui.End).
 			Transition(design.MessageTransition())
 		col.Children(func() {
-			ui.Text(c, m.Text).FontSize(a.ConversationFontSize()).TextColor(t.LabelPrimary).
-				Background(t.BgHover).Radius(design.RadiusMD).Padding(design.Space3)
+			bubble := ui.Column(c).MaxWidthPercent(82)
+			bubble.Children(func() {
+				ui.Text(c, m.Text).FontSize(a.ConversationFontSize()).
+					TextColor(t.LabelPrimary).
+					Background(t.Accent.Alpha(0.10).Over(t.BgRaised)).
+					Radius(th.Radius).
+					Padding(th.Space(2.5), th.Space(3.5))
+			})
 			if len(m.Attachments) > 0 {
 				a.messageAttachmentChips(c, t, snap.SessionID, m.Attachments)
 			}
@@ -331,7 +328,7 @@ func (a *App) liveMessage(c *ui.Context, t *design.Tokens, m state.Message, key 
 	col := ui.Column(c).Key(key).Gap(design.Space1).
 		Transition(design.MessageTransition())
 	col.Children(func() {
-		body := ui.Column(c).Gap(10)
+		body := ui.Column(c).Gap(design.Space2)
 		if streaming {
 			opacity, moving := a.live().streamShown(c.Now(), m.MsgID, m.Text)
 			if c.Preferences().ReduceMotion {
@@ -352,9 +349,9 @@ func (a *App) liveMessage(c *ui.Context, t *design.Tokens, m state.Message, key 
 	return col
 }
 
-// workingIndicator is the "Deep diving for Xm Ys" row shown while a turn
-// runs: a spinner and the elapsed time, with DSH's three dots revealing on
-// its 1.5s step-end cycle. The row fades in over DSH's .15s ease-out.
+// workingIndicator is the working row shown while a turn runs: a spinner and
+// the elapsed time, with the three-dot reveal on the motion scale's pulse
+// cycle. The row fades in over the semantic enter animation.
 func (a *App) workingIndicator(c *ui.Context, t *design.Tokens) {
 	elapsed, running := a.live().runningFor(c.Now(), true)
 	if !running {
@@ -370,8 +367,8 @@ func (a *App) workingIndicator(c *ui.Context, t *design.Tokens) {
 			TextColor(t.LabelSecondary).NoWrap().
 			ContentTransition(ui.ContentTransition{Animation: &design.AnimFast})
 	})
-	// Wake at the next 0.5s dot boundary: DSH reveals a dot at 33.33% and
-	// 66.66% of its 1.5s cycle, step-end.
+	// Wake at the next dot boundary: the indicator reveals a dot at a third
+	// and two thirds of its cycle, step-end.
 	step := design.DurationPulse / 3
 	c.After(step - elapsed%step)
 }
@@ -386,14 +383,12 @@ func (a *App) liveTools(c *ui.Context, t *design.Tokens, snap *state.Snapshot) {
 }
 
 // liveComposerArea is the fixed bottom block: the composer card, the menus
-// above it and the usage footer.
+// above it and the usage footer, all in one centered brand column.
 func (a *App) liveComposerArea(c *ui.Context, t *design.Tokens, snap *state.Snapshot) {
-	ui.Column(c).PaddingY(design.Space4).Children(func() {
-		// The menus, composer and usage footer share DSH's 877px centered
-		// column; without this the live screen painted full-width while the
-		// static renderer and the baseline kept the centered column.
-		ui.Row(c).Justify(ui.Center).Padding(0, sessGutter, 0, 0).Children(func() {
-			ui.Column(c).Width(a.sessionComposerWidthFor(c)).Gap(design.Space2).Children(func() {
+	th := t.Theme()
+	ui.Column(c).PaddingY(th.Space(2)).Children(func() {
+		ui.Row(c).Justify(ui.Center).Children(func() {
+			ui.Column(c).Width(a.sessionComposerWidthFor(c)).Gap(th.Space(1)).Children(func() {
 				// The plan review card comes first: while plan mode is on and a
 				// "Plan" artifact exists, review is the screen's primary action.
 				if plan := a.planReviewArtifact(); plan != nil {
@@ -418,32 +413,38 @@ func (a *App) liveComposerArea(c *ui.Context, t *design.Tokens, snap *state.Snap
 					a.attachmentMenu(c, t)
 				}
 				a.pendingAttachmentChips(c, t, snap)
-				design.Apply(ui.Column(c), t.Composer()).Width(a.sessionComposerWidthFor(c)).
-					Label(a.tr("Session composer", "会话输入框")).
-					Padding(design.Space3, 1, design.Space3, 1).
-					Gap(design.Space2).Children(func() {
-					// Multiline: Enter sends, Shift+Enter inserts a line break.
-					ui.TextAreaBase(c, &a.draft).Label(a.T("session.composer_input")).
-						Placeholder(a.T("home.composer_placeholder")).FontSize(14).
-						MinHeight(28).AutoFocus().Bind(&a.composerRef).
-						OnTextKey(a.composerTextKey(c, false))
-					ui.Row(c).Gap(design.Space2).AlignItems(ui.Center).Children(func() {
-						plus := ui.Button(c, "").Tooltip(a.T("composer.add_files_or_run_commands")).
-							Label(a.T("composer.add_files_or_run_commands"))
-						plus.Children(func() {
-							ui.Icon(c, icons.Plus()).Size(14, 14).TextColor(t.LabelSecondary)
-						})
-						if plus.Clicked() {
-							a.attachOpen = !a.attachOpen
-						}
-						a.livePermissionChip(c, t)
-						ui.Spacer(c).Grow(1)
-						a.liveModelMenuBadge(c, t)
-						a.liveRunButton(c, t, snap)
-					})
-				})
+				a.sessionComposerCard(c, t, snap)
 				a.liveUsageFooter(c, t, snap)
 			})
+		})
+	})
+}
+
+// sessionComposerCard is the Session composer: the same brand card as Home
+// (Panel surface, theme corner, one soft shadow, 4 DIP padding) with a native
+// multiline TextArea and a toolbar of native controls. The card carries the
+// input's focus and hover border; the TextArea keeps the native editing
+// semantics (/ commands, @ mentions, Enter/Shift+Enter handled by
+// composerTextKey).
+func (a *App) sessionComposerCard(c *ui.Context, t *design.Tokens, snap *state.Snapshot) {
+	th := t.Theme()
+	width := a.sessionComposerWidthFor(c)
+	card := brandComposerCard(c, t, width, a.tr("Session composer", "会话输入框"))
+	card.Children(func() {
+		input := brandComposerInput(c, t, &a.draft,
+			a.T("session.composer_input"), a.T("home.composer_placeholder"),
+			a.composerTextKey(c, false), &a.composerRef)
+		input.AutoFocus()
+		card = brandComposerFocus(card, input, t)
+		ui.Row(c).AlignItems(ui.Center).Gap(th.Space(1)).Children(func() {
+			brandIconButton(c, t, icons.Plus(), a.T("composer.add_files_or_run_commands"),
+				func() { a.attachOpen = !a.attachOpen })
+			ui.Box(c).Width(th.Space(1))
+			a.livePermissionChip(c, t)
+			ui.Spacer(c).Grow(1)
+			a.liveModelMenuBadge(c, t)
+			ui.Box(c).Width(th.Space(2))
+			a.liveRunButton(c, t, snap)
 		})
 	})
 }
@@ -453,8 +454,9 @@ func (a *App) liveComposerArea(c *ui.Context, t *design.Tokens, snap *state.Snap
 // approval queue so later turns run it without a prompt. The buttons call the
 // controller, which removes the request from the pending set.
 func (a *App) approvalCardsWithAlways(c *ui.Context, t *design.Tokens, requests []state.ApprovalRequest) {
+	th := t.Theme()
 	for _, request := range requests {
-		a.menuFrame(c, t, 868, func() {
+		a.menuFrame(c, t, a.sessionComposerWidthFor(c), func() {
 			ui.Row(c).Gap(design.Space2).AlignItems(ui.Center).Children(func() {
 				ui.Text(c, a.T("composer.approval_required")).FontSize(12).FixedLineHeight(18).
 					TextColor(t.LabelTertiary).Grow(1)
@@ -473,9 +475,9 @@ func (a *App) approvalCardsWithAlways(c *ui.Context, t *design.Tokens, requests 
 				if always.Clicked() && a.Ctrl != nil {
 					a.Ctrl.ApproveAlways(request.CallID)
 				}
-				deny := ui.Button(c, a.T("composer.deny")).Height(38).PaddingX(design.Space4).
-					Radius(design.RadiusSM).Border(1, t.BorderL2).Background(t.BgBase).
-					TextColor(t.Danger)
+				deny := ui.Button(c, a.T("composer.deny")).Height(th.Space(9)).
+					PaddingX(th.Space(4)).Radius(design.RadiusSM).
+					Border(1, t.BorderL2).Background(t.BgBase).TextColor(t.Danger)
 				if deny.Clicked() && a.Ctrl != nil {
 					a.Ctrl.Deny(request.CallID)
 				}
@@ -485,10 +487,10 @@ func (a *App) approvalCardsWithAlways(c *ui.Context, t *design.Tokens, requests 
 }
 
 // liveRunButton is the composer's primary control: Send while idle, Stop
-// while a turn runs. The label cross-fades and the colors follow the state
-// change, as DSH's composer button does. With an empty draft and no running
-// turn the whole button is disabled (not just its glyph), so it is skipped by
-// keyboard focus and cannot submit.
+// while a turn runs, through the shared brand send button. With an empty draft
+// and no running turn the control is disabled (skipped by keyboard focus and
+// unable to submit) and shows the brand idle tint instead of the retired pale
+// blue.
 func (a *App) liveRunButton(c *ui.Context, t *design.Tokens, snap *state.Snapshot) {
 	running := snap.Phase == state.PhaseRunning
 	empty := !running && strings.TrimSpace(a.draft) == ""
@@ -496,29 +498,16 @@ func (a *App) liveRunButton(c *ui.Context, t *design.Tokens, snap *state.Snapsho
 	if running {
 		label = a.T("session.stop")
 	}
-	bg, fg := t.Accent, t.AccentText
-	if empty {
-		// DSH's empty composer shows the theme-aware disabled fill, not the
-		// active accent.
-		bg, fg = sendIdleFill(t), sendIdleGlyph(t)
-	}
-	button := ui.Button(c, "").Size(34, 34).Radius(design.RadiusMax).
-		Background(bg).TextColor(fg).Label(label).Disabled(empty)
-	button.Children(func() {
-		if running {
-			ui.Text(c, "■").FontSize(14).FontWeight(700).TextColor(fg)
+	brandSendButton(c, t, label, empty, running, func() {
+		if a.Ctrl == nil {
 			return
 		}
-		ui.Icon(c, homeIconArrowUp).Size(16, 16).TextColor(fg)
+		if running {
+			a.Ctrl.Stop()
+			return
+		}
+		a.sendSessionDraft(c)
 	})
-	if empty || !button.Clicked() || a.Ctrl == nil {
-		return
-	}
-	if running {
-		a.Ctrl.Stop()
-		return
-	}
-	a.sendSessionDraft(c)
 }
 
 // sendSessionDraft submits the composer's text and clears it. Enter and the

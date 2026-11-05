@@ -2,6 +2,9 @@ package shell
 
 import (
 	"hash/crc32"
+	"image/png"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -38,8 +41,10 @@ func TestSettingsShortcutsAndPersistence(t *testing.T) {
 	if cfg.Theme != session.ThemeDark {
 		t.Fatalf("theme = %q, want dark", cfg.Theme)
 	}
+	// The brand nav surface is dark in the dark theme; sample it rather than
+	// a fixed DSH pixel (the nav column's bottom-left stays free of controls).
 	img := tt.Image()
-	if r, g, b, _ := img.RGBAAt(1190, 880).RGBA(); r>>8 > 0x60 || g>>8 > 0x60 || b>>8 > 0x60 {
+	if r, g, b, _ := img.RGBAAt(400, 850).RGBA(); r>>8 > 0x60 || g>>8 > 0x60 || b>>8 > 0x60 {
 		t.Fatalf("settings panel stayed light after Dark: %02x %02x %02x", r>>8, g>>8, b>>8)
 	}
 
@@ -207,8 +212,8 @@ func TestKeyboardShortcuts(t *testing.T) {
 	}
 }
 
-// TestRenameAndDeleteFromSidebar exercises the row menu, both dialogs and
-// the resulting store state.
+// TestRenameAndDeleteFromSidebar exercises the session row's native menu,
+// both dialogs and the resulting store state.
 func TestRenameAndDeleteFromSidebar(t *testing.T) {
 	h := newLiveApp(t, &shellProvider{})
 	tt := ui.NewTester(h.app.View, 1600, 1000)
@@ -219,19 +224,17 @@ func TestRenameAndDeleteFromSidebar(t *testing.T) {
 		t.Fatalf("ListSessions = %+v, %v", sessions, err)
 	}
 	id := sessions[0].ID
-	if !tt.HasText("⋯") {
-		t.Fatalf("session row has no actions button: %q", tt.Texts())
-	}
+	actions := "Session actions for " + sessions[0].Title
 
-	// Rename through "..." > Rename.
-	if err := tt.Click("⋯"); err != nil {
-		t.Fatalf("click row actions: %v", err)
+	// Rename through the row's native actions menu.
+	if err := tt.Click(actions); err != nil {
+		t.Fatalf("open the session actions menu: %v", err)
 	}
 	if !tt.HasText("Rename") || !tt.HasText("Delete") {
-		t.Fatalf("row menu missing items: %q", tt.Texts())
+		t.Fatalf("session actions menu missing items: %q", tt.Texts())
 	}
 	if err := tt.Click("Rename"); err != nil {
-		t.Fatalf("click Rename: %v", err)
+		t.Fatalf("choose Rename: %v", err)
 	}
 	if !tt.HasText("Rename session") {
 		t.Fatalf("rename dialog missing: %q", tt.Texts())
@@ -254,12 +257,12 @@ func TestRenameAndDeleteFromSidebar(t *testing.T) {
 		t.Fatalf("sidebar does not show renamed title %q: %q", stored.Title, tt.Texts())
 	}
 
-	// Delete through "..." > Delete > Delete.
-	if err := tt.Click("⋯"); err != nil {
-		t.Fatalf("click row actions: %v", err)
+	// Delete through the row's native actions menu, then the dialog.
+	if err := tt.Click("Session actions for " + stored.Title); err != nil {
+		t.Fatalf("reopen the session actions menu: %v", err)
 	}
 	if err := tt.Click("Delete"); err != nil {
-		t.Fatalf("click Delete item: %v", err)
+		t.Fatalf("choose Delete: %v", err)
 	}
 	if !tt.HasText("Delete session?") {
 		t.Fatalf("delete dialog missing: %q", tt.Texts())
@@ -279,13 +282,14 @@ func TestRenameAndDeleteFromSidebar(t *testing.T) {
 // and reports with a toast.
 func TestCopyTitleToast(t *testing.T) {
 	h := newLiveApp(t, &shellProvider{})
+	h.app.Language = LangEN
 	tt := ui.NewTester(h.app.View, 1600, 1000)
 
-	if err := tt.Click("⋯"); err != nil {
-		t.Fatalf("click row actions: %v", err)
+	if err := tt.Click("Session actions for live"); err != nil {
+		t.Fatalf("open the session actions menu: %v", err)
 	}
 	if err := tt.Click("Copy title"); err != nil {
-		t.Fatalf("click Copy title: %v", err)
+		t.Fatalf("choose Copy title: %v", err)
 	}
 	if !tt.HasText("Copied session title") {
 		t.Fatalf("copy toast missing: %q", tt.Texts())
@@ -577,5 +581,139 @@ func TestPermissionLabelsMatchBetweenSettingsAndComposer(t *testing.T) {
 	}
 	if cfg.Permission != session.PermissionAsk {
 		t.Fatalf("Home composer changed the General default to %q", cfg.Permission)
+	}
+}
+
+// TestRenderSettingsNativePreview renders the Settings overlay for brand
+// review: light and dark at the 1600x1000 design size. The PNGs are written to
+// docs/design/preview so the design is reproducible straight from the test.
+func TestRenderSettingsNativePreview(t *testing.T) {
+	dir := filepath.Join("..", "..", "docs", "design", "preview")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatalf("create preview dir: %v", err)
+	}
+	for _, tc := range []struct {
+		name  string
+		theme string
+	}{
+		{"light", session.ThemeLight},
+		{"dark", session.ThemeDark},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			h := newLiveApp(t, &shellProvider{})
+			// Chinese is the product default language; the preview shows the
+			// shipped first-run look.
+			h.app.Language = LangZH
+			if err := h.store.SetSetting(session.SettingTheme, tc.theme); err != nil {
+				t.Fatalf("theme setting: %v", err)
+			}
+			h.app.Screen = Settings
+			img := ui.Render(h.app.View, 1600, 1000, 1)
+			path := filepath.Join(dir, "settings-native-"+tc.name+".png")
+			f, err := os.Create(path)
+			if err != nil {
+				t.Fatalf("create %s: %v", path, err)
+			}
+			if err := png.Encode(f, img); err != nil {
+				f.Close()
+				t.Fatalf("encode %s: %v", path, err)
+			}
+			if err := f.Close(); err != nil {
+				t.Fatalf("close %s: %v", path, err)
+			}
+			if fi, err := os.Stat(path); err != nil || fi.Size() == 0 {
+				t.Fatalf("preview %s is empty: %v", path, err)
+			}
+			t.Logf("wrote %s", path)
+		})
+	}
+}
+
+// TestSettingsNativeControls covers the native widgets the brand settings
+// page is built from: the page is a responsive brand panel, drop-downs are
+// native Selects that persist their choice, and the Show coding view row is a
+// native Switch whose toggle applies to the nav and the session screen.
+func TestSettingsNativeControls(t *testing.T) {
+	h := newLiveApp(t, &shellProvider{})
+	h.app.Language = LangEN
+	tt := ui.NewTester(h.app.View, 1600, 1000)
+	tt.Frame()
+	tt.Key(ui.Cmd, ui.KeyComma)
+	tt.Frame()
+	if h.app.Screen != Settings {
+		t.Fatalf("Cmd+, screen = %v, want Settings", h.app.Screen)
+	}
+
+	// The panel is the brand cap on a wide window: 720-880 DIPs wide. The
+	// nav's left inset (12) and the header's right inset (24) are the brand
+	// 4 DIP grid, so the members give the panel bounds back.
+	closeRect, ok := tt.Find("Close settings")
+	if !ok {
+		t.Fatalf("settings close control missing: %q", tt.Texts())
+	}
+	general, ok := tt.Find("General")
+	if !ok {
+		t.Fatalf("settings nav missing: %q", tt.Texts())
+	}
+	panelLeft := general.X - 12
+	panelRight := closeRect.X + closeRect.W + 24
+	if panelW := panelRight - panelLeft; panelW < 720 || panelW > 880 {
+		t.Fatalf("settings panel width = %v, want 720-880", panelW)
+	}
+
+	// A native select: the trigger shows the current value, the popup lists
+	// the choices, and choosing one persists through the settings store.
+	if err := tt.Click("On completion"); err != nil {
+		t.Fatalf("open the native work-details select: %v", err)
+	}
+	tt.Frame()
+	if !tt.HasText("Immediately") {
+		t.Fatalf("native select popup missing its option: %q", tt.Texts())
+	}
+	if err := tt.Click("Immediately"); err != nil {
+		t.Fatalf("choose Immediately: %v", err)
+	}
+	cfg, err := h.ctrl.Settings().Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if cfg.CollapseWorkDetail != session.CollapseImmediately {
+		t.Fatalf("collapse setting = %q, want immediately", cfg.CollapseWorkDetail)
+	}
+
+	// A native switch: toggling Show coding view persists and hides the Agent
+	// presets page, exactly as the row's description says.
+	if err := tt.Click("Toggle show coding view"); err != nil {
+		t.Fatalf("toggle Show coding view: %v", err)
+	}
+	tt.Frame()
+	if h.app.currentSettings().ShowCodingView {
+		t.Fatal("native switch did not persist Show coding view off")
+	}
+	if _, ok := tt.Find("Agent presets"); ok {
+		t.Fatalf("Agent presets nav still offered with Show coding view off: %q", tt.Texts())
+	}
+	if err := tt.Click("Toggle show coding view"); err != nil {
+		t.Fatalf("toggle Show coding view back on: %v", err)
+	}
+	tt.Frame()
+	if !h.app.currentSettings().ShowCodingView {
+		t.Fatal("native switch did not persist Show coding view on")
+	}
+
+	// The panel is responsive: at the 900x600 minimum window it stays inside
+	// the window, with the nav and the close control reachable.
+	small := newLiveApp(t, &shellProvider{})
+	small.app.Language = LangEN
+	small.app.Screen = Session
+	stt := ui.NewTester(small.app.View, 900, 600)
+	stt.Frame()
+	stt.Key(ui.Cmd, ui.KeyComma)
+	stt.Frame()
+	for _, label := range []string{"Close settings", "General"} {
+		r, ok := stt.Find(label)
+		if !ok || r.X < 0 || r.Y < 0 || r.X+r.W > 900 || r.Y+r.H > 600 {
+			t.Fatalf("900x600: %q = %+v, want it inside the window", label, r)
+		}
 	}
 }

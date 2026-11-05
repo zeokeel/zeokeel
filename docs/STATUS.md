@@ -9,6 +9,13 @@
 - **以下 M0–M13 历史里程碑保留原文记录以追溯**；其中与像素/基线/比对回路相关的内容均为**历史记录，已退役、不再有效**（因此模块清单中不再列 `pixeltest` 包）。
 - 现行质量口径见 `docs/QUALITY.md` 与 `docs/PLAN.md` §10；功能对齐见 `docs/FUNCTIONAL-PARITY.md`；视觉方向见 `docs/decisions/0002-brand-theme-foundation.md`。
 
+## 2026-11-05 阶段 3：六屏品牌原生视觉 + 桌面壳 P0-1（完成，ALL GREEN）
+
+- **屏/区**：Home、Session、Sidebar、Settings、Plugins、Automation 全部完成品牌原生视觉重构（mygo 原生控件 + `internal/brand` 主题 + Theme/design 令牌；删除 DSH 文案、采样色与 877/909/800×800/960 等像素魔法值）；交互与 a11y 标签/键盘可达不回退。
+- **桌面壳**：系统菜单栏（macOS Role/Windows-Linux 窗口菜单、accelerator 与 `shortcuts.go` 同源）、窗口尺寸/位置/maximized 持久化（`DataDir()/window.json`，损坏 fallback、原子写）、关窗到托盘与退出逻辑修复（ADR 0003）；新增 13 个 app 单测。
+- **验证**：`go build ./...`、`go vet ./...`、`gofmt`、`go test -count=1 ./...` 全绿（shell 38.8s）；新增 12 张浅/深色预览图（`docs/design/preview/`）+ 6 个 `TestRender*NativePreview`。
+- **遗留（下一阶段）**：Trajectory/右侧栏/内联搜索/面板视觉、markdown→`ui/markdown`、文本选择/系统通知/滚动条/DPI/TextScale、设置独立窗口、Sidebar a11y 嵌套与真机 IME/a11y 矩阵。见 [原生视觉方向 §10](design/native-ui.md)。
+
 ## 2026-11-05 阶段 2：Home 原生视觉 pilot（完成）
 
 - 用户决策后的第一个"回归 mygo 设计能力"落地屏：Home live 屏重写为 ZeoKeel 自有视觉。

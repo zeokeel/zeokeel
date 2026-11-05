@@ -24,17 +24,19 @@ var memoryIcon = ui.MustParseSVG([]byte(`<svg xmlns="http://www.w3.org/2000/svg"
 // truth, so the list is read on every frame instead of being cached in a
 // schema-less setting.
 func (a *App) memorySettingsPage(c *ui.Context, t *design.Tokens) {
-	ui.Column(c).Gap(design.Space3).Children(func() {
-		ui.Row(c).Justify(ui.SpaceBetween).AlignItems(ui.Start).Gap(design.Space3).Children(func() {
-			ui.Column(c).Grow(1).Gap(design.Space1).Children(func() {
+	th := t.Theme()
+	ui.Column(c).Gap(th.Space(4)).Children(func() {
+		ui.Row(c).Justify(ui.SpaceBetween).AlignItems(ui.Center).
+			Gap(th.Space(4)).Children(func() {
+			ui.Column(c).Grow(1).Gap(th.Space(1)).Children(func() {
 				settingsText(c, a.memoryText("Workspace memory", "工作区记忆"),
-					design.TypeM, t.LabelPrimary).FontWeight(600)
+					design.TypeL, t.LabelPrimary).FontWeight(600)
 				settingsText(c, a.memoryText(
 					"Persistent notes the agent adds with the memory tool. They are injected into future turns for this workspace only.",
 					"agent 通过 memory 工具添加的持久笔记。它们只会注入到当前工作区未来的回合中。"),
-					design.TypeXXS, t.LabelTertiary)
+					design.TypeXS, t.LabelTertiary)
 			})
-			ui.Row(c).Gap(design.Space2).Children(func() {
+			ui.Row(c).Gap(th.Space(2)).Children(func() {
 				a.memoryButton(c, t, a.memoryText("Refresh", "刷新"),
 					a.memoryText("Refresh memories", "刷新记忆"), false, func() {
 						c.Invalidate()
@@ -76,9 +78,11 @@ func (a *App) memorySettingsPage(c *ui.Context, t *design.Tokens) {
 			a.memoryEmpty(c, t)
 			return
 		}
-		ui.Column(c).Gap(design.Space1).Children(func() {
-			for _, memory := range memories {
-				a.memoryRow(c, t, memory)
+		card := ui.Column(c).Background(t.BgStrong).Border(1, t.BorderL2).
+			Radius(th.Radius)
+		card.Children(func() {
+			for i, memory := range memories {
+				a.memoryRow(c, t, memory, i == len(memories)-1)
 			}
 		})
 	})
@@ -86,31 +90,36 @@ func (a *App) memorySettingsPage(c *ui.Context, t *design.Tokens) {
 
 // memoryEmpty is the empty state for a workspace without notes.
 func (a *App) memoryEmpty(c *ui.Context, t *design.Tokens) {
-	ui.Column(c).Padding(design.Space6, 0, design.Space6, 0).AlignItems(ui.Center).
-		Gap(design.Space2).Children(func() {
+	th := t.Theme()
+	ui.Column(c).Padding(th.Space(10), 0).AlignItems(ui.Center).
+		Gap(th.Space(2)).Children(func() {
 		settingsText(c, a.memoryText("No memories in this workspace yet.", "此工作区还没有记忆。"),
 			design.TypeBody, t.LabelPrimary)
 		settingsText(c, a.memoryText(
 			"Ask the agent to remember durable facts, conventions, or decisions with the memory tool.",
 			"让 agent 使用 memory 工具记住持久的事实、约定或决策。"),
-			design.TypeXXS, t.LabelTertiary)
+			design.TypeXS, t.LabelTertiary)
 	})
 }
 
 // memoryRow is one note: its text and update time on the left, Delete on the
 // right. The delete button carries the memory id in its accessible name so a
 // list with several notes stays unambiguous to accessibility and tests.
-func (a *App) memoryRow(c *ui.Context, t *design.Tokens, memory store.Memory) {
+func (a *App) memoryRow(c *ui.Context, t *design.Tokens, memory store.Memory, last bool) {
+	th := t.Theme()
 	id := memory.ID
-	ui.Row(c).Padding(design.Space3, 0, design.Space3, 0).Gap(design.Space3).
-		AlignItems(ui.Center).
-		BorderWidth(0, 0, 1, 0).BorderColor(t.BorderL2).Children(func() {
-		ui.Column(c).Grow(1).Padding(0, settingsTextEnd, 0, 0).
-			Gap(design.Space1).Children(func() {
+	row := ui.Row(c).Padding(th.Space(4), 0).Gap(th.Space(3)).
+		MinHeight(th.Space(14)).AlignItems(ui.Center)
+	if !last {
+		row = row.BorderWidth(0, 0, 1, 0).BorderColor(t.BorderL2)
+	}
+	row.Children(func() {
+		ui.Column(c).Grow(1).Padding(0, th.Space(4), 0, 0).
+			Gap(th.Space(1)).Children(func() {
 			settingsText(c, memoryDisplayText(memory.Content), design.TypeBody, t.LabelPrimary).MaxLines(2)
 			settingsText(c, a.memoryText("Updated ", "更新于 ")+
 				memory.UpdatedAt.Local().Format("2006-01-02 15:04"),
-				design.TypeXXS, t.LabelTertiary)
+				design.TypeXS, t.LabelTertiary)
 		})
 		a.memoryButton(c, t, a.memoryText("Delete", "删除"),
 			a.memoryText("Delete memory ", "删除记忆 ")+id, true, func() {
@@ -121,20 +130,21 @@ func (a *App) memoryRow(c *ui.Context, t *design.Tokens, memory store.Memory) {
 
 // memoryButton is a small bordered action used by the Memory page.
 func (a *App) memoryButton(c *ui.Context, t *design.Tokens, label, accessible string, danger bool, fn func()) {
+	th := t.Theme()
 	color := t.LabelPrimary
 	border := t.BorderL3
 	if danger {
 		color = t.Danger
 		border = t.Danger
 	}
-	el := ui.Row(c).Height(28).PaddingX(10).Radius(design.RadiusSM).
-		Border(1, border).AlignItems(ui.Center).
+	el := ui.ButtonBase(c).Height(th.Space(8)).PaddingX(th.Space(3)).
+		Radius(design.RadiusSM).Border(1, border).AlignItems(ui.Center).
 		Label(accessible).Tooltip(label).Role(ui.RoleButton).Focusable()
 	if el.Hovered() || el.Focused() {
 		el = el.Background(t.BgHover)
 	}
 	el.Children(func() {
-		settingsText(c, label, design.TypeXXS, color).NoWrap()
+		settingsText(c, label, design.TypeXS, color).NoWrap()
 	})
 	el.OnClick(fn)
 }

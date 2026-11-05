@@ -1,12 +1,16 @@
 package shell
 
 import (
+	"image/png"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/egoist/mygo/ui"
 
+	"github.com/zeokeel/zeokeel/internal/session"
 	"github.com/zeokeel/zeokeel/internal/store"
 )
 
@@ -201,5 +205,58 @@ func TestAutomationRunNowWithoutHook(t *testing.T) {
 	}
 	if !tt.HasText("No automation runner is configured") {
 		t.Fatalf("missing-runner toast missing: %q", tt.Texts())
+	}
+}
+
+// TestRenderAutomationNativePreview renders the Automation page with a few
+// persisted tasks for brand review: light and dark at the 1600x1000 design
+// size, written to docs/design/preview.
+func TestRenderAutomationNativePreview(t *testing.T) {
+	dir := filepath.Join("..", "..", "docs", "design", "preview")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatalf("create preview dir: %v", err)
+	}
+	tasks := []store.Automation{
+		{Title: "每日构建报告", Prompt: "总结昨天的主干提交与失败构建，生成一份简短报告。", Cron: "@daily", Enabled: true},
+		{Title: "依赖安全巡检", Prompt: "检查依赖更新与已知漏洞，列出需要升级的模块。", Cron: "@hourly", Enabled: false},
+		{Title: "发布说明草稿", Prompt: "根据最近合并的 PR 起草发布说明。", Cron: "*/15 * * * *", Enabled: true},
+	}
+	for _, tc := range []struct {
+		name  string
+		theme string
+	}{
+		{"light", session.ThemeLight},
+		{"dark", session.ThemeDark},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			h := newLiveApp(t, &shellProvider{})
+			h.app.Language = LangZH
+			if err := h.store.SetSetting(session.SettingTheme, tc.theme); err != nil {
+				t.Fatalf("theme setting: %v", err)
+			}
+			for _, task := range tasks {
+				if _, err := h.ctrl.Automations().Create(task); err != nil {
+					t.Fatalf("create task %q: %v", task.Title, err)
+				}
+			}
+			h.app.Screen = Automation
+			img := ui.Render(h.app.View, 1600, 1000, 1)
+			path := filepath.Join(dir, "automation-native-"+tc.name+".png")
+			f, err := os.Create(path)
+			if err != nil {
+				t.Fatalf("create %s: %v", path, err)
+			}
+			if err := png.Encode(f, img); err != nil {
+				f.Close()
+				t.Fatalf("encode %s: %v", path, err)
+			}
+			if err := f.Close(); err != nil {
+				t.Fatalf("close %s: %v", path, err)
+			}
+			if fi, err := os.Stat(path); err != nil || fi.Size() == 0 {
+				t.Fatalf("preview %s is empty: %v", path, err)
+			}
+			t.Logf("wrote %s", path)
+		})
 	}
 }

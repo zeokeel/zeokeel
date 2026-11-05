@@ -507,11 +507,16 @@ func (a *App) recordSessionFeedback(c *ui.Context, sess store.Session) {
 // sessionHeaderMore is the "More actions" button the header renders before
 // the right-sidebar toggle.
 func (a *App) sessionHeaderMore(c *ui.Context, t *design.Tokens) {
+	th := t.Theme()
 	st := a.liveMenus()
-	more := ui.Row(c).Size(28, 28).Center().
-		Label(a.menuText("More actions", "更多操作")).Role(ui.RoleButton).Focusable()
+	label := a.menuText("More actions", "更多操作")
+	more := ui.ButtonBase(c).Size(th.Space(7), th.Space(7)).Center().
+		Radius(design.RadiusSM).Label(label).Tooltip(label)
+	if more.Hovered() {
+		more = more.Background(t.BgHover)
+	}
 	more.Children(func() {
-		ui.Text(c, "⋯").FontSize(13).FontWeight(700).TextColor(t.LabelSecondary)
+		ui.Text(c, "⋯").FontSize(14).FontWeight(700).TextColor(t.LabelSecondary)
 	})
 	more.Expanded(st.moreOpen)
 	more.OnClick(func() { st.moreOpen = !st.moreOpen })

@@ -3,51 +3,68 @@ package shell
 import (
 	"github.com/egoist/mygo/ui"
 
+	"github.com/zeokeel/zeokeel/internal/brand"
 	"github.com/zeokeel/zeokeel/internal/design"
 )
 
-// The Settings panel geometry: an 800x800 panel with a 28px radius, a
-// 188px nav column and a 564px options column inset 24px.
+// Settings panel metrics. The panel is responsive and token-derived: the
+// brand's 4 DIP spacing grid sizes it (880 DIP cap, 720 DIP readable width),
+// and the viewport clamps it so the minimum 900x600 window keeps it on screen.
+// No value is sampled from an external reference page.
 const (
-	settingsWidth      float32 = 800
-	settingsHeight     float32 = 800
-	settingsRadius     float32 = 28
-	settingsNavW       float32 = 188
-	settingsNavPad     float32 = 12
-	settingsNavTop     float32 = 22
-	settingsTitleGap   float32 = 18
-	settingsCellH      float32 = 40
-	settingsHeaderH    float32 = 54
-	settingsHeaderTop  float32 = 20
-	settingsHeaderEnd  float32 = 14
-	settingsOptionsPad float32 = 24
-	settingsTextEnd    float32 = 48 // gap between a row's text and its control
-	settingsControlH   float32 = 36
-	settingsCardH      float32 = 84
-	// settingsViewportMargin keeps the panel clear of the window edges at the
-	// 900x600 minimum, so the title and header actions stay on screen.
-	settingsViewportMargin float32 = 24
+	// settingsPanelUnits caps the panel width: 220 spacing units, 880 DIPs at
+	// the brand Spacing=4.
+	settingsPanelUnits float32 = 220
+	// settingsPanelHeightUnits caps the panel height: 190 units, 760 DIPs.
+	settingsPanelHeightUnits float32 = 190
+	// settingsPanelMarginUnits is the room the panel keeps from the window
+	// edge: 8 units, 32 DIPs per side.
+	settingsPanelMarginUnits float32 = 8
+	// settingsPanelFloorUnits keeps the clamped panel usable on a window below
+	// the 900x600 minimum: 80 units, 320 DIPs.
+	settingsPanelFloorUnits float32 = 80
+	// settingsNavUnits is the nav column's width: 50 units, 200 DIPs.
+	settingsNavUnits float32 = 50
 )
 
-// settingsPanelSize clamps the 800x800 baseline panel to the current window.
-// The body scrolls inside it; the panel itself never starts above the window.
+// settingsPanelSize returns the centered panel's size: the brand cap clamped
+// to the window with a 32 DIP margin, so the header, nav and body stay on
+// screen at the 900x600 minimum window.
 func settingsPanelSize(c *ui.Context) (float32, float32) {
-	w, h := settingsWidth, settingsHeight
+	th := c.Theme()
+	w, h := th.Space(settingsPanelUnits), th.Space(settingsPanelHeightUnits)
 	if cw, ch := c.Size(); cw > 0 && ch > 0 {
-		if maxW := cw - 2*settingsViewportMargin; w > maxW {
+		margin := th.Space(settingsPanelMarginUnits)
+		if maxW := cw - 2*margin; w > maxW {
 			w = maxW
 		}
-		if maxH := ch - 2*settingsViewportMargin; h > maxH {
+		if maxH := ch - 2*margin; h > maxH {
 			h = maxH
 		}
 	}
-	if w < 320 {
-		w = 320
+	if floor := th.Space(settingsPanelFloorUnits); w < floor {
+		w = floor
 	}
-	if h < 240 {
-		h = 240
+	if h < 1 {
+		h = 1
 	}
 	return w, h
+}
+
+// settingsNavWidth returns the nav column width: 200 DIPs on a wide window,
+// at most a third of the panel on the narrowest ones.
+func settingsNavWidth(c *ui.Context) float32 {
+	th := c.Theme()
+	w := th.Space(settingsNavUnits)
+	if pw, _ := settingsPanelSize(c); pw > 0 {
+		if limit := pw / 3; w > limit {
+			w = limit
+		}
+	}
+	if floor := th.Space(40); w < floor {
+		w = floor
+	}
+	return w
 }
 
 // settingsText draws text at one of the design type roles. mygo's
@@ -58,51 +75,39 @@ func settingsText(c *ui.Context, s string, role design.TypeRole, color ui.Color)
 	return ui.Text(c, s).FontSize(size).FixedLineHeight(line).FontWeight(weight).TextColor(color)
 }
 
-// Baseline surfaces the shared tokens do not expose, sampled from
-// retired DSH reference design as the
-// home screen does.
-var (
-	settingsSurface          = ui.Hex("#F5F6F7") // selectors, buttons, selected card
-	settingsNavSelected      = ui.Hex("#EBEEF2") // the selected nav cell
-	settingsCardBorder       = ui.RGBA(0, 0, 0, 0.16)
-	settingsCardSelectedEdge = ui.Hex("#ADB2B8")
+// settingsCardSelectedEdge is the brand neutral outline of a selected
+// preset/theme card that does not paint the accent (plugin pages read it).
+// It mirrors the dark palette's tertiary text, which stays visible on both
+// the light and the dark surface.
+var settingsCardSelectedEdge = brand.DarkPalette().TextTertiary
 
-	settingsPanelDark      = ui.Hex("#2C2C2E")
-	settingsSurfaceDark    = ui.Hex("#353638")
-	settingsNavActiveDark  = ui.Hex("#43454A")
-	settingsCardBorderDark = ui.RGBA(255, 255, 255, 0.2)
-)
-
-// settingsPanelColor is the modal surface: white in the light theme as the
-// baseline has it, the raised surface in the dark one.
+// settingsPanelColor is the modal surface: the brand's raised surface in both
+// appearances, so the panel separates from the scrimmed page behind it.
 func settingsPanelColor(t *design.Tokens) ui.Color {
-	if t.Dark {
-		return settingsPanelDark
-	}
-	return t.BgBase
+	return t.BgRaised
 }
 
-// settingsFillColor is the baseline's control fill.
+// settingsFillColor is the neutral control fill: the brand's strong raised
+// surface (light #F1F3F5, dark #272736), used by the filled pills and the
+// plugin-detail actions that still draw their own chrome.
 func settingsFillColor(t *design.Tokens) ui.Color {
-	if t.Dark {
-		return settingsSurfaceDark
-	}
-	return settingsSurface
+	return t.BgStrong
 }
 
-// settingsNavActiveColor is the selected nav cell's tint.
+// settingsControlColor is a control's fill inside a group card: the panel
+// surface, which separates from the card's BgStrong in both appearances.
+func settingsControlColor(t *design.Tokens) ui.Color {
+	return t.BgRaised
+}
 
 // settingsCardOutline is an unselected theme card's outline.
 func settingsCardOutline(t *design.Tokens) ui.Color {
-	if t.Dark {
-		return settingsCardBorderDark
-	}
-	return settingsCardBorder
+	return t.BorderL2
 }
 
-// Settings icons: the baseline's 16px line icons. The gear, sun, moon,
-// monitor and chevron are Lucide's (ISC); the database, sliders and
-// person are drawn to the baseline's measured 16x16 geometry.
+// Settings icons: brand-weight line icons on the 16px grid. The gear, sun,
+// moon, monitor and chevron are Lucide's (ISC); the database, sliders and
+// person are drawn on the same grid.
 var (
 	settingsIconGear = ui.MustParseSVG([]byte(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9.671 4.136a2.34 2.34 0 0 1 4.659 0 2.34 2.34 0 0 0 3.319 1.915 2.34 2.34 0 0 1 2.33 4.033 2.34 2.34 0 0 0 0 3.831 2.34 2.34 0 0 1-2.33 4.033 2.34 2.34 0 0 0-3.319 1.915 2.34 2.34 0 0 1-4.659 0 2.34 2.34 0 0 0-3.32-1.915 2.34 2.34 0 0 1-2.33-4.033 2.34 2.34 0 0 0 0-3.831A2.34 2.34 0 0 1 6.35 6.051a2.34 2.34 0 0 0 3.319-1.915"/><circle cx="12" cy="12" r="3"/></svg>`))
 
@@ -123,53 +128,69 @@ var (
 	settingsIconClose = ui.MustParseSVG([]byte(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.15" stroke-linecap="round"><path d="M2.4 2.4l9.2 9.2M11.6 2.4l-9.2 9.2"/></svg>`))
 )
 
-// settingsNavActiveColor is the selected nav cell's fill.
+// settingsNavActiveColor is the selected nav cell's fill: the brand's
+// translucent hover tint over the nav surface, in either appearance.
 func settingsNavActiveColor(t *design.Tokens) ui.Color {
-	if t.Dark {
-		return settingsNavActiveDark
-	}
-	return settingsNavSelected
+	return t.BgHover
 }
 
-// settingsNavCell is one row of the nav list; the first is selected.
+// settingsNavCell is one row of the nav list, built on the native button base
+// so hover/press/focus/role and keyboard activation come from mygo. The
+// selected cell takes the brand hover tint and an accent icon.
 func (a *App) settingsNavCell(c *ui.Context, t *design.Tokens, label string, active bool, icon *ui.SVG) ui.Element {
-	cell := ui.Row(c).Height(settingsCellH).PaddingX(design.Space3).
-		Gap(design.Space2).Radius(design.RadiusMD).AlignItems(ui.Center).
+	th := t.Theme()
+	cell := ui.ButtonBase(c).FillWidth().Height(th.Space(10)).
+		PaddingX(th.Space(3)).Gap(th.Space(2)).Radius(design.RadiusSM).
+		AlignItems(ui.Center).
 		Label(label).Role(ui.RoleButton).Focusable()
-	if active {
+	if active || cell.Hovered() {
 		cell = cell.Background(settingsNavActiveColor(t))
 	}
+	iconColor := t.LabelSecondary
+	textColor := t.LabelSecondary
+	weight := 400
+	if active {
+		iconColor = t.Accent
+		textColor = t.LabelPrimary
+		weight = 500
+	}
 	cell.Children(func() {
-		ui.Image(c, icon).Size(16, 16).TextColor(t.LabelPrimary)
-		settingsText(c, label, design.TypeBody, t.LabelPrimary)
+		ui.Image(c, icon).Size(th.Space(4), th.Space(4)).TextColor(iconColor)
+		settingsText(c, label, design.TypeBody, textColor).FontWeight(weight)
 	})
 	return cell
 }
 
-// settingsRowStyle tweaks a row where the baseline departs from the common
-// case: its title line height, its description color and its gap.
+// settingsRowStyle tweaks a row where a page departs from the common case:
+// its title line height, its description color, its gap, and whether it is
+// the last row of a group (the last row drops the separator).
 type settingsRowStyle struct {
 	titleLine float32
 	descColor ui.Color
 	gap       float32
+	last      bool
 }
 
-// settingsRow is one option: title and description on the left, a control
-// on the right, with the baseline's 1px bottom separator.
+// settingsRow is one option inside a group card: title and description on the
+// left, a control on the right. Rows are separated by the theme's regular
+// divider; the last row of a group omits it.
 func (a *App) settingsRow(c *ui.Context, t *design.Tokens, title, desc string, st settingsRowStyle, control func()) {
+	th := t.Theme()
 	gap := st.gap
 	if gap == 0 {
-		gap = design.Space2
+		gap = th.Space(4)
 	}
 	descColor := st.descColor
 	if descColor == (ui.Color{}) {
 		descColor = t.LabelTertiary
 	}
-	ui.Row(c).Padding(design.Space4, 0, design.Space4, 0).Gap(gap).
-		AlignItems(ui.Center).
-		BorderWidth(0, 0, 1, 0).BorderColor(t.BorderL2).Children(func() {
-		ui.Column(c).Grow(1).Padding(0, settingsTextEnd, 0, 0).
-			Gap(design.Space1).Children(func() {
+	row := ui.Row(c).Padding(th.Space(2), th.Space(4)).Gap(gap).
+		MinHeight(th.Space(11)).AlignItems(ui.Center)
+	if !st.last {
+		row = row.BorderWidth(0, 0, 1, 0).BorderColor(t.BorderL2)
+	}
+	row.Children(func() {
+		ui.Column(c).Grow(1).Gap(th.Space(1)).Children(func() {
 			titleEl := settingsText(c, title, design.TypeBody, t.LabelPrimary)
 			if st.titleLine > 0 {
 				titleEl.FixedLineHeight(st.titleLine)
@@ -181,22 +202,3 @@ func (a *App) settingsRow(c *ui.Context, t *design.Tokens, title, desc string, s
 		control()
 	})
 }
-
-// settingsAppearance is the appearance group: a title over three theme cards.
-
-// settingsThemeCard is one 183x84 appearance card.
-
-// settingsSelector draws a 36px select pill with a chevron.
-
-// settingsFontSize draws the baseline's font size stepper: a 72px pill, the
-// unit, and an expander chevron.
-
-// settingsChevronButton is a 24x24 chevron hit area.
-
-// settingsSwitch draws the baseline's 36x20 switch, on or off.
-
-// settingsActionButton is a filled 36px button, as a.T("settings.edit_shortcuts") is.
-
-// settingsOutlineButton is the header's bordered a.T("settings.open_configuration_file").
-
-// settingsClose draws the header's X button.

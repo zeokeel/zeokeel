@@ -3,6 +3,9 @@ package shell
 import (
 	"context"
 	"errors"
+	"image/png"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -439,30 +442,251 @@ func TestSearchIncludesAllMessages(t *testing.T) {
 	}
 }
 
-// TestLiveSelectedWorkspaceKeepsSidebarFill is the live counterpart of
-// TestSelectedWorkspaceKeepsSidebarFill: the selected workspace row must not
-// paint the hover tint and its folder glyph must use the accent color.
-func TestLiveSelectedWorkspaceKeepsSidebarFill(t *testing.T) {
+// TestSidebarNativeSelection is the native Sidebar's selection regression: the
+// open session's row carries the brand tint, a plain row does not, and the
+// highlighted row follows the screen (the Plugins destination is chosen while
+// Plugins is open).
+func TestSidebarNativeSelection(t *testing.T) {
 	h := newLiveApp(t, &shellProvider{})
 	h.app.Language = LangEN
-	h.app.Screen = Home
+	h.app.Screen = Session
 	tt := ui.NewTester(h.app.View, 1600, 1000)
 	tt.Frame()
 
-	if c := tt.Image().RGBAAt(150, 262); c.R != 0xF9 || c.G != 0xFA || c.B != 0xFB {
-		t.Errorf("selected live workspace row fill = %v, want sidebar #F9FAFB", c)
+	row, ok := tt.Find("live")
+	if !ok {
+		t.Fatalf("open session row missing: %q", tt.Texts())
 	}
-	accent := false
-	for y := 248; y < 278 && !accent; y++ {
-		for x := 16; x < 40; x++ {
-			c := tt.Image().RGBAAt(x, y)
-			if c.R < 120 && c.G < 170 && c.B > 180 {
-				accent = true
-				break
+	// The native Sidebar paints the chosen item in the theme's
+	// SurfacePressed (brand blue at 10%) while the sidebar has no focus, and
+	// leaves the rest on the sidebar surface. Sample the item's own fill left
+	// of its icon, where no glyph covers it.
+	img := tt.Image()
+	chosen := img.RGBAAt(int(row.X)-32, int(row.Y+row.H/2))
+	if int(chosen.B) < int(chosen.R)+8 {
+		t.Errorf("chosen session row fill = %v, want the brand blue tint", chosen)
+	}
+	wsRow, ok := tt.Find("test")
+	if !ok {
+		t.Fatalf("workspace row missing: %q", tt.Texts())
+	}
+	plain := img.RGBAAt(int(wsRow.X)-32, int(wsRow.Y+wsRow.H/2))
+	if int(plain.B) >= int(plain.R)+8 {
+		t.Errorf("unselected workspace row fill = %v, want the plain sidebar surface", plain)
+	}
+
+	// The highlight follows the screen: with Plugins open the destination row
+	// is the chosen one and the session row is not.
+	if err := tt.Click("Plugins"); err != nil {
+		t.Fatalf("click Plugins: %v", err)
+	}
+	if h.app.Screen != Plugins {
+		t.Fatalf("screen = %v, want Plugins", h.app.Screen)
+	}
+	row, _ = tt.Find("live")
+	img = tt.Image()
+	if c := img.RGBAAt(int(row.X)-32, int(row.Y+row.H/2)); int(c.B) >= int(c.R)+8 {
+		t.Errorf("session row still chosen on Plugins: %v", c)
+	}
+	plugins, _ := tt.Find("Plugins")
+	if c := img.RGBAAt(int(plugins.X)-24, int(plugins.Y+plugins.H/2)); int(c.B) < int(c.R)+8 {
+		t.Errorf("Plugins destination row fill = %v, want the brand blue tint", c)
+	}
+}
+
+// TestSidebarNativeDisclosure covers the workspace disclosure: the chevron
+// button collapses and expands the open workspace without opening it again.
+func TestSidebarNativeDisclosure(t *testing.T) {
+	h := newLiveApp(t, &shellProvider{})
+	ctx := context.Background()
+	// A session whose title only shows in the sidebar: the open session's
+	// title also appears in the screen header, so it cannot tell the two
+	// states apart.
+	if _, err := h.ctrl.CreateSession(ctx, "hidden session"); err != nil {
+		t.Fatalf("CreateSession: %v", err)
+	}
+	sessions, err := h.ctrl.SessionsForWorkspace(ctx, h.ctrl.CurrentWorkspaceID(), false, false)
+	if err != nil {
+		t.Fatalf("SessionsForWorkspace: %v", err)
+	}
+	for _, sess := range sessions {
+		if sess.Title == "live" {
+			if _, err := h.ctrl.OpenSession(ctx, sess.ID); err != nil {
+				t.Fatalf("OpenSession: %v", err)
 			}
 		}
 	}
-	if !accent {
-		t.Error("selected live workspace folder is not drawn in the accent color")
+	h.app.SetSnapshot(h.ctrl.Snapshot())
+	h.app.Language = LangEN
+	h.app.Screen = Session
+	wsID := h.ctrl.CurrentWorkspaceID()
+	tt := ui.NewTester(h.app.View, 1600, 1000)
+	tt.Frame()
+	if !tt.HasText("hidden session") {
+		t.Fatalf("session row missing before collapse: %q", tt.Texts())
+	}
+
+	if err := tt.Click("Collapse workspace"); err != nil {
+		t.Fatalf("click collapse chevron: %v", err)
+	}
+	tt.Frame()
+	if !h.app.wsCollapsed[wsID] {
+		t.Fatal("the chevron did not collapse the workspace")
+	}
+	if tt.HasText("hidden session") {
+		t.Fatalf("collapsed workspace still shows its session rows: %q", tt.Texts())
+	}
+	if err := tt.Click("Expand workspace"); err != nil {
+		t.Fatalf("click expand chevron: %v", err)
+	}
+	tt.Frame()
+	if h.app.wsCollapsed[wsID] {
+		t.Fatal("the chevron did not expand the workspace again")
+	}
+	if !tt.HasText("hidden session") {
+		t.Fatalf("expanded workspace lost its session rows: %q", tt.Texts())
+	}
+}
+
+// TestSidebarNativeKeyboardNavigation covers the keyboard behavior the native
+// Sidebar brings for free: focused, the arrow keys move the choice through the
+// items and the app follows, as a desktop source list does.
+func TestSidebarNativeKeyboardNavigation(t *testing.T) {
+	h := newLiveApp(t, &shellProvider{})
+	ctx := context.Background()
+	for _, title := range []string{"alpha", "beta"} {
+		if _, err := h.ctrl.CreateSession(ctx, title); err != nil {
+			t.Fatalf("CreateSession %q: %v", title, err)
+		}
+	}
+	sessions, err := h.ctrl.SessionsForWorkspace(ctx, h.ctrl.CurrentWorkspaceID(), false, false)
+	if err != nil || len(sessions) < 2 {
+		t.Fatalf("SessionsForWorkspace = %+v, %v", sessions, err)
+	}
+	if _, err := h.ctrl.OpenSession(ctx, sessions[0].ID); err != nil {
+		t.Fatalf("OpenSession: %v", err)
+	}
+	h.app.SetSnapshot(h.ctrl.Snapshot())
+	h.app.Screen = Session
+	tt := ui.NewTester(h.app.View, 1600, 1000)
+	tt.Frame()
+
+	// Tab to the Sidebar: its chosen row's text is then inside the focused
+	// element. Arrow keys from there move the choice.
+	for i := 0; i < 40 && !tt.Focused(sessions[0].Title); i++ {
+		tt.Key(0, ui.KeyTab)
+	}
+	if !tt.Focused(sessions[0].Title) {
+		t.Fatalf("Tab never reached the sidebar: %q", tt.Texts())
+	}
+	before := h.ctrl.CurrentSessionID()
+	tt.Key(0, ui.KeyDown)
+	tt.Frame()
+	if got := h.ctrl.CurrentSessionID(); got == before {
+		t.Fatalf("Down did not move the native Sidebar choice (still %q)", got)
+	}
+}
+
+// TestSidebarNativeGroupingModes keeps the three View-options groupings
+// working on the native tree: By workspace, Workspace Tree and In one list all
+// render the open workspace's sessions.
+func TestSidebarNativeGroupingModes(t *testing.T) {
+	h := newLiveApp(t, &shellProvider{})
+	h.app.Language = LangEN
+	h.app.Screen = Session
+	for _, mode := range []string{groupByWorkspace, groupByTree, groupByList} {
+		t.Run(mode, func(t *testing.T) {
+			h.app.groupBy = mode
+			tt := ui.NewTester(h.app.View, 1600, 1000)
+			tt.Frame()
+			if !tt.HasText("live") {
+				t.Fatalf("%s: session row missing: %q", mode, tt.Texts())
+			}
+			if mode == groupByList {
+				// The flat grouping drops the workspace headers.
+				if tt.HasText("Workspace actions for test") {
+					t.Fatalf("%s: workspace rows leaked into the flat list: %q", mode, tt.Texts())
+				}
+				return
+			}
+			if _, ok := tt.Find("test"); !ok {
+				t.Fatalf("%s: workspace row missing: %q", mode, tt.Texts())
+			}
+		})
+	}
+}
+
+// TestRenderSidebarNativePreview renders the sidebar headlessly for brand
+// review: light and dark at the 1600x1000 design size. The PNGs are written to
+// docs/design/preview, so the design is reproducible straight from the test.
+func TestRenderSidebarNativePreview(t *testing.T) {
+	dir := filepath.Join("..", "..", "docs", "design", "preview")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatalf("create preview dir: %v", err)
+	}
+	for _, tc := range []struct {
+		name  string
+		theme string
+	}{
+		{"light", session.ThemeLight},
+		{"dark", session.ThemeDark},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			h := newLiveApp(t, &shellProvider{})
+			ctx := context.Background()
+			first := h.ctrl.CurrentWorkspaceID()
+			// A realistic tree: several sessions in the open workspace and two
+			// more workspaces folded below it.
+			for _, title := range []string{
+				"原生 UI 迁移计划",
+				"Sidebar 原生化",
+				"Settings 独立窗口",
+				"发布前回归",
+			} {
+				if _, err := h.ctrl.CreateSession(ctx, title); err != nil {
+					t.Fatalf("CreateSession %q: %v", title, err)
+				}
+			}
+			if _, err := h.ctrl.CreateWorkspace(ctx, "ZeoKeel", t.TempDir()); err != nil {
+				t.Fatalf("CreateWorkspace: %v", err)
+			}
+			if _, err := h.ctrl.CreateWorkspace(ctx, "mygo", t.TempDir()); err != nil {
+				t.Fatalf("CreateWorkspace: %v", err)
+			}
+			// Back to the first workspace with its newest session open, so the
+			// tree shows the expanded workspace and the chosen row.
+			if err := h.ctrl.SelectWorkspace(ctx, first); err != nil {
+				t.Fatalf("SelectWorkspace: %v", err)
+			}
+			if sessions, err := h.ctrl.SessionsForWorkspace(ctx, first, false, false); err == nil && len(sessions) > 0 {
+				if _, err := h.ctrl.OpenSession(ctx, sessions[len(sessions)-1].ID); err != nil {
+					t.Fatalf("OpenSession: %v", err)
+				}
+			}
+			h.app.SetSnapshot(h.ctrl.Snapshot())
+			// The preview shows the product's default language and appearance.
+			h.app.Language = LangZH
+			h.app.Screen = Session
+			if err := h.store.SetSetting(session.SettingTheme, tc.theme); err != nil {
+				t.Fatalf("theme setting: %v", err)
+			}
+			img := ui.Render(h.app.View, 1600, 1000, 1)
+			path := filepath.Join(dir, "sidebar-native-"+tc.name+".png")
+			f, err := os.Create(path)
+			if err != nil {
+				t.Fatalf("create %s: %v", path, err)
+			}
+			if err := png.Encode(f, img); err != nil {
+				f.Close()
+				t.Fatalf("encode %s: %v", path, err)
+			}
+			if err := f.Close(); err != nil {
+				t.Fatalf("close %s: %v", path, err)
+			}
+			if fi, err := os.Stat(path); err != nil || fi.Size() == 0 {
+				t.Fatalf("preview %s is empty: %v", path, err)
+			}
+			t.Logf("wrote %s", path)
+		})
 	}
 }

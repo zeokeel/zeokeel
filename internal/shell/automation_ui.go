@@ -11,8 +11,9 @@ import (
 	"github.com/zeokeel/zeokeel/internal/store"
 )
 
-// automationLivePage is the Automation screen with real persisted tasks. The
-// static baseline path (App.Ctrl == nil) never calls it.
+// automationLivePage is the Automation screen with real persisted tasks,
+// laid out on the brand page column: native header action, segmented filter,
+// native search field, task cards and the create/edit dialog.
 func (a *App) automationLivePage(c *ui.Context, t *design.Tokens) {
 	a.automationHeadingLive(c, t)
 	a.automationFiltersLive(c, t)
@@ -23,36 +24,46 @@ func (a *App) automationLivePage(c *ui.Context, t *design.Tokens) {
 	a.automationDialog(c, t)
 }
 
-// automationHeadingLive is the h1 and the dark "New" action, with the action
-// opening the create dialog.
+// automationHeadingLive is the page header: the title and the native primary
+// "New" action, which opens the create dialog.
 func (a *App) automationHeadingLive(c *ui.Context, t *design.Tokens) {
-	ui.Row(c).Height(automationHeadingHeight).
-		Padding(automationHeadingPadTop, 0, 0, 0).
-		AlignItems(ui.Center).Justify(ui.SpaceBetween).
-		Margin(0, 0, automationHeadingGap, 0).Children(func() {
-		ui.Text(c, a.T("automation.automation_tasks")).FontSize(20).FontWeight(500).LineHeight(1.4).
-			TextColor(t.LabelPrimary)
-		button := ui.Row(c).Height(32).PaddingX(12).Gap(4).Radius(16).
-			AlignItems(ui.Center).Background(t.LabelPrimary).
-			Label(a.T("automation.new_automation_task")).Role(ui.RoleButton).Focusable()
-		button.Children(func() {
-			ui.Row(c).Size(16, 16).Center().Children(func() {
-				ui.Icon(c, automationPlusIcon).Size(13, 13).
-					TextColor(t.OnPrimary)
-			})
-			ui.Text(c, a.T("automation.new")).FontSize(13).LineHeight(20.0 / 13.0).
-				TextColor(t.OnPrimary)
+	th := t.Theme()
+	ui.Row(c).Padding(th.Space(4), 0, 0, 0).Margin(0, 0, th.Space(4), 0).
+		AlignItems(ui.End).Justify(ui.SpaceBetween).Children(func() {
+		ui.Column(c).Gap(th.Space(1)).Children(func() {
+			nativeText(c, design.TypeXL, t.LabelPrimary, a.T("automation.automation_tasks")).
+				FontWeight(600)
+			nativeText(c, design.TypeXS, t.LabelSecondary, a.T("automation.subtitle")).
+				MaxLines(1)
 		})
-		button.OnClick(func() { a.beginAutomationAdd() })
+		a.automationNewButton(c, t)
 	})
 }
 
-// automationFiltersLive is the All / Enabled / Inactive row; clicking a tab
-// filters the list.
+// automationNewButton is the header's primary action: mygo's PrimaryButton
+// (native focus, Enter/Space, disabled semantics) with the brand accent fill,
+// a plus glyph and the "New" label. The accessible name is the full action so
+// keyboard and screen-reader users get "New automation task".
+func (a *App) automationNewButton(c *ui.Context, t *design.Tokens) {
+	th := t.Theme()
+	button := ui.PrimaryButton(c, "").Label(a.T("automation.new_automation_task"))
+	button.Children(func() {
+		ui.Icon(c, automationPlusIcon).Size(th.Space(3.5), th.Space(3.5)).
+			TextColor(t.AccentText)
+		nativeText(c, design.TypeBody, t.AccentText, a.T("automation.new")).FontWeight(500)
+	})
+	button.OnClick(func() { a.beginAutomationAdd() })
+}
+
+// automationFiltersLive is the All / Enabled / Inactive filter. It is built on
+// mygo's segmented control base, so the filter is one focus group: Tab enters
+// at the selected segment and the arrows move between the choices, as native
+// desktop segmented controls do.
 func (a *App) automationFiltersLive(c *ui.Context, t *design.Tokens) {
 	st := a.shellUI()
+	th := t.Theme()
 	filters := []string{"all", "enabled", "inactive"}
-	// Keep the TabsBase pointer in step with direct automationFilter writes
+	// Keep the selected index in step with direct automationFilter writes
 	// (tests and older call sites set the string).
 	for i, key := range filters {
 		if key == st.automationFilter {
@@ -63,54 +74,72 @@ func (a *App) automationFiltersLive(c *ui.Context, t *design.Tokens) {
 	labels := []string{
 		a.T("automation.all"), a.T("automation.enabled"), a.T("automation.inactive"),
 	}
-	tabs := ui.TabsBase(c, &st.automationTab, len(filters))
-	tabs.List.Height(automationTabHeight).Gap(automationTabGap).
-		AlignItems(ui.Center).Margin(0, 0, automationFiltersMB, 0).Children(func() {
-		for i, label := range labels {
-			active := i == st.automationTab
-			el := tabs.Tab(i).Height(automationTabHeight).PaddingX(automationTabPadX).
-				Radius(14).AlignItems(ui.Center).Label(label)
-			if active {
-				el = el.Background(t.BgHover)
-			}
-			el.Children(func() {
-				text := ui.Text(c, label).FontSize(14).LineHeight(22.0 / 14.0).Top(1)
-				if active {
-					text = text.TextColor(t.LabelPrimary)
-				} else {
-					text = text.TextColor(t.LabelTertiary)
+	// The track hugs its segments as native segmented controls do; the row
+	// wrapper keeps the page column from stretching it to full width.
+	var track ui.Element
+	ui.Row(c).Margin(0, 0, th.Space(3), 0).AlignItems(ui.Center).Children(func() {
+		parts := ui.SegmentedBase(c, &st.automationTab, len(filters))
+		track = parts.Track.Height(th.Space(8)).Padding(th.Space(0.5)).Gap(th.Space(0.5)).
+			Radius(th.Radius).Background(t.BgStrong).Border(1, t.BorderL2).
+			Label(a.tr("Filter automation tasks", "筛选自动化任务"))
+		track.Children(func() {
+			for i, label := range labels {
+				active := i == st.automationTab
+				segment := parts.Segment(i).Height(th.Space(7)).PaddingX(th.Space(3)).
+					Radius(th.Radius - th.Space(0.5)).AlignItems(ui.Center).Label(label)
+				switch {
+				case active && t.Dark:
+					// In the dark theme the selected segment lifts with the
+					// translucent brand tint; BgRaised is darker than the
+					// track there and would read as "unselected".
+					segment = segment.Background(t.BgHover).Border(1, t.BorderL3)
+				case active:
+					segment = segment.Background(t.BgRaised).Border(1, t.BorderL2)
+				case segment.Hovered():
+					segment = segment.Background(t.BgHover)
 				}
-			})
-		}
+				segment.Children(func() {
+					color := t.LabelTertiary
+					weight := 400
+					if active {
+						color, weight = t.LabelPrimary, 500
+					}
+					nativeText(c, design.TypeXS, color, label).FontWeight(weight)
+				})
+			}
+		})
 	})
+	// Apply the click (if any) before the list reads the selected filter, so
+	// the frame that handles the click already shows the new filtered list.
+	_ = track.Changed()
 	if st.automationTab >= 0 && st.automationTab < len(filters) {
 		st.automationFilter = filters[st.automationTab]
 	}
 }
 
-// automationSearchLive is the rounded search field over the task list.
+// automationSearchLive is the native search field over the task list: mygo's
+// SearchField carries the magnifier, clear action, IME and focus behavior, so
+// the page does not draw its own field chrome.
 func (a *App) automationSearchLive(c *ui.Context, t *design.Tokens) {
 	st := a.shellUI()
-	ui.Row(c).Height(automationSearchHeight).
-		PaddingX(automationSearchPadX).Gap(automationSearchGap).
-		Border(1, t.BorderL3).Radius(design.RadiusMD).
-		AlignItems(ui.Center).Margin(0, 0, automationSearchMB, 0).Children(func() {
-		ui.Row(c).Size(16, 16).Center().Children(func() {
-			ui.Icon(c, automationSearchIcon).Size(14, 14).
-				TextColor(t.LabelTertiary)
-		})
-		ui.TextInputBase(c, &st.automationQuery).
-			Label(a.T("automation.search")).Placeholder(a.T("automation.search")).
-			FontSize(14).Grow(1)
+	th := t.Theme()
+	ui.Row(c).AlignItems(ui.Center).Margin(0, 0, th.Space(4), 0).Children(func() {
+		ui.SearchField(c, &st.automationQuery).
+			Label(a.T("automation.search")).
+			Placeholder(a.T("automation.search")).
+			Grow(1)
 	})
 }
 
 // automationTaskList renders the filtered tasks, or the empty state.
 func (a *App) automationTaskList(c *ui.Context, t *design.Tokens) {
+	if a.Ctrl == nil || a.Ctrl.Automations() == nil {
+		return
+	}
 	tasks, err := a.Ctrl.Automations().List()
 	if err != nil {
-		ui.Text(c, a.T("automation.could_not_load_automation_tasks")).
-			FontSize(13).TextColor(t.Danger).Padding(automationEmptyPadY, 0, 0, 0)
+		nativeText(c, design.TypeXXS, t.Danger, a.T("automation.could_not_load_automation_tasks")).
+			PaddingY(t.Theme().Space(8))
 		return
 	}
 	visible := a.visibleAutomations(tasks)
@@ -118,7 +147,8 @@ func (a *App) automationTaskList(c *ui.Context, t *design.Tokens) {
 		a.automationEmptyLive(c, t)
 		return
 	}
-	ui.Column(c).Gap(design.Space2).Children(func() {
+	th := t.Theme()
+	ui.Column(c).Gap(th.Space(2)).Padding(0, 0, th.Space(6), 0).Children(func() {
 		for _, task := range visible {
 			a.automationTaskRow(c, t, task)
 		}
@@ -152,34 +182,32 @@ func (a *App) visibleAutomations(tasks []store.Automation) []store.Automation {
 	return out
 }
 
-// automationTaskRow is one persisted task: title, prompt snippet, schedule and
-// next run, the enable switch and the row actions.
+// automationTaskRow is one persisted task: a brand card with the title,
+// prompt snippet and schedule, the native enable switch and the native row
+// actions. When the column is too narrow for one line the actions wrap onto a
+// second row so every target is still usable beside the docked right sidebar.
 func (a *App) automationTaskRow(c *ui.Context, t *design.Tokens, task store.Automation) {
-	// The page column is min(960, contentWidth-96). A docked right sidebar
-	// leaves it 304px wide, where the switch and the four actions cannot sit
-	// on one line: the row's fixed children shrank to W=0 and Delete became
-	// unclickable. Stack the actions onto a wrapping second row while the
-	// column is too narrow for the single-line layout.
-	stacked := a.automationPageWidth(c) < automationRowSingleLineW
+	th := t.Theme()
+	stacked := a.automationPageWidth(c) < automationRowSingleLineUnits*design.Space1
 	title := func() {
-		ui.Column(c).Grow(1).MinWidth(0).Gap(1).Children(func() {
-			ui.Row(c).Gap(design.Space2).AlignItems(ui.Center).Children(func() {
-				ui.Text(c, task.Title).FontSize(14).FixedLineHeight(20).FontWeight(500).
-					TextColor(t.LabelPrimary).MaxLines(1).Ellipsis("…")
+		ui.Column(c).Grow(1).MinWidth(0).Gap(th.Space(0.5)).Children(func() {
+			ui.Row(c).Gap(th.Space(2)).AlignItems(ui.Center).Children(func() {
+				nativeText(c, design.TypeBody, t.LabelPrimary, task.Title).
+					FontWeight(500).MaxLines(1).Ellipsis("…")
 				if !task.Enabled {
-					ui.Row(c).Height(18).PaddingX(6).Radius(design.RadiusMax).
-						Background(t.BgHover).AlignItems(ui.Center).Children(func() {
-						ui.Text(c, a.T("automation.inactive")).FontSize(10).FixedLineHeight(14).
-							TextColor(t.LabelTertiary)
+					pill := ui.Row(c).PaddingX(th.Space(1.5)).PaddingY(th.Space(0.5)).
+						Radius(design.RadiusMax).Background(t.BgHover).AlignItems(ui.Center)
+					pill.Children(func() {
+						nativeText(c, design.TypeXXXS, t.LabelTertiary, a.T("automation.inactive"))
 					})
 				}
 			})
 			if task.Prompt != "" {
-				ui.Text(c, automationPromptSnippet(task.Prompt)).FontSize(12).FixedLineHeight(18).
-					TextColor(t.LabelSecondary).MaxLines(1).Ellipsis("…")
+				nativeText(c, design.TypeXS, t.LabelSecondary,
+					automationPromptSnippet(task.Prompt)).MaxLines(1).Ellipsis("…")
 			}
-			ui.Text(c, a.automationTaskDetail(task)).FontSize(11).FixedLineHeight(16).
-				TextColor(t.LabelTertiary).MaxLines(1).Ellipsis("…")
+			nativeText(c, design.TypeXXS, t.LabelTertiary, a.automationTaskDetail(task)).
+				MaxLines(1).Ellipsis("…")
 		})
 	}
 	// The switch is a real control, not decoration: clicking it persists the
@@ -207,35 +235,35 @@ func (a *App) automationTaskRow(c *ui.Context, t *design.Tokens, task store.Auto
 		a.automationAction(c, t, a.T("automation.edit"), func() { a.beginAutomationEdit(task) })
 		a.automationAction(c, t, a.T("automation.delete"), func() { a.deleteAutomation(c, task) })
 	}
+	card := func(el ui.Element) ui.Element {
+		return el.Padding(th.Space(3)).Gap(th.Space(3)).Radius(design.RadiusLG).
+			Background(t.BgRaised).Border(1, t.BorderL2)
+	}
 	if stacked {
-		ui.Column(c).Padding(design.Space3, design.Space3).Gap(design.Space2).
-			Radius(design.RadiusMD).Border(1, t.BorderL2).Children(func() {
-			ui.Row(c).Gap(design.Space2).AlignItems(ui.Center).Children(func() {
+		card(ui.Column(c)).Children(func() {
+			ui.Row(c).Gap(th.Space(2)).AlignItems(ui.Center).Children(func() {
 				title()
 				sw()
 			})
-			ui.Row(c).Gap(design.Space2).Wrap().AlignItems(ui.Center).Children(actions)
+			ui.Row(c).Gap(th.Space(1)).Wrap().AlignItems(ui.Center).Children(actions)
 		})
 		return
 	}
-	ui.Row(c).Padding(design.Space3, design.Space3).Gap(design.Space2).
-		Radius(design.RadiusMD).Border(1, t.BorderL2).AlignItems(ui.Center).
-		Children(func() {
-			title()
-			sw()
-			actions()
-		})
+	card(ui.Row(c)).AlignItems(ui.Center).Children(func() {
+		title()
+		sw()
+		// The action strip sits to the right of the switch on the one-line
+		// layout; the gap comes from the card's own theme gap.
+		ui.Row(c).Gap(th.Space(1)).Shrink(0).Children(actions)
+	})
 }
 
-// automationAction is a small bordered row action.
+// automationAction is one native row action. mygo's Button gives the action
+// the theme's control look, focus ring and keyboard activation; the minimum
+// width keeps every label a comfortable click target in the dense row.
 func (a *App) automationAction(c *ui.Context, t *design.Tokens, label string, fn func()) {
-	el := ui.Row(c).Height(28).MinWidth(44).PaddingX(10).Radius(design.RadiusSM).
-		Border(1, t.BorderL3).AlignItems(ui.Center).Shrink(0).
-		Label(label).Role(ui.RoleButton).Focusable()
-	el.Children(func() {
-		ui.Text(c, label).FontSize(12).FixedLineHeight(18).TextColor(t.LabelPrimary)
-	})
-	el.OnClick(fn)
+	button := ui.Button(c, label).Label(label).MinWidth(design.Space1 * 11)
+	button.OnClick(fn)
 }
 
 // automationTaskDetail is the schedule and next-run line.
@@ -255,27 +283,18 @@ func automationPromptSnippet(prompt string) string {
 	return strings.Join(strings.Fields(prompt), " ")
 }
 
-// automationEmptyLive is the baseline empty state with a clickable create
-// action.
+// automationEmptyLive is the empty state: the brand clock mark, the hint and
+// a native create action, all on the page column instead of the retired fixed
+// 48 DIP empty-state padding.
 func (a *App) automationEmptyLive(c *ui.Context, t *design.Tokens) {
-	ui.Column(c).Padding(automationEmptyPadY, automationEmptyPadX).
-		AlignItems(ui.Center).Children(func() {
-		ui.Icon(c, automationClockIcon).Size(24, 24).
-			TextColor(ui.Hex("#ADB2B8")).Margin(0, 0, 12, 0)
-		ui.Text(c, a.T("automation.empty")).
-			FontSize(14).LineHeight(22.0/14.0).Top(0.5).
-			LetterSpacing(0.05).
-			TextColor(t.LabelTertiary).Margin(0, 0, 8, 0)
-		label := a.T("automation.new_automation_task")
-		button := ui.Row(c).Height(36).PaddingX(14).Radius(design.RadiusMD).
-			Border(1, t.BorderL3).AlignItems(ui.Center).Justify(ui.Center).
-			Background(t.BgBase).Margin(16, 0, 0, 0).
-			Label(label).Role(ui.RoleButton).Focusable()
-		button.Children(func() {
-			ui.Text(c, label).FontSize(14).LineHeight(22.0 / 14.0).Top(1).
-				TextColor(t.LabelPrimary)
-		})
-		button.OnClick(func() { a.beginAutomationAdd() })
+	th := t.Theme()
+	label := a.T("automation.new_automation_task")
+	ui.Column(c).Padding(th.Space(12), 0).AlignItems(ui.Center).Children(func() {
+		ui.Icon(c, automationClockIcon).Size(th.Space(7), th.Space(7)).
+			TextColor(t.LabelTertiary).Margin(0, 0, th.Space(3), 0)
+		nativeText(c, design.TypeBody, t.LabelSecondary, a.T("automation.empty")).
+			Margin(0, 0, th.Space(3), 0)
+		ui.Button(c, label).Label(label).OnClick(func() { a.beginAutomationAdd() })
 	})
 }
 
@@ -296,42 +315,45 @@ func (a *App) beginAutomationEdit(task store.Automation) {
 	st.automationDialog = true
 }
 
-// automationDialog is the create/edit form.
+// automationDialog is the create/edit form on mygo's native Modal. The field
+// order is title, prompt, schedule, enabled, actions, which keeps the dialog's
+// tab order stable for keyboard users.
 func (a *App) automationDialog(c *ui.Context, t *design.Tokens) {
 	st := a.shellUI()
 	ui.Modal(c, &st.automationDialog, func() {
-		ui.Column(c).Width(520).Gap(design.Space2).Children(func() {
+		th := t.Theme()
+		ui.Column(c).Width(th.Space(130)).Gap(th.Space(2)).Children(func() {
 			title := a.T("automation.new_automation_task")
 			if st.automationDraft.id != "" {
 				title = a.T("automation.edit_automation_task")
 			}
-			ui.Text(c, title).FontSize(16).FontWeight(600).TextColor(t.LabelPrimary)
+			nativeText(c, design.TypeM, t.LabelPrimary, title).FontWeight(600)
 
-			ui.Text(c, a.T("automation.title")).FontSize(12).TextColor(t.LabelTertiary)
+			nativeText(c, design.TypeXXS, t.LabelTertiary, a.T("automation.title"))
 			ui.TextInput(c, &st.automationDraft.title).Label(a.T("automation.title")).
 				Placeholder(a.T("automation.daily_report")).AutoFocus()
 
-			ui.Text(c, a.T("automation.prompt")).FontSize(12).TextColor(t.LabelTertiary)
+			nativeText(c, design.TypeXXS, t.LabelTertiary, a.T("automation.prompt"))
 			ui.TextArea(c, &st.automationDraft.prompt).Label(a.T("automation.prompt")).
-				Placeholder(a.T("automation.summarize_yesterday_s_changes")).Height(92)
+				Placeholder(a.T("automation.summarize_yesterday_s_changes")).
+				Height(th.Space(23))
 
-			ui.Text(c, a.T("automation.schedule")).FontSize(12).TextColor(t.LabelTertiary)
+			nativeText(c, design.TypeXXS, t.LabelTertiary, a.T("automation.schedule"))
 			ui.TextInput(c, &st.automationDraft.cron).Label(a.T("automation.schedule")).
 				Placeholder("*/15 * * * *")
-			ui.Text(c, a.T("automation.cron_15_0_9_hourly_or_daily")).
-				FontSize(11).TextColor(t.LabelTertiary)
+			nativeText(c, design.TypeXXXS, t.LabelTertiary, a.T("automation.cron_15_0_9_hourly_or_daily"))
 
 			ui.Checkbox(c, &st.automationDraft.enabled, a.T("automation.enabled"))
 
-			ui.Row(c).Justify(ui.End).Gap(design.Space2).
-				Padding(design.Space2, 0, 0, 0).Children(func() {
-				if ui.Button(c, a.T("automation.cancel")).Clicked() {
-					st.automationDialog = false
-				}
-				if ui.Button(c, a.T("automation.save")).Clicked() {
-					a.confirmAutomation(c)
-				}
-			})
+			ui.Row(c).Justify(ui.End).Gap(th.Space(2)).Padding(th.Space(2), 0, 0, 0).
+				Children(func() {
+					if ui.Button(c, a.T("automation.cancel")).Clicked() {
+						st.automationDialog = false
+					}
+					if ui.PrimaryButton(c, a.T("automation.save")).Clicked() {
+						a.confirmAutomation(c)
+					}
+				})
 		})
 	})
 }

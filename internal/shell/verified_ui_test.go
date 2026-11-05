@@ -148,6 +148,22 @@ func TestSetShortcutOverrideInitializesMap(t *testing.T) {
 
 // TestPluginSwitchRendersOnAndOffState covers the shared switch: on is the
 // inverse track/knob pair in both themes, for Plugins and Automation.
+// distRGBA is the largest per-channel difference between two colors: small
+// when the rendered pixel matches the theme color within antialiasing.
+func distRGBA(a, b color.RGBA) int {
+	d := 0
+	for _, p := range [][2]uint8{{a.R, b.R}, {a.G, b.G}, {a.B, b.B}} {
+		diff := int(p[0]) - int(p[1])
+		if diff < 0 {
+			diff = -diff
+		}
+		if diff > d {
+			d = diff
+		}
+	}
+	return d
+}
+
 func TestPluginSwitchRendersOnAndOffState(t *testing.T) {
 	for _, dark := range []bool{false, true} {
 		name := "light"
@@ -181,34 +197,33 @@ func TestPluginSwitchRendersOnAndOffState(t *testing.T) {
 			if !ok {
 				t.Fatalf("disabled switch missing: %v", tt.Texts())
 			}
+			// The plugin rows use mygo's native ui.Switch: the ON track is
+			// the brand accent, the OFF track the theme's neutral mix, and
+			// the knob is white in both states. Assert that state semantics
+			// rather than the retired hand-drawn palette pins.
 			onTrack := img.RGBAAt(int(on.X)+3, int(on.Y+on.H/2))
 			onKnob := img.RGBAAt(int(on.X+on.W)-6, int(on.Y+on.H/2))
 			offKnob := img.RGBAAt(int(off.X)+6, int(off.Y+off.H/2))
 			offTrack := img.RGBAAt(int(off.X+off.W)-6, int(off.Y+off.H/2))
 
+			accent := rgbaOf(design.Light().Accent)
 			if dark {
-				if onTrack.R < 200 || onKnob.R > 80 {
-					t.Fatalf("dark ON switch track/knob = %v/%v, want a light track and dark knob", onTrack, onKnob)
-				}
-				// The dark OFF switch keeps the static pluginSwitch's
-				// BorderL3 track and white knob; a dark knob on a BgHover
-				// track measured 1.22:1 and looked switched off/invisible.
-				if offKnob.R < 240 {
-					t.Fatalf("dark OFF switch knob = %v, want white like the static pluginSwitch", offKnob)
-				}
-				if offTrack.R < 0x30 || offTrack.R > 0x60 {
-					t.Fatalf("dark OFF switch track = %v, want BorderL3 ~#3B3B3C", offTrack)
-				}
-			} else {
-				if onTrack.R > 80 || onKnob.R < 240 {
-					t.Fatalf("light ON switch track/knob = %v/%v, want a dark track and white knob", onTrack, onKnob)
-				}
-				if offKnob.R < 240 {
-					t.Fatalf("light OFF switch knob = %v, want white", offKnob)
-				}
+				accent = rgbaOf(design.Dark().Accent)
+			}
+			if distRGBA(onTrack, accent) > 32 {
+				t.Fatalf("%s ON switch track = %v, want brand accent %v", name, onTrack, accent)
+			}
+			if onKnob.R < 200 || onKnob.G < 200 || onKnob.B < 200 {
+				t.Fatalf("%s ON switch knob = %v, want white", name, onKnob)
+			}
+			if offKnob.R < 200 || offKnob.G < 200 || offKnob.B < 200 {
+				t.Fatalf("%s OFF switch knob = %v, want white", name, offKnob)
+			}
+			if distRGBA(offTrack, accent) <= 32 {
+				t.Fatalf("%s OFF switch track = %v looks like the ON accent", name, offTrack)
 			}
 			if onTrack == offTrack {
-				t.Fatalf("ON and OFF tracks are identical: %v", onTrack)
+				t.Fatalf("%s ON and OFF tracks are identical: %v", name, onTrack)
 			}
 
 			// The Automation screen uses the same control.
@@ -230,40 +245,21 @@ func TestPluginSwitchRendersOnAndOffState(t *testing.T) {
 			}
 			autoTrack := tt.Image().RGBAAt(int(autoOn.X)+3, int(autoOn.Y+autoOn.H/2))
 			autoKnob := tt.Image().RGBAAt(int(autoOn.X+autoOn.W)-6, int(autoOn.Y+autoOn.H/2))
-			if dark && (autoTrack.R < 200 || autoKnob.R > 80) {
-				t.Fatalf("dark automation ON switch = %v/%v", autoTrack, autoKnob)
+			if distRGBA(autoTrack, accent) > 32 {
+				t.Fatalf("%s automation ON switch track = %v, want brand accent %v", name, autoTrack, accent)
 			}
-			if !dark && (autoTrack.R > 80 || autoKnob.R < 240) {
-				t.Fatalf("light automation ON switch = %v/%v", autoTrack, autoKnob)
+			if autoKnob.R < 200 || autoKnob.G < 200 || autoKnob.B < 200 {
+				t.Fatalf("%s automation ON switch knob = %v, want white", name, autoKnob)
 			}
 		})
 	}
 }
 
-// expectedDisabledFill is the Send control's fill when the empty composer
-// disables it: the theme's idle fill at the framework's 50% disabled opacity
-// over the composer surface. Live Session paints the fill on the disabled
-// button itself (Home puts it on an enabled parent), so its sampled pixel is
-// this dimmed composite, still derived from the theme helper.
-func expectedDisabledFill(t *design.Tokens) color.RGBA {
-	c := sendIdleFill(t).Alpha(0.5).Over(t.BgRaised)
-	return color.RGBA{R: c.R, G: c.G, B: c.B, A: c.A}
-}
-
-func nearRGBA(got, want color.RGBA, tol int) bool {
-	diff := func(a, b uint8) int {
-		if a > b {
-			return int(a - b)
-		}
-		return int(b - a)
-	}
-	return diff(got.R, want.R) <= tol && diff(got.G, want.G) <= tol && diff(got.B, want.B) <= tol
-}
-
-// TestDarkSendControlUsesThemeFill covers the theme-aware disabled Send fill:
-// live Home and live Session share one helper, so dark paints the brand dark
-// token instead of the light baseline's hard-coded #B2C7F4, and light keeps
-// the baseline value.
+// TestDarkSendControlUsesThemeFill covers the shared brand disabled Send
+// fill: live Home and live Session both paint the accent-derived idle tint
+// (sendIdleFill) on the enabled wrapper around the disabled native button, so
+// the retired pale-blue sample is gone from both screens and the dark fill
+// differs from the light one.
 func TestDarkSendControlUsesThemeFill(t *testing.T) {
 	render := func(t *testing.T, screen Screen, dark bool) (*ui.Tester, *image.RGBA) {
 		t.Helper()
@@ -281,10 +277,13 @@ func TestDarkSendControlUsesThemeFill(t *testing.T) {
 		tt.Frame()
 		return tt, tt.Image()
 	}
-	wantLight := rgbaOf(homeSendIdle)
+	wantLight := rgbaOf(sendIdleFill(design.Light()))
 	wantDark := rgbaOf(sendIdleFill(design.Dark()))
 	if wantDark == wantLight {
-		t.Fatalf("dark Send fill %v matches the light baseline %v", wantDark, wantLight)
+		t.Fatalf("dark brand idle fill %v matches the light one %v", wantDark, wantLight)
+	}
+	if wantDark == rgbaOf(homeSendIdle) || wantLight == rgbaOf(homeSendIdle) {
+		t.Fatalf("the brand idle fill still equals the retired pale-blue sample %v", rgbaOf(homeSendIdle))
 	}
 	label := map[Screen]string{Home: "Send message", Session: "Send"}
 	for _, screen := range []Screen{Home, Session} {
@@ -293,18 +292,8 @@ func TestDarkSendControlUsesThemeFill(t *testing.T) {
 		if !ok {
 			t.Fatalf("screen %v: dark Send control missing: %v", screen, darkTT.Texts())
 		}
-		darkFill := darkImg.RGBAAt(int(r.X)+5, int(r.Y+r.H/2))
-		if darkFill == wantLight {
-			t.Fatalf("screen %v: dark Send still paints the light #B2C7F4", screen)
-		}
-		if screen == Home {
-			// Home paints the idle fill on an enabled parent, so it samples
-			// the helper value itself.
-			if darkFill != wantDark {
-				t.Fatalf("screen %v: dark Send fill = %v, want %v", screen, darkFill, wantDark)
-			}
-		} else if want := expectedDisabledFill(design.Dark()); !nearRGBA(darkFill, want, 2) {
-			t.Fatalf("screen %v: dark disabled Send fill = %v, want %v", screen, darkFill, want)
+		if got := darkImg.RGBAAt(int(r.X)+5, int(r.Y+r.H/2)); got != wantDark {
+			t.Fatalf("screen %v: dark Send fill = %v, want the brand idle fill %v", screen, got, wantDark)
 		}
 
 		lightTT, lightImg := render(t, screen, false)
@@ -312,19 +301,8 @@ func TestDarkSendControlUsesThemeFill(t *testing.T) {
 		if !ok {
 			t.Fatalf("screen %v: light Send control missing", screen)
 		}
-		lightFill := lightImg.RGBAAt(int(lr.X)+5, int(lr.Y+lr.H/2))
-		if lightFill == wantDark {
-			t.Fatalf("screen %v: light Send paints the dark fill %v", screen, lightFill)
-		}
-		if screen == Home {
-			if lightFill != wantLight {
-				t.Fatalf("screen %v: light Send fill = %v, want #B2C7F4", screen, lightFill)
-			}
-		} else if want := expectedDisabledFill(design.Light()); !nearRGBA(lightFill, want, 2) {
-			t.Fatalf("screen %v: light disabled Send fill = %v, want %v", screen, lightFill, want)
-		}
-		if darkFill == lightFill {
-			t.Fatalf("screen %v: dark and light Send fills are identical: %v", screen, darkFill)
+		if got := lightImg.RGBAAt(int(lr.X)+5, int(lr.Y+lr.H/2)); got != wantLight {
+			t.Fatalf("screen %v: light Send fill = %v, want the brand idle fill %v", screen, got, wantLight)
 		}
 	}
 }

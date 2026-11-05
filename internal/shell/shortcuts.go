@@ -13,15 +13,35 @@ import (
 // installShortcuts registers the window's keyboard shortcuts. It runs on
 // every frame, as the engine collects handlers per frame.
 //
-//	Cmd/Ctrl+N  new session
-//	Cmd/Ctrl+,  settings
+//	Cmd/Ctrl+N  new session      (MenuActionNewSession)
+//	Cmd/Ctrl+,  settings         (MenuActionSettings)
 //	Cmd/Ctrl+K  focus the composer in a session, else search sessions
 //	Esc         close the topmost overlay or menu
+//
+// The first three chords are parsed from menuCommands, the same table the
+// desktop shell builds the native menu bar from, so the menu accelerators and
+// these window shortcuts cannot drift apart. Cmd/Ctrl+B (Toggle Sidebar) is
+// bound in installChromeShortcuts because its editable override lives there.
 func (a *App) installShortcuts(c *ui.Context) {
-	c.OnShortcut(ui.Cmd, ui.KeyN, func() { a.newSession() })
-	c.OnShortcut(ui.Cmd, ui.KeyComma, func() { a.openSettings() })
-	c.OnShortcut(ui.Cmd, ui.KeyK, func() { a.focusComposerOrSearch(c) })
+	a.bindMenuCommand(c, MenuActionNewSession, func() { a.newSession() })
+	a.bindMenuCommand(c, MenuActionSettings, func() { a.openSettings() })
+	a.bindMenuCommand(c, MenuActionSearch, func() { a.focusComposerOrSearch(c) })
 	c.OnShortcut(0, ui.KeyEscape, func() { a.closeTaskTopmost() })
+}
+
+// bindMenuCommand registers fn for a menu command's default accelerator, so a
+// native menu item and its window shortcut share one chord definition. An
+// unknown action or an unbound chord is a no-op.
+func (a *App) bindMenuCommand(c *ui.Context, action string, fn func()) {
+	cmd, ok := MenuCommandByAction(action)
+	if !ok {
+		return
+	}
+	mods, key, ok := parseShortcut(cmd.Accelerator)
+	if !ok {
+		return
+	}
+	c.OnShortcut(mods, key, fn)
 }
 
 // newSession implements the New Session button and Cmd/Ctrl+N. The static
@@ -280,7 +300,7 @@ func parseShortcut(s string) (ui.Modifiers, ui.Key, bool) {
 	keyPart := strings.TrimSpace(parts[len(parts)-1])
 	for _, raw := range parts[:len(parts)-1] {
 		switch strings.ToLower(strings.TrimSpace(raw)) {
-		case "cmd", "command", "ctrl", "control", "cmd/ctrl":
+		case "cmd", "command", "ctrl", "control", "cmd/ctrl", "cmdorctrl", "commandorcontrol":
 			mods |= ui.Cmd
 		case "alt", "option", "opt":
 			mods |= ui.Alt
@@ -323,6 +343,122 @@ func parseShortcut(s string) (ui.Modifiers, ui.Key, bool) {
 		}
 	}
 	return 0, ui.KeyUnknown, false
+}
+
+// Native-menu command identifiers. The desktop shell (internal/app) builds the
+// system menu bar from these actions and routes each click back through
+// HandleMenuAction, so the menu bar, the keyboard shortcuts and the in-app
+// controls share one command vocabulary and internal/shell never imports mygo.
+const (
+	MenuActionNewSession    = "new_session"
+	MenuActionSettings      = "settings"
+	MenuActionSearch        = "search"
+	MenuActionPlugins       = "plugins"
+	MenuActionAutomation    = "automation"
+	MenuActionToggleSidebar = "toggle_sidebar"
+	MenuActionQuit          = "quit"
+)
+
+// MenuCommand is one command the native menu bar shows: its stable action, the
+// localized labels, and its accelerator in mygo's menu syntax. installShortcuts
+// parses the same accelerator for the window shortcut, so the two cannot drift
+// apart (Cmd/Ctrl+B mirrors the binding in installChromeShortcuts, whose
+// editable override lives in chrome.go). A native menu accelerator takes
+// precedence over the window shortcut, so HandleMenuAction performs the same
+// operation as that shortcut.
+type MenuCommand struct {
+	Action      string
+	LabelEN     string
+	LabelZH     string
+	Accelerator string
+}
+
+// menuCommands is the single source of truth for the menu bar commands. The
+// order is the order the desktop shell appends them in.
+var menuCommands = []MenuCommand{
+	{MenuActionNewSession, "New Session", "新建会话", "CmdOrCtrl+N"},
+	{MenuActionSettings, "Settings…", "设置…", "CmdOrCtrl+,"},
+	{MenuActionSearch, "Search", "搜索", "CmdOrCtrl+K"},
+	{MenuActionPlugins, "Plugins", "插件", ""},
+	{MenuActionAutomation, "Automation", "自动化", ""},
+	{MenuActionToggleSidebar, "Toggle Sidebar", "切换侧边栏", "CmdOrCtrl+B"},
+	{MenuActionQuit, "Quit", "退出", "CmdOrCtrl+Q"},
+}
+
+// MenuCommands returns the native-menu commands in menu order.
+func MenuCommands() []MenuCommand { return append([]MenuCommand(nil), menuCommands...) }
+
+// MenuCommandByAction returns the command with the given action.
+func MenuCommandByAction(action string) (MenuCommand, bool) {
+	for _, cmd := range menuCommands {
+		if cmd.Action == action {
+			return cmd, true
+		}
+	}
+	return MenuCommand{}, false
+}
+
+// MenuLabel returns the localized label of a menu command, or "" for an
+// unknown action. The menu bar is built once at startup, so a later in-app
+// language switch does not relabel it yet.
+func (a *App) MenuLabel(action string) string {
+	cmd, ok := MenuCommandByAction(action)
+	if !ok {
+		return ""
+	}
+	if a.lang() == LangZH {
+		return cmd.LabelZH
+	}
+	return cmd.LabelEN
+}
+
+// SetMenuAction registers the desktop shell's handler for native-menu
+// commands. It is called for every recognized command after the shell ran the
+// ones it owns, so process-level commands (Quit) stay in internal/app while the
+// shell keeps no dependency on mygo or internal/app. A nil handler leaves those
+// commands inert, which is what headless shell tests want.
+func (a *App) SetMenuAction(fn func(action string)) { a.menuAction = fn }
+
+// HandleMenuAction runs one native-menu command. UI commands run immediately;
+// every recognized action also reaches the handler registered with
+// SetMenuAction. It reports whether the action is known; unknown actions are
+// ignored instead of panicking, so a menu built by a newer app build cannot
+// crash an older shell.
+func (a *App) HandleMenuAction(action string) bool {
+	switch action {
+	case MenuActionNewSession:
+		a.newSession()
+	case MenuActionSettings:
+		a.openSettings()
+	case MenuActionSearch:
+		a.menuSearch()
+	case MenuActionPlugins:
+		a.Screen = Plugins
+	case MenuActionAutomation:
+		a.Screen = Automation
+	case MenuActionToggleSidebar:
+		a.toggleSidebar()
+	case MenuActionQuit:
+		// Process-level: only the desktop shell's handler can end the process.
+	default:
+		return false
+	}
+	if a.menuAction != nil {
+		a.menuAction(action)
+	}
+	return true
+}
+
+// menuSearch is Cmd/Ctrl+K from the native menu. It matches the window
+// shortcut: in a live session it focuses the composer, elsewhere it opens the
+// session search. The focus request waits for the next frame because the
+// composer handle is only bound while the composer renders.
+func (a *App) menuSearch() {
+	if a.Screen == Session && a.Ctrl != nil {
+		a.focusComposerOnFrame = true
+		return
+	}
+	a.openPalette()
 }
 
 // compile-time assertion that the session settings type stays the source of

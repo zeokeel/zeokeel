@@ -6,18 +6,23 @@ import (
 	"github.com/zeokeel/zeokeel/internal/design"
 )
 
-// Session screen geometry shared with the live renderer (session_live.go,
-// trajectory.go and the layout helpers).
-const (
-	sessHeaderH   float32 = 76
-	sessTabsH     float32 = 25
-	sessColumnW   float32 = 845
-	sessGutter    float32 = 8
-	sessComposerW float32 = 877
+// Session layout on the brand spacing grid (design.Space1 = 4 DIPs). The
+// centered transcript and the composer share one column width, 180 units =
+// 720 DIPs, like the Home composer; layout.go clamps that column for narrow
+// windows and a docked panel. sessTabsH is also read by the Chat/Trajectory
+// tab row in trajectory.go so the header stays one piece.
+var (
+	sessTabsH     = 7 * design.Space1   // 28 DIP tab row
+	sessColumnW   = 180 * design.Space1 // 720 DIP centered transcript column
+	sessComposerW = 180 * design.Space1 // 720 DIP centered composer card
 )
 
-// sessModeIcon is the 14x14 line icon in the session header's mode slot.
+// sessModeIcon is the line icon in the session header's mode chip.
 var sessModeIcon = homeIconTune
+
+// minSessionColumnW is the narrowest centered column the session keeps before
+// the window itself limits it.
+const minSessionColumnW float32 = 70 * design.Space1 // 280 DIPs
 
 // session draws the Chat tab of a session: header, transcript, composer.
 // The live snapshot is the only renderer; the retired static transcript is

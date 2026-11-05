@@ -143,6 +143,15 @@ type App struct {
 	// to choose the JSONL export path. Tests inject a fake; nil falls back to a
 	// deterministic file under the workspace root.
 	SaveSessionLog func(suggestedPath string) (string, error)
+	// menuAction receives every native-menu command routed through
+	// HandleMenuAction. The desktop shell registers it with SetMenuAction, so
+	// internal/shell never imports mygo or internal/app; a nil handler leaves
+	// process-level commands (Quit) inert, which is what headless tests want.
+	menuAction func(action string)
+	// focusComposerOnFrame asks the next frame to focus the live composer.
+	// The native Search menu command sets it on the session screen so its
+	// Cmd/Ctrl+K accelerator behaves like the window shortcut.
+	focusComposerOnFrame bool
 
 	// Workspace and session-search state. All of it is default-off in the
 	// static App{Ctrl: nil}, so the baseline render path is untouched.
@@ -197,6 +206,15 @@ type App struct {
 	// wsHoverCloseAt is when a hover card the pointer left closes; the
 	// delay covers the gap between a row and the card beside it.
 	wsHoverCloseAt time.Time
+	// sidebarSel is the native Sidebar's choice, as "nav:plugins",
+	// "nav:automation", "ws:<id>" or "s:<id>". The sidebar recomputes it from
+	// the screen each frame and turns a new choice into navigation once the
+	// Sidebar is built (sidebarCanonicalSelection/sidebarChoice).
+	sidebarSel string
+	// sidebarChosenByPointer records that the choice came from a click on a
+	// row this frame, so a click can collapse the open workspace while the
+	// arrow keys only move the selection.
+	sidebarChosenByPointer bool
 
 	// Workspace ordering comes from the ui.workspace_order settings key,
 	// read once and cached; drag/drop writes it back. Pinned sessions come
@@ -283,6 +301,15 @@ func (a *App) View(c *ui.Context) {
 		a.chromeSettingsShortcuts(c)
 	}
 	a.shellOverlays(c, t)
+
+	// A native-menu command that needs the composer focused (Search on the
+	// session screen) could not call Focus when it ran: the handle is only
+	// bound while the session composer renders. Focus it now that this frame's
+	// tree exists.
+	if a.focusComposerOnFrame {
+		a.focusComposerOnFrame = false
+		a.focusComposer(c)
+	}
 }
 
 // backgroundScreen is the screen behind the Settings modal. Settings is an
@@ -339,180 +366,39 @@ func (a *App) mainScreen(c *ui.Context, t *design.Tokens) {
 	}
 }
 
+// sidebar draws the left sidebar: the brand row, the primary New Session
+// action, the native mygo Sidebar carrying the app destinations and the
+// workspace → session tree, and the More account footer. The Sidebar owns the
+// selection, the arrow keys, the first-letter search, the scroll and the
+// accessibility tree; the rows compose native controls for their inline
+// actions instead of hand-drawn DSH rows.
 func (a *App) sidebar(c *ui.Context, t *design.Tokens) {
-	// The live shell can collapse to a narrow icon rail; the static demo
-	// shell always keeps the full sidebar so its pixels stay fixed.
+	// A live shell can collapse to the icon rail; the reopen control and
+	// Cmd/Ctrl+B stay reachable there.
 	if a.Ctrl != nil && a.sidebarCollapsed {
 		a.sidebarRail(c, t)
 		return
 	}
+	// Recompute the native Sidebar's choice from the screen before building
+	// it: a click or an arrow key writes a new choice while the rows build,
+	// and sidebarChoice turns it into navigation right after.
+	a.sidebarSel = a.sidebarCanonicalSelection()
+	a.sidebarChosenByPointer = false
 	design.Apply(ui.Column(c), t.Sidebar()).Children(func() {
-		// Brand row: DSH logoRow (y=6, 60 high, 12px side inset).
-		ui.Row(c).Height(60).Margin(6, 12, 0, 12).PaddingX(design.Space1).
-			AlignItems(ui.Center).Gap(design.Space2).Children(func() {
-			ui.Image(c, mark).Width(24).Height(24)
-			ui.Text(c, "ZeoKeel").FontSize(17).FontWeight(600).TextColor(t.LabelPrimary).Grow(1)
-			if a.Ctrl != nil {
-				a.collapseSidebarButton(c, t)
-			} else {
-				ui.Icon(c, icons.PanelLeft()).FontSize(16).TextColor(t.LabelSecondary)
-			}
-		})
-		// Primary action: DSH 252x38 at y=70, 14px side inset. The column
-		// has no bottom padding: the nav column's 12px top padding then
-		// starts its rows at the baseline's y=120.
-		ui.Column(c).Padding(design.Space1, 14, 0, 14).Children(func() {
-			b := design.Apply(ui.Button(c, ""), t.PrimaryButton()).
-				Width(252).Label(a.T("shell.new_session"))
-			b.Children(func() {
-				ui.Row(c).Gap(6).AlignItems(ui.Center).Children(func() {
-					ui.Icon(c, icons.CirclePlus()).FontSize(15).TextColor(t.LabelPrimary)
-					ui.Text(c, a.T("shell.new_session")).FontSize(14).FixedLineHeight(22).
-						FontWeight(500).TextColor(t.LabelPrimary)
-				})
-			})
-			if b.Clicked() {
-				a.newSession()
-			}
-		})
-		// Nav rows: y=120, 252 wide, 36 high, 4px gap. No bottom padding so
-		// the Workspaces header below starts at the baseline's y=206.
-		ui.Column(c).Padding(design.Space3, 14, 0, 14).Gap(design.Space1).Children(func() {
-			a.navRow(c, t, icons.Plugin(), a.T("shell.plugins"), a.Screen == Plugins, Plugins)
-			a.navRow(c, t, icons.Clock(), a.T("shell.automation_tasks"), a.Screen == Automation, Automation)
-		})
-		// Workspaces header: y=206, 36 high, 260 wide (12/8 inset).
-		// 4px left / 3px right padding puts the three 28px hit areas at
-		// x=176/208/240 and their right edge at 268, matching the baseline.
-		ui.Row(c).Height(36).Margin(10, 8, 0, 12).Padding(0, 3, 0, design.Space1).AlignItems(ui.Center).Children(func() {
-			ui.Text(c, a.T("shell.workspaces")).FontSize(14).FixedLineHeight(20).TextColor(t.LabelTertiary).Grow(1)
-			if a.Ctrl != nil {
-				ui.Row(c).Gap(design.Space1).AlignItems(ui.Center).Children(func() {
-					search := ui.Row(c).Size(28, 28).Center().
-						Label(a.T("shell.search_sessions")).Role(ui.RoleButton).Focusable()
-					search.Children(func() {
-						ui.Icon(c, icons.Search()).FontSize(14).TextColor(t.LabelTertiary)
-					})
-					search.OnClick(func() { a.openInlineSearch() })
-					sliders := ui.Row(c).Size(28, 28).Center().
-						Label(a.T("shell.view_options")).Role(ui.RoleButton).Focusable()
-					sliders.Children(func() {
-						ui.Icon(c, icons.Sliders()).FontSize(14).TextColor(t.LabelTertiary)
-					})
-					sliders.OnClick(func() { a.viewOptionsOpen = !a.viewOptionsOpen })
-					// DSH anchors the 268px popover to the sidebar's right
-					// edge (x=12..280), not under the trigger at x=208 where
-					// it would overlap the main column.
-					ui.PopoverBase(c, sliders, &a.viewOptionsOpen, func(panel ui.Element) {
-						panel.Background(settingsPanelColor(t)).Border(1, t.BorderL2).
-							Radius(design.RadiusLG).AttachTo(sliders, ui.AnchorBottomStart, ui.AnchorTopStart).
-							MarginStart(-196)
-						panel.Children(func() { a.viewOptionsPopover(c, t) })
-					})
-					plus := ui.Row(c).Size(28, 28).Center().
-						Label(a.T("shell.add_workspace")).Role(ui.RoleButton).Focusable()
-					plus.Children(func() {
-						ui.Icon(c, icons.FolderPlus()).FontSize(14).TextColor(t.LabelTertiary)
-					})
-					plus.OnClick(func() { a.beginAddWorkspace() })
-				})
-			} else {
-				// The static demo matches the live 28x28 hit areas (four pixels
-				// apart, right edge at x=268) so the controls clear WCAG's 24px
-				// minimum target size instead of rendering three packed glyphs.
-				ui.Row(c).Gap(design.Space1).AlignItems(ui.Center).Children(func() {
-					for _, control := range []struct {
-						icon  *ui.SVG
-						label string
-					}{
-						{icons.Search(), a.T("shell.search_sessions")},
-						{icons.Sliders(), a.T("shell.view_options")},
-						{icons.FolderPlus(), a.T("shell.add_workspace")},
-					} {
-						ui.Row(c).Size(28, 28).Center().Label(control.label).
-							Role(ui.RoleButton).Children(func() {
-							ui.Icon(c, control.icon).FontSize(14).TextColor(t.LabelTertiary)
-						})
-					}
-				})
-			}
-		})
-		// DSH's Search sessions expands inline under the Workspaces header;
-		// it is not a modal. The Cmd/Ctrl+K palette stays a separate surface.
-		if a.Ctrl != nil && a.inlineSearch {
-			a.sidebarSearchField(c, t)
+		a.sidebarBrandRow(c, t)
+		a.sidebarNewSession(c, t)
+		sidebar := ui.Sidebar(c, &a.sidebarSel, func() {
+			a.sidebarNavItems(c, t)
+			a.sidebarWorkspacesHeader(c, t)
+			a.sidebarTree(c, t)
+		}).Grow(1).Label(a.tr("Sidebar", "侧边栏")).FocusRing(false)
+		// The column already paints the brand sidebar surface: keep the
+		// native Sidebar on it instead of mygo's default control surface.
+		sidebar = sidebar.Background(t.BgSidebar)
+		if sidebar.Changed() {
+			a.sidebarChoice(c, t)
 		}
-		// Workspace rows. The static demo path keeps its fixed list so the
-		// pixel baseline is untouched; a live shell lists real sessions. The
-		// gaps mirror the live rows: 2px under a workspace row and between
-		// its sessions, 4px between workspace groups (baseline 00-home:
-		// mygo 246, sessions 282/316, ZeoKeel-Super-Agent 352).
-		if a.Ctrl != nil {
-			a.workspaceSidebar(c, t)
-		} else {
-			ui.Column(c).PaddingX(design.Space3).PaddingY(design.Space1).
-				Gap(design.Space1).Children(func() {
-				ui.Column(c).Gap(2).Children(func() {
-					a.workspaceRow(c, t, "mygo", true)
-					a.sessionRow(c, t, a.T("shell.new_session"), a.T("common.now"), true)
-					a.sessionRow(c, t, a.T("common.untitled"), a.T("time.minutes_short", 6), false)
-				})
-				a.workspaceRow(c, t, "ZeoKeel-Super-Agent", false)
-				a.workspaceRow(c, t, "ZeoKeel", false)
-				a.workspaceRow(c, t, "ZeoKeel-Next", false)
-			})
-		}
-		ui.Text(c, "").Grow(1)
 		a.moreFooter(c, t)
-	})
-}
-
-func (a *App) navRow(c *ui.Context, t *design.Tokens, ic *ui.SVG, label string, active bool, target Screen) {
-	row := ui.Row(c).Height(36).Width(252).PaddingX(design.Space2).Gap(design.Space2).
-		Radius(design.RadiusMD).AlignItems(ui.Center).
-		Label(label).Role(ui.RoleButton).Focusable()
-	if active || row.Hovered() {
-		row = row.Background(t.BgHover)
-	}
-	row.Children(func() {
-		if ic != nil {
-			ui.Icon(c, ic).FontSize(16).TextColor(t.LabelSecondary)
-		}
-		ui.Text(c, label).FontSize(14).FixedLineHeight(22).TextColor(t.LabelPrimary)
-	})
-	row.OnClick(func() { a.Screen = target })
-}
-
-func (a *App) sessionRow(c *ui.Context, t *design.Tokens, label, when string, selected bool) {
-	// A flat row, not a Surface-filled Button: the baseline paints every
-	// unselected sidebar row on the sidebar color and only tints the selected
-	// one. The Button widget would keep its 1px border and white surface.
-	row := ui.Row(c).Height(32).Width(256).PaddingX(design.Space2).Gap(design.Space1).
-		AlignItems(ui.Center).Label(label).Role(ui.RoleButton).Focusable()
-	if selected {
-		row = row.Background(t.BgHover).Radius(design.RadiusSM)
-	}
-	row.Children(func() {
-		// DSH's 16px leading status slot puts the title at x=40 and the
-		// timestamp at 10/16. The selected New Session draft row has the
-		// slot but no dot; an existing session shows its idle dot.
-		ui.Row(c).Size(16, 16).Center().Children(func() {
-			if !selected {
-				ui.Box(c).Size(6, 6).Radius(design.RadiusMax).Background(t.BorderL3)
-			}
-		})
-		ui.Text(c, label).FontSize(14).FixedLineHeight(20).TextColor(t.LabelPrimary).Grow(1)
-		ui.Text(c, when).FontSize(10).FixedLineHeight(16).TextColor(t.LabelTertiary)
-	})
-	row.OnClick(func() {
-		a.Screen = Session
-		if a.Ctrl != nil {
-			if sessions, err := a.Ctrl.ListSessions(context.Background()); err == nil && len(sessions) > 0 {
-				if _, err := a.Ctrl.OpenSession(context.Background(), sessions[0].ID); err == nil {
-					a.Screen = Session
-				}
-			}
-		}
 	})
 }
 

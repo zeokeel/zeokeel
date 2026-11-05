@@ -4,12 +4,17 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"image/png"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
 	"time"
 
 	"github.com/egoist/mygo/ui"
+
+	"github.com/zeokeel/zeokeel/internal/design"
 
 	"github.com/zeokeel/zeokeel/internal/runtime"
 	"github.com/zeokeel/zeokeel/internal/session"
@@ -408,5 +413,112 @@ func TestArtifactCardListsPresentedArtifact(t *testing.T) {
 	}
 	if !tester.HasText("All tests passed.") {
 		t.Fatalf("inline Markdown missing after expanding; texts: %v", tester.Texts())
+	}
+}
+
+// sessionPreviewSnapshot is one complete, representative turn for the brand
+// preview: a user bubble, a Markdown answer, two finished tool calls and a
+// usage row, so the screenshot shows the message and tool-card surfaces.
+func sessionPreviewSnapshot() *state.Snapshot {
+	snap := state.NewSnapshot()
+	snap.Phase = state.PhaseIdle
+	snap.Messages = []state.Message{
+		{MsgID: "u1", Role: state.RoleUser, Text: "帮我把 README 更新成品牌主题说明，然后跑一下测试。"},
+		{MsgID: "a1", Role: state.RoleAssistant, Text: "## 已完成\n\n- 更新了 `README.md` 的品牌小节\n- 运行 `go test ./...`，全部通过\n\n```go\nfunc main() {\n\tfmt.Println(\"hello, ZeoKeel\")\n}\n```"},
+	}
+	snap.Tools = map[string]state.ToolState{
+		"c1": {
+			CallID: "c1", Name: "bash", Status: state.ToolDone,
+			Args:   json.RawMessage(`{"cmd":"go test ./..."}`),
+			Result: "ok  github.com/zeokeel/zeokeel/internal/shell  37s",
+		},
+		"c2": {
+			CallID: "c2", Name: "read_file", Status: state.ToolDone,
+			Args:   json.RawMessage(`{"path":"README.md"}`),
+			Result: "# ZeoKeel\n\nThe native desktop agent.",
+		},
+	}
+	snap.Usage = state.Usage{Turns: 1, Steps: 3, In: 1200, Out: 640, CacheHit: 860}
+	return snap
+}
+
+// TestSessionBrandComposer pins the Session pilot's brand composer: it is the
+// Home column width (720 DIPs at the 1600 design size), built from the theme's
+// 4 DIP grid, and the native controls and labels the screens depend on are
+// still there.
+func TestSessionBrandComposer(t *testing.T) {
+	h := newLiveSnapshotApp(t, Session, sessionPreviewSnapshot())
+	h.app.Language = LangEN
+	tt := ui.NewTester(h.app.View, 1600, 1000)
+	tt.Frame()
+
+	composer, ok := tt.Find("Session composer")
+	if !ok {
+		t.Fatalf("Session composer is not labeled: %q", tt.Texts())
+	}
+	if want := 180 * design.Space1; composer.W != want {
+		t.Fatalf("Session composer width = %v, want the brand column %v", composer.W, want)
+	}
+	for _, want := range []string{"Composer input", "Add files or run commands", "Send", "Session usage"} {
+		if _, ok := tt.Find(want); !ok {
+			t.Fatalf("Session composer lost %q: %q", want, tt.Texts())
+		}
+	}
+	// The header stays one piece: title, mode chip and the Chat tab row.
+	for _, want := range []string{"Chat", "live"} {
+		if !tt.HasText(want) {
+			t.Fatalf("Session header lost %q: %q", want, tt.Texts())
+		}
+	}
+}
+
+// TestRenderSessionNativePreview renders the Session screen for brand review:
+// light and dark at the 1600x1000 design size, written to docs/design/preview
+// so the design is reproducible straight from the test.
+func TestRenderSessionNativePreview(t *testing.T) {
+	dir := filepath.Join("..", "..", "docs", "design", "preview")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatalf("create preview dir: %v", err)
+	}
+	for _, tc := range []struct {
+		name  string
+		theme string
+	}{
+		{"light", session.ThemeLight},
+		{"dark", session.ThemeDark},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			snap := sessionPreviewSnapshot()
+			h := newLiveSnapshotApp(t, Session, snap)
+			// Chinese is the product default language; the preview shows the
+			// shipped first-run look, with a meaningful session title.
+			h.app.Language = LangZH
+			id := h.ctrl.CurrentSessionID()
+			if _, err := h.ctrl.RenameSession(context.Background(), id, "品牌主题与 Session 视觉"); err != nil {
+				t.Fatalf("rename preview session: %v", err)
+			}
+			snap.SessionID = id
+			if err := h.store.SetSetting(session.SettingTheme, tc.theme); err != nil {
+				t.Fatalf("theme setting: %v", err)
+			}
+			h.app.SetSnapshot(snap)
+			img := ui.Render(h.app.View, 1600, 1000, 1)
+			path := filepath.Join(dir, "session-native-"+tc.name+".png")
+			f, err := os.Create(path)
+			if err != nil {
+				t.Fatalf("create %s: %v", path, err)
+			}
+			if err := png.Encode(f, img); err != nil {
+				f.Close()
+				t.Fatalf("encode %s: %v", path, err)
+			}
+			if err := f.Close(); err != nil {
+				t.Fatalf("close %s: %v", path, err)
+			}
+			if fi, err := os.Stat(path); err != nil || fi.Size() == 0 {
+				t.Fatalf("preview %s is empty: %v", path, err)
+			}
+			t.Logf("wrote %s", path)
+		})
 	}
 }

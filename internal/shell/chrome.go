@@ -15,10 +15,12 @@ import (
 // Chrome geometry and the compact controls shared by the collapsed left
 // sidebar and the right sidebar header.
 const (
-	// sidebarRailWidth is the collapsed sidebar: 64px of icons only.
+	// sidebarRailWidth is the brand's collapsed sidebar: the 64 DIP icon rail,
+	// the theme's Space(16) at the brand's 4 DIP grid.
 	sidebarRailWidth float32 = 64
-	// chromeIconSize is a header icon button's 28x28 hit area, as DSH's
-	// iconButton controls are.
+	// chromeIconSize is a header icon button's 28x28 hit area: the theme's
+	// Space(7), the smallest desktop control that still clears WCAG's 24 DIP
+	// target.
 	chromeIconSize float32 = 28
 )
 
@@ -72,36 +74,87 @@ func (a *App) overlayShortcut(el ui.Element, id string, mods ui.Modifiers, key u
 	return el.OverlayShortcut(mods, key)
 }
 
-// collapseSidebarButton is the brand row's 28x28 collapse control (DSH's
-// "Collapse sidebar"). It exists only in the live shell.
+// sidebarBrandRow is the sidebar's top row: the brand mark, the ZeoKeel
+// wordmark and the collapse control, all on the theme's spacing grid. The
+// wordmark is sized in rem off the brand's 14 DIP base instead of a sampled
+// pixel value, so it follows the theme's type scale.
+func (a *App) sidebarBrandRow(c *ui.Context, t *design.Tokens) {
+	th := t.Theme()
+	ui.Row(c).Padding(th.Space(4), th.Space(3), th.Space(2)).AlignItems(ui.Center).
+		Gap(th.Space(2)).Children(func() {
+		ui.Image(c, mark).Size(th.Space(6), th.Space(6))
+		ui.Text(c, "ZeoKeel").FontSize(th.Rem(1.25)).FixedLineHeight(th.Rem(1.7)).
+			FontWeight(600).TextColor(t.LabelPrimary).Grow(1).MaxLines(1).Ellipsis("…")
+		if a.Ctrl != nil {
+			a.collapseSidebarButton(c, t)
+		}
+	})
+}
+
+// sidebarNewSession is the sidebar's primary action: a native ButtonBase in
+// the brand accent, so pointer, Enter/Space, focus and the pressed state are
+// mygo's instead of a hand-drawn button. The row keeps the theme's corner and
+// spacing; its label is the control's accessible name too.
+func (a *App) sidebarNewSession(c *ui.Context, t *design.Tokens) {
+	th := t.Theme()
+	ui.Row(c).Padding(0, th.Space(3), th.Space(2)).Children(func() {
+		button := ui.ButtonBase(c).Height(th.Space(9)).Grow(1).Radius(th.Radius).
+			Background(t.Accent).Label(a.T("shell.new_session"))
+		switch {
+		case button.Pressed():
+			button = button.Background(t.AccentPressed)
+		case button.Hovered():
+			button = button.Background(t.AccentHover)
+		}
+		button.Children(func() {
+			ui.Row(c).Gap(th.Space(2)).AlignItems(ui.Center).Children(func() {
+				ui.Icon(c, icons.CirclePlus()).Size(th.Space(4), th.Space(4)).
+					TextColor(t.AccentText)
+				ui.Text(c, a.T("shell.new_session")).FontSize(th.FontSize).
+					FixedLineHeight(th.Space(5)).FontWeight(500).TextColor(t.AccentText)
+			})
+		})
+		if button.Clicked() {
+			a.newSession()
+		}
+	})
+}
+
+// collapseSidebarButton is the brand row's collapse control: a native
+// ButtonBase at the theme's control size, so it takes the focus and Enter and
+// Space like every other button.
 func (a *App) collapseSidebarButton(c *ui.Context, t *design.Tokens) {
-	button := ui.Row(c).Size(chromeIconSize, chromeIconSize).Center().
-		Radius(design.RadiusSM).Label(a.tr("Collapse sidebar", "收起侧边栏")).
-		Role(ui.RoleButton).Focusable()
+	th := t.Theme()
+	label := a.tr("Collapse sidebar", "收起侧边栏")
+	button := ui.ButtonBase(c).Size(th.Space(7), th.Space(7)).Radius(design.RadiusSM).
+		Label(label).Tooltip(label)
 	if button.Hovered() {
 		button = button.Background(t.BgHover)
 	}
 	button.Children(func() {
-		ui.Icon(c, icons.PanelLeft()).FontSize(16).TextColor(t.LabelSecondary)
+		ui.Icon(c, icons.PanelLeft()).Size(th.Space(4), th.Space(4)).TextColor(t.LabelSecondary)
 	})
 	button.OnClick(func() { a.sidebarCollapsed = true })
 }
 
-// sidebarRail is the collapsed 64px sidebar: the brand mark, an always
-// visible expand control, the primary actions and the workspace roots as
-// icon rows. Every screen shares this rail, so the reopen control is
-// always reachable; Cmd/Ctrl+B also toggles the sidebar from anywhere.
+// sidebarRail is the collapsed 64 DIP sidebar: the brand mark, an always
+// visible expand control, the primary actions and the workspace roots as icon
+// rows. Every screen shares this rail, so the reopen control is always
+// reachable; Cmd/Ctrl+B also toggles the sidebar from anywhere. The rows are
+// native ButtonBases so each keeps the framework's focus, Enter/Space and
+// Tooltip behavior.
 func (a *App) sidebarRail(c *ui.Context, t *design.Tokens) {
+	th := t.Theme()
 	design.Apply(ui.Column(c), t.Sidebar()).Width(sidebarRailWidth).Children(func() {
-		ui.Row(c).Height(48).Center().Children(func() {
-			ui.Image(c, mark).Size(24, 24)
+		ui.Row(c).Height(th.Space(12)).Center().Children(func() {
+			ui.Image(c, mark).Size(th.Space(6), th.Space(6))
 		})
-		ui.Row(c).PaddingX(design.Space2).Children(func() {
+		ui.Row(c).PaddingX(th.Space(2)).Children(func() {
 			expand := chromeIconRow(c, t, a.tr("Expand sidebar", "展开侧边栏"), icons.PanelLeft(), false)
 			expand.OnClick(func() { a.sidebarCollapsed = false })
 		})
-		ui.Column(c).Padding(design.Space1, design.Space2, design.Space2, design.Space2).
-			Gap(design.Space1).Children(func() {
+		ui.Column(c).Padding(th.Space(1), th.Space(2), th.Space(2), th.Space(2)).
+			Gap(th.Space(1)).Children(func() {
 			newButton := chromeIconRow(c, t, a.T("shell.new_session"), icons.CirclePlus(), false)
 			newButton.OnClick(func() { a.newSession() })
 
@@ -110,10 +163,9 @@ func (a *App) sidebarRail(c *ui.Context, t *design.Tokens) {
 			automation := chromeIconRow(c, t, a.T("shell.automation_tasks"), icons.Clock(), a.Screen == Automation)
 			automation.OnClick(func() { a.Screen = Automation })
 
-			ui.Box(c).Height(1).Margin(design.Space1, design.Space1, design.Space1, design.Space1).
-				Background(t.BorderL2)
+			ui.Box(c).Height(1).Margin(th.Space(1)).Background(t.BorderL2)
 
-			if workspaces, err := a.workspaceList(); err == nil {
+			if workspaces, err := a.workspaceList(); err == nil && a.Ctrl != nil {
 				current := a.Ctrl.CurrentWorkspaceID()
 				for _, ws := range workspaces {
 					workspace := ws
@@ -130,8 +182,8 @@ func (a *App) sidebarRail(c *ui.Context, t *design.Tokens) {
 			add := chromeIconRow(c, t, a.T("workspace.add_workspace"), icons.FolderPlus(), false)
 			add.OnClick(func() { a.beginAddWorkspace() })
 		})
-		ui.Text(c, "").Grow(1)
-		ui.Row(c).Padding(0, design.Space2, design.Space2, design.Space2).Children(func() {
+		ui.Spacer(c).Grow(1)
+		ui.Row(c).Padding(0, th.Space(2), th.Space(2), th.Space(2)).Children(func() {
 			more := chromeIconRow(c, t, a.T("menu.more"), icons.More(), a.moreOpen)
 			more.Expanded(a.moreOpen)
 			more.OnClick(func() {
@@ -143,24 +195,27 @@ func (a *App) sidebarRail(c *ui.Context, t *design.Tokens) {
 	})
 }
 
-// chromeIconRow is one 48x36 icon-only rail row. The label is its
-// accessible name and the tester's click target; there is no visible text,
-// which is what "icons only" means.
+// chromeIconRow is one icon-only rail row: a native ButtonBase at the theme's
+// rail metrics. The label is its accessible name, the tooltip and the
+// tester's click target; there is no visible text, which is what "icons only"
+// means.
 func chromeIconRow(c *ui.Context, t *design.Tokens, label string, icon *ui.SVG, active bool) ui.Element {
-	row := ui.Row(c).Size(48, 36).Center().Radius(design.RadiusSM)
-	if active {
+	th := t.Theme()
+	row := ui.ButtonBase(c).Size(th.Space(12), th.Space(9)).Radius(design.RadiusSM).
+		Label(label).Tooltip(label)
+	switch {
+	case active:
 		row = row.Background(t.BgHover)
-	} else if row.Hovered() {
+	case row.Hovered():
 		row = row.Background(t.BgHover)
 	}
-	row = row.Label(label).Role(ui.RoleButton).Focusable()
 	if icon != nil {
 		row.Children(func() {
 			color := t.LabelSecondary
 			if active {
-				color = t.LabelPrimary
+				color = t.Accent
 			}
-			ui.Icon(c, icon).FontSize(16).TextColor(color)
+			ui.Icon(c, icon).Size(th.Space(4), th.Space(4)).TextColor(color)
 		})
 	}
 	return row
