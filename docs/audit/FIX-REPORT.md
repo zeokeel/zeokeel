@@ -173,11 +173,12 @@ unshare -n xvfb-run -a -s '-screen 0 1600x1000x24' bash -c 'ZEOKEEL_DATA_DIR=/tm
 | FP-05 UI diff | 会话内「工作区变更」卡（A/M/D、点击 Files 打开、重开回放） | verifier-ui 真跑 CONFIRMED |
 | FP-11 checkpoint 恢复 | checkpoint 阶段消费 + 中断回合恢复语义 | 恢复回归测试 |
 | FP-06 presets/persona | 内置 3 + 用户 JSON（字段级合并/fail-closed）、工具白名单（零匹配 fail-closed）、persona/prompt 注入、per-session model、设置页+picker、用户指南 | verifier 端到端 CONFIRMED；product 真跑；fail-open 修复 |
-| PD-12 全局快捷键 | Windows RegisterHotKey 真实现；**Linux/X11 purego dlopen libX11 真实现**（无 cgo/新依赖，4 组 lock-mask、ErrOccupied、headless 降级）；macOS/Wayland DEFERRED | 真 Xvfb 冒烟 + 6 目标交叉编译 |
+| PD-12 全局快捷键 | Windows RegisterHotKey 真实现；**Linux/X11 purego dlopen libX11 真实现**；**macOS Carbon/purego 实现（compile-only 验证，待真机）**；Wayland DEFERRED | 真 Xvfb 冒烟 + 6 目标交叉编译 + darwin build/vet/test-c |
 | PD-13/AR-03 自动更新 | `internal/updater`（HTTPS-only/SHA256/路径防护/崩溃恢复）+ `zeokeel update` CLI + GUI 检查/下载/安装（install-on-restart）；签名/托管 feed DEFERRED | 14 updater 测试 + cmd e2e + GUI 状态机测试 |
 | ACP/SDK 最小协议 | JSON-RPC 2.0 stdio server（initialize/session/prompt/cancel/updates）+ `zeokeel acp` + app adapter e2e + ACP P3 顺序竞态修复 | 13 作者测试 + 6 独立探针 + cmd stdio 冒烟 |
 | AR-05/07/09 | Controller 单一折叠（Projector deprecated）；`messages.ordinal` 回填/排序；有序迁移+事务+`backups/`+`schema_migrations`+旧库拒绝 | verifier 探针 + bench 2→1 折叠 |
 | AR-08/14/20/22 | 会话打开/列表异步；UX-14 顶部带 pass-through toast；runtime.run 161→48 行、cli.go 130→72；ApplyBatch ~700× | 真跑截图 + benchmark |
+| AR-04（进行中，P1 完成） | shell 增量分层：wave2/3 已模块化解耦；**P1：抽离 `internal/i18n`（shell i18n.go 660→190，shell 生产 LOC −470）+ read-model/async 已 DONE**；P0 剩余（kit/text 纯函数包）与 P2–P4 按 `docs/design/shell-refactor-plan.md` | shell 测试全绿、LOC 数据、plan 验收标准 |
 | P3 遗留 | skills root 锚定 workspace、旧 manifest 迁移幂等、spill TOCTOU（Linux openat O_NOFOLLOW）、keyless 仅 http(s)、automation run-now 回滚、首启 setup 卡回归修复 | 定向测试 + 干净快照验证 |
 
 ### 9.3 TDD 证据
@@ -191,9 +192,9 @@ unshare -n xvfb-run -a -s '-screen 0 1600x1000x24' bash -c 'ZEOKEEL_DATA_DIR=/tm
 
 ### 9.5 残余清单（全部为外部条件/框架/大重构，非未处理缺陷）
 1. 签名/公证/托管更新 feed/Windows 安装器实际构建（需证书与发布账号；代码/CI/脚本就绪，安装器为未编译草案）。
-2. 真机矩阵：Windows/macOS 安装包、IME、屏幕阅读器、高 DPI、系统通知、macOS 全局快捷键（需真机/证书）。
+2. 真机矩阵：Windows/macOS 安装包、IME、屏幕阅读器、高 DPI、系统通知；**macOS 全局快捷键已实现（Carbon/purego，compile-only 通过），需真机验证符号/ABI/主线程投递，失败降级 ErrUnsupported 并回退 CGEventTap 方案**。
 3. Wayland-only 全局快捷键（需 D-Bus GlobalShortcuts portal；X11/XWayland 已支持）；X11 按住重复触发建议 debounce。
-4. AR-04 shell 整体分层重构（已增量模块化，计划见 `docs/design/shell-refactor-plan.md`；风险高、非用户可见）。
+4. AR-04 shell 整体分层重构：**P1 已完成**（read-model/async + `internal/i18n` 抽离，shell 生产 LOC −470）；P0 剩余 `shell/kit`/`shell/text` 纯函数包与 P2–P4（App 字段/方法收敛、screens 拆分）按 `docs/design/shell-refactor-plan.md` 分轮推进（风险高、非用户可见；不影响功能/发布）。
 5. per-session MCP manager 共享优化（当前每会话 bundle 自带 MCP 子进程，规模增大需共享池）。
 6. ACP/SDK 完整面（session/load/list、authenticate、client fs/terminal、request_permission 等 non-goals 已文档化）。
 7. 真实模型长回合 E2E 与真实 HTTPS feed（本环境仅 fake provider / httptest）。
@@ -201,5 +202,6 @@ unshare -n xvfb-run -a -s '-screen 0 1600x1000x24' bash -c 'ZEOKEEL_DATA_DIR=/tm
 ## 10. 最终结论
 
 - 审计 P0/P1 全部关闭；用户「除 PTC/语音外全部做好」的指令在可执行范围内全部完成，且全部按 TDD 开发并留有可复跑证据。
-- 当前 HEAD（`b8918f1` + 本报告提交）通过全量门禁与干净 checkout CI，26 个 Go 包测试全绿；独立验证覆盖核心/UI/产品三面。
+- 当前 HEAD（`4b9203f` + 本报告提交）通过全量门禁与干净 checkout CI，26 个 Go 包测试全绿；独立验证覆盖核心/UI/产品三面。
+- AR-04 采用增量收敛：P1（read-model/async + i18n 抽离）已完成并纳入门禁，P2–P4 有可执行计划与验收标准。
 - 产品定位：功能完整的桌面 AI Agent 技术预览/内测 beta；正式发布只差外部发布基建（签名/公证/托管 feed）与真机矩阵，以及可选的大重构（AR-04/MCP 池）。
