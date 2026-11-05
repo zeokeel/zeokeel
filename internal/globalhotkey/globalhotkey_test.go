@@ -287,11 +287,14 @@ func TestNewPlatformSupport(t *testing.T) {
 			t.Fatalf("New() on linux err = %v, want ErrUnsupported when headless", err)
 		}
 	case "darwin":
-		if !errors.Is(err, ErrUnsupported) {
-			t.Fatalf("New() on %s err = %v, want ErrUnsupported", runtime.GOOS, err)
-		}
-		if m != nil {
-			t.Fatalf("New() on %s returned a manager with ErrUnsupported", runtime.GOOS)
+		// Carbon is available in a GUI session (headless CI: ErrUnsupported).
+		if err == nil {
+			if m == nil {
+				t.Fatal("New() on darwin = nil manager, nil error")
+			}
+			_ = m.Close()
+		} else if !errors.Is(err, ErrUnsupported) {
+			t.Fatalf("New() on darwin err = %v, want ErrUnsupported when Carbon/GUI is unavailable", err)
 		}
 	default:
 		if !errors.Is(err, ErrUnsupported) {

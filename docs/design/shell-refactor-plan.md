@@ -1,18 +1,33 @@
 # `internal/shell` 重构计划（AR-04）
 
-> 状态：**PARTIAL（已做增量模块化，整体重构 DEFERRED）** · 日期：2026-11-06 · 基线 `HEAD=20e98d4`（+ 工作树）
+> 状态：**🟡 IN PROGRESS（P1 完成；i18n 抽离完成；P2–P4 按计划）** · 更新：2026-11-06 Round 5 · 基线 `HEAD=68d5468`
 > 关联：[BUGS AR-04](../BUGS.md)（P2）、[AR-08](../BUGS.md)（UI 线程同步 DB）、[known-limitations §3.9](../design/known-limitations.md)
-> 本文只记录现状与分批计划，**本轮不实施**；每阶段完成后回写 BUGS/STATUS。
+> 本文记录现状、增量进度与分批计划；P1 已落地、P2–P4 未实施；每阶段完成后回写 BUGS/STATUS。
+
+## 0. 进度快照（Round 5，2026-11-06）
+
+| 阶段 | 状态 | 说明 |
+| --- | --- | --- |
+| 已完成增量步骤（wave2/3） | ✅ DONE | 功能模块从 `app.go`/大文件拆出到独立文件：`manage_ui.go`(439)/`settings_extra.go`(703)/`presets_ui.go`(500)/`session_errors.go`(165)/`session_open_async.go`(144)/`sessions_cache_async.go`(137)/`workspace_changes_ui.go`(91)/`draft_scope.go`(228)/`plan_ui.go`(475)/`message_actions.go`(380)/`files_native.go`(109)/`files_preview.go`(75)/`files_root.go`(276)/`buildinfo.go`(57) 等 |
+| **P1**（read-model/async 拆分） | ✅ DONE | 读模型缓存与异步入口落地：`sessions_cache_async.go`（会话列表缓存刷新）、`session_open_async.go`（打开会话异步化）、`workspace_changes_ui.go`（工作区变更视图）、`draft_scope.go`（草稿作用域）；剩余同步路径归入 AR-08（仍 OPEN） |
+| i18n 抽离（本轮） | ✅ DONE | 新包 `internal/i18n`（`i18n.go` 87 + `catalog.go` 465 = **552 生产行**；`i18n_test.go` 91 行）；shell `i18n.go` **660→190 行（−470）**，shell 生产 LOC **23,231→22,761（−470）**；`Lang = i18n.Lang` 保持调用点；残留：shell `translation`/`translations` 兼容视图（~18 行 + init 一次 map 拷贝），建议目录断言迁到 `internal/i18n` 后删除 |
+| P0（纯函数独立 `shell/kit`/`shell/text` 包） | 🟡 PARTIAL | i18n 抽离已完成（见上）；树/排序/格式化等纯函数仍留在 shell 文件内（`shell/kit`/`shell/text` 包未拆）→ 归入 P2 前置 |
+| P2（actions 命令层 + 异步队列） | ⏸ 按计划（未实施） | 计划见 §4 |
+| P3（大屏拆包 + import 边界门禁） | ⏸ 按计划（未实施） | 计划见 §4 |
+| P4（`app.go` 生命周期拆分） | ⏸ 按计划（未实施） | 计划见 §4 |
+
+
 
 ## 1. 现状（2026-11-06 实测）
 
 | 指标 | 数值 |
 | --- | --- |
-| `internal/shell` 生产代码 | **57 文件 / 22,865 行** |
-| `internal/shell` 测试代码 | 89 文件 / 24,784 行（测试≈生产） |
-| 全仓 Go | 149,156 行（shell 占 ~15%） |
+| `internal/shell` 生产代码 | **57 文件 / 22,761 行**（i18n 抽离后；抽离前 23,231；初稿基线 HEAD 20e98d4：22,865） |
+| `internal/shell` 测试代码 | 90 文件 / 25,178 行（初稿基线：89 文件/24,784 行；测试≈生产） |
+| 全仓 Go | ~149k 行（shell 占 ~15%） |
 | `App` struct 定义 | `internal/shell/app.go` **262 行**（状态 + 依赖 + 窗口/设置窗口 seam） |
-| `App` 方法数 | **711**（`grep -c "func (a \*App)"` 全包合计） |
+| `App` 方法数 | **715**（`grep -c "func (a \*App)"` 全包合计；初稿基线 711） |
+| i18n 抽离（本轮） | ✅ 完成：`internal/shell/i18n.go` **660→190 行（−470）**；新包 `internal/i18n` **552 生产行**；shell 生产 LOC 23,231→22,761；验收 gofmt/vet/build/test 绿（详见 §0） |
 | 最大生产文件 | `workspaces.go` 1,504 · `right_sidebar.go` 1,232 · `settings_ui.go` 1,033 · `composer_slash.go` 989 · `session_live.go` 933 · `plugin_details.go` 858 · `composer_menus.go` 843 · `automation_ui.go` 794 · `models_ui.go` 763 · `session_search.go` 741 |
 | 直接内部依赖 | `store`、`session`、`state`、`runtime`、`tools`、`automation`、`winproc`、`design`、`brand`、`icons`（10 个；view 文件里直接调 `store`/`Ctrl`） |
 | 已模块化的新文件（wave2/3 增量） | `manage_ui.go` 439 · `settings_extra.go` 703 · `presets_ui.go` 500 · `session_errors.go` 165 · `session_open_async.go` 144 · `sessions_cache_async.go` 137 · `workspace_changes_ui.go` 91 · `draft_scope.go` 228 · `buildinfo.go` 57 · `plan_ui.go` 475 |
@@ -86,6 +101,6 @@ shell/app      生命周期、窗口/tray/settings-window seam、组装（不承
 
 ## 7. 跟踪
 
-- BUGS `AR-04` 保持 **PARTIAL**（已增量模块化），P1 完成前不标 DONE；P0 完成即可把
-  "God-package 风险"描述从"未动"改为"已开始分层"。
+- BUGS `AR-04` 更新为 **🟡 IN PROGRESS**：P1（read-model/async 拆分）已完成；i18n 抽离已完成（shell −470 行 → `internal/i18n` 552 行）；P0 其余（`shell/kit`/`shell/text` 纯函数包）与 P2–P4 按 §4 计划推进（未实施）。
+- 每阶段完成时的证据：wave2/3 增量模块 = 文件清单与 LOC（§0/§1）；i18n 抽离 = 抽离前后 shell LOC 与 `go test ./internal/shell` 绿；P2/P3/P4 完成后回填本文并同步 STATUS/BUGS。
 - 每阶段结束更新本文 §1 指标表 + BUGS/STATUS；不实施前本文即是 DEFERRED 的书面计划。

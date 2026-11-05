@@ -33,8 +33,8 @@
 
 ## 2.2 Round 3 已实现（已提交 `20e98d4`）
 
-- **产品功能**：FP-06 声明式 Presets（`internal/presets` + Presets 页 + 用户指南）；FP-16 `ask_user` 交互会话阻塞等待回答（headless/ACP 降级 pending）；自动更新 GUI 检查+下载+安装（install-on-restart；app `update_install.go`）；全局快捷键：Windows + Linux/X11（Linux 用 purego dlopen libX11，无 cgo；macOS/Wayland DEFERRED）；ACP v1 最小服务器 + `zeokeel acp` + adapter/e2e。
-- **数据/工程**：AR-07 `messages.ordinal` 持久化排序；AR-09 schema v2（有序迁移 + `backups/` 快照 + 旧版 downgrade 拒绝）；AR-20 `scrubEnv`/DDL 重复收敛；AR-05 快照折叠收敛（Controller 单一折叠，`state.Projector` deprecated，每事件折叠 2→1；app/services.go 4 行死代码已删）；UX-04 设置窗重绘 **CONFIRMED FIXED**（Linux/Xvfb 无 WM；真实 WM spot check）；AR-04 增量模块化（整体重构 DEFERRED，计划 `docs/design/shell-refactor-plan.md`）。
+- **产品功能**：FP-06 声明式 Presets（`internal/presets` + Presets 页 + 用户指南）；FP-16 `ask_user` 交互会话阻塞等待回答（headless/ACP 降级 pending）；自动更新 GUI 检查+下载+安装（install-on-restart；app `update_install.go`）；全局快捷键：Windows + Linux/X11 已实现（Linux 用 purego dlopen libX11，无 cgo）；macOS Carbon/purego 代码已实现（compile-only，待真机验证）；Wayland DEFERRED；ACP v1 最小服务器 + `zeokeel acp` + adapter/e2e。
+- **数据/工程**：AR-07 `messages.ordinal` 持久化排序；AR-09 schema v2（有序迁移 + `backups/` 快照 + 旧版 downgrade 拒绝）；AR-20 `scrubEnv`/DDL 重复收敛；AR-05 快照折叠收敛（Controller 单一折叠，`state.Projector` deprecated，每事件折叠 2→1；app/services.go 4 行死代码已删）；UX-04 设置窗重绘 **CONFIRMED FIXED**（Linux/Xvfb 无 WM；真实 WM spot check）；AR-04 **IN PROGRESS**：P1（read-model/async 拆分）完成 + wave2/3 模块化；i18n 抽离完成（新包 `internal/i18n` 552 生产行；shell `i18n.go` 660→190、生产 LOC −470）；P2–P4 按 `docs/design/shell-refactor-plan.md` 计划（未实施）。
 - **发布**：`.github/workflows/release.yml`（tag→三平台矩阵包+SHA256SUMS+GitHub Release）+ `make release`；三平台交叉编译持续验证。
 
 ## 3. 门禁（"绿"的定义）
@@ -60,13 +60,13 @@ sh scripts/evolve/gates.sh --full # 统一门禁；flaky 重跑按失败处理
 2. P1 安全/权限（RT-02/03/07/12、PD-03/05/06/07/09/10）与 UX（UX-01/02/03、PD-01）——本轮修复中。
 3. 发布链路：签名/公证与托管 update feed 为外部依赖（DEFERRED）；自动更新引擎、`zeokeel update` CLI、设置页检查+下载+安装已交付；Windows 安装器为 Inno/NSIS 可执行草案（未编译）。
 4. 迁移定位已降级；**最小导入器 + `zeokeel import` CLI 已交付**（只读 DSH、凭据只列键名）；UI 入口为设置→数据与隐私→「从 DSH 导入」**命令弹窗**（展示/复制 `zeokeel import` 命令，提示先退出应用；非应用内执行）（PD-04，技术预览）。
-5. 结构性债务：AR-04 shell God package 已增量模块化、整体重构 DEFERRED（分批计划 `docs/design/shell-refactor-plan.md`）；AR-05 快照折叠已收敛（Controller 单一折叠，Projector deprecated）；AR-08 UI 线程同步 DB 仍 OPEN；UX-04 已 CONFIRMED FIXED（Linux/Xvfb；真实 WM spot check）。
+5. 结构性债务：AR-04 **IN PROGRESS**（P1 read-model/async 已完成、i18n 抽离已完成（shell −470 行）、P2–P4 按 `docs/design/shell-refactor-plan.md` 计划）；AR-05 快照折叠已收敛（Controller 单一折叠，Projector deprecated）；AR-08 UI 线程同步 DB 仍 OPEN；UX-04 已 CONFIRMED FIXED（Linux/Xvfb；真实 WM spot check）。
 
 ## 5. 已知限制与真机项
 
 - 无真机 Windows/macOS：IME/屏幕阅读器/DPI/通知/安装包行为只能静态核对，发布前必须真机矩阵（[known-limitations §1](design/known-limitations.md)）。
 - 流中途失败不重试（已显示文本无法撤回，需重发）；流空闲超时/重试设置见 known-limitations §5。
-- 结构性债务：shell God package AR-04（PARTIAL，有分批计划）、逐 token 持久化 AR-06（PARTIAL）；AR-05（快照折叠收敛为 Controller 单一折叠/Projector deprecated）、AR-07/AR-09/AR-20 已 DONE——见 BUGS。
+- 结构性债务：shell God package AR-04（IN PROGRESS：P1 完成、i18n 抽离完成（shell −470 行）、P2–P4 按计划）、逐 token 持久化 AR-06（PARTIAL）；AR-05（快照折叠收敛为 Controller 单一折叠/Projector deprecated）、AR-07/AR-09/AR-20 已 DONE——见 BUGS。
 - wave1/2 独立验证残余（见 BUGS 与 [known-limitations §3.8](design/known-limitations.md)）：About 双版本号、PD-02b 无 key 本地 provider、PD-04 导入质量 5 项、wave2 产品面待提交后复核；UX-04 设置窗重绘已 CONFIRMED FIXED（Linux/Xvfb，真实 WM spot check）。
 - 视觉回归为 opt-in 工具（`scripts/visual-check.sh`），CI 不强制。
 
@@ -75,4 +75,4 @@ sh scripts/evolve/gates.sh --full # 统一门禁；flaky 重跑按失败处理
 1. 完成本轮 P0/P1 修复与独立验证（FIX-REPORT）；确保 CI 在干净树上绿。
 2. 迁移导入质量（PD-04 wave3）：过滤 DSH 注入上下文、按 turn 聚合 step 消息、幂等/去重、图片统计（均已补）、运行中实例检测/旧 manifest 兼容；导入 UI 为命令弹窗，非应用内执行；补齐后才可称"支持迁移"。
 3. 发布前真机矩阵 + 签名/公证与托管 update feed（DEFERRED，需外部条件；引擎/CLI/GUI 更新链路已交付）。
-4. 结构性债务分批：AR-05 已收敛（Controller 单一折叠）；剩余 AR-06 events 保留策略/AR-22 快照 O(n) 拷贝 → AR-04 shell 分层（先用 `shell-refactor-plan` P0/P1 做增量分层，L 项整体重构 DEFERRED）。
+4. 结构性债务分批：AR-05 已收敛（Controller 单一折叠）；剩余 AR-06 events 保留策略/AR-22 快照 O(n) 拷贝 → AR-04 shell 分层（P1 已完成、i18n 抽离已完成（shell −470 行）；P2–P4 按 `shell-refactor-plan` 推进，L 项整体重构未实施）。

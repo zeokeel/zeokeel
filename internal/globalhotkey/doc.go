@@ -37,9 +37,24 @@
 //	         after XSync) maps to ErrOccupied. Headless (no $DISPLAY) and
 //	         Wayland-only sessions without a usable X display return
 //	         ErrUnsupported.
-//	macOS:   ErrUnsupported — RegisterEventHotKey needs Carbon/Cocoa (cgo),
-//	         which violates the CGO_ENABLED=0 hard constraint; a future
-//	         CGEventTap-based helper process could be evaluated.
+//	macOS:   implemented for GUI sessions (globalhotkey_darwin.go): pure-Go
+//	         dlopen of Carbon.framework/HIToolbox via purego, using the
+//	         deprecated but still-shipped Carbon hot-key API
+//	         (GetApplicationEventTarget + InstallEventHandler +
+//	         RegisterEventHotKey, dispatch on the kEventHotKeyPressed event).
+//	         No cgo and no new module dependency. eventHotKeyExistsErr maps to
+//	         ErrOccupied; a headless/non-GUI process without an application
+//	         event target returns ErrUnsupported.
+//
+//	         Runtime caveat: this backend is cross-compiled for darwin
+//	         amd64/arm64 but was not executed on a macOS host during
+//	         development. It assumes 64-bit UPPs are plain function pointers
+//	         (the documented 64-bit ABI), the 8-byte EventHotKeyID struct is
+//	         passed as one 64-bit register (SysV/AAPCS64), and that the process
+//	         has a running AppKit/Carbon event target; failures degrade to
+//	         ErrUnsupported/ErrOccupied and never crash startup. A future round
+//	         should validate on a real Mac and otherwise keep the CGEventTap
+//	         helper-process option as a fallback.
 //
 // # Linux / Wayland deferred path
 //
