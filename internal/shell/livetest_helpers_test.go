@@ -1,6 +1,8 @@
 package shell
 
 import (
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/zeokeel/zeokeel/internal/state"
@@ -29,4 +31,20 @@ func newLiveAppWithSnapshot(t *testing.T, screen Screen, snap *state.Snapshot) *
 		h.app.SetSnapshot(snap)
 	}
 	return h
+}
+
+// previewDir is where a brand-preview PNG goes. Ordinary test runs and CI
+// write into the test's temp dir so they never dirty the work tree; run
+// ZEOKEEL_UPDATE_PREVIEWS=1 go test -run 'TestRender.*NativePreview' to
+// refresh the committed docs/design/preview snapshots on purpose.
+func previewDir(t *testing.T) string {
+	t.Helper()
+	if os.Getenv("ZEOKEEL_UPDATE_PREVIEWS") == "1" {
+		dir := filepath.Join("..", "..", "docs", "design", "preview")
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatalf("create preview dir: %v", err)
+		}
+		return dir
+	}
+	return t.TempDir()
 }

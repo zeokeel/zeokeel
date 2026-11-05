@@ -212,10 +212,7 @@ func TestAutomationRunNowWithoutHook(t *testing.T) {
 // persisted tasks for brand review: light and dark at the 1600x1000 design
 // size, written to docs/design/preview.
 func TestRenderAutomationNativePreview(t *testing.T) {
-	dir := filepath.Join("..", "..", "docs", "design", "preview")
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		t.Fatalf("create preview dir: %v", err)
-	}
+	dir := previewDir(t)
 	tasks := []store.Automation{
 		{Title: "每日构建报告", Prompt: "总结昨天的主干提交与失败构建，生成一份简短报告。", Cron: "@daily", Enabled: true},
 		{Title: "依赖安全巡检", Prompt: "检查依赖更新与已知漏洞，列出需要升级的模块。", Cron: "@hourly", Enabled: false},

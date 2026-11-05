@@ -588,10 +588,7 @@ func TestPermissionLabelsMatchBetweenSettingsAndComposer(t *testing.T) {
 // review: light and dark at the 1600x1000 design size. The PNGs are written to
 // docs/design/preview so the design is reproducible straight from the test.
 func TestRenderSettingsNativePreview(t *testing.T) {
-	dir := filepath.Join("..", "..", "docs", "design", "preview")
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		t.Fatalf("create preview dir: %v", err)
-	}
+	dir := previewDir(t)
 	for _, tc := range []struct {
 		name  string
 		theme string

@@ -4,7 +4,8 @@
 
 ```sh
 export PATH=/usr/local/go/bin:$PATH
-go test -count=1 ./internal/shell -run 'TestRender.*NativePreview'
+# 普通测试/CI 只渲染到临时目录，不写工作树；要刷新以下快照时显式开开关：
+ZEOKEEL_UPDATE_PREVIEWS=1 go test -count=1 ./internal/shell -run 'TestRender.*NativePreview'
 ```
 
 | 屏 | 浅色 | 深色 |
