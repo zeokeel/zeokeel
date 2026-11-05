@@ -85,9 +85,16 @@ func (m *providerChatModel) Stream(ctx context.Context, input []*schema.Message,
 		return nil, fmt.Errorf("runtime: provider returned nil chunk channel")
 	}
 
+	tc := turnContextFromContext(ctx)
 	sr, sw := schema.Pipe[*schema.Message](16)
 	go func() {
 		defer sw.Close()
+		if tc != nil {
+			// Count the call (a step) and raise soft budget advisories before
+			// the stream closes: eino builds the next request only after it
+			// sees EOF, so anything queued here rides that request.
+			defer tc.noteModelCall()
+		}
 		for {
 			select {
 			case <-ctx.Done():
@@ -100,6 +107,16 @@ func (m *providerChatModel) Stream(ctx context.Context, input []*schema.Message,
 				if c.Err != nil {
 					sw.Send(nil, fmt.Errorf("runtime: provider chunk: %w", c.Err))
 					return
+				}
+				if tc != nil {
+					// Track usage and identical repeated calls synchronously
+					// while converting, before eino can act on the stream.
+					if c.Usage != nil {
+						tc.noteUsageSample(c.Usage)
+					}
+					for _, call := range c.ToolCalls {
+						tc.noteToolCall(call.Name, call.Arguments)
+					}
 				}
 				msg := chunkToMessage(c)
 				last := c.Done
@@ -151,15 +168,56 @@ func (m *providerChatModel) buildRequest(ctx context.Context, input []*schema.Me
 		tools = bound
 	}
 
+	messages := messagesFromEino(injectToolImages(input))
+	// Soft advisories (cost budget crossings, repeated-tool reminders) are
+	// queued on the turn context and delivered with the next request. They ride
+	// the latest tool result, which is where the model naturally reads the
+	// outcome it is about to act on.
+	if tc := turnContextFromContext(ctx); tc != nil {
+		messages = injectAdvisories(messages, tc.takeAdvisories())
+	}
 	req := Request{
 		Model:    m.model,
-		Messages: messagesFromEino(injectToolImages(input)),
+		Messages: messages,
 		Tools:    toolSpecs(tools),
 	}
 	if sessionID, ok := ctx.Value(sessionIDContextKey{}).(string); ok {
 		req.SessionID = sessionID
 	}
 	return req
+}
+
+// injectAdvisories appends the queued advisory texts to the latest tool result
+// in the request, so the model reads them next to the result they concern. When
+// the request has no tool result yet (a plain chat request) the advisories are
+// left for the next model call: they are only useful inside a tool loop.
+func injectAdvisories(messages []Message, advisories []string) []Message {
+	if len(messages) == 0 || len(advisories) == 0 {
+		return messages
+	}
+	last := -1
+	for i := len(messages) - 1; i >= 0; i-- {
+		if messages[i].Role == RoleTool {
+			last = i
+			break
+		}
+	}
+	if last < 0 {
+		return messages
+	}
+	var b strings.Builder
+	b.WriteString(messages[last].Content)
+	for _, advisory := range advisories {
+		if advisory == "" {
+			continue
+		}
+		b.WriteString("\n\n[harness advisory] ")
+		b.WriteString(advisory)
+	}
+	out := make([]Message, len(messages))
+	copy(out, messages)
+	out[last].Content = b.String()
+	return out
 }
 
 // chunkToMessage translates one provider chunk into an eino assistant message

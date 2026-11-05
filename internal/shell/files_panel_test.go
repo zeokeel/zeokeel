@@ -193,6 +193,21 @@ func TestFilesNativeActionsStayInsideNarrowPanel(t *testing.T) {
 			t.Fatalf("%q rect %+v is outside the panel %+v", label, r, panel)
 		}
 	}
+
+	// A Markdown preview keeps the same panel bounds at the minimum width.
+	writeTestFile(t, h.dir, "notes.md", "# 标题\n\n正文\n")
+	h.app.openFilePreview("notes.md")
+	tt.Frame()
+	panel, _ = tt.Find("Right sidebar")
+	for _, label := range []string{"Markdown preview", "notes.md", "Close preview"} {
+		r, ok := tt.Find(label)
+		if !ok {
+			t.Fatalf("%q missing from the narrow Markdown preview: %v", label, tt.Texts())
+		}
+		if r.X < panel.X || r.X+r.W > panel.X+panel.W {
+			t.Fatalf("%q rect %+v is outside the panel %+v", label, r, panel)
+		}
+	}
 }
 
 // TestFilesNativeLabelsChinese pins the Chinese labels and the exact

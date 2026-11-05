@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sort"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -70,6 +71,18 @@ type Config struct {
 	// the turn (history and checkpoint are saved), the text should tell the
 	// user how to continue.
 	StepLimitNotice func(limit int) string
+	// BudgetWarnSteps and BudgetWarnTokens raise soft cost advisories after the
+	// given per-turn step/token counts are crossed, as DSH does: the advisory
+	// is injected into the tool result the model sees (and surfaced in the
+	// footer) but the turn never stops. nil means the defaults (25/50/100 steps
+	// and 200K/500K output tokens); a non-nil empty slice disables that
+	// dimension.
+	BudgetWarnSteps  []int
+	BudgetWarnTokens []int
+	// BudgetAdvisory renders the model-visible advisory text for a crossing.
+	// kind is "steps" or "tokens"; steps and tokens are the turn's totals.
+	// nil uses a concise English notice.
+	BudgetAdvisory func(kind string, steps, tokens int) string
 	// History persists conversation state across turns. Nil means the Agent is
 	// stateless and every Run starts from an empty conversation (or from
 	// CheckpointStore when that is configured).
@@ -197,7 +210,12 @@ type Agent struct {
 	// stepLimitNotice renders the assistant notice emitted when a turn reaches
 	// maxIterations; it is never nil after New.
 	stepLimitNotice func(limit int) string
-	settings        SettingsStore
+	// Soft per-turn cost advisories (never a hard stop): the thresholds are
+	// sorted once in New and the advisory renderer is never nil.
+	budgetSteps    []int
+	budgetTokens   []int
+	budgetAdvisory func(kind string, steps, tokens int) string
+	settings       SettingsStore
 
 	subagentTools    []string
 	maxSubagentDepth int
@@ -269,6 +287,12 @@ func New(cfg Config) (*Agent, error) {
 	if stepLimitNotice == nil {
 		stepLimitNotice = defaultStepLimitNotice
 	}
+	budgetSteps := normalizeWarnThresholds(cfg.BudgetWarnSteps, defaultBudgetWarnSteps)
+	budgetTokens := normalizeWarnThresholds(cfg.BudgetWarnTokens, defaultBudgetWarnTokens)
+	budgetAdvisory := cfg.BudgetAdvisory
+	if budgetAdvisory == nil {
+		budgetAdvisory = defaultBudgetAdvisory
+	}
 
 	a := &Agent{
 		registry:         registry,
@@ -283,6 +307,9 @@ func New(cfg Config) (*Agent, error) {
 		reviewContext:    cfg.ReviewContext,
 		maxIterations:    maxIterations,
 		stepLimitNotice:  stepLimitNotice,
+		budgetSteps:      budgetSteps,
+		budgetTokens:     budgetTokens,
+		budgetAdvisory:   budgetAdvisory,
 		settings:         cfg.Settings,
 		subagentTools:    append([]string(nil), cfg.SubagentTools...),
 		maxSubagentDepth: maxDepth,
@@ -645,7 +672,7 @@ func (a *Agent) run(ctx context.Context, cancel context.CancelFunc, sessionID, t
 		return
 	}
 
-	usage := &turnUsage{}
+	usage := newTurnUsage()
 	pending := make(map[string]time.Time) // CallID -> start time
 	started := make(map[string]bool)      // CallID -> ToolStart emitted
 
@@ -689,12 +716,16 @@ func (a *Agent) run(ctx context.Context, cancel context.CancelFunc, sessionID, t
 	record := newTurnRecord(inputText)
 	// Tool invocations receive a context derived from this one, so they can
 	// publish approval requests and (indirectly) contribute to the record.
-	ctx = withTurnContext(ctx, &turnContext{
-		sink:          sink,
-		record:        record,
-		userRequest:   text,
-		reviewContext: a.reviewContext,
-	})
+	turnCtx := &turnContext{
+		sink:           sink,
+		record:         record,
+		userRequest:    text,
+		reviewContext:  a.reviewContext,
+		budgetSteps:    a.budgetSteps,
+		budgetTokens:   a.budgetTokens,
+		renderAdvisory: a.budgetAdvisory,
+	}
+	ctx = withTurnContext(ctx, turnCtx)
 
 	runner := adk.NewRunner(ctx, adk.RunnerConfig{
 		Agent:           pinned.adkAgent,
@@ -827,6 +858,41 @@ func defaultStepLimitNotice(limit int) string {
 	return fmt.Sprintf(
 		"Reached this turn's step limit (%d steps). The work and results so far are saved; send another message and I'll continue from here.",
 		limit)
+}
+
+// defaultBudgetWarnSteps / defaultBudgetWarnTokens are the soft per-turn cost
+// advisories DSH-style long runs should raise (never a hard stop).
+var (
+	defaultBudgetWarnSteps  = []int{25, 50, 100}
+	defaultBudgetWarnTokens = []int{200_000, 500_000}
+)
+
+// normalizeWarnThresholds copies, drops non-positive values and sorts a
+// threshold list. A nil list means the defaults; a non-nil empty list disables
+// the dimension.
+func normalizeWarnThresholds(given, defaults []int) []int {
+	if given == nil {
+		given = defaults
+	}
+	out := make([]int, 0, len(given))
+	last := 0
+	for _, v := range given {
+		if v <= 0 || v <= last {
+			continue
+		}
+		out = append(out, v)
+		last = v
+	}
+	sort.Ints(out)
+	return out
+}
+
+// defaultBudgetAdvisory is the English advisory injected into the model's next
+// tool result when a soft budget threshold is crossed.
+func defaultBudgetAdvisory(kind string, steps, tokens int) string {
+	return fmt.Sprintf(
+		"Cost advisory (not a hard stop): this turn has run %d model steps and %d output tokens. Keep going if the work is still useful, but consider wrapping up the current step and reporting progress; the user can stop the turn if the cost is not worth it.",
+		steps, tokens)
 }
 
 // finishPendingTools closes tool calls that never produced a result, so the UI

@@ -83,6 +83,7 @@ type usagePayload struct {
 	Out        int     `json:"out"`
 	CacheHit   int     `json:"cache_hit"`
 	ContextPct float64 `json:"context_pct,omitempty"`
+	Advisory   string  `json:"advisory,omitempty"`
 }
 
 type statusPayload struct {
@@ -217,6 +218,7 @@ func encodeEvent(ev state.Event) (store.Event, error) {
 			Out:        e.Out,
 			CacheHit:   e.CacheHit,
 			ContextPct: e.ContextPct,
+			Advisory:   e.Advisory,
 		}
 	case state.Status:
 		typ = EventStatus
@@ -295,6 +297,7 @@ func decodeEvent(rec store.Event) (ev state.Event, ok bool) {
 			Out:        p.Out,
 			CacheHit:   p.CacheHit,
 			ContextPct: p.ContextPct,
+			Advisory:   p.Advisory,
 		}, true
 	case EventStatus:
 		var p statusPayload

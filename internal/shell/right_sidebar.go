@@ -7,7 +7,6 @@ import (
 	"io"
 	"os"
 	"path/filepath"
-	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -55,6 +54,17 @@ const (
 	terminalTimeout = 30 * time.Second
 )
 
+// maxFilesEntries caps one directory listing: a frame builds one row per
+// entry, so a huge level would cost the whole frame. The extra entries are
+// counted and the panel says how many are hidden. A variable so the truncation
+// test can shrink it.
+var maxFilesEntries = 2000
+
+// filesDirCacheTTL is how long a directory listing is reused before the panel
+// re-reads it; Reload invalidates it immediately. A variable so tests can pin
+// the cache without sleeping.
+var filesDirCacheTTL = time.Second
+
 // rightPanelState is the per-App state of the docked right panel. App lives in
 // app.go, which this change does not own, so the state is keyed by the App like
 // startTabState. Only the view goroutine reads it.
@@ -71,6 +81,21 @@ type rightPanelState struct {
 	// nativeErr is the transient failure of the Files tab's native open/reveal
 	// actions, shown under the preview's metadata row until the next success.
 	nativeErr string
+	// dirCache is one directory's listing, reused for filesDirCacheTTL or
+	// until Reload, a directory switch or a session switch invalidates it. The
+	// entries are already sorted (directories first, natural name order) and
+	// capped at maxFilesEntries; total is the uncapped count.
+	dirCachePath    string
+	dirCacheEntries []os.DirEntry
+	dirCacheTotal   int
+	dirCacheErr     error
+	dirCacheAt      time.Time
+	// previewKind, imageSrc and imageErr describe the file preview: the body
+	// the Files panel draws and, for an image, the decoded source or the
+	// user-facing reason it cannot be shown.
+	previewKind filesPreviewKind
+	imageSrc    ui.ImageSource
+	imageErr    string
 }
 
 var rightPanelStates sync.Map // map[*App]*rightPanelState
@@ -540,7 +565,10 @@ func (a *App) filesBreadcrumb(c *ui.Context, t *design.Tokens, root, fileLabel s
 		Children(func() {
 			// The home glyph keeps the root segment distinct from the
 			// sidebar's workspace row that shows the same name.
-			a.breadcrumbSegment(c, t, rootText, true, 0, func() {
+			// The hover shows the absolute root, so two workspaces with the
+			// same display name stay distinguishable (the Start page's
+			// Workspace files entry carries the same tooltip).
+			a.breadcrumbSegment(c, t, rootText, true, 0, a.filesRootTooltip(), func() {
 				a.filesDir = ""
 				a.filePath = ""
 				a.fileErr = ""
@@ -559,7 +587,7 @@ func (a *App) filesBreadcrumb(c *ui.Context, t *design.Tokens, root, fileLabel s
 				if i == len(visible)-1 {
 					max = lastMax
 				}
-				a.breadcrumbSegment(c, t, segment, false, max, func() {
+				a.breadcrumbSegment(c, t, segment, false, max, "", func() {
 					a.filesDir = next
 					a.filePath = ""
 					a.fileErr = ""
@@ -648,10 +676,13 @@ func (a *App) hiddenBreadcrumbSegments(c *ui.Context, t *design.Tokens, all, hid
 // it takes the focus, Enter/Space and the hover tint like every other control.
 // maxWidth > 0 bounds the label so the last visible directory ellipsizes
 // instead of pushing the pinned Reload control off the panel.
-func (a *App) breadcrumbSegment(c *ui.Context, t *design.Tokens, label string, root bool, maxWidth float32, jump func()) {
+func (a *App) breadcrumbSegment(c *ui.Context, t *design.Tokens, label string, root bool, maxWidth float32, tooltip string, jump func()) {
 	th := t.Theme()
 	item := ui.ButtonBase(c).Height(th.Space(6)).PaddingX(th.Space(1)).
 		Radius(design.RadiusXS).Label(label)
+	if tooltip != "" {
+		item = item.Tooltip(tooltip)
+	}
 	if maxWidth > 0 {
 		item = item.MaxWidth(maxWidth)
 	}
@@ -693,21 +724,21 @@ func (a *App) filesList(c *ui.Context, t *design.Tokens, root string) {
 	if a.filesDir != "" {
 		dir = filepath.Join(root, filepath.FromSlash(a.filesDir))
 	}
-	entries, err := os.ReadDir(dir)
+	entries, total, err := a.filesDirEntries(dir)
 	if err != nil {
 		a.rightEmpty(c, t, rightPanelFileIcon, fmt.Sprintf(
 			a.T("files.could_not_read_the_directory_v"), err))
 		return
 	}
-	sort.SliceStable(entries, func(i, j int) bool {
-		if entries[i].IsDir() != entries[j].IsDir() {
-			return entries[i].IsDir()
-		}
-		return strings.ToLower(entries[i].Name()) < strings.ToLower(entries[j].Name())
-	})
 	if len(entries) == 0 {
 		a.rightEmpty(c, t, icons.Folder(), a.T("files.this_directory_is_empty"))
 		return
+	}
+	if total > len(entries) {
+		ui.Text(c, fmt.Sprintf(a.T("files.showing_first_d_of_d_entries"),
+			len(entries), total)).FontSize(th.FontSize-3).
+			FixedLineHeight(th.Space(4)).TextColor(t.LabelTertiary).
+			Padding(0, th.Space(3), th.Space(1), th.Space(3))
 	}
 	ui.Scroll(c).Grow(1).Children(func() {
 		ui.Column(c).Padding(th.Space(1), th.Space(2), th.Space(2)).Gap(th.Space(0.5)).
@@ -765,11 +796,12 @@ func (a *App) fileRow(c *ui.Context, t *design.Tokens, entry os.DirEntry) {
 	row.OnClick(func() { a.openFilePreview(rel) })
 }
 
-// filePreview reads a file up to 256 KB and shows it as plain text, in the
-// brand panel: the breadcrumb says where it is, a metadata row carries the
-// size and the native Close control, and the text scrolls in both directions.
+// filePreview draws the current file in the brand panel: the breadcrumb says
+// where it is, a metadata row carries the kind/size and the native controls,
+// and the body renders by kind — plain text, Markdown, or a decoded image.
 func (a *App) filePreview(c *ui.Context, t *design.Tokens, root string) {
 	th := t.Theme()
+	panel := a.rightPanelUI()
 	name := pathBase(a.filePath)
 	a.filesBreadcrumb(c, t, root, name)
 	if a.fileErr != "" {
@@ -779,8 +811,8 @@ func (a *App) filePreview(c *ui.Context, t *design.Tokens, root string) {
 	abs, _ := safeJoin(root, a.filePath)
 	ui.Row(c).Height(th.Space(8)).PaddingX(th.Space(3)).AlignItems(ui.Center).
 		Gap(th.Space(2)).Children(func() {
-		ui.Text(c, fmt.Sprintf(a.T("files.plain_text_preview_d_bytes"),
-			len(a.fileText))).FontSize(th.FontSize - 3).FixedLineHeight(th.Space(4)).
+		ui.Text(c, a.previewMetadataLabel(panel.previewKind, len(a.fileText))).
+			FontSize(th.FontSize - 3).FixedLineHeight(th.Space(4)).
 			TextColor(t.LabelTertiary).Grow(1).MaxLines(1).Ellipsis("…")
 		// The desktop build can hand the file to the OS default application or
 		// reveal it in the file manager; the web build cannot, so these are
@@ -815,21 +847,46 @@ func (a *App) filePreview(c *ui.Context, t *design.Tokens, root string) {
 			a.fileTrunc = false
 			a.fileLimited = false
 			a.fileErr = ""
-			a.rightPanelUI().nativeErr = ""
+			panel.nativeErr = ""
+			panel.previewKind = filesPreviewText
+			panel.imageSrc = nil
+			panel.imageErr = ""
 		})
 	})
-	if msg := a.rightPanelUI().nativeErr; msg != "" {
+	if msg := panel.nativeErr; msg != "" {
 		ui.Text(c, msg).FontSize(th.FontSize-3).FixedLineHeight(th.Space(4)).
 			TextColor(t.WarningText).MaxLines(2).Ellipsis("…").
 			Padding(0, th.Space(3), 0, th.Space(3))
 	}
-	ui.ScrollBoth(c).Grow(1).Children(func() {
-		ui.Column(c).Padding(th.Space(2), th.Space(3), th.Space(3), th.Space(3)).
-			Children(func() {
-				ui.Text(c, a.fileText).FontSize(th.FontSize - 2).FixedLineHeight(th.Space(4.5)).
-					TextColor(t.LabelPrimary)
+	switch panel.previewKind {
+	case filesPreviewImage:
+		if panel.imageErr != "" {
+			a.rightEmpty(c, t, rightPanelFileIcon, panel.imageErr)
+			return
+		}
+		ui.ScrollBoth(c).Grow(1).Label(a.T("files.image_preview")).Children(func() {
+			ui.Column(c).Padding(th.Space(2), th.Space(3), th.Space(3), th.Space(3)).
+				AlignItems(ui.Start).Children(func() {
+				ui.Image(c, panel.imageSrc).Radius(design.RadiusSM).
+					MaxWidthPercent(100).Label(a.T("files.image_preview"))
 			})
-	})
+		})
+	case filesPreviewMarkdown:
+		ui.ScrollBoth(c).Grow(1).Label(a.T("files.markdown_preview")).Children(func() {
+			ui.Column(c).Padding(th.Space(2), th.Space(3), th.Space(3), th.Space(3)).
+				Children(func() {
+					a.markdownBlocks(c, t, a.fileText)
+				})
+		})
+	default:
+		ui.ScrollBoth(c).Grow(1).Label(a.T("files.plain_text_preview")).Children(func() {
+			ui.Column(c).Padding(th.Space(2), th.Space(3), th.Space(3), th.Space(3)).
+				Children(func() {
+					ui.Text(c, a.fileText).FontSize(th.FontSize - 2).FixedLineHeight(th.Space(4.5)).
+						TextColor(t.LabelPrimary)
+				})
+		})
+	}
 	if a.fileLimited {
 		ui.Text(c, fmt.Sprintf(
 			a.T("files.preview_limited_to_the_first_d_lines_d_characters_per_line"),
@@ -850,16 +907,32 @@ func (a *App) filePreview(c *ui.Context, t *design.Tokens, root string) {
 func (a *App) openFilePreview(rel string) {
 	a.ensureFilesSession()
 	root := a.filesRoot()
+	panel := a.rightPanelUI()
 	a.filePath = rel
 	a.fileText = ""
 	a.fileErr = ""
 	a.fileTrunc = false
 	a.fileLimited = false
-	a.rightPanelUI().nativeErr = ""
+	panel.nativeErr = ""
+	panel.previewKind = filesPreviewText
+	panel.imageSrc = nil
+	panel.imageErr = ""
 
 	abs, err := safeJoin(root, rel)
 	if err != nil {
 		a.fileErr = a.T("files.that_path_is_outside_the_workspace")
+		return
+	}
+	// Images decode from bytes instead of being read as text: a bitmap is
+	// binary and would otherwise hit the binary-file fallback.
+	if kind := previewKindForPath(rel); kind == filesPreviewImage {
+		panel.previewKind = filesPreviewImage
+		src, message := a.loadPreviewImage(abs)
+		if message != "" {
+			panel.imageErr = message
+			return
+		}
+		panel.imageSrc = src
 		return
 	}
 	f, err := os.Open(abs)
@@ -901,6 +974,12 @@ func (a *App) openFilePreview(rel string) {
 	}
 	a.fileText = strings.Join(lines, "\n")
 	a.fileLimited = limited
+	// A truncated or line-limited Markdown file keeps the plain-text preview:
+	// rendering a cut document would silently drop the tail, while the text
+	// preview says what was left out.
+	if !a.fileTrunc && !a.fileLimited && previewKindForPath(rel) == filesPreviewMarkdown {
+		panel.previewKind = filesPreviewMarkdown
+	}
 }
 
 // terminalPanel is the command runner in the brand panel: the working
@@ -1099,7 +1178,16 @@ func (a *App) resetFiles() {
 	a.fileTrunc = false
 	a.fileLimited = false
 	a.fileErr = ""
-	a.rightPanelUI().nativeErr = ""
+	panel := a.rightPanelUI()
+	panel.nativeErr = ""
+	panel.dirCachePath = ""
+	panel.dirCacheEntries = nil
+	panel.dirCacheTotal = 0
+	panel.dirCacheErr = nil
+	panel.dirCacheAt = time.Time{}
+	panel.previewKind = filesPreviewText
+	panel.imageSrc = nil
+	panel.imageErr = ""
 }
 
 // splitRelPath splits a slash-separated relative path into non-empty parts.

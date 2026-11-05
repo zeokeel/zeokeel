@@ -247,6 +247,9 @@ func (a *App) usageSegments(snap *state.Snapshot) []string {
 			}
 		}
 	}
+	if u.Advisory != "" {
+		segments = append(segments, a.menuText("cost advisory", "成本提醒"))
+	}
 	if detailed && u.In > 0 && u.CacheHit > 0 {
 		pct := u.CacheHit * 100 / u.In
 		if pct < 0 {

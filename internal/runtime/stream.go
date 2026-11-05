@@ -37,6 +37,11 @@ type turnUsage struct {
 	turnPublished  bool
 }
 
+// newTurnUsage builds the per-turn usage accumulator. Soft cost advisories live
+// on the turn context: the provider adapter raises them while it converts the
+// stream, before eino can build the next request.
+func newTurnUsage() *turnUsage { return &turnUsage{} }
+
 // finishCall records one completed model call. usage may be nil.
 func (u *turnUsage) finishCall(usage *schema.TokenUsage) {
 	u.steps++
@@ -53,7 +58,7 @@ func (u *turnUsage) finishCall(usage *schema.TokenUsage) {
 // a turn counts once even though it publishes several deltas. It is a no-op
 // when nothing grew (a non-assistant event, or a provider that reported no
 // usage and no new step).
-func (u *turnUsage) emitDelta(emit emitFunc) {
+func (u *turnUsage) emitDelta(ctx context.Context, emit emitFunc) {
 	delta := state.Usage{
 		Steps:    u.steps - u.publishedSteps,
 		In:       u.in - u.publishedIn,
@@ -64,7 +69,15 @@ func (u *turnUsage) emitDelta(emit emitFunc) {
 		delta.Turns = 1
 		u.turnPublished = true
 	}
-	if delta.Turns == 0 && delta.Steps == 0 && delta.In == 0 && delta.Out == 0 && delta.CacheHit == 0 {
+	// Budget and repeated-tool advisories are raised by the provider adapter
+	// while it converts the stream (before eino can build the next request).
+	// The footer shows the same advisory on the next usage delta.
+	if tc := turnContextFromContext(ctx); tc != nil {
+		if advisory := tc.takeFooterAdvisory(); advisory != "" {
+			delta.Advisory = advisory
+		}
+	}
+	if delta.Turns == 0 && delta.Steps == 0 && delta.In == 0 && delta.Out == 0 && delta.CacheHit == 0 && delta.Advisory == "" {
 		return
 	}
 	u.publishedIn, u.publishedOut = u.in, u.out
@@ -117,7 +130,7 @@ func (a *Agent) consumeMessage(
 				return ctx.Err()
 			}
 		}
-		if err := a.handleToolCalls(mv.Message.ToolCalls, pinned, emit, pending, started); err != nil {
+		if err := a.handleToolCalls(ctx, mv.Message.ToolCalls, pinned, emit, pending, started); err != nil {
 			return err
 		}
 		recordMessage(ctx, mv.Message)
@@ -126,7 +139,7 @@ func (a *Agent) consumeMessage(
 			usagePtr = mv.Message.ResponseMeta.Usage
 		}
 		usage.finishCall(usagePtr)
-		usage.emitDelta(emit)
+		usage.emitDelta(ctx, emit)
 	}
 	return nil
 }
@@ -148,6 +161,18 @@ func (a *Agent) consumeAssistantStream(
 
 	var chunks []*schema.Message
 	var lastUsage *schema.TokenUsage
+	settled := false
+	defer func() {
+		if settled || lastUsage == nil {
+			return
+		}
+		// The stream ended without a normal settlement (cancellation or a
+		// stream error). Flush the usage the provider already reported so the
+		// live counters do not lose the call; the terminal emit path is used
+		// because the turn context may already be cancelled.
+		usage.finishCall(lastUsage)
+		usage.emitDelta(ctx, terminalEmit(ctx))
+	}()
 	for {
 		chunk, err := stream.Recv()
 		if errors.Is(err, io.EOF) {
@@ -173,7 +198,7 @@ func (a *Agent) consumeAssistantStream(
 		if chunk.ResponseMeta != nil && chunk.ResponseMeta.Usage != nil {
 			lastUsage = chunk.ResponseMeta.Usage
 		}
-		if err := a.handleToolCalls(chunk.ToolCalls, pinned, emit, pending, started); err != nil {
+		if err := a.handleToolCalls(ctx, chunk.ToolCalls, pinned, emit, pending, started); err != nil {
 			return err
 		}
 	}
@@ -185,8 +210,24 @@ func (a *Agent) consumeAssistantStream(
 		}
 	}
 	usage.finishCall(lastUsage)
-	usage.emitDelta(emit)
+	usage.emitDelta(ctx, emit)
+	settled = true
 	return nil
+}
+
+// terminalEmit returns an emit function for events published after the turn
+// has already decided to stop (for example the trailing usage of a cancelled
+// call): it uses the sink's non-blocking terminal path so a cancelled consumer
+// cannot leak the goroutine.
+func terminalEmit(ctx context.Context) emitFunc {
+	tc := turnContextFromContext(ctx)
+	if tc == nil || tc.sink == nil {
+		return func(state.Event) bool { return false }
+	}
+	return func(ev state.Event) bool {
+		tc.sink.trySend(ev)
+		return true
+	}
 }
 
 // handleToolCalls announces model-requested tool calls. It fails fast for
@@ -196,6 +237,7 @@ func (a *Agent) consumeAssistantStream(
 // mode and strictness, so a mode switch after the turn started cannot reject a
 // tool the pinned topology still runs (or accept one it cannot).
 func (a *Agent) handleToolCalls(
+	ctx context.Context,
 	calls []schema.ToolCall,
 	pinned *agentState,
 	emit emitFunc,

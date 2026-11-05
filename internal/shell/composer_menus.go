@@ -571,12 +571,16 @@ func (a *App) mentionSectionTitle(c *ui.Context, t *design.Tokens, label string)
 }
 
 // mentionRow draws one 34px option. The row is Focusable inside the list's
-// focus group: the group's arrows move the focus, and Enter or a click inserts
-// the choice.
+// focus group: the group arrows move the focus, and Enter inserts the choice.
+// The body (icon, quoted name, hint) picks the entry; a directory also carries a
+// separate chevron control at the end that drills into it, the pointer twin of
+// the composer's Tab drill, so both verbs are reachable without duplicating the
+// row's accessible name.
 func (a *App) mentionRow(c *ui.Context, t *design.Tokens, choice mentionChoice, index int, st *liveMenuState) {
+	label := mentionDisplayLabel(choice)
 	item := ui.Row(c).Height(34).PaddingX(design.Space2).Gap(design.Space2).
 		Radius(design.RadiusSM).AlignItems(ui.Center).Shrink(0).
-		Label(choice.label).Role(ui.RoleListItem).Focusable()
+		Label(label).Role(ui.RoleListItem).Focusable()
 	if index == 0 {
 		item = item.Bind(&a.mentionRef)
 	}
@@ -586,34 +590,6 @@ func (a *App) mentionRow(c *ui.Context, t *design.Tokens, choice mentionChoice, 
 	if item.Focused() {
 		st.mentionIndex = index
 	}
-	item.Children(func() {
-		switch {
-		case choice.session:
-			ui.Icon(c, icons.NewChat()).Size(14, 14).TextColor(t.LabelSecondary)
-		case choice.dir:
-			ui.Icon(c, icons.Folder()).Size(14, 14).TextColor(t.LabelSecondary)
-		default:
-			ui.Icon(c, mentionFileIcon).Size(14, 14).TextColor(t.LabelSecondary)
-		}
-		ui.Text(c, choice.label).FontSize(13).FixedLineHeight(20).
-			TextColor(t.LabelPrimary).Grow(1).MaxLines(1).Ellipsis("…")
-		switch {
-		case choice.session:
-			ui.Text(c, a.tr("Session", "会话")).FontSize(11).FixedLineHeight(16).
-				TextColor(t.LabelTertiary).NoWrap()
-		case choice.dir:
-			// The row is a real drill target: Tab opens the directory in place
-			// (the chevron says "there is a level below").
-			ui.Text(c, a.tr("Open folder", "打开文件夹")).FontSize(11).FixedLineHeight(16).
-				TextColor(t.LabelTertiary).NoWrap()
-			ui.Text(c, "Tab").FontSize(10).FixedLineHeight(16).TextColor(t.LabelTertiary).
-				Padding(0, 4).Background(t.BgHover).Radius(design.RadiusXS)
-			ui.Icon(c, icons.ChevronRight()).Size(12, 12).TextColor(t.LabelTertiary)
-		default:
-			ui.Text(c, a.tr("File", "文件")).FontSize(11).FixedLineHeight(16).
-				TextColor(t.LabelTertiary).NoWrap()
-		}
-	})
 	choose := func() {
 		if choice.session {
 			a.insertSessionMention(choice.value)
@@ -622,7 +598,50 @@ func (a *App) mentionRow(c *ui.Context, t *design.Tokens, choice mentionChoice, 
 		}
 		a.composerRef.Focus(c)
 	}
-	item.OnClick(choose)
+	drill := func() {
+		a.drillMention(choice)
+		a.composerRef.Focus(c)
+	}
+	item.Children(func() {
+		body := ui.Row(c).Grow(1).Gap(design.Space2).AlignItems(ui.Center).
+			Role(ui.RoleNone)
+		body.Children(func() {
+			switch {
+			case choice.session:
+				ui.Icon(c, icons.NewChat()).Size(14, 14).TextColor(t.LabelSecondary)
+			case choice.dir:
+				ui.Icon(c, icons.Folder()).Size(14, 14).TextColor(t.LabelSecondary)
+			default:
+				ui.Icon(c, mentionFileIcon).Size(14, 14).TextColor(t.LabelSecondary)
+			}
+			ui.Text(c, label).FontSize(13).FixedLineHeight(20).
+				TextColor(t.LabelPrimary).Grow(1).MaxLines(1).Ellipsis("…")
+			switch {
+			case choice.session:
+				ui.Text(c, a.tr("Session", "会话")).FontSize(11).FixedLineHeight(16).
+					TextColor(t.LabelTertiary).NoWrap()
+			case choice.dir:
+				// The row is a real drill target: Tab or the chevron opens the
+				// directory in place.
+				ui.Text(c, a.tr("Open folder", "打开文件夹")).FontSize(11).FixedLineHeight(16).
+					TextColor(t.LabelTertiary).NoWrap()
+				ui.Text(c, "Tab").FontSize(10).FixedLineHeight(16).TextColor(t.LabelTertiary).
+					Padding(0, 4).Background(t.BgHover).Radius(design.RadiusXS)
+			default:
+				ui.Text(c, a.tr("File", "文件")).FontSize(11).FixedLineHeight(16).
+					TextColor(t.LabelTertiary).NoWrap()
+			}
+		})
+		body.OnClick(choose)
+		if choice.dir {
+			chevron := ui.Row(c).AlignItems(ui.Center).
+				Padding(0, design.Space1).Role(ui.RoleNone)
+			chevron.Children(func() {
+				ui.Icon(c, icons.ChevronRight()).Size(12, 12).TextColor(t.LabelTertiary)
+			})
+			chevron.OnClick(drill)
+		}
+	})
 	if item.Focused() && item.Shortcut(0, ui.KeyEnter) {
 		choose()
 	}
@@ -647,9 +666,14 @@ func (a *App) mentionBreadcrumb(c *ui.Context, t *design.Tokens, dir string) {
 		Radius(design.RadiusSM).Gap(design.Space2).AlignItems(ui.Center).
 		Role(ui.RoleButton).Focusable().
 		Label(a.menuText("Back to the parent folder", "返回上级文件夹"))
+	quoted := a.composerTrigger().kind == composerTriggerMention && a.composerTrigger().quoted
+	path := "@" + dir
+	if quoted || needsMentionQuotes(dir) {
+		path = "@\"" + dir + "\""
+	}
 	back.Children(func() {
 		ui.Icon(c, icons.Folder()).Size(14, 14).TextColor(t.LabelSecondary)
-		ui.Text(c, "@"+dir).FontSize(12).FixedLineHeight(18).
+		ui.Text(c, path).FontSize(12).FixedLineHeight(18).
 			TextColor(t.LabelPrimary).Grow(1).MaxLines(1).Ellipsis("…")
 		ui.Text(c, a.menuText("Esc to go up", "Esc 返回上级")).
 			FontSize(11).FixedLineHeight(16).TextColor(t.LabelTertiary).NoWrap()
@@ -700,7 +724,8 @@ func (a *App) chooseMention(entries []string) bool {
 }
 
 func (a *App) insertMention(path string) {
-	a.replaceComposerTrigger("@" + path + " ")
+	quoted := a.composerTrigger().kind == composerTriggerMention && a.composerTrigger().quoted
+	a.replaceComposerTrigger(a.mentionToken(path, quoted, true) + " ")
 }
 
 // insertSessionMention inserts this build's session reference. DSH inserts

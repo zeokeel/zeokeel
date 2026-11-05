@@ -265,6 +265,9 @@ func Apply(prev *Snapshot, ev Event) *Snapshot {
 		if e.ContextPct > 0 {
 			next.Usage.ContextPct = e.ContextPct
 		}
+		if e.Advisory != "" {
+			next.Usage.Advisory = e.Advisory
+		}
 	case Status:
 		next.Phase = e.Phase
 		// The zero reason clears the marker when a new turn starts; terminal

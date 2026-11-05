@@ -2,6 +2,8 @@ package runtime
 
 import (
 	"context"
+	"encoding/json"
+	"fmt"
 	"sync"
 
 	"github.com/zeokeel/zeokeel/internal/state"
@@ -94,8 +96,152 @@ type turnContext struct {
 	// adapter delivers the error to the model as a tool result (so one bad
 	// command does not end the turn); the ToolEnd event still needs the
 	// error state for the UI's red card and the tool_calls table.
+	//
+	// advisories are model-visible notes queued for the next provider request
+	// (soft cost-budget crossings and repeated-tool reminders); the provider
+	// adapter drains them into the next tool result. repeatSeen counts
+	// identical tool name+args calls within this turn. mu guards all of these.
 	mu          sync.Mutex
 	failedTools map[string]bool
+	advisories  []string
+	repeatSeen  map[string]int
+
+	// Soft cost-budget state. The provider adapter feeds it while converting
+	// the stream (which happens before eino can build the next request), so a
+	// crossing raised there is injected into that next request deterministically.
+	budgetSteps    []int
+	budgetTokens   []int
+	renderAdvisory func(kind string, steps, tokens int) string
+	advSteps       int // completed model calls seen by the adapter
+	advOut         int // output tokens reported so far
+	stepWarnAt     int
+	tokenWarnAt    int
+	footerAdvisory string
+}
+
+// repeatWarnThresholds are the identical-call counts that raise a soft
+// repeated-tool reminder (never a hard stop).
+var repeatWarnThresholds = []int{3, 5, 8}
+
+// enqueueAdvisory queues one model-visible advisory for the next provider
+// request. Duplicate texts are collapsed so retries cannot stack copies.
+func (tc *turnContext) enqueueAdvisory(text string) {
+	if tc == nil || text == "" {
+		return
+	}
+	tc.mu.Lock()
+	defer tc.mu.Unlock()
+	for _, existing := range tc.advisories {
+		if existing == text {
+			return
+		}
+	}
+	tc.advisories = append(tc.advisories, text)
+}
+
+// takeAdvisories drains the queued advisories; the provider adapter injects
+// them into the next request exactly once.
+func (tc *turnContext) takeAdvisories() []string {
+	if tc == nil {
+		return nil
+	}
+	tc.mu.Lock()
+	defer tc.mu.Unlock()
+	if len(tc.advisories) == 0 {
+		return nil
+	}
+	out := append([]string(nil), tc.advisories...)
+	tc.advisories = nil
+	return out
+}
+
+// noteUsageSample records the output tokens a provider chunk reported. Called
+// from the adapter's stream goroutine, before eino builds the next request.
+func (tc *turnContext) noteUsageSample(u *Usage) {
+	if tc == nil || u == nil || u.OutputTokens <= 0 {
+		return
+	}
+	tc.mu.Lock()
+	tc.advOut += u.OutputTokens
+	tc.checkBudgetLocked()
+	tc.mu.Unlock()
+}
+
+// noteModelCall records one completed provider call for the step budget and
+// fires any threshold it just crossed.
+func (tc *turnContext) noteModelCall() {
+	if tc == nil {
+		return
+	}
+	tc.mu.Lock()
+	tc.advSteps++
+	tc.checkBudgetLocked()
+	tc.mu.Unlock()
+}
+
+// checkBudgetLocked queues the next crossed cost advisory (steps/tokens) and
+// records it for the footer. Each threshold fires at most once per turn; the
+// turn never stops. tc.mu must be held.
+func (tc *turnContext) checkBudgetLocked() {
+	for tc.stepWarnAt < len(tc.budgetSteps) && tc.advSteps >= tc.budgetSteps[tc.stepWarnAt] {
+		tc.stepWarnAt++
+		if tc.renderAdvisory != nil {
+			if text := tc.renderAdvisory("steps", tc.advSteps, tc.advOut); text != "" {
+				tc.advisories = append(tc.advisories, text)
+				tc.footerAdvisory = text
+				return
+			}
+		}
+	}
+	for tc.tokenWarnAt < len(tc.budgetTokens) && tc.advOut >= tc.budgetTokens[tc.tokenWarnAt] {
+		tc.tokenWarnAt++
+		if tc.renderAdvisory != nil {
+			if text := tc.renderAdvisory("tokens", tc.advSteps, tc.advOut); text != "" {
+				tc.advisories = append(tc.advisories, text)
+				tc.footerAdvisory = text
+				return
+			}
+		}
+	}
+}
+
+// takeFooterAdvisory drains the advisory the footer should show on the next
+// usage delta.
+func (tc *turnContext) takeFooterAdvisory() string {
+	if tc == nil {
+		return ""
+	}
+	tc.mu.Lock()
+	defer tc.mu.Unlock()
+	text := tc.footerAdvisory
+	tc.footerAdvisory = ""
+	return text
+}
+
+// noteToolCall records one model-requested call (name + raw arguments) and
+// queues a reminder when the same call repeats at a threshold. Different
+// arguments are different signatures, so they never count against each other.
+func (tc *turnContext) noteToolCall(name string, args json.RawMessage) {
+	if tc == nil || name == "" {
+		return
+	}
+	sig := name + "\x00" + string(args)
+	tc.mu.Lock()
+	if tc.repeatSeen == nil {
+		tc.repeatSeen = make(map[string]int)
+	}
+	tc.repeatSeen[sig]++
+	count := tc.repeatSeen[sig]
+	tc.mu.Unlock()
+	for _, threshold := range repeatWarnThresholds {
+		if count != threshold {
+			continue
+		}
+		tc.enqueueAdvisory(fmt.Sprintf(
+			"Repeated tool call advisory (not a hard stop): %s has been called %d times with identical arguments in this turn. Check whether the loop is making progress; vary the arguments, try a different approach, or ask the user before repeating it again.",
+			name, count))
+		return
+	}
 }
 
 // markToolFailure records callID as a failed invocation for the current turn.

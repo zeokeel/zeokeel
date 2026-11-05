@@ -293,6 +293,19 @@ func TestUsageSnapshot(t *testing.T) {
 	if s.Usage.ContextPct != 0.51 || s.Usage.Steps != 3 {
 		t.Fatalf("gauge/step fold = %+v", s.Usage)
 	}
+	// The cost advisory is a gauge too: it stays until a newer advisory.
+	s = Apply(s, Usage{Advisory: "cost advisory: 25 steps"})
+	if s.Usage.Advisory != "cost advisory: 25 steps" {
+		t.Fatalf("advisory fold = %+v", s.Usage)
+	}
+	s = Apply(s, Usage{Steps: 1})
+	if s.Usage.Advisory != "cost advisory: 25 steps" {
+		t.Fatalf("step delta cleared the advisory: %+v", s.Usage)
+	}
+	s = Apply(s, Usage{Advisory: "cost advisory: 50 steps"})
+	if s.Usage.Advisory != "cost advisory: 50 steps" {
+		t.Fatalf("newer advisory did not replace the old one: %+v", s.Usage)
+	}
 	// Backward compatibility: an old trace's whole-turn sample (Turns=1,
 	// steps/tokens of that turn) sums exactly like a delta batch.
 	var legacy *Snapshot

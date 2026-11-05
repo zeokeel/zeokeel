@@ -106,6 +106,10 @@ type Usage struct {
 	Out        int
 	CacheHit   int
 	ContextPct float64
+	// Advisory is the latest cost/budget advisory the runtime raised for the
+	// current turn ("" when none). It lets the footer surface the same warning
+	// the model received without inventing a second counter.
+	Advisory string
 }
 
 func (Usage) isEvent() {}

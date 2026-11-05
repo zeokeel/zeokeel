@@ -51,9 +51,12 @@ type PTCResult struct {
 	Error  string `json:"error,omitempty"`
 }
 
-// PTCResponse is the JSON result of the "ptc" tool.
+// PTCResponse is the JSON result of the "ptc" tool. Advisories carries soft
+// reminders for repeated identical inner calls (the batch is one model call, so
+// a mid-batch reminder can only ride the batch output).
 type PTCResponse struct {
-	Results []PTCResult `json:"results"`
+	Results    []PTCResult `json:"results"`
+	Advisories []string    `json:"advisories,omitempty"`
 }
 
 // ptcTool implements runtime.Tool for ModePTC.
@@ -136,6 +139,7 @@ func (t *ptcTool) Invoke(ctx context.Context, args json.RawMessage) (string, err
 	}
 
 	response := PTCResponse{Results: make([]PTCResult, 0, len(req.Calls))}
+	repeatSeen := make(map[string]int, len(req.Calls))
 	for i, call := range req.Calls {
 		if ctx != nil {
 			if err := ctx.Err(); err != nil {
@@ -165,6 +169,21 @@ func (t *ptcTool) Invoke(ctx context.Context, args json.RawMessage) (string, err
 			continue
 		}
 		callArgs, err := ptcCallArgs(call.Args)
+		if err == nil {
+			// The batch is one model step, so a repeated identical inner call
+			// cannot inject a mid-stream message: the reminder rides the batch
+			// output instead (same 3/5/8 thresholds as the main loop).
+			sig := name + "\x00" + string(callArgs)
+			repeatSeen[sig]++
+			for _, threshold := range repeatWarnThresholds {
+				if repeatSeen[sig] == threshold {
+					response.Advisories = append(response.Advisories, fmt.Sprintf(
+						"Repeated tool call advisory: %s was called %d times with identical arguments in this batch. Check whether the batch is looping; different arguments or a different tool may be needed.",
+						name, threshold))
+					break
+				}
+			}
+		}
 		if err != nil {
 			response.Results = append(response.Results, PTCResult{
 				Index: i, Tool: name, OK: false,

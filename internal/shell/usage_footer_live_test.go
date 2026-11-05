@@ -69,6 +69,31 @@ func TestUsageFooterStoppedTurnKeepsCountersWithoutCompletion(t *testing.T) {
 	}
 }
 
+// TestUsageFooterShowsCostAdvisory pins the footer half of the soft budget
+// advisory: the same warning the model received surfaces as a short chip.
+func TestUsageFooterShowsCostAdvisory(t *testing.T) {
+	snap := state.NewSnapshot()
+	snap.Phase = state.PhaseRunning
+	snap.Usage = state.Usage{
+		Turns: 1, Steps: 30, Out: 1200,
+		Advisory: "Cost advisory (not a hard stop): 30 model steps",
+	}
+	h := newLiveSnapshotApp(t, Session, snap)
+	tt := ui.NewTester(h.app.View, 1600, 1000)
+	tt.Frame()
+	if !tt.HasText("cost advisory") {
+		t.Fatalf("footer missing the cost advisory chip: %v", tt.Texts())
+	}
+	// Without an advisory there is no chip.
+	plain := *snap
+	plain.Usage.Advisory = ""
+	h.app.SetSnapshot(&plain)
+	tt.Frame()
+	if tt.HasText("cost advisory") {
+		t.Fatalf("footer invented a cost advisory: %v", tt.Texts())
+	}
+}
+
 // TestTurnOutcomeMarker pins the transcript marker a stopped or interrupted
 // turn leaves in place of an answer (and the absence of a completion line).
 func TestTurnOutcomeMarker(t *testing.T) {

@@ -106,12 +106,14 @@ func (a *App) startTabPanel(c *ui.Context, t *design.Tokens) {
 		a.startCard(c, t, icons.Folder(), t.Accent,
 			a.T("files.workspace_files"),
 			a.tr("Browse files in this session's workspace", "浏览此会话工作区的文件"),
+			a.filesRootTooltip(),
 			func() { a.rightTab = filesTab })
 		a.startTerminalCard(c, t)
 		a.startCard(c, t, icons.SessionLog(), t.LabelSecondary,
 			a.tr("Session Log", "会话日志"),
 			a.tr("Read this session's raw event log (read-only)",
 				"查看当前会话的原始事件日志（只读）"),
+			"",
 			func() { a.rightTab = sessionLogTab })
 	})
 }
@@ -120,11 +122,14 @@ func (a *App) startTabPanel(c *ui.Context, t *design.Tokens) {
 // title and a description. The whole card is a native ButtonBase, so it takes
 // the focus and Enter/Space and the small description is not a dead target.
 func (a *App) startCard(c *ui.Context, t *design.Tokens, ic *ui.SVG, tint ui.Color,
-	title, description string, onClick func()) {
+	title, description, tooltip string, onClick func()) {
 	th := t.Theme()
 	card := ui.ButtonBase(c).MinHeight(th.Space(19)).Padding(th.Space(4)).
 		Gap(th.Space(3)).Radius(th.Radius).Border(1, t.BorderL2).
 		Background(t.BgRaised).AlignItems(ui.Center).Justify(ui.Start).Label(title)
+	if tooltip != "" {
+		card = card.Tooltip(tooltip)
+	}
 	if card.Hovered() {
 		card = card.Background(t.BgHover).Border(1, t.BorderL3)
 	}
@@ -363,6 +368,7 @@ func (a *App) reloadFiles(c *ui.Context) {
 		c.Toast(a.tr("Reloaded the file from disk", "已从磁盘重新加载文件"))
 		return
 	}
+	a.invalidateFilesDirCache()
 	a.fileErr = ""
 	c.Toast(a.tr("Reloaded the directory", "已重新加载目录"))
 }

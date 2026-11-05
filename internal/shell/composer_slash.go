@@ -244,6 +244,12 @@ type composerTrigger struct {
 	query string
 	start int
 	end   int
+	// quoted marks a quoted "@\"...\"" / @'...' path token that may
+	// contain spaces; insertion and drilling keep the quoted form. closed says
+	// whether that token already has its closing quote: an open token is still
+	// being typed, so a drill keeps it open for the next keystroke.
+	quoted bool
+	closed bool
 }
 
 // draftRuneLen returns the draft length in runes.
@@ -272,15 +278,9 @@ func activeComposerTrigger(draft string, caret int) composerTrigger {
 	if len(runes) == 0 || caret == 0 {
 		return composerTrigger{}
 	}
-	// "@": scan back to the nearest '@' on this token.
-	for i := caret - 1; i >= 0; i-- {
-		if unicode.IsSpace(runes[i]) {
-			break
-		}
-		if runes[i] == '@' && (i == 0 || isTriggerBoundary(runes[i-1])) {
-			return composerTrigger{kind: composerTriggerMention,
-				query: string(runes[i+1 : caret]), start: i, end: caret}
-		}
+	// "@": the nearest plain or quoted token to the left of the caret.
+	if mention, ok := mentionTriggerAt(runes, caret); ok {
+		return mention
 	}
 	// "/": scan back to the token's slash, rejecting URL slashes.
 	for i := caret - 1; i >= 0; i-- {
@@ -305,6 +305,122 @@ func activeComposerTrigger(draft string, caret int) composerTrigger {
 			query: string(runes[i+1 : caret]), start: i, end: caret}
 	}
 	return composerTrigger{}
+}
+
+// unquotedMentionTrigger finds the nearest plain "@" token ending at the
+// caret: the token runs back to its "@" and may not contain whitespace.
+func unquotedMentionTrigger(runes []rune, caret int) (composerTrigger, bool) {
+	for i := caret - 1; i >= 0; i-- {
+		if unicode.IsSpace(runes[i]) {
+			return composerTrigger{}, false
+		}
+		if runes[i] == '@' && (i == 0 || isTriggerBoundary(runes[i-1])) {
+			return composerTrigger{kind: composerTriggerMention,
+				query: string(runes[i+1 : caret]), start: i, end: caret}, true
+		}
+	}
+	return composerTrigger{}, false
+}
+
+// quotedMentionTrigger finds the nearest @"..." or @'...' token that contains
+// the caret. The closing quote is optional while the path is being typed; when
+// it exists the token (and the replacement span) includes it, so a pick
+// replaces the whole quoted reference even when the caret is in the middle.
+func quotedMentionTrigger(runes []rune, caret int) (composerTrigger, bool) {
+	for i := caret - 1; i >= 0; i-- {
+		if runes[i] != '@' || i+1 >= len(runes) {
+			continue
+		}
+		quote := runes[i+1]
+		if quote != '"' && quote != '\'' {
+			continue
+		}
+		if i > 0 && !isTriggerBoundary(runes[i-1]) {
+			continue
+		}
+		contentStart := i + 2
+		if caret < contentStart {
+			continue
+		}
+		closeAt := -1
+		for j := contentStart; j < len(runes); j++ {
+			if runes[j] == quote {
+				closeAt = j
+				break
+			}
+		}
+		tokenEnd := caret
+		contentEnd := caret
+		if closeAt >= 0 {
+			tokenEnd = closeAt + 1
+			if caret > tokenEnd {
+				// The caret is past this quoted token; an earlier "@" may
+				// still be live, so keep scanning right-to-left.
+				continue
+			}
+			if caret == tokenEnd {
+				contentEnd = closeAt
+			}
+		}
+		if contentEnd < contentStart {
+			contentEnd = contentStart
+		}
+		return composerTrigger{kind: composerTriggerMention, quoted: true,
+			closed: closeAt >= 0, query: string(runes[contentStart:contentEnd]),
+			start: i, end: tokenEnd}, true
+	}
+	return composerTrigger{}, false
+}
+
+// mentionTriggerAt picks the mention token closest to the caret: the quoted
+// and unquoted spellings can overlap (a quoted token starts with "@" too), so
+// the candidate whose "@" is nearest to the caret wins.
+func mentionTriggerAt(runes []rune, caret int) (composerTrigger, bool) {
+	unquoted, hasUnquoted := unquotedMentionTrigger(runes, caret)
+	quoted, hasQuoted := quotedMentionTrigger(runes, caret)
+	switch {
+	case hasUnquoted && hasQuoted:
+		if quoted.start >= unquoted.start {
+			return quoted, true
+		}
+		return unquoted, true
+	case hasQuoted:
+		return quoted, true
+	case hasUnquoted:
+		return unquoted, true
+	}
+	return composerTrigger{}, false
+}
+
+// needsMentionQuotes reports whether a workspace path must be written as a
+// quoted "@\"...\"" token: paths with spaces (or quote characters) cannot be
+// expressed by the plain spelling.
+func needsMentionQuotes(path string) bool {
+	return strings.ContainsAny(path, " \t\r\n\"'")
+}
+
+// mentionToken spells a workspace path as an @ token, quoting it when needed or
+// when the live token already uses the quoted form. A drill that keeps the
+// token open (no closing quote yet) leaves the quote open too, so the next
+// keystroke continues the path inside the quotes; a completed pick uses the
+// canonical closed form.
+func (a *App) mentionToken(path string, quoted, closed bool) string {
+	if quoted || needsMentionQuotes(path) {
+		if !closed {
+			return "@\"" + path
+		}
+		return "@\"" + path + "\""
+	}
+	return "@" + path
+}
+
+// mentionDisplayLabel is the row label for a workspace path: spaced paths show
+// their quoted spelling so the row and the composer token match.
+func mentionDisplayLabel(choice mentionChoice) string {
+	if choice.session || !needsMentionQuotes(choice.value) {
+		return choice.label
+	}
+	return "@\"" + choice.value + "\""
 }
 
 // recordComposerCaret remembers the composer caret for trigger detection. The
@@ -417,7 +533,11 @@ func (a *App) drillMention(choice mentionChoice) bool {
 	if !choice.dir {
 		return false
 	}
-	a.replaceComposerTrigger("@" + strings.TrimSuffix(choice.value, "/") + "/")
+	content := strings.TrimSuffix(choice.value, "/") + "/"
+	trigger := a.composerTrigger()
+	quoted := trigger.kind == composerTriggerMention && trigger.quoted
+	closed := trigger.kind == composerTriggerMention && trigger.closed
+	a.replaceComposerTrigger(a.mentionToken(content, quoted, closed))
 	return true
 }
 
@@ -429,11 +549,22 @@ func (a *App) mentionDrillUp() bool {
 	if !ok {
 		return false
 	}
+	trigger := a.composerTrigger()
+	quoted := trigger.kind == composerTriggerMention && trigger.quoted
+	closed := trigger.kind == composerTriggerMention && trigger.closed
+	// A quoted root stays open (`@"`) so the user can keep typing a quoted
+	// path; the plain root token is just "@".
+	token := func(path string) string {
+		if path == "" && quoted {
+			return "@" + "\""
+		}
+		return a.mentionToken(path, quoted, closed)
+	}
 	if dir != "" {
 		// Inside a browsed folder, a typed filter is cleared before the menu
 		// walks up: "@docs/gu" -> "@docs/", then "@docs/" -> "@".
-		if _, prefix := mentionQueryPath(a.composerTrigger().query); prefix != "" {
-			a.replaceComposerTrigger("@" + dir)
+		if _, prefix := mentionQueryPath(trigger.query); prefix != "" {
+			a.replaceComposerTrigger(token(dir))
 			return true
 		}
 	}
@@ -445,7 +576,7 @@ func (a *App) mentionDrillUp() bool {
 	if index := strings.LastIndex(trimmed, "/"); index >= 0 {
 		parent = trimmed[:index+1]
 	}
-	a.replaceComposerTrigger("@" + parent)
+	a.replaceComposerTrigger(token(parent))
 	return true
 }
 
@@ -826,10 +957,14 @@ func (a *App) slashHelpText() string {
 		"Commands: /file /plan /feedback · /permission /model /export · /clear /stop /help /new /settings /automate /plugins. "+
 			"/file opens the attachment picker (/file <path> attaches a workspace file); /plan enters plan mode (/plan off leaves it, /plan <message> starts with it); "+
 			"/permission read-only|workspace|full|auto changes the access mode; /feedback good|bad rates the last answer; /export saves the session log. "+
+			"@ mentions complete workspace files and folders (Tab drills into a folder, Esc walks back); a path with spaces can be quoted as @\"my file.txt\". "+
+			"Session mentions insert the documented #title text reference; there is no atomic session reference in this build. "+
 			"Compaction is automatic (the runtime compacts long conversations before a turn); there is no manual command. Unknown commands are sent to the model as a normal message.",
 		"命令：/file /plan /feedback · /permission /model /export · /clear /stop /help /new /settings /automate /plugins。"+
 			"/file 打开附件选择器（/file <路径> 直接附加工作区文件）；/plan 进入计划模式（/plan off 退出，/plan <消息> 以计划模式发送）；"+
 			"/permission read-only|workspace|full|auto 切换访问模式；/feedback good|bad 评价最后一条回答；/export 保存会话日志。"+
+			"@ 提及会补全工作区文件与文件夹（Tab 进入文件夹、Esc 逐级返回）；含空格的路径可写成 @\"my file.txt\"。"+
+			"会话提及插入文档化的 #标题 文本引用；本 build 没有原子 session 引用。"+
 			"压缩是自动的（运行时会在每轮开始前压缩过长的对话）；没有手动命令。未知命令会作为普通消息发送给模型。")
 }
 
