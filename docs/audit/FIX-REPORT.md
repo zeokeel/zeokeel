@@ -1,7 +1,7 @@
 # ZeoKeel 审计修复报告（FIX-REPORT · 最终版）
 
 > 目标：修复 `docs/audit/MASTER-AUDIT.md` 的 P0/P1 全部 + 可行 P2/P3，并逐项给出代码/测试/真跑证据；L 项写清延期理由。
-> 起点：`HEAD=3100af0`（审计基线）；**修复提交**：`1da4f12`（wave 1）→ `0bbf051`/`6da09e3`（补提交与状态）→ `84c5b1f`（wave 2/3，当前）→ 后续仅文档/验证收尾。
+> 起点：`HEAD=3100af0`（审计基线）；**修复提交**：`1da4f12`（wave 1）→ `0bbf051`/`6da09e3`（补提交与状态）→ `84c5b1f`（wave 2/3）→ `e9b5d7e`（importer manifest 真实布局幂等修复 + 最终验证证据/文档）。
 > 验证口径：`gofmt`/`go vet`/`go build`/`go test -count=1 ./...`（22 包）/`scripts/check-nocgo.sh` 四目标/`GOOS=windows build+vet`；**干净 checkout `git archive HEAD` + `sh scripts/ci.sh --fast` 全绿**（84c5b1f）；独立验证员报告见 §5。
 
 ## 0. 一页结论
@@ -20,6 +20,7 @@
 | `0bbf051` | 修复 importer 凭据文件被 `.gitignore` 忽略导致干净 checkout 不可构建（verifier 发现 P1） |
 | `6da09e3` | UX-04 状态修正（独立验证发现 PARTIAL）+ 平台 CI/忽略规则 |
 | `84c5b1f` | wave 2/3：产品面（PD-05/06/07/10/12/04）、剩余功能缺口（FP-01/03/04/05/07/14/15/16/17/19）、设置/管理 UI、导入器质量、预览金标、独立验证报告 |
+| `e9b5d7e` | 收尾：importer manifest 真实 `session-<uuid>` 布局幂等修复（19/19 测试 + 真实 DSH 双跑复验）、cmd import 测试重写、三份最终验证报告、FIX-REPORT/BUGS 定稿 |
 
 **门禁证据（Lead 执行）**
 
