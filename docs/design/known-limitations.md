@@ -84,7 +84,7 @@
 - **UX-04 设置窗重绘**：打开/移动设置窗后主窗口 popover 残留（state 已清、不重绘）；受 mygo 出帧机制限制，PARTIAL。
 - **About 版本**：已统一为 `shell.BuildVersionString()` 单一来源（删除硬编码 `version 0.1.0` 与 `pluginProductVersion`）；预览已按新文案重生成。
 - **RT-04 / AR-04 / AR-09 / AR-22 大项**：per-session Agent、shell 分层、schema v2、快照优化 DEFERRED（理由见 FIX-PLAN §7）。
-- **自动更新 / Windows 安装器**：`internal/updater/` 本轮仅落 **TDD RED 契约**（`go test -tags tdd_red ./internal/updater` 全红，功能未实现）；Windows 安装器只有计划与 Inno/NSIS 草案（`packaging/windows/INSTALLER-PLAN.md`），未构建、未签名；更新通道/签名 DEFERRED（AR-03）。
+- **自动更新 / Windows 安装器**：`internal/updater/` 引擎已实现并通过 14 个契约测试（含崩溃恢复），但**尚未接入 app/UI**，也没有 update feed、签名与回滚通道 → 用户侧不可用（DEFERRED，AR-03）；Windows 安装器只有计划与 Inno/NSIS 可执行草案（`packaging/windows/INSTALLER-PLAN.md`），未构建、未签名；`release.yml` 目前发布的是未签名便携包。
 - **预览金标**：22 张已按 wave1+wave2 UI 重生成（含设置窗 900×840）并回归 PASS（14 屏/1.9s）。
 
 ## 4. 视觉回归策略（v1.1：opt-in 回归工具）

@@ -493,6 +493,16 @@ func settingInt(get func(key, env, def string) string, key, env string, def, min
 	return n
 }
 
+// providerURLScheme returns the lowercased URL scheme of raw, or "" when the
+// value is empty or unparsable.
+func providerURLScheme(raw string) string {
+	parsed, err := url.Parse(strings.TrimSpace(raw))
+	if err != nil {
+		return ""
+	}
+	return strings.ToLower(parsed.Scheme)
+}
+
 // keylessLocalProvider reports whether baseURL points at a local or private
 // network endpoint that typically needs no API key (Ollama, llama.cpp, LM Studio,
 // vLLM). Malformed or public URLs report false, so a missing key there still
@@ -500,6 +510,14 @@ func settingInt(get func(key, env, def string) string, key, env string, def, min
 func keylessLocalProvider(baseURL string) bool {
 	parsed, err := url.Parse(strings.TrimSpace(baseURL))
 	if err != nil || parsed.Host == "" {
+		return false
+	}
+	// Only real HTTP(S) providers can run without a key: ftp://, ws://, file://
+	// etc. are rejected here so the build reports "no model configured" instead
+	// of handing an unusable scheme to the OpenAI-compatible client.
+	switch strings.ToLower(parsed.Scheme) {
+	case "http", "https":
+	default:
 		return false
 	}
 	host := strings.ToLower(parsed.Hostname())
@@ -519,8 +537,8 @@ func keylessLocalProvider(baseURL string) bool {
 // the default "<workspace>/skills" layout also covers the project-local and
 // user roots, so a user-level skill catalog still works in a workspace without
 // its own skills/ directory (FP-17).
-func skillsRootsAvailable(configuredRoot string) bool {
-	for _, root := range skills.RootsFor(configuredRoot) {
+func skillsRootsAvailable(configuredRoot, base string) bool {
+	for _, root := range skills.RootsFor(configuredRoot, base) {
 		if info, err := os.Stat(root); err == nil && info.IsDir() {
 			return true
 		}
@@ -864,8 +882,8 @@ func registerAllToolsWithOptions(st *store.Store, root string, get func(key, env
 	// The default workspace layout expands to the project, project-local and
 	// user roots (FP-17); the skill tool rescans them on change.
 	skillsDir := read("skills.root", "ZEOKEEL_SKILLS_ROOT", filepath.Join(root, "skills"))
-	if pluginOn("skills", true) && skillsRootsAvailable(skillsDir) {
-		skillTool, skillErrs := skills.NewTolerant(skillsDir)
+	if pluginOn("skills", true) && skillsRootsAvailable(skillsDir, root) {
+		skillTool, skillErrs := skills.NewTolerantIn(root, skillsDir)
 		for _, serr := range skillErrs {
 			// A missing primary root is expected in the multi-root layout (a
 			// workspace without skills/ but with user-level skills); it is not
@@ -958,6 +976,12 @@ func buildAgentWithOptions(st *store.Store, root, instruction string, opts regis
 	// reported "no agent" and rolled the turn back (PD-02).
 	apiKey := get("provider.api_key", "DEEPSEEK_API_KEY", "")
 	if apiKey == "" && !keylessLocalProvider(baseURL) {
+		// A configured but unusable endpoint scheme is a configuration error,
+		// not "no model configured": report it clearly instead of sending the
+		// user to the provider settings without a reason.
+		if scheme := providerURLScheme(baseURL); scheme != "" && scheme != "http" && scheme != "https" {
+			return nil, fmt.Errorf("build provider: provider.base_url %q uses unsupported scheme %q; use an http or https endpoint (or configure a provider.api_key for a remote model)", baseURL, scheme)
+		}
 		return nil, nil
 	}
 	model := get("provider.model", "ZEOKEEL_PROVIDER_MODEL", openai.DefaultModel)
@@ -1102,7 +1126,7 @@ func buildAgentWithOptions(st *store.Store, root, instruction string, opts regis
 	skillsDir := ""
 	if pluginEnabled(st, "skills", true) {
 		candidate := get("skills.root", "ZEOKEEL_SKILLS_ROOT", filepath.Join(root, "skills"))
-		if skillsRootsAvailable(candidate) {
+		if skillsRootsAvailable(candidate, root) {
 			skillsDir = candidate
 		}
 	}
@@ -1326,7 +1350,7 @@ func composeInstructionForModesWithMemories(st *store.Store, root, cwd string, r
 	if strings.TrimSpace(skillsDir) != "" {
 		// The prompt catalog must match the skill tool, which loads every root
 		// of the default layout (project + .zeokeel + user, FP-17).
-		loaded, errs := skills.LoadRootsTolerant(skills.RootsFor(skillsDir))
+		loaded, errs := skills.LoadRootsTolerant(skills.RootsFor(skillsDir, root))
 		for _, err := range errs {
 			if errors.Is(err, fs.ErrNotExist) {
 				continue

@@ -10,6 +10,13 @@ targets). Every package lands in `dist/` with a stable name and a
 | `make package-linux` | `dist/zeokeel-linux-amd64.tar.gz`, `dist/zeokeel-linux-arm64.tar.gz` (binary + `README-LINUX.txt` inside a versioned directory) | [linux/README-LINUX.txt](linux/README-LINUX.txt) |
 | `make package-macos` | `dist/zeokeel-macos-arm64.zip`, `dist/zeokeel-macos-amd64.zip` (unsigned `ZeoKeel.app` bundle) | [macos/README-MACOS.txt](macos/README-MACOS.txt) |
 
+## Release pipeline
+
+`make release` (`scripts/release.sh`) builds every package locally into `dist/`
+and writes `SHA256SUMS.txt`; the same artifacts are built and attached to a
+GitHub Release by `.github/workflows/release.yml` when a `v*` tag is pushed
+(no signing). See the README "发布（Release）" section.
+
 ## Build metadata
 
 All targets inject version metadata with `-ldflags -X` and strip the binary

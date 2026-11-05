@@ -84,6 +84,7 @@ const (
 	UpdateAgentThoughtChunk = "agent_thought_chunk"
 	UpdateToolCall          = "tool_call"
 	UpdateToolCallUpdate    = "tool_call_update"
+	UpdateUsage             = "usage_update"
 	UpdatePlan              = "plan"
 )
 
@@ -186,6 +187,13 @@ type CancelNotification struct {
 	SessionID string `json:"sessionId"`
 }
 
+// Usage is the token accounting an adapter can project as a usage_update.
+type Usage struct {
+	InputTokens  int `json:"inputTokens"`
+	OutputTokens int `json:"outputTokens"`
+	TotalTokens  int `json:"totalTokens"`
+}
+
 // SessionUpdate is one semantic session update; a single struct keeps the
 // minimum projection readable while allowing the ACP sub-shapes to grow.
 type SessionUpdate struct {
@@ -195,6 +203,7 @@ type SessionUpdate struct {
 	ToolCallID    string          `json:"toolCallId,omitempty"`
 	Status        string          `json:"status,omitempty"`
 	RawInput      json.RawMessage `json:"rawInput,omitempty"`
+	Usage         *Usage          `json:"usage,omitempty"`
 }
 
 // SessionUpdateNotification is the params of session/update.

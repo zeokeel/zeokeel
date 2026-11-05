@@ -1,7 +1,7 @@
 GO ?= go
 export CGO_ENABLED := 0
 
-.PHONY: build build-all build-check windows package-windows package-linux package-macos icon test vet fmt check nocgo clean-check previews visual-check run clean version
+.PHONY: build build-all build-check windows package-windows package-linux package-macos release icon test vet fmt check nocgo clean-check previews visual-check run clean version
 
 # Every build product lands in dist/ with a stable per-platform name; see
 # scripts/build.sh. Nothing is written to the repository root.
@@ -26,6 +26,10 @@ package-linux:
 
 package-macos:
 	sh scripts/build.sh package-macos
+
+# Build every release artifact locally (same outputs as the release CI workflow).
+release:
+	sh scripts/release.sh
 
 # Print the version/commit/build time the next build would inject.
 version:

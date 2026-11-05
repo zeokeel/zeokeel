@@ -269,6 +269,7 @@ func (a *App) liveTranscript(c *ui.Context, t *design.Tokens, snap *state.Snapsh
 						a.liveTools(c, t, snap)
 					}
 					a.turnOutcomeMarker(c, t, snap)
+					a.liveWorkspaceChanges(c, t, snap)
 					a.liveArtifacts(c, t)
 					// The record-ordered transcript renders each error inside
 					// the turn that recorded it (see bucketTranscriptErrors).

@@ -32,6 +32,11 @@ func TestKeylessLocalProvider(t *testing.T) {
 		"https://api.openai.com/v1",
 		"http://example.test/v1",
 		"not a url",
+		// Non-HTTP schemes never make a keyless local provider (PD-02/P3).
+		"ftp://127.0.0.1/share",
+		"ws://localhost:8080/v1",
+		"wss://localhost:8080/v1",
+		"file:///tmp/model",
 	}
 	for _, url := range remote {
 		if keylessLocalProvider(url) {
@@ -81,6 +86,29 @@ func TestBuildAgentKeylessLocalProvider(t *testing.T) {
 			t.Fatal("public provider without an API key built an agent")
 		}
 	})
+}
+
+// TestBuildAgentRejectsUnsupportedProviderScheme covers the keyless scheme
+// validation: a local host with a non-HTTP scheme is a configuration error with
+// a clear message, not a silently "unconfigured" model.
+func TestBuildAgentRejectsUnsupportedProviderScheme(t *testing.T) {
+	for _, baseURL := range []string{
+		"ftp://127.0.0.1:11434/v1",
+		"ws://localhost:8080/v1",
+		"file:///tmp/ollama",
+	} {
+		st, dir := newToolStore(t)
+		if err := st.SetSetting("provider.base_url", baseURL); err != nil {
+			t.Fatal(err)
+		}
+		_, err := buildAgentWithOptions(st, dir, "instruction", registryOptions{})
+		if err == nil {
+			t.Fatalf("base_url %q without a key built an agent, want a scheme error", baseURL)
+		}
+		if !strings.Contains(err.Error(), "unsupported scheme") || !strings.Contains(err.Error(), "http") {
+			t.Fatalf("base_url %q error = %v, want a clear http/https requirement", baseURL, err)
+		}
+	}
 }
 
 // TestRunHeadlessKeylessLocalProvider is the PD-02 end-to-end check: a local

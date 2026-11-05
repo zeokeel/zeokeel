@@ -418,7 +418,7 @@ func TestQuestionCardAnswerFlow(t *testing.T) {
 	tester := ui.NewTester(app.View, 1600, 1000)
 	for _, want := range []string{
 		"Question", "Which database should I use?",
-		"Suggested: sqlite · postgres", "Answer input", "Send answer",
+		"Choose sqlite", "Choose postgres", "Answer input", "Send answer",
 	} {
 		if !tester.HasText(want) {
 			t.Fatalf("question card missing %q; texts: %v", want, tester.Texts())

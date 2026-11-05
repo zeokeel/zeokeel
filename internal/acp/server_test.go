@@ -1,5 +1,3 @@
-//go:build tdd_red
-
 package acp
 
 // TDD RED tests for the minimum ACP v1 server (see doc.go).

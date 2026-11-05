@@ -160,9 +160,17 @@ func (a *App) questionCards(c *ui.Context, t *design.Tokens) {
 				ui.Text(c, question.Question).FontSize(13).FixedLineHeight(20).
 					TextColor(t.LabelPrimary)
 				if len(question.Options) > 0 {
-					ui.Text(c, a.T("session.suggested", strings.Join(question.Options, " · "))).
-						FontSize(12).FixedLineHeight(18).TextColor(t.LabelSecondary).
-						MaxLines(2).Ellipsis("…")
+					// Suggested answers are one click away: the chips submit
+					// that answer directly, so the common case needs no typing
+					// (FP-16).
+					ui.Row(c).Gap(design.Space2).Wrap().AlignItems(ui.Center).Children(func() {
+						for _, option := range question.Options {
+							option := option
+							label := a.menuText("Choose "+option, "选择 "+option)
+							chip := ui.Button(c, option).Height(th.Space(8)).Label(label)
+							chip.OnClick(func() { a.answerQuestionWith(question, option) })
+						}
+					})
 				}
 				if question.Context != "" {
 					ui.Text(c, question.Context).FontSize(12).FixedLineHeight(18).
@@ -187,18 +195,33 @@ func (a *App) questionCards(c *ui.Context, t *design.Tokens) {
 
 // answerQuestion submits the question card's draft through the controller.
 // The controller removes the card on success and restores it on failure, so
-// the error stays visible here.
+// the error stays visible here. An empty (or whitespace-only) draft is refused
+// locally: it would start a blank turn and lose the question.
 func (a *App) answerQuestion(question tools.Question) {
 	if a.Ctrl == nil {
 		return
 	}
 	uiState := a.uiState()
 	uiState.questionErr = ""
-	if err := a.Ctrl.AnswerQuestion(context.Background(), question.CallID, uiState.questionDraft); err != nil {
+	answer := strings.TrimSpace(uiState.questionDraft)
+	if answer == "" {
+		uiState.questionErr = a.menuText("Enter an answer before sending.",
+			"请输入回答后再发送。")
+		return
+	}
+	if err := a.Ctrl.AnswerQuestion(context.Background(), question.CallID, answer); err != nil {
 		uiState.questionErr = err.Error()
 		return
 	}
 	uiState.questionDraft = ""
+}
+
+// answerQuestionWith submits one of the question's suggested answers directly.
+func (a *App) answerQuestionWith(question tools.Question, answer string) {
+	uiState := a.uiState()
+	uiState.questionDraft = answer
+	uiState.questionErr = ""
+	a.answerQuestion(question)
 }
 
 // liveArtifacts lists the artifacts the agent presented through the present

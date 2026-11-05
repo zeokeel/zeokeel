@@ -19,13 +19,15 @@
 #endif
 
 [Setup]
-AppId={{9A3E4C1F-6B7D-4C2E-9F10-ZEOKEEL0001}
+AppId={{7C4D1E2A-5B6F-4A8C-9D3E-1F2A3B4C5D6E}
 AppName=ZeoKeel
 AppVersion={#AppVersion}
 AppPublisher=ZeoKeel
 DefaultDirName={localappdata}\Programs\ZeoKeel
 DefaultGroupName=ZeoKeel
 PrivilegesRequired=lowest
+ArchitecturesAllowed=x64compatible
+ArchitecturesInstallIn64BitMode=x64compatible
 DisableProgramGroupPage=yes
 OutputDir={#DistDir}
 OutputBaseFilename=zeokeel-windows-amd64-setup
@@ -33,6 +35,7 @@ Compression=lzma2
 SolidCompression=yes
 WizardStyle=modern
 UninstallDisplayName=ZeoKeel {#AppVersion}
+; Silent install for IT: zeokeel-windows-amd64-setup.exe /VERYSILENT /SUPPRESSMSGBOXES /NORESTART
 ; SignTool=... (deferred: needs Authenticode certificate, see INSTALLER-PLAN.md)
 
 [Files]
@@ -40,9 +43,13 @@ Source: "{#DistDir}\zeokeel-windows-amd64.exe"; DestDir: "{app}"; Flags: ignorev
 Source: "{#DistDir}\zeokeel-windows-amd64-console.exe"; DestDir: "{app}"; Flags: ignoreversion
 Source: "{#DistDir}\README-WINDOWS.txt"; DestDir: "{app}"; Flags: ignoreversion isreadme
 
+[Tasks]
+Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{cm:AdditionalIcons}"; Flags: unchecked
+
 [Icons]
 Name: "{group}\ZeoKeel"; Filename: "{app}\zeokeel-windows-amd64.exe"
 Name: "{group}\Uninstall ZeoKeel"; Filename: "{uninstallexe}"
+Name: "{autodesktop}\ZeoKeel"; Filename: "{app}\zeokeel-windows-amd64.exe"; Tasks: desktopicon
 
 [Registry]
 Root: HKCU; Subkey: "Software\ZeoKeel"; ValueType: string; ValueName: "InstallDir"; ValueData: "{app}"; Flags: uninsdeletekey

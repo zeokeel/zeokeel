@@ -381,36 +381,31 @@ func (a *App) View(c *ui.Context) {
 		a.focusComposerOnFrame = false
 		a.focusComposer(c)
 	}
-	// UX-14 (raise the toast above the composer) needs a framework hook:
-	// a shell-owned ToastViewportBase overlay intercepts the pointer for the
-	// popovers below it, so the shell keeps mygo's default placement.
-	// a.toastViewport(c, t)
 }
 
 // toastViewport places the window's toasts. mygo's default sits just above the
-// window bottom, which the Home and Session composers own: on those screens the
-// shell lifts the toast above the composer card and keeps the same inverse fill
-// the framework uses, so click feedback never covers the composer toolbar
-// (UX-14). Toast actions are not used in this shell.
+// window bottom, which the Session composer's footer and the Settings form
+// rows own; the shell places its toasts in the window's top band instead and
+// marks each toast pass-through, so a toast is a status note that never takes
+// a click or a hover from the popover underneath it (UX-14). Toast actions are
+// not used in this shell.
 func (a *App) toastViewport(c *ui.Context, t *design.Tokens) {
 	th := t.Theme()
-	bottom := th.Space(6)
-	switch a.backgroundScreen() {
-	case Home, Session:
-		bottom += th.Space(16)
-	}
-	fill, text := t.LabelPrimary, t.BgBase
+	var fill, text ui.Color
 	if t.Dark {
 		fill, text = t.BgStrong, t.LabelPrimary
+	} else {
+		fill, text = t.LabelPrimary, t.BgBase
 	}
 	ui.ToastViewportBase(c, func(viewport ui.Element, toasts []ui.Toast) {
-		viewport.Bottom(bottom).AlignItems(ui.Center).Gap(th.Space(2))
+		viewport.Top(th.Space(2)).Justify(ui.Start).AlignItems(ui.Center).Gap(th.Space(2))
 		for _, toast := range toasts {
 			parts := ui.ToastBase(c, toast)
 			box := parts.Root.Row().AlignItems(ui.Center).
 				Padding(th.Space(2.5), th.Space(4)).Radius(th.Space(2)).
 				Background(fill).Border(1, t.BorderL3).
-				Shadow(0, 6, 20, 0, ui.RGBA(0, 0, 0, 0.25))
+				Shadow(0, 6, 20, 0, ui.RGBA(0, 0, 0, 0.25)).
+				PassThrough()
 			box.Children(func() {
 				title := toast.Title
 				if toast.Description != "" {

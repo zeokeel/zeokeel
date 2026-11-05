@@ -1,5 +1,3 @@
-//go:build tdd_red
-
 package session_test
 
 import (
@@ -13,17 +11,13 @@ import (
 	"github.com/zeokeel/zeokeel/internal/session"
 )
 
-// RT-04 TDD (RED): per-session agents.
+// RT-04: per-session agents.
 //
-// Today the Controller owns ONE runtime.Agent and every turn takes that agent's
-// global runMu, so two sessions' model calls run strictly serialized. The next
-// round gives each session its own agent (an AgentFactory seam injected through
-// session.Config, wired by the app to buildAgentWithOptions per session) and the
-// controller falls back to the single shared agent only when the factory is nil.
-//
-// This file is a failing test today: it must stay red until the seam and the
-// per-session agent map exist. Do not weaken the timing assertion to make the
-// current serialized implementation pass.
+// The Controller now accepts an AgentFactory: each session gets its own
+// runtime.Agent (and therefore its own runMu), so turns of different sessions
+// run in parallel. The Controller falls back to the shared agent when the
+// factory is nil (the app's headless CLI path and older tests). These tests pin
+// the seam and the real parallelism; keep the timing assertion strict.
 
 // TestSessionsRunInParallelWithPerSessionAgents submits one turn on each of two
 // sessions concurrently. Each model call takes modelLatency; with per-session
@@ -35,6 +29,9 @@ func TestSessionsRunInParallelWithPerSessionAgents(t *testing.T) {
 		return []runtime.Chunk{{Text: "done", Done: true}}
 	}}
 	h := newHarness(t, provider)
+	// Install the per-session factory exactly like the app does: one agent per
+	// session, each with its own runMu.
+	h.ctrl.SetAgentFactory(perSessionAgentFactory(provider, nil), nil)
 	ctx := context.Background()
 	first, err := h.ctrl.CreateSession(ctx, "parallel session a")
 	if err != nil {
@@ -64,20 +61,50 @@ func TestSessionsRunInParallelWithPerSessionAgents(t *testing.T) {
 	// Serialized: >= 2*latency. Parallel: ~1*latency plus scheduling overhead.
 	limit := modelLatency + 150*time.Millisecond
 	if elapsed >= limit {
-		t.Fatalf("RED (RT-04): two one-call sessions took %v (limit %v): turns still share one agent and serialize on its runMu; implement per-session agents via an AgentFactory seam", elapsed, limit)
+		t.Fatalf("two one-call sessions took %v (limit %v): per-session agents still serialize on a shared runMu", elapsed, limit)
 	}
 }
 
-// TestAgentFactorySeamAvailableForPerSessionAgents pins the planned seam shape:
+// TestAgentFactorySeamAvailableForPerSessionAgents pins the seam shape:
 // session.Config must offer an AgentFactory the app can set, so the controller
 // can build/own one runtime.Agent per session instead of one global agent.
 func TestAgentFactorySeamAvailableForPerSessionAgents(t *testing.T) {
 	configType := reflect.TypeOf(session.Config{})
 	field, ok := configType.FieldByName("AgentFactory")
 	if !ok {
-		t.Fatalf("RED (RT-04): session.Config has no AgentFactory seam; the next round must add it (func(sessionID string) (*runtime.Agent, error) or equivalent) so per-session agents can be injected and faked in tests")
+		t.Fatalf("session.Config has no AgentFactory seam (want func(sessionID string) (*runtime.Agent, error))")
 	}
 	if field.Type.Kind() != reflect.Func {
 		t.Fatalf("session.Config.AgentFactory is %v, want a func", field.Type)
+	}
+}
+
+// perSessionAgentFactory returns a factory that builds one independent
+// runtime.Agent per session for these tests, mirroring the app's factory. The
+// optional configure callback customizes each agent (for example to install a
+// Gate).
+func perSessionAgentFactory(provider runtime.Provider, configure func(*runtime.Config)) func(string) (*runtime.Agent, error) {
+	var mu sync.Mutex
+	agents := make(map[string]*runtime.Agent)
+	return func(sessionID string) (*runtime.Agent, error) {
+		mu.Lock()
+		defer mu.Unlock()
+		if agent := agents[sessionID]; agent != nil {
+			return agent, nil
+		}
+		registry := runtime.NewRegistry()
+		if err := registry.Register(echoTool{}); err != nil {
+			return nil, err
+		}
+		cfg := runtime.Config{Provider: provider, Tools: registry, Instruction: "test agent"}
+		if configure != nil {
+			configure(&cfg)
+		}
+		agent, err := runtime.New(cfg)
+		if err != nil {
+			return nil, err
+		}
+		agents[sessionID] = agent
+		return agent, nil
 	}
 }

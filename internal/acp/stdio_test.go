@@ -1,5 +1,3 @@
-//go:build tdd_red
-
 package acp
 
 // TDD RED test for the stdio transport contract (see doc.go): newline-framed
@@ -10,7 +8,6 @@ package acp
 import (
 	"bytes"
 	"context"
-	"errors"
 	"io"
 	"testing"
 	"time"
@@ -73,13 +70,8 @@ func TestStdioLoopStreamsResponses(t *testing.T) {
 		readDone <- readResult{msgs: msgs, err: decodeErr}
 	}()
 
-	select {
-	case serr := <-serveErr:
-		if errors.Is(serr, ErrNotImplemented) {
-			t.Fatalf("RED (TDD acceptance not yet implemented): stdio loop returned %v; implement newline-framed JSON-RPC with id-correlated concurrent responses", serr)
-		}
-		t.Fatalf("stdin reached EOF before any response was collected (serve error: %v)", serr)
-	case res := <-readDone:
+	verify := func(res readResult) {
+		t.Helper()
 		if res.err != nil {
 			t.Fatalf("read protocol stream: %v", res.err)
 		}
@@ -96,7 +88,25 @@ func TestStdioLoopStreamsResponses(t *testing.T) {
 		if !byID["101"] || !byID["102"] {
 			t.Fatalf("response ids = %v, want both 101 and 102 correlated on the same connection", byID)
 		}
+	}
+	select {
+	case res := <-readDone:
+		verify(res)
+	case serr := <-serveErr:
+		if serr != nil {
+			t.Fatalf("server loop failed: %v", serr)
+		}
+		// stdin reached EOF (both requests were consumed). The server does not
+		// own outW, so close our write end to finish the reader and inspect the
+		// frames it already delivered.
+		_ = outW.Close()
+		select {
+		case res := <-readDone:
+			verify(res)
+		case <-time.After(2 * time.Second):
+			t.Fatalf("server returned on EOF but the response stream did not complete")
+		}
 	case <-time.After(3 * time.Second):
-		t.Fatalf("RED: no response within 3s on the stdio transport (server loop not implemented)")
+		t.Fatalf("no response within 3s on the stdio transport")
 	}
 }

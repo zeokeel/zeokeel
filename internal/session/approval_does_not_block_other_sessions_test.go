@@ -1,5 +1,3 @@
-//go:build tdd_red
-
 package session_test
 
 import (
@@ -13,17 +11,11 @@ import (
 	"github.com/zeokeel/zeokeel/internal/state"
 )
 
-// RT-04 TDD (RED): an approval wait in one session must not freeze other
-// sessions.
+// RT-04: an approval wait in one session must not freeze other sessions.
 //
-// Today every turn runs under one runtime.Agent's global runMu, and the approval
-// wait happens inside the tool invocation, i.e. inside that lock. While session A
-// waits for a human decision, session B's Submit cannot make progress, so the
-// desktop UI's other conversations appear frozen until the approval is handled.
-// The next round moves approval waits outside the global turn lock (or gives each
-// session its own agent), which makes this test pass.
-//
-// This test must stay red until that fix lands; do not relax the B deadline.
+// With per-session agents the approval wait blocks only the waiting session's
+// own agent runMu: every other session has a different agent and keeps running.
+// Keep the B deadline strict.
 
 // lastUserText returns the newest user message content of a request.
 func lastUserText(req runtime.Request) string {
@@ -66,6 +58,12 @@ func TestApprovalDoesNotBlockOtherSessions(t *testing.T) {
 		return []runtime.Chunk{{Text: "done", Done: true}}
 	}}
 	h := newHarnessWithGate(t, provider, gate)
+	// Every session's agent must enforce the same gate for the approval hold.
+	h.ctrl.SetAgentFactory(perSessionAgentFactory(provider, func(cfg *runtime.Config) {
+		cfg.Gate = gate
+	}), nil)
+	// Every per-session bundle owns this queue, so decisions resolve against it.
+	h.ctrl.SetAgentGateFactory(func(string) *runtime.ApprovalQueue { return gate })
 	ctx := context.Background()
 	blocked, err := h.ctrl.CreateSession(ctx, "approval session a")
 	if err != nil {
@@ -85,14 +83,14 @@ func TestApprovalDoesNotBlockOtherSessions(t *testing.T) {
 	})
 	// Make sure the approval is never decided while B runs: deny only in cleanup.
 	t.Cleanup(func() {
-		for _, request := range h.ctrl.PendingApprovals() {
-			h.ctrl.Deny(request.CallID)
-		}
+		// Deciding by call id works even after another session became current
+		// (PendingApprovals only exposes the current session's requests).
+		h.ctrl.Deny("call-approval")
 		done := make(chan struct{})
 		go func() { h.ctrl.Wait(); close(done) }()
 		select {
 		case <-done:
-		case <-time.After(5 * time.Second):
+		case <-time.After(3 * time.Second):
 		}
 	})
 
@@ -109,7 +107,7 @@ func TestApprovalDoesNotBlockOtherSessions(t *testing.T) {
 		}
 		time.Sleep(5 * time.Millisecond)
 	}
-	t.Fatalf("RED (RT-04): session B did not finish within %v while session A waited for approval (%.0fms elapsed): the global agent runMu is held across the approval wait; move approval waits outside the global turn lock or give each session its own agent", bDeadline, time.Since(start).Seconds()*1000)
+	t.Fatalf("session B did not finish within %v while session A waited for approval (%.0fms elapsed): the approval wait still blocks other sessions", bDeadline, time.Since(start).Seconds()*1000)
 }
 
 // waitForCondition polls cond until it is true or the timeout elapses.

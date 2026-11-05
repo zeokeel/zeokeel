@@ -199,18 +199,84 @@ func load(root string, tolerant bool) ([]Skill, []error) {
 // operator's explicit override is never widened behind their back.
 const userSkillsSubdir = ".zeokeel/skills"
 
+// resolveSkillPath resolves a skill root or root component to an absolute path.
+// Relative paths are anchored at base when provided, otherwise at the process
+// working directory (historical behaviour for direct callers); "~" expands to
+// the user home; absolute paths are cleaned and returned verbatim.
+func resolveSkillPath(path, base string) string {
+	path = expandHomePath(strings.TrimSpace(path))
+	if path == "" {
+		return ""
+	}
+	if filepath.IsAbs(path) {
+		return filepath.Clean(path)
+	}
+	if strings.TrimSpace(base) != "" {
+		base = expandHomePath(strings.TrimSpace(base))
+		if !filepath.IsAbs(base) {
+			if abs, err := filepath.Abs(base); err == nil {
+				base = abs
+			}
+		}
+		return filepath.Clean(filepath.Join(base, path))
+	}
+	if abs, err := filepath.Abs(path); err == nil {
+		return filepath.Clean(abs)
+	}
+	return filepath.Clean(path)
+}
+
+// expandHomePath expands a leading "~" or "~/" to the user's home directory.
+func expandHomePath(path string) string {
+	if path != "~" && !strings.HasPrefix(path, "~"+string(filepath.Separator)) && !strings.HasPrefix(path, "~/") {
+		return path
+	}
+	home, err := os.UserHomeDir()
+	if err != nil || strings.TrimSpace(home) == "" {
+		return path
+	}
+	if path == "~" {
+		return home
+	}
+	return filepath.Join(home, path[2:])
+}
+
+// NewIn returns the skill tool for root resolved against workspaceRoot (see
+// RootsFor). The app should prefer this over New so a relative configured root
+// never depends on the process working directory.
+func NewIn(workspaceRoot, root string) (*Tool, error) {
+	loaded, err := LoadRoots(RootsFor(root, workspaceRoot))
+	if err != nil {
+		return nil, err
+	}
+	return NewFromSkills(loaded), nil
+}
+
+// NewTolerantIn is NewIn with the tolerant loading used by the app.
+func NewTolerantIn(workspaceRoot, root string) (*Tool, []error) {
+	return NewRootsTolerant(RootsFor(root, workspaceRoot))
+}
+
 // RootsFor returns the skill roots for the configured root, in precedence
 // order. The primary root is always first; project-local and user roots are
 // appended only when root is the default "<workspace>/skills" layout.
-func RootsFor(root string) []string {
+//
+// A relative root is resolved against base (normally the workspace root) when
+// given, never against the process working directory: the app may be launched
+// from anywhere and a settings value such as "skills" or ".zeokeel/skills" must
+// stay inside the workspace. With no base the historical cwd behaviour is kept
+// for direct callers. "~"/"~/" prefixes expand to the user home, and an
+// absolute root is used verbatim.
+func RootsFor(root string, base ...string) []string {
 	root = strings.TrimSpace(root)
 	if root == "" {
 		return nil
 	}
-	abs, err := filepath.Abs(root)
-	if err == nil {
-		root = abs
+	anchor := ""
+	if len(base) > 0 {
+		anchor = strings.TrimSpace(base[0])
 	}
+	root = resolveSkillPath(root, anchor)
 	roots := []string{root}
 	seen := map[string]bool{filepath.Clean(root): true}
 	add := func(path string) {
@@ -218,9 +284,7 @@ func RootsFor(root string) []string {
 		if path == "" {
 			return
 		}
-		if abs, err := filepath.Abs(path); err == nil {
-			path = abs
-		}
+		path = resolveSkillPath(path, anchor)
 		path = filepath.Clean(path)
 		if seen[path] {
 			return

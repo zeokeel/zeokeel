@@ -21,13 +21,17 @@
 Name "ZeoKeel"
 OutFile "${DISTDIR}\zeokeel-windows-amd64-setup.exe"
 Unicode true
+SetCompressor /SOLID lzma
+; Silent install for IT: zeokeel-windows-amd64-setup.exe /S
 ; Per-user install by default; machine-wide needs elevation (see INSTALLER-PLAN).
 RequestExecutionLevel user
+; Only the amd64 build is shipped today (no arm64 Windows artifact).
 InstallDir "$LOCALAPPDATA\Programs\ZeoKeel"
 InstallDirRegKey HKCU "Software\ZeoKeel" "InstallDir"
 
 Page directory
 Page instfiles
+
 UninstPage uninstConfirm
 UninstPage instfiles
 
@@ -42,6 +46,7 @@ Section "ZeoKeel (required)" SecMain
   WriteRegStr HKCU "Software\ZeoKeel" "Commit" "${COMMIT}"
 
   CreateShortcut "$SMPROGRAMS\ZeoKeel.lnk" "$INSTDIR\zeokeel-windows-amd64.exe"
+  ; Optional desktop shortcut: add a components page for it in the full implementation.
   WriteUninstaller "$INSTDIR\uninstall.exe"
   WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\ZeoKeel" \
     "DisplayName" "ZeoKeel"

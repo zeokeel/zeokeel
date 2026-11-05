@@ -277,6 +277,9 @@ func (a *App) settingsPanelLive(c *ui.Context, t *design.Tokens) {
 // in-app modal shows, so the two hosts cannot drift apart; the modal remains
 // the fallback when no host window can be shown.
 func (a *App) SettingsView(c *ui.Context) {
+	// A toast queued by a settings action (the settings window has no live
+	// controller of its own) is shown by this window's top-band layer.
+	a.flushDeferredToast(c)
 	t := a.themeTokens(c)
 	c.SetTheme(t.Theme())
 	a.normalizeSettingsTab()
@@ -287,6 +290,10 @@ func (a *App) SettingsView(c *ui.Context) {
 	// Escape closes the settings window, as it closes the modal. A popover the
 	// page opened consumes its own Escape first, so this only fires when none
 	// is open.
+	// The settings window has its own toast layer: the same top-band,
+	// pass-through placement as the main window, so a "saved" note never
+	// covers the form row it just changed (UX-14).
+	a.toastViewport(c, t)
 	if a.hasSettingsWindowHost() {
 		// Cmd/Ctrl+, focuses the window itself (macOS's global menu bar already
 		// reaches it; on Windows and Linux the menu bar belongs to the main

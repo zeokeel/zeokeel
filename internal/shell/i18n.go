@@ -315,7 +315,6 @@ var translations = map[string]translation{
 	"session.send_answer":                                    {"Send answer", "发送回答"},
 	"session.stop":                                           {"Stop", "停止"},
 	"session.stopped":                                        {"Stopped", "已停止"},
-	"session.suggested":                                      {"Suggested: %s", "建议：%s"},
 	"session.task_stopped":                                   {"Task stopped", "任务已停止"},
 	"session.task_stopped_detail_1":                          {" The DSH process exited before this turn finished (for example, it was killed, crashed, or timed out while", " DSH 进程在此回合完成前退出（例如在关闭时被终止、崩溃或超时），"},
 	"session.task_stopped_detail_2":                          {"shutting down), so the turn was closed when DSH restarted. Unfinished tool calls have unknown outcomes.", "因此 DSH 重启后该回合被关闭。未完成的工具调用结果未知。"},

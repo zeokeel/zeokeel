@@ -172,8 +172,75 @@ func loadManifest(path string) (*manifestFile, error) {
 	if m.Sessions == nil {
 		m.Sessions = make(map[string]manifestEntry)
 	}
+	if err := m.migrateLegacyKeys(); err != nil {
+		return nil, fmt.Errorf("%w: %s: %v", ErrManifest, path, err)
+	}
 	m.path = path
 	return &m, nil
+}
+
+// migrateLegacyKeys rewrites wave-2 manifest keys to the current relative-path
+// scheme. The old key was "<home>|<session dir name or session file base>": for
+// session-<uuid> directories it used the file base (colliding across every
+// session) and for bare-uuid directories the uuid. Without this migration an
+// upgrade would compute the new relative-path key, miss the old entry and
+// import every previously imported session a second time.
+//
+// Migration is fail-closed: an entry whose source cannot be reconstructed is
+// an invalid manifest and the run stops before creating anything. Entries that
+// already use the current scheme are kept as-is; when two keys collapse onto
+// one, identical hashes are de-duplicated and conflicting hashes are rejected.
+func (m *manifestFile) migrateLegacyKeys() error {
+	if m == nil || len(m.Sessions) == 0 {
+		return nil
+	}
+	migrated := make(map[string]manifestEntry, len(m.Sessions))
+	for legacyKey, entry := range m.Sessions {
+		canonical, changed, err := canonicalManifestKey(legacyKey, entry)
+		if err != nil {
+			return err
+		}
+		if existing, ok := migrated[canonical]; ok {
+			if !changed {
+				return fmt.Errorf("manifest key %q appears twice", canonical)
+			}
+			if existing.SHA256 != entry.SHA256 || existing.SourceSize != entry.SourceSize {
+				return fmt.Errorf("legacy keys for %q disagree about the imported content", canonical)
+			}
+			continue // duplicate legacy key for the same source: keep one
+		}
+		_ = changed
+		migrated[canonical] = entry
+	}
+	m.Sessions = migrated
+	return nil
+}
+
+// canonicalManifestKey maps one stored key to the current scheme. changed
+// reports that the key was rewritten; a key already in the current form is
+// returned unchanged. An entry that cannot be placed is an error.
+func canonicalManifestKey(legacyKey string, entry manifestEntry) (key string, changed bool, err error) {
+	home := strings.TrimSpace(entry.DSHHome)
+	source := strings.TrimSpace(entry.SourceFile)
+	if home == "" || source == "" {
+		// Recover a home from the old "<home>|..." prefix when the header fields
+		// are missing (older hand-edited manifests), but only if the key suffix
+		// still looks like a relative path; otherwise fail closed.
+		if pipe := strings.LastIndex(legacyKey, "|"); pipe > 0 {
+			candidateHome := legacyKey[:pipe]
+			suffix := legacyKey[pipe+1:]
+			if strings.ContainsAny(suffix, "/\\") && filepath.IsAbs(candidateHome) {
+				return legacyKey, false, nil
+			}
+		}
+		return "", false, fmt.Errorf("manifest entry %q cannot be migrated: missing dsh_home/source_file", legacyKey)
+	}
+	sessionsRoot := filepath.Join(filepath.Clean(home), sessionsDirName)
+	canonical := manifestKey(filepath.Clean(home), sessionsRoot, source)
+	if canonical == legacyKey {
+		return legacyKey, false, nil
+	}
+	return canonical, true, nil
 }
 
 // alreadyImported reports whether key was imported with the same content.

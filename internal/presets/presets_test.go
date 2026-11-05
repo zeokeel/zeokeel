@@ -1,12 +1,10 @@
-//go:build tdd_red
-
 package presets_test
 
 // Acceptance tests for FP-06 (declarative agent presets/personas).
 //
-// TDD state: STEP 0 is RED. The package ships domain types and stubs, so these
-// tests compile and fail on real behaviour assertions. The next round makes
-// them GREEN without editing them (only internal/presets/presets.go changes).
+// TDD state: STEP 1 is GREEN. The acceptance assertions below were written
+// against the RED skeleton and are unchanged; internal/presets/presets.go now
+// implements the catalog.
 
 import (
 	"errors"

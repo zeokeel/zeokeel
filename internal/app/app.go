@@ -113,6 +113,13 @@ type app struct {
 	// cwd when it becomes current instead of letting one session's "cd" leak
 	// into the next session. Guarded by dirMu.
 	sessionCWDs map[string]string
+
+	// Per-session agents (RT-04): when sessionFactory is true the controller
+	// builds one runtime.Agent per session through a.buildSessionAgent, and
+	// sessionBundles owns the bundles to close them on invalidation/shutdown.
+	sessionFactory bool
+	bundlesMu      sync.Mutex
+	sessionBundles map[string]*AgentBundle
 }
 
 // Run starts the app and blocks until it quits.
@@ -288,6 +295,10 @@ func (a *app) startServices() {
 	// /goal changes and goal-driver state persist through the store-backed tool
 	// state, so a restart shows the same objective (FP-04).
 	ctrl.SetGoalStore(storeToolState{st: ctrl.Store()})
+	// RT-04: one agent per session, so turns of different conversations run in
+	// parallel and an approval wait only blocks its own session.
+	a.installSessionAgentFactory(ctrl)
+	a.sessionFactory = true
 	if built != nil {
 		ctrl.SetAgentModeSwitcher(built.Agent.SetMode)
 	}
@@ -515,6 +526,14 @@ func (a *app) rebuildAgent(reason string) error {
 	if a.services == nil {
 		return nil
 	}
+	// Per-session agents capture build-time settings (tools, plugin set,
+	// provider/model, permission). Any rebuild reason except "workspace" (the
+	// per-session roots are fixed at session creation) must drop the cached
+	// session agents so the next turn of each session rebuilds with the new
+	// settings. The shared fallback bundle below is rebuilt either way.
+	if a.sessionFactory && reason != "workspace" {
+		a.services.InvalidateAgents()
+	}
 	dir := DataDir()
 	root := strings.TrimSpace(a.services.WorkspaceRoot())
 	if root == "" {
@@ -577,6 +596,10 @@ func (a *app) stopServices() {
 		a.scheduler.Stop()
 		a.scheduler = nil
 	}
+	if a.services != nil && a.sessionFactory {
+		a.services.InvalidateAgents()
+	}
+	a.closeSessionBundles()
 	a.closeToolManagers()
 	if a.cleanup == nil {
 		return

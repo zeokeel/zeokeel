@@ -1,6 +1,6 @@
 # Windows installer — plan (not built or verified in this round)
 
-> Status: **PLAN / DRAFT ONLY**. No installer is produced today; the shipped
+> Status: **PLAN + executable drafts (static-reviewed, NOT built)**. `installer.iss` / `zeokeel.nsi` are complete drafts with per-user layout, shortcuts, registry metadata and silent-install flags, but no Inno/NSIS toolchain runs in this environment; the release CI (`.github/workflows/release.yml`) still ships the portable zip only. No installer is produced today; the shipped
 > Windows artifact remains the portable `dist/zeokeel-windows-amd64.zip` (GUI +
 > console twin + README). This file records the intended shape so the updater
 > (`internal/updater/`, TDD RED this round) and packaging can be implemented
@@ -25,7 +25,7 @@ track the release-chain gap; this plan is the Windows half of it.
 | Verdict | **primary** — simplest per-user portable-style install and clean upgrade story | fallback if Inno is unavailable on the build host |
 
 Draft scripts live next to this plan and are **not compiled** in this round:
-`installer.iss` (Inno) and `zeokeel.nsi` (NSIS). They are intentionally minimal.
+`installer.iss` (Inno) and `zeokeel.nsi` (NSIS). Both are intentionally minimal and **not compiled**; a future step adds `iscc`/`makensis` to CI and an artifact to the release workflow.
 
 ## Install layout
 
@@ -73,7 +73,9 @@ makensis -DAPPVERSION=<version> -DCOMMIT=<sha> packaging/windows/zeokeel.nsi
 
 `scripts/build.sh package-windows` stays unchanged this round (zip only); a
 `package-windows-installer` target can wrap the compiler above when the
-toolchain is added to CI.
+toolchain is added to CI. The release workflow (`.github/workflows/release.yml`)
+already publishes the portable zip in the matrix; adding an installer artifact is
+a separate job once signing exists (unsigned installers trigger SmartScreen).
 
 ## Acceptance for the future implementation
 

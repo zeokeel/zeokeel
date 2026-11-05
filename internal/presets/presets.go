@@ -5,23 +5,23 @@
 // data; users add or override presets with JSON files under
 // <data dir>/presets/*.json.
 //
-// # TDD state (wave 3, STEP 0: RED)
+// # Status (wave 3, STEP 1: GREEN)
 //
-// This package currently ships the domain types, the error contract and the
-// acceptance tests only. Every exported function is a stub that returns a zero
-// value, so `go test ./internal/presets` fails on real behaviour assertions
-// (see presets_test.go). The next implementation round turns the same tests
-// GREEN without changing their assertions:
-//
-//	go build ./internal/presets   # passes (stubs compile)
-//	go test  ./internal/presets   # RED: 5 failing acceptance tests
+// The catalog is implemented and `go test ./internal/presets` is green. The
+// acceptance tests pin the contract: built-in catalog, user JSON merge
+// (field-wise override, fail-closed on a broken file), tool allowlists,
+// resolution/validation and ordered persona/prompt prompt sections.
 //
 // # Interface contract (planned wiring; owned by later rounds)
 //
 // Storage
 //   - User presets: "<data dir>/presets/<id>.json", one preset per file, the
-//     same JSON shape as Preset. Files are user data: a malformed file fails
-//     the load with ErrInvalidJSON and keeps the in-memory registry untouched.
+//     same JSON shape as Preset (see testdata/reviewer.json). Files are user
+//     data: a malformed file fails the load with ErrInvalidJSON and keeps the
+//     previous in-memory registry untouched; two user files declaring the same
+//     ID fail with ErrDuplicateID. A user preset with a built-in ID overrides
+//     that built-in field-wise (fields absent from the file keep the built-in
+//     value; `"tools": []` deliberately clears the allowlist).
 //   - Per-session selection: settings key "session.preset.<session id>" holds a
 //     preset ID. Writes go through the existing store settings API; the
 //     legacy "session.mode.<session id>" / "agent.preset" mode keys keep
@@ -45,7 +45,7 @@
 //     Registry.VisibleTools(presetID, registeredNames): an empty allowlist
 //     means every registered tool; a non-empty allowlist keeps registered order
 //     and drops everything else. Unknown allowlist names are a load error, not
-//     a silent drop.
+//     a silent drop (when KnownTools is provided at load time).
 //   - Prompt composition: Registry.PersonaSections(presetID) returns ordered
 //     prompt.Section values. The persona section (ID PersonaSectionID,
 //     Order == prompt.OrderPersonaPrefix) replaces the deployment persona
@@ -54,6 +54,8 @@
 //     it. The app is expected to pass them into prompt composition as preset
 //     sections, sorted with the existing Section.Order rules, so the composed
 //     prompt order stays stable.
+//   - Model: a preset's Model is the default model for sessions that selected
+//     it and have no explicit per-session model; empty keeps the app default.
 //
 // UI (fix-frontend)
 //   - Settings > Agent presets lists Registry.List() (built-ins first, then
@@ -64,7 +66,14 @@
 package presets
 
 import (
+	"encoding/json"
 	"errors"
+	"fmt"
+	"os"
+	"path/filepath"
+	"regexp"
+	"sort"
+	"strings"
 
 	"github.com/zeokeel/zeokeel/internal/prompt"
 )
@@ -94,6 +103,14 @@ const (
 	// persona prefix and far before the deployment persona suffix.
 	OrderPresetPrompt = prompt.OrderPersonaPrefix + 1
 )
+
+// presetsDirName is the user preset directory inside the ZeoKeel data dir.
+const presetsDirName = "presets"
+
+// userPresetPattern restricts preset IDs to one safe file-name-like element.
+// It also makes "<id>.json" a predictable file name for the UI's "open folder"
+// affordance.
+var userPresetPattern = regexp.MustCompile(`^[a-z0-9][a-z0-9._-]{0,63}$`)
 
 // Errors returned by load/validation. Callers classify with errors.Is; a
 // load error must leave the previous registry untouched (fail closed).
@@ -156,63 +173,294 @@ type Options struct {
 // receiver and report an empty/zero result so callers never panic on a failed
 // load.
 type Registry struct {
-	// presets is the merged list in display order; byID is the lookup index.
 	presets []Preset
 	byID    map[string]Preset
 }
 
+// builtins is the fixed built-in catalog. It is the single source of truth for
+// the built-in IDs/order; Builtins returns a deep copy.
+var builtins = []Preset{
+	{
+		ID:          BuiltinStandardID,
+		Name:        "Standard",
+		Description: "The full built-in tool set with the default persona and model.",
+	},
+	{
+		ID:          BuiltinMinimalID,
+		Name:        "Minimal",
+		Description: "Terminal-only tool set for small, focused sessions.",
+		Tools: []string{
+			"terminal_open", "terminal_list", "terminal_read", "terminal_send",
+			"terminal_signal", "terminal_close", "read_image", "working_directory",
+		},
+	},
+	{
+		ID:          BuiltinCreatorID,
+		Name:        "Creator",
+		Description: "Customize ZeoKeel through conversation and write reusable skills.",
+		Prompt: "You customize ZeoKeel. Prefer changing whitelisted settings through the " +
+			"settings tools, and write reusable capabilities as skills under " +
+			"<workspace>/skills/<name>/SKILL.md with the standard file tools. " +
+			"Explain each change and keep the user's existing configuration intact unless " +
+			"they ask for it to change.",
+	},
+}
+
 // Builtins returns the built-in presets: standard (all tools), minimal
 // (terminal-only allowlist) and creator (customization guidance). The slice is
-// a copy; callers may not mutate the registry through it.
-//
-// TDD RED: returns nil until the next round implements the built-in catalog.
+// a deep copy; callers may not mutate the catalog through it.
 func Builtins() []Preset {
-	return nil
+	return clonePresets(builtins)
 }
 
 // Load reads the built-in presets and merges the user preset files under
 // <opts.UserDir>/presets/*.json. A user preset with a built-in ID overrides
-// that built-in (field-wise: a value present in the user preset replaces the
-// built-in field, an absent one keeps the built-in value). A missing user
-// directory is not an error; a malformed file, duplicate user ID or invalid
-// preset fails the whole load (fail closed, no partial registry).
-//
-// TDD RED: returns (nil, nil) until the next round implements loading.
+// that built-in field-wise (a JSON field present in the file replaces the
+// built-in field, an absent field keeps the built-in value; `"tools": []`
+// deliberately clears the allowlist). A missing user directory is not an
+// error; a malformed file, duplicate user ID or invalid preset fails the whole
+// load (fail closed, no partial registry).
 func Load(opts Options) (*Registry, error) {
-	return nil, nil
+	known := normalizeToolNames(opts.KnownTools)
+	merged := clonePresets(builtins)
+	index := make(map[string]int, len(merged))
+	for i := range merged {
+		index[merged[i].ID] = i
+	}
+
+	userDir := strings.TrimSpace(opts.UserDir)
+	var userPresets []Preset
+	if userDir != "" {
+		dir := filepath.Join(userDir, presetsDirName)
+		entries, err := os.ReadDir(dir)
+		if err != nil && !os.IsNotExist(err) {
+			return nil, fmt.Errorf("presets: read user preset directory %q: %w", dir, err)
+		}
+		// Only regular *.json files are presets; README/notes files are
+		// ignored so the folder can document itself.
+		var names []string
+		for _, entry := range entries {
+			if entry.IsDir() || strings.HasPrefix(entry.Name(), ".") {
+				continue
+			}
+			if !strings.EqualFold(filepath.Ext(entry.Name()), ".json") {
+				continue
+			}
+			names = append(names, entry.Name())
+		}
+		sort.Strings(names)
+
+		seen := make(map[string]string, len(names))
+		for _, name := range names {
+			path := filepath.Join(dir, name)
+			preset, fields, perr := parseUserPresetFile(path)
+			if perr != nil {
+				return nil, perr
+			}
+			if err := validatePreset(preset, fields, known); err != nil {
+				return nil, fmt.Errorf("%s: %w", path, err)
+			}
+			if first, ok := seen[preset.ID]; ok {
+				return nil, fmt.Errorf("%w: %q is declared by both %s and %s",
+					ErrDuplicateID, preset.ID, first, name)
+			}
+			seen[preset.ID] = name
+			userPresets = append(userPresets, preset)
+			if i, ok := index[preset.ID]; ok {
+				merged[i] = mergePreset(merged[i], preset, fields)
+				continue
+			}
+			index[preset.ID] = len(merged)
+			merged = append(merged, preset)
+		}
+	}
+
+	// Built-ins keep their fixed display order; user-only presets are sorted
+	// by Order then ID after them.
+	out := make([]Preset, 0, len(merged))
+	rest := make([]Preset, 0, len(userPresets))
+	for _, p := range merged {
+		if isBuiltinID(p.ID) {
+			out = append(out, p)
+			continue
+		}
+		rest = append(rest, p)
+	}
+	sort.SliceStable(rest, func(i, j int) bool {
+		if rest[i].Order != rest[j].Order {
+			return rest[i].Order < rest[j].Order
+		}
+		return rest[i].ID < rest[j].ID
+	})
+	out = append(out, rest...)
+
+	reg := &Registry{presets: out, byID: make(map[string]Preset, len(out))}
+	for _, p := range out {
+		reg.byID[p.ID] = p
+	}
+	if err := reg.Validate(); err != nil {
+		return nil, err
+	}
+	return reg, nil
 }
 
-// List returns the merged presets in display order (built-ins first, then user
-// presets by Order then ID). The slice is a copy.
-//
-// TDD RED: returns nil until implemented.
-func (r *Registry) List() []Preset {
-	if r == nil {
+// parseUserPresetFile decodes one user preset JSON object while tracking which
+// fields the file actually declared, so a same-ID override is field-wise and an
+// omitted field keeps the built-in value (`"tools": []` still clears it).
+func parseUserPresetFile(path string) (Preset, map[string]bool, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return Preset{}, nil, fmt.Errorf("presets: read user preset %q: %w", path, err)
+	}
+	var raw map[string]json.RawMessage
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return Preset{}, nil, fmt.Errorf("%w: %s: %v", ErrInvalidJSON, path, err)
+	}
+	if raw == nil {
+		return Preset{}, nil, fmt.Errorf("%w: %s: preset must be a JSON object", ErrInvalidJSON, path)
+	}
+	var preset Preset
+	fields := make(map[string]bool, len(raw))
+	decode := func(key string, dst any) error {
+		value, ok := raw[key]
+		if !ok {
+			return nil
+		}
+		if err := json.Unmarshal(value, dst); err != nil {
+			return fmt.Errorf("%w: %s: field %q: %v", ErrInvalidJSON, path, key, err)
+		}
+		fields[key] = true
 		return nil
+	}
+	if err := decode("id", &preset.ID); err != nil {
+		return Preset{}, nil, err
+	}
+	if err := decode("name", &preset.Name); err != nil {
+		return Preset{}, nil, err
+	}
+	if err := decode("description", &preset.Description); err != nil {
+		return Preset{}, nil, err
+	}
+	if err := decode("tools", &preset.Tools); err != nil {
+		return Preset{}, nil, err
+	}
+	if err := decode("prompt", &preset.Prompt); err != nil {
+		return Preset{}, nil, err
+	}
+	if err := decode("persona", &preset.Persona); err != nil {
+		return Preset{}, nil, err
+	}
+	if err := decode("model", &preset.Model); err != nil {
+		return Preset{}, nil, err
+	}
+	if err := decode("order", &preset.Order); err != nil {
+		return Preset{}, nil, err
+	}
+	return preset, fields, nil
+}
+
+// mergePreset applies the fields one user preset declared to base.
+func mergePreset(base, user Preset, fields map[string]bool) Preset {
+	out := clonePreset(base)
+	if fields["id"] {
+		out.ID = user.ID
+	}
+	if fields["name"] {
+		out.Name = user.Name
+	}
+	if fields["description"] {
+		out.Description = user.Description
+	}
+	if fields["tools"] {
+		out.Tools = append([]string(nil), user.Tools...)
+	}
+	if fields["prompt"] {
+		out.Prompt = user.Prompt
+	}
+	if fields["persona"] {
+		out.Persona = user.Persona
+	}
+	if fields["model"] {
+		out.Model = user.Model
+	}
+	if fields["order"] {
+		out.Order = user.Order
+	}
+	return out
+}
+
+// validatePreset checks one preset's required fields and allowlist.
+func validatePreset(p Preset, _ map[string]bool, knownTools []string) error {
+	id := strings.TrimSpace(p.ID)
+	if id == "" {
+		return fmt.Errorf("%w: preset id is required", ErrInvalidPreset)
+	}
+	if !userPresetPattern.MatchString(id) {
+		return fmt.Errorf("%w: preset id %q must match %s", ErrInvalidPreset, id, userPresetPattern.String())
+	}
+	if strings.TrimSpace(p.Name) == "" {
+		return fmt.Errorf("%w: preset %q: name is required", ErrInvalidPreset, id)
+	}
+	seen := make(map[string]bool, len(p.Tools))
+	for _, tool := range p.Tools {
+		name := strings.TrimSpace(tool)
+		if name == "" {
+			return fmt.Errorf("%w: preset %q: empty tool name in allowlist", ErrInvalidPreset, id)
+		}
+		if seen[name] {
+			return fmt.Errorf("%w: preset %q: duplicate tool %q in allowlist", ErrInvalidPreset, id, name)
+		}
+		seen[name] = true
+		if len(knownTools) > 0 && !containsString(knownTools, name) {
+			return fmt.Errorf("%w: preset %q lists unknown tool %q", ErrUnknownTool, id, name)
+		}
 	}
 	return nil
 }
 
+// List returns the merged presets in display order (built-ins first, then user
+// presets by Order then ID). The slice is a deep copy.
+func (r *Registry) List() []Preset {
+	if r == nil {
+		return nil
+	}
+	return clonePresets(r.presets)
+}
+
 // Get returns the preset with id and whether it exists.
-//
-// TDD RED: always reports false until implemented.
 func (r *Registry) Get(id string) (Preset, bool) {
 	if r == nil {
 		return Preset{}, false
 	}
-	return Preset{}, false
+	p, ok := r.byID[strings.TrimSpace(id)]
+	if !ok {
+		return Preset{}, false
+	}
+	return clonePreset(p), true
 }
 
 // Resolve resolves a session's preset selection. Empty, unknown or deleted IDs
 // resolve to the fallback preset (standard) with a non-empty warning that names
 // the requested ID; a known ID resolves without warnings.
-//
-// TDD RED: returns a zero preset and no warnings until implemented.
 func (r *Registry) Resolve(id string) (Preset, []string) {
 	if r == nil {
-		return Preset{}, nil
+		return Preset{}, []string{"preset registry is unavailable; using the default agent behaviour"}
 	}
-	return Preset{}, nil
+	requested := strings.TrimSpace(id)
+	if requested == "" {
+		if p, ok := r.Get(PresetFallbackID); ok {
+			return p, nil
+		}
+		return Preset{}, []string{"default preset is missing; using the default agent behaviour"}
+	}
+	if p, ok := r.Get(requested); ok {
+		return p, nil
+	}
+	fallback, ok := r.Get(PresetFallbackID)
+	if !ok {
+		return Preset{}, []string{fmt.Sprintf("preset %q not found and the fallback is missing; using the default agent behaviour", requested)}
+	}
+	return fallback, []string{fmt.Sprintf("preset %q not found; falling back to %q", requested, PresetFallbackID)}
 }
 
 // VisibleTools applies presetID's tool allowlist to the registered tool names.
@@ -220,13 +468,30 @@ func (r *Registry) Resolve(id string) (Preset, []string) {
 // allowlist returns only the named tools, in registration order. Unknown
 // preset IDs return ErrNotFound; allowlist entries that were accepted at load
 // time never silently drop here.
-//
-// TDD RED: returns (nil, nil) until implemented.
 func (r *Registry) VisibleTools(presetID string, registered []string) ([]string, error) {
 	if r == nil {
-		return nil, ErrNotFound
+		return nil, fmt.Errorf("%w: preset registry is unavailable", ErrNotFound)
 	}
-	return nil, nil
+	p, ok := r.Get(presetID)
+	if !ok {
+		return nil, fmt.Errorf("%w: %q", ErrNotFound, presetID)
+	}
+	if len(p.Tools) == 0 {
+		out := make([]string, len(registered))
+		copy(out, registered)
+		return out, nil
+	}
+	allowed := make(map[string]bool, len(p.Tools))
+	for _, name := range p.Tools {
+		allowed[name] = true
+	}
+	out := make([]string, 0, len(registered))
+	for _, name := range registered {
+		if allowed[name] {
+			out = append(out, name)
+		}
+	}
+	return out, nil
 }
 
 // PersonaSections returns the ordered prompt sections a session's preset
@@ -234,24 +499,111 @@ func (r *Registry) VisibleTools(presetID string, registered []string) ([]string,
 // preset instructions (only when Prompt is non-empty). Order is stable across
 // calls and across registry reloads for the same content. Unknown preset IDs
 // return nil (the caller resolves first, so this is not an error).
-//
-// TDD RED: returns nil until implemented.
 func (r *Registry) PersonaSections(presetID string) []prompt.Section {
 	if r == nil {
 		return nil
 	}
+	p, ok := r.Get(presetID)
+	if !ok {
+		return nil
+	}
+	sections := make([]prompt.Section, 0, 2)
+	if text := strings.TrimSpace(p.Persona); text != "" {
+		sections = append(sections, prompt.Section{
+			ID:    PersonaSectionID,
+			Order: prompt.OrderPersonaPrefix,
+			EN:    text,
+			ZH:    text,
+		})
+	}
+	if text := strings.TrimSpace(p.Prompt); text != "" {
+		sections = append(sections, prompt.Section{
+			ID:    PromptSectionID,
+			Order: OrderPresetPrompt,
+			EN:    text,
+			ZH:    text,
+		})
+	}
+	return sections
+}
+
+// Validate reports whether the registry's presets are internally valid: every
+// ID/Name is set, IDs are unique and match the allowed character set, and
+// every non-empty tool allowlist only names known registered tools (when
+// KnownTools was provided at load time).
+func (r *Registry) Validate() error {
+	if r == nil {
+		return fmt.Errorf("%w: nil registry", ErrInvalidPreset)
+	}
+	seen := make(map[string]bool, len(r.presets))
+	for _, p := range r.presets {
+		// Built-ins are part of the product contract and may name tools that a
+		// caller's live registry subset does not include; unknown-tool
+		// membership is enforced for user presets at load time.
+		if err := validatePreset(p, nil, nil); err != nil {
+			return err
+		}
+		if seen[p.ID] {
+			return fmt.Errorf("%w: duplicate preset id %q", ErrDuplicateID, p.ID)
+		}
+		seen[p.ID] = true
+	}
 	return nil
 }
 
-// Validate reports whether the registry's presets are internally valid:
-// every ID/Name is set, IDs are unique and match the allowed character set,
-// and every non-empty tool allowlist only names known registered tools (when
-// KnownTools was provided at load time).
-//
-// TDD RED: returns nil until implemented.
-func (r *Registry) Validate() error {
-	if r == nil {
-		return ErrInvalidPreset
+// isBuiltinID reports whether id is one of the fixed built-in preset IDs.
+func isBuiltinID(id string) bool {
+	for _, b := range builtins {
+		if b.ID == id {
+			return true
+		}
 	}
-	return nil
+	return false
+}
+
+// containsString reports whether list contains want.
+func containsString(list []string, want string) bool {
+	for _, s := range list {
+		if s == want {
+			return true
+		}
+	}
+	return false
+}
+
+// clonePresets deep-copies a preset slice (including tool allowlists).
+func clonePresets(in []Preset) []Preset {
+	out := make([]Preset, 0, len(in))
+	for _, p := range in {
+		out = append(out, clonePreset(p))
+	}
+	return out
+}
+
+// clonePreset deep-copies one preset.
+func clonePreset(p Preset) Preset {
+	out := p
+	if p.Tools != nil {
+		out.Tools = append([]string(nil), p.Tools...)
+	}
+	return out
+}
+
+// normalizeToolNames returns known tool names as a trimmed, de-duplicated slice
+// preserving order. Nil/empty means allowlist validation is disabled.
+func normalizeToolNames(names []string) []string {
+	if len(names) == 0 {
+		return nil
+	}
+	out := make([]string, 0, len(names))
+	seen := make(map[string]bool, len(names))
+	for _, name := range names {
+		name = strings.TrimSpace(name)
+		if name == "" || seen[name] {
+			continue
+		}
+		seen[name] = true
+		out = append(out, name)
+	}
+	return out
 }

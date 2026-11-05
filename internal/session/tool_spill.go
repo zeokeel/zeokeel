@@ -29,6 +29,12 @@ const (
 	toolResultSpillDir = ".zeokeel/tool-results"
 )
 
+// spillDirOpenedHook is a test-only seam: it runs after the spill directory
+// has been validated/opened and before the result file is created. Production
+// leaves it nil; tests use it to inject the directory-swap race deterministically
+// instead of relying on timing.
+var spillDirOpenedHook func(dir string)
+
 // spillToolResultFile writes result to root/.zeokeel/tool-results and returns
 // the summary that replaces the persisted result. ok is false when nothing was
 // spilled (small result or no workspace root); a write error leaves the caller
@@ -37,9 +43,12 @@ const (
 // The workspace (and everything a repository can commit into it) is untrusted:
 // a git checkout can ship symlinks such as .zeokeel/tool-results -> ~/.ssh.
 // The target path is therefore built one component at a time with Lstat checks
-// that refuse symlinks and non-directories, and the file itself is created with
-// O_EXCL so an existing file or symlink is never truncated or followed (RT-07).
-// Unsafe targets return an error and the caller keeps the full result.
+// that refuse symlinks and non-directories (RT-07). Because a check is not a
+// use, createSpillFile then re-opens the directory chain without following
+// symlinks and creates the file inside the still-open descriptor (openat on
+// Linux; an equivalent O_EXCL + identity re-check elsewhere), so a symlink
+// swapped in between validation and creation cannot redirect the write. Unsafe
+// targets return an error and the caller keeps the full result.
 func spillToolResultFile(root, callID, result string) (summary string, ok bool, err error) {
 	if root == "" || len(result) <= toolResultSpillBytes {
 		return "", false, nil
@@ -49,21 +58,16 @@ func spillToolResultFile(root, callID, result string) (summary string, ok bool, 
 		return "", false, err
 	}
 	name := sanitizeToolResultName(callID) + ".txt"
-	path := filepath.Join(dir, name)
-	file, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
-	if err != nil {
+	// Test seam for the deterministic TOCTOU regression: invoked after the
+	// directory was validated/opened and before the file is created, so a test
+	// can swap the validated path for a symlink at exactly the check-use window.
+	if spillDirOpenedHook != nil {
+		spillDirOpenedHook(dir)
+	}
+	if err := createSpillFile(dir, name, result); err != nil {
 		// A pre-existing file (including a planted symlink) is never truncated:
 		// fall back to keeping the full result in the turn.
 		return "", false, err
-	}
-	if _, werr := file.WriteString(result); werr != nil {
-		_ = file.Close()
-		_ = os.Remove(path)
-		return "", false, werr
-	}
-	if cerr := file.Close(); cerr != nil {
-		_ = os.Remove(path)
-		return "", false, cerr
 	}
 	pruneSpilledToolResults(dir, toolResultSpillKeep)
 	rel := toolResultSpillDir + "/" + name

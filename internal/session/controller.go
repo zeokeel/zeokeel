@@ -70,6 +70,21 @@ type Config struct {
 	// Zero leaves automatic continuation disabled. GoalDriver wins when both
 	// are set.
 	GoalRounds int
+	// AgentFactory, when non-nil, builds one runtime.Agent per session instead
+	// of sharing Config.Agent. Per-session agents let turns of different
+	// sessions run in parallel (each agent has its own runMu) and let an
+	// approval wait block only its own session (RT-04). A nil factory keeps the
+	// legacy shared agent; SetAgentFactory can install one later.
+	AgentFactory func(sessionID string) (*runtime.Agent, error)
+	// AgentDiscard, when non-nil, receives an agent the controller stops using
+	// (invalidation, Close or a lost build race) so the app can close the
+	// bundle that owns it. It is called without c.mu held.
+	AgentDiscard func(sessionID string, agent *runtime.Agent)
+	// AgentGateFactory, when non-nil, returns the approval gate that belongs to
+	// the factory-built agent of sessionID (each per-session bundle owns its
+	// own queue). The controller uses it to resolve approvals and allow-always
+	// rules for the right session.
+	AgentGateFactory func(sessionID string) *runtime.ApprovalQueue
 }
 
 // Controller wires one live turn end to end: it persists the prompt, runs the
@@ -125,10 +140,26 @@ type Controller struct {
 	// cannot be exceeded by two concurrent picks. It is held across file I/O
 	// and store writes, never while holding mu.
 	attachMu sync.Mutex
-	// builtPermission is the access mode the current agent/tool set was built
+	// builtPermission is the access mode the shared agent/tool set was built
 	// for; per-session modes trigger a rebuild when it differs.
 	builtPermission string
-	listeners       []func(*state.Snapshot)
+
+	// Per-session agent mode (RT-04). agentFactory/agentDiscard are installed
+	// by the app through Config or SetAgentFactory; agents caches each
+	// session's built agent, builtPermissions records the access mode it was
+	// built for, and agentsGeneration invalidates factory builds that were in
+	// flight when the app asked for a rebuild. All guarded by mu.
+	agentFactory     func(sessionID string) (*runtime.Agent, error)
+	agentDiscard     func(sessionID string, agent *runtime.Agent)
+	agents           map[string]*runtime.Agent
+	agentGates       map[string]*runtime.ApprovalQueue
+	agentGateFactory func(sessionID string) *runtime.ApprovalQueue
+	builtPermissions map[string]string
+	agentsGeneration uint64
+	// sessionEventSubs fans one session's semantic events out to streaming
+	// subscribers (the headless/ACP runtime). Guarded by mu.
+	sessionEventSubs map[string]map[chan state.Event]struct{}
+	listeners        []func(*state.Snapshot)
 	// goalStore, when non-nil, persists each session's goal so a restart keeps
 	// it and the /goal API's changes survive. The app wires the store-backed
 	// tool state; nil keeps goals in memory only. Guarded by mu.
@@ -307,6 +338,14 @@ func New(cfg Config) (*Controller, error) {
 		titleGen:      cfg.TitleGenerator,
 		autoTitles:    make(map[string]bool),
 		initialTitles: make(map[string]string),
+	}
+	if cfg.AgentFactory != nil {
+		c.agentFactory = cfg.AgentFactory
+		c.agentDiscard = cfg.AgentDiscard
+		c.agentGateFactory = cfg.AgentGateFactory
+		c.agents = make(map[string]*runtime.Agent)
+		c.agentGates = make(map[string]*runtime.ApprovalQueue)
+		c.builtPermissions = make(map[string]string)
 	}
 	c.titleCtx, c.titleCancel = context.WithCancel(context.Background())
 	if cfg.Projector != nil {
@@ -662,7 +701,7 @@ func (c *Controller) submit(ctx context.Context, sessionID, text string, automat
 	// Reject a controller without an agent before reserving a turn slot,
 	// preserving Submit's existing error contract.
 	c.mu.Lock()
-	hasAgent := c.agent != nil
+	hasAgent := c.agent != nil || c.agentFactory != nil
 	c.mu.Unlock()
 	if !hasAgent {
 		return ErrNoAgent
@@ -772,9 +811,12 @@ func (c *Controller) submit(ctx context.Context, sessionID, text string, automat
 		c.abortTurn(t)
 		return fmt.Errorf("session: submit: rebuild agent for permission: %w", rerr)
 	}
-	c.mu.Lock()
-	agent := c.agent
-	c.mu.Unlock()
+	agent, agentErr := c.agentFor(sessionID)
+	if agentErr != nil {
+		c.bindMu.Unlock()
+		c.abortTurn(t)
+		return fmt.Errorf("session: submit: build agent: %w", agentErr)
+	}
 	if agent == nil {
 		c.bindMu.Unlock()
 		c.abortTurn(t)
@@ -1055,6 +1097,9 @@ func (c *Controller) workspaceRootForSession(sessionID string) string {
 // notify OnUpdate listeners. Persistence failures do not stop the stream; the
 // UI stays live and the terminal status is retried by finishTurn.
 func (c *Controller) forward(t *turn, ev state.Event) {
+	// Streaming subscribers (headless/ACP) receive the semantic event stream
+	// of this session in order.
+	c.publishSessionEvent(t.sessionID, ev)
 	// Large tool results are persisted as a workspace file plus a short
 	// summary, so the next turn's history does not re-send the whole output
 	// (the current turn's model already saw the full result).
@@ -1668,18 +1713,27 @@ func (c *Controller) abortTurn(t *turn) {
 	close(t.done)
 }
 
-// Stop cancels the current session's turn. It is idempotent and does not block
-// waiting for the runtime to unwind; the snapshot is moved to PhaseIdle and
-// the session row to idle immediately. A later Submit for the same session
-// waits for the cancelled turn to finish unwinding.
+// Stop cancels the current session's turn. See StopSession for the
+// per-session semantics used by the headless/ACP runtime.
 func (c *Controller) Stop() {
 	c.mu.Lock()
-	if c.closed {
-		c.mu.Unlock()
+	sessionID := c.currentID
+	c.mu.Unlock()
+	c.StopSession(sessionID)
+}
+
+// StopSession cancels sessionID's turn. It is idempotent and does not block
+// waiting for the runtime to unwind; the snapshot is moved to PhaseIdle and
+// the session row to idle immediately. A later Submit for the same session
+// waits for the cancelled turn to finish unwinding. An empty or unknown session
+// id is a no-op, so the ACP/headless runtime can cancel defensively.
+func (c *Controller) StopSession(sessionID string) {
+	sessionID = strings.TrimSpace(sessionID)
+	if sessionID == "" {
 		return
 	}
-	sessionID := c.currentID
-	if sessionID == "" {
+	c.mu.Lock()
+	if c.closed {
 		c.mu.Unlock()
 		return
 	}
@@ -1695,8 +1749,8 @@ func (c *Controller) Stop() {
 	// Remember the Stop even when the turn slot is already empty or terminal:
 	// the goal driver may be between deleting the finished turn and submitting
 	// its continuation, and that continuation must not start.
-	c.stopRequested[c.currentID] = true
-	t := c.turns[c.currentID]
+	c.stopRequested[sessionID] = true
+	t := c.turns[sessionID]
 	if t == nil {
 		c.mu.Unlock()
 		return
@@ -1867,6 +1921,20 @@ func (c *Controller) Close() error {
 	c.mu.Unlock()
 
 	c.wg.Wait()
+	// Drop every cached per-session agent; the app closes the owned bundles
+	// through the discard callback.
+	c.mu.Lock()
+	agents := c.agents
+	c.agents = make(map[string]*runtime.Agent)
+	c.agentGates = make(map[string]*runtime.ApprovalQueue)
+	c.builtPermissions = make(map[string]string)
+	discard := c.agentDiscard
+	c.mu.Unlock()
+	for sessionID, agent := range agents {
+		if discard != nil && agent != nil {
+			discard(sessionID, agent)
+		}
+	}
 	if c.ownsProjector && c.projector != nil {
 		c.projector.Close()
 	}
@@ -2196,10 +2264,15 @@ func (c *Controller) AllowAlways(toolName string) {
 	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	if c.closed || c.gate == nil {
+	if c.closed {
 		return
 	}
-	c.gate.AllowAlways(toolName)
+	if c.gate != nil {
+		c.gate.AllowAlways(toolName)
+	}
+	for _, gate := range c.agentGates {
+		gate.AllowAlways(toolName)
+	}
 }
 
 // ClearApprovalRules forgets every Always-allow rule, restoring the approval
@@ -2208,10 +2281,15 @@ func (c *Controller) AllowAlways(toolName string) {
 func (c *Controller) ClearApprovalRules() {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	if c.closed || c.gate == nil {
+	if c.closed {
 		return
 	}
-	c.gate.ClearRules()
+	if c.gate != nil {
+		c.gate.ClearRules()
+	}
+	for _, gate := range c.agentGates {
+		gate.ClearRules()
+	}
 }
 
 // pendingToolName returns the tool name of the pending request callID,
@@ -2245,18 +2323,20 @@ func (c *Controller) decideApproval(callID string, allow bool) bool {
 	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	if c.closed || c.gate == nil {
+	if c.closed {
 		return false
 	}
 	// Prefer the current session: that is the only pending set the UI shows,
 	// and it keeps decisions deterministic when sessions reuse a call id.
-	found := c.removePendingLocked(c.currentID, callID)
+	owner := c.currentID
+	found := c.removePendingLocked(owner, callID)
 	if !found {
 		for sessionID := range c.pending {
 			if sessionID == c.currentID {
 				continue
 			}
 			if c.removePendingLocked(sessionID, callID) {
+				owner = sessionID
 				found = true
 				break
 			}
@@ -2265,12 +2345,18 @@ func (c *Controller) decideApproval(callID string, allow bool) bool {
 	if !found {
 		return false
 	}
+	// Resolve the decision against the queue that owns the request: with
+	// per-session agents every session has its own approval gate (RT-04).
+	queue := c.gateForSessionLocked(owner)
+	if queue == nil {
+		return false
+	}
 	// A decision may land before the tool reaches Wait; the queue buffers it,
 	// so the caller only needs to know that the request was ours to decide.
 	if allow {
-		c.gate.Approve(callID)
+		queue.Approve(callID)
 	} else {
-		c.gate.Deny(callID)
+		queue.Deny(callID)
 	}
 	return true
 }
@@ -2796,8 +2882,17 @@ func (c *Controller) SetPlanMode(sessionID string, on bool) error {
 func (c *Controller) applySessionMode(sessionID string) error {
 	c.mu.Lock()
 	switcher := c.modeSwitcher
-	agent := c.agent
+	shared := c.agent
+	factory := c.agentFactory
 	c.mu.Unlock()
+	agent := shared
+	if factory != nil {
+		built, err := c.agentFor(sessionID)
+		if err != nil {
+			return err
+		}
+		agent = built
+	}
 	want := c.sessionModeFor(sessionID)
 	if strings.TrimSpace(want) == "" {
 		want = runtime.ModeStandard
@@ -2805,7 +2900,9 @@ func (c *Controller) applySessionMode(sessionID string) error {
 	if agent != nil && agent.Mode() == want {
 		return nil
 	}
-	if switcher != nil {
+	// The app's switcher targets the shared agent; with per-session agents the
+	// controller switches the session's own agent directly.
+	if factory == nil && switcher != nil {
 		return switcher(want)
 	}
 	// A controller wired with an agent but no explicit switcher still owns
@@ -2881,13 +2978,238 @@ func (c *Controller) SetAgent(agent *runtime.Agent, gate *runtime.ApprovalQueue)
 	c.mu.Unlock()
 }
 
+// SetAgentFactory installs the per-session agent mode (RT-04): factory builds
+// one runtime.Agent per session, discard (optional) receives agents the
+// controller stops using so the app can close their bundles. Existing cached
+// agents are discarded and in-flight factory builds from before the call are
+// ignored. Passing a nil factory restores the legacy shared-agent mode.
+func (c *Controller) SetAgentFactory(factory func(sessionID string) (*runtime.Agent, error), discard func(sessionID string, agent *runtime.Agent)) {
+	c.mu.Lock()
+	c.agentFactory = factory
+	c.agentDiscard = discard
+	c.agentsGeneration++
+	old := c.agents
+	c.agents = make(map[string]*runtime.Agent)
+	c.agentGates = make(map[string]*runtime.ApprovalQueue)
+	c.builtPermissions = make(map[string]string)
+	c.mu.Unlock()
+	for sessionID, agent := range old {
+		if discard != nil && agent != nil {
+			discard(sessionID, agent)
+		}
+	}
+}
+
+// SetAgentGateFactory installs the lookup for per-session approval gates. It is
+// called by the app together with SetAgentFactory (each per-session bundle owns
+// its own queue, so decisions must resolve against the right one).
+func (c *Controller) SetAgentGateFactory(fn func(sessionID string) *runtime.ApprovalQueue) {
+	c.mu.Lock()
+	c.agentGateFactory = fn
+	c.mu.Unlock()
+}
+
+// gateForSessionLocked returns the approval queue that owns sessionID's
+// approvals: the per-session queue in factory mode, else the shared queue. The
+// caller holds c.mu.
+func (c *Controller) gateForSessionLocked(sessionID string) *runtime.ApprovalQueue {
+	if c.agentFactory != nil {
+		if gate := c.agentGates[sessionID]; gate != nil {
+			return gate
+		}
+	}
+	return c.gate
+}
+
+// InvalidateAgents drops every cached per-session agent so the next turn of any
+// session rebuilds it (settings, plugin or model changes). It returns
+// immediately; bundles are closed through the discard callback.
+func (c *Controller) InvalidateAgents() {
+	c.mu.Lock()
+	c.agentsGeneration++
+	old := c.agents
+	c.agents = make(map[string]*runtime.Agent)
+	c.agentGates = make(map[string]*runtime.ApprovalQueue)
+	c.builtPermissions = make(map[string]string)
+	discard := c.agentDiscard
+	c.mu.Unlock()
+	for sessionID, agent := range old {
+		if discard != nil && agent != nil {
+			discard(sessionID, agent)
+		}
+	}
+}
+
+// invalidateAgent drops sessionID's cached agent (permission change, stale
+// build). It is a no-op in shared-agent mode and when nothing is cached.
+func (c *Controller) invalidateAgent(sessionID string) {
+	c.mu.Lock()
+	agent := c.agents[sessionID]
+	delete(c.agents, sessionID)
+	delete(c.agentGates, sessionID)
+	delete(c.builtPermissions, sessionID)
+	discard := c.agentDiscard
+	c.mu.Unlock()
+	if agent != nil && discard != nil {
+		discard(sessionID, agent)
+	}
+}
+
+// agentFor returns the runtime.Agent that should run sessionID's next turn.
+// Without a factory it is the shared agent (legacy behavior). With a factory
+// the session's agent is built lazily and cached; a build racing an Invalidate
+// is retried so a stale agent never runs a turn.
+func (c *Controller) agentFor(sessionID string) (*runtime.Agent, error) {
+	for attempt := 0; attempt < 4; attempt++ {
+		c.mu.Lock()
+		factory := c.agentFactory
+		if factory == nil {
+			agent := c.agent
+			c.mu.Unlock()
+			return agent, nil
+		}
+		if agent := c.agents[sessionID]; agent != nil {
+			c.mu.Unlock()
+			return agent, nil
+		}
+		generation := c.agentsGeneration
+		discard := c.agentDiscard
+		c.mu.Unlock()
+
+		agent, err := factory(sessionID)
+		if err != nil {
+			return nil, err
+		}
+		if agent == nil {
+			return nil, nil
+		}
+		// Resolve the effective permission before taking mu (the resolver may
+		// hydrate from the store and must not run while c.mu is held).
+		builtPermission := c.SessionPermissionOrDefault(sessionID)
+		gateFactory := func() func(string) *runtime.ApprovalQueue {
+			c.mu.Lock()
+			defer c.mu.Unlock()
+			return c.agentGateFactory
+		}()
+		var sessionGate *runtime.ApprovalQueue
+		if gateFactory != nil {
+			sessionGate = gateFactory(sessionID)
+		}
+
+		c.mu.Lock()
+		if c.closed {
+			c.mu.Unlock()
+			if discard != nil {
+				discard(sessionID, agent)
+			}
+			return nil, ErrClosed
+		}
+		if generation != c.agentsGeneration {
+			// The app invalidated agents while this one was building; retry
+			// with the current generation instead of caching a stale agent.
+			c.mu.Unlock()
+			if discard != nil {
+				discard(sessionID, agent)
+			}
+			continue
+		}
+		if existing := c.agents[sessionID]; existing != nil {
+			c.mu.Unlock()
+			if discard != nil {
+				discard(sessionID, agent)
+			}
+			return existing, nil
+		}
+		if c.agents == nil {
+			c.agents = make(map[string]*runtime.Agent)
+		}
+		c.agents[sessionID] = agent
+		if c.builtPermissions == nil {
+			c.builtPermissions = make(map[string]string)
+		}
+		c.builtPermissions[sessionID] = builtPermission
+		if sessionGate != nil {
+			if c.agentGates == nil {
+				c.agentGates = make(map[string]*runtime.ApprovalQueue)
+			}
+			c.agentGates[sessionID] = sessionGate
+		}
+		c.mu.Unlock()
+		return agent, nil
+	}
+	return nil, fmt.Errorf("%w: agent for session %q kept being invalidated", ErrNoAgent, sessionID)
+}
+
+// SubscribeSessionEvents streams one session's semantic events (tokens,
+// reasoning, tool lifecycle, usage, terminal status) to a buffered channel.
+// The returned unsubscribe function stops delivery and closes the channel; it
+// is idempotent. Slow subscribers drop events instead of stalling the turn.
+func (c *Controller) SubscribeSessionEvents(sessionID string) (<-chan state.Event, func(), error) {
+	sessionID = strings.TrimSpace(sessionID)
+	if sessionID == "" {
+		return nil, nil, fmt.Errorf("%w: subscribe session events: empty session id", ErrInvalidArgument)
+	}
+	ch := make(chan state.Event, 1024)
+	c.mu.Lock()
+	if c.closed {
+		c.mu.Unlock()
+		return nil, nil, ErrClosed
+	}
+	if c.sessionEventSubs == nil {
+		c.sessionEventSubs = make(map[string]map[chan state.Event]struct{})
+	}
+	if c.sessionEventSubs[sessionID] == nil {
+		c.sessionEventSubs[sessionID] = make(map[chan state.Event]struct{})
+	}
+	c.sessionEventSubs[sessionID][ch] = struct{}{}
+	c.mu.Unlock()
+
+	var once sync.Once
+	unsubscribe := func() {
+		once.Do(func() {
+			c.mu.Lock()
+			if subs := c.sessionEventSubs[sessionID]; subs != nil {
+				delete(subs, ch)
+				if len(subs) == 0 {
+					delete(c.sessionEventSubs, sessionID)
+				}
+			}
+			c.mu.Unlock()
+			close(ch)
+		})
+	}
+	return ch, unsubscribe, nil
+}
+
+// publishSessionEvent fans ev out to sessionID's streaming subscribers. It is
+// non-blocking: a subscriber that cannot keep up loses events (never the turn).
+func (c *Controller) publishSessionEvent(sessionID string, ev state.Event) {
+	c.mu.Lock()
+	subs := c.sessionEventSubs[sessionID]
+	if len(subs) == 0 {
+		c.mu.Unlock()
+		return
+	}
+	targets := make([]chan state.Event, 0, len(subs))
+	for ch := range subs {
+		targets = append(targets, ch)
+	}
+	c.mu.Unlock()
+	for _, ch := range targets {
+		select {
+		case ch <- ev:
+		default:
+		}
+	}
+}
+
 // HasAgent reports whether a runtime agent is configured. The shell uses it
 // to explain a disabled Send / ErrNoAgent instead of silently dropping a
 // submit.
 func (c *Controller) HasAgent() bool {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	return c.agent != nil
+	return c.agent != nil || c.agentFactory != nil
 }
 
 // SetAgentRebuilder wires the app hook that rebuilds the runtime agent after
@@ -2990,7 +3312,17 @@ func (c *Controller) SetSessionPermission(sessionID, mode string) {
 	c.perms[sessionID] = mode
 	current := c.currentID
 	built := c.builtPermission
+	factory := c.agentFactory
+	builtForSession := c.builtPermissions[sessionID]
 	c.mu.Unlock()
+	if factory != nil {
+		// Per-session agents capture the mode when built: drop this session's
+		// agent so the next turn rebuilds it with the new permission (RT-04).
+		if sessionID == current && builtForSession != "" && builtForSession != mode {
+			c.invalidateAgent(sessionID)
+		}
+		return
+	}
 	if sessionID == current && built != "" && built != mode {
 		_ = c.RebuildAgent("permission")
 	}
@@ -3014,8 +3346,21 @@ func (c *Controller) SetBuiltPermission(mode string) {
 func (c *Controller) rebuildForPermission(sessionID string) error {
 	c.mu.Lock()
 	built := c.builtPermission
+	factory := c.agentFactory
+	builtForSession := c.builtPermissions[sessionID]
 	c.mu.Unlock()
 	want := c.SessionPermissionOrDefault(sessionID)
+	if factory != nil {
+		// The factory builds each agent for the session's effective mode, so a
+		// mismatch only means the cached agent is stale: drop it and let the
+		// next turn rebuild. Nothing to ask the app for. An empty built value
+		// means this session has no cached agent yet.
+		if builtForSession == "" || want == "" || builtForSession == want {
+			return nil
+		}
+		c.invalidateAgent(sessionID)
+		return nil
+	}
 	if built == "" || want == "" || built == want {
 		return nil
 	}
@@ -3114,7 +3459,15 @@ func (c *Controller) applySessionModel(sessionID string) error {
 	}
 	c.mu.Lock()
 	agent := c.agent
+	factory := c.agentFactory
 	c.mu.Unlock()
+	if factory != nil {
+		built, err := c.agentFor(sessionID)
+		if err != nil {
+			return err
+		}
+		agent = built
+	}
 	if agent == nil {
 		return nil
 	}

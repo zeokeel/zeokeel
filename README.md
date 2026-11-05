@@ -31,6 +31,7 @@
 | `make package-windows` | 上述 Windows 双产物 + `dist/zeokeel-windows-amd64.zip` + `dist/SHA256SUMS.txt` |
 | `make package-linux` | `dist/zeokeel-linux-{amd64,arm64}.tar.gz`（含 README）+ `dist/SHA256SUMS.txt` |
 | `make package-macos` | `dist/zeokeel-macos-{arm64,amd64}.zip`（unsigned `.app`）+ `dist/SHA256SUMS.txt` |
+| `make release` | 本机构建全部发布包（Linux/Windows/macOS）+ `dist/SHA256SUMS.txt` |
 | `make version` | 打印下一次构建将注入的 version/commit（不构建） |
 | `make build-check` | `go build ./...` 仅编译检查（不产生文件） |
 | `make clean` | 删除 `dist/`、遗留的根目录 `zeokeel`/`zeokeel.exe` 与包内 `*.test`（不动 `.cache/`、`.probe/`、`.evolve/`） |
@@ -40,6 +41,15 @@
 **版本与诊断**：构建用 `-ldflags "-s -w -X main.version/commit/buildTime"` 注入版本并剥离符号（产物约 -32%），默认值来自 `git describe`/`git rev-parse`，可用 `ZEOKEEL_VERSION` 等覆盖。`zeokeel --version` 打印三项 + 平台/工具链；`zeokeel run [--json] [--yes] "<prompt>"` 无窗口跑一条 prompt（headless CLI，退出码 0/1/2，`run --help` 看全量参数）；`zeokeel import [--from <dsh-home>] [--dry-run] [--json] [--manifest <file>]` 迁移 DSH 会话（默认幂等 manifest，重复运行跳过未变会话）（只读 DSH；凭据只列键名、不读值；建议先 `--dry-run`）；`sh scripts/check-clean-checkout.sh` 校验提交树（非工作树）可构建；日志写 `<数据目录>/logs/app-YYYYMMDD.log`（8MiB 轮转、跨天换文件、0600），panic 写 `logs/crash-*.txt`，`debug.SetCrashOutput` 捕获致命崩溃（Windows GUI 构建也生效）。
 
 **Windows 可执行文件图标**：`logo/zeokeel.ico`（由 `logo/logo.svg` 生成，含 256/128/64/48/32/16 多尺寸）经 `cmd/zeokeel/resource_windows_amd64.rc` + MinGW `windres` 编译为已提交的 `cmd/zeokeel/resource_windows_amd64.syso`，`go build` 会自动把它嵌入 exe（Explorer/任务栏图标）。修改 icon 后运行 `sh scripts/gen-windows-resource.sh`（或 `make icon`）重新生成；`make windows` 在源文件较新且 `x86_64-w64-mingw32-windres` 存在时也会自动重生成。
+
+## 发布（Release）
+
+- **版本与产物**：`git tag vX.Y.Z && git push origin vX.Y.Z` → [`.github/workflows/release.yml`](.github/workflows/release.yml) 在 ubuntu/macos/windows 矩阵构建并创建 GitHub Release（未签名）：`zeokeel-linux-{amd64,arm64}.tar.gz`、`zeokeel-windows-amd64.zip`（GUI+console）、`zeokeel-macos-{arm64,amd64}.zip`（unsigned `.app`）+ `SHA256SUMS.txt`。
+- **本地等价**：`make release`（= `scripts/release.sh`，产出 `dist/` 全部包与校验和；v 号可用 `ZEOKEEL_VERSION=1.2.3` 覆盖）。
+- **校验**：下载后先 `sha256sum -c SHA256SUMS.txt`；macOS 首次启动需 `xattr -dr com.apple.quarantine /Applications/ZeoKeel.app`。
+- **签名/公证**：未做（需 Authenticode/Developer ID 证书与 CI secrets，DEFERRED，见 [BUGS AR-03](docs/BUGS.md)）；因此 Release 明确标注 unsigned build。
+- **Windows 安装器**：仍发布 portable zip；Inno/NSIS 可执行草案与布局/升级/签名计划见 [packaging/windows/INSTALLER-PLAN.md](packaging/windows/INSTALLER-PLAN.md)（未构建、未验证）。
+- **自动更新**：`internal/updater` 引擎已实现并通过 14 个契约测试（check / HTTPS-only / SHA-256 校验 / 下载暂存 / install-on-restart + 崩溃恢复），但**尚未接入 app/UI**，也还没有 update feed 与签名基建 → 用户侧暂不可用（[BUGS Updater](docs/BUGS.md)）。
 
 ## 文档
 

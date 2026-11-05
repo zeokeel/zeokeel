@@ -1,19 +1,12 @@
-//go:build tdd_red
-
-// RED tests for the auto-update engine (TDD round 1: no implementation).
+// Contract tests for the auto-update engine (TDD: red first, now green).
 //
-// The `tdd_red` build tag keeps the repository's default `go test ./...` gate
-// green while the implementation is missing; the contract is exercised
-// explicitly:
+// These tests are the executable contract; they were written before the
+// implementation and must not be weakened. The RED→GREEN history is recorded in
+// .cache/fix-platform/updater-red.txt and .cache/fix-platform/updater-green.txt.
 //
-//	go test -tags tdd_red -count=1 -v ./internal/updater   # RED today: ErrNotImplemented
+// Run:
 //
-// These tests are the executable contract: they must FAIL until the package is
-// implemented (every function currently returns ErrNotImplemented) and PASS
-// unchanged afterwards. When the implementation lands, remove the build tag (or
-// keep it as the "the TDD contract passes" job) — do not weaken the assertions.
-//
-// The expected failures are recorded in .cache/fix-platform/updater-red.txt.
+//	go test -count=1 ./internal/updater
 
 package updater
 
@@ -114,8 +107,6 @@ func testConfig(t *testing.T, feedURL string) Config {
 		AllowInsecureHTTP: true, // httptest servers are http
 	}
 }
-
-func stagingDir(cfg Config) string { return filepath.Join(cfg.DataDir, "updates") }
 
 // TestCheckFindsNewerVersion: a reachable manifest with a newer version selects
 // this platform's asset and reports available=true.
@@ -437,5 +428,85 @@ func TestInstallFailureKeepsPendingUpdate(t *testing.T) {
 	applied, err = ApplyPendingInstall(cfg)
 	if err != nil || !applied {
 		t.Fatalf("retry ApplyPendingInstall = (%v, %v), want (true, nil)", applied, err)
+	}
+}
+
+// TestApplyPendingInstallResumesInterruptedReplace covers the crash-recovery
+// path: if the process dies after the staged file was renamed to
+// "<path>.installing" but before Replace finished, the next start must resume
+// from the ".installing" sibling instead of losing the update.
+func TestApplyPendingInstallResumesInterruptedReplace(t *testing.T) {
+	cfg, rel, _ := downloadFixture(t)
+	staged, err := Download(context.Background(), cfg, rel)
+	if err != nil {
+		t.Fatalf("Download: %v", err)
+	}
+	if err := ScheduleInstall(cfg, *staged); err != nil {
+		t.Fatalf("ScheduleInstall: %v", err)
+	}
+	installing := staged.Path + ".installing"
+	if err := os.Rename(staged.Path, installing); err != nil {
+		t.Fatalf("simulate interrupted replace: %v", err)
+	}
+
+	applied, err := ApplyPendingInstall(cfg)
+	if err != nil {
+		t.Fatalf("ApplyPendingInstall after interrupted replace: %v", err)
+	}
+	if !applied {
+		t.Fatalf("applied = false, want true (resume interrupted replace)")
+	}
+	replacer := cfg.Replacer.(*fakeReplacer)
+	calls := replacer.replaceCalls()
+	if len(calls) != 1 || !strings.Contains(calls[0], installing) {
+		t.Fatalf("Replace calls = %v, want one call with the .installing path", calls)
+	}
+	for _, p := range []string{installing, stagingDir(cfg) + string(filepath.Separator) + "pending.json"} {
+		if _, err := os.Stat(p); !os.IsNotExist(err) {
+			t.Fatalf("%s still exists after recovery: %v", p, err)
+		}
+	}
+}
+
+// TestApplyPendingInstallSelfHealsMissingDownload covers a marker whose staged
+// file disappeared (e.g. the user cleaned the data directory): startup must
+// not fail, the marker is dropped.
+func TestApplyPendingInstallSelfHealsMissingDownload(t *testing.T) {
+	cfg, rel, _ := downloadFixture(t)
+	staged, err := Download(context.Background(), cfg, rel)
+	if err != nil {
+		t.Fatalf("Download: %v", err)
+	}
+	if err := ScheduleInstall(cfg, *staged); err != nil {
+		t.Fatalf("ScheduleInstall: %v", err)
+	}
+	if err := os.Remove(staged.Path); err != nil {
+		t.Fatalf("remove staged: %v", err)
+	}
+	applied, err := ApplyPendingInstall(cfg)
+	if err != nil || applied {
+		t.Fatalf("ApplyPendingInstall = (%v, %v), want (false, nil) for self-heal", applied, err)
+	}
+	if _, err := os.Stat(pendingPath(cfg)); !os.IsNotExist(err) {
+		t.Fatalf("marker was not removed by self-heal: %v", err)
+	}
+}
+
+// TestApplyPendingInstallSelfHealsCorruptMarker covers a truncated/corrupt
+// pending marker: the app must still start (no error) and drop the marker.
+func TestApplyPendingInstallSelfHealsCorruptMarker(t *testing.T) {
+	cfg := testConfig(t, "")
+	if err := os.MkdirAll(stagingDir(cfg), 0o700); err != nil {
+		t.Fatalf("mkdir staging: %v", err)
+	}
+	if err := os.WriteFile(pendingPath(cfg), []byte("{not json"), 0o600); err != nil {
+		t.Fatalf("write corrupt marker: %v", err)
+	}
+	applied, err := ApplyPendingInstall(cfg)
+	if err != nil || applied {
+		t.Fatalf("ApplyPendingInstall on corrupt marker = (%v, %v), want (false, nil)", applied, err)
+	}
+	if _, err := os.Stat(pendingPath(cfg)); !os.IsNotExist(err) {
+		t.Fatalf("corrupt marker was not removed: %v", err)
 	}
 }
