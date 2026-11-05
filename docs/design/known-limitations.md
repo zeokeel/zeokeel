@@ -16,27 +16,39 @@
 ## 2. 框架/平台限制（已记录策略，未强改）
 
 - **滚动条常显**：mygo v0.7.4 只有 hover overlay（6 DIP），无"始终显示"全局偏好；当前策略为保留 overlay + HighContrast 下加粗加深（`docs/design/native-ui.md` §12.3）。Windows 常显滚动条需框架能力或自绘，列为后续。
-- **TextScale 覆盖**：系统文字缩放在基座主题字号 + 会话正文/行高生效；界面里仍有固定 type scale（约 115 处）不随 TextScale 缩放，大字号下可能密度不足（未裁切已测 1.5x 关键控件）。
+- **TextScale 覆盖**：v1.1 起系统文字缩放覆盖基座主题字号、会话正文/行高，以及 `design.Tokens` 品牌 type scale（`Tokens.Font/Text/TextMuted` 的 size/line 同比例缩放，`t.Font(design.TypeX)` 自动生效）；Home/Session/Settings 另有 21 处显式字号/`settingsText` 调用改为 TypeRole helper（chip 高度等同比放大），1.5x 关键屏已测不裁切。剩余：全仓仍有 169 处显式 `.FontSize(...)`（转换前 177）与 `settingsText/nativeText` 等 helper 内的固定档位不随 TextScale 缩放——多数是图标/像素微调或自定义行高，其余屏幕（Sidebar/右栏/面板等）的批量转换留待 v1.2（详见 native-ui.md §12.5）。
 - **HighContrast**：在品牌主题上做对比度增强（边框/次要文字向主文字混合、Focus 不透明、滚动条加深），不是专门的高对比主题，需真机/无障碍用户评估。
 - **动画**：ReduceMotion 通过 `c.DisableAnimations()` 全局关闭；mygo 框架内建 transition 遵循，个别自绘动画（流式淡入）显式检查。
 
 ## 3. 桌面交互遗留
 
-- **通知**：后台会话完成/失败已通知；后台"等待审批"仍会漏（需要 approval hook）；通知 ID 替换、动作按钮、"退出应用后点击通知"未做；跨会话节流为同会话 5s 冷却的简化策略。
+- **通知**：当前/后台会话的 turn 完成/失败与**审批/提问等待**均已通知（controller hook）；通知 ID 替换、动作按钮、"退出应用后点击通知"未做；跨会话总量节流为简化策略（同会话完成 5s 冷却，审批不节流）。
 - **设置窗口**：Windows/Linux 设置窗口无菜单栏；窗口间几何联动、大页滚动位置持久化未做；overlay 作为无显示器/创建失败的回退保留（行为略有差异）。
-- **文本选择**：消息正文与工具卡内容已可选中/右键复制（mygo markdown）；侧栏/设置等普通 UI 文本未全面开启选择（桌面应用一般也不需要）。
-- **Trajectory**：未虚拟化；超长轨迹滚动性能有优化空间（当前会话规模未触发问题）。
-- **工具输出**：超大工具结果 40 行封顶 + 展开，未虚拟化；工具结果代码块语言映射为简化集合（bash/text 等）。
+- **文本选择**：消息与工具卡中的 Markdown 内容（正文/代码）可选中并右键复制（mygo markdown）；其余 UI 文本未全量开启选择（侧栏、按钮、标题、设置说明等），桌面应用一般也不需要。
+- **Trajectory**：已虚拟化（ui.List，1000 事件稳态帧 22.7ms→3.12ms，见 perf.md §8）；`FollowEnd=false` 为当前选择，若产品要"日志式跟随末尾"改一处即可。
+- **工具输出**：超大工具结果 40 行封顶 + 展开，未虚拟化（当前规模可接受）；工具结果代码块语言映射为简化集合（bash/text 等）。
 
 ## 3.5 已修复的评审判定项（保留记录）
 
 - 浅色三级文字对比度（`#7E8796→#646C7A`，AA）、深色字标白边（`mark-dark@2x.png`）、破坏性操作确认、toolcard 错误面板 danger-on-tint（`DangerText #B91C1C`，5.7:1）、设置窗口重复关闭入口：均已修复并有测试/预览证据（见 STATUS 阶段 6 与 review-round3/4 附录）。
 
-## 4. 视觉回归策略
+## 3.6 v1.1 已处理项（2026-11-05）
 
-- DSH 像素基线门禁已退役（ADR 0001），**不再与外部截图做像素比对**。
-- 现有 22 张品牌预览图（`docs/design/preview/`）由 opt-in 测试生成（`ZEOKEEL_UPDATE_PREVIEWS=1`），普通测试/CI 不写工作树；CI 目前**没有自动视觉回归**（无 golden 比对）。建议后续加 headless golden 冒烟（允许小阈值）覆盖关键屏。
-- 预览覆盖为静态浅/深两态；空态/错误态/加载态/窄窗截图未全部纳入预览集，由相应行为测试覆盖。
+- 后台"等待审批"通知（controller `ApprovalRequestedHook`，所有会话）。
+- Trajectory 虚拟化（ui.List；1000 事件稳态帧 7.3×）。
+- TextScale 覆盖 design 类型系统（21 处关键屏显式字号转换；剩余约 169 处留 v1.2）。
+- opt-in 视觉回归工具（`scripts/visual-check.sh` + `TestVisualRegression`，CI 未强制）。
+- P3 清理：plugins 采样色→token、settings-window 预览唯一关闭入口、known-limitations/preview README 措辞与尺寸。
+
+## 4. 视觉回归策略（v1.1：opt-in 回归工具）
+
+- DSH 像素基线门禁已退役（ADR 0001），**不再与外部截图做像素比对**；下列回归比对的是 ZeoKeel 自有品牌预览，不是 DSH 基线。
+- 现有 22 张品牌预览图（`docs/design/preview/`）由 opt-in 测试生成（`ZEOKEEL_UPDATE_PREVIEWS=1`），普通测试/CI 不写工作树。
+- **v1.1 新增 opt-in 视觉回归工具**（不恢复 DSH 像素门禁，不引入 flaky CI）：
+  - `sh scripts/visual-check.sh`：无头重生成预览 → ImageMagick 对比 `docs/design/preview/` 金标 → 逐屏输出差异像素/%/diff 图（`/tmp/zeokeel-visual/`），超过阈值（默认 2%，`--threshold`/`ZEOKEEL_VISUAL_THRESHOLD` 可配）退出码 1；`--update` 显式刷新金标（人工 review 后提交）；跑完自动还原工作树。约 12s。
+  - `ZEOKEEL_VISUAL=1 go test -run TestVisualRegression ./internal/shell`：进程内 opt-in 测试，覆盖 Home/Sidebar/Settings/Plugins/Automation/Trajectory/Session 浅深两态；默认 skip（普通 `go test` 与 CI 不受影响）；时钟/日期文本按渲染位置掩码；阈值/像素容差/产物目录可配。约 2s。
+  - 已知漂移源与排除：字体栈/CJK fallback 随机器不同（金标与生成机器的字体环境绑定）；`session/automation/trajectory` 预览含墙钟/下次运行时间，脚本默认跳过这三组（`--all` 可看），进程内测试则用文本矩形掩码。因此**不做 CI 硬门禁**；换机器/换字体/大改视觉后先 `--update` 重建金标并人工 review。
+  - 工具卡预览含异步图片加载，单次约 0.006% 抖动（阈值内）；空态/错误态/加载态/窄窗截图仍未全部纳入预览集，由相应行为测试覆盖。
 
 ## 5. 功能对齐口径
 
@@ -47,7 +59,7 @@
 ## 6. 后续建议优先级
 
 1. 真机 IME/屏幕阅读器/DPI/通知矩阵（发布前必须）。
-2. 后台审批通知 + 通知动作按钮。
-3. CI headless 视觉黄金冒烟（关键屏，勿退回 DSH 像素对齐）。
+2. 通知动作按钮/退出后点击（后台审批通知已完成）。
+3. 视觉回归：opt-in 工具已提供（`scripts/visual-check.sh` + `TestVisualRegression`，§4）；CI 强制化需先解决跨机器字体/DPI/时钟矩阵，暂列后续。
 4. TextScale 全量覆盖（固定 type scale 收敛到 Theme）。
-5. Trajectory/工具输出虚拟化（若真实会话规模需要）。
+5. 工具输出虚拟化（Trajectory 已完成；若真实超长输出需要）。

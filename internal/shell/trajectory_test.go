@@ -1,6 +1,8 @@
 package shell
 
 import (
+	"context"
+	"fmt"
 	"image/png"
 	"os"
 	"path/filepath"
@@ -9,6 +11,7 @@ import (
 	"github.com/egoist/mygo/ui"
 
 	"github.com/zeokeel/zeokeel/internal/session"
+	"github.com/zeokeel/zeokeel/internal/store"
 )
 
 // trajectoryPreviewApp builds the live Session screen on its Trajectory tab
@@ -102,5 +105,160 @@ func TestRenderTrajectoryNativePreview(t *testing.T) {
 			}
 			t.Logf("wrote %s", path)
 		})
+	}
+}
+
+// appendTrajectoryRows appends events to the app's current session and drops
+// the Trajectory pane's event cache so the next frame reads them.
+func appendTrajectoryRows(t *testing.T, app *App, events []store.Event) {
+	t.Helper()
+	sessionID := app.Ctrl.CurrentSessionID()
+	if sessionID == "" {
+		t.Fatal("no current session")
+	}
+	for _, event := range events {
+		if _, err := app.Ctrl.Store().AppendEvent(sessionID, event); err != nil {
+			t.Fatalf("AppendEvent(%s): %v", event.Type, err)
+		}
+	}
+	st := app.uiState()
+	st.trajLoaded, st.trajEvents, st.trajErr = false, nil, nil
+}
+
+// longTrajectoryApp is a live Session on its Trajectory tab with a synthetic
+// trace of total rows.
+func longTrajectoryApp(t *testing.T, total int) *App {
+	t.Helper()
+	app := m6LiveApp(t, &m6Provider{})
+	app.Language = LangEN
+	app.uiState().tab = int(liveTrajectory)
+	appendTrajectoryRows(t, app, syntheticTrajectoryRows(total))
+	return app
+}
+
+// TestTrajectoryVirtualizedLongTrace covers the v1.1 virtualization: a 1200
+// row trace renders the header count and the first rows, builds only the rows
+// in view (the tail row is absent until scrolled to), and the list's own
+// ScrollToEnd brings the tail into the built window.
+func TestTrajectoryVirtualizedLongTrace(t *testing.T) {
+	const total = 1200
+	app := longTrajectoryApp(t, total)
+	events, err := app.Ctrl.Events(context.Background(), app.Ctrl.CurrentSessionID())
+	if err != nil {
+		t.Fatalf("Events: %v", err)
+	}
+	entries := buildTrajectory(events)
+	if len(entries) != total {
+		t.Fatalf("entries = %d, want %d", len(entries), total)
+	}
+	tt := ui.NewTester(app.View, 1600, 1000)
+	tt.Frame()
+
+	// The header still counts the whole trace, not just the built rows.
+	if !tt.HasText(fmt.Sprintf("%d entries", len(entries))) {
+		t.Fatalf("trajectory header lost the full count %d: %v", len(entries), tt.Texts())
+	}
+	// The oldest rows are on screen...
+	if !tt.HasText("tool_end · head-call") || !tt.HasText("head-result-marker") {
+		t.Fatalf("first trajectory rows are missing: %v", tt.Texts())
+	}
+	// ...and the tail is not: the list built only the window it shows.
+	if tt.HasText("tail-result-marker") || tt.HasText("tool_end · tail-call") {
+		t.Fatalf("the whole 1200-row trace was built before scrolling: %v", tt.Texts())
+	}
+	if got := len(tt.Texts()); got > 300 {
+		t.Fatalf("built texts = %d, want a bounded visible window for %d rows", got, total)
+	}
+	// The list reports the same bound directly: a screenful of rows, not the
+	// 1200-event history.
+	if first, last := app.uiState().trajList.Visible(); last-first+1 <= 0 || last-first+1 > 80 {
+		t.Fatalf("visible rows = %d..%d, want a bounded window", first, last)
+	}
+
+	// Jump to the end through the ListState the pane owns: the frame then
+	// builds the tail and drops the head.
+	app.uiState().trajList.ScrollToEnd()
+	tt.Frame()
+	if !tt.HasText("tool_end · tail-call") || !tt.HasText("tail-result-marker") {
+		t.Fatalf("ScrollToEnd did not build the tail rows: %v", tt.Texts())
+	}
+	if tt.HasText("head-result-marker") {
+		t.Fatalf("the head row is still built after scrolling to the end: %v", tt.Texts())
+	}
+}
+
+// TestTrajectoryVirtualizedInteractions covers the behavior the virtual list
+// must keep: wheel scrolling moves the window, clicking a row opens its raw
+// payload, the same row keeps its expansion state by event id when rows are
+// appended, and Enter/Space on the focused row toggles it as the native
+// ButtonBase did before virtualization.
+func TestTrajectoryVirtualizedInteractions(t *testing.T) {
+	app := longTrajectoryApp(t, 400)
+	tt := ui.NewTester(app.View, 1600, 1000)
+	tt.Frame()
+
+	// Clicking the first row opens its raw payload inline.
+	if err := tt.Click("tool_end · head-call"); err != nil {
+		t.Fatalf("click head trajectory row: %v", err)
+	}
+	tt.Frame()
+	if !tt.HasText(`"head-call"`) {
+		t.Fatalf("click did not open the raw payload: %v", tt.Texts())
+	}
+	// The row is a native focusable control with its accessible name, as in
+	// the virtual list's predecessors.
+	if !tt.Focused("tool_end · head-call") {
+		t.Fatalf("clicked trajectory row is not the focused control: %v", tt.Texts())
+	}
+	// The expanded state is keyed by the event sequence, so appending rows
+	// leaves this row open and the list keeps its anchor at the top.
+	headSeq := int64(1)
+	if !app.uiState().expandedRaw[headSeq] {
+		t.Fatalf("expanded raw state is not keyed by the event id %d: %v", headSeq, app.uiState().expandedRaw)
+	}
+	appendTrajectoryRows(t, app, syntheticTrajectoryRows(100))
+	tt.Frame()
+	if !tt.HasText(`"head-call"`) {
+		t.Fatalf("appended rows dropped the expanded head row: %v", tt.Texts())
+	}
+
+	// Enter on the focused row toggles it closed, as before.
+	tt.Key(0, ui.KeyEnter)
+	tt.Frame()
+	if tt.HasText(`"head-call"`) {
+		t.Fatalf("Enter on the focused row did not close it: %v", tt.Texts())
+	}
+
+	// A wheel scroll over the list moves the window and the rows leave the
+	// built set: see TestTrajectoryVirtualizedWheelScroll for the pointer
+	// path on its own.
+}
+
+// TestTrajectoryVirtualizedWheelScroll covers pointer scrolling of the virtual
+// list, without a focused row pinning the first rows: the wheel notches move
+// the window, the oldest rows leave the built set entirely and the built set
+// stays bounded.
+func TestTrajectoryVirtualizedWheelScroll(t *testing.T) {
+	app := longTrajectoryApp(t, 400)
+	tt := ui.NewTester(app.View, 1600, 1000)
+	tt.Frame()
+	marker, ok := tt.Find("head-result-marker")
+	if !ok {
+		t.Fatalf("head marker row not found: %v", tt.Texts())
+	}
+	x, y := marker.X+marker.W/2, marker.Y+marker.H/2
+	tt.Move(x, y)
+	for i := 0; i < 12 && tt.HasText("head-result-marker"); i++ {
+		tt.Scroll(x, y, 0, 200)
+		tt.Frame()
+	}
+	if tt.HasText("head-result-marker") {
+		t.Fatalf("wheel did not scroll the virtual list: %v", tt.Texts())
+	}
+	if !tt.HasText("tool_start · bench_tool") && !tt.HasText("status · running") {
+		t.Fatalf("wheel left the list empty: %v", tt.Texts())
+	}
+	if got := len(tt.Texts()); got > 300 {
+		t.Fatalf("built texts = %d after scrolling a 400-row trace", got)
 	}
 }

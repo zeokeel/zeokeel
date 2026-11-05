@@ -107,7 +107,22 @@ func (a *App) themeTokens(c *ui.Context) *design.Tokens {
 	} else {
 		tokens = design.Light()
 	}
-	return shellTokensForPreferences(tokens, c.Preferences())
+	prefs := c.Preferences()
+	tokens = shellTokensForPreferences(tokens, prefs)
+	// The brand type scale follows the desktop text size: every Font/Text/
+	// TextMuted role scales by the same factor, while colors, spacing and
+	// control metrics stay put unless a control scales its own text-bearing
+	// measure (Tokens.Scale).
+	tokens.TextScale = shellTextScale(prefs)
+	return tokens
+}
+
+// settingsTypeText is settingsText at the Tokens' TextScale: the settings
+// screen is a key screen for the system text size, so its brand type roles go
+// through the design tokens' Font instead of the fixed design.TypeMetrics the
+// generic helper uses.
+func settingsTypeText(c *ui.Context, t *design.Tokens, role design.TypeRole, color ui.Color, s string) ui.Element {
+	return design.Apply(ui.Text(c, s), t.Font(role)).TextColor(color)
 }
 
 // conversationTextSize is the design helper conversation text goes through:
@@ -338,7 +353,7 @@ func (a *App) settingsNavLive(c *ui.Context, t *design.Tokens, height float32) {
 		Children(func() {
 			ui.Row(c).Height(th.Space(12)).PaddingX(th.Space(3)).
 				AlignItems(ui.Center).Children(func() {
-				settingsText(c, a.T("settings.settings"), design.TypeM, t.LabelPrimary).
+				settingsTypeText(c, t, design.TypeM, t.LabelPrimary, a.T("settings.settings")).
 					FontWeight(600)
 			})
 			ui.Column(c).Gap(th.Space(1)).Children(func() {
@@ -431,7 +446,7 @@ func (a *App) settingsHeaderLive(c *ui.Context, t *design.Tokens) {
 func (a *App) settingsSection(c *ui.Context, t *design.Tokens, title string, build func()) {
 	th := t.Theme()
 	ui.Column(c).Gap(th.Space(2)).Children(func() {
-		settingsText(c, title, design.TypeXXS, t.LabelTertiary).FontWeight(600)
+		settingsTypeText(c, t, design.TypeXXS, t.LabelTertiary, title).FontWeight(600)
 		ui.Column(c).Background(t.BgStrong).Border(1, t.BorderL2).
 			Radius(th.Radius).Children(build)
 	})
@@ -613,7 +628,7 @@ func (a *App) settingsThemeCardLive(c *ui.Context, t *design.Tokens, label, valu
 			iconColor = t.Accent
 		}
 		ui.Image(c, icon).Size(th.Space(4), th.Space(4)).TextColor(iconColor)
-		settingsText(c, label, design.TypeBody, t.LabelPrimary)
+		settingsTypeText(c, t, design.TypeBody, t.LabelPrimary, label)
 	})
 	card.OnClick(func() {
 		a.updateSettings(c, func(s *session.Settings) { s.Theme = value })
@@ -677,7 +692,7 @@ func (a *App) settingsSelectorLiveNamed(c *ui.Context, t *design.Tokens, accessi
 		el = el.Background(settingsFillColor(t))
 	}
 	el.Children(func() {
-		settingsText(c, label, design.TypeBody, t.LabelPrimary).NoWrap()
+		settingsTypeText(c, t, design.TypeBody, t.LabelPrimary, label).NoWrap()
 		ui.Image(c, settingsIconChevron).Size(th.Space(3), th.Space(3)).TextColor(t.LabelSecondary)
 	})
 	el.Expanded(*open)
@@ -701,9 +716,9 @@ func (a *App) settingsOptionPanel(c *ui.Context, t *design.Tokens, open *bool, o
 	th := t.Theme()
 	ui.Column(c).Gap(1).Children(func() {
 		for _, option := range options {
-			height := th.Space(8)
+			height := t.Scale(th.Space(8))
 			if option.desc != "" {
-				height = th.Space(12)
+				height = t.Scale(th.Space(12))
 			}
 			row := ui.ButtonBase(c).FillWidth().Height(height).
 				PaddingX(th.Space(2)).Gap(th.Space(2)).
@@ -715,12 +730,12 @@ func (a *App) settingsOptionPanel(c *ui.Context, t *design.Tokens, open *bool, o
 			}
 			row.Children(func() {
 				if option.desc == "" {
-					settingsText(c, option.label, design.TypeBody, t.LabelPrimary)
+					settingsTypeText(c, t, design.TypeBody, t.LabelPrimary, option.label)
 					return
 				}
 				ui.Column(c).Gap(1).Children(func() {
-					settingsText(c, option.label, design.TypeBody, t.LabelPrimary)
-					settingsText(c, option.desc, design.TypeXXS, t.LabelTertiary).MaxLines(2)
+					settingsTypeText(c, t, design.TypeBody, t.LabelPrimary, option.label)
+					settingsTypeText(c, t, design.TypeXXS, t.LabelTertiary, option.desc).MaxLines(2)
 				})
 			})
 			choose := option.choose
@@ -749,8 +764,8 @@ func (a *App) settingsFontSizeLive(c *ui.Context, t *design.Tokens, cfg session.
 			pill = pill.Background(settingsFillColor(t))
 		}
 		pill.Children(func() {
-			settingsText(c, fontSizeLabel(cfg.FontSize), design.TypeBody, t.LabelPrimary)
-			settingsText(c, "px", design.TypeXXS, t.LabelTertiary)
+			settingsTypeText(c, t, design.TypeBody, t.LabelPrimary, fontSizeLabel(cfg.FontSize))
+			settingsTypeText(c, t, design.TypeXXS, t.LabelTertiary, "px")
 			ui.Image(c, settingsIconChevron).Size(th.Space(3), th.Space(3)).TextColor(t.LabelSecondary)
 		})
 		pill.Expanded(a.fontSizeOpen)
@@ -811,12 +826,12 @@ func (a *App) settingsFontSizeLive(c *ui.Context, t *design.Tokens, cfg session.
 		})
 		ui.Popover(c, more, &a.pluginUI().fontMoreOpen, func() {
 			ui.Column(c).Gap(th.Space(2)).Padding(th.Space(1)).Children(func() {
-				settingsText(c, a.pluginLocalized("More font settings", "更多字体设置"),
-					design.TypeBody, t.LabelPrimary).FontWeight(500)
-				settingsText(c, a.pluginLocalized(
-					"Conversation text supports 14 or 16 px in this build.",
-					"此版本的对话文字支持 14 或 16 px。"),
-					design.TypeXXS, t.LabelTertiary)
+				settingsTypeText(c, t, design.TypeBody, t.LabelPrimary,
+					a.pluginLocalized("More font settings", "更多字体设置")).FontWeight(500)
+				settingsTypeText(c, t, design.TypeXXS, t.LabelTertiary,
+					a.pluginLocalized(
+						"Conversation text supports 14 or 16 px in this build.",
+						"此版本的对话文字支持 14 或 16 px。"))
 				a.settingsOptionPanel(c, t, &a.pluginUI().fontMoreOpen, []settingsOption{
 					{"14 px", cfg.FontSize == session.FontSizeSmall, func() {
 						a.updateSettings(c, func(s *session.Settings) { s.FontSize = session.FontSizeSmall })
@@ -876,7 +891,7 @@ func (a *App) settingsActionButtonLive(c *ui.Context, t *design.Tokens, label st
 		el = el.Background(settingsFillColor(t))
 	}
 	el.Children(func() {
-		settingsText(c, label, design.TypeBody, t.LabelPrimary).NoWrap()
+		settingsTypeText(c, t, design.TypeBody, t.LabelPrimary, label).NoWrap()
 	})
 	el.OnClick(fn)
 }
@@ -906,7 +921,7 @@ func (a *App) settingsOutlineButtonLive(c *ui.Context, t *design.Tokens, label s
 		el = el.Background(t.BgHover)
 	}
 	el.Children(func() {
-		settingsText(c, label, design.TypeXS, t.LabelPrimary).NoWrap()
+		settingsTypeText(c, t, design.TypeXS, t.LabelPrimary, label).NoWrap()
 	})
 	el.OnClick(fn)
 }

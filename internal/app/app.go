@@ -163,11 +163,13 @@ func (a *app) run() error {
 			win := a.win
 			// Desktop notifications read the same update stream as the UI: the
 			// dispatcher only watches phase transitions, so a token update costs
-			// one map lookup. The controller's turn hook covers background
-			// sessions, which OnUpdate never publishes.
+			// one map lookup. The controller's turn and approval hooks cover
+			// background sessions, which OnUpdate never publishes.
 			notifier := newNotificationDispatcher(newSystemNotifier(), a.notificationActive, a.uiLanguage, a.focusSession)
 			notifier.useTurnFinishedHook()
+			notifier.useApprovalHook()
 			a.services.SetOnTurnFinished(notifier.observeTurnFinished)
+			a.services.SetOnApprovalRequested(notifier.observeApprovalRequested)
 			a.services.OnUpdate(func(snap *state.Snapshot) {
 				shellApp.SetSnapshot(snap)
 				win.Invalidate()

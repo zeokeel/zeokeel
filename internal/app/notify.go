@@ -85,8 +85,10 @@ type observedPhase struct {
 // Snapshot observation only covers the current session, because the controller
 // publishes OnUpdate for that one. Wiring the controller's TurnFinishedHook
 // (useTurnFinishedHook + observeTurnFinished) covers terminal turns of *every*
-// session, including background ones; the snapshot machine then keeps only the
-// approval notifications so one turn cannot notify twice.
+// session, including background ones; wiring the ApprovalRequestedHook
+// (useApprovalHook + observeApprovalRequested) covers pending approvals of
+// every session. The snapshot machine then only fills the gaps left by the
+// hooks, so one event cannot notify twice.
 type notificationDispatcher struct {
 	notifier notifier
 	// active reports whether the user is looking at the app; notifications are
@@ -102,6 +104,10 @@ type notificationDispatcher struct {
 	// turnsFromHook reports terminal turns through the controller hook instead
 	// of the snapshot phase machine, so background sessions are covered too.
 	turnsFromHook bool
+	// approvalsFromHook reports pending approvals through the controller hook
+	// instead of the snapshot phase machine, so background sessions are covered
+	// too.
+	approvalsFromHook bool
 	// now is the clock of the turn throttle. nil uses time.Now; tests replace it.
 	now func() time.Time
 	// turnThrottle is the minimum gap between completion notifications for one
@@ -120,7 +126,14 @@ type notificationDispatcher struct {
 	// lastTurnNotice is when the hook path last notified per session, for the
 	// completion throttle.
 	lastTurnNotice map[string]time.Time
+	// approvalCalls is the defensive session+call dedupe of the approval hook.
+	approvalCalls map[string]struct{}
 }
+
+// approvalDedupeCap bounds the approval-hook dedupe map. The controller already
+// reports each call id once, so dropping the history after the cap only makes a
+// duplicate notification possible for an id that old, never a missed approval.
+const approvalDedupeCap = 1024
 
 // newNotificationDispatcher builds the dispatcher the app wires to the service
 // update stream.
@@ -134,16 +147,63 @@ func newNotificationDispatcher(n notifier, active func() bool, language func() s
 		seen:           make(map[string]observedPhase),
 		lastTurn:       make(map[string]string),
 		lastTurnNotice: make(map[string]time.Time),
+		approvalCalls:  make(map[string]struct{}),
 	}
 }
 
 // useTurnFinishedHook moves terminal-turn reporting to the controller's
 // TurnFinishedHook, so background sessions are covered too. Production wires it
-// together with SetOnTurnFinished; the snapshot phase machine then reports only
-// approval waits (the hook owns complete/failed), which is what keeps one turn
-// from raising two notifications. Headless snapshot tests leave it off.
+// together with SetOnTurnFinished; the snapshot phase machine then only reports
+// approval waits, which is what keeps one turn from raising two notifications.
+// Headless snapshot tests leave it off.
 func (d *notificationDispatcher) useTurnFinishedHook() {
 	d.turnsFromHook = true
+}
+
+// useApprovalHook moves pending-approval reporting to the controller's
+// ApprovalRequestedHook, so approvals of background sessions are covered too.
+// Production wires it together with SetOnApprovalRequested; the snapshot phase
+// machine then no longer raises approval notifications (no double
+// notification). Headless snapshot tests leave it off.
+func (d *notificationDispatcher) useApprovalHook() {
+	d.approvalsFromHook = true
+}
+
+// observeApprovalRequested raises the "approval needed" notification from the
+// controller's ApprovalRequestedHook. Unlike Observe it covers every session,
+// current or background. The controller reports each call id once; the
+// session+call map deduplicates defensively across re-wiring. Approvals are not
+// throttled: every waiting call needs the user's attention. The request carries
+// the tool name/arguments, which are deliberately never rendered.
+func (d *notificationDispatcher) observeApprovalRequested(sessionID string, request state.ApprovalRequest) {
+	if d == nil || d.notifier == nil || !d.approvalsFromHook {
+		return
+	}
+	if sessionID == "" {
+		sessionID = "default"
+	}
+	callKey := sessionID + "\x00" + request.CallID
+	d.mu.Lock()
+	if d.approvalCalls == nil {
+		d.approvalCalls = make(map[string]struct{})
+	}
+	if _, seen := d.approvalCalls[callKey]; seen {
+		d.mu.Unlock()
+		return
+	}
+	if len(d.approvalCalls) >= approvalDedupeCap {
+		d.approvalCalls = make(map[string]struct{}, approvalDedupeCap)
+	}
+	d.approvalCalls[callKey] = struct{}{}
+	d.mu.Unlock()
+
+	if d.isActive() {
+		return
+	}
+	title, body := notificationText(d.currentLanguage(), noticeApproval)
+	// The click callback carries the session id only; the tool name and
+	// arguments stay inside the app.
+	d.notifier.Show(title, body, d.clickAction(sessionID))
 }
 
 // observeTurnFinished raises the terminal-turn notification from the
@@ -235,11 +295,17 @@ func (d *notificationDispatcher) Observe(snap *state.Snapshot) {
 	d.mu.Unlock()
 
 	kind, ok := notificationFor(seen, previous.phase, snap)
-	if ok && d.turnsFromHook && kind != noticeApproval {
-		// Terminal-turn notifications come from the controller hook when it is
-		// wired; the terminal snapshot may arrive just before the hook call, so
-		// skipping here is what prevents a duplicate for the current session.
-		ok = false
+	if ok {
+		// When a controller hook owns a kind, the snapshot machine must not also
+		// raise it: the hook covers background sessions and the snapshot may
+		// arrive just before/after the hook call, so skipping here is what
+		// prevents a duplicate for the current session.
+		switch {
+		case d.turnsFromHook && kind != noticeApproval:
+			ok = false
+		case d.approvalsFromHook && kind == noticeApproval:
+			ok = false
+		}
 	}
 	if ok {
 		// A notification is only useful while the user is not already looking

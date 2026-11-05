@@ -313,8 +313,16 @@ func TestDarkAccentBadges(t *testing.T) {
 			t.Errorf("dark accent on %v contrast = %.2f, want >= 4.5", bg, got)
 		}
 	}
-	if got := pluginMoreColor(dark); got != pluginMoreLabelDark {
-		t.Errorf("dark plugin More = %v, want %v", got, pluginMoreLabelDark)
+	// The plugin More action uses the theme's tertiary label, not a sampled
+	// DSH hex, and that role keeps AA contrast on the plugin cards.
+	for _, tokens := range []*design.Tokens{design.Light(), dark} {
+		if got := pluginMoreColor(tokens); got != tokens.LabelTertiary {
+			t.Errorf("plugin More = %v, want the brand LabelTertiary %v", got, tokens.LabelTertiary)
+		}
+		if got := contrastRatio(pluginMoreColor(tokens), tokens.BgRaised); got < 4.5 {
+			t.Errorf("plugin More %v on %v contrast = %.2f, want >= 4.5",
+				pluginMoreColor(tokens), tokens.BgRaised, got)
+		}
 	}
 	// Danger is a semantic status color: AA text contrast on the page in both
 	// themes, and it adapts to the appearance instead of one DSH hex sample.

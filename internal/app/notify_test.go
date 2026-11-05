@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"strings"
 	"sync"
@@ -11,6 +12,7 @@ import (
 	"github.com/zeokeel/zeokeel/internal/runtime"
 	"github.com/zeokeel/zeokeel/internal/session"
 	"github.com/zeokeel/zeokeel/internal/state"
+	"github.com/zeokeel/zeokeel/internal/store"
 )
 
 // fakeNotification is one notification a fakeNotifier recorded.
@@ -709,5 +711,250 @@ func TestNotificationActiveGate(t *testing.T) {
 	a.quitting = true
 	if !a.notificationActive() {
 		t.Fatal("notificationActive while quitting = false, want true (suppressed)")
+	}
+}
+
+// ---- Background-approval notifications (controller ApprovalRequestedHook) ----
+
+// approvalNotifyProvider is a scripted provider whose first model call returns
+// one tool call once released; later calls answer with text. Used with an
+// approval gate so the controller publishes an ApprovalRequest and blocks.
+type approvalNotifyProvider struct {
+	release chan struct{}
+	mu      sync.Mutex
+	calls   int
+}
+
+func newApprovalNotifyProvider() *approvalNotifyProvider {
+	return &approvalNotifyProvider{release: make(chan struct{})}
+}
+
+func (p *approvalNotifyProvider) Stream(ctx context.Context, _ runtime.Request) (<-chan runtime.Chunk, error) {
+	p.mu.Lock()
+	call := p.calls
+	p.calls++
+	p.mu.Unlock()
+
+	if call != 0 {
+		out := make(chan runtime.Chunk, 1)
+		out <- runtime.Chunk{Text: "finished", Done: true}
+		close(out)
+		return out, nil
+	}
+	out := make(chan runtime.Chunk, 1)
+	go func() {
+		defer close(out)
+		select {
+		case <-p.release:
+			out <- runtime.Chunk{ToolCalls: []runtime.ToolCall{{
+				ID:        "call-approval",
+				Name:      "echo",
+				Arguments: json.RawMessage(`{"path":"private-argument.txt"}`),
+			}}, Done: true}
+		case <-ctx.Done():
+		}
+	}()
+	return out, nil
+}
+
+// newApprovalNotificationController builds a real controller whose agent needs a
+// human decision for every tool call, wires both controller hooks into a
+// dispatcher exactly like the app does, and returns the approval queue.
+func newApprovalNotificationController(t *testing.T, provider runtime.Provider) (*session.Controller, *notifyHarness, *runtime.ApprovalQueue) {
+	t.Helper()
+	gate := runtime.NewApprovalQueue(nil) // every tool call needs a decision
+	registry := runtime.NewRegistry()
+	if err := registry.Register(&wiringEchoTool{}); err != nil {
+		t.Fatalf("register tool: %v", err)
+	}
+	ctrl, cleanup, err := BuildServicesWith(t.TempDir(), func(st *store.Store) (*AgentBundle, error) {
+		agent, agentErr := runtime.New(runtime.Config{
+			Provider:    provider,
+			Tools:       registry,
+			History:     &storeHistory{st: st},
+			Gate:        gate,
+			Instruction: "approval notification test agent",
+		})
+		if agentErr != nil {
+			return nil, agentErr
+		}
+		return &AgentBundle{Agent: agent, Gate: gate}, nil
+	})
+	if err != nil {
+		t.Fatalf("BuildServicesWith: %v", err)
+	}
+	t.Cleanup(func() { _ = cleanup() })
+
+	h := newNotifyHarness(t)
+	h.dispatcher.useTurnFinishedHook()
+	h.dispatcher.useApprovalHook()
+	ctrl.SetOnTurnFinished(h.dispatcher.observeTurnFinished)
+	ctrl.SetOnApprovalRequested(h.dispatcher.observeApprovalRequested)
+	ctrl.OnUpdate(h.dispatcher.Observe)
+	return ctrl, h, gate
+}
+
+// waitNotificationCount waits until the fake notifier recorded want notices.
+func waitNotificationCount(t *testing.T, notifier *fakeNotifier, want int) {
+	t.Helper()
+	deadline := time.Now().Add(10 * time.Second)
+	for time.Now().Before(deadline) {
+		if notifier.count() >= want {
+			return
+		}
+		time.Sleep(2 * time.Millisecond)
+	}
+	t.Fatalf("timed out waiting for %d notifications; got %d", want, notifier.count())
+}
+
+// TestBackgroundSessionApprovalNotifies covers the P1 gap: an approval request
+// in a session that is no longer current (OnUpdate no longer publishes it)
+// still raises exactly one "approval needed" notification, with no tool detail,
+// and its click reopens that session.
+func TestBackgroundSessionApprovalNotifies(t *testing.T) {
+	provider := newApprovalNotifyProvider()
+	ctrl, h, _ := newApprovalNotificationController(t, provider)
+	ctx := context.Background()
+	foreground, err := ctrl.CreateSession(ctx, "foreground")
+	if err != nil {
+		t.Fatalf("CreateSession foreground: %v", err)
+	}
+	background, err := ctrl.CreateSession(ctx, "background")
+	if err != nil {
+		t.Fatalf("CreateSession background: %v", err)
+	}
+	if err := ctrl.Submit(ctx, background, "run the tool"); err != nil {
+		t.Fatalf("Submit: %v", err)
+	}
+	// Switch away before the tool call arrives: the approval snapshot is
+	// published for `foreground`, so only the approval hook can report it.
+	if _, err := ctrl.OpenSession(ctx, foreground); err != nil {
+		t.Fatalf("OpenSession foreground: %v", err)
+	}
+	close(provider.release)
+	waitNotificationCount(t, h.notifier, 1)
+	// Give a wrongly wired duplicate path a chance to fire.
+	time.Sleep(50 * time.Millisecond)
+	if got := h.notifier.count(); got != 1 {
+		t.Fatalf("background approval raised %d notifications, want 1", got)
+	}
+	notification := h.notifier.last(t)
+	if notification.title != "Approval needed" {
+		t.Fatalf("title = %q, want Approval needed", notification.title)
+	}
+	// Privacy: neither the tool name nor its arguments may reach the system
+	// notification (lock screen / notification center).
+	for _, secret := range []string{"echo", "private-argument.txt"} {
+		if strings.Contains(notification.body, secret) || strings.Contains(notification.title, secret) {
+			t.Fatalf("approval notification leaked %q: %q / %q", secret, notification.title, notification.body)
+		}
+	}
+	if notification.onClick == nil {
+		t.Fatal("approval notification has no click handler")
+	}
+	notification.onClick()
+	if len(h.focused) != 1 || h.focused[0] != background {
+		t.Fatalf("click focused %v, want [%s]", h.focused, background)
+	}
+}
+
+// TestCurrentSessionApprovalNotifiesOnce covers the current session: the
+// snapshot machine and the approval hook must not both fire.
+func TestCurrentSessionApprovalNotifiesOnce(t *testing.T) {
+	provider := newApprovalNotifyProvider()
+	ctrl, h, _ := newApprovalNotificationController(t, provider)
+	ctx := context.Background()
+	id, err := ctrl.CreateSession(ctx, "current")
+	if err != nil {
+		t.Fatalf("CreateSession: %v", err)
+	}
+	if err := ctrl.Submit(ctx, id, "run the tool"); err != nil {
+		t.Fatalf("Submit: %v", err)
+	}
+	close(provider.release)
+	waitNotificationCount(t, h.notifier, 1)
+	time.Sleep(50 * time.Millisecond)
+	if got := h.notifier.count(); got != 1 {
+		t.Fatalf("current-session approval raised %d notifications, want exactly 1", got)
+	}
+	if got := h.notifier.last(t).title; got != "Approval needed" {
+		t.Fatalf("title = %q, want Approval needed", got)
+	}
+}
+
+// TestApprovalHookDedupesSessionAndCall covers the defensive dedupe: one call id
+// notifies once per session; the same call id reported for another session is a
+// different approval.
+func TestApprovalHookDedupesSessionAndCall(t *testing.T) {
+	h := newNotifyHarness(t)
+	h.dispatcher.useApprovalHook()
+	request := state.ApprovalRequest{CallID: "call-1", Name: "bash"}
+	h.dispatcher.observeApprovalRequested("s1", request)
+	h.dispatcher.observeApprovalRequested("s1", request)
+	if got := h.notifier.count(); got != 1 {
+		t.Fatalf("duplicate approval call raised %d notifications, want 1", got)
+	}
+	h.dispatcher.observeApprovalRequested("s2", request)
+	if got := h.notifier.count(); got != 2 {
+		t.Fatalf("same call id in another session raised %d notifications, want 2", got)
+	}
+	h.dispatcher.observeApprovalRequested("s1", state.ApprovalRequest{CallID: "call-2"})
+	if got := h.notifier.count(); got != 3 {
+		t.Fatalf("second approval of the session raised %d notifications, want 3", got)
+	}
+}
+
+// TestApprovalHookSkipsWhileActive covers the window gate for approvals: a user
+// already looking at the app sees the approval card, no system notification.
+func TestApprovalHookSkipsWhileActive(t *testing.T) {
+	h := newNotifyHarness(t)
+	h.dispatcher.useApprovalHook()
+	h.active = true
+	h.dispatcher.observeApprovalRequested("s1", state.ApprovalRequest{CallID: "call-1"})
+	if got := h.notifier.count(); got != 0 {
+		t.Fatalf("active window raised %d approval notifications, want 0", got)
+	}
+	h.active = false
+	h.dispatcher.observeApprovalRequested("s2", state.ApprovalRequest{CallID: "call-2"})
+	if got := h.notifier.count(); got != 1 {
+		t.Fatalf("inactive window raised %d approval notifications, want 1", got)
+	}
+}
+
+// TestApprovalHookIsInertWithoutWiring covers a dispatcher without the hook:
+// approval-hook calls are ignored (snapshot path stays authoritative).
+func TestApprovalHookIsInertWithoutWiring(t *testing.T) {
+	h := newNotifyHarness(t)
+	h.dispatcher.observeApprovalRequested("s1", state.ApprovalRequest{CallID: "call-1"})
+	if got := h.notifier.count(); got != 0 {
+		t.Fatalf("unwired approval hook raised %d notifications, want 0", got)
+	}
+}
+
+// TestSnapshotApprovalSkippedWhenHookWired covers the double-notification guard:
+// with the approval hook wired, the snapshot phase machine no longer notifies
+// approval transitions itself.
+func TestSnapshotApprovalSkippedWhenHookWired(t *testing.T) {
+	h := newNotifyHarness(t)
+	h.dispatcher.Observe(notifySnapshot("s1", state.PhaseRunning))
+	h.dispatcher.useApprovalHook()
+	h.dispatcher.Observe(notifySnapshot("s1", state.PhaseWaitingApproval))
+	if got := h.notifier.count(); got != 0 {
+		t.Fatalf("snapshot approval raised %d notifications while the hook owns it, want 0", got)
+	}
+	h.dispatcher.observeApprovalRequested("s1", state.ApprovalRequest{CallID: "call-1"})
+	if got := h.notifier.count(); got != 1 {
+		t.Fatalf("hooked approval raised %d notifications, want 1", got)
+	}
+}
+
+// TestApprovalHookUsesChineseCopy covers the localized background approval copy.
+func TestApprovalHookUsesChineseCopy(t *testing.T) {
+	h := newNotifyHarness(t)
+	h.dispatcher.useApprovalHook()
+	h.lang = session.LanguageChinese
+	h.dispatcher.observeApprovalRequested("s1", state.ApprovalRequest{CallID: "call-1"})
+	if got := h.notifier.last(t).title; got != "需要确认" {
+		t.Fatalf("Chinese approval title = %q, want 需要确认", got)
 	}
 }

@@ -26,20 +26,13 @@ const (
 	pluginsGlyphUnits float32 = 5
 )
 
-// pluginMoreColor is the "More" action's foreground for the current theme.
-// The sample values are kept as the semantic roles' stand-ins until the
-// section header moves fully to the theme's secondary label; the dark value
-// is pinned by the accessibility contrast test.
-var (
-	pluginMoreLabel     = ui.Hex("#6E7278") // light "More" action label
-	pluginMoreLabelDark = ui.Hex("#C2C6CA") // dark "More" action label
-)
-
+// pluginMoreColor is the "More" action's foreground: the theme's tertiary
+// label. The retired DSH samples (#6E7278/#C2C6CA) are gone; the brand
+// palette's tertiary text is WCAG AA on the plugin cards in both themes
+// (a11y_fixes_test pins the role and the contrast), so a semantic token is
+// enough and the color follows the theme like every other label.
 func pluginMoreColor(t *design.Tokens) ui.Color {
-	if t.Dark {
-		return pluginMoreLabelDark
-	}
-	return pluginMoreLabel
+	return t.LabelTertiary
 }
 
 // pluginLine turns a line height in baseline pixels into mygo's LineHeight,

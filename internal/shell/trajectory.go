@@ -48,6 +48,12 @@ type liveUIState struct {
 	trajLoaded    bool
 	trajEvents    []store.Event
 	trajErr       error
+
+	// trajList is the Trajectory event list's virtual place: the rows built,
+	// the anchor and the measured heights. Key is the event's sequence, so the
+	// list keeps the scroll anchor and the row state (expandedRaw) with the
+	// event when rows above change; only the rows in view are built per frame.
+	trajList ui.ListState
 }
 
 // liveUIStates maps each App to its live UI state. Entries live as long as
@@ -151,15 +157,33 @@ func (a *App) trajectoryPane(c *ui.Context, t *design.Tokens, snap *state.Snapsh
 						FontSize(12).TextColor(t.LabelTertiary)
 					return
 				}
-				ui.Scroll(c).Grow(1).Children(func() {
-					ui.Column(c).Gap(th.Space(0.5)).Children(func() {
-						for _, entry := range entries {
-							a.trajectoryRow(c, t, entry)
-						}
-					})
-				})
+				a.trajectoryList(c, t, entries)
 			})
 	})
+}
+
+// trajectoryList hosts the event rows in a virtual mygo List: a frame builds
+// only the rows in view (plus the list's small overscan), so a long trace costs
+// the visible rows instead of the whole history. Key is the event's sequence,
+// which keeps the scroll anchor and the expanded raw payload (liveUIState.
+// expandedRaw) attached to the event when rows come or go; FollowEnd stays
+// false to match the previous Scroll-based timeline, which opened at the
+// oldest event and stayed where the user scrolled (only Chat follows its end).
+// Rows are the same trajectoryRow builders as before, so the time rail, event
+// dot, count pill, raw block, click behavior and labels are unchanged.
+func (a *App) trajectoryList(c *ui.Context, t *design.Tokens, entries []trajectoryEntry) {
+	th := t.Theme()
+	st := a.uiState()
+	st.trajList.Key = func(i int) any { return entries[i].Seq }
+	st.trajList.Label = func(i int) string { return a.trajectoryLabelText(entries[i].Label) }
+	ui.List(c, &st.trajList, len(entries), func(i int) {
+		// A List stacks its rows without a gap; the timeline keeps its
+		// Space(0.5) rhythm inside the row, outside the row's hover surface,
+		// exactly as the old Column's Gap did.
+		ui.Column(c).FillWidth().Padding(0, 0, 0, th.Space(0.5)).Children(func() {
+			a.trajectoryRow(c, t, entries[i])
+		})
+	}).Grow(1)
 }
 
 // trajectoryColumnWidth is the centered timeline measure: 225 spacing units

@@ -62,6 +62,12 @@ func TypeMetrics(r TypeRole) (size, line float32, weight int) {
 // card fill, the modal scrim).
 type Tokens struct {
 	Dark bool
+	// TextScale multiplies every type role rendered through Font, Text and
+	// TextMuted (1.0 is the design system's own size), so the desktop's text
+	// size preference reaches the brand type scale as well as the base theme
+	// font size. It leaves colors, spacing and control metrics alone: the
+	// screens scale a control's own height where its text must grow with it.
+	TextScale float32
 
 	BgBase    ui.Color // page background
 	BgSidebar ui.Color // sidebar background
@@ -112,6 +118,7 @@ func Dark() *Tokens { return fromPalette(brand.DarkPalette(), true) }
 func fromPalette(p brand.Palette, dark bool) *Tokens {
 	return &Tokens{
 		Dark:           dark,
+		TextScale:      1,
 		BgBase:         p.Background,
 		BgSidebar:      p.Sidebar,
 		BgRaised:       p.Surface,

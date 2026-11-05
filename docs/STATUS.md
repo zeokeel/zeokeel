@@ -9,6 +9,15 @@
 - **以下 M0–M13 历史里程碑保留原文记录以追溯**；其中与像素/基线/比对回路相关的内容均为**历史记录，已退役、不再有效**（因此模块清单中不再列 `pixeltest` 包）。
 - 现行质量口径见 `docs/QUALITY.md` 与 `docs/PLAN.md` §10；功能对齐见 `docs/FUNCTIONAL-PARITY.md`；视觉方向见 `docs/decisions/0002-brand-theme-foundation.md`。
 
+## 2026-11-05 v1.1 收尾（追加，ALL GREEN）
+
+- **后台审批通知**：`session.Controller.SetOnApprovalRequested` 可选 hook（默认 nil），所有会话新增审批/提问等待 → 系统通知（同 session+call 去重、隐私文案、点击回会话、与快照路径不双发）；notify 测试 29→36；ADR 0004 更新。
+- **TextScale 覆盖**：`design.Tokens.TextScale` + `Metrics/Scale`，`Font/Text/TextMuted` 全走缩放；Home/Session/Settings 21 处关键显式字号转 TypeRole + `t.Scale`；1.0x 渲染与 HEAD 逐字节一致，1.5x 不裁切；剩余约 169 处留 v1.2。
+- **Trajectory 虚拟化**：`ui.List` 只建可视行，Key=事件序号、展开状态/A11y/交互不变；1000 事件稳态帧 **22.7ms→3.12ms（7.3×）**，冷渲染 128.8→42.6ms（perf.md §8）。
+- **视觉回归（opt-in）**：`scripts/visual-check.sh`（12s，阈值 2%，--update/--all/退出自动还原）+ `TestVisualRegression`（仅 ZEOKEEL_VISUAL=1，默认 skip，时钟文本掩码）；known-limitations §4 更新。
+- **P3 清理**：plugins 采样色→`t.LabelTertiary`、settings-window 预览注册宿主并断言唯一关闭入口、known-limitations 数字/措辞、preview README 尺寸。
+- **验证**：`gofmt`/`vet`/`build` 干净；`go test -count=1 ./...` 17 包全绿（shell ~58s）；`ZEOKEEL_VISUAL=1` 视觉回归 PASS；22 张预览已按当前代码/字体环境重生成；工作树提交前将保持干净。
+
 ## 2026-11-05 收口：独立验收 PASS（objective 全项）
 
 - 独立验收复跑（HEAD `68bc842` → 修复后 `e4e71e4`）：objective ①拆像素门禁与匹配代码 PASS、②品牌原生视觉/桌面交互本地化 PASS、③功能对齐与测试绿色 PASS；FAIL=0、阻塞=0。

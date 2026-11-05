@@ -16,11 +16,14 @@ import (
 // instead of losing them:
 //
 //   - TextScale multiplies the theme's base font size (brand.FontSize ×
-//     scale, rounded to whole DIPs) and, separately, the conversation text
-//     (user conversation size × scale; line height × scale). The app's
-//     14/16px setting is a relative preference, so the desktop's text size
-//     still applies to it; the rest of the brand type scale is fixed and
-//     documented as a limitation in docs/design/native-ui.md.
+//     scale, rounded to whole DIPs), the conversation text (user conversation
+//     size × scale; line height × scale), and the design type scale:
+//     themeTokens puts the scale on design.Tokens, so every Font/Text/
+//     TextMuted role rendered through the tokens grows with the desktop text
+//     size. The app's 14/16px setting stays a relative preference, so the
+//     desktop's text size still applies to it. Only explicit FontSize calls
+//     that carry their own line-height/icon layout remain fixed-by-design;
+//     docs/design/known-limitations.md tracks the remainder.
 //   - HighContrast strengthens the borders and secondary text and makes the
 //     focus ring and scrollbar opaque, mirroring mygo's Theme.follow. The
 //     design tokens the screens paint with get the same treatment.

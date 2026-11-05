@@ -316,3 +316,70 @@ func TestTextScaleRoundsToWholeDips(t *testing.T) {
 		t.Fatalf("0.2x text scale = %v, want the 0.5 clamp", got)
 	}
 }
+
+// TestTextScaleScalesDesignTypeRoles covers the v1.1 coverage: themeTokens
+// writes the desktop scale onto design.Tokens, so every Font/Text/TextMuted
+// type role scales too. At 1.0 the metrics equal the design system's own and
+// key controls keep their baseline size; at 1.5x the type scale and the
+// text-bearing controls grow while Home, Session and Settings stay inside the
+// window.
+func TestTextScaleScalesDesignTypeRoles(t *testing.T) {
+	h := newLiveApp(t, &shellProvider{})
+	h.app.Screen = Home
+	h.app.Language = LangEN
+
+	// 1.0 baseline: no desktop preference means the unscaled design system.
+	var tokens *design.Tokens
+	tt := ui.NewTester(func(c *ui.Context) {
+		h.app.View(c)
+		tokens = h.app.themeTokens(c)
+	}, 1600, 1000)
+	tt.Frame()
+	if tokens.TextScale != 1 {
+		t.Fatalf("tokens.TextScale at 1.0 = %v, want 1", tokens.TextScale)
+	}
+	if size, line, weight := tokens.Metrics(design.TypeBody); size != 14 || line != 22 || weight != 400 {
+		t.Fatalf("TypeBody at 1.0 = %v/%v/%d, want the design system's 14/22/400", size, line, weight)
+	}
+	if chip, ok := tt.Find("Workspace, current: test"); !ok || chip.H != 28 {
+		t.Fatalf("Home chip at 1.0 = %+v (ok=%v), want its baseline 28 DIP height", chip, ok)
+	}
+
+	// 1.5x: the design type scale follows the desktop text size.
+	tt.SetPreferences(ui.Preferences{TextScale: 1.5})
+	tt.Frame()
+	if tokens.TextScale != 1.5 {
+		t.Fatalf("tokens.TextScale at 1.5x = %v, want 1.5", tokens.TextScale)
+	}
+	if size, line, _ := tokens.Metrics(design.TypeBody); size != 21 || line != 33 {
+		t.Fatalf("TypeBody at 1.5x = %v/%v, want 21/33", size, line)
+	}
+	if got := tokens.Scale(28); got != 42 {
+		t.Fatalf("Scale(28) at 1.5x = %v, want 42", got)
+	}
+	chip, ok := tt.Find("Workspace, current: test")
+	if !ok {
+		t.Fatalf("Home chip missing at 1.5x: %q", tt.Texts())
+	}
+	if chip.H != 42 {
+		t.Fatalf("Home chip at 1.5x = %v DIPs, want 42 (28 × 1.5)", chip.H)
+	}
+	assertPrefControlsInside(t, tt, "Composer input", "Send message", "Workspace, current: test")
+
+	// Session keeps its header, transcript and composer inside the window.
+	h.app.Screen = Session
+	tt.Frame()
+	assertPrefControlsInside(t, tt, "Session transcript", "Composer input")
+
+	// Settings opens and its converted brand type grows with the scale.
+	tt.Key(ui.Cmd, ui.KeyComma)
+	tt.Frame()
+	title, ok := tt.Find("Settings")
+	if !ok {
+		t.Fatalf("Settings did not open at 1.5x: %q", tt.Texts())
+	}
+	if title.H <= 24 {
+		t.Fatalf("Settings header title at 1.5x = %v DIPs, want taller than the 1.0x line", title.H)
+	}
+	assertPrefControlsInside(t, tt, "Settings")
+}

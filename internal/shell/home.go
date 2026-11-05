@@ -83,8 +83,8 @@ func (a *App) homeLive(c *ui.Context, t *design.Tokens) {
 				ui.Column(c).Gap(th.Space(3)).Children(func() {
 					a.homeLiveComposer(c, t)
 					ui.Row(c).Justify(ui.Center).Children(func() {
-						homeText(c, a.T("home.composer_hint")).FontSize(th.Space(3)).
-							FixedLineHeight(th.Space(4.5)).TextColor(t.LabelTertiary)
+						hint := design.Apply(homeText(c, a.T("home.composer_hint")), t.Font(design.TypeXXS))
+						hint.TextColor(t.LabelTertiary)
 					})
 				})
 			})
@@ -137,8 +137,8 @@ func (a *App) homeHero(c *ui.Context, t *design.Tokens) {
 // popover, so the native keyboard and a11y behavior is unchanged.
 func homeChip(c *ui.Context, t *design.Tokens) ui.Element {
 	th := t.Theme()
-	chip := ui.Row(c).Height(th.Space(7)).PaddingX(th.Space(2)).
-		Gap(th.Space(1)).Radius(design.RadiusSM).AlignItems(ui.Center)
+	chip := ui.Row(c).Height(t.Scale(th.Space(7))).PaddingX(t.Scale(th.Space(2))).
+		Gap(t.Scale(th.Space(1))).Radius(design.RadiusSM).AlignItems(ui.Center)
 	if chip.Hovered() {
 		chip = chip.Background(t.BgHover)
 	}
@@ -167,8 +167,8 @@ func (a *App) homeLiveChips(c *ui.Context, t *design.Tokens) {
 			Label(chipLabel).Value(label).Role(ui.RolePopUpButton).Focusable()
 		wsChip.Children(func() {
 			ui.Image(c, homeIconFolder).Size(th.Space(4), th.Space(4)).TextColor(t.LabelPrimary)
-			homeText(c, label).FontSize(13).FixedLineHeight(20).FontWeight(500).
-				TextColor(t.LabelPrimary).MaxLines(1).Ellipsis("…")
+			wsText := design.Apply(homeText(c, label), t.Font(design.TypeXS))
+			wsText.FontWeight(500).TextColor(t.LabelPrimary).MaxLines(1).Ellipsis("…")
 			ui.Icon(c, homeIconChevron).Size(th.Space(3), th.Space(3)).TextColor(t.LabelTertiary)
 		})
 		wsChip.Expanded(a.wsPickerOpen)
@@ -184,8 +184,8 @@ func (a *App) homeLiveChips(c *ui.Context, t *design.Tokens) {
 			Label(modeText).Value(modeText).Role(ui.RolePopUpButton).Focusable()
 		mode.Children(func() {
 			ui.Icon(c, homeIconTune).Size(th.Space(4), th.Space(4)).TextColor(t.LabelPrimary)
-			homeText(c, modeText).FontSize(13).FixedLineHeight(20).
-				FontWeight(500).TextColor(t.LabelPrimary)
+			modeEl := design.Apply(homeText(c, modeText), t.Font(design.TypeXS))
+			modeEl.FontWeight(500).TextColor(t.LabelPrimary)
 			ui.Icon(c, homeIconChevron).Size(th.Space(3), th.Space(3)).TextColor(t.LabelTertiary)
 		})
 		mode.Expanded(mst.open)

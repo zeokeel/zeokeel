@@ -118,7 +118,11 @@ type Controller struct {
 	// current session). It runs once per turn from the turn goroutine. Guarded
 	// by mu.
 	onTurnFinished TurnFinishedHook
-	closed         bool
+	// onApprovalRequested, when non-nil, observes an approval request that just
+	// became pending for any session, including sessions that are not current.
+	// It runs once per call id from the turn goroutine. Guarded by mu.
+	onApprovalRequested ApprovalRequestedHook
+	closed              bool
 
 	// Automatic session titles. titleGen is the configured generator (nil
 	// disables the feature), autoTitles marks sessions this Controller already
@@ -848,14 +852,26 @@ func (c *Controller) forward(t *turn, ev state.Event) {
 	c.recordToolCall(t.sessionID, ev)
 
 	c.mu.Lock()
-	snap := c.applyLocked(t, ev)
+	snap, requestedApproval := c.applyLocked(t, ev)
+	approvalHook := c.onApprovalRequested
 	c.mu.Unlock()
 
 	c.broker.Publish(ev)
 	c.notify(t.sessionID, snap)
+
+	// Optional observer for newly pending approvals, including background
+	// sessions that OnUpdate never publishes. Deduplicated by call id in
+	// applyLocked, so a repeated event cannot notify twice.
+	if requestedApproval != nil && approvalHook != nil {
+		approvalHook(t.sessionID, *requestedApproval)
+	}
 }
 
-func (c *Controller) applyLocked(t *turn, ev state.Event) *state.Snapshot {
+// applyLocked folds one event into the session snapshot and its bookkeeping and
+// returns the snapshot plus the approval request that this event newly made
+// pending (nil for every other event and for a repeated call id).
+func (c *Controller) applyLocked(t *turn, ev state.Event) (*state.Snapshot, *state.ApprovalRequest) {
+	var newApproval *state.ApprovalRequest
 	snap := c.views[t.sessionID]
 	if snap == nil {
 		snap = state.NewSnapshot()
@@ -882,6 +898,10 @@ func (c *Controller) applyLocked(t *turn, ev state.Event) *state.Snapshot {
 		if requests == nil {
 			requests = make(map[string]state.ApprovalRequest)
 			c.pending[t.sessionID] = requests
+		}
+		if _, existed := requests[e.CallID]; !existed {
+			request := e
+			newApproval = &request
 		}
 		requests[e.CallID] = e
 	case state.ToolStart:
@@ -958,7 +978,7 @@ func (c *Controller) applyLocked(t *turn, ev state.Event) *state.Snapshot {
 	}
 
 	c.views[t.sessionID] = next
-	return next
+	return next, newApproval
 }
 
 // applyToolResultLocked folds a successful tool result into the session state
@@ -1493,6 +1513,26 @@ type TurnFinishedHook func(TurnOutcome)
 func (c *Controller) SetOnTurnFinished(hook TurnFinishedHook) {
 	c.mu.Lock()
 	c.onTurnFinished = hook
+	c.mu.Unlock()
+}
+
+// ApprovalRequestedHook observes an approval request that just became pending.
+//
+// OnUpdate only publishes the current session, so a background session waiting
+// for approval is invisible to the desktop shell without this hook. It is called
+// once per call id, on the turn's goroutine, after the request is recorded and
+// the current-session snapshot is published. The request carries the tool name
+// and arguments: observers should not render them outside the app.
+type ApprovalRequestedHook func(sessionID string, request state.ApprovalRequest)
+
+// SetOnApprovalRequested registers an observer for newly pending approvals of
+// every session, current or background. Repeated ApprovalRequest events for the
+// same call id are not reported again; decisions and clearing do not re-report.
+// Passing nil removes the hook. The hook is optional: with none installed the
+// Controller behaves exactly as before.
+func (c *Controller) SetOnApprovalRequested(hook ApprovalRequestedHook) {
+	c.mu.Lock()
+	c.onApprovalRequested = hook
 	c.mu.Unlock()
 }
 

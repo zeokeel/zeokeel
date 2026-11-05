@@ -100,3 +100,45 @@ go test -run '^$' -bench 'BenchmarkRender|BenchmarkWarmFrame' -benchmem -count=3
 1. 在 Lead 的全包门禁里增加一条非阻断的性能记录：`go test -run '^$' -bench 'BenchmarkWarmFrame' -benchmem ./internal/shell`，把结果贴到发布检查单（不设硬阈值，先积累趋势）。
 2. 流式高峰期可选做一次 profile，确认 Markdown/工具卡是否是热路径；若是，优先复用解析结果（mygo 已内置增量解析）而不是改渲染结构。
 3. 真实窗口（X11/Wayland/Windows）上的帧时间与 DPI 缩放另做一轮真机测量，补齐 headless 与窗口后端的差值。
+
+## 8. Trajectory 虚拟化前后（v1.1，2026-11-05）
+
+> 背景：[known-limitations](known-limitations.md) 记录 Trajectory 未虚拟化；v1.1 把事件列表从 `ui.Scroll` + 一次性构建全部行改为 mygo `ui.List` 虚拟列表（只构建可视行）。本节记录同一宿主机、同一 fixture 的前后对比。
+
+### 8.1 夹具与方法
+
+- **夹具**：`newBenchApp(b, Session, nil)`（真实 store/agent/controller + 一个空会话），再向会话追加 **1000 条合成事件**（交替 `tool_start`/`status`，首尾各一条带唯一 payload 的行），并把 Session 切到 Trajectory Tab。1000 行是旧实现每帧都要全量构建的数量，也是虚拟化收益最直接的规模。
+- **旧实现**：HEAD `2d8537f` 的 `trajectory.go`（`ui.Scroll` + `for _, entry := range entries` 全量构建）。为了与工作区隔离，旧数字在 `git archive HEAD` 出来的干净副本里跑（只替换了 `render_bench_test.go` 加入同一 Trajectory 基准）。
+- **新实现**：当前工作区（`ui.List`，`ListState.Key` = 事件序号）。
+- 数字为 **3 次运行的中位数**，同一容器、同一 `CGO_ENABLED=0`、无 GPU；其他屏/其他队友的未提交改动可能带来 ±10% 噪声，结论看量级。
+
+```sh
+export PATH=/usr/local/go/bin:$PATH GOMODCACHE=/data/mygo/.cache/gomod CGO_ENABLED=0
+
+# 冷渲染（含一次性 startupsettle；与 §4.1 同口径）
+go test -run '^$' -bench 'BenchmarkRenderTrajectory$' -benchmem -count=3 ./internal/shell
+
+# 稳态帧（与 §4.2 同口径）
+go test -run '^$' -bench 'BenchmarkWarmFrame/Trajectory' -benchmem -count=3 ./internal/shell
+```
+
+### 8.2 结果（1000 事件 trace）
+
+| 指标 | 旧：Scroll 全量构建（2d8537f） | 新：`ui.List` 虚拟化 | 变化 |
+| --- | ---: | ---: | ---: |
+| `ui.Render` 1600×1000 | 128.8 ms · 47.7 MB · 47,653 allocs | **42.6 ms · 10.3 MB · 22,386 allocs** | 时间 −67%，内存 −78%，allocs −53% |
+| `ui.Render` 900×600 | 104.6 ms · 43.3 MB · 47,638 allocs | **26.4 ms · 5.3 MB · 21,930 allocs** | 时间 −75%，内存 −88%，allocs −54% |
+| 稳态帧 1600×1000 | 22.7 ms · 1.07 MB · 17,451 allocs | **3.12 ms · 687 KB · 10,695 allocs** | 时间 −86%（约 7.3×），allocs −39% |
+| 稳态帧 900×600 | 17.8 ms · 1.07 MB · 17,451 allocs | **2.66 ms · 681 KB · 10,573 allocs** | 时间 −85%（约 6.7×），allocs −39% |
+
+### 8.3 解释
+
+- **为什么差这么多**：旧实现每帧构造 1000 个事件行、每行 10+ 个元素（时间文本、色点、标签、详情、caret 等），行数与语义树负载线性相关；新实现每帧只构造视口内的行（1600×1000 约 18–20 行，+2 overscan），列表其余部分只参与高度估算与锚点换算，1000 行与 20 行的帧成本同量级。
+- **剩余成本**：新稳态帧的 ~10.7k allocs 主要来自侧栏/会话 header/composer 等固定部分，而不是事件行；List 自身的测量/锚点计算是轻量算术。
+- **行为不回退**：虚拟化保持时间轨、事件色点/标签、×count pill、raw 展开块、点击/Enter/Space、a11y Label（行成为 List 项）与滚动语义；展开状态按事件 id（`Seq`）保存在 `liveUIState.expandedRaw`，追加事件不会丢展开或跳动。见 `trajectory_test.go` 的 `TestTrajectoryVirtualized*`。
+- **取舍**：`FollowEnd=false`（打开在最早事件、不随流式新事件自动跟随），与旧 Scroll 行为一致；若产品希望 trace 像日志一样跟随末尾，改这一个字段即可。
+
+### 8.4 备注
+
+- 1000 事件仍远高于日常会话（当前会话规模下旧实现已达标）；虚拟化主要为长会话/大 trace 留余量，不改变短 trace 的视觉。
+- 旧数字在干净的 `2d8537f` 副本测得，用于排除工作区未提交改动的影响；复测时建议同样用 `git archive HEAD` 避免共享工作区干扰。

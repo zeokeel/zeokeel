@@ -93,6 +93,32 @@ func newBenchApp(b *testing.B, screen Screen, snap *state.Snapshot) *App {
 	return app
 }
 
+// syntheticTrajectoryRows builds a deterministic trace: alternating tool_start
+// and status rows with uniquely marked first and last rows, so a test can tell
+// the rows the virtual list built from the rest of the history.
+func syntheticTrajectoryRows(total int) []store.Event {
+	rows := make([]store.Event, 0, total)
+	for i := 0; i < total; i++ {
+		switch i {
+		case 0:
+			rows = append(rows, store.Event{Type: session.EventToolEnd,
+				Payload: json.RawMessage(`{"call_id":"head-call","result":"head-result-marker"}`)})
+		case total - 1:
+			rows = append(rows, store.Event{Type: session.EventToolEnd,
+				Payload: json.RawMessage(`{"call_id":"tail-call","result":"tail-result-marker"}`)})
+		default:
+			if i%2 == 0 {
+				rows = append(rows, store.Event{Type: session.EventToolStart,
+					Payload: json.RawMessage(`{"name":"bench_tool"}`)})
+			} else {
+				rows = append(rows, store.Event{Type: session.EventStatus,
+					Payload: json.RawMessage(`{"phase":"running"}`)})
+			}
+		}
+	}
+	return rows
+}
+
 // benchSessionSnapshot is the Session benchmark's transcript: a user message,
 // a Markdown answer with a heading, list, inline code and a highlighted code
 // block, two finished tool calls and the usage footer — the render mix a real
@@ -212,6 +238,31 @@ func BenchmarkRenderSettings(b *testing.B) {
 	benchRender(b, newBenchApp(b, Settings, nil))
 }
 
+// seedBenchTrajectory gives the Trajectory benchmarks a long trace: synthetic
+// events appended to the benchmark session, so the frame cost is the virtual
+// list's built window rather than the whole history.
+func seedBenchTrajectory(b *testing.B, app *App, rows int) {
+	b.Helper()
+	sessionID := app.Ctrl.CurrentSessionID()
+	for _, event := range syntheticTrajectoryRows(rows) {
+		if _, err := app.Ctrl.Store().AppendEvent(sessionID, event); err != nil {
+			b.Fatalf("AppendEvent(%s): %v", event.Type, err)
+		}
+	}
+	app.Language = LangZH
+	app.uiState().tab = int(liveTrajectory)
+	app.uiState().trajLoaded = false
+}
+
+// BenchmarkRenderTrajectory measures the Trajectory screen with a 1000-event
+// trace: the cold ui.Render of a frame whose virtual list builds only the
+// rows in view.
+func BenchmarkRenderTrajectory(b *testing.B) {
+	app := newBenchApp(b, Session, nil)
+	seedBenchTrajectory(b, app, 1000)
+	benchRender(b, app)
+}
+
 // BenchmarkRenderSidebar measures a sidebar-heavy frame: several workspaces
 // with their sessions drawn as the workspace tree.
 func BenchmarkRenderSidebar(b *testing.B) {
@@ -243,6 +294,11 @@ func BenchmarkWarmFrame(b *testing.B) {
 		{"Sidebar", func(b *testing.B) *App {
 			app := newBenchApp(b, Home, nil)
 			seedBenchSidebar(b, app)
+			return app
+		}},
+		{"Trajectory", func(b *testing.B) *App {
+			app := newBenchApp(b, Session, nil)
+			seedBenchTrajectory(b, app, 1000)
 			return app
 		}},
 	}

@@ -115,7 +115,7 @@ func (a *App) liveHeader(c *ui.Context, t *design.Tokens, snap *state.Snapshot) 
 	}
 	ui.Column(c).Padding(th.Space(2), th.Space(4), 0, th.Space(4)).
 		BorderWidth(0, 0, 1, 0).BorderColor(t.BorderL2).Children(func() {
-		ui.Row(c).Height(th.Space(8)).AlignItems(ui.Center).Children(func() {
+		ui.Row(c).Height(t.Scale(th.Space(8))).AlignItems(ui.Center).Children(func() {
 			titleEl := design.Apply(ui.Text(c, title), t.Font(design.TypeBody))
 			titleEl.FontWeight(600).TextColor(t.LabelPrimary).MaxLines(1).Ellipsis("…")
 			ui.Box(c).Width(th.Space(2))
@@ -128,8 +128,8 @@ func (a *App) liveHeader(c *ui.Context, t *design.Tokens, snap *state.Snapshot) 
 				Label(modeText).Value(modeText).Role(ui.RolePopUpButton).Focusable()
 			mode.Children(func() {
 				ui.Icon(c, sessModeIcon).Size(th.Space(4), th.Space(4)).TextColor(t.LabelTertiary)
-				ui.Text(c, modeText).FontSize(13).
-					FixedLineHeight(20).TextColor(t.LabelSecondary).NoWrap()
+				modeTextEl := design.Apply(ui.Text(c, modeText), t.Font(design.TypeXS))
+				modeTextEl.TextColor(t.LabelSecondary).NoWrap()
 				ui.Icon(c, homeIconChevron).Size(th.Space(3), th.Space(3)).TextColor(t.LabelTertiary)
 			})
 			mode.Expanded(mst.open)
@@ -358,13 +358,14 @@ func (a *App) workingIndicator(c *ui.Context, t *design.Tokens) {
 		return
 	}
 	label := a.workingLabel(elapsed)
-	ui.Row(c).Key("working").Height(28).AlignItems(ui.Center).Gap(design.Space2).
+	th := t.Theme()
+	ui.Row(c).Key("working").Height(t.Scale(th.Space(7))).AlignItems(ui.Center).Gap(design.Space2).
 		Transition(design.IndicatorTransition()).Children(func() {
 		// The spinner repaints without rebuilding the view, as MyGo's
 		// spinners do; the text changes on the indicator's own clock.
 		ui.Spinner(c).Size(14, 14).Label(a.T("session.working_indicator"))
-		ui.Text(c, label).FontSize(12).FixedLineHeight(18).FontWeight(500).
-			TextColor(t.LabelSecondary).NoWrap().
+		labelEl := design.Apply(ui.Text(c, label), t.Font(design.TypeXXS))
+		labelEl.FontWeight(500).TextColor(t.LabelSecondary).NoWrap().
 			ContentTransition(ui.ContentTransition{Animation: &design.AnimFast})
 	})
 	// Wake at the next dot boundary: the indicator reveals a dot at a third
@@ -458,13 +459,13 @@ func (a *App) approvalCardsWithAlways(c *ui.Context, t *design.Tokens, requests 
 	for _, request := range requests {
 		a.menuFrame(c, t, a.sessionComposerWidthFor(c), func() {
 			ui.Row(c).Gap(design.Space2).AlignItems(ui.Center).Children(func() {
-				ui.Text(c, a.T("composer.approval_required")).FontSize(12).FixedLineHeight(18).
-					TextColor(t.LabelTertiary).Grow(1)
-				ui.Text(c, request.Name).FontSize(13).FixedLineHeight(20).
-					FontWeight(600).TextColor(t.LabelPrimary)
+				reqLabel := design.Apply(ui.Text(c, a.T("composer.approval_required")), t.Font(design.TypeXXS))
+				reqLabel.TextColor(t.LabelTertiary).Grow(1)
+				reqName := design.Apply(ui.Text(c, request.Name), t.Font(design.TypeXS))
+				reqName.FontWeight(600).TextColor(t.LabelPrimary)
 			})
-			ui.Text(c, compactArgs(request.Args)).FontSize(12).FixedLineHeight(18).
-				TextColor(t.LabelSecondary).MaxLines(2).Ellipsis("...")
+			argsText := design.Apply(ui.Text(c, compactArgs(request.Args)), t.Font(design.TypeXXS))
+			argsText.TextColor(t.LabelSecondary).MaxLines(2).Ellipsis("...")
 			ui.Row(c).Gap(design.Space2).Children(func() {
 				allow := design.Apply(ui.Button(c, a.T("composer.allow")), t.PrimaryButton())
 				if allow.Clicked() && a.Ctrl != nil {

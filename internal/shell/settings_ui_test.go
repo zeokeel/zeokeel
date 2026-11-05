@@ -819,11 +819,36 @@ func TestSettingsChangedHookRuns(t *testing.T) {
 	}
 }
 
+// exactText reports whether the frame shows s as a whole text, as opposed to
+// a text containing it (HasText's substring match would accept "关闭设置").
+func exactText(texts []string, s string) bool {
+	for _, text := range texts {
+		if text == s {
+			return true
+		}
+	}
+	return false
+}
+
 // TestRenderSettingsWindowNativePreview renders the independent settings
 // window's view for brand review at its window size (900x720), light and dark.
 // previewDir keeps ordinary runs in a temporary directory;
 // ZEOKEEL_UPDATE_PREVIEWS=1 refreshes docs/design/preview.
+//
+// The host callbacks are registered before rendering: a desktop host makes
+// hasSettingsWindowHost() true, so the window form shows its single close
+// entry (the panel X) and drops the modal fallback's explicit "关闭" label.
 func TestRenderSettingsWindowNativePreview(t *testing.T) {
+	// A host-less render keeps the modal fallback's explicit Close label, so
+	// the "no 关闭" assertion below would catch the label coming back.
+	fallback := newLiveApp(t, &shellProvider{})
+	fallback.app.Language = LangZH
+	ftt := ui.NewTester(fallback.app.SettingsView, 900, 720)
+	ftt.Frame()
+	if !exactText(ftt.Texts(), "关闭") {
+		t.Fatalf("the modal fallback lost its explicit Close label: %q", ftt.Texts())
+	}
+
 	dir := previewDir(t)
 	for _, tc := range []struct {
 		name  string
@@ -836,8 +861,24 @@ func TestRenderSettingsWindowNativePreview(t *testing.T) {
 			h := newLiveApp(t, &shellProvider{})
 			h.app.Language = LangZH
 			h.app.Screen = Home
+			// The desktop host shows Settings as its own window.
+			h.app.SetSettingsWindowOpener(func() bool { return true })
+			h.app.SetSettingsWindowCloser(func() {})
+			if !h.app.hasSettingsWindowHost() {
+				t.Fatal("the test needs a settings window host")
+			}
 			if err := h.store.SetSetting(session.SettingTheme, tc.theme); err != nil {
 				t.Fatalf("theme setting: %v", err)
+			}
+			// The window form has exactly one visible close entry: the panel X
+			// ("关闭设置"), and no explicit "关闭" button from the modal header.
+			tt := ui.NewTester(h.app.SettingsView, 900, 720)
+			tt.Frame()
+			if _, ok := tt.Find("关闭设置"); !ok {
+				t.Fatalf("the settings window lost its panel X: %q", tt.Texts())
+			}
+			if exactText(tt.Texts(), "关闭") {
+				t.Fatalf("the settings window still shows the modal's Close label: %q", tt.Texts())
 			}
 			img := ui.Render(h.app.SettingsView, 900, 720, 1)
 			path := filepath.Join(dir, "settings-window-native-"+tc.name+".png")

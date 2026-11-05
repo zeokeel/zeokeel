@@ -251,7 +251,7 @@ Plugins 与 Automation 是两个"列表页"屏，本轮把它们的 DSH 复刻�
 
 | 偏好 | 规则 | 落点 |
 | --- | --- | --- |
-| `TextScale` | 主题基准字号 = `brand.FontSize(14) × clamp(scale, 0.5…2)` 并四舍五入到整 DIP；**会话正文** = 应用内字号设置（14/16）× 同一 scale，行高（24/28）按同比例缩放；缩放对两者是相乘关系（应用设置是相对偏好，系统放大仍生效）。品牌 type scale 中其它显式档位（markdown 标题、元数据等）本轮保持固定值，见 12.4 遗留。 | `shellTheme` / `themeTokens` / `ConversationFontSize` / `ConversationLineHeight` |
+| `TextScale` | 主题基准字号 = `brand.FontSize(14) × clamp(scale, 0.5…2)` 并四舍五入到整 DIP；**会话正文** = 应用内字号设置（14/16）× 同一 scale，行高（24/28）按同比例缩放；**品牌 type scale** = `design.Tokens.TextScale`（v1.1），`Tokens.Font/Text/TextMuted` 的 size 与 line 同比例缩放、字重不变（1.0 与旧值逐值一致）。缩放对应用内设置是相乘关系（系统放大仍生效）。剩余显式 `.FontSize` 见 §12.5 / known-limitations §2。 | `shellTheme` / `themeTokens`（注入 `TextScale`）/ `ConversationFontSize` / `ConversationLineHeight` |
 | `HighContrast` | mygo 的 `Theme.follow` 只作用于默认主题；shell 用 `SetTheme` 设置品牌主题后由 `shellTheme` 复刻同一增强：`Border` 向 `Text` 混合 0.45、`TextMuted` 混合 0.4、`Focus` 不透明、`Scrollbar` alpha×1.6、滚动条加宽到 8 DIP。屏幕绘制用的 `design.Tokens` 同步增强：`BorderL2` +0.45 / `BorderL3` +0.6 / `LabelSecondary` +0.4 / `LabelTertiary` +0.3（向主文字色混合），浅/深色都朝更高对比方向。 | 同上 + `shellTokensForPreferences` |
 | `ReduceMotion` | 全局：`View` 顶部（`syncShellPreferences`）读偏好后调用 `Context.DisableAnimations()`，本帧所有 transition/`Animate` 立即到位；mygo 的 transition/`Animate` 本身也遵循该偏好。既有 Session 流式淡入的显式 `ReduceMotion` 检查保留；`Loop`/spinner 等语义"进行中"动效不受影响（mygo 语义）。 | `app.go` View 顶部 + `syncShellPreferences` |
 | `Accent`（系统强调色） | **不采纳**：ZeoKeel 品牌蓝/青是品牌识别的一部分，且品牌 `AccentText` 对比度已由 ADR 0002 色板校验（light 6.6:1 / dark 8.7:1）。记录为有意取舍。 | `shellTheme` 注释 + 测试 |
@@ -274,6 +274,16 @@ Plugins 与 Automation 是两个"列表页"屏，本轮把它们的 DSH 复刻�
 2. 系统 Accent 不采纳（品牌取舍，见 12.1）；若未来提供"跟随系统强调色"开关，可在设置页加选项后复用 `shellTheme`。
 3. 滚动条常显/平台偏好尚未实现（12.3），只做了 HighContrast 最小增强。
 4. `ui.Preferences.ReduceTransparency`（原生文档有，`ui.Preferences` 结构无）未接入；窗口材质后续随桌面壳 P1 处理。
+
+### 12.5 TextScale 扩展到 design 类型系统（v1.1，2026-11-05 完成）
+
+- **机制**：`design.Tokens` 新增 `TextScale`（默认 1.0），`Tokens.Metrics(role)` 返回 `size/line × scale`（字重不变），`Font/Text/TextMuted` 全部走它；`Tokens.Scale(v)` 供"文字变大、控件高度也要变大"的少数度量使用。`themeTokens` 每帧把 `shellTextScale(prefs)` 写入 tokens，因此 Home/Session/Settings 等走 `t.Font(design.TypeX)` 的品牌文字随系统文字缩放。1.0x 下 `TextScale=1`，`Metrics` 与 `TypeMetrics` 逐值相等（像素/行为不变）。
+- **显式字号审计与转换（本轮 21 处）**：
+  - Home（3）：composer hint 12/18 → `TypeXXS`；工作区/模式 chip 文字 13/20 → `TypeXS`（chip 高度/内边距用 `Tokens.Scale` 同比放大）。
+  - Session（5）：header 模式 chip 13/20 → `TypeXS`（header 行高同比）；working indicator 12/18 → `TypeXXS`（行高同比）；审批卡 12/18、13/20、12/18 → `TypeXXS/TypeXS/TypeXXS`。
+  - Settings（13）：`settings_ui.go` 内 13 处 `settingsText(...)` 改用本地 `settingsTypeText`（走 `t.Font(role)`），覆盖设置标题/分组标签/选择器/说明/字号控件等；选项弹层行高使用 `Tokens.Scale` 同比放大。
+- **保持固定（有意）**：图标/像素微调（如 turn 徽标 8px、`+`/`−` 步进按钮 16px）、自定义行高的错误/相位小字（11/16、12 无固定行高，转换会改变 1.0 像素）、会话正文（`ConversationFontSize/LineHeight` 已单独缩放）、Home 字标（`Theme.Rem` 已随基座字号缩放）。其余屏幕的显式字号（余 169 处 `.FontSize`）与 `settingsText/nativeText` 等 helper 内的固定档位留给后续 v1.2，见 known-limitations §2。
+- **验证**：`preferences_test.go` 新增 `TestTextScaleScalesDesignTypeRoles`（1.0 与 `TypeMetrics` 相等、Home chip 28 DIP；1.5x 时 `TypeBody=21/33`、chip 42 DIP、Home/Session/Settings 关键控件仍在窗口内）；`style_test.go` 覆盖 1.0/1.25/1.5/2.0 等比、层级与未设置时按 1.0。1.5x 手检（Home/Session/Settings 临时渲染）无裁切。
 
 ## 13. Markdown 渲染：迁移到 mygo `ui/markdown`（2026-11-05 完成）
 
@@ -337,7 +347,7 @@ Plugins 与 Automation 是两个"列表页"屏，本轮把它们的 DSH 复刻�
 ### 14.3 遗留
 
 1. 右侧栏（Files/Terminal/Start）品牌化仍在其独立任务；Home/Session composer 收敛到 `composer_native.go` 仍待办。
-2. Trajectory 事件很多时仍是普通 `Scroll`（未虚拟化，与迁移前一致）；如需大 trace 性能再评估 `ui.List`。
+2. ~~Trajectory 事件很多时仍是普通 `Scroll`（未虚拟化，与迁移前一致）~~ **已完成（v1.1，2026-11-05，§16.1）**：`ui.List` 虚拟化，只构建可视行。
 3. 搜索高亮目前是行选中（accent 条 + `BgHover`），标题内命中字符的逐字符高亮未做（store 查询只返回会话，逐字符高亮需额外匹配策略与 XSS 无关的纯文本 span 拼接）。
 
 ## 15. 右侧栏（Files / Terminal / Start，第七批，2026-11-05 完成）
@@ -387,10 +397,21 @@ Plugins 与 Automation 是两个"列表页"屏，本轮把它们的 DSH 复刻�
 剩余（优先来自独立设计评审 [review-round3.md](review-round3.md)）：
 
 1. ~~**UX P0**~~ **已完成（2026-11-05 第四轮，见 STATUS 阶段 6）**：破坏性操作确认 + Danger（Automation/Memory）；浅色三级文字 `#646C7A` 四组表面 ≥4.5:1；深色字标改用 `logo-dark.svg` 派生 2x 位图。
-2. P1 细节：Windows/Linux 设置窗口无菜单栏、窗口间几何联动、滚动位置持久化；通知动作按钮/退出后点击/后台"等待审批"漏报；TextScale 未覆盖固定 type scale（115 处）。
-3. 预览/回归：预览无状态覆盖（空态/错误/加载/窄窗），CI 无视觉回归（可加 headless golden 冒烟）。
+2. P1 细节：Windows/Linux 设置窗口无菜单栏、窗口间几何联动、滚动位置持久化；通知动作按钮/退出后点击；TextScale 已覆盖 design 类型系统（§12.5），其余约 169 处显式字号留 v1.2。
+3. 预览/回归：预览无状态覆盖（空态/错误/加载/窄窗）；已提供 opt-in 视觉回归（`scripts/visual-check.sh` + `TestVisualRegression`，CI 未强制，跨机器字体/时钟原因）。
 4. a11y/真机：VoiceOver/Narrator/Orca 人工复核、拖拽键盘等价、IME/高 DPI 真机矩阵。
-5. 性能：Trajectory 未虚拟化（稳态帧已达标，见 perf.md）。
+5. 性能：~~Trajectory 未虚拟化~~ **已完成（v1.1，2026-11-05，§16.1）**：1000 事件稳态帧 22.7ms → 3.12ms（见 [perf.md](perf.md) §8）。
+
+### 16.1 Trajectory 虚拟化（v1.1，2026-11-05 完成）
+
+`internal/shell/trajectory.go` 的事件列表从「`ui.Scroll` + 一次性构建全部事件行」换成 mygo `ui.List` 虚拟列表：
+
+- **只构建可视行**：每帧由 List 构建视口内的行（+2 行 overscan），1000 事件 trace 与 20 事件 trace 的帧成本相同量级；标题的「N 条记录 · M 个事件」仍按全量数据计数。
+- **状态按事件 id**：`ListState.Key` = 事件序号（`trajectoryEntry.Seq`），展开 raw 的 `liveUIState.expandedRaw[seq]` 与滚动锚点跟随事件而不是行号；事件追加到末尾时，用户正在看的行不会跳动。
+- **交互/视觉不变**：每行仍是原来的 `trajectoryRow`（时间轨、事件色点、本地化标签、×count pill、点击/Enter/Space 展开、raw mono 块、`Label` a11y 名称）；行间距用行内 `Space(0.5)` 预留，hover 表面与旧 `Column.Gap` 一致；`ListState.Label` 让辅助技术把行读成列表项。
+- **滚动/跟随语义**：`FollowEnd=false`，与旧 Scroll 一致——打开时在最早事件、随用户滚动保持位置，不随流式新事件自动跳到底部（Chat transcript 才跟随末尾）。
+- **测试**：`trajectory_test.go` 新增 3 个针对性测试——1200 行 trace 只构建可视窗口（尾部行在 `ScrollToEnd` 前不可见、`ListState.Visible()` 有界）、点击展开/重开按事件 id 保留/Enter 折叠/聚焦与 a11y/滚轮滚动、`ScrollToEnd` 正确跳转；预览 `TestRenderTrajectoryNativePreview` 不变。
+- **基准**：见 [perf.md §8](perf.md)：1000 事件 trace 稳态帧 1600×1000 从 22.7ms 降到 3.12ms（约 7×），`ui.Render` 冷渲染从 128.8ms 降到 42.6ms（约 3×），分配从 17.5k→10.7k allocs/帧。
 
 ## 17. 工具卡内容原生化（第八批，2026-11-05 完成）
 
