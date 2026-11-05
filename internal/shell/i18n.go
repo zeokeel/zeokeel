@@ -263,6 +263,7 @@ var translations = map[string]translation{
 	"session.composer_placeholder":                           {"Message or run a task, / commands, @ files or sessions", "输入消息或运行任务，/ 命令，@ 文件或会话"},
 	"session.error_prefix":                                   {"Error: %s", "错误：%s"},
 	"session.host_note":                                      {"This Host has no desktop available to open files or folders in external apps. Files can still be previewed in the sidebar.", "此主机没有可用的桌面，无法使用外部程序打开文件或文件夹；文件仍可在侧栏预览。"},
+	"session.interrupted":                                    {"Interrupted", "已中断"},
 	"session.new_session":                                    {"New Session", "新建会话"},
 	"session.no_inline_content":                              {"No inline content; open the path to view it.", "无内联内容；打开路径查看。"},
 	"session.more_actions":                                   {"More session actions", "更多会话操作"},
@@ -452,7 +453,9 @@ var translations = map[string]translation{
 	"team.progress":           {"%d%%", "%d%%"},
 	"team.status.completed":   {"completed", "已完成"},
 	"team.status.running":     {"running", "运行中"},
+	"team.status.queued":      {"queued", "排队中"},
 	"team.status.failed":      {"failed", "失败"},
+	"team.status.interrupted": {"interrupted", "已中断"},
 	"team.count":              {"%d", "%d"},
 }
 

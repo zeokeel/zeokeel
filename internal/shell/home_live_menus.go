@@ -39,8 +39,12 @@ type liveMenuState struct {
 	// Turn timing for the usage footer. The controller's Usage counters have
 	// no duration, so the view measures the wall clock between the running
 	// and idle phases. When no such measurement exists nothing is shown.
+	// turnStartUsage is the session-cumulative usage when the running phase
+	// began; the completion tok/s uses the growth since then, not the session
+	// total, so a rate is never divided across turns.
 	turnRunning       bool
 	turnStart         time.Time
+	turnStartUsage    state.Usage
 	lastTurnDuration  time.Duration
 	completedUsage    state.Usage
 	hasCompletedUsage bool
@@ -488,6 +492,7 @@ func (a *App) observeTurnTiming(now time.Time, snap *state.Snapshot) {
 		if !st.turnRunning {
 			st.turnRunning = true
 			st.turnStart = now
+			st.turnStartUsage = snap.Usage
 			st.lastTurnDuration = 0
 		}
 		return

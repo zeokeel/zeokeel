@@ -254,6 +254,9 @@ func (a *App) liveToolDetail(c *ui.Context, t *design.Tokens, tool state.ToolSta
 			}
 		}
 		switch {
+		case tool.Status == state.ToolCancelled:
+			ui.Text(c, a.menuText("Stopped before it finished.", "已停止，未执行完成。")).
+				FontSize(12).FixedLineHeight(18).TextColor(t.LabelTertiary)
 		case tool.Result == "" &&
 			(tool.Status == state.ToolRunning || tool.Status == state.ToolPending):
 			ui.Text(c, a.menuText("Waiting for output…", "等待输出…")).

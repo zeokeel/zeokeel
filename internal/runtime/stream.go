@@ -20,13 +20,21 @@ import (
 type emitFunc func(state.Event) bool
 
 // turnUsage accumulates token accounting across the model calls of one turn.
-// Providers that report no usage leave the counters at zero; nothing is
-// fabricated.
+// Providers that report no usage leave the token counters at zero; nothing is
+// fabricated, but Steps still advances for every completed call.
 type turnUsage struct {
 	in    int
 	out   int
 	cache int
 	steps int
+
+	// Published totals: the snapshot keeps session-cumulative usage, so each
+	// publication sends only the growth since the previous one.
+	publishedIn    int
+	publishedOut   int
+	publishedCache int
+	publishedSteps int
+	turnPublished  bool
 }
 
 // finishCall records one completed model call. usage may be nil.
@@ -40,14 +48,28 @@ func (u *turnUsage) finishCall(usage *schema.TokenUsage) {
 	u.cache += usage.PromptTokenDetails.CachedTokens
 }
 
-func (u *turnUsage) snapshot() state.Usage {
-	return state.Usage{
-		Turns:    1,
-		Steps:    u.steps,
-		In:       u.in,
-		Out:      u.out,
-		CacheHit: u.cache,
+// emitDelta publishes the usage growth since the previous publication as one
+// state.Usage delta. The first publication of a turn also carries Turns:1, so
+// a turn counts once even though it publishes several deltas. It is a no-op
+// when nothing grew (a non-assistant event, or a provider that reported no
+// usage and no new step).
+func (u *turnUsage) emitDelta(emit emitFunc) {
+	delta := state.Usage{
+		Steps:    u.steps - u.publishedSteps,
+		In:       u.in - u.publishedIn,
+		Out:      u.out - u.publishedOut,
+		CacheHit: u.cache - u.publishedCache,
 	}
+	if !u.turnPublished && u.steps > 0 {
+		delta.Turns = 1
+		u.turnPublished = true
+	}
+	if delta.Turns == 0 && delta.Steps == 0 && delta.In == 0 && delta.Out == 0 && delta.CacheHit == 0 {
+		return
+	}
+	u.publishedIn, u.publishedOut = u.in, u.out
+	u.publishedCache, u.publishedSteps = u.cache, u.steps
+	emit(delta)
 }
 
 // consumeMessage translates one eino AgentEvent message output into state
@@ -104,6 +126,7 @@ func (a *Agent) consumeMessage(
 			usagePtr = mv.Message.ResponseMeta.Usage
 		}
 		usage.finishCall(usagePtr)
+		usage.emitDelta(emit)
 	}
 	return nil
 }
@@ -162,6 +185,7 @@ func (a *Agent) consumeAssistantStream(
 		}
 	}
 	usage.finishCall(lastUsage)
+	usage.emitDelta(emit)
 	return nil
 }
 

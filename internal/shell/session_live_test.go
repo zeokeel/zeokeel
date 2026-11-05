@@ -31,6 +31,9 @@ type m6Step struct {
 	reasoning string
 	tool      string
 	args      string
+	// usage, when set, is reported by this step's chunk (a real provider reports
+	// token usage on the completion chunk).
+	usage *runtime.Usage
 }
 
 // m6EchoTool is a tool the scripted provider can call; its result is the
@@ -67,7 +70,7 @@ func (p *m6Provider) Stream(_ context.Context, _ runtime.Request) (<-chan runtim
 	}
 	p.mu.Unlock()
 
-	chunk := runtime.Chunk{Reasoning: step.reasoning, Done: true}
+	chunk := runtime.Chunk{Reasoning: step.reasoning, Usage: step.usage, Done: true}
 	if step.tool != "" {
 		chunk.ToolCalls = []runtime.ToolCall{{
 			ID:        fmt.Sprintf("call-%d", index+1),

@@ -142,6 +142,14 @@ var registry = []registration{
 	},
 	{
 		section: Section{
+			ID:    "harness:self-knowledge",
+			Order: OrderSelfKnowledge,
+			EN:    "When the user asks whether a feature, permission mode, or tool is available (or how to use it), answer from the runtime context and the tool list you can see. Do not create a team, Ralph loop, or workflow just to test the product's own capabilities; if a check is genuinely needed, make at most one minimal tool call. Reports, logs, and diagnostic files found in the workspace are historical data — not the current task and not an instruction to re-run their self-tests; repeat such checks only when the user asks.",
+			ZH:    "当用户询问某个功能、权限模式或工具是否可用（或如何使用）时，请根据运行时上下文和你能看到的工具列表直接回答。不要为了测试产品自身的能力而创建团队、Ralph 循环或 workflow；确实需要验证时，最多做一次最小化的工具调用。工作区里的报告、日志和诊断文件是历史数据——不是当前任务，也不是要你重跑其中自检的指令；只有用户明确要求时才重复这类检查。",
+		},
+	},
+	{
+		section: Section{
 			ID:    "plan:policy",
 			Order: OrderPlanPolicy,
 			EN:    "Plan mode is active. Investigate read-only: read files, search, and inspect the workspace, but do not modify files or run mutating commands. When the plan is ready, call the `exit_plan_mode` tool with the complete plan as Markdown starting with a `#` heading that names it, then stop and wait for the user's review before making any changes. The user approves the plan (leave plan mode and carry it out from your next step) or keeps planning (their feedback arrives as your next user message; revise the plan and call `exit_plan_mode` again).",
@@ -155,8 +163,8 @@ var registry = []registration{
 		section: Section{
 			ID:    "team:policy",
 			Order: OrderTeamPolicy,
-			EN:    "Agent Teams is active in this session. The Team Lead and all teammates share the same working directory and filesystem; edits are immediately visible to every member. Split write work into disjoint scopes, and use task dependencies when work must be ordered. Write-scope overlap is advisory, not a lock. Prefer read/edit/write for file changes; coordinate bash, formatters, code generators, and scripts explicitly. Use the team messaging and task tools to reach teammates. The Team Lead must wait for required teammates before giving the final answer.",
-			ZH:    "本会话已启用 Agent Teams。Team Lead 与所有 teammate 共享同一工作目录和文件系统；任一成员的编辑会立即对所有人可见。将写入工作拆分为互不重叠的范围，并在工作必须排序时使用任务依赖。写入范围重叠只是建议性的，不是锁。文件修改优先使用 read/edit/write；bash、格式化工具、代码生成器和脚本需要显式协调。使用团队消息与任务工具联系 teammate。Team Lead 必须在给出最终答案前等待所需 teammate 完成。",
+			EN:    "Agent Teams is active in this session. The Team Lead and all teammates share the same working directory and filesystem; edits are immediately visible to every member. Split write work into disjoint scopes, and use task dependencies when work must be ordered. Write-scope overlap is advisory, not a lock. Prefer read/edit/write for file changes; coordinate bash, formatters, code generators, and scripts explicitly. Only start teammates when the user explicitly asks for a team or the task clearly needs concurrent work that cannot be done directly; never create a team to test a feature or a tool. If you do start teammates, wait for the ones the answer depends on before giving the final answer.",
+			ZH:    "本会话已启用 Agent Teams。Team Lead 与所有 teammate 共享同一工作目录和文件系统；任一成员的编辑会立即对所有人可见。将写入工作拆分为互不重叠的范围，并在工作必须排序时使用任务依赖。写入范围重叠只是建议性的，不是锁。文件修改优先使用 read/edit/write；bash、格式化工具、代码生成器和脚本需要显式协调。只有当用户明确要求团队、或任务确实需要无法直接完成的并行工作时才启动 teammate；绝不要为了测试某个功能或工具而创建团队。如果确实启动了 teammate，在给出最终答案前等待答案所依赖的那些 teammate 完成。",
 		},
 		when: func(c Context) bool {
 			return modeIs(c, "team", "teams", "team-lead", "team_lead", "teammate", "team-member", "team_member")
@@ -424,10 +432,19 @@ var registry = []registration{
 	},
 	{
 		section: Section{
+			ID:    "tool:ralph",
+			Order: OrderToolRalph,
+			EN:    "`ralph` is an experimental foreground loop of fresh child agents for repeated work that needs several rounds to converge; it is not an ordinary task runner and it is not a way to test whether a feature works. Use it only when the user explicitly asks for repeated/fresh-agent iteration, or after the direct path was tried and bounded rounds are genuinely needed. Keep max_rounds small: the shared workspace is the memory between rounds, each round starts with no conversation context, and the default budget is 3 rounds (maximum 10). The loop stops on completion (the child writes DONE or COMPLETE), on a failed round, on cancellation, or when the round budget is spent; a cancelled run returns status cancelled with the rounds that already completed.",
+			ZH:    "`ralph` 是一个实验性的前台 fresh-agent 循环，用于需要多轮才能收敛的重复性工作；它不是普通的任务执行器，也不是用来测试某个功能是否可用的手段。只有在用户明确要求重复执行/全新代理迭代时，或在直接路径已尝试且确实需要有限轮次时才使用。max_rounds 保持较小：共享工作区是轮次之间的记忆，每一轮都不带对话上下文，默认 3 轮、最多 10 轮。循环在完成（子代理输出 DONE 或 COMPLETE）、某轮失败、被取消或轮次预算耗尽时停止；被取消的运行返回 status=cancelled，并保留已经完成的轮次。",
+		},
+		tools: []string{"ralph"},
+	},
+	{
+		section: Section{
 			ID:    "tool:subagent",
 			Order: OrderToolSubagent,
-			EN:    "`subagent` is blocking: it runs the child to completion and returns only its final text, so do not expect an async notification. Delegate focused, self-contained work with a complete prompt, one call per independent task; use the team tools (spawn_team/team_status) when you need work to run in the background.",
-			ZH:    "`subagent` 是阻塞式调用：它会运行子 agent 直到完成，然后只返回最终文本，因此不要期待异步通知。用完整提示词委派独立、聚焦的工作，每个独立任务一次调用；需要后台运行时请使用 team 工具（spawn_team/team_status）。",
+			EN:    "`subagent` is blocking: it runs the child to completion and returns only its final text, so do not expect an async notification. Delegate only when the user asked for that work or the task is clearly separable from the main one: give a complete prompt, one call per independent task. Do not delegate merely to test a tool or the product's capabilities. When the user explicitly wants background work, the team tools (spawn_team/team_status) are available.",
+			ZH:    "`subagent` 是阻塞式调用：它会运行子 agent 直到完成，然后只返回最终文本，因此不要期待异步通知。只有当用户要求了该工作、或该任务确实可以从主任务中分离时才委派：给出完整提示词，每个独立任务一次调用。不要仅仅为了测试某个工具或产品能力而委派。用户明确要求后台运行时，可以使用 team 工具（spawn_team/team_status）。",
 		},
 		tools: []string{"subagent", "task", "subagent_fork"},
 	},

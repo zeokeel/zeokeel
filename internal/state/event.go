@@ -51,6 +51,12 @@ type ToolEnd struct {
 	Result   string
 	IsError  bool
 	Duration time.Duration
+	// Cancelled reports that the call was closed by the turn ending (user Stop,
+	// cancellation or crash recovery) instead of returning a real result. The
+	// snapshot renders it as ToolCancelled and the persisted tool_calls row uses
+	// the "cancelled" status, so a stopped turn no longer leaves a card spinning
+	// forever or an open call in the next turn's history.
+	Cancelled bool
 }
 
 func (ToolEnd) isEvent() {}
@@ -85,8 +91,14 @@ type ApprovalRequest struct {
 
 func (ApprovalRequest) isEvent() {}
 
-// Usage replaces the snapshot's usage counters with a consistent point-in-time
-// measurement. Values are copied as-is; the projector does not clamp them.
+// Usage is a delta on the session's cumulative counters. The projector adds
+// Turns, Steps, In, Out and CacheHit to Snapshot.Usage and treats ContextPct as
+// a gauge (the latest non-zero value wins). The runtime publishes one delta per
+// completed model call, so the snapshot doubles as the live footer the moment
+// work starts; summing the persisted usage events also rebuilds the same
+// cumulative totals on reopen. Event traces written before this contract
+// carried one whole-turn sample per successful turn with Turns=1; summing those
+// also yields the session totals, so old sessions replay correctly.
 type Usage struct {
 	Turns      int
 	Steps      int
@@ -98,10 +110,31 @@ type Usage struct {
 
 func (Usage) isEvent() {}
 
+// StatusReason explains how the latest turn ended. The zero value means a turn
+// completed normally (or no turn has ended yet); it is persisted with the
+// terminal Status event and survives a reopen.
+type StatusReason string
+
+const (
+	// ReasonNone is the zero value: the turn completed normally, or no reason
+	// was recorded (events persisted by older builds).
+	ReasonNone StatusReason = ""
+	// ReasonStopped is a turn the user stopped (or the app cancelled).
+	ReasonStopped StatusReason = "stopped"
+	// ReasonFailed is a turn that failed with an error.
+	ReasonFailed StatusReason = "failed"
+	// ReasonInterrupted is a turn left running by a process that exited; its
+	// open tool calls were closed by crash recovery on the next open.
+	ReasonInterrupted StatusReason = "interrupted"
+)
+
 // Status sets the session phase. Status is the only event that changes
-// Snapshot.Phase.
+// Snapshot.Phase. Reason is set on a terminal Status to explain how the latest
+// turn ended; the zero value keeps older events and normal completions
+// unchanged.
 type Status struct {
-	Phase Phase
+	Phase  Phase
+	Reason StatusReason
 }
 
 func (Status) isEvent() {}

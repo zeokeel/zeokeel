@@ -55,6 +55,10 @@ const (
 	RalphStatusMaxRounds = "max_rounds"
 	// RalphStatusFailed means a round's child agent failed.
 	RalphStatusFailed = "failed"
+	// RalphStatusCancelled means the caller (or the user's Stop) cancelled the
+	// loop. The completed rounds are kept in the result and the message says
+	// the run was cancelled instead of surfacing a bare context error.
+	RalphStatusCancelled = "cancelled"
 )
 
 const ralphDescription = `Run a foreground fresh-agent Ralph loop toward one immutable objective.
@@ -77,7 +81,9 @@ on a failed round, on context cancellation, or when the round budget is spent.
 
 The tool returns {"kind":"ralph","objective":...,"completed":...,
 "rounds":[{"round":1,"output":...,"completed":false,"error":...}],
-"report":{"status":"complete|max_rounds|failed","summary":...,...}}. It never
+"report":{"status":"complete|max_rounds|failed|cancelled","summary":...,...}}.
+A cancelled run stops before the next round, keeps the rounds that already
+completed and returns status "cancelled" with a one-line summary; it never
 panics on a child failure: the failed round and its error are recorded in the
 result. The complete JSON result is capped at 65536 bytes; oversized round
 outputs are truncated and "report.truncated" is set.`
@@ -111,7 +117,7 @@ type RalphRound struct {
 
 // RalphReport is the short structured summary of one Ralph loop.
 type RalphReport struct {
-	// Status is complete, max_rounds or failed.
+	// Status is complete, max_rounds, failed or cancelled.
 	Status string `json:"status"`
 	// Summary is a one-line account of why the loop stopped.
 	Summary string `json:"summary"`
@@ -191,10 +197,6 @@ func (t *RalphTool) Invoke(ctx context.Context, args json.RawMessage) (string, e
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	if err := ctx.Err(); err != nil {
-		return "", err
-	}
-
 	var in ralphArgs
 	if err := decodeArgs(t.Name(), args, &in); err != nil {
 		return "", err
@@ -237,9 +239,11 @@ func (t *RalphTool) Invoke(ctx context.Context, args json.RawMessage) (string, e
 	}
 	previous := ""
 	for round := 1; round <= maxRounds; round++ {
-		// Cancellation is honored between rounds and before the first one.
-		if err := ctx.Err(); err != nil {
-			return "", err
+		// Cancellation is honored between rounds and before the first one. A
+		// stopped loop reports what it did instead of returning a bare context
+		// error, so the model and the UI can say "cancelled" plainly.
+		if ctx.Err() != nil {
+			return cancelledRalphResult(res, fmt.Sprintf("Ralph run was cancelled before round %d started.", round))
 		}
 
 		childCtx := runtime.WithSubagentDepth(ctx, depth)
@@ -249,12 +253,11 @@ func (t *RalphTool) Invoke(ctx context.Context, args json.RawMessage) (string, e
 			Agent: agent,
 			Depth: depth,
 		})
-		if ctxErr := ctx.Err(); ctxErr != nil {
-			return "", ctxErr
-		}
-
 		current := RalphRound{Round: round}
 		if runErr != nil {
+			if ctx.Err() != nil {
+				return cancelledRalphResult(res, fmt.Sprintf("Ralph run was cancelled during round %d; the child agent was stopped.", round))
+			}
 			current.Error = truncateBytes(runErr.Error(), ralphErrorBytes, "error truncated")
 			res.Rounds = append(res.Rounds, current)
 			res.Report = RalphReport{
@@ -271,6 +274,12 @@ func (t *RalphTool) Invoke(ctx context.Context, args json.RawMessage) (string, e
 		current.Completed = ralphCompletionMarker(result.Output)
 		res.Rounds = append(res.Rounds, current)
 		previous = result.Output
+
+		// The round finished; record it before reporting the cancellation so a
+		// stopped loop still carries the work that already landed.
+		if ctx.Err() != nil {
+			return cancelledRalphResult(res, fmt.Sprintf("Ralph run was cancelled after round %d; the child agent was stopped.", round))
+		}
 
 		if current.Completed {
 			res.Completed = true
@@ -291,6 +300,25 @@ func (t *RalphTool) Invoke(ctx context.Context, args json.RawMessage) (string, e
 		RoundsStarted:   maxRounds,
 		RoundsCompleted: maxRounds,
 		LastOutput:      truncateBytes(previous, ralphReportDigestBytes, "output truncated"),
+	}
+	return encodeRalphResult(res, ralphMaxOutput)
+}
+
+// cancelledRalphResult builds the structured result of a cancelled loop. It
+// records the rounds that already finished so a caller can resume from the
+// workspace state instead of redoing them.
+func cancelledRalphResult(res RalphResult, summary string) (string, error) {
+	completed := 0
+	for _, round := range res.Rounds {
+		if round.Error == "" {
+			completed++
+		}
+	}
+	res.Report = RalphReport{
+		Status:          RalphStatusCancelled,
+		Summary:         summary,
+		RoundsStarted:   len(res.Rounds),
+		RoundsCompleted: completed,
 	}
 	return encodeRalphResult(res, ralphMaxOutput)
 }

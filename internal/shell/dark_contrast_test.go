@@ -10,6 +10,7 @@ import (
 	"github.com/egoist/mygo/ui"
 
 	"github.com/zeokeel/zeokeel/internal/design"
+	"github.com/zeokeel/zeokeel/internal/state"
 	"github.com/zeokeel/zeokeel/internal/tools"
 )
 
@@ -222,6 +223,11 @@ func TestNarrowLayoutKeepsControlsVisible(t *testing.T) {
 		t.Run("session", func(t *testing.T) {
 			h := newLiveAppAt(t, Session)
 			h.app.Language = LangEN
+			// The footer hides itself before any turn has run; this layout check
+			// needs it visible.
+			usageSnap := state.NewSnapshot()
+			usageSnap.Usage = state.Usage{Turns: 1, Steps: 2, In: 100, Out: 20, CacheHit: 50}
+			h.app.SetSnapshot(usageSnap)
 			tt := ui.NewTester(h.app.View, w, 800)
 			tt.Frame()
 			transcript, ok := tt.Find("Session transcript")

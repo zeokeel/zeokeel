@@ -8,6 +8,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/zeokeel/zeokeel/internal/runtime"
 )
@@ -331,9 +332,13 @@ func TestRalphCancellation(t *testing.T) {
 		ctx, cancel := context.WithCancel(context.Background())
 		cancel()
 
-		_, err := tool.Invoke(ctx, json.RawMessage(`{"objective":"do work"}`))
-		if !errors.Is(err, context.Canceled) {
-			t.Fatalf("error = %v, want context.Canceled", err)
+		raw, err := tool.Invoke(ctx, json.RawMessage(`{"objective":"do work"}`))
+		if err != nil {
+			t.Fatalf("Invoke error = %v, want a structured cancelled result", err)
+		}
+		res := decodeRalphResult(t, raw)
+		if res.Report.Status != RalphStatusCancelled {
+			t.Fatalf("status = %q, want %q", res.Report.Status, RalphStatusCancelled)
 		}
 		if len(runner.requests()) != 0 {
 			t.Fatalf("requests = %d, want 0", len(runner.requests()))
@@ -349,14 +354,72 @@ func TestRalphCancellation(t *testing.T) {
 		}
 		tool := newRalphRunnerTool(t, RalphConfig{Runner: runner, MaxRounds: 5})
 
-		_, err := tool.Invoke(ctx, json.RawMessage(`{"objective":"do work"}`))
-		if !errors.Is(err, context.Canceled) {
-			t.Fatalf("error = %v, want context.Canceled", err)
+		raw, err := tool.Invoke(ctx, json.RawMessage(`{"objective":"do work"}`))
+		if err != nil {
+			t.Fatalf("Invoke error = %v, want a structured cancelled result", err)
+		}
+		res := decodeRalphResult(t, raw)
+		if res.Report.Status != RalphStatusCancelled || res.Report.RoundsStarted != 1 || res.Report.RoundsCompleted != 1 {
+			t.Fatalf("report = %+v, want cancelled after one completed round", res.Report)
 		}
 		if got := len(runner.requests()); got != 1 {
 			t.Fatalf("requests = %d, want 1 (the loop must stop after cancellation)", got)
 		}
 	})
+
+	t.Run("during a round", func(t *testing.T) {
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+		runner := &ralphBlockingRunner{started: make(chan struct{}, 1)}
+		tool := newRalphRunnerTool(t, RalphConfig{Runner: runner})
+
+		resultCh := make(chan string, 1)
+		errCh := make(chan error, 1)
+		go func() {
+			raw, err := tool.Invoke(ctx, json.RawMessage(`{"objective":"do work"}`))
+			resultCh <- raw
+			errCh <- err
+		}()
+		select {
+		case <-runner.started:
+		case <-time.After(5 * time.Second):
+			t.Fatal("child did not start")
+		}
+		cancel()
+		var raw string
+		select {
+		case raw = <-resultCh:
+		case <-time.After(5 * time.Second):
+			t.Fatal("cancelled ralph did not return")
+		}
+		if err := <-errCh; err != nil {
+			t.Fatalf("Invoke error = %v, want a structured cancelled result", err)
+		}
+		res := decodeRalphResult(t, raw)
+		if res.Report.Status != RalphStatusCancelled {
+			t.Fatalf("status = %q, want %q", res.Report.Status, RalphStatusCancelled)
+		}
+		if runner.calls != 1 {
+			t.Fatalf("child calls = %d, want 1", runner.calls)
+		}
+	})
+}
+
+// ralphBlockingRunner blocks one round until its context is cancelled, proving
+// a stopped loop also stops the running child.
+type ralphBlockingRunner struct {
+	started chan struct{}
+	calls   int
+}
+
+func (r *ralphBlockingRunner) RunSubagent(ctx context.Context, _ runtime.SubagentRequest) (runtime.SubagentResult, error) {
+	r.calls++
+	select {
+	case r.started <- struct{}{}:
+	default:
+	}
+	<-ctx.Done()
+	return runtime.SubagentResult{}, ctx.Err()
 }
 
 func TestRalphOutputCap(t *testing.T) {

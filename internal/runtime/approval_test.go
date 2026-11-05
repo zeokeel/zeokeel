@@ -141,7 +141,7 @@ func TestProviderToolCallsDriveToolLoop(t *testing.T) {
 	if got := strings.Join(tokenTexts(events), ""); got != "It is 12:00." {
 		t.Fatalf("text = %q", got)
 	}
-	usage, ok := lastUsage(events)
+	usage, ok := sumUsage(events)
 	if !ok || usage.Steps != 2 || usage.In != 20 || usage.Out != 5 {
 		t.Fatalf("usage = %+v, ok=%v", usage, ok)
 	}

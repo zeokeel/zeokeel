@@ -101,6 +101,7 @@ before the plan policy. Every row below ships EN and ZH text.
 | `context:skills-catalog` | extension (DSH message) | 140 | `Skills` non-empty and `skill` tool present | EN + ZH |
 | `context:memory` | extension (workspace store) | 145 | `Memories` non-empty (≤20 items, ≤4000 chars) | EN + ZH |
 | `context:time` | extension (DSH history reading) | 150 | `Time` non-zero | EN + ZH |
+| `harness:self-knowledge` | extension (no DSH constant) | 160 | always | EN + ZH |
 | `plan:policy` | `PLAN_POLICY` 500 | 500 | `Mode` = plan/plan-mode/plan_mode | EN + ZH |
 | `team:policy` | `TEAM_POLICY` 600 | 600 | `Mode` = team/teams/team-lead/teammate | EN + ZH |
 | `mode:ptc` | `PTC_ONLY` 800 | 800 | `AgentMode` (or `Mode`) = ptc/ptc-mode/ptc_mode | EN + ZH |
@@ -124,6 +125,7 @@ before the plan policy. Every row below ships EN and ZH text.
 | `tool:session-query` | `TOOL_SESSION_QUERY` 2300 | 2300 | `session_search`/`session_event_search`/related | EN + ZH |
 | `tool:goal` | `TOOL_GOAL` 2400 | 2400 | `goal`, `get_goal`, `create_goal`, `update_goal` | EN + ZH |
 | `tool:workflow` | `TOOL_WORKFLOW` 2600 | 2600 | `workflow` | EN + ZH |
+| `tool:ralph` | `TOOL_RALPH` 2700 | 2700 | `ralph` | EN + ZH |
 | `tool:subagent` | `TOOL_SUBAGENT` 2800 | 2800 | `subagent`, `task`, `subagent_fork` | EN + ZH |
 | `tool:report` | `TOOL_REPORT` 2900 | 2900 | `report` | EN + ZH |
 | `tool:present` | `TOOL_COMPUTER_USE` slot 3000 | 3000 | `present` | EN + ZH |
@@ -213,7 +215,6 @@ Skipped DSH sections:
 - `TOOL_COMPUTER_USE` (3000) — no computer-use/GUI-automation tool. The unused
   slot is reused for `tool:present`, which keeps present guidance adjacent to
   deliverable references.
-- `TOOL_RALPH` (2700) — no Ralph loop tool is registered.
 - `TEAM_IDENTITY` context (125) — `Context` has no team role, name, or
   membership, so only the shared team policy is rendered.
 - Per-MCP-server instruction sections — `Context` carries no server
@@ -235,6 +236,17 @@ Text adaptations (semantics preserved, claims made truthful for this codebase):
   recommendation.
 - workflow, web, goal, jobs, terminal, subagent, and structured-output
   paragraphs are DSH's text adapted to ZeoKeel tool names.
+- `tool:ralph` is DSH's `TOOL_RALPH` (2700) guidance adapted to the tool
+  ZeoKeel registers: the loop is experimental and not a self-test mechanism,
+  keeps the default 3-round budget visible, and reports cancellation as a
+  structured `cancelled` result.
+- `harness:self-knowledge` has no DSH counterpart: it tells the model to answer
+  capability questions from the runtime context and the visible tool list,
+  not by building a team/Ralph/workflow self-test harness, and to treat
+  workspace reports and probe logs as historical data.
+- `team:policy` keeps DSH's shared-filesystem facts but tightens the action
+  guidance: teammates are only started when the user asks for a team or the
+  task clearly needs concurrent work, never to test a feature.
 - plan policy is authored here because DSH takes it from deployment
   configuration; team policy is a concise summary of DSH's experimental team
   guidance.

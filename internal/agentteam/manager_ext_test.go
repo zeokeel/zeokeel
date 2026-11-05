@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"testing"
+	"time"
 )
 
 func TestSpawnBatchIsAtomicAndHonorsLimit(t *testing.T) {
@@ -196,5 +197,126 @@ func TestSnapshotAndMemberLookup(t *testing.T) {
 	}
 	if _, err := mgr.Member("missing"); !errors.Is(err, ErrUnknownTarget) {
 		t.Fatalf("Member missing error = %v, want ErrUnknownTarget", err)
+	}
+}
+
+func TestMemberCarriesSessionID(t *testing.T) {
+	runner := &scriptedRunner{}
+	mgr := New(Config{Runner: runner})
+	defer mgr.Close()
+
+	spawned, err := mgr.Spawn(context.Background(), SpawnRequest{Task: "scoped task", SessionID: "session-a"})
+	if err != nil {
+		t.Fatalf("Spawn: %v", err)
+	}
+	if spawned.SessionID != "session-a" {
+		t.Fatalf("spawned.SessionID = %q, want session-a", spawned.SessionID)
+	}
+	if _, err := mgr.Wait(waitCtx(t), spawned.ID); err != nil {
+		t.Fatalf("Wait: %v", err)
+	}
+	members := mgr.Members()
+	if len(members) != 1 || members[0].SessionID != "session-a" {
+		t.Fatalf("Members = %+v, want one member scoped to session-a", members)
+	}
+}
+
+func TestStopSessionCancelsOnlyThatSessionsMembers(t *testing.T) {
+	runner := &blockingRunner{started: make(chan struct{}, 4)}
+	mgr := New(Config{Runner: runner})
+	defer mgr.Close()
+	ctx := context.Background()
+
+	first, err := mgr.Spawn(ctx, SpawnRequest{Task: "first", SessionID: "session-a"})
+	if err != nil {
+		t.Fatalf("Spawn first: %v", err)
+	}
+	second, err := mgr.Spawn(ctx, SpawnRequest{Task: "second", SessionID: "session-b"})
+	if err != nil {
+		t.Fatalf("Spawn second: %v", err)
+	}
+	for i := 0; i < 2; i++ {
+		select {
+		case <-runner.started:
+		case <-time.After(5 * time.Second):
+			t.Fatalf("member %d did not start", i)
+		}
+	}
+
+	if stopped := mgr.StopSession("session-a"); stopped != 1 {
+		t.Fatalf("StopSession(session-a) = %d, want 1", stopped)
+	}
+	gotFirst, err := mgr.Member(first.ID)
+	if err != nil {
+		t.Fatalf("Member first: %v", err)
+	}
+	if gotFirst.Status != StatusInterrupted {
+		t.Fatalf("first status = %q, want interrupted", gotFirst.Status)
+	}
+	gotSecond, err := mgr.Member(second.ID)
+	if err != nil {
+		t.Fatalf("Member second: %v", err)
+	}
+	if gotSecond.Status != StatusRunning {
+		t.Fatalf("second status = %q, want running (another session must not be stopped)", gotSecond.Status)
+	}
+
+	if stopped := mgr.StopSession("session-b"); stopped != 1 {
+		t.Fatalf("StopSession(session-b) = %d, want 1", stopped)
+	}
+	gotSecond, err = mgr.Member(second.ID)
+	if err != nil {
+		t.Fatalf("Member second after stop: %v", err)
+	}
+	if gotSecond.Status != StatusInterrupted {
+		t.Fatalf("second status = %q, want interrupted", gotSecond.Status)
+	}
+}
+
+func TestStopSessionDropsQueuedMessagesAndIsIdempotent(t *testing.T) {
+	runner := &blockingRunner{started: make(chan struct{}, 2)}
+	mgr := New(Config{Runner: runner})
+	defer mgr.Close()
+	ctx := context.Background()
+
+	spawned, err := mgr.Spawn(ctx, SpawnRequest{Task: "first", SessionID: "session-a"})
+	if err != nil {
+		t.Fatalf("Spawn: %v", err)
+	}
+	select {
+	case <-runner.started:
+	case <-time.After(5 * time.Second):
+		t.Fatal("member did not start")
+	}
+	if _, err := mgr.Send(spawned.ID, "queued follow-up"); err != nil {
+		t.Fatalf("Send: %v", err)
+	}
+
+	if stopped := mgr.StopSession("session-a"); stopped != 1 {
+		t.Fatalf("first StopSession = %d, want 1", stopped)
+	}
+	got, err := mgr.Member(spawned.ID)
+	if err != nil {
+		t.Fatalf("Member: %v", err)
+	}
+	if got.Status != StatusInterrupted || got.QueueLen != 0 {
+		t.Fatalf("member after StopSession = %+v, want interrupted with an empty queue", got)
+	}
+	if stopped := mgr.StopSession("session-a"); stopped != 0 {
+		t.Fatalf("second StopSession = %d, want 0 (idempotent)", stopped)
+	}
+	if stopped := mgr.StopSession("missing-session"); stopped != 0 {
+		t.Fatalf("StopSession(unknown) = %d, want 0", stopped)
+	}
+	if stopped := mgr.StopSession("  "); stopped != 0 {
+		t.Fatalf("StopSession(blank) = %d, want 0", stopped)
+	}
+}
+
+func TestStopSessionAfterCloseIsNoop(t *testing.T) {
+	mgr := New(Config{Runner: &blockingRunner{}})
+	mgr.Close()
+	if stopped := mgr.StopSession("session-a"); stopped != 0 {
+		t.Fatalf("StopSession after Close = %d, want 0", stopped)
 	}
 }

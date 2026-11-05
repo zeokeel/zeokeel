@@ -463,3 +463,39 @@ func TestTeamSpawnToolsCloseAfterManagerCloseIsIdempotent(t *testing.T) {
 		t.Fatalf("second close_team after manager close: %v", err)
 	}
 }
+
+func TestSpawnTeamScopesMembersToSession(t *testing.T) {
+	// Hold the fake runner open: a member that finishes before StopSession is
+	// completed, and StopSession only counts still-running members. The release
+	// channel keeps it running until the manager cancels its turn.
+	runner := &teamSpawnFakeRunner{release: make(chan struct{})}
+	mgr := agentteam.New(agentteam.Config{Runner: runner})
+	defer mgr.Close()
+	tools := teamSpawnTestTools(t, TeamSpawnConfig{Manager: mgr})
+
+	ctx := runtime.WithSessionID(context.Background(), "session-42")
+	raw, err := tools["spawn_team"].Invoke(ctx, json.RawMessage(`{"tasks":["alpha"]}`))
+	if err != nil {
+		t.Fatalf("spawn_team: %v", err)
+	}
+	var spawned teamSpawnResult
+	if err := json.Unmarshal([]byte(raw), &spawned); err != nil {
+		t.Fatalf("decode spawn_team: %v\n%s", err, raw)
+	}
+	if spawned.Count != 1 || spawned.Members[0].SessionID != "session-42" {
+		t.Fatalf("spawned = %+v, want one member scoped to session-42", spawned)
+	}
+
+	// The manager can stop the session's still-running members: the result's
+	// session id is the manager's own record, not just a copy in the tool output.
+	if stopped := mgr.StopSession("session-42"); stopped != 1 {
+		t.Fatalf("StopSession = %d, want 1", stopped)
+	}
+	member, err := mgr.Member(spawned.Members[0].ID)
+	if err != nil {
+		t.Fatalf("Member: %v", err)
+	}
+	if member.Status != agentteam.StatusInterrupted {
+		t.Fatalf("member status = %q, want interrupted", member.Status)
+	}
+}

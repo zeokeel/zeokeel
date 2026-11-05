@@ -10,6 +10,7 @@ import (
 	"github.com/egoist/mygo/ui"
 
 	"github.com/zeokeel/zeokeel/internal/session"
+	"github.com/zeokeel/zeokeel/internal/state"
 )
 
 // TestApprovalCardFitsMinimumWindow covers the 900x600 approval card: the
@@ -403,6 +404,10 @@ func TestLiveSessionUsageNotPinnedToRightEdge(t *testing.T) {
 	h := newLiveApp(t, &shellProvider{})
 	h.app.Language = LangEN
 	h.app.Screen = Session
+	// Give the session usage so the footer renders (it hides before any turn).
+	usageSnap := state.NewSnapshot()
+	usageSnap.Usage = state.Usage{Turns: 1, Steps: 2, In: 100, Out: 20, CacheHit: 50}
+	h.app.SetSnapshot(usageSnap)
 	tt := ui.NewTester(h.app.View, 1600, 1000)
 	tt.Frame()
 	usage, ok := tt.Find("Session usage")

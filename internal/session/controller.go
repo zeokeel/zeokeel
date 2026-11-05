@@ -136,7 +136,12 @@ type Controller struct {
 	// became pending for any session, including sessions that are not current.
 	// It runs once per call id from the turn goroutine. Guarded by mu.
 	onApprovalRequested ApprovalRequestedHook
-	closed              bool
+	// teamStopper, when non-nil, cancels the asynchronous team members a
+	// session spawned. The shell calls the same hook after its own Stop; this
+	// one makes a non-UI Stop (API, automation, programmatic cancellation) stop
+	// the team too. Guarded by mu; called without it held.
+	teamStopper func(sessionID string)
+	closed      bool
 
 	// Automatic session titles. titleGen is the configured generator (nil
 	// disables the feature), autoTitles marks sessions this Controller already
@@ -495,6 +500,15 @@ func (c *Controller) OpenSession(ctx context.Context, id string) (*state.Snapsho
 	c.mu.Unlock()
 
 	if snap == nil {
+		// A previous process may have died mid-turn: close the open tail before
+		// replaying so the reopened session is not stuck "running" with a
+		// spinning tool card.
+		if err := c.recoverInterruptedSession(sess, nil); err != nil {
+			return nil, err
+		}
+		if refreshed, err := c.store.GetSession(id); err == nil {
+			sess = refreshed
+		}
 		loaded, err := c.buildSnapshot(sess)
 		if err != nil {
 			return nil, err
@@ -657,6 +671,23 @@ func (c *Controller) submit(ctx context.Context, sessionID, text string, automat
 		return fmt.Errorf("session: submit: %w", err)
 	}
 
+	// A session this controller has never loaded may be the tail of a process
+	// that died mid-turn. Repair it now (the just-reserved turn is allowed as
+	// the only active turn) so the view and the new turn's history see a closed
+	// tail, without adding work to the pre-reserve window the goal driver relies
+	// on to hand off turns quickly.
+	c.mu.Lock()
+	hasView := c.views[sessionID] != nil
+	c.mu.Unlock()
+	if !hasView {
+		if err := c.recoverInterruptedSession(sess, t); err != nil {
+			c.abortTurn(t)
+			return fmt.Errorf("session: submit: recover interrupted turn: %w", err)
+		}
+		if refreshed, rerr := c.store.GetSession(sessionID); rerr == nil {
+			sess = refreshed
+		}
+	}
 	if err := c.ensureView(sess); err != nil {
 		c.abortTurn(t)
 		return err
@@ -906,7 +937,10 @@ func (c *Controller) recordToolCall(sessionID string, ev state.Event) {
 		})
 	case state.ToolEnd:
 		status := "done"
-		if e.IsError {
+		switch {
+		case e.Cancelled:
+			status = "cancelled"
+		case e.IsError:
 			status = "error"
 		}
 		_ = c.store.FinishToolCall(e.CallID, e.Result, status, time.Now().UTC())
@@ -1350,11 +1384,16 @@ func (c *Controller) persistDrafts(t *turn) {
 			continue
 		}
 		text := d.text.String()
-		reasoning := d.reasoning.String()
-		if text == "" && reasoning == "" {
+		// A draft without visible text is a leftover from a stopped or failed
+		// turn that only produced reasoning. Persisting it used to leave an
+		// empty assistant row that polluted the export and the next turn's
+		// history; the reasoning stays visible in the Trajectory from its
+		// events, so the row is skipped.
+		if strings.TrimSpace(text) == "" {
 			d.saved = true
 			continue
 		}
+		reasoning := d.reasoning.String()
 		msgID := d.msgID
 		if msgID == "" {
 			msgID = newID()
@@ -1396,10 +1435,15 @@ func (c *Controller) persistSessionStatus(t *turn, phase state.Phase) {
 func (c *Controller) finishTurn(t *turn) {
 	if !t.terminalApplied.Load() {
 		phase := state.PhaseIdle
-		if !t.stopped.Load() && t.failed.Load() {
+		reason := state.ReasonNone
+		stopped := t.stopped.Load() || (t.ctx != nil && t.ctx.Err() != nil)
+		if !stopped && t.failed.Load() {
 			phase = state.PhaseFailed
+			reason = state.ReasonFailed
+		} else if stopped {
+			reason = state.ReasonStopped
 		}
-		c.forward(t, state.Status{Phase: phase})
+		c.forward(t, state.Status{Phase: phase, Reason: reason})
 	}
 	c.persistDrafts(t)
 	if !t.statusPersisted {
@@ -1470,9 +1514,19 @@ func (c *Controller) Stop() {
 		c.mu.Unlock()
 		return
 	}
-	if c.currentID == "" {
+	sessionID := c.currentID
+	if sessionID == "" {
 		c.mu.Unlock()
 		return
+	}
+	// A session's asynchronous team outlives the turn slot alone (the members
+	// run in the team manager, not as tools of this turn), so every Stop
+	// request stops them too. It runs off the goroutine and without mu held
+	// because stopping members waits for them to settle; the shell's Stop path
+	// calls the same hook, and the manager tolerates a repeated StopSession.
+	stopper := c.teamStopper
+	if stopper != nil {
+		go stopper(sessionID)
 	}
 	// Remember the Stop even when the turn slot is already empty or terminal:
 	// the goal driver may be between deleting the finished turn and submitting
@@ -1500,7 +1554,7 @@ func (c *Controller) Stop() {
 	snap := c.views[t.sessionID]
 	var next *state.Snapshot
 	if snap != nil {
-		applied := state.Apply(snap, state.Status{Phase: state.PhaseIdle})
+		applied := state.Apply(snap, state.Status{Phase: state.PhaseIdle, Reason: state.ReasonStopped})
 		if applied.SessionID == "" {
 			cp := *applied
 			cp.SessionID = t.sessionID
@@ -1692,6 +1746,98 @@ func (c *Controller) ensureWorkspace() (string, error) {
 	return w.ID, nil
 }
 
+// terminalStoreStatus reports whether a persisted session status already closes
+// the latest turn.
+func terminalStoreStatus(status store.SessionStatus) bool {
+	switch status {
+	case store.SessionIdle, store.SessionFailed:
+		return true
+	default:
+		return false
+	}
+}
+
+// terminalToolCallStatus reports whether a persisted tool call already has an
+// end row.
+func terminalToolCallStatus(status string) bool {
+	switch strings.ToLower(strings.TrimSpace(status)) {
+	case "done", "error", "cancelled", "denied":
+		return true
+	default:
+		return false
+	}
+}
+
+// recoveredToolResult is the model-visible result written for a call that a
+// stopped or crashed process left open. It mirrors DSH's conservative
+// TOOL_OUTCOME_UNKNOWN wording: verify side effects before retrying.
+const recoveredToolResult = "Interrupted before the tool call finished; its outcome is unknown. Retry only if the operation is read-only or idempotent; verify external state first if it may have side effects."
+
+// recoverInterruptedSession repairs the tail of a session whose latest turn was
+// left open by a stopped or crashed process. It is the ZeoKeel counterpart of
+// DSH's interrupted-turn closers: every open tool call gets an error result (so
+// no card spins forever and the next turn's history has no dangling call) and
+// the turn is closed idle with ReasonInterrupted.
+//
+// A no-op when a live turn owns the session. Cold loads (OpenSession/ensureView)
+// and new submissions call it, so a reopened crashed session never shows a
+// phantom "running" phase, a spinning tool card, or an unanswered call.
+// mine is the turn the caller just reserved for this session, or nil when
+// called on a cold open. Any other active turn means the session is live and
+// must not be repaired.
+func (c *Controller) recoverInterruptedSession(sess *store.Session, mine *turn) error {
+	if sess == nil || strings.TrimSpace(sess.ID) == "" {
+		return nil
+	}
+	c.mu.Lock()
+	active := c.turns[sess.ID]
+	c.mu.Unlock()
+	if active != nil && active != mine {
+		return nil
+	}
+
+	calls, err := c.store.ToolCallsForSession(sess.ID)
+	if err != nil {
+		return fmt.Errorf("session: recover interrupted turn: %w", err)
+	}
+	drained := false
+	for _, call := range calls {
+		if terminalToolCallStatus(call.Status) {
+			continue
+		}
+		drained = true
+		if err := c.appendEvent(sess.ID, state.ToolEnd{
+			CallID:   call.ID,
+			Result:   recoveredToolResult,
+			IsError:  true,
+			Duration: time.Since(call.StartedAt),
+		}); err != nil {
+			return fmt.Errorf("session: recover interrupted turn: close tool %q: %w", call.ID, err)
+		}
+		_ = c.store.FinishToolCall(call.ID, recoveredToolResult, "error", time.Now().UTC())
+	}
+	if !drained && terminalStoreStatus(sess.Status) {
+		return nil
+	}
+
+	phase := state.PhaseIdle
+	reason := state.ReasonInterrupted
+	if sess.Status == store.SessionFailed {
+		// Preserve a recorded failure; only the dangling calls needed repair.
+		phase = state.PhaseFailed
+		reason = state.ReasonFailed
+	}
+	if err := c.appendEvent(sess.ID, state.Status{Phase: phase, Reason: reason}); err != nil {
+		return fmt.Errorf("session: recover interrupted turn: append status: %w", err)
+	}
+	if phase == state.PhaseIdle {
+		if _, err := c.store.UpdateSessionStatus(sess.ID, store.SessionIdle); err != nil {
+			return fmt.Errorf("session: recover interrupted turn: update session status: %w", err)
+		}
+	}
+	return nil
+}
+
 // ensureView loads a session's view if this Controller has not seen it yet.
 func (c *Controller) ensureView(sess *store.Session) error {
 	c.mu.Lock()
@@ -1700,7 +1846,6 @@ func (c *Controller) ensureView(sess *store.Session) error {
 	if snap != nil {
 		return nil
 	}
-
 	loaded, err := c.buildSnapshot(sess)
 	if err != nil {
 		return err
@@ -2839,6 +2984,16 @@ func (c *Controller) GoalRounds(sessionID string) int {
 func (c *Controller) SetGoalDriver(d *GoalRoundDriver) {
 	c.mu.Lock()
 	c.goalDriver = d
+	c.mu.Unlock()
+}
+
+// SetTeamStopper registers the hook that cancels a session's asynchronous team
+// members (spawn_team) when Stop is requested, including stops that come from
+// outside the UI (API, automation, programmatic cancellation). Nil disables the
+// hook. The app wires it to the agent-team manager's StopSession.
+func (c *Controller) SetTeamStopper(fn func(sessionID string)) {
+	c.mu.Lock()
+	c.teamStopper = fn
 	c.mu.Unlock()
 }
 

@@ -2,6 +2,7 @@ package shell
 
 import (
 	"testing"
+	"time"
 
 	"github.com/egoist/mygo/ui"
 
@@ -100,5 +101,52 @@ func TestTeamGoalBannerAndPanel(t *testing.T) {
 	tt.Frame()
 	if !tt.HasText("100%") {
 		t.Fatalf("progress was not clamped: %q", tt.Texts())
+	}
+}
+
+// TestTeamPanelShowsLiveAsyncRoster proves the Team panel merges the app's
+// live asynchronous team members (spawn_team) with the synchronous subagent
+// calls, and that stopping a turn also asks the app to stop the session's
+// asynchronous members.
+func TestTeamPanelShowsLiveAsyncRoster(t *testing.T) {
+	h := newLiveApp(t, &shellProvider{})
+	h.ctrl.SetTeam([]tools.Teammate{{
+		CallID: "call-sub",
+		Name:   "researcher",
+		Task:   "check the failing tests",
+		Status: tools.SubagentStatusCompleted,
+	}})
+
+	async := []tools.Teammate{
+		{CallID: "team:agent-1", Name: "worker", Task: "background task", Status: "running"},
+		{CallID: "team:agent-2", Name: "queued-worker", Task: "later task", Status: "queued"},
+	}
+	h.app.SetTeamRoster(func() []tools.Teammate { return async })
+
+	stopped := make(chan string, 1)
+	h.app.SetTeamStop(func(sessionID string) { stopped <- sessionID })
+
+	tt := ui.NewTester(renderTeamPreview(h.app), 900, 600)
+	tt.Frame()
+	for _, want := range []string{"researcher", "worker", "running", "queued-worker", "queued"} {
+		if !tt.HasText(want) {
+			t.Fatalf("live team panel missing %q: %q", want, tt.Texts())
+		}
+	}
+	if !tt.HasText("3") {
+		t.Fatalf("team count does not include the asynchronous members: %q", tt.Texts())
+	}
+
+	// stopTurn stops the controller turn and hands the session id to the app's
+	// team-stop hook off the view goroutine.
+	id := h.ctrl.CurrentSessionID()
+	h.app.stopTurn()
+	select {
+	case got := <-stopped:
+		if got != id {
+			t.Fatalf("team stop session = %q, want %q", got, id)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("stopTurn did not call the team stop hook")
 	}
 }

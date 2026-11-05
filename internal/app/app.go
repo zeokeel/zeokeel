@@ -16,6 +16,7 @@ import (
 	"github.com/egoist/mygo"
 	"github.com/egoist/mygo/ui"
 
+	"github.com/zeokeel/zeokeel/internal/agentteam"
 	"github.com/zeokeel/zeokeel/internal/automation"
 	"github.com/zeokeel/zeokeel/internal/session"
 	"github.com/zeokeel/zeokeel/internal/shell"
@@ -71,6 +72,13 @@ type app struct {
 	// when a rebuild replaces it.
 	buildMu sync.Mutex
 	bundle  *AgentBundle
+
+	// team is the async team manager of the current bundle (nil when Agent
+	// Teams is off). The shell reads it for the live roster and stops the
+	// current session's members after the user stops a turn; the bundle Close
+	// closes it when a rebuild replaces the agent.
+	teamMu sync.Mutex
+	team   *agentteam.Manager
 
 	// Session-lifetime tool state. A rebuild must not forget the model's
 	// working directory, terminals or background jobs, so the app owns them
@@ -135,7 +143,17 @@ func (a *app) run() error {
 		// prevent the window and tray from starting; the shell then runs in
 		// its static, history-free mode.
 		a.startServices()
+		// Non-UI stops (API, automation, programmatic cancellation) also stop
+		// the session's asynchronous team members; the shell's own Stop path
+		// calls the same app hook.
+		if a.services != nil {
+			a.services.SetTeamStopper(a.stopTeamSession)
+		}
 		shellApp := &shell.App{Ctrl: a.services}
+		// The Team panel is a live roster of the session's asynchronous team
+		// members, and stopping a turn also stops the members it spawned.
+		shellApp.SetTeamRoster(a.teamRoster)
+		shellApp.SetTeamStop(a.stopTeamSession)
 		a.shellApp = shellApp
 		// Production save-dialog seam for "Download session log". Tests inject
 		// their own path chooser; without a desktop app the shell falls back to
@@ -238,6 +256,7 @@ func (a *app) startServices() {
 	})
 	if err != nil {
 		log.Printf("zeokeel: session services unavailable, using static UI: %v", err)
+		a.adoptTeamManager(nil)
 		return
 	}
 	a.services = ctrl
@@ -307,6 +326,65 @@ func (a *app) workingDirState(root string) *tools.WorkingDirectoryState {
 	return state
 }
 
+// adoptTeamManager records the async team manager of the current bundle. The
+// previous manager is closed by the replaced bundle's Close.
+func (a *app) adoptTeamManager(m *agentteam.Manager) {
+	a.teamMu.Lock()
+	a.team = m
+	a.teamMu.Unlock()
+}
+
+// teamManager returns the current bundle's async team manager, or nil.
+func (a *app) teamManager() *agentteam.Manager {
+	a.teamMu.Lock()
+	defer a.teamMu.Unlock()
+	return a.team
+}
+
+// teamRoster maps the current session's asynchronous team members to the
+// shell's teammate rows, so the Team panel is a live roster instead of only
+// the completed synchronous subagent calls folded into the session.
+func (a *app) teamRoster() []tools.Teammate {
+	mgr := a.teamManager()
+	if mgr == nil || a.services == nil {
+		return nil
+	}
+	return teammatesForSession(mgr.Members(), a.services.CurrentSessionID())
+}
+
+// teammatesForSession filters the manager's members to sessionID and adapts
+// them to the shell's display type.
+func teammatesForSession(members []agentteam.Member, sessionID string) []tools.Teammate {
+	sessionID = strings.TrimSpace(sessionID)
+	if sessionID == "" || len(members) == 0 {
+		return nil
+	}
+	out := make([]tools.Teammate, 0, len(members))
+	for _, member := range members {
+		if member.SessionID != sessionID {
+			continue
+		}
+		out = append(out, tools.Teammate{
+			CallID:    "team:" + member.ID,
+			Name:      member.Name,
+			Task:      member.Task,
+			Status:    string(member.Status),
+			Output:    member.Output,
+			UpdatedAt: member.UpdatedAt,
+		})
+	}
+	return out
+}
+
+// stopTeamSession cancels and waits for the asynchronous team members a
+// session spawned. The shell calls it after Controller.Stop, off the UI
+// goroutine because it waits for the members to unwind.
+func (a *app) stopTeamSession(sessionID string) {
+	if mgr := a.teamManager(); mgr != nil {
+		mgr.StopSession(sessionID)
+	}
+}
+
 // toolOptions assembles the reusable state for one registry build. Managers
 // are reused only for the same root and output cap; changing either closes
 // them and starts fresh, so settings still take effect on the next build.
@@ -340,6 +418,7 @@ func (a *app) toolOptions(st *store.Store, root, permission string) registryOpti
 		opts.Terminal = a.termMgr
 		opts.Jobs = a.jobsMgr
 	}
+	opts.AdoptTeam = a.adoptTeamManager
 	opts.AdoptManagers = func(state *tools.WorkingDirectoryState, term *tools.TerminalManager, jobs *tools.JobsManager) {
 		if state != nil {
 			a.dirMu.Lock()
@@ -417,6 +496,7 @@ func (a *app) rebuildAgent(reason string) error {
 	}
 	permission := a.services.SessionPermissionOrDefault(a.services.CurrentSessionID())
 	opts := a.toolOptions(a.services.Store(), root, permission)
+	oldTeam := a.teamManager()
 	// Build the agent with the current session's preset so its very first
 	// topology and prompt already match; ModeFunc keeps the prompt gate in sync
 	// when SetMode switches the agent later.
@@ -424,15 +504,27 @@ func (a *app) rebuildAgent(reason string) error {
 	opts.ModeFunc = a.services.Mode
 	bundle, err := buildAgentWithOptions(a.services.Store(), root, DefaultInstruction, opts)
 	if err != nil {
+		// A failed build may have created and already closed a manager; restore
+		// the roster of the still-live old bundle.
+		a.adoptTeamManager(oldTeam)
 		return err
 	}
 	if bundle == nil {
 		// No provider key (or the last model was removed): clear the agent so
 		// Submit reports ErrNoAgent instead of running with stale credentials.
+		// Close the replaced bundle (MCP sessions and the team manager) so its
+		// teammates cannot keep running behind a dead agent.
+		old := a.bundle
 		a.bundle = nil
+		a.adoptTeamManager(nil)
 		a.services.SetAgent(nil, nil)
 		a.services.SetTitleGenerator(nil)
 		a.services.SetBuiltPermission(permission)
+		if old != nil && old.Close != nil {
+			if cerr := old.Close(); cerr != nil {
+				log.Printf("zeokeel: closing replaced agent bundle (%s): %v", reason, cerr)
+			}
+		}
 		return nil
 	}
 	old := a.bundle

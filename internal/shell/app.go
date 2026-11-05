@@ -11,6 +11,7 @@ import (
 	"github.com/zeokeel/zeokeel/internal/design"
 	"github.com/zeokeel/zeokeel/internal/session"
 	"github.com/zeokeel/zeokeel/internal/state"
+	"github.com/zeokeel/zeokeel/internal/tools"
 )
 
 // Screen identifies the top-level view.
@@ -41,6 +42,13 @@ type App struct {
 	// Ctrl is the live session controller; nil runs the static demo shell
 	// (used by the pixel tests and before services start).
 	Ctrl *session.Controller
+	// teamRoster returns the current session's live asynchronous team members
+	// (spawn_team members). nil keeps the old behavior of showing only the
+	// synchronous subagent calls the controller folded into the session.
+	teamRoster func() []tools.Teammate
+	// teamStop cancels the asynchronous team members a session spawned; nil
+	// means stopping a turn does not touch the team (static/test shells).
+	teamStop func(sessionID string)
 	// draft is the composer text of the screen currently shown. Live drafts
 	// are scoped per surface: drafts keeps one buffer per session id and
 	// homeDraft keeps the Home/new-task buffer, so switching sessions never

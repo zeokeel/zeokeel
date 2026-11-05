@@ -60,6 +60,9 @@ type toolEndPayload struct {
 	Result     string `json:"result"`
 	IsError    bool   `json:"is_error"`
 	DurationNS int64  `json:"duration_ns"`
+	// Cancelled marks a call closed by the turn ending rather than by a real
+	// result. Omitted when false so old traces replay unchanged.
+	Cancelled bool `json:"cancelled,omitempty"`
 }
 
 type approvalPayload struct {
@@ -84,6 +87,10 @@ type usagePayload struct {
 
 type statusPayload struct {
 	Phase string `json:"phase"`
+	// Reason explains a terminal phase ("stopped", "failed", "interrupted").
+	// Omitted for a normal completion and for events written before the field
+	// existed, so old traces replay unchanged.
+	Reason string `json:"reason,omitempty"`
 }
 
 type errorPayload struct {
@@ -190,6 +197,7 @@ func encodeEvent(ev state.Event) (store.Event, error) {
 			Result:     e.Result,
 			IsError:    e.IsError,
 			DurationNS: int64(e.Duration),
+			Cancelled:  e.Cancelled,
 		}
 	case state.ApprovalRequest:
 		typ = EventApprovalRequest
@@ -212,7 +220,7 @@ func encodeEvent(ev state.Event) (store.Event, error) {
 		}
 	case state.Status:
 		typ = EventStatus
-		payload = statusPayload{Phase: string(e.Phase)}
+		payload = statusPayload{Phase: string(e.Phase), Reason: string(e.Reason)}
 	case state.Error:
 		typ = EventError
 		payload = errorPayload{MsgID: e.MsgID, Text: errorText(e.Err)}
@@ -257,10 +265,11 @@ func decodeEvent(rec store.Event) (ev state.Event, ok bool) {
 			return nil, false
 		}
 		return state.ToolEnd{
-			CallID:   p.CallID,
-			Result:   p.Result,
-			IsError:  p.IsError,
-			Duration: time.Duration(p.DurationNS),
+			CallID:    p.CallID,
+			Result:    p.Result,
+			IsError:   p.IsError,
+			Duration:  time.Duration(p.DurationNS),
+			Cancelled: p.Cancelled,
 		}, true
 	case EventApprovalRequest:
 		var p approvalPayload
@@ -292,7 +301,7 @@ func decodeEvent(rec store.Event) (ev state.Event, ok bool) {
 		if json.Unmarshal(rec.Payload, &p) != nil {
 			return nil, false
 		}
-		return state.Status{Phase: state.Phase(p.Phase)}, true
+		return state.Status{Phase: state.Phase(p.Phase), Reason: state.StatusReason(p.Reason)}, true
 	case EventError:
 		var p errorPayload
 		if json.Unmarshal(rec.Payload, &p) != nil {

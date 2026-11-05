@@ -210,21 +210,24 @@ func TestMarkdownPlainParagraphLineHeight(t *testing.T) {
 }
 
 func TestUsagePillsSegments(t *testing.T) {
+	// The running snapshot holds the counters from before this turn; the idle
+	// snapshot adds this turn's output. The completion rate covers the growth.
 	snap := state.NewSnapshot()
 	snap.Phase = state.PhaseRunning
-	snap.Usage = state.Usage{Turns: 3, Steps: 5, In: 200, Out: 100, CacheHit: 50}
+	snap.Usage = state.Usage{Turns: 2, Steps: 3, In: 150, Out: 50, CacheHit: 40}
 	h := newLiveSnapshotApp(t, Session, snap)
 	tt := ui.NewTester(h.app.View, 1600, 1000)
 	tt.Advance(2 * time.Second)
 
 	idle := *snap
 	idle.Phase = state.PhaseIdle
+	idle.Usage = state.Usage{Turns: 3, Steps: 5, In: 200, Out: 100, CacheHit: 50}
 	h.app.SetSnapshot(&idle)
 	tt.Frame()
 
 	for _, want := range []string{
 		"3 turns", "5 steps", "100 out tok",
-		"Completed in 2.0s", "50 tok/s", "cache 25%",
+		"Completed in 2.0s", "25 tok/s", "cache 25%",
 	} {
 		if !tt.HasText(want) {
 			t.Fatalf("usage pill %q missing; texts: %v", want, tt.Texts())

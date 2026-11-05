@@ -112,19 +112,23 @@ func TestToolSummaryCollapsesAndExpandsCards(t *testing.T) {
 }
 
 func TestLiveUsageFooterCompletedTokPerSecondAndCache(t *testing.T) {
+	// The running snapshot holds the usage from before this turn; the idle
+	// snapshot carries the cumulative totals after it. The completion rate must
+	// use only the growth since the running phase began.
 	snap := state.NewSnapshot()
 	snap.Phase = state.PhaseRunning
-	snap.Usage = state.Usage{Turns: 1, Steps: 1, In: 200, Out: 100, CacheHit: 50}
+	snap.Usage = state.Usage{Turns: 1, Steps: 1, In: 150, Out: 50, CacheHit: 40}
 	h := newLiveSnapshotApp(t, Session, snap)
 	tt := ui.NewTester(h.app.View, 1600, 1000)
 	tt.Advance(2 * time.Second)
 
 	idle := *snap
 	idle.Phase = state.PhaseIdle
+	idle.Usage = state.Usage{Turns: 2, Steps: 3, In: 200, Out: 100, CacheHit: 50}
 	h.app.SetSnapshot(&idle)
 	tt.Frame()
 
-	for _, want := range []string{"Completed in 2.0s", "50 tok/s", "cache 25%"} {
+	for _, want := range []string{"Completed in 2.0s", "25 tok/s", "cache 25%"} {
 		if !tt.HasText(want) {
 			t.Fatalf("usage footer missing %q: %v", want, tt.Texts())
 		}

@@ -19,12 +19,58 @@ func (a *App) goal() *tools.Goal {
 	return a.Ctrl.Goal()
 }
 
-// teammates returns the subagents the live session spawned, oldest first.
+// SetTeamRoster registers the app's live asynchronous team roster. The Team
+// panel appends those members to the synchronous subagent calls the controller
+// folded into the session, so spawn_team members appear while they run.
+func (a *App) SetTeamRoster(fn func() []tools.Teammate) { a.teamRoster = fn }
+
+// SetTeamStop registers the app's hook that cancels a session's asynchronous
+// team members after the user stops its turn. Nil keeps stopping local only.
+func (a *App) SetTeamStop(fn func(sessionID string)) { a.teamStop = fn }
+
+// teammates returns the live session's teammates: the completed synchronous
+// subagent calls first (oldest first), then the asynchronous team members from
+// the app's live roster. A member repeated by both sources is shown once.
 func (a *App) teammates() []tools.Teammate {
 	if a.Ctrl == nil {
 		return nil
 	}
-	return a.Ctrl.Team()
+	members := a.Ctrl.Team()
+	if a.teamRoster == nil {
+		return members
+	}
+	seen := make(map[string]bool, len(members))
+	for _, member := range members {
+		if member.CallID != "" {
+			seen[member.CallID] = true
+		}
+	}
+	live := a.teamRoster()
+	out := make([]tools.Teammate, 0, len(members)+len(live))
+	out = append(out, members...)
+	for _, member := range live {
+		if member.CallID != "" && seen[member.CallID] {
+			continue
+		}
+		out = append(out, member)
+	}
+	return out
+}
+
+// stopTurn stops the live session's turn and then stops the asynchronous team
+// members it spawned. The team stop runs off the view goroutine: it waits for
+// the members to settle, while Controller.Stop returns immediately.
+func (a *App) stopTurn() {
+	if a.Ctrl == nil {
+		return
+	}
+	sessionID := a.Ctrl.CurrentSessionID()
+	a.Ctrl.Stop()
+	if a.teamStop == nil || sessionID == "" {
+		return
+	}
+	stop := a.teamStop
+	go stop(sessionID)
 }
 
 // goalStatusLabel is the banner's status word.
@@ -111,9 +157,10 @@ func (a *App) teamGoalBanner(c *ui.Context, t *design.Tokens) {
 	})
 }
 
-// teamPanel lists the subagents the session spawned. It renders only when at
-// least one subagent tool result was folded into the session, matching the todo
-// panel's behavior. The header also carries the current agent mode.
+// teamPanel lists the teammates the session spawned: completed synchronous
+// subagent calls plus the app's live asynchronous team members. It renders
+// when either source has at least one member. The header also carries the
+// current agent mode.
 func (a *App) teamPanel(c *ui.Context, t *design.Tokens) {
 	members := a.teammates()
 	if len(members) == 0 {
@@ -144,14 +191,22 @@ func (a *App) teamPanel(c *ui.Context, t *design.Tokens) {
 	})
 }
 
-// teammateRow draws one subagent: a glyph, its name and status, and the task it
-// was given. The status word is the tool's own status ("completed").
+// teammateRow draws one teammate: a glyph, its name and status, and the task
+// it was given. The status word is the tool's or the team manager's own status
+// (completed, running, queued, failed, interrupted).
 func (a *App) teammateRow(c *ui.Context, t *design.Tokens, member tools.Teammate) {
 	th := t.Theme()
 	color := t.LabelTertiary
 	statusColor := t.LabelTertiary
-	if member.Status == tools.SubagentStatusCompleted {
+	switch member.Status {
+	case tools.SubagentStatusCompleted:
 		color, statusColor = t.Success, t.Success
+	case "running":
+		color, statusColor = t.Accent, t.Accent
+	case "failed":
+		color, statusColor = t.Danger, t.Danger
+	case "interrupted":
+		color, statusColor = t.WarningText, t.WarningText
 	}
 	card := ui.Column(c).FillWidth().Gap(th.Space(1)).
 		Padding(th.Space(2)).Radius(design.RadiusSM).

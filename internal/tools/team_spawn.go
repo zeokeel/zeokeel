@@ -183,13 +183,18 @@ func (t *spawnTeamTool) Invoke(ctx context.Context, args json.RawMessage) (strin
 	}
 	agent := strings.TrimSpace(in.Agent)
 	depth := runtime.SubagentDepth(ctx) + 1
+	// Members are scoped to the turn's session: Stop cancels a session's
+	// asynchronous members, so the manager must know who spawned them.
+	sessionID := runtime.SessionIDFromContext(ctx)
 	reqs := make([]agentteam.SpawnRequest, 0, len(in.Tasks))
 	for i, task := range in.Tasks {
 		task = strings.TrimSpace(task)
 		if task == "" {
 			return "", fmt.Errorf("spawn_team: tasks[%d] is empty", i)
 		}
-		reqs = append(reqs, agentteam.SpawnRequest{Task: task, Agent: agent, Depth: depth})
+		reqs = append(reqs, agentteam.SpawnRequest{
+			Task: task, Agent: agent, Depth: depth, SessionID: sessionID,
+		})
 	}
 	mgr, err := teamSpawnManager(t.mgr, t.Name())
 	if err != nil {

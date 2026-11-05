@@ -22,6 +22,11 @@ const (
 	WorkflowCompleted = "completed"
 	// WorkflowFailed is the overall status of a workflow with a failed step.
 	WorkflowFailed = "failed"
+	// WorkflowCancelled is the overall status of a workflow that stopped
+	// because its caller was cancelled (for example the user's Stop). The
+	// steps that already ran are kept; the in-flight and remaining steps are
+	// reported as cancelled/skipped instead of surfacing a bare context error.
+	WorkflowCancelled = "cancelled"
 )
 
 // Workflow step statuses.
@@ -31,8 +36,11 @@ const (
 	// WorkflowStepFailed is a step whose subagent failed.
 	WorkflowStepFailed = "failed"
 	// WorkflowStepSkipped is a step that never ran because an earlier one
-	// failed.
+	// failed or the workflow was cancelled.
 	WorkflowStepSkipped = "skipped"
+	// WorkflowStepCancelled is the step whose child agent was stopped by the
+	// caller's cancellation.
+	WorkflowStepCancelled = "cancelled"
 )
 
 // WorkflowStepResult is one step's outcome.
@@ -66,10 +74,12 @@ default. Each step runs as its own subagent task, sequentially; a failing step
 stops the run and the remaining steps are reported as skipped. "agent" is an
 optional child agent name applied to every step.
 
-The tool returns {"kind":"workflow","status":"completed|failed","steps":[
-{"index":0,"step":...,"status":"completed|failed|skipped","output":...}]}
-so you can see exactly which step failed and why. The depth cap is the same as
-the subagent tool.`
+The tool returns {"kind":"workflow","status":"completed|failed|cancelled","steps":[
+{"index":0,"step":...,"status":"completed|failed|skipped|cancelled","output":...}]}
+so you can see exactly which step failed and why. A cancelled run keeps the
+steps that already completed, marks the in-flight one cancelled and the
+remaining ones skipped, and reports status "cancelled". The depth cap is the
+same as the subagent tool.`
 
 // WorkflowConfig configures a WorkflowTool.
 type WorkflowConfig struct {
@@ -133,9 +143,6 @@ func (t *WorkflowTool) Invoke(ctx context.Context, args json.RawMessage) (string
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	if err := ctx.Err(); err != nil {
-		return "", err
-	}
 
 	var in workflowArgs
 	if len(strings.TrimSpace(string(args))) > 0 {
@@ -173,13 +180,40 @@ func (t *WorkflowTool) Invoke(ctx context.Context, args json.RawMessage) (string
 	agent := strings.TrimSpace(in.Agent)
 	results := make([]WorkflowStepResult, 0, len(steps))
 	status := WorkflowCompleted
+	cancelMessage := ""
 	for i, step := range steps {
+		if ctx.Err() != nil {
+			status = WorkflowCancelled
+			cancelMessage = fmt.Sprintf("Workflow was cancelled before step %d started.", i+1)
+			for j := i; j < len(steps); j++ {
+				results = append(results, WorkflowStepResult{
+					Index: j, Step: steps[j], Status: WorkflowStepSkipped,
+				})
+			}
+			break
+		}
 		res := WorkflowStepResult{Index: i, Step: step, Status: WorkflowStepCompleted}
 		result, runErr := runner.RunSubagent(ctx, runtime.SubagentRequest{
 			Task:  step,
 			Agent: agent,
 			Depth: depth,
 		})
+		if ctx.Err() != nil {
+			// The child agent was stopped by the caller's cancellation: keep
+			// the step visible as cancelled and skip the rest instead of
+			// reporting a failure the user did not cause.
+			status = WorkflowCancelled
+			cancelMessage = fmt.Sprintf("Workflow was cancelled during step %d; the child agent was stopped.", i+1)
+			res.Status = WorkflowStepCancelled
+			res.Error = "cancelled"
+			results = append(results, res)
+			for j := i + 1; j < len(steps); j++ {
+				results = append(results, WorkflowStepResult{
+					Index: j, Step: steps[j], Status: WorkflowStepSkipped,
+				})
+			}
+			break
+		}
 		if runErr != nil {
 			res.Status = WorkflowStepFailed
 			res.Error = runErr.Error()
@@ -203,9 +237,10 @@ func (t *WorkflowTool) Invoke(ctx context.Context, args json.RawMessage) (string
 	t.mu.Unlock()
 
 	out, err := json.Marshal(WorkflowResult{
-		Kind:   workflowKind,
-		Status: status,
-		Steps:  results,
+		Kind:    workflowKind,
+		Status:  status,
+		Steps:   results,
+		Message: cancelMessage,
 	})
 	if err != nil {
 		return "", fmt.Errorf("workflow: encode result: %w", err)

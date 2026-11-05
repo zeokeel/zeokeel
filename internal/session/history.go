@@ -241,19 +241,21 @@ func recordMessageLastSeq(seqs map[string]uint64, msgID string, storeSeq int64) 
 	seqs[msgID] = uint64(storeSeq)
 }
 
-// phaseFromStore maps a persisted session status to the UI phase.
+// phaseFromStore maps a persisted session status to the UI phase for a cold
+// snapshot. buildSnapshot only runs when this controller has no live view, so a
+// non-terminal row (running/waiting/paused) describes a turn that died with its
+// process, not a turn in flight: it is normalized to idle instead of reopening
+// as a phantom "running" session. Crash recovery
+// (recoverInterruptedSession) has usually closed the tail and written the
+// interrupted/reasoned status already; this default keeps a row that escaped
+// repair from lying to the UI.
 func phaseFromStore(status store.SessionStatus) state.Phase {
 	switch status {
-	case store.SessionRunning:
-		return state.PhaseRunning
-	case store.SessionWaitingApproval:
-		return state.PhaseWaitingApproval
-	case store.SessionWaitingUser:
-		return state.PhaseWaitingUser
-	case store.SessionPaused:
-		return state.PhasePaused
 	case store.SessionFailed:
 		return state.PhaseFailed
+	case store.SessionRunning, store.SessionWaitingApproval,
+		store.SessionWaitingUser, store.SessionPaused:
+		return state.PhaseIdle
 	default:
 		return state.PhaseIdle
 	}

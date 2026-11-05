@@ -204,9 +204,7 @@ func (a *App) runSlashCommand(line string) {
 		a.draft = ""
 		a.toastText("Cleared the composer draft", "已清空输入框草稿")
 	case "/stop":
-		if a.Ctrl != nil {
-			a.Ctrl.Stop()
-		}
+		a.stopTurn()
 		a.draft = ""
 	case "/file":
 		a.draft = ""

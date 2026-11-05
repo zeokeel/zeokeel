@@ -271,31 +271,78 @@ func TestApplyCopiesArguments(t *testing.T) {
 	}
 }
 
+// TestUsageSnapshot pins the cumulative usage contract: the snapshot adds
+// usage deltas (one per completed model call), ContextPct is a gauge, and the
+// whole-turn samples older traces carry (Turns=1 each) sum to the same totals.
 func TestUsageSnapshot(t *testing.T) {
 	var s *Snapshot
 	s = Apply(s, Status{Phase: PhaseRunning})
-	want := Usage{Turns: 2, Steps: 7, In: 1200, Out: 340, CacheHit: 900, ContextPct: 0.42}
-	s = Apply(s, want)
-
+	// The provider's first call: the turn counts here, tokens/cache arrive.
+	s = Apply(s, Usage{Turns: 1, Steps: 1, In: 900, Out: 200, CacheHit: 700, ContextPct: 0.42})
+	// The second call is another step with more tokens; the gauge moves on.
+	s = Apply(s, Usage{Steps: 1, In: 300, Out: 140, CacheHit: 200, ContextPct: 0.51})
+	want := Usage{Turns: 1, Steps: 2, In: 1200, Out: 340, CacheHit: 900, ContextPct: 0.51}
 	if s.Phase != PhaseRunning {
 		t.Fatalf("Phase = %q, want running", s.Phase)
 	}
 	if s.Usage != want {
-		t.Fatalf("Usage = %+v, want %+v", s.Usage, want)
+		t.Fatalf("Usage = %+v, want cumulative %+v", s.Usage, want)
 	}
-	if s.Seq != 2 {
-		t.Fatalf("Seq = %d, want 2", s.Seq)
+	// A zero ContextPct does not erase the last gauge reading; a new one replaces it.
+	s = Apply(s, Usage{Steps: 1})
+	if s.Usage.ContextPct != 0.51 || s.Usage.Steps != 3 {
+		t.Fatalf("gauge/step fold = %+v", s.Usage)
 	}
+	// Backward compatibility: an old trace's whole-turn sample (Turns=1,
+	// steps/tokens of that turn) sums exactly like a delta batch.
+	var legacy *Snapshot
+	legacy = Apply(legacy, Usage{Turns: 1, Steps: 3, In: 500, Out: 80})
+	legacy = Apply(legacy, Usage{Turns: 1, Steps: 4, In: 700, Out: 120})
+	if legacy.Usage.Turns != 2 || legacy.Usage.Steps != 7 || legacy.Usage.In != 1200 || legacy.Usage.Out != 200 {
+		t.Fatalf("legacy usage fold = %+v, want two-turn cumulative totals", legacy.Usage)
+	}
+}
 
-	// Usage is a full replacement, not an accumulation.
-	next := Apply(s, Usage{Steps: 8, In: 1300})
-	if next.Usage.In != 1300 || next.Usage.Turns != 0 || next.Usage.CacheHit != 0 {
-		t.Fatalf("Usage should be replaced: %+v", next.Usage)
+// TestStatusReasonFold pins the terminal reason the Chat view shows for a
+// stopped or crashed turn: a terminal Status records it, a new running turn
+// clears it, and it survives an arbitrary sequence (replay/reopen).
+func TestStatusReasonFold(t *testing.T) {
+	var s *Snapshot
+	s = Apply(s, Status{Phase: PhaseRunning})
+	if s.TurnReason != ReasonNone {
+		t.Fatalf("TurnReason while running = %q, want empty", s.TurnReason)
 	}
-
+	s = Apply(s, Status{Phase: PhaseIdle, Reason: ReasonStopped})
+	if s.Phase != PhaseIdle || s.TurnReason != ReasonStopped {
+		t.Fatalf("stopped fold = phase %q reason %q", s.Phase, s.TurnReason)
+	}
+	s = Apply(s, Status{Phase: PhaseRunning})
+	if s.TurnReason != ReasonNone {
+		t.Fatalf("a new turn did not clear TurnReason: %q", s.TurnReason)
+	}
+	s = Apply(s, Status{Phase: PhaseIdle, Reason: ReasonInterrupted})
+	if s.TurnReason != ReasonInterrupted {
+		t.Fatalf("interrupted fold = %q", s.TurnReason)
+	}
+	// Old traces have no reason: the zero value still reads as completed.
 	s = Apply(s, Status{Phase: PhaseIdle})
-	if s.Phase != PhaseIdle || s.Usage != want {
-		t.Fatalf("status/usage fold: phase=%q usage=%+v", s.Phase, s.Usage)
+	if s.TurnReason != ReasonNone {
+		t.Fatalf("reasonless terminal status = %q, want none", s.TurnReason)
+	}
+}
+
+// TestToolEndCancelledFold pins the closed-by-the-turn tool state: a cancelled
+// ToolEnd marks the call ToolCancelled without claiming it was an error.
+func TestToolEndCancelledFold(t *testing.T) {
+	var s *Snapshot
+	s = Apply(s, ToolStart{CallID: "c1", Name: "bash"})
+	s = Apply(s, ToolEnd{CallID: "c1", Result: "cancelled", Cancelled: true})
+	tool := s.Tools["c1"]
+	if tool.Status != ToolCancelled || tool.IsError {
+		t.Fatalf("cancelled tool = %+v, want status %q and no error flag", tool, ToolCancelled)
+	}
+	if tool.Result != "cancelled" {
+		t.Fatalf("cancelled tool result = %q", tool.Result)
 	}
 }
 

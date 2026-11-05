@@ -61,6 +61,11 @@ const (
 	// OrderTimeContext is an extension with no DSH constant: DSH appends time
 	// readings to request history, while ZeoKeel inlines the current clock.
 	OrderTimeContext = 150
+	// OrderSelfKnowledge is an extension with no DSH constant: it keeps the
+	// model from turning capability questions ("can feature X be used?") into
+	// self-built test harnesses of the product's own orchestration tools. It
+	// sits after the runtime context facts such answers should use.
+	OrderSelfKnowledge = 160
 
 	// OrderPlanPolicy matches DSH PLAN_POLICY (500).
 	OrderPlanPolicy = 500
@@ -112,6 +117,8 @@ const (
 	OrderToolGoal = 2400
 	// OrderToolWorkflow matches DSH TOOL_WORKFLOW (2600).
 	OrderToolWorkflow = 2600
+	// OrderToolRalph matches DSH TOOL_RALPH (2700).
+	OrderToolRalph = 2700
 	// OrderToolSubagent matches DSH TOOL_SUBAGENT (2800).
 	OrderToolSubagent = 2800
 	// OrderToolReport matches DSH TOOL_REPORT (2900).

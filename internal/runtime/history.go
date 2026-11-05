@@ -64,7 +64,11 @@ func messageToEino(msg Message) *schema.Message {
 		}
 		return userMessageWithAttachments(msg.Content, msg.Images)
 	case RoleAssistant:
-		if msg.Content == "" && msg.Reasoning == "" && len(msg.ToolCalls) == 0 {
+		// An assistant row with no visible text and no tool call is a draft
+		// leftover (a stopped/crashed turn persisted only reasoning). Sending it
+		// back to the model would inject an empty assistant turn, so drop it —
+		// the reasoning is still visible in the trajectory.
+		if msg.Content == "" && len(msg.ToolCalls) == 0 {
 			return nil
 		}
 		converted := schema.AssistantMessage(msg.Content, toolCallsToEino(msg.ToolCalls))

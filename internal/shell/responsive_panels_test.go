@@ -34,6 +34,9 @@ func seedDeepSession(t *testing.T, h *liveApp) {
 			MsgID: "msg-user", Role: state.RoleUser,
 			Text: "please audit the narrow layout",
 		}},
+		// The layout tests measure the footer, which hides itself before any
+		// turn has reported usage.
+		Usage: state.Usage{Turns: 1, Steps: 2, In: 100, Out: 20, CacheHit: 50},
 	})
 }
 

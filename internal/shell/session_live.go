@@ -264,6 +264,7 @@ func (a *App) liveTranscript(c *ui.Context, t *design.Tokens, snap *state.Snapsh
 						}
 						a.liveTools(c, t, snap)
 					}
+					a.turnOutcomeMarker(c, t, snap)
 					a.liveArtifacts(c, t)
 					if snap.LastError != nil {
 						ui.Text(c, a.T("session.error_prefix", snap.LastError.Text)).FontSize(13).TextColor(t.Danger)
@@ -298,6 +299,28 @@ func (a *App) liveTranscript(c *ui.Context, t *design.Tokens, snap *state.Snapsh
 	if st.pendingTurn > turns {
 		st.pendingTurn = 0
 	}
+}
+
+// turnOutcomeMarker is the transcript's closing line for a turn that did not
+// complete normally. A stopped or interrupted turn has no personal assistant
+// answer, so without this line the transcript would simply stop after the
+// prompt; a failed turn keeps its error line instead. The marker comes back
+// from the terminal Status reason, so it survives a reopen.
+func (a *App) turnOutcomeMarker(c *ui.Context, t *design.Tokens, snap *state.Snapshot) {
+	if snap == nil || snap.Phase == state.PhaseRunning {
+		return
+	}
+	var key string
+	switch snap.TurnReason {
+	case state.ReasonStopped:
+		key = "session.stopped"
+	case state.ReasonInterrupted:
+		key = "session.interrupted"
+	default:
+		return
+	}
+	ui.Text(c, a.T(key)).FontSize(12).FixedLineHeight(18).
+		TextColor(t.LabelTertiary).NoWrap()
 }
 
 // liveOrderedTranscript draws the Seq-ordered transcript body and returns the
@@ -610,7 +633,7 @@ func (a *App) liveRunButton(c *ui.Context, t *design.Tokens, snap *state.Snapsho
 			return
 		}
 		if running {
-			a.Ctrl.Stop()
+			a.stopTurn()
 			return
 		}
 		a.sendSessionDraft(c)
@@ -678,8 +701,9 @@ func (a *App) submitComposerText(c *ui.Context, text string, alternate bool) {
 		a.draft = ""
 		if interrupt {
 			// Stop marks the turn idle immediately; Submit waits for the
-			// cancelled turn to finish unwinding so it does not race it.
-			a.Ctrl.Stop()
+			// cancelled turn to finish unwinding so it does not race it. The
+			// turn's asynchronous team members are stopped with it.
+			a.stopTurn()
 			a.submitWhenIdle(id, text)
 			c.Toast(a.menuText("Stopped the turn and sent the message", "已停止当前回合并发送消息"))
 			return

@@ -23,6 +23,7 @@ func allTools() []string {
 		"session_search",
 		"goal",
 		"workflow",
+		"ralph",
 		"subagent",
 		"report",
 		"skill",
@@ -64,6 +65,7 @@ func TestOrdering(t *testing.T) {
 		"Instructions from: AGENTS.md",
 		"<available_skills>",
 		"Current time: 2026-11-04T16:09:00+08:00[Asia/Shanghai]",
+		"When the user asks whether a feature",
 		"Plan mode is active",
 		"Tokens prefixed with @",
 		"Check the [exit code: N]",
@@ -83,6 +85,7 @@ func TestOrdering(t *testing.T) {
 		"Use session_search",
 		"Track a multi-step objective with the goal tool",
 		"Use the workflow tool ONLY",
+		"`ralph` is an experimental foreground loop",
 		"`subagent` is blocking",
 		"report the final result",
 		"Use present when a separate file card",
@@ -343,6 +346,7 @@ func TestToolGating(t *testing.T) {
 		"Use the read_file tool",
 		"web_search results",
 		"web_fetch returns",
+		"`ralph` is an experimental foreground loop",
 		"`subagent` is blocking",
 		"Use present when",
 		"structured_output` tool",
@@ -408,6 +412,21 @@ func TestToolGating(t *testing.T) {
 	}
 	if !strings.Contains(skillsToolOut, "call the `skill` tool") {
 		t.Fatal("skill catalog did not name the registered skill tool")
+	}
+
+	ralphCtx := base
+	ralphCtx.Tools = []string{"ralph"}
+	ralphOut := Compose(ralphCtx)
+	if !strings.Contains(ralphOut, "`ralph` is an experimental foreground loop") {
+		t.Fatal("ralph section missing when the ralph tool is registered")
+	}
+	if strings.Contains(ralphOut, "Use the workflow tool ONLY") {
+		t.Fatal("workflow section appeared without a workflow tool")
+	}
+	workflowCtx := base
+	workflowCtx.Tools = []string{"workflow"}
+	if workflowOut := Compose(workflowCtx); strings.Contains(workflowOut, "`ralph` is an experimental foreground loop") {
+		t.Fatal("ralph section appeared without a ralph tool")
 	}
 
 	searchCtx := base
@@ -627,6 +646,7 @@ func TestEmptyAndNoToolsBehavior(t *testing.T) {
 		"Check the [exit code: N]",
 		"Use the read_file tool",
 		"web_search results",
+		"`ralph` is an experimental foreground loop",
 		"`subagent` is blocking",
 		"Use present when",
 		"structured_output`",
@@ -681,8 +701,8 @@ func TestAllSectionsNonEmptyInBothLocales(t *testing.T) {
 		t.Fatalf("Sections returned %d entries, registry has %d", len(sections), len(registry))
 	}
 	// docs/prompts.md maps every row; update this guard when adding a section.
-	if len(sections) != 43 {
-		t.Fatalf("registry has %d sections, want 43", len(sections))
+	if len(sections) != 45 {
+		t.Fatalf("registry has %d sections, want 45", len(sections))
 	}
 	seen := make(map[string]bool, len(sections))
 	lastOrder := -1 << 31

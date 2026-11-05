@@ -91,11 +91,11 @@ func TestMaxIterationsCompletesGracefully(t *testing.T) {
 	if got := strings.Join(tokenTexts(events), ""); got != "step ceiling 3 reached" {
 		t.Fatalf("assistant notice = %q, want the StepLimitNotice copy", got)
 	}
-	if usage, ok := lastUsage(events); !ok || usage.Steps != 3 {
-		t.Fatalf("usage = %+v, ok=%v; want 3 completed steps", usage, ok)
+	if usage, ok := sumUsage(events); !ok || usage.Steps != 3 {
+		t.Fatalf("cumulative usage = %+v, ok=%v; want 3 completed steps", usage, ok)
 	}
-	if _, isLast := events[len(events)-1].(state.Usage); !isLast {
-		t.Fatalf("last event = %T, want state.Usage", events[len(events)-1])
+	if _, isLast := events[len(events)-1].(state.Status); !isLast {
+		t.Fatalf("last event = %T, want the terminal state.Status", events[len(events)-1])
 	}
 
 	// History keeps the capped turn so a follow-up continues from here.
@@ -157,8 +157,8 @@ func TestMaxIterationsBelowLimitCompletesNormally(t *testing.T) {
 	if findErrorText(events) != "" {
 		t.Fatalf("normal completion emitted an error: %q", findErrorText(events))
 	}
-	if usage, ok := lastUsage(events); !ok || usage.Steps != 2 {
-		t.Fatalf("usage = %+v, ok=%v; want 2 steps", usage, ok)
+	if usage, ok := sumUsage(events); !ok || usage.Steps != 2 {
+		t.Fatalf("cumulative usage = %+v, ok=%v; want 2 steps", usage, ok)
 	}
 }
 
@@ -185,8 +185,8 @@ func TestMaxIterationsRealErrorStillFails(t *testing.T) {
 	if got := phases(events); len(got) == 0 || got[len(got)-1] != state.PhaseFailed {
 		t.Fatalf("final phase = %v, want failed", got)
 	}
-	if _, ok := lastUsage(events); ok {
-		t.Fatal("failed turn must not report usage")
+	if _, ok := sumUsage(events); ok {
+		t.Fatal("a turn that failed before any model call completed must not report usage")
 	}
 }
 
@@ -241,8 +241,8 @@ func TestMaxIterationsProviderPathCompletesGracefully(t *testing.T) {
 	if !strings.Contains(tokens, "step limit") || !strings.Contains(tokens, "2 steps") {
 		t.Fatalf("assistant notice = %q, want the default English notice naming 2 steps", tokens)
 	}
-	if usage, ok := lastUsage(events); !ok || usage.Steps != 2 {
-		t.Fatalf("usage = %+v, ok=%v; want 2 steps", usage, ok)
+	if usage, ok := sumUsage(events); !ok || usage.Steps != 2 {
+		t.Fatalf("cumulative usage = %+v, ok=%v; want 2 steps", usage, ok)
 	}
 }
 
@@ -306,8 +306,8 @@ func TestUnlimitedIterationsModelEndsTurn(t *testing.T) {
 	if got := strings.Join(tokenTexts(events), ""); got != "final answer" {
 		t.Fatalf("tokens = %q, want only the model's final answer (no step-limit notice)", got)
 	}
-	if usage, ok := lastUsage(events); !ok || usage.Steps != toolCalls+1 {
-		t.Fatalf("usage = %+v, ok=%v; want %d steps", usage, ok, toolCalls+1)
+	if usage, ok := sumUsage(events); !ok || usage.Steps != toolCalls+1 {
+		t.Fatalf("cumulative usage = %+v, ok=%v; want %d steps", usage, ok, toolCalls+1)
 	}
 }
 

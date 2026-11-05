@@ -6,6 +6,7 @@ import (
 	"errors"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/zeokeel/zeokeel/internal/runtime"
 )
@@ -123,4 +124,70 @@ func TestWorkflowToolRequiresRunner(t *testing.T) {
 	if _, err := tool.Invoke(context.Background(), json.RawMessage(`{"steps":["a"]}`)); err == nil {
 		t.Fatal("Invoke without a runner = nil error")
 	}
+}
+
+func TestWorkflowToolCancellation(t *testing.T) {
+	t.Run("before first step", func(t *testing.T) {
+		runner := &fakeSubagentRunner{byTask: map[string]runtime.SubagentResult{}}
+		tool := NewWorkflowTool(WorkflowConfig{Runner: runner})
+		ctx, cancel := context.WithCancel(context.Background())
+		cancel()
+
+		raw, err := tool.Invoke(ctx, json.RawMessage(`{"steps":["one","two"]}`))
+		if err != nil {
+			t.Fatalf("Invoke error = %v, want a structured cancelled result", err)
+		}
+		out := decodeWorkflowResult(t, raw)
+		if out.Status != WorkflowCancelled {
+			t.Fatalf("status = %q, want %q", out.Status, WorkflowCancelled)
+		}
+		if len(out.Steps) != 2 || out.Steps[0].Status != WorkflowStepSkipped || out.Steps[1].Status != WorkflowStepSkipped {
+			t.Fatalf("steps = %+v, want both skipped", out.Steps)
+		}
+		if len(runner.requests()) != 0 {
+			t.Fatalf("runner calls = %d, want 0", len(runner.requests()))
+		}
+	})
+
+	t.Run("during a step", func(t *testing.T) {
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+		runner := &ralphBlockingRunner{started: make(chan struct{}, 1)}
+		tool := NewWorkflowTool(WorkflowConfig{Runner: runner})
+
+		type result struct {
+			raw string
+			err error
+		}
+		done := make(chan result, 1)
+		go func() {
+			raw, err := tool.Invoke(ctx, json.RawMessage(`{"steps":["one","two"]}`))
+			done <- result{raw: raw, err: err}
+		}()
+		select {
+		case <-runner.started:
+		case <-time.After(5 * time.Second):
+			t.Fatal("workflow step did not start")
+		}
+		cancel()
+		var got result
+		select {
+		case got = <-done:
+		case <-time.After(5 * time.Second):
+			t.Fatal("cancelled workflow did not return")
+		}
+		if got.err != nil {
+			t.Fatalf("Invoke error = %v, want a structured cancelled result", got.err)
+		}
+		out := decodeWorkflowResult(t, got.raw)
+		if out.Status != WorkflowCancelled || len(out.Steps) != 2 {
+			t.Fatalf("result = %+v, want cancelled with two steps", out)
+		}
+		if out.Steps[0].Status != WorkflowStepCancelled {
+			t.Fatalf("in-flight step status = %q, want %q", out.Steps[0].Status, WorkflowStepCancelled)
+		}
+		if out.Steps[1].Status != WorkflowStepSkipped {
+			t.Fatalf("remaining step status = %q, want skipped", out.Steps[1].Status)
+		}
+	})
 }

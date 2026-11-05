@@ -55,14 +55,16 @@ const defaultApprovalTools = "bash,pwsh,terminal_open,terminal_send,terminal_sig
 // calls are still exempt, in both sets (see toolNeedsApprovalWithArgs).
 const autoReviewApprovalTools = "bash,write_file,edit_file,str_replace_editor,terminal_open,terminal_send,terminal_signal,terminal_close,job_start,job_kill,ptc,pwsh,enter_worktree,exit_worktree,web_search,web_fetch,mcp__*"
 
-// AgentBundle is the wired agent plus the resources it owns (MCP servers).
+// AgentBundle is the wired agent plus the resources it owns (MCP servers and
+// the async team manager when Agent Teams is enabled).
 type AgentBundle struct {
 	Agent *runtime.Agent
 	Gate  *runtime.ApprovalQueue
 	// TitleGenerator writes automatic session titles with the bundle's
 	// provider. Nil falls back to the truncated first user message.
 	TitleGenerator session.TitleGenerator
-	// Close releases owned resources (MCP sessions); may be nil.
+	// Close releases owned resources (MCP sessions and the team manager, which
+	// cancels and waits for running teammates); may be nil.
 	Close func() error
 }
 
@@ -482,6 +484,10 @@ type registryOptions struct {
 	// AdoptManagers receives the managers this build actually used, so the
 	// caller can hold on to newly created ones for the next rebuild.
 	AdoptManagers func(*tools.WorkingDirectoryState, *tools.TerminalManager, *tools.JobsManager)
+	// AdoptTeam receives the async team manager this build created, so the app
+	// can show live members and stop a session's members when the user stops.
+	// Nil when the Agent Teams plugin is off (no team manager is built).
+	AdoptTeam func(*agentteam.Manager)
 }
 
 // registerAllToolsWithPermission is registerAllTools with an optional access
@@ -604,6 +610,9 @@ func registerAllToolsWithOptions(st *store.Store, root string, get func(key, env
 	}
 	if teamOn {
 		teamMgr := agentteam.New(agentteam.Config{})
+		if opts.AdoptTeam != nil {
+			opts.AdoptTeam(teamMgr)
+		}
 		register(tools.NewTeamTools(tools.TeamConfig{Manager: teamMgr, Store: st})...)
 		register(tools.NewTeamSpawnTools(tools.TeamSpawnConfig{Manager: teamMgr})...)
 	}
@@ -770,9 +779,25 @@ func buildAgentWithOptions(st *store.Store, root, instruction string, opts regis
 	if err != nil {
 		return nil, fmt.Errorf("build provider: %w", err)
 	}
+	// Capture the team manager this build creates so Close can stop its
+	// members when the agent is replaced (plugin/model/workspace rebuild) or
+	// the app quits. The app's adopter sees it too for the live roster/Stop.
+	var teamManager *agentteam.Manager
+	adoptTeam := opts.AdoptTeam
+	opts.AdoptTeam = func(m *agentteam.Manager) {
+		teamManager = m
+		if adoptTeam != nil {
+			adoptTeam(m)
+		}
+	}
 	reg, mcpClose, err := registerAllToolsWithOptions(st, root, get, opts)
 	if err != nil {
 		return nil, err
+	}
+	if adoptTeam != nil && teamManager == nil {
+		// The build has no team manager (Agent Teams off): tell the adopter so
+		// a replaced manager's roster is not kept around.
+		adoptTeam(nil)
 	}
 	// The runtime-context sections (working directory, reference time) are
 	// recomposed at the start of every turn: the working_directory tool may
@@ -781,7 +806,15 @@ func buildAgentWithOptions(st *store.Store, root, instruction string, opts regis
 	// same current directory, so it is resolved here for both.
 	dirState := workingDirectoryFromRegistry(reg)
 	bundle := &AgentBundle{
-		Close: mcpClose,
+		Close: func() error {
+			if teamManager != nil {
+				teamManager.Close()
+			}
+			if mcpClose != nil {
+				return mcpClose()
+			}
+			return nil
+		},
 		// The same provider that runs turns writes automatic session titles
 		// after the first completed turn. Keeping it on the bundle makes a
 		// rebuild (model change, permission change) replace the titler too.

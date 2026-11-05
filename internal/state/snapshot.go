@@ -147,10 +147,16 @@ type Snapshot struct {
 	// Feedback maps a message id to its newest rating ("good"/"bad"). It is
 	// loaded from the store when a session is opened and updated when the
 	// user rates a message, so the action bar reflects the persisted state.
-	Feedback  map[string]string
-	Usage     Usage
-	LastError *ErrorInfo
-	Seq       uint64
+	Feedback map[string]string
+	// Usage holds the session's cumulative counters (see Usage): the runtime
+	// publishes one delta per completed model call, so a running turn updates
+	// it live and a reopen replays the same totals.
+	Usage Usage
+	// TurnReason explains how the latest turn ended (zero = completed or no
+	// turn yet). It survives a reopen through the terminal Status event.
+	TurnReason StatusReason
+	LastError  *ErrorInfo
+	Seq        uint64
 }
 
 // NewSnapshot returns an empty snapshot in PhaseIdle with a non-nil Tools map.
@@ -172,9 +178,10 @@ func NewSnapshot() *Snapshot {
 //	Reasoning       append Text to message MsgID's Reasoning field
 //	ToolStart       set call CallID to ToolRunning, record Name/Args/StartedSeq
 //	ApprovalRequest set call CallID to ToolAwaitingApproval
-//	ToolEnd         set call CallID to ToolDone, or ToolError when IsError
-//	Usage           replace Snapshot.Usage with the event's counters
-//	Status          replace Snapshot.Phase
+//	ToolEnd         set call CallID to ToolDone, ToolError when IsError, or
+//	                ToolCancelled when the turn closed the call
+//	Usage           add the event's delta to Snapshot.Usage (ContextPct is a gauge)
+//	Status          replace Snapshot.Phase and Snapshot.TurnReason
 //	Error           replace Snapshot.LastError with immutable error info
 //
 // Seq is incremented once per applied event. Messages keep the order in which
@@ -224,9 +231,12 @@ func Apply(prev *Snapshot, ev Event) *Snapshot {
 			st.Result = e.Result
 			st.IsError = e.IsError
 			st.Duration = e.Duration
-			if e.IsError {
+			switch {
+			case e.Cancelled:
+				st.Status = ToolCancelled
+			case e.IsError:
 				st.Status = ToolError
-			} else {
+			default:
 				st.Status = ToolDone
 			}
 			st.UpdatedSeq = next.Seq
@@ -244,9 +254,22 @@ func Apply(prev *Snapshot, ev Event) *Snapshot {
 			st.UpdatedSeq = next.Seq
 		})
 	case Usage:
-		next.Usage = e
+		// The snapshot holds session-cumulative counters; the runtime sends
+		// deltas (one per completed model call) and old traces sent whole-turn
+		// samples (Turns=1), which sum to the session totals just the same.
+		next.Usage.Turns += e.Turns
+		next.Usage.Steps += e.Steps
+		next.Usage.In += e.In
+		next.Usage.Out += e.Out
+		next.Usage.CacheHit += e.CacheHit
+		if e.ContextPct > 0 {
+			next.Usage.ContextPct = e.ContextPct
+		}
 	case Status:
 		next.Phase = e.Phase
+		// The zero reason clears the marker when a new turn starts; terminal
+		// statuses persist how the latest turn ended.
+		next.TurnReason = e.Reason
 	case Error:
 		next.LastError = &ErrorInfo{MsgID: e.MsgID, Text: errorText(e.Err)}
 	default:

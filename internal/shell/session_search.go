@@ -147,7 +147,7 @@ func (a *App) closeTaskTopmost() {
 			return
 		}
 		if snap := a.currentSnapshot(); snap != nil && snap.Phase == state.PhaseRunning {
-			a.Ctrl.Stop()
+			a.stopTurn()
 		}
 	}
 }

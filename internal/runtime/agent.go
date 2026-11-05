@@ -650,13 +650,19 @@ func (a *Agent) run(ctx context.Context, cancel context.CancelFunc, sessionID, t
 	started := make(map[string]bool)      // CallID -> ToolStart emitted
 
 	fail := func(err error) {
-		// User cancellation is not a failure: leave the turn quiet and idle.
+		// A cancelled turn is not a failure: close the calls it left open (so no
+		// card keeps spinning and the next turn's history has no dangling
+		// call), mark the turn stopped and leave it quiet otherwise.
 		if ctx.Err() != nil {
-			emitTerminal(state.Status{Phase: state.PhaseIdle})
+			finishPendingTools(pending, ctx.Err(), true, func(ev state.Event) bool {
+				emitTerminal(ev)
+				return true
+			})
+			emitTerminal(state.Status{Phase: state.PhaseIdle, Reason: state.ReasonStopped})
 			return
 		}
-		finishPendingTools(pending, err, emit)
-		emit(state.Status{Phase: state.PhaseFailed})
+		finishPendingTools(pending, err, false, emit)
+		emit(state.Status{Phase: state.PhaseFailed, Reason: state.ReasonFailed})
 		emit(state.Error{MsgID: msgID, Err: err})
 	}
 
@@ -699,7 +705,11 @@ func (a *Agent) run(ctx context.Context, cancel context.CancelFunc, sessionID, t
 
 	for {
 		if ctx.Err() != nil {
-			emitTerminal(state.Status{Phase: state.PhaseIdle})
+			finishPendingTools(pending, ctx.Err(), true, func(ev state.Event) bool {
+				emitTerminal(ev)
+				return true
+			})
+			emitTerminal(state.Status{Phase: state.PhaseIdle, Reason: state.ReasonStopped})
 			return
 		}
 
@@ -714,7 +724,7 @@ func (a *Agent) run(ctx context.Context, cancel context.CancelFunc, sessionID, t
 			// instead of surfacing eino's NodeRunError. Real model/tool errors,
 			// timeouts and cancellation still fail below.
 			if errors.Is(ev.Err, adk.ErrExceedMaxIterations) {
-				if err := a.completeMaxIterations(ctx, sessionID, msgID, record, prior, usage, pending, emit); err != nil {
+				if err := a.completeMaxIterations(ctx, sessionID, msgID, record, prior, pending, emit); err != nil {
 					fail(err)
 				}
 				return
@@ -750,10 +760,11 @@ func (a *Agent) run(ctx context.Context, cancel context.CancelFunc, sessionID, t
 		}
 	}
 
+	// Usage was published as deltas after each model call; the turn completes
+	// normally (ReasonNone) and nothing is left to publish.
 	if !emit(state.Status{Phase: state.PhaseIdle}) {
 		return
 	}
-	emit(usage.snapshot())
 }
 
 // completeMaxIterations ends a turn that reached MaxIterations as a completed
@@ -771,13 +782,12 @@ func (a *Agent) completeMaxIterations(
 	sessionID, msgID string,
 	record *turnRecord,
 	prior []Message,
-	usage *turnUsage,
 	pending map[string]time.Time,
 	emit func(state.Event) bool,
 ) error {
 	// A tool call can only still be pending when the ceiling interrupted a tool
 	// round trip; close it so its card stops spinning.
-	finishPendingTools(pending, errors.New("stopped at the per-turn step limit"), emit)
+	finishPendingTools(pending, errors.New("stopped at the per-turn step limit"), false, emit)
 
 	notice := a.stepLimitNotice(a.maxIterations)
 	if !emit(state.Token{SessionID: sessionID, MsgID: msgID, Text: notice}) {
@@ -802,10 +812,11 @@ func (a *Agent) completeMaxIterations(
 		}
 	}
 
+	// Usage deltas were published per model call; the capped turn ends idle with
+	// no stop reason so it reads as a completed turn, exactly like a normal end.
 	if !emit(state.Status{Phase: state.PhaseIdle}) {
 		return nil
 	}
-	emit(usage.snapshot())
 	return nil
 }
 
@@ -818,15 +829,18 @@ func defaultStepLimitNotice(limit int) string {
 		limit)
 }
 
-// finishPendingTools closes tool calls that never produced a result because
-// the turn failed, so the UI does not spin forever.
-func finishPendingTools(pending map[string]time.Time, cause error, emit func(state.Event) bool) {
+// finishPendingTools closes tool calls that never produced a result, so the UI
+// does not spin forever and the next turn's history has no unanswered call.
+// cancelled marks the calls a turn ending closed (Stop, cancellation, the step
+// ceiling); the snapshot then shows ToolCancelled instead of a red error.
+func finishPendingTools(pending map[string]time.Time, cause error, cancelled bool, emit func(state.Event) bool) {
 	for callID, startedAt := range pending {
 		emit(state.ToolEnd{
-			CallID:   callID,
-			Result:   cause.Error(),
-			IsError:  true,
-			Duration: time.Since(startedAt),
+			CallID:    callID,
+			Result:    cause.Error(),
+			IsError:   !cancelled,
+			Duration:  time.Since(startedAt),
+			Cancelled: cancelled,
 		})
 		delete(pending, callID)
 	}

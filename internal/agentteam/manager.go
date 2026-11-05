@@ -88,6 +88,10 @@ type SpawnRequest struct {
 	Task  string
 	Agent string
 	Depth int
+	// SessionID is the session that requested the member. The manager uses it
+	// to stop a session's asynchronous members when its turn is stopped; it is
+	// empty for direct manager users that do not scope members to a session.
+	SessionID string
 }
 
 // Delivery is the result of Send. It reports acceptance, not the target's
@@ -105,6 +109,7 @@ type Delivery struct {
 type Member struct {
 	ID          string    `json:"id"`
 	Name        string    `json:"name"`
+	SessionID   string    `json:"session_id,omitempty"`
 	Status      Status    `json:"status"`
 	Task        string    `json:"task,omitempty"`
 	CurrentTask string    `json:"current_task,omitempty"`
@@ -127,6 +132,7 @@ type pendingMessage struct {
 type member struct {
 	id          string
 	name        string
+	sessionID   string
 	task        string
 	status      Status
 	currentTask string
@@ -213,9 +219,10 @@ func (m *Manager) SpawnBatch(ctx context.Context, reqs []SpawnRequest) ([]Member
 	}
 
 	type prepared struct {
-		task  string
-		name  string
-		depth int
+		task      string
+		name      string
+		depth     int
+		sessionID string
 	}
 	batch := make([]prepared, len(reqs))
 	for i, req := range reqs {
@@ -227,7 +234,7 @@ func (m *Manager) SpawnBatch(ctx context.Context, reqs []SpawnRequest) ([]Member
 		if name == "" {
 			name = "subagent"
 		}
-		batch[i] = prepared{task: task, name: name, depth: req.Depth}
+		batch[i] = prepared{task: task, name: name, depth: req.Depth, sessionID: strings.TrimSpace(req.SessionID)}
 	}
 	if ctx != nil {
 		if err := ctx.Err(); err != nil {
@@ -249,20 +256,21 @@ func (m *Manager) SpawnBatch(ctx context.Context, reqs []SpawnRequest) ([]Member
 
 	out := make([]Member, 0, len(batch))
 	for _, req := range batch {
-		mem := m.spawnLocked(req.task, req.name, req.depth)
+		mem := m.spawnLocked(req.task, req.name, req.sessionID, req.depth)
 		out = append(out, mem.snapshot())
 	}
 	return out, nil
 }
 
 // spawnLocked creates and starts one member. m.mu must be held.
-func (m *Manager) spawnLocked(task, name string, depth int) *member {
+func (m *Manager) spawnLocked(task, name, sessionID string, depth int) *member {
 	m.nextID++
 	id := fmt.Sprintf("agent-%d", m.nextID)
 	now := m.now().UTC()
 	mem := &member{
 		id:        id,
 		name:      name,
+		sessionID: sessionID,
 		task:      task,
 		status:    StatusQueued,
 		depth:     depth,
@@ -375,6 +383,54 @@ func (m *Manager) CloseMembers() int {
 	for _, id := range m.order {
 		mem := m.members[id]
 		if mem == nil {
+			continue
+		}
+		mem.queue = nil
+		if !mem.running {
+			continue
+		}
+		mem.interrupted = true
+		mem.updatedAt = m.now().UTC()
+		if mem.cancel != nil {
+			mem.cancel()
+		}
+		if mem.turnDone != nil {
+			pending = append(pending, mem.turnDone)
+		}
+		stopped++
+	}
+	m.mu.Unlock()
+
+	for _, done := range pending {
+		<-done
+	}
+	return stopped
+}
+
+// StopSession stops the members a session requested: it drops their queued
+// messages, cancels their running turns and waits for them to settle. The
+// manager stays open for later Spawn calls and members of other sessions are
+// untouched. It returns how many running turns it canceled, and is safe to call
+// for a session that has no members (an accepted no-op).
+func (m *Manager) StopSession(sessionID string) int {
+	if m == nil {
+		return 0
+	}
+	sessionID = strings.TrimSpace(sessionID)
+	if sessionID == "" {
+		return 0
+	}
+
+	m.mu.Lock()
+	if m.closed {
+		m.mu.Unlock()
+		return 0
+	}
+	var pending []chan struct{}
+	stopped := 0
+	for _, id := range m.order {
+		mem := m.members[id]
+		if mem == nil || mem.sessionID != sessionID {
 			continue
 		}
 		mem.queue = nil
@@ -649,6 +705,7 @@ func (mem *member) snapshot() Member {
 	return Member{
 		ID:          mem.id,
 		Name:        mem.name,
+		SessionID:   mem.sessionID,
 		Status:      mem.status,
 		Task:        mem.task,
 		CurrentTask: mem.currentTask,

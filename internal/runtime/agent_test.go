@@ -232,6 +232,7 @@ func reasoningTexts(events []state.Event) []string {
 	return out
 }
 
+// lastUsage returns the most recent usage delta (a single model call).
 func lastUsage(events []state.Event) (state.Usage, bool) {
 	for i := len(events) - 1; i >= 0; i-- {
 		if u, ok := events[i].(state.Usage); ok {
@@ -239,6 +240,26 @@ func lastUsage(events []state.Event) (state.Usage, bool) {
 		}
 	}
 	return state.Usage{}, false
+}
+
+// sumUsage folds the usage deltas into the cumulative totals a snapshot keeps:
+// turns count once per turn, steps/tokens are per model call.
+func sumUsage(events []state.Event) (state.Usage, bool) {
+	var total state.Usage
+	found := false
+	for _, ev := range events {
+		u, ok := ev.(state.Usage)
+		if !ok {
+			continue
+		}
+		found = true
+		total.Turns += u.Turns
+		total.Steps += u.Steps
+		total.In += u.In
+		total.Out += u.Out
+		total.CacheHit += u.CacheHit
+	}
+	return total, found
 }
 
 func findToolStart(events []state.Event, name string) (state.ToolStart, bool) {
@@ -368,16 +389,16 @@ func TestRunStreamsTokensInOrderAndEndsWithUsage(t *testing.T) {
 		t.Fatalf("phases = %v, want first running", gotPhases)
 	}
 
-	// The final event is the usage event.
-	usage, ok := lastUsage(events)
+	// Usage is published as a delta per model call, before the terminal status.
+	usage, ok := sumUsage(events)
 	if !ok {
 		t.Fatal("no usage event")
 	}
-	if _, isLast := events[len(events)-1].(state.Usage); !isLast {
-		t.Fatalf("last event = %T, want state.Usage", events[len(events)-1])
-	}
 	if usage.Turns != 1 || usage.Steps != 1 || usage.In != 11 || usage.Out != 3 || usage.CacheHit != 4 {
-		t.Fatalf("usage = %+v", usage)
+		t.Fatalf("cumulative usage = %+v", usage)
+	}
+	if _, isLast := events[len(events)-1].(state.Status); !isLast {
+		t.Fatalf("last event = %T, want the terminal state.Status", events[len(events)-1])
 	}
 	if gotPhases[len(gotPhases)-1] != state.PhaseIdle {
 		t.Fatalf("final phase = %v, want idle", gotPhases[len(gotPhases)-1])
@@ -462,7 +483,7 @@ func TestRunToolCallExecutesAndResultIsFedBack(t *testing.T) {
 	if strings.Join(gotTokens, "") != "It is 12:00." {
 		t.Fatalf("final text = %q", strings.Join(gotTokens, ""))
 	}
-	usage, ok := lastUsage(events)
+	usage, ok := sumUsage(events)
 	if !ok || usage.Steps != 2 || usage.In != 20 || usage.Out != 5 {
 		t.Fatalf("usage = %+v, ok=%v", usage, ok)
 	}
@@ -670,7 +691,7 @@ func TestRunProviderStreamsChunks(t *testing.T) {
 	if got := strings.Join(tokenTexts(events), ""); got != "Hello, provider!" {
 		t.Fatalf("text = %q", got)
 	}
-	usage, ok := lastUsage(events)
+	usage, ok := sumUsage(events)
 	if !ok || usage.In != 7 || usage.Out != 2 || usage.Steps != 1 {
 		t.Fatalf("usage = %+v, ok=%v", usage, ok)
 	}

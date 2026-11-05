@@ -68,8 +68,13 @@ func (a *App) liveMessageActions(c *ui.Context, t *design.Tokens, m state.Messag
 
 // completionSummary is the footer's short completion line. The view only
 // knows a duration when it saw the whole running phase; otherwise it says
-// the message completed without inventing one.
+// the message completed without inventing one. A stopped, interrupted or failed
+// turn has no completion line: claiming "completed" there would misreport what
+// happened.
 func (a *App) completionSummary(snap *state.Snapshot) string {
+	if snap != nil && snap.TurnReason != state.ReasonNone {
+		return ""
+	}
 	st := a.liveMenus()
 	if !st.turnRunning && st.lastTurnDuration > 0 {
 		return a.menuText("Completed in ", "完成于 ") + formatTurnDuration(st.lastTurnDuration)
@@ -176,13 +181,17 @@ func (a *App) liveUsageFooter(c *ui.Context, t *design.Tokens, snap *state.Snaps
 		return
 	}
 	segments := a.usageSegments(snap)
-	if len(segments) == 0 {
-		return
-	}
 	// The footer is as wide as the composer card and wraps its pills: at
 	// narrow windows with the docked panel the detailed segments are wider
 	// than the card, and wrapping keeps them inside it.
 	th := t.Theme()
+	if len(segments) == 0 {
+		// Before any turn has run there is nothing to show, but the row keeps
+		// its height so the composer does not jump (and so the plan badge does
+		// not slide under a toast) the moment the first counters arrive.
+		ui.Row(c).Width(a.sessionComposerWidthFor(c)).Height(th.Space(6))
+		return
+	}
 	ui.Row(c).Width(a.sessionComposerWidthFor(c)).Gap(th.Space(2)).
 		Wrap().AlignItems(ui.Center).AlignContent(ui.Center).Justify(ui.Center).
 		Label(a.tr("Session usage", "会话用量")).Children(func() {
@@ -203,6 +212,11 @@ func (a *App) liveUsageFooter(c *ui.Context, t *design.Tokens, snap *state.Snaps
 // keeps only the turn count.
 func (a *App) usageSegments(snap *state.Snapshot) []string {
 	u := snap.Usage
+	// Nothing has run yet: no "0 turns 0 steps 0 out tok" strip. DSH hides the
+	// activity pill the same way until a step settles.
+	if u.Turns == 0 && u.Steps == 0 && u.In == 0 && u.Out == 0 && u.CacheHit == 0 {
+		return nil
+	}
 	detailed := a.currentSettings().PerformanceUsage != session.PerformanceStandard
 	segments := []string{
 		a.countSegment("%d turn", "%d turns", "%d 轮", u.Turns),
@@ -218,11 +232,17 @@ func (a *App) usageSegments(snap *state.Snapshot) []string {
 		segments = append(segments, a.menuText("Performance: Standard", "性能：标准"))
 	}
 	st := a.liveMenus()
-	if detailed && !st.turnRunning && st.lastTurnDuration > 0 {
+	// "Completed in" and a completion rate describe a turn that actually
+	// completed; a stopped/interrupted/failed turn keeps the counters but shows
+	// no completion time, and the rate only covers this turn's output growth.
+	completed := !st.turnRunning && snap.Phase != state.PhaseRunning &&
+		snap.TurnReason == state.ReasonNone && st.lastTurnDuration > 0
+	if detailed && completed {
 		d := st.lastTurnDuration
 		segments = append(segments, a.menuText("Completed in ", "完成于 ")+formatTurnDuration(d))
-		if u.Out > 0 {
-			if tps := int(float64(u.Out)/d.Seconds() + 0.5); tps > 0 {
+		turnOut := u.Out - st.turnStartUsage.Out
+		if turnOut > 0 {
+			if tps := int(float64(turnOut)/d.Seconds() + 0.5); tps > 0 {
 				segments = append(segments, fmt.Sprintf("%d tok/s", tps))
 			}
 		}
