@@ -6,10 +6,9 @@ import (
 	"github.com/zeokeel/zeokeel/internal/design"
 )
 
-// Brand composer pieces shared by the Session and Home screens. Home grew its
-// local equivalents in the first pilot (home.go); the Session pilot reuses
-// these helpers so both composers paint one card, one input and one send
-// control from the brand theme while home.go stays untouched.
+// Brand composer pieces shared by the Session and Home screens: one card, one
+// native input, one send control and the same focus/hover feedback, so both
+// composers paint from the brand theme without local copies drifting apart.
 //
 // The card owns the surface, the single soft shadow and the focus/hover
 // border; the native TextArea inside keeps its placeholder, multiline editing,

@@ -9,6 +9,15 @@
 - **以下 M0–M13 历史里程碑保留原文记录以追溯**；其中与像素/基线/比对回路相关的内容均为**历史记录，已退役、不再有效**（因此模块清单中不再列 `pixeltest` 包）。
 - 现行质量口径见 `docs/QUALITY.md` 与 `docs/PLAN.md` §10；功能对齐见 `docs/FUNCTIONAL-PARITY.md`；视觉方向见 `docs/decisions/0002-brand-theme-foundation.md`。
 
+## 2026-11-05 阶段 4：剩余面板 + markdown 原生化 + 桌面交互 P0-2（完成，ALL GREEN）
+
+- **剩余面板/区**：Trajectory 内部行、内联搜索/搜索弹层、todo/team/plan 面板、右侧栏（Files/Terminal/Start，720px → 响应式 560/45% 可拖拽）全部品牌原生视觉化；新增 Trajectory 与右栏浅/深预览。
+- **Markdown 迁移 mygo `ui/markdown`**：删除自研解析渲染 522 行（markdown.go 628→106），获得代码高亮/语言标签/Copy、GFM 表格、任务列表、流式增量解析、文本选中+右键复制（文本/HTML/Markdown）；`markdownBlocks` 签名不变。
+- **系统通知**：Snapshot 相位状态机识别完成/失败/待审批，窗口不活跃时 `mygo.NewNotification`，点击回焦并打开对应会话；Notifier 可注入，17 个单测；ADR 0004（含后台会话通知等遗留）。
+- **系统偏好**：TextScale/HighContrast/ReduceMotion 接入（主题字号、对比度增强、`DisableAnimations`），2x DPI 渲染冒烟；滚动条策略调研记录（native overlay + HC 增强）。
+- **工程**：Home/Session composer 收敛到 `composer_native.go`；responsive 测试改为按实际面板 rect 判定；预览测试 opt-in 写盘。
+- **验证**：`gofmt`/`go vet`/`go build ./...`/`go test -count=1 ./...` 17 包全绿（shell 40.0s）；工作树干净。
+
 ## 2026-11-05 阶段 3：六屏品牌原生视觉 + 桌面壳 P0-1（完成，ALL GREEN）
 
 - **屏/区**：Home、Session、Sidebar、Settings、Plugins、Automation 全部完成品牌原生视觉重构（mygo 原生控件 + `internal/brand` 主题 + Theme/design 令牌；删除 DSH 文案、采样色与 877/909/800×800/960 等像素魔法值）；交互与 a11y 标签/键盘可达不回退。

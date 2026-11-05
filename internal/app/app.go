@@ -145,11 +145,24 @@ func (a *app) run() error {
 		})
 		if a.services != nil {
 			win := a.win
+			// Desktop notifications read the same update stream as the UI: the
+			// dispatcher only watches phase transitions, so a token update costs
+			// one map lookup.
+			notifier := newNotificationDispatcher(newSystemNotifier(), a.windowActive, a.uiLanguage, a.focusSession)
 			a.services.OnUpdate(func(snap *state.Snapshot) {
 				shellApp.SetSnapshot(snap)
 				win.Invalidate()
+				notifier.Observe(snap)
 			})
 		}
+		// What the user has just seen in the app should not wait in the system's
+		// notification center: clear the app's delivered notifications when the
+		// app comes to the front. Unsupported platforms skip it.
+		mygo.App.OnDidBecomeActive(func() {
+			if mygo.NotificationsSupported() {
+				mygo.ClearNotifications()
+			}
+		})
 		// Closing the window hides it; the tray keeps the app alive. The close
 		// must be prevented, not just observed: OnClosed runs after the window
 		// is destroyed, when Hide and the tray's Show would be no-ops. During

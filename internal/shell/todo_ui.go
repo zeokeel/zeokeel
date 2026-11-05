@@ -45,50 +45,93 @@ func (a *App) liveTodoPanel(c *ui.Context, t *design.Tokens) {
 	if len(todos) == 0 {
 		return
 	}
+	th := t.Theme()
 	done := 0
 	for _, todo := range todos {
 		if todo.Status == tools.TodoCompleted {
 			done++
 		}
 	}
-	ui.Column(c).Width(272).Shrink(0).Padding(design.Space4, design.Space4, design.Space4, design.Space4).
-		Gap(design.Space2).BorderWidth(0, 0, 0, 1).BorderColor(t.BorderL2).
+	progress := float32(done) * 100 / float32(len(todos))
+	color := t.Accent
+	if done == len(todos) {
+		color = t.Success
+	}
+	ui.Column(c).Width(th.Space(68)).Shrink(0).Padding(th.Space(4)).
+		Gap(th.Space(2)).Background(t.BgSidebar).
+		BorderWidth(0, 0, 0, 1).BorderColor(t.BorderL2).
 		Children(func() {
-			ui.Row(c).AlignItems(ui.Center).Gap(design.Space2).Children(func() {
+			ui.Row(c).AlignItems(ui.Center).Gap(th.Space(2)).Children(func() {
 				ui.Text(c, a.T("session.todos")).FontSize(12).FixedLineHeight(18).
 					FontWeight(600).TextColor(t.LabelPrimary).Grow(1)
-				ui.Text(c, fmt.Sprintf("%d/%d", done, len(todos))).FontSize(11).
-					FixedLineHeight(18).TextColor(t.LabelTertiary)
+				count := ui.Row(c).Height(th.Space(5)).PaddingX(th.Space(1.5)).
+					Radius(design.RadiusMax).Background(t.BgHover).AlignItems(ui.Center)
+				count.Children(func() {
+					ui.Text(c, fmt.Sprintf("%d/%d", done, len(todos))).FontSize(11).
+						FixedLineHeight(16).TextColor(t.LabelTertiary)
+				})
+			})
+			// The list's progress at a glance: one thin brand track under the
+			// header, green once every task is done.
+			track := ui.Row(c).Height(th.Space(1)).Radius(design.RadiusMax).
+				Background(t.BgHover)
+			track.Children(func() {
+				fill := ui.Box(c).Height(th.Space(1)).Radius(design.RadiusMax).
+					WidthPercent(progress).Background(color)
+				_ = fill
 			})
 			ui.Scroll(c).Grow(1).Children(func() {
-				for _, todo := range todos {
-					a.todoRow(c, t, todo)
-				}
+				ui.Column(c).Gap(th.Space(1)).Children(func() {
+					for _, todo := range todos {
+						a.todoRow(c, t, todo)
+					}
+				})
 			})
 		})
 }
 
-// todoRow draws one task: a status glyph, the task text, and the status word.
+// todoRow draws one task: a brand status mark (empty ring, accent dot while
+// running, filled success check when done), the task text and the status word.
 // A completed task is struck through and muted, the usual todo convention.
 func (a *App) todoRow(c *ui.Context, t *design.Tokens, todo tools.Todo) {
-	glyph, color := "○", t.LabelTertiary
-	switch todo.Status {
-	case tools.TodoInProgress:
-		glyph, color = "◐", t.Accent
-	case tools.TodoCompleted:
-		glyph, color = "●", t.Success
-	}
-	ui.Row(c).Gap(design.Space2).AlignItems(ui.Start).Padding(2, 0, 2, 0).
-		Children(func() {
-			ui.Text(c, glyph).FontSize(12).FixedLineHeight(18).TextColor(color).NoWrap()
-			text := ui.Text(c, todo.Task).FontSize(12).FixedLineHeight(18).
-				TextColor(t.LabelPrimary).Grow(1).MaxLines(3).Ellipsis("…")
-			if todo.Status == tools.TodoCompleted {
-				text.TextColor(t.LabelTertiary).Strikethrough()
-			}
-			ui.Text(c, a.todoStatusLabel(string(todo.Status))).FontSize(10).FixedLineHeight(18).
-				TextColor(t.LabelTertiary).NoWrap()
-		})
+	th := t.Theme()
+	color := t.LabelTertiary
+	ui.Row(c).Gap(th.Space(2)).AlignItems(ui.Start).
+		Padding(th.Space(1), 0).Children(func() {
+		mark := ui.Row(c).Size(th.Space(3.5), th.Space(3.5)).Center().
+			Radius(th.Space(1.75)).Border(1.5, color).Shrink(0).
+			Margin(0, th.Space(0.5), 0, 0)
+		switch todo.Status {
+		case tools.TodoInProgress:
+			color = t.Accent
+			mark = mark.Border(1.5, color)
+			mark.Children(func() {
+				ui.Box(c).Size(th.Space(1.5), th.Space(1.5)).
+					Radius(th.Space(0.75)).Background(color)
+			})
+		case tools.TodoCompleted:
+			color = t.Success
+			mark = mark.Border(0, t.Success).Background(color)
+			mark.Children(func() {
+				ui.Text(c, "✓").FontSize(9).FontWeight(700).
+					TextColor(t.BgRaised).NoWrap()
+			})
+		}
+		text := ui.Text(c, todo.Task).FontSize(12).FixedLineHeight(18).
+			TextColor(t.LabelPrimary).Grow(1).MaxLines(3).Ellipsis("…")
+		if todo.Status == tools.TodoCompleted {
+			text.TextColor(t.LabelTertiary).Strikethrough()
+		}
+		status := a.todoStatusLabel(string(todo.Status))
+		statusColor := t.LabelTertiary
+		if todo.Status == tools.TodoInProgress {
+			statusColor = t.Accent
+		} else if todo.Status == tools.TodoCompleted {
+			statusColor = t.Success
+		}
+		ui.Text(c, status).FontSize(10).FixedLineHeight(18).
+			TextColor(statusColor).NoWrap()
+	})
 }
 
 // questionCards draws one card per pending ask_user question above the
@@ -101,9 +144,10 @@ func (a *App) questionCards(c *ui.Context, t *design.Tokens) {
 		return
 	}
 	uiState := a.uiState()
+	th := t.Theme()
 	for _, question := range questions {
 		question := question
-		a.menuFrame(c, t, 868, func() {
+		a.menuFrame(c, t, a.sessionComposerWidthFor(c), func() {
 			ui.Column(c).Key("question:" + question.CallID).
 				Gap(design.Space2).Children(func() {
 				ui.Row(c).Gap(design.Space2).AlignItems(ui.Center).Children(func() {
@@ -124,7 +168,7 @@ func (a *App) questionCards(c *ui.Context, t *design.Tokens) {
 						TextColor(t.LabelTertiary).MaxLines(2).Ellipsis("…")
 				}
 				ui.TextInput(c, &uiState.questionDraft).Label(a.T("session.answer_input")).
-					FontSize(13).Height(34)
+					FontSize(13).Height(th.Space(9))
 				ui.Row(c).Gap(design.Space2).AlignItems(ui.Center).Children(func() {
 					send := design.Apply(ui.Button(c, a.T("session.send_answer")), t.PrimaryButton())
 					if send.Clicked() {
@@ -164,14 +208,17 @@ func (a *App) liveArtifacts(c *ui.Context, t *design.Tokens) {
 	if len(artifacts) == 0 {
 		return
 	}
+	th := t.Theme()
 	uiState := a.uiState()
-	ui.Column(c).Key("artifacts").Gap(design.Space1).Children(func() {
+	ui.Column(c).Key("artifacts").Gap(th.Space(1)).Children(func() {
 		ui.Text(c, a.T("session.presented")).FontSize(11).FixedLineHeight(16).
 			TextColor(t.LabelTertiary)
 		for _, artifact := range artifacts {
 			artifact := artifact
 			open := uiState.artifactRaw[artifact.CallID]
-			card := ui.Button(c, "").Padding(design.Space2).Radius(design.RadiusSM).
+			card := ui.ButtonBase(c).FillWidth().Padding(th.Space(2)).
+				Radius(design.RadiusSM).Border(1, t.BorderL2).
+				Justify(ui.Start).Background(t.BgRaised).
 				Transition(design.ColorTransition())
 			card.Children(func() {
 				ui.Row(c).Gap(design.Space2).AlignItems(ui.Center).Children(func() {

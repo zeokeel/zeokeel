@@ -131,9 +131,16 @@ func TestAutomationActionsRemainUsableWithDockedPanel(t *testing.T) {
 			tt := ui.NewTester(h.app.View, size.w, size.h)
 			tt.Frame()
 
-			// The 400px main column starts at x=280; the 304px page column is
-			// centered in it, so nothing may paint past x=632.
-			const pageRight = 632
+			// The main column starts at x=280 and ends where the docked right
+			// sidebar begins; the automation page column is centered inside
+			// it, so no action may paint past that boundary. The sidebar is
+			// responsive since the brand pass, so read its rect instead of
+			// pinning a DSH-era x=632.
+			panel, ok := tt.Find("Right sidebar")
+			if !ok {
+				t.Fatalf("docked right sidebar missing: %v", tt.Texts())
+			}
+			pageRight := panel.X
 			for _, label := range []string{"Run now", "Disable", "Edit", "Delete"} {
 				r, ok := tt.Find(label)
 				if !ok {
@@ -146,7 +153,7 @@ func TestAutomationActionsRemainUsableWithDockedPanel(t *testing.T) {
 					t.Fatalf("%q height = %v, want a >=24px target", label, r.H)
 				}
 				if r.X < 280 || r.X+r.W > pageRight {
-					t.Fatalf("%q rect %+v is outside the 280..%d page column", label, r, pageRight)
+					t.Fatalf("%q rect %+v is outside the 280..%v page column", label, r, pageRight)
 				}
 			}
 			if err := tt.Click("Delete"); err != nil {

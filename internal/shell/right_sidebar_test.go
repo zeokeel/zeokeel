@@ -1,6 +1,7 @@
 package shell
 
 import (
+	"image/png"
 	"os"
 	"path/filepath"
 	"strings"
@@ -8,6 +9,8 @@ import (
 	"time"
 
 	"github.com/egoist/mygo/ui"
+
+	"github.com/zeokeel/zeokeel/internal/session"
 )
 
 // writeTestFile writes name under root, creating parent directories.
@@ -237,4 +240,123 @@ func TestRightSidebarTerminalRunDoesNotBlock(t *testing.T) {
 	if tt.HasText("Stop") {
 		t.Fatalf("Stop remained after the command finished: %q", tt.Texts())
 	}
+}
+
+// TestRightSidebarResizeDrag covers the docked panel's brand width and its
+// native resize grip: the default is the brand 560 DIPs on a wide window, a
+// pointer drag widens the panel, and the arrow keys resize it while the grip
+// has the focus.
+func TestRightSidebarResizeDrag(t *testing.T) {
+	h := newLiveApp(t, &shellProvider{})
+	h.app.Screen = Session
+	tt := ui.NewTester(h.app.View, 1600, 1000)
+	tt.Frame()
+	if err := tt.Click("Open right sidebar"); err != nil {
+		t.Fatalf("open right sidebar: %v", err)
+	}
+	tt.Frame()
+	panel, ok := tt.Find("Right sidebar")
+	if !ok {
+		t.Fatalf("right sidebar has no label: %q", tt.Texts())
+	}
+	if panel.W < rightSidebarW-1 || panel.W > rightSidebarW+1 {
+		t.Fatalf("default panel width = %v, want the brand %v", panel.W, rightSidebarW)
+	}
+	grip, ok := tt.Find("Resize right sidebar")
+	if !ok {
+		t.Fatalf("right sidebar has no resize grip: %q", tt.Texts())
+	}
+
+	// Drag the grip left: the right-docked panel widens.
+	y := grip.Y + 200
+	tt.Press(grip.X+grip.W/2, y)
+	tt.Move(grip.X+grip.W/2-120, y)
+	tt.Release(grip.X+grip.W/2-120, y)
+	tt.Frame()
+	wide, _ := tt.Find("Right sidebar")
+	if wide.W < panel.W+100 {
+		t.Fatalf("dragged panel width = %v, want > %v", wide.W, panel.W+100)
+	}
+
+	// The grip keeps the panel resizable with the keyboard: Left grows it by
+	// the theme's spacing step.
+	if err := tt.Click("Resize right sidebar"); err != nil {
+		t.Fatalf("focus resize grip: %v", err)
+	}
+	tt.Key(0, ui.KeyLeft)
+	tt.Frame()
+	grown, _ := tt.Find("Right sidebar")
+	if grown.W <= wide.W {
+		t.Fatalf("Left on the grip did not widen the panel: %v -> %v", wide.W, grown.W)
+	}
+	tt.Key(0, ui.KeyRight)
+	tt.Frame()
+	shrunk, _ := tt.Find("Right sidebar")
+	if shrunk.W >= grown.W {
+		t.Fatalf("Right on the grip did not narrow the panel: %v -> %v", grown.W, shrunk.W)
+	}
+
+	// The panel keeps the main column its minimum at a small window.
+	h.app.setRightDockWidth(2000)
+	small := ui.NewTester(h.app.View, 900, 600)
+	small.Frame()
+	clamped, _ := small.Find("Right sidebar")
+	if clamped.W > 900-sidebarW-minMainW+1 {
+		t.Fatalf("clamped panel width = %v, want the main column to keep %v", clamped.W, minMainW)
+	}
+}
+
+// TestRenderRightSidebarNativePreview renders the branded right panel for
+// review: the Start page (its default landing state) and the Files tab, light
+// and dark, at the 1600x1000 design size. previewDir keeps ordinary runs in a
+// temporary directory; ZEOKEEL_UPDATE_PREVIEWS=1 refreshes docs/design/preview.
+func TestRenderRightSidebarNativePreview(t *testing.T) {
+	dir := previewDir(t)
+	for _, tc := range []struct {
+		name  string
+		theme string
+	}{
+		{"light", session.ThemeLight},
+		{"dark", session.ThemeDark},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			h := newLiveApp(t, &shellProvider{})
+			// A workspace with a readable file tree behind the Files tab.
+			writeTestFile(t, h.dir, "README.md", "# ZeoKeel\n")
+			writeTestFile(t, h.dir, "design/notes.md", "# notes\n")
+			writeTestFile(t, h.dir, "internal/main.go", "package main\n")
+			h.app.Language = LangZH
+			h.app.Screen = Session
+			h.app.rightOpen = true
+			if err := h.store.SetSetting(session.SettingTheme, tc.theme); err != nil {
+				t.Fatalf("theme setting: %v", err)
+			}
+			h.app.rightTab = startTab
+			writePreview(t, filepath.Join(dir, "right-sidebar-native-"+tc.name+".png"), h.app)
+			h.app.rightTab = filesTab
+			h.app.filesDir = ""
+			writePreview(t, filepath.Join(dir, "right-sidebar-files-"+tc.name+".png"), h.app)
+		})
+	}
+}
+
+// writePreview renders the app at the design size and writes the PNG.
+func writePreview(t *testing.T, path string, app *App) {
+	t.Helper()
+	img := ui.Render(app.View, 1600, 1000, 1)
+	f, err := os.Create(path)
+	if err != nil {
+		t.Fatalf("create %s: %v", path, err)
+	}
+	if err := png.Encode(f, img); err != nil {
+		f.Close()
+		t.Fatalf("encode %s: %v", path, err)
+	}
+	if err := f.Close(); err != nil {
+		t.Fatalf("close %s: %v", path, err)
+	}
+	if fi, err := os.Stat(path); err != nil || fi.Size() == 0 {
+		t.Fatalf("preview %s is empty: %v", path, err)
+	}
+	t.Logf("wrote %s", path)
 }

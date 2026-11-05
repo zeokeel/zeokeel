@@ -20,6 +20,11 @@ const (
 	// width before the main column falls below minMainW, so 280+400+220 fits
 	// the 900px minimum window instead of overflowing it.
 	minRightPanelW float32 = 220
+	// rightPanelShare is the share of the content column the docked right
+	// panel may take by default: 45%, capped by the brand's 560 DIP panel
+	// width (rightSidebarW). A user drag can widen it up to the room
+	// minMainW leaves.
+	rightPanelShare float32 = 0.45
 	// minHomeStackW keeps the Home hero and composer usable at 900px.
 	minHomeStackW float32 = 320
 	// narrowSideInset is the per-side inset DSH keeps at 1200x800 for the
@@ -68,8 +73,12 @@ func (a *App) contentWidth(c *ui.Context) float32 {
 	return avail
 }
 
-// rightSidebarWidth is the docked panel width: DSH's 720 at 1600x1000,
-// shrinking so at least minMainW stays for the screen behind it.
+// rightSidebarWidth is the docked inspector panel's brand width: the width the
+// user dragged it to, or else min(560, 45% of the content column). It always
+// leaves minMainW for the screen behind it and never narrows below
+// minRightPanelW, so the panel stays a usable column at the 900x600 minimum.
+// The 560 default is the brand panel token (rightSidebarW), not a value
+// sampled from another product's page.
 func (a *App) rightSidebarWidth(c *ui.Context) float32 {
 	w, _ := c.Size()
 	avail := w - sidebarW
@@ -77,14 +86,23 @@ func (a *App) rightSidebarWidth(c *ui.Context) float32 {
 		return 0
 	}
 	panel := rightSidebarW
-	if avail-panel < minMainW {
-		panel = avail - minMainW
+	if share := avail * rightPanelShare; panel > share {
+		panel = share
+	}
+	if dragged := a.rightPanelUI().dockWidth; dragged > 0 {
+		panel = dragged
+	}
+	if max := avail - minMainW; panel > max {
+		panel = max
 	}
 	if panel < minRightPanelW {
 		panel = minRightPanelW
 	}
 	if panel > avail {
 		panel = avail
+	}
+	if panel < 1 {
+		panel = 1
 	}
 	return panel
 }

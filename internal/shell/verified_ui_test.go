@@ -258,8 +258,8 @@ func TestPluginSwitchRendersOnAndOffState(t *testing.T) {
 // TestDarkSendControlUsesThemeFill covers the shared brand disabled Send
 // fill: live Home and live Session both paint the accent-derived idle tint
 // (sendIdleFill) on the enabled wrapper around the disabled native button, so
-// the retired pale-blue sample is gone from both screens and the dark fill
-// differs from the light one.
+// both screens share one brand idle look and the dark fill differs from the
+// light one.
 func TestDarkSendControlUsesThemeFill(t *testing.T) {
 	render := func(t *testing.T, screen Screen, dark bool) (*ui.Tester, *image.RGBA) {
 		t.Helper()
@@ -281,9 +281,6 @@ func TestDarkSendControlUsesThemeFill(t *testing.T) {
 	wantDark := rgbaOf(sendIdleFill(design.Dark()))
 	if wantDark == wantLight {
 		t.Fatalf("dark brand idle fill %v matches the light one %v", wantDark, wantLight)
-	}
-	if wantDark == rgbaOf(homeSendIdle) || wantLight == rgbaOf(homeSendIdle) {
-		t.Fatalf("the brand idle fill still equals the retired pale-blue sample %v", rgbaOf(homeSendIdle))
 	}
 	label := map[Screen]string{Home: "Send message", Session: "Send"}
 	for _, screen := range []Screen{Home, Session} {

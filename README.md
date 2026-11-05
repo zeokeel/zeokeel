@@ -40,11 +40,12 @@
 
 - 阶段 1（完成）：像素门禁与静态演示屏拆除，测试全部迁移 live fixture；品牌主题 `internal/brand`（logo 色板 + mygo `ui.Theme`）生效。见 [ADR 0001](docs/decisions/0001-retire-dsh-pixel-parity.md)、[ADR 0002](docs/decisions/0002-brand-theme-foundation.md)。
 - 阶段 2/3（完成）：**Home、Session、Sidebar、Settings、Plugins、Automation 六屏改用 ZeoKeel 品牌原生视觉**（mygo 原生控件 + Theme 令牌，去 DSH 文案/像素魔法值）；系统菜单栏与窗口状态持久化落地（[ADR 0003](docs/decisions/0003-desktop-shell-integration.md)）。
-- 设计与逐屏记录：[原生视觉方向](docs/design/native-ui.md)；可复现截图：[docs/design/preview/](docs/design/preview/)（浅/深色）。
+- 阶段 4（完成）：Trajectory / 内联搜索 / todo·team·plan 面板 / 右侧栏（Files·Terminal·Start）品牌化；**Markdown 迁移到 mygo `ui/markdown`**（代码高亮/表格/任务列表/流式/文本选中复制，净减 452 行）；**系统通知**（完成/失败/待审批，[ADR 0004](docs/decisions/0004-desktop-notifications.md)）；系统偏好 TextScale/HighContrast/ReduceMotion 与 2x DPI 冒烟。
+- 设计与逐屏记录：[原生视觉方向](docs/design/native-ui.md)；可复现截图：[docs/design/preview/](docs/design/preview/)（浅/深色，含 Trajectory 与右侧栏）。
 
 ![Session 原生视觉（浅色）](docs/design/preview/session-native-light.png)
 
-- 下一阶段：其余面板（Trajectory/右侧栏/搜索/面板）、markdown 换 mygo `ui/markdown`、桌面交互 P0 剩余（文本选择/系统通知/滚动条/DPI/TextScale）、设置独立窗口。`go build/vet/test` 全绿。
+- 下一阶段：工具卡内容原生化、设置独立窗口、通知后台会话/动作按钮、滚动条与真机 IME/a11y 矩阵、Trajectory 虚拟化（详见 [native-ui.md §16](docs/design/native-ui.md)）。`go build/vet/test` 全绿。
 
 ## 字标（已定）
 

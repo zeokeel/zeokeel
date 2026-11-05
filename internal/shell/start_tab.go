@@ -27,11 +27,6 @@ const sessionLogTTL = 500 * time.Millisecond
 // restart without a schema change.
 const settingTerminalShell = "terminal.shell"
 
-// startFolderTint is the Start card's folder glyph color from the DSH
-// reference design (retired 2026-11-05). It is a tint of
-// its own, not the warning status color.
-var startFolderTint = ui.Hex("#FFBC4D")
-
 // startTabState is the per-App state of the Start page and the shell
 // picker. App lives in app.go, which this change does not own, so the state
 // is keyed by the App like shellUIState and liveMenuState. Only the view
@@ -92,25 +87,27 @@ func (a *App) noteRightScreen() {
 	}
 }
 
-// startTabPanel is DSH's Start page: the three guide cards a fresh right
-// panel shows before the user picks a tab. Each card performs the action its
-// label promises; the terminal card also exposes Choose shell, as DSH does
-// beside "New terminal".
+// startTabPanel is the right panel's Start page: the guide a fresh panel shows
+// before the user picks a tab. The cards are brand surfaces on the theme's
+// spacing grid, and each performs the action its label promises; the terminal
+// card also exposes Choose shell.
 func (a *App) startTabPanel(c *ui.Context, t *design.Tokens) {
-	ui.Column(c).Grow(1).Padding(design.Space6, design.Space5).
-		Justify(ui.Center).Gap(design.Space3).Children(func() {
-		ui.Row(c).Justify(ui.Center).Padding(0, 0, design.Space2, 0).Children(func() {
-			ui.Row(c).Size(44, 44).Radius(design.RadiusMax).Background(t.BgHover).
-				Center().Children(func() {
-				ui.Icon(c, icons.Sparkles()).FontSize(22).TextColor(t.LabelTertiary)
+	th := t.Theme()
+	ui.Column(c).Grow(1).Padding(th.Space(6), th.Space(5)).
+		Justify(ui.Center).Gap(th.Space(2)).Children(func() {
+		ui.Row(c).Justify(ui.Center).Padding(0, 0, th.Space(2), 0).Children(func() {
+			ui.Row(c).Size(th.Space(11), th.Space(11)).Radius(th.Space(5.5)).
+				Background(t.BgHover).Center().Children(func() {
+				ui.Icon(c, icons.Sparkles()).Size(th.Space(5), th.Space(5)).
+					TextColor(t.Accent)
 			})
 		})
-		a.startCard(c, t, icons.Folder(), startFolderTint,
+		a.startCard(c, t, icons.Folder(), t.Accent,
 			a.T("files.workspace_files"),
 			a.tr("Browse files in this session's workspace", "浏览此会话工作区的文件"),
 			func() { a.rightTab = filesTab })
 		a.startTerminalCard(c, t)
-		a.startCard(c, t, icons.SessionLog(), t.LabelTertiary,
+		a.startCard(c, t, icons.SessionLog(), t.LabelSecondary,
 			a.tr("Session Log", "会话日志"),
 			a.tr("Read this session's raw event log (read-only)",
 				"查看当前会话的原始事件日志（只读）"),
@@ -118,69 +115,75 @@ func (a *App) startTabPanel(c *ui.Context, t *design.Tokens) {
 	})
 }
 
-// startCard is one guide card: a glyph, a title and a description. The whole
-// card is clickable, so the small description is not a dead target.
+// startCard is one guide card: a brand raised surface with a glyph disc, a
+// title and a description. The whole card is a native ButtonBase, so it takes
+// the focus and Enter/Space and the small description is not a dead target.
 func (a *App) startCard(c *ui.Context, t *design.Tokens, ic *ui.SVG, tint ui.Color,
 	title, description string, onClick func()) {
-	card := ui.Row(c).MinHeight(76).Padding(design.Space4, design.Space4).
-		Gap(design.Space3).Radius(design.RadiusMD).Border(1, t.BorderL2).
-		AlignItems(ui.Center).Role(ui.RoleButton).Focusable().Label(title)
+	th := t.Theme()
+	card := ui.ButtonBase(c).MinHeight(th.Space(19)).Padding(th.Space(4)).
+		Gap(th.Space(3)).Radius(th.Radius).Border(1, t.BorderL2).
+		Background(t.BgRaised).AlignItems(ui.Center).Justify(ui.Start).Label(title)
 	if card.Hovered() {
-		card = card.Background(t.BgHover)
+		card = card.Background(t.BgHover).Border(1, t.BorderL3)
 	}
 	card.Children(func() {
-		ui.Row(c).Size(28, 28).Center().Children(func() {
-			ui.Icon(c, ic).FontSize(20).TextColor(tint)
+		ui.Row(c).Size(th.Space(8), th.Space(8)).Radius(th.Space(4)).
+			Background(t.BgHover).Center().Children(func() {
+			ui.Icon(c, ic).Size(th.Space(4.5), th.Space(4.5)).TextColor(tint)
 		})
-		ui.Column(c).Grow(1).Gap(2).Children(func() {
-			ui.Text(c, title).FontSize(14).FixedLineHeight(20).FontWeight(600).
-				TextColor(t.LabelPrimary).MaxLines(1).Ellipsis("…")
-			ui.Text(c, description).FontSize(12).FixedLineHeight(17).
+		ui.Column(c).Grow(1).Gap(th.Space(1)).Children(func() {
+			ui.Text(c, title).FontSize(th.FontSize).FixedLineHeight(th.Space(5)).
+				FontWeight(600).TextColor(t.LabelPrimary).MaxLines(1).Ellipsis("…")
+			ui.Text(c, description).FontSize(th.FontSize - 2).FixedLineHeight(th.Space(4)).
 				TextColor(t.LabelTertiary).MaxLines(2)
 		})
 	})
 	card.OnClick(onClick)
 }
 
-// startTerminalCard is the New terminal guide card. Its chevron is DSH's
-// Choose shell menu; the card body opens the Terminal tab with the
-// remembered shell.
+// startTerminalCard is the New terminal guide card. Its chevron is the Choose
+// shell menu; the card body opens the Terminal tab with the remembered shell.
 func (a *App) startTerminalCard(c *ui.Context, t *design.Tokens) {
+	th := t.Theme()
 	st := a.startUI()
-	card := ui.Row(c).MinHeight(76).Padding(design.Space4, design.Space4).
-		Gap(design.Space3).Radius(design.RadiusMD).Border(1, t.BorderL2).
-		AlignItems(ui.Center).Role(ui.RoleButton).Focusable().
-		Label(a.T("files.new_terminal"))
+	label := a.T("files.new_terminal")
+	card := ui.ButtonBase(c).MinHeight(th.Space(19)).Padding(th.Space(4)).
+		Gap(th.Space(3)).Radius(th.Radius).Border(1, t.BorderL2).
+		Background(t.BgRaised).AlignItems(ui.Center).Justify(ui.Start).Label(label)
 	if card.Hovered() {
-		card = card.Background(t.BgHover)
+		card = card.Background(t.BgHover).Border(1, t.BorderL3)
 	}
 	card.Children(func() {
-		ui.Row(c).Size(28, 28).Center().Children(func() {
-			ui.Icon(c, icons.Terminal()).FontSize(20).TextColor(t.Accent)
+		ui.Row(c).Size(th.Space(8), th.Space(8)).Radius(th.Space(4)).
+			Background(t.BgHover).Center().Children(func() {
+			ui.Icon(c, icons.Terminal()).Size(th.Space(4.5), th.Space(4.5)).
+				TextColor(t.Accent)
 		})
-		ui.Column(c).Grow(1).Gap(2).Children(func() {
-			ui.Row(c).Gap(design.Space1).AlignItems(ui.Center).Children(func() {
-				ui.Text(c, a.T("files.new_terminal")).FontSize(14).FixedLineHeight(20).
+		ui.Column(c).Grow(1).Gap(th.Space(1)).Children(func() {
+			ui.Row(c).Gap(th.Space(1)).AlignItems(ui.Center).Children(func() {
+				ui.Text(c, label).FontSize(th.FontSize).FixedLineHeight(th.Space(5)).
 					FontWeight(600).TextColor(t.LabelPrimary)
-				// The chevron is its own menu-button control (not just a
-				// drawing inside the card's button), so Choose shell is
-				// reachable from the keyboard without activating the card.
-				chevron := ui.Row(c).Size(18, 18).Center().Radius(design.RadiusXS).
-					Label(a.tr("Choose shell", "选择 shell")).
-					Role(ui.RoleMenuButton).Focusable()
+				// The chevron is its own native menu button (not just a
+				// drawing inside the card), so Choose shell is reachable from
+				// the keyboard without activating the card.
+				choose := a.tr("Choose shell", "选择 shell")
+				chevron := ui.ButtonBase(c).Size(th.Space(4.5), th.Space(4.5)).
+					Center().Radius(design.RadiusXS).Label(choose).Tooltip(choose)
 				if chevron.Hovered() {
 					chevron = chevron.Background(t.BgHover)
 				}
 				chevron.Children(func() {
-					ui.Icon(c, icons.ChevronDown()).FontSize(13).TextColor(t.LabelTertiary)
+					ui.Icon(c, icons.ChevronDown()).Size(th.Space(3), th.Space(3)).
+						TextColor(t.LabelTertiary)
 				})
 				chevron.Expanded(st.shellMenuOpen)
 				chevron.OnClick(func() { st.shellMenuOpen = !st.shellMenuOpen })
 				ui.Popover(c, chevron, &st.shellMenuOpen, func() { a.shellPickerMenu(c, t) })
 			})
 			ui.Text(c, a.tr("Run commands in the Session workspace",
-				"在会话工作区运行命令")).FontSize(12).FixedLineHeight(17).
-				TextColor(t.LabelTertiary).MaxLines(2)
+				"在会话工作区运行命令")).FontSize(th.FontSize - 2).
+				FixedLineHeight(th.Space(4)).TextColor(t.LabelTertiary).MaxLines(2)
 		})
 	})
 	card.OnClick(func() { a.rightTab = terminalTab })
@@ -322,33 +325,35 @@ func (a *App) setTerminalShell(c *ui.Context, name string) {
 }
 
 // shellPickerMenu is the Choose shell menu: the installed shells with the
-// current one marked. Choosing one persists immediately.
+// current one marked, as native menu-radio ButtonBases so the menu keeps the
+// keyboard, focus and checked semantics mygo gives menus.
 func (a *App) shellPickerMenu(c *ui.Context, t *design.Tokens) {
+	th := t.Theme()
 	st := a.startUI()
-	ui.Column(c).Width(230).Gap(1).Children(func() {
-		ui.Text(c, a.tr("Choose shell", "选择 shell")).FontSize(11).
-			FixedLineHeight(16).TextColor(t.LabelTertiary).
-			Padding(design.Space1, design.Space2)
-		current := a.terminalShellName()
+	current := a.terminalShellName()
+	ui.Column(c).Width(th.Space(50)).Gap(th.Space(0.5)).Children(func() {
+		ui.Text(c, a.tr("Choose shell", "选择 shell")).FontSize(th.FontSize-3).
+			FixedLineHeight(th.Space(4)).TextColor(t.LabelTertiary).
+			Padding(th.Space(1), th.Space(2))
 		for _, sh := range terminalShells() {
 			sh := sh
 			label := a.shellMenuLabel(sh)
-			row := ui.Row(c).Height(32).PaddingX(design.Space2).Gap(design.Space2).
-				Radius(design.RadiusSM).AlignItems(ui.Center).
-				Label(label).Role(ui.RoleMenuItemRadio).
-				Checked(sh.name == current).Focusable()
+			row := ui.ButtonBase(c).Height(th.Space(9)).PaddingX(th.Space(2)).
+				Gap(th.Space(2)).Radius(design.RadiusSM).Label(label).
+				Role(ui.RoleMenuItemRadio).Checked(sh.name == current)
 			if row.Hovered() || sh.name == current {
 				row = row.Background(t.BgHover)
 			}
 			row.Children(func() {
-				ui.Column(c).Grow(1).Gap(0).Children(func() {
-					ui.Text(c, label).FontSize(13).
-						FixedLineHeight(18).TextColor(t.LabelPrimary)
-					ui.Text(c, sh.path).FontSize(10).FixedLineHeight(14).
-						TextColor(t.LabelTertiary)
+				ui.Column(c).Grow(1).Children(func() {
+					ui.Text(c, label).FontSize(th.FontSize - 1).
+						FixedLineHeight(th.Space(4.5)).TextColor(t.LabelPrimary)
+					ui.Text(c, sh.path).FontSize(th.FontSize - 4).
+						FixedLineHeight(th.Space(3.5)).TextColor(t.LabelTertiary)
 				})
 				if sh.name == current {
-					ui.Text(c, "✓").FontSize(12).TextColor(t.Accent)
+					ui.Icon(c, icons.Reload()).Size(th.Space(3), th.Space(3)).
+						TextColor(t.Accent)
 				}
 			})
 			row.OnClick(func() {
@@ -380,21 +385,24 @@ func (a *App) reloadFiles(c *ui.Context) {
 }
 
 // sessionLogPanel is the read-only Session Log tab. It renders the persisted
-// event trace the controller exposes (store-backed), so a session's raw
-// events stay inspectable without the experimental inspector.
+// event trace the controller exposes (store-backed) in the brand panel, so a
+// session's raw events stay inspectable without the experimental inspector.
 func (a *App) sessionLogPanel(c *ui.Context, t *design.Tokens) {
-	ui.Row(c).Height(34).PaddingX(design.Space3).Gap(design.Space2).
+	th := t.Theme()
+	ui.Row(c).Height(th.Space(9)).PaddingX(th.Space(3)).Gap(th.Space(2)).
 		AlignItems(ui.Center).BorderWidth(0, 0, 1, 0).BorderColor(t.BorderL2).
 		Children(func() {
-			ui.Icon(c, icons.SessionLog()).FontSize(15).TextColor(t.LabelSecondary)
-			ui.Text(c, a.tr("Session Log", "会话日志")).FontSize(13).
-				FixedLineHeight(20).FontWeight(600).TextColor(t.LabelPrimary).Grow(1)
-			ui.Text(c, a.tr("Read-only", "只读")).FontSize(11).FixedLineHeight(16).
-				TextColor(t.LabelTertiary)
+			ui.Icon(c, icons.SessionLog()).Size(th.Space(3.5), th.Space(3.5)).
+				TextColor(t.LabelSecondary)
+			ui.Text(c, a.tr("Session Log", "会话日志")).FontSize(th.FontSize - 1).
+				FixedLineHeight(th.Space(4.5)).FontWeight(600).
+				TextColor(t.LabelPrimary).Grow(1)
+			ui.Badge(c, a.tr("Read-only", "只读"))
 		})
 	if a.Ctrl == nil {
-		a.rightEmpty(c, t, a.tr("The Session Log needs the live session service",
-			"会话日志需要实时会话服务"))
+		a.rightEmpty(c, t, icons.SessionLog(),
+			a.tr("The Session Log needs the live session service",
+				"会话日志需要实时会话服务"))
 		return
 	}
 	sessionID := a.Ctrl.CurrentSessionID()
@@ -402,7 +410,7 @@ func (a *App) sessionLogPanel(c *ui.Context, t *design.Tokens) {
 		sessionID = snap.SessionID
 	}
 	if sessionID == "" {
-		a.rightEmpty(c, t, a.tr("No session selected", "未选择会话"))
+		a.rightEmpty(c, t, icons.SessionLog(), a.tr("No session selected", "未选择会话"))
 		return
 	}
 	st := a.startUI()
@@ -415,42 +423,46 @@ func (a *App) sessionLogPanel(c *ui.Context, t *design.Tokens) {
 		st.logErr = err
 	}
 	if st.logErr != nil {
-		a.rightEmpty(c, t, fmt.Sprintf(a.tr("Could not read the event log: %v",
+		a.rightEmpty(c, t, icons.SessionLog(), fmt.Sprintf(a.tr("Could not read the event log: %v",
 			"无法读取事件日志：%v"), st.logErr))
 		return
 	}
 	events := st.logEvents
 	if len(events) == 0 {
-		a.rightEmpty(c, t, a.tr("No events recorded yet", "暂无事件记录"))
+		a.rightEmpty(c, t, icons.Data(), a.tr("No events recorded yet", "暂无事件记录"))
 		return
 	}
 	ui.Scroll(c).Grow(1).Children(func() {
-		ui.Column(c).Padding(design.Space1, design.Space2, design.Space2, design.Space2).
-			Gap(1).Children(func() {
-			for _, event := range events {
-				a.sessionLogRow(c, t, event)
-			}
-		})
+		ui.Column(c).Padding(th.Space(1), th.Space(2), th.Space(2)).Gap(th.Space(0.5)).
+			Children(func() {
+				for _, event := range events {
+					a.sessionLogRow(c, t, event)
+				}
+			})
 	})
 }
 
-// sessionLogRow is one event: sequence, local time, type and a bounded
-// payload preview. The log is read-only, so the row has no handler.
+// sessionLogRow is one event: sequence, local time, type and a bounded payload
+// preview. The log is read-only, so the row has no handler.
 func (a *App) sessionLogRow(c *ui.Context, t *design.Tokens, event store.Event) {
-	ui.Row(c).MinHeight(30).Padding(design.Space1, design.Space2).
-		Gap(design.Space2).Radius(design.RadiusXS).AlignItems(ui.Start).
+	th := t.Theme()
+	ui.Row(c).MinHeight(th.Space(8)).Padding(th.Space(1), th.Space(2)).
+		Gap(th.Space(2)).Radius(design.RadiusXS).AlignItems(ui.Start).
 		Children(func() {
-			ui.Text(c, fmt.Sprintf("#%d", event.Seq)).FontSize(10).
-				FixedLineHeight(15).TextColor(t.LabelTertiary).Width(34)
-			ui.Text(c, event.TS.Local().Format("15:04:05")).FontSize(10).
-				FixedLineHeight(15).TextColor(t.LabelTertiary).Width(54)
-			ui.Column(c).Grow(1).Gap(1).Children(func() {
-				ui.Text(c, event.Type).FontSize(12).FixedLineHeight(17).
-					FontWeight(500).TextColor(t.LabelPrimary).MaxLines(1).
-					Ellipsis("…")
+			ui.Column(c).Width(th.Space(11)).Children(func() {
+				ui.Text(c, fmt.Sprintf("#%d", event.Seq)).FontSize(th.FontSize - 4).
+					FixedLineHeight(th.Space(3.5)).TextColor(t.LabelTertiary)
+				ui.Text(c, event.TS.Local().Format("15:04:05")).FontSize(th.FontSize - 4).
+					FixedLineHeight(th.Space(3.5)).TextColor(t.LabelTertiary)
+			})
+			ui.Column(c).Grow(1).Gap(th.Space(0.5)).Children(func() {
+				ui.Text(c, event.Type).FontSize(th.FontSize - 2).
+					FixedLineHeight(th.Space(4.5)).FontWeight(500).
+					TextColor(t.LabelPrimary).MaxLines(1).Ellipsis("…")
 				if preview := eventPayloadPreview(event.Payload); preview != "" {
-					ui.Text(c, preview).FontSize(11).FixedLineHeight(15).
-						TextColor(t.LabelTertiary).MaxLines(2).Ellipsis("…")
+					ui.Text(c, preview).FontSize(th.FontSize - 3).
+						FixedLineHeight(th.Space(4)).TextColor(t.LabelTertiary).
+						MaxLines(2).Ellipsis("…")
 				}
 			})
 		})

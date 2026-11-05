@@ -22,6 +22,7 @@ func newLiveSnapshotApp(t *testing.T, screen Screen, snap *state.Snapshot) *live
 	// The renderers keep scroll/motion/menu state in package maps keyed by
 	// *App; clear them in case the allocator reuses a dead App's address.
 	sessionRenderStates.Delete(h.app)
+	markdownStyles.Delete(h.app)
 	liveStates.Delete(h.app)
 	liveUIStates.Delete(h.app)
 	liveMenuStates.Delete(h.app)
@@ -77,6 +78,9 @@ func TestMarkdownRendersHeadingsEmphasisAndLists(t *testing.T) {
 		"1.", "2.", "first step", "second step",
 		"quoted guidance",
 		`func main() {`, `println("hi")`,
+		// ui/markdown renders fenced code as a code block with a language
+		// label and a copy button instead of plain monospace text.
+		"Code, go", "Copy code",
 	} {
 		if !tt.HasText(want) {
 			t.Fatalf("markdown output missing %q; texts: %v", want, tt.Texts())
@@ -93,14 +97,80 @@ func TestMarkdownRendersHeadingsEmphasisAndLists(t *testing.T) {
 	}
 }
 
-func TestMarkdownPreservesUnsupportedConstructs(t *testing.T) {
+// TestMarkdownTableRendersCells covers the GFM table extension the migration
+// adopts: a pipe table shows as a table whose cells are real text labels, and
+// the source pipes/delimiter row no longer leak into the message.
+func TestMarkdownTableRendersCells(t *testing.T) {
 	table := "| name | value |\n|------|-------|\n| a    | 1     |"
-	html := "<div class=\"raw\">kept as text</div>"
-	tt, _ := m6MarkdownApp(t, table+"\n\n"+html)
-	for _, want := range []string{"| name | value |", "|------|-------|", "| a    | 1     |", html} {
+	tt, _ := m6MarkdownApp(t, table)
+	for _, want := range []string{"name", "value", "a", "1"} {
 		if !tt.HasText(want) {
-			t.Fatalf("unsupported construct lost its source %q; texts: %v", want, tt.Texts())
+			t.Fatalf("table cell %q missing; texts: %v", want, tt.Texts())
 		}
+	}
+	for _, marker := range []string{"| name", "|------", "| a "} {
+		if tt.HasText(marker) {
+			t.Fatalf("table source %q rendered literally; texts: %v", marker, tt.Texts())
+		}
+	}
+}
+
+// TestMarkdownTaskList covers the GFM task list extension: the items' text is
+// shown (the checkboxes are controls, not text).
+func TestMarkdownTaskList(t *testing.T) {
+	tt, _ := m6MarkdownApp(t, "- [x] done task\n- [ ] todo task")
+	for _, want := range []string{"done task", "todo task"} {
+		if !tt.HasText(want) {
+			t.Fatalf("task list item %q missing; texts: %v", want, tt.Texts())
+		}
+	}
+}
+
+// TestMarkdownRawHTMLKeptAsSource covers the fallback for raw HTML: without an
+// HTML hook the library shows an HTML block as its source, so content is not
+// dropped.
+func TestMarkdownRawHTMLKeptAsSource(t *testing.T) {
+	html := "<div class=\"raw\">kept as text</div>"
+	tt, _ := m6MarkdownApp(t, html)
+	if !tt.HasText(html) {
+		t.Fatalf("raw HTML lost its source %q; texts: %v", html, tt.Texts())
+	}
+}
+
+// TestMarkdownStreamsThenSettles covers the stream path: an assistant message
+// is rendered with markdown.Stream while the turn runs and markdown.View once
+// it is complete, in the same message position, so the text survives the
+// switch and no Markdown marker leaks either way.
+func TestMarkdownStreamsThenSettles(t *testing.T) {
+	text := "# Streaming heading\n\nA **bold** sentence with `code`."
+	snap := state.NewSnapshot()
+	snap.Messages = []state.Message{{MsgID: "a1", Role: state.RoleAssistant, Text: text}}
+	snap.Phase = state.PhaseRunning
+	h := newLiveSnapshotApp(t, Session, snap)
+	tt := ui.NewTester(h.app.View, 1600, 1000)
+	tt.Frame()
+	for _, want := range []string{"Streaming heading", "bold", "code"} {
+		if !tt.HasText(want) {
+			t.Fatalf("streamed Markdown missing %q; texts: %v", want, tt.Texts())
+		}
+	}
+	if tt.HasText("**") || tt.HasText("# ") {
+		t.Fatalf("streamed Markdown leaked markers: %v", tt.Texts())
+	}
+
+	// The same message, now complete: markdown.View takes over in place and
+	// the finished text is still the same.
+	idle := *snap
+	idle.Phase = state.PhaseIdle
+	h.app.SetSnapshot(&idle)
+	tt.Frame()
+	for _, want := range []string{"Streaming heading", "bold", "code"} {
+		if !tt.HasText(want) {
+			t.Fatalf("settled Markdown missing %q; texts: %v", want, tt.Texts())
+		}
+	}
+	if tt.HasText("**") {
+		t.Fatalf("settled Markdown leaked markers: %v", tt.Texts())
 	}
 }
 

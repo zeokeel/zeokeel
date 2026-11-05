@@ -341,7 +341,7 @@ func (a *App) liveMessage(c *ui.Context, t *design.Tokens, m state.Message, key 
 				c.AnimationFrame()
 			}
 		}
-		body.Children(func() { a.markdownBlocks(c, t, m.Text) })
+		body.Children(func() { a.markdownMessage(c, t, m.Text, streaming) })
 		if !streaming {
 			a.liveMessageActions(c, t, m, key, snap)
 		}

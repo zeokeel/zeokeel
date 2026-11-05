@@ -81,10 +81,11 @@ func (a *App) teamGoalBanner(c *ui.Context, t *design.Tokens) {
 	if goal.Status == tools.GoalCompleted {
 		color = t.Success
 	}
-	ui.Column(c).Key("goal-banner").Gap(design.Space2).
-		Padding(design.Space3).Radius(design.RadiusMD).
+	th := t.Theme()
+	ui.Column(c).Key("goal-banner").Gap(th.Space(2)).
+		Padding(th.Space(3)).Radius(th.Radius).
 		Background(t.BgHover).Children(func() {
-		ui.Row(c).Gap(design.Space2).AlignItems(ui.Center).Children(func() {
+		ui.Row(c).Gap(th.Space(2)).AlignItems(ui.Center).Children(func() {
 			ui.Text(c, a.T("team.goal")).FontSize(11).FixedLineHeight(16).
 				TextColor(t.LabelTertiary).Grow(1)
 			ui.Text(c, a.goalStatusLabel(goal.Status)).FontSize(10).
@@ -94,15 +95,14 @@ func (a *App) teamGoalBanner(c *ui.Context, t *design.Tokens) {
 		})
 		ui.Text(c, goal.Objective).FontSize(13).FixedLineHeight(20).
 			TextColor(t.LabelPrimary).MaxLines(2).Ellipsis("…")
-		barWidth := float32(240)
-		ui.Row(c).Width(barWidth).Height(4).Radius(design.RadiusMax).
-			Background(t.BorderL2).Children(func() {
-			fill := barWidth * float32(progress) / 100
-			if fill < 1 {
-				fill = 1
-			}
-			ui.Box(c).Width(fill).Height(4).Radius(design.RadiusMax).
-				Background(color)
+		// The progress bar spans the banner instead of a fixed sample width,
+		// so it follows the transcript measure at every window size.
+		track := ui.Row(c).FillWidth().Height(th.Space(1)).
+			Radius(design.RadiusMax).Background(t.BorderL2)
+		track.Children(func() {
+			fill := ui.Box(c).Height(th.Space(1)).Radius(design.RadiusMax).
+				WidthPercent(float32(progress)).Background(color)
+			_ = fill
 		})
 		if len(goal.Steps) > 0 {
 			ui.Text(c, a.T("team.steps", len(goal.Steps))).FontSize(10).
@@ -119,20 +119,27 @@ func (a *App) teamPanel(c *ui.Context, t *design.Tokens) {
 	if len(members) == 0 {
 		return
 	}
-	ui.Column(c).Key("team-panel").Width(272).Shrink(0).
-		Padding(design.Space4).Gap(design.Space2).
+	th := t.Theme()
+	ui.Column(c).Key("team-panel").Width(th.Space(68)).Shrink(0).
+		Padding(th.Space(4)).Gap(th.Space(2)).Background(t.BgSidebar).
 		BorderWidth(0, 0, 0, 1).BorderColor(t.BorderL2).Children(func() {
-		ui.Row(c).AlignItems(ui.Center).Gap(design.Space2).Children(func() {
+		ui.Row(c).AlignItems(ui.Center).Gap(th.Space(2)).Children(func() {
 			ui.Text(c, a.T("team.team")).FontSize(12).FixedLineHeight(18).
 				FontWeight(600).TextColor(t.LabelPrimary).Grow(1)
 			a.agentModeSummary(c, t)
-			ui.Text(c, a.T("team.count", len(members))).FontSize(11).
-				FixedLineHeight(18).TextColor(t.LabelTertiary)
+			count := ui.Row(c).Height(th.Space(5)).PaddingX(th.Space(1.5)).
+				Radius(design.RadiusMax).Background(t.BgHover).AlignItems(ui.Center)
+			count.Children(func() {
+				ui.Text(c, a.T("team.count", len(members))).FontSize(11).
+					FixedLineHeight(16).TextColor(t.LabelTertiary)
+			})
 		})
 		ui.Scroll(c).Grow(1).Children(func() {
-			for _, member := range members {
-				a.teammateRow(c, t, member)
-			}
+			ui.Column(c).Gap(th.Space(1)).Children(func() {
+				for _, member := range members {
+					a.teammateRow(c, t, member)
+				}
+			})
 		})
 	})
 }
@@ -140,26 +147,28 @@ func (a *App) teamPanel(c *ui.Context, t *design.Tokens) {
 // teammateRow draws one subagent: a glyph, its name and status, and the task it
 // was given. The status word is the tool's own status ("completed").
 func (a *App) teammateRow(c *ui.Context, t *design.Tokens, member tools.Teammate) {
+	th := t.Theme()
 	color := t.LabelTertiary
+	statusColor := t.LabelTertiary
 	if member.Status == tools.SubagentStatusCompleted {
-		color = t.Success
+		color, statusColor = t.Success, t.Success
 	}
-	ui.Row(c).Gap(design.Space2).AlignItems(ui.Start).
-		Padding(2, 0, 2, 0).Children(func() {
-		ui.Text(c, "◆").FontSize(12).FixedLineHeight(18).
-			TextColor(color).NoWrap()
-		ui.Column(c).Gap(0).Grow(1).Children(func() {
-			ui.Row(c).Gap(design.Space2).AlignItems(ui.Center).Children(func() {
-				ui.Text(c, member.Name).FontSize(12).FixedLineHeight(18).
-					FontWeight(600).TextColor(t.LabelPrimary).Grow(1).
-					NoWrap().Ellipsis("…")
-				ui.Text(c, a.teamStatusLabel(member.Status)).FontSize(10).FixedLineHeight(16).
-					TextColor(t.LabelTertiary).NoWrap()
-			})
-			if member.Task != "" {
-				ui.Text(c, member.Task).FontSize(11).FixedLineHeight(16).
-					TextColor(t.LabelSecondary).MaxLines(2).Ellipsis("…")
-			}
+	card := ui.Column(c).FillWidth().Gap(th.Space(1)).
+		Padding(th.Space(2)).Radius(design.RadiusSM).
+		Background(t.BgRaised).Border(1, t.BorderL2)
+	card.Children(func() {
+		ui.Row(c).Gap(th.Space(1.5)).AlignItems(ui.Center).Children(func() {
+			ui.Box(c).Size(th.Space(1.5), th.Space(1.5)).Radius(th.Space(0.75)).
+				Background(color).Shrink(0)
+			ui.Text(c, member.Name).FontSize(12).FixedLineHeight(18).
+				FontWeight(600).TextColor(t.LabelPrimary).Grow(1).
+				NoWrap().Ellipsis("…")
+			ui.Text(c, a.teamStatusLabel(member.Status)).FontSize(10).
+				FixedLineHeight(16).TextColor(statusColor).NoWrap()
 		})
+		if member.Task != "" {
+			ui.Text(c, member.Task).FontSize(11).FixedLineHeight(16).
+				TextColor(t.LabelSecondary).MaxLines(2).Ellipsis("…")
+		}
 	})
 }

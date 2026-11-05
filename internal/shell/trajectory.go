@@ -120,32 +120,69 @@ func (a *App) liveTabButton(c *ui.Context, t *design.Tokens, tabs ui.TabsParts, 
 }
 
 // trajectoryPane is the Trajectory tab: the session's persisted event trace as
-// a scrollable timeline, oldest first (newest last). Each row is clickable; the
-// raw payload opens below it in a collapsed detail.
+// a scrollable brand timeline, oldest first (newest last). Each row is
+// clickable; the raw payload opens below it in a tinted detail block. The
+// timeline is one centered column on the brand spacing grid, matching the
+// transcript and composer measure.
 func (a *App) trajectoryPane(c *ui.Context, t *design.Tokens, snap *state.Snapshot) {
 	events, err := a.trajectoryEvents(snap)
 	entries := buildTrajectory(events)
-	ui.Column(c).Grow(1).Padding(design.Space6).Gap(design.Space3).Children(func() {
-		ui.Row(c).Gap(design.Space2).AlignItems(ui.Center).Children(func() {
-			ui.Text(c, a.T("session.trajectory")).FontSize(13).FontWeight(600).TextColor(t.LabelPrimary)
-			ui.Text(c, a.T("session.trajectory_count", len(entries), len(events))).
-				FontSize(11).TextColor(t.LabelTertiary).Grow(1)
-		})
-		if err != nil {
-			ui.Text(c, a.T("session.trajectory_load_error", err.Error())).FontSize(12).TextColor(t.Danger)
-			return
-		}
-		if len(entries) == 0 {
-			ui.Text(c, a.T("session.trajectory_empty")).
-				FontSize(12).TextColor(t.LabelTertiary)
-			return
-		}
-		ui.Scroll(c).Grow(1).Children(func() {
-			for _, entry := range entries {
-				a.trajectoryRow(c, t, entry)
-			}
-		})
+	th := t.Theme()
+	ui.Column(c).Grow(1).AlignItems(ui.Center).Padding(th.Space(4)).Children(func() {
+		ui.Column(c).Width(a.trajectoryColumnWidth(c, t)).Grow(1).Gap(th.Space(3)).
+			Children(func() {
+				ui.Row(c).Gap(th.Space(2)).AlignItems(ui.Center).Children(func() {
+					ui.Text(c, a.T("session.trajectory")).FontSize(13).FontWeight(600).
+						TextColor(t.LabelPrimary)
+					count := ui.Row(c).Height(th.Space(5)).PaddingX(th.Space(2)).
+						Radius(design.RadiusMax).Background(t.BgHover).AlignItems(ui.Center)
+					count.Children(func() {
+						ui.Text(c, a.T("session.trajectory_count", len(entries), len(events))).
+							FontSize(11).FixedLineHeight(16).TextColor(t.LabelTertiary)
+					})
+				})
+				if err != nil {
+					ui.Text(c, a.T("session.trajectory_load_error", err.Error())).
+						FontSize(12).TextColor(t.Danger)
+					return
+				}
+				if len(entries) == 0 {
+					ui.Text(c, a.T("session.trajectory_empty")).
+						FontSize(12).TextColor(t.LabelTertiary)
+					return
+				}
+				ui.Scroll(c).Grow(1).Children(func() {
+					ui.Column(c).Gap(th.Space(0.5)).Children(func() {
+						for _, entry := range entries {
+							a.trajectoryRow(c, t, entry)
+						}
+					})
+				})
+			})
 	})
+}
+
+// trajectoryColumnWidth is the centered timeline measure: 225 spacing units
+// (900 DIPs), clamped to the main area with a spacing inset so the timeline
+// stays on screen at narrow windows and with the right panel docked.
+func (a *App) trajectoryColumnWidth(c *ui.Context, t *design.Tokens) float32 {
+	th := t.Theme()
+	width := th.Space(225)
+	if avail := a.contentWidth(c); avail > 0 {
+		if limit := avail - th.Space(12); width > limit {
+			width = limit
+		}
+		if width > avail {
+			width = avail
+		}
+	}
+	if width < th.Space(80) {
+		width = th.Space(80)
+	}
+	if width < 1 {
+		width = 1
+	}
+	return width
 }
 
 // trajectoryEvents returns the stored event trace for the current session,
@@ -172,37 +209,61 @@ func (a *App) trajectoryEvents(snap *state.Snapshot) ([]store.Event, error) {
 	return events, err
 }
 
-// trajectoryRow draws one timeline entry. Clicking the row toggles its raw
-// payload; the color is the event class, so message, tool, approval, usage,
+// trajectoryRow draws one timeline entry: a time rail, the event-class dot,
+// the localized label, an optional count pill and the compact detail. Clicking
+// the row toggles its raw payload, which opens in a brand-tinted monospace
+// block. The dot's color is the event class, so message, tool, approval, usage,
 // status and error rows are distinguishable at a glance.
 func (a *App) trajectoryRow(c *ui.Context, t *design.Tokens, entry trajectoryEntry) {
+	th := t.Theme()
 	open := a.uiState().expandedRaw[entry.Seq]
 	color := trajectoryColor(t, entry)
-	button := ui.Button(c, "").Padding(design.Space1).Radius(design.RadiusSM).
-		Transition(design.ColorTransition())
-	button.Children(func() {
-		ui.Row(c).Gap(design.Space2).AlignItems(ui.Start).Children(func() {
-			ui.Box(c).Size(6, 6).Radius(3).Background(color).Margin(0, 5, 0, 0)
+	row := ui.ButtonBase(c).FillWidth().PaddingX(th.Space(2)).
+		PaddingY(th.Space(1.5)).Radius(design.RadiusSM).Gap(th.Space(2)).
+		AlignItems(ui.Start).Justify(ui.Start).
+		Transition(design.ColorTransition()).
+		Label(a.trajectoryLabelText(entry.Label))
+	if row.Hovered() {
+		row = row.Background(t.BgHover)
+	}
+	row.Children(func() {
+		// Time rail: a fixed measure keeps the labels aligned down the list.
+		ui.Row(c).Width(th.Space(14)).Shrink(0).Children(func() {
 			ui.Text(c, entry.At.Local().Format("15:04:05")).FontSize(11).
-				FixedLineHeight(18).TextColor(t.LabelTertiary).Width(56).NoWrap()
-			ui.Text(c, a.trajectoryLabelText(entry.Label)).FontSize(12).FixedLineHeight(18).FontWeight(500).
-				TextColor(color).NoWrap()
-			if entry.Count > 1 {
-				ui.Text(c, fmt.Sprintf("×%d", entry.Count)).FontSize(11).
-					FixedLineHeight(18).TextColor(t.LabelTertiary).NoWrap()
-			}
+				FixedLineHeight(18).TextColor(t.LabelTertiary).NoWrap()
+		})
+		ui.Box(c).Size(th.Space(2), th.Space(2)).Radius(th.Space(1)).
+			Background(color).Margin(0, th.Space(1.5), 0, 0)
+		ui.Column(c).Grow(1).Gap(th.Space(0.5)).Children(func() {
+			ui.Row(c).Gap(th.Space(2)).AlignItems(ui.Center).Children(func() {
+				ui.Text(c, a.trajectoryLabelText(entry.Label)).FontSize(12).
+					FixedLineHeight(18).FontWeight(500).TextColor(color).NoWrap()
+				if entry.Count > 1 {
+					ui.Text(c, fmt.Sprintf("×%d", entry.Count)).FontSize(11).
+						FixedLineHeight(18).TextColor(t.LabelTertiary).NoWrap()
+				}
+				caret := "›"
+				if open {
+					caret = "⌄"
+				}
+				ui.Text(c, caret).FontSize(11).TextColor(t.LabelTertiary).NoWrap()
+			})
 			if entry.Detail != "" {
 				ui.Text(c, entry.Detail).FontSize(12).FixedLineHeight(18).
-					TextColor(t.LabelSecondary).Grow(1).MaxLines(2).Ellipsis("…")
+					TextColor(t.LabelSecondary).MaxLines(2).Ellipsis("…")
+			}
+			if open && entry.Raw != "" {
+				raw := ui.Column(c).FillWidth().Background(t.BgHover).
+					Radius(design.RadiusSM).Padding(th.Space(2))
+				raw.Children(func() {
+					ui.Text(c, entry.Raw).Font(monoFont).FontSize(11).
+						FixedLineHeight(16).TextColor(t.LabelTertiary).
+						MaxLines(8).Ellipsis("…")
+				})
 			}
 		})
-		if open {
-			ui.Text(c, entry.Raw).FontSize(11).FixedLineHeight(16).
-				TextColor(t.LabelTertiary).MaxLines(8).Ellipsis("…").
-				Margin(design.Space4, 0, 0, 0)
-		}
 	})
-	if button.Clicked() {
+	if row.Clicked() {
 		uiState := a.uiState()
 		uiState.expandedRaw[entry.Seq] = !open
 	}

@@ -83,7 +83,10 @@ func (a *App) updateSettings(c *ui.Context, mutate func(*session.Settings)) {
 }
 
 // themeTokens resolves the appearance setting over the desktop's current
-// appearance: Light and Dark force a theme, System follows the desktop.
+// appearance: Light and Dark force a theme, System follows the desktop. The
+// desktop preferences are then applied on top of the brand tokens, so
+// HighContrast strengthens the borders and secondary text the screens paint
+// with (see preferences.go).
 func (a *App) themeTokens(c *ui.Context) *design.Tokens {
 	dark := c.Theme().Dark
 	switch a.currentSettings().Theme {
@@ -92,10 +95,13 @@ func (a *App) themeTokens(c *ui.Context) *design.Tokens {
 	case session.ThemeDark:
 		dark = true
 	}
+	var tokens *design.Tokens
 	if dark {
-		return design.Dark()
+		tokens = design.Dark()
+	} else {
+		tokens = design.Light()
 	}
-	return design.Light()
+	return shellTokensForPreferences(tokens, c.Preferences())
 }
 
 // conversationTextSize is the design helper conversation text goes through:
@@ -109,17 +115,22 @@ func conversationTextSize(cfg session.Settings) float32 {
 
 // ConversationFontSize is the size conversation text uses. Session renderers
 // call it for message bodies so the Font size setting scales chat text only.
+// The desktop TextScale is applied on top of the user's 14/16px choice: the
+// app setting is relative, and the desktop's accessibility text size still
+// has to reach the conversation (see preferences.go for the merge rule).
 func (a *App) ConversationFontSize() float32 {
-	return conversationTextSize(a.currentSettings())
+	return scaleShellText(conversationTextSize(a.currentSettings()), a.shellTextScaleOf())
 }
 
 // ConversationLineHeight returns the matching line box: the brand's 24px at
-// 14px, 28px at 16px.
+// 14px, 28px at 16px, scaled by the desktop TextScale together with the size
+// so the line box keeps its proportions.
 func (a *App) ConversationLineHeight() float32 {
-	if a.ConversationFontSize() >= float32(session.FontSizeLarge) {
-		return 28
+	line := float32(24)
+	if a.currentSettings().FontSize >= session.FontSizeLarge {
+		line = 28
 	}
-	return 24
+	return scaleShellText(line, a.shellTextScaleOf())
 }
 
 // toolDetailsExpanded is the design helper for tool cards: Detailed starts

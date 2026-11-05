@@ -107,7 +107,7 @@ Session 是第二个 pilot 屏（2026-11-05 完成视觉重构），目标是验
 | 布局 | 删除 `sessHeaderH=76`、`sessGutter`、`877/845/98` 等固定像素：transcript 与 composer 共用品牌列 `sessColumnW = sessComposerW = 180 × Space1`（720 DIPs），header 高度由内容与 28 DIP tab 行（`sessTabsH = 7 × Space1`）决定；窄窗/停靠面板由 layout.go 的共享 clamp 处理 |
 | Composer | 与 Home 共用 `composer_native.go`：`brandComposerCard`（Panel、`Radius=10`、单层轻阴影、Space 网格内边距）+ `brandComposerInput`（原生 `ui.TextArea`，卡片承载 hover/焦点 accent 边框）+ `brandIconButton` + `brandSendButton`；`/` 命令、`@` 提及、附件 chips、Enter/Shift+Enter、审批卡位置全部保留 |
 | 发送/停止 | 原生 `ButtonBase` + accent 填充（运行中为 Stop 方块图标，仍可访问 "Stop"）；空 draft 时禁用并用品牌 accent 低透明度 idle 填充（`sendIdleFill`，Home/Session 统一，删掉旧 DSH `#B2C7F4` 采样与浅蓝禁用态） |
-| 消息流 | 用户消息为品牌 tint 气泡（accent 10% over Surface、`Radius=10`、最大 82% 列宽）；助手消息保留自研 Markdown 渲染（见遗留 1），底部动作条改为时间 + ghost Copy/Retry/反馈 + 完成摘要；工具卡改为 ghost 可点击行 + 品牌 tint 详情块，状态点/图标尺寸全部走 `Theme.Space` 与语义色 |
+| 消息流 | 用户消息为品牌 tint 气泡（accent 10% over Surface、`Radius=10`、最大 82% 列宽）；助手消息用 mygo `ui/markdown` 渲染（`markdown.Stream` 流式、`markdown.View` 完成；见 §13），底部动作条改为时间 + ghost Copy/Retry/反馈 + 完成摘要；工具卡改为 ghost 可点击行 + 品牌 tint 详情块，状态点/图标尺寸全部走 `Theme.Space` 与语义色 |
 | 截图测试 | `TestRenderSessionNativePreview`（`session_live_test.go`）用 live fixture + 一条完成回合的 snapshot（用户气泡、Markdown 回答、两个工具卡、usage）渲染 1600×1000 浅/深两张到本目录 `preview/`，可复现 |
 
 ### 4.2 保留与不回退
@@ -117,7 +117,7 @@ Session 是第二个 pilot 屏（2026-11-05 完成视觉重构），目标是验
 
 ### 4.3 遗留
 
-1. **Markdown 渲染仍为自研**（`internal/shell/markdown.go`，628 行）：本轮只做包围层视觉，未替换为 mygo `ui/markdown`——替换需要重做 markdown 测试与交互（代码块复制/流式），且 markdown.go 不在本轮写入范围；建议单独立项评估。
+1. ~~**Markdown 渲染仍为自研**（`internal/shell/markdown.go`，628 行）~~ **已完成（2026-11-05，§13）**：自研解析器删除，助手消息改用 mygo `ui/markdown`（流式/表格/任务列表/代码高亮+复制/选中复制随库获得）；工具卡详情文本仍为纯文本（见 §13 遗留）。
 2. Trajectory 屏内部行视觉仍是旧样式（本轮只品牌化了 Chat/Trajectory tab 行，trajectory.go 其余部分未动）。
 3. Home 的 composer 仍有一份本地实现（未改成共享 `composer_native.go`）；`homeSendIdle` 旧常量待清理。
 4. 后续逐屏继续：Sidebar → Settings/Plugins/Automation（见 §5）。
@@ -243,23 +243,160 @@ Plugins 与 Automation 是两个"列表页"屏，本轮把它们的 DSH 复刻�
 2. 折叠 rail 的截图未单独产出（`chrome_test` 覆盖行为）；如评审需要可加一张 `sidebar-rail-*.png`。
 3. Sidebar 的树是视觉缩进而非 a11y 嵌套（见 9.2-2）；如需屏幕阅读器读出层级，可在后续把工作区/会话分组成 section 或换 `Tree`。
 
-## 10. 剩余路线（2026-11-05 更新）
+## 12. 系统偏好与高 DPI（P0-2，2026-11-05）
 
-已完成：Home、Session、Sidebar、Settings、Plugins、Automation 六屏/区的品牌原生视觉；系统菜单栏与窗口状态持久化（ADR 0003）。
+> 目标：跟随桌面无障碍偏好（`ui.Preferences`：TextScale / HighContrast / ReduceMotion），并验证 2x DPI。实现见 `internal/shell/preferences.go`，测试见 `preferences_test.go`。
+
+### 12.1 合并规则（重要）
+
+| 偏好 | 规则 | 落点 |
+| --- | --- | --- |
+| `TextScale` | 主题基准字号 = `brand.FontSize(14) × clamp(scale, 0.5…2)` 并四舍五入到整 DIP；**会话正文** = 应用内字号设置（14/16）× 同一 scale，行高（24/28）按同比例缩放；缩放对两者是相乘关系（应用设置是相对偏好，系统放大仍生效）。品牌 type scale 中其它显式档位（markdown 标题、元数据等）本轮保持固定值，见 12.4 遗留。 | `shellTheme` / `themeTokens` / `ConversationFontSize` / `ConversationLineHeight` |
+| `HighContrast` | mygo 的 `Theme.follow` 只作用于默认主题；shell 用 `SetTheme` 设置品牌主题后由 `shellTheme` 复刻同一增强：`Border` 向 `Text` 混合 0.45、`TextMuted` 混合 0.4、`Focus` 不透明、`Scrollbar` alpha×1.6、滚动条加宽到 8 DIP。屏幕绘制用的 `design.Tokens` 同步增强：`BorderL2` +0.45 / `BorderL3` +0.6 / `LabelSecondary` +0.4 / `LabelTertiary` +0.3（向主文字色混合），浅/深色都朝更高对比方向。 | 同上 + `shellTokensForPreferences` |
+| `ReduceMotion` | 全局：`View` 顶部（`syncShellPreferences`）读偏好后调用 `Context.DisableAnimations()`，本帧所有 transition/`Animate` 立即到位；mygo 的 transition/`Animate` 本身也遵循该偏好。既有 Session 流式淡入的显式 `ReduceMotion` 检查保留；`Loop`/spinner 等语义"进行中"动效不受影响（mygo 语义）。 | `app.go` View 顶部 + `syncShellPreferences` |
+| `Accent`（系统强调色） | **不采纳**：ZeoKeel 品牌蓝/青是品牌识别的一部分，且品牌 `AccentText` 对比度已由 ADR 0002 色板校验（light 6.6:1 / dark 8.7:1）。记录为有意取舍。 | `shellTheme` 注释 + 测试 |
+
+### 12.2 高 DPI（2x）
+
+- 2x DPI 冒烟：`ui.Render(app.View, 1600, 1000, 2)` 输出 **3200×2000** 物理像素；`preferences_test.go` 的 `TestHighDPIRenderSmoke` 对 Home / Session 断言尺寸、采样色彩数（非空帧）并用 `ui.Tester.SetScale(2)` 断言关键控件仍在窗口内。
+- mygo 原生按 DIP 布局、按 scale 栅格化；品牌 UI 全部是文本 + SVG（无位图资产），2x 无重采样问题；4 DIP 网格保证 2x 下仍是整数设备像素。
+- headless 测试默认 scale=1；需要 2x 的测试用 `ui.Render(..., 2)` 或 `Tester.SetScale(2)`，不新增共享 helper（`livetest_helpers_test.go` 未改）。
+
+### 12.3 滚动条策略（调研 + 最小实现）
+
+- mygo v0.7.4：滚动条是**悬浮指示器**（指针在容器上时显示，6 DIP 宽，`Theme.Scrollbar` 着色），没有"常显/系统偏好"抽象——`ui.Preferences` 不含滚动条偏好；按容器可用 `Element.Scrollbars(false)` 关闭，`ScrollbarInsets` 调整位置。
+- shell 策略（本轮）：保持原生悬浮滚动条，不做常显 gutter；HighContrast 下加宽到 8 DIP + thumb alpha×1.6（`scrollbarPolicyForPreferences`），满足可发现性最小增强。`shellScrollbarPolicy` 结构记录 `Overlay/Width/Contrasted`，供后续平台偏好接入。
+- 下一轮（需屏幕 owner 配合）：若 mygo 增加"总是显示滚动条"平台偏好，接入 `scrollbarPolicyForPreferences` 并设置 `Theme.ScrollbarWidth`/常显；对纯手势容器（如转录区）评估 `Scrollbars(false)`，避免与自定义滚动提示重复。
+
+### 12.4 遗留
+
+1. 品牌 type scale 的固定档位（markdown 标题/列表、元数据）未随 TextScale 缩放：需要 `design` 包导出可缩放的 type 辅助（当前任务写范围不含 `internal/design`）。下一轮建议由 design owner 提供 `design.TypeMetricsScaled(role, scale)`。
+2. 系统 Accent 不采纳（品牌取舍，见 12.1）；若未来提供"跟随系统强调色"开关，可在设置页加选项后复用 `shellTheme`。
+3. 滚动条常显/平台偏好尚未实现（12.3），只做了 HighContrast 最小增强。
+4. `ui.Preferences.ReduceTransparency`（原生文档有，`ui.Preferences` 结构无）未接入；窗口材质后续随桌面壳 P1 处理。
+
+## 13. Markdown 渲染：迁移到 mygo `ui/markdown`（2026-11-05 完成）
+
+自研 Markdown 解析器（`internal/shell/markdown.go`，628 行：块解析 + 内联 spans + 各类元素渲染）已删除，改为对 mygo 官方 `ui/markdown` 的 106 行薄封装（`markdown.go`）。净变化：实现 **-522 行**，测试 +70 行，合计 **-452 行**；助手消息的流式/表格/任务列表/代码高亮与复制/选中复制随库获得。
+
+### 12.1 能力对照
+
+| 能力 | 迁移前（自研） | 迁移后（`ui/markdown`） |
+| --- | --- | --- |
+| 标题/段落/粗斜体/行内代码/链接/有序无序列表/引用/分隔线 | 自研解析与渲染 | CommonMark 对等（标题层级、列表 marker、引用条等由库 Theme 控制） |
+| 代码块 | 纯文本 panel（无高亮、无复制） | **语法高亮**（`editor` tokenizer）+ 语言标签 + **Copy code 按钮** |
+| 表格 | 把源码原样当段落显示 | **GFM 表格**（表头/单元格/边框） |
+| 任务列表 | 源码文本 | **checkbox 任务列表** |
+| 删除线/自动链接/脚注/数学 | 不支持 | 解析支持（`parser.Default` = GFM + 脚注 + 数学；数学无渲染 hook 时显示 TeX 源） |
+| 流式 | 每帧全量重解析 | `markdown.Stream` 增量解析（只解析新增文本、heal 半截语法），完成后 `markdown.View` 原位接管 |
+| 选中/复制 | 纯文本不可选 | 文本可选中，右键菜单复制（文本/HTML/Markdown） |
+| 图片 | 不显示 | 显示 alt 文本（未接 `Options.LoadImage`，不发起网络/IO） |
+| 原始 HTML | 源码文本显示 | 源码文本显示（未接 `Options.HTML`，内容不丢） |
+
+### 12.2 实现要点
+
+- 调用点：`session_live.go` 的助手消息按 `streaming` 选择 `markdown.Stream` / `markdown.View`（同一消息位置，解析状态延续）；`plan_ui.go` 等静态 Markdown 继续走 `markdownBlocks`（内部为 `markdown.View`），调用签名不变。
+- 配置：每个 App 一份缓存的 `markdown.Options`（`markdownStyles` 包级 map，键为 `*App`，与其它 UI 状态 map 同模式）；只在**明暗主题或会话字号变化**时重建。`Theme` 由 `markdown.DefaultTheme(品牌 ui.Theme)` 派生，套用会话字号（14/16）与既有行高节奏（24/28），代码字体沿用 `monoFont`（SF Mono 栈）。
+- 动效：`Reveal = {Unit: AtOnce, Fade: -1}`。Session 已有整条消息的流式淡入上移（`streamShown`/`design.StreamFrom`），关闭库的逐词 reveal 以避免双动画，保持迁移前节奏与 motion 测试意图。
+- 安全/降级：不设 `OnLink`/`LoadImage`/`Math`/`HTML` hook；未知语法与 HTML 显示源码，内容不丢、错误输入不崩（测试覆盖）。
+
+### 12.3 测试与预览
+
+- `markdown_test.go` 重写/更新：标题/强调/列表/引用/行内代码/链接、表格单元格、任务列表、代码块语言标签+Copy、原始 HTML 源码、流式→完成切换、畸形内联保留字符、未闭合围栏保留内容、段落行高。命令：`go test -run 'TestMarkdown|TestUsage|TestTool' ./internal/shell`。
+- 回归：Plan 卡片 Markdown、Session live/流式/motion（settle 一致性、流式帧）、窄窗 transcript 不溢出等定向测试通过。
+- 预览：`ZEOKEEL_UPDATE_PREVIEWS=1 go test -run 'TestRenderSessionNativePreview' ./internal/shell` 重新生成 `preview/session-native-{light,dark}.png` 并已 `read_image` 自检。
+
+### 12.4 遗留
+
+1. 工具卡详情文本仍为纯文本（command/file/search 用 mono，其余普通字，`MaxLines(10)` 截断）——工具输出可能极大且不保证是 Markdown，迁移需要配套截断/裁剪策略，记入后续。
+2. 工具卡结果中的代码没有 Copy 按钮（迁移前也没有），随工具卡原生化再评估。
+3. 图片只显示 alt 文本；需要展示工具/消息内图片时接 `Options.LoadImage`。
+4. 数学公式无渲染 hook（显示 TeX 源）；会话文本选择未跨消息共享（`ShareSelection=false`），与桌面交互 P0"文本可选+右键"项一起做更合适。
+
+## 14. 剩余面板（第六批，2026-11-05 完成）
+
+本轮收尾四组面板/面：Trajectory 屏内部行、内联会话搜索 + 搜索弹层、todo/team/plan 侧面板。
+
+### 14.1 落地要点
+
+| 区域 | 实现 |
+| --- | --- |
+| Trajectory | 居中品牌列（`Space(225)`=900 DIP，按主区宽 clamp）；时间轨 `Space(14)` + 事件色点 + 本地化标签 + `×count` pill；每行 `ButtonBase` ghost（hover tint、键盘可达）；raw payload 展开为 `BgHover` 圆角 mono 块；标题 + 条数 pill |
+| 内联搜索 | 原生 `TextInputBase` + 搜索图标 + 常驻品牌清除按钮（**取舍**：mygo `SearchField` 只在 query 非空时生成清除按钮，无法满足常驻的 `Clear search` 标签、a11y 与回归测试；输入本身仍是原生文本控件，保留键盘/Esc/Enter）；结果行 ghost `ButtonBase`、当前会话 `BgHover`、archived 用 muted pill |
+| 搜索弹层 | 品牌面板（`RadiusLG`、单层阴影、`Space(145)` 宽）；原生 `SearchField`（Enter 打开 / Esc 关闭 / ↑↓ 选择不变）；筛选 chips 品牌描边 + 选中 accent tint；结果行 accent 选中条 + ghost 归档按钮 |
+| View options | 品牌 popover：`Space(67)` 宽、28 DIP 菜单项、可聚焦 checkable 行（RoleMenuItemCheckBox 不变） |
+| todo 面板 | `BgSidebar` inspector 面板（`Space(68)` 宽、左分隔线）；header + 计数 pill + 细分进度条；状态 mark：空环 / in-progress accent 点 / completed success ✓；完成项删除线 |
+| team 面板 | 同 inspector 面板；成员为 `BgRaised` 卡片 + 状态点 + 名称/状态 + 任务；目标 banner 品牌 tint + **全宽**进度条（删除固定 240px），完成态 success |
+| plan | header 计划模式 toggle 改为品牌 chip（accent tint + 勾选框 + 小字开关态，`RoleSwitch`/键盘不变）；plan review 卡宽 = 品牌 composer 列；Approve 沿用品牌 primary，Exit 改 ghost 按钮；question card / artifacts 卡同批品牌化（composer 列宽、tint 卡、`FillWidth` 左对齐） |
+| 通用 | 删除固定像素与采样色，全部改 `Theme.Space/Rem/Radius` 与 brand 语义色；无新增 i18n key（复用现有 key）；键盘导航/Esc/方向键/Enter、勾选/折叠/滚动/窄窗、a11y Label/Role/Focusable 全部保留 |
+
+### 14.2 截图
+
+`TestRenderTrajectoryNativePreview` → [preview/trajectory-native-light.png](preview/trajectory-native-light.png) / [preview/trajectory-native-dark.png](preview/trajectory-native-dark.png)。预览走 `previewDir(t)`：普通测试/CI 写 `t.TempDir()`，只有 `ZEOKEEL_UPDATE_PREVIEWS=1` 才写 `docs/design/preview`；已 `read_image` 自检（1600×1000，中文默认，事件含 tool_start 展开态）。
+
+### 14.3 遗留
+
+1. 右侧栏（Files/Terminal/Start）品牌化仍在其独立任务；Home/Session composer 收敛到 `composer_native.go` 仍待办。
+2. Trajectory 事件很多时仍是普通 `Scroll`（未虚拟化，与迁移前一致）；如需大 trace 性能再评估 `ui.List`。
+3. 搜索高亮目前是行选中（accent 条 + `BgHover`），标题内命中字符的逐字符高亮未做（store 查询只返回会话，逐字符高亮需额外匹配策略与 XSS 无关的纯文本 span 拼接）。
+
+## 15. 右侧栏（Files / Terminal / Start，第七批，2026-11-05 完成）
+
+右侧栏从「手搓 720px DSH 面板」换成品牌 inspector 列：响应式宽度 + 可拖拽边界、原生的 header 控件、品牌化的 Tabs / Files / 文件预览 / Terminal / Start / 空态 / Session Log。功能与 a11y 不回退，Split/Fullscreen 的原生 `SplitPercent` 拖拽与最大化行为原样保留。
+
+![右侧栏 Start 浅色](preview/right-sidebar-native-light.png)
+
+![右侧栏 Start 深色](preview/right-sidebar-native-dark.png)
+
+![右侧栏 Files 浅色](preview/right-sidebar-files-light.png)
+
+![右侧栏 Files 深色](preview/right-sidebar-files-dark.png)
+
+### 15.1 落地要点
+
+| 项 | 实现 |
+| --- | --- |
+| 宽度 | 删除固定 720：停靠宽度 = 用户拖拽值，否则 `min(560, 主区 45%)`（`rightSidebarW`=560 品牌令牌 + `rightPanelShare`=45%），始终给背后屏幕留 `minMainW`(400)、不低于 `minRightPanelW`(220)；1600 宽窗口 560（主区 760），1200/1366 变窄，900×600 最小窗仍 220。`contentWidth` 与 Split/Fullscreen 逻辑共用同一 helper，`chrome_test` 的宽度断言继续成立 |
+| 可拖拽 | 面板左缘 4 DIP 的 `RoleSplitter` 抓取条（`CursorResizeEW`，hover/focus/drag 时显示 accent 边）：原生 `Element.Dragged()` 拖动改宽，`←/→` 键盘步进 `Space(4)`；宽度状态按 `*App` 键存在 `rightPanelStates`（App 在 app.go，本任务不拥有），内存态与左侧栏折叠一致。Split 模式沿用 app.go 的 `SplitPercent` 分隔条，不重复加抓取条 |
+| Header | New tab / Split / Fullscreen / Collapse 全部换成原生 `ButtonBase`（焦点环、Enter/Space、Tooltip、pressed）；激活态用 `BgHover` + `Accent` 图标；控件尺寸 `Space(7)`（窄面板 `Space(6)`），header 高 `Space(11)`、底分隔线；Threshold 用令牌：<520 收成图标 tabs、<320 用紧凑控件 |
+| Tabs | 仍是 `TabsBase`（RoleTabList/方向键/选中语义不变），品牌化为 28 DIP 高、`RadiusSM`、`BgHover` 选中底、`LabelPrimary/Secondary` 文字；窄面板只留图标但保留可访问名 |
+| Files | 面包屑改为原生 `ButtonBase` 段 + 固定 Reload 按钮，保留窄面板折叠（"Hidden path segments" ellipsis 菜单）与 24 DIP 目标；目录/文件行是原生 `ButtonBase`（品牌 line 图标，目录名保留 `/` 后缀）；预览页 = 面包屑 + 尺寸元数据行 + 原生 Close 控件 + 双向滚动文本，截断/超行提示沿用 `WarningText` |
+| Terminal | 工作目录 + `Choose shell` 原生菜单按钮 + Clear；输出用 `MonoFontStack`；输入行原生 `TextInput` + 品牌 `PrimaryButton` Run / 危险色 Stop；"no PTY" 提示保留 |
+| Start | 品牌 Start 页：居中圆形图形标 + 三张 `BgRaised` 引导卡（图标盘 + 标题 + 描述，整卡 `ButtonBase`），删除 DSH 采样色 `#FFBC4D`，文件夹/终端用 `Accent`、日志用 `LabelSecondary`；New terminal 卡的 Choose shell 仍是独立原生菜单按钮 |
+| Session Log | header = 图标 + 标题 + 原生 `Badge("Read-only")`；事件行 = 序号/时间 + 类型 + 有界 payload 预览；空态/错误用品牌空态 |
+| 空态 | `rightEmpty` 品牌化：`BgHover` 圆形图标盘 + `LabelTertiary` 说明，Files/Terminal/Session Log 复用 |
+| 视觉 | 面板底 `BgSidebar` + 左 1px `BorderL2`；所有间距/尺寸/圆角来自 `Theme.Space/Rem/Radius`；删除 720/44/34/28/24/196 等手调像素与采样色 |
+
+### 15.2 保留与不回退
+
+- 功能：Start 默认页与卡片跳转、Files 目录导航/面包屑/预览/256KB 截断/超长行限制/Reload/错误态、Terminal 运行/清空/Stop/Choose shell 持久化、Session Log 只读事件、New tab 菜单、Split/Fullscreen/折叠、Cmd/Ctrl+P 与 Ctrl+` 快捷键、More 菜单不受影响。
+- a11y/键盘：header 控件均为原生 ButtonBase（Tab/Enter/Space/焦点环）；Tabs 保留 TabsBase 语义；抓取条是 `RoleSplitter` + 键盘左右；文件行/面包屑/空态标签保留 `Label`。
+- 测试：`right_sidebar_test.go`、`right_sidebar_screens_test.go`、`start_tab_test.go`、`chrome_test.go` 的原断言全部保留并通过；`responsive_panels_test.go` 的面包屑折叠与 Reload 锚定在 900×600 下仍成立（见 15.3-1 的宽度冲突说明）。
+
+### 15.3 遗留 / 已知冲突
+
+1. **`responsive_panels_test.go:117 TestAutomationActionsRemainUsableWithDockedPanel` 与新的响应式宽度冲突**：该测试把 Automation 页列右界硬编码为 `632`（前提是 1200/1366 宽窗口下主区恰好 400），而本任务的品牌宽度在这些窗口给出主区 506/526，页列居中后 action 跑到 x≈583..687。测试不在本任务写范围，需由 owner 改成按实际 `contentWidth`/面板 rect 计算，或确认接受新几何。
+2. 抓取条的宽度状态是内存态（不持久化，与左侧栏折叠一致）；如需记住面板宽度，可写入 `ui.right_panel_width` settings row。
+3. Terminal 仍是简单命令运行器（无 PTY/persistent shell），视觉品牌化未改变执行模型。
+4. Files 分支折叠菜单在极窄（<220）时不出现（面板本身有最小宽度保证）。
+
+## 16. 剩余路线（2026-11-05 第二轮后更新）
+
+已完成：Home、Session、Sidebar、Settings、Plugins、Automation、Trajectory、内联搜索/todo/team/plan 面板、右侧栏（Files/Terminal/Start）、系统菜单栏与窗口状态（ADR 0003）、系统通知（ADR 0004）、系统偏好与 2x DPI（§12）、Markdown 迁移到 mygo `ui/markdown`（§13）、Home/Session composer 收敛到 `composer_native.go`。
 
 剩余（按优先级）：
 
-1. **其余面板视觉**：Trajectory 屏内部行、右侧栏（Files/Terminal/Start）品牌化、`session_search.go` 内联搜索行/结果行（换原生 `SearchField`/`List`）、todo/team/plan 面板、Home/Session composer 收敛到 `composer_native.go`。
-2. **markdown 换 mygo `ui/markdown`**：流式/表格/代码复制/选中复制随库获得，删除自研 `markdown.go`（单独一项，需回归流式与工具卡）。
-3. **桌面交互 P0 剩余**：文本可选 + 右键 Copy/Select All、系统通知（turn 完成/失败/审批）、滚动条策略、2x DPI 回归、系统 TextScale/HighContrast 接线。
-4. **桌面交互 P1**：设置独立窗口、popover/tooltip 越界与焦点行为、窗口级菜单快捷键补齐、DPI/字体真机矩阵。
-5. **a11y/平台细节**：Sidebar a11y 嵌套（`ui.Tree` 或 section）、纯键盘全流程、VoiceOver/Narrator 冒烟、IME 真机验证。
+1. **工具卡内容原生化**：工具结果/详情仍为纯文本（MaxLines 10，无 Copy）；可接 `ui/markdown` + `ui.editor` 代码视图（与消息流一致）。
+2. **桌面交互 P1**：设置独立窗口（当前为应用内 overlay）、popover/tooltip 越界与焦点行为、通知 ID 替换/动作按钮、后台会话 turn 完成通知（当前 OnUpdate 只派发当前会话，需 controller 后台事件钩子）。
+3. **滚动条与窗口细节**：mygo v0.7.4 只有 hover overlay（无全局常显偏好），当前策略保留 overlay + HighContrast 增强（§12.3）；如需 Windows 常显滚动条，需框架能力或自绘。
+4. **a11y/平台细节**：Sidebar a11y 嵌套（`ui.Tree`/section）、纯键盘全流程、VoiceOver/Narrator 冒烟、IME 真机验证、2x/1.5x DPI 真机矩阵。
+5. **性能**：Trajectory 未虚拟化、超长会话渲染 profiling；markdown 增量解析已有，可补基准。
 
-## 11. 验收口径
+## 17. 验收口径
 
 | 维度 | 验收 |
 | --- | --- |
 | 品牌 | 界面无 DSH 产品文案（`Into the Unknown`/`Preview`/鲸鱼）；品牌资产只用 `logo/` |
 | 令牌 | 新代码不出现新的 DSH 采样色/魔法几何；颜色/间距/圆角走 brand/design |
-| 测试 | `go test ./internal/shell` 绿；交互/a11y 断言保留；截图 headless 可复现 |
+| 测试 | `go build/vet/gofmt/test ./...` 绿；交互/a11y 断言保留；截图 headless 可复现、普通测试不污染工作树 |
 | 观感 | 1600×1000 截图评审通过（浅/深）；信息层级清晰、密度比现状略松、像原生桌面应用 |

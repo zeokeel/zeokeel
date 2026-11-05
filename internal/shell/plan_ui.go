@@ -122,22 +122,37 @@ func (a *App) planHeaderToggle(c *ui.Context, t *design.Tokens) {
 	if on {
 		stateText = a.menuText("On", "开")
 	}
+	th := t.Theme()
 	label := a.menuText("Plan mode", "计划模式") + ": " + stateText
-	row := ui.Row(c).Height(22).PaddingX(design.Space2).Gap(design.Space1).
-		Radius(design.RadiusSM).Border(1, t.BorderL2).AlignItems(ui.Center).
-		Label(label).Value(label).Role(ui.RoleSwitch).Checked(on).Focusable()
+	row := ui.ButtonBase(c).Height(th.Space(7)).PaddingX(th.Space(2)).
+		Gap(th.Space(1.5)).Radius(design.RadiusSM).AlignItems(ui.Center).
+		Label(label).Value(label).Role(ui.RoleSwitch).Checked(on)
+	switch {
+	case on:
+		row = row.Background(t.Accent.Alpha(0.10).Over(t.BgRaised)).Border(1, t.Accent)
+	case row.Hovered():
+		row = row.Background(t.BgHover).Border(1, t.BorderL2)
+	default:
+		row = row.Border(1, t.BorderL2)
+	}
+	color, textColor := t.LabelTertiary, t.LabelSecondary
 	if on {
-		row = row.Background(t.BgHover).BorderColor(t.Accent)
+		color, textColor = t.Accent, t.Accent
 	}
 	row.Children(func() {
-		glyph, color := "□", t.LabelTertiary
+		// A small brand check box mirrors the persisted on/off state.
+		box := ui.Row(c).Size(th.Space(2.5), th.Space(2.5)).Center().
+			Radius(th.Space(0.5)).Border(1.2, color).Shrink(0)
 		if on {
-			glyph, color = "☑", t.Accent
+			box = box.Border(0, t.Accent).Background(t.Accent)
+			box.Children(func() {
+				ui.Text(c, "✓").FontSize(8).FontWeight(700).
+					TextColor(t.AccentText).NoWrap()
+			})
 		}
-		ui.Text(c, glyph).FontSize(11).FixedLineHeight(20).TextColor(color).NoWrap()
 		ui.Text(c, a.menuText("Plan mode", "计划模式")).FontSize(12).
-			FixedLineHeight(22).TextColor(color).NoWrap()
-		ui.Text(c, stateText).FontSize(10).FixedLineHeight(22).
+			FixedLineHeight(20).FontWeight(500).TextColor(textColor).NoWrap()
+		ui.Text(c, stateText).FontSize(10).FixedLineHeight(20).
 			TextColor(t.LabelTertiary).NoWrap()
 	})
 	if row.Clicked() {
@@ -153,7 +168,8 @@ func (a *App) planHeaderToggle(c *ui.Context, t *design.Tokens) {
 // clears plan mode and continues with one submitted turn; Exit only clears it.
 func (a *App) planReviewCard(c *ui.Context, t *design.Tokens, artifact tools.Artifact) {
 	markdown := strings.TrimSpace(artifact.Markdown)
-	a.menuFrame(c, t, 868, func() {
+	th := t.Theme()
+	a.menuFrame(c, t, a.sessionComposerWidthFor(c), func() {
 		ui.Row(c).Gap(design.Space2).AlignItems(ui.Center).Children(func() {
 			ui.Text(c, a.menuText("Plan review", "计划审阅")).FontSize(12).FixedLineHeight(18).
 				TextColor(t.LabelTertiary).Grow(1)
@@ -171,16 +187,24 @@ func (a *App) planReviewCard(c *ui.Context, t *design.Tokens, artifact tools.Art
 			ui.Text(c, a.menuText("The presented plan has no inline content.",
 				"展示的计划没有内联内容。")).FontSize(12).TextColor(t.LabelTertiary)
 		}
-		ui.Row(c).Gap(design.Space2).AlignItems(ui.Center).Children(func() {
+		ui.Row(c).Gap(th.Space(2)).AlignItems(ui.Center).Children(func() {
 			approve := design.Apply(ui.Button(c, a.menuText("Approve", "批准")), t.PrimaryButton())
 			if approve.Clicked() {
 				if err := a.approvePlan(); err != nil {
 					c.Toast(err.Error())
 				}
 			}
-			exit := ui.Button(c, a.menuText("Exit plan mode", "退出计划模式")).
-				Height(38).PaddingX(design.Space4).Radius(design.RadiusSM).
-				Border(1, t.BorderL2).Background(t.BgBase).TextColor(t.LabelSecondary)
+			exitLabel := a.menuText("Exit plan mode", "退出计划模式")
+			exit := ui.ButtonBase(c).Height(th.Space(9)).PaddingX(th.Space(4)).
+				Radius(design.RadiusSM).Border(1, t.BorderL2).
+				AlignItems(ui.Center).Justify(ui.Start).Label(exitLabel)
+			if exit.Hovered() {
+				exit = exit.Background(t.BgHover)
+			}
+			exit.Children(func() {
+				ui.Text(c, exitLabel).FontSize(13).FixedLineHeight(20).
+					TextColor(t.LabelSecondary)
+			})
 			if exit.Clicked() {
 				if err := a.exitPlanMode(); err != nil {
 					c.Toast(err.Error())

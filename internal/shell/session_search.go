@@ -219,18 +219,34 @@ func (a *App) closeInlineSearch() {
 	a.inlineQuery = ""
 }
 
-// sidebarSearchField is the expanded inline search row: a task input labelled
-// for assistive technology and DSH's Clear search button.
+// sidebarSearchField is the expanded inline search row: a native text input
+// with the search magnifier and a brand clear button, all on the theme's
+// spacing grid. It keeps a persistent, labelled Clear control (mygo's
+// SearchField only shows its own clear button while the query is non-empty),
+// which is what the keyboard and assistive-technology flow and the
+// regression tests rely on.
 func (a *App) sidebarSearchField(c *ui.Context, t *design.Tokens) {
-	label := a.tr("Search session names", "搜索会话名称")
-	ui.Row(c).Height(36).Margin(0, 8, 0, 12).PaddingX(design.Space2).
-		Gap(design.Space1).AlignItems(ui.Center).Children(func() {
-		input := ui.TextInput(c, &a.inlineQuery).Label(label).AutoFocus().Grow(1)
+	th := t.Theme()
+	row := ui.Row(c).Height(th.Space(9)).
+		Margin(0, th.Space(2), 0, th.Space(3)).
+		PaddingX(th.Space(2)).Gap(th.Space(1.5)).AlignItems(ui.Center).
+		Background(t.BgRaised).Border(1, t.BorderL2).Radius(design.RadiusSM)
+	row.Children(func() {
+		ui.Icon(c, icons.Search()).Size(th.Space(3.75), th.Space(3.75)).
+			TextColor(t.LabelTertiary).Shrink(0)
+		input := ui.TextInputBase(c, &a.inlineQuery).
+			Label(a.tr("Search session names", "搜索会话名称")).
+			Placeholder(a.T("search.search_sessions")).
+			AutoFocus().Grow(1)
 		input.OnChange(func() { a.searchIndex = 0 })
-		clear := ui.Row(c).Size(24, 24).Center().
-			Label(a.tr("Clear search", "清除搜索")).Role(ui.RoleButton).Focusable()
+		clearLabel := a.tr("Clear search", "清除搜索")
+		clear := ui.ButtonBase(c).Size(th.Space(4), th.Space(4)).Center().
+			Radius(design.RadiusSM).Label(clearLabel).Tooltip(clearLabel).Shrink(0)
+		if clear.Hovered() {
+			clear = clear.Background(t.BgHover)
+		}
 		clear.Children(func() {
-			ui.Text(c, "×").FontSize(14).TextColor(t.LabelTertiary)
+			ui.Text(c, "×").FontSize(14).TextColor(t.LabelTertiary).NoWrap()
 		})
 		clear.OnClick(func() { a.inlineQuery = "" })
 	})
@@ -248,31 +264,35 @@ func (a *App) searchResultsFor(query string) []store.Session {
 	return a.filterSessions(sessions)
 }
 
-// inlineSearchResults replaces the sidebar list with the matching sessions.
+// inlineSearchResults replaces the sidebar list with the matching sessions:
+// ghost result rows on the brand grid, the current session highlighted and
+// archived sessions marked with a muted pill.
 func (a *App) inlineSearchResults(c *ui.Context, t *design.Tokens) {
+	th := t.Theme()
 	results := a.searchResultsFor(a.inlineQuery)
-	ui.Column(c).PaddingX(design.Space3).PaddingY(design.Space1).
-		Gap(2).Children(func() {
+	ui.Column(c).PaddingX(th.Space(3)).PaddingY(th.Space(1)).
+		Gap(th.Space(0.5)).Children(func() {
 		if len(results) == 0 {
 			ui.Text(c, a.T("search.no_matching_sessions")).
-				FontSize(12).TextColor(t.LabelTertiary).PaddingX(design.Space2)
+				FontSize(12).TextColor(t.LabelTertiary).PaddingX(th.Space(2))
 			return
 		}
 		for _, sess := range results {
 			item := sess
-			row := ui.Row(c).Height(32).Width(256).PaddingX(design.Space2).
-				Gap(design.Space2).AlignItems(ui.Center).Radius(design.RadiusSM).
-				Label("Open " + item.Title).Role(ui.RoleButton).Focusable()
+			row := searchResultRow(c, t, "Open "+item.Title).FillWidth()
 			if item.ID == a.Ctrl.CurrentSessionID() {
 				row = row.Background(t.BgHover)
 			}
 			row.Children(func() {
-				ui.Icon(c, icons.Folder()).FontSize(14).TextColor(t.LabelSecondary)
-				ui.Text(c, item.Title).FontSize(14).FixedLineHeight(20).
-					TextColor(t.LabelPrimary).Grow(1).MaxLines(1).Ellipsis("...")
+				ui.Icon(c, icons.Folder()).Size(th.Space(3.5), th.Space(3.5)).
+					TextColor(t.LabelSecondary)
+				ui.Text(c, item.Title).FontSize(13).FixedLineHeight(20).
+					TextColor(t.LabelPrimary).Grow(1).MaxLines(1).Ellipsis("…")
 				if item.Archived {
 					ui.Text(c, a.T("search.archived")).FontSize(10).
-						TextColor(t.LabelTertiary)
+						FixedLineHeight(16).TextColor(t.LabelTertiary).
+						PaddingX(th.Space(1.5)).Radius(design.RadiusMax).
+						Background(t.BgHover)
 				}
 			})
 			row.OnClick(func() {
@@ -281,6 +301,20 @@ func (a *App) inlineSearchResults(c *ui.Context, t *design.Tokens) {
 			})
 		}
 	})
+}
+
+// searchResultRow is the shared ghost row of a session search result: the
+// small brand corner, the hover tint and the row's accessible name. The caller
+// adds the width it needs: FillWidth in the sidebar list, Grow in a dialog row.
+func searchResultRow(c *ui.Context, t *design.Tokens, label string) ui.Element {
+	th := t.Theme()
+	row := ui.ButtonBase(c).Height(th.Space(8)).PaddingX(th.Space(2)).
+		Gap(th.Space(2)).AlignItems(ui.Center).Justify(ui.Start).
+		Radius(design.RadiusSM).Label(label)
+	if row.Hovered() {
+		row = row.Background(t.BgHover)
+	}
+	return row
 }
 
 // openSearch shows the session search modal with a clean query.
@@ -410,9 +444,11 @@ func boolString(v bool) string {
 // viewOptionsPopover is DSH's 268px sidebar popover with its three groups:
 // Group by, Order by and Filter sessions.
 func (a *App) viewOptionsPopover(c *ui.Context, t *design.Tokens) {
+	th := t.Theme()
 	group := normalizeGroupBy(a.groupBy)
 	archive := normalizeArchiveFilter(a.archiveFilter)
-	ui.Column(c).Width(268).Padding(design.Space2).Gap(2).Children(func() {
+	ui.Column(c).Width(th.Space(67)).Padding(th.Space(2)).
+		Gap(th.Space(0.5)).Children(func() {
 		a.viewOptionGroup(c, t, a.T("search.group_by"))
 		a.viewOptionItem(c, t, a.T("search.workspace"), group == groupByWorkspace, func() {
 			a.groupBy = groupByWorkspace
@@ -453,17 +489,20 @@ func (a *App) viewOptionsPopover(c *ui.Context, t *design.Tokens) {
 
 // viewOptionGroup is one dimmed section heading inside the popover.
 func (a *App) viewOptionGroup(c *ui.Context, t *design.Tokens, label string) {
+	th := t.Theme()
 	ui.Text(c, label).FontSize(11).FixedLineHeight(16).
-		TextColor(t.LabelTertiary).Padding(design.Space1, design.Space2, 0, design.Space2)
+		TextColor(t.LabelTertiary).Padding(th.Space(1), th.Space(2), 0, th.Space(2))
 }
 
 // viewOptionItem is one checkable row of the view options popover. It closes
 // the popover on every choice, as DSH does, and is a named, focusable menu
 // item so sort and archive filtering are reachable from the keyboard.
 func (a *App) viewOptionItem(c *ui.Context, t *design.Tokens, label string, selected bool, choose func()) {
-	row := ui.Row(c).Height(30).PaddingX(design.Space2).Gap(design.Space2).
-		Radius(design.RadiusSM).AlignItems(ui.Center).
-		Label(label).Role(ui.RoleMenuItemCheckBox).Checked(selected).Focusable()
+	th := t.Theme()
+	row := ui.ButtonBase(c).Height(th.Space(7)).PaddingX(th.Space(2)).
+		Gap(th.Space(2)).Radius(design.RadiusSM).AlignItems(ui.Center).
+		Justify(ui.Start).Label(label).Role(ui.RoleMenuItemCheckBox).
+		Checked(selected).Focusable()
 	if selected || row.Hovered() {
 		row = row.Background(t.BgHover)
 	}
@@ -472,7 +511,7 @@ func (a *App) viewOptionItem(c *ui.Context, t *design.Tokens, label string, sele
 		if selected {
 			mark = "✓"
 		}
-		ui.Text(c, mark).FontSize(12).TextColor(t.Accent).Width(12)
+		ui.Text(c, mark).FontSize(12).TextColor(t.Accent).Width(th.Space(3))
 		ui.Text(c, label).FontSize(13).FixedLineHeight(20).TextColor(t.LabelPrimary)
 	})
 	row.OnClick(func() {
@@ -495,16 +534,23 @@ func (a *App) sessionSearchDialog(c *ui.Context, t *design.Tokens) {
 			Background(t.Scrim()).Modal()
 		back.OnClick(func() { a.paletteOpen = false })
 		back.Children(func() {
-			panel := ui.Column(c).Width(580).Padding(design.Space5).
-				Background(settingsPanelColor(t)).Radius(design.RadiusXL).
+			th := t.Theme()
+			panel := ui.Column(c).Width(th.Space(145)).Padding(th.Space(5)).
+				Background(t.BgRaised).Radius(design.RadiusLG).
 				Border(1, t.BorderL2).
-				Shadow(0, 0, 20, 0, ui.RGBA(0, 0, 0, 0.12))
+				Shadow(0, 2, 8, 0, homeCardShadow(t))
 			panel.OnClick(func() {})
 			panel.Children(func() {
 				a.sessionSearchHeader(c, t)
-				ui.TextInput(c, &a.paletteQuery).Label(a.T("search.search_sessions")).
-					AutoFocus().OnChange(func() { a.searchIndex = 0 }).
-					OnSubmit(func() { a.openSearchSelection() })
+				query := ui.SearchField(c, &a.paletteQuery).
+					Label(a.T("search.search_sessions")).
+					Placeholder(a.T("search.search_sessions")).AutoFocus()
+				if query.Changed() {
+					a.searchIndex = 0
+				}
+				if query.Submitted() {
+					a.openSearchSelection()
+				}
 				a.sessionSearchOptions(c, t)
 				a.sessionSearchResults(c, t, results)
 				ui.Text(c, a.T("search.enter_opens_moves_esc_closes")).
@@ -571,11 +617,23 @@ func (a *App) sessionSearchOptions(c *ui.Context, t *design.Tokens) {
 // name, a role and focusability so keyboard and assistive-technology users can
 // change sort and archive filtering from the dialog, not only the sidebar.
 func (a *App) searchFilterChip(c *ui.Context, t *design.Tokens, label string, checked bool, toggle func()) {
-	chip := ui.Row(c).Height(26).PaddingX(design.Space2).Radius(design.RadiusSM).
-		Background(t.BgHover).AlignItems(ui.Center).
+	th := t.Theme()
+	chip := ui.ButtonBase(c).Height(th.Space(7)).PaddingX(th.Space(2)).
+		Radius(design.RadiusSM).AlignItems(ui.Center).
 		Label(label).Role(ui.RoleButton).Checked(checked).Focusable()
+	color := t.LabelSecondary
+	if checked {
+		chip = chip.Background(t.Accent.Alpha(0.10).Over(t.BgRaised)).
+			Border(1, t.Accent)
+		color = t.Accent
+	} else {
+		chip = chip.Border(1, t.BorderL2)
+		if chip.Hovered() {
+			chip = chip.Background(t.BgHover)
+		}
+	}
 	chip.Children(func() {
-		ui.Text(c, label).FontSize(12).FixedLineHeight(18).TextColor(t.LabelSecondary)
+		ui.Text(c, label).FontSize(12).FixedLineHeight(18).TextColor(color)
 	})
 	chip.OnClick(toggle)
 }
@@ -588,8 +646,9 @@ func (a *App) sessionSearchResults(c *ui.Context, t *design.Tokens, results []st
 			FontSize(12).TextColor(t.LabelTertiary).Padding(design.Space2, 0, design.Space2, 0)
 		return
 	}
-	ui.Scroll(c).Height(320).Children(func() {
-		ui.Column(c).Gap(1).Children(func() {
+	th := t.Theme()
+	ui.Scroll(c).Height(th.Space(80)).Children(func() {
+		ui.Column(c).Gap(th.Space(0.25)).Children(func() {
 			for i, sess := range results {
 				a.sessionSearchRow(c, t, sess, i)
 			}
@@ -600,22 +659,32 @@ func (a *App) sessionSearchResults(c *ui.Context, t *design.Tokens, results []st
 // sessionSearchRow is one result: the open target, the timestamp and the
 // archive control.
 func (a *App) sessionSearchRow(c *ui.Context, t *design.Tokens, sess store.Session, index int) {
-	row := ui.Row(c).Height(34).PaddingX(design.Space2).Gap(design.Space2).
-		Radius(design.RadiusSM).AlignItems(ui.Center)
-	if index == a.searchIndex || sess.ID == a.Ctrl.CurrentSessionID() {
+	th := t.Theme()
+	selected := index == a.searchIndex || sess.ID == a.Ctrl.CurrentSessionID()
+	row := ui.Row(c).Height(th.Space(9)).PaddingX(th.Space(1)).
+		Radius(design.RadiusSM).AlignItems(ui.Center).Gap(th.Space(1))
+	if selected {
 		row = row.Background(t.BgHover)
 	}
 	row.Children(func() {
-		open := ui.Row(c).Grow(1).Gap(design.Space2).AlignItems(ui.Center).
-			Label("Open " + sess.Title).Role(ui.RoleButton).Focusable()
+		// A small accent rail marks the keyboard selection or the current
+		// session; unselected rows keep the rail's space so titles align.
+		rail := ui.Box(c).Width(th.Space(0.5)).Height(th.Space(6)).
+			Radius(design.RadiusMax).Shrink(0)
+		if selected {
+			rail.Background(t.Accent)
+		}
+		open := searchResultRow(c, t, "Open "+sess.Title).Grow(1)
+		open = open.PaddingX(0)
 		open.Children(func() {
 			title := sess.Title
 			if sess.Archived {
 				title += " · " + a.T("search.archived")
 			}
 			ui.Text(c, title).FontSize(13).FixedLineHeight(20).TextColor(t.LabelPrimary).
-				Grow(1).MaxLines(1).Ellipsis("...")
-			ui.Text(c, a.sessionWhen(sess.UpdatedAt)).FontSize(11).TextColor(t.LabelTertiary)
+				Grow(1).MaxLines(1).Ellipsis("…")
+			ui.Text(c, a.sessionWhen(sess.UpdatedAt)).FontSize(11).
+				FixedLineHeight(20).TextColor(t.LabelTertiary).NoWrap()
 		})
 		id := sess.ID
 		open.OnClick(func() {
@@ -629,9 +698,16 @@ func (a *App) sessionSearchRow(c *ui.Context, t *design.Tokens, sess store.Sessi
 			label = a.T("search.unarchive")
 			archived = false
 		}
-		button := ui.Button(c, label).Height(24).PaddingX(design.Space2).
-			Radius(design.RadiusSM).TextColor(t.LabelSecondary)
-		if button.Clicked() {
+		archive := ui.ButtonBase(c).Height(th.Space(7)).PaddingX(th.Space(2)).
+			Radius(design.RadiusSM).Label(label).TextColor(t.LabelSecondary)
+		if archive.Hovered() {
+			archive = archive.Background(t.BgHover)
+		}
+		archive.Children(func() {
+			ui.Text(c, label).FontSize(12).FixedLineHeight(20).
+				TextColor(t.LabelSecondary).NoWrap()
+		})
+		if archive.Clicked() {
 			a.setSessionArchived(c, sess, archived)
 		}
 	})

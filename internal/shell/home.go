@@ -41,12 +41,6 @@ var (
 	homeComposerWidth = homeStackWidth
 )
 
-// homeSendIdle is the shared composer's idle fill in the light theme. The
-// Session composer's disabled Send paints through composer_style.go's
-// sendIdleFill, so the value stays package-level here even though the Home
-// view now styles its own control from the theme helpers.
-var homeSendIdle = ui.Hex("#B2C7F4")
-
 // homeTagAccent is the reasoning-effort tag's accent: the brand accent in the
 // current appearance, so the tag follows the theme instead of a sampled hex.
 func homeTagAccent(t *design.Tokens) ui.Color { return t.Accent }
@@ -247,9 +241,8 @@ func (a *App) homeLiveComposer(c *ui.Context, t *design.Tokens) {
 
 // homeComposerCard is the themed composer surface: one raised card with the
 // brand corner, a single soft drop shadow and, while focused, the brand
-// accent border. The text input is mygo's native TextArea (placeholder,
-// multiline, IME, undo and caret for free), laid into the card with the
-// theme's font and spacing.
+// accent border. It shares the input, focus and toolbar pieces with the
+// Session composer (composer_native.go) so both screens keep one look.
 func (a *App) homeComposerCard(c *ui.Context, t *design.Tokens, width float32) {
 	th := t.Theme()
 	card := design.Apply(ui.Column(c), t.Panel()).
@@ -262,24 +255,11 @@ func (a *App) homeComposerCard(c *ui.Context, t *design.Tokens, width float32) {
 		Label(a.tr("Home composer", "主页输入框"))
 	card.Children(func() {
 		a.homeLiveChips(c, t)
-		input := ui.TextArea(c, &a.draft).
-			Label(a.T("session.composer_input")).
-			Placeholder(a.T("home.composer_placeholder")).
-			Background(ui.Transparent).
-			Border(0, ui.Transparent).
-			Padding(0, th.Space(1)).
-			MinHeight(th.Space(13)).
-			Grow(1).Bind(&a.composerRef).
-			OnTextKey(a.composerTextKey(c, true))
-		// The native input's own border is off inside the card; the card
-		// carries the focus and hover feedback instead, so the composer still
-		// shows a visible keyboard-focus ring.
-		switch {
-		case input.Focused():
-			card = card.Border(1, t.Accent)
-		case input.Hovered():
-			card = card.Border(1, t.BorderL3)
-		}
+		input := brandComposerInput(c, t, &a.draft,
+			a.T("session.composer_input"), a.T("home.composer_placeholder"),
+			a.composerTextKey(c, true), &a.composerRef).
+			MinHeight(th.Space(13))
+		card = brandComposerFocus(card, input, t)
 		a.homeComposerToolbar(c, t)
 	})
 }
@@ -299,60 +279,18 @@ func homeCardShadow(t *design.Tokens) ui.Color {
 func (a *App) homeComposerToolbar(c *ui.Context, t *design.Tokens) {
 	th := t.Theme()
 	ui.Row(c).AlignItems(ui.Center).Gap(th.Space(1)).Children(func() {
-		plus := ui.ButtonBase(c).Size(th.Space(7), th.Space(7)).Center().
-			Label(a.T("composer.add_files_or_run_commands")).
-			Tooltip(a.T("composer.add_files_or_run_commands")).
-			Radius(design.RadiusSM)
-		if plus.Hovered() {
-			plus = plus.Background(t.BgHover)
-		}
-		plus.Children(func() {
-			ui.Icon(c, icons.Plus()).Size(th.Space(4), th.Space(4)).TextColor(t.LabelSecondary)
-		})
-		if plus.Clicked() {
+		brandIconButton(c, t, icons.Plus(), a.T("composer.add_files_or_run_commands"), func() {
 			a.attachOpen = !a.attachOpen
-		}
+		})
 		ui.Box(c).Width(th.Space(1))
 		a.livePermissionChip(c, t)
 		ui.Spacer(c).Grow(1)
 		a.liveModelMenuBadge(c, t)
 		ui.Box(c).Width(th.Space(2))
-		a.homeSendButton(c, t)
-	})
-}
-
-// homeSendButton is the composer's primary action: a mygo ButtonBase (native
-// focus, Enter/Space and disabled semantics) painted in the brand accent. The
-// fill sits on an enabled parent so the disabled state is a brand idle tint
-// rather than the framework's 50% dim of the accent fill; the inner control
-// still takes the focus and reports the click when there is a draft.
-func (a *App) homeSendButton(c *ui.Context, t *design.Tokens) {
-	th := t.Theme()
-	empty := strings.TrimSpace(a.draft) == ""
-	fill, glyph := t.Accent, t.AccentText
-	if empty {
-		fill, glyph = sendIdleFill(t), sendIdleGlyph(t)
-	}
-	wrap := ui.Row(c).Size(th.Space(9), th.Space(9)).Radius(th.Radius).
-		Background(fill).Center()
-	wrap.Children(func() {
-		send := ui.ButtonBase(c).Size(th.Space(9), th.Space(9)).Center().
-			Label(a.T("composer.send_message")).
-			Tooltip(a.T("composer.send_message")).
-			Disabled(empty)
-		send.Children(func() {
-			ui.Icon(c, homeIconArrowUp).Size(th.Space(4), th.Space(4)).TextColor(glyph)
-		})
-		switch {
-		case empty:
-		case send.Pressed():
-			wrap = wrap.Background(t.AccentPressed)
-		case send.Hovered():
-			wrap = wrap.Background(t.AccentHover)
-		}
-		if send.Clicked() && !empty {
+		empty := strings.TrimSpace(a.draft) == ""
+		brandSendButton(c, t, a.T("composer.send_message"), empty, false, func() {
 			a.sendHomeDraft(c)
-		}
+		})
 	})
 }
 

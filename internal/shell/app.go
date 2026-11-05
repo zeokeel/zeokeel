@@ -73,6 +73,11 @@ type App struct {
 	// the static fallback never renders it.
 	attachOpen bool
 	snap       atomic.Pointer[state.Snapshot]
+	// prefs is the desktop preference snapshot the current frame runs with.
+	// View refreshes it each frame: the theme (TextScale, HighContrast) and
+	// the conversation text scale derive from it, and ReduceMotion turns the
+	// frame's animations off. See preferences.go.
+	prefs ui.Preferences
 
 	// settings is an optional settings store override, used by tests. When
 	// nil, a live App reads and writes through Ctrl.Settings().
@@ -243,6 +248,9 @@ func (a *App) View(c *ui.Context) {
 		ui.Row(c).Fill()
 		return
 	}
+	// The desktop's preferences come first: ReduceMotion must switch the
+	// frame's animations off before any element is built.
+	a.syncShellPreferences(c)
 	a.syncDraftScope()
 	a.syncComposerMenuDismissal()
 	a.persistResolvedLanguage()
@@ -263,7 +271,7 @@ func (a *App) View(c *ui.Context) {
 	// choice overrides it here, so Light/Dark/System apply on the next frame
 	// after the user picks one.
 	t := a.themeTokens(c)
-	c.SetTheme(t.Theme())
+	c.SetTheme(shellTheme(t, c.Preferences()))
 
 	ui.Row(c).Fill().AlignItems(ui.Stretch).Children(func() {
 		a.sidebar(c, t)
