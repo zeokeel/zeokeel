@@ -30,6 +30,8 @@
 
 `sh scripts/build.sh <target>` 支持 `native` / `linux-amd64` / `linux-arm64` / `darwin-arm64` / `windows` / `all` / `package-windows` / `clean` / `check` / `help`。Windows 包说明见 [packaging/windows/README-WINDOWS.txt](packaging/windows/README-WINDOWS.txt)。
 
+**Windows 可执行文件图标**：`logo/zeokeel.ico`（由 `logo/logo.svg` 生成，含 256/128/64/48/32/16 多尺寸）经 `cmd/zeokeel/resource_windows_amd64.rc` + MinGW `windres` 编译为已提交的 `cmd/zeokeel/resource_windows_amd64.syso`，`go build` 会自动把它嵌入 exe（Explorer/任务栏图标）。修改 icon 后运行 `sh scripts/gen-windows-resource.sh`（或 `make icon`）重新生成；`make windows` 在源文件较新且 `x86_64-w64-mingw32-windres` 存在时也会自动重生成。
+
 ## 文档
 
 - **总体规划（主文档）**：[docs/PLAN.md](docs/PLAN.md)

@@ -33,6 +33,9 @@ WIN_README=packaging/windows/README-WINDOWS.txt
 WIN_GUI="$DIST/zeokeel-windows-amd64.exe"
 WIN_CONSOLE="$DIST/zeokeel-windows-amd64-console.exe"
 WIN_ZIP="$DIST/zeokeel-windows-amd64.zip"
+WIN_ICO=logo/zeokeel.ico
+WIN_RC=cmd/zeokeel/resource_windows_amd64.rc
+WIN_SYSO=cmd/zeokeel/resource_windows_amd64.syso
 
 usage() {
 	sed -n "2,21p" "$0" | sed 's/^# \{0,1\}//'
@@ -67,7 +70,23 @@ build_native() {
 	build_one "$os" "$arch"
 }
 
+# ensure_windows_resource keeps the committed icon resource in sync with the
+# .ico/.rc sources. The .syso is committed so a machine without MinGW binutils
+# can still build an icon-bearing exe; when windres is available and a source is
+# newer, it is regenerated here.
+ensure_windows_resource() {
+	[ -f "$WIN_SYSO" ] || die "missing $WIN_SYSO; run sh scripts/gen-windows-resource.sh"
+	if [ "$WIN_ICO" -nt "$WIN_SYSO" ] || [ "$WIN_RC" -nt "$WIN_SYSO" ]; then
+		if command -v x86_64-w64-mingw32-windres >/dev/null 2>&1; then
+			sh scripts/gen-windows-resource.sh
+		else
+			echo "build: warning: $WIN_SYSO is older than its sources but windres is missing" >&2
+		fi
+	fi
+}
+
 build_windows() {
+	ensure_windows_resource
 	mkdir -p "$DIST"
 	echo "  $WIN_GUI (GUI)"
 	GOOS=windows GOARCH=amd64 go build -trimpath -ldflags "-H windowsgui" -o "$WIN_GUI" ./cmd/zeokeel

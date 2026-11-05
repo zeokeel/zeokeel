@@ -1,0 +1,3 @@
+/* Windows executable icon. Generated from logo/zeokeel.ico.
+   Regenerate with: sh scripts/gen-windows-resource.sh */
+1 ICON "../../logo/zeokeel.ico"

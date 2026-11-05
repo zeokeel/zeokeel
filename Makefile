@@ -1,7 +1,7 @@
 GO ?= go
 export CGO_ENABLED := 0
 
-.PHONY: build build-all build-check windows package-windows test vet fmt check nocgo run clean
+.PHONY: build build-all build-check windows package-windows icon test vet fmt check nocgo run clean
 
 # Every build product lands in dist/ with a stable per-platform name; see
 # scripts/build.sh. Nothing is written to the repository root.
@@ -20,6 +20,10 @@ windows:
 
 package-windows:
 	sh scripts/build.sh package-windows
+
+# Regenerate the committed Windows icon resource (needs MinGW windres).
+icon:
+	sh scripts/gen-windows-resource.sh
 
 test:
 	$(GO) test ./...
