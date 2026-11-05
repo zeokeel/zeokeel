@@ -7,6 +7,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/egoist/mygo/ui"
@@ -171,41 +172,230 @@ func (a *App) toolLeadingIcon(c *ui.Context, t *design.Tokens, kind toolVariantK
 	}
 }
 
-// liveToolDetail is the expanded body. It always reports the variant's own
-// facts (command and output, path and change, pattern and matches, URL, size,
-// or question) and keeps the duration line the card already had.
+// toolResultMaxLines caps a collapsed result. A huge tool output must not build
+// an enormous transcript on every frame: the card renders at most this many
+// lines and offers a Show all control when the cap trims the result.
+const toolResultMaxLines = 40
+
+// toolResultState is the per-App UI state of tool results: which call's result
+// the user expanded past the line cap. It lives here, keyed by App, like the
+// other view-state maps (motion.go, trajectory.go), because App belongs to
+// another file.
+type toolResultState struct {
+	expanded map[string]bool
+}
+
+// toolResultStates maps each App to its tool-result state. Entries live as
+// long as their App; the real app has one.
+var toolResultStates sync.Map // map[*App]*toolResultState
+
+// toolResults returns the tool-result state of a, making it on first use.
+func (a *App) toolResults() *toolResultState {
+	if s, ok := toolResultStates.Load(a); ok {
+		return s.(*toolResultState)
+	}
+	s := &toolResultState{expanded: make(map[string]bool)}
+	actual, _ := toolResultStates.LoadOrStore(a, s)
+	return actual.(*toolResultState)
+}
+
+// liveToolDetail is the expanded body. It reports the variant's own facts
+// (command, path and change, pattern and matches, URL, size, or question) and
+// renders the result by content type on the conversation's Markdown theme:
+//
+//   - shell and file/search output is a highlighted code block with a language
+//     label and a Copy button (markdown.DefaultCodeBlock);
+//   - text and Markdown results are rendered by the same mygo ui/markdown view
+//     as the assistant messages;
+//   - an image result shows the picture through the Markdown image loader with
+//     its description as the fallback when the file is missing;
+//   - a failed result is a brand danger panel, kept separate from the args.
+//
+// The duration line stays at the bottom, and long results keep the line cap
+// with an explicit Show all control.
 func (a *App) liveToolDetail(c *ui.Context, t *design.Tokens, tool state.ToolState) {
 	th := t.Theme()
 	v := a.toolVariant(tool)
+	st := a.toolResults()
+	expanded := st.expanded[tool.CallID]
 	ui.Column(c).Key("tool-detail:" + tool.CallID).
 		Transition(design.CollapseTransition()).
 		Background(t.BgHover).Radius(design.RadiusSM).
-		Padding(th.Space(2)).Gap(th.Space(1)).Children(func() {
+		Padding(th.Space(2)).Gap(th.Space(1.5)).Children(func() {
+		// Arguments section: the variant's own first line(s), mono for the
+		// command/file/search families so paths and flags stay aligned.
 		if v.detail != "" {
-			text := ui.Text(c, v.detail).FontSize(12).FixedLineHeight(18).
+			args := ui.Text(c, v.detail).FontSize(12).FixedLineHeight(18).
 				TextColor(t.LabelSecondary).MaxLines(2).Ellipsis("…")
 			if v.kind == toolCommand || v.kind == toolFile || v.kind == toolSearch {
-				text.Font(monoFont)
+				args.Font(monoFont)
 			}
 		}
-		if tool.Result != "" {
-			result := ui.Text(c, tool.Result).FontSize(12).FixedLineHeight(18).
-				TextColor(t.LabelPrimary).MaxLines(10).Ellipsis("…")
-			if v.kind == toolCommand || v.kind == toolFile || v.kind == toolSearch {
-				result.Font(monoFont)
-			}
-			if tool.IsError {
-				result.TextColor(t.Danger)
-			}
-		} else if tool.Status == state.ToolRunning || tool.Status == state.ToolPending {
+		switch {
+		case tool.Result == "" &&
+			(tool.Status == state.ToolRunning || tool.Status == state.ToolPending):
 			ui.Text(c, a.menuText("Waiting for output…", "等待输出…")).
 				FontSize(12).FixedLineHeight(18).TextColor(t.LabelTertiary)
+		case tool.Result == "":
+			ui.Text(c, a.menuText("No output.", "无输出。")).
+				FontSize(12).FixedLineHeight(18).TextColor(t.LabelTertiary)
+		case tool.IsError:
+			a.toolErrorResult(c, t, tool, expanded)
+		case v.kind == toolImage:
+			a.toolImageResult(c, t, tool, v)
+		default:
+			a.toolTextResult(c, t, tool, expanded)
 		}
 		if tool.Duration > 0 {
 			ui.Text(c, a.T("session.took", tool.Duration.Round(time.Millisecond).String())).
 				FontSize(11).FixedLineHeight(16).TextColor(t.LabelTertiary)
 		}
 	})
+}
+
+// toolTextResult renders a non-error, non-image result as the conversation's
+// Markdown: code and search output as a highlighted code block (with the
+// library's language label and Copy button), everything else as Markdown. A
+// result trimmed by the line cap gets a small header with the Show all control
+// above the body, so the control is visible before the long output.
+func (a *App) toolTextResult(c *ui.Context, t *design.Tokens, tool state.ToolState, expanded bool) {
+	body, hidden := truncateToolResult(tool.Result, expanded)
+	if hidden || expanded {
+		a.toolResultHeader(c, t, tool, expanded)
+	}
+	switch kind := toolKindFor(tool.Name); kind {
+	case toolCommand:
+		a.markdownBlocks(c, t, codeFence("bash", body))
+	case toolFile, toolSearch:
+		a.markdownBlocks(c, t, codeFence("text", body))
+	default:
+		a.markdownBlocks(c, t, body)
+	}
+}
+
+// toolResultHeader is the row above a result that the line cap trimmed: a
+// muted label and the Show all / Collapse result control.
+func (a *App) toolResultHeader(c *ui.Context, t *design.Tokens, tool state.ToolState, expanded bool) {
+	th := t.Theme()
+	ui.Row(c).AlignItems(ui.Center).Gap(th.Space(2)).Children(func() {
+		ui.Text(c, a.menuText("Result", "结果")).FontSize(11).
+			FixedLineHeight(16).TextColor(t.LabelTertiary).Grow(1)
+		a.toolResultMore(c, t, tool, expanded)
+	})
+}
+
+// toolResultMore is the Show all / Collapse control of a long result.
+func (a *App) toolResultMore(c *ui.Context, t *design.Tokens, tool state.ToolState, expanded bool) {
+	th := t.Theme()
+	total := len(strings.Split(tool.Result, "\n"))
+	label := fmt.Sprintf(a.menuText("Show all %d lines", "显示全部 %d 行"), total)
+	if expanded {
+		label = a.menuText("Collapse result", "折叠结果")
+	}
+	button := ui.ButtonBase(c).Height(th.Space(6)).PaddingX(th.Space(2)).
+		Radius(design.RadiusSM).AlignItems(ui.Center).Label(label)
+	if button.Hovered() {
+		button = button.Background(t.BgRaised)
+	}
+	button.Children(func() {
+		ui.Text(c, label).FontSize(11).FixedLineHeight(16).TextColor(t.Accent)
+	})
+	if button.Clicked() {
+		st := a.toolResults()
+		st.expanded[tool.CallID] = !expanded
+	}
+}
+
+// codeFence wraps plain output in a Markdown fence so markdown.View renders the
+// library's highlighted code block: language label, Copy button and the same
+// code theme as the assistant messages.
+func codeFence(lang, body string) string {
+	// A fence longer than any backtick run in the body keeps the code intact.
+	fence := "```"
+	for strings.Contains(body, fence) {
+		fence += "`"
+	}
+	return fence + lang + "\n" + body + "\n" + fence
+}
+
+// truncateToolResult caps a collapsed result at toolResultMaxLines and reports
+// whether the cap hid lines.
+func truncateToolResult(result string, expanded bool) (body string, hidden bool) {
+	lines := strings.Split(result, "\n")
+	if expanded || len(lines) <= toolResultMaxLines {
+		return result, false
+	}
+	return strings.Join(lines[:toolResultMaxLines], "\n"), true
+}
+
+// toolErrorResult renders a failed call as a brand danger panel: the error
+// label, the output in mono, and a Copy error control. It stays visually
+// separate from the arguments so a failure reads as a failure. A long error
+// keeps the same line cap with the Show all control in the panel's header.
+func (a *App) toolErrorResult(c *ui.Context, t *design.Tokens, tool state.ToolState, expanded bool) {
+	th := t.Theme()
+	body, hidden := truncateToolResult(tool.Result, expanded)
+	panel := ui.Column(c).FillWidth().Gap(th.Space(1)).
+		Background(t.Danger.Alpha(0.08).Over(t.BgRaised)).
+		Border(1, t.Danger.Alpha(0.45).Over(t.BgRaised)).
+		Radius(design.RadiusSM).Padding(th.Space(2))
+	panel.Children(func() {
+		ui.Row(c).AlignItems(ui.Center).Gap(th.Space(2)).Children(func() {
+			ui.Text(c, a.menuText("Error", "错误")).FontSize(11).
+				FixedLineHeight(16).FontWeight(600).TextColor(t.Danger).Grow(1)
+			if hidden || expanded {
+				a.toolResultMore(c, t, tool, expanded)
+			}
+			copyLabel := a.menuText("Copy error", "复制错误")
+			copyButton := ui.ButtonBase(c).Height(th.Space(5)).PaddingX(th.Space(1.5)).
+				Radius(design.RadiusSM).Label(copyLabel).Tooltip(copyLabel)
+			if copyButton.Hovered() {
+				copyButton = copyButton.Background(t.Danger.Alpha(0.12).Over(t.BgRaised))
+			}
+			copyButton.Children(func() {
+				ui.Text(c, copyLabel).FontSize(11).FixedLineHeight(16).
+					TextColor(t.Danger)
+			})
+			if copyButton.Clicked() {
+				c.WriteClipboard(tool.Result)
+				c.Toast(a.menuText("Copied", "已复制"))
+			}
+		})
+		ui.Text(c, body).Font(monoFont).FontSize(12).FixedLineHeight(18).
+			TextColor(t.Danger)
+	})
+}
+
+// toolImageResult shows an image result through the Markdown image loader: the
+// picture when the file loads, the description otherwise, so a missing file
+// still leaves a readable card. The result text (often the dimensions) stays
+// as a muted line above it.
+func (a *App) toolImageResult(c *ui.Context, t *design.Tokens, tool state.ToolState, v toolVariant) {
+	args := parseToolArgs(tool.Args)
+	path := firstArg(args, "path", "file", "file_path", "url")
+	alt := firstArg(args, "alt", "caption", "description")
+	if alt == "" {
+		alt = oneLine(v.summary)
+	} else if path != "" && !strings.Contains(alt, path) {
+		alt = joinDot(path, alt)
+	}
+	if desc := strings.TrimSpace(tool.Result); desc != "" && !strings.Contains(oneLine(v.summary), oneLine(desc)) {
+		ui.Text(c, desc).FontSize(11).FixedLineHeight(16).
+			TextColor(t.LabelTertiary).MaxLines(2).Ellipsis("…")
+	}
+	if path == "" {
+		if strings.TrimSpace(tool.Result) != "" {
+			a.markdownBlocks(c, t, tool.Result)
+		}
+		return
+	}
+	a.markdownBlocks(c, t, "!["+markdownImageAlt(alt)+"](<"+path+">)")
+}
+
+// markdownImageAlt escapes the characters that would end a Markdown image's
+// description, so a path or title with brackets still renders.
+func markdownImageAlt(alt string) string {
+	return strings.NewReplacer("[", "(", "]", ")", "\n", " ", "\r", " ").Replace(alt)
 }
 
 // liveStatusDot is a tool call's state dot. While the call runs it pulses its

@@ -849,8 +849,8 @@ CGO_ENABLED=0 go test ./...
 CGO_ENABLED=0 go build ./...
 sh scripts/check-nocgo.sh
 sh scripts/ci.sh                # 统一门禁（含工具可调用 / race / 覆盖率）
-sh scripts/lint-style-literals.sh # 视图层禁止样式字面量
-sh scripts/cross-build.sh       # 四目标
+sh scripts/ci.sh                # 统一门禁（fmt/vet/build/test/nocgo）
+sh scripts/check-nocgo.sh       # 零 cgo + 四目标交叉编译
 # 注释：DSH 像素基线门禁（原 scripts/pixel-gate.sh）已于 2026-11-05 退役，见 ADR 0001。
 ```
 

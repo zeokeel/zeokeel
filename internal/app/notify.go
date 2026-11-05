@@ -5,6 +5,7 @@ import (
 	"log"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/egoist/mygo"
 
@@ -27,6 +28,13 @@ type notifier interface {
 // notifications gather together in Notification Center (macOS) instead of
 // mixing with the app's other notifications.
 const notificationGroup = "zeokeel.tasks"
+
+// turnNoticeThrottle is the minimum gap between two "task complete"
+// notifications for the same session on the controller-hook path. Goal and
+// automation continuations can finish turns seconds apart; one notification per
+// window is enough, and the next one is available as soon as the window passes.
+// Failures bypass the throttle.
+const turnNoticeThrottle = 5 * time.Second
 
 // noticeKind is one kind of desktop notification ZeoKeel raises.
 type noticeKind int
@@ -73,6 +81,12 @@ type observedPhase struct {
 //
 // The first snapshot of a session only records a baseline: startup, a restored
 // session or reopening the app must not replay old turns as notifications.
+//
+// Snapshot observation only covers the current session, because the controller
+// publishes OnUpdate for that one. Wiring the controller's TurnFinishedHook
+// (useTurnFinishedHook + observeTurnFinished) covers terminal turns of *every*
+// session, including background ones; the snapshot machine then keeps only the
+// approval notifications so one turn cannot notify twice.
 type notificationDispatcher struct {
 	notifier notifier
 	// active reports whether the user is looking at the app; notifications are
@@ -85,24 +99,119 @@ type notificationDispatcher struct {
 	// focusSession is the notification click action: bring the window forward
 	// and, when the session is known, show that session.
 	focusSession func(sessionID string)
+	// turnsFromHook reports terminal turns through the controller hook instead
+	// of the snapshot phase machine, so background sessions are covered too.
+	turnsFromHook bool
+	// now is the clock of the turn throttle. nil uses time.Now; tests replace it.
+	now func() time.Time
+	// turnThrottle is the minimum gap between completion notifications for one
+	// session on the hook path. Zero disables the throttle (failures bypass it
+	// regardless).
+	turnThrottle time.Duration
 
 	mu sync.Mutex
 	// seen is the last phase observed per session id. Terminal phases are
 	// dropped after handling, so the map stays bounded and the next turn starts
 	// from a fresh baseline.
 	seen map[string]observedPhase
+	// lastTurn is the last turn id the hook reported per session: the defensive
+	// session+turn dedupe.
+	lastTurn map[string]string
+	// lastTurnNotice is when the hook path last notified per session, for the
+	// completion throttle.
+	lastTurnNotice map[string]time.Time
 }
 
 // newNotificationDispatcher builds the dispatcher the app wires to the service
 // update stream.
 func newNotificationDispatcher(n notifier, active func() bool, language func() string, focusSession func(sessionID string)) *notificationDispatcher {
 	return &notificationDispatcher{
-		notifier:     n,
-		active:       active,
-		language:     language,
-		focusSession: focusSession,
-		seen:         make(map[string]observedPhase),
+		notifier:       n,
+		active:         active,
+		language:       language,
+		focusSession:   focusSession,
+		turnThrottle:   turnNoticeThrottle,
+		seen:           make(map[string]observedPhase),
+		lastTurn:       make(map[string]string),
+		lastTurnNotice: make(map[string]time.Time),
 	}
+}
+
+// useTurnFinishedHook moves terminal-turn reporting to the controller's
+// TurnFinishedHook, so background sessions are covered too. Production wires it
+// together with SetOnTurnFinished; the snapshot phase machine then reports only
+// approval waits (the hook owns complete/failed), which is what keeps one turn
+// from raising two notifications. Headless snapshot tests leave it off.
+func (d *notificationDispatcher) useTurnFinishedHook() {
+	d.turnsFromHook = true
+}
+
+// observeTurnFinished raises the terminal-turn notification from the
+// controller's TurnFinishedHook. Unlike Observe it covers every session,
+// including background ones that never reach OnUpdate. The controller calls it
+// once per turn; sessionID+turnID deduplicates defensively and a per-session
+// completion throttle keeps goal/automation loops from stacking notifications.
+func (d *notificationDispatcher) observeTurnFinished(outcome session.TurnOutcome) {
+	if d == nil || d.notifier == nil || !d.turnsFromHook {
+		return
+	}
+	if outcome.Stopped {
+		// The user cancelled the turn (or the app is shutting down); a
+		// "finished" notification would be noise, and a cancelled turn is not
+		// a failure.
+		return
+	}
+	kind := noticeTurnComplete
+	switch {
+	case outcome.Failed:
+		kind = noticeTurnFailed
+	case !outcome.HasOutput:
+		// Nothing the user could read came out of the turn: matches the
+		// snapshot path's output rule.
+		return
+	}
+	sessionID := outcome.SessionID
+	if sessionID == "" {
+		sessionID = "default"
+	}
+	now := d.clockNow()
+	d.mu.Lock()
+	if d.lastTurn == nil {
+		d.lastTurn = make(map[string]string)
+	}
+	if outcome.TurnID != "" && d.lastTurn[sessionID] == outcome.TurnID {
+		d.mu.Unlock()
+		return
+	}
+	d.lastTurn[sessionID] = outcome.TurnID
+	// Completion throttle per session; failures always notify (rare and
+	// actionable). The notification gate below still suppresses everything while
+	// the user is looking at the app.
+	if kind == noticeTurnComplete && d.turnThrottle > 0 {
+		if last, ok := d.lastTurnNotice[sessionID]; ok && now.Sub(last) < d.turnThrottle {
+			d.mu.Unlock()
+			return
+		}
+	}
+	if d.lastTurnNotice == nil {
+		d.lastTurnNotice = make(map[string]time.Time)
+	}
+	d.lastTurnNotice[sessionID] = now
+	d.mu.Unlock()
+
+	if d.isActive() {
+		return
+	}
+	title, body := notificationText(d.currentLanguage(), kind)
+	d.notifier.Show(title, body, d.clickAction(outcome.SessionID))
+}
+
+// clockNow reads the dispatcher clock.
+func (d *notificationDispatcher) clockNow() time.Time {
+	if d.now != nil {
+		return d.now()
+	}
+	return time.Now()
 }
 
 // Observe folds one snapshot into the phase state machine and raises a
@@ -126,6 +235,12 @@ func (d *notificationDispatcher) Observe(snap *state.Snapshot) {
 	d.mu.Unlock()
 
 	kind, ok := notificationFor(seen, previous.phase, snap)
+	if ok && d.turnsFromHook && kind != noticeApproval {
+		// Terminal-turn notifications come from the controller hook when it is
+		// wired; the terminal snapshot may arrive just before the hook call, so
+		// skipping here is what prevents a duplicate for the current session.
+		ok = false
+	}
 	if ok {
 		// A notification is only useful while the user is not already looking
 		// at the app. Skipping here (instead of queueing) also guarantees that
@@ -307,6 +422,14 @@ func (a *app) windowActive() bool {
 		return true
 	}
 	return win.IsVisible() && win.IsFocused()
+}
+
+// notificationActive is the desktop-notification gate: no notifications while
+// the user is looking at the window and none while the app is shutting down
+// (the controller then cancels in-flight turns, whose hook calls report them as
+// stopped and are dropped anyway).
+func (a *app) notificationActive() bool {
+	return a.quitting || a.windowActive()
 }
 
 // uiLanguage returns the language notification copy follows: the persisted

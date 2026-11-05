@@ -50,6 +50,14 @@ type app struct {
 	// commands through the shell's SetMenuAction hook, so the shell owns the UI
 	// behaviour and this package only owns process-level commands (Quit).
 	shellApp *shell.App
+	// settingsWindow is the independent, non-modal settings window. It is
+	// created on the first open and reused afterwards, so reopening it keeps
+	// its tab and scroll position. See settings_window.go.
+	settingsWindow *settingsWindowController
+	// settingsWindows creates the settings window. It is a seam: tests inject a
+	// fake so the window lifecycle is tested without a desktop backend; nil
+	// means the production mygo manager.
+	settingsWindows settingsWindowManager
 	// quitApp ends the process. It is a seam: tests replace it so a menu click
 	// never touches the desktop backend.
 	quitApp func()
@@ -134,6 +142,14 @@ func (a *app) run() error {
 				}},
 			})
 		}
+		// Settings is its own non-modal window: Cmd+,, the menu bar and the
+		// in-app entry points all call shell.App.openSettings, which asks this
+		// host to show the window and falls back to the in-app modal when the
+		// desktop cannot create one. The window is created on the first open.
+		a.initSettingsWindow(shellApp.SettingsView, shellApp.SettingsWindowTitle)
+		shellApp.SetSettingsWindowOpener(a.showSettingsWindow)
+		shellApp.SetSettingsWindowCloser(a.hideSettingsWindow)
+		shellApp.SetSettingsChangedHook(a.refreshWindows)
 		a.win = mygo.NewWindow(mygo.WindowOptions{
 			Title:     "ZeoKeel",
 			Width:     1600,
@@ -147,8 +163,11 @@ func (a *app) run() error {
 			win := a.win
 			// Desktop notifications read the same update stream as the UI: the
 			// dispatcher only watches phase transitions, so a token update costs
-			// one map lookup.
-			notifier := newNotificationDispatcher(newSystemNotifier(), a.windowActive, a.uiLanguage, a.focusSession)
+			// one map lookup. The controller's turn hook covers background
+			// sessions, which OnUpdate never publishes.
+			notifier := newNotificationDispatcher(newSystemNotifier(), a.notificationActive, a.uiLanguage, a.focusSession)
+			notifier.useTurnFinishedHook()
+			a.services.SetOnTurnFinished(notifier.observeTurnFinished)
 			a.services.OnUpdate(func(snap *state.Snapshot) {
 				shellApp.SetSnapshot(snap)
 				win.Invalidate()

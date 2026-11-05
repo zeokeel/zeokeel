@@ -77,6 +77,12 @@ func (a *App) updateSettings(c *ui.Context, mutate func(*session.Settings)) {
 		}
 	}
 	a.settingsErr = nil
+	// A host with more than one window (the desktop settings window beside the
+	// main window) repaints them all through this hook: the theme, the language
+	// and the conversation sizes changed in this window apply to the other.
+	if a.settingsChangedHook != nil {
+		a.settingsChangedHook()
+	}
 	if c != nil {
 		c.Toast(a.T("settings.settings_saved"))
 	}
@@ -211,7 +217,7 @@ func (a *App) settingsOverlay(c *ui.Context, t *design.Tokens) {
 		// Window shortcuts wait behind a modal, so the settings overlay
 		// registers the global keys itself. Escape closes it.
 		if a.overlayShortcut(back, "escape", 0, ui.KeyEscape) {
-			a.closeSettings()
+			a.closeSettingsRequested()
 			return
 		}
 		if a.overlayShortcut(back, "new_session", ui.Cmd, ui.KeyN) {
@@ -227,15 +233,13 @@ func (a *App) settingsOverlay(c *ui.Context, t *design.Tokens) {
 	})
 }
 
-// settingsPanelLive draws the brand settings panel: a centered, responsive
-// surface (720-880 DIPs wide, clamped to the window) with the nav column on
-// the left and the scrolling page on the right. The panel, nav and rows take
-// their color, radius and spacing from the brand theme, not from a sampled
-// reference page.
+// settingsPanelLive draws the in-app modal's settings panel: a centered,
+// responsive surface (720-880 DIPs wide, clamped to the window) with the nav
+// column on the left and the scrolling page on the right. The independent
+// settings window hosts the same nav and pages (SettingsView) without the
+// centered card.
 func (a *App) settingsPanelLive(c *ui.Context, t *design.Tokens) {
-	if tab := a.shellUI().settingsTab; tab == settingsTabAgentPresets && !a.currentSettings().ShowCodingView {
-		a.shellUI().settingsTab = settingsTabGeneral
-	}
+	a.normalizeSettingsTab()
 	th := t.Theme()
 	w, h := settingsPanelSize(c)
 	panel := ui.Row(c).
@@ -247,23 +251,90 @@ func (a *App) settingsPanelLive(c *ui.Context, t *design.Tokens) {
 		Role(ui.RoleDialog).Label(a.T("settings.settings"))
 	panel.OnClick(func() {})
 	panel.Children(func() {
-		a.settingsNavLive(c, t)
+		a.settingsNavLive(c, t, h)
 		a.settingsBodyLive(c, t)
 	})
+}
+
+// SettingsView renders the settings UI as a whole window: the desktop settings
+// window (internal/app) hosts it, so Settings is a non-modal window while a
+// host can open one. It is the same nav, pages and persisted settings the
+// in-app modal shows, so the two hosts cannot drift apart; the modal remains
+// the fallback when no host window can be shown.
+func (a *App) SettingsView(c *ui.Context) {
+	t := a.themeTokens(c)
+	c.SetTheme(t.Theme())
+	a.normalizeSettingsTab()
+	ui.Row(c).Fill().AlignItems(ui.Stretch).Background(t.BgBase).Children(func() {
+		a.settingsNavLive(c, t, 0)
+		a.settingsBodyLive(c, t)
+	})
+	// Escape closes the settings window, as it closes the modal. A popover the
+	// page opened consumes its own Escape first, so this only fires when none
+	// is open.
+	if a.hasSettingsWindowHost() {
+		// Cmd/Ctrl+, focuses the window itself (macOS's global menu bar already
+		// reaches it; on Windows and Linux the menu bar belongs to the main
+		// window, whose shortcuts wait while this window has the focus).
+		if a.settingsWindowOpen != nil {
+			c.OnShortcut(ui.Cmd, ui.KeyComma, func() { a.settingsWindowOpen() })
+		}
+		c.OnShortcut(0, ui.KeyEscape, func() {
+			if a.settingsSelectorOpen() {
+				a.closeSelectors()
+				return
+			}
+			a.closeSettingsRequested()
+		})
+	}
+}
+
+// SettingsWindowTitle is the current-language title of the independent
+// settings window, so internal/app does not duplicate the app's strings.
+func (a *App) SettingsWindowTitle() string { return a.T("settings.settings") }
+
+// hasSettingsWindowHost reports whether a desktop host shows Settings as its
+// own window. The closer is set with the opener, but either is enough to know
+// the UI runs in a window rather than the modal.
+func (a *App) hasSettingsWindowHost() bool {
+	return a.settingsWindowOpen != nil || a.settingsWindowClose != nil
+}
+
+// settingsSelectorOpen reports whether a settings dropdown or popover is open,
+// so Escape can close it instead of the window.
+func (a *App) settingsSelectorOpen() bool {
+	return a.permissionOpen || a.languageOpen || a.fontSizeOpen || a.workOpen ||
+		a.collapseOpen || a.sendOpen || a.performanceOpen || a.pluginUI().fontMoreOpen
+}
+
+// normalizeSettingsTab keeps the visible settings page valid: Agent presets is
+// offered only while the coding view is on, so switching it off returns to
+// General instead of leaving an unreachable page on screen.
+func (a *App) normalizeSettingsTab() {
+	if tab := a.shellUI().settingsTab; tab == settingsTabAgentPresets && !a.currentSettings().ShowCodingView {
+		a.shellUI().settingsTab = settingsTabGeneral
+	}
 }
 
 // settingsNavLive is the left column: the brand wordmark-sidebar treatment of
 // the settings pages. The nav cells are native button bases, so hover, press,
 // focus ring and keyboard activation come from mygo; each page is its own Tab
 // stop, matching the per-item reachability the settings screens always had.
-func (a *App) settingsNavLive(c *ui.Context, t *design.Tokens) {
+// height <= 0 fills the host (the independent window); the modal passes the
+// card's height so the nav matches it.
+func (a *App) settingsNavLive(c *ui.Context, t *design.Tokens, height float32) {
 	th := t.Theme()
 	tab := a.shellUI().settingsTab
-	_, height := settingsPanelSize(c)
-	ui.Column(c).Width(settingsNavWidth(c)).Height(height).
+	nav := ui.Column(c).Width(settingsNavWidth(c)).
 		Background(t.BgSidebar).
 		BorderWidth(0, 0, 1, 0).BorderColor(t.BorderL2).
-		Padding(th.Space(4), th.Space(3)).
+		Padding(th.Space(4), th.Space(3))
+	if height > 0 {
+		nav = nav.Height(height)
+	} else {
+		nav = nav.FillHeight()
+	}
+	nav.
 		Children(func() {
 			ui.Row(c).Height(th.Space(12)).PaddingX(th.Space(3)).
 				AlignItems(ui.Center).Children(func() {
@@ -344,7 +415,7 @@ func (a *App) settingsHeaderLive(c *ui.Context, t *design.Tokens) {
 		a.settingsOutlineButtonLive(c, t, a.T("settings.open_configuration_file"),
 			func() { a.openConfigurationLocation(c) })
 		a.settingsOutlineButtonLive(c, t, a.T("menu.close"),
-			func() { a.closeSettings() })
+			func() { a.closeSettingsRequested() })
 		a.settingsCloseLive(c, t)
 	})
 }
@@ -817,7 +888,7 @@ func (a *App) settingsCloseLive(c *ui.Context, t *design.Tokens) {
 	el.Children(func() {
 		ui.Image(c, settingsIconClose).Size(th.Space(3.5), th.Space(3.5)).TextColor(t.LabelPrimary)
 	})
-	el.OnClick(func() { a.closeSettings() })
+	el.OnClick(func() { a.closeSettingsRequested() })
 }
 
 // settingsOutlineButtonLive is the header's bordered secondary action.

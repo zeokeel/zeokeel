@@ -46,6 +46,10 @@ type markdownStyle struct {
 	dark    bool
 	size    float32
 	line    float32
+	// root is the workspace directory image paths resolve against; a
+	// workspace switch rebuilds the options so images load from the right
+	// files.
+	root string
 }
 
 // markdownStyles holds each App's Markdown configuration. It lives here, in
@@ -68,7 +72,12 @@ func (a *App) markdownOptions(t *design.Tokens) *markdown.Options {
 
 	size := a.ConversationFontSize()
 	line := a.ConversationLineHeight() / size
-	if style.options == nil || style.dark != t.Dark || style.size != size || style.line != line {
+	root := a.workspaceRoot()
+	if root == "" {
+		root = "."
+	}
+	if style.options == nil || style.dark != t.Dark || style.size != size ||
+		style.line != line || style.root != root {
 		theme := markdown.DefaultTheme(t.Theme())
 		// The conversation text setting scales chat text only; the markdown
 		// line box follows it (24 DIPs at 14, 28 at 16), the way the deleted
@@ -80,8 +89,12 @@ func (a *App) markdownOptions(t *design.Tokens) *markdown.Options {
 			Theme:      theme,
 			Extensions: parser.Default,
 			Reveal:     streamReveal,
+			// Images in messages and tool results load from the workspace
+			// (ui/markdown shows the alt text until then, and forever when
+			// the file is missing).
+			LoadImage: markdown.FileImages(root),
 		}
-		style.dark, style.size, style.line = t.Dark, size, line
+		style.dark, style.size, style.line, style.root = t.Dark, size, line, root
 	}
 	return style.options
 }

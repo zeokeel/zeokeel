@@ -9,6 +9,16 @@
 - **以下 M0–M13 历史里程碑保留原文记录以追溯**；其中与像素/基线/比对回路相关的内容均为**历史记录，已退役、不再有效**（因此模块清单中不再列 `pixeltest` 包）。
 - 现行质量口径见 `docs/QUALITY.md` 与 `docs/PLAN.md` §10；功能对齐见 `docs/FUNCTIONAL-PARITY.md`；视觉方向见 `docs/decisions/0002-brand-theme-foundation.md`。
 
+## 2026-11-05 阶段 5：工具卡/设置独立窗口/后台通知/a11y/清理与性能（完成，ALL GREEN）
+
+- **工具卡内容原生化**：命令/文件结果 → mygo markdown 代码块（高亮+语言+Copy）、普通结果 markdown、read_image 真实加载（失败 alt）、错误 danger 面板+复制错误、40 行封顶可展开；新增 toolcard 预览。
+- **设置独立原生窗口（P1）**：非模态单例、Cmd+, 打开/聚焦、关闭隐藏不退出、状态与主窗口同步、overlay 回退；可注入 window manager 单测 8 个；ADR 0005。
+- **后台会话通知（P1）**：session.Controller 新增可选 `TurnOutcome` hook（默认 nil），后台 turn 完成/失败也通知；sessionID+turnID 去重、同会话 5s 冷却、失败绕过、Stop/无输出/退出/活跃抑制、点击回会话；notify 测试 17→30；ADR 0004 更新。
+- **a11y/键盘收尾**：Sidebar a11y 树层级（RoleTree/TreeItem Level）+ 行内动作暴露、5 屏无名节点审计、8 个键盘回归用例。
+- **清理与性能**：死代码净 -203 行（layout/menus/composer_style 零引用符号）、app.go 旧 helper 3 个；新增 6 屏 BenchmarkRender（冷渲染 21.7–31.4ms，稳态帧 0.48–1.26ms，[perf.md](design/perf.md)）。
+- **独立评审/审计**：`docs/design/review-round3.md`（Top10 问题）、`docs/research/05-final-audit.md`、`docs/research/06-acceptance.md`。
+- **验证**：`gofmt`/`go vet`/`go build ./...`/`go test -count=1 ./...` 17+ 包全绿（shell 45.3s）；22 张预览。
+
 ## 2026-11-05 阶段 4：剩余面板 + markdown 原生化 + 桌面交互 P0-2（完成，ALL GREEN）
 
 - **剩余面板/区**：Trajectory 内部行、内联搜索/搜索弹层、todo/team/plan 面板、右侧栏（Files/Terminal/Start，720px → 响应式 560/45% 可拖拽）全部品牌原生视觉化；新增 Trajectory 与右栏浅/深预览。
@@ -333,3 +343,10 @@
 - **fork 续聊重放**：fork 的附件行与字节使 History 适配器在 fork 中继续对话时仍重放文本 `<attachment>` 块与图片 data URL，不再丢失源会话的附件上下文。
 - **导出附件**：`Store.ExportSessionJSONL` 新增 `type:"attachment"` 记录（id/session_id/message_id/name/path/mime/kind/size/created_at），并内嵌 `encoding:"base64"` 的完整字节与文本附件的 `text` 正文，使 session log 自包含；文件缺失时仍导出元数据记录而不中断导出。
 - **验收**：`TestForkAttachmentCopyKeepsTextAndImage`、`TestForkAttachmentReplaySnapshot`、`TestForkAttachmentHistoryReplaysInForkTurn`、`TestExportSessionAttachmentRecordsAndPayload`、`TestExportSessionAttachmentLines` 通过；`go test -run 'TestFork|TestExportSession|TestFeedbackPersists' ./internal/session ./internal/store ./internal/shell` 与 `sh scripts/ci.sh` PASS（含 race；当时的像素基线步骤已于 2026-11-05 退役）
+
+## 工程收尾：UI 渲染性能基准（2026-11-05）
+
+- 新增 `internal/shell/render_bench_test.go`：`BenchmarkRender*`（Home/Session/Plugins/Settings/Automation/Sidebar，1600×1000 + 900×600，live fixture，`ui.Render`）与补充的 `BenchmarkWarmFrame`（稳态帧，`tt.Frame()` 热缓存），补齐 EVOLUTION G10 的"0 benchmark"缺口。
+- 基线与解读见 [docs/design/perf.md](design/perf.md)：稳态帧 0.48–1.26ms/屏（最重 Sidebar 工作区树 1.26ms、Session 1.09ms，均远低于 60fps 的 16.7ms 预算）；`ui.Render` 冷渲染 11.5–31.4ms 为一次性启动+settle 成本，不代表每帧成本。
+- 复现：`go test -run '^$' -bench 'BenchmarkRender' -benchmem ./internal/shell`（稳态帧用 `-bench 'BenchmarkWarmFrame'`）。
+- 同轮清理：删除零引用死代码（layout.go 的 `pageColumnWidth`/`narrowSideInset`/`designGutter`、menus.go 的 `workspaceSection`/`liveSessionRow`/`sessionMenu`/`overlays`/旧 palette 三函数、composer_style.go 的 `switchTrack`），并把 scoped 文件中已退役的 baseline/DSH 注释改为中性描述。

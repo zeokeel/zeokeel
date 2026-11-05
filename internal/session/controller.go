@@ -113,7 +113,12 @@ type Controller struct {
 	// for; per-session modes trigger a rebuild when it differs.
 	builtPermission string
 	listeners       []func(*state.Snapshot)
-	closed          bool
+	// onTurnFinished, when non-nil, observes terminal turns of every session,
+	// including sessions that are not current (OnUpdate publishes only the
+	// current session). It runs once per turn from the turn goroutine. Guarded
+	// by mu.
+	onTurnFinished TurnFinishedHook
+	closed         bool
 
 	// Automatic session titles. titleGen is the configured generator (nil
 	// disables the feature), autoTitles marks sessions this Controller already
@@ -207,6 +212,9 @@ type turn struct {
 	drafts          map[string]*draft
 	order           []string
 	statusPersisted bool
+	// toolStarted records that the turn started at least one tool call, so a
+	// tool-only turn still counts as producing output for TurnOutcome.
+	toolStarted bool
 }
 
 type draft struct {
@@ -824,6 +832,8 @@ func (c *Controller) forward(t *turn, ev state.Event) {
 	case state.Reasoning:
 		d := t.draft(e.MsgID)
 		d.reasoning.WriteString(e.Text)
+	case state.ToolStart:
+		t.toolStarted = true
 	}
 
 	// A terminal status is the point after which the assistant text is final.
@@ -1287,6 +1297,24 @@ func (c *Controller) finishTurn(t *turn) {
 		c.persistSessionStatus(t, t.phase)
 	}
 
+	// Optional terminal-turn observer: OnUpdate only publishes the current
+	// session, so the desktop shell needs this hook to notify about background
+	// sessions. It runs once per turn, after the terminal status is persisted,
+	// on the turn's goroutine.
+	c.mu.Lock()
+	onTurnFinished := c.onTurnFinished
+	c.mu.Unlock()
+	if onTurnFinished != nil {
+		stopped := t.stopped.Load() || (t.ctx != nil && t.ctx.Err() != nil)
+		onTurnFinished(TurnOutcome{
+			SessionID: t.sessionID,
+			TurnID:    t.id,
+			Failed:    t.failed.Load() && !stopped,
+			Stopped:   stopped,
+			HasOutput: len(t.order) > 0 || t.toolStarted,
+		})
+	}
+
 	// The first successfully completed turn is also the point where a session
 	// earns its automatic title. maybeAutoTitle persists and publishes the
 	// title off the turn goroutine; it never delays turn completion.
@@ -1432,6 +1460,40 @@ func (c *Controller) OnUpdate(fn func(*state.Snapshot)) {
 		return
 	}
 	c.listeners = append(c.listeners, fn)
+}
+
+// TurnOutcome describes one terminal turn for TurnFinishedHook observers.
+type TurnOutcome struct {
+	SessionID string
+	// TurnID identifies the turn. A hook may see the same turn only once, but
+	// observers that keep history use it to deduplicate defensively.
+	TurnID string
+	// Failed reports an error end. A stopped turn is not a failure.
+	Failed bool
+	// Stopped reports that the user (or shutdown) cancelled the turn.
+	Stopped bool
+	// HasOutput reports that the turn produced something the user could read:
+	// assistant text/reasoning or a tool call. A turn stopped before anything
+	// streamed has none.
+	HasOutput bool
+}
+
+// TurnFinishedHook observes a terminal turn of any session.
+//
+// OnUpdate only publishes the current session, so a background session's turn
+// is invisible to the desktop shell without this hook. It is called exactly once
+// per turn, on the turn's goroutine, after the terminal status is persisted;
+// keep it cheap and non-blocking (the built-in desktop notification path only
+// does a map lookup and may spawn the notification goroutine).
+type TurnFinishedHook func(TurnOutcome)
+
+// SetOnTurnFinished registers an observer for terminal turns of every session,
+// current or background. Passing nil removes it. The hook is optional: with
+// none installed the Controller behaves exactly as before.
+func (c *Controller) SetOnTurnFinished(hook TurnFinishedHook) {
+	c.mu.Lock()
+	c.onTurnFinished = hook
+	c.mu.Unlock()
 }
 
 // Close cancels every in-flight turn and automatic-title request, waits for

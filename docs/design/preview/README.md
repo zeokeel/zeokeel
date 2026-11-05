@@ -19,5 +19,7 @@ ZEOKEEL_UPDATE_PREVIEWS=1 go test -count=1 ./internal/shell -run 'TestRender.*Na
 | Trajectory | [trajectory-native-light.png](trajectory-native-light.png) | [trajectory-native-dark.png](trajectory-native-dark.png) |
 | Right sidebar（Start） | [right-sidebar-native-light.png](right-sidebar-native-light.png) | [right-sidebar-native-dark.png](right-sidebar-native-dark.png) |
 | Right sidebar（Files） | [right-sidebar-files-light.png](right-sidebar-files-light.png) | [right-sidebar-files-dark.png](right-sidebar-files-dark.png) |
+| Tool cards | [toolcard-native-light.png](toolcard-native-light.png) | [toolcard-native-dark.png](toolcard-native-dark.png) |
+| Settings window | [settings-window-native-light.png](settings-window-native-light.png) | [settings-window-native-dark.png](settings-window-native-dark.png) |
 
 设计口径见 [docs/design/native-ui.md](../native-ui.md)；品牌色板与主题见 [ADR 0002](../../decisions/0002-brand-theme-foundation.md)。

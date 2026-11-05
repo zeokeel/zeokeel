@@ -23,6 +23,7 @@ func newLiveSnapshotApp(t *testing.T, screen Screen, snap *state.Snapshot) *live
 	// *App; clear them in case the allocator reuses a dead App's address.
 	sessionRenderStates.Delete(h.app)
 	markdownStyles.Delete(h.app)
+	toolResultStates.Delete(h.app)
 	liveStates.Delete(h.app)
 	liveUIStates.Delete(h.app)
 	liveMenuStates.Delete(h.app)
@@ -301,5 +302,17 @@ func TestAssistantFooterTimeAndCompletionOnlyWhenCompleted(t *testing.T) {
 	}
 	if _, ok := tt.Find("Copy"); ok {
 		t.Fatal("streaming message shows Copy")
+	}
+}
+
+// TestMarkdownMissingImageShowsDescription covers the image loader wiring:
+// message Markdown now loads images from the workspace, and a missing file
+// falls back to the image's description instead of an empty box or a crash.
+func TestMarkdownMissingImageShowsDescription(t *testing.T) {
+	tt, _ := m6MarkdownApp(t, "Before ![latency chart](missing-chart.png) after")
+	for _, want := range []string{"Before", "latency chart", "after"} {
+		if !tt.HasText(want) {
+			t.Fatalf("missing-image Markdown lost %q: %v", want, tt.Texts())
+		}
 	}
 }

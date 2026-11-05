@@ -9,7 +9,6 @@ import (
 	"github.com/egoist/mygo/ui"
 
 	"github.com/zeokeel/zeokeel/internal/design"
-	"github.com/zeokeel/zeokeel/internal/icons"
 	"github.com/zeokeel/zeokeel/internal/session"
 	"github.com/zeokeel/zeokeel/internal/state"
 )
@@ -87,6 +86,17 @@ type App struct {
 	settingsLoaded bool
 	settingsValue  session.Settings
 	settingsErr    error
+
+	// Settings window host hooks. internal/app sets them so Settings is an
+	// independent desktop window instead of the in-app modal overlay; a nil
+	// opener keeps the overlay, which is what headless shell tests and the
+	// fallback path use. The opener reports whether it could show the window:
+	// false falls back to the overlay on a host that cannot create one.
+	settingsWindowOpen  func() bool
+	settingsWindowClose func()
+	// settingsChangedHook runs after a setting is saved, so a host with several
+	// windows (the main one and the settings window) can repaint them all.
+	settingsChangedHook func()
 
 	// langLoaded/langValue cache the resolved UI language. updateSettings
 	// clears them so a language switch applies on the next frame.
@@ -335,14 +345,46 @@ func (a *App) backgroundScreen() Screen {
 	}
 }
 
-// openSettings shows the modal over the current screen.
+// openSettings shows the settings UI. With a host opener registered (the
+// desktop app), Settings opens as its own non-modal window and this frame
+// keeps the screen it was on; without one, or when the host cannot show the
+// window, the in-app modal overlay is the fallback.
 func (a *App) openSettings() {
+	a.moreOpen = false
+	a.closeSelectors()
+	if a.settingsWindowOpen != nil && a.settingsWindowOpen() {
+		return
+	}
 	if a.Screen != Settings {
 		a.settingsReturn = a.Screen
 	}
-	a.moreOpen = false
-	a.closeSelectors()
 	a.Screen = Settings
+}
+
+// SetSettingsWindowOpener registers the host that shows, or focuses, the
+// independent settings window. It reports whether the window is on screen;
+// false keeps the in-app overlay as the fallback.
+func (a *App) SetSettingsWindowOpener(fn func() bool) { a.settingsWindowOpen = fn }
+
+// SetSettingsWindowCloser registers how the settings UI's Close controls close
+// the independent window (they hide it; the app keeps running). A nil handler
+// closes the in-app overlay instead.
+func (a *App) SetSettingsWindowCloser(fn func()) { a.settingsWindowClose = fn }
+
+// SetSettingsChangedHook registers a callback that runs after a setting is
+// saved. internal/app uses it to repaint the main window when the settings
+// window changes the theme, the language or a conversation size.
+func (a *App) SetSettingsChangedHook(fn func()) { a.settingsChangedHook = fn }
+
+// closeSettingsRequested runs the settings UI's Close controls: in the
+// independent settings window it hides that window, and in the in-app modal it
+// dismisses the overlay.
+func (a *App) closeSettingsRequested() {
+	if a.settingsWindowClose != nil {
+		a.settingsWindowClose()
+		return
+	}
+	a.closeSettings()
 }
 
 // closeSettings dismisses the modal and restores the screen it was opened
@@ -410,33 +452,5 @@ func (a *App) sidebar(c *ui.Context, t *design.Tokens) {
 	})
 }
 
-func (a *App) workspaceRow(c *ui.Context, t *design.Tokens, label string, active bool) {
-	// The selected workspace row stays on the sidebar color in DSH and only
-	// its folder glyph turns accent; the selected session row carries the fill.
-	row := ui.Row(c).Height(34).PaddingX(design.Space2).AlignItems(ui.Center).Gap(design.Space2)
-	row.Children(func() {
-		folder := t.LabelSecondary
-		if active {
-			folder = t.Accent
-		}
-		ui.Icon(c, icons.Folder()).FontSize(15).TextColor(folder)
-		ui.Text(c, label).FontSize(14).TextColor(t.LabelPrimary)
-	})
-}
-
-func (a *App) nav(c *ui.Context, t *design.Tokens, label string, active bool) {
-	design.Apply(ui.Text(c, label), t.NavRow(active), t.Text(design.TypeBody)).
-		PaddingX(design.Space3).PaddingY(design.Space2)
-}
-
-func (a *App) composer(c *ui.Context, t *design.Tokens, permission, model string) {
-	design.Apply(ui.Column(c), t.Composer()).Width(868).Padding(design.Space4).Gap(design.Space2).Children(func() {
-		ui.Text(c, a.T("home.composer_placeholder")).
-			FontSize(14).TextColor(t.LabelTertiary)
-		ui.Row(c).Gap(design.Space2).Children(func() {
-			ui.Text(c, "+").FontSize(14).TextColor(t.LabelSecondary)
-			ui.Text(c, permission).FontSize(13).TextColor(t.LabelSecondary)
-			ui.Text(c, model).FontSize(13).TextColor(t.LabelSecondary)
-		})
-	})
-}
+// The selected workspace row stays on the sidebar color in DSH and only
+// its folder glyph turns accent; the selected session row carries the fill.

@@ -295,7 +295,9 @@ func (a *App) sidebarTree(c *ui.Context, t *design.Tokens) {
 			return
 		}
 		for _, sess := range sessions {
-			a.sidebarSessionRow(c, t, sess, 0)
+			// The flat grouping has no workspace headers: every row is a
+			// top-level item of the tree.
+			a.sidebarSessionRow(c, t, sess, 0, 1)
 		}
 		return
 	}
@@ -344,33 +346,54 @@ func (a *App) sidebarWorkspaceRow(c *ui.Context, t *design.Tokens, ws store.Work
 	if expanded {
 		icon = icons.FolderOpen()
 	}
-	item := ui.SidebarItem(c, sidebarSelWorkspace+ws.ID, icon, ws.Name).
-		PaddingStart(indent).Expanded(expanded)
+	// The native Sidebar lays every item flat, so the workspace → session
+	// nesting is told to assistive technology with Level: the workspace row
+	// is a tree item at its depth, its sessions one level below it. Screen
+	// readers read the outline hierarchy from it, as they do from mygo's own
+	// SidebarSections.
+	//
+	// The row's inline actions live beside the item, overlaid on its trailing
+	// edge, instead of inside it: mygo's SidebarItem is a leaf for assistive
+	// technology (named by its content), so buttons inside it would not be
+	// exposed to screen readers. As siblings they read as the item's own
+	// controls, and the item keeps a clean name and level.
+	row := ui.Row(c).Shrink(0)
 	if depth == 0 {
 		// A little air between workspace groups; nested child workspaces
 		// stay tight to their parent.
-		item = item.Margin(th.Space(2), 0, 0, 0)
+		row = row.Margin(th.Space(2), 0, 0, 0)
 	}
-	if item.Clicked() {
-		a.sidebarChosenByPointer = true
-	}
-	item = item.Children(func() {
-		// The native item has no disclosure arrow of its own, so the row
-		// carries one as a native button; it only expands or collapses the
-		// workspace, while choosing the row opens the workspace.
-		label, chevron := a.T("workspace.show_sessions"), icons.ChevronRight()
-		if expanded {
-			label, chevron = a.T("workspace.hide_sessions"), icons.ChevronDown()
+	var item ui.Element
+	row.Children(func() {
+		item = ui.SidebarItem(c, sidebarSelWorkspace+ws.ID, icon, ws.Name).
+			PaddingStart(indent).
+			// The actions overlaid at the trailing edge keep their room
+			// reserved for the label.
+			PaddingEnd(th.Space(19)).
+			Grow(1).Level(depth + 1).Expanded(expanded)
+		if item.Clicked() {
+			a.sidebarChosenByPointer = true
 		}
-		a.sidebarItemAction(c, t, label, chevron, t.LabelTertiary, func() {
-			a.setWorkspaceCollapsed(ws.ID, expanded)
+		actions := ui.Row(c).Absolute().Right(th.Space(1)).Top(0).Bottom(0).
+			Gap(th.Space(0.5)).AlignItems(ui.Center)
+		actions.Children(func() {
+			// The native item has no disclosure arrow of its own, so the row
+			// carries one as a native button; it only expands or collapses
+			// the workspace, while choosing the row opens the workspace.
+			label, chevron := a.T("workspace.show_sessions"), icons.ChevronRight()
+			if expanded {
+				label, chevron = a.T("workspace.hide_sessions"), icons.ChevronDown()
+			}
+			a.sidebarItemAction(c, t, label, chevron, t.LabelTertiary, func() {
+				a.setWorkspaceCollapsed(ws.ID, expanded)
+			})
+			a.sidebarItemAction(c, t,
+				a.tr("New session in ", "在以下位置新建会话：")+ws.Name, icons.Plus(),
+				t.LabelSecondary, func() { a.newSessionInWorkspace(ws) })
+			a.sidebarItemMenuAction(c, t,
+				a.tr("Workspace actions for ", "工作区操作：")+ws.Name, icons.More(),
+				t.LabelSecondary, func(m *ui.Menu) { a.workspaceMenu(c, m, ws) })
 		})
-		a.sidebarItemAction(c, t,
-			a.tr("New session in ", "在以下位置新建会话：")+ws.Name, icons.Plus(),
-			t.LabelSecondary, func() { a.newSessionInWorkspace(ws) })
-		a.sidebarItemMenuAction(c, t,
-			a.tr("Workspace actions for ", "工作区操作：")+ws.Name, icons.More(),
-			t.LabelSecondary, func(m *ui.Menu) { a.workspaceMenu(c, m, ws) })
 	})
 	// Drag/drop reordering: the row drags its workspace id and takes a drop in
 	// its top half before itself, in its bottom half after itself.
@@ -406,7 +429,7 @@ func (a *App) sidebarWorkspaceRow(c *ui.Context, t *design.Tokens, ws store.Work
 	}
 	sessionIndent := indent + th.Space(6)
 	for _, sess := range sessions {
-		a.sidebarSessionRow(c, t, sess, sessionIndent)
+		a.sidebarSessionRow(c, t, sess, sessionIndent, depth+2)
 	}
 }
 
@@ -424,9 +447,11 @@ func (a *App) sidebarSessionNotice(c *ui.Context, t *design.Tokens, err error, i
 
 // sidebarSessionRow is one session of the tree: a native SidebarItem with the
 // conversation icon, its relative time and the session menu as an always
-// visible inline action. It is a drag/drop source and target in manual order,
-// and a right click opens the same menu.
-func (a *App) sidebarSessionRow(c *ui.Context, t *design.Tokens, sess store.Session, indent float32) {
+// visible inline action. level is its depth in the accessibility tree: 1 in
+// the flat grouping, the workspace's level + 1 under a workspace. It is a
+// drag/drop source and target in manual order, and a right click opens the
+// same menu.
+func (a *App) sidebarSessionRow(c *ui.Context, t *design.Tokens, sess store.Session, indent float32, level int) {
 	th := t.Theme()
 	title := sess.Title
 	archived := false
@@ -434,27 +459,37 @@ func (a *App) sidebarSessionRow(c *ui.Context, t *design.Tokens, sess store.Sess
 		title += " · " + a.T("workspace.archived")
 		archived = true
 	}
-	item := ui.SidebarItem(c, sidebarSelSession+sess.ID, icons.Message(), title).
-		PaddingStart(indent)
-	if archived {
-		item = item.Tooltip(title)
-	}
-	item = item.Children(func() {
-		if when := a.sessionWhen(sess.UpdatedAt); when != "" {
-			ui.Text(c, when).FontSize(th.FontSize - 3).FixedLineHeight(th.Space(4)).
-				TextColor(t.LabelTertiary)
+	// As with a workspace row, the item is a leaf for assistive technology and
+	// its session menu is a sibling overlaid on the trailing edge, so screen
+	// readers see a named tree item at its level next to its own button.
+	row := ui.Row(c).Shrink(0)
+	var item ui.Element
+	row.Children(func() {
+		item = ui.SidebarItem(c, sidebarSelSession+sess.ID, icons.Message(), title).
+			PaddingStart(indent).PaddingEnd(th.Space(16)).
+			Grow(1).Level(level)
+		if archived {
+			item = item.Tooltip(title)
 		}
-		if a.sessionRunning(sess.ID) {
-			ui.Box(c).Size(th.Space(1.5), th.Space(1.5)).Radius(design.RadiusMax).
-				Background(t.Accent)
-		}
-		// The row keeps the "⋯" affordance as native text: it is the mark
-		// the product already used, and a text node stays findable and
-		// clickable for keyboard and assistive-technology tests.
-		a.sidebarItemGlyphMenuAction(c, t,
-			a.menuText("Session actions for "+sess.Title, "会话操作："+sess.Title),
-			"⋯", t.LabelSecondary,
-			func(m *ui.Menu) { a.workspaceSessionMenu(c, m, sess) })
+		actions := ui.Row(c).Absolute().Right(th.Space(1)).Top(0).Bottom(0).
+			Gap(th.Space(1)).AlignItems(ui.Center)
+		actions.Children(func() {
+			if when := a.sessionWhen(sess.UpdatedAt); when != "" {
+				ui.Text(c, when).FontSize(th.FontSize - 3).FixedLineHeight(th.Space(4)).
+					TextColor(t.LabelTertiary)
+			}
+			if a.sessionRunning(sess.ID) {
+				ui.Box(c).Size(th.Space(1.5), th.Space(1.5)).Radius(design.RadiusMax).
+					Background(t.Accent)
+			}
+			// The row keeps the "⋯" affordance as native text: it is the mark
+			// the product already used, and a text node stays findable and
+			// clickable for keyboard and assistive-technology tests.
+			a.sidebarItemGlyphMenuAction(c, t,
+				a.menuText("Session actions for "+sess.Title, "会话操作："+sess.Title),
+				"⋯", t.LabelSecondary,
+				func(m *ui.Menu) { a.workspaceSessionMenu(c, m, sess) })
+		})
 	})
 	// Manual ordering: every session row is a drag source and a drop target.
 	item = item.Drag(sess.ID)

@@ -36,16 +36,17 @@
 
 基础设施：`internal/state`（事件总线/快照）、`internal/store`（SQLite v1 + JSONL）、`internal/runtime`（eino ADK：工具回路/多轮历史/审批）、`internal/provider/openai`（SSE 流式 + tool calls）、`internal/session`（会话控制器）、`internal/app`（单实例/托盘/关窗隐藏 + services 接线）。
 
-**2026-11-05 原生视觉迁移（进行中，六屏已完成）**：
+**2026-11-05 原生视觉迁移（已覆盖全部屏/区）**：
 
 - 阶段 1（完成）：像素门禁与静态演示屏拆除，测试全部迁移 live fixture；品牌主题 `internal/brand`（logo 色板 + mygo `ui.Theme`）生效。见 [ADR 0001](docs/decisions/0001-retire-dsh-pixel-parity.md)、[ADR 0002](docs/decisions/0002-brand-theme-foundation.md)。
 - 阶段 2/3（完成）：**Home、Session、Sidebar、Settings、Plugins、Automation 六屏改用 ZeoKeel 品牌原生视觉**（mygo 原生控件 + Theme 令牌，去 DSH 文案/像素魔法值）；系统菜单栏与窗口状态持久化落地（[ADR 0003](docs/decisions/0003-desktop-shell-integration.md)）。
 - 阶段 4（完成）：Trajectory / 内联搜索 / todo·team·plan 面板 / 右侧栏（Files·Terminal·Start）品牌化；**Markdown 迁移到 mygo `ui/markdown`**（代码高亮/表格/任务列表/流式/文本选中复制，净减 452 行）；**系统通知**（完成/失败/待审批，[ADR 0004](docs/decisions/0004-desktop-notifications.md)）；系统偏好 TextScale/HighContrast/ReduceMotion 与 2x DPI 冒烟。
+- 阶段 5（完成）：**工具卡结果原生化**（代码块 Copy/GFM markdown/图片加载/错误面板/40 行折叠）；**设置独立原生窗口**（Cmd+, 单例非模态，[ADR 0005](docs/decisions/0005-settings-window.md)）；**后台会话完成/失败通知**（controller hook + 去重/节流）；Sidebar a11y 树层级与键盘回归；死代码清理（-203 行）与 UI 渲染性能基准（稳态帧 0.48–1.26ms，[perf.md](docs/design/perf.md)）。
 - 设计与逐屏记录：[原生视觉方向](docs/design/native-ui.md)；可复现截图：[docs/design/preview/](docs/design/preview/)（浅/深色，含 Trajectory 与右侧栏）。
 
 ![Session 原生视觉（浅色）](docs/design/preview/session-native-light.png)
 
-- 下一阶段：工具卡内容原生化、设置独立窗口、通知后台会话/动作按钮、滚动条与真机 IME/a11y 矩阵、Trajectory 虚拟化（详见 [native-ui.md §16](docs/design/native-ui.md)）。`go build/vet/test` 全绿。
+- 下一阶段：按 [设计评审 Top10](docs/design/review-round3.md) 修观感/一致性（破坏性操作确认、三级文字对比度、深色字标位图等）、滚动条与真机 IME/a11y 矩阵、Trajectory 虚拟化。`go build/vet/test` 全绿。
 
 ## 字标（已定）
 

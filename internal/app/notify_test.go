@@ -1,10 +1,14 @@
 package app
 
 import (
+	"context"
+	"errors"
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
+	"github.com/zeokeel/zeokeel/internal/runtime"
 	"github.com/zeokeel/zeokeel/internal/session"
 	"github.com/zeokeel/zeokeel/internal/state"
 )
@@ -377,5 +381,333 @@ func TestUILanguageFallsBackToChinese(t *testing.T) {
 	a := &app{}
 	if got := a.uiLanguage(); got != session.LanguageChinese {
 		t.Fatalf("uiLanguage without services = %q, want zh", got)
+	}
+}
+
+// ---- Background-turn notifications (controller TurnFinishedHook) ----
+
+// gatedNotifyProvider is a scripted provider whose response waits for release,
+// so a test decides when a turn finishes and which session is current then.
+type gatedNotifyProvider struct {
+	release chan struct{}
+	text    string
+	err     error
+}
+
+func newGatedNotifyProvider(text string, err error) *gatedNotifyProvider {
+	return &gatedNotifyProvider{release: make(chan struct{}), text: text, err: err}
+}
+
+func (p *gatedNotifyProvider) Stream(ctx context.Context, _ runtime.Request) (<-chan runtime.Chunk, error) {
+	out := make(chan runtime.Chunk, 1)
+	go func() {
+		defer close(out)
+		select {
+		case <-p.release:
+			if p.err != nil {
+				out <- runtime.Chunk{Err: p.err, Done: true}
+				return
+			}
+			out <- runtime.Chunk{Text: p.text, Done: true}
+		case <-ctx.Done():
+		}
+	}()
+	return out, nil
+}
+
+// waitNotifyPhase waits for the current session snapshot to reach phase.
+func waitNotifyPhase(t *testing.T, ctrl *session.Controller, phase state.Phase) {
+	t.Helper()
+	deadline := time.Now().Add(10 * time.Second)
+	for time.Now().Before(deadline) {
+		if ctrl.Snapshot().Phase == phase {
+			return
+		}
+		time.Sleep(2 * time.Millisecond)
+	}
+	t.Fatalf("session did not reach %s: %+v", phase, ctrl.Snapshot())
+}
+
+// newNotificationController wires a real controller (store/broker/projector) to
+// a dispatcher exactly like the app does: snapshots for approval waits and the
+// controller TurnFinishedHook for terminal turns of every session.
+func newNotificationController(t *testing.T, provider runtime.Provider) (*session.Controller, *notifyHarness) {
+	t.Helper()
+	ctrl, _ := newWiredController(t, provider, nil)
+	h := newNotifyHarness(t)
+	h.dispatcher.useTurnFinishedHook()
+	ctrl.SetOnTurnFinished(h.dispatcher.observeTurnFinished)
+	ctrl.OnUpdate(h.dispatcher.Observe)
+	return ctrl, h
+}
+
+// TestBackgroundSessionTurnCompleteNotifies covers the P1 gap: a turn that ends
+// in a session which is no longer current (OnUpdate no longer publishes it)
+// still raises one notification, and its click reopens that session.
+func TestBackgroundSessionTurnCompleteNotifies(t *testing.T) {
+	provider := newGatedNotifyProvider("background result", nil)
+	ctrl, h := newNotificationController(t, provider)
+	ctx := context.Background()
+	other, err := ctrl.CreateSession(ctx, "foreground")
+	if err != nil {
+		t.Fatalf("CreateSession foreground: %v", err)
+	}
+	background, err := ctrl.CreateSession(ctx, "background")
+	if err != nil {
+		t.Fatalf("CreateSession background: %v", err)
+	}
+	if err := ctrl.Submit(ctx, background, "long background work"); err != nil {
+		t.Fatalf("Submit: %v", err)
+	}
+	waitNotifyPhase(t, ctrl, state.PhaseRunning)
+	// Switch away while the turn runs: the completion snapshot is now published
+	// for `other`, so only the controller hook can report the background turn.
+	if _, err := ctrl.OpenSession(ctx, other); err != nil {
+		t.Fatalf("OpenSession foreground: %v", err)
+	}
+	close(provider.release)
+	ctrl.Wait()
+
+	if got := h.notifier.count(); got != 1 {
+		t.Fatalf("background completion raised %d notifications, want 1", got)
+	}
+	notification := h.notifier.last(t)
+	if notification.title != "Task complete" {
+		t.Fatalf("title = %q, want Task complete", notification.title)
+	}
+	if notification.onClick == nil {
+		t.Fatal("background notification has no click handler")
+	}
+	notification.onClick()
+	if len(h.focused) != 1 || h.focused[0] != background {
+		t.Fatalf("click focused %v, want [%s]", h.focused, background)
+	}
+}
+
+// TestBackgroundSessionTurnFailureNotifies covers the failure half of the same
+// gap, and re-checks the privacy rule: the provider's error text stays out of
+// the notification.
+func TestBackgroundSessionTurnFailureNotifies(t *testing.T) {
+	const secret = "provider exploded on private prompt"
+	provider := newGatedNotifyProvider("", errors.New(secret))
+	ctrl, h := newNotificationController(t, provider)
+	ctx := context.Background()
+	other, err := ctrl.CreateSession(ctx, "foreground")
+	if err != nil {
+		t.Fatalf("CreateSession foreground: %v", err)
+	}
+	background, err := ctrl.CreateSession(ctx, "background")
+	if err != nil {
+		t.Fatalf("CreateSession background: %v", err)
+	}
+	if err := ctrl.Submit(ctx, background, secret); err != nil {
+		t.Fatalf("Submit: %v", err)
+	}
+	waitNotifyPhase(t, ctrl, state.PhaseRunning)
+	if _, err := ctrl.OpenSession(ctx, other); err != nil {
+		t.Fatalf("OpenSession foreground: %v", err)
+	}
+	close(provider.release)
+	ctrl.Wait()
+
+	if got := h.notifier.count(); got != 1 {
+		t.Fatalf("background failure raised %d notifications, want 1", got)
+	}
+	notification := h.notifier.last(t)
+	if notification.title != "Task failed" {
+		t.Fatalf("title = %q, want Task failed", notification.title)
+	}
+	if strings.Contains(notification.body, secret) {
+		t.Fatalf("failure notification leaked the error text: %q", notification.body)
+	}
+	notification.onClick()
+	if len(h.focused) != 1 || h.focused[0] != background {
+		t.Fatalf("click focused %v, want [%s]", h.focused, background)
+	}
+}
+
+// TestCurrentSessionTurnNotifiesOnce checks the hook and the snapshot machine
+// do not both fire for the session the user is looking at: exactly one
+// notification per turn.
+func TestCurrentSessionTurnNotifiesOnce(t *testing.T) {
+	provider := newGatedNotifyProvider("done", nil)
+	ctrl, h := newNotificationController(t, provider)
+	ctx := context.Background()
+	id, err := ctrl.CreateSession(ctx, "current")
+	if err != nil {
+		t.Fatalf("CreateSession: %v", err)
+	}
+	if err := ctrl.Submit(ctx, id, "work"); err != nil {
+		t.Fatalf("Submit: %v", err)
+	}
+	waitNotifyPhase(t, ctrl, state.PhaseRunning)
+	close(provider.release)
+	ctrl.Wait()
+	if got := h.notifier.count(); got != 1 {
+		t.Fatalf("current-session turn raised %d notifications, want exactly 1", got)
+	}
+}
+
+// TestStoppedTurnDoesNotNotify covers the user stopping a turn: cancellation is
+// not a completion and not a failure.
+func TestStoppedTurnDoesNotNotify(t *testing.T) {
+	provider := newGatedNotifyProvider("too late", nil)
+	ctrl, h := newNotificationController(t, provider)
+	ctx := context.Background()
+	id, err := ctrl.CreateSession(ctx, "stopped")
+	if err != nil {
+		t.Fatalf("CreateSession: %v", err)
+	}
+	if err := ctrl.Submit(ctx, id, "work"); err != nil {
+		t.Fatalf("Submit: %v", err)
+	}
+	waitNotifyPhase(t, ctrl, state.PhaseRunning)
+	ctrl.Stop()
+	ctrl.Wait()
+	if got := h.notifier.count(); got != 0 {
+		t.Fatalf("stopped turn raised %d notifications, want 0", got)
+	}
+}
+
+// TestWiringAfterCompletedTurnDoesNotReplayHistory covers the restart path: a
+// dispatcher attached to an already-idle session must stay quiet until the next
+// turn, and then report that turn.
+func TestWiringAfterCompletedTurnDoesNotReplayHistory(t *testing.T) {
+	provider := &wiringProvider{}
+	ctrl, _ := newWiredController(t, provider, nil)
+	ctx := context.Background()
+	id, err := ctrl.CreateSession(ctx, "restored")
+	if err != nil {
+		t.Fatalf("CreateSession: %v", err)
+	}
+	if err := ctrl.Submit(ctx, id, "finished before the app restarted"); err != nil {
+		t.Fatalf("Submit: %v", err)
+	}
+	waitWiringIdle(t, ctrl)
+
+	// "Restart": attach the dispatcher to the idle session and observe its
+	// snapshot; history must not be replayed.
+	h := newNotifyHarness(t)
+	h.dispatcher.useTurnFinishedHook()
+	ctrl.SetOnTurnFinished(h.dispatcher.observeTurnFinished)
+	ctrl.OnUpdate(h.dispatcher.Observe)
+	h.dispatcher.Observe(ctrl.Snapshot())
+	if got := h.notifier.count(); got != 0 {
+		t.Fatalf("restored idle session replayed %d notifications, want 0", got)
+	}
+	// The first live turn after the restart notifies.
+	if err := ctrl.Submit(ctx, id, "next turn"); err != nil {
+		t.Fatalf("Submit after restart: %v", err)
+	}
+	waitWiringIdle(t, ctrl)
+	if got := h.notifier.count(); got != 1 {
+		t.Fatalf("live turn after restart raised %d notifications, want 1", got)
+	}
+}
+
+// TestTurnFinishedHookDedupesSameTurn covers the defensive sessionID+turnID
+// dedupe for a repeated hook call of the same turn.
+func TestTurnFinishedHookDedupesSameTurn(t *testing.T) {
+	h := newNotifyHarness(t)
+	h.dispatcher.useTurnFinishedHook()
+	outcome := session.TurnOutcome{SessionID: "s1", TurnID: "turn-1", HasOutput: true}
+	h.dispatcher.observeTurnFinished(outcome)
+	h.dispatcher.observeTurnFinished(outcome)
+	if got := h.notifier.count(); got != 1 {
+		t.Fatalf("repeated hook for one turn raised %d notifications, want 1", got)
+	}
+}
+
+// TestTurnFinishedHookSkipsStoppedAndOutputlessTurns covers the hook's outcome
+// filters.
+func TestTurnFinishedHookSkipsStoppedAndOutputlessTurns(t *testing.T) {
+	h := newNotifyHarness(t)
+	h.dispatcher.useTurnFinishedHook()
+	h.dispatcher.observeTurnFinished(session.TurnOutcome{SessionID: "s1", TurnID: "t1", Stopped: true})
+	h.dispatcher.observeTurnFinished(session.TurnOutcome{SessionID: "s1", TurnID: "t2"}) // no output
+	if got := h.notifier.count(); got != 0 {
+		t.Fatalf("stopped/output-less turns raised %d notifications, want 0", got)
+	}
+	// A failed turn notifies even when it produced no readable output.
+	h.dispatcher.observeTurnFinished(session.TurnOutcome{SessionID: "s1", TurnID: "t3", Failed: true})
+	if got := h.notifier.count(); got != 1 {
+		t.Fatalf("failed turn raised %d notifications, want 1", got)
+	}
+}
+
+// TestTurnFinishedHookRespectsActiveWindow covers the same gate as snapshots.
+func TestTurnFinishedHookRespectsActiveWindow(t *testing.T) {
+	h := newNotifyHarness(t)
+	h.dispatcher.useTurnFinishedHook()
+	h.active = true
+	h.dispatcher.observeTurnFinished(session.TurnOutcome{SessionID: "s1", TurnID: "t1", HasOutput: true})
+	if got := h.notifier.count(); got != 0 {
+		t.Fatalf("active window raised %d notifications, want 0", got)
+	}
+	h.active = false
+	h.dispatcher.observeTurnFinished(session.TurnOutcome{SessionID: "s2", TurnID: "t2", HasOutput: true})
+	if got := h.notifier.count(); got != 1 {
+		t.Fatalf("inactive window raised %d notifications, want 1", got)
+	}
+}
+
+// TestTurnFinishedHookThrottlesCompletionsPerSession covers the per-session
+// completion throttle (goal/automation continuations) and the failure bypass.
+func TestTurnFinishedHookThrottlesCompletionsPerSession(t *testing.T) {
+	h := newNotifyHarness(t)
+	h.dispatcher.useTurnFinishedHook()
+	now := time.Unix(1_700_000_000, 0)
+	h.dispatcher.now = func() time.Time { return now }
+	h.dispatcher.observeTurnFinished(session.TurnOutcome{SessionID: "s1", TurnID: "t1", HasOutput: true})
+	if got := h.notifier.count(); got != 1 {
+		t.Fatalf("first completion raised %d notifications, want 1", got)
+	}
+	h.dispatcher.observeTurnFinished(session.TurnOutcome{SessionID: "s1", TurnID: "t2", HasOutput: true})
+	if got := h.notifier.count(); got != 1 {
+		t.Fatalf("throttled completion raised %d notifications, want 1", got)
+	}
+	now = now.Add(turnNoticeThrottle + time.Second)
+	h.dispatcher.observeTurnFinished(session.TurnOutcome{SessionID: "s1", TurnID: "t3", HasOutput: true})
+	if got := h.notifier.count(); got != 2 {
+		t.Fatalf("completion after throttle raised %d notifications, want 2", got)
+	}
+	// A failure is rare and actionable: it bypasses the throttle.
+	h.dispatcher.observeTurnFinished(session.TurnOutcome{SessionID: "s1", TurnID: "t4", Failed: true})
+	if got := h.notifier.count(); got != 3 {
+		t.Fatalf("failure during throttle raised %d notifications, want 3", got)
+	}
+}
+
+// TestTurnFinishedHookIsInertWithoutWiring covers a dispatcher that only has the
+// snapshot path (headless tests, older wiring): hook calls are ignored.
+func TestTurnFinishedHookIsInertWithoutWiring(t *testing.T) {
+	h := newNotifyHarness(t)
+	h.dispatcher.observeTurnFinished(session.TurnOutcome{SessionID: "s1", TurnID: "t1", HasOutput: true})
+	if got := h.notifier.count(); got != 0 {
+		t.Fatalf("unwired hook raised %d notifications, want 0", got)
+	}
+}
+
+// TestTurnFinishedHookUsesChineseCopy covers the localized background copy.
+func TestTurnFinishedHookUsesChineseCopy(t *testing.T) {
+	h := newNotifyHarness(t)
+	h.dispatcher.useTurnFinishedHook()
+	h.lang = session.LanguageChinese
+	h.dispatcher.observeTurnFinished(session.TurnOutcome{SessionID: "s1", TurnID: "t1", HasOutput: true})
+	if got := h.notifier.last(t).title; got != "任务完成" {
+		t.Fatalf("Chinese background title = %q, want 任务完成", got)
+	}
+}
+
+// TestNotificationActiveGate covers the app-level gate: quitting suppresses
+// notifications even before the window is gone.
+func TestNotificationActiveGate(t *testing.T) {
+	a := &app{}
+	if !a.notificationActive() {
+		t.Fatal("notificationActive without quitting/window = false, want true (assume visible)")
+	}
+	a.quitting = true
+	if !a.notificationActive() {
+		t.Fatal("notificationActive while quitting = false, want true (suppressed)")
 	}
 }

@@ -70,16 +70,3 @@ func sendIdleFill(t *design.Tokens) ui.Color {
 // sendIdleGlyph is the disabled Send glyph: the brand accent, muted by the
 // disabled control's own 50% paint opacity against the idle fill.
 func sendIdleGlyph(t *design.Tokens) ui.Color { return t.Accent }
-
-// switchTrack returns the track and knob colors of an on/off switch. On uses
-// the inverse pair (light: dark track with a light knob; dark: a near-white
-// track with a dark knob); off uses the BorderL3 track with a white knob in
-// both themes, which stays visible in the dark appearance. Plugins,
-// Automation and Settings all share it so an enabled switch can never look
-// like a disabled one.
-func switchTrack(t *design.Tokens, on bool) (track, knob ui.Color) {
-	if on {
-		return t.LabelPrimary, t.BgBase
-	}
-	return t.BorderL3, t.White
-}

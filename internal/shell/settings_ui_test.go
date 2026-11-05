@@ -714,3 +714,148 @@ func TestSettingsNativeControls(t *testing.T) {
 		}
 	}
 }
+
+// TestSettingsViewRendersStandalone covers the independent settings window's
+// view: the same nav and page content the modal hosts, rendered as a whole
+// window without the scrim, and its Close controls route to the host instead
+// of dismissing an overlay.
+func TestSettingsViewRendersStandalone(t *testing.T) {
+	h := newLiveApp(t, &shellProvider{})
+	h.app.Language = LangEN
+	closed := 0
+	h.app.SetSettingsWindowCloser(func() { closed++ })
+	tt := ui.NewTester(h.app.SettingsView, 900, 720)
+	tt.Frame()
+
+	for _, want := range []string{"Settings", "General", "Models", "Built-in plugins", "Language", "Close settings"} {
+		if !tt.HasText(want) {
+			t.Fatalf("standalone settings view missing %q: %q", want, tt.Texts())
+		}
+	}
+	// The page content is the same General form the modal shows.
+	if !tt.HasText("Appearance") || !tt.HasText("Permission") {
+		t.Fatalf("standalone settings view lost the General page: %q", tt.Texts())
+	}
+	// Nav to another page, as in the modal.
+	if err := tt.Click("Models"); err != nil {
+		t.Fatalf("click Models: %v", err)
+	}
+	if h.app.shellUI().settingsTab != settingsTabModels {
+		t.Fatalf("nav choice = %v, want Models", h.app.shellUI().settingsTab)
+	}
+	// The Close control asks the host to hide the window; it must not leave
+	// Screen=Settings on the main window.
+	if err := tt.Click("Close settings"); err != nil {
+		t.Fatalf("click Close settings: %v", err)
+	}
+	if closed != 1 {
+		t.Fatalf("Close control called the host %d times, want 1", closed)
+	}
+	if h.app.Screen == Settings {
+		t.Fatal("the settings window's Close switched the main window to the overlay")
+	}
+	// Escape closes the window too when no settings popover is open.
+	tt.Frame()
+	tt.Key(0, ui.KeyEscape)
+	tt.Frame()
+	if closed != 2 {
+		t.Fatalf("Escape called the host %d times total, want 2", closed)
+	}
+
+	// Cmd/Ctrl+, focuses the window from inside it (the Windows/Linux menu bar
+	// belongs to the main window, whose shortcuts wait while this one has the
+	// focus).
+	opened := 0
+	h.app.SetSettingsWindowOpener(func() bool { opened++; return true })
+	tt.Frame()
+	tt.Key(ui.Cmd, ui.KeyComma)
+	tt.Frame()
+	if opened != 1 {
+		t.Fatalf("Cmd+, inside the settings window called the host %d times, want 1", opened)
+	}
+}
+
+// TestOpenSettingsRoutesToHostWindow covers Cmd+, and the native menu's
+// Settings command: with a host window available they show it, keep the main
+// window on its screen, and fall back to the in-app overlay when the host
+// reports that it cannot show a window.
+func TestOpenSettingsRoutesToHostWindow(t *testing.T) {
+	h := newLiveApp(t, &shellProvider{})
+	h.app.Language = LangEN
+	h.app.Screen = Home
+	opens := 0
+	h.app.SetSettingsWindowOpener(func() bool { opens++; return true })
+
+	if !h.app.HandleMenuAction(MenuActionSettings) {
+		t.Fatal("HandleMenuAction did not recognize the settings command")
+	}
+	if opens != 1 {
+		t.Fatalf("host opener calls = %d, want 1", opens)
+	}
+	if h.app.Screen != Home {
+		t.Fatalf("screen = %v, want Home: the settings window is not an overlay", h.app.Screen)
+	}
+
+	// A host that cannot show the window falls back to the modal.
+	h.app.SetSettingsWindowOpener(func() bool { return false })
+	h.app.HandleMenuAction(MenuActionSettings)
+	if h.app.Screen != Settings {
+		t.Fatalf("fallback screen = %v, want Settings", h.app.Screen)
+	}
+}
+
+// TestSettingsChangedHookRuns covers the state-sync hook: saving a setting
+// notifies the host, which repaints the main window beside the settings one.
+func TestSettingsChangedHookRuns(t *testing.T) {
+	h := newLiveApp(t, &shellProvider{})
+	changed := 0
+	h.app.SetSettingsChangedHook(func() { changed++ })
+	h.app.updateSettings(nil, func(cfg *session.Settings) { cfg.FontSize = session.FontSizeLarge })
+	if changed != 1 {
+		t.Fatalf("settings-changed hook calls = %d, want 1", changed)
+	}
+	if got := h.app.currentSettings().FontSize; got != session.FontSizeLarge {
+		t.Fatalf("saved font size = %d, want large", got)
+	}
+}
+
+// TestRenderSettingsWindowNativePreview renders the independent settings
+// window's view for brand review at its window size (900x720), light and dark.
+// previewDir keeps ordinary runs in a temporary directory;
+// ZEOKEEL_UPDATE_PREVIEWS=1 refreshes docs/design/preview.
+func TestRenderSettingsWindowNativePreview(t *testing.T) {
+	dir := previewDir(t)
+	for _, tc := range []struct {
+		name  string
+		theme string
+	}{
+		{"light", session.ThemeLight},
+		{"dark", session.ThemeDark},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			h := newLiveApp(t, &shellProvider{})
+			h.app.Language = LangZH
+			h.app.Screen = Home
+			if err := h.store.SetSetting(session.SettingTheme, tc.theme); err != nil {
+				t.Fatalf("theme setting: %v", err)
+			}
+			img := ui.Render(h.app.SettingsView, 900, 720, 1)
+			path := filepath.Join(dir, "settings-window-native-"+tc.name+".png")
+			f, err := os.Create(path)
+			if err != nil {
+				t.Fatalf("create %s: %v", path, err)
+			}
+			if err := png.Encode(f, img); err != nil {
+				f.Close()
+				t.Fatalf("encode %s: %v", path, err)
+			}
+			if err := f.Close(); err != nil {
+				t.Fatalf("close %s: %v", path, err)
+			}
+			if fi, err := os.Stat(path); err != nil || fi.Size() == 0 {
+				t.Fatalf("preview %s is empty: %v", path, err)
+			}
+			t.Logf("wrote %s", path)
+		})
+	}
+}

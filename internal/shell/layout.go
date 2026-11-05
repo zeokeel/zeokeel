@@ -13,8 +13,8 @@ const (
 	// design.Sidebar() paints), not a value sampled from another product.
 	sidebarW float32 = 280
 	// minMainW is the narrowest main column the layouts allow before they
-	// start clamping a panel instead. DSH keeps 400px of main content beside
-	// its 520px right panel at 1200x800, so its docked panel is 520 there.
+	// start clamping a panel instead. It is the desktop-app minimum that keeps
+	// 400px of main content beside a docked inspector panel at 1200x800.
 	minMainW float32 = 400
 	// minRightPanelW is the narrowest docked right panel. The panel gives up
 	// width before the main column falls below minMainW, so 280+400+220 fits
@@ -27,15 +27,13 @@ const (
 	rightPanelShare float32 = 0.45
 	// minHomeStackW keeps the Home hero and composer usable at 900px.
 	minHomeStackW float32 = 320
-	// narrowSideInset is the per-side inset DSH keeps at 1200x800 for the
-	// centered Home/Session columns and the Plugins/Automation pages (48px)
-	// or the Home/Session composer (106px, applied as a total of 212).
-	narrowSideInset   float32 = 48
+	// narrowColumnInset is the total inset the centered Home/Session
+	// columns take at a narrow window: 212px, capped so it never eats a
+	// column that is already narrow.
 	narrowColumnInset float32 = 212
 	// narrowComposerLabelW is where the composer's access chip drops its
-	// text and keeps DSH's 44px icon+chevron trigger. Below it the label
-	// wraps the 28px toolbar; at 1200x800 with the docked panel the
-	// composer is 361px.
+	// label and keeps its icon+chevron trigger. Below it the label would wrap
+	// the toolbar, so only the compact trigger stays.
 	narrowComposerLabelW float32 = 430
 	// sessionSidePanelW is one docked Todo/Team panel. They are fixed-width
 	// columns beside the transcript, so they must be subtracted from the
@@ -108,12 +106,11 @@ func (a *App) rightSidebarWidth(c *ui.Context) float32 {
 }
 
 // narrowInsetFor is the side inset one centered column gets. When the right
-// panel has already reduced the main column, DSH switches to its small
-// inset: at 1600x1000 with the 720px panel the 600px column still paints a
-// 561px composer card and a 593px stack (baseline 15-session-dark). Applying
-// the 212px narrow-window inset there produced a 388px composer. Without the
-// panel, the inset is capped so it never eats a column that is already narrow
-// (400px content keeps the 361px card / 393px stack of baseline 48/16).
+// panel has already reduced the main column, the small inset applies: the
+// remaining column paints a usable composer card and stack instead of being
+// squeezed by the 212px narrow-window inset. Without the panel, the inset is
+// capped so it never eats a column that is already narrow (400px of content
+// keeps the 361px card and 393px stack).
 func (a *App) narrowInsetFor(content float32) float32 {
 	if a.Ctrl != nil && a.rightOpen && a.rightSidebarHosted() && !a.rightFullscreen {
 		return 39
@@ -132,32 +129,32 @@ func (a *App) narrowInsetFor(content float32) float32 {
 }
 
 // narrowColumnWidth clamps one centered column (the Home stack/composer or the
-// Session transcript/composer) to DSH's narrow geometry:
-// min(baseline, contentWidth-inset), where inset comes from narrowInsetFor.
-func (a *App) narrowColumnWidth(content, baseline float32) float32 {
+// Session transcript/composer) to the narrow-window geometry:
+// min(column, contentWidth-inset), where inset comes from narrowInsetFor.
+func (a *App) narrowColumnWidth(content, column float32) float32 {
 	if content <= 0 {
-		return baseline
+		return column
 	}
-	if limit := content - a.narrowInsetFor(content); baseline > limit {
-		baseline = limit
+	if limit := content - a.narrowInsetFor(content); column > limit {
+		column = limit
 	}
-	if baseline < 1 {
-		baseline = 1
+	if column < 1 {
+		column = 1
 	}
-	return baseline
+	return column
 }
 
-// homeStackWidthFor is the centered Home column width. At 1600x1000 it keeps
-// the 909px baseline; at narrow widths the composer shrinks with the capped
-// inset and the stack follows it (composer + 32 without a panel; the baseline
-// 393 at content 400 when the docked panel already narrowed the column).
+// homeStackWidthFor is the centered Home column width. On a wide window it
+// keeps the brand column; at narrow widths the composer shrinks with the
+// capped inset and the stack follows it (composer + 32 without a panel; 393
+// at 400px of content when the docked panel already narrowed the column).
 func (a *App) homeStackWidthFor(c *ui.Context) float32 {
 	avail := a.contentWidth(c)
 	w := homeStackWidth
 	if avail > 0 {
 		inset := a.narrowInsetFor(avail)
 		if inset >= narrowColumnInset {
-			// DSH's uncapped narrow geometry: the stack keeps its original
+			// The uncapped narrow geometry: the stack keeps its original
 			// 29px of extra room over the composer.
 			if limit := avail - (narrowColumnInset - 29); w > limit {
 				w = limit
@@ -165,7 +162,8 @@ func (a *App) homeStackWidthFor(c *ui.Context) float32 {
 		} else if limit := avail - inset + 32; w > limit {
 			// With the panel already subtracted, the composer card is the
 			// content minus the capped inset and the stack is 32px wider:
-			// 393 at content 400, matching baseline 48/16.
+			// 393 at content 400: the narrow layout keeps 16 DIPs of room
+			// over the small inset.
 			w = limit
 		}
 	}
@@ -286,21 +284,6 @@ func (a *App) sessionTranscriptWidthFor(c *ui.Context) float32 {
 	return w
 }
 
-// pageColumnWidth is the centered 960px content column shared by Plugins and
-// Automation: min(960, contentWidth-96), leaving DSH's 48px side insets at
-// 1200x800 while the 1600x1000 column stays 960.
-func (a *App) pageColumnWidth(c *ui.Context, baseline float32) float32 {
-	if avail := a.contentWidth(c); avail > 0 {
-		if limit := avail - 2*narrowSideInset; baseline > limit {
-			baseline = limit
-		}
-	}
-	if baseline < 1 {
-		baseline = 1
-	}
-	return baseline
-}
-
 // composerPopupWidthFor is the width a popover above the composer may use:
 // the composer card's own width, so menus and approval cards never spill past
 // the centered column at narrow sizes.
@@ -312,6 +295,3 @@ func (a *App) composerPopupWidthFor(c *ui.Context) float32 {
 		return a.homeComposerWidthFor(c)
 	}
 }
-
-// designGutter is the per-side breathing room the centered columns reserve.
-const designGutter float32 = 12

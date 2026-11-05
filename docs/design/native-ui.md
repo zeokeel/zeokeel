@@ -380,19 +380,101 @@ Plugins 与 Automation 是两个"列表页"屏，本轮把它们的 DSH 复刻�
 3. Terminal 仍是简单命令运行器（无 PTY/persistent shell），视觉品牌化未改变执行模型。
 4. Files 分支折叠菜单在极窄（<220）时不出现（面板本身有最小宽度保证）。
 
-## 16. 剩余路线（2026-11-05 第二轮后更新）
+## 16. 剩余路线（2026-11-05 第三轮后更新）
 
-已完成：Home、Session、Sidebar、Settings、Plugins、Automation、Trajectory、内联搜索/todo/team/plan 面板、右侧栏（Files/Terminal/Start）、系统菜单栏与窗口状态（ADR 0003）、系统通知（ADR 0004）、系统偏好与 2x DPI（§12）、Markdown 迁移到 mygo `ui/markdown`（§13）、Home/Session composer 收敛到 `composer_native.go`。
+已完成：Home、Session、Sidebar、Settings、Plugins、Automation、Trajectory、内联搜索/todo/team/plan 面板、右侧栏、工具卡内容、系统菜单栏/窗口状态（ADR 0003）、系统通知（ADR 0004）、设置独立窗口（ADR 0005）、系统偏好与 2x DPI（§12）、Markdown 迁移（§13）、a11y/键盘（§18）、死代码清理与渲染基准（[perf.md](perf.md)）。
 
-剩余（按优先级）：
+剩余（优先来自独立设计评审 [review-round3.md](review-round3.md)）：
 
-1. **工具卡内容原生化**：工具结果/详情仍为纯文本（MaxLines 10，无 Copy）；可接 `ui/markdown` + `ui.editor` 代码视图（与消息流一致）。
-2. **桌面交互 P1**：设置独立窗口（当前为应用内 overlay）、popover/tooltip 越界与焦点行为、通知 ID 替换/动作按钮、后台会话 turn 完成通知（当前 OnUpdate 只派发当前会话，需 controller 后台事件钩子）。
-3. **滚动条与窗口细节**：mygo v0.7.4 只有 hover overlay（无全局常显偏好），当前策略保留 overlay + HighContrast 增强（§12.3）；如需 Windows 常显滚动条，需框架能力或自绘。
-4. **a11y/平台细节**：Sidebar a11y 嵌套（`ui.Tree`/section）、纯键盘全流程、VoiceOver/Narrator 冒烟、IME 真机验证、2x/1.5x DPI 真机矩阵。
-5. **性能**：Trajectory 未虚拟化、超长会话渲染 profiling；markdown 增量解析已有，可补基准。
+1. **UX P0（下一轮优先）**：
+   - 破坏性操作统一：Automation 删除、Memory Clear all 需确认弹层/Undo + Danger 色（与会话/工作区删除一致）。
+   - 浅色三级文字对比度：`TextTertiary` 3.3:1 不达 WCAG AA，提升到 ≥4.5:1（11–13px 说明/时间戳/用量），`brand_test` 覆盖 tertiary。
+   - 深色字标：`mark.png` 含白色容器像素，深色 hero/sidebar 有白边；改用 `logo-dark.svg` 派生/无白边位图，2x 清晰。
+2. P1 细节：Windows/Linux 设置窗口无菜单栏、窗口间几何联动、滚动位置持久化；通知动作按钮/退出后点击/后台"等待审批"漏报；TextScale 未覆盖固定 type scale（115 处）。
+3. 预览/回归：预览无状态覆盖（空态/错误/加载/窄窗），CI 无视觉回归（可加 headless golden 冒烟）。
+4. a11y/真机：VoiceOver/Narrator/Orca 人工复核、拖拽键盘等价、IME/高 DPI 真机矩阵。
+5. 性能：Trajectory 未虚拟化（稳态帧已达标，见 perf.md）。
 
-## 17. 验收口径
+## 17. 工具卡内容原生化（第八批，2026-11-05 完成）
+
+工具卡详情从纯文本（MaxLines 10、无 Copy）改为按内容类型使用 mygo 的 Markdown/代码能力，与消息正文同一套主题、字号与代码字体。
+
+### 17.1 能力对照
+
+| 结果类型 | 之前 | 现在 |
+| --- | --- | --- |
+| shell/命令输出 | 纯文本 mono，MaxLines 10 | `markdown.View` 代码块：语言标签（bash）+ 语法高亮 + **Copy** 按钮；40 行封顶 + 「显示全部 N 行」展开 |
+| 文件内容 / 搜索输出 | 纯文本 mono | 代码块（text 语言标签 + Copy + 高亮） |
+| 普通文本 / Markdown（web、question、generic） | 纯文本 | `markdown.View`：标题/列表/加粗/行内代码/表格等与消息正文一致 |
+| 图片结果（read_image 等） | 只显示「W×H」文本 | `ui.Image`（经 markdown 的 LoadImage 从工作区加载）；加载中/失败显示 alt 描述，不空白 |
+| 错误结果 | 红色文字嵌在普通行里 | 品牌 danger 面板：错误标签 + mono 输出 + 「复制错误」+ 行数上限/展开 |
+| 长结果 | 一律截断且无展开 | 折叠上限 `toolResultMaxLines=40`，可「显示全部 / 折叠结果」，避免超大输出每帧布局 |
+
+保留：折叠/展开动画、运行中状态点/脉冲、args/result 分区、6+ 工具变体的摘要行、duration 行；a11y（Label/Role/Focusable、代码块 RoleGroup/Label、复制按钮标签）不回退。
+
+### 17.2 实现要点
+
+- `toolcards.go` 按工具 kind 分派结果渲染；`a.markdownBlocks`（markdown.go 的薄封装）复用消息正文的缓存 `markdown.Options`，主题/字号/代码字体/行高一致。
+- `markdown.go`：`Options.LoadImage = markdown.FileImages(workspaceRoot)`，消息与工具结果图片都从工作区加载；缓存把 workspace root 纳入重建条件，切换工作区后从新根解析。
+- 长结果展开状态放在 `toolcards.go` 的 per-App `toolResultStates`（与其它 UI 状态 map 同模式）；「显示全部/折叠结果」控件渲染在长结果 header（代码块之前），在长输出前即可见可点。
+- 错误面板用品牌 danger 语义色（`t.Danger` 低透明度 over surface），复制走 `c.WriteClipboard` + toast。
+- 行数封顶在 `truncateToolResult`：默认 40 行，展开后显示全文；渲染前截断而非 CSS 裁剪，避免超大输出参与每帧布局。
+
+### 17.3 预览
+
+- [preview/toolcard-native-light.png](preview/toolcard-native-light.png) / [preview/toolcard-native-dark.png](preview/toolcard-native-dark.png)：`TestRenderToolCardNativePreview`（展开的 bash / Markdown / 图片 / 错误四张卡；图片经 LoadImage 真实加载）。
+- Session 预览已重生成：`preview/session-native-{light,dark}.png`（工具卡显示代码块 + Copy）。
+- 全部走 `previewDir(t)`：普通测试/CI 写临时目录，只有 `ZEOKEEL_UPDATE_PREVIEWS=1` 才写 `docs/design/preview`。
+
+### 17.4 遗留
+
+1. Markdown 内置标签（Copy / Copy code、图片占位）由 mygo 的 l10n 按 UI locale 输出；headless 测试/中文界面下可能仍是英文 "Copy"，接窗口 locale 属于框架/窗口层事项。
+2. 代码块语言映射目前 shell→bash、文件/搜索→text；可按工具名或文件扩展名细化为 go/py 等。
+3. 图片以外的富媒体（PDF/HTML）未展示；超大输出除行数封顶外未虚拟化（超长单行由代码块横向滚动承载）。
+
+## 18. a11y 与键盘（P1 收尾，2026-11-05 完成）
+
+> 实现：`internal/shell/workspaces.go`（树语义/行内动作）、新增 `internal/shell/a11y_native_test.go`；右栏抓取条与 chrome.go 已有名称/角色，未改动。测试：`go test -run 'TestA11y|TestKeyboard|TestTab' ./internal/shell`。
+
+### 18.1 侧栏树结构（屏幕阅读器视图）
+
+```
+Tree "Sidebar"
+├─ TreeItem "Plugins"            level 1
+├─ TreeItem "Automation tasks"   level 1
+├─ TreeItem "test"  (workspace)  level 1  Expanded=true
+│   ├─ TreeItem "live"           level 2
+│   └─ TreeItem "second chat"    level 2
+└─ TreeItem "parent-ws"          level 1
+    └─ TreeItem "child-ws"       level 2   (Workspace Tree 分组)
+        └─ TreeItem "child conversation"  level 3
+```
+
+- mygo `ui.Sidebar` 对 a11y 是一个 `RoleTree`，其 `SidebarItem` 是**叶子**（名字取自内容 innerText）。原实现把所有 item 平铺且 `Level` 全为 1，屏幕阅读器读不出工作区 → 会话层级；行内按钮放在 item 内部时也**不会**进入 a11y 树。
+- 修复：`sidebarWorkspaceRow` / `sidebarSessionRow` 用 `.Level(n)` 标注层级（工作区 = 嵌套深度+1，其会话 = 深度+2）；item 名称来自内容文本（工作区名 / 会话标题），不再把行内动作名拼接进名字。
+- 行内动作（展开/折叠、新建会话、工作区菜单、会话「⋯」菜单）移到 item 尾部**绝对定位覆盖层**，作为 `RoleTree` 的兄弟节点暴露：屏幕阅读器可逐个访问，Tab 仍可到达；整行高亮、时间位置等视觉保持不变（会话时间移入覆盖层，避免进入节点名称）。
+- 工作区 item 保留 `Expanded` 状态；折叠后其会话从 a11y 树消失（`TestA11ySidebarTreeHierarchy` / `TestA11ySidebarNestedWorkspaceLevels` / `TestA11ySidebarChevronKeyboard`）。
+- 键盘语义保持：侧栏是单一 Tab 站，方向键/Home/End/首字母选择、行内按钮 Enter/Space 均可用（`TestA11ySidebarKeyboardNavigation`、`TestA11ySidebarSessionActionsKeyboardReachable`）。
+
+### 18.2 原生控件 name 审计
+
+- `a11y_native_test.go` 通过反射读取 Tester 的 accessibility tree（pinned mygo v0.7.4 字段布局，与既有 `testerAccessStates` 同一测试内省手法），断言 Home/Session/Plugins/Automation/Settings 每屏：不存在"可聚焦或可操作但名称为空"的节点；列出的关键控件（工作区/会话行、行内动作、右栏 Resize Splitter、设置关闭、插件/自动化动作等）都在树中；树形 item 的 `Level` 不为 0。
+- 右栏抓取条已经是 `RoleSplitter` + `Label("Resize right sidebar")` + 左右方向键调整宽度（现有实现，测试锁定，无需改动）。
+- 修复项：侧栏 item 名称（拼接动作 → 实体名）、树层级（全 1 → 嵌套）、行内动作对 AT 不可见（↔ 兄弟节点）、会话时间进入名称（↔ 移入覆盖层）。
+
+### 18.3 键盘回归
+
+- 新增纯键盘流程：Tab 到 New Session + Enter 新建；Cmd+, 打开设置 → Tab 到 Close settings + Enter 关闭；Esc 关闭设置/搜索面板/View options 弹层；插件开关 Space 切换；自动化 New 打开弹层 + Esc 关闭；右栏 Open/Collapse 键盘开关；字号 popover Enter 打开 + Esc 关闭。断言不存在键盘死路。
+- 焦点断言使用 a11y 树的真实 Focus 节点（不是 `Tester.Focused` 的"容器内即可"语义），避免"侧栏整体聚焦时所有子控件看似可达"的假阳性。
+
+### 18.4 遗留
+
+1. 真机 VoiceOver / Narrator / Orca 人工复核未做（headless a11y 树只能验证结构与名称，朗读顺序/树形行为需真机）。
+2. 行内动作与树 item 是兄弟节点而非 item 子树：不同平台的树形控件对兄弟节点的朗读方式可能不同，真机复核后再决定是否改用平台推荐的行内动作模式（如 item 自定义 actions）。
+3. 拖拽排序的键盘等价物已有菜单「上移/下移」（既有实现）；但拖拽本身无可访问替代，后续可把移动操作提升为 item 的 a11y actions。
+4. 侧栏 item 与行内动作的 Tab 顺序按构建顺序（item → 动作）；平台惯例可能偏好动作在 item 之后同层，已符合，真机复核顺序即可。
+
+## 19. 验收口径
 
 | 维度 | 验收 |
 | --- | --- |
