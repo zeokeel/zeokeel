@@ -1,5 +1,7 @@
 # 审计修复状态跟踪（Lead 维护，实时）
 
+> **wave 1 已完成并提交 `1da4f12`（119 文件）**：P0 + 大部分 P1（安全/权限/数据/运行时可靠性/UI-UX/产品/发布/文档）。详细修复清单与验证证据见 [`FIX-REPORT.md`](FIX-REPORT.md) §1–§5；产品侧状态真源见 `docs/BUGS.md`。
+> wave 2 待办见 [`FIX-REPORT.md`](FIX-REPORT.md) §6；本文件保留 wave 1 前的计划式跟踪（历史参考）。
 > 基线：`HEAD=3100af0`（2026-11-05 22:18）。修复计划：`FIX-PLAN.md`。最终交付：`FIX-REPORT.md`。
 > 状态：⏳ 进行中 / ✅ FIXED（代码+测试） / 🧪 待独立验证 / ⚠️ PARTIAL / ⛔ DEFERRED（写明理由）
 
