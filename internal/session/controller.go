@@ -15,6 +15,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/zeokeel/zeokeel/internal/presets"
 	"github.com/zeokeel/zeokeel/internal/runtime"
 	"github.com/zeokeel/zeokeel/internal/state"
 	"github.com/zeokeel/zeokeel/internal/store"
@@ -85,6 +86,10 @@ type Config struct {
 	// own queue). The controller uses it to resolve approvals and allow-always
 	// rules for the right session.
 	AgentGateFactory func(sessionID string) *runtime.ApprovalQueue
+	// PresetKnownTools, when non-nil, validates user preset tool allowlists
+	// during the initial preset load: an unknown tool name fails the load
+	// (fail closed) instead of silently mismatching at build time.
+	PresetKnownTools []string
 }
 
 // Controller wires one live turn end to end: it persists the prompt, runs the
@@ -159,7 +164,23 @@ type Controller struct {
 	// sessionEventSubs fans one session's semantic events out to streaming
 	// subscribers (the headless/ACP runtime). Guarded by mu.
 	sessionEventSubs map[string]map[chan state.Event]struct{}
-	listeners        []func(*state.Snapshot)
+
+	// presets is the declarative agent-preset registry (FP-06). It is loaded
+	// from the data directory at New and replaced by ReloadPresets; nil means
+	// the built-ins only (keep Presets() nil-safe).
+	presets *presets.Registry
+	// questionWaiters, when non-empty, holds the ask_user calls that are
+	// blocking inside a turn (FP-16): call id -> waiter. Guarded by mu.
+	questionWaiters map[string]*questionWaiter
+	// presetKnownTools is the registered tool-name list used to validate user
+	// preset allowlists at load time (P1 fail-closed). presetWarnings holds
+	// per-session build warnings (for example a allowlist that matched no
+	// tool) so the UI can show them; lastPresetLoadErr keeps the latest failed
+	// reload error for the settings surface. Guarded by mu.
+	presetKnownTools  []string
+	presetWarnings    map[string][]string
+	lastPresetLoadErr error
+	listeners         []func(*state.Snapshot)
 	// goalStore, when non-nil, persists each session's goal so a restart keeps
 	// it and the /goal API's changes survive. The app wires the store-backed
 	// tool state; nil keeps goals in memory only. Guarded by mu.
@@ -346,6 +367,20 @@ func New(cfg Config) (*Controller, error) {
 		c.agents = make(map[string]*runtime.Agent)
 		c.agentGates = make(map[string]*runtime.ApprovalQueue)
 		c.builtPermissions = make(map[string]string)
+	}
+	c.presetKnownTools = normalizePresetToolNames(cfg.PresetKnownTools)
+	if reg, err := presets.Load(presets.Options{
+		UserDir:    cfg.Store.Dir(),
+		KnownTools: c.presetKnownTools,
+	}); err == nil {
+		c.presets = reg
+	} else {
+		// Fail closed on a broken user preset file: built-ins keep the app
+		// usable and the app surfaces the reload error in the settings UI.
+		c.lastPresetLoadErr = err
+		if fallback, ferr := presets.Load(presets.Options{}); ferr == nil {
+			c.presets = fallback
+		}
 	}
 	c.titleCtx, c.titleCancel = context.WithCancel(context.Background())
 	if cfg.Projector != nil {
@@ -1285,8 +1320,27 @@ func (c *Controller) applyToolResultAtLocked(sessionID, callID, name, result str
 		}
 		c.todos[sessionID] = append([]tools.Todo(nil), in.Tasks...)
 	case "ask_user":
-		var in tools.QuestionResult
+		// The runtime's question-gate result carries the answer and marks the
+		// status answered (FP-16); the card is already resolved by
+		// AnswerQuestion, so only record pending documents here.
+		var in struct {
+			Kind     string   `json:"kind"`
+			Question string   `json:"question"`
+			Options  []string `json:"options,omitempty"`
+			Context  string   `json:"context,omitempty"`
+			Status   string   `json:"status"`
+			Answer   string   `json:"answer,omitempty"`
+		}
 		if err := json.Unmarshal([]byte(result), &in); err != nil || in.Kind != "question" {
+			return
+		}
+		if strings.EqualFold(in.Status, "answered") || strings.TrimSpace(in.Answer) != "" {
+			if questions := c.questions[sessionID]; questions != nil {
+				delete(questions, callID)
+				if len(questions) == 0 {
+					delete(c.questions, sessionID)
+				}
+			}
 			return
 		}
 		question := strings.TrimSpace(in.Question)
@@ -1501,6 +1555,22 @@ func (c *Controller) AnswerQuestion(ctx context.Context, callID, answer string) 
 	if c.closed {
 		c.mu.Unlock()
 		return ErrClosed
+	}
+	// FP-16: a blocking question (AskQuestion) is answered in place, so the
+	// turn continues with the answer instead of a new user turn.
+	if waiter := c.questionWaiters[callID]; waiter != nil {
+		delete(c.questionWaiters, callID)
+		questions := c.questions[waiter.sessionID]
+		delete(questions, callID)
+		if len(questions) == 0 {
+			delete(c.questions, waiter.sessionID)
+		}
+		sessionID := waiter.sessionID
+		snap := c.views[sessionID]
+		c.mu.Unlock()
+		waiter.ch <- questionAnswer{text: answer}
+		c.notify(sessionID, snap)
+		return c.appendQuestionAnswered(sessionID, callID)
 	}
 	sessionID := c.currentID
 	questions := c.questions[sessionID]
@@ -1917,6 +1987,10 @@ func (c *Controller) Close() error {
 			c.titleCancel()
 		}
 		clear(c.pending)
+		for callID, waiter := range c.questionWaiters {
+			waiter.ch <- questionAnswer{err: ErrClosed}
+			delete(c.questionWaiters, callID)
+		}
 	}
 	c.mu.Unlock()
 
@@ -2300,18 +2374,20 @@ func (c *Controller) pendingToolName(callID string) (string, bool) {
 	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	if c.closed || c.gate == nil {
+	if c.closed {
 		return "", false
 	}
+	// Per-session agents own their own approval gate; the shared gate may be
+	// nil in a pure per-session configuration (RT-04 seam consistency).
 	if request, ok := c.pending[c.currentID][callID]; ok {
-		return request.Name, true
+		return request.Name, c.gateForSessionLocked(c.currentID) != nil
 	}
 	for sessionID, requests := range c.pending {
 		if sessionID == c.currentID {
 			continue
 		}
 		if request, ok := requests[callID]; ok {
-			return request.Name, true
+			return request.Name, c.gateForSessionLocked(sessionID) != nil
 		}
 	}
 	return "", false
@@ -3442,17 +3518,40 @@ func (c *Controller) SetSessionModel(sessionID, modelID string) error {
 // default, so switching from a session that picked a model back to one that
 // did not cannot leave the agent on the previous session's model.
 func (c *Controller) applySessionModel(sessionID string) error {
-	id := c.SessionModelOrDefault(sessionID)
-	if id == "" {
-		return nil
+	name := ""
+	// An explicit per-session model wins; otherwise the selected preset's
+	// default model applies (FP-06); otherwise the global default.
+	if id := c.SessionModelID(sessionID); id != "" {
+		if model, err := c.store.GetModel(id); err == nil {
+			name = strings.TrimSpace(model.Model)
+			if name == "" {
+				name = strings.TrimSpace(model.Name)
+			}
+		}
 	}
-	model, err := c.store.GetModel(id)
-	if err != nil {
-		return err
-	}
-	name := strings.TrimSpace(model.Model)
 	if name == "" {
-		name = strings.TrimSpace(model.Name)
+		if presetModel := c.SessionPresetModel(sessionID); presetModel != "" {
+			if model, err := c.store.GetModel(presetModel); err == nil {
+				name = strings.TrimSpace(model.Model)
+				if name == "" {
+					name = strings.TrimSpace(model.Name)
+				}
+			} else {
+				// Not a stored model row: treat the preset value as a wire model
+				// name (common for user presets naming provider models).
+				name = presetModel
+			}
+		}
+	}
+	if name == "" {
+		if id := c.SessionModelOrDefault(sessionID); id != "" {
+			if model, err := c.store.GetModel(id); err == nil {
+				name = strings.TrimSpace(model.Model)
+				if name == "" {
+					name = strings.TrimSpace(model.Name)
+				}
+			}
+		}
 	}
 	if name == "" {
 		return nil
@@ -3713,6 +3812,9 @@ func (c *Controller) DeleteSession(ctx context.Context, id string) error {
 	if err := c.store.DeleteSession(id); err != nil {
 		return fmt.Errorf("session: delete: %w", err)
 	}
+	// Drop the per-session preset selection with the session (FP-06).
+	_ = c.store.SetSetting(presetSettingKeyFor(id), "")
+	_ = c.store.SetSetting(SessionModeKey(id), "")
 
 	c.mu.Lock()
 	delete(c.views, id)
@@ -4378,3 +4480,316 @@ func (c *Controller) SetRunNow(fn func(id string)) {
 // Store exposes the controller's persistence handle for process-level
 // services (scheduler, updater) that live in internal/app.
 func (c *Controller) Store() *store.Store { return c.store }
+
+// -----------------------------------------------------------------------------
+// Declarative agent presets (FP-06) — product wiring.
+
+// DefaultPresetSettingKey is the default preset setting key. The legacy mode
+// keys ("session.mode.<id>", the built-in mode names) keep resolving as
+// built-in preset aliases.
+const DefaultPresetSettingKey = "agent.preset"
+
+// presetSettingPrefix is the per-session preset selection key prefix.
+const presetSettingPrefix = "session.preset."
+
+// presetSettingKeyFor is the settings key holding sessionID's preset id.
+func presetSettingKeyFor(sessionID string) string { return presetSettingPrefix + sessionID }
+
+// Presets returns the current preset registry (always non-nil after New; the
+// zero-value fallback is the built-in catalog).
+func (c *Controller) Presets() *presets.Registry {
+	c.mu.Lock()
+	reg := c.presets
+	c.mu.Unlock()
+	if reg == nil {
+		if fallback, err := presets.Load(presets.Options{KnownTools: c.presetKnownToolsLocked()}); err == nil {
+			return fallback
+		}
+	}
+	return reg
+}
+
+// presetKnownToolsLocked copies the configured known tool names. The caller
+// must not hold c.mu (this helper only reads a slice written before use).
+func (c *Controller) presetKnownToolsLocked() []string {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return append([]string(nil), c.presetKnownTools...)
+}
+
+// ReloadPresets re-reads the user preset files from the data directory. A load
+// error keeps the previous registry (fail closed) and is returned so the
+// settings UI can show it. A successful reload requests an agent rebuild for
+// the next turn (the app installs the hook).
+func (c *Controller) ReloadPresets() (*presets.Registry, error) {
+	c.mu.Lock()
+	known := append([]string(nil), c.presetKnownTools...)
+	c.mu.Unlock()
+	reg, err := presets.Load(presets.Options{UserDir: c.store.Dir(), KnownTools: known})
+	c.mu.Lock()
+	if err != nil {
+		// Fail closed: keep the previous registry active and expose the error
+		// so the settings surface can show why a preset file was rejected.
+		c.lastPresetLoadErr = err
+		c.mu.Unlock()
+		return nil, err
+	}
+	c.presets = reg
+	c.lastPresetLoadErr = nil
+	c.mu.Unlock()
+	c.rebuildForPresets()
+	return reg, nil
+}
+
+// SetPresetKnownTools installs the registered tool names used to validate user
+// preset allowlists. The app calls it once the tool registry exists; a later
+// ReloadPresets validates against it (fail closed on unknown names).
+func (c *Controller) SetPresetKnownTools(names []string) {
+	normalized := normalizePresetToolNames(names)
+	c.mu.Lock()
+	c.presetKnownTools = normalized
+	c.mu.Unlock()
+}
+
+// LastPresetLoadError returns the most recent preset load/reload failure, or nil
+// after a successful load.
+func (c *Controller) LastPresetLoadError() error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.lastPresetLoadErr
+}
+
+// SetPresetWarnings records per-session preset build warnings (for example a
+// non-empty allowlist that matched no registered tool). The UI reads them
+// through PresetWarnings.
+func (c *Controller) SetPresetWarnings(sessionID string, warnings []string) {
+	sessionID = strings.TrimSpace(sessionID)
+	if sessionID == "" || len(warnings) == 0 {
+		if sessionID == "" {
+			return
+		}
+	}
+	c.mu.Lock()
+	if c.presetWarnings == nil {
+		c.presetWarnings = make(map[string][]string)
+	}
+	if len(warnings) == 0 {
+		delete(c.presetWarnings, sessionID)
+	} else {
+		c.presetWarnings[sessionID] = append([]string(nil), warnings...)
+	}
+	c.mu.Unlock()
+}
+
+// PresetWarnings returns the current session's preset build warnings, or the
+// session named by sessionID ("" means the current session when it is set).
+func (c *Controller) PresetWarnings(sessionID string) []string {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	id := strings.TrimSpace(sessionID)
+	if id == "" {
+		id = c.currentID
+	}
+	return append([]string(nil), c.presetWarnings[id]...)
+}
+
+// normalizePresetToolNames trims, deduplicates and sorts a known-tools list.
+func normalizePresetToolNames(names []string) []string {
+	out := make([]string, 0, len(names))
+	seen := make(map[string]bool, len(names))
+	for _, name := range names {
+		name = strings.TrimSpace(name)
+		if name == "" || seen[name] {
+			continue
+		}
+		seen[name] = true
+		out = append(out, name)
+	}
+	sort.Strings(out)
+	return out
+}
+
+// SetSessionPreset persists sessionID's preset selection. An empty presetID
+// clears the selection; an unknown id is rejected with presets.ErrNotFound so
+// the UI can warn instead of silently falling back. A successful change
+// requests a rebuild so the next turn uses the new tool set/persona.
+func (c *Controller) SetSessionPreset(sessionID, presetID string) error {
+	sessionID = strings.TrimSpace(sessionID)
+	if sessionID == "" {
+		return fmt.Errorf("%w: set session preset: empty session id", ErrInvalidArgument)
+	}
+	presetID = strings.TrimSpace(presetID)
+	if presetID != "" {
+		reg := c.Presets()
+		if _, ok := reg.Get(presetID); !ok {
+			return fmt.Errorf("%w: preset %q", presets.ErrNotFound, presetID)
+		}
+	}
+	if err := c.store.SetSetting(presetSettingKeyFor(sessionID), presetID); err != nil {
+		return fmt.Errorf("session: set preset: %w", err)
+	}
+	c.rebuildForPresets()
+	return nil
+}
+
+// SessionPresetID returns the session's persisted preset id ("" means the
+// default preset applies).
+func (c *Controller) SessionPresetID(sessionID string) string {
+	sessionID = strings.TrimSpace(sessionID)
+	if sessionID == "" || c.store == nil {
+		return ""
+	}
+	raw, err := c.store.GetSetting(presetSettingKeyFor(sessionID))
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(raw)
+}
+
+// ResolvePreset returns the effective preset for sessionID and any warnings on
+// the resolution path. The precedence is: explicit session selection, the
+// default agent.preset setting, the legacy session mode (built-in ids are
+// preset ids), then PresetFallbackID. An unknown id never errors: Resolve
+// returns the fallback preset plus a warning.
+func (c *Controller) ResolvePreset(sessionID string) (presets.Preset, []string) {
+	reg := c.Presets()
+	id := c.SessionPresetID(sessionID)
+	if id == "" {
+		if raw, err := c.store.GetSetting(DefaultPresetSettingKey); err == nil {
+			id = strings.TrimSpace(raw)
+		}
+	}
+	if id == "" {
+		// Legacy mode selection: built-in preset ids mirror the old modes.
+		if raw, err := c.store.GetSetting(SessionModeKey(sessionID)); err == nil {
+			if mode := strings.TrimSpace(raw); mode != "" {
+				if _, ok := reg.Get(mode); ok {
+					id = mode
+				}
+			}
+		}
+	}
+	if id == "" {
+		id = presets.PresetFallbackID
+	}
+	return reg.Resolve(id)
+}
+
+// SessionPresetModel returns the preset's default model id for sessionID, or ""
+// when the preset does not specify one. A preset model is only a default: an
+// explicit per-session model always wins (applySessionModel).
+func (c *Controller) SessionPresetModel(sessionID string) string {
+	preset, _ := c.ResolvePreset(sessionID)
+	return strings.TrimSpace(preset.Model)
+}
+
+// rebuildForPresets requests the next-turn rebuild through the app hook. It is
+// best effort: a controller without a wired hook (tests, headless edge) still
+// keeps the registry updated and resolves the preset on the next turn.
+func (c *Controller) rebuildForPresets() {
+	_ = c.RebuildAgent("presets")
+}
+
+// -----------------------------------------------------------------------------
+// Blocking ask_user questions (FP-16) — controller half of the seam.
+
+// questionAnswer is one resolution of a blocking question.
+type questionAnswer struct {
+	text string
+	err  error
+}
+
+// questionWaiter is a turn blocked inside AskQuestion.
+type questionWaiter struct {
+	sessionID string
+	ch        chan questionAnswer
+}
+
+// AskQuestion publishes a question card and blocks until the user answers
+// (AnswerQuestion), the turn context ends, or the caller's timeout elapses.
+// The runtime's QuestionGate implementation calls this from inside the turn, so
+// the answer is returned as the same ask_user tool call's result and the model
+// continues in the same turn. On timeout/cancel the card is withdrawn and the
+// caller decides how to degrade (the runtime falls back to the tool's
+// fire-and-forget pending result).
+func (c *Controller) AskQuestion(ctx context.Context, sessionID, callID string, question tools.Question) (string, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if err := ctx.Err(); err != nil {
+		return "", err
+	}
+	sessionID = strings.TrimSpace(sessionID)
+	callID = strings.TrimSpace(callID)
+	question.Question = strings.TrimSpace(question.Question)
+	if sessionID == "" || callID == "" || question.Question == "" {
+		return "", fmt.Errorf("%w: ask question: empty session id, call id or question", ErrInvalidArgument)
+	}
+	question.CallID = callID
+	question.Status = "pending"
+	if question.AskedAt.IsZero() {
+		question.AskedAt = time.Now().UTC()
+	}
+	waiter := &questionWaiter{sessionID: sessionID, ch: make(chan questionAnswer, 1)}
+
+	c.mu.Lock()
+	if c.closed {
+		c.mu.Unlock()
+		return "", ErrClosed
+	}
+	if c.questionWaiters == nil {
+		c.questionWaiters = make(map[string]*questionWaiter)
+	}
+	if _, exists := c.questionWaiters[callID]; exists {
+		c.mu.Unlock()
+		return "", fmt.Errorf("%w: question %q is already pending", ErrInvalidArgument, callID)
+	}
+	c.questionWaiters[callID] = waiter
+	if c.questions[sessionID] == nil {
+		c.questions[sessionID] = make(map[string]tools.Question)
+	}
+	c.questions[sessionID][callID] = question
+	snap := c.views[sessionID]
+	c.mu.Unlock()
+	c.notify(sessionID, snap)
+
+	defer c.withdrawQuestion(sessionID, callID)
+
+	select {
+	case answer := <-waiter.ch:
+		return answer.text, answer.err
+	case <-ctx.Done():
+		return "", ctx.Err()
+	}
+}
+
+// withdrawQuestion removes a still-pending blocking question card (answer,
+// timeout and cancellation all pass through here; an answered card has already
+// been removed by AnswerQuestion).
+func (c *Controller) withdrawQuestion(sessionID, callID string) {
+	c.mu.Lock()
+	waiter := c.questionWaiters[callID]
+	if waiter == nil {
+		c.mu.Unlock()
+		return
+	}
+	delete(c.questionWaiters, callID)
+	if questions := c.questions[sessionID]; questions != nil {
+		delete(questions, callID)
+		if len(questions) == 0 {
+			delete(c.questions, sessionID)
+		}
+	}
+	snap := c.views[sessionID]
+	c.mu.Unlock()
+	c.notify(sessionID, snap)
+}
+
+// PendingQuestionWaiter reports whether callID is currently blocking inside a
+// turn (used by the app gate's diagnostics/tests).
+func (c *Controller) PendingQuestionWaiter(callID string) bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	_, ok := c.questionWaiters[strings.TrimSpace(callID)]
+	return ok
+}

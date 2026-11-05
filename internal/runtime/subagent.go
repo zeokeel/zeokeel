@@ -312,7 +312,7 @@ func (a *Agent) restrictedEinoTools(mode string) []tool.BaseTool {
 		if !wanted[t.Name()] {
 			continue
 		}
-		out = append(out, newEinoTool(t, a.gate, a.reviewer))
+		out = append(out, newEinoTool(t, a.gate, a.reviewer, a.questionGate))
 	}
 	return out
 }

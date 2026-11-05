@@ -30,7 +30,7 @@ FAIL github.com/zeokeel/zeokeel/internal/runtime 0.008s
 | globalhotkey | 9 FAIL（`ParseHotkey: globalhotkey: not implemented yet` 等；日志 `.cache/fix-platform/globalhotkey-red.txt`） | 10/10 PASS，5 目标交叉编译 OK |
 | PTC/voice 删除守卫 | 守卫测试先于删除：`TestModesExcludePTC` 得到 `[standard ptc minimal creator]`；`TestPluginListExcludesVoiceInput` 仍见 `voice_input`；`TestToolRegistryHasNoPTC` registry 仍含 ptc | 删除后守卫 PASS；独立验证在 /tmp 副本恢复 PTC 符号时守卫再次 FAIL（`FIX-VERIFY-REMOVAL-CORE.md` §②） |
 | FP-05 diff UI | 3 FAIL（`workspace changes block missing`、`no element shows "parser.go"`、replay 缺失） | 3 PASS（渲染/点击打开/replay） |
-| UX-14 toast | `toast is not in the top band {Y:949}` | 主窗口默认 toast 不遮 composer + Settings 自绘 top-band pass-through；3 测试 PASS |
+| UX-14 toast | `toast is not in the top band {Y:949}` | **主窗 + Settings 窗都改走 shell 自绘 top-band + `.PassThrough()` viewport**（此前主窗仍是框架底部 toast，压 composer 工具栏；2026-11-06 verifier-ui 复核后补修）：Home/Session × 1600×1000 / 900×600 下 toast 均不遮 composer 及其 footer，toast 可见时点 composer chip 仍能开菜单（指针穿透）；测试 `TestToastDoesNotOverlapComposer`/`TestToastDoesNotInterceptPopupPointer`/`TestSettingsToastSitsInTopBand` PASS；真跑截图 `.cache/audit/uiux/wave2-shots/14,15,17,18` |
 | P3 skills cwd | `go vet ./internal/skills`: `too many arguments in call to RootsFor`（新 API 缺失） | 4 新测试 + skills 全量 PASS |
 | P3 manifest 迁移 | 旧 key 下 `SessionsImported=1`（重复导入）、裸 uuid 未迁移、损坏未 fail-closed | 迁移后 0 imported、key 重写、二次 idempotent；3 新测试 PASS |
 | P3 spill TOCTOU | 编译缺 `spillDirOpenedHook` seam | `TestSpillRefusesDirSwapAfterValidation` + 原 RT-07 4 用例 PASS |

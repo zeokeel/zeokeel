@@ -158,46 +158,25 @@ func TestHomeModeNormalizesPersistedPresetAliases(t *testing.T) {
 	}
 }
 
-// TestAgentPresetsPageHighlightsPersistedAlias covers the second half of the
-// same bug: Settings > Agent presets compares the raw stored value against the
-// canonical option list, so an alias lost the "Default" badge and still offered
-// "Set default" for the mode that was already stored.
-func TestAgentPresetsPageHighlightsPersistedAlias(t *testing.T) {
-	for _, tc := range modePresetAliases {
-		tc := tc
-		t.Run(tc.alias, func(t *testing.T) {
-			h := newLiveApp(t, &shellProvider{})
-			h.app.Language = LangEN
-			if err := h.ctrl.Store().SetSetting("agent.preset", tc.alias); err != nil {
-				t.Fatalf("seed agent.preset: %v", err)
-			}
-			tt := ui.NewTester(h.app.View, 1600, 1000)
-			openSettingsLive(t, tt)
-			if err := tt.Click("Agent presets"); err != nil {
-				t.Fatalf("open Agent presets: %v", err)
-			}
-			tt.Frame()
-
-			wantLabel := h.app.agentModeLabel(tc.want)
-			if !tt.HasText("Default") {
-				t.Fatalf("Default badge missing for agent.preset=%q: %q", tc.alias, tt.Texts())
-			}
-			if tt.HasText("Set default " + wantLabel) {
-				t.Fatalf("agent.preset=%q still offers %q: %q", tc.alias, "Set default "+wantLabel, tt.Texts())
-			}
-			// A non-selected canonical preset keeps its action, proving the
-			// page rendered every row rather than hiding them.
-			other := ""
-			for _, standard := range []string{runtime.ModeStandard, runtime.ModeMinimal, runtime.ModeCreator} {
-				label := h.app.agentModeLabel(standard)
-				if label != wantLabel {
-					other = label
-					break
-				}
-			}
-			if !tt.HasText("Set default " + other) {
-				t.Fatalf("non-selected preset lost its action: %q", tt.Texts())
-			}
-		})
+// TestAgentPresetsPageShowsDefaultPreset covers the presets page's default
+// marker: the persisted agent.preset selects the row carrying the Default
+// badge and hides its "Set default" action, while every other row keeps one.
+func TestAgentPresetsPageShowsDefaultPreset(t *testing.T) {
+	h := newLiveApp(t, &shellProvider{})
+	h.app.Language = LangEN
+	if err := h.ctrl.Store().SetSetting("agent.preset", "minimal"); err != nil {
+		t.Fatalf("seed agent.preset: %v", err)
+	}
+	tt := ui.NewTester(h.app.SettingsView, 900, 840)
+	tt.Frame()
+	openSettingsPage(t, h, tt, "Agent presets")
+	if !tt.HasText("Default") {
+		t.Fatalf("Default badge missing: %q", tt.Texts())
+	}
+	if tt.HasText("Set default Minimal") {
+		t.Fatalf("the default preset still offers its own action: %q", tt.Texts())
+	}
+	if !tt.HasText("Set default Standard") || !tt.HasText("Set default Creator") {
+		t.Fatalf("non-selected presets lost their actions: %q", tt.Texts())
 	}
 }

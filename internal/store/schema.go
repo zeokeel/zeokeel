@@ -155,36 +155,6 @@ var schemaV1Additions = []string{
 	`CREATE INDEX IF NOT EXISTS automation_runs_automation_idx ON automation_runs(automation_id, started_at DESC)`,
 }
 
-// migrate brings db to SchemaVersion or rejects an incompatible index.
-//
-// A missing schema_version table means a fresh database and is created at
-// SchemaVersion. A table that exists is authoritative: older versions are
-// rejected (docs/PLAN.md §9.4 "低版本拒绝启动并提示") and newer versions are
-// rejected because this build cannot know their invariants.
-func migrate(db *sql.DB) error {
-	exists, err := tableExists(db, "schema_version")
-	if err != nil {
-		return err
-	}
-	if !exists {
-		return createSchemaV1(db)
-	}
-	version, err := schemaVersion(db)
-	if err != nil {
-		return err
-	}
-	switch {
-	case version == SchemaVersion:
-		// An index created by an older build that also used SchemaVersion 1
-		// may miss tables added since. The additions are idempotent.
-		return ensureSchemaAdditions(db)
-	case version < SchemaVersion:
-		return fmt.Errorf("%w: found %d, this build needs %d; remove the index or restore a backup", ErrSchemaTooOld, version, SchemaVersion)
-	default:
-		return fmt.Errorf("%w: found %d, this build supports %d; upgrade ZeoKeel", ErrSchemaTooNew, version, SchemaVersion)
-	}
-}
-
 // createSchemaV1 creates the v1 schema and records its version atomically.
 func createSchemaV1(db *sql.DB) error {
 	tx, err := db.Begin()
@@ -208,7 +178,7 @@ func createSchemaV1(db *sql.DB) error {
 	if err := ensureAutomationColumns(tx); err != nil {
 		return err
 	}
-	if _, err := tx.Exec(`INSERT INTO schema_version(version) VALUES (?)`, SchemaVersion); err != nil {
+	if _, err := tx.Exec(`INSERT INTO schema_version(version) VALUES (1)`); err != nil {
 		return fmt.Errorf("record schema version: %w", err)
 	}
 	if err := tx.Commit(); err != nil {

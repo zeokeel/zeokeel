@@ -22,6 +22,7 @@ import (
 
 	"github.com/zeokeel/zeokeel/internal/agentteam"
 	"github.com/zeokeel/zeokeel/internal/mcp"
+	"github.com/zeokeel/zeokeel/internal/presets"
 	"github.com/zeokeel/zeokeel/internal/prompt"
 	"github.com/zeokeel/zeokeel/internal/provider/openai"
 	"github.com/zeokeel/zeokeel/internal/runtime"
@@ -69,6 +70,13 @@ type AgentBundle struct {
 	// Close releases owned resources (MCP sessions and the team manager, which
 	// cancels and waits for running teammates); may be nil.
 	Close func() error
+	// ToolNames is the registered tool-name list of this build's registry,
+	// before preset filtering: the app installs it as the controller's
+	// KnownTools so user preset allowlists are validated at load time.
+	ToolNames []string
+	// PresetWarnings holds build-time preset problems (for example an allowlist
+	// that matched no registered tool) for the UI/log.
+	PresetWarnings []string
 }
 
 // AgentFactory builds the runtime agent against the opened store. It may
@@ -113,13 +121,21 @@ func BuildServicesWith(dir string, factory AgentFactory) (*session.Controller, f
 	}
 	broker := state.NewBroker()
 	projector := state.NewProjector(context.Background(), broker)
+	// Pass the registered tool names into the initial preset load so a user
+	// preset with a misspelled tool fails closed at New (the previous
+	// no-validation load would let it become active).
+	var presetKnownTools []string
+	if bundle != nil {
+		presetKnownTools = bundle.ToolNames
+	}
 	ctrl, err := session.New(session.Config{
-		Store:          st,
-		Broker:         broker,
-		Projector:      projector,
-		Agent:          agent,
-		Gate:           gate,
-		TitleGenerator: titleGen,
+		Store:            st,
+		Broker:           broker,
+		Projector:        projector,
+		Agent:            agent,
+		Gate:             gate,
+		TitleGenerator:   titleGen,
+		PresetKnownTools: presetKnownTools,
 		// Active goals drive continuation turns until the model marks them
 		// complete, the per-session round budget (session.<id>.goal_rounds,
 		// default 6, cap 12) is exhausted, or the user stops the session.
@@ -130,6 +146,14 @@ func BuildServicesWith(dir string, factory AgentFactory) (*session.Controller, f
 		broker.Close()
 		_ = st.Close()
 		return nil, nil, fmt.Errorf("app: build services: %w", err)
+	}
+	// Keep the known-tool list on the controller for later ReloadPresets calls
+	// (the settings UI reload path) and report an initial fail-closed load.
+	if bundle != nil {
+		ctrl.SetPresetKnownTools(bundle.ToolNames)
+		if rerr := ctrl.LastPresetLoadError(); rerr != nil {
+			log.Printf("zeokeel: presets: user presets rejected, built-ins active: %v", rerr)
+		}
 	}
 	var (
 		once       sync.Once
@@ -641,6 +665,14 @@ type registryOptions struct {
 	// can show live members and stop a session's members when the user stops.
 	// Nil when the Agent Teams plugin is off (no team manager is built).
 	AdoptTeam func(*agentteam.Manager)
+	// Presets is the controller's declarative preset registry (FP-06). Nil
+	// disables preset filtering/injection (the historical all-tools build).
+	Presets *presets.Registry
+	// PresetID is the effective preset for this build (already resolved with
+	// fallback). Empty disables preset filtering/injection.
+	PresetID string
+	// QuestionGate, when set, lets ask_user block inside the turn (FP-16).
+	QuestionGate runtime.QuestionGate
 }
 
 // registerAllToolsWithPermission is registerAllTools with an optional access
@@ -1043,6 +1075,19 @@ func buildAgentWithOptions(st *store.Store, root, instruction string, opts regis
 	if err != nil {
 		return nil, err
 	}
+	// Declarative agent presets (FP-06): a non-empty preset tool allowlist
+	// narrows the model-visible registry (registration-order preserving); the
+	// empty allowlist keeps every tool (the historical standard behaviour).
+	presetID := strings.TrimSpace(opts.PresetID)
+	var presetWarnings []string
+	if opts.Presets != nil && presetID != "" {
+		filtered, warning := filterRegistryByPreset(reg, opts.Presets, presetID)
+		reg = filtered
+		if warning != "" {
+			presetWarnings = append(presetWarnings, warning)
+			log.Printf("zeokeel: preset: %s", warning)
+		}
+	}
 	if adoptTeam != nil && teamManager == nil {
 		// The build has no team manager (Agent Teams off): tell the adopter so
 		// a replaced manager's roster is not kept around.
@@ -1068,6 +1113,16 @@ func buildAgentWithOptions(st *store.Store, root, instruction string, opts regis
 		// after the first completed turn. Keeping it on the bundle makes a
 		// rebuild (model change, permission change) replace the titler too.
 		TitleGenerator: session.LLMTitleGenerator{Provider: prov, Model: model},
+	}
+	// Registered tool names (before preset filtering) validate user preset
+	// allowlists at load time; build warnings (fail-closed filtering) are
+	// exposed to the session UI by the app.
+	bundle.ToolNames = make([]string, 0, len(reg.List()))
+	for _, tool := range reg.List() {
+		bundle.ToolNames = append(bundle.ToolNames, tool.Name())
+	}
+	if len(presetWarnings) > 0 {
+		bundle.PresetWarnings = append(bundle.PresetWarnings, presetWarnings...)
 	}
 	permission := permissionMode(st)
 	if opts.PermissionOverride != "" {
@@ -1130,6 +1185,13 @@ func buildAgentWithOptions(st *store.Store, root, instruction string, opts regis
 			skillsDir = candidate
 		}
 	}
+	// A declarative preset owns the topology: built-in preset ids map to the
+	// historical runtime modes, a custom preset runs the standard topology (its
+	// tool allowlist and prompt do the customization).
+	if opts.Presets != nil && presetID != "" {
+		opts.Mode = presetModeForID(presetID)
+		opts.ModeFunc = nil
+	}
 	// The agent preset is part of the dynamic runtime context: switching mode
 	// must change the prompt policy on the next turn, not only the tool set.
 	agentMode := strings.TrimSpace(opts.Mode)
@@ -1163,6 +1225,9 @@ func buildAgentWithOptions(st *store.Store, root, instruction string, opts regis
 			memoriesForPrompt(st, memoryWorkspaceID()))
 		if text == "" {
 			return instruction
+		}
+		if opts.Presets != nil && presetID != "" {
+			text = injectPresetPrompt(text, opts.Presets, presetID, uiLanguage(st))
 		}
 		return text
 	}
@@ -1201,6 +1266,7 @@ func buildAgentWithOptions(st *store.Store, root, instruction string, opts regis
 		SubagentModel:   subagentModel,
 		History:         &storeHistory{st: st},
 		Gate:            gate,
+		QuestionGate:    opts.QuestionGate,
 		ToolReviewer:    reviewer,
 		ReviewContext:   reviewContext,
 		Compactor: runtime.LLMCompactor{
@@ -1808,4 +1874,115 @@ func connectMCP(root, rawSetting, settingSource, workspaceConfig string) ([]runt
 		log.Printf("zeokeel: mcp: %v (kept %d connected server(s))", err, len(mgr.Servers()))
 	}
 	return mgr.Tools(), mgr, mgr.Close, nil
+}
+
+// filterRegistryByPreset narrows reg to the preset's tool allowlist, keeping
+// registration order. Contract (P1 fail-closed):
+//   - an unknown preset or an empty allowlist keeps every tool (historical
+//     standard behaviour);
+//   - a non-empty allowlist that matches NO registered tool yields an EMPTY
+//     registry plus a warning: the typo must not silently grant the full tool
+//     set. A partially matching allowlist keeps only its matches, and names
+//     that matched nothing are reported in the warning.
+func filterRegistryByPreset(reg *runtime.Registry, registry *presets.Registry, presetID string) (*runtime.Registry, string) {
+	if reg == nil || registry == nil {
+		return reg, ""
+	}
+	preset, ok := registry.Get(presetID)
+	if !ok {
+		return reg, ""
+	}
+	if len(preset.Tools) == 0 {
+		return reg, ""
+	}
+	names := make([]string, 0, len(reg.List()))
+	for _, tool := range reg.List() {
+		names = append(names, tool.Name())
+	}
+	visible, err := registry.VisibleTools(presetID, names)
+	if err != nil {
+		return runtime.NewRegistry(), fmt.Sprintf("preset %q tool allowlist could not be applied (%v); no tools are exposed for this session", presetID, err)
+	}
+	if len(visible) == 0 {
+		return runtime.NewRegistry(), fmt.Sprintf("preset %q tool allowlist (%s) matched no registered tool; no tools are exposed for this session", presetID, strings.Join(preset.Tools, ", "))
+	}
+	keep := make(map[string]bool, len(visible))
+	for _, name := range visible {
+		keep[name] = true
+	}
+	filtered := runtime.NewRegistry()
+	matched := make(map[string]bool, len(visible))
+	for _, tool := range reg.List() {
+		if keep[tool.Name()] {
+			_ = filtered.Register(tool)
+			matched[tool.Name()] = true
+		}
+	}
+	// Report allowlist names that matched no registered tool, even when the
+	// rest matched: a typo must be visible to the user, not silently dropped.
+	var missing []string
+	for _, name := range preset.Tools {
+		if !matched[strings.TrimSpace(name)] {
+			missing = append(missing, strings.TrimSpace(name))
+		}
+	}
+	sort.Strings(missing)
+	if len(missing) > 0 {
+		return filtered, fmt.Sprintf("preset %q tool allowlist names unregistered tool(s) %s; they were dropped from this session", presetID, strings.Join(missing, ", "))
+	}
+	return filtered, ""
+}
+
+// presetModeForID maps a preset id to the runtime topology it selects. Built-in
+// preset ids mirror the historical modes; custom presets run the standard
+// topology and customize through their allowlist/prompt.
+func presetModeForID(presetID string) string {
+	if _, err := runtime.NormalizeMode(presetID); err == nil {
+		return presetID
+	}
+	return runtime.ModeStandard
+}
+
+// uiLanguage returns the prompt language code ("en"/"zh") selected in settings.
+func uiLanguage(st *store.Store) string {
+	lang := "en"
+	if st != nil {
+		if raw, err := st.GetSetting("ui.language"); err == nil && strings.TrimSpace(raw) != "" {
+			lang = strings.TrimSpace(raw)
+		}
+	}
+	return lang
+}
+
+// injectPresetPrompt prepends the preset's persona/prompt sections to the
+// composed instruction in their declared order, before the built-in sections
+// (the preset persona is meant to lead). Dynamic sections render with the
+// deployment prompt context projected onto a minimal language/tools context.
+func injectPresetPrompt(instruction string, registry *presets.Registry, presetID, lang string) string {
+	if registry == nil || strings.TrimSpace(instruction) == "" {
+		return instruction
+	}
+	sections := registry.PersonaSections(presetID)
+	if len(sections) == 0 {
+		return instruction
+	}
+	zh := strings.HasPrefix(strings.ToLower(strings.TrimSpace(lang)), "zh")
+	parts := make([]string, 0, len(sections))
+	for _, section := range sections {
+		text := ""
+		if section.Dynamic != nil {
+			text = section.Dynamic(prompt.Context{Language: lang})
+		} else if zh {
+			text = section.ZH
+		} else {
+			text = section.EN
+		}
+		if text = strings.TrimSpace(text); text != "" {
+			parts = append(parts, text)
+		}
+	}
+	if len(parts) == 0 {
+		return instruction
+	}
+	return strings.Join(parts, "\n\n") + "\n\n" + instruction
 }

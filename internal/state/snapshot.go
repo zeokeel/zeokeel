@@ -310,8 +310,7 @@ func Apply(prev *Snapshot, ev Event) *Snapshot {
 		copy(errors, prev.Errors)
 		errors[len(prev.Errors)] = info
 		// Keep the history bounded; errors are rare but a long-lived session
-		// must not grow this list forever.
-		const maxSnapshotErrors = 100
+		// must not grow this list forever (ApplyBatch shares the bound).
 		if len(errors) > maxSnapshotErrors {
 			errors = errors[len(errors)-maxSnapshotErrors:]
 		}

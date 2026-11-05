@@ -84,7 +84,8 @@
 - **UX-04 设置窗重绘**：打开/移动设置窗后主窗口 popover 残留（state 已清、不重绘）；受 mygo 出帧机制限制，PARTIAL。
 - **About 版本**：已统一为 `shell.BuildVersionString()` 单一来源（删除硬编码 `version 0.1.0` 与 `pluginProductVersion`）；预览已按新文案重生成。
 - **RT-04 / AR-04 / AR-09 / AR-22 大项**：per-session Agent、shell 分层、schema v2、快照优化 DEFERRED（理由见 FIX-PLAN §7）。
-- **自动更新 / Windows 安装器**：`internal/updater/` 引擎已实现并通过 14 个契约测试（含崩溃恢复），但**尚未接入 app/UI**，也没有 update feed、签名与回滚通道 → 用户侧不可用（DEFERRED，AR-03）；Windows 安装器只有计划与 Inno/NSIS 可执行草案（`packaging/windows/INSTALLER-PLAN.md`），未构建、未签名；`release.yml` 目前发布的是未签名便携包。
+- **自动更新 / Windows 安装器**：引擎 `internal/updater`（14 契约测试，含崩溃恢复）+ `zeokeel update` CLI（check/download/install/--json）+ 设置页「检查更新」已交付；**托管 update feed 与代码签名/公证为外部依赖（DEFERRED，AR-03）**，GUI 内下载/安装未接线（CLI 可用）；Windows 安装器仅为计划与 Inno/NSIS 草案（`packaging/windows/INSTALLER-PLAN.md`，未编译/未签名）；`release.yml` 发布的是未签名便携包。
+- **AR-09/AR-07 数据库 schema v2（已落地）**：`SchemaVersion=2`，有序迁移步骤（每步单事务 + `schema_migrations` 日志，失败回滚到上一步）；v2 是 `messages.ordinal` 回填 + 索引（AR-07）。升级前用 `VACUUM INTO` 在 `<data dir>/backups/` 写一致性快照（`index-v<from>-to-v<to>-<UTC 时间戳>.sqlite`，0600；**备份失败则迁移失败 = fail-closed**）。**旧版二进制打开 v2 库会以 `ErrSchemaTooNew` 拒绝启动**（提示升级 ZeoKeel），即**不支持 downgrade**——回退到旧版需用 `backups/` 快照手工恢复；该目录可手动清理，建议保留最近一份。
 - **预览金标**：22 张已按 wave1+wave2 UI 重生成（含设置窗 900×840）并回归 PASS（14 屏/1.9s）。
 
 ## 4. 视觉回归策略（v1.1：opt-in 回归工具）
@@ -109,7 +110,7 @@
 - 构建产物统一 `dist/`（[ADR 0012](../../docs/decisions/0012-build-output-layout.md)）：仓库根/包目录不保留二进制；`make build` / `make package-windows` / `make package-linux` / `make package-macos` 固定命名，`make clean` 只清构建产物。
 - 版本与诊断（AR-01/AR-03）：`scripts/build.sh` 用 `-ldflags "-s -w -X main.version/commit/buildTime"` 注入版本并剥离符号（约 -32% 体积），`zeokeel --version` 输出三项；日志写 `<DataDir>/logs/app-YYYYMMDD.log`（8MiB 轮转、跨天换文件），panic 写 `logs/crash-*.txt`，并用 `debug.SetCrashOutput` 捕获致命崩溃。
 - 纯 Go/no-cgo 边界：插件只内置、无第三方插件市场/运行时；无内核级沙箱（策略 + 审批 + 审计）。这些是产品级既定边界，不随 UI 改造改变。
-- 打包：Windows zip、Linux tar.gz（amd64/arm64）、macOS unsigned `.app` zip 由 `scripts/build.sh` 生成；**代码签名/公证/自动更新仍缺失**（需证书与发布账号，见 BUGS AR-03 / FIX-PLAN §5）；构建与打包脚本不写仓库根目录。
+- 打包：Windows zip、Linux tar.gz（amd64/arm64）、macOS unsigned `.app` zip 由 `scripts/build.sh` 生成；发布流水线 `.github/workflows/release.yml` + `make release` 已就绪；**代码签名/公证与托管 update feed 仍缺**（需证书与发布账号，见 BUGS AR-03）；自动更新引擎+CLI+设置页检查已交付；构建与打包脚本不写仓库根目录。
 
 ## 6. 后续建议优先级
 

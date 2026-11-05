@@ -40,6 +40,15 @@ func (a *App) maybeWorkspaceHoverCard(c *ui.Context, t *design.Tokens, row ui.El
 		a.wsHoverCloseAt = time.Time{}
 		open = true
 	}
+	// Close the card in the build the grace period expires, before its content
+	// is built. Doing it inside PopoverBase's body would paint the card once
+	// more after the state already said it was closed (a frame with no
+	// animation request would keep that stale paint).
+	if open && !a.wsHoverCloseAt.IsZero() && !c.Now().Before(a.wsHoverCloseAt) {
+		open = false
+		a.wsHoverID = ""
+		a.wsHoverCloseAt = time.Time{}
+	}
 	if open {
 		// The card sits beside the row, not below it: a card below a
 		// workspace would cover the next row and swallow its click or

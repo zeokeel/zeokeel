@@ -114,12 +114,12 @@ type forkMessage struct {
 
 // copyForkMessages copies every message of sourceID to newSessionID, keeping
 // the append order, timestamps and turn grouping (which are meaningful) but
-// assigning fresh message ids. It returns the old-id -> new-id mapping used to
-// rewire tool calls and feedback.
+// assigning fresh message ids and dense per-session ordinals (AR-07). It
+// returns the old-id -> new-id mapping used to rewire tool calls and feedback.
 func copyForkMessages(tx *sql.Tx, sourceID, newSessionID string) (map[string]string, error) {
 	rows, err := tx.Query(
 		`SELECT `+messageColumns+` FROM messages WHERE session_id = ?
-		 ORDER BY created_at, rowid`, sourceID,
+		 ORDER BY ordinal, id`, sourceID,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("copy messages: query: %w", err)
@@ -127,10 +127,11 @@ func copyForkMessages(tx *sql.Tx, sourceID, newSessionID string) (map[string]str
 	var list []forkMessage
 	for rows.Next() {
 		var (
-			m       forkMessage
-			ignored string
+			m              forkMessage
+			ignoredID      string
+			ignoredOrdinal int64
 		)
-		if err := rows.Scan(&m.id, &ignored, &m.role, &m.content, &m.reason, &m.created, &m.turnID); err != nil {
+		if err := rows.Scan(&m.id, &ignoredID, &m.role, &m.content, &m.reason, &m.created, &m.turnID, &ignoredOrdinal); err != nil {
 			rows.Close() //nolint:errcheck // scan error wins
 			return nil, fmt.Errorf("copy messages: scan: %w", err)
 		}
@@ -145,16 +146,16 @@ func copyForkMessages(tx *sql.Tx, sourceID, newSessionID string) (map[string]str
 	}
 
 	ids := make(map[string]string, len(list))
-	for _, m := range list {
+	for i, m := range list {
 		newMessageID, err := newID()
 		if err != nil {
 			return nil, err
 		}
 		ids[m.id] = newMessageID
 		if _, err := tx.Exec(
-			`INSERT INTO messages(id, session_id, role, content, reasoning, created_at, turn_id)
-			 VALUES (?, ?, ?, ?, ?, ?, ?)`,
-			newMessageID, newSessionID, m.role, m.content, m.reason, m.created, m.turnID,
+			`INSERT INTO messages(id, session_id, role, content, reasoning, created_at, turn_id, ordinal)
+			 VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+			newMessageID, newSessionID, m.role, m.content, m.reason, m.created, m.turnID, int64(i+1),
 		); err != nil {
 			return nil, fmt.Errorf("copy messages: insert: %w", err)
 		}

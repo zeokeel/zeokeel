@@ -72,7 +72,7 @@ func (a *App) archiveCurrentSession(c *ui.Context) {
 	if err == nil {
 		for _, next := range sessions {
 			if next.ID != sess.ID {
-				a.openSession(next.ID)
+				a.openSessionAsync(c, next.ID)
 				c.Toast(a.T("workspace.session_archived"))
 				return
 			}
@@ -304,7 +304,7 @@ func (a *App) inlineSearchResults(c *ui.Context, t *design.Tokens) {
 			})
 			row.OnClick(func() {
 				a.closeInlineSearch()
-				a.openSession(item.ID)
+				a.openSessionAsync(c, item.ID)
 			})
 		}
 	})
@@ -681,7 +681,7 @@ func (a *App) sessionSearchRow(c *ui.Context, t *design.Tokens, sess store.Sessi
 		id := sess.ID
 		open.OnClick(func() {
 			a.paletteOpen = false
-			a.openSession(id)
+			a.openSessionAsync(c, id)
 		})
 
 		label := a.T("search.archive")

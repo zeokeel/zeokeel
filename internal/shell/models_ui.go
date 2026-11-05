@@ -169,6 +169,22 @@ type shellUIState struct {
 
 	// importOpen is the PD-04 "Import from DSH" instructions dialog.
 	importOpen bool
+
+	// Updates page state: the async check's progress and last result.
+	updateChecking bool
+	updateMessage  string
+
+	// presetPickerOpen is the live header's FP-06 preset popover.
+	presetPickerOpen bool
+
+	// sessionCache is the AR-08 session-list cache: the view renders it while
+	// a background goroutine refreshes it.
+	sessionCache *sessionListCache
+
+	// AR-08 session-open async: the id being opened and the completed results
+	// waiting for the UI thread.
+	sessionOpeningID   string
+	sessionOpenResults chan sessionOpenResult
 }
 
 // shellUIStates maps each App to its shell UI state.

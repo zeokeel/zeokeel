@@ -310,6 +310,7 @@ func (a *App) View(c *ui.Context) {
 	// Reopen the last conversation (read-only) and its saved draft once, then
 	// keep the composer draft persisted while the user types (PD-10).
 	a.restoreSessionState()
+	a.applySessionOpenResults()
 	a.flushDraftPersistence(c)
 	// The desktop's preferences come first: ReduceMotion must switch the
 	// frame's animations off before any element is built.
@@ -335,6 +336,12 @@ func (a *App) View(c *ui.Context) {
 	// after the user picks one.
 	t := a.themeTokens(c)
 	c.SetTheme(shellTheme(t, c.Preferences()))
+
+	// UX-14: the shell draws the window's toasts itself, in the top band and
+	// pass-through, so a toast never covers the composer (whose toolbar owns
+	// the window's bottom edge) nor the footer, and never takes a click meant
+	// for the UI underneath (the Settings window uses the same layer).
+	a.toastViewport(c, t)
 
 	ui.Row(c).Fill().AlignItems(ui.Stretch).Children(func() {
 		a.sidebar(c, t)

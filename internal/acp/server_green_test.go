@@ -268,3 +268,90 @@ func TestServeStopsOnContextCancellation(t *testing.T) {
 		t.Fatal("Serve did not return within 2s of context cancellation (blocking stdio read)")
 	}
 }
+
+// TestServerFirstPromptWinsSingleInflight pins deterministic admission order:
+// when two prompts for the same session are sent back to back, the first one
+// runs (arrival order, not goroutine scheduling) and the second is rejected.
+func TestServerFirstPromptWinsSingleInflight(t *testing.T) {
+	agent := &blockingAgent{started: make(chan struct{}, 4)}
+	srv, err := NewServer(Config{Agent: agent, Logf: func(string, ...any) {}})
+	if err != nil {
+		t.Fatalf("NewServer: %v", err)
+	}
+	ic := startInteractive(t, srv)
+	ic.send(rpcRequest(t, 1, MethodInitialize, InitializeRequest{ProtocolVersion: ProtocolVersion}))
+	if resp := ic.readResponse(1, 2*time.Second); resp.Error != nil {
+		t.Fatalf("initialize: %+v", resp.Error)
+	}
+	ic.send(rpcRequest(t, 2, MethodSessionNew, NewSessionRequest{Cwd: t.TempDir()}))
+	if resp := ic.readResponse(2, 2*time.Second); resp.Error != nil {
+		t.Fatalf("session/new: %+v", resp.Error)
+	}
+	// First prompt runs; the second must be rejected with -32603.
+	ic.send(rpcRequest(t, 3, MethodSessionPrompt, PromptRequest{SessionID: "session-block", Prompt: []ContentBlock{{Type: "text", Text: "first"}}}))
+	ic.send(rpcRequest(t, 4, MethodSessionPrompt, PromptRequest{SessionID: "session-block", Prompt: []ContentBlock{{Type: "text", Text: "second"}}}))
+	// The second prompt's error must arrive without waiting for the first turn.
+	second := ic.readResponse(4, 2*time.Second)
+	if second.Error == nil || second.Error.Code != CodeInternalError {
+		t.Fatalf("second prompt = %+v, want -32603 single-inflight rejection", second)
+	}
+	// The first prompt is the one actually running.
+	select {
+	case <-agent.started:
+	case <-time.After(2 * time.Second):
+		t.Fatal("first prompt did not start")
+	}
+	ic.send(rpcNotification(t, MethodSessionCancel, CancelNotification{SessionID: "session-block"}))
+	first := ic.readResponse(3, 3*time.Second)
+	if first.Error != nil {
+		t.Fatalf("first prompt returned an error instead of a cancelled stopReason: %+v", first.Error)
+	}
+	var result PromptResponse
+	if err := json.Unmarshal(first.Result, &result); err != nil {
+		t.Fatalf("first prompt result: %v", err)
+	}
+	if result.StopReason != StopReasonCancelled {
+		t.Fatalf("stopReason = %q, want %q", result.StopReason, StopReasonCancelled)
+	}
+}
+
+// TestServerPipelinedPromptBeforeInitializeRejected pins the protocol
+// hardening for the round-2 finding: when a client pipelines session/prompt and
+// initialize on the same connection, the prompt frame arrived first and must be
+// rejected with -32600 even though the handler goroutine could run after
+// initialize was folded. Frame arrival order decides.
+func TestServerPipelinedPromptBeforeInitializeRejected(t *testing.T) {
+	srv := newTestServer(t)
+	input := strings.Join([]string{
+		rpcRequest(t, 1, MethodSessionPrompt, PromptRequest{SessionID: "session-1", Prompt: []ContentBlock{{Type: "text", Text: "hi"}}}),
+		rpcRequest(t, 2, MethodInitialize, InitializeRequest{ProtocolVersion: ProtocolVersion}),
+	}, "\n") + "\n"
+	msgs := serveLines(t, srv, input)
+	promptResp := findResponse(t, msgs, 1)
+	if promptResp.Error == nil || promptResp.Error.Code != CodeInvalidRequest {
+		t.Fatalf("pipelined prompt before initialize = %+v, want -32600", promptResp)
+	}
+	initResp := findResponse(t, msgs, 2)
+	if initResp.Error != nil {
+		t.Fatalf("initialize after a rejected pipelined prompt: %+v", initResp.Error)
+	}
+}
+
+// TestServerPipelinedInitializeThenPromptRuns confirms the other interleaving:
+// initialize first in the byte stream opens the gate for the pipelined prompt.
+func TestServerPipelinedInitializeThenPromptRuns(t *testing.T) {
+	srv := newTestServer(t)
+	input := strings.Join([]string{
+		rpcRequest(t, 1, MethodInitialize, InitializeRequest{ProtocolVersion: ProtocolVersion}),
+		rpcRequest(t, 2, MethodSessionPrompt, PromptRequest{SessionID: "session-1", Prompt: []ContentBlock{{Type: "text", Text: "hi"}}}),
+	}, "\n") + "\n"
+	msgs := serveLines(t, srv, input)
+	promptResp := findResponse(t, msgs, 2)
+	if promptResp.Error != nil {
+		t.Fatalf("prompt after pipelined initialize = %+v, want end_turn", promptResp.Error)
+	}
+	var result PromptResponse
+	if err := json.Unmarshal(promptResp.Result, &result); err != nil || result.StopReason != StopReasonEndTurn {
+		t.Fatalf("prompt result = %s (err=%v), want end_turn", promptResp.Result, err)
+	}
+}

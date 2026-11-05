@@ -137,7 +137,7 @@ func (s *Store) ExportSessionJSONL(sessionID string) ([]byte, error) {
 func exportMessages(tx *sql.Tx, sessionID string) ([]Message, error) {
 	rows, err := tx.Query(
 		`SELECT `+messageColumns+` FROM messages WHERE session_id = ?
-		 ORDER BY created_at, rowid`, sessionID,
+		 ORDER BY ordinal, id`, sessionID,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("read messages: %w", err)
@@ -148,7 +148,7 @@ func exportMessages(tx *sql.Tx, sessionID string) ([]Message, error) {
 			m       Message
 			created string
 		)
-		if err := rows.Scan(&m.ID, &m.SessionID, &m.Role, &m.Content, &m.Reasoning, &created, &m.TurnID); err != nil {
+		if err := rows.Scan(&m.ID, &m.SessionID, &m.Role, &m.Content, &m.Reasoning, &created, &m.TurnID, &m.Ordinal); err != nil {
 			rows.Close() //nolint:errcheck // scan error wins
 			return nil, fmt.Errorf("read messages: scan: %w", err)
 		}

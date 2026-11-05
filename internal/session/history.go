@@ -19,11 +19,15 @@ import (
 // Token and Reasoning events are skipped because their text is already in the
 // messages table; folding them too would duplicate assistant text.
 //
-// The replay runs on the store's event seq axis: the snapshot Seq is seeded
-// from each record's seq, so ToolState.StartedSeq/UpdatedSeq are persisted
-// event seqs. Message.Seq is recovered from the same axis (a user message's
-// "message" event, or an assistant message's first token/reasoning event), so
-// a reopened snapshot can order messages and tool calls on one timeline.
+// Message order comes from the store's per-session ordinal column (AR-07), not
+// from event replay: the messages slice is copied in ListMessages order and is
+// never re-sorted, so a session whose event trace is missing, pruned or gapped
+// still reopens in its true append order. The replay runs on the store's event
+// seq axis only for the non-message state: the snapshot Seq is seeded from each
+// record's seq, so ToolState.StartedSeq/UpdatedSeq are persisted event seqs.
+// Message.Seq is recovered from the same axis (a user message's "message" event,
+// or an assistant message's first token/reasoning event) for the trajectory
+// timeline, but it no longer drives transcript ordering.
 //
 // The session row's status is authoritative for Phase: a process that died
 // mid-turn must not reopen a session that still looks "running".

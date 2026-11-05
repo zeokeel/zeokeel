@@ -54,7 +54,7 @@ func TestDelegatedApprovalSkipsAutoReview(t *testing.T) {
 	tool := newEinoTool(&jsonTool{name: "bash"}, gate, func(ctx context.Context, in ToolReviewInput) (bool, string, error) {
 		reviewed = true
 		return true, "allowed", nil // would auto-allow if consulted
-	})
+	}, nil)
 	ctx := WithDelegatedApproval(context.Background())
 	err := tool.awaitApproval(ctx, nil)
 	if err == nil {

@@ -476,21 +476,21 @@ func TestSettingsStaticPages(t *testing.T) {
 	if err := tt.Click("Agent presets"); err != nil {
 		t.Fatalf("click Agent presets: %v", err)
 	}
-	for _, label := range []string{"Standard mode", "Minimal mode", "Creator mode"} {
+	for _, label := range []string{"Standard", "Minimal", "Creator"} {
 		if !tt.HasText(label) {
 			t.Fatalf("agent presets page missing %q: %q", label, tt.Texts())
 		}
 	}
-	if !tt.HasText("terminal and image reading") {
+	if !tt.HasText("Terminal-only tool set") {
 		t.Fatalf("preset description missing: %q", tt.Texts())
 	}
-	if err := tt.Click("Set default Minimal mode"); err != nil {
-		t.Fatalf("click Set default Minimal mode: %v", err)
+	if err := tt.Click("Set default Minimal"); err != nil {
+		t.Fatalf("click Set default Minimal: %v", err)
 	}
 	if got, err := h.store.GetSetting("agent.preset"); err != nil || got != "minimal" {
 		t.Fatalf("agent.preset = %q, %v; want minimal", got, err)
 	}
-	if !tt.HasText("Default preset: Minimal mode") {
+	if !tt.HasText("Default preset: minimal") {
 		t.Fatalf("set default toast missing: %q", tt.Texts())
 	}
 	if !tt.HasText("Default") {

@@ -35,7 +35,9 @@ stdout carries protocol frames only; logs go to stderr and the app log file.
 Signals: SIGINT/SIGTERM shut down cleanly; EOF on stdin exits 0.
 
 Environment:
-  ZEOKEEL_DATA_DIR   data directory for ACP sessions (default: ~/.zeokeel)
+  ZEOKEEL_DATA_DIR   data directory for ACP sessions (default: ~/.zeokeel).
+                     Prefer a dedicated directory for ACP clients so a running
+                     desktop app does not share the SQLite store.
   DEEPSEEK_API_KEY   model API key when none is configured in Settings
 
 Supported requests: initialize, session/new, session/prompt, session/cancel.

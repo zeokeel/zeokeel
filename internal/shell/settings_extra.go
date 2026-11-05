@@ -354,14 +354,17 @@ func (a *App) updatesSettingsPage(c *ui.Context, t *design.Tokens) {
 		a.shellInfoRow(c, t, a.menuText("Current version", "当前版本"), BuildVersionString(), false)
 		a.shellInfoRow(c, t, a.menuText("Update channel", "更新通道"),
 			a.menuText("Manual only", "仅手动"), false)
-		a.shellActionRow(c, t,
+		st := a.shellUI()
+		a.settingsRow(c, t,
 			a.menuText("Check for updates", "检查更新"),
-			a.menuText("This build does not download updates automatically; install a newer package when one is available.",
-				"此版本不会自动下载更新；有新安装包时请手动安装。"),
-			a.menuText("Check", "检查"), false, true, func() {
-				a.toastDeferred(c, a.menuText(
-					"Manual updates only. Current version: "+BuildVersionString(),
-					"仅手动更新。当前版本："+BuildVersionString()))
+			a.updateStatusText(),
+			settingsRowStyle{last: true}, func() {
+				label := a.menuText("Check", "检查")
+				if st.updateChecking {
+					label = a.menuText("Checking…", "正在检查…")
+				}
+				button := ui.Button(c, label).Height(t.Theme().Space(8)).Label(label)
+				button.OnClick(func() { a.runUpdateCheck(c) })
 			})
 	})
 }
@@ -407,7 +410,8 @@ func (a *App) desktopSettingsPage(c *ui.Context, t *design.Tokens) {
 			a.menuText("Launch at login", "登录时启动"),
 			a.menuText("Start ZeoKeel when you sign in (supported on this platform when the system allows it).",
 				"登录系统时启动 ZeoKeel（平台允许时生效）。"),
-			settingAutostart, false, true)
+			settingAutostart, false, false)
+		a.globalHotkeyRow(c, t)
 	})
 }
 

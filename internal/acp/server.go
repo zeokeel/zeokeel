@@ -167,12 +167,34 @@ readLoop:
 				continue
 			}
 			if req.Method == MethodSessionPrompt {
-				prompts.Add(1)
-				go func(req request) {
-					defer prompts.Done()
-					c.handleRequest(ctx, req)
-				}(req)
-				continue
+				// The initialize gate is checked synchronously in frame arrival
+				// order, before the handler goroutine exists: a pipelined prompt
+				// that arrives before initialize must be rejected even if the
+				// goroutine would run after initialize was folded (protocol
+				// hardening; verifier-core round-2 finding).
+				if !c.init.Load() {
+					c.out.writeError(req.ID, &RPCError{Code: CodeInvalidRequest, Message: "session/prompt before initialize"})
+					continue
+				}
+				// Register the per-session prompt slot synchronously (in frame
+				// arrival order) before spawning the handler: the first prompt
+				// wins and a second one is rejected deterministically instead of
+				// by goroutine scheduling.
+				if sid, perr := promptSessionID(req.Params); perr == nil {
+					if promptCtx, ok := c.beginPrompt(ctx, sid); ok {
+						prompts.Add(1)
+						go func(req request, promptCtx context.Context, sid string) {
+							defer prompts.Done()
+							defer c.endPrompt(sid)
+							c.handleRequest(promptCtx, req)
+						}(req, promptCtx, sid)
+						continue
+					}
+					c.out.writeError(req.ID, internalError("session/prompt: a prompt is already running for this session"))
+					continue
+				}
+				// Malformed params: fall through to the normal dispatch so the
+				// client gets the standard -32602 response.
 			}
 			// Control requests are handled in order so initialize/session state
 			// is established before the requests that depend on it.
@@ -366,27 +388,10 @@ func (c *conn) handlePrompt(ctx context.Context, params json.RawMessage) (any, *
 		return nil, invalidParams("session/prompt: prompt text is empty")
 	}
 
-	promptCtx, cancel := context.WithCancel(ctx)
-	defer cancel()
-	c.mu.Lock()
-	st := c.sessions[sessionID]
-	if st == nil {
-		st = &sessionState{}
-		c.sessions[sessionID] = st
-	}
-	if st.busy {
-		c.mu.Unlock()
-		return nil, internalError("session/prompt: a prompt is already running for this session")
-	}
-	st.busy = true
-	st.cancel = cancel
-	c.mu.Unlock()
-	defer func() {
-		c.mu.Lock()
-		st.busy = false
-		st.cancel = nil
-		c.mu.Unlock()
-	}()
+	// The Serve loop registered this session's prompt slot (and its cancel func)
+	// synchronously before starting the handler; ctx is already the per-prompt
+	// cancellable context. See beginPrompt/endPrompt.
+	promptCtx := ctx
 
 	updates := func(update SessionUpdateNotification) error {
 		if strings.TrimSpace(update.SessionID) == "" {
@@ -455,6 +460,53 @@ func (c *conn) cancelAllPrompts() {
 	c.mu.Unlock()
 	for _, cancel := range cancels {
 		cancel()
+	}
+}
+
+// promptSessionID extracts the sessionId of a session/prompt request without
+// fully validating the prompt blocks (that happens in handlePrompt).
+func promptSessionID(params json.RawMessage) (string, error) {
+	var p PromptRequest
+	if err := json.Unmarshal(params, &p); err != nil {
+		return "", err
+	}
+	sid := strings.TrimSpace(p.SessionID)
+	if sid == "" {
+		return "", errors.New("empty sessionId")
+	}
+	return sid, nil
+}
+
+// beginPrompt reserves the single in-flight prompt slot of sessionID and
+// returns its cancellable context. It is called synchronously by the read loop
+// so prompt ordering follows frame arrival, not goroutine scheduling.
+func (c *conn) beginPrompt(parent context.Context, sessionID string) (context.Context, bool) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	st := c.sessions[sessionID]
+	if st == nil {
+		st = &sessionState{}
+		c.sessions[sessionID] = st
+	}
+	if st.busy {
+		return nil, false
+	}
+	ctx, cancel := context.WithCancel(parent)
+	st.busy = true
+	st.cancel = cancel
+	return ctx, true
+}
+
+// endPrompt releases sessionID's prompt slot.
+func (c *conn) endPrompt(sessionID string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if st := c.sessions[sessionID]; st != nil {
+		if st.cancel != nil {
+			st.cancel()
+		}
+		st.busy = false
+		st.cancel = nil
 	}
 }
 

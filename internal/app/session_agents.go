@@ -62,17 +62,36 @@ func (a *app) buildSessionAgent(sessionID string) (*runtime.Agent, error) {
 		root = st.Dir()
 	}
 	permission := ctrl.SessionPermissionOrDefault(sessionID)
+	// Declarative agent presets (FP-06): resolve the session's effective preset
+	// (explicit selection, default, legacy mode alias, fallback) and let the
+	// build filter tools, inject the persona and pick the topology. An unknown
+	// preset never fails the build: ResolvePreset falls back to standard with a
+	// warning the app logs.
+	preset, warnings := ctrl.ResolvePreset(sessionID)
+	for _, warning := range warnings {
+		log.Printf("zeokeel: session %s preset: %s", sessionID, warning)
+	}
+	opts := a.toolOptions(st, root, permission)
+	opts.Presets = ctrl.Presets()
+	opts.PresetID = preset.ID
+	opts.QuestionGate = a.questionGateForSession(sessionID)
 	// Serialize with rebuildAgent: both replace bundles and close old ones.
 	a.buildMu.Lock()
 	defer a.buildMu.Unlock()
-	bundle, err := buildAgentWithOptions(st, root, DefaultInstruction, a.toolOptions(st, root, permission))
+	bundle, err := buildAgentWithOptions(st, root, DefaultInstruction, opts)
 	if err != nil {
 		return nil, err
 	}
 	if bundle == nil || bundle.Agent == nil {
 		return nil, nil
 	}
+	// Surface fail-closed preset problems (for example an allowlist that
+	// matched no registered tool) to the session UI.
+	ctrl.SetPresetWarnings(sessionID, bundle.PresetWarnings)
 	a.bundlesMu.Lock()
+	if a.sessionBundles == nil {
+		a.sessionBundles = make(map[string]*AgentBundle)
+	}
 	old := a.sessionBundles[sessionID]
 	a.sessionBundles[sessionID] = bundle
 	a.bundlesMu.Unlock()

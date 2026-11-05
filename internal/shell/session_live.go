@@ -175,6 +175,10 @@ func (a *App) liveHeader(c *ui.Context, t *design.Tokens, snap *state.Snapshot) 
 			mode.Expanded(mst.open)
 			mode.OnClick(func() { mst.open = !mst.open })
 			ui.Popover(c, mode, &mst.open, func() { a.agentModeMenu(c, t, &mst.open) })
+			// FP-06: the preset chip is the session-level selector (tool
+			// allowlist, persona and prompt); the mode chip next to it is the
+			// legacy topology shorthand.
+			a.sessionPresetPicker(c, t)
 			// No status text while idle: the header is title, mode and
 			// actions only. Running/waiting/failed/paused/stopped get the
 			// cross-fading phase label.
@@ -252,6 +256,7 @@ func (a *App) liveTranscript(c *ui.Context, t *design.Tokens, snap *state.Snapsh
 				ui.Column(c).Width(a.sessionTranscriptWidthFor(c)).
 					Label(a.tr("Session transcript", "会话记录")).
 					Padding(design.Space6, 0).Gap(design.Space5).Children(func() {
+					a.liveSessionOpening(c, t)
 					if transcriptEmpty(snap) {
 						a.liveTranscriptEmpty(c, t)
 						return

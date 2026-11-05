@@ -17,11 +17,13 @@ import (
 
 	"github.com/zeokeel/zeokeel/internal/agentteam"
 	"github.com/zeokeel/zeokeel/internal/automation"
+	"github.com/zeokeel/zeokeel/internal/globalhotkey"
 	"github.com/zeokeel/zeokeel/internal/session"
 	"github.com/zeokeel/zeokeel/internal/shell"
 	"github.com/zeokeel/zeokeel/internal/state"
 	"github.com/zeokeel/zeokeel/internal/store"
 	"github.com/zeokeel/zeokeel/internal/tools"
+	"github.com/zeokeel/zeokeel/internal/updater"
 )
 
 // ErrAlreadyRunning is returned when a second ZeoKeel is launched.
@@ -120,6 +122,23 @@ type app struct {
 	sessionFactory bool
 	bundlesMu      sync.Mutex
 	sessionBundles map[string]*AgentBundle
+
+	// Update check seam (task-33): updateCheck defaults to updater.Check; tests
+	// inject a fake. CheckForUpdate is the CLI/UI entry point.
+	updateCheck func(ctx context.Context, cfg updater.Config) (*updater.Release, bool, error)
+
+	// Global hotkey (task-33): newHotkeyManager is the platform seam, the
+	// manager/handle hold the live registration and showWindowFromHotkey runs on
+	// the backend dispatch goroutine. hotkeyNotice explains a degraded setting
+	// (unsupported platform, occupied shortcut, invalid spec) without failing
+	// startup.
+	hotkeyMu             sync.Mutex
+	newHotkeyManager     func() (hotkeyManager, error)
+	hotkeyManager        hotkeyManager
+	hotkeyHandle         *globalhotkey.Handle
+	hotkeySpec           string
+	showWindowFromHotkey func()
+	hotkeyNotice         string
 }
 
 // Run starts the app and blocks until it quits.
@@ -313,6 +332,20 @@ func (a *app) startServices() {
 		log.Printf("zeokeel: agent rebuild for the selected workspace: %v", err)
 	}
 	a.startAutomation(ctrl)
+	// Round-3 product wiring: apply the persisted global hotkey and, when
+	// opted in, run one background update check (never blocks startup).
+	_ = a.syncGlobalHotkey()
+	if a.checkUpdatesOnStart() {
+		go func() {
+			release, available, err := a.CheckForUpdate(context.Background())
+			switch {
+			case err != nil:
+				log.Printf("zeokeel: update check: %v", err)
+			case available && release != nil:
+				log.Printf("zeokeel: update available: %s", release.Version)
+			}
+		}()
+	}
 }
 
 // workspaceRootForStore resolves the selected workspace's root from the store
@@ -541,6 +574,17 @@ func (a *app) rebuildAgent(reason string) error {
 	}
 	permission := a.services.SessionPermissionOrDefault(a.services.CurrentSessionID())
 	opts := a.toolOptions(a.services.Store(), root, permission)
+	// The shared fallback bundle also carries the session preset and the
+	// interactive question gate (FP-06/FP-16); per-session bundles resolve
+	// their own preset in buildSessionAgent.
+	if preset, warnings := a.services.ResolvePreset(a.services.CurrentSessionID()); true {
+		for _, warning := range warnings {
+			log.Printf("zeokeel: preset: %s", warning)
+		}
+		opts.Presets = a.services.Presets()
+		opts.PresetID = preset.ID
+	}
+	opts.QuestionGate = a.questionGateForSession("")
 	oldTeam := a.teamManager()
 	// Build the agent with the current session's preset so its very first
 	// topology and prompt already match; ModeFunc keeps the prompt gate in sync
@@ -574,6 +618,9 @@ func (a *app) rebuildAgent(reason string) error {
 	}
 	old := a.bundle
 	a.bundle = bundle
+	// Expose any fail-closed preset warning (for example an allowlist that
+	// matched no tool) for the current session's UI.
+	a.services.SetPresetWarnings(a.services.CurrentSessionID(), bundle.PresetWarnings)
 	a.services.SetAgent(bundle.Agent, bundle.Gate)
 	a.services.SetTitleGenerator(bundle.TitleGenerator)
 	a.services.SetBuiltPermission(permission)

@@ -12,9 +12,9 @@ func overlaps(a, b ui.Rect) bool {
 }
 
 // TestToastDoesNotOverlapComposer pins UX-14's main-window rule: at the wide
-// and the minimum window size the toast never covers the composer card of the
-// screen it reports on (Session's composer owns the bottom edge, Home's is
-// centered).
+// and the minimum window size the toast sits in the top band and never covers
+// the composer or its toolbar (Session's composer owns the bottom edge, Home's
+// is centered).
 func TestToastDoesNotOverlapComposer(t *testing.T) {
 	for _, size := range []struct{ w, h int }{{1600, 1000}, {900, 600}} {
 		for _, screen := range []Screen{Home, Session} {
@@ -36,6 +36,17 @@ func TestToastDoesNotOverlapComposer(t *testing.T) {
 			if overlaps(toast, composer) {
 				t.Fatalf("%dx%d screen %v: toast %+v covers composer %+v",
 					size.w, size.h, screen, toast, composer)
+			}
+			// The composer footer ("Enter to send…" / usage stats) owns the
+			// window's bottom edge: the toast must stay above it entirely, not
+			// just avoid the input box.
+			if toast.Y+toast.H > float32(size.h-40) {
+				t.Fatalf("%dx%d screen %v: toast %+v sits on the composer footer",
+					size.w, size.h, screen, toast)
+			}
+			if toast.Y > 120 {
+				t.Fatalf("%dx%d screen %v: toast is not in the top band: %+v",
+					size.w, size.h, screen, toast)
 			}
 		}
 	}

@@ -17,9 +17,13 @@ type Message struct {
 	Reasoning string    `json:"reasoning,omitempty"`
 	CreatedAt time.Time `json:"created_at"`
 	TurnID    string    `json:"turn_id,omitempty"`
+	// Ordinal is the message's position inside its session (1-based, dense in
+	// append order). Ordering reads this column only, so a skewed clock or an
+	// event-replay gap cannot reorder the transcript.
+	Ordinal int64 `json:"ordinal,omitempty"`
 }
 
-const messageColumns = `id, session_id, role, content, reasoning, created_at, turn_id`
+const messageColumns = `id, session_id, role, content, reasoning, created_at, turn_id, ordinal`
 
 // AppendMessage persists m and returns the stored message. When m.ID is empty
 // a fresh UUID is assigned; when m.CreatedAt is zero the current time is used.
@@ -57,10 +61,17 @@ func (s *Store) AppendMessage(m Message) (*Message, error) {
 	if !ok {
 		return nil, fmt.Errorf("store: append message: session %q: %w", m.SessionID, ErrNotFound)
 	}
+	var ordinal int64
+	if err := tx.QueryRow(
+		`SELECT COALESCE(MAX(ordinal), 0) + 1 FROM messages WHERE session_id = ?`, out.SessionID,
+	).Scan(&ordinal); err != nil {
+		return nil, fmt.Errorf("store: append message to session %q: next ordinal: %w", out.SessionID, err)
+	}
+	out.Ordinal = ordinal
 	if _, err := tx.Exec(
-		`INSERT INTO messages(`+messageColumns+`) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+		`INSERT INTO messages(`+messageColumns+`) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
 		out.ID, out.SessionID, out.Role, out.Content, out.Reasoning,
-		encodeTime(out.CreatedAt), out.TurnID,
+		encodeTime(out.CreatedAt), out.TurnID, out.Ordinal,
 	); err != nil {
 		return nil, fmt.Errorf("store: append message to session %q: insert: %w", m.SessionID, err)
 	}
@@ -70,14 +81,15 @@ func (s *Store) AppendMessage(m Message) (*Message, error) {
 	return &out, nil
 }
 
-// ListMessages returns a session's messages in append order. A message's
-// CreatedAt is unique in practice; rowid breaks ties deterministically.
+// ListMessages returns a session's messages in append order, read from the
+// persisted ordinal column (with id as a deterministic tie-break for rows written
+// before the ordinal migration). The event trace is not consulted for ordering.
 func (s *Store) ListMessages(sessionID string) ([]Message, error) {
 	if sessionID == "" {
 		return nil, fmt.Errorf("%w: list messages: empty session id", ErrInvalidArgument)
 	}
 	rows, err := s.db.Query(
-		`SELECT `+messageColumns+` FROM messages WHERE session_id = ? ORDER BY created_at, rowid`,
+		`SELECT `+messageColumns+` FROM messages WHERE session_id = ? ORDER BY ordinal, id`,
 		sessionID,
 	)
 	if err != nil {
@@ -91,7 +103,7 @@ func (s *Store) ListMessages(sessionID string) ([]Message, error) {
 			m       Message
 			created string
 		)
-		if err := rows.Scan(&m.ID, &m.SessionID, &m.Role, &m.Content, &m.Reasoning, &created, &m.TurnID); err != nil {
+		if err := rows.Scan(&m.ID, &m.SessionID, &m.Role, &m.Content, &m.Reasoning, &created, &m.TurnID, &m.Ordinal); err != nil {
 			return nil, fmt.Errorf("store: list messages for session %q: scan: %w", sessionID, err)
 		}
 		if m.CreatedAt, err = decodeTime(created); err != nil {

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"log"
 	"strings"
+	"time"
 
 	"github.com/zeokeel/zeokeel/internal/session"
 	"github.com/zeokeel/zeokeel/internal/store"
@@ -258,5 +259,16 @@ func (a *app) runAutomationTask(ctrl *session.Controller, task store.Automation)
 			log.Printf("zeokeel: automation %q: bind model %q: %v", task.Title, modelID, err)
 		}
 	}
-	_, _ = submitInto(sessionID)
+	if ok, submitErr := submitInto(sessionID); !ok {
+		// Run-now rollback (P3): the session was created moments ago and never
+		// received a turn, so leaving it behind pollutes the session list with
+		// an empty conversation. Delete it and keep the failed run record.
+		rollbackCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if delErr := ctrl.DeleteSession(rollbackCtx, sessionID); delErr != nil {
+			log.Printf("zeokeel: automation %q: roll back empty session %s: %v", task.Title, sessionID, delErr)
+		} else {
+			log.Printf("zeokeel: automation %q: rolled back empty session %s after %v", task.Title, sessionID, submitErr)
+		}
+	}
 }

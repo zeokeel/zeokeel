@@ -53,7 +53,8 @@ func TestRunAutomationTaskDeliversToOriginSession(t *testing.T) {
 }
 
 // TestRunAutomationTaskCreatesSessionWhenOriginMissing covers the fallback: a
-// deleted origin session means a new session is created and its id recorded.
+// deleted origin session means a fresh session is created and its id recorded;
+// when the submit then fails, that empty session is rolled back again (P3).
 func TestRunAutomationTaskCreatesSessionWhenOriginMissing(t *testing.T) {
 	a, st := newSettingsTestApp(t)
 	before, err := st.ListSessions("")
@@ -71,15 +72,18 @@ func TestRunAutomationTaskCreatesSessionWhenOriginMissing(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ListSessions after: %v", err)
 	}
-	if len(after) != len(before)+1 {
-		t.Fatalf("session count %d -> %d, want one new session", len(before), len(after))
+	if len(after) != len(before) {
+		t.Fatalf("session count %d -> %d; the failed run's empty session should be rolled back", len(before), len(after))
 	}
 	run, err := st.LatestAutomationRun(task.ID)
 	if err != nil {
 		t.Fatalf("LatestAutomationRun: %v", err)
 	}
 	if run.SessionID == "" || run.SessionID == "deleted-session-id" {
-		t.Fatalf("run session = %q, want the newly created session", run.SessionID)
+		t.Fatalf("run session = %q, want the newly created (and rolled back) session", run.SessionID)
+	}
+	if _, serr := st.GetSession(run.SessionID); serr == nil {
+		t.Fatalf("empty automation session %s was not rolled back", run.SessionID)
 	}
 }
 

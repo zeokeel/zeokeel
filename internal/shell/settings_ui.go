@@ -438,7 +438,7 @@ func (a *App) settingsBodyLive(c *ui.Context, t *design.Tokens) {
 					a.pluginsSettingsPage(c, t)
 				case settingsTabAgentPresets:
 					if a.currentSettings().ShowCodingView {
-						a.agentPresetsPage(c, t)
+						a.presetsSettingsPage(c, t)
 					} else {
 						a.settingsRowsLive(c, t)
 					}

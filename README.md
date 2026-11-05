@@ -49,7 +49,7 @@
 - **校验**：下载后先 `sha256sum -c SHA256SUMS.txt`；macOS 首次启动需 `xattr -dr com.apple.quarantine /Applications/ZeoKeel.app`。
 - **签名/公证**：未做（需 Authenticode/Developer ID 证书与 CI secrets，DEFERRED，见 [BUGS AR-03](docs/BUGS.md)）；因此 Release 明确标注 unsigned build。
 - **Windows 安装器**：仍发布 portable zip；Inno/NSIS 可执行草案与布局/升级/签名计划见 [packaging/windows/INSTALLER-PLAN.md](packaging/windows/INSTALLER-PLAN.md)（未构建、未验证）。
-- **自动更新**：`internal/updater` 引擎已实现并通过 14 个契约测试（check / HTTPS-only / SHA-256 校验 / 下载暂存 / install-on-restart + 崩溃恢复），但**尚未接入 app/UI**，也还没有 update feed 与签名基建 → 用户侧暂不可用（[BUGS Updater](docs/BUGS.md)）。
+- **自动更新**：引擎 `internal/updater`（check / HTTPS-only / SHA-256 校验 / 暂存 / install-on-restart + 崩溃恢复）与 **`zeokeel update` CLI**（`--check`/`--download`/`--install`/`--json`）已交付；GUI **设置 › 更新 ›「检查更新」已接线**（读 `update.feed_url` 设置或 `ZEOKEEL_UPDATE_FEED`，只检查并提示；下载/安装走 CLI）。**托管 update feed、代码签名/公证为外部依赖 → DEFERRED**，因此发布包仍明确标注 unsigned build（[BUGS Updater](docs/BUGS.md)）。
 
 ## 文档
 
@@ -89,7 +89,7 @@
 - **2026-11-05 交互调整（完成）**：原生窗口菜单栏退役（[ADR 0006](docs/decisions/0006-retire-native-menu-bar.md)，托盘/快捷键/应用内入口保留）；「计划模式」对齐 DSH（[ADR 0008](docs/decisions/0008-plan-mode-soft-alignment.md)）——header 复选框移除（[ADR 0007](docs/decisions/0007-remove-plan-mode-toggle.md)），plan mode 改为**软引导流程**（`plan:policy` prompt + `present` 计划 + 审阅卡，runtime 不再硬拦截工具），入口为 `/plan` 命令与 composer 计划徽章（`/plan off` 或点徽章退出），只读权限独立存在、可与 plan 叠加；Chat 会话页改为按记录 Seq 渲染——每回合「用户 → 过程块（摘要 + 工具卡）→ 最终回答 → 完成行」，多回合不再把历史工具卡堆到会话末尾（数据层 `state.Message.Seq` + 重开事件 seq 轴，对齐 DSH，见 [native-ui.md §4.1.1](docs/design/native-ui.md)）；预览/测试同步更新。
 - **2026-11-05 平台感知 + 弹层统一（完成）**：shell 工具栈按平台门控——Windows 只暴露 `pwsh`（PowerShell）、POSIX 只暴露 `bash`，系统提示新增显式「运行环境」段（OS/arch + shell 调用方式/语法/路径风格），工具描述与错误按平台方言化（Windows 不再出现「bash + sh -c」的误导），见 [ADR 0009](docs/decisions/0009-platform-shell-stacks.md)；应用内可见弹层统一为品牌菜单（`internal/shell/popover_menus.go`：composer/header/侧栏/右栏，见 [native-ui.md §19.4](docs/design/native-ui.md)）；修复 Home composer 打开 `/`/@ 面板后丢键盘焦点、Enter 不执行命令的既有缺陷；Home/Session 预览重生成。
 - **2026-11-05 反馈修复批次（完成）**：**构建产物统一 `dist/` + 稳定命名**（`scripts/build.sh`/make；根目录不再留二进制，`make clean` 只清构建产物，见 [ADR 0012](docs/decisions/0012-build-output-layout.md)）；**审批范围收敛**——默认只审批会逃逸工作区沙箱的工具，`str_replace_editor view` 等只读调用永不审批，Auto review 覆盖保留（[ADR 0010](docs/decisions/0010-approval-scope.md)）；**Windows 子进程隐藏控制台**，执行命令不再弹 cmd 窗口（[ADR 0011](docs/decisions/0011-windows-hidden-console.md)）；**Chat 顺序回归修复**（reasoning-first turn 的回复不再跑到工具卡上方，`state.Message.LastSeq` 按可见文本结束位置归并）；**eino max iterations 不再整轮失败且默认不限步数**（0=不限、AI 自行结束，对齐 DSH；可选 1–1000 安全上限，命中优雅收尾并保留结果，[ADR 0013](docs/decisions/0013-agent-step-limit.md)）；**Session 右侧空白缺口修复**（composer 回主列、team/todo 面板贯穿到底）；Settings 剩余弹层统一；**plan 模式 ADR 0008 §4 四项补齐**（`exit_plan_mode` 工具、Keep planning 反馈、pending 徽章、Home 草稿 `/plan`）。
-- 下一阶段：见 [docs/BUGS.md](docs/BUGS.md)（P0/P1 修复状态 + 延期项）与 [docs/STATUS.md](docs/STATUS.md)（当前状态）。发布前必做：真机 IME/a11y/DPI/通知矩阵（[已知限制](docs/design/known-limitations.md) §1）、签名/公证/自动更新（迁移导入器已提供最小 CLI+设置入口，质量限制见 known-limitations §3.7）。
+- 下一阶段：见 [docs/BUGS.md](docs/BUGS.md)（P0/P1 修复状态 + 延期项）与 [docs/STATUS.md](docs/STATUS.md)（当前状态）。发布前必做：真机 IME/a11y/DPI/通知矩阵（[已知限制](docs/design/known-limitations.md) §1）、签名/公证（DEFERRED，外部依赖）；自动更新已有引擎+CLI+设置页检查，托管 feed/签名待外部条件（迁移导入器已提供最小 CLI+设置入口，质量限制见 known-limitations §3.7）。
 
 ## 字标（已定）
 

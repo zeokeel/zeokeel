@@ -478,7 +478,9 @@ func (a *App) mentionEntries() []string {
 		return out
 	}
 	files := len(out)
-	if sessions, err := a.Ctrl.ListSessions(context.Background()); err == nil {
+	// AR-08: render from the shell's session cache, refreshed in the
+	// background, so opening @ never waits on the store.
+	if sessions := a.sessions(); sessions != nil {
 		for _, sess := range sessions {
 			title := strings.TrimSpace(sess.Title)
 			if title == "" {

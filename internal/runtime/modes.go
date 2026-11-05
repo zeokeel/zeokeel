@@ -293,7 +293,7 @@ func (a *Agent) einoToolsForMode(mode string) []tool.BaseTool {
 	list := a.effectiveTools(mode)
 	out := make([]tool.BaseTool, 0, len(list))
 	for _, t := range list {
-		out = append(out, newEinoTool(t, a.gate, a.reviewer))
+		out = append(out, newEinoTool(t, a.gate, a.reviewer, a.questionGate))
 	}
 	return out
 }

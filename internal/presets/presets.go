@@ -214,12 +214,18 @@ func Builtins() []Preset {
 }
 
 // Load reads the built-in presets and merges the user preset files under
-// <opts.UserDir>/presets/*.json. A user preset with a built-in ID overrides
-// that built-in field-wise (a JSON field present in the file replaces the
-// built-in field, an absent field keeps the built-in value; `"tools": []`
-// deliberately clears the allowlist). A missing user directory is not an
-// error; a malformed file, duplicate user ID or invalid preset fails the whole
-// load (fail closed, no partial registry).
+// <opts.UserDir>/presets/*.json.
+//
+// Override rule: a user preset with a built-in ID overrides that built-in
+// field-wise. A JSON field present in the file replaces the built-in field; an
+// absent field keeps the built-in value, so an override may be as small as
+// {"id":"minimal","tools":["read_file"]} and still inherit the built-in name,
+// description, prompt and persona. `"tools": []` deliberately clears the
+// allowlist (= every registered tool). Validation runs on the merged preset, so
+// a built-in's required name does not have to be repeated in the override; a
+// brand-new user preset (no built-in with that ID) must carry both id and name.
+// A missing user directory is not an error; a malformed file, duplicate user
+// ID or invalid preset fails the whole load (fail closed, no partial registry).
 func Load(opts Options) (*Registry, error) {
 	known := normalizeToolNames(opts.KnownTools)
 	merged := clonePresets(builtins)
@@ -257,18 +263,40 @@ func Load(opts Options) (*Registry, error) {
 			if perr != nil {
 				return nil, perr
 			}
-			if err := validatePreset(preset, fields, known); err != nil {
-				return nil, fmt.Errorf("%s: %w", path, err)
+			if preset.ID != "" {
+				if first, ok := seen[preset.ID]; ok {
+					return nil, fmt.Errorf("%w: %q is declared by both %s and %s",
+						ErrDuplicateID, preset.ID, first, name)
+				}
+				seen[preset.ID] = name
 			}
-			if first, ok := seen[preset.ID]; ok {
-				return nil, fmt.Errorf("%w: %q is declared by both %s and %s",
-					ErrDuplicateID, preset.ID, first, name)
-			}
-			seen[preset.ID] = name
 			userPresets = append(userPresets, preset)
 			if i, ok := index[preset.ID]; ok {
-				merged[i] = mergePreset(merged[i], preset, fields)
+				// Override a built-in: merge first, validate the merged result.
+				// The user file may omit any field (name/description/tools/...),
+				// so the built-in value is inherited and required-field checks
+				// run on what the session will actually see (PD-04 P3: an
+				// override without "name" must not fail).
+				mergedPreset := mergePreset(merged[i], preset, fields)
+				if err := validatePreset(mergedPreset, nil, nil); err != nil {
+					return nil, fmt.Errorf("%s: %w", path, err)
+				}
+				// Tool membership is checked only for the allowlist the user
+				// file actually declares: inherited built-in tools are part of
+				// the product contract and may name tools outside a caller's
+				// live registry subset (same rule as Validate).
+				if fields["tools"] {
+					if err := validateToolAllowlist(preset.ID, preset.Tools, known); err != nil {
+						return nil, fmt.Errorf("%s: %w", path, err)
+					}
+				}
+				merged[i] = mergedPreset
 				continue
+			}
+			// A brand-new preset is validated on its own: id and name are
+			// required because there is no built-in to inherit them from.
+			if err := validatePreset(preset, fields, known); err != nil {
+				return nil, fmt.Errorf("%s: %w", path, err)
 			}
 			index[preset.ID] = len(merged)
 			merged = append(merged, preset)
@@ -401,8 +429,16 @@ func validatePreset(p Preset, _ map[string]bool, knownTools []string) error {
 	if strings.TrimSpace(p.Name) == "" {
 		return fmt.Errorf("%w: preset %q: name is required", ErrInvalidPreset, id)
 	}
-	seen := make(map[string]bool, len(p.Tools))
-	for _, tool := range p.Tools {
+	return validateToolAllowlist(id, p.Tools, knownTools)
+}
+
+// validateToolAllowlist checks one allowlist's shape (no empty/duplicate names)
+// and, when knownTools is non-empty, that every name is a registered tool. It
+// is separate from validatePreset so an override can validate only the tools
+// the user file declared, not inherited built-in tools.
+func validateToolAllowlist(id string, tools, knownTools []string) error {
+	seen := make(map[string]bool, len(tools))
+	for _, tool := range tools {
 		name := strings.TrimSpace(tool)
 		if name == "" {
 			return fmt.Errorf("%w: preset %q: empty tool name in allowlist", ErrInvalidPreset, id)

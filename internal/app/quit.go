@@ -18,6 +18,9 @@ import "github.com/egoist/mygo"
 // menu's Quit) are covered by the mygo.App.OnBeforeQuit listener in app.run.
 func (a *app) quitApplication() {
 	a.quitting = true
+	// Round-3: release the system-wide hotkey before the process exits; a
+	// vanished owner otherwise leaves some platforms thinking it is occupied.
+	a.stopGlobalHotkeys()
 	if a.quitApp != nil {
 		a.quitApp()
 		return

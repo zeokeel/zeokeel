@@ -348,7 +348,7 @@ func (a *App) automationRunHistory(c *ui.Context, t *design.Tokens, task store.A
 				if r.SessionID != "" {
 					label := a.menuText("Open session", "打开会话")
 					if ui.Button(c, label).Height(t.Theme().Space(7)).Label(label).Clicked() {
-						a.openSession(r.SessionID)
+						a.openSessionAsync(c, r.SessionID)
 					}
 				}
 			})

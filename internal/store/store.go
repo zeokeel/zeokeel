@@ -6,10 +6,13 @@
 // recoverable database instead of a corrupted one. Every connection also
 // enables foreign keys and a busy timeout.
 //
-// Schema upgrades are guarded by the schema_version table. A brand-new
-// database is migrated to SchemaVersion. A database written by a build with a
-// newer (or legacy older) schema is rejected with ErrSchemaTooNew or
-// ErrSchemaTooOld instead of being silently mutated, per docs/PLAN.md §9.4.
+// Schema upgrades are guarded by the schema_version table and applied by the
+// ordered migration steps in migrations.go (each in its own transaction, with a
+// VACUUM INTO backup before the first step and a schema_migrations log row per
+// step). A brand-new database is created at v1 and upgraded through the same
+// steps. A database written by a newer (or unsupported legacy) schema is
+// rejected with ErrSchemaTooNew or ErrSchemaTooOld instead of being silently
+// mutated, per docs/PLAN.md §9.4.
 //
 // All errors returned by this package are wrapped with context; use
 // errors.Is/errors.As against the sentinel errors below to classify them.
@@ -29,8 +32,9 @@ import (
 	_ "modernc.org/sqlite" // pure-Go SQLite driver (no cgo)
 )
 
-// SchemaVersion is the SQLite schema version this build reads and writes.
-const SchemaVersion = 1
+// SchemaVersion is the SQLite schema version this build reads and writes. It
+// advances by exactly one per ordered migration in schemaMigrations.
+const SchemaVersion = 2
 
 // Sentinel errors. Callers classify failures with errors.Is.
 var (
@@ -110,7 +114,7 @@ func Open(dir string) (*Store, error) {
 		db.Close() //nolint:errcheck // original error wins
 		return nil, fmt.Errorf("store: open %q: %w", path, err)
 	}
-	if err := migrate(db); err != nil {
+	if err := migrate(db, dir); err != nil {
 		db.Close() //nolint:errcheck // original error wins
 		return nil, fmt.Errorf("store: open %q: %w", path, err)
 	}

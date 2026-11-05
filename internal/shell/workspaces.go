@@ -162,7 +162,7 @@ func (a *App) sidebarChoice(c *ui.Context, t *design.Tokens) {
 	case strings.HasPrefix(choice, sidebarSelSession):
 		a.wsHoverID = ""
 		if id := strings.TrimPrefix(choice, sidebarSelSession); id != "" {
-			a.openSession(id)
+			a.openSessionAsync(c, id)
 		}
 	}
 }

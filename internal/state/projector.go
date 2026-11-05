@@ -137,23 +137,27 @@ func (p *Projector) run() {
 			ev = e
 		}
 
-		snap = applyEvent(snap, ev)
+		batchEvents := make([]Event, 0, p.batch)
+		batchEvents = append(batchEvents, ev)
 		closed := false
 		// Fold everything already buffered into this batch so one atomic swap
-		// and one callback cover a burst, instead of one per token.
+		// and one callback cover a burst, instead of one per token. ApplyBatch
+		// copies each changed collection once for the whole burst instead of
+		// once per event (AR-22).
 	drain:
-		for n := 1; n < p.batch; n++ {
+		for len(batchEvents) < p.batch {
 			select {
 			case e, ok := <-p.events:
 				if !ok {
 					closed = true
 					break drain
 				}
-				snap = applyEvent(snap, e)
+				batchEvents = append(batchEvents, e)
 			default:
 				break drain
 			}
 		}
+		snap = ApplyBatch(snap, batchEvents)
 
 		p.commit(snap)
 		if closed {

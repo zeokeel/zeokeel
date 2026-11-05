@@ -90,6 +90,12 @@ type Config struct {
 	// Gate approves tool calls before they execute. Nil means tools run
 	// without approval.
 	Gate Gate
+	// QuestionGate, when set, lets the ask_user tool block inside the turn:
+	// the runtime publishes the question through the gate, waits for the user's
+	// answer and returns it as that tool call's result. Nil keeps the historical
+	// fire-and-forget behaviour (the question card is derived from the tool
+	// result and the answer becomes the next user turn).
+	QuestionGate QuestionGate
 	// ToolReviewer, when set, is consulted before a tool call that the Gate
 	// requires approval for. An allow decision runs the tool without publishing
 	// an ApprovalRequest; a deny decision asks the user (the published request
@@ -205,6 +211,7 @@ type Agent struct {
 	instrFunc     func() string
 	gate          Gate
 	reviewer      ToolReviewer
+	questionGate  QuestionGate
 	reviewContext func() (workDir, constraints string)
 	maxIterations int
 	// stepLimitNotice renders the assistant notice emitted when a turn reaches
@@ -311,6 +318,7 @@ func New(cfg Config) (*Agent, error) {
 		instrFunc:        cfg.InstructionFunc,
 		gate:             cfg.Gate,
 		reviewer:         cfg.ToolReviewer,
+		questionGate:     cfg.QuestionGate,
 		reviewContext:    cfg.ReviewContext,
 		maxIterations:    maxIterations,
 		stepLimitNotice:  stepLimitNotice,
@@ -662,60 +670,31 @@ func (a *Agent) RunWithAttachments(ctx context.Context, sessionID, text string, 
 // blocks Run/Submit nor serializes unrelated sessions. Failures are published
 // as state events because Run has already returned a live event channel.
 func (a *Agent) run(ctx context.Context, cancel context.CancelFunc, sessionID, text string, attachments []UserAttachment, prior []Message, pinned *agentState, out chan<- state.Event) {
-	sink := newEventSink(out)
-	defer sink.close()
+	t := &turnRun{
+		agent:       a,
+		ctx:         ctx,
+		cancel:      cancel,
+		sessionID:   sessionID,
+		text:        text,
+		attachments: attachments,
+		prior:       prior,
+		pinned:      pinned,
+		msgID:       uuid.NewString(),
+		sink:        newEventSink(out),
+		usage:       newTurnUsage(),
+		pending:     make(map[string]time.Time), // CallID -> start time
+		started:     make(map[string]bool),      // CallID -> ToolStart emitted
+	}
+	defer t.sink.close()
 	defer cancel()
 
-	msgID := uuid.NewString()
-	emit := func(ev state.Event) bool {
-		return sink.send(ctx, ev)
-	}
-	// terminal emits happen after the turn has already decided to stop, so a
-	// cancelled consumer must not leak this goroutine.
-	emitTerminal := sink.trySend
-
-	if !emit(state.Status{Phase: state.PhaseRunning}) {
+	if !t.emit(state.Status{Phase: state.PhaseRunning}) {
 		return
 	}
-
-	usage := newTurnUsage()
-	pending := make(map[string]time.Time) // CallID -> start time
-	started := make(map[string]bool)      // CallID -> ToolStart emitted
-
-	fail := func(err error) {
-		// A cancelled turn is not a failure: close the calls it left open (so no
-		// card keeps spinning and the next turn's history has no dangling
-		// call), mark the turn stopped and leave it quiet otherwise.
-		if ctx.Err() != nil {
-			finishPendingTools(pending, ctx.Err(), true, func(ev state.Event) bool {
-				emitTerminal(ev)
-				return true
-			})
-			emitTerminal(state.Status{Phase: state.PhaseIdle, Reason: state.ReasonStopped})
-			return
-		}
-		finishPendingTools(pending, err, false, emit)
-		emit(state.Status{Phase: state.PhaseFailed, Reason: state.ReasonFailed})
-		emit(state.Error{MsgID: msgID, Err: err})
-	}
-
-	// Compact the prior conversation inside the turn (see the Run doc): the
-	// summary call is bounded by the Compactor's own timeout and its failure is
-	// a turn error, not a setup error.
-	prior, err := a.compactPrior(ctx, sessionID, prior)
-	if err != nil {
-		fail(fmt.Errorf("runtime: compact conversation for session %q: %w", sessionID, err))
+	input, ok := t.prepare()
+	if !ok {
 		return
 	}
-
-	pendingAdvisories := a.takePendingAdvisories()
-	inputText := AttachmentPrompt(text, attachments)
-	if len(pendingAdvisories) > 0 {
-		inputText = appendAdvisoriesToPrompt(inputText, pendingAdvisories)
-	}
-	input := make([]*schema.Message, 0, len(prior)+1)
-	input = append(input, messagesToEino(prior)...)
-	input = append(input, userMessageWithAttachments(inputText, AttachmentImages(attachments)))
 
 	// Serialize the eino turn only after compaction: the shared topology must
 	// not be driven by two turns at once, but compacting sessions need not
@@ -723,55 +702,141 @@ func (a *Agent) run(ctx context.Context, cancel context.CancelFunc, sessionID, t
 	a.runMu.Lock()
 	defer a.runMu.Unlock()
 
-	record := newTurnRecord(inputText)
-	// Tool invocations receive a context derived from this one, so they can
-	// publish approval requests and (indirectly) contribute to the record.
-	turnCtx := &turnContext{
-		sink:           sink,
-		record:         record,
-		userRequest:    text,
-		reviewContext:  a.reviewContext,
-		budgetSteps:    a.budgetSteps,
-		budgetTokens:   a.budgetTokens,
-		renderAdvisory: a.budgetAdvisory,
-	}
-	ctx = withTurnContext(ctx, turnCtx)
-	// External notices that arrive while this turn runs are delivered with the
-	// next provider request; the active pointer is cleared when the turn ends so
-	// late notices wait for the next turn instead of vanishing.
-	a.activeTurn.Store(turnCtx)
+	t.record = newTurnRecord(t.inputText)
+	turnCtx := t.bindContext()
 	defer a.activeTurn.CompareAndSwap(turnCtx, nil)
-	// Barrier checkpoints (FP-11): the model adapter flushes the request before
-	// it is sent and the tool wrapper flushes before a side-effecting tool body
-	// runs, so a crash can lose neither. A Save failure fails the barrier
-	// closed instead of continuing without a recovery record.
-	ctx = withTurnCheckpoint(ctx, &turnCheckpointContext{
-		store:     a.checkpoints,
-		prior:     prior,
-		sessionID: sessionID,
-		turnID:    msgID,
-	})
 
-	runner := adk.NewRunner(ctx, adk.RunnerConfig{
+	runner := adk.NewRunner(t.ctx, adk.RunnerConfig{
 		Agent:           pinned.adkAgent,
 		EnableStreaming: true,
 		SessionID:       sessionID,
 	})
-	iter := runner.Run(ctx, input)
+	iter := runner.Run(t.ctx, input)
+	if t.consumeIter(iter) {
+		return
+	}
+	t.finish()
+}
 
+// turnRun holds the per-turn state shared by run and its phase helpers. It is
+// confined to the turn goroutine; the tool eventSink synchronizes the tool
+// goroutines that publish through it.
+type turnRun struct {
+	agent       *Agent
+	ctx         context.Context
+	cancel      context.CancelFunc
+	sessionID   string
+	text        string
+	inputText   string
+	attachments []UserAttachment
+	prior       []Message
+	pinned      *agentState
+	msgID       string
+	sink        *eventSink
+	usage       *turnUsage
+	pending     map[string]time.Time
+	started     map[string]bool
+	record      *turnRecord
+}
+
+// emit publishes an event on the turn channel (false when the consumer is
+// gone).
+func (t *turnRun) emit(ev state.Event) bool {
+	return t.sink.send(t.ctx, ev)
+}
+
+// emitTerminal publishes an event after the turn already decided to stop, so a
+// cancelled consumer must not leak the turn goroutine.
+func (t *turnRun) emitTerminal(ev state.Event) {
+	t.sink.trySend(ev)
+}
+
+// stopCancelled closes the tool calls a cancelled turn left open (so no card
+// keeps spinning and the next turn's history has no dangling call) and settles
+// the idle/stopped phase quietly.
+func (t *turnRun) stopCancelled() {
+	finishPendingTools(t.pending, t.ctx.Err(), true, func(ev state.Event) bool {
+		t.emitTerminal(ev)
+		return true
+	})
+	t.emitTerminal(state.Status{Phase: state.PhaseIdle, Reason: state.ReasonStopped})
+}
+
+// fail publishes a turn failure, or the quiet cancellation settlement when the
+// turn was cancelled instead of failed.
+func (t *turnRun) fail(err error) {
+	if t.ctx.Err() != nil {
+		t.stopCancelled()
+		return
+	}
+	finishPendingTools(t.pending, err, false, t.emit)
+	t.emit(state.Status{Phase: state.PhaseFailed, Reason: state.ReasonFailed})
+	t.emit(state.Error{MsgID: t.msgID, Err: err})
+}
+
+// prepare compacts the prior conversation and builds the initial user input.
+// It reports false when the turn already failed and run must return.
+func (t *turnRun) prepare() ([]*schema.Message, bool) {
+	prior, err := t.agent.compactPrior(t.ctx, t.sessionID, t.prior)
+	if err != nil {
+		t.fail(fmt.Errorf("runtime: compact conversation for session %q: %w", t.sessionID, err))
+		return nil, false
+	}
+	t.prior = prior
+	pendingAdvisories := t.agent.takePendingAdvisories()
+	t.inputText = AttachmentPrompt(t.text, t.attachments)
+	if len(pendingAdvisories) > 0 {
+		t.inputText = appendAdvisoriesToPrompt(t.inputText, pendingAdvisories)
+	}
+	input := make([]*schema.Message, 0, len(prior)+1)
+	input = append(input, messagesToEino(prior)...)
+	input = append(input, userMessageWithAttachments(t.inputText, AttachmentImages(t.attachments)))
+	return input, true
+}
+
+// bindContext installs the tool/turn context and the checkpoint barriers on
+// t.ctx (mirroring run's historical local ctx reassignment) and returns the
+// turn context so run can clear the active-turn pointer on return.
+func (t *turnRun) bindContext() *turnContext {
+	turnCtx := &turnContext{
+		sink:           t.sink,
+		record:         t.record,
+		userRequest:    t.text,
+		reviewContext:  t.agent.reviewContext,
+		budgetSteps:    t.agent.budgetSteps,
+		budgetTokens:   t.agent.budgetTokens,
+		renderAdvisory: t.agent.budgetAdvisory,
+	}
+	t.ctx = withTurnContext(t.ctx, turnCtx)
+	// External notices that arrive while this turn runs are delivered with the
+	// next provider request; run clears the pointer when the turn ends so late
+	// notices wait for the next turn instead of vanishing.
+	t.agent.activeTurn.Store(turnCtx)
+	// Barrier checkpoints (FP-11): the model adapter flushes the request before
+	// it is sent and the tool wrapper flushes before a side-effecting tool body
+	// runs, so a crash can lose neither. A Save failure fails the barrier
+	// closed instead of continuing without a recovery record.
+	t.ctx = withTurnCheckpoint(t.ctx, &turnCheckpointContext{
+		store:     t.agent.checkpoints,
+		prior:     t.prior,
+		sessionID: t.sessionID,
+		turnID:    t.msgID,
+	})
+	return turnCtx
+}
+
+// consumeIter advances the eino iterator and folds every model message. It
+// returns true when the turn already reached a terminal path (run must return);
+// false on normal iterator exhaustion, where run persists the completed turn.
+func (t *turnRun) consumeIter(iter *adk.AsyncIterator[*adk.AgentEvent]) bool {
 	for {
-		if ctx.Err() != nil {
-			finishPendingTools(pending, ctx.Err(), true, func(ev state.Event) bool {
-				emitTerminal(ev)
-				return true
-			})
-			emitTerminal(state.Status{Phase: state.PhaseIdle, Reason: state.ReasonStopped})
-			return
+		if t.ctx.Err() != nil {
+			t.stopCancelled()
+			return true
 		}
-
 		ev, ok := iter.Next()
 		if !ok {
-			break
+			return false
 		}
 		if ev.Err != nil {
 			// Reaching the per-turn step ceiling is a budget boundary, not a
@@ -780,47 +845,45 @@ func (a *Agent) run(ctx context.Context, cancel context.CancelFunc, sessionID, t
 			// instead of surfacing eino's NodeRunError. Real model/tool errors,
 			// timeouts and cancellation still fail below.
 			if errors.Is(ev.Err, adk.ErrExceedMaxIterations) {
-				if err := a.completeMaxIterations(ctx, sessionID, msgID, record, prior, pending, emit); err != nil {
-					fail(err)
+				if err := t.agent.completeMaxIterations(t.ctx, t.sessionID, t.msgID, t.record, t.prior, t.pending, t.emit); err != nil {
+					t.fail(err)
 				}
-				return
+				return true
 			}
-			fail(ev.Err)
-			return
+			t.fail(ev.Err)
+			return true
 		}
 		if ev.Output == nil || ev.Output.MessageOutput == nil {
 			continue
 		}
+		if err := t.agent.consumeMessage(t.ctx, t.sessionID, t.msgID, t.pinned, ev.Output.MessageOutput, t.emit, t.usage, t.pending, t.started); err != nil {
+			t.fail(err)
+			return true
+		}
+	}
+}
 
-		err := a.consumeMessage(ctx, sessionID, msgID, pinned, ev.Output.MessageOutput, emit, usage, pending, started)
-		if err != nil {
-			fail(err)
+// finish persists the completed turn and settles the idle phase. Failed or
+// cancelled turns are retried from the last committed conversation state
+// instead of leaving a partial one.
+func (t *turnRun) finish() {
+	turnMessages := t.record.messages()
+	if t.agent.history != nil {
+		if err := t.agent.history.Append(t.ctx, t.sessionID, turnMessages...); err != nil {
+			t.fail(fmt.Errorf("runtime: append history for session %q: %w", t.sessionID, err))
 			return
 		}
 	}
-
-	// Persist only completed turns: a failed or cancelled turn is retried from
-	// the last committed conversation state instead of leaving a partial one.
-	turnMessages := record.messages()
-	if a.history != nil {
-		if err := a.history.Append(ctx, sessionID, turnMessages...); err != nil {
-			fail(fmt.Errorf("runtime: append history for session %q: %w", sessionID, err))
+	if t.agent.checkpoints != nil {
+		cp := checkpointFor(t.prior, turnMessages, t.msgID, CheckpointPhaseCompleted, time.Now())
+		if err := t.agent.checkpoints.Save(t.ctx, t.sessionID, cp); err != nil {
+			t.fail(fmt.Errorf("runtime: save checkpoint for session %q: %w", t.sessionID, err))
 			return
 		}
 	}
-	if a.checkpoints != nil {
-		cp := checkpointFor(prior, turnMessages, msgID, CheckpointPhaseCompleted, time.Now())
-		if err := a.checkpoints.Save(ctx, sessionID, cp); err != nil {
-			fail(fmt.Errorf("runtime: save checkpoint for session %q: %w", sessionID, err))
-			return
-		}
-	}
-
 	// Usage was published as deltas after each model call; the turn completes
 	// normally (ReasonNone) and nothing is left to publish.
-	if !emit(state.Status{Phase: state.PhaseIdle}) {
-		return
-	}
+	t.emit(state.Status{Phase: state.PhaseIdle})
 }
 
 // completeMaxIterations ends a turn that reached MaxIterations as a completed

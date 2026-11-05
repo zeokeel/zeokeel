@@ -386,19 +386,21 @@ func toolSpecs(infos []*schema.ToolInfo) []ToolSpec {
 // the reviewer's reason attached, so the user can override the recommendation;
 // a reviewer failure falls back to the ordinary prompt.
 type einoInvokableTool struct {
-	tool     Tool
-	info     *schema.ToolInfo
-	gate     Gate
-	reviewer ToolReviewer
+	tool         Tool
+	info         *schema.ToolInfo
+	gate         Gate
+	reviewer     ToolReviewer
+	questionGate QuestionGate
 }
 
 var _ tool.InvokableTool = (*einoInvokableTool)(nil)
 
-func newEinoTool(t Tool, gate Gate, reviewer ToolReviewer) *einoInvokableTool {
+func newEinoTool(t Tool, gate Gate, reviewer ToolReviewer, questionGate QuestionGate) *einoInvokableTool {
 	return &einoInvokableTool{
-		tool:     t,
-		gate:     gate,
-		reviewer: reviewer,
+		tool:         t,
+		gate:         gate,
+		reviewer:     reviewer,
+		questionGate: questionGate,
 		info: &schema.ToolInfo{
 			Name: t.Name(),
 			Desc: t.Description(),
@@ -429,6 +431,15 @@ func (e *einoInvokableTool) InvokableRun(ctx context.Context, argumentsInJSON st
 		if err := saveBarrierCheckpoint(ctx, CheckpointPhaseToolPending); err != nil {
 			return "", fmt.Errorf("runtime: save checkpoint before tool %q: %w", e.tool.Name(), err)
 		}
+	}
+	// FP-16: an ask_user call may block for an interactive answer inside this
+	// turn through the configured QuestionGate. A timeout falls through to the
+	// tool (pending) path below.
+	if result, handled, qerr := e.askUserQuestion(ctx, args); handled {
+		if qerr != nil {
+			return e.toolFailure(ctx, "", "", qerr)
+		}
+		return result, nil
 	}
 	text, err := e.tool.Invoke(ctx, args)
 	if err != nil {

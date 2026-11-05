@@ -180,10 +180,9 @@ func TestRunAutomationTaskRecordsFailure(t *testing.T) {
 	if run.SessionID == "" {
 		t.Error("failed run did not record the session it created")
 	}
-	// Binding must not leak the persisted default: the created session reads
-	// back the task's read-only permission.
-	raw, err := st.GetSetting(session.SessionPermissionKey(run.SessionID))
-	if err != nil || raw != session.PermissionAsk {
-		t.Fatalf("session permission = %q, %v; want %q", raw, err, session.PermissionAsk)
+	// Run-now rollback (P3): the empty session is deleted again, so a failed
+	// fired task leaves no empty conversation behind.
+	if _, serr := st.GetSession(run.SessionID); serr == nil {
+		t.Fatalf("failed automation left empty session %s behind", run.SessionID)
 	}
 }

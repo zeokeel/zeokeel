@@ -46,7 +46,7 @@ const (
 	questionPending = "pending"
 )
 
-const askUserDescription = `Ask the user a clarifying question and stop the turn.
+const askUserDescription = `Ask the user a clarifying question and wait for the answer.
 
 Call it with a JSON object:
   {"question":"Which database should I target?","options":["sqlite","postgres"],"context":"The schema differs."}
@@ -54,11 +54,20 @@ Call it with a JSON object:
 "question" is required. "options" is an optional list of suggested answers.
 "context" is optional background that helps the user answer.
 
-The tool returns a JSON document {"kind":"question","question":...,
-"status":"pending"} immediately. The live session shows the question as a card
-with a text input; the user's answer becomes the next user turn, so the
-conversation resumes with their reply. Do not guess an answer after calling
-this tool: wait for the user.`
+How the answer arrives depends on the session:
+
+- Interactive sessions block this tool call until the user answers (or the
+  question times out / the turn is cancelled). The result is a JSON document
+  {"kind":"question","question":...,"status":"answered","answer":"..."} and the
+  conversation continues in the SAME turn with that answer: use it directly,
+  and do not ask the same question again.
+- Sessions without an interactive question channel (headless/ACP runs and
+  delegated subagents) return {"kind":"question","question":...,
+  "status":"pending"} immediately; the user's answer then arrives as the next
+  user message and this turn ends without it. In that case wait for the user.
+- A timed-out question degrades to the pending result above.
+
+Do not invent an answer when the result is pending.`
 
 // AskUserTool asks the user a question. It keeps an in-memory record of the
 // questions this agent instance asked (guarded by mu) so tests and future

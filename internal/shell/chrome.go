@@ -258,7 +258,7 @@ func (a *App) railWorkspaceMenu(c *ui.Context, t *design.Tokens, ws store.Worksp
 				desc := a.sessionWhen(session.UpdatedAt)
 				a.popoverMenuRow(c, t, session.Title, desc, false, nil, func() {
 					*open = false
-					a.openSession(session.ID)
+					a.openSessionAsync(c, session.ID)
 				})
 			}
 		}

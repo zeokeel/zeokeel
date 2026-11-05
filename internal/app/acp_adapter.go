@@ -154,14 +154,14 @@ func (a *acpAdapter) Prompt(ctx context.Context, req acp.PromptRequest, updates 
 		return acp.PromptResponse{}, err
 	}
 
-	stopReason := "end_turn"
+	stopReason := acp.StopReasonEndTurn
 	for {
 		select {
 		case <-ctx.Done():
 			// The client went away (or the server cancelled): stop the turn so it
 			// does not keep burning tokens, and settle as cancelled.
 			_ = a.rt.Cancel(context.Background(), sessionID)
-			return acp.PromptResponse{StopReason: "cancelled"}, nil
+			return acp.PromptResponse{StopReason: acp.StopReasonCancelled}, nil
 		case ev, ok := <-events:
 			if !ok {
 				return acp.PromptResponse{StopReason: stopReason}, nil
@@ -171,7 +171,7 @@ func (a *acpAdapter) Prompt(ctx context.Context, req acp.PromptRequest, updates 
 				if err := updates(acp.SessionUpdateNotification{
 					SessionID: sessionID,
 					Update: acp.SessionUpdate{
-						SessionUpdate: "agent_message_chunk",
+						SessionUpdate: acp.UpdateAgentMessageChunk,
 						Content:       &acp.ContentBlock{Type: "text", Text: e.Text},
 					},
 				}); err != nil {
@@ -181,7 +181,7 @@ func (a *acpAdapter) Prompt(ctx context.Context, req acp.PromptRequest, updates 
 				if err := updates(acp.SessionUpdateNotification{
 					SessionID: sessionID,
 					Update: acp.SessionUpdate{
-						SessionUpdate: "agent_thought_chunk",
+						SessionUpdate: acp.UpdateAgentThoughtChunk,
 						Content:       &acp.ContentBlock{Type: "text", Text: e.Text},
 					},
 				}); err != nil {
@@ -191,7 +191,7 @@ func (a *acpAdapter) Prompt(ctx context.Context, req acp.PromptRequest, updates 
 				if err := updates(acp.SessionUpdateNotification{
 					SessionID: sessionID,
 					Update: acp.SessionUpdate{
-						SessionUpdate: "tool_call",
+						SessionUpdate: acp.UpdateToolCall,
 						ToolCallID:    e.CallID,
 						Title:         e.Name,
 						Status:        "pending",
@@ -208,7 +208,7 @@ func (a *acpAdapter) Prompt(ctx context.Context, req acp.PromptRequest, updates 
 				if err := updates(acp.SessionUpdateNotification{
 					SessionID: sessionID,
 					Update: acp.SessionUpdate{
-						SessionUpdate: "tool_call_update",
+						SessionUpdate: acp.UpdateToolCallUpdate,
 						ToolCallID:    e.CallID,
 						Status:        status,
 					},
@@ -216,10 +216,15 @@ func (a *acpAdapter) Prompt(ctx context.Context, req acp.PromptRequest, updates 
 					return acp.PromptResponse{}, err
 				}
 			case state.Usage:
+				// Minimum-surface mapping: the ACP v1 usage_update is a context
+				// gauge ({used,size}); this adapter exposes the ZeoKeel turn
+				// counters (input/output/total) instead and documents that
+				// divergence in internal/acp/doc.go. Do not read it as an ACP
+				// context-window gauge.
 				if err := updates(acp.SessionUpdateNotification{
 					SessionID: sessionID,
 					Update: acp.SessionUpdate{
-						SessionUpdate: "usage_update",
+						SessionUpdate: acp.UpdateUsage,
 						Usage: &acp.Usage{
 							InputTokens:  e.In,
 							OutputTokens: e.Out,
@@ -292,13 +297,13 @@ func promptText(blocks []acp.ContentBlock) (string, error) {
 // stopReasonFor maps a ZeoKeel terminal turn state to an ACP stopReason.
 func stopReasonFor(reason state.StatusReason, phase state.Phase) string {
 	if phase == state.PhaseFailed || reason == state.ReasonFailed {
-		return "refusal"
+		return acp.StopReasonRefusal
 	}
 	switch reason {
 	case state.ReasonStopped, state.ReasonInterrupted:
-		return "cancelled"
+		return acp.StopReasonCancelled
 	default:
-		return "end_turn"
+		return acp.StopReasonEndTurn
 	}
 }
 

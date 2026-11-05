@@ -340,3 +340,69 @@ func TestPersonaPromptInjected(t *testing.T) {
 		t.Errorf("standard PersonaSections = %v, want none", sectionIDs(got))
 	}
 }
+
+// TestBuiltinOverrideInheritsMissingFields pins the documented override rule
+// (verifier-core P3): a user file that overrides a built-in may omit fields the
+// built-in already provides — name, description, prompt and persona are
+// inherited, validation runs on the merged preset, and the override wins for
+// the fields it does declare.
+func TestBuiltinOverrideInheritsMissingFields(t *testing.T) {
+	dataDir := t.TempDir()
+	// Smallest useful override: only the tool allowlist. No name/description.
+	writePresetFile(t, dataDir, "minimal.json", `{
+		"id": "minimal", "tools": ["read_file", "bash"]
+	}`)
+	// Persona-only override of the creator preset: name/prompt are inherited.
+	writePresetFile(t, dataDir, "creator.json", `{
+		"id": "creator", "persona": "You are a documentation editor."
+	}`)
+
+	reg := mustLoad(t, presets.Options{UserDir: dataDir, KnownTools: knownTools})
+
+	builtinByID := make(map[string]presets.Preset)
+	for _, b := range presets.Builtins() {
+		builtinByID[b.ID] = b
+	}
+
+	minimal, ok := reg.Get(presets.BuiltinMinimalID)
+	if !ok {
+		t.Fatalf("Get(minimal) failed after override")
+	}
+	if want := builtinByID[presets.BuiltinMinimalID]; minimal.Name != want.Name || minimal.Description != want.Description {
+		t.Errorf("minimal override lost inherited fields: name=%q description=%q, want %q / %q",
+			minimal.Name, minimal.Description, want.Name, want.Description)
+	}
+	if !reflect.DeepEqual(minimal.Tools, []string{"read_file", "bash"}) {
+		t.Errorf("minimal override Tools = %v, want the override's allowlist", minimal.Tools)
+	}
+
+	creator, ok := reg.Get(presets.BuiltinCreatorID)
+	if !ok {
+		t.Fatalf("Get(creator) failed after override")
+	}
+	builtinCreator := builtinByID[presets.BuiltinCreatorID]
+	if creator.Name != builtinCreator.Name {
+		t.Errorf("creator override Name = %q, want inherited %q", creator.Name, builtinCreator.Name)
+	}
+	if creator.Prompt != builtinCreator.Prompt {
+		t.Errorf("creator override lost the inherited built-in prompt")
+	}
+	if creator.Persona != "You are a documentation editor." {
+		t.Errorf("creator override Persona = %q, want the override's persona", creator.Persona)
+	}
+
+	// An override with an unknown tool still fails closed against the merged
+	// preset's allowlist (the error names the file).
+	badDir := t.TempDir()
+	writePresetFile(t, badDir, "minimal.json", `{"id": "minimal", "tools": ["does_not_exist"]}`)
+	if _, err := presets.Load(presets.Options{UserDir: badDir, KnownTools: knownTools}); !errors.Is(err, presets.ErrUnknownTool) {
+		t.Errorf("Load override with unknown tool error = %v, want ErrUnknownTool", err)
+	}
+
+	// A new user preset still needs its own name (nothing to inherit).
+	noNameDir := t.TempDir()
+	writePresetFile(t, noNameDir, "fresh.json", `{"id": "fresh", "tools": ["read_file"]}`)
+	if _, err := presets.Load(presets.Options{UserDir: noNameDir, KnownTools: knownTools}); !errors.Is(err, presets.ErrInvalidPreset) {
+		t.Errorf("Load new preset without name error = %v, want ErrInvalidPreset", err)
+	}
+}

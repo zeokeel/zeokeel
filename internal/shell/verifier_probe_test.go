@@ -468,7 +468,7 @@ func TestVerifierAgentPresetDefaultApplies(t *testing.T) {
 		t.Fatalf("open Agent presets: %v", err)
 	}
 	tt.Frame()
-	if err := tt.Click("Set default Minimal mode"); err != nil {
+	if err := tt.Click("Set default Minimal"); err != nil {
 		t.Fatalf("set Minimal default: %v", err)
 	}
 	tt.Frame()
