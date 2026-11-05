@@ -8,6 +8,7 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	goruntime "runtime"
 	"strings"
 	"sync"
 	"syscall"
@@ -749,17 +750,33 @@ func (s *terminalSession) renderDelta(start int64, wait string) string {
 	return b.String()
 }
 
-const terminalOpenDescription = `Create a persistent terminal session backed by a long-lived shell.
+// terminalOpenDescriptionFor describes terminal_open for goos. Unix runs under
+// a PTY with a pipe fallback, so the description can promise pty=true. Windows
+// (terminal_other.go) always uses stdio pipes and the platform shell, so it
+// must describe pty=false and never a login "sh".
+func terminalOpenDescriptionFor(goos string) string {
+	if strings.EqualFold(strings.TrimSpace(goos), "windows") {
+		return `Create a persistent terminal session backed by a long-lived shell.
+
+On Windows the session runs without a PTY (pty=false in the output) over stdio pipes with the platform shell: PowerShell 7 ("pwsh") when it is installed on PATH, otherwise %COMSPEC% (usually cmd.exe). Typed input is interpreted by that shell, so use its syntax and native Windows paths. Each session keeps its working directory and environment across calls. A terminal is confined to the workspace root. Close sessions with terminal_close when they are no longer needed.
+
+Args JSON schema:
+{"type":"object","properties":{"cwd":{"type":"string","description":"Optional workspace-relative initial working directory. Defaults to the workspace root."}},"additionalProperties":false}`
+	}
+	return `Create a persistent terminal session backed by a long-lived shell.
 
 On Unix the shell runs under a real pseudoterminal (pty=true in the output), so typed input is echoed and line editing and job control work. If the environment cannot allocate a PTY, the session falls back to stdio pipes (pty=false) without failing. Each session keeps its working directory and environment across calls. A terminal is confined to the workspace root. The shell is a login shell ("sh -l" on Unix) rather than "sh -lc <command>", because a -c process exits after one command and cannot persist state. Close sessions with terminal_close when they are no longer needed.
 
 Args JSON schema:
 {"type":"object","properties":{"cwd":{"type":"string","description":"Optional workspace-relative initial working directory. Defaults to the workspace root."}},"additionalProperties":false}`
+}
 
 type terminalOpenTool struct{ mgr *terminalManager }
 
-func (t *terminalOpenTool) Name() string        { return "terminal_open" }
-func (t *terminalOpenTool) Description() string { return terminalOpenDescription }
+func (t *terminalOpenTool) Name() string { return "terminal_open" }
+func (t *terminalOpenTool) Description() string {
+	return terminalOpenDescriptionFor(goruntime.GOOS)
+}
 
 func (t *terminalOpenTool) Invoke(_ context.Context, args json.RawMessage) (string, error) {
 	var a struct {

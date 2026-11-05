@@ -328,24 +328,35 @@ func (a *App) rightNewTabButton(c *ui.Context, t *design.Tokens) {
 }
 
 // rightNewTabMenu lists the tabs a new tab can open: the Start guide page,
-// Files, a shell-backed Terminal and the read-only Session Log.
+// Files, a shell-backed Terminal and the read-only Session Log. The rows and
+// the panel come from the shared popover helpers, clamped to the right panel.
 func (a *App) rightNewTabMenu(c *ui.Context, t *design.Tokens) {
 	closeMenu := func() { a.shellUI().rightNewTabOpen = false }
-	a.moreMenuItem(c, t, icons.Sparkles(), a.tr("Start page", "开始页"), func() {
-		closeMenu()
-		a.rightTab = startTab
-	})
-	a.moreMenuItem(c, t, icons.Folder(), a.T("files.workspace_files"), func() {
-		closeMenu()
-		a.newRightTab(c)
-	})
-	a.moreMenuItem(c, t, icons.Terminal(), a.T("files.new_terminal"), func() {
-		closeMenu()
-		a.rightTab = terminalTab
-	})
-	a.moreMenuItem(c, t, icons.SessionLog(), a.tr("Session log", "会话日志"), func() {
-		closeMenu()
-		a.rightTab = sessionLogTab
+	a.popoverMenuPanelIn(c, t, a.rightSidebarPanelWidth(c), func() {
+		a.popoverMenuActionRow(c, t, a.tr("Start page", "开始页"), func() {
+			ui.Image(c, icons.Sparkles()).Size(16, 16).TextColor(t.LabelPrimary)
+		}, func() {
+			closeMenu()
+			a.rightTab = startTab
+		})
+		a.popoverMenuActionRow(c, t, a.T("files.workspace_files"), func() {
+			ui.Image(c, icons.Folder()).Size(16, 16).TextColor(t.LabelPrimary)
+		}, func() {
+			closeMenu()
+			a.newRightTab(c)
+		})
+		a.popoverMenuActionRow(c, t, a.T("files.new_terminal"), func() {
+			ui.Image(c, icons.Terminal()).Size(16, 16).TextColor(t.LabelPrimary)
+		}, func() {
+			closeMenu()
+			a.rightTab = terminalTab
+		})
+		a.popoverMenuActionRow(c, t, a.tr("Session log", "会话日志"), func() {
+			ui.Image(c, icons.SessionLog()).Size(16, 16).TextColor(t.LabelPrimary)
+		}, func() {
+			closeMenu()
+			a.rightTab = sessionLogTab
+		})
 	})
 }
 
@@ -580,20 +591,13 @@ func (a *App) hiddenBreadcrumbSegments(c *ui.Context, t *design.Tokens, all, hid
 	ell.Expanded(st.breadcrumbOpen)
 	ell.OnClick(func() { st.breadcrumbOpen = !st.breadcrumbOpen })
 	ui.Popover(c, ell, &st.breadcrumbOpen, func() {
-		ui.Column(c).Width(th.Space(50)).Gap(th.Space(0.5)).Children(func() {
+		a.popoverMenuPanelIn(c, t, a.rightSidebarPanelWidth(c), func() {
 			for i, segment := range hidden {
 				prefix := strings.Join(all[:i+1], "/")
 				name := segment
-				row := ui.ButtonBase(c).Height(th.Space(7)).PaddingX(th.Space(2)).
-					Radius(design.RadiusXS).Label(name)
-				if row.Hovered() {
-					row = row.Background(t.BgHover)
-				}
-				row.Children(func() {
-					ui.Text(c, name).FontSize(th.FontSize - 2).FixedLineHeight(th.Space(4.5)).
-						TextColor(t.LabelPrimary).MaxLines(1).Ellipsis("…")
-				})
-				row.OnClick(func() {
+				// The entries keep their plain button role; only the surface
+				// and the row look are the shared menu ones.
+				a.popoverMenuRoleRow(c, t, name, ui.RoleButton, nil, func() {
 					a.filesDir = prefix
 					a.filePath = ""
 					a.fileErr = ""

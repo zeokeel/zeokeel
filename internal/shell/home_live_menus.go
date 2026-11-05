@@ -191,7 +191,8 @@ func (a *App) livePermissionChip(c *ui.Context, t *design.Tokens) {
 
 // permissionMenu lists the access modes, marking the session's effective one.
 // Auto review EXP carries a one-line description because its behavior is not
-// obvious from the label alone.
+// obvious from the label alone. The rows and the panel come from the shared
+// popover menu helpers, so the menu matches the composer's other popovers.
 func (a *App) permissionMenu(c *ui.Context, t *design.Tokens) {
 	mode := a.composerPermissionMode()
 	options := []struct {
@@ -205,13 +206,11 @@ func (a *App) permissionMenu(c *ui.Context, t *design.Tokens) {
 		{a.T("settings.full_access"), "", session.PermissionFull, mode == session.PermissionFull},
 		{a.autoReviewLabel(), a.autoReviewDescription(), session.PermissionAutoReview, mode == session.PermissionAutoReview},
 	}
-	for _, option := range options {
-		value := option.value
-		label := option.label
-		desc := option.desc
-		ui.Column(c).Gap(1).Children(func() {
-			item := liveMenuItem(c, t, label, option.active)
-			item.OnClick(func() {
+	a.popoverMenuPanel(c, t, func() {
+		for _, option := range options {
+			option := option
+			value := option.value
+			a.popoverMenuRow(c, t, option.label, option.desc, option.active, nil, func() {
 				a.liveMenus().permissionOpen = false
 				if a.Ctrl == nil {
 					return
@@ -226,13 +225,8 @@ func (a *App) permissionMenu(c *ui.Context, t *design.Tokens) {
 				// setting is the future-session default and is not saved here.
 				a.Ctrl.SetSessionPermission(a.Ctrl.CurrentSessionID(), value)
 			})
-			if desc != "" {
-				ui.Text(c, desc).FontSize(11).FixedLineHeight(16).
-					TextColor(t.LabelTertiary).MaxLines(2).
-					Padding(0, design.Space2, 0, design.Space2)
-			}
-		})
-	}
+		}
+	})
 }
 
 // liveModelMenuBadge is the composer's model selector. It shows the selected
@@ -273,146 +267,103 @@ func (a *App) liveModelMenuBadge(c *ui.Context, t *design.Tokens) {
 }
 
 // modelPickerMenu lists every configured model and makes a click its default.
+// The rows and the panel come from the shared popover menu helpers, so the
+// list matches the other composer menus.
 func (a *App) modelPickerMenu(c *ui.Context, t *design.Tokens) {
 	if a.Ctrl == nil {
 		return
 	}
-	th := t.Theme()
 	models, err := a.Ctrl.Models().List()
-	if err != nil {
-		ui.Text(c, a.T("models.could_not_load_models")).FontSize(12).
-			FixedLineHeight(18).TextColor(t.Danger)
-		return
-	}
-	if len(models) == 0 {
-		ui.Text(c, a.T("models.no_models_configured")).FontSize(12).
-			FixedLineHeight(18).TextColor(t.LabelTertiary)
-		return
-	}
-	currentID := a.composerModelID()
-	for _, model := range models {
-		model := model
-		selected := model.ID == currentID
-		row := ui.Row(c).Height(th.Space(9)).PaddingX(th.Space(2)).Gap(th.Space(2)).
-			Radius(design.RadiusSM).AlignItems(ui.Center).Width(th.Space(60)).
-			Label(modelDisplayName(model)).Role(ui.RoleMenuItemRadio).
-			Checked(selected).Focusable()
-		if row.Hovered() {
-			row = row.Background(t.BgHover)
+	a.popoverMenuPanel(c, t, func() {
+		if err != nil {
+			ui.Text(c, a.T("models.could_not_load_models")).FontSize(12).
+				FixedLineHeight(18).TextColor(t.Danger).
+				Padding(design.Space1, design.Space2)
+			return
 		}
-		row.Children(func() {
-			ui.Column(c).Grow(1).Gap(1).Children(func() {
-				ui.Text(c, modelDisplayName(model)).FontSize(13).FixedLineHeight(18).
-					TextColor(t.LabelPrimary).MaxLines(1).Ellipsis("…")
-				ui.Text(c, modelDetail(model)).FontSize(11).FixedLineHeight(15).
-					TextColor(t.LabelTertiary).MaxLines(1).Ellipsis("…")
-			})
-			if selected {
-				ui.Text(c, "✓").FontSize(12).TextColor(t.Accent)
-			}
-		})
-		row.OnClick(func() {
-			a.liveMenus().modelOpen = false
-			if a.Ctrl == nil {
-				return
-			}
-			if a.backgroundScreen() == Home {
-				// Stage for the next created session; the global default in
-				// Settings > Models is not changed from the composer.
-				a.homeModel = model.ID
-				return
-			}
-			if id := a.Ctrl.CurrentSessionID(); id != "" {
-				if err := a.Ctrl.SetSessionModel(id, model.ID); err != nil {
-					c.Toast(a.T("models.could_not_select_model"))
+		if len(models) == 0 {
+			ui.Text(c, a.T("models.no_models_configured")).FontSize(12).
+				FixedLineHeight(18).TextColor(t.LabelTertiary).
+				Padding(design.Space1, design.Space2)
+			return
+		}
+		currentID := a.composerModelID()
+		for _, model := range models {
+			model := model
+			selected := model.ID == currentID
+			a.popoverMenuRow(c, t, modelDisplayName(model), modelDetail(model), selected, nil, func() {
+				a.liveMenus().modelOpen = false
+				if a.Ctrl == nil {
+					return
 				}
-			}
-		})
-	}
+				if a.backgroundScreen() == Home {
+					// Stage for the next created session; the global default in
+					// Settings > Models is not changed from the composer.
+					a.homeModel = model.ID
+					return
+				}
+				if id := a.Ctrl.CurrentSessionID(); id != "" {
+					if err := a.Ctrl.SetSessionModel(id, model.ID); err != nil {
+						c.Toast(a.T("models.could_not_select_model"))
+					}
+				}
+			})
+		}
+	})
 }
 
 // homeWorkspacePicker lists the known workspaces and switches to the clicked
-// one. It is only built while the chip's popover is open.
+// one. It is only built while the chip's popover is open. The rows and the
+// panel come from the shared popover menu helpers.
 func (a *App) homeWorkspacePicker(c *ui.Context, t *design.Tokens) {
 	if a.Ctrl == nil {
 		return
 	}
-	th := t.Theme()
 	ctx := context.Background()
 	workspaces, err := a.Ctrl.ListWorkspaces(ctx)
-	if err != nil {
-		ui.Text(c, a.T("workspace.could_not_load_workspaces")).FontSize(12).
-			FixedLineHeight(18).TextColor(t.Danger)
-		return
-	}
-	if len(workspaces) == 0 {
-		ui.Text(c, a.T("workspace.add_workspace")).FontSize(12).
-			FixedLineHeight(18).TextColor(t.LabelTertiary)
-		return
-	}
-	current := a.Ctrl.CurrentWorkspaceID()
-	for _, ws := range workspaces {
-		ws := ws
-		row := ui.Row(c).Height(th.Space(9)).PaddingX(th.Space(2)).Gap(th.Space(2)).
-			Radius(design.RadiusSM).AlignItems(ui.Center).Width(th.Space(65)).
-			Label(a.menuText("Switch to "+ws.Name, "切换到 "+ws.Name)).
-			Role(ui.RoleMenuItemRadio).Checked(ws.ID == current).Focusable()
-		if row.Hovered() {
-			row = row.Background(t.BgHover)
+	a.popoverMenuPanel(c, t, func() {
+		if err != nil {
+			ui.Text(c, a.T("workspace.could_not_load_workspaces")).FontSize(12).
+				FixedLineHeight(18).TextColor(t.Danger).
+				Padding(design.Space1, design.Space2)
+			return
 		}
-		row.Children(func() {
-			ui.Image(c, homeIconFolder).Size(th.Space(4), th.Space(4)).TextColor(t.LabelSecondary)
-			ui.Column(c).Grow(1).Gap(1).Children(func() {
-				ui.Text(c, ws.Name).FontSize(13).FixedLineHeight(18).
-					TextColor(t.LabelPrimary).MaxLines(1).Ellipsis("…")
-				ui.Text(c, ws.Root).FontSize(11).FixedLineHeight(15).
-					TextColor(t.LabelTertiary).MaxLines(1).Ellipsis("…")
-			})
-			if ws.ID == current {
-				ui.Text(c, "✓").FontSize(12).TextColor(t.Accent)
-			}
-		})
-		row.OnClick(func() {
+		if len(workspaces) == 0 {
+			ui.Text(c, a.T("workspace.add_workspace")).FontSize(12).
+				FixedLineHeight(18).TextColor(t.LabelTertiary).
+				Padding(design.Space1, design.Space2)
+			return
+		}
+		current := a.Ctrl.CurrentWorkspaceID()
+		for _, ws := range workspaces {
+			ws := ws
+			a.popoverMenuRow(c, t,
+				a.menuText("Switch to "+ws.Name, "切换到 "+ws.Name), ws.Root,
+				ws.ID == current,
+				func() {
+					ui.Image(c, homeIconFolder).Size(16, 16).TextColor(t.LabelSecondary)
+				},
+				func() {
+					a.wsPickerOpen = false
+					a.switchWorkspaceFromHome(c, ws.ID)
+				})
+		}
+		// The picker ends with an add action; without it this chip offered no
+		// way to add a workspace once one already existed.
+		a.popoverMenuActionRow(c, t, a.T("workspace.add_workspace_ellipsis"), func() {
+			ui.Icon(c, homeIconPlus).Size(16, 16).TextColor(t.LabelSecondary)
+		}, func() {
 			a.wsPickerOpen = false
-			a.switchWorkspaceFromHome(c, ws.ID)
+			a.beginAddWorkspace()
 		})
-	}
-	// The picker ends with an add action; without it this chip offered no way
-	// to add a workspace once one already existed.
-	add := ui.Row(c).Height(th.Space(9)).PaddingX(th.Space(2)).Gap(th.Space(2)).
-		Radius(design.RadiusSM).AlignItems(ui.Center).Width(th.Space(65)).
-		Label(a.T("workspace.add_workspace_ellipsis")).
-		Role(ui.RoleMenuItem).Focusable()
-	if add.Hovered() {
-		add = add.Background(t.BgHover)
-	}
-	add.Children(func() {
-		ui.Icon(c, homeIconPlus).Size(th.Space(4), th.Space(4)).TextColor(t.LabelSecondary)
-		ui.Text(c, a.T("workspace.add_workspace_ellipsis")).FontSize(13).FixedLineHeight(18).
-			TextColor(t.LabelPrimary)
 	})
-	add.OnClick(func() {
-		a.wsPickerOpen = false
-		a.beginAddWorkspace()
-	})
-}
-
-// liveMenuItem is one row of a composer or header popover.
-func liveMenuItem(c *ui.Context, t *design.Tokens, label string, active bool) ui.Element {
-	th := t.Theme()
-	item := ui.Button(c, label).Height(th.Space(8)).PaddingX(th.Space(2)).
-		Radius(design.RadiusSM).TextColor(t.LabelPrimary)
-	if active {
-		item = item.Background(t.BgHover)
-	}
-	return item
 }
 
 // sessionHeaderMenu is DSH's session-header More actions popover: Fork
 // session, Download session log and Feedback. Session CRUD
 // (rename/archive/delete/copy title) lives on the sidebar row's context menu,
 // where DSH keeps it, so this menu no longer claims parity while showing a
-// different set.
+// different set. The rows and the panel come from the shared popover helpers.
 func (a *App) sessionHeaderMenu(c *ui.Context, t *design.Tokens) {
 	if a.Ctrl == nil {
 		return
@@ -423,20 +374,19 @@ func (a *App) sessionHeaderMenu(c *ui.Context, t *design.Tokens) {
 	}
 	closeMenu := func() { a.liveMenus().moreOpen = false }
 
-	fork := liveMenuItem(c, t, a.tr("Fork session", "创建分支会话"), false)
-	fork.OnClick(func() {
-		closeMenu()
-		a.forkSession(c, *sess)
-	})
-	download := liveMenuItem(c, t, a.tr("Download session log", "下载会话日志"), false)
-	download.OnClick(func() {
-		closeMenu()
-		a.downloadSessionLog(c, *sess)
-	})
-	feedback := liveMenuItem(c, t, a.tr("Feedback", "反馈"), false)
-	feedback.OnClick(func() {
-		closeMenu()
-		a.recordSessionFeedback(c, *sess)
+	a.popoverMenuPanel(c, t, func() {
+		a.popoverMenuActionRow(c, t, a.tr("Fork session", "创建分支会话"), nil, func() {
+			closeMenu()
+			a.forkSession(c, *sess)
+		})
+		a.popoverMenuActionRow(c, t, a.tr("Download session log", "下载会话日志"), nil, func() {
+			closeMenu()
+			a.downloadSessionLog(c, *sess)
+		})
+		a.popoverMenuActionRow(c, t, a.tr("Feedback", "反馈"), nil, func() {
+			closeMenu()
+			a.recordSessionFeedback(c, *sess)
+		})
 	})
 }
 

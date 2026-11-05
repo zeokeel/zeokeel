@@ -259,6 +259,15 @@ func (a *App) homeComposerCard(c *ui.Context, t *design.Tokens, width float32) {
 			a.T("session.composer_input"), a.T("home.composer_placeholder"),
 			a.composerTextKey(c, true), &a.composerRef).
 			MinHeight(th.Space(13))
+		// Keep the input focused the way the Session composer does. Opening a
+		// derived popup ("/" palette, "@" mention list) inserts it before this
+		// column, which changes the input's element id and used to drop the
+		// keyboard focus: the following Enter then never reached
+		// composerTextKey, so Home slash commands silently did nothing.
+		// AutoFocus only fires for an element that is new in the frame, so it
+		// restores the focus here without stealing it from a control the user
+		// intentionally focused elsewhere.
+		input.AutoFocus()
 		card = brandComposerFocus(card, input, t)
 		a.homeComposerToolbar(c, t)
 	})

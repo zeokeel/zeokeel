@@ -423,3 +423,30 @@ func TestTerminalPTYConcurrentClose(t *testing.T) {
 		t.Fatal("read after close should fail")
 	}
 }
+
+// TestTerminalOpenDescriptionFollowsPlatform covers the terminal description
+// fix: Windows always uses stdio pipes and the platform shell, so it must not
+// promise pty=true or a login "sh" the way the Unix description does.
+func TestTerminalOpenDescriptionFollowsPlatform(t *testing.T) {
+	unix := terminalOpenDescriptionFor("linux")
+	if !strings.Contains(unix, "pty=true") || !strings.Contains(unix, "sh -l") {
+		t.Fatalf("Unix terminal description lost its PTY/login-shell facts: %q", unix)
+	}
+	win := terminalOpenDescriptionFor("windows")
+	if !strings.Contains(win, "pty=false") {
+		t.Fatalf("Windows terminal description does not state pty=false: %q", win)
+	}
+	if strings.Contains(win, "sh -l") || strings.Contains(win, "pty=true") {
+		t.Fatalf("Windows terminal description promises a Unix PTY: %q", win)
+	}
+	for _, want := range []string{"cmd.exe", "pwsh", "Args JSON schema:"} {
+		if !strings.Contains(win, want) {
+			t.Fatalf("Windows terminal description missing %q: %q", want, win)
+		}
+	}
+	live := terminalOpenDescriptionFor(goruntime.GOOS)
+	if !strings.Contains(live, "Args JSON schema:") {
+		t.Fatalf("live terminal description missing its schema: %q", live)
+	}
+	assertSchema(t, &terminalOpenTool{})
+}

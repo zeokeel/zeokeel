@@ -145,7 +145,7 @@ func TestToolDescriptionsMatchSharedWorkingDirectory(t *testing.T) {
 	if got := state.Rel(); got != "src" {
 		t.Fatalf("state.Rel() = %q, want src", got)
 	}
-	builtins, err := Builtins(Config{WorkspaceRoot: root, AllowShell: true, DirState: state})
+	builtins, err := Builtins(Config{WorkspaceRoot: root, AllowShell: true, AllowBash: true, DirState: state})
 	if err != nil {
 		t.Fatalf("Builtins: %v", err)
 	}

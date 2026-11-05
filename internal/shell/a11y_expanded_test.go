@@ -12,12 +12,22 @@ import (
 // AccessStates bit), read from the tester's accessibility tree below.
 const accessExpandedState = 1 << 5
 
-// testerAccessStates returns label -> OR of every accessibility node's states
-// with that label in the tester's last frame. The Tester keeps its access tree
-// private, so the test reaches it through the same struct layout the ui
-// package uses; this is test-only introspection of the dependency, and the
-// build pins mygo v0.7.4.
-func testerAccessStates(t *testing.T, tt *ui.Tester) map[string]uint64 {
+// testerAccessNodeInfo is one node of the tester's accessibility tree, the
+// part of platform.AccessNode the shell tests assert on.
+type testerAccessNodeInfo struct {
+	Role   uint8
+	Label  string
+	Value  string
+	States uint64
+	// Parent is the index of the parent node in the slice, -1 at the top.
+	Parent int
+}
+
+// testerAccessNodes returns the tester's last accessibility tree. The Tester
+// keeps the tree private, so the test reaches it through the same struct
+// layout the ui package uses; this is test-only introspection of the
+// dependency, and the build pins mygo v0.7.4.
+func testerAccessNodes(t *testing.T, tt *ui.Tester) []testerAccessNodeInfo {
 	t.Helper()
 	// The headless Tester only describes frames for assistive technology
 	// after a platform.AccessibilityOn event, which it does not expose. Set
@@ -46,14 +56,31 @@ func testerAccessStates(t *testing.T, tt *ui.Tester) map[string]uint64 {
 	}
 	tree := reflect.NewAt(access.Type(), unsafe.Pointer(access.UnsafeAddr())).Elem().Elem()
 	nodes := tree.FieldByName("Nodes")
-	out := make(map[string]uint64, nodes.Len())
+	out := make([]testerAccessNodeInfo, nodes.Len())
 	for i := 0; i < nodes.Len(); i++ {
 		n := nodes.Index(i)
-		label := n.FieldByName("Label").String()
-		if label == "" {
+		out[i] = testerAccessNodeInfo{
+			Role:   uint8(n.FieldByName("Role").Uint()),
+			Label:  n.FieldByName("Label").String(),
+			Value:  n.FieldByName("Value").String(),
+			States: n.FieldByName("States").Uint(),
+			Parent: int(n.FieldByName("Parent").Int()),
+		}
+	}
+	return out
+}
+
+// testerAccessStates returns label -> OR of every accessibility node's states
+// with that label in the tester's last frame.
+func testerAccessStates(t *testing.T, tt *ui.Tester) map[string]uint64 {
+	t.Helper()
+	nodes := testerAccessNodes(t, tt)
+	out := make(map[string]uint64, len(nodes))
+	for _, n := range nodes {
+		if n.Label == "" {
 			continue
 		}
-		out[label] |= n.FieldByName("States").Uint()
+		out[n.Label] |= n.States
 	}
 	return out
 }

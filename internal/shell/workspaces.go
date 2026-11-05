@@ -182,11 +182,9 @@ func (a *App) sidebarWorkspacesHeader(c *ui.Context, t *design.Tokens) {
 		search.OnClick(func() { a.openInlineSearch() })
 		sliders := a.sidebarHeaderButton(c, t, icons.Sliders(), a.T("shell.view_options"))
 		sliders.OnClick(func() { a.viewOptionsOpen = !a.viewOptionsOpen })
-		ui.PopoverBase(c, sliders, &a.viewOptionsOpen, func(panel ui.Element) {
-			panel.Background(t.BgRaised).Border(1, t.BorderL2).Radius(th.Radius).
-				AttachTo(sliders, ui.AnchorBottomStart, ui.AnchorTopStart)
-			panel.Children(func() { a.viewOptionsPopover(c, t) })
-		})
+		// The View options menu is a plain Popover: its body paints the shared
+		// branded panel, clamped to the sidebar column.
+		ui.Popover(c, sliders, &a.viewOptionsOpen, func() { a.viewOptionsPopover(c, t) })
 		add := a.sidebarHeaderButton(c, t, icons.FolderPlus(), a.T("shell.add_workspace"))
 		add.OnClick(func() { a.beginAddWorkspace() })
 	})

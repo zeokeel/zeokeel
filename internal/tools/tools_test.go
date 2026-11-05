@@ -88,9 +88,9 @@ func TestBuiltinsAndRegister(t *testing.T) {
 		assertSchema(t, tool)
 	}
 
-	shell := testTools(t, Config{WorkspaceRoot: root, AllowShell: true})
+	shell := testTools(t, Config{WorkspaceRoot: root, AllowShell: true, AllowBash: true})
 	if _, ok := shell["bash"]; !ok {
-		t.Fatalf("bash missing when AllowShell is true: %v", namesOf(shell))
+		t.Fatalf("bash missing when AllowShell and AllowBash are true: %v", namesOf(shell))
 	}
 	assertSchema(t, shell["bash"])
 	if len(shell) != len(want)+1 {

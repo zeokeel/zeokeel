@@ -9,6 +9,7 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	goruntime "runtime"
 	"strconv"
 	"strings"
 	"sync"
@@ -495,10 +496,17 @@ func registerAllToolsWithOptions(st *store.Store, root string, get func(key, env
 	// timeout the tool description denies.
 	bashTimeout := time.Duration(settingInt(read, "plugin.shell.timeout_seconds", "", 120, 1, 300)) * time.Second
 
+	// The shell stacks are platform gated like DSH's composition: a POSIX
+	// build exposes bash, a Windows build exposes pwsh, never both. The prompt
+	// and the runtime prompt section read the same selection through the
+	// registered tool names.
+	allowBash, allowPwsh := shellStackFor(goruntime.GOOS)
+
 	reg := runtime.NewRegistry()
 	if err := tools.Register(reg, tools.Config{
 		WorkspaceRoot:        root,
 		AllowShell:           shellOn,
+		AllowBash:            allowBash,
 		ReadOnly:             readOnly,
 		DisableFileMutations: !shellOn,
 		MaxOutputBytes:       maxOutput,
@@ -571,7 +579,11 @@ func registerAllToolsWithOptions(st *store.Store, root string, get func(key, env
 		}
 		register(termMgr.Tools()...)
 		register(jobsMgr.Tools()...)
-		register(tools.NewPwshTool(tools.PwshConfig{WorkspaceRoot: root, MaxOutputBytes: maxOutput}))
+		// Windows exposes the pwsh tool instead of bash; POSIX builds keep the
+		// bash stack off so the model only ever sees the platform shell.
+		if allowPwsh {
+			register(tools.NewPwshTool(tools.PwshConfig{WorkspaceRoot: root, MaxOutputBytes: maxOutput}))
+		}
 		register(tools.NewStrReplaceEditorTool(tools.EditorConfig{WorkspaceRoot: root}))
 		register(tools.NewWorktreeTools(tools.WorktreeConfig{WorkspaceRoot: root})...)
 	}
@@ -883,10 +895,21 @@ func collaborationMode(st *store.Store) string {
 	return ""
 }
 
+// shellStackFor reports which model-facing shell tools a build exposes for
+// goos. The stacks are mutually exclusive, mirroring DSH's per-platform
+// composition: Windows gets pwsh only, every other platform gets bash only.
+// goos is a parameter so tests can pin both branches on one machine.
+func shellStackFor(goos string) (allowBash, allowPwsh bool) {
+	windows := strings.EqualFold(strings.TrimSpace(goos), "windows")
+	return !windows, windows
+}
+
 // registryHasMutationTools reports whether the registered set can modify
 // files or run commands. It mirrors the tool names registerAllTools gates on
 // the Shell plugin and Read Only mode, so the prompt's file policy comes from
-// the effective registry instead of the persisted permission alone.
+// the effective registry instead of the persisted permission alone. The shell
+// names include both stacks even though registerAllTools only mounts one per
+// platform: the function reads whatever the registry actually holds.
 func registryHasMutationTools(reg *runtime.Registry) bool {
 	if reg == nil {
 		return false
@@ -1000,6 +1023,7 @@ func composeInstructionForModesWithMemories(st *store.Store, root, cwd string, r
 	}
 	return prompt.Compose(prompt.Context{
 		WorkDir:        cwd,
+		Platform:       goruntime.GOOS + "/" + goruntime.GOARCH,
 		SandboxPolicy:  sandboxPolicy,
 		ApprovalPolicy: approvalPolicy,
 		Skills:         skillNames,

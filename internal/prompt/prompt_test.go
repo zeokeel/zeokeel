@@ -1,6 +1,7 @@
 package prompt
 
 import (
+	goruntime "runtime"
 	"strings"
 	"testing"
 	"time"
@@ -9,6 +10,7 @@ import (
 func allTools() []string {
 	return []string{
 		"bash",
+		"pwsh",
 		"read_file",
 		"write_file",
 		"edit_file",
@@ -56,6 +58,7 @@ func TestOrdering(t *testing.T) {
 		"You are ZeoKeel",
 		"Answer concisely and accurately",
 		`Current working directory: "/data/mygo".`,
+		"Runtime environment:",
 		"Current ZeoKeel file policy: workspace-write",
 		"Approval prompts are disabled",
 		"Instructions from: AGENTS.md",
@@ -64,6 +67,7 @@ func TestOrdering(t *testing.T) {
 		"Plan mode is active",
 		"Tokens prefixed with @",
 		"Check the [exit code: N]",
+		"On Windows a killed process settles",
 		"Use the read_file tool — not shell",
 		"Read an existing file before overwriting it with write_file, and prefer edit_file",
 		"Read a file before editing it with edit_file",
@@ -275,6 +279,7 @@ func TestLocaleSwitch(t *testing.T) {
 
 	for _, want := range []string{
 		"当前工作目录",
+		"运行环境：",
 		"当前 ZeoKeel 文件策略",
 		"本会话已禁用审批提示",
 		"以下工作区指令",
@@ -283,6 +288,7 @@ func TestLocaleSwitch(t *testing.T) {
 		"计划模式已启用",
 		"以 @ 为前缀",
 		"检查每个 bash 结果",
+		"在 Windows 上被强杀的进程以",
 		"使用 read_file 工具",
 		"使用 glob 工具",
 		"使用 grep 工具",
@@ -356,6 +362,25 @@ func TestToolGating(t *testing.T) {
 	}
 	if strings.Contains(bash, "Use the read_file tool") {
 		t.Fatal("read section appeared without a read tool")
+	}
+	if !strings.Contains(bash, "The shell tool is `bash`") {
+		t.Fatal("environment section did not name the bash shell")
+	}
+	if strings.Contains(bash, "On Windows a killed process settles") {
+		t.Fatal("pwsh section appeared without a pwsh tool")
+	}
+
+	pwshCtx := base
+	pwshCtx.Tools = []string{"pwsh"}
+	pwsh := Compose(pwshCtx)
+	if !strings.Contains(pwsh, "On Windows a killed process settles") {
+		t.Fatal("pwsh section missing when pwsh is registered")
+	}
+	if strings.Contains(pwsh, "Check the [exit code: N]") {
+		t.Fatal("bash section appeared without a bash tool")
+	}
+	if !strings.Contains(pwsh, "The shell tool is `pwsh`") {
+		t.Fatal("environment section did not name the pwsh shell")
 	}
 
 	readCtx := base
@@ -586,6 +611,8 @@ func TestEmptyAndNoToolsBehavior(t *testing.T) {
 	for _, want := range []string{
 		"You are ZeoKeel",
 		"Answer concisely and accurately",
+		"Runtime environment:",
+		"No shell tool is available",
 		"Current ZeoKeel file policy: read-only",
 		"Approval policy: ask",
 		"You are running inside ZeoKeel",
@@ -653,9 +680,9 @@ func TestAllSectionsNonEmptyInBothLocales(t *testing.T) {
 	if len(sections) != len(registry) {
 		t.Fatalf("Sections returned %d entries, registry has %d", len(sections), len(registry))
 	}
-	// docs/prompts.md maps every row; update both when adding a section.
-	if len(sections) != 41 {
-		t.Fatalf("registry has %d sections, docs/prompts.md documents 41", len(sections))
+	// docs/prompts.md maps every row; update this guard when adding a section.
+	if len(sections) != 43 {
+		t.Fatalf("registry has %d sections, want 43", len(sections))
 	}
 	seen := make(map[string]bool, len(sections))
 	lastOrder := -1 << 31
@@ -686,10 +713,11 @@ func TestAllSectionsNonEmptyInBothLocales(t *testing.T) {
 
 	for _, id := range []string{
 		"harness:identity", "deployment:persona-prefix", "working-directory:current",
+		"runtime:environment",
 		"sandbox:policy", "approval:policy", "subagent:delegation", "context:agents-md",
 		"context:skills-catalog", "context:time", "plan:policy", "team:policy",
 		"mode:ptc", "mode:minimal", "mode:creator",
-		"context:file-reference", "tool:bash", "tool:read", "tool:write", "tool:edit",
+		"context:file-reference", "tool:bash", "tool:pwsh", "tool:read", "tool:write", "tool:edit",
 		"tool:glob", "tool:grep", "tool:jobs", "tool:terminal", "tool:skill",
 		"tool:todo", "tool:ask-user", "tool:web-search", "tool:web-fetch",
 		"tool:session-query", "tool:goal", "tool:workflow", "tool:subagent",
@@ -734,4 +762,64 @@ func reverseStrings(in []string) []string {
 		out[len(in)-1-i] = in[i]
 	}
 	return out
+}
+
+// TestRuntimeEnvironmentSectionPlatforms covers the explicit operating-system
+// section: the injected Platform decides the OS/arch text, and the registered
+// shell tool decides the dialect guidance, so a Windows build never reads POSIX
+// advice and vice versa.
+func TestRuntimeEnvironmentSectionPlatforms(t *testing.T) {
+	win := Context{Language: "en", Platform: "windows/amd64", Tools: []string{"pwsh"}}
+	winOut := Compose(win)
+	for _, want := range []string{
+		"Runtime environment: windows/amd64",
+		"The shell tool is `pwsh`",
+		"pwsh -Command",
+		"native Windows paths",
+		"$env:NAME",
+		"Do not assume POSIX tools",
+	} {
+		if !strings.Contains(winOut, want) {
+			t.Fatalf("Windows environment missing %q:\n%s", want, winOut)
+		}
+	}
+	if strings.Contains(winOut, "The shell tool is `bash`") {
+		t.Fatalf("Windows environment advertised bash:\n%s", winOut)
+	}
+
+	winZH := win
+	winZH.Language = "zh"
+	winZHOut := Compose(winZH)
+	for _, want := range []string{"运行环境：windows/amd64", "shell 工具为 `pwsh`", "$env:NAME", "不要假定存在 POSIX 工具"} {
+		if !strings.Contains(winZHOut, want) {
+			t.Fatalf("Windows ZH environment missing %q:\n%s", want, winZHOut)
+		}
+	}
+
+	linux := Context{Language: "en", Platform: "linux/amd64", Tools: []string{"bash"}}
+	linuxOut := Compose(linux)
+	for _, want := range []string{
+		"Runtime environment: linux/amd64",
+		"The shell tool is `bash`",
+		"sh -c",
+		"POSIX paths",
+		"Do not assume PowerShell",
+	} {
+		if !strings.Contains(linuxOut, want) {
+			t.Fatalf("POSIX environment missing %q:\n%s", want, linuxOut)
+		}
+	}
+	if strings.Contains(linuxOut, "$env:NAME") {
+		t.Fatalf("POSIX environment advertised PowerShell variables:\n%s", linuxOut)
+	}
+
+	// An empty Platform falls back to the binary's real GOOS/GOARCH.
+	emptyOut := Compose(Context{Language: "en"})
+	wantPlatform := "Runtime environment: " + goruntime.GOOS + "/" + goruntime.GOARCH
+	if !strings.Contains(emptyOut, wantPlatform) {
+		t.Fatalf("empty Platform did not fall back to %q:\n%s", wantPlatform, emptyOut)
+	}
+	if !strings.Contains(emptyOut, "No shell tool is available") {
+		t.Fatalf("tool-less environment did not say no shell is available:\n%s", emptyOut)
+	}
 }

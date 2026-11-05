@@ -441,14 +441,14 @@ func boolString(v bool) string {
 	return "false"
 }
 
-// viewOptionsPopover is DSH's 268px sidebar popover with its three groups:
-// Group by, Order by and Filter sessions.
+// viewOptionsPopover is the sidebar's View options menu with its three groups:
+// Group by, Order by and Filter sessions. It uses the shared branded popover
+// panel, clamped to the sidebar column, and the shared checkable menu rows; the
+// group headings stay the small tertiary labels the popover always had.
 func (a *App) viewOptionsPopover(c *ui.Context, t *design.Tokens) {
-	th := t.Theme()
 	group := normalizeGroupBy(a.groupBy)
 	archive := normalizeArchiveFilter(a.archiveFilter)
-	ui.Column(c).Width(th.Space(67)).Padding(th.Space(2)).
-		Gap(th.Space(0.5)).Children(func() {
+	a.popoverMenuPanelIn(c, t, sidebarW, func() {
 		a.viewOptionGroup(c, t, a.T("search.group_by"))
 		a.viewOptionItem(c, t, a.T("search.workspace"), group == groupByWorkspace, func() {
 			a.groupBy = groupByWorkspace
@@ -494,27 +494,12 @@ func (a *App) viewOptionGroup(c *ui.Context, t *design.Tokens, label string) {
 		TextColor(t.LabelTertiary).Padding(th.Space(1), th.Space(2), 0, th.Space(2))
 }
 
-// viewOptionItem is one checkable row of the view options popover. It closes
-// the popover on every choice, as DSH does, and is a named, focusable menu
-// item so sort and archive filtering are reachable from the keyboard.
+// viewOptionItem is one checkable row of the view options popover: the shared
+// branded check row (RoleMenuItemCheckBox, Focusable, Checked). It closes the
+// popover on every choice, as DSH does, so sort and archive filtering stay one
+// click away.
 func (a *App) viewOptionItem(c *ui.Context, t *design.Tokens, label string, selected bool, choose func()) {
-	th := t.Theme()
-	row := ui.ButtonBase(c).Height(th.Space(7)).PaddingX(th.Space(2)).
-		Gap(th.Space(2)).Radius(design.RadiusSM).AlignItems(ui.Center).
-		Justify(ui.Start).Label(label).Role(ui.RoleMenuItemCheckBox).
-		Checked(selected).Focusable()
-	if selected || row.Hovered() {
-		row = row.Background(t.BgHover)
-	}
-	row.Children(func() {
-		mark := ""
-		if selected {
-			mark = "✓"
-		}
-		ui.Text(c, mark).FontSize(12).TextColor(t.Accent).Width(th.Space(3))
-		ui.Text(c, label).FontSize(13).FixedLineHeight(20).TextColor(t.LabelPrimary)
-	})
-	row.OnClick(func() {
+	a.popoverMenuCheckRow(c, t, label, selected, func() {
 		a.viewOptionsOpen = false
 		if choose != nil {
 			choose()

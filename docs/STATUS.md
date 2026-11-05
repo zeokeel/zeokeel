@@ -22,7 +22,15 @@
 - **决策（[ADR 0008](decisions/0008-plan-mode-soft-alignment.md)）**：对齐 DSH。删除 `internal/runtime/plan_mode.go` 与 runtime 侧 PlanModeFunc/模型适配/PTC/子代理的全部工具拦截接线；`internal/app/services.go` 不再向 runtime 传 `PlanModeFunc`（prompt 的 `PlanMode` 注入保留）。plan 模式 = `plan:policy` 软引导 + `present` "Plan" + shell 计划审阅卡（Approve/Exit 不变）；需要强制只读规划时用户同时选 composer「只读」权限。
 - **入口**：`/plan` 开启、`/plan off` 关闭、`/plan <message>` 开启并把消息作为下一请求提交（无 session 时提示先开会话；slash 行不进模型）；composer 计划徽章仅在激活时显示（accent「✦ 计划/Plan」chip，点击=退出，a11y RoleButton/Focusable，窄 composer 只留图标）；`/help` 与命令面板同步。
 - **验证**：gofmt/vet/build 干净；`go test ./... -count=1` 19 包全绿；新增 `/plan` 命令与徽章测试 4 个 + `/help`/命令识别测试，计划审阅卡 Approve/Exit 测试不回退；`ZEOKEEL_VISUAL=1` PASS（徽章仅激活态，预览 fixture 未变）。
-- **遗留（ADR 0008 §4）**：独立 `exit_plan_mode` 工具、审阅卡 Keep planning（带反馈）分支、pending 态徽章、Home 草稿会话的 `/plan`；Home composer 打开 `/` 面板后丢键盘焦点是既有缺陷（未在本轮修）。
+- **遗留（ADR 0008 §4）**：独立 `exit_plan_mode` 工具、审阅卡 Keep planning（带反馈）分支、pending 态徽章、Home 草稿会话的 `/plan`（Home `/` 面板丢焦点已在本轮后续修复，见下）。
+
+## 2026-11-05 平台感知 + 弹层统一（ALL GREEN）
+
+- **问题**：用户反馈「agent 没办法知道自己是什么操作系统，在 Win 上执行 Linux 命令」+「权限下拉弹层没有样式，统一设计语言」+ Home composer 打开 `/` 面板丢焦点。
+- **平台感知（[ADR 0009](decisions/0009-platform-shell-stacks.md)）**：审计 DSH 后按其方案落地——DSH 不写 OS 提示段，而是按平台门控 shell 栈（Windows 只 pwsh、POSIX 只 bash，`dsh-base` 组合层）+ 工具描述即方言 + per-tool 提示段（`tool:bash` 1000 / `tool:pwsh` 1010）。ZeoKeel 等价实现：`tools.Config.AllowBash` + `app.shellStackFor(goos)` 按平台注册（Windows 不再注册 bash、POSIX 不再注册 pwsh）；`internal/prompt` 新增 `runtime:environment` 段（Order 105，OS/arch + shell 调用方式/语法/路径/环境变量风格，中英）与 `tool:pwsh` 段，`Context.Platform` 由 app 注入；bash/pwsh/terminal 描述与缺 PowerShell 错误按平台方言化；Windows 终端默认 shell 优先探测 pwsh。
+- **弹层统一**：mygo `ui.Popover` 只负责定位/关闭/焦点圈定、不带面板样式（原 permission 菜单是裸 `ui.Button` 列表）。新增 `internal/shell/popover_menus.go`（品牌 Panel + 菜单行 + 选中 ✓ + 复选/动作/指定角色行，宽度 260–320 并 clamp 到所在列）；统一 composer 权限/模型/工作区/附件/`/` 命令面板、会话头 agent mode/More actions、侧栏账户 More/View options、右栏 New tab/Choose shell/Files 面包屑；Settings select 弹层与工作区 hover 卡有意跳过（自有视觉/非菜单）。详见 [native-ui.md §19.4](design/native-ui.md)。
+- **Home composer 焦点缺陷**：`homeLiveComposer` 把 `/`/@ 面板插在 composer 列之前 → 元素 id 变化、旧焦点悬空；`homeComposerCard` 补 `input.AutoFocus()`（与 Session composer 对齐、不抢用户手动聚焦），Enter 恢复正常执行命令；Home 预览重生成显示聚焦边框。
+- **验证**：gofmt/vet/build 干净；`go test ./... -count=1` 19 包全绿；`GOOS=windows GOARCH=amd64 go build/vet ./...` 通过；`check-nocgo` 四目标 PASS；`ZEOKEEL_VISUAL=1` 视觉回归 PASS；`docs/prompts.md` 段目录同步（41→43，新增 `runtime:environment`/`tool:pwsh` 与 `Context.Platform`）。遗留：Windows 运行期真机验证、POSIX 不再暴露 pwsh、Git Bash/WSL 未集成（见 [known-limitations](design/known-limitations.md) §1/§5）；plan 模式 ADR 0008 §4 事项仍待排期。
 
 ## 2026-11-05 v1.1 收尾（追加，ALL GREEN）
 

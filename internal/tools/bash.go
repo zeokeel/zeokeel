@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	goruntime "runtime"
 	"strings"
 	"sync"
 	"time"
@@ -19,15 +20,29 @@ const (
 	maxBashTimeout     = 300 * time.Second
 )
 
-// bashDescription documents the tool. The default is filled in by
+// bashDescriptionTemplate documents the tool. The default is filled in by
 // bashTool.Description so the prose always matches the configured
-// plugin.shell.timeout_seconds value (clamped to maxBashTimeout).
-const bashDescription = `Run a shell command inside the workspace and return its combined stdout and stderr.
+// plugin.shell.timeout_seconds value (clamped to maxBashTimeout) and the
+// platform-specific shell invocation described by bashShellDescription.
+const bashDescriptionTemplate = `Run a shell command inside the workspace and return its combined stdout and stderr.
 
-The command runs as "sh -c <command>" in the current working directory (the workspace root by default; the working_directory tool can change it). ZEOKEEL_* and DEEPSEEK* environment variables are removed. The timeout defaults to %d seconds and is capped at %d seconds; on timeout the whole process group is killed. Output beyond the configured limit is truncated. A non-zero exit appends an [exit code: N] marker to the result (the tool also returns an error).
+The command runs as %s in the current working directory (the workspace root by default; the working_directory tool can change it). ZEOKEEL_* and DEEPSEEK* environment variables are removed. The timeout defaults to %d seconds and is capped at %d seconds; on timeout the whole process group is killed. Output beyond the configured limit is truncated. A non-zero exit appends an [exit code: N] marker to the result (the tool also returns an error).
 
 Args JSON schema:
 {"type":"object","properties":{"command":{"type":"string","description":"Shell command to execute."},"timeout_seconds":{"type":"integer","description":"Optional timeout in seconds (default %d, maximum %d).","minimum":1,"maximum":%d}},"required":["command"],"additionalProperties":false}`
+
+// bashShellDescription describes the interpreter this tool invokes on goos.
+// POSIX builds run commands through "sh -c". Windows has no sh by default and
+// the standard Windows build does not expose this tool at all (it exposes the
+// pwsh tool instead); a custom Windows build that enables bash still routes the
+// command through cmd.exe /C, so the description must never promise a POSIX
+// shell there.
+func bashShellDescription(goos string) string {
+	if strings.EqualFold(strings.TrimSpace(goos), "windows") {
+		return `cmd.exe /C <command> (Windows has no sh by default; the standard Windows build exposes the pwsh tool instead of bash, so do not rely on POSIX shell syntax here)`
+	}
+	return "sh -c <command>"
+}
 
 type bashTool struct {
 	root      string
@@ -89,7 +104,7 @@ func (t *bashTool) Name() string { return "bash" }
 func (t *bashTool) Description() string {
 	def := int(t.defaultTimeout() / time.Second)
 	maxSeconds := int(maxBashTimeout / time.Second)
-	return fmt.Sprintf(bashDescription, def, maxSeconds, def, maxSeconds, maxSeconds)
+	return fmt.Sprintf(bashDescriptionTemplate, bashShellDescription(goruntime.GOOS), def, maxSeconds, def, maxSeconds, maxSeconds)
 }
 
 func (t *bashTool) Invoke(ctx context.Context, args json.RawMessage) (string, error) {

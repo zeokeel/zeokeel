@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	goruntime "runtime"
 	"strings"
 	"testing"
 
@@ -73,6 +74,25 @@ func TestProductionToolsInvocable(t *testing.T) {
 	if len(list) < 40 {
 		t.Fatalf("registry has %d tools, want >= 40", len(list))
 	}
+	// The host build must expose exactly one shell stack (acceptance for the
+	// platform gating): bash on POSIX, pwsh on Windows.
+	hasBash, hasPwsh := false, false
+	for _, tl := range list {
+		switch tl.Name() {
+		case "bash":
+			hasBash = true
+		case "pwsh":
+			hasPwsh = true
+		}
+	}
+	if goruntime.GOOS == "windows" {
+		if hasBash || !hasPwsh {
+			t.Fatalf("Windows registry shell tools = bash:%v pwsh:%v, want bash:false pwsh:true", hasBash, hasPwsh)
+		}
+	} else if !hasBash || hasPwsh {
+		t.Fatalf("%s registry shell tools = bash:%v pwsh:%v, want bash:true pwsh:false", goruntime.GOOS, hasBash, hasPwsh)
+	}
+
 	ctx := context.Background()
 	invoke := func(name string, args any) (string, error) {
 		for _, tl := range list {
@@ -115,6 +135,12 @@ func TestProductionToolsInvocable(t *testing.T) {
 		"wait_team":            map[string]any{},
 		"list_teams":           map[string]any{},
 		"ask_user":             map[string]any{"question": "continue?"},
+	}
+	// The model-facing shell stack is platform gated: Windows registers pwsh
+	// instead of bash, so only the build's own shell tool can be invoked here.
+	if goruntime.GOOS == "windows" {
+		delete(must, "bash")
+		must["pwsh"] = map[string]any{"command": "Write-Output hi"}
 	}
 	for name, args := range must {
 		out, err := invoke(name, args)
@@ -199,7 +225,6 @@ func TestProductionToolsInvocable(t *testing.T) {
 		"workflow":             "runner",
 		"ralph":                "runner",
 		"spawn_team":           "runner",
-		"pwsh":                 "pwsh",
 		"web_fetch":            "web_fetch",
 		"team_status":          "target",
 		"send_message":         "target",
@@ -208,6 +233,11 @@ func TestProductionToolsInvocable(t *testing.T) {
 		"session_event_search": "session",
 		"session_event_read":   "session",
 		"session_event_trace":  "session",
+	}
+	// pwsh only exists on Windows builds, where a missing installation is the
+	// expected external-state error; on POSIX the tool is not registered.
+	if goruntime.GOOS != "windows" {
+		delete(expectedErrors, "pwsh")
 	}
 	for name, want := range expectedErrors {
 		out, err := invoke(name, map[string]any{"task": "x", "objective": "x", "command": "echo hi", "url": "http://127.0.0.1:1/", "steps": []string{"x"}, "tasks": []string{"x"}, "target": "missing", "message": "hi", "query": "x", "session_id": "missing"})

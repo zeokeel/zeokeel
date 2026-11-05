@@ -45,6 +45,17 @@ var registry = []registration{
 	},
 	{
 		section: Section{
+			ID:    "runtime:environment",
+			Order: OrderRuntimeEnvironment,
+			EN:    "Runtime environment: unavailable.",
+			ZH:    "运行环境：不可用。",
+			Dynamic: func(c Context) string {
+				return runtimeEnvironmentText(c)
+			},
+		},
+	},
+	{
+		section: Section{
 			ID:    "sandbox:policy",
 			Order: OrderSandboxPolicy,
 			EN:    "Current ZeoKeel file policy: read-only. Available file operations cannot modify files in the standing mode. Do not refuse a required modification from this policy alone: try an available tool normally and follow any denial and escalation guidance it returns.",
@@ -221,6 +232,15 @@ var registry = []registration{
 			ZH:    "检查每个 bash 结果上的 [exit code: N] 标记；在继续之前调查失败原因。",
 		},
 		tools: []string{"bash"},
+	},
+	{
+		section: Section{
+			ID:    "tool:pwsh",
+			Order: OrderToolPwsh,
+			EN:    "Non-zero exits are reported as `[exit code: N]` markers; investigate failures before moving on. On Windows a killed process settles as `[exit code: 1]` without a signal marker; treat a bare exit 1 after an interruption as a termination, not a command failure.",
+			ZH:    "非零退出以 `[exit code: N]` 标记报告；在继续之前调查失败原因。在 Windows 上被强杀的进程以 `[exit code: 1]` 结算且没有信号标记；中断后出现的裸 exit 1 应视为终止，而不是命令失败。",
+		},
+		tools: []string{"pwsh"},
 	},
 	{
 		section: Section{
@@ -460,8 +480,8 @@ var registry = []registration{
 		section: Section{
 			ID:    "harness:note",
 			Order: OrderHarnessNote,
-			EN:    "You are running inside ZeoKeel, a native desktop agent harness. The harness passes this composed instruction at the start of every turn. Treat the runtime context sections in this prompt as the authoritative facts for the current session: the workspace root, working directory, file policy, approval policy, time, and available skills. Tool results are authoritative over earlier assumptions.",
-			ZH:    "你运行在 ZeoKeel 之中，这是一个原生桌面 Agent harness。harness 在每一轮开始时传入这段组合指令。请将本提示中的运行时上下文部分视为当前会话的权威事实：工作区根目录、工作目录、文件策略、审批策略、时间和可用技能。工具结果优先于先前的假设。",
+			EN:    "You are running inside ZeoKeel, a native desktop agent harness. The harness passes this composed instruction at the start of every turn. Treat the runtime context sections in this prompt as the authoritative facts for the current session: the runtime environment (operating system, architecture and shell dialect), the workspace root, working directory, file policy, approval policy, time, and available skills. Tool results are authoritative over earlier assumptions.",
+			ZH:    "你运行在 ZeoKeel 之中，这是一个原生桌面 Agent harness。harness 在每一轮开始时传入这段组合指令。请将本提示中的运行时上下文部分视为当前会话的权威事实：运行环境（操作系统、架构与 shell 方言）、工作区根目录、工作目录、文件策略、审批策略、时间和可用技能。工具结果优先于先前的假设。",
 		},
 	},
 	{
@@ -516,6 +536,45 @@ func creatorModePolicy(c Context) string {
 	return localized(c,
 		"Creator mode is active. You can customize ZeoKeel through conversation: change whitelisted settings with settings_get and settings_set. In this session, skill writing is unavailable under the current policy: the file write tools are not available, so you cannot create <root>/skills/<name>/SKILL.md. Prefer small, reviewable changes, explain what you changed, and never expose credentials: the settings whitelist rejects secret names.",
 		"创造模式已启用。你可以通过对话定制 ZeoKeel：使用 settings_get 和 settings_set 修改白名单内的设置。当前策略下无法写入技能：文件写入工具不可用，因此在本会话中无法创建 <root>/skills/<name>/SKILL.md。优先进行小而可审查的改动，说明你改了什么，并且绝不暴露凭据：设置白名单会拒绝机密名称。")
+}
+
+// runtimeEnvironmentText states the operating system, architecture and the
+// shell dialect the current tool set exposes. DSH encodes the platform only in
+// its per-platform tool composition; ZeoKeel states it explicitly so the model
+// never has to infer the build it runs in. The section is always on: when no
+// shell tool is visible it says so instead of advertising an interpreter the
+// session cannot call.
+func runtimeEnvironmentText(c Context) string {
+	platform := platformLabel(c)
+	tools := toolSet(c.Tools)
+	_, hasBash := tools["bash"]
+	_, hasPwsh := tools["pwsh"]
+
+	switch {
+	case hasBash && hasPwsh:
+		// The platform-gated stacks expose at most one shell; describe the
+		// platform-preferred one and note that the other is also registered.
+		if platformOS(c) == "windows" {
+			return localized(c,
+				fmt.Sprintf("Runtime environment: %s. The shell tool is `pwsh`, which runs commands through `pwsh -Command`; use PowerShell syntax, native Windows paths (`C:\\...`), and `$env:NAME` for environment variables. Do not assume POSIX tools or /bin/sh. A `bash` tool is also registered; prefer this shell for Windows commands.", platform),
+				fmt.Sprintf("运行环境：%s。shell 工具为 `pwsh`，通过 `pwsh -Command` 执行命令；请使用 PowerShell 语法、原生 Windows 路径（`C:\\...`），环境变量使用 `$env:NAME`。不要假定存在 POSIX 工具或 /bin/sh。同时注册了 `bash` 工具；Windows 命令请优先使用本节所述 shell。", platform))
+		}
+		return localized(c,
+			fmt.Sprintf("Runtime environment: %s. The shell tool is `bash`, which runs commands through `sh -c`; use POSIX shell syntax, POSIX paths (`/...`), and `$NAME` for environment variables. Do not assume PowerShell or cmd.exe. A `pwsh` tool is also registered; prefer this shell for POSIX commands.", platform),
+			fmt.Sprintf("运行环境：%s。shell 工具为 `bash`，通过 `sh -c` 执行命令；请使用 POSIX shell 语法、POSIX 路径（`/...`），环境变量使用 `$NAME`。不要假定存在 PowerShell 或 cmd.exe。同时注册了 `pwsh` 工具；POSIX 命令请优先使用本节所述 shell。", platform))
+	case hasPwsh:
+		return localized(c,
+			fmt.Sprintf("Runtime environment: %s. The shell tool is `pwsh`, which runs commands through `pwsh -Command`; use PowerShell syntax, native Windows paths (`C:\\...`), and `$env:NAME` for environment variables. Do not assume POSIX tools or /bin/sh.", platform),
+			fmt.Sprintf("运行环境：%s。shell 工具为 `pwsh`，通过 `pwsh -Command` 执行命令；请使用 PowerShell 语法、原生 Windows 路径（`C:\\...`），环境变量使用 `$env:NAME`。不要假定存在 POSIX 工具或 /bin/sh。", platform))
+	case hasBash:
+		return localized(c,
+			fmt.Sprintf("Runtime environment: %s. The shell tool is `bash`, which runs commands through `sh -c`; use POSIX shell syntax, POSIX paths (`/...`), and `$NAME` for environment variables. Do not assume PowerShell or cmd.exe.", platform),
+			fmt.Sprintf("运行环境：%s。shell 工具为 `bash`，通过 `sh -c` 执行命令；请使用 POSIX shell 语法、POSIX 路径（`/...`），环境变量使用 `$NAME`。不要假定存在 PowerShell 或 cmd.exe。", platform))
+	default:
+		return localized(c,
+			fmt.Sprintf("Runtime environment: %s. No shell tool is available in this session, so do not attempt to run shell commands.", platform),
+			fmt.Sprintf("运行环境：%s。本会话没有可用的 shell 工具，因此不要尝试执行 shell 命令。", platform))
+	}
 }
 
 // sandboxPolicyText renders the DSH sandbox-policy context for c.

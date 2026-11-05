@@ -6,8 +6,9 @@
 // single deterministic string suitable for runtime.Config.Instruction.
 //
 // Sections are rendered in ascending Order. Static sections use their EN or ZH
-// text, while dynamic sections (working directory, policies, AGENTS.md, skills,
-// time, and a few tool hints) derive their text from the Context. Tool sections
+// text, while dynamic sections (working directory, runtime environment,
+// policies, AGENTS.md, skills, time, and a few tool hints) derive their text
+// from the Context. Tool sections
 // are included only when at least one of their gated tools is present, which
 // mirrors DSH's per-plugin registrations without requiring a service registry.
 //
@@ -17,6 +18,7 @@ package prompt
 
 import (
 	"fmt"
+	"runtime"
 	"sort"
 	"strings"
 	"time"
@@ -35,6 +37,12 @@ const (
 
 	// OrderWorkingDirectory matches DSH CONTEXT_ORDERS.WORKING_DIRECTORY.
 	OrderWorkingDirectory = 100
+	// OrderRuntimeEnvironment is the explicit operating-system/shell section.
+	// DSH has no such section: it encodes the platform in the gated tool set and
+	// tool descriptions. ZeoKeel states it explicitly so the model never has to
+	// infer the operating system, sitting between the working directory and the
+	// file policy in the runtime-context range.
+	OrderRuntimeEnvironment = 105
 	// OrderSandboxPolicy matches DSH CONTEXT_ORDERS.SANDBOX_POLICY.
 	OrderSandboxPolicy = 110
 	// OrderApprovalPolicy matches DSH CONTEXT_ORDERS.APPROVAL_POLICY.
@@ -71,6 +79,8 @@ const (
 
 	// OrderToolBash matches DSH TOOL_BASH (1000).
 	OrderToolBash = 1000
+	// OrderToolPwsh matches DSH TOOL_PWSH (1010).
+	OrderToolPwsh = 1010
 	// OrderToolRead matches DSH TOOL_READ (1100).
 	OrderToolRead = 1100
 	// OrderToolWrite matches DSH TOOL_WRITE (1200).
@@ -132,6 +142,10 @@ type Context struct {
 	// WorkDir is the session's current working directory. Empty omits the
 	// working-directory section.
 	WorkDir string
+	// Platform is the runtime GOOS/GOARCH pair (for example "windows/amd64").
+	// Empty uses the compiling process's runtime.GOOS/runtime.GOARCH, so the
+	// environment section always reports the build's real platform.
+	Platform string
 	// SandboxPolicy is "read-only", "workspace-write", or "danger-full-access".
 	// Empty (or an unknown value) uses read-only, the DSH deployment default.
 	SandboxPolicy string
@@ -260,6 +274,25 @@ func normalizeLanguage(language string) string {
 
 // isZH reports whether c selects Chinese.
 func isZH(c Context) bool { return normalizeLanguage(c.Language) == "zh" }
+
+// platformLabel returns the runtime platform for c, falling back to the
+// compiling process's GOOS/GOARCH so an empty Context still reports a real
+// platform instead of omitting the fact.
+func platformLabel(c Context) string {
+	if platform := strings.TrimSpace(c.Platform); platform != "" {
+		return platform
+	}
+	return runtime.GOOS + "/" + runtime.GOARCH
+}
+
+// platformOS returns the lower-case GOOS part of the platform label.
+func platformOS(c Context) string {
+	platform := platformLabel(c)
+	if i := strings.IndexByte(platform, '/'); i > 0 {
+		return strings.ToLower(platform[:i])
+	}
+	return strings.ToLower(platform)
+}
 
 // lowerTrim normalizes a policy or mode value.
 func lowerTrim(value string) string { return strings.ToLower(strings.TrimSpace(value)) }

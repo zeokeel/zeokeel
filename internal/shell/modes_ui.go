@@ -139,7 +139,9 @@ func (a *App) setAgentMode(mode string) {
 }
 
 // agentModeMenu is the picker's popover body. Selecting an entry closes the
-// popover and applies the mode; the selected entry is highlighted.
+// popover and applies the mode; the selected entry is highlighted. The rows
+// and the panel come from the shared popover menu helpers, so the picker
+// matches the composer's other menus.
 func (a *App) agentModeMenu(c *ui.Context, t *design.Tokens, open *bool) {
 	current := a.currentAgentMode()
 	if a.backgroundScreen() == Home {
@@ -147,29 +149,14 @@ func (a *App) agentModeMenu(c *ui.Context, t *design.Tokens, open *bool) {
 		// the last-opened session's mode.
 		current = a.homeAgentMode()
 	}
-	ui.Column(c).Width(320).Gap(2).Children(func() {
+	a.popoverMenuPanel(c, t, func() {
 		for _, option := range agentModeOptions() {
 			option := option
-			label := a.agentModeLabel(option.Mode)
-			row := ui.Row(c).Padding(design.Space2, design.Space2).Gap(design.Space2).
-				Radius(design.RadiusSM).AlignItems(ui.Center).
-				Label(label).Role(ui.RoleMenuItemRadio).
-				Checked(option.Mode == current).Focusable()
-			if option.Mode == current || row.Hovered() {
-				row = row.Background(t.BgHover)
-			}
-			row.Children(func() {
-				ui.Column(c).Gap(2).Children(func() {
-					ui.Text(c, a.agentModeLabel(option.Mode)).FontSize(12).FixedLineHeight(16).
-						TextColor(t.LabelPrimary)
-					ui.Text(c, a.agentModeHint(option.Mode)).FontSize(10).FixedLineHeight(14).
-						TextColor(t.LabelTertiary).MaxLines(4)
+			a.popoverMenuRow(c, t, a.agentModeLabel(option.Mode), a.agentModeHint(option.Mode),
+				option.Mode == current, nil, func() {
+					*open = false
+					a.setAgentMode(option.Mode)
 				})
-			})
-			row.OnClick(func() {
-				*open = false
-				a.setAgentMode(option.Mode)
-			})
 		}
 	})
 }

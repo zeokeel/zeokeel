@@ -24,9 +24,15 @@ type Config struct {
 	// required and must exist (a symlink to a directory is resolved).
 	WorkspaceRoot string
 
-	// AllowShell enables the shell tool group: bash plus the write_file and
-	// edit_file mutations. Disabled by default.
+	// AllowShell enables the shell tool group: the platform shell tool plus the
+	// write_file and edit_file mutations. Disabled by default.
 	AllowShell bool
+
+	// AllowBash selects the POSIX bash tool. The shell stacks are platform
+	// gated like DSH's composition: POSIX builds set AllowBash (and expose
+	// bash), Windows builds leave it false and register the pwsh tool instead.
+	// It never controls write_file/edit_file, which stay tied to AllowShell.
+	AllowBash bool
 
 	// ReadOnly omits every mutating tool (write_file, edit_file, bash) so an
 	// explicit Read Only permission mode cannot modify the workspace.
@@ -53,8 +59,9 @@ type Config struct {
 }
 
 // Builtins returns the configured tool set. It returns an error when the
-// workspace root is missing or unusable. The bash tool is omitted when
-// cfg.AllowShell is false.
+// workspace root is missing or unusable. The bash tool is omitted unless
+// cfg.AllowShell and cfg.AllowBash are both true; the app sets AllowBash from
+// the platform so Windows never advertises a POSIX shell it does not have.
 func Builtins(cfg Config) ([]runtime.Tool, error) {
 	sb, err := newSandbox(cfg.WorkspaceRoot)
 	if err != nil {
@@ -77,7 +84,7 @@ func Builtins(cfg Config) ([]runtime.Tool, error) {
 	if mutatingFiles {
 		builtins = append(builtins, &writeFileTool{sb: sb}, &editFileTool{sb: sb})
 	}
-	if cfg.AllowShell && mutatingFiles {
+	if cfg.AllowShell && cfg.AllowBash && mutatingFiles {
 		builtins = append(builtins, newBashTool(sb.root, maxOutput).withTimeout(cfg.BashTimeout).withCwd(sb.cwd))
 	}
 	builtins = append(builtins, newWebFetchTool(maxOutput, false))

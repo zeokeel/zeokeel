@@ -9,7 +9,7 @@
 |---|---|---|---|
 | 流式对话 + 多轮历史 | 有 | 有（SSE、SQLite history、e2e 真实模型通过） | ✅ |
 | 工具循环（ReAct） | 有 | 有（eino ADK，真实模型工具调用 e2e 通过） | ✅ |
-| 工具集 | 约 37 个（fs/bash/terminal/jobs/pwsh/web/todo/goal/schedule/skill/subagent/subagent-control/workflow/ralph/present/ask_user/session-query/worktree/inspect/report/MCP…） | 约 35 个，覆盖除 LSP/computer-use 外全部；PTC 以 pipeline 批处理工具实现，Creator 设置工具已接入 | ⚠️ 基本齐 |
+| 工具集 | 约 37 个（fs/bash/terminal/jobs/pwsh/web/todo/goal/schedule/skill/subagent/subagent-control/workflow/ralph/present/ask_user/session-query/worktree/inspect/report/MCP…） | 约 35 个，覆盖除 LSP/computer-use 外全部；PTC 以 pipeline 批处理工具实现，Creator 设置工具已接入；shell 栈按平台门控（Windows `pwsh` / POSIX `bash`，对齐 DSH，见 [ADR 0009](decisions/0009-platform-shell-stacks.md)） | ⚠️ 基本齐 |
 | 审批/权限 | Full/Workspace/Read-only/Ask/Auto-review EXP | Full/Workspace/Read-only/Ask + Always allow；Auto-review 缺失 | ⚠️ |
 | 上下文压缩 | 自动压缩 + 工具结果裁剪 + LLM 摘要 | `LLMCompactor`（真实模型摘要 + 20s 摘要超时后回退 `WindowCompactor` + 旧工具结果裁剪），ContextBudget 24000，app 已接线；压缩在回合 goroutine 内执行，不阻塞 UI/Submit | ✅ 已接线 |
 | 崩溃恢复/checkpoint | checkpoint + 断点续跑 | `CheckpointStore` 已接 app 的 SQLite checkpoints 表：每成功回合写入（压缩后 prior + 本回合消息），独立冷启动可恢复；生产以 History 为准，checkpoint 作为镜像 | ✅ 已接线（回合边界） |

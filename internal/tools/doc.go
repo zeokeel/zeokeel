@@ -3,8 +3,10 @@
 // Every tool is a pure-Go implementation of runtime.Tool. File-system tools
 // are confined to a single workspace root: absolute paths, ".." components and
 // symlinks that resolve outside the root are rejected. The optional shell tool
-// is disabled unless Config.AllowShell is set, and web_fetch refuses to talk to
-// loopback, private, link-local or otherwise non-public addresses.
+// is disabled unless Config.AllowShell is set, and the platform-gated bash/pwsh
+// stacks only expose one shell per build (Config.AllowBash selects bash).
+// web_fetch refuses to talk to loopback, private, link-local or otherwise
+// non-public addresses.
 //
 // Builtins assembles the tool set and Register installs it into a
 // runtime.Registry:

@@ -14,6 +14,7 @@ those facts and passes them in a `prompt.Context`.
 ```go
 type Context struct {
     WorkDir        string   // session working directory; "" omits the section
+    Platform       string   // runtime GOOS/GOARCH, e.g. "windows/amd64"; "" falls back to the build
     SandboxPolicy  string   // read-only | workspace-write | danger-full-access
     ApprovalPolicy string   // ask | never
     Skills         []string // skill names; rendered sorted and deduplicated
@@ -45,7 +46,10 @@ func Sections() []Section // ordered snapshot for inspection/tests
   renderer omits them;
 - the caller is responsible for passing the mode's *effective* tool names
   (`runtime.ModeTools(agentMode, registered)`), so the prompt and the model's
-  actual tool set cannot contradict each other;
+  actual tool set cannot contradict each other; the shell stacks are platform
+  gated by the app (Windows exposes `pwsh` only, POSIX `bash` only), so
+  `tool:bash` / `tool:pwsh` and `runtime:environment` always describe the shell
+  the build actually has;
 - dynamic sections render their text from `Context`; they return `""` to omit
   themselves (empty working directory, empty AGENTS.md, empty skills, zero
   time, etc.);
@@ -60,6 +64,7 @@ Typical wiring (the parent owns this change):
 ```go
 instruction := prompt.Compose(prompt.Context{
     WorkDir:        cwd,
+    Platform:       runtime.GOOS + "/" + runtime.GOARCH,
     SandboxPolicy:  sandbox,
     ApprovalPolicy: approval,
     Skills:         skillNames,
@@ -88,6 +93,7 @@ before the plan policy. Every row below ships EN and ZH text.
 | `harness:identity` | `HARNESS_IDENTITY` −1000 | −1000 | always | EN + ZH |
 | `deployment:persona-prefix` | `DEPLOYMENT_PERSONA_PREFIX` 0 | 0 | always | EN + ZH |
 | `working-directory:current` | `CONTEXT_ORDERS.WORKING_DIRECTORY` 100 | 100 | `WorkDir` non-empty | EN + ZH |
+| `runtime:environment` | extension (DSH encodes the platform only in its per-platform tool composition) | 105 | always | EN + ZH |
 | `sandbox:policy` | `CONTEXT_ORDERS.SANDBOX_POLICY` 110 | 110 | always (empty → read-only) | EN + ZH |
 | `approval:policy` | `CONTEXT_ORDERS.APPROVAL_POLICY` 115 | 115 | always (empty → ask) | EN + ZH |
 | `subagent:delegation` | `CONTEXT_ORDERS.SUBAGENT_DELEGATION` 120 | 120 | `Mode` = subagent/delegated/child | EN + ZH |
@@ -102,6 +108,7 @@ before the plan policy. Every row below ships EN and ZH text.
 | `mode:creator` | extension | 820 | `AgentMode` (or `Mode`) = creator/creator-mode/creator_mode/cordis | EN + ZH |
 | `context:file-reference` | `FILE_REFERENCE` 900 | 900 | `read` or `read_file` | EN + ZH |
 | `tool:bash` | `TOOL_BASH` 1000 | 1000 | `bash` | EN + ZH |
+| `tool:pwsh` | `TOOL_PWSH` 1010 | 1010 | `pwsh` | EN + ZH |
 | `tool:read` | `TOOL_READ` 1100 | 1100 | `read` or `read_file` | EN + ZH |
 | `tool:write` | `TOOL_WRITE` 1200 | 1200 | `write` or `write_file` | EN + ZH |
 | `tool:edit` | `TOOL_EDIT` 1300 | 1300 | `edit` or `edit_file` | EN + ZH |
@@ -199,8 +206,6 @@ starts with `mcp`.
 
 Skipped DSH sections:
 
-- `TOOL_PWSH` (1010) — ZeoKeel has no PowerShell tool; `tool:bash` is the only
-  shell surface.
 - `TOOL_LSP` (2200) — no language-server integration exists to describe.
 - `TOOLS_SDK` (5000) — no programmatic tool-calling SDK. `PTC_ONLY` (800) is
   implemented as `mode:ptc`: ZeoKeel's PTC is a pipeline-style batch tool, not

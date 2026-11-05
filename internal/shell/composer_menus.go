@@ -174,12 +174,14 @@ func (a *App) commandPalette(c *ui.Context, t *design.Tokens) {
 		ui.Text(c, a.T("composer.commands")).FontSize(11).FixedLineHeight(16).
 			TextColor(t.LabelTertiary)
 		for _, command := range slashCommands {
-			item := ui.Button(c, command.name).Height(30).PaddingX(design.Space2).
-				Radius(design.RadiusSM).TextColor(t.LabelPrimary)
-			item.Tooltip(a.tr(command.en, command.zh))
-			if item.Clicked() {
+			command := command
+			// The rows use the shared branded menu row, the same one the
+			// composer's popovers use, so the palette is not a stack of
+			// default buttons inside the panel.
+			row := a.popoverMenuActionRow(c, t, command.name, nil, func() {
 				a.runSlashCommand(command.name)
-			}
+			})
+			row.Tooltip(a.tr(command.en, command.zh))
 		}
 		ui.Text(c, a.tr("Unknown commands are sent to the model as text.",
 			"未知命令会作为普通文本发送给模型。")).
@@ -643,12 +645,10 @@ func (a *App) attachmentMenu(c *ui.Context, t *design.Tokens) {
 			{a.T("composer.commands"), func() { a.insertComposerToken(c, "/") }},
 		} {
 			item := item
-			button := ui.Button(c, item.label).Height(30).PaddingX(design.Space2).
-				Radius(design.RadiusSM).TextColor(t.LabelPrimary)
-			if button.Clicked() {
+			a.popoverMenuActionRow(c, t, item.label, nil, func() {
 				a.attachOpen = false
 				item.run()
-			}
+			})
 		}
 	})
 }

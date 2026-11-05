@@ -540,6 +540,18 @@ Tree "Sidebar"
 
 验收：`go test -run 'TestAutomation|TestMemory|TestDelete|TestDanger' ./internal/shell` 绿；gofmt/vet/build 绿；全包 `go test ./internal/shell` 绿（快照）。预览 PNG 由 Lead 统一重生成，本轮不提交截图。
 
+### 19.4 弹层与菜单统一 + Home composer 焦点（2026-11-05）
+
+用户反馈「权限下拉弹层没有样式，统一设计语言」。根因：mygo 的 `ui.Popover` 只负责定位/关闭/焦点圈定，**不带面板样式**（`ui/base.go` 的 popover 是裸 box），因此菜单体必须自绘表面；此前 permission 菜单是裸 `ui.Button` 列表，其它若干弹层也各写各的。
+
+- **共享品牌弹层 helper**：`internal/shell/popover_menus.go`
+  - `popoverMenuPanel` / `popoverMenuPanelIn(maxWidth)`：`t.Panel()` 表面（BgRaised + 1px BorderL2 + RadiusLG + 4 DIP padding + 轻阴影），宽度先按 composer 列 clamp 到 260–320，再 clamp 到所在列（侧栏 280 / 右栏实际面板宽）。
+  - `popoverMenuRow`：13px 标签 + 可选 11px LabelTertiary 说明、`Pad(4,8)/RadiusSM/MinH32`、hover/选中 `BgHover`、选中 accent ✓、`RoleMenuItemRadio + Checked + Focusable`；`popoverMenuActionRow`/`popoverMenuRoleRow`/`popoverMenuCheckRow` 覆盖动作/指定角色/复选三种行。
+- **已统一**（行为/文案/点击语义/角色保持，a11y 不退化）：composer 权限、模型、工作区、附件、`/` 命令面板；会话头 agent mode、More actions；侧栏底部账户 More、View options（复选行仍 `RoleMenuItemCheckBox`）；右栏 New tab、Choose shell（新增 Focusable，正向）、Files 面包屑隐藏段（仍 `RoleButton`）。
+- **有意跳过**：Settings 屏内 select 弹层（自有控件视觉）、`sidebar_hover.go` 工作区 hover 预览卡（已是 `t.Panel()` 卡片，非菜单）、native tray 菜单（已退役）。
+- **Home composer 焦点修复**：Home 的 `/`/@ 面板插在 composer 列之前，导致元素 id 变化、旧焦点悬空，Enter 不触发命令；`homeComposerCard` 的输入框补 `input.AutoFocus()`（与 Session composer 对齐，只在元素本帧新出现时聚焦，不抢用户手动聚焦）。Home 预览因此显示 composer 聚焦边框（已重生成）。
+- 测试：`popover_menus_test.go` / `popover_menus_rest_test.go` / `home_focus_test.go` 覆盖面板唯一性、行角色/Checked/Focusable、点击行为不回退、Home `/` 与 @ 面板焦点保持、不抢焦点；既有账户/右栏/View options/Choose shell/面包屑/a11y/键盘测试全绿。
+
 ## 20. 验收口径
 
 | 维度 | 验收 |

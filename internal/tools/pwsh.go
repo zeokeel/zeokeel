@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	goruntime "runtime"
 	"strings"
 	"time"
 
@@ -21,10 +22,21 @@ import (
 
 const pwshDescription = `Run a PowerShell command in the workspace root and return its combined stdout and stderr.
 
-PowerShell is resolved from PATH as "pwsh" first and "powershell" second; when neither exists the call fails with an explicit error. The command runs with the workspace root as its working directory. ZEOKEEL_* and DEEPSEEK* environment variables are removed. The timeout defaults to 30 seconds and is capped at 300 seconds; on timeout the whole process group is killed. Output beyond the configured limit is truncated.
+PowerShell is resolved from PATH as "pwsh" first and "powershell" second; when neither exists the call fails with an explicit error. The command runs as "pwsh -Command <command>" with -NoLogo -NoProfile -NonInteractive. Paths use native Windows form (C:\...), and environment variables are read with $env:NAME. On Windows a force-killed command settles as [exit code: 1] without a signal marker, so treat it as an interruption rather than a command failure. The command runs with the workspace root as its working directory. ZEOKEEL_* and DEEPSEEK* environment variables are removed. The timeout defaults to 30 seconds and is capped at 300 seconds; on timeout the whole process group is killed. Output beyond the configured limit is truncated.
 
 Args JSON schema:
 {"type":"object","properties":{"command":{"type":"string","description":"PowerShell command to execute."},"timeout_seconds":{"type":"integer","description":"Optional timeout in seconds (default 30, maximum 300).","minimum":1,"maximum":300}},"required":["command"],"additionalProperties":false}`
+
+// pwshMissingHint tells the caller how to recover when PowerShell is absent.
+// It is platform-aware so a Windows build never points the model at the bash
+// tool: Windows exposes the pwsh tool only, so a bash suggestion would name a
+// tool the model cannot call there.
+func pwshMissingHint(goos string) string {
+	if strings.EqualFold(strings.TrimSpace(goos), "windows") {
+		return "install PowerShell 7+ (for example: winget install --id Microsoft.PowerShell) and retry"
+	}
+	return "install PowerShell 7+ and retry, or use the bash tool for POSIX commands"
+}
 
 // PwshConfig configures the pwsh tool.
 type PwshConfig struct {
@@ -72,7 +84,7 @@ func pwshExecutable() (string, error) {
 			return path, nil
 		}
 	}
-	return "", fmt.Errorf("pwsh: PowerShell is not installed or not on PATH (looked for \"pwsh\" and \"powershell\"); install PowerShell 7+ and retry, or use bash for this command")
+	return "", fmt.Errorf("pwsh: PowerShell is not installed or not on PATH (looked for \"pwsh\" and \"powershell\"); %s", pwshMissingHint(goruntime.GOOS))
 }
 
 func (t *pwshTool) Invoke(ctx context.Context, args json.RawMessage) (string, error) {

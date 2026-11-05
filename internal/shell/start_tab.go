@@ -325,38 +325,20 @@ func (a *App) setTerminalShell(c *ui.Context, name string) {
 }
 
 // shellPickerMenu is the Choose shell menu: the installed shells with the
-// current one marked, as native menu-radio ButtonBases so the menu keeps the
-// keyboard, focus and checked semantics mygo gives menus.
+// current one marked. It uses the shared branded popover panel and radio rows,
+// clamped to the right panel, so it keeps the focus, keyboard and checked
+// semantics the other menus have.
 func (a *App) shellPickerMenu(c *ui.Context, t *design.Tokens) {
-	th := t.Theme()
 	st := a.startUI()
 	current := a.terminalShellName()
-	ui.Column(c).Width(th.Space(50)).Gap(th.Space(0.5)).Children(func() {
-		ui.Text(c, a.tr("Choose shell", "选择 shell")).FontSize(th.FontSize-3).
-			FixedLineHeight(th.Space(4)).TextColor(t.LabelTertiary).
-			Padding(th.Space(1), th.Space(2))
+	a.popoverMenuPanelIn(c, t, a.rightSidebarPanelWidth(c), func() {
+		ui.Text(c, a.tr("Choose shell", "选择 shell")).FontSize(11).
+			FixedLineHeight(16).TextColor(t.LabelTertiary).
+			Padding(design.Space1, design.Space2, 0, design.Space2)
 		for _, sh := range terminalShells() {
 			sh := sh
 			label := a.shellMenuLabel(sh)
-			row := ui.ButtonBase(c).Height(th.Space(9)).PaddingX(th.Space(2)).
-				Gap(th.Space(2)).Radius(design.RadiusSM).Label(label).
-				Role(ui.RoleMenuItemRadio).Checked(sh.name == current)
-			if row.Hovered() || sh.name == current {
-				row = row.Background(t.BgHover)
-			}
-			row.Children(func() {
-				ui.Column(c).Grow(1).Children(func() {
-					ui.Text(c, label).FontSize(th.FontSize - 1).
-						FixedLineHeight(th.Space(4.5)).TextColor(t.LabelPrimary)
-					ui.Text(c, sh.path).FontSize(th.FontSize - 4).
-						FixedLineHeight(th.Space(3.5)).TextColor(t.LabelTertiary)
-				})
-				if sh.name == current {
-					ui.Icon(c, icons.Reload()).Size(th.Space(3), th.Space(3)).
-						TextColor(t.Accent)
-				}
-			})
-			row.OnClick(func() {
+			a.popoverMenuRow(c, t, label, sh.path, sh.name == current, nil, func() {
 				st.shellMenuOpen = false
 				a.setTerminalShell(c, sh.name)
 			})

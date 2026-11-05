@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	goruntime "runtime"
 	"strings"
 	"testing"
 	"time"
@@ -188,5 +189,52 @@ func TestBashDescriptionTracksConfiguredTimeout(t *testing.T) {
 	}
 	if tool.defaultTimeout() != maxBashTimeout {
 		t.Fatalf("configured timeout = %v, want the %v cap", tool.defaultTimeout(), maxBashTimeout)
+	}
+}
+
+// TestBashRequiresAllowBash proves the platform selection is independent from
+// AllowShell: the shell plugin can be on (write/edit available) while the
+// POSIX bash tool stays off on a build that exposes another shell stack.
+func TestBashRequiresAllowBash(t *testing.T) {
+	root := t.TempDir()
+	ts := testTools(t, Config{WorkspaceRoot: root, AllowShell: true})
+	if _, ok := ts["bash"]; ok {
+		t.Fatal("bash must not be built when AllowBash is false")
+	}
+	if _, ok := ts["write_file"]; !ok {
+		t.Fatal("AllowShell must not remove write_file when AllowBash is false")
+	}
+	cfg := Config{WorkspaceRoot: root, AllowShell: true, AllowBash: true}
+	reg := runtime.NewRegistry()
+	if err := Register(reg, cfg); err != nil {
+		t.Fatalf("Register: %v", err)
+	}
+	if _, ok := reg.Get("bash"); !ok {
+		t.Fatal("bash must be registered when AllowShell and AllowBash are true")
+	}
+}
+
+// TestBashDescriptionFollowsPlatform covers the description fix: a Windows
+// build must never promise "sh -c" (the implementation there routes through
+// cmd.exe /C), while POSIX builds keep documenting sh -c.
+func TestBashDescriptionFollowsPlatform(t *testing.T) {
+	if got := bashShellDescription("linux"); !strings.Contains(got, "sh -c") {
+		t.Fatalf("POSIX shell description = %q, want sh -c", got)
+	}
+	if got := bashShellDescription("darwin"); !strings.Contains(got, "sh -c") {
+		t.Fatalf("darwin shell description = %q, want sh -c", got)
+	}
+	win := bashShellDescription("windows")
+	if strings.Contains(win, "sh -c") {
+		t.Fatalf("Windows shell description still promises sh -c: %q", win)
+	}
+	for _, want := range []string{"cmd.exe /C", "pwsh"} {
+		if !strings.Contains(win, want) {
+			t.Fatalf("Windows shell description %q does not mention %q", win, want)
+		}
+	}
+	tool := newBashTool(t.TempDir(), 0)
+	if !strings.Contains(tool.Description(), bashShellDescription(goruntime.GOOS)) {
+		t.Fatalf("bash description does not match the build platform (%s):\n%s", goruntime.GOOS, tool.Description())
 	}
 }

@@ -24,11 +24,16 @@ func startTerminalProcess(newCmd func() *exec.Cmd, out *outputRing, touch func()
 func terminalForegroundPGID(*terminalSession) int { return 0 }
 
 // init installs the non-Unix platform defaults. Terminal sessions on these
-// systems use cmd.exe (through COMSPEC when present), and signals are delivered
-// to the shell process directly because POSIX process-group addressing does not
-// exist here. The tool surface and error reporting stay identical.
+// systems use PowerShell 7 ("pwsh") when it is installed, matching the pwsh
+// tool stack; otherwise they fall back to cmd.exe (through COMSPEC when
+// present). Signals are delivered to the shell process directly because POSIX
+// process-group addressing does not exist here. The tool surface and error
+// reporting stay identical.
 func init() {
 	terminalShellDefaults = func() (string, []string) {
+		if path, err := exec.LookPath("pwsh"); err == nil && path != "" {
+			return path, []string{"-NoLogo"}
+		}
 		if comspec := os.Getenv("COMSPEC"); comspec != "" {
 			return comspec, nil
 		}

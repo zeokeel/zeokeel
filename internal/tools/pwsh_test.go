@@ -58,3 +58,38 @@ func TestPwshDescriptionHasSchema(t *testing.T) {
 	tool := NewPwshTool(PwshConfig{WorkspaceRoot: t.TempDir()})
 	assertSchema(t, tool)
 }
+
+// TestPwshDescriptionCarriesWindowsFacts covers the description fix: the tool
+// only surfaces on Windows builds, so it must teach native paths, $env:
+// variables, the pwsh -Command invocation and the Windows exit-1 kill semantics.
+func TestPwshDescriptionCarriesWindowsFacts(t *testing.T) {
+	desc := NewPwshTool(PwshConfig{WorkspaceRoot: t.TempDir()}).Description()
+	for _, want := range []string{
+		"pwsh -Command",
+		"native Windows form",
+		"$env:NAME",
+		"[exit code: 1]",
+		"without a signal marker",
+	} {
+		if !strings.Contains(desc, want) {
+			t.Fatalf("pwsh description missing %q:\n%s", want, desc)
+		}
+	}
+}
+
+// TestPwshMissingHintIsPlatformAware covers the actionable-error fix: Windows
+// must never be pointed at the bash tool, which does not exist there, while a
+// POSIX build may suggest bash as the fallback shell.
+func TestPwshMissingHintIsPlatformAware(t *testing.T) {
+	win := pwshMissingHint("windows")
+	if strings.Contains(win, "bash") {
+		t.Fatalf("Windows missing-pwsh hint points at bash: %q", win)
+	}
+	if !strings.Contains(win, "install PowerShell") {
+		t.Fatalf("Windows missing-pwsh hint is not actionable: %q", win)
+	}
+	posix := pwshMissingHint("linux")
+	if !strings.Contains(posix, "bash") {
+		t.Fatalf("POSIX missing-pwsh hint does not offer bash: %q", posix)
+	}
+}

@@ -80,39 +80,30 @@ func (a *App) moreFooter(c *ui.Context, t *design.Tokens) {
 	})
 }
 
-// moreMenu draws Settings / About / Quit in the popover.
+// moreMenu draws Settings / About / Quit in the popover. It is the sidebar's
+// account menu, so it uses the shared popover panel clamped to the sidebar
+// column and the branded menu action rows the other menus use.
 func (a *App) moreMenu(c *ui.Context, t *design.Tokens) {
-	ui.Column(c).Gap(2).Children(func() {
-		a.moreMenuItem(c, t, settingsIconGear, a.T("menu.settings"), func() {
+	a.popoverMenuPanelIn(c, t, sidebarW, func() {
+		a.popoverMenuActionRow(c, t, a.T("menu.settings"), func() {
+			ui.Image(c, settingsIconGear).Size(16, 16).TextColor(t.LabelPrimary)
+		}, func() {
 			a.moreOpen = false
 			a.openSettings()
 		})
-		a.moreMenuItem(c, t, menuIconInfo, a.T("menu.about"), func() {
+		a.popoverMenuActionRow(c, t, a.T("menu.about"), func() {
+			ui.Image(c, menuIconInfo).Size(16, 16).TextColor(t.LabelPrimary)
+		}, func() {
 			a.moreOpen = false
 			a.aboutOpen = true
 		})
-		a.moreMenuItem(c, t, menuIconPower, a.T("menu.quit"), func() {
+		a.popoverMenuActionRow(c, t, a.T("menu.quit"), func() {
+			ui.Image(c, menuIconPower).Size(16, 16).TextColor(t.LabelPrimary)
+		}, func() {
 			a.moreOpen = false
 			quitApp()
 		})
 	})
-}
-
-// moreMenuItem is one row of the More popover. It is a real menu item: named,
-// focusable and activated by Enter/Space, so the account menu is not
-// pointer-only. The same helper draws the right sidebar's New tab menu.
-func (a *App) moreMenuItem(c *ui.Context, t *design.Tokens, icon *ui.SVG, label string, fn func()) {
-	row := ui.Row(c).Height(30).PaddingX(design.Space2).Gap(design.Space2).
-		Radius(design.RadiusSM).AlignItems(ui.Center).
-		Label(label).Role(ui.RoleMenuItem).Focusable()
-	if row.Hovered() {
-		row = row.Background(t.BgHover)
-	}
-	row.Children(func() {
-		ui.Image(c, icon).Size(16, 16).TextColor(t.LabelPrimary)
-		settingsText(c, label, design.TypeBody, t.LabelPrimary)
-	})
-	row.OnClick(fn)
 }
 
 // aboutDialog is the About item's dialog.
