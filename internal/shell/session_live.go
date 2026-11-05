@@ -266,7 +266,11 @@ func (a *App) liveTranscript(c *ui.Context, t *design.Tokens, snap *state.Snapsh
 					}
 					a.turnOutcomeMarker(c, t, snap)
 					a.liveArtifacts(c, t)
-					if snap.LastError != nil {
+					// The record-ordered transcript renders each error inside
+					// the turn that recorded it (see bucketTranscriptErrors).
+					// Only snapshots without the Seq axis fall back to the
+					// legacy session-tail error line.
+					if snap.LastError != nil && !transcriptOrderEnabled(snap) {
 						ui.Text(c, a.T("session.error_prefix", snap.LastError.Text)).FontSize(13).TextColor(t.Danger)
 					}
 				})
@@ -359,7 +363,11 @@ func (a *App) turnOutcomeMarker(c *ui.Context, t *design.Tokens, snap *state.Sna
 func (a *App) liveOrderedTranscript(c *ui.Context, t *design.Tokens, snap *state.Snapshot, streaming int) int {
 	st := a.liveMenus()
 	turns := 0
-	for _, plan := range buildTranscriptTurns(snap) {
+	plans := buildTranscriptTurns(snap)
+	preambleErrors, turnErrors := bucketTranscriptErrors(snap, plans)
+	// Errors recorded before the first user message belong above the first turn.
+	a.liveTranscriptErrors(c, t, preambleErrors)
+	for pi, plan := range plans {
 		var turnUserMsgID string
 		for _, entry := range plan.entries {
 			if entry.tools != nil {
@@ -378,11 +386,67 @@ func (a *App) liveOrderedTranscript(c *ui.Context, t *design.Tokens, snap *state
 				}
 			}
 		}
+		// A failure belongs after everything its turn produced and before the
+		// next user message, so a later prompt never pushes an old error below
+		// itself.
+		a.liveTranscriptErrors(c, t, turnErrors[pi])
 		// The per-turn marker closes the whole turn group (after its process
 		// block and answer), anchored by the turn's user message.
 		a.turnMark(c, t, snap, turnUserMsgID)
 	}
 	return turns
+}
+
+// liveTranscriptErrors draws one bucket of recorded errors as danger lines.
+func (a *App) liveTranscriptErrors(c *ui.Context, t *design.Tokens, errs []state.ErrorInfo) {
+	for _, info := range errs {
+		ui.Text(c, a.T("session.error_prefix", info.Text)).FontSize(13).TextColor(t.Danger)
+	}
+}
+
+// bucketTranscriptErrors assigns every recorded error to the turn that was
+// active when it was folded, using the user message Seq that starts each turn
+// plan. Errors recorded before the first user message go to the preamble
+// bucket; an error with an unknown/zero position (hand-built snapshot) follows
+// the last turn. This is what keeps a failed turn's error above the user
+// message that came after it, both live and after reopening the session.
+func bucketTranscriptErrors(snap *state.Snapshot, plans []turnPlan) (preamble []state.ErrorInfo, perTurn [][]state.ErrorInfo) {
+	if snap == nil {
+		return nil, nil
+	}
+	perTurn = make([][]state.ErrorInfo, len(plans))
+	if len(snap.Errors) == 0 {
+		return nil, perTurn
+	}
+	turnSeqs := make([]uint64, len(plans))
+	for pi, plan := range plans {
+		for _, entry := range plan.entries {
+			if entry.msgIndex < 0 || entry.msgIndex >= len(snap.Messages) {
+				continue
+			}
+			m := snap.Messages[entry.msgIndex]
+			if m.Role == state.RoleUser {
+				turnSeqs[pi] = m.Seq
+				break
+			}
+		}
+	}
+	for _, info := range snap.Errors {
+		// The last turn whose user message starts at or before the error owns
+		// it; plans are in record order.
+		owner := -1
+		for pi := range plans {
+			if turnSeqs[pi] > 0 && turnSeqs[pi] <= info.Seq {
+				owner = pi
+			}
+		}
+		if owner < 0 {
+			preamble = append(preamble, info)
+			continue
+		}
+		perTurn[owner] = append(perTurn[owner], info)
+	}
+	return preamble, perTurn
 }
 
 // liveFlatTranscript is the legacy layout for snapshots without a Seq axis:

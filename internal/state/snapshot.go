@@ -125,10 +125,14 @@ type ToolState struct {
 	UpdatedSeq uint64
 }
 
-// ErrorInfo is an immutable rendering of an Error event.
+// ErrorInfo is an immutable rendering of an Error event. Seq is the snapshot
+// Seq at which the error was recorded, so the transcript can keep a failed
+// turn's error inside that turn instead of pinning it below later user
+// messages.
 type ErrorInfo struct {
 	MsgID string
 	Text  string
+	Seq   uint64
 }
 
 // Snapshot is the immutable UI state for one session. The view reads it once
@@ -160,6 +164,10 @@ type Snapshot struct {
 	// the marker at the end of the matching turn so historical interruptions
 	// survive a reopen, not only the latest one.
 	TurnMarks map[string]StatusReason
+	// Errors keeps every recorded Error with its Seq so the transcript can
+	// render a historical failure in the turn it belongs to. LastError stays
+	// the latest error for compatibility and for callers that only need it.
+	Errors    []ErrorInfo
 	LastError *ErrorInfo
 	Seq       uint64
 }
@@ -289,7 +297,20 @@ func Apply(prev *Snapshot, ev Event) *Snapshot {
 			next.TurnMarks = out
 		}
 	case Error:
-		next.LastError = &ErrorInfo{MsgID: e.MsgID, Text: errorText(e.Err)}
+		info := ErrorInfo{MsgID: e.MsgID, Text: errorText(e.Err), Seq: next.Seq}
+		next.LastError = &info
+		// Copy the slice before appending: previous snapshots stay immutable
+		// even when the append would reuse the same backing array.
+		errors := make([]ErrorInfo, len(prev.Errors)+1)
+		copy(errors, prev.Errors)
+		errors[len(prev.Errors)] = info
+		// Keep the history bounded; errors are rare but a long-lived session
+		// must not grow this list forever.
+		const maxSnapshotErrors = 100
+		if len(errors) > maxSnapshotErrors {
+			errors = errors[len(errors)-maxSnapshotErrors:]
+		}
+		next.Errors = errors
 	default:
 		// Event is a closed set; an unknown implementation can only appear via
 		// type embedding. Advance Seq so replay stays aligned, change nothing.

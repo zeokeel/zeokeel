@@ -367,6 +367,11 @@ func TestErrorSnapshot(t *testing.T) {
 	if s.LastError == nil || s.LastError.MsgID != "m1" || s.LastError.Text != "model failed" {
 		t.Fatalf("LastError = %+v", s.LastError)
 	}
+	// Every error is also kept with its Seq so the transcript can place a
+	// historical failure inside the turn that recorded it.
+	if len(s.Errors) != 1 || s.Errors[0].MsgID != "m1" || s.Errors[0].Text != "model failed" || s.Errors[0].Seq != 2 {
+		t.Fatalf("Errors = %+v", s.Errors)
+	}
 	// Errors do not erase streamed content.
 	if len(s.Messages) != 1 || s.Messages[0].Text != "partial" {
 		t.Fatalf("messages after error = %+v", s.Messages)
@@ -375,6 +380,15 @@ func TestErrorSnapshot(t *testing.T) {
 	s = Apply(s, Error{MsgID: "m2", Err: nil})
 	if s.LastError == nil || s.LastError.MsgID != "m2" || s.LastError.Text != "" {
 		t.Fatalf("nil error event LastError = %+v", s.LastError)
+	}
+	if len(s.Errors) != 2 || s.Errors[1].MsgID != "m2" || s.Errors[1].Seq != 3 {
+		t.Fatalf("Errors after second error = %+v", s.Errors)
+	}
+	// The list must stay a snapshot-owned copy: folding on top of s must not
+	// mutate s's slice.
+	s2 := Apply(s, Error{MsgID: "m3", Err: errors.New("third")})
+	if len(s.Errors) != 2 || len(s2.Errors) != 3 {
+		t.Fatalf("errors aliased across snapshots: old=%d new=%d", len(s.Errors), len(s2.Errors))
 	}
 }
 
