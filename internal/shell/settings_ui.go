@@ -394,7 +394,12 @@ func (a *App) settingsBodyLive(c *ui.Context, t *design.Tokens) {
 	ui.Column(c).Grow(1).Children(func() {
 		a.settingsHeaderLive(c, t)
 		ui.Scroll(c).Grow(1).Children(func() {
-			ui.Column(c).Padding(th.Space(5), th.Space(6)).Gap(th.Space(4)).Children(func() {
+			// The window host is a fixed 900x720, so the trailing row of a
+			// page can meet the viewport edge. The extra bottom inset keeps
+			// the scroll area's end off the border and gives the cut a
+			// deliberate padding instead of a bisected control (UX-06).
+			ui.Column(c).Padding(th.Space(5), th.Space(6), th.Space(10), th.Space(6)).
+				Gap(th.Space(4)).Children(func() {
 				switch a.shellUI().settingsTab {
 				case settingsTabModels:
 					a.modelsSettingsPage(c, t)

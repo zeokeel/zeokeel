@@ -31,24 +31,55 @@ type Event struct {
 //
 // event.Seq is ignored; event.TS defaults to the current time when zero.
 func (s *Store) AppendEvent(sessionID string, event Event) (*Event, error) {
+	out, err := s.AppendEvents(sessionID, []Event{event})
+	if err != nil {
+		return nil, err
+	}
+	return &out[0], nil
+}
+
+// AppendEvents appends events to sessionID in one SQLite transaction and
+// returns copies with their assigned contiguous per-session sequence numbers
+// and timestamps. Callers that persist a burst of high-frequency events (for
+// example streamed token chunks) can use it to pay one transaction instead of
+// one per event while keeping the same ordered, gap-free trace.
+//
+// The events are validated before the transaction starts, so a malformed batch
+// writes nothing. An empty batch is a no-op and returns nil.
+func (s *Store) AppendEvents(sessionID string, events []Event) ([]Event, error) {
 	if sessionID == "" {
 		return nil, fmt.Errorf("%w: append event: empty session id", ErrInvalidArgument)
 	}
-	if strings.TrimSpace(event.Type) == "" {
-		return nil, fmt.Errorf("%w: append event: empty type", ErrInvalidArgument)
+	if len(events) == 0 {
+		return nil, nil
 	}
-	var payload any
-	if p := bytes.TrimSpace(event.Payload); len(p) > 0 {
-		if !json.Valid(p) {
-			return nil, fmt.Errorf("%w: append event: payload is not valid JSON", ErrInvalidArgument)
+
+	// Validate and normalize the whole batch first: an invalid payload must
+	// not leave a partially written batch behind.
+	prepared := make([]Event, len(events))
+	payloads := make([]any, len(events))
+	for i, event := range events {
+		if strings.TrimSpace(event.Type) == "" {
+			return nil, fmt.Errorf("%w: append event: empty type", ErrInvalidArgument)
 		}
-		payload = string(p)
-	}
-	ts := event.TS
-	if ts.IsZero() {
-		ts = nowUTC()
-	} else {
-		ts = ts.UTC()
+		var payload any
+		if p := bytes.TrimSpace(event.Payload); len(p) > 0 {
+			if !json.Valid(p) {
+				return nil, fmt.Errorf("%w: append event: payload is not valid JSON", ErrInvalidArgument)
+			}
+			payload = string(p)
+		}
+		ts := event.TS
+		if ts.IsZero() {
+			ts = nowUTC()
+		} else {
+			ts = ts.UTC()
+		}
+		prepared[i] = Event{Type: event.Type, TS: ts}
+		if p := bytes.TrimSpace(event.Payload); len(p) > 0 {
+			prepared[i].Payload = append(json.RawMessage(nil), p...)
+		}
+		payloads[i] = payload
 	}
 
 	tx, err := s.db.Begin()
@@ -65,32 +96,38 @@ func (s *Store) AppendEvent(sessionID string, event Event) (*Event, error) {
 		return nil, fmt.Errorf("store: append event: session %q: %w", sessionID, ErrNotFound)
 	}
 
-	var seq int64
+	var base int64
 	if err := tx.QueryRow(
-		`SELECT COALESCE(MAX(seq), 0) + 1 FROM events WHERE session_id = ?`, sessionID,
-	).Scan(&seq); err != nil {
+		`SELECT COALESCE(MAX(seq), 0) FROM events WHERE session_id = ?`, sessionID,
+	).Scan(&base); err != nil {
 		return nil, fmt.Errorf("store: append event: allocate seq: %w", err)
 	}
-	if _, err := tx.Exec(
+	stmt, err := tx.Prepare(
 		`INSERT INTO events(session_id, seq, type, payload, ts) VALUES (?, ?, ?, ?, ?)`,
-		sessionID, seq, event.Type, payload, encodeTime(ts),
-	); err != nil {
-		return nil, fmt.Errorf("store: append event to session %q: insert: %w", sessionID, err)
+	)
+	if err != nil {
+		return nil, fmt.Errorf("store: append event: prepare insert: %w", err)
+	}
+	defer stmt.Close() //nolint:errcheck // closed by tx commit/rollback too
+
+	out := make([]Event, len(events))
+	for i := range events {
+		seq := base + int64(i) + 1
+		if _, err := stmt.Exec(sessionID, seq, prepared[i].Type, payloads[i], encodeTime(prepared[i].TS)); err != nil {
+			return nil, fmt.Errorf("store: append event to session %q: insert: %w", sessionID, err)
+		}
+		out[i] = Event{
+			SessionID: sessionID,
+			Seq:       seq,
+			Type:      prepared[i].Type,
+			Payload:   prepared[i].Payload,
+			TS:        prepared[i].TS,
+		}
 	}
 	if err := tx.Commit(); err != nil {
 		return nil, fmt.Errorf("store: append event to session %q: commit: %w", sessionID, err)
 	}
-
-	out := event
-	out.SessionID = sessionID
-	out.Seq = seq
-	out.TS = ts
-	if payload != nil {
-		out.Payload = append(json.RawMessage(nil), bytes.TrimSpace(event.Payload)...)
-	} else {
-		out.Payload = nil
-	}
-	return &out, nil
+	return out, nil
 }
 
 // ListEvents returns a session's events ordered by sequence number.

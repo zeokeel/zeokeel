@@ -215,10 +215,12 @@ func (w *mygoSettingsWindow) Invalidate()           { w.win.Invalidate() }
 
 // Settings window metrics. The window hosts the two-column settings layout, so
 // it opens at a size that keeps the brand nav and a comfortable page column
-// without the modal's 32 DIP card margin, and can shrink to 640x480.
+// without the modal's 32 DIP card margin, and can shrink to 640x480. The height
+// leaves room for the full first screen (title, tab rail and the last settings
+// row) instead of clipping the bottom row (UX-06).
 const (
 	settingsWindowWidth     = 900
-	settingsWindowHeight    = 720
+	settingsWindowHeight    = 840
 	settingsWindowMinWidth  = 640
 	settingsWindowMinHeight = 480
 )
@@ -231,12 +233,22 @@ func (a *app) initSettingsWindow(content func(*ui.Context), title func() string)
 	if manager == nil {
 		manager = newMygoSettingsWindows()
 	}
+	// Clamp the preferred size to the current display work area: the 900x840
+	// settings window must still fit a 1366x768 laptop screen (AR-18/PD-15).
+	// Tests and headless callers have no desktop backend, so the display query
+	// only runs once the app is ready (it must never block a unit test).
+	width, height, minWidth, minHeight := settingsWindowWidth, settingsWindowHeight, settingsWindowMinWidth, settingsWindowMinHeight
+	if mygo.App.IsReady() {
+		if workArea, ok := primaryWorkArea(currentDisplays()); ok {
+			width, height, minWidth, minHeight = clampSizeToWorkArea(width, height, minWidth, minHeight, workArea)
+		}
+	}
 	a.settingsWindow = newSettingsWindowController(manager, settingsWindowOptions{
 		Title:     title,
-		Width:     settingsWindowWidth,
-		Height:    settingsWindowHeight,
-		MinWidth:  settingsWindowMinWidth,
-		MinHeight: settingsWindowMinHeight,
+		Width:     width,
+		Height:    height,
+		MinWidth:  minWidth,
+		MinHeight: minHeight,
 		StateKey:  settingsWindowStateKey,
 		Content:   content,
 	}, func() bool { return a.quitting })

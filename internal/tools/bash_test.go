@@ -133,9 +133,21 @@ func TestScrubEnv(t *testing.T) {
 		"DEEPSEEKER=removed",
 		"HOME=/home/me",
 		"ZEOKEEL=kept",
+		// Common third-party credentials: RT-15 extended the match beyond the
+		// ZeoKeel/DeepSeek prefixes.
+		"OPENAI_API_KEY=sk-openai",
+		"ANTHROPIC_API_KEY=sk-ant",
+		"AWS_SECRET_ACCESS_KEY=aws",
+		"GITHUB_TOKEN=ghp",
+		"SSH_AUTH_SOCK=/tmp/agent.sock",
+		"KUBECONFIG=/home/me/.kube/config",
+		// Ordinary shell/build variables must survive the scrub.
+		"LANG=en_US.UTF-8",
+		"TERM=xterm",
+		"GIT_AUTHOR_NAME=A User",
 	}
 	got := scrubEnv(env)
-	want := []string{"PATH=/bin", "HOME=/home/me", "ZEOKEEL=kept"}
+	want := []string{"PATH=/bin", "HOME=/home/me", "ZEOKEEL=kept", "LANG=en_US.UTF-8", "TERM=xterm", "GIT_AUTHOR_NAME=A User"}
 	if strings.Join(got, ",") != strings.Join(want, ",") {
 		t.Fatalf("scrubEnv = %v, want %v", got, want)
 	}

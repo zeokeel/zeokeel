@@ -91,6 +91,7 @@ func (a *App) setWorkspaceCollapsed(id string, collapsed bool) {
 // the arrow keys, the first-letter search and the tree's accessibility tree
 // while the app still decides what a choice means.
 const (
+	sidebarSelHome       = "nav:home"
 	sidebarSelPlugins    = "nav:plugins"
 	sidebarSelAutomation = "nav:automation"
 	sidebarSelWorkspace  = "ws:"
@@ -102,6 +103,8 @@ const (
 // the last session's row stays clickable there.
 func (a *App) sidebarCanonicalSelection() string {
 	switch a.backgroundScreen() {
+	case Home:
+		return sidebarSelHome
 	case Plugins:
 		return sidebarSelPlugins
 	case Automation:
@@ -128,9 +131,13 @@ func (a *App) sidebarChoice(c *ui.Context, t *design.Tokens) {
 	a.sidebarChosenByPointer = false
 	defer func() { a.sidebarSel = a.sidebarCanonicalSelection() }()
 	switch {
+	case choice == sidebarSelHome:
+		a.goHome()
 	case choice == sidebarSelPlugins:
+		a.closeComposerPopovers()
 		a.Screen = Plugins
 	case choice == sidebarSelAutomation:
+		a.closeComposerPopovers()
 		a.Screen = Automation
 	case strings.HasPrefix(choice, sidebarSelWorkspace):
 		a.wsHoverID = ""
@@ -160,10 +167,23 @@ func (a *App) sidebarChoice(c *ui.Context, t *design.Tokens) {
 	}
 }
 
-// sidebarNavItems are the two app destinations as native Sidebar items: the
+// goHome returns to the Home screen from a session, a plugin page or the
+// automation page. It only changes the destination: the next frame's
+// syncDraftScope parks the session composer buffer on that session and
+// restores the Home draft, so leaving never drops either side's text (PD-11).
+func (a *App) goHome() {
+	a.Screen = Home
+	a.moreOpen = false
+	a.closeSelectors()
+	a.closeComposerPopovers()
+}
+
+// sidebarNavItems are the app destinations as native Sidebar items: the
 // Sidebar's arrows, first-letter search, focus ring and accessibility tree
-// cover them.
+// cover them. Home is first so a session always has a visible way back to the
+// Home composer (PD-11).
 func (a *App) sidebarNavItems(c *ui.Context, t *design.Tokens) {
+	ui.SidebarItem(c, sidebarSelHome, icons.NewChat(), a.T("shell.home"))
 	ui.SidebarItem(c, sidebarSelPlugins, icons.Plugin(), a.T("shell.plugins"))
 	ui.SidebarItem(c, sidebarSelAutomation, icons.Clock(), a.T("shell.automation_tasks"))
 }
@@ -275,6 +295,10 @@ func (a *App) sidebarTree(c *ui.Context, t *design.Tokens) {
 		ui.Text(c, a.T("workspace.could_not_load_workspaces")).
 			FontSize(t.Theme().FontSize - 2).TextColor(t.LabelTertiary).
 			PaddingX(t.Theme().Space(2))
+		return
+	}
+	if len(workspaces) == 0 {
+		a.sidebarWorkspacesEmpty(c, t)
 		return
 	}
 	current := a.Ctrl.CurrentWorkspaceID()
@@ -441,6 +465,20 @@ func (a *App) sidebarSessionNotice(c *ui.Context, t *design.Tokens, err error, i
 	}
 	ui.Text(c, text).FontSize(th.FontSize-2).TextColor(t.LabelTertiary).
 		Padding(0, th.Space(2), th.Space(1), indent+th.Space(6))
+}
+
+// sidebarWorkspacesEmpty is the tree's first-run empty state: the tree area
+// would otherwise be blank under the Workspaces strip, with only unlabeled
+// header icons, so the first workspace gets a sentence and a button (UX-09).
+func (a *App) sidebarWorkspacesEmpty(c *ui.Context, t *design.Tokens) {
+	th := t.Theme()
+	ui.Column(c).Padding(design.Space3, design.Space2).Gap(th.Space(2)).Children(func() {
+		ui.Text(c, a.T("workspace.no_workspaces_yet")).FontSize(th.FontSize - 2).
+			TextColor(t.LabelTertiary).MaxLines(2)
+		label := a.T("shell.add_workspace")
+		button := ui.Button(c, label).Height(th.Space(8)).Label(label)
+		button.OnClick(func() { a.beginAddWorkspace() })
+	})
 }
 
 // sidebarSessionRow is one session of the tree: a native SidebarItem with the
@@ -1155,6 +1193,7 @@ func (a *App) beginAddWorkspace() {
 	a.wsName = ""
 	a.wsRoot = ""
 	a.wsErr = ""
+	a.wsCreateRoot = false
 	a.wsDialogOpen = true
 	a.wsDeleteOpen = false
 	a.viewOptionsOpen = false
@@ -1190,16 +1229,32 @@ func (a *App) workspaceDialog(c *ui.Context, t *design.Tokens) {
 				title = a.T("workspace.rename_workspace")
 			}
 			ui.Text(c, title).FontSize(16).FontWeight(600).TextColor(t.LabelPrimary)
-			ui.TextInput(c, &a.wsName).Label(a.T("workspace.workspace_name")).AutoFocus().
-				OnSubmit(func() { a.confirmWorkspace(c) })
-			if a.wsEditID == "" {
-				ui.Row(c).Gap(design.Space2).AlignItems(ui.Center).Children(func() {
-					ui.TextInput(c, &a.wsRoot).Label(a.T("workspace.root_path")).
-						Grow(1).OnSubmit(func() { a.confirmWorkspace(c) })
-					if ui.Button(c, a.T("workspace.browse")).Clicked() {
-						a.browseWorkspaceRoot()
-					}
+			// The dialog is a native form so both inputs carry a visible
+			// label; a bare TextInput only names the field for assistive
+			// technology, which left the two rows looking blank (UX-05).
+			ui.Form(c, func() {
+				ui.Field(c, a.T("workspace.workspace_name"), func() {
+					ui.TextInput(c, &a.wsName).Label(a.T("workspace.workspace_name")).AutoFocus().
+						OnSubmit(func() { a.confirmWorkspace(c) })
 				})
+				if a.wsEditID == "" {
+					ui.Field(c, a.T("workspace.root_path"), func() {
+						ui.Row(c).Gap(design.Space2).AlignItems(ui.Center).Children(func() {
+							ui.TextInput(c, &a.wsRoot).Label(a.T("workspace.root_path")).
+								Grow(1).OnSubmit(func() { a.confirmWorkspace(c) })
+							if ui.Button(c, a.T("workspace.browse")).Clicked() {
+								a.browseWorkspaceRoot()
+							}
+						})
+					})
+				}
+			})
+			if a.wsEditID == "" {
+				if a.workspaceRootMissing() {
+					ui.Text(c, a.T("workspace.root_missing_hint")).FontSize(11).
+						TextColor(t.WarningText)
+					ui.Checkbox(c, &a.wsCreateRoot, a.T("workspace.create_root"))
+				}
 				ui.Text(c, a.T("workspace.sessions_created_in_this_workspace_run_under_its_root")).
 					FontSize(11).TextColor(t.LabelTertiary)
 			} else if a.wsRoot != "" {
@@ -1271,6 +1326,55 @@ var pickWorkspaceDirectory = func() (string, error) {
 	return paths[0], nil
 }
 
+// workspaceRootMissing reports whether the typed root does not exist yet, so
+// the dialog can offer to create it instead of failing after the fact.
+func (a *App) workspaceRootMissing() bool {
+	root := strings.TrimSpace(a.wsRoot)
+	if root == "" {
+		return false
+	}
+	_, err := os.Stat(root)
+	return os.IsNotExist(err)
+}
+
+// checkWorkspaceRoot validates a new workspace's root before it is persisted
+// (PD-17): an existing path must be a directory that accepts a file, a missing
+// one is created only when the user ticked "Create this folder", and every
+// failure becomes a localized line in the dialog instead of a silent bad
+// workspace.
+func (a *App) checkWorkspaceRoot(root string) error {
+	// A new workspace root must be absolute: a relative path would resolve
+	// against whatever directory the app was started in and create the folder
+	// somewhere the user does not expect (PD-17).
+	if !filepath.IsAbs(root) {
+		return fmt.Errorf("%s", a.T("workspace.root_must_be_absolute"))
+	}
+	info, err := os.Stat(root)
+	if err != nil {
+		if os.IsNotExist(err) {
+			if !a.wsCreateRoot {
+				return fmt.Errorf("%s", a.T("workspace.root_missing_error"))
+			}
+			if mkErr := os.MkdirAll(root, 0o755); mkErr != nil {
+				return fmt.Errorf("%s: %v", a.T("workspace.root_could_not_create"), mkErr)
+			}
+			return nil
+		}
+		return fmt.Errorf("%s: %v", a.T("workspace.root_unreadable"), err)
+	}
+	if !info.IsDir() {
+		return fmt.Errorf("%s", a.T("workspace.root_not_a_folder"))
+	}
+	probe, err := os.CreateTemp(root, ".zeokeel-write-probe-*")
+	if err != nil {
+		return fmt.Errorf("%s: %v", a.T("workspace.root_not_writable"), err)
+	}
+	name := probe.Name()
+	_ = probe.Close()
+	_ = os.Remove(name)
+	return nil
+}
+
 // confirmWorkspace validates and saves the workspace dialog.
 func (a *App) confirmWorkspace(c *ui.Context) {
 	name := strings.TrimSpace(a.wsName)
@@ -1282,6 +1386,12 @@ func (a *App) confirmWorkspace(c *ui.Context) {
 	if a.wsEditID == "" && root == "" {
 		a.wsErr = a.T("workspace.root_path_cannot_be_empty")
 		return
+	}
+	if a.wsEditID == "" {
+		if err := a.checkWorkspaceRoot(root); err != nil {
+			a.wsErr = err.Error()
+			return
+		}
 	}
 	if a.Ctrl == nil {
 		a.wsDialogOpen = false

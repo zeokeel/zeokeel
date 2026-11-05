@@ -1,9 +1,14 @@
 package shell
 
 import (
+	"context"
 	"fmt"
+	"io"
+	"net/http"
+	"net/url"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/egoist/mygo/ui"
 
@@ -23,7 +28,72 @@ const (
 
 // modelDraft is the edit state of the Add/Edit model dialog.
 type modelDraft struct {
-	id, name, baseURL, apiKey, model, effort string
+	id, name, baseURL, apiKey, model, effort, preset string
+}
+
+// modelProbeState is the Add model dialog's connection check as the frame
+// paints it: running, the outcome, and the one-line message next to the
+// button. It lives on App (not shellUIState) so the async probe can write it
+// while the view goroutine reads it.
+type modelProbeState struct {
+	running bool
+	ok      bool
+	message string
+}
+
+// providerPreset fills the Add model dialog's wire fields for one known
+// OpenAI-compatible provider. name is the product name (the same in every
+// language); an empty name is the custom endpoint, whose label is translated.
+type providerPreset struct {
+	id      string
+	name    string
+	baseURL string
+	model   string
+	keyHint string
+}
+
+// providerPresets are the service presets the Add model dialog offers. They
+// only pre-fill Base URL and Model; the key stays whatever the user types.
+var providerPresets = []providerPreset{
+	{id: "custom", keyHint: "sk-..."},
+	{id: "deepseek", name: "DeepSeek", baseURL: "https://api.deepseek.com", model: "deepseek-chat", keyHint: "sk-..."},
+	{id: "openai", name: "OpenAI", baseURL: "https://api.openai.com/v1", model: "gpt-4o-mini", keyHint: "sk-..."},
+	{id: "ollama", name: "Ollama", baseURL: "http://localhost:11434/v1", model: "llama3.2", keyHint: ""},
+}
+
+// probeModelConnection is the "Test connection" check: an OpenAI-compatible
+// GET {base}/models, the cheapest request that separates a bad URL from a bad
+// key without spending tokens. It is a variable so tests never touch a
+// network. The controller's provider client already retries turns; this probe
+// is deliberately one short attempt.
+var probeModelConnection = func(ctx context.Context, baseURL, apiKey string) error {
+	base := strings.TrimRight(strings.TrimSpace(baseURL), "/")
+	if base == "" {
+		return fmt.Errorf("empty base URL")
+	}
+	u, err := url.Parse(base)
+	if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
+		return fmt.Errorf("invalid base URL %q", baseURL)
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, base+"/models", nil)
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Accept", "application/json")
+	if key := strings.TrimSpace(apiKey); key != "" {
+		req.Header.Set("Authorization", "Bearer "+key)
+	}
+	client := &http.Client{Timeout: 8 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close() //nolint:errcheck // probe response
+	_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 4096))
+	if resp.StatusCode < 200 || resp.StatusCode > 299 {
+		return fmt.Errorf("HTTP %s", resp.Status)
+	}
+	return nil
 }
 
 // automationDraft is the edit state of the Add/Edit automation dialog.
@@ -59,6 +129,10 @@ type shellUIState struct {
 	// running and the Send behavior is Queue. The view submits it when the
 	// turn reaches idle.
 	queued map[string]string
+
+	// railWorkspaceOpen is the collapsed rail's per-workspace session flyout
+	// (one bool per workspace id, so each workspace icon owns its popover).
+	railWorkspaceOpen map[string]*bool
 }
 
 // shellUIStates maps each App to its shell UI state.
@@ -111,9 +185,13 @@ func (a *App) modelsSettingsPage(c *ui.Context, t *design.Tokens) {
 		})
 	})
 	a.modelDialog(c, t)
+	a.modelDeleteDialog(c, t)
 }
 
-// modelsEmpty is the empty model list with its call to action.
+// modelsEmpty is the empty model list with its call to action. The action is
+// secondary here: the page header already carries the one primary "Add model"
+// button, and two filled primaries in one viewport read as two competing
+// actions (UX-07).
 func (a *App) modelsEmpty(c *ui.Context, t *design.Tokens) {
 	th := t.Theme()
 	ui.Column(c).Padding(th.Space(8), 0).AlignItems(ui.Center).
@@ -121,7 +199,9 @@ func (a *App) modelsEmpty(c *ui.Context, t *design.Tokens) {
 		settingsText(c, a.T("models.no_models_configured"), design.TypeBody, t.LabelPrimary)
 		settingsText(c, a.T("models.add_a_model_to_choose_it_from_the_composer"),
 			design.TypeXS, t.LabelTertiary)
-		a.modelsAddButton(c, t)
+		label := a.T("models.add_model")
+		button := ui.Button(c, label).Height(th.Space(9)).Label(label)
+		button.OnClick(func() { a.beginModelAdd() })
 	})
 }
 
@@ -162,7 +242,7 @@ func (a *App) modelRow(c *ui.Context, t *design.Tokens, model store.Model) {
 				a.modelAction(c, t, a.T("models.set_default"), func() { a.setDefaultModel(c, model) })
 			}
 			a.modelAction(c, t, a.T("models.edit"), func() { a.beginModelEdit(model) })
-			a.modelAction(c, t, a.T("models.delete"), func() { a.deleteModel(c, model) })
+			a.modelAction(c, t, a.T("models.delete"), func() { a.beginModelDelete(model) })
 		})
 }
 
@@ -203,25 +283,170 @@ func modelDetail(model store.Model) string {
 	return strings.Join(parts, " · ")
 }
 
-// beginModelAdd opens the dialog in create mode.
+// beginModelAdd opens the dialog in create mode. The provider preset starts on
+// the custom endpoint (fields empty) so nothing is prefilled behind the user's
+// back; choosing a preset fills Base URL and Model.
 func (a *App) beginModelAdd() {
+	a.resetModelProbe()
 	st := a.shellUI()
-	st.modelDraft = modelDraft{}
+	st.modelDraft = modelDraft{preset: "custom"}
 	st.modelDialog = true
 }
 
-// beginModelEdit opens the dialog prefilled with model.
+// beginModelEdit opens the dialog prefilled with model. The preset row matches
+// the saved Base URL when it is one of the known providers, so editing shows
+// which service the model came from.
 func (a *App) beginModelEdit(model store.Model) {
+	a.resetModelProbe()
 	st := a.shellUI()
 	st.modelDraft = modelDraft{
 		id: model.ID, name: model.Name, baseURL: model.BaseURL,
 		apiKey: model.APIKey, model: model.Model, effort: model.ReasoningEffort,
+		preset: presetForBaseURL(model.BaseURL),
 	}
 	st.modelDialog = true
 }
 
+// presetForBaseURL returns the provider preset whose Base URL matches, or the
+// custom endpoint.
+func presetForBaseURL(baseURL string) string {
+	base := strings.TrimRight(strings.TrimSpace(baseURL), "/")
+	if base == "" {
+		return "custom"
+	}
+	for _, preset := range providerPresets {
+		if preset.baseURL != "" && strings.TrimRight(preset.baseURL, "/") == base {
+			return preset.id
+		}
+	}
+	return "custom"
+}
+
+// providerPresetLabel is a preset's visible name: the product name, or the
+// translated "Custom" for the custom endpoint.
+func (a *App) providerPresetLabel(preset providerPreset) string {
+	if preset.name != "" {
+		return preset.name
+	}
+	return a.T("models.provider_custom")
+}
+
+// applyProviderPreset copies a preset's wire fields into the dialog draft and
+// clears a previous probe result: the old result no longer describes the
+// endpoint the fields now name.
+func (a *App) applyProviderPreset(preset providerPreset) {
+	st := a.shellUI()
+	st.modelDraft.preset = preset.id
+	if preset.baseURL != "" {
+		st.modelDraft.baseURL = preset.baseURL
+	}
+	if preset.model != "" {
+		st.modelDraft.model = preset.model
+	}
+	a.resetModelProbe()
+}
+
+// resetModelProbe cancels a running "Test connection" and clears its result;
+// the dialog calls it when it opens, closes or points at different fields.
+func (a *App) resetModelProbe() {
+	if a.modelProbeCancel != nil {
+		a.modelProbeCancel()
+		a.modelProbeCancel = nil
+	}
+	a.setModelProbe(modelProbeState{})
+}
+
+// currentModelProbe reads the probe state; the probe goroutine writes it, so
+// the frame and the goroutine share it through modelProbeMu.
+func (a *App) currentModelProbe() modelProbeState {
+	a.modelProbeMu.Lock()
+	defer a.modelProbeMu.Unlock()
+	return a.modelProbe
+}
+
+// setModelProbe replaces the probe state under modelProbeMu.
+func (a *App) setModelProbe(state modelProbeState) {
+	a.modelProbeMu.Lock()
+	a.modelProbe = state
+	a.modelProbeMu.Unlock()
+}
+
+// testModelConnection starts the probe for the current draft fields: the
+// request runs off the view goroutine with a short timeout, and the frame
+// paints App.modelProbe. The messages are resolved before the goroutine starts
+// because a.T follows the UI language, which the view goroutine owns.
+func (a *App) testModelConnection(c *ui.Context) {
+	st := a.shellUI()
+	draft := st.modelDraft
+	base := strings.TrimSpace(draft.baseURL)
+	model := strings.TrimSpace(draft.model)
+	if base == "" || model == "" {
+		a.setModelProbe(modelProbeState{message: a.T("models.test_needs_url_and_model")})
+		if c != nil {
+			c.Invalidate()
+		}
+		return
+	}
+	a.resetModelProbe()
+	ctx, cancel := context.WithTimeout(context.Background(), 12*time.Second)
+	a.modelProbeCancel = cancel
+	a.setModelProbe(modelProbeState{running: true, message: a.T("models.testing_connection")})
+	if c != nil {
+		c.Invalidate()
+	}
+	okMessage := a.T("models.connection_ok")
+	failTemplate := a.T("models.connection_failed")
+	apiKey := draft.apiKey
+	go func() {
+		err := probeModelConnection(ctx, base, apiKey)
+		cancel()
+		if err != nil {
+			a.setModelProbe(modelProbeState{message: fmt.Sprintf(failTemplate, err.Error())})
+		} else {
+			a.setModelProbe(modelProbeState{ok: true, message: okMessage})
+		}
+		if c != nil {
+			c.Invalidate()
+		}
+	}()
+}
+
+// modelProviderField is the Add model dialog's provider preset row: choosing
+// DeepSeek/OpenAI/Ollama fills Base URL and Model so the common cases need only
+// a key. The custom row leaves both fields alone.
+func (a *App) modelProviderField(c *ui.Context, t *design.Tokens) {
+	th := t.Theme()
+	st := a.shellUI()
+	labels := make([]string, 0, len(providerPresets))
+	current := ""
+	for _, preset := range providerPresets {
+		label := a.providerPresetLabel(preset)
+		labels = append(labels, label)
+		if preset.id == st.modelDraft.preset {
+			current = label
+		}
+	}
+	if current == "" {
+		current = a.T("models.provider_custom")
+	}
+	ui.Field(c, a.T("models.provider"), func() {
+		sel := ui.Select(c, &current, labels)
+		sel.Height(th.Space(9)).MinWidth(th.Space(36)).Radius(design.RadiusSM)
+		if sel.Changed() {
+			for _, preset := range providerPresets {
+				if a.providerPresetLabel(preset) == current {
+					a.applyProviderPreset(preset)
+					break
+				}
+			}
+		}
+	})
+}
+
 // modelDialog is the Add/Edit model form: the native mygo Form lays the
-// labels beside the controls, and the buttons stay native.
+// labels beside the controls, and the buttons stay native. The provider
+// presets and the connection test live above the form's Save/Cancel so the
+// user can check a URL and key before persisting them (PD-02).
 func (a *App) modelDialog(c *ui.Context, t *design.Tokens) {
 	th := t.Theme()
 	st := a.shellUI()
@@ -232,6 +457,7 @@ func (a *App) modelDialog(c *ui.Context, t *design.Tokens) {
 				title = a.T("models.edit_model")
 			}
 			settingsText(c, title, design.TypeL, t.LabelPrimary).FontWeight(600)
+			a.modelProviderField(c, t)
 			ui.Form(c, func() {
 				a.modelField(c, t, a.T("models.name"), &st.modelDraft.name,
 					"DeepSeek V4.1 Flash", true, false)
@@ -244,9 +470,31 @@ func (a *App) modelDialog(c *ui.Context, t *design.Tokens) {
 				a.modelField(c, t, a.T("models.reasoning_effort"), &st.modelDraft.effort,
 					a.T("common.high"), false, false)
 			})
+			ui.Row(c).Gap(design.Space2).AlignItems(ui.Center).Children(func() {
+				probe := a.currentModelProbe()
+				testLabel := a.T("models.test_connection")
+				if probe.running {
+					testLabel = a.T("models.testing_connection")
+				}
+				button := ui.Button(c, testLabel).Height(th.Space(8)).Label(testLabel)
+				button.OnClick(func() { a.testModelConnection(c) })
+				if msg := probe.message; msg != "" {
+					color := t.LabelTertiary
+					switch {
+					case probe.running:
+					case probe.ok:
+						color = t.Success
+					default:
+						color = t.Danger
+					}
+					ui.Text(c, msg).FontSize(11).FixedLineHeight(16).
+						TextColor(color).MaxLines(2).Ellipsis("…")
+				}
+			})
 			ui.Row(c).Justify(ui.End).Gap(th.Space(2)).
 				Padding(th.Space(2), 0, 0, 0).Children(func() {
 				if ui.Button(c, a.T("models.cancel")).Clicked() {
+					a.resetModelProbe()
 					st.modelDialog = false
 				}
 				if ui.PrimaryButton(c, a.T("models.save")).Clicked() {
@@ -302,6 +550,7 @@ func (a *App) confirmModel(c *ui.Context) {
 		c.Toast(a.T("models.could_not_save_model"))
 		return
 	}
+	a.resetModelProbe()
 	st.modelDialog = false
 	c.Toast(a.T("models.model_saved"))
 }
@@ -318,15 +567,53 @@ func (a *App) setDefaultModel(c *ui.Context, model store.Model) {
 	c.Toast(a.T("models.default_model_updated"))
 }
 
-// deleteModel removes a model; deleting the default clears it.
-func (a *App) deleteModel(c *ui.Context, model store.Model) {
+// beginModelDelete opens the delete confirmation for model (PD-18): deleting
+// the default model changes what every session falls back to, so it must not
+// happen on a single click.
+func (a *App) beginModelDelete(model store.Model) {
+	a.modelDeleteID = model.ID
+	a.modelDeleteName = modelDisplayName(model)
+	a.modelDeleteOpen = true
+}
+
+// modelDeleteDialog is the model row's destructive confirmation, matching the
+// Automation task delete: Cancel takes the focus, Esc and the backdrop dismiss
+// it, and the danger button is never the default action.
+func (a *App) modelDeleteDialog(c *ui.Context, t *design.Tokens) {
+	th := t.Theme()
+	ui.Modal(c, &a.modelDeleteOpen, func() {
+		ui.Column(c).Width(th.Space(105)).Gap(th.Space(3)).Children(func() {
+			settingsText(c, a.T("models.delete_model_title"), design.TypeM, t.LabelPrimary).
+				FontWeight(600)
+			message := a.T("models.delete_model_named")
+			settingsText(c, fmt.Sprintf(message, a.modelDeleteName), design.TypeXS,
+				t.LabelSecondary).MaxLines(3)
+			ui.Row(c).Gap(th.Space(2)).Justify(ui.End).Children(func() {
+				if ui.Button(c, a.T("models.cancel")).AutoFocus().Clicked() {
+					a.modelDeleteOpen = false
+				}
+				if ui.Button(c, a.T("models.delete_model_confirm")).TextColor(t.Danger).Clicked() {
+					a.confirmModelDelete(c)
+				}
+			})
+		})
+	})
+}
+
+// confirmModelDelete removes the confirmed model. A failure keeps the dialog
+// open and reports through the toast so the user can retry or cancel.
+func (a *App) confirmModelDelete(c *ui.Context) {
 	if a.Ctrl == nil {
+		a.modelDeleteOpen = false
 		return
 	}
-	if err := a.Ctrl.Models().Delete(model.ID); err != nil {
+	if err := a.Ctrl.Models().Delete(a.modelDeleteID); err != nil {
 		c.Toast(a.T("models.could_not_delete_model"))
 		return
 	}
+	a.modelDeleteOpen = false
+	a.modelDeleteID = ""
+	a.modelDeleteName = ""
 	c.Toast(a.T("models.model_deleted"))
 }
 

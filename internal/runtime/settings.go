@@ -76,8 +76,109 @@ var SettingsAllowedKeys = map[string]bool{
 	"plugin.agent_teams.enabled": true,
 }
 
+// SettingsWriteAllowedKeys is the settings_set allowlist. It is deliberately
+// narrower than the read whitelist: Creator mode may tune benign behavior, but
+// it must not be able to change a setting whose next value starts a process,
+// moves credentials to a different destination, or weakens an approval/sandbox
+// control. Writing those through a model-facing tool would be a second
+// execution/authorization channel outside the approval gate (the model — or
+// prompt-injected workspace content — could point MCP at an attacker command,
+// redirect provider traffic, or empty the approval list).
+//
+// Everything absent here is rejected even when settings_get may read it:
+//   - mcp.*            (server command/args/env; including any workspace MCP
+//     enable switch) — process execution on next rebuild
+//   - provider.base_url — sends the API key and conversation to another host
+//   - websearch.endpoint / web_search.endpoint — sends the stored key to
+//     another host
+//   - approval.tools   — would disable/weaken the approval gate
+//   - ui.permission    — would weaken the default access mode
+//   - plugin.shell.*, plugin.mcp.enabled — re-enable a process-capable plugin
+//     or its configuration path
+var SettingsWriteAllowedKeys = map[string]bool{
+	// Model behavior (not endpoints or credentials).
+	"model.default":             true,
+	"provider.model":            true,
+	"provider.reasoning_effort": true,
+	// Agent preset selection.
+	"agent.preset":             true,
+	"agent.collaboration_mode": true,
+	// Skill catalog root: only changes which SKILL.md files are read as
+	// untrusted data, not what can execute.
+	"skills.root": true,
+	// Appearance and composer behavior.
+	"ui.language":              true,
+	"ui.theme":                 true,
+	"ui.font_size":             true,
+	"ui.work_details":          true,
+	"ui.show_coding_view":      true,
+	"ui.collapse_work_details": true,
+	"ui.send_behavior":         true,
+	// Safe plugin tuning: iteration/timeout/output knobs and feature switches
+	// that cannot start arbitrary processes by themselves.
+	"plugin.agent_loop.enabled":            true,
+	"plugin.agent_loop.max_iterations":     true,
+	"plugin.agent_loop.budget_warn_steps":  true,
+	"plugin.agent_loop.budget_warn_tokens": true,
+	"plugin.skills.enabled":                true,
+	"plugin.subagent.enabled":              true,
+	"plugin.subagent.depth":                true,
+	"plugin.subagent.model":                true,
+	"plugin.web_search.enabled":            true,
+	"plugin.agent_teams.enabled":           true,
+	// Search result cap (the endpoint itself is not writable).
+	"websearch.max_results":  true,
+	"web_search.max_results": true,
+}
+
+// SettingsWriteDeniedKeys are the read-whitelisted keys the Creator writer must
+// never change. They are listed explicitly (in addition to the exact-key
+// allowlist) so the intent survives a future widening of the allowlist: a key
+// here can never become writable by mistake.
+var SettingsWriteDeniedKeys = map[string]bool{
+	"mcp.servers":          true,
+	"mcp.workspace_config": true,
+	"provider.base_url":    true,
+	"websearch.endpoint":   true,
+	"web_search.endpoint":  true,
+	"approval.tools":       true,
+	"ui.permission":        true,
+	"plugin.shell.enabled": true,
+	"plugin.mcp.enabled":   true,
+}
+
+// SettingsWriteDeniedPrefixes are namespaces where every key could re-open an
+// execution or credential path. Denying the whole namespace is simpler and
+// safer than enumerating future server/transport/endpoint keys.
+var SettingsWriteDeniedPrefixes = []string{
+	"mcp.",
+	"plugin.shell.",
+	"plugin.mcp.",
+}
+
+// SettingsKeyWritable reports whether Creator mode's settings_set tool may
+// write key. Reads use SettingsKeyAllowed; writes additionally require the
+// minimized write allowlist and reject every execution, credential or
+// authorization surface.
+func SettingsKeyWritable(key string) bool {
+	key = strings.TrimSpace(key)
+	if !SettingsKeyAllowed(key) {
+		return false
+	}
+	if SettingsWriteDeniedKeys[key] {
+		return false
+	}
+	for _, prefix := range SettingsWriteDeniedPrefixes {
+		if strings.HasPrefix(key, prefix) {
+			return false
+		}
+	}
+	return SettingsWriteAllowedKeys[key]
+}
+
 // SettingsKeyAllowed reports whether Creator mode may read or write key. This
-// is the single whitelist used by both settings tools.
+// is the single read whitelist used by settings_get; settings_set applies the
+// narrower SettingsKeyWritable on top.
 func SettingsKeyAllowed(key string) bool {
 	key = strings.TrimSpace(key)
 	if !settingsKeyPattern.MatchString(key) {
@@ -282,7 +383,7 @@ const settingsSetDescription = `Write one whitelisted ZeoKeel setting.
 Call it with a JSON object:
   {"key":"ui.language","value":"zh"}
 
-Only Creator mode exposes this tool. The same whitelist as settings_get applies; secret names (API keys, tokens, passwords, credentials) are rejected. Values are stored as text; a JSON string, number, boolean or null is accepted and normalized to text (null/omitted stores an empty value). A setting change takes effect for the next agent rebuild or turn as the setting owner documents.
+Only Creator mode exposes this tool. The write whitelist is narrower than settings_get's read whitelist: secret names (API keys, tokens, passwords, credentials) are rejected, and so is every setting that could start a process, move credentials or weaken the approval/sandbox controls (MCP server configuration, provider/web-search endpoints, approval.tools, ui.permission, shell/MCP plugin switches). Values are stored as text; a JSON string, number, boolean or null is accepted and normalized to text (null/omitted stores an empty value). A setting change takes effect for the next agent rebuild or turn as the setting owner documents.
 
 Args JSON schema:
 {"type":"object","properties":{"key":{"type":"string","description":"Setting key, for example ui.language."},"value":{"description":"New value; strings, numbers and booleans are stored as text."}},"required":["key"],"additionalProperties":false}`
@@ -304,8 +405,8 @@ func (t *settingsSetTool) Invoke(_ context.Context, args json.RawMessage) (strin
 	if key == "" {
 		return "", fmt.Errorf(`settings_set: "key" is required`)
 	}
-	if !SettingsKeyAllowed(key) {
-		return "", fmt.Errorf("settings_set: key %q is not allowed by the Creator settings whitelist", key)
+	if !SettingsKeyWritable(key) {
+		return "", fmt.Errorf("settings_set: key %q is not writable by the Creator settings tool (execution, credential and authorization settings are read-only)", key)
 	}
 	value, err := settingsValueText(in.Value)
 	if err != nil {

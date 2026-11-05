@@ -591,10 +591,10 @@ func TestMentionMenuIncludesSessions(t *testing.T) {
 	if !tt.HasText("lively.md") {
 		t.Fatalf("mention menu missing the file: %v", tt.Texts())
 	}
-	if !tt.HasText("session · live") {
+	if !tt.HasText("Session · live") {
 		t.Fatalf("mention menu missing the session: %v", tt.Texts())
 	}
-	if err := tt.Click("session · live"); err != nil {
+	if err := tt.Click("Session · live"); err != nil {
 		t.Fatalf("click session mention: %v", err)
 	}
 	if want := "read #live "; h.app.draft != want {
@@ -621,7 +621,7 @@ func TestMentionSessionsWithNoFileMatches(t *testing.T) {
 		t.Fatalf("RenameSession: %v", err)
 	}
 	tt := ui.NewTester(h.app.View, 1600, 1000)
-	if !tt.HasText("session · zh-plan") {
+	if !tt.HasText("Session · zh-plan") {
 		t.Fatalf("session-only mention menu missing: %v", tt.Texts())
 	}
 }

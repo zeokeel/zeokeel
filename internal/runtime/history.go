@@ -2,6 +2,7 @@ package runtime
 
 import (
 	"context"
+	"sync"
 
 	"github.com/cloudwego/eino/adk"
 	"github.com/cloudwego/eino/schema"
@@ -119,6 +120,9 @@ func (m Message) empty() bool {
 // every assistant message (including the ones that only carry tool calls), and
 // every tool result. The run goroutine owns the record; tools never touch it.
 type turnRecord struct {
+	// mu guards msgs: the run goroutine appends while a concurrently running
+	// tool (or parallel tool call) takes a barrier checkpoint snapshot.
+	mu   sync.Mutex
 	msgs []Message
 }
 
@@ -130,12 +134,19 @@ func (r *turnRecord) add(msg Message) {
 	if r == nil || msg.empty() {
 		return
 	}
+	r.mu.Lock()
 	r.msgs = append(r.msgs, msg)
+	r.mu.Unlock()
 }
 
 // messages returns a copy so callers cannot mutate the record's state.
 func (r *turnRecord) messages() []Message {
-	if r == nil || len(r.msgs) == 0 {
+	if r == nil {
+		return nil
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if len(r.msgs) == 0 {
 		return nil
 	}
 	return append([]Message(nil), r.msgs...)

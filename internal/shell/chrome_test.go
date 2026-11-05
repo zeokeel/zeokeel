@@ -36,23 +36,23 @@ func TestSidebarCollapseRailEveryScreen(t *testing.T) {
 		t.Fatalf("collapsed rail has no Expand sidebar control: %q", tt.Texts())
 	}
 
-	// The rail's workspace icon toggles that workspace's session group,
-	// and its More icon opens the same account menu.
+	// The rail's workspace icon opens that workspace's session flyout
+	// (UX-08): the tree is hidden in the rail, so the flyout is the way to
+	// reach a session or start one there.
 	if _, ok := tt.Find("test"); !ok {
 		t.Fatalf("collapsed rail has no workspace icon: %q", tt.Texts())
 	}
 	if err := tt.Click("test"); err != nil {
 		t.Fatalf("click rail workspace: %v", err)
 	}
-	wsID := app.Ctrl.CurrentWorkspaceID()
-	if !app.wsCollapsed[wsID] {
-		t.Fatal("rail workspace click did not toggle the session group")
+	for _, want := range []string{"New session here", "Open workspace"} {
+		if !tt.HasText(want) {
+			t.Fatalf("rail workspace flyout missing %q: %q", want, tt.Texts())
+		}
 	}
-	if err := tt.Click("test"); err != nil {
-		t.Fatalf("click rail workspace again: %v", err)
-	}
-	if app.wsCollapsed[wsID] {
-		t.Fatal("second rail workspace click did not toggle back")
+	tt.Key(0, ui.KeyEscape)
+	if _, ok := tt.Find("New session here"); ok {
+		t.Fatalf("Escape did not close the rail workspace flyout: %q", tt.Texts())
 	}
 	if err := tt.Click("More"); err != nil {
 		t.Fatalf("click rail More: %v", err)

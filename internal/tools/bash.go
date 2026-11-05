@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/zeokeel/zeokeel/internal/tools/winenc"
+	"github.com/zeokeel/zeokeel/internal/winproc"
 )
 
 const (
@@ -174,22 +175,14 @@ func (t *bashTool) Invoke(ctx context.Context, args json.RawMessage) (string, er
 	return text, nil
 }
 
-// scrubEnv removes ZeoKeel and provider secrets from a child environment.
-// Matching is case-insensitive so Windows-style variable names are covered.
+// scrubEnv removes credential-bearing variables from a child environment.
+// Shell children deliberately get a scrubbed copy of the process environment
+// instead of a whitelist: PATH/HOME/LANG/TERM and build-tool variables must keep
+// working, while ZeoKeel/provider secrets and the common cloud/CI credential
+// names are removed. The matcher is shared with the MCP client (winproc.ScrubEnv,
+// RT-15).
 func scrubEnv(env []string) []string {
-	out := make([]string, 0, len(env))
-	for _, entry := range env {
-		name := entry
-		if i := strings.IndexByte(entry, '='); i >= 0 {
-			name = entry[:i]
-		}
-		upper := strings.ToUpper(name)
-		if strings.HasPrefix(upper, "ZEOKEEL_") || strings.HasPrefix(upper, "DEEPSEEK") {
-			continue
-		}
-		out = append(out, entry)
-	}
-	return out
+	return winproc.ScrubEnv(env)
 }
 
 // setEnv replaces any existing key (case-insensitively) with key=value. The

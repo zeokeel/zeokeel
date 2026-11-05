@@ -276,21 +276,25 @@ done
 
 ### 4.2 分层与依赖方向
 
+实际包结构（2026-11-05 审计后按代码复核；`go list ./...` 共 20 个包）：
+
 ```
-cmd/mygo-agent
-   └─ internal/app        组装：配置、store、runtime、UI、托盘、单实例
-        ├─ internal/ui      纯视图：view(snapshot) 函数 + 主题 + 组件
-        ├─ internal/view    快照类型、投影、动作（Action）定义
-        ├─ internal/runtime eino 图、会话、审批、工具调度、事件
-        │     ├─ internal/tools     工具实现（fs/bash/web/...）
-        │     ├─ internal/provider  模型 provider（SSE 流式）
-        │     ├─ internal/prompt    系统提示词、工具描述、模板
-        │     └─ internal/ext       skills / MCP / 计划 / 目标 / 定时
-        ├─ internal/store   SQLite + JSONL + 迁移
-        └─ internal/design  设计令牌（生成）+ 基础样式函数层（§5.4）
+cmd/zeokeel            进程入口：日志/崩溃诊断、--version/--help、run 子命令
+internal/app           组装根：配置、store、provider、runtime、session、shell、托盘、单实例
+internal/shell         mygo 原生 UI + 交互/命令 + 会话动作（现状：God package，AR-04 待拆；直接依赖 store/session）
+internal/runtime       eino ADK 图、审批、工具调度、事件（只依赖 state，不依赖 store/session）
+internal/session       会话控制器：提交/停止、快照、持久化编排
+internal/tools         工具实现（fs/shell/terminal/jobs/web/team/...）
+internal/provider/openai  OpenAI 兼容 SSE 流式 + tool calls + 重试/空闲超时
+internal/prompt        系统提示词 section 注册表（EN/ZH）
+internal/store         SQLite（唯一持久化真源）+ 每会话 JSONL 镜像 + 迁移
+internal/state         事件总线 Broker + 不可变快照（无内部依赖）
+internal/mcp  internal/agentteam  internal/skills  internal/automation  internal/websearch  internal/winproc
+internal/design  internal/brand  internal/icons   设计令牌/品牌主题/图标
+internal/e2e           build tag e2e 的真实模型 E2E（默认不编译）
 ```
 
-依赖只能向下：`ui → view → runtime → {tools, provider, store}`；`design` 与 `platform` 被所有层依赖。禁止 `runtime` 反向依赖 `ui`。
+依赖方向（现行）：`runtime → state`，`provider → runtime`，`store` 无内部依赖；`session → {runtime, state, store, tools}`；`shell → {store, session, state, runtime, tools, automation, winproc, design, brand, icons}`；`app` 是唯一组装根（import 13 个内部包）。**已知债务**：`shell` 越过"视图"层直接调 store/session 并在 UI 线程执行 DB 操作（BUGS AR-04/AR-08），`tools` 反向依赖 store（会话查询工具），这两条是后续分层重构的目标。
 
 ### 4.3 一次对话的端到端时序
 
@@ -320,8 +324,8 @@ type StatusEvent struct{ Phase Phase; Subagents, Jobs int }
 type ErrorEvent struct{ MsgID string; Err error }
 ```
 
-- 总线是**有界队列 + 单消费者**；投影层是唯一消费者，保证 UI 快照的确定性与可测试性。
-- 事件同时落 JSONL（`events.jsonl`），用于恢复、轨迹页与回放测试。
+- 总线是**有界队列 + 非阻塞投递**（满了丢弃并计数）；设计意图是单消费者投影层，但现状是 `session.Controller` 自己折叠 `views` 快照、`state.Projector` 仍在旁路折叠（BUGS AR-05：二选一收敛）。
+- 事件同时落每会话 JSONL（`<data dir>/sessions/<id>/session.jsonl`），用于人类可读镜像/导出；**SQLite `events` 表是持久化真源**（见 §8.3）。
 
 ### 4.5 状态机（会话/回合/工具/审批）
 
@@ -360,7 +364,7 @@ type ErrorEvent struct{ MsgID string; Err error }
 | ~~ADR-7~~ | ~~令牌机器生成 + 单测锁死~~ **已退役（2026-11-05）** | 历史：像素 1:1 需要可验证 | 现行：视觉令牌以品牌主题（ADR 0002）为源，不做 DSH 令牌同步 |
 | ADR-8 | 交互测试基于 `NewTester`/`Render`（像素测试已退役） | 确定性、无显示器、快 | 外部截图 E2E：作为补充，不作主门禁 |
 | ADR-9 | 基础样式函数化（Go style 函数） | 单一事实来源；集中维护；复用与评审 | 各屏手写链式样式：漂移、无法门禁 |
-| **ADR-10** | **退役 DSH 像素/交互 1:1；功能对齐 + 自有视觉/交互** | 像素不可达且无差异化；产品定位为 DSH 桌面替代/迁移器 + 独立品牌（2026-11-05，见 ADR 0001） | 维持三重 1:1：否决 |
+| **ADR-10** | **退役 DSH 像素/交互 1:1；功能对齐 + 自有视觉/交互** | 像素不可达且无差异化；产品定位为 DSH 同类替代 + 独立品牌（2026-11-05，见 ADR 0001；迁移能力见 docs/BUGS.md PD-04，尚无导入器） | 维持三重 1:1：否决 |
 
 ---
 
@@ -722,9 +726,9 @@ ChatModelAgent(deepseek-v4.1-flash, tools=[...], middlewares=[...])
 
 ### 8.3 持久化与恢复
 
-- `session.jsonl`：追加式事件（用户/assistant/工具/审批/用量），**唯一真相**。
-- `index.sqlite`：会话、消息、工具调用、用量、搜索索引（可重建）。
-- checkpoint：每回合结束与工具批次结束落盘；崩溃后从 checkpoint + JSONL 尾部对齐恢复。
+- `index.sqlite`：**持久化真源**——会话、消息、工具调用、事件、设置；每会话事件用 `(session_id, seq)` 主键自增。
+- `session.jsonl`：追加式事件的**人类可读镜像/导出格式**（`store.AppendTranscript`，写入错误不致命）；生产路径不从它恢复（`ReadTranscript` 目前仅测试使用，BUGS AR-14）。
+- checkpoint：每回合结束与工具批次结束落盘；崩溃后以 SQLite history + checkpoint 恢复。
 - 恢复策略：未完成回合标 `interrupted`，给"继续/重试"；不自动重放有副作用的工具。
 
 ### 8.4 工具实现清单
@@ -907,7 +911,7 @@ sh scripts/check-nocgo.sh       # 零 cgo + 四目标交叉编译
 
 ### 11.3 每个里程碑的固定动作
 
-1. 代码 + 测试；2. 交互 + 功能门禁（视觉按自有设计系统）；3. 写/更新 ADR；4. 录一段 60s 演示；5. 更新 `docs/STATUS.md`（唯一状态真源）。
+1. 代码 + 测试；2. 交互 + 功能门禁（视觉按自有设计系统）；3. 写/更新 ADR；4. 录一段 60s 演示；5. 更新 `docs/STATUS.md`（唯一状态真源）与 `docs/BUGS.md`（缺陷状态），数字类结论附命令与 commit。
 
 ### 11.4 M0 详细任务（两周，可直接开工）
 
@@ -958,7 +962,7 @@ sh scripts/check-nocgo.sh       # 零 cgo + 四目标交叉编译
 - 主题与语言：默认中文，浅色 + 深色同期交付；
 - ~~样式路线（用户已选 A，2026-11-04）：原生 mygo + Go 样式函数层；DSH 的 CSS 只作为对齐依据（computed style 全量抽取），不在运行时解析 CSS~~ → **2026-11-05 更新**：原生 mygo + **ZeoKeel 品牌主题**（`internal/brand`，ADR 0002）；DSH 的 CSS/截图只作历史参考，**不在运行时解析 CSS**；webview/CSS 运行时方案否决。
 - 可建测试会话做行为确认；可读官方源码确认行为（只读，不复制）。
-- **2026-11-05 方向决策（用户）**：ZeoKeel = DSH 桌面替代/迁移器 + 独立品牌产品；**功能对齐 DSH，视觉与交互自有，停止像素级对齐**（[ADR 0001](decisions/0001-retire-dsh-pixel-parity.md)）。
+- **2026-11-05 方向决策（用户）**：ZeoKeel = **DSH 同类替代** + 独立品牌产品；**功能对齐 DSH，视觉与交互自有，停止像素级对齐**（[ADR 0001](decisions/0001-retire-dsh-pixel-parity.md)）。迁移（导入 DSH 会话/配置）尚无实现，最小导入器在路线图上（docs/BUGS.md PD-04），落地前不宣称"迁移器"。
 
 仍需你拍板（按重要性排序）：
 

@@ -133,8 +133,14 @@ func TestPluginDetailEditors(t *testing.T) {
 		}},
 	}
 	for _, tc := range cases {
-		if err := tt.Click("View " + tc.name); err != nil {
-			t.Fatalf("click View %s: %v", tc.name, err)
+		// The Plugins page now names the row from builtinPluginDefs ("Shell
+		// tools", PD-08) while the detail editor keeps its own "Shell" title.
+		rowName := tc.name
+		if rowName == "Shell" {
+			rowName = "Shell tools"
+		}
+		if err := tt.Click("View " + rowName); err != nil {
+			t.Fatalf("click View %s: %v", rowName, err)
 		}
 		if !tt.HasText(tc.name + " settings") {
 			t.Fatalf("%s detail dialog missing: %q", tc.name, tt.Texts())
@@ -192,8 +198,8 @@ func TestPluginDetailEditors(t *testing.T) {
 	}
 
 	// Cancel discards a draft.
-	if err := tt.Click("View Shell"); err != nil {
-		t.Fatalf("click View Shell: %v", err)
+	if err := tt.Click("View Shell tools"); err != nil {
+		t.Fatalf("click View Shell tools: %v", err)
 	}
 	*st.detailFields["plugin.shell.timeout_seconds"] = "301"
 	if err := tt.Click("Cancel"); err != nil {
@@ -288,10 +294,12 @@ func TestExperimentalSwitches(t *testing.T) {
 		t.Fatalf("plugin.agent_loop.enabled = %q, %v; want false", got, err)
 	}
 
-	// The experimental name opens an explanation dialog too.
-	if err := tt.Click("View Developer Tools"); err != nil {
-		t.Fatalf("click View Developer Tools: %v", err)
-	}
+	// The experimental name opens an explanation dialog too. The page now has
+	// six built-in rows (PD-08), so Developer Tools can start below the fold;
+	// its reachability by scrolling is covered by
+	// TestPluginsScrollsAtMinimumHeight, so this checks the dialog itself.
+	h.app.openPluginInstance("Developer Tools")
+	tt.Frame()
 	if !tt.HasText("inspect tool for raw session data") {
 		t.Fatalf("developer tools explanation missing: %q", tt.Texts())
 	}

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"sync"
+	"time"
 
 	"github.com/zeokeel/zeokeel/internal/state"
 )
@@ -44,8 +45,19 @@ func (s *eventSink) send(ctx context.Context, ev state.Event) bool {
 	}
 }
 
-// trySend publishes ev only when a receiver is ready. Terminal events emitted
-// after the turn has decided to stop must not block a cancelled consumer.
+// terminalSendGrace is how long trySend waits for room in a full output
+// channel. Terminal events (the final "idle/stopped" Status, a cancelled
+// ToolEnd, trailing usage) decide how the turn is recorded, so silently
+// dropping them can persist "completed" for a stopped turn (RT-13). The wait is
+// bounded: if the consumer really is gone, the turn goroutine must not leak.
+const terminalSendGrace = 2 * time.Second
+
+// trySend publishes ev, preferring delivery over a drop-on-full policy: it first
+// tries the non-blocking send, then waits up to terminalSendGrace for the
+// consumer to drain the channel. Only a closed sink or a consumer that stays
+// blocked for the whole grace period loses the event, which keeps terminal state
+// ("stopped", failed tool) correct under transient UI/database backpressure
+// without hanging a cancelled turn.
 func (s *eventSink) trySend(ev state.Event) {
 	if s == nil {
 		return
@@ -57,7 +69,14 @@ func (s *eventSink) trySend(ev state.Event) {
 	}
 	select {
 	case s.ch <- ev:
+		return
 	default:
+	}
+	timer := time.NewTimer(terminalSendGrace)
+	defer timer.Stop()
+	select {
+	case s.ch <- ev:
+	case <-timer.C:
 	}
 }
 

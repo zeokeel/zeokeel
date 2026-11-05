@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log"
 	"time"
 
 	"github.com/zeokeel/zeokeel/internal/state"
@@ -131,11 +132,27 @@ func (c *Controller) appendEvent(sessionID string, ev state.Event) error {
 	return nil
 }
 
-// appendStoredEvent writes one event row and mirrors it to the session's
+// appendStoredEvent persists one event row and mirrors it to the session's
 // JSONL transcript. The mirror is best effort: SQLite stays the source of
 // truth for a turn, but the documented crash-recovery/readable transcript
 // exists in production instead of only in tests.
+//
+// High-frequency stream chunks are buffered and written in batches (see
+// event_batch.go); every other event flushes the buffer first so the persisted
+// trace keeps arrival order and contiguous sequence numbers.
 func (c *Controller) appendStoredEvent(sessionID string, rec store.Event) (*store.Event, error) {
+	if isStreamEventType(rec.Type) {
+		if err := c.bufferStoredEvent(sessionID, rec); err != nil {
+			return nil, err
+		}
+		return nil, nil
+	}
+	// A flush failure must not drop this boundary event: status and turn_end
+	// are how a stop/failure survives a reopen, so log and keep going. The
+	// boundary row still reports its own error below.
+	if err := c.flushStoredEvents(sessionID); err != nil {
+		log.Printf("zeokeel: session: flush pending stream events before %s: %v", rec.Type, err)
+	}
 	out, err := c.store.AppendEvent(sessionID, rec)
 	if err != nil {
 		return nil, err

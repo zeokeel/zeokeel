@@ -151,10 +151,16 @@ func (a *App) sidebarRail(c *ui.Context, t *design.Tokens) {
 		})
 		ui.Row(c).PaddingX(th.Space(2)).Children(func() {
 			expand := chromeIconRow(c, t, a.tr("Expand sidebar", "展开侧边栏"), icons.PanelLeft(), false)
-			expand.OnClick(func() { a.sidebarCollapsed = false })
+			expand.OnClick(func() {
+				a.closeRailWorkspaceMenus("")
+				a.sidebarCollapsed = false
+			})
 		})
 		ui.Column(c).Padding(th.Space(1), th.Space(2), th.Space(2), th.Space(2)).
 			Gap(th.Space(1)).Children(func() {
+			home := chromeIconRow(c, t, a.T("shell.home"), icons.NewChat(), a.Screen == Home)
+			home.OnClick(func() { a.goHome() })
+
 			newButton := chromeIconRow(c, t, a.T("shell.new_session"), icons.CirclePlus(), false)
 			newButton.OnClick(func() { a.newSession() })
 
@@ -169,13 +175,16 @@ func (a *App) sidebarRail(c *ui.Context, t *design.Tokens) {
 				current := a.Ctrl.CurrentWorkspaceID()
 				for _, ws := range workspaces {
 					workspace := ws
-					item := chromeIconRow(c, t, workspace.Name, icons.Folder(), workspace.ID == current)
+					open := a.railWorkspacePopover(workspace.ID)
+					item := chromeIconRow(c, t, workspace.Name, icons.Folder(),
+						workspace.ID == current)
+					item.Expanded(*open)
 					item.OnClick(func() {
-						if workspace.ID == a.Ctrl.CurrentWorkspaceID() {
-							a.setWorkspaceCollapsed(workspace.ID, !a.wsCollapsed[workspace.ID])
-							return
-						}
-						a.switchWorkspace(workspace.ID)
+						a.closeRailWorkspaceMenus(workspace.ID)
+						*open = !*open
+					})
+					ui.Popover(c, item, open, func() {
+						a.railWorkspaceMenu(c, t, workspace, open)
 					})
 				}
 			}
@@ -195,6 +204,80 @@ func (a *App) sidebarRail(c *ui.Context, t *design.Tokens) {
 	})
 }
 
+// railWorkspacePopover returns the flyout state for one workspace's rail
+// icon, making it on first use.
+func (a *App) railWorkspacePopover(workspaceID string) *bool {
+	st := a.shellUI()
+	if st.railWorkspaceOpen == nil {
+		st.railWorkspaceOpen = make(map[string]*bool)
+	}
+	if open, ok := st.railWorkspaceOpen[workspaceID]; ok {
+		return open
+	}
+	open := new(bool)
+	st.railWorkspaceOpen[workspaceID] = open
+	return open
+}
+
+// closeRailWorkspaceMenus closes every rail workspace flyout except keep (the
+// one about to open); an empty keep closes all.
+func (a *App) closeRailWorkspaceMenus(keep string) {
+	st := a.shellUI()
+	for id, open := range st.railWorkspaceOpen {
+		if id != keep {
+			*open = false
+		}
+	}
+}
+
+// railWorkspaceMenu is the collapsed rail's workspace flyout: the workspace's
+// sessions, then the two actions that need a visible list (open the workspace,
+// start a session there). The rail hides the session tree, so this menu is how
+// a session is reached without expanding the sidebar (UX-08).
+func (a *App) railWorkspaceMenu(c *ui.Context, t *design.Tokens, ws store.Workspace, open *bool) {
+	if a.Ctrl == nil {
+		return
+	}
+	sessions, err := a.Ctrl.SessionsForWorkspace(context.Background(), ws.ID,
+		a.includeArchived(), a.manualSort)
+	a.popoverMenuPanel(c, t, func() {
+		ui.Text(c, ws.Name).FontSize(12).FontWeight(600).TextColor(t.LabelPrimary).
+			Padding(design.Space1, design.Space2).MaxLines(1).Ellipsis("…")
+		switch {
+		case err != nil:
+			ui.Text(c, a.T("workspace.could_not_load_sessions")).FontSize(11).
+				FixedLineHeight(16).TextColor(t.Danger).
+				Padding(design.Space1, design.Space2)
+		case len(sessions) == 0:
+			ui.Text(c, a.T("workspace.no_sessions_yet")).FontSize(11).
+				FixedLineHeight(16).TextColor(t.LabelTertiary).
+				Padding(design.Space1, design.Space2)
+		default:
+			for _, sess := range a.pinnedFirst(a.filterSessions(sessions)) {
+				session := sess
+				desc := a.sessionWhen(session.UpdatedAt)
+				a.popoverMenuRow(c, t, session.Title, desc, false, nil, func() {
+					*open = false
+					a.openSession(session.ID)
+				})
+			}
+		}
+		ui.Box(c).Height(1).Margin(design.Space1, design.Space2).Background(t.BorderL2)
+		a.popoverMenuActionRow(c, t, a.menuText("Open workspace", "打开工作区"), nil, func() {
+			*open = false
+			a.switchWorkspace(ws.ID)
+		})
+		a.popoverMenuActionRow(c, t, a.menuText("New session here", "在此新建会话"), nil, func() {
+			*open = false
+			if ws.ID != a.Ctrl.CurrentWorkspaceID() {
+				a.switchWorkspace(ws.ID)
+			}
+			a.newSession()
+		})
+	})
+}
+
+// chromeIconRow is one icon-only rail row: a native ButtonBase at the theme's
 // chromeIconRow is one icon-only rail row: a native ButtonBase at the theme's
 // rail metrics. The label is its accessible name, the tooltip and the
 // tester's click target; there is no visible text, which is what "icons only"

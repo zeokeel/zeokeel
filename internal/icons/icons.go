@@ -50,26 +50,27 @@ func get(name string) *ui.SVG {
 // right/down are the disclosure glyphs; NewChat is the composer's new-session
 // bubble; Data is the Session Log's storage glyph.
 var (
-	Folder       = func() *ui.SVG { return get("folder") }
-	FolderOpen   = func() *ui.SVG { return get("folder-open") }
-	FolderPlus   = func() *ui.SVG { return get("folder-plus") }
-	Plug         = func() *ui.SVG { return get("plug") }
-	Plugin       = func() *ui.SVG { return get("plugin") }
-	CirclePlus   = func() *ui.SVG { return get("circle-plus") }
-	Clock        = func() *ui.SVG { return get("clock") }
-	Search       = func() *ui.SVG { return get("search") }
-	Plus         = func() *ui.SVG { return get("plus") }
-	Sliders      = func() *ui.SVG { return get("sliders") }
-	PanelLeft    = func() *ui.SVG { return get("panel-left") }
-	More         = func() *ui.SVG { return get("more") }
-	ChevronRight = func() *ui.SVG { return get("chevron-right") }
-	ChevronDown  = func() *ui.SVG { return get("chevron-down") }
-	Message      = func() *ui.SVG { return get("message") }
-	Sparkles     = func() *ui.SVG { return get("sparkles") }
-	Terminal     = func() *ui.SVG { return get("terminal") }
-	NewChat      = func() *ui.SVG { return get("new-chat") }
-	Data         = func() *ui.SVG { return get("data") }
-	Reload       = func() *ui.SVG { return get("reload") }
+	Folder        = func() *ui.SVG { return get("folder") }
+	FolderOpen    = func() *ui.SVG { return get("folder-open") }
+	FolderPlus    = func() *ui.SVG { return get("folder-plus") }
+	Plug          = func() *ui.SVG { return get("plug") }
+	Plugin        = func() *ui.SVG { return get("plugin") }
+	CirclePlus    = func() *ui.SVG { return get("circle-plus") }
+	Clock         = func() *ui.SVG { return get("clock") }
+	Search        = func() *ui.SVG { return get("search") }
+	Plus          = func() *ui.SVG { return get("plus") }
+	Sliders       = func() *ui.SVG { return get("sliders") }
+	PanelLeft     = func() *ui.SVG { return get("panel-left") }
+	More          = func() *ui.SVG { return get("more") }
+	ChevronRight  = func() *ui.SVG { return get("chevron-right") }
+	ChevronDown   = func() *ui.SVG { return get("chevron-down") }
+	Message       = func() *ui.SVG { return get("message") }
+	Sparkles      = func() *ui.SVG { return get("sparkles") }
+	Terminal      = func() *ui.SVG { return get("terminal") }
+	NewChat       = func() *ui.SVG { return get("new-chat") }
+	Data          = func() *ui.SVG { return get("data") }
+	Reload        = func() *ui.SVG { return get("reload") }
+	AlertTriangle = func() *ui.SVG { return get("alert-triangle") }
 )
 
 // Semantic aliases keep call sites readable where the DSH name differs from

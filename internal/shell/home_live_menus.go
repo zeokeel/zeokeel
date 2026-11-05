@@ -77,6 +77,11 @@ type liveMenuState struct {
 	// dismissal instead of comparing against the stored draft forever.
 	menuDraft    string
 	menuDraftSet bool
+
+	// errorDetails is the transcript's per-error "Technical details" toggle,
+	// keyed by the error's record Seq. No entry means the card shows the
+	// productized copy only.
+	errorDetails map[uint64]bool
 }
 
 // liveMenuStates maps each App to its live popover state. Entries live as long
@@ -176,6 +181,7 @@ func (a *App) livePermissionChip(c *ui.Context, t *design.Tokens) {
 	current := a.composerPermissionLabel(mode)
 	chip := homeChip(c, t).
 		Label(a.menuText("Access mode, current: ", "访问模式，当前：") + current).
+		Tooltip(a.menuText("Access mode: ", "访问模式：") + current).
 		Value(current).Role(ui.RolePopUpButton).Focusable()
 	chip.Children(func() {
 		ui.Icon(c, homeIconShield).Size(th.Space(4), th.Space(4)).TextColor(t.LabelSecondary)

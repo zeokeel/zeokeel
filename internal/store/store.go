@@ -52,6 +52,11 @@ const (
 	busyTimeoutMS = 5000
 	// dirPerm is the mode used for the store and per-session directories.
 	dirPerm = 0o700
+	// filePerm is the mode enforced on the index and its WAL sidecars. The
+	// index stores provider API keys and the full session history, so it must
+	// not be world- or group-readable even when the directory mode was
+	// loosened by an older build, a restore or a sync tool (RT-11).
+	filePerm = 0o600
 )
 
 // Store is a handle to one on-disk ZeoKeel data directory.
@@ -94,6 +99,13 @@ func Open(dir string) (*Store, error) {
 		db.Close() //nolint:errcheck // original error wins
 		return nil, fmt.Errorf("store: open %q: connect: %w", path, err)
 	}
+	// Enforce the modes right after the database exists: SQLite copies the
+	// database file's mode onto the WAL/-shm sidecars it creates later, so
+	// securing index.sqlite before the first write keeps them 0600 too.
+	if err := secureDatabaseFiles(dir, path); err != nil {
+		db.Close() //nolint:errcheck // original error wins
+		return nil, fmt.Errorf("store: open %q: %w", dir, err)
+	}
 	if err := applyPragmas(db); err != nil {
 		db.Close() //nolint:errcheck // original error wins
 		return nil, fmt.Errorf("store: open %q: %w", path, err)
@@ -102,7 +114,33 @@ func Open(dir string) (*Store, error) {
 		db.Close() //nolint:errcheck // original error wins
 		return nil, fmt.Errorf("store: open %q: %w", path, err)
 	}
+	// A WAL sidecar may have been created before the mode above (or by a
+	// previous process); re-check after migration so a repaired database and
+	// its sidecars all end up 0600 while the connection is open.
+	if err := secureDatabaseFiles(dir, path); err != nil {
+		db.Close() //nolint:errcheck // original error wins
+		return nil, fmt.Errorf("store: open %q: %w", dir, err)
+	}
 	return &Store{dir: dir, path: path, db: db}, nil
+}
+
+// secureDatabaseFiles enforces the store directory's 0700 and the index's (and
+// any existing -wal/-shm sidecars') 0600 modes. The sidecars are optional: they
+// only exist while WAL has pending pages, so a missing one is not an error.
+func secureDatabaseFiles(dir, path string) error {
+	if err := os.Chmod(dir, dirPerm); err != nil {
+		return fmt.Errorf("secure data directory: %w", err)
+	}
+	for _, name := range []string{dbFileName, dbFileName + "-wal", dbFileName + "-shm"} {
+		target := filepath.Join(dir, name)
+		if err := os.Chmod(target, filePerm); err != nil {
+			if os.IsNotExist(err) {
+				continue
+			}
+			return fmt.Errorf("secure %s: %w", name, err)
+		}
+	}
+	return nil
 }
 
 // Close releases the database connection. It is safe to call more than once.

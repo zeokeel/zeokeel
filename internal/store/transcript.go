@@ -64,21 +64,41 @@ func (s *Store) RemoveSessionDir(sessionID string) error {
 // The JSONL transcript is the durable, human-readable mirror of the events
 // table (docs/PLAN.md §9.3); records are otherwise opaque to the store.
 func AppendTranscript(dir, sessionID string, record any) error {
+	return AppendTranscriptRecords(dir, sessionID, []any{record})
+}
+
+// AppendTranscriptRecords appends records as consecutive JSON lines to the
+// session transcript. All lines are written with one open, one write and one
+// fsync, which keeps high-frequency callers (streamed token events) from
+// paying a file open plus durability barrier per record. The atomicity
+// guarantee matches AppendTranscript: after it returns the lines are durable,
+// and a crash during the write can only tear the final line.
+//
+// An empty record list is a no-op.
+func AppendTranscriptRecords(dir, sessionID string, records []any) error {
 	if strings.TrimSpace(dir) == "" {
 		return fmt.Errorf("%w: append transcript: empty directory", ErrInvalidArgument)
 	}
-	if record == nil {
-		return fmt.Errorf("%w: append transcript: nil record", ErrInvalidArgument)
+	if len(records) == 0 {
+		return nil
 	}
 	sessDir, err := sessionDir(dir, sessionID)
 	if err != nil {
 		return fmt.Errorf("store: append transcript: %w", err)
 	}
-	line, err := json.Marshal(record)
-	if err != nil {
-		return fmt.Errorf("store: append transcript: encode record: %w", err)
+
+	var buf bytes.Buffer
+	for _, record := range records {
+		if record == nil {
+			return fmt.Errorf("%w: append transcript: nil record", ErrInvalidArgument)
+		}
+		line, err := json.Marshal(record)
+		if err != nil {
+			return fmt.Errorf("store: append transcript: encode record: %w", err)
+		}
+		buf.Write(line)
+		buf.WriteByte('\n')
 	}
-	line = append(line, '\n')
 
 	if err := os.MkdirAll(sessDir, dirPerm); err != nil {
 		return fmt.Errorf("store: append transcript: create session directory: %w", err)
@@ -91,7 +111,7 @@ func AppendTranscript(dir, sessionID string, record any) error {
 	if err != nil {
 		return fmt.Errorf("store: append transcript %q: %w", path, err)
 	}
-	if _, err := f.Write(line); err != nil {
+	if _, err := f.Write(buf.Bytes()); err != nil {
 		f.Close() //nolint:errcheck // write error wins
 		return fmt.Errorf("store: append transcript %q: write: %w", path, err)
 	}

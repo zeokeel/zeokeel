@@ -451,14 +451,18 @@ func TestA11ySidebarKeyboardNavigation(t *testing.T) {
 	}
 	focusSidebar(t)
 
-	// Home chooses the first item (Plugins) and navigates to it.
+	// Home chooses the first item (Home, the PD-11 return entry) and
+	// navigates to it.
 	tt.Key(0, ui.KeyHome)
 	tt.Frame()
-	if h.app.Screen != Plugins {
-		t.Fatalf("Home selected screen %v, want Plugins", h.app.Screen)
+	if h.app.Screen != Home {
+		t.Fatalf("Home selected screen %v, want Home", h.app.Screen)
 	}
 
-	// End chooses the last item (the last session) and opens it.
+	// Home autofocuses its composer, so re-enter the sidebar before the next
+	// keyboard step; End then chooses the last item (the last session) and
+	// opens it.
+	focusSidebar(t)
 	tt.Key(0, ui.KeyEnd)
 	tt.Frame()
 	if h.app.Screen != Session {
@@ -466,14 +470,19 @@ func TestA11ySidebarKeyboardNavigation(t *testing.T) {
 	}
 
 	// An arrow moves the sidebar's choice to the next item and navigates:
-	// from the first item (Plugins) Down reaches Automation. Opening a
-	// session moves the focus to its composer, so re-enter the sidebar
-	// first.
+	// from Home Down reaches Plugins, then Automation. Opening a session
+	// moves the focus to its composer, so re-enter the sidebar first.
 	focusSidebar(t)
 	tt.Key(0, ui.KeyHome)
 	tt.Frame()
+	if h.app.Screen != Home {
+		t.Fatalf("Home selected screen %v, want Home", h.app.Screen)
+	}
+	focusSidebar(t)
+	tt.Key(0, ui.KeyDown)
+	tt.Frame()
 	if h.app.Screen != Plugins {
-		t.Fatalf("Home selected screen %v, want Plugins", h.app.Screen)
+		t.Fatalf("Down selected screen %v, want Plugins", h.app.Screen)
 	}
 	tt.Key(0, ui.KeyDown)
 	tt.Frame()

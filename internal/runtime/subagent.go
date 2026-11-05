@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/cloudwego/eino/adk"
 	"github.com/cloudwego/eino/components/tool"
@@ -93,12 +94,16 @@ func SubagentDepth(ctx context.Context) int {
 	return depth
 }
 
-// subagentEntry is one cached child agent, the tool names it was given and the
-// topology generation it was built for.
+// subagentEntry is one cached child agent, the tool names it was given, the
+// topology generation it was built for, and whether a run currently owns it.
+// eino's ChatModelAgent must not be driven by two goroutines at once, so a busy
+// entry is never handed out; a concurrent caller builds its own child instead
+// (child construction is cheap relative to a model turn).
 type subagentEntry struct {
 	agent *adk.ChatModelAgent
 	tools []string
 	gen   uint64
+	busy  bool
 }
 
 // RunSubagent implements SubagentRunner by running a child eino ChatModelAgent
@@ -136,21 +141,27 @@ func (a *Agent) RunSubagent(ctx context.Context, req SubagentRequest) (SubagentR
 		name = "subagent"
 	}
 
-	child, toolNames, err := a.childAgent(ctx, name)
+	child, toolNames, release, err := a.acquireChildAgent(ctx, name)
 	if err != nil {
 		return SubagentResult{}, err
 	}
+	defer release()
 
 	payload, err := json.Marshal(map[string]string{"request": task})
 	if err != nil {
 		return SubagentResult{}, fmt.Errorf("runtime: encode subagent request: %w", err)
 	}
-	agentTool := adk.NewAgentTool(WithSubagentDepth(ctx, depth), child)
+	// Delegated runs have no user approval channel (the async Agent Teams
+	// runner has no controller turn to attach approval cards to). Mark the
+	// context so a gated tool fails with actionable guidance instead of a
+	// generic "outside an agent turn" error.
+	runCtx := WithSubagentDepth(WithDelegatedApproval(ctx), depth)
+	agentTool := adk.NewAgentTool(runCtx, child)
 	invokable, ok := agentTool.(tool.InvokableTool)
 	if !ok {
 		return SubagentResult{}, errors.New("runtime: eino agent tool is not invokable")
 	}
-	output, err := invokable.InvokableRun(WithSubagentDepth(ctx, depth), string(payload))
+	output, err := invokable.InvokableRun(runCtx, string(payload))
 	if err != nil {
 		return SubagentResult{}, fmt.Errorf("runtime: subagent %q: %w", name, err)
 	}
@@ -163,29 +174,58 @@ func (a *Agent) RunSubagent(ctx context.Context, req SubagentRequest) (SubagentR
 	}, nil
 }
 
-// childAgent returns the cached (or newly built) child agent for name. Child
-// agents are shared by every session, exactly like the root agent, and are safe
-// for concurrent use.
+// acquireChildAgent returns a child agent for name together with a release
+// function the caller must call when the run finishes. An idle cached entry is
+// reused; a busy entry (a concurrent RunSubagent is driving that eino agent) or
+// a missing one gets a freshly built child that is cached only when the slot is
+// still free. This keeps parallel team members from driving the same
+// ChatModelAgent concurrently, which eino does not support (Agent.runMu exists
+// for exactly that reason on the root path).
 //
 // The parent snapshot is loaded before subMu is taken and passed to the
 // builder, so this path never takes agentMu while holding subMu (SetModel takes
 // them in the opposite order to clear the cache). Entries carry the topology
 // generation: a child built from a snapshot that a concurrent SetMode/SetModel
 // has since replaced is ignored and rebuilt instead of surviving the clear.
-func (a *Agent) childAgent(ctx context.Context, name string) (*adk.ChatModelAgent, []string, error) {
+func (a *Agent) acquireChildAgent(ctx context.Context, name string) (*adk.ChatModelAgent, []string, func(), error) {
 	snap := a.loadState()
 	a.subMu.Lock()
-	defer a.subMu.Unlock()
-	if entry, ok := a.subagents[name]; ok && entry.gen == snap.gen {
-		return entry.agent, entry.tools, nil
+	if entry, ok := a.subagents[name]; ok && entry.gen == snap.gen && !entry.busy {
+		entry.busy = true
+		a.subMu.Unlock()
+		return entry.agent, entry.tools, func() { a.releaseChildAgent(name, entry) }, nil
 	}
+	a.subMu.Unlock()
+
+	// Build outside the lock: building is not free and two different calls may
+	// legitimately race here (each then gets its own agent).
 	child, err := a.buildSubagentAgent(ctx, name, snap.snap)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
-	entry := &subagentEntry{agent: child, tools: a.subagentToolNames(snap.snap.mode), gen: snap.gen}
+	tools := a.subagentToolNames(snap.snap.mode)
+
+	a.subMu.Lock()
+	if entry, ok := a.subagents[name]; ok && entry.gen == snap.gen && entry.busy {
+		// Another run owns the cached entry: this run keeps its private child.
+		a.subMu.Unlock()
+		return child, tools, func() {}, nil
+	}
+	entry := &subagentEntry{agent: child, tools: tools, gen: snap.gen, busy: true}
 	a.subagents[name] = entry
-	return entry.agent, entry.tools, nil
+	a.subMu.Unlock()
+	return child, tools, func() { a.releaseChildAgent(name, entry) }, nil
+}
+
+// releaseChildAgent marks a cached entry idle again. The entry is only touched
+// when it is still the one this run acquired (a SetModel clear or a newer
+// build may have replaced it).
+func (a *Agent) releaseChildAgent(name string, entry *subagentEntry) {
+	a.subMu.Lock()
+	defer a.subMu.Unlock()
+	if current, ok := a.subagents[name]; ok && current == entry {
+		entry.busy = false
+	}
 }
 
 // buildSubagentAgent builds one child ChatModelAgent with the restricted tool
@@ -342,4 +382,97 @@ func (a *Agent) bindToolReviewers() {
 			binder.SetToolReviewer(a.reviewer)
 		}
 	}
+}
+
+// delegatedApprovalGuidance is the model-facing recovery instruction when a
+// delegated agent hits a tool that requires user approval: it names the
+// non-mutating tools it can still use and tells it to report the blocked action
+// for the parent to perform. Phrased without "retry", because retrying the same
+// gated call cannot succeed in a delegated run.
+const delegatedApprovalGuidance = "Use non-mutating tools (read_file, glob, grep, read_image, skill, memory, session_query, todo, present) " +
+	"and report the blocked action so the parent agent can perform it; do not retry the same call."
+
+// delegatedApprovalKey marks a context whose run is a delegated agent (subagent
+// or Agent Teams member) with no interactive approval channel. Tool calls that
+// would need user approval fail closed with actionable guidance instead of
+// surfacing a generic "outside an agent turn" runtime error, which the model
+// could only retry in a loop.
+type delegatedApprovalKey struct{}
+
+// WithDelegatedApproval marks ctx as belonging to a delegated agent run. It is
+// applied by RunSubagent; an inherited turn context (if any) still wins, since
+// it provides a real approval channel.
+func WithDelegatedApproval(ctx context.Context) context.Context {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	return context.WithValue(ctx, delegatedApprovalKey{}, true)
+}
+
+// delegatedApprovalFromContext reports whether ctx belongs to a delegated run
+// without an approval channel.
+func delegatedApprovalFromContext(ctx context.Context) bool {
+	if ctx == nil {
+		return false
+	}
+	marked, _ := ctx.Value(delegatedApprovalKey{}).(bool)
+	return marked
+}
+
+// turnApprovalContext combines two contexts: the turn state (including the
+// approval channel) comes from parent, while cancellation, deadline and the
+// child's own values come from child. It lets an async Agent Teams member keep
+// the spawning turn's approval channel (so gated tools can still ask the user
+// through the parent session) without being cancelled when that turn ends or
+// the parent tool context is released.
+type turnApprovalContext struct {
+	parent context.Context
+	child  context.Context
+}
+
+func (c *turnApprovalContext) Deadline() (time.Time, bool) { return c.child.Deadline() }
+func (c *turnApprovalContext) Done() <-chan struct{}       { return c.child.Done() }
+func (c *turnApprovalContext) Err() error                  { return c.child.Err() }
+
+// Value prefers the child's own values and falls back to the parent's. The
+// parent's turnContext is what carries the event sink and reviewer context;
+// the child never sets one, so the fallback is the approval channel.
+func (c *turnApprovalContext) Value(key any) any {
+	if value := c.child.Value(key); value != nil {
+		return value
+	}
+	return c.parent.Value(key)
+}
+
+// WithTurnApprovalFrom returns child extended with parent's turn approval
+// channel (its event sink, user request and review context) while keeping
+// child's cancellation, deadline and values. It is used by the Agent Teams
+// runner so an asynchronous member can still surface a tool approval request in
+// the session that spawned it.
+//
+// The child's own values win; the parent's are the fallback, so a context value
+// placed on the spawning tool context (including the turn context) remains
+// visible while cancellation stays with the child. A parent without a turn
+// context simply contributes no approval channel: a gated tool in the delegated
+// run then fails closed with actionable guidance (see
+// delegatedApprovalGuidance), and HasTurnApproval reports false. After the
+// parent turn has ended its sink is closed, so a later gated call also fails
+// closed instead of hanging.
+func WithTurnApprovalFrom(parent, child context.Context) context.Context {
+	if child == nil {
+		child = context.Background()
+	}
+	if parent == nil || parent == child {
+		return child
+	}
+	return &turnApprovalContext{parent: parent, child: child}
+}
+
+// HasTurnApproval reports whether ctx carries a live turn approval channel,
+// either the running turn's own context or one inherited through
+// WithTurnApprovalFrom. Callers use it to decide whether a gated tool may ask
+// the user instead of failing closed.
+func HasTurnApproval(ctx context.Context) bool {
+	tc := turnContextFromContext(ctx)
+	return tc != nil && tc.sink != nil
 }

@@ -130,10 +130,16 @@ type pendingMessage struct {
 
 // member is the mutable record guarded by Manager.mu.
 type member struct {
-	id          string
-	name        string
-	sessionID   string
-	task        string
+	id        string
+	name      string
+	sessionID string
+	task      string
+	// spawnCtx is the context the member was spawned from (the spawning turn's
+	// tool context). The run context inherits its approval channel through
+	// runtime.WithTurnApprovalFrom, so a gated tool can still ask the user via
+	// the parent session; cancellation intentionally comes from the manager, so
+	// the member's lifetime does not end with the spawning turn.
+	spawnCtx    context.Context
 	status      Status
 	currentTask string
 	output      string
@@ -256,14 +262,14 @@ func (m *Manager) SpawnBatch(ctx context.Context, reqs []SpawnRequest) ([]Member
 
 	out := make([]Member, 0, len(batch))
 	for _, req := range batch {
-		mem := m.spawnLocked(req.task, req.name, req.sessionID, req.depth)
+		mem := m.spawnLocked(ctx, req.task, req.name, req.sessionID, req.depth)
 		out = append(out, mem.snapshot())
 	}
 	return out, nil
 }
 
 // spawnLocked creates and starts one member. m.mu must be held.
-func (m *Manager) spawnLocked(task, name, sessionID string, depth int) *member {
+func (m *Manager) spawnLocked(spawnCtx context.Context, task, name, sessionID string, depth int) *member {
 	m.nextID++
 	id := fmt.Sprintf("agent-%d", m.nextID)
 	now := m.now().UTC()
@@ -272,6 +278,7 @@ func (m *Manager) spawnLocked(task, name, sessionID string, depth int) *member {
 		name:      name,
 		sessionID: sessionID,
 		task:      task,
+		spawnCtx:  spawnCtx,
 		status:    StatusQueued,
 		depth:     depth,
 		createdAt: now,
@@ -624,7 +631,13 @@ func (m *Manager) loop(mem *member, done chan struct{}) {
 		runner := m.runner
 		name := mem.name
 		depth := mem.depth
+		spawnCtx := mem.spawnCtx
 		m.mu.Unlock()
+		// Keep the spawning turn's approval channel (its event sink, so the
+		// user can approve a gated tool through the parent session) without
+		// inheriting that turn's cancellation: the member keeps running on the
+		// manager-owned context and only dies on interrupt/close.
+		runCtx := runtime.WithTurnApprovalFrom(spawnCtx, ctx)
 
 		if runner == nil {
 			cancel()
@@ -634,7 +647,7 @@ func (m *Manager) loop(mem *member, done chan struct{}) {
 			return
 		}
 
-		result, err := runner.RunSubagent(ctx, runtime.SubagentRequest{
+		result, err := runner.RunSubagent(runCtx, runtime.SubagentRequest{
 			Task:  msg.text,
 			Agent: name,
 			Depth: depth,

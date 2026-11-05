@@ -167,6 +167,13 @@ func (s *Store) QuerySessions(q SessionQuery) ([]Session, error) {
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("store: query sessions: %w", err)
 	}
+	// Relevance ordering is applied on top of the LIKE-filtered set: the filter
+	// keeps the documented literal-substring semantics, while the FTS5 index
+	// (when available) puts title matches and best BM25 matches first. A
+	// ranking failure leaves the prior updated-time order untouched.
+	if search := strings.TrimSpace(q.Search); search != "" {
+		s.orderSessionsByRelevance(list, search)
+	}
 	return list, nil
 }
 
@@ -400,6 +407,14 @@ func (s *Store) DeleteSession(id string) error {
 	// before the table gained its foreign key and makes the intent obvious.
 	if _, err := tx.Exec(`DELETE FROM checkpoints WHERE session_id = ?`, id); err != nil {
 		return fmt.Errorf("store: delete session %q: delete checkpoint: %w", id, err)
+	}
+	// The FTS search index stores message content outside the messages table
+	// (its shadow tables do not cascade), so clear it explicitly: "delete
+	// session" must remove the session's searchable content as well.
+	if _, ok := sessionSearchReady.Load(s); ok {
+		if _, err := tx.Exec(`DELETE FROM `+sessionSearchTable+` WHERE session_id = ?`, id); err != nil {
+			return fmt.Errorf("store: delete session %q: delete search index rows: %w", id, err)
+		}
 	}
 
 	res, err := tx.Exec(`DELETE FROM sessions WHERE id = ?`, id)

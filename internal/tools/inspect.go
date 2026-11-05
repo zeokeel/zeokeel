@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/zeokeel/zeokeel/internal/mcp"
 	"github.com/zeokeel/zeokeel/internal/runtime"
 	"github.com/zeokeel/zeokeel/internal/skills"
 	"github.com/zeokeel/zeokeel/internal/store"
@@ -85,7 +86,12 @@ The result is one read-only JSON document:
             reduced to its server-name array. Values are capped at 2 KiB.
   sessions: {count,recent:[{id,title,status,updated_at}]} (10 most recent)
   skills:   {root,count,skills:[{name,description,path}],error?}
-  mcp:      {source,file?,count,servers:[name],error?}
+  mcp:      {source,file?,workspace_config,workspace_config_note?,count,
+             servers:[name],error?} where source is "settings", "mcp.json" or
+             "none". workspace_config is the effective mcp.workspace_config
+             value ("off" by default), and workspace_config_note explains
+             whether a workspace mcp.json would be ignored or is untrusted
+             repository content that only runs after an explicit opt-in.
 
 The whole document is capped at 64 KiB. The tool uses only read-only store
 and filesystem APIs: it never changes settings, sessions or workspace files,
@@ -462,28 +468,56 @@ func (t *inspectTool) skills() inspectSkillsSection {
 	return view
 }
 
-// inspectMCPSection is the MCP server-name snapshot.
+// inspectMCPSection is the MCP server-name snapshot plus the workspace trust
+// gate status. It carries no command, argument or environment value, so a
+// secret in the configuration can never leak through diagnostics.
 type inspectMCPSection struct {
-	Source  string   `json:"source"`
-	File    string   `json:"file,omitempty"`
-	Count   int      `json:"count"`
-	Servers []string `json:"servers"`
-	Error   string   `json:"error,omitempty"`
+	Source string `json:"source"`
+	// File is the workspace-relative config file when source is "mcp.json".
+	File string `json:"file,omitempty"`
+	// WorkspaceConfig is the effective mcp.workspace_config value ("off" when
+	// unset or invalid): "allow" means <root>/mcp.json is executed.
+	WorkspaceConfig string `json:"workspace_config"`
+	// WorkspaceConfigNote explains what the gate means for this workspace, so
+	// diagnostics do not present an ignored file as active configuration.
+	WorkspaceConfigNote string   `json:"workspace_config_note,omitempty"`
+	Count               int      `json:"count"`
+	Servers             []string `json:"servers"`
+	Error               string   `json:"error,omitempty"`
 }
 
-// mcp reports the configured MCP server names. It mirrors the app wiring:
-// the mcp.servers setting wins and mcp.json is used only when that setting is
-// absent or blank.
+// mcp reports the configured MCP server names. It mirrors the app wiring: the
+// mcp.servers setting wins and mcp.json is read only when that setting is
+// absent or blank; when the file exists it is reported together with the
+// mcp.workspace_config gate that decides whether the app may execute it.
 func (t *inspectTool) mcp() inspectMCPSection {
-	view := inspectMCPSection{Source: "none", Servers: []string{}}
+	view := inspectMCPSection{
+		Source:          "none",
+		WorkspaceConfig: mcp.WorkspaceConfigOff,
+		Servers:         []string{},
+	}
+	if t.st != nil {
+		rawConfig, err := t.st.GetSetting(mcp.WorkspaceConfigKey)
+		if err != nil && !errors.Is(err, store.ErrNotFound) {
+			view.Error = truncateBytes(fmt.Sprintf("read %s: %v", mcp.WorkspaceConfigKey, err), inspectTextBytes, "error truncated")
+			return view
+		}
+		view.WorkspaceConfig = mcp.NormalizeWorkspaceConfig(rawConfig)
+	}
 	raw, err := t.st.GetSetting("mcp.servers")
 	if err != nil && !errors.Is(err, store.ErrNotFound) {
 		view.Error = truncateBytes(fmt.Sprintf("read mcp.servers: %v", err), inspectTextBytes, "error truncated")
 		return view
 	}
+	path := filepath.Join(t.root, "mcp.json")
+	_, statErr := os.Lstat(path)
+	fileExists := statErr == nil
 	if err == nil && strings.TrimSpace(raw) != "" {
 		names, perr := parseMCPServerNames([]byte(raw), false)
 		view.Source = "settings"
+		if fileExists {
+			view.WorkspaceConfigNote = "the mcp.servers setting wins; workspace mcp.json is not read"
+		}
 		if perr != nil {
 			view.Error = truncateBytes(fmt.Sprintf("parse mcp.servers: %v", perr), inspectTextBytes, "error truncated")
 			return view
@@ -493,15 +527,19 @@ func (t *inspectTool) mcp() inspectMCPSection {
 		return view
 	}
 
-	path := filepath.Join(t.root, "mcp.json")
-	data, err := os.ReadFile(path)
-	if errors.Is(err, os.ErrNotExist) {
+	if !fileExists {
 		return view
 	}
 	view.Source = "mcp.json"
 	view.File = "mcp.json"
-	if err != nil {
-		view.Error = truncateBytes(fmt.Sprintf("read mcp.json: %v", err), inspectTextBytes, "error truncated")
+	if mcp.WorkspaceConfigAllowed(view.WorkspaceConfig) {
+		view.WorkspaceConfigNote = "untrusted workspace repository content; enabled by mcp.workspace_config=allow"
+	} else {
+		view.WorkspaceConfigNote = "ignored: mcp.workspace_config is off (set it to \"allow\" to run workspace-declared MCP servers); the names below are not started"
+	}
+	data, rerr := os.ReadFile(path)
+	if rerr != nil {
+		view.Error = truncateBytes(fmt.Sprintf("read mcp.json: %v", rerr), inspectTextBytes, "error truncated")
 		return view
 	}
 	names, perr := parseMCPServerNames(data, true)

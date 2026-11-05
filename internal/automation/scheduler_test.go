@@ -311,3 +311,51 @@ func TestSchedulerWithStore(t *testing.T) {
 		t.Fatalf("NextRun = %v, want %v", stored.NextRun, wantNext)
 	}
 }
+
+// TestSchedulerDailyUsesLocalTimezone pins RT-09: @daily is a local wall-clock
+// expression (local midnight), while the persisted instant stays UTC.
+func TestSchedulerDailyUsesLocalTimezone(t *testing.T) {
+	shanghai := time.FixedZone("CST", 8*60*60)
+	localNow := time.Date(2026, 1, 1, 0, 30, 0, 0, shanghai) // local 00:30
+	task := store.Automation{ID: "a", Title: "daily", Prompt: "p", Cron: "@daily", Enabled: true}
+	fs := newFakeStore(task)
+	s, err := New(Config{Store: fs})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	if got := s.Tick(localNow); len(got) != 0 {
+		t.Fatalf("Tick = %d fired, want 0 before next run", len(got))
+	}
+	stored, ok := fs.next["a"]
+	if !ok {
+		t.Fatal("Tick did not schedule a task without NextRun")
+	}
+	wantLocal := time.Date(2026, 1, 2, 0, 0, 0, 0, shanghai) // next local midnight
+	wantUTC := wantLocal.UTC()
+	if !stored.Equal(wantUTC) {
+		t.Fatalf("next run = %v (%v), want %v (local %v)", stored, stored.UTC(), wantUTC, wantLocal)
+	}
+	// The persisted value must be UTC so the store encoding stays uniform.
+	if _, offset := stored.Zone(); offset != 0 {
+		t.Fatalf("persisted next run offset = %d, want UTC", offset)
+	}
+}
+
+// TestSchedulerHourlyUsesLocalTopOfHour pins the @hourly half of RT-09: from a
+// local 10:07 the next @hourly is local 11:00 (not 10:00 UTC).
+func TestSchedulerHourlyUsesLocalTopOfHour(t *testing.T) {
+	shanghai := time.FixedZone("CST", 8*60*60)
+	localNow := time.Date(2026, 1, 1, 10, 7, 0, 0, shanghai)
+	task := store.Automation{ID: "h", Title: "hourly", Prompt: "p", Cron: "@hourly", Enabled: true}
+	fs := newFakeStore(task)
+	s, err := New(Config{Store: fs})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	s.Tick(localNow)
+	stored := fs.next["h"]
+	want := time.Date(2026, 1, 1, 11, 0, 0, 0, shanghai).UTC()
+	if !stored.Equal(want) {
+		t.Fatalf("next run = %v, want %v", stored, want)
+	}
+}

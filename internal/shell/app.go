@@ -157,6 +157,17 @@ type App struct {
 	automationDeleteTitle string
 	memoryClearOpen       bool
 
+	// The model page's destructive and probe state: deleting a model asks for
+	// confirmation, and the Add model dialog's "Test connection" runs an
+	// OpenAI-compatible GET /models off the view goroutine. The frame reads
+	// modelProbe; closing the dialog cancels an in-flight probe.
+	modelDeleteOpen  bool
+	modelDeleteID    string
+	modelDeleteName  string
+	modelProbe       modelProbeState
+	modelProbeMu     sync.Mutex
+	modelProbeCancel context.CancelFunc
+
 	// composerRef is the live composer's focus handle. session_live.go binds it
 	// when the session renderer builds the input; the Cmd/Ctrl+K shortcut
 	// focuses it when bound. mentionRef is the first row of the "@" menu, so
@@ -199,6 +210,10 @@ type App struct {
 	wsName            string
 	wsRoot            string
 	wsErr             string
+	// wsCreateRoot is the Add workspace dialog's "create this folder" choice:
+	// a typed root that does not exist yet is only created when it is set, so
+	// a typo cannot silently mkdir a path (PD-17).
+	wsCreateRoot bool
 
 	viewOptionsOpen bool
 	showArchived    bool
@@ -349,6 +364,46 @@ func (a *App) View(c *ui.Context) {
 		a.focusComposerOnFrame = false
 		a.focusComposer(c)
 	}
+	// UX-14 (raise the toast above the composer) needs a framework hook:
+	// a shell-owned ToastViewportBase overlay intercepts the pointer for the
+	// popovers below it, so the shell keeps mygo's default placement.
+	// a.toastViewport(c, t)
+}
+
+// toastViewport places the window's toasts. mygo's default sits just above the
+// window bottom, which the Home and Session composers own: on those screens the
+// shell lifts the toast above the composer card and keeps the same inverse fill
+// the framework uses, so click feedback never covers the composer toolbar
+// (UX-14). Toast actions are not used in this shell.
+func (a *App) toastViewport(c *ui.Context, t *design.Tokens) {
+	th := t.Theme()
+	bottom := th.Space(6)
+	switch a.backgroundScreen() {
+	case Home, Session:
+		bottom += th.Space(16)
+	}
+	fill, text := t.LabelPrimary, t.BgBase
+	if t.Dark {
+		fill, text = t.BgStrong, t.LabelPrimary
+	}
+	ui.ToastViewportBase(c, func(viewport ui.Element, toasts []ui.Toast) {
+		viewport.Bottom(bottom).AlignItems(ui.Center).Gap(th.Space(2))
+		for _, toast := range toasts {
+			parts := ui.ToastBase(c, toast)
+			box := parts.Root.Row().AlignItems(ui.Center).
+				Padding(th.Space(2.5), th.Space(4)).Radius(th.Space(2)).
+				Background(fill).Border(1, t.BorderL3).
+				Shadow(0, 6, 20, 0, ui.RGBA(0, 0, 0, 0.25))
+			box.Children(func() {
+				title := toast.Title
+				if toast.Description != "" {
+					title += " " + toast.Description
+				}
+				ui.Text(c, title).FontSize(12).FixedLineHeight(18).
+					TextColor(text).MaxLines(3)
+			})
+		}
+	})
 }
 
 // backgroundScreen is the screen behind the Settings modal. Settings is an
@@ -373,6 +428,7 @@ func (a *App) backgroundScreen() Screen {
 func (a *App) openSettings() {
 	a.moreOpen = false
 	a.closeSelectors()
+	a.closeComposerPopovers()
 	if a.settingsWindowOpen != nil && a.settingsWindowOpen() {
 		return
 	}

@@ -24,13 +24,15 @@
 5. 合并；测试保留；更新 `docs/BUGS.md` 状态。
 6. 禁止“为了过验证而改断言”，除非行为规格本身变更并记录。
 
-## CI 门禁（scripts/ci.sh）
+## CI 门禁（`.github/workflows/ci.yml` → `scripts/ci.sh`）
 
 - gofmt / go vet / go build / go test（-count=1）
 - 零 cgo 四目标交叉编译
 - 生产工具注册表可调用
 - 无头渲染 smoke + 交互用例（DSH 像素基线/深色窄屏基线已退役，2026-11-05）
-- 覆盖率摘要；race 检测（阻断级；无 cgo 工具链时跳过）
+- 覆盖率记录：`go test -coverprofile=.cache/coverage.out ./internal/...`，作为 CI artifact（暂不设阈值，见 docs/BUGS.md AR-17）
+- race 检测（阻断级；覆盖 state/store/session/agentteam/tools/runtime/app；`./internal/shell` 因耗时约 9 分钟为独立 job，`-timeout 20m`）
+- flaky 纪律：`scripts/evolve/gates.sh` 的重跑仅用于暴露 flaky，重跑才通过 = 失败（exit 1），不得当成绿
 
 ## 测试金字塔（当前已有基础上补）
 

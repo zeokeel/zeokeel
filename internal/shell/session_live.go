@@ -252,6 +252,10 @@ func (a *App) liveTranscript(c *ui.Context, t *design.Tokens, snap *state.Snapsh
 				ui.Column(c).Width(a.sessionTranscriptWidthFor(c)).
 					Label(a.tr("Session transcript", "会话记录")).
 					Padding(design.Space6, 0).Gap(design.Space5).Children(func() {
+					if transcriptEmpty(snap) {
+						a.liveTranscriptEmpty(c, t)
+						return
+					}
 					if transcriptOrderEnabled(snap) {
 						turns = a.liveOrderedTranscript(c, t, snap, streaming)
 						if snap.Phase == state.PhaseRunning {
@@ -271,7 +275,7 @@ func (a *App) liveTranscript(c *ui.Context, t *design.Tokens, snap *state.Snapsh
 					// Only snapshots without the Seq axis fall back to the
 					// legacy session-tail error line.
 					if snap.LastError != nil && !transcriptOrderEnabled(snap) {
-						ui.Text(c, a.T("session.error_prefix", snap.LastError.Text)).FontSize(13).TextColor(t.Danger)
+						a.liveErrorCard(c, t, *snap.LastError)
 					}
 				})
 			})
@@ -303,6 +307,58 @@ func (a *App) liveTranscript(c *ui.Context, t *design.Tokens, snap *state.Snapsh
 	if st.pendingTurn > turns {
 		st.pendingTurn = 0
 	}
+}
+
+// transcriptEmpty reports whether the Chat tab has nothing to show yet: no
+// messages, no tool calls, no recorded error and no terminal turn. The
+// composer is still the next action, so the empty state invites the first
+// message instead of leaving a blank pane (UX-02). A running turn never counts
+// as empty, because the working indicator and any first tokens belong on
+// screen.
+func transcriptEmpty(snap *state.Snapshot) bool {
+	if snap == nil {
+		return false
+	}
+	if snap.Phase == state.PhaseRunning || snap.Phase == state.PhaseWaitingApproval ||
+		snap.Phase == state.PhaseWaitingUser {
+		return false
+	}
+	return len(snap.Messages) == 0 && len(snap.Tools) == 0 &&
+		snap.LastError == nil && len(snap.TurnMarks) == 0 &&
+		snap.TurnReason == state.ReasonNone
+}
+
+// liveTranscriptEmpty draws the Chat tab's first-run empty state: the icon,
+// a one-line invitation and the two composer hints, plus the Settings > Models
+// CTA when no agent is configured. It reuses the Trajectory pane's empty-state
+// language (small muted copy on the brand column) so every empty pane in the
+// session reads the same way.
+func (a *App) liveTranscriptEmpty(c *ui.Context, t *design.Tokens) {
+	th := t.Theme()
+	ui.Row(c).Justify(ui.Center).PaddingY(design.Space8).Children(func() {
+		ui.Column(c).AlignItems(ui.Center).Gap(th.Space(3)).Children(func() {
+			ui.Row(c).Size(th.Space(10), th.Space(10)).Center().
+				Radius(design.RadiusMax).Background(t.BgHover).Children(func() {
+				ui.Icon(c, icons.NewChat()).Size(th.Space(4), th.Space(4)).
+					TextColor(t.LabelSecondary)
+			})
+			ui.Text(c, a.T("session.empty_title")).FontSize(15).
+				FontWeight(600).TextColor(t.LabelPrimary)
+			ui.Text(c, a.T("session.empty_hint")).FontSize(12).
+				FixedLineHeight(18).TextColor(t.LabelTertiary).MaxLines(2)
+			if a.Ctrl != nil && !a.Ctrl.HasAgent() {
+				ui.Text(c, a.T("session.empty_no_model")).FontSize(12).
+					FixedLineHeight(18).TextColor(t.WarningText).MaxLines(2)
+				button := design.Apply(
+					ui.Button(c, a.T("session.empty_add_model")),
+					t.PrimaryButton()).Height(th.Space(8)).PaddingX(design.Space4)
+				if button.Clicked() {
+					a.shellUI().settingsTab = settingsTabModels
+					a.openSettings()
+				}
+			}
+		})
+	})
 }
 
 // turnMark renders one turn's terminal marker (stopped/failed/interrupted) at
@@ -342,6 +398,11 @@ func (a *App) turnMarkLabel(reason state.StatusReason) string {
 // silent; a failed turn keeps its error line instead.
 func (a *App) turnOutcomeMarker(c *ui.Context, t *design.Tokens, snap *state.Snapshot) {
 	if snap == nil || snap.Phase == state.PhaseRunning || len(snap.TurnMarks) > 0 {
+		return
+	}
+	// A recorded error already renders as the productized liveErrorCard; only
+	// the silent terminal reasons need a marker here (PD-09).
+	if snap.TurnReason == state.ReasonFailed {
 		return
 	}
 	label := ""
@@ -400,7 +461,7 @@ func (a *App) liveOrderedTranscript(c *ui.Context, t *design.Tokens, snap *state
 // liveTranscriptErrors draws one bucket of recorded errors as danger lines.
 func (a *App) liveTranscriptErrors(c *ui.Context, t *design.Tokens, errs []state.ErrorInfo) {
 	for _, info := range errs {
-		ui.Text(c, a.T("session.error_prefix", info.Text)).FontSize(13).TextColor(t.Danger)
+		a.liveErrorCard(c, t, info)
 	}
 }
 
@@ -808,19 +869,19 @@ func (a *App) submitComposerText(c *ui.Context, text string, alternate bool) {
 			// turn's asynchronous team members are stopped with it.
 			a.stopTurn()
 			a.submitWhenIdle(id, text)
-			c.Toast(a.menuText("Stopped the turn and sent the message", "已停止当前回合并发送消息"))
+			a.toastDeferred(c, a.menuText("Stopped the turn and sent the message", "已停止当前回合并发送消息"))
 			return
 		}
 		a.queueDraft(id, text)
-		c.Toast(a.menuText("Message queued until the turn finishes", "消息已排队，将在回合结束后发送"))
+		a.toastDeferred(c, a.menuText("Message queued until the turn finishes", "消息已排队，将在回合结束后发送"))
 		return
 	}
 	if err := a.Ctrl.Submit(context.Background(), id, text); err != nil {
 		if errors.Is(err, session.ErrNoAgent) {
-			c.Toast(a.menuText("No agent configured. Add a model in Settings > Models.",
+			a.toastDeferred(c, a.menuText("No agent configured. Add a model in Settings > Models.",
 				"尚未配置 Agent。请在 设置 > 模型 中添加模型。"))
 		} else {
-			c.Toast(fmt.Sprintf(a.menuText("Could not send: %v", "发送失败：%v"), err))
+			a.toastDeferred(c, fmt.Sprintf(a.menuText("Could not send: %v", "发送失败：%v"), err))
 		}
 		return
 	}

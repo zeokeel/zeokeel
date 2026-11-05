@@ -132,8 +132,12 @@ func (s *Scheduler) Running() bool {
 // the tasks it fired in deterministic order. Enabled tasks without a NextRun
 // are scheduled from now. A task with an invalid cron expression is skipped
 // and surfaces through LastError.
+//
+// Schedule expressions are wall-clock expressions in the caller's time zone:
+// "@daily" means local midnight, not UTC midnight. The next run is therefore
+// computed from now's location and only the persisted timestamps are
+// normalized to UTC (the store keeps every instant in UTC).
 func (s *Scheduler) Tick(now time.Time) []store.Automation {
-	now = now.UTC()
 	tasks, err := s.Store.ListAutomations()
 	if err != nil {
 		s.recordErr(fmt.Errorf("automation: list tasks: %w", err))
@@ -167,7 +171,7 @@ func (s *Scheduler) Tick(now time.Time) []store.Automation {
 			continue
 		}
 		if task.NextRun == nil {
-			next := schedule.Next(now)
+			next := schedule.Next(now).UTC()
 			if _, err := s.Store.SetAutomationNextRun(task.ID, next); err != nil {
 				s.recordErr(fmt.Errorf("automation: schedule task %q: %w", task.ID, err))
 			}
@@ -180,8 +184,8 @@ func (s *Scheduler) Tick(now time.Time) []store.Automation {
 		if s.OnFire != nil {
 			s.OnFire(task)
 		}
-		next := schedule.Next(now)
-		if _, err := s.Store.MarkAutomationRun(task.ID, now, &next); err != nil {
+		next := schedule.Next(now).UTC()
+		if _, err := s.Store.MarkAutomationRun(task.ID, now.UTC(), &next); err != nil {
 			s.recordErr(fmt.Errorf("automation: mark task %q run: %w", task.ID, err))
 		}
 		fired = append(fired, task)

@@ -28,6 +28,24 @@ type Compactor interface {
 // conversational context.
 const DefaultCompactionKeepLast = 8
 
+// DefaultImageKeepLast is how many of the newest image-bearing messages keep
+// their image parts after compaction. Older images are replaced by a text
+// placeholder: a base64 data URL costs a large, fixed amount of prompt context
+// and an image that is many turns old is rarely still needed (DSH's
+// compaction-image-offload behaviour). The most recent images are preserved so
+// the model can still see what the user last showed it.
+const DefaultImageKeepLast = 2
+
+// ImageOffloadPlaceholder prefixes the text that replaces an offloaded image
+// part. It is stable so replay and tests can recognize the substitution.
+const ImageOffloadPlaceholder = "[image omitted to recover context]"
+
+// estimatedImageTokens is the rough prompt cost charged for one image part.
+// The provider sends a data URL whose size dwarfs its information content, so
+// counting the URL bytes would wildly overestimate; one vision input is
+// charged a flat, conservative amount instead.
+const estimatedImageTokens = 1024
+
 // compactionSummaryPrefix marks the synthetic message that stands in for the
 // compacted part of a conversation. It is deliberately stable so repeated
 // compaction can replace the previous summary instead of accumulating them.
@@ -61,6 +79,10 @@ func (c WindowCompactor) Compact(ctx context.Context, sessionID string, messages
 	if len(messages) == 0 {
 		return nil, nil
 	}
+
+	// Old images are offloaded first: they are the largest prompt cost that a
+	// window change can reclaim without dropping whole messages.
+	messages = offloadOldImages(messages, DefaultImageKeepLast)
 
 	keepLast := c.KeepLast
 	if keepLast <= 0 {
@@ -133,23 +155,124 @@ func compactionBoundary(rest []Message, keepLast int) int {
 	return dropped
 }
 
-// estimateTokens approximates the prompt size of messages using the common
-// chars/4 heuristic. Reasoning text and tool-call payloads count too, because
-// providers send them back as part of the prompt.
+// estimateTokens approximates the prompt size in tokens. It is rune-aware:
+// ASCII text averages the common ~4 characters per token, while a CJK rune is
+// charged about one token (the chars/4 heuristic under-counted Chinese and
+// Japanese prompts by roughly 4x on their CJK portion). Image parts are charged
+// a flat per-image amount instead of their base64 URL length. Reasoning text
+// and tool-call payloads count too, because providers send them back as part of
+// the prompt.
 func estimateTokens(messages []Message) int {
-	chars := 0
+	tokens := 0
 	for _, msg := range messages {
-		chars += len(msg.Content)
-		chars += len(msg.Reasoning)
-		chars += len(msg.ToolCallID)
-		chars += len(msg.ToolName)
+		tokens += estimateTextTokens(msg.Content)
+		tokens += estimateTextTokens(msg.Reasoning)
+		tokens += (len(msg.ToolCallID) + len(msg.ToolName) + 3) / 4
 		for _, call := range msg.ToolCalls {
-			chars += len(call.ID)
-			chars += len(call.Name)
-			chars += len(call.Arguments)
+			tokens += (len(call.ID) + len(call.Name) + len(call.Arguments) + 3) / 4
+		}
+		tokens += len(msg.Images) * estimatedImageTokens
+	}
+	return tokens
+}
+
+// estimateTextTokens approximates one string's token count. Pure ASCII keeps
+// the fast chars/4 path; mixed text counts CJK runes as one token each and the
+// remaining runes at four characters per token.
+func estimateTextTokens(s string) int {
+	if s == "" {
+		return 0
+	}
+	ascii := true
+	for i := 0; i < len(s); i++ {
+		if s[i] >= 0x80 {
+			ascii = false
+			break
 		}
 	}
-	return chars / 4
+	if ascii {
+		return (len(s) + 3) / 4
+	}
+	cjk, other := 0, 0
+	for _, r := range s {
+		if isCJKRune(r) {
+			cjk++
+		} else {
+			other++
+		}
+	}
+	return cjk + (other+3)/4
+}
+
+// isCJKRune reports whether r belongs to a CJK/CJK-adjacent script whose
+// characters tokenize at roughly one token each.
+func isCJKRune(r rune) bool {
+	switch {
+	case r >= 0x2E80 && r <= 0x303F: // CJK radicals, Kangxi, CJK punctuation
+		return true
+	case r >= 0x3040 && r <= 0x30FF: // Hiragana, Katakana
+		return true
+	case r >= 0x3100 && r <= 0x31FF: // Bopomofo, Hangul compatibility Jamo
+		return true
+	case r >= 0x3400 && r <= 0x4DBF: // CJK Unified Ideographs Extension A
+		return true
+	case r >= 0x4E00 && r <= 0x9FFF: // CJK Unified Ideographs
+		return true
+	case r >= 0xAC00 && r <= 0xD7AF: // Hangul Syllables
+		return true
+	case r >= 0xF900 && r <= 0xFAFF: // CJK Compatibility Ideographs
+		return true
+	case r >= 0xFF00 && r <= 0xFFEF: // Halfwidth/Fullwidth Forms
+		return true
+	case r >= 0x20000 && r <= 0x3FFFF: // CJK Extension B+ (and supplement)
+		return true
+	default:
+		return false
+	}
+}
+
+// offloadOldImages returns a copy of messages where every image part outside
+// the newest keepLast image-bearing messages is replaced by an
+// ImageOffloadPlaceholder line. A non-positive keepLast means
+// DefaultImageKeepLast. Messages without images and the kept images are
+// returned unchanged (the input slice is never mutated).
+func offloadOldImages(messages []Message, keepLast int) []Message {
+	if len(messages) == 0 {
+		return messages
+	}
+	if keepLast <= 0 {
+		keepLast = DefaultImageKeepLast
+	}
+	keep := make(map[int]bool, keepLast)
+	for i := len(messages) - 1; i >= 0 && len(keep) < keepLast; i-- {
+		if len(messages[i].Images) > 0 {
+			keep[i] = true
+		}
+	}
+	if len(keep) == 0 {
+		return messages
+	}
+	out := make([]Message, len(messages))
+	copy(out, messages)
+	changed := false
+	for i := range out {
+		if len(out[i].Images) == 0 || keep[i] {
+			continue
+		}
+		dropped := len(out[i].Images)
+		out[i].Images = nil
+		note := fmt.Sprintf("%s (%d image(s) removed)", ImageOffloadPlaceholder, dropped)
+		if content := strings.TrimRight(out[i].Content, "\n"); content != "" {
+			out[i].Content = content + "\n" + note
+		} else {
+			out[i].Content = note
+		}
+		changed = true
+	}
+	if !changed {
+		return messages
+	}
+	return out
 }
 
 // cloneMessages returns a shallow copy whose tool-call slice is independent of

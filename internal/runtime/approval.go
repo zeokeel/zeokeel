@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"sync"
+	"time"
 )
 
 // ErrApprovalExpired reports that a tool call was waiting for a human
@@ -38,17 +39,34 @@ type Gate interface {
 //
 // Decisions may arrive before the matching Wait call (the approval event is
 // published slightly before the tool reaches Wait); such early decisions are
-// buffered per call id and consumed by the next Wait. A decision for a call id
-// that never waits is retained, so callers should only resolve ids they saw in
-// an ApprovalRequest.
+// buffered per call id and consumed by the next Wait. Buffering is bounded: an
+// early decision older than earlyDecisionTTL is ignored and only the newest
+// maxEarlyDecisions are kept, so a UI/mistiming bug cannot grow the map forever.
 type ApprovalQueue struct {
 	require func(toolName string, args json.RawMessage) bool
 
 	mu      sync.Mutex
 	waiters map[string]chan bool
-	early   map[string]bool
+	early   map[string]earlyDecision
 	rules   map[string]struct{}
 }
+
+// earlyDecision is a decision buffered before its Wait call arrived.
+type earlyDecision struct {
+	allow bool
+	at    time.Time
+}
+
+const (
+	// earlyDecisionTTL bounds how long a decision without a matching Wait is
+	// remembered. The approval event is published before the tool reaches Wait,
+	// so a few seconds is plenty; stale entries otherwise accumulate for the
+	// lifetime of the process.
+	earlyDecisionTTL = 5 * time.Minute
+	// maxEarlyDecisions caps the buffer. Older entries are evicted first; a
+	// decision that is truly still needed is re-sent by the UI.
+	maxEarlyDecisions = 256
+)
 
 var _ Gate = (*ApprovalQueue)(nil)
 
@@ -59,7 +77,7 @@ func NewApprovalQueue(require func(toolName string, args json.RawMessage) bool) 
 	return &ApprovalQueue{
 		require: require,
 		waiters: make(map[string]chan bool),
-		early:   make(map[string]bool),
+		early:   make(map[string]earlyDecision),
 		rules:   make(map[string]struct{}),
 	}
 }
@@ -124,10 +142,14 @@ func (q *ApprovalQueue) Wait(ctx context.Context, callID string) (bool, error) {
 	}
 
 	q.mu.Lock()
-	if allow, ok := q.early[callID]; ok {
+	if decision, ok := q.early[callID]; ok {
 		delete(q.early, callID)
-		q.mu.Unlock()
-		return allow, nil
+		if time.Since(decision.at) <= earlyDecisionTTL {
+			q.mu.Unlock()
+			return decision.allow, nil
+		}
+		// A stale early decision no longer applies: fall through and wait for a
+		// fresh one instead of rejecting the call on expired input.
 	}
 	waiter := make(chan bool, 1)
 	q.waiters[callID] = waiter
@@ -175,6 +197,38 @@ func (q *ApprovalQueue) resolve(callID string, allow bool) bool {
 		waiter <- allow
 		return true
 	}
-	q.early[callID] = allow
+	q.early[callID] = earlyDecision{allow: allow, at: time.Now()}
+	q.pruneEarlyLocked()
 	return false
+}
+
+// pruneEarlyLocked drops expired early decisions and enforces the size cap.
+// The caller holds q.mu.
+func (q *ApprovalQueue) pruneEarlyLocked() {
+	now := time.Now()
+	for id, decision := range q.early {
+		if now.Sub(decision.at) > earlyDecisionTTL {
+			delete(q.early, id)
+		}
+	}
+	if len(q.early) <= maxEarlyDecisions {
+		return
+	}
+	// Evict the oldest entries; there is normally one or two entries here, so
+	// the linear scan is cheap and avoids per-resolve allocation.
+	excess := len(q.early) - maxEarlyDecisions
+	for excess > 0 {
+		oldestID := ""
+		var oldest time.Time
+		for id, decision := range q.early {
+			if oldestID == "" || decision.at.Before(oldest) {
+				oldestID, oldest = id, decision.at
+			}
+		}
+		if oldestID == "" {
+			return
+		}
+		delete(q.early, oldestID)
+		excess--
+	}
 }

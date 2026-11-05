@@ -1,6 +1,12 @@
 #!/bin/sh
 # ZeoKeel CI quality gate. One command = the definition of "green".
 # Usage: sh scripts/ci.sh [--fast]
+#
+# GitHub Actions runs this script in .github/workflows/ci.yml (job "gate"), so
+# local and CI results are the same command. `-race ./internal/shell` costs
+# ~9 minutes and runs as a separate workflow job instead (AR-02).
+# Coverage is written to .cache/coverage.out (uploaded as a CI artifact); it is
+# recorded, not gated on a number yet (see docs/BUGS.md AR-17).
 set -eu
 cd "$(dirname "$0")/.."
 
@@ -39,8 +45,13 @@ go test -count=1 ./internal/app -run 'TestProductionToolsInvocable' || fail "too
 # Visual quality is now owned by the ZeoKeel design system, not by DSH screenshot diffs.
 
 if [ "$FAST" = 0 ]; then
-  step "coverage summary"
-  go test -count=1 -cover ./internal/... 2>/dev/null | awk '/coverage:/ {print}' | sort -t: -k2 -n | tail -20
+  step "coverage (profile + summary)"
+  mkdir -p .cache
+  go test -count=1 -coverprofile=.cache/coverage.out -covermode=atomic ./internal/... 2>/dev/null \
+    | awk '/coverage:/ {print}' | sort -t: -k2 -n | tail -20
+  if [ -f .cache/coverage.out ]; then
+    echo "total: $(go tool cover -func=.cache/coverage.out | tail -1)"
+  fi
 
   # Blocking gate: a race failure fails CI. Only an absent cgo toolchain skips
   # the step, since -race needs cgo to build its runtime.
@@ -48,7 +59,7 @@ if [ "$FAST" = 0 ]; then
   race_cc=$(go env CC 2>/dev/null || echo gcc)
   race_cc=${race_cc%% *}
   if [ -n "$race_cc" ] && command -v "$race_cc" >/dev/null 2>&1; then
-    if ! CGO_ENABLED=1 go test -race -count=1 ./internal/state ./internal/store ./internal/session ./internal/agentteam ./internal/tools ./internal/runtime 2>/tmp/zk-race.log; then
+    if ! CGO_ENABLED=1 go test -race -count=1 ./internal/state ./internal/store ./internal/session ./internal/agentteam ./internal/tools ./internal/runtime ./internal/app 2>/tmp/zk-race.log; then
       tail -20 /tmp/zk-race.log
       fail "race"
     fi

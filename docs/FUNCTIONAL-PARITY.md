@@ -2,6 +2,7 @@
 
 > 结论：**核心 agent 已经可用**（真实 LLM 流式对话、工具循环、审批、多会话、子代理、MCP、技能、定时任务均跑通）；
 > 但**功能上与 DSH 未做到一比一**。此前的 UI 像素/交互微循环不应再作为主目标，先补功能缺口。
+> 2026-11-05 审计修复轮复核：此前标为缺失的 **Auto-review、Goal round driver、plan mode 三项增强** 经代码复核已实现，本表随之更正（缺陷跟踪见 [BUGS.md](BUGS.md)）。
 
 ## A. 核心 agent 能力
 
@@ -10,12 +11,12 @@
 | 流式对话 + 多轮历史 | 有 | 有（SSE、SQLite history、e2e 真实模型通过） | ✅ |
 | 工具循环（ReAct） | 有 | 有（eino ADK，真实模型工具调用 e2e 通过） | ✅ |
 | 工具集 | 约 37 个（fs/bash/terminal/jobs/pwsh/web/todo/goal/schedule/skill/subagent/subagent-control/workflow/ralph/present/ask_user/session-query/worktree/inspect/report/MCP…） | 约 35 个，覆盖除 LSP/computer-use 外全部；PTC 以 pipeline 批处理工具实现，Creator 设置工具已接入；shell 栈按平台门控（Windows `pwsh` / POSIX `bash`，对齐 DSH，见 [ADR 0009](decisions/0009-platform-shell-stacks.md)） | ⚠️ 基本齐 |
-| 审批/权限 | Full/Workspace/Read-only/Ask/Auto-review EXP | Full/Workspace/Read-only/Ask + Always allow；Auto-review 缺失 | ⚠️ |
+| 审批/权限 | Full/Workspace/Read-only/Ask/Auto-review EXP | Full/Workspace/Read-only/Ask + Always allow；**Auto-review EXP 已实现**（`internal/runtime/review.go` 的 `LLMToolReviewer`，15s 超时回退人工；app 接线 + 审批 UI 测试） | ✅ 基本对齐 |
 | 上下文压缩 | 自动压缩 + 工具结果裁剪 + LLM 摘要 | `LLMCompactor`（真实模型摘要 + 20s 摘要超时后回退 `WindowCompactor` + 旧工具结果裁剪），ContextBudget 24000，app 已接线；压缩在回合 goroutine 内执行，不阻塞 UI/Submit | ✅ 已接线 |
 | 崩溃恢复/checkpoint | checkpoint + 断点续跑 | `CheckpointStore` 已接 app 的 SQLite checkpoints 表：每成功回合写入（压缩后 prior + 本回合消息），独立冷启动可恢复；生产以 History 为准，checkpoint 作为镜像 | ✅ 已接线（回合边界） |
 | Agent 模式 | **Standard / PTC / Minimal / Creator** | **Standard / PTC / Minimal / Creator**（工具集、prompt 策略、切换重建已对齐；Deep/Supervisor/Plan-Execute 仅作旧会话别名） | ✅ 已对齐 |
 | 子代理 / Agent Team | 同步+异步、消息/中断、team 工具 | 同步 subagent + 异步 manager/team 工具 | ✅ 基本 |
-| Goal（跨回合推进） | goal round driver 自动多轮 | goal 工具 + 状态/进度，无自动 round 驱动 | ⚠️ |
+| Goal（跨回合推进） | goal round driver 自动多轮 | **round driver 已实现**（`internal/session/goal_driver.go`，app 默认接线，回合预算 6/cap 12）；goal 工具 + 状态/进度；`/goal` 命令行仍缺（缺 Controller 写入 API，见 BUGS FP-04） | ⚠️ 基本 |
 | Schedule（模型侧） | schedule_* 工具 | 有，落 automation 表，app 调度器执行 | ✅ |
 | 后台 jobs | job_* 工具 | 有（start/list/output/kill，wait） | ✅ |
 | Skills / MCP | 有（tools/resources/prompts） | 有（tools/resources/prompts） | ✅ |
@@ -25,7 +26,7 @@
 | 反馈 | 服务端反馈传输 | 反馈行（message_id/rating/note/created_at）持久化，重开回显、随导出；仍无联网上送 | ⚠️ 本地持久化 |
 | 自动记忆/AGENTS.md | AGENTS.md + auto-memory | AGENTS.md 注入；无 auto-memory | ⚠️ |
 | 插件 | 内置 + 第三方市场 | 仅内置（产品决定） | 设计差异 |
-| 打包/更新 | 三平台安装包 + 自动更新 | 仅 Windows zip，无签名/更新 | ❌ 缺失 |
+| 打包/更新 | 三平台安装包 + 自动更新 | Windows zip + **Linux tar.gz（amd64/arm64）+ macOS unsigned `.app` zip**（`make package-*`，版本注入已接入）；签名/公证/自动更新仍缺 | ⚠️ 部分 |
 
 ## B. 典型 E2E 场景（验收矩阵）
 
@@ -35,7 +36,7 @@
 | 多轮上下文 + 压缩后继续对话 | ✅ 超预算自动 LLM 摘要 + 工具结果裁剪；摘要失败/超时回退 WindowCompactor |
 | 进程重启后继续未完成回合 | ⚠️ 已完成回合可从 checkpoint/History 冷启动恢复；进行中回合仍不续跑 |
 | 子代理/Team 并行任务 + 消息/中断 | ✅ 工具层通过（同步/异步） |
-| Goal 多轮自动推进 | ❌ 需手动再次触发 |
+| Goal 多轮自动推进 | ✅ round driver 自动续轮（默认预算 6，cap 12；`/goal` 命令行仍是缺口） |
 | 定时任务到点执行 | ✅ 已验证 |
 | MCP 服务器工具/resources/prompts | ✅ 测试通过（stdio 假服务器） |
 | 图片理解 | ✅ 真实模型识图通过 |
@@ -53,12 +54,13 @@ P0（核心体验/数据安全）：
 3. ~~会话 fork + 导出 session log + 本地反馈持久化~~ ✅ 已完成（反馈无联网上送）
 
 P1（能力完整）：
-4. Goal round driver（自动多轮）；Plan mode 已按 DSH 对齐为软引导 + `/plan` 命令 + composer 徽章 + `exit_plan_mode` 工具 / Keep planning / pending 徽章 / Home `/plan`（[ADR 0008](decisions/0008-plan-mode-soft-alignment.md)）
-5. Auto-review 权限（模型审前审批）
+4. ~~Goal round driver（自动多轮）~~ ✅ 已完成（`goal_driver.go` 接线）；剩余 `/goal` 命令行（需 Controller 写入 API）
+   Plan mode 已按 DSH 对齐为软引导 + `/plan` 命令 + composer 徽章 + `exit_plan_mode` 工具 / Keep planning / pending 徽章 / Home `/plan`（[ADR 0008](decisions/0008-plan-mode-soft-alignment.md)）✅
+5. ~~Auto-review 权限（模型审前审批）~~ ✅ 已完成（`LLMToolReviewer` + 审批 UI）
 6. auto-memory / AGENTS.md 深化
 
 P2（产品化）：
-7. 三平台安装包/签名/自动更新
+7. 三平台安装包~~（Linux/macOS 已做 unsigned 版）~~/签名/自动更新
 8. 性能与资源基线（启动、内存、长会话）
 
 > 每项完成后跑对应 E2E 场景，而不是以“像素 diff/死控件扫描”作为完成标准。

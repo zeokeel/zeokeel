@@ -31,9 +31,11 @@ func TestHistoricalErrorStaysInItsTurn(t *testing.T) {
 	tt := ui.NewTester(h.app.View, 1600, 1000)
 	tt.Frame()
 
-	errRect, ok := tt.Find("Error: provider boom")
+	// The recorded error renders as the productized failure card (PD-09);
+	// "provider boom" is unclassified and falls back to the generic title.
+	errRect, ok := tt.Find("This turn failed")
 	if !ok {
-		t.Fatalf("error line missing: %v", tt.Texts())
+		t.Fatalf("error card missing: %v", tt.Texts())
 	}
 	first, ok := tt.Find("first question")
 	if !ok {
@@ -69,9 +71,11 @@ func TestLatestErrorStaysAtTranscriptTail(t *testing.T) {
 	tt := ui.NewTester(h.app.View, 1600, 1000)
 	tt.Frame()
 
-	errRect, ok := tt.Find("Error: provider boom")
+	// The recorded error renders as the productized failure card (PD-09);
+	// "provider boom" is unclassified and falls back to the generic title.
+	errRect, ok := tt.Find("This turn failed")
 	if !ok {
-		t.Fatalf("error line missing: %v", tt.Texts())
+		t.Fatalf("error card missing: %v", tt.Texts())
 	}
 	question, ok := tt.Find("only question")
 	if !ok {

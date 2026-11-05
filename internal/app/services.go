@@ -7,9 +7,12 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"net/url"
 	"os"
 	"path/filepath"
+	"regexp"
 	goruntime "runtime"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -381,13 +384,14 @@ func permissionMode(st *store.Store) string {
 
 // autoReviewContext builds the automatic reviewer's environment: the session's
 // current working directory, resolved per review so a working_directory move
-// within a turn is visible, and the project's AGENTS.md content. A missing file
-// leaves the constraints empty; a nil dirState keeps the workspace root.
+// within a turn is visible.
+//
+// It deliberately does not read the workspace AGENTS.md. That file travels with
+// cloned repositories and was previously passed to the review model as
+// "authorization evidence"; untrusted repository content could then try to
+// weaken the automatic-approval boundary (RT-14). The reviewer receives only
+// the user's own request as authorization evidence plus its fixed policy.
 func autoReviewContext(root string, dirState *tools.WorkingDirectoryState) func() (workDir, constraints string) {
-	constraints := ""
-	if data, err := os.ReadFile(filepath.Join(root, "AGENTS.md")); err == nil {
-		constraints = string(data)
-	}
 	return func() (string, string) {
 		workDir := root
 		if dirState != nil {
@@ -395,7 +399,7 @@ func autoReviewContext(root string, dirState *tools.WorkingDirectoryState) func(
 				workDir = abs
 			}
 		}
-		return workDir, constraints
+		return workDir, ""
 	}
 }
 
@@ -462,6 +466,48 @@ func settingInt(get func(key, env, def string) string, key, env string, def, min
 		n = max
 	}
 	return n
+}
+
+// Context budget defaults. The budget is the approximate prompt size in tokens
+// (estimated as chars/4) above which the runtime compacts the prior
+// conversation. 24000 is the historical fixed value and stays the fallback when
+// the user has not configured one (FP-10: the window itself is not exposed by
+// the provider, so there is no reliable model-window number to derive it from).
+const (
+	defaultContextBudgetTokens = 24000
+	minContextBudgetTokens     = 1000
+	maxContextBudgetTokens     = 2000000
+)
+
+// contextBudgetTokens resolves the prompt budget from settings, preferring the
+// documented context.budget_tokens key and falling back to the namespaced
+// agent.context_budget_tokens for older installs. ZEOKEEL_CONTEXT_BUDGET_TOKENS
+// is the environment override. Invalid values log and fall back to the default;
+// out-of-range values are clamped instead of silently disabling compaction.
+func contextBudgetTokens(get func(key, env, def string) string) int {
+	keys := []struct{ key, env string }{
+		{"context.budget_tokens", "ZEOKEEL_CONTEXT_BUDGET_TOKENS"},
+		{"agent.context_budget_tokens", ""},
+	}
+	for _, candidate := range keys {
+		raw := strings.TrimSpace(get(candidate.key, candidate.env, ""))
+		if raw == "" {
+			continue
+		}
+		n, err := strconv.Atoi(raw)
+		if err != nil || n <= 0 {
+			log.Printf("zeokeel: invalid %s=%q; using the default %d-token context budget", candidate.key, raw, defaultContextBudgetTokens)
+			return defaultContextBudgetTokens
+		}
+		if n < minContextBudgetTokens {
+			return minContextBudgetTokens
+		}
+		if n > maxContextBudgetTokens {
+			return maxContextBudgetTokens
+		}
+		return n
+	}
+	return defaultContextBudgetTokens
 }
 
 // registerAllTools registers the production tool set for the agent: file and
@@ -603,7 +649,14 @@ func registerAllToolsWithOptions(st *store.Store, root string, get func(key, env
 	// rejects calls unless the calling session is in plan mode. The shell
 	// renders the plan review card from the tool result; see ExitPlanModeTool.
 	_ = reg.Register(tools.NewExitPlanModeTool(tools.ExitPlanModeConfig{PlanMode: opts.PlanModeForSession}))
-	_ = reg.Register(tools.NewGoalToolWithStore(interactiveState))
+	// Read Only builds omit the goal tool: a durable goal keeps the goal
+	// driver submitting automatic continuation turns (up to its round cap)
+	// after the user has put the session in Read Only, so the model could
+	// schedule unattended work from a session whose promise is "no lasting
+	// side effects" (RT-03).
+	if !readOnly {
+		_ = reg.Register(tools.NewGoalToolWithStore(interactiveState))
+	}
 
 	// Agent-mode tools are registered once and exposed by mode routing in the
 	// runtime: standard/legacy hide them, PTC adds "ptc", and Creator adds the
@@ -688,12 +741,30 @@ func registerAllToolsWithOptions(st *store.Store, root string, get func(key, env
 	// or sensitive turn content, and gives the user no clear point of control.
 	// The agent must choose durable notes deliberately, and Settings > Memory
 	// lists and deletes them.
-	register(tools.NewMemoryTool(tools.MemoryConfig{
-		Store:       st,
-		WorkspaceID: workspaceIDResolver(st, root, opts.WorkspaceID),
-	}))
+	//
+	// Read Only omits the tool entirely: a memory written here is injected
+	// into every later turn's system prompt, which is exactly the persistent
+	// side effect Read Only promises not to have (RT-03). The prompt catalog
+	// is derived from the registry, so the memory policy text disappears with
+	// the tool instead of advertising a capability the session lacks.
+	if !readOnly {
+		register(tools.NewMemoryTool(tools.MemoryConfig{
+			Store:       st,
+			WorkspaceID: workspaceIDResolver(st, root, opts.WorkspaceID),
+		}))
+	}
 	register(tools.NewSessionQueryTools(tools.SessionQueryConfig{Store: st, WorkspaceID: workspaceID})...)
-	register(tools.NewScheduleTools(tools.ScheduleConfig{Store: st})...)
+	// Scheduling tools create durable automations that run their prompt in a
+	// future session (under that session's permission), so Read Only keeps
+	// only the read-only schedule_list and drops create/update/delete; the
+	// approval gate cannot express "this tool is a persistent side effect" for
+	// a session the current approval prompt never covers (RT-03).
+	for _, scheduleTool := range tools.NewScheduleTools(tools.ScheduleConfig{Store: st}) {
+		if readOnly && scheduleTool.Name() != "schedule_list" {
+			continue
+		}
+		_ = reg.Register(scheduleTool)
+	}
 	register(tools.NewWorkingDirectoryTool(tools.WorkingDirectoryConfig{WorkspaceRoot: root, State: dirState}))
 	register(tools.NewReportTool())
 	if pluginOn("developer_tools", false) {
@@ -735,8 +806,15 @@ func registerAllToolsWithOptions(st *store.Store, root string, get func(key, env
 	// MCP servers: settings key mcp.servers (JSON array) or <root>/mcp.json.
 	// A disabled plugin must not connect, and a malformed config is surfaced
 	// instead of silently dropping the whole server list.
+	//
+	// The workspace file is untrusted data: it travels with cloned
+	// repositories, so starting the commands it declares is third-party code
+	// execution without approval. It only applies after an explicit opt-in
+	// through mcp.workspace_config=allow (RT-01); the default is off.
 	if pluginOn("mcp", true) {
-		mcpTools, mcpMgr, closeMCP, merr := connectMCP(root, read("mcp.servers", "ZEOKEEL_MCP_SERVERS", ""))
+		rawSetting := read("mcp.servers", "ZEOKEEL_MCP_SERVERS", "")
+		workspaceConfig := read(workspaceMCPConfigKey, "ZEOKEEL_MCP_WORKSPACE_CONFIG", workspaceMCPConfigOff)
+		mcpTools, mcpMgr, closeMCP, merr := connectMCP(root, rawSetting, mcpServersSource(rawSetting, st), workspaceConfig)
 		if merr != nil {
 			return nil, nil, fmt.Errorf("mcp: %w", merr)
 		}
@@ -907,8 +985,9 @@ func buildAgentWithOptions(st *store.Store, root, instruction string, opts regis
 	}
 	// The reviewer judges whether the user authorized the action, so the runtime
 	// attaches this turn's user request and this environment to every review.
-	// AGENTS.md is the project's constraint source, the same file the prompt
-	// calls authoritative; a missing file leaves the constraints empty.
+	// The review environment deliberately excludes workspace files such as
+	// AGENTS.md: repository content is untrusted and must not become
+	// authorization evidence (RT-14).
 	var reviewContext func() (workDir, constraints string)
 	if reviewer != nil {
 		reviewContext = autoReviewContext(root, dirState)
@@ -1015,7 +1094,7 @@ func buildAgentWithOptions(st *store.Store, root, instruction string, opts regis
 			ToolResultKeepLast: runtime.DefaultToolResultKeepLast,
 			Fallback:           runtime.WindowCompactor{KeepLast: 12},
 		},
-		ContextBudget:   24000,
+		ContextBudget:   contextBudgetTokens(get),
 		CheckpointStore: &storeCheckpoint{st: st},
 		// Soft cost warnings (never a hard stop) follow the agent-loop plugin
 		// settings; empty falls back to the runtime defaults.
@@ -1438,18 +1517,151 @@ func editorCallIsReadOnly(args json.RawMessage) bool {
 	return strings.TrimSpace(parsed.Command) == "view"
 }
 
-// connectMCP reads <root>/mcp.json and starts the configured stdio servers.
-// A missing file is not an error (returns nil tooling).
-func connectMCP(root, rawSetting string) ([]runtime.Tool, *mcp.Manager, func() error, error) {
+// workspaceMCPConfigKey aliases the canonical setting name from the mcp
+// package so the app, the inspect diagnostics and the docs cannot drift.
+const workspaceMCPConfigKey = mcp.WorkspaceConfigKey
+
+// workspaceMCPConfigOff is the default: workspace-declared MCP servers are
+// treated as data, not executable configuration.
+const workspaceMCPConfigOff = mcp.WorkspaceConfigOff
+
+// workspaceMCPConfigAllowed reports whether the mcp.workspace_config value
+// opts into running <root>/mcp.json. The canonical parser lives in the mcp
+// package so the runtime gate and the inspect diagnostics agree.
+func workspaceMCPConfigAllowed(value string) bool {
+	return mcp.WorkspaceConfigAllowed(value)
+}
+
+// mcpServersSource labels where the effective mcp.servers value came from.
+// The store wins over the environment (see buildAgentWithOptions' getter), so
+// the label is diagnostic only; an unknown source falls back to a generic
+// label instead of claiming a channel that was not used.
+func mcpServersSource(raw string, st *store.Store) string {
+	if strings.TrimSpace(raw) == "" {
+		return "none"
+	}
+	if st != nil {
+		if v, err := st.GetSetting("mcp.servers"); err == nil && strings.TrimSpace(v) != "" {
+			return "settings mcp.servers"
+		}
+	}
+	if strings.TrimSpace(os.Getenv("ZEOKEEL_MCP_SERVERS")) != "" {
+		return "env ZEOKEEL_MCP_SERVERS"
+	}
+	return "injected mcp.servers"
+}
+
+// mcpArgSecretPattern matches an argument key that conventionally carries a
+// credential, so its value is redacted before anything is logged.
+var mcpArgSecretPattern = regexp.MustCompile(`(?i)(api[_-]?key|apikey|token|secret|passw|credential|auth|key)`)
+
+// mcpArgTailPattern matches "flag=SECRET" and "--flag SECRET" style arguments.
+// The value is redacted but the flag stays visible, which keeps the startup log
+// useful without writing tokens to <data dir>/logs (RT-01 diagnosability).
+func redactMCPArgs(args []string) []string {
+	out := make([]string, 0, len(args))
+	redactNext := false
+	for _, arg := range args {
+		if redactNext {
+			out = append(out, "[redacted]")
+			redactNext = false
+			continue
+		}
+		if key, value, ok := strings.Cut(arg, "="); ok && value != "" && mcpArgSecretPattern.MatchString(key) {
+			out = append(out, key+"=[redacted]")
+			continue
+		}
+		trimmed := strings.TrimLeft(arg, "-")
+		if mcpArgSecretPattern.MatchString(trimmed) {
+			out = append(out, arg)
+			redactNext = true
+			continue
+		}
+		if len(arg) > 128 {
+			out = append(out, arg[:64]+fmt.Sprintf("…[%d chars]", len(arg)))
+			continue
+		}
+		out = append(out, arg)
+	}
+	return out
+}
+
+// logMCPServers records which server processes are about to run and where
+// their configuration came from. Names, commands, redacted arguments and env
+// key names are logged; env values and credential-looking argument values are
+// never written, because <data dir>/logs persists and a declared server's
+// environment can carry keys.
+func logMCPServers(source string, servers []mcp.ServerConfig) {
+	for _, server := range servers {
+		if mcp.IsStreamableHTTP(server) {
+			headerKeys := make([]string, 0, len(server.Headers))
+			for key := range server.Headers {
+				headerKeys = append(headerKeys, key)
+			}
+			sort.Strings(headerKeys)
+			log.Printf("zeokeel: mcp: starting server %q from %s: transport=streamable-http url=%q header_keys=%v",
+				server.Name, source, redactMCPURL(server.URL), headerKeys)
+			continue
+		}
+		envKeys := make([]string, 0, len(server.Env))
+		for _, entry := range server.Env {
+			key, _, _ := strings.Cut(entry, "=")
+			envKeys = append(envKeys, key)
+		}
+		log.Printf("zeokeel: mcp: starting server %q from %s: command=%q args=%q env_keys=%v",
+			server.Name, source, server.Command, redactMCPArgs(server.Args), envKeys)
+	}
+}
+
+// redactMCPURL hides the parts of a remote MCP endpoint that can carry
+// credentials (userinfo and query string) before the endpoint is written to the
+// startup log.
+func redactMCPURL(raw string) string {
+	parsed, err := url.Parse(strings.TrimSpace(raw))
+	if err != nil {
+		return "[invalid url]"
+	}
+	if parsed.User != nil {
+		parsed.User = url.User("[redacted]")
+	}
+	if parsed.RawQuery != "" {
+		parsed.RawQuery = "[redacted]"
+	}
+	return parsed.String()
+}
+
+// connectMCP starts the configured stdio MCP servers. Configuration comes
+// from the mcp.servers value when it is non-empty (settingSource labels where
+// that value was resolved from); otherwise the workspace file <root>/mcp.json
+// is used, but only when mcp.workspace_config opts in (see
+// workspaceMCPConfigAllowed). A missing file and a disabled workspace config
+// are not errors (returns nil tooling).
+func connectMCP(root, rawSetting, settingSource, workspaceConfig string) ([]runtime.Tool, *mcp.Manager, func() error, error) {
 	var cfg mcp.Config
+	source := settingSource
 	if strings.TrimSpace(rawSetting) != "" {
 		var servers []mcp.ServerConfig
 		if err := json.Unmarshal([]byte(rawSetting), &servers); err != nil {
 			return nil, nil, nil, fmt.Errorf("parse mcp.servers: %w", err)
 		}
 		cfg = mcp.Config{Servers: servers}
+		if source == "" || source == "none" {
+			source = "settings mcp.servers"
+		}
 	} else {
 		path := filepath.Join(root, "mcp.json")
+		if !workspaceMCPConfigAllowed(workspaceConfig) {
+			// Never read, let alone execute, workspace-declared commands by
+			// default: a cloned repository can carry mcp.json, so trusting it
+			// would be unapproved remote code execution (RT-01). Log the
+			// ignored file so a user who expected its servers can see why
+			// nothing started.
+			if _, statErr := os.Lstat(path); statErr == nil {
+				log.Printf("zeokeel: mcp: ignoring workspace config %s (mcp.workspace_config=%q; set it to %q to enable workspace MCP servers)",
+					path, mcp.NormalizeWorkspaceConfig(workspaceConfig), mcp.WorkspaceConfigAllow)
+			}
+			return nil, nil, nil, nil
+		}
 		data, err := os.ReadFile(path)
 		if err != nil {
 			if os.IsNotExist(err) {
@@ -1460,10 +1672,12 @@ func connectMCP(root, rawSetting string) ([]runtime.Tool, *mcp.Manager, func() e
 		if err := json.Unmarshal(data, &cfg); err != nil {
 			return nil, nil, nil, fmt.Errorf("parse %s: %w", path, err)
 		}
+		source = "untrusted workspace file " + path + " (mcp.workspace_config=allow)"
 	}
 	if len(cfg.Servers) == 0 {
 		return nil, nil, nil, nil
 	}
+	logMCPServers(source, cfg.Servers)
 	mgr := mcp.NewManager(context.Background())
 	if err := mgr.Connect(context.Background(), cfg); err != nil {
 		// Per-server isolation: the manager keeps every server that did

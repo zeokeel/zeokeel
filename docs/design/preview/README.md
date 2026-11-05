@@ -1,6 +1,6 @@
 # ZeoKeel 原生视觉预览（2026-11-05）
 
-全部截图由各屏的 headless 预览测试生成（大多数为 `ui.Render(..., 1600, 1000, 1)`；独立的 Settings window 为 `900×720`，见下表），live fixture，中文默认，可复现：
+全部截图由各屏的 headless 预览测试生成（大多数为 `ui.Render(..., 1600, 1000, 1)`；独立的 Settings window 为 `900×840`，见下表），live fixture，中文默认，可复现：
 
 ```sh
 export PATH=/usr/local/go/bin:$PATH
@@ -20,7 +20,7 @@ ZEOKEEL_UPDATE_PREVIEWS=1 go test -count=1 ./internal/shell -run 'TestRender.*Na
 | Right sidebar（Start） | [right-sidebar-native-light.png](right-sidebar-native-light.png) | [right-sidebar-native-dark.png](right-sidebar-native-dark.png) |
 | Right sidebar（Files） | [right-sidebar-files-light.png](right-sidebar-files-light.png) | [right-sidebar-files-dark.png](right-sidebar-files-dark.png) |
 | Tool cards | [toolcard-native-light.png](toolcard-native-light.png) | [toolcard-native-dark.png](toolcard-native-dark.png) |
-| Settings window（900×720） | [settings-window-native-light.png](settings-window-native-light.png) | [settings-window-native-dark.png](settings-window-native-dark.png) |
+| Settings window（900×840） | [settings-window-native-light.png](settings-window-native-light.png) | [settings-window-native-dark.png](settings-window-native-dark.png) |
 
 设计口径见 [docs/design/native-ui.md](../native-ui.md)；品牌色板与主题见 [ADR 0002](../../decisions/0002-brand-theme-foundation.md)。
 
@@ -60,3 +60,18 @@ ZEOKEEL_VISUAL=1 go test -count=1 -run TestVisualRegression ./internal/shell
 
 - 金标与**生成机器的字体环境**绑定（本次生成环境含 NotoSansCJK / DroidSansFallbackFull / Noto Mono 字体栈；本机 CJK fallback 渲染）。换机器、安装/更换系统字体后，先 `--update` 重建金标并人工 review 差异，再提交。
 - 修改任何屏的视觉（颜色/间距/文案）后：跑 `--update`（或 `ZEOKEEL_UPDATE_PREVIEWS=1 go test ...`）刷新 PNG → review 截图 → 提交 PNG 与代码同一 commit；opt-in 回归用于阻止"无意的视觉漂移"，不用于外部产品对齐。
+
+## 2026-11-05 审计修复轮重生成
+
+UI/UX 修复批次（设置窗口 900×840、空态、toast/错误态、popover 等）落地后，按下面两条统一重生成并回归，命令与结果同时写入 `docs/STATUS.md` 与 `docs/BUGS.md`：
+
+```sh
+# 1) 重生成金标（写 docs/design/preview/，22 张 PNG + 本 README）
+ZEOKEEL_UPDATE_PREVIEWS=1 go test -count=1 -run 'TestRender.*NativePreview' ./internal/shell
+
+# 2) 用金标做同机回归（opt-in，默认 skip）
+ZEOKEEL_VISUAL=1 go test -count=1 -run TestVisualRegression ./internal/shell
+```
+
+- 结果：待本轮修复批次完成后执行并回填（预期 22 张刷新、`TestVisualRegression` PASS）。
+- 注意：设置窗口从 900×720 改为 900×840 后，`settings-window-native-{light,dark}.png` 必须重生成，否则本目录的尺寸说明与图不一致。

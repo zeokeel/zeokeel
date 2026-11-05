@@ -1,11 +1,12 @@
 // Package mcp manages Model Context Protocol servers and exposes their tools
 // to the ZeoKeel agent runtime.
 //
-// Servers are launched over stdio with the official
-// github.com/modelcontextprotocol/go-sdk client and CommandTransport. Each
-// server is connected independently: a broken command or a failing handshake
-// only removes that server's tools and is reported in the Connect error, while
-// every other server keeps working.
+// Servers are launched over stdio (CommandTransport) or reached over the
+// streamable-HTTP transport (StreamableClientTransport) with the official
+// github.com/modelcontextprotocol/go-sdk client. Each server is connected
+// independently: a broken command or a failing handshake only removes that
+// server's tools and is reported in the Connect error, while every other server
+// keeps working.
 //
 // Discovered tools are adapted to runtime.Tool with the DSH-style name
 // "mcp__<server>__<tool>". The adapter forwards the model's JSON arguments to
@@ -23,6 +24,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/http"
+	"net/url"
 	"os"
 	"os/exec"
 	"regexp"
@@ -58,21 +61,47 @@ const (
 	maxToolNameLen = 128
 )
 
-// ServerConfig describes one stdio MCP server.
+// Transport identifiers accepted in ServerConfig.Transport. Stdio is the
+// default for servers configured with a Command; streamable HTTP connects to a
+// remote MCP endpoint (DSH feature parity, FP-13).
+const (
+	TransportStdio          = "stdio"
+	TransportStreamableHTTP = "http"
+	// TransportStreamableHTTPAlias is the longer spelling accepted in configs.
+	TransportStreamableHTTPAlias = "streamable-http"
+)
+
+// ServerConfig describes one MCP server: either a stdio child process or a
+// remote streamable-HTTP endpoint.
 type ServerConfig struct {
 	// Name identifies the server in tool names. It must be non-empty and
 	// unique within a Manager. Keep it to letters, digits, '.', '_' and '-'.
 	Name string
 
-	// Command is the executable to start. Required.
+	// Transport selects how to reach the server: "stdio" (default when Command
+	// is set) or "http" / "streamable-http" for a remote endpoint.
+	Transport string
+
+	// Command is the executable to start for a stdio server. Required for
+	// stdio, rejected for HTTP transports.
 	Command string
 
-	// Args are passed to Command verbatim.
+	// Args are passed to Command verbatim for stdio servers.
 	Args []string
 
 	// Env entries are "KEY=VALUE" overrides appended to the current process
-	// environment for the server process.
+	// environment for a stdio server process.
 	Env []string
+
+	// URL is the MCP endpoint for HTTP transports (http or https). Required for
+	// HTTP transports, ignored for stdio. It may carry credentials in userinfo
+	// or the query; the app's startup log redacts them.
+	URL string
+
+	// Headers are extra HTTP headers sent with every request of an HTTP
+	// transport, for example an Authorization bearer token. They are secrets:
+	// inspect and the startup log only report their names.
+	Headers map[string]string
 }
 
 // Config is a set of MCP servers to connect.
@@ -142,6 +171,7 @@ func (m *Manager) Connect(ctx context.Context, cfg Config) error {
 	seen := make(map[string]struct{}, len(cfg.Servers))
 	for _, server := range cfg.Servers {
 		server.Name = strings.TrimSpace(server.Name)
+		server.Transport = normalizeTransport(server)
 		if err := validateServerConfig(server); err != nil {
 			errs = append(errs, fmt.Errorf("mcp: server %q: %w", server.Name, err))
 			continue
@@ -177,16 +207,36 @@ func (m *Manager) connectServer(parent context.Context, server ServerConfig) err
 	ctx, cancelTimeout := context.WithTimeout(ctx, timeout)
 	defer cancelTimeout()
 
-	cmd := exec.Command(server.Command, server.Args...)
-	// The desktop app runs as a GUI executable; hide the MCP server's console
-	// window on Windows so connecting does not flash a cmd dialog.
-	winproc.Hide(cmd)
-	// Inherit a scrubbed environment: a configured server must not be able to
-	// read the provider key or another ZeoKeel secret. An operator can still
-	// pass a variable explicitly through the server's own Env list, so the
-	// configuration remains the only way to hand a secret to a server.
-	cmd.Env = mergeEnv(scrubMCPEnv(os.Environ()), server.Env)
-	transport := &sdk.CommandTransport{Command: cmd, TerminateDuration: m.terminate}
+	var transport sdk.Transport
+	if normalizeTransport(server) == TransportStreamableHTTP {
+		// Remote MCP endpoint (FP-13). The HTTP client has no overall timeout:
+		// the connect context bounds initialization, and the SDK's persistent
+		// standalone SSE stream must be allowed to outlive it.
+		httpClient := &http.Client{}
+		if len(server.Headers) > 0 {
+			httpClient.Transport = &headerRoundTripper{base: http.DefaultTransport, headers: server.Headers}
+		}
+		transport = &sdk.StreamableClientTransport{
+			Endpoint:   strings.TrimSpace(server.URL),
+			HTTPClient: httpClient,
+			// Fail fast within the connect timeout instead of the SDK default
+			// reconnect loop; the app surfaces the failure and the next rebuild
+			// retries.
+			MaxRetries: -1,
+		}
+	} else {
+		cmd := exec.Command(server.Command, server.Args...)
+		// The desktop app runs as a GUI executable; hide the MCP server's
+		// console window on Windows so connecting does not flash a cmd dialog.
+		winproc.Hide(cmd)
+		// Inherit a scrubbed environment: a configured server must not be able
+		// to read the provider key or another ZeoKeel secret. An operator can
+		// still pass a variable explicitly through the server's own Env list,
+		// so the configuration remains the only way to hand a secret to a
+		// server.
+		cmd.Env = mergeEnv(scrubMCPEnv(os.Environ()), server.Env)
+		transport = &sdk.CommandTransport{Command: cmd, TerminateDuration: m.terminate}
+	}
 
 	client := sdk.NewClient(&sdk.Implementation{Name: clientName, Version: clientVersion}, nil)
 	session, err := client.Connect(ctx, transport, nil)
@@ -465,6 +515,33 @@ func formatResult(result *sdk.CallToolResult) (string, error) {
 
 var serverNamePattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$`)
 
+// IsStreamableHTTP reports whether server connects to a remote MCP endpoint
+// instead of spawning a child process. The app uses it for diagnostics: HTTP
+// servers log a redacted endpoint and header names, never command lines.
+func IsStreamableHTTP(server ServerConfig) bool {
+	return normalizeTransport(server) == TransportStreamableHTTP
+}
+
+// normalizeTransport resolves ServerConfig.Transport to one of the transport
+// constants. An empty transport means stdio (the historical behavior) unless
+// only a URL was configured, in which case HTTP is the only workable reading.
+func normalizeTransport(server ServerConfig) string {
+	transport := strings.ToLower(strings.TrimSpace(server.Transport))
+	switch transport {
+	case "":
+		if strings.TrimSpace(server.Command) == "" && strings.TrimSpace(server.URL) != "" {
+			return TransportStreamableHTTP
+		}
+		return TransportStdio
+	case "stdio", "command", "process":
+		return TransportStdio
+	case TransportStreamableHTTP, TransportStreamableHTTPAlias, "streamable_http", "streamablehttp":
+		return TransportStreamableHTTP
+	default:
+		return transport // validateServerConfig reports the unknown value
+	}
+}
+
 func validateServerConfig(server ServerConfig) error {
 	if server.Name == "" {
 		return errors.New("name is required")
@@ -472,14 +549,39 @@ func validateServerConfig(server ServerConfig) error {
 	if !serverNamePattern.MatchString(server.Name) {
 		return fmt.Errorf("invalid name %q: use letters, digits, '.', '_' or '-' (max 64 chars)", server.Name)
 	}
-	if strings.TrimSpace(server.Command) == "" {
-		return errors.New("command is required")
-	}
-	for _, entry := range server.Env {
-		key, _, ok := strings.Cut(entry, "=")
-		if !ok || strings.TrimSpace(key) == "" {
-			return fmt.Errorf("env entry %q must be KEY=VALUE", entry)
+	switch transport := normalizeTransport(server); transport {
+	case TransportStdio:
+		if strings.TrimSpace(server.Command) == "" {
+			return errors.New("command is required for a stdio server")
 		}
+		if strings.TrimSpace(server.URL) != "" {
+			return errors.New("url is only valid for an http transport; remove command for a remote server")
+		}
+		for _, entry := range server.Env {
+			key, _, ok := strings.Cut(entry, "=")
+			if !ok || strings.TrimSpace(key) == "" {
+				return fmt.Errorf("env entry %q must be KEY=VALUE", entry)
+			}
+		}
+	case TransportStreamableHTTP:
+		rawURL := strings.TrimSpace(server.URL)
+		if rawURL == "" {
+			return errors.New("url is required for an http transport")
+		}
+		parsed, err := url.Parse(rawURL)
+		if err != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") || parsed.Host == "" {
+			return fmt.Errorf("invalid url %q: use an http or https URL", rawURL)
+		}
+		if strings.TrimSpace(server.Command) != "" {
+			return errors.New("command is only valid for a stdio server; remove it for an http transport")
+		}
+		for key := range server.Headers {
+			if strings.TrimSpace(key) == "" {
+				return errors.New("header names must not be empty")
+			}
+		}
+	default:
+		return fmt.Errorf("unknown transport %q: use %q or %q", server.Transport, TransportStdio, TransportStreamableHTTP)
 	}
 	return nil
 }
@@ -499,25 +601,36 @@ func validateToolName(name string) error {
 	return nil
 }
 
-// scrubMCPEnv removes ZeoKeel and provider secrets from the environment a
-// configured MCP server inherits. Matching is case-insensitive, as the bash,
-// job, pwsh and terminal tools' scrubEnv is, so Windows-style names are
-// covered. Entries the operator lists in ServerConfig.Env are merged after
-// this and are not filtered.
+// scrubMCPEnv removes credential-bearing variables from the environment a
+// configured MCP server inherits: ZeoKeel/provider secrets and the common
+// cloud/CI credential names are dropped, while ordinary variables stay so the
+// server process still works. The matcher is shared with the shell tools
+// (winproc.ScrubEnv, RT-15). Entries the operator lists in ServerConfig.Env are
+// merged after this and are not filtered.
 func scrubMCPEnv(env []string) []string {
-	out := make([]string, 0, len(env))
-	for _, entry := range env {
-		name := entry
-		if i := strings.IndexByte(entry, '='); i >= 0 {
-			name = entry[:i]
-		}
-		upper := strings.ToUpper(name)
-		if strings.HasPrefix(upper, "ZEOKEEL_") || strings.HasPrefix(upper, "DEEPSEEK") {
-			continue
-		}
-		out = append(out, entry)
+	return winproc.ScrubEnv(env)
+}
+
+// headerRoundTripper attaches fixed HTTP headers (for example an
+// Authorization bearer token) to every streamable-HTTP MCP request. It clones
+// each request so redirects and retries cannot mutate shared state, and it
+// never logs or exposes the header values.
+type headerRoundTripper struct {
+	base    http.RoundTripper
+	headers map[string]string
+}
+
+// RoundTrip implements http.RoundTripper.
+func (h *headerRoundTripper) RoundTrip(req *http.Request) (*http.Response, error) {
+	clone := req.Clone(req.Context())
+	for key, value := range h.headers {
+		clone.Header.Set(key, value)
 	}
-	return out
+	base := h.base
+	if base == nil {
+		base = http.DefaultTransport
+	}
+	return base.RoundTrip(clone)
 }
 
 // mergeEnv returns base with overrides applied by key. Overrides whose key is

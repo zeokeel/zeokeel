@@ -36,7 +36,8 @@ Call it with a JSON object:
 "title" (at most 120 characters), "prompt" and "cron" are required.
 "enabled" is optional and defaults to true. Supported cron expressions are the
 automation subset: "*/N * * * *", "M H * * *", "@hourly", "@daily" (and
-"@midnight").
+"@midnight"). Hour/minute values are the machine's local wall-clock time:
+"@daily" fires at local midnight, "@hourly" at the top of each local hour.
 
 The tool validates the expression, computes the next run time and persists the
 task through the automation store. It returns
@@ -114,12 +115,25 @@ func (b *scheduleToolBase) requireStore(name string) error {
 	return nil
 }
 
-// clock returns the configured clock, defaulting to time.Now.
+// clock returns the configured clock, defaulting to time.Now in the machine's
+// local time zone. Cron expressions are wall-clock expressions (@daily means
+// local midnight), so the schedule is computed against local time and only the
+// persisted instant is normalized to UTC.
 func (b *scheduleToolBase) clock() time.Time {
 	if b.now != nil {
-		return b.now().UTC()
+		return b.now()
 	}
-	return time.Now().UTC()
+	return time.Now()
+}
+
+// nextRunUTC computes the next run of cron after the clock's wall-clock time
+// and returns it as a UTC instant, which is what the store persists.
+func (b *scheduleToolBase) nextRunUTC(cron string) (time.Time, error) {
+	next, err := automation.NextRun(cron, b.clock())
+	if err != nil {
+		return time.Time{}, err
+	}
+	return next.UTC(), nil
 }
 
 // scheduleCreateTool implements schedule_create.
@@ -161,7 +175,7 @@ func (t *scheduleCreateTool) Invoke(ctx context.Context, args json.RawMessage) (
 		Enabled: enabled,
 	}
 	if enabled {
-		next, err := automation.NextRun(cron, t.clock())
+		next, err := t.nextRunUTC(cron)
 		if err != nil {
 			return "", fmt.Errorf("%s: %w", t.Name(), err)
 		}
@@ -273,7 +287,7 @@ func (t *scheduleUpdateTool) Invoke(ctx context.Context, args json.RawMessage) (
 		return "", fmt.Errorf("%s: %w", t.Name(), err)
 	}
 	if task.Enabled && (cronChanged || enabledChanged || task.NextRun == nil) {
-		next, err := automation.NextRun(task.Cron, t.clock())
+		next, err := t.nextRunUTC(task.Cron)
 		if err != nil {
 			return "", fmt.Errorf("%s: %w", t.Name(), err)
 		}

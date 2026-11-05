@@ -2,6 +2,8 @@
 
 **ZeoKeel：纯 Go 桌面 AI Agent。mygo 原生 UI + eino 运行时。功能对齐 DSH（DeepSeek Harness），视觉与交互自有（mygo 原生设计 + ZeoKeel 品牌）。**
 
+产品定位：**DSH 同类替代**（独立品牌桌面 Agent），**不是**已可用的迁移器——DSH 会话导入仍在开发中（`internal/importer` 初版，CLI/UI 未接线；见 [docs/BUGS.md](docs/BUGS.md) PD-04）。
+
 > 品牌资产只使用 `logo/` 下的 SVG，不自行猜测或重绘。插件只做内置（无第三方安装/市场）。
 >
 > **2026-11-05 决策**：DSH 像素级对齐已退役；功能对齐继续作为目标。见 [ADR 0001：退役 DSH 像素对齐基建](docs/decisions/0001-retire-dsh-pixel-parity.md)。
@@ -13,7 +15,8 @@
 | C1 | 纯 Go，`CGO_ENABLED=0`，不引入任何 cgo 依赖 |
 | C2 | UI 只用 mygo 原生控件（`ui` 包），不用 webview / Electron / HTML |
 | C3 | 单进程、单二进制、可交叉编译到 Linux / macOS / Windows |
-| C4 | 测试无显示器可跑；功能与交互验收进 CI（DSH 像素/基线门禁已于 2026-11-05 退役） |
+| C4 | 测试无显示器可跑；门禁统一由 `.github/workflows/ci.yml` 与 `scripts/ci.sh` 执行（gofmt/vet/build/test/零 cgo 交叉编译/race/coverage；`-race ./internal/shell` 为单独 job，`-timeout 20m`） |
+| C5 | 不可信 workspace 内容默认不执行：`<root>/mcp.json` 需显式 `mcp.workspace_config=allow`（默认 `off`，`on/true/1` 一律 fail-closed） |
 
 ## 构建与产物
 
@@ -25,10 +28,15 @@
 | `make build-all` | `dist/zeokeel-{linux-amd64,linux-arm64,darwin-arm64}` + Windows GUI/console 双产物 |
 | `make windows` | `dist/zeokeel-windows-amd64.exe`（GUI）+ `dist/zeokeel-windows-amd64-console.exe`（console） |
 | `make package-windows` | 上述 Windows 双产物 + `dist/zeokeel-windows-amd64.zip` + `dist/SHA256SUMS.txt` |
+| `make package-linux` | `dist/zeokeel-linux-{amd64,arm64}.tar.gz`（含 README）+ `dist/SHA256SUMS.txt` |
+| `make package-macos` | `dist/zeokeel-macos-{arm64,amd64}.zip`（unsigned `.app`）+ `dist/SHA256SUMS.txt` |
+| `make version` | 打印下一次构建将注入的 version/commit（不构建） |
 | `make build-check` | `go build ./...` 仅编译检查（不产生文件） |
 | `make clean` | 删除 `dist/`、遗留的根目录 `zeokeel`/`zeokeel.exe` 与包内 `*.test`（不动 `.cache/`、`.probe/`、`.evolve/`） |
 
-`sh scripts/build.sh <target>` 支持 `native` / `linux-amd64` / `linux-arm64` / `darwin-arm64` / `windows` / `all` / `package-windows` / `clean` / `check` / `help`。Windows 包说明见 [packaging/windows/README-WINDOWS.txt](packaging/windows/README-WINDOWS.txt)。
+`sh scripts/build.sh <target>` 支持 `native` / `linux-amd64` / `linux-arm64` / `darwin-amd64` / `darwin-arm64` / `windows` / `all` / `package-windows` / `package-linux` / `package-macos` / `clean` / `check` / `help`。打包总览见 [packaging/README.md](packaging/README.md)；各平台安装说明见 `packaging/{windows,linux,macos}/`。
+
+**版本与诊断**：构建用 `-ldflags "-s -w -X main.version/commit/buildTime"` 注入版本并剥离符号（产物约 -32%），默认值来自 `git describe`/`git rev-parse`，可用 `ZEOKEEL_VERSION` 等覆盖。`zeokeel --version` 打印三项 + 平台/工具链；`zeokeel run [--json] [--yes] "<prompt>"` 无窗口跑一条 prompt（headless CLI，退出码 0/1/2，`run --help` 看全量参数）；日志写 `<数据目录>/logs/app-YYYYMMDD.log`（8MiB 轮转、跨天换文件、0600），panic 写 `logs/crash-*.txt`，`debug.SetCrashOutput` 捕获致命崩溃（Windows GUI 构建也生效）。
 
 **Windows 可执行文件图标**：`logo/zeokeel.ico`（由 `logo/logo.svg` 生成，含 256/128/64/48/32/16 多尺寸）经 `cmd/zeokeel/resource_windows_amd64.rc` + MinGW `windres` 编译为已提交的 `cmd/zeokeel/resource_windows_amd64.syso`，`go build` 会自动把它嵌入 exe（Explorer/任务栏图标）。修改 icon 后运行 `sh scripts/gen-windows-resource.sh`（或 `make icon`）重新生成；`make windows` 在源文件较新且 `x86_64-w64-mingw32-windres` 存在时也会自动重生成。
 
@@ -42,14 +50,15 @@
   - 交互规格（§6）、功能对齐矩阵（§7）
   - eino 运行时设计（§8）、数据模型（§9）
   - 质量体系（§10）、里程碑与 M0 任务（§11）、风险（§12）、待拍板（§13）
-- **决策记录**：[docs/decisions/](docs/decisions/)（0001 退役 DSH 像素对齐；0002 品牌主题基础）
+- **决策记录**：`docs/decisions/`（14 篇 ADR；0001 退役 DSH 像素对齐、0002 品牌主题、0003–0014 见目录与各自"状态"字段）
 - **功能对齐矩阵**：[docs/FUNCTIONAL-PARITY.md](docs/FUNCTIONAL-PARITY.md)（活文档；像素对齐已退役）
-- **历史文档（已退役，不再维护）**：[docs/UI-PARITY-AUDIT.md](docs/UI-PARITY-AUDIT.md)、[docs/COMPONENT-PARITY.md](docs/COMPONENT-PARITY.md)、[docs/research/](docs/research/)
+- **缺陷清单（真源）**：[docs/BUGS.md](docs/BUGS.md)（P0/P1 与延期项状态）；**审计报告（证据）**：[docs/audit/](docs/audit/)（`MASTER-AUDIT.md` + 分报告）
+- **历史文档（仅历史参考，已被 docs/audit/ 取代）**：[docs/UI-PARITY-AUDIT.md](docs/UI-PARITY-AUDIT.md)、[docs/COMPONENT-PARITY.md](docs/COMPONENT-PARITY.md)、[docs/research/](docs/research/)
 - **字标规格**：[docs/wordmark.md](docs/wordmark.md)
 
 ## 当前状态
 
-**M0–M13 完成：五屏 UI · 动画/交互 · 运行时 · 提示词层 · Agent Loop 工具全量 · 多模态图片输入 · 终端 PTY · 真实模型 E2E · 附件上传 · fork/导出**：Home / Session / Plugins / Settings / Automation 全部用 mygo 原生控件实现。`CGO_ENABLED=0 go build/test/vet` 与 `scripts/check-nocgo.sh`（四目标交叉编译）为现行门禁；DSH 像素比对已退役（2026-11-05），历史基线资产已整包归档（`/data/zeokeel-backups/parity-assets-20261105.tar.gz`，回滚点 tag `pre-native-ui`）。
+**M0–M13 完成：五屏 UI · 动画/交互 · 运行时 · 提示词层 · Agent Loop 工具全量 · 多模态图片输入 · 终端 PTY · 真实模型 E2E · 附件上传 · fork/导出**（当前状态真源：[docs/STATUS.md](docs/STATUS.md)；缺陷状态：[docs/BUGS.md](docs/BUGS.md)）：Home / Session / Plugins / Settings / Automation 全部用 mygo 原生控件实现。`CGO_ENABLED=0 go build/test/vet` 与 `scripts/check-nocgo.sh`（四目标交叉编译）为现行门禁；DSH 像素比对已退役（2026-11-05），历史基线资产已整包归档（`/data/zeokeel-backups/parity-assets-20261105.tar.gz`，回滚点 tag `pre-native-ui`）。
 
 基础设施：`internal/state`（事件总线/快照）、`internal/store`（SQLite v1 + JSONL）、`internal/runtime`（eino ADK：工具回路/多轮历史/审批）、`internal/provider/openai`（SSE 流式 + tool calls）、`internal/session`（会话控制器）、`internal/app`（单实例/托盘/关窗隐藏 + services 接线）。
 
@@ -65,11 +74,11 @@
 ![Session 原生视觉（浅色）](docs/design/preview/session-native-light.png)
 
 - **v1.1 收尾（完成）**：后台"等待审批"通知、TextScale 覆盖 design 类型系统（21 处关键屏转换）、Trajectory 虚拟化（1000 事件稳态帧 22.7→3.12ms）、opt-in 视觉回归工具（`scripts/visual-check.sh` + `TestVisualRegression`）、验收 P3 清理。
-- **验收（2026-11-05）**：独立验收复跑 `objective ①PASS / ②PASS / ③PASS`（[07](docs/research/07-final-acceptance.md)、[08 最终复核](docs/research/08-final-recheck.md)）；`gofmt`/`vet`/`build`/`go test ./...`（17 包）/`ci.sh --fast` 全绿。
+- **验收（2026-11-05）**：审计与验证见 [docs/audit/MASTER-AUDIT.md](docs/audit/MASTER-AUDIT.md) 与 `docs/audit/06-verification-core.md`、`docs/audit/07-verification-ui.md`；门禁：`sh scripts/ci.sh`（gofmt/vet/build/test/零 cgo/race/coverage，包数随迭代变化——`go list ./... | wc -l`，当前 21）。历史验收文档（docs/research/）已退役，仅作归档。
 - **2026-11-05 交互调整（完成）**：原生窗口菜单栏退役（[ADR 0006](docs/decisions/0006-retire-native-menu-bar.md)，托盘/快捷键/应用内入口保留）；「计划模式」对齐 DSH（[ADR 0008](docs/decisions/0008-plan-mode-soft-alignment.md)）——header 复选框移除（[ADR 0007](docs/decisions/0007-remove-plan-mode-toggle.md)），plan mode 改为**软引导流程**（`plan:policy` prompt + `present` 计划 + 审阅卡，runtime 不再硬拦截工具），入口为 `/plan` 命令与 composer 计划徽章（`/plan off` 或点徽章退出），只读权限独立存在、可与 plan 叠加；Chat 会话页改为按记录 Seq 渲染——每回合「用户 → 过程块（摘要 + 工具卡）→ 最终回答 → 完成行」，多回合不再把历史工具卡堆到会话末尾（数据层 `state.Message.Seq` + 重开事件 seq 轴，对齐 DSH，见 [native-ui.md §4.1.1](docs/design/native-ui.md)）；预览/测试同步更新。
 - **2026-11-05 平台感知 + 弹层统一（完成）**：shell 工具栈按平台门控——Windows 只暴露 `pwsh`（PowerShell）、POSIX 只暴露 `bash`，系统提示新增显式「运行环境」段（OS/arch + shell 调用方式/语法/路径风格），工具描述与错误按平台方言化（Windows 不再出现「bash + sh -c」的误导），见 [ADR 0009](docs/decisions/0009-platform-shell-stacks.md)；应用内可见弹层统一为品牌菜单（`internal/shell/popover_menus.go`：composer/header/侧栏/右栏，见 [native-ui.md §19.4](docs/design/native-ui.md)）；修复 Home composer 打开 `/`/@ 面板后丢键盘焦点、Enter 不执行命令的既有缺陷；Home/Session 预览重生成。
 - **2026-11-05 反馈修复批次（完成）**：**构建产物统一 `dist/` + 稳定命名**（`scripts/build.sh`/make；根目录不再留二进制，`make clean` 只清构建产物，见 [ADR 0012](docs/decisions/0012-build-output-layout.md)）；**审批范围收敛**——默认只审批会逃逸工作区沙箱的工具，`str_replace_editor view` 等只读调用永不审批，Auto review 覆盖保留（[ADR 0010](docs/decisions/0010-approval-scope.md)）；**Windows 子进程隐藏控制台**，执行命令不再弹 cmd 窗口（[ADR 0011](docs/decisions/0011-windows-hidden-console.md)）；**Chat 顺序回归修复**（reasoning-first turn 的回复不再跑到工具卡上方，`state.Message.LastSeq` 按可见文本结束位置归并）；**eino max iterations 不再整轮失败且默认不限步数**（0=不限、AI 自行结束，对齐 DSH；可选 1–1000 安全上限，命中优雅收尾并保留结果，[ADR 0013](docs/decisions/0013-agent-step-limit.md)）；**Session 右侧空白缺口修复**（composer 回主列、team/todo 面板贯穿到底）；Settings 剩余弹层统一；**plan 模式 ADR 0008 §4 四项补齐**（`exit_plan_mode` 工具、Keep planning 反馈、pending 徽章、Home 草稿 `/plan`）。
-- 下一阶段（v1.1）：发布前真机验证（IME/a11y/DPI/通知矩阵，见 [已知限制](docs/design/known-limitations.md)）、CI headless 视觉黄金冒烟、TextScale 全覆盖、Trajectory 虚拟化；观感迭代参考 [review-round4.md](docs/design/review-round4.md)。
+- 下一阶段：见 [docs/BUGS.md](docs/BUGS.md)（P0/P1 修复状态 + 延期项）与 [docs/STATUS.md](docs/STATUS.md)（当前状态）。发布前必做：真机 IME/a11y/DPI/通知矩阵（[已知限制](docs/design/known-limitations.md) §1）、迁移导入器、签名/公证/自动更新。
 
 ## 字标（已定）
 

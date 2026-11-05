@@ -1,7 +1,7 @@
 GO ?= go
 export CGO_ENABLED := 0
 
-.PHONY: build build-all build-check windows package-windows icon test vet fmt check nocgo run clean
+.PHONY: build build-all build-check windows package-windows package-linux package-macos icon test vet fmt check nocgo run clean version
 
 # Every build product lands in dist/ with a stable per-platform name; see
 # scripts/build.sh. Nothing is written to the repository root.
@@ -20,6 +20,17 @@ windows:
 
 package-windows:
 	sh scripts/build.sh package-windows
+
+package-linux:
+	sh scripts/build.sh package-linux
+
+package-macos:
+	sh scripts/build.sh package-macos
+
+# Print the version/commit/build time the next build would inject.
+version:
+	@sh -c 'echo "version:    $${ZEOKEEL_VERSION:-$$(git describe --tags --always --dirty 2>/dev/null || echo 0.1.0-dev)}"; \
+	         echo "commit:     $${ZEOKEEL_COMMIT:-$$(git rev-parse --short HEAD 2>/dev/null || echo unknown)}"'
 
 # Regenerate the committed Windows icon resource (needs MinGW windres).
 icon:

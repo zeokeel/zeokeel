@@ -42,11 +42,13 @@ func pluginLine(size, line float32) float32 { return line / size }
 
 // pluginRow is one row of a plugin section.
 type pluginRow struct {
-	name, desc string
-	icon       *ui.SVG
-	badge      bool // shows the "Experimental" pill
-	toggle     bool // shows an on/off switch on the right
-	on         bool
+	name, desc    string
+	icon          *ui.SVG
+	key           string // persisted plugin.<key>.enabled name; "" for display-only
+	badge         bool   // shows the "Experimental" pill
+	unimplemented bool   // shows the "Not implemented" pill and disables the switch
+	toggle        bool   // shows an on/off switch on the right
+	on            bool
 }
 
 // The row glyphs are ZeoKeel's own monochrome line art on mygo's 16 DIP grid:
@@ -71,6 +73,10 @@ var (
 	pluginIconDev = ui.MustParseSVG([]byte(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M5.4 4.6 2 8l3.4 3.4M10.6 4.6 14 8l-3.4 3.4"/></svg>`))
 
 	pluginIconRefresh = ui.MustParseSVG([]byte(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M13.4 8A5.4 5.4 0 1 1 11.5 4"/><path d="M13.4 1.9v3.2h-3.2"/></svg>`))
+
+	pluginIconSkills = ui.MustParseSVG([]byte(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"><path d="M8 1.9 9.6 5l3.4.5-2.5 2.4.6 3.4L8 9.7l-3.1 1.6.6-3.4L3 5.5 6.4 5z"/><path d="M12.9 11.4v2.7M11.6 12.8h2.6" stroke-linecap="round"/></svg>`))
+
+	pluginIconMCP = ui.MustParseSVG([]byte(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M5.4 2.4v5.2a2.6 2.6 0 0 0 5.2 0V2.4"/><path d="M5.4 2.4h1.8M9.4 2.4H11"/><path d="M8 10.2v3.4"/></svg>`))
 
 	pluginIconInfo = ui.MustParseSVG([]byte(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"><circle cx="8" cy="8" r="6.2"/><path d="M8 7.1v4.1"/><circle cx="8" cy="4.8" r="0.9" fill="currentColor" stroke="none"/></svg>`))
 
@@ -246,11 +252,12 @@ func (a *App) pluginSection(c *ui.Context, t *design.Tokens, title string, rows 
 // keeps the platform's toggle behavior and accessibility.
 func (a *App) pluginRow(c *ui.Context, t *design.Tokens, p pluginRow, divider bool) {
 	th := t.Theme()
-	on, key := p.on, ""
-	if a.Ctrl != nil && p.toggle {
-		if key = pluginKeyForLabel(p.name); key != "" {
-			on = a.pluginEnabledValue(key, pluginDefaultEnabled(key))
-		}
+	on, key := p.on, p.key
+	if key == "" && a.Ctrl != nil && p.toggle {
+		key = pluginKeyForLabel(p.name)
+	}
+	if a.Ctrl != nil && key != "" {
+		on = a.pluginEnabledValue(key, pluginDefaultEnabled(key))
 	}
 	row := ui.Row(c).PaddingY(th.Space(3)).PaddingX(th.Space(3)).Gap(th.Space(3)).
 		AlignItems(ui.Center).Radius(design.RadiusMD)
@@ -279,6 +286,9 @@ func (a *App) pluginRow(c *ui.Context, t *design.Tokens, p pluginRow, divider bo
 				if p.badge {
 					a.pluginBadge(c, t)
 				}
+				if p.unimplemented {
+					a.pluginUnimplementedBadge(c, t)
+				}
 			})
 			nativeText(c, design.TypeXS, t.LabelTertiary, a.pluginRowDesc(p.desc)).MaxLines(2)
 		})
@@ -305,6 +315,17 @@ func (a *App) pluginBadge(c *ui.Context, t *design.Tokens) {
 	})
 }
 
+// pluginUnimplementedBadge marks an experimental row whose feature does not
+// exist in the runtime yet: its switch is disabled, so the pill says why
+// instead of leaving the user to discover it (PD-08).
+func (a *App) pluginUnimplementedBadge(c *ui.Context, t *design.Tokens) {
+	th := t.Theme()
+	ui.Row(c).PaddingX(th.Space(1.5)).PaddingY(th.Space(0.5)).Radius(design.RadiusMax).
+		Background(t.WarningText.Alpha(0.12)).AlignItems(ui.Center).Children(func() {
+		nativeText(c, design.TypeXXXS, t.WarningText, a.T("plugins.not_implemented")).FontWeight(500)
+	})
+}
+
 // pluginRowNameKeys maps a row's stable English name to its catalog prefix.
 // The English name stays the settings-key source (pluginKeyForLabel), so only
 // the display string is localized.
@@ -313,6 +334,9 @@ var pluginRowNameKeys = map[string]string{
 	"Web search":                "plugins.row.web_search",
 	"Agent loop":                "plugins.row.agent_loop",
 	"Shell":                     "plugins.row.shell",
+	"Shell tools":               "plugins.row.shell",
+	"Skills":                    "plugins.row.skills",
+	"MCP servers":               "plugins.row.mcp",
 	"Agent Teams":               "plugins.row.agent_teams",
 	"Voice input":               "plugins.row.voice_input",
 	"Auto Authorization Review": "plugins.row.auto_review",

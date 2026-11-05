@@ -26,7 +26,11 @@ const (
 	// []string because session_live.go and home.go (outside this change's
 	// ownership) pass it through; the prefix keeps the two kinds apart
 	// without changing that signature.
-	sessionMentionPrefix = "session · "
+	sessionMentionPrefix = "session \u00b7 "
+	// sessionMentionSep separates the session title from its relative time in
+	// the candidate string. A control byte keeps the separator out of titles
+	// and paths, so splitting stays unambiguous.
+	sessionMentionSep = "\x1f"
 )
 
 // pendingApprovals returns the controller's pending requests, or nil in static
@@ -43,6 +47,23 @@ func (a *App) pendingApprovals() []state.ApprovalRequest {
 // the command palette: it must start with "/" and be live at the caret.
 func (a *App) slashVisible() bool {
 	return a.composerTrigger().kind == composerTriggerSlash
+}
+
+// closeComposerPopovers dismisses every composer-owned popover: the
+// permission and model menus, the composer More menu, the attachment menu and
+// the derived "/" and "@" lists. Opening another surface (Settings, Home, a
+// plugin page) or another window calls it, so a menu cannot outlive the screen
+// that owns it (UX-04).
+func (a *App) closeComposerPopovers() {
+	st := a.liveMenus()
+	st.permissionOpen = false
+	st.modelOpen = false
+	st.moreOpen = false
+	a.attachOpen = false
+	// The derived lists hide while the draft is unchanged; recording the
+	// current draft is their dismissal.
+	st.mentionDismissedDraft = a.draft
+	st.slashDismissedDraft = a.draft
 }
 
 // syncComposerMenuDismissal clears an Escape dismissal whenever the draft
@@ -314,27 +335,26 @@ func (a *App) startPlanFromHome(arg string) {
 		return
 	}
 	c := a.startUI().lastComposerContext
+	staged := append([]homeAttachment(nil), a.homeAttachments...)
 	id, ok := a.newHomeSession(c)
 	if !ok {
 		return
 	}
 	if err := a.Ctrl.SetPlanMode(id, true); err != nil {
-		if c != nil {
-			c.Toast(err.Error())
-		}
+		// The session was created only to carry this command: roll it back so a
+		// failed /plan does not leave an empty session behind (UX-01).
+		a.rollbackHomeSession(id, staged)
+		a.toastDeferred(c, err.Error())
 		return
 	}
 	a.draft = ""
 	if arg == "" {
-		if c != nil {
-			c.Toast(a.menuText("Plan mode on", "已进入计划模式"))
-		}
+		a.toastDeferred(c, a.menuText("Plan mode on", "已进入计划模式"))
 		return
 	}
 	if err := a.Ctrl.Submit(context.Background(), id, arg); err != nil {
-		if c != nil {
-			c.Toast(fmt.Sprintf(a.menuText("Could not send: %v", "发送失败：%v"), err))
-		}
+		a.rollbackHomeSession(id, staged)
+		a.toastDeferred(c, fmt.Sprintf(a.menuText("Could not send: %v", "发送失败：%v"), err))
 		return
 	}
 	a.homeDraft = ""
@@ -362,13 +382,23 @@ func (a *App) submitPlanMessage(text string) {
 // context. The command catalog lives in i18n.go, which this change does not
 // own, so new messages carry both languages here.
 func (a *App) toastText(en, zh string) {
-	message := a.tr(en, zh)
-	if c := a.startUI().lastComposerContext; c != nil && c.Valid() {
-		c.Toast(message)
+	a.toastDeferred(a.startUI().lastComposerContext, a.tr(en, zh))
+}
+
+// toastDeferred shows message as a toast when the given frame context can take
+// one, and otherwise keeps it for the next frame's View. mygo drops Context
+// toasts raised outside a build pass, which is where key handlers run: without
+// this fallback a failed Enter (send, /plan, model switch) failed silently
+// (UX-01/UX-03). base may be nil, as when a command runs before the composer
+// has built a frame.
+func (a *App) toastDeferred(base *ui.Context, message string) {
+	if strings.TrimSpace(message) == "" {
 		return
 	}
-	// Outside a build pass mygo drops Context toasts; keep the message for the
-	// next frame so a command run from the keyboard still reports its outcome.
+	if base != nil && base.Valid() {
+		base.Toast(message)
+		return
+	}
 	a.queueToast(message)
 }
 
@@ -457,7 +487,7 @@ func (a *App) mentionEntries() []string {
 			if !strings.HasPrefix(strings.ToLower(title), lowerPrefix) {
 				continue
 			}
-			out = append(out, sessionMentionPrefix+title)
+			out = append(out, sessionMentionPrefix+title+sessionMentionSep+a.sessionWhen(sess.UpdatedAt))
 			if len(out)-files == maxMentionSessions {
 				break
 			}
@@ -471,6 +501,7 @@ func (a *App) mentionEntries() []string {
 type mentionChoice struct {
 	label   string
 	value   string
+	detail  string
 	session bool
 	dir     bool
 }
@@ -483,8 +514,9 @@ func mentionChoices(entries []string) []mentionChoice {
 	out := make([]mentionChoice, 0, len(entries))
 	for _, entry := range entries {
 		if strings.HasPrefix(entry, sessionMentionPrefix) {
-			title := strings.TrimPrefix(entry, sessionMentionPrefix)
-			out = append(out, mentionChoice{label: entry, value: title, session: true})
+			rest := strings.TrimPrefix(entry, sessionMentionPrefix)
+			title, detail, _ := strings.Cut(rest, sessionMentionSep)
+			out = append(out, mentionChoice{label: title, value: title, detail: detail, session: true})
 			continue
 		}
 		out = append(out, mentionChoice{label: entry, value: entry,
@@ -578,6 +610,12 @@ func (a *App) mentionSectionTitle(c *ui.Context, t *design.Tokens, label string)
 // row's accessible name.
 func (a *App) mentionRow(c *ui.Context, t *design.Tokens, choice mentionChoice, index int, st *liveMenuState) {
 	label := mentionDisplayLabel(choice)
+	if choice.session {
+		// The row says "Session · title" in the UI language instead of the
+		// English-only candidate prefix, and the relative time separates two
+		// sessions that share a title (UX-10).
+		label = a.menuText("Session \u00b7 ", "会话 \u00b7 ") + choice.label
+	}
 	item := ui.Row(c).Height(34).PaddingX(design.Space2).Gap(design.Space2).
 		Radius(design.RadiusSM).AlignItems(ui.Center).Shrink(0).
 		Label(label).Role(ui.RoleListItem).Focusable()
@@ -618,7 +656,11 @@ func (a *App) mentionRow(c *ui.Context, t *design.Tokens, choice mentionChoice, 
 				TextColor(t.LabelPrimary).Grow(1).MaxLines(1).Ellipsis("…")
 			switch {
 			case choice.session:
-				ui.Text(c, a.tr("Session", "会话")).FontSize(11).FixedLineHeight(16).
+				trailing := choice.detail
+				if trailing == "" {
+					trailing = a.tr("Session", "会话")
+				}
+				ui.Text(c, trailing).FontSize(11).FixedLineHeight(16).
 					TextColor(t.LabelTertiary).NoWrap()
 			case choice.dir:
 				// The row is a real drill target: Tab or the chevron opens the

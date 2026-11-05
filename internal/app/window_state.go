@@ -33,6 +33,11 @@ const windowJSONFile = "window.json"
 // WindowOptions defaults when the file is missing or damaged.
 type fileWindowStateStore struct {
 	path string
+	// displays returns the current monitors so restored window states can be
+	// clamped into a work area (AR-18/PD-15). Nil (tests, headless) leaves the
+	// saved states untouched. The app sets mygo.Screen.Displays after the
+	// desktop backend is ready.
+	displays func() []mygo.Display
 
 	// mu guards the file operations, although mygo calls the interface on the
 	// main thread; a mutex costs nothing and keeps the store safe if a future
@@ -66,7 +71,11 @@ func (s *fileWindowStateStore) LoadWindowStates() (map[string]mygo.WindowState, 
 		log.Printf("zeokeel: ignoring damaged window state file %s: %v", s.path, err)
 		return nil, nil
 	}
-	return usableWindowStates(states), nil
+	states = usableWindowStates(states)
+	if s.displays != nil {
+		states = clampWindowStateMap(states, s.displays())
+	}
+	return states, nil
 }
 
 // SaveWindowStates writes the states atomically: the JSON goes to a temporary

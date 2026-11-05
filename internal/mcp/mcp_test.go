@@ -359,6 +359,10 @@ func findTool(t *testing.T, tools []runtime.Tool, name string) runtime.Tool {
 func TestMCPEnvironmentIsScrubbed(t *testing.T) {
 	t.Setenv("DEEPSEEK_API_KEY", "sk-provider-secret")
 	t.Setenv("ZEOKEEL_WEBSEARCH_API_KEY", "ws-secret")
+	// RT-15: third-party credentials are scrubbed too, not only ZeoKeel's own.
+	t.Setenv("OPENAI_API_KEY", "sk-openai-secret")
+	t.Setenv("AWS_SECRET_ACCESS_KEY", "aws-secret")
+	t.Setenv("GITHUB_TOKEN", "ghp-secret")
 
 	manager := NewManager(context.Background())
 	t.Cleanup(func() { _ = manager.Close() })
@@ -368,7 +372,7 @@ func TestMCPEnvironmentIsScrubbed(t *testing.T) {
 		t.Fatalf("Connect: %v", err)
 	}
 	env := findTool(t, manager.Tools(), "mcp__demo__env")
-	for _, name := range []string{"DEEPSEEK_API_KEY", "ZEOKEEL_WEBSEARCH_API_KEY"} {
+	for _, name := range []string{"DEEPSEEK_API_KEY", "ZEOKEEL_WEBSEARCH_API_KEY", "OPENAI_API_KEY", "AWS_SECRET_ACCESS_KEY", "GITHUB_TOKEN"} {
 		raw, _ := json.Marshal(map[string]string{"name": name})
 		out, err := env.Invoke(ctx, raw)
 		if err != nil {

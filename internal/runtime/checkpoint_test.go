@@ -17,6 +17,9 @@ type memoryCheckpointStore struct {
 	mu        sync.Mutex
 	data      map[string]*Checkpoint
 	saves     int
+	phases    []string
+	saved     []*Checkpoint
+	failPhase string
 	deletes   int
 	loadErr   error
 	saveErr   error
@@ -54,7 +57,12 @@ func (s *memoryCheckpointStore) Save(ctx context.Context, sessionID string, cp *
 	if s.saveErr != nil {
 		return s.saveErr
 	}
+	if s.failPhase != "" && cp.Phase == s.failPhase {
+		return errors.New("checkpoint store: injected failure for phase " + cp.Phase)
+	}
 	s.saves++
+	s.phases = append(s.phases, cp.Phase)
+	s.saved = append(s.saved, cloneCheckpoint(cp))
 	s.data[sessionID] = cloneCheckpoint(cp)
 	return nil
 }
@@ -77,6 +85,25 @@ func (s *memoryCheckpointStore) get(sessionID string) *Checkpoint {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return cloneCheckpoint(s.data[sessionID])
+}
+
+// checkpointsAt returns the checkpoints saved for one phase, in save order.
+func (s *memoryCheckpointStore) checkpointsAt(phase string) []*Checkpoint {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	var out []*Checkpoint
+	for _, cp := range s.saved {
+		if cp.Phase == phase {
+			out = append(out, cloneCheckpoint(cp))
+		}
+	}
+	return out
+}
+
+func (s *memoryCheckpointStore) savedPhases() []string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return append([]string(nil), s.phases...)
 }
 
 func (s *memoryCheckpointStore) saveCount() int {
@@ -124,8 +151,13 @@ func TestCheckpointSavesCompletedTurn(t *testing.T) {
 		t.Fatalf("turn produced error event: %q", errText)
 	}
 
-	if store.saveCount() != 1 {
-		t.Fatalf("Save calls = %d, want 1", store.saveCount())
+	// FP-11: a request barrier checkpoint precedes the completed turn
+	// checkpoint, so one model request produces two saves.
+	if store.saveCount() != 2 {
+		t.Fatalf("Save calls = %d, want 2 (request barrier + completed)", store.saveCount())
+	}
+	if got := store.savedPhases(); len(got) != 2 || got[0] != CheckpointPhaseRequested || got[1] != CheckpointPhaseCompleted {
+		t.Fatalf("saved phases = %v, want [requested completed]", got)
 	}
 	cp := store.get("session-cp")
 	if cp == nil {
@@ -203,9 +235,13 @@ func TestCheckpointCorruptIsIgnored(t *testing.T) {
 	if got := providerMessages(t, p, 0); len(got) != 1 || got[0] != "user:hello" {
 		t.Fatalf("provider messages = %v, want a fresh conversation", got)
 	}
-	// New completed state is still saved, replacing the unreadable checkpoint.
-	if store.saveCount() != 1 {
-		t.Fatalf("Save calls = %d, want 1", store.saveCount())
+	// New state is still saved (request barrier + completed), replacing the
+	// unreadable checkpoint.
+	if store.saveCount() != 2 {
+		t.Fatalf("Save calls = %d, want 2", store.saveCount())
+	}
+	if cp := store.get("session-corrupt"); cp == nil || cp.Phase != CheckpointPhaseCompleted {
+		t.Fatalf("final checkpoint = %+v, want completed phase", cp)
 	}
 }
 
@@ -261,6 +297,10 @@ func TestCheckpointHistoryTakesPrecedence(t *testing.T) {
 	}
 }
 
+// TestCheckpointNotSavedForFailedTurn pins the FP-11 boundary: a provider
+// failure never writes a *completed* checkpoint, but the request barrier that
+// ran before the model call is recorded (so recovery knows the request was
+// dispatched rather than never sent).
 func TestCheckpointNotSavedForFailedTurn(t *testing.T) {
 	store := newMemoryCheckpointStore()
 	provider := &fakeProvider{fn: func(context.Context, Request) ([]Chunk, error) {
@@ -272,8 +312,11 @@ func TestCheckpointNotSavedForFailedTurn(t *testing.T) {
 	if errText := findErrorText(events); !strings.Contains(errText, "provider exploded") {
 		t.Fatalf("error event = %q", errText)
 	}
-	if store.saveCount() != 0 {
-		t.Fatalf("Save calls = %d, want 0 for a failed turn", store.saveCount())
+	if cp := store.get("session-failed"); cp != nil && cp.Phase == CheckpointPhaseCompleted {
+		t.Fatalf("failed turn wrote a completed checkpoint: %+v", cp)
+	}
+	if got := store.savedPhases(); len(got) != 1 || got[0] != CheckpointPhaseRequested {
+		t.Fatalf("saved phases = %v, want only the request barrier", got)
 	}
 }
 

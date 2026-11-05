@@ -6,7 +6,6 @@ import (
 	"context"
 	"errors"
 	"log"
-	"net"
 	"os"
 	"path/filepath"
 	"strings"
@@ -45,7 +44,15 @@ type app struct {
 	quitting bool
 	win      *mygo.Window
 	tray     *mygo.Tray
-	lock     net.Listener
+	// instanceLock is the data-directory single-instance lock (nil before
+	// acquire and after release). See singleinstance.go.
+	instanceLock *instanceLock
+	// activationMu guards activateWindow/activationPending: a second launch
+	// asks this instance to show its window through the loopback activation
+	// listener, which runs on its own goroutine.
+	activationMu      sync.Mutex
+	activateWindow    func()
+	activationPending bool
 
 	// shellApp is the UI the window renders. The shell owns the UI behaviour
 	// and the keyboard shortcuts; this package owns the process lifecycle.
@@ -103,21 +110,8 @@ func Run() error {
 	if err := a.acquire(); err != nil {
 		return err
 	}
+	defer a.releaseInstance()
 	return a.run()
-}
-
-// acquire is the single-instance guard: a loopback listener is held for the
-// process lifetime and released by the OS if the process dies.
-func (a *app) acquire() error {
-	if err := os.MkdirAll(DataDir(), 0o700); err != nil {
-		return err
-	}
-	ln, err := net.Listen("tcp", "127.0.0.1:49731")
-	if err != nil {
-		return ErrAlreadyRunning
-	}
-	a.lock = ln
-	return nil
 }
 
 func (a *app) run() error {
@@ -137,7 +131,9 @@ func (a *app) run() error {
 	// directory instead of mygo's per-app user-data file, so a portable install
 	// (ZEOKEEL_DATA_DIR) carries its window state with it. Call this before the
 	// first window with a StateKey is created, as mygo requires.
-	mygo.App.SetWindowStateStore(newWindowStateStore(DataDir()))
+	windowStates := newWindowStateStore(DataDir())
+	windowStates.displays = currentDisplays
+	mygo.App.SetWindowStateStore(windowStates)
 	mygo.App.WhenReady(func() {
 		// Services are created lazily so a broken data directory cannot
 		// prevent the window and tray from starting; the shell then runs in
@@ -177,15 +173,15 @@ func (a *app) run() error {
 		shellApp.SetSettingsWindowOpener(a.showSettingsWindow)
 		shellApp.SetSettingsWindowCloser(a.hideSettingsWindow)
 		shellApp.SetSettingsChangedHook(a.refreshWindows)
-		a.win = mygo.NewWindow(mygo.WindowOptions{
-			Title:     "ZeoKeel",
-			Width:     1600,
-			Height:    1000,
-			MinWidth:  900,
-			MinHeight: 600,
-			StateKey:  windowStateKey,
-			Content:   ui.View(shellApp.View),
-		})
+		// Preferred 1600x1000, clamped to the primary display's work area so a
+		// small laptop screen does not open a window larger than the screen
+		// (AR-18/PD-15).
+		windowOptions := mainWindowOptionsFor(currentDisplays())
+		windowOptions.Content = ui.View(shellApp.View)
+		a.win = mygo.NewWindow(windowOptions)
+		// A second launch that lost the single-instance race asks this instance
+		// to show its window; wire that before the window can be activated.
+		a.setActivationWindow(a.win)
 		if a.services != nil {
 			win := a.win
 			// Desktop notifications read the same update stream as the UI: the
@@ -233,9 +229,6 @@ func (a *app) run() error {
 	})
 	err := mygo.App.Run()
 	a.stopServices()
-	if a.lock != nil {
-		_ = a.lock.Close()
-	}
 	return err
 }
 

@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"unicode/utf8"
@@ -64,5 +65,94 @@ func TestSpillWriteFailureReportsError(t *testing.T) {
 	sum, ok, err := spillToolResultFile(blocked, "call-1", strings.Repeat("y", 33*1024))
 	if err == nil || ok || sum != "" {
 		t.Fatalf("spill into a file root = (%q, %v, %v), want fallback + error", sum, ok, err)
+	}
+}
+
+// TestSpillRefusesSymlinkedToolResultsDir is the RT-07 regression: a workspace
+// can commit .zeokeel/tool-results as a symlink to an arbitrary directory; the
+// spill must refuse to write through it instead of escaping the workspace.
+func TestSpillRefusesSymlinkedToolResultsDir(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("symlink creation needs extra privileges on Windows")
+	}
+	root := t.TempDir()
+	outside := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(root, ".zeokeel"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(outside, filepath.Join(root, ".zeokeel", "tool-results")); err != nil {
+		t.Fatal(err)
+	}
+	sum, ok, err := spillToolResultFile(root, "call-1", strings.Repeat("z", 33*1024))
+	if err == nil || ok || sum != "" {
+		t.Fatalf("spill through symlinked tool-results = (%q, %v, %v), want fallback + error", sum, ok, err)
+	}
+	entries, rerr := os.ReadDir(outside)
+	if rerr != nil {
+		t.Fatalf("read outside dir: %v", rerr)
+	}
+	if len(entries) != 0 {
+		t.Fatalf("spill wrote %d file(s) outside the workspace: %v", len(entries), entries)
+	}
+}
+
+// TestSpillRefusesSymlinkedZeokeelDir covers the parent component: a symlinked
+// .zeokeel directory must not be followed either.
+func TestSpillRefusesSymlinkedZeokeelDir(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("symlink creation needs extra privileges on Windows")
+	}
+	root := t.TempDir()
+	outside := t.TempDir()
+	if err := os.Symlink(outside, filepath.Join(root, ".zeokeel")); err != nil {
+		t.Fatal(err)
+	}
+	sum, ok, err := spillToolResultFile(root, "call-2", strings.Repeat("z", 33*1024))
+	if err == nil || ok || sum != "" {
+		t.Fatalf("spill through symlinked .zeokeel = (%q, %v, %v), want fallback + error", sum, ok, err)
+	}
+	if entries, _ := os.ReadDir(outside); len(entries) != 0 {
+		t.Fatalf("spill wrote %d file(s) outside the workspace: %v", len(entries), entries)
+	}
+}
+
+// TestSpillDoesNotOverwriteExistingTarget covers the O_EXCL half of RT-07: a
+// planted file (or symlink) named after the call id must be left untouched.
+func TestSpillDoesNotOverwriteExistingTarget(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("symlink creation needs extra privileges on Windows")
+	}
+	root := t.TempDir()
+	outside := t.TempDir()
+	target := filepath.Join(outside, "victim.txt")
+	if err := os.WriteFile(target, []byte("original"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	spillDir := filepath.Join(root, ".zeokeel", "tool-results")
+	if err := os.MkdirAll(spillDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(target, filepath.Join(spillDir, "call-3.txt")); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok, err := spillToolResultFile(root, "call-3", strings.Repeat("z", 33*1024)); err == nil || ok {
+		t.Fatalf("spill onto a planted symlink = (ok=%v, err=%v), want fallback + error", ok, err)
+	}
+	if content, err := os.ReadFile(target); err != nil || string(content) != "original" {
+		t.Fatalf("planted symlink target = %q, %v; want untouched", content, err)
+	}
+	// A regular pre-existing file is not truncated either.
+	if err := os.Remove(filepath.Join(spillDir, "call-3.txt")); err != nil {
+		t.Fatal(err)
+	}
+	existing := filepath.Join(spillDir, "call-3.txt")
+	if err := os.WriteFile(existing, []byte("keep me"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok, err := spillToolResultFile(root, "call-3", strings.Repeat("z", 33*1024)); err == nil || ok {
+		t.Fatalf("spill onto an existing file = (ok=%v, err=%v), want fallback + error", ok, err)
+	}
+	if content, err := os.ReadFile(existing); err != nil || string(content) != "keep me" {
+		t.Fatalf("existing spill target = %q, %v; want untouched", content, err)
 	}
 }

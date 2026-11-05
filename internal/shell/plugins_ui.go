@@ -212,7 +212,7 @@ func pluginKeyForLabel(label string) string {
 		return "web_search"
 	case "Agent loop":
 		return "agent_loop"
-	case "Shell":
+	case "Shell", "Shell tools":
 		return "shell"
 	case "Agent Teams":
 		return "agent_teams"
@@ -237,15 +237,35 @@ func pluginDefaultEnabled(name string) bool {
 	return true
 }
 
-// builtinPluginRowsLive builds the Plugins page's built-in rows with live
-// persisted toggles. The static page keeps its exact baseline rows.
+// builtinPluginRowsLive builds the Plugins page's built-in rows from the same
+// builtinPluginDefs Settings > Built-in plugins uses, so both pages list the
+// same six plugins with the same persisted plugin.<name>.enabled keys and
+// the same localized names (PD-08).
 func (a *App) builtinPluginRowsLive() []pluginRow {
-	return []pluginRow{
-		{"Subagent", "Set Subagent recursion depth, count, and models.", pluginIconSubagent, false, true, a.pluginEnabledValue("subagent", true)},
-		{"Web search", "Set up the DeepSeek search provider.", pluginIconSearch, false, true, a.pluginEnabledValue("web_search", true)},
-		{"Agent loop", "Control how the Agent dispatches tool calls.", pluginIconLoop, false, true, a.pluginEnabledValue("agent_loop", true)},
-		{"Shell", "Limit how long each command may run and how much it may output.", pluginIconShell, false, true, a.pluginEnabledValue("shell", true)},
+	rows := make([]pluginRow, 0, len(builtinPluginDefs))
+	for _, def := range builtinPluginDefs {
+		icon := pluginRowIcons[def.name]
+		if icon == nil {
+			icon = pluginIconInfo
+		}
+		rows = append(rows, pluginRow{
+			name: def.titleEN, desc: def.descEN, icon: icon, key: def.name,
+			toggle: true, on: a.pluginEnabledValue(def.name, def.enabledByDefault),
+		})
 	}
+	return rows
+}
+
+// pluginRowIcons maps one builtinPluginDef name to the Plugins page's row
+// glyph. The page and the settings list name the same six plugins, so the
+// icons live here rather than in each row literal.
+var pluginRowIcons = map[string]*ui.SVG{
+	"subagent":   pluginIconSubagent,
+	"web_search": pluginIconSearch,
+	"agent_loop": pluginIconLoop,
+	"shell":      pluginIconShell,
+	"skills":     pluginIconSkills,
+	"mcp":        pluginIconMCP,
 }
 
 // experimentalPluginRowsLive builds the experimental rows with persisted
@@ -261,8 +281,8 @@ func (a *App) experimentalPluginRowsLive() []pluginRow {
 	}
 	for i, plugin := range experimentalPluginDefs {
 		rows = append(rows, pluginRow{
-			name: plugin.titleEN, desc: descs[i],
-			icon: icons[i], badge: true, toggle: true,
+			name: plugin.titleEN, desc: descs[i], icon: icons[i],
+			key: plugin.name, badge: true, unimplemented: true, toggle: true,
 			on: a.pluginEnabledValue(plugin.name, false),
 		})
 	}

@@ -77,6 +77,14 @@ func (m *providerChatModel) Generate(ctx context.Context, input []*schema.Messag
 func (m *providerChatModel) Stream(ctx context.Context, input []*schema.Message, opts ...model.Option) (*schema.StreamReader[*schema.Message], error) {
 	req := m.buildRequest(ctx, input, opts...)
 
+	// Barrier checkpoint: persist the request context-before it reaches the
+	// provider so a crash during the response cannot lose the request or the
+	// work before it. The checkpoint store call is cheap for the no-store /
+	// no-turn cases because saveBarrierCheckpoint returns immediately.
+	if err := saveBarrierCheckpoint(ctx, CheckpointPhaseRequested); err != nil {
+		return nil, fmt.Errorf("runtime: save checkpoint before model request: %w", err)
+	}
+
 	chunks, err := m.provider.Stream(ctx, req)
 	if err != nil {
 		return nil, fmt.Errorf("runtime: provider stream: %w", err)
@@ -406,6 +414,15 @@ func (e *einoInvokableTool) InvokableRun(ctx context.Context, argumentsInJSON st
 	if err := e.awaitApproval(ctx, args); err != nil {
 		return e.toolFailure(ctx, "", "", err)
 	}
+	// Barrier checkpoint: a top-level tool with external side effects records
+	// that it is about to be dispatched before its body runs. A crash in the
+	// body then leaves an unknown-result call rather than an unrecorded side
+	// effect. A checkpoint failure fails closed: the tool body never runs.
+	if checkpointBarrierTool(e.tool.Name()) {
+		if err := saveBarrierCheckpoint(ctx, CheckpointPhaseToolPending); err != nil {
+			return "", fmt.Errorf("runtime: save checkpoint before tool %q: %w", e.tool.Name(), err)
+		}
+	}
 	text, err := e.tool.Invoke(ctx, args)
 	if err != nil {
 		return e.toolFailure(ctx, compose.GetToolCallID(ctx), text, err)
@@ -453,6 +470,14 @@ func (e *einoInvokableTool) awaitApproval(ctx context.Context, args json.RawMess
 	if e.gate == nil || !e.gate.RequireApproval(e.tool.Name(), args) {
 		return nil
 	}
+	// A delegated run without a turn context has no approval card and no user
+	// request to authorize the action. Fail closed before the automatic
+	// reviewer runs: a review with empty authorization evidence must not be
+	// able to auto-allow a gated call.
+	if turnContextFromContext(ctx) == nil && delegatedApprovalFromContext(ctx) {
+		return fmt.Errorf("runtime: tool %q needs user approval, but this delegated agent has no approval channel. %s",
+			e.tool.Name(), delegatedApprovalGuidance)
+	}
 	callID := compose.GetToolCallID(ctx)
 	if callID == "" {
 		// A tool invoked outside the ADK tools node (for example by a future
@@ -484,6 +509,10 @@ func (e *einoInvokableTool) awaitApproval(ctx context.Context, args json.RawMess
 func awaitGateApproval(ctx context.Context, gate Gate, callID, name string, args json.RawMessage, reviewReason string) error {
 	tc := turnContextFromContext(ctx)
 	if tc == nil || tc.sink == nil {
+		if delegatedApprovalFromContext(ctx) {
+			return fmt.Errorf("runtime: tool %q needs user approval, but this delegated agent has no approval channel. %s",
+				name, delegatedApprovalGuidance)
+		}
 		return fmt.Errorf("runtime: tool %q requires approval outside an agent turn", name)
 	}
 	request := state.ApprovalRequest{

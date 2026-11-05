@@ -2,6 +2,7 @@ package runtime
 
 import (
 	"context"
+	"strings"
 	"time"
 )
 
@@ -23,9 +24,23 @@ type Checkpoint struct {
 	Phase string `json:"phase,omitempty"`
 }
 
-// CheckpointPhaseCompleted is the Phase written by the runtime after a
-// successful turn.
-const CheckpointPhaseCompleted = "completed"
+// Checkpoint phases written by the runtime. Only the completed phase replaces
+// the conversation as the recovery source of truth; the barrier phases expose
+// how far an interrupted turn got so a crash cannot lose an already-recorded
+// model request or an about-to-run tool call.
+const (
+	// CheckpointPhaseCompleted is the Phase written by the runtime after a
+	// successful (or step-capped) turn.
+	CheckpointPhaseCompleted = "completed"
+	// CheckpointPhaseRequested is written before a model request is handed to
+	// the provider, so a crash mid-response does not lose the request.
+	CheckpointPhaseRequested = "requested"
+	// CheckpointPhaseToolPending is written before a top-level tool with
+	// external side effects runs, so a crash in the tool body leaves a record
+	// that the call was dispatched (its result is then unknown, never replayed
+	// blindly).
+	CheckpointPhaseToolPending = "tool_pending"
+)
 
 // CheckpointStore persists turn-boundary checkpoints for crash/cold-start
 // recovery. Implementations are called concurrently across sessions and must be
@@ -111,5 +126,78 @@ func checkpointFor(prior []Message, turn []Message, turnID string, phase string,
 		TurnID:    turnID,
 		UpdatedAt: now,
 		Phase:     phase,
+	}
+}
+
+// turnCheckpointKey carries the barrier-checkpoint inputs into tool and model
+// call contexts. Only the turn goroutine sets it; the model adapter and tool
+// wrapper read it from their derived contexts.
+type turnCheckpointKey struct{}
+
+// turnCheckpointContext is the immutable per-turn checkpoint input.
+type turnCheckpointContext struct {
+	store     CheckpointStore
+	prior     []Message
+	sessionID string
+	turnID    string
+}
+
+// withTurnCheckpoint installs the barrier-checkpoint context on a turn. A nil
+// store (no recovery configured) leaves the context unchanged.
+func withTurnCheckpoint(ctx context.Context, cc *turnCheckpointContext) context.Context {
+	if ctx == nil || cc == nil || cc.store == nil {
+		return ctx
+	}
+	return context.WithValue(ctx, turnCheckpointKey{}, cc)
+}
+
+// saveBarrierCheckpoint persists a non-terminal checkpoint for the current turn
+// with its conversation so far (prior + everything recorded before the barrier).
+// It is a no-op outside an agent turn or when no CheckpointStore is configured.
+// A Save failure is returned to the caller, which fails closed: the model
+// request is not sent and the tool body does not run.
+func saveBarrierCheckpoint(ctx context.Context, phase string) error {
+	if ctx == nil {
+		return nil
+	}
+	cc, _ := ctx.Value(turnCheckpointKey{}).(*turnCheckpointContext)
+	if cc == nil || cc.store == nil {
+		return nil
+	}
+	var turn []Message
+	if tc := turnContextFromContext(ctx); tc != nil && tc.record != nil {
+		turn = tc.record.messages()
+	}
+	cp := checkpointFor(cc.prior, turn, cc.turnID, phase, time.Now())
+	return cc.store.Save(ctx, cc.sessionID, cp)
+}
+
+// checkpointBarrierTool reports whether name is a top-level tool whose body may
+// produce an external side effect (filesystem, process, network or another
+// agent) and therefore earns a pre-execution checkpoint. Pure read tools and
+// purely in-memory bookkeeping tools (todo, goal, present, ...) are skipped so
+// the barrier stays cheap.
+func checkpointBarrierTool(name string) bool {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return false
+	}
+	switch {
+	case strings.HasPrefix(name, "terminal_"),
+		strings.HasPrefix(name, "job_"),
+		strings.HasPrefix(name, "mcp__"):
+		return true
+	}
+	switch name {
+	case "bash", "pwsh", "write_file", "edit_file", "str_replace_editor",
+		"enter_worktree", "exit_worktree",
+		"web_fetch", "web_search",
+		"ptc", "subagent", "workflow", "ralph",
+		"spawn_team", "send_message", "interrupt_agent", "close_team",
+		"schedule_create", "schedule_update", "schedule_delete",
+		"settings_set":
+		return true
+	default:
+		return false
 	}
 }

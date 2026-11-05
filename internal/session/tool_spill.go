@@ -33,22 +33,79 @@ const (
 // the summary that replaces the persisted result. ok is false when nothing was
 // spilled (small result or no workspace root); a write error leaves the caller
 // on the original result.
+//
+// The workspace (and everything a repository can commit into it) is untrusted:
+// a git checkout can ship symlinks such as .zeokeel/tool-results -> ~/.ssh.
+// The target path is therefore built one component at a time with Lstat checks
+// that refuse symlinks and non-directories, and the file itself is created with
+// O_EXCL so an existing file or symlink is never truncated or followed (RT-07).
+// Unsafe targets return an error and the caller keeps the full result.
 func spillToolResultFile(root, callID, result string) (summary string, ok bool, err error) {
 	if root == "" || len(result) <= toolResultSpillBytes {
 		return "", false, nil
 	}
-	dir := filepath.Join(root, filepath.FromSlash(toolResultSpillDir))
-	if err := os.MkdirAll(dir, 0o700); err != nil {
+	dir, err := safeSpillDir(root)
+	if err != nil {
 		return "", false, err
 	}
 	name := sanitizeToolResultName(callID) + ".txt"
 	path := filepath.Join(dir, name)
-	if err := os.WriteFile(path, []byte(result), 0o600); err != nil {
+	file, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
+	if err != nil {
+		// A pre-existing file (including a planted symlink) is never truncated:
+		// fall back to keeping the full result in the turn.
 		return "", false, err
+	}
+	if _, werr := file.WriteString(result); werr != nil {
+		_ = file.Close()
+		_ = os.Remove(path)
+		return "", false, werr
+	}
+	if cerr := file.Close(); cerr != nil {
+		_ = os.Remove(path)
+		return "", false, cerr
 	}
 	pruneSpilledToolResults(dir, toolResultSpillKeep)
 	rel := toolResultSpillDir + "/" + name
 	return spilledToolResultSummary(rel, result), true, nil
+}
+
+// safeSpillDir creates and returns root/.zeokeel/tool-results after verifying,
+// component by component, that no part of the path is a symlink or a
+// non-directory. Components that do not exist yet are created with 0700; an
+// existing component is only accepted when Lstat (not Stat) reports a real
+// directory, so a repository-supplied symlink cannot redirect the write outside
+// the workspace.
+func safeSpillDir(root string) (string, error) {
+	// A workspace root may not exist yet (a fresh path); create it like the old
+	// MkdirAll did, then verify the spill components below it.
+	if err := os.MkdirAll(root, 0o700); err != nil {
+		return "", err
+	}
+	dir := root
+	for _, part := range strings.Split(toolResultSpillDir, "/") {
+		dir = filepath.Join(dir, part)
+		info, err := os.Lstat(dir)
+		if err != nil {
+			if !os.IsNotExist(err) {
+				return "", err
+			}
+			if merr := os.Mkdir(dir, 0o700); merr != nil && !os.IsExist(merr) {
+				return "", merr
+			}
+			info, err = os.Lstat(dir)
+			if err != nil {
+				return "", err
+			}
+		}
+		if info.Mode()&os.ModeSymlink != 0 {
+			return "", fmt.Errorf("refusing tool-result directory %s: it is a symlink", dir)
+		}
+		if !info.IsDir() {
+			return "", fmt.Errorf("refusing tool-result directory %s: not a directory", dir)
+		}
+	}
+	return dir, nil
 }
 
 // sanitizeToolResultName turns a call id into a safe file name: letters,

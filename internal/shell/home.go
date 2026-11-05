@@ -315,20 +315,26 @@ func (a *App) sendHomeDraft(c *ui.Context) {
 	if strings.TrimSpace(a.draft) == "" {
 		return
 	}
+	// Remember the staged files before the session takes them: a failed first
+	// send rolls the session back and must give the chips back to the Home
+	// draft instead of dropping them with the deleted session.
+	staged := append([]homeAttachment(nil), a.homeAttachments...)
 	id, ok := a.newHomeSession(c)
 	if !ok {
 		return
 	}
 	text := strings.TrimSpace(a.draft)
 	if err := a.Ctrl.Submit(context.Background(), id, text); err != nil {
-		// Keep the unsent text on the new session's own draft rather than
-		// dropping it (or letting the Home buffer follow into the session).
-		a.saveSessionDraft(id, a.draft)
+		// A failed first send must not leave an empty session behind (UX-01):
+		// roll it back, keep the Home draft and its staged files, and report
+		// the failure through the deferred toast path so a keyboard Enter is
+		// not silent (UX-03).
+		a.rollbackHomeSession(id, staged)
 		if errors.Is(err, session.ErrNoAgent) {
-			c.Toast(a.menuText("No agent configured. Add a model in Settings > Models.",
+			a.toastDeferred(c, a.menuText("No agent configured. Add a model in Settings > Models.",
 				"尚未配置 Agent。请在 设置 > 模型 中添加模型。"))
 		} else {
-			c.Toast(fmt.Sprintf(a.menuText("Could not send: %v", "发送失败：%v"), err))
+			a.toastDeferred(c, fmt.Sprintf(a.menuText("Could not send: %v", "发送失败：%v"), err))
 		}
 		return
 	}
@@ -336,21 +342,33 @@ func (a *App) sendHomeDraft(c *ui.Context) {
 	a.homeDraft = ""
 }
 
+// rollbackHomeSession deletes a session the Home send/plan path just created
+// because its first request failed, and returns the UI to Home with the draft
+// intact. staged (captured before the session took the files) re-stages the
+// Home attachment chips; it may be empty.
+func (a *App) rollbackHomeSession(id string, staged []homeAttachment) {
+	if a.Ctrl != nil && strings.TrimSpace(id) != "" {
+		_ = a.Ctrl.DeleteSession(context.Background(), id)
+	}
+	a.SetSnapshot(nil)
+	a.Screen = Home
+	if len(staged) > 0 {
+		a.homeAttachments = staged
+	}
+}
+
 // newHomeSession creates and opens the session the Home composer sends into:
 // the current workspace, the Home-staged agent preset/access mode/model, and
 // the staged attachments. It returns the new session id on success; failures
-// are reported through c (when it is available) and leave the Home draft and
-// its chips intact. The Session screen is only entered after every step
-// succeeds, so a failed /plan or Home send cannot land on a half-built session.
+// are reported through c (when it is available), delete any session created
+// half-way, and leave the Home draft and its chips intact. The Session screen
+// is only entered after every step succeeds, so a failed /plan or Home send
+// cannot land on a half-built session.
 func (a *App) newHomeSession(c *ui.Context) (string, bool) {
 	if a.Ctrl == nil {
 		return "", false
 	}
-	toast := func(msg string) {
-		if c != nil {
-			c.Toast(msg)
-		}
-	}
+	toast := func(msg string) { a.toastDeferred(c, msg) }
 	ctx := context.Background()
 	ws, ok, err := a.Ctrl.CurrentWorkspace(ctx)
 	if err != nil || !ok || strings.TrimSpace(ws.ID) == "" {
@@ -364,6 +382,9 @@ func (a *App) newHomeSession(c *ui.Context) (string, bool) {
 	}
 	snap, err := a.Ctrl.OpenSession(ctx, id)
 	if err != nil {
+		// The session row exists but could not be opened: never leave it as an
+		// empty session in the sidebar.
+		_ = a.Ctrl.DeleteSession(ctx, id)
 		toast(fmt.Sprintf(a.menuText("Could not open the new session: %v", "无法打开新会话：%v"), err))
 		return "", false
 	}

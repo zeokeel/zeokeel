@@ -95,13 +95,16 @@ func (a *App) noteRightScreen() {
 func (a *App) startTabPanel(c *ui.Context, t *design.Tokens) {
 	th := t.Theme()
 	ui.Column(c).Grow(1).Padding(th.Space(6), th.Space(5)).
-		Justify(ui.Center).Gap(th.Space(2)).Children(func() {
-		ui.Row(c).Justify(ui.Center).Padding(0, 0, th.Space(2), 0).Children(func() {
-			ui.Row(c).Size(th.Space(11), th.Space(11)).Radius(th.Space(5.5)).
-				Background(t.BgHover).Center().Children(func() {
-				ui.Icon(c, icons.Sparkles()).Size(th.Space(5), th.Space(5)).
-					TextColor(t.Accent)
-			})
+		Justify(ui.Center).Gap(th.Space(3)).Children(func() {
+		// A heading and one line of help: the earlier floating icon read as a
+		// button/loading state and the centered column left a large blank above
+		// (UX-13).
+		ui.Column(c).Gap(th.Space(1)).Children(func() {
+			ui.Text(c, a.tr("Workspace tools", "工作区工具")).FontSize(14).
+				FontWeight(600).TextColor(t.LabelPrimary)
+			ui.Text(c, a.tr("Open files, a terminal, or this session's log.",
+				"打开文件、终端，或查看本会话的日志。")).FontSize(12).
+				FixedLineHeight(18).TextColor(t.LabelTertiary).MaxLines(2)
 		})
 		a.startCard(c, t, icons.Folder(), t.Accent,
 			a.T("files.workspace_files"),

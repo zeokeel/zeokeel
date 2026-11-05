@@ -104,11 +104,13 @@ type inspectTestSnapshot struct {
 		} `json:"skills"`
 	} `json:"skills"`
 	MCP struct {
-		Source  string   `json:"source"`
-		File    string   `json:"file"`
-		Count   int      `json:"count"`
-		Servers []string `json:"servers"`
-		Error   string   `json:"error"`
+		Source              string   `json:"source"`
+		File                string   `json:"file"`
+		WorkspaceConfig     string   `json:"workspace_config"`
+		WorkspaceConfigNote string   `json:"workspace_config_note"`
+		Count               int      `json:"count"`
+		Servers             []string `json:"servers"`
+		Error               string   `json:"error"`
 	} `json:"mcp"`
 }
 
@@ -217,18 +219,72 @@ func TestInspectSnapshot(t *testing.T) {
 		t.Errorf("inspect output contains a skill body")
 	}
 
-	// MCP: names from mcp.json, no command or environment details.
+	// MCP: names from mcp.json, no command or environment details. The
+	// workspace trust gate is reported explicitly: no setting means the
+	// default "off" and the file is marked ignored, not active.
 	if snap.MCP.Error != "" {
 		t.Fatalf("mcp error = %q", snap.MCP.Error)
 	}
 	if snap.MCP.Source != "mcp.json" || snap.MCP.File != "mcp.json" || snap.MCP.Count != 2 {
 		t.Errorf("mcp = %+v", snap.MCP)
 	}
+	if snap.MCP.WorkspaceConfig != "off" {
+		t.Errorf("mcp.workspace_config = %q, want the effective default off", snap.MCP.WorkspaceConfig)
+	}
+	if !strings.Contains(snap.MCP.WorkspaceConfigNote, "ignored") {
+		t.Errorf("workspace_config_note = %q, want the ignored status", snap.MCP.WorkspaceConfigNote)
+	}
 	if strings.Join(snap.MCP.Servers, ",") != "alpha,beta" {
 		t.Errorf("mcp servers = %v", snap.MCP.Servers)
 	}
 	if strings.Contains(out, "alpha-cmd") {
 		t.Errorf("inspect output contains an MCP command")
+	}
+}
+
+// TestInspectMCPWorkspaceGateStatus covers the RT-01 diagnostics follow-up:
+// inspect must distinguish an ignored workspace mcp.json (default off) from an
+// explicitly enabled one, and must mark the enabled source as untrusted.
+func TestInspectMCPWorkspaceGateStatus(t *testing.T) {
+	st := openInspectStore(t)
+	root := t.TempDir()
+	writeTestFile(t, filepath.Join(root, "mcp.json"), `{"servers":[{"name":"alpha","command":"alpha-cmd"}]}`)
+	tool := NewInspectTool(InspectConfig{Store: st, Root: root})
+
+	var snap inspectTestSnapshot
+	decodeInspectJSON(t, mustInvoke(t, tool, map[string]any{"section": "mcp"}), &snap)
+	if snap.MCP.Source != "mcp.json" || snap.MCP.WorkspaceConfig != "off" {
+		t.Fatalf("default gate status = %+v, want source mcp.json + off", snap.MCP)
+	}
+	if !strings.Contains(snap.MCP.WorkspaceConfigNote, "ignored") {
+		t.Errorf("default note = %q, want ignored", snap.MCP.WorkspaceConfigNote)
+	}
+
+	if err := st.SetSetting("mcp.workspace_config", "allow"); err != nil {
+		t.Fatal(err)
+	}
+	decodeInspectJSON(t, mustInvoke(t, tool, map[string]any{"section": "mcp"}), &snap)
+	if snap.MCP.WorkspaceConfig != "allow" {
+		t.Fatalf("allowed gate status = %+v", snap.MCP)
+	}
+	if !strings.Contains(snap.MCP.WorkspaceConfigNote, "untrusted") || !strings.Contains(snap.MCP.WorkspaceConfigNote, "allow") {
+		t.Errorf("allowed note = %q, want untrusted + allow", snap.MCP.WorkspaceConfigNote)
+	}
+	if strings.Contains(mustInvoke(t, tool, map[string]any{"section": "mcp"}), "alpha-cmd") {
+		t.Error("inspect output leaked the MCP command")
+	}
+
+	// An explicit mcp.servers value wins; the workspace file is reported as
+	// not read so the note cannot suggest two active sources.
+	if err := st.SetSetting("mcp.servers", `[{"name":"beta","command":"beta-cmd"}]`); err != nil {
+		t.Fatal(err)
+	}
+	decodeInspectJSON(t, mustInvoke(t, tool, map[string]any{"section": "mcp"}), &snap)
+	if snap.MCP.Source != "settings" || snap.MCP.Count != 1 || snap.MCP.Servers[0] != "beta" {
+		t.Fatalf("settings source = %+v", snap.MCP)
+	}
+	if !strings.Contains(snap.MCP.WorkspaceConfigNote, "wins") {
+		t.Errorf("settings note = %q, want it to say the setting wins", snap.MCP.WorkspaceConfigNote)
 	}
 }
 

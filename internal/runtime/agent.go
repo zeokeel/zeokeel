@@ -726,6 +726,16 @@ func (a *Agent) run(ctx context.Context, cancel context.CancelFunc, sessionID, t
 		renderAdvisory: a.budgetAdvisory,
 	}
 	ctx = withTurnContext(ctx, turnCtx)
+	// Barrier checkpoints (FP-11): the model adapter flushes the request before
+	// it is sent and the tool wrapper flushes before a side-effecting tool body
+	// runs, so a crash can lose neither. A Save failure fails the barrier
+	// closed instead of continuing without a recovery record.
+	ctx = withTurnCheckpoint(ctx, &turnCheckpointContext{
+		store:     a.checkpoints,
+		prior:     prior,
+		sessionID: sessionID,
+		turnID:    msgID,
+	})
 
 	runner := adk.NewRunner(ctx, adk.RunnerConfig{
 		Agent:           pinned.adkAgent,

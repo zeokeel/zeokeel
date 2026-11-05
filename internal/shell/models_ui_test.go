@@ -1,7 +1,11 @@
 package shell
 
 import (
+	"context"
+	"errors"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/egoist/mygo/ui"
 
@@ -138,9 +142,25 @@ func TestModelsSettingsCRUD(t *testing.T) {
 		t.Fatalf("edited name = %q, want Alpha Renamed", edited.Name)
 	}
 
-	// Delete the edited model; the default (second) survives.
+	// Delete the edited model; the confirmation must be accepted first (PD-18)
+	// and cancelling it must leave the store untouched.
 	if err := tt.Click("Delete"); err != nil {
 		t.Fatalf("click Delete: %v", err)
+	}
+	if !tt.HasText("Delete model?") {
+		t.Fatalf("delete confirmation missing: %q", tt.Texts())
+	}
+	if err := tt.Click("Cancel"); err != nil {
+		t.Fatalf("cancel delete: %v", err)
+	}
+	if models, err = h.ctrl.Models().List(); err != nil || len(models) != 2 {
+		t.Fatalf("cancelling the delete changed the models: %+v, %v", models, err)
+	}
+	if err := tt.Click("Delete"); err != nil {
+		t.Fatalf("click Delete (#2): %v", err)
+	}
+	if err := tt.Click("Delete model"); err != nil {
+		t.Fatalf("confirm Delete: %v", err)
 	}
 	models, err = h.ctrl.Models().List()
 	if err != nil || len(models) != 1 || models[0].ID != second.ID {
@@ -150,14 +170,133 @@ func TestModelsSettingsCRUD(t *testing.T) {
 		t.Fatal("deleted model's name key survived")
 	}
 
-	// Deleting the default clears the selection.
+	// Deleting the default clears the selection, also through the
+	// confirmation.
 	if err := tt.Click("Delete"); err != nil {
 		t.Fatalf("click Delete (default): %v", err)
+	}
+	if err := tt.Click("Delete model"); err != nil {
+		t.Fatalf("confirm Delete (default): %v", err)
 	}
 	if _, err := h.ctrl.Models().DefaultID(); err == nil {
 		t.Fatal("default survived deleting the default model")
 	}
 	if got := h.app.DefaultModelLabel(); got != "No model" {
 		t.Fatalf("DefaultModelLabel with no default = %q, want No model", got)
+	}
+}
+
+// TestModelProviderPresetsAndConnection pins PD-02: the Add model dialog
+// offers provider presets that fill Base URL and Model, and a "Test
+// connection" probe with a local validation state and an async outcome. The
+// probe is stubbed so the test never touches a network.
+func TestModelProviderPresetsAndConnection(t *testing.T) {
+	h := newLiveApp(t, &shellProvider{})
+	h.app.Language = LangEN
+	tt := ui.NewTester(h.app.View, 1600, 1000)
+	tt.Key(ui.Cmd, ui.KeyComma)
+	if err := tt.Click("Models"); err != nil {
+		t.Fatalf("click Models nav: %v", err)
+	}
+	if err := tt.Click("Add model"); err != nil {
+		t.Fatalf("click Add model: %v", err)
+	}
+	if !tt.HasText("Provider") {
+		t.Fatalf("model dialog has no provider row: %q", tt.Texts())
+	}
+	if !tt.HasText("Test connection") {
+		t.Fatalf("model dialog has no connection test: %q", tt.Texts())
+	}
+
+	// Validation runs before any request: empty Base URL/Model reports what is
+	// missing instead of probing "".
+	called := make(chan struct{}, 1)
+	oldProbe := probeModelConnection
+	probeModelConnection = func(context.Context, string, string) error {
+		called <- struct{}{}
+		return nil
+	}
+	t.Cleanup(func() { probeModelConnection = oldProbe })
+	if err := tt.Click("Test connection"); err != nil {
+		t.Fatalf("click Test connection: %v", err)
+	}
+	tt.Frame()
+	if !tt.HasText("Fill in Base URL and Model") {
+		t.Fatalf("connection test without fields did not validate: %q", tt.Texts())
+	}
+	select {
+	case <-called:
+		t.Fatal("connection test probed an empty endpoint")
+	default:
+	}
+
+	// Picking the OpenAI preset fills the wire fields.
+	for _, preset := range providerPresets {
+		if preset.id == "openai" {
+			h.app.applyProviderPreset(preset)
+		}
+	}
+	draft := h.app.shellUI().modelDraft
+	if draft.baseURL != "https://api.openai.com/v1" || draft.model != "gpt-4o-mini" {
+		t.Fatalf("preset did not fill the draft: %+v", draft)
+	}
+	h.app.shellUI().modelDraft.apiKey = "sk-test"
+	tt.Frame()
+
+	// The stub probe reports success, and the dialog paints it.
+	if err := tt.Click("Test connection"); err != nil {
+		t.Fatalf("click Test connection (#2): %v", err)
+	}
+	select {
+	case <-called:
+	case <-time.After(5 * time.Second):
+		t.Fatal("connection probe did not run")
+	}
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		if got := h.app.currentModelProbe(); got.message == "Connection OK" {
+			break
+		}
+		time.Sleep(2 * time.Millisecond)
+	}
+	tt.Frame()
+	if !tt.HasText("Connection OK") {
+		t.Fatalf("connection success not painted: %q", tt.Texts())
+	}
+
+	// A failing endpoint paints the failure message and the error text.
+	probeModelConnection = func(context.Context, string, string) error {
+		return errors.New("HTTP 401 Unauthorized")
+	}
+	if err := tt.Click("Test connection"); err != nil {
+		t.Fatalf("click Test connection (#3): %v", err)
+	}
+	deadline = time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		if got := h.app.currentModelProbe(); strings.Contains(got.message, "401") {
+			break
+		}
+		time.Sleep(2 * time.Millisecond)
+	}
+	tt.Frame()
+	if !tt.HasText("Connection failed") || !tt.HasText("HTTP 401 Unauthorized") {
+		t.Fatalf("connection failure not painted: %q", tt.Texts())
+	}
+}
+
+// TestModelPresetMatching keeps the preset row honest when editing a saved
+// model: a known Base URL selects its preset, anything else is Custom.
+func TestModelPresetMatching(t *testing.T) {
+	cases := map[string]string{
+		"https://api.deepseek.com":     "deepseek",
+		"https://api.deepseek.com/v1":  "custom",
+		"https://api.openai.com/v1/":   "openai",
+		"http://localhost:11434/v1":    "ollama",
+		"https://gateway.example.test": "custom",
+	}
+	for baseURL, want := range cases {
+		if got := presetForBaseURL(baseURL); got != want {
+			t.Errorf("presetForBaseURL(%q) = %q, want %q", baseURL, got, want)
+		}
 	}
 }

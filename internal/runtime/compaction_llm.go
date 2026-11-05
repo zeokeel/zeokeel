@@ -87,6 +87,11 @@ func (c LLMCompactor) Compact(ctx context.Context, sessionID string, messages []
 		return nil, nil
 	}
 
+	// Offload old image parts before summarizing: the summary prompt must not
+	// carry data URLs, and the retained tail keeps only its newest images
+	// (same policy as WindowCompactor).
+	messages = offloadOldImages(messages, DefaultImageKeepLast)
+
 	keepLast := c.keepLast()
 	system := make([]Message, 0, len(messages))
 	rest := make([]Message, 0, len(messages))

@@ -224,3 +224,43 @@ func TestScheduleToolsWithoutStore(t *testing.T) {
 		}
 	}
 }
+
+// TestScheduleCreateUsesLocalTimezone pins RT-09 at the tool boundary: with a
+// local-zone clock, @daily must resolve to the next local midnight and persist
+// that instant in UTC.
+func TestScheduleCreateUsesLocalTimezone(t *testing.T) {
+	dir := t.TempDir()
+	st, err := store.Open(dir)
+	if err != nil {
+		t.Fatalf("store.Open: %v", err)
+	}
+	defer st.Close()
+
+	shanghai := time.FixedZone("CST", 8*60*60)
+	now := time.Date(2026, 1, 1, 0, 30, 0, 0, shanghai)
+	tools := scheduleToolsFor(st, now)
+	out, err := sqInvoke(t, tools["schedule_create"], `{"title":"Daily","prompt":"p","cron":"@daily"}`)
+	if err != nil {
+		t.Fatalf("schedule_create: %v", err)
+	}
+	var created struct {
+		Schedule *store.Automation `json:"schedule"`
+	}
+	if err := json.Unmarshal([]byte(out), &created); err != nil {
+		t.Fatalf("decode: %v\n%s", err, out)
+	}
+	if created.Schedule == nil || created.Schedule.NextRun == nil {
+		t.Fatal("schedule_create returned no next_run")
+	}
+	want := time.Date(2026, 1, 2, 0, 0, 0, 0, shanghai).UTC()
+	if !created.Schedule.NextRun.Equal(want) {
+		t.Fatalf("next_run = %v, want %v", created.Schedule.NextRun, want)
+	}
+	stored, err := st.GetAutomation(created.Schedule.ID)
+	if err != nil {
+		t.Fatalf("GetAutomation: %v", err)
+	}
+	if stored.NextRun == nil || !stored.NextRun.Equal(want) {
+		t.Fatalf("stored next_run = %v, want %v", stored.NextRun, want)
+	}
+}

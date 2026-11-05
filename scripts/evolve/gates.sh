@@ -9,11 +9,12 @@
 #
 # 行为:
 #   - 自动补齐 /usr/local/go/bin 到 PATH（非登录 shell 里 make check 会 127）
-#   - 测试类步骤失败自动重跑（默认最多 3 次），重跑才通过记为 flaky
+#   - 测试类步骤失败自动重跑（默认最多 3 次）只用于暴露 flaky；重跑才通过记为
+#     flaky 并按失败处理（exit 1）——不允许把"重试后绿"当成绿（AR-02）
 #   - 2026-11-05: DSH 像素门禁步骤已退役（见 docs/decisions/0001-retire-dsh-pixel-parity.md）
 #   - 输出: .evolve/state/latest.json（机器可读）、.evolve/state/latest.md（人读）、
 #           .evolve/state/logs/<run-id>-<step>.log（原始日志）
-#   - 任一确定性步骤失败 -> exit 1；仅 flaky -> exit 0 但标记
+#   - 任一确定性步骤失败 -> exit 1；仅 flaky -> exit 1 且报告 flaky 步骤
 set -uo pipefail
 
 ROOT=$(cd "$(dirname "$0")/../.." && pwd)
@@ -51,6 +52,7 @@ trap 'rm -f "$TSV"' EXIT
 
 STARTED=$(date -Iseconds)
 FAILED=0
+FLAKY=0
 
 # run_step <name> <attempts> <timeout_s> <cmd...>
 run_step() {
@@ -81,7 +83,10 @@ run_step() {
 		status=fail
 		FAILED=$((FAILED + 1))
 	elif ((attempt > 1)); then
+		# Retrying until green is how flaky tests get masked: report the step
+		# as flaky AND count it as a gate failure.
 		status=flaky
+		FLAKY=$((FLAKY + 1))
 	fi
 	printf '%s\t%s\t%s\t%s\t%s\t%s\n' "$name" "$status" "$attempt" "$dur" "$rc" "$tail" >>"$TSV"
 	printf '  %-14s %-6s attempts=%d %4ds\n' "$name" "$status" "$attempt" "$dur"
@@ -99,7 +104,7 @@ fi
 
 FINISHED=$(date -Iseconds)
 GOVER=$(go version 2>/dev/null | tr '\n' ' ')
-export RUN_ID MODE STARTED FINISHED GOVER ROOT FAILED
+export RUN_ID MODE STARTED FINISHED GOVER ROOT FAILED FLAKY
 python3 - "$TSV" "$STATE" <<'PY'
 import json, os, sys
 
@@ -125,9 +130,10 @@ run = {
     "run_id": env["RUN_ID"], "mode": env["MODE"],
     "root": env["ROOT"], "go_version": env["GOVER"],
     "started_at": env["STARTED"], "finished_at": env["FINISHED"],
-    "ok": int(env["FAILED"]) == 0,
+    "ok": int(env["FAILED"]) == 0 and int(env["FLAKY"]) == 0,
     "failed_steps": [s["name"] for s in steps if s["status"] == "fail"],
     "flaky_steps": [s["name"] for s in steps if s["status"] == "flaky"],
+    "flaky_count": int(env["FLAKY"]),
     "steps": steps,
 }
 with open(os.path.join(state, "latest.json"), "w") as f:
@@ -141,8 +147,8 @@ md = ["# Gates run " + run["run_id"], "",
 for s in steps:
     md.append(f"| {s['name']} | {s['status']} | {s['attempts']} | {s['duration_s']}s |")
 if run["flaky_steps"]:
-    md += ["", "> flaky（重跑才通过）: " + ", ".join(run["flaky_steps"]),
-           "> 注意：flaky 不是「通过」，应记为门禁健康问题。"]
+    md += ["", "> flaky（重跑才通过，按失败处理）: " + ", ".join(run["flaky_steps"]),
+           "> 注意：flaky 不是「通过」；本次 run 的 ok 为 false。"]
 if run["failed_steps"]:
     md += ["", "> 失败: " + ", ".join(run["failed_steps"])]
 md += ["", "日志: `.evolve/state/logs/`；机器可读: `.evolve/state/latest.json`"]
@@ -155,6 +161,10 @@ rm -f "$TSV"
 echo
 if ((FAILED > 0)); then
 	echo "GATES FAIL ($FAILED deterministic failure[s]) — see .evolve/state/latest.md" >&2
+	exit 1
+fi
+if ((FLAKY > 0)); then
+	echo "GATES FLAKY ($FLAKY step[s] passed only on retry; treated as failure) — see .evolve/state/latest.md" >&2
 	exit 1
 fi
 echo "GATES OK — see .evolve/state/latest.md"

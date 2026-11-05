@@ -566,7 +566,7 @@ func (c *Controller) OpenSession(ctx context.Context, id string) (*state.Snapsho
 	// Each session can have its own access mode. The agent's tools and gate
 	// are built for one mode, so switching to a session with a different mode
 	// asks the app to rebuild before the next turn.
-	c.rebuildForPermission(id)
+	_ = c.rebuildForPermission(id)
 	// Point the shared agent at this session's selected model before the next
 	// request. The choice is per session and never rewrites the global default.
 	_ = c.applySessionModel(id)
@@ -712,10 +712,32 @@ func (c *Controller) submit(ctx context.Context, sessionID, text string, automat
 	// goroutine, so a Submit blocked in reserve while holding bindMu could
 	// deadlock against that continuation. Here nothing blocks on a turn.
 	c.bindMu.Lock()
+	// reserve switched currentID to the target session, but a concurrent
+	// OpenSession/CreateSession that held bindMu while this Submit waited can
+	// have switched it again. Re-pin the target before the rebuilds below: the
+	// app builds the shared agent for the controller's current session, so the
+	// wrong current id would build the wrong permission set (RT-02).
+	c.mu.Lock()
+	c.currentID = sessionID
+	c.mu.Unlock()
 	if err := c.bindWorkspace(ctx, sess.WorkspaceID); err != nil {
 		c.bindMu.Unlock()
 		c.abortTurn(t)
 		return fmt.Errorf("session: submit: %w", err)
+	}
+	// Access mode is captured when the agent is built (tool set and approval
+	// gate), and neither CreateSession nor reserve rebuilds. A Submit that
+	// targets a session other than the one the agent was built for (automation
+	// runs, queued sends, goal continuations) would therefore run with the
+	// previous session's permission: Full access would leak into a default
+	// Workspace session, and a Read Only session would silently lose its write
+	// tools. Rebuild for the target's own mode before the turn starts; a
+	// failed rebuild would run the turn under the wrong permission, so refuse
+	// the turn instead.
+	if rerr := c.rebuildForPermission(sessionID); rerr != nil {
+		c.bindMu.Unlock()
+		c.abortTurn(t)
+		return fmt.Errorf("session: submit: rebuild agent for permission: %w", rerr)
 	}
 	c.mu.Lock()
 	agent := c.agent
@@ -2902,16 +2924,19 @@ func (c *Controller) SetBuiltPermission(mode string) {
 
 // rebuildForPermission rebuilds when sessionID's effective mode differs from
 // the mode the current agent was built for. A missing built value (startup)
-// leaves the app's own startup rebuild in charge.
-func (c *Controller) rebuildForPermission(sessionID string) {
+// leaves the app's own startup rebuild in charge. The rebuild is requested
+// without c.mu held; the app reads the target session through the controller
+// (currentID must already point at sessionID), which is why callers hold
+// bindMu across the currentID switch and this call.
+func (c *Controller) rebuildForPermission(sessionID string) error {
 	c.mu.Lock()
 	built := c.builtPermission
 	c.mu.Unlock()
 	want := c.SessionPermissionOrDefault(sessionID)
 	if built == "" || want == "" || built == want {
-		return
+		return nil
 	}
-	_ = c.RebuildAgent("permission")
+	return c.RebuildAgent("permission")
 }
 
 // SessionPermissionOrDefault returns the session's access mode. A session the
