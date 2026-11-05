@@ -201,6 +201,8 @@ var pluginDetailSpecs = []pluginDetailSpec{
 		descZH: "0 = 不限（默认）：由模型自行决定何时结束。填正数则作为单轮安全上限：达到上限会保留已完成的工作、提示并允许继续。",
 		fields: []pluginDetailField{
 			{key: "plugin.agent_loop.max_iterations", labelEN: "Max iterations (0 = unlimited)", labelZH: "最大迭代次数（0 = 不限）", kind: pluginFieldInt, def: strconv.Itoa(runtime.DefaultMaxIterations), min: 0, max: runtime.MaxIterationsLimit},
+			{key: "plugin.agent_loop.budget_warn_steps", labelEN: "Soft step warnings (comma separated; empty = 25,50,100; 0 = off)", labelZH: "软步数提醒（逗号分隔；空 = 默认 25,50,100；0 = 关闭）", kind: pluginFieldText, def: ""},
+			{key: "plugin.agent_loop.budget_warn_tokens", labelEN: "Soft token warnings (comma separated; empty = 200000,500000; 0 = off)", labelZH: "软 token 提醒（逗号分隔；空 = 默认 200000,500000；0 = 关闭）", kind: pluginFieldText, def: ""},
 		},
 	},
 	{

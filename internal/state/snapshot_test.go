@@ -423,3 +423,39 @@ func TestApplyDeterministic(t *testing.T) {
 		t.Fatalf("Seq = %d, want %d", a.Seq, len(events))
 	}
 }
+
+// TestTurnEndFold pins the per-turn marker fold: TurnEnd records one reason per
+// user message, later events do not clear earlier marks, and the input snapshot
+// is never mutated.
+func TestTurnEndFold(t *testing.T) {
+	s := NewSnapshot()
+	s = Apply(s, TurnEnd{TurnID: "t1", UserMsgID: "u1", Reason: ReasonStopped})
+	s = Apply(s, TurnEnd{TurnID: "t2", UserMsgID: "u2", Reason: ReasonFailed})
+	if got := s.TurnMarks["u1"]; got != ReasonStopped {
+		t.Fatalf("u1 mark = %q, want stopped", got)
+	}
+	if got := s.TurnMarks["u2"]; got != ReasonFailed {
+		t.Fatalf("u2 mark = %q, want failed", got)
+	}
+	// The previous snapshot keeps its own map (immutable fold).
+	prev := s
+	s = Apply(s, TurnEnd{TurnID: "t3", UserMsgID: "u3", Reason: ReasonInterrupted})
+	if _, ok := prev.TurnMarks["u3"]; ok {
+		t.Fatal("TurnEnd mutated the previous snapshot's marks")
+	}
+	if got := s.TurnMarks["u3"]; got != ReasonInterrupted {
+		t.Fatalf("u3 mark = %q, want interrupted", got)
+	}
+	// A completed turn (ReasonNone) and an empty anchor record nothing.
+	s = Apply(s, TurnEnd{UserMsgID: "u4", Reason: ReasonNone})
+	s = Apply(s, TurnEnd{UserMsgID: "", Reason: ReasonStopped})
+	if len(s.TurnMarks) != 3 {
+		t.Fatalf("marks = %+v, want three", s.TurnMarks)
+	}
+	// A later terminal Status keeps the marks (only the latest-reason field
+	// changes), so a reopen shows every historical marker.
+	s = Apply(s, Status{Phase: PhaseIdle, Reason: ReasonStopped})
+	if len(s.TurnMarks) != 3 {
+		t.Fatalf("Status cleared the marks: %+v", s.TurnMarks)
+	}
+}

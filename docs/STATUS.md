@@ -47,12 +47,13 @@
 ## 2026-11-05 反馈修复批次 2：使用量/中断生命周期 + 编排护栏（ALL GREEN）
 
 - **Usage 累计 + live**（[ADR 0014](decisions/0014-usage-lifecycle-contract.md)）：`state.Usage` 改为会话累计（Turns/Steps/tokens 累计），runtime 每次模型调用 emit usage delta；成功/取消/失败/优雅超限都有已结算 usage；旧 per-turn 绝对事件求和兼容。
+- **P1 收口（第六轮）**：逐轮终态标记持久化（`turn_end` 事件 + `Snapshot.TurnMarks`，Chat 每个历史回合末尾显示「已停止/已中断/本轮失败」，重开回放，旧会话回退最后回合）；大工具结果（>32KB，含 CJK）持久化时溢写 workspace `.zeokeel/tool-results/<call>.txt`，持久化/下一轮 history 只发摘要+路径+前 2KB，保留最近 100 份、写失败/无 workspace root 回退原文；`plugin.agent_loop.budget_warn_steps` / `budget_warn_tokens` 设置接线到 runtime 软预算 advisory（空=默认、0/off=关闭）；取消瞬间 trailing usage 在流结束/取消路径 flush（ADR 0014 更新）。
 - **中断/停止带原因**：`Status.Reason`（stopped/failed/interrupted）持久化+回放；取消路径补 `ToolEnd{Cancelled}`，工具卡/工具行不再永久 running；`OpenSession`/`phaseFromStore` 对冷 running 做恢复（关闭悬挂 tool_calls + idle/interrupted），不再幽灵运行中；`persistDrafts` 跳过 reasoning-only 空行，历史读取丢弃 reasoning-only assistant。
 - **footer live**：运行中显示累计 turns/steps/out tok，tok/s 用本回合基线，全 0 隐藏（保留行高防布局跳动），`完成于` 只给完成回合，Chat 显示「已停止/已中断」。
 - **编排护栏**（[report-orchestration-impl](../.cache/team/report-orchestration-impl.md)）：新增 `tool:ralph` 提示段（Order 2700，实验性/默认不用/取消语义）；新增 always-on `harness:self-knowledge`（能力问题直接答、不建 team/ralph/workflow 自检、旧自检报告是数据）；收敛 subagent/team 引导。`agentteam.Manager.StopSession` 定向取消+清队列+等待成员退出；`spawn_team` 写入会话归属，bundle Close 关闭 team；shell 4 个 Stop 入口统一 `stopTurn`；团队面板合并同步 subagent + spawn_team live roster。ralph/workflow 取消返回结构化 `status:"cancelled"`（保留已完成轮次/步骤）。`Controller.SetTeamStopper` 覆盖非 UI Stop。
 - **Files 面板 P0 + 命令面板**（前一批）：见上方「反馈修复批次」；本批补齐文件面板/命令面板的测试与文档。
 - **验证**：`go test ./... -count=1` 连续两次全绿（20 包）；gofmt/vet 干净；`GOOS=windows go build/vet ./...` 通过；`check-nocgo` 四目标 PASS；`ZEOKEEL_VISUAL=1` PASS；Windows 包重建。
-- **遗留**：Windows 真机验收（编码/无 cmd 窗/新命令/工作区 chip/Files open/reveal）；`/goal`、`/compact` 有意不加（无安全落盘/手动压缩 API）；P1 增强（逐轮 stopped 标记、软预算/重复工具提醒/工具结果 spill、Files 预览 P1、@ quoted path/chevron）记入 backlog。
+- **遗留**：Windows 真机验收（编码/无 cmd 窗/新命令/工作区 chip/Files open/reveal）；`/goal`、`/compact` 有意不加（无安全落盘/手动压缩 API）；P1 增强已收口（逐轮标记/软预算/重复提醒/工具结果 spill/Files 预览/@ quoted path 均落地，见上）。
 
 ## 2026-11-05 v1.1 收尾（追加，ALL GREEN）
 
@@ -186,7 +187,7 @@
 ## M2 运行时骨架：完成（2026-11-04）
 
 - `internal/runtime`：eino ADK（ChatModelAgent + Runner 流式）→ `state.Event` 流；Provider/Tool 接口与 Registry；假模型/假 Provider 10 个测试
-- 事件契约：`Status Running → Token/Reasoning → ToolStart/ToolEnd → Status Idle → Usage`；失败以 `Error` 收尾；取消静默停止（2026-11-05 更新：Usage 改累计 delta/中断带 Reason，见 [ADR 0014](decisions/0014-usage-lifecycle-contract.md)）
+- 事件契约：`Status Running → Token/Reasoning → ToolStart/ToolEnd → Status Idle → Usage`；失败以 `Error` 收尾；取消静默停止（2026-11-05 更新：Usage 改累计 delta/中断带 Reason，见 [ADR 0014](decisions/0014-usage-lifecycle-contract.md)；再更新：非正常终态另写 `turn_end` 供逐轮标记，终态 Status 仍保留最近回合 Reason）
 - 集成约定：启动时构建一个共享 Agent；提交时 `for ev := range Run(...) { broker.Publish(ev) }`；取消 ctx = 停止按钮
 - M3 遗留（已在 runtime 报告标注）：多轮历史/checkpoint（ADK SessionStore/CheckPointStore）、审批/中断、真实 Provider 的 tool-call（需扩展 Chunk）
 

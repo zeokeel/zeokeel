@@ -415,6 +415,35 @@ func outputCapBytes(st *store.Store) int {
 	return def
 }
 
+// budgetWarnThresholds parses a comma-separated soft-budget threshold list
+// from the agent-loop plugin settings. Empty means the runtime defaults (nil);
+// "0", "off" or "none" disables the dimension (empty non-nil slice); any
+// invalid or non-positive entry falls back to the defaults, so a typo can never
+// silently turn the soft warnings off.
+func budgetWarnThresholds(raw string) []int {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return nil
+	}
+	switch strings.ToLower(raw) {
+	case "0", "off", "none":
+		return []int{}
+	}
+	parts := strings.Split(raw, ",")
+	out := make([]int, 0, len(parts))
+	for _, part := range parts {
+		n, err := strconv.Atoi(strings.TrimSpace(part))
+		if err != nil || n <= 0 {
+			return nil
+		}
+		out = append(out, n)
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
+
 // settingInt parses an integer setting, returning def when it is missing,
 // unreadable, or outside [min,max]. A zero limit means "no bound".
 func settingInt(get func(key, env, def string) string, key, env string, def, min, max int) int {
@@ -956,8 +985,12 @@ func buildAgentWithOptions(st *store.Store, root, instruction string, opts regis
 			ToolResultKeepLast: runtime.DefaultToolResultKeepLast,
 			Fallback:           runtime.WindowCompactor{KeepLast: 12},
 		},
-		ContextBudget:    24000,
-		CheckpointStore:  &storeCheckpoint{st: st},
+		ContextBudget:   24000,
+		CheckpointStore: &storeCheckpoint{st: st},
+		// Soft cost warnings (never a hard stop) follow the agent-loop plugin
+		// settings; empty falls back to the runtime defaults.
+		BudgetWarnSteps:  budgetWarnThresholds(get("plugin.agent_loop.budget_warn_steps", "", "")),
+		BudgetWarnTokens: budgetWarnThresholds(get("plugin.agent_loop.budget_warn_tokens", "", "")),
 		SubagentTools:    nil,
 		MaxSubagentDepth: settingInt(get, "plugin.subagent.depth", "", tools.DefaultSubagentMaxDepth, 1, 8),
 	})

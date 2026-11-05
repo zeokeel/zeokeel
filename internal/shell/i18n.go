@@ -298,6 +298,7 @@ var translations = map[string]translation{
 	"session.todo.pending":                                   {"pending", "待处理"},
 	"session.todos":                                          {"Todos", "待办"},
 	"session.took":                                           {"Took %s", "耗时 %s"},
+	"session.turn_failed":                                    {"Turn failed", "本轮失败"},
 	"session.tool_label":                                     {"Tool %s", "工具 %s"},
 	"session.tool_summary":                                   {"Ran commands, read images, called tools", "运行命令、读取图像、调用工具"},
 	"session.trajectory":                                     {"Trajectory", "轨迹"},

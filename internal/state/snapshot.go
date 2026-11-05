@@ -155,8 +155,13 @@ type Snapshot struct {
 	// TurnReason explains how the latest turn ended (zero = completed or no
 	// turn yet). It survives a reopen through the terminal Status event.
 	TurnReason StatusReason
-	LastError  *ErrorInfo
-	Seq        uint64
+	// TurnMarks maps a turn's user message ID to how that turn ended. Only
+	// stopped/failed/interrupted turns are recorded; the Chat transcript shows
+	// the marker at the end of the matching turn so historical interruptions
+	// survive a reopen, not only the latest one.
+	TurnMarks map[string]StatusReason
+	LastError *ErrorInfo
+	Seq       uint64
 }
 
 // NewSnapshot returns an empty snapshot in PhaseIdle with a non-nil Tools map.
@@ -182,6 +187,7 @@ func NewSnapshot() *Snapshot {
 //	                ToolCancelled when the turn closed the call
 //	Usage           add the event's delta to Snapshot.Usage (ContextPct is a gauge)
 //	Status          replace Snapshot.Phase and Snapshot.TurnReason
+//	TurnEnd         record one turn's terminal reason in Snapshot.TurnMarks
 //	Error           replace Snapshot.LastError with immutable error info
 //
 // Seq is incremented once per applied event. Messages keep the order in which
@@ -273,6 +279,15 @@ func Apply(prev *Snapshot, ev Event) *Snapshot {
 		// The zero reason clears the marker when a new turn starts; terminal
 		// statuses persist how the latest turn ended.
 		next.TurnReason = e.Reason
+	case TurnEnd:
+		if e.UserMsgID != "" && e.Reason != ReasonNone {
+			out := make(map[string]StatusReason, len(prev.TurnMarks)+1)
+			for id, reason := range prev.TurnMarks {
+				out[id] = reason
+			}
+			out[e.UserMsgID] = e.Reason
+			next.TurnMarks = out
+		}
 	case Error:
 		next.LastError = &ErrorInfo{MsgID: e.MsgID, Text: errorText(e.Err)}
 	default:

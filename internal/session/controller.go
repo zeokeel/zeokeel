@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
 	"sort"
 	"strconv"
 	"strings"
@@ -239,6 +240,10 @@ type turn struct {
 	// toolStarted records that the turn started at least one tool call, so a
 	// tool-only turn still counts as producing output for TurnOutcome.
 	toolStarted bool
+	// userMsgID is the persisted user message that opened this turn; the
+	// per-turn TurnEnd marker and the transcript anchor use it. Set before the
+	// drain goroutine starts, read only by finishTurn afterwards.
+	userMsgID string
 }
 
 type draft struct {
@@ -791,6 +796,7 @@ func (c *Controller) persistUserMessage(t *turn, sessionID, text string, attachm
 	if err := c.appendMessageEvent(msg); err != nil {
 		return fmt.Errorf("persist user event: %w", err)
 	}
+	t.userMsgID = msg.ID
 	chips := c.linkAttachments(attachments, msg.ID)
 	c.addUserMessage(t, msg, chips)
 	_, _ = c.store.UpdateSessionStatus(sessionID, store.SessionRunning)
@@ -947,11 +953,59 @@ func (c *Controller) recordToolCall(sessionID string, ev state.Event) {
 	}
 }
 
+// spillToolResult replaces an oversized tool result with a summary that points
+// at the file holding the full output. A missing workspace or a write error
+// keeps the original result: spilling is an optimization, never a reason to
+// lose the tool output.
+func (c *Controller) spillToolResult(sessionID string, te state.ToolEnd) state.ToolEnd {
+	if len(te.Result) <= toolResultSpillBytes {
+		return te
+	}
+	root := c.workspaceRootForSession(sessionID)
+	if root == "" {
+		return te
+	}
+	summary, ok, err := spillToolResultFile(root, te.CallID, te.Result)
+	if err != nil {
+		// Record the failure for diagnostics; the turn keeps the full result.
+		fmt.Fprintf(os.Stderr, "session: spill tool result %q: %v\n", te.CallID, err)
+		return te
+	}
+	if !ok {
+		return te
+	}
+	te.Result = summary
+	return te
+}
+
+// workspaceRootForSession resolves the session's workspace root, which is where
+// spilled tool results live. Empty means the workspace cannot be resolved.
+func (c *Controller) workspaceRootForSession(sessionID string) string {
+	if c.store == nil {
+		return ""
+	}
+	sess, err := c.store.GetSession(sessionID)
+	if err != nil || sess == nil || sess.WorkspaceID == "" {
+		return ""
+	}
+	ws, err := c.store.GetWorkspace(sess.WorkspaceID)
+	if err != nil || ws == nil {
+		return ""
+	}
+	return ws.Root
+}
+
 // forward performs the per-event work: accumulate assistant text, persist the
 // event, fold it into the session snapshot, fan it out through the Broker and
 // notify OnUpdate listeners. Persistence failures do not stop the stream; the
 // UI stays live and the terminal status is retried by finishTurn.
 func (c *Controller) forward(t *turn, ev state.Event) {
+	// Large tool results are persisted as a workspace file plus a short
+	// summary, so the next turn's history does not re-send the whole output
+	// (the current turn's model already saw the full result).
+	if te, ok := ev.(state.ToolEnd); ok {
+		ev = c.spillToolResult(t.sessionID, te)
+	}
 	switch e := ev.(type) {
 	case state.Token:
 		d := t.draft(e.MsgID)
@@ -1433,17 +1487,26 @@ func (c *Controller) persistSessionStatus(t *turn, phase state.Phase) {
 // assistant messages, then unregisters the turn and wakes any Submit waiting
 // on it. It runs exactly once per turn.
 func (c *Controller) finishTurn(t *turn) {
+	reason := state.ReasonNone
+	stopped := t.stopped.Load() || (t.ctx != nil && t.ctx.Err() != nil)
+	switch {
+	case !stopped && t.failed.Load():
+		reason = state.ReasonFailed
+	case stopped:
+		reason = state.ReasonStopped
+	}
 	if !t.terminalApplied.Load() {
 		phase := state.PhaseIdle
-		reason := state.ReasonNone
-		stopped := t.stopped.Load() || (t.ctx != nil && t.ctx.Err() != nil)
-		if !stopped && t.failed.Load() {
+		if reason == state.ReasonFailed {
 			phase = state.PhaseFailed
-			reason = state.ReasonFailed
-		} else if stopped {
-			reason = state.ReasonStopped
 		}
 		c.forward(t, state.Status{Phase: phase, Reason: reason})
+	}
+	// Persist the per-turn marker for the transcript: a later reopen must show
+	// which historical turns were stopped/failed, not only the latest one.
+	// Completed turns keep no mark.
+	if reason != state.ReasonNone && t.userMsgID != "" {
+		c.forward(t, state.TurnEnd{TurnID: t.id, UserMsgID: t.userMsgID, Reason: reason})
 	}
 	c.persistDrafts(t)
 	if !t.statusPersisted {
@@ -1746,6 +1809,22 @@ func (c *Controller) ensureWorkspace() (string, error) {
 	return w.ID, nil
 }
 
+// lastUserMessageID returns the newest persisted user message id of sessionID,
+// or "" when the session has none. Crash recovery uses it to anchor the
+// interrupted-turn marker in the transcript.
+func (c *Controller) lastUserMessageID(sessionID string) string {
+	msgs, err := c.store.ListMessages(sessionID)
+	if err != nil {
+		return ""
+	}
+	for i := len(msgs) - 1; i >= 0; i-- {
+		if strings.EqualFold(strings.TrimSpace(msgs[i].Role), string(state.RoleUser)) {
+			return msgs[i].ID
+		}
+	}
+	return ""
+}
+
 // terminalStoreStatus reports whether a persisted session status already closes
 // the latest turn.
 func terminalStoreStatus(status store.SessionStatus) bool {
@@ -1826,6 +1905,13 @@ func (c *Controller) recoverInterruptedSession(sess *store.Session, mine *turn) 
 		// Preserve a recorded failure; only the dangling calls needed repair.
 		phase = state.PhaseFailed
 		reason = state.ReasonFailed
+	}
+	// Anchor the repaired tail to its last user message so the per-turn
+	// transcript marker survives the reopen like a live Stop's would.
+	if userMsgID := c.lastUserMessageID(sess.ID); userMsgID != "" {
+		if err := c.appendEvent(sess.ID, state.TurnEnd{UserMsgID: userMsgID, Reason: reason}); err != nil {
+			return fmt.Errorf("session: recover interrupted turn: append turn end: %w", err)
+		}
 	}
 	if err := c.appendEvent(sess.ID, state.Status{Phase: phase, Reason: reason}); err != nil {
 		return fmt.Errorf("session: recover interrupted turn: append status: %w", err)

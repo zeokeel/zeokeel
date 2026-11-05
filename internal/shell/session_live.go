@@ -301,25 +301,54 @@ func (a *App) liveTranscript(c *ui.Context, t *design.Tokens, snap *state.Snapsh
 	}
 }
 
-// turnOutcomeMarker is the transcript's closing line for a turn that did not
-// complete normally. A stopped or interrupted turn has no personal assistant
-// answer, so without this line the transcript would simply stop after the
-// prompt; a failed turn keeps its error line instead. The marker comes back
-// from the terminal Status reason, so it survives a reopen.
-func (a *App) turnOutcomeMarker(c *ui.Context, t *design.Tokens, snap *state.Snapshot) {
-	if snap == nil || snap.Phase == state.PhaseRunning {
+// turnMark renders one turn's terminal marker (stopped/failed/interrupted) at
+// the end of that turn's transcript group. It is a no-op for completed turns
+// and for hand-built fixtures that carry no marks.
+func (a *App) turnMark(c *ui.Context, t *design.Tokens, snap *state.Snapshot, userMsgID string) {
+	if snap == nil || userMsgID == "" || snap.Phase == state.PhaseRunning {
 		return
 	}
-	var key string
-	switch snap.TurnReason {
+	label := a.turnMarkLabel(snap.TurnMarks[userMsgID])
+	if label == "" {
+		return
+	}
+	ui.Text(c, label).FontSize(12).FixedLineHeight(18).
+		TextColor(t.LabelTertiary).NoWrap()
+}
+
+// turnMarkLabel localizes one terminal turn reason.
+func (a *App) turnMarkLabel(reason state.StatusReason) string {
+	switch reason {
 	case state.ReasonStopped:
-		key = "session.stopped"
+		return a.T("session.stopped")
 	case state.ReasonInterrupted:
-		key = "session.interrupted"
+		return a.T("session.interrupted")
+	case state.ReasonFailed:
+		return a.T("session.turn_failed")
 	default:
+		return ""
+	}
+}
+
+// turnOutcomeMarker is the transcript's closing line for a turn that did not
+// complete normally. It is the compatibility path for sessions persisted before
+// per-turn TurnEnd markers existed: without any marks only the latest terminal
+// reason is known, so it is shown once at the end of the transcript. A stopped
+// or interrupted turn has no assistant answer of its own and would otherwise be
+// silent; a failed turn keeps its error line instead.
+func (a *App) turnOutcomeMarker(c *ui.Context, t *design.Tokens, snap *state.Snapshot) {
+	if snap == nil || snap.Phase == state.PhaseRunning || len(snap.TurnMarks) > 0 {
 		return
 	}
-	ui.Text(c, a.T(key)).FontSize(12).FixedLineHeight(18).
+	label := ""
+	switch snap.TurnReason {
+	case state.ReasonStopped, state.ReasonInterrupted:
+		label = a.turnMarkLabel(snap.TurnReason)
+	}
+	if label == "" {
+		return
+	}
+	ui.Text(c, label).FontSize(12).FixedLineHeight(18).
 		TextColor(t.LabelTertiary).NoWrap()
 }
 
@@ -331,6 +360,7 @@ func (a *App) liveOrderedTranscript(c *ui.Context, t *design.Tokens, snap *state
 	st := a.liveMenus()
 	turns := 0
 	for _, plan := range buildTranscriptTurns(snap) {
+		var turnUserMsgID string
 		for _, entry := range plan.entries {
 			if entry.tools != nil {
 				a.liveToolSummary(c, t, entry.tools)
@@ -341,12 +371,16 @@ func (a *App) liveOrderedTranscript(c *ui.Context, t *design.Tokens, snap *state
 			el := a.liveMessage(c, t, m, transcriptMessageKey(m, i), i == streaming, snap)
 			if m.Role == state.RoleUser {
 				turns++
+				turnUserMsgID = m.MsgID
 				if st.pendingTurn == turns {
 					el.ScrollIntoView()
 					st.pendingTurn = 0
 				}
 			}
 		}
+		// The per-turn marker closes the whole turn group (after its process
+		// block and answer), anchored by the turn's user message.
+		a.turnMark(c, t, snap, turnUserMsgID)
 	}
 	return turns
 }
@@ -357,12 +391,16 @@ func (a *App) liveOrderedTranscript(c *ui.Context, t *design.Tokens, snap *state
 func (a *App) liveFlatTranscript(c *ui.Context, t *design.Tokens, snap *state.Snapshot, streaming int) int {
 	st := a.liveMenus()
 	turns := 0
+	currentTurnUserMsgID := ""
 	for i, m := range snap.Messages {
 		if m.Text == "" {
 			continue
 		}
 		el := a.liveMessage(c, t, m, transcriptMessageKey(m, i), i == streaming, snap)
 		if m.Role == state.RoleUser {
+			// Close the previous turn's marker before the next user message.
+			a.turnMark(c, t, snap, currentTurnUserMsgID)
+			currentTurnUserMsgID = m.MsgID
 			turns++
 			if st.pendingTurn == turns {
 				el.ScrollIntoView()
@@ -370,6 +408,7 @@ func (a *App) liveFlatTranscript(c *ui.Context, t *design.Tokens, snap *state.Sn
 			}
 		}
 	}
+	a.turnMark(c, t, snap, currentTurnUserMsgID)
 	return turns
 }
 

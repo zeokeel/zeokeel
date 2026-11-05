@@ -132,6 +132,20 @@ const (
 	ReasonInterrupted StatusReason = "interrupted"
 )
 
+// TurnEnd closes one turn for the per-turn transcript marker. It is recorded at
+// the same place the terminal Status is written, so a reopened session can show
+// which historical turns were stopped, failed or interrupted instead of only the
+// latest one. Completed turns need no marker and are not recorded.
+type TurnEnd struct {
+	TurnID string
+	// UserMsgID anchors the marker to the user message that opened the turn;
+	// the Chat transcript renders the marker at the end of that turn's group.
+	UserMsgID string
+	Reason    StatusReason
+}
+
+func (TurnEnd) isEvent() {}
+
 // Status sets the session phase. Status is the only event that changes
 // Snapshot.Phase. Reason is set on a terminal Status to explain how the latest
 // turn ended; the zero value keeps older events and normal completions

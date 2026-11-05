@@ -33,7 +33,7 @@
   - **caret 记录的框架限制**：mygo 在 composer 上方插入派生弹层时会重建编辑器元素、选区回落到文末；`recordComposerCaret` 用「draft 未变且 caret 落到文末」判定并回写原 caret（native-ui.md §19.5），真机 IME 组合期的极端 caret 行为仍需人工冒烟。
 - **文本选择**：消息与工具卡中的 Markdown 内容（正文/代码）可选中并右键复制（mygo markdown）；其余 UI 文本未全量开启选择（侧栏、按钮、标题、设置说明等），桌面应用一般也不需要。
 - **Trajectory**：已虚拟化（ui.List，1000 事件稳态帧 22.7ms→3.12ms，见 perf.md §8）；`FollowEnd=false` 为当前选择，若产品要"日志式跟随末尾"改一处即可。
-- **工具输出**：超大工具结果 40 行封顶 + 展开，未虚拟化（当前规模可接受）；工具结果代码块语言映射为简化集合（bash/text 等）。
+- **工具输出**：超大工具结果 40 行封顶 + 展开，未虚拟化（当前规模可接受）；工具结果代码块语言映射为简化集合（bash/text 等）。超过 32KB 的工具结果在持久化时溢写到 workspace `.zeokeel/tool-results/`（见 §5 运行中统计），工具卡显示摘要与路径，完整内容可用编辑器打开；清理策略为每 workspace 保留最近 100 份，无 UI 内打开按钮（用文件面板/编辑器打开）。
 
 ## 3.5 已修复的评审判定项（保留记录）
 
@@ -62,7 +62,7 @@
 - 与 DSH 的"功能对齐"是**行为与能力对齐**，不是逐像素/逐交互复刻；DSH 版本升级后不做视觉同步，功能差异以 `docs/FUNCTIONAL-PARITY.md` 为准。
 - **平台与 shell 工具**（[ADR 0009](../../docs/decisions/0009-platform-shell-stacks.md)）：shell 栈按平台门控（Windows 仅 `pwsh`、POSIX 仅 `bash`，对齐 DSH「每台机器一套 shell 栈」）；POSIX 构建不再暴露 `pwsh` 工具、Windows 构建不再暴露 `bash`。未集成 Git Bash/WSL（如需要可后续用自定义 shell 栈/profile 扩展）。Windows 终端为管道回退（PTY 仅 Unix），默认 shell 优先探测 `pwsh`、缺失回退 `%COMSPEC%`/cmd.exe；`terminal_signal` 描述仍沿用 POSIX 措辞（低风险）。Windows 子进程控制台已隐藏（[ADR 0011](../../docs/decisions/0011-windows-hidden-console.md)）。
 - **审批范围**（[ADR 0010](../../docs/decisions/0010-approval-scope.md)）：Workspace Write 默认只审批能逃逸工作区沙箱/有工作区外副作用的工具（shell/terminal/job/worktree/web/MCP）；workspace 内的文件写由沙箱边界保证、不再逐次审批；`str_replace_editor view` 等只读调用永不审批；Auto review EXP 保留更宽的模型复核范围。需要逐次文件审批可把 `approval.tools` 设回旧列表或 `*`。
-- **运行中统计/中断状态**（[ADR 0014](../../docs/decisions/0014-usage-lifecycle-contract.md)）：Usage 为会话累计并实时下发；Stop/失败/崩溃/重开有终态 Reason 与工具收尾。仍存在：Status.Reason 只保留最近回合（逐轮 stopped 标记待 P1）、取消瞬间 trailing usage chunk 可能丢 1 次调用计数（语义可接受）、footer 全 0 隐藏时保留 24 DIP 行高。
+- **运行中统计/中断状态**（[ADR 0014](../../docs/decisions/0014-usage-lifecycle-contract.md)）：Usage 为会话累计并实时下发；Stop/失败/崩溃/重开有终态 Reason 与工具收尾。逐轮终态标记已持久化（`turn_end` 事件 + `Snapshot.TurnMarks`，Chat 按 user 消息锚点在每个历史回合末尾显示「已停止/已中断/本轮失败」，重开回放，旧会话回退为只显示最后回合）。软预算 advisory（默认 25/50/100 steps、200K/500K tokens，只提醒不硬停）可由 `plugin.agent_loop.budget_warn_steps` / `budget_warn_tokens` 配置（空=默认、0/off=关闭）。大工具结果（>32KB，含 CJK）在 session 持久化时落盘到 workspace `.zeokeel/tool-results/<call>.txt`，持久化/下一轮 history 只发摘要+路径+前 2KB，保留最近 100 份（写失败回退原文；默认 workspace 无 root 时同样回退）。仍存在：取消瞬间 trailing usage chunk 的修复只覆盖已收到 usage 样本的调用（无样本不计数）；footer 全 0 隐藏时保留 24 DIP 行高；spill 只影响会话持久化/下一轮，不改变当前轮模型已收到的完整结果。
 - 构建产物统一 `dist/`（[ADR 0012](../../docs/decisions/0012-build-output-layout.md)）：仓库根/包目录不保留二进制；`make build` / `make package-windows` 固定命名，`make clean` 只清构建产物。
 - 纯 Go/no-cgo 边界：插件只内置、无第三方插件市场/运行时；无内核级沙箱（策略 + 审批 + 审计）。这些是产品级既定边界，不随 UI 改造改变。
 - 打包/签名/自动更新未在本轮重新验证（`dist/` 与交叉编译脚本另见 CI）。

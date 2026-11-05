@@ -26,6 +26,10 @@ const (
 	// Replay uses it to drop the pending question instead of resurrecting it
 	// from the original tool_end row.
 	EventQuestionAnswered = "question_answered"
+	// EventTurnEnd records one turn's terminal reason; it is what lets the Chat
+	// transcript mark historical stopped/failed/interrupted turns after a
+	// reopen. Payload JSON, so no store schema change is needed.
+	EventTurnEnd = "turn_end"
 )
 
 // questionAnsweredPayload is the resolution row for one ask_user call.
@@ -84,6 +88,12 @@ type usagePayload struct {
 	CacheHit   int     `json:"cache_hit"`
 	ContextPct float64 `json:"context_pct,omitempty"`
 	Advisory   string  `json:"advisory,omitempty"`
+}
+
+type turnEndPayload struct {
+	TurnID    string `json:"turn_id,omitempty"`
+	UserMsgID string `json:"user_msg_id,omitempty"`
+	Reason    string `json:"reason"`
 }
 
 type statusPayload struct {
@@ -220,6 +230,13 @@ func encodeEvent(ev state.Event) (store.Event, error) {
 			ContextPct: e.ContextPct,
 			Advisory:   e.Advisory,
 		}
+	case state.TurnEnd:
+		typ = EventTurnEnd
+		payload = turnEndPayload{
+			TurnID:    e.TurnID,
+			UserMsgID: e.UserMsgID,
+			Reason:    string(e.Reason),
+		}
 	case state.Status:
 		typ = EventStatus
 		payload = statusPayload{Phase: string(e.Phase), Reason: string(e.Reason)}
@@ -298,6 +315,16 @@ func decodeEvent(rec store.Event) (ev state.Event, ok bool) {
 			CacheHit:   p.CacheHit,
 			ContextPct: p.ContextPct,
 			Advisory:   p.Advisory,
+		}, true
+	case EventTurnEnd:
+		var p turnEndPayload
+		if json.Unmarshal(rec.Payload, &p) != nil {
+			return nil, false
+		}
+		return state.TurnEnd{
+			TurnID:    p.TurnID,
+			UserMsgID: p.UserMsgID,
+			Reason:    state.StatusReason(p.Reason),
 		}, true
 	case EventStatus:
 		var p statusPayload
