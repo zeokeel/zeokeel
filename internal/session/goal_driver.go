@@ -217,6 +217,12 @@ func (d *GoalRoundDriver) limit(c *Controller, sessionID string) int {
 // turn. An empty objective is treated as no goal even if the status says
 // active.
 func goalContinuable(goal *tools.Goal) bool {
+	// A paused or blocked goal keeps its objective and stays visible, but the
+	// user explicitly asked for no more automatic turns until it is resumed
+	// (FP-04 /goal pause|block).
+	if goal != nil && (goal.Phase == tools.GoalPhasePaused || goal.Phase == tools.GoalPhaseBlocked) {
+		return false
+	}
 	if goal == nil || goal.Status != tools.GoalActive {
 		return false
 	}

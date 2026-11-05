@@ -459,6 +459,20 @@ func (c *Controller) turnAttachmentInputs(sessionID string) ([]store.Attachment,
 				Name:  a.Name,
 				Image: &runtime.ImagePart{URL: url, Detail: "auto"},
 			})
+		case store.AttachmentKindFile:
+			// Binary/large attachment: the stored read-only copy is referenced by
+			// path instead of being inlined or silently dropped (FP-14). The
+			// model reads it on demand with read_file/read_image.
+			path := strings.TrimSpace(a.Path)
+			if path == "" {
+				continue
+			}
+			inputs = append(inputs, runtime.UserAttachment{
+				Name: a.Name,
+				Path: path,
+				MIME: normalizeMIME(a.MIME),
+				Size: a.Size,
+			})
 		}
 	}
 	return rows, inputs

@@ -53,7 +53,30 @@
 - **AR-02 CI/门禁**：新增 `.github/workflows/ci.yml`（本地与 CI 同用 `scripts/ci.sh`；race 覆盖 state/session/tools/runtime/store/agentteam/app，shell 单独 job `-timeout 20m`）；coverage 写 `.cache/coverage.out` 作为 artifact；`scripts/evolve/gates.sh` 的 flaky 重跑改为失败。
 - **AR-03 版本注入/打包**：见 §5 构建条目；`package-linux`/`package-macos` 新增，Windows 行为不变。
 - **RT-01/RT-06/RT-08**：workspace MCP 默认不执行（§5）、无整体超时 + 流空闲/重试设置（§5）。
-- **迁移定位（PD-04）**：产品文案由"DSH 桌面替代/迁移器"降级为"DSH 同类替代"；最小导入器开发中（`internal/importer` 初版已能读 DSH `sessions/**/session.v4.jsonl[.zstd]` 与 credentials 键名并写 store；CLI/UI 未接线），落地前不宣称支持迁移。
+- **迁移定位（PD-04）**：产品文案由"DSH 桌面替代/迁移器"降级为"DSH 同类替代"；最小导入器已交付（技术预览）：`internal/importer` 读取 DSH `sessions/**/session.v4.jsonl[.zstd]` 与 credentials **键名**（值永不读取），写 ZeoKeel store；`zeokeel import [--from] [--dry-run] [--json] [--max]` 已接 CLI（退出码 0/1/2，`--json` 输出 report）。
+**导入范围（先说清楚）**：只导入**文本对话**（用户/assistant 文本与 reasoning）；工具调用/工具结果以合成文本行计数、不落 tool_calls；图片/附件/profile/storage/trajectory/usage 不导入；subagent 子会话默认跳过（`--include-subagents` 可含）；凭据只列键名，需在设置里重填 API key。
+**导入质量（wave2 importer 已补一部分）**：① DSH 注入上下文过滤 ✅（`SkipSystemInjected`，source.kind != user 不再变用户气泡）；② assistant step 过滤 ✅（`SkipStepAssistant`，无可见文本的 step 消息不落库）；③ 幂等 ✅（`--manifest` 默认 `<数据目录>/dsh-import-manifest.json`，按源文件 hash/size/mtime 跳过；`--no-manifest` 可退回全量重导）；④ 图片统计 ✅（`images_dropped`）；⑤ skip 原因分解 ✅（`skips` 按 subagent/system_injected/step_assistant/unsupported_version/idempotent/...）；⑥ header version 守卫 ✅（未来版本显式跳过）。**仍缺**：设置页「从 DSH 导入」UI 入口、app 运行中导入检测 `instance.lock`、图片/附件对象迁移、独立复验（原先的 FIX-VERIFY-PRODUCT 结论基于旧 importer）。
+
+## 3.8 wave 1/2 独立验证残余（2026-11-05）
+
+独立验证（`docs/audit/FIX-VERIFY-BACKEND.md`、`FIX-VERIFY-UI.md`、`FIX-VERIFY-PRODUCT.md`）确认 wave1 P0/P1 主体成立，以下残余仍在 BUGS.md 跟踪：
+
+- **RT-01 三个残留**：workspace MCP 被忽略时的提示文案可能误导；Creator 的 `settings_set` 通道曾写 `mcp.*`（已加写白名单，需回归保持）；MCP 启动日志 args 可能含 secret（已 redact，需回归保持）。
+- **UX-04**：打开/移动设置窗后主窗口 popover 残留不重绘（state 已清，`win.Invalidate()` 不足以让 mygo 出帧）。
+- **About 双版本号**：`shell.BuildVersionString()` 已显示真实 build，但 `about.version` 硬编码 `version 0.1.0` 仍并存。
+- **PD-02b**：无 key 的本地 provider（Ollama 预设）可保存但发送被判"未配置"。
+- **PD-04 导入质量 5 项**：注入上下文过滤、step 聚合、幂等、图片统计、UI 入口（见 §3.7 与 `FIX-VERIFY-PRODUCT.md` §2.6）。
+
+## 3.9 wave 2 残余与延期（2026-11-05）
+
+- **FP-16 ask_user 仍非阻塞**：回答作为下一轮用户消息（`internal/tools/ask_user.go:91` 注释：工具内阻塞会死锁回合）。阻塞式需要 interrupt/resume 语义，DEFERRED。
+- **FP-11 checkpoint 屏障恢复**：屏障可写入、fail-closed 成立；但没有恢复 consumer——`requested`/`tool_pending` checkpoint 不被读取，恢复仍走 History/tool_calls（FIX-VERIFY-CORE2）。PARTIAL。
+- **RT-10/逐 token 持久化**：已改为批量写（`eventBatchMaxBytes=8KB`、`eventBatchMaxDelay=200ms`，`internal/session/event_batch.go`）——**崩溃恢复窗口 ≤8KB/200ms** 的流事件，非流事件强制 flush；snapshot 每 token O(n) 拷贝（AR-22）与 events 保留策略仍待后续。
+- **FP-17 skills 多 root**：当前仍单 root（`skills.root` 或 workspace `skills/`），多 root/项目级技能目录未落地。
+- **UX-04 设置窗重绘**：打开/移动设置窗后主窗口 popover 残留（state 已清、不重绘）；受 mygo 出帧机制限制，PARTIAL。
+- **About 版本**：已统一为 `shell.BuildVersionString()` 单一来源（删除硬编码 `version 0.1.0` 与 `pluginProductVersion`）；预览已按新文案重生成。
+- **RT-04 / AR-04 / AR-09 / AR-22 大项**：per-session Agent、shell 分层、schema v2、快照优化 DEFERRED（理由见 FIX-PLAN §7）。
+- **预览金标**：22 张已按 wave1+wave2 UI 重生成（含设置窗 900×840）并回归 PASS（14 屏/1.9s）。
 
 ## 4. 视觉回归策略（v1.1：opt-in 回归工具）
 

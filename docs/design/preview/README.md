@@ -73,5 +73,9 @@ ZEOKEEL_UPDATE_PREVIEWS=1 go test -count=1 -run 'TestRender.*NativePreview' ./in
 ZEOKEEL_VISUAL=1 go test -count=1 -run TestVisualRegression ./internal/shell
 ```
 
-- 结果：待本轮修复批次完成后执行并回填（预期 22 张刷新、`TestVisualRegression` PASS）。
-- 注意：设置窗口从 900×720 改为 900×840 后，`settings-window-native-{light,dark}.png` 必须重生成，否则本目录的尺寸说明与图不一致。
+- 结果（2026-11-05 23:53，worktree = wave1 提交 + 全部 wave2 UI 修复；**22 张均为当前代码生成**）：
+  - `ZEOKEEL_UPDATE_PREVIEWS=1 go test -count=1 -run 'TestRender.*NativePreview' ./internal/shell` → **ok，5.3s（缓存热）/12.2s（首跑），22 张 PNG 全部重写**（`git status` 22 个 `M`）。
+  - `ZEOKEEL_VISUAL=1 go test -count=1 -run TestVisualRegression ./internal/shell` → **PASS，14 屏，1.9s**（阈值 2%）。
+  - `settings-window-native-{light,dark}.png` 现为 **900×840**（与 `internal/app/settings_window.go:222-223` 一致；渲染夹具用共享常量 `settingsWindowPreviewW/H`，`internal/shell/settings_ui_test.go:17-24`）；`identify` 校验尺寸通过。
+  - 变化来源：wave1/wave2 UI 修复（空态、toast/错误态、设置补页 通知/数据隐私/诊断/网络/桌面/更新、Automation 历史、MCP/Skills/AGENTS 管理页、About 版本单一来源、popover 统一、设置窗 840 等）——属**预期漂移**，已人工确认新图与当前 UI 一致后提交。
+- 复现：`make previews`（写金标）与 `make visual-check`（只读回归）封装了上述两条命令。

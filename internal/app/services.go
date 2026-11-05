@@ -6,7 +6,9 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io/fs"
 	"log"
+	"net"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -212,6 +214,17 @@ func (h *storeHistory) Messages(ctx context.Context, sessionID string) ([]runtim
 			url := "data:" + a.MIME + ";base64," + base64.StdEncoding.EncodeToString(data)
 			attachmentInputs[a.MessageID] = append(attachmentInputs[a.MessageID],
 				runtime.UserAttachment{Name: a.Name, Image: &runtime.ImagePart{URL: url, Detail: "auto"}})
+		case store.AttachmentKindFile:
+			// Binary/large attachment: the stored read-only copy is referenced
+			// by path, exactly like the live turn sends it (FP-14). Without
+			// this branch a replayed turn silently dropped the file, so the
+			// model lost context the user had attached.
+			path := strings.TrimSpace(a.Path)
+			if path == "" {
+				continue
+			}
+			attachmentInputs[a.MessageID] = append(attachmentInputs[a.MessageID],
+				runtime.UserAttachment{Name: a.Name, Path: path, MIME: normalizeAttachmentMIME(a.MIME), Size: a.Size})
 		}
 	}
 
@@ -261,6 +274,20 @@ func (h *storeHistory) Messages(ctx context.Context, sessionID string) ([]runtim
 		emitCall(calls[cursor])
 	}
 	return out, nil
+}
+
+// normalizeAttachmentMIME mirrors the session attachment normalization: strip
+// parameters, lowercase, and default to application/octet-stream, so a
+// replayed file attachment carries the same MIME the live turn sent.
+func normalizeAttachmentMIME(mediaType string) string {
+	if i := strings.IndexByte(mediaType, ';'); i >= 0 {
+		mediaType = mediaType[:i]
+	}
+	mediaType = strings.ToLower(strings.TrimSpace(mediaType))
+	if mediaType == "" {
+		return "application/octet-stream"
+	}
+	return mediaType
 }
 
 // Append is intentionally read-only. See storeHistory's comment: the
@@ -468,6 +495,41 @@ func settingInt(get func(key, env, def string) string, key, env string, def, min
 	return n
 }
 
+// keylessLocalProvider reports whether baseURL points at a local or private
+// network endpoint that typically needs no API key (Ollama, llama.cpp, LM Studio,
+// vLLM). Malformed or public URLs report false, so a missing key there still
+// means "no model configured".
+func keylessLocalProvider(baseURL string) bool {
+	parsed, err := url.Parse(strings.TrimSpace(baseURL))
+	if err != nil || parsed.Host == "" {
+		return false
+	}
+	host := strings.ToLower(parsed.Hostname())
+	switch host {
+	case "localhost", "localhost.localdomain", "host.docker.internal", "gateway.docker.internal":
+		return true
+	}
+	ip := net.ParseIP(host)
+	if ip == nil {
+		return false
+	}
+	return ip.IsLoopback() || ip.IsPrivate() || ip.IsLinkLocalUnicast()
+}
+
+// skillsRootsAvailable reports whether any skill root of the configured layout
+// exists as a directory. A custom skills.root keeps exactly that one root;
+// the default "<workspace>/skills" layout also covers the project-local and
+// user roots, so a user-level skill catalog still works in a workspace without
+// its own skills/ directory (FP-17).
+func skillsRootsAvailable(configuredRoot string) bool {
+	for _, root := range skills.RootsFor(configuredRoot) {
+		if info, err := os.Stat(root); err == nil && info.IsDir() {
+			return true
+		}
+	}
+	return false
+}
+
 // Context budget defaults. The budget is the approximate prompt size in tokens
 // (estimated as chars/4) above which the runtime compacts the prior
 // conversation. 24000 is the historical fixed value and stays the fallback when
@@ -592,6 +654,10 @@ func registerAllToolsWithOptions(st *store.Store, root string, get func(key, env
 		}
 		return def
 	}
+	// The outbound proxy setting reaches every tool this registry builds
+	// (web_fetch), so it is applied before the first tool constructor runs.
+	networkProxy := networkProxyFromSetting(read)
+	tools.SetNetworkProxy(networkProxy)
 	permission := permissionMode(st)
 	if opts.PermissionOverride != "" {
 		permission = opts.PermissionOverride
@@ -784,7 +850,11 @@ func registerAllToolsWithOptions(st *store.Store, root string, get func(key, env
 			maxResults, _ = strconv.Atoi(read("websearch.max_results", "ZEOKEEL_WEBSEARCH_MAX_RESULTS", ""))
 		}
 		apiKey2 := read("websearch.api_key", "ZEOKEEL_WEBSEARCH_API_KEY", read("web_search.api_key", "ZEOKEEL_WEB_SEARCH_API_KEY", ""))
-		wt, werr := websearch.New(websearch.Config{Endpoint: endpoint, APIKey: apiKey2, MaxResults: maxResults})
+		searchConfig := websearch.Config{Endpoint: endpoint, APIKey: apiKey2, MaxResults: maxResults}
+		if networkProxy != nil {
+			searchConfig.HTTPClient = webSearchProxyHTTPClient(networkProxy)
+		}
+		wt, werr := websearch.New(searchConfig)
 		if werr != nil {
 			return nil, nil, fmt.Errorf("build web_search: %w", werr)
 		}
@@ -794,10 +864,18 @@ func registerAllToolsWithOptions(st *store.Store, root string, get func(key, env
 	}
 
 	// Skills: every <skills.root>/<name>/SKILL.md is a built-in capability.
+	// The default workspace layout expands to the project, project-local and
+	// user roots (FP-17); the skill tool rescans them on change.
 	skillsDir := read("skills.root", "ZEOKEEL_SKILLS_ROOT", filepath.Join(root, "skills"))
-	if info, serr := os.Stat(skillsDir); serr == nil && info.IsDir() && pluginOn("skills", true) {
+	if pluginOn("skills", true) && skillsRootsAvailable(skillsDir) {
 		skillTool, skillErrs := skills.NewTolerant(skillsDir)
 		for _, serr := range skillErrs {
+			// A missing primary root is expected in the multi-root layout (a
+			// workspace without skills/ but with user-level skills); it is not
+			// a diagnostic.
+			if errors.Is(serr, fs.ErrNotExist) {
+				continue
+			}
 			log.Printf("zeokeel: skills: %v", serr)
 		}
 		_ = reg.Register(skillTool)
@@ -870,11 +948,21 @@ func buildAgentWithOptions(st *store.Store, root, instruction string, opts regis
 		}
 		return def
 	}
+	// One network.proxy setting configures the provider, web_search and
+	// web_fetch (FP-19). Empty keeps each client's environment/default
+	// behavior; the tool registry reads the configured URL process-wide.
+	networkProxy := networkProxyFromSetting(get)
+	tools.SetNetworkProxy(networkProxy)
+	baseURL := get("provider.base_url", "ZEOKEEL_PROVIDER_BASE_URL", openai.DefaultBaseURL)
+	// An API key is required except for local/loopback providers (Ollama,
+	// llama.cpp, LM Studio, vLLM): those servers accept unauthenticated
+	// requests, and the DSH parity target lets users run them without a key.
+	// Without this a saved local provider badge said "configured" while Send
+	// reported "no agent" and rolled the turn back (PD-02).
 	apiKey := get("provider.api_key", "DEEPSEEK_API_KEY", "")
-	if apiKey == "" {
+	if apiKey == "" && !keylessLocalProvider(baseURL) {
 		return nil, nil
 	}
-	baseURL := get("provider.base_url", "ZEOKEEL_PROVIDER_BASE_URL", openai.DefaultBaseURL)
 	model := get("provider.model", "ZEOKEEL_PROVIDER_MODEL", openai.DefaultModel)
 	reasoningEffort := get("provider.reasoning_effort", "", "")
 	// Zero (the default) means no overall request deadline: streaming a long
@@ -903,7 +991,7 @@ func buildAgentWithOptions(st *store.Store, root, instruction string, opts regis
 		MaxDelay:     time.Duration(retryMaxMs) * time.Millisecond,
 		JitterRatio:  0.1,
 	}
-	prov, err := openai.New(openai.Config{
+	providerConfig := openai.Config{
 		BaseURL:           baseURL,
 		APIKey:            apiKey,
 		Model:             model,
@@ -911,7 +999,11 @@ func buildAgentWithOptions(st *store.Store, root, instruction string, opts regis
 		Timeout:           time.Duration(requestTimeout) * time.Second,
 		StreamIdleTimeout: time.Duration(streamIdleSeconds) * time.Second,
 		Retry:             retry,
-	})
+	}
+	if networkProxy != nil {
+		providerConfig.HTTPClient = providerProxyHTTPClient(networkProxy)
+	}
+	prov, err := openai.New(providerConfig)
 	if err != nil {
 		return nil, fmt.Errorf("build provider: %w", err)
 	}
@@ -969,10 +1061,14 @@ func buildAgentWithOptions(st *store.Store, root, instruction string, opts regis
 	if permission == session.PermissionAutoReview {
 		reviewProvider := runtime.Provider(prov)
 		zero := float32(0)
-		if p, perr := openai.New(openai.Config{
+		reviewConfig := openai.Config{
 			BaseURL: baseURL, APIKey: apiKey, Model: model, Temperature: &zero,
 			Retry: &openai.RetryPolicy{MaxRetries: 0},
-		}); perr == nil {
+		}
+		if networkProxy != nil {
+			reviewConfig.HTTPClient = providerProxyHTTPClient(networkProxy)
+		}
+		if p, perr := openai.New(reviewConfig); perr == nil {
 			reviewProvider = p
 		} else {
 			log.Printf("zeokeel: auto review provider: %v", perr)
@@ -1009,7 +1105,7 @@ func buildAgentWithOptions(st *store.Store, root, instruction string, opts regis
 	skillsDir := ""
 	if pluginEnabled(st, "skills", true) {
 		candidate := get("skills.root", "ZEOKEEL_SKILLS_ROOT", filepath.Join(root, "skills"))
-		if info, serr := os.Stat(candidate); serr == nil && info.IsDir() {
+		if skillsRootsAvailable(candidate) {
 			skillsDir = candidate
 		}
 	}
@@ -1231,8 +1327,13 @@ func composeInstructionForModesWithMemories(st *store.Store, root, cwd string, r
 	names = runtime.ModeTools(agentMode, names)
 	var skillNames []string
 	if strings.TrimSpace(skillsDir) != "" {
-		loaded, errs := skills.LoadTolerant(skillsDir)
+		// The prompt catalog must match the skill tool, which loads every root
+		// of the default layout (project + .zeokeel + user, FP-17).
+		loaded, errs := skills.LoadRootsTolerant(skills.RootsFor(skillsDir))
 		for _, err := range errs {
+			if errors.Is(err, fs.ErrNotExist) {
+				continue
+			}
 			log.Printf("zeokeel: skills: %v", err)
 		}
 		for _, sk := range loaded {

@@ -318,6 +318,29 @@ func TestAppSettingsActionFallsBackToOverlay(t *testing.T) {
 	}
 }
 
+// TestSettingsWindowShowHideRepaints is the UX-04 regression: opening or
+// hiding the separate Settings window repaints immediately, so a popover that
+// was open in the main window cannot stay frozen on screen.
+func TestSettingsWindowShowHideRepaints(t *testing.T) {
+	manager := newFakeSettingsWindows()
+	a := &app{settingsWindows: manager}
+	shellApp := &shell.App{}
+	a.initSettingsWindow(shellApp.SettingsView, shellApp.SettingsWindowTitle)
+
+	if !a.showSettingsWindow() {
+		t.Fatal("showSettingsWindow reported the window unavailable")
+	}
+	_, _, _, afterShow := manager.window(0).counts()
+	if afterShow == 0 {
+		t.Fatal("opening the settings window did not repaint")
+	}
+	a.hideSettingsWindow()
+	_, _, _, afterHide := manager.window(0).counts()
+	if afterHide <= afterShow {
+		t.Fatalf("hiding the settings window did not repaint (invalidations %d -> %d)", afterShow, afterHide)
+	}
+}
+
 // TestRefreshWindowsInvalidatesBoth covers the state-sync hook: a setting saved
 // in the settings window repaints the main window too, and a missing main
 // window (headless or early startup) is not a panic.

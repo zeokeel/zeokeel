@@ -2,7 +2,7 @@
 
 **ZeoKeel：纯 Go 桌面 AI Agent。mygo 原生 UI + eino 运行时。功能对齐 DSH（DeepSeek Harness），视觉与交互自有（mygo 原生设计 + ZeoKeel 品牌）。**
 
-产品定位：**DSH 同类替代**（独立品牌桌面 Agent），**不是**已可用的迁移器——DSH 会话导入仍在开发中（`internal/importer` 初版，CLI/UI 未接线；见 [docs/BUGS.md](docs/BUGS.md) PD-04）。
+产品定位：**DSH 同类替代**（独立品牌桌面 Agent），**不是**已可用的迁移器。当前提供**最小导入（技术预览）**：`zeokeel import [--from <dsh-home>] [--dry-run] [--json]` 把 DSH 会话的**文本对话**导入 ZeoKeel——只读 DSH、凭据只读键名；工具调用/图片/附件/trajectory 不导入，subagent 会话默认跳过；建议先 `--dry-run`。设置页 UI 入口与导入质量增强待 wave3，详见 [docs/BUGS.md](docs/BUGS.md) PD-04 与 [独立验证 §2](docs/audit/FIX-VERIFY-PRODUCT.md)。
 
 > 品牌资产只使用 `logo/` 下的 SVG，不自行猜测或重绘。插件只做内置（无第三方安装/市场）。
 >
@@ -36,7 +36,7 @@
 
 `sh scripts/build.sh <target>` 支持 `native` / `linux-amd64` / `linux-arm64` / `darwin-amd64` / `darwin-arm64` / `windows` / `all` / `package-windows` / `package-linux` / `package-macos` / `clean` / `check` / `help`。打包总览见 [packaging/README.md](packaging/README.md)；各平台安装说明见 `packaging/{windows,linux,macos}/`。
 
-**版本与诊断**：构建用 `-ldflags "-s -w -X main.version/commit/buildTime"` 注入版本并剥离符号（产物约 -32%），默认值来自 `git describe`/`git rev-parse`，可用 `ZEOKEEL_VERSION` 等覆盖。`zeokeel --version` 打印三项 + 平台/工具链；`zeokeel run [--json] [--yes] "<prompt>"` 无窗口跑一条 prompt（headless CLI，退出码 0/1/2，`run --help` 看全量参数）；日志写 `<数据目录>/logs/app-YYYYMMDD.log`（8MiB 轮转、跨天换文件、0600），panic 写 `logs/crash-*.txt`，`debug.SetCrashOutput` 捕获致命崩溃（Windows GUI 构建也生效）。
+**版本与诊断**：构建用 `-ldflags "-s -w -X main.version/commit/buildTime"` 注入版本并剥离符号（产物约 -32%），默认值来自 `git describe`/`git rev-parse`，可用 `ZEOKEEL_VERSION` 等覆盖。`zeokeel --version` 打印三项 + 平台/工具链；`zeokeel run [--json] [--yes] "<prompt>"` 无窗口跑一条 prompt（headless CLI，退出码 0/1/2，`run --help` 看全量参数）；`zeokeel import [--from <dsh-home>] [--dry-run] [--json] [--manifest <file>]` 迁移 DSH 会话（默认幂等 manifest，重复运行跳过未变会话）（只读 DSH；凭据只列键名、不读值；建议先 `--dry-run`）；`sh scripts/check-clean-checkout.sh` 校验提交树（非工作树）可构建；日志写 `<数据目录>/logs/app-YYYYMMDD.log`（8MiB 轮转、跨天换文件、0600），panic 写 `logs/crash-*.txt`，`debug.SetCrashOutput` 捕获致命崩溃（Windows GUI 构建也生效）。
 
 **Windows 可执行文件图标**：`logo/zeokeel.ico`（由 `logo/logo.svg` 生成，含 256/128/64/48/32/16 多尺寸）经 `cmd/zeokeel/resource_windows_amd64.rc` + MinGW `windres` 编译为已提交的 `cmd/zeokeel/resource_windows_amd64.syso`，`go build` 会自动把它嵌入 exe（Explorer/任务栏图标）。修改 icon 后运行 `sh scripts/gen-windows-resource.sh`（或 `make icon`）重新生成；`make windows` 在源文件较新且 `x86_64-w64-mingw32-windres` 存在时也会自动重生成。
 

@@ -20,10 +20,6 @@ import (
 	"github.com/zeokeel/zeokeel/internal/session"
 )
 
-// pluginProductVersion is the version the About surfaces report. It matches
-// the DSH baseline's "Current version" and the catalog's about.version.
-const pluginProductVersion = "0.1.0"
-
 // settingsTabAbout is the Settings > About page. It is declared here because
 // models_ui.go (which owns the settingsTab type) is outside this change's
 // ownership; the value simply follows the last existing tab.
@@ -440,7 +436,7 @@ func (a *App) pluginAboutDialog(c *ui.Context, t *design.Tokens) {
 			nativeText(c, design.TypeXS, t.LabelSecondary, a.pluginLocalized(
 				"Toggles and per-plugin settings are stored in the local configuration database and apply from the next turn.",
 				"开关和每个插件的设置保存在本地配置数据库中，并在下一轮生效。"))
-			nativeText(c, design.TypeXXS, t.LabelTertiary, a.T("about.version"))
+			nativeText(c, design.TypeXXS, t.LabelTertiary, BuildVersionString())
 			ui.Row(c).Justify(ui.End).Children(func() {
 				if ui.Button(c, a.T("menu.close")).Clicked() {
 					st.aboutOpen = false
@@ -668,7 +664,7 @@ func (a *App) openConfigurationLocation(c *ui.Context) {
 func (a *App) aboutSettingsPage(c *ui.Context, t *design.Tokens) {
 	info, ok := debug.ReadBuildInfo()
 	modulePath := "github.com/zeokeel/zeokeel"
-	moduleVersion := pluginProductVersion
+	moduleVersion := BuildVersion
 	if ok {
 		if info.Main.Path != "" {
 			modulePath = info.Main.Path
@@ -678,16 +674,20 @@ func (a *App) aboutSettingsPage(c *ui.Context, t *design.Tokens) {
 		}
 	}
 	build := fmt.Sprintf("Go %s · %s/%s", goruntime.Version(), goruntime.GOOS, goruntime.GOARCH)
-	details := fmt.Sprintf("ZeoKeel %s (%s)\n%s", pluginProductVersion, moduleVersion, build)
+	details := fmt.Sprintf("ZeoKeel %s\n%s\n%s", BuildVersionString(), moduleVersion, build)
+	// The build identity the host injected (shell.SetBuildInfo): version,
+	// commit and build time from the release build, or the defaults for a
+	// development binary.
+	buildIdentity := BuildVersionString()
 
 	ui.Column(c).Gap(design.Space3).Children(func() {
 		ui.Column(c).Gap(design.Space1).Children(func() {
 			settingsText(c, a.T("menu.about")+" ZeoKeel", design.TypeM, t.LabelPrimary).
 				FontWeight(600)
-			settingsText(c, a.T("about.version"), design.TypeXXS, t.LabelTertiary)
 		})
 		ui.Column(c).Gap(2).Children(func() {
-			settingsText(c, build, design.TypeBody, t.LabelPrimary)
+			settingsText(c, buildIdentity, design.TypeBody, t.LabelPrimary)
+			settingsText(c, build, design.TypeXS, t.LabelSecondary)
 			settingsText(c, modulePath, design.TypeXXS, t.LabelTertiary)
 		})
 		ui.Row(c).Gap(design.Space2).Children(func() {
@@ -713,7 +713,7 @@ func (a *App) aboutSettingsPage(c *ui.Context, t *design.Tokens) {
 					design.TypeXXS, t.LabelPrimary)
 			})
 			copyVersion.OnClick(func() {
-				c.WriteClipboard(pluginProductVersion)
+				c.WriteClipboard(BuildVersionString())
 				c.Toast(a.pluginLocalized("Version copied", "版本已复制"))
 			})
 			copyBuild := ui.Row(c).Height(28).PaddingX(10).Radius(design.RadiusSM).

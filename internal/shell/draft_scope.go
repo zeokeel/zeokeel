@@ -17,7 +17,16 @@ func (a *App) draftForSession(id string) string {
 	if a.drafts == nil {
 		a.drafts = make(map[string]string)
 	}
-	return a.drafts[id]
+	if text, ok := a.drafts[id]; ok {
+		return text
+	}
+	// The draft may have been persisted by an earlier run (PD-10): load it
+	// the first time this session's composer asks for its text.
+	if saved := a.shellSetting(draftSettingKey(id), ""); saved != "" {
+		a.drafts[id] = saved
+		return saved
+	}
+	return ""
 }
 
 // saveSessionDraft stores text as one session's draft.
@@ -86,6 +95,7 @@ func (a *App) syncDraftScope() {
 		a.homeDraft = a.draft
 	case Session:
 		a.saveSessionDraft(a.lastDraftSession, a.draft)
+		a.persistDraft(a.lastDraftSession, a.draft)
 	}
 	// Restore the buffer of the surface now shown.
 	switch screen {

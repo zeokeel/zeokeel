@@ -42,7 +42,6 @@ type translation struct {
 // languages; T falls back to the key itself so a missing entry is visible in
 // development rather than silently blank.
 var translations = map[string]translation{
-	"about.version":                                            {"version 0.1.0", "version 0.1.0"},
 	"automation.all":                                           {"All", "全部"},
 	"automation.automation_started":                            {"Automation started", "自动化已开始"},
 	"automation.automation_task_deleted":                       {"Automation task deleted", "自动化任务已删除"},

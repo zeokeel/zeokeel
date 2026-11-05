@@ -19,8 +19,17 @@ import (
 )
 
 func main() {
+	// Hand the ldflags-injected identity to internal/app before anything else
+	// so the About page and Diagnostics render the real version (contract with
+	// internal/shell's build-info API).
+	installBuildInfo()
 	os.Exit(run(os.Args[1:]))
 }
+
+// installBuildInfo copies the main-package build metadata (filled by
+// `-ldflags -X main.version/commit/buildTime`) into internal/app, which
+// forwards it to internal/shell for the About/Diagnostics pages.
+func installBuildInfo() { app.SetBuildInfo(version, commit, buildTime) }
 
 // run is main's testable body: it returns the process exit code instead of
 // calling os.Exit so deferred cleanup (log close, crash write) always runs.

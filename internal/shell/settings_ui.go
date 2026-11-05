@@ -387,6 +387,10 @@ func (a *App) settingsNavLive(c *ui.Context, t *design.Tokens, height float32) {
 					} {
 						a.settingsNavCellLive(c, t, page.label, page.tab, tab, a.settingsTabIcon(page.tab))
 					}
+					for _, page := range a.managementPages() {
+						a.settingsNavCellLive(c, t, page.label, page.tab, tab,
+							a.settingsPageIconForManagement(page.tab))
+					}
 				}
 				if a.Ctrl != nil {
 					a.settingsNavCellLive(c, t, a.T("menu.about"), settingsTabAbout, tab, pluginIconInfo)
@@ -443,6 +447,10 @@ func (a *App) settingsBodyLive(c *ui.Context, t *design.Tokens) {
 					a.desktopSettingsPage(c, t)
 				case settingsTabUpdates:
 					a.updatesSettingsPage(c, t)
+				case settingsTabMCPServers:
+					a.mcpSettingsPage(c, t)
+				case settingsTabSkills:
+					a.skillsSettingsPage(c, t)
 				case settingsTabAbout:
 					a.aboutSettingsPage(c, t)
 				default:
@@ -609,6 +617,14 @@ func (a *App) settingsRowsLive(c *ui.Context, t *design.Tokens) {
 	})
 
 	a.settingsSection(c, t, a.T("settings.advanced"), func() {
+		// Context budget: the token ceiling the runtime warns at before
+		// compacting. Empty means the provider default; the app reads the key
+		// (contract: context.budget_tokens).
+		a.shellTextRow(c, t,
+			a.tr("Context budget", "上下文预算"),
+			a.tr("Approximate token ceiling before compaction, for example 200000. Empty uses the provider default.",
+				"压缩前的近似 token 上限，例如 200000。留空使用服务商默认值。"),
+			"context.budget_tokens", "200000", "", false)
 		desc := a.tr("Not available in this build: no session-log upload endpoint is configured.",
 			"此版本不可用：尚未配置会话日志上传端点。")
 		a.settingsRow(c, t, a.T("settings.upload_session_log"), desc,

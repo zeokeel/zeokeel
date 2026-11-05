@@ -169,7 +169,12 @@ type Snapshot struct {
 	// the latest error for compatibility and for callers that only need it.
 	Errors    []ErrorInfo
 	LastError *ErrorInfo
-	Seq       uint64
+	// WorkspaceChanges is the latest turn's changed-file summary (DSH's
+	// workspace/changes event). WorkspaceChangesTurn names the turn it belongs
+	// to so a UI can tell a stale summary from a fresh one.
+	WorkspaceChanges     []WorkspaceChange
+	WorkspaceChangesTurn string
+	Seq                  uint64
 }
 
 // NewSnapshot returns an empty snapshot in PhaseIdle with a non-nil Tools map.
@@ -311,6 +316,13 @@ func Apply(prev *Snapshot, ev Event) *Snapshot {
 			errors = errors[len(errors)-maxSnapshotErrors:]
 		}
 		next.Errors = errors
+	case WorkspaceChanges:
+		if e.TurnID != "" {
+			next.WorkspaceChangesTurn = e.TurnID
+		}
+		if len(e.Changes) > 0 {
+			next.WorkspaceChanges = append([]WorkspaceChange(nil), e.Changes...)
+		}
 	default:
 		// Event is a closed set; an unknown implementation can only appear via
 		// type embedding. Advance Seq so replay stays aligned, change nothing.

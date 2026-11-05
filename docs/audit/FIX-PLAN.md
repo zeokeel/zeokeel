@@ -145,3 +145,13 @@
 - **verifier-core（task-14）**：独立复核 wave1 未双验项（FP-08/09/11/13/18、AR-18、RT-05、RT-10、FP-10、AR-01/02/03）。
 - **verifier-ui（task-15）**：独立真跑复核 UI/UX wave1 修复（UX-01/02/03/04/05/06/08/09/10/11/13、PD-02/08/09/11/17/18）。
 - **product-auditor（task-16）**：产品面复核 + PD-04 导入器验收（真实 /root/.dsh 只读探测）+ 用户旅程复核。
+
+## wave 2 平台（fix-platform）进度
+
+- [x] `zeokeel import` CLI（`cmd/zeokeel/import_cli.go`：`--from/--dry-run/--json/--max/--include-subagents`，退出码 0/1/2；真实 `/root/.dsh` 只读 dry-run 验证；cmd 测试 7 个）——PD-04 最小导入（技术预览），UI 入口与导入质量 5 项留 wave3（见 BUGS PD-04 / FIX-VERIFY-PRODUCT §2）。
+- [x] 构建信息 cmd 侧：`main()` → `app.SetBuildInfo(version,commit,buildTime)` + `TestInstallBuildInfo`。
+- [x] BUILD-01 守卫：`scripts/check-clean-checkout.sh`（`git archive HEAD` 构建）+ CI gate 步骤 + `make clean-check` + `.gitignore` 收紧 + BUGS 记录。
+- [x] 预览金标重生成（22 张，2026-11-05）+ `TestVisualRegression` PASS；`make previews`/`make visual-check` 目标。
+- [x] `settings-window` 两张已重生成（夹具改共享常量 900×840；`identify` 校验 900×840）+ `TestVisualRegression` PASS。
+- [x] `zeokeel import --manifest/--no-manifest`：importer `Options.ManifestPath` 就绪后已接线（默认 `<数据目录>/dsh-import-manifest.json`，幂等；`--no-manifest` 退回全量重导）+ 测试；并接入 `Skips`/`images_dropped` 文本报告。
+- [x] 工作树 `sh scripts/ci.sh --fast` = **CI PASS**（2026-11-05 23:52，全部包绿：session 252s/shell 68s/app tool/zero-cgo）；clean-checkout 待 Lead 提交 wave2 后跑。

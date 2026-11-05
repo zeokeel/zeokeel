@@ -192,6 +192,10 @@ type App struct {
 	// closeBehaviorOpen is the Desktop page's Close-behavior selector state.
 	closeBehaviorOpen bool
 
+	// startupRestored guards the one-time PD-10 restore of ui.last_session and
+	// its saved composer draft on the first live frame.
+	startupRestored bool
+
 	// SaveSessionLog is the save-dialog seam the session-header download uses
 	// to choose the JSONL export path. Tests inject a fake; nil falls back to a
 	// deterministic file under the workspace root.
@@ -303,6 +307,10 @@ func (a *App) View(c *ui.Context) {
 	// Show a toast a key handler queued while no frame was building, so the
 	// feedback of a command run with Enter is not silently dropped.
 	a.flushDeferredToast(c)
+	// Reopen the last conversation (read-only) and its saved draft once, then
+	// keep the composer draft persisted while the user types (PD-10).
+	a.restoreSessionState()
+	a.flushDraftPersistence(c)
 	// The desktop's preferences come first: ReduceMotion must switch the
 	// frame's animations off before any element is built.
 	a.syncShellPreferences(c)

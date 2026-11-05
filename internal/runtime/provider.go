@@ -25,6 +25,7 @@ package runtime
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"strings"
 )
 
@@ -57,12 +58,19 @@ type ImagePart struct {
 
 // UserAttachment is one file attached to the user turn that is starting. Text
 // is the textual content injected into the prompt (the caller applies the size
-// cap); Image, when set, travels as a multimodal image part. Name is the
-// display name used in the injected text block.
+// cap); Image, when set, travels as a multimodal image part; Path, when set,
+// is a read-only stored copy the model should read with read_file/read_image
+// instead of receiving the bytes inline (FP-14: binary/large attachments).
+// Name is the display name used in the injected text block.
 type UserAttachment struct {
 	Name  string
 	Text  string
 	Image *ImagePart
+	// Path is the absolute path of the stored read-only attachment copy.
+	Path string
+	// MIME and Size describe the stored copy when Path is set.
+	MIME string
+	Size int64
 }
 
 // attachmentNameEscaper escapes the characters that would otherwise break the
@@ -94,12 +102,37 @@ func AttachmentPrompt(text string, attachments []UserAttachment) string {
 	b.WriteString(text)
 	changed := false
 	for _, att := range attachments {
-		if att.Text == "" {
-			continue
-		}
 		name := strings.TrimSpace(att.Name)
 		if name == "" {
 			name = "attachment"
+		}
+		if att.Text == "" && att.Path != "" {
+			// No inline bytes: reference the stored read-only copy and let the
+			// model fetch exactly what it needs. This keeps binary and large
+			// attachments out of the prompt/context entirely.
+			changed = true
+			b.WriteString("\n\n<attachment name=\"")
+			b.WriteString(escapeAttachmentName(name))
+			b.WriteString("\" path=\"")
+			b.WriteString(escapeAttachmentName(att.Path))
+			b.WriteString("\"")
+			if att.MIME != "" {
+				b.WriteString(" mime=\"")
+				b.WriteString(escapeAttachmentName(att.MIME))
+				b.WriteString("\"")
+			}
+			if att.Size > 0 {
+				b.WriteString(" size=\"")
+				b.WriteString(fmt.Sprintf("%d", att.Size))
+				b.WriteString("\"")
+			}
+			b.WriteString(" />\n")
+			b.WriteString("The file itself was not inlined in this message; its read-only copy is at the path above. ")
+			b.WriteString("Read it with read_file, or with read_image when it is an image. Do not modify the stored copy; write any output to the workspace instead.")
+			continue
+		}
+		if att.Text == "" {
+			continue
 		}
 		changed = true
 		b.WriteString("\n\n<attachment name=\"")

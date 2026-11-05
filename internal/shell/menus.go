@@ -113,7 +113,7 @@ func (a *App) aboutDialog(c *ui.Context, t *design.Tokens) {
 			ui.Text(c, "ZeoKeel").FontSize(20).FontWeight(600).TextColor(t.LabelPrimary)
 			ui.Text(c, a.T("menu.pure_go_desktop_ai_agent_mygo_eino")).
 				FontSize(13).TextColor(t.LabelSecondary)
-			ui.Text(c, a.T("about.version")).FontSize(12).TextColor(t.LabelTertiary)
+			ui.Text(c, BuildVersionString()).FontSize(12).TextColor(t.LabelTertiary)
 			ui.Row(c).Justify(ui.End).Padding(design.Space2, 0, 0, 0).Children(func() {
 				if ui.Button(c, a.T("menu.close")).Clicked() {
 					a.aboutOpen = false

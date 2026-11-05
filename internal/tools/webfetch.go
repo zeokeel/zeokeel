@@ -9,7 +9,9 @@ import (
 	"net/http"
 	"net/netip"
 	"net/url"
+	"os"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 )
@@ -22,6 +24,8 @@ const (
 const webFetchDescription = `Fetch a web page over HTTP or HTTPS and return its body as text.
 
 Only http and https URLs are allowed. The request times out after 10 seconds, reads at most 2 MiB, and is truncated to the configured output limit. SSRF protection rejects loopback, private, link-local and other non-public addresses, including on every redirect hop.
+
+The app's network.proxy setting applies here like it does to the model provider and web_search; with no setting, HTTP(S)_PROXY from the environment is honored and a direct connection is used otherwise. When a proxy is configured, the destination host is still resolved and validated locally on every request and redirect; the proxy itself must be trusted user configuration.
 
 Args JSON schema:
 {"type":"object","properties":{"url":{"type":"string","description":"Absolute http or https URL to fetch."}},"required":["url"],"additionalProperties":false}`
@@ -46,12 +50,53 @@ func newWebFetchTool(maxOutput int, allowPrivate bool) *webFetchTool {
 func (t *webFetchTool) Name() string        { return "web_fetch" }
 func (t *webFetchTool) Description() string { return webFetchDescription }
 
+// networkProxy is the process-wide outbound proxy the app configures from the
+// network.proxy setting (FP-19). The zero value (nil URL) means "follow the
+// environment proxy variables, then connect directly", which matches the model
+// provider and web_search. The app calls SetNetworkProxy before every tool
+// registry build, so a setting change applies to the next turn.
+var networkProxy struct {
+	mu  sync.RWMutex
+	url *url.URL
+}
+
+// SetNetworkProxy configures the proxy every web_fetch tool uses. nil restores
+// the environment/default behavior. The URL must be http or https; the app
+// validates the setting before calling this.
+func SetNetworkProxy(proxy *url.URL) {
+	networkProxy.mu.Lock()
+	networkProxy.url = proxy
+	networkProxy.mu.Unlock()
+}
+
+// configuredNetworkProxy returns the explicitly configured proxy, or nil.
+func configuredNetworkProxy() *url.URL {
+	networkProxy.mu.RLock()
+	defer networkProxy.mu.RUnlock()
+	return networkProxy.url
+}
+
+// envProxyConfigured reports whether the environment asks for an HTTP proxy.
+// The fetch tool only takes the environment-proxy path when a setting is
+// absent; the names mirror net/http's ProxyFromEnvironment.
+func envProxyConfigured() bool {
+	for _, name := range []string{"HTTP_PROXY", "HTTPS_PROXY", "http_proxy", "https_proxy"} {
+		if strings.TrimSpace(os.Getenv(name)) != "" {
+			return true
+		}
+	}
+	return false
+}
+
 func (t *webFetchTool) newClient() *http.Client {
+	proxy := configuredNetworkProxy()
+	useProxy := proxy != nil || envProxyConfigured()
 	dialer := &net.Dialer{Timeout: webFetchTimeout}
-	if !t.allowPrivate {
+	if !t.allowPrivate && !useProxy {
+		// Direct connections keep the DNS-rebinding-safe destination check:
 		// Control runs after DNS resolution with the concrete address that is
-		// about to be dialed, which closes the DNS-rebinding gap between URL
-		// validation and the actual connection.
+		// about to be dialed. With a proxy the dialer reaches the proxy, so the
+		// target is validated by validateURL's preflight resolution instead.
 		dialer.Control = func(_, address string, _ syscall.RawConn) error {
 			host, _, err := net.SplitHostPort(address)
 			if err != nil {
@@ -68,15 +113,20 @@ func (t *webFetchTool) newClient() *http.Client {
 		}
 	}
 	transport := &http.Transport{
-		// A proxy would hide the real destination from URL validation, so the
-		// fetch tool connects directly.
-		Proxy:                 nil,
 		DialContext:           dialer.DialContext,
 		ForceAttemptHTTP2:     true,
 		MaxIdleConns:          8,
 		IdleConnTimeout:       30 * time.Second,
 		TLSHandshakeTimeout:   webFetchTimeout,
 		ResponseHeaderTimeout: webFetchTimeout,
+	}
+	switch {
+	case proxy != nil:
+		transport.Proxy = http.ProxyURL(proxy)
+	case useProxy:
+		transport.Proxy = http.ProxyFromEnvironment
+	default:
+		transport.Proxy = nil
 	}
 	return &http.Client{
 		Transport:     transport,

@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"errors"
 	"log"
 	"strings"
 
@@ -31,23 +32,72 @@ func (a *app) observeTurnFinished(outcome session.TurnOutcome) {
 	a.finishAutomationForSession(outcome)
 }
 
-// trackAutomationRun remembers which run a session's turn reports to.
-func (a *app) trackAutomationRun(sessionID, runID string) {
+// automationTerminalState is a turn outcome remembered for a session whose
+// automation run row was not created yet (the turn finished in the tiny window
+// between Submit and CreateAutomationRun).
+type automationTerminalState struct {
+	status  string
+	errText string
+}
+
+// automationTerminal maps one TurnOutcome to the run status/error pair.
+func automationTerminal(outcome session.TurnOutcome) automationTerminalState {
+	switch {
+	case outcome.Stopped:
+		return automationTerminalState{status: store.AutomationRunStopped}
+	case outcome.Failed:
+		errText := strings.TrimSpace(outcome.Error)
+		if errText == "" {
+			errText = "turn failed"
+		}
+		return automationTerminalState{status: store.AutomationRunFailed, errText: errText}
+	default:
+		return automationTerminalState{status: store.AutomationRunCompleted}
+	}
+}
+
+// markAutomationPending records that a turn was submitted for sessionID before
+// its run row exists, so a turn that finishes immediately still finishes the
+// run (via trackAutomationRun) instead of leaving it "running" forever.
+func (a *app) markAutomationPending(sessionID string) {
 	a.automationMu.Lock()
 	defer a.automationMu.Unlock()
 	if a.automationRuns == nil {
 		a.automationRuns = make(map[string]string)
 	}
-	a.automationRuns[sessionID] = runID
+	if _, exists := a.automationRuns[sessionID]; !exists {
+		a.automationRuns[sessionID] = ""
+	}
 }
 
-// untrackAutomationRun removes the session's pending run entry and returns it.
-func (a *app) untrackAutomationRun(sessionID string) string {
+// clearAutomationPending forgets a pending/known run for sessionID after a
+// submit that never started a turn.
+func (a *app) clearAutomationPending(sessionID string) {
 	a.automationMu.Lock()
 	defer a.automationMu.Unlock()
-	runID := a.automationRuns[sessionID]
 	delete(a.automationRuns, sessionID)
-	return runID
+	if a.automationTerminals != nil {
+		delete(a.automationTerminals, sessionID)
+	}
+}
+
+// trackAutomationRun attaches the created run id to its session. If the turn
+// already finished (a very fast provider), the remembered outcome finishes the
+// run immediately.
+func (a *app) trackAutomationRun(sessionID, runID string) {
+	a.automationMu.Lock()
+	if a.automationRuns == nil {
+		a.automationRuns = make(map[string]string)
+	}
+	if terminal, ok := a.automationTerminals[sessionID]; ok {
+		delete(a.automationTerminals, sessionID)
+		delete(a.automationRuns, sessionID)
+		a.automationMu.Unlock()
+		a.finishAutomationRun(runID, terminal.status, terminal.errText)
+		return
+	}
+	a.automationRuns[sessionID] = runID
+	a.automationMu.Unlock()
 }
 
 // finishAutomationForSession records a fired automation's terminal state when
@@ -56,23 +106,27 @@ func (a *app) finishAutomationForSession(outcome session.TurnOutcome) {
 	if a == nil || strings.TrimSpace(outcome.SessionID) == "" {
 		return
 	}
-	runID := a.untrackAutomationRun(outcome.SessionID)
-	if runID == "" {
+	terminal := automationTerminal(outcome)
+	a.automationMu.Lock()
+	runID, tracked := a.automationRuns[outcome.SessionID]
+	if !tracked {
+		// This session's turn was not started by an automation.
+		a.automationMu.Unlock()
 		return
 	}
-	status := store.AutomationRunCompleted
-	errText := ""
-	switch {
-	case outcome.Stopped:
-		status = store.AutomationRunStopped
-	case outcome.Failed:
-		status = store.AutomationRunFailed
-		errText = strings.TrimSpace(outcome.Error)
-		if errText == "" {
-			errText = "turn failed"
+	if runID == "" {
+		// The run row is still being created; remember the outcome and let
+		// trackAutomationRun finish it.
+		if a.automationTerminals == nil {
+			a.automationTerminals = make(map[string]automationTerminalState)
 		}
+		a.automationTerminals[outcome.SessionID] = terminal
+		a.automationMu.Unlock()
+		return
 	}
-	a.finishAutomationRun(runID, status, errText)
+	delete(a.automationRuns, outcome.SessionID)
+	a.automationMu.Unlock()
+	a.finishAutomationRun(runID, terminal.status, terminal.errText)
 }
 
 // finishAutomationRun persists a run's terminal state, logging (not failing)
@@ -99,17 +153,67 @@ func (a *app) store() *store.Store {
 	return a.services.Store()
 }
 
-// runAutomationTask executes one fired automation: it creates a session bound
-// to the task's workspace, permission and model, records a run, and submits the
-// prompt. A failure before the turn starts (no workspace, no model key, a
-// rejected submit) finishes the run as failed immediately; otherwise the turn
-// finished hook finishes it.
+// runAutomationTask executes one fired automation. The scheduler's run is
+// delivered back to the session that created the task (FP-07) when that session
+// still exists and is free; otherwise a new session is created. The task's
+// workspace/permission/model bind the new session only: an existing origin
+// session keeps the user's own settings. Every attempt writes an
+// automation_runs row.
 func (a *app) runAutomationTask(ctrl *session.Controller, task store.Automation) {
 	if ctrl == nil {
 		return
 	}
 	ctx := context.Background()
 	st := ctrl.Store()
+
+	// submitInto prepares the run row, submits the prompt into sessionID and
+	// tracks the run for the terminal-turn hook. It reports false when Submit
+	// did not start a turn (the run is already finished as failed then) and
+	// returns the submit error so the caller can distinguish a busy session
+	// (fall back to a fresh one) from a failure that affects every session.
+	submitInto := func(sessionID string) (bool, error) {
+		a.markAutomationPending(sessionID)
+		run, runErr := st.CreateAutomationRun(task.ID, sessionID)
+		if runErr != nil {
+			log.Printf("zeokeel: automation %q: record run: %v", task.Title, runErr)
+		}
+		if err := ctrl.Submit(ctx, sessionID, task.Prompt); err != nil {
+			a.clearAutomationPending(sessionID)
+			if run != nil {
+				a.finishAutomationRun(run.ID, store.AutomationRunFailed, "submit: "+err.Error())
+			}
+			log.Printf("zeokeel: automation %q: submit: %v", task.Title, err)
+			return false, err
+		}
+		if run != nil {
+			a.trackAutomationRun(sessionID, run.ID)
+		} else {
+			// Without a run row there is nothing to finish; keep the pending
+			// marker out of the maps.
+			a.clearAutomationPending(sessionID)
+		}
+		return true, nil
+	}
+
+	// Deliver the run back to the session that created the task when possible.
+	if origin := strings.TrimSpace(task.OriginSessionID); origin != "" {
+		if _, err := st.GetSession(origin); err == nil {
+			ok, submitErr := submitInto(origin)
+			if ok {
+				return
+			}
+			if !errors.Is(submitErr, session.ErrTurnRunning) {
+				// No-Agent / closed-controller errors would hit a new session
+				// exactly the same way; the failed run is already recorded.
+				return
+			}
+			// A busy origin session falls through to a fresh session so a
+			// scheduled task is not silently skipped.
+			log.Printf("zeokeel: automation %q: origin session %s is busy; creating a new session", task.Title, origin)
+		} else {
+			log.Printf("zeokeel: automation %q: origin session %s no longer exists; creating a new session", task.Title, origin)
+		}
+	}
 
 	// Create the session in the task's workspace. The workspace is part of the
 	// task definition (PD-06), so a task created for another project must not
@@ -123,14 +227,13 @@ func (a *app) runAutomationTask(ctrl *session.Controller, task store.Automation)
 	} else {
 		sessionID, sessErr = ctrl.CreateSession(ctx, task.Title)
 	}
-
-	// Record the run even when the session could not be created: the history
-	// must show that the scheduled task attempted to run and failed.
-	run, runErr := st.CreateAutomationRun(task.ID, sessionID)
-	if runErr != nil {
-		log.Printf("zeokeel: automation %q: record run: %v", task.Title, runErr)
-	}
 	if sessErr != nil {
+		// Record the attempt even though no session exists: the history must
+		// show that the scheduled task ran and failed.
+		run, runErr := st.CreateAutomationRun(task.ID, "")
+		if runErr != nil {
+			log.Printf("zeokeel: automation %q: record run: %v", task.Title, runErr)
+		}
 		if run != nil {
 			a.finishAutomationRun(run.ID, store.AutomationRunFailed, "create session: "+sessErr.Error())
 		}
@@ -138,28 +241,22 @@ func (a *app) runAutomationTask(ctrl *session.Controller, task store.Automation)
 		return
 	}
 
-	// Apply the run's access mode and model. Both are best effort: an invalid
-	// permission or a deleted model must not stop the task from running with
-	// the app defaults (the run history still records what happened).
+	// Apply the run's access mode and model to the new session. Both are best
+	// effort: an invalid permission or a deleted model must not stop the task
+	// from running with the app defaults. The permission accepts both the UI
+	// spellings ("read-only", "workspace", "full", "auto-review") and the
+	// persisted session constants ("ask", ...).
 	if permission := strings.TrimSpace(task.Permission); permission != "" {
-		ctrl.SetSessionPermission(sessionID, permission)
+		if mode, perr := headlessPermission(permission); perr == nil {
+			ctrl.SetSessionPermission(sessionID, mode)
+		} else {
+			log.Printf("zeokeel: automation %q: invalid permission %q: %v", task.Title, permission, perr)
+		}
 	}
 	if modelID := strings.TrimSpace(task.Model); modelID != "" {
 		if err := ctrl.SetSessionModel(sessionID, modelID); err != nil {
 			log.Printf("zeokeel: automation %q: bind model %q: %v", task.Title, modelID, err)
 		}
 	}
-
-	if err := ctrl.Submit(ctx, sessionID, task.Prompt); err != nil {
-		// The turn never started, so no TurnFinished hook will fire: finish
-		// the run here instead of leaving it "running" forever.
-		if run != nil {
-			a.finishAutomationRun(run.ID, store.AutomationRunFailed, "submit: "+err.Error())
-		}
-		log.Printf("zeokeel: automation %q: submit: %v", task.Title, err)
-		return
-	}
-	if run != nil {
-		a.trackAutomationRun(sessionID, run.ID)
-	}
+	_, _ = submitInto(sessionID)
 }

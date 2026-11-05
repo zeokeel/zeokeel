@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 
@@ -19,8 +21,11 @@ import (
 const importUsage = `Usage: zeokeel import [options]
 
 Migrate DSH (DeepSeek Harness) sessions into this ZeoKeel data directory.
+This is the minimal import (technical preview): text conversations are
+imported; tool calls are counted/summarized, images/attachments/trajectory are
+not, and subagent sessions are skipped unless --include-subagents is given.
 The DSH data is read, never modified. Credential key names are listed in the
-report; values are never read, printed or stored.
+report; values are never read, printed or stored. Start with --dry-run.
 
 Options:
   --from <dir>          DSH data directory (default: ~/.dsh)
@@ -28,6 +33,8 @@ Options:
   --json                Print one JSON object (the importer report) on stdout
   --max <n>             Import at most n sessions (0 = all)
   --include-subagents   Also import sessions whose header origin is subagent
+  --manifest <file>     Idempotency manifest (default: <data dir>/dsh-import-manifest.json)
+  --no-manifest         Disable idempotency: re-import every session on every run
   -h, --help            Show this help
 
 Exit codes: 0 import completed (0 sessions is not an error), 1 DSH not found /
@@ -37,6 +44,12 @@ Quit the desktop app before importing: a running app may be writing to the same
 data directory.
 `
 
+// DefaultImportManifestName is the per-data-directory idempotency manifest used
+// when --manifest is not given. It records imported DSH sessions (source hash /
+// size / mtime) so a repeated import skips unchanged sessions instead of
+// duplicating conversations (PD-04 X4).
+const DefaultImportManifestName = "dsh-import-manifest.json"
+
 // importOptions is the parsed `zeokeel import` command line.
 type importOptions struct {
 	help             bool
@@ -45,6 +58,8 @@ type importOptions struct {
 	from             string
 	maxSessions      int
 	includeSubagents bool
+	manifest         string
+	noManifest       bool
 }
 
 // parseImportArgs parses the import flags. Unknown flags are usage errors so a
@@ -70,6 +85,16 @@ func parseImportArgs(args []string) (importOptions, error) {
 			opts.from = args[i]
 		case strings.HasPrefix(arg, "--from="):
 			opts.from = strings.TrimPrefix(arg, "--from=")
+		case arg == "--manifest":
+			if i+1 >= len(args) {
+				return opts, fmt.Errorf("--manifest needs a file path")
+			}
+			i++
+			opts.manifest = args[i]
+		case strings.HasPrefix(arg, "--manifest="):
+			opts.manifest = strings.TrimPrefix(arg, "--manifest=")
+		case arg == "--no-manifest":
+			opts.noManifest = true
 		case arg == "--max":
 			if i+1 >= len(args) {
 				return opts, fmt.Errorf("--max needs a number")
@@ -92,6 +117,9 @@ func parseImportArgs(args []string) (importOptions, error) {
 			return opts, fmt.Errorf("unexpected argument %q (the import command takes flags only)", arg)
 		}
 	}
+	if opts.noManifest && strings.TrimSpace(opts.manifest) != "" {
+		return opts, fmt.Errorf("--manifest and --no-manifest are mutually exclusive")
+	}
 	return opts, nil
 }
 
@@ -110,11 +138,21 @@ func runImportCLI(args []string, stdout, stderr io.Writer) int {
 	}
 
 	ctx := context.Background()
+	// Idempotency manifest: default to a per-data-directory file so running the
+	// command twice does not duplicate sessions (PD-04 X4). --no-manifest keeps
+	// the historical re-import-everything behaviour.
+	manifestPath := strings.TrimSpace(opts.manifest)
+	if opts.noManifest {
+		manifestPath = ""
+	} else if manifestPath == "" {
+		manifestPath = filepath.Join(app.DataDir(), DefaultImportManifestName)
+	}
 	importOpts := importer.Options{
 		DSHHome:                 opts.from,
 		DryRun:                  opts.dryRun,
 		IncludeSubagentSessions: opts.includeSubagents,
 		MaxSessions:             opts.maxSessions,
+		ManifestPath:            manifestPath,
 	}
 
 	if !opts.dryRun {
@@ -147,6 +185,11 @@ func runImportCLI(args []string, stdout, stderr io.Writer) int {
 		}
 		fmt.Fprintf(stdout, "%s\n", data)
 	} else {
+		if manifestPath == "" {
+			fmt.Fprintln(stdout, "manifest: disabled (--no-manifest): every run re-imports all sessions")
+		} else {
+			fmt.Fprintf(stdout, "manifest: %s (repeated runs skip unchanged sessions)\n", manifestPath)
+		}
 		printImportReport(stdout, report)
 	}
 	if len(report.Errors) > 0 {
@@ -169,6 +212,21 @@ func printImportReport(w io.Writer, r *importer.Report) {
 		r.MessagesImported, r.SystemMessages, r.ToolCallsSeen, r.ToolResultsSeen)
 	if r.CompressedInput {
 		fmt.Fprintln(w, "input: some sessions were zstd-compressed")
+	}
+	if r.ImagesDropped > 0 {
+		fmt.Fprintf(w, "images: %d dropped (minimal import migrates text conversations only)\n", r.ImagesDropped)
+	}
+	if len(r.Skips) > 0 {
+		keys := make([]string, 0, len(r.Skips))
+		for k := range r.Skips {
+			keys = append(keys, k)
+		}
+		sort.Strings(keys)
+		parts := make([]string, 0, len(keys))
+		for _, k := range keys {
+			parts = append(parts, fmt.Sprintf("%s=%d", k, r.Skips[k]))
+		}
+		fmt.Fprintf(w, "skips: %s\n", strings.Join(parts, " "))
 	}
 	if len(r.Credentials) > 0 {
 		names := make([]string, 0, len(r.Credentials))

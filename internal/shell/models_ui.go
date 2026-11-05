@@ -96,10 +96,13 @@ var probeModelConnection = func(ctx context.Context, baseURL, apiKey string) err
 	return nil
 }
 
-// automationDraft is the edit state of the Add/Edit automation dialog.
+// automationDraft is the edit state of the Add/Edit automation dialog. The
+// binding fields (workspace/permission/model) scope each run's session; empty
+// means the app default.
 type automationDraft struct {
-	id, title, prompt, cron string
-	enabled                 bool
+	id, title, prompt, cron        string
+	workspaceID, permission, model string
+	enabled                        bool
 }
 
 // shellUIState is the live interaction state the shell keeps per App but
@@ -142,6 +145,30 @@ type shellUIState struct {
 	// the Data & privacy page opens (reset settings, delete conversations).
 	confirmOpen bool
 	confirmKind string
+
+	// Draft persistence bookkeeping (PD-10): the last values written per
+	// session and when, so typing writes the store at most every
+	// draftPersistDelay and a switch writes immediately.
+	draftPersisted   map[string]string
+	draftPersistedAt time.Time
+
+	// PD-07 management page state: the MCP JSON editor draft (seeded from the
+	// settings store on first open) and the AGENTS.md editor.
+	mcpLoaded     bool
+	mcpDraft      string
+	agentsEditing bool
+	agentsDraft   string
+	agentsErr     string
+
+	// PD-06 automation page state: the dialog's three binding selectors and
+	// which task cards have their run history expanded.
+	automationWorkspaceOpen  bool
+	automationPermissionOpen bool
+	automationModelOpen      bool
+	automationRunsOpen       map[string]bool
+
+	// importOpen is the PD-04 "Import from DSH" instructions dialog.
+	importOpen bool
 }
 
 // shellUIStates maps each App to its shell UI state.

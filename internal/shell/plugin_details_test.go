@@ -61,7 +61,7 @@ func TestPluginsPageHeaderDialogs(t *testing.T) {
 	if !tt.HasText("no third-party registry") {
 		t.Fatalf("about dialog description missing: %q", tt.Texts())
 	}
-	if !tt.HasText("version 0.1.0") {
+	if !tt.HasText(BuildVersionString()) {
 		t.Fatalf("about dialog version missing: %q", tt.Texts())
 	}
 	if err := tt.Click("Close"); err != nil {
@@ -514,7 +514,7 @@ func TestSettingsStaticPages(t *testing.T) {
 	if err := tt.Click("About"); err != nil {
 		t.Fatalf("click About: %v", err)
 	}
-	if !tt.HasText("version 0.1.0") || !tt.HasText("Go go") || !tt.HasText("github.com/zeokeel/zeokeel") {
+	if !tt.HasText(BuildVersionString()) || !tt.HasText("Go go") || !tt.HasText("github.com/zeokeel/zeokeel") {
 		t.Fatalf("about page missing version/build info: %q", tt.Texts())
 	}
 	if err := tt.Click("Open project repository"); err != nil {
@@ -526,13 +526,13 @@ func TestSettingsStaticPages(t *testing.T) {
 	if err := tt.Click("Copy version"); err != nil {
 		t.Fatalf("click Copy version: %v", err)
 	}
-	if got := tt.Clipboard(); got != "0.1.0" {
-		t.Fatalf("version clipboard = %q", got)
+	if got := tt.Clipboard(); got != BuildVersionString() {
+		t.Fatalf("version clipboard = %q, want %q", got, BuildVersionString())
 	}
 	if err := tt.Click("Copy build info"); err != nil {
 		t.Fatalf("click Copy build info: %v", err)
 	}
-	if got := tt.Clipboard(); !strings.Contains(got, "ZeoKeel 0.1.0") || !strings.Contains(got, "Go ") {
+	if got := tt.Clipboard(); !strings.Contains(got, "ZeoKeel "+BuildVersionString()) || !strings.Contains(got, "Go ") {
 		t.Fatalf("build clipboard = %q", got)
 	}
 

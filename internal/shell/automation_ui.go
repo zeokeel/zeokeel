@@ -1,6 +1,7 @@
 package shell
 
 import (
+	"context"
 	"fmt"
 	"strings"
 	"time"
@@ -17,6 +18,13 @@ import (
 // native search field, task cards and the create/edit dialog.
 func (a *App) automationLivePage(c *ui.Context, t *design.Tokens) {
 	a.automationHeadingLive(c, t)
+	// Automations only fire while the app runs (the scheduler lives in the
+	// desktop process), so say it where the user creates them (PD-06).
+	ui.Row(c).AlignItems(ui.Center).Margin(0, 0, t.Theme().Space(2), 0).Children(func() {
+		nativeText(c, design.TypeXXS, t.LabelTertiary, a.menuText(
+			"Automations run only while ZeoKeel is running in the foreground.",
+			"自动化任务仅在 ZeoKeel 前台运行时执行。"))
+	})
 	a.automationFiltersLive(c, t)
 	a.automationSearchLive(c, t)
 	ui.Scroll(c).Grow(1).Children(func() {
@@ -210,6 +218,25 @@ func (a *App) automationTaskRow(c *ui.Context, t *design.Tokens, task store.Auto
 			}
 			nativeText(c, design.TypeXXS, t.LabelTertiary, a.automationTaskDetail(task)).
 				MaxLines(1).Ellipsis("…")
+			// Latest run: status + how long ago, with the failure reason on
+			// the card so a broken automation is visible without opening the
+			// history (PD-06).
+			latest := a.automationLatestRun(task.ID)
+			runColor := t.LabelTertiary
+			if latest != nil {
+				switch latest.Status {
+				case store.AutomationRunFailed:
+					runColor = t.DangerText
+				case store.AutomationRunRunning, store.AutomationRunCompleted:
+					runColor = t.LabelSecondary
+				}
+			}
+			nativeText(c, design.TypeXXS, runColor, a.automationRunSummary(latest)).
+				MaxLines(1).Ellipsis("…")
+			if latest != nil && strings.TrimSpace(latest.Error) != "" {
+				nativeText(c, design.TypeXXXS, t.DangerText, latest.Error).
+					MaxLines(2).Ellipsis("…")
+			}
 		})
 	}
 	// The switch is a real control, not decoration: clicking it persists the
@@ -229,6 +256,7 @@ func (a *App) automationTaskRow(c *ui.Context, t *design.Tokens, task store.Auto
 		a.automationAction(c, t, a.T("automation.run_now"), func() {
 			a.runAutomationNow(c, task.ID)
 		})
+		a.automationAction(c, t, a.mapLiteralHistoryLabel(), func() { a.toggleAutomationRuns(task.ID) })
 		if task.Enabled {
 			a.automationAction(c, t, a.T("automation.disable"), func() { a.toggleAutomation(c, task) })
 		} else {
@@ -243,22 +271,91 @@ func (a *App) automationTaskRow(c *ui.Context, t *design.Tokens, task store.Auto
 		return el.Padding(th.Space(3)).Gap(th.Space(3)).Radius(design.RadiusLG).
 			Background(t.BgRaised).Border(1, t.BorderL2)
 	}
-	if stacked {
-		card(ui.Column(c)).Children(func() {
-			ui.Row(c).Gap(th.Space(2)).AlignItems(ui.Center).Children(func() {
+	ui.Column(c).Gap(th.Space(1)).Children(func() {
+		if stacked {
+			card(ui.Column(c)).Children(func() {
+				ui.Row(c).Gap(th.Space(2)).AlignItems(ui.Center).Children(func() {
+					title()
+					sw()
+				})
+				ui.Row(c).Gap(th.Space(1)).Wrap().AlignItems(ui.Center).Children(actions)
+			})
+		} else {
+			card(ui.Row(c)).AlignItems(ui.Center).Children(func() {
 				title()
 				sw()
+				// The action strip sits to the right of the switch on the
+				// one-line layout; the gap comes from the card's own theme gap.
+				ui.Row(c).Gap(th.Space(1)).Shrink(0).Children(actions)
 			})
-			ui.Row(c).Gap(th.Space(1)).Wrap().AlignItems(ui.Center).Children(actions)
-		})
+		}
+		a.automationRunHistory(c, t, task)
+	})
+}
+
+// mapLiteralHistoryLabel is the row action's label: "History" in English,
+// "历史" in Chinese.
+func (a *App) mapLiteralHistoryLabel() string {
+	return a.menuText("History", "历史")
+}
+
+// toggleAutomationRuns expands or collapses one task's run history.
+func (a *App) toggleAutomationRuns(taskID string) {
+	st := a.shellUI()
+	if st.automationRunsOpen == nil {
+		st.automationRunsOpen = make(map[string]bool)
+	}
+	st.automationRunsOpen[taskID] = !st.automationRunsOpen[taskID]
+}
+
+// automationRunHistory draws the last runs of one task when its history is
+// expanded: status, start time, duration and the failure reason.
+func (a *App) automationRunHistory(c *ui.Context, t *design.Tokens, task store.Automation) {
+	st := a.shellUI()
+	if !st.automationRunsOpen[task.ID] || a.Ctrl == nil || a.Ctrl.Store() == nil {
 		return
 	}
-	card(ui.Row(c)).AlignItems(ui.Center).Children(func() {
-		title()
-		sw()
-		// The action strip sits to the right of the switch on the one-line
-		// layout; the gap comes from the card's own theme gap.
-		ui.Row(c).Gap(th.Space(1)).Shrink(0).Children(actions)
+	runs, err := a.Ctrl.Store().ListAutomationRuns(task.ID, 10)
+	if err != nil {
+		nativeText(c, design.TypeXXS, t.Danger, a.menuText("Could not load the run history", "无法加载运行历史")).
+			PaddingX(t.Theme().Space(3))
+		return
+	}
+	ui.Column(c).Gap(t.Theme().Space(1)).Padding(t.Theme().Space(2), t.Theme().Space(3)).
+		Radius(design.RadiusMD).Background(t.BgStrong).Children(func() {
+		if len(runs) == 0 {
+			nativeText(c, design.TypeXXS, t.LabelTertiary, a.menuText("No runs recorded yet", "尚无运行记录"))
+			return
+		}
+		for _, run := range runs {
+			r := run
+			line := a.automationRunLabel(r.Status)
+			if when := a.sessionWhen(r.StartedAt); when != "" {
+				line += " · " + when
+			}
+			if r.FinishedAt != nil {
+				line += " · " + a.menuText("finished", "完成于") + " " + a.sessionWhen(*r.FinishedAt)
+			}
+			ui.Row(c).Gap(t.Theme().Space(2)).AlignItems(ui.Center).Children(func() {
+				statusColor := t.LabelSecondary
+				switch r.Status {
+				case store.AutomationRunFailed:
+					statusColor = t.DangerText
+				case store.AutomationRunCompleted:
+					statusColor = t.Success
+				}
+				nativeText(c, design.TypeXXS, statusColor, line).Grow(1).MaxLines(2)
+				if r.SessionID != "" {
+					label := a.menuText("Open session", "打开会话")
+					if ui.Button(c, label).Height(t.Theme().Space(7)).Label(label).Clicked() {
+						a.openSession(r.SessionID)
+					}
+				}
+			})
+			if strings.TrimSpace(r.Error) != "" {
+				nativeText(c, design.TypeXXXS, t.DangerText, r.Error).MaxLines(2).Ellipsis("…")
+			}
+		}
 	})
 }
 
@@ -353,6 +450,7 @@ func (a *App) beginAutomationEdit(task store.Automation) {
 	st.automationDraft = automationDraft{
 		id: task.ID, title: task.Title, prompt: task.Prompt,
 		cron: task.Cron, enabled: task.Enabled,
+		workspaceID: task.WorkspaceID, permission: task.Permission, model: task.Model,
 	}
 	st.automationDialog = true
 }
@@ -384,6 +482,12 @@ func (a *App) automationDialog(c *ui.Context, t *design.Tokens) {
 			ui.TextInput(c, &st.automationDraft.cron).Label(a.T("automation.schedule")).
 				Placeholder("*/15 * * * *")
 			nativeText(c, design.TypeXXXS, t.LabelTertiary, a.T("automation.cron_15_0_9_hourly_or_daily"))
+
+			// Run binding: which workspace the run's session is created in,
+			// its access mode and its model. Empty means the app default.
+			a.automationWorkspaceField(c, t)
+			a.automationPermissionField(c, t)
+			a.automationModelField(c, t)
 
 			ui.Checkbox(c, &st.automationDraft.enabled, a.T("automation.enabled"))
 
@@ -420,11 +524,14 @@ func (a *App) confirmAutomation(c *ui.Context) {
 		return
 	}
 	task := store.Automation{
-		ID:      draft.id,
-		Title:   title,
-		Prompt:  strings.TrimSpace(draft.prompt),
-		Cron:    cron,
-		Enabled: draft.enabled,
+		ID:          draft.id,
+		Title:       title,
+		Prompt:      strings.TrimSpace(draft.prompt),
+		Cron:        cron,
+		Enabled:     draft.enabled,
+		WorkspaceID: strings.TrimSpace(draft.workspaceID),
+		Permission:  strings.TrimSpace(draft.permission),
+		Model:       strings.TrimSpace(draft.model),
 	}
 	if task.Enabled {
 		task.NextRun = &next
@@ -540,4 +647,148 @@ func (a *App) SetAutomationRunNow(fn func(id string)) {
 	if a.Ctrl != nil {
 		a.Ctrl.SetRunNow(fn)
 	}
+}
+
+// automationWorkspaceField is the run's workspace selector: the current
+// default when empty, otherwise one of the registered workspaces.
+func (a *App) automationWorkspaceField(c *ui.Context, t *design.Tokens) {
+	st := a.shellUI()
+	label := a.menuText("Default workspace", "默认工作区")
+	options := []settingsOption{{
+		label: label, selected: st.automationDraft.workspaceID == "",
+		choose: func() { st.automationDraft.workspaceID = "" },
+		desc:   a.menuText("Use the workspace the app has selected.", "使用应用当前选中的工作区。"),
+	}}
+	if a.Ctrl != nil {
+		if workspaces, err := a.Ctrl.ListWorkspaces(context.Background()); err == nil {
+			for _, ws := range workspaces {
+				workspace := ws
+				options = append(options, settingsOption{
+					label:    workspace.Name,
+					selected: st.automationDraft.workspaceID == workspace.ID,
+					choose:   func() { st.automationDraft.workspaceID = workspace.ID },
+					desc:     workspace.Root,
+				})
+			}
+		}
+	}
+	current := label
+	for _, option := range options {
+		if option.selected {
+			current = option.label
+			break
+		}
+	}
+	nativeText(c, design.TypeXXS, t.LabelTertiary, a.menuText("Workspace", "工作区"))
+	a.settingsSelectorLiveNamed(c, t,
+		a.menuText("Run workspace, current: ", "运行工作区，当前：")+current,
+		current, &st.automationWorkspaceOpen, options)
+}
+
+// automationPermissionField is the run's access mode: the four UI spellings
+// the app normalizes when it executes the task.
+func (a *App) automationPermissionField(c *ui.Context, t *design.Tokens) {
+	st := a.shellUI()
+	type perm struct{ label, value, desc string }
+	perms := []perm{
+		{a.T("settings.read_only"), "read-only", a.menuText("Read tools only.", "仅使用读取类工具。")},
+		{a.T("settings.workspace_write"), "workspace", a.menuText("Write inside the workspace.", "可在工作区内写入。")},
+		{a.menuText("Auto review", "自动审查"), "auto-review", a.menuText("The model reviews mutating calls.", "由模型审查修改类调用。")},
+		{a.T("settings.full_access"), "full", a.menuText("No approval gate.", "不过审批。")},
+	}
+	current := a.menuText("Default", "默认")
+	options := make([]settingsOption, 0, len(perms)+1)
+	options = append(options, settingsOption{
+		label: a.menuText("Default permission", "默认权限"), selected: st.automationDraft.permission == "",
+		choose: func() { st.automationDraft.permission = "" },
+		desc:   a.menuText("Use the app's default access mode.", "使用应用默认访问模式。"),
+	})
+	if st.automationDraft.permission == "" {
+		current = a.menuText("Default permission", "默认权限")
+	}
+	for _, p := range perms {
+		p := p
+		options = append(options, settingsOption{
+			label: p.label, selected: st.automationDraft.permission == p.value,
+			choose: func() { st.automationDraft.permission = p.value }, desc: p.desc,
+		})
+		if st.automationDraft.permission == p.value {
+			current = p.label
+		}
+	}
+	nativeText(c, design.TypeXXS, t.LabelTertiary, a.menuText("Permission", "权限"))
+	a.settingsSelectorLiveNamed(c, t,
+		a.menuText("Run permission, current: ", "运行权限，当前：")+current,
+		current, &st.automationPermissionOpen, options)
+}
+
+// automationModelField is the run's model: the app default or one of the
+// configured models.
+func (a *App) automationModelField(c *ui.Context, t *design.Tokens) {
+	st := a.shellUI()
+	current := a.menuText("Default model", "默认模型")
+	options := []settingsOption{{
+		label: current, selected: st.automationDraft.model == "",
+		choose: func() { st.automationDraft.model = "" },
+		desc:   a.menuText("Use the default model.", "使用默认模型。"),
+	}}
+	if a.Ctrl != nil {
+		if models, err := a.Ctrl.Models().List(); err == nil {
+			for _, model := range models {
+				m := model
+				name := modelDisplayName(m)
+				options = append(options, settingsOption{
+					label: name, selected: st.automationDraft.model == m.ID,
+					choose: func() { st.automationDraft.model = m.ID }, desc: m.Model,
+				})
+				if st.automationDraft.model == m.ID {
+					current = name
+				}
+			}
+		}
+	}
+	nativeText(c, design.TypeXXS, t.LabelTertiary, a.menuText("Model", "模型"))
+	a.settingsSelectorLiveNamed(c, t,
+		a.menuText("Run model, current: ", "运行模型，当前：")+current,
+		current, &st.automationModelOpen, options)
+}
+
+// automationLatestRun is the newest recorded run of one task, or nil.
+func (a *App) automationLatestRun(taskID string) *store.AutomationRun {
+	if a.Ctrl == nil || a.Ctrl.Store() == nil {
+		return nil
+	}
+	run, err := a.Ctrl.Store().LatestAutomationRun(taskID)
+	if err != nil {
+		return nil
+	}
+	return run
+}
+
+// automationRunLabel localizes one run's status.
+func (a *App) automationRunLabel(status string) string {
+	switch status {
+	case store.AutomationRunRunning:
+		return a.menuText("Running", "运行中")
+	case store.AutomationRunCompleted:
+		return a.menuText("Completed", "已完成")
+	case store.AutomationRunFailed:
+		return a.menuText("Failed", "失败")
+	case store.AutomationRunStopped:
+		return a.menuText("Stopped", "已停止")
+	default:
+		return status
+	}
+}
+
+// automationRunSummary is the one-line latest-run state a task card shows.
+func (a *App) automationRunSummary(run *store.AutomationRun) string {
+	if run == nil {
+		return a.menuText("Never ran", "尚未运行")
+	}
+	label := a.automationRunLabel(run.Status)
+	if when := a.sessionWhen(run.StartedAt); when != "" {
+		label += " · " + when
+	}
+	return label
 }

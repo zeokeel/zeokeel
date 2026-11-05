@@ -261,7 +261,21 @@ func (a *app) showSettingsWindow() bool {
 	if a.settingsWindow == nil {
 		return false
 	}
-	return a.settingsWindow.Open() == nil
+	opened := a.settingsWindow.Open() == nil
+	if opened {
+		// Opening the separate Settings window clears the shell's popover
+		// state, but nothing repaints the main window until the next input, so
+		// the previously open popover stays visible (and clickable) until then
+		// (UX-04). Repaint both windows immediately.
+		//
+		// PARTIAL (verified on Xvfb): the state cleanup and this repaint are
+		// correct, but the native frame can keep compositing the previous main
+		// window frame while another (settings) window is focused, so a stale
+		// popover may still be visible until the next main-window interaction.
+		// That is a mygo frame-hold limitation; tracked in docs/BUGS.md.
+		a.refreshWindows()
+	}
+	return opened
 }
 
 // hideSettingsWindow is the settings UI's Close: the window hides, the app
@@ -269,6 +283,9 @@ func (a *app) showSettingsWindow() bool {
 func (a *app) hideSettingsWindow() {
 	if a.settingsWindow != nil {
 		a.settingsWindow.Hide()
+		// Same repaint rule as opening: a popover/pending layout in the main
+		// window must be painted out at once when focus returns to it.
+		a.refreshWindows()
 	}
 }
 
@@ -283,4 +300,7 @@ func (a *app) refreshWindows() {
 	if a.settingsWindow != nil {
 		a.settingsWindow.Invalidate()
 	}
+	// A settings save may have toggled app.autostart; reconcile the OS
+	// registration now so the change takes effect without a restart (PD-12).
+	a.syncAutostartFromSetting()
 }

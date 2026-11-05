@@ -1,7 +1,7 @@
 GO ?= go
 export CGO_ENABLED := 0
 
-.PHONY: build build-all build-check windows package-windows package-linux package-macos icon test vet fmt check nocgo clean-check run clean version
+.PHONY: build build-all build-check windows package-windows package-linux package-macos icon test vet fmt check nocgo clean-check previews visual-check run clean version
 
 # Every build product lands in dist/ with a stable per-platform name; see
 # scripts/build.sh. Nothing is written to the repository root.
@@ -55,6 +55,15 @@ nocgo:
 # Verify the committed tree (not the working tree) builds without ignored files.
 clean-check:
 	sh scripts/check-clean-checkout.sh
+
+# Regenerate the visual goldens in docs/design/preview/ (opt-in; review the diff
+# before committing the PNGs). See docs/design/preview/README.md.
+previews:
+	ZEOKEEL_UPDATE_PREVIEWS=1 $(GO) test -count=1 -run 'TestRender.*NativePreview' ./internal/shell
+
+# Same-machine visual regression against the committed goldens (opt-in).
+visual-check:
+	ZEOKEEL_VISUAL=1 $(GO) test -count=1 -run TestVisualRegression ./internal/shell
 
 run:
 	$(GO) run ./cmd/zeokeel

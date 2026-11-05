@@ -3,6 +3,7 @@ package importer
 import (
 	"bufio"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"strings"
@@ -21,6 +22,15 @@ type ContentPart struct {
 	Arguments json.RawMessage `json:"arguments"`
 	ID        string          `json:"id"`
 }
+
+// ErrUnsupportedVersion reports a DSH session header whose format version this
+// importer does not understand. A future v5 log must be reported explicitly
+// instead of being parsed as v4 and silently losing events (PD-04).
+var ErrUnsupportedVersion = errors.New("importer: unsupported DSH session version")
+
+// supportedSessionVersion is the DSH session-log format this package parses.
+// DSH 0.2.x writes version 4 (session.v4.jsonl[.zstd]).
+const supportedSessionVersion = 4
 
 // Message is one imported conversation row (store-agnostic).
 type Message struct {
@@ -44,10 +54,20 @@ type Session struct {
 	Title           string
 	Messages        []Message
 	SystemMessages  int
-	ToolCalls       int
-	ToolResults     int
-	Images          int
-	Warnings        []string
+	// SystemInjected counts user/message events whose source.kind is not
+	// "user": DSH injects per-turn context (time-context, runtime-context,
+	// agent-message, subagent-settled, ...) through user events. They are
+	// context, not the human's words, so they are not imported.
+	SystemInjected int
+	// StepAssistant counts assistant/message events with no visible text
+	// (reasoning/tool-call-only step events). Only real replies are kept.
+	StepAssistant int
+	ToolCalls     int
+	ToolResults   int
+	// Images counts content parts that were dropped (image import is out of
+	// scope for the minimal importer) so the report can surface them.
+	Images   int
+	Warnings []string
 }
 
 // sessionHeader is the first JSONL line of a DSH session log.
@@ -91,6 +111,9 @@ type userMessageData struct {
 	Content []ContentPart `json:"content"`
 	Role    string        `json:"role"`
 	ID      string        `json:"id"`
+	Source  struct {
+		Kind string `json:"kind"`
+	} `json:"source"`
 }
 
 // titleData is the data payload of session/title.
@@ -173,6 +196,10 @@ func parseLine(sess *Session, line string, headerSeen bool, source string, lineN
 		if header.Type != "session" {
 			return fmt.Errorf("importer: %s:%d: first line is %q, want session header", source, lineNo, header.Type)
 		}
+		if header.Version != supportedSessionVersion {
+			return fmt.Errorf("%w: %s: header version %d; this build reads version %d",
+				ErrUnsupportedVersion, source, header.Version, supportedSessionVersion)
+		}
 		sess.ID = header.ID
 		sess.Cwd = header.Cwd
 		sess.ParentSession = header.ParentSession
@@ -203,6 +230,17 @@ func parseLine(sess *Session, line string, headerSeen bool, source string, lineN
 		if err := json.Unmarshal(envelope.Data, &data); err != nil {
 			return fmt.Errorf("importer: %s:%d: user/message: %w", source, lineNo, err)
 		}
+		// source.kind identifies where the text came from. DSH writes most
+		// per-turn context as user/message with kind time-context /
+		// runtime-context / agent-message / subagent-settled / tool-jobs /
+		// goal / ... (89% of real user events). Those are injected context,
+		// not the human's words: importing them renders fake user bubbles.
+		// An empty kind means an exported/hand-written fixture, kept as user
+		// for backward compatibility.
+		if kind := strings.TrimSpace(data.Source.Kind); kind != "" && !strings.EqualFold(kind, "user") {
+			sess.SystemInjected++
+			return nil
+		}
 		content, reasoning, images := flattenContent(data.Content)
 		sess.Images += images
 		if strings.TrimSpace(content) != "" {
@@ -215,7 +253,14 @@ func parseLine(sess *Session, line string, headerSeen bool, source string, lineN
 		}
 		content, reasoning, images := flattenContent(data.Message.Content)
 		sess.Images += images
-		if strings.TrimSpace(content) == "" && strings.TrimSpace(reasoning) == "" {
+		// DSH emits one assistant/message per step; step events carry
+		// reasoning and tool-call parts but no visible reply (95.7% of real
+		// assistant events). Turning them into empty bubbles or synthetic
+		// "[tool call] ..." transcript lines makes the migrated conversation
+		// unreadable, so only messages with real text are imported (reasoning
+		// is kept alongside the text).
+		if strings.TrimSpace(content) == "" {
+			sess.StepAssistant++
 			return nil
 		}
 		sess.Messages = append(sess.Messages, Message{
@@ -239,30 +284,23 @@ func parseLine(sess *Session, line string, headerSeen bool, source string, lineN
 }
 
 // flattenContent renders DSH content parts into the text/reasoning pair
-// ZeoKeel persists. Tool-call parts become a readable assistant line so the
-// migrated transcript still shows what the agent did; tool RESULTS are not
-// inlined (they are counted, and the following assistant message usually
-// summarizes them).
+// ZeoKeel persists. Tool-call and tool-result parts are not turned into
+// transcript text: tool activity is counted separately and synthesized
+// "[tool call] ..." lines made migrated conversations unreadable (PD-04).
+// Parts that carry an image are counted as dropped so the report can surface
+// them; image import itself is out of scope for the minimal importer.
 func flattenContent(parts []ContentPart) (content, reasoning string, images int) {
 	var text, think strings.Builder
 	for _, part := range parts {
-		switch part.Type {
-		case "text":
+		switch {
+		case part.Type == "text":
 			text.WriteString(part.Text)
-		case "reasoning":
+		case part.Type == "reasoning":
 			think.WriteString(part.Text)
-		case "tool-call":
-			args := strings.TrimSpace(string(part.Arguments))
-			if len(args) > 512 {
-				args = args[:512] + "…"
-			}
-			text.WriteString(fmt.Sprintf("\n\n[tool call] %s(%s)", part.Name, args))
-		case "tool-result":
-			// Results live in tool/result events; nothing to add here.
-		default:
-			if part.Type != "" {
-				images++
-			}
+		case part.Type == "tool-call", part.Type == "tool-result":
+			// Counted from tool/call and tool/result events.
+		case strings.Contains(part.Type, "image"):
+			images++
 		}
 	}
 	return strings.TrimSpace(text.String()), strings.TrimSpace(think.String()), images

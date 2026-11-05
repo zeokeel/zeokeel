@@ -80,6 +80,7 @@ func (a *App) homeLive(c *ui.Context, t *design.Tokens) {
 			column := ui.Column(c).Width(a.homeColumnWidth(c, t)).Gap(th.Space(8))
 			column.Children(func() {
 				a.homeHero(c, t)
+				a.homeSetupCard(c, t)
 				ui.Column(c).Gap(th.Space(3)).Children(func() {
 					a.homeLiveComposer(c, t)
 					ui.Row(c).Justify(ui.Center).Children(func() {
@@ -89,6 +90,57 @@ func (a *App) homeLive(c *ui.Context, t *design.Tokens) {
 				})
 			})
 		})
+	})
+}
+
+// homeSetupCard is the first-run guidance card: while the app has no model or
+// no workspace, the Home screen says what is missing and offers the two
+// actions that fix it, instead of letting the composer fail silently on the
+// first send (PD-01 remaining).
+func (a *App) homeSetupCard(c *ui.Context, t *design.Tokens) {
+	if a.Ctrl == nil {
+		return
+	}
+	th := t.Theme()
+	needModel := !a.Ctrl.HasAgent()
+	needWorkspace := true
+	if ws, ok, err := a.Ctrl.CurrentWorkspace(context.Background()); err == nil && ok && strings.TrimSpace(ws.ID) != "" {
+		needWorkspace = false
+	}
+	if !needModel && !needWorkspace {
+		return
+	}
+	design.Apply(ui.Column(c), t.Panel()).Width(a.homeColumnWidth(c, t)).
+		Radius(th.Radius).Border(1, t.BorderL2).Padding(th.Space(3)).
+		Gap(th.Space(2)).Children(func() {
+		ui.Row(c).Gap(th.Space(2)).AlignItems(ui.Center).Children(func() {
+			ui.Icon(c, icons.Sparkles()).Size(th.Space(4), th.Space(4)).TextColor(t.Accent)
+			ui.Text(c, a.tr("Finish setting up ZeoKeel", "完成 ZeoKeel 的初始设置")).
+				FontSize(13).FontWeight(600).TextColor(t.LabelPrimary).Grow(1)
+		})
+		if needWorkspace {
+			ui.Row(c).Gap(th.Space(2)).AlignItems(ui.Center).Children(func() {
+				ui.Text(c, a.tr("No workspace yet. A workspace is the folder the agent works in.",
+					"还没有工作区。工作区是代理操作所在的文件夹。")).
+					FontSize(12).TextColor(t.LabelSecondary).Grow(1).MaxLines(2)
+				label := a.tr("Create workspace", "创建工作区")
+				button := ui.Button(c, label).Height(th.Space(8)).Label(label)
+				button.OnClick(func() { a.beginAddWorkspace() })
+			})
+		}
+		if needModel {
+			ui.Row(c).Gap(th.Space(2)).AlignItems(ui.Center).Children(func() {
+				ui.Text(c, a.tr("No model configured. Add a provider and key to send messages.",
+					"尚未配置模型。添加服务商与密钥后才能发送消息。")).
+					FontSize(12).TextColor(t.LabelSecondary).Grow(1).MaxLines(2)
+				label := a.tr("Configure model", "配置模型")
+				btn := ui.Button(c, label).Height(th.Space(8)).Label(label)
+				btn.OnClick(func() {
+					a.shellUI().settingsTab = settingsTabModels
+					a.openSettings()
+				})
+			})
+		}
 	})
 }
 

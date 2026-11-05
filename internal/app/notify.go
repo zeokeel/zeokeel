@@ -101,6 +101,13 @@ type notificationDispatcher struct {
 	// focusSession is the notification click action: bring the window forward
 	// and, when the session is known, show that session.
 	focusSession func(sessionID string)
+	// enabled reports whether notifications are enabled at all
+	// (notification.enabled setting, default true). nil means enabled.
+	enabled func() bool
+	// suppressFocused reports whether notifications are suppressed while the
+	// user is looking at the app (notification.suppress_focused setting, default
+	// true). nil means suppress (the historical behavior).
+	suppressFocused func() bool
 	// turnsFromHook reports terminal turns through the controller hook instead
 	// of the snapshot phase machine, so background sessions are covered too.
 	turnsFromHook bool
@@ -197,13 +204,9 @@ func (d *notificationDispatcher) observeApprovalRequested(sessionID string, requ
 	d.approvalCalls[callKey] = struct{}{}
 	d.mu.Unlock()
 
-	if d.isActive() {
-		return
-	}
-	title, body := notificationText(d.currentLanguage(), noticeApproval)
 	// The click callback carries the session id only; the tool name and
 	// arguments stay inside the app.
-	d.notifier.Show(title, body, d.clickAction(sessionID))
+	d.show(noticeApproval, sessionID)
 }
 
 // observeTurnFinished raises the terminal-turn notification from the
@@ -259,11 +262,7 @@ func (d *notificationDispatcher) observeTurnFinished(outcome session.TurnOutcome
 	d.lastTurnNotice[sessionID] = now
 	d.mu.Unlock()
 
-	if d.isActive() {
-		return
-	}
-	title, body := notificationText(d.currentLanguage(), kind)
-	d.notifier.Show(title, body, d.clickAction(outcome.SessionID))
+	d.show(kind, outcome.SessionID)
 }
 
 // clockNow reads the dispatcher clock.
@@ -311,10 +310,7 @@ func (d *notificationDispatcher) Observe(snap *state.Snapshot) {
 		// A notification is only useful while the user is not already looking
 		// at the app. Skipping here (instead of queueing) also guarantees that
 		// walking away after the turn finished cannot raise a late duplicate.
-		if !d.isActive() {
-			title, body := notificationText(d.currentLanguage(), kind)
-			d.notifier.Show(title, body, d.clickAction(snap.SessionID))
-		}
+		d.show(kind, snap.SessionID)
 	}
 	// A terminal phase has no further transition to report; forgetting it keeps
 	// the per-session map small and avoids a stale baseline if the same session
@@ -376,7 +372,35 @@ func turnHasOutput(snap *state.Snapshot) bool {
 // a probe, it assumes they are: silently dropping a notification is better than
 // interrupting someone who is already reading the result.
 func (d *notificationDispatcher) isActive() bool {
+	if d == nil {
+		return true
+	}
+	if d.suppressFocused != nil && !d.suppressFocused() {
+		// The user asked to receive notifications even while the app is
+		// focused (notification.suppress_focused=false).
+		return false
+	}
 	return d.active == nil || d.active()
+}
+
+// notificationsEnabled reports whether the dispatcher may raise notifications
+// at all (notification.enabled, default true).
+func (d *notificationDispatcher) notificationsEnabled() bool {
+	if d == nil {
+		return false
+	}
+	return d.enabled == nil || d.enabled()
+}
+
+// show raises one notification when notifications are enabled and the current
+// focus state allows it. All three delivery paths (snapshot, turn hook,
+// approval hook) go through it so the two settings apply consistently.
+func (d *notificationDispatcher) show(kind noticeKind, sessionID string) bool {
+	if d == nil || d.notifier == nil || !d.notificationsEnabled() || d.isActive() {
+		return false
+	}
+	title, body := notificationText(d.currentLanguage(), kind)
+	return d.notifier.Show(title, body, d.clickAction(sessionID))
 }
 
 // currentLanguage returns the UI language the copy follows.

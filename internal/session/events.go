@@ -31,6 +31,9 @@ const (
 	// transcript mark historical stopped/failed/interrupted turns after a
 	// reopen. Payload JSON, so no store schema change is needed.
 	EventTurnEnd = "turn_end"
+	// EventWorkspaceChanges records the files one completed turn changed in the
+	// workspace (DSH's workspace/changes event). Payload JSON, display only.
+	EventWorkspaceChanges = "workspace/changes"
 )
 
 // questionAnsweredPayload is the resolution row for one ask_user call.
@@ -95,6 +98,14 @@ type turnEndPayload struct {
 	TurnID    string `json:"turn_id,omitempty"`
 	UserMsgID string `json:"user_msg_id,omitempty"`
 	Reason    string `json:"reason"`
+}
+
+type workspaceChangesPayload struct {
+	TurnID  string `json:"turn_id,omitempty"`
+	Changes []struct {
+		Path   string `json:"path"`
+		Status string `json:"status"`
+	} `json:"changes"`
 }
 
 type statusPayload struct {
@@ -254,6 +265,16 @@ func encodeEvent(ev state.Event) (store.Event, error) {
 			UserMsgID: e.UserMsgID,
 			Reason:    string(e.Reason),
 		}
+	case state.WorkspaceChanges:
+		typ = EventWorkspaceChanges
+		workspace := workspaceChangesPayload{TurnID: e.TurnID}
+		for _, change := range e.Changes {
+			workspace.Changes = append(workspace.Changes, struct {
+				Path   string `json:"path"`
+				Status string `json:"status"`
+			}{Path: change.Path, Status: change.Status})
+		}
+		payload = workspace
 	case state.Status:
 		typ = EventStatus
 		payload = statusPayload{Phase: string(e.Phase), Reason: string(e.Reason)}
@@ -349,6 +370,16 @@ func decodeEvent(rec store.Event) (ev state.Event, ok bool) {
 			return nil, false
 		}
 		return state.Status{Phase: state.Phase(p.Phase), Reason: state.StatusReason(p.Reason)}, true
+	case EventWorkspaceChanges:
+		var p workspaceChangesPayload
+		if json.Unmarshal(rec.Payload, &p) != nil {
+			return nil, false
+		}
+		ev := state.WorkspaceChanges{TurnID: p.TurnID}
+		for _, change := range p.Changes {
+			ev.Changes = append(ev.Changes, state.WorkspaceChange{Path: change.Path, Status: change.Status})
+		}
+		return ev, true
 	case EventError:
 		var p errorPayload
 		if json.Unmarshal(rec.Payload, &p) != nil {

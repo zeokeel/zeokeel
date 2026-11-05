@@ -202,6 +202,12 @@ type Options struct {
 	TitlePrefix string
 	// Now is the clock for synthetic message timestamps; nil means time.Now.
 	Now func() time.Time
+	// ManifestPath enables import idempotency. When non-empty, the importer
+	// records every imported DSH session (id, source size/mtime/SHA-256) in
+	// this JSON file and skips sessions that were already imported with the
+	// same content on a later run. Empty keeps the historical behaviour: every
+	// run imports everything again (the CLI can pass a data-directory path).
+	ManifestPath string
 }
 
 // SessionError is one session that failed to import; the rest of the run
@@ -225,27 +231,76 @@ type WorkspaceReport struct {
 
 // Report is the machine-readable result of one import run.
 type Report struct {
-	DryRun           bool              `json:"dry_run"`
-	DSHHome          string            `json:"dsh_home"`
-	SessionsFound    int               `json:"sessions_found"`
-	SessionsImported int               `json:"sessions_imported"`
-	SessionsSkipped  int               `json:"sessions_skipped"`
-	SessionsFailed   int               `json:"sessions_failed"`
-	MessagesImported int               `json:"messages_imported"`
-	SystemMessages   int               `json:"system_messages_skipped"`
-	ToolCallsSeen    int               `json:"tool_calls_seen"`
-	ToolResultsSeen  int               `json:"tool_results_seen"`
-	CompressedInput  bool              `json:"compressed_input"`
-	Credentials      []CredentialRef   `json:"credentials,omitempty"`
-	Workspaces       []WorkspaceReport `json:"workspaces,omitempty"`
-	Warnings         []string          `json:"warnings,omitempty"`
-	Errors           []SessionError    `json:"errors,omitempty"`
+	DryRun           bool   `json:"dry_run"`
+	DSHHome          string `json:"dsh_home"`
+	SessionsFound    int    `json:"sessions_found"`
+	SessionsImported int    `json:"sessions_imported"`
+	SessionsSkipped  int    `json:"sessions_skipped"`
+	SessionsFailed   int    `json:"sessions_failed"`
+	MessagesImported int    `json:"messages_imported"`
+	SystemMessages   int    `json:"system_messages_skipped"`
+	ToolCallsSeen    int    `json:"tool_calls_seen"`
+	ToolResultsSeen  int    `json:"tool_results_seen"`
+	CompressedInput  bool   `json:"compressed_input"`
+	// ImagesDropped counts image content parts that were not imported (the
+	// minimal importer only migrates text conversations).
+	ImagesDropped int `json:"images_dropped,omitempty"`
+	// Skips breaks the skipped work down by reason so a report explains what
+	// was filtered instead of only showing one opaque skipped count. Keys use
+	// the constants below: system_injected, step_assistant, subagent,
+	// bad_session, unsupported_version, images_dropped, idempotent,
+	// empty_session, workspace_error. Some reasons count messages/parts and
+	// others count sessions; the key names say which data was skipped.
+	Skips       map[string]int    `json:"skips,omitempty"`
+	Credentials []CredentialRef   `json:"credentials,omitempty"`
+	Workspaces  []WorkspaceReport `json:"workspaces,omitempty"`
+	Warnings    []string          `json:"warnings,omitempty"`
+	Errors      []SessionError    `json:"errors,omitempty"`
+}
+
+// Skip reasons reported in Report.Skips.
+const (
+	// SkipSystemInjected counts user/message events with source.kind != "user"
+	// (DSH-injected per-turn context) that are not imported as user messages.
+	SkipSystemInjected = "system_injected"
+	// SkipStepAssistant counts assistant/message events without visible text
+	// (step-level reasoning/tool-call events) that are not imported.
+	SkipStepAssistant = "step_assistant"
+	// SkipSubagent counts subagent child sessions skipped by default.
+	SkipSubagent = "subagent"
+	// SkipBadSession counts sessions that could not be parsed/imported.
+	SkipBadSession = "bad_session"
+	// SkipUnsupportedVersion counts sessions whose header format version this
+	// build does not understand.
+	SkipUnsupportedVersion = "unsupported_version"
+	// SkipImagesDropped counts image content parts that were not imported.
+	SkipImagesDropped = "images_dropped"
+	// SkipIdempotent counts sessions already imported with the same content
+	// (only possible with Options.ManifestPath).
+	SkipIdempotent = "idempotent"
+	// SkipEmptySession counts sessions with no importable message.
+	SkipEmptySession = "empty_session"
+	// SkipWorkspaceError counts sessions whose destination workspace could not
+	// be resolved/created.
+	SkipWorkspaceError = "workspace_error"
+)
+
+// noteSkip increments one reason counter, creating the map on first use.
+func (r *Report) noteSkip(reason string, n int) {
+	if r == nil || n <= 0 {
+		return
+	}
+	if r.Skips == nil {
+		r.Skips = make(map[string]int)
+	}
+	r.Skips[reason] += n
 }
 
 // Import migrates the DSH sessions under opts.DSHHome into opts.Store.
 // It never aborts the whole run for one bad session: parse/store failures are
 // recorded in Report.Errors and the next session continues. A missing DSH
 // installation returns ErrNotInstalled so the caller can say "nothing found".
+// With Options.ManifestPath the run is idempotent across invocations.
 func Import(ctx context.Context, opts Options) (*Report, error) {
 	if ctx == nil {
 		ctx = context.Background()
@@ -256,6 +311,10 @@ func Import(ctx context.Context, opts Options) (*Report, error) {
 	}
 	if !opts.DryRun && opts.Store == nil {
 		return nil, ErrNoStore
+	}
+	manifest, err := loadManifest(opts.ManifestPath)
+	if err != nil {
+		return nil, err
 	}
 	report := &Report{DryRun: opts.DryRun, DSHHome: layout.Home}
 	if len(layout.SessionFiles) == 0 {
@@ -300,18 +359,55 @@ func Import(ctx context.Context, opts Options) (*Report, error) {
 		processed++
 		report.SessionsFound++
 
+		// Idempotency: the manifest records the imported source's size and
+		// SHA-256, so a repeated run skips unchanged sessions before parsing
+		// them (and before creating duplicate ZeoKeel sessions).
+		key := manifestKey(layout.Home, sessionFile)
+		var identity sourceIdentity
+		if manifest != nil {
+			identity, err = inspectSourceFile(sessionFile)
+			if err != nil {
+				report.SessionsFailed++
+				report.noteSkip(SkipBadSession, 1)
+				report.Errors = append(report.Errors, SessionError{SessionFile: sessionFile, Error: "inspect source: " + err.Error()})
+				continue
+			}
+			if manifest.alreadyImported(key, identity) {
+				report.SessionsSkipped++
+				report.noteSkip(SkipIdempotent, 1)
+				continue
+			}
+		}
+
 		sess, perr := ParseSessionFile(sessionFile)
 		if perr != nil {
-			report.SessionsFailed++
 			report.Errors = append(report.Errors, SessionError{SessionFile: sessionFile, Error: perr.Error()})
+			if errors.Is(perr, ErrUnsupportedVersion) {
+				// A future DSH format is reported explicitly instead of being
+				// half-imported under v4 assumptions.
+				report.SessionsSkipped++
+				report.noteSkip(SkipUnsupportedVersion, 1)
+			} else {
+				report.SessionsFailed++
+				report.noteSkip(SkipBadSession, 1)
+			}
 			continue
 		}
 		if !opts.IncludeSubagentSessions && isSubagentSession(sess) {
 			report.SessionsSkipped++
+			report.noteSkip(SkipSubagent, 1)
 			continue
 		}
+		// Message-level filtering diagnostics only count sessions that are in
+		// the import scope, so a default run (subagents skipped) does not
+		// report injected context from child sessions it never considered.
+		report.noteSkip(SkipSystemInjected, sess.SystemInjected)
+		report.noteSkip(SkipStepAssistant, sess.StepAssistant)
+		report.noteSkip(SkipImagesDropped, sess.Images)
+		report.ImagesDropped += sess.Images
 		if len(sess.Messages) == 0 {
 			report.SessionsSkipped++
+			report.noteSkip(SkipEmptySession, 1)
 			continue
 		}
 
@@ -327,29 +423,31 @@ func Import(ctx context.Context, opts Options) (*Report, error) {
 			}
 			workspaces[cwd] = wsReport
 			report.Workspaces = append(report.Workspaces, *wsReport)
-			// The pointer above is stale once the slice grows; look it up again
-			// by cwd whenever it is updated (small N, clarity over cleverness).
 		}
 		if !opts.DryRun {
 			id, created, werr := ensureWorkspace(opts.Store, existing, cwd, wsReport.Name)
 			if werr != nil {
 				report.SessionsFailed++
+				report.noteSkip(SkipWorkspaceError, 1)
 				report.Errors = append(report.Errors, SessionError{SessionFile: sessionFile, SessionID: sess.ID, Error: "workspace: " + werr.Error()})
 				continue
 			}
 			workspaceIDs[cwd] = id
 			updateWorkspaceReport(report, cwd, func(r *WorkspaceReport) {
 				r.WorkspaceID = id
-				r.CreatedInZeo = created
+				// A later session in the same workspace must not overwrite a
+				// real creation with false (previous report bug).
+				r.CreatedInZeo = r.CreatedInZeo || created
 			})
 			if id == "" {
 				report.SessionsFailed++
+				report.noteSkip(SkipWorkspaceError, 1)
 				report.Errors = append(report.Errors, SessionError{SessionFile: sessionFile, SessionID: sess.ID, Error: "workspace resolve returned empty id"})
 				continue
 			}
 		}
 
-		imported, merr := importSession(opts, sess, workspaceIDs[cwd])
+		imported, zeoSessionID, merr := importSession(opts, sess, workspaceIDs[cwd])
 		report.MessagesImported += imported
 		report.SystemMessages += sess.SystemMessages
 		report.ToolCallsSeen += sess.ToolCalls
@@ -361,11 +459,30 @@ func Import(ctx context.Context, opts Options) (*Report, error) {
 		if merr != nil {
 			report.SessionsFailed++
 			report.Errors = append(report.Errors, SessionError{SessionFile: sessionFile, SessionID: sess.ID, Error: merr.Error()})
+			report.noteSkip(SkipBadSession, 1)
 			continue
 		}
 		report.SessionsImported++
+		if manifest != nil {
+			manifest.record(key, manifestEntry{
+				DSHHome:             layout.Home,
+				SessionID:           sessionDirName(sessionFile),
+				SourceFile:          sessionFile,
+				SourceSize:          identity.Size,
+				SourceMTimeUnixNano: identity.ModTimeUnixNano,
+				SHA256:              identity.SHA256,
+				ImportedAt:          opts.now().UTC(),
+				ZeoKeelSessionID:    zeoSessionID,
+				Title:               sess.Title,
+			})
+		}
 	}
 	sort.Slice(report.Workspaces, func(i, j int) bool { return report.Workspaces[i].Cwd < report.Workspaces[j].Cwd })
+	if manifest != nil && !opts.DryRun {
+		if serr := manifest.save(); serr != nil {
+			report.Warnings = append(report.Warnings, "import manifest not saved: "+serr.Error())
+		}
+	}
 	return report, nil
 }
 
@@ -375,17 +492,18 @@ func isSubagentSession(sess *Session) bool {
 }
 
 // importSession persists one parsed session. It returns the number of
-// conversation rows written (0 in dry-run) and an error only when the store
-// rejects a write; partial sessions are reported rather than rolled back
-// because the store has no cross-session transaction for imports.
-func importSession(opts Options, sess *Session, workspaceID string) (int, error) {
+// conversation rows written (0 in dry-run), the created ZeoKeel session id
+// (for the idempotency manifest) and an error when the store rejects a write;
+// partial sessions are reported rather than rolled back because the store has
+// no cross-session transaction for imports.
+func importSession(opts Options, sess *Session, workspaceID string) (int, string, error) {
 	if opts.DryRun {
-		return len(sess.Messages), nil
+		return len(sess.Messages), "", nil
 	}
 	title := buildTitle(opts.TitlePrefix, sess)
 	created, err := opts.Store.CreateSession(workspaceID, title)
 	if err != nil {
-		return 0, fmt.Errorf("create session: %w", err)
+		return 0, "", fmt.Errorf("create session: %w", err)
 	}
 	base := sess.CreatedAt
 	if base.IsZero() {
@@ -401,11 +519,11 @@ func importSession(opts Options, sess *Session, workspaceID string) (int, error)
 			CreatedAt: base.Add(time.Duration(i) * time.Millisecond),
 			TurnID:    "import",
 		}); err != nil {
-			return written, fmt.Errorf("append message %d: %w", i, err)
+			return written, created.ID, fmt.Errorf("append message %d: %w", i, err)
 		}
 		written++
 	}
-	return written, nil
+	return written, created.ID, nil
 }
 
 // buildTitle renders the imported session title.

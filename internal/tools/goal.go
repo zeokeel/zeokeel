@@ -2,6 +2,8 @@ package tools
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -24,12 +26,42 @@ const (
 	GoalAbandoned GoalStatus = "abandoned"
 )
 
+// GoalPhase is the finer lifecycle phase the user can command (/goal pause,
+// block, resume). Status stays the two-state active/completed/abandoned axis the
+// goal driver and older UIs read; Phase adds the paused/blocked states that must
+// stop automatic continuation turns without abandoning the objective (FP-04).
+type GoalPhase string
+
+const (
+	// GoalPhaseActive is a goal the agent should keep working on.
+	GoalPhaseActive GoalPhase = "active"
+	// GoalPhasePaused is a goal the user paused: it stays visible and can be
+	// resumed, but no automatic continuation turns run.
+	GoalPhasePaused GoalPhase = "paused"
+	// GoalPhaseBlocked is a goal waiting on an external blocker: no automatic
+	// continuation turns run until it is unblocked.
+	GoalPhaseBlocked GoalPhase = "blocked"
+	// GoalPhaseCompleted is a finished goal.
+	GoalPhaseCompleted GoalPhase = "completed"
+	// GoalPhaseAbandoned is a goal the user gave up on.
+	GoalPhaseAbandoned GoalPhase = "abandoned"
+)
+
 const goalKind = "goal"
 
 // Goal is the objective the agent is working towards in one session. It is
 // reported by the goal tool and folded into the session by the controller so
 // the team banner can show it without the tool holding any session state.
 type Goal struct {
+	// ID identifies this goal instance. It stays stable across progress,
+	// step, pause/resume and block/unblock updates and changes when a new
+	// objective starts, so an observer can tell "the same goal advanced" from
+	// "a new goal replaced it" (FP-04).
+	ID string `json:"id,omitempty"`
+	// Revision increments on every mutation (set of a field, pause, resume,
+	// block, unblock, complete, abandon). Clients can ignore an older revision.
+	Revision  int        `json:"revision"`
+	Phase     GoalPhase  `json:"phase,omitempty"`
 	Objective string     `json:"objective"`
 	Steps     []string   `json:"steps,omitempty"`
 	Progress  int        `json:"progress"` // percent, 0-100
@@ -53,19 +85,28 @@ const goalDescription = `Set, inspect and close the session goal.
 Call it with a JSON object:
   {"action":"set","objective":"Ship the release","steps":["Run the tests","Write notes"],"progress":25}
   {"action":"get"}
+  {"action":"pause"}
+  {"action":"resume"}
+  {"action":"block","message":"Waiting for CI"}
+  {"action":"unblock"}
   {"action":"complete"}
   {"action":"abandon","message":"Blocked on the vendor"}
+  {"action":"clear"}
 
-"action" is required and is one of set, get, complete, abandon.
+"action" is required and is one of set, get, pause, resume, block, unblock,
+complete, abandon, clear.
 "objective" is required for the first set and optional afterwards (the existing
 objective is kept). "steps" is an optional ordered list for set; omit it to keep
 the current steps and pass [] to clear them. "progress" is an optional percent
 between 0 and 100. "message" is optional free text echoed back to you.
 
 The tool returns {"kind":"goal","action":...,"goal":{...},"message":...}; get
-returns no goal object when none is set. complete sets progress to 100 and
-abandon keeps the objective but marks the goal abandoned. The UI shows the goal
-as a banner above the conversation.`
+returns no goal object when none is set. A goal carries an id, a revision that
+increments on every change, and a phase (active, paused, blocked, completed,
+abandoned). pause and block stop automatic continuation turns without
+abandoning the objective; resume and unblock re-arm it. complete sets progress
+to 100, abandon keeps the objective but marks the goal abandoned, and clear
+removes it. The UI shows the goal as a banner above the conversation.`
 
 // GoalTool is the per-agent goal store. All state lives in this instance,
 // guarded by mu, so two agents (or two test runs) never share a goal.
@@ -121,7 +162,8 @@ type goalArgs struct {
 
 // Invoke implements runtime.Tool. It returns a GoalResult JSON document and
 // never panics on bad arguments; a non-nil error is reported to the model as a
-// tool failure.
+// tool failure. Every lifecycle action goes through ApplyGoalAction so the tool
+// and the /goal controller API produce identical ids, revisions and phases.
 func (t *GoalTool) Invoke(ctx context.Context, args json.RawMessage) (string, error) {
 	if ctx == nil {
 		ctx = context.Background()
@@ -138,7 +180,7 @@ func (t *GoalTool) Invoke(ctx context.Context, args json.RawMessage) (string, er
 	}
 	action := strings.ToLower(strings.TrimSpace(in.Action))
 	if action == "" {
-		return "", errors.New(`goal: "action" is required (set, get, complete, abandon)`)
+		return "", errors.New(`goal: "action" is required (set, get, pause, resume, block, unblock, complete, abandon, clear)`)
 	}
 
 	sessionID := goalSessionKey(ctx)
@@ -155,86 +197,23 @@ func (t *GoalTool) Invoke(ctx context.Context, args json.RawMessage) (string, er
 			t.sessions[sessionID] = cloneGoal(saved)
 		}
 	}
-	goal := t.sessions[sessionID]
-	var message string
-	switch action {
-	case "set":
-		objective := strings.TrimSpace(in.Objective)
-		if objective == "" && goal != nil {
-			objective = goal.Objective
-		}
-		if objective == "" {
-			t.mu.Unlock()
-			return "", errors.New(`goal: "objective" is required for set`)
-		}
-		var steps []string
-		progress := 0
-		if goal != nil {
-			steps = goal.Steps
-			progress = goal.Progress
-		}
-		if in.Steps != nil {
-			steps = cleanSteps(in.Steps)
-		}
-		if in.Progress != nil {
-			p, err := clampProgress(*in.Progress)
-			if err != nil {
-				t.mu.Unlock()
-				return "", err
-			}
-			progress = p
-		}
-		t.sessions[sessionID] = &Goal{
-			Objective: objective,
-			Steps:     append([]string(nil), steps...),
-			Progress:  progress,
-			Status:    GoalActive,
-			UpdatedAt: time.Now().UTC(),
-		}
-		goal = t.sessions[sessionID]
-		message = strings.TrimSpace(in.Message)
-		if message == "" {
-			message = "goal set"
-		}
-	case "get":
-		if goal == nil {
-			message = "no goal set"
-		} else {
-			message = "goal"
-		}
-	case "complete":
-		if goal == nil {
-			t.mu.Unlock()
-			return "", errors.New("goal: no goal to complete")
-		}
-		goal.Status = GoalCompleted
-		goal.Progress = 100
-		goal.UpdatedAt = time.Now().UTC()
-		message = strings.TrimSpace(in.Message)
-		if message == "" {
-			message = "goal completed"
-		}
-	case "abandon":
-		if goal == nil {
-			t.mu.Unlock()
-			return "", errors.New("goal: no goal to abandon")
-		}
-		goal.Status = GoalAbandoned
-		goal.UpdatedAt = time.Now().UTC()
-		message = strings.TrimSpace(in.Message)
-		if message == "" {
-			message = "goal abandoned"
-		}
-	default:
+	previous := t.sessions[sessionID]
+	next, message, err := ApplyGoalAction(previous, action, in.Objective, in.Steps, in.Progress, in.Message)
+	if err != nil {
 		t.mu.Unlock()
-		return "", fmt.Errorf("goal: unknown action %q (want set, get, complete, abandon)", in.Action)
+		return "", err
 	}
-	result := cloneGoal(goal)
+	if next == nil {
+		delete(t.sessions, sessionID)
+	} else {
+		t.sessions[sessionID] = next
+	}
 	if t.persister != nil && action != "get" {
-		if goal != nil {
-			_ = t.persister.SaveGoal(sessionID, cloneGoal(goal))
-		}
+		// SaveGoal(nil) persists the cleared state; a persistence failure is
+		// not fatal (the in-memory goal is authoritative for this process).
+		_ = t.persister.SaveGoal(sessionID, cloneGoal(next))
 	}
+	result := cloneGoal(next)
 	t.mu.Unlock()
 
 	out, err := json.Marshal(GoalResult{
@@ -247,6 +226,138 @@ func (t *GoalTool) Invoke(ctx context.Context, args json.RawMessage) (string, er
 		return "", fmt.Errorf("goal: encode result: %w", err)
 	}
 	return string(out), nil
+}
+
+// ApplyGoalAction applies one lifecycle action to the previous goal and returns
+// the next goal (nil means "no goal"), a human-readable message, and an error
+// for invalid transitions. It is the single implementation shared by the goal
+// tool and the Controller.GoalAction /goal API.
+//
+// set keeps the steps/progress of an update of the same objective and assigns a
+// fresh id when the objective changes or a completed/abandoned goal is reopened.
+// pause/block move the phase without abandoning the objective; resume/unblock
+// return it to active. complete and abandon are terminal; clear deletes the
+// goal. Every mutating action increments Revision, and get is side-effect free.
+func ApplyGoalAction(previous *Goal, action, objective string, steps []string, progress *int, message string) (*Goal, string, error) {
+	action = strings.ToLower(strings.TrimSpace(action))
+	now := time.Now().UTC()
+	switch action {
+	case "get":
+		if previous == nil {
+			return nil, "no goal set", nil
+		}
+		return cloneGoal(previous), "goal", nil
+	case "clear":
+		if previous == nil {
+			return nil, "no goal set", nil
+		}
+		return nil, "goal cleared", nil
+	case "set":
+		next := &Goal{Status: GoalActive, Phase: GoalPhaseActive, UpdatedAt: now}
+		if previous != nil {
+			next.Objective = previous.Objective
+			next.Steps = append([]string(nil), previous.Steps...)
+			next.Progress = previous.Progress
+			next.ID = previous.ID
+			next.Revision = previous.Revision
+		}
+		if obj := strings.TrimSpace(objective); obj != "" {
+			next.Objective = obj
+		}
+		if strings.TrimSpace(next.Objective) == "" {
+			return nil, "", errors.New(`goal: "objective" is required for set`)
+		}
+		if steps != nil {
+			next.Steps = cleanSteps(steps)
+		}
+		if progress != nil {
+			p, err := clampProgress(*progress)
+			if err != nil {
+				return nil, "", fmt.Errorf("goal: %w", err)
+			}
+			next.Progress = p
+		}
+		newObjective := previous == nil || strings.TrimSpace(previous.Objective) != strings.TrimSpace(next.Objective)
+		reopened := previous != nil && previous.Status != GoalActive
+		if next.ID == "" || newObjective || reopened {
+			// A new goal instance starts a fresh id and revision sequence.
+			next.ID = newGoalID()
+			next.Revision = 0
+		}
+		next.Revision++
+		msg := strings.TrimSpace(message)
+		if msg == "" {
+			msg = "goal set"
+		}
+		return next, msg, nil
+	}
+
+	if previous == nil {
+		return nil, "", fmt.Errorf("goal: no goal to %s", action)
+	}
+	next := cloneGoal(previous)
+	next.UpdatedAt = now
+	msg := strings.TrimSpace(message)
+	switch action {
+	case "pause":
+		if next.Status != GoalActive {
+			return nil, "", fmt.Errorf("goal: cannot pause a %s goal", next.Status)
+		}
+		next.Phase = GoalPhasePaused
+		if msg == "" {
+			msg = "goal paused"
+		}
+	case "resume":
+		if next.Status != GoalActive {
+			return nil, "", fmt.Errorf("goal: cannot resume a %s goal", next.Status)
+		}
+		next.Phase = GoalPhaseActive
+		if msg == "" {
+			msg = "goal resumed"
+		}
+	case "block":
+		if next.Status != GoalActive {
+			return nil, "", fmt.Errorf("goal: cannot block a %s goal", next.Status)
+		}
+		next.Phase = GoalPhaseBlocked
+		if msg == "" {
+			msg = "goal blocked"
+		}
+	case "unblock":
+		if next.Status != GoalActive {
+			return nil, "", fmt.Errorf("goal: cannot unblock a %s goal", next.Status)
+		}
+		next.Phase = GoalPhaseActive
+		if msg == "" {
+			msg = "goal unblocked"
+		}
+	case "complete":
+		next.Status = GoalCompleted
+		next.Phase = GoalPhaseCompleted
+		next.Progress = 100
+		if msg == "" {
+			msg = "goal completed"
+		}
+	case "abandon":
+		next.Status = GoalAbandoned
+		next.Phase = GoalPhaseAbandoned
+		if msg == "" {
+			msg = "goal abandoned"
+		}
+	default:
+		return nil, "", fmt.Errorf("goal: unknown action %q (want set, get, pause, resume, block, unblock, complete, abandon, clear)", action)
+	}
+	next.Revision++
+	return next, msg, nil
+}
+
+// newGoalID returns a random goal instance id.
+func newGoalID() string {
+	var b [8]byte
+	if _, err := rand.Read(b[:]); err != nil {
+		return fmt.Sprintf("goal-%d", time.Now().UnixNano())
+	}
+	return "goal-" + hex.EncodeToString(b[:])
 }
 
 // Current returns a copy of the current goal, or nil. The view reads it only

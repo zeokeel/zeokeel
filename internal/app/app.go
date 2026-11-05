@@ -79,10 +79,12 @@ type app struct {
 	// ready. observeTurnFinished fans terminal turns out to it and to the
 	// automation run history (PD-06).
 	notifier *notificationDispatcher
-	// automationMu guards automationRuns: session id -> automation run id for
-	// fired automations whose turn has not finished yet.
-	automationMu   sync.Mutex
-	automationRuns map[string]string
+	// automationMu guards automationRuns (session id -> automation run id for
+	// fired automations whose turn has not finished yet) and automationTerminals
+	// (terminal outcomes that arrived before the run row existed).
+	automationMu        sync.Mutex
+	automationRuns      map[string]string
+	automationTerminals map[string]automationTerminalState
 
 	// buildMu serializes agent rebuilds; bundle is the current one, closed
 	// when a rebuild replaces it.
@@ -201,6 +203,10 @@ func (a *app) run() error {
 			// one map lookup. The controller's turn and approval hooks cover
 			// background sessions, which OnUpdate never publishes.
 			notifier := newNotificationDispatcher(newSystemNotifier(), a.notificationActive, a.uiLanguage, a.focusSession)
+			// PD-05 notification settings: the dispatcher reads them per
+			// notification, so toggling them in Settings applies immediately.
+			notifier.enabled = a.notificationsEnabled
+			notifier.suppressFocused = a.notificationsSuppressFocused
 			notifier.useTurnFinishedHook()
 			notifier.useApprovalHook()
 			a.notifier = notifier
@@ -222,15 +228,21 @@ func (a *app) run() error {
 				mygo.ClearNotifications()
 			}
 		})
-		// Closing the window hides it; the tray keeps the app alive. The close
-		// must be prevented, not just observed: OnClosed runs after the window
-		// is destroyed, when Hide and the tray's Show would be no-ops. During
-		// quit a.quitting is already set, so the windows close for real.
+		// Closing the window hides it by default; the tray keeps the app alive.
+		// ui.close_behavior=quit makes the close button exit instead (PD-05).
+		// The close must be prevented, not just observed: OnClosed runs after
+		// the window is destroyed, when Hide and the tray's Show would be
+		// no-ops. During quit a.quitting is already set, so the windows close
+		// for real.
 		a.win.OnClose(func(e *mygo.CloseEvent) {
 			if a.quitting {
 				return
 			}
 			e.PreventDefault()
+			if a.closeBehaviorQuits() {
+				a.quitApplication()
+				return
+			}
 			a.win.Hide()
 		})
 		mygo.App.OnWindowAllClosed(func() {
@@ -241,6 +253,9 @@ func (a *app) run() error {
 			a.win.Focus()
 		})
 		a.installTray()
+		// PD-12: make the OS autostart registration agree with app.autostart.
+		// Best effort: a failure is logged and never blocks startup.
+		a.syncAutostartFromSetting()
 	})
 	err := mygo.App.Run()
 	a.stopServices()
@@ -270,6 +285,9 @@ func (a *app) startServices() {
 	a.services = ctrl
 	a.cleanup = cleanup
 	a.bundle = built
+	// /goal changes and goal-driver state persist through the store-backed tool
+	// state, so a restart shows the same objective (FP-04).
+	ctrl.SetGoalStore(storeToolState{st: ctrl.Store()})
 	if built != nil {
 		ctrl.SetAgentModeSwitcher(built.Agent.SetMode)
 	}
@@ -581,6 +599,8 @@ func (a *app) installTray() {
 				a.win.Focus()
 			}
 		}},
+		{Label: "New Session", Click: func(*mygo.MenuItem, *mygo.Window) { a.trayNewSession() }},
+		{Label: "Settings", Click: func(*mygo.MenuItem, *mygo.Window) { a.traySettings() }},
 		mygo.Separator(),
 		{Label: "Quit", Click: func(*mygo.MenuItem, *mygo.Window) { a.quitApplication() }},
 	})

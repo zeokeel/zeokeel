@@ -166,3 +166,20 @@ type Error struct {
 }
 
 func (Error) isEvent() {}
+
+// WorkspaceChange is one file an agent turn added, modified or deleted.
+type WorkspaceChange struct {
+	Path   string `json:"path"`
+	Status string `json:"status"` // added|modified|deleted
+}
+
+// WorkspaceChanges reports the files one completed turn changed in the
+// workspace (DSH's workspace/changes session event). It is a display/telemetry
+// event: it never alters the conversation or the tool state.
+type WorkspaceChanges struct {
+	TurnID string
+	// Changes is the turn's changed paths, sorted by path.
+	Changes []WorkspaceChange
+}
+
+func (WorkspaceChanges) isEvent() {}

@@ -179,17 +179,17 @@ func TestCreatorCanSetSettingAndWriteSkill(t *testing.T) {
 		t.Fatalf("loaded skills = %+v", loaded)
 	}
 
-	// The skill tool sees the catalog at build time; a Creator-written skill
-	// becomes available after the next registry rebuild, not silently within
-	// the turn that wrote it.
+	// The skill tool rescans its roots when SKILL.md files change (FP-17), so a
+	// Creator-written skill appears in the same process without a rebuild; the
+	// rebuild below proves it also survives a new registry.
 	skillTool, ok := bundle.Agent.ToolByName("skill")
 	if !ok {
 		t.Fatalf("creator has no skill tool: %v", bundle.Agent.ToolNames())
 	}
 	if out, err := skillTool.Invoke(ctx, json.RawMessage(`{"action":"list"}`)); err != nil {
 		t.Fatalf("skill list: %v", err)
-	} else if !strings.Contains(out, "No skills available") {
-		t.Fatalf("pre-existing skill catalog = %q, want empty before rebuild", out)
+	} else if !strings.Contains(out, "creator-probe") {
+		t.Fatalf("skill catalog after write = %q, want the refreshed catalog to include creator-probe", out)
 	}
 	rebuilt, err := buildAgentWithOptions(st, dir, "instruction", registryOptions{Mode: runtime.ModeCreator})
 	if err != nil || rebuilt == nil {

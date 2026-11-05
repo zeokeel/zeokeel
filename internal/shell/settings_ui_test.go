@@ -14,6 +14,16 @@ import (
 	"github.com/zeokeel/zeokeel/internal/state"
 )
 
+// settingsWindowPreviewW/H mirror the independent settings window metrics in
+// internal/app/settings_window.go (settingsWindowWidth/Height = 900x840). The
+// shell cannot import internal/app (the dependency points the other way), so
+// the preview fixtures keep the same numbers here; update both together when
+// the window size changes.
+const (
+	settingsWindowPreviewW = 900
+	settingsWindowPreviewH = 840
+)
+
 // TestSettingsShortcutsAndPersistence drives the settings modal with the
 // keyboard and the mouse, then checks that every value is persisted and
 // applied to the running app.
@@ -724,7 +734,7 @@ func TestSettingsViewRendersStandalone(t *testing.T) {
 	h.app.Language = LangEN
 	closed := 0
 	h.app.SetSettingsWindowCloser(func() { closed++ })
-	tt := ui.NewTester(h.app.SettingsView, 900, 720)
+	tt := ui.NewTester(h.app.SettingsView, settingsWindowPreviewW, settingsWindowPreviewH)
 	tt.Frame()
 
 	for _, want := range []string{"Settings", "General", "Models", "Built-in plugins", "Language", "Close settings"} {
@@ -843,7 +853,7 @@ func TestRenderSettingsWindowNativePreview(t *testing.T) {
 	// the "no 关闭" assertion below would catch the label coming back.
 	fallback := newLiveApp(t, &shellProvider{})
 	fallback.app.Language = LangZH
-	ftt := ui.NewTester(fallback.app.SettingsView, 900, 720)
+	ftt := ui.NewTester(fallback.app.SettingsView, settingsWindowPreviewW, settingsWindowPreviewH)
 	ftt.Frame()
 	if !exactText(ftt.Texts(), "关闭") {
 		t.Fatalf("the modal fallback lost its explicit Close label: %q", ftt.Texts())
@@ -872,7 +882,7 @@ func TestRenderSettingsWindowNativePreview(t *testing.T) {
 			}
 			// The window form has exactly one visible close entry: the panel X
 			// ("关闭设置"), and no explicit "关闭" button from the modal header.
-			tt := ui.NewTester(h.app.SettingsView, 900, 720)
+			tt := ui.NewTester(h.app.SettingsView, settingsWindowPreviewW, settingsWindowPreviewH)
 			tt.Frame()
 			if _, ok := tt.Find("关闭设置"); !ok {
 				t.Fatalf("the settings window lost its panel X: %q", tt.Texts())
@@ -880,7 +890,7 @@ func TestRenderSettingsWindowNativePreview(t *testing.T) {
 			if exactText(tt.Texts(), "关闭") {
 				t.Fatalf("the settings window still shows the modal's Close label: %q", tt.Texts())
 			}
-			img := ui.Render(h.app.SettingsView, 900, 720, 1)
+			img := ui.Render(h.app.SettingsView, settingsWindowPreviewW, settingsWindowPreviewH, 1)
 			path := filepath.Join(dir, "settings-window-native-"+tc.name+".png")
 			f, err := os.Create(path)
 			if err != nil {

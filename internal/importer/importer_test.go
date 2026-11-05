@@ -43,8 +43,12 @@ func jsonLine(t *testing.T, v any) string {
 }
 
 func headerLine(t *testing.T, id, cwd, origin string, depth int) string {
+	return headerLineVersion(t, id, cwd, origin, depth, 4)
+}
+
+func headerLineVersion(t *testing.T, id, cwd, origin string, depth, version int) string {
 	return jsonLine(t, map[string]any{
-		"type": "session", "version": 4, "id": id, "createdAt": int64(1793788819976),
+		"type": "session", "version": version, "id": id, "createdAt": int64(1793788819976),
 		"cwd": cwd, "origin": origin, "delegationDepth": depth, "agentPreset": "standard",
 	})
 }
@@ -53,9 +57,22 @@ func eventLine(t *testing.T, typ string, seq int64, data any) string {
 	return jsonLine(t, map[string]any{"type": typ, "seq": seq, "time": int64(1793788819976 + seq), "data": data})
 }
 
+// userMessageEvent is one genuine human message (source.kind == "user").
 func userMessageEvent(t *testing.T, seq int64, text string) string {
 	return eventLine(t, "user/message", seq, map[string]any{
 		"role":    "user",
+		"source":  map[string]any{"kind": "user"},
+		"content": []map[string]any{{"type": "text", "text": text}},
+	})
+}
+
+// injectedUserMessageEvent is DSH-injected per-turn context: it arrives as a
+// user/message event but its source.kind is not "user" (time-context,
+// runtime-context, agent-message, ...), so it must not become a user bubble.
+func injectedUserMessageEvent(t *testing.T, seq int64, kind, text string) string {
+	return eventLine(t, "user/message", seq, map[string]any{
+		"role":    "user",
+		"source":  map[string]any{"kind": kind},
 		"content": []map[string]any{{"type": "text", "text": text}},
 	})
 }
@@ -160,9 +177,14 @@ func TestParseSessionV4(t *testing.T) {
 		t.Fatalf("user message = %+v", sess.Messages[0])
 	}
 	assistant := sess.Messages[1]
-	if assistant.Role != "assistant" || !strings.Contains(assistant.Content, "running a tool") ||
-		!strings.Contains(assistant.Content, "[tool call] bash") {
+	if assistant.Role != "assistant" || !strings.Contains(assistant.Content, "running a tool") {
 		t.Fatalf("assistant message = %+v", assistant)
+	}
+	if strings.Contains(assistant.Content, "[tool call]") {
+		t.Fatalf("assistant content still contains a synthetic tool-call line: %q", assistant.Content)
+	}
+	if sess.StepAssistant != 0 || sess.SystemInjected != 0 {
+		t.Fatalf("filter counters on a plain session = step %d system %d, want 0/0", sess.StepAssistant, sess.SystemInjected)
 	}
 	if assistant.Reasoning != "thinking…" {
 		t.Fatalf("reasoning = %q", assistant.Reasoning)
@@ -350,5 +372,261 @@ func TestImportTornSessionDoesNotAbortRun(t *testing.T) {
 	}
 	if report.SessionsFailed != 1 || report.SessionsImported != 1 || len(report.Errors) != 1 {
 		t.Fatalf("report = %+v", report)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// PD-04 quality fixes: injected-context filtering, step-message filtering,
+// skip-reason reporting and idempotency/version guards.
+// ---------------------------------------------------------------------------
+
+func imagePart() map[string]any { return map[string]any{"type": "image"} }
+
+func TestParseSessionFiltersInjectedAndStepMessages(t *testing.T) {
+	home := t.TempDir()
+	cwd := t.TempDir()
+	path := writeFixtureSession(t, home, "--w--", "sess-filter", "session.v4.jsonl", []string{
+		headerLine(t, "sess-filter", cwd, "user", 0),
+		userMessageEvent(t, 1, "real question"),
+		injectedUserMessageEvent(t, 2, "time-context", "Time sampled while preparing turn 1"),
+		injectedUserMessageEvent(t, 3, "runtime-context", "Current runtime context: ..."),
+		// Step-level assistant event: reasoning + tool call, no visible text.
+		assistantMessageEvent(t, 4, []map[string]any{
+			{"type": "reasoning", "text": "thinking about the question"},
+			{"type": "tool-call", "id": "call-1", "name": "bash", "arguments": `{"command":"ls"}`},
+		}),
+		// Final reply: visible text (+ a dropped image part).
+		assistantMessageEvent(t, 5, []map[string]any{
+			{"type": "text", "text": "final answer"},
+			imagePart(),
+		}),
+	})
+	sess, err := ParseSessionFile(path)
+	if err != nil {
+		t.Fatalf("ParseSessionFile: %v", err)
+	}
+	if len(sess.Messages) != 2 {
+		t.Fatalf("messages = %d, want 2: %+v", len(sess.Messages), sess.Messages)
+	}
+	if sess.Messages[0].Role != "user" || sess.Messages[0].Content != "real question" {
+		t.Fatalf("user message = %+v", sess.Messages[0])
+	}
+	if sess.Messages[1].Role != "assistant" || sess.Messages[1].Content != "final answer" {
+		t.Fatalf("assistant message = %+v", sess.Messages[1])
+	}
+	if sess.SystemInjected != 2 {
+		t.Fatalf("SystemInjected = %d, want 2", sess.SystemInjected)
+	}
+	if sess.StepAssistant != 1 {
+		t.Fatalf("StepAssistant = %d, want 1", sess.StepAssistant)
+	}
+	if sess.Images != 1 {
+		t.Fatalf("Images = %d, want 1", sess.Images)
+	}
+	for _, msg := range sess.Messages {
+		for _, forbidden := range []string{"Time sampled", "Current runtime context", "[tool call]"} {
+			if strings.Contains(msg.Content, forbidden) {
+				t.Fatalf("imported content still contains %q: %q", forbidden, msg.Content)
+			}
+		}
+	}
+}
+
+func TestImportReportSkipReasonsAndImages(t *testing.T) {
+	home := t.TempDir()
+	cwd := t.TempDir()
+	writeFixtureSession(t, home, "--w--", "sess-skips", "session.v4.jsonl", []string{
+		headerLine(t, "sess-skips", cwd, "user", 0),
+		userMessageEvent(t, 1, "hi"),
+		injectedUserMessageEvent(t, 2, "time-context", "time context"),
+		injectedUserMessageEvent(t, 3, "agent-message", "agent note"),
+		assistantMessageEvent(t, 4, []map[string]any{{"type": "tool-call", "id": "c1", "name": "bash", "arguments": `{}`}}),
+		assistantMessageEvent(t, 5, []map[string]any{{"type": "text", "text": "answer"}, imagePart()}),
+	})
+	report, err := Import(context.Background(), Options{DSHHome: home, DryRun: true})
+	if err != nil {
+		t.Fatalf("Import dry run: %v", err)
+	}
+	if report.MessagesImported != 2 || report.SessionsImported != 1 {
+		t.Fatalf("report = %+v", report)
+	}
+	want := map[string]int{
+		SkipSystemInjected: 2,
+		SkipStepAssistant:  1,
+		SkipImagesDropped:  1,
+	}
+	for reason, n := range want {
+		if got := report.Skips[reason]; got != n {
+			t.Errorf("Skips[%s] = %d, want %d (report %+v)", reason, got, n, report.Skips)
+		}
+	}
+	if report.ImagesDropped != 1 {
+		t.Errorf("ImagesDropped = %d, want 1", report.ImagesDropped)
+	}
+	raw, err := json.Marshal(report)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(raw), `"skips"`) || !strings.Contains(string(raw), SkipSystemInjected) {
+		t.Fatalf("report JSON does not expose skip reasons: %s", raw)
+	}
+}
+
+func TestImportUnsupportedVersionIsExplicit(t *testing.T) {
+	home := t.TempDir()
+	cwd := t.TempDir()
+	path := writeFixtureSession(t, home, "--w--", "sess-v5", "session.v5.jsonl", []string{
+		headerLineVersion(t, "sess-v5", cwd, "user", 0, 5),
+		userMessageEvent(t, 1, "future format"),
+	})
+	if _, err := ParseSessionFile(path); !errors.Is(err, ErrUnsupportedVersion) {
+		t.Fatalf("ParseSessionFile error = %v, want ErrUnsupportedVersion", err)
+	}
+	// The parser intentionally only discovers the version-5 file if a session
+	// file name matches; rename it so Probe finds it, then check the report.
+	if err := os.Rename(path, filepath.Join(filepath.Dir(path), "session.v4.jsonl")); err != nil {
+		t.Fatal(err)
+	}
+	report, err := Import(context.Background(), Options{DSHHome: home, DryRun: true})
+	if err != nil {
+		t.Fatalf("Import: %v", err)
+	}
+	if report.SessionsFound != 1 || report.SessionsImported != 0 ||
+		report.SessionsSkipped != 1 || report.SessionsFailed != 0 {
+		t.Fatalf("report = %+v", report)
+	}
+	if report.Skips[SkipUnsupportedVersion] != 1 {
+		t.Fatalf("Skips[unsupported_version] = %d, want 1 (%+v)", report.Skips[SkipUnsupportedVersion], report.Skips)
+	}
+	if len(report.Errors) != 1 || !strings.Contains(report.Errors[0].Error, "unsupported") {
+		t.Fatalf("unsupported version not surfaced explicitly: %+v", report.Errors)
+	}
+}
+
+func TestImportManifestIdempotent(t *testing.T) {
+	home := t.TempDir()
+	cwd := t.TempDir()
+	path := writeFixtureSession(t, home, "--w--", "sess-idem", "session.v4.jsonl", []string{
+		headerLine(t, "sess-idem", cwd, "user", 0),
+		userMessageEvent(t, 1, "hello"),
+		assistantMessageEvent(t, 2, []map[string]any{{"type": "text", "text": "hi"}}),
+	})
+	manifestPath := filepath.Join(t.TempDir(), "dsh-import.json")
+	st := newStore(t)
+	opts := Options{DSHHome: home, Store: st, ManifestPath: manifestPath}
+
+	first, err := Import(context.Background(), opts)
+	if err != nil {
+		t.Fatalf("first import: %v", err)
+	}
+	if first.SessionsImported != 1 || first.MessagesImported != 2 {
+		t.Fatalf("first report = %+v", first)
+	}
+	if _, err := os.Stat(manifestPath); err != nil {
+		t.Fatalf("manifest not written: %v", err)
+	}
+	manifest, err := loadManifest(manifestPath)
+	if err != nil {
+		t.Fatalf("load manifest: %v", err)
+	}
+	if len(manifest.Sessions) != 1 {
+		t.Fatalf("manifest sessions = %d, want 1", len(manifest.Sessions))
+	}
+	for _, entry := range manifest.Sessions {
+		if entry.SHA256 == "" || entry.SourceSize == 0 || entry.ZeoKeelSessionID == "" || entry.SessionID != "sess-idem" {
+			t.Fatalf("manifest entry incomplete: %+v", entry)
+		}
+	}
+	sessions, err := st.ListSessions(first.Workspaces[0].WorkspaceID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(sessions) != 1 {
+		t.Fatalf("sessions after first import = %d, want 1", len(sessions))
+	}
+
+	// Second run: unchanged source must be skipped, not duplicated.
+	second, err := Import(context.Background(), opts)
+	if err != nil {
+		t.Fatalf("second import: %v", err)
+	}
+	if second.SessionsImported != 0 || second.SessionsSkipped != 1 || second.Skips[SkipIdempotent] != 1 {
+		t.Fatalf("second report = %+v", second)
+	}
+	sessions, err = st.ListSessions(first.Workspaces[0].WorkspaceID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(sessions) != 1 {
+		t.Fatalf("second import duplicated the session: %d sessions", len(sessions))
+	}
+
+	// Third run after the DSH session changed (continued conversation): the
+	// hash differs, so the new content is imported as a fresh session.
+	f, err := os.OpenFile(path, os.O_APPEND|os.O_WRONLY, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.WriteString(assistantMessageEvent(t, 3, []map[string]any{{"type": "text", "text": "follow-up"}}) + "\n"); err != nil {
+		t.Fatal(err)
+	}
+	_ = f.Close()
+	third, err := Import(context.Background(), opts)
+	if err != nil {
+		t.Fatalf("third import: %v", err)
+	}
+	if third.SessionsImported != 1 || third.Skips[SkipIdempotent] != 0 {
+		t.Fatalf("third report = %+v", third)
+	}
+	sessions, err = st.ListSessions(first.Workspaces[0].WorkspaceID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(sessions) != 2 {
+		t.Fatalf("changed session was not re-imported: %d sessions", len(sessions))
+	}
+}
+
+func TestImportManifestDryRunDoesNotWrite(t *testing.T) {
+	home := t.TempDir()
+	cwd := t.TempDir()
+	writeFixtureSession(t, home, "--w--", "sess-dry", "session.v4.jsonl", []string{
+		headerLine(t, "sess-dry", cwd, "user", 0),
+		userMessageEvent(t, 1, "hello"),
+	})
+	manifestPath := filepath.Join(t.TempDir(), "manifest.json")
+	report, err := Import(context.Background(), Options{DSHHome: home, DryRun: true, ManifestPath: manifestPath})
+	if err != nil {
+		t.Fatalf("dry run: %v", err)
+	}
+	if report.SessionsImported != 1 {
+		t.Fatalf("dry-run report = %+v", report)
+	}
+	if _, err := os.Stat(manifestPath); !os.IsNotExist(err) {
+		t.Fatalf("dry run wrote a manifest: %v", err)
+	}
+}
+
+func TestImportCorruptManifestFailsBeforeWriting(t *testing.T) {
+	home := t.TempDir()
+	cwd := t.TempDir()
+	writeFixtureSession(t, home, "--w--", "sess-manifest", "session.v4.jsonl", []string{
+		headerLine(t, "sess-manifest", cwd, "user", 0),
+		userMessageEvent(t, 1, "hello"),
+	})
+	manifestPath := filepath.Join(t.TempDir(), "manifest.json")
+	if err := os.WriteFile(manifestPath, []byte("not json"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	st := newStore(t)
+	if _, err := Import(context.Background(), Options{DSHHome: home, Store: st, ManifestPath: manifestPath}); !errors.Is(err, ErrManifest) {
+		t.Fatalf("Import error = %v, want ErrManifest", err)
+	}
+	workspaces, err := st.ListWorkspaces()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(workspaces) != 0 {
+		t.Fatalf("corrupt manifest still imported: %d workspaces", len(workspaces))
 	}
 }

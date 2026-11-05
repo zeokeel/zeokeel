@@ -173,6 +173,11 @@ func (t *scheduleCreateTool) Invoke(ctx context.Context, args json.RawMessage) (
 		Prompt:  prompt,
 		Cron:    cron,
 		Enabled: enabled,
+		// Remember which session created the task so the scheduler can deliver
+		// the fired run back to that conversation (FP-07). Outside a session
+		// (direct tool use, tests) the id stays empty and the app creates a new
+		// session when the task fires.
+		OriginSessionID: strings.TrimSpace(runtime.SessionIDFromContext(ctx)),
 	}
 	if enabled {
 		next, err := t.nextRunUTC(cron)

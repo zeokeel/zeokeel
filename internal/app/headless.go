@@ -74,6 +74,10 @@ func RunHeadless(args []string, stdout, stderr io.Writer) int {
 	// running the startup agent.
 	a.services = ctrl
 	a.bundle = startup
+	// One-shot runs still persist /goal-created state the same way the desktop
+	// app does (the goal tool already persisted; this makes the controller API
+	// path durable too).
+	ctrl.SetGoalStore(storeToolState{st: ctrl.Store()})
 	if startup.Agent != nil {
 		ctrl.SetAgentModeSwitcher(startup.Agent.SetMode)
 	}

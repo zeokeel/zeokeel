@@ -42,7 +42,7 @@ func TestMoreMenuItemsAndAbout(t *testing.T) {
 	if err := tt.Click("About"); err != nil {
 		t.Fatalf("click About: %v", err)
 	}
-	if !tt.HasText("version 0.1.0") {
+	if !tt.HasText(BuildVersionString()) {
 		t.Fatalf("About dialog missing: %q", tt.Texts())
 	}
 	if err := tt.Click("Close"); err != nil {
@@ -87,7 +87,7 @@ func TestMoreMenuLocalizes(t *testing.T) {
 	if err := tt.Click("关于"); err != nil {
 		t.Fatalf("click 关于: %v", err)
 	}
-	if !tt.HasText("version 0.1.0") {
+	if !tt.HasText(BuildVersionString()) {
 		t.Fatalf("About dialog missing: %q", tt.Texts())
 	}
 	if err := tt.Click("关闭"); err != nil {

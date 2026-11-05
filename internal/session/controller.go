@@ -19,6 +19,7 @@ import (
 	"github.com/zeokeel/zeokeel/internal/state"
 	"github.com/zeokeel/zeokeel/internal/store"
 	"github.com/zeokeel/zeokeel/internal/tools"
+	"github.com/zeokeel/zeokeel/internal/workspacechanges"
 )
 
 // Sentinel errors returned by Controller. Callers classify failures with
@@ -128,6 +129,10 @@ type Controller struct {
 	// for; per-session modes trigger a rebuild when it differs.
 	builtPermission string
 	listeners       []func(*state.Snapshot)
+	// goalStore, when non-nil, persists each session's goal so a restart keeps
+	// it and the /goal API's changes survive. The app wires the store-backed
+	// tool state; nil keeps goals in memory only. Guarded by mu.
+	goalStore tools.GoalStateStore
 	// onTurnFinished, when non-nil, observes terminal turns of every session,
 	// including sessions that are not current (OnUpdate publishes only the
 	// current session). It runs once per turn from the turn goroutine. Guarded
@@ -248,6 +253,13 @@ type turn struct {
 	// drain goroutine (applyLocked/finishTurn), like the other unexported
 	// per-turn fields above.
 	errText string
+
+	// workspaceBefore/root/captured carry the pre-turn workspace snapshot used
+	// to report files this turn changed (FP-05 workspace/changes). Empty when
+	// diffing is skipped (Read Only, no workspace root, capture failure).
+	workspaceBefore   workspacechanges.Snapshot
+	workspaceRoot     string
+	workspaceCaptured bool
 }
 
 type draft struct {
@@ -706,6 +718,23 @@ func (c *Controller) submit(ctx context.Context, sessionID, text string, automat
 	// They are injected into the model-visible prompt (text) and user message
 	// (images), then linked to the persisted user message once it is written.
 	attachmentRows, attachmentInputs := c.turnAttachmentInputs(sessionID)
+
+	// Capture the workspace baseline for the turn's changed-file summary
+	// (FP-05). Read Only turns cannot modify files, and a session without a
+	// workspace root has nothing to diff. Capture runs before the turn starts
+	// and outside bindMu so a slow git call cannot block another binding.
+	if c.SessionPermissionOrDefault(sessionID) != PermissionAsk {
+		if root := strings.TrimSpace(c.workspaceRootForSession(sessionID)); root != "" {
+			captureCtx, cancelCapture := context.WithTimeout(context.Background(), workspaceChangesCaptureTimeout)
+			before, werr := workspacechanges.Capture(captureCtx, root)
+			cancelCapture()
+			if werr == nil {
+				t.workspaceBefore = before
+				t.workspaceRoot = root
+				t.workspaceCaptured = true
+			}
+		}
+	}
 
 	// Bind the session's workspace and start the turn as one critical section.
 	// reserve may have waited for a previous turn, and the user (or another
@@ -1258,17 +1287,26 @@ func (c *Controller) applyToolResultAtLocked(sessionID, callID, name, result str
 			return
 		}
 		if in.Goal == nil {
-			// get on an empty session reports no goal; leave any stored goal
-			// alone rather than clearing it.
+			if in.Action != "clear" {
+				// get on an empty session reports no goal; leave any stored
+				// goal alone rather than clearing it.
+				return
+			}
+			// clear removed the goal (the tool persisted the removal too).
+			previous := c.goals[sessionID]
+			delete(c.goals, sessionID)
+			c.goalDriver.goalChanged(sessionID, previous, nil)
 			return
 		}
 		goal := *in.Goal
 		goal.Steps = append([]string(nil), in.Goal.Steps...)
 		previous := c.goals[sessionID]
 		c.goals[sessionID] = &goal
-		// A brand-new objective starts a fresh automatic-continuation budget.
-		// Progress updates for the same active objective must not reset it, or
-		// the per-session cap could never be reached.
+		// A brand-new objective starts a fresh automatic-continuation budget;
+		// progress updates for the same active objective must not reset it.
+		// Paused/blocked/terminal goals are not continuable, which the driver
+		// re-checks in turnFinished; passing the goal (not nil) here keeps the
+		// per-session round counter for the transcript/UI (FP-04).
 		c.goalDriver.goalChanged(sessionID, previous, &goal)
 	}
 }
@@ -1512,6 +1550,35 @@ func (c *Controller) persistSessionStatus(t *turn, phase state.Phase) {
 	t.statusPersisted = true
 }
 
+// workspaceChangesCaptureTimeout bounds one workspace snapshot (before and
+// after) so a very large non-Git workspace cannot stall turn completion.
+const workspaceChangesCaptureTimeout = 5 * time.Second
+
+// emitWorkspaceChanges diffs the post-turn workspace against the baseline
+// captured in submit and publishes state.WorkspaceChanges for the UI/telemetry.
+// Capture/diff failures stay silent: the summary is display data, never a
+// reason to fail or delay a turn beyond the bounded timeout.
+func (c *Controller) emitWorkspaceChanges(t *turn) {
+	if c == nil || t == nil || !t.workspaceCaptured || t.workspaceRoot == "" {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), workspaceChangesCaptureTimeout)
+	defer cancel()
+	after, err := workspacechanges.Capture(ctx, t.workspaceRoot)
+	if err != nil {
+		return
+	}
+	changes := workspacechanges.Diff(t.workspaceBefore, after)
+	if len(changes) == 0 {
+		return
+	}
+	out := make([]state.WorkspaceChange, 0, len(changes))
+	for _, change := range changes {
+		out = append(out, state.WorkspaceChange{Path: change.Path, Status: change.Status})
+	}
+	c.forward(t, state.WorkspaceChanges{TurnID: t.id, Changes: out})
+}
+
 // finishTurn closes out a turn: it guarantees a terminal status and persisted
 // assistant messages, then unregisters the turn and wakes any Submit waiting
 // on it. It runs exactly once per turn.
@@ -1541,6 +1608,10 @@ func (c *Controller) finishTurn(t *turn) {
 	if !t.statusPersisted {
 		c.persistSessionStatus(t, t.phase)
 	}
+	// Report the files the turn changed (FP-05). The capture+diff runs on the
+	// turn goroutine after the terminal status, before done closes, so the
+	// summary belongs to this turn's persisted history.
+	c.emitWorkspaceChanges(t)
 
 	// Optional terminal-turn observer: OnUpdate only publishes the current
 	// session, so the desktop shell needs this hook to notify about background
@@ -3073,19 +3144,80 @@ func (c *Controller) SessionGoal(sessionID string) *tools.Goal {
 // does not.
 func (c *Controller) SetGoal(goal *tools.Goal) {
 	c.mu.Lock()
-	defer c.mu.Unlock()
-	if c.currentID == "" {
+	sessionID := c.currentID
+	if sessionID == "" {
+		c.mu.Unlock()
 		return
 	}
-	previous := c.goals[c.currentID]
-	if goal == nil {
-		delete(c.goals, c.currentID)
-		c.goalDriver.goalChanged(c.currentID, previous, nil)
-		return
+	previous := c.goals[sessionID]
+	var next *tools.Goal
+	if goal != nil {
+		next = cloneGoal(goal)
 	}
-	next := cloneGoal(goal)
-	c.goals[c.currentID] = next
-	c.goalDriver.goalChanged(c.currentID, previous, next)
+	if next == nil {
+		delete(c.goals, sessionID)
+	} else {
+		c.goals[sessionID] = next
+	}
+	// Report the goal itself (not nil) so a terminal/paused goal keeps its
+	// continuation counter; the driver re-checks continuability per turn.
+	c.goalDriver.goalChanged(sessionID, previous, next)
+	store := c.goalStore
+	c.mu.Unlock()
+	if store != nil {
+		_ = store.SaveGoal(sessionID, cloneGoal(next))
+	}
+}
+
+// SetGoalStore wires the persistence seam /goal changes are saved through. The
+// app passes the store-backed tool state so a goal survives a restart; nil
+// keeps goals in memory only (tests, previews).
+func (c *Controller) SetGoalStore(store tools.GoalStateStore) {
+	c.mu.Lock()
+	c.goalStore = store
+	c.mu.Unlock()
+}
+
+// GoalAction applies one /goal command to the current session's goal and
+// persists the result. It is the non-model entry point for the shell's /goal
+// command: action is set (with objective), pause, resume, block, unblock,
+// complete, abandon, clear or get. steps/progress are optional set fields. The
+// returned goal is nil for clear and for get when no goal is set.
+func (c *Controller) GoalAction(action, objective string, steps []string, progress *int) (*tools.Goal, error) {
+	action = strings.ToLower(strings.TrimSpace(action))
+	if action == "" {
+		return nil, fmt.Errorf("%w: goal action is required", ErrInvalidArgument)
+	}
+	c.mu.Lock()
+	sessionID := c.currentID
+	if sessionID == "" {
+		c.mu.Unlock()
+		return nil, fmt.Errorf("%w: goal: no current session", ErrInvalidArgument)
+	}
+	previous := c.goals[sessionID]
+	next, _, err := tools.ApplyGoalAction(previous, action, objective, steps, progress, "")
+	if err != nil {
+		c.mu.Unlock()
+		return nil, err
+	}
+	mutated := action != "get"
+	if next == nil {
+		delete(c.goals, sessionID)
+	} else {
+		c.goals[sessionID] = next
+	}
+	if mutated {
+		// Report the goal itself (not nil) so pausing/completing keeps the
+		// continuation counter; turnFinished re-checks goalContinuable.
+		c.goalDriver.goalChanged(sessionID, previous, next)
+	}
+	store := c.goalStore
+	result := cloneGoal(next)
+	c.mu.Unlock()
+	if mutated && store != nil {
+		_ = store.SaveGoal(sessionID, cloneGoal(next))
+	}
+	return result, nil
 }
 
 // GoalRounds returns how many automatic continuation turns the goal driver has

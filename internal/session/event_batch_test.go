@@ -165,3 +165,39 @@ func TestEventBatchInterleavedBoundaryOrder(t *testing.T) {
 		}
 	}
 }
+
+// TestWorkspaceChangesEventRoundTrip pins FP-05's event plumbing: the display
+// event encodes to the store, decodes back and folds into the snapshot, so an
+// app can emit it after a turn without a schema change.
+func TestWorkspaceChangesEventRoundTrip(t *testing.T) {
+	ev := state.WorkspaceChanges{
+		TurnID: "turn-1",
+		Changes: []state.WorkspaceChange{
+			{Path: "internal/app/app.go", Status: "modified"},
+			{Path: "docs/new.md", Status: "added"},
+		},
+	}
+	rec, err := encodeEvent(ev)
+	if err != nil {
+		t.Fatalf("encodeEvent: %v", err)
+	}
+	if rec.Type != EventWorkspaceChanges {
+		t.Fatalf("event type = %q, want %q", rec.Type, EventWorkspaceChanges)
+	}
+	back, ok := decodeEvent(rec)
+	if !ok {
+		t.Fatal("decodeEvent did not recognise the workspace/changes event")
+	}
+	decoded, ok := back.(state.WorkspaceChanges)
+	if !ok {
+		t.Fatalf("decoded event = %T, want state.WorkspaceChanges", back)
+	}
+	if decoded.TurnID != "turn-1" || len(decoded.Changes) != 2 || decoded.Changes[0].Path != "internal/app/app.go" {
+		t.Fatalf("decoded event = %+v", decoded)
+	}
+
+	snap := state.Apply(state.NewSnapshot(), ev)
+	if snap.WorkspaceChangesTurn != "turn-1" || len(snap.WorkspaceChanges) != 2 {
+		t.Fatalf("snapshot workspace changes = %+v (turn %q)", snap.WorkspaceChanges, snap.WorkspaceChangesTurn)
+	}
+}

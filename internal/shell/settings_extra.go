@@ -42,7 +42,6 @@ const (
 	settingNetworkProxy                = "network.proxy"
 	settingCloseBehavior               = "ui.close_behavior"
 	settingAutostart                   = "app.autostart"
-	settingLastSession                 = "ui.last_session"
 )
 
 // shellSetting reads one of this file's settings keys, falling back to def
@@ -97,7 +96,7 @@ func (a *App) shellToggleRow(c *ui.Context, t *design.Tokens, title, desc, key s
 	next := value
 	rowStyle := settingsRowStyle{last: last}
 	a.settingsRow(c, t, title, desc, rowStyle, func() {
-		sw := ui.Switch(c, &next).Label(title)
+		sw := ui.Switch(c, &next).Label(a.menuText("Enable ", "启用 ") + title)
 		if sw.Changed() {
 			if err := a.setShellBoolSetting(key, next); err != nil {
 				c.Toast(a.menuText("Could not save the setting: ", "设置保存失败：") + err.Error())
@@ -207,6 +206,15 @@ func (a *App) dataPrivacySettingsPage(c *ui.Context, t *design.Tokens) {
 			a.menuText("Stored in the local settings database; never uploaded by the app.",
 				"保存在本地设置数据库中；应用不会上传。"), true)
 	})
+	a.settingsSection(c, t, a.menuText("Import", "导入"), func() {
+		a.shellActionRow(c, t,
+			a.menuText("Import from DSH", "从 DSH 导入"),
+			a.menuText("Migrate an existing DSH conversation store with the zeokeel import command.",
+				"用 zeokeel import 命令迁移已有的 DSH 会话数据。"),
+			a.menuText("Show command…", "查看命令…"), false, true, func() {
+				a.shellUI().importOpen = true
+			})
+	})
 	a.settingsSection(c, t, a.menuText("Export", "导出"), func() {
 		a.shellActionRow(c, t,
 			a.menuText("Export all data", "导出全部数据"),
@@ -231,6 +239,48 @@ func (a *App) dataPrivacySettingsPage(c *ui.Context, t *design.Tokens) {
 			})
 	})
 	a.shellConfirmDialog(c, t)
+	a.importFromDSHDialog(c, t)
+}
+
+// importFromDSHDialog explains the PD-04 migration: preview first, then the
+// real import. Both commands are on the clipboard with one click; the app
+// itself cannot run a process for this, and importing while the app runs is
+// unsafe, so the dialog says to quit the app first.
+func (a *App) importFromDSHDialog(c *ui.Context, t *design.Tokens) {
+	st := a.shellUI()
+	th := t.Theme()
+	ui.Modal(c, &st.importOpen, func() {
+		ui.Column(c).Width(th.Space(120)).Gap(th.Space(3)).Children(func() {
+			settingsTypeText(c, t, design.TypeM, t.LabelPrimary,
+				a.menuText("Import from DSH", "从 DSH 导入")).FontWeight(600)
+			settingsTypeText(c, t, design.TypeXS, t.LabelSecondary, a.menuText(
+				"Quit ZeoKeel first, then run one of these commands in a terminal. --dry-run only reports what would be imported.",
+				"请先退出 ZeoKeel，然后在终端执行以下命令之一。--dry-run 只统计将要导入的内容，不写入数据。")).MaxLines(3)
+			commands := []struct{ label, command string }{
+				{a.menuText("Preview", "预览"), "zeokeel import --dry-run --json"},
+				{a.menuText("Import", "导入"), "zeokeel import"},
+			}
+			for _, item := range commands {
+				ui.Row(c).Gap(th.Space(2)).AlignItems(ui.Center).Children(func() {
+					ui.Text(c, item.command).Font(monoFont).FontSize(12).
+						TextColor(t.LabelPrimary).Grow(1)
+					label := a.menuText("Copy", "复制")
+					if ui.Button(c, label).Height(th.Space(8)).Label(label).Clicked() {
+						c.WriteClipboard(item.command)
+						a.toastDeferred(c, a.menuText("Command copied", "命令已复制"))
+					}
+				})
+			}
+			settingsTypeText(c, t, design.TypeXXS, t.LabelTertiary, a.menuText(
+				"Use --from <dir> when the DSH data folder is not the default ~/.dsh.",
+				"DSH 数据目录不是默认的 ~/.dsh 时，追加 --from <目录>。")).MaxLines(2)
+			ui.Row(c).Justify(ui.End).Children(func() {
+				if ui.Button(c, a.menuText("Close", "关闭")).Clicked() {
+					st.importOpen = false
+				}
+			})
+		})
+	})
 }
 
 // diagnosticsSettingsPage is Settings > Diagnostics: the build identity, the
@@ -385,12 +435,12 @@ func (a *App) shellConfirmDialog(c *ui.Context, t *design.Tokens) {
 		title := a.menuText("Reset settings?", "重置设置？")
 		body := a.menuText("Every setting returns to its default. Conversations, workspaces and models stay.",
 			"所有设置将恢复默认；会话、工作区与模型保留。")
-		confirm := a.menuText("Reset settings", "重置设置")
+		confirm := a.menuText("Reset defaults", "恢复默认")
 		if st.confirmKind == shellConfirmClearData {
 			title = a.menuText("Delete all conversations?", "删除全部会话？")
 			body = a.menuText("Every session and workspace is deleted. Settings and models stay. This cannot be undone.",
 				"所有会话与工作区将被删除；设置与模型保留。此操作不可撤销。")
-			confirm = a.menuText("Delete everything", "全部删除")
+			confirm = a.menuText("Delete all", "全部删除")
 		}
 		ui.Column(c).Width(th.Space(105)).Gap(th.Space(3)).Children(func() {
 			settingsTypeText(c, t, design.TypeM, t.LabelPrimary, title).FontWeight(600)
