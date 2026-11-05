@@ -45,15 +45,19 @@ var (
 	errGoalContinuationStopped = errors.New("session: goal continuation stopped")
 )
 
-// Config is everything a Controller needs. Store, Broker, Projector and Agent
-// are owned by the caller; Controller only borrows them. Projector may be nil,
-// in which case Controller creates (and closes) a private one for the Broker.
-// Agent may be nil for a read-only/static UI; Submit then reports ErrNoAgent.
-// Gate may be nil, in which case approval requests are surfaced to the UI but
-// cannot be decided through Approve or Deny.
+// Config is everything a Controller needs. Store, Broker and Agent are owned by
+// the caller; Controller only borrows them. Agent may be nil for a
+// read-only/static UI; Submit then reports ErrNoAgent. Gate may be nil, in
+// which case approval requests are surfaced to the UI but cannot be decided
+// through Approve or Deny.
 type Config struct {
-	Store       *store.Store
-	Broker      *state.Broker
+	Store  *store.Store
+	Broker *state.Broker
+	// Projector is deprecated (AR-05 convergence): the UI reads the
+	// controller's own per-session snapshots, so the raw broker projector is not
+	// a second source of truth. When supplied, New closes it immediately to stop
+	// the duplicate fold; keep passing nil (or omit the field) once the app
+	// wiring is removed.
 	Projector   *state.Projector
 	Agent       *runtime.Agent
 	Gate        *runtime.ApprovalQueue
@@ -110,13 +114,10 @@ type Config struct {
 // OnUpdate describe the session most recently opened, created or submitted to
 // (the "current" session).
 type Controller struct {
-	store     *store.Store
-	broker    *state.Broker
-	projector *state.Projector
-	agent     *runtime.Agent
-	gate      *runtime.ApprovalQueue
-
-	ownsProjector bool
+	store  *store.Store
+	broker *state.Broker
+	agent  *runtime.Agent
+	gate   *runtime.ApprovalQueue
 
 	wsMu        sync.Mutex
 	workspaceID string
@@ -154,8 +155,14 @@ type Controller struct {
 	// session's built agent, builtPermissions records the access mode it was
 	// built for, and agentsGeneration invalidates factory builds that were in
 	// flight when the app asked for a rebuild. All guarded by mu.
-	agentFactory     func(sessionID string) (*runtime.Agent, error)
-	agentDiscard     func(sessionID string, agent *runtime.Agent)
+	agentFactory func(sessionID string) (*runtime.Agent, error)
+	agentDiscard func(sessionID string, agent *runtime.Agent)
+	// modelConfigured reports whether a model is configured/usable (a saved
+	// provider key or a keyless local provider, PD-02). HasConfiguredModel
+	// exposes it to the UI: unlike HasAgent it must be false on a fresh
+	// install, where the per-session AgentFactory is installed but no model can
+	// run yet. Guarded by mu.
+	modelConfigured  func() bool
 	agents           map[string]*runtime.Agent
 	agentGates       map[string]*runtime.ApprovalQueue
 	agentGateFactory func(sessionID string) *runtime.ApprovalQueue
@@ -383,11 +390,12 @@ func New(cfg Config) (*Controller, error) {
 		}
 	}
 	c.titleCtx, c.titleCancel = context.WithCancel(context.Background())
+	// AR-05 convergence: the controller folds events into its own per-session
+	// views (the UI's source of truth), so a broker-wide projector is no longer
+	// consumed. Close one supplied by an older app wiring immediately so the
+	// duplicate fold stops; this is idempotent with the owner's later Close.
 	if cfg.Projector != nil {
-		c.projector = cfg.Projector
-	} else {
-		c.projector = state.NewProjector(context.Background(), cfg.Broker)
-		c.ownsProjector = true
+		cfg.Projector.Close()
 	}
 	return c, nil
 }
@@ -1876,8 +1884,10 @@ func (c *Controller) Wait() {
 }
 
 // Snapshot returns the current session's immutable snapshot. It never returns
-// nil; before any session exists it returns the projector's snapshot (usually
-// an empty idle snapshot).
+// nil; before any session exists it returns an empty idle snapshot. The snapshot
+// comes from the controller's own per-session fold (views), never from a raw
+// broker projector: the projector is session-unaware and cannot represent user
+// messages or a session switch (AR-05).
 func (c *Controller) Snapshot() *state.Snapshot {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -1888,9 +1898,6 @@ func (c *Controller) Snapshot() *state.Snapshot {
 		snap := state.NewSnapshot()
 		snap.SessionID = c.currentID
 		return snap
-	}
-	if c.projector != nil {
-		return c.projector.Snapshot()
 	}
 	return state.NewSnapshot()
 }
@@ -1972,9 +1979,8 @@ func (c *Controller) SetOnApprovalRequested(hook ApprovalRequestedHook) {
 }
 
 // Close cancels every in-flight turn and automatic-title request, waits for
-// them to unwind (persisting their terminal state) and closes a projector
-// created by New. A projector supplied through Config is left open for its
-// owner.
+// them to unwind and persists their terminal state. A Projector supplied through
+// Config was already closed by New (AR-05); Close never owns one.
 func (c *Controller) Close() error {
 	c.mu.Lock()
 	if !c.closed {
@@ -2008,9 +2014,6 @@ func (c *Controller) Close() error {
 		if discard != nil && agent != nil {
 			discard(sessionID, agent)
 		}
-	}
-	if c.ownsProjector && c.projector != nil {
-		c.projector.Close()
 	}
 	return nil
 }
@@ -3286,6 +3289,36 @@ func (c *Controller) HasAgent() bool {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	return c.agent != nil || c.agentFactory != nil
+}
+
+// SetModelConfiguredFunc installs the app-owned predicate that answers whether
+// a model is configured and usable. The app wires it once services are ready,
+// because provider settings (key/base URL env fallbacks) live in the app's
+// configuration layer; a nil predicate keeps the legacy agent-based fallback.
+func (c *Controller) SetModelConfiguredFunc(fn func() bool) {
+	c.mu.Lock()
+	c.modelConfigured = fn
+	c.mu.Unlock()
+}
+
+// HasConfiguredModel reports whether the app can actually run a model: a saved
+// or environment API key, or a keyless local provider (PD-02). The first-run
+// setup card and the empty-session "add a model" hint must use this instead of
+// HasAgent: HasAgent is the turn-execution predicate and is true as soon as the
+// per-session AgentFactory is installed (RT-04), which happens on startup even
+// on a fresh install with no model configured.
+//
+// Without an app predicate (unit tests, headless edge) it falls back to the
+// legacy "a shared agent exists" check.
+func (c *Controller) HasConfiguredModel() bool {
+	c.mu.Lock()
+	fn := c.modelConfigured
+	hasAgent := c.agent != nil
+	c.mu.Unlock()
+	if fn != nil {
+		return fn()
+	}
+	return hasAgent
 }
 
 // SetAgentRebuilder wires the app hook that rebuilds the runtime agent after

@@ -1,6 +1,6 @@
 # 状态（唯一状态真源）
 
-> 更新：2026-11-05（审计修复轮）· 基线 `HEAD=3100af0`；此后并发提交以 `git log` 为准。
+> 更新：2026-11-06（Round 3 收尾）· 基线 `HEAD=20e98d4`；此后并发提交以 `git log` 为准。
 > 本文件只写**当前状态与验证结果**，不写过程。历史流水已归档：[docs/history/STATUS-journal.md](history/STATUS-journal.md)（不再维护）。
 > 缺陷状态：[docs/BUGS.md](BUGS.md) · 审计证据：[docs/audit/](audit/) · 已知限制：[docs/design/known-limitations.md](design/known-limitations.md) · 规划：[docs/PLAN.md](PLAN.md)。
 
@@ -17,12 +17,12 @@
 | --- | --- |
 | 桌面壳 | 主窗口 + 设置窗口（单例非模态）+ 托盘 + 关窗隐藏 + 单实例 + 窗口状态持久化；无原生菜单栏（ADR 0006） |
 | 会话 | 流式对话（SSE）、多轮历史、SQLite 持久化、重开恢复、自动/LLM 标题、fork、JSONL 导出、反馈 |
-| Agent | eino ADK 工具回路；Standard/Minimal/Creator（**PTC 明确不做，已移除**）；压缩（LLM 摘要 + 工具裁剪）；checkpoint（回合边界）；Goal round driver（自动续轮，预算 6/cap 12）；subagent/Agent Team；workflow（JSON 步骤）；ralph |
+| Agent | eino ADK 工具回路；**声明式 Presets**（`internal/presets`：内置 standard/minimal/creator 等 + 用户 JSON 字段级覆盖 + Presets 页 + 用户指南）；**ask_user 交互阻塞等待回答**（FP-16；headless/ACP 降级 pending）；压缩（LLM 摘要 + 工具裁剪）；checkpoint（回合边界）；Goal round driver（自动续轮，预算 6/cap 12）；subagent/Agent Team；workflow（JSON 步骤）；ralph（**PTC 明确不做，已移除**） |
 | 工具 | fs（read/write/edit/editor/glob/grep）、bash/pwsh（平台门控）、terminal（Unix PTY）、jobs、web_search、web_fetch、read_image、todo、ask_user、present、report、session_query、schedule_*、skill、inspect、worktree、working_directory、MCP（stdio + resources/prompts） |
 | 审批/权限 | Full/Workspace/Read-only/Ask + Always allow；Auto-review EXP（LLM 预审，15s 超时回退人工）；审批范围 ADR 0010 |
-| 数据 | `index.sqlite`（WAL/foreign_keys/busy_timeout/单写者）为持久化真源；每会话 JSONL 镜像/导出；附件与工具结果落盘；搜索用 FTS5 trigram（LIKE 降级）；**DSH 迁移导入器**：`internal/importer` + `zeokeel import`（读取 DSH `sessions/**/session.v4.jsonl[.zstd]`，只读 DSH，凭据只读键名） |
-| 诊断/发布 | 版本注入（`--version` 输出 version/commit/buildTime）+ `-s -w`（约 -32% 体积）；日志 `logs/app-YYYYMMDD.log`（轮转）+ panic `logs/crash-*.txt`；Windows zip / Linux tar.gz / macOS unsigned `.app` 打包；**发布流水线**：`make release` / `release.yml`（tag→三平台包+SHA256SUMS+GitHub Release，未签名）；自动更新：引擎 `internal/updater` + `zeokeel update` CLI（check/download/install/--json）+ 设置页「检查更新」已交付；托管 feed/签名 DEFERRED |
-| CLI | 桌面（默认）、`--version`/`--help`、`run [--json] [--yes] "<prompt>"` headless（退出码 0/1/2，无 GUI/托盘/单实例锁）、`import [--from --dry-run --json --max --manifest/--no-manifest]`（DSH 会话迁移；幂等 manifest；凭据只列键名不读值；失败隔离） |
+| 数据 | `index.sqlite`（WAL/foreign_keys/busy_timeout/单写者）为持久化真源；每会话 JSONL 镜像/导出；附件与工具结果落盘；搜索用 FTS5 trigram（LIKE 降级）；**DSH 迁移导入器**：`internal/importer` + `zeokeel import`（读取 DSH `sessions/**/session.v4.jsonl[.zstd]`，只读 DSH，凭据只读键名）；UI 入口为设置→数据与隐私→「从 DSH 导入」命令弹窗（复制命令，非应用内执行） |
+| 诊断/发布 | 版本注入（`--version` 输出 version/commit/buildTime）+ `-s -w`（约 -32% 体积）；日志 `logs/app-YYYYMMDD.log`（轮转）+ panic `logs/crash-*.txt`；Windows zip / Linux tar.gz / macOS unsigned `.app` 打包；**发布流水线**：`make release` / `release.yml`（tag→三平台包+SHA256SUMS+GitHub Release，未签名）；自动更新：引擎 `internal/updater` + `zeokeel update` CLI + 设置页「检查更新 / 下载并安装」（install-on-restart）已交付；托管 feed/签名 DEFERRED |
+| CLI | 桌面（默认）、`--version`/`--help`、`run [--json] [--yes] "<prompt>"` headless（退出码 0/1/2，无 GUI/托盘/单实例锁）、`import [--from --dry-run --json --max --manifest/--no-manifest]`（DSH 会话迁移；幂等 manifest；凭据只列键名不读值；失败隔离）、`acp`（ACP v1 stdio server，编辑器/客户端）、`update [--check|--download|--install] [--json]`（自动更新 CLI） |
 | CI | `.github/workflows/ci.yml`：gate job 跑 `scripts/ci.sh`（gofmt/vet/build/test/零 cgo/coverage/race），shell race 单独 job `-timeout 20m` |
 
 ## 2.1 wave 2 已实现（工作树，待提交/独立复核）
@@ -30,6 +30,12 @@
 - 产品面：PD-05 设置补页（通知/数据隐私/诊断/网络/桌面/更新/重置）、PD-06 Automation 运行历史/失败/绑定、PD-07 MCP/Skills/AGENTS 管理、PD-10 会话/草稿恢复、PD-12 关闭行为/自启、首启 setup 卡、About 版本（残留重复版本行）、context budget 设置行。
 - 后端/功能：FP-19 统一代理、FP-04 Goal 模型（phase/revision）、FP-07 schedule 投回原会话、FP-15 job 完成通知、FP-01 workflow JSON parallel/pipeline、FP-03 subagent 异步、FP-05 workspace changes、PD-04 `zeokeel import` CLI + 独立验收（技术预览）；FP-11/FP-16/FP-17 见 known-limitations §3.9。
 - 视觉：22 张预览金标已按 wave1+wave2 UI 重生成（含设置窗 900×840、About 单一版本来源），`TestVisualRegression` PASS（14 屏/1.9s）。
+
+## 2.2 Round 3 已实现（已提交 `20e98d4`）
+
+- **产品功能**：FP-06 声明式 Presets（`internal/presets` + Presets 页 + 用户指南）；FP-16 `ask_user` 交互会话阻塞等待回答（headless/ACP 降级 pending）；自动更新 GUI 检查+下载+安装（install-on-restart；app `update_install.go`）；全局快捷键：Windows + Linux/X11（Linux 用 purego dlopen libX11，无 cgo；macOS/Wayland DEFERRED）；ACP v1 最小服务器 + `zeokeel acp` + adapter/e2e。
+- **数据/工程**：AR-07 `messages.ordinal` 持久化排序；AR-09 schema v2（有序迁移 + `backups/` 快照 + 旧版 downgrade 拒绝）；AR-20 `scrubEnv`/DDL 重复收敛；AR-05 快照折叠收敛（Controller 单一折叠，`state.Projector` deprecated，每事件折叠 2→1；app/services.go 4 行死代码已删）；UX-04 设置窗重绘 **CONFIRMED FIXED**（Linux/Xvfb 无 WM；真实 WM spot check）；AR-04 增量模块化（整体重构 DEFERRED，计划 `docs/design/shell-refactor-plan.md`）。
+- **发布**：`.github/workflows/release.yml`（tag→三平台矩阵包+SHA256SUMS+GitHub Release）+ `make release`；三平台交叉编译持续验证。
 
 ## 3. 门禁（"绿"的定义）
 
@@ -52,20 +58,21 @@ sh scripts/evolve/gates.sh --full # 统一门禁；flaky 重跑按失败处理
 
 1. P0 RT-01 workspace MCP 默认不执行 —— **代码已落地**（`mcp.workspace_config` 默认 off），待全量验证。
 2. P1 安全/权限（RT-02/03/07/12、PD-03/05/06/07/09/10）与 UX（UX-01/02/03、PD-01）——本轮修复中。
-3. 发布链路：签名/公证与托管 update feed 为外部依赖（DEFERRED）；自动更新引擎、`zeokeel update` CLI 与设置页检查已交付（下载/安装用 CLI），Windows 安装器为 Inno/NSIS 可执行草案（未编译）。
-4. 迁移定位已降级；**最小导入器 + `zeokeel import` CLI 已交付**（只读 DSH、凭据只列键名），设置页「从 DSH 导入」入口已提供（PD-04，技术预览）。
+3. 发布链路：签名/公证与托管 update feed 为外部依赖（DEFERRED）；自动更新引擎、`zeokeel update` CLI、设置页检查+下载+安装已交付；Windows 安装器为 Inno/NSIS 可执行草案（未编译）。
+4. 迁移定位已降级；**最小导入器 + `zeokeel import` CLI 已交付**（只读 DSH、凭据只列键名）；UI 入口为设置→数据与隐私→「从 DSH 导入」**命令弹窗**（展示/复制 `zeokeel import` 命令，提示先退出应用；非应用内执行）（PD-04，技术预览）。
+5. 结构性债务：AR-04 shell God package 已增量模块化、整体重构 DEFERRED（分批计划 `docs/design/shell-refactor-plan.md`）；AR-05 快照折叠已收敛（Controller 单一折叠，Projector deprecated）；AR-08 UI 线程同步 DB 仍 OPEN；UX-04 已 CONFIRMED FIXED（Linux/Xvfb；真实 WM spot check）。
 
 ## 5. 已知限制与真机项
 
 - 无真机 Windows/macOS：IME/屏幕阅读器/DPI/通知/安装包行为只能静态核对，发布前必须真机矩阵（[known-limitations §1](design/known-limitations.md)）。
 - 流中途失败不重试（已显示文本无法撤回，需重发）；流空闲超时/重试设置见 known-limitations §5。
-- 结构性债务（shell God package AR-04、双快照折叠 AR-05、逐 token 持久化 AR-06、Seq 回放排序 AR-07）见 BUGS。
-- wave1/2 独立验证残余（见 BUGS 与 [known-limitations §3.8](design/known-limitations.md)）：UX-04 设置窗重绘、About 双版本号、PD-02b 无 key 本地 provider、PD-04 导入质量 5 项、wave2 产品面待提交后复核。
+- 结构性债务：shell God package AR-04（PARTIAL，有分批计划）、逐 token 持久化 AR-06（PARTIAL）；AR-05（快照折叠收敛为 Controller 单一折叠/Projector deprecated）、AR-07/AR-09/AR-20 已 DONE——见 BUGS。
+- wave1/2 独立验证残余（见 BUGS 与 [known-limitations §3.8](design/known-limitations.md)）：About 双版本号、PD-02b 无 key 本地 provider、PD-04 导入质量 5 项、wave2 产品面待提交后复核；UX-04 设置窗重绘已 CONFIRMED FIXED（Linux/Xvfb，真实 WM spot check）。
 - 视觉回归为 opt-in 工具（`scripts/visual-check.sh`），CI 不强制。
 
 ## 6. 下一步（按投入产出）
 
 1. 完成本轮 P0/P1 修复与独立验证（FIX-REPORT）；确保 CI 在干净树上绿。
-2. 迁移导入质量（PD-04 wave3）：过滤 DSH 注入上下文、按 turn 聚合 step 消息、幂等/去重、图片统计、设置页导入入口；补齐后才可称"支持迁移"。
-3. 发布前真机矩阵 + 签名/公证/自动更新基建（DEFERRED，需外部条件）。
-4. 结构性债务分批：AR-05/06/07 数据层收敛 → AR-04 shell 分层（L）。
+2. 迁移导入质量（PD-04 wave3）：过滤 DSH 注入上下文、按 turn 聚合 step 消息、幂等/去重、图片统计（均已补）、运行中实例检测/旧 manifest 兼容；导入 UI 为命令弹窗，非应用内执行；补齐后才可称"支持迁移"。
+3. 发布前真机矩阵 + 签名/公证与托管 update feed（DEFERRED，需外部条件；引擎/CLI/GUI 更新链路已交付）。
+4. 结构性债务分批：AR-05 已收敛（Controller 单一折叠）；剩余 AR-06 events 保留策略/AR-22 快照 O(n) 拷贝 → AR-04 shell 分层（先用 `shell-refactor-plan` P0/P1 做增量分层，L 项整体重构 DEFERRED）。

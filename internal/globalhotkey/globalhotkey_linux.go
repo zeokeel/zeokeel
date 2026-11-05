@@ -2,17 +2,13 @@
 
 package globalhotkey
 
-// Linux has no dependency-free way to register system-wide hotkeys:
-//   - X11 needs an X11 protocol client (the common Go option is a third-party
-//     xgb/xgb-go dependency) plus a key-grab/event-loop implementation;
-//   - Wayland forbids global key grabs by design and requires a desktop portal
-//     (org.freedesktop.portal.GlobalShortcuts), which is a D-Bus client;
-//   - reading /dev/input bypasses the display server and needs elevated
-//     permissions, so it is not a viable product path.
+// Linux backend: X11 only (see x11_linux.go), implemented with purego dlopen of
+// the system libX11.so.6 — no cgo and no new module dependency.
 //
-// Adding another module dependency for this feature is a product/architecture
-// decision outside this package, so New() reports ErrUnsupported and the shell
-// stays on in-app shortcuts. Tracked as a BUGS item (PD-12 global shortcuts).
+// Headless sessions (no $DISPLAY) and Wayland sessions that expose no usable X
+// display degrade to ErrUnsupported; the shell then stays on in-app shortcuts.
+// Wayland's org.freedesktop.portal.GlobalShortcuts remains the future path for
+// a native Wayland implementation (it needs a D-Bus client).
 func platformBackend() (backend, error) {
-	return nil, ErrUnsupported
+	return newX11Backend()
 }

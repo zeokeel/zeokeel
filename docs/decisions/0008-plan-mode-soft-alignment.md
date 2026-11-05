@@ -3,7 +3,7 @@
 - 日期：2026-11-05
 - 状态：**已采纳**（取代 [ADR 0007](0007-remove-plan-mode-toggle.md) 的「入口收敛仅隐藏」处置；ADR 0007 的「移除 header 复选框」部分继续有效）
 - 决策者：用户（2026-11-05 在 DSH 调查后选择方案 A）；记录：Lead / plan-soft-runtime / plan-entry
-- 关联：[ADR 0007 移除计划模式开关](0007-remove-plan-mode-toggle.md)、DSH 参考（已安装包）：`/usr/local/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-plan-mode/README.zh.md`、`.../dsh-client-ui-plan/README.zh.md`、`.../dsh-permission-presets/README.zh.md`、[docs/design/native-ui.md §14](../design/native-ui.md)、[docs/design/known-limitations.md §3](../design/known-limitations.md)、[docs/PLAN.md](../../PLAN.md)
+- 关联：[ADR 0007 移除计划模式开关](0007-remove-plan-mode-toggle.md)、DSH 参考（已安装包）：`/usr/local/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-plan-mode/README.zh.md`、`.../dsh-client-ui-plan/README.zh.md`、`.../dsh-permission-presets/README.zh.md`、[docs/design/native-ui.md §14](../design/native-ui.md)、[docs/design/known-limitations.md §3](../design/known-limitations.md)、[docs/PLAN.md](../PLAN.md)
 - 实施：`internal/runtime/{plan_mode.go,plan_mode_test.go}`（删除）、`internal/runtime/{agent,model_adapter,ptc,subagent,modes}.go`（去掉 planMode 接线）、`internal/app/services.go`（不再向 runtime 传 PlanModeFunc）、`internal/shell/composer_menus.go`（`/plan` 命令、`/help`）、`internal/shell/session_live.go`（composer 徽章）、`internal/shell/plan_ui.go`（徽章渲染/退出）
 
 ## 1. 背景

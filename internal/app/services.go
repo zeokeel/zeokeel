@@ -120,7 +120,6 @@ func BuildServicesWith(dir string, factory AgentFactory) (*session.Controller, f
 		agent, gate, titleGen = bundle.Agent, bundle.Gate, bundle.TitleGenerator
 	}
 	broker := state.NewBroker()
-	projector := state.NewProjector(context.Background(), broker)
 	// Pass the registered tool names into the initial preset load so a user
 	// preset with a misspelled tool fails closed at New (the previous
 	// no-validation load would let it become active).
@@ -131,7 +130,6 @@ func BuildServicesWith(dir string, factory AgentFactory) (*session.Controller, f
 	ctrl, err := session.New(session.Config{
 		Store:            st,
 		Broker:           broker,
-		Projector:        projector,
 		Agent:            agent,
 		Gate:             gate,
 		TitleGenerator:   titleGen,
@@ -142,7 +140,6 @@ func BuildServicesWith(dir string, factory AgentFactory) (*session.Controller, f
 		GoalDriver: session.NewGoalRoundDriver(),
 	})
 	if err != nil {
-		projector.Close()
 		broker.Close()
 		_ = st.Close()
 		return nil, nil, fmt.Errorf("app: build services: %w", err)
@@ -170,7 +167,6 @@ func BuildServicesWith(dir string, factory AgentFactory) (*session.Controller, f
 					errs = append(errs, fmt.Errorf("close agent bundle: %w", err))
 				}
 			}
-			projector.Close()
 			broker.Close()
 			if err := st.Close(); err != nil {
 				errs = append(errs, fmt.Errorf("close store: %w", err))
@@ -1874,6 +1870,39 @@ func connectMCP(root, rawSetting, settingSource, workspaceConfig string) ([]runt
 		log.Printf("zeokeel: mcp: %v (kept %d connected server(s))", err, len(mgr.Servers()))
 	}
 	return mgr.Tools(), mgr, mgr.Close, nil
+}
+
+// hasConfiguredModel mirrors buildAgentWithOptions' provider gating for UI
+// decisions (first-run setup card, empty-session "add a model" hint): a model is
+// configured when a provider key is saved (or comes from the environment) or
+// when the endpoint is a keyless local provider (PD-02). A default model row
+// alone is not enough if the provider cannot authenticate.
+func (a *app) hasConfiguredModel() bool {
+	var st *store.Store
+	if a != nil && a.services != nil {
+		st = a.services.Store()
+	}
+	get := func(key, env string) string {
+		if st != nil {
+			if v, err := st.GetSetting(key); err == nil && strings.TrimSpace(v) != "" {
+				return strings.TrimSpace(v)
+			}
+		}
+		if env != "" {
+			if v := strings.TrimSpace(os.Getenv(env)); v != "" {
+				return v
+			}
+		}
+		return ""
+	}
+	baseURL := get("provider.base_url", "ZEOKEEL_PROVIDER_BASE_URL")
+	if baseURL == "" {
+		baseURL = openai.DefaultBaseURL
+	}
+	if get("provider.api_key", "DEEPSEEK_API_KEY") != "" {
+		return true
+	}
+	return keylessLocalProvider(baseURL)
 }
 
 // filterRegistryByPreset narrows reg to the preset's tool allowlist, keeping

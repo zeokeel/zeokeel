@@ -22,12 +22,12 @@
 | 功能 | FP-03 | P1 | subagent 仅同步（无 childId/异步/续谈） | ✅ DONE（异步） | wave2：`subagent` 支持 `async:true` 后台子代理，返回 `{kind:"subagent_async",child_id,...}`（`internal/tools/subagent.go:59`）；续谈/fork 仍缺 |
 | 功能 | FP-04 | P1 | Goal 半成品（无 revision/phase/pause，无 `/goal`） | ✅ DONE（模型+API；UI 命令待前端） | wave2：`GoalPhase`（active/paused/blocked）+ revision/暂停语义（`internal/tools/goal.go`）；`/goal` 命令行入口待前端 |
 | 功能 | FP-05 | P1 | 无 workspace changes / 每回合 diff | 🟡 PARTIAL（后端已交付） | wave2：`internal/workspacechanges` 快照/差异 + controller 在回合结束发 `state.WorkspaceChanges`（`controller.go:1557`）；UI 渲染待前端 |
-| 功能 | FP-06 | P1 | 无声明式 agent preset/persona | ⏸ DEFERRED | L 项，见 §3 |
+| 功能 | FP-06 | P1 | 无声明式 agent preset/persona | ✅ DONE | wave3：`internal/presets`（内置 standard/minimal/creator 等 + 用户 `<data dir>/presets/*.json` 字段级覆盖，7/7 测试）+ shell「预设」页（`presets_ui.go`，会话级选择/覆盖）+ 用户指南 `docs/audit/PRESETS-USER-GUIDE.md`；Deep/Supervisor 保留旧别名 |
 | 功能 | FP-07 | P1 | schedule 触发不回原会话/不记录 origin | ✅ DONE（worktree） | wave2：`schedule` 记录 `OriginSessionID`（`internal/tools/schedule.go:180`），调度器优先投回原会话否则新建（`internal/app/automation_runs.go:199`）；automation_runs 表记录运行 |
 | 功能 | FP-15 | P1 | job 完成无通知 | ✅ DONE（worktree） | wave2：`jobManager.notifyFinished` + `completionNotice`（`internal/tools/jobs.go:121,305`）在回合内投放 advisory |
 | 功能 | FP-17 | P1 | skills 单 root | ✅ DONE | `internal/skills` 多 root（ws/skills + ws/.zeokeel/skills + ~/.zeokeel/skills，自定义 root 不扩张）+ SKILL.md 指纹自动 refresh；app 注册/prompt 用 `LoadRootsTolerant(RootsFor(...))`；测试 8+ |
 | 功能 | FP-19 | P1 | 无统一代理设置 | ✅ DONE（worktree） | wave2：`network.proxy` 统一 provider/web_search/web_fetch（`app/services.go:635,933`；`tools.SetNetworkProxy`）；设置行在 Settings › 网络 |
-| 功能 | FP-16 | P1 | ask_user 非阻塞（回答走下一轮） | ⏸ DEFERRED | 阻塞式需 interrupt/resume 语义（当前工具内阻塞会死锁回合，见 `internal/tools/ask_user.go:91` 注释）；见 known-limitations §3.9 |
+| 功能 | FP-16 | P1 | ask_user 非阻塞（回答走下一轮） | ✅ DONE | wave3：`runtime.QuestionGate` + `app/question_gate.go`：交互会话**阻塞工具调用等待回答**（超时/取消降级 pending）；headless/ACP/子代理无问答通道时立即返回 pending 并结束回合（不阻塞）；shell 问题卡经 `Controller.AnswerQuestion` 回答；测试 + 文档同步 |
 | UX | UX-01 | P1 | 无模型发送完全静默 | ✅ DONE | deferred toast + 失败回滚空会话/保留 draft；**独立 GUI 复核 CONFIRMED**（FIX-VERIFY-UI：toast+回滚+保留 draft，DB sessions=0） |
 | UX | UX-03 | P1 | 发送失败 toast 路径不一致（根因；键盘 Enter 静默） | ✅ DONE | `toastDeferred`（build 外 queueToast）；**独立 GUI 复核 CONFIRMED**（Home/Session 键盘 Enter 均 toast） |
 | UX | UX-02 | P1 | 新会话对话 tab 无空态 | ✅ DONE | 会话空态 + 无模型 CTA；**独立 GUI 复核 CONFIRMED**（FIX-VERIFY-UI） |
@@ -35,7 +35,7 @@
 | 产品 | PD-02 | P1 | 添加模型无语义校验/预设/模型清单 | ✅ DONE | Provider 预设 + 异步测试连接（GET /models）；**独立 GUI 复核 CONFIRMED**（FIX-VERIFY-UI `shots/39/42/43`） |
 | 产品 | PD-02b | P1 | **新发现**：无 key 的本地 provider（Ollama 预设）可保存但发送时被判"未配置" | ✅ DONE | wave2：`keylessLocalProvider`（localhost/127.0.0.1/::1/私网/链路本地/host.docker.internal 允许空 key，公网仍要求 key）+ headless e2e；测试 `TestKeylessLocalProvider`/`TestBuildAgentKeylessLocalProvider`/`TestRunHeadlessKeylessLocalProvider` |
 | 产品 | PD-03 | P1 | 单实例固定端口、二次启动不激活窗口 | ✅ DONE | data-dir 锁 + 二次启动 IPC 激活窗口；独立验证 CONFIRMED |
-| 产品 | PD-04 | P1 | "迁移器"定位但零迁移实现 | ✅ DONE（最小导入，技术预览） | **最小导入器 + CLI 已交付**：`internal/importer` + `zeokeel import [--from --dry-run --json --max]`（退出码 0/1/2；真实 `/root/.dsh` 只读 dry-run 325 sessions/**1,248 messages**（系统注入/step 级过滤后；修复前 17,219））。独立验证（`docs/audit/FIX-VERIFY-PRODUCT.md` §2）：**可作为「最小导入（技术预览 CLI）」发布，不可宣称迁移器**；口径已降级（README/STATUS/PLAN/known-limitations）。wave2 已补①–④的导入器侧：`SkipSystemInjected`/`SkipStepAssistant` 过滤 + `Skips` 原因分解 + `ImagesDropped` 统计 + `ManifestPath` 幂等 manifest（`--manifest`/`--no-manifest`）+ header version 守卫（`ErrUnsupportedVersion`）；剩余：运行中实例检测、旧版 manifest 首次重导说明。独立再验收（FIX-VERIFY-IMPORT2）质量 PASS；manifest 幂等在真实 `session-<uuid>` 布局上的 P1 已修复（key 改 `home|相对 sessions 路径` + 真实布局回归测试，fix-security 独立复核）；设置页导入入口已提供。 |
+| 产品 | PD-04 | P1 | "迁移器"定位但零迁移实现 | ✅ DONE（最小导入，技术预览） | **最小导入器 + CLI 已交付**：`internal/importer` + `zeokeel import [--from --dry-run --json --max]`（退出码 0/1/2；真实 `/root/.dsh` 只读 dry-run 325 sessions/**1,248 messages**（系统注入/step 级过滤后；修复前 17,219））。独立验证（`docs/audit/FIX-VERIFY-PRODUCT.md` §2）：**可作为「最小导入（技术预览 CLI）」发布，不可宣称迁移器**；口径已降级（README/STATUS/PLAN/known-limitations）。wave2 已补①–④的导入器侧：`SkipSystemInjected`/`SkipStepAssistant` 过滤 + `Skips` 原因分解 + `ImagesDropped` 统计 + `ManifestPath` 幂等 manifest（`--manifest`/`--no-manifest`）+ header version 守卫（`ErrUnsupportedVersion`）；剩余：运行中实例检测、旧版 manifest 首次重导说明。独立再验收（FIX-VERIFY-IMPORT2）质量 PASS；manifest 幂等在真实 `session-<uuid>` 布局上的 P1 已修复（key 改 `home|相对 sessions 路径` + 真实布局回归测试，fix-security 独立复核）；UI 入口为设置→数据与隐私→「从 DSH 导入」**命令弹窗**（展示并复制 `zeokeel import` 命令，提示先退出应用；**非应用内执行**）。 |
 | 产品 | PD-05 | P1 | 设置面缺通知/隐私/诊断/代理/更新/重置 | ✅ DONE（已提交 84c5b1f） | 设置导航 通知/数据与隐私/诊断/网络/桌面/更新 + 持久化测试；独立 GUI 复核（FIX-VERIFY-UI-WAVE2）进行中 |
 | 产品 | PD-06 | P1 | Automation 失败/历史不可见、不绑定会话配置 | ✅ DONE（已提交 84c5b1f） | store.AutomationRun* + automation_runs 记录 workspace/permission/model + 历史/失败原因/前景提示 UI；origin 投递；独立 GUI 复核进行中 |
 | 产品 | PD-07 | P1 | MCP/Skills/AGENTS.md 无管理 UI | ✅ DONE（已提交 84c5b1f） | manage_ui.go：MCP JSON 编辑/校验、Skills 扫描/校验错误/打开文件夹、AGENTS.md 查看/编辑；独立 GUI 复核进行中 |
@@ -50,33 +50,35 @@
 
 | ID | 级别 | 问题 | 状态 | 去向 |
 | --- | --- | --- | --- | --- |
-| AR-04 | P2 | `internal/shell` God package 41.4k 行/UI 直连 store | ⏸ DEFERRED | L 项重构（FIX-PLAN §5） |
-| AR-05 | P2 | 两套快照折叠（Projector 闲置） | 🟡 IN PROGRESS | fix-backend §2.15（收敛/删除） |
+| AR-04 | P2 | `internal/shell` God package（57 生产文件/22.9k 行；`App` 262 行字段/711 方法；UI 直连 store/session） | 🟡 PARTIAL | wave2/3 已增量模块化（`manage_ui`/`settings_extra`/`presets_ui`/`session_errors`/`session_open_async`/`sessions_cache_async`/`workspace_changes_ui`/`draft_scope` 等新文件）；整体分层重构 **DEFERRED**，分批计划（P0–P4）见 [`docs/design/shell-refactor-plan.md`](design/shell-refactor-plan.md) |
+| AR-05 | P2 | 两套快照折叠（Projector 闲置） | ✅ FIXED（2026-11-06） | 收敛为 **Controller 单一折叠**：`session.Snapshot()` 只读 controller 自己的 per-session views；`state.Projector` **deprecated**（`state/projector.go:36`、`state/doc.go:11`），`session.Config.Projector` 传入时 `New` 立即 `Close` 以停止旁路折叠（`internal/app/services.go` 的 4 行 projector 死代码已删除，fix-security）。RED→GREEN：`TestControllerStopsBorrowedProjector`、`TestControllerSnapshotIgnoresBorrowedProjector`（`internal/session/projector_convergence_test.go`）。bench：每事件折叠 **2→1 次**（`BenchmarkProjectorFoldEvent` → `BenchmarkApplyFoldEvent`，parity-auditor 记录 ~3792→~1416 ns/op） |
 | AR-06 / RT-10 | P2 | 逐 token 持久化 + 无保留策略（RT-10：实测 0.66–0.79ms/事件 + snapshot O(n²)） | ✅ PARTIAL | 批量持久化已落地：流事件按 `eventBatchMaxBytes=8KB` / `eventBatchMaxDelay=200ms` 批量写（`internal/session/event_batch.go`），即**崩溃恢复窗口 ≤8KB/200ms**；store 批量事务/单 fsync；非流事件强制先 flush 保持重放顺序；snapshot O(n²) 拷贝（AR-22）与 events 保留策略仍待后续 |
-| AR-07 | P2 | 排序依赖事件回放重建 Seq | 🟡 IN PROGRESS | fix-backend §2.15（`messages.ordinal` + 迁移） |
+| AR-07 | P2 | 排序依赖事件回放重建 Seq | ✅ DONE | wave3：`messages.ordinal` 列（schema v2 迁移回填 + 索引 `messages_session_ordinal_idx`），新增消息在 store 内分配 ordinal，`ListMessages ORDER BY ordinal, id`，排序不再依赖事件回放 |
 | AR-08 | P2 | UI 线程同步 DB（OpenSession/ListSessions） | OPEN | 前端/后端协同，未排本轮 |
-| UX-04 | P2 | 设置窗打开后主窗口残留 popover（state 已清但 `win.Invalidate()` 不足以强制出帧） | 🟡 PARTIAL | 独立 GUI 复核仍复现（FIX-VERIFY-UI §2.1）；需 mygo 强制重绘/`holdFrame` 方案 |
+| UX-04 | P2 | 设置窗打开后主窗口残留 popover（state 已清但 `win.Invalidate()` 不足以强制出帧） | ✅ CONFIRMED FIXED（2026-11-06，Linux/Xvfb 无 WM） | fix-security 真跑复现序列（popover→Ctrl+,→移窗→Escape）popover 立即消失无残影，证据 `.cache/audit/fix-round4-ux04/{00-first…07-escape}.png`。**根因澄清**：mygo `holdFrame` 只在 `host.occluded()` 时挂帧，Linux GTK surface 未实现 `OccludableSurface` → 不是残影原因；现有重绘链路（关闭 composer/popover 状态 + `refreshWindows` + `Invalidate`）已正确重绘。**备注**：真实 WM/compositor（GNOME/KDE 等）下仍需 spot check |
 | About | P2 | About 页硬编码 `version 0.1.0`（i18n.go:45）与 `BuildVersionString()` 两行版本冲突 | ✅ DONE（worktree） | fix-frontend 删除硬编码行与 `pluginProductVersion`，About 统一读 `shell.BuildVersionString()`（单一来源）；预览已重生成 |
 | FP-11 | P2 | checkpoint 双屏障：屏障**可写入/fail-closed 成立**，但无恢复 consumer（requested/tool_pending checkpoint 不被读取，恢复仍走 History/tool_calls） | 🟡 PARTIAL | 独立验证 FIX-VERIFY-CORE2 §0；补恢复 consumer 或文档写明"仅供审计" |
 | Budget | P2 | `context.budget_tokens` 无设置入口 | ✅ DONE（worktree） | wave2：Settings 显示并持久化 `context.budget_tokens`（`shell/settings_ui.go:622-627`，默认 200000） |
-| AR-09 | P2 | schema 演进冻结 v1 | 🟡 IN PROGRESS | fix-backend §2.15（迁移框架） |
+| AR-09 | P2 | schema 演进冻结 v1 | ✅ DONE | wave3：`SchemaVersion=2`，有序迁移步骤（每步单事务 + `schema_migrations` 日志），升级前 `VACUUM INTO <data dir>/backups/`（0600、失败即迁移失败 fail-closed）；旧版打开 v2 库被 `ErrSchemaTooNew` 拒绝（不支持 downgrade，见 known-limitations） |
 | AR-17 | P2 | 测试盲区（store 62.8%/design 32.6%、无 fuzz） | 🟡 IN PROGRESS | CI 已记录 coverage；fuzz 待补 |
 | AR-18 | P2 | 窗口首启/恢复未按 WorkArea 裁剪 | ✅ DONE | WorkArea clamp（主窗口+设置窗口）；11 headless 几何测试 |
-| AR-20 | P3 | `scrubEnv`/DDL 重复 | 🟡 IN PROGRESS | fix-backend §2.8（secret 名单 + 收敛） |
-| AR-21/22 | P3 | 快照每 token 拷贝 / 大文件函数 | 🟡 PARTIAL | scrubEnv/DDL 重复已收敛；O(n²) 快照与大函数重构 ⏸ |
+| AR-20 | P3 | `scrubEnv`/DDL 重复 | ✅ DONE | `scrubEnv`/`scrubMCPEnv` 统一委托 `winproc.ScrubEnv`（RT-15 名单），automations DDL 收敛为单一来源 |
+| AR-21/22 | P3 | 快照每 token O(n) 拷贝 / 大文件函数 | 🟡 PARTIAL | 重复代码已收敛（AR-20）；`state.updateMessage/updateTool` 仍整片复制 + 字符串重拼，大文件/长函数重构 ⏸ DEFERRED（见 shell-refactor-plan P3） |
 | PD-08 | P2 | 插件双界面不一致（4 vs 6）、无功能实验开关 | ✅ DONE | 统一 6 项 + 实验项「未实现」标注；shell 测试 |
 | AR-16/文档 | — | 已知缺陷此前无落地清单（本文件缺失） | ✅ DONE | 本文件；STATUS/README/PLAN/known-limitations 同轮纠错 |
+| Hotkey | P2 | 全局快捷键无平台支持 | ✅ DONE（Windows + Linux/X11；macOS/Wayland DEFERRED） | `internal/globalhotkey`：**Windows** `RegisterHotKey` + 锁 OS 线程消息泵 + WM_HOTKEY 分发；**Linux/X11** `x11_linux.go`（454 行）用 **purego dlopen 系统 `libX11.so.6`**（无 cgo、无新模块依赖；`XGrabKey` 四组 lock-mask 变体 + 专用事件泵 + `XInitThreads`）；测试全包 **18 PASS**（含 X11 seam 8 个 + opt-in 真 display smoke 默认 SKIP）；`ParseHotkey`/Manager + app `syncGlobalHotkey` + 设置项 `global_hotkey`。**macOS（Carbon/cgo）与 Wayland（需 portal/D-Bus）DEFERRED**；无 `$DISPLAY`/XWayland 不可用 → `ErrUnsupported` 降级并在 UI 提示 |
+| ACP | P2 | 无编辑器/外部客户端协议（ACP v1） | ✅ DONE（最小面） | wave3：`internal/acp`（JSON-RPC stdio 最小 v1：initialize/session/new/prompt/cancel + session/update 投影；11 测试）+ `internal/app/acp_adapter.go`（真 `acp.Server`→真 runtime e2e，4 测试）+ `zeokeel acp`（stdout 仅协议帧、SIGINT/EOF 干净退出）。**Non-goals（DEFERRED）**：session/load|list、authenticate、client fs/terminal、image prompt、session/request_permission（headless 自动 deny） |
 | BUILD-01 | P1 | `.gitignore` 的 `credentials*` 规则把 `internal/importer/credentials.go`（已跟踪构建输入）忽略，wave1 提交在干净 checkout 下无法 `go build`（verifier-core 发现） | ✅ DONE | Lead 改名 `internal/importer/import_credentials.go` 并提交 `0bbf051`；`.gitignore` 收紧为 `.credentials*`/`/credentials*`；新增 `scripts/check-clean-checkout.sh`（`git archive HEAD` 到临时目录后 `go build ./...`）+ CI gate job 步骤 + `make clean-check`；本文件记录该类问题。验证：`sh scripts/check-clean-checkout.sh` → PASS |
 | BUILD-02 | P1 | 干净 HEAD 曾 `ci.sh --fast` 红：wave1 断言与 skills live re-scan 冲突 | ✅ DONE | `modes_test.go` 修正随 wave2 提交；`git archive 84c5b1f` 干净副本 `sh scripts/ci.sh --fast` = **PASS**（22 包全绿，session 252s/shell 68s/nocgo 四目标）；CI 已加 `check-clean-checkout.sh` 守卫 |
 | Preview | P3 | 视觉金标与 wave1/wave2 UI 漂移 | ✅ DONE（22 张） | 2026-11-05 重生成 22 张（当前代码，含设置窗 **900×840**、About 单一版本来源）+ `TestVisualRegression` PASS（14 屏/1.9s）；`identify` 校验尺寸；命令见 `docs/design/preview/README.md` 与 `make previews`/`make visual-check` |
 | Voice | ❌ NOT PLANNED | 语音输入（DSH 实验能力） | 产品决定明确不做（2026-11-06）；UI/入口不提供，不是能力缺口 | known-limitations §2.1 |
-| Updater | ✅ DONE（引擎+CLI+GUI 检查） | 自动更新（check/download/sha256/install-on-restart） | `internal/updater/` 引擎（HTTPS-only、平台 asset、SHA-256、原子 install-on-restart、崩溃恢复，14/14 测试绿）+ **`zeokeel update` CLI**（`--check/--download/--install/--json`，10 测试绿，`cmd/zeokeel/update_cli*.go`）+ **设置页「检查更新」已接线**（`shell/settings_update_hotkey.go`，读 `update.feed_url`/`ZEOKEEL_UPDATE_FEED`，仅检查提示）。**托管 feed 与签名/公证为外部依赖 → DEFERRED**；GUI 下载/安装未接线（用 CLI） | `.cache/fix-platform/updater-{red,green}.txt`、`round3-evidence.txt` |
+| Updater | ✅ DONE（引擎+CLI+GUI 全链路） | 自动更新（check/download/sha256/install-on-restart） | `internal/updater/` 引擎（HTTPS-only、平台 asset、SHA-256、原子 install-on-restart、崩溃恢复，14/14 测试绿）+ **`zeokeel update` CLI**（`--check/--download/--install/--json`，10 测试绿，`cmd/zeokeel/update_cli*.go`）+ **GUI 更新页全链路**：「检查更新」+「下载并安装」（`shell/settings_update_hotkey.go` 下载→SHA-256 校验→`ScheduleInstall`→**重启应用完成安装**；GUI 安装经 shell hook `SetInstallUpdateHook` 路由到 app seam `DownloadAndInstallUpdate`，启动时 `applyPendingUpdate` 应用暂存更新；`app/update_install.go` 另有 executable replacer；feed 取 `update.feed_url`/`ZEOKEEL_UPDATE_FEED`）。**托管 feed 与签名/公证为外部依赖 → DEFERRED**。 | `.cache/fix-platform/updater-{red,green}.txt`、`round3-evidence.txt` |
 | FP-18 | P2 | headless CLI 缺失 | ✅ DONE | `internal/app/headless.go` + cmd 接线；`--permission` 失效 P1 已由独立验证发现并修复（read-only/full 回归） |
 
 ## 3. 延期项（DEFERRED，本轮不做；理由见 FIX-PLAN §5）
 
 - workflow 完整 JS 引擎（与纯 Go / no-cgo 约束冲突）。**PTC 运行时不在延期项**：已改为明确不做（FP-02）。
-- ACP/SDK 完整协议；三平台代码签名/公证与托管 update feed（自动更新引擎/CLI/检查 UI 已交付，缺证书、发布账号与 feed 托管）。
+- ACP 完整协议（session/load/list、client fs/terminal、request_permission 映射等）；SDK 完整协议；三平台代码签名/公证与托管 update feed（自动更新引擎/CLI/检查+下载+安装 UI 已交付，缺证书、发布账号与 feed 托管）。
 - `internal/shell` 整体分层重构、schema v2 大迁移、JSONL 真源重写（高风险，分批）。
 - 真机 IME/屏幕阅读器/DPI/通知矩阵（无真机环境）。
 - 第三方插件市场（产品边界：仅内置插件）。

@@ -12,7 +12,11 @@
 | 高 DPI/多显示器 | `ui.Render(...,scale=2)` 冒烟（3200×2000 非空、关键控件存在）；未真机 1.25x/1.5x/2x 切换 | 各平台 DPI 切换与跨屏拖动，确认无 1px 漂移/模糊 |
 | 系统通知服务 | 通知状态机与 Notifier 注入测试覆盖；真实 mygo.NewNotification 只在源码级接入 | macOS 打包后通知权限、Windows balloon、Linux notification service 实机 |
 | 窗口管理 | 窗口状态持久化、设置独立窗口均有单测与 headless 行为测试；原生窗口菜单栏已于 2026-11-05 退役（[ADR 0006](../../docs/decisions/0006-retire-native-menu-bar.md)） | 真机窗口恢复、双窗口焦点、无菜单栏下的快捷键/剪贴板/Quit 路径 |
-| Windows shell 方言 | Windows 构建只暴露 `pwsh`（PowerShell）、POSIX 构建只暴露 `bash`；系统提示含显式运行环境段与平台化工具描述（[ADR 0009](../../docs/decisions/0009-platform-shell-stacks.md)）；所有子进程（bash/pwsh/terminal/jobs/git/MCP/UI 终端）启动时设置 `CREATE_NO_WINDOW`+`HideWindow`（[ADR 0011](../../docs/decisions/0011-windows-hidden-console.md)），不再弹 cmd 窗。本环境仅有 `GOOS=windows` 编译/vet/纯函数单测，未真机运行 | Windows 真机：pwsh 解析（pwsh→powershell 回退）、中文输出/路径、terminal 默认 pwsh、plan/只读模式下工具集、缺失 PowerShell 时的错误提示、命令执行时不再出现 cmd 窗口 |
+| Windows shell 方言 | Windows 构建只暴露 `pwsh`（PowerShell）、POSIX 构建只暴露 `bash`；系统提示含显式运行环境段与平台化工具描述（[ADR 0009](../../docs/decisions/0009-platform-shell-stacks.md)）；所有子进程（bash/pwsh/terminal/jobs/git/MCP/UI 终端）启动时设置 `CREATE_NO_WINDOW`+`HideWindow`（[ADR 0011](../../docs/decisions/0011-windows-hidden-console.md)），不再弹 cmd 窗。本环境仅有 `GOOS=windows` 编译/vet/纯函数单测，未真机运行 | Windows 真机：pwsh 解析（pwsh→powershell 回退）、中文输出/路径、terminal 默认 pwsh、plan/只读模式下工具集、缺失 PowerShell 时的错误提示、命令执行时不再出现 cmd 窗口 || 全局快捷键（Windows/Linux X11） | Windows：RegisterHotKey + 消息泵；Linux/X11：purego dlopen libX11 + fake-Xlib 单测；本环境无显示器 | Windows 真机：注册成功、被占用（ErrOccupied）提示、设置变更即生效、退出释放；Linux X11 真机：真实会话下 grab/冲突、键位映射、退出 ungrab、Wayland 下提示不支持 |
+| 自动更新（GUI/CLI） | 引擎+CLI+GUI 下载/安装均有单测/httptest；app seam `DownloadAndInstallUpdate`/`applyPendingUpdate` 已交付；无真实 feed/签名 | 真机：真实托管 feed 的检查/下载/校验/**重启应用完成安装**、失败回滚（`.old-*` 备份）、无 feed 时提示 |
+| ACP 客户端互操作 | `zeokeel acp` stdio e2e + fake provider；无真实编辑器 | Zed/Neovim 等 ACP 客户端：initialize、session/new（cwd）、流式 update、cancel、EOF/SIGINT 干净退出 |
+| 预设（Presets） | catalog/UI/测试就绪；无真机视觉与交互验证 | 真机：预设页选择/覆盖生效（工具白名单/人设），用户 JSON 覆盖与错误提示 |
+
 
 ## 2. 框架/平台限制（已记录策略，未强改）
 
@@ -63,15 +67,15 @@
 - **RT-01/RT-06/RT-08**：workspace MCP 默认不执行（§5）、无整体超时 + 流空闲/重试设置（§5）。
 - **迁移定位（PD-04）**：产品文案由"DSH 桌面替代/迁移器"降级为"DSH 同类替代"；最小导入器已交付（技术预览）：`internal/importer` 读取 DSH `sessions/**/session.v4.jsonl[.zstd]` 与 credentials **键名**（值永不读取），写 ZeoKeel store；`zeokeel import [--from] [--dry-run] [--json] [--max]` 已接 CLI（退出码 0/1/2，`--json` 输出 report）。
 **导入范围（先说清楚）**：只导入**文本对话**（用户/assistant 文本与 reasoning）；工具调用/工具结果以合成文本行计数、不落 tool_calls；图片/附件/profile/storage/trajectory/usage 不导入；subagent 子会话默认跳过（`--include-subagents` 可含）；凭据只列键名，需在设置里重填 API key。
-**导入质量（wave2 importer 已补一部分）**：① DSH 注入上下文过滤 ✅（`SkipSystemInjected`，source.kind != user 不再变用户气泡）；② assistant step 过滤 ✅（`SkipStepAssistant`，无可见文本的 step 消息不落库）；③ 幂等 ✅（`--manifest` 默认 `<数据目录>/dsh-import-manifest.json`，按源文件 hash/size/mtime 跳过；`--no-manifest` 可退回全量重导）；④ 图片统计 ✅（`images_dropped`）；⑤ skip 原因分解 ✅（`skips` 按 subagent/system_injected/step_assistant/unsupported_version/idempotent/...）；⑥ header version 守卫 ✅（未来版本显式跳过）。**仍缺**：app 运行中导入检测、图片/附件对象迁移、旧版 manifest 兼容（旧版覆盖 key 升级后首次会重导一次，之后稳定幂等）。设置页「从 DSH 导入」入口已提供；独立复验见 FIX-VERIFY-IMPORT2 / FIX-VERIFY-WAVE23。
+**导入质量（wave2 importer 已补一部分）**：① DSH 注入上下文过滤 ✅（`SkipSystemInjected`，source.kind != user 不再变用户气泡）；② assistant step 过滤 ✅（`SkipStepAssistant`，无可见文本的 step 消息不落库）；③ 幂等 ✅（`--manifest` 默认 `<数据目录>/dsh-import-manifest.json`，按源文件 hash/size/mtime 跳过；`--no-manifest` 可退回全量重导）；④ 图片统计 ✅（`images_dropped`）；⑤ skip 原因分解 ✅（`skips` 按 subagent/system_injected/step_assistant/unsupported_version/idempotent/...）；⑥ header version 守卫 ✅（未来版本显式跳过）。**仍缺**：app 运行中导入检测、图片/附件对象迁移、旧版 manifest 兼容（旧版覆盖 key 升级后首次会重导一次，之后稳定幂等）。UI 入口为设置→数据与隐私→「从 DSH 导入」**命令弹窗**（展示/复制 `zeokeel import` 命令并提示先退出应用；**非应用内执行**）；独立复验见 FIX-VERIFY-IMPORT2 / FIX-VERIFY-WAVE23。
 
 ## 3.8 wave 1/2 独立验证残余（2026-11-05）
 
 独立验证（`docs/audit/FIX-VERIFY-BACKEND.md`、`FIX-VERIFY-UI.md`、`FIX-VERIFY-PRODUCT.md`）确认 wave1 P0/P1 主体成立，以下残余仍在 BUGS.md 跟踪：
 
 - **RT-01 三个残留**：workspace MCP 被忽略时的提示文案可能误导；Creator 的 `settings_set` 通道曾写 `mcp.*`（已加写白名单，需回归保持）；MCP 启动日志 args 可能含 secret（已 redact，需回归保持）。
-- **UX-04**：打开/移动设置窗后主窗口 popover 残留不重绘（state 已清，`win.Invalidate()` 不足以让 mygo 出帧）。
-- **About 双版本号**：`shell.BuildVersionString()` 已显示真实 build，但 `about.version` 硬编码 `version 0.1.0` 仍并存。
+- ~~**UX-04**：设置窗打开/移动后主窗口 popover 残留不重绘~~ → **✅ CONFIRMED FIXED（2026-11-06，Linux/Xvfb 无 WM）**：fix-security 真跑“popover→Ctrl+,→移窗→Escape”复现序列，popover 立即消失无残影（证据 `.cache/audit/fix-round4-ux04/*.png`）；根因澄清：mygo `holdFrame` 只在 `host.occluded()` 时挂帧，Linux GTK surface 未实现 `OccludableSurface`，不是残影原因；现有重绘链路（关闭 popover 状态 + `refreshWindows` + `Invalidate`）已正确。真实 WM/compositor 下仍建议 spot check。
+- **版本显示（干净开发构建 = `0.1.0-dev`）**：About 已统一为 `shell.BuildVersionString()` 单一来源（硬编码 `version 0.1.0` 与 `pluginProductVersion` 已删）；**干净开发构建**（`go build`/`go run`，未经 ldflags）显示 `0.1.0-dev`（`cmd/zeokeel/version.go` 默认值），**发布构建**由 `scripts/build.sh` 用 `-ldflags "-s -w -X main.version/commit/buildTime"` 注入 git tag 版本/commit/构建时间（`make version` 可预览；`ZEOKEEL_VERSION` 可覆盖）。
 - **PD-02b**：无 key 的本地 provider（Ollama 预设）可保存但发送被判"未配置"。
 - **PD-04 导入质量 5 项**：注入上下文过滤、step 聚合、幂等、图片统计、UI 入口（见 §3.7 与 `FIX-VERIFY-PRODUCT.md` §2.6）。
 
@@ -81,10 +85,13 @@
 - **FP-11 checkpoint 屏障恢复**：屏障可写入、fail-closed 成立；但没有恢复 consumer——`requested`/`tool_pending` checkpoint 不被读取，恢复仍走 History/tool_calls（FIX-VERIFY-CORE2）。PARTIAL。
 - **RT-10/逐 token 持久化**：已改为批量写（`eventBatchMaxBytes=8KB`、`eventBatchMaxDelay=200ms`，`internal/session/event_batch.go`）——**崩溃恢复窗口 ≤8KB/200ms** 的流事件，非流事件强制 flush；snapshot 每 token O(n) 拷贝（AR-22）与 events 保留策略仍待后续。
 - **FP-17 skills 多 root**：当前仍单 root（`skills.root` 或 workspace `skills/`），多 root/项目级技能目录未落地。
-- **UX-04 设置窗重绘**：打开/移动设置窗后主窗口 popover 残留（state 已清、不重绘）；受 mygo 出帧机制限制，PARTIAL。
+- **UX-04 设置窗重绘**：已 CONFIRMED FIXED（Linux/Xvfb 无 WM，见 §3.8）；真实 WM/compositor 下 spot check 即可。
 - **About 版本**：已统一为 `shell.BuildVersionString()` 单一来源（删除硬编码 `version 0.1.0` 与 `pluginProductVersion`）；预览已按新文案重生成。
 - **RT-04 / AR-04 / AR-09 / AR-22 大项**：per-session Agent、shell 分层、schema v2、快照优化 DEFERRED（理由见 FIX-PLAN §7）。
-- **自动更新 / Windows 安装器**：引擎 `internal/updater`（14 契约测试，含崩溃恢复）+ `zeokeel update` CLI（check/download/install/--json）+ 设置页「检查更新」已交付；**托管 update feed 与代码签名/公证为外部依赖（DEFERRED，AR-03）**，GUI 内下载/安装未接线（CLI 可用）；Windows 安装器仅为计划与 Inno/NSIS 草案（`packaging/windows/INSTALLER-PLAN.md`，未编译/未签名）；`release.yml` 发布的是未签名便携包。
+- **自动更新 / Windows 安装器**：引擎 `internal/updater`（14 契约测试，含崩溃恢复）+ `zeokeel update` CLI（check/download/install/--json）+ 设置页「检查更新 / 下载并安装」（下载→SHA-256 校验→`ScheduleInstall`→重启安装；`app/update_install.go` 提供 apply-on-startup 与 replacer）已交付（GUI 安装经 shell `SetInstallUpdateHook` 路由到 app seam `DownloadAndInstallUpdate`，启动时 `applyPendingUpdate` 应用暂存更新，**重启应用完成安装**）；**托管 update feed 与代码签名/公证为外部依赖（DEFERRED，AR-03）**，无真实 feed/签名链路的真机安装验证；Windows 安装器仅为计划与 Inno/NSIS 草案（`packaging/windows/INSTALLER-PLAN.md`，未编译/未签名）；`release.yml` 发布未签名便携包。
+- **全局快捷键（globalhotkey）**：**Windows** 已实现（`RegisterHotKey` + 消息泵）；**Linux/X11** 已实现（`x11_linux.go`：purego dlopen 系统 `libX11.so.6`，无 cgo、无新模块依赖；`XGrabKey` 四组 lock-mask 变体；fake-Xlib 单测 + opt-in 真 display smoke）；设置项 `global_hotkey` + app `syncGlobalHotkey` 接线。**未在真机验证注册/占用/冲突场景**（Windows 与 X11 均只有单测/交叉编译；X11 真 display smoke 需 `ZEOKEEL_X11_TEST=1`）。**macOS（Carbon/cgo）与 Wayland（org.freedesktop.portal.GlobalShortcuts，需 D-Bus client）DEFERRED**；无 `$DISPLAY`/XWayland 不可用 → `ErrUnsupported` 降级并在 UI 提示。
+- **ACP v1（编辑器/外部客户端）**：最小面已交付（initialize/session/new/prompt/cancel + session/update；stdio；`zeokeel acp`）。**Non-goals（DEFERRED）**：session/load|list、authenticate、client fs/terminal 方法、image prompt、MCP server 启动、session/request_permission（headless 自动 deny）；未与真实编辑器做互操作验证，只有 stdio e2e 与 fake-provider 测试。
+- **AR-04 shell 重构**：已增量模块化（`manage_ui`/`settings_extra`/`presets_ui`/`session_*_async` 等新文件），但 `App` 仍是 God object（262 行字段/711 方法）、view 直连 store（AR-08）；整体分层重构 **DEFERRED**，分批计划见 [`shell-refactor-plan.md`](shell-refactor-plan.md)（P0–P4）。
 - **AR-09/AR-07 数据库 schema v2（已落地）**：`SchemaVersion=2`，有序迁移步骤（每步单事务 + `schema_migrations` 日志，失败回滚到上一步）；v2 是 `messages.ordinal` 回填 + 索引（AR-07）。升级前用 `VACUUM INTO` 在 `<data dir>/backups/` 写一致性快照（`index-v<from>-to-v<to>-<UTC 时间戳>.sqlite`，0600；**备份失败则迁移失败 = fail-closed**）。**旧版二进制打开 v2 库会以 `ErrSchemaTooNew` 拒绝启动**（提示升级 ZeoKeel），即**不支持 downgrade**——回退到旧版需用 `backups/` 快照手工恢复；该目录可手动清理，建议保留最近一份。
 - **预览金标**：22 张已按 wave1+wave2 UI 重生成（含设置窗 900×840）并回归 PASS（14 屏/1.9s）。
 

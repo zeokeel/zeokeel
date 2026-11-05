@@ -126,6 +126,9 @@ type app struct {
 	// Update check seam (task-33): updateCheck defaults to updater.Check; tests
 	// inject a fake. CheckForUpdate is the CLI/UI entry point.
 	updateCheck func(ctx context.Context, cfg updater.Config) (*updater.Release, bool, error)
+	// updateReplacer is the executable-replace seam for GUI/embedding installs;
+	// nil uses appExeReplacer (the same strategy as `zeokeel update --install`).
+	updateReplacer updater.Replacer
 
 	// Global hotkey (task-33): newHotkeyManager is the platform seam, the
 	// manager/handle hold the live registration and showWindowFromHotkey runs on
@@ -151,6 +154,13 @@ func Run() error {
 		return err
 	}
 	defer a.releaseInstance()
+	// Install-on-restart: a verified download scheduled by an earlier run (or by
+	// the GUI install action) replaces the executable before any window starts.
+	if applied, err := a.applyPendingUpdate(); err != nil {
+		log.Printf("zeokeel: pending update install: %v", err)
+	} else if applied {
+		log.Printf("zeokeel: update installed; restart ZeoKeel to run the new build")
+	}
 	return a.run()
 }
 
@@ -311,6 +321,9 @@ func (a *app) startServices() {
 	a.services = ctrl
 	a.cleanup = cleanup
 	a.bundle = built
+	// P2 regression: HasAgent is true as soon as the per-session factory exists
+	// (RT-04), so the UI's "model configured?" question uses this predicate.
+	ctrl.SetModelConfiguredFunc(a.hasConfiguredModel)
 	// /goal changes and goal-driver state persist through the store-backed tool
 	// state, so a restart shows the same objective (FP-04).
 	ctrl.SetGoalStore(storeToolState{st: ctrl.Store()})
@@ -332,6 +345,9 @@ func (a *app) startServices() {
 		log.Printf("zeokeel: agent rebuild for the selected workspace: %v", err)
 	}
 	a.startAutomation(ctrl)
+	// Round-4: route the shell's Updates page "download and install" action
+	// through the app updater seam (progress, verified download, schedule/apply).
+	a.installShellUpdateHook()
 	// Round-3 product wiring: apply the persisted global hotkey and, when
 	// opted in, run one background update check (never blocks startup).
 	_ = a.syncGlobalHotkey()

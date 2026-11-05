@@ -102,7 +102,7 @@ func (a *App) homeSetupCard(c *ui.Context, t *design.Tokens) {
 		return
 	}
 	th := t.Theme()
-	needModel := !a.Ctrl.HasAgent()
+	needModel := !a.Ctrl.HasConfiguredModel()
 	needWorkspace := true
 	if ws, ok, err := a.Ctrl.CurrentWorkspace(context.Background()); err == nil && ok && strings.TrimSpace(ws.ID) != "" {
 		needWorkspace = false

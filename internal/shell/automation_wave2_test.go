@@ -79,15 +79,53 @@ func TestAutomationCardShowsRunHistory(t *testing.T) {
 	if !tt.HasText("Failed") {
 		t.Fatalf("card missing the latest run status: %q", tt.Texts())
 	}
-	if !tt.HasText("provider 401") {
+	// The raw runtime reason is mapped to readable text by the UI.
+	if !tt.HasText("provider rejected the credentials") {
 		t.Fatalf("card missing the failure reason: %q", tt.Texts())
 	}
 	if err := tt.Click("History"); err != nil {
 		t.Fatalf("expand run history: %v", err)
 	}
 	tt.Frame()
-	if !tt.HasText("provider 401") {
+	if !tt.HasText("provider rejected the credentials") {
 		t.Fatalf("history missing the run: %q", tt.Texts())
 	}
 	_ = context.Background()
+}
+
+// TestAutomationFailureReasonIsLocalized pins the P3 polish: the runtime's
+// English failure reasons ("no agent configured") are mapped to readable
+// Chinese on the automation card and in the run history.
+func TestAutomationFailureReasonIsLocalized(t *testing.T) {
+	h := newLiveApp(t, &shellProvider{})
+	h.app.Language = LangZH
+	h.app.Screen = Automation
+	task, err := h.ctrl.Automations().Create(store.Automation{
+		Title: "晚报", Prompt: "report", Cron: "@daily", Enabled: true,
+	})
+	if err != nil {
+		t.Fatalf("create automation: %v", err)
+	}
+	run, err := h.store.CreateAutomationRun(task.ID, "")
+	if err != nil {
+		t.Fatalf("create run: %v", err)
+	}
+	if _, err := h.store.FinishAutomationRun(run.ID, store.AutomationRunFailed, "session: no agent configured"); err != nil {
+		t.Fatalf("finish run: %v", err)
+	}
+	tt := ui.NewTester(h.app.View, 1600, 1000)
+	tt.Frame()
+	if !tt.HasText("尚未配置模型") {
+		t.Fatalf("localized automation failure missing: %q", tt.Texts())
+	}
+	if tt.HasText("no agent configured") {
+		t.Fatalf("English failure reason leaked onto the card: %q", tt.Texts())
+	}
+	if err := tt.Click("历史"); err != nil {
+		t.Fatalf("expand run history: %v", err)
+	}
+	tt.Frame()
+	if tt.HasText("no agent configured") {
+		t.Fatalf("English failure reason leaked into the history: %q", tt.Texts())
+	}
 }

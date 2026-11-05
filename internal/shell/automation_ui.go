@@ -234,8 +234,8 @@ func (a *App) automationTaskRow(c *ui.Context, t *design.Tokens, task store.Auto
 			nativeText(c, design.TypeXXS, runColor, a.automationRunSummary(latest)).
 				MaxLines(1).Ellipsis("…")
 			if latest != nil && strings.TrimSpace(latest.Error) != "" {
-				nativeText(c, design.TypeXXXS, t.DangerText, latest.Error).
-					MaxLines(2).Ellipsis("…")
+				nativeText(c, design.TypeXXXS, t.DangerText,
+					a.automationFailureText(latest.Error)).MaxLines(2).Ellipsis("…")
 			}
 		})
 	}
@@ -353,7 +353,8 @@ func (a *App) automationRunHistory(c *ui.Context, t *design.Tokens, task store.A
 				}
 			})
 			if strings.TrimSpace(r.Error) != "" {
-				nativeText(c, design.TypeXXXS, t.DangerText, r.Error).MaxLines(2).Ellipsis("…")
+				nativeText(c, design.TypeXXXS, t.DangerText,
+					a.automationFailureText(r.Error)).MaxLines(2).Ellipsis("…")
 			}
 		}
 	})
@@ -763,6 +764,39 @@ func (a *App) automationLatestRun(taskID string) *store.AutomationRun {
 		return nil
 	}
 	return run
+}
+
+// automationFailureText maps the runtime's English failure reasons to readable
+// text in the UI language. Reasons without a known mapping stay as recorded:
+// inventing a translation for an unknown error would hide the real cause.
+func (a *App) automationFailureText(reason string) string {
+	reason = strings.TrimSpace(reason)
+	if reason == "" {
+		return ""
+	}
+	lower := strings.ToLower(reason)
+	switch {
+	case strings.Contains(lower, "no agent configured"),
+		strings.Contains(lower, "no model configured"),
+		strings.Contains(lower, "model is not configured"):
+		return a.menuText("No model is configured yet; configure a model in Settings.",
+			"尚未配置模型；请先在设置中配置模型。")
+	case strings.Contains(lower, "context canceled"),
+		strings.Contains(lower, "turn canceled"),
+		strings.Contains(lower, "context deadline exceeded"):
+		return a.menuText("The run was canceled.", "运行已取消。")
+	case strings.Contains(lower, "rate limit"), strings.Contains(lower, "429"):
+		return a.menuText("The provider rate limit was hit.", "触及服务商限流。")
+	case strings.Contains(lower, "401"), strings.Contains(lower, "403"),
+		strings.Contains(lower, "unauthorized"), strings.Contains(lower, "authentication"):
+		return a.menuText("The provider rejected the credentials.", "服务商拒绝了凭据。")
+	case strings.Contains(lower, "connection refused"),
+		strings.Contains(lower, "no such host"),
+		strings.Contains(lower, "network is unreachable"):
+		return a.menuText("The provider is unreachable.", "无法连接到服务商。")
+	default:
+		return reason
+	}
 }
 
 // automationRunLabel localizes one run's status.

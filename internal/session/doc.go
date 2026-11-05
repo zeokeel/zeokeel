@@ -57,9 +57,10 @@
 // session, so switching sessions mid-turn keeps background turns running while
 // the visible snapshot follows the user's selection.
 //
-// Snapshot is the UI's source of truth. The supplied state.Projector mirrors
-// the raw Broker event stream for any subscriber that wants it, but it cannot
-// represent a user message or a session switch (the state event set has no
-// reset event); Controller therefore maintains its own per-session snapshots
-// with the same folding package.
+// Snapshot is the UI's source of truth. Controller maintains the per-session
+// snapshots with state.Apply, the same fold the state layer exposes; a
+// broker-wide state.Projector is session-unaware (it cannot represent a user
+// message or a session switch, since the event set has no reset event) and is
+// therefore no longer a second production consumer (AR-05). New closes a
+// projector supplied by older wiring so the duplicate fold stops.
 package session

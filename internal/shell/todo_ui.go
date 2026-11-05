@@ -141,6 +141,7 @@ func (a *App) todoRow(c *ui.Context, t *design.Tokens, todo tools.Todo) {
 // records the question and resumes the conversation with the answer.
 func (a *App) questionCards(c *ui.Context, t *design.Tokens) {
 	questions := a.questions()
+	a.trackQuestionCards(questions)
 	if len(questions) == 0 {
 		return
 	}
@@ -193,6 +194,41 @@ func (a *App) questionCards(c *ui.Context, t *design.Tokens) {
 	}
 }
 
+// trackQuestionCards notices when a pending card disappears without the user
+// answering it: a blocking question whose turn context ended or timed out is
+// withdrawn by the controller, and the user should see why their card is gone
+// instead of wondering whether the answer was lost (FP-16).
+func (a *App) trackQuestionCards(questions []tools.Question) {
+	if a.Ctrl == nil {
+		return
+	}
+	st := a.shellUI()
+	sessionID := a.Ctrl.CurrentSessionID()
+	if st.questionSession != sessionID {
+		st.questionSession = sessionID
+		st.questionSeen = nil
+		st.questionAnswered = nil
+	}
+	seen := make(map[string]bool, len(questions))
+	for _, question := range questions {
+		seen[question.CallID] = true
+	}
+	for id := range st.questionSeen {
+		if seen[id] || st.questionAnswered[id] {
+			continue
+		}
+		a.toastDeferred(nil, a.menuText(
+			"The question was withdrawn (it timed out or the turn ended); the agent continues.",
+			"问题卡已撤回（超时或回合结束）；代理将继续处理。"))
+	}
+	for id := range st.questionAnswered {
+		if !seen[id] {
+			delete(st.questionAnswered, id)
+		}
+	}
+	st.questionSeen = seen
+}
+
 // answerQuestion submits the question card's draft through the controller.
 // The controller removes the card on success and restores it on failure, so
 // the error stays visible here. An empty (or whitespace-only) draft is refused
@@ -202,6 +238,11 @@ func (a *App) answerQuestion(question tools.Question) {
 		return
 	}
 	uiState := a.uiState()
+	st := a.shellUI()
+	if st.questionAnswered == nil {
+		st.questionAnswered = make(map[string]bool)
+	}
+	st.questionAnswered[question.CallID] = true
 	uiState.questionErr = ""
 	answer := strings.TrimSpace(uiState.questionDraft)
 	if answer == "" {

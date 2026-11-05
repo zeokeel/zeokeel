@@ -14,7 +14,7 @@
 
 ## 预览
 
-![A](assets/wordmark/preview-a.png)
+![A](../assets/wordmark/preview-a.png)
 
 ## 实现约定
 

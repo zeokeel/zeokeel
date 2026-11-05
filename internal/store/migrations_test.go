@@ -12,9 +12,26 @@ import (
 // test fails (rather than following) if the constant is not bumped.
 const latestSchemaVersion = 2
 
+// legacyMessage is one row of the schema-version-1 messages fixture.
+type legacyMessage struct {
+	id      string
+	content string
+	created string
+}
+
 // openLegacyV1 builds a real schema-version-1 index without ordinal columns,
-// like a database written by an earlier ZeoKeel build.
+// like a database written by an earlier ZeoKeel build. Messages are inserted in
+// slice order, so their legacy read order (created_at, rowid) is deterministic.
 func openLegacyV1(t *testing.T, dir string) *sql.DB {
+	t.Helper()
+	return openLegacyV1WithMessages(t, dir, []legacyMessage{
+		{id: "ma", content: "msg a", created: "2026-01-01T00:00:03Z"},
+		{id: "mb", content: "msg b", created: "2026-01-01T00:00:01Z"},
+		{id: "mc", content: "msg c", created: "2026-01-01T00:00:02Z"},
+	})
+}
+
+func openLegacyV1WithMessages(t *testing.T, dir string, messages []legacyMessage) *sql.DB {
 	t.Helper()
 	if err := os.MkdirAll(dir, dirPerm); err != nil {
 		t.Fatalf("mkdir legacy store: %v", err)
@@ -50,16 +67,57 @@ func openLegacyV1(t *testing.T, dir string) *sql.DB {
 	); err != nil {
 		t.Fatalf("insert legacy session: %v", err)
 	}
-	for i, created := range []string{"2026-01-01T00:00:03Z", "2026-01-01T00:00:01Z", "2026-01-01T00:00:02Z"} {
+	for _, msg := range messages {
 		if _, err := db.Exec(
 			`INSERT INTO messages(id, session_id, role, content, reasoning, created_at, turn_id)
 			 VALUES (?, 's1', 'user', ?, '', ?, '')`,
-			"m"+string(rune('a'+i)), "msg"+string(rune('a'+i)), created,
+			msg.id, msg.content, msg.created,
 		); err != nil {
-			t.Fatalf("insert legacy message: %v", err)
+			t.Fatalf("insert legacy message %q: %v", msg.id, err)
 		}
 	}
 	return db
+}
+
+// TestLegacyV1UpgradePreservesSameTimestampTieBreak pins the ordinal backfill's
+// tie-break: legacy v1 ListMessages read `ORDER BY created_at, rowid`, so two
+// messages with the same created_at display in insertion order. The migration
+// must reproduce that order, not fall back to the uuid id order (verifier-core
+// Round3 AR-07 probe used zzz-message inserted before aaa-message).
+func TestLegacyV1UpgradePreservesSameTimestampTieBreak(t *testing.T) {
+	dir := t.TempDir()
+	const sameInstant = "2026-01-01T00:00:01Z"
+	legacy := openLegacyV1WithMessages(t, dir, []legacyMessage{
+		{id: "zzz-message", content: "inserted first", created: sameInstant},
+		{id: "aaa-message", content: "inserted second", created: sameInstant},
+	})
+	if err := legacy.Close(); err != nil {
+		t.Fatalf("close legacy: %v", err)
+	}
+
+	s, err := Open(dir)
+	if err != nil {
+		t.Fatalf("Open(legacy v1): %v", err)
+	}
+	defer func() { _ = s.Close() }()
+
+	got, err := s.ListMessages("s1")
+	if err != nil {
+		t.Fatalf("ListMessages: %v", err)
+	}
+	if len(got) != 2 {
+		t.Fatalf("messages = %d, want 2", len(got))
+	}
+	// Legacy v1 order: created_at equal, rowid = insertion order.
+	want := []string{"zzz-message", "aaa-message"}
+	for i := range want {
+		if got[i].ID != want[i] {
+			t.Fatalf("upgraded order = [%s %s], want the legacy v1 order %v (tie-break must use rowid, not id)", got[0].ID, got[1].ID, want)
+		}
+		if got[i].Ordinal != int64(i+1) {
+			t.Fatalf("message %q ordinal = %d, want %d", got[i].ID, got[i].Ordinal, i+1)
+		}
+	}
 }
 
 func nowUTCString() string {

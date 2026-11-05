@@ -3,6 +3,7 @@ package shell
 import (
 	"context"
 	"errors"
+	"runtime"
 	"testing"
 	"time"
 
@@ -119,4 +120,211 @@ func waitForText(t *testing.T, tt *ui.Tester, text string) {
 		time.Sleep(10 * time.Millisecond)
 	}
 	t.Fatalf("text %q did not appear; texts: %v", text, tt.Texts())
+}
+
+// TestUpdateDownloadInstallFlow pins the download/install state machine: after
+// a check finds a release the install action is enabled, clicking it calls the
+// seam once and the page awaits a restart.
+func TestUpdateDownloadInstallFlow(t *testing.T) {
+	h := newLiveApp(t, &shellProvider{})
+	h.app.Language = LangEN
+	if err := h.store.SetSetting(settingUpdateFeed, "https://updates.example/manifest.json"); err != nil {
+		t.Fatalf("seed feed: %v", err)
+	}
+	checkForUpdate = func(*App, context.Context) (*updater.Release, bool, error) {
+		return &updater.Release{Version: "1.4.2"}, true, nil
+	}
+	installed := 0
+	SetInstallUpdateHook(func(ctx context.Context, progress func(int64, int64)) (*UpdateInstallOutcome, error) {
+		installed++
+		progress(512, 1024)
+		time.Sleep(150 * time.Millisecond)
+		return &UpdateInstallOutcome{
+			CurrentVersion: BuildVersion, ReleaseVersion: "1.4.2",
+			StagedPath: "/tmp/staged", Staged: true,
+		}, nil
+	})
+	t.Cleanup(func() { checkForUpdate = nil; SetInstallUpdateHook(nil) })
+
+	tt := ui.NewTester(h.app.SettingsView, 900, 840)
+	tt.Frame()
+	openSettingsPage(t, h, tt, "Updates")
+	// Before a check the action is present but the status says why it waits.
+	if !tt.HasText("Check for updates first.") {
+		t.Fatalf("pre-check install hint missing: %q", tt.Texts())
+	}
+	if err := tt.Click("Check"); err != nil {
+		t.Fatalf("click Check: %v", err)
+	}
+	waitForText(t, tt, "1.4.2")
+	if !tt.HasText("Download and install") {
+		t.Fatalf("install action missing after a check: %q", tt.Texts())
+	}
+	if err := tt.Click("Download and install"); err != nil {
+		t.Fatalf("click Download and install: %v", err)
+	}
+	// The app seam's progress callback is rendered while downloading.
+	waitForText(t, tt, "50%")
+	waitForText(t, tt, "Restart ZeoKeel")
+	if installed != 1 {
+		t.Fatalf("install seam calls = %d, want 1", installed)
+	}
+	if !tt.HasText("Restart now") {
+		t.Fatalf("restart action missing after install: %q", tt.Texts())
+	}
+}
+
+// TestUpdateInstallErrorIsShown pins the error state of the install action.
+func TestUpdateInstallErrorIsShown(t *testing.T) {
+	h := newLiveApp(t, &shellProvider{})
+	h.app.Language = LangEN
+	if err := h.store.SetSetting(settingUpdateFeed, "https://updates.example/manifest.json"); err != nil {
+		t.Fatalf("seed feed: %v", err)
+	}
+	checkForUpdate = func(*App, context.Context) (*updater.Release, bool, error) {
+		return &updater.Release{Version: "2.0.0"}, true, nil
+	}
+	SetInstallUpdateHook(func(context.Context, func(int64, int64)) (*UpdateInstallOutcome, error) {
+		return nil, errors.New("checksum mismatch")
+	})
+	t.Cleanup(func() { checkForUpdate = nil; SetInstallUpdateHook(nil) })
+	tt := ui.NewTester(h.app.SettingsView, 900, 840)
+	tt.Frame()
+	openSettingsPage(t, h, tt, "Updates")
+	if err := tt.Click("Check"); err != nil {
+		t.Fatalf("click Check: %v", err)
+	}
+	waitForText(t, tt, "2.0.0")
+	if err := tt.Click("Download and install"); err != nil {
+		t.Fatalf("click Download and install: %v", err)
+	}
+	waitForText(t, tt, "checksum mismatch")
+}
+
+// TestUpdateNoFeedDisablesInstall pins the no-feed state: the page explains the
+// missing update.feed_url and the install action never runs.
+func TestUpdateNoFeedDisablesInstall(t *testing.T) {
+	h := newLiveApp(t, &shellProvider{})
+	h.app.Language = LangEN
+	checkForUpdate = func(*App, context.Context) (*updater.Release, bool, error) {
+		return nil, false, updater.ErrDisabled
+	}
+	t.Cleanup(func() { checkForUpdate = nil })
+	tt := ui.NewTester(h.app.SettingsView, 900, 840)
+	tt.Frame()
+	openSettingsPage(t, h, tt, "Updates")
+	if !tt.HasText("Configure update.feed_url") {
+		t.Fatalf("no-feed hint missing: %q", tt.Texts())
+	}
+	// A disabled button must not start the install seam.
+	called := false
+	SetInstallUpdateHook(func(context.Context, func(int64, int64)) (*UpdateInstallOutcome, error) {
+		called = true
+		return &UpdateInstallOutcome{Staged: true}, nil
+	})
+	t.Cleanup(func() { SetInstallUpdateHook(nil) })
+	if err := tt.Click("Download and install"); err == nil {
+		// The button exists; a click must not reach the seam.
+	}
+	if called {
+		t.Fatal("install seam ran without a feed")
+	}
+	if h.app.shellUI().updateInstalling {
+		t.Fatal("install state machine started without a feed")
+	}
+}
+
+// TestSettingsPagesFitNarrowWindow pins the narrow-window layout: at 900x600
+// every settings page header and its primary control stay inside the window
+// horizontally (no clipped controls), including the pages this round touched.
+func TestSettingsPagesFitNarrowWindow(t *testing.T) {
+	h := newLiveApp(t, &shellProvider{})
+	h.app.Language = LangEN
+	tt := ui.NewTester(h.app.SettingsView, 900, 600)
+	tt.Frame()
+	pages := []struct {
+		nav   string
+		title string
+		ctrl  string
+	}{
+		{"Updates", "Updates", "Check"},
+		{"Agent presets", "Agent presets", "Reload presets"},
+		{"Desktop", "Desktop", "Global shortcut"},
+		{"Data & privacy", "Data & privacy", "Open"},
+	}
+	for _, page := range pages {
+		if err := tt.Click(page.nav); err != nil {
+			t.Fatalf("open %q: %v", page.nav, err)
+		}
+		tt.Frame()
+		if !tt.HasText(page.title) {
+			t.Fatalf("%s: page title missing: %q", page.nav, tt.Texts())
+		}
+		for _, label := range []string{page.title, page.ctrl} {
+			rect, ok := tt.Find(label)
+			if !ok {
+				t.Fatalf("%s: %q not found: %q", page.nav, label, tt.Texts())
+			}
+			if rect.X < 0 || rect.X+rect.W > 900 {
+				t.Fatalf("%s: %q clipped horizontally: %+v", page.nav, label, rect)
+			}
+			if rect.Y < 0 {
+				t.Fatalf("%s: %q clipped vertically: %+v", page.nav, label, rect)
+			}
+		}
+	}
+}
+
+// TestUpdateInstallFallbackWithoutHook pins the built-in fallback: when no app
+// seam is installed the action still runs the updater engine (download +
+// schedule) and surfaces its failure instead of doing nothing.
+func TestUpdateInstallFallbackWithoutHook(t *testing.T) {
+	h := newLiveApp(t, &shellProvider{})
+	h.app.Language = LangEN
+	if err := h.store.SetSetting(settingUpdateFeed, "https://127.0.0.1:9/manifest.json"); err != nil {
+		t.Fatalf("seed feed: %v", err)
+	}
+	checkForUpdate = func(*App, context.Context) (*updater.Release, bool, error) {
+		return &updater.Release{
+			Version: "3.0.0",
+			Asset:   updater.Asset{GOOS: runtime.GOOS, GOARCH: runtime.GOARCH, URL: "https://127.0.0.1:9/zeokeel"},
+		}, true, nil
+	}
+	t.Cleanup(func() { checkForUpdate = nil; SetInstallUpdateHook(nil) })
+	SetInstallUpdateHook(nil) // explicit fallback
+	tt := ui.NewTester(h.app.SettingsView, 900, 840)
+	tt.Frame()
+	openSettingsPage(t, h, tt, "Updates")
+	if err := tt.Click("Check"); err != nil {
+		t.Fatalf("click Check: %v", err)
+	}
+	waitForText(t, tt, "3.0.0")
+	if err := tt.Click("Download and install"); err != nil {
+		t.Fatalf("click Download and install: %v", err)
+	}
+	waitForText(t, tt, "Could not install the update")
+}
+
+// TestHotkeyErrorsAreLocalized pins the P3 polish: parser errors from the
+// globalhotkey package are English; the Chinese UI must explain them in
+// Chinese instead of leaking the inner error text.
+func TestHotkeyErrorsAreLocalized(t *testing.T) {
+	h := newLiveApp(t, &shellProvider{})
+	h.app.Language = LangZH
+	tt := ui.NewTester(h.app.SettingsView, 900, 840)
+	tt.Frame()
+	openSettingsPage(t, h, tt, "桌面")
+	h.app.shellUI().textDrafts[settingGlobalHotkey] = "Ctrl+NotAKey"
+	tt.Frame()
+	if !tt.HasText("未知按键") {
+		t.Fatalf("localized hotkey key error missing: %q", tt.Texts())
+	}
+	if tt.HasText("unknown key") || tt.HasText("Invalid shortcut") {
+		t.Fatalf("English hotkey error leaked into the Chinese UI: %q", tt.Texts())
+	}
+	h.app.shellUI().textDrafts[settingGlobalHotkey] = "Ctrl"
+	tt.Frame()
+	if !tt.HasText("至少需要一个修饰键") {
+		t.Fatalf("localized hotkey shape error missing: %q", tt.Texts())
+	}
 }

@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/zeokeel/zeokeel/internal/globalhotkey"
+	"github.com/zeokeel/zeokeel/internal/shell"
 	"github.com/zeokeel/zeokeel/internal/updater"
 )
 
@@ -59,6 +60,40 @@ func (a *app) CheckForUpdate(ctx context.Context) (*updater.Release, bool, error
 // checkUpdatesOnStart reports whether update.check_on_start is enabled.
 func (a *app) checkUpdatesOnStart() bool {
 	return a.settingBool(updateCheckOnStartKey, false)
+}
+
+// setShellInstallUpdateHook installs the shell's GUI install seam. It is a
+// variable only so tests can capture the adapter without driving the shell UI;
+// production always calls shell.SetInstallUpdateHook.
+var setShellInstallUpdateHook = shell.SetInstallUpdateHook
+
+// installShellUpdateHook routes the shell's Updates page "download and install"
+// action through the app seam (progress reporting, verified download,
+// schedule/apply, staged-vs-applied outcome). Without it the shell keeps its
+// built-in updater-engine fallback (download + schedule only).
+func (a *app) installShellUpdateHook() {
+	if setShellInstallUpdateHook == nil {
+		return
+	}
+	setShellInstallUpdateHook(a.shellInstallUpdate)
+}
+
+// shellInstallUpdate adapts DownloadAndInstallUpdate to shell.UpdateInstallHook.
+// The shell mirrors the outcome fields so internal/app stays the only package
+// that knows about the updater engine.
+func (a *app) shellInstallUpdate(ctx context.Context, progress func(downloaded, total int64)) (*shell.UpdateInstallOutcome, error) {
+	result, err := a.DownloadAndInstallUpdate(ctx, progress)
+	if result == nil {
+		return nil, err
+	}
+	return &shell.UpdateInstallOutcome{
+		CurrentVersion: result.CurrentVersion,
+		ReleaseVersion: result.ReleaseVersion,
+		StagedPath:     result.StagedPath,
+		Staged:         result.Staged,
+		Applied:        result.Applied,
+		UpToDate:       result.UpToDate,
+	}, err
 }
 
 // hotkeyManager is the app's view of globalhotkey.Manager (seam for tests).

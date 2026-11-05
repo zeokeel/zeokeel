@@ -33,10 +33,12 @@ func WithBatchSize(n int) Option {
 	return func(c *projectorConfig) { c.batchSize = n }
 }
 
-// Projector is the single consumer of a Broker's subscription. It folds events
-// into immutable Snapshots on its own goroutine and publishes the current
-// snapshot through an atomic pointer, so UI goroutines can read it without
-// locking and without racing the fold.
+// Projector is a deprecated single-session consumer of a Broker's subscription
+// (AR-05). It folds events into immutable Snapshots on its own goroutine and
+// publishes the current snapshot through an atomic pointer. Production UI state
+// is folded by session.Controller with Apply instead; a Projector cannot
+// represent a user message or a session switch. Retained for experiments and
+// tests only.
 type Projector struct {
 	ctx     context.Context
 	events  <-chan Event

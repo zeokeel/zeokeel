@@ -66,3 +66,25 @@ func TestQuestionCardEmptyAnswerIsRefused(t *testing.T) {
 		t.Fatalf("question card disappeared after an empty send; texts: %v", tester.Texts())
 	}
 }
+
+// TestQuestionCardWithdrawalIsExplained pins the timeout half of FP-16: when a
+// pending card disappears without the user answering (the blocking question
+// timed out or its turn ended), the shell explains the withdrawal instead of
+// silently dropping the card.
+func TestQuestionCardWithdrawalIsExplained(t *testing.T) {
+	h := newLiveApp(t, &shellProvider{})
+	h.app.Language = LangEN
+	st := h.app.shellUI()
+	st.questionSession = h.ctrl.CurrentSessionID()
+	st.questionSeen = map[string]bool{"call-1": true}
+	st.questionAnswered = map[string]bool{}
+	tt := ui.NewTester(h.app.View, 1600, 1000)
+	tt.Frame()
+	tt.Frame()
+	if !tt.HasText("question was withdrawn") {
+		t.Fatalf("withdrawal notice missing: %q", tt.Texts())
+	}
+	if !tt.HasText("agent continues") {
+		t.Fatalf("withdrawal notice lost its explanation: %q", tt.Texts())
+	}
+}

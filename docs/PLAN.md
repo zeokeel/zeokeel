@@ -324,7 +324,7 @@ type StatusEvent struct{ Phase Phase; Subagents, Jobs int }
 type ErrorEvent struct{ MsgID string; Err error }
 ```
 
-- 总线是**有界队列 + 非阻塞投递**（满了丢弃并计数）；设计意图是单消费者投影层，但现状是 `session.Controller` 自己折叠 `views` 快照、`state.Projector` 仍在旁路折叠（BUGS AR-05：二选一收敛）。
+- 总线是**有界队列 + 非阻塞投递**（满了丢弃并计数）；已收敛（AR-05）：`session.Controller` 单一折叠 `views` 快照（UI 真源），`state.Projector` 已 **deprecated**（仅测试/兼容保留，`session.Config.Projector` 传入会被立即关闭以停止重复折叠）。
 - 事件同时落每会话 JSONL（`<data dir>/sessions/<id>/session.jsonl`），用于人类可读镜像/导出；**SQLite `events` 表是持久化真源**（见 §8.3）。
 
 ### 4.5 状态机（会话/回合/工具/审批）

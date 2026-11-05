@@ -352,7 +352,7 @@ func (a *App) liveTranscriptEmpty(c *ui.Context, t *design.Tokens) {
 				FontWeight(600).TextColor(t.LabelPrimary)
 			ui.Text(c, a.T("session.empty_hint")).FontSize(12).
 				FixedLineHeight(18).TextColor(t.LabelTertiary).MaxLines(2)
-			if a.Ctrl != nil && !a.Ctrl.HasAgent() {
+			if a.Ctrl != nil && !a.Ctrl.HasConfiguredModel() {
 				ui.Text(c, a.T("session.empty_no_model")).FontSize(12).
 					FixedLineHeight(18).TextColor(t.WarningText).MaxLines(2)
 				button := design.Apply(

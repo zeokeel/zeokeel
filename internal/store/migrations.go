@@ -169,8 +169,11 @@ func backupDatabase(db *sql.DB, dir string, from, to int) error {
 }
 
 // migrateMessagesOrdinal is the AR-07 step: add a per-session ordinal column and
-// backfill it from the historical ordering (created_at, id), so message order no
-// longer depends on event replay ordering or timestamp uniqueness.
+// backfill it from the historical read order. Legacy v1 ListMessages used
+// `ORDER BY created_at, rowid`, so the backfill must use the same tie-break:
+// rowid is the insertion order, while two messages that share a created_at could
+// otherwise be reordered by their uuid ids after the upgrade (verifier-core
+// Round3 AR-07 P3).
 func migrateMessagesOrdinal(tx *sql.Tx) error {
 	exists, err := columnExistsTx(tx, "messages", "ordinal")
 	if err != nil {
@@ -186,7 +189,7 @@ func migrateMessagesOrdinal(tx *sql.Tx) error {
 		UPDATE messages SET ordinal = (
 			SELECT ranked.rn FROM (
 				SELECT id, ROW_NUMBER() OVER (
-					PARTITION BY session_id ORDER BY created_at, id
+					PARTITION BY session_id ORDER BY created_at, rowid
 				) AS rn FROM messages
 			) AS ranked WHERE ranked.id = messages.id
 		)`); err != nil {

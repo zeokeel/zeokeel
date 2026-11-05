@@ -358,13 +358,33 @@ func (a *App) updatesSettingsPage(c *ui.Context, t *design.Tokens) {
 		a.settingsRow(c, t,
 			a.menuText("Check for updates", "检查更新"),
 			a.updateStatusText(),
-			settingsRowStyle{last: true}, func() {
+			settingsRowStyle{}, func() {
 				label := a.menuText("Check", "检查")
 				if st.updateChecking {
 					label = a.menuText("Checking…", "正在检查…")
 				}
 				button := ui.Button(c, label).Height(t.Theme().Space(8)).Label(label)
 				button.OnClick(func() { a.runUpdateCheck(c) })
+			})
+		installLabel, installEnabled, installHint := a.updateInstallState()
+		a.settingsRow(c, t,
+			a.menuText("Install update", "安装更新"),
+			installHint,
+			settingsRowStyle{last: true}, func() {
+				ui.Row(c).Gap(t.Theme().Space(2)).AlignItems(ui.Center).Children(func() {
+					button := ui.Button(c, installLabel).Height(t.Theme().Space(8)).
+						Label(installLabel)
+					if !installEnabled {
+						button = button.Disabled(true)
+					}
+					button.OnClick(func() { a.runUpdateInstall(c) })
+					if st.updateInstalled {
+						quitLabel := a.menuText("Restart now", "立即重启")
+						quitButton := ui.Button(c, quitLabel).Height(t.Theme().Space(8)).
+							Label(quitLabel)
+						quitButton.OnClick(func() { quitApp() })
+					}
+				})
 			})
 	})
 }

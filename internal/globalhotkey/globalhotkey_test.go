@@ -276,7 +276,17 @@ func TestNewPlatformSupport(t *testing.T) {
 		if err := m.Close(); err != nil {
 			t.Fatalf("Close: %v", err)
 		}
-	case "linux", "darwin":
+	case "linux":
+		// X11 when a display is reachable (headless test runners: ErrUnsupported).
+		if err == nil {
+			if m == nil {
+				t.Fatal("New() on linux = nil manager, nil error")
+			}
+			_ = m.Close()
+		} else if !errors.Is(err, ErrUnsupported) {
+			t.Fatalf("New() on linux err = %v, want ErrUnsupported when headless", err)
+		}
+	case "darwin":
 		if !errors.Is(err, ErrUnsupported) {
 			t.Fatalf("New() on %s err = %v, want ErrUnsupported", runtime.GOOS, err)
 		}

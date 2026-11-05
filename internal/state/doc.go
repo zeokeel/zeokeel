@@ -1,12 +1,18 @@
-// Package state is ZeoKeel's UI state layer: a runtime event bus plus an
-// immutable snapshot projector that every UI screen reads.
+// Package state is ZeoKeel's UI state layer: the runtime event set, a bounded
+// event bus (Broker) and the pure fold (Apply) that turns events into immutable
+// Snapshots.
 //
 // The runtime never mutates UI state directly. It publishes values from the
 // closed Event set (Token, Reasoning, ToolStart, ToolEnd, ApprovalRequest,
-// Usage, Status, Error) to a Broker. A Projector is the broker's single
-// consumer: it folds events, in publish order, into a Snapshot and swaps the
-// current snapshot atomically (atomic.Pointer[Snapshot]). The view reads the
-// snapshot once per frame via Projector.Snapshot and only reads it.
+// Usage, Status, Error) to a Broker. Production UI state is folded by
+// session.Controller into one Snapshot per session with Apply; the view reads
+// that snapshot and only reads it.
+//
+// Projector is retained as a deprecated single-session consumer of a Broker's
+// subscription (AR-05): it folds events on its own goroutine into one Snapshot
+// and swaps it atomically. It cannot represent a user message or a session
+// switch, so production no longer consumes it; keep it only for experiments or
+// tests, and prefer Apply for any new fold.
 //
 // Folding is deterministic. Applying the same events in the same order
 // always produces the same snapshot, and Apply never mutates its input: every
@@ -17,8 +23,8 @@
 //
 // Snapshot.Seq counts applied events. It is not a publish counter: an event
 // dropped by a slow subscriber is never applied and does not advance Seq.
-// Subscribe the projector before the first Publish (NewProjector does that)
-// and keep the OnPublish callback cheap so the projector keeps up; drops are
+// A legacy Projector must be subscribed before the first Publish (NewProjector
+// does that); keep its OnPublish callback cheap so it keeps up. Drops are
 // observable via Broker.Dropped.
 //
 // Concurrency contract:

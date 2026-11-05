@@ -346,7 +346,7 @@ Plugins 与 Automation 是两个"列表页"屏，本轮把它们的 DSH 复刻�
 | View options | 品牌 popover：`Space(67)` 宽、28 DIP 菜单项、可聚焦 checkable 行（RoleMenuItemCheckBox 不变） |
 | todo 面板 | `BgSidebar` inspector 面板（`Space(68)` 宽、左分隔线）；header + 计数 pill + 细分进度条；状态 mark：空环 / in-progress accent 点 / completed success ✓；完成项删除线 |
 | team 面板 | 同 inspector 面板；成员为 `BgRaised` 卡片 + 状态点 + 名称/状态 + 任务；目标 banner 品牌 tint + **全宽**进度条（删除固定 240px），完成态 success |
-| plan | ~~header 计划模式 toggle~~ **（2026-11-05 对齐 DSH：header 不再有复选框；入口改为 `/plan` 命令 + composer 计划徽章（仅激活时显示，点击或 `/plan off` 退出）；plan 模式为软引导（`plan:policy` + `present` "Plan" + 审阅卡），不拦截工具——需要强制只读时同时选「只读」权限，见 [ADR 0008](../../decisions/0008-plan-mode-soft-alignment.md)）**；plan review 卡宽 = 品牌 composer 列；Approve 沿用品牌 primary，Exit 改 ghost 按钮；question card / artifacts 卡同批品牌化（composer 列宽、tint 卡、`FillWidth` 左对齐） |
+| plan | ~~header 计划模式 toggle~~ **（2026-11-05 对齐 DSH：header 不再有复选框；入口改为 `/plan` 命令 + composer 计划徽章（仅激活时显示，点击或 `/plan off` 退出）；plan 模式为软引导（`plan:policy` + `present` "Plan" + 审阅卡），不拦截工具——需要强制只读时同时选「只读」权限，见 [ADR 0008](../decisions/0008-plan-mode-soft-alignment.md)）**；plan review 卡宽 = 品牌 composer 列；Approve 沿用品牌 primary，Exit 改 ghost 按钮；question card / artifacts 卡同批品牌化（composer 列宽、tint 卡、`FillWidth` 左对齐） |
 | 通用 | 删除固定像素与采样色，全部改 `Theme.Space/Rem/Radius` 与 brand 语义色；无新增 i18n key（复用现有 key）；键盘导航/Esc/方向键/Enter、勾选/折叠/滚动/窄窗、a11y Label/Role/Focusable 全部保留 |
 
 ### 14.2 截图

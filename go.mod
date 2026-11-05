@@ -5,6 +5,7 @@ go 1.27.3
 require (
 	github.com/cloudwego/eino v0.10.0-alpha.35
 	github.com/creack/pty v1.1.21
+	github.com/ebitengine/purego v0.11.1
 	github.com/egoist/mygo v0.7.4
 	github.com/google/uuid v1.6.0
 	github.com/modelcontextprotocol/go-sdk v1.8.0
@@ -21,7 +22,6 @@ require (
 	github.com/bytedance/sonic/loader v0.5.0 // indirect
 	github.com/cloudwego/base64x v0.1.6 // indirect
 	github.com/dustin/go-humanize v1.1.0 // indirect
-	github.com/ebitengine/purego v0.11.1 // indirect
 	github.com/eino-contrib/jsonschema v1.0.3 // indirect
 	github.com/go-text/typesetting v0.3.5 // indirect
 	github.com/go-text/typesetting-utils v0.0.0-20261009215314-bb530f4842f3 // indirect

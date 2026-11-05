@@ -99,6 +99,7 @@ func NewHeadlessRuntime(cfg HeadlessRuntimeConfig) (HeadlessRuntime, error) {
 
 	a.services = ctrl
 	a.bundle = startup
+	ctrl.SetModelConfiguredFunc(a.hasConfiguredModel)
 	if startup.Agent != nil {
 		ctrl.SetAgentModeSwitcher(startup.Agent.SetMode)
 	}

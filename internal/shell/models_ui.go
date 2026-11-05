@@ -14,6 +14,7 @@ import (
 
 	"github.com/zeokeel/zeokeel/internal/design"
 	"github.com/zeokeel/zeokeel/internal/store"
+	"github.com/zeokeel/zeokeel/internal/updater"
 )
 
 // settingsTab identifies the selected page of the live Settings modal.
@@ -170,12 +171,29 @@ type shellUIState struct {
 	// importOpen is the PD-04 "Import from DSH" instructions dialog.
 	importOpen bool
 
-	// Updates page state: the async check's progress and last result.
-	updateChecking bool
-	updateMessage  string
+	// Updates page state: the async check's progress and last result, the
+	// release found by the check, and the download/install progress.
+	updateChecking   bool
+	updateMessage    string
+	updateRelease    *updater.Release
+	updateAvailable  bool
+	updateInstalling bool
+	updateInstalled  bool
+	updateStaged     *updater.Staged
+	// updateProgress* are written by the download goroutine and read by the
+	// render; the mutex keeps the race detector quiet and the UI coherent.
+	updateProgressMu         sync.Mutex
+	updateProgressDownloaded int64
+	updateProgressTotal      int64
 
 	// presetPickerOpen is the live header's FP-06 preset popover.
 	presetPickerOpen bool
+
+	// FP-16 question-card tracking: which pending cards are on screen (so a
+	// controller-withdrawn card can be explained) and which the user answered.
+	questionSession  string
+	questionSeen     map[string]bool
+	questionAnswered map[string]bool
 
 	// sessionCache is the AR-08 session-list cache: the view renders it while
 	// a background goroutine refreshes it.
