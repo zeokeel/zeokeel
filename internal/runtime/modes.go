@@ -14,17 +14,12 @@ import (
 	"github.com/cloudwego/eino/compose"
 )
 
-// Agent modes. The first four mirror DeepSeek Harness's agent presets and own
-// both the eino topology and the model-visible tool set:
+// Agent modes. The three supported presets own both the eino topology and the
+// model-visible tool set:
 //
 //   - ModeStandard builds a single adk.ChatModelAgent over the configured
 //     Provider and tool Registry. This is the historical behavior and the only
 //     mode that works without a tool-calling model.
-//   - ModePTC adds the "ptc" pipeline tool to the standard tool set. PTC here
-//     is deliberately pipeline-style: the model submits one batch of tool
-//     calls and the runtime executes them sequentially, with no JavaScript or
-//     other code-execution sandbox. It is for batching reads/searches and then
-//     filtering, organizing, deduplicating, counting or summarizing results.
 //   - ModeMinimal exposes exactly terminal_open, terminal_list, terminal_read,
 //     terminal_send, terminal_signal, terminal_close, read_image and
 //     working_directory. Context compaction still applies because the runtime
@@ -50,8 +45,6 @@ import (
 const (
 	// ModeStandard is a single ChatModelAgent with the full registry.
 	ModeStandard = "standard"
-	// ModePTC is standard plus the pipeline-style "ptc" batch tool.
-	ModePTC = "ptc"
 	// ModeMinimal exposes the six DSH terminal tools, read_image and
 	// working_directory only.
 	ModeMinimal = "minimal"
@@ -70,16 +63,11 @@ const (
 // "cordis" is DSH's internal preset id for Creator mode.
 var modeAliases = map[string]string{
 	"cordis":       ModeCreator,
-	"ptc-mode":     ModePTC,
-	"ptc_mode":     ModePTC,
 	"minimal-mode": ModeMinimal,
 	"minimal_mode": ModeMinimal,
 	"creator-mode": ModeCreator,
 	"creator_mode": ModeCreator,
 }
-
-// ptcToolName is the tool ModePTC adds to the standard set.
-const ptcToolName = "ptc"
 
 // minimalToolNames is Minimal mode's complete model-visible tool set, matching
 // DSH's minimal preset: the six terminal session tools, read_image and
@@ -98,8 +86,8 @@ var minimalToolNames = map[string]bool{
 }
 
 // creatorOnlyToolNames are registered by the app for Creator mode only. The
-// standard, PTC and legacy tool sets hide them, matching DSH's separation
-// between ordinary work and customization.
+// standard and legacy tool sets hide them, matching DSH's separation between
+// ordinary work and customization.
 var creatorOnlyToolNames = map[string]bool{
 	"settings_get": true,
 	"settings_set": true,
@@ -110,7 +98,7 @@ var creatorOnlyToolNames = map[string]bool{
 // ModeStandard, but is normalized away before an Agent is built. The legacy
 // deep/supervisor/planexecute aliases are intentionally absent.
 func Modes() []string {
-	return []string{ModeStandard, ModePTC, ModeMinimal, ModeCreator}
+	return []string{ModeStandard, ModeMinimal, ModeCreator}
 }
 
 // NormalizeMode validates mode and returns its canonical value. "" means
@@ -125,7 +113,7 @@ func NormalizeMode(mode string) (string, error) {
 		return alias, nil
 	}
 	switch mode {
-	case ModeStandard, ModePTC, ModeMinimal, ModeCreator,
+	case ModeStandard, ModeMinimal, ModeCreator,
 		ModeDeep, ModeSupervisor, ModePlanExecute:
 		return mode, nil
 	}
@@ -134,18 +122,13 @@ func NormalizeMode(mode string) (string, error) {
 
 // modeAllowsTool reports whether a registered tool is visible in mode. Minimal
 // uses the exact minimalToolNames allowlist; the Creator settings tools are the
-// only other registry entries whose visibility depends on a mode. PTC's "ptc"
-// tool is synthesized by the Agent and is never taken from the registry.
+// only other registry entries whose visibility depends on a mode.
 func modeAllowsTool(mode, name string) bool {
 	switch mode {
 	case ModeMinimal:
 		return minimalToolNames[name]
-	case ModeCreator:
-		return name != ptcToolName
-	case ModeStandard, ModePTC, ModeDeep, ModeSupervisor, ModePlanExecute:
-		return name != ptcToolName && !creatorOnlyToolNames[name]
 	default:
-		return name != ptcToolName && !creatorOnlyToolNames[name]
+		return !creatorOnlyToolNames[name]
 	}
 }
 
@@ -188,8 +171,6 @@ func ModeTools(mode string, available []string) []string {
 		}
 	}
 	switch normalized {
-	case ModePTC:
-		add(ptcToolName)
 	case ModeCreator:
 		add("settings_get")
 		add("settings_set")
@@ -221,7 +202,7 @@ func (a *Agent) buildMode(snap agentSnapshot) (adk.Agent, error) {
 	}
 
 	switch mode {
-	case ModeStandard, ModePTC, ModeMinimal, ModeCreator:
+	case ModeStandard, ModeMinimal, ModeCreator:
 		return adk.NewChatModelAgent(context.Background(), &adk.ChatModelAgentConfig{
 			Name:          a.name,
 			Description:   "ZeoKeel agent runtime",
@@ -339,10 +320,6 @@ func (a *Agent) effectiveTools(mode string) []Tool {
 		present[name] = true
 	}
 	switch normalized {
-	case ModePTC:
-		if !present[ptcToolName] {
-			out = append(out, newPTCTool(a.registry, a.gate, a.reviewer))
-		}
 	case ModeCreator:
 		if !present["settings_get"] {
 			out = append(out, NewSettingsGetTool(a.settings))

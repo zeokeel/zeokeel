@@ -76,7 +76,7 @@ func TestExitPlanModeToolWiring(t *testing.T) {
 	}
 
 	// Minimal mode hides every tool outside its terminal-oriented set; the
-	// tool is exposed by the standard/PTC/creator presets, not everywhere.
+	// tool is exposed by the standard/creator presets, not everywhere.
 	if err := bundle.Agent.SetMode(runtime.ModeMinimal); err != nil {
 		t.Fatalf("SetMode(minimal): %v", err)
 	}

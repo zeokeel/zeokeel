@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -88,62 +87,6 @@ func TestRunSubagentRestrictsToolsAndReturnsText(t *testing.T) {
 		t.Fatalf("child model tools = %v, want the orchestration tools excluded", tools)
 	}
 }
-
-// TestPTCSubagentPromptMatchesItsToolSet is the PTC prompt/tool parity
-// regression: the parent instruction advertises the root-only ptc batch tool,
-// which subagentToolNames deliberately hides from children. The child prompt
-// must say so instead of leaving the model to call a tool it does not have.
-func TestPTCSubagentPromptMatchesItsToolSet(t *testing.T) {
-	reg := NewRegistry()
-	for _, name := range []string{"bash", "read_file", "ptc"} {
-		if err := reg.Register(&jsonTool{name: name}); err != nil {
-			t.Fatal(err)
-		}
-	}
-	const parentInstruction = "PTC mode is active. The ptc tool executes an ordered batch of ordinary tool calls in one pipeline-style step."
-	m := &fakeChatModel{script: func(context.Context, int, []*schema.Message) ([]*schema.Message, error) {
-		return finalText("child done"), nil
-	}}
-	agent := newTestAgent(t, Config{
-		einoModel:   m,
-		Tools:       reg,
-		Mode:        ModePTC,
-		Instruction: parentInstruction,
-	})
-	result, err := agent.RunSubagent(context.Background(), SubagentRequest{Task: "batch the reads", Depth: 1})
-	if err != nil {
-		t.Fatalf("RunSubagent(ptc): %v", err)
-	}
-	if hasTool(result.Tools, "ptc") {
-		t.Fatalf("PTC child tools = %v, want the root-only ptc tool excluded", result.Tools)
-	}
-	if !hasTool(result.Tools, "bash") || !hasTool(result.Tools, "read_file") {
-		t.Fatalf("PTC child tools = %v, want the ordinary tools", result.Tools)
-	}
-
-	var systemPrompt string
-	for _, msg := range m.inputAt(0) {
-		if msg.Role == schema.System {
-			systemPrompt = msg.Content
-			break
-		}
-	}
-	if systemPrompt == "" {
-		t.Fatal("child model received no system prompt")
-	}
-	if !strings.Contains(systemPrompt, "PTC mode is active") {
-		t.Fatalf("child prompt did not inherit the parent policy:\n%s", systemPrompt)
-	}
-	if !strings.Contains(systemPrompt, "PTC batch is root-only; use individual tools") {
-		t.Fatalf("child prompt does not warn that the ptc tool is root-only:\n%s", systemPrompt)
-	}
-	idxParent := strings.Index(systemPrompt, "The ptc tool executes")
-	idxRootOnly := strings.Index(systemPrompt, "PTC batch is root-only")
-	if idxParent < 0 || idxRootOnly < 0 || idxRootOnly < idxParent {
-		t.Fatalf("child prompt root-only note must follow the inherited PTC policy (parent=%d note=%d):\n%s", idxParent, idxRootOnly, systemPrompt)
-	}
-}
-
 func TestRunSubagentHonorsAllowList(t *testing.T) {
 	reg := NewRegistry()
 	for _, name := range []string{"clock", "writer"} {

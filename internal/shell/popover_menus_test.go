@@ -161,7 +161,7 @@ func TestComposerPopoversUseBrandedMenuRows(t *testing.T) {
 		if got := popupCount(nodes); got != 1 {
 			t.Fatalf("mode menu popup panels = %d, want 1", got)
 		}
-		for _, label := range []string{"Standard mode", "PTC mode", "Minimal mode", "Creator mode"} {
+		for _, label := range []string{"Standard mode", "Minimal mode", "Creator mode"} {
 			assertMenuRow(t, nodes, accessRoleMenuItemRadio, label, true)
 		}
 		if states := assertMenuRow(t, nodes, accessRoleMenuItemRadio, "Standard mode", true); states&accessCheckedState == 0 {

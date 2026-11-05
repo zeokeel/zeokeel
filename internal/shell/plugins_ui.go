@@ -64,7 +64,6 @@ var builtinPluginDefs = []builtinPluginDef{
 // survives a restart and a future wiring has one source of truth.
 var experimentalPluginDefs = []builtinPluginDef{
 	{name: "agent_teams", titleEN: "Agent Teams", titleZH: "代理团队", enabledByDefault: false},
-	{name: "voice_input", titleEN: "Voice input", titleZH: "语音输入", enabledByDefault: false},
 	{name: "auto_review", titleEN: "Auto Authorization Review", titleZH: "自动授权审核", enabledByDefault: false},
 	{name: "developer_tools", titleEN: "Developer Tools", titleZH: "开发者工具", enabledByDefault: false},
 }
@@ -216,8 +215,6 @@ func pluginKeyForLabel(label string) string {
 		return "shell"
 	case "Agent Teams":
 		return "agent_teams"
-	case "Voice input":
-		return "voice_input"
 	case "Auto Authorization Review":
 		return "auto_review"
 	case "Developer Tools":
@@ -272,10 +269,9 @@ var pluginRowIcons = map[string]*ui.SVG{
 // toggles. The features do not exist yet, but the switches keep their state.
 func (a *App) experimentalPluginRowsLive() []pluginRow {
 	rows := make([]pluginRow, 0, len(experimentalPluginDefs))
-	icons := []*ui.SVG{pluginIconTeams, pluginIconVoice, pluginIconReview, pluginIconDev}
+	icons := []*ui.SVG{pluginIconTeams, pluginIconReview, pluginIconDev}
 	descs := []string{
 		"Enable team collaboration, team tools, the member roster, and the shared task board.",
-		"Transcribe recordings locally with SenseVoice; first use requires installing dependencies",
 		"Add an Auto review permission mode that uses the model to assess authorization before each tool call.",
 		"Inspect and debug raw session data, grouped chat messages, and the NodeJS backend.",
 	}

@@ -113,12 +113,14 @@ git archive 84c5b1f | tar -x -C /tmp/clean && cd /tmp/clean && sh scripts/ci.sh 
 | `FIX-VERIFY-UI-WAVE2.md` | wave2 UI 真跑 | **CONFIRMED 9 / PARTIAL 1 / REFUTED 0**：PD-05/06/10、About/setup/import 入口 CONFIRMED；PD-07 PARTIAL（AGENTS.md 编辑保存流程未驱动）；无 P0/P1 回归；2 个 P3 观察入 BUGS |
 | `FIX-VERIFY-IMPORT2.md` | 导入器改进再验收 | 质量 PASS（1,248 msgs/系统注入=0/`[tool call]`=0）；发现 manifest 幂等 P1（真实布局）→ 已修复并由 fix-security 独立复核；旧版 manifest 首导重导一次说明 |
 
+> **2026-11-06 用户决策**：**PTC（代码运行时/模式）与语音输入明确不做**，本轮从代码与 UI 删除；不再是 DEFERRED/后续项，见 `docs/BUGS.md`（FP-02/Voice）与 `known-limitations.md` §2.1。
+
 ## 6. 明确延期（DEFERRED，含理由；均已写入 docs/BUGS.md 与 known-limitations）
 
 | 项 | 理由 |
 | --- | --- |
 | RT-04 per-session Agent（全局串行/审批占锁） | 涉及 Eino 并发模型与 MCP/terminal manager 生命周期，需专项设计与压测；方案已记录（`SetAgentFactory` seam + 审批不占全局锁），本轮不做大改 |
-| FP-02 PTC 代码运行时 | 与「纯 Go、CGO_ENABLED=0、单二进制」硬约束冲突（需嵌 JS/Node）；保持 batch pipeline 并在文档标 ❌/产品边界 |
+| ~~FP-02 PTC 代码运行时~~ | **2026-11-06 用户决策：明确不做**——PTC 模式/代码运行时从代码与 UI 删除，不是延期项；`docs/BUGS.md` FP-02 已改 ❌ NOT PLANNED |
 | FP-06 声明式 agent preset/persona | L 能力扩展项，需 preset 存储/注册表/会话选择 UI；先以 4 模式 + skills/settings 覆盖 |
 | FP-16 阻塞式 ask_user | P2 体验项；跨 runtime/shell/controller 三 owner，方案已记录 |
 | FP-05 UI diff 视图 | 后端事件/差异已交付；UI 展示留待下一迭代 |

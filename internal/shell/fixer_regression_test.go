@@ -190,7 +190,7 @@ func TestSetDefaultPresetKeyboardReachable(t *testing.T) {
 		t.Fatalf("open Agent presets: %v", err)
 	}
 	tt.Frame()
-	assertTabReachable(t, tt, []string{"Set default PTC mode", "Set default Minimal mode"})
+	assertTabReachable(t, tt, []string{"Set default Minimal mode", "Set default Creator mode"})
 }
 
 // TestSearchDialogChipsAndRowsReachable covers the search dialog's filter

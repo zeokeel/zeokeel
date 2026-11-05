@@ -356,9 +356,6 @@ func pluginUnsupportedReason(name string) (en, zh string) {
 	case "agent_teams":
 		return "Agent Teams is experimental. When enabled, team tools and the shared task board are registered for the next turn; disabling it removes them.",
 			"代理团队仍处于实验阶段。启用后，团队工具与共享任务面板会在下一轮注册；停用后会被移除。"
-	case "voice_input":
-		return "Voice input needs local SenseVoice dependencies that this build does not ship; the preference is saved for a future release.",
-			"语音输入需要本地 SenseVoice 依赖，此版本未内置；偏好已保存，供后续版本使用。"
 	case "auto_review":
 		return "Auto Authorization Review is experimental. Choose the Auto review EXP permission mode to have the model review mutating tool calls; this plugin switch stores the preference only.",
 			"自动授权审核仍处于实验阶段。选择“自动审查（实验）”权限模式后，模型会审查会修改数据的工具调用；此插件开关仅保存偏好。"
@@ -520,8 +517,6 @@ func pluginRowDescForName(name string) string {
 	switch name {
 	case "Agent Teams":
 		return "Enable team collaboration, team tools, the member roster, and the shared task board."
-	case "Voice input":
-		return "Transcribe recordings locally with SenseVoice; first use requires installing dependencies"
 	case "Auto Authorization Review":
 		return "Add an Auto review permission mode that uses the model to assess authorization before each tool call."
 	case "Developer Tools":
@@ -757,6 +752,12 @@ func (a *App) agentPresetDefault() string {
 	}
 	mode, err := runtime.NormalizeMode(value)
 	if err != nil {
+		return ""
+	}
+	// Only modes the picker still offers count as a default: an older build
+	// may have persisted a preset this UI no longer exposes, and silently
+	// applying it would put the user in a mode they cannot see or change.
+	if !supportedAgentMode(mode) {
 		return ""
 	}
 	return mode

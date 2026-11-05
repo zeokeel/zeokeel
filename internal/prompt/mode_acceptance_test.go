@@ -20,13 +20,6 @@ func TestPromptModeSections(t *testing.T) {
 	}
 	cases := []modeCase{
 		{
-			id:      "mode:ptc",
-			order:   OrderModePTC,
-			marker:  "PTC mode is active",
-			zh:      "PTC 模式已启用",
-			aliases: []string{"ptc", "ptc-mode", "ptc_mode"},
-		},
-		{
 			id:      "mode:minimal",
 			order:   OrderModeMinimal,
 			marker:  "Minimal mode is active",
@@ -55,11 +48,10 @@ func TestPromptModeSections(t *testing.T) {
 			t.Fatalf("section %q order = %d, want %d", tc.id, order, tc.order)
 		}
 	}
-	if !(orders["mode:ptc"] < orders["mode:minimal"] &&
-		orders["mode:minimal"] < orders["mode:creator"] &&
+	if !(orders["mode:minimal"] < orders["mode:creator"] &&
 		orders["mode:creator"] < OrderFileReference) {
-		t.Fatalf("mode section order = ptc:%d minimal:%d creator:%d, want ascending before file reference (%d)",
-			orders["mode:ptc"], orders["mode:minimal"], orders["mode:creator"], OrderFileReference)
+		t.Fatalf("mode section order = minimal:%d creator:%d, want ascending before file reference (%d)",
+			orders["mode:minimal"], orders["mode:creator"], OrderFileReference)
 	}
 
 	// Standard adds no preset policy.
@@ -106,25 +98,14 @@ func TestPromptModeSections(t *testing.T) {
 	}
 
 	// A collaboration mode and an agent preset compose together in order.
-	planPTC := richContext()
-	planPTC.Mode = "plan"
-	planPTC.AgentMode = "ptc"
-	combined := Compose(planPTC)
+	planCreator := richContext()
+	planCreator.Mode = "plan"
+	planCreator.AgentMode = "creator"
+	combined := Compose(planCreator)
 	planAt := strings.Index(combined, "Plan mode is active")
-	ptcAt := strings.Index(combined, "PTC mode is active")
-	if planAt < 0 || ptcAt < 0 || planAt > ptcAt {
-		t.Fatalf("plan -> PTC order is wrong: plan=%d ptc=%d\n%s", planAt, ptcAt, combined)
-	}
-
-	// PTC describes the pipeline batch tool rather than a code sandbox.
-	ptc := richContext()
-	ptc.Mode = ""
-	ptc.AgentMode = "ptc"
-	ptcOut := Compose(ptc)
-	for _, marker := range []string{"ordered batch", "pipeline-style", "not a JavaScript or code sandbox"} {
-		if !strings.Contains(ptcOut, marker) {
-			t.Fatalf("PTC policy is missing %q:\n%s", marker, ptcOut)
-		}
+	creatorAt := strings.Index(combined, "Creator mode is active")
+	if planAt < 0 || creatorAt < 0 || planAt > creatorAt {
+		t.Fatalf("plan -> creator order is wrong: plan=%d creator=%d\n%s", planAt, creatorAt, combined)
 	}
 
 	// Minimal's dynamic policy follows the terminal group being visible or not.

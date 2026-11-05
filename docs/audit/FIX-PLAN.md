@@ -155,3 +155,43 @@
 - [x] `settings-window` 两张已重生成（夹具改共享常量 900×840；`identify` 校验 900×840）+ `TestVisualRegression` PASS。
 - [x] `zeokeel import --manifest/--no-manifest`：importer `Options.ManifestPath` 就绪后已接线（默认 `<数据目录>/dsh-import-manifest.json`，幂等；`--no-manifest` 退回全量重导）+ 测试；并接入 `Skips`/`images_dropped` 文本报告。
 - [x] 工作树 `sh scripts/ci.sh --fast` = **CI PASS**（2026-11-05 23:52，全部包绿：session 252s/shell 68s/app tool/zero-cgo）；clean-checkout 待 Lead 提交 wave2 后跑。
+
+---
+
+# 用户新指令（2026-11-06）：删 PTC/语音 + 做完其余全部，TDD
+
+## 产品决策（final）
+- **PTC 明确不做**：删除 `internal/runtime/ptc.go`、ModePTC、modeAliases ptc-*、prompt `tool:ptc` 段、app 注册、shell 模式菜单、相关 tests/doc refs；不保留死代码。
+- **语音输入明确不做**：删除 shell 插件页 voice_input 行/详情 case/i18n/test 引用；docs 标注"产品决定不做"。
+- 两者在 `docs/BUGS.md`/`FUNCTIONAL-PARITY`/`known-limitations` 记为「明确不做（非能力缺口/非延期）」。
+- 删除验收：`grep -rn 'ptc\|PTC\|voice\|Voice\|语音' internal cmd --include=*.go` 为空（文档说明除外）；`go test ./...` 全绿。
+
+## TDD 工作方式（强制）
+1. 每个改动先写**会失败的测试**（记录 RED：测试名 + `go test -run ...` 失败输出摘要）。
+2. 再写实现到 GREEN（记录命令与输出）；重构仅在 GREEN 后做。
+3. 报告必须给：ID、测试文件/测试名、RED 证据、GREEN 证据、grep/真跑证据；不 commit（Lead 统一）。
+4. 对"删除类"任务：RED = 断言目标已不存在的测试当前失败；GREEN = 删除实现后通过。
+5. 跨包接口先定契约（消息里写明函数签名/类型），后写测试与实现。
+
+## 剩余全部项（对照 FIX-REPORT §6）与 owner（wave 4+）
+| 项 | 目标 | Owner | TDD 起点 |
+| --- | --- | --- | --- |
+| 删除 PTC/voice | 代码/UI/测试零残留 + 文档标注不做 | parity/ uiux/ fix-security / arch | 存在性断言红 |
+| FP-05 UI diff 视图 | 会话内展示本轮 workspace changes（文件列表+增删行/打开文件） | uiux | shell render test 红 |
+| FP-11 checkpoint 恢复 consumer | 启动/重开会话读取 checkpoint 阶段，恢复中断回合语义 | parity | recovery test 红 |
+| UX-04 popover 残影 | 设置窗开关后主窗口必然重绘（workaround 或框架 seam）+ 真跑回归 | uiux+fix-security | app fake window + live test 红 |
+| UX-14 toast 位置 | toast 不遮挡 composer/popover（位置/层级调整，回归指针穿透） | uiux | shell test 红 |
+| FP-16 阻塞 ask_user | runtime question gate + Controller answer channel + shell 输入卡；同回合返回 | fix-security+uiux | runtime/controller/shell tests 红 |
+| FP-06 preset/persona | `internal/presets` + 会话选择 UI + prompt/tool 生效 | product-auditor+fix-security+uiux | 新包测试红 |
+| RT-04 per-session Agent | AgentFactory seam、每会话 Agent、审批不阻塞其他会话 | fix-security | 并行/审批测试红 |
+| PD-12 全局快捷键 | `internal/globalhotkey` 三平台 + app 接线 + 设置页 | arch+fix-security+uiux | 新包 seam 测试红 |
+| PD-13/AR-03 自动更新+安装器 | `internal/updater`（check/download/sha256/replace-on-restart）+ CLI/设置页 + Windows 安装器脚本 + CI release | arch+uiux | 新包测试红 |
+| ACP/SDK 最小协议 | `internal/acp` JSON-RPC stdio（initialize/session.new/prompt/cancel）+ `zeokeel acp` CLI | runtime-auditor+arch | 新包测试红 |
+| AR-04 分层 | shell 拆分 kit/actions/screens（渐进，新文件为主，旧代码不回归） | uiux+Lead | 现有 shell 测试绿为约束 |
+| AR-05 projector 收敛 | 二选一：删 projector 或 per-session projector（先测试两套快照一致/竞态） | parity | consistency test 红 |
+| AR-07 messages ordinal | messages 表加 ordinal + 迁移 + 排序只读该列 | parity | store/session tests 红 |
+| AR-08 UI 异步 DB | OpenSession/ListSessions 从 view 线程移出（加载态） | uiux+fix-security | shell timing test 红 |
+| AR-09 迁移框架 | schema 有序迁移 + 事务 + 备份 | parity | migration tests 红 |
+| AR-20/22 | 拆分超大函数/快照 O(n²) 优化（profiling 证据） | parity+uiux | benchmark 红（改善断言） |
+| P3 遗留 | Automation run-now 回滚、skills 路径、TOCTOU、旧 manifest 迁移、keyless scheme | 对应 owner | 见 P3-TEST-PLAN |
+| 真机/证书类 | 签名、公证、自动更新发布基建、真机 IME/a11y/DPI/通知 | 仅外部条件，代码侧就绪 | 文档列明 |

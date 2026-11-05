@@ -54,24 +54,18 @@ func TestAgentModeToolRoutingInProduction(t *testing.T) {
 		{
 			mode:    runtime.ModeStandard,
 			present: []string{"bash", "read_file", "write_file", "terminal_open", "read_image", "working_directory"},
-			absent:  []string{"ptc", "settings_get", "settings_set", "PTC mode is active", "Minimal mode is active"},
-		},
-		{
-			mode:    runtime.ModePTC,
-			present: []string{"bash", "read_file", "write_file", "terminal_open", "read_image", "working_directory", "ptc"},
-			absent:  []string{"settings_get", "settings_set"},
-			policy:  "PTC mode is active",
+			absent:  []string{"settings_get", "settings_set", "Minimal mode is active"},
 		},
 		{
 			mode:    runtime.ModeMinimal,
 			present: []string{"terminal_open", "terminal_read", "terminal_send", "terminal_signal", "terminal_close", "terminal_list", "read_image", "working_directory"},
-			absent:  []string{"bash", "read_file", "write_file", "edit_file", "glob", "grep", "ptc", "settings_get", "settings_set"},
+			absent:  []string{"bash", "read_file", "write_file", "edit_file", "glob", "grep", "settings_get", "settings_set"},
 			policy:  "Minimal mode is active",
 		},
 		{
 			mode:    runtime.ModeCreator,
 			present: []string{"bash", "read_file", "write_file", "terminal_open", "read_image", "working_directory", "settings_get", "settings_set"},
-			absent:  []string{"ptc"},
+			absent:  []string{},
 			policy:  "Creator mode is active",
 		},
 	}
@@ -96,7 +90,7 @@ func TestAgentModeToolRoutingInProduction(t *testing.T) {
 			requireAgentTools(t, tc.mode, names, tc.present, tc.absent)
 			instruction := bundle.Agent.Instruction()
 			for _, absentPolicy := range tc.absent {
-				if strings.HasPrefix(absentPolicy, "PTC mode is active") || strings.HasPrefix(absentPolicy, "Minimal mode is active") {
+				if strings.HasPrefix(absentPolicy, "Minimal mode is active") {
 					if strings.Contains(instruction, absentPolicy) {
 						t.Fatalf("%s prompt unexpectedly contains %q", tc.mode, absentPolicy)
 					}
@@ -426,8 +420,7 @@ func sameToolSet(a, b map[string]bool) bool {
 // TestAgentModeToolSetsAreExact pins each DSH-aligned preset to its full
 // production tool set, not just the sample names other tests assert:
 //
-//   - Standard is the registry minus the mode-owned creator and PTC tools.
-//   - PTC is Standard + ptc.
+//   - Standard is the registry minus the mode-owned creator tools.
 //   - Minimal is exactly terminal_* + read_image + working_directory.
 //   - Creator is Standard + settings_get/settings_set.
 func TestAgentModeToolSetsAreExact(t *testing.T) {
@@ -455,18 +448,8 @@ func TestAgentModeToolSetsAreExact(t *testing.T) {
 		return set
 	}
 	standard := toolSet(runtime.ModeStandard)
-	ptc := toolSet(runtime.ModePTC)
 	minimal := toolSet(runtime.ModeMinimal)
 	creator := toolSet(runtime.ModeCreator)
-
-	ptcWant := make(map[string]bool, len(standard)+1)
-	for name := range standard {
-		ptcWant[name] = true
-	}
-	ptcWant["ptc"] = true
-	if !sameToolSet(ptc, ptcWant) {
-		t.Fatalf("PTC tools = %v, want standard + ptc %v", ptc, ptcWant)
-	}
 
 	creatorWant := make(map[string]bool, len(standard)+2)
 	for name := range standard {
@@ -488,13 +471,10 @@ func TestAgentModeToolSetsAreExact(t *testing.T) {
 			t.Fatalf("Minimal tools = %v, want %q", minimal, want)
 		}
 	}
-	if standard["ptc"] || minimal["ptc"] || !ptc["ptc"] {
-		t.Fatalf("PTC ownership wrong: standard=%v ptc=%v minimal=%v", standard, ptc, minimal)
-	}
 	for _, absent := range []string{"settings_get", "settings_set"} {
-		if standard[absent] || ptc[absent] || minimal[absent] || !creator[absent] {
-			t.Fatalf("creator tool %q ownership wrong: standard=%v ptc=%v minimal=%v creator=%v",
-				absent, standard, ptc, minimal, creator)
+		if standard[absent] || minimal[absent] || !creator[absent] {
+			t.Fatalf("creator tool %q ownership wrong: standard=%v minimal=%v creator=%v",
+				absent, standard, minimal, creator)
 		}
 	}
 }
@@ -526,11 +506,10 @@ func TestSetModeRefreshesPromptPolicy(t *testing.T) {
 	})
 
 	markers := map[string]string{
-		runtime.ModePTC:     "PTC mode is active",
 		runtime.ModeMinimal: "Minimal mode is active",
 		runtime.ModeCreator: "Creator mode is active",
 	}
-	for _, mode := range []string{runtime.ModePTC, runtime.ModeMinimal, runtime.ModeCreator, runtime.ModeStandard} {
+	for _, mode := range []string{runtime.ModeMinimal, runtime.ModeCreator, runtime.ModeStandard} {
 		current = mode
 		if err := bundle.Agent.SetMode(mode); err != nil {
 			t.Fatalf("SetMode(%s): %v", mode, err)

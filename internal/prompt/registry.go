@@ -172,17 +172,6 @@ var registry = []registration{
 	},
 	{
 		section: Section{
-			ID:    "mode:ptc",
-			Order: OrderModePTC,
-			EN:    "PTC mode is active. The ptc tool executes an ordered batch of ordinary tool calls in one pipeline-style step; it is not a JavaScript or code sandbox. Batch independent reads, searches and listings instead of spending one model round trip per call, then filter, organize, deduplicate, count or summarize the returned results yourself. Calls run sequentially, and every argument is fixed when you submit the batch.",
-			ZH:    "PTC 模式已启用。ptc 工具会在一个流水线步骤中按顺序执行一批普通工具调用；它不是 JavaScript 或代码沙箱。将独立的读取、搜索和列表操作批量提交，而不是为每次调用消耗一轮模型交互，然后自行筛选、整理、去重、统计或汇总返回结果。各调用按顺序执行，提交批次时所有参数都已固定。",
-		},
-		when: func(c Context) bool {
-			return agentModeIs(c, "ptc", "ptc-mode", "ptc_mode")
-		},
-	},
-	{
-		section: Section{
 			ID:    "mode:minimal",
 			Order: OrderModeMinimal,
 			EN:    "Minimal mode is active. Only the terminal_* tools, read_image and working_directory are available: there are no file read/write/edit/search tools and no bash tool, so inspect and change files through the terminal. Context compaction runs automatically when the conversation grows; rely on it to keep long terminal-driven sessions inside the model window instead of repeating work.",

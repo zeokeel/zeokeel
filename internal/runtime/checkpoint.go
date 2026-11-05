@@ -192,7 +192,7 @@ func checkpointBarrierTool(name string) bool {
 	case "bash", "pwsh", "write_file", "edit_file", "str_replace_editor",
 		"enter_worktree", "exit_worktree",
 		"web_fetch", "web_search",
-		"ptc", "subagent", "workflow", "ralph",
+		"subagent", "workflow", "ralph",
 		"spawn_team", "send_message", "interrupt_agent", "close_team",
 		"schedule_create", "schedule_update", "schedule_delete",
 		"settings_set":

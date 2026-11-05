@@ -177,20 +177,11 @@ func TestAgentModePolicies(t *testing.T) {
 		notHave []string
 	}{
 		{
-			mode:   "ptc",
-			marker: "PTC mode is active",
-			zh:     "PTC 模式已启用",
-			notHave: []string{
-				"Minimal mode is active", "Creator mode is active",
-				"Plan mode is active", "Agent Teams is active",
-			},
-		},
-		{
 			mode:   "minimal",
 			marker: "Minimal mode is active",
 			zh:     "极简模式已启用",
 			notHave: []string{
-				"PTC mode is active", "Creator mode is active",
+				"Creator mode is active",
 			},
 		},
 		{
@@ -198,7 +189,7 @@ func TestAgentModePolicies(t *testing.T) {
 			marker: "Creator mode is active",
 			zh:     "创造模式已启用",
 			notHave: []string{
-				"PTC mode is active", "Minimal mode is active",
+				"Minimal mode is active",
 			},
 		},
 	}
@@ -232,7 +223,6 @@ func TestAgentModePolicies(t *testing.T) {
 	// Prompt-only callers may put the preset in Mode; agentModeIs falls back
 	// so a single field selects the policy without a separate AgentMode.
 	for mode, marker := range map[string]string{
-		"ptc":     "PTC mode is active",
 		"minimal": "Minimal mode is active",
 		"creator": "Creator mode is active",
 		"cordis":  "Creator mode is active",
@@ -250,17 +240,17 @@ func TestAgentModePolicies(t *testing.T) {
 	standard.Mode = ""
 	standard.AgentMode = "standard"
 	out := Compose(standard)
-	for _, unwanted := range []string{"PTC mode is active", "Minimal mode is active", "Creator mode is active"} {
+	for _, unwanted := range []string{"Minimal mode is active", "Creator mode is active"} {
 		if strings.Contains(out, unwanted) {
 			t.Fatalf("standard prompt contains %q", unwanted)
 		}
 	}
-	ptcPlan := richContext()
-	ptcPlan.Mode = "plan"
-	ptcPlan.AgentMode = "ptc"
-	combined := Compose(ptcPlan)
-	if !strings.Contains(combined, "Plan mode is active") || !strings.Contains(combined, "PTC mode is active") {
-		t.Fatalf("plan collaboration and PTC preset did not compose together:\n%s", combined)
+	creatorPlan := richContext()
+	creatorPlan.Mode = "plan"
+	creatorPlan.AgentMode = "creator"
+	combined := Compose(creatorPlan)
+	if !strings.Contains(combined, "Plan mode is active") || !strings.Contains(combined, "Creator mode is active") {
+		t.Fatalf("plan collaboration and Creator preset did not compose together:\n%s", combined)
 	}
 }
 
@@ -701,8 +691,8 @@ func TestAllSectionsNonEmptyInBothLocales(t *testing.T) {
 		t.Fatalf("Sections returned %d entries, registry has %d", len(sections), len(registry))
 	}
 	// docs/prompts.md maps every row; update this guard when adding a section.
-	if len(sections) != 45 {
-		t.Fatalf("registry has %d sections, want 45", len(sections))
+	if len(sections) != 44 {
+		t.Fatalf("registry has %d sections, want 44", len(sections))
 	}
 	seen := make(map[string]bool, len(sections))
 	lastOrder := -1 << 31
@@ -736,7 +726,7 @@ func TestAllSectionsNonEmptyInBothLocales(t *testing.T) {
 		"runtime:environment",
 		"sandbox:policy", "approval:policy", "subagent:delegation", "context:agents-md",
 		"context:skills-catalog", "context:time", "plan:policy", "team:policy",
-		"mode:ptc", "mode:minimal", "mode:creator",
+		"mode:minimal", "mode:creator",
 		"context:file-reference", "tool:bash", "tool:pwsh", "tool:read", "tool:write", "tool:edit",
 		"tool:glob", "tool:grep", "tool:jobs", "tool:terminal", "tool:skill",
 		"tool:todo", "tool:ask-user", "tool:web-search", "tool:web-fetch",

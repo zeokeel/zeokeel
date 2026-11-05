@@ -181,8 +181,8 @@ func TestPluginSwitchRendersOnAndOffState(t *testing.T) {
 			if err := h.ctrl.SetPluginEnabled("agent_teams", true); err != nil {
 				t.Fatalf("enable Agent Teams: %v", err)
 			}
-			if err := h.ctrl.SetPluginEnabled("voice_input", false); err != nil {
-				t.Fatalf("disable Voice input: %v", err)
+			if err := h.ctrl.SetPluginEnabled("auto_review", false); err != nil {
+				t.Fatalf("disable Auto review: %v", err)
 			}
 			h.app.Screen = Plugins
 			tt := ui.NewTester(h.app.View, 1600, 1000)
@@ -193,7 +193,7 @@ func TestPluginSwitchRendersOnAndOffState(t *testing.T) {
 			if !ok {
 				t.Fatalf("enabled switch missing: %v", tt.Texts())
 			}
-			off, ok := tt.Find("Enable Voice input")
+			off, ok := tt.Find("Enable Auto Authorization Review")
 			if !ok {
 				t.Fatalf("disabled switch missing: %v", tt.Texts())
 			}

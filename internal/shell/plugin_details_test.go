@@ -95,7 +95,7 @@ func TestPluginsPageHeaderDialogs(t *testing.T) {
 	if err := tt.Click("More experimental plugins"); err != nil {
 		t.Fatalf("click experimental More: %v", err)
 	}
-	if !tt.HasText("Agent Teams is experimental") || !tt.HasText("SenseVoice") {
+	if !tt.HasText("Agent Teams is experimental") || !tt.HasText("Developer Tools") {
 		t.Fatalf("experimental dialog missing reasons: %q", tt.Texts())
 	}
 	if err := tt.Click("Close"); err != nil {
@@ -270,14 +270,6 @@ func TestExperimentalSwitches(t *testing.T) {
 	}
 	if !tt.HasText("Plugin disabled") {
 		t.Fatalf("disable toast missing: %q", tt.Texts())
-	}
-
-	// Voice input explains that its SenseVoice dependency is not shipped.
-	if err := tt.Click("Enable Voice input"); err != nil {
-		t.Fatalf("toggle Voice input: %v", err)
-	}
-	if !tt.HasText("SenseVoice") {
-		t.Fatalf("voice input explanation missing: %q", tt.Texts())
 	}
 
 	// Built-in switches persist the same plugin.<name>.enabled keys.
@@ -484,21 +476,21 @@ func TestSettingsStaticPages(t *testing.T) {
 	if err := tt.Click("Agent presets"); err != nil {
 		t.Fatalf("click Agent presets: %v", err)
 	}
-	for _, label := range []string{"Standard mode", "PTC mode", "Minimal mode", "Creator mode"} {
+	for _, label := range []string{"Standard mode", "Minimal mode", "Creator mode"} {
 		if !tt.HasText(label) {
 			t.Fatalf("agent presets page missing %q: %q", label, tt.Texts())
 		}
 	}
-	if !tt.HasText("Better suited to tasks that call tools in batches") {
+	if !tt.HasText("terminal and image reading") {
 		t.Fatalf("preset description missing: %q", tt.Texts())
 	}
-	if err := tt.Click("Set default PTC mode"); err != nil {
-		t.Fatalf("click Set default PTC mode: %v", err)
+	if err := tt.Click("Set default Minimal mode"); err != nil {
+		t.Fatalf("click Set default Minimal mode: %v", err)
 	}
-	if got, err := h.store.GetSetting("agent.preset"); err != nil || got != "ptc" {
-		t.Fatalf("agent.preset = %q, %v; want ptc", got, err)
+	if got, err := h.store.GetSetting("agent.preset"); err != nil || got != "minimal" {
+		t.Fatalf("agent.preset = %q, %v; want minimal", got, err)
 	}
-	if !tt.HasText("Default preset: PTC mode") {
+	if !tt.HasText("Default preset: Minimal mode") {
 		t.Fatalf("set default toast missing: %q", tt.Texts())
 	}
 	if !tt.HasText("Default") {

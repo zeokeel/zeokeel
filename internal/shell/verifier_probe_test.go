@@ -468,20 +468,20 @@ func TestVerifierAgentPresetDefaultApplies(t *testing.T) {
 		t.Fatalf("open Agent presets: %v", err)
 	}
 	tt.Frame()
-	if err := tt.Click("Set default PTC mode"); err != nil {
-		t.Fatalf("set PTC default: %v", err)
+	if err := tt.Click("Set default Minimal mode"); err != nil {
+		t.Fatalf("set Minimal default: %v", err)
 	}
 	tt.Frame()
-	if got := h.app.agentPresetDefault(); got != "ptc" {
-		t.Fatalf("agent.preset = %q, want ptc", got)
+	if got := h.app.agentPresetDefault(); got != "minimal" {
+		t.Fatalf("agent.preset = %q, want minimal", got)
 	}
 	h.app.Screen = Home
 	tt.Frame()
 	if err := tt.Click("New Session"); err != nil {
 		t.Fatalf("click New Session: %v", err)
 	}
-	if got := h.ctrl.Mode(); got != "ptc" {
-		t.Fatalf("new session mode = %q, want ptc", got)
+	if got := h.ctrl.Mode(); got != "minimal" {
+		t.Fatalf("new session mode = %q, want minimal", got)
 	}
 }
 

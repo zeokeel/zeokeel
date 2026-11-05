@@ -33,6 +33,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -40,6 +41,11 @@ const (
 	// maxHashedFileBytes bounds content hashing: larger files are fingerprinted
 	// by size+modtime instead, which is enough to detect a change.
 	maxHashedFileBytes = 2 << 20
+	// smallAlwaysHashedBytes: files up to this size are re-read on every
+	// capture. Filesystems can share an mtime granularity broad enough for two
+	// same-size edits to look unchanged, so the mtime cache is only trusted for
+	// larger files where re-reading is expensive and stat drift is rarer.
+	smallAlwaysHashedBytes = 64 << 10
 	// maxWalkFiles bounds a non-Git snapshot so a huge workspace cannot hang
 	// the turn. Files beyond the cap are omitted (the diff then under-reports,
 	// never blocks).
@@ -191,9 +197,29 @@ func captureGit(ctx context.Context, root string, snap Snapshot) (Snapshot, erro
 	return snap, nil
 }
 
+// walkCache keeps the previous walk snapshot per root so an unchanged file can
+// reuse its content hash without being read again. A desktop workspace is
+// snapshotted before and after every turn; re-hashing every file each time made
+// the capture cost grow with the tree (and dominated repeated turns in a large
+// workspace). The cache is process-local and keyed by absolute root.
+var walkCache sync.Map // map[string]map[string]FileState
+
 // captureWalk hashes the workspace tree without Git.
 func captureWalk(ctx context.Context, root string, snap Snapshot) (Snapshot, error) {
+	previous, _ := walkCache.Load(root)
+	prevFiles, _ := previous.(map[string]FileState)
+	nextCache := make(map[string]FileState, 256)
 	count := 0
+
+	// A ZeoKeel data directory can be used as a session workspace (tests and the
+	// "open app data" case). Its SQLite index, WAL and transcript/attachment
+	// trees are app-managed state, change on every turn and are never workspace
+	// content, so they are skipped instead of being rehashed on each capture.
+	dataDir := false
+	if info, err := os.Stat(filepath.Join(root, "index.sqlite")); err == nil && !info.IsDir() {
+		dataDir = true
+	}
+
 	err := filepath.WalkDir(root, func(path string, entry fs.DirEntry, walkErr error) error {
 		if walkErr != nil {
 			// A transient unreadable entry must not fail the whole snapshot.
@@ -205,8 +231,17 @@ func captureWalk(ctx context.Context, root string, snap Snapshot) (Snapshot, err
 		if err := ctx.Err(); err != nil {
 			return err
 		}
+		var rel string
+		if path != root {
+			if r, relErr := filepath.Rel(root, path); relErr == nil {
+				rel = filepath.ToSlash(r)
+			}
+		}
 		if entry.IsDir() {
-			if path != root && ignoredDir(entry.Name()) {
+			if path == root {
+				return nil
+			}
+			if ignoredDir(entry.Name()) || (dataDir && (rel == "sessions" || rel == "attachments")) {
 				return fs.SkipDir
 			}
 			return nil
@@ -214,26 +249,35 @@ func captureWalk(ctx context.Context, root string, snap Snapshot) (Snapshot, err
 		if count >= maxWalkFiles {
 			return fs.SkipAll
 		}
+		if dataDir && (rel == "index.sqlite" || strings.HasPrefix(rel, "index.sqlite-")) {
+			return nil
+		}
 		count++
 		info, err := entry.Info()
 		if err != nil || !info.Mode().IsRegular() {
 			return nil
 		}
-		rel, err := filepath.Rel(root, path)
-		if err != nil {
+		if rel == "" {
 			return nil
 		}
-		rel = filepath.ToSlash(rel)
 		state := FileState{Path: rel, Size: info.Size(), ModTime: info.ModTime()}
-		if hash, err := hashFile(path, info.Size()); err == nil {
+		// Small files are always re-read: a coarse filesystem mtime can hide two
+		// same-size edits, and hashing a small file is cheap. Larger files may
+		// reuse the previous hash when size and mtime are unchanged.
+		if prev, ok := prevFiles[rel]; ok && state.Size > smallAlwaysHashedBytes &&
+			prev.Size == state.Size && prev.ModTime.Equal(state.ModTime) && prev.Hash != "" {
+			state.Hash = prev.Hash
+		} else if hash, hashErr := hashFile(path, info.Size()); hashErr == nil {
 			state.Hash = hash
 		}
 		snap.Files[rel] = state
+		nextCache[rel] = state
 		return nil
 	})
 	if err != nil {
 		return Snapshot{}, fmt.Errorf("workspacechanges: walk %q: %w", root, err)
 	}
+	walkCache.Store(root, nextCache)
 	return snap, nil
 }
 

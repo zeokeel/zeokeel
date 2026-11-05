@@ -66,8 +66,6 @@ var (
 
 	pluginIconTeams = ui.MustParseSVG([]byte(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3"><circle cx="5.2" cy="5.2" r="2.2"/><circle cx="10.8" cy="5.2" r="2.2"/><circle cx="5.2" cy="10.8" r="2.2"/><circle cx="10.8" cy="10.8" r="2.2"/></svg>`))
 
-	pluginIconVoice = ui.MustParseSVG([]byte(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><path d="M2.4 6.4v3.2M5.4 4.4v7.2M8 2.8v10.4M10.6 4.4v7.2M13.6 6.4v3.2"/></svg>`))
-
 	pluginIconReview = ui.MustParseSVG([]byte(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"><path d="M8 1.8 13.2 4v3.8c0 3.3-2.2 5.4-5.2 6.4-3-1-5.2-3.1-5.2-6.4V4z"/><path d="m5.6 8 1.7 1.7L10.6 6.4" stroke-linecap="round"/></svg>`))
 
 	pluginIconDev = ui.MustParseSVG([]byte(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M5.4 4.6 2 8l3.4 3.4M10.6 4.6 14 8l-3.4 3.4"/></svg>`))
@@ -338,7 +336,6 @@ var pluginRowNameKeys = map[string]string{
 	"Skills":                    "plugins.row.skills",
 	"MCP servers":               "plugins.row.mcp",
 	"Agent Teams":               "plugins.row.agent_teams",
-	"Voice input":               "plugins.row.voice_input",
 	"Auto Authorization Review": "plugins.row.auto_review",
 	"Developer Tools":           "plugins.row.developer_tools",
 }
@@ -350,7 +347,6 @@ var pluginRowDescKeys = map[string]string{
 	"Control how the Agent dispatches tool calls.":                                                          "plugins.row.agent_loop.desc",
 	"Limit how long each command may run and how much it may output.":                                       "plugins.row.shell.desc",
 	"Enable team collaboration, team tools, the member roster, and the shared task board.":                  "plugins.row.agent_teams.desc",
-	"Transcribe recordings locally with SenseVoice; first use requires installing dependencies":             "plugins.row.voice_input.desc",
 	"Add an Auto review permission mode that uses the model to assess authorization before each tool call.": "plugins.row.auto_review.desc",
 	"Inspect and debug raw session data, grouped chat messages, and the NodeJS backend.":                    "plugins.row.developer_tools.desc",
 	"Let the agent search the web with the configured provider.":                                            "plugins.live.web_search.desc",

@@ -9,6 +9,7 @@
 - **DSH 同类替代**：独立品牌桌面 Agent，功能对齐 DSH；**不是已可用的迁移器**——目前是"最小导入（技术预览 CLI）"：`zeokeel import` 只导入**文本对话**（工具/图片/附件/trajectory 不导入，凭据只读键名，subagent 默认跳过），建议先 `--dry-run`；见 [BUGS PD-04](BUGS.md) 与 [FIX-VERIFY-PRODUCT §2](audit/FIX-VERIFY-PRODUCT.md)。
 - 纯 Go、`CGO_ENABLED=0`、单二进制、单进程；UI 只用 mygo 原生控件（无 webview）；插件只内置。
 - 不可信 workspace 内容默认不执行：`<root>/mcp.json` 需显式 `mcp.workspace_config=allow`（默认 `off`，`on/true/1` 一律 fail-closed；RT-01）。
+- **明确不做（产品决定，2026-11-06）**：PTC 代码运行时、语音输入——不提供入口，**不是能力缺口/后续项**（known-limitations §2.1）。
 
 ## 2. 已实现并可用（代码在、测试在）
 
@@ -16,7 +17,7 @@
 | --- | --- |
 | 桌面壳 | 主窗口 + 设置窗口（单例非模态）+ 托盘 + 关窗隐藏 + 单实例 + 窗口状态持久化；无原生菜单栏（ADR 0006） |
 | 会话 | 流式对话（SSE）、多轮历史、SQLite 持久化、重开恢复、自动/LLM 标题、fork、JSONL 导出、反馈 |
-| Agent | eino ADK 工具回路；Standard/PTC/Minimal/Creator；压缩（LLM 摘要 + 工具裁剪）；checkpoint（回合边界）；Goal round driver（自动续轮，预算 6/cap 12）；subagent/Agent Team；workflow（JSON 步骤）；ralph |
+| Agent | eino ADK 工具回路；Standard/Minimal/Creator（**PTC 明确不做，已移除**）；压缩（LLM 摘要 + 工具裁剪）；checkpoint（回合边界）；Goal round driver（自动续轮，预算 6/cap 12）；subagent/Agent Team；workflow（JSON 步骤）；ralph |
 | 工具 | fs（read/write/edit/editor/glob/grep）、bash/pwsh（平台门控）、terminal（Unix PTY）、jobs、web_search、web_fetch、read_image、todo、ask_user、present、report、session_query、schedule_*、skill、inspect、worktree、working_directory、MCP（stdio + resources/prompts） |
 | 审批/权限 | Full/Workspace/Read-only/Ask + Always allow；Auto-review EXP（LLM 预审，15s 超时回退人工）；审批范围 ADR 0010 |
 | 数据 | `index.sqlite`（WAL/foreign_keys/busy_timeout/单写者）为持久化真源；每会话 JSONL 镜像/导出；附件与工具结果落盘；搜索用 FTS5 trigram（LIKE 降级）；**DSH 迁移导入器**：`internal/importer` + `zeokeel import`（读取 DSH `sessions/**/session.v4.jsonl[.zstd]`，只读 DSH，凭据只读键名） |
@@ -51,7 +52,7 @@ sh scripts/evolve/gates.sh --full # 统一门禁；flaky 重跑按失败处理
 
 1. P0 RT-01 workspace MCP 默认不执行 —— **代码已落地**（`mcp.workspace_config` 默认 off），待全量验证。
 2. P1 安全/权限（RT-02/03/07/12、PD-03/05/06/07/09/10）与 UX（UX-01/02/03、PD-01）——本轮修复中。
-3. 发布链路：签名/公证/自动更新仍缺（需证书/发布账号，DEFERRED）。
+3. 发布链路：签名/公证/自动更新仍缺（需证书/发布账号，DEFERRED）；自动更新引擎 `internal/updater` 仅有 TDD RED 契约（`-tags tdd_red`，本轮不实现），Windows 安装器为 Inno/NSIS 计划草案（未构建）。
 4. 迁移定位已降级；**最小导入器 + `zeokeel import` CLI 已交付**（只读 DSH、凭据只列键名），设置页「从 DSH 导入」入口已提供（PD-04，技术预览）。
 
 ## 5. 已知限制与真机项

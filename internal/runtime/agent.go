@@ -123,8 +123,8 @@ type Config struct {
 	CheckpointStore CheckpointStore
 
 	// Mode selects the agent preset and its model-visible tool set (see
-	// Modes). "" and "standard" expose the full registry. "ptc" adds the
-	// pipeline-style "ptc" batch tool, "minimal" exposes only terminal_open,
+	// Modes). "" and "standard" expose the full registry. "minimal" exposes
+	// only terminal_open,
 	// terminal_list, terminal_read, terminal_send, terminal_signal,
 	// terminal_close, read_image and working_directory, and "creator" adds
 	// settings_get and settings_set. The legacy "deep", "supervisor" and
@@ -370,9 +370,8 @@ func (a *Agent) loadState() *agentState { return a.currentState.Load() }
 func (a *Agent) Instruction() string { return a.loadState().snap.instruction }
 
 // ToolNames returns the model-visible tool names for the current mode, sorted.
-// The registry may hold tools another mode owns (Creator's settings tools, the
-// app-registered "ptc" tool); unlike Registry.List this reflects what the model
-// actually sees.
+// The registry may hold tools another mode owns (for example Creator's settings
+// tools); unlike Registry.List this reflects what the model actually sees.
 func (a *Agent) ToolNames() []string {
 	mode := a.Mode()
 	list := a.effectiveTools(mode)
@@ -385,8 +384,7 @@ func (a *Agent) ToolNames() []string {
 
 // EffectiveTools returns the model-visible tools for the current mode, sorted.
 // It is the inspectable form of ToolNames and includes the tools a mode
-// synthesizes ("ptc" or settings_get/settings_set) when they are not in the
-// registry.
+// synthesizes (settings_get/settings_set) when they are not in the registry.
 func (a *Agent) EffectiveTools() []Tool { return a.effectiveTools(a.Mode()) }
 
 // ToolByName returns the model-visible tool named name in the current mode.

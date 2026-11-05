@@ -507,9 +507,8 @@ func (e *einoInvokableTool) awaitApproval(ctx context.Context, args json.RawMess
 }
 
 // awaitGateApproval publishes the ApprovalRequest for one call and blocks until
-// the Gate resolves it. It is shared by the eino tool wrapper (outer calls,
-// callID from the ADK tools node) and the PTC batch tool (nested calls, each
-// with a fresh call id), so approvals behave identically in both paths.
+// the Gate resolves it. It is shared by the eino tool wrapper and any nested
+// tool dispatcher, so approvals behave identically in both paths.
 // reviewReason, when non-empty, is the automatic reviewer's recommendation to
 // deny; the request still asks the user to decide, and the shell shows the
 // reason on the approval card.

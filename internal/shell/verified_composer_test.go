@@ -191,20 +191,20 @@ func TestHomeModeStagesNewTaskPreset(t *testing.T) {
 	if err := tt.Click("Standard mode"); err != nil {
 		t.Fatalf("click mode chip: %v", err)
 	}
-	if err := tt.Click("PTC mode"); err != nil {
-		t.Fatalf("choose PTC mode: %v", err)
+	if err := tt.Click("Creator mode"); err != nil {
+		t.Fatalf("choose Creator mode: %v", err)
 	}
 	tt.Frame()
-	if h.app.homeMode != "ptc" {
-		t.Fatalf("staged Home mode = %q, want ptc", h.app.homeMode)
+	if h.app.homeMode != "creator" {
+		t.Fatalf("staged Home mode = %q, want creator", h.app.homeMode)
 	}
 	if got := h.ctrl.Mode(); got != "standard" {
 		t.Fatalf("Home mode chip changed the last session to %q", got)
 	}
-	if got := h.app.agentPresetDefault(); got != "ptc" {
-		t.Fatalf("agent.preset = %q, want ptc", got)
+	if got := h.app.agentPresetDefault(); got != "creator" {
+		t.Fatalf("agent.preset = %q, want creator", got)
 	}
-	if !tt.HasText("PTC mode") {
+	if !tt.HasText("Creator mode") {
 		t.Fatalf("Home chip did not show the staged mode: %v", tt.Texts())
 	}
 
@@ -218,8 +218,8 @@ func TestHomeModeStagesNewTaskPreset(t *testing.T) {
 	waitIdle(t, h.ctrl)
 	h.ctrl.Wait()
 	h.app.SetSnapshot(h.ctrl.Snapshot())
-	if got := h.ctrl.Mode(); got != "ptc" {
-		t.Fatalf("Home-created session mode = %q, want ptc", got)
+	if got := h.ctrl.Mode(); got != "creator" {
+		t.Fatalf("Home-created session mode = %q, want creator", got)
 	}
 
 	// Home renders mode errors instead of swallowing them.

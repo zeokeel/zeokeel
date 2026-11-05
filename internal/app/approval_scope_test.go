@@ -72,7 +72,7 @@ func TestApprovalPatternsForPermission(t *testing.T) {
 	st, _ := newToolStore(t)
 
 	workspace := approvalPatternsForPermission(st, session.PermissionWorkspace)
-	for _, name := range []string{"write_file", "edit_file", "str_replace_editor", "ptc"} {
+	for _, name := range []string{"write_file", "edit_file", "str_replace_editor"} {
 		if toolNeedsApproval(name, workspace) {
 			t.Errorf("Workspace default gates sandbox-confined tool %q", name)
 		}
@@ -88,10 +88,10 @@ func TestApprovalPatternsForPermission(t *testing.T) {
 	}
 
 	// Auto review keeps the wider pre-convergence coverage so its reviewer
-	// still sees file mutations and the ptc batch.
+	// still sees file mutations.
 	autoReview := approvalPatternsForPermission(st, session.PermissionAutoReview)
 	for _, name := range []string{
-		"write_file", "edit_file", "str_replace_editor", "ptc",
+		"write_file", "edit_file", "str_replace_editor",
 		"bash", "pwsh", "terminal_open", "web_search", "mcp__demo__echo",
 	} {
 		if !toolNeedsApproval(name, autoReview) {

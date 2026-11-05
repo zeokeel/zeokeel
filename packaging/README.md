@@ -6,7 +6,7 @@ targets). Every package lands in `dist/` with a stable name and a
 
 | Target | Artifacts | Docs |
 | --- | --- | --- |
-| `make package-windows` | `dist/zeokeel-windows-amd64.zip` (GUI `zeokeel-windows-amd64.exe` + console twin `-console.exe` + `README-WINDOWS.txt`) | [windows/README-WINDOWS.txt](windows/README-WINDOWS.txt) |
+| `make package-windows` | `dist/zeokeel-windows-amd64.zip` (GUI `zeokeel-windows-amd64.exe` + console twin `-console.exe` + `README-WINDOWS.txt`) | [windows/README-WINDOWS.txt](windows/README-WINDOWS.txt)；安装器计划（未实现，Inno/NSIS 草案）见 [windows/INSTALLER-PLAN.md](windows/INSTALLER-PLAN.md) |
 | `make package-linux` | `dist/zeokeel-linux-amd64.tar.gz`, `dist/zeokeel-linux-arm64.tar.gz` (binary + `README-LINUX.txt` inside a versioned directory) | [linux/README-LINUX.txt](linux/README-LINUX.txt) |
 | `make package-macos` | `dist/zeokeel-macos-arm64.zip`, `dist/zeokeel-macos-amd64.zip` (unsigned `ZeoKeel.app` bundle) | [macos/README-MACOS.txt](macos/README-MACOS.txt) |
 

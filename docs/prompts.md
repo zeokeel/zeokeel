@@ -104,7 +104,6 @@ before the plan policy. Every row below ships EN and ZH text.
 | `harness:self-knowledge` | extension (no DSH constant) | 160 | always | EN + ZH |
 | `plan:policy` | `PLAN_POLICY` 500 | 500 | `Mode` = plan/plan-mode/plan_mode | EN + ZH |
 | `team:policy` | `TEAM_POLICY` 600 | 600 | `Mode` = team/teams/team-lead/teammate | EN + ZH |
-| `mode:ptc` | `PTC_ONLY` 800 | 800 | `AgentMode` (or `Mode`) = ptc/ptc-mode/ptc_mode | EN + ZH |
 | `mode:minimal` | extension | 810 | `AgentMode` (or `Mode`) = minimal/minimal-mode/minimal_mode | EN + ZH |
 | `mode:creator` | extension | 820 | `AgentMode` (or `Mode`) = creator/creator-mode/creator_mode/cordis | EN + ZH |
 | `context:file-reference` | `FILE_REFERENCE` 900 | 900 | `read` or `read_file` | EN + ZH |
@@ -210,8 +209,9 @@ Skipped DSH sections:
 
 - `TOOL_LSP` (2200) — no language-server integration exists to describe.
 - `TOOLS_SDK` (5000) — no programmatic tool-calling SDK. `PTC_ONLY` (800) is
-  implemented as `mode:ptc`: ZeoKeel's PTC is a pipeline-style batch tool, not
-  a JavaScript sandbox, and the policy text says so.
+  **not implemented: PTC is an explicit product decision (2026-11-06, do not
+  reuse this slot)** — the mode, its prompt section and its tools were removed
+  from the build; see `docs/design/known-limitations.md` §2.1.
 - `TOOL_COMPUTER_USE` (3000) — no computer-use/GUI-automation tool. The unused
   slot is reused for `tool:present`, which keeps present guidance adjacent to
   deliverable references.

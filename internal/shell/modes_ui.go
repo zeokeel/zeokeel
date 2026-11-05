@@ -26,11 +26,6 @@ func agentModeOptions() []agentModeOption {
 			Hint:  "Work with code, files, and information. Suitable for most tasks, with search, editing, terminal commands, and other tools available as needed.",
 		},
 		{
-			Mode:  runtime.ModePTC,
-			Label: "PTC mode",
-			Hint:  "Includes all Standard mode capabilities. Better suited to tasks that call tools in batches and then filter, organize, deduplicate, count, or summarize the results.",
-		},
-		{
 			Mode:  runtime.ModeMinimal,
 			Label: "Minimal mode",
 			Hint:  "The agent uses a terminal and image reading, with context compaction. Useful for testing and comparing its basic performance.",
@@ -166,4 +161,16 @@ func (a *App) agentModeMenu(c *ui.Context, t *design.Tokens, open *bool) {
 func (a *App) agentModeSummary(c *ui.Context, t *design.Tokens) {
 	ui.Text(c, a.agentModeLabel(a.currentAgentMode())).FontSize(10).
 		FixedLineHeight(16).TextColor(t.LabelTertiary).NoWrap()
+}
+
+// supportedAgentMode reports whether the picker offers mode. Persisted values
+// from older builds are normalized first; a mode this UI no longer lists is
+// treated as unset so the app falls back to Standard.
+func supportedAgentMode(mode string) bool {
+	for _, option := range agentModeOptions() {
+		if option.Mode == mode {
+			return true
+		}
+	}
+	return false
 }

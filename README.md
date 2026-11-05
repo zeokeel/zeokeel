@@ -5,6 +5,7 @@
 产品定位：**DSH 同类替代**（独立品牌桌面 Agent），**不是**已可用的迁移器。当前提供**最小导入（技术预览）**：`zeokeel import [--from <dsh-home>] [--dry-run] [--json]` 把 DSH 会话的**文本对话**导入 ZeoKeel——只读 DSH、凭据只读键名；工具调用/图片/附件/trajectory 不导入，subagent 会话默认跳过；建议先 `--dry-run`。设置页「从 DSH 导入」入口已提供，详见 [docs/BUGS.md](docs/BUGS.md) PD-04 与 [独立验证 §2](docs/audit/FIX-VERIFY-PRODUCT.md)。
 
 > 品牌资产只使用 `logo/` 下的 SVG，不自行猜测或重绘。插件只做内置（无第三方安装/市场）。
+> **明确不做（产品决定，2026-11-06）**：PTC/JS 代码运行时、语音输入——不提供入口，不是能力缺口。
 >
 > **2026-11-05 决策**：DSH 像素级对齐已退役；功能对齐继续作为目标。见 [ADR 0001：退役 DSH 像素对齐基建](docs/decisions/0001-retire-dsh-pixel-parity.md)。
 

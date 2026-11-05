@@ -107,7 +107,7 @@ func TestPluginAccessorDefaults(t *testing.T) {
 	if got, err := h.ctrl.PluginEnabled("skills"); err != nil || !got {
 		t.Fatalf("PluginEnabled(unset) = %v, %v; want true", got, err)
 	}
-	if got, err := h.ctrl.PluginEnabledDefault("voice_input", false); err != nil || got {
+	if got, err := h.ctrl.PluginEnabledDefault("auto_review", false); err != nil || got {
 		t.Fatalf("PluginEnabledDefault(experimental) = %v, %v; want false", got, err)
 	}
 	if err := h.ctrl.SetPluginEnabled("skills", false); err != nil {

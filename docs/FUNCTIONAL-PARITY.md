@@ -10,17 +10,18 @@
 |---|---|---|---|
 | 流式对话 + 多轮历史 | 有 | 有（SSE、SQLite history、e2e 真实模型通过） | ✅ |
 | 工具循环（ReAct） | 有 | 有（eino ADK，真实模型工具调用 e2e 通过） | ✅ |
-| 工具集 | 约 37 个（fs/bash/terminal/jobs/pwsh/web/todo/goal/schedule/skill/subagent/subagent-control/workflow/ralph/present/ask_user/session-query/worktree/inspect/report/MCP…） | 约 35 个，覆盖除 LSP/computer-use 外全部；PTC 以 pipeline 批处理工具实现，Creator 设置工具已接入；shell 栈按平台门控（Windows `pwsh` / POSIX `bash`，对齐 DSH，见 [ADR 0009](decisions/0009-platform-shell-stacks.md)） | ⚠️ 基本齐 |
+| 工具集 | 约 37 个（fs/bash/terminal/jobs/pwsh/web/todo/goal/schedule/skill/subagent/subagent-control/workflow/ralph/present/ask_user/session-query/worktree/inspect/report/MCP…） | 约 34 个，覆盖除 LSP/computer-use 外全部（**PTC 已移除：产品决定明确不做**）；Creator 设置工具已接入；shell 栈按平台门控（Windows `pwsh` / POSIX `bash`，对齐 DSH，见 [ADR 0009](decisions/0009-platform-shell-stacks.md)） | ⚠️ 基本齐 |
 | 审批/权限 | Full/Workspace/Read-only/Ask/Auto-review EXP | Full/Workspace/Read-only/Ask + Always allow；**Auto-review EXP 已实现**（`internal/runtime/review.go` 的 `LLMToolReviewer`，15s 超时回退人工；app 接线 + 审批 UI 测试） | ✅ 基本对齐 |
 | 上下文压缩 | 自动压缩 + 工具结果裁剪 + LLM 摘要 | `LLMCompactor`（真实模型摘要 + 20s 摘要超时后回退 `WindowCompactor` + 旧工具结果裁剪），ContextBudget 24000，app 已接线；压缩在回合 goroutine 内执行，不阻塞 UI/Submit | ✅ 已接线 |
 | 崩溃恢复/checkpoint | checkpoint + 断点续跑 | `CheckpointStore` 已接 app 的 SQLite checkpoints 表：每成功回合写入（压缩后 prior + 本回合消息），独立冷启动可恢复；生产以 History 为准，checkpoint 作为镜像 | ✅ 已接线（回合边界） |
-| Agent 模式 | **Standard / PTC / Minimal / Creator** | **Standard / PTC / Minimal / Creator**（工具集、prompt 策略、切换重建已对齐；Deep/Supervisor/Plan-Execute 仅作旧会话别名） | ✅ 已对齐 |
+| Agent 模式 | **Standard / PTC / Minimal / Creator** | **Standard / Minimal / Creator**（工具集/prompt 策略/切换重建已对齐；Deep/Supervisor/Plan-Execute 仅旧会话别名）；**PTC ❌ 明确不做**（2026-11-06 用户决策，模式与入口已移除） | ⚠️ 3/4（PTC 不做） |
 | 子代理 / Agent Team | 同步+异步、消息/中断、team 工具 | 同步 subagent + 异步 manager/team 工具 | ✅ 基本 |
 | Goal（跨回合推进） | goal round driver 自动多轮 | **round driver 已实现**（`internal/session/goal_driver.go`，app 默认接线，回合预算 6/cap 12）；goal 工具 + 状态/进度；`/goal` 命令行仍缺（缺 Controller 写入 API，见 BUGS FP-04） | ⚠️ 基本 |
 | Schedule（模型侧） | schedule_* 工具 | 有，落 automation 表，app 调度器执行 | ✅ |
 | 后台 jobs | job_* 工具 | 有（start/list/output/kill，wait） | ✅ |
 | Skills / MCP | 有（tools/resources/prompts） | 有（tools/resources/prompts） | ✅ |
 | 多模态 | 图片输入 + 附件 | 图片工具→content parts 注入；**用户附件上传已实现**（文本注入 prompt、图片 data URL content part、chip 持久化/删除清理） | ✅ |
+| 语音输入 | 有（实验性） | **❌ 明确不做（产品决定，2026-11-06）**：无 UI/入口，不列入能力缺口 | ❌ |
 | 会话标题 | 自动/LLM 标题、conversation-following titles | 自动/LLM 标题（首条完成回合；失败/停止后下个成功回合补）+ header/sidebar 实时刷新；手改优先 | ✅ |
 | Fork / 分支 / 导出 | fork session、下载 session log | `Store.ForkSession` 复制会话/消息/事件/工具调用/反馈/附件（附件行换新 id、message_id 重映射、字节复制到 fork 自己的 `attachments/<fork>/`，删除任一侧互不影响；标题加 “ (fork)”），Session More 菜单可 fork；`Controller.ExportSession` 导出 session/messages/attachments/events/feedback JSONL，附件记录内嵌 base64 数据与文本正文，下载走保存对话框 | ✅ 本地 |
 | 反馈 | 服务端反馈传输 | 反馈行（message_id/rating/note/created_at）持久化，重开回显、随导出；仍无联网上送 | ⚠️ 本地持久化 |

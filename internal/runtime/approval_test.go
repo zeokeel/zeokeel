@@ -6,11 +6,8 @@ import (
 	"errors"
 	"strings"
 	"sync"
-	"sync/atomic"
 	"testing"
 	"time"
-
-	"github.com/cloudwego/eino/schema"
 
 	"github.com/zeokeel/zeokeel/internal/state"
 )
@@ -415,126 +412,4 @@ func waitForWaiter(t *testing.T, q *ApprovalQueue, callID string) {
 		time.Sleep(time.Millisecond)
 	}
 	t.Fatalf("no waiter registered for %q", callID)
-}
-
-// TestPTCBatchEnforcesApprovalOnNestedCalls proves a PTC batch cannot bypass the
-// Gate: the outer "ptc" call is not gated here, but the nested mutating call
-// still publishes its own ApprovalRequest with a unique call id, and a denial
-// fails that entry without invoking the tool.
-func TestPTCBatchEnforcesApprovalOnNestedCalls(t *testing.T) {
-	var mutCalls atomic.Int32
-	reg := NewRegistry()
-	if err := reg.Register(&stubTool{name: "mut", invoke: func(context.Context, json.RawMessage) (string, error) {
-		mutCalls.Add(1)
-		return "mutated", nil
-	}}); err != nil {
-		t.Fatal(err)
-	}
-	gate := NewApprovalQueue(func(name string, _ json.RawMessage) bool { return name == "mut" })
-	m := newScriptModel(func(call int) ([]*schema.Message, error) {
-		if call == 0 {
-			return toolCall("ptc", `{"calls":[{"tool":"mut","args":{}}]}`), nil
-		}
-		return finalText("done"), nil
-	})
-	agent := newTestAgent(t, Config{einoModel: m, Tools: reg, Mode: ModePTC, Gate: gate})
-
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-	ch, err := agent.Run(ctx, "ptc-approval", "run the batch")
-	if err != nil {
-		t.Fatalf("Run: %v", err)
-	}
-	var sawNested bool
-	events := collectEventsWith(t, ch, func(ev state.Event) {
-		req, ok := ev.(state.ApprovalRequest)
-		if !ok || req.Name != "mut" {
-			return
-		}
-		sawNested = true
-		gate.Deny(req.CallID)
-	})
-	if !sawNested {
-		t.Fatalf("nested mut call published no approval request: %v", events)
-	}
-	if got := mutCalls.Load(); got != 0 {
-		t.Fatalf("denied nested tool ran %d times, want 0", got)
-	}
-	end, ok := findToolEnd(events, "call-ptc")
-	if !ok {
-		t.Fatalf("ptc tool end missing: %v", events)
-	}
-	if end.IsError {
-		t.Fatalf("ptc batch itself failed: %s", end.Result)
-	}
-	var response PTCResponse
-	if err := json.Unmarshal([]byte(end.Result), &response); err != nil {
-		t.Fatalf("ptc result %q: %v", end.Result, err)
-	}
-	if len(response.Results) != 1 || response.Results[0].OK {
-		t.Fatalf("nested results = %+v, want one denied entry", response.Results)
-	}
-	if !strings.Contains(response.Results[0].Error, "denied") {
-		t.Fatalf("nested error = %q, want a denial", response.Results[0].Error)
-	}
-}
-
-// TestPTCBatchApprovesEachNestedCall checks the allowed path uses a fresh call
-// id per nested call and still runs the tool after approval.
-func TestPTCBatchApprovesEachNestedCall(t *testing.T) {
-	var mutCalls atomic.Int32
-	reg := NewRegistry()
-	if err := reg.Register(&stubTool{name: "mut", invoke: func(context.Context, json.RawMessage) (string, error) {
-		mutCalls.Add(1)
-		return "mutated", nil
-	}}); err != nil {
-		t.Fatal(err)
-	}
-	gate := NewApprovalQueue(func(name string, _ json.RawMessage) bool { return name == "mut" })
-	m := newScriptModel(func(call int) ([]*schema.Message, error) {
-		if call == 0 {
-			return toolCall("ptc", `{"calls":[{"tool":"mut"},{"tool":"mut"}]}`), nil
-		}
-		return finalText("done"), nil
-	})
-	agent := newTestAgent(t, Config{einoModel: m, Tools: reg, Mode: ModePTC, Gate: gate})
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-	ch, err := agent.Run(ctx, "ptc-approval-allow", "run the batch")
-	if err != nil {
-		t.Fatalf("Run: %v", err)
-	}
-	ids := make(map[string]bool)
-	var mu sync.Mutex
-	events := collectEventsWith(t, ch, func(ev state.Event) {
-		req, ok := ev.(state.ApprovalRequest)
-		if !ok || req.Name != "mut" {
-			return
-		}
-		mu.Lock()
-		ids[req.CallID] = true
-		mu.Unlock()
-		gate.Approve(req.CallID)
-	})
-	if mutCalls.Load() != 2 {
-		t.Fatalf("approved nested calls ran %d times, want 2", mutCalls.Load())
-	}
-	mu.Lock()
-	defer mu.Unlock()
-	if len(ids) != 2 {
-		t.Fatalf("nested approval call ids = %v, want two distinct ids", ids)
-	}
-	end, ok := findToolEnd(events, "call-ptc")
-	if !ok || end.IsError {
-		t.Fatalf("ptc end = %+v, %v", end, ok)
-	}
-	var response PTCResponse
-	if err := json.Unmarshal([]byte(end.Result), &response); err != nil {
-		t.Fatalf("ptc result %q: %v", end.Result, err)
-	}
-	for i, result := range response.Results {
-		if !result.OK || result.Output != "mutated" {
-			t.Fatalf("result[%d] = %+v, want mutated", i, result)
-		}
-	}
 }

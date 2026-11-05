@@ -171,7 +171,7 @@ func runModeTurn(t *testing.T, a *Agent, sessionID, text string) []state.Event {
 }
 
 func TestModesAndNormalizeMode(t *testing.T) {
-	want := []string{ModeStandard, ModePTC, ModeMinimal, ModeCreator}
+	want := []string{ModeStandard, ModeMinimal, ModeCreator}
 	got := Modes()
 	if len(got) != len(want) {
 		t.Fatalf("Modes() = %v, want %v", got, want)
@@ -200,7 +200,6 @@ func TestModesAndNormalizeMode(t *testing.T) {
 		"SUPERVISOR":  ModeSupervisor,
 		"planexecute": ModePlanExecute,
 		"cordis":      ModeCreator,
-		"ptc-mode":    ModePTC,
 	} {
 		if mode, err := NormalizeMode(alias); err != nil || mode != want {
 			t.Fatalf("NormalizeMode(%q) = %q, %v; want %q", alias, mode, err, want)
@@ -458,22 +457,17 @@ func TestModeToolSets(t *testing.T) {
 		{
 			mode:    ModeStandard,
 			present: []string{"bash", "read_file", "write_file", "terminal_open", "read_image", "working_directory"},
-			absent:  []string{"ptc", "settings_get", "settings_set"},
-		},
-		{
-			mode:    ModePTC,
-			present: []string{"bash", "read_file", "write_file", "terminal_open", "read_image", "working_directory", "ptc"},
 			absent:  []string{"settings_get", "settings_set"},
 		},
 		{
 			mode:    ModeMinimal,
 			present: []string{"terminal_open", "terminal_read", "read_image", "working_directory"},
-			absent:  []string{"bash", "read_file", "write_file", "ptc", "settings_get", "settings_set"},
+			absent:  []string{"bash", "read_file", "write_file", "settings_get", "settings_set"},
 		},
 		{
 			mode:    ModeCreator,
 			present: []string{"bash", "read_file", "write_file", "terminal_open", "read_image", "working_directory", "settings_get", "settings_set"},
-			absent:  []string{"ptc"},
+			absent:  []string{},
 		},
 	}
 	for _, tc := range cases {
@@ -484,101 +478,6 @@ func TestModeToolSets(t *testing.T) {
 			requireTools(t, tc.mode, m.toolNamesAt(0), tc.present, tc.absent)
 			requireTools(t, tc.mode+" ToolNames()", agent.ToolNames(), tc.present, tc.absent)
 		})
-	}
-}
-
-func TestPTCExecutesBatchSequentially(t *testing.T) {
-	var (
-		mu    sync.Mutex
-		order []string
-	)
-	reg := NewRegistry()
-	if err := reg.Register(&stubTool{name: "echo", invoke: func(_ context.Context, args json.RawMessage) (string, error) {
-		var in struct {
-			Text string `json:"text"`
-		}
-		if err := json.Unmarshal(args, &in); err != nil {
-			return "", err
-		}
-		mu.Lock()
-		order = append(order, in.Text)
-		mu.Unlock()
-		return "echo:" + in.Text, nil
-	}}); err != nil {
-		t.Fatal(err)
-	}
-
-	m := newScriptModel(func(call int) ([]*schema.Message, error) {
-		if call == 0 {
-			return toolCall("ptc", `{"calls":[
-				{"tool":"echo","args":{"text":"one"}},
-				{"tool":"echo","args":{"text":"two"}},
-				{"tool":"echo","args":"{\"text\":\"three\"}"}
-			]}`), nil
-		}
-		return finalText("batch done"), nil
-	})
-	agent := newTestAgent(t, Config{einoModel: m, Tools: reg, Mode: ModePTC})
-	if _, ok := agent.ToolByName("ptc"); !ok {
-		t.Fatalf("ModePTC effective tools = %v, want ptc", agent.ToolNames())
-	}
-	events := runModeTurn(t, agent, "ptc", "batch please")
-	end, ok := findToolEnd(events, "call-ptc")
-	if !ok {
-		t.Fatalf("ptc tool end missing: %v", events)
-	}
-	if end.IsError {
-		t.Fatalf("ptc result is an error: %s", end.Result)
-	}
-	var response PTCResponse
-	if err := json.Unmarshal([]byte(end.Result), &response); err != nil {
-		t.Fatalf("ptc result %q: %v", end.Result, err)
-	}
-	if len(response.Results) != 3 {
-		t.Fatalf("ptc results = %+v, want 3", response.Results)
-	}
-	for i, want := range []string{"echo:one", "echo:two", "echo:three"} {
-		if !response.Results[i].OK || response.Results[i].Output != want {
-			t.Fatalf("ptc result[%d] = %+v, want %q", i, response.Results[i], want)
-		}
-	}
-	mu.Lock()
-	defer mu.Unlock()
-	if strings.Join(order, ",") != "one,two,three" {
-		t.Fatalf("ptc call order = %v, want sequential one,two,three", order)
-	}
-}
-
-func TestPTCBatchReportsUnknownAndRejectsNestedPTC(t *testing.T) {
-	reg := NewRegistry()
-	if err := reg.Register(&stubTool{name: "echo"}); err != nil {
-		t.Fatal(err)
-	}
-	agent := newTestAgent(t, Config{
-		einoModel: newScriptModel(func(int) ([]*schema.Message, error) { return finalText("x"), nil }),
-		Tools:     reg,
-		Mode:      ModePTC,
-	})
-	ptc, ok := agent.ToolByName("ptc")
-	if !ok {
-		t.Fatalf("ptc missing from %v", agent.ToolNames())
-	}
-	out, err := ptc.Invoke(context.Background(), json.RawMessage(`{"calls":[{"tool":"missing"},{"tool":"ptc"},{"tool":"echo"}]}`))
-	if err != nil {
-		t.Fatalf("ptc batch: %v", err)
-	}
-	var response PTCResponse
-	if err := json.Unmarshal([]byte(out), &response); err != nil {
-		t.Fatalf("decode: %v", err)
-	}
-	if len(response.Results) != 3 || response.Results[0].OK || response.Results[1].OK || !response.Results[2].OK {
-		t.Fatalf("ptc mixed results = %+v", response.Results)
-	}
-	if !strings.Contains(response.Results[0].Error, "unknown tool") {
-		t.Fatalf("unknown tool error = %q", response.Results[0].Error)
-	}
-	if _, err := ptc.Invoke(context.Background(), json.RawMessage(`{"calls":[]}`)); err == nil {
-		t.Fatal("ptc accepted an empty batch")
 	}
 }
 
@@ -643,23 +542,19 @@ func TestSetModeRebuildsToolSet(t *testing.T) {
 		runModeTurn(t, agent, "switch-"+label, "hello")
 		requireTools(t, label+" model", m.toolNamesAt(call), present, absent)
 	}
-	checkTurn(0, "standard", []string{"bash", "read_file"}, []string{"ptc", "settings_get"})
+	checkTurn(0, "standard", []string{"bash", "read_file"}, []string{"settings_get"})
 	if err := agent.SetMode(ModeMinimal); err != nil {
 		t.Fatalf("SetMode(minimal): %v", err)
 	}
-	checkTurn(1, "minimal", []string{"terminal_open", "read_image", "working_directory"}, []string{"bash", "read_file", "ptc"})
-	if err := agent.SetMode(ModePTC); err != nil {
-		t.Fatalf("SetMode(ptc): %v", err)
-	}
-	checkTurn(2, "ptc", []string{"bash", "ptc"}, []string{"settings_get"})
+	checkTurn(1, "minimal", []string{"terminal_open", "read_image", "working_directory"}, []string{"bash", "read_file"})
 	if err := agent.SetMode(ModeCreator); err != nil {
 		t.Fatalf("SetMode(creator): %v", err)
 	}
-	checkTurn(3, "creator", []string{"bash", "settings_get", "settings_set"}, []string{"ptc"})
+	checkTurn(2, "creator", []string{"bash", "settings_get", "settings_set"}, []string{})
 	if err := agent.SetMode(ModeStandard); err != nil {
 		t.Fatalf("SetMode(standard): %v", err)
 	}
-	checkTurn(4, "standard again", []string{"bash", "read_file"}, []string{"ptc", "settings_get", "settings_set"})
+	checkTurn(3, "standard again", []string{"bash", "read_file"}, []string{"settings_get", "settings_set"})
 }
 
 // TestSetModeRefreshesInstructionPolicy proves a mode switch updates the
@@ -684,7 +579,7 @@ func TestSetModeRefreshesInstructionPolicy(t *testing.T) {
 	if got := agent.Instruction(); got != "base" {
 		t.Fatalf("initial Instruction() = %q, want base", got)
 	}
-	for _, mode := range []string{ModePTC, ModeMinimal, ModeCreator, ModeStandard} {
+	for _, mode := range []string{ModeMinimal, ModeCreator, ModeStandard} {
 		current = mode
 		if err := agent.SetMode(mode); err != nil {
 			t.Fatalf("SetMode(%s): %v", mode, err)
@@ -696,8 +591,8 @@ func TestSetModeRefreshesInstructionPolicy(t *testing.T) {
 	// An InstructionFunc that renders nothing keeps the current instruction,
 	// matching refreshInstruction's behavior.
 	current = ""
-	if err := agent.SetMode(ModePTC); err != nil {
-		t.Fatalf("SetMode(ptc) with empty instruction: %v", err)
+	if err := agent.SetMode(ModeMinimal); err != nil {
+		t.Fatalf("SetMode(minimal) with empty instruction: %v", err)
 	}
 	if got := agent.Instruction(); got != "preset=standard" {
 		t.Fatalf("Instruction() after empty render = %q, want the previous text", got)
@@ -706,8 +601,7 @@ func TestSetModeRefreshesInstructionPolicy(t *testing.T) {
 
 // TestSubagentToolSetsFollowMode proves delegated children inherit the
 // parent's model-visible mode tool set (minus orchestration) instead of the
-// unfiltered registry. The PTC batch tool stays root-only because its nested
-// calls resolve against the registry, which would bypass the child filter.
+// unfiltered registry.
 func TestSubagentToolSetsFollowMode(t *testing.T) {
 	reg := NewRegistry()
 	for _, name := range []string{"bash", "terminal_open", "read_image", "settings_get", "settings_set", "subagent"} {
@@ -723,22 +617,17 @@ func TestSubagentToolSetsFollowMode(t *testing.T) {
 		{
 			mode:    ModeStandard,
 			present: []string{"bash", "terminal_open", "read_image"},
-			absent:  []string{"settings_get", "settings_set", "subagent", "ptc"},
-		},
-		{
-			mode:    ModePTC,
-			present: []string{"bash", "terminal_open", "read_image"},
-			absent:  []string{"settings_get", "settings_set", "subagent", "ptc"},
+			absent:  []string{"settings_get", "settings_set", "subagent"},
 		},
 		{
 			mode:    ModeMinimal,
 			present: []string{"terminal_open", "read_image"},
-			absent:  []string{"bash", "settings_get", "settings_set", "subagent", "ptc"},
+			absent:  []string{"bash", "settings_get", "settings_set", "subagent"},
 		},
 		{
 			mode:    ModeCreator,
 			present: []string{"bash", "terminal_open", "read_image", "settings_get", "settings_set"},
-			absent:  []string{"subagent", "ptc"},
+			absent:  []string{"subagent"},
 		},
 	}
 	for _, tc := range cases {
@@ -779,8 +668,8 @@ func TestCreatorSubagentGetsSynthesizedSettingsTools(t *testing.T) {
 	if err != nil {
 		t.Fatalf("RunSubagent(creator): %v", err)
 	}
-	requireTools(t, "creator child", result.Tools, []string{"bash", "settings_get", "settings_set"}, []string{"ptc"})
-	requireTools(t, "creator child model", m.toolNamesAt(0), []string{"bash", "settings_get", "settings_set"}, []string{"ptc"})
+	requireTools(t, "creator child", result.Tools, []string{"bash", "settings_get", "settings_set"}, []string{})
+	requireTools(t, "creator child model", m.toolNamesAt(0), []string{"bash", "settings_get", "settings_set"}, []string{})
 }
 
 // drainEventsUntil drains ch but gives up after d without failing the test from
@@ -939,7 +828,7 @@ func TestConcurrentModeModelAndRun(t *testing.T) {
 	// so each iteration drives exactly one turn while SetMode and SetModel race
 	// that turn's rebuild. This is the overlap the production controller has
 	// (a model switch applies from the next turn while a turn may run).
-	modes := []string{ModeStandard, ModePTC, ModeMinimal, ModeCreator}
+	modes := []string{ModeStandard, ModeMinimal, ModeCreator}
 	for i := 0; i < 8; i++ {
 		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 		ch, err := agent.Run(ctx, fmt.Sprintf("race-%d", i), "hello")

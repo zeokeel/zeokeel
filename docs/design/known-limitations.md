@@ -21,6 +21,14 @@
 - **HighContrast**：在品牌主题上做对比度增强（边框/次要文字向主文字混合、Focus 不透明、滚动条加深），不是专门的高对比主题，需真机/无障碍用户评估。
 - **动画**：ReduceMotion 通过 `c.DisableAnimations()` 全局关闭；mygo 框架内建 transition 遵循，个别自绘动画（流式淡入）显式检查。
 
+## 2.1 产品决定明确不做（不是能力缺口）
+
+以下能力是**用户/产品决定明确不做**，不再作为"待实现/后续"跟踪，也不应出现在 parity 期望清单里：
+
+- **PTC 代码运行时**（Programmatic Tool Calling / JS 沙箱）：2026-11-06 用户决策不做。原因：引入 JS/Node 运行时违反"纯 Go、CGO_ENABLED=0、单二进制"硬约束；PTC 模式与入口已从代码/UI 移除（ADR 0005 内置插件边界同样适用于此）。
+- **语音输入**（DSH 实验能力）：2026-11-06 用户决策不做，UI 不提供入口。
+- 相关历史记录保留在 `docs/history/` 与审计报告中，仅作追溯；若代码/文档仍出现 PTC/voice 入口，以本轮删除结果为准（代码删除由同批 worker 执行）。
+
 ## 3. 桌面交互遗留
 
 - **通知**：当前/后台会话的 turn 完成/失败与**审批/提问等待**均已通知（controller hook）；通知 ID 替换、动作按钮、"退出应用后点击通知"未做；跨会话总量节流为简化策略（同会话完成 5s 冷却，审批不节流）。
@@ -76,6 +84,7 @@
 - **UX-04 设置窗重绘**：打开/移动设置窗后主窗口 popover 残留（state 已清、不重绘）；受 mygo 出帧机制限制，PARTIAL。
 - **About 版本**：已统一为 `shell.BuildVersionString()` 单一来源（删除硬编码 `version 0.1.0` 与 `pluginProductVersion`）；预览已按新文案重生成。
 - **RT-04 / AR-04 / AR-09 / AR-22 大项**：per-session Agent、shell 分层、schema v2、快照优化 DEFERRED（理由见 FIX-PLAN §7）。
+- **自动更新 / Windows 安装器**：`internal/updater/` 本轮仅落 **TDD RED 契约**（`go test -tags tdd_red ./internal/updater` 全红，功能未实现）；Windows 安装器只有计划与 Inno/NSIS 草案（`packaging/windows/INSTALLER-PLAN.md`），未构建、未签名；更新通道/签名 DEFERRED（AR-03）。
 - **预览金标**：22 张已按 wave1+wave2 UI 重生成（含设置窗 900×840）并回归 PASS（14 屏/1.9s）。
 
 ## 4. 视觉回归策略（v1.1：opt-in 回归工具）

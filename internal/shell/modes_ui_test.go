@@ -32,14 +32,13 @@ func TestAgentModePickerPersistsAndSwitches(t *testing.T) {
 	}
 	// The runtime's names and descriptions are the picker's single source of
 	// truth.
-	for _, label := range []string{"PTC mode", "Minimal mode", "Creator mode"} {
+	for _, label := range []string{"Minimal mode", "Creator mode"} {
 		if !tt.HasText(label) {
 			t.Fatalf("menu entry %q missing: %q", label, tt.Texts())
 		}
 	}
 	for _, hint := range []string{
-		"Includes all Standard mode capabilities",
-		"Better suited to tasks that call tools in batches",
+		"Work with code, files, and information",
 		"terminal and image reading, with context compaction",
 		"change whitelisted settings and write reusable skills",
 	} {
@@ -48,26 +47,26 @@ func TestAgentModePickerPersistsAndSwitches(t *testing.T) {
 		}
 	}
 
-	if err := tt.Click("PTC mode"); err != nil {
-		t.Fatalf("click PTC mode: %v", err)
+	if err := tt.Click("Minimal mode"); err != nil {
+		t.Fatalf("click Minimal mode: %v", err)
 	}
-	if got := h.ctrl.Mode(); got != runtime.ModePTC {
-		t.Fatalf("Mode() = %q, want ptc", got)
+	if got := h.ctrl.Mode(); got != runtime.ModeMinimal {
+		t.Fatalf("Mode() = %q, want minimal", got)
 	}
 	tt.Frame()
-	if !tt.HasText("PTC mode") {
-		t.Fatalf("live chip did not show PTC mode: %q", tt.Texts())
+	if !tt.HasText("Minimal mode") {
+		t.Fatalf("live chip did not show Minimal mode: %q", tt.Texts())
 	}
 	key := session.SessionModeKey(h.ctrl.CurrentSessionID())
-	if value, err := h.ctrl.Store().GetSetting(key); err != nil || value != runtime.ModePTC {
+	if value, err := h.ctrl.Store().GetSetting(key); err != nil || value != runtime.ModeMinimal {
 		t.Fatalf("stored mode = %q, %v", value, err)
 	}
-	if len(switched) != 1 || switched[0] != runtime.ModePTC {
+	if len(switched) != 1 || switched[0] != runtime.ModeMinimal {
 		t.Fatalf("switcher calls = %v", switched)
 	}
 
 	// A second selection persists again and calls the switcher again.
-	if err := tt.Click("PTC mode"); err != nil {
+	if err := tt.Click("Minimal mode"); err != nil {
 		t.Fatalf("reopen live picker: %v", err)
 	}
 	if err := tt.Click("Creator mode"); err != nil {
@@ -116,8 +115,6 @@ var modePresetAliases = []struct {
 	{"cordis", runtime.ModeCreator},
 	{"creator-mode", runtime.ModeCreator},
 	{"creator_mode", runtime.ModeCreator},
-	{"ptc-mode", runtime.ModePTC},
-	{"ptc_mode", runtime.ModePTC},
 	{"minimal-mode", runtime.ModeMinimal},
 	{"minimal_mode", runtime.ModeMinimal},
 }
@@ -190,9 +187,13 @@ func TestAgentPresetsPageHighlightsPersistedAlias(t *testing.T) {
 			}
 			// A non-selected canonical preset keeps its action, proving the
 			// page rendered every row rather than hiding them.
-			other := h.app.agentModeLabel(runtime.ModeStandard)
-			if wantLabel == other {
-				other = h.app.agentModeLabel(runtime.ModePTC)
+			other := ""
+			for _, standard := range []string{runtime.ModeStandard, runtime.ModeMinimal, runtime.ModeCreator} {
+				label := h.app.agentModeLabel(standard)
+				if label != wantLabel {
+					other = label
+					break
+				}
 			}
 			if !tt.HasText("Set default " + other) {
 				t.Fatalf("non-selected preset lost its action: %q", tt.Texts())

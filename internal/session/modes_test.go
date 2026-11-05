@@ -306,15 +306,15 @@ func TestOpenSessionInstructionFollowsReopenedMode(t *testing.T) {
 	ctrl, agent := newInstructionModeHarness(t)
 	ctx := context.Background()
 
-	ptcID, err := ctrl.CreateSession(ctx, "ptc")
+	creatorID, err := ctrl.CreateSession(ctx, "creator")
 	if err != nil {
-		t.Fatalf("CreateSession(ptc): %v", err)
+		t.Fatalf("CreateSession(creator): %v", err)
 	}
-	if err := ctrl.SetMode(runtime.ModePTC); err != nil {
-		t.Fatalf("SetMode(ptc): %v", err)
+	if err := ctrl.SetMode(runtime.ModeCreator); err != nil {
+		t.Fatalf("SetMode(creator): %v", err)
 	}
-	if got := agent.Instruction(); got != "preset=ptc" {
-		t.Fatalf("instruction after SetMode(ptc) = %q, want preset=ptc", got)
+	if got := agent.Instruction(); got != "preset=creator" {
+		t.Fatalf("instruction after SetMode(creator) = %q, want preset=creator", got)
 	}
 
 	// A new Standard session resets the shared topology and prompt.
@@ -329,19 +329,19 @@ func TestOpenSessionInstructionFollowsReopenedMode(t *testing.T) {
 		t.Fatalf("OpenSession(standard): %v", err)
 	}
 
-	// Reopening the PTC session must switch the topology and the prompt
+	// Reopening the Creator session must switch the topology and the prompt
 	// together, not leave the instruction describing Standard.
-	if _, err := ctrl.OpenSession(ctx, ptcID); err != nil {
-		t.Fatalf("OpenSession(ptc): %v", err)
+	if _, err := ctrl.OpenSession(ctx, creatorID); err != nil {
+		t.Fatalf("OpenSession(creator): %v", err)
 	}
-	if got := ctrl.CurrentSessionID(); got != ptcID {
-		t.Fatalf("current session = %q, want %q", got, ptcID)
+	if got := ctrl.CurrentSessionID(); got != creatorID {
+		t.Fatalf("current session = %q, want %q", got, creatorID)
 	}
-	if got := agent.Mode(); got != runtime.ModePTC {
-		t.Fatalf("Agent.Mode() after OpenSession(ptc) = %q, want ptc", got)
+	if got := agent.Mode(); got != runtime.ModeCreator {
+		t.Fatalf("Agent.Mode() after OpenSession(creator) = %q, want creator", got)
 	}
-	if got := agent.Instruction(); got != "preset=ptc" {
-		t.Fatalf("Agent.Instruction() after OpenSession(ptc) = %q, want preset=ptc", got)
+	if got := agent.Instruction(); got != "preset=creator" {
+		t.Fatalf("Agent.Instruction() after OpenSession(creator) = %q, want preset=creator", got)
 	}
 }
 
@@ -352,12 +352,12 @@ func TestOpenSessionRestoresPreviousSessionOnModeFailure(t *testing.T) {
 	ctrl, agent := newInstructionModeHarness(t)
 	ctx := context.Background()
 
-	ptcID, err := ctrl.CreateSession(ctx, "ptc")
+	creatorID, err := ctrl.CreateSession(ctx, "creator")
 	if err != nil {
-		t.Fatalf("CreateSession(ptc): %v", err)
+		t.Fatalf("CreateSession(creator): %v", err)
 	}
-	if err := ctrl.SetMode(runtime.ModePTC); err != nil {
-		t.Fatalf("SetMode(ptc): %v", err)
+	if err := ctrl.SetMode(runtime.ModeCreator); err != nil {
+		t.Fatalf("SetMode(creator): %v", err)
 	}
 	stdID, err := ctrl.CreateSession(ctx, "standard")
 	if err != nil {
@@ -369,8 +369,8 @@ func TestOpenSessionRestoresPreviousSessionOnModeFailure(t *testing.T) {
 
 	boom := errors.New("cannot rebuild")
 	ctrl.SetAgentModeSwitcher(func(string) error { return boom })
-	if _, err := ctrl.OpenSession(ctx, ptcID); err == nil || !errors.Is(err, boom) {
-		t.Fatalf("OpenSession(ptc) error = %v, want %v", err, boom)
+	if _, err := ctrl.OpenSession(ctx, creatorID); err == nil || !errors.Is(err, boom) {
+		t.Fatalf("OpenSession(creator) error = %v, want %v", err, boom)
 	}
 	if got := ctrl.CurrentSessionID(); got != stdID {
 		t.Fatalf("current session after failed open = %q, want the previous session %q", got, stdID)
@@ -391,21 +391,21 @@ func TestOpenSessionRestoresPreviousSessionOnModeFailure(t *testing.T) {
 // start in the preset Settings > Agent presets advertises.
 func TestControllerCreateSessionAppliesDefaultPreset(t *testing.T) {
 	h := newModeHarness(t, &echoOnlyProvider{}, nil)
-	if err := h.store.SetSetting("agent.preset", runtime.ModePTC); err != nil {
+	if err := h.store.SetSetting("agent.preset", runtime.ModeCreator); err != nil {
 		t.Fatal(err)
 	}
 	id, err := h.ctrl.CreateSession(context.Background(), "automation")
 	if err != nil {
 		t.Fatalf("CreateSession: %v", err)
 	}
-	if got := h.ctrl.Mode(); got != runtime.ModePTC {
-		t.Fatalf("new session Mode() = %q, want ptc", got)
+	if got := h.ctrl.Mode(); got != runtime.ModeCreator {
+		t.Fatalf("new session Mode() = %q, want creator", got)
 	}
-	if got := h.agent.Mode(); got != runtime.ModePTC {
-		t.Fatalf("new session Agent.Mode() = %q, want ptc", got)
+	if got := h.agent.Mode(); got != runtime.ModeCreator {
+		t.Fatalf("new session Agent.Mode() = %q, want creator", got)
 	}
-	if value, err := h.store.GetSetting(session.SessionModeKey(id)); err != nil || value != runtime.ModePTC {
-		t.Fatalf("stored session mode = %q, %v; want ptc", value, err)
+	if value, err := h.store.GetSetting(session.SessionModeKey(id)); err != nil || value != runtime.ModeCreator {
+		t.Fatalf("stored session mode = %q, %v; want creator", value, err)
 	}
 
 	// An invalid preset is ignored so a bad settings row cannot make session
@@ -583,22 +583,17 @@ func TestControllerDSHModesPersistAndRouteTools(t *testing.T) {
 		{
 			mode:    runtime.ModeStandard,
 			present: []string{"bash", "read_file", "terminal_open", "read_image", "working_directory"},
-			absent:  []string{"ptc", "settings_get", "settings_set"},
-		},
-		{
-			mode:    runtime.ModePTC,
-			present: []string{"bash", "read_file", "terminal_open", "read_image", "working_directory", "ptc"},
 			absent:  []string{"settings_get", "settings_set"},
 		},
 		{
 			mode:    runtime.ModeMinimal,
 			present: []string{"terminal_open", "read_image", "working_directory"},
-			absent:  []string{"bash", "read_file", "ptc", "settings_get", "settings_set"},
+			absent:  []string{"bash", "read_file", "settings_get", "settings_set"},
 		},
 		{
 			mode:    runtime.ModeCreator,
 			present: []string{"bash", "read_file", "terminal_open", "read_image", "working_directory", "settings_get", "settings_set"},
-			absent:  []string{"ptc"},
+			absent:  []string{},
 		},
 	}
 	for _, tc := range cases {

@@ -53,11 +53,10 @@ const (
 // images carried by tool results. It never mutates the incoming messages; when
 // no image is added it returns the input slice unchanged.
 //
-// A tool result may carry one direct image (read_image's JSON object) or, for a
-// PTC batch, several images nested in the results entries; both forms are
-// attached in message order. The scan is idempotent: image URLs already present
-// in any message are not attached again, so calling it before every model call
-// of a run does not grow the conversation.
+// A tool result may carry one direct image (read_image's JSON object); it is
+// attached to the conversation in message order. The scan is idempotent: image
+// URLs already present in any message are not attached again, so calling it
+// before every model call of a run does not grow the conversation.
 func injectToolImages(messages []*schema.Message) []*schema.Message {
 	if len(messages) == 0 {
 		return messages
@@ -99,40 +98,12 @@ func injectToolImages(messages []*schema.Message) []*schema.Message {
 }
 
 // imagePartsFromToolResult returns every attachable image carried by a tool
-// result. A direct tool result has at most one top-level image; a PTC batch
-// ("ptc" tool) nests each nested tool's output as a JSON string, so its images
-// are collected from the successful result entries in batch order.
+// result: a direct tool result has at most one top-level image.
 func imagePartsFromToolResult(content string) []ImagePart {
 	if part, ok := imagePartFromToolResult(content); ok {
 		return []ImagePart{part}
 	}
-	return imagePartsFromPTCResults(content)
-}
-
-// imagePartsFromPTCResults extracts images from a PTC batch result's nested
-// outputs. Each PTCResult.Output is the raw result text of one nested tool, so
-// an image-returning tool such as read_image reaches the model exactly as it
-// does on a direct call instead of only as escaped text.
-func imagePartsFromPTCResults(content string) []ImagePart {
-	content = strings.TrimSpace(content)
-	if content == "" || !strings.HasPrefix(content, "{") || !strings.Contains(content, "image_data_url") {
-		return nil
-	}
-	var response struct {
-		Results []struct {
-			Output string `json:"output"`
-		} `json:"results"`
-	}
-	if err := json.Unmarshal([]byte(content), &response); err != nil {
-		return nil
-	}
-	var parts []ImagePart
-	for _, result := range response.Results {
-		if part, ok := imagePartFromToolResult(result.Output); ok {
-			parts = append(parts, part)
-		}
-	}
-	return parts
+	return nil
 }
 
 // imagePartFromToolResult extracts a valid data URL from a tool result's JSON

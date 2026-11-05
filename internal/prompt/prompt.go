@@ -71,10 +71,8 @@ const (
 	OrderPlanPolicy = 500
 	// OrderTeamPolicy matches DSH TEAM_POLICY (600).
 	OrderTeamPolicy = 600
-	// OrderModePTC matches DSH PTC_ONLY (800): the pipeline-style PTC policy.
-	OrderModePTC = 800
 	// OrderModeMinimal is an extension with no DSH constant; the minimal mode
-	// policy sits just after PTC and before file-reference guidance.
+	// policy sits before file-reference guidance.
 	OrderModeMinimal = 810
 	// OrderModeCreator is an extension with no DSH constant; the Creator mode
 	// policy sits next to the other agent-mode policies.
@@ -178,7 +176,7 @@ type Context struct {
 	// gate can coexist with any agent preset.
 	PlanMode bool
 	// AgentMode enables the selected agent preset's policy: "standard",
-	// "ptc", "minimal", or "creator". It is separate from Mode because a plan
+	// "minimal", or "creator". It is separate from Mode because a plan
 	// or team collaboration state can coexist with an agent preset. For
 	// convenience the policy sections also accept these names in Mode, which
 	// keeps prompt-only callers simple.

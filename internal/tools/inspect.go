@@ -116,7 +116,6 @@ var inspectPluginCatalog = []inspectPluginDef{
 	{name: "shell", defaultEnabled: true},
 	{name: "subagent", defaultEnabled: true},
 	{name: "agent_teams", defaultEnabled: false},
-	{name: "voice_input", defaultEnabled: false},
 	{name: "auto_review", defaultEnabled: false},
 	{name: "developer_tools", defaultEnabled: false},
 }

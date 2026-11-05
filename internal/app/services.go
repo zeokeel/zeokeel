@@ -44,9 +44,7 @@ const DefaultInstruction = `You are ZeoKeel, a helpful desktop AI agent. Answer 
 //
 // Workspace-confined file tools (write_file, edit_file, str_replace_editor) are
 // deliberately absent: the workspace sandbox already confines them to the root,
-// so an approval prompt there adds friction without adding a boundary. The
-// "ptc" batch tool is absent too because its nested calls are gated one by one
-// by the same queue; asking for the batch again would be a duplicate prompt.
+// so an approval prompt there adds friction without adding a boundary.
 // Read-only terminal/job operations are absent because the prompt tells the
 // model to poll job_output and terminal_read.
 const defaultApprovalTools = "bash,pwsh,terminal_open,terminal_send,terminal_signal,terminal_close,job_start,job_kill,enter_worktree,exit_worktree,web_search,web_fetch,mcp__*"
@@ -54,11 +52,11 @@ const defaultApprovalTools = "bash,pwsh,terminal_open,terminal_send,terminal_sig
 // autoReviewApprovalTools is the Auto review permission's fallback. Auto review
 // is an experimental oversight mode: the model reviewer decides the calls that
 // would otherwise prompt the user. It keeps the wider pre-convergence pattern
-// set (including the sandbox-confined file editors and the ptc batch) so
-// converging the human-approval default above does not silently stop the
-// reviewer from seeing file mutations. Read-only str_replace_editor "view"
-// calls are still exempt, in both sets (see toolNeedsApprovalWithArgs).
-const autoReviewApprovalTools = "bash,write_file,edit_file,str_replace_editor,terminal_open,terminal_send,terminal_signal,terminal_close,job_start,job_kill,ptc,pwsh,enter_worktree,exit_worktree,web_search,web_fetch,mcp__*"
+// set (including the sandbox-confined file editors) so converging the
+// human-approval default above does not silently stop the reviewer from seeing
+// file mutations. Read-only str_replace_editor "view" calls are still exempt, in
+// both sets (see toolNeedsApprovalWithArgs).
+const autoReviewApprovalTools = "bash,write_file,edit_file,str_replace_editor,terminal_open,terminal_send,terminal_signal,terminal_close,job_start,job_kill,pwsh,enter_worktree,exit_worktree,web_search,web_fetch,mcp__*"
 
 // AgentBundle is the wired agent plus the resources it owns (MCP servers and
 // the async team manager when Agent Teams is enabled).
@@ -725,15 +723,14 @@ func registerAllToolsWithOptions(st *store.Store, root string, get func(key, env
 	}
 
 	// Agent-mode tools are registered once and exposed by mode routing in the
-	// runtime: standard/legacy hide them, PTC adds "ptc", and Creator adds the
-	// settings authoring pair. Registering the concrete instances keeps the
-	// registry, tool tests and settings screen discoverable while
-	// Agent.ToolNames still reports the model-visible set.
+	// runtime: standard/legacy hide them, and Creator adds the settings
+	// authoring pair. Registering the concrete instances keeps the registry, tool
+	// tests and settings screen discoverable while Agent.ToolNames still reports
+	// the model-visible set.
 	var settingsStore runtime.SettingsStore
 	if st != nil {
 		settingsStore = st
 	}
-	_ = reg.Register(runtime.NewPTCTool(reg))
 	_ = reg.Register(runtime.NewSettingsGetTool(settingsStore))
 	_ = reg.Register(runtime.NewSettingsSetTool(settingsStore))
 
@@ -1303,7 +1300,7 @@ func composeInstructionAt(st *store.Store, root, cwd string, reg *runtime.Regist
 
 // composeInstructionForModes is composeInstructionAt with every policy gate:
 // collaborationMode is plan/team/subagent, agentMode is the selected agent
-// preset (standard, ptc, minimal, creator), and planMode is the per-session
+// preset (standard, minimal, creator), and planMode is the per-session
 // plan review gate. Empty/false values add no policy.
 func composeInstructionForModes(st *store.Store, root, cwd string, reg *runtime.Registry, skillsDir, permission, collaborationMode, agentMode string, planMode bool) string {
 	return composeInstructionForModesWithMemories(st, root, cwd, reg, skillsDir, permission,
@@ -1322,7 +1319,7 @@ func composeInstructionForModesWithMemories(st *store.Store, root, cwd string, r
 	// The prompt must describe only the tools the selected mode actually
 	// exposes. Passing the raw registry would tell Minimal mode to use bash,
 	// read/edit, glob or grep even though ModeTools hides them from the model.
-	// ModeTools also adds the tools a mode synthesizes (ptc, settings_*) so the
+	// ModeTools also adds the tools a mode synthesizes (settings_*) so the
 	// prompt and the live topology agree.
 	names = runtime.ModeTools(agentMode, names)
 	var skillNames []string

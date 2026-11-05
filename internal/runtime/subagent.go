@@ -239,13 +239,6 @@ func (a *Agent) buildSubagentAgent(ctx context.Context, name string, snap agentS
 	if instruction != "" {
 		instruction += "\n\n"
 	}
-	// A PTC parent's instruction advertises the "ptc" batch tool, but
-	// subagentToolNames is deliberately root-only (the batch tool resolves
-	// nested calls against the unfiltered registry). Tell the child so its
-	// prompt and its bound tool set cannot disagree.
-	if snap.mode == ModePTC {
-		instruction += "PTC batch is root-only; use individual tools instead of the ptc tool.\n\n"
-	}
 	instruction += "You are a focused subagent. Complete the single task you are given" +
 		" with the tools available to you and reply with your final result."
 
@@ -277,10 +270,7 @@ func (a *Agent) buildSubagentAgent(ctx context.Context, name string, snap agentS
 //
 // "Model-visible" means this includes the tools a mode synthesizes, so a
 // Creator child gets settings_get/settings_set even when the registry does not
-// hold concrete instances. The PTC batch tool is deliberately root-only: it
-// resolves nested calls against the registry instead of the child's restricted
-// set, so delegating it would let a child reach orchestration tools the filter
-// hides.
+// hold concrete instances.
 func (a *Agent) subagentToolNames(mode string) []string {
 	allowed := make(map[string]bool, len(a.subagentTools))
 	for _, name := range a.subagentTools {
@@ -292,9 +282,6 @@ func (a *Agent) subagentToolNames(mode string) []string {
 	names := make([]string, 0, len(allowed))
 	for _, t := range a.effectiveTools(mode) {
 		name := t.Name()
-		if name == ptcToolName {
-			continue
-		}
 		if len(allowed) > 0 {
 			if allowed[name] {
 				names = append(names, name)
@@ -342,9 +329,9 @@ func (a *Agent) bindSubagentRunners() {
 }
 
 // ApprovalGateBinder is implemented by tools that enforce approval themselves
-// on nested calls (the PTC batch tool). New hands them the same Gate the root
+// on nested calls. New hands them the same Gate the root
 // topology uses, so an inner call cannot skip approval just because the outer
-// "ptc" call was allowed.
+// outer call was allowed.
 type ApprovalGateBinder interface {
 	SetApprovalGate(Gate)
 }
@@ -363,9 +350,9 @@ func (a *Agent) bindApprovalGates() {
 }
 
 // ToolReviewBinder is implemented by tools that enforce automatic review
-// themselves on nested calls (the PTC batch tool). New hands them the same
+// themselves on nested calls. New hands them the same
 // reviewer the root topology uses, so an inner mutating call cannot skip review
-// just because the outer "ptc" call was allowed.
+// just because the outer call was allowed.
 type ToolReviewBinder interface {
 	SetToolReviewer(ToolReviewer)
 }

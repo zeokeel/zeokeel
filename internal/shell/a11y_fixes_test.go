@@ -128,7 +128,7 @@ func TestSidebarMenusKeyboardReachable(t *testing.T) {
 			t.Fatalf("click mode chip: %v", err)
 		}
 		tt.Frame()
-		if seen := focusedDuringTab(tt, []string{"PTC mode"}, 300); !seen["PTC mode"] {
+		if seen := focusedDuringTab(tt, []string{"Minimal mode"}, 300); !seen["Minimal mode"] {
 			t.Fatal("agent mode options are not keyboard focusable")
 		}
 	})

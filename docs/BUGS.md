@@ -18,7 +18,7 @@
 | 团队 | RT-05 | P1 | Agent Teams 成员无 turnContext，gated 工具失败 | ✅ DONE | `WithTurnApprovalFrom` 审批上下文回退 + agentteam spawnCtx 透传；8 测试；父回合结束 fail-closed |
 | 可靠性 | RT-06 | P1 | 模型流 60s 硬超时 | ✅ DONE | 默认无整体超时；`provider.timeout_seconds`（0=不限）、`provider.stream_idle_timeout_seconds`（默认 300s）；见 known-limitations §5 |
 | 功能 | FP-01 | P1 | workflow 非 JS 编排引擎（固定 JSON 步骤） | ✅ DONE（JSON 范围） | wave2：workflow 支持 JSON parallel/pipeline（`internal/tools/workflow.go`；parallel 组展开/依赖）；完整 JS/Node 引擎 ⏸（§3 纯 Go 约束） |
-| 功能 | FP-02 | P1 | PTC 只是工具批处理（无代码运行时） | ⏸ DEFERRED | 产品边界+纯 Go 约束；见 known-limitations §5 |
+| 功能 | FP-02 | P1 | PTC 只是工具批处理（无代码运行时） | ❌ NOT PLANNED（产品决定明确不做） | 2026-11-06 用户决策：**PTC 代码运行时明确不做**，PTC 模式/入口同批从代码与 UI 删除（不再作为缺口/后续项跟踪）；见 known-limitations §2.1 |
 | 功能 | FP-03 | P1 | subagent 仅同步（无 childId/异步/续谈） | ✅ DONE（异步） | wave2：`subagent` 支持 `async:true` 后台子代理，返回 `{kind:"subagent_async",child_id,...}`（`internal/tools/subagent.go:59`）；续谈/fork 仍缺 |
 | 功能 | FP-04 | P1 | Goal 半成品（无 revision/phase/pause，无 `/goal`） | ✅ DONE（模型+API；UI 命令待前端） | wave2：`GoalPhase`（active/paused/blocked）+ revision/暂停语义（`internal/tools/goal.go`）；`/goal` 命令行入口待前端 |
 | 功能 | FP-05 | P1 | 无 workspace changes / 每回合 diff | 🟡 PARTIAL（后端已交付） | wave2：`internal/workspacechanges` 快照/差异 + controller 在回合结束发 `state.WorkspaceChanges`（`controller.go:1557`）；UI 渲染待前端 |
@@ -44,7 +44,7 @@
 | 产品 | PD-12 | P2 | 桌面生命周期（关闭行为/自启/托盘动作/全局快捷键） | 🟡 PARTIAL | 关闭行为/自启三平台/托盘 Show-New-Settings-Quit 已实现并提交；全局快捷键 mygo 无 API → DEFERRED（known-limitations） |
 | 工程 | AR-01 | P1 | 发布版零崩溃诊断（无 recover/日志，Windows 丢 stderr） | ✅ DONE | `cmd/zeokeel/{main,logging}.go`：`<DataDir>/logs/app-YYYYMMDD.log`（0600、8MiB→`.1` 轮转、跨天换文件）+ MultiWriter(stderr,file) + `debug.SetCrashOutput` + recover 写 `crash-*.txt`；`go test ./cmd/...`（14 个用例）；**独立验证 CONFIRMED**（FIX-VERIFY-CORE2：Xvfb 日志落盘/崩溃机制单测） |
 | 工程 | AR-02 | P1 | CI 只是本地脚本；race/coverage 覆盖不全、flaky 重跑 | ✅ DONE | `.github/workflows/ci.yml`（gate 跑 `scripts/ci.sh`；shell race 独立 job `-timeout 20m`）；`ci.sh` 写 `.cache/coverage.out` 并把 app 纳入 race；`scripts/evolve/gates.sh` 的 flaky 重跑改为 exit 1 不掩盖；**独立验证 CONFIRMED**（FIX-VERIFY-CORE2 §0：干净副本机制正确，另发现需修 BUILD-02） |
-| 工程 | AR-03 | P1 | 发布链路缺失（仅 Windows zip/无签名/无更新/版本未注入） | 🟡 PARTIAL | ✅ 版本注入 + `-s -w`（-31.8%）+ linux/mac 打包（**独立验证 CONFIRMED**，FIX-VERIFY-CORE2：`--version`/package-linux）；签名/公证/自动更新 ⏸（需证书/发布账号） |
+| 工程 | AR-03 | P1 | 发布链路缺失（仅 Windows zip/无签名/无更新/版本未注入） | 🟡 PARTIAL | ✅ 版本注入 + `-s -w`（-31.8%）+ linux/mac 打包（**独立验证 CONFIRMED**，FIX-VERIFY-CORE2：`--version`/package-linux）；签名/公证/自动更新 ⏸（需证书/发布账号）；Windows 安装器计划（Inno/NSIS 草案，未构建）见 `packaging/windows/INSTALLER-PLAN.md`；自动更新引擎 `internal/updater` 本轮仅 TDD RED（`ErrNotImplemented`，测试见 `.cache/fix-platform/updater-red.txt`） |
 
 ## 2. P2/P3 结构性债务（本轮修复中 / 延期）
 
@@ -69,11 +69,13 @@
 | BUILD-01 | P1 | `.gitignore` 的 `credentials*` 规则把 `internal/importer/credentials.go`（已跟踪构建输入）忽略，wave1 提交在干净 checkout 下无法 `go build`（verifier-core 发现） | ✅ DONE | Lead 改名 `internal/importer/import_credentials.go` 并提交 `0bbf051`；`.gitignore` 收紧为 `.credentials*`/`/credentials*`；新增 `scripts/check-clean-checkout.sh`（`git archive HEAD` 到临时目录后 `go build ./...`）+ CI gate job 步骤 + `make clean-check`；本文件记录该类问题。验证：`sh scripts/check-clean-checkout.sh` → PASS |
 | BUILD-02 | P1 | 干净 HEAD 曾 `ci.sh --fast` 红：wave1 断言与 skills live re-scan 冲突 | ✅ DONE | `modes_test.go` 修正随 wave2 提交；`git archive 84c5b1f` 干净副本 `sh scripts/ci.sh --fast` = **PASS**（22 包全绿，session 252s/shell 68s/nocgo 四目标）；CI 已加 `check-clean-checkout.sh` 守卫 |
 | Preview | P3 | 视觉金标与 wave1/wave2 UI 漂移 | ✅ DONE（22 张） | 2026-11-05 重生成 22 张（当前代码，含设置窗 **900×840**、About 单一版本来源）+ `TestVisualRegression` PASS（14 屏/1.9s）；`identify` 校验尺寸；命令见 `docs/design/preview/README.md` 与 `make previews`/`make visual-check` |
+| Voice | ❌ NOT PLANNED | 语音输入（DSH 实验能力） | 产品决定明确不做（2026-11-06）；UI/入口不提供，不是能力缺口 | known-limitations §2.1 |
+| Updater | 🟡 RED（TDD，未实现） | 自动更新（check/download/sha256/install-on-restart） | `internal/updater/` 先落 RED 契约（首轮不实现）：`go test -tags tdd_red ./internal/updater` **11/11 FAIL（ErrNotImplemented）**；默认 `go test ./...` 保持绿（build tag `tdd_red`）。安装器计划/草案见 `packaging/windows/INSTALLER-PLAN.md`（+ `installer.iss`/`zeokeel.nsi`，未构建） | `.cache/fix-platform/updater-red.txt` |
 | FP-18 | P2 | headless CLI 缺失 | ✅ DONE | `internal/app/headless.go` + cmd 接线；`--permission` 失效 P1 已由独立验证发现并修复（read-only/full 回归） |
 
 ## 3. 延期项（DEFERRED，本轮不做；理由见 FIX-PLAN §5）
 
-- workflow 完整 JS 引擎、PTC Node/TS 运行时（与纯 Go / no-cgo 约束冲突）。
+- workflow 完整 JS 引擎（与纯 Go / no-cgo 约束冲突）。**PTC 运行时不在延期项**：已改为明确不做（FP-02）。
 - ACP/SDK 完整协议、三平台代码签名/公证/自动更新基础设施（需证书与发布账号）。
 - `internal/shell` 整体分层重构、schema v2 大迁移、JSONL 真源重写（高风险，分批）。
 - 真机 IME/屏幕阅读器/DPI/通知矩阵（无真机环境）。

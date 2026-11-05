@@ -44,8 +44,7 @@ func registryHas(bundle *AgentBundle, name string) bool {
 // TestDefaultApprovalGatesSandboxEscapingTools covers the converged
 // Workspace Write defaults: only tools that can act outside the workspace
 // sandbox (or have side effects outside it) require approval. Workspace-
-// confined file writes are sandboxed to the root and no longer ask; the ptc
-// batch no longer asks because its nested calls are gated one by one.
+// confined file writes are sandboxed to the root and no longer ask.
 func TestDefaultApprovalGatesSandboxEscapingTools(t *testing.T) {
 	st, _ := newToolStore(t)
 	patterns := approvalPatternsForPermission(st, session.PermissionWorkspace)
@@ -66,7 +65,7 @@ func TestDefaultApprovalGatesSandboxEscapingTools(t *testing.T) {
 	for _, name := range []string{
 		"read_file", "glob", "grep", "todo", "goal",
 		"terminal_read", "terminal_list", "job_output", "job_list",
-		"write_file", "edit_file", "str_replace_editor", "ptc",
+		"write_file", "edit_file", "str_replace_editor",
 	} {
 		if toolNeedsApprovalWithArgs(name, nil, patterns) {
 			t.Errorf("tool %q unexpectedly requires approval", name)

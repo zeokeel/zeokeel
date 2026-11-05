@@ -126,17 +126,17 @@ func TestModePersistRebuild(t *testing.T) {
 		t.Fatalf("new session Agent.Mode() = %q, want standard", got)
 	}
 	secondKey := session.SessionModeKey(second)
-	if err := h.ctrl.SetMode(runtime.ModePTC); err != nil {
-		t.Fatalf("SetMode(ptc): %v", err)
+	if err := h.ctrl.SetMode(runtime.ModeCreator); err != nil {
+		t.Fatalf("SetMode(creator): %v", err)
 	}
-	if stored, err := h.store.GetSetting(secondKey); err != nil || stored != runtime.ModePTC {
-		t.Fatalf("second session stored mode = %q, %v; want ptc", stored, err)
+	if stored, err := h.store.GetSetting(secondKey); err != nil || stored != runtime.ModeCreator {
+		t.Fatalf("second session stored mode = %q, %v; want creator", stored, err)
 	}
 	if stored, err := h.store.GetSetting(firstKey); err != nil || stored != runtime.ModeMinimal {
 		t.Fatalf("first session stored mode changed to %q, %v; want minimal", stored, err)
 	}
-	if !sessionHasTool(h.agent.ToolNames(), "ptc") {
-		t.Fatalf("PTC session tools = %v, want ptc", h.agent.ToolNames())
+	if !sessionHasTool(h.agent.ToolNames(), "settings_set") {
+		t.Fatalf("Creator session tools = %v, want the Creator settings pair", h.agent.ToolNames())
 	}
 
 	// Reopening the first session restores Minimal and rebuilds its tool set.
@@ -145,18 +145,18 @@ func TestModePersistRebuild(t *testing.T) {
 	}
 	assertCurrent("reopened minimal", firstKey, runtime.ModeMinimal, minimalTools)
 
-	// Reopening the second session restores PTC and its ptc tool.
+	// Reopening the second session restores Creator and its settings tools.
 	if _, err := h.ctrl.OpenSession(ctx, second); err != nil {
 		t.Fatalf("OpenSession(second): %v", err)
 	}
-	if got := h.ctrl.Mode(); got != runtime.ModePTC {
-		t.Fatalf("reopened second Ctrl.Mode() = %q, want ptc", got)
+	if got := h.ctrl.Mode(); got != runtime.ModeCreator {
+		t.Fatalf("reopened second Ctrl.Mode() = %q, want creator", got)
 	}
-	if got := h.agent.Mode(); got != runtime.ModePTC {
-		t.Fatalf("reopened second Agent.Mode() = %q, want ptc", got)
+	if got := h.agent.Mode(); got != runtime.ModeCreator {
+		t.Fatalf("reopened second Agent.Mode() = %q, want creator", got)
 	}
-	if !sessionHasTool(h.agent.ToolNames(), "ptc") {
-		t.Fatalf("reopened PTC tools = %v, want ptc", h.agent.ToolNames())
+	if !sessionHasTool(h.agent.ToolNames(), "settings_set") {
+		t.Fatalf("reopened Creator tools = %v, want the settings pair", h.agent.ToolNames())
 	}
 }
 
@@ -178,16 +178,16 @@ func TestSubmitAppliesTargetSessionMode(t *testing.T) {
 	ctx := context.Background()
 
 	standardID := h.sessionID
-	ptcID, err := h.ctrl.CreateSession(ctx, "ptc")
+	creatorID, err := h.ctrl.CreateSession(ctx, "creator")
 	if err != nil {
 		t.Fatalf("CreateSession: %v", err)
 	}
-	if err := h.ctrl.SetMode(runtime.ModePTC); err != nil {
-		t.Fatalf("SetMode(ptc): %v", err)
+	if err := h.ctrl.SetMode(runtime.ModeCreator); err != nil {
+		t.Fatalf("SetMode(creator): %v", err)
 	}
 
 	// Look at the Standard session again so the shared agent is Standard while
-	// the Submit targets the PTC session.
+	// the Submit targets the Creator session.
 	if _, err := h.ctrl.OpenSession(ctx, standardID); err != nil {
 		t.Fatalf("OpenSession(standard): %v", err)
 	}
@@ -198,23 +198,23 @@ func TestSubmitAppliesTargetSessionMode(t *testing.T) {
 		t.Fatalf("Agent.Mode() before submit = %q, want standard", got)
 	}
 
-	if err := h.ctrl.Submit(ctx, ptcID, "hello"); err != nil {
-		t.Fatalf("Submit(ptc): %v", err)
+	if err := h.ctrl.Submit(ctx, creatorID, "hello"); err != nil {
+		t.Fatalf("Submit(creator): %v", err)
 	}
 	// Submit returns only after the mode switch, so the chip, the runtime and
 	// the model call cannot disagree.
-	if got := h.ctrl.Mode(); got != runtime.ModePTC {
-		t.Fatalf("Ctrl.Mode() after submit = %q, want ptc", got)
+	if got := h.ctrl.Mode(); got != runtime.ModeCreator {
+		t.Fatalf("Ctrl.Mode() after submit = %q, want creator", got)
 	}
-	if got := h.agent.Mode(); got != runtime.ModePTC {
-		t.Fatalf("Agent.Mode() after submit = %q, want ptc", got)
+	if got := h.agent.Mode(); got != runtime.ModeCreator {
+		t.Fatalf("Agent.Mode() after submit = %q, want creator", got)
 	}
 
 	waitControllerIdle(t, h.ctrl)
-	if got := h.ctrl.CurrentSessionID(); got != ptcID {
-		t.Fatalf("current session after submit = %q, want %q", got, ptcID)
+	if got := h.ctrl.CurrentSessionID(); got != creatorID {
+		t.Fatalf("current session after submit = %q, want %q", got, creatorID)
 	}
-	testRequireModeToolSet(t, "first model call", provider.firstTools(), []string{"bash", "read_file", "ptc"})
+	testRequireModeToolSet(t, "first model call", provider.firstTools(), []string{"bash", "read_file", "settings_get", "settings_set"})
 }
 
 // blockingBashProvider holds the first model call of a turn until the test
