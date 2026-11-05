@@ -244,6 +244,10 @@ type turn struct {
 	// per-turn TurnEnd marker and the transcript anchor use it. Set before the
 	// drain goroutine starts, read only by finishTurn afterwards.
 	userMsgID string
+	// errText is the first failure message the turn received. Owned by the
+	// drain goroutine (applyLocked/finishTurn), like the other unexported
+	// per-turn fields above.
+	errText string
 }
 
 type draft struct {
@@ -1165,6 +1169,9 @@ func (c *Controller) applyLocked(t *turn, ev state.Event) (*state.Snapshot, *sta
 		}
 	case state.Error:
 		t.failed.Store(true)
+		if t.errText == "" && e.Err != nil {
+			t.errText = e.Err.Error()
+		}
 	}
 
 	// Stop is an optimistic state change: late events (for example tokens
@@ -1550,6 +1557,7 @@ func (c *Controller) finishTurn(t *turn) {
 			Failed:    t.failed.Load() && !stopped,
 			Stopped:   stopped,
 			HasOutput: len(t.order) > 0 || t.toolStarted,
+			Error:     t.errText,
 		})
 	}
 
@@ -1724,6 +1732,10 @@ type TurnOutcome struct {
 	// assistant text/reasoning or a tool call. A turn stopped before anything
 	// streamed has none.
 	HasOutput bool
+	// Error is the turn's failure text (the first state.Error message), empty
+	// for completed or stopped turns. Observers that persist an execution
+	// history (automation runs) record it for diagnostics.
+	Error string
 }
 
 // TurnFinishedHook observes a terminal turn of any session.

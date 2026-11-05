@@ -183,6 +183,15 @@ type App struct {
 	// uses. Tests inject a fake so no desktop dialog is needed; nil falls back
 	// to mygo.Dialog.
 	PickFiles func() ([]string, error)
+	// SaveFileDialog is the general save-dialog seam the Diagnostics and Data
+	// pages use for their zip exports. Tests inject their own chooser; the
+	// desktop host wires the native dialog. When it is nil the shell falls
+	// back to SaveSessionLog and then to the suggested path.
+	SaveFileDialog func(title, suggestedPath string) (string, error)
+
+	// closeBehaviorOpen is the Desktop page's Close-behavior selector state.
+	closeBehaviorOpen bool
+
 	// SaveSessionLog is the save-dialog seam the session-header download uses
 	// to choose the JSONL export path. Tests inject a fake; nil falls back to a
 	// deterministic file under the workspace root.

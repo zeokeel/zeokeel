@@ -1,7 +1,7 @@
 GO ?= go
 export CGO_ENABLED := 0
 
-.PHONY: build build-all build-check windows package-windows package-linux package-macos icon test vet fmt check nocgo run clean version
+.PHONY: build build-all build-check windows package-windows package-linux package-macos icon test vet fmt check nocgo clean-check run clean version
 
 # Every build product lands in dist/ with a stable per-platform name; see
 # scripts/build.sh. Nothing is written to the repository root.
@@ -51,6 +51,10 @@ check: fmt vet test
 
 nocgo:
 	sh scripts/check-nocgo.sh
+
+# Verify the committed tree (not the working tree) builds without ignored files.
+clean-check:
+	sh scripts/check-clean-checkout.sh
 
 run:
 	$(GO) run ./cmd/zeokeel

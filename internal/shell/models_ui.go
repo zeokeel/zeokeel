@@ -133,6 +133,15 @@ type shellUIState struct {
 	// railWorkspaceOpen is the collapsed rail's per-workspace session flyout
 	// (one bool per workspace id, so each workspace icon owns its popover).
 	railWorkspaceOpen map[string]*bool
+
+	// textDrafts are the in-progress values of the settings text rows (the
+	// proxy URL today), keyed by settings key, so typing does not rebuild the
+	// value from the store on every frame.
+	textDrafts map[string]string
+	// confirmOpen/confirmKind are the shared destructive-confirmation dialog
+	// the Data & privacy page opens (reset settings, delete conversations).
+	confirmOpen bool
+	confirmKind string
 }
 
 // shellUIStates maps each App to its shell UI state.

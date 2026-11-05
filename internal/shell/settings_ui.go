@@ -370,6 +370,24 @@ func (a *App) settingsNavLive(c *ui.Context, t *design.Tokens, height float32) {
 				if a.currentSettings().ShowCodingView {
 					a.settingsNavCellLive(c, t, a.T("settings.agent_presets"), settingsTabAgentPresets, tab, settingsIconPerson)
 				}
+				// Wave 2 pages: notifications, data & privacy, diagnostics,
+				// network, updates and desktop lifecycle. They are live-only:
+				// each reads and writes the controller's store.
+				if a.Ctrl != nil {
+					for _, page := range []struct {
+						label string
+						tab   settingsTab
+					}{
+						{a.menuText("Notifications", "通知"), settingsTabNotifications},
+						{a.menuText("Data & privacy", "数据与隐私"), settingsTabDataPrivacy},
+						{a.menuText("Diagnostics", "诊断"), settingsTabDiagnostics},
+						{a.menuText("Network", "网络"), settingsTabNetwork},
+						{a.menuText("Desktop", "桌面"), settingsTabDesktop},
+						{a.menuText("Updates", "更新"), settingsTabUpdates},
+					} {
+						a.settingsNavCellLive(c, t, page.label, page.tab, tab, a.settingsTabIcon(page.tab))
+					}
+				}
 				if a.Ctrl != nil {
 					a.settingsNavCellLive(c, t, a.T("menu.about"), settingsTabAbout, tab, pluginIconInfo)
 				}
@@ -413,6 +431,18 @@ func (a *App) settingsBodyLive(c *ui.Context, t *design.Tokens) {
 					} else {
 						a.settingsRowsLive(c, t)
 					}
+				case settingsTabNotifications:
+					a.notificationsSettingsPage(c, t)
+				case settingsTabDataPrivacy:
+					a.dataPrivacySettingsPage(c, t)
+				case settingsTabDiagnostics:
+					a.diagnosticsSettingsPage(c, t)
+				case settingsTabNetwork:
+					a.networkSettingsPage(c, t)
+				case settingsTabDesktop:
+					a.desktopSettingsPage(c, t)
+				case settingsTabUpdates:
+					a.updatesSettingsPage(c, t)
 				case settingsTabAbout:
 					a.aboutSettingsPage(c, t)
 				default:

@@ -44,7 +44,7 @@
 | PD-02 | 添加模型 Provider 预设（DeepSeek/OpenAI/Ollama/自定义）+ 异步「测试连接」（GET /models，12s，可注入） | `shell/models_ui.go`；2 测试 |
 | PD-09 | 失败回合产品化卡片：错误分类（auth/限流/网络/上下文/模型/通用）+ 动作（打开设置/重试）+ 技术细节折叠 | `shell/session_errors.go`；4 测试 |
 | PD-11/PD-17/PD-18/UX-05/UX-09 | Home 返回入口（侧栏+rail）、工作区 root 校验（存在/目录/可写/绝对路径 + 创建目录）、模型删除二次确认、工作区对话框可见 label、侧栏空态 | `shell/{chrome,workspaces,models_ui}.go`；6 测试 |
-| UX-04/UX-06/UX-08/UX-10/UX-11/UX-13/PD-08 | popover 生命周期、设置窗口高度 840、rail 会话 flyout、@ 会话行本地化、权限 chip tooltip、Start 页整治、插件页统一（6 项+实验项标注） | shell 多文件；10+ 测试 |
+| UX-04/UX-06/UX-08/UX-10/UX-11/UX-13/PD-08 | popover 生命周期（**wave2 复核 PARTIAL：独立设置窗打开后主窗口未重绘，popover 残留可点，修复中**）、设置窗口高度 840、rail 会话 flyout、@ 会话行本地化、权限 chip tooltip、Start 页整治、插件页统一（6 项+实验项标注） | shell 多文件；10+ 测试 |
 | PD-04 | 「迁移器」文案降级为「同类替代+迁移路线图」；`internal/importer` 新包（DSH session JSONL/zstd + credentials 键名 → store），dry-run/失败隔离，10 测试 | `internal/importer/`、README/STATUS/PLAN；CLI/UI 接线待下轮 |
 
 ## 4. 工程 / 发布 / 文档

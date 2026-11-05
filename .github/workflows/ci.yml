@@ -28,6 +28,11 @@ jobs:
         with:
           go-version-file: go.mod
           cache: true
+      # BUILD-01 guard: the committed tree (git index, no ignored files) must
+      # build. This caught a source file that .gitignore had hidden from the
+      # commit; a normal working-tree build cannot see that class of bug.
+      - name: clean-checkout build (gitignored-source guard)
+        run: sh scripts/check-clean-checkout.sh
       - name: run scripts/ci.sh
         run: sh scripts/ci.sh
       - name: coverage report

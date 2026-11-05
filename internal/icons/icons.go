@@ -71,6 +71,11 @@ var (
 	Data          = func() *ui.SVG { return get("data") }
 	Reload        = func() *ui.SVG { return get("reload") }
 	AlertTriangle = func() *ui.SVG { return get("alert-triangle") }
+	Bell          = func() *ui.SVG { return get("bell") }
+	Shield        = func() *ui.SVG { return get("shield") }
+	Activity      = func() *ui.SVG { return get("activity") }
+	Globe         = func() *ui.SVG { return get("globe") }
+	Download      = func() *ui.SVG { return get("download") }
 )
 
 // Semantic aliases keep call sites readable where the DSH name differs from

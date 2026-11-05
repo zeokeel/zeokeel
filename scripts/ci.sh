@@ -3,7 +3,9 @@
 # Usage: sh scripts/ci.sh [--fast]
 #
 # GitHub Actions runs this script in .github/workflows/ci.yml (job "gate"), so
-# local and CI results are the same command. `-race ./internal/shell` costs
+# local and CI results are the same command. That job also runs
+# `scripts/check-clean-checkout.sh` BEFORE this script: it builds `git archive
+# HEAD` so a tracked-but-gitignored source file (BUILD-01) fails the gate. `-race ./internal/shell` costs
 # ~9 minutes and runs as a separate workflow job instead (AR-02).
 # Coverage is written to .cache/coverage.out (uploaded as a CI artifact); it is
 # recorded, not gated on a number yet (see docs/BUGS.md AR-17).

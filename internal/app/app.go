@@ -75,6 +75,15 @@ type app struct {
 	cleanup   func() error
 	scheduler *automation.Scheduler
 
+	// notifier is the desktop notification dispatcher, set once services are
+	// ready. observeTurnFinished fans terminal turns out to it and to the
+	// automation run history (PD-06).
+	notifier *notificationDispatcher
+	// automationMu guards automationRuns: session id -> automation run id for
+	// fired automations whose turn has not finished yet.
+	automationMu   sync.Mutex
+	automationRuns map[string]string
+
 	// buildMu serializes agent rebuilds; bundle is the current one, closed
 	// when a rebuild replaces it.
 	buildMu sync.Mutex
@@ -106,6 +115,9 @@ type app struct {
 
 // Run starts the app and blocks until it quits.
 func Run() error {
+	// Publish the build metadata before anything renders: the About and
+	// Diagnostics pages read internal/shell's copy of it.
+	publishBuildInfo()
 	a := &app{}
 	if err := a.acquire(); err != nil {
 		return err
@@ -191,7 +203,10 @@ func (a *app) run() error {
 			notifier := newNotificationDispatcher(newSystemNotifier(), a.notificationActive, a.uiLanguage, a.focusSession)
 			notifier.useTurnFinishedHook()
 			notifier.useApprovalHook()
-			a.services.SetOnTurnFinished(notifier.observeTurnFinished)
+			a.notifier = notifier
+			// One controller hook fans out to every turn observer: desktop
+			// notifications and the automation run history.
+			a.services.SetOnTurnFinished(a.observeTurnFinished)
 			a.services.SetOnApprovalRequested(notifier.observeApprovalRequested)
 			a.services.OnUpdate(func(snap *state.Snapshot) {
 				shellApp.SetSnapshot(snap)
@@ -584,15 +599,7 @@ func (a *app) startAutomation(ctrl *session.Controller) {
 		return
 	}
 	runTask := func(task store.Automation) {
-		ctx := context.Background()
-		id, err := ctrl.CreateSession(ctx, task.Title)
-		if err != nil {
-			log.Printf("zeokeel: automation %q: create session: %v", task.Title, err)
-			return
-		}
-		if err := ctrl.Submit(ctx, id, task.Prompt); err != nil {
-			log.Printf("zeokeel: automation %q: submit: %v", task.Title, err)
-		}
+		a.runAutomationTask(ctrl, task)
 	}
 	ctrl.RunNow = func(id string) {
 		task, err := ctrl.Automations().Get(id)

@@ -30,6 +30,11 @@ func allIcons() map[string]*ui.SVG {
 		"Data":          Data(),
 		"Reload":        Reload(),
 		"AlertTriangle": AlertTriangle(),
+		"Bell":          Bell(),
+		"Shield":        Shield(),
+		"Activity":      Activity(),
+		"Globe":         Globe(),
+		"Download":      Download(),
 	}
 }
 
