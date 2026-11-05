@@ -314,19 +314,57 @@ func (a *App) sendHomeDraft(c *ui.Context) {
 	if strings.TrimSpace(a.draft) == "" {
 		return
 	}
+	id, ok := a.newHomeSession(c)
+	if !ok {
+		return
+	}
+	text := strings.TrimSpace(a.draft)
+	if err := a.Ctrl.Submit(context.Background(), id, text); err != nil {
+		// Keep the unsent text on the new session's own draft rather than
+		// dropping it (or letting the Home buffer follow into the session).
+		a.saveSessionDraft(id, a.draft)
+		if errors.Is(err, session.ErrNoAgent) {
+			c.Toast(a.menuText("No agent configured. Add a model in Settings > Models.",
+				"尚未配置 Agent。请在 设置 > 模型 中添加模型。"))
+		} else {
+			c.Toast(fmt.Sprintf(a.menuText("Could not send: %v", "发送失败：%v"), err))
+		}
+		return
+	}
+	a.draft = ""
+	a.homeDraft = ""
+}
+
+// newHomeSession creates and opens the session the Home composer sends into:
+// the current workspace, the Home-staged agent preset/access mode/model, and
+// the staged attachments. It returns the new session id on success; failures
+// are reported through c (when it is available) and leave the Home draft and
+// its chips intact. The Session screen is only entered after every step
+// succeeds, so a failed /plan or Home send cannot land on a half-built session.
+func (a *App) newHomeSession(c *ui.Context) (string, bool) {
+	if a.Ctrl == nil {
+		return "", false
+	}
+	toast := func(msg string) {
+		if c != nil {
+			c.Toast(msg)
+		}
+	}
 	ctx := context.Background()
 	ws, ok, err := a.Ctrl.CurrentWorkspace(ctx)
 	if err != nil || !ok || strings.TrimSpace(ws.ID) == "" {
 		a.beginAddWorkspace()
-		return
+		return "", false
 	}
 	id, err := a.Ctrl.CreateSessionInWorkspace(ctx, ws.ID, a.T("session.new_session"))
 	if err != nil {
-		return
+		toast(fmt.Sprintf(a.menuText("Could not create a session: %v", "无法创建会话：%v"), err))
+		return "", false
 	}
 	snap, err := a.Ctrl.OpenSession(ctx, id)
 	if err != nil {
-		return
+		toast(fmt.Sprintf(a.menuText("Could not open the new session: %v", "无法打开新会话：%v"), err))
+		return "", false
 	}
 	a.SetSnapshot(snap)
 	// Apply the Home composer's staged preset, access mode and model to the
@@ -344,26 +382,11 @@ func (a *App) sendHomeDraft(c *ui.Context) {
 		_ = a.Ctrl.DeleteSession(ctx, id)
 		a.SetSnapshot(nil)
 		a.Screen = Home
-		c.Toast(fmt.Sprintf(a.menuText("Could not attach file: %v",
-			"无法添加附件：%v"), err))
-		return
+		toast(fmt.Sprintf(a.menuText("Could not attach file: %v", "无法添加附件：%v"), err))
+		return "", false
 	}
 	a.Screen = Session
-	text := strings.TrimSpace(a.draft)
-	if err := a.Ctrl.Submit(ctx, id, text); err != nil {
-		// Keep the unsent text on the new session's own draft rather than
-		// dropping it (or letting the Home buffer follow into the session).
-		a.saveSessionDraft(id, a.draft)
-		if errors.Is(err, session.ErrNoAgent) {
-			c.Toast(a.menuText("No agent configured. Add a model in Settings > Models.",
-				"尚未配置 Agent。请在 设置 > 模型 中添加模型。"))
-		} else {
-			c.Toast(fmt.Sprintf(a.menuText("Could not send: %v", "发送失败：%v"), err))
-		}
-		return
-	}
-	a.draft = ""
-	a.homeDraft = ""
+	return id, true
 }
 
 // homeHeader is the top strip of the main area: empty except for the control

@@ -109,6 +109,79 @@ func TestSessionSidePanelsKeepTranscriptVisible(t *testing.T) {
 	}
 }
 
+// TestSessionSidePanelsRunToBottom covers the Deep-mode layout the user
+// reported: the Todo/Team columns ended above the composer, which then painted
+// across the whole content width and left a blank gap at the bottom right. The
+// composer now stays inside the main column beside the panels, and the panels
+// dock for the row's whole height like the right sidebar.
+func TestSessionSidePanelsRunToBottom(t *testing.T) {
+	h := newLiveApp(t, &shellProvider{})
+	h.app.Language = LangEN
+	h.app.Screen = Session
+	seedDeepSession(t, h)
+
+	const w, windowH = 1600, 1000
+	tt := ui.NewTester(h.app.View, w, windowH)
+	tt.Frame()
+
+	todos, ok := tt.Find("Todos")
+	if !ok {
+		t.Fatalf("Todos panel missing: %v", tt.Texts())
+	}
+	team, ok := tt.Find("Team")
+	if !ok {
+		t.Fatalf("Team panel missing: %v", tt.Texts())
+	}
+	composer, ok := tt.Find("Session composer")
+	if !ok {
+		t.Fatalf("Session composer missing: %v", tt.Texts())
+	}
+	if composer.W <= 0 || composer.X < 280 {
+		t.Fatalf("composer rect = %+v, want a positive card inside the main column", composer)
+	}
+	// The composer belongs to the main column: its right edge stops before
+	// both docked panels instead of painting under their columns.
+	if composer.X+composer.W > team.X {
+		t.Fatalf("composer %+v crosses the Team panel at x=%v", composer, team.X)
+	}
+	if composer.X+composer.W > todos.X {
+		t.Fatalf("composer %+v crosses the Todos panel at x=%v", composer, todos.X)
+	}
+	usage, ok := tt.Find("Session usage")
+	if !ok {
+		t.Fatalf("usage footer missing: %v", tt.Texts())
+	}
+	if usage.X+usage.W > team.X {
+		t.Fatalf("usage %+v crosses the Team panel at x=%v", usage, team.X)
+	}
+
+	// The panels are painted down to the window's last row: the same column
+	// inside each panel shows its background at mid-height and at the bottom,
+	// while the main column's bottom is the page background.
+	img := tt.Image()
+	pixel := func(x, y int) [4]uint32 {
+		r, g, b, a := img.At(x, y).RGBA()
+		return [4]uint32{r, g, b, a}
+	}
+	panelW := int(sessionSidePanelW)
+	for _, tc := range []struct {
+		name string
+		x    int
+	}{
+		{"Todos", w - 8},
+		{"Team", w - 2*panelW + 8},
+	} {
+		mid := pixel(tc.x, windowH/2)
+		bottom := pixel(tc.x, windowH-8)
+		if mid != bottom {
+			t.Fatalf("%s panel does not reach the window bottom: mid %v bottom %v", tc.name, mid, bottom)
+		}
+	}
+	if panelBottom, mainBottom := pixel(w-8, windowH-8), pixel(300, windowH-8); panelBottom == mainBottom {
+		t.Fatalf("bottom-right pixel %v is the page background: the panels do not dock to the bottom", panelBottom)
+	}
+}
+
 // TestAutomationActionsRemainUsableWithDockedPanel covers the task row beside
 // the docked right sidebar: the page column is 304px, which used to shrink
 // Delete and Edit to W=0 and Run now to 47px. The responsive row now wraps its

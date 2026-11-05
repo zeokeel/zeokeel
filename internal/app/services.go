@@ -31,14 +31,29 @@ import (
 // DefaultInstruction is the agent's system prompt until prompts are editable.
 const DefaultInstruction = `You are ZeoKeel, a helpful desktop AI agent. Answer concisely and accurately. Use tools when they help.`
 
-// defaultApprovalTools is the setting's fallback: the mutating file/shell
-// tools plus outbound network tools. Entries are prefix patterns; a trailing
-// "*" is optional ("mcp__*" and "mcp__" are equivalent). The list is read when
-// the agent is built, so a change applies to the next build. Read-only
-// terminal/job operations are deliberately absent: the prompt tells the model
-// to poll job_output and terminal_read, and asking for approval on every poll
-// made normal work unusable.
-const defaultApprovalTools = "bash,write_file,edit_file,str_replace_editor,terminal_open,terminal_send,terminal_signal,terminal_close,job_start,job_kill,ptc,pwsh,enter_worktree,exit_worktree,web_search,web_fetch,mcp__*"
+// defaultApprovalTools is the setting's fallback for human-approval modes:
+// only the tools that can escape the workspace sandbox (or have side effects
+// outside it) prompt. Entries are prefix patterns; a trailing "*" is optional
+// ("mcp__*" and "mcp__" are equivalent). The list is read when the agent is
+// built, so a change applies to the next build.
+//
+// Workspace-confined file tools (write_file, edit_file, str_replace_editor) are
+// deliberately absent: the workspace sandbox already confines them to the root,
+// so an approval prompt there adds friction without adding a boundary. The
+// "ptc" batch tool is absent too because its nested calls are gated one by one
+// by the same queue; asking for the batch again would be a duplicate prompt.
+// Read-only terminal/job operations are absent because the prompt tells the
+// model to poll job_output and terminal_read.
+const defaultApprovalTools = "bash,pwsh,terminal_open,terminal_send,terminal_signal,terminal_close,job_start,job_kill,enter_worktree,exit_worktree,web_search,web_fetch,mcp__*"
+
+// autoReviewApprovalTools is the Auto review permission's fallback. Auto review
+// is an experimental oversight mode: the model reviewer decides the calls that
+// would otherwise prompt the user. It keeps the wider pre-convergence pattern
+// set (including the sandbox-confined file editors and the ptc batch) so
+// converging the human-approval default above does not silently stop the
+// reviewer from seeing file mutations. Read-only str_replace_editor "view"
+// calls are still exempt, in both sets (see toolNeedsApprovalWithArgs).
+const autoReviewApprovalTools = "bash,write_file,edit_file,str_replace_editor,terminal_open,terminal_send,terminal_signal,terminal_close,job_start,job_kill,ptc,pwsh,enter_worktree,exit_worktree,web_search,web_fetch,mcp__*"
 
 // AgentBundle is the wired agent plus the resources it owns (MCP servers).
 type AgentBundle struct {
@@ -429,6 +444,12 @@ type registryOptions struct {
 	// section and the shell's plan review, not a runtime tool gate, so toggling
 	// it rebuilds neither the registry nor the agent topology.
 	PlanModeFunc func() bool
+	// PlanModeForSession resolves a session's plan mode from the session id the
+	// runtime attaches to a tool call. The exit_plan_mode tool uses it to stay
+	// inert outside plan mode; unlike PlanModeFunc it does not go through the
+	// app's current-session selection, so a background session's turn reads its
+	// own flag (and tests can inject a fixed resolver).
+	PlanModeForSession func(sessionID string) bool
 	// WorkspaceID is the controller's current workspace. When set it scopes
 	// session history tools directly instead of re-deriving the selection
 	// from the store and the filesystem root.
@@ -523,6 +544,10 @@ func registerAllToolsWithOptions(st *store.Store, root string, get func(key, env
 	_ = reg.Register(tools.NewTodoToolWithStore(interactiveState))
 	_ = reg.Register(tools.NewAskUserTool())
 	_ = reg.Register(tools.NewPresentTool())
+	// exit_plan_mode is always registered (a stable tool catalog) but the tool
+	// rejects calls unless the calling session is in plan mode. The shell
+	// renders the plan review card from the tool result; see ExitPlanModeTool.
+	_ = reg.Register(tools.NewExitPlanModeTool(tools.ExitPlanModeConfig{PlanMode: opts.PlanModeForSession}))
 	_ = reg.Register(tools.NewGoalToolWithStore(interactiveState))
 
 	// Agent-mode tools are registered once and exposed by mode routing in the
@@ -740,7 +765,7 @@ func buildAgentWithOptions(st *store.Store, root, instruction string, opts regis
 	if opts.PermissionOverride != "" {
 		permission = opts.PermissionOverride
 	}
-	// Auto review keeps the mutating tool set and the Workspace Write approval
+	// Auto review keeps the mutating tool set and its own (wider) review
 	// patterns, but a model reviewer decides each call that would otherwise
 	// prompt. The reviewer gets its own provider clone with temperature 0 for
 	// deterministic verdicts; if that clone somehow fails, the turn provider is
@@ -762,17 +787,18 @@ func buildAgentWithOptions(st *store.Store, root, instruction string, opts regis
 			Timeout:  runtime.DefaultToolReviewTimeout,
 		}.Review
 	}
-	approvalPatterns := approvalToolPatterns(st)
-	// Full access bypasses approval entirely; Read Only never reaches the
-	// gate because mutating tools are not registered; Workspace Write asks
-	// for the configured mutating patterns. Auto review uses those same
-	// patterns, then its reviewer decides instead of prompting; a reviewer
-	// error falls back to the prompt.
+	approvalPatterns := approvalPatternsForPermission(st, permission)
+	// Full access bypasses approval entirely; Read Only never reaches the gate
+	// because mutating tools are not registered; Workspace Write asks only for
+	// the tools that can leave the workspace sandbox. Auto review keeps its
+	// wider pattern set, then its reviewer decides instead of prompting; a
+	// reviewer error falls back to the prompt. The gate predicate also inspects
+	// the arguments, so a read-only str_replace_editor "view" never asks.
 	needsApproval := func(name string, args json.RawMessage) bool {
 		if permission == session.PermissionFull {
 			return false
 		}
-		return toolNeedsApproval(name, approvalPatterns)
+		return toolNeedsApprovalWithArgs(name, args, approvalPatterns)
 	}
 	gate := runtime.NewApprovalQueue(needsApproval)
 	skillsDir := ""
@@ -831,7 +857,7 @@ func buildAgentWithOptions(st *store.Store, root, instruction string, opts regis
 	maxIterations := runtime.DefaultMaxIterations
 	if !pluginEnabled(st, "agent_loop", true) {
 		maxIterations = 1
-	} else if n := settingInt(get, "plugin.agent_loop.max_iterations", "", runtime.DefaultMaxIterations, 1, 100); n > 0 {
+	} else if n := settingInt(get, "plugin.agent_loop.max_iterations", "", runtime.DefaultMaxIterations, 1, runtime.MaxIterationsLimit); n > 0 {
 		maxIterations = n
 	}
 	subagentModel := strings.TrimSpace(get("plugin.subagent.model", "", ""))
@@ -845,6 +871,7 @@ func buildAgentWithOptions(st *store.Store, root, instruction string, opts regis
 		Mode:            agentMode,
 		Settings:        settings,
 		MaxIterations:   maxIterations,
+		StepLimitNotice: stepLimitNoticeFor(get("ui.language", "", session.LanguageChinese)),
 		SubagentModel:   subagentModel,
 		History:         &storeHistory{st: st},
 		Gate:            gate,
@@ -1038,19 +1065,42 @@ func composeInstructionForModesWithMemories(st *store.Store, root, cwd string, r
 	})
 }
 
-// approvalToolPatterns reads approval.tools from the store. A missing, blank
-// or unreadable setting falls back to defaultApprovalTools so a broken settings
-// row can never silently disable the gate.
-func approvalToolPatterns(st *store.Store) []string {
-	raw := ""
-	if st != nil {
-		if v, err := st.GetSetting("approval.tools"); err == nil {
-			raw = v
-		}
+// approvalPatternsForPermission resolves the pattern list that defines which
+// tool calls require approval in permission mode. An explicit approval.tools
+// setting wins in every mode (the user's list is the override). Otherwise
+// Workspace Write uses the converged defaultApprovalTools list and Auto review
+// keeps its wider experimental set, because the reviewer stands in for the
+// human prompt and should still see file mutations. Read-only call exemptions
+// are applied separately by toolNeedsApprovalWithArgs, so both sets exempt
+// str_replace_editor "view".
+func approvalPatternsForPermission(st *store.Store, permission string) []string {
+	if patterns, ok := configuredApprovalToolPatterns(st); ok {
+		return patterns
 	}
-	if strings.TrimSpace(raw) == "" {
-		raw = defaultApprovalTools
+	if permission == session.PermissionAutoReview {
+		return splitApprovalPatterns(autoReviewApprovalTools)
 	}
+	return splitApprovalPatterns(defaultApprovalTools)
+}
+
+// configuredApprovalToolPatterns returns the approval.tools setting as parsed
+// patterns and whether the user configured it. A missing, blank or unreadable
+// setting reports false, so a broken settings row can never silently disable
+// the gate.
+func configuredApprovalToolPatterns(st *store.Store) ([]string, bool) {
+	if st == nil {
+		return nil, false
+	}
+	raw, err := st.GetSetting("approval.tools")
+	if err != nil || strings.TrimSpace(raw) == "" {
+		return nil, false
+	}
+	return splitApprovalPatterns(raw), true
+}
+
+// splitApprovalPatterns splits a comma-separated approval.tools value into
+// trimmed, non-empty prefix patterns.
+func splitApprovalPatterns(raw string) []string {
 	patterns := make([]string, 0, strings.Count(raw, ",")+1)
 	for _, part := range strings.Split(raw, ",") {
 		if part = strings.TrimSpace(part); part != "" {
@@ -1220,6 +1270,37 @@ func toolNeedsApproval(name string, patterns []string) bool {
 		}
 	}
 	return false
+}
+
+// toolNeedsApprovalWithArgs is the approval gate's predicate. It applies the
+// configured patterns to the tool name, then exempts the read-only calls that
+// share a tool name with mutating calls: str_replace_editor's "view" command
+// only reads the workspace, so it never asks for approval, even under a
+// "str_replace_editor" or "*" pattern. Arguments the gate cannot parse fall
+// through to the name-based decision, so an unclassifiable call is treated as
+// mutating (fail-closed).
+func toolNeedsApprovalWithArgs(name string, args json.RawMessage, patterns []string) bool {
+	name = strings.TrimSpace(name)
+	if name == "str_replace_editor" && editorCallIsReadOnly(args) {
+		return false
+	}
+	return toolNeedsApproval(name, patterns)
+}
+
+// editorCallIsReadOnly reports whether args select str_replace_editor's
+// read-only "view" command. Invalid JSON, a missing command and non-object
+// payloads all report false so the call keeps its name-based approval decision.
+func editorCallIsReadOnly(args json.RawMessage) bool {
+	if len(args) == 0 {
+		return false
+	}
+	var parsed struct {
+		Command string `json:"command"`
+	}
+	if err := json.Unmarshal(args, &parsed); err != nil {
+		return false
+	}
+	return strings.TrimSpace(parsed.Command) == "view"
 }
 
 // connectMCP reads <root>/mcp.json and starts the configured stdio servers.

@@ -102,6 +102,11 @@ func (c *Controller) buildSnapshot(sess *store.Session) (*state.Snapshot, error)
 	// seq column, so this is how a reopened snapshot restores Message.Seq onto
 	// the same axis as ToolState.StartedSeq.
 	messageSeq := make(map[string]uint64)
+	// messageLastSeq records the last visible token event seq per message. One
+	// turn publishes a single assistant message, so its first event may be the
+	// reasoning that precedes its tool calls while its visible text only ends
+	// after them; the Chat view orders the message by this end position.
+	messageLastSeq := make(map[string]uint64)
 	var results []replayedCall
 	for _, rec := range events {
 		if rec.Type == EventQuestionAnswered {
@@ -125,6 +130,7 @@ func (c *Controller) buildSnapshot(sess *store.Session) (*state.Snapshot, error)
 		switch e := ev.(type) {
 		case state.Token:
 			recordMessageSeq(messageSeq, e.MsgID, rec.Seq)
+			recordMessageLastSeq(messageLastSeq, e.MsgID, rec.Seq)
 			continue
 		case state.Reasoning:
 			recordMessageSeq(messageSeq, e.MsgID, rec.Seq)
@@ -156,26 +162,36 @@ func (c *Controller) buildSnapshot(sess *store.Session) (*state.Snapshot, error)
 		snap = state.Apply(&next, ev)
 	}
 
-	// Restore each message's first-appearance Seq on the replayed axis. A
-	// message whose events are missing (a row persisted by an older build, or
-	// an assistant message that never streamed) falls back to the previous
-	// message's Seq+1 so the order stays strictly monotonic for the view.
-	var lastMessageSeq uint64
+	// Restore each message's first-appearance Seq and visible-text end
+	// (LastSeq) on the replayed axis. A message whose events are missing (a row
+	// persisted by an older build, or an assistant message that never streamed)
+	// falls back to the previous message's Seq+1 so the order stays strictly
+	// monotonic for the view; a message with no token event (a user row, or an
+	// assistant row that only ever reasoned) falls back to LastSeq=Seq.
+	var lastMessageSeq, highestSeq uint64
 	for i := range snap.Messages {
 		seq := messageSeq[snap.Messages[i].MsgID]
 		if seq <= lastMessageSeq {
 			seq = lastMessageSeq + 1
 		}
+		last := messageLastSeq[snap.Messages[i].MsgID]
+		if last < seq {
+			last = seq
+		}
 		snap.Messages[i].Seq = seq
+		snap.Messages[i].LastSeq = last
 		lastMessageSeq = seq
+		if last > highestSeq {
+			highestSeq = last
+		}
 	}
-	// Skipped trailing events (a token that arrived after the last folded
-	// state, or a persisted question_answered) can leave the counter behind a
-	// message Seq. Keep the counter at least at the highest message Seq so a
-	// turn continued after this reopen still numbers above every loaded
-	// message.
-	if lastMessageSeq > snap.Seq {
-		snap.Seq = lastMessageSeq
+	// Skipped trailing events (tokens and reasoning are not folded on replay,
+	// and a persisted question_answered is handled separately) can leave the
+	// counter behind the loaded messages. Keep it at the highest restored
+	// position — including LastSeq, which is a token event seq — so a turn
+	// continued after this reopen still numbers above every loaded message.
+	if highestSeq > snap.Seq {
+		snap.Seq = highestSeq
 	}
 	if len(results) > 0 {
 		c.mu.Lock()
@@ -213,6 +229,16 @@ func recordMessageSeq(seqs map[string]uint64, msgID string, storeSeq int64) {
 	if _, ok := seqs[msgID]; !ok {
 		seqs[msgID] = uint64(storeSeq)
 	}
+}
+
+// recordMessageLastSeq remembers the last visible token event seq for msgID.
+// The last event wins: the message's visible text ends at the latest token,
+// while reasoning events in between must not extend it.
+func recordMessageLastSeq(seqs map[string]uint64, msgID string, storeSeq int64) {
+	if strings.TrimSpace(msgID) == "" || storeSeq <= 0 {
+		return
+	}
+	seqs[msgID] = uint64(storeSeq)
 }
 
 // phaseFromStore maps a persisted session status to the UI phase.

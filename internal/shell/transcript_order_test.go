@@ -199,3 +199,121 @@ func TestSnapshotToolStatesOrdersByStartSeq(t *testing.T) {
 		t.Fatalf("tool order = %v, want %v", ids, want)
 	}
 }
+
+// reasoningFirstSnapshot is the real-world turn shape the old ordering got
+// wrong: one assistant message is created by the Reasoning event that precedes
+// the tool call, and its visible text only arrives afterwards.
+//
+//	user(Seq 1) -> Reasoning(2) -> ToolStart(3) -> ToolEnd(4) -> Token(5)
+func reasoningFirstSnapshot() *state.Snapshot {
+	snap := state.NewSnapshot()
+	snap.Seq = 1
+	snap.Messages = []state.Message{
+		{MsgID: "u1", Seq: 1, LastSeq: 1, Role: state.RoleUser, Text: "question"},
+	}
+	snap = state.Apply(snap, state.Reasoning{MsgID: "a1", Text: "let me check"})
+	snap = state.Apply(snap, state.ToolStart{CallID: "c1", Name: "bash"})
+	snap = state.Apply(snap, state.ToolEnd{CallID: "c1", Result: "ok"})
+	snap = state.Apply(snap, state.Token{MsgID: "a1", Text: "final answer"})
+	return snap
+}
+
+// TestBuildTranscriptTurnsReasoningFirstPutsProcessAboveAnswer is the order
+// regression: the assistant message's first event is pre-tool Reasoning, so
+// its Seq is before the call; the message must still render below the process
+// block because its visible text ends after the call (LastSeq). Before
+// LastSeq/end-based placement this produced user -> answer -> block.
+func TestBuildTranscriptTurnsReasoningFirstPutsProcessAboveAnswer(t *testing.T) {
+	snap := reasoningFirstSnapshot()
+	msg, tool := snap.Messages[1], snap.Tools["c1"]
+	if !(msg.Seq < tool.StartedSeq && tool.StartedSeq < msg.LastSeq) {
+		t.Fatalf("fixture axis = msg Seq %d, tool StartedSeq %d, msg LastSeq %d; want Seq < tool < LastSeq",
+			msg.Seq, tool.StartedSeq, msg.LastSeq)
+	}
+
+	plans := buildTranscriptTurns(snap)
+	if len(plans) != 1 {
+		t.Fatalf("turns = %d, want 1", len(plans))
+	}
+	if got, want := orderMessageIDs(t, snap, plans[0]), []string{"u1", "block:c1", "a1"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("turn order = %v, want %v (process block must be above the answer)", got, want)
+	}
+}
+
+// TestBuildTranscriptTurnsReasoningFirstMultiTurn checks the same shape on two
+// turns: each turn keeps its own block above its own answer, and the second
+// turn stays below the first turn's answer.
+func TestBuildTranscriptTurnsReasoningFirstMultiTurn(t *testing.T) {
+	snap := reasoningFirstSnapshot()
+	// Turn 2: user(6) -> Reasoning(7) -> ToolStart(8) -> ToolEnd(9) -> Token(10).
+	snap.Seq = 6
+	snap.Messages = append(snap.Messages,
+		state.Message{MsgID: "u2", Seq: 6, LastSeq: 6, Role: state.RoleUser, Text: "second question"})
+	snap = state.Apply(snap, state.Reasoning{MsgID: "a2", Text: "checking again"})
+	snap = state.Apply(snap, state.ToolStart{CallID: "c2", Name: "read_file"})
+	snap = state.Apply(snap, state.ToolEnd{CallID: "c2", Result: "contents"})
+	snap = state.Apply(snap, state.Token{MsgID: "a2", Text: "second answer"})
+
+	plans := buildTranscriptTurns(snap)
+	if len(plans) != 2 {
+		t.Fatalf("turns = %d, want 2", len(plans))
+	}
+	if got, want := orderMessageIDs(t, snap, plans[0]), []string{"u1", "block:c1", "a1"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("turn 1 order = %v, want %v", got, want)
+	}
+	if got, want := orderMessageIDs(t, snap, plans[1]), []string{"u2", "block:c2", "a2"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("turn 2 order = %v, want %v", got, want)
+	}
+}
+
+// TestBuildTranscriptTurnsStreamingAfterToolKeepsBlockAbove pins streaming
+// stability: once the answer has any token after the call, the block stays
+// above it on every later token frame.
+func TestBuildTranscriptTurnsStreamingAfterToolKeepsBlockAbove(t *testing.T) {
+	snap := state.NewSnapshot()
+	snap.Seq = 1
+	snap.Messages = []state.Message{
+		{MsgID: "u1", Seq: 1, LastSeq: 1, Role: state.RoleUser, Text: "question"},
+	}
+	snap = state.Apply(snap, state.Reasoning{MsgID: "a1", Text: "thinking"})
+	snap = state.Apply(snap, state.ToolStart{CallID: "c1", Name: "bash"})
+	snap = state.Apply(snap, state.ToolEnd{CallID: "c1", Result: "ok"})
+
+	// Before the first visible token the message has no text yet and no row.
+	if got := orderMessageIDs(t, snap, buildTranscriptTurns(snap)[0]); !reflect.DeepEqual(got, []string{"u1", "block:c1"}) {
+		t.Fatalf("pre-token order = %v, want [u1 block:c1]", got)
+	}
+	// Every token frame keeps the block above the growing answer.
+	for i := 0; i < 3; i++ {
+		snap = state.Apply(snap, state.Token{MsgID: "a1", Text: "chunk"})
+		if got := orderMessageIDs(t, snap, buildTranscriptTurns(snap)[0]); !reflect.DeepEqual(got, []string{"u1", "block:c1", "a1"}) {
+			t.Fatalf("token frame %d order = %v, want block above answer", i+1, got)
+		}
+	}
+}
+
+// TestBuildTranscriptTurnsAnswerBeforeToolStaysAbove pins the other direction:
+// text recorded entirely before the call stays above the block (the message
+// ended before the call started, e.g. a text-only assistant step followed by a
+// later turn's question in hand-built data).
+func TestBuildTranscriptTurnsAnswerBeforeToolStaysAbove(t *testing.T) {
+	snap := state.NewSnapshot()
+	snap.Seq = 1
+	snap.Messages = []state.Message{
+		{MsgID: "u1", Seq: 1, LastSeq: 1, Role: state.RoleUser, Text: "question"},
+	}
+	snap = state.Apply(snap, state.Token{MsgID: "a1", Text: "answer"})    // Seq 2
+	snap = state.Apply(snap, state.ToolStart{CallID: "c1", Name: "bash"}) // Seq 3
+	snap = state.Apply(snap, state.ToolEnd{CallID: "c1", Result: "ok"})   // Seq 4
+	// A second visible message created after the tool ends up below it.
+	snap = state.Apply(snap, state.Token{MsgID: "a2", Text: "later"}) // Seq 5
+
+	plans := buildTranscriptTurns(snap)
+	if len(plans) != 1 {
+		t.Fatalf("turns = %d, want 1", len(plans))
+	}
+	want := []string{"u1", "a1", "block:c1", "a2"}
+	if got := orderMessageIDs(t, snap, plans[0]); !reflect.DeepEqual(got, want) {
+		t.Fatalf("turn order = %v, want %v", got, want)
+	}
+}

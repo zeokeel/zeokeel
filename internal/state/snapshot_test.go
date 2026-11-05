@@ -71,6 +71,48 @@ func TestMessageSeqFirstAppearance(t *testing.T) {
 	}
 }
 
+// TestMessageLastSeqTracksVisibleTokens pins the visible-text end the Chat
+// view places a message by: a message created by pre-tool Reasoning has
+// LastSeq 0 until the first Token, every Token moves it, and a Reasoning fold
+// in between never does.
+func TestMessageLastSeqTracksVisibleTokens(t *testing.T) {
+	var s *Snapshot
+	s = Apply(s, Reasoning{MsgID: "m1", Text: "thinking"}) // Seq 1: message exists, no visible text
+	if m := s.Messages[0]; m.Seq != 1 || m.LastSeq != 0 {
+		t.Fatalf("reasoning-created message = Seq %d LastSeq %d, want 1/0", m.Seq, m.LastSeq)
+	}
+
+	s = Apply(s, ToolStart{CallID: "c1", Name: "bash"}) // Seq 2
+	s = Apply(s, ToolEnd{CallID: "c1", Result: "ok"})   // Seq 3
+	s = Apply(s, Reasoning{MsgID: "m1", Text: "more"})  // Seq 4: still no visible text
+	if m := s.Messages[0]; m.LastSeq != 0 {
+		t.Fatalf("reasoning moved LastSeq to %d, want 0", m.LastSeq)
+	}
+
+	s = Apply(s, Token{MsgID: "m1", Text: "answer"}) // Seq 5: visible text after the tool
+	if m := s.Messages[0]; m.Seq != 1 || m.LastSeq != 5 {
+		t.Fatalf("message after first token = Seq %d LastSeq %d, want 1/5", m.Seq, m.LastSeq)
+	}
+	if got, want := s.Messages[0].Text, "answer"; got != want {
+		t.Fatalf("text = %q, want %q", got, want)
+	}
+
+	s = Apply(s, Token{MsgID: "m1", Text: " more"}) // Seq 6: later tokens keep moving LastSeq
+	if m := s.Messages[0]; m.Seq != 1 || m.LastSeq != 6 {
+		t.Fatalf("message after second token = Seq %d LastSeq %d, want 1/6", m.Seq, m.LastSeq)
+	}
+	s = Apply(s, Reasoning{MsgID: "m1", Text: "late thought"}) // Seq 7
+	if m := s.Messages[0]; m.LastSeq != 6 {
+		t.Fatalf("late reasoning moved LastSeq to %d, want 6", m.LastSeq)
+	}
+
+	// A token-created message ends at its creation seq until more text arrives.
+	s = Apply(s, Token{MsgID: "m2", Text: "x"}) // Seq 8
+	if m := s.Messages[1]; m.Seq != 8 || m.LastSeq != 8 {
+		t.Fatalf("token-created message = Seq %d LastSeq %d, want 8/8", m.Seq, m.LastSeq)
+	}
+}
+
 func TestTokenAccumulation(t *testing.T) {
 	var s *Snapshot
 	s = Apply(s, Token{SessionID: "sess-1", MsgID: "m1", Text: "Hel"})

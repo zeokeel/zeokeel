@@ -76,12 +76,31 @@ func (a *App) sessionLive(c *ui.Context, t *design.Tokens, snap *state.Snapshot)
 			a.teamGoalBanner(c, t)
 		}
 		if a.uiState().tab == int(liveTrajectory) {
-			a.trajectoryPane(c, t, snap)
-			a.liveComposerArea(c, t, snap)
+			// The Trajectory tab draws the same body frame as Chat: one main
+			// column holding the pane above the composer. Sharing the frame
+			// keeps the composer's element identity (and its one-shot
+			// auto-focus) stable while the tab switches; the trajectory layout
+			// is otherwise the pane over the composer, exactly as before.
+			a.sessionBody(c, func() {
+				ui.Column(c).Key("session-trajectory").Grow(1).Children(func() {
+					a.trajectoryPane(c, t, snap)
+				})
+			}, func() {
+				a.liveComposerArea(c, t, snap)
+			}, nil)
 			return
 		}
-		ui.Row(c).Grow(1).AlignItems(ui.Stretch).Children(func() {
-			a.liveTranscript(c, t, snap)
+		// The chat body: the transcript and the composer share one main
+		// column, and the Todo/Team panels dock beside it for the row's whole
+		// height and run to the window bottom like the right sidebar, so the
+		// chat column no longer leaves a blank gap under its right edge.
+		a.sessionBody(c, func() {
+			ui.Column(c).Key("session-chat").Grow(1).Children(func() {
+				a.liveTranscript(c, t, snap)
+			})
+		}, func() {
+			a.liveComposerArea(c, t, snap)
+		}, func() {
 			// The panels are fixed-width columns; at narrow widths (or with
 			// the right sidebar docked) hiding them keeps the transcript and
 			// the panel boundaries intact instead of overflowing the row.
@@ -93,7 +112,25 @@ func (a *App) sessionLive(c *ui.Context, t *design.Tokens, snap *state.Snapshot)
 				a.liveTodoPanel(c, t)
 			}
 		})
-		a.liveComposerArea(c, t, snap)
+	})
+}
+
+// sessionBody draws the session's main column between the header and the
+// window bottom: the tab's content column above the composer, and, when the
+// chat docks them, the Todo/Team side panels beside both. The same keyed frame
+// is used by Chat and Trajectory (their content differs by key), so the
+// composer keeps one element identity across tab switches instead of being
+// rebuilt — which would re-fire its one-shot auto-focus and steal focus from
+// the tab.
+func (a *App) sessionBody(c *ui.Context, content, composer, panels func()) {
+	ui.Row(c).Key("session-body").Grow(1).AlignItems(ui.Stretch).Children(func() {
+		ui.Column(c).Key("session-main").Grow(1).Children(func() {
+			content()
+			composer()
+		})
+		if panels != nil {
+			panels()
+		}
 	})
 }
 

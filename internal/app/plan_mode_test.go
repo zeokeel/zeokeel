@@ -42,7 +42,7 @@ func TestPlanModeProductionPromptWiring(t *testing.T) {
 		t.Fatalf("SetMode: %v", err)
 	}
 	on := bundle.Agent.Instruction()
-	for _, want := range []string{"Plan mode is active", "`present`", `"Plan"`} {
+	for _, want := range []string{"Plan mode is active", "`exit_plan_mode`", "`#` heading"} {
 		if !strings.Contains(on, want) {
 			t.Fatalf("production prompt after enabling plan mode missing %q:\n%s", want, on)
 		}

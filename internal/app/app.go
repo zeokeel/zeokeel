@@ -318,6 +318,14 @@ func (a *app) toolOptions(st *store.Store, root, permission string) registryOpti
 		}
 		return a.services.PlanMode(a.services.CurrentSessionID())
 	}
+	// The exit_plan_mode tool gets the same flag by session id instead of the
+	// current selection, so a turn in a background session checks its own mode.
+	opts.PlanModeForSession = func(sessionID string) bool {
+		if a.services == nil {
+			return false
+		}
+		return a.services.PlanMode(sessionID)
+	}
 	capBytes := outputCapBytes(st)
 	if a.termMgr != nil && a.managerRoot == filepath.Clean(root) && a.managerCap == capBytes {
 		opts.Terminal = a.termMgr

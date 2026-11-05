@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"os"
 	"strings"
 
@@ -281,21 +282,34 @@ func planCommandArg(line string) string {
 // locally, so the slash line itself never reaches the model; only the optional
 // message is sent. Plan mode is soft guidance (the plan:policy prompt), not a
 // tool gate, so this only persists the flag.
+//
+// On Home without a session the command creates the draft session the Home send
+// path would create and turns plan mode on for it, instead of only asking for a
+// session (ADR 0008 §4.4).
 func (a *App) runPlanCommand(line string) {
 	arg := planCommandArg(line)
-	if a.Ctrl == nil || strings.TrimSpace(a.Ctrl.CurrentSessionID()) == "" {
+	if a.Ctrl == nil {
 		a.draft = ""
 		a.toastText("Open a session before enabling plan mode.",
 			"请先打开会话再启用计划模式。")
 		return
 	}
+	if strings.TrimSpace(a.Ctrl.CurrentSessionID()) == "" {
+		a.draft = ""
+		a.startPlanFromHome(arg)
+		return
+	}
 	id := a.Ctrl.CurrentSessionID()
 	if strings.EqualFold(arg, "off") {
 		a.draft = ""
+		reviewID := a.currentPlanDeliveryID()
 		if err := a.Ctrl.SetPlanMode(id, false); err != nil {
 			a.toastText(err.Error(), err.Error())
 			return
 		}
+		// Leaving through the command is a decision on the current review, like
+		// the card's Exit button: re-entering plan mode starts a fresh review.
+		a.decidePlanReview(reviewID)
 		a.toastText("Plan mode off", "已退出计划模式")
 		return
 	}
@@ -309,6 +323,43 @@ func (a *App) runPlanCommand(line string) {
 		return
 	}
 	a.submitPlanMessage(arg)
+}
+
+// startPlanFromHome implements /plan while the Home composer is showing and no
+// session exists: it creates the same draft session the Home send path would
+// create (current workspace, Home-staged preset/access/model, staged
+// attachments), turns plan mode on for it, and submits the optional message as
+// its first request. Creating the session here is one shot: the command has
+// already switched to the Session screen, so it cannot re-enter this path.
+func (a *App) startPlanFromHome(arg string) {
+	if a.Ctrl == nil {
+		return
+	}
+	c := a.startUI().lastComposerContext
+	id, ok := a.newHomeSession(c)
+	if !ok {
+		return
+	}
+	if err := a.Ctrl.SetPlanMode(id, true); err != nil {
+		if c != nil {
+			c.Toast(err.Error())
+		}
+		return
+	}
+	a.draft = ""
+	if arg == "" {
+		if c != nil {
+			c.Toast(a.menuText("Plan mode on", "已进入计划模式"))
+		}
+		return
+	}
+	if err := a.Ctrl.Submit(context.Background(), id, arg); err != nil {
+		if c != nil {
+			c.Toast(fmt.Sprintf(a.menuText("Could not send: %v", "发送失败：%v"), err))
+		}
+		return
+	}
+	a.homeDraft = ""
 }
 
 // submitPlanMessage submits the message of "/plan <message>" after plan mode

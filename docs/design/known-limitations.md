@@ -12,7 +12,7 @@
 | 高 DPI/多显示器 | `ui.Render(...,scale=2)` 冒烟（3200×2000 非空、关键控件存在）；未真机 1.25x/1.5x/2x 切换 | 各平台 DPI 切换与跨屏拖动，确认无 1px 漂移/模糊 |
 | 系统通知服务 | 通知状态机与 Notifier 注入测试覆盖；真实 mygo.NewNotification 只在源码级接入 | macOS 打包后通知权限、Windows balloon、Linux notification service 实机 |
 | 窗口管理 | 窗口状态持久化、设置独立窗口均有单测与 headless 行为测试；原生窗口菜单栏已于 2026-11-05 退役（[ADR 0006](../../docs/decisions/0006-retire-native-menu-bar.md)） | 真机窗口恢复、双窗口焦点、无菜单栏下的快捷键/剪贴板/Quit 路径 |
-| Windows shell 方言 | Windows 构建只暴露 `pwsh`（PowerShell）、POSIX 构建只暴露 `bash`；系统提示含显式运行环境段与平台化工具描述（[ADR 0009](../../docs/decisions/0009-platform-shell-stacks.md)）。本环境仅有 `GOOS=windows` 编译/vet/纯函数单测，未真机运行 | Windows 真机：pwsh 解析（pwsh→powershell 回退）、中文输出/路径、terminal 默认 pwsh、plan/只读模式下工具集、缺失 PowerShell 时的错误提示 |
+| Windows shell 方言 | Windows 构建只暴露 `pwsh`（PowerShell）、POSIX 构建只暴露 `bash`；系统提示含显式运行环境段与平台化工具描述（[ADR 0009](../../docs/decisions/0009-platform-shell-stacks.md)）；所有子进程（bash/pwsh/terminal/jobs/git/MCP/UI 终端）启动时设置 `CREATE_NO_WINDOW`+`HideWindow`（[ADR 0011](../../docs/decisions/0011-windows-hidden-console.md)），不再弹 cmd 窗。本环境仅有 `GOOS=windows` 编译/vet/纯函数单测，未真机运行 | Windows 真机：pwsh 解析（pwsh→powershell 回退）、中文输出/路径、terminal 默认 pwsh、plan/只读模式下工具集、缺失 PowerShell 时的错误提示、命令执行时不再出现 cmd 窗口 |
 
 ## 2. 框架/平台限制（已记录策略，未强改）
 
@@ -55,7 +55,9 @@
 ## 5. 功能对齐口径
 
 - 与 DSH 的"功能对齐"是**行为与能力对齐**，不是逐像素/逐交互复刻；DSH 版本升级后不做视觉同步，功能差异以 `docs/FUNCTIONAL-PARITY.md` 为准。
-- **平台与 shell 工具**（[ADR 0009](../../docs/decisions/0009-platform-shell-stacks.md)）：shell 栈按平台门控（Windows 仅 `pwsh`、POSIX 仅 `bash`，对齐 DSH「每台机器一套 shell 栈」）；POSIX 构建不再暴露 `pwsh` 工具、Windows 构建不再暴露 `bash`。未集成 Git Bash/WSL（如需要可后续用自定义 shell 栈/profile 扩展）。Windows 终端为管道回退（PTY 仅 Unix），默认 shell 优先探测 `pwsh`、缺失回退 `%COMSPEC%`/cmd.exe；`terminal_signal` 描述仍沿用 POSIX 措辞（低风险）。
+- **平台与 shell 工具**（[ADR 0009](../../docs/decisions/0009-platform-shell-stacks.md)）：shell 栈按平台门控（Windows 仅 `pwsh`、POSIX 仅 `bash`，对齐 DSH「每台机器一套 shell 栈」）；POSIX 构建不再暴露 `pwsh` 工具、Windows 构建不再暴露 `bash`。未集成 Git Bash/WSL（如需要可后续用自定义 shell 栈/profile 扩展）。Windows 终端为管道回退（PTY 仅 Unix），默认 shell 优先探测 `pwsh`、缺失回退 `%COMSPEC%`/cmd.exe；`terminal_signal` 描述仍沿用 POSIX 措辞（低风险）。Windows 子进程控制台已隐藏（[ADR 0011](../../docs/decisions/0011-windows-hidden-console.md)）。
+- **审批范围**（[ADR 0010](../../docs/decisions/0010-approval-scope.md)）：Workspace Write 默认只审批能逃逸工作区沙箱/有工作区外副作用的工具（shell/terminal/job/worktree/web/MCP）；workspace 内的文件写由沙箱边界保证、不再逐次审批；`str_replace_editor view` 等只读调用永不审批；Auto review EXP 保留更宽的模型复核范围。需要逐次文件审批可把 `approval.tools` 设回旧列表或 `*`。
+- 构建产物统一 `dist/`（[ADR 0012](../../docs/decisions/0012-build-output-layout.md)）：仓库根/包目录不保留二进制；`make build` / `make package-windows` 固定命名，`make clean` 只清构建产物。
 - 纯 Go/no-cgo 边界：插件只内置、无第三方插件市场/运行时；无内核级沙箱（策略 + 审批 + 审计）。这些是产品级既定边界，不随 UI 改造改变。
 - 打包/签名/自动更新未在本轮重新验证（`dist/` 与交叉编译脚本另见 CI）。
 

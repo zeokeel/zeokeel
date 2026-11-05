@@ -36,10 +36,16 @@ ZeoKeel 原实现与此不同：`internal/runtime/plan_mode.go` 在每次工具�
 
 ## 4. 未做 / 后续
 
-1. DSH 的独立 `exit_plan_mode` 工具（当前仍由 `present` 计划交付）。
-2. 审阅卡的「Keep planning（带反馈）」分支（当前只有 Approve / Exit）。
-3. DSH 的 plan 徽章 pending 态（模式变更在下一回合边界生效）；ZeoKeel 切换立即生效。
-4. Home 草稿会话（尚无 Session）的 `/plan` 支持。
+> **2026-11-05 更新：以下 1–4 已全部实现**（用户要求把遗留修复；实施报告 `.cache/team/report-plan-parity.md`）：
+>
+> 1. `exit_plan_mode` 独立工具：`internal/tools/exit_plan_mode.go`，始终注册、按 per-session plan 模式门控、非阻塞提交计划；shell 从 live snapshot 的最新成功调用渲染审阅卡。旧 `present` "Plan" 路径保留兼容。
+> 2. 审阅卡 Keep planning（带反馈）：反馈作为下一轮用户消息提交、plan 保持；另有 Exit / Dismiss（Esc 关闭卡片、保持 plan），Approve 仍退出并继续。
+> 3. pending 态徽章：交付未决期间 warning 色 + Clock +「待审阅」，a11y Label 更新，点击重开卡片；决定后回 active 或隐藏。
+> 4. Home 草稿会话 `/plan`：无 session 时创建草稿会话并开启 plan，`/plan <message>` 作为首条请求；命令面板与 Enter 同路径，失败 toast、单次创建。
+>
+> 测试：`internal/tools/exit_plan_mode_test.go`、`internal/app/exit_plan_mode_test.go`、`internal/shell/plan_ui_test.go` 新增 8 个场景；全仓测试绿。`internal/prompt/registry.go` 的 `plan:policy` 文本同步引导新工具。
+
+（历史记录，已完成）1. DSH 的独立 `exit_plan_mode` 工具；2. 审阅卡「Keep planning（带反馈）」；3. pending 态徽章；4. Home 草稿会话 `/plan`。
 
 ## 5. 验证
 

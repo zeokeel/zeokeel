@@ -8,6 +8,8 @@ import (
 	"os"
 	"os/exec"
 	"runtime"
+
+	"github.com/zeokeel/zeokeel/internal/winproc"
 )
 
 // shellCommand builds the platform shell invocation. Windows has no sh by
@@ -20,8 +22,9 @@ func shellCommand(ctx context.Context, command string) *exec.Cmd {
 }
 
 // configureProcess has no portable process-group equivalent here; the direct
-// child is killed on timeout.
-func configureProcess(cmd *exec.Cmd) {}
+// child is killed on timeout. On Windows it also hides the child console so a
+// GUI build does not pop a cmd window for every command.
+func configureProcess(cmd *exec.Cmd) { winproc.Hide(cmd) }
 
 // killProcessGroup kills the command process on platforms without POSIX
 // process groups.

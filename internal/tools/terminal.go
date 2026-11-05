@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/zeokeel/zeokeel/internal/runtime"
+	"github.com/zeokeel/zeokeel/internal/winproc"
 )
 
 // Persistent terminal tools.
@@ -316,6 +317,7 @@ func (m *terminalManager) open(cwd string) (*terminalSession, error) {
 		cmd := exec.Command(m.shell, m.args...)
 		cmd.Dir = cwd
 		cmd.Env = setEnv(scrubEnv(os.Environ()), "PWD", cwd)
+		winproc.Hide(cmd)
 		cmd.WaitDelay = 2 * time.Second
 		return cmd
 	}

@@ -782,8 +782,11 @@ func (c *Controller) addUserMessage(t *turn, msg *store.Message, attachments []s
 	next.Messages = append(msgs, state.Message{
 		MsgID: msg.ID,
 		// Seq is the Seq this fold assigns the user message, so the message
-		// and the tools that turn starts share one snapshot Seq axis.
+		// and the tools that turn starts share one snapshot Seq axis. LastSeq
+		// equals Seq: the user message is its own visible row and no token
+		// event extends it.
 		Seq:         next.Seq,
+		LastSeq:     next.Seq,
 		Role:        state.RoleUser,
 		Text:        msg.Content,
 		Attachments: append([]state.Attachment(nil), attachments...),

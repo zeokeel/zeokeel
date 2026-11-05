@@ -35,6 +35,7 @@ import (
 	sdk "github.com/modelcontextprotocol/go-sdk/mcp"
 
 	"github.com/zeokeel/zeokeel/internal/runtime"
+	"github.com/zeokeel/zeokeel/internal/winproc"
 )
 
 const (
@@ -177,6 +178,9 @@ func (m *Manager) connectServer(parent context.Context, server ServerConfig) err
 	defer cancelTimeout()
 
 	cmd := exec.Command(server.Command, server.Args...)
+	// The desktop app runs as a GUI executable; hide the MCP server's console
+	// window on Windows so connecting does not flash a cmd dialog.
+	winproc.Hide(cmd)
 	// Inherit a scrubbed environment: a configured server must not be able to
 	// read the provider key or another ZeoKeel secret. An operator can still
 	// pass a variable explicitly through the server's own Env list, so the

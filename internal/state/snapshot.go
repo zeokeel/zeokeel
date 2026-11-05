@@ -62,7 +62,15 @@ type Message struct {
 	// the controller assigned it. Hand-built snapshots (fixtures) and
 	// pre-upgrade snapshots may leave Seq 0; the view treats 0 as "unknown"
 	// and degrades to list order instead of sorting on it.
-	Seq       uint64
+	Seq uint64
+	// LastSeq is the snapshot Seq of the last visible Token event folded into
+	// this message, or 0 while it has no visible text (a message created only
+	// by Reasoning). One turn publishes one assistant message whose first event
+	// may be the reasoning that precedes its tool calls, so Seq marks where the
+	// message was created while LastSeq marks where its visible text ends. The
+	// Chat transcript places the message by LastSeq: a process block recorded
+	// before the visible answer stays above it. Reasoning never moves LastSeq.
+	LastSeq   uint64
 	Role      Role
 	Text      string
 	Reasoning string
@@ -166,9 +174,13 @@ func NewSnapshot() *Snapshot {
 // Seq is incremented once per applied event. Messages keep the order in which
 // their MsgID first appeared, and a message created by a fold records that
 // event's Seq in Message.Seq (later appends keep it), so Message.Seq and
-// ToolState.StartedSeq share the snapshot's Seq axis. Token and Reasoning
-// events carrying a non-empty SessionID set Snapshot.SessionID (the last such
-// event wins).
+// ToolState.StartedSeq share the snapshot's Seq axis. A Token fold also moves
+// the message's LastSeq to that event's Seq (Reasoning leaves it alone); the
+// pair Seq/LastSeq describes where a message's visible text starts and ends on
+// the same axis, which the Chat view needs because one turn's single assistant
+// message may be created by pre-tool reasoning and finished by post-tool text.
+// Token and Reasoning events carrying a non-empty SessionID set
+// Snapshot.SessionID (the last such event wins).
 func Apply(prev *Snapshot, ev Event) *Snapshot {
 	if ev == nil {
 		if prev != nil {
@@ -238,10 +250,19 @@ func Apply(prev *Snapshot, ev Event) *Snapshot {
 	return &next
 }
 
+// appendMessageText folds a visible Token: it moves LastSeq to the event's Seq
+// (creating the message at that Seq when it is new) and keeps Seq otherwise, so
+// the message's visible text is known to end here.
 func appendMessageText(msgs []Message, msgID, text string, seq uint64) []Message {
-	return updateMessage(msgs, msgID, seq, func(m *Message) { m.Text += text })
+	return updateMessage(msgs, msgID, seq, func(m *Message) {
+		m.Text += text
+		m.LastSeq = seq
+	})
 }
 
+// appendMessageReasoning folds a Reasoning event: it can create the message
+// (at the event's Seq) but never moves LastSeq, because reasoning is not a
+// visible message row.
 func appendMessageReasoning(msgs []Message, msgID, text string, seq uint64) []Message {
 	return updateMessage(msgs, msgID, seq, func(m *Message) { m.Reasoning += text })
 }

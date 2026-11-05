@@ -32,6 +32,18 @@
 - **Home composer 焦点缺陷**：`homeLiveComposer` 把 `/`/@ 面板插在 composer 列之前 → 元素 id 变化、旧焦点悬空；`homeComposerCard` 补 `input.AutoFocus()`（与 Session composer 对齐、不抢用户手动聚焦），Enter 恢复正常执行命令；Home 预览重生成显示聚焦边框。
 - **验证**：gofmt/vet/build 干净；`go test ./... -count=1` 19 包全绿；`GOOS=windows GOARCH=amd64 go build/vet ./...` 通过；`check-nocgo` 四目标 PASS；`ZEOKEEL_VISUAL=1` 视觉回归 PASS；`docs/prompts.md` 段目录同步（41→43，新增 `runtime:environment`/`tool:pwsh` 与 `Context.Platform`）。遗留：Windows 运行期真机验证、POSIX 不再暴露 pwsh、Git Bash/WSL 未集成（见 [known-limitations](design/known-limitations.md) §1/§5）；plan 模式 ADR 0008 §4 事项仍待排期。
 
+## 2026-11-05 反馈修复批次（ALL GREEN）
+
+- **构建产物统一 `dist/` + 稳定命名**（用户：「清理一下编译，搞的到处都是，固定编译到一个位置，并且编译名称要稳定」）：新增 `scripts/build.sh`（make 同名目标），本机/交叉/Windows 包全部固定落 `dist/zeokeel-<goos>-<goarch>[.exe]`（Windows 另加 `-console.exe`），发布包固定 `dist/zeokeel-windows-amd64.zip`；`make clean` 只清构建产物（不再删 `.cache/`），根目录遗留 `zeokeel`/`zeokeel.exe` 已删；Windows 包 README 移入仓库 `packaging/windows/`。[ADR 0012](decisions/0012-build-output-layout.md)
+- **审批范围收敛**（用户：`str_replace_editor view` 为什么也要审批、点是不是有点多）：Workspace Write 默认只审批能逃逸工作区沙箱/有工作区外副作用的工具（bash/pwsh/terminal/job/worktree/web/mcp__*）；workspace 内文件写由沙箱边界保证、不再逐次审批；`str_replace_editor command=view` 永不审批；Auto review EXP 保留原宽复核范围；`approval.tools` 覆盖语义保留。[ADR 0010](decisions/0010-approval-scope.md)
+- **Windows 不再弹 cmd 窗口**（用户：「执行命令时不断弹出 cmd 的对话框」）：新增 `internal/winproc.Hide`（Windows 设 `CREATE_NO_WINDOW`+`HideWindow`；其它平台 no-op），应用到 bash/pwsh/terminal/jobs/git worktree/MCP server/UI 终端全部 spawn 点；DSH 对应实现是 Node child_process 的 `windowsHide:true`。[ADR 0011](decisions/0011-windows-hidden-console.md)
+- **Chat 顺序回归修复**（用户实测：「这个又跑下面去了，你怎么修复的？」）：根因是 runtime 每 turn 单 msgID、assistant 消息在工具前的 Reasoning 时创建，`Message.Seq` 早于工具 `StartedSeq`。`state.Message` 新增 `LastSeq`（最后可见 Token seq，Reasoning 不更新），重开快照按末 token 事件恢复；`transcript_order` 改为按可见文本**结束位置**与过程块归并——过程块在回答上方。含修复前 FAIL/修复后 PASS 的 reasoning-first 回归、多轮与重开测试。
+- **执行失败 exceeds max iterations 修复**（用户：「执行命令时候失败了」）：不是配置 bug——eino `MaxIterations` 计数是模型调用次数，旧默认 20 偏低且错误硬失败。默认提到 200（Setting 上限 1000），超限改为**优雅收尾**（保留已完成工具结果、追加本地化提示、写 history/checkpoint、回 idle + usage），不再 failed；超时/取消/真实错误仍失败。[ADR 0013](decisions/0013-agent-step-limit.md)
+- **Session 右侧空白缺口修复**（用户截图标注右侧空白）：Chat 布局改为 `Row{ Column(Grow){transcript; composer}, teamPanel, todoPanel }`——composer 回到主列、team/todo 面板贯穿到窗口底部；Trajectory 复用同一 body 帧保持 composer 元素身份（避免切 tab 抢焦点）；新增渲染断言 + 窄窗回归。
+- **Settings 剩余弹层统一**：Permission/Font size/More font settings 三个自定义 popover 切到 `popover_menus.go` 品牌 helper；其余 5 个原生 `ui.Select` 保留原生键盘/a11y 语义。
+- **plan 模式 ADR 0008 §4 四项补齐**：独立 `exit_plan_mode` 工具（per-session plan 门控、非阻塞提交、shell 从 snapshot 渲染审阅卡）、审阅卡 Keep planning（反馈作为下一轮用户消息）、pending 态计划徽章（warning+Clock+待审阅、a11y、点击重开卡片）、Home 无 session `/plan` 创建草稿会话并开启 plan；旧 `present` 路径兼容。[ADR 0008 §4](decisions/0008-plan-mode-soft-alignment.md)
+- **验证**：gofmt/vet 干净；`go test ./... -count=1` **19 包全绿**；`GOOS=windows go build/vet ./...` 通过；`scripts/check-nocgo.sh` 四目标 PASS；`ZEOKEEL_VISUAL=1` **14/14 PASS**（预览资产无需重生成）；Windows 包用新脚本重建（见 README 构建章节）。
+
 ## 2026-11-05 v1.1 收尾（追加，ALL GREEN）
 
 - **后台审批通知**：`session.Controller.SetOnApprovalRequested` 可选 hook（默认 nil），所有会话新增审批/提问等待 → 系统通知（同 session+call 去重、隐私文案、点击回会话、与快照路径不双发）；notify 测试 29→36；ADR 0004 更新。

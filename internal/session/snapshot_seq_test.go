@@ -256,3 +256,158 @@ func TestSnapshotSeqFallbackForOrphanMessage(t *testing.T) {
 		}
 	}
 }
+
+// reasoningFirstRespond scripts two turns whose assistant message is created by
+// the Reasoning event that precedes the turn's tool call and finished by the
+// text that follows it. The runtime publishes one msgID per turn, so this is
+// the real shape of a "think, call a tool, then answer" turn.
+func reasoningFirstRespond(_ context.Context, _ runtime.Request, call int) []runtime.Chunk {
+	switch call {
+	case 0:
+		return []runtime.Chunk{{
+			Reasoning: "thinking before the first call",
+			ToolCalls: []runtime.ToolCall{{
+				ID:        "call-1",
+				Name:      "echo",
+				Arguments: json.RawMessage(`{"path":"first.md"}`),
+			}},
+			Done: true,
+		}}
+	case 1:
+		return []runtime.Chunk{{Text: "first answer", Done: true}}
+	case 2:
+		return []runtime.Chunk{{
+			Reasoning: "thinking before the second call",
+			ToolCalls: []runtime.ToolCall{{
+				ID:        "call-2",
+				Name:      "echo",
+				Arguments: json.RawMessage(`{"path":"second.md"}`),
+			}},
+			Done: true,
+		}}
+	default:
+		return []runtime.Chunk{{Text: "second answer", Done: true}}
+	}
+}
+
+// eventLastSeqWith returns the seq of the last store event of type typ whose
+// JSON payload has key == value (the visible-text end of an assistant message).
+func eventLastSeqWith(t *testing.T, events []store.Event, typ, key, value string) int64 {
+	t.Helper()
+	var last int64
+	for _, ev := range events {
+		if ev.Type != typ {
+			continue
+		}
+		var payload map[string]any
+		if json.Unmarshal(ev.Payload, &payload) != nil {
+			continue
+		}
+		if payload[key] == value {
+			last = ev.Seq
+		}
+	}
+	if last == 0 {
+		t.Fatalf("no %s event with %s=%q in %d events", typ, key, value, len(events))
+	}
+	return last
+}
+
+// assertLastSeqInterleaving pins the data-model half of the reasoning-first
+// fix: each assistant message's Seq (its pre-tool reasoning) is before its
+// call, while its LastSeq (its visible text end) is after it. So a turn is
+// recorded interleaved as user < answer.Seq < tool < answer.LastSeq < next
+// user, and the Chat view can place the message by LastSeq.
+func assertLastSeqInterleaving(t *testing.T, snap *state.Snapshot) {
+	t.Helper()
+	if len(snap.Messages) != 4 {
+		t.Fatalf("messages = %d, want 4 (two turns)", len(snap.Messages))
+	}
+	user1, answer1, user2, answer2 := snap.Messages[0], snap.Messages[1], snap.Messages[2], snap.Messages[3]
+	if user1.Role != state.RoleUser || answer1.Role != state.RoleAssistant ||
+		user2.Role != state.RoleUser || answer2.Role != state.RoleAssistant {
+		t.Fatalf("message roles = %q,%q,%q,%q", user1.Role, answer1.Role, user2.Role, answer2.Role)
+	}
+	for i := 1; i < len(snap.Messages); i++ {
+		if snap.Messages[i].Seq <= snap.Messages[i-1].Seq {
+			t.Fatalf("message Seqs not strictly increasing: %+v", snap.Messages)
+		}
+	}
+	tool1, ok := snap.Tools["call-1"]
+	if !ok {
+		t.Fatalf("turn-1 tool call-1 missing: %+v", snap.Tools)
+	}
+	tool2, ok := snap.Tools["call-2"]
+	if !ok {
+		t.Fatalf("turn-2 tool call-2 missing: %+v", snap.Tools)
+	}
+	if !(user1.Seq < answer1.Seq && answer1.Seq < tool1.StartedSeq && tool1.StartedSeq < answer1.LastSeq) {
+		t.Fatalf("turn 1 not interleaved: user=%d answer.Seq=%d tool=%d answer.LastSeq=%d",
+			user1.Seq, answer1.Seq, tool1.StartedSeq, answer1.LastSeq)
+	}
+	if !(answer1.LastSeq < user2.Seq && user2.Seq < answer2.Seq &&
+		answer2.Seq < tool2.StartedSeq && tool2.StartedSeq < answer2.LastSeq) {
+		t.Fatalf("turn 2 not interleaved: answer1.LastSeq=%d user2=%d answer2.Seq=%d tool2=%d answer2.LastSeq=%d",
+			answer1.LastSeq, user2.Seq, answer2.Seq, tool2.StartedSeq, answer2.LastSeq)
+	}
+	// A user message is its own visible row: LastSeq equals its Seq.
+	if user1.LastSeq != user1.Seq || user2.LastSeq != user2.Seq {
+		t.Fatalf("user LastSeq = %d/%d, want Seq %d/%d",
+			user1.LastSeq, user2.LastSeq, user1.Seq, user2.Seq)
+	}
+	for _, m := range []state.Message{answer1, answer2} {
+		if m.Text == "" {
+			t.Fatalf("assistant answer %q has no visible text", m.MsgID)
+		}
+	}
+}
+
+// TestMessageLastSeqAfterReopen pins the LastSeq recovery on both the live fold
+// axis and the reopened store-event axis: a reopened snapshot must remember
+// where each assistant message's visible text ended, not just where it was
+// created by the pre-tool reasoning.
+func TestMessageLastSeqAfterReopen(t *testing.T) {
+	h := newHarness(t, &fakeProvider{respond: reasoningFirstRespond})
+	ctx := context.Background()
+	id, err := h.ctrl.CreateSession(ctx, "reasoning first")
+	if err != nil {
+		t.Fatalf("CreateSession: %v", err)
+	}
+	runTwoToolTurns(t, h.ctrl, id)
+
+	live := h.ctrl.Snapshot()
+	assertLastSeqInterleaving(t, live)
+	if got := live.Messages[1].Seq; got != 3 {
+		t.Fatalf("live turn-1 answer Seq = %d, want the pre-tool reasoning seq 3", got)
+	}
+	t.Logf("live: user1 Seq=%d answer1 Seq=%d LastSeq=%d tool1=%d",
+		live.Messages[0].Seq, live.Messages[1].Seq, live.Messages[1].LastSeq, live.Tools["call-1"].StartedSeq)
+
+	h.restart()
+	snap, err := h.ctrl.OpenSession(ctx, id)
+	if err != nil {
+		t.Fatalf("OpenSession after restart: %v", err)
+	}
+	assertLastSeqInterleaving(t, snap)
+	events, err := h.ctrl.Events(ctx, id)
+	if err != nil {
+		t.Fatalf("Events: %v", err)
+	}
+	for i, text := range []string{"first answer", "second answer"} {
+		answer := snap.Messages[1+2*i]
+		if answer.Text != text {
+			t.Fatalf("answer %d text = %q, want %q", i+1, answer.Text, text)
+		}
+		if want := uint64(eventLastSeqWith(t, events, session.EventToken, "msg_id", answer.MsgID)); answer.LastSeq != want {
+			t.Fatalf("answer %q LastSeq = %d, want its last token event seq %d", text, answer.LastSeq, want)
+		}
+		if want := uint64(eventSeqWith(t, events, session.EventReasoning, "msg_id", answer.MsgID)); answer.Seq != want {
+			t.Fatalf("answer %q Seq = %d, want its first reasoning event seq %d", text, answer.Seq, want)
+		}
+	}
+	if snap.Seq < snap.Messages[3].LastSeq {
+		t.Fatalf("reopened snapshot Seq = %d is behind the last visible text %d; a continued turn would reuse the axis",
+			snap.Seq, snap.Messages[3].LastSeq)
+	}
+	t.Logf("reopened: Seq=%d messages=%+v", snap.Seq, snap.Messages)
+}

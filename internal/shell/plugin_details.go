@@ -197,10 +197,10 @@ var pluginDetailSpecs = []pluginDetailSpec{
 	},
 	{
 		key: "agent_loop", titleEN: "Agent loop", titleZH: "代理循环",
-		descEN: "How many tool-call iterations one turn may run.",
-		descZH: "设置单轮允许的工具调用迭代次数。",
+		descEN: "The per-turn step ceiling: reaching it keeps the work done, shows a notice and lets you continue. Defaults to a high safety bound; lower it to stop a turn sooner.",
+		descZH: "单轮步骤上限：达到上限时会保留已完成的工作、提示并允许继续。默认是较高的安全上限；调低可让单轮更早停止。",
 		fields: []pluginDetailField{
-			{key: "plugin.agent_loop.max_iterations", labelEN: "Max iterations", labelZH: "最大迭代次数", kind: pluginFieldInt, def: "20", min: 1, max: 100},
+			{key: "plugin.agent_loop.max_iterations", labelEN: "Max iterations", labelZH: "最大迭代次数", kind: pluginFieldInt, def: strconv.Itoa(runtime.DefaultMaxIterations), min: 1, max: runtime.MaxIterationsLimit},
 		},
 	},
 	{

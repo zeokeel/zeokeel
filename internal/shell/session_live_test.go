@@ -23,12 +23,14 @@ import (
 	"github.com/zeokeel/zeokeel/internal/tools"
 )
 
-// m6Step scripts one model call. A step with a tool name asks for that call;
-// otherwise it streams Text as the answer.
+// m6Step scripts one model call. A step with a tool name asks for that call
+// (optionally after Reasoning, matching how real providers think before a
+// call); otherwise it streams Text as the answer.
 type m6Step struct {
-	text string
-	tool string
-	args string
+	text      string
+	reasoning string
+	tool      string
+	args      string
 }
 
 // m6EchoTool is a tool the scripted provider can call; its result is the
@@ -65,19 +67,17 @@ func (p *m6Provider) Stream(_ context.Context, _ runtime.Request) (<-chan runtim
 	}
 	p.mu.Unlock()
 
-	var chunks []runtime.Chunk
+	chunk := runtime.Chunk{Reasoning: step.reasoning, Done: true}
 	if step.tool != "" {
-		chunks = []runtime.Chunk{{
-			ToolCalls: []runtime.ToolCall{{
-				ID:        fmt.Sprintf("call-%d", index+1),
-				Name:      step.tool,
-				Arguments: json.RawMessage(step.args),
-			}},
-			Done: true,
+		chunk.ToolCalls = []runtime.ToolCall{{
+			ID:        fmt.Sprintf("call-%d", index+1),
+			Name:      step.tool,
+			Arguments: json.RawMessage(step.args),
 		}}
 	} else {
-		chunks = []runtime.Chunk{{Text: step.text, Done: true}}
+		chunk.Text = step.text
 	}
+	chunks := []runtime.Chunk{chunk}
 	out := make(chan runtime.Chunk, len(chunks))
 	for _, chunk := range chunks {
 		out <- chunk
@@ -757,6 +757,73 @@ func TestTurnProcessBlocksFoldIndependently(t *testing.T) {
 	tt.Frame()
 	if !tt.HasText("bash · done") {
 		t.Fatalf("turn 1's cards did not return: %v", tt.Texts())
+	}
+}
+
+// TestChatReasoningBeforeToolKeepsProcessAboveAnswer is the real-runtime
+// regression for the ordering bug users hit: the provider thinks (Reasoning),
+// calls a tool, and only then streams the visible answer. The runtime
+// publishes one assistant msgID per turn, so the message is created by the
+// pre-tool Reasoning event; the Chat view must still render
+// user -> process block -> answer, live and after the store-backed reopen.
+func TestChatReasoningBeforeToolKeepsProcessAboveAnswer(t *testing.T) {
+	provider := &m6Provider{steps: []m6Step{
+		{reasoning: "Let me run the first command.", tool: "bash", args: `{"cmd":"first-cmd"}`},
+		{text: "first answer"},
+		{reasoning: "Now read the file.", tool: "read_file", args: `{"path":"later.txt"}`},
+		{text: "second answer"},
+	}}
+	rig := m6NewRig(t, provider, summaryTool{name: "bash"}, summaryTool{name: "read_file"})
+	// Collapsed cards keep both turns inside the 1000-DIP window; the order
+	// assertion reads the card title rows, which render in both modes.
+	if err := rig.store.SetSetting(session.SettingWorkDetails, session.WorkDetailsStandard); err != nil {
+		t.Fatalf("work details setting: %v", err)
+	}
+	m6Submit(t, rig.app, "first question")
+	m6Submit(t, rig.app, "second question")
+
+	assertReasoningFirstAxis(t, rig.app.Snapshot())
+	assertChatTurnOrder(t, rig.app)
+
+	// Reopen: the seq axis becomes the persisted event seq and LastSeq must be
+	// recovered from the last token event, not from the reasoning that created
+	// the message.
+	reopened := rig.reopen(t)
+	assertReasoningFirstAxis(t, reopened.Snapshot())
+	assertChatTurnOrder(t, reopened)
+}
+
+// assertReasoningFirstAxis pins the shape that broke Seq-only ordering: each
+// turn's assistant message starts at its pre-tool Reasoning (Seq before the
+// call) and ends at its visible text (LastSeq after the call).
+func assertReasoningFirstAxis(t *testing.T, snap *state.Snapshot) {
+	t.Helper()
+	find := func(text string) state.Message {
+		t.Helper()
+		for _, m := range snap.Messages {
+			if m.Text == text {
+				return m
+			}
+		}
+		t.Fatalf("message %q missing from snapshot: %+v", text, snap.Messages)
+		return state.Message{}
+	}
+	for _, turn := range []struct {
+		answer string
+		callID string
+	}{
+		{"first answer", "call-1"},
+		{"second answer", "call-3"}, // provider call index 2, so its ID is call-3
+	} {
+		msg := find(turn.answer)
+		tool, ok := snap.Tools[turn.callID]
+		if !ok {
+			t.Fatalf("tool %q missing from snapshot: %+v", turn.callID, snap.Tools)
+		}
+		if !(msg.Seq < tool.StartedSeq && tool.StartedSeq < msg.LastSeq) {
+			t.Fatalf("%q axis = Seq %d, tool %q StartedSeq %d, LastSeq %d; want Seq < tool < LastSeq",
+				turn.answer, msg.Seq, turn.callID, tool.StartedSeq, msg.LastSeq)
+		}
 	}
 }
 

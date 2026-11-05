@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/zeokeel/zeokeel/internal/runtime"
+	"github.com/zeokeel/zeokeel/internal/winproc"
 )
 
 // Git worktree management. The tools create, list and remove linked
@@ -565,6 +566,7 @@ func runGit(ctx context.Context, dir string, timeout time.Duration, args ...stri
 	cmd := exec.CommandContext(runCtx, "git", args...)
 	cmd.Dir = dir
 	cmd.Env = worktreeGitEnv()
+	winproc.Hide(cmd)
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr

@@ -241,17 +241,32 @@ func (a *App) sessionSidePanelWidth(c *ui.Context) float32 {
 	return width
 }
 
+// sessionViewportWidthFor is the width of the session's main column: the
+// content column minus the docked Todo/Team panels. The transcript and the
+// composer both live inside that column (the panels dock beside the pair, not
+// beside the transcript alone), so their centered measures clamp to it.
+func (a *App) sessionViewportWidthFor(c *ui.Context) float32 {
+	viewport := a.contentWidth(c)
+	if panelW := a.sessionSidePanelWidth(c); panelW > 0 && viewport > panelW {
+		viewport -= panelW
+	}
+	return viewport
+}
+
 // sessionComposerWidthFor is the centered Session composer card width: the
 // brand column (sessComposerW, 720 DIPs) clamped by the shared narrow-window
 // insets, so its Send and model controls stay visible at 900-1100px and when
-// the right panel is open.
+// the right panel is open. The composer sits inside the main column beside the
+// Todo/Team panels, so the docked panels narrow the card instead of leaving it
+// painting under their columns.
 func (a *App) sessionComposerWidthFor(c *ui.Context) float32 {
-	w := a.narrowColumnWidth(a.contentWidth(c), sessComposerW)
+	viewport := a.sessionViewportWidthFor(c)
+	w := a.narrowColumnWidth(viewport, sessComposerW)
 	if w < minSessionColumnW {
 		w = minSessionColumnW
 	}
-	if avail := a.contentWidth(c); avail > 0 && w > avail {
-		w = avail
+	if viewport > 0 && w > viewport {
+		w = viewport
 	}
 	if w < 1 {
 		w = 1
@@ -264,13 +279,7 @@ func (a *App) sessionComposerWidthFor(c *ui.Context) float32 {
 // the viewport that remains beside the docked Todo/Team panels. Chat and
 // composer stay aligned instead of the old 845/877 fixed pair.
 func (a *App) sessionTranscriptWidthFor(c *ui.Context) float32 {
-	content := a.contentWidth(c)
-	// The side panels are siblings of the transcript inside the content
-	// column; only what remains is the transcript's real viewport.
-	viewport := content
-	if panelW := a.sessionSidePanelWidth(c); panelW > 0 {
-		viewport -= panelW
-	}
+	viewport := a.sessionViewportWidthFor(c)
 	w := a.narrowColumnWidth(viewport, sessColumnW)
 	if w < minSessionColumnW {
 		w = minSessionColumnW

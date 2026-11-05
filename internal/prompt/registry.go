@@ -144,8 +144,8 @@ var registry = []registration{
 		section: Section{
 			ID:    "plan:policy",
 			Order: OrderPlanPolicy,
-			EN:    "Plan mode is active. Investigate read-only: read files, search, and inspect the workspace, but do not modify files or run mutating commands. When the plan is ready, call the `present` tool with title \"Plan\" and the concrete, ordered steps as Markdown, then stop and wait for the user's approval before making any changes. If the user replies with feedback, revise the plan and present it again.",
-			ZH:    "计划模式已启用。先以只读方式调查：阅读文件、搜索并检查工作区，但不要修改文件或运行会改变状态的命令。计划准备好后，调用 `present` 工具，标题使用 \"Plan\"，内容为具体、有序的 Markdown 步骤，然后停止并等待用户批准后再进行任何更改。如果用户回复反馈，请修订计划并重新展示。",
+			EN:    "Plan mode is active. Investigate read-only: read files, search, and inspect the workspace, but do not modify files or run mutating commands. When the plan is ready, call the `exit_plan_mode` tool with the complete plan as Markdown starting with a `#` heading that names it, then stop and wait for the user's review before making any changes. The user approves the plan (leave plan mode and carry it out from your next step) or keeps planning (their feedback arrives as your next user message; revise the plan and call `exit_plan_mode` again).",
+			ZH:    "计划模式已启用。先以只读方式调查：阅读文件、搜索并检查工作区，但不要修改文件或运行会改变状态的命令。计划准备好后，调用 `exit_plan_mode` 工具，传入完整计划：以命名该计划的 `#` 标题开头的 Markdown，然后停止并等待用户审阅后再进行任何更改。用户会批准计划（退出计划模式并在下一步执行）或选择继续规划（其反馈会作为你的下一条用户消息发来；请修订计划并再次调用 `exit_plan_mode`）。",
 		},
 		when: func(c Context) bool {
 			return c.PlanMode || modeIs(c, "plan", "plan-mode", "plan_mode")

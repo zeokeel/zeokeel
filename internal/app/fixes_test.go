@@ -41,30 +41,35 @@ func registryHas(bundle *AgentBundle, name string) bool {
 	return false
 }
 
-// TestDefaultApprovalGatesMutatingTools covers the tools the default patterns
-// used to miss: process, network, editor and worktree tools.
-func TestDefaultApprovalGatesMutatingTools(t *testing.T) {
+// TestDefaultApprovalGatesSandboxEscapingTools covers the converged
+// Workspace Write defaults: only tools that can act outside the workspace
+// sandbox (or have side effects outside it) require approval. Workspace-
+// confined file writes are sandboxed to the root and no longer ask; the ptc
+// batch no longer asks because its nested calls are gated one by one.
+func TestDefaultApprovalGatesSandboxEscapingTools(t *testing.T) {
 	st, _ := newToolStore(t)
-	patterns := approvalToolPatterns(st)
+	patterns := approvalPatternsForPermission(st, session.PermissionWorkspace)
 	for _, name := range []string{
-		"bash", "write_file", "edit_file", "str_replace_editor",
-		"terminal_open", "terminal_send", "terminal_signal",
-		"job_start", "job_kill", "pwsh", "enter_worktree", "exit_worktree",
-		"web_search", "web_fetch", "mcp__demo__echo",
+		"bash", "pwsh", "terminal_open", "terminal_send", "terminal_signal",
+		"terminal_close", "job_start", "job_kill", "enter_worktree",
+		"exit_worktree", "web_search", "web_fetch", "mcp__demo__echo",
 	} {
-		if !toolNeedsApproval(name, patterns) {
+		if !toolNeedsApprovalWithArgs(name, nil, patterns) {
 			t.Errorf("tool %q is not gated under Workspace Write", name)
 		}
 	}
 	// Read-only polling and listing must stay ungated: the prompt tells the
 	// model to poll job_output, and repeated approval prompts broke normal
-	// background-job use.
+	// background-job use. Workspace-confined file tools are sandboxed to the
+	// root, so they do not prompt either (str_replace_editor "view" never does;
+	// its mutating commands still follow the configured patterns).
 	for _, name := range []string{
 		"read_file", "glob", "grep", "todo", "goal",
 		"terminal_read", "terminal_list", "job_output", "job_list",
+		"write_file", "edit_file", "str_replace_editor", "ptc",
 	} {
-		if toolNeedsApproval(name, patterns) {
-			t.Errorf("read-only tool %q unexpectedly requires approval", name)
+		if toolNeedsApprovalWithArgs(name, nil, patterns) {
+			t.Errorf("tool %q unexpectedly requires approval", name)
 		}
 	}
 }

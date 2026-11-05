@@ -673,7 +673,8 @@ func (a *App) settingsSelectLive(c *ui.Context, t *design.Tokens, value string, 
 
 // settingsSelectorLive draws the branded select trigger for the selectors the
 // native Select cannot express: the permission menu lists descriptions under
-// its options. The popover stays; the chrome is the brand surface.
+// its options. The trigger keeps the settings control look; its popover body
+// uses the app's shared branded menu helpers.
 func (a *App) settingsSelectorLive(c *ui.Context, t *design.Tokens, label string, w float32, open *bool, options []settingsOption) {
 	a.settingsSelectorLiveNamed(c, t, label, label, open, options)
 }
@@ -710,43 +711,47 @@ type settingsOption struct {
 	desc string
 }
 
-// settingsOptionPanel is the popover body; choosing an option closes it and
-// applies the value, which rebuilds the frame.
+// settingsPopoverWidth is the width of a Settings select popover: the shared
+// compact 260-320 menu width, clamped to the settings screen's body column so
+// a menu never spills past the panel (or the independent settings window) it
+// opens in.
+func (a *App) settingsPopoverWidth(c *ui.Context) float32 {
+	width := a.popoverMenuWidth(c)
+	panel, _ := settingsPanelSize(c)
+	body := panel - settingsNavWidth(c) - 2*design.Space6
+	if body > 0 && width > body {
+		width = body
+	}
+	if width < 1 {
+		width = popoverMenuWidthMax
+	}
+	return width
+}
+
+// settingsOptionPanel is the branded surface of a Settings select popover; the
+// app's other menus share its panel and row look. Choosing an option closes it
+// and applies the value, which rebuilds the frame.
 func (a *App) settingsOptionPanel(c *ui.Context, t *design.Tokens, open *bool, options []settingsOption) {
-	th := t.Theme()
-	ui.Column(c).Gap(1).Children(func() {
-		for _, option := range options {
-			height := t.Scale(th.Space(8))
-			if option.desc != "" {
-				height = t.Scale(th.Space(12))
-			}
-			row := ui.ButtonBase(c).FillWidth().Height(height).
-				PaddingX(th.Space(2)).Gap(th.Space(2)).
-				Radius(design.RadiusSM).AlignItems(ui.Center).
-				Label(option.label).Role(ui.RoleMenuItemRadio).
-				Checked(option.selected).Focusable()
-			if option.selected || row.Hovered() {
-				row = row.Background(t.BgHover)
-			}
-			row.Children(func() {
-				if option.desc == "" {
-					settingsTypeText(c, t, design.TypeBody, t.LabelPrimary, option.label)
-					return
-				}
-				ui.Column(c).Gap(1).Children(func() {
-					settingsTypeText(c, t, design.TypeBody, t.LabelPrimary, option.label)
-					settingsTypeText(c, t, design.TypeXXS, t.LabelTertiary, option.desc).MaxLines(2)
-				})
-			})
-			choose := option.choose
-			row.OnClick(func() {
-				*open = false
-				if choose != nil {
-					choose()
-				}
-			})
-		}
+	a.popoverMenuPanelIn(c, t, a.settingsPopoverWidth(c), func() {
+		a.settingsOptionRows(c, t, open, options)
 	})
+}
+
+// settingsOptionRows draws the option rows inside a Settings popover panel:
+// the shared menu rows (13 DIP label, 11 DIP description under it, hover and
+// selected tint, accent check, menu-item-radio role) with the settings
+// popover's close-and-apply behavior.
+func (a *App) settingsOptionRows(c *ui.Context, t *design.Tokens, open *bool, options []settingsOption) {
+	for _, option := range options {
+		option := option
+		choose := option.choose
+		a.popoverMenuRow(c, t, option.label, option.desc, option.selected, nil, func() {
+			*open = false
+			if choose != nil {
+				choose()
+			}
+		})
+	}
 }
 
 // settingsFontSizeLive is the conversation font size control: a brand value
@@ -825,14 +830,18 @@ func (a *App) settingsFontSizeLive(c *ui.Context, t *design.Tokens, cfg session.
 			a.pluginUI().fontMoreOpen = !opened
 		})
 		ui.Popover(c, more, &a.pluginUI().fontMoreOpen, func() {
-			ui.Column(c).Gap(th.Space(2)).Padding(th.Space(1)).Children(func() {
-				settingsTypeText(c, t, design.TypeBody, t.LabelPrimary,
-					a.pluginLocalized("More font settings", "更多字体设置")).FontWeight(500)
-				settingsTypeText(c, t, design.TypeXXS, t.LabelTertiary,
-					a.pluginLocalized(
-						"Conversation text supports 14 or 16 px in this build.",
-						"此版本的对话文字支持 14 或 16 px。"))
-				a.settingsOptionPanel(c, t, &a.pluginUI().fontMoreOpen, []settingsOption{
+			a.popoverMenuPanelIn(c, t, a.settingsPopoverWidth(c), func() {
+				// The popover opens with a short header: the control's title
+				// and the build's 14/16 px explanation, then the two choices.
+				ui.Text(c, a.pluginLocalized("More font settings", "更多字体设置")).FontSize(13).
+					FixedLineHeight(18).FontWeight(500).TextColor(t.LabelPrimary).
+					Padding(design.Space1, design.Space2, 0, design.Space2)
+				ui.Text(c, a.pluginLocalized(
+					"Conversation text supports 14 or 16 px in this build.",
+					"此版本的对话文字支持 14 或 16 px。")).
+					FontSize(11).FixedLineHeight(16).TextColor(t.LabelTertiary).MaxLines(2).
+					Padding(0, design.Space2, design.Space1, design.Space2)
+				a.settingsOptionRows(c, t, &a.pluginUI().fontMoreOpen, []settingsOption{
 					{"14 px", cfg.FontSize == session.FontSizeSmall, func() {
 						a.updateSettings(c, func(s *session.Settings) { s.FontSize = session.FontSizeSmall })
 					}, ""},

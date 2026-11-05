@@ -17,6 +17,7 @@ import (
 	"github.com/zeokeel/zeokeel/internal/design"
 	"github.com/zeokeel/zeokeel/internal/icons"
 	"github.com/zeokeel/zeokeel/internal/store"
+	"github.com/zeokeel/zeokeel/internal/winproc"
 )
 
 // sessionLogTTL bounds how often the Session Log re-reads the event table.
@@ -498,6 +499,7 @@ func runShellCommandFor(ctx context.Context, dir, shellName, command string) ([]
 		}
 	}
 	cmd.Dir = dir
+	winproc.Hide(cmd)
 	return cmd.CombinedOutput()
 }
 

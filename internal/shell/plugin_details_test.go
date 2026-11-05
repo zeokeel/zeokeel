@@ -2,12 +2,15 @@ package shell
 
 import (
 	"errors"
+	"fmt"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 
 	"github.com/egoist/mygo/ui"
 
+	"github.com/zeokeel/zeokeel/internal/runtime"
 	"github.com/zeokeel/zeokeel/internal/session"
 )
 
@@ -670,5 +673,47 @@ func TestWebSearchDetailRequiresAdapterAndAPIKey(t *testing.T) {
 	}
 	if got, err := h.store.GetSetting("plugin.web_search.endpoint"); err != nil || got != "" {
 		t.Fatalf("cleared endpoint = %q, %v; want empty", got, err)
+	}
+}
+
+// TestAgentLoopStepCeilingBounds pins the Agent loop plugin editor after the
+// max-iterations fix: the field defaults to the runtime's high safety ceiling,
+// the editor's upper bound is the runtime limit, and values beyond it are
+// rejected without persisting so the ceiling cannot disappear by accident.
+func TestAgentLoopStepCeilingBounds(t *testing.T) {
+	h := newLiveApp(t, &shellProvider{})
+	h.app.Language = LangEN
+	tt := ui.NewTester(h.app.View, 1600, 1000)
+	if err := tt.Click("Plugins"); err != nil {
+		t.Fatalf("click Plugins: %v", err)
+	}
+	if err := tt.Click("View Agent loop"); err != nil {
+		t.Fatalf("view Agent loop: %v", err)
+	}
+	st := h.app.pluginUI()
+	field := "plugin.agent_loop.max_iterations"
+	if got, want := *st.detailFields[field], strconv.Itoa(runtime.DefaultMaxIterations); got != want {
+		t.Fatalf("default max iterations = %q, want the runtime default %q", got, want)
+	}
+
+	// Above the editor limit: rejected, toast names the bounds, nothing saved.
+	*st.detailFields[field] = strconv.Itoa(runtime.MaxIterationsLimit + 1)
+	if err := tt.Click("Save"); err != nil {
+		t.Fatalf("save out-of-range: %v", err)
+	}
+	if !tt.HasText(fmt.Sprintf("Max iterations must be a number between 1 and %d", runtime.MaxIterationsLimit)) {
+		t.Fatalf("range toast missing: %q", tt.Texts())
+	}
+	if got, _ := h.store.GetSetting(field); got != "" {
+		t.Fatalf("out-of-range save persisted %q", got)
+	}
+
+	// The upper bound itself is accepted and persisted.
+	*st.detailFields[field] = strconv.Itoa(runtime.MaxIterationsLimit)
+	if err := tt.Click("Save"); err != nil {
+		t.Fatalf("save upper bound: %v", err)
+	}
+	if got, _ := h.store.GetSetting(field); got != strconv.Itoa(runtime.MaxIterationsLimit) {
+		t.Fatalf("upper bound persisted = %q, want %d", got, runtime.MaxIterationsLimit)
 	}
 }

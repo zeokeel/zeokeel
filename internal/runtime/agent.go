@@ -17,9 +17,18 @@ import (
 	"github.com/zeokeel/zeokeel/internal/state"
 )
 
-// DefaultMaxIterations bounds how many model/tool round trips one turn may
-// take before the ADK aborts the run.
-const DefaultMaxIterations = 20
+// DefaultMaxIterations is the per-turn ceiling on model/tool round trips when
+// the user has not configured one. It is deliberately high: DSH's agent loop
+// has no fixed step cap (its loop runs until the model answers, the user stops
+// it, or the turn errors), so a long but progressing tool loop must not be cut
+// off. The Plugins editor still lets a user impose a stricter bound; reaching
+// the ceiling ends the turn gracefully instead of failing it (see
+// Agent.completeMaxIterations).
+const DefaultMaxIterations = 200
+
+// MaxIterationsLimit is the largest per-turn ceiling the Plugins editor
+// accepts. It keeps the setting a safety bound rather than an unbounded budget.
+const MaxIterationsLimit = 1000
 
 // Config configures an Agent. Provider is the production path; einoModel is a
 // test seam for injecting an eino model directly (see the package tests) and
@@ -44,8 +53,15 @@ type Config struct {
 	// Tools is the tool registry exposed to the model. Optional.
 	Tools *Registry
 	// MaxIterations caps model/tool round trips per turn. Zero means
-	// DefaultMaxIterations.
+	// DefaultMaxIterations. Reaching the cap completes the turn gracefully: the
+	// work done so far is kept and StepLimitNotice is shown to the user.
 	MaxIterations int
+	// StepLimitNotice returns the assistant text shown when a turn reaches
+	// MaxIterations. The app supplies it so the notice follows the UI language;
+	// nil uses a concise English notice. Because reaching the limit completes
+	// the turn (history and checkpoint are saved), the text should tell the
+	// user how to continue.
+	StepLimitNotice func(limit int) string
 	// History persists conversation state across turns. Nil means the Agent is
 	// stateless and every Run starts from an empty conversation (or from
 	// CheckpointStore when that is configured).
@@ -161,7 +177,10 @@ type Agent struct {
 	gate          Gate
 	reviewer      ToolReviewer
 	maxIterations int
-	settings      SettingsStore
+	// stepLimitNotice renders the assistant notice emitted when a turn reaches
+	// maxIterations; it is never nil after New.
+	stepLimitNotice func(limit int) string
+	settings        SettingsStore
 
 	subagentTools    []string
 	maxSubagentDepth int
@@ -227,6 +246,11 @@ func New(cfg Config) (*Agent, error) {
 		maxDepth = DefaultMaxSubagentDepth
 	}
 
+	stepLimitNotice := cfg.StepLimitNotice
+	if stepLimitNotice == nil {
+		stepLimitNotice = defaultStepLimitNotice
+	}
+
 	a := &Agent{
 		registry:         registry,
 		history:          cfg.History,
@@ -238,6 +262,7 @@ func New(cfg Config) (*Agent, error) {
 		gate:             cfg.Gate,
 		reviewer:         cfg.ToolReviewer,
 		maxIterations:    maxIterations,
+		stepLimitNotice:  stepLimitNotice,
 		settings:         cfg.Settings,
 		subagentTools:    append([]string(nil), cfg.SubagentTools...),
 		maxSubagentDepth: maxDepth,
@@ -639,6 +664,17 @@ func (a *Agent) run(ctx context.Context, cancel context.CancelFunc, sessionID, t
 			break
 		}
 		if ev.Err != nil {
+			// Reaching the per-turn step ceiling is a budget boundary, not a
+			// failure: the turn already did real work and the user can simply
+			// send another message. Finish it as completed with a notice
+			// instead of surfacing eino's NodeRunError. Real model/tool errors,
+			// timeouts and cancellation still fail below.
+			if errors.Is(ev.Err, adk.ErrExceedMaxIterations) {
+				if err := a.completeMaxIterations(ctx, sessionID, msgID, record, prior, usage, pending, emit); err != nil {
+					fail(err)
+				}
+				return
+			}
 			fail(ev.Err)
 			return
 		}
@@ -674,6 +710,68 @@ func (a *Agent) run(ctx context.Context, cancel context.CancelFunc, sessionID, t
 		return
 	}
 	emit(usage.snapshot())
+}
+
+// completeMaxIterations ends a turn that reached MaxIterations as a completed
+// turn rather than a failure. The model/tool work already streamed stays on
+// screen and in history, the user gets an assistant notice that names the
+// ceiling and says how to continue, and the session returns to idle so the next
+// message resumes from the committed conversation. It only returns an error
+// when persisting the completed turn fails, which is a real failure.
+//
+// This is the graceful half of the step-ceiling contract: the ceiling is a
+// safety budget, not an error condition (eino would otherwise wrap it in a
+// NodeRunError that the UI renders as a red failed turn).
+func (a *Agent) completeMaxIterations(
+	ctx context.Context,
+	sessionID, msgID string,
+	record *turnRecord,
+	prior []Message,
+	usage *turnUsage,
+	pending map[string]time.Time,
+	emit func(state.Event) bool,
+) error {
+	// A tool call can only still be pending when the ceiling interrupted a tool
+	// round trip; close it so its card stops spinning.
+	finishPendingTools(pending, errors.New("stopped at the per-turn step limit"), emit)
+
+	notice := a.stepLimitNotice(a.maxIterations)
+	if !emit(state.Token{SessionID: sessionID, MsgID: msgID, Text: notice}) {
+		// The consumer is gone (cancellation): there is nobody to persist for.
+		return nil
+	}
+	record.add(Message{Role: RoleAssistant, Content: notice})
+
+	// Save the capped turn exactly like a successful one: the next message must
+	// see the tools and results that already ran, otherwise "continue" would
+	// restart the work from scratch.
+	turnMessages := record.messages()
+	if a.history != nil {
+		if err := a.history.Append(ctx, sessionID, turnMessages...); err != nil {
+			return fmt.Errorf("runtime: append history for session %q: %w", sessionID, err)
+		}
+	}
+	if a.checkpoints != nil {
+		cp := checkpointFor(prior, turnMessages, msgID, CheckpointPhaseCompleted, time.Now())
+		if err := a.checkpoints.Save(ctx, sessionID, cp); err != nil {
+			return fmt.Errorf("runtime: save checkpoint for session %q: %w", sessionID, err)
+		}
+	}
+
+	if !emit(state.Status{Phase: state.PhaseIdle}) {
+		return nil
+	}
+	emit(usage.snapshot())
+	return nil
+}
+
+// defaultStepLimitNotice is the English step-limit notice used when
+// Config.StepLimitNotice is nil (tests and headless callers). The app supplies
+// localized copy so a Chinese UI shows Chinese text.
+func defaultStepLimitNotice(limit int) string {
+	return fmt.Sprintf(
+		"Reached this turn's step limit (%d steps). The work and results so far are saved; send another message and I'll continue from here.",
+		limit)
 }
 
 // finishPendingTools closes tool calls that never produced a result because

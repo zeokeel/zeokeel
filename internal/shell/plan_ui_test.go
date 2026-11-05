@@ -5,7 +5,6 @@ import (
 	"reflect"
 	"strings"
 	"testing"
-	"time"
 	"unsafe"
 
 	"github.com/egoist/mygo/ui"
@@ -29,8 +28,20 @@ type planHarness struct {
 }
 
 // planBadgeLabelEN is the composer plan badge's accessible name (and value) in
-// the English UI, as the badge's Label.
+// the English UI, as the badge's Label, when plan mode is active and no plan
+// is waiting for review.
 const planBadgeLabelEN = "Plan mode on; click to exit"
+
+// planBadgePendingLabelEN is the badge's label while a submitted plan waits
+// for the user's decision.
+const planBadgePendingLabelEN = "Plan review pending; click to open"
+
+// planExitStep is the scripted exit_plan_mode call the review tests use. The
+// plan starts with a "#" heading because the tool requires that shape.
+var planExitStep = m6Step{
+	tool: "exit_plan_mode",
+	args: `{"plan":"# Plan\n1. Inspect internal/shell in read-only mode\n2. Add the exit tool and review card"}`,
+}
 
 // planBadgeRoleButton is platform.AccessRole's RoleButton value, as the
 // badge's accessibility node reports it.
@@ -64,12 +75,21 @@ func newPlanHarnessWithSession(t *testing.T, openSession bool, steps ...m6Step) 
 		t.Fatalf("CreateWorkspace: %v", err)
 	}
 
+	var ctrl *session.Controller
 	registry := runtime.NewRegistry()
 	if err := registry.Register(tools.NewPresentTool()); err != nil {
 		t.Fatalf("register present: %v", err)
 	}
+	// exit_plan_mode resolves plan mode per calling session, exactly like the
+	// production app's registryOptions.PlanModeForSession wiring.
+	if err := registry.Register(tools.NewExitPlanModeTool(tools.ExitPlanModeConfig{
+		PlanMode: func(sessionID string) bool {
+			return ctrl != nil && ctrl.PlanMode(sessionID)
+		},
+	})); err != nil {
+		t.Fatalf("register exit_plan_mode: %v", err)
+	}
 	provider := &m6Provider{steps: steps}
-	var ctrl *session.Controller
 	agent, err := runtime.New(runtime.Config{
 		Provider:    provider,
 		Tools:       registry,
@@ -198,7 +218,7 @@ func TestPlanModePresentPlanCardShown(t *testing.T) {
 	}
 	h.reload()
 	tt.Frame()
-	if !tt.HasText("Plan review") {
+	if !hasLabel(tt, "Plan review") {
 		t.Fatalf("plan review card missing after enabling plan mode: %v", tt.Texts())
 	}
 	for _, want := range []string{"Plan", "Approve", "Exit plan mode"} {
@@ -206,9 +226,13 @@ func TestPlanModePresentPlanCardShown(t *testing.T) {
 			t.Fatalf("plan review card missing %q: %v", want, tt.Texts())
 		}
 	}
-	// Plan mode on also shows the composer badge (ADR 0008)…
-	if !hasLabel(tt, planBadgeLabelEN) {
-		t.Fatalf("composer plan badge missing with plan mode on: %v", tt.Texts())
+	// Plan mode on with a submitted plan shows the composer badge in its
+	// pending review state (the plan waits for Approve / Keep planning / Exit).
+	if !hasLabel(tt, planBadgePendingLabelEN) {
+		t.Fatalf("pending composer plan badge missing with plan under review: %v", tt.Texts())
+	}
+	if hasLabel(tt, planBadgeLabelEN) {
+		t.Fatalf("plan badge shows the active state while review is pending: %v", tt.Texts())
 	}
 	// …but the header toggle does not come back.
 	if hasLabel(tt, "Plan mode: Off") || hasLabel(tt, "Plan mode: On") {
@@ -281,7 +305,7 @@ func TestPlanModeApproveClearsAndContinues(t *testing.T) {
 	}
 
 	tt.Frame()
-	if tt.HasText("Exit plan mode") || tt.HasText("Plan review") {
+	if tt.HasText("Exit plan mode") || hasLabel(tt, "Plan review") {
 		t.Fatalf("plan review card still visible after Approve: %v", tt.Texts())
 	}
 }
@@ -327,7 +351,7 @@ func TestPlanModeExitNoContinuation(t *testing.T) {
 		t.Fatalf("persisted plan_mode after Exit = %q, want \"false\"", raw)
 	}
 	tt.Frame()
-	if tt.HasText("Plan review") || tt.HasText("Approve") {
+	if hasLabel(tt, "Plan review") || tt.HasText("Approve") {
 		t.Fatalf("plan review card still visible after Exit: %v", tt.Texts())
 	}
 	if !tt.HasText("Presented") {
@@ -515,18 +539,220 @@ func TestPlanCommandWithMessageEnablesAndSubmits(t *testing.T) {
 	}
 }
 
-// TestPlanCommandWithoutSessionToastsAndDoesNotPanic checks the Home/no-session
-// case: typing /plan explains that a session is needed, clears the draft, and
-// never panics or reaches the model.
-func TestPlanCommandWithoutSessionToastsAndDoesNotPanic(t *testing.T) {
+// TestPlanModeExitToolShowsReviewCard proves the independent exit_plan_mode
+// tool submits the plan for review instead of leaving plan mode: the review
+// card shows the tool's plan, the composer badge switches to pending, and
+// Approve then clears the mode and submits exactly one continuation.
+func TestPlanModeExitToolShowsReviewCard(t *testing.T) {
+	h := newPlanHarness(t,
+		planExitStep,
+		m6Step{text: "Plan submitted for review."},
+		m6Step{text: "Executing the approved plan."},
+	)
+	id := h.ctrl.CurrentSessionID()
+	if err := h.ctrl.SetPlanMode(id, true); err != nil {
+		t.Fatalf("SetPlanMode: %v", err)
+	}
+	h.reload()
+	h.submit(t, "plan the change")
+
+	tt := ui.NewTester(h.app.View, 1600, 1000)
+	tt.Frame()
+	if !hasLabel(tt, "Plan review") {
+		t.Fatalf("exit_plan_mode did not open the review card: %v", tt.Texts())
+	}
+	for _, want := range []string{"Approve", "Keep planning", "Exit plan mode",
+		"Inspect internal/shell in read-only mode", "Add the exit tool and review card"} {
+		if !tt.HasText(want) {
+			t.Fatalf("review card missing %q: %v", want, tt.Texts())
+		}
+	}
+	if !hasLabel(tt, planBadgePendingLabelEN) {
+		t.Fatalf("pending badge missing while the plan waits for review: %v", tt.Texts())
+	}
+	if !tt.HasText("Pending") {
+		t.Fatalf("pending badge text missing: %v", tt.Texts())
+	}
+	// The pending state also carries its own accessible name/value and stays a
+	// focusable button, exactly like the active badge.
+	role, value, states, ok := testerAccessNode(t, tt, planBadgePendingLabelEN)
+	if !ok {
+		t.Fatalf("pending badge has no accessibility node labeled %q", planBadgePendingLabelEN)
+	}
+	if role != planBadgeRoleButton || value != planBadgePendingLabelEN || states&accessFocusableState == 0 {
+		t.Fatalf("pending badge a11y = role %d value %q states %d, want a focusable button", role, value, states)
+	}
+	if !h.ctrl.PlanMode(id) {
+		t.Fatal("exit_plan_mode left plan mode before the user decided")
+	}
+
+	beforeCalls := h.provider.callCount()
+	if err := tt.Click("Approve"); err != nil {
+		t.Fatalf("click Approve: %v", err)
+	}
+	if h.ctrl.PlanMode(id) {
+		t.Fatal("Approve left plan mode on")
+	}
+	h.ctrl.Wait()
+	m6WaitIdle(t, h.ctrl)
+	h.reload()
+	if got := h.provider.callCount(); got != beforeCalls+1 {
+		t.Fatalf("provider calls after Approve = %d, want %d", got, beforeCalls+1)
+	}
+	if raw, _ := h.store.GetSetting(session.SessionPlanModeKey(id)); raw != "false" {
+		t.Fatalf("persisted plan_mode after Approve = %q, want \"false\"", raw)
+	}
+	tt.Frame()
+	if hasLabel(tt, "Plan review") {
+		t.Fatalf("review card still visible after Approve: %v", tt.Texts())
+	}
+}
+
+// TestPlanModeKeepPlanningSubmitsFeedback proves Keep planning keeps plan mode
+// and sends the feedback text as the next user message, then returns the badge
+// to its active state until a revised plan arrives.
+func TestPlanModeKeepPlanningSubmitsFeedback(t *testing.T) {
+	h := newPlanHarness(t,
+		planExitStep,
+		m6Step{text: "Plan submitted for review."},
+		m6Step{text: "Revising the plan."},
+	)
+	id := h.ctrl.CurrentSessionID()
+	if err := h.ctrl.SetPlanMode(id, true); err != nil {
+		t.Fatalf("SetPlanMode: %v", err)
+	}
+	h.reload()
+	h.submit(t, "plan the change")
+
+	tt := ui.NewTester(h.app.View, 1600, 1000)
+	tt.Frame()
+	beforeCalls := h.provider.callCount()
+	if err := tt.Click("Feedback for the agent (optional)"); err != nil {
+		t.Fatalf("click feedback input: %v", err)
+	}
+	tt.Type("Add tests for the review branches")
+	tt.Frame()
+	if err := tt.Click("Keep planning"); err != nil {
+		t.Fatalf("click Keep planning: %v", err)
+	}
+	if !h.ctrl.PlanMode(id) {
+		t.Fatal("Keep planning left plan mode")
+	}
+	m6WaitIdle(t, h.ctrl)
+	h.ctrl.Wait()
+	h.reload()
+	if got := h.provider.callCount(); got != beforeCalls+1 {
+		t.Fatalf("provider calls after Keep planning = %d, want %d", got, beforeCalls+1)
+	}
+	messages := h.userMessages(t)
+	if len(messages) == 0 || messages[len(messages)-1].Content != "Add tests for the review branches" {
+		t.Fatalf("last user message = %+v, want the feedback text", messages)
+	}
+	if raw, _ := h.store.GetSetting(session.SessionPlanModeKey(id)); raw != "true" {
+		t.Fatalf("persisted plan_mode after Keep planning = %q, want \"true\"", raw)
+	}
+	tt.Frame()
+	if hasLabel(tt, "Plan review") {
+		t.Fatalf("review card still visible after Keep planning: %v", tt.Texts())
+	}
+	if hasLabel(tt, planBadgePendingLabelEN) {
+		t.Fatalf("badge still pending after the user decided: %v", tt.Texts())
+	}
+	if !hasLabel(tt, planBadgeLabelEN) {
+		t.Fatalf("active plan badge missing after Keep planning: %v", tt.Texts())
+	}
+}
+
+// TestPlanModeReviewDismissKeepsPlan proves Dismiss and Escape close the review
+// card without leaving plan mode, keep the badge pending, and that clicking the
+// pending badge reopens the review.
+func TestPlanModeReviewDismissKeepsPlan(t *testing.T) {
+	h := newPlanHarness(t, planExitStep, m6Step{text: "Plan submitted for review."})
+	id := h.ctrl.CurrentSessionID()
+	if err := h.ctrl.SetPlanMode(id, true); err != nil {
+		t.Fatalf("SetPlanMode: %v", err)
+	}
+	h.reload()
+	h.submit(t, "plan the change")
+
+	tt := ui.NewTester(h.app.View, 1600, 1000)
+	tt.Frame()
+	if err := tt.Click("Dismiss"); err != nil {
+		t.Fatalf("click Dismiss: %v", err)
+	}
+	tt.Frame()
+	if !h.ctrl.PlanMode(id) {
+		t.Fatal("Dismiss left plan mode")
+	}
+	if hasLabel(tt, "Plan review") {
+		t.Fatalf("review card still visible after Dismiss: %v", tt.Texts())
+	}
+	if !hasLabel(tt, planBadgePendingLabelEN) {
+		t.Fatalf("pending badge missing after Dismiss: %v", tt.Texts())
+	}
+
+	// The pending badge reopens the same review instead of leaving the mode.
+	if err := tt.Click(planBadgePendingLabelEN); err != nil {
+		t.Fatalf("click pending badge: %v", err)
+	}
+	tt.Frame()
+	if !h.ctrl.PlanMode(id) {
+		t.Fatal("clicking the pending badge left plan mode")
+	}
+	if !hasLabel(tt, "Plan review") {
+		t.Fatalf("pending badge did not reopen the review: %v", tt.Texts())
+	}
+
+	// Escape is the global topmost-overlay shortcut: it dismisses the review
+	// card and keeps plan mode (it must not fall through to stopping turns or
+	// leaving the mode).
+	tt.Key(0, ui.KeyEscape)
+	tt.Frame()
+	if !h.ctrl.PlanMode(id) {
+		t.Fatal("Escape left plan mode")
+	}
+	if hasLabel(tt, "Plan review") {
+		t.Fatalf("review card still visible after Escape: %v", tt.Texts())
+	}
+	if !hasLabel(tt, planBadgePendingLabelEN) {
+		t.Fatalf("pending badge missing after Escape dismissed the review: %v", tt.Texts())
+	}
+}
+
+// TestPlanModePresentArtifactStillShowsReview proves the legacy present path
+// keeps working next to exit_plan_mode: a present artifact titled "Plan" opens
+// the review card while plan mode is on.
+func TestPlanModePresentArtifactStillShowsReview(t *testing.T) {
+	h := newPlanHarness(t,
+		planPresentStep,
+		m6Step{text: "Plan ready for review."},
+	)
+	id := h.ctrl.CurrentSessionID()
+	if err := h.ctrl.SetPlanMode(id, true); err != nil {
+		t.Fatalf("SetPlanMode: %v", err)
+	}
+	h.reload()
+	h.submit(t, "plan the change")
+
+	tt := ui.NewTester(h.app.View, 1600, 1000)
+	tt.Frame()
+	if !hasLabel(tt, "Plan review") {
+		t.Fatalf("present plan did not open the review card: %v", tt.Texts())
+	}
+	if !hasLabel(tt, planBadgePendingLabelEN) {
+		t.Fatalf("pending badge missing for the present plan: %v", tt.Texts())
+	}
+}
+
+// TestPlanCommandHomeCreatesSession proves /plan on the Home screen with no
+// session now creates the draft session and turns plan mode on instead of only
+// asking for a session.
+func TestPlanCommandHomeCreatesSession(t *testing.T) {
 	h := newPlanHarnessNoSession(t)
 	if id := h.ctrl.CurrentSessionID(); id != "" {
 		t.Fatalf("fixture unexpectedly has a current session %q", id)
 	}
 	tt := ui.NewTester(h.app.View, 1600, 1000)
-	// Choose the palette row the user would click. ui.Context.Toast is only
-	// live while a frame builds, and clicking runs the command there, which is
-	// how the user sees the toast.
 	if err := tt.Click("Composer input"); err != nil {
 		t.Fatalf("click composer: %v", err)
 	}
@@ -535,16 +761,72 @@ func TestPlanCommandWithoutSessionToastsAndDoesNotPanic(t *testing.T) {
 	if err := tt.Click("/plan"); err != nil {
 		t.Fatalf("click /plan row: %v", err)
 	}
+	id := h.ctrl.CurrentSessionID()
+	if id == "" {
+		t.Fatal("/plan on Home did not create a draft session")
+	}
+	if !h.ctrl.PlanMode(id) {
+		t.Fatal("/plan on Home did not turn plan mode on")
+	}
+	if h.app.Screen != Session {
+		t.Fatalf("screen after /plan on Home = %v, want Session", h.app.Screen)
+	}
 	if h.app.draft != "" {
-		t.Fatalf("/plan without a session left the draft %q", h.app.draft)
+		t.Fatalf("/plan on Home left the draft %q", h.app.draft)
 	}
 	if got := h.provider.callCount(); got != 0 {
-		t.Fatalf("/plan without a session model calls = %d, want 0", got)
+		t.Fatalf("bare /plan model calls = %d, want 0", got)
 	}
-	// The toast fades in; advance past that so its text is part of the frame.
-	tt.Advance(300 * time.Millisecond)
+	if raw, _ := h.store.GetSetting(session.SessionPlanModeKey(id)); raw != "true" {
+		t.Fatalf("persisted plan_mode after Home /plan = %q, want \"true\"", raw)
+	}
+	// Exactly one session was created: the command must not re-enter the Home
+	// creation path once the Session screen is up.
+	sessions, err := h.ctrl.ListSessions(context.Background())
+	if err != nil {
+		t.Fatalf("ListSessions: %v", err)
+	}
+	if len(sessions) != 1 {
+		t.Fatalf("sessions after Home /plan = %d, want exactly 1", len(sessions))
+	}
 	tt.Frame()
-	if !tt.HasText("Open a session before enabling plan mode.") {
-		t.Fatalf("missing no-session toast: %v", tt.Texts())
+	if !hasLabel(tt, planBadgeLabelEN) {
+		t.Fatalf("active plan badge missing after Home /plan: %v", tt.Texts())
+	}
+}
+
+// TestPlanCommandHomeWithMessageSubmitsFirstRequest proves /plan <message> on
+// Home creates the session, turns plan mode on, and submits the message as the
+// session's first request (never the slash line).
+func TestPlanCommandHomeWithMessageSubmitsFirstRequest(t *testing.T) {
+	h := newPlanHarnessNoSession(t, m6Step{text: "planning started"})
+	tt := ui.NewTester(h.app.View, 1600, 1000)
+	typeComposer(t, tt, "/plan write the plan tests")
+	m6WaitIdle(t, h.ctrl)
+	h.ctrl.Wait()
+	h.reload()
+
+	id := h.ctrl.CurrentSessionID()
+	if id == "" {
+		t.Fatal("/plan <message> on Home did not create a session")
+	}
+	if !h.ctrl.PlanMode(id) {
+		t.Fatal("/plan <message> on Home did not turn plan mode on")
+	}
+	if got := h.provider.callCount(); got != 1 {
+		t.Fatalf("model calls after Home /plan <message> = %d, want 1", got)
+	}
+	messages := h.userMessages(t)
+	if len(messages) != 1 {
+		t.Fatalf("user messages after Home /plan <message> = %d, want 1", len(messages))
+	}
+	if got := messages[0].Content; got != "write the plan tests" {
+		t.Fatalf("first user message = %q, want %q", got, "write the plan tests")
+	}
+	if h.app.Screen != Session {
+		t.Fatalf("screen after Home /plan <message> = %v, want Session", h.app.Screen)
+	}
+	if raw, _ := h.store.GetSetting(session.SessionPlanModeKey(id)); raw != "true" {
+		t.Fatalf("persisted plan_mode = %q, want \"true\"", raw)
 	}
 }

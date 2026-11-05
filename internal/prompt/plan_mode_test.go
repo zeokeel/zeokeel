@@ -7,8 +7,8 @@ import (
 
 // TestPlanModePromptPolicyIncluded proves the plan policy is gated by the
 // explicit Context.PlanMode flag, tells the agent to investigate read-only and
-// submit the plan through present with the title the shell's review card looks
-// for, and then stop for approval.
+// submit the plan through exit_plan_mode as a headed markdown document, and
+// then stop for review (approve or keep planning).
 func TestPlanModePromptPolicyIncluded(t *testing.T) {
 	ctx := Context{
 		WorkDir:  "/data/mygo",
@@ -25,9 +25,10 @@ func TestPlanModePromptPolicyIncluded(t *testing.T) {
 	for _, want := range []string{
 		"Plan mode is active",
 		"read-only",
-		"`present`",
-		`"Plan"`,
-		"stop and wait for the user's approval",
+		"`exit_plan_mode`",
+		"`#` heading",
+		"stop and wait for the user's review",
+		"keeps planning",
 	} {
 		if !strings.Contains(on, want) {
 			t.Fatalf("plan policy missing %q:\n%s", want, on)
@@ -43,7 +44,7 @@ func TestPlanModePromptPolicyIncluded(t *testing.T) {
 
 	zh := ctx
 	zh.Language = "zh"
-	if !strings.Contains(Compose(zh), "计划模式已启用") {
+	if !strings.Contains(Compose(zh), "计划模式已启用") || !strings.Contains(Compose(zh), "`exit_plan_mode`") {
 		t.Fatalf("Chinese plan policy missing:\n%s", Compose(zh))
 	}
 	// The legacy Mode spelling stays supported for prompt-only callers.

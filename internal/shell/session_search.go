@@ -132,6 +132,13 @@ func (a *App) closeTaskTopmost() {
 		return
 	}
 	if a.Screen == Session && a.Ctrl != nil {
+		// A plan waiting for review is an overlay-like decision: Esc closes
+		// the review card but keeps plan mode on (the pending composer badge
+		// reopens it), so a reflexive Esc never leaves the planning flow.
+		if review := a.planReviewArtifact(); review != nil {
+			a.dismissPlanReview(review.CallID)
+			return
+		}
 		// DSH denies a pending approval with Esc before it considers the
 		// turn; stopping a turn that waits for approval would be a different
 		// action.

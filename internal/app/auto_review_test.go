@@ -1,6 +1,7 @@
 package app
 
 import (
+	"encoding/json"
 	"strings"
 	"testing"
 
@@ -8,9 +9,10 @@ import (
 )
 
 // TestAutoReviewAppWiring proves the app builds the model-backed reviewer only
-// for the auto_review permission, while keeping the ordinary approval patterns
-// and the mutating tool set. Full access still bypasses approval, and Read Only
-// keeps its restricted registry.
+// for the auto_review permission, while keeping the mutating tool set. Auto
+// review keeps its own wider review pattern set (the workspace-confined file
+// tools included), the human-approval modes use the converged default, Full
+// access still bypasses approval, and Read Only keeps its restricted registry.
 func TestAutoReviewAppWiring(t *testing.T) {
 	if got := permissionMode(nil); got != session.PermissionWorkspace {
 		t.Fatalf("permissionMode(nil) = %q, want %q", got, session.PermissionWorkspace)
@@ -21,11 +23,12 @@ func TestAutoReviewAppWiring(t *testing.T) {
 		wantReviewer   bool
 		wantBash       bool
 		wantBashApprov bool
+		wantFileApprov bool
 	}{
-		{permission: session.PermissionAsk, wantBash: false, wantBashApprov: true},
-		{permission: session.PermissionWorkspace, wantBash: true, wantBashApprov: true},
-		{permission: session.PermissionFull, wantBash: true, wantBashApprov: false},
-		{permission: session.PermissionAutoReview, wantReviewer: true, wantBash: true, wantBashApprov: true},
+		{permission: session.PermissionAsk, wantBash: false, wantBashApprov: true, wantFileApprov: false},
+		{permission: session.PermissionWorkspace, wantBash: true, wantBashApprov: true, wantFileApprov: false},
+		{permission: session.PermissionFull, wantBash: true, wantBashApprov: false, wantFileApprov: false},
+		{permission: session.PermissionAutoReview, wantReviewer: true, wantBash: true, wantBashApprov: true, wantFileApprov: true},
 	}
 	for _, tc := range cases {
 		t.Run(tc.permission, func(t *testing.T) {
@@ -60,6 +63,19 @@ func TestAutoReviewAppWiring(t *testing.T) {
 			}
 			if got := bundle.Gate.RequireApproval("bash", nil); got != tc.wantBashApprov {
 				t.Fatalf("bash approval = %v, want %v", got, tc.wantBashApprov)
+			}
+			// Workspace-confined file writes no longer ask a human under the
+			// converged Workspace default; Auto review keeps reviewing them.
+			if got := bundle.Gate.RequireApproval("write_file", json.RawMessage(`{"path":"a.txt","content":"x"}`)); got != tc.wantFileApprov {
+				t.Fatalf("write_file approval = %v, want %v", got, tc.wantFileApprov)
+			}
+			if got := bundle.Gate.RequireApproval("str_replace_editor", json.RawMessage(`{"command":"create","path":"a.txt","file_text":"x"}`)); got != tc.wantFileApprov {
+				t.Fatalf("str_replace_editor create approval = %v, want %v", got, tc.wantFileApprov)
+			}
+			// A read-only view call never asks, even in Auto review's wider set
+			// where str_replace_editor is a gated name.
+			if bundle.Gate.RequireApproval("str_replace_editor", json.RawMessage(`{"command":"view","path":"."}`)) {
+				t.Fatal("str_replace_editor view requires approval")
 			}
 			// Read-only tools never reach the reviewer: the gate's patterns
 			// keep them ungated in every permission mode.
