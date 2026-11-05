@@ -47,7 +47,8 @@
 
 ![Session 原生视觉（浅色）](docs/design/preview/session-native-light.png)
 
-- 下一阶段：发布前真机验证（IME/a11y/DPI/通知矩阵，见 [已知限制](docs/design/known-limitations.md)）、CI headless 视觉黄金冒烟、TextScale 全覆盖、Trajectory 虚拟化；观感迭代参考 [review-round4.md](docs/design/review-round4.md)。`go build/vet/test` 全绿。
+- **验收（2026-11-05）**：独立验收复跑 `objective ①PASS / ②PASS / ③PASS`（[07](docs/research/07-final-acceptance.md)、[08 最终复核](docs/research/08-final-recheck.md)）；`gofmt`/`vet`/`build`/`go test ./...`（17 包）/`ci.sh --fast` 全绿。
+- 下一阶段（v1.1）：发布前真机验证（IME/a11y/DPI/通知矩阵，见 [已知限制](docs/design/known-limitations.md)）、CI headless 视觉黄金冒烟、TextScale 全覆盖、Trajectory 虚拟化；观感迭代参考 [review-round4.md](docs/design/review-round4.md)。
 
 ## 字标（已定）
 

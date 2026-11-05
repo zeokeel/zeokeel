@@ -9,6 +9,12 @@
 - **以下 M0–M13 历史里程碑保留原文记录以追溯**；其中与像素/基线/比对回路相关的内容均为**历史记录，已退役、不再有效**（因此模块清单中不再列 `pixeltest` 包）。
 - 现行质量口径见 `docs/QUALITY.md` 与 `docs/PLAN.md` §10；功能对齐见 `docs/FUNCTIONAL-PARITY.md`；视觉方向见 `docs/decisions/0002-brand-theme-foundation.md`。
 
+## 2026-11-05 收口：独立验收 PASS（objective 全项）
+
+- 独立验收复跑（HEAD `68bc842` → 修复后 `e4e71e4`）：objective ①拆像素门禁与匹配代码 PASS、②品牌原生视觉/桌面交互本地化 PASS、③功能对齐与测试绿色 PASS；FAIL=0、阻塞=0。
+- 门禁证据：`gofmt` 空、`go vet ./...`、`go build ./...`、`go test -count=1 ./...` 18 包全绿（shell ~45–52s）、`check-nocgo` 四目标 PASS、`scripts/ci.sh --fast` PASS；测试/CI 后工作树保持干净（预览测试 opt-in 不写仓库）。
+- 报告：[07-final-acceptance.md](research/07-final-acceptance.md)、[08-final-recheck.md](research/08-final-recheck.md)；遗留仅为真机验证与已知框架限制（[known-limitations.md](design/known-limitations.md)），不阻塞目标达成。
+
 ## 2026-11-05 阶段 6：设计评审批次修复（P0，完成，ALL GREEN）
 
 - **P0-2 对比度**：Light `TextTertiary` `#7E8796` → `#646C7A`，BgBase/BgRaised 5.29、BgSidebar 5.06、BgStrong 4.76:1（全部 ≥4.5:1）；brand_test 增加四组表面 + 层级断言；ADR 0002 §9。
