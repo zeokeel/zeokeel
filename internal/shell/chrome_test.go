@@ -126,34 +126,6 @@ func TestSidebarCollapseRailEveryScreen(t *testing.T) {
 	}
 }
 
-// TestChromeStaticPathUnchanged pins the baseline rule: App{Ctrl: nil}
-// ignores every new live chrome flag, so the five pixel baselines still
-// render the original static shell.
-func TestChromeStaticPathUnchanged(t *testing.T) {
-	app := &App{
-		Screen:           Session,
-		sidebarCollapsed: true,
-		rightOpen:        true,
-		rightSplit:       true,
-		rightFullscreen:  true,
-		wsHoverID:        "ignored",
-	}
-	tt := ui.NewTester(app.View, 1600, 1000)
-	tt.Frame()
-	if !tt.HasText("Workspaces") {
-		t.Fatalf("static shell rendered the collapsed rail: %q", tt.Texts())
-	}
-	if _, ok := tt.Find("Expand sidebar"); ok {
-		t.Fatal("static shell rendered the rail's Expand sidebar control")
-	}
-	if _, ok := tt.Find("Right sidebar"); ok {
-		t.Fatal("static shell rendered the live right sidebar")
-	}
-	if tt.HasText("no PTY") {
-		t.Fatalf("static shell rendered live terminal text: %q", tt.Texts())
-	}
-}
-
 // TestRightSidebarHeaderControls drives DSH's New tab, Split, Fullscreen
 // and Collapse right sidebar controls and checks each has real behavior.
 func TestRightSidebarHeaderControls(t *testing.T) {

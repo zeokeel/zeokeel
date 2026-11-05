@@ -4,7 +4,8 @@ import "github.com/egoist/mygo/ui"
 
 // Style is one styling step: it takes an element and returns it with more
 // properties set. Styles compose with Apply, the Go equivalent of CSS
-// declarations; every screen builds with these and never with raw values.
+// declarations; every screen builds with these, the brand colors of Tokens
+// and the brand metrics of the theme.
 type Style func(ui.Element) ui.Element
 
 // Apply applies styles in order.
@@ -38,10 +39,10 @@ func (t *Tokens) Radius(r float32) Style {
 	return func(el ui.Element) ui.Element { return el.Radius(r) }
 }
 
-// Font sets a baseline type role and the DSH font stack. Applying the
+// Font sets a brand type role and the brand system font family. Applying the
 // family here, at the design-system level, makes every styled text run in
-// the baseline face without per-call edits; raw FontSize calls inherit the
-// same stack from Tokens.Theme().Font.
+// the brand face without per-call edits; raw FontSize calls inherit the same
+// stack from Tokens.Theme().Font.
 func (t *Tokens) Font(role TypeRole) Style {
 	size, line, weight := TypeMetrics(role)
 	return func(el ui.Element) ui.Element {

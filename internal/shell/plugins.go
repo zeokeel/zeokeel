@@ -11,7 +11,7 @@ import (
 const pluginPageWidth float32 = 960
 
 // Colors the plugins page uses that the design tokens do not cover.
-// Values are from baseline/css/02-plugins.json. The "More" label has a
+// Values are from the retired DSH reference design. The "More" label has a
 // theme-aware dark value (46-plugins-dark.json); the accent pill follows
 // the theme's accent token instead of hard-coding the light hue.
 var (
@@ -42,7 +42,7 @@ type pluginRow struct {
 }
 
 // The row glyphs follow the baseline's own artwork: small vector marks in
-// the accent hues of baseline/screenshots/59-plugins-page.png.
+// the accent hues of the retired reference capture.
 var (
 	pluginIconSubagent = ui.MustParseSVG([]byte(`<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24">
 <rect x="9" y="9" width="13" height="13" rx="3.5" fill="#45C2B8"/>
@@ -122,24 +122,8 @@ var (
 )
 
 func (a *App) plugins(c *ui.Context, t *design.Tokens) {
-	builtin := []pluginRow{
-		{"Subagent", "Set Subagent recursion depth, count, and models.", pluginIconSubagent, false, false, false},
-		{"Web search", "Set up the DeepSeek search provider.", pluginIconSearch, false, false, false},
-		{"Agent loop", "Control how the Agent dispatches tool calls.", pluginIconLoop, false, false, false},
-		{"Shell", "Limit how long each command may run and how much it may output.", pluginIconShell, false, false, false},
-	}
-	experimental := []pluginRow{
-		{"Agent Teams", "Enable team collaboration, team tools, the member roster, and the shared task board.", pluginIconTeams, true, true, false},
-		{"Voice input", "Transcribe recordings locally with SenseVoice; first use requires installing dependencies", pluginIconVoice, true, true, false},
-		{"Auto Authorization Review", "Add an Auto review permission mode that uses the model to assess authorization before each tool call.", pluginIconReview, true, true, false},
-		{"Developer Tools", "Inspect and debug raw session data, grouped chat messages, and the NodeJS backend.", pluginIconDev, true, true, false},
-	}
-	// A live shell reads the persisted toggles; the static demo keeps the
-	// baseline's rows exactly (App.Ctrl == nil), so the pixel path is stable.
-	if a.Ctrl != nil {
-		builtin = a.builtinPluginRowsLive()
-		experimental = a.experimentalPluginRowsLive()
-	}
+	builtin := a.builtinPluginRowsLive()
+	experimental := a.experimentalPluginRowsLive()
 	ui.Column(c).Grow(1).AlignItems(ui.Center).Children(func() {
 		a.pluginsHeader(c, t)
 		// The plugin list scrolls under the fixed title block, so the last

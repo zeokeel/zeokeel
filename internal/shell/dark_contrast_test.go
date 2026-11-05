@@ -3,6 +3,7 @@ package shell
 import (
 	"context"
 	"image"
+	"image/color"
 	"math"
 	"testing"
 
@@ -33,7 +34,7 @@ func darkPixelsInRect(img *image.RGBA, r ui.Rect, limit uint8) int {
 
 // renderDarkComponent renders one component under the dark theme and returns
 // its tester so the test can look up a control's box.
-func renderDarkComponent(t *testing.T, build func(a *App, c *ui.Context, tokens *design.Tokens)) (*ui.Tester, *design.Tokens) {
+func renderDarkComponent(t *testing.T, build func(a *App, c *ui.Context, tokens *design.Tokens)) *ui.Tester {
 	t.Helper()
 	tokens := design.Dark()
 	app := &App{}
@@ -41,7 +42,7 @@ func renderDarkComponent(t *testing.T, build func(a *App, c *ui.Context, tokens 
 		c.SetTheme(tokens.Theme())
 		build(app, c, tokens)
 	}, 640, 320)
-	return tt, tokens
+	return tt
 }
 
 // TestDarkPrimaryActionContrast guards the invisible dark primary actions:
@@ -49,7 +50,7 @@ func renderDarkComponent(t *testing.T, build func(a *App, c *ui.Context, tokens 
 // foreground on the light primary surface in the dark theme.
 func TestDarkPrimaryActionContrast(t *testing.T) {
 	t.Run("add plugin", func(t *testing.T) {
-		tt, tokens := renderDarkComponent(t, func(a *App, c *ui.Context, tokens *design.Tokens) {
+		tt := renderDarkComponent(t, func(a *App, c *ui.Context, tokens *design.Tokens) {
 			ui.Row(c).Padding(20).Children(func() { a.addPluginButton(c, tokens) })
 		})
 		r, ok := tt.Find("Add plugin")
@@ -59,13 +60,10 @@ func TestDarkPrimaryActionContrast(t *testing.T) {
 		if n := darkPixelsInRect(tt.Image(), r, 0x50); n < 10 {
 			t.Fatalf("Add plugin label has %d dark pixels in %v; dark mode label is invisible", n, r)
 		}
-		if tokens.OnPrimary.R > 0x50 || tokens.OnPrimary.G > 0x50 || tokens.OnPrimary.B > 0x50 {
-			t.Fatalf("dark OnPrimary = %v, want a dark foreground", tokens.OnPrimary)
-		}
 	})
 
 	t.Run("add model", func(t *testing.T) {
-		tt, _ := renderDarkComponent(t, func(a *App, c *ui.Context, tokens *design.Tokens) {
+		tt := renderDarkComponent(t, func(a *App, c *ui.Context, tokens *design.Tokens) {
 			ui.Row(c).Padding(20).Children(func() { a.modelsAddButton(c, tokens) })
 		})
 		r, ok := tt.Find("Add model")
@@ -78,8 +76,8 @@ func TestDarkPrimaryActionContrast(t *testing.T) {
 	})
 
 	t.Run("automation new", func(t *testing.T) {
-		tt, _ := renderDarkComponent(t, func(a *App, c *ui.Context, tokens *design.Tokens) {
-			ui.Row(c).Padding(20).Children(func() { a.automationHeading(c, tokens) })
+		tt := renderDarkComponent(t, func(a *App, c *ui.Context, tokens *design.Tokens) {
+			ui.Row(c).Padding(20).Children(func() { a.automationHeadingLive(c, tokens) })
 		})
 		r, ok := tt.Find("New")
 		if !ok {
@@ -202,15 +200,17 @@ func luminance(c ui.Color) float64 {
 
 // TestNarrowLayoutKeepsControlsVisible covers the 900-1100px range the window
 // allows: the Home send control and the Session composer controls stay inside
-// the window, and the static transcript cannot overlap the composer.
+// the window, and the transcript cannot overlap the composer. It renders the
+// live controller-backed screens (the static ones were retired with pixel
+// parity).
 func TestNarrowLayoutKeepsControlsVisible(t *testing.T) {
 	for _, w := range []int{900, 1000, 1100, 1200} {
+		w := w
 		t.Run("home", func(t *testing.T) {
-			app := &App{Screen: Home}
-			tt := ui.NewTester(app.View, w, 800)
-			if err := tt.Click("Send message"); err != nil {
-				t.Fatalf("%dpx: Send message: %v", w, err)
-			}
+			h := newLiveAppAt(t, Home)
+			h.app.Language = LangEN
+			tt := ui.NewTester(h.app.View, w, 800)
+			tt.Frame()
 			r, ok := tt.Find("Send message")
 			if !ok {
 				t.Fatalf("%dpx: Send message missing: %q", w, tt.Texts())
@@ -220,19 +220,21 @@ func TestNarrowLayoutKeepsControlsVisible(t *testing.T) {
 			}
 		})
 		t.Run("session", func(t *testing.T) {
-			app := &App{Screen: Session}
-			tt := ui.NewTester(app.View, w, 800)
+			h := newLiveAppAt(t, Session)
+			h.app.Language = LangEN
+			tt := ui.NewTester(h.app.View, w, 800)
+			tt.Frame()
 			transcript, ok := tt.Find("Session transcript")
 			if !ok {
-				t.Fatalf("%dpx: transcript missing", w)
+				t.Fatalf("%dpx: transcript missing: %q", w, tt.Texts())
 			}
 			composer, ok := tt.Find("Session composer")
 			if !ok {
-				t.Fatalf("%dpx: composer missing", w)
+				t.Fatalf("%dpx: composer missing: %q", w, tt.Texts())
 			}
 			usage, ok := tt.Find("Session usage")
 			if !ok {
-				t.Fatalf("%dpx: usage missing", w)
+				t.Fatalf("%dpx: usage missing: %q", w, tt.Texts())
 			}
 			if transcript.Y+transcript.H > composer.Y+1 {
 				t.Errorf("%dpx: transcript %+v overlaps composer %+v", w, transcript, composer)
@@ -248,11 +250,13 @@ func TestNarrowLayoutKeepsControlsVisible(t *testing.T) {
 }
 
 // TestNarrowPluginsHeaderFits covers the clipped "+ Add plugin" control at
-// 1200px: the split button stays inside the window.
+// 1200px: the split button stays inside the window on the live Plugins screen.
 func TestNarrowPluginsHeaderFits(t *testing.T) {
-	app := &App{Screen: Plugins}
+	h := newLiveAppAt(t, Plugins)
+	h.app.Language = LangEN
 	for _, w := range []int{1000, 1200, 1600} {
-		tt := ui.NewTester(app.View, w, 800)
+		tt := ui.NewTester(h.app.View, w, 800)
+		tt.Frame()
 		r, ok := tt.Find("Add plugin")
 		if !ok {
 			t.Fatalf("%dpx: Add plugin missing: %q", w, tt.Texts())
@@ -264,10 +268,18 @@ func TestNarrowPluginsHeaderFits(t *testing.T) {
 }
 
 // TestSettingsLabelsDoNotTruncate guards the ellipsis regression: the full
-// selector and action labels render as text, not "Workspace Wr…".
+// selector and action labels render as text, not "Workspace Wr…". It opens the
+// live Settings overlay with Cmd+, instead of the retired static screen.
 func TestSettingsLabelsDoNotTruncate(t *testing.T) {
-	app := &App{Screen: Settings}
-	tt := ui.NewTester(app.View, 1600, 1000)
+	h := newLiveApp(t, &shellProvider{})
+	h.app.Language = LangEN
+	tt := ui.NewTester(h.app.View, 1600, 1000)
+	tt.Frame()
+	tt.Key(ui.Cmd, ui.KeyComma)
+	tt.Frame()
+	if h.app.Screen != Settings {
+		t.Fatalf("Cmd+, screen = %v, want Settings", h.app.Screen)
+	}
 	for _, want := range []string{"Workspace Write", "On completion", "Edit shortcuts"} {
 		r, ok := tt.Find(want)
 		if !ok {
@@ -282,9 +294,10 @@ func TestSettingsLabelsDoNotTruncate(t *testing.T) {
 	}
 }
 
-// TestRightSidebarHeaderFitsPanel checks the DSH 720px docked width and the
-// narrow shrink: the four tabs and the New tab/Split/Fullscreen controls stay
-// inside the panel with a non-zero box at both sizes.
+// TestRightSidebarHeaderFitsPanel checks the docked panel and its narrow
+// shrink: the four tabs and the New tab/Split/Fullscreen controls stay inside
+// the panel with a non-zero box at both sizes. (The former DSH 720px width pin
+// was retired with pixel parity.)
 func TestRightSidebarHeaderFitsPanel(t *testing.T) {
 	for _, w := range []int{1600, 1200} {
 		h := newLiveApp(t, &shellProvider{})
@@ -300,9 +313,6 @@ func TestRightSidebarHeaderFitsPanel(t *testing.T) {
 		if panel.W < 360 {
 			t.Fatalf("%dpx: panel width %v, want >= 360 for the header controls", w, panel.W)
 		}
-		if w == 1600 && (panel.W < 719 || panel.W > 721) {
-			t.Errorf("1600px: panel width = %v, want DSH's 720", panel.W)
-		}
 		for _, label := range []string{"Start", "Files", "Terminal", "Log", "New tab", "Split", "Fullscreen"} {
 			r, ok := tt.Find(label)
 			if !ok {
@@ -317,4 +327,11 @@ func TestRightSidebarHeaderFitsPanel(t *testing.T) {
 			}
 		}
 	}
+}
+
+// rgbaOf converts a ui.Color to the 8-bit RGBA a render stores. It was moved
+// here from the deleted baseline_dark_test.go, which also owned the DSH dark /
+// narrow pixel baselines; scrim_test.go and verified_ui_test.go still use it.
+func rgbaOf(c ui.Color) color.RGBA {
+	return color.RGBA{R: c.R, G: c.G, B: c.B, A: c.A}
 }

@@ -7,7 +7,6 @@ import (
 
 	"github.com/egoist/mygo/ui"
 
-	"github.com/zeokeel/zeokeel/internal/pixeltest"
 	"github.com/zeokeel/zeokeel/internal/session"
 )
 
@@ -74,27 +73,6 @@ func TestSplitLeavesFullscreen(t *testing.T) {
 	}
 }
 
-// TestNarrowRightPanelWidth covers DSH's 520px docked panel at 1200x800
-// (400px of main content), instead of the old 560px clamp.
-func TestNarrowRightPanelWidth(t *testing.T) {
-	h := newLiveApp(t, &shellProvider{})
-	h.app.Screen = Session
-	h.app.Language = LangEN
-	h.app.rightOpen = true
-	tt := ui.NewTester(h.app.View, 1200, 800)
-	tt.Frame()
-	panel, ok := tt.Find("Right sidebar")
-	if !ok {
-		t.Fatalf("right panel missing: %q", tt.Texts())
-	}
-	if panel.W < 518 || panel.W > 522 {
-		t.Fatalf("docked panel width = %v, want 520 (main 400)", panel.W)
-	}
-	if panel.X < 678 || panel.X > 682 {
-		t.Fatalf("docked panel x = %v, want 680", panel.X)
-	}
-}
-
 // TestInlineSearchIsNotADialog covers DSH screen 78: the sidebar search
 // expands an inline field with a Clear control and filters the sidebar; it does
 // not open a modal.
@@ -147,8 +125,9 @@ func TestInlineSearchIsNotADialog(t *testing.T) {
 	}
 }
 
-// TestViewOptionsBaselineGroups covers the nine baseline option labels and
-// the popover's right-aligned 268px geometry over the sidebar.
+// TestViewOptionsBaselineGroups covers the nine View-options labels. (The
+// former DSH 268px popover geometry pin was retired with pixel parity; the
+// labels are the product behaviour this test keeps.)
 func TestViewOptionsBaselineGroups(t *testing.T) {
 	h := newLiveApp(t, &shellProvider{})
 	h.app.Screen = Home
@@ -167,16 +146,6 @@ func TestViewOptionsBaselineGroups(t *testing.T) {
 		if !tt.HasText(label) {
 			t.Fatalf("view options missing %q: %q", label, tt.Texts())
 		}
-	}
-	item, ok := tt.Find("WorkSpace")
-	if !ok {
-		t.Fatal("WorkSpace item missing")
-	}
-	if item.X < 12 || item.X+item.W > 281 {
-		t.Fatalf("view options item = %+v, want it inside the sidebar (x 12..280)", item)
-	}
-	if item.W < 240 {
-		t.Fatalf("view options item width = %v, want the 268px popover", item.W)
 	}
 }
 
@@ -281,74 +250,6 @@ func TestAddWorkspaceRowRemoved(t *testing.T) {
 	}
 }
 
-// TestNarrowContentColumns covers DSH's 1200x800 geometry: the Home stack and
-// composer are min(baseline, contentWidth-212) = 708px at x≈381, and the
-// Session composer follows the same clamp.
-func TestNarrowContentColumns(t *testing.T) {
-	home := &App{Screen: Home}
-	tt := ui.NewTester(home.View, 1200, 800)
-	tt.Frame()
-	card, ok := tt.Find("Home composer")
-	if !ok {
-		t.Fatalf("home composer missing: %q", tt.Texts())
-	}
-	if card.W < 706 || card.W > 712 {
-		t.Fatalf("home composer width = %v, want 708 (+2 border)", card.W)
-	}
-	if card.X < 380 || card.X > 386 {
-		t.Fatalf("home composer x = %v, want ~381", card.X)
-	}
-
-	sess := &App{Screen: Session}
-	st := ui.NewTester(sess.View, 1200, 800)
-	st.Frame()
-	composer, ok := st.Find("Session composer")
-	if !ok {
-		t.Fatalf("session composer missing: %q", st.Texts())
-	}
-	if composer.W < 700 || composer.W > 716 {
-		t.Fatalf("session composer width = %v, want 708", composer.W)
-	}
-}
-
-// TestNarrowPageColumns covers DSH's 824px Plugins/Automation column in the
-// 920px main area (48px gutters) at 1200x800.
-func TestNarrowPageColumns(t *testing.T) {
-	plugins := &App{Screen: Plugins}
-	pt := ui.NewTester(plugins.View, 1200, 800)
-	pt.Frame()
-	header, ok := pt.Find("Plugins page header")
-	if !ok {
-		t.Fatalf("plugins header missing: %q", pt.Texts())
-	}
-	if header.X < 326 || header.X > 330 || header.W < 822 || header.W > 826 {
-		t.Fatalf("plugins column = %+v, want x=328 w=824", header)
-	}
-	if add, ok := pt.Find("Add plugin"); !ok {
-		t.Fatalf("Add plugin missing")
-	} else if add.X+add.W > 1152.5 {
-		t.Fatalf("Add plugin right edge = %v, want <= 1152", add.X+add.W)
-	}
-
-	automation := &App{Screen: Automation}
-	at := ui.NewTester(automation.View, 1200, 800)
-	at.Frame()
-	heading, ok := at.Find("Automation page heading")
-	if !ok {
-		t.Fatalf("automation heading missing: %q", at.Texts())
-	}
-	if heading.X < 326 || heading.X > 330 || heading.W < 822 || heading.W > 826 {
-		t.Fatalf("automation column = %+v, want x=328 w=824", heading)
-	}
-	search, ok := at.Find("Search automation tasks")
-	if !ok {
-		t.Fatalf("automation search missing")
-	}
-	if search.X < 326 || search.X > 330 || search.X+search.W > 1152.5 {
-		t.Fatalf("automation search = %+v, want 328..1152", search)
-	}
-}
-
 // TestComposerPermissionUsesSessionMode covers the composer chip reading the
 // global default while the session's effective mode differed.
 func TestComposerPermissionUsesSessionMode(t *testing.T) {
@@ -377,54 +278,72 @@ func TestComposerPermissionUsesSessionMode(t *testing.T) {
 	}
 }
 
-// TestNewSessionIconCrop compares the sidebar's New Session glyph with the
-// baseline's circled plus. The old bare plus left the ring unpainted, which
-// this crop detects even though the label and button geometry are unchanged.
-func TestNewSessionIconCrop(t *testing.T) {
-	app := &App{Screen: Home}
-	got := ui.Render(app.View, 1600, 1000, 1)
-	want, err := pixeltest.LoadPNG("../../baseline/screenshots/00-home.png")
-	if err != nil {
-		t.Fatalf("load baseline: %v", err)
-	}
-	// The 16px glyph sits inside the 252x38 primary button at y=70.
-	res := pixeltest.Compare(got, want, image.Rect(80, 76, 108, 104), 40)
-	if res.Ratio > 0.25 {
-		t.Fatalf("New Session icon crop diff = %.1f%%, want <= 25%%", res.Ratio*100)
-	}
-}
-
 // TestCredentialFieldsAreMasked covers the API-key fields that painted the
 // stored secret as plain text: two different keys of equal length must render
-// identically when the input is masked.
+// identically when the input is masked. It renders the live Settings dialogs
+// (Models add/edit and the plugin detail editor) through App.View; the retired
+// static fixture now renders an empty frame, which made the old assertion
+// compare two blank images.
 func TestCredentialFieldsAreMasked(t *testing.T) {
-	renderModel := func(key string) *image.RGBA {
-		app := &App{Screen: Settings}
-		st := app.shellUI()
+	renderModel := func(key string) *ui.Tester {
+		h := newLiveApp(t, &shellProvider{})
+		h.app.Language = LangEN
+		h.app.Screen = Settings
+		st := h.app.shellUI()
+		st.settingsTab = settingsTabModels
 		st.modelDraft = modelDraft{id: "model-1", name: "Test", apiKey: key}
 		st.modelDialog = true
-		return ui.Render(app.View, 1600, 1000, 1)
+		tt := ui.NewTester(h.app.View, 1600, 1000)
+		tt.Frame()
+		return tt
 	}
-	assertMasked := func(label string, render func(string) *image.RGBA) {
+	assertMasked := func(label string, render func(string) *ui.Tester, wantTexts ...string) {
 		t.Helper()
 		a, b := render("sk-AAAA"), render("sk-BBBB")
-		if a == nil || b == nil {
-			t.Fatalf("%s: nil render", label)
+		// The dialog must really be painted: the live-only App.View returns an
+		// empty frame for a Ctrl-less App, and comparing two blank frames would
+		// pass for the wrong reason.
+		for _, want := range wantTexts {
+			if !a.HasText(want) {
+				t.Fatalf("%s: dialog not painted (missing %q): %q", label, want, a.Texts())
+			}
 		}
-		if res := pixeltest.Compare(a, b, a.Bounds(), 0); res.Changed != 0 {
+		if changed := differingPixels(a.Image(), b.Image()); changed != 0 {
 			t.Fatalf("%s: secret is painted in clear text: %d pixels differ between two keys",
-				label, res.Changed)
+				label, changed)
 		}
 	}
-	assertMasked("model API key", renderModel)
+	assertMasked("model API key", renderModel, "Edit model", "API key")
 
-	renderPlugin := func(key string) *image.RGBA {
-		app := &App{Screen: Settings}
-		st := app.pluginUI()
+	renderPlugin := func(key string) *ui.Tester {
+		h := newLiveApp(t, &shellProvider{})
+		h.app.Language = LangEN
+		h.app.Screen = Settings
+		st := h.app.pluginUI()
 		st.detailOpen = true
 		st.detailKey = "web_search"
 		st.detailFields = map[string]*string{"websearch.api_key": &key}
-		return ui.Render(app.View, 1600, 1000, 1)
+		tt := ui.NewTester(h.app.View, 1600, 1000)
+		tt.Frame()
+		return tt
 	}
-	assertMasked("web search API key", renderPlugin)
+	assertMasked("web search API key", renderPlugin, "Web search settings", "API key (Bearer token)")
+}
+
+// differingPixels counts the pixels that differ between two renders of the same
+// size; -1 means the inputs are not comparable. It replaces the retired
+// pixeltest.Compare(..., tolerance 0) call in the credential-masking test.
+func differingPixels(a, b *image.RGBA) int {
+	if a == nil || b == nil || a.Bounds() != b.Bounds() {
+		return -1
+	}
+	n := 0
+	for y := a.Bounds().Min.Y; y < a.Bounds().Max.Y; y++ {
+		for x := a.Bounds().Min.X; x < a.Bounds().Max.X; x++ {
+			if a.RGBAAt(x, y) != b.RGBAAt(x, y) {
+				n++
+			}
+		}
+	}
+	return n
 }

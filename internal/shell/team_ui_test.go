@@ -102,10 +102,3 @@ func TestTeamGoalBannerAndPanel(t *testing.T) {
 		t.Fatalf("progress was not clamped: %q", tt.Texts())
 	}
 }
-
-func TestTeamPanelStaticPathHidden(t *testing.T) {
-	tt := ui.NewTester(renderTeamPreview(&App{}), 900, 400)
-	if tt.HasText("Goal") || tt.HasText("Team") {
-		t.Fatalf("static path rendered live panels: %q", tt.Texts())
-	}
-}

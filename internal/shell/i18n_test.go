@@ -93,43 +93,57 @@ func TestCatalogFixedKeys(t *testing.T) {
 	}
 }
 
-func TestStaticAppEnglish(t *testing.T) {
-	app := &App{}
-	if app.lang() != LangEN {
-		t.Fatalf("static App language = %q, want %q", app.lang(), LangEN)
+// TestLiveAppEnglish covers the package's English test default end to end on
+// the controller-backed Home screen (TestMain pins the fallback language to
+// English for the existing English-oriented UI tests).
+func TestLiveAppEnglish(t *testing.T) {
+	h := newLiveAppAt(t, Home)
+	if got := h.app.lang(); got != LangEN {
+		t.Fatalf("live App language = %q, want %q", got, LangEN)
 	}
-	if got := app.T("home.hero_title"); got != "Into the Unknown" {
-		t.Fatalf("static T(home.hero_title) = %q", got)
+	if got := h.app.T("home.hero_title"); got != "Into the Unknown" {
+		t.Fatalf("live T(home.hero_title) = %q", got)
 	}
-	tt := ui.NewTester(app.View, 1600, 1000)
+	tt := ui.NewTester(h.app.View, 1600, 1000)
+	tt.Frame()
 	if !tt.HasText("Into the Unknown") || !tt.HasText("Preview") || !tt.HasText("More") {
-		t.Fatalf("static App did not render English: %q", tt.Texts())
+		t.Fatalf("live App did not render English: %q", tt.Texts())
 	}
 	if tt.HasText("驶向未知") {
-		t.Fatalf("static App rendered Chinese: %q", tt.Texts())
+		t.Fatalf("live App rendered Chinese: %q", tt.Texts())
 	}
-	// Explicit test hook and explicit field both work on a static App.
-	app.SetLanguageForTest(LangZH)
-	if got := app.T("home.hero_title"); got != "驶向未知" {
-		t.Fatalf("SetLanguageForTest(zh): %q", got)
+	// Explicit test hook and explicit field both work on a live App; the next
+	// frame follows the switch immediately.
+	h.app.SetLanguageForTest(LangZH)
+	if got := h.app.T("home.hero_title"); got != "驶向未知" {
+		t.Fatalf("SetLanguageForTest(zh) on live App: %q", got)
+	}
+	tt.Frame()
+	if !tt.HasText("驶向未知") {
+		t.Fatalf("live App did not rerender in Chinese: %q", tt.Texts())
 	}
 }
 
 func TestLanguageSwitchRerenders(t *testing.T) {
-	en := ui.NewTester((&App{Language: LangEN}).View, 1600, 1000)
-	zh := ui.NewTester((&App{Language: LangZH}).View, 1600, 1000)
+	render := func(lang Lang) string {
+		h := newLiveAppAt(t, Home)
+		h.app.SetLanguageForTest(lang)
+		tt := ui.NewTester(h.app.View, 1600, 1000)
+		tt.Frame()
+		return strings.Join(tt.Texts(), "\n")
+	}
+	enText := render(LangEN)
+	zhText := render(LangZH)
 
-	enText := strings.Join(en.Texts(), "\n")
-	zhText := strings.Join(zh.Texts(), "\n")
 	if enText == zhText {
 		t.Fatal("English and Chinese renders produced identical text")
 	}
-	for _, want := range []string{"Into the Unknown", "Preview", "Full access", "More"} {
+	for _, want := range []string{"Into the Unknown", "Preview", "Workspace Write", "More"} {
 		if !strings.Contains(enText, want) {
 			t.Errorf("English render missing %q", want)
 		}
 	}
-	for _, want := range []string{"驶向未知", "预览", "完全访问", "更多"} {
+	for _, want := range []string{"驶向未知", "预览", "工作区写入", "更多"} {
 		if !strings.Contains(zhText, want) {
 			t.Errorf("Chinese render missing %q", want)
 		}

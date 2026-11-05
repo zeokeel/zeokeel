@@ -294,13 +294,21 @@ func containsText(texts []string, want string) bool {
 	return false
 }
 
-// TestDarkAccentBadges guards the dark-theme accent pills and status colors.
+// TestDarkAccentBadges guards the dark-theme accent pills and status colors
+// under the brand theme: the tag accent and the primary accent keep WCAG AA
+// contrast on the dark surfaces, the plugin "More" action stays readable, and
+// the danger color is a theme-aware semantic red with AA text contrast instead
+// of the retired DSH hex samples (#EC1313 / #F25A5A).
 func TestDarkAccentBadges(t *testing.T) {
 	dark := design.Dark()
-	if homeTagAccent(dark) != dark.Accent {
-		t.Errorf("dark reasoning-effort tag = %v, want the dark accent %v", homeTagAccent(dark), dark.Accent)
+	if homeTagAccent(dark) == homeTagAccent(design.Light()) {
+		t.Errorf("reasoning-effort tag accent is not theme-aware: %v", homeTagAccent(dark))
 	}
 	for _, bg := range []ui.Color{dark.BgBase, dark.BgRaised} {
+		if got := contrastRatio(homeTagAccent(dark), bg); got < 4.5 {
+			t.Errorf("dark tag accent %v on %v contrast = %.2f, want >= 4.5",
+				homeTagAccent(dark), bg, got)
+		}
 		if got := contrastRatio(dark.Accent, bg); got < 4.5 {
 			t.Errorf("dark accent on %v contrast = %.2f, want >= 4.5", bg, got)
 		}
@@ -308,11 +316,15 @@ func TestDarkAccentBadges(t *testing.T) {
 	if got := pluginMoreColor(dark); got != pluginMoreLabelDark {
 		t.Errorf("dark plugin More = %v, want %v", got, pluginMoreLabelDark)
 	}
-	if design.Light().Danger != ui.Hex("#EC1313") {
-		t.Errorf("light danger = %v, want #EC1313", design.Light().Danger)
+	// Danger is a semantic status color: AA text contrast on the page in both
+	// themes, and it adapts to the appearance instead of one DSH hex sample.
+	if design.Light().Danger == dark.Danger {
+		t.Errorf("danger color is not theme-aware: %v", design.Light().Danger)
 	}
-	if dark.Danger != ui.Hex("#F25A5A") {
-		t.Errorf("dark danger = %v, want #F25A5A", dark.Danger)
+	for _, tokens := range []*design.Tokens{design.Light(), dark} {
+		if got := contrastRatio(tokens.Danger, tokens.BgBase); got < 4.5 {
+			t.Errorf("danger on %v contrast = %.2f, want >= 4.5", tokens.BgBase, got)
+		}
 	}
 	for _, tokens := range []*design.Tokens{design.Light(), dark} {
 		if got := contrastRatio(tokens.WarningText, tokens.BgBase); got < 4.5 {

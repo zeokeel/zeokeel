@@ -1,8 +1,0 @@
-[
-  {"act":"goto","url":"/","wait":6000},
-  {"act":"clickxy","x":1010,"y":684,"wait":1200},
-  {"act":"dump","out":".probe/controls/52-home-titles.json"},
-  {"act":"clickxy","x":85,"y":331,"wait":9000},
-  {"act":"dump","out":".probe/controls/53-session.json"},
-  {"act":"shot","out":".probe/shots/53-session.png"}
-]

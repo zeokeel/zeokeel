@@ -161,12 +161,3 @@ func TestModelsSettingsCRUD(t *testing.T) {
 		t.Fatalf("DefaultModelLabel with no default = %q, want No model", got)
 	}
 }
-
-// TestModelBadgeStaticKeepsBaselineLabel checks the static shell keeps the
-// baseline's demo label when the badge helper is used outside a live app.
-func TestModelBadgeStaticKeepsBaselineLabel(t *testing.T) {
-	app := &App{}
-	if got := app.DefaultModelLabel(); got != "DeepSeek-V4.1-Flash" {
-		t.Fatalf("static DefaultModelLabel = %q, want baseline label", got)
-	}
-}

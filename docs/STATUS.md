@@ -2,33 +2,49 @@
 
 更新时间：2026-11-05
 
-## 基线文档：100% 收口
-- 80 张屏/状态截图、53 份全元素 CSS、108 条逐控件行为、216 张前后对比
-- 入口：`docs/baseline/index.md`、`docs/baseline/coverage.md`
+## 2026-11-05 方向变更（当前状态）
 
-## M0 进行中
+- **用户决策**：ZeoKeel = DSH 桌面替代/迁移器 + 独立品牌产品；**功能对齐 DSH，视觉与交互自有，停止 DSH 像素级对齐**。见 [ADR 0001：退役 DSH 像素对齐基建](decisions/0001-retire-dsh-pixel-parity.md)。
+- 已删除并归档：`baseline/`（截图/控件/CSS/行为数据）、基线文档目录、`artifacts/`、`scripts/cdp.mjs`、`scripts/capture/`、`internal/pixeltest/`（归档包 `/data/zeokeel-backups/parity-assets-20261105.tar.gz`，回滚点 tag `pre-native-ui`）；CI/门禁像素步骤与像素指标同步移除（`scripts/ci.sh`、`scripts/evolve/gates.sh`）。
+- **以下 M0–M13 历史里程碑保留原文记录以追溯**；其中与像素/基线/比对回路相关的内容均为**历史记录，已退役、不再有效**（因此模块清单中不再列 `pixeltest` 包）。
+- 现行质量口径见 `docs/QUALITY.md` 与 `docs/PLAN.md` §10；功能对齐见 `docs/FUNCTIONAL-PARITY.md`；视觉方向见 `docs/decisions/0002-brand-theme-foundation.md`。
+
+## 2026-11-05 阶段 1 完成：像素门禁与静态屏拆除（ALL GREEN）
+
+- **像素门禁已拆**：`TestScreensBaseline` / `TestScreensDarkNarrow` / CI 6 次像素调用 / `internal/pixeltest` / `baseline/` / `docs/baseline/` / `artifacts/` / `scripts/cdp.mjs` / `scripts/capture/` 全部移除（归档包与回滚 tag 见上）。
+- **静态五屏已拆**：home/session/plugins/settings/automation 的 `Ctrl == nil` 静态渲染路径与静态专用 helper 已删除；`App.View` 只渲染 live（无控制器时绘制空帧）。生产 `internal/shell` 生产代码 16,288 → 15,343 行。
+- **测试已迁移 live**：parity 专项测试删除 7 文件/17 个 Test；13 个静态契约测试删除；30 个产品行为测试迁移到 live fixture（新增 `newLiveAppAt` / `newLiveAppWithSnapshot`）。shell 测试 14,514 → 13,233 行，测试函数全仓 838 → 812。
+- **品牌主题地基**：新增 `internal/brand`（logo 色板 + mygo `ui.Theme` 品牌覆盖 + Radius=10/Spacing=4/FontSize=14/系统字体）；`internal/design` 全量派生品牌主题，去除 DSH 令牌口径。详见 [ADR 0002](decisions/0002-brand-theme-foundation.md)。
+- **门禁**：`go build ./...`、`go vet ./...`、`gofmt`、`go test -count=1 ./...` 全绿（shell 36s、session 30s）。
+- **下一阶段**：按 [原生视觉方向](design/native-ui.md) 逐屏重构，Home 屏为 pilot。
+
+## 基线文档：100% 收口（历史，像素对齐已退役 2026-11-05）
+- 80 张屏/状态截图、53 份全元素 CSS、108 条逐控件行为、216 张前后对比（历史数据；资产已归档删除，见 `/data/zeokeel-backups/parity-assets-20261105.tar.gz`）
+- 历史文档入口已随基线目录归档删除，不再维护。
+
+## M0 进行中（历史记录）
 | 任务 | 状态 |
 | --- | --- |
 | M0-1 仓库骨架 + go.mod | ✅ |
 | M0-2 no-cgo 守卫 + 交叉编译脚本 | ✅ |
-| M0-3 基线采集（截图/controls） | ✅ |
+| M0-3 基线采集（截图/controls） | ✅（历史；资产已归档删除） |
 | M0-4 令牌提取 + 生成（首版：design 包常量 + 单测） | ✅ |
-| M0-5 空壳窗口（侧栏 280 + 首页 composer + 主题 + 字体） | ✅ 无头渲染见 `artifacts/m0-shell.png` |
-| M0-6 `ui.Render` 像素链路 | ✅ `shell` 无头渲染 + 像素断言 + `artifacts/m0-shell.png`（与 DSH 基线 diff 待 M1） |
+| M0-5 空壳窗口（侧栏 280 + 首页 composer + 主题 + 字体） | ✅ 无头渲染通过（历史产物已删除） |
+| M0-6 `ui.Render` 像素链路 | ✅ `shell` 无头渲染 + 像素断言（历史；像素门禁已退役，与 DSH 基线 diff 记录见下） |
 | M0-7 `ui.NewTester` 交互骨架 | ✅ 侧栏导航/会话行可点击，`TestSidebarNavigation` 无头点击通过 |
 | M0-8 事件总线 + 快照骨架 | ✅ `internal/state`：Broker + Projector + 不可变快照，24 测试 |
 | M0-9 存储骨架 | ✅ `internal/store`：SQLite v1（modernc，纯 Go）+ JSONL 记录，19 测试 |
 | M0-10 单实例/托盘/关窗隐藏 | ✅ `internal/app`：回环监听单实例锁、托盘 Show/Quit、关窗隐藏 |
 | M0-11 基础样式函数层 | ✅ 首版 atoms/components（Page/Sidebar/BrandRow/NavRow/Panel/Composer/PrimaryButton/Tab/Row） |
-| M0-12 逐屏截图采集 | ✅ |
-| M0-13 基线文档 | ✅ |
+| M0-12 逐屏截图采集 | ✅（历史；已归档） |
+| M0-13 基线文档 | ✅（历史；已归档） |
 
-## M1 第一轮：五屏渲染 + 像素比对回路（2026-11-04）
+## M1 第一轮：五屏渲染 + 像素比对回路（2026-11-04，历史；像素门禁已退役）
 
-已实现 `internal/shell` 五个屏：Home / Session / Plugins / Settings / Automation；`TestScreensBaseline` 逐屏用 `ui.Render` 渲染 1600×1000，并与 DSH 基线截图做像素 diff，输出：
+已实现 `internal/shell` 五个屏：Home / Session / Plugins / Settings / Automation；像素比对测试（历史）逐屏用 `ui.Render` 渲染 1600×1000，并与 DSH 基线截图做像素 diff，输出：
 
-- 渲染图：`artifacts/screens/<screen>.png`
-- 差异图（红=不同）：`artifacts/diff/<screen>.png`
+- 渲染图：历史产物目录（`artifacts/`，已删除）
+- 差异图（红=不同）：历史产物目录（`artifacts/`，已删除）
 - 首轮差异率：
 
 | 屏 | diff | 说明 |
@@ -39,11 +55,11 @@
 | settings | 64.95% | Modal 布局有问题（右列被拉伸、背景脏），下一轮修 |
 | automation | 3.14% | 结构接近 |
 
-**回路已建立**：改 `internal/shell` → `go test ./internal/shell -run TestScreensBaseline -v` → 看 diff 率与红图 → 再改。下一轮从 settings 的 Modal 布局与 session 头部几何开始压差异率。
+**回路已建立（历史，已退役）**：改 `internal/shell` → 跑像素比对测试 → 看 diff 率与红图 → 再改。下一轮从 settings 的 Modal 布局与 session 头部几何开始压差异率。
 
-## M1 五屏 UI：完成（2026-11-04）
+## M1 五屏 UI：完成（2026-11-04；像素指标为历史记录）
 
-五个顶屏全部用 mygo 原生控件实现，逐屏与 DSH 基线做像素比对并迭代到结构对齐（指标为 `TestScreensBaseline` 的 masked diff，容差 12，排除品牌行 / 侧栏动态列表 / 基线悬浮 tooltip）：
+五个顶屏全部用 mygo 原生控件实现，逐屏与 DSH 基线做像素比对并迭代到结构对齐（历史指标：像素比对 masked diff，容差 12，排除品牌行 / 侧栏动态列表 / 基线悬浮 tooltip）：
 
 | 屏 | masked diff | raw | 入口 | 说明 |
 | --- | --- | --- | --- | --- |
@@ -53,7 +69,7 @@
 | Settings | **2.31%** | 2.66% | `internal/shell/settings.go` | 800×800 模态、188px 导航、8 行设置、Appearance 三卡 |
 | Automation | **1.34%** | 2.34% | `internal/shell/automation.go` | 960px 列、标题/New、筛选、搜索、空态 |
 
-**比对回路**：`SCREEN=<name> go test ./internal/shell -run TestScreensBaseline -v`，产物 `artifacts/screens/<name>.png`、`artifacts/diff/<name>.png`、总览 `artifacts/m1-screens.png`。
+**比对回路（历史，已退役）**：`SCREEN=<name>` 跑当时的像素比对测试，产物为历史截图/差异图（`artifacts/`，已删除）与总览图（同上）。
 
 **剩余差异的性质（已量化）**
 - ~85% 是文本抗锯齿：基线是 Chromium LCD/subpixel AA，mygo 无头 `ui.Render` 是 pango/cairo 灰度 AA；同一渲染在容差 24/36/48 下 session 分别为 5.59/5.05/4.52%。这是渲染器地板，不是布局问题。
@@ -71,7 +87,7 @@
 
 ## 当前门禁（全绿）
 
-- `CGO_ENABLED=0 go test ./...`：design / icons / pixeltest / runtime / shell / state / store 全过（含 5 屏像素比对 + 侧栏交互 + 24 state + 19 store + 10 runtime 测试）
+- `CGO_ENABLED=0 go test ./...`：design / icons / runtime / shell / state / store 全过（历史记录，当时含 5 屏像素比对；像素门禁已退役）
 - `go vet ./...` 干净；`gofmt` 干净
 - `scripts/check-nocgo.sh` → **PASS (zero cgo)**（linux/amd64+arm64、darwin/arm64、windows/amd64）
 - 依赖仅纯 Go：mygo v0.7.4、eino v0.10.0-alpha.35、modernc.org/sqlite v1.61.1
@@ -88,7 +104,7 @@
 
 ## 门禁（全绿）
 
-- `CGO_ENABLED=0 go test ./...`：app / design / pixeltest / provider / runtime / session / shell / state / store 全过
+- `CGO_ENABLED=0 go test ./...`：app / design / provider / runtime / session / shell / state / store 全过（历史记录）
 - `go vet ./...`、`gofmt` 干净；`scripts/check-nocgo.sh` PASS（四目标交叉编译）
 
 ## M4 完成：工具、审批、菜单与全链路接线（2026-11-04）
@@ -98,7 +114,7 @@
 - **Composer 菜单**：`/` 命令面板（/clear /stop /help）、`@` 工作区文件提及、`+` 附件菜单（Files / Session log 占位）
 - **App 全链路接线**：`BuildServicesWith` 先开 store，再构建 provider + 工具注册表 + 审批队列 + store-backed History + runtime Agent，最后接 Controller；设置键 `provider.api_key/base_url/model`（或环境变量），bash 等变更类工具走审批
 - **headless 冒烟**：`ZEOKEEL_DATA_DIR=.cache/zk-data xvfb-run .cache/zeokeel` → 建库成功、无 services 错误
-- 像素基线未变：home 1.00% / session 6.48% / plugins 3.20% / settings 2.38% / automation 1.39%（masked，AA 地板）
+- （历史）像素基线未变：home 1.00% / session 6.48% / plugins 3.20% / settings 2.38% / automation 1.39%（masked，AA 地板；像素门禁 2026-11-05 已退役）
 
 ### 已知边界（非阻塞）
 
@@ -109,13 +125,13 @@
 
 ## 门禁（全绿）
 
-- `CGO_ENABLED=0 go test ./...`：app/design/icons/pixeltest/provider/runtime/session/shell/state/store/tools 全过
+- `CGO_ENABLED=0 go test ./...`：app/design/icons/provider/runtime/session/shell/state/store/tools 全过（历史记录）
 - `go vet ./...`、`gofmt` 干净；`scripts/check-nocgo.sh` PASS（四目标交叉编译）
 
 ## M5 完成：动画/交互/功能对齐（2026-11-04）
 
 ### 展示过程动画（与 DSH 对齐）
-- 从 DSH 构建产物提取 motion tokens：100/120/150/160/200/300/800/1500ms、`cubic-bezier(.4,0,.2,1)` 等，落在 `internal/design/motion.go`；证据表 `docs/baseline/motion.md`
+- 从 DSH 构建产物提取 motion tokens：100/120/150/160/200/300/800/1500ms、`cubic-bezier(.4,0,.2,1)` 等，落在 `internal/design/motion.go`；证据表（历史，已随基线归档删除）
 - 已实现：流式文本 120ms 淡入+2DIP 上移（静止帧精确 1/0，支持 ReduceMotion）；运行中 spinner + “Deep diving for Xm Ys” 1.5s 三点逐现（c.After 驱动，不 60fps 重建）；工具卡 200ms 展开/收起 + 状态点 1.5s 脉冲；新消息 200ms 淡入/位移；Send↔Stop 内容/颜色 150/100ms 过渡；12 个虚拟时钟测试
 - 静止帧与从未动画的渲染逐像素一致；五屏基线 diff 不变
 
@@ -133,7 +149,7 @@
 - 设置键：`websearch.endpoint/api_key/max_results`、`skills.root`、`mcp.servers`
 
 ### 门禁（全绿）
-- `CGO_ENABLED=0 go test ./...`：app/design/mcp/pixeltest/provider/runtime/session/shell/skills/state/store/tools/websearch 全过
+- `CGO_ENABLED=0 go test ./...`：app/design/mcp/provider/runtime/session/shell/skills/state/store/tools/websearch 全过（历史记录）
 - `go vet`、`gofmt` 干净；`check-nocgo.sh` PASS（四目标）
 - headless 冒烟：建库成功、无 services 错误
 - 像素 diff：home 1.00 / session 6.48 / plugins 3.20 / settings 2.38 / automation 1.39%（masked，AA 地板）
@@ -161,7 +177,7 @@
 - **右侧边栏**：Files（面包屑/目录/文本预览 256KB/截断与二进制提示）、Terminal（cwd=workspace root，30s 超时，无 PTY/非持久 shell）
 
 ### 门禁（全绿）
-- `CGO_ENABLED=0 go test ./...`：app/automation/design/mcp/pixeltest/provider/runtime/session/shell/skills/state/store/tools/websearch 全过
+- `CGO_ENABLED=0 go test ./...`：app/automation/design/mcp/provider/runtime/session/shell/skills/state/store/tools/websearch 全过（历史记录）
 - `go vet`、`gofmt` 干净；`check-nocgo.sh` PASS（四目标）
 - headless 冒烟：建库成功、无 services 错误
 - 五屏像素 diff 不变：1.00 / 6.48 / 3.20 / 2.38 / 1.39%（masked）
@@ -189,7 +205,7 @@
 - 静态 `App{}` 渲染英文（像素基线不变）；live 默认中文（`ui.language` 可切 en/zh，立即生效）
 
 ### 深色 / 窄屏逐屏基线
-- `TestScreensDarkNarrow`：5 屏 × dark 1600×1000 + narrow 1200×800，渲染/差异图写入 `artifacts/screens-dark|screens-narrow|diff-dark|diff-narrow`，文档 `docs/baseline/dark-narrow.md`
+- 像素比对测试（历史，已退役）：5 屏 × dark 1600×1000 + narrow 1200×800，渲染/差异图写入历史产物目录（`artifacts/`，已删除），文档随基线归档删除
 - dark 预算内：home 12.54%、session 22.49%、plugins 4.05%、settings 3.66%（高值来自基线截图开着右栏/历史不同，已记录）
 
 ### 门禁
@@ -275,7 +291,7 @@
 - **摘要超时**：`LLMCompactor.Timeout`（零值 `DefaultLLMSummaryTimeout` = 20s，短于 provider 60s）限制单次摘要请求，超时回退 `WindowCompactor`；caller 取消仍如实返回错误
 - **app 接线**：`buildAgent` 显式配置摘要超时；压缩仍在回合锁之前执行，不串行化无关会话
 - **checkpoint 文档对齐**：`FUNCTIONAL-PARITY` / `STATUS` 改为描述 LLM 摘要 + WindowCompactor 回退 + 工具结果裁剪，以及 store-backed checkpoint（独立冷启动恢复 + 生产 History 权威镜像）
-- **验收**：`TestLLMCompactorSummarizes`、`TestCompactorFallbackOnError`、`TestToolResultPruning`、`TestCheckpointPersistResume`、`TestCheckpointDeletedWithSession` 通过；`sh scripts/ci.sh` PASS（含 race 与像素基线）
+- **验收**：`TestLLMCompactorSummarizes`、`TestCompactorFallbackOnError`、`TestToolResultPruning`、`TestCheckpointPersistResume`、`TestCheckpointDeletedWithSession` 通过；`sh scripts/ci.sh` PASS（含 race；当时的像素基线步骤已于 2026-11-05 退役）
 
 ## M12 完成：用户附件上传（文件/图片进入会话）（2026-11-05）
 
@@ -284,11 +300,11 @@
 - **持久化**：`attachments` 表保存 `id / session_id / message_id / name / path / mime / kind / size / created_at`；`message_id` 为空表示 pending，提交后链到对应 user message；文件字节存放在 SQLite 之外，读取/删除时重新校验路径必须位于附件根目录。重启后 pending 与已发送附件均可恢复，历史重放会把文本和图片重新送入模型。
 - **注入模型**：文本附件以 `<attachment name="...">…</attachment>` 块追加到用户 prompt（≤64 KiB），附件名中的 `&`、`"`、`<`、`>` 会做 XML 转义（`TestAttachmentPromptEscapesName`），不会破坏 header 语法；图片转成 `data:<mime>;base64,...` 的 `runtime.ImagePart`，由 OpenAI 兼容 provider 作为 `image_url` content part 发送；History 适配器按消息重建同样的文本块与图片 data URL，chip 本身不展开正文。
 - **清理**：删除 chip 会删除附件行和已复制文件；删除会话级联删除附件行并移除该会话的附件目录。
-- **验收**：`TestAttachmentCaps`、`TestAttachmentTextInjected`、`TestAttachmentImageContentPart`、`TestAttachmentPersistsReopen`、`TestAttachmentCleanupOnDelete`、`TestAttachmentPickerCopies`、`TestAttachmentChipRemove`、`TestAttachmentHistoryReplayed`、`TestAttachmentHomeFollowsSend`、`TestAttachmentHomeChipRemove`、`TestAttachmentHomeWithoutCurrentSession` 通过；`go test -run 'TestAttachment' ./internal/session ./internal/shell ./internal/app ./internal/store` 与 `sh scripts/ci.sh` PASS（含 race 与像素基线）
+- **验收**：`TestAttachmentCaps`、`TestAttachmentTextInjected`、`TestAttachmentImageContentPart`、`TestAttachmentPersistsReopen`、`TestAttachmentCleanupOnDelete`、`TestAttachmentPickerCopies`、`TestAttachmentChipRemove`、`TestAttachmentHistoryReplayed`、`TestAttachmentHomeFollowsSend`、`TestAttachmentHomeChipRemove`、`TestAttachmentHomeWithoutCurrentSession` 通过；`go test -run 'TestAttachment' ./internal/session ./internal/shell ./internal/app ./internal/store` 与 `sh scripts/ci.sh` PASS（含 race；当时的像素基线步骤已于 2026-11-05 退役）
 
 ## M13 完成：fork / 导出携带附件（2026-11-05）
 
 - **fork 复制附件**：`Store.ForkSession` 在同一事务内新增 `copyForkAttachments`：附件行换新 id，`message_id` 经消息 id 映射指向 fork 的 user message（pending 保持 pending），字节复制到 fork 自己的 `<data dir>/attachments/<fork>/<id>-<name>`；删除 fork 只清理 fork 的行与文件，源会话不受影响；事务未提交时清理已复制文件。源文件缺失或路径越界时跳过该附件而不是让整个 fork 失败。
 - **fork 续聊重放**：fork 的附件行与字节使 History 适配器在 fork 中继续对话时仍重放文本 `<attachment>` 块与图片 data URL，不再丢失源会话的附件上下文。
 - **导出附件**：`Store.ExportSessionJSONL` 新增 `type:"attachment"` 记录（id/session_id/message_id/name/path/mime/kind/size/created_at），并内嵌 `encoding:"base64"` 的完整字节与文本附件的 `text` 正文，使 session log 自包含；文件缺失时仍导出元数据记录而不中断导出。
-- **验收**：`TestForkAttachmentCopyKeepsTextAndImage`、`TestForkAttachmentReplaySnapshot`、`TestForkAttachmentHistoryReplaysInForkTurn`、`TestExportSessionAttachmentRecordsAndPayload`、`TestExportSessionAttachmentLines` 通过；`go test -run 'TestFork|TestExportSession|TestFeedbackPersists' ./internal/session ./internal/store ./internal/shell` 与 `sh scripts/ci.sh` PASS（含 race 与像素基线）
+- **验收**：`TestForkAttachmentCopyKeepsTextAndImage`、`TestForkAttachmentReplaySnapshot`、`TestForkAttachmentHistoryReplaysInForkTurn`、`TestExportSessionAttachmentRecordsAndPayload`、`TestExportSessionAttachmentLines` 通过；`go test -run 'TestFork|TestExportSession|TestFeedbackPersists' ./internal/session ./internal/store ./internal/shell` 与 `sh scripts/ci.sh` PASS（含 race；当时的像素基线步骤已于 2026-11-05 退役）

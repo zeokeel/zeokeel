@@ -1,9 +1,0 @@
-[
-  {"act":"goto","url":"/","wait":5000},
-  {"act":"clickxy","x":1010,"y":684,"wait":1000},
-  {"act":"clickxy","x":1574,"y":25,"wait":1800},
-  {"act":"eval","js":"(() => { const els=[...document.querySelectorAll('button,[role=\"button\"]')]; const b=els.find(b=>(b.innerText||'').startsWith('New terminal')); if(!b) return 'none'; b.scrollIntoView({block:'center'}); b.click(); return 'clicked'; })()","wait":2500},
-  {"act":"dump","out":"baseline/controls/109-right-terminal.json"},
-  {"act":"shot","out":"baseline/screenshots/109-right-terminal.png"},
-  {"act":"cssscan","name":"52-right-terminal","out":"baseline/css/52-right-terminal.json"}
-]

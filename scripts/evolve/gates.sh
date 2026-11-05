@@ -4,13 +4,13 @@
 # 用法:
 #   scripts/evolve/gates.sh [--quick|--full]
 #
-# --quick（默认）: gofmt / vet / build / go test / 浅色像素 / 深色+窄屏像素
+# --quick（默认）: gofmt / vet / build / go test
 # --full        : 额外跑 scripts/check-nocgo.sh（零 cgo + 四目标交叉编译）
 #
 # 行为:
 #   - 自动补齐 /usr/local/go/bin 到 PATH（非登录 shell 里 make check 会 127）
 #   - 测试类步骤失败自动重跑（默认最多 3 次），重跑才通过记为 flaky
-#   - 像素测试的 ARTIFACTS 指向 /tmp，避免污染仓库 artifacts/
+#   - 2026-11-05: DSH 像素门禁步骤已退役（见 docs/decisions/0001-retire-dsh-pixel-parity.md）
 #   - 输出: .evolve/state/latest.json（机器可读）、.evolve/state/latest.md（人读）、
 #           .evolve/state/logs/<run-id>-<step>.log（原始日志）
 #   - 任一确定性步骤失败 -> exit 1；仅 flaky -> exit 0 但标记
@@ -27,7 +27,7 @@ for arg in "$@"; do
 	--quick) MODE=quick ;;
 	--full) MODE=full ;;
 	-h | --help)
-		sed -n '2,20p' "$0"
+		sed -n '2,16p' "$0"
 		exit 0
 		;;
 	*)
@@ -45,14 +45,12 @@ command -v go >/dev/null 2>&1 || {
 RUN_ID=$(date +%Y%m%d-%H%M%S)
 STATE="$ROOT/.evolve/state"
 LOGS="$STATE/logs"
-ARTIFACTS_DIR="/tmp/zk-evolve/artifacts"
-mkdir -p "$LOGS" "$ARTIFACTS_DIR"
+mkdir -p "$LOGS"
 TSV=$(mktemp)
 trap 'rm -f "$TSV"' EXIT
 
 STARTED=$(date -Iseconds)
 FAILED=0
-STEPS=()
 
 # run_step <name> <attempts> <timeout_s> <cmd...>
 run_step() {
@@ -86,7 +84,6 @@ run_step() {
 		status=flaky
 	fi
 	printf '%s\t%s\t%s\t%s\t%s\t%s\n' "$name" "$status" "$attempt" "$dur" "$rc" "$tail" >>"$TSV"
-	STEPS+=("$name")
 	printf '  %-14s %-6s attempts=%d %4ds\n' "$name" "$status" "$attempt" "$dur"
 }
 
@@ -95,8 +92,6 @@ run_step fmt 1 60 bash -c 'out=$(gofmt -l ./cmd ./internal); if [ -n "$out" ]; t
 run_step vet 1 180 go vet ./...
 run_step build 1 180 go build ./...
 run_step test 3 900 go test -count=1 ./...
-run_step pixel-light 3 600 env ARTIFACTS="$ARTIFACTS_DIR" go test ./internal/shell -run '^TestScreensBaseline$' -count=1 -v
-run_step pixel-dark 3 300 env ARTIFACTS="$ARTIFACTS_DIR" go test ./internal/shell -run '^TestScreensDarkNarrow$' -count=1 -v
 
 if [[ $MODE == full ]]; then
 	run_step nocgo 1 600 sh scripts/check-nocgo.sh
@@ -106,26 +101,10 @@ FINISHED=$(date -Iseconds)
 GOVER=$(go version 2>/dev/null | tr '\n' ' ')
 export RUN_ID MODE STARTED FINISHED GOVER ROOT FAILED
 python3 - "$TSV" "$STATE" <<'PY'
-import json, os, re, sys
+import json, os, sys
 
 tsv, state = sys.argv[1], sys.argv[2]
 
-PIXEL_LIGHT = re.compile(r'(\w+)\s+diff [\d.]+% \(masked ([\d.]+)%, raw ([\d.]+)%\)', re.M)
-PIXEL_DARK = re.compile(r'(\w+)/(dark|narrow): masked diff ([\d.]+)%', re.M)
-
-def pixel_metrics(log):
-    try:
-        text = open(log, errors='replace').read()
-    except OSError:
-        return {}
-    chunks = text.split('--- attempt ')
-    last = chunks[-2] if len(chunks) > 1 else text
-    out = {}
-    for name, masked, raw in PIXEL_LIGHT.findall(last):
-        out[f'{name}'] = {'masked_pct': float(masked), 'raw_pct': float(raw)}
-    for name, kind, masked in PIXEL_DARK.findall(last):
-        out[f'{name}/{kind}'] = {'masked_pct': float(masked)}
-    return out
 env = os.environ
 steps = []
 with open(tsv) as f:
@@ -135,14 +114,11 @@ with open(tsv) as f:
             continue
         name, status, attempts, dur, rc, tail = line.split("\t", 5)
         log = os.path.join(state, "logs", f"{env['RUN_ID']}-{name}.log")
-        metrics = pixel_metrics(log) if name.startswith("pixel-") else {}
         step = {
             "name": name, "status": status,
             "attempts": int(attempts), "duration_s": int(dur),
             "exit_code": int(rc), "tail": tail, "log": log,
         }
-        if metrics:
-            step["metrics"] = metrics
         steps.append(step)
 run = {
     "schema": "zeokeel.evolve.gates/v1",
@@ -164,14 +140,6 @@ md = ["# Gates run " + run["run_id"], "",
       "", "| step | status | attempts | duration |", "| --- | --- | ---: | ---: |"]
 for s in steps:
     md.append(f"| {s['name']} | {s['status']} | {s['attempts']} | {s['duration_s']}s |")
-metrics_lines = []
-for s in steps:
-    if s.get('metrics'):
-        metrics_lines.append("- " + s['name'] + ": " + ", ".join(
-            f"{k} masked={v.get('masked_pct')}%" + (f" raw={v['raw_pct']}%" if 'raw_pct' in v else "")
-            for k, v in s['metrics'].items()))
-if metrics_lines:
-    md += [""] + metrics_lines
 if run["flaky_steps"]:
     md += ["", "> flaky（重跑才通过）: " + ", ".join(run["flaky_steps"]),
            "> 注意：flaky 不是「通过」，应记为门禁健康问题。"]

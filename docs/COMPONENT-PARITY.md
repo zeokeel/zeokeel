@@ -1,9 +1,12 @@
 # 组件级一一对应审计（DSH vs ZeoKeel）
 
-## 方法（全部实测，非猜测）
+> ⚠️ **历史文档，已退役 2026-11-05，不再维护。**
+> DSH 像素级对齐已停止（[ADR 0001](decisions/0001-retire-dsh-pixel-parity.md)）；本文的组件对照与“逐像素修几何”记录仅作历史参考，`baseline/`、`artifacts/` 已归档删除。现行视觉以 ZeoKeel 品牌设计系统为准（ADR 0002），功能对齐见 [FUNCTIONAL-PARITY.md](FUNCTIONAL-PARITY.md)。
 
-- DSH 侧：`baseline/css/*.json`（每屏元素 tag/class/rect/计算样式）、`baseline/controls/*.json`（可交互控件）、`baseline/screenshots/*.png`；源码对照 `dsh-client-ui-*` bundle（Rows.module.css 类名、client.js 结构）。
-- ZeoKeel 侧：`internal/design/components.go` + `internal/shell/*.go` 的 Go 组件；无头实拍 `artifacts/live/home.png`、`session.png`（`TestCaptureLiveSession`，真实 Controller）；像素基线 `TestScreensBaseline`。
+## 方法（历史，全部实测，非猜测）
+
+- DSH 侧（历史资产，已归档）：`baseline/css/*.json`（每屏元素 tag/class/rect/计算样式）、`baseline/controls/*.json`（可交互控件）、`baseline/screenshots/*.png`；源码对照 `dsh-client-ui-*` bundle（Rows.module.css 类名、client.js 结构）。
+- ZeoKeel 侧（历史记录）：`internal/design/components.go` + `internal/shell/*.go` 的 Go 组件；无头实拍历史产物与历史像素基线测试（均已删除/退役）。
 - 元素对应原则：DSH CSS module 类 → 我们的 Go 函数/样式；几何（x/y/w/h/padding/gap/radius/font/line-height）逐项比对。
 
 ## 侧栏（本轮已按 DSH 精确几何修）

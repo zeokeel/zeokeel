@@ -1,9 +1,0 @@
-[
-  {"act":"goto","url":"/","wait":5000},
-  {"act":"clickxy","x":1010,"y":684,"wait":1000},
-  {"act":"clickxy","x":1574,"y":25,"wait":1800},
-  {"act":"clickxy","x":1241,"y":507,"wait":2500},
-  {"act":"dump","out":"baseline/controls/110-right-terminal.json"},
-  {"act":"shot","out":"baseline/screenshots/110-right-terminal.png"},
-  {"act":"cssscan","name":"53-right-terminal","out":"baseline/css/53-right-terminal.json"}
-]

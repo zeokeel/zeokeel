@@ -1,17 +1,13 @@
-// Motion tokens and helpers: the DSH baseline's durations, easing curves and
-// transition presets, in the terms MyGo animates with.
+// Motion tokens and helpers: the durations, easing curves and transition
+// presets ZeoKeel screens animate with, in the terms mygo's animation API
+// uses.
 //
-// The values come from two places, both captured from the DSH frontend build
-// at /usr/local/lib/node_modules/@deepseek-ai/dsh/node_modules/
-// @deepseek-ai/dsh-web-frontend:
-//
-//   - the stylesheet's transition/animation declarations and @keyframes
-//     (dist/assets/index-BxpfOGf3.css), and
-//   - the computed transition-duration / transition-timing-function of every
-//     element on every baseline screen (baseline/css/*.json).
-//
-// Each token's comment names the CSS selector or computed property it came
-// from. docs/baseline/motion.md has the full table.
+// The scale is small on purpose. A handful of durations covers UI feedback,
+// two longer ones drive panels and looping indicators, and each named preset
+// pairs a duration with an easing so screens do not invent new pairs. Motion
+// here is feedback, not decoration: it tells the user where a row moved,
+// that a panel appeared, or that the assistant is still working.
+
 package design
 
 import (
@@ -21,61 +17,41 @@ import (
 	"github.com/egoist/mygo/ui"
 )
 
-// Durations, from DSH's transition and animation declarations.
+// Durations: the motion scale.
 const (
-	// DurationTick is .1s: the session's activity rows, the "Ran command"
-	// disclosure title, its icon and chevron, the status label, and the
-	// composer's primary button. Computed as "0.1s" on
-	// ._row_k7ery_26 (baseline/css/08-session-chat.json) and
-	// ._iconIdle_k7ery_78, which transition color/opacity with it.
+	// DurationTick is .1s: color and opacity feedback on rows and status
+	// labels, short enough to feel immediate.
 	DurationTick = 100 * time.Millisecond
 
-	// DurationFast is .12s: file cards, the header search slot's input,
-	// tab colors and chevrons. Computed as "0.12s" on
-	// .nyYjTG_file and ._tab_d62eq_37.
+	// DurationFast is .12s: content arriving in place, such as streaming
+	// text or a caret swap.
 	DurationFast = 120 * time.Millisecond
 
-	// DurationEnter is .15s: the working indicator's entrance
-	// (_indicator_1gwo3_1 animation: _indicator-enter_1gwo3_1 .15s
-	// ease-out) and the tooltip's (_tooltip-in_12mhf_1 .15s).
+	// DurationEnter is .15s: overlays entering the screen, such as the
+	// working indicator or a tooltip.
 	DurationEnter = 150 * time.Millisecond
 
-	// DurationBase is .16s: the working indicator's color and opacity
-	// transitions (transition: ... .16s ease-out on _indicator_1gwo3_1),
-	// the toast's entrance (_dsh-toast-in_l6cvn_1 .16s ease-out) and the
-	// dock indicator's transform (._indicator_d62eq_22 .16s ease).
+	// DurationBase is .16s: color/opacity transitions and the toast
+	// entrance, one step above DurationEnter.
 	DurationBase = 160 * time.Millisecond
 
-	// DurationSlow is .2s, DSH's --ds-transition-duration. It is the
-	// duration of the modal entrance (_modalEnter_o6lrb_1 var(
-	// --ds-transition-duration)) and of the file-link box-shadow
-	// transition (._markdown_1ypvv_5 a), whose computed
-	// transition-duration is "0.2s" and whose timing function is
-	// cubic-bezier(0.4, 0, 0.2, 1) (baseline/css/11-right-sidebar.json).
-	// The variable itself is defined outside the captured stylesheets, so
-	// the computed value is the evidence.
+	// DurationSlow is .2s: the standard duration of a modal entrance, an
+	// expansion or an element moving to a new place.
 	DurationSlow = 200 * time.Millisecond
 
-	// DurationTab is .3s: the right sidebar's tab cell and empty-tab host
-	// slide in with cubic-bezier(0.4, 0, 0.2, 1) (computed "0.3s" on
-	// ._tabCell_6nhg2_142 and ._emptyTabHost_6nhg2_143).
+	// DurationTab is .3s: a panel or tab sliding into its place.
 	DurationTab = 300 * time.Millisecond
 
-	// DurationSpin is .8s: one turn of DSH's ring spinner
-	// (_spinner_u7vgf_45: animation: _spin_u7vgf_45 .8s linear infinite).
+	// DurationSpin is .8s: one turn of a ring spinner.
 	DurationSpin = 800 * time.Millisecond
 
-	// DurationPulse is 1.5s: the state-dot spinner's turn
-	// (_dsh-state-dot-spin_1i3xo_1 1.5s linear infinite), its dash
-	// (_dsh-state-dot-dash_1i3xo_1 1.5s ease-in-out infinite) and the
-	// working indicator's three-dot reveal (_reveal-second-dot_1gwo3_1 and
-	// _reveal-third-dot_1gwo3_1 1.5s step-end infinite).
+	// DurationPulse is 1.5s: one cycle of a looping status indicator, the
+	// state-dot spinner and the three-dot working indicator.
 	DurationPulse = 1500 * time.Millisecond
 
-	// DurationShimmer is 1.5s: the session row's working shimmer sweep
-	// (._sweep_1rdzk_34, animation-duration: 1.5s, delay .3s,
-	// steps(48, end), infinite). The sweep keyframe reaches its end at
-	// 66.6667% of the period (_dsh-row-shimmer-sweep_1rdzk_1) and holds.
+	// DurationShimmer is 1.5s: the period of the working row's shimmer
+	// sweep. The sweep reaches its end at two thirds of the period and
+	// holds until the next cycle.
 	DurationShimmer = 1500 * time.Millisecond
 
 	// ShimmerDelay is the .3s before the row shimmer starts.
@@ -85,27 +61,22 @@ const (
 	ShimmerSteps = 48
 )
 
-// Easing curves, as CSS timing functions DSH names or computes.
+// Easing curves, as CSS timing functions.
 var (
-	// EaseStandard is DSH's --ds-ease-in-out: cubic-bezier(0.4, 0, 0.2, 1).
-	// The stylesheet uses it for the modal entrance (the mask and the
-	// dialog) and for the file link's box-shadow; the file link's computed
-	// transition-timing-function is exactly this curve
-	// (baseline/css/11-right-sidebar.json), as is that of every other
-	// element captured with the variable's 0.2s transition.
+	// EaseStandard is cubic-bezier(0.4, 0, 0.2, 1): the all-purpose curve
+	// for entrances, expansions and moves.
 	EaseStandard = ui.CubicBezier(0.4, 0, 0.2, 1)
 
-	// EaseCSS is CSS's `ease` keyword, cubic-bezier(0.25, 0.1, 0.25, 1),
-	// the computed timing function of the session's .1s activity rows.
+	// EaseCSS is CSS's `ease` keyword, cubic-bezier(0.25, 0.1, 0.25, 1):
+	// the curve of short color/opacity feedback.
 	EaseCSS = ui.CubicBezier(0.25, 0.1, 0.25, 1)
 
-	// EaseOut is CSS's `ease-out`, cubic-bezier(0, 0, 0.58, 1): the
-	// working indicator's entrance, the toast's, the dock hint's, and the
-	// indicator's opacity transition.
+	// EaseOut is CSS's `ease-out`, cubic-bezier(0, 0, 0.58, 1): entrances
+	// that should settle quickly.
 	EaseOut = ui.CubicBezier(0, 0, 0.58, 1)
 
 	// EaseInOut is CSS's `ease-in-out`, cubic-bezier(0.42, 0, 0.58, 1),
-	// the state-dot dash's curve.
+	// the curve of the pulsing status dot.
 	EaseInOut = ui.CubicBezier(0.42, 0, 0.58, 1)
 
 	// Pulse turns a loop's 0..1 progress into a 0..1..0 pulse, from which
@@ -113,34 +84,24 @@ var (
 	Pulse = ui.Bounce(EaseInOut)
 )
 
-// Animations: DSH's duration/easing pairs in the form MyGo animates with.
+// Animations: duration/easing pairs in the form mygo animates with.
 var (
-	// AnimTick is the .1s ease of the session's activity rows and status.
-	AnimTick = ui.Animation{Duration: DurationTick, Ease: EaseCSS}
-
 	// AnimFast is the .12s ease-out used for content arriving in place:
 	// the streaming fade and the caret/content swaps.
 	AnimFast = ui.Animation{Duration: DurationFast, Ease: EaseOut}
 
-	// AnimEnter is the .15s ease-out of the working indicator's entrance.
+	// AnimEnter is the .15s ease-out of an entering overlay, such as the
+	// working indicator.
 	AnimEnter = ui.Animation{Duration: DurationEnter, Ease: EaseOut}
-
-	// AnimBase is the .16s ease-out of the indicator's color/opacity and
-	// the toast's entrance.
-	AnimBase = ui.Animation{Duration: DurationBase, Ease: EaseOut}
-
-	// AnimSlow is the .2s --ds-transition-duration with the standard curve.
-	AnimSlow = ui.Animation{Duration: DurationSlow, Ease: EaseStandard}
 )
 
-// Fractions and distances of the baseline's "appearing" motions, measured
-// from the DSH @keyframes: opacity 0 to 1, a small rise, a .98 scale.
+// Fractions and distances of the "appearing" motions: opacity 0 to 1, a
+// small rise, a .98 scale.
 const (
 	// StreamFrom is how opaque streaming text dips when new tokens arrive,
-	// before it settles back to 1. DSH does not cross-fade a whole
-	// message; this is the subtle "appear" that keeps new text from being
-	// a hard cut. It stays above 0.5 because tokens often arrive faster
-	// than the fade, and the text should not look dim while it streams.
+	// before it settles back to 1. It is a subtle "appear", not a full
+	// cross-fade, and stays above 0.5 because tokens often arrive faster
+	// than the fade, so the text should not look dim while it streams.
 	StreamFrom float32 = 0.65
 
 	// StreamRise is the DIPs streaming text rises from as it fades in.
@@ -149,12 +110,12 @@ const (
 	// MessageRise is the DIPs a new message rises from as it fades in.
 	MessageRise float32 = 6
 
-	// IndicatorRise is the DIPs the working indicator rises from
-	// (the @keyframes only fade; the rise is ours, kept tiny).
+	// IndicatorRise is the DIPs the working indicator rises from as it
+	// enters; the fade carries most of the motion, the rise stays tiny.
 	IndicatorRise float32 = 2
 
-	// ScaleFrom is the .98 scale of DSH's dock hint entrance
-	// (_dockHintIn_6nhg2_1: transform: scale(.98) to none).
+	// ScaleFrom is the .98 scale a dock hint starts at before it settles
+	// at 1.
 	ScaleFrom float32 = 0.98
 
 	// PulseMin is the dimmest a running status dot gets in its pulse.
@@ -174,8 +135,8 @@ func MessageTransition() ui.ElementTransition {
 	}
 }
 
-// IndicatorTransition fades the working indicator in over DSH's .15s
-// ease-out, and fades it out when the turn ends.
+// IndicatorTransition fades the working indicator in over the enter
+// duration with ease-out, and fades it out when the turn ends.
 func IndicatorTransition() ui.ElementTransition {
 	return ui.ElementTransition{
 		Duration: DurationEnter,
@@ -207,7 +168,7 @@ func LayoutTransition() ui.ElementTransition {
 	}
 }
 
-// ColorTransition fades a color change over DSH's .1s ease.
+// ColorTransition fades a color change over the tick duration.
 func ColorTransition() ui.ElementTransition {
 	return ui.ElementTransition{
 		Duration: DurationTick,
@@ -267,8 +228,8 @@ func StreamOpacity(elapsed time.Duration) (opacity float32, moving bool) {
 }
 
 // DotsAt returns how many of the working indicator's dots show after
-// elapsed, from 1 to 3: DSH reveals the second at 33.33% and the third at
-// 66.66% of DurationPulse, step-end.
+// elapsed, from 1 to 3: the second dot appears at a third of DurationPulse
+// and the third at two thirds, step-end.
 func DotsAt(elapsed time.Duration) int {
 	if elapsed < 0 {
 		return 1
@@ -290,10 +251,10 @@ func PulseOpacity(p float32) float32 {
 	return PulseMin + (1-PulseMin)*clamp01(p)
 }
 
-// ShimmerPhase returns how far DSH's row shimmer has swept after elapsed,
-// in ShimmerSteps steps: 0 during ShimmerDelay and at the start of each
-// DurationShimmer period, and 1 from two thirds through the period until
-// it starts over.
+// ShimmerPhase returns how far the row shimmer has swept after elapsed, in
+// ShimmerSteps steps: 0 during ShimmerDelay and at the start of each
+// DurationShimmer period, and 1 from two thirds through the period until it
+// starts over.
 func ShimmerPhase(elapsed time.Duration) float32 {
 	start := elapsed - ShimmerDelay
 	if start < 0 {

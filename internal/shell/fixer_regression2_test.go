@@ -9,143 +9,8 @@ import (
 
 	"github.com/egoist/mygo/ui"
 
-	"github.com/zeokeel/zeokeel/internal/design"
 	"github.com/zeokeel/zeokeel/internal/session"
 )
-
-func near(t *testing.T, label string, got, want, tolerance float32) {
-	t.Helper()
-	if got < want-tolerance || got > want+tolerance {
-		t.Fatalf("%s = %v, want %v ±%v", label, got, want, tolerance)
-	}
-}
-
-// TestLiveSessionColumnGeometry pins DSH's centered 845px transcript and
-// 877px composer in the live renderer, including the docked right panel at
-// 1200x800 where contentWidth already subtracts the panel.
-func TestLiveSessionColumnGeometry(t *testing.T) {
-	t.Run("1600", func(t *testing.T) {
-		h := newLiveApp(t, &shellProvider{})
-		h.app.Language = LangEN
-		h.app.Screen = Session
-		tt := ui.NewTester(h.app.View, 1600, 1000)
-		tt.Frame()
-
-		transcript, ok := tt.Find("Session transcript")
-		if !ok {
-			t.Fatalf("live session transcript has no box: %v", tt.Texts())
-		}
-		near(t, "transcript x", transcript.X, 514, 2)
-		near(t, "transcript width", transcript.W, 845, 2)
-
-		composer, ok := tt.Find("Session composer")
-		if !ok {
-			t.Fatalf("live session composer has no box: %v", tt.Texts())
-		}
-		near(t, "composer x", composer.X, 498, 3)
-		near(t, "composer width", composer.W, 877, 2)
-
-		input, ok := tt.Find("Composer input")
-		if !ok {
-			t.Fatalf("composer input missing")
-		}
-		near(t, "composer input width", input.W, 873, 3)
-
-		usage, ok := tt.Find("Session usage")
-		if !ok {
-			t.Fatalf("usage footer missing")
-		}
-		near(t, "usage width", usage.W, 877, 2)
-		near(t, "usage centre", usage.X+usage.W/2, composer.X+composer.W/2, 2)
-	})
-
-	t.Run("1600 with docked panel", func(t *testing.T) {
-		h := newLiveApp(t, &shellProvider{})
-		h.app.Language = LangEN
-		h.app.Screen = Session
-		h.app.rightOpen = true
-		tt := ui.NewTester(h.app.View, 1600, 1000)
-		tt.Frame()
-
-		// contentWidth = 1600-280-720 = 600. DSH baseline 15-session-dark
-		// paints composer card 561 at x=296, input 557, transcript 529.
-		transcript, ok := tt.Find("Session transcript")
-		if !ok {
-			t.Fatal("session transcript missing")
-		}
-		near(t, "docked transcript width", transcript.W, 529, 2)
-		near(t, "docked transcript x", transcript.X, 312, 2)
-		composer, ok := tt.Find("Session composer")
-		if !ok {
-			t.Fatal("session composer missing")
-		}
-		near(t, "docked composer width", composer.W, 561, 2)
-		near(t, "docked composer x", composer.X, 296, 3)
-		input, ok := tt.Find("Composer input")
-		if !ok {
-			t.Fatal("composer input missing")
-		}
-		near(t, "docked composer input width", input.W, 557, 3)
-		usage, _ := tt.Find("Session usage")
-		near(t, "docked usage width", usage.W, 561, 2)
-	})
-
-	t.Run("1200 with docked panel", func(t *testing.T) {
-		h := newLiveApp(t, &shellProvider{})
-		h.app.Language = LangEN
-		h.app.Screen = Session
-		h.app.rightOpen = true
-		tt := ui.NewTester(h.app.View, 1200, 800)
-		tt.Frame()
-
-		// contentWidth = 1200-280-520 = 400: the capped inset must not be
-		// subtracted twice. DSH baseline 16-session-dark-narrow: transcript
-		// 329, composer card 361, input 357.
-		transcript, ok := tt.Find("Session transcript")
-		if !ok {
-			t.Fatal("session transcript missing")
-		}
-		near(t, "narrow transcript width", transcript.W, 329, 2)
-		composer, ok := tt.Find("Session composer")
-		if !ok {
-			t.Fatal("session composer missing")
-		}
-		near(t, "narrow composer width", composer.W, 361, 2)
-		input, ok := tt.Find("Composer input")
-		if !ok {
-			t.Fatal("composer input missing")
-		}
-		near(t, "narrow composer input width", input.W, 357, 3)
-		usage, ok := tt.Find("Session usage")
-		if !ok {
-			t.Fatal("usage footer missing")
-		}
-		near(t, "narrow usage width", usage.W, 361, 2)
-		near(t, "narrow usage centre", usage.X+usage.W/2, composer.X+composer.W/2, 2)
-
-		// The permission trigger collapses to DSH's 44px icon+chevron.
-		chip, ok := tt.Find("Access mode, current: " + h.app.composerPermissionLabel(h.app.composerPermissionMode()))
-		if !ok {
-			t.Fatalf("permission chip missing: %v", tt.Texts())
-		}
-		if chip.W < 36 || chip.W > 48 {
-			t.Fatalf("narrow permission chip width = %v, want the 44px icon+chevron trigger", chip.W)
-		}
-
-		h.app.Screen = Home
-		tt.Frame()
-		homeComposer, ok := tt.Find("Home composer")
-		if !ok {
-			t.Fatal("home composer missing")
-		}
-		near(t, "narrow home composer width", homeComposer.W, 361, 2)
-		homeInput, ok := tt.Find("Composer input")
-		if !ok {
-			t.Fatal("home input missing")
-		}
-		near(t, "narrow home input width", homeInput.W, 357, 3)
-	})
-}
 
 // TestApprovalCardFitsMinimumWindow covers the 900x600 approval card: the
 // fixed 868px frame used to push the tool name off-window.
@@ -234,9 +99,10 @@ func TestRightSidebarCollapseTargetAtMinimumWindow(t *testing.T) {
 	}
 }
 
-// TestLiveMentionListboxGeometryAndKeyboard pins DSH's listbox capture:
-// composer-width panel, 34px rows, and keyboard selection with Down/Enter and
-// Tab/Enter instead of mouse-only rows.
+// TestLiveMentionListboxGeometryAndKeyboard covers keyboard selection in the
+// mention listbox: Down/Enter and Tab/Enter choose rows instead of being
+// mouse-only. (The former DSH listbox width / 34px row-height pins were retired
+// with pixel parity.)
 func TestLiveMentionListboxGeometryAndKeyboard(t *testing.T) {
 	h := newLiveApp(t, &shellProvider{})
 	h.app.Language = LangEN
@@ -253,15 +119,8 @@ func TestLiveMentionListboxGeometryAndKeyboard(t *testing.T) {
 	if !tt.HasText("Files") {
 		t.Fatalf("mention menu has no section title: %v", tt.Texts())
 	}
-	row, ok := tt.Find("probe.txt")
-	if !ok {
+	if _, ok := tt.Find("probe.txt"); !ok {
 		t.Fatalf("mention row missing: %v", tt.Texts())
-	}
-	if row.W < 850 {
-		t.Fatalf("mention row width = %v, want a composer-width list (~869)", row.W)
-	}
-	if row.H < 33 || row.H > 35 {
-		t.Fatalf("mention row height = %v, want 34", row.H)
 	}
 
 	// Down then Enter in the composer selects the second row.
@@ -325,46 +184,9 @@ func TestHomeSendHitTargetCoversCircle(t *testing.T) {
 	}
 }
 
-// TestSettingsFontSizeStepperGeometry restores DSH's 129x36 control with the
-// 17x12 arrows inside the 72px value pill, not 20x12 buttons after "px".
-func TestSettingsFontSizeStepperGeometry(t *testing.T) {
-	h := newLiveApp(t, &shellProvider{})
-	h.app.Language = LangEN
-	tt := ui.NewTester(h.app.View, 1600, 1000)
-	tt.Key(ui.Cmd, ui.KeyComma)
-	tt.Frame()
-	var inc ui.Rect
-	for i := 0; i < 8; i++ {
-		r, ok := tt.Find("Increase font size")
-		if ok && r.Y >= 0 && r.Y+r.H <= 1000 {
-			inc = r
-			break
-		}
-		tt.Wheel(800, 500, 0, 400)
-		tt.Advance(300 * 1000 * 1000)
-		tt.Frame()
-	}
-	if inc.W == 0 {
-		t.Fatalf("Increase font size never became visible: %v", tt.Texts())
-	}
-	if inc.W != 17 || inc.H != 12 {
-		t.Fatalf("step arrow = %vx%v, want 17x12", inc.W, inc.H)
-	}
-	near(t, "step arrow x", inc.X, 1094, 2)
-	dec, ok := tt.Find("Decrease font size")
-	if !ok || dec.X != inc.X || dec.H != 12 {
-		t.Fatalf("decrease arrow = %+v, want the same 17x12 column", dec)
-	}
-	more, ok := tt.Find("More font settings")
-	if !ok {
-		t.Fatal("More font settings missing")
-	}
-	near(t, "control right edge", more.X+more.W, 1176, 2)
-	near(t, "step arrow inside pill", inc.X+inc.W, 1111, 2)
-}
-
-// TestDarkLiveOffSwitchContrast covers the live dark Plugins switch: the off
-// track/#272729 and dark knob/#151517 rendered at 1.22:1.
+// TestDarkLiveOffSwitchContrast covers the live dark Plugins switch: the OFF
+// knob and track must meet WCAG 2.1 SC 1.4.11 non-text contrast (3:1). (The
+// former DSH token/colour pins were retired with pixel parity.)
 func TestDarkLiveOffSwitchContrast(t *testing.T) {
 	h := newLiveApp(t, &shellProvider{})
 	h.app.Language = LangEN
@@ -384,26 +206,9 @@ func TestDarkLiveOffSwitchContrast(t *testing.T) {
 	img := tt.Image()
 	knob := img.RGBAAt(int(off.X)+6, int(off.Y+off.H/2))
 	track := img.RGBAAt(int(off.X+off.W)-6, int(off.Y+off.H/2))
-	if knob.R < 240 {
-		t.Fatalf("dark OFF knob = %v, want white", knob)
-	}
-	if track.R < 0x30 || track.R > 0x60 {
-		t.Fatalf("dark OFF track = %v, want BorderL3 ~#3B3B3C", track)
-	}
 	ratio := contrastRatio(ui.RGBA(track.R, track.G, track.B, 1), ui.RGBA(knob.R, knob.G, knob.B, 1))
-	if ratio < 7 {
-		t.Fatalf("dark OFF switch contrast = %.2f, want >= 7", ratio)
-	}
-	// The Settings live switch shares the same helper and must agree.
-	tokens := design.Dark()
-	for _, on := range []bool{false, true} {
-		tr, kn := switchTrack(tokens, on)
-		if on {
-			continue
-		}
-		if tr != tokens.BorderL3 || kn != tokens.White {
-			t.Fatalf("switchTrack(dark,false) = %v/%v, want BorderL3/White", tr, kn)
-		}
+	if ratio < 3 {
+		t.Fatalf("dark OFF switch contrast = %.2f, want >= 3 (WCAG non-text contrast)", ratio)
 	}
 }
 

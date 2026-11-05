@@ -5,14 +5,18 @@ import (
 	"testing"
 
 	"github.com/egoist/mygo/ui"
+
+	"github.com/zeokeel/zeokeel/internal/brand"
 )
 
-// TestFontStackMatchesBaseline checks that the design system carries the
-// DSH computed font stack exactly: the macOS/Windows/Linux general families
-// and the Chinese families follow the same order as baseline/css, with
-// sans-serif last so an unknown system still resolves.
-func TestFontStackMatchesBaseline(t *testing.T) {
+// TestFontStack checks that the design system carries the brand system font
+// stack: the platform families and the Chinese fallbacks in a fixed order,
+// with sans-serif last so an unknown system still resolves.
+func TestFontStack(t *testing.T) {
 	stack := FontStack()
+	if stack != brand.SystemFont {
+		t.Errorf("FontStack = %q, want the brand stack %q", stack, brand.SystemFont)
+	}
 	for _, want := range []string{
 		"-apple-system",
 		"BlinkMacSystemFont",
@@ -21,7 +25,6 @@ func TestFontStackMatchesBaseline(t *testing.T) {
 		`"Hiragino Sans GB"`,
 		`"Microsoft YaHei"`,
 		`"Helvetica Neue"`,
-		"Helvetica",
 		"Arial",
 		"sans-serif",
 	} {
@@ -30,7 +33,7 @@ func TestFontStackMatchesBaseline(t *testing.T) {
 		}
 	}
 	// Segoe UI is the Windows family and must come before the Chinese
-	// fallbacks, as DSH orders them.
+	// fallbacks, which are only reached on an install without it.
 	if strings.Index(stack, "Segoe UI") > strings.Index(stack, "PingFang SC") {
 		t.Errorf("Segoe UI must precede PingFang SC: %s", stack)
 	}
@@ -44,9 +47,13 @@ func TestFontStackMatchesBaseline(t *testing.T) {
 	}
 }
 
-// TestMonoFontStack checks the DSH code face for terminal and command text.
+// TestMonoFontStack checks the brand code face for terminal and command
+// text.
 func TestMonoFontStack(t *testing.T) {
 	stack := MonoFontStack()
+	if stack != brand.MonoFont {
+		t.Errorf("MonoFontStack = %q, want the brand mono stack %q", stack, brand.MonoFont)
+	}
 	for _, want := range []string{"SF Mono", "JetBrains Mono", "Fira Code", "Consolas", "Menlo", "PingFang SC"} {
 		if !strings.Contains(stack, want) {
 			t.Errorf("MonoFontStack missing %q: %s", want, stack)

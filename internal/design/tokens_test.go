@@ -1,52 +1,115 @@
 package design
 
 import (
+	"reflect"
 	"testing"
 
 	"github.com/egoist/mygo/ui"
+
+	"github.com/zeokeel/zeokeel/internal/brand"
 )
 
-func TestBaselineTokens(t *testing.T) {
-	l := Light()
-	if l.BgBase != ui.Hex("#FFFFFF") {
-		t.Errorf("bg base: %v", l.BgBase)
+// TestBrandTokens checks the brand mapping: every semantic token comes from
+// the internal/brand palette, and the light/dark accents are the two brand
+// blues the palette names.
+func TestBrandTokens(t *testing.T) {
+	l, d := Light(), Dark()
+	pLight, pDark := brand.LightPalette(), brand.DarkPalette()
+
+	if l.Dark || !d.Dark {
+		t.Fatalf("tokens Dark flags = %v/%v, want false/true", l.Dark, d.Dark)
 	}
-	if l.BgSidebar != ui.Hex("#F9FAFB") {
-		t.Errorf("sidebar: %v", l.BgSidebar)
+	checks := []struct {
+		name      string
+		got, want ui.Color
+	}{
+		{"light base", l.BgBase, pLight.Background},
+		{"light sidebar", l.BgSidebar, pLight.Sidebar},
+		{"light strong", l.BgStrong, pLight.SurfaceStrong},
+		{"light hover", l.BgHover, pLight.Hover},
+		{"light primary label", l.LabelPrimary, pLight.Text},
+		{"light secondary label", l.LabelSecondary, pLight.TextSecondary},
+		{"light border", l.BorderL2, pLight.Border},
+		{"light accent", l.Accent, ui.Hex(brand.HexRoyal)},
+		{"light on-primary", l.OnPrimary, pLight.OnPrimary},
+		{"dark base", d.BgBase, pDark.Background},
+		{"dark sidebar", d.BgSidebar, pDark.Sidebar},
+		{"dark raised", d.BgRaised, pDark.Surface},
+		{"dark hover", d.BgHover, pDark.Hover},
+		{"dark primary label", d.LabelPrimary, pDark.Text},
+		{"dark accent", d.Accent, ui.Hex(brand.HexSky)},
+		{"dark on-primary", d.OnPrimary, pDark.OnPrimary},
+		{"white", l.White, ui.Hex(brand.HexWhite)},
 	}
-	if l.LabelPrimary != ui.Hex("#0F1115") {
-		t.Errorf("label primary: %v", l.LabelPrimary)
+	for _, c := range checks {
+		if c.got != c.want {
+			t.Errorf("%s = %v, want %v", c.name, c.got, c.want)
+		}
 	}
-	d := Dark()
-	if !d.Dark || d.BgBase != ui.Hex("#151517") {
-		t.Errorf("dark base: %+v", d)
+	if l.Accent == d.Accent {
+		t.Errorf("light and dark accents are the same color; the palette maps them differently on purpose")
 	}
-	if l.Accent != ui.Hex("#4176E6") {
-		t.Errorf("light accent = %v, want #4176E6 (baseline rgb(65,118,230))", l.Accent)
+	// Status colors are semantic and shared by neither theme's logo palette:
+	// they must still come from the palettes, and warning text must be
+	// readable on the page background.
+	if l.WarningText != pLight.WarningText || d.WarningText != pDark.WarningText {
+		t.Errorf("warning text does not come from the brand palette")
 	}
-	if d.Accent != ui.Hex("#7AAAFF") {
-		t.Errorf("dark accent = %v, want #7AAAFF (baseline rgb(122,170,255))", d.Accent)
+}
+
+// TestScrim checks the modal backdrop is the brand palette's scrim in both
+// appearances.
+func TestScrim(t *testing.T) {
+	if got := Light().Scrim(); got != brand.LightPalette().Scrim {
+		t.Errorf("light scrim = %v, want brand scrim", got)
 	}
-	if d.BgHover != ui.RGBA(255, 255, 255, 0.08) {
-		t.Errorf("dark hover = %v, want white 0.08", d.BgHover)
+	if got := Dark().Scrim(); got != brand.DarkPalette().Scrim {
+		t.Errorf("dark scrim = %v, want brand scrim", got)
 	}
-	if d.BorderL2 != ui.RGBA(255, 255, 255, 0.12) || d.BorderL3 != ui.RGBA(255, 255, 255, 0.16) {
-		t.Errorf("dark borders = %v/%v, want 0.12/0.16", d.BorderL2, d.BorderL3)
+}
+
+// TestThemeIsBrandTheme pins the contract screens rely on: Tokens.Theme is
+// exactly the brand ui.Theme (colors, metrics and font), so installing it
+// with c.SetTheme gives every stock mygo widget the brand appearance.
+func TestThemeIsBrandTheme(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		tok  *Tokens
+		want *ui.Theme
+	}{
+		{"light", Light(), brand.LightTheme()},
+		{"dark", Dark(), brand.DarkTheme()},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got := tc.tok.Theme()
+			if !reflect.DeepEqual(got, tc.want) {
+				t.Errorf("Tokens.Theme() = %+v\nwant brand theme %+v", got, tc.want)
+			}
+			// The theme's color slots must agree with the tokens the screens
+			// pass around, so a widget and a hand-styled element never
+			// disagree on the brand.
+			if got.Background != tc.tok.BgBase || got.Surface != tc.tok.BgRaised || got.Text != tc.tok.LabelPrimary {
+				t.Errorf("theme slots drifted from tokens: %+v", got)
+			}
+			if got.Radius != RadiusMD {
+				t.Errorf("theme radius = %v, want the control corner %v", got.Radius, RadiusMD)
+			}
+		})
 	}
-	if d.BgRaised != ui.Hex("#2C2C2E") || d.BgStrong != ui.Hex("#43454A") {
-		t.Errorf("dark surfaces = %v/%v, want #2C2C2E/#43454A", d.BgRaised, d.BgStrong)
-	}
-	if d.OnPrimary != ui.Hex("#151517") || l.OnPrimary != ui.Hex("#FFFFFF") {
-		t.Errorf("on-primary = %v/%v, want #151517/#FFFFFF", d.OnPrimary, l.OnPrimary)
-	}
-	// The modal scrim is theme-aware: DSH's light backdrop is 0.24 black and
-	// its dark one is 0.5 (baseline 104-settings-dark).
-	if l.Scrim() != ui.RGBA(0, 0, 0, 0.24) {
-		t.Errorf("light scrim = %v, want black 0.24", l.Scrim())
-	}
-	if d.Scrim() != ui.RGBA(0, 0, 0, 0.5) {
-		t.Errorf("dark scrim = %v, want black 0.5", d.Scrim())
-	}
+}
+
+// TestOfFollowsContextTheme checks the helper screens use to pick tokens for
+// the current appearance.
+func TestOfFollowsContextTheme(t *testing.T) {
+	ui.Render(func(c *ui.Context) {
+		if Of(c).Dark {
+			t.Error("Of(default context) is dark, want light")
+		}
+		c.SetTheme(brand.DarkTheme())
+		if !Of(c).Dark {
+			t.Error("Of(context with the dark theme) is light")
+		}
+	}, 40, 20, 1)
 }
 
 func TestTypeScale(t *testing.T) {
@@ -65,13 +128,24 @@ func TestTypeScale(t *testing.T) {
 	for _, c := range cases {
 		size, line, weight := TypeMetrics(c.role)
 		if size != c.size || line != c.line || weight != c.weight {
-			t.Errorf("role %d: got %v/%v/%d", c.role, size, line, weight)
+			t.Errorf("role %d: got %v/%v/%d, want %v/%v/%d", c.role, size, line, weight, c.size, c.line, c.weight)
 		}
+	}
+	// The body step is the brand base size, and the theme carries the same
+	// number: a raw FontSize and a Tokens.Font(TypeBody) run at one size.
+	if size, _, _ := TypeMetrics(TypeBody); size != brand.FontSize {
+		t.Errorf("TypeBody = %v, want the brand base font size %v", size, brand.FontSize)
 	}
 }
 
-func TestSpacingGrid(t *testing.T) {
-	if Space1 != 4 || Space2 != 8 || Space4 != 16 || Space6 != 24 {
-		t.Fatalf("space scale: %v %v %v %v", Space1, Space2, Space4, Space6)
+func TestBrandGrid(t *testing.T) {
+	if Space1 != brand.Spacing || Space2 != 2*brand.Spacing || Space4 != 4*brand.Spacing || Space6 != 6*brand.Spacing {
+		t.Fatalf("spacing scale is not on the brand grid: %v %v %v %v", Space1, Space2, Space4, Space6)
+	}
+	if RadiusMD != brand.Radius {
+		t.Errorf("RadiusMD = %v, want the brand control radius %v", RadiusMD, brand.Radius)
+	}
+	if RadiusXS >= RadiusSM || RadiusSM >= RadiusMD || RadiusMD >= RadiusLG || RadiusLG >= RadiusXL {
+		t.Errorf("radius scale is not ascending: %v %v %v %v %v", RadiusXS, RadiusSM, RadiusMD, RadiusLG, RadiusXL)
 	}
 }

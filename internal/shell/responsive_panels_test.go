@@ -222,17 +222,19 @@ func TestLiveSessionUsagePillsStayInsideComposer(t *testing.T) {
 // TestFilesBreadcrumbKeepsReloadAtMinimum covers the 900x600 Files panel: a
 // normal two-level path used to push Reload outside the window (x=924, W=0)
 // and clip the last segment to W=0. Leading segments collapse into an
-// ellipsis menu and Reload stays a >=24px target inside the panel.
+// ellipsis menu and Reload stays a >=24px target inside the panel. The path is
+// built inside the fixture's temporary workspace; it deliberately does not
+// point at the retired docs/baseline tree.
 func TestFilesBreadcrumbKeepsReloadAtMinimum(t *testing.T) {
 	h := newLiveApp(t, &shellProvider{})
 	h.app.Language = LangEN
-	if err := os.MkdirAll(filepath.Join(h.dir, "docs", "baseline", "screenshots"), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Join(h.dir, "docs", "guides", "screenshots"), 0o755); err != nil {
 		t.Fatal(err)
 	}
 	h.app.Screen = Session
 	h.app.rightOpen = true
 	h.app.rightTab = filesTab
-	h.app.filesDir = "docs/baseline/screenshots"
+	h.app.filesDir = "docs/guides/screenshots"
 
 	tt := ui.NewTester(h.app.View, 900, 600)
 	tt.Frame()
@@ -278,7 +280,7 @@ func TestFilesBreadcrumbKeepsReloadAtMinimum(t *testing.T) {
 	}
 
 	// At 1600 the whole path fits and no ellipsis is needed.
-	h.app.filesDir = "docs/baseline/screenshots"
+	h.app.filesDir = "docs/guides/screenshots"
 	wide := ui.NewTester(h.app.View, 1600, 1000)
 	wide.Frame()
 	if _, ok := wide.Find("docs"); !ok {

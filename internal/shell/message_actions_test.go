@@ -115,14 +115,13 @@ func TestLiveUsageFooterCompletedTokPerSecondAndCache(t *testing.T) {
 	snap := state.NewSnapshot()
 	snap.Phase = state.PhaseRunning
 	snap.Usage = state.Usage{Turns: 1, Steps: 1, In: 200, Out: 100, CacheHit: 50}
-	app := &App{Screen: Session}
-	app.SetSnapshot(snap)
-	tt := ui.NewTester(app.View, 1600, 1000)
+	h := newLiveSnapshotApp(t, Session, snap)
+	tt := ui.NewTester(h.app.View, 1600, 1000)
 	tt.Advance(2 * time.Second)
 
 	idle := *snap
 	idle.Phase = state.PhaseIdle
-	app.SetSnapshot(&idle)
+	h.app.SetSnapshot(&idle)
 	tt.Frame()
 
 	for _, want := range []string{"Completed in 2.0s", "50 tok/s", "cache 25%"} {
@@ -135,7 +134,7 @@ func TestLiveUsageFooterCompletedTokPerSecondAndCache(t *testing.T) {
 	// the old clock must not be paired with the new tokens.
 	next := idle
 	next.Usage = state.Usage{Turns: 2, Steps: 2, In: 100, Out: 80, CacheHit: 10}
-	app.SetSnapshot(&next)
+	h.app.SetSnapshot(&next)
 	tt.Frame()
 	if tt.HasText("Completed in") || tt.HasText("tok/s") {
 		t.Fatalf("footer reused the previous turn's clock: %v", tt.Texts())
@@ -148,9 +147,8 @@ func TestLiveUsageFooterCompletedTokPerSecondAndCache(t *testing.T) {
 func TestLiveUsageFooterOmitsUnmeasurableRate(t *testing.T) {
 	snap := state.NewSnapshot()
 	snap.Usage = state.Usage{Turns: 1, Steps: 1, In: 10, Out: 20, CacheHit: 5}
-	app := &App{Screen: Session}
-	app.SetSnapshot(snap)
-	tt := ui.NewTester(app.View, 1600, 1000)
+	h := newLiveSnapshotApp(t, Session, snap)
+	tt := ui.NewTester(h.app.View, 1600, 1000)
 	tt.Frame()
 
 	if tt.HasText("Completed in") || tt.HasText("tok/s") {
@@ -169,9 +167,8 @@ func TestTurnNavigationScrollsToTurn(t *testing.T) {
 		{MsgID: "u2", Role: state.RoleUser, Text: "second turn question"},
 		{MsgID: "a2", Role: state.RoleAssistant, Text: "second answer"},
 	}
-	app := &App{Screen: Session}
-	app.SetSnapshot(snap)
-	tt := ui.NewTester(app.View, 1600, 1000)
+	h := newLiveSnapshotApp(t, Session, snap)
+	tt := ui.NewTester(h.app.View, 1600, 1000)
 	tt.Frame()
 
 	before, ok := tt.Find("second turn question")
@@ -192,7 +189,7 @@ func TestTurnNavigationScrollsToTurn(t *testing.T) {
 	if after.Y == before.Y {
 		t.Fatalf("jump control did not scroll: y stayed %v", after.Y)
 	}
-	if got := app.liveMenus().pendingTurn; got != 0 {
+	if got := h.app.liveMenus().pendingTurn; got != 0 {
 		t.Fatalf("jump request was not consumed: pendingTurn=%d", got)
 	}
 }

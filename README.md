@@ -1,8 +1,10 @@
 # ZeoKeel Agent
 
-**ZeoKeel：纯 Go 桌面 AI Agent。mygo 原生 UI + eino 运行时，与 DSH（0.2.1-rc.2）做像素 / 交互 / 功能三重 1:1 对齐。**
+**ZeoKeel：纯 Go 桌面 AI Agent。mygo 原生 UI + eino 运行时。功能对齐 DSH（DeepSeek Harness），视觉与交互自有（mygo 原生设计 + ZeoKeel 品牌）。**
 
 > 品牌资产只使用 `logo/` 下的 SVG，不自行猜测或重绘。插件只做内置（无第三方安装/市场）。
+>
+> **2026-11-05 决策**：DSH 像素级对齐已退役；功能对齐继续作为目标。见 [ADR 0001：退役 DSH 像素对齐基建](docs/decisions/0001-retire-dsh-pixel-parity.md)。
 
 ## 硬约束
 
@@ -11,34 +13,35 @@
 | C1 | 纯 Go，`CGO_ENABLED=0`，不引入任何 cgo 依赖 |
 | C2 | UI 只用 mygo 原生控件（`ui` 包），不用 webview / Electron / HTML |
 | C3 | 单进程、单二进制、可交叉编译到 Linux / macOS / Windows |
-| C4 | 测试无显示器可跑；像素与交互验收进 CI |
+| C4 | 测试无显示器可跑；功能与交互验收进 CI（DSH 像素/基线门禁已于 2026-11-05 退役） |
 
 ## 文档
 
 - **总体规划（主文档）**：[docs/PLAN.md](docs/PLAN.md)
-  - 三条对齐轴的工程定义与门禁（§1）
-  - DSH 基线令牌与布局测量（§2）
+  - 对齐轴与门禁（§1；功能/交互轴有效，像素轴已退役）
+  - DSH 设计令牌与布局测量（§2；历史参考，已退役）
   - 架构与 ADR（§4）
-  - UI 规格 + **基础样式函数层**（§5）
+  - UI 规格 + **基础样式函数层**（§5；自有视觉设计系统）
   - 交互规格（§6）、功能对齐矩阵（§7）
   - eino 运行时设计（§8）、数据模型（§9）
   - 质量体系（§10）、里程碑与 M0 任务（§11）、风险（§12）、待拍板（§13）
-- **基线截图**：[baseline/screenshots/](baseline/screenshots/)（1600×1000，逐屏）
-- **基线控件清单**：[baseline/controls/](baseline/controls/)（每屏交互元素 dump）
-- **基线文档**：[docs/baseline/index.md](docs/baseline/index.md)（屏幕地图 / 控件总表 / 覆盖矩阵）
-- **全元素 CSS**：[docs/baseline/css.md](docs/baseline/css.md)（17 屏 computed style 汇总 + 组件样式样本）
+- **决策记录**：[docs/decisions/](docs/decisions/)（0001 退役 DSH 像素对齐；0002 品牌主题基础）
+- **功能对齐矩阵**：[docs/FUNCTIONAL-PARITY.md](docs/FUNCTIONAL-PARITY.md)（活文档；像素对齐已退役）
+- **历史文档（已退役，不再维护）**：[docs/UI-PARITY-AUDIT.md](docs/UI-PARITY-AUDIT.md)、[docs/COMPONENT-PARITY.md](docs/COMPONENT-PARITY.md)、[docs/research/](docs/research/)
+- **字标规格**：[docs/wordmark.md](docs/wordmark.md)
 
 ## 当前状态
 
-**M0–M10 完成：五屏 UI · 动画/交互 · 运行时 · 提示词层 · Agent Loop 工具全量 · 多模态图片输入 · 终端 PTY · 真实模型 E2E**：Home / Session / Plugins / Settings / Automation 全部用 mygo 原生控件实现，逐屏与 DSH 基线像素比对迭代（masked diff 0.93% / 6.40% / 3.17% / 2.31% / 1.34%）。`CGO_ENABLED=0 go build/test/vet` 全绿、`scripts/check-nocgo.sh` PASS（四目标交叉编译）。
-
-![M1 screens](artifacts/m1-screens.png)
-
-各屏渲染：`artifacts/screens/`，差异图（红=不同）：`artifacts/diff/`。
+**M0–M13 完成：五屏 UI · 动画/交互 · 运行时 · 提示词层 · Agent Loop 工具全量 · 多模态图片输入 · 终端 PTY · 真实模型 E2E · 附件上传 · fork/导出**：Home / Session / Plugins / Settings / Automation 全部用 mygo 原生控件实现。`CGO_ENABLED=0 go build/test/vet` 与 `scripts/check-nocgo.sh`（四目标交叉编译）为现行门禁；DSH 像素比对已退役（2026-11-05），历史基线资产已整包归档（`/data/zeokeel-backups/parity-assets-20261105.tar.gz`，回滚点 tag `pre-native-ui`）。
 
 基础设施：`internal/state`（事件总线/快照）、`internal/store`（SQLite v1 + JSONL）、`internal/runtime`（eino ADK：工具回路/多轮历史/审批）、`internal/provider/openai`（SSE 流式 + tool calls）、`internal/session`（会话控制器）、`internal/app`（单实例/托盘/关窗隐藏 + services 接线）。
 
-**基线文档 100% 收口，可进入 M0**：80 张屏/状态截图、53 份全元素 computed style、108 条逐控件行为 + 216 张前后对比截图；样式路线已定：原生 mygo + Go 样式函数，CSS 仅作对齐依据。尚未开始编码；`docs/PLAN.md` 是计划真源，`docs/baseline/` 是施工图。
+## 视觉与交互方向（2026-11-05 起）
+
+- **功能对齐 DSH**：能力与行为对齐（`docs/FUNCTIONAL-PARITY.md`）；不再承诺逐像素/逐交互复刻。
+- **视觉自有**：mygo 原生 `ui.Theme` + ZeoKeel 品牌主题（`internal/brand`），设计令牌以品牌资产为源。
+- **交互自有**：按桌面平台惯例本地化（系统菜单栏、通知、文本选择、DPI/文本缩放、窗口状态等）。
+- **验收口径**：自有设计系统组件样本 + 关键屏自身视觉回归，不再与 DSH 截图做像素比对。
 
 ## 字标（已定）
 

@@ -6,6 +6,7 @@ import (
 
 	"github.com/egoist/mygo/ui"
 
+	"github.com/zeokeel/zeokeel/internal/session"
 	"github.com/zeokeel/zeokeel/internal/state"
 )
 
@@ -58,12 +59,14 @@ func m6ToolSnapshot() *state.Snapshot {
 }
 
 func TestToolCardsVariantRows(t *testing.T) {
-	app := &App{Screen: Session}
-	sessionRenderStates.Delete(app)
-	liveStates.Delete(app)
-	liveUIStates.Delete(app)
-	app.SetSnapshot(m6ToolSnapshot())
-	tt := ui.NewTester(app.View, 1600, 1000)
+	h := newLiveSnapshotApp(t, Session, m6ToolSnapshot())
+	// Work details defaults to Detailed, which starts every tool card open.
+	// This test keeps the collapsed state's product intent (the title row
+	// alone), so pin the setting that starts cards collapsed.
+	if err := h.store.SetSetting(session.SettingWorkDetails, session.WorkDetailsStandard); err != nil {
+		t.Fatalf("work details setting: %v", err)
+	}
+	tt := ui.NewTester(h.app.View, 1600, 1000)
 	tt.Frame()
 
 	// Every card keeps the existing title line.
@@ -99,12 +102,11 @@ func TestToolCardsVariantRows(t *testing.T) {
 }
 
 func TestToolCardExpandShowsVariantDetail(t *testing.T) {
-	app := &App{Screen: Session}
-	sessionRenderStates.Delete(app)
-	liveStates.Delete(app)
-	liveUIStates.Delete(app)
-	app.SetSnapshot(m6ToolSnapshot())
-	tt := ui.NewTester(app.View, 1600, 1000)
+	h := newLiveSnapshotApp(t, Session, m6ToolSnapshot())
+	if err := h.store.SetSetting(session.SettingWorkDetails, session.WorkDetailsStandard); err != nil {
+		t.Fatalf("work details setting: %v", err)
+	}
+	tt := ui.NewTester(h.app.View, 1600, 1000)
 	tt.Frame()
 
 	if err := tt.Click("Tool bash"); err != nil {

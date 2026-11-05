@@ -1,6 +1,0 @@
-[
-  {"act":"goto","url":"/","wait":5000},
-  {"act":"clickxy","x":1010,"y":684,"wait":1500},
-  {"act":"dump","out":".probe/controls/dismiss.json"},
-  {"act":"shot","out":".probe/shots/dismiss.png"}
-]

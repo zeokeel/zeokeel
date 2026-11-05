@@ -1,13 +1,13 @@
 # ZeoKeel Agent 总体规划
 
-> **ZeoKeel · 纯 Go · mygo 原生 UI · eino Agent 运行时 · 与 DSH 1:1 对齐（像素/交互/功能）**
+> **ZeoKeel · 纯 Go · mygo 原生 UI · eino Agent 运行时 · 功能对齐 DSH（视觉与交互自有；像素对齐已于 2026-11-05 退役）**
 >
-> 文档版本：v0.13（2026-11-04） · 状态：**M0–M10：多模态图片输入 + 终端 PTY 完成** · 基线：**DSH 0.2.1-rc.2**（官方发版后同步；参考窗口 1600×1000） · 品牌：**ZeoKeel**（logo 只使用 `logo/` 下的资产，不允许猜测或重绘）
+> 文档版本：v0.14（2026-11-05） · 状态：**M0–M13 完成；2026-11-05 方向变更：DSH 像素对齐退役，视觉/交互自有** · DSH 基线（0.2.1-rc.2）仅作**功能对齐参考**（像素门禁已退役，基线资产归档于仓库外） · 品牌：**ZeoKeel**（logo 只使用 `logo/` 下的资产，不允许猜测或重绘）
 >
 > 本文档不依赖任何既有项目代码或既有设计文档。所有技术结论来自三处可复核证据：
 > ① `github.com/egoist/mygo@v0.7.4` 与其 `ui`、`ui/markdown`、`ui/editor`、`ui/i18n` 包源码；
 > ② `github.com/cloudwego/eino@v0.10.0-alpha.35` 及其 `adk`、`compose`、`components` 源码；
-> ③ 本机 DSH 前端构建产物（设计令牌、字体）与逐屏基线截图（`baseline/screenshots/`，控制项清单 `baseline/controls/`）；
+> ③ 本机 DSH 前端构建产物（设计令牌、字体）与逐屏基线截图（**历史资产，2026-11-05 已归档并移出仓库**，见 `docs/decisions/0001-retire-dsh-pixel-parity.md`）；
 > ④ DSH 官方源码（只读，用于确认按钮行为与边界，不复制代码）。
 
 ---
@@ -16,50 +16,50 @@
 
 **结论：路线成立，但要换一个心智模型——这不是"做一个聊天框"，而是"用纯 Go 重建一个 Agent 宿主"。**
 
-1. **约束可满足**：mygo（purego，无 cgo）、eino（纯 Go）、`modernc.org/sqlite`（纯 Go）可以在 `CGO_ENABLED=0` 下单进程共存，产出单二进制；mygo 的 `ui.Render(view, w, h, scale)` 与 `ui.NewTester` 能把"像素对齐"变成**无头、确定性、可进 CI 的单元测试**，这是本项目最重要的可行性红利。此外，DSH 的“基础 CSS”会全部函数化为语义样式层（§5.4）：所有界面共用同一批 style 函数，视图层不写样式字面量。
-2. **真正的成本在 Agent 运行时与对齐验收体系，不在画界面**：UI 约占总工作量的 1/3；运行时（会话、工具、审批、恢复、子智能体）约 1/2；像素/交互/功能三套对齐门禁约 1/6。功能对齐的难点是"运行时 + 插件形态"，不是按钮画得像不像。
-3. **"1:1"必须工程化定义，否则永远做不完**：三条轴各自有度量、阈值与门禁（见 §1.2）；先锁 P0（宿主壳 + 会话 + 工具/审批），再按矩阵推进 P1/P2。**不建议一上来追求全功能 1:1**——那是 9 个月以上的单人体量。
+1. **约束可满足**：mygo（purego，无 cgo）、eino（纯 Go）、`modernc.org/sqlite`（纯 Go）可以在 `CGO_ENABLED=0` 下单进程共存，产出单二进制；mygo 的 `ui.Render(view, w, h, scale)` 与 `ui.NewTester` 能把「渲染/交互验证」变成**无头、确定性、可进 CI 的单元测试**，这是本项目最重要的可行性红利。此外，样式路线保留语义样式层（§5.4）：所有界面共用同一批 style 函数，视图层不写样式字面量；视觉来源改为 ZeoKeel 品牌设计系统（DSH 像素对齐已退役，见 §1.2 与 ADR 0001）。
+2. **真正的成本在 Agent 运行时与验收体系，不在画界面**：UI 约占总工作量的 1/3；运行时（会话、工具、审批、恢复、子智能体）约 1/2；功能/交互对齐门禁约 1/6。功能对齐的难点是"运行时 + 插件形态"，不是按钮画得像不像（像素门禁已于 2026-11-05 退役）。
+3. **对齐必须工程化定义，否则永远做不完**：功能/交互各轴有度量与门禁（见 §1.2）；先锁 P0（宿主壳 + 会话 + 工具/审批），再按矩阵推进 P1/P2。**不追求全功能 1:1**——那是 9 个月以上的单人体量；像素 1:1 已退役（2026-11-05）。
 4. **纯 Go 带来的两个硬性功能边界**，必须提前拍板：
    - **插件只做内置**：对齐 DSH 的 Built-in / Experimental 插件（开关 + 配置页），但**不做第三方插件安装、上传与插件市场**。插件在编译期以注册表形式存在；这既保留"插件"这一产品概念，也避免 Node/Cordis 依赖。
    - **没有内核级沙箱**。DSH 的权限预设/审批可以对齐交互，但底层隔离只能做到"策略 + 审批 + 审计"（纯 Go 可用 `os/exec` + 路径策略），不承诺与系统沙箱同等级别的隔离。这也是诚实的产品边界。
 5. **估时**：2 名 Go 工程师，约 **22 周（5.5 个月）**到 v1.0；1 人约 9–10 个月。里程碑见 §11。
-6. **已锁定的决策**（2026-11-04）：基线 = DSH 0.2.1-rc.2，官方发版后同步；品牌 = ZeoKeel（logo 用 `logo/` 资产）；插件 = 只做内置插件；允许只读官方源码确认行为；采集时可以建测试会话并少量对话。
-7. **施工前置：基线文档必须 100% 覆盖**。每个界面、每个按钮都要有截图 + 行为说明 + 边界条件，全部落在 `docs/baseline/`；未覆盖的界面不进入编码（§2.7）。这也是当前第一优先级。
+6. **已锁定的决策**（2026-11-04，2026-11-05 增补）：DSH 0.2.1-rc.2 作为**功能对齐参考**（不再做像素对齐）；品牌 = ZeoKeel（logo 用 `logo/` 资产）；插件 = 只做内置插件；允许只读官方源码确认行为；采集时可以建测试会话并少量对话。**2026-11-05：停止 DSH 像素级对齐，视觉/交互自有（ADR 0001）。**
+7. **（历史，已退役 2026-11-05）施工前置：基线文档必须 100% 覆盖**。每个界面、每个按钮都要有截图 + 行为说明 + 边界条件，全部落在当时的基线文档目录；未覆盖的界面不进入编码（§2.7）。该要求随像素对齐退役；基线文档目录已归档删除，现有界面以 `docs/FUNCTIONAL-PARITY.md` 功能矩阵为准。
 
 ---
 
-## 1. 目标、范围与"1:1"的工程定义
+## 1. 目标、范围与对齐的工程定义
 
 ### 1.1 产品目标
 
-用**纯 Go** 构建一个桌面 AI Agent：视觉、交互、能力三方面与 DSH 对齐，单二进制、离线优先、可三平台分发。
+用**纯 Go** 构建一个桌面 AI Agent：**功能对齐 DSH，视觉与交互自有**（mygo 原生设计 + ZeoKeel 品牌），单二进制、离线优先、可三平台分发。
 
 | 维度 | 目标 |
 | --- | --- |
 | 形态 | 原生桌面应用（mygo 原生 `ui`，非 webview、非 Electron） |
 | 语言/构建 | 100% Go；`CGO_ENABLED=0`；单二进制；`go test` 无显示器可跑 |
 | 产品能力 | 会话、工作区、Agent 工具调用、审批、轨迹、用量、模型选择、插件页、自动化任务、设置 |
-| 对齐基准 | DSH 当前 Web 客户端：布局/令牌/交互/功能逐项对齐 |
+| 对齐基准 | DSH 当前 Web 客户端的**功能/能力**（行为对齐）；视觉/交互不再逐像素复刻（2026-11-05） |
 | 交付物 | Linux/macOS/Windows 可执行 + 安装包 + 自动更新（P2） |
 
-### 1.2 三条对齐轴：定义、度量、门禁
+### 1.2 对齐轴：定义、度量、门禁
 
 | 轴 | 对齐对象 | 度量方法 | 通过门槛（P0 屏） | 不达标处理 |
 | --- | --- | --- | --- | --- |
-| **像素对齐** | 布局几何、设计令牌、字体、图标、圆角/阴影/边框、明暗主题 | ① 设计令牌逐项比对（机器）；② 无头渲染 `ui.Render` 与基线截图做 ROI 差异；③ 尺寸/坐标断言 | 几何偏差 ≤ 1px；颜色 ΔE ≤ 1（或同值）；非文本区像素差异 ≤ 0.2%/屏；文本区 SSIM ≥ 0.98 | 进白名单必须写明原因 + 到期日；不接受"整体看起来差不多" |
-| **交互对齐** | 状态机、键位、焦点顺序、动效时长、异步反馈、错误反馈 | 交互用例库（§6.9）在 `ui.NewTester` 虚拟时钟上逐条执行；关键动效断言 ±50ms | 用例 100% 通过；同一操作在基准与实现上的状态转移一致 | 用例降级必须改需求单，不允许静默跳过 |
+| ~~**像素对齐**~~（**已退役 2026-11-05**） | 布局几何、设计令牌、字体、图标、圆角/阴影/边框、明暗主题 | 历史做法：设计令牌逐项比对 + 无头渲染 `ui.Render` 与 DSH 基线截图做 ROI 差异 + 尺寸/坐标断言 | 历史标准（不再执行）：几何偏差 ≤ 1px；颜色 ΔE ≤ 1；非文本区像素差异 ≤ 0.2%/屏；文本区 SSIM ≥ 0.98。退役原因见 [ADR 0001](decisions/0001-retire-dsh-pixel-parity.md) | 不再适用（资产已归档，视觉改按品牌设计系统验收） |
+| **交互对齐** | 状态机、键位、焦点顺序、动效时长、异步反馈、错误反馈 | 交互用例库（§6.9）在 `ui.NewTester` 虚拟时钟上逐条执行；关键动效断言 ±50ms | 用例 100% 通过；同一操作的行为语义与 DSH 一致；交互形式按桌面平台惯例（2026-11-05 起不再逐 hover/焦点样式复刻） | 用例降级必须改需求单，不允许静默跳过 |
 | **功能对齐** | 能力矩阵（§7）中的每一条 | 每条能力一个验收用例（成功 + 失败 + 边界） | P0 行 100%；P1 行 ≥ 90% 且余项有排期；P2 行有明确降级说明 | 写进"功能降级清单"并在产品内可见 |
 
-**三条轴的共同前提：基准版本必须锁死。** 建议在仓库里提交 `baseline/VERSION`（如 `dsh 0.2.1-rc.2`）与基线截图集；DSH 升级时走 §2.6 的基线更新流程，否则"1:1"没有判据。
+**功能/交互轴的共同前提：参考版本必须锁死。** 功能对齐参考 `DSH 0.2.1-rc.2`（记录在本文档；不再维护仓库内基线截图集——像素轴已于 2026-11-05 退役，历史资产归档于 `/data/zeokeel-backups/parity-assets-20261105.tar.gz`）。
 
 ### 1.3 对齐分层（先做对 20% 的屏，再扩）
 
 | 层级 | 范围 | 验收强度 |
 | --- | --- | --- |
-| **P0** | 宿主壳（侧栏 + 首页 composer）、会话页（Chat/Trajectory 头、消息流、composer）、工具调用卡片、审批、停止/流式、用量条 | 像素 + 交互 + 功能三轴全门禁 |
-| **P1** | 工作区/会话列表管理、模型与权限选择、设置页、插件页、自动化任务页、Markdown/代码/差异渲染、深色主题、i18n | 像素门禁（ROI 放宽）+ 交互门禁用例 |
-| **P2** | 目标、定时、子智能体、Agent Team、skills、MCP、后台任务、工作流 | 功能门禁 + 交互门禁（视觉只要求组件级一致） |
-| **P3** | 语音输入、Office/PDF 预览、CoT 翻译、检查器等等官方实验能力 | 只要求"入口与文案对齐"，实现可延后 |
+| **P0** | 宿主壳（侧栏 + 首页 composer）、会话页（Chat/Trajectory 头、消息流、composer）、工具调用卡片、审批、停止/流式、用量条 | 交互 + 功能门禁；视觉按自有设计系统验收 |
+| **P1** | 工作区/会话列表管理、模型与权限选择、设置页、插件页、自动化任务页、Markdown/代码/差异渲染、深色主题、i18n | 功能验收 + 交互门禁用例；视觉按自有设计系统 |
+| **P2** | 目标、定时、子智能体、Agent Team、skills、MCP、后台任务、工作流 | 功能门禁 + 交互门禁（视觉按自有设计系统） |
+| **P3** | 语音输入、Office/PDF 预览、CoT 翻译、检查器等等官方实验能力 | 只要求"入口与文案语义对齐"，实现可延后 |
 
 ### 1.4 明确不做（非目标，写入产品口径）
 
@@ -68,12 +68,14 @@
 3. **不承诺内核级沙箱**（见 §0-4）；不承诺与系统级权限模型（如 macOS TCC 全能力）逐项一致。
 4. **不做多租户/云同步**；单机、单用户、本地优先。
 5. **不引入任何 cgo 依赖**，包括"性能更好的 SQLite/图形库"这类理由。
-6. **不复制 DSH 的代码与资源**：令牌用测量/提取值重写，图标用等价图形重绘，字体用 OFL 字体替代（§2.5）。官方源码只用于确认行为，不搬运实现。
+6. **不复制 DSH 的代码与资源**：图标用等价图形重绘（或采用独立图标库），字体用系统字体栈/OFL 字体替代（§2.5）。官方源码只用于确认行为，不搬运实现；视觉设计以 ZeoKeel 品牌资产为源，不再从 DSH 令牌反推。
 7. **不做第三方的插件生态**（见第 1 条）；也不做插件热加载/动态加载，插件集合编译期固定。
 
 ---
 
-## 2. 基线：DSH 界面与设计令牌
+## 2. DSH 基线：历史参考（已退役，2026-11-05）
+
+> **状态：历史参考，不再维护。** 本节记录像素对齐时代的基线/令牌/几何/采集流程，用于追溯历史决策；资产已整包归档（`/data/zeokeel-backups/parity-assets-20261105.tar.gz`），对应目录与门禁已删除。现行视觉设计以 `internal/brand` 品牌主题与自有设计系统为准（见 [ADR 0001](decisions/0001-retire-dsh-pixel-parity.md)）。
 
 ### 2.1 基线画面
 
@@ -84,11 +86,11 @@
 | Plugins | 侧栏入口 → 插件列表页（Built-in/Experimental、开关、Add plugin） | 1600×1000 |
 | Settings / Automation | 设置分组与自动化任务列表 | 1600×1000 |
 
-**基线截图必须先落库**：`baseline/<screen>@1600x1000.png`，并附 `geometry.json`（每个关键盒子的 x/y/w/h）。当前仓库的 `baseline/` 已建立，M0 第一件事就是补齐（DSH Web 需要带鉴权 token 的 URL 才能打开，采集脚本见附录 B）。
+**（历史）基线截图先落库**：`baseline/<screen>@1600x1000.png`，并附 `geometry.json`（每个关键盒子的 x/y/w/h）。该资产已于 2026-11-05 归档删除（不含 `VERSION` 文件）；采集脚本见附录 B（历史命令，仅存档参考）。
 
-### 2.2 设计令牌体系（已从 DSH 前端产物提取，M0 生成 Go 常量）
+### 2.2 设计令牌体系（历史参考，已被品牌主题取代）
 
-DSH 的令牌分三层：`static`（原始色板）→ `alias`（语义）→ 组件。我们**原样移植这三层**，不做"我觉得更好看"的改动。
+（历史）DSH 的令牌分三层：`static`（原始色板）→ `alias`（语义）→ 组件。当时**原样移植这三层**；2026-11-05 起设计令牌改为 ZeoKeel 品牌主题（`internal/brand`，ADR 0002），不再复制 DSH 令牌。以下数值仅作历史参考。
 
 **字号/行高（已确认）**
 
@@ -127,9 +129,9 @@ DSH 的令牌分三层：`static`（原始色板）→ `alias`（语义）→ �
 | `blue-500` / `blue-600` | `#3B82F6` / `#2563EB` | 强调、发送按钮、链接 |
 | `green-500` / `red-500` / `amber-500` | `#22C55E` / `#EF4444` / `#F59E0B` | 状态 |
 
-> 完整色板（约 90 个 static token）与 alias 映射在 M0 用脚本导出为 `internal/design/tokens.json`，再由 `go generate` 生成 `tokens_gen.go`；生成物有单测：**Go 常量必须与基线 JSON 完全一致**，禁止手改。
+> （历史）完整色板（约 90 个 static token）与 alias 映射曾在 M0 用脚本导出为 `internal/design/tokens.json`，再由 `go generate` 生成 `tokens_gen.go`；该“Go 常量必须与基线 JSON 完全一致”的门禁随像素对齐退役，品牌主题值以 ADR 0002 为准。
 
-### 2.3 布局几何（初步测量，M0 复核到 1px）
+### 2.3 布局几何（历史测量，像素对齐时代）
 
 | 测量项 | 基线值 | 说明 |
 | --- | --- | --- |
@@ -142,101 +144,49 @@ DSH 的令牌分三层：`static`（原始色板）→ `alias`（语义）→ �
 | 会话内容列 | 与 composer 同列宽（约 868） | 居中，左右留白由窗口宽度分配 |
 | 侧栏分组标题 | 11–12px，`#81858C` | Workspaces / 项目名 |
 
-> 这些数字是 1600×1000 下的实测初值；M0 用 `geometry.json` 固化，任何改动都要走基线更新。
+> （历史）这些数字是 1600×1000 下的实测初值；曾用 `geometry.json` 固化并走基线更新流程。2026-11-05 起布局按自有设计系统与桌面窗口尺寸自适应，不再以此为准。
 
-### 2.4 令牌的机器化移植（关键工程手段）
+### 2.4 令牌的机器化移植（历史工程手段，已退役）
 
 ```
-DSH 前端产物 ──(内置提取脚本)──> baseline/tokens.json ──(go generate)──> internal/design/tokens_gen.go
-                                                            │
-                                          单测：tokens_gen.go == baseline/tokens.json
+（历史）DSH 前端产物 ──(提取脚本，已删除)──> baseline/tokens.json ──(go generate)──> internal/design/tokens_gen.go
 ```
 
-- `internal/design` 只暴露**语义令牌**（`ColorLabelPrimary`、`Space4`、`RadiusMD`、`TextBody` …）；令牌只被 §5.4 的样式函数层消费，屏代码通过 style 函数访问，禁止直接写魔法值。
-- 主题切换（浅/深）用同一套 alias 表 + 两套 static 值，`tt.SetDark` 可无头验证。
-- 间距用 4px 栅格（4/8/12/16/20/24/32），但**以基线实测为准**，不硬套栅格。
+- 现行：`internal/design` 暴露**语义令牌**（`ColorLabelPrimary`、`Space4`、`RadiusMD`、`TextBody` …），值来自 ZeoKeel 品牌主题（`internal/brand`，ADR 0002）；令牌只被 §5.4 的样式函数层消费，屏代码通过 style 函数访问，禁止直接写魔法值。
+- 主题切换（浅/深）用同一套语义表 + 两套品牌值，`tt.SetDark` 可无头验证。
+- 间距用 4px 栅格（4/8/12/16/20/24/32），以品牌设计系统定义为准。
 
-### 2.5 字体策略（像素对齐的最大变量）
+### 2.5 字体策略（历史参考）
 
-| 用途 | DSH 基线 | 我们的做法 |
+| 用途 | DSH 基线（历史） | 现行做法 |
 | --- | --- | --- |
-| 正文/UI | `-apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", "Helvetica Neue", Helvetica, Arial, sans-serif` | **同一字体栈**按平台解析；mygo 的 `Font(family)` 按平台映射到同一族 |
-| 品牌字 | Montserrat 300/400/500（OFL） | 打包 Montserrat TTF，`ui.RegisterFont(data, "Montserrat")`；用于 wordmark |
-| 代码 | `"SF Mono", "JetBrains Mono", "Fira Code", Consolas, "Liberation Mono", Menlo, Courier, "PingFang SC", "Microsoft YaHei"` | 同栈；Linux 无 SF Mono 时回退 JetBrains Mono（打包 OFL 版本），差异进白名单 |
+| 正文/UI | `-apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", "Helvetica Neue", Helvetica, Arial, sans-serif` | **同一系统字体栈**按平台解析（mygo `ui` 默认字体栈）；不打包字体 |
+| 品牌字 | Montserrat 300/400/500（OFL） | 按 `docs/wordmark.md`：图形标 + “ZeoKeel”文字，系统字体栈，不打包字体 |
+| 代码 | `"SF Mono", "JetBrains Mono", "Fira Code", Consolas, "Liberation Mono", Menlo, Courier, "PingFang SC", "Microsoft YaHei"` | 系统等宽字体栈优先；不打包字体 |
 
-**风险与对策**：Chromium 的文本整形/抗锯齿与 mygo 的系统文本引擎不同，**文本区不可能逐像素相同**。因此像素门禁对文本区采用 SSIM/感知阈值，对几何（盒子位置、行高、断行位置）采用 1px 断言；如果断行不一致，优先修字体族/字号/字距，而不是改布局。
+**（历史）风险与对策**：Chromium 的文本整形/抗锯齿与 mygo 的系统文本引擎不同，文本区不可能逐像素相同——这也是像素门禁最终退役的原因之一。现行做法：UI 统一使用系统字体栈（品牌字标按 `docs/wordmark.md`），不做打包字体与逐像素字体拟合。
 
-### 2.6 基线更新流程
+### 2.6 基线更新流程（历史，已废止）
 
-1. 锁定 DSH 版本（`baseline/VERSION`）→ 2. 重新截图与测量 → 3. 更新 `tokens.json`/`geometry.json` → 4. 重新生成常量 → 5. 跑像素门禁，差异逐条解释 → 6. 提交基线 commit 并记录变更说明。**基线更新是一个独立 PR，不夹在功能 PR 里。**
+（历史，已废止）~~1. 锁定 DSH 版本 → 2. 重新截图与测量 → 3. 更新 tokens/geometry → 4. 重新生成常量 → 5. 跑像素门禁，差异逐条解释 → 6. 独立基线 PR。~~ 2026-11-05 起 DSH 仅作功能参考；新增/修改界面不再更新像素基线。
 
 ---
 
-### 2.7 基线文档体系（施工前置，当前第一优先级）
+### 2.7 基线文档体系（历史，已退役）
 
-**规则：一个界面没有"截图 + 控件清单 + 行为说明"，就不进入编码。** 文档不是附属品，是施工图。
+（历史规则）**一个界面没有"截图 + 控件清单 + 行为说明"，就不进入编码。** 文档不是附属品，是施工图。该要求随像素对齐退役；基线文档目录已归档删除。以下 2.7.1 为历史摘要，对应脚本（`scripts/cdp.mjs`、`scripts/capture/`）与资产已删除。
 
-#### 2.7.1 目录与产物
+#### 2.7.1 历史产物与门禁（摘要）
 
-```
-baseline/
-├── VERSION                     # dsh 0.2.1-rc.2 + 采集时间
-├── screenshots/                # 逐屏、逐状态截图（1600×1000）
-├── controls/                   # 每屏的交互控件 dump（json：标签/位置/尺寸/禁用态）
-└── tokens.json / geometry.json
-docs/baseline/
-├── index.md                    # 屏幕地图：全部入口、路由、状态
-├── controls.md                 # 控件总表（ID/所属屏/名称/类型/行为/状态/截图/确认日期）
-├── states.md                   # 全局状态：空/加载/错误/离线/流式/审批/权限
-├── coverage.md                 # 覆盖矩阵（界面 × 控件 × 截图 × 文档 × 验收）
-└── screens/
-    └── NN-<screen>.md          # 每屏：目的、布局、区域、控件表、状态、边界、截图引用
-```
-
-#### 2.7.2 每屏文档模板（必须填满）
-
-```md
-# <屏名>
-- 入口/路由：<从哪进、URL 或点击路径>
-- 目的：<一句话>
-- 截图：<empty/有内容/加载/错误 各一张>
-- 布局：<区域树 + 关键尺寸（来自 geometry.json）>
-- 控件表：| ID | 名称/文案 | 类型 | 位置 | 可用条件 | 点击行为 | 结果状态 | 快捷键 | 截图 |
-- 状态：<该屏可能出现的全部状态与切换条件>
-- 边界：<空数据、权限不足、超长文本、离线、错误>
-- 待确认：<仅允许暂时存在，且有 owner/日期>
-```
-
-#### 2.7.3 采集方式（已跑通）
-
-- 探测实例：`DSH_HOME=/data/mygo/.probe/home`（127.0.0.1:8099），已复制 workspace 与会话投影缓存；采集不影响用户实例。
-- 冷启动先点 **Preview Notice → Continue**（坐标 1010,684）；**打开会话点侧栏标题文字（x≈85）**，点行尾空白不会进入会话。
-- `scripts/cdp.mjs`：无头 Chromium + CDP，用 `~/.dsh/.credentials.yaml` 里的 browser-session 秘密生成会话 cookie，逐屏导航、点击、截图、dump 控件。
-- **滚动扫描**：`scrollscan` 自动找滚动容器（含弹窗内），逐屏滚动并按步截图 + dump，确保长列表/长会话的所有元素被发现。采集脚本在 `scripts/capture/*.json`。
-- **行为探测**：`probescan` 逐个点击控件，记录点击前后（URL、弹窗数、页面文本、控件集合）变化，写入 `baseline/behavior/*.jsonl`。危险/破坏性控件与用户配置开关先跳过，确认后再测。
-- 每次采集产出：`baseline/screenshots/NN-name.png` + `baseline/controls/NN-name.json`（控件标签、坐标、尺寸、禁用态、页面文本）。
-- 行为确认：点击前后各截一张图 + dump 一次；对照 DSH 官方源码确认边界条件。
-- 版本锁定：采集前写 `baseline/VERSION`；官方发版后重跑同一套序列，diff 出变化。
-
-#### 2.7.4 全元素 CSS 提取（新增，已跑通）
-
-- `scripts/cdp.mjs cssscan`：对每个屏/状态逐元素读取 **computed style**（43 个属性：颜色、字体栈/字号/字重/行高、边框、圆角、阴影、padding/margin/gap、display/flex、过渡等），原始数据写入 `baseline/css/<screen>.json`。
-- 汇总为 [docs/baseline/css.md](docs/baseline/css.md) + `baseline/css/summary.json`：唯一值频次表 + 组件样式样本（按钮/Tab/设置行/插件行等）。
-- 已覆盖 17 个屏/状态（含会话深色、窄屏、各弹层），共数万条元素样式样本。
-- **用法**：`internal/design` 的样式函数按此表实现，禁止凭感觉取值；令牌与样式函数改动必须能以 CSS 表为证据。
-- 已确认路线（A）：**CSS 只作为对齐依据**，运行时是 Go 样式函数，不引入 CSS 解析器、不用 webview 承载界面。
-
-#### 2.7.5 覆盖门禁
-
-- P0/P1 屏：控件覆盖率 100%（每个可交互元素都有 ID、行为、截图）。
-- 每个 P0 屏至少 4 张截图：空态、有内容、加载/流式、错误态（能构造的话）。
-- 未覆盖项必须登记在 `coverage.md`，带原因与排期；不允许"看起来差不多"。
+- 历史目录：仓库内 `baseline/`（screenshots/controls/css/behavior dump 等，约 605 文件 106MB）与 `docs/` 下的基线文档目录（屏幕地图、控件总表、覆盖矩阵、逐屏说明，约 19 文件）；**均已随像素对齐退役归档删除**（归档位置与回滚方法见 [ADR 0001](decisions/0001-retire-dsh-pixel-parity.md) §5）。
+- 历史采集方式：CDP 脚本（无头 Chromium）逐屏截图 / 控件 dump / 行为探测 / 全元素 computed style 抽取（43 属性），原始数据落入 `baseline/css/`；对应 `scripts/cdp.mjs` 与 `scripts/capture/` 已删除。
+- 历史门禁：P0/P1 屏控件覆盖率 100%、每屏至少 4 张状态截图、未覆盖项登记 coverage；**已废止**——改用 `docs/FUNCTIONAL-PARITY.md` 功能矩阵、交互用例与自有设计系统验收。
 
 ### 2.8 品牌替换：ZeoKeel（logo 以资产为准）
 
 - **资产唯一来源**：`logo/logo.svg`（浅色）与 `logo/logo-dark.svg`（深色）。**不允许自行猜测、重绘或生成 logo**；任何尺寸从 SVG 派生（mygo 用 `ui.ParseSVG` / 位图资源）。
-- **品牌出现的位置**（逐项对齐并替换）：
-  | 位置 | DSH | ZeoKeel |
+- **品牌出现的位置**（逐项替换）：
+  | 位置 | DSH（历史） | ZeoKeel |
   | --- | --- | --- |
   | 侧栏左上 wordmark | deepseek HARNESS | 图形标 + “ZeoKeel”文字（**已选方案 A**；系统字体栈、字重 600、17px、间隔 8px；规格见 `docs/wordmark.md`） |
   | 窗口标题 / 任务栏 | DSH | ZeoKeel |
@@ -245,7 +195,7 @@ docs/baseline/
   | 设置›关于、更新器 | DSH | ZeoKeel |
   | 对话框/错误页里的产品名 | DSH | ZeoKeel |
 - **不替换**：官方协议/数据目录名（若需保留兼容）由 ADR 决定；第三方 API 名称（DeepSeek 模型名等）保持原样。
-- **验收**：品牌位置逐项截图对照（同为 1600×1000），确认无残留 "deepseek"/"DeepSeek Harness" 字样（模型名除外）。
+- **验收**：品牌位置逐项检查，确认无残留 "deepseek"/"DeepSeek Harness" 字样（模型名除外）；不再要求与 DSH 截图对照（像素对齐已退役）。
 
 ---
 
@@ -388,13 +338,12 @@ type ErrorEvent struct{ MsgID string; Err error }
 
 ```
 /data/mygo
-├── cmd/mygo-agent/main.go
-├── internal/{app,ui,view,runtime,tools,provider,prompt,ext,store,design,platform}
-├── internal/ui/...            # 视图按屏拆分：home/session/plugins/settings/trajectory
-├── assets/                    # logo、图标、字体（Montserrat、JetBrains Mono）
-├── baseline/                  # DSH 基线：VERSION、截图、geometry.json、tokens.json
-├── docs/                      # 本规划 + 规格 + ADR
-├── scripts/                   # 提取、生成、门禁、打包
+├── cmd/zeokeel/main.go
+├── internal/{app,shell,runtime,tools,provider,prompt,store,design,brand,icons,agentteam}
+├── internal/shell/...         # 视图按屏拆分：home/session/plugins/settings/trajectory
+├── assets/                    # 品牌预览图（运行时 logo 在 logo/）
+├── docs/                      # 本规划 + 规格 + ADR（decisions/）+ STATUS
+├── scripts/                   # 门禁 / 打包 / 验收脚本
 └── go.mod
 ```
 
@@ -408,18 +357,19 @@ type ErrorEvent struct{ MsgID string; Err error }
 | ADR-4 | SQLite 索引 + JSONL 事件流 | 查询快 + 追加写安全 + 可回放 | 纯 SQLite：JSONL 便于恢复/轨迹；纯 JSONL：查询差 |
 | ADR-5 | 插件 = 编译期内置注册表（内置插件可开关/配置），不做第三方安装 | 纯 Go 不能运行 TS 插件；产品只需要官方内置能力；编译期固定便于对齐与测试 | 第三方插件 / WASM / goja：否决（范围外且不可对齐） |
 | ADR-6 | 无内核沙箱，策略 + 审批 + 审计 | 纯 Go 能力边界；不假装有隔离 | 引入 cgo 沙箱：违反 C1 |
-| ADR-7 | 令牌机器生成 + 单测锁死 | "1:1"需要可验证，不靠人眼 | 手抄令牌：漂移不可控 |
-| ADR-8 | 交互/像素测试基于 `NewTester`/`Render` | 确定性、无显示器、快 | 外部截图 E2E：作为补充，不作主门禁 |
-| ADR-9 | 基础样式全部函数化（CSS → Go style 函数） | 单一事实来源；像素对齐集中维护；复用与评审 | 各屏手写链式样式：漂移、无法门禁 |
+| ~~ADR-7~~ | ~~令牌机器生成 + 单测锁死~~ **已退役（2026-11-05）** | 历史：像素 1:1 需要可验证 | 现行：视觉令牌以品牌主题（ADR 0002）为源，不做 DSH 令牌同步 |
+| ADR-8 | 交互测试基于 `NewTester`/`Render`（像素测试已退役） | 确定性、无显示器、快 | 外部截图 E2E：作为补充，不作主门禁 |
+| ADR-9 | 基础样式函数化（Go style 函数） | 单一事实来源；集中维护；复用与评审 | 各屏手写链式样式：漂移、无法门禁 |
+| **ADR-10** | **退役 DSH 像素/交互 1:1；功能对齐 + 自有视觉/交互** | 像素不可达且无差异化；产品定位为 DSH 桌面替代/迁移器 + 独立品牌（2026-11-05，见 ADR 0001） | 维持三重 1:1：否决 |
 
 ---
 
-## 5. UI 规格（像素对齐）
+## 5. UI 规格（自有视觉；DSH 视觉历史参考已退役）
 
 ### 5.1 窗口与栅格
 
-- 默认窗口 1200×800，最小 900×600；基线验收尺寸 1600×1000（与截图一致）。
-- 主区内容列宽 = `min(868, 可用宽度 - 96)`，居中；侧栏 280 固定；窗口 < 1100 时侧栏可折叠为 56px 图标栏（P1）。
+- 默认窗口 1200×800，最小 900×600；1600×1000 仅作历史基线截图参考尺寸（不再作为验收尺寸）。
+- 主区内容列宽 = `min(868, 可用宽度 - 96)`，居中；侧栏 280 固定；窗口 < 1100 时侧栏可折叠为 56px 图标栏（P1）。（历史视觉参考值，自有视觉阶段可调整）
 - 缩放：100% / 125% / 150%；`tt.SetScale` 验证令牌与布局随 DPR 等比。
 - 无系统标题栏（自绘窗口控件或原生标题栏隐藏由平台决定，M1 定稿）。
 
@@ -530,12 +480,12 @@ func (v sessionView) body(c *ui.Context) {
 
 1. **单一事实来源**：颜色/尺寸/圆角/阴影只允许出现在 `internal/design`；视图层出现 `ui.Hex(...)`、`ui.RGBA(...)`、`.Padding(14)` 这类字面量即 CI 失败（AST 扫描，图标资源与测试快照白名单除外）。
 2. **状态由参数表达**：hover/active/selected/disabled/dark 是组件函数的参数，内部查令牌；**禁止**为某个状态复制一份函数或一份屏幕代码。
-3. **与基线一一对应**：每个组件函数登记对应的 DSH CSS 角色（下表），新增屏幕先"登记样式"再写视图——等同于往设计系统里加 class，评审能看见。
+3. **与设计系统登记一致**：每个组件函数登记语义角色（下表为 DSH 视觉时代的历史映射，新增组件以品牌设计系统为准），新增屏幕先"登记样式"再写视图——等同于往设计系统里加 class，评审能看见。
 4. **原生控件也要统一**：`design.Theme(dark) *ui.Theme` 喂给 `c.SetTheme`，让 mygo 自带的 Button/TextInput/List 等控件与令牌一致；组件函数负责 Theme 表达不了的部分（边框层级、hover 叠加、动效）。
 5. **样式有 golden 测试**：每个组件函数渲染一张样本卡（`ui.Render`），断言颜色/字号/圆角/阴影；暗色再跑一遍，任何漂移都失败。
-6. **样式改动可追溯**：`docs/ui-styles.md` 维护"函数 → 基线截图 → 用途"三列表；改样式必须同步改文档，否则评审拒收。
+6. **样式改动可追溯**：`docs/ui-styles.md` 维护"函数 → 语义角色/品牌来源 → 用途"三列表；改样式必须同步改文档，否则评审拒收。
 
-**映射表（DSH CSS 角色 → Go 样式函数）**
+**映射表（DSH CSS 角色 → Go 样式函数；历史映射，仍可参考语义角色）**
 
 | DSH CSS 角色 | Go 样式函数 |
 | --- | --- |
@@ -552,12 +502,14 @@ func (v sessionView) body(c *ui.Context) {
 
 **为什么必须这样做**
 
-- **像素对齐成本最低**：基线升级只改令牌 + 少量组件函数，不用逐屏改链式调用；
+- **样式维护成本最低**：品牌主题/令牌升级只改令牌 + 少量组件函数，不用逐屏改链式调用；
 - **一致性**：hover/focus/禁用态不会在 20 个屏里各漂各的；
 - **可测**：样式函数有 golden 单测，屏幕测试只关心布局与交互；
 - **可评审**："新增一个样式"是显式变更，像加 CSS class 一样进入 code review。
 
-### 5.5 逐屏规格（P0 关键值）
+### 5.5 逐屏规格（P0 关键值；DSH 视觉历史参考，自有视觉阶段可调整）
+
+> 以下数值来自 DSH 视觉时代；2026-11-05 起允许按 ZeoKeel 品牌设计系统调整，不再逐像素核对。
 
 | 屏 | 元素 | 规格 |
 | --- | --- | --- |
@@ -592,21 +544,19 @@ func (v sessionView) body(c *ui.Context) {
 ### 5.8 中英文与图标
 
 - 语言：zh-Hans 默认、en 次之；全部文案走 `i18n` 目录（mygo 自带 locales），禁止硬编码。
-- 中文行高与西文不同（PingFang 的行高更大），基线以 DSH 中文界面为准截图。
-- 图标：统一 16/20px、1.5px 线宽、圆角端点；从基线截图逐枚对照重绘为 SVG；差异进白名单。
+- 中文行高与西文不同（PingFang 的行高更大），字体排版以系统字体栈实测为准（不再对照 DSH 截图）。
+- 图标：统一 16/20px、1.5px 线宽、圆角端点；采用独立图标库（Lucide 等价图形）或自有品牌图标，不再逐枚对照 DSH 截图重绘。
 
-### 5.9 像素门禁流程（无头、确定、可进 CI）
+### 5.9 视觉验收流程（像素门禁已退役，2026-11-05）
 
-```
-基线截图（DSH，1600×1000） ──┐
-                              ├─> internal/pixeltest：ROI 裁剪 → 像素/SSIM 计算 → 报告
-我们的画面：ui.Render(view, 1600, 1000, 1) ─┘
-                              └─> 失败时输出 diff.png（红=差异）+ 差异清单
-```
+> **已退役**：原「DSH 基线截图 → `internal/pixeltest` ROI/SSIM 比对 → diff.png 白名单」流程，连同 `internal/pixeltest`、`baseline/`、`artifacts/` 一并删除（见 [ADR 0001](decisions/0001-retire-dsh-pixel-parity.md)）。退役原因：~85% 差异是渲染器 AA 地板、门禁只测 static 假屏、预算被放大 10–42 倍。
 
-- 门禁阈值：非文本区 ≤ 0.2%/屏；文本区 SSIM ≥ 0.98；几何断言 ≤1px（用 `tt.Find("…")` 的盒子坐标）。
-- 分类白名单：`text-rasterization`（抗锯齿/字体 hinting）、`icon-redraw`、`platform-font-fallback`；每项有 owner 和到期日。
-- 同一套流程加 `tt.SetScale(2)` 覆盖 2x；加 `tt.SetDark` 覆盖深色（P1）。
+现行视觉验收（无头、可进 CI）：
+
+- `ui.Render` 组件样本/关键屏快照的**自身回归**（golden 由本项目生成，不与 DSH 对比）；
+- 设计令牌/品牌主题断言（`internal/brand`、`internal/design` 单测）；
+- `ui.NewTester` 交互与键盘可达性用例（§6.9）；
+- 2x DPR 与深色主题以 smoke/快照方式覆盖（P1）。
 
 ---
 
@@ -884,7 +834,7 @@ Goal(id, session_id, objective, status, rounds)
 | --- | --- | --- |
 | 单元 | 纯函数、状态机表、工具语义（假 fs/假进程） | 300+ |
 | 视图 | `ui.NewTester`：点击/输入/键盘/虚拟时钟/无障碍播报 | 100+ |
-| 像素 | `ui.Render` → golden 对比（§5.9） | P0 每屏 3 状态（空/加载/有内容） |
+| 视觉回归 | `ui.Render` → 自有 golden 快照（§5.9；DSH 像素对比已退役） | 设计系统组件 + 关键屏 2 状态 |
 | 样式 | `ui.Render` 组件样本 golden（浅/深） | 每个组件函数 1 张，断言令牌 |
 | 交互 E2E | Tester 驱动的完整用例库（§6.9） | 30+ |
 | 运行时 | 脚本化假模型（确定性流）验证工具循环/中断/恢复 | 50+ |
@@ -898,9 +848,10 @@ CGO_ENABLED=0 go vet ./...
 CGO_ENABLED=0 go test ./...
 CGO_ENABLED=0 go build ./...
 sh scripts/check-nocgo.sh
-sh scripts/pixel-gate.sh        # 无头像素对比
+sh scripts/ci.sh                # 统一门禁（含工具可调用 / race / 覆盖率）
 sh scripts/lint-style-literals.sh # 视图层禁止样式字面量
 sh scripts/cross-build.sh       # 四目标
+# 注释：DSH 像素基线门禁（原 scripts/pixel-gate.sh）已于 2026-11-05 退役，见 ADR 0001。
 ```
 
 ### 10.3 性能预算
@@ -918,7 +869,7 @@ sh scripts/cross-build.sh       # 四目标
 
 | Job | 内容 |
 | --- | --- |
-| build-linux | amd64/arm64，no-cgo 检查，单测，像素门禁（Xvfb 不需要，Render 无头） |
+| build-linux | amd64/arm64，no-cgo 检查，单测，无头渲染 smoke（Xvfb 不需要，Render 无头；像素门禁已退役） |
 | build-darwin | arm64 交叉编译 + 单测（不跑 UI 截图） |
 | build-windows | amd64 交叉编译 + 单测 |
 | smoke-linux | Xvfb 真窗口启动、截图、退出码 0 |
@@ -932,29 +883,31 @@ sh scripts/cross-build.sh       # 四目标
 
 | 里程碑 | 周期 | 目标 | 出口标准 |
 | --- | --- | --- | --- |
-| **M0 基线工程化** | 3 周 | 仓库骨架、no-cgo 守卫、令牌/基线提取、**逐屏截图 + 控件清单 + 基线文档**、基础样式函数层、`ui.Render` 像素链路、空壳窗口 | `go test ./...` 无显示器全绿；tokens 生成 + 单测；样式 golden（浅/深）通过；`docs/baseline/` 覆盖全部 P0/P1 屏与控件（100%），无"待确认"项 |
-| **M1 宿主壳（P0 像素）** | 3 周 | 侧栏 + Home + 空会话 + 主题 + 字体；像素门禁跑通 | Home 屏三状态像素通过；交互 IX-01/08/17 通过 |
-| **M2 会话与流式（P0）** | 3 周 | eino 假模型驱动会话页：消息流、Markdown 流式、停止、用量条 | Session 屏像素通过；IX-01/02/07/13 通过；假模型回归 |
+| **M0 基线工程化**（历史；基线/像素部分已退役） | 3 周 | 仓库骨架、no-cgo 守卫、~~令牌/基线提取、逐屏截图 + 控件清单 + 基线文档、`ui.Render` 像素链路~~（2026-11-05 退役）、基础样式函数层、空壳窗口 | `go test ./...` 无显示器全绿；样式 golden（浅/深）通过；品牌主题基线（ADR 0002） |
+| **M1 宿主壳（P0）** | 3 周 | 侧栏 + Home + 空会话 + 主题 + 字体；交互门禁跑通 | 交互 IX-01/08/17 通过；Home 屏视觉按自有设计系统验收 |
+| **M2 会话与流式（P0）** | 3 周 | eino 假模型驱动会话页：消息流、Markdown 流式、停止、用量条 | Session 屏交互/功能通过；IX-01/02/07/13 通过；假模型回归 |
 | **M3 工具与审批（P0）** | 3 周 | 文件/Shell/Todo/ask_user、审批卡片、interrupt/resume、工具卡片 | IX-03/04/05/06 通过；真模型冒烟 3 任务 |
 | **M4 轨迹/持久化/恢复（P1）** | 2 周 | JSONL+SQLite、轨迹页、崩溃恢复、会话管理 | 重启恢复用例通过；IX-14 通过；性能预算达标 |
-| **M5 设置/插件/自动化（P1/P2）** | 3 周 | 设置页、插件页、自动化任务页、模型/权限/模式选择、i18n | 三页像素 + 功能验收；IX-09/10/11/15/16 通过 |
+| **M5 设置/插件/自动化（P1/P2）** | 3 周 | 设置页、插件页、自动化任务页、模型/权限/模式选择、i18n | 功能验收 + 交互用例；IX-09/10/11/15/16 通过 |
 | **M6 高级 Agent 能力（P2）** | 4 周 | 子智能体、Agent Team、skills、MCP、jobs、goal、schedule、压缩 | 每条能力一个端到端验收；功能矩阵 P2 行完成 |
 | **M7 硬化发布** | 2 周 | 三平台打包、安装、签名/公证、自动更新检查、性能与稳定性 | 发布检查单全绿；二进制/内存/启动达标 |
 
 **依赖关系**：M0 → M1 → M2 → M3 →（M4、M5 可并行）→ M6 → M7。总工期约 **22 周**。
 
+> 2026-11-05 起，里程碑中的“像素”出口标准统一替换为交互/功能/自有视觉验收（ADR 0001）；历史执行记录见 `docs/STATUS.md`。
+
 ### 11.2 人员与写范围（避免并行改同一批文件）
 
 | 角色 | 负责 | 写范围 |
 | --- | --- | --- |
-| Lead / 架构 | ADR、令牌与基线、像素/交互体系、集成 | `docs/`、`baseline/`、`internal/design`、`scripts/` |
-| Go A（UI） | 所有 `internal/ui` 与 view 快照；像素与交互门禁 | `internal/ui`、`internal/view`、`internal/design` 消费 |
+| Lead / 架构 | ADR、品牌设计系统、交互体系、集成 | `docs/`、`internal/brand`、`internal/design`、`scripts/` |
+| Go A（UI） | 所有 `internal/shell` 与 view 快照；视觉与交互门禁 | `internal/shell`、`internal/brand`、`internal/design` 消费 |
 | Go B（运行时） | eino 图、工具、provider、store、恢复 | `internal/runtime`、`internal/tools`、`internal/provider`、`internal/store` |
 | 共享 | `cmd/`、`internal/app` 由 Lead 集成，改动需评审 | — |
 
 ### 11.3 每个里程碑的固定动作
 
-1. 更新基线（如 DSH 有变化）；2. 代码 + 测试；3. 三轴门禁；4. 写/更新 ADR；5. 录一段 60s 演示；6. 更新 `docs/STATUS.md`（唯一状态真源）。
+1. 代码 + 测试；2. 交互 + 功能门禁（视觉按自有设计系统）；3. 写/更新 ADR；4. 录一段 60s 演示；5. 更新 `docs/STATUS.md`（唯一状态真源）。
 
 ### 11.4 M0 详细任务（两周，可直接开工）
 
@@ -962,17 +915,19 @@ sh scripts/cross-build.sh       # 四目标
 | --- | --- | --- | --- |
 | M0-1 | 仓库骨架 + `go.mod` + toolchain 钉死 | `cmd/`、`internal/`、Makefile | 0.5d |
 | M0-2 | no-cgo 守卫 + 四目标交叉编译脚本 | `scripts/check-nocgo.sh`、CI | 0.5d |
-| M0-3 | 基线采集：截图 + `geometry.json` + `VERSION` | `baseline/` | 1d |
+| M0-3 | ~~基线采集：截图 + `geometry.json` + `VERSION`~~ **已退役（2026-11-05 归档）** | — | 1d（历史） |
 | M0-4 | 令牌提取脚本 + 生成器 + 单测 | `internal/design/tokens_gen.go` | 1.5d |
 | M0-5 | 空壳窗口（侧栏 + 主区 + 主题 + 字体注册） | `internal/ui/shell.go` | 1.5d |
-| M0-6 | `ui.Render` 像素测试链路 + diff 工具 | `internal/pixeltest`、`scripts/pixel-gate.sh` | 2d |
+| M0-6 | ~~`ui.Render` 像素测试链路 + diff 工具~~ **已退役（`internal/pixeltest` 已删除）** | — | 2d（历史） |
 | M0-7 | `ui.NewTester` 交互测试骨架 + 虚拟时钟用例 | `internal/ui/*_test.go` | 1d |
 | M0-8 | 事件总线 + 快照骨架（假数据） | `internal/view`、`internal/runtime/bus.go` | 1.5d |
 | M0-9 | 存储骨架（SQLite 打开/迁移/关闭）+ JSONL | `internal/store` | 1d |
 | M0-10 | 单实例/托盘/关窗隐藏 | `internal/app` | 1d |
 | M0-11 | 基础样式函数层（`style.go`/`atoms.go`/`components.go`）+ 字面量 lint + 样式 golden | `internal/design` | 2d |
-| M0-12 | 逐屏截图采集（CDP 驱动：`scripts/cdp.mjs` + `baseline/controls/*.json`） | `baseline/screenshots/`、`baseline/controls/` | 2d |
-| M0-13 | 基线文档：屏幕地图、控件总表、逐屏行为说明、覆盖门禁 | `docs/baseline/` | 3d |
+| M0-12 | ~~逐屏截图采集（CDP 驱动：`scripts/cdp.mjs` + `baseline/controls/*.json`）~~ **已退役（脚本与基线已删除）** | — | 2d（历史） |
+| M0-13 | ~~基线文档：屏幕地图、控件总表、逐屏行为说明、覆盖门禁~~ **已退役（基线文档目录已归档删除）** | — | 3d（历史） |
+
+> 表中 M0-3/M0-6/M0-12/M0-13 为像素对齐时代的任务，已按 ADR 0001 退役；其余任务仍有效。
 
 ---
 
@@ -980,7 +935,7 @@ sh scripts/cross-build.sh       # 四目标
 
 | # | 风险 | 概率 | 影响 | 缓解 | 触发信号 |
 | --- | --- | --- | --- | --- | --- |
-| R1 | 文本渲染与 Chromium 不一致，像素门禁长期红 | 高 | 中 | 文本区用 SSIM/掩码；先对齐字体族与字号；断行差异单独归类 | 差异集中在文字边缘 |
+| R1 | ~~文本渲染与 Chromium 不一致，像素门禁长期红~~（风险已随像素门禁退役解除，2026-11-05） | — | — | 像素对齐已退役（ADR 0001）；现行自有视觉不依赖与 Chromium 渲染对照 | — |
 | R2 | mygo 控件缺口（卡片/命令面板等复合件） | 中 | 中 | 用 Column/Row/边框组合；缺口清单 M1 定稿；不自行发明控件库 | 需要"新控件"超过 3 个 |
 | R3 | eino 与 DSH 行为模型差异（中断/恢复/子智能体） | 中 | 高 | 先做假模型一致性测试；运行时能力矩阵逐项验收；必要时在 eino 外包一层薄适配 | 用例语义对不齐 |
 | R4 | 插件生态功能无法 1:1（TS/Cordis） | 高 | 高 | 提前改产品口径：内置注册表 + WASM v2；插件页交互对齐 | 用户/评审要求跑第三方插件 |
@@ -989,20 +944,21 @@ sh scripts/cross-build.sh       # 四目标
 | R7 | mygo/eino 版本为预发布，API 变动 | 中 | 中 | 版本钉死、升级独立 PR、封装边界（provider/tools 不直接扩散 API） | 升级时编译大面积失败 |
 | R8 | SQLite 纯 Go 性能（全文搜索/大库） | 低 | 中 | FTS 验证；LIKE 兜底；分页；索引 | 搜索 > 200ms |
 | R9 | 单一 UI 线程被长任务卡住 | 中 | 高 | 快照 + 异步命令队列；CI 加帧时间断言 | 滚动掉帧/输入延迟 |
-| R10 | 基线随 DSH 升级漂移 | 中 | 中 | 基线锁版本 + 独立更新 PR | 上游发版 |
+| R10 | ~~基线随 DSH 升级漂移~~（风险已随像素基线退役解除，2026-11-05） | — | — | DSH 仅作功能参考；不维护像素基线；上游发版需复核功能对齐矩阵 | 上游发版 |
 
 ---
 
 ## 13. 待拍板问题
 
-**已锁定**（2026-11-04）：
-- 基线 **DSH 0.2.1-rc.2**，官方发版后同步；
+**已锁定**（2026-11-04，2026-11-05 增补）：
+- ~~基线 **DSH 0.2.1-rc.2**，官方发版后同步~~（2026-11-05 改为：DSH 仅作**功能对齐参考**；像素基线已退役）；
 - 品牌 **ZeoKeel**；字标 = 图形标 + “ZeoKeel”文字（**已选 A**，系统字体栈、17px/600、间隔 8px，规格 `docs/wordmark.md`）；logo 只用 `logo/` 资产；
 - 命名：应用 `ZeoKeel` / 二进制 `zeokeel` / module `github.com/zeokeel/zeokeel` / 数据目录 `~/.zeokeel`；
 - 插件：全量对齐官方 Built-in + Experimental，开关默认值照官方；**不做第三方安装/市场**，插件页移除 “+ Add plugin”；
 - 主题与语言：默认中文，浅色 + 深色同期交付；
-- **样式路线（用户已选 A）**：原生 mygo + Go 样式函数层；DSH 的 CSS 只作为对齐依据（computed style 全量抽取），**不在运行时解析 CSS**；webview/CSS 运行时方案否决。
+- ~~样式路线（用户已选 A，2026-11-04）：原生 mygo + Go 样式函数层；DSH 的 CSS 只作为对齐依据（computed style 全量抽取），不在运行时解析 CSS~~ → **2026-11-05 更新**：原生 mygo + **ZeoKeel 品牌主题**（`internal/brand`，ADR 0002）；DSH 的 CSS/截图只作历史参考，**不在运行时解析 CSS**；webview/CSS 运行时方案否决。
 - 可建测试会话做行为确认；可读官方源码确认行为（只读，不复制）。
+- **2026-11-05 方向决策（用户）**：ZeoKeel = DSH 桌面替代/迁移器 + 独立品牌产品；**功能对齐 DSH，视觉与交互自有，停止像素级对齐**（[ADR 0001](decisions/0001-retire-dsh-pixel-parity.md)）。
 
 仍需你拍板（按重要性排序）：
 
@@ -1017,33 +973,31 @@ sh scripts/cross-build.sh       # 四目标
 
 ---
 
-## 附录 A：仓库结构（建议）
+## 附录 A：仓库结构（历史建议；基线/像素相关目录已删除）
 
 ```
 /data/mygo
-├── cmd/mygo-agent/
+├── cmd/zeokeel/
 ├── internal/
 │   ├── app/          # 组装、生命周期、单实例、托盘
-│   ├── ui/           # 纯视图 + 主题 + 组件
-│   ├── view/         # 快照、投影、动作
+│   ├── shell/        # 五屏视图 + 交互 + 样式消费
 │   ├── runtime/      # eino 图、会话、审批、事件
 │   ├── tools/        # 工具实现
 │   ├── provider/     # 模型 provider
 │   ├── prompt/       # 系统提示词与模板
-│   ├── ext/          # skills / MCP / goal / schedule
 │   ├── store/        # SQLite + JSONL
-│   ├── design/       # 令牌（生成）
-│   ├── pixeltest/    # 像素门禁
-│   └── platform/     # 平台差异封装
-├── assets/           # 图标 / 字体 / logo
-├── baseline/         # DSH 基线（VERSION/截图/controls dump/geometry/tokens）
-├── docs/             # PLAN + 规格 + ADR + STATUS
-│   └── baseline/     # 施工图：index / controls / coverage / screens/*
-├── scripts/          # 提取 / 生成 / 门禁 / 打包 / cdp.mjs
+│   ├── design/       # 设计令牌/样式函数（消费品牌主题）
+│   ├── brand/        # ZeoKeel 品牌主题（ui.Theme 覆盖，ADR 0002）
+│   └── icons/        # 图标
+├── assets/           # 品牌预览图（运行时 logo 在 logo/）
+├── docs/             # PLAN + 规格 + ADR（decisions/）+ STATUS
+├── scripts/          # 门禁 / 打包 / 验收脚本
 └── go.mod
 ```
 
-## 附录 B：基线采集与令牌提取（可复现命令）
+## 附录 B：基线采集与令牌提取（历史命令，已退役）
+
+> 2026-11-05 退役：以下命令所用的 `scripts/cdp.mjs`、`baseline/` 目录已删除（`scripts/extract-tokens.mjs` 从未入库）；仅作历史归档参考。基线资产见 `/data/zeokeel-backups/parity-assets-20261105.tar.gz`。
 
 ```sh
 # 1) 锁定基线版本
@@ -1065,21 +1019,19 @@ go generate ./internal/design
 go test ./internal/design -run TestTokensMatchBaseline
 ```
 
-## 附录 C：验收单模板（每屏一份）
+## 附录 C：验收单模板（功能/交互；像素部分已退役）
 
 ```md
-# <屏名> 对齐验收单
+# <屏名> 验收单（功能/交互）
 
-## 像素
-- [ ] 几何：<元素> 位置/尺寸与基线偏差 ≤ 1px（附 geometry diff）
-- [ ] 颜色：令牌逐项一致（附 tokens diff）
-- [ ] 文本区 SSIM ≥ 0.98，非文本区差异 ≤ 0.2%
+## 视觉（自有设计系统；不再与 DSH 比对）
+- [ ] 组件使用品牌设计系统令牌/样式函数（视图层无样式字面量）
+- [ ] 关键屏自身视觉回归通过（浅/深）
 - [ ] 2x DPR 通过
-- [ ] 白名单项：<项> — 原因 / owner / 到期日
 
 ## 交互
 - [ ] 用例：IX-xx, IX-yy …（附测试名）
-- [ ] 键位/焦点/动效时长与基线一致
+- [ ] 键位/焦点/动效按交互规格（§6）与桌面平台惯例
 
 ## 功能
 - [ ] 矩阵行：<能力> 成功路径 / 失败路径 / 边界路径
@@ -1089,9 +1041,10 @@ go test ./internal/design -run TestTokensMatchBaseline
 
 | 术语 | 含义 |
 | --- | --- |
-| DSH | DeepSeek Harness，本项目的 1:1 对齐基准（Web 客户端） |
+| DSH | DeepSeek Harness，本项目的**功能对齐参考**（Web 客户端；像素对齐已于 2026-11-05 退役） |
 | 快照 | 后台产出的不可变 UI 状态，view 每帧只读 |
-| 令牌 | 颜色/字体/圆角/阴影/间距等设计常量 |
-| 像素门禁 | 无头渲染 + 与基线对比的自动化验收 |
+| 令牌 | 颜色/字体/圆角/阴影/间距等设计常量（以 ZeoKeel 品牌主题为源） |
+| 品牌主题 | 以 mygo `ui.Theme` 为底的 ZeoKeel 自有视觉覆盖（`internal/brand`，ADR 0002） |
+| 像素门禁 | （历史术语，2026-11-05 已退役）无头渲染 + 与 DSH 基线截图对比的自动化验收 |
 | interrupt | eino 的中断机制，用于审批/提问挂起与恢复 |
-| 降级 | 明确记录的不 1:1 项，必须有替代行为与文案 |
+| 降级 | 明确记录的功能降级项，必须有替代行为与文案 |

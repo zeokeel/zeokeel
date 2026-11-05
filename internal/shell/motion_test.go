@@ -10,6 +10,7 @@ import (
 	"github.com/egoist/mygo/ui"
 
 	"github.com/zeokeel/zeokeel/internal/design"
+	"github.com/zeokeel/zeokeel/internal/session"
 	"github.com/zeokeel/zeokeel/internal/state"
 )
 
@@ -245,9 +246,8 @@ func TestMotionWorkingIndicator(t *testing.T) {
 		state.Token{MsgID: "m1", Text: "thinking"},
 		state.Status{Phase: state.PhaseRunning},
 	)
-	app := &App{Screen: Session}
-	app.SetSnapshot(running)
-	tt := ui.NewTester(app.View, 1600, 1000)
+	h := newLiveSnapshotApp(t, Session, running)
+	tt := ui.NewTester(h.app.View, 1600, 1000)
 
 	if _, ok := tt.Find("Deep diving for 0m 0s."); !ok {
 		t.Fatalf("working label missing at start; texts: %v", tt.Texts())
@@ -263,7 +263,7 @@ func TestMotionWorkingIndicator(t *testing.T) {
 	}
 
 	// A finished turn removes the indicator; nothing animates at rest.
-	app.SetSnapshot(motionSnap(
+	h.app.SetSnapshot(motionSnap(
 		state.Token{MsgID: "m1", Text: "thinking"},
 		state.Status{Phase: state.PhaseIdle},
 	))
@@ -287,9 +287,8 @@ func TestMotionLiveSettlesToRestFrame(t *testing.T) {
 		state.ToolStart{CallID: "call-1", Name: "echo", Args: json.RawMessage(`{"path":"README.md"}`)},
 		state.ToolEnd{CallID: "call-1", Result: "ok", Duration: 12 * time.Millisecond},
 	)
-	app := &App{Screen: Session}
-	app.SetSnapshot(first)
-	tt := ui.NewTester(app.View, 1600, 1000)
+	h := newLiveSnapshotApp(t, Session, first)
+	tt := ui.NewTester(h.app.View, 1600, 1000)
 	tt.Advance(2 * design.DurationSlow)
 
 	// A second message arrives as the turn starts streaming.
@@ -300,7 +299,7 @@ func TestMotionLiveSettlesToRestFrame(t *testing.T) {
 		state.ToolStart{CallID: "call-1", Name: "echo", Args: json.RawMessage(`{"path":"README.md"}`)},
 		state.ToolEnd{CallID: "call-1", Result: "ok", Duration: 12 * time.Millisecond},
 	)
-	app.SetSnapshot(grown)
+	h.app.SetSnapshot(grown)
 	tt.Frame()
 	if !tt.FramePending() {
 		t.Fatal("a new message did not start its appear animation")
@@ -319,20 +318,18 @@ func TestMotionLiveSettlesToRestFrame(t *testing.T) {
 		state.ToolStart{CallID: "call-1", Name: "echo", Args: json.RawMessage(`{"path":"README.md"}`)},
 		state.ToolEnd{CallID: "call-1", Result: "ok", Duration: 12 * time.Millisecond},
 	)
-	app.SetSnapshot(rest)
+	h.app.SetSnapshot(rest)
 	tt.Frame()
 	tt.Advance(4 * design.DurationSlow)
 	if tt.FramePending() {
 		t.Fatal("still animating at rest")
 	}
 
-	// A view of the same state that never animated draws the same pixels.
-	// The composer is left out: its text caret blinks on the clock, so the
-	// two views' first frames differ in that one column. Everything the
-	// motion tests animate is above it.
-	still := &App{Screen: Session}
-	still.SetSnapshot(rest)
-	want := ui.Render(still.View, 1600, 1000, 1)
+	// A view of the same state that never animated draws the same pixels: a
+	// fresh runtime builds the first frame at rest. The composer is left out:
+	// its text caret blinks on the clock, so the two views' first frames differ
+	// in that one column. Everything the motion tests animate is above it.
+	want := ui.Render(h.app.View, 1600, 1000, 1)
 	got := tt.Image()
 	if got.Stride != want.Stride {
 		t.Fatalf("stride %d, want %d", got.Stride, want.Stride)
@@ -355,12 +352,11 @@ func TestMotionStreamingFadeFrames(t *testing.T) {
 		state.Token{MsgID: "m1", Text: "a"},
 		state.Status{Phase: state.PhaseRunning},
 	)
-	app := &App{Screen: Session}
-	app.SetSnapshot(base)
-	tt := ui.NewTester(app.View, 1600, 1000)
+	h := newLiveSnapshotApp(t, Session, base)
+	tt := ui.NewTester(h.app.View, 1600, 1000)
 	tt.Advance(4 * design.DurationSlow)
 
-	app.SetSnapshot(motionSnap(
+	h.app.SetSnapshot(motionSnap(
 		state.Token{MsgID: "m1", Text: "a new token arrived"},
 		state.Status{Phase: state.PhaseRunning},
 	))
@@ -377,16 +373,15 @@ func TestMotionStreamingFadeFrames(t *testing.T) {
 // TestMotionStreamReduceMotion checks that "less motion" takes the fade at
 // once: the text still grows, and no frame is left pending.
 func TestMotionStreamReduceMotion(t *testing.T) {
-	app := &App{Screen: Session}
-	app.SetSnapshot(motionSnap(
+	h := newLiveSnapshotApp(t, Session, motionSnap(
 		state.Token{MsgID: "m1", Text: "a"},
 		state.Status{Phase: state.PhaseRunning},
 	))
-	tt := ui.NewTester(app.View, 1600, 1000)
+	tt := ui.NewTester(h.app.View, 1600, 1000)
 	tt.SetPreferences(ui.Preferences{ReduceMotion: true})
 	tt.Advance(4 * design.DurationSlow)
 
-	app.SetSnapshot(motionSnap(
+	h.app.SetSnapshot(motionSnap(
 		state.Token{MsgID: "m1", Text: "a new token arrived"},
 		state.Status{Phase: state.PhaseRunning},
 	))
@@ -403,12 +398,11 @@ func TestMotionStreamReduceMotion(t *testing.T) {
 // TestMotionStreamIdleHasNoFrames checks that a settled, idle session asks
 // for no frames: the animation state costs nothing at rest.
 func TestMotionStreamIdleHasNoFrames(t *testing.T) {
-	app := &App{Screen: Session}
-	app.SetSnapshot(motionSnap(
+	h := newLiveSnapshotApp(t, Session, motionSnap(
 		state.Token{MsgID: "m1", Text: "a settled answer"},
 		state.Status{Phase: state.PhaseIdle},
 	))
-	tt := ui.NewTester(app.View, 1600, 1000)
+	tt := ui.NewTester(h.app.View, 1600, 1000)
 	tt.Advance(time.Second)
 	if tt.FramePending() {
 		t.Fatal("an idle session still asks for frames")
@@ -418,13 +412,17 @@ func TestMotionStreamIdleHasNoFrames(t *testing.T) {
 // TestMotionToolCardExpandCollapse clicks a tool card open and shut: the
 // detail's height animates, and the final frames hold the settled heights.
 func TestMotionToolCardExpandCollapse(t *testing.T) {
-	app := &App{Screen: Session}
-	app.SetSnapshot(motionSnap(
+	h := newLiveSnapshotApp(t, Session, motionSnap(
 		state.ToolStart{CallID: "call-1", Name: "echo", Args: json.RawMessage(`{"path":"README.md"}`)},
 		state.ToolEnd{CallID: "call-1", Result: "tool output", Duration: 42 * time.Millisecond},
 		state.Status{Phase: state.PhaseIdle},
 	))
-	tt := ui.NewTester(app.View, 1600, 1000)
+	// Work details defaults to Detailed, which starts the card open; pin the
+	// collapsed start this test exercises.
+	if err := h.store.SetSetting(session.SettingWorkDetails, session.WorkDetailsStandard); err != nil {
+		t.Fatalf("work details setting: %v", err)
+	}
+	tt := ui.NewTester(h.app.View, 1600, 1000)
 	tt.Advance(4 * design.DurationSlow)
 
 	if tt.HasText("README.md") {
@@ -461,18 +459,17 @@ func TestMotionToolCardExpandCollapse(t *testing.T) {
 // TestMotionToolDotPulse checks the running status dot's 1.5s pulse: it
 // keeps asking for frames while the call runs and stops when it finishes.
 func TestMotionToolDotPulse(t *testing.T) {
-	app := &App{Screen: Session}
-	app.SetSnapshot(motionSnap(
+	h := newLiveSnapshotApp(t, Session, motionSnap(
 		state.ToolStart{CallID: "call-1", Name: "echo", Args: json.RawMessage(`{"path":"README.md"}`)},
 		state.Status{Phase: state.PhaseRunning},
 	))
-	tt := ui.NewTester(app.View, 1600, 1000)
+	tt := ui.NewTester(h.app.View, 1600, 1000)
 	tt.Advance(2 * time.Second)
 	if !tt.FramePending() {
 		t.Fatal("the running status dot is not pulsing")
 	}
 
-	app.SetSnapshot(motionSnap(
+	h.app.SetSnapshot(motionSnap(
 		state.ToolStart{CallID: "call-1", Name: "echo", Args: json.RawMessage(`{"path":"README.md"}`)},
 		state.ToolEnd{CallID: "call-1", Result: "ok", Duration: time.Second},
 		state.Status{Phase: state.PhaseIdle},
@@ -487,14 +484,13 @@ func TestMotionToolDotPulse(t *testing.T) {
 // TestMotionRunButtonState checks the composer's Send/Stop swap: the label
 // follows the phase and the change is animated, settling on the new label.
 func TestMotionRunButtonState(t *testing.T) {
-	app := &App{Screen: Session}
-	app.SetSnapshot(motionSnap(state.Status{Phase: state.PhaseIdle}))
-	tt := ui.NewTester(app.View, 1600, 1000)
+	h := newLiveSnapshotApp(t, Session, motionSnap(state.Status{Phase: state.PhaseIdle}))
+	tt := ui.NewTester(h.app.View, 1600, 1000)
 	if !tt.HasText("Send") {
 		t.Fatalf("idle composer has no Send; texts: %v", tt.Texts())
 	}
 
-	app.SetSnapshot(motionSnap(state.Status{Phase: state.PhaseRunning}))
+	h.app.SetSnapshot(motionSnap(state.Status{Phase: state.PhaseRunning}))
 	tt.Frame()
 	if !tt.HasText("Stop") {
 		t.Fatalf("running composer has no Stop; texts: %v", tt.Texts())

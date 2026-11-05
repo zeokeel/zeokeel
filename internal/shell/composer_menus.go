@@ -374,7 +374,7 @@ func mentionChoices(entries []string) []mentionChoice {
 }
 
 // mentionMenu lists the matching files and sessions for the trailing "@"
-// token. It follows DSH's listbox capture (baseline/css/20-mention.json): the
+// token. It follows DSH's listbox capture (retired reference design): the
 // composer-width panel, 30px section titles, 34px option rows with an icon, a
 // name and a trailing hint. Rows are RoleListItem and Focusable; the column is
 // a RoleList focus group, so Tab/Up/Down reach them and Enter chooses.

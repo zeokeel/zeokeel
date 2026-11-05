@@ -1,5 +1,5 @@
 // Command zeokeel is ZeoKeel: a pure-Go desktop AI agent built with mygo's
-// native UI. Its baseline is docs/baseline/, its tokens are internal/design.
+// native UI. Its visual system is internal/brand + internal/design.
 package main
 
 import (

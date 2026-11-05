@@ -6,10 +6,8 @@ import (
 	"github.com/zeokeel/zeokeel/internal/design"
 )
 
-// Settings modal geometry, measured from the DSH baseline
-// (baseline/screenshots/55-settings-general.png at 1600x1000):
-// an 800x800 panel at 400,100 with a 28px radius, a 188px nav column and
-// a 564px options column inset 24px.
+// The Settings panel geometry: an 800x800 panel with a 28px radius, a
+// 188px nav column and a 564px options column inset 24px.
 const (
 	settingsWidth      float32 = 800
 	settingsHeight     float32 = 800
@@ -61,7 +59,7 @@ func settingsText(c *ui.Context, s string, role design.TypeRole, color ui.Color)
 }
 
 // Baseline surfaces the shared tokens do not expose, sampled from
-// baseline/css/04-settings-general.json and 47-settings-dark.json as the
+// retired DSH reference design as the
 // home screen does.
 var (
 	settingsSurface          = ui.Hex("#F5F6F7") // selectors, buttons, selected card
@@ -93,12 +91,6 @@ func settingsFillColor(t *design.Tokens) ui.Color {
 }
 
 // settingsNavActiveColor is the selected nav cell's tint.
-func settingsNavActiveColor(t *design.Tokens) ui.Color {
-	if t.Dark {
-		return settingsNavActiveDark
-	}
-	return settingsNavSelected
-}
 
 // settingsCardOutline is an unselected theme card's outline.
 func settingsCardOutline(t *design.Tokens) ui.Color {
@@ -131,36 +123,12 @@ var (
 	settingsIconClose = ui.MustParseSVG([]byte(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.15" stroke-linecap="round"><path d="M2.4 2.4l9.2 9.2M11.6 2.4l-9.2 9.2"/></svg>`))
 )
 
-// settingsPanel draws the whole Settings surface. app.go dims the Home
-// behind it with the baseline scrim; everything inside the panel is here.
-func (a *App) settingsPanel(c *ui.Context, t *design.Tokens) {
-	w, h := settingsPanelSize(c)
-	panel := ui.Row(c).
-		Width(w).Height(h).
-		AlignItems(ui.Stretch).
-		Background(settingsPanelColor(t)).Radius(settingsRadius).Clip().
-		Shadow(0, 0, 0, 0.5, ui.RGBA(0, 0, 0, 0.16)).
-		Shadow(0, 3, 8, 0, ui.RGBA(0, 0, 0, 0.04)).
-		Shadow(0, 0, 20, 0, ui.RGBA(0, 0, 0, 0.05))
-	panel.Children(func() {
-		a.settingsNav(c, t, h)
-		a.settingsBody(c, t)
-	})
-}
-
-// settingsNav is the left column: the title and the four nav cells.
-func (a *App) settingsNav(c *ui.Context, t *design.Tokens, height float32) {
-	ui.Column(c).Width(settingsNavW).Height(height).
-		Padding(settingsNavTop, settingsNavPad, 0, settingsNavPad).
-		Gap(settingsTitleGap).Children(func() {
-		settingsText(c, a.T("settings.settings"), design.TypeM, t.LabelPrimary).FontWeight(500).PaddingX(design.Space3)
-		ui.Column(c).Gap(design.Space1).Children(func() {
-			a.settingsNavCell(c, t, a.T("settings.general"), true, settingsIconGear)
-			a.settingsNavCell(c, t, a.T("settings.models"), false, settingsIconDatabase)
-			a.settingsNavCell(c, t, a.T("settings.built_in_plugins"), false, settingsIconSliders)
-			a.settingsNavCell(c, t, a.T("settings.agent_presets"), false, settingsIconPerson)
-		})
-	})
+// settingsNavActiveColor is the selected nav cell's fill.
+func settingsNavActiveColor(t *design.Tokens) ui.Color {
+	if t.Dark {
+		return settingsNavActiveDark
+	}
+	return settingsNavSelected
 }
 
 // settingsNavCell is one row of the nav list; the first is selected.
@@ -176,57 +144,6 @@ func (a *App) settingsNavCell(c *ui.Context, t *design.Tokens, label string, act
 		settingsText(c, label, design.TypeBody, t.LabelPrimary)
 	})
 	return cell
-}
-
-// settingsBody is the right column: the header actions and the option rows.
-func (a *App) settingsBody(c *ui.Context, t *design.Tokens) {
-	ui.Column(c).Grow(1).Children(func() {
-		ui.Row(c).Height(settingsHeaderH).
-			Padding(settingsHeaderTop, settingsHeaderEnd, 0, 0).
-			Gap(design.Space2).Justify(ui.End).AlignItems(ui.Start).Children(func() {
-			a.settingsOutlineButton(c, t, a.T("settings.open_configuration_file"))
-			a.settingsClose(c, t)
-		})
-		ui.Scroll(c).Grow(1).Children(func() {
-			ui.Column(c).Padding(0, settingsOptionsPad, 0, settingsOptionsPad).Children(func() {
-				a.settingsRows(c, t)
-			})
-		})
-	})
-}
-
-// settingsRows draws the option list, top to bottom, as the baseline does.
-func (a *App) settingsRows(c *ui.Context, t *design.Tokens) {
-	a.settingsRow(c, t, a.T("settings.permission"), a.T("settings.choose_the_default_permission_mode_for_new_sessions"),
-		settingsRowStyle{},
-		func() { a.settingsSelector(c, t, a.T("settings.workspace_write"), 172) })
-	a.settingsRow(c, t, a.T("settings.language"), "", settingsRowStyle{},
-		func() { a.settingsSelector(c, t, a.T("settings.language_english"), 105) })
-	a.settingsAppearance(c, t)
-	a.settingsRow(c, t, a.T("settings.font_size"), a.T("settings.only_affects_conversation_content"),
-		settingsRowStyle{},
-		func() { a.settingsFontSize(c, t) })
-	a.settingsRow(c, t, a.T("settings.work_details"), a.T("settings.choose_how_much_detail_to_show_for_tool_calls"),
-		settingsRowStyle{},
-		func() { a.settingsSelector(c, t, a.T("settings.detailed"), 113) })
-	a.settingsRow(c, t, a.T("settings.when_to_collapse_work_details"), a.T("settings.choose_when_to_automatically_collapse_work_details"),
-		settingsRowStyle{},
-		func() { a.settingsSelector(c, t, a.T("settings.on_completion"), 156) })
-	a.settingsRow(c, t, a.T("settings.show_coding_view"), a.T("settings.shows_trajectory_code_diffs_and_all_agent_presets"),
-		settingsRowStyle{titleLine: 20, descColor: t.LabelSecondary, gap: design.Space6},
-		func() { a.settingsSwitch(c, t, true) })
-	a.settingsRow(c, t, a.T("settings.keyboard_shortcuts"), a.T("settings.view_and_edit_available_shortcuts_and_input_actions"),
-		settingsRowStyle{},
-		func() { a.settingsActionButton(c, t, a.T("settings.view_shortcuts"), 125) })
-	a.settingsRow(c, t, a.T("settings.send_behavior_while_busy"), a.T("settings.what_enter_and_the_send_button_do_while_the_agent_is_running_cmd"),
-		settingsRowStyle{},
-		func() { a.settingsSelector(c, t, a.T("settings.queue"), 100) })
-	a.settingsRow(c, t, a.T("settings.performance_usage"), a.T("settings.performance_usage_desc"),
-		settingsRowStyle{},
-		func() { a.settingsSelector(c, t, a.T("settings.detailed"), 113) })
-	a.settingsRow(c, t, a.T("settings.upload_session_log"), a.T("settings.upload_session_log_desc"),
-		settingsRowStyle{},
-		func() { a.settingsSwitch(c, t, true) })
 }
 
 // settingsRowStyle tweaks a row where the baseline departs from the common
@@ -266,103 +183,20 @@ func (a *App) settingsRow(c *ui.Context, t *design.Tokens, title, desc string, s
 }
 
 // settingsAppearance is the appearance group: a title over three theme cards.
-func (a *App) settingsAppearance(c *ui.Context, t *design.Tokens) {
-	ui.Column(c).Padding(design.Space4, 0, design.Space4, 0).Gap(design.Space2).
-		BorderWidth(0, 0, 1, 0).BorderColor(t.BorderL2).Children(func() {
-		settingsText(c, a.T("settings.appearance"), design.TypeBody, t.LabelPrimary)
-		ui.Row(c).Height(settingsCardH).Gap(design.Space2).Children(func() {
-			a.settingsThemeCard(c, t, a.T("settings.light"), false, settingsIconSun)
-			a.settingsThemeCard(c, t, a.T("settings.dark"), false, settingsIconMoon)
-			a.settingsThemeCard(c, t, a.T("settings.system"), true, settingsIconMonitor)
-		})
-	})
-}
 
 // settingsThemeCard is one 183x84 appearance card.
-func (a *App) settingsThemeCard(c *ui.Context, t *design.Tokens, label string, selected bool, icon *ui.SVG) {
-	card := ui.Column(c).Grow(1).Height(settingsCardH).
-		Radius(design.RadiusXL).Border(1, settingsCardOutline(t)).
-		Gap(design.Space1).AlignItems(ui.Center).Justify(ui.Center)
-	if selected {
-		card = card.Background(settingsFillColor(t)).BorderColor(settingsCardSelectedEdge)
-	}
-	card.Children(func() {
-		ui.Image(c, icon).Size(16, 16).TextColor(t.LabelPrimary)
-		settingsText(c, label, design.TypeBody, t.LabelPrimary)
-	})
-}
 
 // settingsSelector draws a 36px select pill with a chevron.
-func (a *App) settingsSelector(c *ui.Context, t *design.Tokens, label string, w float32) {
-	ui.Row(c).Width(w).Height(settingsControlH).PaddingX(14).
-		Gap(design.Space3).Radius(design.RadiusMD).Background(settingsFillColor(t)).
-		Justify(ui.SpaceBetween).AlignItems(ui.Center).Children(func() {
-		settingsText(c, label, design.TypeBody, t.LabelPrimary).NoWrap()
-		ui.Image(c, settingsIconChevron).Size(14, 14).TextColor(t.LabelSecondary)
-	})
-}
 
 // settingsFontSize draws the baseline's font size stepper: a 72px pill, the
 // unit, and an expander chevron.
-func (a *App) settingsFontSize(c *ui.Context, t *design.Tokens) {
-	ui.Row(c).Gap(design.Space2).AlignItems(ui.Center).Children(func() {
-		ui.Row(c).Width(72).Height(settingsControlH).
-			Radius(design.RadiusMD).Background(settingsFillColor(t)).
-			Justify(ui.Center).AlignItems(ui.Center).Children(func() {
-			settingsText(c, "14", design.TypeBody, t.LabelPrimary)
-		})
-		settingsText(c, "px", design.TypeBody, t.LabelSecondary)
-		a.settingsChevronButton(c, t, 24)
-	})
-}
 
 // settingsChevronButton is a 24x24 chevron hit area.
-func (a *App) settingsChevronButton(c *ui.Context, t *design.Tokens, size float32) {
-	ui.Row(c).Width(size).Height(size).
-		Justify(ui.Center).AlignItems(ui.Center).Children(func() {
-		ui.Image(c, settingsIconChevron).Size(12, 12).TextColor(t.LabelTertiary)
-	})
-}
 
 // settingsSwitch draws the baseline's 36x20 switch, on or off.
-func (a *App) settingsSwitch(c *ui.Context, t *design.Tokens, on bool) {
-	sw := ui.Row(c).Width(36).Height(20).Radius(design.RadiusMax).
-		Padding(2).AlignItems(ui.Center).Justify(ui.End)
-	thumb := t.White
-	if t.Dark {
-		thumb = t.BgBase
-	}
-	if on {
-		sw = sw.Background(t.LabelPrimary).Justify(ui.End)
-	} else {
-		sw = sw.Background(t.BgHover).Justify(ui.Start)
-	}
-	sw.Children(func() {
-		ui.Box(c).Width(16).Height(16).Radius(design.RadiusMax).Background(thumb)
-	})
-}
 
 // settingsActionButton is a filled 36px button, as a.T("settings.edit_shortcuts") is.
-func (a *App) settingsActionButton(c *ui.Context, t *design.Tokens, label string, w float32) {
-	ui.Row(c).Width(w).Height(settingsControlH).
-		Radius(design.RadiusMD).Background(settingsFillColor(t)).
-		Justify(ui.Center).AlignItems(ui.Center).Children(func() {
-		settingsText(c, label, design.TypeBody, t.LabelPrimary).NoWrap()
-	})
-}
 
 // settingsOutlineButton is the header's bordered a.T("settings.open_configuration_file").
-func (a *App) settingsOutlineButton(c *ui.Context, t *design.Tokens, label string) {
-	ui.Row(c).Height(28).PaddingX(10).Radius(design.RadiusSM).
-		Border(1, t.BorderL3).AlignItems(ui.Center).Children(func() {
-		settingsText(c, label, design.TypeXXS, t.LabelPrimary)
-	})
-}
 
 // settingsClose draws the header's X button.
-func (a *App) settingsClose(c *ui.Context, t *design.Tokens) {
-	ui.Row(c).Width(28).Height(28).Radius(design.RadiusSM).
-		Justify(ui.Center).AlignItems(ui.Center).Children(func() {
-		ui.Image(c, settingsIconClose).Size(14, 14).TextColor(t.LabelPrimary)
-	})
-}

@@ -11,22 +11,37 @@ import (
 	"github.com/zeokeel/zeokeel/internal/state"
 )
 
+// newLiveSnapshotApp builds the live controller fixture and injects snap as
+// the snapshot the live renderer draws. Pixel parity retired the snapshot-only
+// static renderer, so a synthetic snapshot must ride the real controller.
+// The assertions in this group use English copy, so the language is pinned.
+func newLiveSnapshotApp(t *testing.T, screen Screen, snap *state.Snapshot) *liveApp {
+	t.Helper()
+	h := newLiveAppWithSnapshot(t, screen, snap)
+	h.app.Language = LangEN
+	// The renderers keep scroll/motion/menu state in package maps keyed by
+	// *App; clear them in case the allocator reuses a dead App's address.
+	sessionRenderStates.Delete(h.app)
+	liveStates.Delete(h.app)
+	liveUIStates.Delete(h.app)
+	liveMenuStates.Delete(h.app)
+	shellUIStates.Delete(h.app)
+	modeUIStates.Delete(h.app)
+	pluginUIStates.Delete(h.app)
+	startTabStates.Delete(h.app)
+	return h
+}
+
 // m6MarkdownApp renders one assistant message through the live transcript.
-// It has no controller, as a snapshot built by hand needs none; the static
-// App{Ctrl: nil} demo path is a different renderer and stays untouched.
 func m6MarkdownApp(t *testing.T, text string) (*ui.Tester, *App) {
 	t.Helper()
 	snap := state.NewSnapshot()
 	snap.Messages = []state.Message{{MsgID: "a1", Role: state.RoleAssistant, Text: text}}
 	snap.Phase = state.PhaseIdle
-	app := &App{Screen: Session}
-	sessionRenderStates.Delete(app)
-	liveStates.Delete(app)
-	liveUIStates.Delete(app)
-	app.SetSnapshot(snap)
-	tt := ui.NewTester(app.View, 1600, 1000)
+	h := newLiveSnapshotApp(t, Session, snap)
+	tt := ui.NewTester(h.app.View, 1600, 1000)
 	tt.Frame()
-	return tt, app
+	return tt, h.app
 }
 
 func TestMarkdownRendersHeadingsEmphasisAndLists(t *testing.T) {
@@ -105,11 +120,10 @@ func TestMarkdownUnclosedFenceKeepsBody(t *testing.T) {
 }
 
 func TestMarkdownPlainParagraphLineHeight(t *testing.T) {
-	app := &App{Screen: Session}
+	tt, app := m6MarkdownApp(t, "first line\nsecond line")
 	if got, want := app.ConversationLineHeight(), float32(24); got != want {
 		t.Fatalf("conversation line height = %v, want %v", got, want)
 	}
-	tt, _ := m6MarkdownApp(t, "first line\nsecond line")
 	r1, ok := tt.Find("first line\nsecond line")
 	if !ok {
 		// RichText may split the newline into separate labels; the model
@@ -128,14 +142,13 @@ func TestUsagePillsSegments(t *testing.T) {
 	snap := state.NewSnapshot()
 	snap.Phase = state.PhaseRunning
 	snap.Usage = state.Usage{Turns: 3, Steps: 5, In: 200, Out: 100, CacheHit: 50}
-	app := &App{Screen: Session}
-	app.SetSnapshot(snap)
-	tt := ui.NewTester(app.View, 1600, 1000)
+	h := newLiveSnapshotApp(t, Session, snap)
+	tt := ui.NewTester(h.app.View, 1600, 1000)
 	tt.Advance(2 * time.Second)
 
 	idle := *snap
 	idle.Phase = state.PhaseIdle
-	app.SetSnapshot(&idle)
+	h.app.SetSnapshot(&idle)
 	tt.Frame()
 
 	for _, want := range []string{
@@ -155,18 +168,14 @@ func TestBackToBottomAppearsAndScrolls(t *testing.T) {
 		Role:  state.RoleAssistant,
 		Text:  strings.Repeat("a long line of transcript text\n", 200),
 	}}
-	app := &App{Screen: Session}
-	sessionRenderStates.Delete(app)
-	liveStates.Delete(app)
-	liveUIStates.Delete(app)
-	app.SetSnapshot(snap)
-	tt := ui.NewTester(app.View, 1600, 1000)
+	h := newLiveSnapshotApp(t, Session, snap)
+	tt := ui.NewTester(h.app.View, 1600, 1000)
 	tt.Frame()
 
 	if !tt.HasText("Back to bottom") {
 		t.Fatalf("a scrolled-up transcript has no Back to bottom control: %v", tt.Texts())
 	}
-	st := app.renderState()
+	st := h.app.renderState()
 	if st.scroll.MaxY <= 1 {
 		t.Fatalf("transcript reports no scroll range: %+v", st.scroll)
 	}

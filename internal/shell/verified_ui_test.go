@@ -10,8 +10,8 @@ import (
 	"github.com/egoist/mygo/ui"
 
 	"github.com/zeokeel/zeokeel/internal/design"
-	"github.com/zeokeel/zeokeel/internal/icons"
 	"github.com/zeokeel/zeokeel/internal/session"
+	"github.com/zeokeel/zeokeel/internal/state"
 	"github.com/zeokeel/zeokeel/internal/store"
 )
 
@@ -240,83 +240,138 @@ func TestPluginSwitchRendersOnAndOffState(t *testing.T) {
 	}
 }
 
-// TestDarkSendControlUsesThemeFill covers the hard-coded #B2C7F4 disabled Send
-// fill: the dark static Home/Session and the live Home now share one
-// theme-aware helper (#4B5E82 in dark).
+// expectedDisabledFill is the Send control's fill when the empty composer
+// disables it: the theme's idle fill at the framework's 50% disabled opacity
+// over the composer surface. Live Session paints the fill on the disabled
+// button itself (Home puts it on an enabled parent), so its sampled pixel is
+// this dimmed composite, still derived from the theme helper.
+func expectedDisabledFill(t *design.Tokens) color.RGBA {
+	c := sendIdleFill(t).Alpha(0.5).Over(t.BgRaised)
+	return color.RGBA{R: c.R, G: c.G, B: c.B, A: c.A}
+}
+
+func nearRGBA(got, want color.RGBA, tol int) bool {
+	diff := func(a, b uint8) int {
+		if a > b {
+			return int(a - b)
+		}
+		return int(b - a)
+	}
+	return diff(got.R, want.R) <= tol && diff(got.G, want.G) <= tol && diff(got.B, want.B) <= tol
+}
+
+// TestDarkSendControlUsesThemeFill covers the theme-aware disabled Send fill:
+// live Home and live Session share one helper, so dark paints the brand dark
+// token instead of the light baseline's hard-coded #B2C7F4, and light keeps
+// the baseline value.
 func TestDarkSendControlUsesThemeFill(t *testing.T) {
-	render := func(screen Screen, dark bool) (*ui.Tester, *image.RGBA) {
-		app := &App{Screen: screen}
-		tt := ui.NewTester(func(c *ui.Context) {
-			if dark {
-				c.SetTheme(design.Dark().Theme())
-			} else {
-				c.SetTheme(design.Light().Theme())
-			}
-			app.View(c)
-		}, 1600, 1000)
+	render := func(t *testing.T, screen Screen, dark bool) (*ui.Tester, *image.RGBA) {
+		t.Helper()
+		h := newLiveApp(t, &shellProvider{})
+		h.app.Language = LangEN
+		theme := session.ThemeLight
+		if dark {
+			theme = session.ThemeDark
+		}
+		if err := h.store.SetSetting(session.SettingTheme, theme); err != nil {
+			t.Fatalf("theme setting: %v", err)
+		}
+		h.app.Screen = screen
+		tt := ui.NewTester(h.app.View, 1600, 1000)
 		tt.Frame()
 		return tt, tt.Image()
 	}
-
+	wantLight := rgbaOf(homeSendIdle)
+	wantDark := rgbaOf(sendIdleFill(design.Dark()))
+	if wantDark == wantLight {
+		t.Fatalf("dark Send fill %v matches the light baseline %v", wantDark, wantLight)
+	}
+	label := map[Screen]string{Home: "Send message", Session: "Send"}
 	for _, screen := range []Screen{Home, Session} {
-		darkTT, darkImg := render(screen, true)
-		r, ok := darkTT.Find("Send message")
+		darkTT, darkImg := render(t, screen, true)
+		r, ok := darkTT.Find(label[screen])
 		if !ok {
-			t.Fatalf("screen %v: Send control missing: %v", screen, darkTT.Texts())
+			t.Fatalf("screen %v: dark Send control missing: %v", screen, darkTT.Texts())
 		}
-		wantDark := rgbaOf(sendIdleFill(design.Dark()))
-		if got := darkImg.RGBAAt(int(r.X)+5, int(r.Y+r.H/2)); got != wantDark {
-			t.Fatalf("screen %v: dark Send fill = %v, want %v", screen, got, wantDark)
-		}
-		if got := darkImg.RGBAAt(int(r.X)+5, int(r.Y+r.H/2)); got == rgbaOf(homeSendIdle) {
+		darkFill := darkImg.RGBAAt(int(r.X)+5, int(r.Y+r.H/2))
+		if darkFill == wantLight {
 			t.Fatalf("screen %v: dark Send still paints the light #B2C7F4", screen)
 		}
+		if screen == Home {
+			// Home paints the idle fill on an enabled parent, so it samples
+			// the helper value itself.
+			if darkFill != wantDark {
+				t.Fatalf("screen %v: dark Send fill = %v, want %v", screen, darkFill, wantDark)
+			}
+		} else if want := expectedDisabledFill(design.Dark()); !nearRGBA(darkFill, want, 2) {
+			t.Fatalf("screen %v: dark disabled Send fill = %v, want %v", screen, darkFill, want)
+		}
 
-		lightTT, lightImg := render(screen, false)
-		lr, ok := lightTT.Find("Send message")
+		lightTT, lightImg := render(t, screen, false)
+		lr, ok := lightTT.Find(label[screen])
 		if !ok {
 			t.Fatalf("screen %v: light Send control missing", screen)
 		}
-		if got := lightImg.RGBAAt(int(lr.X)+5, int(lr.Y+lr.H/2)); got != rgbaOf(homeSendIdle) {
-			t.Fatalf("screen %v: light Send fill = %v, want #B2C7F4", screen, got)
+		lightFill := lightImg.RGBAAt(int(lr.X)+5, int(lr.Y+lr.H/2))
+		if lightFill == wantDark {
+			t.Fatalf("screen %v: light Send paints the dark fill %v", screen, lightFill)
 		}
-	}
-
-	// The live Home path goes through the same helper.
-	h := newLiveApp(t, &shellProvider{})
-	h.app.Screen = Home
-	h.app.Language = LangEN
-	if err := h.store.SetSetting(session.SettingTheme, session.ThemeDark); err != nil {
-		t.Fatalf("theme setting: %v", err)
-	}
-	tt := ui.NewTester(h.app.View, 1600, 1000)
-	tt.Frame()
-	r, ok := tt.Find("Send message")
-	if !ok {
-		t.Fatalf("live Home Send missing: %v", tt.Texts())
-	}
-	want := rgbaOf(sendIdleFill(design.Dark()))
-	if got := tt.Image().RGBAAt(int(r.X)+5, int(r.Y+r.H/2)); got != want {
-		t.Fatalf("live dark Home Send fill = %v, want %v", got, want)
+		if screen == Home {
+			if lightFill != wantLight {
+				t.Fatalf("screen %v: light Send fill = %v, want #B2C7F4", screen, lightFill)
+			}
+		} else if want := expectedDisabledFill(design.Light()); !nearRGBA(lightFill, want, 2) {
+			t.Fatalf("screen %v: light disabled Send fill = %v, want %v", screen, lightFill, want)
+		}
+		if darkFill == lightFill {
+			t.Fatalf("screen %v: dark and light Send fills are identical: %v", screen, darkFill)
+		}
 	}
 }
 
-// TestNarrowSessionTranscriptStaysInsideWindow covers the NoWrap transcript
-// lines that painted through the window edge at 1200x800 and 900x600.
+// TestNarrowSessionTranscriptStaysInsideWindow covers the transcript lines that
+// used to paint through the window edge at 1200x800 and 900x600: a line long
+// enough to overflow the column if it were not wrapped must stay inside the
+// transcript column and never ink the window's last columns or the area past
+// the column.
 func TestNarrowSessionTranscriptStaysInsideWindow(t *testing.T) {
 	bg := rgbaOf(design.Light().BgBase)
+	// 400 characters is ~7x the widest transcript column at these sizes: it
+	// only fits by wrapping, exactly the old NoWrap regression's trigger.
+	longLine := strings.Repeat("x", 400)
+	snap := state.NewSnapshot()
+	snap.Messages = []state.Message{
+		{MsgID: "a1", Role: state.RoleAssistant, Text: "```\n" + longLine + "\n```"},
+	}
 	for _, size := range [][2]int{{1200, 800}, {900, 600}} {
-		app := &App{Screen: Session}
-		tt := ui.NewTester(app.View, size[0], size[1])
+		h := newLiveSnapshotApp(t, Session, snap)
+		tt := ui.NewTester(h.app.View, size[0], size[1])
 		tt.Frame()
 		img := tt.Image()
 		col, ok := tt.Find("Session transcript")
 		if !ok {
 			t.Fatalf("%dx%d: transcript column missing: %v", size[0], size[1], tt.Texts())
 		}
+		bottom := 520
+		if limit := size[1] - 160; bottom > limit {
+			bottom = limit
+		}
+		// The band must actually cross the transcript content, or the scan
+		// below would pass on an empty window.
+		ink := 0
+		for x := int(col.X); x < int(col.X+col.W); x++ {
+			for y := 180; y < bottom; y++ {
+				if img.RGBAAt(x, y) != bg {
+					ink++
+				}
+			}
+		}
+		if ink == 0 {
+			t.Fatalf("%dx%d: transcript band is empty; nothing to test", size[0], size[1])
+		}
 		// No glyph may paint in the window's last columns.
 		for x := size[0] - 8; x < size[0]; x++ {
-			for y := 180; y < 520 && y < size[1]-160; y++ {
+			for y := 180; y < bottom; y++ {
 				if got := img.RGBAAt(x, y); got != bg {
 					t.Fatalf("%dx%d: transcript ink at window edge (%d,%d) = %v", size[0], size[1], x, y, got)
 				}
@@ -325,7 +380,7 @@ func TestNarrowSessionTranscriptStaysInsideWindow(t *testing.T) {
 		// Nor beyond the transcript column's right edge.
 		right := int(col.X+col.W) + 1
 		for x := right; x < size[0]-8; x++ {
-			for y := 180; y < 520 && y < size[1]-160; y++ {
+			for y := 180; y < bottom; y++ {
 				if got := img.RGBAAt(x, y); got != bg {
 					t.Fatalf("%dx%d: transcript ink past the column (%d,%d) = %v", size[0], size[1], x, y, got)
 				}
@@ -589,78 +644,6 @@ func TestConfigurationDialogAccessibleLabels(t *testing.T) {
 	want := h.app.pluginConfigPath()
 	if opened != want {
 		t.Fatalf("opened %q, want %q", opened, want)
-	}
-}
-
-// TestBaselineMarginsCompareCollapseControlAndRowFill covers the loosened
-// masks: the Sidebar collapse control and the row fill stay inside the
-// compared region, and explicit assertions guard them.
-func TestBaselineMarginsCompareCollapseControlAndRowFill(t *testing.T) {
-	app := &App{Screen: Home}
-	tt := ui.NewTester(app.View, 1600, 1000)
-	tt.Frame()
-	img := tt.Image()
-	tokens := design.Light()
-	sidebar := rgbaOf(tokens.BgSidebar)
-	ink := 0
-	for y := 18; y < 52; y++ {
-		for x := 240; x < 268; x++ {
-			if img.RGBAAt(x, y) != sidebar {
-				ink++
-			}
-		}
-	}
-	if ink < 5 {
-		t.Fatalf("collapse control region has only %d non-sidebar pixels", ink)
-	}
-	// The selected session row's fill starts left of the label mask.
-	fill := false
-	for y := 246; y < 330; y++ {
-		for x := 14; x < 36; x++ {
-			if img.RGBAAt(x, y) != sidebar {
-				fill = true
-			}
-		}
-	}
-	if !fill {
-		t.Fatal("sidebar row fill is not visible outside the label mask")
-	}
-}
-
-// TestStaticHeaderIcons covers the two header artwork regressions: the right
-// panel control uses the right-divider icon and the mode indicator is an SVG,
-// not the "☁" text glyph.
-func TestStaticHeaderIcons(t *testing.T) {
-	if liveHeaderPanelIcon != chromeIconPanelRight || liveHeaderPanelIcon == icons.PanelLeft() {
-		t.Fatal("live header right-sidebar control does not use the right-panel icon")
-	}
-	app := &App{Screen: Session}
-	tt := ui.NewTester(app.View, 1600, 1000)
-	tt.Frame()
-	if tt.HasText("☁") {
-		t.Fatalf("static session still paints the cloud text glyph: %v", tt.Texts())
-	}
-	r, ok := tt.Find("Mode icon")
-	if !ok {
-		t.Fatalf("mode icon slot missing: %v", tt.Texts())
-	}
-	if r.W < 14 || r.H < 14 {
-		t.Fatalf("mode icon slot = %vx%v, want the baseline's 16x16 slot", r.W, r.H)
-	}
-	bg := rgbaOf(design.Light().BgBase)
-	ink := 0
-	for y := int(r.Y); y < int(r.Y+r.H); y++ {
-		for x := int(r.X); x < int(r.X+r.W); x++ {
-			if tt.Image().RGBAAt(x, y) != bg {
-				ink++
-			}
-		}
-	}
-	if ink == 0 {
-		t.Fatal("mode icon slot is empty")
-	}
-	if sessModeIcon != homeIconTune {
-		t.Fatal("static mode icon does not use the intended tune glyph")
 	}
 }
 

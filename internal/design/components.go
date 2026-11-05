@@ -1,23 +1,30 @@
 package design
 
-import "github.com/egoist/mygo/ui"
+import (
+	"github.com/egoist/mygo/ui"
 
-// Baseline spacing steps (4px grid), from docs/baseline/css.md.
-const (
-	Space1 float32 = 4
-	Space2 float32 = 8
-	Space3 float32 = 12
-	Space4 float32 = 16
-	Space5 float32 = 20
-	Space6 float32 = 24
-	Space8 float32 = 32
+	"github.com/zeokeel/zeokeel/internal/brand"
 )
 
-// Baseline radii, from baseline/css/summary.json.
+// Brand spacing steps on the 4 DIP grid whose unit is brand.Spacing.
+const (
+	Space1 float32 = brand.Spacing
+	Space2 float32 = Space1 * 2
+	Space3 float32 = Space1 * 3
+	Space4 float32 = Space1 * 4
+	Space5 float32 = Space1 * 5
+	Space6 float32 = Space1 * 6
+	Space8 float32 = Space1 * 8
+)
+
+// Brand radii. RadiusMD is the control corner of the theme (brand.Radius);
+// the smaller steps round inline chips and the larger ones the nested
+// surfaces above a control: cards, the composer and dialogs. RadiusMax is
+// the pill for badges, not a real corner size.
 const (
 	RadiusXS  float32 = 4
 	RadiusSM  float32 = 8
-	RadiusMD  float32 = 12
+	RadiusMD  float32 = brand.Radius
 	RadiusLG  float32 = 16
 	RadiusXL  float32 = 20
 	RadiusMax float32 = 999
@@ -39,7 +46,9 @@ func (t *Tokens) Page() Style {
 	}
 }
 
-// Sidebar is the 280px source list (baseline geometry).
+// Sidebar is the 280px source list. The width is the brand layout's fixed
+// source column, kept from the current screens until the native-layout stage
+// revisits the shell geometry.
 func (t *Tokens) Sidebar() Style {
 	return func(el ui.Element) ui.Element {
 		return el.Width(280).Background(t.BgSidebar).
@@ -54,7 +63,8 @@ func (t *Tokens) Main() Style {
 	}
 }
 
-// BrandRow is the top row of the sidebar: logo + wordmark.
+// BrandRow is the top row of the sidebar: logo + wordmark. Its 64px height
+// follows docs/wordmark.md (the mark is vertically centred in it).
 func (t *Tokens) BrandRow() Style {
 	return func(el ui.Element) ui.Element {
 		return el.Height(64).PaddingX(Space4).Gap(Space2)
@@ -99,7 +109,8 @@ func (t *Tokens) Panel() Style {
 	}
 }
 
-// Composer is the message input box (baseline: 868 wide, 116 tall, radius 16-20).
+// Composer is the message input box: the 868×116 brand geometry, kept from
+// the current screens until the native-layout stage revisits it.
 func (t *Tokens) Composer() Style {
 	return func(el ui.Element) ui.Element {
 		return Apply(el, t.Panel(), func(e ui.Element) ui.Element {
@@ -108,11 +119,12 @@ func (t *Tokens) Composer() Style {
 	}
 }
 
-// PrimaryButton is the baseline "New Session" button: the BgStrong surface,
-// a 1px BorderL3 edge, the readable LabelPrimary foreground, 38px tall,
-// 12px radius. BgStrong is white in Light and #43454A in Dark, so OnPrimary
-// (white/black) was invisible on the light fill; LabelPrimary contrasts with
-// BgStrong in both themes (18.9:1 light, 9.2:1 dark).
+// PrimaryButton is the brand "New Session" button: the strong surface fill,
+// a 1px BorderL3 edge, the readable LabelPrimary foreground, 38px tall and
+// the theme's control radius. BgStrong is the cool brand neutral (#F1F3F5
+// light, #272736 dark), so LabelPrimary contrasts in both themes; OnPrimary
+// is reserved for accent-filled controls, where it is the text color on the
+// brand fill.
 func (t *Tokens) PrimaryButton() Style {
 	return func(el ui.Element) ui.Element {
 		return el.Height(38).PaddingX(Space4).Radius(RadiusMD).

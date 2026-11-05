@@ -1,11 +1,23 @@
-// Package design is ZeoKeel's design system: the DSH baseline tokens
-// (docs/baseline/css.md) and the style functions every screen builds with.
+// Package design is ZeoKeel's design system: the brand theme built on mygo's
+// native widgets and the style functions every screen builds with.
+//
+// History: the package began as a verbatim copy of the DSH baseline tokens,
+// maintained for the retired pixel-parity effort (ADR 0001). Since ADR 0002
+// it is a brand layer over mygo: Tokens carries the semantic colors of
+// internal/brand, Theme returns the branded ui.Theme for the stock widgets,
+// and the style, component and motion helpers stay as thin sugar over mygo's
+// native Element API, to be replaced widget by widget in the native-control
+// stage.
 package design
 
-import "github.com/egoist/mygo/ui"
+import (
+	"github.com/egoist/mygo/ui"
 
-// TypeRole names a step of the baseline type scale. Values come from the
-// computed styles captured in baseline/css/summary.json.
+	"github.com/zeokeel/zeokeel/internal/brand"
+)
+
+// TypeRole names a step of the brand type scale: a 14px body with 16/20/24
+// display steps above it and 13/12/11 metadata steps below.
 type TypeRole int
 
 const (
@@ -19,8 +31,9 @@ const (
 	TypeXXXS
 )
 
-// TypeMetrics returns the font size, line height and weight of a role.
-// The numbers are the DSH baseline's typography tokens (docs/baseline/css.md).
+// TypeMetrics returns the font size, fixed line height and weight of a role.
+// The numbers are the design system's own scale, tuned for a desktop UI at
+// the brand's 14px base.
 func TypeMetrics(r TypeRole) (size, line float32, weight int) {
 	switch r {
 	case TypeXL:
@@ -42,7 +55,11 @@ func TypeMetrics(r TypeRole) (size, line float32, weight int) {
 	}
 }
 
-// Tokens is one theme's slice of the baseline design tokens.
+// Tokens is one appearance's slice of the brand design system: the semantic
+// colors and surfaces the screens build with. The colors come from
+// internal/brand; this type names them the way screens use them and adds the
+// surfaces that the mygo ui.Theme does not carry (the sidebar, the raised
+// card fill, the modal scrim).
 type Tokens struct {
 	Dark bool
 
@@ -56,90 +73,70 @@ type Tokens struct {
 	LabelSecondary ui.Color
 	LabelTertiary  ui.Color
 
-	BorderL2 ui.Color // regular divider, rgba(0,0,0,.10) in the baseline
+	BorderL2 ui.Color // regular divider
 	BorderL3 ui.Color // stronger divider
 
 	Accent        ui.Color
 	AccentHover   ui.Color
 	AccentPressed ui.Color
 	AccentText    ui.Color
-	// OnPrimary is the foreground for a primary/accent filled control. In
-	// the light theme that is white; in the dark theme DSH's near-black
-	// label on its light primary pill.
+	// OnPrimary is the foreground for a primary/accent filled control: white
+	// on the brand blue in the light theme, brand ink on the sky fill in the
+	// dark one.
 	OnPrimary ui.Color
 
 	Success ui.Color
 	Danger  ui.Color
-	// Warning is the baseline status color used for badges and state dots
-	// (#DD8629). WarningText is its WCAG-AA foreground for warning message
-	// text on the page background; the status color itself is too light for
-	// 11-13px text on white.
+	// Warning is the status color for badges and state dots. WarningText is
+	// its WCAG-AA foreground for warning message text on the page
+	// background; the status color itself is too light for small text on
+	// white.
 	Warning     ui.Color
 	WarningText ui.Color
 
 	White ui.Color
 }
 
-// Light returns the light theme tokens.
-func Light() *Tokens {
-	return &Tokens{
-		BgBase:         ui.Hex("#FFFFFF"),
-		BgSidebar:      ui.Hex("#F9FAFB"),
-		BgRaised:       ui.Hex("#FFFFFF"),
-		BgStrong:       ui.Hex("#FFFFFF"),
-		BgHover:        ui.RGBA(38, 49, 72, 0.06),
-		LabelPrimary:   ui.Hex("#0F1115"),
-		LabelSecondary: ui.Hex("#61666B"),
-		LabelTertiary:  ui.Hex("#81858C"),
-		BorderL2:       ui.RGBA(0, 0, 0, 0.10),
-		BorderL3:       ui.RGBA(0, 0, 0, 0.12),
-		Accent:         ui.Hex("#4176E6"),
-		AccentHover:    ui.Hex("#3468CF"),
-		AccentPressed:  ui.Hex("#2A57B8"),
-		AccentText:     ui.Hex("#FFFFFF"),
-		OnPrimary:      ui.Hex("#FFFFFF"),
-		Success:        ui.Hex("#22C55E"),
-		Danger:         ui.Hex("#EC1313"),
-		Warning:        ui.Hex("#DD8629"),
-		WarningText:    ui.Hex("#8A4B0F"),
-		White:          ui.Hex("#FFFFFF"),
-	}
-}
+// Light returns the light appearance's brand tokens.
+func Light() *Tokens { return fromPalette(brand.LightPalette(), false) }
 
-// Dark returns the dark theme tokens.
-func Dark() *Tokens {
+// Dark returns the dark appearance's brand tokens.
+func Dark() *Tokens { return fromPalette(brand.DarkPalette(), true) }
+
+// fromPalette maps a brand palette onto the semantic token names the screens
+// use. The mapping is deliberately direct: one token is one palette role, so
+// retuning the brand means editing internal/brand only.
+func fromPalette(p brand.Palette, dark bool) *Tokens {
 	return &Tokens{
-		Dark:           true,
-		BgBase:         ui.Hex("#151517"),
-		BgSidebar:      ui.Hex("#1B1B1C"),
-		BgRaised:       ui.Hex("#2C2C2E"),
-		BgStrong:       ui.Hex("#43454A"),
-		BgHover:        ui.RGBA(255, 255, 255, 0.08),
-		LabelPrimary:   ui.Hex("#F9FAFB"),
-		LabelSecondary: ui.Hex("#CFD3D6"),
-		LabelTertiary:  ui.Hex("#ADB2B8"),
-		BorderL2:       ui.RGBA(255, 255, 255, 0.12),
-		BorderL3:       ui.RGBA(255, 255, 255, 0.16),
-		Accent:         ui.Hex("#7AAAFF"),
-		AccentHover:    ui.Hex("#93BAFF"),
-		AccentPressed:  ui.Hex("#6398F0"),
-		AccentText:     ui.Hex("#151517"),
-		OnPrimary:      ui.Hex("#151517"),
-		Success:        ui.Hex("#22C55E"),
-		Danger:         ui.Hex("#F25A5A"),
-		Warning:        ui.Hex("#DD8629"),
-		WarningText:    ui.Hex("#E9A24C"),
-		White:          ui.Hex("#FFFFFF"),
+		Dark:           dark,
+		BgBase:         p.Background,
+		BgSidebar:      p.Sidebar,
+		BgRaised:       p.Surface,
+		BgStrong:       p.SurfaceStrong,
+		BgHover:        p.Hover,
+		LabelPrimary:   p.Text,
+		LabelSecondary: p.TextSecondary,
+		LabelTertiary:  p.TextTertiary,
+		BorderL2:       p.Border,
+		BorderL3:       p.BorderStrong,
+		Accent:         p.Accent,
+		AccentHover:    p.AccentHover,
+		AccentPressed:  p.AccentPressed,
+		AccentText:     p.AccentText,
+		OnPrimary:      p.OnPrimary,
+		Success:        p.Success,
+		Danger:         p.Danger,
+		Warning:        p.Warning,
+		WarningText:    p.WarningText,
+		White:          ui.Hex(brand.HexWhite),
 	}
 }
 
 // Scrim is the full-window backdrop a modal paints over the screen behind
-// it: DSH's 0.24 black in the light theme and 0.5 black in the dark one.
+// it: the brand ink scrim in the light theme and a deeper black in the dark
+// one, so the dialog keeps its edge on either background.
 func (t *Tokens) Scrim() ui.Color {
-	if t.Dark {
-		return ui.RGBA(0, 0, 0, 0.5)
-	}
-	return ui.RGBA(0, 0, 0, 0.24)
+	return brand.PaletteOf(t.Dark).Scrim
 }
 
 // Of picks the tokens for the context's current theme (light or dark).
@@ -150,34 +147,13 @@ func Of(c *ui.Context) *Tokens {
 	return Light()
 }
 
-// Theme maps the tokens onto the colors and metrics mygo's own widgets use,
-// so built-in controls match the baseline too.
+// Theme returns the brand theme the mygo widgets draw with: brand.LightTheme
+// or brand.DarkTheme for the tokens' appearance. Screens install it with
+// c.SetTheme(t.Theme()), so every stock mygo control (buttons, inputs, lists,
+// menus, scroll bars) picks up the brand colors and metrics.
 func (t *Tokens) Theme() *ui.Theme {
-	return &ui.Theme{
-		Dark:           t.Dark,
-		Background:     t.BgBase,
-		Surface:        t.BgRaised,
-		SurfaceHover:   t.BgHover,
-		SurfacePressed: t.BgHover,
-		Border:         t.BorderL2,
-		Text:           t.LabelPrimary,
-		TextMuted:      t.LabelSecondary,
-		Accent:         t.Accent,
-		AccentHover:    t.AccentHover,
-		AccentPressed:  t.AccentPressed,
-		AccentText:     t.AccentText,
-		Danger:         t.Danger,
-		Warning:        t.Warning,
-		Success:        t.Success,
-		Selection:      t.BgHover,
-		Focus:          t.Accent,
-		Inverse:        t.LabelPrimary,
-		InverseText:    t.BgBase,
-		Radius:         8,
-		Spacing:        4,
-		FontSize:       14,
-		// The DSH content stack, so built-in widgets (buttons, inputs,
-		// menus, dialogs) get the same families as the shell's own text.
-		Font: FontStack(),
+	if t.Dark {
+		return brand.DarkTheme()
 	}
+	return brand.LightTheme()
 }

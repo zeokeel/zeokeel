@@ -13,10 +13,10 @@ import (
 	"github.com/zeokeel/zeokeel/internal/session"
 )
 
-// Home layout follows the baseline geometry recorded in
-// docs/baseline/screens/00-home.md for the 1600x1000 window: a blank 40px
-// header over the main area, then the hero (logo, title, Preview badge,
-// workspace/mode chips) and the composer, centered as one column.
+// Home layout: a blank 40px header over the main area, then the hero (logo,
+// title, badge, workspace/mode chips) and the composer, centered as one
+// column. The geometry values below are from the retired DSH reference design
+// (archived 2026-11-05); the native visual redesign will replace them.
 const (
 	homeHeaderHeight   float32 = 40
 	homeHeroHeight     float32 = 44
@@ -34,22 +34,21 @@ const (
 	homeGutter float32 = 7
 )
 
-// Baseline colors the shared tokens do not expose (sampled from
-// baseline/css/00-home.json).
+// Colors the shared tokens do not expose (sampled from the retired DSH
+// reference design).
 var (
-	homePreviewBg   = ui.Hex("#E4EDFD")
-	homePreviewFg   = ui.Hex("#0E3074")
-	homePlaceholder = ui.Hex("#ADB2B8")
-	homeAddButtonBg = ui.Hex("#F5F6F7")
-	homeShadowDrop  = ui.RGBA(0, 0, 0, 0.03)
-	homeSendIdle    = ui.Hex("#B2C7F4") // the baseline's disabled send fill
-	homeTagFg       = ui.Hex("#4176E6") // the baseline's accent on the 1017 tag
+	homePreviewBg = ui.Hex("#E4EDFD")
+	homePreviewFg = ui.Hex("#0E3074")
 
-	// Dark variants, sampled from baseline/css/45-home-dark.json.
-	homePreviewBgDark   = ui.Hex("#34415B")
-	homePreviewFgDark   = ui.Hex("#F9FAFB")
-	homeAddButtonBgDark = ui.Hex("#353638")
-	homeTagFgDark       = ui.Hex("#7AAAFF")
+	homeShadowDrop = ui.RGBA(0, 0, 0, 0.03)
+	homeSendIdle   = ui.Hex("#B2C7F4") // the baseline's disabled send fill
+	homeTagFg      = ui.Hex("#4176E6") // the baseline's accent on the 1017 tag
+
+	// Dark variants of the same retired reference samples.
+	homePreviewBgDark = ui.Hex("#34415B")
+	homePreviewFgDark = ui.Hex("#F9FAFB")
+
+	homeTagFgDark = ui.Hex("#7AAAFF")
 )
 
 func homePreviewColors(t *design.Tokens) (ui.Color, ui.Color) {
@@ -57,13 +56,6 @@ func homePreviewColors(t *design.Tokens) (ui.Color, ui.Color) {
 		return homePreviewBgDark, homePreviewFgDark
 	}
 	return homePreviewBg, homePreviewFg
-}
-
-func homeAddSurface(t *design.Tokens) ui.Color {
-	if t.Dark {
-		return homeAddButtonBgDark
-	}
-	return homeAddButtonBg
 }
 
 func homeTagAccent(t *design.Tokens) ui.Color {
@@ -93,24 +85,11 @@ var (
 	homeIconPanel = ui.MustParseSVG([]byte(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"><rect x="1.2" y="1.2" width="13.6" height="13.6" rx="2.4"/><path d="M10.6 1.2v13.6"/></svg>`))
 )
 
+// home draws the Home screen. The live controller-backed renderer is the
+// only one; the retired static baseline render was deleted (pixel parity
+// retired 2026-11-05).
 func (a *App) home(c *ui.Context, t *design.Tokens) {
-	if a.Ctrl != nil && a.backgroundScreen() == Home {
-		a.homeLive(c, t)
-		return
-	}
-	design.Apply(ui.Column(c), t.Main()).Children(func() {
-		a.homeHeader(c, t)
-		ui.Column(c).Grow(1).Justify(ui.Center).AlignItems(ui.Center).PaddingEnd(homeGutter).Children(func() {
-			ui.Column(c).Width(a.homeStackWidthFor(c)).Children(func() {
-				a.homeHero(c, t)
-				ui.Box(c).Height(design.Space3)
-				a.homeWorkspaceRow(c, t)
-				ui.Box(c).Height(homeCardGap)
-				a.homeComposer(c, t)
-				ui.Box(c).Height(homeCardFoot)
-			})
-		})
-	})
+	a.homeLive(c, t)
 }
 
 // homeLive is the controller-backed home screen: the workspace chip reflects
@@ -420,106 +399,4 @@ func (a *App) homePreviewBadge(c *ui.Context, t *design.Tokens) {
 		Padding(1, 7, 2, 9).Radius(design.RadiusMax).
 		Background(bg).TextColor(fg).
 		AlignSelf(ui.Start).Top(2)
-}
-
-// homeWorkspaceRow is the row of workspace and mode chips above the
-// composer.
-func (a *App) homeWorkspaceRow(c *ui.Context, t *design.Tokens) {
-	ui.Row(c).Height(28).Padding(0, design.Space4, 0, design.Space5).Gap(design.Space1).
-		Children(func() {
-			a.homeChip(c, t, homeIconFolder, 16, "mygo", 12)
-			a.homeChip(c, t, homeIconTune, 16, a.T("common.standard_mode"), 14)
-		})
-}
-
-func (a *App) homeChip(c *ui.Context, t *design.Tokens, icon *ui.SVG, iconSize float32, label string, chevronSize float32) {
-	ui.Row(c).Height(28).PaddingX(design.Space2).Gap(design.Space1).Radius(design.RadiusSM).
-		AlignItems(ui.Center).Children(func() {
-		if icon == homeIconFolder {
-			ui.Image(c, homeIconFolder).Size(iconSize, iconSize).TextColor(t.LabelPrimary)
-		} else {
-			ui.Icon(c, icon).Size(iconSize, iconSize).TextColor(t.LabelPrimary)
-		}
-		homeText(c, label).FontSize(13).FixedLineHeight(20).FontWeight(500).TextColor(t.LabelPrimary)
-		ui.Icon(c, homeIconChevron).Size(chevronSize, chevronSize).TextColor(t.LabelTertiary)
-	})
-}
-
-// homeComposer is the hero message box: an input row over a toolbar with
-// attach, permission, model and send controls.
-func (a *App) homeComposer(c *ui.Context, t *design.Tokens) {
-	ui.Row(c).Width(a.homeStackWidthFor(c)).Padding(0, 14, 0, 15).Children(func() {
-		design.Apply(ui.Column(c), t.Panel()).
-			Label(a.tr("Home composer", "主页输入框")).
-			Width(a.homeComposerWidthFor(c)+2).
-			Radius(homeComposerRadius).
-			Border(1, t.BorderL2).
-			Shadow(0, 4, 12, 0, homeShadowDrop).
-			Shadow(0, 0, 18, 0, homeShadowDrop).
-			Padding(design.Space2, 0, 0, 0).
-			Gap(design.Space3).
-			Children(func() {
-				ui.Row(c).Height(homeInputHeight).Padding(5, 14, 0, 14).
-					AlignItems(ui.Start).Children(func() {
-					homeText(c, a.T("home.composer_placeholder")).
-						FontSize(14).FixedLineHeight(24).TextColor(homePlaceholder)
-				})
-				a.homeComposerToolbar(c, t)
-			})
-	})
-}
-
-func (a *App) homeComposerToolbar(c *ui.Context, t *design.Tokens) {
-	ui.Row(c).Height(homeToolbarHeight).Padding(2, design.Space2, 6, design.Space2).
-		AlignItems(ui.Center).Children(func() {
-		ui.Box(c).Size(28, 28).Radius(design.RadiusMax).Background(homeAddSurface(t)).Center().
-			Children(func() {
-				ui.Icon(c, homeIconPlus).Size(14, 14).TextColor(t.LabelPrimary)
-			})
-		ui.Box(c).Width(design.Space3)
-		a.homePermissionChip(c, t)
-		ui.Spacer(c).Grow(1)
-		a.homeModelChip(c, t)
-		ui.Box(c).Width(design.Space6)
-		a.homeSendButton(c, t)
-	})
-}
-
-func (a *App) homePermissionChip(c *ui.Context, t *design.Tokens) {
-	ui.Row(c).Height(28).Padding(0, design.Space1, 0, design.Space2).Gap(design.Space1).
-		AlignItems(ui.Center).Children(func() {
-		ui.Icon(c, homeIconShield).Size(14, 14).TextColor(t.LabelSecondary)
-		homeText(c, a.T("settings.full_access")).FontSize(13).FixedLineHeight(20).FontWeight(500).
-			TextColor(t.LabelSecondary)
-		ui.Icon(c, homeIconChevron).Size(14, 14).TextColor(t.LabelTertiary)
-	})
-}
-
-func (a *App) homeModelChip(c *ui.Context, t *design.Tokens) {
-	ui.Row(c).Height(28).Padding(0, design.Space1, 0, design.Space2).Gap(design.Space1).
-		AlignItems(ui.Center).Children(func() {
-		homeText(c, "DeepSeek-V4.1-Flash").FontSize(13).FixedLineHeight(20).TextColor(t.LabelSecondary)
-		tag := homeTagAccent(t)
-		homeText(c, "1017").FontSize(11).FixedLineHeight(17).FontWeight(500).
-			Padding(1, design.Space2, 1, design.Space2).Radius(design.RadiusMax).
-			Background(tag.Alpha(0.10)).TextColor(tag)
-		homeText(c, a.T("common.high")).FontSize(13).FixedLineHeight(20).TextColor(homePlaceholder)
-		ui.Icon(c, homeIconChevron).Size(14, 14).TextColor(t.LabelTertiary)
-	})
-}
-
-func (a *App) homeSendButton(c *ui.Context, t *design.Tokens) {
-	// The baseline button sits 2px above the toolbar's content box. The fill
-	// stays the baseline's #B2C7F4: mygo dims a disabled element by 0.5, so the
-	// fill lives on an enabled parent and only the arrow carries the disabled
-	// state. Painting Disabled on the parent rendered #D8E3F9 instead.
-	button := ui.Box(c).Size(34, 34).Radius(design.RadiusMax).Background(sendIdleFill(t)).Center().Top(-2)
-	button.Children(func() {
-		// The control itself carries Label/Role/Disabled; the fill stays on
-		// the enabled parent so the theme's disabled fill is not dimmed.
-		ui.Row(c).Size(34, 34).Center().Label(a.T("composer.send_message")).
-			Role(ui.RoleButton).Disabled(true).Children(func() {
-			ui.Icon(c, homeIconArrowUp).Size(18, 18).TextColor(sendIdleGlyph(t))
-		})
-	})
 }

@@ -28,7 +28,7 @@ const sessionLogTTL = 500 * time.Millisecond
 const settingTerminalShell = "terminal.shell"
 
 // startFolderTint is the Start card's folder glyph color from the DSH
-// baseline (baseline/screenshots/95-right-sidebar-home.png). It is a tint of
+// reference design (retired 2026-11-05). It is a tint of
 // its own, not the warning status color.
 var startFolderTint = ui.Hex("#FFBC4D")
 

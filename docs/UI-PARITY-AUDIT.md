@@ -1,6 +1,9 @@
 # UI / 交互对齐审计（对照 DSH 0.2.1-rc.2）
 
-方法：DSH 真实实例 + 前端 bundle 源码（Rows.client.js / locale）+ 基线截图；ZeoKeel 侧用无头 `ui.Render` + fake Controller 实拍（`TestCaptureLiveSession` → `artifacts/live/session.png`），逐像素 diff 与控件测试。不做猜测。
+> ⚠️ **历史文档，已退役 2026-11-05，不再维护。**
+> DSH 像素级对齐已停止（[ADR 0001](decisions/0001-retire-dsh-pixel-parity.md)）；本文中的逐像素 diff 记录、`artifacts/` 实拍与基线对照均为历史快照，相关资产/截图已归档删除。现行质量口径见 [QUALITY.md](QUALITY.md) 与 [PLAN.md](PLAN.md)（视觉与交互自有）。
+
+方法（历史）：DSH 真实实例 + 前端 bundle 源码（Rows.client.js / locale）+ 基线截图；ZeoKeel 侧用无头 `ui.Render` + fake Controller 实拍（历史测试 `TestCaptureLiveSession` → 历史产物目录），逐像素 diff 与控件测试。不做猜测。
 
 ## 本轮已修复（有实拍/测试证据）
 

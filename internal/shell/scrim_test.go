@@ -1,6 +1,7 @@
 package shell
 
 import (
+	"image/color"
 	"testing"
 
 	"github.com/egoist/mygo/ui"
@@ -9,9 +10,11 @@ import (
 )
 
 // TestSessionSearchScrimIsThemeAware covers the session-search modal's
-// backdrop: it shared the Settings modal's hardcoded 0.24 black in both
-// themes. The dark backdrop is 0.5, composited through the same ui color path
-// the renderer uses.
+// backdrop: it used to share the Settings modal's hardcoded 0.24 black in both
+// themes. The backdrop is the theme's Scrim composited over the page
+// background, so it must follow the theme in both appearances and actually
+// dim the page behind the modal. (The old DSH dark sample (10,10,11) was a
+// token pin, retired with the brand theme.)
 func TestSessionSearchScrimIsThemeAware(t *testing.T) {
 	render := func(dark bool) *ui.Tester {
 		h := newLiveApp(t, &shellProvider{})
@@ -43,16 +46,23 @@ func TestSessionSearchScrimIsThemeAware(t *testing.T) {
 			// (1500,900) is outside the 580px modal panel, on the page
 			// background behind it.
 			want := rgbaOf(tc.tokens.Scrim().Over(tc.tokens.BgBase))
-			if got := tt.Image().RGBAAt(1500, 900); got != want {
+			got := tt.Image().RGBAAt(1500, 900)
+			if got != want {
 				t.Fatalf("%s session-search scrim at (1500,900) = %v, want %v", tc.name, got, want)
 			}
-			if tc.dark {
-				// The dark scrim's exact baseline sample is 0.5 black over
-				// #151517: (10,10,11), not the old 0.24 value (16,16,17).
-				if got := tt.Image().RGBAAt(1500, 900); got.R != 10 || got.G != 10 || got.B != 11 {
-					t.Fatalf("dark scrim sample = %v, want (10,10,11)", got)
-				}
+			// The scrim is a dimming overlay, not the page color: the
+			// composited backdrop must be darker than the plain background.
+			if luminance(ui.Color{R: got.R, G: got.G, B: got.B}) >= luminance(tc.tokens.BgBase) {
+				t.Fatalf("%s scrim sample %v does not dim BgBase %v", tc.name, got, tc.tokens.BgBase)
 			}
 		})
+	}
+
+	// Theme-aware behaviour: the light and dark backdrops are not one
+	// hardcoded sample reused in both appearances.
+	light := render(false).Image().RGBAAt(1500, 900)
+	dark := render(true).Image().RGBAAt(1500, 900)
+	if light == dark {
+		t.Fatalf("light and dark session-search scrims are identical: %v", color.RGBA(light))
 	}
 }

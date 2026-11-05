@@ -126,20 +126,6 @@ func TestMemorySettingsPageLive(t *testing.T) {
 
 }
 
-// TestMemoryNavCellIsStaticSafe pins the baseline path: App{Ctrl: nil} keeps
-// exactly the four canonical settings nav cells, so the pixel baseline does
-// not gain a Memory row.
-func TestMemoryNavCellIsStaticSafe(t *testing.T) {
-	app := &App{Screen: Settings}
-	tt := ui.NewTester(app.View, 1600, 1000)
-	if tt.HasText("Memory") {
-		t.Fatalf("static settings rendered the live Memory nav cell: %q", tt.Texts())
-	}
-	if !tt.HasText("General") || !tt.HasText("Models") {
-		t.Fatalf("static settings lost its canonical nav: %q", tt.Texts())
-	}
-}
-
 // TestMemoryPageStringsAreLocalized guards the zh labels of the new page
 // without extending the shared catalog.
 func TestMemoryPageStringsAreLocalized(t *testing.T) {

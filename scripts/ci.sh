@@ -35,13 +35,8 @@ sh scripts/check-nocgo.sh >/tmp/zk-nocgo.log 2>&1 || { tail -20 /tmp/zk-nocgo.lo
 step "app tool invocation"
 go test -count=1 ./internal/app -run 'TestProductionToolsInvocable' || fail "tool invocation"
 
-step "pixel baselines (light)"
-for s in home session plugins settings automation; do
-  SCREEN=$s ARTIFACTS="$PWD/artifacts" go test -count=1 ./internal/shell -run TestScreensBaseline >/tmp/zk-px-$s.log 2>&1 || { tail -20 /tmp/zk-px-$s.log; fail "pixel $s"; }
-done
-
-step "pixel baselines (dark/narrow)"
-go test -count=1 ./internal/shell -run TestScreensDarkNarrow >/tmp/zk-px-dark.log 2>&1 || { tail -20 /tmp/zk-px-dark.log; fail "dark/narrow"; }
+# DSH pixel-baseline gate retired 2026-11-05 (docs/decisions/0001-retire-dsh-pixel-parity.md).
+# Visual quality is now owned by the ZeoKeel design system, not by DSH screenshot diffs.
 
 if [ "$FAST" = 0 ]; then
   step "coverage summary"

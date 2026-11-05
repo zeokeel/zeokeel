@@ -3,6 +3,8 @@
 > 版本 v0.1 · 2026-11-04 · 状态：待拍板
 > 输入：仓库实跑证据 + `.evolve/research/01-audit.md`（现状审计，repo-auditor）+ `.evolve/research/02-external.md`（外部模式调研）+ `.evolve/research/03-product-review.md`（产品/设计自评审，37 项 rubric）
 > 本文回答一个问题：**怎样让 ZeoKeel 自己找 bug、自己修、自己测、自己评审产品与设计，并且可信、可控、可回滚。**
+>
+> **2026-11-05 状态说明**：DSH 像素/交互 1:1 对齐已退役（[ADR 0001](decisions/0001-retire-dsh-pixel-parity.md)）；文中与像素门禁/基线相关的机制（`pixel-light`/`pixel-dark` step、masked/raw 指标、`internal/pixeltest`、`baseline/`、`artifacts/`）作为历史设计保留，**现行门禁以 `scripts/ci.sh` 与 `scripts/evolve/gates.sh` 的实际行为为准**（无像素步骤，只做 fmt/vet/build/test/nocgo 与 flake 重跑）。
 
 ---
 

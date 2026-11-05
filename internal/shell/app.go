@@ -217,8 +217,14 @@ func (a *App) SetSnapshot(s *state.Snapshot) { a.snap.Store(s) }
 // Snapshot returns the latest live snapshot, or nil in static mode.
 func (a *App) Snapshot() *state.Snapshot { return a.snap.Load() }
 
-// View draws the shell for the current screen.
+// View draws the shell for the current screen. The shell is live-only since
+// pixel parity retired: an App without a controller draws an empty frame
+// (tests use the live fixture helpers).
 func (a *App) View(c *ui.Context) {
+	if a.Ctrl == nil {
+		ui.Row(c).Fill()
+		return
+	}
 	a.syncDraftScope()
 	a.syncComposerMenuDismissal()
 	a.persistResolvedLanguage()

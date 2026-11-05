@@ -107,17 +107,6 @@ func TestAgentModePickerShowsSwitcherError(t *testing.T) {
 	}
 }
 
-// TestAgentModeStaticSessionRendersStandardChip keeps the static session path
-// panic-free: a Ctrl-less App paints the fixed Standard chip.
-func TestAgentModeStaticSessionRendersStandardChip(t *testing.T) {
-	app := &App{Screen: Session}
-	tt := ui.NewTester(app.View, 1600, 1000)
-	tt.Frame()
-	if !tt.HasText("Standard mode") {
-		t.Fatalf("static session chip missing: %q", tt.Texts())
-	}
-}
-
 // modePresetAliases are every non-canonical spelling runtime.NormalizeMode
 // accepts. Settings and the Creator settings tool can persist any of them.
 var modePresetAliases = []struct {

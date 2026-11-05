@@ -229,37 +229,19 @@ func TestLiveSessionIdleHidesStatus(t *testing.T) {
 	}
 }
 
-// TestStaticSettingsLanguageIsEnglish pins the static demo's self-consistency:
-// English labels and an English language selector.
-func TestStaticSettingsLanguageIsEnglish(t *testing.T) {
-	app := &App{Screen: Settings}
-	tt := ui.NewTester(app.View, 1600, 1000)
-	tt.Frame()
-	if !tt.HasText("English") {
-		t.Fatalf("static settings language selector is not English: %q", tt.Texts())
-	}
-	if tt.HasText("中文") {
-		t.Fatalf("static settings still shows 中文 beside English labels: %q", tt.Texts())
-	}
-}
-
-// TestStaticSessionUsesSVGIcons guards the replaced text glyphs.
-func TestStaticSessionUsesSVGIcons(t *testing.T) {
-	app := &App{Screen: Session}
-	tt := ui.NewTester(app.View, 1600, 1000)
-	tt.Frame()
-	for _, glyph := range []string{"▢", "△", "▽", "↗"} {
-		if tt.HasText(glyph) {
-			t.Fatalf("static session still renders text glyph %q", glyph)
-		}
-	}
-}
-
 // TestSettingsParityRowsPresent covers the two DSH rows the page was missing.
 func TestSettingsParityRowsPresent(t *testing.T) {
-	app := &App{Screen: Settings}
-	tt := ui.NewTester(app.View, 1600, 1000)
+	// The parity rows are rendered by the live Settings overlay, so drive the
+	// real shortcut instead of the retired static Settings screen.
+	h := newLiveApp(t, &shellProvider{})
+	h.app.Language = LangEN
+	tt := ui.NewTester(h.app.View, 1600, 1000)
 	tt.Frame()
+	tt.Key(ui.Cmd, ui.KeyComma)
+	tt.Frame()
+	if h.app.Screen != Settings {
+		t.Fatalf("Cmd+, screen = %v, want Settings", h.app.Screen)
+	}
 	for _, want := range []string{
 		"Performance & usage",
 		"Upload Session Log when using the official model API",
@@ -269,12 +251,6 @@ func TestSettingsParityRowsPresent(t *testing.T) {
 		}
 	}
 
-	h := newLiveApp(t, &shellProvider{})
-	h.app.Language = LangEN
-	tt = ui.NewTester(h.app.View, 1600, 1000)
-	tt.Frame()
-	tt.Key(ui.Cmd, ui.KeyComma)
-	tt.Frame()
 	for i := 0; i < 8; i++ {
 		if r, ok := tt.Find("Upload session log"); ok && r.Y >= 0 && r.Y+r.H <= 1000 && r.W > 0 {
 			break
@@ -330,31 +306,6 @@ func TestPluginDetailTitleIsLocalized(t *testing.T) {
 
 func zh(s string) string { return s }
 
-// TestDarkStaticTranscriptContrast checks the surfaces the dark fallback used
-// to paint with light-only colors.
-func TestDarkStaticTranscriptContrast(t *testing.T) {
-	dark := design.Dark()
-	blend := func(fg ui.Color, bg ui.Color) ui.Color {
-		a := float64(fg.A) / 255
-		return ui.RGBA(
-			uint8(float64(fg.R)*a+float64(bg.R)*(1-a)),
-			uint8(float64(fg.G)*a+float64(bg.G)*(1-a)),
-			uint8(float64(fg.B)*a+float64(bg.B)*(1-a)),
-			1,
-		)
-	}
-	surfaces := map[string]ui.Color{
-		"user bubble": blend(sessUserSurface(dark), dark.BgBase),
-		"file card":   blend(sessCardSurface(dark), dark.BgBase),
-		"code pill":   blend(sessCodeSurface(dark), dark.BgBase),
-	}
-	for name, surface := range surfaces {
-		if got := contrastRatio(dark.LabelPrimary, surface); got < 4.5 {
-			t.Errorf("dark %s contrast = %.2f, want >= 4.5", name, got)
-		}
-	}
-}
-
 // TestDarkHomeTokens checks the Preview badge and tag colors in dark mode.
 func TestDarkHomeTokens(t *testing.T) {
 	dark := design.Dark()
@@ -364,24 +315,6 @@ func TestDarkHomeTokens(t *testing.T) {
 	}
 	if got := contrastRatio(homeTagAccent(dark), dark.BgBase); got < 4.5 {
 		t.Errorf("dark 1017 tag contrast = %.2f, want >= 4.5", got)
-	}
-}
-
-// TestStaticSendFillIsOpaque checks the disabled Home Send keeps the baseline
-// #B2C7F4 instead of the 0.5-dimmed #D8E3F9.
-func TestStaticSendFillIsOpaque(t *testing.T) {
-	app := &App{Screen: Home}
-	tt := ui.NewTester(app.View, 1600, 1000)
-	tt.Frame()
-	r, ok := tt.Find("Send message")
-	if !ok {
-		t.Fatalf("Send message missing: %q", tt.Texts())
-	}
-	img := tt.Image()
-	c := img.RGBAAt(int(r.X+r.W/2), int(r.Y+4))
-	want := struct{ R, G, B uint8 }{0xB2, 0xC7, 0xF4}
-	if c.R != want.R || c.G != want.G || c.B != want.B {
-		t.Fatalf("send fill = %v, want #B2C7F4", c)
 	}
 }
 

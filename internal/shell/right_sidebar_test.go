@@ -182,16 +182,6 @@ func TestRightSidebarTerminalRunsEcho(t *testing.T) {
 	}
 }
 
-// TestRightSidebarLiveOnly pins the static path: App{Ctrl: nil} never builds
-// the right sidebar, even if a caller sets its state.
-func TestRightSidebarLiveOnly(t *testing.T) {
-	app := &App{Screen: Session, rightOpen: true, rightTab: filesTab}
-	tt := ui.NewTester(app.View, 1600, 1000)
-	if tt.HasText("no PTY") || tt.HasText("Run a command in the workspace root") {
-		t.Fatalf("static shell rendered the live right sidebar: %q", tt.Texts())
-	}
-}
-
 // TestSafeJoinRejectsEscapes checks the preview path guard.
 func TestSafeJoinRejectsEscapes(t *testing.T) {
 	root := t.TempDir()

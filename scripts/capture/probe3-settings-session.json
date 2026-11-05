@@ -1,8 +1,0 @@
-[
-  {"act":"probescan3","limit":35,"prefix":"settings","shotDir":"baseline/behavior/shots3","log":"baseline/behavior/probe3-settings.jsonl",
-   "pre":[{"act":"goto","url":"/","wait":4000},{"act":"clickxy","x":1010,"y":684,"wait":800},{"act":"clickxy","x":140,"y":974,"wait":700},{"act":"clickxy","x":74,"y":850,"wait":1500}],
-   "skip":["sign out","delete"]},
-  {"act":"probescan3","limit":35,"prefix":"session","shotDir":"baseline/behavior/shots3","log":"baseline/behavior/probe3-session.jsonl",
-   "pre":[{"act":"goto","url":"/","wait":4000},{"act":"clickxy","x":1010,"y":684,"wait":800},{"act":"clickxy","x":85,"y":331,"wait":5000}],
-   "skip":["send","delete","stop"]}
-]
