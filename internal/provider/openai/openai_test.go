@@ -23,6 +23,9 @@ func newTestProvider(t *testing.T, handler http.HandlerFunc) (*Provider, *httpte
 		BaseURL: srv.URL + "/v1",
 		APIKey:  "test-key",
 		Model:   "default-model",
+		// Keep the many fixture servers deterministic: retry behavior has its
+		// own tests with an explicit policy.
+		Retry: &RetryPolicy{MaxRetries: 0},
 	})
 	if err != nil {
 		t.Fatalf("New: %v", err)
@@ -1019,5 +1022,39 @@ func TestStreamIdleTimeoutRetriesBeforeOutput(t *testing.T) {
 	}
 	if got := chunks[len(chunks)-1].Err.Error(); !strings.Contains(got, "stream idle timeout") {
 		t.Fatalf("idle timeout error = %q", got)
+	}
+}
+
+// TestRetryEmptyResponse covers DSH normal mode's EMPTY_RESPONSE recovery: a
+// clean [DONE] with no content is retried while budget remains.
+func TestRetryEmptyResponse(t *testing.T) {
+	var calls int
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls++
+		if calls <= 2 {
+			writeSSE(t, w, "data: [DONE]\n\n")
+			return
+		}
+		writeSSE(t, w, ssePayload(t, map[string]any{
+			"choices": []any{map[string]any{"delta": map[string]any{"content": "recovered"}}},
+		}), "data: [DONE]\n\n")
+	}))
+	t.Cleanup(srv.Close)
+	p, err := New(Config{
+		BaseURL: srv.URL + "/v1", APIKey: "k", Model: "m",
+		Retry: &RetryPolicy{MaxRetries: 3, InitialDelay: time.Millisecond, MaxDelay: 2 * time.Millisecond},
+	})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	ch, err := p.Stream(context.Background(), runtime.Request{})
+	if err != nil {
+		t.Fatalf("Stream: %v", err)
+	}
+	if got := textOf(collect(t, ch)); got != "recovered" {
+		t.Fatalf("text = %q, want recovered (calls=%d)", got, calls)
+	}
+	if calls != 3 {
+		t.Fatalf("provider calls = %d, want 3", calls)
 	}
 }

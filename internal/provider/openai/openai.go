@@ -342,6 +342,20 @@ func (p *Provider) streamAttempts(ctx context.Context, payload []byte, resp *htt
 		}
 		if failure == nil {
 			if sawDone {
+				// DSH's normal retry mode includes EMPTY_RESPONSE: a clean
+				// completion with no text/reasoning/tool calls is retried
+				// while budget remains, then passed through as empty.
+				if !emitted && attemptsLeft > 0 {
+					attemptsLeft--
+					delay := p.delayFor(attempt, "")
+					logRetry(p.retry.MaxRetries-attemptsLeft, p.retry.MaxRetries, delay, fmt.Errorf("empty response"))
+					attempt++
+					if !sleepCtx(ctx, delay) {
+						return
+					}
+					resp = nil
+					continue
+				}
 				out <- runtime.Chunk{Done: true}
 				return
 			}
