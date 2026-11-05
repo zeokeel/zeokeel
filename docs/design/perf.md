@@ -56,7 +56,7 @@ go test -run '^$' -bench 'BenchmarkRender|BenchmarkWarmFrame' -benchmem -count=3
 | 屏 | 1600×1000 ns/op | 1600×1000 B/op | 1600×1000 allocs/op | 900×600 ns/op | 900×600 B/op | 900×600 allocs/op |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
 | Home | 21.70 ms | 6.99 MB | 1140 | 11.48 ms | 2.71 MB | 1104 |
-| Session | 31.44 ms | 8.24 MB | 2082 | 14.62 ms | 3.84 MB | 2066 |
+| Session | 28.56 ms | 8.19 MB | 2126 | 16.87 ms | 3.89 MB | 2109 |
 | Plugins | 27.67 ms | 7.37 MB | 1571 | 12.82 ms | 3.04 MB | 1560 |
 | Automation | 26.18 ms | 7.15 MB | 954 | 11.54 ms | 2.91 MB | 951 |
 | Settings | 27.13 ms | 7.78 MB | 1670 | 13.81 ms | 3.40 MB | 1637 |
@@ -67,23 +67,25 @@ go test -run '^$' -bench 'BenchmarkRender|BenchmarkWarmFrame' -benchmem -count=3
 | 屏 | 1600×1000 ns/op | 1600×1000 B/op | 1600×1000 allocs/op | 900×600 ns/op | 900×600 B/op | 900×600 allocs/op |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
 | Home | 0.649 ms | 21.4 KB | 403 | 0.603 ms | 21.4 KB | 403 |
-| Session | 1.085 ms | 33.4 KB | 642 | 0.997 ms | 33.4 KB | 644 |
+| Session | 1.026 ms | 35.2 KB | 663 | 0.922 ms | 35.2 KB | 665 |
 | Plugins | 0.796 ms | 27.6 KB | 581 | 0.814 ms | 27.6 KB | 581 |
 | Automation | 0.481 ms | 18.4 KB | 294 | 0.482 ms | 18.4 KB | 294 |
 | Settings | 0.831 ms | 32.8 KB | 518 | 0.790 ms | 32.4 KB | 512 |
 | Sidebar（工作区树） | 1.259 ms | 65.2 KB | 1099 | 1.264 ms | 65.2 KB | 1099 |
 
+> 注（2026-11-05）：Chat 记录序渲染（[native-ui.md §4.1.1](native-ui.md)）后 Session 的 benchmark fixture 更新为带 `Seq`/`StartedSeq` 的快照并按新顺序渲染；上表 Session 两行已用同一宿主机 3 次运行中位数复测（`BenchmarkRenderSession$` / `BenchmarkWarmFrame/Session`，见 §3 命令），其余屏沿用首测数字。
+
 ### 4.3 冷渲染 vs 稳态帧
 
-- `ui.Render` 比稳态帧贵 **15–30 倍**（Home 21.7ms vs 0.65ms，Session 31.4ms vs 1.09ms）。差额来自无头 runtime 冷启动、字体/解析/布局缓存未热、最多 20 帧 settle 与整幅图像分配——都是一次性成本，**不是每帧成本**。
+- `ui.Render` 比稳态帧贵 **15–30 倍**（Home 21.7ms vs 0.65ms，Session 28.6ms vs 1.03ms）。差额来自无头 runtime 冷启动、字体/解析/布局缓存未热、最多 20 帧 settle 与整幅图像分配——都是一次性成本，**不是每帧成本**。
 - 900×600 的 `ui.Render` 约减半像素量但只降到 45–55%（固定成本占大头）；稳态帧在 900×600 也只降 5–10%（元素数量不变，成本在树/文本而非像素）。
 
 ## 5. 观察与结论
 
-1. **稳态帧预算充裕**：最重的 Sidebar 工作区树 1.26ms、Session 1.09ms，均 < 16.7ms（60fps）一个数量级余量。mygo 的即时模式重建（每帧重跑 view 函数）在桌面规模下不是瓶颈，**不需要为此引入快照/增量渲染重构**。
-2. **相对成本排序**：Sidebar 树（1.26ms）> Session（1.09ms）> Settings（0.83ms）> Plugins（0.80ms）> Home（0.65ms）> Automation（0.48ms）。成本随**语义元素数量**走（Sidebar 每行有图标/时间/按钮；Session 有 Markdown 块 + 工具卡 + composer + usage）。
+1. **稳态帧预算充裕**：最重的 Sidebar 工作区树 1.26ms、Session 1.03ms，均 < 16.7ms（60fps）一个数量级余量。mygo 的即时模式重建（每帧重跑 view 函数）在桌面规模下不是瓶颈，**不需要为此引入快照/增量渲染重构**。
+2. **相对成本排序**：Sidebar 树（1.26ms）> Session（1.03ms）> Settings（0.83ms）> Plugins（0.80ms）> Home（0.65ms）> Automation（0.48ms）。成本随**语义元素数量**走（Sidebar 每行有图标/时间/按钮；Session 有 Markdown 块 + 工具卡 + composer + usage）。
 3. **分配集中在元素构造**：稳态帧 294–1099 次 allocs、18–65KB/帧。Session 比 Home 多约 240 allocs/帧，对应 Markdown 视图与工具卡；Sidebar 树多约 700 allocs/帧，对应每行三个子元素。属"每帧重建树"模型的预期成本，GC 压力低（65KB/帧 × 60fps ≈ 3.9MB/s，可接受）。
-4. **测试/预览成本需正确解读**：`ui.Render` 的 21–31ms 说明跑一次无头截图测试≈数十毫秒，适合做预览/回归但不宜在循环里逐 token 调用；Session 预览测试目前单张图一次，成本可接受。
+4. **测试/预览成本需正确解读**：`ui.Render` 的 21–29ms 说明跑一次无头截图测试≈数十毫秒，适合做预览/回归但不宜在循环里逐 token 调用；Session 预览测试目前单张图一次，成本可接受。
 5. **无明显低垂果实**：没有单帧 >16.7ms 的屏；当前不建议为性能改动视觉/结构。若后续要做流式高频重排或多会话并排，优先用 CPU profile 定位（`go test -bench BenchmarkWarmFrame -cpuprofile`），再考虑把稳定子树缓存或降频重建。
 6. **基线用途**：把 4.2 表作为回归基线；若某次改动使任一屏稳态帧超过基线 1.5×，应视为性能回归并在 CI/评审中说明。
 
@@ -92,8 +94,8 @@ go test -run '^$' -bench 'BenchmarkRender|BenchmarkWarmFrame' -benchmem -count=3
 - 无 GPU/真实窗口：mygo 窗口后端与 headless 共享布局/绘制路径，但窗口合成、字体 hinting 与真实 DPI 缩放可能不同；本基准测的是应用侧成本。
 - 服务器 CPU（Xeon 5220R）单核频率低于主流桌面 CPU，绝对数字偏保守。
 - `GOMAXPROCS=96`（96 逻辑核）下测；用户桌面核数更少，单帧渲染是单线程为主，数字大致可平移，但 GC 并行度不同。
-- 数据为 3 次运行中位数；`ui.Render` 在 900×600 Session 上波动较大（11.7–16.0ms），对比时建议重跑取中位数。
-- 基准在 HEAD `b3ff65f`（markdown 迁移完成后）测得；后续视觉改动应重跑并更新本文件。
+- 数据为 3 次运行中位数；`ui.Render` 在 900×600 Session 上波动较大（首测 11.7–16.0ms，2026-11-05 复测 16.6–17.0ms），对比时建议重跑取中位数。
+- 基准首测于 HEAD `b3ff65f`（markdown 迁移完成后）；2026-11-05 Chat 记录序渲染后 Session fixture 更新并复测（§4 注），其余屏沿用首测数字；后续视觉改动应重跑并更新本文件。
 
 ## 7. 后续（可选）
 

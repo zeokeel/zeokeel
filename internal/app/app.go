@@ -46,9 +46,8 @@ type app struct {
 	tray     *mygo.Tray
 	lock     net.Listener
 
-	// shellApp is the UI the window renders. The native menu bar dispatches its
-	// commands through the shell's SetMenuAction hook, so the shell owns the UI
-	// behaviour and this package only owns process-level commands (Quit).
+	// shellApp is the UI the window renders. The shell owns the UI behaviour
+	// and the keyboard shortcuts; this package owns the process lifecycle.
 	shellApp *shell.App
 	// settingsWindow is the independent, non-modal settings window. It is
 	// created on the first open and reused afterwards, so reopening it keeps
@@ -58,8 +57,8 @@ type app struct {
 	// fake so the window lifecycle is tested without a desktop backend; nil
 	// means the production mygo manager.
 	settingsWindows settingsWindowManager
-	// quitApp ends the process. It is a seam: tests replace it so a menu click
-	// never touches the desktop backend.
+	// quitApp ends the process. It is a seam: tests replace it so the tray's
+	// Quit item never touches the desktop backend.
 	quitApp func()
 
 	// Session services are built lazily on ready. They are optional: if the
@@ -109,10 +108,16 @@ func (a *app) acquire() error {
 
 func (a *app) run() error {
 	mygo.App.SetName("ZeoKeel")
+	// The native window menu bar (File/Edit/View/Window) is retired: the user
+	// does not want it (ADR 0006). Windows and Linux windows show no menu bar
+	// unless one is installed, and nothing installs one anymore; macOS would
+	// keep mygo's default App/File/Edit/View/Window bar unless the application
+	// menu is removed, so remove it explicitly on every platform.
+	mygo.App.SetMenu(nil)
 	// Mark the app as quitting before windows close, so the close-to-hide
-	// handlers cannot re-show the main window during shutdown. The menu's Quit
-	// command sets the flag too; this listener covers the other quit paths
-	// (the OS, macOS's own app-menu roles).
+	// handlers cannot re-show the main window during shutdown. The tray's Quit
+	// item, the in-app More menu's Quit and the OS's own quit paths all end up
+	// here, so mark the flag for every one of them.
 	mygo.App.OnBeforeQuit(func(*mygo.QuitEvent) { a.quitting = true })
 	// Keep the main window's bounds and maximized state in the app's own data
 	// directory instead of mygo's per-app user-data file, so a portable install
@@ -126,9 +131,6 @@ func (a *app) run() error {
 		a.startServices()
 		shellApp := &shell.App{Ctrl: a.services}
 		a.shellApp = shellApp
-		// Native-menu commands are routed through the shell so it owns the UI
-		// behaviour; this package only implements the process-level commands.
-		shellApp.SetMenuAction(a.handleMenuAction)
 		// Production save-dialog seam for "Download session log". Tests inject
 		// their own path chooser; without a desktop app the shell falls back to
 		// the deterministic workspace path.
@@ -142,10 +144,11 @@ func (a *app) run() error {
 				}},
 			})
 		}
-		// Settings is its own non-modal window: Cmd+,, the menu bar and the
-		// in-app entry points all call shell.App.openSettings, which asks this
-		// host to show the window and falls back to the in-app modal when the
-		// desktop cannot create one. The window is created on the first open.
+		// Settings is its own non-modal window: Cmd+,, the in-app More menu and
+		// the other in-app entry points all call shell.App.openSettings, which
+		// asks this host to show the window and falls back to the in-app modal
+		// when the desktop cannot create one. The window is created on the
+		// first open.
 		a.initSettingsWindow(shellApp.SettingsView, shellApp.SettingsWindowTitle)
 		shellApp.SetSettingsWindowOpener(a.showSettingsWindow)
 		shellApp.SetSettingsWindowCloser(a.hideSettingsWindow)
@@ -203,7 +206,6 @@ func (a *app) run() error {
 			a.win.Focus()
 		})
 		a.installTray()
-		a.installMenu()
 	})
 	err := mygo.App.Run()
 	a.stopServices()
@@ -451,6 +453,9 @@ func (a *app) stopServices() {
 	a.cleanup = nil
 }
 
+// installTray adds the tray icon and its menu. This is the app's only native
+// menu now that the window menu bar is retired (ADR 0006); together with the
+// shell's keyboard shortcuts and in-app entries it keeps Show/Quit reachable.
 func (a *app) installTray() {
 	menu := mygo.NewMenu([]*mygo.MenuItem{
 		{Label: "Show ZeoKeel", Click: func(*mygo.MenuItem, *mygo.Window) {

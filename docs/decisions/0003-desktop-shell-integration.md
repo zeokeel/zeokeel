@@ -1,7 +1,9 @@
 # ADR 0003：桌面壳集成（系统菜单栏 + 窗口状态持久化）
 
+> **2026-11-05 更新**：本 ADR 的**菜单栏部分**（§2.1 系统菜单栏、§2.2 命令分发、§4 菜单栏条目）已由 [ADR 0006](0006-retire-native-menu-bar.md) 取代（用户决定移除原生窗口菜单栏）；**窗口状态持久化**与桌面壳其余部分继续有效。
+
 - 日期：2026-11-05
-- 状态：**已采纳**（桌面壳集成 P0 第一批）
+- 状态：**部分取代**（菜单栏部分由 ADR 0006 取代；窗口状态持久化仍有效）
 - 决策者：用户（ZeoKeel = 独立品牌桌面产品，交互按桌面平台惯例本地化）；记录：Lead / test-migrate-a
 - 关联：[ADR 0001 退役 DSH 像素对齐](0001-retire-dsh-pixel-parity.md)、[ADR 0002 品牌主题基础](0002-brand-theme-foundation.md)、[UI/UX 评估 §5.2/§6/§7](../research/03-ux-design.md)、[mygo 菜单文档](../../.cache/gomod/github.com/egoist/mygo@v0.7.4/docs/menus.md)、[mygo 窗口文档](../../.cache/gomod/github.com/egoist/mygo@v0.7.4/docs/windows.md)
 - 实施：`internal/app/menu.go`（新增）、`internal/app/window_state.go`（新增）、`internal/app/app.go`、`internal/app/menu_test.go`（新增）、`internal/app/window_state_test.go`（新增）、`internal/shell/app.go`（菜单 hook）、`internal/shell/shortcuts.go`（命令表/accelerator）

@@ -61,13 +61,6 @@ type Config struct {
 	// full-access sessions (whose Gate requires nothing) never reach it. Nil
 	// preserves the pre-review behavior exactly.
 	ToolReviewer ToolReviewer
-	// PlanModeFunc, when set, reports whether the session the current turn
-	// belongs to is in plan mode. It is consulted before every model-visible
-	// tool invocation: mutating/external tools (shell, file writes, terminals,
-	// MCP, web, ...) are rejected with ErrPlanMode, while read-only tools and
-	// present stay available. The function is resolved per call, so toggling
-	// plan mode needs no topology or registry rebuild. Nil disables the gate.
-	PlanModeFunc func() bool
 	// Compactor condenses the prior conversation when its estimated size
 	// exceeds ContextBudget. Nil disables compaction. WindowCompactor is the
 	// built-in, model-free implementation. The compactor runs in the turn
@@ -167,7 +160,6 @@ type Agent struct {
 	instrFunc     func() string
 	gate          Gate
 	reviewer      ToolReviewer
-	planMode      func() bool
 	maxIterations int
 	settings      SettingsStore
 
@@ -245,7 +237,6 @@ func New(cfg Config) (*Agent, error) {
 		instrFunc:        cfg.InstructionFunc,
 		gate:             cfg.Gate,
 		reviewer:         cfg.ToolReviewer,
-		planMode:         cfg.PlanModeFunc,
 		maxIterations:    maxIterations,
 		settings:         cfg.Settings,
 		subagentTools:    append([]string(nil), cfg.SubagentTools...),
@@ -273,7 +264,6 @@ func New(cfg Config) (*Agent, error) {
 	})
 	a.bindSubagentRunners()
 	a.bindApprovalGates()
-	a.bindPlanMode()
 	a.bindToolReviewers()
 	return a, nil
 }

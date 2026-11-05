@@ -1,7 +1,9 @@
 # ADR 0005：Settings 独立原生窗口（桌面 P1）
 
+> **2026-11-05 更新**：原生窗口菜单栏已退役（[ADR 0006](0006-retire-native-menu-bar.md)）；本 ADR 中「菜单栏」相关描述（§2.6 平台表、§2.2 的 `dispatchMenuAction("settings")` 路径）以 ADR 0006 为准——Settings 入口现为 Cmd/Ctrl+,、托盘与应用内，不再有菜单项。
+
 - 日期：2026-11-05
-- 状态：**已采纳**（桌面交互 P1）
+- 状态：**已采纳**（桌面交互 P1；菜单栏入口部分被 ADR 0006 取代）
 - 决策者：用户（ZeoKeel = 独立品牌桌面产品，交互按桌面平台惯例本地化）；记录：native-prototype
 - 关联：[ADR 0003 桌面壳集成](0003-desktop-shell-integration.md)（系统菜单栏 / 菜单 action / 窗口状态）、[ADR 0002 品牌主题基础](0002-brand-theme-foundation.md)、[UI/UX 评估 §5.2/§7](../research/03-ux-design.md)（P1「设置独立窗口」）、[mygo 窗口文档](../../.cache/gomod/github.com/egoist/mygo@v0.7.4/docs/windows.md)
 - 实施：`internal/app/settings_window.go`（新增）、`internal/app/settings_window_test.go`（新增）、`internal/app/app.go`（接线）、`internal/shell/settings_ui.go`（`SettingsView` + host-aware Close）、`internal/shell/app.go`（host hooks / `openSettings` 路由）、`internal/shell/settings_ui_test.go`、预览 `docs/design/preview/settings-window-native-{light,dark}.png`

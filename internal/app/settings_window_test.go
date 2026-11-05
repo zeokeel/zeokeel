@@ -259,8 +259,10 @@ func TestSettingsWindowOptionsAreBrandSized(t *testing.T) {
 }
 
 // TestAppSettingsActionOpensWindow covers the process wiring end to end
-// without a desktop backend: the native menu's Settings command reaches the
-// shell, the shell asks the host, and the host opens (or focuses) the window.
+// without a desktop backend: the shell's Settings command reaches the shell,
+// the shell asks the host, and the host opens (or focuses) the window. The
+// native menu bar was retired (ADR 0006); Cmd/Ctrl+, and the in-app entry
+// points still route through this same shell-side openSettings path.
 func TestAppSettingsActionOpensWindow(t *testing.T) {
 	manager := newFakeSettingsWindows()
 	shellApp := &shell.App{}
@@ -269,21 +271,20 @@ func TestAppSettingsActionOpensWindow(t *testing.T) {
 	shellApp.SetSettingsWindowOpener(a.showSettingsWindow)
 	shellApp.SetSettingsWindowCloser(a.hideSettingsWindow)
 	shellApp.SetSettingsChangedHook(a.refreshWindows)
-	shellApp.SetMenuAction(a.handleMenuAction)
 
-	a.dispatchMenuAction(shell.MenuActionSettings)
+	shellApp.HandleMenuAction(shell.MenuActionSettings)
 	if got := manager.createdCount(); got != 1 {
-		t.Fatalf("Settings menu action created %d windows, want 1", got)
+		t.Fatalf("Settings command created %d windows, want 1", got)
 	}
 	if !a.settingsWindow.IsOpen() {
-		t.Fatal("Settings menu action did not show the window")
+		t.Fatal("Settings command did not show the window")
 	}
 	if shellApp.Screen == shell.Settings {
 		t.Fatal("the main window switched to the in-app Settings overlay")
 	}
 
 	// A second command focuses the same window.
-	a.dispatchMenuAction(shell.MenuActionSettings)
+	shellApp.HandleMenuAction(shell.MenuActionSettings)
 	if got := manager.createdCount(); got != 1 {
 		t.Fatalf("second Settings command created %d windows, want the singleton", got)
 	}
@@ -311,7 +312,7 @@ func TestAppSettingsActionFallsBackToOverlay(t *testing.T) {
 	a.initSettingsWindow(shellApp.SettingsView, shellApp.SettingsWindowTitle)
 	shellApp.SetSettingsWindowOpener(a.showSettingsWindow)
 
-	a.dispatchMenuAction(shell.MenuActionSettings)
+	shellApp.HandleMenuAction(shell.MenuActionSettings)
 	if shellApp.Screen != shell.Settings {
 		t.Fatalf("fallback left screen = %v, want the in-app Settings overlay", shellApp.Screen)
 	}

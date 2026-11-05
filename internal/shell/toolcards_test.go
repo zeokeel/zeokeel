@@ -313,31 +313,34 @@ func TestToolCardLongResultLineCap(t *testing.T) {
 
 // toolCardPreviewSnapshot is the Session screen for the tool-card preview: a
 // short turn plus one open card of each result kind (command output, Markdown,
-// an image, and a failed call).
+// an image, and a failed call). The Seq/StartedSeq values put the four calls in
+// record order before the answer, so the preview shows the record-ordered
+// transcript (user -> process block -> answer) instead of the legacy tail.
 func toolCardPreviewSnapshot() *state.Snapshot {
 	snap := state.NewSnapshot()
 	snap.Phase = state.PhaseIdle
 	snap.Messages = []state.Message{
-		{MsgID: "a1", Role: state.RoleAssistant, Text: "已完成：README 已读取，`go test ./...` 全部通过。"},
+		{MsgID: "u1", Seq: 1, Role: state.RoleUser, Text: "帮我检查 README 和品牌资源，再跑一下测试。"},
+		{MsgID: "a1", Seq: 6, Role: state.RoleAssistant, Text: "已完成：README 已读取，`go test ./...` 全部通过。"},
 	}
 	snap.Tools = map[string]state.ToolState{
 		"c1": {
-			CallID: "c1", Name: "bash", Status: state.ToolDone,
+			CallID: "c1", StartedSeq: 2, Name: "bash", Status: state.ToolDone,
 			Args:   json.RawMessage(`{"cmd":"go test ./..."}`),
 			Result: "ok  github.com/zeokeel/zeokeel/internal/shell  37s\nPASS",
 		},
 		"c2": {
-			CallID: "c2", Name: "web_search", Status: state.ToolDone,
+			CallID: "c2", StartedSeq: 3, Name: "web_search", Status: state.ToolDone,
 			Args:   json.RawMessage(`{"query":"brand guidelines"}`),
 			Result: "**品牌指南**：主色 `#0D44F6`，控件圆角 10。",
 		},
 		"c3": {
-			CallID: "c3", Name: "read_image", Status: state.ToolDone,
+			CallID: "c3", StartedSeq: 4, Name: "read_image", Status: state.ToolDone,
 			Args:   json.RawMessage(`{"path":"brand-mark.png","alt":"ZeoKeel 品牌图形标"}`),
 			Result: "image 48×48",
 		},
 		"c4": {
-			CallID: "c4", Name: "bash", Status: state.ToolError,
+			CallID: "c4", StartedSeq: 5, Name: "bash", Status: state.ToolError,
 			Args:    json.RawMessage(`{"cmd":"git status"}`),
 			Result:  "fatal: not a git repository (or any of the parent directories): .git",
 			IsError: true,

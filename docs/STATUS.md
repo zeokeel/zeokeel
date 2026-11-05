@@ -9,6 +9,21 @@
 - **以下 M0–M13 历史里程碑保留原文记录以追溯**；其中与像素/基线/比对回路相关的内容均为**历史记录，已退役、不再有效**（因此模块清单中不再列 `pixeltest` 包）。
 - 现行质量口径见 `docs/QUALITY.md` 与 `docs/PLAN.md` §10；功能对齐见 `docs/FUNCTIONAL-PARITY.md`；视觉方向见 `docs/decisions/0002-brand-theme-foundation.md`。
 
+## 2026-11-05 交互调整（追加，ALL GREEN）
+
+- **原生窗口菜单栏退役**（用户原话「file edit 这些菜单栏不需要」）：删除 `internal/app` 的菜单模板/安装/分发（File/Edit/View/Window），`run()` 显式 `mygo.App.SetMenu(nil)`（macOS 默认菜单一并移除）；托盘菜单、shell 快捷键与应用内入口保留；新增 [ADR 0006](decisions/0006-retire-native-menu-bar.md)（取代 ADR 0003 的菜单栏部分，窗口状态持久化继续有效）。`internal/app` 净 -325 行，菜单测试改写为 Quit 路径测试。
+- **移除会话头「计划模式」复选框**（用户：计划模式就是 composer 下方权限里的「只读」）：删除 `planHeaderToggle`/`togglePlanMode` 与 header 调用；controller/runtime 的 plan mode 语义与计划审阅卡当时保留、暂无 UI 入口（入口处置见下方「计划模式对齐 DSH」）。[ADR 0007](decisions/0007-remove-plan-mode-toggle.md)。
+- **Chat 会话页改为按记录 Seq 渲染（对齐 DSH）**：原实现把工具摘要 + 卡作为**会话级尾部区块**追加在消息列表之后，导致「最终回复在上、执行过程在下」；且多轮/重开会话会把历史工具卡堆到最后一条回复之后、摘要跨回合累计（实测渲染 Y 序：firstAnswer < secondAnswer < summary < tools）。现数据层 `state.Message.Seq` 与 `ToolState.StartedSeq` 共用快照 Seq 轴（重开时恢复为 store 事件 seq），视图按回合归并：用户消息 → 该回合过程块（摘要行 + 卡，插在首个调用的记录位置）→ assistant 回答/最终回答 + 完成行；过程块折叠逐块独立，卡序按 StartedSeq。新增 live + 重开两条路径的顺序回归、手工 fixture 降级路径测试；`session-native`/`toolcard` 预览按新顺序重生成。
+- **验证**：`gofmt`/`go vet ./...` 干净；`go test ./... -count=1` **19 包全绿**；`ZEOKEEL_VISUAL=1` 视觉回归 PASS；22 张预览按当前代码刷新（含 Session 头的 10 张去掉了计划模式 chip，toolcard/session 预览呈现新顺序）。
+
+## 2026-11-05 计划模式对齐 DSH（方案 A，ALL GREEN）
+
+- **背景**：header 复选框移除后，用户追问「DSH 是怎么处理计划模式的？不就是只读么？」。对已安装 DSH 0.2.1-rc.2 包的审计结论：DSH 的 plan mode 是**流程**（`@deepseek-ai/dsh-plan-mode`：`plan:policy` 软引导 + `exit_plan_mode` 审阅；文档明确「它不限制 agent：每个工具仍可调用」「计划模式是引导而非执行沙箱」），**只读**是权限预设里的 sandbox 模式（`read-only`/`workspace-write`/`danger-full-access` + 审批策略捆绑），两者正交可叠加；DSH 的入口是 `/plan` 命令 + plan 激活时的 composer「计划」徽章，没有 header 复选框。ZeoKeel 原 plan mode 是 runtime 硬门（拦截 mutating 工具），因此与「只读」重复。
+- **决策（[ADR 0008](decisions/0008-plan-mode-soft-alignment.md)）**：对齐 DSH。删除 `internal/runtime/plan_mode.go` 与 runtime 侧 PlanModeFunc/模型适配/PTC/子代理的全部工具拦截接线；`internal/app/services.go` 不再向 runtime 传 `PlanModeFunc`（prompt 的 `PlanMode` 注入保留）。plan 模式 = `plan:policy` 软引导 + `present` "Plan" + shell 计划审阅卡（Approve/Exit 不变）；需要强制只读规划时用户同时选 composer「只读」权限。
+- **入口**：`/plan` 开启、`/plan off` 关闭、`/plan <message>` 开启并把消息作为下一请求提交（无 session 时提示先开会话；slash 行不进模型）；composer 计划徽章仅在激活时显示（accent「✦ 计划/Plan」chip，点击=退出，a11y RoleButton/Focusable，窄 composer 只留图标）；`/help` 与命令面板同步。
+- **验证**：gofmt/vet/build 干净；`go test ./... -count=1` 19 包全绿；新增 `/plan` 命令与徽章测试 4 个 + `/help`/命令识别测试，计划审阅卡 Approve/Exit 测试不回退；`ZEOKEEL_VISUAL=1` PASS（徽章仅激活态，预览 fixture 未变）。
+- **遗留（ADR 0008 §4）**：独立 `exit_plan_mode` 工具、审阅卡 Keep planning（带反馈）分支、pending 态徽章、Home 草稿会话的 `/plan`；Home composer 打开 `/` 面板后丢键盘焦点是既有缺陷（未在本轮修）。
+
 ## 2026-11-05 v1.1 收尾（追加，ALL GREEN）
 
 - **后台审批通知**：`session.Controller.SetOnApprovalRequested` 可选 hook（默认 nil），所有会话新增审批/提问等待 → 系统通知（同 session+call 去重、隐私文案、点击回会话、与快照路径不双发）；notify 测试 29→36；ADR 0004 更新。

@@ -86,9 +86,20 @@ func (p *m6Provider) Stream(_ context.Context, _ runtime.Request) (<-chan runtim
 	return out, nil
 }
 
-// m6LiveApp builds a real controller + agent behind the shell, with the given
-// tools registered, and opens one session.
-func m6LiveApp(t *testing.T, provider runtime.Provider, toolset ...runtime.Tool) *App {
+// m6Rig is the real controller-backed fixture: a store, agent, controller and
+// shell App with one open session. The inputs are kept so a test can close the
+// controller and reopen the same session over the same store, exercising the
+// persisted-event snapshot path instead of the live one.
+type m6Rig struct {
+	store       *store.Store
+	agent       *runtime.Agent
+	workspaceID string
+	app         *App
+}
+
+// m6NewRig builds the fixture m6LiveApp returns: a real store, agent and
+// controller behind the shell.
+func m6NewRig(t *testing.T, provider runtime.Provider, toolset ...runtime.Tool) *m6Rig {
 	t.Helper()
 	dir := t.TempDir()
 	st, err := store.Open(dir)
@@ -142,6 +153,62 @@ func m6LiveApp(t *testing.T, provider runtime.Provider, toolset ...runtime.Tool)
 	if _, err := ctrl.CreateSession(context.Background(), "live"); err != nil {
 		t.Fatalf("CreateSession: %v", err)
 	}
+	app.SetSnapshot(ctrl.Snapshot())
+	return &m6Rig{store: st, agent: agent, workspaceID: ws.ID, app: app}
+}
+
+// m6LiveApp builds a real controller + agent behind the shell, with the given
+// tools registered, and opens one session.
+func m6LiveApp(t *testing.T, provider runtime.Provider, toolset ...runtime.Tool) *App {
+	t.Helper()
+	return m6NewRig(t, provider, toolset...).app
+}
+
+// reopen closes the live controller and opens the app's current session
+// through a fresh controller over the same store, then returns an App drawing
+// that reopened snapshot. The transcript must keep its record order after the
+// round trip through persisted events. The fixture's own cleanup stays
+// registered; Controller.Close is idempotent.
+func (r *m6Rig) reopen(t *testing.T) *App {
+	t.Helper()
+	sessionID := r.app.Ctrl.CurrentSessionID()
+	if err := r.app.Ctrl.Close(); err != nil {
+		t.Fatalf("close controller: %v", err)
+	}
+	broker := state.NewBroker()
+	projector := state.NewProjector(context.Background(), broker)
+	ctrl, err := session.New(session.Config{
+		Store:       r.store,
+		Broker:      broker,
+		Projector:   projector,
+		Agent:       r.agent,
+		WorkspaceID: r.workspaceID,
+	})
+	if err != nil {
+		t.Fatalf("session.New (reopen): %v", err)
+	}
+	t.Cleanup(func() {
+		_ = ctrl.Close()
+		projector.Close()
+		broker.Close()
+	})
+	if _, err := ctrl.OpenSession(context.Background(), sessionID); err != nil {
+		t.Fatalf("OpenSession(%s): %v", sessionID, err)
+	}
+	app := &App{Screen: Session, Ctrl: ctrl}
+	// A new App may reuse the dead one's address; drop the state maps keyed by
+	// *App exactly as newLiveSnapshotApp does for a fresh fixture.
+	sessionRenderStates.Delete(app)
+	markdownStyles.Delete(app)
+	toolResultStates.Delete(app)
+	liveStates.Delete(app)
+	liveUIStates.Delete(app)
+	liveMenuStates.Delete(app)
+	shellUIStates.Delete(app)
+	modeUIStates.Delete(app)
+	pluginUIStates.Delete(app)
+	startTabStates.Delete(app)
+	ctrl.OnUpdate(app.SetSnapshot)
 	app.SetSnapshot(ctrl.Snapshot())
 	return app
 }
@@ -417,23 +484,28 @@ func TestArtifactCardListsPresentedArtifact(t *testing.T) {
 }
 
 // sessionPreviewSnapshot is one complete, representative turn for the brand
-// preview: a user bubble, a Markdown answer, two finished tool calls and a
-// usage row, so the screenshot shows the message and tool-card surfaces.
+// preview: a user bubble, the turn's process block (two finished tool calls
+// above the answer) and a Markdown answer with its completion footer, plus a
+// usage row. The Seq values put the tools between the question and the answer
+// on the snapshot's record axis, so the screenshot exercises the Chat
+// transcript's turn-inside order rather than the legacy session-tail block.
 func sessionPreviewSnapshot() *state.Snapshot {
 	snap := state.NewSnapshot()
 	snap.Phase = state.PhaseIdle
 	snap.Messages = []state.Message{
-		{MsgID: "u1", Role: state.RoleUser, Text: "帮我把 README 更新成品牌主题说明，然后跑一下测试。"},
-		{MsgID: "a1", Role: state.RoleAssistant, Text: "## 已完成\n\n- 更新了 `README.md` 的品牌小节\n- 运行 `go test ./...`，全部通过\n\n```go\nfunc main() {\n\tfmt.Println(\"hello, ZeoKeel\")\n}\n```"},
+		{MsgID: "u1", Seq: 1, Role: state.RoleUser, Text: "帮我把 README 更新成品牌主题说明，然后跑一下测试。"},
+		{MsgID: "a1", Seq: 6, Role: state.RoleAssistant, Text: "## 已完成\n\n- 更新了 `README.md` 的品牌小节\n- 运行 `go test ./...`，全部通过\n\n```go\nfunc main() {\n\tfmt.Println(\"hello, ZeoKeel\")\n}\n```"},
 	}
 	snap.Tools = map[string]state.ToolState{
 		"c1": {
 			CallID: "c1", Name: "bash", Status: state.ToolDone,
+			StartedSeq: 3, UpdatedSeq: 4,
 			Args:   json.RawMessage(`{"cmd":"go test ./..."}`),
 			Result: "ok  github.com/zeokeel/zeokeel/internal/shell  37s",
 		},
 		"c2": {
 			CallID: "c2", Name: "read_file", Status: state.ToolDone,
+			StartedSeq: 2, UpdatedSeq: 5,
 			Args:   json.RawMessage(`{"path":"README.md"}`),
 			Result: "# ZeoKeel\n\nThe native desktop agent.",
 		},
@@ -517,5 +589,225 @@ func TestRenderSessionNativePreview(t *testing.T) {
 			}
 			t.Logf("wrote %s", path)
 		})
+	}
+}
+
+// TestChatInterleavesTurnToolsBeforeFinalAnswer is the Chat order regression:
+// a two-turn session with one tool call per turn must render
+//
+//	user1 -> turn1 process block -> answer1+footer -> user2 -> turn2 block -> answer2
+//
+// so the cards a turn produced sit above that turn's final answer and the first
+// turn's block sits above the second question, never accumulated at the session
+// tail. The reopened snapshot (rebuilt from persisted events) keeps the same
+// order.
+func TestChatInterleavesTurnToolsBeforeFinalAnswer(t *testing.T) {
+	provider := &m6Provider{steps: []m6Step{
+		{tool: "bash", args: `{"cmd":"first-cmd"}`},
+		{text: "first answer"},
+		{tool: "read_file", args: `{"path":"later.txt"}`},
+		{text: "second answer"},
+	}}
+	rig := m6NewRig(t, provider, summaryTool{name: "bash"}, summaryTool{name: "read_file"})
+	// Collapsed cards keep both turns inside the 1000-DIP window; the order
+	// assertion reads the card title rows, which render in both modes.
+	if err := rig.store.SetSetting(session.SettingWorkDetails, session.WorkDetailsStandard); err != nil {
+		t.Fatalf("work details setting: %v", err)
+	}
+	m6Submit(t, rig.app, "first question")
+	m6Submit(t, rig.app, "second question")
+	assertSeqAxis(t, rig.app.Snapshot())
+	assertChatTurnOrder(t, rig.app)
+
+	// Reopen: the snapshot is rebuilt from the messages and events tables, so
+	// the Seq axis is the store's event seq instead of the live fold counter.
+	// The transcript order must be identical.
+	reopened := rig.reopen(t)
+	assertSeqAxis(t, reopened.Snapshot())
+	assertChatTurnOrder(t, reopened)
+}
+
+// assertSeqAxis pins the input the record-ordered transcript relies on: both
+// turns sit on one strictly increasing Seq axis, with each call between the
+// question and the answer it belongs to (live fold counter and reopened store
+// event seq axes are each internally consistent; they need not match).
+func assertSeqAxis(t *testing.T, snap *state.Snapshot) {
+	t.Helper()
+	if !transcriptOrderEnabled(snap) {
+		t.Fatal("snapshot has no Message.Seq axis")
+	}
+	msgSeq := func(text string) uint64 {
+		t.Helper()
+		for i := range snap.Messages {
+			if snap.Messages[i].Text == text {
+				if snap.Messages[i].Seq == 0 {
+					t.Fatalf("message %q has no Seq", text)
+				}
+				return snap.Messages[i].Seq
+			}
+		}
+		t.Fatalf("message %q not in snapshot", text)
+		return 0
+	}
+	toolSeq := func(name string) uint64 {
+		t.Helper()
+		for _, tool := range snap.Tools {
+			if tool.Name == name {
+				if tool.StartedSeq == 0 {
+					t.Fatalf("tool %q has no StartedSeq", name)
+				}
+				return tool.StartedSeq
+			}
+		}
+		t.Fatalf("tool %q not in snapshot", name)
+		return 0
+	}
+	axis := []struct {
+		label string
+		seq   uint64
+	}{
+		{"first question", msgSeq("first question")},
+		{"bash call", toolSeq("bash")},
+		{"first answer", msgSeq("first answer")},
+		{"second question", msgSeq("second question")},
+		{"read_file call", toolSeq("read_file")},
+		{"second answer", msgSeq("second answer")},
+	}
+	for i := 1; i < len(axis); i++ {
+		if axis[i].seq <= axis[i-1].seq {
+			t.Fatalf("Seq axis is not increasing at %s: %v <= %v (%+v)",
+				axis[i].label, axis[i].seq, axis[i-1].seq, axis)
+		}
+	}
+}
+
+// TestChatHandBuiltSnapshotKeepsLegacyToolTail guards the degradation path:
+// a fixture that never set Message.Seq (hand-built snapshots) must keep the
+// old layout — all messages first, then the session-wide tool block — instead
+// of sorting the zero positions to the top.
+func TestChatHandBuiltSnapshotKeepsLegacyToolTail(t *testing.T) {
+	snap := state.NewSnapshot()
+	snap.Phase = state.PhaseIdle
+	snap.Messages = []state.Message{
+		{MsgID: "u1", Role: state.RoleUser, Text: "legacy question"},
+		{MsgID: "a1", Role: state.RoleAssistant, Text: "legacy answer"},
+	}
+	snap.Tools["c1"] = state.ToolState{
+		CallID: "c1", Name: "bash", Status: state.ToolDone,
+		Args: json.RawMessage(`{"cmd":"ls"}`), Result: "ok",
+	}
+	h := newLiveSnapshotApp(t, Session, snap)
+	tt := ui.NewTester(h.app.View, 1600, 1000)
+	tt.Frame()
+	if transcriptOrderEnabled(snap) {
+		t.Fatal("the fixture unexpectedly has a Seq axis")
+	}
+	answer, ok := tt.Find("legacy answer")
+	if !ok {
+		t.Fatalf("legacy answer missing: %v", tt.Texts())
+	}
+	card, ok := tt.Find("bash · done")
+	if !ok {
+		t.Fatalf("legacy tool card missing: %v", tt.Texts())
+	}
+	if card.Y <= answer.Y {
+		t.Fatalf("legacy layout moved the tool block above the answer: card y=%.1f answer y=%.1f", card.Y, answer.Y)
+	}
+	if !tt.HasText("Ran 1 command") {
+		t.Fatalf("legacy summary line missing: %v", tt.Texts())
+	}
+}
+
+// TestTurnProcessBlocksFoldIndependently pins the per-block disclosure added
+// with the turn-inside order: collapsing one turn's summary line hides only
+// that block's cards, not every turn's.
+func TestTurnProcessBlocksFoldIndependently(t *testing.T) {
+	provider := &m6Provider{steps: []m6Step{
+		{tool: "bash", args: `{"cmd":"first-cmd"}`},
+		{text: "first answer"},
+		{tool: "read_file", args: `{"path":"later.txt"}`},
+		{text: "second answer"},
+	}}
+	rig := m6NewRig(t, provider, summaryTool{name: "bash"}, summaryTool{name: "read_file"})
+	if err := rig.store.SetSetting(session.SettingWorkDetails, session.WorkDetailsStandard); err != nil {
+		t.Fatalf("work details setting: %v", err)
+	}
+	rig.app.Language = LangEN
+	m6Submit(t, rig.app, "first question")
+	m6Submit(t, rig.app, "second question")
+
+	tt := ui.NewTester(rig.app.View, 1600, 1000)
+	tt.Frame()
+	if !tt.HasText("bash · done") || !tt.HasText("read_file · done") {
+		t.Fatalf("both turns' cards must start visible: %v", tt.Texts())
+	}
+	if err := tt.Click("Ran 1 command"); err != nil {
+		t.Fatalf("collapse turn 1's process block: %v", err)
+	}
+	tt.Frame()
+	if tt.HasText("bash · done") {
+		t.Fatalf("turn 1's cards are still visible after collapsing: %v", tt.Texts())
+	}
+	if !tt.HasText("read_file · done") {
+		t.Fatalf("collapsing turn 1 also hid turn 2's cards: %v", tt.Texts())
+	}
+	if err := tt.Click("Ran 1 command"); err != nil {
+		t.Fatalf("expand turn 1's process block: %v", err)
+	}
+	tt.Frame()
+	if !tt.HasText("bash · done") {
+		t.Fatalf("turn 1's cards did not return: %v", tt.Texts())
+	}
+}
+
+// assertChatTurnOrder pins the record order of the two-turn transcript: each
+// turn's tool block is above that turn's answer, and turn 2's rows are below
+// turn 1's block. It also pins that each summary counts only its own turn.
+func assertChatTurnOrder(t *testing.T, app *App) {
+	t.Helper()
+	app.Language = LangEN
+	tt := ui.NewTester(app.View, 1600, 1000)
+	tt.Frame()
+
+	at := func(label string) ui.Rect {
+		t.Helper()
+		r, ok := tt.Find(label)
+		if !ok {
+			t.Fatalf("%q missing from the Chat transcript: %v", label, tt.Texts())
+		}
+		return r
+	}
+	user1, answer1 := at("first question"), at("first answer")
+	card1 := at("bash · done")
+	user2, answer2 := at("second question"), at("second answer")
+	card2 := at("read_file · done")
+
+	if user1.Y >= card1.Y {
+		t.Fatalf("turn 1 user message (y=%.1f) is not above its tool block (y=%.1f)", user1.Y, card1.Y)
+	}
+	if card1.Y >= answer1.Y {
+		t.Fatalf("turn 1 tool card (y=%.1f) is not above turn 1 answer (y=%.1f)", card1.Y, answer1.Y)
+	}
+	if answer1.Y >= user2.Y {
+		t.Fatalf("turn 1 answer (y=%.1f) is not above the second user message (y=%.1f)", answer1.Y, user2.Y)
+	}
+	if card1.Y >= user2.Y {
+		t.Fatalf("turn 1 tool card (y=%.1f) is not above the second turn's user message (y=%.1f); the tool block is still a session tail", card1.Y, user2.Y)
+	}
+	if card2.Y <= user2.Y || card2.Y >= answer2.Y {
+		t.Fatalf("turn 2 tool card (y=%.1f) must sit between its user message (y=%.1f) and answer (y=%.1f)", card2.Y, user2.Y, answer2.Y)
+	}
+
+	// The summaries recount per turn: turn 1 ran one command, turn 2 read one
+	// file. A session-wide accumulator would print one combined line instead.
+	for _, want := range []string{"Ran 1 command", "read 1 file"} {
+		if !tt.HasText(want) {
+			t.Fatalf("per-turn summary %q missing: %v", want, tt.Texts())
+		}
+	}
+	for _, unwanted := range []string{"Ran 2 commands", "read 2 files", "Ran 1 command, read 1 file"} {
+		if tt.HasText(unwanted) {
+			t.Fatalf("summary is still session-cumulative: found %q in %v", unwanted, tt.Texts())
+		}
 	}
 }

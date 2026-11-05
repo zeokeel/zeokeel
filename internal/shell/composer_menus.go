@@ -38,6 +38,7 @@ var slashCommands = []struct {
 }{
 	{"/clear", "Clear the composer draft", "清空输入框草稿"},
 	{"/stop", "Stop the running turn", "停止当前回合"},
+	{"/plan", "Enter plan mode (optional message)", "进入计划模式（可带一条消息）"},
 	{"/help", "List the composer commands", "列出输入框命令"},
 	{"/new", "Start a new session", "新建会话"},
 	{"/settings", "Open Settings", "打开设置"},
@@ -234,10 +235,12 @@ func (a *App) runSlashCommand(line string) {
 			a.Ctrl.Stop()
 		}
 		a.draft = ""
+	case "/plan":
+		a.runPlanCommand(line)
 	case "/help":
 		a.draft = a.tr(
-			"Commands: /clear /stop /help /new /settings /automate /plugins /model. Compaction is automatic (the runtime compacts long conversations before a turn); there is no manual command. Unknown commands are sent to the model.",
-			"命令：/clear /stop /help /new /settings /automate /plugins /model。压缩是自动的（运行时会在每轮开始前压缩过长的对话）；没有手动命令。未知命令会发送给模型。")
+			"Commands: /clear /stop /plan /help /new /settings /automate /plugins /model. /plan turns plan mode on, /plan off turns it off, and /plan <message> turns it on and sends the message. Compaction is automatic (the runtime compacts long conversations before a turn); there is no manual command. Unknown commands are sent to the model.",
+			"命令：/clear /stop /plan /help /new /settings /automate /plugins /model。/plan 开启计划模式，/plan off 关闭，/plan <消息> 开启并发送该消息。压缩是自动的（运行时会在每轮开始前压缩过长的对话）；没有手动命令。未知命令会发送给模型。")
 	case "/new":
 		a.draft = ""
 		a.newSession()
@@ -255,6 +258,72 @@ func (a *App) runSlashCommand(line string) {
 		a.openModelPickerFromCommand()
 	default:
 		a.draft = ""
+	}
+}
+
+// planCommandArg returns the text after the "/plan" token on a slash line,
+// trimmed. It is "" for a bare "/plan" (also what choosing the palette row
+// passes) and "off" for "/plan off".
+func planCommandArg(line string) string {
+	text := strings.TrimSpace(line)
+	name, ok := slashCommandName(text)
+	if !ok || name != "/plan" {
+		return ""
+	}
+	return strings.TrimSpace(strings.TrimPrefix(text, name))
+}
+
+// runPlanCommand implements /plan, the composer's plan-mode entry (ADR 0008):
+// "/plan" turns plan mode on, "/plan off" turns it off, and "/plan <message>"
+// turns it on and submits the message as the next prompt. The command runs
+// locally, so the slash line itself never reaches the model; only the optional
+// message is sent. Plan mode is soft guidance (the plan:policy prompt), not a
+// tool gate, so this only persists the flag.
+func (a *App) runPlanCommand(line string) {
+	arg := planCommandArg(line)
+	if a.Ctrl == nil || strings.TrimSpace(a.Ctrl.CurrentSessionID()) == "" {
+		a.draft = ""
+		a.toastText("Open a session before enabling plan mode.",
+			"请先打开会话再启用计划模式。")
+		return
+	}
+	id := a.Ctrl.CurrentSessionID()
+	if strings.EqualFold(arg, "off") {
+		a.draft = ""
+		if err := a.Ctrl.SetPlanMode(id, false); err != nil {
+			a.toastText(err.Error(), err.Error())
+			return
+		}
+		a.toastText("Plan mode off", "已退出计划模式")
+		return
+	}
+	a.draft = ""
+	if err := a.Ctrl.SetPlanMode(id, true); err != nil {
+		a.toastText(err.Error(), err.Error())
+		return
+	}
+	if arg == "" {
+		a.toastText("Plan mode on", "已进入计划模式")
+		return
+	}
+	a.submitPlanMessage(arg)
+}
+
+// submitPlanMessage submits the message of "/plan <message>" after plan mode
+// was enabled. With the composer frame available it goes through the regular
+// send path, so a running turn keeps the persisted Queue/Interrupt behavior
+// (and a failed submit shows the same toast). Without a frame, as in a
+// headless call, it submits through the controller directly.
+func (a *App) submitPlanMessage(text string) {
+	if a.Ctrl == nil {
+		return
+	}
+	if c := a.startUI().lastComposerContext; c != nil {
+		a.submitComposerText(c, text, false)
+		return
+	}
+	if err := a.Ctrl.Submit(context.Background(), a.Ctrl.CurrentSessionID(), text); err != nil {
+		a.toastText("Could not send: "+err.Error(), "发送失败："+err.Error())
 	}
 }
 

@@ -120,24 +120,28 @@ func syntheticTrajectoryRows(total int) []store.Event {
 }
 
 // benchSessionSnapshot is the Session benchmark's transcript: a user message,
-// a Markdown answer with a heading, list, inline code and a highlighted code
-// block, two finished tool calls and the usage footer — the render mix a real
-// session frame draws.
+// the turn's process block (two finished tool calls) above a Markdown answer
+// with a heading, list, inline code and a highlighted code block, and the
+// usage footer — the render mix a real session frame draws. The Seq values put
+// the calls between the question and the answer, so the benchmark measures the
+// shipped record-ordered transcript rather than the legacy session-tail block.
 func benchSessionSnapshot() *state.Snapshot {
 	snap := state.NewSnapshot()
 	snap.Phase = state.PhaseIdle
 	snap.Messages = []state.Message{
-		{MsgID: "u1", Role: state.RoleUser, Text: "帮我把 README 更新成品牌主题说明，然后跑一下测试。"},
-		{MsgID: "a1", Role: state.RoleAssistant, Text: "## 已完成\n\n- 更新了 `README.md` 的品牌小节\n- 运行 `go test ./...`，全部通过\n\n```go\nfunc main() {\n\tfmt.Println(\"hello, ZeoKeel\")\n}\n```"},
+		{MsgID: "u1", Seq: 1, Role: state.RoleUser, Text: "帮我把 README 更新成品牌主题说明，然后跑一下测试。"},
+		{MsgID: "a1", Seq: 6, Role: state.RoleAssistant, Text: "## 已完成\n\n- 更新了 `README.md` 的品牌小节\n- 运行 `go test ./...`，全部通过\n\n```go\nfunc main() {\n\tfmt.Println(\"hello, ZeoKeel\")\n}\n```"},
 	}
 	snap.Tools = map[string]state.ToolState{
 		"c1": {
 			CallID: "c1", Name: "bash", Status: state.ToolDone,
+			StartedSeq: 3, UpdatedSeq: 4,
 			Args:   json.RawMessage(`{"cmd":"go test ./..."}`),
 			Result: "ok  github.com/zeokeel/zeokeel/internal/shell  37s",
 		},
 		"c2": {
 			CallID: "c2", Name: "read_file", Status: state.ToolDone,
+			StartedSeq: 2, UpdatedSeq: 5,
 			Args:   json.RawMessage(`{"path":"README.md"}`),
 			Result: "# ZeoKeel\n\nThe native desktop agent.",
 		},
@@ -213,7 +217,8 @@ func BenchmarkRenderHome(b *testing.B) {
 }
 
 // BenchmarkRenderSession measures the Session screen: header/tabs, the
-// Markdown transcript, two tool cards, the composer and the usage footer.
+// record-ordered transcript (process block above the answer), the composer and
+// the usage footer.
 func BenchmarkRenderSession(b *testing.B) {
 	benchRender(b, newBenchApp(b, Session, benchSessionSnapshot()))
 }

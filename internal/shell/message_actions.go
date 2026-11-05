@@ -258,10 +258,11 @@ type toolSummaryCounts struct {
 	tools    int
 }
 
-// countToolSummary classifies the session's tool calls for the summary line.
-// The buckets: shells and jobs are commands, file and image readers are
-// files, and every other tool is counted generically.
-func countToolSummary(tools map[string]state.ToolState) toolSummaryCounts {
+// countToolSummary classifies one process block's tool calls for its summary
+// line. The buckets: shells and jobs are commands, file and image readers are
+// files, and every other tool is counted generically. The session passes only
+// the block's calls, so counts are per turn/process block, not cumulative.
+func countToolSummary(tools []state.ToolState) toolSummaryCounts {
 	var counts toolSummaryCounts
 	for _, tool := range tools {
 		switch tool.Name {
@@ -311,19 +312,25 @@ func toolPlural(n int, one, many string) string {
 	return many
 }
 
-// liveToolSummary draws the summary row and, while it is open, the existing
-// cards below it. The summary starts open so Detailed work stays visible; its
-// row is the only added control and it expands and collapses the same cards
-// the session already had.
-func (a *App) liveToolSummary(c *ui.Context, t *design.Tokens, snap *state.Snapshot) {
-	if len(snap.Tools) == 0 {
+// liveToolSummary draws one process block: the summary row and, while it is
+// open, the block's cards below it. The tools argument is that block's subset
+// of the session, so a multi-turn transcript shows one summary per turn with
+// that turn's counts. Each block folds on its own: the key is its first call's
+// ID, stable for the life of the block, instead of one session-wide toggle.
+func (a *App) liveToolSummary(c *ui.Context, t *design.Tokens, tools []state.ToolState) {
+	if len(tools) == 0 {
 		return
 	}
 	st := a.liveMenus()
-	label := a.toolSummaryText(countToolSummary(snap.Tools))
+	label := a.toolSummaryText(countToolSummary(tools))
 	if label == "" {
 		return
 	}
+	key := tools[0].CallID
+	if st.toolSummaryCollapsed == nil {
+		st.toolSummaryCollapsed = make(map[string]bool)
+	}
+	collapsed := st.toolSummaryCollapsed[key]
 	th := t.Theme()
 	row := ui.ButtonBase(c).Height(th.Space(6)).PaddingX(th.Space(1)).
 		Gap(th.Space(1)).Radius(design.RadiusSM).
@@ -333,7 +340,7 @@ func (a *App) liveToolSummary(c *ui.Context, t *design.Tokens, snap *state.Snaps
 	}
 	row.Children(func() {
 		caret := "›"
-		if !st.toolSummaryCollapsed {
+		if !collapsed {
 			caret = "⌄"
 		}
 		ui.Text(c, caret).FontSize(11).TextColor(t.LabelTertiary).NoWrap()
@@ -341,9 +348,10 @@ func (a *App) liveToolSummary(c *ui.Context, t *design.Tokens, snap *state.Snaps
 			TextColor(t.LabelSecondary).NoWrap()
 	})
 	if row.Clicked() {
-		st.toolSummaryCollapsed = !st.toolSummaryCollapsed
+		st.toolSummaryCollapsed[key] = !collapsed
+		collapsed = !collapsed
 	}
-	if !st.toolSummaryCollapsed {
-		a.liveToolCards(c, t, snap)
+	if !collapsed {
+		a.liveToolCards(c, t, tools)
 	}
 }

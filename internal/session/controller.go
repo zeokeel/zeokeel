@@ -170,8 +170,9 @@ type Controller struct {
 
 	// Per-session plan mode. The flag itself lives in the settings table
 	// (session.<id>.plan_mode); planModes caches the last value read or
-	// written ("true"/"false"). The runtime reads it through the app's
-	// Config.PlanModeFunc, so no agent rebuild is needed to toggle it.
+	// written ("true"/"false"). The app's prompt composer reads it through
+	// its PlanModeFunc hook at the start of each turn, so no agent rebuild is
+	// needed to toggle it.
 	planModes map[string]string
 
 	wg sync.WaitGroup
@@ -497,8 +498,9 @@ func (c *Controller) OpenSession(ctx context.Context, id string) (*state.Snapsho
 	// happened to be current.
 	c.hydrateSessionPermission(id)
 
-	// Hydrate the per-session plan flag the runtime resolves through the app's
-	// PlanModeFunc. A session that predates the feature reads as off.
+	// Hydrate the per-session plan flag the app's prompt composer reads
+	// through its PlanModeFunc hook. A session that predates the feature
+	// reads as off.
 	c.hydrateSessionPlanMode(id)
 
 	// Each session can have its own access mode. The agent's tools and gate
@@ -778,7 +780,10 @@ func (c *Controller) addUserMessage(t *turn, msg *store.Message, attachments []s
 	msgs := make([]state.Message, len(snap.Messages), len(snap.Messages)+1)
 	copy(msgs, snap.Messages)
 	next.Messages = append(msgs, state.Message{
-		MsgID:       msg.ID,
+		MsgID: msg.ID,
+		// Seq is the Seq this fold assigns the user message, so the message
+		// and the tools that turn starts share one snapshot Seq axis.
+		Seq:         next.Seq,
 		Role:        state.RoleUser,
 		Text:        msg.Content,
 		Attachments: append([]state.Attachment(nil), attachments...),
@@ -2279,8 +2284,8 @@ func (c *Controller) sessionModeFor(sessionID string) string {
 // PlanMode reports whether sessionID is in plan mode. A session that never
 // stored a value reports off, the default for every new session. The value is
 // persisted as session.<id>.plan_mode and cached after the first read. The
-// runtime resolves the current session's flag per tool call through the app's
-// Config.PlanModeFunc, so toggling it does not rebuild the agent.
+// app's prompt composer resolves the flag through its PlanModeFunc hook at the
+// start of each turn, so toggling it does not rebuild the agent.
 func (c *Controller) PlanMode(sessionID string) bool {
 	sessionID = strings.TrimSpace(sessionID)
 	if sessionID == "" || c.store == nil {
@@ -2332,9 +2337,10 @@ func (c *Controller) hydrateSessionPlanMode(sessionID string) bool {
 }
 
 // SetPlanMode persists one session's plan mode and updates the cache the
-// runtime resolver reads. It never touches the agent topology: the gate is
-// keyed by Config.PlanModeFunc and is evaluated per tool call, while the
-// plan:policy prompt is recomposed at the start of the next turn.
+// app's prompt composer reads. It never touches the agent topology: the
+// plan:policy prompt section is recomposed at the start of the next turn, so
+// the flag only guides the model (soft guidance; tool use still follows the
+// permission/sandbox policy).
 func (c *Controller) SetPlanMode(sessionID string, on bool) error {
 	sessionID = strings.TrimSpace(sessionID)
 	if sessionID == "" {

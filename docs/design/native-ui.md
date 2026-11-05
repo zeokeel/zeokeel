@@ -103,12 +103,21 @@ Session 是第二个 pilot 屏（2026-11-05 完成视觉重构），目标是验
 
 | 项 | 实现 |
 | --- | --- |
-| Header | 品牌 header：标题（`TypeBody` 600）+ 模式 chip（复用 `homeChip`）+ 计划模式开关 + 运行/等待/失败相位标签 + More/右侧栏动作（`ButtonBase` ghost）；Chat/Trajectory tabs 改为轻量品牌 tab：`LabelPrimary/Secondary` + 2 DIP accent 底条，仍用 `TabsBase` 保留 RoleTabList/方向键/Checked |
+| Header | 品牌 header：标题（`TypeBody` 600）+ 模式 chip（复用 `homeChip`）+ 运行/等待/失败相位标签 + More/右侧栏动作（`ButtonBase` ghost）；Chat/Trajectory tabs 改为轻量品牌 tab：`LabelPrimary/Secondary` + 2 DIP accent 底条，仍用 `TabsBase` 保留 RoleTabList/方向键/Checked |
 | 布局 | 删除 `sessHeaderH=76`、`sessGutter`、`877/845/98` 等固定像素：transcript 与 composer 共用品牌列 `sessColumnW = sessComposerW = 180 × Space1`（720 DIPs），header 高度由内容与 28 DIP tab 行（`sessTabsH = 7 × Space1`）决定；窄窗/停靠面板由 layout.go 的共享 clamp 处理 |
 | Composer | 与 Home 共用 `composer_native.go`：`brandComposerCard`（Panel、`Radius=10`、单层轻阴影、Space 网格内边距）+ `brandComposerInput`（原生 `ui.TextArea`，卡片承载 hover/焦点 accent 边框）+ `brandIconButton` + `brandSendButton`；`/` 命令、`@` 提及、附件 chips、Enter/Shift+Enter、审批卡位置全部保留 |
 | 发送/停止 | 原生 `ButtonBase` + accent 填充（运行中为 Stop 方块图标，仍可访问 "Stop"）；空 draft 时禁用并用品牌 accent 低透明度 idle 填充（`sendIdleFill`，Home/Session 统一，删掉旧 DSH `#B2C7F4` 采样与浅蓝禁用态） |
-| 消息流 | 用户消息为品牌 tint 气泡（accent 10% over Surface、`Radius=10`、最大 82% 列宽）；助手消息用 mygo `ui/markdown` 渲染（`markdown.Stream` 流式、`markdown.View` 完成；见 §13），底部动作条改为时间 + ghost Copy/Retry/反馈 + 完成摘要；工具卡改为 ghost 可点击行 + 品牌 tint 详情块，状态点/图标尺寸全部走 `Theme.Space` 与语义色 |
-| 截图测试 | `TestRenderSessionNativePreview`（`session_live_test.go`）用 live fixture + 一条完成回合的 snapshot（用户气泡、Markdown 回答、两个工具卡、usage）渲染 1600×1000 浅/深两张到本目录 `preview/`，可复现 |
+| 消息流 | 用户消息为品牌 tint 气泡（accent 10% over Surface、`Radius=10`、最大 82% 列宽）；助手消息用 mygo `ui/markdown` 渲染（`markdown.Stream` 流式、`markdown.View` 完成；见 §13），底部动作条改为时间 + ghost Copy/Retry/反馈 + 完成摘要；工具卡改为 ghost 可点击行 + 品牌 tint 详情块，状态点/图标尺寸全部走 `Theme.Space` 与语义色。**顺序（2026-11-05 对齐 DSH）**：每回合按记录 Seq 合并——用户消息 → 该回合过程块（摘要行 + 工具卡，插在首个工具调用的记录位置）→ 本回合 assistant 回答/最终回答及其完成行 → 下一回合；多回合不再把工具累积到会话尾部 |
+| 截图测试 | `TestRenderSessionNativePreview`（`session_live_test.go`）用 live fixture + 一条完成回合的 snapshot（用户气泡、该回合过程块（摘要行 + 两个工具卡）、Markdown 最终回答与完成行、usage）渲染 1600×1000 浅/深两张到本目录 `preview/`，可复现；预览呈现「用户 → 过程块 → 回答 → 完成行」的新顺序 |
+
+### 4.1.1 消息流顺序（2026-11-05 修正）
+
+`liveTranscript` 不再固定「全部消息 → 运行指示 → 会话级工具块」。数据层给 `state.Message` 增加 `Seq`（消息首次出现时的快照序号），与 `ToolState.StartedSeq` 共用同一条快照 Seq 轴；重开会话时两者恢复为 store 事件 seq（`internal/session/history.go` 的事件重放）。视图据此按回合归并：
+
+- 回合边界 = user 消息的 `Seq`；工具归入「最后一个 `Seq <= StartedSeq` 的 user 消息」所在回合（首条 user 消息之前的工具归入前置块）。
+- 回合内：assistant 消息按 `Seq` 排序；连续工具聚成一个**过程块**（若中间夹了 assistant 消息则拆块），过程块插在它首个调用的 seq 位置；过程块 = 摘要行（只统计该块工具，不再会话累计）+ 该块的工具卡（按 `StartedSeq` 升序、同 seq 用 CallID 兜底，取代旧的 CallID 字符串排序）。
+- 完成行/页脚仍是 assistant 消息内部的 `liveMessageActions`，因此最终回答与其完成行位于过程块之后；运行中 `workingIndicator` 在最后，artifacts/LastError 仍在 transcript 之后。
+- 降级：手工构造的 snapshot（`Message.Seq` 全 0）回退旧布局「全部消息 → 运行指示 → 会话级工具块」，既有 fixture 不受影响。过程块的折叠状态按块（首条 CallID）独立记忆，多回合各自展开/收起。
 
 ### 4.2 保留与不回退
 
@@ -337,7 +346,7 @@ Plugins 与 Automation 是两个"列表页"屏，本轮把它们的 DSH 复刻�
 | View options | 品牌 popover：`Space(67)` 宽、28 DIP 菜单项、可聚焦 checkable 行（RoleMenuItemCheckBox 不变） |
 | todo 面板 | `BgSidebar` inspector 面板（`Space(68)` 宽、左分隔线）；header + 计数 pill + 细分进度条；状态 mark：空环 / in-progress accent 点 / completed success ✓；完成项删除线 |
 | team 面板 | 同 inspector 面板；成员为 `BgRaised` 卡片 + 状态点 + 名称/状态 + 任务；目标 banner 品牌 tint + **全宽**进度条（删除固定 240px），完成态 success |
-| plan | header 计划模式 toggle 改为品牌 chip（accent tint + 勾选框 + 小字开关态，`RoleSwitch`/键盘不变）；plan review 卡宽 = 品牌 composer 列；Approve 沿用品牌 primary，Exit 改 ghost 按钮；question card / artifacts 卡同批品牌化（composer 列宽、tint 卡、`FillWidth` 左对齐） |
+| plan | ~~header 计划模式 toggle~~ **（2026-11-05 对齐 DSH：header 不再有复选框；入口改为 `/plan` 命令 + composer 计划徽章（仅激活时显示，点击或 `/plan off` 退出）；plan 模式为软引导（`plan:policy` + `present` "Plan" + 审阅卡），不拦截工具——需要强制只读时同时选「只读」权限，见 [ADR 0008](../../decisions/0008-plan-mode-soft-alignment.md)）**；plan review 卡宽 = 品牌 composer 列；Approve 沿用品牌 primary，Exit 改 ghost 按钮；question card / artifacts 卡同批品牌化（composer 列宽、tint 卡、`FillWidth` 左对齐） |
 | 通用 | 删除固定像素与采样色，全部改 `Theme.Space/Rem/Radius` 与 brand 语义色；无新增 i18n key（复用现有 key）；键盘导航/Esc/方向键/Enter、勾选/折叠/滚动/窄窗、a11y Label/Role/Focusable 全部保留 |
 
 ### 14.2 截图
@@ -392,12 +401,12 @@ Plugins 与 Automation 是两个"列表页"屏，本轮把它们的 DSH 复刻�
 
 ## 16. 剩余路线（2026-11-05 第三轮后更新）
 
-已完成：Home、Session、Sidebar、Settings、Plugins、Automation、Trajectory、内联搜索/todo/team/plan 面板、右侧栏、工具卡内容、系统菜单栏/窗口状态（ADR 0003）、系统通知（ADR 0004）、设置独立窗口（ADR 0005）、系统偏好与 2x DPI（§12）、Markdown 迁移（§13）、a11y/键盘（§18）、死代码清理与渲染基准（[perf.md](perf.md)）。
+已完成：Home、Session、Sidebar、Settings、Plugins、Automation、Trajectory、内联搜索/todo/team/plan 面板、右侧栏、工具卡内容、窗口状态（ADR 0003；原生菜单栏已退役，ADR 0006）、系统通知（ADR 0004）、设置独立窗口（ADR 0005）、系统偏好与 2x DPI（§12）、Markdown 迁移（§13）、a11y/键盘（§18）、Chat 记录序渲染（§4.1.1）、死代码清理与渲染基准（[perf.md](perf.md)）。
 
 剩余（优先来自独立设计评审 [review-round3.md](review-round3.md)）：
 
 1. ~~**UX P0**~~ **已完成（2026-11-05 第四轮，见 STATUS 阶段 6）**：破坏性操作确认 + Danger（Automation/Memory）；浅色三级文字 `#646C7A` 四组表面 ≥4.5:1；深色字标改用 `logo-dark.svg` 派生 2x 位图。
-2. P1 细节：Windows/Linux 设置窗口无菜单栏、窗口间几何联动、滚动位置持久化；通知动作按钮/退出后点击；TextScale 已覆盖 design 类型系统（§12.5），其余约 169 处显式字号留 v1.2。
+2. P1 细节：所有窗口均无菜单栏（原生窗口菜单栏已退役，ADR 0006）、窗口间几何联动、滚动位置持久化；通知动作按钮/退出后点击；TextScale 已覆盖 design 类型系统（§12.5），其余约 169 处显式字号留 v1.2。
 3. 预览/回归：预览无状态覆盖（空态/错误/加载/窄窗）；已提供 opt-in 视觉回归（`scripts/visual-check.sh` + `TestVisualRegression`，CI 未强制，跨机器字体/时钟原因）。
 4. a11y/真机：VoiceOver/Narrator/Orca 人工复核、拖拽键盘等价、IME/高 DPI 真机矩阵。
 5. 性能：~~Trajectory 未虚拟化~~ **已完成（v1.1，2026-11-05，§16.1）**：1000 事件稳态帧 22.7ms → 3.12ms（见 [perf.md](perf.md) §8）。
@@ -441,7 +450,7 @@ Plugins 与 Automation 是两个"列表页"屏，本轮把它们的 DSH 复刻�
 ### 17.3 预览
 
 - [preview/toolcard-native-light.png](preview/toolcard-native-light.png) / [preview/toolcard-native-dark.png](preview/toolcard-native-dark.png)：`TestRenderToolCardNativePreview`（展开的 bash / Markdown / 图片 / 错误四张卡；图片经 LoadImage 真实加载）。
-- Session 预览已重生成：`preview/session-native-{light,dark}.png`（工具卡显示代码块 + Copy）。
+- Session 预览已重生成：`preview/session-native-{light,dark}.png`（工具卡显示代码块 + Copy；2026-11-05 顺序修正后过程块位于该回合最终回答之前）。
 - 全部走 `previewDir(t)`：普通测试/CI 写临时目录，只有 `ZEOKEEL_UPDATE_PREVIEWS=1` 才写 `docs/design/preview`。
 
 ### 17.4 遗留

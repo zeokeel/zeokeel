@@ -8,6 +8,7 @@ import (
 	"github.com/egoist/mygo/ui"
 
 	"github.com/zeokeel/zeokeel/internal/design"
+	"github.com/zeokeel/zeokeel/internal/icons"
 	"github.com/zeokeel/zeokeel/internal/state"
 	"github.com/zeokeel/zeokeel/internal/tools"
 )
@@ -48,20 +49,6 @@ func (a *App) planReviewArtifact() *tools.Artifact {
 		}
 	}
 	return nil
-}
-
-// togglePlanMode flips the current session's persisted plan mode. It reports an
-// error to the caller (shown as a toast) instead of dropping it.
-func (a *App) togglePlanMode() error {
-	if a.Ctrl == nil {
-		return nil
-	}
-	id := a.Ctrl.CurrentSessionID()
-	if strings.TrimSpace(id) == "" {
-		return errors.New(a.menuText("Open a session before enabling plan mode.",
-			"请先打开会话再启用计划模式。"))
-	}
-	return a.Ctrl.SetPlanMode(id, !a.Ctrl.PlanMode(id))
 }
 
 // approvePlan is the Plan review card's primary action: turn plan mode off and
@@ -110,55 +97,40 @@ func (a *App) exitPlanMode() error {
 	return a.Ctrl.SetPlanMode(id, false)
 }
 
-// planHeaderToggle is the session header's plan-mode switch. It always renders
-// (on/off) so the state is visible without opening a menu; clicking it flips
-// the persisted flag through the controller.
-func (a *App) planHeaderToggle(c *ui.Context, t *design.Tokens) {
-	if a.Ctrl == nil {
+// composerPlanBadge is the composer's plan-mode status chip (ADR 0008): DSH's
+// accent "Plan" badge to the right of the access-mode control. It renders only
+// while plan mode is on, and clicking it leaves the mode exactly like
+// "/plan off". Plan mode is soft guidance, not a permission, so the chip
+// reports the state and offers the exit; it never changes the access mode.
+func (a *App) composerPlanBadge(c *ui.Context, t *design.Tokens) {
+	if !a.planModeOn() {
 		return
 	}
-	on := a.planModeOn()
-	stateText := a.menuText("Off", "关")
-	if on {
-		stateText = a.menuText("On", "开")
-	}
 	th := t.Theme()
-	label := a.menuText("Plan mode", "计划模式") + ": " + stateText
-	row := ui.ButtonBase(c).Height(th.Space(7)).PaddingX(th.Space(2)).
-		Gap(th.Space(1.5)).Radius(design.RadiusSM).AlignItems(ui.Center).
-		Label(label).Value(label).Role(ui.RoleSwitch).Checked(on)
-	switch {
-	case on:
-		row = row.Background(t.Accent.Alpha(0.10).Over(t.BgRaised)).Border(1, t.Accent)
-	case row.Hovered():
-		row = row.Background(t.BgHover).Border(1, t.BorderL2)
-	default:
-		row = row.Border(1, t.BorderL2)
+	label := a.menuText("Plan mode on; click to exit", "计划模式已开启；点击退出")
+	chip := ui.Row(c).Height(t.Scale(th.Space(7))).PaddingX(t.Scale(th.Space(2))).
+		Gap(t.Scale(th.Space(1))).Radius(design.RadiusSM).AlignItems(ui.Center).
+		Background(t.Accent.Alpha(0.10).Over(t.BgRaised)).
+		Label(label).Value(label).Role(ui.RoleButton).Focusable()
+	if chip.Hovered() {
+		chip = chip.Background(t.Accent.Alpha(0.18).Over(t.BgRaised))
 	}
-	color, textColor := t.LabelTertiary, t.LabelSecondary
-	if on {
-		color, textColor = t.Accent, t.Accent
-	}
-	row.Children(func() {
-		// A small brand check box mirrors the persisted on/off state.
-		box := ui.Row(c).Size(th.Space(2.5), th.Space(2.5)).Center().
-			Radius(th.Space(0.5)).Border(1.2, color).Shrink(0)
-		if on {
-			box = box.Border(0, t.Accent).Background(t.Accent)
-			box.Children(func() {
-				ui.Text(c, "✓").FontSize(8).FontWeight(700).
-					TextColor(t.AccentText).NoWrap()
-			})
+	chip.Children(func() {
+		ui.Icon(c, icons.Sparkles()).Size(th.Space(4), th.Space(4)).TextColor(t.Accent)
+		// The narrow composer keeps the icon only, the same rule the access
+		// chip follows: a text label would push the model chip or Send out of
+		// the toolbar instead of being clipped.
+		if a.composerPopupWidthFor(c) >= narrowComposerLabelW {
+			ui.Text(c, a.menuText("Plan", "计划")).FontSize(12).
+				FixedLineHeight(20).FontWeight(500).TextColor(t.Accent).NoWrap()
 		}
-		ui.Text(c, a.menuText("Plan mode", "计划模式")).FontSize(12).
-			FixedLineHeight(20).FontWeight(500).TextColor(textColor).NoWrap()
-		ui.Text(c, stateText).FontSize(10).FixedLineHeight(20).
-			TextColor(t.LabelTertiary).NoWrap()
 	})
-	if row.Clicked() {
-		if err := a.togglePlanMode(); err != nil {
+	if chip.Clicked() {
+		if err := a.exitPlanMode(); err != nil {
 			c.Toast(err.Error())
+			return
 		}
+		c.Toast(a.menuText("Plan mode off", "已退出计划模式"))
 	}
 }
 

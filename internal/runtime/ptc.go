@@ -61,19 +61,17 @@ type ptcTool struct {
 	registry *Registry
 	gate     Gate
 	reviewer ToolReviewer
-	planMode func() bool
 }
 
 var _ Tool = (*ptcTool)(nil)
 var _ ApprovalGateBinder = (*ptcTool)(nil)
 var _ ToolReviewBinder = (*ptcTool)(nil)
-var _ planModeBinder = (*ptcTool)(nil)
 
 // NewPTCTool returns the pipeline-style PTC batch tool over registry. The app
 // registers it in the production registry so the tool is discoverable, while
 // Agent.effectiveTools synthesizes the same tool for a bare runtime registry.
-// Agent.New binds the approval Gate, the tool reviewer and the plan-mode
-// resolver; nested calls consult all three per call.
+// Agent.New binds the approval Gate and the tool reviewer; nested calls consult
+// both per call.
 func NewPTCTool(registry *Registry) Tool {
 	return &ptcTool{registry: registry}
 }
@@ -81,8 +79,8 @@ func NewPTCTool(registry *Registry) Tool {
 // newPTCTool builds the batch tool with the Gate already bound, used when the
 // Agent synthesizes the tool for a runtime whose registry has no concrete
 // instance.
-func newPTCTool(registry *Registry, gate Gate, planMode func() bool, reviewer ToolReviewer) Tool {
-	return &ptcTool{registry: registry, gate: gate, reviewer: reviewer, planMode: planMode}
+func newPTCTool(registry *Registry, gate Gate, reviewer ToolReviewer) Tool {
+	return &ptcTool{registry: registry, gate: gate, reviewer: reviewer}
 }
 
 // SetToolReviewer implements ToolReviewBinder. New calls it once before the
@@ -92,10 +90,6 @@ func (t *ptcTool) SetToolReviewer(reviewer ToolReviewer) { t.reviewer = reviewer
 // SetApprovalGate implements ApprovalGateBinder. New calls it once before the
 // agent serves turns, so the field is effectively read-only afterwards.
 func (t *ptcTool) SetApprovalGate(gate Gate) { t.gate = gate }
-
-// SetPlanModeFunc implements planModeBinder. New calls it once before the
-// agent serves turns; the function itself is read per nested call.
-func (t *ptcTool) SetPlanModeFunc(fn func() bool) { t.planMode = fn }
 
 // Name implements runtime.Tool.
 func (t *ptcTool) Name() string { return ptcToolName }
@@ -175,13 +169,6 @@ func (t *ptcTool) Invoke(ctx context.Context, args json.RawMessage) (string, err
 			response.Results = append(response.Results, PTCResult{
 				Index: i, Tool: name, OK: false,
 				Error: fmt.Sprintf("ptc: tool %q: %v", name, err),
-			})
-			continue
-		}
-		if t.planMode != nil && t.planMode() && PlanModeBlocksTool(name) {
-			response.Results = append(response.Results, PTCResult{
-				Index: i, Tool: name, OK: false,
-				Error: planModeBlockedError(name).Error(),
 			})
 			continue
 		}

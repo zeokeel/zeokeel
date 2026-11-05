@@ -306,13 +306,13 @@ func (a *Agent) buildMode(snap agentSnapshot) (adk.Agent, error) {
 }
 
 // einoToolsForMode wraps the mode's model-visible tools for eino. newEinoTool
-// keeps the Gate, auto-review and plan-mode wiring, so approvals, automatic
-// review and the plan gate behave the same in every mode.
+// keeps the Gate and auto-review wiring, so approvals and automatic review
+// behave the same in every mode.
 func (a *Agent) einoToolsForMode(mode string) []tool.BaseTool {
 	list := a.effectiveTools(mode)
 	out := make([]tool.BaseTool, 0, len(list))
 	for _, t := range list {
-		out = append(out, newEinoTool(t, a.gate, a.planMode, a.reviewer))
+		out = append(out, newEinoTool(t, a.gate, a.reviewer))
 	}
 	return out
 }
@@ -341,7 +341,7 @@ func (a *Agent) effectiveTools(mode string) []Tool {
 	switch normalized {
 	case ModePTC:
 		if !present[ptcToolName] {
-			out = append(out, newPTCTool(a.registry, a.gate, a.planMode, a.reviewer))
+			out = append(out, newPTCTool(a.registry, a.gate, a.reviewer))
 		}
 	case ModeCreator:
 		if !present["settings_get"] {

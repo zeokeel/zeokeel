@@ -52,7 +52,7 @@ P0（核心体验/数据安全）：
 3. ~~会话 fork + 导出 session log + 本地反馈持久化~~ ✅ 已完成（反馈无联网上送）
 
 P1（能力完整）：
-4. Goal round driver（自动多轮）、Plan mode
+4. Goal round driver（自动多轮）；Plan mode 已按 DSH 对齐为软引导 + `/plan` 命令 + composer 徽章（余 `exit_plan_mode` 工具 / Keep planning 见 [ADR 0008](decisions/0008-plan-mode-soft-alignment.md)）
 5. Auto-review 权限（模型审前审批）
 6. auto-memory / AGENTS.md 深化
 

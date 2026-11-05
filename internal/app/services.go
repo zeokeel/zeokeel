@@ -424,9 +424,9 @@ type registryOptions struct {
 	// registry. The agent's topology is still switched by Agent.SetMode.
 	ModeFunc func() string
 	// PlanModeFunc, when set, resolves the current session's plan mode for each
-	// turn. It feeds both the plan:policy prompt section and the runtime tool
-	// gate (runtime.Config.PlanModeFunc), so toggling plan mode rebuilds
-	// neither the registry nor the agent topology.
+	// turn. Plan mode is a soft workflow: it feeds only the plan:policy prompt
+	// section and the shell's plan review, not a runtime tool gate, so toggling
+	// it rebuilds neither the registry nor the agent topology.
 	PlanModeFunc func() bool
 	// WorkspaceID is the controller's current workspace. When set it scopes
 	// session history tools directly instead of re-deriving the selection
@@ -831,7 +831,6 @@ func buildAgentWithOptions(st *store.Store, root, instruction string, opts regis
 		Provider:        prov,
 		Tools:           reg,
 		Mode:            agentMode,
-		PlanModeFunc:    planModeForTurn,
 		Settings:        settings,
 		MaxIterations:   maxIterations,
 		SubagentModel:   subagentModel,

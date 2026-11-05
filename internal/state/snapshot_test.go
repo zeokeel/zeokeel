@@ -23,8 +23,51 @@ func TestApplyNil(t *testing.T) {
 	}
 
 	fromNil := Apply(nil, Token{MsgID: "m", Text: "a"})
-	if fromNil.Seq != 1 || fromNil.Messages[0].Text != "a" {
+	if fromNil.Seq != 1 || fromNil.Messages[0].Text != "a" || fromNil.Messages[0].Seq != 1 {
 		t.Fatalf("Apply(nil, Token) = %+v", fromNil)
+	}
+}
+
+// TestMessageSeqFirstAppearance pins the message Seq rule the Chat view will
+// sort on: a message created by a Token/Reasoning fold records that event's
+// snapshot Seq, later folds keep it, and a hand-built fixture may leave it 0.
+func TestMessageSeqFirstAppearance(t *testing.T) {
+	// A hand-built snapshot (fixture) leaves Seq 0: the field is only set by a
+	// fold, and the view degrades 0 to list order.
+	manual := NewSnapshot()
+	manual.Messages = []Message{{MsgID: "u1", Role: RoleUser, Text: "hi"}}
+	if got := manual.Messages[0].Seq; got != 0 {
+		t.Fatalf("hand-built message Seq = %d, want 0", got)
+	}
+
+	var s *Snapshot
+	s = Apply(s, Token{MsgID: "m1", Text: "Hel"}) // Seq 1 creates m1
+	s = Apply(s, Token{MsgID: "m1", Text: "lo"})  // Seq 2 appends to m1
+	s = Apply(s, Reasoning{MsgID: "m1", Text: "think"})
+	if got := s.Messages[0].Seq; got != 1 {
+		t.Fatalf("m1 Seq after appends = %d, want 1 (first appearance)", got)
+	}
+
+	s = Apply(s, Reasoning{MsgID: "m2", Text: "why"}) // Seq 4 creates m2
+	if got := s.Messages[1].Seq; got != 4 {
+		t.Fatalf("reasoning-created m2 Seq = %d, want 4", got)
+	}
+	s = Apply(s, Token{MsgID: "m2", Text: "!"}) // Seq 5 appends to m2
+	if got := s.Messages[1].Seq; got != 4 {
+		t.Fatalf("m2 Seq after token append = %d, want 4", got)
+	}
+
+	s = Apply(s, Status{Phase: PhaseRunning})   // Seq 6
+	s = Apply(s, Token{MsgID: "m3", Text: "x"}) // Seq 7 creates m3
+	if got := s.Messages[2].Seq; got != 7 {
+		t.Fatalf("m3 Seq = %d, want 7", got)
+	}
+	// The Seq values are strictly increasing in first-appearance order, on the
+	// same axis ToolState.StartedSeq uses.
+	for i := 1; i < len(s.Messages); i++ {
+		if s.Messages[i].Seq <= s.Messages[i-1].Seq {
+			t.Fatalf("message Seqs not increasing: %+v", s.Messages)
+		}
 	}
 }
 
@@ -58,6 +101,9 @@ func TestTokenAccumulation(t *testing.T) {
 	m2 := s.Messages[1]
 	if m2.MsgID != "m2" || m2.Text != "world" || m2.Reasoning != "" {
 		t.Fatalf("second message = %+v", m2)
+	}
+	if m1.Seq != 1 || m2.Seq != 3 {
+		t.Fatalf("message Seqs = %d,%d, want first-appearance 1,3", m1.Seq, m2.Seq)
 	}
 
 	// The previously published snapshot must not observe later folds.

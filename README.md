@@ -39,7 +39,7 @@
 **2026-11-05 原生视觉迁移（已覆盖全部屏/区）**：
 
 - 阶段 1（完成）：像素门禁与静态演示屏拆除，测试全部迁移 live fixture；品牌主题 `internal/brand`（logo 色板 + mygo `ui.Theme`）生效。见 [ADR 0001](docs/decisions/0001-retire-dsh-pixel-parity.md)、[ADR 0002](docs/decisions/0002-brand-theme-foundation.md)。
-- 阶段 2/3（完成）：**Home、Session、Sidebar、Settings、Plugins、Automation 六屏改用 ZeoKeel 品牌原生视觉**（mygo 原生控件 + Theme 令牌，去 DSH 文案/像素魔法值）；系统菜单栏与窗口状态持久化落地（[ADR 0003](docs/decisions/0003-desktop-shell-integration.md)）。
+- 阶段 2/3（完成）：**Home、Session、Sidebar、Settings、Plugins、Automation 六屏改用 ZeoKeel 品牌原生视觉**（mygo 原生控件 + Theme 令牌，去 DSH 文案/像素魔法值）；窗口状态持久化落地（[ADR 0003](docs/decisions/0003-desktop-shell-integration.md)）；系统菜单栏后于 2026-11-05 按用户决定退役（[ADR 0006](docs/decisions/0006-retire-native-menu-bar.md)）。
 - 阶段 4（完成）：Trajectory / 内联搜索 / todo·team·plan 面板 / 右侧栏（Files·Terminal·Start）品牌化；**Markdown 迁移到 mygo `ui/markdown`**（代码高亮/表格/任务列表/流式/文本选中复制，净减 452 行）；**系统通知**（完成/失败/待审批，[ADR 0004](docs/decisions/0004-desktop-notifications.md)）；系统偏好 TextScale/HighContrast/ReduceMotion 与 2x DPI 冒烟。
 - 阶段 6（完成）：按独立设计评审修 P0——**浅色三级文字对比度** `#7E8796→#646C7A`（BgStrong 4.76:1，全表面达 WCAG AA）；**深色字标**改用 `logo-dark.svg` 派生 2x 位图（去除白边）；**破坏性操作确认**（Automation 删除 / Memory Clear all 弹层 + Danger，与其它删除一致，含计划文案中文本地化）；22 张预览重生成。未验证项见 [已知限制](docs/design/known-limitations.md)。
 - 阶段 5（完成）：**工具卡结果原生化**（代码块 Copy/GFM markdown/图片加载/错误面板/40 行折叠）；**设置独立原生窗口**（Cmd+, 单例非模态，[ADR 0005](docs/decisions/0005-settings-window.md)）；**后台会话完成/失败通知**（controller hook + 去重/节流）；Sidebar a11y 树层级与键盘回归；死代码清理（-203 行）与 UI 渲染性能基准（稳态帧 0.48–1.26ms，[perf.md](docs/design/perf.md)）。
@@ -49,6 +49,7 @@
 
 - **v1.1 收尾（完成）**：后台"等待审批"通知、TextScale 覆盖 design 类型系统（21 处关键屏转换）、Trajectory 虚拟化（1000 事件稳态帧 22.7→3.12ms）、opt-in 视觉回归工具（`scripts/visual-check.sh` + `TestVisualRegression`）、验收 P3 清理。
 - **验收（2026-11-05）**：独立验收复跑 `objective ①PASS / ②PASS / ③PASS`（[07](docs/research/07-final-acceptance.md)、[08 最终复核](docs/research/08-final-recheck.md)）；`gofmt`/`vet`/`build`/`go test ./...`（17 包）/`ci.sh --fast` 全绿。
+- **2026-11-05 交互调整（完成）**：原生窗口菜单栏退役（[ADR 0006](docs/decisions/0006-retire-native-menu-bar.md)，托盘/快捷键/应用内入口保留）；「计划模式」对齐 DSH（[ADR 0008](docs/decisions/0008-plan-mode-soft-alignment.md)）——header 复选框移除（[ADR 0007](docs/decisions/0007-remove-plan-mode-toggle.md)），plan mode 改为**软引导流程**（`plan:policy` prompt + `present` 计划 + 审阅卡，runtime 不再硬拦截工具），入口为 `/plan` 命令与 composer 计划徽章（`/plan off` 或点徽章退出），只读权限独立存在、可与 plan 叠加；Chat 会话页改为按记录 Seq 渲染——每回合「用户 → 过程块（摘要 + 工具卡）→ 最终回答 → 完成行」，多回合不再把历史工具卡堆到会话末尾（数据层 `state.Message.Seq` + 重开事件 seq 轴，对齐 DSH，见 [native-ui.md §4.1.1](docs/design/native-ui.md)）；预览/测试同步更新。
 - 下一阶段（v1.1）：发布前真机验证（IME/a11y/DPI/通知矩阵，见 [已知限制](docs/design/known-limitations.md)）、CI headless 视觉黄金冒烟、TextScale 全覆盖、Trajectory 虚拟化；观感迭代参考 [review-round4.md](docs/design/review-round4.md)。
 
 ## 字标（已定）

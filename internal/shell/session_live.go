@@ -101,8 +101,8 @@ func (a *App) sessionLive(c *ui.Context, t *design.Tokens, snap *state.Snapshot)
 // matching the panel it opens.
 var liveHeaderPanelIcon = chromeIconPanelRight
 
-// liveHeader is the brand header: one title row (title, mode chip, plan
-// toggle, phase label and the screen actions) over the Chat/Trajectory tabs.
+// liveHeader is the brand header: one title row (title, mode chip, phase
+// label and the screen actions) over the Chat/Trajectory tabs.
 // All spacing and heights come from the theme's 4 DIP grid; the phase label
 // keeps its color/content cross-fade while the actions are native buttons.
 func (a *App) liveHeader(c *ui.Context, t *design.Tokens, snap *state.Snapshot) {
@@ -135,7 +135,6 @@ func (a *App) liveHeader(c *ui.Context, t *design.Tokens, snap *state.Snapshot) 
 			mode.Expanded(mst.open)
 			mode.OnClick(func() { mst.open = !mst.open })
 			ui.Popover(c, mode, &mst.open, func() { a.agentModeMenu(c, t, &mst.open) })
-			a.planHeaderToggle(c, t)
 			// No status text while idle: the header is title, mode and
 			// actions only. Running/waiting/failed/paused/stopped get the
 			// cross-fading phase label.
@@ -183,9 +182,15 @@ func livePhaseColor(t *design.Tokens, p state.Phase) ui.Color {
 	}
 }
 
-// liveTranscript is the scrollable message column, the working indicator and
-// the tool cards, in the order the session built them. With more than one
-// user turn a rail of jump buttons scrolls the chosen turn into view.
+// liveTranscript is the scrollable transcript and its turn rail. It renders
+// the session's record order (see buildTranscriptTurns): a turn's process
+// block (summary line and cards) sits between the user message and the
+// assistant answer it produced, so a turn that runs tools before answering
+// reads top to bottom as user → tools → answer → completion footer. A session
+// with several turns keeps each turn's tools inside that turn instead of
+// stacking them below the latest answer. Snapshots without a Seq axis
+// (hand-built fixtures) keep the legacy layout: all messages, then the
+// session's tool block.
 func (a *App) liveTranscript(c *ui.Context, t *design.Tokens, snap *state.Snapshot) {
 	streaming := -1
 	if snap.Phase == state.PhaseRunning {
@@ -207,29 +212,18 @@ func (a *App) liveTranscript(c *ui.Context, t *design.Tokens, snap *state.Snapsh
 				ui.Column(c).Width(a.sessionTranscriptWidthFor(c)).
 					Label(a.tr("Session transcript", "会话记录")).
 					Padding(design.Space6, 0).Gap(design.Space5).Children(func() {
-					for i, m := range snap.Messages {
-						if m.Text == "" {
-							continue
+					if transcriptOrderEnabled(snap) {
+						turns = a.liveOrderedTranscript(c, t, snap, streaming)
+						if snap.Phase == state.PhaseRunning {
+							a.workingIndicator(c, t)
 						}
-						key := "msg:" + m.MsgID
-						if m.MsgID == "" {
-							// A snapshot built by hand may not name its messages;
-							// the index keeps their keys distinct and stable.
-							key = "msg-index:" + strconv.Itoa(i)
+					} else {
+						turns = a.liveFlatTranscript(c, t, snap, streaming)
+						if snap.Phase == state.PhaseRunning {
+							a.workingIndicator(c, t)
 						}
-						el := a.liveMessage(c, t, m, key, i == streaming, snap)
-						if m.Role == state.RoleUser {
-							turns++
-							if st.pendingTurn == turns {
-								el.ScrollIntoView()
-								st.pendingTurn = 0
-							}
-						}
+						a.liveTools(c, t, snap)
 					}
-					if snap.Phase == state.PhaseRunning {
-						a.workingIndicator(c, t)
-					}
-					a.liveTools(c, t, snap)
 					a.liveArtifacts(c, t)
 					if snap.LastError != nil {
 						ui.Text(c, a.T("session.error_prefix", snap.LastError.Text)).FontSize(13).TextColor(t.Danger)
@@ -264,6 +258,66 @@ func (a *App) liveTranscript(c *ui.Context, t *design.Tokens, snap *state.Snapsh
 	if st.pendingTurn > turns {
 		st.pendingTurn = 0
 	}
+}
+
+// liveOrderedTranscript draws the Seq-ordered transcript body and returns the
+// number of user turns it rendered (the turn rail's count). The working
+// indicator and the artifacts stay the caller's business: the indicator goes
+// after this body, the artifacts after the transcript column.
+func (a *App) liveOrderedTranscript(c *ui.Context, t *design.Tokens, snap *state.Snapshot, streaming int) int {
+	st := a.liveMenus()
+	turns := 0
+	for _, plan := range buildTranscriptTurns(snap) {
+		for _, entry := range plan.entries {
+			if entry.tools != nil {
+				a.liveToolSummary(c, t, entry.tools)
+				continue
+			}
+			i := entry.msgIndex
+			m := snap.Messages[i]
+			el := a.liveMessage(c, t, m, transcriptMessageKey(m, i), i == streaming, snap)
+			if m.Role == state.RoleUser {
+				turns++
+				if st.pendingTurn == turns {
+					el.ScrollIntoView()
+					st.pendingTurn = 0
+				}
+			}
+		}
+	}
+	return turns
+}
+
+// liveFlatTranscript is the legacy layout for snapshots without a Seq axis:
+// every message in list order. liveTranscript appends the session's whole tool
+// block after it, matching the layout the renderer had before record ordering.
+func (a *App) liveFlatTranscript(c *ui.Context, t *design.Tokens, snap *state.Snapshot, streaming int) int {
+	st := a.liveMenus()
+	turns := 0
+	for i, m := range snap.Messages {
+		if m.Text == "" {
+			continue
+		}
+		el := a.liveMessage(c, t, m, transcriptMessageKey(m, i), i == streaming, snap)
+		if m.Role == state.RoleUser {
+			turns++
+			if st.pendingTurn == turns {
+				el.ScrollIntoView()
+				st.pendingTurn = 0
+			}
+		}
+	}
+	return turns
+}
+
+// transcriptMessageKey is the element key of one message: the MsgID when the
+// snapshot names it, the index otherwise, so a hand-built message keeps a
+// distinct and stable key.
+func transcriptMessageKey(m state.Message, index int) string {
+	if m.MsgID == "" {
+		return "msg-index:" + strconv.Itoa(index)
+	}
+	return "msg:" + m.MsgID
 }
 
 // backToBottomVisible reports whether the transcript is scrolled up from its
@@ -374,13 +428,14 @@ func (a *App) workingIndicator(c *ui.Context, t *design.Tokens) {
 	c.After(step - elapsed%step)
 }
 
-// liveTools draws the session's tool calls, ordered by call ID so a map's
-// iteration order never moves them from frame to frame.
+// liveTools draws every tool call as one process block. It is the legacy
+// placement for snapshots without a Seq axis: the caller already drew all
+// messages, so this block appends after them.
 func (a *App) liveTools(c *ui.Context, t *design.Tokens, snap *state.Snapshot) {
 	if len(snap.Tools) == 0 {
 		return
 	}
-	a.liveToolSummary(c, t, snap)
+	a.liveToolSummary(c, t, snapshotToolStates(snap))
 }
 
 // liveComposerArea is the fixed bottom block: the composer card, the menus
@@ -442,6 +497,7 @@ func (a *App) sessionComposerCard(c *ui.Context, t *design.Tokens, snap *state.S
 				func() { a.attachOpen = !a.attachOpen })
 			ui.Box(c).Width(th.Space(1))
 			a.livePermissionChip(c, t)
+			a.composerPlanBadge(c, t)
 			ui.Spacer(c).Grow(1)
 			a.liveModelMenuBadge(c, t)
 			ui.Box(c).Width(th.Space(2))
@@ -545,6 +601,18 @@ func (a *App) submitComposer(c *ui.Context, alternate bool) {
 	// the "/" palette lists these commands, so Enter must honor them too.
 	if isSlashCommand(text) {
 		a.runSlashCommand(text)
+		return
+	}
+	a.submitComposerText(c, text, alternate)
+}
+
+// submitComposerText is the composer's plain send path: it sends text that is
+// not a slash command. /plan's optional message uses it too, so a running turn
+// follows the persisted Send behavior (Queue keeps the text until the turn
+// ends; Interrupt stops the turn and sends immediately) and a failed submit
+// shows one shared toast.
+func (a *App) submitComposerText(c *ui.Context, text string, alternate bool) {
+	if a.Ctrl == nil {
 		return
 	}
 	id := a.Ctrl.CurrentSessionID()

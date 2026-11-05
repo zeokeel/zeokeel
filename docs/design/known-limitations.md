@@ -11,7 +11,7 @@
 | 屏幕阅读器 | a11y 树结构/名称/层级已用 headless 反射测试覆盖（Sidebar RoleTree/TreeItem、无名节点审计、键盘回归） | VoiceOver（macOS）、Narrator（Windows）、Orca（Linux）人工复核朗读顺序与操作 |
 | 高 DPI/多显示器 | `ui.Render(...,scale=2)` 冒烟（3200×2000 非空、关键控件存在）；未真机 1.25x/1.5x/2x 切换 | 各平台 DPI 切换与跨屏拖动，确认无 1px 漂移/模糊 |
 | 系统通知服务 | 通知状态机与 Notifier 注入测试覆盖；真实 mygo.NewNotification 只在源码级接入 | macOS 打包后通知权限、Windows balloon、Linux notification service 实机 |
-| 窗口管理 | 窗口状态持久化/设置独立窗口/菜单栏均有单测与 headless 行为测试 | 真机窗口恢复、双窗口焦点、macOS 菜单栏/Windows 窗口菜单 |
+| 窗口管理 | 窗口状态持久化、设置独立窗口均有单测与 headless 行为测试；原生窗口菜单栏已于 2026-11-05 退役（[ADR 0006](../../docs/decisions/0006-retire-native-menu-bar.md)） | 真机窗口恢复、双窗口焦点、无菜单栏下的快捷键/剪贴板/Quit 路径 |
 
 ## 2. 框架/平台限制（已记录策略，未强改）
 
@@ -23,7 +23,8 @@
 ## 3. 桌面交互遗留
 
 - **通知**：当前/后台会话的 turn 完成/失败与**审批/提问等待**均已通知（controller hook）；通知 ID 替换、动作按钮、"退出应用后点击通知"未做；跨会话总量节流为简化策略（同会话完成 5s 冷却，审批不节流）。
-- **设置窗口**：Windows/Linux 设置窗口无菜单栏；窗口间几何联动、大页滚动位置持久化未做；overlay 作为无显示器/创建失败的回退保留（行为略有差异）。
+- **设置窗口**：所有窗口均无菜单栏（原生菜单栏 2026-11-05 退役，[ADR 0006](../../docs/decisions/0006-retire-native-menu-bar.md)）；窗口间几何联动、大页滚动位置持久化未做；overlay 作为无显示器/创建失败的回退保留（行为略有差异）。
+- **计划模式**：2026-11-05 起对齐 DSH（[ADR 0008](../../docs/decisions/0008-plan-mode-soft-alignment.md)）：入口为 `/plan` 命令 + composer 计划徽章（`/plan` 开、`/plan off` 或点徽章关、`/plan <消息>` 开并提交该消息）；计划模式是**软引导**（`plan:policy` prompt + `present` "Plan" + 审阅卡），**不再拦截任何工具**——需要强制只读规划的必须同时选择 composer 的「只读」权限（plan 与权限正交、可叠加）。尚未做：独立 `exit_plan_mode` 工具、审阅卡 Keep planning（带反馈）分支、pending 态徽章、Home 草稿会话的 `/plan`。另：Home composer 打开 `/` 面板后会丢键盘焦点（既有缺陷，未修）。
 - **文本选择**：消息与工具卡中的 Markdown 内容（正文/代码）可选中并右键复制（mygo markdown）；其余 UI 文本未全量开启选择（侧栏、按钮、标题、设置说明等），桌面应用一般也不需要。
 - **Trajectory**：已虚拟化（ui.List，1000 事件稳态帧 22.7ms→3.12ms，见 perf.md §8）；`FollowEnd=false` 为当前选择，若产品要"日志式跟随末尾"改一处即可。
 - **工具输出**：超大工具结果 40 行封顶 + 展开，未虚拟化（当前规模可接受）；工具结果代码块语言映射为简化集合（bash/text 等）。

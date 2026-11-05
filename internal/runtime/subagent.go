@@ -270,11 +270,10 @@ func (a *Agent) subagentToolNames(mode string) []string {
 	return names
 }
 
-// restrictedEinoTools wraps the child tool subset for mode, preserving the Gate,
-// reviewer and plan-mode resolver so a child tool call still asks for approval,
-// is reviewed automatically exactly like a root call, and is rejected by plan
-// mode exactly like a root call. It binds the same effective tools the parent
-// sees (including a mode's synthesized settings tools), so the child's
+// restrictedEinoTools wraps the child tool subset for mode, preserving the Gate
+// and reviewer so a child tool call still asks for approval and is reviewed
+// automatically exactly like a root call. It binds the same effective tools the
+// parent sees (including a mode's synthesized settings tools), so the child's
 // advertised and bound tool sets cannot disagree.
 func (a *Agent) restrictedEinoTools(mode string) []tool.BaseTool {
 	wanted := make(map[string]bool)
@@ -286,7 +285,7 @@ func (a *Agent) restrictedEinoTools(mode string) []tool.BaseTool {
 		if !wanted[t.Name()] {
 			continue
 		}
-		out = append(out, newEinoTool(t, a.gate, a.planMode, a.reviewer))
+		out = append(out, newEinoTool(t, a.gate, a.reviewer))
 	}
 	return out
 }
@@ -341,28 +340,6 @@ func (a *Agent) bindToolReviewers() {
 	for _, t := range a.registry.List() {
 		if binder, ok := t.(ToolReviewBinder); ok {
 			binder.SetToolReviewer(a.reviewer)
-		}
-	}
-}
-
-// planModeBinder is implemented by tools that execute nested tool calls
-// themselves (the PTC batch tool). New hands them the same resolver the outer
-// eino wrapper uses, so an inner call cannot bypass plan mode just because the
-// outer "ptc" call was allowed.
-type planModeBinder interface {
-	SetPlanModeFunc(func() bool)
-}
-
-// bindPlanMode passes a.planMode to every registered tool that implements
-// planModeBinder. A nil resolver means plan mode is disabled, matching the
-// outer wrapper. It runs once from New, before the agent is used.
-func (a *Agent) bindPlanMode() {
-	if a.planMode == nil {
-		return
-	}
-	for _, t := range a.registry.List() {
-		if binder, ok := t.(planModeBinder); ok {
-			binder.SetPlanModeFunc(a.planMode)
 		}
 	}
 }

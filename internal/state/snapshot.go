@@ -55,7 +55,14 @@ type Attachment struct {
 // values; a fold that grows a message copies the slice and the one message it
 // changes, so previously published snapshots never observe the update.
 type Message struct {
-	MsgID     string
+	MsgID string
+	// Seq is the snapshot Seq at which this message first appeared. A message
+	// created by folding a Token or Reasoning event takes that event's Seq and
+	// keeps it when later text is appended; a live user message takes the Seq
+	// the controller assigned it. Hand-built snapshots (fixtures) and
+	// pre-upgrade snapshots may leave Seq 0; the view treats 0 as "unknown"
+	// and degrades to list order instead of sorting on it.
+	Seq       uint64
 	Role      Role
 	Text      string
 	Reasoning string
@@ -157,8 +164,11 @@ func NewSnapshot() *Snapshot {
 //	Error           replace Snapshot.LastError with immutable error info
 //
 // Seq is incremented once per applied event. Messages keep the order in which
-// their MsgID first appeared. Token and Reasoning events carrying a non-empty
-// SessionID set Snapshot.SessionID (the last such event wins).
+// their MsgID first appeared, and a message created by a fold records that
+// event's Seq in Message.Seq (later appends keep it), so Message.Seq and
+// ToolState.StartedSeq share the snapshot's Seq axis. Token and Reasoning
+// events carrying a non-empty SessionID set Snapshot.SessionID (the last such
+// event wins).
 func Apply(prev *Snapshot, ev Event) *Snapshot {
 	if ev == nil {
 		if prev != nil {
@@ -177,12 +187,12 @@ func Apply(prev *Snapshot, ev Event) *Snapshot {
 		if e.SessionID != "" {
 			next.SessionID = e.SessionID
 		}
-		next.Messages = appendMessageText(prev.Messages, e.MsgID, e.Text)
+		next.Messages = appendMessageText(prev.Messages, e.MsgID, e.Text, next.Seq)
 	case Reasoning:
 		if e.SessionID != "" {
 			next.SessionID = e.SessionID
 		}
-		next.Messages = appendMessageReasoning(prev.Messages, e.MsgID, e.Text)
+		next.Messages = appendMessageReasoning(prev.Messages, e.MsgID, e.Text, next.Seq)
 	case ToolStart:
 		next.Tools = updateTool(prev.Tools, e.CallID, func(st *ToolState) {
 			st.Name = e.Name
@@ -228,17 +238,18 @@ func Apply(prev *Snapshot, ev Event) *Snapshot {
 	return &next
 }
 
-func appendMessageText(msgs []Message, msgID, text string) []Message {
-	return updateMessage(msgs, msgID, func(m *Message) { m.Text += text })
+func appendMessageText(msgs []Message, msgID, text string, seq uint64) []Message {
+	return updateMessage(msgs, msgID, seq, func(m *Message) { m.Text += text })
 }
 
-func appendMessageReasoning(msgs []Message, msgID, text string) []Message {
-	return updateMessage(msgs, msgID, func(m *Message) { m.Reasoning += text })
+func appendMessageReasoning(msgs []Message, msgID, text string, seq uint64) []Message {
+	return updateMessage(msgs, msgID, seq, func(m *Message) { m.Reasoning += text })
 }
 
-// updateMessage copies msgs, appends msgID if missing, and applies mutate to
-// the single affected message.
-func updateMessage(prev []Message, msgID string, mutate func(*Message)) []Message {
+// updateMessage copies msgs, appends msgID if missing (created at seq, the
+// snapshot Seq of the event that first named it), and applies mutate to the
+// single affected message. Appending to an existing message keeps its Seq.
+func updateMessage(prev []Message, msgID string, seq uint64, mutate func(*Message)) []Message {
 	for i := range prev {
 		if prev[i].MsgID != msgID {
 			continue
@@ -248,7 +259,7 @@ func updateMessage(prev []Message, msgID string, mutate func(*Message)) []Messag
 		mutate(&out[i])
 		return out
 	}
-	msg := Message{MsgID: msgID, Role: RoleAssistant}
+	msg := Message{MsgID: msgID, Seq: seq, Role: RoleAssistant}
 	mutate(&msg)
 	out := make([]Message, len(prev), len(prev)+1)
 	copy(out, prev)

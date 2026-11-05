@@ -310,25 +310,21 @@ func toolSpecs(infos []*schema.ToolInfo) []ToolSpec {
 // approval: the call is announced as state.ApprovalRequest and blocks until the
 // user decides. When a ToolReviewer is configured, a call that would ask is
 // first reviewed by the model: ALLOW skips the prompt, DENY fails the call, and
-// a reviewer failure falls back to the prompt. When planMode reports true it
-// rejects mutating/external tools before either gate, so a blocked call never
-// prompts or reviews.
+// a reviewer failure falls back to the prompt.
 type einoInvokableTool struct {
 	tool     Tool
 	info     *schema.ToolInfo
 	gate     Gate
 	reviewer ToolReviewer
-	planMode func() bool
 }
 
 var _ tool.InvokableTool = (*einoInvokableTool)(nil)
 
-func newEinoTool(t Tool, gate Gate, planMode func() bool, reviewer ToolReviewer) *einoInvokableTool {
+func newEinoTool(t Tool, gate Gate, reviewer ToolReviewer) *einoInvokableTool {
 	return &einoInvokableTool{
 		tool:     t,
 		gate:     gate,
 		reviewer: reviewer,
-		planMode: planMode,
 		info: &schema.ToolInfo{
 			Name: t.Name(),
 			Desc: t.Description(),
@@ -347,9 +343,6 @@ func (e *einoInvokableTool) InvokableRun(ctx context.Context, argumentsInJSON st
 	}
 	if !json.Valid(args) {
 		return e.toolFailure(ctx, "", "", fmt.Errorf("tool %q: invalid JSON arguments %q", e.tool.Name(), argumentsInJSON))
-	}
-	if err := e.planModeBlocked(); err != nil {
-		return e.toolFailure(ctx, "", "", err)
 	}
 	if err := e.awaitApproval(ctx, args); err != nil {
 		return e.toolFailure(ctx, "", "", err)
@@ -391,20 +384,6 @@ func (e *einoInvokableTool) toolFailure(ctx context.Context, callID, text string
 		return marker, nil
 	}
 	return strings.TrimRight(text, "\n") + "\n" + marker, nil
-}
-
-// planModeBlocked returns ErrPlanMode when plan mode is active and the tool is
-// mutating or external. Read-only tools and present keep working so the agent
-// can investigate and submit the plan. The resolver is read at call time; no
-// topology rebuild is involved.
-func (e *einoInvokableTool) planModeBlocked() error {
-	if e.planMode == nil || !e.planMode() {
-		return nil
-	}
-	if !PlanModeBlocksTool(e.tool.Name()) {
-		return nil
-	}
-	return planModeBlockedError(e.tool.Name())
 }
 
 // awaitApproval runs automatic review for a call the Gate requires approval

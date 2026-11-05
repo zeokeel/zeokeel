@@ -26,9 +26,11 @@ type liveMenuState struct {
 	modelOpen      bool
 	moreOpen       bool
 
-	// toolSummaryCollapsed hides the tool cards under the summary line. The
-	// default false keeps the detailed Work details behavior visible.
-	toolSummaryCollapsed bool
+	// toolSummaryCollapsed hides the cards under one process block's summary
+	// line, keyed by the block's first call ID. No entry means the block is
+	// open, which keeps the detailed Work details behavior visible; each turn
+	// folds independently now that the transcript has one block per turn.
+	toolSummaryCollapsed map[string]bool
 
 	// pendingTurn is the turn a jump control asked to reveal. The next frame
 	// scrolls that turn's first message into view and clears it.

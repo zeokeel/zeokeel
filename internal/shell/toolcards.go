@@ -76,19 +76,41 @@ func toolKindFor(name string) toolVariantKind {
 	}
 }
 
-// liveToolCards draws the session's tool calls, ordered by call ID so a map's
-// iteration order never moves them from frame to frame.
-func (a *App) liveToolCards(c *ui.Context, t *design.Tokens, snap *state.Snapshot) {
-	if len(snap.Tools) == 0 {
-		return
+// snapshotToolStates resolves the snapshot's tool map into record order: start
+// Seq ascending, call ID as the stable tiebreak for hand-built snapshots whose
+// calls all start at 0. Sorting a copy means the map's iteration order never
+// moves a card from frame to frame.
+func snapshotToolStates(snap *state.Snapshot) []state.ToolState {
+	tools := make([]state.ToolState, 0, len(snap.Tools))
+	for _, tool := range snap.Tools {
+		tools = append(tools, tool)
 	}
-	ids := make([]string, 0, len(snap.Tools))
-	for id := range snap.Tools {
-		ids = append(ids, id)
+	return sortToolStates(tools)
+}
+
+// sortToolStates returns tools in record order: ToolState.StartedSeq ascending
+// on the same axis as Message.Seq, with the call ID as the stable tiebreak.
+func sortToolStates(tools []state.ToolState) []state.ToolState {
+	if len(tools) < 2 {
+		return tools
 	}
-	sort.Strings(ids)
-	for _, id := range ids {
-		a.liveToolCard(c, t, snap.Tools[id])
+	out := make([]state.ToolState, len(tools))
+	copy(out, tools)
+	sort.SliceStable(out, func(i, j int) bool {
+		if out[i].StartedSeq != out[j].StartedSeq {
+			return out[i].StartedSeq < out[j].StartedSeq
+		}
+		return out[i].CallID < out[j].CallID
+	})
+	return out
+}
+
+// liveToolCards draws one process block's tool calls in record order. The
+// caller passes the block's subset of the session's tools, so a multi-turn
+// session renders each turn's cards under that turn's summary line.
+func (a *App) liveToolCards(c *ui.Context, t *design.Tokens, tools []state.ToolState) {
+	for _, tool := range sortToolStates(tools) {
+		a.liveToolCard(c, t, tool)
 	}
 }
 

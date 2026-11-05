@@ -436,10 +436,34 @@ func TestSlashCommandsExecuteLocally(t *testing.T) {
 		if !strings.HasPrefix(h.app.draft, "Commands:") {
 			t.Fatalf("/help draft = %q", h.app.draft)
 		}
-		for _, name := range []string{"/clear", "/model"} {
+		for _, name := range []string{"/clear", "/model", "/plan"} {
 			if !strings.Contains(h.app.draft, name) {
 				t.Fatalf("/help text missing %q: %q", name, h.app.draft)
 			}
+		}
+	})
+	t.Run("/plan", func(t *testing.T) {
+		provider := &shellProvider{}
+		h := newLiveApp(t, provider)
+		// Plan mode is persisted in the session's settings, not sent to the
+		// model.
+		if h.ctrl.PlanMode(h.ctrl.CurrentSessionID()) {
+			t.Fatal("new session starts in plan mode")
+		}
+		tt := ui.NewTester(h.app.View, 1600, 1000)
+		typeComposer(t, tt, "/plan")
+		if !h.ctrl.PlanMode(h.ctrl.CurrentSessionID()) {
+			t.Fatal("/plan did not turn plan mode on")
+		}
+		if h.app.draft != "" {
+			t.Fatalf("/plan left draft %q", h.app.draft)
+		}
+		if got := provider.callCount(); got != 0 {
+			t.Fatalf("/plan model calls = %d, want 0", got)
+		}
+		tt.Frame()
+		if !tt.HasText(planBadgeLabelEN) {
+			t.Fatalf("plan badge missing after /plan: %v", tt.Texts())
 		}
 	})
 	t.Run("/new", func(t *testing.T) {
@@ -516,7 +540,7 @@ func TestUnknownSlashFallsThroughToModel(t *testing.T) {
 // added after the first three.
 func TestCatalogCommandsAreKnown(t *testing.T) {
 	for _, name := range []string{
-		"/clear", "/stop", "/help", "/new", "/settings",
+		"/clear", "/stop", "/plan", "/help", "/new", "/settings",
 		"/automate", "/plugins", "/model",
 	} {
 		if !isSlashCommand(name) {
@@ -533,6 +557,27 @@ func TestCatalogCommandsAreKnown(t *testing.T) {
 	// Arguments after whitespace still resolve to the command.
 	if !isSlashCommand("/stop now") {
 		t.Error("/stop now did not resolve to /stop")
+	}
+	// /plan takes an optional argument, so its forms must dispatch locally
+	// instead of falling through to the model.
+	for _, line := range []string{"/plan", "/plan off", "/plan OFF", "/plan 写测试"} {
+		if !isSlashCommand(line) {
+			t.Errorf("%q is not a known command", line)
+		}
+	}
+	// It resolves to /plan itself and keeps the rest as the argument.
+	for _, tc := range []struct{ line, arg string }{
+		{"/plan", ""},
+		{"/plan off", "off"},
+		{"/plan 写测试", "写测试"},
+		{" /plan   two words  ", "two words"},
+	} {
+		if got := planCommandArg(tc.line); got != tc.arg {
+			t.Errorf("planCommandArg(%q) = %q, want %q", tc.line, got, tc.arg)
+		}
+	}
+	if got := planCommandArg("/planning"); got != "" {
+		t.Errorf("planCommandArg(%q) = %q, want empty (not a /plan line)", "/planning", got)
 	}
 }
 
