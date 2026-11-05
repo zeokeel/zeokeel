@@ -132,7 +132,7 @@ func (a *Agent) buildDeepAgent(snap agentSnapshot) (adk.Agent, error) {
 		Description:   "ZeoKeel deep agent",
 		Instruction:   instruction,
 		Model:         snap.chatModel,
-		MaxIterations: a.maxIterations,
+		MaxIterations: a.einoMaxIterations(),
 		Handlers:      a.modelHandlers(),
 		ToolsConfig: adk.ToolsConfig{
 			ToolsNodeConfig: compose.ToolsNodeConfig{Tools: tools},

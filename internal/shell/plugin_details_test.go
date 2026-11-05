@@ -208,7 +208,7 @@ func TestPluginDetailEditors(t *testing.T) {
 		t.Fatalf("click View Agent loop: %v", err)
 	}
 	*st.detailFields["plugin.agent_loop.max_iterations"] = ""
-	if err := tt.Click("Max iterations"); err != nil {
+	if err := tt.Click("Max iterations (0 = unlimited)"); err != nil {
 		t.Fatalf("focus Max iterations input: %v", err)
 	}
 	tt.Type("30")
@@ -677,9 +677,10 @@ func TestWebSearchDetailRequiresAdapterAndAPIKey(t *testing.T) {
 }
 
 // TestAgentLoopStepCeilingBounds pins the Agent loop plugin editor after the
-// max-iterations fix: the field defaults to the runtime's high safety ceiling,
-// the editor's upper bound is the runtime limit, and values beyond it are
-// rejected without persisting so the ceiling cannot disappear by accident.
+// unlimited-by-default change: the field defaults to 0 (no fixed ceiling, the
+// model decides when to end), 0 is a valid persisted choice meaning unlimited,
+// a positive safety cap up to the editor limit is accepted, and negative or
+// too-large values are rejected without persisting.
 func TestAgentLoopStepCeilingBounds(t *testing.T) {
 	h := newLiveApp(t, &shellProvider{})
 	h.app.Language = LangEN
@@ -687,28 +688,58 @@ func TestAgentLoopStepCeilingBounds(t *testing.T) {
 	if err := tt.Click("Plugins"); err != nil {
 		t.Fatalf("click Plugins: %v", err)
 	}
-	if err := tt.Click("View Agent loop"); err != nil {
-		t.Fatalf("view Agent loop: %v", err)
+	openEditor := func() {
+		t.Helper()
+		if err := tt.Click("View Agent loop"); err != nil {
+			t.Fatalf("view Agent loop: %v", err)
+		}
 	}
+	openEditor()
 	st := h.app.pluginUI()
 	field := "plugin.agent_loop.max_iterations"
+	if runtime.DefaultMaxIterations != 0 {
+		t.Fatalf("runtime.DefaultMaxIterations = %d, want 0 (DSH-aligned unlimited default)", runtime.DefaultMaxIterations)
+	}
 	if got, want := *st.detailFields[field], strconv.Itoa(runtime.DefaultMaxIterations); got != want {
 		t.Fatalf("default max iterations = %q, want the runtime default %q", got, want)
 	}
+	boundsToast := fmt.Sprintf("Max iterations (0 = unlimited) must be a number between 0 and %d", runtime.MaxIterationsLimit)
 
-	// Above the editor limit: rejected, toast names the bounds, nothing saved.
+	// Explicit 0 (= unlimited) is valid and persisted as the user's choice.
+	*st.detailFields[field] = "0"
+	if err := tt.Click("Save"); err != nil {
+		t.Fatalf("save zero: %v", err)
+	}
+	if got, _ := h.store.GetSetting(field); got != "0" {
+		t.Fatalf("zero persisted = %q, want \"0\" (explicit unlimited)", got)
+	}
+
+	// Negative values are outside the editor's 0 lower bound and never persist.
+	openEditor()
+	*st.detailFields[field] = "-5"
+	if err := tt.Click("Save"); err != nil {
+		t.Fatalf("save negative: %v", err)
+	}
+	if !tt.HasText(boundsToast) {
+		t.Fatalf("negative range toast missing: %q", tt.Texts())
+	}
+	if got, _ := h.store.GetSetting(field); got != "0" {
+		t.Fatalf("negative save changed setting to %q", got)
+	}
+
+	// Values above the editor limit are rejected the same way.
 	*st.detailFields[field] = strconv.Itoa(runtime.MaxIterationsLimit + 1)
 	if err := tt.Click("Save"); err != nil {
 		t.Fatalf("save out-of-range: %v", err)
 	}
-	if !tt.HasText(fmt.Sprintf("Max iterations must be a number between 1 and %d", runtime.MaxIterationsLimit)) {
+	if !tt.HasText(boundsToast) {
 		t.Fatalf("range toast missing: %q", tt.Texts())
 	}
-	if got, _ := h.store.GetSetting(field); got != "" {
-		t.Fatalf("out-of-range save persisted %q", got)
+	if got, _ := h.store.GetSetting(field); got != "0" {
+		t.Fatalf("out-of-range save changed setting to %q", got)
 	}
 
-	// The upper bound itself is accepted and persisted.
+	// The upper bound itself is accepted and persisted as an explicit cap.
 	*st.detailFields[field] = strconv.Itoa(runtime.MaxIterationsLimit)
 	if err := tt.Click("Save"); err != nil {
 		t.Fatalf("save upper bound: %v", err)

@@ -31,10 +31,10 @@ func TestStepLimitNoticeFollowsLanguage(t *testing.T) {
 }
 
 // TestBuildAgentStepCeiling covers the app wiring of the per-turn step ceiling:
-// the runtime default (a high safety bound, not the old 20) applies when the
-// user has not configured one, configured values above the old editor limit are
-// honored up to the new limit, and values beyond it clamp instead of disabling
-// the ceiling.
+// the default is 0 (no fixed ceiling, DSH-aligned: the model decides when to
+// stop), a positive setting is honored up to the editor limit, values beyond it
+// clamp, negative or unreadable values fall back to 0 (unlimited), and the
+// disabled agent-loop plugin keeps its single-round-trip meaning.
 func TestBuildAgentStepCeiling(t *testing.T) {
 	st, dir := newToolStore(t)
 	for key, value := range map[string]string{
@@ -56,33 +56,48 @@ func TestBuildAgentStepCeiling(t *testing.T) {
 		}
 		return bundle
 	}
-	closeBundle := func(bundle *AgentBundle) {
-		if bundle.Close != nil {
-			_ = bundle.Close()
+	maxIterations := func(value string) int {
+		t.Helper()
+		if value != "" {
+			if err := st.SetSetting("plugin.agent_loop.max_iterations", value); err != nil {
+				t.Fatal(err)
+			}
 		}
+		bundle := build()
+		defer func() {
+			if bundle.Close != nil {
+				_ = bundle.Close()
+			}
+		}()
+		return bundle.Agent.MaxIterations()
 	}
 
-	def := build()
-	if got := def.Agent.MaxIterations(); got != runtime.DefaultMaxIterations {
-		t.Fatalf("default MaxIterations = %d, want %d", got, runtime.DefaultMaxIterations)
+	// Missing setting: no fixed ceiling, like DSH.
+	if got := maxIterations(""); got != 0 {
+		t.Fatalf("default MaxIterations = %d, want 0 (unlimited)", got)
 	}
-	closeBundle(def)
-
-	if err := st.SetSetting("plugin.agent_loop.max_iterations", "700"); err != nil {
-		t.Fatal(err)
-	}
-	configured := build()
-	if got := configured.Agent.MaxIterations(); got != 700 {
+	// Explicit positive values are kept, clamped to the editor limit.
+	if got := maxIterations("700"); got != 700 {
 		t.Fatalf("configured MaxIterations = %d, want 700", got)
 	}
-	closeBundle(configured)
-
-	if err := st.SetSetting("plugin.agent_loop.max_iterations", "100000"); err != nil {
-		t.Fatal(err)
-	}
-	clamped := build()
-	if got := clamped.Agent.MaxIterations(); got != runtime.MaxIterationsLimit {
+	if got := maxIterations("100000"); got != runtime.MaxIterationsLimit {
 		t.Fatalf("clamped MaxIterations = %d, want %d", got, runtime.MaxIterationsLimit)
 	}
-	closeBundle(clamped)
+	// A negative or unreadable value means unlimited, never "one step".
+	if got := maxIterations("-5"); got != 0 {
+		t.Fatalf("negative MaxIterations = %d, want 0 (unlimited)", got)
+	}
+	if got := maxIterations("not-a-number"); got != 0 {
+		t.Fatalf("unreadable MaxIterations = %d, want 0 (unlimited)", got)
+	}
+	if got := maxIterations("0"); got != 0 {
+		t.Fatalf("explicit zero MaxIterations = %d, want 0 (unlimited)", got)
+	}
+	// Disabling the agent-loop plugin keeps its old single-round-trip meaning.
+	if err := st.SetSetting("plugin.agent_loop.enabled", "false"); err != nil {
+		t.Fatal(err)
+	}
+	if got := maxIterations("700"); got != 1 {
+		t.Fatalf("disabled agent-loop MaxIterations = %d, want 1", got)
+	}
 }

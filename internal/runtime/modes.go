@@ -227,7 +227,7 @@ func (a *Agent) buildMode(snap agentSnapshot) (adk.Agent, error) {
 			Description:   "ZeoKeel agent runtime",
 			Instruction:   snap.instruction,
 			Model:         snap.chatModel,
-			MaxIterations: a.maxIterations,
+			MaxIterations: a.einoMaxIterations(),
 			ToolsConfig:   toolsConfig,
 			Handlers:      a.modelHandlers(),
 		})
@@ -246,7 +246,7 @@ func (a *Agent) buildMode(snap agentSnapshot) (adk.Agent, error) {
 			Description:   "ZeoKeel supervisor",
 			Instruction:   instruction,
 			Model:         snap.chatModel,
-			MaxIterations: a.maxIterations,
+			MaxIterations: a.einoMaxIterations(),
 			ToolsConfig:   toolsConfig,
 			Handlers:      a.modelHandlers(),
 		})
@@ -279,7 +279,7 @@ func (a *Agent) buildMode(snap agentSnapshot) (adk.Agent, error) {
 		executor, err := planexecute.NewExecutor(context.Background(), &planexecute.ExecutorConfig{
 			Model:         snap.chatModel,
 			ToolsConfig:   toolsConfig,
-			MaxIterations: a.maxIterations,
+			MaxIterations: a.einoMaxIterations(),
 		})
 		if err != nil {
 			return nil, fmt.Errorf("runtime: build executor: %w", err)
@@ -294,7 +294,7 @@ func (a *Agent) buildMode(snap agentSnapshot) (adk.Agent, error) {
 			Planner:       planner,
 			Executor:      executor,
 			Replanner:     replanner,
-			MaxIterations: a.maxIterations,
+			MaxIterations: a.einoMaxIterations(),
 		})
 		if err != nil {
 			return nil, fmt.Errorf("runtime: build plan-execute agent: %w", err)

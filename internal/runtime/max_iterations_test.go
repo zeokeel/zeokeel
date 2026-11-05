@@ -245,3 +245,122 @@ func TestMaxIterationsProviderPathCompletesGracefully(t *testing.T) {
 		t.Fatalf("usage = %+v, ok=%v; want 2 steps", usage, ok)
 	}
 }
+
+// toolLoopModel scripts a model that calls the clock tool n times and then ends
+// the turn with finalText. It is the "AI decides when to stop" shape: the model
+// returns no tool calls on the last step, so no ceiling is involved.
+func toolLoopModel(n int, finalText string) *fakeChatModel {
+	return &fakeChatModel{script: func(_ context.Context, call int, _ []*schema.Message) ([]*schema.Message, error) {
+		if call < n {
+			return []*schema.Message{{
+				Role: schema.Assistant,
+				ToolCalls: []schema.ToolCall{{
+					ID:       fmt.Sprintf("call-%d", call+1),
+					Type:     "function",
+					Function: schema.FunctionCall{Name: "clock", Arguments: `{}`},
+				}},
+			}}, nil
+		}
+		return []*schema.Message{{Role: schema.Assistant, Content: finalText}}, nil
+	}}
+}
+
+// TestUnlimitedIterationsModelEndsTurn pins the DSH-aligned default: with no
+// configured ceiling (MaxIterations=0), the model may take as many tool round
+// trips as it needs and ends the turn itself by answering without tool calls.
+// 25 round trips exceed eino's own 20 fallback, so this also proves the runtime
+// passes the large sentinel instead of letting eino default to 20.
+func TestUnlimitedIterationsModelEndsTurn(t *testing.T) {
+	clock := &fakeClock{result: "now"}
+	reg := NewRegistry()
+	if err := reg.Register(clock); err != nil {
+		t.Fatal(err)
+	}
+	const toolCalls = 25
+	m := toolLoopModel(toolCalls, "final answer")
+	agent := newTestAgent(t, Config{einoModel: m, Tools: reg})
+	if got := agent.MaxIterations(); got != 0 {
+		t.Fatalf("MaxIterations() = %d, want 0 (no fixed ceiling)", got)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	ch, err := agent.Run(ctx, "session-unlimited", "do the long job")
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	events := collectEvents(t, ch)
+
+	t.Logf("model calls=%d tool calls=%d phases=%v error=%q",
+		m.callCount(), clock.callCount(), phases(events), findErrorText(events))
+
+	if m.callCount() != toolCalls+1 || clock.callCount() != toolCalls {
+		t.Fatalf("model calls=%d tool calls=%d, want %d/%d", m.callCount(), clock.callCount(), toolCalls+1, toolCalls)
+	}
+	if got := findErrorText(events); got != "" {
+		t.Fatalf("unlimited turn emitted an error: %q", got)
+	}
+	if got := phases(events); len(got) == 0 || got[len(got)-1] != state.PhaseIdle {
+		t.Fatalf("final phase = %v, want idle", got)
+	}
+	if got := strings.Join(tokenTexts(events), ""); got != "final answer" {
+		t.Fatalf("tokens = %q, want only the model's final answer (no step-limit notice)", got)
+	}
+	if usage, ok := lastUsage(events); !ok || usage.Steps != toolCalls+1 {
+		t.Fatalf("usage = %+v, ok=%v; want %d steps", usage, ok, toolCalls+1)
+	}
+}
+
+// TestNegativeMaxIterationsMeansUnlimited pins that a negative configuration
+// means the same as 0: no fixed ceiling. It also pins the getter contract.
+func TestNegativeMaxIterationsMeansUnlimited(t *testing.T) {
+	clock := &fakeClock{result: "now"}
+	reg := NewRegistry()
+	if err := reg.Register(clock); err != nil {
+		t.Fatal(err)
+	}
+	m := toolLoopModel(3, "done")
+	agent := newTestAgent(t, Config{einoModel: m, Tools: reg, MaxIterations: -7})
+	if got := agent.MaxIterations(); got != 0 {
+		t.Fatalf("MaxIterations() = %d, want 0 for a negative configuration", got)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	ch, err := agent.Run(ctx, "session-negative", "go")
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	events := collectEvents(t, ch)
+	if m.callCount() != 4 || clock.callCount() != 3 {
+		t.Fatalf("model calls=%d tool calls=%d, want 4/3", m.callCount(), clock.callCount())
+	}
+	if got := findErrorText(events); got != "" {
+		t.Fatalf("negative-cap turn emitted an error: %q", got)
+	}
+	if got := phases(events); len(got) == 0 || got[len(got)-1] != state.PhaseIdle {
+		t.Fatalf("final phase = %v, want idle", got)
+	}
+	if got := strings.Join(tokenTexts(events), ""); got != "done" {
+		t.Fatalf("tokens = %q, want the model's final answer", got)
+	}
+}
+
+// TestExplicitMaxIterationsGetter pins that an explicit positive cap is kept
+// as configured.
+func TestExplicitMaxIterationsGetter(t *testing.T) {
+	agent := newTestAgent(t, Config{
+		einoModel:     toolLoopModel(0, "x"),
+		MaxIterations: 42,
+	})
+	if got := agent.MaxIterations(); got != 42 {
+		t.Fatalf("MaxIterations() = %d, want 42", got)
+	}
+	if got := agent.einoMaxIterations(); got != 42 {
+		t.Fatalf("einoMaxIterations() = %d, want 42", got)
+	}
+	unlimited := newTestAgent(t, Config{einoModel: toolLoopModel(0, "x")})
+	if got := unlimited.einoMaxIterations(); got != unlimitedEinoIterations {
+		t.Fatalf("unlimited einoMaxIterations() = %d, want sentinel %d", got, unlimitedEinoIterations)
+	}
+}

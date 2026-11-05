@@ -17,18 +17,25 @@ import (
 	"github.com/zeokeel/zeokeel/internal/state"
 )
 
-// DefaultMaxIterations is the per-turn ceiling on model/tool round trips when
-// the user has not configured one. It is deliberately high: DSH's agent loop
-// has no fixed step cap (its loop runs until the model answers, the user stops
-// it, or the turn errors), so a long but progressing tool loop must not be cut
-// off. The Plugins editor still lets a user impose a stricter bound; reaching
-// the ceiling ends the turn gracefully instead of failing it (see
-// Agent.completeMaxIterations).
-const DefaultMaxIterations = 200
+// DefaultMaxIterations is the per-turn ceiling when the user has not configured
+// one. Zero means no fixed ceiling: like DSH's agent loop (an unbounded
+// model/tool loop), the model decides when the turn ends by answering without
+// tool calls; the user can always stop it. A positive Config.MaxIterations
+// restores a user-chosen safety cap, and reaching that cap ends the turn
+// gracefully (see Agent.completeMaxIterations).
+const DefaultMaxIterations = 0
 
-// MaxIterationsLimit is the largest per-turn ceiling the Plugins editor
-// accepts. It keeps the setting a safety bound rather than an unbounded budget.
+// MaxIterationsLimit is the largest explicit per-turn ceiling the Plugins editor
+// accepts. The setting is a user opt-in safety bound, not the default.
 const MaxIterationsLimit = 1000
+
+// unlimitedEinoIterations is the positive sentinel handed to eino when ZeoKeel
+// has no fixed ceiling. eino's react state treats a configured MaxIterations
+// <= 0 as "unset" and falls back to its own default 20
+// (eino/adk/react.go genReactState/genAgenticReactState), so 0 cannot express
+// "unlimited"; the sentinel is far beyond any real turn and still decrements
+// safely.
+const unlimitedEinoIterations = 1_000_000_000
 
 // Config configures an Agent. Provider is the production path; einoModel is a
 // test seam for injecting an eino model directly (see the package tests) and
@@ -52,9 +59,10 @@ type Config struct {
 	Provider Provider
 	// Tools is the tool registry exposed to the model. Optional.
 	Tools *Registry
-	// MaxIterations caps model/tool round trips per turn. Zero means
-	// DefaultMaxIterations. Reaching the cap completes the turn gracefully: the
-	// work done so far is kept and StepLimitNotice is shown to the user.
+	// MaxIterations caps model/tool round trips per turn. Zero or negative means
+	// no fixed ceiling: the model ends the turn itself by answering without tool
+	// calls (the DSH behavior). A positive value is a user-chosen safety cap;
+	// reaching it completes the turn gracefully with StepLimitNotice shown.
 	MaxIterations int
 	// StepLimitNotice returns the assistant text shown when a turn reaches
 	// MaxIterations. The app supplies it so the notice follows the UI language;
@@ -225,6 +233,8 @@ func New(cfg Config) (*Agent, error) {
 	}
 	maxIterations := cfg.MaxIterations
 	if maxIterations <= 0 {
+		// Zero is the default "no fixed ceiling"; a negative configuration means
+		// the same. Normalize it so MaxIterations() never reports a negative.
 		maxIterations = DefaultMaxIterations
 	}
 
@@ -377,8 +387,20 @@ func (a *Agent) SetModel(name string) error {
 	return nil
 }
 
-// MaxIterations returns the model/tool round-trip cap.
+// MaxIterations returns the configured per-turn ceiling; 0 means no fixed
+// ceiling (the default: the model decides when to end the turn).
 func (a *Agent) MaxIterations() int { return a.maxIterations }
+
+// einoMaxIterations maps ZeoKeel's "no fixed ceiling" (<=0) onto eino's
+// positive-only MaxIterations. eino falls back to 20 for a configured value
+// <= 0 (eino/adk/react.go genReactState/genAgenticReactState), so unlimited is
+// sent as a very large positive sentinel that no real turn reaches.
+func (a *Agent) einoMaxIterations() int {
+	if a.maxIterations > 0 {
+		return a.maxIterations
+	}
+	return unlimitedEinoIterations
+}
 
 // MaxSubagentDepth returns the child-agent nesting cap.
 func (a *Agent) MaxSubagentDepth() int { return a.maxSubagentDepth }

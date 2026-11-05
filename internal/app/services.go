@@ -854,10 +854,19 @@ func buildAgentWithOptions(st *store.Store, root, instruction string, opts regis
 	if st != nil {
 		settings = st
 	}
+	// 0 (the runtime default) means no fixed per-turn ceiling: the model decides
+	// when to end the turn, like DSH. A positive setting is a user-chosen safety
+	// cap; negatives are clamped to 0 so the setting can never mean "one step"
+	// by accident. Disabling the agent-loop plugin keeps its old single-round-trip
+	// meaning.
 	maxIterations := runtime.DefaultMaxIterations
 	if !pluginEnabled(st, "agent_loop", true) {
 		maxIterations = 1
-	} else if n := settingInt(get, "plugin.agent_loop.max_iterations", "", runtime.DefaultMaxIterations, 1, runtime.MaxIterationsLimit); n > 0 {
+	} else {
+		n := settingInt(get, "plugin.agent_loop.max_iterations", "", runtime.DefaultMaxIterations, 0, runtime.MaxIterationsLimit)
+		if n < 0 {
+			n = 0
+		}
 		maxIterations = n
 	}
 	subagentModel := strings.TrimSpace(get("plugin.subagent.model", "", ""))

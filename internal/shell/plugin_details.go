@@ -197,10 +197,10 @@ var pluginDetailSpecs = []pluginDetailSpec{
 	},
 	{
 		key: "agent_loop", titleEN: "Agent loop", titleZH: "代理循环",
-		descEN: "The per-turn step ceiling: reaching it keeps the work done, shows a notice and lets you continue. Defaults to a high safety bound; lower it to stop a turn sooner.",
-		descZH: "单轮步骤上限：达到上限时会保留已完成的工作、提示并允许继续。默认是较高的安全上限；调低可让单轮更早停止。",
+		descEN: "0 = no limit (default): the model decides when the turn ends. A positive value is a safety ceiling; reaching it keeps the completed work, shows a notice and lets you continue.",
+		descZH: "0 = 不限（默认）：由模型自行决定何时结束。填正数则作为单轮安全上限：达到上限会保留已完成的工作、提示并允许继续。",
 		fields: []pluginDetailField{
-			{key: "plugin.agent_loop.max_iterations", labelEN: "Max iterations", labelZH: "最大迭代次数", kind: pluginFieldInt, def: strconv.Itoa(runtime.DefaultMaxIterations), min: 1, max: runtime.MaxIterationsLimit},
+			{key: "plugin.agent_loop.max_iterations", labelEN: "Max iterations (0 = unlimited)", labelZH: "最大迭代次数（0 = 不限）", kind: pluginFieldInt, def: strconv.Itoa(runtime.DefaultMaxIterations), min: 0, max: runtime.MaxIterationsLimit},
 		},
 	},
 	{

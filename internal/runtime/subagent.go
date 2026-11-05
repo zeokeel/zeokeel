@@ -218,7 +218,7 @@ func (a *Agent) buildSubagentAgent(ctx context.Context, name string, snap agentS
 		Description:   "A focused ZeoKeel subagent that completes one delegated task.",
 		Instruction:   instruction,
 		Model:         childModel,
-		MaxIterations: a.maxIterations,
+		MaxIterations: a.einoMaxIterations(),
 		Handlers:      a.modelHandlers(),
 		ToolsConfig: adk.ToolsConfig{
 			ToolsNodeConfig: compose.ToolsNodeConfig{Tools: a.restrictedEinoTools(snap.mode)},
