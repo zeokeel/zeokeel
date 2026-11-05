@@ -160,6 +160,11 @@ func TestAutomationActionsRemainUsableWithDockedPanel(t *testing.T) {
 				t.Fatalf("click Delete: %v", err)
 			}
 			tt.Frame()
+			// Deleting asks first; confirm through the dialog's own action.
+			if err := tt.Click("Delete task"); err != nil {
+				t.Fatalf("confirm Delete: %v", err)
+			}
+			tt.Frame()
 			tasks, err := h.ctrl.Automations().List()
 			if err != nil {
 				t.Fatal(err)

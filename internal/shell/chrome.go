@@ -82,7 +82,7 @@ func (a *App) sidebarBrandRow(c *ui.Context, t *design.Tokens) {
 	th := t.Theme()
 	ui.Row(c).Padding(th.Space(4), th.Space(3), th.Space(2)).AlignItems(ui.Center).
 		Gap(th.Space(2)).Children(func() {
-		ui.Image(c, mark).Size(th.Space(6), th.Space(6))
+		ui.Image(c, brandMark(t)).Size(th.Space(6), th.Space(6))
 		ui.Text(c, "ZeoKeel").FontSize(th.Rem(1.25)).FixedLineHeight(th.Rem(1.7)).
 			FontWeight(600).TextColor(t.LabelPrimary).Grow(1).MaxLines(1).Ellipsis("…")
 		if a.Ctrl != nil {
@@ -147,7 +147,7 @@ func (a *App) sidebarRail(c *ui.Context, t *design.Tokens) {
 	th := t.Theme()
 	design.Apply(ui.Column(c), t.Sidebar()).Width(sidebarRailWidth).Children(func() {
 		ui.Row(c).Height(th.Space(12)).Center().Children(func() {
-			ui.Image(c, mark).Size(th.Space(6), th.Space(6))
+			ui.Image(c, brandMark(t)).Size(th.Space(6), th.Space(6))
 		})
 		ui.Row(c).PaddingX(th.Space(2)).Children(func() {
 			expand := chromeIconRow(c, t, a.tr("Expand sidebar", "展开侧边栏"), icons.PanelLeft(), false)

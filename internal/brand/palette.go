@@ -140,22 +140,27 @@ func LightPalette() Palette {
 		Hover:          ui.RGBA(13, 68, 246, 0.06), // brand royal blue at 6%
 		Text:           ui.Hex(HexInk),             // wordmark light ink, 18.9:1 on white
 		TextSecondary:  ui.Hex("#5B6373"),          // ink cooled toward blue, 6.0:1 on white
-		TextTertiary:   ui.Hex("#7E8796"),          // ink cooled, 3.6:1: labels only
-		Border:         ui.RGBA(15, 17, 21, 0.10),  // ink at 10%
-		BorderStrong:   ui.RGBA(15, 17, 21, 0.16),  // ink at 16%
-		Accent:         ui.Hex(HexRoyal),           // logo/logo.svg:12, 6.6:1 with white text
-		AccentHover:    ui.Hex(HexBlue),            // logo/logo.svg:5, one step darker
-		AccentPressed:  ui.Hex("#0B38CA"),          // royal blue darkened 18% for the press
-		AccentText:     ui.Hex(HexWhite),
-		OnPrimary:      ui.Hex(HexWhite),
-		Selection:      ui.RGBA(13, 68, 246, 0.22), // royal blue at 22%
-		Focus:          ui.RGBA(13, 68, 246, 0.55), // royal blue at 55%
-		Scrollbar:      ui.RGBA(15, 17, 21, 0.30),
-		Scrim:          ui.RGBA(15, 17, 21, 0.30), // ink scrim, modal backdrop
-		Success:        ui.Hex("#16A34A"),
-		Danger:         ui.Hex("#DC2626"), // 4.8:1 on white
-		Warning:        ui.Hex("#D97706"),
-		WarningText:    ui.Hex("#8A4B0F"), // 6.8:1 on white
+		// Tertiary carries 11–13px explanations, timestamps and usage numbers,
+		// so it must clear WCAG AA (4.5:1) on every light surface:
+		// 5.29:1 on BgBase/BgRaised, 5.06:1 on BgSidebar, 4.76:1 on BgStrong.
+		// It stays lighter than TextSecondary (6.04:1 on white) so the
+		// Text > Secondary > Tertiary hierarchy survives (P0-2, review-round3).
+		TextTertiary:  ui.Hex("#646C7A"),         // ink cooled, WCAG AA on all light surfaces
+		Border:        ui.RGBA(15, 17, 21, 0.10), // ink at 10%
+		BorderStrong:  ui.RGBA(15, 17, 21, 0.16), // ink at 16%
+		Accent:        ui.Hex(HexRoyal),          // logo/logo.svg:12, 6.6:1 with white text
+		AccentHover:   ui.Hex(HexBlue),           // logo/logo.svg:5, one step darker
+		AccentPressed: ui.Hex("#0B38CA"),         // royal blue darkened 18% for the press
+		AccentText:    ui.Hex(HexWhite),
+		OnPrimary:     ui.Hex(HexWhite),
+		Selection:     ui.RGBA(13, 68, 246, 0.22), // royal blue at 22%
+		Focus:         ui.RGBA(13, 68, 246, 0.55), // royal blue at 55%
+		Scrollbar:     ui.RGBA(15, 17, 21, 0.30),
+		Scrim:         ui.RGBA(15, 17, 21, 0.30), // ink scrim, modal backdrop
+		Success:       ui.Hex("#16A34A"),
+		Danger:        ui.Hex("#DC2626"), // 4.8:1 on white
+		Warning:       ui.Hex("#D97706"),
+		WarningText:   ui.Hex("#8A4B0F"), // 6.8:1 on white
 	}
 }
 

@@ -122,7 +122,7 @@ func (a *App) homeHero(c *ui.Context, t *design.Tokens) {
 	th := t.Theme()
 	ui.Column(c).AlignItems(ui.Center).Gap(th.Space(3)).Children(func() {
 		ui.Row(c).AlignItems(ui.Center).Gap(th.Space(3)).Children(func() {
-			ui.Image(c, mark).Size(th.Space(11), th.Space(11))
+			ui.Image(c, brandMark(t)).Size(th.Space(11), th.Space(11))
 			homeText(c, "ZeoKeel").FontSize(th.Rem(homeWordmarkRem)).
 				FixedLineHeight(th.Rem(2.9)).FontWeight(600).TextColor(t.LabelPrimary)
 		})

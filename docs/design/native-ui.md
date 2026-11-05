@@ -386,10 +386,7 @@ Plugins 与 Automation 是两个"列表页"屏，本轮把它们的 DSH 复刻�
 
 剩余（优先来自独立设计评审 [review-round3.md](review-round3.md)）：
 
-1. **UX P0（下一轮优先）**：
-   - 破坏性操作统一：Automation 删除、Memory Clear all 需确认弹层/Undo + Danger 色（与会话/工作区删除一致）。
-   - 浅色三级文字对比度：`TextTertiary` 3.3:1 不达 WCAG AA，提升到 ≥4.5:1（11–13px 说明/时间戳/用量），`brand_test` 覆盖 tertiary。
-   - 深色字标：`mark.png` 含白色容器像素，深色 hero/sidebar 有白边；改用 `logo-dark.svg` 派生/无白边位图，2x 清晰。
+1. ~~**UX P0**~~ **已完成（2026-11-05 第四轮，见 STATUS 阶段 6）**：破坏性操作确认 + Danger（Automation/Memory）；浅色三级文字 `#646C7A` 四组表面 ≥4.5:1；深色字标改用 `logo-dark.svg` 派生 2x 位图。
 2. P1 细节：Windows/Linux 设置窗口无菜单栏、窗口间几何联动、滚动位置持久化；通知动作按钮/退出后点击/后台"等待审批"漏报；TextScale 未覆盖固定 type scale（115 处）。
 3. 预览/回归：预览无状态覆盖（空态/错误/加载/窄窗），CI 无视觉回归（可加 headless golden 冒烟）。
 4. a11y/真机：VoiceOver/Narrator/Orca 人工复核、拖拽键盘等价、IME/高 DPI 真机矩阵。
@@ -474,7 +471,46 @@ Tree "Sidebar"
 3. 拖拽排序的键盘等价物已有菜单「上移/下移」（既有实现）；但拖拽本身无可访问替代，后续可把移动操作提升为 item 的 a11y actions。
 4. 侧栏 item 与行内动作的 Tab 顺序按构建顺序（item → 动作）；平台惯例可能偏好动作在 item 之后同层，已符合，真机复核顺序即可。
 
-## 19. 验收口径
+## 19. 确认与危险操作规范（P0-1，2026-11-05 完成）
+
+> 评审 `docs/design/review-round3.md` P0-1：破坏性操作不一致/无确认。本轮把 Automation 删除与 Memory「Clear all」接入会话/工作区删除已用的确认模态，并补齐 Danger 语义与计划文案本地化。
+
+### 19.1 规范（所有破坏性操作一致）
+
+| 维度 | 规则 | 落点 |
+| --- | --- | --- |
+| 触发 | 任何不可撤销操作都不一键执行：行内 Danger 按钮只**打开确认**，确认按钮才执行 | Automation 行 `Delete` → `automationDeleteDialog`；Memory 头部 `Clear all` → `memoryClearDialog` |
+| 模态 | 复用 mygo `ui.Modal`（背景 scrim + 居中面板）：标题 + 后果说明（点名对象/不可撤销）+ `Cancel` + Danger 确认；Esc、点外都由 Modal 自动关闭 | 与 `menus.go` 会话删除、`workspaces.go` 工作区删除同一模式 |
+| 默认焦点 | `Cancel` 上 `AutoFocus()`；Danger 按钮不设默认，Enter 只取消、不会误删 | `automationDeleteDialog` / `memoryClearDialog` |
+| Danger 样式 | 行内删除与确认按钮都用 `t.Danger`（品牌语义色，浅/深色各自可读），不再与 Run now/Edit 同款中性 ghost | `automationDangerAction`、两个确认弹层的确认按钮；Memory 头部 Clear all 原本即 Danger |
+| 文案 | 中英双语 i18n；确认按钮用专门动词，避免与行内/头部同名（`Delete task`/`Clear memories`），键盘与屏幕阅读器、测试都能唯一命中 | i18n：`automation.delete_automation_task`、`automation.delete_named`、`automation.delete_task`；`memory.clear_all_memories_q`、`memory.clear_all_desc`、`memory.clear_memories` |
+| 失败 | 删除失败保持弹层打开并 Toast，可重试/取消；清空失败 Toast 且列表不变 | `confirmAutomationDelete` / `clearWorkspaceMemories` |
+| 成功 | 关闭弹层 + Toast（Automation task deleted；Cleared N memories） | 同上 |
+
+> 本轮不做 Undo（评审里为可选项）：两个操作都是低频率、且失败可见；后续如加 Undo 需要 store 层支持回收。
+
+### 19.2 Automation 计划文案本地化
+
+- 规则：**只本地化渲染，不改调度行为**。shell 侧新增 `automationScheduleLabel`：用 `automation.Parse` 解析已持久化 cron（解析结果与调度器一致），按 UI 语言输出：
+  - 中文：`每小时`、`每分钟`、`每 N 分钟`、`每天 HH:MM`
+  - 英文：`Every hour`、`Every minute`、`Every N minutes`、`Daily at HH:MM`
+- `internal/automation` 的解析/`Next`/调度与 `Describe` 均未改（`Describe` 仍是英文公共 API，被其包测试覆盖）；无效 cron 原样显示，和旧行为一致。
+- 新 i18n key：`automation.daily_at`、`automation.every_hour`、`automation.every_minute`、`automation.every_n_minutes`；英文文案与旧 `Describe` 完全一致，所以英文界面观感不变。
+- 测试：`TestAutomationScheduleLabelLocalized`（中文界面断言出现中文、**不出现** "Daily at/Every hour/Every 15 minutes"；英文界面保持英文；cron 持久化值不变）。
+- 遗留：next/last 时间戳仍是数字格式（`2006-01-02 15:04`），未按区域格式本地化；如需要下一轮补。
+
+### 19.3 测试
+
+| 测试 | 覆盖 |
+| --- | --- |
+| `TestAutomationDeleteRequiresConfirmation` | 行内/确认按钮 Danger 像素断言；Cancel/Esc/Enter/点外都不删；确认后才删 + Toast |
+| `TestMemoryClearAllRequiresConfirmation` | 头部与确认按钮 Danger；Cancel/Esc/Enter 不清空；确认才清空、其他工作区不受影响、Toast/空态 |
+| `TestAutomationScheduleLabelLocalized` | 中英计划文案与 cron 持久化不变 |
+| 既有测试 | `TestAutomationTasksCRUDAndRunNow` 删除步骤改为经确认；`responsive_panels_test.go` 的删除动作补确认步骤；`TestAutomationTabReachability` 等不变 |
+
+验收：`go test -run 'TestAutomation|TestMemory|TestDelete|TestDanger' ./internal/shell` 绿；gofmt/vet/build 绿；全包 `go test ./internal/shell` 绿（快照）。预览 PNG 由 Lead 统一重生成，本轮不提交截图。
+
+## 20. 验收口径
 
 | 维度 | 验收 |
 | --- | --- |

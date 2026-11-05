@@ -84,9 +84,19 @@ func TestMemorySettingsPageLive(t *testing.T) {
 		t.Fatalf("delete removed the wrong memory: %q", tt.Texts())
 	}
 
-	// Clear all removes the remaining note and returns to the empty state.
+	// Clear all asks first; only the Danger button confirms.
 	if err := tt.Click("Clear all memories"); err != nil {
 		t.Fatalf("click clear all: %v", err)
+	}
+	tt.Frame()
+	if !tt.HasText("Clear all memories?") {
+		t.Fatalf("clear confirmation missing: %q", tt.Texts())
+	}
+	if remaining, err := h.store.ListMemories(workspaceID, 0); err != nil || len(remaining) != 1 {
+		t.Fatalf("memories cleared before the confirmation = %d, %v", len(remaining), err)
+	}
+	if err := tt.Click("Clear memories"); err != nil {
+		t.Fatalf("confirm clear all: %v", err)
 	}
 	tt.Frame()
 	remaining, err := h.store.ListMemories(workspaceID, 0)
@@ -124,6 +134,108 @@ func TestMemorySettingsPageLive(t *testing.T) {
 		t.Fatalf("refresh toast missing: %q", tt.Texts())
 	}
 
+}
+
+// TestMemoryClearAllRequiresConfirmation covers the destructive-action rule on
+// the Memory page: the header's danger button only asks, cancel/Escape/Enter
+// (on the default-focused cancel) and a click outside keep the notes, and only
+// the Danger button clears.
+func TestMemoryClearAllRequiresConfirmation(t *testing.T) {
+	h := newLiveApp(t, &shellProvider{})
+	h.app.Language = LangEN
+	workspaceID := h.ctrl.CurrentWorkspaceID()
+	if _, err := h.store.CreateMemory(workspaceID, "Keep the release branch green."); err != nil {
+		t.Fatalf("CreateMemory: %v", err)
+	}
+	otherWS, err := h.store.CreateWorkspace("other", t.TempDir())
+	if err != nil {
+		t.Fatalf("CreateWorkspace: %v", err)
+	}
+	if _, err := h.store.CreateMemory(otherWS.ID, "Other workspace note."); err != nil {
+		t.Fatalf("CreateMemory other: %v", err)
+	}
+	tt := ui.NewTester(h.app.View, 1600, 1000)
+	tt.Key(ui.Cmd, ui.KeyComma)
+	if err := tt.Click("Memory"); err != nil {
+		t.Fatalf("open Memory: %v", err)
+	}
+	tt.Frame()
+
+	count := func(t *testing.T) int {
+		t.Helper()
+		memories, err := h.store.ListMemories(workspaceID, 0)
+		if err != nil {
+			t.Fatalf("ListMemories: %v", err)
+		}
+		return len(memories)
+	}
+	openConfirm := func(t *testing.T) {
+		t.Helper()
+		if err := tt.Click("Clear all memories"); err != nil {
+			t.Fatalf("open clear confirmation: %v", err)
+		}
+		tt.Frame()
+		if !tt.HasText("Clear all memories?") {
+			t.Fatalf("clear confirmation missing: %q", tt.Texts())
+		}
+		if !dangerPixels(tt, "Clear memories") {
+			t.Fatal("the confirmation's Clear memories is not painted in the danger color")
+		}
+	}
+
+	// The header's danger action already reads as destructive.
+	if !dangerPixels(tt, "Clear all memories") {
+		t.Fatal("the header's Clear all is not painted in the danger color")
+	}
+
+	// Cancel keeps the notes.
+	openConfirm(t)
+	if err := tt.Click("Cancel"); err != nil {
+		t.Fatalf("cancel: %v", err)
+	}
+	tt.Frame()
+	if tt.HasText("Clear all memories?") {
+		t.Fatalf("Cancel left the confirmation open: %q", tt.Texts())
+	}
+	if got := count(t); got != 1 {
+		t.Fatalf("Cancel cleared the notes: %d left", got)
+	}
+
+	// Escape dismisses without clearing.
+	openConfirm(t)
+	tt.Key(0, ui.KeyEscape)
+	tt.Frame()
+	if got := count(t); got != 1 {
+		t.Fatalf("Esc cleared the notes: %d left", got)
+	}
+
+	// Enter activates the default-focused Cancel, never the danger button.
+	openConfirm(t)
+	tt.Key(0, ui.KeyEnter)
+	tt.Frame()
+	if got := count(t); got != 1 {
+		t.Fatalf("Enter on the confirmation cleared the notes: %d left", got)
+	}
+
+	// Only the Danger button clears, keeps other workspaces, and toasts.
+	openConfirm(t)
+	if err := tt.Click("Clear memories"); err != nil {
+		t.Fatalf("confirm clear: %v", err)
+	}
+	tt.Frame()
+	if got := count(t); got != 0 {
+		t.Fatalf("confirmed clear left %d notes", got)
+	}
+	if !tt.HasText("No memories in this workspace yet.") {
+		t.Fatalf("empty state missing after clear: %q", tt.Texts())
+	}
+	if !tt.HasText("Cleared 1 memories") {
+		t.Fatalf("clear toast missing: %q", tt.Texts())
+	}
+	other, err := h.store.ListMemories(otherWS.ID, 0)
+	if err != nil || len(other) != 1 {
+		t.Fatalf("other workspace memories = %d, %v; want 1", len(other), err)
+	}
 }
 
 // TestMemoryPageStringsAreLocalized guards the zh labels of the new page

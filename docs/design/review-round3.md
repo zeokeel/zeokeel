@@ -319,3 +319,20 @@ go test -count=1 ./...     → HEAD_TEST_EXIT:0（17 包；shell 37.747s、sessi
 - `native-ui.md` 缺 §5、§6，§13 小节编号误写为 “12.x”，§16 引用不存在的 §5；建议补"视觉验收状态矩阵"小节并把 §17 的验收口径从"1600×1000 浅/深截图"扩为状态矩阵。
 - README/STATUS 对 TextScale/2x DPI 的措辞应从"已完成"细化为"部分/冒烟"；"系统偏好"四档（完整/部分/冒烟/未验证）写进 STATUS。
 - `docs/design/preview/README.md` 应补每张图对应的测试名/生成命令与"覆盖矩阵"（含未覆盖状态），避免"18 张=全部"的误读。
+
+---
+
+## 附录：问题修复状态（2026-11-05 第四轮，供复核）
+
+| 问题 | 状态 | 证据 |
+| --- | --- | --- |
+| P0-1 Automation 删除 / Memory Clear all 无确认、无 Danger | **已修复** | 确认弹层（Cancel 默认焦点、Esc/点外关闭、Enter 不误删、Danger 确认按钮、确认后 Toast）；新增 `TestAutomationDeleteRequiresConfirmation` / `TestMemoryClearAllRequiresConfirmation` |
+| P0-2 浅色三级文字不达 AA（#7E8796 3.3–3.6:1） | **已修复** | `#646C7A`：BgBase/BgRaised 5.29、BgSidebar 5.06、BgStrong 4.76:1；`TestPaletteContrast` 增四组表面+层级断言；ADR 0002 §9 |
+| P0-3 深色字标浅色位图白边 | **已修复** | `logo-dark.svg → mark-dark@2x.png`（96×96），`brandMark(t)` 按主题切换；Home/Sidebar/rail；assets_test 断言深色外圈无近白像素 |
+| P1-4 设置仍应用内模态**双入口** | **部分修复** | 设置已默认独立非模态原生窗口（ADR 0005），overlay 仅作无显示器/失败回退；回退路径仍有 close/X 双入口 |
+| P1-5 Automation 中文残留英文计划文案 | **已修复** | shell 侧 `automationScheduleLabel` 按 UI 语言渲染；`TestAutomationScheduleLabelLocalized` |
+| P1-6 TextScale 未覆盖固定 type scale（115 处） | **未修** | 记录于 known-limitations §2 |
+| P1-7 预览无状态覆盖 / CI 无视觉回归 | **未修** | 记录于 known-limitations §4（建议后续 headless golden 冒烟） |
+| P2 Home 构图/双主按钮等观感项 | **未修（设计选择/待产品反馈）** | 保留 landing 构图；列表页双主按钮按上下文保留 |
+
+> 说明：本表只记录修复状态，不改动原评审结论。复核时请以最新 HEAD 的预览图与测试为准。

@@ -1,6 +1,7 @@
 package shell
 
 import (
+	"fmt"
 	"strings"
 	"time"
 
@@ -22,6 +23,7 @@ func (a *App) automationLivePage(c *ui.Context, t *design.Tokens) {
 		a.automationTaskList(c, t)
 	})
 	a.automationDialog(c, t)
+	a.automationDeleteDialog(c, t)
 }
 
 // automationHeadingLive is the page header: the title and the native primary
@@ -233,7 +235,9 @@ func (a *App) automationTaskRow(c *ui.Context, t *design.Tokens, task store.Auto
 			a.automationAction(c, t, a.T("automation.enable"), func() { a.toggleAutomation(c, task) })
 		}
 		a.automationAction(c, t, a.T("automation.edit"), func() { a.beginAutomationEdit(task) })
-		a.automationAction(c, t, a.T("automation.delete"), func() { a.deleteAutomation(c, task) })
+		a.automationDangerAction(c, t, a.T("automation.delete"), func() {
+			a.beginAutomationDelete(task)
+		})
 	}
 	card := func(el ui.Element) ui.Element {
 		return el.Padding(th.Space(3)).Gap(th.Space(3)).Radius(design.RadiusLG).
@@ -266,9 +270,47 @@ func (a *App) automationAction(c *ui.Context, t *design.Tokens, label string, fn
 	button.OnClick(fn)
 }
 
+// automationDangerAction is a destructive row action: the same native button
+// as the other row actions, painted in the theme's danger color so Delete is
+// not visually identical to Run now, Enable or Edit.
+func (a *App) automationDangerAction(c *ui.Context, t *design.Tokens, label string, fn func()) {
+	button := ui.Button(c, label).Label(label).MinWidth(design.Space1 * 11).
+		TextColor(t.Danger)
+	button.OnClick(fn)
+}
+
+// automationScheduleLabel is the human-readable schedule line, localized to
+// the UI language: the runtime's automation.Describe is English-only and the
+// Chinese UI used to show "Every hour" and "Daily at 00:00" verbatim. The
+// scheduling itself is untouched: this only renders the persisted cron.
+func (a *App) automationScheduleLabel(spec string) string {
+	schedule, err := automation.Parse(spec)
+	if err != nil {
+		// Invalid schedules are shown unchanged, as automation.Describe does.
+		return spec
+	}
+	switch schedule.Kind() {
+	case automation.KindEveryMinute:
+		if n := schedule.Every(); n == 1 {
+			return a.T("automation.every_minute")
+		}
+		return a.T("automation.every_n_minutes", schedule.Every())
+	case automation.KindHourly:
+		return a.T("automation.every_hour")
+	case automation.KindDaily:
+		hour, minute, ok := schedule.HourMinute()
+		if !ok {
+			return spec
+		}
+		return a.T("automation.daily_at", fmt.Sprintf("%02d:%02d", hour, minute))
+	default:
+		return spec
+	}
+}
+
 // automationTaskDetail is the schedule and next-run line.
 func (a *App) automationTaskDetail(task store.Automation) string {
-	parts := []string{automation.Describe(task.Cron)}
+	parts := []string{a.automationScheduleLabel(task.Cron)}
 	if task.NextRun != nil {
 		parts = append(parts, a.T("automation.next", task.NextRun.Local().Format("2006-01-02 15:04")))
 	}
@@ -430,15 +472,56 @@ func (a *App) toggleAutomation(c *ui.Context, task store.Automation) {
 	}
 }
 
-// deleteAutomation removes a task.
-func (a *App) deleteAutomation(c *ui.Context, task store.Automation) {
+// beginAutomationDelete opens the delete confirmation for task. Deleting is
+// never one click: the row's Delete only asks, and the modal's Danger button
+// carries the irreversible action.
+func (a *App) beginAutomationDelete(task store.Automation) {
+	a.automationDeleteID = task.ID
+	a.automationDeleteTitle = task.Title
+	a.automationDeleteOpen = true
+	a.shellUI().automationDialog = false
+	a.closeSelectors()
+}
+
+// automationDeleteDialog confirms deleting an automation task. It reuses the
+// session/workspace delete modal pattern: cancel (focused first, so Enter
+// never deletes by accident), Escape or a click outside dismiss without
+// touching the store, and only the Danger button deletes.
+func (a *App) automationDeleteDialog(c *ui.Context, t *design.Tokens) {
+	th := t.Theme()
+	ui.Modal(c, &a.automationDeleteOpen, func() {
+		ui.Column(c).Width(th.Space(105)).Gap(th.Space(3)).Children(func() {
+			nativeText(c, design.TypeM, t.LabelPrimary, a.T("automation.delete_automation_task")).
+				FontWeight(600)
+			nativeText(c, design.TypeXS, t.LabelSecondary,
+				fmt.Sprintf(a.T("automation.delete_named"), a.automationDeleteTitle)).MaxLines(3)
+			ui.Row(c).Gap(th.Space(2)).Justify(ui.End).Children(func() {
+				if ui.Button(c, a.T("automation.cancel")).AutoFocus().Clicked() {
+					a.automationDeleteOpen = false
+				}
+				if ui.Button(c, a.T("automation.delete_task")).TextColor(t.Danger).Clicked() {
+					a.confirmAutomationDelete(c)
+				}
+			})
+		})
+	})
+}
+
+// confirmAutomationDelete removes the task after the confirmation. A failed
+// delete keeps the dialog open and reports through the toast, so the user can
+// retry or cancel instead of losing the target silently.
+func (a *App) confirmAutomationDelete(c *ui.Context) {
 	if a.Ctrl == nil {
+		a.automationDeleteOpen = false
 		return
 	}
-	if err := a.Ctrl.Automations().Delete(task.ID); err != nil {
+	if err := a.Ctrl.Automations().Delete(a.automationDeleteID); err != nil {
 		c.Toast(a.T("automation.could_not_delete_automation_task"))
 		return
 	}
+	a.automationDeleteOpen = false
+	a.automationDeleteID = ""
+	a.automationDeleteTitle = ""
 	c.Toast(a.T("automation.automation_task_deleted"))
 }
 

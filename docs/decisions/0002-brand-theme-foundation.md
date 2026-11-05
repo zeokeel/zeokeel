@@ -202,3 +202,62 @@ grep -rn 'baseline\|DSH' internal/design     # 仅 tokens.go 历史说明一行
 6. **待拍板**：品牌主色最终值（当前单蓝 `#0D44F6`/`#3CBBFA`）、渐变是否用于更多装饰、是否引入品牌强调字体（当前明确不打包字体）。
 
 **回滚**：`git checkout pre-native-ui` 可回到迁移前状态；本轮的 `internal/brand` 为纯新增，`internal/design` 的改动可按文件单独回退，不涉及数据/运行时迁移。
+
+## 9. 附录：P0-2 浅色三级文字对比度修正（2026-11-05）
+
+独立评审 [docs/design/review-round3.md](../design/review-round3.md) 的 P0-2 指出：浅色主题 `TextTertiary #7E8796` 在 BgBase/BgSidebar/BgRaised/BgStrong 上仅 **3.26–3.62:1**，而它承载 11–13px 的设置说明、时间戳、用量、区块标签与空态（约 160 处），不满足 WCAG AA 的 4.5:1。本条修正**只改浅色 `TextTertiary`**：不改布局、字号、其它品牌色与深色主题（深色三级文字原本 5.64–7.43:1，已达标）。§4.1 语义映射表中 `3.6:1` 一行为历史值，以本条为准。
+
+### 9.1 变更
+
+| 项 | 旧值 | 新值 |
+| --- | --- | --- |
+| `LightPalette().TextTertiary` | `#7E8796` | `#646C7A` |
+
+### 9.2 实测对比度（WCAG 2.x 相对亮度公式，`TestPaletteContrast` 断言 ≥4.5:1）
+
+| 前景 | BgBase `#FFFFFF` | BgSidebar `#F9FAFB` | BgRaised `#FFFFFF` | BgStrong `#F1F3F5` |
+| --- | --- | --- | --- | --- |
+| 旧 `#7E8796` | 3.62:1 ❌ | 3.47:1 ❌ | 3.62:1 ❌ | 3.26:1 ❌ |
+| 新 `#646C7A` | **5.29:1** ✅ | **5.06:1** ✅ | **5.29:1** ✅ | **4.76:1** ✅ |
+
+`BgRaised` 与 `BgBase` 同为 `#FFFFFF`，两组数值相同；最差组合是强表面上的 4.76:1，仍有 0.26 的安全余量。
+
+### 9.3 文字层级保持（浅色，BgBase 上）
+
+`Text #0F1115` 18.90:1 > `TextSecondary #5B6373` 6.04:1 > `TextTertiary #646C7A` 5.29:1。新三级色比旧值深，但比次要文字仍浅、仍可区分（对比度差 0.75:1，RGB 每通道差 7–9）；`TestPaletteContrast` 增加层级断言防止后续把三级色压得比次要文字还深。
+
+### 9.4 影响、验证与回滚
+
+- **影响面**：`internal/brand` 是唯一来源，`internal/design.Tokens.LabelTertiary` 自动继承新值；所有引用 `LabelTertiary` 的 11–13px 说明/时间戳/用量/区块标签/空态文本提升到 WCAG AA，无需改 shell。
+- **深色不动**：`#9AA0B4` 在 BgBase/BgSidebar/BgRaised/BgStrong 上为 7.43 / 7.09 / 6.55 / 5.64:1，保持原值。
+- **高对比模式**：`internal/shell/preferences.go` 的 `LabelTertiary.Mix(LabelPrimary, 0.3)` 会把新色继续向主文字加深，方向仍正确，无需调整。
+- **测试**：`TestPaletteContrast` 增加 tertiary 在四组表面上的 ≥4.5:1 断言（明暗）与 `Text > TextSecondary > TextTertiary` 层级断言；`go test ./internal/brand ./internal/design` 绿、`go build ./...` 通过。
+- **预览**：本轮不生成/提交预览 PNG，由 P0 三项合入后统一 `ZEOKEEL_UPDATE_PREVIEWS=1` 重生成。
+- **回滚**：把 `LightPalette().TextTertiary` 还原为 `#7E8796` 即可（无其它文件依赖旧值）。
+
+## 10. 附录：P0-3 深色品牌字标资产切换（2026-11-05）
+
+独立评审 `docs/design/review-round3.md` P0-3：深色主题的 Home hero 与 Sidebar 品牌行复用浅色 `mark.png`，而它由 `logo/logo.svg` 的**白色圆角容器**渲染而来——容器边缘的抗锯齿白色像素在深色页面上就是一圈白边；且该图只有 48×48，hero 的 44 DIP 使用接近 1x。
+
+**决策：按主题切换两张位图，不重画、不 tint。**
+
+| 资产 | 来源 | 尺寸 | 用途 |
+| --- | --- | --- | --- |
+| `internal/shell/mark.png`（不变） | `logo/logo.svg` | 48×48 | 浅色主题（白容器是浅色身份的一部分） |
+| `internal/shell/mark-dark@2x.png`（新） | `logo/logo-dark.svg` | 96×96（2x） | 深色主题（黑容器，无白边） |
+
+- **生成命令**（宿主 rsvg-convert；矢量直出，比 `convert` 缩放边缘更干净）：
+
+  ```sh
+  rsvg-convert -w 96 -h 96 logo/logo-dark.svg -o internal/shell/mark-dark@2x.png
+  ```
+
+  文件大小 4.7KB（浅色 2.2KB，均远低于 100KB），无新增运行时依赖，资产内嵌编译。
+- **选择 helper**：`internal/shell/assets.go` 嵌入两张图并导出 `brandMark(t *design.Tokens) *ui.Bitmap`——`t.Dark` 时返回深色位图，否则保持浅色位图。使用点：`home.go` hero（44 DIP）、`chrome.go` Sidebar 品牌行（24 DIP）与折叠 rail（24 DIP）；设置 About 页不使用字标，无需改动。使用尺寸 24–44 DIP，2x 资产另有 2–4 倍余量。
+- **浅色不变**：浅色仍用原 `mark.png`，像素与视觉零变化；只有深色主题换了资产。
+- **验证**（`internal/shell/assets_test.go`，无显示器）：
+  1. `TestBrandMarkAssets`：浅/深位图不同、尺寸 48×48 / 96×96、`brandMark(design.Light()/Dark())` 返回对应位图；
+  2. `TestDarkMarkHasNoWhiteContainer`：深色位图外圈 3px 内无近白像素（白容器回归守卫）；直边是**不透明黑容器**（A≥200、RGB≤24）；四个圆角透明；同时确认浅色位图仍保留白容器像素（解释为什么深色不能复用它）；
+  3. `TestBrandMarkRendersWithoutWhiteCorners`：用 `ui.Render` 在深色 BgBase 上合成 48×48 字标——深色渲染外圈最大通道 ≤80/255（只有页面底色与黑容器），而同一合成用浅色位图时外圈达到 ≥150/255，证明该断言能捕获 P0-3 回归。
+- **预览**：按 P0 批次约定不生成/提交预览 PNG，由统一重生成流程产出。
+- **回滚**：删除 `mark-dark@2x.png` 与 `brandMark` 调用（回到单一 `mark`）即可；深色主题会重新出现白边。

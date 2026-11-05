@@ -133,8 +133,10 @@ func TestThemesAreIndependent(t *testing.T) {
 }
 
 // TestPaletteContrast checks the WCAG AA pairs the brand promises: body text
-// and secondary text on the page background, accent text on the accent fill,
-// and the warning text color on the page background.
+// and secondary text on the page background, tertiary text on every light and
+// dark surface it is used on (page, sidebar, raised and strong surfaces),
+// warning text on the page background, and accent text on the accent fill. It
+// also keeps the Text > TextSecondary > TextTertiary hierarchy distinguishable.
 func TestPaletteContrast(t *testing.T) {
 	for _, tc := range []struct {
 		name string
@@ -150,12 +152,27 @@ func TestPaletteContrast(t *testing.T) {
 			}{
 				{"primary text", tc.p.Text, tc.p.Background},
 				{"secondary text", tc.p.TextSecondary, tc.p.Background},
+				{"tertiary text on the page", tc.p.TextTertiary, tc.p.Background},
+				{"tertiary text on the sidebar", tc.p.TextTertiary, tc.p.Sidebar},
+				{"tertiary text on a raised surface", tc.p.TextTertiary, tc.p.Surface},
+				{"tertiary text on the strong surface", tc.p.TextTertiary, tc.p.SurfaceStrong},
 				{"warning text", tc.p.WarningText, tc.p.Background},
 				{"accent text on accent fill", tc.p.AccentText, tc.p.Accent},
 			} {
 				if r := contrast(c.fg, c.bg); r < 4.5 {
 					t.Errorf("%s: contrast %.2f:1 < 4.5:1", c.name, r)
 				}
+			}
+			// The hierarchy stays readable: primary text is darkest (highest
+			// contrast on the page), secondary next, tertiary lightest but
+			// still AA. P0-2 (review-round3) fixed the light tertiary step
+			// without collapsing it into the secondary one.
+			text := contrast(tc.p.Text, tc.p.Background)
+			secondary := contrast(tc.p.TextSecondary, tc.p.Background)
+			tertiary := contrast(tc.p.TextTertiary, tc.p.Background)
+			if !(text > secondary && secondary > tertiary) {
+				t.Errorf("text hierarchy broken: text %.2f:1, secondary %.2f:1, tertiary %.2f:1",
+					text, secondary, tertiary)
 			}
 		})
 	}

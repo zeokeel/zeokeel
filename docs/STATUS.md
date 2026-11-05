@@ -9,6 +9,15 @@
 - **以下 M0–M13 历史里程碑保留原文记录以追溯**；其中与像素/基线/比对回路相关的内容均为**历史记录，已退役、不再有效**（因此模块清单中不再列 `pixeltest` 包）。
 - 现行质量口径见 `docs/QUALITY.md` 与 `docs/PLAN.md` §10；功能对齐见 `docs/FUNCTIONAL-PARITY.md`；视觉方向见 `docs/decisions/0002-brand-theme-foundation.md`。
 
+## 2026-11-05 阶段 6：设计评审批次修复（P0，完成，ALL GREEN）
+
+- **P0-2 对比度**：Light `TextTertiary` `#7E8796` → `#646C7A`，BgBase/BgRaised 5.29、BgSidebar 5.06、BgStrong 4.76:1（全部 ≥4.5:1）；brand_test 增加四组表面 + 层级断言；ADR 0002 §9。
+- **P0-3 深色字标**：`logo-dark.svg` → `mark-dark@2x.png`（96×96）；`brandMark(t)` 按主题选择；Home hero/Sidebar/rail 切换；assets_test 验证深色无白边、浅色不变；ADR 0002 §10。
+- **P0-1 破坏性操作**：Automation 删除与 Memory Clear all 改为确认弹层（Cancel 默认焦点、Esc/点外关闭、Enter 不误删、Danger 确认按钮、确认后 Toast）；计划文案中文本地化（每小时/每 N 分钟/每天 HH:MM），cron 行为未改；新增 3 测试。
+- **预览**：22 张全部重生成（含深色字标/对比度变化）。
+- **验证**：`gofmt`/`go vet`/`go build ./...`/`go test -count=1 ./...` 全绿（shell 45.9s）；工作树提交前干净。
+- 未验证/框架限制已整理：[known-limitations.md](design/known-limitations.md)。
+
 ## 2026-11-05 阶段 5：工具卡/设置独立窗口/后台通知/a11y/清理与性能（完成，ALL GREEN）
 
 - **工具卡内容原生化**：命令/文件结果 → mygo markdown 代码块（高亮+语言+Copy）、普通结果 markdown、read_image 真实加载（失败 alt）、错误 danger 面板+复制错误、40 行封顶可展开；新增 toolcard 预览。

@@ -139,6 +139,16 @@ type App struct {
 	deleteID    string
 	deleteTitle string
 
+	// Destructive confirmations beyond the session/workspace ones: the
+	// Automation task delete and the Memory "clear all". They reuse the same
+	// modal pattern (flag, what is targeted, a ui.Modal rendered by the page
+	// that owns the action), so cancel/Esc/backdrop all dismiss without
+	// touching the store and the danger button is never the default focus.
+	automationDeleteOpen  bool
+	automationDeleteID    string
+	automationDeleteTitle string
+	memoryClearOpen       bool
+
 	// composerRef is the live composer's focus handle. session_live.go binds it
 	// when the session renderer builds the input; the Cmd/Ctrl+K shortcut
 	// focuses it when bound. mentionRef is the first row of the "@" menu, so

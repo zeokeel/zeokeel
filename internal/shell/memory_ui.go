@@ -44,7 +44,7 @@ func (a *App) memorySettingsPage(c *ui.Context, t *design.Tokens) {
 					})
 				a.memoryButton(c, t, a.memoryText("Clear all", "全部清除"),
 					a.memoryText("Clear all memories", "清除全部记忆"), true, func() {
-						a.clearWorkspaceMemories(c)
+						a.beginMemoryClear()
 					})
 			})
 		})
@@ -86,6 +86,7 @@ func (a *App) memorySettingsPage(c *ui.Context, t *design.Tokens) {
 			}
 		})
 	})
+	a.memoryClearDialog(c, t)
 }
 
 // memoryEmpty is the empty state for a workspace without notes.
@@ -169,6 +170,39 @@ func (a *App) deleteWorkspaceMemory(c *ui.Context, id string) {
 		return
 	}
 	c.Toast(a.memoryText("Memory deleted", "记忆已删除"))
+}
+
+// beginMemoryClear opens the Clear all confirmation. It is never one click:
+// the header's danger button only asks, and the modal's Danger button carries
+// the irreversible clear.
+func (a *App) beginMemoryClear() {
+	a.memoryClearOpen = true
+	a.closeSelectors()
+}
+
+// memoryClearDialog confirms clearing the current workspace's memories. It
+// reuses the session/workspace delete modal pattern: cancel (focused first,
+// so Enter never clears by accident), Escape or a click outside dismiss
+// without touching the store, and only the Danger button clears.
+func (a *App) memoryClearDialog(c *ui.Context, t *design.Tokens) {
+	th := t.Theme()
+	ui.Modal(c, &a.memoryClearOpen, func() {
+		ui.Column(c).Width(th.Space(105)).Gap(th.Space(3)).Children(func() {
+			nativeText(c, design.TypeM, t.LabelPrimary, a.T("memory.clear_all_memories_q")).
+				FontWeight(600)
+			nativeText(c, design.TypeXS, t.LabelSecondary,
+				a.T("memory.clear_all_desc")).MaxLines(3)
+			ui.Row(c).Gap(th.Space(2)).Justify(ui.End).Children(func() {
+				if ui.Button(c, a.T("memory.cancel")).AutoFocus().Clicked() {
+					a.memoryClearOpen = false
+				}
+				if ui.Button(c, a.T("memory.clear_memories")).TextColor(t.Danger).Clicked() {
+					a.memoryClearOpen = false
+					a.clearWorkspaceMemories(c)
+				}
+			})
+		})
+	})
 }
 
 // clearWorkspaceMemories empties the current workspace's memory list. Other
