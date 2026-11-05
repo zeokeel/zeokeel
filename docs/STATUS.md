@@ -206,7 +206,7 @@
 
 - **内置工具**（`internal/tools`）：read_file / write_file / edit_file / glob / grep / bash / web_fetch，全部限定 workspace root、路径穿越与 symlink 逃逸拒绝、输出上限、bash 默认关闭+超时杀进程组、web_fetch 拒绝私网/重定向到私网；测试通过
 - **审批 UI**：`session.Config.Gate` + `PendingApprovals/Approve/Deny`；会话屏在 composer 上方渲染审批卡（Allow/Deny），静态路径不变
-- **Composer 菜单**：`/` 命令面板（/clear /stop /help）、`@` 工作区文件提及、`+` 附件菜单（Files / Session log 占位）
+- **Composer 菜单**（2026-11-05 对齐 DSH）：`/` 命令面板 13 条（添加：/file /plan /feedback；指令：/permission /model /export + /clear /stop /help /new /settings /automate /plugins），分组标题 + 图标/本地化标题/命令名/右对齐说明、键入即过滤、↑↓ 高亮、Tab/Enter 执行、Esc 关闭；`/file`、`/permission`、`/export`、`/feedback` 均为真实本地行为（picker/权限写入/JSONL 导出/反馈落库），`/goal`、`/compact` 有意不提供（见 known-limitations）；未知 `/` 行仍作为普通消息发送给模型。`@` 工作区文件/目录提及（文件→会话分组、Tab 进入目录、路径面包屑、Esc 逐级返回、中间文本替换）；`+` 附件菜单（Files / Commands）。
 - **App 全链路接线**：`BuildServicesWith` 先开 store，再构建 provider + 工具注册表 + 审批队列 + store-backed History + runtime Agent，最后接 Controller；设置键 `provider.api_key/base_url/model`（或环境变量），bash 等变更类工具走审批
 - **headless 冒烟**：`ZEOKEEL_DATA_DIR=.cache/zk-data xvfb-run .cache/zeokeel` → 建库成功、无 services 错误
 - （历史）像素基线未变：home 1.00% / session 6.48% / plugins 3.20% / settings 2.38% / automation 1.39%（masked，AA 地板；像素门禁 2026-11-05 已退役）

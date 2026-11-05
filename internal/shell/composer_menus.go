@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/egoist/mygo/ui"
@@ -28,26 +29,6 @@ const (
 	sessionMentionPrefix = "session · "
 )
 
-// slashCommands is the composer command palette. Every entry starts with "/"
-// and is handled locally; none of them is sent to the model. A slash line
-// that names anything else falls through to the model as normal text, as
-// DSH's command directory does.
-var slashCommands = []struct {
-	name string
-	en   string
-	zh   string
-}{
-	{"/clear", "Clear the composer draft", "清空输入框草稿"},
-	{"/stop", "Stop the running turn", "停止当前回合"},
-	{"/plan", "Enter plan mode (optional message)", "进入计划模式（可带一条消息）"},
-	{"/help", "List the composer commands", "列出输入框命令"},
-	{"/new", "Start a new session", "新建会话"},
-	{"/settings", "Open Settings", "打开设置"},
-	{"/automate", "Open Automation tasks", "打开自动化任务"},
-	{"/plugins", "Open Plugins", "打开插件"},
-	{"/model", "Choose the model (needs the live model API)", "选择模型（需要实时模型 API）"},
-}
-
 // pendingApprovals returns the controller's pending requests, or nil in static
 // mode. It is read every frame so the card follows the turn without extra
 // listener plumbing.
@@ -58,10 +39,10 @@ func (a *App) pendingApprovals() []state.ApprovalRequest {
 	return a.Ctrl.PendingApprovals()
 }
 
-// slashVisible reports whether the draft asks for the command palette: a
-// non-empty draft that starts with "/" and nothing else.
+// slashVisible reports whether the token under the composer caret asks for
+// the command palette: it must start with "/" and be live at the caret.
 func (a *App) slashVisible() bool {
-	return strings.HasPrefix(strings.TrimSpace(a.draft), "/")
+	return a.composerTrigger().kind == composerTriggerSlash
 }
 
 // syncComposerMenuDismissal clears an Escape dismissal whenever the draft
@@ -83,16 +64,16 @@ func (a *App) syncComposerMenuDismissal() {
 	st.slashDismissedDraft = ""
 }
 
-// slashMenuVisible reports whether the "/" palette is derived from the draft
-// and has not been dismissed with Escape for that exact draft.
+// slashMenuVisible reports whether the "/" palette is derived from the token
+// under the caret and has not been dismissed with Escape for that draft.
 func (a *App) slashMenuVisible() bool {
-	return a.slashVisible() && a.liveMenus().slashDismissedDraft != a.draft
+	return !a.attachOpen && a.slashVisible() && a.liveMenus().slashDismissedDraft != a.draft
 }
 
 // visibleMentionEntries returns the "@" menu rows for the current draft, or
 // nil when Escape has dismissed the menu for that draft.
 func (a *App) visibleMentionEntries() []string {
-	if a.liveMenus().mentionDismissedDraft == a.draft {
+	if a.attachOpen || a.liveMenus().mentionDismissedDraft == a.draft {
 		return nil
 	}
 	return a.mentionEntries()
@@ -109,7 +90,12 @@ func (a *App) composerPopupVisible() bool {
 // because the recorded draft no longer matches.
 func (a *App) dismissComposerPopup() bool {
 	st := a.liveMenus()
-	if a.slashVisible() && st.slashDismissedDraft != a.draft {
+	// Escape walks up one "@" directory before it closes the menu, so a wrong
+	// drill is one key away from the folder list.
+	if a.mentionDrillUp() {
+		return true
+	}
+	if a.slashMenuVisible() && st.slashDismissedDraft != a.draft {
 		st.slashDismissedDraft = a.draft
 		return true
 	}
@@ -148,6 +134,11 @@ func (a *App) approvalCards(c *ui.Context, t *design.Tokens, requests []state.Ap
 			})
 			ui.Text(c, compactArgs(request.Args)).FontSize(12).FixedLineHeight(18).
 				TextColor(t.LabelSecondary).MaxLines(2).Ellipsis("...")
+			if reason := strings.TrimSpace(request.ReviewReason); reason != "" {
+				ui.Text(c, a.menuText("Auto review suggested denial: ", "自动审查建议拒绝：")+reason).
+					FontSize(11).FixedLineHeight(16).TextColor(t.WarningText).
+					MaxLines(3).Ellipsis("…")
+			}
 			ui.Row(c).Gap(design.Space2).Children(func() {
 				allow := design.Apply(ui.Button(c, a.T("composer.allow")), t.PrimaryButton())
 				if allow.Clicked() && a.Ctrl != nil {
@@ -164,31 +155,10 @@ func (a *App) approvalCards(c *ui.Context, t *design.Tokens, requests []state.Ap
 	}
 }
 
-// commandPalette is the "/" menu above the composer.
+// commandPalette is the "/" menu above the composer. The grouped, filtered
+// panel lives in composer_slash.go; this name is what the two composers call.
 func (a *App) commandPalette(c *ui.Context, t *design.Tokens) {
-	// runSlashCommand has no context parameter (session_live.go calls it with
-	// the bare line), so keep the frame's context for the toast the command
-	// may show. The palette is built on every frame whose draft starts with
-	// "/", which is exactly the frame whose Enter/click runs a command.
-	a.startUI().lastComposerContext = c
-	a.menuFrame(c, t, 360, func() {
-		ui.Text(c, a.T("composer.commands")).FontSize(11).FixedLineHeight(16).
-			TextColor(t.LabelTertiary)
-		for _, command := range slashCommands {
-			command := command
-			// The rows use the shared branded menu row, the same one the
-			// composer's popovers use, so the palette is not a stack of
-			// default buttons inside the panel.
-			row := a.popoverMenuActionRow(c, t, command.name, nil, func() {
-				a.runSlashCommand(command.name)
-			})
-			row.Tooltip(a.tr(command.en, command.zh))
-		}
-		ui.Text(c, a.tr("Unknown commands are sent to the model as text.",
-			"未知命令会作为普通文本发送给模型。")).
-			FontSize(11).FixedLineHeight(16).TextColor(t.LabelTertiary).
-			Padding(design.Space1, design.Space2, 0, design.Space2)
-	})
+	a.slashCommandPalette(c, t)
 }
 
 // slashCommandName returns the command name of a typed slash line. The name
@@ -238,12 +208,22 @@ func (a *App) runSlashCommand(line string) {
 			a.Ctrl.Stop()
 		}
 		a.draft = ""
+	case "/file":
+		a.draft = ""
+		a.runFileCommand(commandArgs(line, name))
 	case "/plan":
 		a.runPlanCommand(line)
+	case "/feedback":
+		a.draft = ""
+		a.runFeedbackCommand(commandArgs(line, name))
+	case "/permission":
+		a.draft = ""
+		a.runPermissionCommand(commandArgs(line, name))
+	case "/export":
+		a.draft = ""
+		a.runExportCommand()
 	case "/help":
-		a.draft = a.tr(
-			"Commands: /clear /stop /plan /help /new /settings /automate /plugins /model. /plan turns plan mode on, /plan off turns it off, and /plan <message> turns it on and sends the message. Compaction is automatic (the runtime compacts long conversations before a turn); there is no manual command. Unknown commands are sent to the model.",
-			"命令：/clear /stop /plan /help /new /settings /automate /plugins /model。/plan 开启计划模式，/plan off 关闭，/plan <消息> 开启并发送该消息。压缩是自动的（运行时会在每轮开始前压缩过长的对话）；没有手动命令。未知命令会发送给模型。")
+		a.draft = a.slashHelpText()
 	case "/new":
 		a.draft = ""
 		a.newSession()
@@ -384,9 +364,14 @@ func (a *App) submitPlanMessage(text string) {
 // context. The command catalog lives in i18n.go, which this change does not
 // own, so new messages carry both languages here.
 func (a *App) toastText(en, zh string) {
-	if c := a.startUI().lastComposerContext; c != nil {
-		c.Toast(a.tr(en, zh))
+	message := a.tr(en, zh)
+	if c := a.startUI().lastComposerContext; c != nil && c.Valid() {
+		c.Toast(message)
+		return
 	}
+	// Outside a build pass mygo drops Context toasts; keep the message for the
+	// next frame so a command run from the keyboard still reports its outcome.
+	a.queueToast(message)
 }
 
 // openModelPickerFromCommand is /model: it opens the composer's real model
@@ -407,50 +392,62 @@ func (a *App) openModelPickerFromCommand() {
 
 // mentionQuery finds a trailing "@query" token. query is empty for a draft
 // that ends in "@"; a space after the "@" ends the mention.
-func mentionQuery(draft string) (start int, query string, ok bool) {
-	start = strings.LastIndex(draft, "@")
-	if start < 0 {
-		return 0, "", false
-	}
-	query = draft[start+1:]
-	if strings.ContainsAny(query, " \t\r\n") {
-		return 0, "", false
-	}
-	return start, query, true
-}
-
-// mentionEntries lists the workspace entries and sessions whose names start
-// with the text after the trailing "@": files first, then sessions, as DSH's
-// reference menu orders them. Directories carry a trailing slash so the
-// inserted path reads as a directory; a session row is labelled
-// "session · <title>" and inserted as the plain "#<title>" reference (see
-// insertSessionMention for why this build has no richer form).
+// mentionEntries lists the workspace entries under the directory the "@" token
+// is browsing, then the matching sessions at the workspace root, as DSH's
+// reference menu orders them. The token's query is a path: "@docs/gu" lists
+// "docs/" for names starting with "gu" and keeps the relative path in the
+// value, so a nested pick inserts the full path. Directories carry a trailing
+// slash so the inserted path reads as a directory and the row becomes a drill
+// target; sessions are only offered at the root and are inserted as the plain
+// "#<title>" reference (see insertSessionMention for why this build has no
+// richer form).
 func (a *App) mentionEntries() []string {
 	if a.Ctrl == nil {
 		return nil
 	}
-	_, query, ok := mentionQuery(a.draft)
-	if !ok {
+	trigger := a.composerTrigger()
+	if trigger.kind != composerTriggerMention {
 		return nil
 	}
-	prefix := strings.ToLower(query)
+	dir, prefix := mentionQueryPath(trigger.query)
+	dir = filepath.Clean(filepath.FromSlash(dir))
+	if dir == "." || strings.HasPrefix(dir, "..") || filepath.IsAbs(dir) {
+		if dir != "." {
+			return nil
+		}
+		dir = ""
+	}
+	lowerPrefix := strings.ToLower(prefix)
+	root := strings.TrimSpace(a.Ctrl.WorkspaceRoot())
 	out := make([]string, 0, maxMentionFiles+maxMentionSessions)
-	if root := strings.TrimSpace(a.Ctrl.WorkspaceRoot()); root != "" {
-		if entries, err := os.ReadDir(root); err == nil {
+	if root != "" {
+		base := root
+		if dir != "" {
+			base = filepath.Join(root, dir)
+		}
+		if entries, err := os.ReadDir(base); err == nil {
 			for _, entry := range entries {
 				name := entry.Name()
-				if !strings.HasPrefix(strings.ToLower(name), prefix) {
+				if !strings.HasPrefix(strings.ToLower(name), lowerPrefix) {
 					continue
 				}
-				if entry.IsDir() {
-					name += "/"
+				relative := name
+				if dir != "" {
+					relative = filepath.ToSlash(dir) + "/" + name
 				}
-				out = append(out, name)
+				if entry.IsDir() {
+					relative += "/"
+				}
+				out = append(out, relative)
 				if len(out) == maxMentionFiles {
 					break
 				}
 			}
 		}
+	}
+	// Sessions are workspace-level references, not children of a folder.
+	if dir != "" {
+		return out
 	}
 	files := len(out)
 	if sessions, err := a.Ctrl.ListSessions(context.Background()); err == nil {
@@ -459,7 +456,7 @@ func (a *App) mentionEntries() []string {
 			if title == "" {
 				title = a.T("common.untitled")
 			}
-			if !strings.HasPrefix(strings.ToLower(title), prefix) {
+			if !strings.HasPrefix(strings.ToLower(title), lowerPrefix) {
 				continue
 			}
 			out = append(out, sessionMentionPrefix+title)
@@ -477,11 +474,13 @@ type mentionChoice struct {
 	label   string
 	value   string
 	session bool
+	dir     bool
 }
 
 // mentionChoices splits the flat candidate list into rows. Files keep their
-// path (and a trailing slash for a directory); sessions carry the display
-// prefix and insert the documented "#<title>" reference.
+// relative path (and a trailing slash for a directory, which also marks the
+// row as a drill target); sessions carry the display prefix and insert the
+// documented "#<title>" reference.
 func mentionChoices(entries []string) []mentionChoice {
 	out := make([]mentionChoice, 0, len(entries))
 	for _, entry := range entries {
@@ -490,7 +489,8 @@ func mentionChoices(entries []string) []mentionChoice {
 			out = append(out, mentionChoice{label: entry, value: title, session: true})
 			continue
 		}
-		out = append(out, mentionChoice{label: entry, value: entry})
+		out = append(out, mentionChoice{label: entry, value: entry,
+			dir: strings.HasSuffix(entry, "/")})
 	}
 	return out
 }
@@ -520,6 +520,9 @@ func (a *App) mentionMenu(c *ui.Context, t *design.Tokens, entries []string) {
 	width := a.composerPopupWidthFor(c)
 	ui.Row(c).Justify(ui.Center).Children(func() {
 		design.Apply(ui.Column(c), t.Panel()).Width(width).Padding(design.Space1).Children(func() {
+			if dir, ok := a.mentionDir(); ok && dir != "" {
+				a.mentionBreadcrumb(c, t, dir)
+			}
 			list := ui.Column(c).Role(ui.RoleList).FocusGroup(ui.Vertical).
 				Label(a.menuText("Mention suggestions", "提及建议"))
 			list.Children(func() {
@@ -586,23 +589,32 @@ func (a *App) mentionRow(c *ui.Context, t *design.Tokens, choice mentionChoice, 
 		st.mentionIndex = index
 	}
 	item.Children(func() {
-		if choice.session {
+		switch {
+		case choice.session:
 			ui.Icon(c, icons.NewChat()).Size(14, 14).TextColor(t.LabelSecondary)
-		} else {
+		case choice.dir:
 			ui.Icon(c, icons.Folder()).Size(14, 14).TextColor(t.LabelSecondary)
+		default:
+			ui.Icon(c, mentionFileIcon).Size(14, 14).TextColor(t.LabelSecondary)
 		}
 		ui.Text(c, choice.label).FontSize(13).FixedLineHeight(20).
 			TextColor(t.LabelPrimary).Grow(1).MaxLines(1).Ellipsis("…")
-		if choice.session {
+		switch {
+		case choice.session:
 			ui.Text(c, a.tr("Session", "会话")).FontSize(11).FixedLineHeight(16).
 				TextColor(t.LabelTertiary).NoWrap()
-			return
+		case choice.dir:
+			// The row is a real drill target: Tab opens the directory in place
+			// (the chevron says "there is a level below").
+			ui.Text(c, a.tr("Open folder", "打开文件夹")).FontSize(11).FixedLineHeight(16).
+				TextColor(t.LabelTertiary).NoWrap()
+			ui.Text(c, "Tab").FontSize(10).FixedLineHeight(16).TextColor(t.LabelTertiary).
+				Padding(0, 4).Background(t.BgHover).Radius(design.RadiusXS)
+			ui.Icon(c, icons.ChevronRight()).Size(12, 12).TextColor(t.LabelTertiary)
+		default:
+			ui.Text(c, a.tr("File", "文件")).FontSize(11).FixedLineHeight(16).
+				TextColor(t.LabelTertiary).NoWrap()
 		}
-		ui.Text(c, a.tr("Browse folder", "浏览文件夹")).FontSize(11).FixedLineHeight(16).
-			TextColor(t.LabelTertiary).NoWrap()
-		ui.Text(c, "Tab").FontSize(10).FixedLineHeight(16).TextColor(t.LabelTertiary).
-			Padding(0, 4).Background(t.BgHover).Radius(design.RadiusXS)
-		ui.Icon(c, icons.ChevronRight()).Size(12, 12).TextColor(t.LabelTertiary)
 	})
 	choose := func() {
 		if choice.session {
@@ -616,6 +628,38 @@ func (a *App) mentionRow(c *ui.Context, t *design.Tokens, choice mentionChoice, 
 	if item.Focused() && item.Shortcut(0, ui.KeyEnter) {
 		choose()
 	}
+}
+
+// drillMentionAt opens the highlighted "@" row when it is a directory and
+// reports whether it did. The composer's Tab uses it; choosing the row with
+// Enter still inserts the folder path as a reference.
+func (a *App) drillMentionAt(entries []string) bool {
+	choices := mentionChoices(entries)
+	st := a.liveMenus()
+	if st.mentionIndex < 0 || st.mentionIndex >= len(choices) {
+		return false
+	}
+	return a.drillMention(choices[st.mentionIndex])
+}
+
+// mentionBreadcrumb is the "@" menu's path row while it browses a directory:
+// it names the folder and says Esc walks back up. Clicking it goes up too.
+func (a *App) mentionBreadcrumb(c *ui.Context, t *design.Tokens, dir string) {
+	back := ui.Row(c).Height(28).Padding(design.Space1, design.Space2).
+		Radius(design.RadiusSM).Gap(design.Space2).AlignItems(ui.Center).
+		Role(ui.RoleButton).Focusable().
+		Label(a.menuText("Back to the parent folder", "返回上级文件夹"))
+	back.Children(func() {
+		ui.Icon(c, icons.Folder()).Size(14, 14).TextColor(t.LabelSecondary)
+		ui.Text(c, "@"+dir).FontSize(12).FixedLineHeight(18).
+			TextColor(t.LabelPrimary).Grow(1).MaxLines(1).Ellipsis("…")
+		ui.Text(c, a.menuText("Esc to go up", "Esc 返回上级")).
+			FontSize(11).FixedLineHeight(16).TextColor(t.LabelTertiary).NoWrap()
+	})
+	back.OnClick(func() {
+		a.mentionDrillUp()
+		a.composerRef.Focus(c)
+	})
 }
 
 // moveMention moves the "@" menu highlight by delta while the composer keeps
@@ -658,11 +702,7 @@ func (a *App) chooseMention(entries []string) bool {
 }
 
 func (a *App) insertMention(path string) {
-	start, _, ok := mentionQuery(a.draft)
-	if !ok {
-		return
-	}
-	a.draft = a.draft[:start+1] + path + " "
+	a.replaceComposerTrigger("@" + path + " ")
 }
 
 // insertSessionMention inserts this build's session reference. DSH inserts
@@ -673,11 +713,7 @@ func (a *App) insertMention(path string) {
 // "#<title>" token: readable to the model and to the user, with no false
 // claim of a resolved context.
 func (a *App) insertSessionMention(title string) {
-	start, _, ok := mentionQuery(a.draft)
-	if !ok {
-		return
-	}
-	a.draft = a.draft[:start] + "#" + title + " "
+	a.replaceComposerTrigger("#" + title + " ")
 }
 
 // attachmentMenu is the "+" menu: Files opens the real multi-file picker and
@@ -719,6 +755,10 @@ func (a *App) insertComposerToken(c *ui.Context, token string) {
 	case "/":
 		a.draft = "/" + a.draft
 	}
+	// The token was inserted outside the editor: put the caret after it so the
+	// next frame derives the trigger from the end of the new token (the Home
+	// composer is rebuilt when the attach menu closes, resetting its caret).
+	a.setComposerCaretAfterInsert()
 	a.composerRef.Focus(c)
 }
 

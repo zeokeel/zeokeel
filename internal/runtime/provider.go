@@ -11,9 +11,10 @@
 // Optional conversation state is attached through Config.History (multi-turn
 // history), Config.Compactor + Config.ContextBudget (context compaction),
 // Config.CheckpointStore (turn-boundary recovery), Config.Gate (tool
-// approvals) and Config.ToolReviewer (automatic review before a prompt); all
-// default to nil, which keeps an Agent stateless, uncompacted, un-gated and
-// prompt-driven. Config.Mode selects the eino agent topology (standard, deep,
+// approvals), Config.ToolReviewer (automatic review before a prompt) and
+// Config.ReviewContext (the working directory and project constraints that
+// review receives); all default to nil, which keeps an Agent stateless,
+// uncompacted, un-gated and prompt-driven. Config.Mode selects the eino agent topology (standard, deep,
 // supervisor or planexecute); it can be changed between turns with
 // Agent.SetMode.
 //

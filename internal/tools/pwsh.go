@@ -121,7 +121,7 @@ func (t *pwshTool) Invoke(ctx context.Context, args json.RawMessage) (string, er
 	defer cancel()
 
 	out := newCappedBuffer(t.maxOutput)
-	cmd := exec.CommandContext(ctx, exe, "-NoLogo", "-NoProfile", "-NonInteractive", "-Command", a.Command)
+	cmd := exec.CommandContext(ctx, exe, "-NoLogo", "-NoProfile", "-NonInteractive", "-Command", pwshCommandArg(goruntime.GOOS, a.Command))
 	cmd.Dir = t.root
 	cmd.Env = setEnv(scrubEnv(os.Environ()), "PWD", t.root)
 	cmd.Stdout = out

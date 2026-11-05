@@ -79,12 +79,20 @@ type Config struct {
 	Gate Gate
 	// ToolReviewer, when set, is consulted before a tool call that the Gate
 	// requires approval for. An allow decision runs the tool without publishing
-	// an ApprovalRequest; a deny decision fails the call with an "auto review
-	// denied: <reason>" tool error; a reviewer error falls back to the ordinary
-	// approval prompt. Read-only calls (which the Gate never requires) and
-	// full-access sessions (whose Gate requires nothing) never reach it. Nil
-	// preserves the pre-review behavior exactly.
+	// an ApprovalRequest; a deny decision asks the user (the published request
+	// carries ReviewReason), so the user can override the recommendation; a
+	// reviewer error falls back to the ordinary approval prompt. Read-only
+	// calls (which the Gate never requires) and full-access sessions (whose
+	// Gate requires nothing) never reach it. Nil preserves the pre-review
+	// behavior exactly.
 	ToolReviewer ToolReviewer
+	// ReviewContext, when set, supplies the automatic reviewer's environment
+	// for each review: the session's current working directory (the
+	// working_directory tool may move it within a turn) and the project
+	// constraints (AGENTS.md). It is called per review, so both stay current.
+	// Nil leaves the reviewer's environment empty; it only affects
+	// ToolReviewer, never an ordinary approval.
+	ReviewContext func() (workDir, constraints string)
 	// Compactor condenses the prior conversation when its estimated size
 	// exceeds ContextBudget. Nil disables compaction. WindowCompactor is the
 	// built-in, model-free implementation. The compactor runs in the turn
@@ -184,6 +192,7 @@ type Agent struct {
 	instrFunc     func() string
 	gate          Gate
 	reviewer      ToolReviewer
+	reviewContext func() (workDir, constraints string)
 	maxIterations int
 	// stepLimitNotice renders the assistant notice emitted when a turn reaches
 	// maxIterations; it is never nil after New.
@@ -271,6 +280,7 @@ func New(cfg Config) (*Agent, error) {
 		instrFunc:        cfg.InstructionFunc,
 		gate:             cfg.Gate,
 		reviewer:         cfg.ToolReviewer,
+		reviewContext:    cfg.ReviewContext,
 		maxIterations:    maxIterations,
 		stepLimitNotice:  stepLimitNotice,
 		settings:         cfg.Settings,
@@ -301,6 +311,13 @@ func New(cfg Config) (*Agent, error) {
 	a.bindApprovalGates()
 	a.bindToolReviewers()
 	return a, nil
+}
+
+// HasReviewContext reports whether the agent supplies the reviewer's
+// environment (working directory and project constraints). It lets the app
+// assert its Auto review wiring without exposing the closure.
+func (a *Agent) HasReviewContext() bool {
+	return a != nil && a.reviewContext != nil
 }
 
 // HasToolReviewer reports whether the agent was built with an automatic tool
@@ -666,7 +683,12 @@ func (a *Agent) run(ctx context.Context, cancel context.CancelFunc, sessionID, t
 	record := newTurnRecord(inputText)
 	// Tool invocations receive a context derived from this one, so they can
 	// publish approval requests and (indirectly) contribute to the record.
-	ctx = withTurnContext(ctx, &turnContext{sink: sink, record: record})
+	ctx = withTurnContext(ctx, &turnContext{
+		sink:          sink,
+		record:        record,
+		userRequest:   text,
+		reviewContext: a.reviewContext,
+	})
 
 	runner := adk.NewRunner(ctx, adk.RunnerConfig{
 		Agent:           pinned.adkAgent,

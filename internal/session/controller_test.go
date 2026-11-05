@@ -161,6 +161,12 @@ func newHarness(t *testing.T, provider runtime.Provider) *harness {
 }
 
 func newHarnessWithGate(t *testing.T, provider runtime.Provider, gate *runtime.ApprovalQueue) *harness {
+	return newHarnessConfigured(t, provider, func(cfg *runtime.Config) { cfg.Gate = gate })
+}
+
+// newHarnessConfigured is newHarnessWithGate with a callback that may set any
+// additional runtime.Config field, used by tests that wire automatic review.
+func newHarnessConfigured(t *testing.T, provider runtime.Provider, configure func(*runtime.Config)) *harness {
 	t.Helper()
 	dir := t.TempDir()
 	st, err := store.Open(dir)
@@ -176,17 +182,23 @@ func newHarnessWithGate(t *testing.T, provider runtime.Provider, gate *runtime.A
 	if err := registry.Register(echoTool{}); err != nil {
 		t.Fatalf("register echo: %v", err)
 	}
-	agent, err := runtime.New(runtime.Config{
+	cfg := runtime.Config{
 		Provider:    provider,
 		Tools:       registry,
 		Instruction: "test agent",
-		Gate:        gate,
-	})
+	}
+	if configure != nil {
+		configure(&cfg)
+	}
+	agent, err := runtime.New(cfg)
 	if err != nil {
 		t.Fatalf("runtime.New: %v", err)
 	}
 
-	h := &harness{t: t, dir: dir, store: st, agent: agent, gate: gate, workspace: ws.ID}
+	// The harness only exposes the concrete approval queue; tests that wire a
+	// different Gate inspect it through their own closure.
+	approvalGate, _ := cfg.Gate.(*runtime.ApprovalQueue)
+	h := &harness{t: t, dir: dir, store: st, agent: agent, gate: approvalGate, workspace: ws.ID}
 	h.newController()
 	t.Cleanup(h.close)
 	return h

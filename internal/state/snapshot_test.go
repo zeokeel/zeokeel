@@ -231,6 +231,21 @@ func TestToolLifecycleTransitions(t *testing.T) {
 	if st.Status != ToolAwaitingApproval || st.Name != "write_file" || st.Args != nil {
 		t.Fatalf("approval-only call = %+v", st)
 	}
+	if st.ReviewReason != "" {
+		t.Fatalf("ordinary approval gained a review reason: %+v", st)
+	}
+
+	// An automatic-review denial recommendation keeps its reason on the call so
+	// the approval card (and a replayed snapshot) can explain it. The call stays
+	// awaiting the user's decision.
+	s = Apply(s, ApprovalRequest{
+		CallID: "c4", Name: "bash", Kind: ApprovalCommand,
+		ReviewReason: "deletes pre-existing files",
+	})
+	st = s.Tools["c4"]
+	if st.Status != ToolAwaitingApproval || st.ReviewReason != "deletes pre-existing files" {
+		t.Fatalf("review fallback approval = %+v", st)
+	}
 
 	// Earlier snapshots keep their own tool state.
 	if afterStart.Tools["c1"].Status != ToolRunning {

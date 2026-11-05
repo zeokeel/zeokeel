@@ -2,10 +2,13 @@ package app
 
 import (
 	"encoding/json"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/zeokeel/zeokeel/internal/session"
+	"github.com/zeokeel/zeokeel/internal/tools"
 )
 
 // TestAutoReviewAppWiring proves the app builds the model-backed reviewer only
@@ -21,6 +24,7 @@ func TestAutoReviewAppWiring(t *testing.T) {
 	cases := []struct {
 		permission     string
 		wantReviewer   bool
+		wantReviewEnv  bool
 		wantBash       bool
 		wantBashApprov bool
 		wantFileApprov bool
@@ -28,7 +32,7 @@ func TestAutoReviewAppWiring(t *testing.T) {
 		{permission: session.PermissionAsk, wantBash: false, wantBashApprov: true, wantFileApprov: false},
 		{permission: session.PermissionWorkspace, wantBash: true, wantBashApprov: true, wantFileApprov: false},
 		{permission: session.PermissionFull, wantBash: true, wantBashApprov: false, wantFileApprov: false},
-		{permission: session.PermissionAutoReview, wantReviewer: true, wantBash: true, wantBashApprov: true, wantFileApprov: true},
+		{permission: session.PermissionAutoReview, wantReviewer: true, wantReviewEnv: true, wantBash: true, wantBashApprov: true, wantFileApprov: true},
 	}
 	for _, tc := range cases {
 		t.Run(tc.permission, func(t *testing.T) {
@@ -54,6 +58,11 @@ func TestAutoReviewAppWiring(t *testing.T) {
 			})
 			if got := bundle.Agent.HasToolReviewer(); got != tc.wantReviewer {
 				t.Fatalf("reviewer configured = %v, want %v", got, tc.wantReviewer)
+			}
+			// The reviewer's environment (cwd + AGENTS.md) is wired exactly when
+			// a reviewer exists, so a blind reviewer cannot happen again.
+			if got := bundle.Agent.HasReviewContext(); got != tc.wantReviewEnv {
+				t.Fatalf("review environment configured = %v, want %v", got, tc.wantReviewEnv)
 			}
 			if got := registryHas(bundle, "bash"); got != tc.wantBash {
 				t.Fatalf("bash registered = %v, want %v", got, tc.wantBash)
@@ -89,5 +98,49 @@ func TestAutoReviewAppWiring(t *testing.T) {
 				t.Fatalf("auto review prompt does not describe workspace-write: %q", bundle.Agent.Instruction())
 			}
 		})
+	}
+}
+
+// TestAutoReviewContextWiring proves the reviewer environment is the same one
+// the prompt calls authoritative: the working-directory tool's current
+// directory (workspace root by default) and the project's AGENTS.md content.
+func TestAutoReviewContextWiring(t *testing.T) {
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "AGENTS.md"),
+		[]byte("# Project rules\nNever touch production."), 0o644); err != nil {
+		t.Fatalf("write AGENTS.md: %v", err)
+	}
+	dirState, err := tools.NewWorkingDirectoryState(root)
+	if err != nil {
+		t.Fatalf("NewWorkingDirectoryState: %v", err)
+	}
+
+	reviewContext := autoReviewContext(root, dirState)
+	workDir, constraints := reviewContext()
+	if got, _ := dirState.Cwd(); workDir != got {
+		t.Fatalf("reviewer cwd = %q, want the working directory %q", workDir, got)
+	}
+	if !strings.Contains(constraints, "Never touch production") {
+		t.Fatalf("reviewer constraints = %q, want the AGENTS.md content", constraints)
+	}
+
+	// A working_directory move inside the turn is visible to the next review.
+	if err := os.Mkdir(filepath.Join(root, "sub"), 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	if err := dirState.SetRel("sub"); err != nil {
+		t.Fatalf("SetRel: %v", err)
+	}
+	moved, _ := reviewContext()
+	if want, _ := dirState.Cwd(); moved != want || moved == workDir {
+		t.Fatalf("reviewer cwd after move = %q, want %q (was %q)", moved, want, workDir)
+	}
+
+	// No AGENTS.md and no working-directory state: the reviewer still gets the
+	// workspace root and empty constraints.
+	emptyRoot := t.TempDir()
+	noConstraints, constraints := autoReviewContext(emptyRoot, nil)()
+	if noConstraints != emptyRoot || constraints != "" {
+		t.Fatalf("fallback review env = (%q, %q), want root and empty constraints", noConstraints, constraints)
 	}
 }

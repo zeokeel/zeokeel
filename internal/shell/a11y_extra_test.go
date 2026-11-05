@@ -75,8 +75,8 @@ func TestSidebarRowsTabReachability(t *testing.T) {
 	})
 }
 
-// TestRightSidebarTabReachability covers the Files tab's breadcrumb, reload
-// and file rows.
+// TestRightSidebarTabReachability covers the Files tab's breadcrumb, directory
+// opener, reload and file rows.
 func TestRightSidebarTabReachability(t *testing.T) {
 	h := newLiveApp(t, &shellProvider{})
 	h.app.Language = LangEN
@@ -88,7 +88,8 @@ func TestRightSidebarTabReachability(t *testing.T) {
 	tt.Frame()
 	assertTabReachable(t, tt, []string{
 		"Start", "Files", "Terminal", "Log", "New tab", "Split", "Fullscreen",
-		"Collapse right sidebar", "Reload", "⌂ test", "probe.txt",
+		"Collapse right sidebar", "Open directory in system app", "Reload",
+		"⌂ test", "probe.txt",
 	})
 }
 

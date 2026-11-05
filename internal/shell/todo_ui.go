@@ -3,6 +3,7 @@ package shell
 import (
 	"context"
 	"fmt"
+	"path/filepath"
 	"strings"
 
 	"github.com/egoist/mygo/ui"
@@ -201,8 +202,10 @@ func (a *App) answerQuestion(question tools.Question) {
 }
 
 // liveArtifacts lists the artifacts the agent presented through the present
-// tool. Clicking a card expands inline Markdown; the path is always shown and
-// is never copied or opened by the shell.
+// tool. Clicking the card's title row expands inline Markdown; a presented file
+// also carries its native actions: preview it in the Files tab, or hand it to
+// the OS default application / file manager. The shell never reads a path
+// outside the session workspace, so such a card explains that instead.
 func (a *App) liveArtifacts(c *ui.Context, t *design.Tokens) {
 	artifacts := a.artifacts()
 	if len(artifacts) == 0 {
@@ -216,22 +219,29 @@ func (a *App) liveArtifacts(c *ui.Context, t *design.Tokens) {
 		for _, artifact := range artifacts {
 			artifact := artifact
 			open := uiState.artifactRaw[artifact.CallID]
-			card := ui.ButtonBase(c).FillWidth().Padding(th.Space(2)).
+			card := ui.Column(c).FillWidth().Padding(th.Space(2)).
 				Radius(design.RadiusSM).Border(1, t.BorderL2).
-				Justify(ui.Start).Background(t.BgRaised).
-				Transition(design.ColorTransition())
+				Background(t.BgRaised).Transition(design.ColorTransition())
 			card.Children(func() {
-				ui.Row(c).Gap(design.Space2).AlignItems(ui.Center).Children(func() {
-					ui.Text(c, "▣").FontSize(12).TextColor(t.Accent)
-					ui.Text(c, artifact.Title).FontSize(12).FixedLineHeight(18).
-						FontWeight(600).TextColor(t.LabelPrimary).Grow(1).NoWrap().
-						Ellipsis("…")
-					ui.Text(c, artifact.Kind).FontSize(10).FixedLineHeight(18).
-						TextColor(t.LabelTertiary).NoWrap()
+				// The title row stays the expand control, so a click on the
+				// title still shows or hides the inline Markdown.
+				toggle := ui.ButtonBase(c).FillWidth().Padding(0).Justify(ui.Start)
+				toggle.Children(func() {
+					ui.Row(c).Gap(design.Space2).AlignItems(ui.Center).Children(func() {
+						ui.Text(c, "▣").FontSize(12).TextColor(t.Accent)
+						ui.Text(c, artifact.Title).FontSize(12).FixedLineHeight(18).
+							FontWeight(600).TextColor(t.LabelPrimary).Grow(1).NoWrap().
+							Ellipsis("…")
+						ui.Text(c, artifact.Kind).FontSize(10).FixedLineHeight(18).
+							TextColor(t.LabelTertiary).NoWrap()
+					})
+					if artifact.Path != "" {
+						ui.Text(c, artifact.Path).FontSize(11).FixedLineHeight(16).
+							TextColor(t.LabelSecondary).NoWrap().Ellipsis("…")
+					}
 				})
-				if artifact.Path != "" {
-					ui.Text(c, artifact.Path).FontSize(11).FixedLineHeight(16).
-						TextColor(t.LabelSecondary).NoWrap().Ellipsis("…")
+				if toggle.Clicked() {
+					uiState.artifactRaw[artifact.CallID] = !open
 				}
 				if open {
 					if artifact.Markdown != "" {
@@ -242,10 +252,64 @@ func (a *App) liveArtifacts(c *ui.Context, t *design.Tokens) {
 							FontSize(11).TextColor(t.LabelTertiary)
 					}
 				}
+				if artifact.Path != "" {
+					a.artifactActions(c, t, artifact)
+				}
 			})
-			if card.Clicked() {
-				uiState.artifactRaw[artifact.CallID] = !open
-			}
 		}
 	})
+}
+
+// artifactActions is the present card's action row: preview the file in the
+// Files tab, and, when the desktop backend is available, open it with the OS
+// default application or reveal it in the file manager. A path outside the
+// session workspace gets the explanation only; the card never opens a file the
+// panel would refuse to read.
+func (a *App) artifactActions(c *ui.Context, t *design.Tokens, artifact tools.Artifact) {
+	th := t.Theme()
+	rel, previewable := a.artifactPreviewRel(artifact.Path)
+	ui.Column(c).Gap(th.Space(1)).Children(func() {
+		if !previewable {
+			ui.Text(c, a.T("files.that_path_is_outside_the_workspace")).
+				FontSize(th.FontSize - 3).FixedLineHeight(th.Space(4)).
+				TextColor(t.WarningText).MaxLines(2).Ellipsis("…")
+			return
+		}
+		available := a.filesNativeAvailable()
+		ui.Row(c).Gap(th.Space(1)).Wrap().AlignItems(ui.Center).Children(func() {
+			a.artifactActionButton(c, t, a.T("session.preview_in_sidebar"),
+				func() { a.openArtifactPreview(artifact.Path) })
+			if !available {
+				return
+			}
+			abs := filepath.Join(a.filesRoot(), filepath.FromSlash(rel))
+			a.artifactActionButton(c, t, a.T("session.open_artifact_in_system"),
+				func() { a.filesNativeRun(c, abs, a.filesOpener()) })
+			a.artifactActionButton(c, t, a.T("session.reveal_artifact_in_file_manager"),
+				func() { a.filesNativeRun(c, abs, a.filesRevealer()) })
+		})
+		if !available {
+			// The reference product explains why the native controls are
+			// missing and what still works; the card keeps the preview action.
+			ui.Text(c, a.T("session.host_note")).FontSize(th.FontSize - 3).
+				FixedLineHeight(th.Space(4)).TextColor(t.LabelTertiary).
+				MaxLines(2).Ellipsis("…")
+		}
+	})
+}
+
+// artifactActionButton is one compact text action of the present card, on the
+// same native ButtonBase the rest of the panel uses.
+func (a *App) artifactActionButton(c *ui.Context, t *design.Tokens, label string, onClick func()) {
+	th := t.Theme()
+	button := ui.ButtonBase(c).Height(th.Space(6)).PaddingX(th.Space(2)).
+		Radius(design.RadiusXS).Label(label).Tooltip(label)
+	if button.Hovered() {
+		button = button.Background(t.BgHover)
+	}
+	button.Children(func() {
+		ui.Text(c, label).FontSize(th.FontSize - 3).
+			FixedLineHeight(th.Space(4)).TextColor(t.LabelSecondary)
+	})
+	button.OnClick(onClick)
 }

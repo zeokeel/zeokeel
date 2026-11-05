@@ -156,6 +156,9 @@ func (a *App) liveHeader(c *ui.Context, t *design.Tokens, snap *state.Snapshot) 
 			titleEl := design.Apply(ui.Text(c, title), t.Font(design.TypeBody))
 			titleEl.FontWeight(600).TextColor(t.LabelPrimary).MaxLines(1).Ellipsis("…")
 			ui.Box(c).Width(th.Space(2))
+			// The workspace the agent actually works in: the session screen had
+			// no visible workspace indicator beyond the Files breadcrumb.
+			a.sessionWorkspaceChip(c, t)
 			mst := a.modeUI()
 			modeText := a.agentModeLabel(a.currentAgentMode())
 			if a.currentAgentMode() == "standard" {
@@ -528,6 +531,7 @@ func (a *App) sessionComposerCard(c *ui.Context, t *design.Tokens, snap *state.S
 			a.T("session.composer_input"), a.T("home.composer_placeholder"),
 			a.composerTextKey(c, false), &a.composerRef)
 		input.AutoFocus()
+		a.recordComposerCaret(input)
 		card = brandComposerFocus(card, input, t)
 		ui.Row(c).AlignItems(ui.Center).Gap(th.Space(1)).Children(func() {
 			brandIconButton(c, t, icons.Plus(), a.T("composer.add_files_or_run_commands"),
@@ -559,6 +563,15 @@ func (a *App) approvalCardsWithAlways(c *ui.Context, t *design.Tokens, requests 
 			})
 			argsText := design.Apply(ui.Text(c, compactArgs(request.Args)), t.Font(design.TypeXXS))
 			argsText.TextColor(t.LabelSecondary).MaxLines(2).Ellipsis("...")
+			// The automatic reviewer recommended denial: keep the reason on the
+			// card so the user can override it with full context. The buttons
+			// below keep their meaning (Allow runs the call, Deny rejects it).
+			if reason := strings.TrimSpace(request.ReviewReason); reason != "" {
+				reviewNote := design.Apply(ui.Text(c, a.menuText(
+					"Auto review suggested denial: ", "自动审查建议拒绝：")+reason),
+					t.Font(design.TypeXXS))
+				reviewNote.TextColor(t.WarningText).MaxLines(3).Ellipsis("…")
+			}
 			ui.Row(c).Gap(design.Space2).Children(func() {
 				allow := design.Apply(ui.Button(c, a.T("composer.allow")), t.PrimaryButton())
 				if allow.Clicked() && a.Ctrl != nil {

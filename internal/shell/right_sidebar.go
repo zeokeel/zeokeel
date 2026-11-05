@@ -62,6 +62,15 @@ type rightPanelState struct {
 	// dockWidth is the width the user dragged the panel to, 0 for the brand
 	// default. It is in-memory only, like the collapsed left sidebar.
 	dockWidth float32
+	// filesSessionID is the session the Files tab's navigation belongs to:
+	// filesDir, filePath and the preview are reset when it changes
+	// (files_root.go ensureFilesSession). filesSessionSet distinguishes the
+	// first frame, which only records the session, from a real switch.
+	filesSessionID  string
+	filesSessionSet bool
+	// nativeErr is the transient failure of the Files tab's native open/reveal
+	// actions, shown under the preview's metadata row until the next success.
+	nativeErr string
 }
 
 var rightPanelStates sync.Map // map[*App]*rightPanelState
@@ -79,6 +88,11 @@ func (a *App) rightPanelUI() *rightPanelState {
 // no plain file glyph yet, so the panel carries its own on the same 16 DIP
 // grid as the other line icons.
 var rightPanelFileIcon = ui.MustParseSVG([]byte(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 1.8h5.2L12.2 4.8v9.4H4z"/><path d="M9 1.8v3.2h3.2"/></svg>`))
+
+// rightPanelExternalIcon is the "open in system app" affordance: a box with an
+// arrow leaving it, on the same 16 DIP grid as the other line icons. The icon
+// package has no external-link glyph yet, so the panel carries its own.
+var rightPanelExternalIcon = ui.MustParseSVG([]byte(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"><path d="M9.5 2.5h4v4"/><path d="M13.5 2.5 8 8"/><path d="M12 9.8v3.7H2.5V3h3.7"/></svg>`))
 
 // rightSidebarResizeGrip is the docked panel's draggable leading edge: a
 // pointer drag resizes the panel, and the arrow keys resize it from the
@@ -415,7 +429,8 @@ func (a *App) rightTabButton(c *ui.Context, t *design.Tokens, tabs ui.TabsParts,
 
 // filesPanel shows either the current directory listing or a file preview.
 func (a *App) filesPanel(c *ui.Context, t *design.Tokens) {
-	root := a.workspaceRoot()
+	a.ensureFilesSession()
+	root := a.filesRoot()
 	if root == "" {
 		a.rightEmpty(c, t, icons.Folder(),
 			a.T("files.no_workspace_root_yet_create_or_select_a_workspace"))
@@ -449,11 +464,12 @@ func (a *App) filesBreadcrumb(c *ui.Context, t *design.Tokens, root, fileLabel s
 	segments := splitRelPath(a.filesDir)
 	panelW := a.rightSidebarPanelWidth(c)
 	reloadW := th.Space(6)
+	openW := th.Space(6)
 	gap := th.Space(0.5)
-	// The row's own side padding, the resize grip and the pinned Reload
-	// control.
+	// The row's own side padding, the resize grip and the pinned
+	// open-in-system and Reload controls.
 	inner := panelW - rightPanelGripW - 2*th.Space(3)
-	available := inner - reloadW - gap
+	available := inner - reloadW - openW - 2*gap
 
 	measure := func(label string) float32 {
 		w, _ := c.MeasureText(0, ui.Span{Text: label, Size: 12})
@@ -558,6 +574,26 @@ func (a *App) filesBreadcrumb(c *ui.Context, t *design.Tokens, root, fileLabel s
 				}
 			}
 			ui.Spacer(c)
+			// The directory opener uses the OS default application: a desktop
+			// app can hand the workspace folder to Finder/Explorer/the
+			// desktop's file manager or editor, which the web build cannot.
+			openLabel := a.T("files.open_directory_in_system")
+			open := ui.ButtonBase(c).Size(openW, th.Space(6)).Shrink(0).Center().
+				Radius(design.RadiusXS).Label(openLabel).Tooltip(openLabel)
+			if open.Hovered() {
+				open = open.Background(t.BgHover)
+			}
+			open.Children(func() {
+				ui.Icon(c, rightPanelExternalIcon).Size(th.Space(3.5), th.Space(3.5)).
+					TextColor(t.LabelSecondary)
+			})
+			open.OnClick(func() {
+				dir := root
+				if a.filesDir != "" {
+					dir = filepath.Join(root, filepath.FromSlash(a.filesDir))
+				}
+				a.filesNativeRun(c, dir, a.filesOpener())
+			})
 			reload := ui.ButtonBase(c).Size(reloadW, th.Space(6)).Shrink(0).Center().
 				Radius(design.RadiusXS).
 				Label(a.tr("Reload", "重新加载")).Tooltip(a.tr("Reload", "重新加载"))
@@ -740,11 +776,30 @@ func (a *App) filePreview(c *ui.Context, t *design.Tokens, root string) {
 		a.rightEmpty(c, t, rightPanelFileIcon, a.fileErr)
 		return
 	}
+	abs, _ := safeJoin(root, a.filePath)
 	ui.Row(c).Height(th.Space(8)).PaddingX(th.Space(3)).AlignItems(ui.Center).
 		Gap(th.Space(2)).Children(func() {
 		ui.Text(c, fmt.Sprintf(a.T("files.plain_text_preview_d_bytes"),
 			len(a.fileText))).FontSize(th.FontSize - 3).FixedLineHeight(th.Space(4)).
-			TextColor(t.LabelTertiary).Grow(1)
+			TextColor(t.LabelTertiary).Grow(1).MaxLines(1).Ellipsis("…")
+		// The desktop build can hand the file to the OS default application or
+		// reveal it in the file manager; the web build cannot, so these are
+		// part of the native panel instead of the preview body.
+		openLabel := a.T("files.open_file_in_system")
+		revealLabel := a.T("files.reveal_in_file_manager")
+		nativeAction := func(label string, ic *ui.SVG, action func(string) error) {
+			button := ui.ButtonBase(c).Size(th.Space(6), th.Space(6)).Shrink(0).Center().
+				Radius(design.RadiusXS).Label(label).Tooltip(label)
+			if button.Hovered() {
+				button = button.Background(t.BgHover)
+			}
+			button.Children(func() {
+				ui.Icon(c, ic).Size(th.Space(3.5), th.Space(3.5)).TextColor(t.LabelSecondary)
+			})
+			button.OnClick(func() { a.filesNativeRun(c, abs, action) })
+		}
+		nativeAction(openLabel, rightPanelExternalIcon, a.filesOpener())
+		nativeAction(revealLabel, icons.FolderOpen(), a.filesRevealer())
 		closePreview := ui.ButtonBase(c).Height(th.Space(6)).PaddingX(th.Space(2)).
 			Radius(design.RadiusXS).Label(a.T("files.close_preview"))
 		if closePreview.Hovered() {
@@ -760,8 +815,14 @@ func (a *App) filePreview(c *ui.Context, t *design.Tokens, root string) {
 			a.fileTrunc = false
 			a.fileLimited = false
 			a.fileErr = ""
+			a.rightPanelUI().nativeErr = ""
 		})
 	})
+	if msg := a.rightPanelUI().nativeErr; msg != "" {
+		ui.Text(c, msg).FontSize(th.FontSize-3).FixedLineHeight(th.Space(4)).
+			TextColor(t.WarningText).MaxLines(2).Ellipsis("…").
+			Padding(0, th.Space(3), 0, th.Space(3))
+	}
 	ui.ScrollBoth(c).Grow(1).Children(func() {
 		ui.Column(c).Padding(th.Space(2), th.Space(3), th.Space(3), th.Space(3)).
 			Children(func() {
@@ -783,15 +844,18 @@ func (a *App) filePreview(c *ui.Context, t *design.Tokens, root string) {
 	}
 }
 
-// openFilePreview loads rel under the workspace root. Paths are resolved
-// through filepath.Clean and rejected when they escape the root.
+// openFilePreview loads rel under the files root (the shown session's
+// workspace). Paths are resolved through filepath.Clean and rejected when they
+// escape the root.
 func (a *App) openFilePreview(rel string) {
-	root := a.workspaceRoot()
+	a.ensureFilesSession()
+	root := a.filesRoot()
 	a.filePath = rel
 	a.fileText = ""
 	a.fileErr = ""
 	a.fileTrunc = false
 	a.fileLimited = false
+	a.rightPanelUI().nativeErr = ""
 
 	abs, err := safeJoin(root, rel)
 	if err != nil {
@@ -1035,6 +1099,7 @@ func (a *App) resetFiles() {
 	a.fileTrunc = false
 	a.fileLimited = false
 	a.fileErr = ""
+	a.rightPanelUI().nativeErr = ""
 }
 
 // splitRelPath splits a slash-separated relative path into non-empty parts.

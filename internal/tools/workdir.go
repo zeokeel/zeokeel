@@ -82,6 +82,47 @@ func (s *WorkingDirectoryState) Cwd() (abs, rel string) {
 	return s.root, "."
 }
 
+// Reset returns the current directory to the workspace root, keeping the
+// state's root and sandbox. The app uses it when a new or reopened session
+// takes over the shared list: a session must not inherit the subdirectory
+// another session happened to cd into.
+func (s *WorkingDirectoryState) Reset() {
+	if s == nil || s.sb == nil {
+		return
+	}
+	s.set(s.root, ".")
+}
+
+// SetRel restores the current directory to a workspace-relative path that was
+// saved earlier (empty or "." means the workspace root). A path that no longer
+// resolves to a directory resets to the root instead of leaving the state on a
+// stale directory, so a deleted subdirectory can never strand the agent.
+func (s *WorkingDirectoryState) SetRel(rel string) error {
+	if s == nil || s.sb == nil {
+		return errors.New("working_directory: state is not initialized")
+	}
+	clean := strings.TrimSpace(strings.TrimPrefix(rel, "./"))
+	if clean == "" || clean == "." {
+		s.Reset()
+		return nil
+	}
+	abs, resolved, err := s.resolve(clean)
+	if err != nil {
+		s.Reset()
+		return err
+	}
+	info, statErr := os.Stat(abs)
+	if statErr != nil || !info.IsDir() {
+		s.Reset()
+		if statErr != nil {
+			return statErr
+		}
+		return fmt.Errorf("working_directory: %q is not a directory", rel)
+	}
+	s.set(abs, resolved)
+	return nil
+}
+
 // resolve maps a root-relative path to its absolute form.
 func (s *WorkingDirectoryState) resolve(rel string) (string, string, error) {
 	if s == nil || s.sb == nil {

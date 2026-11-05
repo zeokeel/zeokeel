@@ -54,6 +54,14 @@ type liveUIState struct {
 	// list keeps the scroll anchor and the row state (expandedRaw) with the
 	// event when rows above change; only the rows in view are built per frame.
 	trajList ui.ListState
+
+	// Workspace indicator cache. The header draws every frame, so the current
+	// session's workspace is resolved once per session instead of querying the
+	// store on every frame.
+	workspaceSessionID string
+	workspaceName      string
+	workspaceRoot      string
+	workspaceLoaded    bool
 }
 
 // liveUIStates maps each App to its live UI state. Entries live as long as

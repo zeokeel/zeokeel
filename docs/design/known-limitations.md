@@ -25,7 +25,12 @@
 
 - **通知**：当前/后台会话的 turn 完成/失败与**审批/提问等待**均已通知（controller hook）；通知 ID 替换、动作按钮、"退出应用后点击通知"未做；跨会话总量节流为简化策略（同会话完成 5s 冷却，审批不节流）。
 - **设置窗口**：所有窗口均无菜单栏（原生菜单栏 2026-11-05 退役，[ADR 0006](../../docs/decisions/0006-retire-native-menu-bar.md)）；窗口间几何联动、大页滚动位置持久化未做；overlay 作为无显示器/创建失败的回退保留（行为略有差异）。
-- **计划模式**：2026-11-05 起对齐 DSH（[ADR 0008](../../docs/decisions/0008-plan-mode-soft-alignment.md)）：入口为 `/plan` 命令 + composer 计划徽章（`/plan` 开、`/plan off` 或点徽章关、`/plan <消息>` 开并提交该消息）；计划模式是**软引导**（`plan:policy` prompt + `present` "Plan" + 审阅卡），**不再拦截任何工具**——需要强制只读规划的必须同时选择 composer 的「只读」权限（plan 与权限正交、可叠加）。尚未做：独立 `exit_plan_mode` 工具、审阅卡 Keep planning（带反馈）分支、pending 态徽章、Home 草稿会话的 `/plan`。另：Home composer 打开 `/` 面板后会丢键盘焦点（既有缺陷，未修）。
+- **计划模式**：2026-11-05 起对齐 DSH（[ADR 0008](../../docs/decisions/0008-plan-mode-soft-alignment.md)）：入口为 `/plan` 命令 + composer 计划徽章（`/plan` 开、`/plan off` 或点徽章关、`/plan <消息>` 开并提交该消息）；计划模式是**软引导**（`plan:policy` prompt + `present` "Plan" + 审阅卡），**不再拦截任何工具**——需要强制只读规划的必须同时选择 composer 的「只读」权限（plan 与权限正交、可叠加）。尚未做：独立 `exit_plan_mode` 工具、审阅卡 Keep planning（带反馈）分支、pending 态徽章（Home 草稿会话的 `/plan` 与 Home composer 打开 `/` 面板后的键盘焦点均已修复，后者见 native-ui.md §19.4/§19.5）。
+- **Composer 斜杠命令 / `@` 提及**（2026-11-05 对齐 DSH，native-ui.md §19.5）：
+  - **有意不加行**：`/goal` —— shell 侧 `Controller.SetGoal` 只写内存、不落 `GoalStateStore`，会与 goal 工具/GoalDriver 分叉，需要 session/app 层官方写入 API；`/compact` —— 压缩只在 runtime 回合前自动执行，没有公开的手动压缩 API（需 runtime+session 语义改动）。两者在 `/help` 只是说明（压缩自动、未知命令发给模型）。
+  - **保留的 ZeoKeel 策略**：未知 `/xxx` 行仍作为普通消息发送给模型（DSH 文档称未知行被拒绝，但其源码对未知行也走普通提交；两端口径不统一，按用户此前文档保留现有行为）。
+  - **`@` 提及未做（P1）**：行尾 chevron 的指针 drill（Tab 已是真实下钻）、`@"path with spaces"` 引号路径、文件夹多级面包屑的点击跳级、会话行的时间/workspace 详情；会话引用仍是文档化的 `#<title>` 纯文本 fallback（无 DSH 的原子 session-reference 解析器）。
+  - **caret 记录的框架限制**：mygo 在 composer 上方插入派生弹层时会重建编辑器元素、选区回落到文末；`recordComposerCaret` 用「draft 未变且 caret 落到文末」判定并回写原 caret（native-ui.md §19.5），真机 IME 组合期的极端 caret 行为仍需人工冒烟。
 - **文本选择**：消息与工具卡中的 Markdown 内容（正文/代码）可选中并右键复制（mygo markdown）；其余 UI 文本未全量开启选择（侧栏、按钮、标题、设置说明等），桌面应用一般也不需要。
 - **Trajectory**：已虚拟化（ui.List，1000 事件稳态帧 22.7ms→3.12ms，见 perf.md §8）；`FollowEnd=false` 为当前选择，若产品要"日志式跟随末尾"改一处即可。
 - **工具输出**：超大工具结果 40 行封顶 + 展开，未虚拟化（当前规模可接受）；工具结果代码块语言映射为简化集合（bash/text 等）。

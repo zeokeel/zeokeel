@@ -99,12 +99,26 @@ type Controller struct {
 	wsMu        sync.Mutex
 	workspaceID string
 
+	// bindMu serializes the workspace binding of CreateSession/OpenSession and
+	// Submit. The app has one shared runtime agent built for the selected
+	// workspace's root, so the "select the session's workspace, then start the
+	// turn" sequence must not interleave with another submit switching the
+	// root between the rebuild and Agent.Run. UI-driven SelectWorkspace calls
+	// do not take it: a user switching workspace mid-turn changes the agent for
+	// the next turn, as before.
+	bindMu sync.Mutex
+
 	mu        sync.Mutex
 	views     map[string]*state.Snapshot
 	turns     map[string]*turn
 	pending   map[string]map[string]state.ApprovalRequest // session id -> call id
 	perms     map[string]string                           // session id -> permission mode at creation
 	currentID string
+	// onSessionActivated, when non-nil, observes a session becoming current
+	// through create/open. It runs without mu held, so the app can reset or
+	// restore that session's working directory (the runtime agent shares one
+	// working-directory state across sessions in a workspace). Guarded by mu.
+	onSessionActivated func(previousSessionID, sessionID string)
 	// attachMu serializes attachment admission/removal so the per-turn cap
 	// cannot be exceeded by two concurrent picks. It is held across file I/O
 	// and store writes, never while holding mu.
@@ -297,6 +311,12 @@ func (c *Controller) CreateSession(ctx context.Context, title string) (string, e
 		return "", ErrClosed
 	}
 
+	// Serialize with a Submit's workspace binding: creating a session also
+	// selects its workspace and rebuilds the shared agent, so a concurrent
+	// submit must not observe a half-switched selection.
+	c.bindMu.Lock()
+	defer c.bindMu.Unlock()
+
 	workspaceID, err := c.ensureWorkspace()
 	if err != nil {
 		return "", err
@@ -325,6 +345,8 @@ func (c *Controller) CreateSessionInWorkspace(ctx context.Context, workspaceID, 
 	if closed {
 		return "", ErrClosed
 	}
+	c.bindMu.Lock()
+	defer c.bindMu.Unlock()
 	return c.createSessionInWorkspaceLocked(ctx, workspaceID, title)
 }
 
@@ -340,6 +362,14 @@ func (c *Controller) CurrentSession() (*store.Session, error) {
 func (c *Controller) createSessionInWorkspaceLocked(ctx context.Context, workspaceID, title string) (string, error) {
 	if strings.TrimSpace(title) == "" {
 		title = "Untitled"
+	}
+
+	// A session created for an explicit workspace must select that workspace
+	// (and rebuild the shared agent for its root) before it becomes current.
+	// Without this, CreateSessionInWorkspace(B) while A is selected created a
+	// session whose first turn ran with A's tools and prompt WorkDir.
+	if err := c.bindWorkspace(ctx, workspaceID); err != nil {
+		return "", fmt.Errorf("session: create in workspace %q: %w", workspaceID, err)
 	}
 
 	sess, err := c.store.CreateSession(workspaceID, title)
@@ -381,6 +411,7 @@ func (c *Controller) createSessionInWorkspaceLocked(ctx context.Context, workspa
 		c.mu.Unlock()
 		return "", ErrClosed
 	}
+	previousID := c.currentID
 	c.views[sess.ID] = snap
 	c.perms[sess.ID] = permission
 	c.planModes[sess.ID] = "false"
@@ -395,6 +426,11 @@ func (c *Controller) createSessionInWorkspaceLocked(ctx context.Context, workspa
 	if err := c.applySessionMode(sess.ID); err != nil {
 		return "", fmt.Errorf("session: create %q: apply agent mode: %w", sess.ID, err)
 	}
+
+	// The new session takes over the shared working-directory state: let the
+	// app start it at the workspace root (or its own saved directory) instead
+	// of inheriting whatever subdirectory the previous session had entered.
+	c.notifySessionActivated(previousID, sess.ID)
 
 	c.notify(sess.ID, snap)
 	return sess.ID, nil
@@ -432,6 +468,11 @@ func (c *Controller) OpenSession(ctx context.Context, id string) (*state.Snapsho
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
+	// Serialize the workspace switch with Submit's binding: both move the
+	// shared agent to a different workspace root, and a submit must not start
+	// its turn between this switch and the current-session update below.
+	c.bindMu.Lock()
+	defer c.bindMu.Unlock()
 
 	sess, err := c.store.GetSession(id)
 	if err != nil {
@@ -510,6 +551,10 @@ func (c *Controller) OpenSession(ctx context.Context, id string) (*state.Snapsho
 	// Point the shared agent at this session's selected model before the next
 	// request. The choice is per session and never rewrites the global default.
 	_ = c.applySessionModel(id)
+	// The reopened session takes over the shared working-directory state: the
+	// app starts it at the workspace root or its own last directory instead of
+	// inheriting the previous session's cwd.
+	c.notifySessionActivated(previousID, id)
 	c.notify(id, snap)
 	return snap, nil
 }
@@ -575,14 +620,17 @@ func (c *Controller) submit(ctx context.Context, sessionID, text string, automat
 	if strings.TrimSpace(text) == "" {
 		return fmt.Errorf("%w: submit: empty prompt", ErrEmptyPrompt)
 	}
-	c.mu.Lock()
-	agent := c.agent
-	c.mu.Unlock()
-	if agent == nil {
-		return ErrNoAgent
-	}
 	if err := ctx.Err(); err != nil {
 		return err
+	}
+
+	// Reject a controller without an agent before reserving a turn slot,
+	// preserving Submit's existing error contract.
+	c.mu.Lock()
+	hasAgent := c.agent != nil
+	c.mu.Unlock()
+	if !hasAgent {
+		return ErrNoAgent
 	}
 
 	turnCtx, t, err := c.reserve(ctx, sessionID, automatic)
@@ -599,11 +647,16 @@ func (c *Controller) submit(ctx context.Context, sessionID, text string, automat
 		}
 	}()
 
+	// Read the session after reserving the turn slot (the original order): the
+	// goal driver submits its continuation from the finishing turn's goroutine,
+	// and a wait-idle observer must see that continuation as an in-flight turn,
+	// not as a window between its round counter and its reservation.
 	sess, err := c.store.GetSession(sessionID)
 	if err != nil {
 		c.abortTurn(t)
 		return fmt.Errorf("session: submit: %w", err)
 	}
+
 	if err := c.ensureView(sess); err != nil {
 		c.abortTurn(t)
 		return err
@@ -614,6 +667,29 @@ func (c *Controller) submit(ctx context.Context, sessionID, text string, automat
 	// (images), then linked to the persisted user message once it is written.
 	attachmentRows, attachmentInputs := c.turnAttachmentInputs(sessionID)
 
+	// Bind the session's workspace and start the turn as one critical section.
+	// reserve may have waited for a previous turn, and the user (or another
+	// background submit) may have switched the workspace since; Agent.Run pins
+	// its topology from the current agent, which is built for the selected
+	// workspace's root. bindMu is NOT held across reserve: this controller's
+	// goal driver submits the continuation turn from the finishing turn's
+	// goroutine, so a Submit blocked in reserve while holding bindMu could
+	// deadlock against that continuation. Here nothing blocks on a turn.
+	c.bindMu.Lock()
+	if err := c.bindWorkspace(ctx, sess.WorkspaceID); err != nil {
+		c.bindMu.Unlock()
+		c.abortTurn(t)
+		return fmt.Errorf("session: submit: %w", err)
+	}
+	c.mu.Lock()
+	agent := c.agent
+	c.mu.Unlock()
+	if agent == nil {
+		c.bindMu.Unlock()
+		c.abortTurn(t)
+		return ErrNoAgent
+	}
+
 	// Point the shared agent at this session's persisted mode before the turn
 	// starts. reserve already made sessionID current, so the app's
 	// InstructionFunc (Controller.Mode) composes the target preset. Submit can
@@ -621,6 +697,7 @@ func (c *Controller) submit(ctx context.Context, sessionID, text string, automat
 	// sends, automation), which previously left the agent running the previous
 	// session's topology while Ctrl.Mode reported the target's.
 	if err := c.applySessionMode(sessionID); err != nil {
+		c.bindMu.Unlock()
 		c.abortTurn(t)
 		return fmt.Errorf("session: submit: apply agent mode: %w", err)
 	}
@@ -634,8 +711,12 @@ func (c *Controller) submit(ctx context.Context, sessionID, text string, automat
 	// prompt out of the seeded conversation; persisting it first made the
 	// provider receive the same user message twice and let every turn's
 	// history compound.
-	events, err := agent.RunWithAttachments(turnCtx, sessionID, text, attachmentInputs)
-	if err != nil {
+	events, runErr := agent.RunWithAttachments(turnCtx, sessionID, text, attachmentInputs)
+	// RunWithAttachments pins the topology before it returns; the binding is
+	// no longer needed. Release bindMu before the error path below, which may
+	// call finishTurn and (via the goal driver) submit the continuation turn.
+	c.bindMu.Unlock()
+	if runErr != nil {
 		// The turn never started. Keep the prompt that was typed so the
 		// failed attempt is still visible and stored.
 		if perr := c.persistUserMessage(t, sessionID, text, attachmentRows); perr != nil {
@@ -643,9 +724,9 @@ func (c *Controller) submit(ctx context.Context, sessionID, text string, automat
 			return fmt.Errorf("session: submit: persist user message: %w", perr)
 		}
 		c.forward(t, state.Status{Phase: state.PhaseFailed})
-		c.forward(t, state.Error{MsgID: t.id, Err: err})
+		c.forward(t, state.Error{MsgID: t.id, Err: runErr})
 		c.finishTurn(t)
-		return fmt.Errorf("session: submit: agent run: %w", err)
+		return fmt.Errorf("session: submit: agent run: %w", runErr)
 	}
 
 	if err := c.persistUserMessage(t, sessionID, text, attachmentRows); err != nil {
@@ -2492,6 +2573,62 @@ func (c *Controller) RebuildAgent(reason string) error {
 		return nil
 	}
 	return rebuild(reason)
+}
+
+// SetOnSessionActivated registers fn, called after a session becomes current
+// through CreateSession/CreateSessionInWorkspace/OpenSession. previous is the
+// previously current session id ("" when there was none). It is called without
+// c.mu held, so listeners may call back into the controller. The app uses it to
+// reset the shared working-directory state to each session's own directory: one
+// session's "cd .agents" must not leak into the next session's prompt WorkDir.
+func (c *Controller) SetOnSessionActivated(fn func(previousSessionID, sessionID string)) {
+	c.mu.Lock()
+	c.onSessionActivated = fn
+	c.mu.Unlock()
+}
+
+// notifySessionActivated runs the activation hook without c.mu held.
+func (c *Controller) notifySessionActivated(previous, sessionID string) {
+	if strings.TrimSpace(sessionID) == "" || previous == sessionID {
+		return
+	}
+	c.mu.Lock()
+	hook := c.onSessionActivated
+	c.mu.Unlock()
+	if hook != nil {
+		hook(previous, sessionID)
+	}
+}
+
+// bindWorkspace makes workspaceID the selected workspace and rebuilds the
+// shared agent for its root when the selection differs. Submit and session
+// creation call it because both can target a session outside the workspace the
+// user is looking at (queued sends, goal continuations, automation, a
+// create-in-workspace call): without it the turn would run with the tools,
+// prompt WorkDir and file root of the wrong workspace. A rebuild failure is
+// returned so the caller can refuse to start a turn on the wrong root.
+func (c *Controller) bindWorkspace(ctx context.Context, workspaceID string) error {
+	id := strings.TrimSpace(workspaceID)
+	previous := c.CurrentWorkspaceID()
+	if id == "" || id == previous {
+		return nil
+	}
+	if _, err := c.store.GetWorkspace(id); err != nil {
+		return fmt.Errorf("session: bind workspace %q: %w", id, err)
+	}
+	c.setWorkspace(id)
+	if err := c.store.SetSetting(SettingWorkspace, id); err != nil {
+		return fmt.Errorf("session: bind workspace %q: persist: %w", id, err)
+	}
+	if err := c.RebuildAgent("workspace"); err != nil {
+		// Roll the selection back: the agent still works on the previous root,
+		// and leaving the store/db pointing at a root the agent was never built
+		// for would make the next turn even more surprising.
+		c.setWorkspace(previous)
+		_ = c.store.SetSetting(SettingWorkspace, previous)
+		return fmt.Errorf("session: bind workspace %q: rebuild agent: %w", id, err)
+	}
+	return nil
 }
 
 // SetSessionPermission updates one session's access mode and persists it as

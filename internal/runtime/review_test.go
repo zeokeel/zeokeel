@@ -13,8 +13,9 @@ import (
 	"github.com/zeokeel/zeokeel/internal/state"
 )
 
-// countingReviewer records how often the runtime consulted it and returns a
-// fixed decision. Tests use it to prove the hook is (or is not) reached.
+// countingReviewer records how often the runtime consulted it and what input it
+// received, and returns a fixed decision. Tests use it to prove the hook is (or
+// is not) reached and that the reviewer gets the turn's context.
 type countingReviewer struct {
 	calls  atomic.Int32
 	allow  bool
@@ -23,18 +24,30 @@ type countingReviewer struct {
 	mu     sync.Mutex
 	names  []string
 	args   []json.RawMessage
+	inputs []ToolReviewInput
 }
 
-func (r *countingReviewer) review(_ context.Context, name string, args json.RawMessage) (bool, string, error) {
+func (r *countingReviewer) review(_ context.Context, in ToolReviewInput) (bool, string, error) {
 	r.calls.Add(1)
 	r.mu.Lock()
-	r.names = append(r.names, name)
-	r.args = append(r.args, append(json.RawMessage(nil), args...))
+	r.names = append(r.names, in.Tool)
+	r.args = append(r.args, append(json.RawMessage(nil), in.Args...))
+	r.inputs = append(r.inputs, in)
 	r.mu.Unlock()
 	return r.allow, r.reason, r.err
 }
 
 func (r *countingReviewer) callCount() int32 { return r.calls.Load() }
+
+// reviewedInput returns the input of the i-th review (zero value when absent).
+func (r *countingReviewer) reviewedInput(i int) ToolReviewInput {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if i < 0 || i >= len(r.inputs) {
+		return ToolReviewInput{}
+	}
+	return r.inputs[i]
+}
 
 // TestAutoReviewAllowsToolWithoutPrompt proves the allow path: the reviewer is
 // consulted for a call the Gate would otherwise prompt for, no
@@ -80,10 +93,10 @@ func TestAutoReviewAllowsToolWithoutPrompt(t *testing.T) {
 	}
 }
 
-// TestAutoReviewDeniesToolWithReason proves the deny path: the tool never
-// executes, no ApprovalRequest is published, the model receives an error
-// carrying the reviewer's reason, and the turn continues.
-func TestAutoReviewDeniesToolWithReason(t *testing.T) {
+// TestAutoReviewInputCarriesTurnContext proves the reviewer is not blind: it
+// receives the user request that authorized the turn, the agent's current
+// working directory and the project constraints, next to the pending action.
+func TestAutoReviewInputCarriesTurnContext(t *testing.T) {
 	clock := &fakeClock{result: "now"}
 	reg := NewRegistry()
 	if err := reg.Register(clock); err != nil {
@@ -92,57 +105,159 @@ func TestAutoReviewDeniesToolWithReason(t *testing.T) {
 	gate := NewApprovalQueue(func(name string, _ json.RawMessage) bool {
 		return name == "clock"
 	})
-	const reason = "the command deletes the workspace"
-	reviewer := &countingReviewer{allow: false, reason: reason}
-	provider := scriptedToolProvider(t)
+	reviewer := &countingReviewer{allow: false, reason: "deletes generated output"}
 	agent := newTestAgent(t, Config{
-		Provider:     provider,
+		Provider:     scriptedToolProvider(t),
 		Tools:        reg,
 		Gate:         gate,
 		ToolReviewer: reviewer.review,
+		ReviewContext: func() (string, string) {
+			return "/workspace/project", "# Project rules\nNever touch production."
+		},
 	})
 
-	events := runTurn(t, agent, "session-auto-review-deny", "what time is it?")
-	for _, ev := range events {
-		if _, ok := ev.(state.ApprovalRequest); ok {
-			t.Fatalf("auto-review deny published an ApprovalRequest: %#v", ev)
+	const prompt = "delete the generated build directory"
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	ch, err := agent.Run(ctx, "session-auto-review-context", prompt)
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	collectEventsWith(t, ch, func(ev state.Event) {
+		if req, ok := ev.(state.ApprovalRequest); ok {
+			gate.Approve(req.CallID)
 		}
-	}
-	if clock.callCount() != 0 {
-		t.Fatalf("denied tool ran %d times, want 0", clock.callCount())
-	}
+	})
 	if got := reviewer.callCount(); got != 1 {
 		t.Fatalf("reviewer calls = %d, want 1", got)
 	}
-	end, ok := findToolEnd(events, "call-1")
-	if !ok {
-		t.Fatalf("no ToolEnd for denied call; events: %#v", events)
+	in := reviewer.reviewedInput(0)
+	if in.Tool != "clock" {
+		t.Fatalf("reviewer tool = %q, want clock", in.Tool)
 	}
-	if !end.IsError {
-		t.Fatalf("denied call ToolEnd is not an error: %+v", end)
+	if string(in.Args) != `{}` {
+		t.Fatalf("reviewer args = %s, want the pending call arguments", in.Args)
 	}
-	if !strings.Contains(end.Result, "auto review denied: "+reason) {
-		t.Fatalf("ToolEnd result = %q, want the auto-review denial and reason", end.Result)
+	if in.UserRequest != prompt {
+		t.Fatalf("reviewer user request = %q, want %q", in.UserRequest, prompt)
 	}
-	if errText := findErrorText(events); errText != "" {
-		t.Fatalf("denied tool produced a turn error: %q", errText)
+	if in.WorkDir != "/workspace/project" {
+		t.Fatalf("reviewer workdir = %q, want /workspace/project", in.WorkDir)
 	}
-	if got := strings.Join(tokenTexts(events), ""); got != "It is 12:00." {
-		t.Fatalf("assistant text after denial = %q", got)
+	if !strings.Contains(in.Constraints, "Never touch production") {
+		t.Fatalf("reviewer constraints = %q, want the project constraints", in.Constraints)
 	}
-	second, ok := provider.requestAt(1)
-	if !ok {
-		t.Fatal("provider got no second request")
-	}
-	var fedBack string
-	for _, msg := range second.Messages {
-		if msg.Role == RoleTool && msg.ToolCallID == "call-1" {
-			fedBack = msg.Content
+}
+
+// TestAutoReviewDenyFallsBackToUser proves a reviewer denial is a recommendation,
+// not a final rejection (DSH's ask policy): the runtime publishes an
+// ApprovalRequest carrying the reviewer's reason, and the user's decision
+// controls the call. Allow runs the tool; Deny rejects it with the ordinary
+// user-rejection tool error the model can adapt to.
+func TestAutoReviewDenyFallsBackToUser(t *testing.T) {
+	const reason = "the command deletes the workspace"
+
+	t.Run("user allows", func(t *testing.T) {
+		clock := &fakeClock{result: "now"}
+		reg := NewRegistry()
+		if err := reg.Register(clock); err != nil {
+			t.Fatal(err)
 		}
-	}
-	if !strings.Contains(fedBack, "auto review denied: "+reason) {
-		t.Fatalf("model tool result = %q, want the denial", fedBack)
-	}
+		gate := NewApprovalQueue(func(name string, _ json.RawMessage) bool {
+			return name == "clock"
+		})
+		reviewer := &countingReviewer{allow: false, reason: reason}
+		agent := newTestAgent(t, Config{
+			Provider:     scriptedToolProvider(t),
+			Tools:        reg,
+			Gate:         gate,
+			ToolReviewer: reviewer.review,
+		})
+
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		ch, err := agent.Run(ctx, "session-auto-review-user-allows", "what time is it?")
+		if err != nil {
+			t.Fatalf("Run: %v", err)
+		}
+		var request state.ApprovalRequest
+		events := collectEventsWith(t, ch, func(ev state.Event) {
+			req, ok := ev.(state.ApprovalRequest)
+			if !ok {
+				return
+			}
+			request = req
+			gate.Approve(req.CallID)
+		})
+		if request.CallID == "" {
+			t.Fatal("reviewer denial did not fall back to an ApprovalRequest")
+		}
+		if request.ReviewReason != reason {
+			t.Fatalf("ApprovalRequest.ReviewReason = %q, want %q", request.ReviewReason, reason)
+		}
+		if got := reviewer.callCount(); got != 1 {
+			t.Fatalf("reviewer calls = %d, want 1", got)
+		}
+		if clock.callCount() != 1 {
+			t.Fatalf("user-approved tool calls = %d, want 1", clock.callCount())
+		}
+		end, ok := findToolEnd(events, request.CallID)
+		if !ok || end.IsError || end.Result != clock.result {
+			t.Fatalf("ToolEnd = %+v, ok=%v; want the approved call to succeed", end, ok)
+		}
+	})
+
+	t.Run("user denies", func(t *testing.T) {
+		clock := &fakeClock{result: "now"}
+		reg := NewRegistry()
+		if err := reg.Register(clock); err != nil {
+			t.Fatal(err)
+		}
+		gate := NewApprovalQueue(func(name string, _ json.RawMessage) bool {
+			return name == "clock"
+		})
+		reviewer := &countingReviewer{allow: false, reason: reason}
+		provider := scriptedToolProvider(t)
+		agent := newTestAgent(t, Config{
+			Provider:     provider,
+			Tools:        reg,
+			Gate:         gate,
+			ToolReviewer: reviewer.review,
+		})
+
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		ch, err := agent.Run(ctx, "session-auto-review-user-denies", "what time is it?")
+		if err != nil {
+			t.Fatalf("Run: %v", err)
+		}
+		var request state.ApprovalRequest
+		events := collectEventsWith(t, ch, func(ev state.Event) {
+			req, ok := ev.(state.ApprovalRequest)
+			if !ok {
+				return
+			}
+			request = req
+			gate.Deny(req.CallID)
+		})
+		if request.CallID == "" {
+			t.Fatal("reviewer denial did not fall back to an ApprovalRequest")
+		}
+		if request.ReviewReason != reason {
+			t.Fatalf("ApprovalRequest.ReviewReason = %q, want %q", request.ReviewReason, reason)
+		}
+		if clock.callCount() != 0 {
+			t.Fatalf("user-denied tool ran %d times, want 0", clock.callCount())
+		}
+		end, ok := findToolEnd(events, request.CallID)
+		if !ok || !end.IsError || !strings.Contains(end.Result, "denied by user") {
+			t.Fatalf("ToolEnd = %+v, ok=%v; want the user denial error", end, ok)
+		}
+		fedBack := toolResultFor(provider, request.CallID)
+		if !strings.Contains(fedBack, "denied by user") {
+			t.Fatalf("model tool result = %q, want the user denial", fedBack)
+		}
+	})
 }
 
 // TestAutoReviewReviewerErrorFallsBackToApproval proves a reviewer failure is
@@ -332,12 +447,18 @@ func TestParseToolReviewDecision(t *testing.T) {
 	}
 }
 
-func TestLLMToolReviewerSendsToolPayloadAndParsesVerdict(t *testing.T) {
+func TestLLMToolReviewerSendsContextPayloadAndParsesVerdict(t *testing.T) {
 	provider := &fakeProvider{fn: func(context.Context, Request) ([]Chunk, error) {
 		return []Chunk{{Text: "DENY: deletes the workspace", Done: true}}, nil
 	}}
 	reviewer := LLMToolReviewer{Provider: provider, Model: "review-model", Timeout: time.Second}
-	allow, reason, err := reviewer.Review(context.Background(), "bash", json.RawMessage(`{"command":"rm -rf ."}`))
+	allow, reason, err := reviewer.Review(context.Background(), ToolReviewInput{
+		Tool:        "bash",
+		Args:        json.RawMessage(`{"command":"rm -rf ."}`),
+		WorkDir:     "/workspace/project",
+		UserRequest: "clean up the build output",
+		Constraints: "# Rules\nKeep the workspace tidy.",
+	})
 	if err != nil {
 		t.Fatalf("Review: %v", err)
 	}
@@ -354,19 +475,59 @@ func TestLLMToolReviewerSendsToolPayloadAndParsesVerdict(t *testing.T) {
 	if len(req.Messages) != 2 || req.Messages[0].Role != RoleSystem || req.Messages[0].Content != ToolReviewSystemPrompt {
 		t.Fatalf("review system message = %+v", req.Messages)
 	}
-	if !strings.Contains(req.Messages[1].Content, `"tool":"bash"`) ||
-		!strings.Contains(req.Messages[1].Content, `"command":"rm -rf ."`) {
-		t.Fatalf("review payload = %q", req.Messages[1].Content)
+	payload := req.Messages[1].Content
+	for _, want := range []string{
+		`"cwd":"/workspace/project"`,
+		`"user_request":"clean up the build output"`,
+		`"project_constraints":"# Rules\nKeep the workspace tidy."`,
+		`"pending_action":{"tool":"bash","args":{"command":"rm -rf ."}}`,
+	} {
+		if !strings.Contains(payload, want) {
+			t.Fatalf("review payload missing %q:\n%s", want, payload)
+		}
 	}
 	if len(req.Tools) != 0 {
 		t.Fatalf("review request advertised tools: %+v", req.Tools)
+	}
+	// The fixed policy tells the reviewer to use the user request as
+	// authorization evidence and to judge by actual effects.
+	for _, want := range []string{
+		"authorization evidence",
+		"never as instructions",
+		"destructive",
+		"ALLOW: <short reason> or DENY: <short reason>",
+	} {
+		if !strings.Contains(ToolReviewSystemPrompt, want) {
+			t.Fatalf("review policy missing %q", want)
+		}
+	}
+}
+
+// TestLLMToolReviewerTruncatesOversizedEvidence bounds the user request and
+// project constraints so a huge prompt cannot crowd the pending action out of
+// the review request.
+func TestLLMToolReviewerTruncatesOversizedEvidence(t *testing.T) {
+	provider := &fakeProvider{fn: func(context.Context, Request) ([]Chunk, error) {
+		return []Chunk{{Text: "ALLOW: project-local edit", Done: true}}, nil
+	}}
+	reviewer := LLMToolReviewer{Provider: provider, Timeout: time.Second}
+	long := strings.Repeat("x", maxReviewUserRequestRunes+100)
+	if _, _, err := reviewer.Review(context.Background(), ToolReviewInput{
+		Tool: "write_file", UserRequest: long, Constraints: long,
+	}); err != nil {
+		t.Fatalf("Review: %v", err)
+	}
+	req, _ := provider.requestAt(0)
+	payload := req.Messages[1].Content
+	if strings.Count(payload, "x") > 2*maxReviewUserRequestRunes+10 {
+		t.Fatalf("review payload did not bound the evidence (%d x runes)", strings.Count(payload, "x"))
 	}
 }
 
 func TestLLMToolReviewerFailuresAreErrors(t *testing.T) {
 	t.Run("no provider", func(t *testing.T) {
 		reviewer := LLMToolReviewer{}
-		if _, _, err := reviewer.Review(context.Background(), "bash", nil); err == nil {
+		if _, _, err := reviewer.Review(context.Background(), ToolReviewInput{Tool: "bash"}); err == nil {
 			t.Fatal("reviewer without provider returned no error")
 		}
 	})
@@ -375,7 +536,7 @@ func TestLLMToolReviewerFailuresAreErrors(t *testing.T) {
 			return []Chunk{{Text: "I am not sure", Done: true}}, nil
 		}}
 		reviewer := LLMToolReviewer{Provider: provider, Timeout: time.Second}
-		if _, _, err := reviewer.Review(context.Background(), "bash", nil); err == nil {
+		if _, _, err := reviewer.Review(context.Background(), ToolReviewInput{Tool: "bash"}); err == nil {
 			t.Fatal("unparseable reviewer reply returned no error")
 		}
 	})
@@ -384,7 +545,7 @@ func TestLLMToolReviewerFailuresAreErrors(t *testing.T) {
 			return nil, errors.New("upstream down")
 		}}
 		reviewer := LLMToolReviewer{Provider: provider, Timeout: time.Second}
-		if _, _, err := reviewer.Review(context.Background(), "bash", nil); err == nil {
+		if _, _, err := reviewer.Review(context.Background(), ToolReviewInput{Tool: "bash"}); err == nil {
 			t.Fatal("provider error returned no reviewer error")
 		}
 	})
@@ -394,7 +555,7 @@ func TestLLMToolReviewerFailuresAreErrors(t *testing.T) {
 			return nil, ctx.Err()
 		}}
 		reviewer := LLMToolReviewer{Provider: provider, Timeout: 20 * time.Millisecond}
-		if _, _, err := reviewer.Review(context.Background(), "bash", nil); err == nil {
+		if _, _, err := reviewer.Review(context.Background(), ToolReviewInput{Tool: "bash"}); err == nil {
 			t.Fatal("timed-out reviewer returned no error")
 		}
 	})
@@ -402,7 +563,8 @@ func TestLLMToolReviewerFailuresAreErrors(t *testing.T) {
 
 // TestAutoReviewBindsNestedPTCTool proves the PTC batch tool receives the same
 // reviewer as direct calls, so a nested mutating call cannot bypass automatic
-// review just because the outer batch was approved.
+// review just because the outer batch was approved. A nested reviewer denial
+// falls back to the user exactly like an outer call.
 func TestAutoReviewBindsNestedPTCTool(t *testing.T) {
 	clock := &fakeClock{result: "now"}
 	reg := NewRegistry()
@@ -416,11 +578,13 @@ func TestAutoReviewBindsNestedPTCTool(t *testing.T) {
 	gate := NewApprovalQueue(func(name string, _ json.RawMessage) bool {
 		return name == "clock"
 	})
-	reviewer := &countingReviewer{allow: false, reason: "nested tool deletes data"}
-	_ = newTestAgent(t, Config{
+	const reason = "nested tool deletes data"
+	reviewer := &countingReviewer{allow: false, reason: reason}
+	agent := newTestAgent(t, Config{
 		Provider: scriptedToolProvider(t), Tools: reg, Gate: gate,
 		ToolReviewer: reviewer.review,
 	})
+	_ = agent
 
 	batch, ok := ptc.(*ptcTool)
 	if !ok {
@@ -429,14 +593,74 @@ func TestAutoReviewBindsNestedPTCTool(t *testing.T) {
 	if batch.reviewer == nil || batch.gate == nil {
 		t.Fatal("PTC tool did not receive the gate and reviewer")
 	}
-	err := batch.awaitNestedApproval(context.Background(), "clock", json.RawMessage(`{}`))
-	if err == nil || !strings.Contains(err.Error(), "auto review denied: nested tool deletes data") {
-		t.Fatalf("nested denied error = %v, want the auto-review denial", err)
+
+	// The nested call publishes its approval request on the turn's sink, so the
+	// test needs the same turn context a tool invocation receives.
+	runNested := func(t *testing.T, decide func(callID string)) error {
+		t.Helper()
+		events := make(chan state.Event, 8)
+		sink := newEventSink(events)
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		ctx = withTurnContext(ctx, &turnContext{sink: sink, userRequest: "clean the workspace"})
+		errCh := make(chan error, 1)
+		go func() { errCh <- batch.awaitNestedApproval(ctx, "clock", json.RawMessage(`{}`)) }()
+		select {
+		case ev := <-events:
+			req, ok := ev.(state.ApprovalRequest)
+			if !ok {
+				t.Fatalf("nested approval event = %#v, want ApprovalRequest", ev)
+			}
+			if req.ReviewReason != reason {
+				t.Fatalf("nested ReviewReason = %q, want %q", req.ReviewReason, reason)
+			}
+			decide(req.CallID)
+		case <-ctx.Done():
+			t.Fatal("nested call did not ask for approval")
+		}
+		select {
+		case err := <-errCh:
+			return err
+		case <-ctx.Done():
+			t.Fatal("nested call did not finish")
+		}
+		return nil
 	}
-	if clock.callCount() != 0 {
-		t.Fatalf("nested denied tool ran %d times, want 0", clock.callCount())
+
+	t.Run("user allows", func(t *testing.T) {
+		// awaitNestedApproval only gates the call; the batch loop invokes the
+		// tool after it returns, so an allowed call reports no error and the
+		// clock itself is not executed here.
+		if err := runNested(t, func(callID string) { gate.Approve(callID) }); err != nil {
+			t.Fatalf("nested allowed call: %v", err)
+		}
+	})
+
+	t.Run("user denies", func(t *testing.T) {
+		err := runNested(t, func(callID string) { gate.Deny(callID) })
+		if err == nil || !strings.Contains(err.Error(), "denied by user") {
+			t.Fatalf("nested denied error = %v, want the user denial", err)
+		}
+		if clock.callCount() != 0 {
+			t.Fatalf("nested denied tool ran %d times, want 0", clock.callCount())
+		}
+	})
+	if got := reviewer.callCount(); got != 2 {
+		t.Fatalf("nested reviewer calls = %d, want 2", got)
 	}
-	if got := reviewer.callCount(); got != 1 {
-		t.Fatalf("nested reviewer calls = %d, want 1", got)
+}
+
+// toolResultFor returns the tool message content the provider was given for
+// callID, searching requests newest first.
+func toolResultFor(provider *fakeProvider, callID string) string {
+	provider.mu.Lock()
+	defer provider.mu.Unlock()
+	for i := len(provider.reqs) - 1; i >= 0; i-- {
+		for _, msg := range provider.reqs[i].Messages {
+			if msg.Role == RoleTool && msg.ToolCallID == callID {
+				return msg.Content
+			}
+		}
 	}
+	return ""
 }

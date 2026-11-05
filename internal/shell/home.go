@@ -268,6 +268,7 @@ func (a *App) homeComposerCard(c *ui.Context, t *design.Tokens, width float32) {
 		// restores the focus here without stealing it from a control the user
 		// intentionally focused elsewhere.
 		input.AutoFocus()
+		a.recordComposerCaret(input)
 		card = brandComposerFocus(card, input, t)
 		a.homeComposerToolbar(c, t)
 	})

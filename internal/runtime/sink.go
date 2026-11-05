@@ -82,6 +82,13 @@ type turnContextKey struct{}
 type turnContext struct {
 	sink   *eventSink
 	record *turnRecord
+	// userRequest is the user text that started this turn. The automatic
+	// reviewer uses it as authorization evidence (never as an instruction).
+	userRequest string
+	// reviewContext supplies the reviewer's environment per review: the
+	// current working directory and the project constraints. Nil leaves both
+	// empty.
+	reviewContext func() (workDir, constraints string)
 
 	// failedTools records the calls whose Invoke returned an error. The
 	// adapter delivers the error to the model as a tool result (so one bad

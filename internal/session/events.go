@@ -67,6 +67,10 @@ type approvalPayload struct {
 	Name   string          `json:"name"`
 	Args   json.RawMessage `json:"args,omitempty"`
 	Kind   string          `json:"kind"`
+	// ReviewReason is the automatic reviewer's recommended-denial reason.
+	// Omitted for ordinary approvals and for events written before the field
+	// existed, so replay stays backward compatible.
+	ReviewReason string `json:"review_reason,omitempty"`
 }
 
 type usagePayload struct {
@@ -190,10 +194,11 @@ func encodeEvent(ev state.Event) (store.Event, error) {
 	case state.ApprovalRequest:
 		typ = EventApprovalRequest
 		payload = approvalPayload{
-			CallID: e.CallID,
-			Name:   e.Name,
-			Args:   e.Args,
-			Kind:   string(e.Kind),
+			CallID:       e.CallID,
+			Name:         e.Name,
+			Args:         e.Args,
+			Kind:         string(e.Kind),
+			ReviewReason: e.ReviewReason,
 		}
 	case state.Usage:
 		typ = EventUsage
@@ -263,10 +268,11 @@ func decodeEvent(rec store.Event) (ev state.Event, ok bool) {
 			return nil, false
 		}
 		return state.ApprovalRequest{
-			CallID: p.CallID,
-			Name:   p.Name,
-			Args:   p.Args,
-			Kind:   state.ApprovalKind(p.Kind),
+			CallID:       p.CallID,
+			Name:         p.Name,
+			Args:         p.Args,
+			Kind:         state.ApprovalKind(p.Kind),
+			ReviewReason: p.ReviewReason,
 		}, true
 	case EventUsage:
 		var p usagePayload

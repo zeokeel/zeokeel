@@ -214,9 +214,11 @@ func (t *ptcTool) awaitNestedApproval(ctx context.Context, name string, args jso
 		if allow {
 			return nil
 		}
-		return autoReviewDeniedError(reason)
+		// A reviewer denial asks the user, exactly like an outer call; the
+		// nested request carries the reviewer's reason.
+		return awaitGateApproval(ctx, t.gate, uuid.NewString(), name, args, reason)
 	}
-	return awaitGateApproval(ctx, t.gate, uuid.NewString(), name, args)
+	return awaitGateApproval(ctx, t.gate, uuid.NewString(), name, args, "")
 }
 
 // ptcCallArgs normalizes one call's arguments. A model may send an object, a

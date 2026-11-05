@@ -13,6 +13,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/zeokeel/zeokeel/internal/tools/winenc"
 )
 
 const (
@@ -249,7 +251,11 @@ func (b *cappedBuffer) Write(p []byte) (int, error) {
 func (b *cappedBuffer) String() string {
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	data := b.buf.String()
+	// Decode before truncating: Windows children may emit the console code page
+	// (GBK on Chinese Windows), and byte truncation must not split a multi-byte
+	// character before it is turned into a string. Decoding a UTF-8 buffer is a
+	// validating pass-through, so POSIX behavior is unchanged.
+	data := winenc.DecodeProcessOutput(b.buf.Bytes())
 	if !b.truncated {
 		return data
 	}

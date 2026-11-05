@@ -112,6 +112,12 @@ type ToolState struct {
 	IsError  bool
 	Duration time.Duration
 
+	// ReviewReason, when non-empty, is the automatic reviewer's recommendation
+	// to deny the call that is waiting for the user's approval. It survives a
+	// snapshot replay so a reopened session's tool card can still explain the
+	// pending/decided call.
+	ReviewReason string
+
 	// StartedSeq is the snapshot Seq of the most recent ToolStart. It stays 0
 	// when only an ApprovalRequest has been seen for the call.
 	StartedSeq uint64
@@ -233,6 +239,7 @@ func Apply(prev *Snapshot, ev Event) *Snapshot {
 			if len(e.Args) > 0 {
 				st.Args = cloneJSON(e.Args)
 			}
+			st.ReviewReason = e.ReviewReason
 			st.Status = ToolAwaitingApproval
 			st.UpdatedSeq = next.Seq
 		})

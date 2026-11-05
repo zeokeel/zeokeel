@@ -413,7 +413,7 @@ func (a *App) forkSession(c *ui.Context, sess store.Session) {
 // injected) and reports where it was written.
 func (a *App) downloadSessionLog(c *ui.Context, sess store.Session) {
 	if a.Ctrl == nil {
-		c.Toast(a.tr("Session log export is not available", "会话日志导出不可用"))
+		a.toastText("Session log export is not available", "会话日志导出不可用")
 		return
 	}
 	dir := a.workspaceRoot()
@@ -425,20 +425,20 @@ func (a *App) downloadSessionLog(c *ui.Context, sess store.Session) {
 	if a.SaveSessionLog != nil {
 		chosen, err := a.SaveSessionLog(suggested)
 		if err != nil {
-			c.Toast(fmt.Sprintf(a.tr("Could not save the session log: %v", "会话日志保存失败：%v"), err))
+			a.toastText(fmt.Sprintf("Could not save the session log: %v", err), fmt.Sprintf("会话日志保存失败：%v", err))
 			return
 		}
 		if strings.TrimSpace(chosen) == "" {
-			c.Toast(a.tr("Session log export cancelled", "已取消导出会话日志"))
+			a.toastText("Session log export cancelled", "已取消导出会话日志")
 			return
 		}
 		path = chosen
 	}
 	if err := a.Ctrl.ExportSession(context.Background(), sess.ID, path); err != nil {
-		c.Toast(fmt.Sprintf(a.tr("Could not save the session log: %v", "会话日志保存失败：%v"), err))
+		a.toastText(fmt.Sprintf("Could not save the session log: %v", err), fmt.Sprintf("会话日志保存失败：%v", err))
 		return
 	}
-	c.Toast(fmt.Sprintf(a.tr("Session log saved to %s", "会话日志已保存到 %s"), path))
+	a.toastText(fmt.Sprintf("Session log saved to %s", path), fmt.Sprintf("会话日志已保存到 %s", path))
 }
 
 // recordSessionFeedback persists a session-level feedback marker. The store

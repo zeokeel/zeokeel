@@ -35,6 +35,11 @@ func brandComposerCard(c *ui.Context, t *design.Tokens, width float32, label str
 func brandComposerInput(c *ui.Context, t *design.Tokens, value *string, label, placeholder string,
 	onKey func(k ui.TextKey) bool, ref *ui.Handle) ui.Element {
 	th := t.Theme()
+	// A stable element key keeps the editor's text selection across frames that
+	// insert a derived popup ("/" palette, "@" mention list) above the composer:
+	// without it the element id shifts and the caret resets to the end of the
+	// draft on the frame the popup first appears.
+	c.Key("composer-input")
 	return ui.TextArea(c, value).
 		Label(label).
 		Placeholder(placeholder).

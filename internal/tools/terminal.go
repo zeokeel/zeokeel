@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/zeokeel/zeokeel/internal/runtime"
+	"github.com/zeokeel/zeokeel/internal/tools/winenc"
 	"github.com/zeokeel/zeokeel/internal/winproc"
 )
 
@@ -458,6 +459,13 @@ type terminalSession struct {
 	out    *outputRing
 	done   chan struct{}
 
+	// decMu guards the incremental output decoder. Deltas from consecutive
+	// sends are contiguous byte ranges, so a character split across the
+	// boundary is carried into the next send instead of becoming U+FFFD.
+	decMu  sync.Mutex
+	dec    *winenc.StreamDecoder
+	decEnd int64
+
 	mu         sync.Mutex
 	started    time.Time
 	lastActive time.Time
@@ -731,13 +739,30 @@ func (s *terminalSession) send(start int64, ctx context.Context) (string, error)
 	}
 }
 
+// decodeDelta decodes the send window [start,end) and carries a trailing split
+// character into the next contiguous send. When the window does not continue
+// where the previous one ended (output was skipped or the retained ring moved),
+// the decoder restarts, which is the same "replacement character" behavior the
+// byte offsets already had.
+func (s *terminalSession) decodeDelta(data []byte, start, end int64) string {
+	s.decMu.Lock()
+	defer s.decMu.Unlock()
+	if s.dec == nil || start != s.decEnd {
+		s.dec = &winenc.StreamDecoder{}
+		s.decEnd = start
+	}
+	text := s.dec.Decode(data)
+	s.decEnd = end
+	return text
+}
+
 func (s *terminalSession) renderDelta(start int64, wait string) string {
 	data, retainedStart, end, total := s.out.snapshot(start)
 	var b strings.Builder
 	if start > 0 && start < retainedStart {
 		fmt.Fprintf(&b, "[output truncated: earliest retained output starts at byte %d]\n", retainedStart)
 	}
-	body := string(data)
+	body := s.decodeDelta(data, start, end)
 	if body == "" {
 		body = "(no new output)"
 	}
@@ -891,8 +916,11 @@ func (t *terminalReadTool) Invoke(_ context.Context, args json.RawMessage) (stri
 	if len(data) == 0 {
 		b.WriteString("(no retained output)")
 	} else {
-		b.Write(data)
-		if data[len(data)-1] != '\n' {
+		// terminal_read keeps its byte-offset API; a window that starts inside a
+		// multi-byte character yields a replacement rune, as before.
+		text := winenc.DecodeProcessOutput(data)
+		b.WriteString(text)
+		if !strings.HasSuffix(text, "\n") {
 			b.WriteByte('\n')
 		}
 	}

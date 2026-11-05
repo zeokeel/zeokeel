@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/zeokeel/zeokeel/internal/runtime"
+	"github.com/zeokeel/zeokeel/internal/tools/winenc"
 )
 
 // Background job tools.
@@ -440,8 +441,11 @@ func (j *job) renderOutput() string {
 			b.WriteString("(no output)")
 		}
 	} else {
-		b.Write(data)
-		if data[len(data)-1] != '\n' {
+		// Decode before appending: Windows jobs run through cmd.exe, whose
+		// built-ins emit the OEM code page (GBK on Chinese Windows).
+		text := winenc.DecodeProcessOutput(data)
+		b.WriteString(text)
+		if !strings.HasSuffix(text, "\n") {
 			b.WriteByte('\n')
 		}
 	}

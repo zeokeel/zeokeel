@@ -377,6 +377,26 @@ func permissionMode(st *store.Store) string {
 	return session.PermissionWorkspace
 }
 
+// autoReviewContext builds the automatic reviewer's environment: the session's
+// current working directory, resolved per review so a working_directory move
+// within a turn is visible, and the project's AGENTS.md content. A missing file
+// leaves the constraints empty; a nil dirState keeps the workspace root.
+func autoReviewContext(root string, dirState *tools.WorkingDirectoryState) func() (workDir, constraints string) {
+	constraints := ""
+	if data, err := os.ReadFile(filepath.Join(root, "AGENTS.md")); err == nil {
+		constraints = string(data)
+	}
+	return func() (string, string) {
+		workDir := root
+		if dirState != nil {
+			if abs, _ := dirState.Cwd(); strings.TrimSpace(abs) != "" {
+				workDir = abs
+			}
+		}
+		return workDir, constraints
+	}
+}
+
 // outputCapBytes resolves plugin.shell.output_cap_kb the way the registry
 // build does, so the app can tell when an app-owned terminal/job manager was
 // built for a stale cap.
@@ -754,6 +774,12 @@ func buildAgentWithOptions(st *store.Store, root, instruction string, opts regis
 	if err != nil {
 		return nil, err
 	}
+	// The runtime-context sections (working directory, reference time) are
+	// recomposed at the start of every turn: the working_directory tool may
+	// have moved since build time, and a long-lived session must not report
+	// its build time as the current time. The Auto review reviewer uses the
+	// same current directory, so it is resolved here for both.
+	dirState := workingDirectoryFromRegistry(reg)
 	bundle := &AgentBundle{
 		Close: mcpClose,
 		// The same provider that runs turns writes automatic session titles
@@ -787,6 +813,14 @@ func buildAgentWithOptions(st *store.Store, root, instruction string, opts regis
 			Timeout:  runtime.DefaultToolReviewTimeout,
 		}.Review
 	}
+	// The reviewer judges whether the user authorized the action, so the runtime
+	// attaches this turn's user request and this environment to every review.
+	// AGENTS.md is the project's constraint source, the same file the prompt
+	// calls authoritative; a missing file leaves the constraints empty.
+	var reviewContext func() (workDir, constraints string)
+	if reviewer != nil {
+		reviewContext = autoReviewContext(root, dirState)
+	}
 	approvalPatterns := approvalPatternsForPermission(st, permission)
 	// Full access bypasses approval entirely; Read Only never reaches the gate
 	// because mutating tools are not registered; Workspace Write asks only for
@@ -808,11 +842,6 @@ func buildAgentWithOptions(st *store.Store, root, instruction string, opts regis
 			skillsDir = candidate
 		}
 	}
-	// The runtime-context sections (working directory, reference time) are
-	// recomposed at the start of every turn: the working_directory tool may
-	// have moved since build time, and a long-lived session must not report
-	// its build time as the current time.
-	dirState := workingDirectoryFromRegistry(reg)
 	// The agent preset is part of the dynamic runtime context: switching mode
 	// must change the prompt policy on the next turn, not only the tool set.
 	agentMode := strings.TrimSpace(opts.Mode)
@@ -885,6 +914,7 @@ func buildAgentWithOptions(st *store.Store, root, instruction string, opts regis
 		History:         &storeHistory{st: st},
 		Gate:            gate,
 		ToolReviewer:    reviewer,
+		ReviewContext:   reviewContext,
 		Compactor: runtime.LLMCompactor{
 			Provider:           prov,
 			Model:              model,

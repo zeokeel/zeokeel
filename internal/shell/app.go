@@ -268,6 +268,9 @@ func (a *App) View(c *ui.Context) {
 		ui.Row(c).Fill()
 		return
 	}
+	// Show a toast a key handler queued while no frame was building, so the
+	// feedback of a command run with Enter is not silently dropped.
+	a.flushDeferredToast(c)
 	// The desktop's preferences come first: ReduceMotion must switch the
 	// frame's animations off before any element is built.
 	a.syncShellPreferences(c)

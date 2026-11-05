@@ -80,6 +80,13 @@ type approvalApp struct {
 
 func newApprovalApp(t *testing.T, provider runtime.Provider) *approvalApp {
 	t.Helper()
+	return newApprovalAppWithReviewer(t, provider, nil)
+}
+
+// newApprovalAppWithReviewer is newApprovalApp with an automatic reviewer wired
+// into the agent, so a reviewer denial falls back to the approval card.
+func newApprovalAppWithReviewer(t *testing.T, provider runtime.Provider, reviewer runtime.ToolReviewer) *approvalApp {
+	t.Helper()
 	dir := t.TempDir()
 	st, err := store.Open(dir)
 	if err != nil {
@@ -100,10 +107,11 @@ func newApprovalApp(t *testing.T, provider runtime.Provider) *approvalApp {
 		return name == "echo"
 	})
 	agent, err := runtime.New(runtime.Config{
-		Provider:    provider,
-		Tools:       registry,
-		Instruction: "test agent",
-		Gate:        gate,
+		Provider:     provider,
+		Tools:        registry,
+		Instruction:  "test agent",
+		Gate:         gate,
+		ToolReviewer: reviewer,
 	})
 	if err != nil {
 		t.Fatalf("runtime.New: %v", err)
@@ -276,5 +284,86 @@ func TestControllerAllowAlwaysPassthrough(t *testing.T) {
 	}
 	if h.ctrl.ApproveAlways("not-pending") {
 		t.Fatal("ApproveAlways(unknown) = true, want false")
+	}
+}
+
+// denyReviewer is an automatic reviewer that recommends denial with a reason.
+func denyReviewer(reason string) runtime.ToolReviewer {
+	return func(_ context.Context, _ runtime.ToolReviewInput) (bool, string, error) {
+		return false, reason, nil
+	}
+}
+
+// TestApprovalCardShowsAutoReviewReason proves the reviewer fallback renders on
+// the real approval card: the card appears with the reviewer's recommended
+// denial, and Allow overrides the recommendation and runs the tool.
+func TestApprovalCardShowsAutoReviewReason(t *testing.T) {
+	const reason = "deletes a pre-existing file"
+	provider := &alwaysAllowProvider{}
+	h := newApprovalAppWithReviewer(t, provider, denyReviewer(reason))
+	id := h.ctrl.CurrentSessionID()
+	if err := h.ctrl.Submit(context.Background(), id, "delete the file"); err != nil {
+		t.Fatalf("Submit: %v", err)
+	}
+	request := waitApprovalPending(t, h.ctrl)
+	if request.ReviewReason != reason {
+		t.Fatalf("pending ReviewReason = %q, want %q", request.ReviewReason, reason)
+	}
+
+	tt := ui.NewTester(h.app.View, 1600, 1000)
+	tt.Frame()
+	wantLine := "Auto review suggested denial: " + reason
+	if !tt.HasText(wantLine) {
+		t.Fatalf("approval card missing the reviewer reason %q; texts: %v", wantLine, tt.Texts())
+	}
+	if !tt.HasText("Allow") || !tt.HasText("Deny") {
+		t.Fatalf("approval card missing its decisions; texts: %v", tt.Texts())
+	}
+
+	// The user overrides the reviewer: the call runs.
+	if err := tt.Click("Allow"); err != nil {
+		t.Fatalf("click Allow: %v", err)
+	}
+	waitApprovalGone(t, h.ctrl)
+	waitApprovalIdle(t, h.ctrl)
+	h.ctrl.Wait()
+	if got := h.tool.calls.Load(); got != 1 {
+		t.Fatalf("tool calls after overriding a reviewer denial = %d, want 1", got)
+	}
+	tt.Frame()
+	if tt.HasText(wantLine) {
+		t.Fatalf("reviewer reason still rendered after the decision: %v", tt.Texts())
+	}
+}
+
+// TestApprovalCardAutoReviewReasonDenyPath proves the user can confirm the
+// reviewer's recommendation: Deny rejects the call, the tool never runs, and
+// the model receives the ordinary user-rejection tool error.
+func TestApprovalCardAutoReviewReasonDenyPath(t *testing.T) {
+	const reason = "writes outside the workspace"
+	provider := &alwaysAllowProvider{}
+	h := newApprovalAppWithReviewer(t, provider, denyReviewer(reason))
+	id := h.ctrl.CurrentSessionID()
+	if err := h.ctrl.Submit(context.Background(), id, "write outside"); err != nil {
+		t.Fatalf("Submit: %v", err)
+	}
+	waitApprovalPending(t, h.ctrl)
+
+	tt := ui.NewTester(h.app.View, 1600, 1000)
+	tt.Frame()
+	if !tt.HasText("Auto review suggested denial: " + reason) {
+		t.Fatalf("approval card missing the reviewer reason; texts: %v", tt.Texts())
+	}
+	if err := tt.Click("Deny"); err != nil {
+		t.Fatalf("click Deny: %v", err)
+	}
+	waitApprovalGone(t, h.ctrl)
+	waitApprovalIdle(t, h.ctrl)
+	h.ctrl.Wait()
+	if got := h.tool.calls.Load(); got != 0 {
+		t.Fatalf("user-denied tool ran %d times, want 0", got)
+	}
+	if got := provider.callCount(); got != 2 {
+		t.Fatalf("provider calls = %d, want 2 (tool call + final answer)", got)
 	}
 }

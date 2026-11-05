@@ -41,6 +41,7 @@
 | 图片理解 | ✅ 真实模型识图通过 |
 | 上传文件/附件给 agent | ✅ 文本附件进入 prompt（≤64 KiB），图片作为 data URL content part 发送；chip 持久化、删除 chip/会话时清理 |
 | 会话 fork/导出/反馈 | ✅ fork 复制历史（含附件行与文件字节，续聊仍重放文本/图片）并打开；JSONL 导出（保存对话框）含附件记录与内容；反馈行持久化、重开回显、随导出 |
+| Composer 斜杠命令 / `@` 提及 | ✅ 对齐 DSH：分组面板（添加/指令）、图标+本地化标题+命令名+右对齐说明、键入过滤、↑↓/Tab/Enter/Esc；`/file`（附件 picker / 工作区路径校验）、`/permission`（read-only/workspace/full/auto 写入）、`/export`（JSONL）、`/feedback good|bad`、`/plan`、`/model`、`/clear`、`/stop`、`/help`、`/new`、`/settings`、`/automate`、`/plugins`；`@` 文件/目录下钻（Tab 进入、Esc 逐级上返）与会话引用；`/goal`、`/compact` 因写入/API 缺口有意不加行（见 known-limitations），未知 `/` 行按文档作为普通消息发送 |
 
 ## C. 优先级建议（停止 UI 微循环，按此顺序）
 

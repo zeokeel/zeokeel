@@ -173,3 +173,52 @@ func TestToolDescriptionsMatchSharedWorkingDirectory(t *testing.T) {
 		}
 	}
 }
+
+// TestWorkingDirectoryStateResetAndRestore covers the app-facing helpers that
+// stop one session's "cd" from leaking into the next: Reset returns the state
+// to the workspace root, SetRel restores a saved relative directory, and a
+// directory that disappeared falls back to the root instead of stranding the
+// tools outside the workspace.
+func TestWorkingDirectoryStateResetAndRestore(t *testing.T) {
+	root := t.TempDir()
+	for _, dir := range []string{"src", "docs"} {
+		if err := os.MkdirAll(filepath.Join(root, dir), 0o755); err != nil {
+			t.Fatalf("mkdir %s: %v", dir, err)
+		}
+	}
+	state, err := NewWorkingDirectoryState(root)
+	if err != nil {
+		t.Fatalf("NewWorkingDirectoryState: %v", err)
+	}
+	if err := state.SetRel("src"); err != nil {
+		t.Fatalf("SetRel(src): %v", err)
+	}
+	if abs, rel := state.Cwd(); rel != "src" || abs != filepath.Join(root, "src") {
+		t.Fatalf("after SetRel(src) Cwd = %q, %q", abs, rel)
+	}
+	if err := state.SetRel("./docs"); err != nil {
+		t.Fatalf("SetRel(./docs): %v", err)
+	}
+	if rel := state.Rel(); rel != "docs" {
+		t.Fatalf("SetRel(./docs) Rel = %q, want docs", rel)
+	}
+	state.Reset()
+	if abs, rel := state.Cwd(); rel != "." || abs != root {
+		t.Fatalf("after Reset Cwd = %q, %q; want the workspace root", abs, rel)
+	}
+	if err := state.SetRel("missing"); err == nil {
+		t.Fatal("SetRel(missing) = nil error, want the missing-directory error")
+	}
+	if abs, rel := state.Cwd(); rel != "." || abs != root {
+		t.Fatalf("failed SetRel left Cwd = %q, %q; want the workspace root", abs, rel)
+	}
+	// Empty or "." means the root, which is how the app starts a session that
+	// has no saved directory yet.
+	state.Reset()
+	if err := state.SetRel(""); err != nil {
+		t.Fatalf("SetRel(empty): %v", err)
+	}
+	if rel := state.Rel(); rel != "." {
+		t.Fatalf("SetRel(empty) Rel = %q, want .", rel)
+	}
+}

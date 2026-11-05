@@ -309,8 +309,9 @@ func toolSpecs(infos []*schema.ToolInfo) []ToolSpec {
 // tools node can execute it. When a Gate is configured it also enforces
 // approval: the call is announced as state.ApprovalRequest and blocks until the
 // user decides. When a ToolReviewer is configured, a call that would ask is
-// first reviewed by the model: ALLOW skips the prompt, DENY fails the call, and
-// a reviewer failure falls back to the prompt.
+// first reviewed by the model: ALLOW skips the prompt; DENY asks the user with
+// the reviewer's reason attached, so the user can override the recommendation;
+// a reviewer failure falls back to the ordinary prompt.
 type einoInvokableTool struct {
 	tool     Tool
 	info     *schema.ToolInfo
@@ -394,14 +395,6 @@ func (e *einoInvokableTool) awaitApproval(ctx context.Context, args json.RawMess
 	if e.gate == nil || !e.gate.RequireApproval(e.tool.Name(), args) {
 		return nil
 	}
-	if allow, reason, reviewed := reviewToolCall(ctx, e.reviewer, e.tool.Name(), args); reviewed {
-		if allow {
-			// The review decided the call may run: no ApprovalRequest is
-			// published and the tool executes immediately.
-			return nil
-		}
-		return autoReviewDeniedError(reason)
-	}
 	callID := compose.GetToolCallID(ctx)
 	if callID == "" {
 		// A tool invoked outside the ADK tools node (for example by a future
@@ -409,23 +402,38 @@ func (e *einoInvokableTool) awaitApproval(ctx context.Context, args json.RawMess
 		// correlated with the event the UI renders.
 		callID = uuid.NewString()
 	}
-	return awaitGateApproval(ctx, e.gate, callID, e.tool.Name(), args)
+	if allow, reason, reviewed := reviewToolCall(ctx, e.reviewer, e.tool.Name(), args); reviewed {
+		if allow {
+			// The review decided the call may run: no ApprovalRequest is
+			// published and the tool executes immediately.
+			return nil
+		}
+		// The reviewer recommends denial, not a final rejection (DSH's ask
+		// policy): ask the user, carrying the reviewer's reason so the approval
+		// card can explain why. The user's decision wins either way.
+		return awaitGateApproval(ctx, e.gate, callID, e.tool.Name(), args, reason)
+	}
+	return awaitGateApproval(ctx, e.gate, callID, e.tool.Name(), args, "")
 }
 
 // awaitGateApproval publishes the ApprovalRequest for one call and blocks until
 // the Gate resolves it. It is shared by the eino tool wrapper (outer calls,
 // callID from the ADK tools node) and the PTC batch tool (nested calls, each
 // with a fresh call id), so approvals behave identically in both paths.
-func awaitGateApproval(ctx context.Context, gate Gate, callID, name string, args json.RawMessage) error {
+// reviewReason, when non-empty, is the automatic reviewer's recommendation to
+// deny; the request still asks the user to decide, and the shell shows the
+// reason on the approval card.
+func awaitGateApproval(ctx context.Context, gate Gate, callID, name string, args json.RawMessage, reviewReason string) error {
 	tc := turnContextFromContext(ctx)
 	if tc == nil || tc.sink == nil {
 		return fmt.Errorf("runtime: tool %q requires approval outside an agent turn", name)
 	}
 	request := state.ApprovalRequest{
-		CallID: callID,
-		Name:   name,
-		Args:   args,
-		Kind:   state.ApprovalOther,
+		CallID:       callID,
+		Name:         name,
+		Args:         args,
+		Kind:         state.ApprovalOther,
+		ReviewReason: strings.TrimSpace(reviewReason),
 	}
 	if !tc.sink.send(ctx, request) {
 		if err := ctx.Err(); err != nil {

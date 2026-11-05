@@ -81,6 +81,12 @@ type app struct {
 	jobsMgr     *tools.JobsManager
 	managerRoot string
 	managerCap  int
+	// sessionCWDs remembers each session's workspace-relative working
+	// directory. The runtime agent and its WorkingDirectoryState are shared
+	// across sessions in one workspace, so the app restores a session's own
+	// cwd when it becomes current instead of letting one session's "cd" leak
+	// into the next session. Guarded by dirMu.
+	sessionCWDs map[string]string
 }
 
 // Run starts the app and blocks until it quits.
@@ -244,6 +250,9 @@ func (a *app) startServices() {
 	// the workspace from the store. Rebuild now that the Controller can
 	// resolve the selected workspace and future changes have a hook.
 	ctrl.SetAgentRebuilder(a.rebuildAgent)
+	// The shared working-directory state is reset/restored whenever the
+	// current session changes, so one session's cd cannot leak into another.
+	ctrl.SetOnSessionActivated(a.sessionActivated)
 	if err := a.rebuildAgent("startup"); err != nil {
 		log.Printf("zeokeel: agent rebuild for the selected workspace: %v", err)
 	}

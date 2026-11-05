@@ -547,10 +547,22 @@ Tree "Sidebar"
 - **共享品牌弹层 helper**：`internal/shell/popover_menus.go`
   - `popoverMenuPanel` / `popoverMenuPanelIn(maxWidth)`：`t.Panel()` 表面（BgRaised + 1px BorderL2 + RadiusLG + 4 DIP padding + 轻阴影），宽度先按 composer 列 clamp 到 260–320，再 clamp 到所在列（侧栏 280 / 右栏实际面板宽）。
   - `popoverMenuRow`：13px 标签 + 可选 11px LabelTertiary 说明、`Pad(4,8)/RadiusSM/MinH32`、hover/选中 `BgHover`、选中 accent ✓、`RoleMenuItemRadio + Checked + Focusable`；`popoverMenuActionRow`/`popoverMenuRoleRow`/`popoverMenuCheckRow` 覆盖动作/指定角色/复选三种行。
-- **已统一**（行为/文案/点击语义/角色保持，a11y 不退化）：composer 权限、模型、工作区、附件、`/` 命令面板；会话头 agent mode、More actions；侧栏底部账户 More、View options（复选行仍 `RoleMenuItemCheckBox`）；右栏 New tab、Choose shell（新增 Focusable，正向）、Files 面包屑隐藏段（仍 `RoleButton`）。
+- **已统一**（行为/文案/点击语义/角色保持，a11y 不退化）：composer 权限、模型、工作区、附件、`/` 命令面板（命令面板 2026-11-05 升级为 DSH 分组面板，见 §19.5）；会话头 agent mode、More actions；侧栏底部账户 More、View options（复选行仍 `RoleMenuItemCheckBox`）；右栏 New tab、Choose shell（新增 Focusable，正向）、Files 面包屑隐藏段（仍 `RoleButton`）。
 - **有意跳过**：Settings 屏内 select 弹层（自有控件视觉）、`sidebar_hover.go` 工作区 hover 预览卡（已是 `t.Panel()` 卡片，非菜单）、native tray 菜单（已退役）。
 - **Home composer 焦点修复**：Home 的 `/`/@ 面板插在 composer 列之前，导致元素 id 变化、旧焦点悬空，Enter 不触发命令；`homeComposerCard` 的输入框补 `input.AutoFocus()`（与 Session composer 对齐，只在元素本帧新出现时聚焦，不抢用户手动聚焦）。Home 预览因此显示 composer 聚焦边框（已重生成）。
 - 测试：`popover_menus_test.go` / `popover_menus_rest_test.go` / `home_focus_test.go` 覆盖面板唯一性、行角色/Checked/Focusable、点击行为不回退、Home `/` 与 @ 面板焦点保持、不抢焦点；既有账户/右栏/View options/Choose shell/面包屑/a11y/键盘测试全绿。
+
+### 19.5 斜杠命令面板与 `@` 提及对齐 DSH（2026-11-05，BUG-7）
+
+用户截图反馈「斜杠菜单和 @ 菜单都有问题」，并要求「命令有了功能也得补齐」，目标是与 DSH 的 `@`/`/` 菜单对齐且不留死行。
+
+- **命令目录**（`internal/shell/composer_slash.go`）：13 条、两组——添加（`/file`、`/plan`、`/feedback`）与指令（`/permission`、`/model`、`/export`、`/clear`、`/stop`、`/help`、`/new`、`/settings`、`/automate`、`/plugins`）。行面 = 16px 图标 + 13px 本地化标题 + 11px 命令名 + 右对齐 11px 说明；面板宽度撑满 composer 列、分组标题（`RoleHeading`）、滚动视口（窗口高 0.55 clamp 220–520）、空态、footer 键位提示；行是 `RoleMenuItem + Focusable`，行区是带 Label（`Command suggestions`）的 `RoleList` 并把高亮行设为 `ActiveDescendant`。高亮/过滤状态放在新文件的 per-App `sync.Map`，没有给 `App`/`liveMenuState` 加字段。
+- **触发与互斥**：`activeComposerTrigger` 在 caret 处优先识别 `@` token，再识别 `/`（词首/空白/标点边界；`//`、`https:/` 有 carve-out；rune span 即拾取替换范围）。两个 composer 每帧用 `recordComposerCaret` 记录 caret（Session/Home 各一行），`@` 与 `/` 因此天然互斥；`+` attach 菜单打开时两者都隐藏。
+- **键盘**：`composerTextKey` 新增 slash 分支——↑↓ 移动高亮、Tab/Enter 执行高亮行（完整命令带参数时按原文执行）、Esc 关闭不清草稿；无匹配时 Enter 回落到原文派发（未知 `/` 行按文档发给模型）。`@` 菜单保留既有 ↑↓/Enter，Tab 对目录行执行真实 drill。
+- **真实功能**：`/file` 走 `PickFiles` seam / 工作区路径校验（`Ctrl.AttachFiles` 或 Home staging）；`/permission` 写 Session 权限或 Home 暂存，无参报当前值+用法；`/export` 走 `downloadSessionLog`（JSONL）；`/feedback good|bad` 写最新 assistant 消息反馈，bare 写 session 反馈——全部落库、0 模型调用、slash 行不进模型。`/goal`、`/compact` 有意不加行（原因见 known-limitations）。deferred toast：键盘在 build 外触发的命令反馈由 `View` 下一帧 flush（`app.go` + `toastText`），不再静默丢失。
+- **`@` 目录 drill（P0）**：trigger query 就是路径（`@docs/gu` → 浏览 `docs/` 且过滤 `gu`）；目录行显示「Open folder + Tab + ›」，Tab 把 token 替换为 `@docs/` 并保持菜单打开；顶部 breadcrumb（`@docs/` + Esc 上返，`RoleButton`）；Esc 先清目录内过滤、再逐级返回、根目录才关闭；行点击/Enter 仍插入文件夹路径引用；文件行 Tab 保持聚焦列表。`insertMention`/`insertSessionMention` 改为只替换 trigger span（中间文本可提及；替换尾空格吞一个后续空格）。
+- **mygo caret 限制**：派生弹层插入到 composer 之前会重排元素 id，mygo 重建编辑器时选区回落到文末；`recordComposerCaret` 以「draft 未变且 caret 落到文末」判定为重建、保留原 caret 并回写 selection（真实输入/方向键不受影响）。`composer_native.go` 给 TextArea 一个稳定 key。
+- **测试**：`composer_slash_menu_test.go`（分组/行面/a11y/过滤/键盘/窄窗/未知行）、`composer_slash_commands_test.go`（4 条新命令真实效果 + /help + 0 模型调用）、`composer_mention_drill_test.go`（trigger 纯函数、caret、互斥、中间文本替换、Tab drill/面包屑/Esc 逐级/空目录/窄窗）。全包 `go test ./internal/shell`、`go vet`、`TestVisualRegression` 均绿。
 
 ## 20. 验收口径
 

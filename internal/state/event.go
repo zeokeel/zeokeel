@@ -76,6 +76,11 @@ type ApprovalRequest struct {
 	Name   string
 	Args   json.RawMessage
 	Kind   ApprovalKind
+	// ReviewReason, when non-empty, is the automatic reviewer's reason for
+	// recommending denial. The call still waits for the user's decision: Allow
+	// runs it, Deny rejects it. Empty for ordinary approvals and for events
+	// persisted before this field existed.
+	ReviewReason string
 }
 
 func (ApprovalRequest) isEvent() {}
