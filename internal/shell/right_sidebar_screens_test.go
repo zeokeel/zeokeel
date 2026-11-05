@@ -20,7 +20,9 @@ func TestRightSidebarWorksOnEveryHostScreen(t *testing.T) {
 		// fullscreen can prove it is not built at all.
 		behind string
 	}{
-		{Home, "home", "Into the Unknown"},
+		// Home's behind-the-panel text is the brand tagline now; the retired
+		// DSH hero copy was removed with the native Home redesign.
+		{Home, "home", "What will you build today?"},
 		{Session, "session", "Composer input"},
 		{Plugins, "plugins", "Install, enable, and configure plugins"},
 		{Automation, "automation", "No tasks yet. Tasks created in your sessions appear here."},

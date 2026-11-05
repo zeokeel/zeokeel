@@ -36,6 +36,14 @@
 
 基础设施：`internal/state`（事件总线/快照）、`internal/store`（SQLite v1 + JSONL）、`internal/runtime`（eino ADK：工具回路/多轮历史/审批）、`internal/provider/openai`（SSE 流式 + tool calls）、`internal/session`（会话控制器）、`internal/app`（单实例/托盘/关窗隐藏 + services 接线）。
 
+**2026-11-05 原生视觉迁移进行中**：
+- 阶段 1（完成）：像素门禁与静态演示屏已拆除，测试全部迁移到 live fixture；品牌主题 `internal/brand`（logo 色板 + mygo `ui.Theme`）已生效。见 [ADR 0001](docs/decisions/0001-retire-dsh-pixel-parity.md)、[ADR 0002](docs/decisions/0002-brand-theme-foundation.md)。
+- 阶段 2（Home pilot 完成）：Home 屏改为 ZeoKeel 自有视觉——品牌 mark + 字标 + 双语 tagline、令牌化布局、原生 `ui.TextArea`/`ButtonBase` composer；设计与截图见 [原生视觉方向](docs/design/native-ui.md) 与 `docs/design/preview/`。`go build/vet/test` 全绿。
+
+![Home 原生视觉（浅色）](docs/design/preview/home-native-light.png)
+
+下一阶段：Session / Sidebar / Settings·Plugins·Automation 逐屏原生化，以及桌面交互 P0（菜单栏、文本选择、系统通知等）。
+
 ## 视觉与交互方向（2026-11-05 起）
 
 - **功能对齐 DSH**：能力与行为对齐（`docs/FUNCTIONAL-PARITY.md`）；不再承诺逐像素/逐交互复刻。

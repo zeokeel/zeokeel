@@ -2,9 +2,14 @@ package shell
 
 import (
 	"context"
+	"image/png"
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/egoist/mygo/ui"
+
+	"github.com/zeokeel/zeokeel/internal/session"
 )
 
 func TestHomeLiveSendCreatesSession(t *testing.T) {
@@ -120,5 +125,83 @@ func TestHomeEmptySendDoesNotCreateSession(t *testing.T) {
 	}
 	if app.Screen != Home {
 		t.Fatalf("empty Enter left Home for %v", app.Screen)
+	}
+}
+
+// TestHomeBrandHero pins the native Home's brand header: the ZeoKeel wordmark
+// and an owned tagline are rendered, and the retired DSH hero copy and badge
+// are gone (docs/design/native-ui.md §3.2).
+func TestHomeBrandHero(t *testing.T) {
+	h := newLiveAppAt(t, Home)
+	h.app.Language = LangEN
+	tt := ui.NewTester(h.app.View, 1600, 1000)
+	tt.Frame()
+	for _, want := range []string{"ZeoKeel", "What will you build today?"} {
+		if !tt.HasText(want) {
+			t.Fatalf("Home is missing the brand header %q: %q", want, tt.Texts())
+		}
+	}
+	for _, gone := range []string{"Into the Unknown", "Preview"} {
+		if tt.HasText(gone) {
+			t.Fatalf("Home still renders the retired DSH copy %q: %q", gone, tt.Texts())
+		}
+	}
+
+	// The content column is theme-derived and capped: the composer card fills
+	// it on a 1600x1000 window instead of the retired 877/909 fixed widths.
+	if r, ok := tt.Find("Home composer"); ok {
+		if r.W > 720+1 {
+			t.Fatalf("Home composer width = %v, want the 720 DIP brand column", r.W)
+		}
+		if r.W < 320 {
+			t.Fatalf("Home composer width = %v, want a usable card on a wide window", r.W)
+		}
+	} else {
+		t.Fatalf("Home composer is not labeled: %q", tt.Texts())
+	}
+}
+
+// TestRenderHomeNativePreview renders the Home screen head for brand review:
+// light and dark at the 1600x1000 design size. The PNGs are written to
+// docs/design/preview so the design is reproducible straight from the test.
+func TestRenderHomeNativePreview(t *testing.T) {
+	dir := filepath.Join("..", "..", "docs", "design", "preview")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatalf("create preview dir: %v", err)
+	}
+	for _, tc := range []struct {
+		name  string
+		theme string
+	}{
+		{"light", session.ThemeLight},
+		{"dark", session.ThemeDark},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			h := newLiveApp(t, &shellProvider{})
+			// Chinese is the product default language; the preview shows the
+			// shipped first-run look.
+			h.app.Language = LangZH
+			if err := h.store.SetSetting(session.SettingTheme, tc.theme); err != nil {
+				t.Fatalf("theme setting: %v", err)
+			}
+			h.app.Screen = Home
+			img := ui.Render(h.app.View, 1600, 1000, 1)
+			path := filepath.Join(dir, "home-native-"+tc.name+".png")
+			f, err := os.Create(path)
+			if err != nil {
+				t.Fatalf("create %s: %v", path, err)
+			}
+			if err := png.Encode(f, img); err != nil {
+				f.Close()
+				t.Fatalf("encode %s: %v", path, err)
+			}
+			if err := f.Close(); err != nil {
+				t.Fatalf("close %s: %v", path, err)
+			}
+			if fi, err := os.Stat(path); err != nil || fi.Size() == 0 {
+				t.Fatalf("preview %s is empty: %v", path, err)
+			}
+			t.Logf("wrote %s", path)
+		})
 	}
 }

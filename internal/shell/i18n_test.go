@@ -63,7 +63,7 @@ func TestCatalogFixedKeys(t *testing.T) {
 	fixed := []string{
 		"shell.new_session", "shell.plugins", "shell.automation_tasks",
 		"shell.workspaces", "shell.search_sessions", "shell.view_options",
-		"home.hero_title", "home.preview", "home.composer_placeholder",
+		"home.tagline", "home.composer_hint", "home.composer_placeholder",
 		"session.chat", "session.trajectory", "session.working_indicator",
 		"session.send", "session.stop", "session.todos", "session.question",
 		"session.send_answer", "session.presented", "session.trajectory_empty",
@@ -101,25 +101,30 @@ func TestLiveAppEnglish(t *testing.T) {
 	if got := h.app.lang(); got != LangEN {
 		t.Fatalf("live App language = %q, want %q", got, LangEN)
 	}
-	if got := h.app.T("home.hero_title"); got != "Into the Unknown" {
-		t.Fatalf("live T(home.hero_title) = %q", got)
+	if got := h.app.T("home.tagline"); got != "What will you build today?" {
+		t.Fatalf("live T(home.tagline) = %q", got)
 	}
 	tt := ui.NewTester(h.app.View, 1600, 1000)
 	tt.Frame()
-	if !tt.HasText("Into the Unknown") || !tt.HasText("Preview") || !tt.HasText("More") {
+	if !tt.HasText("What will you build today?") || !tt.HasText("More") {
 		t.Fatalf("live App did not render English: %q", tt.Texts())
 	}
-	if tt.HasText("驶向未知") {
+	if tt.HasText("今天想构建什么？") {
 		t.Fatalf("live App rendered Chinese: %q", tt.Texts())
+	}
+	// The retired DSH hero copy must not come back: the Home header is the
+	// brand wordmark and an owned tagline now.
+	if tt.HasText("Into the Unknown") || tt.HasText("Preview") || tt.HasText("驶向未知") || tt.HasText("预览") {
+		t.Fatalf("live App still renders the retired DSH hero: %q", tt.Texts())
 	}
 	// Explicit test hook and explicit field both work on a live App; the next
 	// frame follows the switch immediately.
 	h.app.SetLanguageForTest(LangZH)
-	if got := h.app.T("home.hero_title"); got != "驶向未知" {
+	if got := h.app.T("home.tagline"); got != "今天想构建什么？" {
 		t.Fatalf("SetLanguageForTest(zh) on live App: %q", got)
 	}
 	tt.Frame()
-	if !tt.HasText("驶向未知") {
+	if !tt.HasText("今天想构建什么？") {
 		t.Fatalf("live App did not rerender in Chinese: %q", tt.Texts())
 	}
 }
@@ -138,17 +143,17 @@ func TestLanguageSwitchRerenders(t *testing.T) {
 	if enText == zhText {
 		t.Fatal("English and Chinese renders produced identical text")
 	}
-	for _, want := range []string{"Into the Unknown", "Preview", "Workspace Write", "More"} {
+	for _, want := range []string{"What will you build today?", "Workspace Write", "More"} {
 		if !strings.Contains(enText, want) {
 			t.Errorf("English render missing %q", want)
 		}
 	}
-	for _, want := range []string{"驶向未知", "预览", "工作区写入", "更多"} {
+	for _, want := range []string{"今天想构建什么？", "工作区写入", "更多"} {
 		if !strings.Contains(zhText, want) {
 			t.Errorf("Chinese render missing %q", want)
 		}
 	}
-	if strings.Contains(zhText, "Into the Unknown") || strings.Contains(enText, "驶向未知") {
+	if strings.Contains(zhText, "What will you build today?") || strings.Contains(enText, "今天想构建什么？") {
 		t.Fatal("render leaked the other language")
 	}
 }
@@ -196,7 +201,7 @@ func TestPersistencePath(t *testing.T) {
 	app := &App{settings: fake}
 	// DefaultSettings.Language matches the live shell's product default
 	// (Chinese), so a fresh install shows and reports the same language.
-	if got := app.T("home.hero_title"); got != "驶向未知" {
+	if got := app.T("home.tagline"); got != "今天想构建什么？" {
 		t.Fatalf("default language = %q, want Chinese from ui.language default", got)
 	}
 	if fake.saves != 0 || fake.cfg.Language != session.LanguageChinese {
@@ -206,11 +211,11 @@ func TestPersistencePath(t *testing.T) {
 	if fake.saves != 1 || fake.cfg.Language != session.LanguageChinese {
 		t.Fatalf("saved settings = %+v (saves %d), want zh", fake.cfg, fake.saves)
 	}
-	if got := app.T("home.hero_title"); got != "驶向未知" {
+	if got := app.T("home.tagline"); got != "今天想构建什么？" {
 		t.Fatalf("after switch to zh: %q", got)
 	}
 	app.updateSettings(nil, func(s *session.Settings) { s.Language = session.LanguageEnglish })
-	if got := app.T("home.hero_title"); got != "Into the Unknown" {
+	if got := app.T("home.tagline"); got != "What will you build today?" {
 		t.Fatalf("after switch back to en: %q", got)
 	}
 }
@@ -238,13 +243,13 @@ func TestLiveLanguageDefault(t *testing.T) {
 	if got := en.lang(); got != LangEN {
 		t.Fatalf("persisted en language = %q, want en", got)
 	}
-	if got := en.T("home.hero_title"); got != "Into the Unknown" {
+	if got := en.T("home.tagline"); got != "What will you build today?" {
 		t.Fatalf("persisted en text = %q", got)
 	}
 
 	// Switching through the settings UI persists and applies immediately.
 	en.updateSettings(nil, func(s *session.Settings) { s.Language = session.LanguageChinese })
-	if got := en.T("home.hero_title"); got != "驶向未知" {
+	if got := en.T("home.tagline"); got != "今天想构建什么？" {
 		t.Fatalf("immediate zh switch = %q", got)
 	}
 	cfg, err := h.ctrl.Settings().Load()
@@ -271,7 +276,7 @@ func TestFirstRunLanguageConsistent(t *testing.T) {
 	if got := app.lang(); got != LangZH {
 		t.Fatalf("fresh live language = %q, want zh", got)
 	}
-	if !tt.HasText("驶向未知") {
+	if !tt.HasText("今天想构建什么？") {
 		t.Fatalf("fresh live Home is not Chinese: %q", tt.Texts())
 	}
 	cfg, err := h.ctrl.Settings().Load()

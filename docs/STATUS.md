@@ -9,6 +9,15 @@
 - **以下 M0–M13 历史里程碑保留原文记录以追溯**；其中与像素/基线/比对回路相关的内容均为**历史记录，已退役、不再有效**（因此模块清单中不再列 `pixeltest` 包）。
 - 现行质量口径见 `docs/QUALITY.md` 与 `docs/PLAN.md` §10；功能对齐见 `docs/FUNCTIONAL-PARITY.md`；视觉方向见 `docs/decisions/0002-brand-theme-foundation.md`。
 
+## 2026-11-05 阶段 2：Home 原生视觉 pilot（完成）
+
+- 用户决策后的第一个"回归 mygo 设计能力"落地屏：Home live 屏重写为 ZeoKeel 自有视觉。
+- Hero：品牌 mark（44）+ `ZeoKeel` 字标（600、2.25rem）+ 双语 tagline「今天想构建什么？/ What will you build today?」；删除 DSH 的 `Into the Unknown`、`Preview` 徽章、鲸鱼图标。
+- 布局令牌化：内容列 `min(720, 主区-80)`（`Theme.Space` 派生），删除 909/877 等 DSH 像素常量；composer 用品牌 Panel（Radius 10 / 1px border / 单层轻阴影）+ 原生 `ui.TextArea`；发送/加号/右侧栏开关改原生 `ButtonBase`；工作区/权限/模型 trigger 保留自定义 Popover 但按品牌 chip 重绘（标签/角色/键盘可达不变）。
+- 截图（可复现，`TestRenderHomeNativePreview`）：`docs/design/preview/home-native-light.png`、`home-native-dark.png`；设计记录见 [原生视觉方向](design/native-ui.md)。
+- 验收：`go build ./...`、`go vet ./...`、`gofmt`、`go test -count=1 ./...` 全绿（shell 36.6s）；功能（/ 命令、@ 提及、附件、Cmd+K/N、i18n、禁用发送、a11y）由原有测试覆盖。
+- 下一阶段：Session composer/消息流与 Home 统一 → Sidebar 原生化 → Settings/Plugins/Automation → 桌面交互 P0（菜单栏/文本选择/通知/窗口状态）。
+
 ## 2026-11-05 阶段 1 完成：像素门禁与静态屏拆除（ALL GREEN）
 
 - **像素门禁已拆**：`TestScreensBaseline` / `TestScreensDarkNarrow` / CI 6 次像素调用 / `internal/pixeltest` / `baseline/` / `docs/baseline/` / `artifacts/` / `scripts/cdp.mjs` / `scripts/capture/` 全部移除（归档包与回滚 tag 见上）。

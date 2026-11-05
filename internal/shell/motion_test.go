@@ -24,7 +24,8 @@ func motionSnap(events ...state.Event) *state.Snapshot {
 }
 
 // TestMotionTokens pins the durations and curves extracted from DSH: each
-// value is the one documented in docs/baseline/motion.md, so a silent change
+// value is the one documented in the retired motion baseline (archived
+// 2026-11-05), so a silent change
 // to a token fails here.
 func TestMotionTokens(t *testing.T) {
 	durations := []struct {
@@ -45,7 +46,7 @@ func TestMotionTokens(t *testing.T) {
 	}
 	for _, c := range durations {
 		if c.got != c.want {
-			t.Errorf("%s = %v, want %v (docs/baseline/motion.md)", c.name, c.got, c.want)
+			t.Errorf("%s = %v, want %v (retired motion baseline)", c.name, c.got, c.want)
 		}
 	}
 	if design.ShimmerSteps != 48 {

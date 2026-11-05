@@ -63,6 +63,34 @@
 - 所有颜色/间距/圆角来自 `internal/brand` + `design.Tokens`，不再新增 DSH 采样色。
 - 产出 headless 截图（1600×1000，浅色+深色）供评审；`go test ./internal/shell` 保持绿。
 
+### 3.4 实现记录（2026-11-05，Home 第一轮，已完成）
+
+本轮把 3.2 的方向落到 `internal/shell/home.go` + `home_live_menus.go`，截图见 `preview/`：
+
+![Home 浅色](preview/home-native-light.png)
+
+![Home 深色](preview/home-native-dark.png)
+
+**落地要点（与上方方向一致，记录取舍）**
+
+| 项 | 实现 |
+| --- | --- |
+| Hero | `mark` 品牌图形标 44×44 + `ZeoKeel` 字标 `homeWordmarkRem = 2.25rem`（≈31.5px，600）+ 自有 tagline（i18n `home.tagline`：「今天想构建什么？」/"What will you build today?"）；删除 `home.hero_title`（Into the Unknown）、`home.preview`（Preview 徽章）与 DSH 鲸鱼图标 |
+| 布局 | 内容列 `min(720, 主区宽-80)` = `theme.Space(180)` / `theme.Space(20)`；全部间距/尺寸/圆角走 `Theme.Space/Rem` 与 `design` 网格；删除 909/877 等固定像素 |
+| Composer | 一个 `design.Tokens.Panel` 卡片（`Theme.Radius=10`、`BorderL2` 1px、单层轻阴影、`Space(3)` 内边距），内部用原生 `ui.TextArea`（原生占位/多行/IME/撤销/焦点），输入框自身边框关闭、由卡片承载 hover/焦点态 accent 边框 |
+| Chips | 工作区/模式/权限/模型仍保留手搓 trigger + Popover（菜单承载路径、描述、新增动作等 `Select` 无法表达的产品内容，符合 3.2 允许项），视觉统一重绘为品牌 ghost chip：28 DIP 高、`RadiusSM`、品牌 hover 底色、`Theme` 文字色 |
+| 发送 | 原生 `ui.ButtonBase`（原生焦点/Enter/Space/禁用语义）+ 品牌 accent 填充/圆角；禁用态沿用共享 composer 的 idle 填充（与 Session composer 同一 helper，待 Session 重构时一起品牌化） |
+| 附加控件 | 加号、右侧栏开关改用 `ui.ButtonBase` + 品牌 hover；菜单行高度/宽度/图标尺寸改为 `Theme.Space` 派生 |
+| 截图测试 | `TestRenderHomeNativePreview`（`home_live_test.go`）用 `ui.Render(app.View,1600,1000,1)` 生成浅/深两张，写入本目录 `preview/`，可复现 |
+| 测试 | `go test -count=1 ./internal/shell` 全绿；`TestHomeBrandHero` 钉住品牌文案与无 DSH hero；`TestHomeComposerInputFillsRow` 改为断言输入填满卡片（不再绑定 877 旧几何） |
+
+**遗留（下一阶段）**
+
+1. Session composer 与 Home composer 视觉统一（同一 helper / 组件化）；Session 的发送禁用填充仍是迁移前浅蓝色。
+2. Sidebar / 字标行 / 其它屏仍是旧视觉，按 §4 逐屏原生化。
+3. 权限/模型/工作区 trigger 目前是「品牌化的手搓层」；若后续把菜单简化为纯文字选项，可换成 `ui.Select`/`ui.MenuButton` 拿全键盘/弹出行为。
+4. Home 竖向节奏在 900×600 最小窗口与右侧栏打开时需目视复核（占位/行高会在下一轮密度调整中再评估）。
+
 ## 4. 后续逐屏路线
 
 1. **Home（本轮 pilot）**：验证品牌主题 + 原生控件 + 新布局的观感与测试成本。

@@ -150,35 +150,37 @@ func (a *App) composerPermissionMode() string {
 
 // livePermissionChip is the composer's access-mode control. Clicking it opens
 // a real menu that persists the choice through updateSettings instead of
-// jumping to the Settings screen.
+// jumping to the Settings screen. The trigger keeps its own popover (the menu
+// carries tool-level explanations a native Select cannot express) and is
+// restyled with the brand chip look.
 func (a *App) livePermissionChip(c *ui.Context, t *design.Tokens) {
+	th := t.Theme()
 	if a.Ctrl == nil {
-		ui.Row(c).Height(28).Padding(0, design.Space1, 0, design.Space2).
-			Gap(design.Space1).AlignItems(ui.Center).Children(func() {
-			ui.Icon(c, homeIconShield).Size(14, 14).TextColor(t.LabelSecondary)
+		chip := homeChip(c, t)
+		chip.Children(func() {
+			ui.Icon(c, homeIconShield).Size(th.Space(4), th.Space(4)).TextColor(t.LabelSecondary)
 			ui.Text(c, a.permissionLabel(a.currentSettings().Permission)).FontSize(13).
 				FixedLineHeight(20).FontWeight(500).TextColor(t.LabelSecondary)
-			ui.Icon(c, homeIconChevron).Size(14, 14).TextColor(t.LabelTertiary)
+			ui.Icon(c, homeIconChevron).Size(th.Space(3), th.Space(3)).TextColor(t.LabelTertiary)
 		})
 		return
 	}
 	st := a.liveMenus()
 	mode := a.composerPermissionMode()
 	current := a.composerPermissionLabel(mode)
-	chip := ui.Row(c).Height(28).Padding(0, design.Space1, 0, design.Space2).
-		Gap(design.Space1).AlignItems(ui.Center).
+	chip := homeChip(c, t).
 		Label(a.menuText("Access mode, current: ", "访问模式，当前：") + current).
 		Value(current).Role(ui.RolePopUpButton).Focusable()
 	chip.Children(func() {
-		ui.Icon(c, homeIconShield).Size(14, 14).TextColor(t.LabelSecondary)
-		// DSH's narrow composer trigger is the 44px icon+chevron only; the
-		// full "Workspace Write" label wraps the 28px toolbar once the
-		// docked panel narrows the composer to ~360px.
+		ui.Icon(c, homeIconShield).Size(th.Space(4), th.Space(4)).TextColor(t.LabelSecondary)
+		// On a narrow composer the trigger keeps the icon and chevron only,
+		// so the access mode never pushes the model chip or Send out of the
+		// toolbar.
 		if a.composerPopupWidthFor(c) >= narrowComposerLabelW {
 			ui.Text(c, current).FontSize(13).
 				FixedLineHeight(20).FontWeight(500).TextColor(t.LabelSecondary)
 		}
-		ui.Icon(c, homeIconChevron).Size(14, 14).TextColor(t.LabelTertiary)
+		ui.Icon(c, homeIconChevron).Size(th.Space(3), th.Space(3)).TextColor(t.LabelTertiary)
 	})
 	chip.Expanded(st.permissionOpen)
 	chip.OnClick(func() { st.permissionOpen = !st.permissionOpen })
@@ -233,8 +235,10 @@ func (a *App) permissionMenu(c *ui.Context, t *design.Tokens) {
 
 // liveModelMenuBadge is the composer's model selector. It shows the selected
 // default, its configured reasoning effort and a chevron, and opens the model
-// list. The static App keeps modelBadge's baseline text.
+// list. Like the access chip it keeps its own popover (the rows carry model
+// details) and is restyled with the brand chip look.
 func (a *App) liveModelMenuBadge(c *ui.Context, t *design.Tokens) {
+	th := t.Theme()
 	if a.Ctrl == nil {
 		a.modelBadge(c, t)
 		return
@@ -245,21 +249,21 @@ func (a *App) liveModelMenuBadge(c *ui.Context, t *design.Tokens) {
 	if model := a.composerModel(); model != nil && model.ReasoningEffort != "" {
 		badgeAccessible += a.menuText(", reasoning effort "+model.ReasoningEffort, "，推理强度 "+model.ReasoningEffort)
 	}
-	badge := ui.Row(c).Height(28).Padding(0, design.Space1, 0, design.Space2).
-		Gap(design.Space1).AlignItems(ui.Center).
+	badge := homeChip(c, t).
 		Label(badgeAccessible).Value(modelLabel).Role(ui.RolePopUpButton).Focusable()
 	badge.Children(func() {
 		ui.Text(c, modelLabel).FontSize(13).FixedLineHeight(20).
 			TextColor(t.LabelSecondary).MaxLines(1)
 		if model := a.composerModel(); model != nil && model.ReasoningEffort != "" {
 			tag := homeTagAccent(t)
-			ui.Row(c).Padding(1, design.Space2).Radius(design.RadiusMax).
-				Background(tag.Alpha(0.10)).Children(func() {
+			tagRow := ui.Row(c).Height(th.Space(5)).PaddingX(th.Space(2)).
+				Radius(design.RadiusMax).Background(tag.Alpha(0.10))
+			tagRow.Children(func() {
 				ui.Text(c, model.ReasoningEffort).FontSize(11).FixedLineHeight(17).
 					FontWeight(500).TextColor(tag)
 			})
 		}
-		ui.Icon(c, homeIconChevron).Size(14, 14).TextColor(t.LabelTertiary)
+		ui.Icon(c, homeIconChevron).Size(th.Space(3), th.Space(3)).TextColor(t.LabelTertiary)
 	})
 	badge.Expanded(st.modelOpen)
 	badge.OnClick(func() { st.modelOpen = !st.modelOpen })
@@ -271,6 +275,7 @@ func (a *App) modelPickerMenu(c *ui.Context, t *design.Tokens) {
 	if a.Ctrl == nil {
 		return
 	}
+	th := t.Theme()
 	models, err := a.Ctrl.Models().List()
 	if err != nil {
 		ui.Text(c, a.T("models.could_not_load_models")).FontSize(12).
@@ -286,8 +291,8 @@ func (a *App) modelPickerMenu(c *ui.Context, t *design.Tokens) {
 	for _, model := range models {
 		model := model
 		selected := model.ID == currentID
-		row := ui.Row(c).Height(36).PaddingX(design.Space2).Gap(design.Space2).
-			Radius(design.RadiusSM).AlignItems(ui.Center).Width(240).
+		row := ui.Row(c).Height(th.Space(9)).PaddingX(th.Space(2)).Gap(th.Space(2)).
+			Radius(design.RadiusSM).AlignItems(ui.Center).Width(th.Space(60)).
 			Label(modelDisplayName(model)).Role(ui.RoleMenuItemRadio).
 			Checked(selected).Focusable()
 		if row.Hovered() {
@@ -330,6 +335,7 @@ func (a *App) homeWorkspacePicker(c *ui.Context, t *design.Tokens) {
 	if a.Ctrl == nil {
 		return
 	}
+	th := t.Theme()
 	ctx := context.Background()
 	workspaces, err := a.Ctrl.ListWorkspaces(ctx)
 	if err != nil {
@@ -345,15 +351,15 @@ func (a *App) homeWorkspacePicker(c *ui.Context, t *design.Tokens) {
 	current := a.Ctrl.CurrentWorkspaceID()
 	for _, ws := range workspaces {
 		ws := ws
-		row := ui.Row(c).Height(34).PaddingX(design.Space2).Gap(design.Space2).
-			Radius(design.RadiusSM).AlignItems(ui.Center).Width(260).
+		row := ui.Row(c).Height(th.Space(9)).PaddingX(th.Space(2)).Gap(th.Space(2)).
+			Radius(design.RadiusSM).AlignItems(ui.Center).Width(th.Space(65)).
 			Label(a.menuText("Switch to "+ws.Name, "切换到 "+ws.Name)).
 			Role(ui.RoleMenuItemRadio).Checked(ws.ID == current).Focusable()
 		if row.Hovered() {
 			row = row.Background(t.BgHover)
 		}
 		row.Children(func() {
-			ui.Image(c, homeIconFolder).Size(15, 15).TextColor(t.LabelSecondary)
+			ui.Image(c, homeIconFolder).Size(th.Space(4), th.Space(4)).TextColor(t.LabelSecondary)
 			ui.Column(c).Grow(1).Gap(1).Children(func() {
 				ui.Text(c, ws.Name).FontSize(13).FixedLineHeight(18).
 					TextColor(t.LabelPrimary).MaxLines(1).Ellipsis("…")
@@ -369,17 +375,17 @@ func (a *App) homeWorkspacePicker(c *ui.Context, t *design.Tokens) {
 			a.switchWorkspaceFromHome(c, ws.ID)
 		})
 	}
-	// DSH's picker ends with an add action; without it this chip offered no
-	// way to add a workspace once one already existed.
-	add := ui.Row(c).Height(34).PaddingX(design.Space2).Gap(design.Space2).
-		Radius(design.RadiusSM).AlignItems(ui.Center).Width(260).
+	// The picker ends with an add action; without it this chip offered no way
+	// to add a workspace once one already existed.
+	add := ui.Row(c).Height(th.Space(9)).PaddingX(th.Space(2)).Gap(th.Space(2)).
+		Radius(design.RadiusSM).AlignItems(ui.Center).Width(th.Space(65)).
 		Label(a.T("workspace.add_workspace_ellipsis")).
 		Role(ui.RoleMenuItem).Focusable()
 	if add.Hovered() {
 		add = add.Background(t.BgHover)
 	}
 	add.Children(func() {
-		ui.Icon(c, homeIconPlus).Size(15, 15).TextColor(t.LabelSecondary)
+		ui.Icon(c, homeIconPlus).Size(th.Space(4), th.Space(4)).TextColor(t.LabelSecondary)
 		ui.Text(c, a.T("workspace.add_workspace_ellipsis")).FontSize(13).FixedLineHeight(18).
 			TextColor(t.LabelPrimary)
 	})
@@ -391,7 +397,8 @@ func (a *App) homeWorkspacePicker(c *ui.Context, t *design.Tokens) {
 
 // liveMenuItem is one row of a composer or header popover.
 func liveMenuItem(c *ui.Context, t *design.Tokens, label string, active bool) ui.Element {
-	item := ui.Button(c, label).Height(30).PaddingX(design.Space2).
+	th := t.Theme()
+	item := ui.Button(c, label).Height(th.Space(8)).PaddingX(th.Space(2)).
 		Radius(design.RadiusSM).TextColor(t.LabelPrimary)
 	if active {
 		item = item.Background(t.BgHover)

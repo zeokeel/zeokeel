@@ -201,7 +201,9 @@ func TestPluginsScrollsAtMinimumHeight(t *testing.T) {
 }
 
 // TestHomeComposerInputFillsRow guards the live Home composer: the input used
-// to shrink to ~216px.
+// to shrink to ~216px. It must still fill the composer card it sits in (the
+// card itself is now the brand's theme-derived column, not the retired 877px
+// width).
 func TestHomeComposerInputFillsRow(t *testing.T) {
 	h := newLiveApp(t, &shellProvider{})
 	h.app.Language = LangEN
@@ -212,8 +214,13 @@ func TestHomeComposerInputFillsRow(t *testing.T) {
 	if !ok {
 		t.Fatalf("Home composer input missing: %q", tt.Texts())
 	}
-	if r.W <= 700 {
-		t.Fatalf("Home composer input width = %v, want > 700", r.W)
+	card, ok := tt.Find("Home composer")
+	if !ok {
+		t.Fatalf("Home composer card missing: %q", tt.Texts())
+	}
+	// The card pads by design.Space(3) on each side; the input fills the rest.
+	if want := card.W - 2*design.Space3 - 4; r.W < want {
+		t.Fatalf("Home composer input width = %v, want >= %v inside the %v card", r.W, want, card.W)
 	}
 }
 
@@ -306,15 +313,20 @@ func TestPluginDetailTitleIsLocalized(t *testing.T) {
 
 func zh(s string) string { return s }
 
-// TestDarkHomeTokens checks the Preview badge and tag colors in dark mode.
-func TestDarkHomeTokens(t *testing.T) {
-	dark := design.Dark()
-	bg, fg := homePreviewColors(dark)
-	if got := contrastRatio(fg, bg); got < 4.5 {
-		t.Errorf("dark preview badge contrast = %.2f, want >= 4.5", got)
-	}
-	if got := contrastRatio(homeTagAccent(dark), dark.BgBase); got < 4.5 {
-		t.Errorf("dark 1017 tag contrast = %.2f, want >= 4.5", got)
+// TestHomeTagContrast checks the model-effort tag accent (the brand accent)
+// against the page background in both appearances. The Preview badge this
+// used to cover was removed with the DSH hero in the native Home redesign.
+func TestHomeTagContrast(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		tokens *design.Tokens
+	}{
+		{"light", design.Light()},
+		{"dark", design.Dark()},
+	} {
+		if got := contrastRatio(homeTagAccent(tc.tokens), tc.tokens.BgBase); got < 4.5 {
+			t.Errorf("%s tag contrast = %.2f, want >= 4.5", tc.name, got)
+		}
 	}
 }
 
