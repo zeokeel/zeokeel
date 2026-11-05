@@ -111,13 +111,16 @@ const (
 )
 
 type jobManager struct {
-	mu      sync.Mutex
-	sb      *sandbox
-	root    string
-	outCap  int
-	max     int
-	jobs    map[string]*job
-	order   []string
+	mu     sync.Mutex
+	sb     *sandbox
+	root   string
+	outCap int
+	max    int
+	jobs   map[string]*job
+	order  []string
+	// notify delivers a model-visible advisory when a job finishes (FP-15).
+	// Nil disables notifications (tests and embedders without an agent).
+	notify  func(string)
 	nextID  int
 	initErr error
 }
@@ -285,6 +288,48 @@ func (m *jobManager) list() []*job {
 	return out
 }
 
+// setNotify installs the model-visible completion-notification sink. The
+// runtime binds it once through the job tools, so a finished job no longer
+// depends on the model remembering to poll.
+func (m *jobManager) setNotify(fn func(string)) {
+	if m == nil {
+		return
+	}
+	m.mu.Lock()
+	m.notify = fn
+	m.mu.Unlock()
+}
+
+// notifyFinished emits the completion advisory for j. It is called exactly
+// once, from the goroutine that reaps the process.
+func (m *jobManager) notifyFinished(j *job) {
+	if m == nil || j == nil {
+		return
+	}
+	m.mu.Lock()
+	notify := m.notify
+	m.mu.Unlock()
+	if notify == nil {
+		return
+	}
+	notify(j.completionNotice())
+}
+
+// completionNotice renders the one-line model-facing advisory for a terminal
+// job. It names the job id so the model can fetch the retained output with
+// job_output instead of starting the same command again.
+func (j *job) completionNotice() string {
+	j.mu.Lock()
+	status := j.status
+	detail := j.detail
+	id := j.id
+	j.mu.Unlock()
+	_, _, _, total := j.out.snapshot(0)
+	return fmt.Sprintf(
+		"Background job %s finished: %s (%s; output %d bytes). Read it with job_output id %q; do not start the same command again.",
+		id, status, detail, total, id)
+}
+
 func (m *jobManager) expire(j *job) {
 	j.mu.Lock()
 	if j.status != jobRunning {
@@ -325,6 +370,7 @@ func (j *job) run() {
 
 	j.settle(err)
 	close(j.done)
+	j.mgr.notifyFinished(j)
 }
 
 // settle records the terminal state unless job_kill already did. Non-zero exit
@@ -461,6 +507,15 @@ Args JSON schema:
 {"type":"object","properties":{"command":{"type":"string","description":"Shell command to execute."},"timeout_seconds":{"type":"integer","description":"Optional timeout in seconds (default none, maximum 300).","minimum":1,"maximum":300}},"required":["command"],"additionalProperties":false}`
 
 type jobStartTool struct{ mgr *jobManager }
+
+// SetAdvisorySink implements runtime.AdvisorySinkBinder: the runtime installs
+// its external-notice sink so a finished job is reported to the model in-turn.
+func (t *jobStartTool) SetAdvisorySink(sink runtime.AdvisorySink) {
+	if t == nil || t.mgr == nil || sink == nil {
+		return
+	}
+	t.mgr.setNotify(func(text string) { sink(text) })
+}
 
 func (t *jobStartTool) Name() string        { return "job_start" }
 func (t *jobStartTool) Description() string { return jobStartDescription }

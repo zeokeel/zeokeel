@@ -192,3 +192,65 @@ func TestJobOutputWait(t *testing.T) {
 		t.Fatalf("kill slow job: %v", err)
 	}
 }
+
+// TestJobsCompletionNotifies pins FP-15: when a background job reaches a
+// terminal state the manager emits one model-facing advisory naming the job id,
+// so the model can read the result with job_output instead of polling blindly.
+func TestJobsCompletionNotifies(t *testing.T) {
+	skipUnlessUnixShell(t)
+	jm := NewJobsManager(JobsConfig{WorkspaceRoot: t.TempDir()})
+	defer func() { _ = jm.Close() }()
+
+	notices := make(chan string, 4)
+	jm.m.setNotify(func(text string) { notices <- text })
+
+	start := findTool(t, jm.Tools(), "job_start")
+	out := mustInvoke(t, start, map[string]any{"command": "printf finished"})
+	id := testToolID(t, out, "job-")
+
+	select {
+	case notice := <-notices:
+		for _, want := range []string{id, "finished", "job_output"} {
+			if !strings.Contains(notice, want) {
+				t.Fatalf("completion notice %q missing %q", notice, want)
+			}
+		}
+	case <-time.After(8 * time.Second):
+		t.Fatal("job completion never produced an advisory")
+	}
+
+	// A killed job also settles and notifies (a stopped background command must
+	// not silently disappear).
+	out = mustInvoke(t, start, map[string]any{"command": "sleep 5"})
+	killID := testToolID(t, out, "job-")
+	mustInvoke(t, findTool(t, jm.Tools(), "job_kill"), map[string]any{"id": killID})
+	deadline := time.After(8 * time.Second)
+	for {
+		select {
+		case notice := <-notices:
+			if strings.Contains(notice, killID) {
+				return
+			}
+		case <-deadline:
+			t.Fatalf("killed job %s never produced an advisory", killID)
+		}
+	}
+}
+
+// TestJobToolAdvisoryBinder pins the runtime seam: the registered job tools
+// accept the Agent's advisory sink.
+func TestJobToolAdvisoryBinder(t *testing.T) {
+	tools := NewJobsTools(JobsConfig{WorkspaceRoot: t.TempDir()})
+	var binder runtime.AdvisorySinkBinder
+	for _, tool := range tools {
+		if b, ok := tool.(runtime.AdvisorySinkBinder); ok {
+			binder = b
+			break
+		}
+	}
+	if binder == nil {
+		t.Fatal("no job tool implements runtime.AdvisorySinkBinder")
+	}
+	// A nil sink must be tolerated and leave the manager notification-free.
+	binder.SetAdvisorySink(nil)
+}

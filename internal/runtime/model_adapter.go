@@ -182,7 +182,14 @@ func (m *providerChatModel) buildRequest(ctx context.Context, input []*schema.Me
 	// the latest tool result, which is where the model naturally reads the
 	// outcome it is about to act on.
 	if tc := turnContextFromContext(ctx); tc != nil {
-		messages = injectAdvisories(messages, tc.takeAdvisories())
+		var leftover []string
+		messages, leftover = injectAdvisories(messages, tc.takeAdvisories())
+		// A plain chat request has no tool result to attach the notice to; put
+		// it back so the next request (the usual tool loop) still carries it
+		// instead of silently dropping it.
+		for _, advisory := range leftover {
+			tc.enqueueAdvisory(advisory)
+		}
 	}
 	req := Request{
 		Model:    m.model,
@@ -199,9 +206,9 @@ func (m *providerChatModel) buildRequest(ctx context.Context, input []*schema.Me
 // in the request, so the model reads them next to the result they concern. When
 // the request has no tool result yet (a plain chat request) the advisories are
 // left for the next model call: they are only useful inside a tool loop.
-func injectAdvisories(messages []Message, advisories []string) []Message {
+func injectAdvisories(messages []Message, advisories []string) ([]Message, []string) {
 	if len(messages) == 0 || len(advisories) == 0 {
-		return messages
+		return messages, nil
 	}
 	last := -1
 	for i := len(messages) - 1; i >= 0; i-- {
@@ -211,7 +218,7 @@ func injectAdvisories(messages []Message, advisories []string) []Message {
 		}
 	}
 	if last < 0 {
-		return messages
+		return messages, advisories
 	}
 	var b strings.Builder
 	b.WriteString(messages[last].Content)
@@ -225,7 +232,7 @@ func injectAdvisories(messages []Message, advisories []string) []Message {
 	out := make([]Message, len(messages))
 	copy(out, messages)
 	out[last].Content = b.String()
-	return out
+	return out, nil
 }
 
 // chunkToMessage translates one provider chunk into an eino assistant message

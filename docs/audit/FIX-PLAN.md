@@ -103,3 +103,45 @@
 - Lead 每完成一波：`gofmt`/`go vet ./...`/`go build ./...`/`go test -count=1 ./...`/`sh scripts/check-nocgo.sh`；关键 P0/P1 跑回归测试 + Xvfb 真跑冒烟（1600×1000，隔离 data dir，unshare -n）。
 - 修完 → Lead 生成 `docs/audit/FIX-REPORT.md`：ID | 修复前 | 修复内容 | 文件 | 验证证据 | 状态（FIXED/PARTIAL/DEFERRED）；再交独立验证员抽查 P0/P1（可复用 verifier-core/ui 思路）。
 - 提交策略：Lead 在每波验证绿后统一 `git commit`（用户可见的分批提交），不 push。
+
+---
+
+# Wave 2 计划（2026-11-05 23:5x 起）
+
+> 前置：wave 1 已提交 `1da4f12`（P0 + 大部分 P1 完成并全量验证绿）。wave 2 目标：剩余 P1 产品面 + 功能缺口 + 低风险架构项 + 独立验证 + 预览金标。
+> 协作规则不变：文件所有权、不 commit、gofmt、定向测试、完成即报。跨范围接口需求用信息约定。
+
+## 接口/契约（先定，避免互相等待）
+
+1. **构建信息（About 版本显示）**
+   - `internal/app`：`var BuildVersion, BuildCommit, BuildTime = "dev","unknown","unknown"` + `func SetBuildInfo(v,c,t string)`；`app.Run` 启动时调用 `shell.SetBuildInfo(BuildVersion, BuildCommit, BuildTime)`。
+   - `internal/shell`：新增 `buildinfo.go` 导出 `SetBuildInfo` + `BuildVersionString()`；About 页显示；测试用默认值。
+   - `cmd/zeokeel/main.go`：`app.SetBuildInfo(version, commit, buildTime)`（main 包变量已由 ldflags 注入）。
+   - 归属：app=fix-security，shell=fix-frontend，cmd=fix-platform。
+2. **PD-06 Automation 后端契约（fix-security 实现，fix-frontend 直接读 store）**
+   - store：automations 表新增列（迁移 additions）：`workspace_id`、`permission`、`model`、`origin_session_id`；新表 `automation_runs(id, automation_id, session_id, started_at, finished_at, status, error)`。
+   - store API：`CreateAutomationRun`/`FinishAutomationRun`/`ListAutomationRuns(automationID, limit)`/`LatestAutomationRun(automationID)`；`Automation` 结构体加字段；app 调度器执行时写 run（成功/失败/耗时/session_id）。
+   - shell：直接 `a.Ctrl.Store()` 读取渲染（沿用现有 shell 直连 store 模式），表单字段用 `ListWorkspaces`/权限/模型列表。
+3. **PD-05 通知/数据/诊断/网络设置（frontend 渲染 + security 小接线）**
+   - settings 键：`notification.enabled`（默认 true）、`notification.suppress_focused`（默认 true）、`network.proxy`（默认空=环境代理）、`ui.close_behavior`（hide|quit，默认 hide）、`app.autostart`（bool）。app/notify.go 读前两个；provider/websearch/webfetch 读 proxy；app 窗口关闭读 close_behavior；autostart 平台实现（Linux XDG autostart / Windows 注册表 / macOS LaunchAgents）由 security 做，frontend 只写设置行。
+   - 诊断：shell 提供按钮显示数据目录/日志路径/版本，复制诊断信息；导出日志用 mygo 保存对话框（参考 export 实现）。
+4. **PD-07 MCP/Skills/AGENTS 管理 UI（frontend-only，直接读写文件/设置）**
+   - MCP：读 `a.Ctrl.Store().GetSetting("mcp.servers")` 渲染列表/JSON 编辑 + 保存；状态可用 `mcp.workspace_config` 说明；不做连通测试（后端已有 connectMCP 但无 API——可显示上次启动日志路径）。
+   - Skills：读 `skills.root`/workspace `skills/*/SKILL.md` 列表、解析 frontmatter 名称/描述、校验错误、打开文件夹（mygo Shell）。
+   - AGENTS.md：读/编辑 `<workspace root>/AGENTS.md`（编辑用保存对话框/输入框）。
+5. **PD-10 会话/草稿恢复（frontend-only）**
+   - 设置键：`ui.last_session`（启动时只读打开，不自动提交）、`draft.<sessionID>`（composer draft 持久化，输入停止 500ms/切换时写入）；启动恢复草稿。
+6. **PD-12 桌面生命周期（security app + frontend settings）**：托盘菜单加 New Session/Settings（app）、`ui.close_behavior`、`app.autostart`；全局快捷键若 mygo 无 API 则文档 DEFERRED。
+7. **FP-19 代理（security）**：`network.proxy` 统一 provider/websearch/webfetch；webfetch 保留 SSRF 校验（代理目标二次校验或文档说明）。
+8. **PD-04 导入器接线（platform CLI + frontend optional UI）**：`cmd/zeokeel` 加 `import` 子命令（`--dry-run`/`--json`/`--from`），调用 `internal/importer`；frontend 设置页提供「从 DSH 导入」入口（调用 CLI 或提示命令）。
+9. **验证任务**：verifier-core（wave1 核心未复核项）、verifier-ui（wave1 UI/UX 真跑复核）、product-auditor（产品面 + PD-04 导入器验收）。
+
+## Wave 2 分工
+
+- **fix-security（task-9）**：PD-06 后端、PD-05 通知/关闭行为/autostart 接线、FP-19 代理、FP-04 goal 模型+API、FP-07 schedule 投回原会话、FP-16 ask_user 阻塞、RT-05 app 集成测试、构建信息 app 侧、PD-06/PD-12 所需 app 逻辑。
+- **fix-runtime（task-10）**：FP-15 job 完成通知、FP-17 skills 多 root、FP-01 workflow parallel/pipeline、FP-03 subagent 异步、FP-05 workspace changes/diff、FP-14 附件路径语义。
+- **fix-frontend（task-11）**：PD-05 设置补页（通知/数据与隐私/诊断/网络/更新/重置）、PD-06 UI、PD-07 管理 UI、PD-10 恢复、PD-12 设置行、About 版本、context budget 设置行、首启 setup 引导卡（PD-01 剩余）、PD-04 首次运行入口。
+- **fix-platform（task-12）**：预览金标重生成 + 视觉回归、`zeokeel import` CLI、docs 同步（BUGS/known-limitations/STATUS/FIX-REPORT 的 wave2 状态）、打包收尾。
+- **verifier-core（task-14）**：独立复核 wave1 未双验项（FP-08/09/11/13/18、AR-18、RT-05、RT-10、FP-10、AR-01/02/03）。
+- **verifier-ui（task-15）**：独立真跑复核 UI/UX wave1 修复（UX-01/02/03/04/05/06/08/09/10/11/13、PD-02/08/09/11/17/18）。
+- **product-auditor（task-16）**：产品面复核 + PD-04 导入器验收（真实 /root/.dsh 只读探测）+ 用户旅程复核。

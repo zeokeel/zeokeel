@@ -65,14 +65,18 @@ var schemaV1 = []string{
 		value TEXT NOT NULL
 	)`,
 	`CREATE TABLE automations (
-		id         TEXT PRIMARY KEY,
-		title      TEXT NOT NULL,
-		prompt     TEXT NOT NULL,
-		cron       TEXT NOT NULL,
-		enabled    INTEGER NOT NULL,
-		last_run   TEXT,
-		next_run   TEXT,
-		created_at TEXT NOT NULL
+		id                TEXT PRIMARY KEY,
+		title             TEXT NOT NULL,
+		prompt            TEXT NOT NULL,
+		cron              TEXT NOT NULL,
+		enabled           INTEGER NOT NULL,
+		last_run          TEXT,
+		next_run          TEXT,
+		created_at        TEXT NOT NULL,
+		workspace_id      TEXT NOT NULL DEFAULT '',
+		permission        TEXT NOT NULL DEFAULT '',
+		model             TEXT NOT NULL DEFAULT '',
+		origin_session_id TEXT NOT NULL DEFAULT ''
 	)`,
 	`CREATE INDEX automations_next_run_idx ON automations(enabled, next_run)`,
 }
@@ -136,6 +140,19 @@ var schemaV1Additions = []string{
 		updated_at   TEXT NOT NULL
 	)`,
 	`CREATE INDEX IF NOT EXISTS memories_workspace_idx ON memories(workspace_id, updated_at DESC)`,
+	// Automation run history (PD-06): one row per scheduler firing, with the
+	// session it created and its terminal status/error. DeleteAutomation
+	// cascades the history away with the task.
+	`CREATE TABLE IF NOT EXISTS automation_runs (
+		id            TEXT PRIMARY KEY,
+		automation_id TEXT NOT NULL REFERENCES automations(id) ON DELETE CASCADE,
+		session_id    TEXT NOT NULL DEFAULT '',
+		started_at    TEXT NOT NULL,
+		finished_at   TEXT,
+		status        TEXT NOT NULL,
+		error         TEXT NOT NULL DEFAULT ''
+	)`,
+	`CREATE INDEX IF NOT EXISTS automation_runs_automation_idx ON automation_runs(automation_id, started_at DESC)`,
 }
 
 // migrate brings db to SchemaVersion or rejects an incompatible index.
@@ -188,6 +205,9 @@ func createSchemaV1(db *sql.DB) error {
 			return fmt.Errorf("create schema v1 additions: %w", err)
 		}
 	}
+	if err := ensureAutomationColumns(tx); err != nil {
+		return err
+	}
 	if _, err := tx.Exec(`INSERT INTO schema_version(version) VALUES (?)`, SchemaVersion); err != nil {
 		return fmt.Errorf("record schema version: %w", err)
 	}
@@ -204,6 +224,59 @@ func ensureSchemaAdditions(db *sql.DB) error {
 	for _, stmt := range schemaV1Additions {
 		if _, err := db.Exec(stmt); err != nil {
 			return fmt.Errorf("apply schema addition: %w", err)
+		}
+	}
+	return ensureAutomationColumns(db)
+}
+
+// schemaQuerier is the subset of *sql.DB and *sql.Tx the column migration
+// needs; both must work so a fresh database migrates inside its creating
+// transaction and an existing one migrates on Open.
+type schemaQuerier interface {
+	Query(query string, args ...any) (*sql.Rows, error)
+	Exec(query string, args ...any) (sql.Result, error)
+}
+
+// ensureAutomationColumns adds the PD-06 binding columns to an automations
+// table created before they existed. SQLite has no ADD COLUMN IF NOT EXISTS, so
+// the current columns are read from PRAGMA table_info first; the migration is
+// therefore idempotent and safe on both fresh and upgraded indexes.
+func ensureAutomationColumns(q schemaQuerier) error {
+	rows, err := q.Query(`PRAGMA table_info(automations)`)
+	if err != nil {
+		return fmt.Errorf("inspect automations columns: %w", err)
+	}
+	defer rows.Close()
+	have := make(map[string]bool, 12)
+	for rows.Next() {
+		var (
+			cid        int
+			name       string
+			columnType string
+			notNull    int
+			defaultV   sql.NullString
+			pk         int
+		)
+		if err := rows.Scan(&cid, &name, &columnType, &notNull, &defaultV, &pk); err != nil {
+			return fmt.Errorf("inspect automations columns: scan: %w", err)
+		}
+		have[name] = true
+	}
+	if err := rows.Err(); err != nil {
+		return fmt.Errorf("inspect automations columns: %w", err)
+	}
+	additions := []struct{ name, ddl string }{
+		{"workspace_id", `ALTER TABLE automations ADD COLUMN workspace_id TEXT NOT NULL DEFAULT ''`},
+		{"permission", `ALTER TABLE automations ADD COLUMN permission TEXT NOT NULL DEFAULT ''`},
+		{"model", `ALTER TABLE automations ADD COLUMN model TEXT NOT NULL DEFAULT ''`},
+		{"origin_session_id", `ALTER TABLE automations ADD COLUMN origin_session_id TEXT NOT NULL DEFAULT ''`},
+	}
+	for _, addition := range additions {
+		if have[addition.name] {
+			continue
+		}
+		if _, err := q.Exec(addition.ddl); err != nil {
+			return fmt.Errorf("add automations.%s: %w", addition.name, err)
 		}
 	}
 	return nil

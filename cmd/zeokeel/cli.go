@@ -18,6 +18,8 @@ Usage:
   zeokeel                 launch the desktop app (default)
   zeokeel run [flags] "<prompt>"   run one prompt headless (no window, no tray)
   zeokeel run --help      headless flags: --json, --yes, --model ...
+  zeokeel import [flags]  migrate DSH sessions into this data directory
+  zeokeel import --help   import flags: --from, --dry-run, --json, --max
   zeokeel --version       print build version, commit and platform
   zeokeel --help          show this help
 
@@ -63,6 +65,8 @@ func runCLI(args []string, stdout, stderr io.Writer) int {
 		case "--help", "-h", "-help", "help":
 			fmt.Fprint(stdout, usageText)
 			return 0
+		case "import":
+			return runImportCLI(args[1:], stdout, stderr)
 		case "run":
 			if headlessRun == nil {
 				fmt.Fprintln(stderr, "zeokeel: the headless 'run' command is not wired yet (internal/app.RunHeadless is pending; see docs/BUGS.md FP-18)")

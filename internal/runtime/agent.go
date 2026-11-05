@@ -238,6 +238,13 @@ type Agent struct {
 
 	subMu     sync.Mutex
 	subagents map[string]*subagentEntry
+
+	// External advisories (FP-15): background jobs and async subagents finish
+	// outside a turn. Their notices go to the running turn's advisory queue
+	// when one is active, otherwise they wait for the next turn's prompt.
+	advisoryMu        sync.Mutex
+	pendingAdvisories []string
+	activeTurn        atomic.Pointer[turnContext]
 }
 
 // New builds an Agent from cfg.
@@ -337,6 +344,7 @@ func New(cfg Config) (*Agent, error) {
 	a.bindSubagentRunners()
 	a.bindApprovalGates()
 	a.bindToolReviewers()
+	a.bindAdvisorySinks()
 	return a, nil
 }
 
@@ -702,7 +710,11 @@ func (a *Agent) run(ctx context.Context, cancel context.CancelFunc, sessionID, t
 		return
 	}
 
+	pendingAdvisories := a.takePendingAdvisories()
 	inputText := AttachmentPrompt(text, attachments)
+	if len(pendingAdvisories) > 0 {
+		inputText = appendAdvisoriesToPrompt(inputText, pendingAdvisories)
+	}
 	input := make([]*schema.Message, 0, len(prior)+1)
 	input = append(input, messagesToEino(prior)...)
 	input = append(input, userMessageWithAttachments(inputText, AttachmentImages(attachments)))
@@ -726,6 +738,11 @@ func (a *Agent) run(ctx context.Context, cancel context.CancelFunc, sessionID, t
 		renderAdvisory: a.budgetAdvisory,
 	}
 	ctx = withTurnContext(ctx, turnCtx)
+	// External notices that arrive while this turn runs are delivered with the
+	// next provider request; the active pointer is cleared when the turn ends so
+	// late notices wait for the next turn instead of vanishing.
+	a.activeTurn.Store(turnCtx)
+	defer a.activeTurn.CompareAndSwap(turnCtx, nil)
 	// Barrier checkpoints (FP-11): the model adapter flushes the request before
 	// it is sent and the tool wrapper flushes before a side-effecting tool body
 	// runs, so a crash can lose neither. A Save failure fails the barrier
