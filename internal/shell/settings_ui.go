@@ -414,8 +414,13 @@ func (a *App) settingsHeaderLive(c *ui.Context, t *design.Tokens) {
 		Gap(th.Space(2)).Justify(ui.End).AlignItems(ui.Center).Children(func() {
 		a.settingsOutlineButtonLive(c, t, a.T("settings.open_configuration_file"),
 			func() { a.openConfigurationLocation(c) })
-		a.settingsOutlineButtonLive(c, t, a.T("menu.close"),
-			func() { a.closeSettingsRequested() })
+		// One visible close: in the independent window the OS title bar
+		// already offers close, so keep only the panel's X; the modal
+		// fallback keeps the explicit label next to its X.
+		if !a.hasSettingsWindowHost() {
+			a.settingsOutlineButtonLive(c, t, a.T("menu.close"),
+				func() { a.closeSettingsRequested() })
+		}
 		a.settingsCloseLive(c, t)
 	})
 }

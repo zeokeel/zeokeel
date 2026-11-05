@@ -342,7 +342,7 @@ func (a *App) toolErrorResult(c *ui.Context, t *design.Tokens, tool state.ToolSt
 	panel.Children(func() {
 		ui.Row(c).AlignItems(ui.Center).Gap(th.Space(2)).Children(func() {
 			ui.Text(c, a.menuText("Error", "错误")).FontSize(11).
-				FixedLineHeight(16).FontWeight(600).TextColor(t.Danger).Grow(1)
+				FixedLineHeight(16).FontWeight(600).TextColor(t.DangerText).Grow(1)
 			if hidden || expanded {
 				a.toolResultMore(c, t, tool, expanded)
 			}
@@ -354,7 +354,7 @@ func (a *App) toolErrorResult(c *ui.Context, t *design.Tokens, tool state.ToolSt
 			}
 			copyButton.Children(func() {
 				ui.Text(c, copyLabel).FontSize(11).FixedLineHeight(16).
-					TextColor(t.Danger)
+					TextColor(t.DangerText)
 			})
 			if copyButton.Clicked() {
 				c.WriteClipboard(tool.Result)
@@ -362,7 +362,7 @@ func (a *App) toolErrorResult(c *ui.Context, t *design.Tokens, tool state.ToolSt
 			}
 		})
 		ui.Text(c, body).Font(monoFont).FontSize(12).FixedLineHeight(18).
-			TextColor(t.Danger)
+			TextColor(t.DangerText)
 	})
 }
 

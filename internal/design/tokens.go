@@ -87,6 +87,9 @@ type Tokens struct {
 
 	Success ui.Color
 	Danger  ui.Color
+	// DangerText is the WCAG-AA foreground for danger message text on a
+	// danger tint (Danger stays the fill/border/icon color).
+	DangerText ui.Color
 	// Warning is the status color for badges and state dots. WarningText is
 	// its WCAG-AA foreground for warning message text on the page
 	// background; the status color itself is too light for small text on
@@ -126,6 +129,7 @@ func fromPalette(p brand.Palette, dark bool) *Tokens {
 		OnPrimary:      p.OnPrimary,
 		Success:        p.Success,
 		Danger:         p.Danger,
+		DangerText:     p.DangerText,
 		Warning:        p.Warning,
 		WarningText:    p.WarningText,
 		White:          ui.Hex(brand.HexWhite),

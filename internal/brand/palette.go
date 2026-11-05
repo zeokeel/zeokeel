@@ -119,8 +119,11 @@ type Palette struct {
 	// Status colors are universal semantic hues, deliberately outside the
 	// logo palette. WarningText is the WCAG-AA text companion of Warning,
 	// which is too light for small text on the page background.
-	Success     ui.Color
-	Danger      ui.Color
+	Success ui.Color
+	Danger  ui.Color
+	// DangerText is the WCAG-AA foreground for danger message text on a
+	// danger tint; Danger itself is the fill/border/icon color.
+	DangerText  ui.Color
 	Warning     ui.Color
 	WarningText ui.Color
 }
@@ -159,6 +162,7 @@ func LightPalette() Palette {
 		Scrim:         ui.RGBA(15, 17, 21, 0.30), // ink scrim, modal backdrop
 		Success:       ui.Hex("#16A34A"),
 		Danger:        ui.Hex("#DC2626"), // 4.8:1 on white
+		DangerText:    ui.Hex("#B91C1C"), // 5.7:1 on the 8% danger tint
 		Warning:       ui.Hex("#D97706"),
 		WarningText:   ui.Hex("#8A4B0F"), // 6.8:1 on white
 	}
@@ -191,6 +195,7 @@ func DarkPalette() Palette {
 		Scrim:          ui.RGBA(0, 0, 0, 0.55),
 		Success:        ui.Hex("#22C55E"),
 		Danger:         ui.Hex("#F87171"),
+		DangerText:     ui.Hex("#FCA5A5"), // AA on the dark danger tint
 		Warning:        ui.Hex("#F59E0B"),
 		WarningText:    ui.Hex("#E9A24C"), // 9.0:1 on the night
 	}

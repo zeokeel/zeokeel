@@ -157,6 +157,8 @@ func TestPaletteContrast(t *testing.T) {
 				{"tertiary text on a raised surface", tc.p.TextTertiary, tc.p.Surface},
 				{"tertiary text on the strong surface", tc.p.TextTertiary, tc.p.SurfaceStrong},
 				{"warning text", tc.p.WarningText, tc.p.Background},
+				{"danger text on the 8% danger tint over a raised surface", tc.p.DangerText, tc.p.Danger.Alpha(0.08).Over(tc.p.Surface)},
+				{"danger text on the 12% danger tint over a raised surface", tc.p.DangerText, tc.p.Danger.Alpha(0.12).Over(tc.p.Surface)},
 				{"accent text on accent fill", tc.p.AccentText, tc.p.Accent},
 			} {
 				if r := contrast(c.fg, c.bg); r < 4.5 {

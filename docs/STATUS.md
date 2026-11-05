@@ -14,6 +14,7 @@
 - **P0-2 对比度**：Light `TextTertiary` `#7E8796` → `#646C7A`，BgBase/BgRaised 5.29、BgSidebar 5.06、BgStrong 4.76:1（全部 ≥4.5:1）；brand_test 增加四组表面 + 层级断言；ADR 0002 §9。
 - **P0-3 深色字标**：`logo-dark.svg` → `mark-dark@2x.png`（96×96）；`brandMark(t)` 按主题选择；Home hero/Sidebar/rail 切换；assets_test 验证深色无白边、浅色不变；ADR 0002 §10。
 - **P0-1 破坏性操作**：Automation 删除与 Memory Clear all 改为确认弹层（Cancel 默认焦点、Esc/点外关闭、Enter 不误删、Danger 确认按钮、确认后 Toast）；计划文案中文本地化（每小时/每 N 分钟/每天 HH:MM），cron 行为未改；新增 3 测试。
+- **P1 收口（第五轮）**：toolcard 错误面板对比度（品牌新增 `DangerText` #B91C1C/#FCA5A5，danger tint 5.7:1）+ 测试；设置独立窗口隐藏多余文字关闭入口（只留面板 ×，overlay 回退不变）。
 - **预览**：22 张全部重生成（含深色字标/对比度变化）。
 - **验证**：`gofmt`/`go vet`/`go build ./...`/`go test -count=1 ./...` 全绿（shell 45.9s）；工作树提交前干净。
 - 未验证/框架限制已整理：[known-limitations.md](design/known-limitations.md)。

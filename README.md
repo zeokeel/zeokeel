@@ -47,7 +47,7 @@
 
 ![Session 原生视觉（浅色）](docs/design/preview/session-native-light.png)
 
-- 下一阶段：按 [设计评审 Top10](docs/design/review-round3.md) 修观感/一致性（破坏性操作确认、三级文字对比度、深色字标位图等）、滚动条与真机 IME/a11y 矩阵、Trajectory 虚拟化。`go build/vet/test` 全绿。
+- 下一阶段：发布前真机验证（IME/a11y/DPI/通知矩阵，见 [已知限制](docs/design/known-limitations.md)）、CI headless 视觉黄金冒烟、TextScale 全覆盖、Trajectory 虚拟化；观感迭代参考 [review-round4.md](docs/design/review-round4.md)。`go build/vet/test` 全绿。
 
 ## 字标（已定）
 
