@@ -1,0 +1,10 @@
+[
+  {"act":"goto","url":"/","wait":5000},
+  {"act":"clickxy","x":1010,"y":684,"wait":1200},
+  {"act":"click","text":"Automation tasks","wait":3000},
+  {"act":"dump","out":"baseline/controls/diag-automation-page.json"},
+  {"act":"shot","out":"baseline/screenshots/diag-automation-page.png"},
+  {"act":"clickxy","x":1379,"y":44,"wait":2500},
+  {"act":"dump","out":"baseline/controls/diag-automation-dialog.json"},
+  {"act":"shot","out":"baseline/screenshots/diag-automation-dialog.png"}
+]

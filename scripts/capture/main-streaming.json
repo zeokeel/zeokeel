@@ -1,0 +1,20 @@
+[
+  {"act":"goto","url":"/","wait":6000},
+  {"act":"clickxy","x":140,"y":89,"wait":2000},
+  {"act":"shot","out":"baseline/screenshots/90-main-new-session.png"},
+  {"act":"dump","out":"baseline/controls/90-main-new-session.json"},
+  {"act":"clickxy","x":900,"y":527,"wait":600},
+  {"act":"type","text":"请只回复 OK 两个字","wait":600},
+  {"act":"clickxy","x":1350,"y":582,"wait":2000},
+  {"act":"shot","out":"baseline/screenshots/91-main-streaming.png"},
+  {"act":"cssscan","name":"32-main-streaming","out":"baseline/css/32-main-streaming.json"},
+  {"act":"dump","out":"baseline/controls/91-main-streaming.json"},
+  {"act":"wait","ms":18000},
+  {"act":"shot","out":"baseline/screenshots/92-main-final.png"},
+  {"act":"cssscan","name":"33-main-final","out":"baseline/css/33-main-final.json"},
+  {"act":"dump","out":"baseline/controls/92-main-final.json"},
+  {"act":"clickxy","x":406,"y":62,"wait":1800},
+  {"act":"shot","out":"baseline/screenshots/93-main-trajectory.png"},
+  {"act":"cssscan","name":"34-main-trajectory","out":"baseline/css/34-main-trajectory.json"},
+  {"act":"dump","out":"baseline/controls/93-main-trajectory.json"}
+]

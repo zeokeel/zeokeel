@@ -1,0 +1,9 @@
+[
+  {"act":"goto","url":"/","wait":5000},
+  {"act":"clickxy","x":1010,"y":684,"wait":1200},
+  {"act":"eval","js":"(() => { const rows=[...document.querySelectorAll('button')].filter(b=>/Untitled/.test(b.innerText)); return rows.map(b=>({t:b.innerText.trim(),x:Math.round(b.getBoundingClientRect().x),y:Math.round(b.getBoundingClientRect().y)})); })()"},
+  {"act":"eval","js":"(() => { const b=[...document.querySelectorAll('button')].find(b=>/Untitled/.test(b.innerText)); if(!b) return 'none'; b.click(); return 'clicked '+b.innerText.trim(); })()"},
+  {"act":"wait","ms":8000},
+  {"act":"dump","out":".probe/controls/50-session-open.json"},
+  {"act":"shot","out":".probe/shots/50-session-open.png"}
+]

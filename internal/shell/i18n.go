@@ -1,0 +1,589 @@
+package shell
+
+import (
+	"errors"
+	"fmt"
+	"strings"
+	"time"
+
+	"github.com/zeokeel/zeokeel/internal/design"
+	"github.com/zeokeel/zeokeel/internal/session"
+	"github.com/zeokeel/zeokeel/internal/state"
+	"github.com/zeokeel/zeokeel/internal/store"
+)
+
+// Lang is a UI language code persisted as ui.language.
+type Lang string
+
+const (
+	// LangEN is English.
+	LangEN Lang = "en"
+	// LangZH is Simplified Chinese.
+	LangZH Lang = "zh"
+)
+
+// liveDefaultLanguage is the product default for a live shell whose
+// ui.language was never stored: Chinese. A static App (the baseline demo
+// shell) renders English regardless, which keeps the pixel baselines stable.
+var liveDefaultLanguage = LangZH
+
+// testDefaultLanguage pins the unresolved live default during tests so the
+// existing English-oriented UI tests stay deterministic. It is empty in the
+// real binary.
+var testDefaultLanguage Lang
+
+// translation is one catalog entry.
+type translation struct {
+	en, zh string
+}
+
+// translations is the complete user-visible string catalog. Keys are grouped
+// by surface (shell, home, session, settings, ...). Every entry has both
+// languages; T falls back to the key itself so a missing entry is visible in
+// development rather than silently blank.
+var translations = map[string]translation{
+	"about.version":                                            {"version 0.1.0", "version 0.1.0"},
+	"automation.all":                                           {"All", "全部"},
+	"automation.automation_started":                            {"Automation started", "自动化已开始"},
+	"automation.automation_task_deleted":                       {"Automation task deleted", "自动化任务已删除"},
+	"automation.automation_task_disabled":                      {"Automation task disabled", "自动化任务已停用"},
+	"automation.automation_task_enabled":                       {"Automation task enabled", "自动化任务已启用"},
+	"automation.automation_task_saved":                         {"Automation task saved", "自动化任务已保存"},
+	"automation.cancel":                                        {"Cancel", "取消"},
+	"automation.could_not_delete_automation_task":              {"Could not delete automation task", "自动化任务删除失败"},
+	"automation.could_not_load_automation_tasks":               {"Could not load automation tasks", "无法加载自动化任务"},
+	"automation.could_not_save_automation_task":                {"Could not save automation task", "自动化任务保存失败"},
+	"automation.could_not_update_automation_task":              {"Could not update automation task", "自动化任务更新失败"},
+	"automation.cron_15_0_9_hourly_or_daily":                   {"Cron: */15 * * * *, 0 9 * * *, @hourly or @daily", "计划：*/15 * * * *、0 9 * * *、@hourly 或 @daily"},
+	"automation.daily_report":                                  {"Daily report", "每日报告"},
+	"automation.delete":                                        {"Delete", "删除"},
+	"automation.disable":                                       {"Disable", "停用"},
+	"automation.edit":                                          {"Edit", "编辑"},
+	"automation.edit_automation_task":                          {"Edit automation task", "编辑自动化任务"},
+	"automation.empty":                                         {"No tasks yet. Tasks created in your sessions appear here.", "暂无任务。在会话中创建的任务会显示在这里。"},
+	"automation.enable":                                        {"Enable", "启用"},
+	"automation.enabled":                                       {"Enabled", "启用"},
+	"automation.inactive":                                      {"Inactive", "停用"},
+	"automation.invalid_schedule":                              {"Invalid schedule", "计划格式无效"},
+	"automation.last":                                          {"last %s", "上次 %s"},
+	"automation.new":                                           {"New", "新建"},
+	"automation.new_automation_task":                           {"New automation task", "新建自动化任务"},
+	"automation.next":                                          {"next %s", "下次 %s"},
+	"automation.no_automation_runner_is_configured":            {"No automation runner is configured", "尚未配置自动化执行器"},
+	"automation.prompt":                                        {"Prompt", "提示词"},
+	"automation.run_now":                                       {"Run now", "立即运行"},
+	"automation.save":                                          {"Save", "保存"},
+	"automation.schedule":                                      {"Schedule", "计划"},
+	"automation.search":                                        {"Search automation tasks", "搜索自动化任务"},
+	"automation.summarize_yesterday_s_changes":                 {"Summarize yesterday's changes", "总结昨天的改动"},
+	"automation.title":                                         {"Title", "标题"},
+	"automation.title_is_required":                             {"Title is required", "标题不能为空"},
+	"common.high":                                              {"High", "高"},
+	"common.now":                                               {"now", "刚刚"},
+	"common.standard_mode":                                     {"Standard mode", "标准模式"},
+	"common.untitled":                                          {"Untitled", "未命名"},
+	"composer.add_to_message":                                  {"Add to message", "添加到消息"},
+	"composer.add_files_or_run_commands":                       {"Add files or run commands", "添加文件或运行命令"},
+	"composer.allow":                                           {"Allow", "允许"},
+	"composer.approval_required":                               {"Approval required", "需要审批"},
+	"composer.commands":                                        {"Commands", "命令"},
+	"composer.deny":                                            {"Deny", "拒绝"},
+	"composer.files":                                           {"Files", "文件"},
+	"composer.help_text":                                       {"Commands: /clear /stop /help", "命令：/clear /stop /help"},
+	"composer.send_message":                                    {"Send message", "发送消息"},
+	"composer.session_log":                                     {"Session log", "会话日志"},
+	"composer.slash_clear_hint":                                {"Clear the draft", "清空草稿"},
+	"composer.slash_help_hint":                                 {"List the composer commands", "列出输入框命令"},
+	"composer.slash_stop_hint":                                 {"Stop the running turn", "停止当前回合"},
+	"files.binary_file_preview_is_not_available":               {"Binary file — preview is not available.", "二进制文件 — 无法预览。"},
+	"files.clear":                                              {"Clear", "清空"},
+	"files.close_preview":                                      {"Close preview", "关闭预览"},
+	"files.command":                                            {"Command", "命令"},
+	"files.could_not_open_the_file_v":                          {"Could not open the file: %v", "无法打开文件：%v"},
+	"files.could_not_read_the_directory_v":                     {"Could not read the directory: %v", "无法读取目录：%v"},
+	"files.could_not_read_the_file_v":                          {"Could not read the file: %v", "无法读取文件：%v"},
+	"files.files":                                              {"Files", "文件"},
+	"files.no_workspace_root_yet_create_or_select_a_workspace": {"No workspace root yet. Create or select a workspace.", "暂无工作区根目录。请创建或选择工作区。"},
+	"files.plain_text_preview_d_bytes":                         {"Plain text preview · %d bytes", "纯文本预览 · %d 字节"},
+	"files.preview_limited_to_the_first_d_lines_d_characters_per_line": {"Preview limited to the first %d lines (%d characters per line).", "预览仅显示前 %d 行（每行 %d 个字符）。"},
+	"files.preview_truncated_at_256_kb":                                {"Preview truncated at 256 KB.", "预览已截断至 256 KB。"},
+	"files.run":                                                        {"Run", "运行"},
+	"files.run_a_command_in_the_workspace_root":                        {"Run a command in the workspace root.", "在工作区根目录运行命令。"},
+	"files.simple_command_runner_no_pty_no_persistent_shell":           {"Simple command runner: no PTY, no persistent shell.", "简单命令运行器：无 PTY，非常驻 shell。"},
+	"files.terminal":                                                   {"Terminal", "终端"},
+	"files.that_path_is_outside_the_workspace":                         {"That path is outside the workspace.", "该路径不在工作区内。"},
+	"files.this_directory_is_empty":                                    {"This directory is empty.", "此目录为空。"},
+	"files.workspace_root_is_not_readable_v":                           {"Workspace root is not readable: %v", "工作区根目录不可读：%v"},
+	"files.workspace_files":                                            {"Workspace files", "工作区文件"},
+	"files.new_terminal":                                               {"New terminal", "新建终端"},
+	"home.choose_workspace":                                            {"Choose workspace", "选择工作区"},
+	"home.composer_placeholder":                                        {"Describe what you want to build, / commands, @ files or sessions", "描述你想构建的内容，/ 命令，@ 文件或会话"},
+	"home.hero_title":                                                  {"Into the Unknown", "驶向未知"},
+	"home.preview":                                                     {"Preview", "预览"},
+	"menu.about":                                                       {"About", "关于"},
+	"menu.cancel":                                                      {"Cancel", "取消"},
+	"menu.close":                                                       {"Close", "关闭"},
+	"menu.close_overlay_or_menu":                                       {"Close overlay or menu", "关闭弹层或菜单"},
+	"menu.copied_session_title":                                        {"Copied session title", "已复制会话标题"},
+	"menu.copy_title":                                                  {"Copy title", "复制标题"},
+	"menu.could_not_delete_session":                                    {"Could not delete session", "删除会话失败"},
+	"menu.could_not_load_sessions":                                     {"Could not load sessions", "无法加载会话"},
+	"menu.could_not_rename_session":                                    {"Could not rename session", "重命名会话失败"},
+	"menu.delete":                                                      {"Delete", "删除"},
+	"menu.delete_q_this_cannot_be_undone":                              {"Delete %q? This cannot be undone.", "删除“%s”？此操作不可撤销。"},
+	"menu.delete_session":                                              {"Delete session?", "删除会话？"},
+	"menu.edit":                                                        {"Edit", "编辑"},
+	"menu.enter_opens_the_first_match_esc_closes":                      {"Enter opens the first match · Esc closes", "Enter 打开第一个结果 · Esc 关闭"},
+	"menu.focus_composer_or_search_outside_a_session":                  {"Focus composer, or search outside a session", "聚焦输入框，会话外打开搜索"},
+	"menu.keyboard_shortcuts":                                          {"Keyboard shortcuts", "键盘快捷键"},
+	"menu.more":                                                        {"More", "更多"},
+	"menu.new_session":                                                 {"New session", "新建会话"},
+	"menu.no_matching_sessions":                                        {"No matching sessions", "没有匹配的会话"},
+	"menu.no_sessions_yet":                                             {"No sessions yet", "暂无会话"},
+	"menu.pure_go_desktop_ai_agent_mygo_eino":                          {"Pure Go desktop AI agent — MyGo + Eino", "纯 Go 桌面 AI Agent — MyGo + Eino"},
+	"menu.quit":                                                        {"Quit", "退出"},
+	"menu.rename":                                                      {"Rename", "重命名"},
+	"menu.rename_session":                                              {"Rename session", "重命名会话"},
+	"menu.save":                                                        {"Save", "保存"},
+	"menu.search_sessions":                                             {"Search sessions", "搜索会话"},
+	"menu.session_deleted":                                             {"Session deleted", "会话已删除"},
+	"menu.session_renamed":                                             {"Session renamed", "会话已重命名"},
+	"menu.session_title":                                               {"Session title", "会话标题"},
+	"menu.settings":                                                    {"Settings", "设置"},
+	"menu.title_cannot_be_empty":                                       {"Title cannot be empty", "标题不能为空"},
+	"models.add_a_model_to_choose_it_from_the_composer":                {"Add a model to choose it from the composer.", "添加模型后即可在输入框中选择。"},
+	"models.add_model":                                                 {"Add model", "添加模型"},
+	"models.api_key":                                                   {"API key", "API 密钥"},
+	"models.base_url":                                                  {"Base URL", "基础 URL"},
+	"models.cancel":                                                    {"Cancel", "取消"},
+	"models.choose_the_model_the_agent_uses_by_default":                {"Choose the model the agent uses by default", "选择代理默认使用的模型"},
+	"models.could_not_delete_model":                                    {"Could not delete model", "无法删除模型"},
+	"models.could_not_load_models":                                     {"Could not load models", "无法加载模型"},
+	"models.could_not_save_model":                                      {"Could not save model", "模型保存失败"},
+	"models.could_not_select_model":                                    {"Could not select model", "无法选择模型"},
+	"models.default":                                                   {"Default", "默认"},
+	"models.default_model_updated":                                     {"Default model updated", "默认模型已更新"},
+	"models.delete":                                                    {"Delete", "删除"},
+	"models.edit":                                                      {"Edit", "编辑"},
+	"models.edit_model":                                                {"Edit model", "编辑模型"},
+	"models.model":                                                     {"Model", "模型"},
+	"models.model_deleted":                                             {"Model deleted", "模型已删除"},
+	"models.model_name_is_required":                                    {"Model name is required", "模型名称不能为空"},
+	"models.model_saved":                                               {"Model saved", "模型已保存"},
+	"models.models":                                                    {"Models", "模型"},
+	"models.models_require_the_live_session_service":                   {"Models require the live session service.", "模型功能需要实时会话服务。"},
+	"models.name":                                                      {"Name", "名称"},
+	"models.no_model":                                                  {"No model", "未选择模型"},
+	"models.no_models_configured":                                      {"No models configured", "尚未配置模型"},
+	"models.reasoning_effort":                                          {"Reasoning effort", "推理强度"},
+	"models.save":                                                      {"Save", "保存"},
+	"models.set_default":                                               {"Set default", "设为默认"},
+	"plugins.add":                                                      {"Add plugin", "添加插件"},
+	"plugins.built_in_plugins":                                         {"Built-in plugins", "内置插件"},
+	"plugins.could_not_update_plugin":                                  {"Could not update plugin", "插件更新失败"},
+	"plugins.experimental_badge":                                       {"Experimental", "实验性"},
+	"plugins.experimental_plugins":                                     {"Experimental plugins", "实验性插件"},
+	"plugins.live.mcp.desc":                                            {"Expose tools from configured Model Context Protocol servers.", "暴露已配置的模型上下文协议服务工具。"},
+	"plugins.live.mcp.title":                                           {"MCP servers", "MCP 服务"},
+	"plugins.live.shell.desc":                                          {"Enable the bash, write_file and edit_file tool group.", "启用 bash、write_file 和 edit_file 工具组。"},
+	"plugins.live.shell.title":                                         {"Shell tools", "Shell 工具"},
+	"plugins.live.skills.desc":                                         {"Load SKILL.md capabilities from the workspace skills folder.", "从工作区 skills 目录加载 SKILL.md 能力。"},
+	"plugins.live.skills.title":                                        {"Skills", "技能"},
+	"plugins.live.subagent.desc":                                       {"Let the agent delegate work to a nested subagent.", "允许代理把任务委派给嵌套子代理。"},
+	"plugins.live.subagent.title":                                      {"Subagent", "子代理"},
+	"plugins.live.web_search.desc":                                     {"Let the agent search the web with the configured provider.", "允许代理使用已配置的搜索提供方。"},
+	"plugins.more":                                                     {"More", "更多"},
+	"plugins.plugin_disabled":                                          {"Plugin disabled", "插件已停用"},
+	"plugins.plugin_enabled":                                           {"Plugin enabled", "插件已启用"},
+	"plugins.row.agent_loop.desc":                                      {"Control how the Agent dispatches tool calls.", "控制代理如何分发工具调用。"},
+	"plugins.row.agent_loop.name":                                      {"Agent loop", "代理循环"},
+	"plugins.row.agent_teams.desc":                                     {"Enable team collaboration, team tools, the member roster, and the shared task board.", "启用团队协作、团队工具、成员列表和共享任务面板。"},
+	"plugins.row.agent_teams.name":                                     {"Agent Teams", "代理团队"},
+	"plugins.row.auto_review.desc":                                     {"Add an Auto review permission mode that uses the model to assess authorization before each tool call.", "新增自动审核权限模式，在每次工具调用前由模型评估授权。"},
+	"plugins.row.auto_review.name":                                     {"Auto Authorization Review", "自动授权审核"},
+	"plugins.row.developer_tools.desc":                                 {"Inspect and debug raw session data, grouped chat messages, and the NodeJS backend.", "检查和调试原始会话数据、分组聊天消息及 NodeJS 后端。"},
+	"plugins.row.developer_tools.name":                                 {"Developer Tools", "开发者工具"},
+	"plugins.row.shell.desc":                                           {"Limit how long each command may run and how much it may output.", "限制每个命令的运行时长和输出量。"},
+	"plugins.row.shell.name":                                           {"Shell", "Shell"},
+	"plugins.row.subagent.desc":                                        {"Set Subagent recursion depth, count, and models.", "设置子代理递归深度、数量与模型。"},
+	"plugins.row.subagent.name":                                        {"Subagent", "子代理"},
+	"plugins.row.voice_input.desc":                                     {"Transcribe recordings locally with SenseVoice; first use requires installing dependencies", "使用 SenseVoice 在本地转写录音；首次使用需要安装依赖。"},
+	"plugins.row.voice_input.name":                                     {"Voice input", "语音输入"},
+	"plugins.row.web_search.desc":                                      {"Set up the DeepSeek search provider.", "配置 DeepSeek 搜索提供方。"},
+	"plugins.row.web_search.name":                                      {"Web search", "网络搜索"},
+	"plugins.section.builtin":                                          {"Built-in plugin settings", "内置插件设置"},
+	"plugins.subtitle":                                                 {"Install, enable, and configure plugins", "安装、启用并配置插件"},
+	"plugins.title":                                                    {"Plugins", "插件"},
+	"plugins.turn_runtime_features_on_or_off_changes_apply_to_the_next_turn": {"Turn runtime features on or off. Changes apply to the next turn.", "开或关运行时功能，更改将在下一轮生效。"},
+	"search.archive":                                         {"Archive", "归档"},
+	"search.archived":                                        {"archived", "已归档"},
+	"search.archived_only":                                   {"Archived only", "仅已归档"},
+	"search.all_conversations":                               {"All conversations (show archived)", "所有会话（显示已归档）"},
+	"search.enter_opens_moves_esc_closes":                    {"Enter opens · ↑↓ moves · Esc closes", "Enter 打开 · ↑↓ 选择 · Esc 关闭"},
+	"search.filter_sessions":                                 {"Filter sessions", "筛选会话"},
+	"search.group_by":                                        {"Group by", "分组方式"},
+	"search.hide_archived":                                   {"Hide archived", "隐藏已归档"},
+	"search.in_one_list":                                     {"In one list", "单一列表"},
+	"search.last_updated":                                    {"Last updated", "最近更新"},
+	"search.manual":                                          {"Manual", "手动"},
+	"search.no_matching_sessions":                            {"No matching sessions", "没有匹配的会话"},
+	"search.order_by":                                        {"Order by", "排序方式"},
+	"search.search_sessions":                                 {"Search sessions", "搜索会话"},
+	"search.show_archived":                                   {"Show archived", "显示已归档"},
+	"search.sort":                                            {"Sort", "排序"},
+	"search.sort_2":                                          {"Sort: ", "排序："},
+	"search.title_or_message_content":                        {"Title or message content", "标题或消息内容"},
+	"search.unarchive":                                       {"Unarchive", "取消归档"},
+	"search.view_options":                                    {"View options", "视图选项"},
+	"search.workspace":                                       {"WorkSpace", "工作区"},
+	"search.workspace_tree":                                  {"Workspace Tree", "工作区树"},
+	"session.add_attachments":                                {"Add attachments", "添加附件"},
+	"session.always_allow":                                   {"Always allow", "始终允许"},
+	"session.always_allow_tooltip":                           {"Allow this tool without asking again this session", "本会话中允许此工具且不再询问"},
+	"session.answer_input":                                   {"Answer input", "回答输入"},
+	"session.chat":                                           {"Chat", "对话"},
+	"session.composer_input":                                 {"Composer input", "输入框"},
+	"session.composer_placeholder":                           {"Message or run a task, / commands, @ files or sessions", "输入消息或运行任务，/ 命令，@ 文件或会话"},
+	"session.error_prefix":                                   {"Error: %s", "错误：%s"},
+	"session.host_note":                                      {"This Host has no desktop available to open files or folders in external apps. Files can still be previewed in the sidebar.", "此主机没有可用的桌面环境来在外部应用中打开文件或文件夹。仍可在侧边栏预览文件。"},
+	"session.new_session":                                    {"New Session", "新建会话"},
+	"session.no_inline_content":                              {"No inline content; open the path to view it.", "无内联内容；打开路径查看。"},
+	"session.more_actions":                                   {"More session actions", "更多会话操作"},
+	"session.phase.failed":                                   {"failed", "失败"},
+	"session.phase.idle":                                     {"idle", "空闲"},
+	"session.phase.paused":                                   {"paused", "已暂停"},
+	"session.phase.running":                                  {"running", "运行中"},
+	"session.phase.waiting_approval":                         {"waiting_approval", "等待审批"},
+	"session.phase.waiting_user":                             {"waiting_user", "等待用户"},
+	"session.presented":                                      {"Presented", "已展示"},
+	"session.question":                                       {"Question", "问题"},
+	"session.send":                                           {"Send", "发送"},
+	"session.send_answer":                                    {"Send answer", "发送回答"},
+	"session.stop":                                           {"Stop", "停止"},
+	"session.stopped":                                        {"Stopped", "已停止"},
+	"session.suggested":                                      {"Suggested: %s", "建议：%s"},
+	"session.task_stopped":                                   {"Task stopped", "任务已停止"},
+	"session.task_stopped_detail_1":                          {" The DSH process exited before this turn finished (for example, it was killed, crashed, or timed out while", " DSH 进程在此回合完成前退出（例如在关闭时被终止、崩溃或超时），"},
+	"session.task_stopped_detail_2":                          {"shutting down), so the turn was closed when DSH restarted. Unfinished tool calls have unknown outcomes.", "因此 DSH 重启后该回合被关闭。未完成的工具调用结果未知。"},
+	"session.todo.completed":                                 {"completed", "已完成"},
+	"session.todo.in_progress":                               {"in_progress", "进行中"},
+	"session.todo.pending":                                   {"pending", "待处理"},
+	"session.todos":                                          {"Todos", "待办"},
+	"session.took":                                           {"Took %s", "耗时 %s"},
+	"session.tool_label":                                     {"Tool %s", "工具 %s"},
+	"session.tool_summary":                                   {"Ran commands, read images, called tools", "运行命令、读取图像、调用工具"},
+	"session.trajectory":                                     {"Trajectory", "轨迹"},
+	"session.trajectory_count":                               {"%d entries · %d events", "%d 条记录 · %d 个事件"},
+	"session.trajectory_empty":                               {"No events yet. Send a message to start the trace.", "暂无事件。发送消息以开始追踪。"},
+	"session.trajectory_entry.approval":                      {"approval", "审批"},
+	"session.trajectory_entry.assistant":                     {"assistant", "助手"},
+	"session.trajectory_entry.count":                         {"×%d", "×%d"},
+	"session.trajectory_entry.error":                         {"error", "错误"},
+	"session.trajectory_entry.error_detail":                  {"error: %s", "错误：%s"},
+	"session.trajectory_entry.message":                       {"message", "消息"},
+	"session.trajectory_entry.reasoning":                     {"reasoning", "推理"},
+	"session.trajectory_entry.status":                        {"status", "状态"},
+	"session.trajectory_entry.tool_end":                      {"tool_end", "工具结束"},
+	"session.trajectory_entry.tool_start":                    {"tool_start", "工具开始"},
+	"session.trajectory_entry.usage":                         {"usage", "用量"},
+	"session.trajectory_load_error":                          {"Could not load trajectory: %s", "无法加载轨迹：%s"},
+	"session.usage_cache":                                    {"19.7M tok · Cache hit 99%", "19.7M tok · 缓存命中 99%"},
+	"session.usage_context":                                  {"26%", "26%"},
+	"session.usage_tokens":                                   {"Usage %s tok", "用量 %s tok"},
+	"session.usage_turns":                                    {"3 turns 125 steps · 197 tok/s", "3 轮 125 步 · 197 tok/s"},
+	"session.working":                                        {"Deep diving for %s", "深度思考 %s"},
+	"session.working_indicator":                              {"Working", "运行中"},
+	"settings.agent_presets":                                 {"Agent presets", "代理预设"},
+	"settings.appearance":                                    {"Appearance", "外观"},
+	"settings.ask":                                           {"Read Only", "只读"},
+	"settings.read_only":                                     {"Read Only", "只读"},
+	"settings.built_in_plugins":                              {"Built-in plugins", "内置插件"},
+	"settings.choose_how_much_detail_to_show_for_tool_calls": {"Choose how much detail to show for tool calls", "选择工具调用的显示详细程度"},
+	"settings.choose_the_default_permission_mode_for_new_sessions": {"Choose the default permission mode for new sessions", "为新会话选择默认权限模式"},
+	"settings.choose_when_to_automatically_collapse_work_details":  {"Choose when to automatically collapse work details", "选择何时自动收起工作详情"},
+	"settings.could_not_save_settings":                             {"Could not save settings", "设置保存失败"},
+	"settings.dark":                                                {"Dark", "深色"},
+	"settings.detailed":                                            {"Detailed", "详细"},
+	"settings.edit_shortcut_for":                                   {"Edit shortcut for ", "编辑快捷键："},
+	"settings.edit_shortcuts":                                      {"Edit shortcuts", "编辑快捷键"},
+	"settings.restore_all_defaults":                                {"Restore all defaults", "恢复全部默认"},
+	"settings.search_shortcuts":                                    {"Search shortcuts", "搜索快捷键"},
+	"settings.shortcut_for":                                        {"Shortcut for ", "快捷键："},
+	"settings.keyboard_shortcuts_reference":                        {"Keyboard shortcut reference", "快捷键参考"},
+	"settings.view_shortcuts":                                      {"View shortcuts", "查看快捷键"},
+	"settings.font_size":                                           {"Font size", "字号"},
+	"settings.full_access":                                         {"Full access", "完全访问"},
+	"settings.general":                                             {"General", "通用"},
+	"settings.immediately":                                         {"Immediately", "立即"},
+	"settings.interrupt":                                           {"Interrupt", "打断"},
+	"settings.keyboard_shortcuts":                                  {"Keyboard shortcuts", "键盘快捷键"},
+	"settings.language":                                            {"Language", "语言"},
+	"settings.language_chinese":                                    {"中文", "中文"},
+	"settings.language_english":                                    {"English", "English"},
+	"settings.light":                                               {"Light", "浅色"},
+	"settings.models":                                              {"Models", "模型"},
+	"settings.on_completion":                                       {"On completion", "完成后"},
+	"settings.only_affects_conversation_content":                   {"Only affects conversation content", "仅影响对话内容"},
+	"settings.open_configuration_file":                             {"Open configuration file", "打开配置文件"},
+	"settings.permission":                                          {"Permission", "权限"},
+	"settings.preset_editing_arrives_with_the_preset_runtime":      {"Preset editing arrives with the preset runtime.", "预设编辑将随后续运行时提供。"},
+	"settings.queue":                                               {"Queue", "排队"},
+	"settings.send_behavior_while_busy":                            {"Send behavior while busy", "忙碌时的发送行为"},
+	"settings.performance_usage":                                   {"Performance & usage", "性能与用量"},
+	"settings.performance_usage_desc":                              {"Choose how much performance detail to show in the session view.", "选择在会话视图中显示多少性能细节。"},
+	"settings.upload_session_log":                                  {"Upload Session Log when using the official model API", "使用官方模型 API 时上传会话日志"},
+	"settings.upload_session_log_desc":                             {"Send a session log to help improve the model. Off by default.", "发送会话日志以帮助改进模型。默认关闭。"},
+	"settings.settings":                                            {"Settings", "设置"},
+	"settings.settings_saved":                                      {"Settings saved", "设置已保存"},
+	"settings.show_coding_view":                                    {"Show coding view", "显示编码视图"},
+	"settings.shows_trajectory_code_diffs_and_all_agent_presets":   {"Shows trajectory, code diffs, and all Agent presets", "显示轨迹、代码差异和所有代理预设"},
+	"settings.standard":                                            {"Standard", "标准"},
+	"settings.system":                                              {"System", "跟随系统"},
+	"settings.view_and_edit_available_shortcuts_and_input_actions": {"View and edit available shortcuts and input actions", "查看和编辑可用快捷键与输入操作"},
+	"settings.view_available_shortcuts_and_input_actions":          {"View the available shortcuts and input actions (read-only reference)", "查看可用快捷键与输入操作（只读参考）"},
+	"settings.what_enter_and_the_send_button_do_while_the_agent_is_running_cmd": {"What Enter and the Send button do while the agent is running; Cmd/Ctrl+Enter uses the other behavior", "代理运行时 Enter 和发送按钮的行为；Cmd/Ctrl+Enter 使用另一种行为"},
+	"settings.when_to_collapse_work_details":                                    {"When to Collapse Work Details", "自动收起工作详情的时机"},
+	"settings.work_details":                                                     {"Work details", "工作详情"},
+	"settings.workspace_write":                                                  {"Workspace Write", "工作区写入"},
+	"shell.add_workspace":                                                       {"Add workspace", "添加工作区"},
+	"shell.automation_tasks":                                                    {"Automation tasks", "自动化任务"},
+	"shell.new_session":                                                         {"New Session", "新建会话"},
+	"shell.plugins":                                                             {"Plugins", "插件"},
+	"shell.search_sessions":                                                     {"Search sessions", "搜索会话"},
+	"shell.toggle_right_sidebar":                                                {"Toggle right sidebar", "切换右侧边栏"},
+	"shell.open_right_sidebar":                                                  {"Open right sidebar", "打开右侧边栏"},
+	"shell.collapse_right_sidebar":                                              {"Collapse right sidebar", "收起右侧边栏"},
+	"shell.view_options":                                                        {"View options", "视图选项"},
+	"shell.workspaces":                                                          {"Workspaces", "工作区"},
+	"time.days_short":                                                           {"%dd", "%d 天"},
+	"time.hours_short":                                                          {"%dh", "%d 小时"},
+	"time.minutes_short":                                                        {"%dmin", "%d 分钟"},
+	"workspace.add_workspace":                                                   {"Add workspace", "添加工作区"},
+	"workspace.add_workspace_ellipsis":                                          {"Add workspace…", "添加工作区…"},
+	"workspace.and_every_session_in_it_this_cannot_be_undone":                   {" and every session in it? This cannot be undone.", "”及其所有会话？此操作不可撤销。"},
+	"workspace.archive":                                                         {"Archive", "归档"},
+	"workspace.archived":                                                        {"archived", "已归档"},
+	"workspace.browse":                                                          {"Browse…", "浏览…"},
+	"workspace.cancel":                                                          {"Cancel", "取消"},
+	"workspace.copied_session_title":                                            {"Copied session title", "已复制会话标题"},
+	"workspace.copy_title":                                                      {"Copy title", "复制标题"},
+	"workspace.could_not_create_the_workspace":                                  {"Could not create the workspace", "无法创建工作区"},
+	"workspace.could_not_delete_the_workspace":                                  {"Could not delete the workspace", "无法删除工作区"},
+	"workspace.could_not_load_sessions":                                         {"Could not load sessions", "无法加载会话"},
+	"workspace.could_not_load_workspaces":                                       {"Could not load workspaces", "无法加载工作区"},
+	"workspace.could_not_open_the_folder_picker":                                {"Could not open the folder picker", "无法打开目录选择器"},
+	"workspace.could_not_rename_the_workspace":                                  {"Could not rename the workspace", "无法重命名工作区"},
+	"workspace.could_not_update_the_session":                                    {"Could not update the session", "无法更新会话"},
+	"workspace.create":                                                          {"Create", "创建"},
+	"workspace.delete":                                                          {"Delete", "删除"},
+	"workspace.delete_2":                                                        {"Delete ", "删除“"},
+	"workspace.delete_named":                                                    {"Delete %s and every session in it? This cannot be undone.", "删除“%s”及其所有会话？此操作不可撤销。"},
+	"workspace.delete_workspace":                                                {"Delete workspace", "删除工作区"},
+	"workspace.delete_workspace_2":                                              {"Delete workspace?", "删除工作区？"},
+	"workspace.no_sessions_yet":                                                 {"No sessions yet", "暂无会话"},
+	"workspace.rename":                                                          {"Rename", "重命名"},
+	"workspace.rename_workspace":                                                {"Rename workspace", "重命名工作区"},
+	"workspace.root_path":                                                       {"Root path", "根目录"},
+	"workspace.root_path_cannot_be_empty":                                       {"Root path cannot be empty", "根目录不能为空"},
+	"workspace.save":                                                            {"Save", "保存"},
+	"workspace.session_archived":                                                {"Session archived", "会话已归档"},
+	"workspace.session_unarchived":                                              {"Session unarchived", "会话已取消归档"},
+	"workspace.sessions_created_in_this_workspace_run_under_its_root":           {"Sessions created in this workspace run under its root.", "在此工作区创建的会话以其根目录为工作目录。"},
+	"workspace.unarchive":                                                       {"Unarchive", "取消归档"},
+	"workspace.workspace_created":                                               {"Workspace created", "工作区已创建"},
+	"workspace.workspace_deleted":                                               {"Workspace deleted", "工作区已删除"},
+	"workspace.workspace_name":                                                  {"Workspace name", "工作区名称"},
+	"workspace.workspace_name_cannot_be_empty":                                  {"Workspace name cannot be empty", "工作区名称不能为空"},
+	"workspace.workspace_renamed":                                               {"Workspace renamed", "工作区已重命名"},
+	"automation.automation_tasks":                                               {"Automation tasks", "自动化任务"},
+	"session.live_usage":                                                        {"%d turns  %d steps  %d out tok", "%d 轮  %d 步  %d 输出 tok"},
+	"plugins.live.web_search.title":                                             {"Web search", "网络搜索"},
+	"plugins.live.agent_teams.title":                                            {"Agent Teams", "代理团队"},
+	"plugins.live.voice_input.title":                                            {"Voice input", "语音输入"},
+	"plugins.live.auto_review.title":                                            {"Auto Authorization Review", "自动授权审核"},
+	"plugins.live.developer_tools.title":                                        {"Developer Tools", "开发者工具"},
+	"modes.agent_mode":                                                          {"Agent mode", "代理模式"},
+	"modes.standard.label":                                                      {"Standard mode", "标准模式"},
+	"modes.standard.hint":                                                       {"Work with code, files, and information. Suitable for most tasks, with search, editing, terminal commands, and other tools available as needed.", "处理代码、文件和资料，适合大多数任务。Agent 会按需使用检索、编辑和终端等工具。"},
+	"modes.ptc.label":                                                           {"PTC mode", "PTC 模式"},
+	"modes.ptc.hint":                                                            {"Includes all Standard mode capabilities. Better suited to tasks that call tools in batches and then filter, organize, deduplicate, count, or summarize the results.", "包含标准模式的所有能力，更适合批量调用工具，并对结果进行筛选、整理、去重、统计或汇总的任务。"},
+	"modes.minimal.label":                                                       {"Minimal mode", "极简模式"},
+	"modes.minimal.hint":                                                        {"The agent uses a terminal and image reading, with context compaction. Useful for testing and comparing its basic performance.", "Agent 使用终端和图片读取工具，并支持上下文压缩，适合测试和对比其基础表现。"},
+	"modes.creator.label":                                                       {"Creator mode", "创造模式"},
+	"modes.creator.hint":                                                        {"Customize ZeoKeel through conversation. Let the agent change whitelisted settings and write reusable skills to <root>/skills/<name>/SKILL.md with the standard file tools.", "通过对话定制 ZeoKeel：让 Agent 修改白名单内的设置，并使用标准文件工具将可复用技能写入 <root>/skills/<name>/SKILL.md。"},
+	// Legacy topology aliases remain readable for sessions saved before the
+	// DSH preset alignment, but they are not listed by the picker.
+	"modes.deep.label":        {"Deep", "深度"},
+	"modes.deep.hint":         {"Plans with a todo list and delegates to subagents", "使用待办列表规划并委派给子代理"},
+	"modes.supervisor.label":  {"Supervisor", "主管"},
+	"modes.supervisor.hint":   {"Coordinates a general-purpose subagent", "协调一个通用子代理"},
+	"modes.planexecute.label": {"Plan-Execute", "计划-执行"},
+	"modes.planexecute.hint":  {"Plans, executes and replans step by step", "逐步规划、执行并重新规划"},
+	"team.goal":               {"Goal", "目标"},
+	"team.team":               {"Team", "团队"},
+	"team.completed":          {"Completed", "已完成"},
+	"team.abandoned":          {"Abandoned", "已放弃"},
+	"team.in_progress":        {"In progress", "进行中"},
+	"team.steps":              {"%d step(s)", "%d 步"},
+	"team.progress":           {"%d%%", "%d%%"},
+	"team.status.completed":   {"completed", "已完成"},
+	"team.status.running":     {"running", "运行中"},
+	"team.status.failed":      {"failed", "失败"},
+	"team.count":              {"%d", "%d"},
+}
+
+// SetLanguageForTest pins an App's language for a test. It is a tiny exported
+// hook because many shell tests construct App{} and must stay deterministic.
+func (a *App) SetLanguageForTest(l Lang) { a.Language = l }
+
+// SetDefaultLanguageForTest pins the fallback live language used when
+// ui.language has no stored value. Tests restore it with the zero Lang.
+func SetDefaultLanguageForTest(l Lang) { testDefaultLanguage = l }
+
+// T returns key's text in the app's current language. Optional args are
+// formatted with fmt.Sprintf, so catalog entries may use verbs.
+func (a *App) T(key string, args ...any) string {
+	t, ok := translations[key]
+	if !ok {
+		return key
+	}
+	s := t.en
+	if a.lang() == LangZH {
+		s = t.zh
+	}
+	if len(args) > 0 {
+		return fmt.Sprintf(s, args...)
+	}
+	return s
+}
+
+// tr is the legacy positional helper kept for small call sites that have not
+// been moved onto the key catalog yet.
+func (a *App) tr(en, zh string) string {
+	if a.lang() == LangZH {
+		return zh
+	}
+	return en
+}
+
+// lang resolves the UI language once per settings change. An explicit
+// App.Language wins (tests and embedders); otherwise a static App is English
+// and a live App starts Chinese unless ui.language explicitly says English.
+// persistResolvedLanguage writes the language a fresh live shell resolved
+// from the product default, so Settings reports the same value the UI shows
+// and a later unrelated change cannot flip it. It runs once per App and never
+// overwrites an explicit ui.language row.
+func (a *App) persistResolvedLanguage() {
+	if a.Ctrl == nil || a.langPersisted {
+		return
+	}
+	a.langPersisted = true
+	if _, err := a.Ctrl.Store().GetSetting(session.SettingLanguage); !errors.Is(err, store.ErrNotFound) {
+		return
+	}
+	_ = a.Ctrl.Store().SetSetting(session.SettingLanguage, string(a.lang()))
+}
+
+func (a *App) lang() Lang {
+	if a.Language != "" {
+		return a.Language
+	}
+	if a.langLoaded {
+		return a.langValue
+	}
+	a.langValue = a.resolveLanguage()
+	a.langLoaded = true
+	return a.langValue
+}
+
+func (a *App) resolveLanguage() Lang {
+	// The static demo shell is the English pixel baseline.
+	if a.Ctrl == nil && a.settings == nil {
+		return LangEN
+	}
+	// A live shell reads the raw setting so an absent key means the product
+	// default, which DefaultSettings.Language now matches.
+	if a.Ctrl != nil {
+		if v, err := a.Ctrl.Store().GetSetting(session.SettingLanguage); err == nil {
+			if l := normalizeLang(v); l != "" {
+				return l
+			}
+		} else if errors.Is(err, store.ErrNotFound) {
+			return defaultLiveLang()
+		}
+	}
+	cfg := a.currentSettings()
+	if l := normalizeLang(cfg.Language); l != "" {
+		return l
+	}
+	return defaultLiveLang()
+}
+
+func normalizeLang(v string) Lang {
+	switch Lang(v) {
+	case LangEN, LangZH:
+		return Lang(v)
+	}
+	return ""
+}
+
+func defaultLiveLang() Lang {
+	if testDefaultLanguage != "" {
+		return testDefaultLanguage
+	}
+	return liveDefaultLanguage
+}
+
+// hasTranslation reports whether key is in the catalog.
+func hasTranslation(key string) bool {
+	_, ok := translations[key]
+	return ok
+}
+
+// phaseLabel localizes a session phase for the live header.
+func (a *App) phaseLabel(p state.Phase) string {
+	key := "session.phase." + string(p)
+	if !hasTranslation(key) {
+		return string(p)
+	}
+	return a.T(key)
+}
+
+// todoStatusLabel localizes a todo status, falling back to the raw value for
+// a status a future tool may add.
+func (a *App) todoStatusLabel(status string) string {
+	key := "session.todo." + status
+	if !hasTranslation(key) {
+		return status
+	}
+	return a.T(key)
+}
+
+// workingLabel is the "Deep diving for Xm Ys" indicator with its animated
+// dots. The English text must stay byte-identical to indicatorLabel.
+func (a *App) workingLabel(elapsed time.Duration) string {
+	if a.lang() != LangZH {
+		return indicatorLabel(elapsed)
+	}
+	return a.T("session.working", formatDiveTime(elapsed)) +
+		strings.Repeat(".", design.DotsAt(elapsed))
+}
+
+// trajectoryLabelText localizes one trajectory row label at render time. The
+// event data itself stays language-neutral; only the class name is translated.
+func (a *App) trajectoryLabelText(label string) string {
+	base, rest, ok := strings.Cut(label, " · ")
+	key := "session.trajectory_entry." + base
+	if _, found := translations[key]; found {
+		base = a.T(key)
+	}
+	if !ok {
+		return base
+	}
+	if base == a.T("session.trajectory_entry.status") {
+		if p := a.phaseLabel(state.Phase(rest)); p != "session.phase."+rest {
+			rest = p
+		}
+	}
+	return base + " · " + rest
+}

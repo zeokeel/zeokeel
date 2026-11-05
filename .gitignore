@@ -1,0 +1,23 @@
+# Local secrets — never commit API keys or managed endpoints.
+.env
+.env.*
+*.secret
+*.key
+credentials*
+.cache/
+.probe/
+
+# Build outputs (large binaries; rebuild, don't commit).
+dist/
+/zeokeel
+/zeokeel.exe
+
+# Self-evolution machine-local state (reports live in .evolve/research/).
+.evolve/state/
+.evolve/runs/
+
+# DSH pixel-parity assets (retired 2026-11-05; archived outside the repo).
+/baseline/
+/artifacts/
+/internal/shell/artifacts/
+/internal/shell/.cache/

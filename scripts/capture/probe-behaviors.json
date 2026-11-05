@@ -1,0 +1,18 @@
+[
+  {"act":"goto","url":"/","wait":5500},
+  {"act":"clickxy","x":1010,"y":684,"wait":1200},
+  {"act":"probescan","limit":12,"wait":900,"log":"baseline/behavior/iso-home.jsonl","resetUrl":"/","skip":["sign in","feedback","delete","remove","send","stop"]},
+  {"act":"goto","url":"/","wait":5000},
+  {"act":"clickxy","x":1010,"y":684,"wait":1200},
+  {"act":"clickxy","x":140,"y":138,"wait":1800},
+  {"act":"probescan","limit":25,"wait":1100,"log":"baseline/behavior/iso-plugins.jsonl","resetUrl":"/","skip":["add plugin","uninstall","remove"]},
+  {"act":"goto","url":"/","wait":5000},
+  {"act":"clickxy","x":1010,"y":684,"wait":1200},
+  {"act":"clickxy","x":140,"y":178,"wait":1800},
+  {"act":"probescan","limit":15,"wait":900,"log":"baseline/behavior/iso-automation.jsonl","resetUrl":"/","skip":["delete","remove","run now"]},
+  {"act":"goto","url":"/","wait":5000},
+  {"act":"clickxy","x":1010,"y":684,"wait":1200},
+  {"act":"clickxy","x":140,"y":974,"wait":900},
+  {"act":"clickxy","x":74,"y":850,"wait":2200},
+  {"act":"probescan","limit":25,"wait":900,"log":"baseline/behavior/iso-settings.jsonl","resetUrl":"/","skip":["sign out","delete"]}
+]

@@ -1,0 +1,673 @@
+package shell
+
+import (
+	"context"
+
+	"github.com/egoist/mygo/ui"
+
+	"github.com/zeokeel/zeokeel/internal/design"
+	"github.com/zeokeel/zeokeel/internal/icons"
+	"github.com/zeokeel/zeokeel/internal/state"
+	"github.com/zeokeel/zeokeel/internal/store"
+)
+
+// installTaskShortcuts registers the window's keyboard shortcuts. It mirrors
+// the original set and adds the workspace and view-option overlays to the
+// Escape order.
+//
+//	Cmd/Ctrl+N        new session
+//	Cmd/Ctrl+,        settings
+//	Cmd/Ctrl+K        focus the composer in a session, else search sessions
+//	Cmd/Ctrl+/        open the keyboard shortcuts reference
+//	Cmd/Ctrl+B        toggle the left sidebar (installChromeShortcuts)
+//	Cmd/Ctrl+Alt+B    toggle the right sidebar (Session and Home)
+//	Cmd/Ctrl+P        open the right sidebar's Workspace files tab
+//	Ctrl+`            open the right sidebar's Terminal tab
+//	Esc               close the topmost overlay, else stop a running turn
+func (a *App) installTaskShortcuts(c *ui.Context) {
+	a.bindShortcut(c, "new_session", ui.Cmd, ui.KeyN, func() { a.newSession() })
+	a.bindShortcut(c, "add_workspace", ui.Cmd, ui.KeyO, func() { a.beginAddWorkspace() })
+	a.bindShortcut(c, "settings", ui.Cmd, ui.KeyComma, func() { a.openSettings() })
+	a.bindShortcut(c, "search", ui.Cmd, ui.KeyK, func() { a.taskShortcutK(c) })
+	a.bindShortcut(c, "send_alternate", ui.Cmd, ui.KeyEnter, func() { a.submitAlternate(c) })
+	a.bindShortcut(c, "shortcuts", ui.Cmd, ui.KeySlash, func() { a.openShortcutsDialog() })
+	a.bindShortcut(c, "rename_session", ui.Cmd|ui.Alt, ui.KeyG, func() { a.renameCurrentSession() })
+	a.bindShortcut(c, "archive_session", ui.Cmd|ui.Shift, ui.KeyA, func() { a.archiveCurrentSession(c) })
+	a.bindShortcut(c, "toggle_right_sidebar", ui.Cmd|ui.Alt, ui.KeyB, func() { a.toggleRightSidebar() })
+	a.bindShortcut(c, "workspace_files", ui.Cmd, ui.KeyP, func() { a.openRightSidebarTab(filesTab) })
+	a.bindShortcut(c, "new_terminal", ui.Ctrl, ui.KeyBackquote, func() { a.openRightSidebarTab(terminalTab) })
+	a.bindShortcut(c, "escape", 0, ui.KeyEscape, func() { a.closeTaskTopmost() })
+}
+
+// renameCurrentSession is DSH's Cmd/Ctrl+Alt+G: it opens the rename dialog for
+// the current session.
+func (a *App) renameCurrentSession() {
+	if a.Ctrl == nil {
+		return
+	}
+	sess, err := a.Ctrl.CurrentSession()
+	if err != nil || sess == nil || sess.ID == "" {
+		return
+	}
+	a.beginRename(sess.ID, sess.Title)
+}
+
+// archiveCurrentSession is DSH's Cmd/Ctrl+Shift+A. It archives the current
+// session and opens the next unarchived one, or Home when none is left.
+func (a *App) archiveCurrentSession(c *ui.Context) {
+	if a.Ctrl == nil {
+		return
+	}
+	sess, err := a.Ctrl.CurrentSession()
+	if err != nil || sess == nil || sess.ID == "" {
+		return
+	}
+	if err := a.Ctrl.SetSessionArchived(context.Background(), sess.ID, true); err != nil {
+		c.Toast(a.T("workspace.could_not_update_the_session"))
+		return
+	}
+	a.liveMenus().moreOpen = false
+	ctx := context.Background()
+	sessions, err := a.Ctrl.SessionsForWorkspace(ctx, a.Ctrl.CurrentWorkspaceID(), false, a.manualSort)
+	if err == nil {
+		for _, next := range sessions {
+			if next.ID != sess.ID {
+				a.openSession(next.ID)
+				c.Toast(a.T("workspace.session_archived"))
+				return
+			}
+		}
+	}
+	a.SetSnapshot(nil)
+	a.Screen = Home
+	c.Toast(a.T("workspace.session_archived"))
+}
+
+// openShortcutsDialog shows the keyboard shortcut reference, from Cmd/Ctrl+/
+// or Settings > Keyboard shortcuts.
+func (a *App) openShortcutsDialog() {
+	a.moreOpen = false
+	a.closeSelectors()
+	a.shortcutsOpen = true
+}
+
+// toggleRightSidebar is Cmd/Ctrl+Alt+B, DSH's right-sidebar shortcut.
+func (a *App) toggleRightSidebar() {
+	if a.Ctrl == nil {
+		return
+	}
+	a.rightOpen = !a.rightOpen
+	if !a.rightOpen {
+		a.rightFullscreen = false
+		a.rightSplit = false
+	}
+}
+
+// openRightSidebarTab opens the right panel on tab. It is a no-op in the
+// static demo shell; Home, Session, Plugins and Automation all host the panel.
+func (a *App) openRightSidebarTab(tab rightTab) {
+	if a.Ctrl == nil || !a.rightSidebarHosted() {
+		return
+	}
+	a.rightOpen = true
+	a.rightTab = tab
+}
+
+// taskShortcutK focuses the composer inside a live session and opens the
+// session search elsewhere, as Cmd/Ctrl+K did before the view options.
+func (a *App) taskShortcutK(c *ui.Context) {
+	if a.Screen == Session && a.Ctrl != nil {
+		a.composerRef.Focus(c)
+		return
+	}
+	a.openSearch()
+}
+
+// closeTaskTopmost closes one overlay per Esc, including the workspace
+// dialogs, the view-options popover and the derived "@"/"/" composer menus.
+// Only with nothing to close does Esc stop the running turn, matching DSH's
+// response-stop binding.
+func (a *App) closeTaskTopmost() {
+	if a.closeOneTaskOverlay() {
+		return
+	}
+	if a.Screen == Session && a.Ctrl != nil {
+		// DSH denies a pending approval with Esc before it considers the
+		// turn; stopping a turn that waits for approval would be a different
+		// action.
+		if pending := a.pendingApprovals(); len(pending) > 0 {
+			a.Ctrl.Deny(pending[0].CallID)
+			return
+		}
+		if snap := a.currentSnapshot(); snap != nil && snap.Phase == state.PhaseRunning {
+			a.Ctrl.Stop()
+		}
+	}
+}
+
+// closeOneTaskOverlay closes exactly one open shell surface and reports
+// whether it closed anything.
+func (a *App) closeOneTaskOverlay() bool {
+	switch {
+	case a.wsDialogOpen:
+		a.wsDialogOpen = false
+	case a.wsDeleteOpen:
+		a.wsDeleteOpen = false
+	case a.viewOptionsOpen:
+		a.viewOptionsOpen = false
+	case a.inlineSearch:
+		a.closeInlineSearch()
+	case a.shellUI().rightNewTabOpen:
+		a.shellUI().rightNewTabOpen = false
+	case a.attachOpen:
+		a.attachOpen = false
+	case a.dismissComposerPopup():
+		// Escape closes the derived "@" mention or "/" command menu before
+		// the stop-turn fallback in closeTaskTopmost.
+	default:
+		return a.closeOneOverlay()
+	}
+	return true
+}
+
+// shellOverlays draws every live overlay above the current screen. It is the
+// original overlay set plus the workspace dialogs and the content-searching
+// session palette that replaced the title-only one.
+func (a *App) shellOverlays(c *ui.Context, t *design.Tokens) {
+	if a.aboutOpen {
+		a.aboutDialog(c, t)
+	}
+	if a.shortcutsOpen {
+		a.shortcutsDialog(c, t)
+	}
+	if a.renameOpen {
+		a.renameDialog(c, t)
+	}
+	if a.deleteOpen {
+		a.deleteDialog(c, t)
+	}
+	if a.wsDialogOpen {
+		a.workspaceDialog(c, t)
+	}
+	if a.wsDeleteOpen {
+		a.workspaceDeleteDialog(c, t)
+	}
+	if a.paletteOpen {
+		a.sessionSearchDialog(c, t)
+	}
+}
+
+// openInlineSearch is DSH's sidebar Search sessions: it expands an inline
+// field in the sidebar and filters the workspace/session list there, leaving
+// the palette modal for Cmd/Ctrl+K.
+func (a *App) openInlineSearch() {
+	if a.Ctrl == nil {
+		return
+	}
+	a.moreOpen = false
+	a.closeSelectors()
+	a.viewOptionsOpen = false
+	a.paletteOpen = false
+	a.inlineSearch = true
+	a.inlineQuery = ""
+	a.searchIndex = 0
+}
+
+// closeInlineSearch collapses the inline field and clears its query.
+func (a *App) closeInlineSearch() {
+	a.inlineSearch = false
+	a.inlineQuery = ""
+}
+
+// sidebarSearchField is the expanded inline search row: a task input labelled
+// for assistive technology and DSH's Clear search button.
+func (a *App) sidebarSearchField(c *ui.Context, t *design.Tokens) {
+	label := a.tr("Search session names", "搜索会话名称")
+	ui.Row(c).Height(36).Margin(0, 8, 0, 12).PaddingX(design.Space2).
+		Gap(design.Space1).AlignItems(ui.Center).Children(func() {
+		input := ui.TextInput(c, &a.inlineQuery).Label(label).AutoFocus().Grow(1)
+		input.OnChange(func() { a.searchIndex = 0 })
+		clear := ui.Row(c).Size(24, 24).Center().
+			Label(a.tr("Clear search", "清除搜索")).Role(ui.RoleButton).Focusable()
+		clear.Children(func() {
+			ui.Text(c, "×").FontSize(14).TextColor(t.LabelTertiary)
+		})
+		clear.OnClick(func() { a.inlineQuery = "" })
+	})
+}
+
+// searchResultsFor queries the current workspace for sessions matching query.
+func (a *App) searchResultsFor(query string) []store.Session {
+	if a.Ctrl == nil {
+		return nil
+	}
+	sessions, err := a.Ctrl.SearchSessions(context.Background(), query, a.includeArchived(), a.manualSort)
+	if err != nil {
+		return nil
+	}
+	return a.filterSessions(sessions)
+}
+
+// inlineSearchResults replaces the sidebar list with the matching sessions.
+func (a *App) inlineSearchResults(c *ui.Context, t *design.Tokens) {
+	results := a.searchResultsFor(a.inlineQuery)
+	ui.Column(c).PaddingX(design.Space3).PaddingY(design.Space1).
+		Gap(2).Children(func() {
+		if len(results) == 0 {
+			ui.Text(c, a.T("search.no_matching_sessions")).
+				FontSize(12).TextColor(t.LabelTertiary).PaddingX(design.Space2)
+			return
+		}
+		for _, sess := range results {
+			item := sess
+			row := ui.Row(c).Height(32).Width(256).PaddingX(design.Space2).
+				Gap(design.Space2).AlignItems(ui.Center).Radius(design.RadiusSM).
+				Label("Open " + item.Title).Role(ui.RoleButton).Focusable()
+			if item.ID == a.Ctrl.CurrentSessionID() {
+				row = row.Background(t.BgHover)
+			}
+			row.Children(func() {
+				ui.Icon(c, icons.Folder()).FontSize(14).TextColor(t.LabelSecondary)
+				ui.Text(c, item.Title).FontSize(14).FixedLineHeight(20).
+					TextColor(t.LabelPrimary).Grow(1).MaxLines(1).Ellipsis("...")
+				if item.Archived {
+					ui.Text(c, a.T("search.archived")).FontSize(10).
+						TextColor(t.LabelTertiary)
+				}
+			})
+			row.OnClick(func() {
+				a.closeInlineSearch()
+				a.openSession(item.ID)
+			})
+		}
+	})
+}
+
+// openSearch shows the session search modal with a clean query.
+func (a *App) openSearch() {
+	a.moreOpen = false
+	a.closeSelectors()
+	a.viewOptionsOpen = false
+	a.inlineSearch = false
+	a.paletteQuery = ""
+	a.searchIndex = 0
+	a.paletteOpen = true
+}
+
+// searchResults asks the store for the current workspace's sessions matching
+// the palette query in their title or message content.
+func (a *App) searchResults() []store.Session {
+	return a.searchResultsFor(a.paletteQuery)
+}
+
+// View-option keys are ordinary settings rows, so the grouping, sort order
+// and archive filter survive a restart instead of resetting to their defaults.
+const (
+	settingSessionsManualSort    = "ui.sessions_manual_sort"
+	settingSessionsShowArchived  = "ui.sessions_show_archived"
+	settingSessionsGroupBy       = "ui.sessions_group_by"
+	settingSessionsArchiveFilter = "ui.sessions_archive_filter"
+)
+
+// View-option values, matching DSH's View options popover.
+const (
+	groupByWorkspace = "workspace" // WorkSpace
+	groupByTree      = "tree"      // Workspace Tree
+	groupByList      = "list"      // In one list
+
+	archiveHide     = "hide"     // Hide archived
+	archiveAll      = "all"      // All conversations (show archived)
+	archiveArchived = "archived" // Archived only
+)
+
+// normalizeGroupBy/archiveFilter accept only the values the popover offers.
+func normalizeGroupBy(v string) string {
+	switch v {
+	case groupByWorkspace, groupByTree, groupByList:
+		return v
+	}
+	return groupByWorkspace
+}
+
+func normalizeArchiveFilter(v string) string {
+	switch v {
+	case archiveHide, archiveAll, archiveArchived:
+		return v
+	}
+	return archiveHide
+}
+
+// includeArchived reports whether the session query should return archived
+// sessions; the archived-only filter fetches them and narrows afterwards.
+func (a *App) includeArchived() bool {
+	return normalizeArchiveFilter(a.archiveFilter) != archiveHide
+}
+
+// filterSessions applies the archive filter to a fetched session list.
+func (a *App) filterSessions(sessions []store.Session) []store.Session {
+	switch normalizeArchiveFilter(a.archiveFilter) {
+	case archiveArchived:
+		out := make([]store.Session, 0, len(sessions))
+		for _, sess := range sessions {
+			if sess.Archived {
+				out = append(out, sess)
+			}
+		}
+		return out
+	default:
+		return sessions
+	}
+}
+
+// restoreViewOptions loads the persisted grouping, sort order and archive
+// filter once per App. The static shell never reads it.
+func (a *App) restoreViewOptions() {
+	if a.Ctrl == nil || a.viewOptionsLoaded {
+		return
+	}
+	a.viewOptionsLoaded = true
+	a.groupBy = groupByWorkspace
+	a.archiveFilter = archiveHide
+	if raw, err := a.Ctrl.Store().GetSetting(settingSessionsManualSort); err == nil {
+		a.manualSort = raw == "true"
+	}
+	if raw, err := a.Ctrl.Store().GetSetting(settingSessionsGroupBy); err == nil {
+		a.groupBy = normalizeGroupBy(raw)
+	}
+	if raw, err := a.Ctrl.Store().GetSetting(settingSessionsArchiveFilter); err == nil {
+		a.archiveFilter = normalizeArchiveFilter(raw)
+	}
+	// Legacy installs stored only the boolean; keep their choice.
+	if raw, err := a.Ctrl.Store().GetSetting(settingSessionsShowArchived); err == nil && raw == "true" {
+		if a.archiveFilter == archiveHide {
+			a.archiveFilter = archiveAll
+		}
+	}
+	a.showArchived = a.includeArchived()
+}
+
+// persistViewOptions writes every view option after a change. A store failure
+// is not fatal for the frame; the in-memory choice still applies until restart.
+func (a *App) persistViewOptions() {
+	if a.Ctrl == nil {
+		return
+	}
+	a.showArchived = a.includeArchived()
+	_ = a.Ctrl.Store().SetSetting(settingSessionsManualSort, boolString(a.manualSort))
+	_ = a.Ctrl.Store().SetSetting(settingSessionsShowArchived, boolString(a.showArchived))
+	_ = a.Ctrl.Store().SetSetting(settingSessionsGroupBy, normalizeGroupBy(a.groupBy))
+	_ = a.Ctrl.Store().SetSetting(settingSessionsArchiveFilter, normalizeArchiveFilter(a.archiveFilter))
+}
+
+// boolString is the settings-store encoding for a bool.
+func boolString(v bool) string {
+	if v {
+		return "true"
+	}
+	return "false"
+}
+
+// viewOptionsPopover is DSH's 268px sidebar popover with its three groups:
+// Group by, Order by and Filter sessions.
+func (a *App) viewOptionsPopover(c *ui.Context, t *design.Tokens) {
+	group := normalizeGroupBy(a.groupBy)
+	archive := normalizeArchiveFilter(a.archiveFilter)
+	ui.Column(c).Width(268).Padding(design.Space2).Gap(2).Children(func() {
+		a.viewOptionGroup(c, t, a.T("search.group_by"))
+		a.viewOptionItem(c, t, a.T("search.workspace"), group == groupByWorkspace, func() {
+			a.groupBy = groupByWorkspace
+			a.persistViewOptions()
+		})
+		a.viewOptionItem(c, t, a.T("search.workspace_tree"), group == groupByTree, func() {
+			a.groupBy = groupByTree
+			a.persistViewOptions()
+		})
+		a.viewOptionItem(c, t, a.T("search.in_one_list"), group == groupByList, func() {
+			a.groupBy = groupByList
+			a.persistViewOptions()
+		})
+		a.viewOptionGroup(c, t, a.T("search.order_by"))
+		a.viewOptionItem(c, t, a.T("search.manual"), a.manualSort, func() {
+			a.manualSort = true
+			a.persistViewOptions()
+		})
+		a.viewOptionItem(c, t, a.T("search.last_updated"), !a.manualSort, func() {
+			a.manualSort = false
+			a.persistViewOptions()
+		})
+		a.viewOptionGroup(c, t, a.T("search.filter_sessions"))
+		a.viewOptionItem(c, t, a.T("search.hide_archived"), archive == archiveHide, func() {
+			a.archiveFilter = archiveHide
+			a.persistViewOptions()
+		})
+		a.viewOptionItem(c, t, a.T("search.all_conversations"), archive == archiveAll, func() {
+			a.archiveFilter = archiveAll
+			a.persistViewOptions()
+		})
+		a.viewOptionItem(c, t, a.T("search.archived_only"), archive == archiveArchived, func() {
+			a.archiveFilter = archiveArchived
+			a.persistViewOptions()
+		})
+	})
+}
+
+// viewOptionGroup is one dimmed section heading inside the popover.
+func (a *App) viewOptionGroup(c *ui.Context, t *design.Tokens, label string) {
+	ui.Text(c, label).FontSize(11).FixedLineHeight(16).
+		TextColor(t.LabelTertiary).Padding(design.Space1, design.Space2, 0, design.Space2)
+}
+
+// viewOptionItem is one checkable row of the view options popover. It closes
+// the popover on every choice, as DSH does, and is a named, focusable menu
+// item so sort and archive filtering are reachable from the keyboard.
+func (a *App) viewOptionItem(c *ui.Context, t *design.Tokens, label string, selected bool, choose func()) {
+	row := ui.Row(c).Height(30).PaddingX(design.Space2).Gap(design.Space2).
+		Radius(design.RadiusSM).AlignItems(ui.Center).
+		Label(label).Role(ui.RoleMenuItemCheckBox).Checked(selected).Focusable()
+	if selected || row.Hovered() {
+		row = row.Background(t.BgHover)
+	}
+	row.Children(func() {
+		mark := ""
+		if selected {
+			mark = "✓"
+		}
+		ui.Text(c, mark).FontSize(12).TextColor(t.Accent).Width(12)
+		ui.Text(c, label).FontSize(13).FixedLineHeight(20).TextColor(t.LabelPrimary)
+	})
+	row.OnClick(func() {
+		a.viewOptionsOpen = false
+		if choose != nil {
+			choose()
+		}
+	})
+}
+
+// sessionSearchDialog is the modal session search with keyboard navigation,
+// content matching, view options and per-row archive.
+func (a *App) sessionSearchDialog(c *ui.Context, t *design.Tokens) {
+	results := a.searchResults()
+	a.clampSearchIndex(len(results))
+
+	ui.Overlay(c, func() {
+		back := ui.Row(c).Absolute().Left(0).Top(0).Right(0).Bottom(0).
+			Justify(ui.Center).AlignItems(ui.Center).
+			Background(t.Scrim()).Modal()
+		back.OnClick(func() { a.paletteOpen = false })
+		back.Children(func() {
+			panel := ui.Column(c).Width(580).Padding(design.Space5).
+				Background(settingsPanelColor(t)).Radius(design.RadiusXL).
+				Border(1, t.BorderL2).
+				Shadow(0, 0, 20, 0, ui.RGBA(0, 0, 0, 0.12))
+			panel.OnClick(func() {})
+			panel.Children(func() {
+				a.sessionSearchHeader(c, t)
+				ui.TextInput(c, &a.paletteQuery).Label(a.T("search.search_sessions")).
+					AutoFocus().OnChange(func() { a.searchIndex = 0 }).
+					OnSubmit(func() { a.openSearchSelection() })
+				a.sessionSearchOptions(c, t)
+				a.sessionSearchResults(c, t, results)
+				ui.Text(c, a.T("search.enter_opens_moves_esc_closes")).
+					FontSize(11).FixedLineHeight(16).TextColor(t.LabelTertiary)
+			})
+		})
+
+		if back.OverlayShortcut(0, ui.KeyEscape) {
+			a.paletteOpen = false
+			return
+		}
+		if back.OverlayShortcut(0, ui.KeyDown) {
+			a.moveSearchSelection(1, len(results))
+			return
+		}
+		if back.OverlayShortcut(0, ui.KeyUp) {
+			a.moveSearchSelection(-1, len(results))
+			return
+		}
+		if back.OverlayShortcut(0, ui.KeyEnter) {
+			a.openSearchSelection()
+		}
+	})
+}
+
+// sessionSearchHeader is the dialog title and the modifier hint.
+func (a *App) sessionSearchHeader(c *ui.Context, t *design.Tokens) {
+	ui.Row(c).AlignItems(ui.Center).Children(func() {
+		ui.Text(c, a.T("search.search_sessions")).FontSize(16).
+			FontWeight(600).TextColor(t.LabelPrimary).Grow(1)
+		ui.Text(c, a.T("search.title_or_message_content")).
+			FontSize(11).TextColor(t.LabelTertiary)
+	})
+}
+
+// sessionSearchOptions shows and toggles the sort and archive filters inside
+// the dialog, mirroring the sidebar popover.
+func (a *App) sessionSearchOptions(c *ui.Context, t *design.Tokens) {
+	sortLabel := a.T("search.last_updated")
+	if a.manualSort {
+		sortLabel = a.T("search.manual")
+	}
+	archiveLabel := a.T("search.hide_archived")
+	if a.includeArchived() {
+		archiveLabel = a.T("search.all_conversations")
+	}
+	ui.Row(c).Gap(design.Space2).AlignItems(ui.Center).Children(func() {
+		a.searchFilterChip(c, t, a.T("search.sort_2")+sortLabel, false, func() {
+			a.manualSort = !a.manualSort
+			a.persistViewOptions()
+		})
+		a.searchFilterChip(c, t, archiveLabel, a.includeArchived(), func() {
+			if a.includeArchived() {
+				a.archiveFilter = archiveHide
+			} else {
+				a.archiveFilter = archiveAll
+			}
+			a.persistViewOptions()
+		})
+	})
+}
+
+// searchFilterChip is one view-option pill in the search dialog. It carries a
+// name, a role and focusability so keyboard and assistive-technology users can
+// change sort and archive filtering from the dialog, not only the sidebar.
+func (a *App) searchFilterChip(c *ui.Context, t *design.Tokens, label string, checked bool, toggle func()) {
+	chip := ui.Row(c).Height(26).PaddingX(design.Space2).Radius(design.RadiusSM).
+		Background(t.BgHover).AlignItems(ui.Center).
+		Label(label).Role(ui.RoleButton).Checked(checked).Focusable()
+	chip.Children(func() {
+		ui.Text(c, label).FontSize(12).FixedLineHeight(18).TextColor(t.LabelSecondary)
+	})
+	chip.OnClick(toggle)
+}
+
+// sessionSearchResults draws the matching sessions with the keyboard
+// selection highlighted and an archive action per row.
+func (a *App) sessionSearchResults(c *ui.Context, t *design.Tokens, results []store.Session) {
+	if len(results) == 0 {
+		ui.Text(c, a.T("search.no_matching_sessions")).
+			FontSize(12).TextColor(t.LabelTertiary).Padding(design.Space2, 0, design.Space2, 0)
+		return
+	}
+	ui.Scroll(c).Height(320).Children(func() {
+		ui.Column(c).Gap(1).Children(func() {
+			for i, sess := range results {
+				a.sessionSearchRow(c, t, sess, i)
+			}
+		})
+	})
+}
+
+// sessionSearchRow is one result: the open target, the timestamp and the
+// archive control.
+func (a *App) sessionSearchRow(c *ui.Context, t *design.Tokens, sess store.Session, index int) {
+	row := ui.Row(c).Height(34).PaddingX(design.Space2).Gap(design.Space2).
+		Radius(design.RadiusSM).AlignItems(ui.Center)
+	if index == a.searchIndex || sess.ID == a.Ctrl.CurrentSessionID() {
+		row = row.Background(t.BgHover)
+	}
+	row.Children(func() {
+		open := ui.Row(c).Grow(1).Gap(design.Space2).AlignItems(ui.Center).
+			Label("Open " + sess.Title).Role(ui.RoleButton).Focusable()
+		open.Children(func() {
+			title := sess.Title
+			if sess.Archived {
+				title += " · " + a.T("search.archived")
+			}
+			ui.Text(c, title).FontSize(13).FixedLineHeight(20).TextColor(t.LabelPrimary).
+				Grow(1).MaxLines(1).Ellipsis("...")
+			ui.Text(c, a.sessionWhen(sess.UpdatedAt)).FontSize(11).TextColor(t.LabelTertiary)
+		})
+		id := sess.ID
+		open.OnClick(func() {
+			a.paletteOpen = false
+			a.openSession(id)
+		})
+
+		label := a.T("search.archive")
+		archived := true
+		if sess.Archived {
+			label = a.T("search.unarchive")
+			archived = false
+		}
+		button := ui.Button(c, label).Height(24).PaddingX(design.Space2).
+			Radius(design.RadiusSM).TextColor(t.LabelSecondary)
+		if button.Clicked() {
+			a.setSessionArchived(c, sess, archived)
+		}
+	})
+}
+
+// clampSearchIndex keeps the keyboard selection inside results.
+func (a *App) clampSearchIndex(n int) {
+	if n <= 0 {
+		a.searchIndex = 0
+		return
+	}
+	if a.searchIndex < 0 {
+		a.searchIndex = 0
+	}
+	if a.searchIndex >= n {
+		a.searchIndex = n - 1
+	}
+}
+
+// moveSearchSelection moves the keyboard selection, wrapping at the ends.
+func (a *App) moveSearchSelection(delta, n int) {
+	if n <= 0 {
+		a.searchIndex = 0
+		return
+	}
+	a.searchIndex = (a.searchIndex + delta + n) % n
+}
+
+// openSearchSelection opens the highlighted result and closes the dialog.
+func (a *App) openSearchSelection() {
+	results := a.searchResults()
+	if len(results) == 0 {
+		return
+	}
+	a.clampSearchIndex(len(results))
+	sess := results[a.searchIndex]
+	a.paletteOpen = false
+	a.openSession(sess.ID)
+}

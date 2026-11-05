@@ -1,0 +1,7 @@
+[
+  {"act":"goto","url":"/","wait":5000},
+  {"act":"clickxy","x":1010,"y":684,"wait":1200},
+  {"act":"clickxy","x":85,"y":331,"wait":8000},
+  {"act":"dump","out":".probe/controls/51-session-open.json"},
+  {"act":"shot","out":".probe/shots/51-session-open.png"}
+]

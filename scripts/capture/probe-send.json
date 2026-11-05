@@ -1,0 +1,13 @@
+[
+  {"act":"goto","url":"/","wait":5500},
+  {"act":"clickxy","x":1010,"y":684,"wait":1200},
+  {"act":"clickxy","x":85,"y":331,"wait":8500},
+  {"act":"clickxy","x":934,"y":898,"wait":700},
+  {"act":"type","text":"请只回复 OK 两个字","wait":700},
+  {"act":"key","key":"Enter","code":"Enter","vk":13,"wait":2500},
+  {"act":"shot","out":".probe/shots/80-send-streaming.png"},
+  {"act":"dump","out":".probe/controls/80-send-streaming.json"},
+  {"act":"wait","ms":20000},
+  {"act":"shot","out":".probe/shots/81-send-final.png"},
+  {"act":"dump","out":".probe/controls/81-send-final.json"}
+]

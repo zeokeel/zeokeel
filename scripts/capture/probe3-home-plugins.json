@@ -1,0 +1,8 @@
+[
+  {"act":"probescan3","limit":25,"prefix":"home","shotDir":"baseline/behavior/shots3","log":"baseline/behavior/probe3-home.jsonl",
+   "pre":[{"act":"goto","url":"/","wait":4000},{"act":"clickxy","x":1010,"y":684,"wait":800}],
+   "skip":["sign in","feedback","delete","remove","send","stop"]},
+  {"act":"probescan3","limit":25,"prefix":"plugins","shotDir":"baseline/behavior/shots3","log":"baseline/behavior/probe3-plugins.jsonl",
+   "pre":[{"act":"goto","url":"/","wait":4000},{"act":"clickxy","x":1010,"y":684,"wait":800},{"act":"clickxy","x":140,"y":138,"wait":1200}],
+   "skip":["add plugin","uninstall","remove"]}
+]

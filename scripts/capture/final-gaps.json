@@ -1,0 +1,23 @@
+[
+  {"act":"goto","url":"/","wait":4500},
+  {"act":"clickxy","x":1010,"y":684,"wait":900},
+  {"act":"clickxy","x":140,"y":178,"wait":1500},
+  {"act":"click","text":"New automation task","wait":1800,"optional":true},
+  {"act":"cssscan","name":"35-automation-dialog","out":"baseline/css/35-automation-dialog.json"},
+  {"act":"shot","out":"baseline/screenshots/94-automation-dialog.png"},
+  {"act":"dump","out":"baseline/controls/94-automation-dialog.json"},
+  {"act":"goto","url":"/","wait":4500},
+  {"act":"clickxy","x":1010,"y":684,"wait":900},
+  {"act":"clickxy","x":1574,"y":25,"wait":1500},
+  {"act":"cssscan","name":"36-right-sidebar-home","out":"baseline/css/36-right-sidebar-home.json"},
+  {"act":"shot","out":"baseline/screenshots/95-right-sidebar-home.png"},
+  {"act":"dump","out":"baseline/controls/95-right-sidebar-home.json"},
+  {"act":"click","text":"Workspace files","wait":1500,"optional":true},
+  {"act":"cssscan","name":"37-right-files","out":"baseline/css/37-right-files.json"},
+  {"act":"shot","out":"baseline/screenshots/96-right-files.png"},
+  {"act":"dump","out":"baseline/controls/96-right-files.json"},
+  {"act":"click","text":"New terminal","wait":1800,"optional":true},
+  {"act":"cssscan","name":"38-right-terminal","out":"baseline/css/38-right-terminal.json"},
+  {"act":"shot","out":"baseline/screenshots/97-right-terminal.png"},
+  {"act":"dump","out":"baseline/controls/97-right-terminal.json"}
+]

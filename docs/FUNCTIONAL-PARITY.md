@@ -1,0 +1,63 @@
+# 功能级 1:1 对齐审计（宏观视角，2026-11-05）
+
+> 结论：**核心 agent 已经可用**（真实 LLM 流式对话、工具循环、审批、多会话、子代理、MCP、技能、定时任务均跑通）；
+> 但**功能上与 DSH 未做到一比一**。此前的 UI 像素/交互微循环不应再作为主目标，先补功能缺口。
+
+## A. 核心 agent 能力
+
+| 能力 | DSH | ZeoKeel | 状态 |
+|---|---|---|---|
+| 流式对话 + 多轮历史 | 有 | 有（SSE、SQLite history、e2e 真实模型通过） | ✅ |
+| 工具循环（ReAct） | 有 | 有（eino ADK，真实模型工具调用 e2e 通过） | ✅ |
+| 工具集 | 约 37 个（fs/bash/terminal/jobs/pwsh/web/todo/goal/schedule/skill/subagent/subagent-control/workflow/ralph/present/ask_user/session-query/worktree/inspect/report/MCP…） | 约 35 个，覆盖除 LSP/computer-use 外全部；PTC 以 pipeline 批处理工具实现，Creator 设置工具已接入 | ⚠️ 基本齐 |
+| 审批/权限 | Full/Workspace/Read-only/Ask/Auto-review EXP | Full/Workspace/Read-only/Ask + Always allow；Auto-review 缺失 | ⚠️ |
+| 上下文压缩 | 自动压缩 + 工具结果裁剪 + LLM 摘要 | `LLMCompactor`（真实模型摘要 + 20s 摘要超时后回退 `WindowCompactor` + 旧工具结果裁剪），ContextBudget 24000，app 已接线；压缩在回合 goroutine 内执行，不阻塞 UI/Submit | ✅ 已接线 |
+| 崩溃恢复/checkpoint | checkpoint + 断点续跑 | `CheckpointStore` 已接 app 的 SQLite checkpoints 表：每成功回合写入（压缩后 prior + 本回合消息），独立冷启动可恢复；生产以 History 为准，checkpoint 作为镜像 | ✅ 已接线（回合边界） |
+| Agent 模式 | **Standard / PTC / Minimal / Creator** | **Standard / PTC / Minimal / Creator**（工具集、prompt 策略、切换重建已对齐；Deep/Supervisor/Plan-Execute 仅作旧会话别名） | ✅ 已对齐 |
+| 子代理 / Agent Team | 同步+异步、消息/中断、team 工具 | 同步 subagent + 异步 manager/team 工具 | ✅ 基本 |
+| Goal（跨回合推进） | goal round driver 自动多轮 | goal 工具 + 状态/进度，无自动 round 驱动 | ⚠️ |
+| Schedule（模型侧） | schedule_* 工具 | 有，落 automation 表，app 调度器执行 | ✅ |
+| 后台 jobs | job_* 工具 | 有（start/list/output/kill，wait） | ✅ |
+| Skills / MCP | 有（tools/resources/prompts） | 有（tools/resources/prompts） | ✅ |
+| 多模态 | 图片输入 + 附件 | 图片工具→content parts 注入；**用户附件上传已实现**（文本注入 prompt、图片 data URL content part、chip 持久化/删除清理） | ✅ |
+| 会话标题 | 自动/LLM 标题、conversation-following titles | 自动/LLM 标题（首条完成回合；失败/停止后下个成功回合补）+ header/sidebar 实时刷新；手改优先 | ✅ |
+| Fork / 分支 / 导出 | fork session、下载 session log | `Store.ForkSession` 复制会话/消息/事件/工具调用/反馈/附件（附件行换新 id、message_id 重映射、字节复制到 fork 自己的 `attachments/<fork>/`，删除任一侧互不影响；标题加 “ (fork)”），Session More 菜单可 fork；`Controller.ExportSession` 导出 session/messages/attachments/events/feedback JSONL，附件记录内嵌 base64 数据与文本正文，下载走保存对话框 | ✅ 本地 |
+| 反馈 | 服务端反馈传输 | 反馈行（message_id/rating/note/created_at）持久化，重开回显、随导出；仍无联网上送 | ⚠️ 本地持久化 |
+| 自动记忆/AGENTS.md | AGENTS.md + auto-memory | AGENTS.md 注入；无 auto-memory | ⚠️ |
+| 插件 | 内置 + 第三方市场 | 仅内置（产品决定） | 设计差异 |
+| 打包/更新 | 三平台安装包 + 自动更新 | 仅 Windows zip，无签名/更新 | ❌ 缺失 |
+
+## B. 典型 E2E 场景（验收矩阵）
+
+| 场景 | 现状 |
+|---|---|
+| 新建会话 → 真实模型对话 → 工具调用 → 审批 Allow/Deny/Always | ✅ 已通过（真实端点 e2e） |
+| 多轮上下文 + 压缩后继续对话 | ✅ 超预算自动 LLM 摘要 + 工具结果裁剪；摘要失败/超时回退 WindowCompactor |
+| 进程重启后继续未完成回合 | ⚠️ 已完成回合可从 checkpoint/History 冷启动恢复；进行中回合仍不续跑 |
+| 子代理/Team 并行任务 + 消息/中断 | ✅ 工具层通过（同步/异步） |
+| Goal 多轮自动推进 | ❌ 需手动再次触发 |
+| 定时任务到点执行 | ✅ 已验证 |
+| MCP 服务器工具/resources/prompts | ✅ 测试通过（stdio 假服务器） |
+| 图片理解 | ✅ 真实模型识图通过 |
+| 上传文件/附件给 agent | ✅ 文本附件进入 prompt（≤64 KiB），图片作为 data URL content part 发送；chip 持久化、删除 chip/会话时清理 |
+| 会话 fork/导出/反馈 | ✅ fork 复制历史（含附件行与文件字节，续聊仍重放文本/图片）并打开；JSONL 导出（保存对话框）含附件记录与内容；反馈行持久化、重开回显、随导出 |
+
+## C. 优先级建议（停止 UI 微循环，按此顺序）
+
+> 已完成：Agent 模式语义对齐；真 LLM 摘要压缩 + 工具结果裁剪；checkpoint 接线（回合边界恢复）；会话标题自动生成（首条完成回合 / LLM，实时刷新）；用户附件上传（文本/图片进入会话，持久化与清理）；会话 fork / JSONL 导出 / 本地反馈持久化。
+
+P0（核心体验/数据安全）：
+1. ~~会话标题自动生成（首条消息/LLM）~~ ✅ 已完成
+2. ~~用户附件上传（文件/图片进入会话）~~ ✅ 已完成
+3. ~~会话 fork + 导出 session log + 本地反馈持久化~~ ✅ 已完成（反馈无联网上送）
+
+P1（能力完整）：
+4. Goal round driver（自动多轮）、Plan mode
+5. Auto-review 权限（模型审前审批）
+6. auto-memory / AGENTS.md 深化
+
+P2（产品化）：
+7. 三平台安装包/签名/自动更新
+8. 性能与资源基线（启动、内存、长会话）
+
+> 每项完成后跑对应 E2E 场景，而不是以“像素 diff/死控件扫描”作为完成标准。

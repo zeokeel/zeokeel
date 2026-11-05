@@ -1,0 +1,4 @@
+[
+  {"act":"goto","url":"/","wait":4500},
+  {"act":"probescan","limit":10,"wait":900,"log":"baseline/behavior/home.jsonl","resetUrl":"/","skip":["send","sign in","feedback","delete","remove","clear","stop","add plugin"]}
+]

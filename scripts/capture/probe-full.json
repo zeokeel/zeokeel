@@ -1,0 +1,352 @@
+[
+ {
+  "act": "goto",
+  "url": "/",
+  "wait": 5000
+ },
+ {
+  "act": "shot",
+  "out": ".probe/shots/00-home-light.png"
+ },
+ {
+  "act": "dump",
+  "out": ".probe/controls/00-home-light.json"
+ },
+ {
+  "act": "clickxy",
+  "x": 1010,
+  "y": 684,
+  "wait": 1500
+ },
+ {
+  "act": "shot",
+  "out": ".probe/shots/01-home-clean.png"
+ },
+ {
+  "act": "clickxy",
+  "x": 140,
+  "y": 974,
+  "wait": 1000
+ },
+ {
+  "act": "dump",
+  "out": ".probe/controls/02-more.json"
+ },
+ {
+  "act": "shot",
+  "out": ".probe/shots/02-more.png"
+ },
+ {
+  "act": "clickxy",
+  "x": 74,
+  "y": 850,
+  "wait": 2400
+ },
+ {
+  "act": "shot",
+  "out": ".probe/shots/03-settings-general.png"
+ },
+ {
+  "act": "dump",
+  "out": ".probe/controls/03-settings-general.json"
+ },
+ {
+  "act": "scrollscan",
+  "prefix": "03-settings-general",
+  "outDir": ".probe/shots",
+  "dumpDir": ".probe/controls",
+  "steps": 6
+ },
+ {
+  "act": "clickxy",
+  "x": 460,
+  "y": 225,
+  "wait": 1200
+ },
+ {
+  "act": "shot",
+  "out": ".probe/shots/04-settings-models.png"
+ },
+ {
+  "act": "dump",
+  "out": ".probe/controls/04-settings-models.json"
+ },
+ {
+  "act": "clickxy",
+  "x": 480,
+  "y": 267,
+  "wait": 1200
+ },
+ {
+  "act": "shot",
+  "out": ".probe/shots/05-settings-builtin-plugins.png"
+ },
+ {
+  "act": "dump",
+  "out": ".probe/controls/05-settings-builtin.json"
+ },
+ {
+  "act": "clickxy",
+  "x": 470,
+  "y": 309,
+  "wait": 1200
+ },
+ {
+  "act": "shot",
+  "out": ".probe/shots/06-settings-presets.png"
+ },
+ {
+  "act": "dump",
+  "out": ".probe/controls/06-settings-presets.json"
+ },
+ {
+  "act": "clickxy",
+  "x": 1172,
+  "y": 132,
+  "wait": 1000
+ },
+ {
+  "act": "goto",
+  "url": "/",
+  "wait": 4000
+ },
+ {
+  "act": "click",
+  "text": "Plugins",
+  "wait": 1800
+ },
+ {
+  "act": "scrollscan",
+  "prefix": "10-plugins",
+  "outDir": ".probe/shots",
+  "dumpDir": ".probe/controls",
+  "steps": 12
+ },
+ {
+  "act": "goto",
+  "url": "/",
+  "wait": 4000
+ },
+ {
+  "act": "click",
+  "text": "Automation tasks",
+  "wait": 1800
+ },
+ {
+  "act": "shot",
+  "out": ".probe/shots/11-automation.png"
+ },
+ {
+  "act": "dump",
+  "out": ".probe/controls/11-automation.json"
+ },
+ {
+  "act": "goto",
+  "url": "/",
+  "wait": 4000
+ },
+ {
+  "act": "clickxy",
+  "x": 605,
+  "y": 584,
+  "wait": 900
+ },
+ {
+  "act": "shot",
+  "out": ".probe/shots/20-permission.png"
+ },
+ {
+  "act": "key",
+  "key": "Escape",
+  "code": "Escape",
+  "vk": 27,
+  "wait": 400
+ },
+ {
+  "act": "clickxy",
+  "x": 1184,
+  "y": 584,
+  "wait": 900
+ },
+ {
+  "act": "shot",
+  "out": ".probe/shots/21-model.png"
+ },
+ {
+  "act": "key",
+  "key": "Escape",
+  "code": "Escape",
+  "vk": 27,
+  "wait": 400
+ },
+ {
+  "act": "clickxy",
+  "x": 672,
+  "y": 471,
+  "wait": 900
+ },
+ {
+  "act": "shot",
+  "out": ".probe/shots/22-mode.png"
+ },
+ {
+  "act": "key",
+  "key": "Escape",
+  "code": "Escape",
+  "vk": 27,
+  "wait": 400
+ },
+ {
+  "act": "clickxy",
+  "x": 520,
+  "y": 550,
+  "wait": 900
+ },
+ {
+  "act": "shot",
+  "out": ".probe/shots/23-attach.png"
+ },
+ {
+  "act": "key",
+  "key": "Escape",
+  "code": "Escape",
+  "vk": 27,
+  "wait": 400
+ },
+ {
+  "act": "clickxy",
+  "x": 900,
+  "y": 510,
+  "wait": 500
+ },
+ {
+  "act": "type",
+  "text": "/",
+  "wait": 900
+ },
+ {
+  "act": "shot",
+  "out": ".probe/shots/24-commands.png"
+ },
+ {
+  "act": "dump",
+  "out": ".probe/controls/24-commands.json"
+ },
+ {
+  "act": "type",
+  "text": "mod",
+  "wait": 700
+ },
+ {
+  "act": "shot",
+  "out": ".probe/shots/25-commands-filtered.png"
+ },
+ {
+  "act": "key",
+  "key": "Escape",
+  "code": "Escape",
+  "vk": 27,
+  "wait": 400
+ },
+ {
+  "act": "clickxy",
+  "x": 150,
+  "y": 296,
+  "wait": 3500
+ },
+ {
+  "act": "shot",
+  "out": ".probe/shots/30-session.png"
+ },
+ {
+  "act": "dump",
+  "out": ".probe/controls/30-session.json"
+ },
+ {
+  "act": "click",
+  "text": "Trajectory",
+  "wait": 1500
+ },
+ {
+  "act": "shot",
+  "out": ".probe/shots/31-trajectory.png"
+ },
+ {
+  "act": "dump",
+  "out": ".probe/controls/31-trajectory.json"
+ },
+ {
+  "act": "click",
+  "text": "Chat",
+  "wait": 1200
+ },
+ {
+  "act": "clickxy",
+  "x": 1513,
+  "y": 24,
+  "wait": 900
+ },
+ {
+  "act": "shot",
+  "out": ".probe/shots/32-session-menu.png"
+ },
+ {
+  "act": "dump",
+  "out": ".probe/controls/32-session-menu.json"
+ },
+ {
+  "act": "key",
+  "key": "Escape",
+  "code": "Escape",
+  "vk": 27,
+  "wait": 400
+ },
+ {
+  "act": "clickxy",
+  "x": 1574,
+  "y": 25,
+  "wait": 1200
+ },
+ {
+  "act": "shot",
+  "out": ".probe/shots/33-right-sidebar.png"
+ },
+ {
+  "act": "dump",
+  "out": ".probe/controls/33-right-sidebar.json"
+ },
+ {
+  "act": "dark",
+  "on": true,
+  "wait": 4000
+ },
+ {
+  "act": "shot",
+  "out": ".probe/shots/40-session-dark.png"
+ },
+ {
+  "act": "dump",
+  "out": ".probe/controls/40-session-dark.json"
+ },
+ {
+  "act": "viewport",
+  "width": 1200,
+  "height": 800,
+  "wait": 1200
+ },
+ {
+  "act": "shot",
+  "out": ".probe/shots/41-session-dark-narrow.png"
+ },
+ {
+  "act": "dark",
+  "on": false,
+  "wait": 3500
+ },
+ {
+  "act": "viewport",
+  "width": 1600,
+  "height": 1000,
+  "wait": 1000
+ }
+]
