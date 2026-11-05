@@ -2,14 +2,11 @@ package main
 
 import (
 	"bytes"
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
-	"time"
 )
 
 // TestParseImportArgs covers the flag parser: defaults, both value syntaxes,
@@ -230,48 +227,52 @@ func TestRunImportCLIJSON(t *testing.T) {
 // writeManifestFixture creates a DSH session file plus a manifest that already
 // records it (same size/mtime/SHA-256), so `zeokeel import` must skip it as
 // idempotent without parsing the dummy session content.
-func writeManifestFixture(t *testing.T, dshHome, dataDir string) (manifestPath string) {
+// writeValidDSHSessionFixture writes one minimal, valid DSH v4 session
+// (session-<uuid> directory layout, as DSH 0.2.x produces) and returns its
+// session file. The manifest is deliberately not pre-seeded: the idempotency
+// test performs a real first import that records the session, then verifies
+// that a second run skips it.
+func writeValidDSHSessionFixture(t *testing.T, dshHome string) string {
 	t.Helper()
-	sessionDir := filepath.Join(dshHome, "sessions", "ws-1", "abc123")
+	sessionDir := filepath.Join(dshHome, "sessions", "--tmp-ws--", "session-abc123")
 	if err := os.MkdirAll(sessionDir, 0o755); err != nil {
 		t.Fatalf("mkdir session dir: %v", err)
 	}
-	sessionFile := filepath.Join(sessionDir, "session.v4.jsonl")
-	content := []byte("{\"type\":\"session\"}\n")
-	if err := os.WriteFile(sessionFile, content, 0o600); err != nil {
-		t.Fatalf("write session file: %v", err)
-	}
-	info, err := os.Stat(sessionFile)
+	header, err := json.Marshal(map[string]any{
+		"type": "session", "version": 4, "id": "session-abc123",
+		"createdAt": int64(1793788819976), "cwd": "/tmp/proj", "agentPreset": "standard",
+	})
 	if err != nil {
-		t.Fatalf("stat session file: %v", err)
+		t.Fatalf("marshal header: %v", err)
 	}
-	sum := sha256.Sum256(content)
-	manifest := map[string]any{
-		"version": 1,
-		"sessions": map[string]any{
-			filepath.Clean(dshHome) + "|abc123": map[string]any{
-				"dsh_home":               dshHome,
-				"dsh_session_id":         "session-abc",
-				"source_file":            sessionFile,
-				"source_size":            info.Size(),
-				"source_mtime_unix_nano": info.ModTime().UnixNano(),
-				"sha256":                 hex.EncodeToString(sum[:]),
-				"imported_at":            time.Now().UTC().Format(time.RFC3339Nano),
+	user, err := json.Marshal(map[string]any{
+		"type": "user/message", "seq": 1, "data": map[string]any{
+			"role":    "user",
+			"source":  map[string]any{"kind": "user"},
+			"content": []map[string]any{{"type": "text", "text": "hello from dsh"}},
+		},
+	})
+	if err != nil {
+		t.Fatalf("marshal user event: %v", err)
+	}
+	assistant, err := json.Marshal(map[string]any{
+		"type": "assistant/message", "seq": 2, "data": map[string]any{
+			"turn": 1, "step": 1,
+			"message": map[string]any{
+				"role":    "assistant",
+				"content": []map[string]any{{"type": "text", "text": "hello back"}},
 			},
 		},
-	}
-	data, err := json.Marshal(manifest)
+	})
 	if err != nil {
-		t.Fatalf("marshal manifest: %v", err)
+		t.Fatalf("marshal assistant event: %v", err)
 	}
-	manifestPath = filepath.Join(dataDir, "dsh-import-manifest.json")
-	if err := os.MkdirAll(dataDir, 0o700); err != nil {
-		t.Fatalf("mkdir data dir: %v", err)
+	sessionFile := filepath.Join(sessionDir, "session.v4.jsonl")
+	content := strings.Join([]string{string(header), string(user), string(assistant)}, "\n") + "\n"
+	if err := os.WriteFile(sessionFile, []byte(content), 0o600); err != nil {
+		t.Fatalf("write session file: %v", err)
 	}
-	if err := os.WriteFile(manifestPath, data, 0o600); err != nil {
-		t.Fatalf("write manifest: %v", err)
-	}
-	return manifestPath
+	return sessionFile
 }
 
 // TestRunImportCLIManifestSkipsImportedSession covers the idempotency contract
@@ -281,17 +282,28 @@ func TestRunImportCLIManifestSkipsImportedSession(t *testing.T) {
 	dshHome := t.TempDir()
 	dataDir := filepath.Join(t.TempDir(), "zk-data")
 	t.Setenv("ZEOKEEL_DATA_DIR", dataDir)
-	manifest := writeManifestFixture(t, dshHome, dataDir)
+	writeValidDSHSessionFixture(t, dshHome)
+	manifest := filepath.Join(dataDir, "dsh-import-manifest.json")
 
-	var out, errb bytes.Buffer
-	if code := runImportCLI([]string{"--from", dshHome, "--manifest", manifest}, &out, &errb); code != 0 {
-		t.Fatalf("exit code = %d (stderr %q)", code, errb.String())
+	// First run imports the session and records it in the manifest.
+	var out1, err1 bytes.Buffer
+	if code := runImportCLI([]string{"--from", dshHome, "--manifest", manifest}, &out1, &err1); code != 0 {
+		t.Fatalf("first import exit code = %d (stderr %q, stdout %q)", code, err1.String(), out1.String())
 	}
-	if !strings.Contains(out.String(), "sessions: found 1, imported 0, skipped 1, failed 0") {
-		t.Fatalf("summary does not report the idempotent skip:\n%s", out.String())
+	if !strings.Contains(out1.String(), "sessions: found 1, imported 1, skipped 0, failed 0") {
+		t.Fatalf("first import summary unexpected:\n%s", out1.String())
 	}
-	if !strings.Contains(out.String(), "skips:") || !strings.Contains(out.String(), "idempotent=1") {
-		t.Fatalf("summary does not break down skips:\n%s", out.String())
+
+	// Second run must skip the unchanged session instead of importing it again.
+	var out2, err2 bytes.Buffer
+	if code := runImportCLI([]string{"--from", dshHome, "--manifest", manifest}, &out2, &err2); code != 0 {
+		t.Fatalf("second import exit code = %d (stderr %q, stdout %q)", code, err2.String(), out2.String())
+	}
+	if !strings.Contains(out2.String(), "sessions: found 1, imported 0, skipped 1, failed 0") {
+		t.Fatalf("summary does not report the idempotent skip:\n%s", out2.String())
+	}
+	if !strings.Contains(out2.String(), "skips:") || !strings.Contains(out2.String(), "idempotent=1") {
+		t.Fatalf("summary does not break down skips:\n%s", out2.String())
 	}
 }
 

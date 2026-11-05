@@ -55,7 +55,7 @@
 - **RT-01/RT-06/RT-08**：workspace MCP 默认不执行（§5）、无整体超时 + 流空闲/重试设置（§5）。
 - **迁移定位（PD-04）**：产品文案由"DSH 桌面替代/迁移器"降级为"DSH 同类替代"；最小导入器已交付（技术预览）：`internal/importer` 读取 DSH `sessions/**/session.v4.jsonl[.zstd]` 与 credentials **键名**（值永不读取），写 ZeoKeel store；`zeokeel import [--from] [--dry-run] [--json] [--max]` 已接 CLI（退出码 0/1/2，`--json` 输出 report）。
 **导入范围（先说清楚）**：只导入**文本对话**（用户/assistant 文本与 reasoning）；工具调用/工具结果以合成文本行计数、不落 tool_calls；图片/附件/profile/storage/trajectory/usage 不导入；subagent 子会话默认跳过（`--include-subagents` 可含）；凭据只列键名，需在设置里重填 API key。
-**导入质量（wave2 importer 已补一部分）**：① DSH 注入上下文过滤 ✅（`SkipSystemInjected`，source.kind != user 不再变用户气泡）；② assistant step 过滤 ✅（`SkipStepAssistant`，无可见文本的 step 消息不落库）；③ 幂等 ✅（`--manifest` 默认 `<数据目录>/dsh-import-manifest.json`，按源文件 hash/size/mtime 跳过；`--no-manifest` 可退回全量重导）；④ 图片统计 ✅（`images_dropped`）；⑤ skip 原因分解 ✅（`skips` 按 subagent/system_injected/step_assistant/unsupported_version/idempotent/...）；⑥ header version 守卫 ✅（未来版本显式跳过）。**仍缺**：设置页「从 DSH 导入」UI 入口、app 运行中导入检测 `instance.lock`、图片/附件对象迁移、独立复验（原先的 FIX-VERIFY-PRODUCT 结论基于旧 importer）。
+**导入质量（wave2 importer 已补一部分）**：① DSH 注入上下文过滤 ✅（`SkipSystemInjected`，source.kind != user 不再变用户气泡）；② assistant step 过滤 ✅（`SkipStepAssistant`，无可见文本的 step 消息不落库）；③ 幂等 ✅（`--manifest` 默认 `<数据目录>/dsh-import-manifest.json`，按源文件 hash/size/mtime 跳过；`--no-manifest` 可退回全量重导）；④ 图片统计 ✅（`images_dropped`）；⑤ skip 原因分解 ✅（`skips` 按 subagent/system_injected/step_assistant/unsupported_version/idempotent/...）；⑥ header version 守卫 ✅（未来版本显式跳过）。**仍缺**：app 运行中导入检测、图片/附件对象迁移、旧版 manifest 兼容（旧版覆盖 key 升级后首次会重导一次，之后稳定幂等）。设置页「从 DSH 导入」入口已提供；独立复验见 FIX-VERIFY-IMPORT2 / FIX-VERIFY-WAVE23。
 
 ## 3.8 wave 1/2 独立验证残余（2026-11-05）
 

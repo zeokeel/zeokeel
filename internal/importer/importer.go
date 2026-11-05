@@ -154,6 +154,16 @@ func scanWorkspace(sessionsRoot, encoded string) (*Workspace, []string, int) {
 	return ws, files, compressed
 }
 
+// manifestSessionID records the real DSH session id from the session header,
+// falling back to the path-derived identity only when the header has none.
+func manifestSessionID(headerID, sessionsRoot, sessionFile string) string {
+	if id := strings.TrimSpace(headerID); id != "" {
+		return id
+	}
+	id, _ := sessionPathIdentity(sessionsRoot, sessionFile)
+	return id
+}
+
 // sessionFileIn returns the session JSONL path inside one session directory.
 // Newer DSH builds write session.v4.jsonl.zstd; uncompressed and older names
 // are accepted so exported/hand-copied data also imports.
@@ -362,7 +372,7 @@ func Import(ctx context.Context, opts Options) (*Report, error) {
 		// Idempotency: the manifest records the imported source's size and
 		// SHA-256, so a repeated run skips unchanged sessions before parsing
 		// them (and before creating duplicate ZeoKeel sessions).
-		key := manifestKey(layout.Home, sessionFile)
+		key := manifestKey(layout.Home, layout.SessionsRoot, sessionFile)
 		var identity sourceIdentity
 		if manifest != nil {
 			identity, err = inspectSourceFile(sessionFile)
@@ -466,7 +476,7 @@ func Import(ctx context.Context, opts Options) (*Report, error) {
 		if manifest != nil {
 			manifest.record(key, manifestEntry{
 				DSHHome:             layout.Home,
-				SessionID:           sessionDirName(sessionFile),
+				SessionID:           manifestSessionID(sess.ID, layout.SessionsRoot, sessionFile),
 				SourceFile:          sessionFile,
 				SourceSize:          identity.Size,
 				SourceMTimeUnixNano: identity.ModTimeUnixNano,

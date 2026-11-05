@@ -63,23 +63,61 @@ func inspectSourceFile(path string) (sourceIdentity, error) {
 	}, nil
 }
 
-// manifestKey scopes one DSH session id to its DSH home. Two different data
-// sources may legitimately use the same session id, so the home is part of the
-// key; a moved DSH home re-imports (better than silently skipping).
-func manifestKey(dshHome, sessionFile string) string {
-	return filepath.Clean(dshHome) + "|" + sessionDirName(sessionFile)
+// manifestKey scopes one DSH session to its DSH home using the session file's
+// path relative to <DSH home>/sessions, e.g.
+// "--data-mygo--/session-<uuid>/session.v4.jsonl.zstd". The full relative path
+// (not a guessed "session id") is the key because real DSH session directories
+// are named session-<uuid> while older ones use a bare uuid: only the path is
+// guaranteed to be unique. Two different data sources may legitimately reuse a
+// session id, so the home is part of the key; a moved DSH home re-imports
+// (better than silently skipping).
+func manifestKey(dshHome, sessionsRoot, sessionFile string) string {
+	home := filepath.Clean(dshHome)
+	rel, err := filepath.Rel(filepath.Clean(sessionsRoot), sessionFile)
+	if err == nil && rel != "." && rel != ".." &&
+		!strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		return home + "|" + filepath.ToSlash(rel)
+	}
+	// A session file outside the standard layout (hand-made export) still gets
+	// a stable key from its base name.
+	return home + "|" + filepath.Base(sessionFile)
 }
 
-// sessionDirName extracts the DSH session id from the session file path. DSH
-// stores sessions as <sessions>/<workspace>/<session-id>/session.v4.jsonl[.zstd].
-// A hand-made export with the file directly inside a bucket falls back to the
-// file name.
-func sessionDirName(sessionFile string) string {
-	dir := filepath.Base(filepath.Dir(sessionFile))
-	if strings.HasPrefix(dir, "session.") || strings.HasPrefix(dir, "session-") {
-		return filepath.Base(sessionFile)
+// sessionPathIdentity derives a session identity from the file's path under
+// the DSH sessions root: "--data-mygo--/session-<uuid>" ->
+// "session-<uuid>", and a hand-made "<bucket>/session.v4.jsonl" ->
+// "session.v4" (file stem). It is the fallback for sessions whose header has
+// no id.
+func sessionPathIdentity(sessionsRoot, sessionFile string) (string, error) {
+	rel, err := filepath.Rel(filepath.Clean(sessionsRoot), sessionFile)
+	if err != nil || rel == "." || rel == ".." ||
+		strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		return "", fmt.Errorf("session file %q is not under %q", sessionFile, sessionsRoot)
 	}
-	return dir
+	parts := strings.Split(filepath.ToSlash(rel), "/")
+	if len(parts) < 2 {
+		// Directly inside the sessions root: use the file stem.
+		return trimSessionExt(parts[len(parts)-1]), nil
+	}
+	parent := parts[len(parts)-2]
+	if isDSHWorkspaceBucket(parent) {
+		// Hand-made export placed directly in a workspace bucket.
+		return trimSessionExt(parts[len(parts)-1]), nil
+	}
+	return parent, nil
+}
+
+// trimSessionExt removes the JSONL (and optional .zstd) suffix from a session
+// file name.
+func trimSessionExt(name string) string {
+	name = strings.TrimSuffix(name, ".zstd")
+	return strings.TrimSuffix(name, ".jsonl")
+}
+
+// isDSHWorkspaceBucket reports whether name is a DSH workspace directory
+// ("--data-mygo--", i.e. a decoded path wrapped in double dashes).
+func isDSHWorkspaceBucket(name string) bool {
+	return strings.HasPrefix(name, "--") && strings.HasSuffix(name, "--") && len(name) > 4
 }
 
 // manifestEntry records one imported session.

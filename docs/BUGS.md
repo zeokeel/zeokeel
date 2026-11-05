@@ -21,11 +21,11 @@
 | 功能 | FP-02 | P1 | PTC 只是工具批处理（无代码运行时） | ⏸ DEFERRED | 产品边界+纯 Go 约束；见 known-limitations §5 |
 | 功能 | FP-03 | P1 | subagent 仅同步（无 childId/异步/续谈） | ✅ DONE（异步） | wave2：`subagent` 支持 `async:true` 后台子代理，返回 `{kind:"subagent_async",child_id,...}`（`internal/tools/subagent.go:59`）；续谈/fork 仍缺 |
 | 功能 | FP-04 | P1 | Goal 半成品（无 revision/phase/pause，无 `/goal`） | ✅ DONE（模型+API；UI 命令待前端） | wave2：`GoalPhase`（active/paused/blocked）+ revision/暂停语义（`internal/tools/goal.go`）；`/goal` 命令行入口待前端 |
-| 功能 | FP-05 | P1 | 无 workspace changes / 每回合 diff | ✅ DONE（后端事件） | wave2：`internal/workspacechanges` 快照/差异 + controller 在回合结束发 `state.WorkspaceChanges`（`controller.go:1557`）；UI 渲染待前端 |
+| 功能 | FP-05 | P1 | 无 workspace changes / 每回合 diff | 🟡 PARTIAL（后端已交付） | wave2：`internal/workspacechanges` 快照/差异 + controller 在回合结束发 `state.WorkspaceChanges`（`controller.go:1557`）；UI 渲染待前端 |
 | 功能 | FP-06 | P1 | 无声明式 agent preset/persona | ⏸ DEFERRED | L 项，见 §3 |
 | 功能 | FP-07 | P1 | schedule 触发不回原会话/不记录 origin | ✅ DONE（worktree） | wave2：`schedule` 记录 `OriginSessionID`（`internal/tools/schedule.go:180`），调度器优先投回原会话否则新建（`internal/app/automation_runs.go:199`）；automation_runs 表记录运行 |
 | 功能 | FP-15 | P1 | job 完成无通知 | ✅ DONE（worktree） | wave2：`jobManager.notifyFinished` + `completionNotice`（`internal/tools/jobs.go:121,305`）在回合内投放 advisory |
-| 功能 | FP-17 | P1 | skills 单 root | 🟡 IN PROGRESS | 当前仍单 root（`internal/app/services.go:847`）；wave2 多 root 未落地 |
+| 功能 | FP-17 | P1 | skills 单 root | ✅ DONE | `internal/skills` 多 root（ws/skills + ws/.zeokeel/skills + ~/.zeokeel/skills，自定义 root 不扩张）+ SKILL.md 指纹自动 refresh；app 注册/prompt 用 `LoadRootsTolerant(RootsFor(...))`；测试 8+ |
 | 功能 | FP-19 | P1 | 无统一代理设置 | ✅ DONE（worktree） | wave2：`network.proxy` 统一 provider/web_search/web_fetch（`app/services.go:635,933`；`tools.SetNetworkProxy`）；设置行在 Settings › 网络 |
 | 功能 | FP-16 | P1 | ask_user 非阻塞（回答走下一轮） | ⏸ DEFERRED | 阻塞式需 interrupt/resume 语义（当前工具内阻塞会死锁回合，见 `internal/tools/ask_user.go:91` 注释）；见 known-limitations §3.9 |
 | UX | UX-01 | P1 | 无模型发送完全静默 | ✅ DONE | deferred toast + 失败回滚空会话/保留 draft；**独立 GUI 复核 CONFIRMED**（FIX-VERIFY-UI：toast+回滚+保留 draft，DB sessions=0） |
@@ -33,15 +33,15 @@
 | UX | UX-02 | P1 | 新会话对话 tab 无空态 | ✅ DONE | 会话空态 + 无模型 CTA；**独立 GUI 复核 CONFIRMED**（FIX-VERIFY-UI） |
 | 产品 | PD-01 | P1 | 无模型首启无引导 + 错误静默 | ✅ DONE（首启卡 PARTIAL） | 与 UX-01 同根因修复，独立 GUI CONFIRMED；首启 setup 引导卡已在 wave2 工作树（`TestHomeSetupCardGuidesFirstRun`），待提交后复核 |
 | 产品 | PD-02 | P1 | 添加模型无语义校验/预设/模型清单 | ✅ DONE | Provider 预设 + 异步测试连接（GET /models）；**独立 GUI 复核 CONFIRMED**（FIX-VERIFY-UI `shots/39/42/43`） |
-| 产品 | PD-02b | P1 | **新发现**：无 key 的本地 provider（Ollama 预设）可保存但发送时被判"未配置"（`services.go` 要求 `provider.api_key != ""`），本地模型"可配不可用" | 🟡 OPEN | 来源 `docs/audit/FIX-VERIFY-PRODUCT.md` §3（截图 shots/45/46）；建议：空 key 时允许 localhost/本地 base URL，或预设携带哨兵 key |
+| 产品 | PD-02b | P1 | **新发现**：无 key 的本地 provider（Ollama 预设）可保存但发送时被判"未配置" | ✅ DONE | wave2：`keylessLocalProvider`（localhost/127.0.0.1/::1/私网/链路本地/host.docker.internal 允许空 key，公网仍要求 key）+ headless e2e；测试 `TestKeylessLocalProvider`/`TestBuildAgentKeylessLocalProvider`/`TestRunHeadlessKeylessLocalProvider` |
 | 产品 | PD-03 | P1 | 单实例固定端口、二次启动不激活窗口 | ✅ DONE | data-dir 锁 + 二次启动 IPC 激活窗口；独立验证 CONFIRMED |
-| 产品 | PD-04 | P1 | "迁移器"定位但零迁移实现 | 🟡 IN PROGRESS（最小导入已交付） | **最小导入器 + CLI 已交付**：`internal/importer` + `zeokeel import [--from --dry-run --json --max]`（退出码 0/1/2；真实 `/root/.dsh` 只读 dry-run 325 sessions/17223 messages）。独立验证（`docs/audit/FIX-VERIFY-PRODUCT.md` §2）：**可作为「最小导入（技术预览 CLI）」发布，不可宣称迁移器**；口径已降级（README/STATUS/PLAN/known-limitations）。wave2 已补①–④的导入器侧：`SkipSystemInjected`/`SkipStepAssistant` 过滤 + `Skips` 原因分解 + `ImagesDropped` 统计 + `ManifestPath` 幂等 manifest（`--manifest`/`--no-manifest`）+ header version 守卫（`ErrUnsupportedVersion`）；剩余：设置页导入入口、运行中实例检测、独立复验（product-auditor 需按新行为复核）。 |
-| 产品 | PD-05 | P1 | 设置面缺通知/隐私/诊断/代理/更新/重置 | 🟡 PARTIAL（工作树已实现，未提交） | 独立验证 FIX-VERIFY-PRODUCT：设置导航 通知/数据隐私/诊断/网络/桌面/更新 + 持久化测试 PASS；提交后复核 |
-| 产品 | PD-06 | P1 | Automation 失败/历史不可见、不绑定会话配置 | 🟡 PARTIAL（工作树已实现，未提交） | store.AutomationRun* + 运行历史/前景提示 + origin 投递测试 PASS；提交后 GUI 复核 |
-| 产品 | PD-07 | P1 | MCP/Skills/AGENTS.md 无管理 UI | 🟡 PARTIAL（工作树已实现，未提交） | manage_ui.go 页面 + MCP/Skills/AGENTS 测试 PASS；MCP 连通测试未做（设计允许） |
+| 产品 | PD-04 | P1 | "迁移器"定位但零迁移实现 | ✅ DONE（最小导入，技术预览） | **最小导入器 + CLI 已交付**：`internal/importer` + `zeokeel import [--from --dry-run --json --max]`（退出码 0/1/2；真实 `/root/.dsh` 只读 dry-run 325 sessions/**1,248 messages**（系统注入/step 级过滤后；修复前 17,219））。独立验证（`docs/audit/FIX-VERIFY-PRODUCT.md` §2）：**可作为「最小导入（技术预览 CLI）」发布，不可宣称迁移器**；口径已降级（README/STATUS/PLAN/known-limitations）。wave2 已补①–④的导入器侧：`SkipSystemInjected`/`SkipStepAssistant` 过滤 + `Skips` 原因分解 + `ImagesDropped` 统计 + `ManifestPath` 幂等 manifest（`--manifest`/`--no-manifest`）+ header version 守卫（`ErrUnsupportedVersion`）；剩余：运行中实例检测、旧版 manifest 首次重导说明。独立再验收（FIX-VERIFY-IMPORT2）质量 PASS；manifest 幂等在真实 `session-<uuid>` 布局上的 P1 已修复（key 改 `home|相对 sessions 路径` + 真实布局回归测试，fix-security 独立复核）；设置页导入入口已提供。 |
+| 产品 | PD-05 | P1 | 设置面缺通知/隐私/诊断/代理/更新/重置 | ✅ DONE（已提交 84c5b1f） | 设置导航 通知/数据与隐私/诊断/网络/桌面/更新 + 持久化测试；独立 GUI 复核（FIX-VERIFY-UI-WAVE2）进行中 |
+| 产品 | PD-06 | P1 | Automation 失败/历史不可见、不绑定会话配置 | ✅ DONE（已提交 84c5b1f） | store.AutomationRun* + automation_runs 记录 workspace/permission/model + 历史/失败原因/前景提示 UI；origin 投递；独立 GUI 复核进行中 |
+| 产品 | PD-07 | P1 | MCP/Skills/AGENTS.md 无管理 UI | ✅ DONE（已提交 84c5b1f） | manage_ui.go：MCP JSON 编辑/校验、Skills 扫描/校验错误/打开文件夹、AGENTS.md 查看/编辑；独立 GUI 复核进行中 |
 | 产品 | PD-09 | P1 | 失败回合直接展示内部错误栈、无建议/重试 | ✅ DONE | 错误分类卡 + 动作 + 技术细节折叠；`shell/session_errors.go`；4 测试 |
-| 产品 | PD-10 | P1 | 重启不恢复会话、草稿仅内存 | 🟡 PARTIAL（工作树已实现，未提交） | ui.last_session + draft.<id> 持久化，3 测试 PASS；GUI 复跑未完成 |
-| 产品 | PD-12 | P2 | 桌面生命周期（关闭行为/自启/托盘动作/全局快捷键） | 🟡 PARTIAL（工作树已实现，未提交） | settings 桌面页 + app/autostart*；3 测试 PASS；全局快捷键若 mygo 无 API 则 DEFERRED |
+| 产品 | PD-10 | P1 | 重启不恢复会话、草稿仅内存 | ✅ DONE（已提交 84c5b1f） | ui.last_session 只读恢复 + draft.<id> 500ms 防抖持久化；独立 GUI 复核进行中 |
+| 产品 | PD-12 | P2 | 桌面生命周期（关闭行为/自启/托盘动作/全局快捷键） | 🟡 PARTIAL | 关闭行为/自启三平台/托盘 Show-New-Settings-Quit 已实现并提交；全局快捷键 mygo 无 API → DEFERRED（known-limitations） |
 | 工程 | AR-01 | P1 | 发布版零崩溃诊断（无 recover/日志，Windows 丢 stderr） | ✅ DONE | `cmd/zeokeel/{main,logging}.go`：`<DataDir>/logs/app-YYYYMMDD.log`（0600、8MiB→`.1` 轮转、跨天换文件）+ MultiWriter(stderr,file) + `debug.SetCrashOutput` + recover 写 `crash-*.txt`；`go test ./cmd/...`（14 个用例）；**独立验证 CONFIRMED**（FIX-VERIFY-CORE2：Xvfb 日志落盘/崩溃机制单测） |
 | 工程 | AR-02 | P1 | CI 只是本地脚本；race/coverage 覆盖不全、flaky 重跑 | ✅ DONE | `.github/workflows/ci.yml`（gate 跑 `scripts/ci.sh`；shell race 独立 job `-timeout 20m`）；`ci.sh` 写 `.cache/coverage.out` 并把 app 纳入 race；`scripts/evolve/gates.sh` 的 flaky 重跑改为 exit 1 不掩盖；**独立验证 CONFIRMED**（FIX-VERIFY-CORE2 §0：干净副本机制正确，另发现需修 BUILD-02） |
 | 工程 | AR-03 | P1 | 发布链路缺失（仅 Windows zip/无签名/无更新/版本未注入） | 🟡 PARTIAL | ✅ 版本注入 + `-s -w`（-31.8%）+ linux/mac 打包（**独立验证 CONFIRMED**，FIX-VERIFY-CORE2：`--version`/package-linux）；签名/公证/自动更新 ⏸（需证书/发布账号） |
@@ -67,7 +67,7 @@
 | PD-08 | P2 | 插件双界面不一致（4 vs 6）、无功能实验开关 | ✅ DONE | 统一 6 项 + 实验项「未实现」标注；shell 测试 |
 | AR-16/文档 | — | 已知缺陷此前无落地清单（本文件缺失） | ✅ DONE | 本文件；STATUS/README/PLAN/known-limitations 同轮纠错 |
 | BUILD-01 | P1 | `.gitignore` 的 `credentials*` 规则把 `internal/importer/credentials.go`（已跟踪构建输入）忽略，wave1 提交在干净 checkout 下无法 `go build`（verifier-core 发现） | ✅ DONE | Lead 改名 `internal/importer/import_credentials.go` 并提交 `0bbf051`；`.gitignore` 收紧为 `.credentials*`/`/credentials*`；新增 `scripts/check-clean-checkout.sh`（`git archive HEAD` 到临时目录后 `go build ./...`）+ CI gate job 步骤 + `make clean-check`；本文件记录该类问题。验证：`sh scripts/check-clean-checkout.sh` → PASS |
-| BUILD-02 | P1 | 干净 HEAD（`6da09e3`）`ci.sh --fast` 红：wave1 断言 `TestCreatorCanSetSettingAndWriteSkill` 与 `0bbf051` 的 skills live re-scan 行为冲突；worktree 已有 `modes_test.go` 修正 | 🟡 OPEN（待提交后复跑） | 独立验证 FIX-VERIFY-CORE2 §3.1 发现；Lead 提交 wave2 后必须在 `git archive HEAD` 副本重跑全量 ci（`sh scripts/ci.sh --fast` + `check-clean-checkout.sh`） |
+| BUILD-02 | P1 | 干净 HEAD 曾 `ci.sh --fast` 红：wave1 断言与 skills live re-scan 冲突 | ✅ DONE | `modes_test.go` 修正随 wave2 提交；`git archive 84c5b1f` 干净副本 `sh scripts/ci.sh --fast` = **PASS**（22 包全绿，session 252s/shell 68s/nocgo 四目标）；CI 已加 `check-clean-checkout.sh` 守卫 |
 | Preview | P3 | 视觉金标与 wave1/wave2 UI 漂移 | ✅ DONE（22 张） | 2026-11-05 重生成 22 张（当前代码，含设置窗 **900×840**、About 单一版本来源）+ `TestVisualRegression` PASS（14 屏/1.9s）；`identify` 校验尺寸；命令见 `docs/design/preview/README.md` 与 `make previews`/`make visual-check` |
 | FP-18 | P2 | headless CLI 缺失 | ✅ DONE | `internal/app/headless.go` + cmd 接线；`--permission` 失效 P1 已由独立验证发现并修复（read-only/full 回归） |
 
@@ -85,3 +85,11 @@
 2. 每轮修复由 Lead 在 `docs/audit/FIX-REPORT.md` 汇总，本文件只保留"当前仍有/已修"的结论，不写过程。
 3. 不允许再出现 `.cache/team/*.md` 这类未跟踪的缺陷积压（`docs/QUALITY.md` 的要求）。
 4. 构建/发布类问题的回归守卫：`sh scripts/check-clean-checkout.sh`（干净 checkout 构建，BUILD-01）、`sh scripts/check-nocgo.sh`（零 cgo + 交叉编译）、`sh scripts/ci.sh`（全门禁）。
+
+## 6. wave2 验证新观察（P3，来自 FIX-VERIFY-UI-WAVE2，未阻塞）
+
+| ID | 级别 | 问题 | 状态/去向 |
+| --- | --- | --- | --- |
+| UX-W2-1 | P3 | Automation「立即运行」在提交失败时仍创建 0 消息会话（与 UX-01 空会话污染同类） | OPEN，下轮修复（run-now 失败应回滚会话并记 failed run） |
+| UX-W2-2 | P3 | Skills 默认扫描路径显示进程 cwd 下 `/data/mygo/skills`（从任意目录启动时可能反直觉，应优先 workspace 根） | OPEN，下轮确认预期语义/修正文案 |
+| UX-W2-3 | P3 | Settings 设置页 nav 14 项、840 高可显示（已在独立验证确认无裁切）；后续新增页面需回归 840 高度 | 记录 |

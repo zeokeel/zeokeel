@@ -630,3 +630,146 @@ func TestImportCorruptManifestFailsBeforeWriting(t *testing.T) {
 		t.Fatalf("corrupt manifest still imported: %d workspaces", len(workspaces))
 	}
 }
+
+// TestImportManifestIdempotentRealDSHLayout is the regression for the wave2
+// defect where real DSH session directories ("session-<uuid>") made every
+// session share one manifest key, so a second import duplicated everything.
+func TestImportManifestIdempotentRealDSHLayout(t *testing.T) {
+	home := t.TempDir()
+	cwd := t.TempDir()
+	ids := []string{
+		"session-aaaaaaaa-1111-2222-3333-444444444444",
+		"session-bbbbbbbb-1111-2222-3333-444444444444",
+	}
+	paths := make([]string, 0, len(ids))
+	for i, sid := range ids {
+		path := writeFixtureSession(t, home, "--tmp-proj--", sid, "session.v4.jsonl", []string{
+			headerLine(t, sid, cwd, "user", 0),
+			userMessageEvent(t, 1, "hello "+sid),
+			assistantMessageEvent(t, 2, []map[string]any{{"type": "text", "text": "hi " + sid}}),
+		})
+		paths = append(paths, path)
+		_ = i
+	}
+	manifestPath := filepath.Join(t.TempDir(), "manifest.json")
+	st := newStore(t)
+	opts := Options{DSHHome: home, Store: st, ManifestPath: manifestPath}
+
+	first, err := Import(context.Background(), opts)
+	if err != nil {
+		t.Fatalf("first import: %v", err)
+	}
+	if first.SessionsImported != 2 || first.MessagesImported != 4 {
+		t.Fatalf("first report = %+v", first)
+	}
+	manifest, err := loadManifest(manifestPath)
+	if err != nil {
+		t.Fatalf("load manifest: %v", err)
+	}
+	if len(manifest.Sessions) != 2 {
+		t.Fatalf("manifest entries = %d, want one per session (2): real DSH session-<uuid> dirs collided", len(manifest.Sessions))
+	}
+	seenIDs := map[string]bool{}
+	for _, entry := range manifest.Sessions {
+		seenIDs[entry.SessionID] = true
+		if entry.SHA256 == "" || entry.SourceSize == 0 {
+			t.Fatalf("manifest entry incomplete: %+v", entry)
+		}
+	}
+	for _, sid := range ids {
+		if !seenIDs[sid] {
+			t.Fatalf("manifest missing real session id %q (saw %v)", sid, seenIDs)
+		}
+	}
+	workspaceID := first.Workspaces[0].WorkspaceID
+	sessions, err := st.ListSessions(workspaceID)
+	if err != nil || len(sessions) != 2 {
+		t.Fatalf("sessions after first import = %d (err=%v), want 2", len(sessions), err)
+	}
+
+	// Second run must skip both unchanged sessions and create no duplicates.
+	second, err := Import(context.Background(), opts)
+	if err != nil {
+		t.Fatalf("second import: %v", err)
+	}
+	if second.SessionsImported != 0 || second.SessionsSkipped != 2 || second.Skips[SkipIdempotent] != 2 {
+		t.Fatalf("second report = %+v (want 0 imported, 2 idempotent skips)", second)
+	}
+	if second.MessagesImported != 0 {
+		t.Fatalf("second import re-imported %d messages", second.MessagesImported)
+	}
+	sessions, err = st.ListSessions(workspaceID)
+	if err != nil || len(sessions) != 2 {
+		t.Fatalf("sessions after second import = %d (err=%v), want still 2", len(sessions), err)
+	}
+
+	// A changed source is re-imported (only the changed one).
+	f, err := os.OpenFile(paths[0], os.O_APPEND|os.O_WRONLY, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.WriteString(assistantMessageEvent(t, 3, []map[string]any{{"type": "text", "text": "updated"}}) + "\n"); err != nil {
+		t.Fatal(err)
+	}
+	_ = f.Close()
+	third, err := Import(context.Background(), opts)
+	if err != nil {
+		t.Fatalf("third import: %v", err)
+	}
+	if third.SessionsImported != 1 || third.Skips[SkipIdempotent] != 1 {
+		t.Fatalf("third report = %+v (want 1 re-import, 1 idempotent skip)", third)
+	}
+	sessions, err = st.ListSessions(workspaceID)
+	if err != nil || len(sessions) != 3 {
+		t.Fatalf("sessions after source change = %d (err=%v), want 3", len(sessions), err)
+	}
+}
+
+// TestManifestKeyRealLayoutUniqueness pins the manifest key for the real DSH
+// layout and for flat hand-made exports (<bucket>/session.v4.jsonl).
+func TestManifestKeyRealLayoutUniqueness(t *testing.T) {
+	home := t.TempDir()
+	root := filepath.Join(home, "sessions")
+	rels := []string{
+		"--data-mygo--/session-aaaa-1111/session.v4.jsonl.zstd",
+		"--data-mygo--/session-bbbb-2222/session.v4.jsonl.zstd",
+		"--data-mygo--/cd457092-f76d-4cf5/session.v4.jsonl",
+		"--data-Plot--/session.v4.jsonl",
+		"--data-Other--/session.v4.jsonl",
+	}
+	seen := map[string]string{}
+	for _, rel := range rels {
+		key := manifestKey(home, root, filepath.Join(root, filepath.FromSlash(rel)))
+		if previous, dup := seen[key]; dup {
+			t.Fatalf("manifest key collision: %q and %q both map to %q", previous, rel, key)
+		}
+		seen[key] = rel
+		if !strings.Contains(key, "|") || !strings.Contains(key, filepath.ToSlash(filepath.Dir(rel))) {
+			t.Fatalf("manifest key %q for %q does not carry the bucket/session path", key, rel)
+		}
+	}
+}
+
+// TestSessionPathIdentity covers the manifest identity helper for the layouts
+// DSH and hand-made exports produce.
+func TestSessionPathIdentity(t *testing.T) {
+	root := filepath.Join(t.TempDir(), "sessions")
+	cases := []struct {
+		rel  string
+		want string
+	}{
+		{"--data-mygo--/session-aaaa-1111/session.v4.jsonl.zstd", "session-aaaa-1111"},
+		{"--data-mygo--/cd457092-f76d-4cf5/session.v4.jsonl", "cd457092-f76d-4cf5"},
+		{"--data-Plot--/session.v4.jsonl", "session.v4"},
+		{"session.v4.jsonl", "session.v4"},
+	}
+	for _, tc := range cases {
+		got, err := sessionPathIdentity(root, filepath.Join(root, filepath.FromSlash(tc.rel)))
+		if err != nil || got != tc.want {
+			t.Errorf("sessionPathIdentity(%q) = (%q, %v), want %q", tc.rel, got, err, tc.want)
+		}
+	}
+	if _, err := sessionPathIdentity(root, filepath.Join(t.TempDir(), "outside.jsonl")); err == nil {
+		t.Fatal("sessionPathIdentity accepted a file outside the sessions root")
+	}
+}

@@ -19,7 +19,7 @@
 | Agent | eino ADK 工具回路；Standard/PTC/Minimal/Creator；压缩（LLM 摘要 + 工具裁剪）；checkpoint（回合边界）；Goal round driver（自动续轮，预算 6/cap 12）；subagent/Agent Team；workflow（JSON 步骤）；ralph |
 | 工具 | fs（read/write/edit/editor/glob/grep）、bash/pwsh（平台门控）、terminal（Unix PTY）、jobs、web_search、web_fetch、read_image、todo、ask_user、present、report、session_query、schedule_*、skill、inspect、worktree、working_directory、MCP（stdio + resources/prompts） |
 | 审批/权限 | Full/Workspace/Read-only/Ask + Always allow；Auto-review EXP（LLM 预审，15s 超时回退人工）；审批范围 ADR 0010 |
-| 数据 | `index.sqlite`（WAL/foreign_keys/busy_timeout/单写者）为持久化真源；每会话 JSONL 镜像/导出；附件与工具结果落盘；搜索用 LIKE（FTS 未做）；**DSH 迁移导入器**：`internal/importer` + `zeokeel import`（读取 DSH `sessions/**/session.v4.jsonl[.zstd]`，只读 DSH，凭据只读键名） |
+| 数据 | `index.sqlite`（WAL/foreign_keys/busy_timeout/单写者）为持久化真源；每会话 JSONL 镜像/导出；附件与工具结果落盘；搜索用 FTS5 trigram（LIKE 降级）；**DSH 迁移导入器**：`internal/importer` + `zeokeel import`（读取 DSH `sessions/**/session.v4.jsonl[.zstd]`，只读 DSH，凭据只读键名） |
 | 诊断/发布 | 版本注入（`--version` 输出 version/commit/buildTime）+ `-s -w`（约 -32% 体积）；日志 `logs/app-YYYYMMDD.log`（轮转）+ panic `logs/crash-*.txt`；Windows zip / Linux tar.gz / macOS unsigned `.app` 打包 |
 | CLI | 桌面（默认）、`--version`/`--help`、`run [--json] [--yes] "<prompt>"` headless（退出码 0/1/2，无 GUI/托盘/单实例锁）、`import [--from --dry-run --json --max --manifest/--no-manifest]`（DSH 会话迁移；幂等 manifest；凭据只列键名不读值；失败隔离） |
 | CI | `.github/workflows/ci.yml`：gate job 跑 `scripts/ci.sh`（gofmt/vet/build/test/零 cgo/coverage/race），shell race 单独 job `-timeout 20m` |
@@ -52,7 +52,7 @@ sh scripts/evolve/gates.sh --full # 统一门禁；flaky 重跑按失败处理
 1. P0 RT-01 workspace MCP 默认不执行 —— **代码已落地**（`mcp.workspace_config` 默认 off），待全量验证。
 2. P1 安全/权限（RT-02/03/07/12、PD-03/05/06/07/09/10）与 UX（UX-01/02/03、PD-01）——本轮修复中。
 3. 发布链路：签名/公证/自动更新仍缺（需证书/发布账号，DEFERRED）。
-4. 迁移定位已降级；**最小导入器 + `zeokeel import` CLI 已交付**（只读 DSH、凭据只列键名），设置页导入入口待前端（PD-04）。
+4. 迁移定位已降级；**最小导入器 + `zeokeel import` CLI 已交付**（只读 DSH、凭据只列键名），设置页「从 DSH 导入」入口已提供（PD-04，技术预览）。
 
 ## 5. 已知限制与真机项
 
