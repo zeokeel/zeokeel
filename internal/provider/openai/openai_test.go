@@ -741,8 +741,8 @@ func TestNewDefaults(t *testing.T) {
 	if p.Model() != DefaultModel {
 		t.Errorf("Model = %q, want %q", p.Model(), DefaultModel)
 	}
-	if p.client == nil || p.client.Timeout != DefaultTimeout {
-		t.Errorf("client timeout = %v, want %v", p.client, DefaultTimeout)
+	if p.client == nil || p.client.Timeout != 0 {
+		t.Errorf("client timeout = %v, want no overall request timeout", p.client)
 	}
 
 	// A supplied client is used as-is.
@@ -834,5 +834,65 @@ func TestReasoningEffortReachesRequest(t *testing.T) {
 	<-done
 	if effort, _ := got["reasoning_effort"].(string); effort != "high" {
 		t.Fatalf("request reasoning_effort = %v, want high (body: %+v)", got["reasoning_effort"], got)
+	}
+}
+
+// TestStreamOverallRequestTimeoutIsOptIn proves the default has no overall
+// request deadline (long reasoning must not be cut at a fixed 60s) and a
+// positive Config.Timeout still bounds one request with a clear hint.
+func TestStreamOverallRequestTimeoutIsOptIn(t *testing.T) {
+	slow := func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.WriteHeader(http.StatusOK)
+		if f, ok := w.(http.Flusher); ok {
+			f.Flush()
+		}
+		time.Sleep(120 * time.Millisecond)
+		_, _ = io.WriteString(w, ssePayload(t, map[string]any{
+			"choices": []any{map[string]any{"delta": map[string]any{"content": "late"}}},
+		}))
+		if f, ok := w.(http.Flusher); ok {
+			f.Flush()
+		}
+		_, _ = io.WriteString(w, "data: [DONE]\n\n")
+	}
+	srv := httptest.NewServer(http.HandlerFunc(slow))
+	t.Cleanup(srv.Close)
+
+	// No overall deadline: a stream that runs past the old 60s-style cap and
+	// delivers its content late still succeeds.
+	noLimit, err := New(Config{BaseURL: srv.URL + "/v1", APIKey: "k", Model: "m"})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	ch, err := noLimit.Stream(context.Background(), runtime.Request{
+		Messages: []runtime.Message{{Role: runtime.RoleUser, Content: "hi"}},
+	})
+	if err != nil {
+		t.Fatalf("Stream without timeout: %v", err)
+	}
+	chunks := collect(t, ch)
+	if got := textOf(chunks); got != "late" {
+		t.Fatalf("text = %q, want late", got)
+	}
+
+	// An explicit positive Timeout still caps the whole stream and reports a
+	// configurable-timeout hint rather than raw net/http wording.
+	bounded, err := New(Config{BaseURL: srv.URL + "/v1", APIKey: "k", Model: "m", Timeout: 20 * time.Millisecond})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	ch, err = bounded.Stream(context.Background(), runtime.Request{
+		Messages: []runtime.Message{{Role: runtime.RoleUser, Content: "hi"}},
+	})
+	if err != nil {
+		t.Fatalf("Stream with timeout: %v", err)
+	}
+	chunks = collect(t, ch)
+	if len(chunks) == 0 || chunks[len(chunks)-1].Err == nil {
+		t.Fatalf("missing timeout error chunk: %+v", chunks)
+	}
+	if msg := chunks[len(chunks)-1].Err.Error(); !strings.Contains(msg, "timed out") || !strings.Contains(msg, "provider.timeout_seconds") {
+		t.Fatalf("timeout error = %q, want the provider.timeout_seconds hint", msg)
 	}
 }

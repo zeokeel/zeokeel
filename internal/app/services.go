@@ -799,11 +799,20 @@ func buildAgentWithOptions(st *store.Store, root, instruction string, opts regis
 	baseURL := get("provider.base_url", "ZEOKEEL_PROVIDER_BASE_URL", openai.DefaultBaseURL)
 	model := get("provider.model", "ZEOKEEL_PROVIDER_MODEL", openai.DefaultModel)
 	reasoningEffort := get("provider.reasoning_effort", "", "")
+	// Zero (the default) means no overall request deadline: streaming a long
+	// reasoning turn must not be cut off by a fixed HTTP timeout. A positive
+	// provider.timeout_seconds / ZEOKEEL_PROVIDER_TIMEOUT_SECONDS restores a
+	// user-chosen cap.
+	requestTimeout := 0
+	if n := settingInt(get, "provider.timeout_seconds", "ZEOKEEL_PROVIDER_TIMEOUT_SECONDS", 0, 0, 3600); n > 0 {
+		requestTimeout = n
+	}
 	prov, err := openai.New(openai.Config{
 		BaseURL:         baseURL,
 		APIKey:          apiKey,
 		Model:           model,
 		ReasoningEffort: reasoningEffort,
+		Timeout:         time.Duration(requestTimeout) * time.Second,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("build provider: %w", err)

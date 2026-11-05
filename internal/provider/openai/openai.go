@@ -41,8 +41,11 @@ const (
 	// DefaultModel is DeepSeek's general chat model. runtime.Request.Model
 	// overrides it per call.
 	DefaultModel = "deepseek-chat"
-	// DefaultTimeout bounds the whole response, including the streamed body.
-	DefaultTimeout = 60 * time.Second
+	// DefaultResponseHeaderTimeout bounds the wait for response headers.
+	// The streamed body has no overall deadline by default: long reasoning
+	// generations legitimately stream past any fixed request cap, and the
+	// caller's context (the Stop button) remains the bound.
+	DefaultResponseHeaderTimeout = 60 * time.Second
 	// UserAgent identifies ZeoKeel to the endpoint.
 	UserAgent = "zeokeel"
 
@@ -62,11 +65,14 @@ type Config struct {
 	APIKey string
 	// Model is the default model. runtime.Request.Model overrides it.
 	Model string
-	// HTTPClient is used for requests. Nil means a client with
-	// DefaultTimeout, which bounds the whole response including the
-	// streamed body; pass a client with a longer (or no) Timeout for long
-	// generations.
+	// HTTPClient is used for requests. Nil means a client with Timeout and
+	// DefaultResponseHeaderTimeout.
 	HTTPClient *http.Client
+	// Timeout bounds the whole HTTP response including the streamed body.
+	// Zero means no overall request deadline (the default): the caller's
+	// context and the Stop button bound a long generation, and only the
+	// response header wait is capped. A positive value caps one request.
+	Timeout time.Duration
 	// Temperature, when non-nil, is sent on every request. A pointer keeps
 	// an explicit 0 distinct from "unset".
 	Temperature *float32
@@ -130,7 +136,11 @@ func New(cfg Config) (*Provider, error) {
 	}
 	client := cfg.HTTPClient
 	if client == nil {
-		client = &http.Client{Timeout: DefaultTimeout}
+		transport := http.DefaultTransport.(*http.Transport).Clone()
+		if transport.ResponseHeaderTimeout == 0 {
+			transport.ResponseHeaderTimeout = DefaultResponseHeaderTimeout
+		}
+		client = &http.Client{Transport: transport, Timeout: cfg.Timeout}
 	}
 
 	return &Provider{

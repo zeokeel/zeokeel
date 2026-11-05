@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"strings"
@@ -134,6 +135,13 @@ func (p *Provider) readStream(ctx context.Context, body io.Reader, out chan<- ru
 	if err := scanner.Err(); err != nil {
 		if ctxErr := ctx.Err(); ctxErr != nil {
 			state.fail(ctxErr)
+			return
+		}
+		// http.Client.Timeout aborts a long streamed generation by cancelling
+		// the body read. Surface a configurable-timeout hint instead of the
+		// raw net/http wording.
+		if errors.Is(err, context.DeadlineExceeded) || strings.Contains(err.Error(), "Client.Timeout") {
+			state.fail(fmt.Errorf("openai: read stream timed out (provider.timeout_seconds; set 0 for no overall limit or a larger value): %w", err))
 			return
 		}
 		state.fail(fmt.Errorf("openai: read stream: %w", err))
