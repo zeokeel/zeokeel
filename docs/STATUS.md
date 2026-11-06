@@ -55,6 +55,17 @@
 - **收口时修正的过期口径**：BUGS RT-04（per-session Agent 已落地）、FP-05（UI 卡片本轮补 diff）、FP-11（本轮补 consumer）均已关闭；FUNCTIONAL-PARITY 修正 auto-memory/computer-use 的 DSH 归属。
 - **残余/未验**：真实 GNOME/KDE portal、真实 gopls、真机 IME/a11y/DPI/通知/安装包、签名/公证与托管 feed（DEFERRED）——见 known-limitations。
 
+## 2.5 Auto-memory 双层记忆（2026-11-06）
+
+> 设计/契约：[docs/design/auto-memory.md](design/auto-memory.md)；决策：[ADR 0015](decisions/0015-auto-memory-two-scopes.md)；调研依据见 ADR §1。
+
+- **双层作用域**：`global`（整体设置/用户级，跨工作区；默认 **suggest** → 候选进 Settings›Memory 审核 inbox）；`workspace`（跟随工作空间；默认 **auto** → agent 通过 memory 工具即时写入 active）。注入顺序 Global → Workspace，两段独立限额（12 条/1500 字符；20 条/4000 字符），「参考数据非指令」警告。
+- **写入通路**：A) 会话内 agent 自写（memory 工具 `scope` + off/suggest/auto 模式，零额外模型调用，Claude Code 式）；B) 可选后台抽取器（默认关，`ui.memory_extractor`；每 N 个成功回合异步抽取 ≤3 条，secret scrub → 去重/相似合并 → 按 scope 模式落库；失败静默）；C) 确定性整合（启动/6h/写入阈值；精确重复合并、superseded 30 天清理、active 上限 global 100 / workspace 300 按 importance+last_used_at 淘汰）。不使用额外模型调用完成 C。
+- **数据面**：store schema **v3**（memories 增 scope/kind/source/status/session_id/turn_id/content_hash/confidence/importance/last_used_at/superseded_by + scope 索引；v2→v3 迁移保留旧行并回填 hash；行尾 CRLF 规范化为 LF 与 `memory.Hash` 一致）；删除 workspace 级联删除其 workspace 记忆（global 保留）。
+- **控制面**：Settings›Memory 双 tab（Global/Workspace；模式单选、计数、pending「Suggestions to review」Accept/Discard、active 列表/删除、Clear all 按 scope 二次确认、Export markdown 到数据目录）、`/memory` 命令打开页面；Read Only 会话不注册 memory 工具（RT-03 不变）；workspace 删除级联、secret scrub 全程生效。
+- **质量**：每项 TDD RED→GREEN；独立审查 REVIEW-MEMORY 报 P1×1 + P2×4，全部修复并复验 PASS；最终 `sh scripts/ci.sh` PASS（coverage 80.5%）、`CGO_ENABLED=1 go test -race ./internal/shell` PASS（626.8s）、Windows/darwin 交叉 build PASS；代码提交 `a76fe94` 后 `check-clean-checkout.sh` PASS + `ci.sh --fast` PASS。
+- **未接/已知限制**：后台抽取器/整合只在桌面 app 生命周期注册（headless/ACP 路径不触发）；抽取节流计数为内存态（重启清零、失败消耗一个 interval）；不做跨机器同步；不自动写 markdown 镜像（仅导出）；Subagent 会话不自动捕获；P1 过滤依赖引用上下文 envelope（文案变更需同步 `IsContextText`）。
+
 ## 3. 门禁（"绿"的定义）
 
 ```sh

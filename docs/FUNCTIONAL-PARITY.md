@@ -3,6 +3,7 @@
 > 结论：**核心 agent 已经可用**（真实 LLM 流式对话、工具循环、审批、多会话、子代理、MCP、技能、定时任务均跑通）；
 > 但**功能上与 DSH 未做到一比一**。此前的 UI 像素/交互微循环不应再作为主目标，先补功能缺口。
 > 2026-11-05 审计修复轮复核：此前标为缺失的 **Auto-review、Goal round driver、plan mode 三项增强** 经代码复核已实现，本表随之更正（缺陷跟踪见 [BUGS.md](BUGS.md)）。
+> **2026-11-06 auto-memory 功能轮**（[ADR 0015](decisions/0015-auto-memory-two-scopes.md)）：新增双层记忆——Global（整体设置/用户级，默认 suggest）+ Workspace（跟随工作空间，默认 auto），agent 工具自写 + 可选后台抽取器 + 确定性整合；DSH 无 memory 能力，这是 ZeoKeel 产品扩展。
 > **2026-11-06 统一收口轮**（[FIX-REPORT-CLOSURE](audit/FIX-REPORT-CLOSURE.md)）：补齐工作区 inline diff、`/goal`、`/compact`（会话级持久压缩）、`@` 提及细节、会话引用原子化、崩溃中断回合修复、ACP 完整面、LSP 工具、Wayland 全局快捷键、导入器收尾、Chat 流式思考展示与折叠（DSH ReasoningRow 对齐）；并**修正 auto-memory / computer-use 的 DSH 归属**——经核实 DSH 0.2.1-rc.2 安装包内无对应包/能力，二者不是对齐缺口（详见 FIX-REPORT-CLOSURE §0）。
 
 ## A. 核心 agent 能力
@@ -32,7 +33,7 @@
 | 会话标题 | 自动/LLM 标题、conversation-following titles | 自动/LLM 标题（首条完成回合；失败/停止后下个成功回合补）+ header/sidebar 实时刷新；手改优先 | ✅ |
 | Fork / 分支 / 导出 | fork session、下载 session log | `Store.ForkSession` 复制会话/消息/事件/工具调用/反馈/附件（附件行换新 id、message_id 重映射、字节复制到 fork 自己的 `attachments/<fork>/`，删除任一侧互不影响；标题加 “ (fork)”），Session More 菜单可 fork；`Controller.ExportSession` 导出 session/messages/attachments/events/feedback JSONL，附件记录内嵌 base64 数据与文本正文，下载走保存对话框 | ✅ 本地 |
 | 反馈 | 服务端反馈传输 | 反馈行（message_id/rating/note/created_at）持久化，重开回显、随导出；仍无联网上送 | ⚠️ 本地持久化 |
-| 自动记忆/AGENTS.md | AGENTS.md（经核实 DSH 0.2.1-rc.2 安装包无 memory/auto-memory 包或能力） | AGENTS.md 注入 + **memory 工具 + Settings › Memory 页**（按 workspace 持久、跨会话注入、可增删改查/清空） | ✅ 不落后（auto-memory 非 DSH 能力，不列为缺口） |
+| 自动记忆/AGENTS.md | AGENTS.md（经核实 DSH 0.2.1-rc.2 安装包无 memory/auto-memory 包或能力；ZeoKeel 产品扩展） | AGENTS.md 注入 + **双层 auto-memory**：Global（跨工作区偏好，默认 suggest→待确认 inbox）与 Workspace（项目约定，默认 auto→agent 即时写）；memory 工具带 scope 与 off/suggest/auto 模式；可选后台抽取器（默认关，每 N 回合 scrub/去重后落库）+ 确定性整合（去重/30 天清理/每 scope 上限）；Settings›Memory 双 tab（查看/编辑/删除/接受建议/清空/导出 markdown）+ `/memory` 命令 | ✅ 产品扩展（DSH 无对应能力） |
 | 插件 | 内置 + 第三方市场 | 仅内置（产品决定） | 设计差异 |
 | 打包/更新 | 三平台安装包 + 自动更新 | Windows zip + **Linux tar.gz（amd64/arm64）+ macOS unsigned `.app` zip**（`make package-*`，版本注入已接入）；签名/公证/自动更新仍缺 | ⚠️ 部分 |
 
@@ -68,7 +69,7 @@ P1（能力完整）：
 4. ~~Goal round driver（自动多轮）+ `/goal` 命令~~ ✅ 已完成（round driver + `/goal`/`/goal edit` 本地命令）
    Plan mode 已按 DSH 对齐为软引导 + `/plan` 命令 + composer 徽章 + `exit_plan_mode` 工具 / Keep planning / pending 徽章 / Home `/plan`（[ADR 0008](decisions/0008-plan-mode-soft-alignment.md)）✅
 5. ~~Auto-review 权限（模型审前审批）~~ ✅ 已完成（`LLMToolReviewer` + 审批 UI）
-6. ~~auto-memory~~ → 经核实 DSH 0.2.1-rc.2 无 memory/auto-memory 包（非对齐项）；ZeoKeel 已有 memory 工具 + 设置页，AGENTS.md 注入保留
+6. ~~auto-memory~~ → ✅ 已完成 ZeoKeel 产品扩展（双层 Global/Workspace + 自动写入通路 + 审核 inbox + 可选抽取器/整合，见 [ADR 0015](decisions/0015-auto-memory-two-scopes.md)）；DSH 无对应能力，不属于对齐项
 7. ~~`/compact` 手动压缩~~ ✅ 已完成（runtime 手动压缩 API + 会话级持久替换）
 8. ~~工作区 inline diff / 会话引用 / ACP 完整面 / LSP 工具 / 崩溃中断收尾 / 导入器附件迁移 / Wayland 快捷键~~ ✅ 已完成（统一收口轮，见 [FIX-REPORT-CLOSURE](audit/FIX-REPORT-CLOSURE.md)）；LSP/Wayland 真机项见 known-limitations
 

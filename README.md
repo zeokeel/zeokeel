@@ -71,6 +71,8 @@
 
 ## 当前状态
 
+**2026-11-06 Auto-memory 双层记忆**：Global（整体设置/用户级，默认 suggest→待确认 inbox）+ Workspace（跟随工作空间，默认 auto→agent 即时写）；memory 工具 scope/off-suggest-auto 模式；可选后台抽取器（默认关，secret scrub/去重/合并）+ 确定性整合（30 天清理/每 scope 上限）；Settings›Memory 双 tab + `/memory` 命令；store schema v3 迁移。设计与取舍见 [docs/design/auto-memory.md](docs/design/auto-memory.md) / [ADR 0015](docs/decisions/0015-auto-memory-two-scopes.md)。
+
 **2026-11-06「1.0 功能缺口统一收口」轮（TDD）**：工作区变更 inline diff、`/goal`、`/compact`（会话级持久压缩）、`@` 提及细节（引号路径/指针下钻/面包屑/跨工作区候选）、会话引用原子化（canonical mention + 受限只读上下文注入）、崩溃中断回合修复（checkpoint consumer，不重放副作用）、ACP 完整面（list/load/authenticate/fs/terminal/permission）、LSP 工具（stdio server + 插件页开关）、Wayland 全局快捷键（GlobalShortcuts portal，纯 Go D-Bus）、导入器收尾（运行中检测/图片附件迁移/manifest v2/失败回滚）、Chat 流式思考展示与折叠（DSH ReasoningRow 对齐）已交付；每项 TDD RED→GREEN、3 组独立审查 + P2 修复。契约/差异/未验项见 [FIX-REPORT-CLOSURE](docs/audit/FIX-REPORT-CLOSURE.md)。排除项：反馈联网上送、模型配置剩余限制（用户指定）；PTC/语音（产品决定）；auto-memory、computer-use（核实 DSH 0.2.1-rc.2 无对应包，非对齐项）。
 **M0–M13 完成：五屏 UI · 动画/交互 · 运行时 · 提示词层 · Agent Loop 工具全量 · 多模态图片输入 · 终端 PTY · 真实模型 E2E · 附件上传 · fork/导出**（当前状态真源：[docs/STATUS.md](docs/STATUS.md)；缺陷状态：[docs/BUGS.md](docs/BUGS.md)）：Home / Session / Plugins / Settings / Automation 全部用 mygo 原生控件实现。`CGO_ENABLED=0 go build/test/vet` 与 `scripts/check-nocgo.sh`（四目标交叉编译）为现行门禁；DSH 像素比对已退役（2026-11-05），历史基线资产已整包归档（`/data/zeokeel-backups/parity-assets-20261105.tar.gz`，回滚点 tag `pre-native-ui`）。
 

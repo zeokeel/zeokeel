@@ -72,3 +72,18 @@ go test -count=1 ./internal/{acp,presets,updater,globalhotkey,shell,session,app,
 | 独立审查 P2 修复 | 各项 RED（如 LSP sibling 落工作区根、Wayland 等 Close 超时、symlink 被误迁移、解析全量内存放大） | task-16 七项全绿 + -race；gofmt/vet/build 干净 |
 | REVIEW-3 P1/P2 修复 | goal driver race flaky（7 跑 4 败）；引用注入出现原始 JSON 气泡+幻影 turn；preview 每帧全量重算 | task-21/22/23 修复；10 次 race 复跑全绿；引用折叠/候选排序/per-agent 队列/预览缓存均有测试 |
 
+## 5. 2026-11-06 Auto-memory 双层记忆 RED→GREEN
+
+| 交付 | RED（写测试后首次运行） | GREEN（实现后） |
+| --- | --- | --- |
+| store schema v3 + 双层模型 | `CreateMemoryScoped undefined`/`unknown field Scope`/`MemoryScopeGlobal undefined`；迁移测试 v3 期望 | `go test ./internal/store` 全绿；v2→v3 默认值+hash 回填、scope 隔离、旧 API 兼容、CRLF 规范化、workspace 删除级联 |
+| Settings 四键 | 默认/Normalize/Load-Save 测试缺字段 | `TestMemorySettings*` PASS；`ui.memory_*` 在 allowed keys |
+| prompt 双段 + policy | `unknown field GlobalMemories`/`undefined: maxGlobalMemoryItems` | `go test ./internal/prompt` PASS；双段顺序/独立限额/off 无 policy/无工具无 policy |
+| memory 工具 scope×模式 | `unknown field Modes`/`MemoryResult has no Scope` | tools 测试 PASS（auto/suggest/off、source=auto、scope 校验、secret 拒绝） |
+| app 接线 | `instruction missing "## Global memory (user, cross-workspace)"` | app 测试 PASS（两 scope 读取/模式传递/使用标记） |
+| Settings›Memory 双 tab + /memory | 旧 `memory_ui.go`+stub 7/7 FAIL | `TestMemory` 7/7 PASS；shell 全包 PASS |
+| `internal/memory` 纯包 | 骨架期全部 not implemented 失败 | 37 表驱动测试 PASS（hash/相似/scrub/抽取解析/合并/整合） |
+| app 抽取器 + 整合 | 首跑 cap 用例失败（store 禁止 SetMemoryStatus(superseded)）→ 改 SupersedeMemory/RetireMemory | app 19 个 auto-memory 测试 PASS；`-race` 定向 PASS |
+| REVIEW-MEMORY 修复 | 引用上下文行进入抽取器（P1）、off 未拦 update/delete/clear、last_used_at 未更新、hash 契约、workspace 级联 | 修复后定向测试 + 复验 PASS（见最终报告） |
+
+> 说明：Auto-memory 是用户批准的 ZeoKeel 产品扩展（DSH 0.2.1-rc.2 无 memory 能力），契约见 docs/design/auto-memory.md 与 ADR 0015。

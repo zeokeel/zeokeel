@@ -99,7 +99,9 @@ before the plan policy. Every row below ships EN and ZH text.
 | `subagent:delegation` | `CONTEXT_ORDERS.SUBAGENT_DELEGATION` 120 | 120 | `Mode` = subagent/delegated/child | EN + ZH |
 | `context:agents-md` | extension (DSH message) | 130 | `AgentsMD` non-empty | EN + ZH |
 | `context:skills-catalog` | extension (DSH message) | 140 | `Skills` non-empty and `skill` tool present | EN + ZH |
+| `context:global-memory` | extension (global store, 2026-11-06) | 144 | `GlobalMemories` non-empty (≤12 items, ≤1500 chars) | EN + ZH |
 | `context:memory` | extension (workspace store) | 145 | `Memories` non-empty (≤20 items, ≤4000 chars) | EN + ZH |
+| `context:memory-policy` | extension (auto-memory, 2026-11-06) | 147 | `memory` tool present AND (`MemoryWorkspaceMode` or `MemoryGlobalMode` ≠ off) | EN + ZH |
 | `context:time` | extension (DSH history reading) | 150 | `Time` non-zero | EN + ZH |
 | `harness:self-knowledge` | extension (no DSH constant) | 160 | always | EN + ZH |
 | `plan:policy` | `PLAN_POLICY` 500 | 500 | `Mode` = plan/plan-mode/plan_mode | EN + ZH |
