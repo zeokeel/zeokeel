@@ -1,0 +1,56 @@
+{
+  "version": 1,
+  "entries": [
+    {
+      "id": "appinfo",
+      "module": "zeokeel/appinfo",
+      "config": {
+        "name": "ZeoKeel"
+      }
+    },
+    {
+      "id": "toolkit",
+      "module": "zeokeel/toolkit",
+      "config": {
+        "root": ".",
+        "shellTimeoutMs": 30000
+      }
+    },
+    {
+      "id": "ui",
+      "module": "zeokeel/host/group",
+      "children": [
+        {
+          "id": "home",
+          "module": "zeokeel-ui/home",
+          "config": {
+            "title": "首页",
+            "greeting": "编译期模块化的桌面 AI agent。"
+          }
+        },
+        {
+          "id": "welcome",
+          "module": "zeokeel-ui/welcome",
+          "config": {
+            "title": "欢迎使用 ZeoKeel",
+            "message": "这是一个独立编译的 UI 模块，通过注入点出现在宿主中。"
+          }
+        },
+        {
+          "id": "toolcards",
+          "module": "zeokeel-ui/toolcards",
+          "config": {
+            "title": "工具调用"
+          }
+        },
+        {
+          "id": "about",
+          "module": "zeokeel-ui/about",
+          "config": {
+            "title": "关于"
+          }
+        }
+      ]
+    }
+  ]
+}

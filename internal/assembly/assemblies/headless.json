@@ -1,0 +1,20 @@
+{
+  "version": 1,
+  "entries": [
+    {
+      "id": "appinfo",
+      "module": "zeokeel/appinfo",
+      "config": {
+        "name": "ZeoKeel"
+      }
+    },
+    {
+      "id": "toolkit",
+      "module": "zeokeel/toolkit",
+      "config": {
+        "root": ".",
+        "shellTimeoutMs": 30000
+      }
+    }
+  ]
+}

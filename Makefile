@@ -1,78 +1,53 @@
+# ZeoKeel — build, vet and test with the offline Go toolchain.
+#
+# The project is offline-first: dependencies are pinned in go.mod/go.sum and
+# resolved from the local module cache. These are the environment variables the
+# README and the release scripts assume:
+#
+#   GOPROXY=off        never reach the network; fail instead of hanging
+#   GOSUMDB=off        no checksum-database lookups (the module cache is trusted)
+#   GOFLAGS=-mod=mod   let the go command maintain go.mod/go.sum offline
+#
+# Override the toolchain with `make GO=/path/to/go ...`. `make run` starts the
+# desktop product (needs a desktop session); `make run ARGS=--headless` or
+# `make run-headless` starts the headless product.
+
 GO ?= go
-export CGO_ENABLED := 0
+export PATH := /usr/local/go/bin:$(PATH)
+export GOPROXY := off
+export GOSUMDB := off
+export GOFLAGS := -mod=mod
 
-.PHONY: build build-all build-check windows package-windows package-linux package-macos release icon test vet fmt check nocgo clean-check previews visual-check run clean version
+# Extra arguments for `make run` (e.g. ARGS=--headless --data-dir /tmp/zk).
+ARGS ?=
 
-# Every build product lands in dist/ with a stable per-platform name; see
-# scripts/build.sh. Nothing is written to the repository root.
+.PHONY: all build vet test ci run run-headless clean
+
+all: build
+
+# Compile every package, including cmd/zeokeel.
 build:
-	sh scripts/build.sh native
-
-build-all:
-	sh scripts/build.sh all
-
-# Compile check only (writes nothing).
-build-check:
 	$(GO) build ./...
 
-windows:
-	sh scripts/build.sh windows
-
-package-windows:
-	sh scripts/build.sh package-windows
-
-package-linux:
-	sh scripts/build.sh package-linux
-
-package-macos:
-	sh scripts/build.sh package-macos
-
-# Build every release artifact locally (same outputs as the release CI workflow).
-release:
-	sh scripts/release.sh
-
-# Print the version/commit/build time the next build would inject.
-version:
-	@sh -c 'echo "version:    $${ZEOKEEL_VERSION:-$$(git describe --tags --always --dirty 2>/dev/null || echo 0.1.0-dev)}"; \
-	         echo "commit:     $${ZEOKEEL_COMMIT:-$$(git rev-parse --short HEAD 2>/dev/null || echo unknown)}"'
-
-# Regenerate the committed Windows icon resource (needs MinGW windres).
-icon:
-	sh scripts/gen-windows-resource.sh
-
-test:
-	$(GO) test ./...
-
+# Static checks (no build output is written to the repository).
 vet:
 	$(GO) vet ./...
 
-fmt:
-	gofmt -l ./cmd ./internal
+# Unit tests, uncached. Everything is headless-safe: the headless product and
+# the embedded assemblies are exercised without a display environment.
+test:
+	$(GO) test ./... -count=1
 
-check: fmt vet test
-	@test -z "$$(gofmt -l ./cmd ./internal)" || (echo "gofmt needed"; exit 1)
-	sh scripts/check-nocgo.sh
+# What CI runs.
+ci: build vet test
 
-nocgo:
-	sh scripts/check-nocgo.sh
-
-# Verify the committed tree (not the working tree) builds without ignored files.
-clean-check:
-	sh scripts/check-clean-checkout.sh
-
-# Regenerate the visual goldens in docs/design/preview/ (opt-in; review the diff
-# before committing the PNGs). See docs/design/preview/README.md.
-previews:
-	ZEOKEEL_UPDATE_PREVIEWS=1 $(GO) test -count=1 -run 'TestRender.*NativePreview' ./internal/shell
-
-# Same-machine visual regression against the committed goldens (opt-in).
-visual-check:
-	ZEOKEEL_VISUAL=1 $(GO) test -count=1 -run TestVisualRegression ./internal/shell
-
+# Run the desktop product from source (needs a desktop session).
 run:
-	$(GO) run ./cmd/zeokeel
+	$(GO) run ./cmd/zeokeel $(ARGS)
 
-# Removes dist/ and the legacy repo-root binaries (*.test too); keeps .cache/,
-# .probe/ and .evolve/ because those are local state, not build artifacts.
+# Run the headless product from source (no display environment required).
+run-headless:
+	$(GO) run ./cmd/zeokeel --headless $(ARGS)
+
 clean:
-	sh scripts/build.sh clean
+	$(GO) clean ./...
