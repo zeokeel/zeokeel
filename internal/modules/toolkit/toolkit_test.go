@@ -34,7 +34,7 @@ func TestModuleProvidesRigToolset(t *testing.T) {
 	if err != nil {
 		t.Fatalf("require toolkit: %v", err)
 	}
-	if got := len(tools.Specs()); got < 7 {
-		t.Fatalf("registry tools = %d, want at least 7", got)
+	if got := len(tools.Specs()); got < 9 {
+		t.Fatalf("registry tools = %d, want at least 9 (7 builtin + working_directory + todo_write)", got)
 	}
 }

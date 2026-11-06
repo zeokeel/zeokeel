@@ -5,7 +5,7 @@ go 1.27.3
 require (
 	github.com/egoist/mygo v0.7.4
 	github.com/zeokeel/zeokeel-kernel v0.1.1
-	github.com/zeokeel/zeokeel-rig v0.2.0
+	github.com/zeokeel/zeokeel-rig v0.3.0
 )
 
 require (
