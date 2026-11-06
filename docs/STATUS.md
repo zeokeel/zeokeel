@@ -51,7 +51,7 @@
 
 - **交付 13 项**：①工作区变更 inline diff（捕获/统一 diff/事件持久化/可展开 UI/回放）；②`/goal` 命令；③`/compact` 手动压缩 + **会话级持久替换**；④`/goal edit` 保持 goal 身份；⑤`@` 提及细节（`@"带空格路径"` 含引号/反斜杠转义与往返、chevron 下钻、面包屑回跳、跨工作区会话行详情）；⑥会话引用原子化（canonical mention + 受限只读快照作第二条 user 消息注入，Chat 折叠显示）；⑦崩溃中断回合修复（checkpoint consumer 幂等收尾，不重放副作用）；⑧ACP 完整面（list/load/authenticate/fs/terminal/request_permission）；⑨LSP 工具 + 插件页开关 + inspect 配置键；⑩Wayland 全局快捷键（GlobalShortcuts portal，纯 Go D-Bus）；⑪导入器收尾（运行中检测/图片附件迁移/manifest v2/失败回滚）；⑫Chat 流式思考展示与折叠（DSH ReasoningRow 对齐，用户追加）；⑬独立审查 P2 修复 7 项 + REVIEW-3 P1/P2 修复。
 - **明确不做/非对齐项**：反馈联网上送、模型配置剩余限制（用户指定）；PTC/语音（产品决定）；auto-memory、computer-use（经核实 DSH 0.2.1-rc.2 无对应包/能力，非对齐项，见 FIX-REPORT-CLOSURE §0）。
-- **质量**：每项 TDD（RED→GREEN 留档）；3 组独立审查（REVIEW/REVIEW-2/REVIEW-3）；最终 `sh scripts/ci.sh` PASS、`CGO_ENABLED=1 go test -race ./internal/shell` PASS、Windows/darwin 交叉 build PASS、干净 checkout PASS（提交后复跑）。
+- **质量**：每项 TDD（RED→GREEN 留档）；3 组独立审查（REVIEW/REVIEW-2/REVIEW-3，P2 全修、REVIEW-3 P1×2 修复并复验）；最终 `sh scripts/ci.sh` PASS（coverage 80.3%，含 session race 233.6s）、`CGO_ENABLED=1 go test -race ./internal/shell` PASS（528.1s）、Windows/darwin 交叉 build PASS；提交 `f204755`/`63617af` 后 `check-clean-checkout.sh` PASS + `ci.sh --fast` PASS。
 - **收口时修正的过期口径**：BUGS RT-04（per-session Agent 已落地）、FP-05（UI 卡片本轮补 diff）、FP-11（本轮补 consumer）均已关闭；FUNCTIONAL-PARITY 修正 auto-memory/computer-use 的 DSH 归属。
 - **残余/未验**：真实 GNOME/KDE portal、真实 gopls、真机 IME/a11y/DPI/通知/安装包、签名/公证与托管 feed（DEFERRED）——见 known-limitations。
 

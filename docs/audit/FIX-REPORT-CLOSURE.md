@@ -96,4 +96,4 @@
   - `go vet ./...`、`gofmt -l cmd internal` → 干净。
 - **独立验证**：REVIEW（task-12）/REVIEW-2（task-13）均 PASS（仅 P2，已修）；REVIEW-3（task-18）报 P1×2 + P2×4，**全部修复并复验 PASS**（goal driver race 10/10 连续绿；引用注入折叠/候选排序/per-agent 队列；compact summary 识别；思考行 preview 缓存；packaging 文案）；PRE-GATE（task-17）GREEN；VERIFY-FIXES（task-24）PASS。
 - **TDD**：每项先 RED 后 GREEN，证据见 [TDD-RED-EVIDENCE.md](TDD-RED-EVIDENCE.md) §4；无 `tdd_red` 标签残留。
-- **提交后终验**：`sh scripts/check-clean-checkout.sh`（干净 HEAD 构建）与 `sh scripts/ci.sh --fast` 在 docs 提交后的 HEAD 上复跑，结果记录于最终提交信息/会话报告（若复跑失败以该结果为准）。
+- **提交后终验**（HEAD `63617af`）：`sh scripts/check-clean-checkout.sh` → **PASS**（仅 tracked 文件可构建）；`sh scripts/ci.sh --fast` → **PASS**（gofmt/vet/build/全量测试/零 cgo/app 工具可调用）。
