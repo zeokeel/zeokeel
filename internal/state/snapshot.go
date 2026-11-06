@@ -202,6 +202,7 @@ func NewSnapshot() *Snapshot {
 //	Status          replace Snapshot.Phase and Snapshot.TurnReason
 //	TurnEnd         record one turn's terminal reason in Snapshot.TurnMarks
 //	Error           replace Snapshot.LastError with immutable error info
+//	Compaction      remove the replaced messages and insert the summary message
 //
 // Seq is incremented once per applied event. Messages keep the order in which
 // their MsgID first appeared, and a message created by a fold records that
@@ -322,6 +323,8 @@ func Apply(prev *Snapshot, ev Event) *Snapshot {
 		if len(e.Changes) > 0 {
 			next.WorkspaceChanges = append([]WorkspaceChange(nil), e.Changes...)
 		}
+	case Compaction:
+		next.Messages = applyCompactionMessages(prev.Messages, e, next.Seq)
 	default:
 		// Event is a closed set; an unknown implementation can only appear via
 		// type embedding. Advance Seq so replay stays aligned, change nothing.

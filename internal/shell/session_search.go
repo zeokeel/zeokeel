@@ -2,11 +2,16 @@ package shell
 
 import (
 	"context"
+	"sort"
+	"strings"
+	"sync"
+	"time"
 
 	"github.com/egoist/mygo/ui"
 
 	"github.com/zeokeel/zeokeel/internal/design"
 	"github.com/zeokeel/zeokeel/internal/icons"
+	"github.com/zeokeel/zeokeel/internal/sessionreference"
 	"github.com/zeokeel/zeokeel/internal/state"
 	"github.com/zeokeel/zeokeel/internal/store"
 )
@@ -738,4 +743,201 @@ func (a *App) openSearchSelection() {
 	sess := results[a.searchIndex]
 	a.paletteOpen = false
 	a.openSession(sess.ID)
+}
+
+// The composer's "@" menu lists sessions of every workspace, while the
+// sidebar's AR-08 session cache (sessions_cache_async.go) only holds the
+// current workspace. The menu therefore needs its own session data source: one
+// cached copy of every workspace's sessions plus their workspace names, so a
+// frame never queries the store. It lives next to the other session data
+// sources in this file rather than in App because app.go is owned by other
+// changes; like liveMenus and shellUI, its state is keyed by the App.
+
+// mentionSessionCandidate is one session row of the "@" menu: the session, the
+// workspace name to show in its detail when it belongs to a workspace other
+// than the current one ("" for the current workspace, whose rows need no extra
+// location), and the session's working directory (its workspace root), which
+// ranks discovery.
+type mentionSessionCandidate struct {
+	session   store.Session
+	workspace string
+	cwd       string
+}
+
+// mentionSessionListCache caches one App's cross-workspace "@" menu sessions.
+type mentionSessionListCache struct {
+	mu sync.Mutex
+	// workspaceID is the current workspace the workspace labels were built
+	// for: switching workspaces rebuilds the cache synchronously so a stale
+	// label never names the wrong current workspace.
+	workspaceID string
+	items       []mentionSessionCandidate
+	loadedAt    time.Time
+	loading     bool
+}
+
+// mentionSessionCaches maps each App to its "@" menu session data source.
+var mentionSessionCaches sync.Map // map[*App]*mentionSessionListCache
+
+// mentionSessionCandidates returns the "@" menu's session rows: the current
+// workspace's sessions from the cached sidebar list merged with the other
+// workspaces' sessions from this file's cache, most recently updated first.
+// Every workspace is represented so the rows can name the workspace of a
+// session that is not the current one. Both lists are caches, so a row can lag
+// a rename by one TTL; the menu keeps rendering while a background refresh
+// replaces the list.
+func (a *App) mentionSessionCandidates() []mentionSessionCandidate {
+	if a.Ctrl == nil {
+		return nil
+	}
+	current := a.Ctrl.CurrentWorkspaceID()
+	cross := a.crossWorkspaceSessions()
+	// The sidebar cache can still hold the previous workspace for one TTL
+	// after a switch; label those rows from the freshly rebuilt cross cache so
+	// they never read as the current workspace's sessions.
+	labels := make(map[string]string, len(cross))
+	for _, candidate := range cross {
+		if candidate.workspace != "" {
+			labels[candidate.session.ID] = candidate.workspace
+		}
+	}
+	currentRoot := strings.TrimSpace(a.Ctrl.WorkspaceRoot())
+	out := make([]mentionSessionCandidate, 0, maxMentionSessions)
+	seen := make(map[string]struct{}, maxMentionSessions)
+	for _, sess := range a.sessions() {
+		seen[sess.ID] = struct{}{}
+		candidate := mentionSessionCandidate{session: sess, cwd: currentRoot}
+		if sess.WorkspaceID != current {
+			candidate.workspace = labels[sess.ID]
+		}
+		out = append(out, candidate)
+	}
+	for _, candidate := range cross {
+		if _, ok := seen[candidate.session.ID]; ok {
+			continue
+		}
+		out = append(out, candidate)
+	}
+	// Most recently updated first is the base order the menu always had; the
+	// discovery ranking then lifts the current working directory's sessions
+	// above the other workspaces' (DSH's candidate affinity) while keeping the
+	// base order inside each group.
+	sort.SliceStable(out, func(i, j int) bool {
+		return out[i].session.UpdatedAt.After(out[j].session.UpdatedAt)
+	})
+	return rankMentionCandidates(currentRoot, out)
+}
+
+// rankMentionCandidates applies sessionreference.Candidates ordering to the
+// merged "@" menu rows: sessions whose working directory is the caller's come
+// first, untitled sessions still fall back to their id for the reference label,
+// and the incoming order is stable inside each affinity group.
+func rankMentionCandidates(targetCwd string, candidates []mentionSessionCandidate) []mentionSessionCandidate {
+	if len(candidates) < 2 {
+		return candidates
+	}
+	sessions := make([]sessionreference.Session, 0, len(candidates))
+	byID := make(map[string]mentionSessionCandidate, len(candidates))
+	for _, candidate := range candidates {
+		byID[candidate.session.ID] = candidate
+		sessions = append(sessions, sessionreference.Session{
+			ID:    candidate.session.ID,
+			Cwd:   candidate.cwd,
+			Title: candidate.session.Title,
+		})
+	}
+	ranked, err := sessionreference.Candidates(targetCwd, "", len(sessions), sessions)
+	if err != nil || len(ranked) != len(sessions) {
+		return candidates
+	}
+	out := make([]mentionSessionCandidate, 0, len(ranked))
+	for _, candidate := range ranked {
+		out = append(out, byID[candidate.SessionID])
+	}
+	return out
+}
+
+// crossWorkspaceSessions returns the cached sessions outside the current
+// workspace, refreshing them in the background once they are stale. The first
+// load (and the first load after a workspace switch) is synchronous so the
+// menu starts with real data, exactly like the sidebar's session cache.
+func (a *App) crossWorkspaceSessions() []mentionSessionCandidate {
+	current := a.Ctrl.CurrentWorkspaceID()
+	cache := &mentionSessionListCache{}
+	if existing, ok := mentionSessionCaches.Load(a); ok {
+		cache = existing.(*mentionSessionListCache)
+	} else {
+		actual, _ := mentionSessionCaches.LoadOrStore(a, cache)
+		cache = actual.(*mentionSessionListCache)
+	}
+	cache.mu.Lock()
+	sameWorkspace := cache.workspaceID == current
+	fresh := sameWorkspace && !cache.loadedAt.IsZero() &&
+		time.Since(cache.loadedAt) < shellListFreshFor
+	items := cache.items
+	loading := cache.loading
+	cache.mu.Unlock()
+	if fresh || loading {
+		return items
+	}
+	if !sameWorkspace || cache.loadedAt.IsZero() {
+		list, err := a.loadCrossWorkspaceSessions(current)
+		if err != nil {
+			return nil
+		}
+		cache.mu.Lock()
+		cache.workspaceID = current
+		cache.items = list
+		cache.loadedAt = time.Now()
+		cache.mu.Unlock()
+		return list
+	}
+	cache.mu.Lock()
+	cache.loading = true
+	cache.mu.Unlock()
+	go func() {
+		list, err := a.loadCrossWorkspaceSessions(current)
+		cache.mu.Lock()
+		cache.loading = false
+		if err == nil {
+			cache.workspaceID = current
+			cache.items = list
+			cache.loadedAt = time.Now()
+		}
+		cache.mu.Unlock()
+	}()
+	return items
+}
+
+// loadCrossWorkspaceSessions queries every workspace's sessions and labels the
+// sessions outside currentWorkspaceID with their workspace name.
+func (a *App) loadCrossWorkspaceSessions(currentWorkspaceID string) ([]mentionSessionCandidate, error) {
+	ctx := context.Background()
+	sessions, err := a.Ctrl.SessionsForWorkspace(ctx, "", true, false)
+	if err != nil {
+		return nil, err
+	}
+	workspaces, err := a.Ctrl.ListWorkspaces(ctx)
+	if err != nil {
+		return nil, err
+	}
+	names := make(map[string]string, len(workspaces))
+	roots := make(map[string]string, len(workspaces))
+	for _, ws := range workspaces {
+		names[ws.ID] = strings.TrimSpace(ws.Name)
+		roots[ws.ID] = strings.TrimSpace(ws.Root)
+	}
+	out := make([]mentionSessionCandidate, 0, len(sessions))
+	for _, sess := range sessions {
+		name := ""
+		if sess.WorkspaceID != currentWorkspaceID {
+			name = names[sess.WorkspaceID]
+		}
+		out = append(out, mentionSessionCandidate{
+			session:   sess,
+			workspace: name,
+			cwd:       roots[sess.WorkspaceID],
+		})
+	}
+	return out, nil
 }

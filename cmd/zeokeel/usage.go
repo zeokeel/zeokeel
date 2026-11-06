@@ -10,7 +10,7 @@ Usage:
   zeokeel run [flags] "<prompt>"   run one prompt headless (no window, no tray)
   zeokeel run --help      headless flags: --json, --yes, --model ...
   zeokeel import [flags]  migrate DSH sessions into this data directory
-  zeokeel import --help   import flags: --from, --dry-run, --json, --max
+  zeokeel import --help   import flags: --from, --dry-run, --json, --max, --force
   zeokeel acp             run the ACP v1 agent server on stdio (editors/clients)
   zeokeel update [flags]  check/download/install a ZeoKeel update (--check/--download/--install/--json)
   zeokeel --version       print build version, commit and platform

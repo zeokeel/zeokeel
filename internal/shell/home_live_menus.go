@@ -33,6 +33,13 @@ type liveMenuState struct {
 	// folds independently now that the transcript has one block per turn.
 	toolSummaryCollapsed map[string]bool
 
+	// reasoningExpanded is the transcript's per-turn "Think" disclosure state,
+	// keyed by the assistant message that owns the reasoning. Reasoning rows
+	// are collapsed by default; an expanded row keeps its body open across
+	// frames, tab switches and the turn ending (the key is the persisted
+	// message id, so a reopened transcript can expand its old reasoning too).
+	reasoningExpanded map[string]bool
+
 	// pendingTurn is the turn a jump control asked to reveal. The next frame
 	// scrolls that turn's first message into view and clears it.
 	pendingTurn int

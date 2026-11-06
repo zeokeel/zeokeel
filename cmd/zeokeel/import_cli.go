@@ -21,11 +21,15 @@ import (
 const importUsage = `Usage: zeokeel import [options]
 
 Migrate DSH (DeepSeek Harness) sessions into this ZeoKeel data directory.
-This is the minimal import (technical preview): text conversations are
-imported; tool calls are counted/summarized, images/attachments/trajectory are
-not, and subagent sessions are skipped unless --include-subagents is given.
-The DSH data is read, never modified. Credential key names are listed in the
-report; values are never read, printed or stored. Start with --dry-run.
+User/assistant text and reasoning are imported; images and file attachments are
+migrated as ZeoKeel attachments linked to their message (tool calls/results and
+trajectory are still not imported), and subagent sessions are skipped unless
+--include-subagents is given. The DSH data is read, never modified. Credential
+key names are listed in the report; values are never read, printed or stored.
+Start with --dry-run.
+
+A real import is refused while the ZeoKeel desktop app is running for this data
+directory: quit the app first. Pass --force to import anyway (not recommended).
 
 Options:
   --from <dir>          DSH data directory (default: ~/.dsh)
@@ -35,13 +39,11 @@ Options:
   --include-subagents   Also import sessions whose header origin is subagent
   --manifest <file>     Idempotency manifest (default: <data dir>/dsh-import-manifest.json)
   --no-manifest         Disable idempotency: re-import every session on every run
+  --force               Import even if the desktop app appears to be running
   -h, --help            Show this help
 
-Exit codes: 0 import completed (0 sessions is not an error), 1 DSH not found /
-store error / some sessions failed, 2 usage error.
-
-Quit the desktop app before importing: a running app may be writing to the same
-data directory.
+Exit codes: 0 import completed (0 sessions is not an error), 1 app running /
+DSH not found / store error / some sessions failed, 2 usage error.
 `
 
 // DefaultImportManifestName is the per-data-directory idempotency manifest used
@@ -49,6 +51,11 @@ data directory.
 // size / mtime) so a repeated import skips unchanged sessions instead of
 // duplicating conversations (PD-04 X4).
 const DefaultImportManifestName = "dsh-import-manifest.json"
+
+// probeInstanceLock is the seam over app.ProbeInstanceLock: a real import must
+// be refused while the desktop app holds the data directory's single-instance
+// lock. It is a variable so cmd-level tests can simulate a running app.
+var probeInstanceLock = app.ProbeInstanceLock
 
 // importOptions is the parsed `zeokeel import` command line.
 type importOptions struct {
@@ -60,6 +67,7 @@ type importOptions struct {
 	includeSubagents bool
 	manifest         string
 	noManifest       bool
+	force            bool
 }
 
 // parseImportArgs parses the import flags. Unknown flags are usage errors so a
@@ -95,6 +103,8 @@ func parseImportArgs(args []string) (importOptions, error) {
 			opts.manifest = strings.TrimPrefix(arg, "--manifest=")
 		case arg == "--no-manifest":
 			opts.noManifest = true
+		case arg == "--force":
+			opts.force = true
 		case arg == "--max":
 			if i+1 >= len(args) {
 				return opts, fmt.Errorf("--max needs a number")
@@ -138,6 +148,31 @@ func runImportCLI(args []string, stdout, stderr io.Writer) int {
 	}
 
 	ctx := context.Background()
+	// Refuse a real import while the desktop app holds this data directory's
+	// single-instance lock (residual PD-04 item): the app may be writing the
+	// same database, and the import opens the same store. The lock probe is
+	// non-blocking and never keeps the lock. --force is the explicit escape
+	// hatch; a probe failure warns instead of blocking (the store's own locking
+	// still protects the data).
+	if !opts.dryRun {
+		running, probeErr := probeInstanceLock(app.DataDir())
+		switch {
+		case probeErr != nil:
+			fmt.Fprintf(stderr, "zeokeel import: warning: cannot check whether ZeoKeel is running in %s: %v\n", app.DataDir(), probeErr)
+		case running != nil:
+			owner := app.DataDir()
+			if running.PID > 0 {
+				owner = fmt.Sprintf("%s (pid %d)", owner, running.PID)
+			}
+			if !opts.force {
+				fmt.Fprintf(stderr,
+					"zeokeel import: ZeoKeel appears to be running for data directory %s.\nQuit the desktop app before importing, or re-run with --force to import anyway.\n",
+					owner)
+				return 1
+			}
+			fmt.Fprintf(stderr, "zeokeel import: warning: ZeoKeel appears to be running for data directory %s; continuing because --force was given.\n", owner)
+		}
+	}
 	// Idempotency manifest: default to a per-data-directory file so running the
 	// command twice does not duplicate sessions (PD-04 X4). --no-manifest keeps
 	// the historical re-import-everything behaviour.
@@ -213,8 +248,12 @@ func printImportReport(w io.Writer, r *importer.Report) {
 	if r.CompressedInput {
 		fmt.Fprintln(w, "input: some sessions were zstd-compressed")
 	}
-	if r.ImagesDropped > 0 {
-		fmt.Fprintf(w, "images: %d dropped (minimal import migrates text conversations only)\n", r.ImagesDropped)
+	if r.ImagesMigrated > 0 || r.AttachmentsMigrated > 0 {
+		fmt.Fprintf(w, "attachments: %d image(s) and %d file(s) migrated\n", r.ImagesMigrated, r.AttachmentsMigrated)
+	}
+	if r.ImagesDropped > 0 || r.AttachmentsDropped > 0 {
+		fmt.Fprintf(w, "attachments: %d image(s) and %d file(s) skipped (source missing, too large or unreadable)\n",
+			r.ImagesDropped, r.AttachmentsDropped)
 	}
 	if len(r.Skips) > 0 {
 		keys := make([]string, 0, len(r.Skips))

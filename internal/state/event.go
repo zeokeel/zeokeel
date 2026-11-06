@@ -171,6 +171,23 @@ func (Error) isEvent() {}
 type WorkspaceChange struct {
 	Path   string `json:"path"`
 	Status string `json:"status"` // added|modified|deleted
+	// Diff is the persisted unified diff body for the file: @@ hunk headers
+	// with context, added and removed lines, without file headers. It is kept
+	// in the event itself (bounded by the runtime's per-turn byte budget) so
+	// replaying a reopened session renders the same inline diff without
+	// touching the workspace.
+	Diff string `json:"diff,omitempty"`
+	// Added and Removed are the comparison's changed-line counts.
+	Added   int `json:"added,omitempty"`
+	Removed int `json:"removed,omitempty"`
+	// Binary marks a file with NUL bytes: no text comparison exists.
+	Binary bool `json:"binary,omitempty"`
+	// Oversized marks a file above the capture size limit.
+	Oversized bool `json:"oversized,omitempty"`
+	// Coarse marks a diff that degraded to a whole-file replacement.
+	Coarse bool `json:"coarse,omitempty"`
+	// Truncated marks a diff cut by the per-file or per-turn byte budget.
+	Truncated bool `json:"truncated,omitempty"`
 }
 
 // WorkspaceChanges reports the files one completed turn changed in the

@@ -1,23 +1,34 @@
 ZeoKeel for Linux
 =================
 
-ZeoKeel is a pure-Go desktop AI agent. This package is a single static binary
-with no runtime dependencies (no cgo, no webview, no Node).
+ZeoKeel is a pure-Go desktop AI agent: the application itself builds with
+CGO_ENABLED=0 and carries no webview or Node runtime. The binary is linked
+against the system glibc by the graphics layer's purego/fakecgo shim, so it is
+NOT a static Alpine/scratch binary: run it on a glibc-based distribution
+(Debian/Ubuntu, Fedora, ...). It also loads the X11 libraries at runtime (see
+Requirements); both of those are the package's runtime dependencies.
 
 Install
 -------
 
-  tar -xzf zeokeel-linux-amd64.tar.gz
-  cd zeokeel-<version>-linux-amd64
+  tar -xzf zeokeel-linux-<arch>.tar.gz     # e.g. zeokeel-linux-amd64.tar.gz
+  cd zeokeel-linux-<arch>                  # e.g. zeokeel-linux-amd64
   ./zeokeel
+
+The archive directory is named zeokeel-linux-<arch> with no version number;
+the release version is embedded in the binary and printed by
+`./zeokeel --version`.
 
 Requirements
 ------------
 
 * Linux x86-64 or aarch64.
-* An X11 desktop session. ZeoKeel runs natively (mygo) but renders through the
-  platform graphics stack, so a headless machine needs Xvfb (`xvfb-run -a
-  ./zeokeel`) for screenshots/tests.
+* glibc (the binary is dynamically linked; musl-only systems such as Alpine are
+  not supported by this package).
+* An X11 desktop session with the usual X11 client libraries (libX11 is loaded
+  via dlopen). ZeoKeel runs natively (mygo) but renders through the platform
+  graphics stack, so a headless machine needs Xvfb (`xvfb-run -a ./zeokeel`)
+  for screenshots/tests.
 * A model provider API key: set `DEEPSEEK_API_KEY` in the environment or add a
   provider in Settings. The key is stored in the app data directory, never in
   this package.
@@ -34,7 +45,8 @@ Data and logs
 Report a bug with the output of `./zeokeel --version` and the newest files
 under `~/.zeokeel/logs/`.
 
-Package checksums are in SHA256SUMS.txt next to the archive.
+Package checksums are in dist/SHA256SUMS.txt next to the archive (and as a
+GitHub release asset); the file is not inside the tar.gz.
 
 Unsigned package: this build is not GPG-signed. Verify the SHA-256 digest and
 build from source (`make build`) if you need provenance.

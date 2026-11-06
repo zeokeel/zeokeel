@@ -16,6 +16,14 @@
 // The package is deliberately side-effect free beyond reading the workspace:
 // the app captures a snapshot before a turn, captures again after it, and emits
 // state.WorkspaceChanges so the UI/telemetry can show what the turn touched.
+//
+// A Turn (see content.go) upgrades that summary to a per-file inline
+// comparison: it retains the bounded start-of-turn content during the capture,
+// takes the file tools' target paths from their ToolStart events, and produces
+// a unified diff with three lines of context for each changed file, degrading
+// to a coarse whole-file diff when a change is too large or too slow to align.
+// The session event persists the diff text (within MaxTurnDiffBytes) so a
+// reopened session replays the same comparison.
 package workspacechanges
 
 import (
@@ -23,7 +31,6 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -83,10 +90,29 @@ type Snapshot struct {
 	Files map[string]FileState
 }
 
-// Change is one file that differs between two snapshots.
+// Change is one file that differs between two snapshots. Diff carries the
+// richer per-file comparison for a turn report (the file-tool/end-of-turn
+// content compared with the start-of-turn baseline); a plain snapshot diff
+// leaves the optional fields zero.
 type Change struct {
 	Path   string `json:"path"`
 	Status string `json:"status"`
+	// Diff is the persisted unified diff body: @@ hunk headers plus
+	// context, added and removed lines, without file headers. Empty when no
+	// text comparison exists (binary, oversized) or the byte budget dropped
+	// it (Truncated).
+	Diff string `json:"diff,omitempty"`
+	// Added and Removed are the comparison's changed-line counts.
+	Added   int `json:"added,omitempty"`
+	Removed int `json:"removed,omitempty"`
+	// Binary marks a file with NUL bytes: no text comparison exists.
+	Binary bool `json:"binary,omitempty"`
+	// Oversized marks a file above MaxContentFileBytes on either side.
+	Oversized bool `json:"oversized,omitempty"`
+	// Coarse marks a comparison that degraded to a whole-file replacement.
+	Coarse bool `json:"coarse,omitempty"`
+	// Truncated marks a diff cut by the per-file or per-turn byte limit.
+	Truncated bool `json:"truncated,omitempty"`
 }
 
 // IsGit reports whether root (or an ancestor) is a Git work tree. It is cheap:
@@ -349,9 +375,15 @@ func sameFile(a, b FileState) bool {
 	}
 }
 
-// runGit runs one git command in root and returns stdout.
+// runGit runs one git command in root and returns stdout. GIT_OPTIONAL_LOCKS=0
+// keeps read-only queries (status, cat-file) from refreshing and rewriting the
+// repository index, so capturing a snapshot never mutates the repository.
 func runGit(ctx context.Context, root string, args ...string) (string, error) {
 	cmd := exec.CommandContext(ctx, "git", append([]string{"-C", root, "-c", "core.quotepath=false"}, args...)...)
+	cmd.Env = append(os.Environ(),
+		"GIT_OPTIONAL_LOCKS=0",
+		"GIT_TERMINAL_PROMPT=0",
+	)
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
@@ -370,19 +402,4 @@ func firstLine(s string) string {
 		return s[:i]
 	}
 	return s
-}
-
-// ToStateChanges converts package changes into the session event payload
-// (state.WorkspaceChanges JSON). It lives here so the app does not need to
-// import the runtime event type for such a small conversion.
-func ToStateChanges(turnID string, changes []Change) []byte {
-	payload := struct {
-		TurnID  string   `json:"turn_id,omitempty"`
-		Changes []Change `json:"changes"`
-	}{TurnID: turnID, Changes: changes}
-	encoded, err := json.Marshal(payload)
-	if err != nil {
-		return []byte(`{"changes":[]}`)
-	}
-	return encoded
 }

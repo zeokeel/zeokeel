@@ -90,18 +90,9 @@ func (c WindowCompactor) Compact(ctx context.Context, sessionID string, messages
 	}
 
 	// Preserve system messages in their original relative order, and replace a
-	// summary from an earlier compaction with the fresh one below.
-	system := make([]Message, 0, len(messages))
-	rest := make([]Message, 0, len(messages))
-	for _, msg := range messages {
-		if msg.Role == RoleSystem {
-			if !isCompactionSummary(msg) {
-				system = append(system, msg)
-			}
-			continue
-		}
-		rest = append(rest, msg)
-	}
+	// summary from an earlier compaction (either role it was stored with) with
+	// the fresh one below.
+	system, rest := splitCompactionConversation(messages)
 
 	if len(rest) <= keepLast {
 		// Nothing to drop: leave the conversation untouched (including any
@@ -130,8 +121,56 @@ func (c WindowCompactor) Compact(ctx context.Context, sessionID string, messages
 	return out, nil
 }
 
+// isCompactionSummary reports whether msg is a summary produced by an earlier
+// compaction. A compacted conversation's summary is a synthetic system message
+// at the runtime level, but a manually compacted session persists its summary
+// as an assistant row (the app's storeHistory maps only user/assistant rows),
+// so the recognizer keys on the stable content marker and accepts both roles.
+// Recognition is what lets a later compaction replace the previous summary
+// instead of treating it as an ordinary answer, including after a reopen.
 func isCompactionSummary(msg Message) bool {
-	return msg.Role == RoleSystem && strings.HasPrefix(msg.Content, compactionSummaryPrefix)
+	if msg.Role != RoleSystem && msg.Role != RoleAssistant {
+		return false
+	}
+	return strings.HasPrefix(msg.Content, compactionSummaryPrefix)
+}
+
+// splitCompactionConversation partitions a conversation for compaction: system
+// messages are preserved in order, and a previous compaction summary (whatever
+// role it was persisted with) is dropped so the fresh summary replaces it
+// instead of competing with it. The remaining messages are the compaction
+// window candidates.
+func splitCompactionConversation(messages []Message) (system, rest []Message) {
+	system = make([]Message, 0, len(messages))
+	rest = make([]Message, 0, len(messages))
+	for _, msg := range messages {
+		if isCompactionSummary(msg) {
+			continue
+		}
+		if msg.Role == RoleSystem {
+			system = append(system, msg)
+			continue
+		}
+		rest = append(rest, msg)
+	}
+	return system, rest
+}
+
+// CompactionSummaryContent renders the stable content of a persisted compaction
+// summary. The shell's manual /compact stores the summary as an assistant row
+// (see internal/session controller_compact.go), so the content must carry the
+// marker isCompactionSummary recognizes even when a custom Compactor's summary
+// text does not: an already framed summary passes through unchanged.
+func CompactionSummaryContent(dropped int, summary string) string {
+	summary = strings.TrimSpace(summary)
+	if strings.HasPrefix(summary, compactionSummaryPrefix) {
+		return summary
+	}
+	frame := fmt.Sprintf("%s%d messages)", compactionSummaryPrefix, dropped)
+	if summary == "" {
+		return frame
+	}
+	return frame + "\n\n" + summary
 }
 
 // compactionBoundary returns the index into rest where the retained tail

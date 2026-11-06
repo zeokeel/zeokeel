@@ -53,6 +53,8 @@ var (
 	slashFileIcon     = ui.MustParseSVG([]byte(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"><path d="M12.8 6.9 7.5 12.2a2.6 2.6 0 0 1-3.7-3.7l5.6-5.6a1.8 1.8 0 0 1 2.5 2.5l-5.5 5.5a.9.9 0 0 1-1.3-1.3l5-5"/></svg>`))
 	slashFeedbackIcon = ui.MustParseSVG([]byte(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"><path d="M14.2 2.2 2.4 6.5l4.3 2.2 2.2 4.3z"/><path d="M14.2 2.2 6.7 8.7"/></svg>`))
 	slashExportIcon   = ui.MustParseSVG([]byte(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"><path d="M8 2.6v6.8M5 6.6 8 9.6l3-3"/><path d="M2.8 11.2v1.4a1.4 1.4 0 0 0 1.4 1.4h7.6a1.4 1.4 0 0 0 1.4-1.4v-1.4"/></svg>`))
+	slashGoalIcon     = ui.MustParseSVG([]byte(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"><circle cx="8" cy="8" r="5.4"/><circle cx="8" cy="8" r="1.7"/></svg>`))
+	slashCompactIcon  = ui.MustParseSVG([]byte(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"><path d="M8 1.9v4.2M6.2 4.3 8 6.1l1.8-1.8M8 14.1V9.9M6.2 11.7 8 9.9l1.8 1.8"/></svg>`))
 	// mentionFileIcon is the plain-document row glyph of the "@" menu; its
 	// folder and session faces reuse internal/icons.
 	mentionFileIcon = ui.MustParseSVG([]byte(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 1.6h5l3 3v9.8H4z"/><path d="M9 1.8v3h3"/></svg>`))
@@ -84,6 +86,14 @@ var slashCommands = []slashCommand{
 		"Choose the model this session uses",
 		"选择本会话使用的模型",
 		slashGroupCommand, func() *ui.SVG { return icons.Data() }},
+	{"/goal", "Session goal", "会话目标",
+		"Create, pause, resume or clear the session goal",
+		"创建、暂停、恢复或清除会话目标",
+		slashGroupCommand, func() *ui.SVG { return slashGoalIcon }},
+	{"/compact", "Compact conversation", "压缩对话",
+		"Replace older history with a summary now",
+		"立即用摘要替换较早的历史",
+		slashGroupCommand, func() *ui.SVG { return slashCompactIcon }},
 	{"/export", "Export log", "下载日志",
 		"Export this session's log to a file",
 		"将会话日志导出为文件",
@@ -344,6 +354,12 @@ func quotedMentionTrigger(runes []rune, caret int) (composerTrigger, bool) {
 		}
 		closeAt := -1
 		for j := contentStart; j < len(runes); j++ {
+			// A backslash escapes the next rune, so an escaped quote inside the
+			// path is content, not the closing delimiter.
+			if runes[j] == '\\' && j+1 < len(runes) {
+				j++
+				continue
+			}
 			if runes[j] == quote {
 				closeAt = j
 				break
@@ -366,7 +382,7 @@ func quotedMentionTrigger(runes []rune, caret int) (composerTrigger, bool) {
 			contentEnd = contentStart
 		}
 		return composerTrigger{kind: composerTriggerMention, quoted: true,
-			closed: closeAt >= 0, query: string(runes[contentStart:contentEnd]),
+			closed: closeAt >= 0, query: unescapeMentionPath(string(runes[contentStart:contentEnd])),
 			start: i, end: tokenEnd}, true
 	}
 	return composerTrigger{}, false
@@ -399,28 +415,75 @@ func needsMentionQuotes(path string) bool {
 	return strings.ContainsAny(path, " \t\r\n\"'")
 }
 
+// escapeMentionPath escapes a path for the quoted @"..." token grammar. The
+// double quote and the backslash are the only characters that grammar treats
+// specially, so a path like a"b.txt is inserted as @"a\"b.txt" and parses back
+// to the exact workspace path instead of ending the token at the inner quote.
+func escapeMentionPath(path string) string {
+	if !strings.ContainsAny(path, "\\\"") {
+		return path
+	}
+	var b strings.Builder
+	for _, r := range path {
+		if r == '\\' || r == '"' {
+			b.WriteByte('\\')
+		}
+		b.WriteRune(r)
+	}
+	return b.String()
+}
+
+// unescapeMentionPath reverses escapeMentionPath: a backslash makes the next
+// rune literal, so the parsed query is the real workspace path. A trailing
+// backslash (an escape still being typed) stays literal.
+func unescapeMentionPath(content string) string {
+	if !strings.Contains(content, "\\") {
+		return content
+	}
+	var b strings.Builder
+	escaped := false
+	for _, r := range content {
+		if escaped {
+			b.WriteRune(r)
+			escaped = false
+			continue
+		}
+		if r == '\\' {
+			escaped = true
+			continue
+		}
+		b.WriteRune(r)
+	}
+	if escaped {
+		b.WriteByte('\\')
+	}
+	return b.String()
+}
+
 // mentionToken spells a workspace path as an @ token, quoting it when needed or
-// when the live token already uses the quoted form. A drill that keeps the
-// token open (no closing quote yet) leaves the quote open too, so the next
-// keystroke continues the path inside the quotes; a completed pick uses the
-// canonical closed form.
+// when the live token already uses the quoted form. Inside the quotes the path
+// is escaped, so a path containing a double quote round-trips through the
+// token grammar. A drill that keeps the token open (no closing quote yet) leaves
+// the quote open too, so the next keystroke continues the path inside the
+// quotes; a completed pick uses the canonical closed form.
 func (a *App) mentionToken(path string, quoted, closed bool) string {
 	if quoted || needsMentionQuotes(path) {
+		escaped := escapeMentionPath(path)
 		if !closed {
-			return "@\"" + path
+			return "@\"" + escaped
 		}
-		return "@\"" + path + "\""
+		return "@\"" + escaped + "\""
 	}
 	return "@" + path
 }
 
-// mentionDisplayLabel is the row label for a workspace path: spaced paths show
-// their quoted spelling so the row and the composer token match.
+// mentionDisplayLabel is the row label for a workspace path: quoted paths show
+// their escaped spelling so the row and the composer token match.
 func mentionDisplayLabel(choice mentionChoice) string {
 	if choice.session || !needsMentionQuotes(choice.value) {
 		return choice.label
 	}
-	return "@\"" + choice.value + "\""
+	return "@\"" + escapeMentionPath(choice.value) + "\""
 }
 
 // recordComposerCaret remembers the composer caret for trigger detection. The
@@ -950,22 +1013,26 @@ func (a *App) runFeedbackCommand(args string) {
 	}
 }
 
-// slashHelpText is /help's draft text: the full command list, the automatic
-// compaction note, and the documented fate of unknown slash lines.
+// slashHelpText is /help's draft text: the full command list, the compaction
+// note (automatic and manual), and the documented fate of unknown slash lines.
 func (a *App) slashHelpText() string {
 	return a.menuText(
-		"Commands: /file /plan /feedback · /permission /model /export · /clear /stop /help /new /settings /automate /plugins. "+
+		"Commands: /file /plan /feedback · /permission /model /goal /compact /export · /clear /stop /help /new /settings /automate /plugins. "+
 			"/file opens the attachment picker (/file <path> attaches a workspace file); /plan enters plan mode (/plan off leaves it, /plan <message> starts with it); "+
 			"/permission read-only|workspace|full|auto changes the access mode; /feedback good|bad rates the last answer; /export saves the session log. "+
+			"/goal shows or controls the session goal (/goal <objective> creates one, /goal edit <objective> replaces it, /goal pause|resume|complete|abandon|clear control it). "+
 			"@ mentions complete workspace files and folders (Tab drills into a folder, Esc walks back); a path with spaces can be quoted as @\"my file.txt\". "+
-			"Session mentions insert the documented #title text reference; there is no atomic session reference in this build. "+
-			"Compaction is automatic (the runtime compacts long conversations before a turn); there is no manual command. Unknown commands are sent to the model as a normal message.",
-		"命令：/file /plan /feedback · /permission /model /export · /clear /stop /help /new /settings /automate /plugins。"+
+			"Session mentions insert the atomic @[label](dsh-session:<id>) reference and add the referenced session's bounded read-only context to the next request. "+
+			"Compaction is automatic (the runtime compacts long conversations before a turn); /compact compacts the current conversation now. "+
+			"Unknown commands are sent to the model as a normal message.",
+		"命令：/file /plan /feedback · /permission /model /goal /compact /export · /clear /stop /help /new /settings /automate /plugins。"+
 			"/file 打开附件选择器（/file <路径> 直接附加工作区文件）；/plan 进入计划模式（/plan off 退出，/plan <消息> 以计划模式发送）；"+
 			"/permission read-only|workspace|full|auto 切换访问模式；/feedback good|bad 评价最后一条回答；/export 保存会话日志。"+
+			"/goal 查看或控制会话目标（/goal <目标> 创建，/goal edit <目标> 替换目标，/goal pause|resume|complete|abandon|clear 控制生命周期）。"+
 			"@ 提及会补全工作区文件与文件夹（Tab 进入文件夹、Esc 逐级返回）；含空格的路径可写成 @\"my file.txt\"。"+
-			"会话提及插入文档化的 #标题 文本引用；本 build 没有原子 session 引用。"+
-			"压缩是自动的（运行时会在每轮开始前压缩过长的对话）；没有手动命令。未知命令会作为普通消息发送给模型。")
+			"会话提及插入原子 @[label](dsh-session:<id>) 引用，并在下一请求中附带被引用会话的有界只读上下文。"+
+			"压缩是自动的（运行时会在每轮开始前压缩过长的对话）；/compact 可立即压缩当前对话。"+
+			"未知命令会作为普通消息发送给模型。")
 }
 
 // queueToast stores a message for the next frame's View, which is where mygo

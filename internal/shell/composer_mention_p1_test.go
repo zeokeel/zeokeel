@@ -299,7 +299,7 @@ func TestQuotedMentionNarrowDark(t *testing.T) {
 }
 
 // TestSlashHelpDocumentsMentionSyntax pins the /help note for quoted paths and
-// the session-reference fallback.
+// the canonical session reference with its bounded read-only context.
 func TestSlashHelpDocumentsMentionSyntax(t *testing.T) {
 	h := newLiveApp(t, &shellProvider{})
 	h.app.Language = LangEN
@@ -309,8 +309,8 @@ func TestSlashHelpDocumentsMentionSyntax(t *testing.T) {
 	for _, want := range []string{
 		"@ mentions complete workspace files",
 		`@"my file.txt"`,
-		"#title",
-		"no atomic session reference",
+		"atomic @[label](dsh-session:",
+		"bounded read-only context",
 	} {
 		if !strings.Contains(h.app.draft, want) {
 			t.Fatalf("/help text missing %q: %q", want, h.app.draft)

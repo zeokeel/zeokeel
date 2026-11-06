@@ -3,11 +3,16 @@
 //
 // # Status
 //
-// Implemented: Windows (RegisterHotKey message loop) and Linux/X11 (pure-Go
-// dlopen of libX11 via purego). macOS stays ErrUnsupported (Carbon/Cocoa needs
-// cgo, which the CGO_ENABLED=0 hard constraint forbids). Headless sessions on
-// every platform degrade to ErrUnsupported and the shell falls back to in-app
-// shortcuts.
+// Implemented:
+//   - Windows (RegisterHotKey message loop);
+//   - Linux/X11 (pure-Go dlopen of libX11 via purego);
+//   - Linux/Wayland via the xdg-desktop-portal org.freedesktop.portal.GlobalShortcuts
+//     interface, spoken through a minimal pure-Go D-Bus client
+//     (wayland_linux.go + dbus_linux.go);
+//   - macOS (pure-Go dlopen of Carbon/HIToolbox).
+//
+// Headless sessions on every platform degrade to ErrUnsupported and the shell
+// falls back to in-app shortcuts.
 //
 // # Design
 //
@@ -18,8 +23,8 @@
 //     close semantics) and delegates the actual OS registration to a backend.
 //   - The backend seam (`backend`) is unexported and injected in tests, so the
 //     logic is testable on any platform; New() selects the real backend by
-//     GOOS: Windows uses RegisterHotKey, Linux/macOS return ErrUnsupported
-//     until a dependency-free implementation exists (see docs/BUGS.md).
+//     GOOS: Windows uses RegisterHotKey, Linux picks X11 or the Wayland portal,
+//     macOS uses Carbon.
 //   - Registration failures from the OS are surfaced as ErrOccupied (another
 //     application already owns the shortcut) or wrapped errors; callers keep
 //     the app usable instead of failing startup.
@@ -37,6 +42,24 @@
 //	         after XSync) maps to ErrOccupied. Headless (no $DISPLAY) and
 //	         Wayland-only sessions without a usable X display return
 //	         ErrUnsupported.
+//	Linux/Wayland: implemented (wayland_linux.go): detection order is Wayland
+//	         session ($XDG_SESSION_TYPE=wayland or $WAYLAND_DISPLAY set) ->
+//	         org.freedesktop.portal.GlobalShortcuts; X11/XWayland remains the
+//	         fallback when the portal is missing, and non-Wayland sessions never
+//	         touch D-Bus. The portal flow is CreateSession -> BindShortcuts ->
+//	         Activated, with a minimal pure-Go D-Bus client (AF_UNIX session bus,
+//	         SASL EXTERNAL, Hello, method_call/reply, signals, little-endian
+//	         encoding and both byte orders on decode). BindShortcuts consent is
+//	         asynchronous: registration succeeds when the portal accepts the
+//	         method call instead of blocking app startup on the user dialog. A
+//	         changed shortcut set is rebound in a fresh session because the
+//	         portal allows only one BindShortcuts request per session.
+//	         Caveat: implemented from the published portal/D-Bus specifications
+//	         and tested against a fake portal over a unix socket (plus a real
+//	         dbus-daemon for the transport), but NOT validated against a real
+//	         GNOME/KDE portal. Compositor-specific consent dialogs, shortcut-id
+//	         persistence and Activated delivery should be verified on a real
+//	         Wayland desktop before advertising the feature.
 //	macOS:   implemented for GUI sessions (globalhotkey_darwin.go): pure-Go
 //	         dlopen of Carbon.framework/HIToolbox via purego, using the
 //	         deprecated but still-shipped Carbon hot-key API
@@ -55,16 +78,4 @@
 //	         ErrUnsupported/ErrOccupied and never crash startup. A future round
 //	         should validate on a real Mac and otherwise keep the CGEventTap
 //	         helper-process option as a fallback.
-//
-// # Linux / Wayland deferred path
-//
-// Native Wayland forbids global key grabs by design. The supported API is the
-// D-Bus desktop portal org.freedesktop.portal.GlobalShortcuts
-// (GlobalShortcuts1), which needs a D-Bus client plus a portal implementation
-// of a recent enough version on the desktop. ZeoKeel has no pure-Go D-Bus
-// dependency today, and the portal API is still not implemented by several
-// compositors, so a native Wayland backend is deferred: under Wayland sessions
-// that expose no usable X display, New() returns ErrUnsupported and the shell
-// keeps in-app shortcuts. When XWayland is present with working grabs, the X11
-// path may work, depending on the compositor's security policy.
 package globalhotkey

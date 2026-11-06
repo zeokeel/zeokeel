@@ -116,9 +116,11 @@ func (d *GoalRoundDriver) goalChanged(sessionID string, previous, next *tools.Go
 }
 
 // isNewGoal reports whether next starts a fresh goal rather than updating the
-// active objective. A progress or step update for the same active objective is
-// not a new goal; changing the objective, or reopening a completed/abandoned
-// goal, is. A nil next clears the goal and is treated as a fresh start.
+// current one. A progress, step or objective edit for the same goal instance
+// (same non-empty id) is not a new goal, so the automatic-continuation budget
+// survives an in-place /goal edit; a /goal set with a new objective assigns a
+// fresh id and is a new goal, as is reopening a completed/abandoned goal. A nil
+// next clears the goal and is treated as a fresh start.
 func isNewGoal(previous, next *tools.Goal) bool {
 	if next == nil {
 		return true
@@ -129,6 +131,13 @@ func isNewGoal(previous, next *tools.Goal) bool {
 	if previous == nil || previous.Status != tools.GoalActive {
 		return true
 	}
+	// The id identifies a goal instance across every update that keeps it; an
+	// objective edit keeps the same instance, so it must not reset the round
+	// counter. Falls back to the objective comparison for goals persisted
+	// without an id (older traces or hand-built states).
+	if previous.ID != "" && previous.ID == next.ID {
+		return false
+	}
 	return strings.TrimSpace(previous.Objective) != strings.TrimSpace(next.Objective)
 }
 
@@ -138,8 +147,10 @@ func isNewGoal(previous, next *tools.Goal) bool {
 // is not exhausted. It never retries: another turn in flight, a closed
 // controller or any other Submit failure just ends the automatic sequence.
 //
-// The caller must have removed the finished turn from Controller.turns before
-// calling, so this continuation sees a free session slot.
+// The caller runs while the finished turn still owns its slot: Controller's
+// reserve performs an atomic handoff for an automatic continuation (it replaces
+// the terminal turn with this one under a single lock), so a wait-idle observer
+// never sees the session without a registered turn between the two rounds.
 func (d *GoalRoundDriver) turnFinished(c *Controller, sessionID string, stopped bool) {
 	if d == nil || c == nil || stopped || strings.TrimSpace(sessionID) == "" {
 		return

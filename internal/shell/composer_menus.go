@@ -13,6 +13,7 @@ import (
 
 	"github.com/zeokeel/zeokeel/internal/design"
 	"github.com/zeokeel/zeokeel/internal/icons"
+	"github.com/zeokeel/zeokeel/internal/sessionreference"
 	"github.com/zeokeel/zeokeel/internal/state"
 )
 
@@ -27,11 +28,47 @@ const (
 	// ownership) pass it through; the prefix keeps the two kinds apart
 	// without changing that signature.
 	sessionMentionPrefix = "session \u00b7 "
-	// sessionMentionSep separates the session title from its relative time in
-	// the candidate string. A control byte keeps the separator out of titles
-	// and paths, so splitting stays unambiguous.
-	sessionMentionSep = "\x1f"
 )
+
+// sessionMentionEntry is how the flat "@" candidate list carries a session row
+// through the []string signature the two composers share: a JSON object after
+// sessionMentionPrefix keeps the title (which may contain any character), the
+// row's relative-time detail and the session id unambiguous.
+type sessionMentionEntry struct {
+	// Title is the row label: the session title, falling back to the
+	// localized "Untitled".
+	Title string `json:"title"`
+	// Label is the session's own title ("" when untitled); the inserted
+	// canonical mention falls back to the session id for it, as DSH does.
+	Label string `json:"label"`
+	// Detail is the row's right column: the relative time, prefixed with the
+	// workspace name for a session outside the current workspace.
+	Detail string `json:"detail"`
+	// ID is the session id the inserted canonical mention encodes.
+	ID string `json:"id"`
+}
+
+// encodeSessionMention renders one session candidate for mentionEntries.
+func encodeSessionMention(entry sessionMentionEntry) string {
+	encoded, err := json.Marshal(entry)
+	if err != nil {
+		return ""
+	}
+	return sessionMentionPrefix + string(encoded)
+}
+
+// decodeSessionMention parses one session candidate; ok is false for a file
+// path or for a damaged encoding.
+func decodeSessionMention(candidate string) (sessionMentionEntry, bool) {
+	if !strings.HasPrefix(candidate, sessionMentionPrefix) {
+		return sessionMentionEntry{}, false
+	}
+	var entry sessionMentionEntry
+	if err := json.Unmarshal([]byte(strings.TrimPrefix(candidate, sessionMentionPrefix)), &entry); err != nil {
+		return sessionMentionEntry{}, false
+	}
+	return entry, true
+}
 
 // pendingApprovals returns the controller's pending requests, or nil in static
 // mode. It is read every frame so the card follows the turn without extra
@@ -258,6 +295,12 @@ func (a *App) runSlashCommand(line string) {
 	case "/model":
 		a.draft = ""
 		a.openModelPickerFromCommand()
+	case "/goal":
+		a.draft = ""
+		a.runGoalCommand(commandArgs(line, name))
+	case "/compact":
+		a.draft = ""
+		a.runCompactCommand(commandArgs(line, name))
 	default:
 		a.draft = ""
 	}
@@ -419,16 +462,17 @@ func (a *App) openModelPickerFromCommand() {
 }
 
 // mentionQuery finds a trailing "@query" token. query is empty for a draft
-// that ends in "@"; a space after the "@" ends the mention.
+// that ends in "@"; a space after the "@" ends the plain mention.
 // mentionEntries lists the workspace entries under the directory the "@" token
-// is browsing, then the matching sessions at the workspace root, as DSH's
-// reference menu orders them. The token's query is a path: "@docs/gu" lists
-// "docs/" for names starting with "gu" and keeps the relative path in the
-// value, so a nested pick inserts the full path. Directories carry a trailing
-// slash so the inserted path reads as a directory and the row becomes a drill
-// target; sessions are only offered at the root and are inserted as the plain
-// "#<title>" reference (see insertSessionMention for why this build has no
-// richer form).
+// is browsing, then the matching sessions from every workspace with the current
+// one's sessions first, as DSH's reference menu orders them. The token's query
+// is a path: "@docs/gu" lists "docs/" for names starting with "gu" and keeps
+// the relative path in the value, so a nested pick inserts the full path.
+// Directories carry a trailing slash so the inserted path reads as a directory
+// and the row becomes a drill target; sessions are only offered at the root and
+// are inserted as the canonical @[label](dsh-session:<base64url(id)>) mention
+// (see insertSessionMention). DSH's quoted @"..." form searches files only: it
+// never lists sessions.
 func (a *App) mentionEntries() []string {
 	if a.Ctrl == nil {
 		return nil
@@ -473,26 +517,38 @@ func (a *App) mentionEntries() []string {
 			}
 		}
 	}
-	// Sessions are workspace-level references, not children of a folder.
-	if dir != "" {
+	// Sessions are workspace-level references, not children of a folder, and
+	// DSH's quoted @"..." form searches files only.
+	if dir != "" || trigger.quoted {
 		return out
 	}
 	files := len(out)
-	// AR-08: render from the shell's session cache, refreshed in the
+	// AR-08: render from the shell's session caches, refreshed in the
 	// background, so opening @ never waits on the store.
-	if sessions := a.sessions(); sessions != nil {
-		for _, sess := range sessions {
-			title := strings.TrimSpace(sess.Title)
-			if title == "" {
-				title = a.T("common.untitled")
-			}
-			if !strings.HasPrefix(strings.ToLower(title), lowerPrefix) {
-				continue
-			}
-			out = append(out, sessionMentionPrefix+title+sessionMentionSep+a.sessionWhen(sess.UpdatedAt))
-			if len(out)-files == maxMentionSessions {
-				break
-			}
+	for _, candidate := range a.mentionSessionCandidates() {
+		sess := candidate.session
+		label := strings.TrimSpace(sess.Title)
+		title := label
+		if title == "" {
+			title = a.T("common.untitled")
+		}
+		if !strings.HasPrefix(strings.ToLower(title), lowerPrefix) {
+			continue
+		}
+		detail := a.sessionWhen(sess.UpdatedAt)
+		if candidate.workspace != "" {
+			// DSH names the workspace only when the session lives outside the
+			// current one, in front of the same relative time.
+			detail = candidate.workspace + " \u00b7 " + detail
+		}
+		out = append(out, encodeSessionMention(sessionMentionEntry{
+			Title:  title,
+			Label:  label,
+			Detail: detail,
+			ID:     sess.ID,
+		}))
+		if len(out)-files == maxMentionSessions {
+			break
 		}
 	}
 	return out
@@ -506,19 +562,30 @@ type mentionChoice struct {
 	detail  string
 	session bool
 	dir     bool
+	// sessionID and sessionLabel are set only for a session row:
+	// sessionID feeds the canonical mention and sessionLabel is the label it
+	// carries (the session's own title, "" for an untitled session so the
+	// mention falls back to the session id).
+	sessionID    string
+	sessionLabel string
 }
 
 // mentionChoices splits the flat candidate list into rows. Files keep their
 // relative path (and a trailing slash for a directory, which also marks the
-// row as a drill target); sessions carry the display prefix and insert the
-// documented "#<title>" reference.
+// row as a drill target); sessions decode their JSON-encoded row data and
+// insert the canonical @[label](dsh-session:<base64url(id)>) mention.
 func mentionChoices(entries []string) []mentionChoice {
 	out := make([]mentionChoice, 0, len(entries))
 	for _, entry := range entries {
-		if strings.HasPrefix(entry, sessionMentionPrefix) {
-			rest := strings.TrimPrefix(entry, sessionMentionPrefix)
-			title, detail, _ := strings.Cut(rest, sessionMentionSep)
-			out = append(out, mentionChoice{label: title, value: title, detail: detail, session: true})
+		if session, ok := decodeSessionMention(entry); ok {
+			out = append(out, mentionChoice{
+				label:        session.Title,
+				value:        session.Title,
+				detail:       session.Detail,
+				session:      true,
+				sessionID:    session.ID,
+				sessionLabel: session.Label,
+			})
 			continue
 		}
 		out = append(out, mentionChoice{label: entry, value: entry,
@@ -632,7 +699,7 @@ func (a *App) mentionRow(c *ui.Context, t *design.Tokens, choice mentionChoice, 
 	}
 	choose := func() {
 		if choice.session {
-			a.insertSessionMention(choice.value)
+			a.insertSessionMention(choice.sessionLabel, choice.sessionID)
 		} else {
 			a.insertMention(choice.value)
 		}
@@ -662,8 +729,13 @@ func (a *App) mentionRow(c *ui.Context, t *design.Tokens, choice mentionChoice, 
 				if trailing == "" {
 					trailing = a.tr("Session", "会话")
 				}
+				// The detail is the row's second column: the workspace name
+				// (only for a session outside the current workspace) followed
+				// by the relative time. It is capped and ellipsized so a long
+				// workspace name cannot squeeze the session title to nothing.
 				ui.Text(c, trailing).FontSize(11).FixedLineHeight(16).
-					TextColor(t.LabelTertiary).NoWrap()
+					TextColor(t.LabelTertiary).MaxLines(1).Ellipsis("…").
+					MaxWidthPercent(55).Shrink(0)
 			case choice.dir:
 				// The row is a real drill target: Tab or the chevron opens the
 				// directory in place.
@@ -678,8 +750,12 @@ func (a *App) mentionRow(c *ui.Context, t *design.Tokens, choice mentionChoice, 
 		})
 		body.OnClick(choose)
 		if choice.dir {
+			// The chevron is the pointer twin of Tab's drill: a labelled
+			// button nested at the row's end, so the row body (pick the folder
+			// reference) and the drill verb keep distinct accessible names.
 			chevron := ui.Row(c).AlignItems(ui.Center).
-				Padding(0, design.Space1).Role(ui.RoleNone)
+				Padding(0, design.Space1).Role(ui.RoleButton).
+				Label(fmt.Sprintf(a.menuText("Open folder %s", "打开文件夹 %s"), label))
 			chevron.Children(func() {
 				ui.Icon(c, icons.ChevronRight()).Size(12, 12).TextColor(t.LabelTertiary)
 			})
@@ -703,29 +779,104 @@ func (a *App) drillMentionAt(entries []string) bool {
 	return a.drillMention(choices[st.mentionIndex])
 }
 
-// mentionBreadcrumb is the "@" menu's path row while it browses a directory:
-// it names the folder and says Esc walks back up. Clicking it goes up too.
+// mentionBreadcrumb is the "@" menu's path bar while it browses a directory:
+// one clickable crumb per level from the workspace root down to the current
+// folder, then the current directory's canonical @ path and the Esc hint.
+// Every ancestor crumb carries the same drill payload a folder row does, so
+// "go back to that level" and "drill into it" write the same token (DSH's
+// reference breadcrumb behaves the same way). Clicking the current path keeps
+// the old one-level "go up" behavior, and Esc walks up one level too.
 func (a *App) mentionBreadcrumb(c *ui.Context, t *design.Tokens, dir string) {
-	back := ui.Row(c).Height(28).Padding(design.Space1, design.Space2).
-		Radius(design.RadiusSM).Gap(design.Space2).AlignItems(ui.Center).
-		Role(ui.RoleButton).Focusable().
-		Label(a.menuText("Back to the parent folder", "返回上级文件夹"))
-	quoted := a.composerTrigger().kind == composerTriggerMention && a.composerTrigger().quoted
+	trigger := a.composerTrigger()
+	quoted := trigger.kind == composerTriggerMention && trigger.quoted
+	closed := trigger.kind == composerTriggerMention && trigger.closed
+	goTo := func(token string) {
+		a.replaceComposerTrigger(token)
+		a.composerRef.Focus(c)
+	}
+	// The root crumb returns to the workspace root. A quoted token keeps its
+	// quote open (`@"`) so the user can keep typing a quoted path, exactly as
+	// Esc from a quoted directory does.
+	rootToken := "@"
+	if quoted {
+		rootToken = "@" + "\""
+	}
 	path := "@" + dir
 	if quoted || needsMentionQuotes(dir) {
 		path = "@\"" + dir + "\""
 	}
-	back.Children(func() {
-		ui.Icon(c, icons.Folder()).Size(14, 14).TextColor(t.LabelSecondary)
-		ui.Text(c, path).FontSize(12).FixedLineHeight(18).
-			TextColor(t.LabelPrimary).Grow(1).MaxLines(1).Ellipsis("…")
-		ui.Text(c, a.menuText("Esc to go up", "Esc 返回上级")).
-			FontSize(11).FixedLineHeight(16).TextColor(t.LabelTertiary).NoWrap()
+	segments := mentionPathSegments(dir)
+	row := ui.Row(c).Height(28).Padding(design.Space1, design.Space2).
+		Radius(design.RadiusSM).Gap(design.Space2).AlignItems(ui.Center)
+	row.Children(func() {
+		a.mentionCrumb(c, t, a.menuText("Root", "根目录"),
+			a.menuText("Back to the workspace root", "返回工作区根目录"), true,
+			func() { goTo(rootToken) })
+		prefix := ""
+		for i, segment := range segments {
+			prefix += segment + "/"
+			ui.Icon(c, icons.ChevronRight()).Size(10, 10).TextColor(t.LabelTertiary)
+			// The last segment is the menu's current directory: its full path
+			// follows as the non-drill crumb, so it needs no level button.
+			if i == len(segments)-1 {
+				break
+			}
+			level := prefix
+			// The accessible name is the canonical (closed) spelling so a
+			// screen reader reads the same path the row would insert, while
+			// the action keeps the live token's open/closed state like a drill.
+			a11y := a.menuText("Go to ", "转到 ") + a.mentionToken(level, quoted, true)
+			a.mentionCrumb(c, t, segment, a11y, false, func() {
+				goTo(a.mentionToken(level, quoted, closed))
+			})
+		}
+		back := ui.Row(c).Grow(1).Height(20).PaddingX(design.Space1).
+			Radius(design.RadiusXS).Gap(design.Space2).AlignItems(ui.Center).
+			Role(ui.RoleButton).Focusable().
+			Label(a.menuText("Back to the parent folder", "返回上级文件夹"))
+		if back.Hovered() {
+			back = back.Background(t.BgHover)
+		}
+		back.Children(func() {
+			ui.Text(c, path).FontSize(12).FixedLineHeight(18).
+				TextColor(t.LabelPrimary).Grow(1).MaxLines(1).Ellipsis("…")
+			ui.Text(c, a.menuText("Esc to go up", "Esc 返回上级")).
+				FontSize(11).FixedLineHeight(16).TextColor(t.LabelTertiary).NoWrap()
+		})
+		back.OnClick(func() {
+			a.mentionDrillUp()
+			a.composerRef.Focus(c)
+		})
 	})
-	back.OnClick(func() {
-		a.mentionDrillUp()
-		a.composerRef.Focus(c)
+}
+
+// mentionCrumb is one clickable level of the "@" menu's breadcrumb: a small
+// labelled button that writes the level's token and returns the focus to the
+// composer. The root level also draws the folder icon the old breadcrumb had.
+func (a *App) mentionCrumb(c *ui.Context, t *design.Tokens, label, a11y string, folder bool, choose func()) {
+	crumb := ui.Row(c).Height(20).PaddingX(design.Space1).Radius(design.RadiusXS).
+		Gap(design.Space1).AlignItems(ui.Center).Role(ui.RoleButton).Label(a11y)
+	if crumb.Hovered() {
+		crumb = crumb.Background(t.BgHover)
+	}
+	crumb.Children(func() {
+		if folder {
+			ui.Icon(c, icons.Folder()).Size(14, 14).TextColor(t.LabelSecondary)
+		}
+		ui.Text(c, label).FontSize(12).FixedLineHeight(18).
+			TextColor(t.LabelSecondary).NoWrap()
 	})
+	crumb.OnClick(choose)
+}
+
+// mentionPathSegments splits a browsed directory path into its levels:
+// "docs/sub/" -> ["docs", "sub"]; the breadcrumb draws one crumb per level.
+func mentionPathSegments(dir string) []string {
+	trimmed := strings.Trim(strings.TrimSpace(dir), "/")
+	if trimmed == "" {
+		return nil
+	}
+	return strings.Split(trimmed, "/")
 }
 
 // moveMention moves the "@" menu highlight by delta while the composer keeps
@@ -760,7 +911,7 @@ func (a *App) chooseMention(entries []string) bool {
 	}
 	choice := choices[index]
 	if choice.session {
-		a.insertSessionMention(choice.value)
+		a.insertSessionMention(choice.sessionLabel, choice.sessionID)
 	} else {
 		a.insertMention(choice.value)
 	}
@@ -772,15 +923,14 @@ func (a *App) insertMention(path string) {
 	a.replaceComposerTrigger(a.mentionToken(path, quoted, true) + " ")
 }
 
-// insertSessionMention inserts this build's session reference. DSH inserts
-// an atomic "@[label](dsh-session:<id>)" mention, which the host resolves to
-// captured session context. ZeoKeel's controller has no session-reference
-// resolver (the counterpart of dsh-session-reference) and the runtime would
-// treat that URI as opaque text, so the documented fallback is the plain
-// "#<title>" token: readable to the model and to the user, with no false
-// claim of a resolved context.
-func (a *App) insertSessionMention(title string) {
-	a.replaceComposerTrigger("#" + title + " ")
+// insertSessionMention inserts the canonical session reference DSH uses:
+// @[label](dsh-session:<base64url(id)>). The controller parses it before the
+// turn and appends the bounded referenced-session context (see
+// internal/sessionreference). The mygo text area has no inline-chip primitive,
+// so the draft shows the mention as text; the transcript renders it as the
+// readable @label, which is the recorded UI deviation from DSH.
+func (a *App) insertSessionMention(label, sessionID string) {
+	a.replaceComposerTrigger(sessionreference.FormatMention(label, sessionID) + " ")
 }
 
 // attachmentMenu is the "+" menu: Files opens the real multi-file picker and

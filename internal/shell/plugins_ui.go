@@ -57,6 +57,16 @@ var builtinPluginDefs = []builtinPluginDef{
 		descZH:           "暴露已配置的模型上下文协议服务工具。",
 		enabledByDefault: true,
 	},
+	{
+		// The LSP tool is registered by default (internal/app services.go
+		// pluginOn("lsp", true)) but has no language server until the user
+		// configures lsp.servers; a workspace .zeokeel/lsp.json is untrusted
+		// unless lsp.workspace_config explicitly enables it.
+		name: "lsp", titleEN: "Language server tools", titleZH: "语言服务器工具",
+		descEN:           "Expose definition, references, implementation and hover through a configured language server (lsp.servers); workspace .zeokeel/lsp.json stays untrusted until enabled.",
+		descZH:           "通过已配置的语言服务器（lsp.servers）提供定义、引用、实现与悬停；工作区 .zeokeel/lsp.json 默认不信任，需显式开启。",
+		enabledByDefault: true,
+	},
 }
 
 // experimentalPluginDefs are the baseline's experimental toggles. The
@@ -143,18 +153,27 @@ func (a *App) pluginToggleRow(c *ui.Context, t *design.Tokens, plugin builtinPlu
 	}
 }
 
-// pluginTitle localizes a plugin's display name.
+// pluginTitle localizes a plugin's display name: the i18n catalog wins when it
+// has a live-plugin entry, otherwise the definition's inline Chinese title is
+// used for a Chinese UI (the LSP row has no catalog entry by design).
 func (a *App) pluginTitle(plugin builtinPluginDef) string {
 	if key := "plugins.live." + plugin.name + ".title"; hasTranslation(key) {
 		return a.T(key)
 	}
+	if a.lang() == LangZH && plugin.titleZH != "" {
+		return plugin.titleZH
+	}
 	return plugin.titleEN
 }
 
-// pluginDesc localizes a plugin's description.
+// pluginDesc localizes a plugin's description with the same catalog-first,
+// inline-bilingual fallback as pluginTitle.
 func (a *App) pluginDesc(plugin builtinPluginDef) string {
 	if key := "plugins.live." + plugin.name + ".desc"; hasTranslation(key) {
 		return a.T(key)
+	}
+	if a.lang() == LangZH && plugin.descZH != "" {
+		return plugin.descZH
 	}
 	return plugin.descEN
 }
@@ -224,7 +243,10 @@ func pluginKeyForLabel(label string) string {
 	}
 }
 
-// pluginDefaultEnabled is the fallback state for a row's persisted toggle.
+// pluginDefaultEnabled is the fallback state for a row's persisted toggle: every
+// built-in runtime feature (including the LSP tool and its language servers)
+// is on by default, matching the app's pluginOn(name, true) build gates; only
+// the experimental, not-yet-implemented rows default off.
 func pluginDefaultEnabled(name string) bool {
 	for _, plugin := range experimentalPluginDefs {
 		if plugin.name == name {
@@ -236,8 +258,10 @@ func pluginDefaultEnabled(name string) bool {
 
 // builtinPluginRowsLive builds the Plugins page's built-in rows from the same
 // builtinPluginDefs Settings > Built-in plugins uses, so both pages list the
-// same six plugins with the same persisted plugin.<name>.enabled keys and
-// the same localized names (PD-08).
+// same plugins with the same persisted plugin.<name>.enabled keys and the same
+// localized names (PD-08). The row name/description are already localized here
+// because a new built-in (the LSP tool) has no plugins.row.* catalog entries;
+// rows with one keep resolving through pluginRowName/pluginRowDesc.
 func (a *App) builtinPluginRowsLive() []pluginRow {
 	rows := make([]pluginRow, 0, len(builtinPluginDefs))
 	for _, def := range builtinPluginDefs {
@@ -246,7 +270,9 @@ func (a *App) builtinPluginRowsLive() []pluginRow {
 			icon = pluginIconInfo
 		}
 		rows = append(rows, pluginRow{
-			name: def.titleEN, desc: def.descEN, icon: icon, key: def.name,
+			name: a.pluginLocalized(def.titleEN, def.titleZH),
+			desc: a.pluginLocalized(def.descEN, def.descZH),
+			icon: icon, key: def.name,
 			toggle: true, on: a.pluginEnabledValue(def.name, def.enabledByDefault),
 		})
 	}

@@ -59,7 +59,7 @@ type Goal struct {
 	// "a new goal replaced it" (FP-04).
 	ID string `json:"id,omitempty"`
 	// Revision increments on every mutation (set of a field, pause, resume,
-	// block, unblock, complete, abandon). Clients can ignore an older revision.
+	// block, unblock, edit, complete, abandon). Clients can ignore an older revision.
 	Revision  int        `json:"revision"`
 	Phase     GoalPhase  `json:"phase,omitempty"`
 	Objective string     `json:"objective"`
@@ -80,11 +80,12 @@ type GoalResult struct {
 }
 
 // goalDescription documents the tool and its JSON argument schema.
-const goalDescription = `Set, inspect and close the session goal.
+const goalDescription = `Set, inspect, edit and close the session goal.
 
 Call it with a JSON object:
   {"action":"set","objective":"Ship the release","steps":["Run the tests","Write notes"],"progress":25}
   {"action":"get"}
+  {"action":"edit","objective":"Ship the release by Friday"}
   {"action":"pause"}
   {"action":"resume"}
   {"action":"block","message":"Waiting for CI"}
@@ -93,12 +94,17 @@ Call it with a JSON object:
   {"action":"abandon","message":"Blocked on the vendor"}
   {"action":"clear"}
 
-"action" is required and is one of set, get, pause, resume, block, unblock,
-complete, abandon, clear.
-"objective" is required for the first set and optional afterwards (the existing
-objective is kept). "steps" is an optional ordered list for set; omit it to keep
-the current steps and pass [] to clear them. "progress" is an optional percent
-between 0 and 100. "message" is optional free text echoed back to you.
+"action" is required and is one of set, get, edit, pause, resume, block,
+unblock, complete, abandon, clear.
+"objective" is required for the first set and for edit, and optional afterwards
+for set (the existing objective is kept). "steps" is an optional ordered list
+for set; omit it to keep the current steps and pass [] to clear them. "progress"
+is an optional percent between 0 and 100. "message" is optional free text
+echoed back to you.
+
+edit replaces the current goal's objective in place: it keeps the goal id and
+its phase/status (a paused goal stays paused, continuation is not re-armed),
+and only the revision advances.
 
 The tool returns {"kind":"goal","action":...,"goal":{...},"message":...}; get
 returns no goal object when none is set. A goal carries an id, a revision that
@@ -180,7 +186,7 @@ func (t *GoalTool) Invoke(ctx context.Context, args json.RawMessage) (string, er
 	}
 	action := strings.ToLower(strings.TrimSpace(in.Action))
 	if action == "" {
-		return "", errors.New(`goal: "action" is required (set, get, pause, resume, block, unblock, complete, abandon, clear)`)
+		return "", errors.New(`goal: "action" is required (set, get, edit, pause, resume, block, unblock, complete, abandon, clear)`)
 	}
 
 	sessionID := goalSessionKey(ctx)
@@ -236,8 +242,11 @@ func (t *GoalTool) Invoke(ctx context.Context, args json.RawMessage) (string, er
 // set keeps the steps/progress of an update of the same objective and assigns a
 // fresh id when the objective changes or a completed/abandoned goal is reopened.
 // pause/block move the phase without abandoning the objective; resume/unblock
-// return it to active. complete and abandon are terminal; clear deletes the
-// goal. Every mutating action increments Revision, and get is side-effect free.
+// return it to active. edit replaces only the objective of the current goal:
+// it keeps the id, phase and status (a paused goal stays paused and the
+// automatic-continuation state is untouched) and only advances Revision.
+// complete and abandon are terminal; clear deletes the goal. Every mutating
+// action increments Revision, and get is side-effect free.
 func ApplyGoalAction(previous *Goal, action, objective string, steps []string, progress *int, message string) (*Goal, string, error) {
 	action = strings.ToLower(strings.TrimSpace(action))
 	now := time.Now().UTC()
@@ -331,6 +340,20 @@ func ApplyGoalAction(previous *Goal, action, objective string, steps []string, p
 		if msg == "" {
 			msg = "goal unblocked"
 		}
+	case "edit":
+		// Edit the objective of the current goal in place: the goal instance
+		// (id), its phase/status and progress/steps are untouched, so a paused
+		// or completed goal stays paused/completed and automatic continuation
+		// is neither re-armed nor reset. Only the objective and revision
+		// change.
+		objective := strings.TrimSpace(objective)
+		if objective == "" {
+			return nil, "", errors.New(`goal: "objective" is required for edit`)
+		}
+		next.Objective = objective
+		if msg == "" {
+			msg = "goal updated"
+		}
 	case "complete":
 		next.Status = GoalCompleted
 		next.Phase = GoalPhaseCompleted
@@ -345,7 +368,7 @@ func ApplyGoalAction(previous *Goal, action, objective string, steps []string, p
 			msg = "goal abandoned"
 		}
 	default:
-		return nil, "", fmt.Errorf("goal: unknown action %q (want set, get, pause, resume, block, unblock, complete, abandon, clear)", action)
+		return nil, "", fmt.Errorf("goal: unknown action %q (want set, get, edit, pause, resume, block, unblock, complete, abandon, clear)", action)
 	}
 	next.Revision++
 	return next, msg, nil

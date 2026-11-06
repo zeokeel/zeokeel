@@ -9,6 +9,7 @@ import (
 
 	"github.com/zeokeel/zeokeel/internal/design"
 	"github.com/zeokeel/zeokeel/internal/session"
+	"github.com/zeokeel/zeokeel/internal/sessionreference"
 	"github.com/zeokeel/zeokeel/internal/state"
 )
 
@@ -163,10 +164,16 @@ func lastUserText(snap *state.Snapshot) string {
 		return ""
 	}
 	for i := len(snap.Messages) - 1; i >= 0; i-- {
-		if snap.Messages[i].Role == state.RoleUser {
-			if text := strings.TrimSpace(snap.Messages[i].Text); text != "" {
-				return text
-			}
+		if snap.Messages[i].Role != state.RoleUser {
+			continue
+		}
+		// The injected referenced-session snapshot is user-role history for the
+		// model, not a message the user typed: retry must resend their prompt.
+		if sessionreference.IsContextText(snap.Messages[i].Text) {
+			continue
+		}
+		if text := strings.TrimSpace(snap.Messages[i].Text); text != "" {
+			return text
 		}
 	}
 	return ""

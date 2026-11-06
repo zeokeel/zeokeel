@@ -607,7 +607,11 @@ func TestImportManifestDryRunDoesNotWrite(t *testing.T) {
 	}
 }
 
-func TestImportCorruptManifestFailsBeforeWriting(t *testing.T) {
+// TestImportCorruptManifestRebuildsAndImports replaced the old fail-closed
+// contract: a damaged manifest is preserved and rebuilt with a warning so the
+// import is not blocked (the recorded history is recovered from the rolling
+// backup when possible; see manifest_compat_test.go).
+func TestImportCorruptManifestRebuildsAndImports(t *testing.T) {
 	home := t.TempDir()
 	cwd := t.TempDir()
 	writeFixtureSession(t, home, "--w--", "sess-manifest", "session.v4.jsonl", []string{
@@ -619,15 +623,22 @@ func TestImportCorruptManifestFailsBeforeWriting(t *testing.T) {
 		t.Fatal(err)
 	}
 	st := newStore(t)
-	if _, err := Import(context.Background(), Options{DSHHome: home, Store: st, ManifestPath: manifestPath}); !errors.Is(err, ErrManifest) {
-		t.Fatalf("Import error = %v, want ErrManifest", err)
+	report, err := Import(context.Background(), Options{DSHHome: home, Store: st, ManifestPath: manifestPath})
+	if err != nil {
+		t.Fatalf("Import error = %v, want the run to continue with a warning", err)
+	}
+	if report.SessionsImported != 1 {
+		t.Fatalf("SessionsImported = %d, want 1 (report %+v)", report.SessionsImported, report)
+	}
+	if !warningsContain(report.Warnings, "corrupt") {
+		t.Fatalf("warnings do not explain the corrupt manifest: %+v", report.Warnings)
 	}
 	workspaces, err := st.ListWorkspaces()
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(workspaces) != 0 {
-		t.Fatalf("corrupt manifest still imported: %d workspaces", len(workspaces))
+	if len(workspaces) != 1 {
+		t.Fatalf("workspaces after rebuild = %d, want 1", len(workspaces))
 	}
 }
 
@@ -771,5 +782,90 @@ func TestSessionPathIdentity(t *testing.T) {
 	}
 	if _, err := sessionPathIdentity(root, filepath.Join(t.TempDir(), "outside.jsonl")); err == nil {
 		t.Fatal("sessionPathIdentity accepted a file outside the sessions root")
+	}
+}
+
+// TestImportSessionFailureRollsBackAndRetries pins the failure contract of a
+// mid-session store error: the partially written session is rolled back (no
+// duplicate on retry), its messages are not counted as imported, the manifest
+// records nothing for it, and the already imported sessions are not re-imported.
+func TestImportSessionFailureRollsBackAndRetries(t *testing.T) {
+	home := t.TempDir()
+	cwd := t.TempDir()
+	writeFixtureSession(t, home, "--w--", "sess-ok", "session.v4.jsonl", []string{
+		headerLine(t, "sess-ok", cwd, "user", 0),
+		userMessageEvent(t, 1, "first session question"),
+		assistantMessageEvent(t, 2, []map[string]any{{"type": "text", "text": "first session answer"}}),
+	})
+	writeFixtureSession(t, home, "--w--", "sess-fail", "session.v4.jsonl", []string{
+		headerLine(t, "sess-fail", cwd, "user", 0),
+		userMessageEvent(t, 1, "second session question"),
+	})
+	manifestPath := filepath.Join(t.TempDir(), "dsh-import.json")
+	st := newStore(t)
+	opts := Options{DSHHome: home, Store: st, ManifestPath: manifestPath}
+
+	original := appendImportedMessage
+	t.Cleanup(func() { appendImportedMessage = original })
+	calls := 0
+	appendImportedMessage = func(store *store.Store, msg store.Message) (*store.Message, error) {
+		calls++
+		if calls == 3 { // first session's two messages succeeded; fail the second session's first write
+			return nil, errors.New("injected store failure")
+		}
+		return original(store, msg)
+	}
+
+	first, err := Import(context.Background(), opts)
+	if err != nil {
+		t.Fatalf("Import: %v", err)
+	}
+	if first.SessionsImported != 1 || first.SessionsFailed != 1 {
+		t.Fatalf("first report imported/failed = %d/%d, want 1/1: %+v", first.SessionsImported, first.SessionsFailed, first.Errors)
+	}
+	if first.MessagesImported != 1 {
+		t.Fatalf("first report messages = %d, want only the successful session's 1", first.MessagesImported)
+	}
+	if len(first.Workspaces) != 1 {
+		t.Fatalf("workspace reports = %+v", first.Workspaces)
+	}
+	sessions, err := st.ListSessions(first.Workspaces[0].WorkspaceID)
+	if err != nil {
+		t.Fatalf("ListSessions: %v", err)
+	}
+	if len(sessions) != 1 {
+		t.Fatalf("failed session left a partial import behind: %d sessions, want 1", len(sessions))
+	}
+	messages, err := st.ListMessages(sessions[0].ID)
+	if err != nil {
+		t.Fatalf("ListMessages: %v", err)
+	}
+	if len(messages) != 1 {
+		t.Fatalf("successful session messages = %d, want its 1 message only (no partial rows)", len(messages))
+	}
+	manifest, err := loadManifest(manifestPath)
+	if err != nil {
+		t.Fatalf("loadManifest: %v", err)
+	}
+	if len(manifest.Sessions) != 1 {
+		t.Fatalf("manifest sessions = %d, want only the successful session", len(manifest.Sessions))
+	}
+
+	// Retry: the failed session must import without re-importing the one the
+	// manifest already records.
+	appendImportedMessage = original
+	second, err := Import(context.Background(), opts)
+	if err != nil {
+		t.Fatalf("retry Import: %v", err)
+	}
+	if second.SessionsImported != 1 || second.Skips[SkipIdempotent] != 1 {
+		t.Fatalf("retry report = %+v, want 1 imported and the successful session skipped", second)
+	}
+	sessions, err = st.ListSessions(first.Workspaces[0].WorkspaceID)
+	if err != nil {
+		t.Fatalf("ListSessions after retry: %v", err)
+	}
+	if len(sessions) != 2 {
+		t.Fatalf("sessions after retry = %d, want 2 (no duplicates)", len(sessions))
 	}
 }

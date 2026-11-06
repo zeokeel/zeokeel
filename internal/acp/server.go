@@ -14,6 +14,7 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
+	"time"
 )
 
 // maxFrameBytes bounds one JSON-RPC frame so a huge line cannot exhaust memory.
@@ -56,15 +57,36 @@ type Config struct {
 	// Logf receives diagnostics (always stderr or a file, never stdout: stdout
 	// is reserved for protocol frames). Nil means log.Printf.
 	Logf func(format string, args ...any)
+	// AuthMethods are the authentication methods advertised by initialize.
+	// Default: one no-op method ("none") so an unauthenticated client keeps
+	// working exactly as before.
+	AuthMethods []AuthMethod
+	// Authenticate validates one authenticate request. Nil means no
+	// authentication is configured: the no-op method always succeeds and no
+	// session method is gated. When set, every method except initialize and
+	// authenticate answers -32000 until authenticate succeeds.
+	Authenticate func(ctx context.Context, methodID string) error
+	// ClientRequestTimeout bounds each server->client request (fs/*,
+	// terminal/*, session/request_permission). Default:
+	// DefaultClientRequestTimeout.
+	ClientRequestTimeout time.Duration
+	// ClientRequest, when non-nil, replaces the stdio transport for
+	// server->client requests (embedders and unit tests). The result is the raw
+	// JSON result payload of the client's response.
+	ClientRequest func(ctx context.Context, method string, params any) (json.RawMessage, error)
 }
 
 // Server is the ACP v1 JSON-RPC server over one newline-framed stream pair.
 // One connection may serve many sessions concurrently.
 type Server struct {
-	agent      Agent
-	serverName string
-	version    string
-	logf       func(format string, args ...any)
+	agent         Agent
+	serverName    string
+	version       string
+	logf          func(format string, args ...any)
+	authMethods   []AuthMethod
+	authenticate  func(ctx context.Context, methodID string) error
+	clientTimeout time.Duration
+	clientRequest func(ctx context.Context, method string, params any) (json.RawMessage, error)
 }
 
 // NewServer validates cfg and returns a server.
@@ -84,7 +106,24 @@ func NewServer(cfg Config) (*Server, error) {
 	if logf == nil {
 		logf = log.Printf
 	}
-	return &Server{agent: cfg.Agent, serverName: name, version: version, logf: logf}, nil
+	authMethods := cfg.AuthMethods
+	if len(authMethods) == 0 {
+		authMethods = []AuthMethod{{ID: "none", Name: "No authentication"}}
+	}
+	clientTimeout := cfg.ClientRequestTimeout
+	if clientTimeout <= 0 {
+		clientTimeout = DefaultClientRequestTimeout
+	}
+	return &Server{
+		agent:         cfg.Agent,
+		serverName:    name,
+		version:       version,
+		logf:          logf,
+		authMethods:   authMethods,
+		authenticate:  cfg.Authenticate,
+		clientTimeout: clientTimeout,
+		clientRequest: cfg.ClientRequest,
+	}, nil
 }
 
 // Serve runs the connection until in reaches EOF or ctx is cancelled:
@@ -97,6 +136,28 @@ func NewServer(cfg Config) (*Server, error) {
 //     its session/update notifications are written before its response;
 //   - notifications (session/cancel) are fire-and-forget;
 //   - stdout (out) carries protocol frames only, diagnostics go to logf.
+//
+// synchronousHandlerKey marks a handler that runs on the connection's read
+// loop. Such a handler must not issue server->client requests: the response
+// would have to be read by the very loop the handler is blocking, so the call
+// could only time out. Prompt handlers run on their own goroutine and may use
+// the Client seam.
+type synchronousHandlerKey struct{}
+
+// withSynchronousHandler marks ctx as belonging to a read-loop handler.
+func withSynchronousHandler(ctx context.Context) context.Context {
+	return context.WithValue(ctx, synchronousHandlerKey{}, true)
+}
+
+// isSynchronousHandler reports whether ctx belongs to a read-loop handler.
+func isSynchronousHandler(ctx context.Context) bool {
+	if ctx == nil {
+		return false
+	}
+	value, _ := ctx.Value(synchronousHandlerKey{}).(bool)
+	return value
+}
+
 func (s *Server) Serve(ctx context.Context, in io.Reader, out io.Writer) error {
 	if in == nil || out == nil {
 		return errors.New("acp: Serve requires non-nil input and output streams")
@@ -108,6 +169,7 @@ func (s *Server) Serve(ctx context.Context, in io.Reader, out io.Writer) error {
 		srv:      s,
 		out:      newFrameWriter(out),
 		sessions: make(map[string]*sessionState),
+		pending:  make(map[int64]chan clientResult),
 	}
 
 	// Read frames on their own goroutine: a blocking stdio read must not make
@@ -142,16 +204,17 @@ readLoop:
 		select {
 		case <-ctx.Done():
 			// Connection shutdown: stop agent work before returning so Serve
-			// does not leak a running turn.
+			// does not leak a running turn, and unblock client-request waiters.
 			c.cancelAllPrompts()
 			prompts.Wait()
+			c.failPending()
 			return nil
 		case line, ok := <-lines:
 			if !ok {
 				scanErr = <-readerErr
 				break readLoop
 			}
-			req, isReq, isNotif, frameErr := c.decodeFrame(line)
+			req, kind, frameErr := c.decodeFrame(line)
 			if frameErr != nil {
 				// Malformed JSON: answer a parse error with a null id and keep
 				// the connection alive (a bad frame must not kill a long-lived
@@ -159,13 +222,19 @@ readLoop:
 				c.out.writeError(json.RawMessage("null"), &RPCError{Code: CodeParseError, Message: "parse error: " + frameErr.Error()})
 				continue
 			}
-			if isNotif {
-				c.handleNotification(ctx, req.Method, req.Params)
+			switch kind {
+			case frameResponse:
+				// A response to a server->client request (fs/*, terminal/*,
+				// session/request_permission): route it to its waiter.
+				c.handleIncomingResponse(line)
+				continue
+			case frameNotification:
+				c.handleNotification(withSynchronousHandler(ctx), req.Method, req.Params)
+				continue
+			case frameOther:
 				continue
 			}
-			if !isReq {
-				continue
-			}
+			// frameRequest: a client request.
 			if req.Method == MethodSessionPrompt {
 				// The initialize gate is checked synchronously in frame arrival
 				// order, before the handler goroutine exists: a pipelined prompt
@@ -176,12 +245,19 @@ readLoop:
 					c.out.writeError(req.ID, &RPCError{Code: CodeInvalidRequest, Message: "session/prompt before initialize"})
 					continue
 				}
+				if gateErr := c.authGateError(MethodSessionPrompt); gateErr != nil {
+					c.out.writeError(req.ID, gateErr)
+					continue
+				}
 				// Register the per-session prompt slot synchronously (in frame
 				// arrival order) before spawning the handler: the first prompt
 				// wins and a second one is rejected deterministically instead of
 				// by goroutine scheduling.
 				if sid, perr := promptSessionID(req.Params); perr == nil {
 					if promptCtx, ok := c.beginPrompt(ctx, sid); ok {
+						// Plant the client seam on the prompt context: the agent
+						// reaches the ACP client through ClientFromContext.
+						promptCtx = WithClient(promptCtx, c)
 						prompts.Add(1)
 						go func(req request, promptCtx context.Context, sid string) {
 							defer prompts.Done()
@@ -198,46 +274,69 @@ readLoop:
 			}
 			// Control requests are handled in order so initialize/session state
 			// is established before the requests that depend on it.
-			c.handleRequest(ctx, req)
+			c.handleRequest(withSynchronousHandler(ctx), req)
 		}
 	}
 	// A closed stream ends the connection: cancel any prompt still running so
-	// the agent work stops before Serve returns.
+	// the agent work stops before Serve returns, then fail any in-flight
+	// server->client request.
 	c.cancelAllPrompts()
 	prompts.Wait()
+	c.failPending()
 	if scanErr != nil {
 		return fmt.Errorf("acp: read protocol stream: %w", scanErr)
 	}
 	return nil
 }
 
+// frameKind classifies one decoded JSON-RPC frame.
+type frameKind int
+
+const (
+	// frameOther is a well-formed but unusable frame (ignored).
+	frameOther frameKind = iota
+	// frameRequest is a client request (method + id) needing a response.
+	frameRequest
+	// frameNotification is a client notification (method, no id).
+	frameNotification
+	// frameResponse is a client response (id, no method): a reply to a
+	// server->client request.
+	frameResponse
+)
+
 // decodeFrame classifies one raw JSON-RPC line. A nil error means the frame was
-// well-formed JSON; isNotif marks notifications (no id) and isReq marks requests
-// that need a response. Inbound responses are neither (ignored: the minimum
-// server never sends requests to the client).
-func (c *conn) decodeFrame(line []byte) (req request, isReq, isNotif bool, err error) {
+// well-formed JSON: kind is frameRequest (needs a response), frameNotification
+// (fire-and-forget), frameResponse (a reply to a server->client request) or
+// frameOther (ignored).
+func (c *conn) decodeFrame(line []byte) (req request, kind frameKind, err error) {
 	line = bytes.TrimSpace(line)
 	if len(line) == 0 {
-		return request{}, false, false, nil
+		return request{}, frameOther, nil
 	}
 	var frame incomingFrame
 	if err := json.Unmarshal(line, &frame); err != nil {
-		return request{}, false, false, err
+		return request{}, frameOther, err
 	}
 	if frame.JSONRPC != JSONRPCVersion {
 		if len(frame.ID) > 0 && frame.Method != "" {
 			c.out.writeError(frame.ID, &RPCError{Code: CodeInvalidRequest, Message: `jsonrpc must be "2.0"`})
 		}
-		return request{}, false, false, nil
+		return request{}, frameOther, nil
 	}
 	if frame.Method == "" {
-		return request{}, false, false, nil
+		// A frame without a method is either an inbound response to one of
+		// this connection's server->client requests (it carries the id we
+		// assigned) or unusable traffic.
+		if len(frame.ID) > 0 && string(bytes.TrimSpace(frame.ID)) != "null" {
+			return request{}, frameResponse, nil
+		}
+		return request{}, frameOther, nil
 	}
 	req = request{JSONRPC: frame.JSONRPC, ID: frame.ID, Method: frame.Method, Params: frame.Params}
 	if isNotification(req) {
-		return req, false, true, nil
+		return req, frameNotification, nil
 	}
-	return req, true, false, nil
+	return req, frameRequest, nil
 }
 
 // incomingFrame is one decoded JSON-RPC line before request/notification
@@ -267,13 +366,25 @@ type conn struct {
 	out  *frameWriter
 	init atomic.Bool
 
+	// Client-facing connection state: capabilities advertised in initialize,
+	// the authentication flag, and the pending server->client requests keyed
+	// by the ids this connection assigned.
+	clientCaps    atomic.Pointer[ClientCapabilities]
+	authenticated atomic.Bool
+	nextClientID  atomic.Int64
+	pendingMu     sync.Mutex
+	pending       map[int64]chan clientResult
+	closed        atomic.Bool
+
 	mu       sync.Mutex
 	sessions map[string]*sessionState
 }
 
-// handleRequest dispatches one request and writes exactly one response.
+// handleRequest dispatches one request and writes exactly one response. The
+// connection's Client seam is planted on ctx so Agent handlers can call the
+// ACP client's methods.
 func (c *conn) handleRequest(ctx context.Context, req request) {
-	result, rpcErr := c.dispatch(ctx, req)
+	result, rpcErr := c.dispatch(WithClient(ctx, c), req)
 	if rpcErr != nil {
 		c.out.writeError(req.ID, rpcErr)
 		return
@@ -283,11 +394,25 @@ func (c *conn) handleRequest(ctx context.Context, req request) {
 
 // dispatch runs one method handler.
 func (c *conn) dispatch(ctx context.Context, req request) (any, *RPCError) {
+	// initialize negotiates the connection and authenticate is the way out of
+	// an auth gate; every other method is refused until authentication when the
+	// server is configured with an authenticator.
 	switch req.Method {
 	case MethodInitialize:
 		return c.handleInitialize(req.Params)
+	case MethodAuthenticate:
+		return c.handleAuthenticate(ctx, req.Params)
+	}
+	if gateErr := c.authGateError(req.Method); gateErr != nil {
+		return nil, gateErr
+	}
+	switch req.Method {
 	case MethodSessionNew:
 		return c.handleNewSession(ctx, req.Params)
+	case MethodSessionList:
+		return c.handleSessionList(ctx, req.Params)
+	case MethodSessionLoad:
+		return c.handleSessionLoad(ctx, req.Params)
 	case MethodSessionPrompt:
 		return c.handlePrompt(ctx, req.Params)
 	case MethodSessionCancel:
@@ -308,7 +433,8 @@ func (c *conn) handleNotification(ctx context.Context, method string, params jso
 	}
 }
 
-// handleInitialize implements the ACP initialize handshake and opens the
+// handleInitialize implements the ACP initialize handshake, records the client
+// capabilities used to gate server->client requests, and opens the
 // session/prompt gate.
 func (c *conn) handleInitialize(params json.RawMessage) (any, *RPCError) {
 	var p InitializeRequest
@@ -317,16 +443,23 @@ func (c *conn) handleInitialize(params json.RawMessage) (any, *RPCError) {
 			return nil, invalidParams("initialize: " + err.Error())
 		}
 	}
+	c.clientCaps.Store(&p.ClientCapabilities)
 	c.init.Store(true)
+	// Capabilities mirror what the Agent can actually do: the minimum Agent
+	// keeps the old advertisement (no loadSession/session list), while the app
+	// adapter implements SessionLister + SessionLoader.
+	agentCaps := AgentCapabilities{PromptCapabilities: PromptCapabilities{}}
+	if _, ok := c.srv.agent.(SessionLoader); ok {
+		agentCaps.LoadSession = true
+	}
+	if _, ok := c.srv.agent.(SessionLister); ok {
+		agentCaps.SessionCapabilities = &SessionCapabilities{List: &SessionListCapabilities{}}
+	}
 	return InitializeResponse{
-		ProtocolVersion: ProtocolVersion,
-		AgentCapabilities: AgentCapabilities{
-			// The minimum automation surface is text-only and stateless across
-			// restarts (session/load is a documented non-goal).
-			LoadSession:        false,
-			PromptCapabilities: PromptCapabilities{},
-		},
-		AgentInfo: Implementation{Name: c.srv.serverName, Version: c.srv.version},
+		ProtocolVersion:   ProtocolVersion,
+		AgentCapabilities: agentCaps,
+		AgentInfo:         Implementation{Name: c.srv.serverName, Version: c.srv.version},
+		AuthMethods:       c.srv.authMethods,
 	}, nil
 }
 

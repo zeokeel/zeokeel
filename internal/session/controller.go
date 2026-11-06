@@ -314,12 +314,11 @@ type turn struct {
 	// per-turn fields above.
 	errText string
 
-	// workspaceBefore/root/captured carry the pre-turn workspace snapshot used
-	// to report files this turn changed (FP-05 workspace/changes). Empty when
-	// diffing is skipped (Read Only, no workspace root, capture failure).
-	workspaceBefore   workspacechanges.Snapshot
-	workspaceRoot     string
-	workspaceCaptured bool
+	// workspaceTurn carries the pre-turn baseline and the file tools'
+	// pre-edit content used to report files this turn changed with inline
+	// diffs (FP-05 workspace/changes). Nil when diffing is skipped (Read
+	// Only, no workspace root, capture failure).
+	workspaceTurn *workspacechanges.Turn
 }
 
 type draft struct {
@@ -751,6 +750,16 @@ func (c *Controller) submit(ctx context.Context, sessionID, text string, automat
 		return ErrNoAgent
 	}
 
+	// Session references (DSH @deepseek-ai/dsh-session-reference parity):
+	// resolve the canonical @[label](dsh-session:…) mentions this prompt cites
+	// before reserving the turn, so a malformed, self-referential, over-limit
+	// or unreadable reference is a plain Submit error the shell can present
+	// instead of a silently dropped request. The prompt itself is not changed.
+	referenceContext, refErr := c.prepareSessionReferenceContext(ctx, sessionID, text)
+	if refErr != nil {
+		return fmt.Errorf("session: submit: %w", refErr)
+	}
+
 	turnCtx, t, err := c.reserve(ctx, sessionID, automatic)
 	if err != nil {
 		return err
@@ -802,19 +811,20 @@ func (c *Controller) submit(ctx context.Context, sessionID, text string, automat
 	// (images), then linked to the persisted user message once it is written.
 	attachmentRows, attachmentInputs := c.turnAttachmentInputs(sessionID)
 
-	// Capture the workspace baseline for the turn's changed-file summary
-	// (FP-05). Read Only turns cannot modify files, and a session without a
-	// workspace root has nothing to diff. Capture runs before the turn starts
-	// and outside bindMu so a slow git call cannot block another binding.
+	// Start the workspace baseline for the turn's changed-file summary with
+	// inline diffs (FP-05). Read Only turns cannot modify files, and a
+	// session without a workspace root has nothing to diff. The capture runs
+	// before the turn starts and outside bindMu so a slow git call cannot
+	// block another binding; the baseline content that a later comparison
+	// needs is retained there, and the file tools' target paths are
+	// attributed from the turn's ToolStart events (see forward).
 	if c.SessionPermissionOrDefault(sessionID) != PermissionAsk {
 		if root := strings.TrimSpace(c.workspaceRootForSession(sessionID)); root != "" {
 			captureCtx, cancelCapture := context.WithTimeout(context.Background(), workspaceChangesCaptureTimeout)
-			before, werr := workspacechanges.Capture(captureCtx, root)
+			workspaceTurn, werr := workspacechanges.StartTurn(captureCtx, root)
 			cancelCapture()
 			if werr == nil {
-				t.workspaceBefore = before
-				t.workspaceRoot = root
-				t.workspaceCaptured = true
+				t.workspaceTurn = workspaceTurn
 			}
 		}
 	}
@@ -883,6 +893,16 @@ func (c *Controller) submit(ctx context.Context, sessionID, text string, automat
 	// failed switch keeps the current model rather than dropping the turn.
 	_ = c.applySessionModel(sessionID)
 
+	// Queue the referenced-session snapshot as the turn's second user message:
+	// the runtime appends it right after the prompt in the provider request, so
+	// the user's own message stays byte-identical and the snapshot stays
+	// untrusted background.
+	if qerr := c.queueSessionReferenceContext(agent, sessionID, referenceContext); qerr != nil {
+		c.bindMu.Unlock()
+		c.abortTurn(t)
+		return fmt.Errorf("session: submit: queue session reference context: %w", qerr)
+	}
+
 	// Load the prior conversation before persisting this prompt. Agent.Run
 	// reads History synchronously, so doing it first keeps the just-typed
 	// prompt out of the seeded conversation; persisting it first made the
@@ -894,8 +914,11 @@ func (c *Controller) submit(ctx context.Context, sessionID, text string, automat
 	// call finishTurn and (via the goal driver) submit the continuation turn.
 	c.bindMu.Unlock()
 	if runErr != nil {
-		// The turn never started. Keep the prompt that was typed so the
-		// failed attempt is still visible and stored.
+		// The turn never started; the queued snapshot must not leak into a
+		// later turn.
+		agent.ClearTurnContext(sessionID)
+		// Keep the prompt that was typed so the failed attempt is still
+		// visible and stored.
 		if perr := c.persistUserMessage(t, sessionID, text, attachmentRows); perr != nil {
 			c.abortTurn(t)
 			return fmt.Errorf("session: submit: persist user message: %w", perr)
@@ -909,6 +932,15 @@ func (c *Controller) submit(ctx context.Context, sessionID, text string, automat
 	if err := c.persistUserMessage(t, sessionID, text, attachmentRows); err != nil {
 		c.abortTurn(t)
 		return fmt.Errorf("session: submit: persist user message: %w", err)
+	}
+	// Persist the injected snapshot as its own user row right after the prompt
+	// so history and the next provider request carry it in model order and a
+	// reopened transcript replays it.
+	if referenceContext != "" {
+		if err := c.persistSessionReferenceContext(t, sessionID, referenceContext); err != nil {
+			c.abortTurn(t)
+			return fmt.Errorf("session: submit: persist session reference context: %w", err)
+		}
 	}
 
 	// The reservation already added this turn to the wait group; the drain
@@ -949,6 +981,12 @@ func (c *Controller) persistUserMessage(t *turn, sessionID, text string, attachm
 // status, which keeps a Submit issued from an OnUpdate idle callback from
 // observing a spurious ErrTurnRunning.
 //
+// An automatic continuation is different: its caller (the goal driver) runs on
+// the finishing turn's goroutine before that turn releases the slot, so reserve
+// performs an atomic handoff (delete the terminal turn + register the
+// continuation under one lock) instead of waiting for done. That keeps the
+// session's turn slot continuously occupied, which wait-idle observers rely on.
+//
 // automatic turns are the goal driver's continuations: a Stop marker for the
 // session suppresses them even when it landed after the finished turn's
 // terminal status. Manual turns clear the marker once they own the slot.
@@ -965,17 +1003,30 @@ func (c *Controller) reserve(ctx context.Context, sessionID string, automatic bo
 		}
 		if existing := c.turns[sessionID]; existing != nil {
 			if existing.terminalApplied.Load() {
-				done := existing.done
-				c.mu.Unlock()
-				select {
-				case <-done:
-					continue
-				case <-ctx.Done():
-					return nil, nil, ctx.Err()
+				if automatic {
+					// Atomic slot handoff for the goal driver's continuation.
+					// The finishing turn's goroutine calls turnFinished before
+					// releasing the slot or closing done, so replacing the
+					// finished slot here (under the same lock) guarantees that
+					// a wait-idle observer never sees this session without a
+					// registered turn: otherwise it could return in the window
+					// between the finished turn's deletion and this
+					// continuation's reservation.
+					delete(c.turns, sessionID)
+				} else {
+					done := existing.done
+					c.mu.Unlock()
+					select {
+					case <-done:
+						continue
+					case <-ctx.Done():
+						return nil, nil, ctx.Err()
+					}
 				}
+			} else {
+				c.mu.Unlock()
+				return nil, nil, fmt.Errorf("%w: session %q", ErrTurnRunning, sessionID)
 			}
-			c.mu.Unlock()
-			return nil, nil, fmt.Errorf("%w: session %q", ErrTurnRunning, sessionID)
 		}
 
 		turnCtx, cancel := context.WithCancel(ctx)
@@ -1159,6 +1210,13 @@ func (c *Controller) forward(t *turn, ev state.Event) {
 		d.reasoning.WriteString(e.Text)
 	case state.ToolStart:
 		t.toolStarted = true
+		// Attribute a file tool's target to the turn's changed-file report
+		// (FP-05). The event may be handled after the tool already wrote the
+		// file, so this only classifies the path; the comparison's before
+		// side comes from the start-of-turn baseline.
+		if t.workspaceTurn != nil {
+			t.workspaceTurn.NoteToolStart(e.Name, e.Args)
+		}
 	}
 
 	// A terminal status is the point after which the assistant text is final.
@@ -1680,25 +1738,33 @@ const workspaceChangesCaptureTimeout = 5 * time.Second
 
 // emitWorkspaceChanges diffs the post-turn workspace against the baseline
 // captured in submit and publishes state.WorkspaceChanges for the UI/telemetry.
+// Each change carries its unified diff (bounded by the package's per-turn
+// budget) so the UI and a replayed session show the inline comparison.
 // Capture/diff failures stay silent: the summary is display data, never a
 // reason to fail or delay a turn beyond the bounded timeout.
 func (c *Controller) emitWorkspaceChanges(t *turn) {
-	if c == nil || t == nil || !t.workspaceCaptured || t.workspaceRoot == "" {
+	if c == nil || t == nil || t.workspaceTurn == nil {
 		return
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), workspaceChangesCaptureTimeout)
 	defer cancel()
-	after, err := workspacechanges.Capture(ctx, t.workspaceRoot)
-	if err != nil {
-		return
-	}
-	changes := workspacechanges.Diff(t.workspaceBefore, after)
+	changes := t.workspaceTurn.Finish(ctx)
 	if len(changes) == 0 {
 		return
 	}
 	out := make([]state.WorkspaceChange, 0, len(changes))
 	for _, change := range changes {
-		out = append(out, state.WorkspaceChange{Path: change.Path, Status: change.Status})
+		out = append(out, state.WorkspaceChange{
+			Path:      change.Path,
+			Status:    change.Status,
+			Diff:      change.Diff,
+			Added:     change.Added,
+			Removed:   change.Removed,
+			Binary:    change.Binary,
+			Oversized: change.Oversized,
+			Coarse:    change.Coarse,
+			Truncated: change.Truncated,
+		})
 	}
 	c.forward(t, state.WorkspaceChanges{TurnID: t.id, Changes: out})
 }
@@ -1761,22 +1827,31 @@ func (c *Controller) finishTurn(t *turn) {
 	// title off the turn goroutine; it never delays turn completion.
 	c.maybeAutoTitle(t)
 
+	// Automatic goal continuation. This is the only trigger: it runs exactly
+	// once per terminal turn, while this turn still owns the slot, so the
+	// driver's reserve hands the slot over atomically (delete the finished
+	// turn and register the continuation under one lock). Doing this before
+	// the slot is released closes the window where a wait-idle observer could
+	// see Idle with no turn registered and miss the continuation entirely.
+	// A user Stop leaves t.stopped set; a caller-cancelled turn context leaves
+	// t.ctx.Err() set. Both suppress the continuation.
 	c.mu.Lock()
-	if c.turns[t.sessionID] == t {
-		delete(c.turns, t.sessionID)
-	}
 	driver := c.goalDriver
 	c.mu.Unlock()
-
-	// Automatic goal continuation. This is the only trigger: it runs exactly
-	// once per terminal turn, after the turn slot is free and before done is
-	// closed, so a waiter woken by the idle transition sees the continuation
-	// registered. A user Stop leaves t.stopped set; a caller-cancelled turn
-	// context leaves t.ctx.Err() set. Both suppress the continuation.
 	if driver != nil {
 		stopped := t.stopped.Load() || (t.ctx != nil && t.ctx.Err() != nil)
 		driver.turnFinished(c, t.sessionID, stopped)
 	}
+
+	// Release the slot. A continuation that took the slot over already
+	// replaced it in reserve, so this delete is then a no-op; done is closed
+	// last so a waiter that was waiting on this turn only proceeds once any
+	// continuation is registered and running.
+	c.mu.Lock()
+	if c.turns[t.sessionID] == t {
+		delete(c.turns, t.sessionID)
+	}
+	c.mu.Unlock()
 
 	close(t.done)
 }
@@ -1826,8 +1901,9 @@ func (c *Controller) StopSession(sessionID string) {
 		go stopper(sessionID)
 	}
 	// Remember the Stop even when the turn slot is already empty or terminal:
-	// the goal driver may be between deleting the finished turn and submitting
-	// its continuation, and that continuation must not start.
+	// the goal driver may be submitting its continuation right now, and the
+	// automatic reserve path checks this marker before accepting it (a Stop
+	// that lands after the handoff cancels the registered continuation below).
 	c.stopRequested[sessionID] = true
 	t := c.turns[sessionID]
 	if t == nil {
@@ -2124,6 +2200,17 @@ func (c *Controller) recoverInterruptedSession(sess *store.Session, mine *turn) 
 	c.mu.Unlock()
 	if active != nil && active != mine {
 		return nil
+	}
+
+	// A process that died mid-turn leaves a non-terminal barrier checkpoint
+	// (requested/tool_pending). Repair that tail from the checkpoint before the
+	// store-status repair below: the conversation gains an interrupted
+	// assistant anchor and every dispatched-but-unaccounted tool call gets an
+	// explicit unknown-outcome result, so the next request has no dangling
+	// call and no duplicated user message. Completed checkpoints and normally
+	// ended turns are no-ops here.
+	if err := c.recoverInterruptedCheckpoint(sess); err != nil {
+		return fmt.Errorf("session: recover interrupted turn: %w", err)
 	}
 
 	calls, err := c.store.ToolCallsForSession(sess.ID)
@@ -3752,9 +3839,10 @@ func (c *Controller) SetGoalStore(store tools.GoalStateStore) {
 
 // GoalAction applies one /goal command to the current session's goal and
 // persists the result. It is the non-model entry point for the shell's /goal
-// command: action is set (with objective), pause, resume, block, unblock,
-// complete, abandon, clear or get. steps/progress are optional set fields. The
-// returned goal is nil for clear and for get when no goal is set.
+// command: action is set (with objective), edit (with the replacement
+// objective — same goal id/phase, revision bumped), pause, resume, block,
+// unblock, complete, abandon, clear or get. steps/progress are optional set
+// fields. The returned goal is nil for clear and for get when no goal is set.
 func (c *Controller) GoalAction(action, objective string, steps []string, progress *int) (*tools.Goal, error) {
 	action = strings.ToLower(strings.TrimSpace(action))
 	if action == "" {

@@ -3,7 +3,11 @@ ZeoKeel — Windows x64 test build (pure Go, CGO_ENABLED=0)
 Files
 - zeokeel-windows-amd64.exe          GUI build (no console window); recommended
 - zeokeel-windows-amd64-console.exe  same app with a console window for logs
-- SHA256SUMS.txt
+- README-WINDOWS.txt
+
+Checksums: SHA256SUMS.txt is published next to the zip (dist/SHA256SUMS.txt and
+as a GitHub release asset), not inside the zip. The GitHub release also attaches
+the two bare .exe files next to the zip, so either form can be downloaded.
 
 Requirements
 - Windows 10/11 x64. No runtime or DLL dependency; single executable.
@@ -33,7 +37,13 @@ What to test
 - Settings persistence: theme, language zh/en, font size, plugins, automations.
 
 Known limits in this build
-- Unsigned; no installer/auto-update yet.
+- Unsigned; no bundled installer yet. The package is a portable zip; an
+  Inno Setup / NSIS installer is planned but not built (see
+  INSTALLER-PLAN.md in the repository).
+- Auto-update: the update engine, the `zeokeel update` CLI and
+  Settings -> Updates (check / download / install on restart) are delivered.
+  The hosted update feed and signing are deferred, so update checks need a
+  configured feed URL (`update.feed_url` / ZEOKEEL_UPDATE_FEED).
 - Shell is platform gated: Windows exposes the pwsh tool, POSIX builds expose
   bash; no Git Bash/WSL integration. Terminal on Windows is pipe-backed
   (pty=false); Linux/macOS builds use bash + a real PTY.

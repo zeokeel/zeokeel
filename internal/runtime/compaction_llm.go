@@ -93,17 +93,10 @@ func (c LLMCompactor) Compact(ctx context.Context, sessionID string, messages []
 	messages = offloadOldImages(messages, DefaultImageKeepLast)
 
 	keepLast := c.keepLast()
-	system := make([]Message, 0, len(messages))
-	rest := make([]Message, 0, len(messages))
-	for _, msg := range messages {
-		if msg.Role == RoleSystem {
-			if !isCompactionSummary(msg) {
-				system = append(system, msg)
-			}
-			continue
-		}
-		rest = append(rest, msg)
-	}
+	// Preserve system messages and drop a previous compaction summary (either
+	// persisted role) so the fresh summary replaces it, exactly like
+	// WindowCompactor.
+	system, rest := splitCompactionConversation(messages)
 	if len(rest) <= keepLast {
 		// Nothing to drop: leave the conversation untouched (including any
 		// previous summary), exactly like WindowCompactor.

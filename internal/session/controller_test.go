@@ -268,9 +268,23 @@ func waitPhase(t *testing.T, ctrl *session.Controller, phase state.Phase) {
 
 func waitIdleAndDrain(t *testing.T, ctrl *session.Controller) {
 	t.Helper()
-	waitPhase(t, ctrl, state.PhaseIdle)
-	ctrl.Wait()
-	waitPhase(t, ctrl, state.PhaseIdle)
+	// "Idle and drained" is only stable once no turn is registered and the
+	// snapshot is idle again. A terminal Idle can be observed while the goal
+	// driver's automatic continuation is being accepted (the driver hands the
+	// slot over atomically, but the continuation's snapshot may not be running
+	// yet), so Wait can wake on the finished turn and still find the
+	// continuation registered: re-check instead of returning on the stale Idle.
+	deadline := time.Now().Add(10 * time.Second)
+	for {
+		waitPhase(t, ctrl, state.PhaseIdle)
+		ctrl.Wait()
+		if ctrl.Snapshot().Phase == state.PhaseIdle {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("session did not settle after waiting for its continuations: %+v", ctrl.Snapshot())
+		}
+	}
 }
 
 func waitAssistantText(t *testing.T, ctrl *session.Controller, substr string) {

@@ -80,10 +80,11 @@ Call it with an empty object for a full snapshot, or select one section with
 The result is one read-only JSON document:
   kind, root, section
   plugins:  [{name,enabled,source}] where source is "setting" or "default"
-  settings: {key:value} for provider, web search, approval, skills, UI and
-            model settings. Values whose key matches api_key/secret/token/
-            password/credential/authorization are "[redacted]"; mcp.servers is
-            reduced to its server-name array. Values are capped at 2 KiB.
+  settings: {key:value} for provider, web search, approval, skills, language
+            servers (lsp.servers, lsp.workspace_config), UI and model settings.
+            Values whose key matches api_key/secret/token/password/credential/
+            authorization are "[redacted]"; mcp.servers is reduced to its
+            server-name array. Values are capped at 2 KiB.
   sessions: {count,recent:[{id,title,status,updated_at}]} (10 most recent)
   skills:   {root,count,skills:[{name,description,path}],error?}
   mcp:      {source,file?,workspace_config,workspace_config_note?,count,
@@ -115,6 +116,7 @@ var inspectPluginCatalog = []inspectPluginDef{
 	{name: "mcp", defaultEnabled: true},
 	{name: "shell", defaultEnabled: true},
 	{name: "subagent", defaultEnabled: true},
+	{name: "lsp", defaultEnabled: true},
 	{name: "agent_teams", defaultEnabled: false},
 	{name: "auto_review", defaultEnabled: false},
 	{name: "developer_tools", defaultEnabled: false},
@@ -136,6 +138,8 @@ var inspectSettingKeys = []string{
 	"approval.tools",
 	"skills.root",
 	"mcp.servers",
+	"lsp.servers",
+	"lsp.workspace_config",
 	store.ModelDefaultKey,
 	"ui.language",
 	"ui.theme",

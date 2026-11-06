@@ -21,6 +21,7 @@ import (
 	"time"
 
 	"github.com/zeokeel/zeokeel/internal/agentteam"
+	"github.com/zeokeel/zeokeel/internal/lsp"
 	"github.com/zeokeel/zeokeel/internal/mcp"
 	"github.com/zeokeel/zeokeel/internal/presets"
 	"github.com/zeokeel/zeokeel/internal/prompt"
@@ -836,6 +837,29 @@ func registerAllToolsWithOptions(st *store.Store, root string, get func(key, env
 		opts.AdoptManagers(dirState, termMgr, jobsMgr)
 	}
 	register(tools.NewReadImageTool(tools.ImageConfig{WorkspaceRoot: root}))
+	// The lsp tool is read-only code intelligence from a configured language
+	// server. It stays registered without any server so a call gets a stable
+	// "not configured" error instead of a missing-tool error, and a malformed
+	// configuration is reported by the tool instead of failing the whole agent
+	// build. The workspace file .zeokeel/lsp.json is untrusted data: starting
+	// the commands it declares is third-party code execution, so it is only
+	// read after an explicit lsp.workspace_config=allow opt-in (the same
+	// fail-closed policy as mcp.workspace_config).
+	if pluginOn("lsp", true) {
+		lspServers, lspErr := lsp.LoadServers(
+			read("lsp.servers", "ZEOKEEL_LSP_SERVERS", ""),
+			root,
+			read("lsp.workspace_config", "ZEOKEEL_LSP_WORKSPACE_CONFIG", lsp.WorkspaceConfigOff),
+		)
+		if lspErr != nil {
+			log.Printf("zeokeel: lsp: %v (fix lsp.servers or %s)", lspErr, lsp.WorkspaceConfigFile)
+		}
+		register(tools.NewLSPTool(tools.LSPConfig{
+			WorkspaceRoot: root,
+			Provider:      lsp.NewStdioProvider(lsp.ProviderConfig{Servers: lspServers, Root: root}),
+			ConfigError:   lspErr,
+		}))
+	}
 	// Session history tools are scoped to the selected workspace, matching
 	// the prompt's "workspace-scoped" claim and the shell's search. The app
 	// passes the controller's current workspace; a direct caller without it

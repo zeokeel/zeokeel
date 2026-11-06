@@ -15,12 +15,65 @@ import (
 //	{"type":"text","text":"..."}
 //	{"type":"reasoning","text":"..."}
 //	{"type":"tool-call","id":"...","name":"...","arguments":"{...}"}
+//	{"type":"image","attachment":{"attachmentId":"sha256:...","mediaType":"image/png",...}}
+//	{"type":"file","attachment":{"attachmentId":"sha256:...","name":"notes.md","bytes":123}}
+//
+// Image/file parts are migrated as ZeoKeel attachment rows (the message model
+// itself stays text-only). Older exports and fixtures may instead embed the
+// bytes: either in attachment.data or in an Anthropic-style source object,
+// both accepted below.
 type ContentPart struct {
 	Type      string          `json:"type"`
 	Text      string          `json:"text"`
 	Name      string          `json:"name"`
 	Arguments json.RawMessage `json:"arguments"`
 	ID        string          `json:"id"`
+	// Attachment is the durable, content-addressed reference DSH writes for
+	// image and file parts.
+	Attachment *ContentAttachmentRef `json:"attachment,omitempty"`
+	// MediaType/Data are the wire-encoded base64 form some exports embed.
+	MediaType string `json:"mediaType,omitempty"`
+	Data      string `json:"data,omitempty"`
+	// Source is the Anthropic-style inline base64 source form.
+	Source *ContentPartSource `json:"source,omitempty"`
+}
+
+// ContentAttachmentRef is the DSH durable attachment reference carried by an
+// image or file content part. AttachmentID is "sha256:<hex>"; Bytes is the
+// exact stored object length.
+type ContentAttachmentRef struct {
+	AttachmentID string `json:"attachmentId"`
+	MediaType    string `json:"mediaType"`
+	Name         string `json:"name"`
+	Bytes        int64  `json:"bytes"`
+	Width        int    `json:"width"`
+	Height       int    `json:"height"`
+	// Data is the inline base64 fallback (older exports); normally empty.
+	Data string `json:"data,omitempty"`
+}
+
+// ContentPartSource is the legacy inline image form:
+//
+//	{"type":"base64","media_type":"image/png","data":"..."}
+type ContentPartSource struct {
+	Type           string `json:"type"`
+	MediaType      string `json:"media_type"`
+	MediaTypeCamel string `json:"mediaType"`
+	Data           string `json:"data"`
+	Name           string `json:"name"`
+}
+
+// ContentAttachment is one image/file content part attached to a message. The
+// bytes are resolved against the DSH attachment store (or decoded inline) when
+// the session is imported; parse never touches the filesystem.
+type ContentAttachment struct {
+	// Kind is the DSH content part type: "image" or "file".
+	Kind          string
+	Name          string
+	MediaType     string
+	DeclaredBytes int64
+	AttachmentID  string
+	InlineData    string
 }
 
 // ErrUnsupportedVersion reports a DSH session header whose format version this
@@ -38,6 +91,9 @@ type Message struct {
 	Content   string
 	Reasoning string
 	Turn      int
+	// Attachments holds the image/file parts of this message (empty for plain
+	// text messages). They become ZeoKeel attachment rows linked to the message.
+	Attachments []ContentAttachment
 }
 
 // Session is one parsed DSH session. Messages holds only the rows that can be
@@ -64,8 +120,10 @@ type Session struct {
 	StepAssistant int
 	ToolCalls     int
 	ToolResults   int
-	// Images counts content parts that were dropped (image import is out of
-	// scope for the minimal importer) so the report can surface them.
+	// Images counts image content parts seen in the session. The importer
+	// resolves them against the DSH attachment store: resolvable images become
+	// ZeoKeel attachment rows; missing/oversized/corrupt sources are counted in
+	// Report.ImagesDropped with a granular skip reason.
 	Images   int
 	Warnings []string
 }
@@ -241,33 +299,42 @@ func parseLine(sess *Session, line string, headerSeen bool, source string, lineN
 			sess.SystemInjected++
 			return nil
 		}
-		content, reasoning, images := flattenContent(data.Content)
-		sess.Images += images
-		if strings.TrimSpace(content) != "" {
-			sess.Messages = append(sess.Messages, Message{Role: "user", Content: content, Reasoning: reasoning})
+		content, reasoning, attachments := flattenContent(data.Content)
+		sess.Images += countImageAttachments(attachments)
+		// A message is kept when it has visible text OR a migratable image/file
+		// part: an image-only prompt still needs its message row so the migrated
+		// attachment has an owning message to link to.
+		if strings.TrimSpace(content) != "" || len(attachments) > 0 {
+			sess.Messages = append(sess.Messages, Message{
+				Role:        "user",
+				Content:     content,
+				Reasoning:   reasoning,
+				Attachments: attachments,
+			})
 		}
 	case "assistant/message":
 		var data messageData
 		if err := json.Unmarshal(envelope.Data, &data); err != nil {
 			return fmt.Errorf("importer: %s:%d: assistant/message: %w", source, lineNo, err)
 		}
-		content, reasoning, images := flattenContent(data.Message.Content)
-		sess.Images += images
+		content, reasoning, attachments := flattenContent(data.Message.Content)
+		sess.Images += countImageAttachments(attachments)
 		// DSH emits one assistant/message per step; step events carry
 		// reasoning and tool-call parts but no visible reply (95.7% of real
 		// assistant events). Turning them into empty bubbles or synthetic
 		// "[tool call] ..." transcript lines makes the migrated conversation
-		// unreadable, so only messages with real text are imported (reasoning
-		// is kept alongside the text).
-		if strings.TrimSpace(content) == "" {
+		// unreadable, so only messages with real text (or an image/file part)
+		// are imported (reasoning is kept alongside the text).
+		if strings.TrimSpace(content) == "" && len(attachments) == 0 {
 			sess.StepAssistant++
 			return nil
 		}
 		sess.Messages = append(sess.Messages, Message{
-			Role:      "assistant",
-			Content:   content,
-			Reasoning: reasoning,
-			Turn:      data.Turn,
+			Role:        "assistant",
+			Content:     content,
+			Reasoning:   reasoning,
+			Turn:        data.Turn,
+			Attachments: attachments,
 		})
 	case "system/message":
 		var data messageData
@@ -284,12 +351,13 @@ func parseLine(sess *Session, line string, headerSeen bool, source string, lineN
 }
 
 // flattenContent renders DSH content parts into the text/reasoning pair
-// ZeoKeel persists. Tool-call and tool-result parts are not turned into
-// transcript text: tool activity is counted separately and synthesized
-// "[tool call] ..." lines made migrated conversations unreadable (PD-04).
-// Parts that carry an image are counted as dropped so the report can surface
-// them; image import itself is out of scope for the minimal importer.
-func flattenContent(parts []ContentPart) (content, reasoning string, images int) {
+// ZeoKeel persists plus the image/file attachments to migrate. Tool-call and
+// tool-result parts are not turned into transcript text: tool activity is
+// counted separately and synthesized "[tool call] ..." lines made migrated
+// conversations unreadable (PD-04). Image/file parts carry no transcript text;
+// they are returned for the importer to resolve against the DSH attachment
+// store.
+func flattenContent(parts []ContentPart) (content, reasoning string, attachments []ContentAttachment) {
 	var text, think strings.Builder
 	for _, part := range parts {
 		switch {
@@ -299,9 +367,61 @@ func flattenContent(parts []ContentPart) (content, reasoning string, images int)
 			think.WriteString(part.Text)
 		case part.Type == "tool-call", part.Type == "tool-result":
 			// Counted from tool/call and tool/result events.
-		case strings.Contains(part.Type, "image"):
-			images++
+		case part.Type == "image", part.Type == "file", strings.Contains(part.Type, "image"):
+			attachments = append(attachments, contentAttachmentOf(part))
 		}
 	}
-	return strings.TrimSpace(text.String()), strings.TrimSpace(think.String()), images
+	return strings.TrimSpace(text.String()), strings.TrimSpace(think.String()), attachments
+}
+
+// contentAttachmentOf extracts the durable reference (or inline base64 payload)
+// from one image/file content part. The importer resolves it later; parsing
+// itself never touches the filesystem.
+func contentAttachmentOf(part ContentPart) ContentAttachment {
+	att := ContentAttachment{Kind: "image", Name: strings.TrimSpace(part.Name)}
+	if part.Type == "file" {
+		att.Kind = "file"
+	}
+	if part.Attachment != nil {
+		att.AttachmentID = strings.TrimSpace(part.Attachment.AttachmentID)
+		att.MediaType = strings.TrimSpace(part.Attachment.MediaType)
+		att.DeclaredBytes = part.Attachment.Bytes
+		att.InlineData = strings.TrimSpace(part.Attachment.Data)
+		if name := strings.TrimSpace(part.Attachment.Name); name != "" {
+			att.Name = name
+		}
+	}
+	if part.Source != nil {
+		if att.InlineData == "" {
+			att.InlineData = strings.TrimSpace(part.Source.Data)
+		}
+		if att.MediaType == "" {
+			att.MediaType = strings.TrimSpace(part.Source.MediaType)
+			if att.MediaType == "" {
+				att.MediaType = strings.TrimSpace(part.Source.MediaTypeCamel)
+			}
+		}
+		if att.Name == "" {
+			att.Name = strings.TrimSpace(part.Source.Name)
+		}
+	}
+	if att.InlineData == "" {
+		att.InlineData = strings.TrimSpace(part.Data)
+	}
+	if att.MediaType == "" {
+		att.MediaType = strings.TrimSpace(part.MediaType)
+	}
+	return att
+}
+
+// countImageAttachments counts image parts (file parts are counted separately by
+// the importer) so Session.Images keeps its historical meaning.
+func countImageAttachments(attachments []ContentAttachment) int {
+	n := 0
+	for _, att := range attachments {
+		if att.Kind == "image" {
+			n++
+		}
+	}
+	return n
 }

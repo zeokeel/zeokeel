@@ -34,6 +34,11 @@ const (
 	// EventWorkspaceChanges records the files one completed turn changed in the
 	// workspace (DSH's workspace/changes event). Payload JSON, display only.
 	EventWorkspaceChanges = "workspace/changes"
+	// EventCompaction records one manual /compact: the replaced message ids and
+	// the summary message that stands in for them. Replaying it is idempotent
+	// over the already-compacted messages table, so a reopened session's fold
+	// matches the live one.
+	EventCompaction = "compaction"
 )
 
 // questionAnsweredPayload is the resolution row for one ask_user call.
@@ -100,12 +105,28 @@ type turnEndPayload struct {
 	Reason    string `json:"reason"`
 }
 
+// workspaceChangesPayload reuses the state struct for the per-file fields:
+// its JSON tags are the wire contract (path/status plus the optional diff,
+// counts and markers), and older rows without the optional fields still decode
+// to zero values.
 type workspaceChangesPayload struct {
-	TurnID  string `json:"turn_id,omitempty"`
-	Changes []struct {
-		Path   string `json:"path"`
-		Status string `json:"status"`
-	} `json:"changes"`
+	TurnID  string                  `json:"turn_id,omitempty"`
+	Changes []state.WorkspaceChange `json:"changes"`
+}
+
+// compactionPayload is the persisted /compact checkpoint. replaced msg ids are
+// removed on replay and the summary message is inserted in their place; both
+// are explicit wire fields so older traces stay readable.
+type compactionPayload struct {
+	ReplacedMsgIDs []string                 `json:"replaced_msg_ids"`
+	Summary        compactionSummaryPayload `json:"summary"`
+}
+
+type compactionSummaryPayload struct {
+	MsgID     string `json:"msg_id"`
+	Role      string `json:"role"`
+	Content   string `json:"content"`
+	Reasoning string `json:"reasoning,omitempty"`
 }
 
 type statusPayload struct {
@@ -267,14 +288,18 @@ func encodeEvent(ev state.Event) (store.Event, error) {
 		}
 	case state.WorkspaceChanges:
 		typ = EventWorkspaceChanges
-		workspace := workspaceChangesPayload{TurnID: e.TurnID}
-		for _, change := range e.Changes {
-			workspace.Changes = append(workspace.Changes, struct {
-				Path   string `json:"path"`
-				Status string `json:"status"`
-			}{Path: change.Path, Status: change.Status})
+		payload = workspaceChangesPayload{TurnID: e.TurnID, Changes: e.Changes}
+	case state.Compaction:
+		typ = EventCompaction
+		payload = compactionPayload{
+			ReplacedMsgIDs: e.ReplacedMsgIDs,
+			Summary: compactionSummaryPayload{
+				MsgID:     e.Summary.MsgID,
+				Role:      string(e.Summary.Role),
+				Content:   e.Summary.Text,
+				Reasoning: e.Summary.Reasoning,
+			},
 		}
-		payload = workspace
 	case state.Status:
 		typ = EventStatus
 		payload = statusPayload{Phase: string(e.Phase), Reason: string(e.Reason)}
@@ -375,11 +400,21 @@ func decodeEvent(rec store.Event) (ev state.Event, ok bool) {
 		if json.Unmarshal(rec.Payload, &p) != nil {
 			return nil, false
 		}
-		ev := state.WorkspaceChanges{TurnID: p.TurnID}
-		for _, change := range p.Changes {
-			ev.Changes = append(ev.Changes, state.WorkspaceChange{Path: change.Path, Status: change.Status})
+		return state.WorkspaceChanges{TurnID: p.TurnID, Changes: p.Changes}, true
+	case EventCompaction:
+		var p compactionPayload
+		if json.Unmarshal(rec.Payload, &p) != nil {
+			return nil, false
 		}
-		return ev, true
+		return state.Compaction{
+			ReplacedMsgIDs: p.ReplacedMsgIDs,
+			Summary: state.Message{
+				MsgID:     p.Summary.MsgID,
+				Role:      state.Role(p.Summary.Role),
+				Text:      p.Summary.Content,
+				Reasoning: p.Summary.Reasoning,
+			},
+		}, true
 	case EventError:
 		var p errorPayload
 		if json.Unmarshal(rec.Payload, &p) != nil {

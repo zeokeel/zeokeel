@@ -15,6 +15,7 @@ import (
 
 	"github.com/zeokeel/zeokeel/internal/runtime"
 	"github.com/zeokeel/zeokeel/internal/session"
+	"github.com/zeokeel/zeokeel/internal/sessionreference"
 	"github.com/zeokeel/zeokeel/internal/state"
 	"github.com/zeokeel/zeokeel/internal/store"
 )
@@ -541,15 +542,14 @@ func TestUnknownSlashFallsThroughToModel(t *testing.T) {
 func TestCatalogCommandsAreKnown(t *testing.T) {
 	for _, name := range []string{
 		"/clear", "/stop", "/plan", "/help", "/new", "/settings",
-		"/automate", "/plugins", "/model",
+		"/automate", "/plugins", "/model", "/goal", "/compact",
 	} {
 		if !isSlashCommand(name) {
 			t.Errorf("%s is not a known command", name)
 		}
 	}
-	// /compact is deliberately not in the palette: compaction is automatic
-	// and the help text says so. It falls through as model prose.
-	for _, name := range []string{"/bogus", "/compact", "hello", "", "/"} {
+	// Unknown slash lines still fall through as model prose.
+	for _, name := range []string{"/bogus", "hello", "", "/"} {
 		if isSlashCommand(name) {
 			t.Errorf("%q reported as a known command", name)
 		}
@@ -582,7 +582,7 @@ func TestCatalogCommandsAreKnown(t *testing.T) {
 }
 
 // TestMentionMenuIncludesSessions checks the "@" menu lists sessions next to
-// files and inserts this build's documented "#<title>" fallback token.
+// files and inserts the canonical session-reference mention.
 func TestMentionMenuIncludesSessions(t *testing.T) {
 	h := newLiveApp(t, &shellProvider{})
 	writeTestFile(t, h.dir, "lively.md", "# lively\n")
@@ -597,7 +597,7 @@ func TestMentionMenuIncludesSessions(t *testing.T) {
 	if err := tt.Click("Session · live"); err != nil {
 		t.Fatalf("click session mention: %v", err)
 	}
-	if want := "read #live "; h.app.draft != want {
+	if want := "read " + sessionreference.FormatMention("live", h.ctrl.CurrentSessionID()) + " "; h.app.draft != want {
 		t.Fatalf("draft after session mention = %q, want %q", h.app.draft, want)
 	}
 

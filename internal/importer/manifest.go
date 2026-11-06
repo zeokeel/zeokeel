@@ -17,19 +17,41 @@ import (
 //
 // The manifest is a small JSON file (typically inside the ZeoKeel data
 // directory) that records every DSH session this data directory already
-// imported, keyed by DSH home + session directory, together with the source
-// file's size, mtime and SHA-256. A second run skips a session whose content is
+// imported, keyed by DSH home + session path, together with the source file's
+// size, mtime and SHA-256. A second run skips a session whose content is
 // unchanged instead of creating a duplicate ZeoKeel session (PD-04: repeated
 // imports used to duplicate everything). A changed source (new content, e.g. a
 // session continued in DSH after the import) has a different hash and is
 // imported again.
 //
+// Format versions (migrated transparently on load):
+//
+//	0  pre-version manifests (key "<home>|<session dir or file base>")
+//	1  wave-2: version field added, same collision-prone key form
+//	2  current: key is "<home>|<path relative to <DSH home>/sessions>" and the
+//	   last valid file is kept as "<path>.bak" so a damaged main file can
+//	   recover its recorded sessions instead of re-importing them
+//
+// A manifest from a newer build is rejected (fail closed); a damaged JSON
+// payload is preserved next to its path and rebuilt with a warning instead of
+// blocking the import forever.
+//
 // Options.ManifestPath == "" keeps the historical non-idempotent behaviour.
-const manifestFormatVersion = 1
+const manifestFormatVersion = 2
 
-// ErrManifest reports an unreadable or incompatible import manifest. The run
-// stops before writing anything so a corrupted manifest cannot silently turn
-// into duplicate imports.
+// manifestBackupSuffix is the rolling backup of the last valid manifest; it is
+// used to recover recorded sessions when the main file is damaged.
+const manifestBackupSuffix = ".bak"
+
+// manifestCorruptSuffix prefixes the preserved copy of a damaged manifest.
+const manifestCorruptSuffix = ".corrupt-"
+
+// ErrManifest reports an unreadable or incompatible import manifest. A run stops
+// when the manifest exists but cannot be read/decoded into a state we can safely
+// rewrite (permission errors, a newer format version, or legacy entries that
+// cannot be re-keyed): silently rebuilding then could duplicate or lose
+// idempotency state. A corrupt JSON payload is recoverable (backup restore or
+// preserved rebuild) and only produces a warning.
 var ErrManifest = errors.New("importer: import manifest is invalid")
 
 // sourceIdentity is one DSH session file's identity for idempotency checks.
@@ -141,11 +163,27 @@ type manifestFile struct {
 	Sessions  map[string]manifestEntry `json:"sessions,omitempty"`
 
 	path string
+	// warnings are load-time recovery notes surfaced in the import report.
+	warnings []string
+	// corruptMain reports that the main file was corrupt and must be preserved
+	// (renamed) before the rebuilt manifest is saved over it.
+	corruptMain bool
+}
+
+// newManifest returns an empty current-version manifest bound to path.
+func newManifest(path string) *manifestFile {
+	return &manifestFile{
+		Version:  manifestFormatVersion,
+		Sessions: make(map[string]manifestEntry),
+		path:     path,
+	}
 }
 
 // loadManifest reads the manifest at path. An empty path disables idempotency
-// (nil, nil). A missing file is an empty manifest; a corrupt or incompatible
-// file is ErrManifest so the caller stops before creating duplicate sessions.
+// (nil, nil). A missing file is an empty manifest. A corrupt JSON payload is
+// recovered from the rolling backup when possible, or preserved and rebuilt
+// with a warning (see loadCorruptManifest). Incompatible/unsafe manifests return
+// ErrManifest so the caller stops before creating ambiguous state.
 func loadManifest(path string) (*manifestFile, error) {
 	path = strings.TrimSpace(path)
 	if path == "" {
@@ -154,20 +192,16 @@ func loadManifest(path string) (*manifestFile, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return &manifestFile{
-				Version:  manifestFormatVersion,
-				Sessions: make(map[string]manifestEntry),
-				path:     path,
-			}, nil
+			return newManifest(path), nil
 		}
 		return nil, fmt.Errorf("importer: read manifest %q: %w", path, err)
 	}
 	var m manifestFile
 	if err := json.Unmarshal(data, &m); err != nil {
-		return nil, fmt.Errorf("%w: %s: %v", ErrManifest, path, err)
+		return loadCorruptManifest(path, err)
 	}
-	if m.Version != manifestFormatVersion {
-		return nil, fmt.Errorf("%w: %s: version %d, this build writes %d", ErrManifest, path, m.Version, manifestFormatVersion)
+	if err := m.normalizeVersion(); err != nil {
+		return nil, fmt.Errorf("%w: %s: %v", ErrManifest, path, err)
 	}
 	if m.Sessions == nil {
 		m.Sessions = make(map[string]manifestEntry)
@@ -175,8 +209,84 @@ func loadManifest(path string) (*manifestFile, error) {
 	if err := m.migrateLegacyKeys(); err != nil {
 		return nil, fmt.Errorf("%w: %s: %v", ErrManifest, path, err)
 	}
+	m.Version = manifestFormatVersion
 	m.path = path
 	return &m, nil
+}
+
+// normalizeVersion accepts the legacy formats (missing/zero version and wave-2
+// version 1) plus the current one; a manifest written by a newer build is
+// rejected so an old binary cannot rewrite (and silently lose) its state.
+func (m *manifestFile) normalizeVersion() error {
+	switch m.Version {
+	case 0, 1, manifestFormatVersion:
+		return nil
+	default:
+		return fmt.Errorf("version %d, this build reads up to %d", m.Version, manifestFormatVersion)
+	}
+}
+
+// loadCorruptManifest handles an unparsable manifest payload. Recorded sessions
+// are recovered from the rolling backup when it is valid; otherwise the run
+// continues with an empty manifest after the damaged file is preserved by
+// preserveCorrupt. Both paths only produce warnings: a corrupt small JSON file
+// must not block importing DSH sessions forever.
+func loadCorruptManifest(path string, parseErr error) (*manifestFile, error) {
+	if backup, ok := loadManifestBackup(path); ok {
+		backup.warnings = append(backup.warnings, fmt.Sprintf(
+			"import manifest %q is corrupt (%v); restored %d recorded session(s) from the backup %q",
+			path, parseErr, len(backup.Sessions), path+manifestBackupSuffix))
+		backup.corruptMain = true
+		return backup, nil
+	}
+	m := newManifest(path)
+	m.corruptMain = true
+	m.warnings = append(m.warnings, fmt.Sprintf(
+		"import manifest %q is corrupt (%v); rebuilding it (the damaged file is preserved next to it); sessions imported before may be imported again once",
+		path, parseErr))
+	return m, nil
+}
+
+// loadManifestBackup loads path+".bak" when it is a valid, compatible manifest.
+func loadManifestBackup(path string) (*manifestFile, bool) {
+	data, err := os.ReadFile(path + manifestBackupSuffix)
+	if err != nil {
+		return nil, false
+	}
+	var m manifestFile
+	if err := json.Unmarshal(data, &m); err != nil {
+		return nil, false
+	}
+	if err := m.normalizeVersion(); err != nil {
+		return nil, false
+	}
+	if m.Sessions == nil {
+		m.Sessions = make(map[string]manifestEntry)
+	}
+	if err := m.migrateLegacyKeys(); err != nil {
+		return nil, false
+	}
+	m.Version = manifestFormatVersion
+	m.path = path
+	return &m, true
+}
+
+// preserveCorrupt renames a damaged main manifest aside so the rebuilt manifest
+// can be written without destroying the evidence. It returns warnings to surface
+// in the report.
+func (m *manifestFile) preserveCorrupt() []string {
+	if m == nil || !m.corruptMain {
+		return nil
+	}
+	m.corruptMain = false
+	target := fmt.Sprintf("%s%s%d", m.path, manifestCorruptSuffix, time.Now().UTC().UnixNano())
+	if err := os.Rename(m.path, target); err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return []string{fmt.Sprintf("corrupt import manifest %q could not be preserved before rebuilding: %v", m.path, err)}
+	}
+	return []string{fmt.Sprintf("corrupt import manifest preserved as %q", target)}
 }
 
 // migrateLegacyKeys rewrites wave-2 manifest keys to the current relative-path
@@ -313,9 +423,27 @@ func (m *manifestFile) save() error {
 		_ = os.Remove(tmpName)
 		return fmt.Errorf("importer: secure manifest: %w", err)
 	}
+	// Keep the previous valid manifest as a rolling backup (best effort) before
+	// replacing it, so a later corrupt main file can recover the recorded
+	// sessions instead of re-importing them. Only a manifest we can parse is
+	// copied: never overwrite a good backup with garbage.
+	if existing, rerr := os.ReadFile(m.path); rerr == nil && validManifestBytes(existing) {
+		_ = os.WriteFile(m.path+manifestBackupSuffix, existing, 0o600)
+	}
 	if err := os.Rename(tmpName, m.path); err != nil {
 		_ = os.Remove(tmpName)
 		return fmt.Errorf("importer: replace manifest: %w", err)
 	}
 	return nil
+}
+
+// validManifestBytes reports whether data decodes as a compatible manifest. It
+// is used to decide whether the previous on-disk file is safe to keep as the
+// rolling backup.
+func validManifestBytes(data []byte) bool {
+	var m manifestFile
+	if err := json.Unmarshal(data, &m); err != nil {
+		return false
+	}
+	return m.normalizeVersion() == nil
 }

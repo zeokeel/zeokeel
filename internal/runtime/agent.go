@@ -253,6 +253,13 @@ type Agent struct {
 	advisoryMu        sync.Mutex
 	pendingAdvisories []string
 	activeTurn        atomic.Pointer[turnContext]
+
+	// turnContextMu guards turnContexts: extra user-role messages queued for a
+	// session's next provider request (see turn_context.go). The queue lives on
+	// the agent instance so rebuilding an agent for a session's workspace or
+	// permission never keeps the old one alive or leaks context across builds.
+	turnContextMu sync.Mutex
+	turnContexts  map[string][]Message
 }
 
 // New builds an Agent from cfg.
@@ -331,6 +338,7 @@ func New(cfg Config) (*Agent, error) {
 		subagentModel:    strings.TrimSpace(cfg.SubagentModel),
 		provider:         cfg.Provider,
 		subagents:        make(map[string]*subagentEntry),
+		turnContexts:     make(map[string][]Message),
 	}
 	a.defaultContextBudget = cfg.ContextBudget
 	a.contextBudget.Store(int64(cfg.ContextBudget))
@@ -827,6 +835,10 @@ func (t *turnRun) fail(err error) {
 // prepare compacts the prior conversation and builds the initial user input.
 // It reports false when the turn already failed and run must return.
 func (t *turnRun) prepare() ([]*schema.Message, bool) {
+	// Turn context messages (referenced-session snapshots) are consumed before
+	// compaction so a failed prepare never leaks them into a later turn; they
+	// follow the prompt as extra user messages in the provider request.
+	extra := t.agent.takeTurnContext(t.sessionID)
 	prior, err := t.agent.compactPrior(t.ctx, t.sessionID, t.prior)
 	if err != nil {
 		t.fail(fmt.Errorf("runtime: compact conversation for session %q: %w", t.sessionID, err))
@@ -838,9 +850,10 @@ func (t *turnRun) prepare() ([]*schema.Message, bool) {
 	if len(pendingAdvisories) > 0 {
 		t.inputText = appendAdvisoriesToPrompt(t.inputText, pendingAdvisories)
 	}
-	input := make([]*schema.Message, 0, len(prior)+1)
+	input := make([]*schema.Message, 0, len(prior)+1+len(extra))
 	input = append(input, messagesToEino(prior)...)
 	input = append(input, userMessageWithAttachments(t.inputText, AttachmentImages(t.attachments)))
+	input = append(input, messagesToEino(extra)...)
 	return input, true
 }
 

@@ -218,6 +218,33 @@ func ApplyBatch(prev *Snapshot, events []Event) *Snapshot {
 				workspaceChanges = append([]WorkspaceChange(nil), e.Changes...)
 				workspaceChanged = true
 			}
+		case Compaction:
+			// A compaction rewrites the message slice, so flush the text this
+			// batch has accumulated into the rows first and rebuild the index
+			// afterwards. In practice a compaction is published as its own
+			// batch, but the fold must stay equivalent to one Apply per event.
+			ensureMsgs()
+			for _, acc := range accs {
+				msg := &outMsgs[acc.idx]
+				if acc.text.Len() > 0 {
+					msg.Text += acc.text.String()
+				}
+				if acc.reasoning.Len() > 0 {
+					msg.Reasoning += acc.reasoning.String()
+				}
+				if acc.hasText {
+					msg.LastSeq = acc.lastSeq
+				}
+			}
+			for id := range accs {
+				delete(accs, id)
+			}
+			outMsgs = applyCompactionMessages(outMsgs, e, seq)
+			msgIndex = make(map[string]int, len(outMsgs))
+			for i := range outMsgs {
+				msgIndex[outMsgs[i].MsgID] = i
+			}
+			msgsChanged = true
 		default:
 			// Closed event set: an unknown implementation only advances Seq,
 			// matching Apply.

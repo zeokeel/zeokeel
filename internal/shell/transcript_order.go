@@ -3,6 +3,7 @@ package shell
 import (
 	"sort"
 
+	"github.com/zeokeel/zeokeel/internal/sessionreference"
 	"github.com/zeokeel/zeokeel/internal/state"
 )
 
@@ -47,6 +48,9 @@ func transcriptOrderEnabled(snap *state.Snapshot) bool {
 type transcriptEntry struct {
 	msgIndex int               // index into Snapshot.Messages; -1 for a block
 	tools    []state.ToolState // the block's calls in record order; nil for a message
+	// referenceContext marks the injected referenced-session snapshot row: it
+	// stays in record order but renders folded and never opens a turn.
+	referenceContext bool
 }
 
 // turnPlan is one user turn's entries in render order. The messages before the
@@ -61,9 +65,10 @@ type turnPlan struct {
 // (often the pre-tool reasoning) and end is where its last visible token ended
 // (LastSeq, falling back to seq while it has no visible text).
 type positionedMessage struct {
-	index int
-	seq   uint64
-	end   uint64
+	index            int
+	seq              uint64
+	end              uint64
+	referenceContext bool
 }
 
 // normalizedMessagePositions resolves each message's Seq and visible-text end
@@ -127,6 +132,22 @@ func buildTranscriptTurns(snap *state.Snapshot) []turnPlan {
 		if msgs[i].Text == "" {
 			continue
 		}
+		if msgs[i].Role == state.RoleUser && sessionreference.IsContextText(msgs[i].Text) {
+			// An injected referenced-session snapshot is model history, not a
+			// user turn: keep it at its record position inside the turn it
+			// follows, but never open a turn (and never a phantom turn mark).
+			pi := turn + 1
+			if pi < 0 {
+				pi = 0
+			}
+			planMsgs[pi] = append(planMsgs[pi], positionedMessage{
+				index:            i,
+				seq:              seqs[i],
+				end:              ends[i],
+				referenceContext: true,
+			})
+			continue
+		}
 		if msgs[i].Role == state.RoleUser {
 			turn++
 			userSeqs = append(userSeqs, seqs[i])
@@ -182,13 +203,13 @@ func buildTranscriptTurns(snap *state.Snapshot) []turnPlan {
 		for bi < len(toolBlocks) || mi < len(ms) {
 			switch {
 			case bi >= len(toolBlocks):
-				entries = append(entries, transcriptEntry{msgIndex: ms[mi].index})
+				entries = append(entries, transcriptEntry{msgIndex: ms[mi].index, referenceContext: ms[mi].referenceContext})
 				mi++
 			case mi >= len(ms):
 				entries = append(entries, transcriptEntry{tools: toolBlocks[bi]})
 				bi++
 			case ms[mi].end < toolBlocks[bi][0].StartedSeq:
-				entries = append(entries, transcriptEntry{msgIndex: ms[mi].index})
+				entries = append(entries, transcriptEntry{msgIndex: ms[mi].index, referenceContext: ms[mi].referenceContext})
 				mi++
 			default:
 				entries = append(entries, transcriptEntry{tools: toolBlocks[bi]})

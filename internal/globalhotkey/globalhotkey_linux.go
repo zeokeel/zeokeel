@@ -2,13 +2,36 @@
 
 package globalhotkey
 
-// Linux backend: X11 only (see x11_linux.go), implemented with purego dlopen of
-// the system libX11.so.6 — no cgo and no new module dependency.
+import "fmt"
+
+// Linux backend selection.
 //
-// Headless sessions (no $DISPLAY) and Wayland sessions that expose no usable X
-// display degrade to ErrUnsupported; the shell then stays on in-app shortcuts.
-// Wayland's org.freedesktop.portal.GlobalShortcuts remains the future path for
-// a native Wayland implementation (it needs a D-Bus client).
+// Wayland sessions cannot use global key grabs: the compositor-owned
+// org.freedesktop.portal.GlobalShortcuts interface is the only supported path
+// (see wayland_linux.go). Detection order is therefore:
+//
+//  1. Wayland session ($XDG_SESSION_TYPE=wayland or $WAYLAND_DISPLAY set) ->
+//     the GlobalShortcuts portal;
+//  2. X11 (see x11_linux.go), also as the fallback for Wayland sessions that
+//     still expose a usable XWayland display;
+//  3. otherwise ErrUnsupported, and the shell keeps in-app shortcuts.
+//
+// Non-Wayland sessions never touch D-Bus: they go straight to the X11 backend,
+// preserving its existing behaviour.
 func platformBackend() (backend, error) {
+	if isWaylandSession() {
+		portalB, portalErr := waylandBackendFactory()
+		if portalErr == nil {
+			return portalB, nil
+		}
+		// A Wayland session may still have a usable XWayland display; keep the
+		// long-standing X11 fallback before giving up.
+		x11B, x11Err := newX11Backend()
+		if x11Err == nil {
+			return x11B, nil
+		}
+		return nil, fmt.Errorf("%w: Wayland global shortcuts unavailable (portal: %v; X11: %v)",
+			ErrUnsupported, portalErr, x11Err)
+	}
 	return newX11Backend()
 }

@@ -40,7 +40,10 @@ Environment:
                      desktop app does not share the SQLite store.
   DEEPSEEK_API_KEY   model API key when none is configured in Settings
 
-Supported requests: initialize, session/new, session/prompt, session/cancel.
+Supported requests: initialize, authenticate, session/new, session/list,
+session/load, session/prompt, session/cancel. The server may call the client's
+fs/read_text_file, fs/write_text_file, terminal/* and session/request_permission
+methods when the client advertises the matching capabilities.
 `
 
 // runACP implements `zeokeel acp`. It never writes to stdout itself.

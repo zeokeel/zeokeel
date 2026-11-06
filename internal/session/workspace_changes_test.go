@@ -14,15 +14,34 @@ import (
 // as state.WorkspaceChanges, and the snapshot names the files the turn changed.
 func TestWorkspaceChangesReportedAfterTurn(t *testing.T) {
 	var root string
-	// The fake model call mutates the workspace mid-turn: that is the work a
-	// real turn's tools would do.
-	provider := &fakeProvider{respond: func(_ context.Context, _ runtime.Request, _ int) []runtime.Chunk {
-		_ = os.Remove(filepath.Join(root, "to-delete.txt"))
-		_ = os.WriteFile(filepath.Join(root, "turn-added.txt"), []byte("new"), 0o600)
-		return []runtime.Chunk{{Text: "done", Done: true}}
+	fileTool := &scriptedFileTool{}
+	// The fake tools mutate the workspace mid-turn: that is the work a real
+	// turn's write_file/delete calls would do. A non-Git workspace attributes
+	// only file-tool edits to the turn, so the fake model cannot write the
+	// files directly.
+	provider := &fakeProvider{respond: func(_ context.Context, _ runtime.Request, call int) []runtime.Chunk {
+		if call > 0 {
+			return []runtime.Chunk{{Text: "done", Done: true}}
+		}
+		return []runtime.Chunk{{
+			ToolCalls: []runtime.ToolCall{
+				{ID: "call-add", Name: "write_file", Arguments: []byte(`{"path":"turn-added.txt"}`)},
+				{ID: "call-delete", Name: "write_file", Arguments: []byte(`{"path":"to-delete.txt"}`)},
+			},
+			Done: true,
+		}}
 	}}
-	h := newHarness(t, provider)
+	h := newHarnessConfigured(t, provider, func(cfg *runtime.Config) {
+		if err := cfg.Tools.Register(fileTool); err != nil {
+			t.Fatalf("register file tool: %v", err)
+		}
+	})
 	root = h.dir
+	fileTool.root = root
+	fileTool.mutations = map[string]string{
+		"turn-added.txt": "new",
+		"to-delete.txt":  "",
+	}
 	if err := os.WriteFile(filepath.Join(root, "to-delete.txt"), []byte("old"), 0o600); err != nil {
 		t.Fatal(err)
 	}

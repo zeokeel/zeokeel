@@ -24,6 +24,13 @@ var (
 	ErrZstdUnavailable = errors.New("importer: zstd binary is required to read compressed DSH sessions")
 )
 
+// appendImportedMessage appends one imported conversation row. It is a package
+// variable so tests can inject a mid-session store failure and pin the rollback
+// contract (a failed session must not survive as a partial import).
+var appendImportedMessage = func(st *store.Store, msg store.Message) (*store.Message, error) {
+	return st.AppendMessage(msg)
+}
+
 const (
 	// DefaultDSHHomeName is the DSH data directory name inside the user's home.
 	DefaultDSHHomeName = ".dsh"
@@ -252,15 +259,28 @@ type Report struct {
 	ToolCallsSeen    int    `json:"tool_calls_seen"`
 	ToolResultsSeen  int    `json:"tool_results_seen"`
 	CompressedInput  bool   `json:"compressed_input"`
-	// ImagesDropped counts image content parts that were not imported (the
-	// minimal importer only migrates text conversations).
+	// ImagesDropped counts image content parts that were not imported. An image
+	// whose DSH object is missing, oversized or corrupt is counted here and in
+	// Report.Skips (with a granular reason) instead of failing the session.
 	ImagesDropped int `json:"images_dropped,omitempty"`
+	// ImagesMigrated counts image content parts migrated into ZeoKeel
+	// attachment rows (linked to the imported message).
+	ImagesMigrated int `json:"images_migrated,omitempty"`
+	// AttachmentsMigrated counts non-image DSH file parts migrated into ZeoKeel
+	// attachment rows.
+	AttachmentsMigrated int `json:"attachments_migrated,omitempty"`
+	// AttachmentsDropped counts non-image DSH file parts that could not be
+	// migrated (missing/oversized/corrupt source object).
+	AttachmentsDropped int `json:"attachments_dropped,omitempty"`
 	// Skips breaks the skipped work down by reason so a report explains what
 	// was filtered instead of only showing one opaque skipped count. Keys use
 	// the constants below: system_injected, step_assistant, subagent,
-	// bad_session, unsupported_version, images_dropped, idempotent,
-	// empty_session, workspace_error. Some reasons count messages/parts and
-	// others count sessions; the key names say which data was skipped.
+	// bad_session, unsupported_version, images_dropped, image_missing,
+	// image_oversized, image_corrupt, attachments_dropped,
+	// attachment_missing, attachment_oversized, attachment_corrupt,
+	// idempotent, empty_session, workspace_error. Some reasons count
+	// messages/parts and others count sessions; the key names say which data
+	// was skipped.
 	Skips       map[string]int    `json:"skips,omitempty"`
 	Credentials []CredentialRef   `json:"credentials,omitempty"`
 	Workspaces  []WorkspaceReport `json:"workspaces,omitempty"`
@@ -283,8 +303,27 @@ const (
 	// SkipUnsupportedVersion counts sessions whose header format version this
 	// build does not understand.
 	SkipUnsupportedVersion = "unsupported_version"
-	// SkipImagesDropped counts image content parts that were not imported.
+	// SkipImagesDropped counts image content parts that were not migrated. It is
+	// the aggregate of the granular image_* reasons below and is kept for
+	// backward compatibility with wave-2 reports.
 	SkipImagesDropped = "images_dropped"
+	// SkipImageMissing counts image parts whose source object is absent.
+	SkipImageMissing = "image_missing"
+	// SkipImageOversized counts image parts above the per-file size cap.
+	SkipImageOversized = "image_oversized"
+	// SkipImageCorrupt counts image parts whose bytes are unreadable, not
+	// valid base64, or do not match their content-addressed digest.
+	SkipImageCorrupt = "image_corrupt"
+	// SkipAttachmentsDropped counts file/text attachments that were not
+	// migrated (aggregate of the granular attachment_* reasons).
+	SkipAttachmentsDropped = "attachments_dropped"
+	// SkipAttachmentMissing counts file parts whose source object is absent.
+	SkipAttachmentMissing = "attachment_missing"
+	// SkipAttachmentOversized counts file parts above the per-file size cap.
+	SkipAttachmentOversized = "attachment_oversized"
+	// SkipAttachmentCorrupt counts file parts whose bytes are unreadable or do
+	// not match their content-addressed digest.
+	SkipAttachmentCorrupt = "attachment_corrupt"
 	// SkipIdempotent counts sessions already imported with the same content
 	// (only possible with Options.ManifestPath).
 	SkipIdempotent = "idempotent"
@@ -327,8 +366,31 @@ func Import(ctx context.Context, opts Options) (*Report, error) {
 		return nil, err
 	}
 	report := &Report{DryRun: opts.DryRun, DSHHome: layout.Home}
+	if manifest != nil {
+		// Manifest recovery notes (corrupt file rebuilt/recovered from backup)
+		// and the one-time preservation of a damaged file.
+		report.Warnings = append(report.Warnings, manifest.warnings...)
+		if opts.DryRun {
+			if manifest.corruptMain {
+				report.Warnings = append(report.Warnings, "dry run: the corrupt import manifest was not rebuilt")
+			}
+		} else {
+			report.Warnings = append(report.Warnings, manifest.preserveCorrupt()...)
+		}
+	}
+	saveManifest := func() {
+		if manifest == nil || opts.DryRun {
+			return
+		}
+		if serr := manifest.save(); serr != nil {
+			report.Warnings = append(report.Warnings, "import manifest not saved: "+serr.Error())
+		}
+	}
 	if len(layout.SessionFiles) == 0 {
 		report.Warnings = append(report.Warnings, "no DSH sessions found under "+layout.SessionsRoot)
+		// Still write a recovered/rebuilt manifest: an empty run after a corrupt
+		// manifest must leave a valid manifest behind for the next run.
+		saveManifest()
 		return report, nil
 	}
 	if layout.CompressedSessions > 0 {
@@ -413,8 +475,6 @@ func Import(ctx context.Context, opts Options) (*Report, error) {
 		// report injected context from child sessions it never considered.
 		report.noteSkip(SkipSystemInjected, sess.SystemInjected)
 		report.noteSkip(SkipStepAssistant, sess.StepAssistant)
-		report.noteSkip(SkipImagesDropped, sess.Images)
-		report.ImagesDropped += sess.Images
 		if len(sess.Messages) == 0 {
 			report.SessionsSkipped++
 			report.noteSkip(SkipEmptySession, 1)
@@ -457,21 +517,25 @@ func Import(ctx context.Context, opts Options) (*Report, error) {
 			}
 		}
 
-		imported, zeoSessionID, merr := importSession(opts, sess, workspaceIDs[cwd])
-		report.MessagesImported += imported
+		imported, zeoSessionID, attachmentStats, merr := importSession(opts, sess, workspaceIDs[cwd], layout.AttachmentsRoot)
+		// Parser-level statistics describe the source data and stay valid even
+		// when persisting the session fails; import statistics describe writes,
+		// so they are only folded in for a session that really landed.
 		report.SystemMessages += sess.SystemMessages
 		report.ToolCallsSeen += sess.ToolCalls
 		report.ToolResultsSeen += sess.ToolResults
-		updateWorkspaceReport(report, cwd, func(r *WorkspaceReport) {
-			r.Sessions++
-			r.Messages += imported
-		})
 		if merr != nil {
 			report.SessionsFailed++
 			report.Errors = append(report.Errors, SessionError{SessionFile: sessionFile, SessionID: sess.ID, Error: merr.Error()})
 			report.noteSkip(SkipBadSession, 1)
 			continue
 		}
+		report.MessagesImported += imported
+		attachmentStats.mergeInto(report)
+		updateWorkspaceReport(report, cwd, func(r *WorkspaceReport) {
+			r.Sessions++
+			r.Messages += imported
+		})
 		report.SessionsImported++
 		if manifest != nil {
 			manifest.record(key, manifestEntry{
@@ -488,11 +552,7 @@ func Import(ctx context.Context, opts Options) (*Report, error) {
 		}
 	}
 	sort.Slice(report.Workspaces, func(i, j int) bool { return report.Workspaces[i].Cwd < report.Workspaces[j].Cwd })
-	if manifest != nil && !opts.DryRun {
-		if serr := manifest.save(); serr != nil {
-			report.Warnings = append(report.Warnings, "import manifest not saved: "+serr.Error())
-		}
-	}
+	saveManifest()
 	return report, nil
 }
 
@@ -502,38 +562,75 @@ func isSubagentSession(sess *Session) bool {
 }
 
 // importSession persists one parsed session. It returns the number of
-// conversation rows written (0 in dry-run), the created ZeoKeel session id
-// (for the idempotency manifest) and an error when the store rejects a write;
-// partial sessions are reported rather than rolled back because the store has
-// no cross-session transaction for imports.
-func importSession(opts Options, sess *Session, workspaceID string) (int, string, error) {
+// conversation rows written (0 in dry-run), the created ZeoKeel session id (for
+// the idempotency manifest), the attachment migration/skip counts and an error
+// when the store rejects a write; partial sessions are reported rather than
+// rolled back because the store has no cross-session transaction for imports.
+//
+// Images/files attached to a message are migrated as ZeoKeel attachment rows
+// linked to the appended message id (attachmentsRoot is the DSH
+// <home>/attachments directory). In dry-run the sources are still resolved and
+// counted so the report shows what a real run would migrate, but nothing is
+// written.
+func importSession(opts Options, sess *Session, workspaceID, attachmentsRoot string) (int, string, attachmentCounts, error) {
+	var counts attachmentCounts
 	if opts.DryRun {
-		return len(sess.Messages), "", nil
+		for _, msg := range sess.Messages {
+			for _, att := range msg.Attachments {
+				counts.record(att.Kind, resolveAttachment(att, attachmentsRoot))
+			}
+		}
+		return len(sess.Messages), "", counts, nil
 	}
 	title := buildTitle(opts.TitlePrefix, sess)
 	created, err := opts.Store.CreateSession(workspaceID, title)
 	if err != nil {
-		return 0, "", fmt.Errorf("create session: %w", err)
+		return 0, "", counts, fmt.Errorf("create session: %w", err)
 	}
 	base := sess.CreatedAt
 	if base.IsZero() {
 		base = opts.now()
 	}
+	// A session that fails halfway must not survive as a partial import: the
+	// manifest records nothing for it, and without this rollback a retry would
+	// create a duplicate session next to the truncated one. The session and its
+	// rows/attachments are removed so the next run imports it cleanly.
+	rollback := func(cause error) (int, string, attachmentCounts, error) {
+		if delErr := opts.Store.DeleteSession(created.ID); delErr != nil {
+			return 0, "", attachmentCounts{}, fmt.Errorf("%w (rollback of partial session %s failed: %v)", cause, created.ID, delErr)
+		}
+		return 0, "", attachmentCounts{}, cause
+	}
 	written := 0
 	for i, msg := range sess.Messages {
-		if _, err := opts.Store.AppendMessage(store.Message{
+		createdAt := base.Add(time.Duration(i) * time.Millisecond)
+		stored, err := appendImportedMessage(opts.Store, store.Message{
 			SessionID: created.ID,
 			Role:      msg.Role,
 			Content:   msg.Content,
 			Reasoning: msg.Reasoning,
-			CreatedAt: base.Add(time.Duration(i) * time.Millisecond),
+			CreatedAt: createdAt,
 			TurnID:    "import",
-		}); err != nil {
-			return written, created.ID, fmt.Errorf("append message %d: %w", i, err)
+		})
+		if err != nil {
+			return rollback(fmt.Errorf("append message %d: %w", i, err))
 		}
 		written++
+		for _, att := range msg.Attachments {
+			outcome := resolveAttachment(att, attachmentsRoot)
+			if outcome.problem != "" {
+				counts.record(att.Kind, outcome)
+				continue
+			}
+			if _, err := storeMigratedAttachment(opts.Store, created.ID, stored.ID, outcome.resolved, createdAt); err != nil {
+				// A store failure is a real import failure (reported per session);
+				// only bad DSH sources are downgraded to skip counters.
+				return rollback(err)
+			}
+			counts.record(att.Kind, outcome)
+		}
 	}
-	return written, created.ID, nil
+	return written, created.ID, counts, nil
 }
 
 // buildTitle renders the imported session title.

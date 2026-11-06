@@ -124,8 +124,9 @@ type PromptCapabilities struct {
 
 // AgentCapabilities is the initialize capability result.
 type AgentCapabilities struct {
-	LoadSession        bool               `json:"loadSession,omitempty"`
-	PromptCapabilities PromptCapabilities `json:"promptCapabilities"`
+	LoadSession         bool                 `json:"loadSession,omitempty"`
+	PromptCapabilities  PromptCapabilities   `json:"promptCapabilities"`
+	SessionCapabilities *SessionCapabilities `json:"sessionCapabilities,omitempty"`
 }
 
 // InitializeResponse is the result of initialize.
@@ -133,7 +134,7 @@ type InitializeResponse struct {
 	ProtocolVersion   int               `json:"protocolVersion"`
 	AgentCapabilities AgentCapabilities `json:"agentCapabilities"`
 	AgentInfo         Implementation    `json:"agentInfo,omitempty"`
-	AuthMethods       []string          `json:"authMethods,omitempty"`
+	AuthMethods       []AuthMethod      `json:"authMethods,omitempty"`
 }
 
 // McpServer declares one MCP server mounted into a new session. The minimum

@@ -15,6 +15,7 @@ import (
 	"github.com/zeokeel/zeokeel/internal/design"
 	"github.com/zeokeel/zeokeel/internal/icons"
 	"github.com/zeokeel/zeokeel/internal/session"
+	"github.com/zeokeel/zeokeel/internal/sessionreference"
 	"github.com/zeokeel/zeokeel/internal/state"
 )
 
@@ -436,22 +437,44 @@ func (a *App) liveOrderedTranscript(c *ui.Context, t *design.Tokens, snap *state
 	a.liveTranscriptErrors(c, t, preambleErrors)
 	for pi, plan := range plans {
 		var turnUserMsgID string
+		// The turn's reasoning disclosure sits in its process area, above the
+		// tool summary: user -> think -> tools -> answer. The row is drawn once
+		// per turn, before the turn's first process/answer entry, so a turn
+		// without tools still shows user -> think -> answer.
+		reasoningSnap, reasoningPlan := reasoningView(snap, plan)
+		reasoningText, reasoningKey, reasoningRunning := turnReasoning(reasoningSnap, reasoningPlan, pi == len(plans)-1)
+		reasoningDrawn := false
+		drawReasoning := func() {
+			if reasoningDrawn || reasoningText == "" {
+				return
+			}
+			a.liveReasoningRow(c, t, reasoningKey, reasoningText, reasoningRunning)
+			reasoningDrawn = true
+		}
 		for _, entry := range plan.entries {
 			if entry.tools != nil {
+				drawReasoning()
 				a.liveToolSummary(c, t, entry.tools)
 				continue
 			}
 			i := entry.msgIndex
 			m := snap.Messages[i]
+			if entry.referenceContext {
+				a.liveReferenceContextRow(c, t, m, i)
+				continue
+			}
 			el := a.liveMessage(c, t, m, transcriptMessageKey(m, i), i == streaming, snap)
 			if m.Role == state.RoleUser {
 				turns++
 				turnUserMsgID = m.MsgID
+				drawReasoning()
 				if st.pendingTurn == turns {
 					el.ScrollIntoView()
 					st.pendingTurn = 0
 				}
+				continue
 			}
+			drawReasoning()
 		}
 		// A failure belongs after everything its turn produced and before the
 		// next user message, so a later prompt never pushes an old error below
@@ -462,6 +485,47 @@ func (a *App) liveOrderedTranscript(c *ui.Context, t *design.Tokens, snap *state
 		a.turnMark(c, t, snap, turnUserMsgID)
 	}
 	return turns
+}
+
+// reasoningView returns a view of the snapshot and its turn plan with the
+// injected referenced-session rows removed: those rows stay in the model
+// history but are not user messages in Chat, so the reasoning row's turn
+// boundaries (which walk user messages around the answer) must not treat them
+// as turns. The filtering lives here because reasoning_ui.go is owned by
+// another change.
+func reasoningView(snap *state.Snapshot, plan turnPlan) (*state.Snapshot, turnPlan) {
+	if snap == nil {
+		return snap, plan
+	}
+	remap := make([]int, len(snap.Messages))
+	messages := make([]state.Message, 0, len(snap.Messages))
+	for i, message := range snap.Messages {
+		if message.Role == state.RoleUser && sessionreference.IsContextText(message.Text) {
+			remap[i] = -1
+			continue
+		}
+		remap[i] = len(messages)
+		messages = append(messages, message)
+	}
+	if len(messages) == len(snap.Messages) {
+		return snap, plan
+	}
+	filtered := *snap
+	filtered.Messages = messages
+	entries := make([]transcriptEntry, 0, len(plan.entries))
+	for _, entry := range plan.entries {
+		if entry.referenceContext {
+			continue
+		}
+		if entry.msgIndex >= 0 {
+			if entry.msgIndex >= len(remap) || remap[entry.msgIndex] < 0 {
+				continue
+			}
+			entry.msgIndex = remap[entry.msgIndex]
+		}
+		entries = append(entries, entry)
+	}
+	return &filtered, turnPlan{entries: entries}
 }
 
 // liveTranscriptErrors draws one bucket of recorded errors as danger lines.
@@ -523,8 +587,31 @@ func (a *App) liveFlatTranscript(c *ui.Context, t *design.Tokens, snap *state.Sn
 	st := a.liveMenus()
 	turns := 0
 	currentTurnUserMsgID := ""
+	lastAssistant := -1
+	for i := range snap.Messages {
+		if snap.Messages[i].Role == state.RoleAssistant {
+			lastAssistant = i
+		}
+	}
+	reasoningDrawn := false
 	for i, m := range snap.Messages {
+		if m.Role == state.RoleUser {
+			reasoningDrawn = false
+		}
+		// Snapshots without the Seq axis keep the legacy layout; a turn's
+		// reasoning row still precedes its assistant answer.
+		if !reasoningDrawn && m.Role == state.RoleAssistant {
+			if reasoning := strings.TrimSpace(m.Reasoning); reasoning != "" {
+				running := snap.Phase == state.PhaseRunning && i == lastAssistant && strings.TrimSpace(m.Text) == ""
+				a.liveReasoningRow(c, t, transcriptMessageKey(m, i), reasoning, running)
+				reasoningDrawn = true
+			}
+		}
 		if m.Text == "" {
+			continue
+		}
+		if m.Role == state.RoleUser && sessionreference.IsContextText(m.Text) {
+			a.liveReferenceContextRow(c, t, m, i)
 			continue
 		}
 		el := a.liveMessage(c, t, m, transcriptMessageKey(m, i), i == streaming, snap)
@@ -600,7 +687,11 @@ func (a *App) liveMessage(c *ui.Context, t *design.Tokens, m state.Message, key 
 		col.Children(func() {
 			bubble := ui.Column(c).MaxWidthPercent(82)
 			bubble.Children(func() {
-				ui.Text(c, m.Text).FontSize(a.ConversationFontSize()).
+				// A canonical session mention is structured text in the
+				// stored message (see insertSessionMention); the transcript
+				// shows the readable @label the model and the user read, the
+				// closest DSH equivalent the mygo text area allows.
+				ui.Text(c, sessionreference.RenderReadable(m.Text)).FontSize(a.ConversationFontSize()).
 					TextColor(t.LabelPrimary).
 					Background(t.Accent.Alpha(0.10).Over(t.BgRaised)).
 					Radius(th.Radius).
@@ -634,6 +725,105 @@ func (a *App) liveMessage(c *ui.Context, t *design.Tokens, m state.Message, key 
 		}
 	})
 	return col
+}
+
+// referenceContextOpen remembers which folded referenced-session rows the user
+// expanded. It is keyed by the App and only touched by the view goroutine, like
+// the other shell view state that cannot live in App.
+var referenceContextOpen sync.Map // map[*App]map[string]bool
+
+// referenceContextExpanded reports whether the folded row with this key is open.
+func (a *App) referenceContextExpanded(key string) bool {
+	states, ok := referenceContextOpen.Load(a)
+	if !ok {
+		return false
+	}
+	return states.(map[string]bool)[key]
+}
+
+// toggleReferenceContext flips the folded row with this key.
+func (a *App) toggleReferenceContext(key string) {
+	states := make(map[string]bool)
+	if existing, ok := referenceContextOpen.Load(a); ok {
+		states = existing.(map[string]bool)
+	}
+	states[key] = !states[key]
+	referenceContextOpen.Store(a, states)
+}
+
+// referenceContextLabel names the injected context row for the folded Chat row.
+func (a *App) referenceContextLabel(summary sessionreference.ContextSummary) string {
+	switch summary.Sources {
+	case 0:
+		return a.menuText("Referenced sessions", "引用会话")
+	case 1:
+		return a.menuText("Referenced sessions · 1 source", "引用会话 · 1 个来源")
+	default:
+		return fmt.Sprintf(a.menuText("Referenced sessions · %d sources", "引用会话 · %d 个来源"), summary.Sources)
+	}
+}
+
+// liveReferenceContextRow folds one injected `## Referenced sessions` row. The
+// row stays in the snapshot and in the model history (it is untrusted context
+// for the model, not for the user), but Chat must not print that snapshot as a
+// user bubble and the row must not open a turn. It renders as a compact
+// disclosure; expanding it lists the source labels and retained/omitted counts,
+// never the raw JSON.
+func (a *App) liveReferenceContextRow(c *ui.Context, t *design.Tokens, m state.Message, index int) {
+	th := t.Theme()
+	summary, _ := sessionreference.SummarizeContext(m.Text)
+	key := "refctx:" + transcriptMessageKey(m, index)
+	expanded := a.referenceContextExpanded(key)
+	label := a.referenceContextLabel(summary)
+	hint := a.menuText("Show referenced session summary", "显示被引用会话摘要")
+	if expanded {
+		hint = a.menuText("Hide referenced session summary", "隐藏被引用会话摘要")
+	}
+	col := ui.Column(c).Key(transcriptMessageKey(m, index)).Gap(design.Space1)
+	col.Children(func() {
+		row := ui.Row(c).Height(th.Space(7)).PaddingX(th.Space(2)).Radius(design.RadiusSM).
+			Gap(design.Space2).AlignItems(ui.Center).
+			Role(ui.RoleDisclosure).Focusable().Label(label + ". " + hint)
+		row.Expanded(expanded)
+		if row.Hovered() {
+			row = row.Background(t.BgHover)
+		}
+		row.Children(func() {
+			ui.Icon(c, icons.NewChat()).Size(14, 14).TextColor(t.LabelTertiary)
+			ui.Text(c, label).FontSize(11).FixedLineHeight(16).TextColor(t.LabelTertiary).
+				Grow(1).MaxLines(1).Ellipsis("…")
+			ui.Icon(c, icons.ChevronRight()).Size(10, 10).TextColor(t.LabelTertiary)
+		})
+		row.OnClick(func() { a.toggleReferenceContext(key) })
+		if !expanded {
+			return
+		}
+		ui.Column(c).Padding(0, th.Space(2)).Gap(th.Space(0.5)).Children(func() {
+			if summary.Sources == 0 {
+				ui.Text(c, a.menuText("Snapshot summary unavailable", "快照摘要不可用")).
+					FontSize(11).FixedLineHeight(16).TextColor(t.LabelTertiary)
+				return
+			}
+			for i, sourceLabel := range summary.Labels {
+				line := sourceLabel
+				if i < len(summary.Messages) {
+					unit := a.menuText("messages", "条消息")
+					if summary.Messages[i] == 1 {
+						unit = a.menuText("message", "条消息")
+					}
+					line += " · " + strconv.Itoa(summary.Messages[i]) + " " + unit
+				}
+				ui.Text(c, line).FontSize(11).FixedLineHeight(16).TextColor(t.LabelTertiary).
+					MaxLines(1).Ellipsis("…")
+			}
+			if summary.OmittedMessages > 0 || summary.OmittedBytes > 0 {
+				ui.Text(c, fmt.Sprintf(
+					a.menuText("%d messages, %d bytes omitted from the preview", "预览省略 %d 条消息、%d 字节"),
+					summary.OmittedMessages, summary.OmittedBytes)).
+					FontSize(11).FixedLineHeight(16).TextColor(t.LabelTertiary)
+			}
+		})
+	})
 }
 
 // workingIndicator is the working row shown while a turn runs: a spinner and

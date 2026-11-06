@@ -3,10 +3,13 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/zeokeel/zeokeel/internal/app"
 )
 
 // TestParseImportArgs covers the flag parser: defaults, both value syntaxes,
@@ -23,12 +26,12 @@ func TestParseImportArgs(t *testing.T) {
 	}
 
 	opts, err := parseImportArgs([]string{
-		"--from", "/tmp/dsh", "--dry-run", "--json", "--max", "3", "--include-subagents",
+		"--from", "/tmp/dsh", "--dry-run", "--json", "--max", "3", "--include-subagents", "--force",
 	})
 	if err != nil {
 		t.Fatalf("parse full: %v", err)
 	}
-	if opts.from != "/tmp/dsh" || !opts.dryRun || !opts.json || opts.maxSessions != 3 || !opts.includeSubagents {
+	if opts.from != "/tmp/dsh" || !opts.dryRun || !opts.json || opts.maxSessions != 3 || !opts.includeSubagents || !opts.force {
 		t.Fatalf("full parse = %+v", opts)
 	}
 
@@ -307,9 +310,10 @@ func TestRunImportCLIManifestSkipsImportedSession(t *testing.T) {
 	}
 }
 
-// TestRunImportCLIRejectsCorruptManifest covers the fail-closed contract: a
-// corrupt manifest stops the run (exit 1) before any session is written.
-func TestRunImportCLIRejectsCorruptManifest(t *testing.T) {
+// TestRunImportCLICorruptManifestRebuilds covers the damage-tolerance contract:
+// a corrupt manifest no longer blocks the run; it is preserved next to the
+// manifest path and rebuilt with a warning, and the import proceeds.
+func TestRunImportCLICorruptManifestRebuilds(t *testing.T) {
 	dshHome := t.TempDir()
 	dataDir := filepath.Join(t.TempDir(), "zk-data")
 	t.Setenv("ZEOKEEL_DATA_DIR", dataDir)
@@ -317,15 +321,130 @@ func TestRunImportCLIRejectsCorruptManifest(t *testing.T) {
 		t.Fatalf("mkdir data dir: %v", err)
 	}
 	manifest := filepath.Join(dataDir, "manifest.json")
-	if err := os.WriteFile(manifest, []byte("{not json"), 0o600); err != nil {
+	corrupt := []byte("{not json")
+	if err := os.WriteFile(manifest, corrupt, 0o600); err != nil {
 		t.Fatalf("write corrupt manifest: %v", err)
 	}
 
 	var out, errb bytes.Buffer
-	if code := runImportCLI([]string{"--from", dshHome, "--manifest", manifest}, &out, &errb); code != 1 {
+	if code := runImportCLI([]string{"--from", dshHome, "--manifest", manifest}, &out, &errb); code != 0 {
+		t.Fatalf("exit code = %d, want 0 with a rebuilt manifest (stdout %q, stderr %q)",
+			code, out.String(), errb.String())
+	}
+	if !strings.Contains(out.String(), "corrupt") {
+		t.Fatalf("summary does not warn about the corrupt manifest:\n%s", out.String())
+	}
+	preserved, _ := filepath.Glob(manifest + ".corrupt-*")
+	if len(preserved) != 1 {
+		t.Fatalf("corrupt manifest was not preserved: %v", preserved)
+	}
+	data, err := os.ReadFile(manifest)
+	if err != nil {
+		t.Fatalf("rebuilt manifest missing: %v", err)
+	}
+	var rebuilt struct {
+		Version int `json:"version"`
+	}
+	if err := json.Unmarshal(data, &rebuilt); err != nil || rebuilt.Version != 2 {
+		t.Fatalf("rebuilt manifest = %s (err %v), want version 2", data, err)
+	}
+}
+
+// stubInstanceProbe replaces the data-directory lock probe for one test.
+func stubInstanceProbe(t *testing.T, fn func(dir string) (*app.InstanceLockInfo, error)) {
+	t.Helper()
+	previous := probeInstanceLock
+	probeInstanceLock = fn
+	t.Cleanup(func() { probeInstanceLock = previous })
+}
+
+// TestRunImportCLIRefusesWhileAppRunning is the residual PD-04 guard: a real
+// import is refused (exit 1, actionable message) while another ZeoKeel process
+// holds the data directory's single-instance lock. The store is never opened.
+func TestRunImportCLIRefusesWhileAppRunning(t *testing.T) {
+	dshHome := t.TempDir()
+	dataDir := filepath.Join(t.TempDir(), "zk-data")
+	t.Setenv("ZEOKEEL_DATA_DIR", dataDir)
+	var probedDir string
+	stubInstanceProbe(t, func(dir string) (*app.InstanceLockInfo, error) {
+		probedDir = dir
+		return &app.InstanceLockInfo{PID: 4242}, nil
+	})
+
+	var out, errb bytes.Buffer
+	if code := runImportCLI([]string{"--from", dshHome}, &out, &errb); code != 1 {
 		t.Fatalf("exit code = %d, want 1 (stdout %q, stderr %q)", code, out.String(), errb.String())
 	}
-	if !strings.Contains(errb.String(), "manifest") {
-		t.Fatalf("stderr does not mention the manifest: %q", errb.String())
+	if probedDir != dataDir {
+		t.Fatalf("probed data dir = %q, want %q", probedDir, dataDir)
+	}
+	for _, want := range []string{"running", "4242", "Quit the desktop app", "--force"} {
+		if !strings.Contains(errb.String(), want) {
+			t.Fatalf("stderr missing %q:\n%s", want, errb.String())
+		}
+	}
+	if _, err := os.Stat(filepath.Join(dataDir, "index.sqlite")); !os.IsNotExist(err) {
+		t.Fatalf("running-instance refusal still opened/created the store (err %v)", err)
+	}
+}
+
+// TestRunImportCLIForceOverridesRunningInstance keeps an escape hatch for
+// read-only/quirky environments: --force imports anyway with an explicit
+// warning.
+func TestRunImportCLIForceOverridesRunningInstance(t *testing.T) {
+	dshHome := t.TempDir()
+	dataDir := filepath.Join(t.TempDir(), "zk-data")
+	t.Setenv("ZEOKEEL_DATA_DIR", dataDir)
+	stubInstanceProbe(t, func(string) (*app.InstanceLockInfo, error) {
+		return &app.InstanceLockInfo{PID: 4242}, nil
+	})
+
+	var out, errb bytes.Buffer
+	if code := runImportCLI([]string{"--from", dshHome, "--force"}, &out, &errb); code != 0 {
+		t.Fatalf("exit code = %d, want 0 with --force (stdout %q, stderr %q)", code, out.String(), errb.String())
+	}
+	if !strings.Contains(errb.String(), "--force") {
+		t.Fatalf("stderr does not record the forced override: %q", errb.String())
+	}
+	if _, err := os.Stat(filepath.Join(dataDir, "index.sqlite")); err != nil {
+		t.Fatalf("forced import did not open the store: %v", err)
+	}
+}
+
+// TestRunImportCLIProbeErrorWarnsAndContinues: an unreadable/odd lock file must
+// not block imports forever; the CLI warns and continues.
+func TestRunImportCLIProbeErrorWarnsAndContinues(t *testing.T) {
+	dshHome := t.TempDir()
+	dataDir := filepath.Join(t.TempDir(), "zk-data")
+	t.Setenv("ZEOKEEL_DATA_DIR", dataDir)
+	stubInstanceProbe(t, func(string) (*app.InstanceLockInfo, error) {
+		return nil, errors.New("permission denied reading instance lock")
+	})
+	var out, errb bytes.Buffer
+	if code := runImportCLI([]string{"--from", dshHome}, &out, &errb); code != 0 {
+		t.Fatalf("exit code = %d, want 0 (stdout %q, stderr %q)", code, out.String(), errb.String())
+	}
+	if !strings.Contains(errb.String(), "warning") || !strings.Contains(errb.String(), "instance lock") {
+		t.Fatalf("stderr does not warn about the failed running-instance probe: %q", errb.String())
+	}
+}
+
+// TestRunImportCLIDryRunSkipsInstanceProbe: a dry run writes nothing, so it
+// must not be blocked by the running-app guard (and must not probe at all).
+func TestRunImportCLIDryRunSkipsInstanceProbe(t *testing.T) {
+	dshHome := t.TempDir()
+	dataDir := filepath.Join(t.TempDir(), "zk-data")
+	t.Setenv("ZEOKEEL_DATA_DIR", dataDir)
+	called := false
+	stubInstanceProbe(t, func(string) (*app.InstanceLockInfo, error) {
+		called = true
+		return &app.InstanceLockInfo{PID: 4242}, nil
+	})
+	var out, errb bytes.Buffer
+	if code := runImportCLI([]string{"--from", dshHome, "--dry-run"}, &out, &errb); code != 0 {
+		t.Fatalf("dry-run exit code = %d, want 0 (stderr %q)", code, errb.String())
+	}
+	if called {
+		t.Fatal("dry run consulted the running-instance probe")
 	}
 }

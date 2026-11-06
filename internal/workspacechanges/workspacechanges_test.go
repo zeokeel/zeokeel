@@ -2,7 +2,6 @@ package workspacechanges
 
 import (
 	"context"
-	"encoding/json"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -186,31 +185,6 @@ func TestCaptureGitBackend(t *testing.T) {
 	}
 	if !found {
 		t.Fatalf("tracked.txt deletion not detected: %+v", deleted)
-	}
-}
-
-// TestToStateChanges pins the JSON payload the session event persistence
-// accepts (turn id + path/status pairs).
-func TestToStateChanges(t *testing.T) {
-	payload := ToStateChanges("turn-1", []Change{
-		{Path: "a/b.go", Status: StatusModified},
-		{Path: `quote"and\slash`, Status: StatusAdded},
-	})
-	var decoded struct {
-		TurnID  string `json:"turn_id"`
-		Changes []struct {
-			Path   string `json:"path"`
-			Status string `json:"status"`
-		} `json:"changes"`
-	}
-	if err := json.Unmarshal(payload, &decoded); err != nil {
-		t.Fatalf("payload is not JSON: %v\n%s", err, payload)
-	}
-	if decoded.TurnID != "turn-1" || len(decoded.Changes) != 2 {
-		t.Fatalf("decoded = %+v", decoded)
-	}
-	if decoded.Changes[1].Path != `quote"and\slash` || decoded.Changes[1].Status != StatusAdded {
-		t.Fatalf("escaped path round-trip = %+v", decoded.Changes[1])
 	}
 }
 
