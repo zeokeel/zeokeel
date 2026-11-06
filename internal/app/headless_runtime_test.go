@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -211,16 +212,43 @@ func TestHeadlessRuntimeAutoDeniesApprovals(t *testing.T) {
 
 // TestHeadlessRuntimeSessionsRunInParallel is the RT-04 acceptance test at the
 // ACP seam: two sessions with their own agents overlap their model calls.
+//
+// Parallelism is proven by the server observing two in-flight model requests at
+// once, not by a wall-clock threshold. The first request is held open until the
+// second one arrives (the handler waits on a release channel), so the overlap is
+// deterministic: a serialized implementation can only ever reach maxInFlight
+// == 1 and the test fails with a clear message instead of a timing margin that
+// race instrumentation or machine load can blow up. Elapsed is a generous hang
+// guard only and carries no parallelism meaning.
 func TestHeadlessRuntimeSessionsRunInParallel(t *testing.T) {
 	ctx := context.Background()
-	const latency = 250 * time.Millisecond
+	var inFlight, maxInFlight atomic.Int32
+	overlap := make(chan struct{})
+	release := make(chan struct{})
+	var overlapOnce, releaseOnce sync.Once
+	defer releaseOnce.Do(func() { close(release) })
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		time.Sleep(latency)
+		current := inFlight.Add(1)
+		defer inFlight.Add(-1)
+		for {
+			max := maxInFlight.Load()
+			if current <= max || maxInFlight.CompareAndSwap(max, current) {
+				break
+			}
+		}
+		if current >= 2 {
+			overlapOnce.Do(func() { close(overlap) })
+		}
+		// Hold the response until the test has either observed the overlap or
+		// given up; this is what makes the concurrency proof independent of
+		// request-start timing (no sleep is long enough under -race).
+		<-release
 		w.Header().Set("Content-Type", "text/event-stream")
 		w.WriteHeader(http.StatusOK)
 		writeHeadlessSSE(w, "parallel answer")
 	}))
 	t.Cleanup(srv.Close)
+	t.Cleanup(func() { releaseOnce.Do(func() { close(release) }) })
 	rt := newTestHeadlessRuntime(t, srv.URL+"/v1")
 
 	first, err := rt.NewSession(ctx, t.TempDir())
@@ -249,6 +277,20 @@ func TestHeadlessRuntimeSessionsRunInParallel(t *testing.T) {
 	if err := rt.Submit(ctx, second, "second prompt"); err != nil {
 		t.Fatalf("Submit(b): %v", err)
 	}
+
+	// Wait until the server has seen both model calls in flight at the same
+	// time. The first response is held open, so a parallel pair reaches this
+	// deterministically; a serialized pair never does.
+	select {
+	case <-overlap:
+	case <-time.After(10 * time.Second):
+		t.Fatalf("max in-flight model requests = %d, want >= 2: the two sessions' calls never overlapped, so they are not running in parallel", maxInFlight.Load())
+	}
+	if got := maxInFlight.Load(); got < 2 {
+		t.Fatalf("max in-flight model requests = %d, want >= 2: the two sessions' calls never overlapped", got)
+	}
+	releaseOnce.Do(func() { close(release) })
+
 	terminal := func(ch <-chan state.Event) {
 		waitRuntimeEvent(t, ch, 15*time.Second, func(ev state.Event) bool {
 			status, ok := ev.(state.Status)
@@ -257,8 +299,10 @@ func TestHeadlessRuntimeSessionsRunInParallel(t *testing.T) {
 	}
 	terminal(chA)
 	terminal(chB)
-	elapsed := time.Since(start)
-	if elapsed >= 2*latency {
-		t.Fatalf("two sessions' prompts took %v (serial would be ~%v): per-session agents are not running in parallel", elapsed, 2*latency)
+
+	// Generous sanity bound only (hung-turn guard); it is not the parallelism
+	// assertion and must never be tightened into a timing race.
+	if elapsed := time.Since(start); elapsed > 10*time.Second {
+		t.Fatalf("two sessions' prompts took %v, want < 10s (hung turn?)", elapsed)
 	}
 }
