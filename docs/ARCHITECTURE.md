@@ -171,9 +171,9 @@ if _, err := ctx.Effect(func() cordis.Effect {
   `slot` 模型含保留槽位与模块自定义槽位 `RenderSlot`；`RenderTool` 工具卡注入）
 - ✅ assembly（编译期 registry + 内嵌 desktop/headless 装配 + 预检 + 级联卸载）
 - ✅ host（窗口/设置存储/日志/信号/退出顺序）+ 薄 `cmd/zeokeel`（17 行）+ Makefile
-- ✅ 工具集：`internal/modules/toolkit` 把 **ZeoKeel Rig v0.4.0**（sandbox 策略 + 内置
-  fs/shell/editor/image/terminal/jobs + working_directory/todo + 可选 web_fetch）组装成
-  `zeokeel/toolkit` 服务；`internal/modules/hosttools` 再把产品侧 host 工具（ask_user/present/
+- ✅ 工具集：`internal/modules/toolkit` 把 **ZeoKeel Rig v0.5.0**（sandbox 策略 + 内置
+  fs/shell/pwsh/editor/image、真实 PTY terminal、后台 jobs、working_directory/todo、
+  可选 web_fetch 与远程 MCP over Streamable HTTP）组装成 `zeokeel/toolkit` 服务；`internal/modules/hosttools` 再把产品侧 host 工具（ask_user/present/
   plan_review/exit_plan_mode/goal/team）注册进同一注册表，证明产品「只做组装」
 - ✅ 示范模块：`appinfo`（服务）、`ui/home`（screen+command+槽位组合）、`ui/about`
   （settings page + settings.header）、`ui/welcome`（topbar.center + home.hero + command）、
