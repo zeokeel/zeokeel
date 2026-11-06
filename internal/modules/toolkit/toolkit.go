@@ -30,6 +30,8 @@ import (
 	"github.com/zeokeel/zeokeel-rig/tools/misc"
 	"github.com/zeokeel/zeokeel-rig/tools/schedule"
 	"github.com/zeokeel/zeokeel-rig/tools/settings"
+	"github.com/zeokeel/zeokeel-rig/tools/skill"
+	"github.com/zeokeel/zeokeel-rig/tools/team"
 	"github.com/zeokeel/zeokeel-rig/tools/terminal"
 	"github.com/zeokeel/zeokeel-rig/tools/web"
 	"github.com/zeokeel/zeokeel-rig/tools/worktree"
@@ -131,6 +133,8 @@ func Module() *module.Descriptor[Config] {
 		tools = append(tools, memory.Tools(nil)...)
 		tools = append(tools, schedule.Tools(nil)...)
 		tools = append(tools, worktree.Tools(policy)...)
+		tools = append(tools, skill.Tools(nil)...)
+		tools = append(tools, team.TaskTools(team.NewTaskManager())...)
 		if settingsService, ok := ctx.Get(contracts.KeySettings); ok {
 			tools = append(tools, settings.Tools(settingsService)...)
 		}
