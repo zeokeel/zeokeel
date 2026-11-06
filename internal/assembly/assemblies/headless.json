@@ -15,6 +15,13 @@
         "root": ".",
         "shellTimeoutMs": 30000
       }
+    },
+    {
+      "id": "hosttools",
+      "module": "zeokeel/hosttools",
+      "config": {
+        "interactive": false
+      }
     }
   ]
 }

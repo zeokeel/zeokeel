@@ -9,7 +9,7 @@ import (
 	"github.com/egoist/mygo/ui"
 	cordis "github.com/zeokeel/zeokeel-kernel"
 
-	rigtool "github.com/zeokeel/zeokeel-rig/tool"
+	rigtool "github.com/zeokeel/zeokeel-rig/tools"
 )
 
 // BuildFunc builds one contribution inside a mygo frame. The context, and the

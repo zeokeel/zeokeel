@@ -131,17 +131,19 @@ func TestProductsAndEntries(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Entries(desktop): %v", err)
 	}
-	if len(desktop) != 3 {
-		t.Fatalf("desktop roots = %d, want appinfo + toolkit + ui group", len(desktop))
+	if len(desktop) != 4 {
+		t.Fatalf("desktop roots = %d, want appinfo + toolkit + hosttools + ui group", len(desktop))
 	}
-	if desktop[0].Module != "zeokeel/appinfo" || desktop[1].Module != "zeokeel/toolkit" || desktop[2].Module != assembly.GroupModuleID {
-		t.Fatalf("desktop roots = %q/%q/%q, want appinfo/toolkit/group", desktop[0].Module, desktop[1].Module, desktop[2].Module)
+	if desktop[0].Module != "zeokeel/appinfo" || desktop[1].Module != "zeokeel/toolkit" ||
+		desktop[2].Module != "zeokeel/hosttools" || desktop[3].Module != assembly.GroupModuleID {
+		t.Fatalf("desktop roots = %q/%q/%q/%q, want appinfo/toolkit/hosttools/group",
+			desktop[0].Module, desktop[1].Module, desktop[2].Module, desktop[3].Module)
 	}
-	if len(desktop[2].Children) != 4 {
-		t.Fatalf("UI group children = %d, want home + welcome + toolcards + about", len(desktop[1].Children))
+	if len(desktop[3].Children) != 4 {
+		t.Fatalf("UI group children = %d, want home + welcome + toolcards + about", len(desktop[3].Children))
 	}
 	wantChildren := []string{"zeokeel-ui/home", "zeokeel-ui/welcome", "zeokeel-ui/toolcards", "zeokeel-ui/about"}
-	for index, child := range desktop[2].Children {
+	for index, child := range desktop[3].Children {
 		if child.Module != wantChildren[index] {
 			t.Fatalf("UI group child %d = %q, want %q", index, child.Module, wantChildren[index])
 		}
@@ -151,8 +153,9 @@ func TestProductsAndEntries(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Entries(headless): %v", err)
 	}
-	if len(headless) != 2 || headless[0].Module != "zeokeel/appinfo" || headless[1].Module != "zeokeel/toolkit" {
-		t.Fatalf("headless entries = %+v, want appinfo + toolkit", headless)
+	if len(headless) != 3 || headless[0].Module != "zeokeel/appinfo" ||
+		headless[1].Module != "zeokeel/toolkit" || headless[2].Module != "zeokeel/hosttools" {
+		t.Fatalf("headless entries = %+v, want appinfo + toolkit + hosttools", headless)
 	}
 }
 
@@ -165,14 +168,15 @@ func TestRegistryIsExplicit(t *testing.T) {
 		"zeokeel-ui/welcome",
 		"zeokeel-ui/toolcards",
 		"zeokeel/toolkit",
+		"zeokeel/hosttools",
 		assembly.GroupModuleID,
 	} {
 		if !registry.Has(id) {
 			t.Fatalf("Registry() lacks module %q", id)
 		}
 	}
-	if got := len(registry.Modules()); got != 7 {
-		t.Fatalf("Registry() modules = %d, want 7", got)
+	if got := len(registry.Modules()); got != 8 {
+		t.Fatalf("Registry() modules = %d, want 8", got)
 	}
 }
 
@@ -199,13 +203,15 @@ func TestDesktopAssemblyLoadsAndUnwinds(t *testing.T) {
 		t.Fatalf("LoadWithBuildInfo(desktop): %v", err)
 	}
 
-	// Five modules (appinfo/home/welcome/toolcards/about) plus the no-op UI
-	// group container are all active after the synchronous load.
+	// Seven modules (appinfo/toolkit/hosttools/home/welcome/toolcards/about)
+	// plus the no-op UI group container are all active after the synchronous
+	// load: the toolkit provider and its hosttools consumer settle in
+	// dependency order.
 	instances := loader.Instances()
-	if len(instances) != 7 {
-		t.Fatalf("desktop instances = %d, want 7", len(instances))
+	if len(instances) != 8 {
+		t.Fatalf("desktop instances = %d, want 8", len(instances))
 	}
-	wantIDs := []string{"appinfo", "toolkit", "ui", "home", "welcome", "toolcards", "about"}
+	wantIDs := []string{"appinfo", "toolkit", "hosttools", "ui", "home", "welcome", "toolcards", "about"}
 	gotIDs := make([]string, len(instances))
 	for index, instance := range instances {
 		gotIDs[index] = instance.ID()
@@ -245,6 +251,26 @@ func TestDesktopAssemblyLoadsAndUnwinds(t *testing.T) {
 		}
 	}
 
+	// The toolkit registry is the product's shared tool catalog: the hosttools
+	// module registered its six tools into it during activation.
+	toolkitRegistry, ok := root.Get(contracts.KeyToolkit)
+	if !ok {
+		t.Fatal("KeyToolkit service is not available on the root")
+	}
+	hostToolNames := []string{"ask_user", "exit_plan_mode", "goal", "plan_review", "present", "team"}
+	for _, name := range hostToolNames {
+		found := false
+		for _, spec := range toolkitRegistry.Specs() {
+			if spec.Name == name {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Fatalf("toolkit registry lacks host tool %q", name)
+		}
+	}
+
 	// Build identity from the host was overlaid onto the appinfo module config.
 	info, ok := root.Get(contracts.KeyAppInfo)
 	if !ok {
@@ -268,6 +294,16 @@ func TestDesktopAssemblyLoadsAndUnwinds(t *testing.T) {
 	if err := uiRoot.Validate(); err == nil {
 		t.Fatal("uiroot Validate after close succeeded, want no-screen error")
 	}
+	// Module disposal unregistered every host tool through the kernel effect,
+	// leaving only the toolkit module's own tools in the shared registry.
+	for _, spec := range toolkitRegistry.Specs() {
+		if slices.Contains(hostToolNames, spec.Name) {
+			t.Fatalf("host tool %q survived loader.Close", spec.Name)
+		}
+	}
+	if got := len(toolkitRegistry.Specs()); got == 0 {
+		t.Fatal("toolkit module's own tools disappeared with the host tools")
+	}
 }
 
 // --- headless product: loads without any UI service or display environment ---
@@ -288,8 +324,8 @@ func TestHeadlessAssemblyNeedsNoUIServices(t *testing.T) {
 	}()
 
 	instances := loader.Instances()
-	if len(instances) != 2 {
-		t.Fatalf("headless instances = %d, want appinfo + toolkit", len(instances))
+	if len(instances) != 3 {
+		t.Fatalf("headless instances = %d, want appinfo + toolkit + hosttools", len(instances))
 	}
 	instance := instances[0]
 	if instance.ID() != "appinfo" || instance.ModuleID() != "zeokeel/appinfo" {
@@ -297,6 +333,29 @@ func TestHeadlessAssemblyNeedsNoUIServices(t *testing.T) {
 	}
 	if state := instance.State(); state != cordis.Active {
 		t.Fatalf("appinfo state = %s, want Active", state)
+	}
+	hostInstance := instances[2]
+	if hostInstance.ID() != "hosttools" || hostInstance.ModuleID() != "zeokeel/hosttools" {
+		t.Fatalf("headless instance[2] = %s/%s, want hosttools/zeokeel/hosttools",
+			hostInstance.ID(), hostInstance.ModuleID())
+	}
+	if state := hostInstance.State(); state != cordis.Active {
+		t.Fatalf("hosttools state = %s, want Active", state)
+	}
+	// Host tools are registered even in a non-interactive product: the catalog
+	// is stable, only the ask_user capability is unavailable.
+	toolkitRegistry, ok := root.Get(contracts.KeyToolkit)
+	if !ok {
+		t.Fatal("KeyToolkit service is not available on the headless root")
+	}
+	registered := make(map[string]bool, len(toolkitRegistry.Specs()))
+	for _, spec := range toolkitRegistry.Specs() {
+		registered[spec.Name] = true
+	}
+	for _, name := range []string{"ask_user", "exit_plan_mode", "goal", "plan_review", "present", "team"} {
+		if !registered[name] {
+			t.Fatalf("headless toolkit registry lacks host tool %q", name)
+		}
 	}
 	if warnings := loader.Warnings(); len(warnings) != 0 {
 		t.Fatalf("headless warnings = %v, want none", warnings)

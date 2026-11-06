@@ -15,10 +15,10 @@ import (
 	"github.com/zeokeel/zeokeel-kernel/module"
 
 	"github.com/zeokeel/zeokeel-rig/sandbox"
-	rigtool "github.com/zeokeel/zeokeel-rig/tool"
-	"github.com/zeokeel/zeokeel-rig/tool/builtin"
-	"github.com/zeokeel/zeokeel-rig/tool/misc"
-	"github.com/zeokeel/zeokeel-rig/tool/web"
+	rigtool "github.com/zeokeel/zeokeel-rig/tools"
+	"github.com/zeokeel/zeokeel-rig/tools/builtin"
+	"github.com/zeokeel/zeokeel-rig/tools/misc"
+	"github.com/zeokeel/zeokeel-rig/tools/web"
 
 	"github.com/zeokeel/zeokeel/internal/contracts"
 )

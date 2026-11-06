@@ -5,6 +5,7 @@ import (
 
 	"github.com/zeokeel/zeokeel/internal/contracts"
 	"github.com/zeokeel/zeokeel/internal/modules/appinfo"
+	"github.com/zeokeel/zeokeel/internal/modules/hosttools"
 	"github.com/zeokeel/zeokeel/internal/modules/toolkit"
 	"github.com/zeokeel/zeokeel/internal/ui/about"
 	"github.com/zeokeel/zeokeel/internal/ui/home"
@@ -33,6 +34,7 @@ func Registry() *module.Registry {
 
 	mustRegister(registry, appinfo.Module())
 	mustRegister(registry, toolkit.Module())
+	mustRegister(registry, hosttools.Module())
 	mustRegister(registry, home.Module())
 	mustRegister(registry, about.Module())
 	mustRegister(registry, welcome.Module())

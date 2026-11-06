@@ -17,6 +17,13 @@
       }
     },
     {
+      "id": "hosttools",
+      "module": "zeokeel/hosttools",
+      "config": {
+        "interactive": true
+      }
+    },
+    {
       "id": "ui",
       "module": "zeokeel/host/group",
       "children": [
