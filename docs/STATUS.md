@@ -1,6 +1,6 @@
 # 状态（唯一状态真源）
 
-> 更新：2026-11-06（Round 3 收尾 + 模型配置/推理强度 parity）· 基线 `HEAD=20e98d4`；此后并发提交以 `git log` 为准。
+> 更新：2026-11-06（Round 3 收尾 + 模型配置/推理强度 parity + **1.0 功能缺口统一收口**）· 基线 `HEAD=20e98d4`；此后并发提交以 `git log` 为准。
 > 本文件只写**当前状态与验证结果**，不写过程。历史流水已归档：[docs/history/STATUS-journal.md](history/STATUS-journal.md)（不再维护）。
 > 缺陷状态：[docs/BUGS.md](BUGS.md) · 审计证据：[docs/audit/](audit/) · 已知限制：[docs/design/known-limitations.md](design/known-limitations.md) · 规划：[docs/PLAN.md](PLAN.md)。
 
@@ -45,6 +45,16 @@
 - 新增/更新测试：`internal/modelcatalog`、store 上下文窗口往返/容错、provider 动态强度、runtime `SetReasoningEffort`/`SetContextBudget`、session 会话强度与预算、shell 对话框目录预填/校验、composer 强度菜单与 Home 暂存。
 - 附带修复（门禁发现）：Updates 页异步状态与渲染的并发读写（基线 `3565c97` 的 shell race job 红）——`updateMu` + 一致快照，见 BUGS AR-23；修复后 `CGO_ENABLED=1 go test -race -timeout 20m ./internal/shell` PASS（462.8s）。
 
+## 2.4 1.0 功能缺口「统一收口」轮（2026-11-06）
+
+> 详细契约/差异/证据：[docs/audit/FIX-REPORT-CLOSURE.md](audit/FIX-REPORT-CLOSURE.md)；RED→GREEN 摘要：[TDD-RED-EVIDENCE.md](audit/TDD-RED-EVIDENCE.md) §4。
+
+- **交付 13 项**：①工作区变更 inline diff（捕获/统一 diff/事件持久化/可展开 UI/回放）；②`/goal` 命令；③`/compact` 手动压缩 + **会话级持久替换**；④`/goal edit` 保持 goal 身份；⑤`@` 提及细节（`@"带空格路径"` 含引号/反斜杠转义与往返、chevron 下钻、面包屑回跳、跨工作区会话行详情）；⑥会话引用原子化（canonical mention + 受限只读快照作第二条 user 消息注入，Chat 折叠显示）；⑦崩溃中断回合修复（checkpoint consumer 幂等收尾，不重放副作用）；⑧ACP 完整面（list/load/authenticate/fs/terminal/request_permission）；⑨LSP 工具 + 插件页开关 + inspect 配置键；⑩Wayland 全局快捷键（GlobalShortcuts portal，纯 Go D-Bus）；⑪导入器收尾（运行中检测/图片附件迁移/manifest v2/失败回滚）；⑫Chat 流式思考展示与折叠（DSH ReasoningRow 对齐，用户追加）；⑬独立审查 P2 修复 7 项 + REVIEW-3 P1/P2 修复。
+- **明确不做/非对齐项**：反馈联网上送、模型配置剩余限制（用户指定）；PTC/语音（产品决定）；auto-memory、computer-use（经核实 DSH 0.2.1-rc.2 无对应包/能力，非对齐项，见 FIX-REPORT-CLOSURE §0）。
+- **质量**：每项 TDD（RED→GREEN 留档）；3 组独立审查（REVIEW/REVIEW-2/REVIEW-3）；最终 `sh scripts/ci.sh` PASS、`CGO_ENABLED=1 go test -race ./internal/shell` PASS、Windows/darwin 交叉 build PASS、干净 checkout PASS（提交后复跑）。
+- **收口时修正的过期口径**：BUGS RT-04（per-session Agent 已落地）、FP-05（UI 卡片本轮补 diff）、FP-11（本轮补 consumer）均已关闭；FUNCTIONAL-PARITY 修正 auto-memory/computer-use 的 DSH 归属。
+- **残余/未验**：真实 GNOME/KDE portal、真实 gopls、真机 IME/a11y/DPI/通知/安装包、签名/公证与托管 feed（DEFERRED）——见 known-limitations。
+
 ## 3. 门禁（"绿"的定义）
 
 ```sh
@@ -77,10 +87,11 @@ sh scripts/evolve/gates.sh --full # 统一门禁；flaky 重跑按失败处理
 - 结构性债务：shell God package AR-04（IN PROGRESS：P1 完成、i18n 抽离完成（shell −470 行）、P2–P4 按计划）、逐 token 持久化 AR-06（PARTIAL）；AR-05（快照折叠收敛为 Controller 单一折叠/Projector deprecated）、AR-07/AR-09/AR-20 已 DONE——见 BUGS。
 - wave1/2 独立验证残余（见 BUGS 与 [known-limitations §3.8](design/known-limitations.md)）：About 双版本号、PD-02b 无 key 本地 provider、PD-04 导入质量 5 项、wave2 产品面待提交后复核；UX-04 设置窗重绘已 CONFIRMED FIXED（Linux/Xvfb，真实 WM spot check）。
 - 视觉回归为 opt-in 工具（`scripts/visual-check.sh`），CI 不强制。
+- 统一收口轮的已记录差异：会话引用在 composer 为明文 canonical mention（mygo TextArea 无内联芯片）、注入行 Chat 折叠显示；思考行完成态仅「已思考」（无 settled preview）、shimmer 为透明度脉冲、展开正文 mono；`/compact` summary 以 assistant 行持久化（识别语义见 FIX-REPORT-CLOSURE）；LSP 冷启动 server 无连接池/未真机 gopls；Wayland 真实 GNOME/KDE portal 未验（fake portal 测试通过）。
 
 ## 6. 下一步（按投入产出）
 
 1. 完成本轮 P0/P1 修复与独立验证（FIX-REPORT）；确保 CI 在干净树上绿。
 2. 迁移导入质量（PD-04 wave3）：过滤 DSH 注入上下文、按 turn 聚合 step 消息、幂等/去重、图片统计（均已补）、运行中实例检测/旧 manifest 兼容；导入 UI 为命令弹窗，非应用内执行；补齐后才可称"支持迁移"。
-3. 发布前真机矩阵 + 签名/公证与托管 update feed（DEFERRED，需外部条件；引擎/CLI/GUI 更新链路已交付）。
+3. 发布前真机矩阵 + 签名/公证与托管 update feed（DEFERRED，需外部条件；引擎/CLI/GUI 更新链路已交付）；真实 GNOME/KDE portal、真实 gopls 冒烟，见 known-limitations §1。
 4. 结构性债务分批：AR-05 已收敛（Controller 单一折叠）；剩余 AR-06 events 保留策略/AR-22 快照 O(n) 拷贝 → AR-04 shell 分层（P1 已完成、i18n 抽离已完成（shell −470 行）；P2–P4 按 `shell-refactor-plan` 推进，L 项整体重构未实施）。

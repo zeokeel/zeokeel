@@ -51,3 +51,24 @@ go test -count=1 ./internal/{acp,presets,updater,globalhotkey,shell,session,app,
 ```
 
 > 说明：`.cache/` 为 gitignored 临时证据；本文件是进入版本库的 RED 证据摘要。原始日志摘录（updater/globalhotkey/acp-cli）仍在 `.cache/fix-platform/`（本机可查）。
+
+## 4. 2026-11-06 统一收口轮 RED→GREEN（13 项 + 审查修复）
+
+> 汇总来源：各任务 worker 简报与 [FIX-REPORT-CLOSURE.md](FIX-REPORT-CLOSURE.md)；实现完成后的契约测试均在默认门禁内（无 `tdd_red` 标签残留）。原始 RED 日志多保存在 `/tmp`（本机可查）或 `.cache/`（gitignored）。
+
+| 交付 | RED（写测试后首次运行） | GREEN（实现后） |
+| --- | --- | --- |
+| 工作区变更 inline diff | workspacechanges `undefined: Turn`；session `WorkspaceChange 无 Diff/Added`；shell `unknown field Diff`/`undefined workspaceDiffStates` | 四包 + shell 全绿；`workspace/changes` 事件含 diff 且重开回放一致 |
+| `/goal` + `/compact` | palette 缺 `/goal`、`/compact`；命令到达模型（4/1 provider calls）；runtime/session `undefined CompactNow/CompactCurrent` | 六包全绿；命令 0 provider calls；busy/空历史/失败稳定文案 |
+| `/compact` 持久化 + `/goal edit` | store `ReplaceCompactedMessages undefined`；state `undefined: Compaction`；runtime `undefined: CompactionPersister`；tools `goal: unknown action "edit"` | 重开旧消息消失/summary 在/后续回合不回退；edit 保持 id/phase/rounds；六包全绿 |
+| `@` 提及细节 | 4 个 Tester 用例失败（引号列了会话/无可点 crumb/root crumb 无 RoleButton/跨区行 other=-1）；引号 token 解析错 | 定向 4 用例 PASS；shell 全包 PASS；`a"b.txt` 往返 |
+| 会话引用原子化 | 包 stub 全失败；注入无第二条 user 消息/无持久化/畸形引用未报错；shell `#live` 旧 token 泄漏 | sessionreference/session/runtime/shell 全绿；幂等（二轮仅 1 条 context）/重开回放；注入行 Chat 折叠 |
+| 崩溃中断回合修复 | runtime/session 恢复测试 `not implemented` | runtime/session/app 定向全绿；二次恢复 no-op；无重复 user/工具不重放 |
+| ACP 完整面 | `./internal/acp` build failed（undefined Client/ListSessionsResponse 等）；旧 adapter list=-32601、permission 超时 | acp/app 全绿；-race PASS；list 排序/cwd/回放/权限四选项符合验收 |
+| LSP 工具 | `internal/lsp` 全 `not implemented`；tools 17 fail；app 编译被瞬态阻塞后复跑 | lsp/tools/app 全绿；-race PASS；UTF-16/超时/崩溃/无配置错误路径 |
+| Wayland 全局快捷键 | `undefined: dbusMessage` 等编译失败 | 57 pass + 1 skip（无 X display）；-race PASS；fake portal 覆盖成功/拒绝/重连/Close |
+| 导入器收尾 | 14 FAIL（图片迁移 0≠1、manifest 损坏仍 fail-closed、v1/v0 不迁移等） | importer/cmd 全绿；真实 `~/.dsh` dry-run 334 sessions → 28 导入/1276 消息/26 图+1 文件 0 丢弃 |
+| Chat 流式思考展示 | `-run Reasoning` 8 FAIL（无 Think 行/preview/展开/顺序/无障碍） | Reasoning + shell 全包 PASS；长 preview/展开/键盘/回放/性能测试 |
+| 独立审查 P2 修复 | 各项 RED（如 LSP sibling 落工作区根、Wayland 等 Close 超时、symlink 被误迁移、解析全量内存放大） | task-16 七项全绿 + -race；gofmt/vet/build 干净 |
+| REVIEW-3 P1/P2 修复 | goal driver race flaky（7 跑 4 败）；引用注入出现原始 JSON 气泡+幻影 turn；preview 每帧全量重算 | task-21/22/23 修复；10 次 race 复跑全绿；引用折叠/候选排序/per-agent 队列/预览缓存均有测试 |
+

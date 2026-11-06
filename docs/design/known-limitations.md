@@ -1,6 +1,6 @@
 # 已知限制与未验证项（v1 收口用）
 
-> 更新时间：2026-11-05（审计修复轮）· 基线 `HEAD=3100af0`；审计报告见 `docs/audit/`，缺陷状态清单见 [docs/BUGS.md](../BUGS.md)。
+> 更新时间：2026-11-06（审计修复轮 + 1.0 功能缺口统一收口）· 基线 `HEAD=3100af0`（收口轮见 [FIX-REPORT-CLOSURE](../audit/FIX-REPORT-CLOSURE.md)）；审计报告见 `docs/audit/`，缺陷状态清单见 [docs/BUGS.md](../BUGS.md)。
 > 目的：把"没有做到/没有条件验证"的事说清楚，避免把目标达成的部分与已知缺口混在一起。发布前必须完成 §1 的真机验证；其余为后续排期。
 
 ## 1. 真机能力未验证（本环境无显示器）
@@ -13,7 +13,9 @@
 | 系统通知服务 | 通知状态机与 Notifier 注入测试覆盖；真实 mygo.NewNotification 只在源码级接入 | macOS 打包后通知权限、Windows balloon、Linux notification service 实机 |
 | 窗口管理 | 窗口状态持久化、设置独立窗口均有单测与 headless 行为测试；原生窗口菜单栏已于 2026-11-05 退役（[ADR 0006](../../docs/decisions/0006-retire-native-menu-bar.md)） | 真机窗口恢复、双窗口焦点、无菜单栏下的快捷键/剪贴板/Quit 路径 |
 | Windows shell 方言 | Windows 构建只暴露 `pwsh`（PowerShell）、POSIX 构建只暴露 `bash`；系统提示含显式运行环境段与平台化工具描述（[ADR 0009](../../docs/decisions/0009-platform-shell-stacks.md)）；所有子进程（bash/pwsh/terminal/jobs/git/MCP/UI 终端）启动时设置 `CREATE_NO_WINDOW`+`HideWindow`（[ADR 0011](../../docs/decisions/0011-windows-hidden-console.md)），不再弹 cmd 窗。本环境仅有 `GOOS=windows` 编译/vet/纯函数单测，未真机运行 | Windows 真机：pwsh 解析（pwsh→powershell 回退）、中文输出/路径、terminal 默认 pwsh、plan/只读模式下工具集、缺失 PowerShell 时的错误提示、命令执行时不再出现 cmd 窗口 |
-| 全局快捷键（Windows/Linux X11/macOS） | Windows：RegisterHotKey+消息泵；Linux/X11：purego dlopen libX11 + fake-Xlib 单测；macOS：Carbon/purego dlopen（compile-only，`carbon_mapping` 纯映射单测）；本环境无 macOS/显示器 | Windows 真机：注册成功、被占用（ErrOccupied）提示、设置变更即生效、退出释放；Linux X11 真机：真实会话 grab/冲突、键位映射、退出 ungrab、Wayland 提示不支持、按住自动重复（待 debounce）；macOS 真机：HIToolbox 符号/回调 ABI/主线程事件循环、F21–F24 无标准键码、无 AppKit target 时降级 ErrUnsupported |
+| 全局快捷键（Windows/Linux X11/Wayland/macOS） | Windows：RegisterHotKey+消息泵；Linux/X11：purego dlopen libX11 + fake-Xlib 单测；**Wayland：纯 Go D-Bus + xdg-desktop-portal `GlobalShortcuts`（CreateSession/BindShortcuts/Activated/Session.Close，fake portal 测试通过；真实 portal 未验）**；macOS：Carbon/purego dlopen（compile-only，`carbon_mapping` 纯映射单测）；本环境无 macOS/显示器/Wayland 会话 | Windows 真机：注册成功、被占用（ErrOccupied）、设置变更即生效、退出释放；Linux X11 真机：真实 grab/冲突、键位映射、退出 ungrab、按住自动重复（debounce 待做）；**Wayland 真机：GNOME/KDE portal 同意对话框、Activated 投递、shortcut id 持久化、session 释放**；macOS 真机：HIToolbox 符号/回调 ABI/主线程事件循环、F21–F24 无标准键码、无 AppKit target 时降级 ErrUnsupported |
+| LSP 工具（语言服务器） | stdio JSON-RPC client + fake LSP server 测试（definition/references/implementation/hover、UTF-16 坐标、输出上限、超时 kill）；`lsp.servers`/`.zeokeel/lsp.json` 安全门；未真机 gopls | 真机：gopls/clangd/pyright 等真实 server 的 initialize 兼容、大仓库 hover/引用延迟、server 崩溃隔离；冷启动无连接池（每次调用重启）需评估 |
+| 会话引用 / 思考行 UI | canonical mention + 注入行折叠 disclosure + ReasoningRow 行为均有 headless Tester 测试；真实 IME/滚动/选中交互未真机 | 真机：长上下文滚动下引用折叠行展开、思考行 expand/collapse 动画与焦点、与 markdown 链接/选择交互不冲突 |
 | 自动更新（GUI/CLI） | 引擎+CLI+GUI 下载/安装均有单测/httptest；app seam `DownloadAndInstallUpdate`/`applyPendingUpdate` 已交付；无真实 feed/签名 | 真机：真实托管 feed 的检查/下载/校验/**重启应用完成安装**、失败回滚（`.old-*` 备份）、无 feed 时提示 |
 | ACP 客户端互操作 | `zeokeel acp` stdio e2e + fake provider；无真实编辑器 | Zed/Neovim 等 ACP 客户端：initialize、session/new（cwd）、流式 update、cancel、EOF/SIGINT 干净退出 |
 | 预设（Presets） | catalog/UI/测试就绪；无真机视觉与交互验证 | 真机：预设页选择/覆盖生效（工具白名单/人设），用户 JSON 覆盖与错误提示 |
@@ -40,9 +42,9 @@
 - **设置窗口**：所有窗口均无菜单栏（原生菜单栏 2026-11-05 退役，[ADR 0006](../../docs/decisions/0006-retire-native-menu-bar.md)）；窗口间几何联动、大页滚动位置持久化未做；overlay 作为无显示器/创建失败的回退保留（行为略有差异）。
 - **计划模式**：2026-11-05 起对齐 DSH（[ADR 0008](../../docs/decisions/0008-plan-mode-soft-alignment.md)）：入口为 `/plan` 命令 + composer 计划徽章（`/plan` 开、`/plan off` 或点徽章关、`/plan <消息>` 开并提交该消息）；计划模式是**软引导**（`plan:policy` prompt + `present` "Plan" + 审阅卡），**不再拦截任何工具**——需要强制只读规划的必须同时选择 composer 的「只读」权限（plan 与权限正交、可叠加）。**已实现**：独立 `exit_plan_mode` 工具（`internal/tools/exit_plan_mode.go`）、审阅卡 Keep planning（带反馈，`internal/shell/plan_ui.go` 的 `keepPlanning`）、pending 态徽章（`plan_ui.go`）；Home 草稿会话的 `/plan` 与 Home composer 打开 `/` 面板后的键盘焦点均已修复（后者见 native-ui.md §19.4/§19.5）。仍未做：计划审阅卡在真实窗口中的多显示器/窄窗视觉矩阵（真机项，见 §1）。
 - **Composer 斜杠命令 / `@` 提及**（2026-11-05 对齐 DSH，native-ui.md §19.5）：
-  - **有意不加行**：`/goal` —— goal round driver 已实现（`internal/session/goal_driver.go`，自动多轮有 round 预算），缺的是 shell 侧写入路径：`Controller.SetGoal` 只写内存、不落 `GoalStateStore`，会与 goal 工具/GoalDriver 分叉，需要 session/app 层官方写入 API（见 BUGS FP-04）；`/compact` —— 压缩只在 runtime 回合前自动执行，没有公开的手动压缩 API（需 runtime+session 语义改动）。两者在 `/help` 只是说明（压缩自动、未知命令发给模型）。
+  - **已补齐（2026-11-06 统一收口）**：`/goal` 已接 Controller `GoalAction`（status/create/edit/pause/resume/complete/abandon/clear，本地执行不进模型；edit 保持同一 goal id/phase/rounds）；`/compact` 已接 runtime 手动压缩 API + 会话级**持久替换**（早期历史变 summary、事件回放、重开不回退）。见 [FIX-REPORT-CLOSURE](../audit/FIX-REPORT-CLOSURE.md)。
   - **保留的 ZeoKeel 策略**：未知 `/xxx` 行仍作为普通消息发送给模型（DSH 文档称未知行被拒绝，但其源码对未知行也走普通提交；两端口径不统一，按用户此前文档保留现有行为）。
-  - **`@` 提及未做（P1）**：行尾 chevron 的指针 drill（Tab 已是真实下钻）、`@"path with spaces"` 引号路径、文件夹多级面包屑的点击跳级、会话行的时间/workspace 详情；会话引用仍是文档化的 `#<title>` 纯文本 fallback（无 DSH 的原子 session-reference 解析器）。
+  - **`@` 提及已补齐（2026-11-06 统一收口）**：行尾 chevron 指针下钻、`@"path with spaces"` 引号路径（含 `"`/`\` 转义与往返解析）、文件夹多级面包屑点击跳级、会话行 workspace/时间详情、跨工作区候选（同 cwd 优先）；会话引用已升级为 canonical `@[label](dsh-session:<id>)` + 受限只读快照作为第二条 user 消息注入（Chat 折叠显示）。已知差异：composer 显示明文 mention（mygo TextArea 无内联芯片）。
   - **caret 记录的框架限制**：mygo 在 composer 上方插入派生弹层时会重建编辑器元素、选区回落到文末；`recordComposerCaret` 用「draft 未变且 caret 落到文末」判定并回写原 caret（native-ui.md §19.5），真机 IME 组合期的极端 caret 行为仍需人工冒烟。
 - **文本选择**：消息与工具卡中的 Markdown 内容（正文/代码）可选中并右键复制（mygo markdown）；其余 UI 文本未全量开启选择（侧栏、按钮、标题、设置说明等），桌面应用一般也不需要。
 - **Trajectory**：已虚拟化（ui.List，1000 事件稳态帧 22.7ms→3.12ms，见 perf.md §8）；`FollowEnd=false` 为当前选择，若产品要"日志式跟随末尾"改一处即可。
@@ -68,7 +70,7 @@
 - **RT-01/RT-06/RT-08**：workspace MCP 默认不执行（§5）、无整体超时 + 流空闲/重试设置（§5）。
 - **迁移定位（PD-04）**：产品文案由"DSH 桌面替代/迁移器"降级为"DSH 同类替代"；最小导入器已交付（技术预览）：`internal/importer` 读取 DSH `sessions/**/session.v4.jsonl[.zstd]` 与 credentials **键名**（值永不读取），写 ZeoKeel store；`zeokeel import [--from] [--dry-run] [--json] [--max]` 已接 CLI（退出码 0/1/2，`--json` 输出 report）。
 **导入范围（先说清楚）**：只导入**文本对话**（用户/assistant 文本与 reasoning）；工具调用/工具结果以合成文本行计数、不落 tool_calls；图片/附件/profile/storage/trajectory/usage 不导入；subagent 子会话默认跳过（`--include-subagents` 可含）；凭据只列键名，需在设置里重填 API key。
-**导入质量（wave2 importer 已补一部分）**：① DSH 注入上下文过滤 ✅（`SkipSystemInjected`，source.kind != user 不再变用户气泡）；② assistant step 过滤 ✅（`SkipStepAssistant`，无可见文本的 step 消息不落库）；③ 幂等 ✅（`--manifest` 默认 `<数据目录>/dsh-import-manifest.json`，按源文件 hash/size/mtime 跳过；`--no-manifest` 可退回全量重导）；④ 图片统计 ✅（`images_dropped`）；⑤ skip 原因分解 ✅（`skips` 按 subagent/system_injected/step_assistant/unsupported_version/idempotent/...）；⑥ header version 守卫 ✅（未来版本显式跳过）。**仍缺**：app 运行中导入检测、图片/附件对象迁移、旧版 manifest 兼容（旧版覆盖 key 升级后首次会重导一次，之后稳定幂等）。UI 入口为设置→数据与隐私→「从 DSH 导入」**命令弹窗**（展示/复制 `zeokeel import` 命令并提示先退出应用；**非应用内执行**）；独立复验见 FIX-VERIFY-IMPORT2 / FIX-VERIFY-WAVE23。
+**导入质量（wave2 importer 已补一部分）**：① DSH 注入上下文过滤 ✅（`SkipSystemInjected`，source.kind != user 不再变用户气泡）；② assistant step 过滤 ✅（`SkipStepAssistant`，无可见文本的 step 消息不落库）；③ 幂等 ✅（`--manifest` 默认 `<数据目录>/dsh-import-manifest.json`，按源文件 hash/size/mtime 跳过；`--no-manifest` 可退回全量重导）；④ 图片统计 ✅（`images_dropped`）；⑤ skip 原因分解 ✅（`skips` 按 subagent/system_injected/step_assistant/unsupported_version/idempotent/...）；⑥ header version 守卫 ✅（未来版本显式跳过）。**2026-11-06 统一收口已补齐**：① app 运行中导入检测（默认拒绝 + `--force`，dry-run 不探测）；② 图片/附件对象迁移（`attachments/v1/objects|file-objects`/内联 base64 → store 附件行 + MessageID 关联；25MiB 帽/缺/超大/损坏计数跳过；`Lstat` 拒绝 symlink；失败会话补偿回滚）；③ manifest v2 旧版 key 一次性迁移不重导、损坏从 `.bak` 恢复或隔离重建、`>v2` fail-closed。**仍不导入**：工具调用/工具结果/轨迹/usage（messages 表无 tool_call 列，强行合成会破坏后续模型调用——设计保持不变）；损坏 manifest 重建可能重导一次（备份恢复成功则不会）。UI 入口为设置→数据与隐私→「从 DSH 导入」**命令弹窗**（展示/复制 `zeokeel import` 命令并提示先退出应用；**非应用内执行**）；独立复验见 FIX-VERIFY-IMPORT2 / FIX-VERIFY-WAVE23。
 
 ## 3.8 wave 1/2 独立验证残余（2026-11-05）
 
@@ -119,6 +121,7 @@
 - 版本与诊断（AR-01/AR-03）：`scripts/build.sh` 用 `-ldflags "-s -w -X main.version/commit/buildTime"` 注入版本并剥离符号（约 -32% 体积），`zeokeel --version` 输出三项；日志写 `<DataDir>/logs/app-YYYYMMDD.log`（8MiB 轮转、跨天换文件），panic 写 `logs/crash-*.txt`，并用 `debug.SetCrashOutput` 捕获致命崩溃。
 - 纯 Go/no-cgo 边界：插件只内置、无第三方插件市场/运行时；无内核级沙箱（策略 + 审批 + 审计）。这些是产品级既定边界，不随 UI 改造改变。
 - 打包：Windows zip、Linux tar.gz（amd64/arm64）、macOS unsigned `.app` zip 由 `scripts/build.sh` 生成；发布流水线 `.github/workflows/release.yml` + `make release` 已就绪；**代码签名/公证与托管 update feed 仍缺**（需证书与发布账号，见 BUGS AR-03）；自动更新引擎+CLI+设置页检查已交付；构建与打包脚本不写仓库根目录。
+- **2026-11-06 统一收口轮**：功能缺口（workspace inline diff、`/goal`、`/compact` 持久压缩、`@` 细节、会话引用、崩溃中断收尾、ACP 完整面、LSP、Wayland portal、导入器收尾、Chat 思考展示）已补齐，契约/差异/未验项见 [FIX-REPORT-CLOSURE](../audit/FIX-REPORT-CLOSURE.md)；发布仍受真机矩阵、签名/公证与托管 feed（外部条件）约束。
 
 ## 6. 后续建议优先级
 
