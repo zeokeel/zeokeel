@@ -30,6 +30,7 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/zeokeel/zeokeel/internal/runtime"
@@ -94,17 +95,21 @@ type Config struct {
 }
 
 // Provider is an OpenAI-compatible runtime.Provider. It is safe for
-// concurrent use: it holds no per-stream state.
+// concurrent use: it holds no per-stream state. ReasoningEffort is the one
+// mutable setting (the composer's per-session reasoning-strength menu changes
+// it between requests), guarded by effortMu.
 type Provider struct {
-	baseURL         string
-	apiKey          string
-	model           string
-	client          *http.Client
-	temperature     *float32
-	maxTokens       int
+	baseURL     string
+	apiKey      string
+	model       string
+	client      *http.Client
+	temperature *float32
+	maxTokens   int
+	retry       RetryPolicy
+	streamIdle  time.Duration
+
+	effortMu        sync.RWMutex
 	reasoningEffort string
-	retry           RetryPolicy
-	streamIdle      time.Duration
 }
 
 var _ runtime.Provider = (*Provider)(nil)
@@ -182,6 +187,24 @@ func (p *Provider) Model() string { return p.model }
 
 // BaseURL reports the normalized API root.
 func (p *Provider) BaseURL() string { return p.baseURL }
+
+// SetReasoningEffort replaces the reasoning_effort sent on subsequent
+// requests. The composer's per-session strength menu calls it so a change
+// reaches the next request without rebuilding the provider; an empty effort
+// omits the field and leaves the provider's own default.
+func (p *Provider) SetReasoningEffort(effort string) {
+	p.effortMu.Lock()
+	p.reasoningEffort = strings.TrimSpace(effort)
+	p.effortMu.Unlock()
+}
+
+// ReasoningEffort reports the effort the next request sends ("" omits the
+// field).
+func (p *Provider) ReasoningEffort() string {
+	p.effortMu.RLock()
+	defer p.effortMu.RUnlock()
+	return p.reasoningEffort
+}
 
 // Stream starts a streaming completion. It returns once the server has
 // accepted the request; the channel then carries chunks until the stream
@@ -453,7 +476,7 @@ func (p *Provider) buildRequest(req runtime.Request) ([]byte, error) {
 		StreamOptions:   &streamOptions{IncludeUsage: true},
 		Temperature:     p.temperature,
 		MaxTokens:       p.maxTokens,
-		ReasoningEffort: p.reasoningEffort,
+		ReasoningEffort: p.ReasoningEffort(),
 	}
 	raw, err := json.Marshal(body)
 	if err != nil {

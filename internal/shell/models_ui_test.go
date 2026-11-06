@@ -10,6 +10,8 @@ import (
 	"github.com/egoist/mygo/ui"
 
 	"github.com/zeokeel/zeokeel/internal/design"
+	"github.com/zeokeel/zeokeel/internal/modelcatalog"
+	"github.com/zeokeel/zeokeel/internal/store"
 )
 
 // TestModelsSettingsCRUD drives Settings > Models with NewTester: add two
@@ -28,18 +30,27 @@ func TestModelsSettingsCRUD(t *testing.T) {
 		t.Fatalf("models page missing: %q", tt.Texts())
 	}
 
-	// Add the first model. Name is auto-focused; Tab walks the other fields.
+	// Add the first model. The dialog opens on the built-in DeepSeek
+	// configuration, so every prefilled field is selected before typing; the
+	// Name field is auto-focused. Tab walks the other fields.
 	if err := tt.Click("Add model"); err != nil {
 		t.Fatalf("click Add model: %v", err)
 	}
+	tt.Key(ui.Cmd, ui.KeyA)
 	tt.Type("My Model")
 	tt.Key(0, ui.KeyTab)
+	tt.Key(ui.Cmd, ui.KeyA)
 	tt.Type("https://alpha.test")
 	tt.Key(0, ui.KeyTab)
 	tt.Type("sk-alpha")
 	tt.Key(0, ui.KeyTab)
+	tt.Key(ui.Cmd, ui.KeyA)
 	tt.Type("alpha-1")
 	tt.Key(0, ui.KeyTab)
+	tt.Key(ui.Cmd, ui.KeyA)
+	tt.Type("200000")
+	tt.Key(0, ui.KeyTab)
+	tt.Key(ui.Cmd, ui.KeyA)
 	tt.Type("High")
 	if err := tt.Click("Save"); err != nil {
 		t.Fatalf("click Save: %v", err)
@@ -54,7 +65,8 @@ func TestModelsSettingsCRUD(t *testing.T) {
 	}
 	first := models[0]
 	if first.Name != "My Model" || first.BaseURL != "https://alpha.test" ||
-		first.APIKey != "sk-alpha" || first.Model != "alpha-1" || first.ReasoningEffort != "High" {
+		first.APIKey != "sk-alpha" || first.Model != "alpha-1" ||
+		first.ReasoningEffort != "High" || first.ContextWindow != 200000 {
 		t.Fatalf("stored model = %+v", first)
 	}
 	if !first.Default {
@@ -66,6 +78,7 @@ func TestModelsSettingsCRUD(t *testing.T) {
 		"model." + first.ID + ".api_key":          "sk-alpha",
 		"model." + first.ID + ".model":            "alpha-1",
 		"model." + first.ID + ".reasoning_effort": "High",
+		"model." + first.ID + ".context_window":   "200000",
 		"model.default":                           first.ID,
 	} {
 		if got, err := h.store.GetSetting(key); err != nil || got != want {
@@ -91,7 +104,17 @@ func TestModelsSettingsCRUD(t *testing.T) {
 	if err := tt.Click("Add model"); err != nil {
 		t.Fatalf("click Add model (#2): %v", err)
 	}
+	tt.Key(ui.Cmd, ui.KeyA)
 	tt.Type("Second")
+	// Leave this row's wire fields empty so it exercises the name fallback
+	// (the dialog opened with the built-in DeepSeek configuration).
+	tt.Key(0, ui.KeyTab)
+	tt.Key(ui.Cmd, ui.KeyA)
+	tt.Key(0, ui.KeyBackspace)
+	tt.Key(0, ui.KeyTab)
+	tt.Key(0, ui.KeyTab)
+	tt.Key(ui.Cmd, ui.KeyA)
+	tt.Key(0, ui.KeyBackspace)
 	if err := tt.Click("Save"); err != nil {
 		t.Fatalf("click Save (#2): %v", err)
 	}
@@ -209,7 +232,8 @@ func TestModelProviderPresetsAndConnection(t *testing.T) {
 	}
 
 	// Validation runs before any request: empty Base URL/Model reports what is
-	// missing instead of probing "".
+	// missing instead of probing "". The dialog opens preconfigured, so clear
+	// the live draft (the button and handler read it directly).
 	called := make(chan struct{}, 1)
 	oldProbe := probeModelConnection
 	probeModelConnection = func(context.Context, string, string) error {
@@ -217,6 +241,9 @@ func TestModelProviderPresetsAndConnection(t *testing.T) {
 		return nil
 	}
 	t.Cleanup(func() { probeModelConnection = oldProbe })
+	live := h.app.shellUI()
+	live.modelDraft.baseURL = ""
+	live.modelDraft.model = ""
 	if err := tt.Click("Test connection"); err != nil {
 		t.Fatalf("click Test connection: %v", err)
 	}
@@ -230,15 +257,19 @@ func TestModelProviderPresetsAndConnection(t *testing.T) {
 	default:
 	}
 
-	// Picking the OpenAI preset fills the wire fields.
-	for _, preset := range providerPresets {
-		if preset.id == "openai" {
-			h.app.applyProviderPreset(preset)
-		}
+	// Picking a built-in provider fills the endpoint and its first published
+	// model, including that model's context window and default effort.
+	openai, ok := modelcatalog.LookupProvider("openai")
+	if !ok {
+		t.Fatal("catalog has no OpenAI provider")
 	}
+	h.app.applyProviderPreset(openai)
 	draft := h.app.shellUI().modelDraft
-	if draft.baseURL != "https://api.openai.com/v1" || draft.model != "gpt-4o-mini" {
+	if draft.baseURL != "https://api.openai.com/v1" || draft.model != "gpt-4.1" {
 		t.Fatalf("preset did not fill the draft: %+v", draft)
+	}
+	if draft.contextWindow != "1047576" || draft.presetModel != "gpt-4.1" {
+		t.Fatalf("preset did not fill the model metadata: %+v", draft)
 	}
 	h.app.shellUI().modelDraft.apiKey = "sk-test"
 	tt.Frame()
@@ -298,5 +329,121 @@ func TestModelPresetMatching(t *testing.T) {
 		if got := presetForBaseURL(baseURL); got != want {
 			t.Errorf("presetForBaseURL(%q) = %q, want %q", baseURL, got, want)
 		}
+	}
+}
+
+// TestModelDialogBuiltInCatalogPrefillAndValidation pins the framework-parity
+// add flow: choosing DeepSeek fills the endpoint, its default model, the 1M
+// context window and that model's default strength, so the user only pastes a
+// key; invalid capacities and unpublished levels are rejected before saving.
+func TestModelDialogBuiltInCatalogPrefillAndValidation(t *testing.T) {
+	h := newLiveApp(t, &shellProvider{})
+	h.app.Language = LangEN
+	tt := ui.NewTester(h.app.View, 1600, 1000)
+	tt.Key(ui.Cmd, ui.KeyComma)
+	if err := tt.Click("Models"); err != nil {
+		t.Fatalf("click Models nav: %v", err)
+	}
+	if err := tt.Click("Add model"); err != nil {
+		t.Fatalf("click Add model: %v", err)
+	}
+	tt.Frame()
+	// The dialog opens on the built-in DeepSeek configuration: only the API
+	// key is missing, and the built-in model row is visible.
+	if !tt.HasText("Built-in model") {
+		t.Fatalf("built-in model row missing on the default DeepSeek setup: %v", tt.Texts())
+	}
+	if draft := h.app.shellUI().modelDraft; draft.preset != "deepseek" ||
+		draft.name != "DeepSeek V4.1 Flash" || draft.baseURL != "https://api.deepseek.com" ||
+		draft.model != "deepseek-flash" || draft.contextWindow != "1000000" || draft.effort != "high" {
+		t.Fatalf("default add draft = %+v", draft)
+	}
+	// The custom endpoint leaves the fields alone and hides the built-in model
+	// row (the user manages the endpoint by hand).
+	h.app.shellUI().modelDraft = modelDraft{preset: customProviderID}
+	tt.Frame()
+	if tt.HasText("Built-in model") {
+		t.Fatalf("custom endpoint shows a built-in model row: %v", tt.Texts())
+	}
+	if draft := h.app.shellUI().modelDraft; draft.preset != customProviderID || draft.presetModel != "" {
+		t.Fatalf("custom draft = %+v", draft)
+	}
+
+	// Choosing DeepSeek prefills the whole built-in configuration.
+	deepseek, ok := modelcatalog.LookupProvider("deepseek")
+	if !ok {
+		t.Fatal("catalog has no DeepSeek provider")
+	}
+	h.app.applyProviderPreset(deepseek)
+	tt.Frame()
+	if !tt.HasText("Built-in model") {
+		t.Fatalf("built-in model row missing after choosing DeepSeek: %v", tt.Texts())
+	}
+	draft := h.app.shellUI().modelDraft
+	if draft.name != "DeepSeek V4.1 Flash" || draft.baseURL != "https://api.deepseek.com" ||
+		draft.model != "deepseek-flash" || draft.contextWindow != "1000000" ||
+		draft.effort != "high" || draft.presetModel != "deepseek-flash" {
+		t.Fatalf("DeepSeek preset = %+v", draft)
+	}
+
+	// Save validation is covered directly (typing into every non-focused
+	// field would only re-test the native text input): a bad capacity, an
+	// unpublished level and a missing name each block the row.
+	invalid := draft
+	invalid.contextWindow = "many"
+	if _, key := modelFromDraft(invalid); key != "models.invalid_context_window" {
+		t.Fatalf("bad capacity validation key = %q", key)
+	}
+	invalid = draft
+	invalid.effort = "medium"
+	if _, key := modelFromDraft(invalid); key != "models.unsupported_reasoning_effort" {
+		t.Fatalf("unpublished effort validation key = %q", key)
+	}
+	invalid = draft
+	invalid.name = ""
+	if _, key := modelFromDraft(invalid); key != "models.model_name_is_required" {
+		t.Fatalf("missing name validation key = %q", key)
+	}
+	if valid, key := modelFromDraft(draft); key != "" || valid.ContextWindow != 1000000 {
+		t.Fatalf("valid draft = %+v, key %q", valid, key)
+	}
+
+	// A published level saves the complete built-in configuration. The live
+	// draft is mutated directly (a frame would re-sync the bound text inputs).
+	live := h.app.shellUI()
+	live.modelDraft.effort = "max"
+	live.modelDraft.apiKey = "sk-deepseek"
+	if err := tt.Click("Save"); err != nil {
+		t.Fatalf("click Save: %v", err)
+	}
+	models, err := h.ctrl.Models().List()
+	if err != nil || len(models) != 1 {
+		t.Fatalf("models after save = %+v, %v", models, err)
+	}
+	saved := models[0]
+	if saved.Model != "deepseek-flash" || saved.BaseURL != "https://api.deepseek.com" ||
+		saved.ContextWindow != 1000000 || saved.ReasoningEffort != "max" || saved.APIKey != "sk-deepseek" {
+		t.Fatalf("saved model = %+v", saved)
+	}
+}
+
+// TestBeginModelEditRestoresCatalogMetadata keeps the edit dialog honest: the
+// provider, built-in model choice and context window are re-selected from the
+// saved model instead of showing Custom/empty again.
+func TestBeginModelEditRestoresCatalogMetadata(t *testing.T) {
+	h := newLiveApp(t, &shellProvider{})
+	saved, err := h.ctrl.Models().Create(store.Model{
+		Name: "DeepSeek V4 Pro", Model: "deepseek-v4-pro",
+		BaseURL: "https://api.deepseek.com", ReasoningEffort: "high",
+		ContextWindow: 1000000,
+	})
+	if err != nil {
+		t.Fatalf("create model: %v", err)
+	}
+	h.app.beginModelEdit(*saved)
+	draft := h.app.shellUI().modelDraft
+	if draft.preset != "deepseek" || draft.presetModel != "deepseek-v4-pro" ||
+		draft.contextWindow != "1000000" || draft.effort != "high" {
+		t.Fatalf("edit draft = %+v", draft)
 	}
 }

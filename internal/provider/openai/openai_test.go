@@ -1058,3 +1058,54 @@ func TestRetryEmptyResponse(t *testing.T) {
 		t.Fatalf("provider calls = %d, want 3", calls)
 	}
 }
+
+// TestSetReasoningEffortReachesNextRequest pins the composer's per-session
+// reasoning-strength control: changing the effort applies to the next request
+// built by the same provider (no rebuild), and clearing it omits the field so
+// the provider's own default wins.
+func TestSetReasoningEffortReachesNextRequest(t *testing.T) {
+	type request struct {
+		effort any
+	}
+	requests := make(chan map[string]any, 4)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		raw, _ := io.ReadAll(r.Body)
+		var body map[string]any
+		if err := json.Unmarshal(raw, &body); err != nil {
+			t.Errorf("decode request: %v", err)
+		}
+		requests <- body
+		writeSSE(t, w, `data: {"choices":[{"delta":{"content":"ok"},"finish_reason":"stop"}]}`+"\n\n",
+			"data: [DONE]\n\n")
+	}))
+	defer srv.Close()
+	p, err := New(Config{BaseURL: srv.URL + "/v1", APIKey: "k", Model: "m", ReasoningEffort: "high"})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	send := func() map[string]any {
+		t.Helper()
+		ch, err := p.Stream(context.Background(), runtime.Request{
+			Messages: []runtime.Message{{Role: runtime.RoleUser, Content: "hi"}},
+		})
+		if err != nil {
+			t.Fatalf("Stream: %v", err)
+		}
+		collect(t, ch)
+		return <-requests
+	}
+	if got := send()["reasoning_effort"]; got != "high" {
+		t.Fatalf("first request reasoning_effort = %v, want high", got)
+	}
+	p.SetReasoningEffort(" low ")
+	if got := p.ReasoningEffort(); got != "low" {
+		t.Fatalf("ReasoningEffort = %q, want low", got)
+	}
+	if got := send()["reasoning_effort"]; got != "low" {
+		t.Fatalf("request after SetReasoningEffort = %v, want low", got)
+	}
+	p.SetReasoningEffort("")
+	if _, present := send()["reasoning_effort"]; present {
+		t.Fatal("cleared effort still serialized reasoning_effort")
+	}
+}

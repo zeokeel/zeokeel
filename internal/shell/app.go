@@ -69,13 +69,14 @@ type App struct {
 	lastDraftScreen  Screen
 	lastDraftSession string
 	draftInitialized bool
-	// homeMode, homePermission and homeModel stage the Home composer's
-	// new-task choices. They apply only to the session the Home composer
-	// creates; they never mutate the last-opened session or the global
-	// default.
+	// homeMode, homePermission, homeModel and homeEffort stage the Home
+	// composer's new-task choices. They apply only to the session the Home
+	// composer creates; they never mutate the last-opened session or the
+	// global default.
 	homeMode       string
 	homePermission string
 	homeModel      string
+	homeEffort     string
 	// attachOpen shows the composer's attachment menu. It is live-only state:
 	// the static fallback never renders it.
 	attachOpen bool

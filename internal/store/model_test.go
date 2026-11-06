@@ -36,7 +36,7 @@ func TestModelCRUDAndDefault(t *testing.T) {
 
 	second, err := s.CreateModel(Model{
 		Name: "Beta", Model: "beta-1", BaseURL: "https://beta.test",
-		APIKey: "sk-beta", ReasoningEffort: "High",
+		APIKey: "sk-beta", ReasoningEffort: "High", ContextWindow: 1000000,
 	})
 	if err != nil {
 		t.Fatalf("CreateModel(second): %v", err)
@@ -53,6 +53,7 @@ func TestModelCRUDAndDefault(t *testing.T) {
 		{modelKey(second.ID, "name"), "Beta"},
 		{modelKey(second.ID, "model"), "beta-1"},
 		{modelKey(second.ID, "reasoning_effort"), "High"},
+		{modelKey(second.ID, "context_window"), "1000000"},
 	} {
 		if got, err := s.GetSetting(want.key); err != nil || got != want.value {
 			t.Errorf("setting %q = %q, %v; want %q", want.key, got, err, want.value)
@@ -74,12 +75,22 @@ func TestModelCRUDAndDefault(t *testing.T) {
 	second.Name = "Beta Pro"
 	second.Model = "beta-2"
 	second.ReasoningEffort = "Medium"
+	second.ContextWindow = 200000
 	updated, err := s.UpdateModel(*second)
 	if err != nil {
 		t.Fatalf("UpdateModel: %v", err)
 	}
-	if updated.Name != "Beta Pro" || updated.Model != "beta-2" {
+	if updated.Name != "Beta Pro" || updated.Model != "beta-2" || updated.ContextWindow != 200000 {
 		t.Fatalf("UpdateModel = %+v", updated)
+	}
+	// Clearing the context window deletes its settings row instead of
+	// persisting a zero.
+	updated.ContextWindow = 0
+	if _, err := s.UpdateModel(*updated); err != nil {
+		t.Fatalf("UpdateModel(clear context): %v", err)
+	}
+	if _, err := s.GetSetting(modelKey(second.ID, "context_window")); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("context_window row after clear = %v, want ErrNotFound", err)
 	}
 	if err := s.SetDefaultModel(second.ID); err != nil {
 		t.Fatalf("SetDefaultModel: %v", err)
@@ -207,4 +218,42 @@ func TestModelListIgnoresUnrelatedSettings(t *testing.T) {
 // that unrelated settings do not leak into a row.
 func modelDetailForTest(m Model) string {
 	return m.Name + m.BaseURL + m.Model + m.ReasoningEffort
+}
+
+// TestModelContextWindowValidationAndTolerance pins the capacity column rules:
+// negative values are rejected on write, while a hand-edited malformed or
+// non-positive settings row reads as unknown instead of hiding the model.
+func TestModelContextWindowValidationAndTolerance(t *testing.T) {
+	s := openTestStore(t)
+	if _, err := s.CreateModel(Model{Name: "Negative", ContextWindow: -1}); !errors.Is(err, ErrInvalidArgument) {
+		t.Fatalf("CreateModel(negative context) = %v, want ErrInvalidArgument", err)
+	}
+	created, err := s.CreateModel(Model{Name: "Tolerant"})
+	if err != nil {
+		t.Fatalf("CreateModel: %v", err)
+	}
+	if err := s.SetSetting(modelKey(created.ID, "context_window"), "not-a-number"); err != nil {
+		t.Fatalf("SetSetting: %v", err)
+	}
+	got, err := s.GetModel(created.ID)
+	if err != nil {
+		t.Fatalf("GetModel: %v", err)
+	}
+	if got.ContextWindow != 0 {
+		t.Fatalf("malformed context_window read as %d, want 0", got.ContextWindow)
+	}
+	if err := s.SetSetting(modelKey(created.ID, "context_window"), "0"); err != nil {
+		t.Fatalf("SetSetting(0): %v", err)
+	}
+	if got, err = s.GetModel(created.ID); err != nil || got.ContextWindow != 0 {
+		t.Fatalf("zero context_window read as %d, %v; want 0", got.ContextWindow, err)
+	}
+	// A stored value survives the ListModels path too.
+	if err := s.SetSetting(modelKey(created.ID, "context_window"), "1048576"); err != nil {
+		t.Fatalf("SetSetting(1048576): %v", err)
+	}
+	list, err := s.ListModels()
+	if err != nil || len(list) != 1 || list[0].ContextWindow != 1048576 {
+		t.Fatalf("ListModels context window = %+v, %v", list, err)
+	}
 }

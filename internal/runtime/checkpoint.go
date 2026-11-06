@@ -106,13 +106,14 @@ func (a *Agent) loadPriorConversation(ctx context.Context, sessionID string) ([]
 // non-positive budget, an empty conversation, or a conversation within budget
 // is a no-op.
 func (a *Agent) compactPrior(ctx context.Context, sessionID string, prior []Message) ([]Message, error) {
-	if a.compactor == nil || a.contextBudget <= 0 || len(prior) == 0 {
+	budget := a.ContextBudget()
+	if a.compactor == nil || budget <= 0 || len(prior) == 0 {
 		return prior, nil
 	}
-	if estimateTokens(prior) <= a.contextBudget {
+	if estimateTokens(prior) <= budget {
 		return prior, nil
 	}
-	return a.compactor.Compact(ctx, sessionID, cloneMessages(prior), a.contextBudget)
+	return a.compactor.Compact(ctx, sessionID, cloneMessages(prior), budget)
 }
 
 // checkpointFor assembles the completed state of a turn: the prior conversation

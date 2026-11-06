@@ -15,6 +15,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/zeokeel/zeokeel/internal/modelcatalog"
 	"github.com/zeokeel/zeokeel/internal/presets"
 	"github.com/zeokeel/zeokeel/internal/runtime"
 	"github.com/zeokeel/zeokeel/internal/state"
@@ -2508,6 +2509,10 @@ const (
 	SessionPermissionSuffix = ".permission"
 	// SessionModelSuffix ends a per-session selected-model setting key.
 	SessionModelSuffix = ".model"
+	// SessionReasoningEffortSuffix ends a per-session reasoning-effort
+	// setting key. It stores the composer's explicit choice; an empty value
+	// means the selected model's own configured effort applies.
+	SessionReasoningEffortSuffix = ".reasoning_effort"
 	// SessionPlanModeSuffix ends a per-session plan-mode setting key.
 	SessionPlanModeSuffix = ".plan_mode"
 )
@@ -2539,6 +2544,13 @@ func SessionPermissionKey(sessionID string) string {
 // default used by new sessions and by sessions without a choice.
 func SessionModelKey(sessionID string) string {
 	return SessionModePrefix + sessionID + SessionModelSuffix
+}
+
+// SessionReasoningEffortKey renders the settings key that stores one
+// session's explicit reasoning-effort choice. An empty value means "use the
+// selected model's configured effort", which keeps a model switch honest.
+func SessionReasoningEffortKey(sessionID string) string {
+	return SessionModePrefix + sessionID + SessionReasoningEffortSuffix
 }
 
 // Permission defaults a new session may inherit.
@@ -3537,6 +3549,10 @@ func (c *Controller) SetSessionModel(sessionID, modelID string) error {
 	if err := c.store.SetSetting(SessionModelKey(sessionID), modelID); err != nil {
 		return fmt.Errorf("session: set session model: %w", err)
 	}
+	// A model switch adopts the new model's own configured effort; the old
+	// explicit level may not exist on the new model, so it is cleared rather
+	// than carried over.
+	_ = c.store.SetSetting(SessionReasoningEffortKey(sessionID), "")
 	c.mu.Lock()
 	current := c.currentID
 	c.mu.Unlock()
@@ -3546,46 +3562,52 @@ func (c *Controller) SetSessionModel(sessionID, modelID string) error {
 	return nil
 }
 
-// applySessionModel points the running agent at sessionID's selected model for
-// the next request. A session without its own choice falls back to the global
-// default, so switching from a session that picked a model back to one that
-// did not cannot leave the agent on the previous session's model.
+// SessionReasoningEffort returns the reasoning effort sessionID explicitly
+// selected from the composer, or "" when the selected model's configured
+// effort applies.
+func (c *Controller) SessionReasoningEffort(sessionID string) string {
+	if strings.TrimSpace(sessionID) == "" || c.store == nil {
+		return ""
+	}
+	raw, err := c.store.GetSetting(SessionReasoningEffortKey(sessionID))
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(raw)
+}
+
+// SetSessionReasoningEffort persists one session's reasoning-effort choice and
+// applies it to the running agent when that session is current. An empty
+// effort clears the explicit choice so the selected model's configured effort
+// applies again. The model configuration in Settings > Models is untouched.
+func (c *Controller) SetSessionReasoningEffort(sessionID, effort string) error {
+	sessionID = strings.TrimSpace(sessionID)
+	if sessionID == "" {
+		return fmt.Errorf("%w: set session reasoning effort: empty session", ErrInvalidArgument)
+	}
+	effort = strings.TrimSpace(effort)
+	if effort != "" && !modelcatalog.ValidEffort(effort) {
+		return fmt.Errorf("%w: set session reasoning effort: unknown effort %q", ErrInvalidArgument, effort)
+	}
+	if err := c.store.SetSetting(SessionReasoningEffortKey(sessionID), effort); err != nil {
+		return fmt.Errorf("session: set session reasoning effort: %w", err)
+	}
+	c.mu.Lock()
+	current := c.currentID
+	c.mu.Unlock()
+	if current == sessionID {
+		return c.applySessionModel(sessionID)
+	}
+	return nil
+}
+
+// applySessionModel points the running agent at sessionID's selected model, its
+// reasoning effort and its context budget for the next request. A session
+// without its own choice falls back to the global default, so switching from a
+// session that picked a model back to one that did not cannot leave the agent
+// on the previous session's model.
 func (c *Controller) applySessionModel(sessionID string) error {
-	name := ""
-	// An explicit per-session model wins; otherwise the selected preset's
-	// default model applies (FP-06); otherwise the global default.
-	if id := c.SessionModelID(sessionID); id != "" {
-		if model, err := c.store.GetModel(id); err == nil {
-			name = strings.TrimSpace(model.Model)
-			if name == "" {
-				name = strings.TrimSpace(model.Name)
-			}
-		}
-	}
-	if name == "" {
-		if presetModel := c.SessionPresetModel(sessionID); presetModel != "" {
-			if model, err := c.store.GetModel(presetModel); err == nil {
-				name = strings.TrimSpace(model.Model)
-				if name == "" {
-					name = strings.TrimSpace(model.Name)
-				}
-			} else {
-				// Not a stored model row: treat the preset value as a wire model
-				// name (common for user presets naming provider models).
-				name = presetModel
-			}
-		}
-	}
-	if name == "" {
-		if id := c.SessionModelOrDefault(sessionID); id != "" {
-			if model, err := c.store.GetModel(id); err == nil {
-				name = strings.TrimSpace(model.Model)
-				if name == "" {
-					name = strings.TrimSpace(model.Name)
-				}
-			}
-		}
-	}
+	record, name := c.selectedSessionModel(sessionID)
 	if name == "" {
 		return nil
 	}
@@ -3603,7 +3625,72 @@ func (c *Controller) applySessionModel(sessionID string) error {
 	if agent == nil {
 		return nil
 	}
-	return agent.SetModel(name)
+	if err := agent.SetModel(name); err != nil {
+		return err
+	}
+	// The composer's explicit reasoning strength wins over the model's
+	// configured default; an empty value still reaches the provider so a
+	// session that falls back to a model without an effort cannot inherit the
+	// previous model's level.
+	effort := c.SessionReasoningEffort(sessionID)
+	if effort == "" && record != nil {
+		effort = strings.TrimSpace(record.ReasoningEffort)
+	}
+	_ = agent.SetReasoningEffort(effort)
+	// A model with a known context window sizes this session's compaction
+	// budget, so the runtime uses the model's real capacity instead of the
+	// global fallback. A model without one restores the build-time budget.
+	if record != nil {
+		agent.SetContextBudget(ContextBudgetForWindow(record.ContextWindow))
+	}
+	return nil
+}
+
+// selectedSessionModel resolves the model record a session runs and the wire
+// model name to send. An explicit per-session model wins; otherwise the
+// selected preset's default model applies (FP-06); otherwise the global
+// default. The record is nil when only a wire name is available (a preset that
+// names a provider model without a stored row).
+func (c *Controller) selectedSessionModel(sessionID string) (*store.Model, string) {
+	if id := c.SessionModelID(sessionID); id != "" {
+		if model, err := c.store.GetModel(id); err == nil {
+			return model, modelWireName(*model)
+		}
+	}
+	if presetModel := c.SessionPresetModel(sessionID); presetModel != "" {
+		if model, err := c.store.GetModel(presetModel); err == nil {
+			return model, modelWireName(*model)
+		}
+		// Not a stored model row: treat the preset value as a wire model name
+		// (common for user presets naming provider models).
+		return nil, presetModel
+	}
+	if id := c.SessionModelOrDefault(sessionID); id != "" {
+		if model, err := c.store.GetModel(id); err == nil {
+			return model, modelWireName(*model)
+		}
+	}
+	return nil, ""
+}
+
+// modelWireName is the model id to send for a stored model row.
+func modelWireName(model store.Model) string {
+	if name := strings.TrimSpace(model.Model); name != "" {
+		return name
+	}
+	return strings.TrimSpace(model.Name)
+}
+
+// ContextBudgetForWindow converts a model's combined context window into the
+// prompt budget compaction uses. A fifth of the window is reserved for the
+// model's own output and the system prompt, mirroring the framework's
+// compaction headroom instead of letting a 1M-token window fill with history
+// alone. A non-positive window yields 0 (keep the configured fallback).
+func ContextBudgetForWindow(window int) int {
+	if window <= 0 {
+		return 0
+	}
+	return window * 4 / 5
 }
 
 // Goal returns a copy of the current session's goal, or nil when the goal tool
@@ -3875,6 +3962,7 @@ func (c *Controller) DeleteSession(ctx context.Context, id string) error {
 	_ = c.store.SetSetting(SessionPermissionKey(id), "")
 	_ = c.store.SetSetting(SessionModeKey(id), "")
 	_ = c.store.SetSetting(SessionModelKey(id), "")
+	_ = c.store.SetSetting(SessionReasoningEffortKey(id), "")
 	_ = c.store.SetSetting(SessionPlanModeKey(id), "")
 	_ = c.store.SetSetting(SessionGoalRoundsKey(id), "")
 	_ = c.store.SetSetting(autoTitleKey(id), "")
@@ -4035,6 +4123,7 @@ func (c *Controller) DeleteWorkspace(ctx context.Context, id string) error {
 		_ = c.store.SetSetting(SessionPermissionKey(sess.ID), "")
 		_ = c.store.SetSetting(SessionModeKey(sess.ID), "")
 		_ = c.store.SetSetting(SessionModelKey(sess.ID), "")
+		_ = c.store.SetSetting(SessionReasoningEffortKey(sess.ID), "")
 		_ = c.store.SetSetting(SessionPlanModeKey(sess.ID), "")
 		_ = c.store.SetSetting(SessionGoalRoundsKey(sess.ID), "")
 	}

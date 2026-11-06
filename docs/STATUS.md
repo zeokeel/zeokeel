@@ -1,6 +1,6 @@
 # 状态（唯一状态真源）
 
-> 更新：2026-11-06（Round 3 收尾）· 基线 `HEAD=20e98d4`；此后并发提交以 `git log` 为准。
+> 更新：2026-11-06（Round 3 收尾 + 模型配置/推理强度 parity）· 基线 `HEAD=20e98d4`；此后并发提交以 `git log` 为准。
 > 本文件只写**当前状态与验证结果**，不写过程。历史流水已归档：[docs/history/STATUS-journal.md](history/STATUS-journal.md)（不再维护）。
 > 缺陷状态：[docs/BUGS.md](BUGS.md) · 审计证据：[docs/audit/](audit/) · 已知限制：[docs/design/known-limitations.md](design/known-limitations.md) · 规划：[docs/PLAN.md](PLAN.md)。
 
@@ -36,6 +36,13 @@
 - **产品功能**：FP-06 声明式 Presets（`internal/presets` + Presets 页 + 用户指南）；FP-16 `ask_user` 交互会话阻塞等待回答（headless/ACP 降级 pending）；自动更新 GUI 检查+下载+安装（install-on-restart；app `update_install.go`）；全局快捷键：Windows + Linux/X11 已实现（Linux 用 purego dlopen libX11，无 cgo）；macOS Carbon/purego 代码已实现（compile-only，待真机验证）；Wayland DEFERRED；ACP v1 最小服务器 + `zeokeel acp` + adapter/e2e。
 - **数据/工程**：AR-07 `messages.ordinal` 持久化排序；AR-09 schema v2（有序迁移 + `backups/` 快照 + 旧版 downgrade 拒绝）；AR-20 `scrubEnv`/DDL 重复收敛；AR-05 快照折叠收敛（Controller 单一折叠，`state.Projector` deprecated，每事件折叠 2→1；app/services.go 4 行死代码已删）；UX-04 设置窗重绘 **CONFIRMED FIXED**（Linux/Xvfb 无 WM；真实 WM spot check）；AR-04 **IN PROGRESS**：P1（read-model/async 拆分）完成 + wave2/3 模块化；i18n 抽离完成（新包 `internal/i18n` 552 生产行；shell `i18n.go` 660→190、生产 LOC −470）；P2–P4 按 `docs/design/shell-refactor-plan.md` 计划（未实施）。
 - **发布**：`.github/workflows/release.yml`（tag→三平台矩阵包+SHA256SUMS+GitHub Release）+ `make release`；三平台交叉编译持续验证。
+
+## 2.3 模型配置与推理强度 parity（工作树）
+
+- **内置模型目录**（`internal/modelcatalog`）：DeepSeek（`deepseek-flash` / `deepseek-v4-pro`，1,000,000 上下文、384,000 输出，推理档 off/low/high/max）、OpenAI、Moonshot AI（含 CN）、Z.AI、Groq、Together、OpenRouter、Ollama（本地免 key）。设置 › 模型 › 添加模型默认打开在 DeepSeek 配置（端点、模型 id、上下文窗口、默认推理强度、名称均已预填），只需粘贴 API key；其他供应商与自定义端点一次切换即可，内置模型也可改选目录中的其他模型。
+- **composer 推理强度菜单**：输入框下方模型菜单新增「推理强度」段（模型默认 + 该模型公布的档位；无论文模型不显示）。Session 级选择持久化到 `session.<id>.reasoning_effort` 并经 `Provider.SetReasoningEffort` 下一回合生效（无需重建 agent）；Home 的选择暂存到新会话；切换模型自动回到该模型默认档。
+- **上下文窗口**：`store.Model.context_window`（Settings 行显示 `1M ctx` 等）；会话 agent 的压缩预算按模型窗口的 80% 设置（预留输出/系统提示），模型无窗口时回退全局 `agent.context_budget_tokens`。
+- 新增/更新测试：`internal/modelcatalog`、store 上下文窗口往返/容错、provider 动态强度、runtime `SetReasoningEffort`/`SetContextBudget`、session 会话强度与预算、shell 对话框目录预填/校验、composer 强度菜单与 Home 暂存。
 
 ## 3. 门禁（"绿"的定义）
 

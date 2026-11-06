@@ -12,6 +12,7 @@ import (
 	"github.com/egoist/mygo/ui"
 
 	"github.com/zeokeel/zeokeel/internal/design"
+	"github.com/zeokeel/zeokeel/internal/modelcatalog"
 	"github.com/zeokeel/zeokeel/internal/session"
 	"github.com/zeokeel/zeokeel/internal/state"
 	"github.com/zeokeel/zeokeel/internal/store"
@@ -240,9 +241,9 @@ func (a *App) permissionMenu(c *ui.Context, t *design.Tokens) {
 }
 
 // liveModelMenuBadge is the composer's model selector. It shows the selected
-// default, its configured reasoning effort and a chevron, and opens the model
-// list. Like the access chip it keeps its own popover (the rows carry model
-// details) and is restyled with the brand chip look.
+// model, its effective reasoning effort and a chevron, and opens the model and
+// reasoning-strength menu. Like the access chip it keeps its own popover (the
+// rows carry model details) and is restyled with the brand chip look.
 func (a *App) liveModelMenuBadge(c *ui.Context, t *design.Tokens) {
 	th := t.Theme()
 	if a.Ctrl == nil {
@@ -251,21 +252,22 @@ func (a *App) liveModelMenuBadge(c *ui.Context, t *design.Tokens) {
 	}
 	st := a.liveMenus()
 	modelLabel := a.composerModelLabel()
+	effort := a.composerEffort()
 	badgeAccessible := a.menuText("Select model, current "+modelLabel, "选择模型，当前 "+modelLabel)
-	if model := a.composerModel(); model != nil && model.ReasoningEffort != "" {
-		badgeAccessible += a.menuText(", reasoning effort "+model.ReasoningEffort, "，推理强度 "+model.ReasoningEffort)
+	if effort != "" {
+		badgeAccessible += a.menuText(", reasoning effort "+effort, "，推理强度 "+effort)
 	}
 	badge := homeChip(c, t).
 		Label(badgeAccessible).Value(modelLabel).Role(ui.RolePopUpButton).Focusable()
 	badge.Children(func() {
 		ui.Text(c, modelLabel).FontSize(13).FixedLineHeight(20).
 			TextColor(t.LabelSecondary).MaxLines(1)
-		if model := a.composerModel(); model != nil && model.ReasoningEffort != "" {
+		if effort != "" {
 			tag := homeTagAccent(t)
 			tagRow := ui.Row(c).Height(th.Space(5)).PaddingX(th.Space(2)).
 				Radius(design.RadiusMax).Background(tag.Alpha(0.10))
 			tagRow.Children(func() {
-				ui.Text(c, model.ReasoningEffort).FontSize(11).FixedLineHeight(17).
+				ui.Text(c, effort).FontSize(11).FixedLineHeight(17).
 					FontWeight(500).TextColor(tag)
 			})
 		}
@@ -308,8 +310,10 @@ func (a *App) modelPickerMenu(c *ui.Context, t *design.Tokens) {
 				}
 				if a.backgroundScreen() == Home {
 					// Stage for the next created session; the global default in
-					// Settings > Models is not changed from the composer.
+					// Settings > Models is not changed from the composer. A model
+					// switch adopts the new model's own configured effort.
 					a.homeModel = model.ID
+					a.homeEffort = ""
 					return
 				}
 				if id := a.Ctrl.CurrentSessionID(); id != "" {
@@ -319,7 +323,31 @@ func (a *App) modelPickerMenu(c *ui.Context, t *design.Tokens) {
 				}
 			})
 		}
+		a.modelEffortMenu(c, t)
 	})
+}
+
+// modelEffortMenu is the composer menu's reasoning-strength section, under the
+// model rows: "Model default" clears an explicit choice, then each level the
+// selected model publishes. The section only appears while that model has
+// reasoning levels, so a non-reasoning model offers no empty control.
+func (a *App) modelEffortMenu(c *ui.Context, t *design.Tokens) {
+	options := a.composerEffortOptions()
+	if len(options) == 0 {
+		return
+	}
+	current := a.composerEffort()
+	ui.Text(c, a.T("models.reasoning_effort")).FontSize(11).FixedLineHeight(16).
+		TextColor(t.LabelTertiary).Padding(design.Space1, design.Space2)
+	a.popoverMenuRow(c, t, a.T("composer.effort_model_default"), "", current == "", nil, func() {
+		a.applyComposerEffort(c, "")
+	})
+	for _, option := range options {
+		option := option
+		a.popoverMenuRow(c, t, modelcatalog.EffortLabel(option), "", current == option, nil, func() {
+			a.applyComposerEffort(c, option)
+		})
+	}
 }
 
 // homeWorkspacePicker lists the known workspaces and switches to the clicked

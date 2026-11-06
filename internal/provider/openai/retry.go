@@ -104,7 +104,7 @@ func retryableStreamError(err error) bool {
 
 // delayFor computes the exponential backoff for one retry, honoring a
 // provider Retry-After header when it is valid and within MaxDelay.
-func (p Provider) delayFor(attempt int, retryAfter string) time.Duration {
+func (p *Provider) delayFor(attempt int, retryAfter string) time.Duration {
 	if d := parseRetryAfter(retryAfter); d > 0 {
 		if d > p.retry.MaxDelay {
 			return p.retry.MaxDelay

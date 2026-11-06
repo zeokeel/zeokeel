@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"sort"
+	"strconv"
 	"strings"
 )
 
@@ -20,6 +21,7 @@ import (
 //	model.<id>.api_key
 //	model.<id>.model
 //	model.<id>.reasoning_effort
+//	model.<id>.context_window
 //	model.default            -- the selected model's id
 type Model struct {
 	ID              string `json:"id"`
@@ -28,6 +30,11 @@ type Model struct {
 	APIKey          string `json:"api_key"`
 	Model           string `json:"model"`
 	ReasoningEffort string `json:"reasoning_effort"`
+	// ContextWindow is the model's combined request/response capacity in
+	// tokens, 0 when unknown. The runtime derives a session's compaction
+	// budget from it; the Add model dialog fills it from the built-in
+	// provider catalog when the user picks a published model.
+	ContextWindow int `json:"context_window"`
 	// Default is derived (it is not a stored field): true when the model is
 	// the selected default.
 	Default bool `json:"default"`
@@ -51,7 +58,7 @@ const (
 )
 
 // modelFields is the persisted field order used by create and update.
-var modelFields = []string{"name", "base_url", "api_key", "model", "reasoning_effort"}
+var modelFields = []string{"name", "base_url", "api_key", "model", "reasoning_effort", "context_window"}
 
 // modelKey renders the settings key for one field of a model.
 func modelKey(id, field string) string {
@@ -109,6 +116,8 @@ func (s *Store) ListModels() ([]Model, error) {
 			m.Model = value
 		case "reasoning_effort":
 			m.ReasoningEffort = value
+		case "context_window":
+			m.ContextWindow = parseContextWindow(value)
 		}
 	}
 
@@ -125,6 +134,26 @@ func (s *Store) ListModels() ([]Model, error) {
 		return list[i].ID < list[j].ID
 	})
 	return list, nil
+}
+
+// parseContextWindow reads a persisted token capacity. Malformed or
+// non-positive values read as unknown (0) instead of failing the whole list:
+// a hand-edited settings row must not hide every model.
+func parseContextWindow(value string) int {
+	n, err := strconv.Atoi(strings.TrimSpace(value))
+	if err != nil || n <= 0 {
+		return 0
+	}
+	return n
+}
+
+// formatContextWindow renders ContextWindow for its settings key; unknown (0)
+// writes no row so a cleared value does not linger.
+func formatContextWindow(n int) string {
+	if n <= 0 {
+		return ""
+	}
+	return strconv.Itoa(n)
 }
 
 // modelSortKey is the display string a model is sorted by.
@@ -151,7 +180,7 @@ func parseModelKey(key string) (id, field string, ok bool) {
 	}
 	id, field = rest[:dot], rest[dot+1:]
 	switch field {
-	case "name", "base_url", "api_key", "model", "reasoning_effort":
+	case "name", "base_url", "api_key", "model", "reasoning_effort", "context_window":
 		return id, field, true
 	default:
 		return "", "", false
@@ -193,6 +222,8 @@ func (s *Store) GetModel(id string) (*Model, error) {
 			m.Model = value
 		case "reasoning_effort":
 			m.ReasoningEffort = value
+		case "context_window":
+			m.ContextWindow = parseContextWindow(value)
 		}
 	}
 	if err := rows.Err(); err != nil {
@@ -218,6 +249,9 @@ func (s *Store) CreateModel(m Model) (*Model, error) {
 	m.Name = strings.TrimSpace(m.Name)
 	if m.Name == "" {
 		return nil, fmt.Errorf("%w: create model: empty name", ErrInvalidArgument)
+	}
+	if m.ContextWindow < 0 {
+		return nil, fmt.Errorf("%w: create model: negative context window %d", ErrInvalidArgument, m.ContextWindow)
 	}
 	if m.ID == "" {
 		id, err := newID()
@@ -269,6 +303,9 @@ func (s *Store) UpdateModel(m Model) (*Model, error) {
 	m.Name = strings.TrimSpace(m.Name)
 	if m.Name == "" {
 		return nil, fmt.Errorf("%w: update model: empty name", ErrInvalidArgument)
+	}
+	if m.ContextWindow < 0 {
+		return nil, fmt.Errorf("%w: update model: negative context window %d", ErrInvalidArgument, m.ContextWindow)
 	}
 	if err := validateModelID(m.ID); err != nil {
 		return nil, fmt.Errorf("store: update model: %w", err)
@@ -411,6 +448,7 @@ func writeModelTx(tx *sql.Tx, m Model) error {
 		{"api_key", m.APIKey},
 		{"model", m.Model},
 		{"reasoning_effort", m.ReasoningEffort},
+		{"context_window", formatContextWindow(m.ContextWindow)},
 	}
 	for _, v := range values {
 		if err := writeSettingTx(tx, modelKey(m.ID, v.field), strings.TrimSpace(v.value)); err != nil {

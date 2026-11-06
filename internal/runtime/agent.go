@@ -201,11 +201,12 @@ type agentState struct {
 // A queued turn starts as soon as the previous one finishes; each Run call still
 // gets its own session id and output channel.
 type Agent struct {
-	registry      *Registry
-	history       History
-	compactor     Compactor
-	contextBudget int
-	checkpoints   CheckpointStore
+	registry             *Registry
+	history              History
+	compactor            Compactor
+	contextBudget        atomic.Int64
+	defaultContextBudget int
+	checkpoints          CheckpointStore
 
 	name          string
 	instrFunc     func() string
@@ -312,7 +313,6 @@ func New(cfg Config) (*Agent, error) {
 		registry:         registry,
 		history:          cfg.History,
 		compactor:        cfg.Compactor,
-		contextBudget:    cfg.ContextBudget,
 		checkpoints:      cfg.CheckpointStore,
 		name:             name,
 		instrFunc:        cfg.InstructionFunc,
@@ -332,6 +332,8 @@ func New(cfg Config) (*Agent, error) {
 		provider:         cfg.Provider,
 		subagents:        make(map[string]*subagentEntry),
 	}
+	a.defaultContextBudget = cfg.ContextBudget
+	a.contextBudget.Store(int64(cfg.ContextBudget))
 
 	snap := agentSnapshot{
 		mode:        mode,
@@ -443,6 +445,54 @@ func (a *Agent) SetModel(name string) error {
 	// stale entries are also rejected by the generation check in childAgent.
 	a.clearSubagents()
 	return nil
+}
+
+// ReasoningEffortSetter is implemented by providers that accept a per-request
+// reasoning effort, such as the OpenAI-compatible provider. The shell's
+// per-session reasoning-strength control uses it to retarget the next request
+// without rebuilding the agent.
+type ReasoningEffortSetter interface {
+	SetReasoningEffort(effort string)
+}
+
+// SetReasoningEffort changes the reasoning effort the provider sends from the
+// next request on; an empty effort restores the provider's own default. It is
+// a no-op error for provider-backed agents whose provider cannot retarget a
+// request (the eino test seam and non-OpenAI providers), so a caller that also
+// changed the model can keep the turn running.
+func (a *Agent) SetReasoningEffort(effort string) error {
+	if a == nil {
+		return errors.New("runtime: nil agent")
+	}
+	setter, ok := a.provider.(ReasoningEffortSetter)
+	if !ok {
+		return errors.New("runtime: SetReasoningEffort requires a provider that supports it")
+	}
+	setter.SetReasoningEffort(strings.TrimSpace(effort))
+	return nil
+}
+
+// SetContextBudget replaces the prompt budget compaction uses for the next
+// turn. Positive tokens are a model's derived budget; 0 restores the build-time
+// configuration, which is what a session whose model has no known context
+// window falls back to. Negative values are ignored.
+func (a *Agent) SetContextBudget(tokens int) {
+	if a == nil || tokens < 0 {
+		return
+	}
+	if tokens == 0 {
+		a.contextBudget.Store(int64(a.defaultContextBudget))
+		return
+	}
+	a.contextBudget.Store(int64(tokens))
+}
+
+// ContextBudget reports the prompt budget compaction currently uses.
+func (a *Agent) ContextBudget() int {
+	if a == nil {
+		return 0
+	}
+	return int(a.contextBudget.Load())
 }
 
 // MaxIterations returns the configured per-turn ceiling; 0 means no fixed

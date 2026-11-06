@@ -205,8 +205,9 @@ func (a *App) homeModelID() string {
 	return ""
 }
 
-// applyHomeComposerChoices writes the Home composer's staged mode, access and
-// model onto a freshly created session. It touches only that new session.
+// applyHomeComposerChoices writes the Home composer's staged mode, access,
+// model and reasoning effort onto a freshly created session. It touches only
+// that new session.
 func (a *App) applyHomeComposerChoices(sessionID string) {
 	if a.Ctrl == nil || strings.TrimSpace(sessionID) == "" {
 		return
@@ -224,5 +225,10 @@ func (a *App) applyHomeComposerChoices(sessionID string) {
 	}
 	if model := strings.TrimSpace(a.homeModel); model != "" {
 		_ = a.Ctrl.SetSessionModel(sessionID, model)
+	}
+	// After the model: switching models clears an explicit effort, and the
+	// staged Home choice is the new session's explicit level.
+	if effort := strings.TrimSpace(a.homeEffort); effort != "" {
+		_ = a.Ctrl.SetSessionReasoningEffort(sessionID, effort)
 	}
 }

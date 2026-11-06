@@ -13,6 +13,7 @@
 | 工具集 | 约 37 个（fs/bash/terminal/jobs/pwsh/web/todo/goal/schedule/skill/subagent/subagent-control/workflow/ralph/present/ask_user/session-query/worktree/inspect/report/MCP…） | 约 34 个，覆盖除 LSP/computer-use 外全部（**PTC 已移除：产品决定明确不做**）；Creator 设置工具已接入；shell 栈按平台门控（Windows `pwsh` / POSIX `bash`，对齐 DSH，见 [ADR 0009](decisions/0009-platform-shell-stacks.md)） | ⚠️ 基本齐 |
 | 审批/权限 | Full/Workspace/Read-only/Ask/Auto-review EXP | Full/Workspace/Read-only/Ask + Always allow；**Auto-review EXP 已实现**（`internal/runtime/review.go` 的 `LLMToolReviewer`，15s 超时回退人工；app 接线 + 审批 UI 测试） | ✅ 基本对齐 |
 | 上下文压缩 | 自动压缩 + 工具结果裁剪 + LLM 摘要 | `LLMCompactor`（真实模型摘要 + 20s 摘要超时后回退 `WindowCompactor` + 旧工具结果裁剪），ContextBudget 24000，app 已接线；压缩在回合 goroutine 内执行，不阻塞 UI/Submit | ✅ 已接线 |
+| 模型配置与选择 | 内置供应商/模型目录（DeepSeek 等），模型带上下文窗口与推理等级；composer 模型 + 推理强度菜单，按会话生效 | 内置 `internal/modelcatalog`（DeepSeek、OpenAI、Moonshot AI(CN)、Z.AI、Groq、Together、OpenRouter、Ollama）；添加模型只需填 API key，端点/模型/上下文窗口/默认强度按目录自动填；composer 模型菜单新增推理强度段（Home 暂存、Session 持久化，下一回合生效）；模型上下文窗口自动决定该会话压缩预算（80%） | ✅ 已对齐（OpenAI-compatible 路由） |
 | 崩溃恢复/checkpoint | checkpoint + 断点续跑 | `CheckpointStore` 已接 app 的 SQLite checkpoints 表：每成功回合写入（压缩后 prior + 本回合消息），独立冷启动可恢复；生产以 History 为准，checkpoint 作为镜像 | ✅ 已接线（回合边界） |
 | Agent 模式 | **Standard / PTC / Minimal / Creator** | **Standard / Minimal / Creator**（工具集/prompt 策略/切换重建已对齐；Deep/Supervisor/Plan-Execute 仅旧会话别名）；**PTC ❌ 明确不做**（2026-11-06 用户决策，模式与入口已移除） | ⚠️ 3/4（PTC 不做） |
 | 子代理 / Agent Team | 同步+异步、消息/中断、team 工具 | 同步 subagent + 异步 manager/team 工具 | ✅ 基本 |

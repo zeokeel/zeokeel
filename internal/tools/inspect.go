@@ -304,6 +304,9 @@ func (t *inspectTool) settings() (map[string]string, error) {
 		if model.ReasoningEffort != "" {
 			out[prefix+"reasoning_effort"] = truncateBytes(model.ReasoningEffort, inspectSettingValueBytes, "value truncated")
 		}
+		if model.ContextWindow > 0 {
+			out[prefix+"context_window"] = strconv.Itoa(model.ContextWindow)
+		}
 		if model.APIKey != "" {
 			out[prefix+"api_key"] = redactedValue
 		}

@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -13,6 +14,7 @@ import (
 	"github.com/egoist/mygo/ui"
 
 	"github.com/zeokeel/zeokeel/internal/design"
+	"github.com/zeokeel/zeokeel/internal/modelcatalog"
 	"github.com/zeokeel/zeokeel/internal/store"
 	"github.com/zeokeel/zeokeel/internal/updater"
 )
@@ -28,8 +30,13 @@ const (
 )
 
 // modelDraft is the edit state of the Add/Edit model dialog.
+//
+// preset is a modelcatalog provider id or customProviderID; presetModel is the
+// selected built-in model's id ("" for a hand-written custom model id).
+// contextWindow is kept as text while the user types so an empty field means
+// "unknown" and a partial number is not lost between frames.
 type modelDraft struct {
-	id, name, baseURL, apiKey, model, effort, preset string
+	id, name, baseURL, apiKey, model, effort, contextWindow, preset, presetModel string
 }
 
 // modelProbeState is the Add model dialog's connection check as the frame
@@ -42,24 +49,16 @@ type modelProbeState struct {
 	message string
 }
 
-// providerPreset fills the Add model dialog's wire fields for one known
-// OpenAI-compatible provider. name is the product name (the same in every
-// language); an empty name is the custom endpoint, whose label is translated.
-type providerPreset struct {
-	id      string
-	name    string
-	baseURL string
-	model   string
-	keyHint string
-}
+// customProviderID is the Add model dialog's row for an endpoint that is not
+// one of the built-in catalog providers.
+const customProviderID = "custom"
 
-// providerPresets are the service presets the Add model dialog offers. They
-// only pre-fill Base URL and Model; the key stays whatever the user types.
-var providerPresets = []providerPreset{
-	{id: "custom", keyHint: "sk-..."},
-	{id: "deepseek", name: "DeepSeek", baseURL: "https://api.deepseek.com", model: "deepseek-chat", keyHint: "sk-..."},
-	{id: "openai", name: "OpenAI", baseURL: "https://api.openai.com/v1", model: "gpt-4o-mini", keyHint: "sk-..."},
-	{id: "ollama", name: "Ollama", baseURL: "http://localhost:11434/v1", model: "llama3.2", keyHint: ""},
+// dialogProviders returns the built-in provider choices the Add/Edit model
+// dialog offers, in catalog order. Each choice fills the endpoint, key hint and
+// its first published model, so DeepSeek and the other common providers need
+// only a pasted key.
+func dialogProviders() []modelcatalog.Provider {
+	return modelcatalog.Providers()
 }
 
 // probeModelConnection is the "Test connection" check: an OpenAI-compatible
@@ -337,7 +336,7 @@ func modelDisplayName(model store.Model) string {
 
 // modelDetail is the second line of a model row.
 func modelDetail(model store.Model) string {
-	parts := make([]string, 0, 3)
+	parts := make([]string, 0, 4)
 	if model.Model != "" {
 		parts = append(parts, model.Model)
 	}
@@ -347,19 +346,66 @@ func modelDetail(model store.Model) string {
 	if model.ReasoningEffort != "" {
 		parts = append(parts, model.ReasoningEffort)
 	}
+	if model.ContextWindow > 0 {
+		parts = append(parts, formatTokenCount(model.ContextWindow)+" ctx")
+	}
 	if len(parts) == 0 {
 		return model.ID
 	}
 	return strings.Join(parts, " · ")
 }
 
-// beginModelAdd opens the dialog in create mode. The provider preset starts on
-// the custom endpoint (fields empty) so nothing is prefilled behind the user's
-// back; choosing a preset fills Base URL and Model.
+// formatTokenCount renders a token capacity compactly for a model row:
+// 1000000 -> "1M", 262144 -> "262k", 512 -> "512".
+func formatTokenCount(tokens int) string {
+	if tokens >= 1000000 {
+		value := float64(tokens) / 1000000
+		if value == float64(int(value)) {
+			return strconv.Itoa(int(value)) + "M"
+		}
+		return strings.TrimRight(strings.TrimRight(strconv.FormatFloat(value, 'f', 1, 64), "0"), ".") + "M"
+	}
+	if tokens >= 1000 {
+		return strconv.Itoa(tokens/1000) + "k"
+	}
+	return strconv.Itoa(tokens)
+}
+
+// formatContextWindowDraft renders a stored capacity for the dialog's text
+// field; an unknown capacity leaves the field empty.
+func formatContextWindowDraft(tokens int) string {
+	if tokens <= 0 {
+		return ""
+	}
+	return strconv.Itoa(tokens)
+}
+
+// parseContextWindowDraft reads the dialog's context-window field. An empty
+// field means unknown (0); anything else must be a positive whole number.
+func parseContextWindowDraft(raw string) (int, error) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return 0, nil
+	}
+	tokens, err := strconv.Atoi(raw)
+	if err != nil || tokens <= 0 {
+		return 0, fmt.Errorf("invalid context window %q", raw)
+	}
+	return tokens, nil
+}
+
+// beginModelAdd opens the dialog in create mode on the built-in DeepSeek
+// configuration (the catalog's first provider): endpoint, first published
+// model, context window and default reasoning effort are prefilled, so a new
+// user only pastes an API key. Any other provider, including a custom endpoint,
+// is one pick away.
 func (a *App) beginModelAdd() {
 	a.resetModelProbe()
 	st := a.shellUI()
-	st.modelDraft = modelDraft{preset: "custom"}
+	st.modelDraft = modelDraft{preset: customProviderID}
+	if provider, ok := modelcatalog.LookupProvider("deepseek"); ok {
+		a.applyProviderPreset(provider)
+	}
 	st.modelDialog = true
 }
 
@@ -372,48 +418,91 @@ func (a *App) beginModelEdit(model store.Model) {
 	st.modelDraft = modelDraft{
 		id: model.ID, name: model.Name, baseURL: model.BaseURL,
 		apiKey: model.APIKey, model: model.Model, effort: model.ReasoningEffort,
-		preset: presetForBaseURL(model.BaseURL),
+		contextWindow: formatContextWindowDraft(model.ContextWindow),
+		preset:        presetForBaseURL(model.BaseURL),
+		presetModel:   presetModelFor(model.BaseURL, model.Model),
 	}
 	st.modelDialog = true
 }
 
-// presetForBaseURL returns the provider preset whose Base URL matches, or the
+// presetForBaseURL returns the catalog provider whose Base URL matches, or the
 // custom endpoint.
 func presetForBaseURL(baseURL string) string {
-	base := strings.TrimRight(strings.TrimSpace(baseURL), "/")
-	if base == "" {
-		return "custom"
+	if provider, ok := modelcatalog.ProviderForBaseURL(baseURL); ok {
+		return provider.ID
 	}
-	for _, preset := range providerPresets {
-		if preset.baseURL != "" && strings.TrimRight(preset.baseURL, "/") == base {
-			return preset.id
-		}
-	}
-	return "custom"
+	return customProviderID
 }
 
-// providerPresetLabel is a preset's visible name: the product name, or the
-// translated "Custom" for the custom endpoint.
-func (a *App) providerPresetLabel(preset providerPreset) string {
-	if preset.name != "" {
-		return preset.name
+// presetModelFor returns the built-in model id matching a saved endpoint and
+// wire model, or "" for a hand-written model.
+func presetModelFor(baseURL, wireModel string) string {
+	provider, ok := modelcatalog.ProviderForBaseURL(baseURL)
+	if !ok {
+		return ""
+	}
+	if model, ok := modelcatalog.LookupModel(provider.ID, wireModel); ok {
+		return model.ID
+	}
+	return ""
+}
+
+// providerPresetLabel is a provider's visible name: the catalog's product name,
+// or the translated "Custom" for the custom endpoint.
+func (a *App) providerPresetLabel(providerID string) string {
+	if provider, ok := modelcatalog.LookupProvider(providerID); ok {
+		return provider.Name
 	}
 	return a.T("models.provider_custom")
 }
 
-// applyProviderPreset copies a preset's wire fields into the dialog draft and
-// clears a previous probe result: the old result no longer describes the
-// endpoint the fields now name.
-func (a *App) applyProviderPreset(preset providerPreset) {
+// applyProviderPreset copies a provider's endpoint and first published model
+// into the dialog draft and clears a previous probe result: the old result no
+// longer describes the endpoint the fields now name.
+func (a *App) applyProviderPreset(provider modelcatalog.Provider) {
 	st := a.shellUI()
-	st.modelDraft.preset = preset.id
-	if preset.baseURL != "" {
-		st.modelDraft.baseURL = preset.baseURL
+	st.modelDraft.preset = provider.ID
+	st.modelDraft.presetModel = ""
+	if provider.BaseURL != "" {
+		st.modelDraft.baseURL = provider.BaseURL
 	}
-	if preset.model != "" {
-		st.modelDraft.model = preset.model
+	if len(provider.Models) > 0 {
+		a.applyModelPreset(provider.Models[0])
 	}
 	a.resetModelProbe()
+}
+
+// applyModelPreset fills the dialog from one built-in model: the wire model id,
+// the context window the catalog knows and the model's default reasoning
+// effort. The display name is only replaced when it is empty or still names a
+// catalog model, so a user-typed name survives repeated picks.
+func (a *App) applyModelPreset(model modelcatalog.Model) {
+	st := a.shellUI()
+	st.modelDraft.presetModel = model.ID
+	st.modelDraft.model = model.ID
+	if name := strings.TrimSpace(st.modelDraft.name); name == "" || catalogModelName(name) {
+		st.modelDraft.name = model.Name
+	}
+	st.modelDraft.contextWindow = formatContextWindowDraft(model.ContextWindow)
+	st.modelDraft.effort = model.DefaultEffort
+	a.resetModelProbe()
+}
+
+// catalogModelName reports whether name is a built-in model display name (so a
+// previous auto-fill may be replaced without touching a user-typed name).
+func catalogModelName(name string) bool {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return true
+	}
+	for _, provider := range modelcatalog.Providers() {
+		for _, model := range provider.Models {
+			if model.Name == name || model.ID == name {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // resetModelProbe cancels a running "Test connection" and clears its result;
@@ -481,33 +570,79 @@ func (a *App) testModelConnection(c *ui.Context) {
 	}()
 }
 
-// modelProviderField is the Add model dialog's provider preset row: choosing
-// DeepSeek/OpenAI/Ollama fills Base URL and Model so the common cases need only
-// a key. The custom row leaves both fields alone.
+// modelProviderField is the Add model dialog's provider row: choosing a
+// built-in provider (DeepSeek leads) fills the endpoint, its first published
+// model, that model's context window and its default reasoning effort, so the
+// common cases need only a pasted key. The custom row leaves the fields alone.
 func (a *App) modelProviderField(c *ui.Context, t *design.Tokens) {
 	th := t.Theme()
 	st := a.shellUI()
-	labels := make([]string, 0, len(providerPresets))
-	current := ""
-	for _, preset := range providerPresets {
-		label := a.providerPresetLabel(preset)
-		labels = append(labels, label)
-		if preset.id == st.modelDraft.preset {
-			current = label
+	providers := dialogProviders()
+	labels := make([]string, 0, len(providers)+1)
+	current := a.T("models.provider_custom")
+	for _, provider := range providers {
+		labels = append(labels, provider.Name)
+		if provider.ID == st.modelDraft.preset {
+			current = provider.Name
 		}
 	}
-	if current == "" {
-		current = a.T("models.provider_custom")
-	}
+	labels = append(labels, a.T("models.provider_custom"))
 	ui.Field(c, a.T("models.provider"), func() {
 		sel := ui.Select(c, &current, labels)
 		sel.Height(th.Space(9)).MinWidth(th.Space(36)).Radius(design.RadiusSM)
-		if sel.Changed() {
-			for _, preset := range providerPresets {
-				if a.providerPresetLabel(preset) == current {
-					a.applyProviderPreset(preset)
-					break
-				}
+		if !sel.Changed() {
+			return
+		}
+		if current == a.T("models.provider_custom") {
+			st.modelDraft.preset = customProviderID
+			st.modelDraft.presetModel = ""
+			a.resetModelProbe()
+			return
+		}
+		for _, provider := range providers {
+			if provider.Name == current {
+				a.applyProviderPreset(provider)
+				return
+			}
+		}
+	})
+}
+
+// modelPresetField is the Add model dialog's built-in model row, shown only
+// while the chosen provider publishes model entries. Picking one fills the
+// wire id, the context window and the default reasoning effort; the "Custom
+// model" row lets the user type an id the catalog does not know.
+func (a *App) modelPresetField(c *ui.Context, t *design.Tokens) {
+	provider, ok := modelcatalog.LookupProvider(a.shellUI().modelDraft.preset)
+	if !ok || len(provider.Models) == 0 {
+		return
+	}
+	th := t.Theme()
+	st := a.shellUI()
+	customLabel := a.T("models.model_custom")
+	labels := make([]string, 0, len(provider.Models)+1)
+	current := customLabel
+	for _, model := range provider.Models {
+		labels = append(labels, model.Name)
+		if st.modelDraft.presetModel == model.ID {
+			current = model.Name
+		}
+	}
+	labels = append(labels, customLabel)
+	ui.Field(c, a.T("models.model_preset"), func() {
+		sel := ui.Select(c, &current, labels)
+		sel.Height(th.Space(9)).MinWidth(th.Space(36)).Radius(design.RadiusSM)
+		if !sel.Changed() {
+			return
+		}
+		if current == customLabel {
+			st.modelDraft.presetModel = ""
+			return
+		}
+		for _, model := range provider.Models {
+			if model.Name == current {
+				a.applyModelPreset(model)
+				return
 			}
 		}
 	})
@@ -528,6 +663,7 @@ func (a *App) modelDialog(c *ui.Context, t *design.Tokens) {
 			}
 			settingsText(c, title, design.TypeL, t.LabelPrimary).FontWeight(600)
 			a.modelProviderField(c, t)
+			a.modelPresetField(c, t)
 			ui.Form(c, func() {
 				a.modelField(c, t, a.T("models.name"), &st.modelDraft.name,
 					"DeepSeek V4.1 Flash", true, false)
@@ -536,7 +672,9 @@ func (a *App) modelDialog(c *ui.Context, t *design.Tokens) {
 				a.modelField(c, t, a.T("models.api_key"), &st.modelDraft.apiKey,
 					"sk-...", false, true)
 				a.modelField(c, t, a.T("models.model"), &st.modelDraft.model,
-					"deepseek-v4.1-flash", false, false)
+					"deepseek-flash", false, false)
+				a.modelField(c, t, a.T("models.context_window"), &st.modelDraft.contextWindow,
+					"1000000", false, false)
 				a.modelField(c, t, a.T("models.reasoning_effort"), &st.modelDraft.effort,
 					a.T("common.high"), false, false)
 			})
@@ -597,7 +735,35 @@ func (a *App) confirmModel(c *ui.Context) {
 		st.modelDialog = false
 		return
 	}
-	draft := st.modelDraft
+	model, toastKey := modelFromDraft(st.modelDraft)
+	if toastKey != "" {
+		c.Toast(a.T(toastKey))
+		return
+	}
+	var saveErr error
+	if model.ID == "" {
+		_, saveErr = a.Ctrl.Models().Create(model)
+	} else {
+		_, saveErr = a.Ctrl.Models().Update(model)
+	}
+	if saveErr != nil {
+		c.Toast(a.T("models.could_not_save_model"))
+		return
+	}
+	a.resetModelProbe()
+	st.modelDialog = false
+	c.Toast(a.T("models.model_saved"))
+}
+
+// modelFromDraft validates the Add/Edit model dialog's draft and returns the
+// row to persist, or the i18n key of the first field that blocks saving. The
+// built-in catalog is advisory: a published model accepts only the effort
+// levels it lists, while a custom endpoint stays free-form.
+func modelFromDraft(draft modelDraft) (store.Model, string) {
+	contextWindow, err := parseContextWindowDraft(draft.contextWindow)
+	if err != nil {
+		return store.Model{}, "models.invalid_context_window"
+	}
 	model := store.Model{
 		ID:              draft.id,
 		Name:            strings.TrimSpace(draft.name),
@@ -605,24 +771,18 @@ func (a *App) confirmModel(c *ui.Context) {
 		APIKey:          strings.TrimSpace(draft.apiKey),
 		Model:           strings.TrimSpace(draft.model),
 		ReasoningEffort: strings.TrimSpace(draft.effort),
+		ContextWindow:   contextWindow,
 	}
 	if model.Name == "" {
-		c.Toast(a.T("models.model_name_is_required"))
-		return
+		return store.Model{}, "models.model_name_is_required"
 	}
-	var err error
-	if model.ID == "" {
-		_, err = a.Ctrl.Models().Create(model)
-	} else {
-		_, err = a.Ctrl.Models().Update(model)
+	if provider, ok := modelcatalog.ProviderForBaseURL(model.BaseURL); ok {
+		if catalogModel, ok := modelcatalog.LookupModel(provider.ID, model.Model); ok &&
+			model.ReasoningEffort != "" && !effortSupported(catalogModel, model.ReasoningEffort) {
+			return store.Model{}, "models.unsupported_reasoning_effort"
+		}
 	}
-	if err != nil {
-		c.Toast(a.T("models.could_not_save_model"))
-		return
-	}
-	a.resetModelProbe()
-	st.modelDialog = false
-	c.Toast(a.T("models.model_saved"))
+	return model, ""
 }
 
 // setDefaultModel marks a model as the selected default.
@@ -735,6 +895,81 @@ func (a *App) composerModelLabel() string {
 		}
 	}
 	return a.T("models.no_model")
+}
+
+// effortSupported reports whether a built-in model publishes effort.
+func effortSupported(model modelcatalog.Model, effort string) bool {
+	for _, supported := range model.Efforts {
+		if supported == effort {
+			return true
+		}
+	}
+	return false
+}
+
+// composerEffort is the reasoning effort the composer controls right now: the
+// session's explicit choice, the Home composer's staged choice, or the selected
+// model's configured default.
+func (a *App) composerEffort() string {
+	if a.Ctrl == nil {
+		return ""
+	}
+	switch a.backgroundScreen() {
+	case Session:
+		if id := a.Ctrl.CurrentSessionID(); id != "" {
+			if effort := a.Ctrl.SessionReasoningEffort(id); effort != "" {
+				return effort
+			}
+		}
+	case Home:
+		if effort := strings.TrimSpace(a.homeEffort); effort != "" {
+			return effort
+		}
+	}
+	if model := a.composerModel(); model != nil {
+		return strings.TrimSpace(model.ReasoningEffort)
+	}
+	return ""
+}
+
+// composerEffortOptions returns the reasoning levels the composer offers for
+// the selected model: the levels its built-in entry publishes, or every known
+// level for a custom endpoint or hand-written model id.
+func (a *App) composerEffortOptions() []string {
+	model := a.composerModel()
+	if model == nil {
+		return nil
+	}
+	if provider, ok := modelcatalog.ProviderForBaseURL(model.BaseURL); ok {
+		if catalogModel, ok := modelcatalog.LookupModel(provider.ID, model.Model); ok {
+			return catalogModel.Efforts
+		}
+	}
+	return modelcatalog.AllEfforts()
+}
+
+// applyComposerEffort records the composer's reasoning-strength choice: on Home
+// it stages the level for the session the composer creates, on Session it
+// persists the session's own choice (applied from the next request on). An
+// empty level restores the selected model's configured default.
+func (a *App) applyComposerEffort(c *ui.Context, effort string) {
+	a.liveMenus().modelOpen = false
+	if a.Ctrl == nil {
+		return
+	}
+	if a.backgroundScreen() == Home {
+		a.homeEffort = effort
+		return
+	}
+	id := a.Ctrl.CurrentSessionID()
+	if id == "" {
+		return
+	}
+	if err := a.Ctrl.SetSessionReasoningEffort(id, effort); err != nil {
+		if c != nil {
+			c.Toast(a.T("models.could_not_select_effort"))
+		}
+	}
 }
 
 // DefaultModelLabel is the badge text for the selected default model. In the
