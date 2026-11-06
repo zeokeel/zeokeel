@@ -87,18 +87,14 @@ superseded_by TEXT NOT NULL DEFAULT ''
 - **C. 整合**（`internal/app/memory_consolidate.go`）：`EnsureMemoryConsolidation(st)` 在 app 启动与每 6h/写入超过阈值时运行：精确 hash 重复合并、superseded 超过 30 天删除、每 scope active 上限（global 100 / workspace 300）按 importance+last_used_at 淘汰为 superseded；纯确定性、无模型调用。
 - 事件/UI 刷新：Settings›Memory 每次渲染读 store（现有模式）；不需要新增 session 事件。
 
-## 6. UI（Settings › Memory 重构 + `/memory`）
+## 6. UI 布局（2026-11-06 用户决定：全局在设置、工作区在聊天）
 
-- 顶部 tabs：`Global (this machine)` / `Workspace (name)`；每 tab：
-  - 模式选择（Off / Suggest / Auto，来自 Settings）；
-  - 计数（active/pending）；pending 区（标题 "Suggestions to review"；每行 Accept / Edit? / Discard — MVP Accept/Discard）；
-  - active 列表（内容、kind 标签、source（Manual/Auto）、时间、Delete）；空态；
-  - Clear all（清当前 tab scope，二次确认，沿用现有 modal 模式）；
-  - Export markdown（写到 `<data dir>/memory/<scope>-<timestamp>.md`，toast 路径；不改 save dialog）；
-  - Open folder（若已有 open-folder seam 则用；否则省略，列为后续）。
-- `/memory` 命令：打开 Settings › Memory（若已有 slash command 机制）；`/memory <text>` 快捷添加一条 workspace/manual 记忆（MVP 可选，先 open）。
-- 文案：使用现有 `a.memoryText(en,zh)` 与 i18n catalog 兼容；本轮允许改 `internal/i18n/catalog.go` 的 owner 仅限 T-shell。
-- a11y：tabs role/selected、pending 操作可键盘、删除确认非默认焦点。
+- **Settings › Memory = Global memory（单页，无 Workspace tab）**：管理 `global` scope（整体设置/用户级）——off/suggest/auto 模式单选（`MemoryGlobalMode`）、active/pending 计数、pending「Suggestions to review」Accept/Discard、active 列表（内容/kind/source/时间/Edit/Delete）、Add memory（多行弹窗，空/超 8KiB 拒绝）、Clear all（global 二次确认）、Export markdown（global）。不依赖当前工作区。
+- **Session 头部 tabs 增加第三个 Memory tab（`轨迹` 旁）**：`Chat | Trajectory | Memory`（Show coding view 关闭时为 `Chat | Memory`，Memory 始终显示）。内容 = 当前 **workspace scope**：模式（`MemoryWorkspaceMode`）、计数、pending inbox（Accept/Discard）、active 列表（Edit/Delete）、Add memory（模态）、Clear all（仅当前工作区二次确认）、Export markdown（workspace）；无可选「Global memory…」入口跳 Settings。tab 状态在 liveUIState（切屏保持）；与 Chat/Trajectory 共享 `sessionBody` 帧，composer 元素身份/auto-focus 不重建。
+- 两处复用同一组按 `scope` 参数化的列表/弹窗/导出组件（避免两份逻辑）；store API 不变（`CreateMemoryScoped`/`UpdateMemory`/`SetMemoryStatus`/`DeleteMemory`/`ClearMemoriesScoped`/`MemoryCounts`/`ListMemoriesScoped`）。
+- **`/memory` 语义**：会话中执行 → 切到 session Memory tab（workspace）；Home/无会话 → 打开 Settings›Memory（global）。`/help` EN+ZH 同步。
+- a11y：tabs RoleTab/Checked + 左右键；编辑/删除按钮带可读 Label；Add/Edit 弹窗默认焦点在文本域（便于直接输入；Esc 安全关闭、Enter 只换行、Cancel 不写库）；Clear 等破坏性确认弹窗 Cancel 默认焦点，Enter 不误删/误清。
+- 文案：`a.memoryText(en,zh)` 或 `session.memory` catalog 键（本轮单一 owner）。
 
 ## 7. TDD 验收清单（按里程碑）
 
