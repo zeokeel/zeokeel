@@ -1011,15 +1011,19 @@ func TestSettingsLoadSaveAndRestart(t *testing.T) {
 	}
 
 	custom := session.Settings{
-		Permission:         session.PermissionAsk,
-		Language:           session.LanguageChinese,
-		Theme:              session.ThemeDark,
-		FontSize:           session.FontSizeLarge,
-		WorkDetails:        session.WorkDetailsStandard,
-		ShowCodingView:     false,
-		CollapseWorkDetail: session.CollapseImmediately,
-		SendBehavior:       session.SendInterrupt,
-		PerformanceUsage:   session.PerformanceDetailed,
+		Permission:               session.PermissionAsk,
+		Language:                 session.LanguageChinese,
+		Theme:                    session.ThemeDark,
+		FontSize:                 session.FontSizeLarge,
+		WorkDetails:              session.WorkDetailsStandard,
+		ShowCodingView:           false,
+		CollapseWorkDetail:       session.CollapseImmediately,
+		SendBehavior:             session.SendInterrupt,
+		PerformanceUsage:         session.PerformanceDetailed,
+		MemoryWorkspaceMode:      session.MemoryModeSuggest,
+		MemoryGlobalMode:         session.MemoryModeOff,
+		MemoryExtractor:          true,
+		MemoryExtractionInterval: 12,
 	}
 	if err := h.ctrl.Settings().Save(custom); err != nil {
 		t.Fatalf("Save: %v", err)
@@ -1033,14 +1037,18 @@ func TestSettingsLoadSaveAndRestart(t *testing.T) {
 	}
 
 	wantKeys := map[string]string{
-		"ui.permission":            "ask",
-		"ui.language":              "zh",
-		"ui.theme":                 "dark",
-		"ui.font_size":             "16",
-		"ui.work_details":          "standard",
-		"ui.show_coding_view":      "false",
-		"ui.collapse_work_details": "immediately",
-		"ui.send_behavior":         "interrupt",
+		"ui.permission":                 "ask",
+		"ui.language":                   "zh",
+		"ui.theme":                      "dark",
+		"ui.font_size":                  "16",
+		"ui.work_details":               "standard",
+		"ui.show_coding_view":           "false",
+		"ui.collapse_work_details":      "immediately",
+		"ui.send_behavior":              "interrupt",
+		"ui.memory_workspace_mode":      "suggest",
+		"ui.memory_global_mode":         "off",
+		"ui.memory_extractor":           "true",
+		"ui.memory_extraction_interval": "12",
 	}
 	for key, want := range wantKeys {
 		value, err := h.store.GetSetting(key)

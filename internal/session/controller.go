@@ -2582,6 +2582,16 @@ const (
 	SettingSendBehavior       = "ui.send_behavior"
 	SettingPerformanceUsage   = "ui.performance_usage"
 	SettingUploadSessionLog   = "ui.upload_session_log"
+	// Auto-memory scopes (docs/design/auto-memory.md): the workspace scope
+	// defaults to auto (the agent may write project notes directly) while the
+	// global user scope defaults to suggest (candidates wait for review).
+	SettingMemoryWorkspaceMode = "ui.memory_workspace_mode"
+	SettingMemoryGlobalMode    = "ui.memory_global_mode"
+	// SettingMemoryExtractor enables the optional background extractor and
+	// SettingMemoryExtractionInterval is how many successful turns it waits
+	// before running for a session.
+	SettingMemoryExtractor          = "ui.memory_extractor"
+	SettingMemoryExtractionInterval = "ui.memory_extraction_interval"
 	// SettingWorkspace is the id of the workspace the sidebar last selected.
 	SettingWorkspace = "ui.workspace"
 )
@@ -2697,6 +2707,23 @@ const (
 
 // Settings is the persisted UI configuration. It is deliberately small: one
 // value per key in the settings table.
+// Auto-memory write modes (docs/design/auto-memory.md §2): off disables the
+// scope, suggest stores candidates as pending review items, auto applies them
+// immediately.
+const (
+	MemoryModeOff     = "off"
+	MemoryModeSuggest = "suggest"
+	MemoryModeAuto    = "auto"
+)
+
+// MemoryExtractionDefaultInterval is the default number of successful turns
+// between two background extractor runs.
+const MemoryExtractionDefaultInterval = 6
+
+// MemoryExtractionMaxInterval bounds the user setting so the extractor cannot
+// be configured to run on every single turn without bound.
+const MemoryExtractionMaxInterval = 50
+
 type Settings struct {
 	Permission         string `json:"permission"`
 	Language           string `json:"language"`
@@ -2708,6 +2735,12 @@ type Settings struct {
 	SendBehavior       string `json:"send_behavior"`
 	PerformanceUsage   string `json:"performance_usage"`
 	UploadSessionLog   bool   `json:"upload_session_log"`
+	// Auto-memory modes and the optional background extractor. The workspace
+	// scope defaults to auto, the global user scope to suggest (review-first).
+	MemoryWorkspaceMode      string `json:"memory_workspace_mode"`
+	MemoryGlobalMode         string `json:"memory_global_mode"`
+	MemoryExtractor          bool   `json:"memory_extractor"`
+	MemoryExtractionInterval int    `json:"memory_extraction_interval"`
 }
 
 // DefaultSettings returns the values a fresh store uses: Workspace Write,
@@ -2717,16 +2750,20 @@ type Settings struct {
 // while Settings reported the other and the first save would flip it.
 func DefaultSettings() Settings {
 	return Settings{
-		Permission:         PermissionWorkspace,
-		Language:           LanguageChinese,
-		Theme:              ThemeSystem,
-		FontSize:           FontSizeSmall,
-		WorkDetails:        WorkDetailsDetailed,
-		ShowCodingView:     true,
-		CollapseWorkDetail: CollapseOnCompletion,
-		SendBehavior:       SendQueue,
-		PerformanceUsage:   PerformanceDetailed,
-		UploadSessionLog:   false,
+		Permission:               PermissionWorkspace,
+		Language:                 LanguageChinese,
+		Theme:                    ThemeSystem,
+		FontSize:                 FontSizeSmall,
+		WorkDetails:              WorkDetailsDetailed,
+		ShowCodingView:           true,
+		CollapseWorkDetail:       CollapseOnCompletion,
+		SendBehavior:             SendQueue,
+		PerformanceUsage:         PerformanceDetailed,
+		UploadSessionLog:         false,
+		MemoryWorkspaceMode:      MemoryModeAuto,
+		MemoryGlobalMode:         MemoryModeSuggest,
+		MemoryExtractor:          false,
+		MemoryExtractionInterval: MemoryExtractionDefaultInterval,
 	}
 }
 
@@ -2773,6 +2810,19 @@ func NormalizeSettings(s Settings) Settings {
 	case PerformanceStandard, PerformanceDetailed:
 	default:
 		s.PerformanceUsage = def.PerformanceUsage
+	}
+	switch s.MemoryWorkspaceMode {
+	case MemoryModeOff, MemoryModeSuggest, MemoryModeAuto:
+	default:
+		s.MemoryWorkspaceMode = def.MemoryWorkspaceMode
+	}
+	switch s.MemoryGlobalMode {
+	case MemoryModeOff, MemoryModeSuggest, MemoryModeAuto:
+	default:
+		s.MemoryGlobalMode = def.MemoryGlobalMode
+	}
+	if s.MemoryExtractionInterval < 1 || s.MemoryExtractionInterval > MemoryExtractionMaxInterval {
+		s.MemoryExtractionInterval = def.MemoryExtractionInterval
 	}
 	return s
 }
@@ -2854,6 +2904,30 @@ func (s *SettingsStore) Load() (Settings, error) {
 			cfg.UploadSessionLog = b
 		}
 	}
+	if err := read(SettingMemoryWorkspaceMode, &cfg.MemoryWorkspaceMode); err != nil {
+		return cfg, fmt.Errorf("settings: load memory workspace mode: %w", err)
+	}
+	if err := read(SettingMemoryGlobalMode, &cfg.MemoryGlobalMode); err != nil {
+		return cfg, fmt.Errorf("settings: load memory global mode: %w", err)
+	}
+	var memoryExtractor string
+	if err := read(SettingMemoryExtractor, &memoryExtractor); err != nil {
+		return cfg, fmt.Errorf("settings: load memory extractor: %w", err)
+	}
+	if memoryExtractor != "" {
+		if b, err := strconv.ParseBool(memoryExtractor); err == nil {
+			cfg.MemoryExtractor = b
+		}
+	}
+	var memoryInterval string
+	if err := read(SettingMemoryExtractionInterval, &memoryInterval); err != nil {
+		return cfg, fmt.Errorf("settings: load memory extraction interval: %w", err)
+	}
+	if memoryInterval != "" {
+		if n, err := strconv.Atoi(memoryInterval); err == nil {
+			cfg.MemoryExtractionInterval = n
+		}
+	}
 	return NormalizeSettings(cfg), nil
 }
 
@@ -2895,6 +2969,10 @@ func (s *SettingsStore) save(cfg Settings, writeDefaultLanguage bool) error {
 		{SettingSendBehavior, cfg.SendBehavior},
 		{SettingPerformanceUsage, cfg.PerformanceUsage},
 		{SettingUploadSessionLog, strconv.FormatBool(cfg.UploadSessionLog)},
+		{SettingMemoryWorkspaceMode, cfg.MemoryWorkspaceMode},
+		{SettingMemoryGlobalMode, cfg.MemoryGlobalMode},
+		{SettingMemoryExtractor, strconv.FormatBool(cfg.MemoryExtractor)},
+		{SettingMemoryExtractionInterval, strconv.Itoa(cfg.MemoryExtractionInterval)},
 	}
 	for _, v := range values {
 		if v.key == SettingLanguage && languageAbsent {

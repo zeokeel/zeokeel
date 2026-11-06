@@ -33,6 +33,11 @@ var schemaMigrations = []schemaMigration{
 		Name:    "messages-ordinal",
 		Apply:   migrateMessagesOrdinal,
 	},
+	{
+		Version: 3,
+		Name:    "memory-scopes",
+		Apply:   migrateMemoryScopes,
+	},
 }
 
 // migrationFailureHook is a test seam: it runs before one migration step and a
@@ -209,4 +214,85 @@ func columnExistsTx(q schemaQuerier, table, column string) (bool, error) {
 	}
 	defer rows.Close()
 	return rows.Next(), rows.Err()
+}
+
+// migrateMemoryScopes is the two-scope memory step (docs/design/auto-memory.md
+// §1): existing workspace memories keep their content and gain the
+// workspace/project/manual/active defaults, the scope columns needed by the
+// global user layer are added, and old rows get their dedupe content hash
+// backfilled (SQLite has no built-in SHA-256, so the hash is computed in Go).
+func migrateMemoryScopes(tx *sql.Tx) error {
+	additions := []struct{ name, ddl string }{
+		{"scope", `ALTER TABLE memories ADD COLUMN scope TEXT NOT NULL DEFAULT 'workspace'`},
+		{"kind", `ALTER TABLE memories ADD COLUMN kind TEXT NOT NULL DEFAULT 'project'`},
+		{"source", `ALTER TABLE memories ADD COLUMN source TEXT NOT NULL DEFAULT 'manual'`},
+		{"status", `ALTER TABLE memories ADD COLUMN status TEXT NOT NULL DEFAULT 'active'`},
+		{"session_id", `ALTER TABLE memories ADD COLUMN session_id TEXT NOT NULL DEFAULT ''`},
+		{"turn_id", `ALTER TABLE memories ADD COLUMN turn_id TEXT NOT NULL DEFAULT ''`},
+		{"content_hash", `ALTER TABLE memories ADD COLUMN content_hash TEXT NOT NULL DEFAULT ''`},
+		{"confidence", `ALTER TABLE memories ADD COLUMN confidence REAL NOT NULL DEFAULT 1.0`},
+		{"importance", `ALTER TABLE memories ADD COLUMN importance INTEGER NOT NULL DEFAULT 0`},
+		{"last_used_at", `ALTER TABLE memories ADD COLUMN last_used_at TEXT NOT NULL DEFAULT ''`},
+		{"superseded_by", `ALTER TABLE memories ADD COLUMN superseded_by TEXT NOT NULL DEFAULT ''`},
+	}
+	for _, addition := range additions {
+		exists, err := columnExistsTx(tx, "memories", addition.name)
+		if err != nil {
+			return err
+		}
+		if exists {
+			continue
+		}
+		if _, err := tx.Exec(addition.ddl); err != nil {
+			return fmt.Errorf("add memories.%s: %w", addition.name, err)
+		}
+	}
+	if _, err := tx.Exec(
+		`CREATE INDEX IF NOT EXISTS memories_scope_idx
+		 ON memories(scope, workspace_id, status, updated_at DESC)`,
+	); err != nil {
+		return fmt.Errorf("create memories_scope_idx: %w", err)
+	}
+
+	// Backfill content hashes for rows written before the column existed. The
+	// rows are collected before the updates run so the single writer
+	// connection is not asked to execute while a read cursor is open.
+	type legacyHash struct{ id, content string }
+	rows, err := tx.Query(`SELECT id, content FROM memories WHERE content_hash = ''`)
+	if err != nil {
+		return fmt.Errorf("read legacy memories for hash backfill: %w", err)
+	}
+	var pending []legacyHash
+	for rows.Next() {
+		var row legacyHash
+		if err := rows.Scan(&row.id, &row.content); err != nil {
+			rows.Close() //nolint:errcheck // read error wins
+			return fmt.Errorf("scan legacy memory for hash backfill: %w", err)
+		}
+		pending = append(pending, row)
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close() //nolint:errcheck // read error wins
+		return fmt.Errorf("read legacy memories for hash backfill: %w", err)
+	}
+	if err := rows.Close(); err != nil {
+		return fmt.Errorf("close legacy memory rows: %w", err)
+	}
+	for _, row := range pending {
+		// Normalize the stored form as well, so the content column and its hash
+		// follow the same canonical-line-ending rule as new writes. A row that
+		// no longer validates (hand-edited oversized/blank content) keeps its
+		// text and an empty hash instead of failing the whole migration.
+		normalized, err := normalizeMemoryContent(row.content)
+		if err != nil {
+			continue
+		}
+		if _, err := tx.Exec(
+			`UPDATE memories SET content = ?, content_hash = ? WHERE id = ?`,
+			normalized, hashMemoryContent(normalized), row.id,
+		); err != nil {
+			return fmt.Errorf("backfill memory %q hash: %w", row.id, err)
+		}
+	}
+	return nil
 }

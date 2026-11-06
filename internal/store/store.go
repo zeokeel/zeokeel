@@ -34,7 +34,7 @@ import (
 
 // SchemaVersion is the SQLite schema version this build reads and writes. It
 // advances by exactly one per ordered migration in schemaMigrations.
-const SchemaVersion = 2
+const SchemaVersion = 3
 
 // Sentinel errors. Callers classify failures with errors.Is.
 var (

@@ -88,6 +88,14 @@ type app struct {
 	automationRuns      map[string]string
 	automationTerminals map[string]automationTerminalState
 
+	// memoryMu guards the background auto-memory pipeline: the extractor
+	// worker and the consolidation loop started with services (see
+	// memory_auto.go / memory_consolidate.go). Both are stopped before the
+	// store closes, so a shutdown never writes through a closed database.
+	memoryMu     sync.Mutex
+	memoryCancel context.CancelFunc
+	memoryWorker *memoryWorker
+
 	// buildMu serializes agent rebuilds; bundle is the current one, closed
 	// when a rebuild replaces it.
 	buildMu sync.Mutex
@@ -248,7 +256,7 @@ func (a *app) run() error {
 			a.notifier = notifier
 			// One controller hook fans out to every turn observer: desktop
 			// notifications and the automation run history.
-			a.services.SetOnTurnFinished(a.observeTurnFinished)
+			a.services.SetOnTurnFinished(a.observeTurnAndMemory)
 			a.services.SetOnApprovalRequested(notifier.observeApprovalRequested)
 			a.services.OnUpdate(func(snap *state.Snapshot) {
 				shellApp.SetSnapshot(snap)
@@ -319,8 +327,17 @@ func (a *app) startServices() {
 		return
 	}
 	a.services = ctrl
-	a.cleanup = cleanup
+	a.cleanup = func() error {
+		// Stop the auto-memory loop and extractor before BuildServicesWith's
+		// cleanup closes the store.
+		a.stopMemoryMaintenance()
+		return cleanup()
+	}
 	a.bundle = built
+	// Auto-memory pipeline (docs/design/auto-memory.md §5): the extractor
+	// counts finished turns and the consolidation loop runs at startup and
+	// every six hours. Both are inert until settings enable them.
+	a.startMemoryMaintenance(ctrl)
 	// P2 regression: HasAgent is true as soon as the per-session factory exists
 	// (RT-04), so the UI's "model configured?" question uses this predicate.
 	ctrl.SetModelConfiguredFunc(a.hasConfiguredModel)

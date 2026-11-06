@@ -10,7 +10,7 @@ import (
 
 // latestSchemaVersion is the version this round must reach. Kept literal so the
 // test fails (rather than following) if the constant is not bumped.
-const latestSchemaVersion = 2
+const latestSchemaVersion = 3
 
 // legacyMessage is one row of the schema-version-1 messages fixture.
 type legacyMessage struct {

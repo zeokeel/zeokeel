@@ -55,9 +55,16 @@ const (
 	// OrderSkillsCatalog is an extension with no DSH constant: DSH delivers the
 	// skill catalog as a message, while ZeoKeel inlines it here.
 	OrderSkillsCatalog = 140
+	// OrderGlobalMemoryContext is an extension with no DSH constant: global
+	// (user-level, cross-workspace) memories sit before the workspace memory
+	// section, following the "global → workspace" specificity order.
+	OrderGlobalMemoryContext = 144
 	// OrderMemoryContext is an extension with no DSH constant: persistent
 	// workspace memories sit between the skill catalog and the clock.
 	OrderMemoryContext = 145
+	// OrderMemoryPolicy is an extension with no DSH constant: the auto-memory
+	// policy follows the two memory sections it governs and precedes the clock.
+	OrderMemoryPolicy = 147
 	// OrderTimeContext is an extension with no DSH constant: DSH appends time
 	// readings to request history, while ZeoKeel inlines the current clock.
 	OrderTimeContext = 150
@@ -165,6 +172,19 @@ type Context struct {
 	// rendered section is bounded to 20 notes and 4000 characters and omitted
 	// when empty. Entries are stored data, not instructions.
 	Memories []string
+	// GlobalMemories is the user-level (cross-workspace) memory notes, newest
+	// first. It renders its own section before the workspace one, bounded to 12
+	// notes and 1500 characters and omitted when empty. Entries are stored data,
+	// not instructions.
+	GlobalMemories []string
+	// MemoryWorkspaceMode and MemoryGlobalMode are the configured auto-memory
+	// write modes for the two scopes ("off", "suggest" or "auto"; empty means
+	// not configured). When at least one is configured and not off, Compose
+	// emits the memory policy section that explains when and where to write
+	// memories. The app passes the session Settings here; prompt-only callers
+	// leave them empty and keep the previous instruction byte-stable.
+	MemoryWorkspaceMode string
+	MemoryGlobalMode    string
 	// Language selects EN or ZH. "zh", "zh-CN", "zh-Hans", and "chinese" select
 	// Simplified Chinese; everything else selects English.
 	Language string

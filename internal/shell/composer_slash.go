@@ -86,6 +86,10 @@ var slashCommands = []slashCommand{
 		"Choose the model this session uses",
 		"选择本会话使用的模型",
 		slashGroupCommand, func() *ui.SVG { return icons.Data() }},
+	{"/memory", "Memory", "记忆",
+		"Open Settings › Memory",
+		"打开 设置 › 记忆",
+		slashGroupCommand, func() *ui.SVG { return memoryIcon }},
 	{"/goal", "Session goal", "会话目标",
 		"Create, pause, resume or clear the session goal",
 		"创建、暂停、恢复或清除会话目标",
@@ -1017,17 +1021,17 @@ func (a *App) runFeedbackCommand(args string) {
 // note (automatic and manual), and the documented fate of unknown slash lines.
 func (a *App) slashHelpText() string {
 	return a.menuText(
-		"Commands: /file /plan /feedback · /permission /model /goal /compact /export · /clear /stop /help /new /settings /automate /plugins. "+
+		"Commands: /file /plan /feedback · /permission /model /memory /goal /compact /export · /clear /stop /help /new /settings /automate /plugins. "+
 			"/file opens the attachment picker (/file <path> attaches a workspace file); /plan enters plan mode (/plan off leaves it, /plan <message> starts with it); "+
-			"/permission read-only|workspace|full|auto changes the access mode; /feedback good|bad rates the last answer; /export saves the session log. "+
+			"/permission read-only|workspace|full|auto changes the access mode; /memory opens Settings › Memory; /feedback good|bad rates the last answer; /export saves the session log. "+
 			"/goal shows or controls the session goal (/goal <objective> creates one, /goal edit <objective> replaces it, /goal pause|resume|complete|abandon|clear control it). "+
 			"@ mentions complete workspace files and folders (Tab drills into a folder, Esc walks back); a path with spaces can be quoted as @\"my file.txt\". "+
 			"Session mentions insert the atomic @[label](dsh-session:<id>) reference and add the referenced session's bounded read-only context to the next request. "+
 			"Compaction is automatic (the runtime compacts long conversations before a turn); /compact compacts the current conversation now. "+
 			"Unknown commands are sent to the model as a normal message.",
-		"命令：/file /plan /feedback · /permission /model /goal /compact /export · /clear /stop /help /new /settings /automate /plugins。"+
+		"命令：/file /plan /feedback · /permission /model /memory /goal /compact /export · /clear /stop /help /new /settings /automate /plugins。"+
 			"/file 打开附件选择器（/file <路径> 直接附加工作区文件）；/plan 进入计划模式（/plan off 退出，/plan <消息> 以计划模式发送）；"+
-			"/permission read-only|workspace|full|auto 切换访问模式；/feedback good|bad 评价最后一条回答；/export 保存会话日志。"+
+			"/permission read-only|workspace|full|auto 切换访问模式；/memory 打开 设置 › 记忆；/feedback good|bad 评价最后一条回答；/export 保存会话日志。"+
 			"/goal 查看或控制会话目标（/goal <目标> 创建，/goal edit <目标> 替换目标，/goal pause|resume|complete|abandon|clear 控制生命周期）。"+
 			"@ 提及会补全工作区文件与文件夹（Tab 进入文件夹、Esc 逐级返回）；含空格的路径可写成 @\"my file.txt\"。"+
 			"会话提及插入原子 @[label](dsh-session:<id>) 引用，并在下一请求中附带被引用会话的有界只读上下文。"+

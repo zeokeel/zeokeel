@@ -120,14 +120,43 @@ var registry = []registration{
 	},
 	{
 		section: Section{
+			ID:    "context:global-memory",
+			Order: OrderGlobalMemoryContext,
+			EN:    "## Global memory (user, cross-workspace)\nKnown global memories:\n- ...",
+			ZH:    "## 全局记忆（用户级，跨工作区）\n已知全局记忆：\n- ...",
+			Dynamic: func(c Context) string {
+				return globalMemoriesText(c)
+			},
+		},
+	},
+	{
+		section: Section{
 			ID:    "context:memory",
 			Order: OrderMemoryContext,
-			EN:    "Known workspace memories:\n- ...",
-			ZH:    "已知工作区记忆：\n- ...",
+			EN:    "## Workspace memory\nKnown workspace memories:\n- ...",
+			ZH:    "## 工作区记忆\n已知工作区记忆：\n- ...",
 			Dynamic: func(c Context) string {
 				return memoriesText(c)
 			},
 		},
+	},
+	{
+		section: Section{
+			ID:    "context:memory-policy",
+			Order: OrderMemoryPolicy,
+			EN:    "## Memory policy\nStore durable, reusable knowledge with the `memory` tool.",
+			ZH:    "## 记忆策略\n用 `memory` 工具保存可持久复用的知识。",
+			Dynamic: func(c Context) string {
+				return memoryPolicyText(c)
+			},
+		},
+		// The policy explains when and where to write memories. It is omitted
+		// when both scopes are off or no mode was configured, so prompt-only
+		// callers (and the unit tests) keep a byte-stable instruction. The tool
+		// gate keeps it out of Read Only sessions, which do not register the
+		// memory tool and must not advertise a capability they lack (RT-03).
+		tools: []string{"memory"},
+		when:  memoryPolicyEnabled,
 	},
 	{
 		section: Section{

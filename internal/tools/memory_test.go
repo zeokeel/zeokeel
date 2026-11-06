@@ -212,7 +212,10 @@ func TestMemoryToolOutputCap(t *testing.T) {
 	tool := memoryToolFor(st, alpha)
 	body := strings.Repeat("x", store.MaxMemoryContentBytes)
 	for i := 0; i < 12; i++ {
-		invokeMemory(t, tool, `{"action":"add","content":"`+body+`"}`)
+		// Scoped writes dedupe exact content, so keep each oversized note
+		// distinct to exercise the output cap with a real 12-row list.
+		content := body[:len(body)-1] + string(rune('a'+i))
+		invokeMemory(t, tool, `{"action":"add","content":"`+content+`"}`)
 	}
 
 	out, err := tool.Invoke(context.Background(), json.RawMessage(`{"action":"list","limit":200}`))

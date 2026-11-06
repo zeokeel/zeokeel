@@ -37,16 +37,19 @@ func allTools() []string {
 
 func richContext() Context {
 	return Context{
-		WorkDir:        "/data/mygo",
-		SandboxPolicy:  "workspace-write",
-		ApprovalPolicy: "never",
-		Skills:         []string{"pdf-tools", "code-review"},
-		AgentsMD:       "Prefer small, reviewable diffs.",
-		Memories:       []string{"Run make lint before committing."},
-		Language:       "en",
-		Mode:           "plan",
-		Time:           time.Date(2026, 11, 4, 16, 9, 0, 0, time.FixedZone("Asia/Shanghai", 8*60*60)),
-		Tools:          allTools(),
+		WorkDir:             "/data/mygo",
+		SandboxPolicy:       "workspace-write",
+		ApprovalPolicy:      "never",
+		Skills:              []string{"pdf-tools", "code-review"},
+		AgentsMD:            "Prefer small, reviewable diffs.",
+		GlobalMemories:      []string{"Prefer concise answers."},
+		Memories:            []string{"Run make lint before committing."},
+		MemoryGlobalMode:    "suggest",
+		MemoryWorkspaceMode: "auto",
+		Language:            "en",
+		Mode:                "plan",
+		Time:                time.Date(2026, 11, 4, 16, 9, 0, 0, time.FixedZone("Asia/Shanghai", 8*60*60)),
+		Tools:               allTools(),
 	}
 }
 
@@ -691,8 +694,8 @@ func TestAllSectionsNonEmptyInBothLocales(t *testing.T) {
 		t.Fatalf("Sections returned %d entries, registry has %d", len(sections), len(registry))
 	}
 	// docs/prompts.md maps every row; update this guard when adding a section.
-	if len(sections) != 44 {
-		t.Fatalf("registry has %d sections, want 44", len(sections))
+	if len(sections) != 46 {
+		t.Fatalf("registry has %d sections, want 46", len(sections))
 	}
 	seen := make(map[string]bool, len(sections))
 	lastOrder := -1 << 31

@@ -138,7 +138,7 @@ func TestSchemaVersionGuard(t *testing.T) {
 		want   error
 	}{
 		{"older", `UPDATE schema_version SET version = 0`, ErrSchemaTooOld},
-		{"newer", `UPDATE schema_version SET version = 3`, ErrSchemaTooNew},
+		{"newer", `UPDATE schema_version SET version = 99`, ErrSchemaTooNew},
 		{"empty", `DELETE FROM schema_version`, ErrSchemaTooOld},
 	}
 	for _, tc := range cases {

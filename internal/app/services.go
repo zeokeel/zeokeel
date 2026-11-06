@@ -868,12 +868,13 @@ func registerAllToolsWithOptions(st *store.Store, root string, get func(key, env
 	if workspaceID == "" {
 		workspaceID = currentWorkspaceID(st, root)
 	}
-	// Memory is captured only through the explicit memory tool. There is
-	// deliberately no post-turn auto-extraction: persisting inferred text
-	// would make the store depend on model behavior, could capture transient
-	// or sensitive turn content, and gives the user no clear point of control.
-	// The agent must choose durable notes deliberately, and Settings > Memory
-	// lists and deletes them.
+	// Auto-memory (docs/design/auto-memory.md): the agent writes durable notes
+	// deliberately through the explicit memory tool, which covers two scopes
+	// (workspace project context and global user-level preferences) and follows
+	// the per-scope Settings write mode (auto=active, suggest=pending review,
+	// off=refuse). The optional background extractor (M3) feeds the same store
+	// through internal/memory's scrub/dedupe pipeline instead of a second hidden
+	// prompt path; Settings > Memory lists, reviews and deletes every row.
 	//
 	// Read Only omits the tool entirely: a memory written here is injected
 	// into every later turn's system prompt, which is exactly the persistent
@@ -884,6 +885,7 @@ func registerAllToolsWithOptions(st *store.Store, root string, get func(key, env
 		register(tools.NewMemoryTool(tools.MemoryConfig{
 			Store:       st,
 			WorkspaceID: workspaceIDResolver(st, root, opts.WorkspaceID),
+			Modes:       func() (string, string) { return memoryWriteModes(st) },
 		}))
 	}
 	register(tools.NewSessionQueryTools(tools.SessionQueryConfig{Store: st, WorkspaceID: workspaceID})...)
@@ -1240,14 +1242,26 @@ func buildAgentWithOptions(st *store.Store, root, instruction string, opts regis
 				cwd = abs
 			}
 		}
+		workspaceMemories, globalMemories := memoriesForPrompt(st, memoryWorkspaceID())
+		workspaceMemoryMode, globalMemoryMode := memoryWriteModes(st)
 		text := composeInstructionForModesWithMemories(st, root, cwd, reg, skillsDir, permission,
 			collaborationMode(st), modeForTurn(), planModeForTurn(),
-			memoriesForPrompt(st, memoryWorkspaceID()))
+			memoryPromptTexts(workspaceMemories), memoryPromptTexts(globalMemories),
+			workspaceMemoryMode, globalMemoryMode)
 		if text == "" {
 			return instruction
 		}
 		if opts.Presets != nil && presetID != "" {
 			text = injectPresetPrompt(text, opts.Presets, presetID, uiLanguage(st))
+		}
+		// Record which stored memories this turn's prompt injected, so the
+		// consolidation policy can rank by real use instead of updated_at.
+		// Failure is logged only: a memory bookkeeping error must not fail the
+		// turn or lose the instruction.
+		if ids := memoryPromptIDs(workspaceMemories, globalMemories); len(ids) > 0 {
+			if err := markPromptMemoriesUsed(st, ids); err != nil {
+				log.Printf("zeokeel: mark memories used: %v", err)
+			}
 		}
 		return text
 	}
@@ -1414,14 +1428,15 @@ func composeInstructionAt(st *store.Store, root, cwd string, reg *runtime.Regist
 // plan review gate. Empty/false values add no policy.
 func composeInstructionForModes(st *store.Store, root, cwd string, reg *runtime.Registry, skillsDir, permission, collaborationMode, agentMode string, planMode bool) string {
 	return composeInstructionForModesWithMemories(st, root, cwd, reg, skillsDir, permission,
-		collaborationMode, agentMode, planMode, nil)
+		collaborationMode, agentMode, planMode, nil, nil, "", "")
 }
 
-// composeInstructionForModesWithMemories is composeInstructionForModes with
-// the workspace memories the caller loaded for this turn. The prompt package
-// bounds the list again, so a large store cannot crowd out the rest of the
-// instruction.
-func composeInstructionForModesWithMemories(st *store.Store, root, cwd string, reg *runtime.Registry, skillsDir, permission, collaborationMode, agentMode string, planMode bool, memories []string) string {
+// composeInstructionForModesWithMemories is composeInstructionForModes with the
+// memory material the caller loaded for this turn: the workspace notes, the
+// user-level global notes and the two configured write modes (which enable the
+// memory policy section). The prompt package bounds each list again, so a large
+// store cannot crowd out the rest of the instruction.
+func composeInstructionForModesWithMemories(st *store.Store, root, cwd string, reg *runtime.Registry, skillsDir, permission, collaborationMode, agentMode string, planMode bool, memories, globalMemories []string, memoryWorkspaceMode, memoryGlobalMode string) string {
 	names := make([]string, 0, 64)
 	for _, t := range reg.List() {
 		names = append(names, t.Name())
@@ -1471,19 +1486,22 @@ func composeInstructionForModesWithMemories(st *store.Store, root, cwd string, r
 		sandboxPolicy = "read-only"
 	}
 	return prompt.Compose(prompt.Context{
-		WorkDir:        cwd,
-		Platform:       goruntime.GOOS + "/" + goruntime.GOARCH,
-		SandboxPolicy:  sandboxPolicy,
-		ApprovalPolicy: approvalPolicy,
-		Skills:         skillNames,
-		AgentsMD:       agentsMD,
-		Memories:       memories,
-		Language:       lang,
-		Mode:           collaborationMode,
-		PlanMode:       planMode,
-		AgentMode:      agentMode,
-		Time:           time.Now(),
-		Tools:          names,
+		WorkDir:             cwd,
+		Platform:            goruntime.GOOS + "/" + goruntime.GOARCH,
+		SandboxPolicy:       sandboxPolicy,
+		ApprovalPolicy:      approvalPolicy,
+		Skills:              skillNames,
+		AgentsMD:            agentsMD,
+		Memories:            memories,
+		GlobalMemories:      globalMemories,
+		MemoryWorkspaceMode: memoryWorkspaceMode,
+		MemoryGlobalMode:    memoryGlobalMode,
+		Language:            lang,
+		Mode:                collaborationMode,
+		PlanMode:            planMode,
+		AgentMode:           agentMode,
+		Time:                time.Now(),
+		Tools:               names,
 	})
 }
 
@@ -1589,10 +1607,15 @@ func (s storeToolState) SaveGoal(sessionID string, goal *tools.Goal) error {
 	return s.saveJSON(toolStateKey("tool.goal.", sessionID), goal)
 }
 
-// memoryPromptLimit is how many workspace notes the app loads per turn. The
-// prompt package applies its own 20-item/4000-character cap afterwards, so a
-// larger store never turns the instruction into an unbounded dump.
-const memoryPromptLimit = 20
+// memoryPromptLimit is how many workspace notes the app loads per turn;
+// memoryGlobalPromptLimit is the smaller cap for the cross-workspace user
+// scope (docs/design/auto-memory.md §3). The prompt package applies its own
+// per-scope caps afterwards, so a larger store never turns the instruction into
+// an unbounded dump.
+const (
+	memoryPromptLimit       = 20
+	memoryGlobalPromptLimit = 12
+)
 
 // workspaceIDResolver returns the workspace id used to scope memories. An
 // explicit override from the controller wins; otherwise the id is re-derived
@@ -1608,25 +1631,109 @@ func workspaceIDResolver(st *store.Store, root, override string) func() string {
 	}
 }
 
-// memoriesForPrompt loads the newest notes for one workspace as plain strings.
-// A missing store, an unresolved scope or a read failure yields nil: the
-// memory section is optional and must never fail a turn.
-func memoriesForPrompt(st *store.Store, workspaceID string) []string {
-	if st == nil || strings.TrimSpace(workspaceID) == "" {
-		return nil
+// memoryPromptItem is one memory the turn's prompt injects: its stable id (used
+// to record last_used_at after a successful composition) and its rendered text.
+type memoryPromptItem struct {
+	ID      string
+	Content string
+}
+
+// memoriesForPrompt loads the notes the turn's prompt should inject: the
+// selected workspace's active notes plus the user-level (cross-workspace)
+// global notes (docs/design/auto-memory.md §3). A missing store, an unresolved
+// workspace or a read failure yields nil for that scope: the memory sections
+// are optional and must never fail a turn. Pending suggestions are not injected
+// (they wait for review); the prompt package bounds both lists again. The
+// returned items carry the row ids so the caller can mark them used.
+func memoriesForPrompt(st *store.Store, workspaceID string) (workspace, global []memoryPromptItem) {
+	if st == nil {
+		return nil, nil
 	}
-	list, err := st.ListMemories(workspaceID, memoryPromptLimit)
-	if err != nil {
-		log.Printf("zeokeel: load workspace memories: %v", err)
-		return nil
-	}
-	out := make([]string, 0, len(list))
-	for _, memory := range list {
-		if content := strings.TrimSpace(memory.Content); content != "" {
-			out = append(out, content)
+	if id := strings.TrimSpace(workspaceID); id != "" {
+		list, err := st.ListMemoriesScoped(store.MemoryScopeWorkspace, id, store.MemoryStatusActive, memoryPromptLimit)
+		if err != nil {
+			log.Printf("zeokeel: load workspace memories: %v", err)
+		} else {
+			workspace = memoryPromptItems(list)
 		}
 	}
+	if list, err := st.ListMemoriesScoped(store.MemoryScopeGlobal, "", store.MemoryStatusActive, memoryGlobalPromptLimit); err != nil {
+		log.Printf("zeokeel: load global memories: %v", err)
+	} else {
+		global = memoryPromptItems(list)
+	}
+	return workspace, global
+}
+
+// memoryPromptItems projects stored rows to prompt items, dropping blank
+// content (the prompt would omit it too, so it must not be marked used).
+func memoryPromptItems(list []store.Memory) []memoryPromptItem {
+	out := make([]memoryPromptItem, 0, len(list))
+	for _, memory := range list {
+		content := strings.TrimSpace(memory.Content)
+		if content == "" {
+			continue
+		}
+		out = append(out, memoryPromptItem{ID: memory.ID, Content: content})
+	}
 	return out
+}
+
+// memoryPromptTexts extracts the rendered note texts for the prompt.
+func memoryPromptTexts(items []memoryPromptItem) []string {
+	if len(items) == 0 {
+		return nil
+	}
+	out := make([]string, 0, len(items))
+	for _, item := range items {
+		out = append(out, item.Content)
+	}
+	return out
+}
+
+// memoryPromptIDs concatenates the injected row ids across scopes.
+func memoryPromptIDs(workspace, global []memoryPromptItem) []string {
+	if len(workspace)+len(global) == 0 {
+		return nil
+	}
+	out := make([]string, 0, len(workspace)+len(global))
+	for _, item := range workspace {
+		out = append(out, item.ID)
+	}
+	for _, item := range global {
+		out = append(out, item.ID)
+	}
+	return out
+}
+
+// markPromptMemoriesUsed records the memories a turn's prompt injected. It is a
+// package variable so tests can force a store failure without a corrupt
+// database; production failures are logged and never fail the turn.
+var markPromptMemoriesUsed = func(st *store.Store, ids []string) error {
+	return st.MarkMemoriesUsed(ids)
+}
+
+// memoryWriteModes resolves the configured auto-memory write modes. The memory
+// tool reads them per invocation and the prompt renders the policy section from
+// them, so a Settings change applies to the next turn/tool call without
+// rebuilding the agent. Unset or unreadable keys keep the documented defaults
+// (workspace auto, global suggest).
+func memoryWriteModes(st *store.Store) (workspace, global string) {
+	workspace, global = session.MemoryModeAuto, session.MemoryModeSuggest
+	if st == nil {
+		return workspace, global
+	}
+	if v, err := st.GetSetting(session.SettingMemoryWorkspaceMode); err == nil {
+		if mode := strings.TrimSpace(v); mode != "" {
+			workspace = mode
+		}
+	}
+	if v, err := st.GetSetting(session.SettingMemoryGlobalMode); err == nil {
+		if mode := strings.TrimSpace(v); mode != "" {
+			global = mode
+		}
+	}
+	return workspace, global
 }
 
 // currentWorkspaceID resolves the workspace the tool set should scope history// reads to: the sidebar's persisted selection, else the workspace whose root

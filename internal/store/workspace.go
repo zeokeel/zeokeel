@@ -181,6 +181,15 @@ func (s *Store) DeleteWorkspace(id string) error {
 		return fmt.Errorf("store: delete workspace %q: close sessions: %w", id, err)
 	}
 
+	// memories has no foreign key to workspaces (a row may be global), so the
+	// workspace's own notes are removed explicitly before the cascade deletes
+	// the workspace. The global scope is untouched.
+	if _, err := tx.Exec(
+		`DELETE FROM memories WHERE workspace_id = ? AND scope = ?`,
+		id, MemoryScopeWorkspace,
+	); err != nil {
+		return fmt.Errorf("store: delete workspace %q: delete memories: %w", id, err)
+	}
 	res, err := tx.Exec(`DELETE FROM workspaces WHERE id = ?`, id)
 	if err != nil {
 		return fmt.Errorf("store: delete workspace %q: %w", id, err)

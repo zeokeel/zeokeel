@@ -67,7 +67,7 @@ func TestMemorySectionBounds(t *testing.T) {
 	for i := 0; i < 25; i++ {
 		short = append(short, strings.Repeat("note-", 4)+string(rune('a'+i)))
 	}
-	lines, truncated := memoryBulletLines(short)
+	lines, truncated := memoryBulletLines(short, maxMemoryPromptItems, maxMemoryPromptChars)
 	if !truncated {
 		t.Fatal("25 notes did not report truncation")
 	}
@@ -85,7 +85,7 @@ func TestMemorySectionBounds(t *testing.T) {
 	for i := 0; i < 10; i++ {
 		long = append(long, strings.Repeat(string(rune('A'+i)), 1000))
 	}
-	lines, truncated = memoryBulletLines(long)
+	lines, truncated = memoryBulletLines(long, maxMemoryPromptItems, maxMemoryPromptChars)
 	if !truncated {
 		t.Fatal("oversized notes did not report truncation")
 	}
@@ -99,7 +99,7 @@ func TestMemorySectionBounds(t *testing.T) {
 
 	// A single oversized note is trimmed and marked instead of being dropped.
 	huge := strings.Repeat("x", 5000)
-	lines, truncated = memoryBulletLines([]string{huge})
+	lines, truncated = memoryBulletLines([]string{huge}, maxMemoryPromptItems, maxMemoryPromptChars)
 	if !truncated || len(lines) != 1 {
 		t.Fatalf("huge note lines = %d, truncated = %v", len(lines), truncated)
 	}

@@ -295,6 +295,9 @@ func (a *App) runSlashCommand(line string) {
 	case "/model":
 		a.draft = ""
 		a.openModelPickerFromCommand()
+	case "/memory":
+		a.draft = ""
+		a.openMemorySettings()
 	case "/goal":
 		a.draft = ""
 		a.runGoalCommand(commandArgs(line, name))
