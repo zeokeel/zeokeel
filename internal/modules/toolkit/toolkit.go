@@ -26,9 +26,13 @@ import (
 	"github.com/zeokeel/zeokeel-rig/tools/image"
 	"github.com/zeokeel/zeokeel-rig/tools/jobs"
 	"github.com/zeokeel/zeokeel-rig/tools/mcp"
+	"github.com/zeokeel/zeokeel-rig/tools/memory"
 	"github.com/zeokeel/zeokeel-rig/tools/misc"
+	"github.com/zeokeel/zeokeel-rig/tools/schedule"
+	"github.com/zeokeel/zeokeel-rig/tools/settings"
 	"github.com/zeokeel/zeokeel-rig/tools/terminal"
 	"github.com/zeokeel/zeokeel-rig/tools/web"
+	"github.com/zeokeel/zeokeel-rig/tools/worktree"
 
 	"github.com/zeokeel/zeokeel/internal/contracts"
 )
@@ -118,10 +122,18 @@ func Module() *module.Descriptor[Config] {
 			terminalOpts = append(terminalOpts, terminal.WithTransport(terminal.TransportPipe))
 		}
 		terminals := terminal.NewManager(terminalOpts...)
-		tools = append(tools, terminals.Tools()...)
+		tools = append(tools, terminals.ToolsWithList()...)
 
 		background := jobs.NewManager(jobs.WithPolicy(policy))
-		tools = append(tools, background.Tools()...)
+		tools = append(tools,
+			background.Tools()...,
+		)
+		tools = append(tools, memory.Tools(nil)...)
+		tools = append(tools, schedule.Tools(nil)...)
+		tools = append(tools, worktree.Tools(policy)...)
+		if settingsService, ok := ctx.Get(contracts.KeySettings); ok {
+			tools = append(tools, settings.Tools(settingsService)...)
+		}
 
 		if cfg.Network {
 			tools = append(tools, web.NewFetcher(policy))

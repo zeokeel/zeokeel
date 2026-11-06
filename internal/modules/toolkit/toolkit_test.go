@@ -21,6 +21,10 @@ func TestModuleProvidesRigToolset(t *testing.T) {
 	root := cordis.Root()
 	defer func() { _ = root.DisposeAll() }()
 
+	if _, err := root.Provide(contracts.KeySettings, contracts.SettingsService(testSettings{})); err != nil {
+		t.Fatalf("provide settings: %v", err)
+	}
+
 	registry := module.NewRegistry()
 	if err := registry.Register(Module()); err != nil {
 		t.Fatalf("register: %v", err)
@@ -40,8 +44,8 @@ func TestModuleProvidesRigToolset(t *testing.T) {
 		t.Fatalf("require toolkit: %v", err)
 	}
 	specs := tools.Specs()
-	if len(specs) < 20 {
-		t.Fatalf("registry tools = %d, want at least 20 (builtin/editor/image/terminal/jobs/misc)", len(specs))
+	if len(specs) < 25 {
+		t.Fatalf("registry tools = %d, want at least 25 (builtin/editor/image/terminal/jobs/misc/memory/schedule/worktree)", len(specs))
 	}
 	names := make(map[string]bool, len(specs))
 	for _, spec := range specs {
@@ -49,7 +53,8 @@ func TestModuleProvidesRigToolset(t *testing.T) {
 	}
 	for _, want := range []string{
 		"bash", "read_file", "str_replace_editor", "read_image",
-		"terminal_open", "job_start", "working_directory", "todo_write",
+		"terminal_open", "terminal_list", "job_start", "working_directory", "todo_write",
+		"memory", "schedule_create", "enter_worktree", "settings_get",
 	} {
 		if !names[want] {
 			t.Fatalf("registry lacks tool %q (have %v)", want, names)
@@ -151,3 +156,10 @@ func testMCPHTTPServer(t *testing.T) *httptest.Server {
 		_ = json.NewEncoder(w).Encode(map[string]any{"jsonrpc": "2.0", "id": request.ID, "result": result})
 	}))
 }
+
+// testSettings is the host settings seam used by the toolkit tests.
+type testSettings struct{}
+
+func (testSettings) Get(key, def string) string  { return def }
+func (testSettings) Set(key, value string) error { return nil }
+func (testSettings) All() map[string]string      { return nil }

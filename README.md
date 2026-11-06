@@ -44,11 +44,13 @@ go test ./...
   槽位渲染（`RenderSlot`）与工具卡注入（`RenderTool`）
 - ✅ 进程宿主 `internal/host` + 薄 `cmd/zeokeel`（17 行）+ `Makefile`
 - ✅ 示范模块：`appinfo`、`toolkit`（把 ZeoKeel Rig 工具集 + 沙盒策略组装成产品服务：
-  fs/shell/pwsh、editor、image、PTY terminal、jobs、web、远程 MCP over HTTP）、
+  fs/shell/pwsh、editor、image、PTY terminal、jobs、web、远程 MCP over HTTP、
+  memory/schedule/worktree/settings 等）、
   `hosttools`（产品侧 host 工具：ask_user/present/plan/goal/team，注册进共享工具注册表）、
   `ui/home`、`ui/about`、`ui/welcome`、`ui/toolcards`、`uikit`
-- ✅ SDK 依赖：`github.com/zeokeel/zeokeel-rig v0.5.0`（纯工具集：agent loop / subagent runner /
-  provider / sandbox / 全部工具 / gate / session；零第三方依赖）
+- ✅ SDK 依赖：`github.com/zeokeel/zeokeel-rig v0.6.0`（纯工具集：agent loop / subagent runner /
+  provider / sandbox / 66 个静态工具 + MCP/LSP / gate / session；零第三方依赖；
+  旧 agent 的 61 个工具名 100% 覆盖，`TestToolCatalogCoverage` 作为发布门禁）
 - ✅ `make ci` 全绿；uiroot 29 个 headless 测试（覆盖率 99.3%）；desktop/headless 装配集成测试；
   Xvfb 真窗口冒烟通过
 - ⬜ 逐模块迁移（后端 20 + UI 16，见 `docs/research/kernel-split/05-ui-module-map.md`）；
