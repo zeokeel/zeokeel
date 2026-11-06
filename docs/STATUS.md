@@ -43,6 +43,7 @@
 - **composer 推理强度菜单**：输入框下方模型菜单新增「推理强度」段（模型默认 + 该模型公布的档位；无论文模型不显示）。Session 级选择持久化到 `session.<id>.reasoning_effort` 并经 `Provider.SetReasoningEffort` 下一回合生效（无需重建 agent）；Home 的选择暂存到新会话；切换模型自动回到该模型默认档。
 - **上下文窗口**：`store.Model.context_window`（Settings 行显示 `1M ctx` 等）；会话 agent 的压缩预算按模型窗口的 80% 设置（预留输出/系统提示），模型无窗口时回退全局 `agent.context_budget_tokens`。
 - 新增/更新测试：`internal/modelcatalog`、store 上下文窗口往返/容错、provider 动态强度、runtime `SetReasoningEffort`/`SetContextBudget`、session 会话强度与预算、shell 对话框目录预填/校验、composer 强度菜单与 Home 暂存。
+- 附带修复（门禁发现）：Updates 页异步状态与渲染的并发读写（基线 `3565c97` 的 shell race job 红）——`updateMu` + 一致快照，见 BUGS AR-23；修复后 `CGO_ENABLED=1 go test -race -timeout 20m ./internal/shell` PASS（462.8s）。
 
 ## 3. 门禁（"绿"的定义）
 

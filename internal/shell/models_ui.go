@@ -171,7 +171,10 @@ type shellUIState struct {
 	importOpen bool
 
 	// Updates page state: the async check's progress and last result, the
-	// release found by the check, and the download/install progress.
+	// release found by the check, and the download/install progress. The
+	// check/install goroutines write it off the frame thread while the view
+	// reads it, so every access goes through updateMu (see updateSnapshot).
+	updateMu         sync.Mutex
 	updateChecking   bool
 	updateMessage    string
 	updateRelease    *updater.Release
@@ -179,11 +182,8 @@ type shellUIState struct {
 	updateInstalling bool
 	updateInstalled  bool
 	updateStaged     *updater.Staged
-	// updateProgress* are written by the download goroutine and read by the
-	// render; the mutex keeps the race detector quiet and the UI coherent.
-	updateProgressMu         sync.Mutex
-	updateProgressDownloaded int64
-	updateProgressTotal      int64
+	updateDownloaded int64
+	updateTotal      int64
 
 	// presetPickerOpen is the live header's FP-06 preset popover.
 	presetPickerOpen bool
@@ -202,6 +202,45 @@ type shellUIState struct {
 	// waiting for the UI thread.
 	sessionOpeningID   string
 	sessionOpenResults chan sessionOpenResult
+}
+
+// updatePageSnapshot is a consistent copy of the Updates page state for the
+// render: the check/install goroutines write the live fields off the frame
+// thread, so the view never reads them directly.
+type updatePageSnapshot struct {
+	checking   bool
+	message    string
+	release    *updater.Release
+	available  bool
+	installing bool
+	installed  bool
+	staged     *updater.Staged
+	downloaded int64
+	total      int64
+}
+
+// updateSnapshot copies the Updates page state under its mutex.
+func (st *shellUIState) updateSnapshot() updatePageSnapshot {
+	st.updateMu.Lock()
+	defer st.updateMu.Unlock()
+	return updatePageSnapshot{
+		checking:   st.updateChecking,
+		message:    st.updateMessage,
+		release:    st.updateRelease,
+		available:  st.updateAvailable,
+		installing: st.updateInstalling,
+		installed:  st.updateInstalled,
+		staged:     st.updateStaged,
+		downloaded: st.updateDownloaded,
+		total:      st.updateTotal,
+	}
+}
+
+// mutateUpdatePage runs fn with the Updates page state locked.
+func (st *shellUIState) mutateUpdatePage(fn func()) {
+	st.updateMu.Lock()
+	defer st.updateMu.Unlock()
+	fn()
 }
 
 // shellUIStates maps each App to its shell UI state.

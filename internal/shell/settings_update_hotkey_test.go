@@ -229,7 +229,7 @@ func TestUpdateNoFeedDisablesInstall(t *testing.T) {
 	if called {
 		t.Fatal("install seam ran without a feed")
 	}
-	if h.app.shellUI().updateInstalling {
+	if h.app.shellUI().updateSnapshot().installing {
 		t.Fatal("install state machine started without a feed")
 	}
 }

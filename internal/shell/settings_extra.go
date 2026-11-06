@@ -354,13 +354,13 @@ func (a *App) updatesSettingsPage(c *ui.Context, t *design.Tokens) {
 		a.shellInfoRow(c, t, a.menuText("Current version", "当前版本"), BuildVersionString(), false)
 		a.shellInfoRow(c, t, a.menuText("Update channel", "更新通道"),
 			a.menuText("Manual only", "仅手动"), false)
-		st := a.shellUI()
+		snap := a.shellUI().updateSnapshot()
 		a.settingsRow(c, t,
 			a.menuText("Check for updates", "检查更新"),
 			a.updateStatusText(),
 			settingsRowStyle{}, func() {
 				label := a.menuText("Check", "检查")
-				if st.updateChecking {
+				if snap.checking {
 					label = a.menuText("Checking…", "正在检查…")
 				}
 				button := ui.Button(c, label).Height(t.Theme().Space(8)).Label(label)
@@ -378,7 +378,7 @@ func (a *App) updatesSettingsPage(c *ui.Context, t *design.Tokens) {
 						button = button.Disabled(true)
 					}
 					button.OnClick(func() { a.runUpdateInstall(c) })
-					if st.updateInstalled {
+					if snap.installed {
 						quitLabel := a.menuText("Restart now", "立即重启")
 						quitButton := ui.Button(c, quitLabel).Height(t.Theme().Space(8)).
 							Label(quitLabel)

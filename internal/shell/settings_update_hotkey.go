@@ -111,14 +111,18 @@ func (a *App) defaultUpdateCheck(ctx context.Context) (*updater.Release, bool, e
 
 // runUpdateCheck starts one asynchronous check and renders "checking" until it
 // finishes. The goroutine only touches the shell state store plus Invalidate,
-// so a slow network never blocks the frame.
+// so a slow network never blocks the frame; every write to the shared Updates
+// page state holds updateMu because the next frame reads it concurrently.
 func (a *App) runUpdateCheck(c *ui.Context) {
 	st := a.shellUI()
+	st.updateMu.Lock()
 	if st.updateChecking {
+		st.updateMu.Unlock()
 		return
 	}
 	st.updateChecking = true
 	st.updateMessage = a.menuText("Checking for updates…", "正在检查更新…")
+	st.updateMu.Unlock()
 	if c != nil {
 		c.Invalidate()
 	}
@@ -135,6 +139,7 @@ func (a *App) runUpdateCheck(c *ui.Context) {
 			release, available, err = a.defaultUpdateCheck(ctx)
 		}
 		st := a.shellUI()
+		st.updateMu.Lock()
 		st.updateChecking = false
 		switch {
 		case errors.Is(err, updater.ErrDisabled):
@@ -157,6 +162,7 @@ func (a *App) runUpdateCheck(c *ui.Context) {
 			st.updateMessage = a.menuText("You are up to date.",
 				"当前已是最新版本。")
 		}
+		st.updateMu.Unlock()
 		if c != nil {
 			c.Invalidate()
 		}
@@ -166,28 +172,34 @@ func (a *App) runUpdateCheck(c *ui.Context) {
 // runUpdateInstall downloads and schedules the update found by the last check.
 // The download runs off the frame thread; the page shows progress and then the
 // restart prompt. A build without a feed or without a checked release keeps
-// the action disabled.
+// the action disabled. Shared state writes hold updateMu.
 func (a *App) runUpdateInstall(c *ui.Context) {
 	st := a.shellUI()
+	st.updateMu.Lock()
 	if st.updateInstalling || st.updateChecking {
+		st.updateMu.Unlock()
 		return
 	}
 	if !st.updateAvailable || st.updateRelease == nil {
+		st.updateMu.Unlock()
 		a.toastDeferred(c, a.menuText("Check for updates first.", "请先检查更新。"))
 		return
 	}
-	if a.updateFeedURL() == "" {
+	rel := st.updateRelease
+	feedURL := a.updateFeedURL()
+	if feedURL == "" {
+		st.updateMu.Unlock()
 		a.toastDeferred(c, a.menuText(
 			"No update feed is configured for this build; configure update.feed_url.",
 			"此版本未配置更新源；请配置 update.feed_url。"))
 		return
 	}
-	rel := st.updateRelease
 	st.updateInstalling = true
-	st.updateProgressDownloaded = 0
-	st.updateProgressTotal = 0
+	st.updateDownloaded = 0
+	st.updateTotal = 0
 	st.updateMessage = fmt.Sprintf(a.menuText("Downloading and installing %s…",
 		"正在下载并安装 %s…"), rel.Version)
+	st.updateMu.Unlock()
 	if c != nil {
 		c.Invalidate()
 	}
@@ -199,9 +211,9 @@ func (a *App) runUpdateInstall(c *ui.Context) {
 		var err error
 		progress := func(downloaded, total int64) {
 			st := a.shellUI()
-			st.updateProgressMu.Lock()
-			st.updateProgressDownloaded, st.updateProgressTotal = downloaded, total
-			st.updateProgressMu.Unlock()
+			st.updateMu.Lock()
+			st.updateDownloaded, st.updateTotal = downloaded, total
+			st.updateMu.Unlock()
 			if c != nil {
 				c.Invalidate()
 			}
@@ -221,6 +233,7 @@ func (a *App) runUpdateInstall(c *ui.Context) {
 			}
 		}
 		st := a.shellUI()
+		st.updateMu.Lock()
 		st.updateInstalling = false
 		switch {
 		case err != nil:
@@ -252,6 +265,7 @@ func (a *App) runUpdateInstall(c *ui.Context) {
 				"Update %s downloaded. Restart ZeoKeel to finish installing.",
 				"更新 %s 已下载。重启 ZeoKeel 完成安装。"), version)
 		}
+		st.updateMu.Unlock()
 		if c != nil {
 			c.Invalidate()
 		}
@@ -277,21 +291,21 @@ func (a *App) defaultUpdateInstall(ctx context.Context, rel *updater.Release) (*
 
 // updateInstallState describes the install action's label and enabled state.
 func (a *App) updateInstallState() (label string, enabled bool, hint string) {
-	st := a.shellUI()
+	snap := a.shellUI().updateSnapshot()
 	feed := a.updateFeedURL()
 	switch {
 	case feed == "":
 		return a.menuText("Download and install", "下载并安装"), false,
 			a.menuText("Configure update.feed_url (or ZEOKEEL_UPDATE_FEED) to enable updates.",
 				"请配置 update.feed_url（或 ZEOKEEL_UPDATE_FEED）以启用更新。")
-	case st.updateInstalling:
+	case snap.installing:
 		return a.menuText("Downloading…", "正在下载…"), false,
 			a.updateProgressHint()
-	case st.updateInstalled:
+	case snap.installed:
 		return a.menuText("Restart to finish", "重启完成安装"), false,
 			a.menuText("The downloaded update installs when ZeoKeel restarts.",
 				"重启 ZeoKeel 后完成安装。")
-	case !st.updateAvailable:
+	case !snap.available:
 		return a.menuText("Download and install", "下载并安装"), false,
 			a.menuText("Check for updates first.", "请先检查更新。")
 	default:
@@ -303,10 +317,8 @@ func (a *App) updateInstallState() (label string, enabled bool, hint string) {
 
 // updateProgressHint renders the download progress line while installing.
 func (a *App) updateProgressHint() string {
-	st := a.shellUI()
-	st.updateProgressMu.Lock()
-	downloaded, total := st.updateProgressDownloaded, st.updateProgressTotal
-	st.updateProgressMu.Unlock()
+	snap := a.shellUI().updateSnapshot()
+	downloaded, total := snap.downloaded, snap.total
 	base := a.menuText("The update downloads in the background; keep ZeoKeel open.",
 		"更新在后台下载，请保持 ZeoKeel 运行。")
 	if total <= 0 {
@@ -322,9 +334,8 @@ func (a *App) updateProgressHint() string {
 
 // updateStatusText is the current status line of the Updates page.
 func (a *App) updateStatusText() string {
-	st := a.shellUI()
-	if st.updateMessage != "" {
-		return st.updateMessage
+	if message := a.shellUI().updateSnapshot().message; message != "" {
+		return message
 	}
 	return a.menuText("Manual updates only.",
 		"仅支持手动更新。")
