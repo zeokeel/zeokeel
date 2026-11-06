@@ -267,6 +267,7 @@ var translations = map[string]Entry{
 	"session.interrupted":                                    {"Interrupted", "已中断"},
 	"session.new_session":                                    {"New Session", "新建会话"},
 	"session.no_inline_content":                              {"No inline content; open the path to view it.", "无内联内容；打开路径查看。"},
+	"session.memory":                                         {"Memory", "记忆"},
 	"session.more_actions":                                   {"More session actions", "更多会话操作"},
 	"session.phase.failed":                                   {"failed", "失败"},
 	"session.phase.idle":                                     {"idle", "空闲"},

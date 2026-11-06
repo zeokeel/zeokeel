@@ -262,3 +262,193 @@ func TestTrajectoryVirtualizedWheelScroll(t *testing.T) {
 		t.Fatalf("built texts = %d after scrolling a 400-row trace", got)
 	}
 }
+
+// ---------------------------------------------------------------------------
+// Session header tab keyboard navigation (REVIEW-MEMORY-UI P2-2).
+// ---------------------------------------------------------------------------
+
+// sessionTabChecked reports whether the header tab labeled label is the
+// checked tab in the accessibility tree.
+func sessionTabChecked(t *testing.T, tt *ui.Tester, label string) bool {
+	t.Helper()
+	role, states := memoryAccessState(t, tt, label)
+	if role != nativeRoleTab {
+		t.Fatalf("%q role = %d, want tab (%d)", label, role, nativeRoleTab)
+	}
+	return states&accessCheckedState != 0
+}
+
+// assertSelectedSessionTab checks that liveUIState and the accessibility tree
+// agree on the selected tab, and that no other header tab is checked.
+func assertSelectedSessionTab(t *testing.T, h *liveApp, tt *ui.Tester, target liveTab) {
+	t.Helper()
+	if want, got := h.app.liveTabPosition(target), h.app.uiState().tab; got != want {
+		t.Fatalf("liveUIState.tab = %d, want %q at position %d", got, h.app.liveTabLabel(target), want)
+	}
+	for _, tab := range h.app.liveTabsLayout() {
+		label := h.app.liveTabLabel(tab)
+		checked := sessionTabChecked(t, tt, label)
+		if tab == target && !checked {
+			t.Fatalf("tab %q is selected but not Checked", label)
+		}
+		if tab != target && checked {
+			t.Fatalf("tab %q is Checked while %q is selected", label, h.app.liveTabLabel(target))
+		}
+	}
+}
+
+// TestSessionTabsKeyboardNavigation drives the header tabs with Left, Right,
+// Home and End: every move updates liveUIState.tab and the RoleTab Checked
+// state together, wraps in both directions, and renders the matching pane.
+func TestSessionTabsKeyboardNavigation(t *testing.T) {
+	h := newMemoryApp(t)
+	tt := ui.NewTester(h.app.View, 1600, 1000)
+	tt.Frame()
+
+	// Clicking a tab focuses its list so the arrow keys belong to the tabs.
+	if err := tt.Click("Chat"); err != nil {
+		t.Fatalf("focus the Chat tab: %v", err)
+	}
+	tt.Frame()
+	assertSelectedSessionTab(t, h, tt, liveChat)
+	if !tt.Focused("Chat") {
+		t.Fatal("clicking the Chat tab did not focus the tab list")
+	}
+
+	// Right walks Chat → Trajectory → Memory and wraps back to Chat.
+	tt.Key(0, ui.KeyRight)
+	tt.Frame()
+	assertSelectedSessionTab(t, h, tt, liveTrajectory)
+	if tt.HasText("Workspace memory") {
+		t.Fatalf("Trajectory selection rendered the Memory pane: %v", tt.Texts())
+	}
+	tt.Key(0, ui.KeyRight)
+	tt.Frame()
+	assertSelectedSessionTab(t, h, tt, liveMemory)
+	if !tt.HasText("Workspace memory") {
+		t.Fatalf("Memory selection did not render the workspace pane: %v", tt.Texts())
+	}
+	tt.Key(0, ui.KeyRight)
+	tt.Frame()
+	assertSelectedSessionTab(t, h, tt, liveChat)
+
+	// Left wraps the other way: Chat → Memory.
+	tt.Key(0, ui.KeyLeft)
+	tt.Frame()
+	assertSelectedSessionTab(t, h, tt, liveMemory)
+
+	// Home and End jump to the first and last tab.
+	tt.Key(0, ui.KeyHome)
+	tt.Frame()
+	assertSelectedSessionTab(t, h, tt, liveChat)
+	tt.Key(0, ui.KeyEnd)
+	tt.Frame()
+	assertSelectedSessionTab(t, h, tt, liveMemory)
+}
+
+// TestSessionTabsKeyboardNavigationCodingViewOff pins the two-tab layout
+// (Chat | Memory) and its keyboard order once Trajectory is hidden, and that a
+// hidden selected Trajectory migrates to Chat while Memory keeps its identity.
+func TestSessionTabsKeyboardNavigationCodingViewOff(t *testing.T) {
+	h := newMemoryApp(t)
+	tt := ui.NewTester(h.app.View, 1600, 1000)
+	tt.Frame()
+
+	// Turn Show coding view off through Settings.
+	openMemorySettings(t, h, tt)
+	clickSettingsNav(t, tt, "General")
+	tt.Frame()
+	if err := tt.Click("Toggle show coding view"); err != nil {
+		t.Fatalf("turn Show coding view off: %v", err)
+	}
+	tt.Frame()
+	tt.Key(0, ui.KeyEscape)
+	tt.Frame()
+	if h.app.currentSettings().ShowCodingView {
+		t.Fatal("Show coding view did not persist off")
+	}
+	if len(h.app.liveTabsLayout()) != 2 {
+		t.Fatalf("visible tabs = %v, want Chat | Memory", h.app.liveTabsLayout())
+	}
+	if tt.HasText("Trajectory") {
+		t.Fatalf("Trajectory tab still rendered: %v", tt.Texts())
+	}
+
+	// Right/Left wrap between exactly Chat and Memory.
+	if err := tt.Click("Chat"); err != nil {
+		t.Fatalf("focus the Chat tab: %v", err)
+	}
+	tt.Frame()
+	assertSelectedSessionTab(t, h, tt, liveChat)
+	tt.Key(0, ui.KeyRight)
+	tt.Frame()
+	assertSelectedSessionTab(t, h, tt, liveMemory)
+	if !tt.HasText("Workspace memory") {
+		t.Fatalf("Memory selection did not render its pane: %v", tt.Texts())
+	}
+	tt.Key(0, ui.KeyRight)
+	tt.Frame()
+	assertSelectedSessionTab(t, h, tt, liveChat)
+	tt.Key(0, ui.KeyLeft)
+	tt.Frame()
+	assertSelectedSessionTab(t, h, tt, liveMemory)
+	tt.Key(0, ui.KeyHome)
+	tt.Frame()
+	assertSelectedSessionTab(t, h, tt, liveChat)
+	tt.Key(0, ui.KeyEnd)
+	tt.Frame()
+	assertSelectedSessionTab(t, h, tt, liveMemory)
+
+	// A Trajectory selection migrates to Chat when the coding view is hidden.
+	if err := tt.Click("Chat"); err != nil {
+		t.Fatalf("focus Chat again: %v", err)
+	}
+	openMemorySettings(t, h, tt)
+	clickSettingsNav(t, tt, "General")
+	tt.Frame()
+	if err := tt.Click("Toggle show coding view"); err != nil {
+		t.Fatalf("turn Show coding view back on: %v", err)
+	}
+	tt.Frame()
+	tt.Key(0, ui.KeyEscape)
+	tt.Frame()
+	if !tt.HasText("Trajectory") {
+		t.Fatalf("Trajectory tab did not return: %v", tt.Texts())
+	}
+	if err := tt.Click("Trajectory"); err != nil {
+		t.Fatalf("select Trajectory: %v", err)
+	}
+	tt.Frame()
+	assertSelectedSessionTab(t, h, tt, liveTrajectory)
+	openMemorySettings(t, h, tt)
+	clickSettingsNav(t, tt, "General")
+	tt.Frame()
+	if err := tt.Click("Toggle show coding view"); err != nil {
+		t.Fatalf("hide the coding view with Trajectory selected: %v", err)
+	}
+	tt.Frame()
+	tt.Key(0, ui.KeyEscape)
+	tt.Frame()
+	assertSelectedSessionTab(t, h, tt, liveChat)
+	if tt.HasText("Workspace memory") {
+		t.Fatalf("the hidden Trajectory migrated to Memory instead of Chat: %v", tt.Texts())
+	}
+
+	// Re-showing the coding view keeps Memory selected from its two-tab
+	// position (identity migration, not index reset).
+	if err := tt.Click("Memory"); err != nil {
+		t.Fatalf("select Memory in the two-tab layout: %v", err)
+	}
+	tt.Frame()
+	assertSelectedSessionTab(t, h, tt, liveMemory)
+	openMemorySettings(t, h, tt)
+	clickSettingsNav(t, tt, "General")
+	tt.Frame()
+	if err := tt.Click("Toggle show coding view"); err != nil {
+		t.Fatalf("show the coding view again: %v", err)
+	}
+	tt.Frame()
+	tt.Key(0, ui.KeyEscape)
+	tt.Frame()
+	assertSelectedSessionTab(t, h, tt, liveMemory)
+}

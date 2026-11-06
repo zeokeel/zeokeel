@@ -68,15 +68,10 @@ func (a *App) sessionLive(c *ui.Context, t *design.Tokens, snap *state.Snapshot)
 	}
 	design.Apply(ui.Column(c), t.Main()).Children(func() {
 		a.liveHeader(c, t, snap)
-		// Turning Show coding view off removes the Trajectory tab; if it was
-		// selected, fall back to Chat instead of rendering a hidden tab.
-		if !a.currentSettings().ShowCodingView && a.uiState().tab == int(liveTrajectory) {
-			a.uiState().tab = int(liveChat)
-		}
-		if a.uiState().tab == int(liveChat) {
-			a.teamGoalBanner(c, t)
-		}
-		if a.uiState().tab == int(liveTrajectory) {
+		// The stored tab position is resolved to a tab (migrating it when Show
+		// coding view changed the visible order) before the body is chosen.
+		switch a.selectedLiveTab() {
+		case liveTrajectory:
 			// The Trajectory tab draws the same body frame as Chat: one main
 			// column holding the pane above the composer. Sharing the frame
 			// keeps the composer's element identity (and its one-shot
@@ -90,7 +85,20 @@ func (a *App) sessionLive(c *ui.Context, t *design.Tokens, snap *state.Snapshot)
 				a.liveComposerArea(c, t, snap)
 			}, nil)
 			return
+		case liveMemory:
+			// The Memory tab manages the current workspace's memories in the
+			// same body frame as Chat/Trajectory, so the composer keeps its
+			// element identity (and its one-shot auto-focus) across tabs.
+			a.sessionBody(c, func() {
+				ui.Column(c).Key("session-memory").Grow(1).Children(func() {
+					a.sessionMemoryPane(c, t)
+				})
+			}, func() {
+				a.liveComposerArea(c, t, snap)
+			}, nil)
+			return
 		}
+		a.teamGoalBanner(c, t)
 		// The chat body: the transcript and the composer share one main
 		// column, and the Todo/Team panels dock beside it for the row's whole
 		// height and run to the window bottom like the right sidebar, so the

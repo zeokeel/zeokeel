@@ -297,7 +297,7 @@ func (a *App) runSlashCommand(line string) {
 		a.openModelPickerFromCommand()
 	case "/memory":
 		a.draft = ""
-		a.openMemorySettings()
+		a.openMemoryFromCommand()
 	case "/goal":
 		a.draft = ""
 		a.runGoalCommand(commandArgs(line, name))

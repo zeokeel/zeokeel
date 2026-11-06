@@ -23,6 +23,9 @@ type liveTab int
 const (
 	liveChat liveTab = iota
 	liveTrajectory
+	// liveMemory is the session's workspace-scope memory manager, always
+	// present (unlike Trajectory, which follows Show coding view).
+	liveMemory
 )
 
 // liveUIState is the live-only interaction state of one App: the selected tab,
@@ -31,9 +34,13 @@ const (
 // defined in app.go, which this change does not own. The static shell
 // (App.Ctrl == nil) never reads it, so the pixel baseline is untouched.
 type liveUIState struct {
-	tab         int
-	expandedRaw map[int64]bool
-	artifactRaw map[string]bool
+	tab int
+	// liveTabCount is the number of header tabs the last frame laid out. When
+	// Show coding view changes the count, the stored position is migrated by
+	// tab identity so the selected tab does not jump to an unrelated one.
+	liveTabCount int
+	expandedRaw  map[int64]bool
+	artifactRaw  map[string]bool
 
 	// questionDraft is the text input of the pending ask_user card. The
 	// questionErr is shown below it when the controller rejects the answer.
@@ -81,40 +88,97 @@ func (a *App) uiState() *liveUIState {
 	return actual.(*liveUIState)
 }
 
-// liveTabs is the clickable Chat/Trajectory row. The active tab carries the 2px
-// accent underline; switching tabs only changes liveUIState, so the transcript
-// and composer keep their state. The Trajectory tab is the "coding view" that
-// Settings > General > Show coding view controls, so it is absent while that
-// setting is off.
-func (a *App) liveTabs(c *ui.Context, t *design.Tokens) {
-	st := a.uiState()
-	n := 1
+// liveTabsLayout is the header tab order for the current settings: Chat,
+// then Trajectory while Show coding view is on, then Memory always. The
+// pre-M4 order (Chat | Trajectory) is the prefix of this list, so a stored
+// position keeps its meaning while the coding view is on.
+func (a *App) liveTabsLayout() []liveTab {
+	tabs := make([]liveTab, 0, 3)
+	tabs = append(tabs, liveChat)
 	if a.currentSettings().ShowCodingView {
-		n = 2
+		tabs = append(tabs, liveTrajectory)
 	}
-	if st.tab < 0 || st.tab >= n {
+	return append(tabs, liveMemory)
+}
+
+// liveTabPosition returns the position of target in the current header, -1
+// while the tab is hidden.
+func (a *App) liveTabPosition(target liveTab) int {
+	for index, tab := range a.liveTabsLayout() {
+		if tab == target {
+			return index
+		}
+	}
+	return -1
+}
+
+// selectedLiveTab resolves the stored tab position to a tab, migrating the
+// position when the visible layout changed (Show coding view toggled) so the
+// selection follows the tab's identity rather than its index: Memory moves
+// from position 2 to 1 when Trajectory disappears, and a selected Trajectory
+// falls back to Chat when it is hidden.
+func (a *App) selectedLiveTab() liveTab {
+	st := a.uiState()
+	layout := a.liveTabsLayout()
+	if st.liveTabCount > 0 && st.liveTabCount != len(layout) {
+		if len(layout) < st.liveTabCount {
+			switch st.tab {
+			case int(liveMemory):
+				st.tab = int(liveMemory) - 1
+			case int(liveTrajectory):
+				st.tab = int(liveChat)
+			}
+		} else if st.tab == int(liveMemory)-1 {
+			st.tab = int(liveMemory)
+		}
+	}
+	st.liveTabCount = len(layout)
+	if st.tab < 0 || st.tab >= len(layout) {
 		st.tab = int(liveChat)
 	}
+	return layout[st.tab]
+}
+
+// liveTabs is the clickable Chat/Trajectory/Memory row. The active tab carries
+// the 2px accent underline; switching tabs only changes liveUIState, so the
+// transcript, composer and Memory pane keep their state. The Trajectory tab is
+// the "coding view" that Settings > General > Show coding view controls, so it
+// is absent while that setting is off; Memory is always present.
+func (a *App) liveTabs(c *ui.Context, t *design.Tokens) {
+	st := a.uiState()
+	layout := a.liveTabsLayout()
+	a.selectedLiveTab() // migrate/clamp the position before TabsBase binds it
 	// TabsBase provides RoleTabList, a horizontal focus group, per-tab
 	// Checked state and the Left/Right/Home/End keys; the artwork below is
 	// the brand's quiet tab: label plus a small accent underline.
 	th := t.Theme()
-	tabs := ui.TabsBase(c, &st.tab, n)
+	tabs := ui.TabsBase(c, &st.tab, len(layout))
 	tabs.List.Height(sessTabsH).Margin(th.Space(2), 0, 0, 0).
 		Padding(0, 0, 0, th.Space(2)).
 		Gap(th.Space(9)).AlignItems(ui.Stretch).Children(func() {
-		a.liveTabButton(c, t, tabs, 0, liveChat, a.T("session.chat"))
-		if n > 1 {
-			a.liveTabButton(c, t, tabs, 1, liveTrajectory, a.T("session.trajectory"))
+		for index, tab := range layout {
+			a.liveTabButton(c, t, tabs, index, tab, a.liveTabLabel(tab))
 		}
 	})
+}
+
+// liveTabLabel is the localized header label of one tab.
+func (a *App) liveTabLabel(tab liveTab) string {
+	switch tab {
+	case liveTrajectory:
+		return a.T("session.trajectory")
+	case liveMemory:
+		return a.T("session.memory")
+	default:
+		return a.T("session.chat")
+	}
 }
 
 // liveTabButton draws one header tab through the TabsBase part, which owns
 // selection, checked state and arrow-key navigation.
 func (a *App) liveTabButton(c *ui.Context, t *design.Tokens, tabs ui.TabsParts, index int, target liveTab, label string) {
 	th := t.Theme()
-	active := a.uiState().tab == int(target)
+	active := a.uiState().tab == index
 	row := tabs.Tab(index).Height(sessTabsH).PaddingX(0).Gap(0).
 		Label(label).Transition(design.ColorTransition())
 	row.Children(func() {

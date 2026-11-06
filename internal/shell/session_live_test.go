@@ -881,3 +881,116 @@ func assertChatTurnOrder(t *testing.T, app *App) {
 		}
 	}
 }
+
+// ---------------------------------------------------------------------------
+// Composer draft and element identity across session tabs (P2-3).
+// ---------------------------------------------------------------------------
+
+// sessionTextNode returns the accessibility node of one labeled text field,
+// including its stable element ID and current value.
+func sessionTextNode(t *testing.T, tt *ui.Tester, label string) memoryAccessNode {
+	t.Helper()
+	for _, node := range memoryAccessNodes(t, tt) {
+		if node.Label == label && node.Role == nativeRoleTextField {
+			return node
+		}
+	}
+	t.Fatalf("accessibility tree has no text field labeled %q", label)
+	return memoryAccessNode{}
+}
+
+// TestComposerDraftAndIdentityAcrossTabs pins the shared sessionBody frame: a
+// draft typed on Chat survives Chat → Trajectory → Memory → Chat, the composer
+// keeps its element identity (no rebuild, so its one-shot AutoFocus cannot
+// re-fire and steal the focus from the clicked tab), and opening Settings and
+// returning keeps both the draft and the session tab selection.
+func TestComposerDraftAndIdentityAcrossTabs(t *testing.T) {
+	h := newMemoryApp(t)
+	tt := ui.NewTester(h.app.View, 1600, 1000)
+	tt.Frame()
+
+	// Type a draft on Chat without sending it.
+	if err := tt.Click("Composer input"); err != nil {
+		t.Fatalf("focus the composer: %v", err)
+	}
+	const draft = "draft that must survive tab switches"
+	tt.Type(draft)
+	tt.Frame()
+	composer := sessionTextNode(t, tt, "Composer input")
+	if composer.Value != draft {
+		t.Fatalf("composer value after typing = %q, want %q", composer.Value, draft)
+	}
+	if !tt.Focused("Composer input") {
+		t.Fatal("the composer is not focused after typing")
+	}
+
+	// assertKept checks the shared composer after a tab switch: same element
+	// ID (not rebuilt), same draft, and the focus stayed on the clicked tab so
+	// the composer's one-shot AutoFocus did not fire again.
+	assertKept := func(step string) {
+		t.Helper()
+		node := sessionTextNode(t, tt, "Composer input")
+		if node.ID != composer.ID {
+			t.Fatalf("%s: composer element rebuilt (id %d → %d)", step, composer.ID, node.ID)
+		}
+		if node.Value != draft {
+			t.Fatalf("%s: composer value = %q, want the draft %q", step, node.Value, draft)
+		}
+		if h.app.draft != draft {
+			t.Fatalf("%s: app draft = %q, want %q", step, h.app.draft, draft)
+		}
+		if tt.Focused("Composer input") {
+			t.Fatalf("%s: the rebuilt composer's AutoFocus stole the focus from the tab", step)
+		}
+	}
+
+	for _, step := range []struct {
+		tab     string
+		pane    string
+		visible bool
+	}{
+		{"Trajectory", "Trajectory", true},
+		{"Memory", "Workspace memory", true},
+		{"Chat", "session-chat", false},
+	} {
+		step := step
+		if err := tt.Click(step.tab); err != nil {
+			t.Fatalf("switch to %s: %v", step.tab, err)
+		}
+		tt.Frame()
+		tt.Frame() // an extra frame would expose a re-fired one-shot AutoFocus
+		if !tt.Focused(step.tab) {
+			t.Fatalf("after clicking %s, the focus is not on the tab", step.tab)
+		}
+		if step.tab == "Memory" && !tt.HasText(step.pane) {
+			t.Fatalf("Memory pane not rendered: %v", tt.Texts())
+		}
+		if step.tab == "Trajectory" && !tt.HasText("Trajectory") {
+			t.Fatalf("Trajectory pane not rendered: %v", tt.Texts())
+		}
+		assertKept("after switching to " + step.tab)
+	}
+
+	// Opening Settings from the Memory tab and returning keeps the tab
+	// selection and the composer draft/identity.
+	if err := tt.Click("Memory"); err != nil {
+		t.Fatalf("select the Memory tab: %v", err)
+	}
+	tt.Frame()
+	openMemorySettings(t, h, tt)
+	if h.app.Screen != Settings {
+		t.Fatalf("settings overlay did not open: screen %v", h.app.Screen)
+	}
+	tt.Key(0, ui.KeyEscape)
+	tt.Frame()
+	if h.app.Screen != Session {
+		t.Fatalf("Escape left screen %v, want Session", h.app.Screen)
+	}
+	if want, got := h.app.liveTabPosition(liveMemory), h.app.uiState().tab; got != want {
+		t.Fatalf("session tab after returning from Settings = %d, want Memory (%d)", got, want)
+	}
+	if !tt.HasText("Workspace memory") {
+		t.Fatalf("Memory pane not restored after Settings: %v", tt.Texts())
+	}
+	assertKept("after returning from Settings")
+}
