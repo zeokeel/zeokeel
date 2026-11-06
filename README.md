@@ -48,10 +48,10 @@ go test ./...
   memory/schedule/worktree/skill/team_task/settings 等）、
   `hosttools`（产品侧 host 工具：ask_user/present/plan/goal/team，注册进共享工具注册表）、
   `ui/home`、`ui/about`、`ui/welcome`、`ui/toolcards`、`uikit`
-- ✅ SDK 依赖：`github.com/zeokeel/zeokeel-rig v0.7.0`（纯工具集：agent loop / subagent runner /
-  provider / sandbox / 73 个静态工具 + MCP/LSP / gate / session；零第三方依赖；
-  旧 agent 61 个工具名 + 现代工具面 61 个名称 100% 覆盖，`TestToolCatalogCoverage`
-  与 `TestModernToolSurface` 双重门禁）
+- ✅ SDK 依赖：`github.com/zeokeel/zeokeel-rig v0.8.0`（纯工具集：agent loop / subagent runner
+  + fork + 结构化输出 / provider / sandbox / 74 个静态工具 + MCP(含 resource templates)/LSP /
+  gate / session；零第三方依赖；旧 agent 61 个工具名 + 现代工具面 62 个名称 100% 覆盖，
+  `TestToolCatalogCoverage` 与 `TestModernToolSurface` 双重门禁）
 - ✅ `make ci` 全绿；uiroot 29 个 headless 测试（覆盖率 99.3%）；desktop/headless 装配集成测试；
   Xvfb 真窗口冒烟通过
 - ⬜ 逐模块迁移（后端 20 + UI 16，见 `docs/research/kernel-split/05-ui-module-map.md`）；
