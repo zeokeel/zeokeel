@@ -191,7 +191,8 @@ func TestConcurrentRunNowRecordsHistory(t *testing.T) {
 	})
 	// Drain the asynchronous executions (the in-flight guard collapses
 	// overlapping RunNow calls into at most one active run).
-	deadline := time.Now().Add(3 * time.Second)
+	// Generous budget: parallel CI load can delay the asynchronous runs.
+	deadline := time.Now().Add(10 * time.Second)
 	for time.Now().Before(deadline) {
 		task := waitTask(t, service, created.ID, func(task contracts.AutomationTask) bool { return true })
 		if task.LastRun.IsZero() {

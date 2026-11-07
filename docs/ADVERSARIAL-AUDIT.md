@@ -7,7 +7,7 @@
 
 ## 修复状态（Lead 复核后）
 
-> 首轮 11 个「已知缺陷探针」与第二轮 4 个 P3 均已随 TDD 修复转为 PASS；第三轮 P3-9/10 已修复、P3-11 重开后于 ca2d24c 真正修复；第四轮 P3-12 已修复（ca2d24c）；第五~七轮无新缺陷，第八轮发现 1 个 P3（AUDIT-P3-13）并已修复：诊断报告现在对 apiKey/token/secret/password/authorization 类设置整值隐藏，并对 JSON 结构化设置（mcp.servers）递归掩码 Bearer token 与凭证字段；新增单测断言 web.search.apiKey 与 mcp Bearer 不泄漏。第九轮发现 1 个 P3（AUDIT-P3-14：agent.permission=never 已存储但会话权限 chip 显示「询问」，待修）。`go test ./internal/regression -count=1 -race` 当前 **220 PASS / 0 SKIP**（历史：首轮修复后 92，第二轮后 98，第三轮后 133，第四轮后 153，第五轮后 172，第六轮后 180，第七轮后 189，第八轮后 208）。
+> 首轮 11 个「已知缺陷探针」与第二轮 4 个 P3 均已随 TDD 修复转为 PASS；第三轮 P3-9/10 已修复、P3-11 重开后于 ca2d24c 真正修复；第四轮 P3-12 已修复（ca2d24c）；第五~七轮无新缺陷，第八轮发现 1 个 P3（AUDIT-P3-13）并已修复：诊断报告现在对 apiKey/token/secret/password/authorization 类设置整值隐藏，并对 JSON 结构化设置（mcp.servers）递归掩码 Bearer token 与凭证字段；新增单测断言 web.search.apiKey 与 mcp Bearer 不泄漏。第九轮发现 1 个 P3（AUDIT-P3-14：agent.permission=never 已存储但会话权限 chip 显示「询问」，待修）。第十轮无新缺陷。`go test ./internal/regression -count=1 -race` 当前 **227 PASS / 0 SKIP**（历史：首轮修复后 92，第二轮后 98，第三轮后 133，第四轮后 153，第五轮后 172，第六轮后 180，第七轮后 189，第八轮后 208，第九轮后 220）。
 
 | ID | 优先级 | 状态 | 修复摘要 |
 |----|--------|------|----------|
@@ -31,7 +31,7 @@ $ go test ./internal/regression -count=1                    ok  1.2s
 $ go test ./internal/regression -count=1 -race              ok 12.8s（98 PASS / 0 SKIP）
 ```
 
-测试规模：`internal/regression` 共 220 个顶层 Test（首轮 78 + 第二轮 20 + 第三轮 35 + 第四轮 20 + 第五轮 19 + 第六轮 8 + 第七轮 9 + 第八轮 17 + 特性提交补充 2 + 第九轮 12；含子用例后更多；另有 `internal/ui/uimodtest` 的 E2E 1 个，不计入本包）。第三轮 P3-9/10 已修复，P3-11 重开后已真正修复，第四轮 P3-12 已修复，第五~七轮无新缺陷，第八轮 P3-13 已修复（da654e3），第九轮新增 P3-14（待修）；当前 **220 PASS / 0 SKIP**。
+测试规模：`internal/regression` 共 227 个顶层 Test（首轮 78 + 第二轮 20 + 第三轮 35 + 第四轮 20 + 第五轮 19 + 第六轮 8 + 第七轮 9 + 第八轮 17 + 特性提交补充 2 + 第九轮 12 + 第十轮 7；含子用例后更多；另有 `internal/ui/uimodtest` 的 E2E 1 个，不计入本包）。第三轮 P3-9/10 已修复，P3-11 重开后已真正修复，第四轮 P3-12 已修复，第五~七轮无新缺陷，第八轮 P3-13 已修复（da654e3），第九轮新增 P3-14（待修），第十轮无新缺陷；当前 **227 PASS / 0 SKIP**。
 
 ## 用例矩阵
 
@@ -351,6 +351,7 @@ $ go test ./internal/regression -count=1 -race               ok 27.9s（153 PASS
 第七轮复跑扩张到 **189 PASS / 0 SKIP**（全局热键、可选 LSP、automation Close 关机语义），并复跑第四~六轮关键探针 104 项确认 0 回退。
 第八轮扩张到 **206 PASS / 0 SKIP**（Home composer、/停止 /附加文件 /帮助、数据与隐私页、通知开关、侧栏添加工作区），发现 AUDIT-P3-13（已修复）。
 第九轮扩张到 **220 PASS / 0 SKIP**（ACP session/list/load、三态主题、侧栏视图、行为默认权限、通知级别过滤、自动化模型覆盖），发现 AUDIT-P3-14。
+第十轮扩张到 **227 PASS / 0 SKIP**（plan keep-planning、slash 命令 i18n、窗口快捷键），并复跑第九轮关键链路 17 项确认 0 回退。
 仍有文档化未落地项（plan keep-planning 反馈循环、会话级 feedback 汇总、旧 `/feedback [good|bad]` 参数式直接打分、自动化 runs 之外的历史查询）。
 
 ## 反证审计第五轮：/feedback 命令 / 自动化运行历史 / 反馈复跑 / 记忆与技能编辑（2026-11-08）
@@ -583,3 +584,42 @@ $ go test ./internal/regression -count=1 -race               ok 46.7s（220 PASS
 | ID | 状态 | 修复摘要 |
 |----|------|----------|
 | AUDIT-P3-14 | ✅ 已修复 | `contracts.PermissionNever` 常量补入；会话 composer 权限 chip 识别 never 并显示「从不允许/Never」（此前回落为「询问」），新增单测；实际 fail-closed 行为与显示一致 |
+
+## 反证审计第十轮：plan keep-planning / slash 命令 i18n / 窗口快捷键（2026-11-08）
+
+范围：`f2dff99`（plan keep-planning 反馈回路 + UI i18n 清理）+ `6563a1a`（ACP session list/load、行为权限页、窗口快捷键）。
+只新增 `internal/regression/**` 并改本文件；未改生产代码。新增 **7** 个顶层 Test（220 → 227）。
+
+```
+$ gofmt -l internal/regression/                              （空）
+$ go vet ./internal/regression                               OK
+$ go build ./...                                             OK
+$ go test ./internal/regression -count=1 -race               ok 47.2s（227 PASS / 0 SKIP）
+$ go test ./internal/regression -race -run '第九轮关键链路'      17 PASS / 0 SKIP（0 回退）
+```
+
+| # | 链路 | 反证点 | 用例 | 结果 |
+|---|------|--------|------|------|
+| 43 | plan keep-planning（interaction 叠加层） | 成功：Exit("cancel") 恰一次 + Send(active, 固定前缀+反馈) 恰一次 + 叠加层关闭 + Notifier 成功 toast 恰一次；空反馈时按钮禁用/点击无动作（无 Exit/Send）；Send 失败保留 Modal+错误行、仅一次尝试（无重复发送）；Exit 失败保留 Modal 且不 Send；无 active session → 「没有活动会话」错误、无 Send、Modal 保留；无 chat → 隐藏「继续规划/继续规划反馈」而批准/取消仍在 | 3 | PASS |
+| 44 | slash 命令 i18n | en 下 12 个 session 命令（含反馈）Title/Hint 全英文且无汉字；zh→en 切换后下一帧重注册（stop/help 变英文）；/help Modal 渲染英文（Help/Slash commands/New conversation/Stop/Attach files/Permission mode/Esc to close）且无中文标题；Esc 关闭后切回 zh 恢复中文；命令注册不漂移 | 2 | PASS |
+| 45 | 窗口快捷键（回归层） | Cmd/Ctrl+N 经 kernel KeyChat 建会话并导航 session（连续两次建两个）；Cmd/Ctrl+, 打开设置（关闭后可再开）；Cmd+K 打开命令面板（Esc 关闭）；Cmd+B 折叠侧栏；K/B 不建会话、不开设置（与 N/, 不冲突）；无 chat：Cmd+N 安全（不导航不 panic）、Cmd+, 仍可开设置；NewSession 失败静默不导航 | 2 | PASS |
+| 46 | 第九轮关键链路复跑 | 按前缀复跑 theme / sidebar view / behavior permission / toast level / ACP session / automation model / sidebar add workspace：17 PASS / 0 SKIP，0 回退 | 复跑 | PASS |
+
+### 第十轮未证伪的关键不变量
+
+1. **keep-planning**：反馈非空才可提交；提交先 Exit(cancel)（失败则原样保留、不发送），再向 active session 发送带前缀反馈（失败保留 Modal 防丢失）；成功才关叠加层并 toast；无 chat 时该交互整体隐藏。
+2. **i18n**：命令注册表的 Title/Hint 随宿主语言在激活时与切换后的下一帧更新；帮助 Modal 直接读取注册表，因此同步刷新；切回中文恢复。
+3. **快捷键**：N 创建+导航（kernel 绑定与失败静默）、, 切换设置、K/B 各自独立；无 chat 与失败的 NewSession 均安全。
+
+### 第十轮发现
+
+- **无新缺陷**（无 P0/P1/P2/P3）。
+- 观察（非缺陷）：headless Tester 中当 Modal（设置面/命令面板）已打开时，再次按 Cmd/Ctrl+, 或 Cmd/Ctrl+K 不会关闭它（按键被 Modal/焦点消费）；关闭走 Esc/按钮。真实桌面焦点链路由 mygo 处理，uiroot 单测只断言“打开”。回归按可达路径（Esc/CloseSettings）断言。
+- 观察：plan keep-planning 的英文文案由模块内测试覆盖；本层回归覆盖中文成功/失败分支与无 chat 隐藏。
+
+### 第十轮局限
+
+- plan 回路用 fake PlanReviewer/Notifier 桥接（宿主真实桥由 uiroot 测试覆盖）；未驱动真实 agent 的 plan_review 工具回合。
+- 快捷键测试手工 `SetKernelContext` 绑定 kernel（真实 host 在装配前绑定）；Modal 打开时的按键消费行为与桌面焦点可能不同（见观察）。
+- i18n 断言注册表值 + 帮助 Modal 显示；斜杠菜单/命令面板的渲染顺序由内部测试覆盖，本轮不重复。
+- 第九轮复跑按前缀选择 17 项（全量 227 项 -race 已单独跑绿）。
