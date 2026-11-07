@@ -11,6 +11,8 @@
 package home
 
 import (
+	"strings"
+
 	"github.com/egoist/mygo/ui"
 	cordis "github.com/zeokeel/zeokeel-kernel"
 	"github.com/zeokeel/zeokeel-kernel/module"
@@ -55,6 +57,23 @@ func Module() *module.Descriptor[Config] {
 		if err != nil {
 			return err
 		}
+		// Chat is optional so the Home screen still loads in products without
+		// the agent backend; with it the recent-session list becomes real.
+		chat, _ := ctx.Get(contracts.KeyChat)
+		if chat != nil {
+			unsubscribe, err := chat.Subscribe(func(string) {
+				runtime.Post(func() { runtime.Invalidate() })
+			})
+			if err != nil {
+				return err
+			}
+			if _, err := ctx.Effect(func() cordis.Effect {
+				return cordis.Effect{cordis.CleanupOf(unsubscribe)}
+			}); err != nil {
+				unsubscribe()
+				return err
+			}
+		}
 		title := firstNonEmpty(cfg.Title, "首页")
 		greeting := firstNonEmpty(cfg.Greeting, "编译期模块化的桌面 AI agent。")
 		composerPlaceholder := firstNonEmpty(cfg.ComposerPlaceholder, "向 ZeoKeel 提问…")
@@ -82,13 +101,21 @@ func Module() *module.Descriptor[Config] {
 						})
 					})
 					region(c, runtime, contracts.SlotHomeComposer, func(c *ui.Context) {
-						ui.Row(c).FillWidth().Padding(12).Background(c.Theme().Surface).Radius(8).Children(func() {
+						ui.Row(c).FillWidth().Padding(12).Background(c.Theme().Surface).Radius(8).
+							AlignItems(ui.Center).Gap(10).Children(func() {
 							ui.Text(c, composerPlaceholder).FontSize(13).TextColor(c.Theme().TextMuted)
+							ui.Spacer(c).Grow(1)
+							if chat != nil && ui.PrimaryButton(c, "开始新对话").Clicked() {
+								if _, err := chat.NewSession(""); err == nil {
+									_ = nav.Push("session")
+									runtime.Invalidate()
+								}
+							}
 						})
 					})
 					uikit.Section(c, recentTitle, func(c *ui.Context) {
 						region(c, runtime, contracts.SlotHomeRecent, func(c *ui.Context) {
-							uikit.EmptyState(c, recentEmpty)
+							buildRecent(c, chat, nav, runtime, recentEmpty)
 						})
 					})
 					uikit.Section(c, "工具卡", func(c *ui.Context) {
@@ -119,6 +146,39 @@ func Module() *module.Descriptor[Config] {
 		AddRequires(module.Requires(contracts.KeyNavigator)).
 		AddRequires(module.Requires(contracts.KeyAppInfo)).
 		WithName("ZeoKeel Home screen")
+}
+
+// buildRecent renders the recent-session list with native buttons; without the
+// chat service (or with no sessions yet) it shows the configured empty state.
+func buildRecent(c *ui.Context, chat contracts.ChatService, nav contracts.Navigator,
+	runtime contracts.UIRuntime, empty string) {
+	if chat == nil {
+		uikit.EmptyState(c, empty)
+		return
+	}
+	sessions := chat.Sessions()
+	if len(sessions) == 0 {
+		uikit.EmptyState(c, empty)
+		return
+	}
+	if len(sessions) > 5 {
+		sessions = sessions[:5]
+	}
+	ui.Column(c).FillWidth().Gap(6).Children(func() {
+		for _, info := range sessions {
+			info := info
+			label := strings.TrimSpace(info.Title)
+			if label == "" {
+				label = "未命名会话"
+			}
+			button := ui.Button(c, label).FillWidth()
+			button.OnClick(func() {
+				_ = chat.SetActiveSession(info.ID)
+				_ = nav.Push("session")
+				runtime.Invalidate()
+			})
+		}
+	})
 }
 
 // region renders one injection point. When nothing is registered yet it draws

@@ -71,9 +71,13 @@ go test ./...
   - 装配：desktop 15 实例、headless 6 实例（store/approvals 后端 + approval UI）；
     E2E 覆盖「工具调用→审批弹窗→允许→工具执行→工具卡/轨迹展示→重启恢复」
   - 截图：`docs/screenshots/p1-approval.png`、`p1-chat.png`、`p1-trajectory.png`
+- ✅ P2（第一批）：Home 接入真实最近会话 + "开始新对话"；设置新增「外观」页（native Toggle 深色模式 +
+  native Select 界面语言，写 `ui.theme.dark`/`ui.language` 并立即生效）；模型页新增 DeepSeek/OpenAI/
+  Ollama 快速预设（native Button 填 draft，保存生效）。截图：`docs/screenshots/p2-home.png`、
+  `p2-appearance.png`
 - ⬜ 后续阶段见 [docs/PRODUCT-REBUILD-PLAN.md](docs/PRODUCT-REBUILD-PLAN.md)：
-  P2 composer 增强（slash/@/附件/图片）/设置扩展（模型目录/外观/语言）→ P3 memory/skills/
-  automation/插件/workspace diff/搜索/fork/export → P4 ACP/热键/导入/更新/诊断
+  P2 剩余（composer slash 命令/@ 提及/附件与图片）→ P3 memory/skills/automation/插件/
+  workspace diff/搜索/fork/export → P4 ACP/热键/导入/更新/诊断
 - ✅ `make ci` 全绿；uiroot 29 个 headless 测试（覆盖率 99.3%）；desktop/headless 装配集成测试；
   Xvfb 真窗口冒烟通过
 - ⬜ 逐模块迁移（后端 20 + UI 16，见 `docs/research/kernel-split/05-ui-module-map.md`）：

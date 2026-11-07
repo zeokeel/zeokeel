@@ -32,7 +32,104 @@ const (
 	PageID      = "model"
 	PageSection = "模型"
 	PageOrder   = 10
+
+	// AppearancePageID is the appearance page identity (theme + language).
+	AppearancePageID = "appearance"
+	// AppearancePageOrder places the page after the model page.
+	AppearancePageOrder = 20
 )
+
+// appearanceState is the appearance page's UI-local state.
+type appearanceState struct {
+	dark      bool
+	language  string
+	status    string
+	statusErr bool
+}
+
+// buildAppearanceLabels is the resolved copy of the appearance page.
+type buildAppearanceLabels struct {
+	title         string
+	themeLabel    string
+	languageLabel string
+	saveLabel     string
+}
+
+// languageOptions maps the selector's display strings to locale codes.
+var languageOptions = []string{"中文", "English"}
+
+func languageCode(choice string) string {
+	if choice == "English" {
+		return "en"
+	}
+	return "zh"
+}
+
+func languageChoice(code string) string {
+	if code == "en" {
+		return "English"
+	}
+	return "中文"
+}
+
+// buildAppearancePage builds the theme/language page with native controls.
+func buildAppearancePage(c *ui.Context, state *appearanceState, store contracts.SettingsService,
+	theme contracts.ThemeService, locale contracts.LocaleService, labels buildAppearanceLabels) {
+	ui.Column(c).FillWidth().Gap(14).Children(func() {
+		uikit.PageHeader(c, labels.title, "主题与界面语言；保存后立即生效并写入产品设置。")
+
+		uikit.Section(c, "主题", func(c *ui.Context) {
+			toggle := ui.Toggle(c, &state.dark, labels.themeLabel)
+			if toggle.Changed() {
+				theme.SetDark(state.dark)
+				_ = store.Set(contracts.SettingsUIThemeDark, fmt.Sprintf("%t", state.dark))
+				state.status = "主题已切换"
+				state.statusErr = false
+			}
+		})
+
+		uikit.Section(c, "语言", func(c *ui.Context) {
+			choice := languageChoice(state.language)
+			selectControl := ui.Select(c, &choice, languageOptions).Label(labels.languageLabel)
+			if selectControl.Changed() {
+				state.language = languageCode(choice)
+				locale.SetLanguage(state.language)
+				_ = store.Set(contracts.SettingsUILanguage, state.language)
+				state.status = "语言已切换"
+				state.statusErr = false
+			}
+		})
+
+		ui.Row(c).FillWidth().Gap(8).AlignItems(ui.Center).Children(func() {
+			if ui.PrimaryButton(c, labels.saveLabel).Clicked() {
+				theme.SetDark(state.dark)
+				locale.SetLanguage(state.language)
+				if err := saveAppearance(state, store); err != nil {
+					state.status = "保存失败：" + err.Error()
+					state.statusErr = true
+				} else {
+					state.status = "已保存"
+					state.statusErr = false
+				}
+			}
+			ui.Spacer(c).Grow(1)
+			if state.status != "" {
+				if state.statusErr {
+					ui.Text(c, state.status).FontSize(12).TextColor(c.Theme().Danger)
+				} else {
+					ui.Badge(c, state.status)
+				}
+			}
+		})
+	})
+}
+
+func saveAppearance(state *appearanceState, store contracts.SettingsService) error {
+	if err := store.Set(contracts.SettingsUIThemeDark, fmt.Sprintf("%t", state.dark)); err != nil {
+		return err
+	}
+	return store.Set(contracts.SettingsUILanguage, state.language)
+}
 
 // Config is the module's typed assembly config.
 type Config struct {
@@ -48,6 +145,14 @@ type Config struct {
 	SystemPromptLabel string `json:"systemPromptLabel"`
 	// SaveLabel labels the save button (default "保存").
 	SaveLabel string `json:"saveLabel"`
+	// AppearanceTitle is the appearance page title (default "外观").
+	AppearanceTitle string `json:"appearanceTitle"`
+	// ThemeLabel labels the dark-mode toggle (default "深色模式").
+	ThemeLabel string `json:"themeLabel"`
+	// LanguageLabel labels the language selector (default "界面语言").
+	LanguageLabel string `json:"languageLabel"`
+	// SaveAppearanceLabel labels the appearance save button (default "应用").
+	SaveAppearanceLabel string `json:"saveAppearanceLabel"`
 }
 
 // moduleState is the page's UI-local state. Drafts live across frames; the API
@@ -78,6 +183,14 @@ func Module() *module.Descriptor[Config] {
 		if err != nil {
 			return err
 		}
+		theme, err := ctx.Require(contracts.KeyTheme)
+		if err != nil {
+			return err
+		}
+		locale, err := ctx.Require(contracts.KeyLocale)
+		if err != nil {
+			return err
+		}
 
 		title := firstNonEmpty(cfg.Title, "模型")
 		modelLabel := firstNonEmpty(cfg.ModelLabel, "模型")
@@ -85,8 +198,13 @@ func Module() *module.Descriptor[Config] {
 		apiKeyLabel := firstNonEmpty(cfg.APIKeyLabel, "API Key")
 		systemPromptLabel := firstNonEmpty(cfg.SystemPromptLabel, "系统提示词")
 		saveLabel := firstNonEmpty(cfg.SaveLabel, "保存")
+		appearanceTitle := firstNonEmpty(cfg.AppearanceTitle, "外观")
+		themeLabel := firstNonEmpty(cfg.ThemeLabel, "深色模式")
+		languageLabel := firstNonEmpty(cfg.LanguageLabel, "界面语言")
+		saveAppearanceLabel := firstNonEmpty(cfg.SaveAppearanceLabel, "应用")
 
 		state := newState(chat, store)
+		appearance := &appearanceState{dark: theme.Dark(), language: locale.Language()}
 
 		page := contracts.SettingsPageSpec{
 			ID:      PageID,
@@ -104,12 +222,34 @@ func Module() *module.Descriptor[Config] {
 				}, store)
 			},
 		}
-		return own(ctx, func() (func(), error) { return runtime.RegisterSettingsPage(page) })
+		if err := own(ctx, func() (func(), error) { return runtime.RegisterSettingsPage(page) }); err != nil {
+			return err
+		}
+		appearancePage := contracts.SettingsPageSpec{
+			ID: AppearancePageID,
+			// Same sidebar section as the model page so the section heading does
+			// not reorder the pages ahead of the model page; Order keeps the
+			// model page first.
+			Section: PageSection,
+			Title:   appearanceTitle,
+			Order:   AppearancePageOrder,
+			Build: func(c *ui.Context) {
+				buildAppearancePage(c, appearance, store, theme, locale, buildAppearanceLabels{
+					title:         appearanceTitle,
+					themeLabel:    themeLabel,
+					languageLabel: languageLabel,
+					saveLabel:     saveAppearanceLabel,
+				})
+			},
+		}
+		return own(ctx, func() (func(), error) { return runtime.RegisterSettingsPage(appearancePage) })
 	}).
 		AddRequires(module.Requires(contracts.KeyUIRuntime)).
 		AddRequires(module.Requires(contracts.KeySettings)).
 		AddRequires(module.Requires(contracts.KeyChat)).
-		WithName("ZeoKeel model settings page")
+		AddRequires(module.Requires(contracts.KeyTheme)).
+		AddRequires(module.Requires(contracts.KeyLocale)).
+		WithName("ZeoKeel settings pages")
 }
 
 // buildLabels is the resolved copy of one page build.
@@ -139,6 +279,26 @@ func newState(chat contracts.ChatService, store contracts.SettingsService) *modu
 func buildPage(c *ui.Context, state *moduleState, chat contracts.ChatService, labels buildLabels, store contracts.SettingsService) {
 	ui.Column(c).FillWidth().Gap(14).Children(func() {
 		uikit.PageHeader(c, labels.title, "配置对话使用的模型、API 地址与系统提示词。")
+
+		uikit.Section(c, "快速预设", func(c *ui.Context) {
+			type preset struct{ label, model, baseURL string }
+			presets := []preset{
+				{"DeepSeek", "deepseek-chat", "https://api.deepseek.com/v1"},
+				{"OpenAI", "gpt-4o-mini", "https://api.openai.com/v1"},
+				{"Ollama", "llama3.1", "http://localhost:11434/v1"},
+			}
+			ui.Row(c).FillWidth().Gap(8).Children(func() {
+				for _, preset := range presets {
+					preset := preset
+					if ui.Button(c, preset.label).Clicked() {
+						state.model = preset.model
+						state.baseURL = preset.baseURL
+						state.status = "已填入 " + preset.label + " 预设，保存后生效"
+						state.statusErr = false
+					}
+				}
+			})
+		})
 
 		uikit.Section(c, "连接", func(c *ui.Context) {
 			ui.Column(c).FillWidth().Gap(10).Children(func() {

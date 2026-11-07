@@ -66,11 +66,20 @@ func TestDesktopChatPipelineEndToEnd(t *testing.T) {
 		t.Fatalf("assistant text missing; messages = %+v", session.Messages)
 	}
 
+	// Home shows the real recent-session list (and a composer action).
+	tester := ui.NewTester(uiRoot.View, 1280, 800)
+	tester.Frame()
+	if !tester.HasText("开始新对话") {
+		t.Fatalf("home composer action missing; texts = %v", tester.Texts())
+	}
+	if !tester.HasText("你好") {
+		t.Fatalf("home recent list missing the session title; texts = %v", tester.Texts())
+	}
+
 	// The real product frame: side bar + chat screen + settings page.
 	if err := uiRoot.Navigator().Push("session"); err != nil {
 		t.Fatalf("Push(session): %v", err)
 	}
-	tester := ui.NewTester(uiRoot.View, 1280, 800)
 	tester.Frame()
 	for _, want := range []string{"对话", "轨迹", "记忆", "我是 ZeoKeel", "发送"} {
 		if !tester.HasText(want) {
@@ -90,6 +99,15 @@ func TestDesktopChatPipelineEndToEnd(t *testing.T) {
 	for _, want := range []string{"Base URL", "API Key", "系统提示词", "保存"} {
 		if !tester.HasText(want) {
 			t.Fatalf("model settings page does not show %q; texts = %v", want, tester.Texts())
+		}
+	}
+	if err := tester.Click("外观"); err != nil {
+		t.Fatalf("click appearance page: %v; texts = %v", err, tester.Texts())
+	}
+	tester.Frame()
+	for _, want := range []string{"深色模式", "界面语言", "应用"} {
+		if !tester.HasText(want) {
+			t.Fatalf("appearance page does not show %q; texts = %v", want, tester.Texts())
 		}
 	}
 	uiRoot.Navigator().CloseSettings()

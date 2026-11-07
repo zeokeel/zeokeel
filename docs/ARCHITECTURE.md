@@ -184,6 +184,8 @@ if _, err := ctx.Effect(func() cordis.Effect {
 - ✅ P1 持久化/审批：`internal/modules/sessionstore`（SQLite History/SessionLog/CheckpointStore）、
   `internal/modules/approvals` + `internal/ui/approval`（审批队列与 native Modal）、
   `internal/ui/toolcards` 真实工具卡、`ui/session` 轨迹时间线；desktop 15 实例 / headless 6 实例
+- ✅ P2 第一批：`ui/home` 真实最近会话 + 新对话；`ui/settings` 外观页（主题/语言，native Toggle/Select，
+  持久化 host 键）与模型快速预设
 - ✅ 示范模块：`appinfo`（服务）、`ui/home`（screen+command+槽位组合）、`ui/about`
   （settings page + settings.header）、`ui/welcome`（topbar.center + home.hero + command）、
   `ui/toolcards`（ToolRenderer）、`uikit`（共享控件封装）

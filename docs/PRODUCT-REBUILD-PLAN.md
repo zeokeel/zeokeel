@@ -1,3 +1,6 @@
+> **P2 第一批落地（2026-11-07）**：Home 真实最近会话/新对话入口、外观设置页（深色模式+界面语言，
+> 持久化到 `ui.theme.dark`/`ui.language`）、模型快速预设；composer slash/@/附件与图片留待下一批。
+>
 > **P1 落地状态（2026-11-07）**：会话持久化 `zeokeel/sessionstore`（SQLite）、审批后端
 > `zeokeel/approvals` + 审批弹窗 `zeokeel-ui/approval`、工具卡/轨迹（`zeokeel-ui/toolcards`、
 > `zeokeel-ui/session`）已完成并接入 kernel assembly；desktop 15 实例 / headless 6 实例，

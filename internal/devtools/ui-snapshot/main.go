@@ -93,6 +93,19 @@ func main() {
 		fmt.Println("click trajectory:", err)
 	}
 	a.render(outDir + "/p1-trajectory.png")
+
+	// P2: Home recent sessions and the appearance settings page.
+	if err := a.ui.Navigator().Push("home"); err != nil {
+		fmt.Println("push home:", err)
+	}
+	a.render(outDir + "/p2-home.png")
+	a.ui.Navigator().ToggleSettings()
+	a.tester.Frame()
+	if err := a.tester.Click("外观"); err != nil {
+		fmt.Println("click appearance:", err)
+	}
+	a.render(outDir + "/p2-appearance.png")
+	a.ui.Navigator().CloseSettings()
 }
 
 func boot(baseURL, dataDir string) *app {

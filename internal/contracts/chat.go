@@ -16,6 +16,15 @@ const (
 	SettingsChatSystemPrompt = "chat.systemPrompt"
 )
 
+// Host-owned UI preference keys. The process host persists these between runs;
+// the appearance settings page writes them through contracts.SettingsService.
+const (
+	// SettingsUIThemeDark stores "true"/"false" for the dark theme.
+	SettingsUIThemeDark = "ui.theme.dark"
+	// SettingsUILanguage stores the UI language code ("zh"/"en").
+	SettingsUILanguage = "ui.language"
+)
+
 // Chat roles used by ChatMessage.Role.
 const (
 	ChatRoleUser      = "user"

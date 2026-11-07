@@ -392,3 +392,44 @@ func TestModuleManifest(t *testing.T) {
 		}
 	}
 }
+
+// TestModelPresetsFillDrafts covers the quick presets: a preset only fills the
+// drafts, saving writes the preset model/base URL.
+func TestModelPresetsFillDrafts(t *testing.T) {
+	h := newHarness(t, &fakeChat{}, newFakeSettings(nil), settings.Config{})
+	tester := h.tester()
+	tester.Frame()
+
+	h.click(tester, "DeepSeek")
+	h.click(tester, "保存")
+	if got := h.settings.get(contracts.SettingsChatModel); got != "deepseek-chat" {
+		t.Fatalf("saved model = %q, want deepseek-chat", got)
+	}
+	if got := h.settings.get(contracts.SettingsChatBaseURL); got != "https://api.deepseek.com/v1" {
+		t.Fatalf("saved base URL = %q", got)
+	}
+}
+
+// TestAppearancePageTogglesTheme covers the appearance page: the native toggle
+// switches the host theme and saving persists the UI preference keys.
+func TestAppearancePageTogglesTheme(t *testing.T) {
+	store := newFakeSettings(nil)
+	h := newHarness(t, &fakeChat{}, store, settings.Config{})
+	tester := h.tester()
+	tester.Frame()
+
+	h.click(tester, "外观")
+	h.assertTexts(tester, "深色模式", "界面语言", "应用")
+
+	h.click(tester, "深色模式")
+	if !h.uiRoot.Theme().Dark() {
+		t.Fatalf("theme did not switch to dark after clicking the toggle")
+	}
+	h.click(tester, "应用")
+	if got := store.get(contracts.SettingsUIThemeDark); got != "true" {
+		t.Fatalf("persisted dark = %q, want true", got)
+	}
+	if got := store.get(contracts.SettingsUILanguage); got != "zh" {
+		t.Fatalf("persisted language = %q, want zh", got)
+	}
+}
