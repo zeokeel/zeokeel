@@ -211,6 +211,11 @@ func (t *teamService) Wait(ctx context.Context, id string) (string, error) {
 	if err != nil {
 		return "", err
 	}
+	// After a follow-up SendAsync the manager's Wait can still report the first
+	// run's result; prefer the latest completed answer when one is recorded.
+	if latest, ok, lastErr := t.manager().Last(id); lastErr == nil && ok && latest.Output != "" {
+		return latest.Output, nil
+	}
 	return result.Output, nil
 }
 

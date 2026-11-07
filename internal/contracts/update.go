@@ -35,3 +35,23 @@ type UpdateService interface {
 // KeyUpdate is provided by the update backend module and consumed by the
 // settings 更新 page.
 var KeyUpdate = cordis.NewServiceKey[UpdateService]("zeokeel/update")
+
+// UpdateDownload is one verified download staged under the data directory.
+type UpdateDownload struct {
+	// Version is the manifest version that was downloaded.
+	Version string
+	// Path is the staged file inside <dataDir>/updates.
+	Path string
+	// SHA256 is the verified asset checksum (hex).
+	SHA256 string
+	// Size is the written byte count.
+	Size int64
+}
+
+// UpdateDownloader is the optional download half of the update service: it
+// fetches the manifest's platform asset, verifies SHA-256/size and stages it
+// under <dataDir>/updates. Installing/replacing the running binary is a
+// separate, deliberate host step.
+type UpdateDownloader interface {
+	Download(ctx context.Context) (UpdateDownload, error)
+}

@@ -201,6 +201,8 @@ func (s *service) effectiveMode() string {
 		return contracts.PermissionWorkspace
 	case contracts.PermissionFull, ModeAuto:
 		return ModeAuto
+	case ModeNever:
+		return ModeNever
 	default:
 		return ModeAsk
 	}

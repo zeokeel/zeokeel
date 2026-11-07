@@ -14,25 +14,49 @@ func FormatSessionReference(sessionID string) string {
 }
 
 // ParseSessionReferences extracts the distinct session IDs mentioned in text,
-// in first-appearance order. Tokens are whitespace-delimited; a trailing
-// punctuation character is trimmed.
+// in first-appearance order. A reference runs from a prefix up to the first
+// delimiter (whitespace, punctuation, quotes/brackets or a second prefix);
+// trailing dots are trimmed so sentence punctuation does not stick to the ID,
+// while inner punctuation such as "team/a.b" is preserved.
 func ParseSessionReferences(text string) []string {
 	seen := make(map[string]bool)
 	refs := make([]string, 0)
 	for _, field := range strings.Fields(text) {
-		index := strings.Index(field, SessionReferencePrefix)
-		if index < 0 {
-			continue
+		rest := field
+		for {
+			index := strings.Index(rest, SessionReferencePrefix)
+			if index < 0 {
+				break
+			}
+			candidate := rest[index+len(SessionReferencePrefix):]
+			runes := []rune(candidate)
+			limit := len(runes)
+			if next := strings.Index(candidate, SessionReferencePrefix); next >= 0 {
+				limit = len([]rune(candidate[:next]))
+			}
+			end := 0
+			for end < limit && !sessionReferenceDelimiter(runes[end]) {
+				end++
+			}
+			id := strings.TrimRight(string(runes[:end]), ".")
+			if id != "" && !seen[id] {
+				seen[id] = true
+				refs = append(refs, id)
+			}
+			rest = string(runes[end:])
 		}
-		id := strings.TrimSpace(field[index+len(SessionReferencePrefix):])
-		id = strings.TrimRight(id, ".,;:!?，。；：！？)")
-		if id == "" || seen[id] {
-			continue
-		}
-		seen[id] = true
-		refs = append(refs, id)
 	}
 	return refs
+}
+
+// sessionReferenceDelimiter reports whether r ends a session reference.
+func sessionReferenceDelimiter(r rune) bool {
+	switch r {
+	case ' ', '\t', '\n', '\r', ',', ';', ':', '!', '?', ']', '}', ')', '>',
+		'"', '\'', '，', '。', '；', '：', '！', '？', '）', '」', '》':
+		return true
+	}
+	return false
 }
 
 // Session effort settings: the per-session reasoning effort override.

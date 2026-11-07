@@ -65,7 +65,7 @@
 |---|---|---|---|
 | Home / 起始页 | ✅ | `internal/ui/home` | hero/greeting/setup card/composer/最近会话 |
 | Composer 基础（输入/附件/发送/停止/模型 chip/@/） | 🟡 | `internal/ui/session/view.go`、`attachments.go` | 文本、附件/图片/拖放、发送/停止、模型 chip、工作区 `@`、`/` 菜单；per-session 模型菜单已接 modelcatalog |
-| Composer 深度菜单/权限/plan/goal/compact | 🟡 | session `sessionCommands` + `buildComposerToolbar` | 已有 /新会话、/创建副本、/导出对话、/打开设置、**权限模式命令+Badge（ask/workspace/full 即时生效）**、**推理强度菜单（默认/低/中/高）**、**@session 引用菜单** + 消息级重新生成 + per-session 模型切换；缺 /plan /goal /compact /feedback /memory、plan/mode 入口 |
+| Composer 深度菜单/权限/plan/goal/compact | 🟡 | session `sessionCommands` + `buildComposerToolbar` + command dialogs | 已有 /新会话、/创建副本、/导出对话、/打开设置、**/设置目标 /审阅计划 /添加记忆（native 对话框）**、权限模式、推理强度、@session 引用、重新生成、per-session 模型；缺 /compact /feedback、plan-mode 模式切换入口 |
 | Chrome/Sidebar/折叠 rail/右栏 dock | ✅ | uiroot + sidebar | 280px sidebar、64px rail、Cmd/Ctrl+B、右栏开关 |
 | 命令面板/窗口内快捷键 | ✅ | uiroot palette/shortcuts | Cmd/Ctrl+K、可配置两条 chrome 快捷键；非系统全局热键 |
 | Settings 外壳与页面 | 🟡 | `internal/ui/settings`、about | 10 页：模型/服务商/外观/快捷键/技能/诊断/更新/导入/搜索/MCP + 关于，en/zh；缺 presets、内置插件开关/详情、记忆管理页 |

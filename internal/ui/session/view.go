@@ -61,6 +61,11 @@ func buildScreen(
 		if hasSession {
 			buildComposer(c, t, runtime, navigator, chat, cfg, st, activeID, chatSession)
 		}
+		// Command-family dialogs (/goal, /plan, /memory): native Modals above
+		// the screen; their buttons close them and request the next frame.
+		buildGoalDialog(c, t, runtime, st)
+		buildPlanDialog(c, t, runtime, st)
+		buildMemoryDialog(c, t, runtime, st)
 	})
 }
 
@@ -116,6 +121,9 @@ func buildHeader(c *ui.Context, t *design.Tokens, runtime contracts.UIRuntime, c
 					badge.Tooltip(st.exportPath)
 				}
 			})
+		}
+		if st.memNotice != "" {
+			design.Apply(ui.Badge(c, st.memNotice), t.Badge()).TextColor(t.Success)
 		}
 		buildTabs(c, t, cfg, st)
 	})

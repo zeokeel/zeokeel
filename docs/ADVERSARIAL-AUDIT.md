@@ -28,10 +28,10 @@ $ go build ./...                                            OK
 $ go vet ./...                                              OK
 $ go test ./... -count=1                                    全部包 ok（含 internal/regression）
 $ go test ./internal/regression -count=1                    ok  1.2s
-$ go test ./internal/regression -count=1 -race              ok  8.7s
+$ go test ./internal/regression -count=1 -race              ok 12.8s（98 PASS / 0 SKIP）
 ```
 
-测试规模：`internal/regression` 共 78 个顶层 Test（含子用例后更多），约 3.9k 行；11 个已知缺陷探针在缺陷存在时 SKIP（不影响 CI 绿），其余全部 PASS。
+测试规模：`internal/regression` 共 98 个顶层 Test（首轮 78 + 新链路扩展 20；含子用例后更多），约 5.3k 行。首轮 11 个「已知缺陷探针」已随 e9ae184 的修复转为通过断言（当前 **98 PASS / 0 SKIP**）；新链路扩展另记录 4 个 P3（AUDIT-P3-5..8，见文末小节，尚未修复）。
 
 ## 用例矩阵
 
@@ -140,3 +140,77 @@ $ go test ./internal/regression -count=1 -race              ok  8.7s
 - **P0/P1 未被证伪**：未发现必现崩溃、数据损坏或远程可利用的问题；核心不变量（审批队列完整性、存储并发与迁移、导入幂等与容错、HTTP 故障分类、客户端/UI 空数据不 panic、模块卸载清理）均通过反证。
 - **被证伪的断言集中在三处语义边界**：搜索的「文本」语义（AUDIT-P2-1）、导入的「源树边界」语义（AUDIT-P2-2），以及宿主对模块回调的「panic 遏制」约定在 uiroot 四桥上的缺失（AUDIT-P2-4）；另有 update 的空 ctx panic（P2-3）与 4 个 P3 文案/口径问题。建议按 ID 修复后，删除对应探针的 SKIP 分支即可获得回归锁。
 - 审计测试可独立运行：`go test ./internal/regression/... -count=1 -race`（当前全绿，11 skip 即缺陷台账）。
+
+## 新链路缺陷修复（Lead 复核，2026-11-08）
+
+| ID | 状态 | 修复摘要 |
+|----|------|----------|
+| AUDIT-P3-5 | ✅ 已修复 | TeamService.Wait 在 manager.Wait 后优先返回 Manager.Last 的最新答案（后续 SendAsync 不再返回首次结果） |
+| AUDIT-P3-6 | ✅ 已修复 | ParseSessionReferences 按分隔符集解析（补齐 ] } " ' > 」），尾点裁剪、内嵌 `team/a.b` 保留 |
+| AUDIT-P3-7 | ✅ 已修复 | 引用前缀无 token 边界问题：`,`/`;` 等分隔符截断，`@session:abc,@session:def` 正确解析两个 ID |
+| AUDIT-P3-8 | ✅ 已修复 | settings `agent.permission="never"` 映射到 ModeNever（拒绝而非排队）；恶意/未知值仍回退 ask |
+
+回归套件复跑：`internal/regression` **98 PASS / 0 SKIP**（新增 20 个反证用例覆盖 team/@session/effort/permission）。
+
+## 反证扩展：新链路（2026-11-08 第二轮）
+
+同一包内追加的负向/边界测试，覆盖新交付的 4 条链路；仍只写测试与本报告，未改生产代码、未 commit。
+
+```
+$ go test ./internal/regression -count=1 -race              ok  13.5s（98 顶层 Test；11 SKIP 为缺陷台账）
+$ go build ./... / go vet ./internal/regression              OK
+```
+
+| # | 链路 | 反证点 | 新增用例 | 结果 |
+|---|------|--------|---------|------|
+| 8 | team 编排（contracts.TeamService over rig team.Manager） | 未知/空成员 ID 上 SendAsync/Send/Wait/Interrupt/Close；空 name/prompt；nil ctx；6 并发 Spawn（唯一 ID、各自答案，-race）；provider 400 的 spawn 后错误从 Wait 传播且成员可 Close；Interrupt 中断在飞行中的 run；kernel dispose 触发 CloseAll 并回收团队工具（保留调用方预置工具）；工具注册去重：预置 `spawn_teammate`/`team_spawn` 后 agent 记日志跳过而非失败，`subagent`/`subagent_fork` 各只注册一次 | 7 | PASS（发现 AUDIT-P3-5） |
+| 9 | @session 引用 | ParseSessionReferences：空/纯文本/仅前缀/前缀+空格/尾随标点/括号/CJK 标点/重复折叠/首次出现顺序/大写与相似词不匹配/内嵌标点保留/10 万 rune token/Format↔Parse 往返；尾随 `] } " ' > 」` 未裁剪、无 token 边界（两块文档化缺口）；E2E：引用块注入模型输入且截断 ≤8000 rune（含省略号/结束标记），自引用/未知/重复不注入，read model+SQLite 历史只保留原始 prompt | 4 | PASS（发现 AUDIT-P3-6/7） |
+| 10 | reasoning effort | 非法 module config→请求体省略 reasoning_effort；非法 per-session setting→省略；无配置无 setting→省略；config low/medium/high/大小写空格→请求体顶层字段精确；session setting 覆盖 config（含 trim/大小写）；其他 session 不继承覆盖（setting 作用域） | 4 | PASS |
+| 11 | permission（settings agent.permission） | workspace 模式仅 read_file/list_dir/glob/grep 自动 allow（不排队/不通知），write/edit/bash/terminal/web_*/MCP/空名与大写仍排队；ask/workspace/full/auto/大小写/空值回退映射；恶意/未知值（`root`、`full;drop table`、`never\n`、NUL、4096 rune）回退 ask；pending 期间切换模式不扰动在途请求、新请求按新模式；settings 写入 300 次 + 60 次请求/解析并发（-race，无死锁，队列清空）；无 settings 服务时以 assembly mode 为准 | 5 | PASS（发现 AUDIT-P3-8） |
+
+新增缺陷（均只记录，未改生产代码；仍无 P0/P1）：
+
+### AUDIT-P3-5（P3，契约措辞/语义）TeamService.Wait 在后续 Send/SendAsync 之后返回首次运行结果
+
+- 位置：`internal/contracts/team.go:37`（“Wait blocks until the teammate finishes its current run”）vs 适配器 `internal/modules/agent/team.go:206` → rig `team.Manager.Wait` → rig `agent/subagent.go:411-421`（`<-firstDone` 后返回 `firstResult`，后续 run 不改写）。
+- 复现：`go test ./internal/regression -run TestTeamSpawnWaitSendAndMembers -v`（log 记录）→ spawn+Wait→SendAsync 跟进→`Wait` 仍返回首次答案，最新答案只在 `Members().Last`。
+- 影响：团队工具/UI 若用 Wait 读“当前运行结果”，在持续对话后会拿到过期答案；无数据损坏。建议契约措辞改为“首次/当前在飞 run，后续轮次用 Send+Last”，或适配器改为轮询成员 Last。
+- 无独立失败断言（测试已按现状断言并记录）。
+
+### AUDIT-P3-6（P3，解析器）@session 引用尾随标点裁剪集不全
+
+- 位置：`internal/contracts/sessionref.go:28`（`TrimRight` 集合 `.,;:!?，。；：！？)`）。
+- 复现：`go test ./internal/regression -run TestParseSessionReferencesMissedTrailingPunctuation -v`（log）→ `@session:abc]`、`...}`、`..."`、`...'`、`...>`、`...」` 均返回带标点的 ID，随后查不到会话被当未知引用跳过（Markdown 链接/引号粘贴场景失效）。
+- 建议：裁剪集补 `] } > " ' 」 ” ’`（或用 unicode.IsPunct 从尾部剥离非 ID 字符）。
+
+### AUDIT-P3-7（P3，解析器）前缀无 token 边界，畸形文本产生拼接伪 ID
+
+- 位置：`internal/contracts/sessionref.go:23`（`strings.Index(field, prefix)` 允许 token 中间匹配）。
+- 复现：`go test ./internal/regression -run TestParseSessionReferencesNoTokenBoundary -v`（log）→ `@session:abc,@session:def` → `["abc,@session:def"]`；`@session:a@session:b` → `["a@session:b"]`；`mail@session:abc` → `["abc"]`。
+- 影响：多引用紧邻（缺空格）时只解析出一个伪 ID，其余静默丢失；被当作未知引用跳过，无崩溃。建议按空白 token 后要求前缀位于 token 起点（或 field==prefix+id 完全匹配）。
+
+### AUDIT-P3-8（P3，权限语义）settings `agent.permission=never` 未被 effectiveMode 映射，退化为 ask
+
+- 位置：`internal/modules/approvals/approvals.go:198-206`（switch 仅映射 ask/workspace/full(auto)，无 never 分支）。
+- 复现：`go test ./internal/regression -run TestPermissionSettingModes -v`（log）→ 设置 `"never"`/`"NEVER"` 时 `Mode()` 返回 `ask`，Request 排队而非立即 deny；never 只能在 assembly Config 中生效。
+- 影响：把 never 写进 settings 的自动化/宿主期望“全部拒绝、不阻塞”，实际会挂起等待人工审批；属语义不一致（当前唯一方式是 assembly 配置）。建议显式映射 never→ModeNever（或让 settings 只接受 ask/workspace/full 并在写入/读取处给日志）。
+
+### 回归复核：首轮缺陷已全部修复
+
+- 首轮 8 个缺陷（P2-1..4、P3-1..4）已随提交 `e9ae184`（"adversarial-audit fixes"）修复：搜索改为解码文本列、importer 跳过 symlink、update nil ctx、uiroot 四桥 panic 遏制、JSONL 前缀/标题、MCP URL 小写去重、importer preview 去重计数。
+- 本次复跑 `go test ./internal/regression -count=1 -race`：**98 PASS / 0 SKIP**——所有遗留探针按设计自动转为断言并通过，无需再跳过。
+- 本小节新链路的 4 个 P3（AUDIT-P3-5..8）是在上述修复提交之后、基于 HEAD `99495c3`（@session 引用 + reasoning effort）与 `38e0ec2`（team 编排）复测得到的**新增记录**，当前代码仍可复现（均为 t.Logf 记录，不影响 CI 绿）。
+
+### 新链路未被证伪的通过项
+
+1. **team**：未知/空 ID 与空 name/prompt 全部可读报错且不 panic；并发 Spawn 无重复 ID/丢成员（-race）；provider 失败的成员仍可列出并关闭；Interrupt 使成员变 interrupted 且 Wait 报中断；kernel dispose 关闭所有成员并反注册团队工具（调用方预置工具保留）；工具注册冲突走“日志+跳过”而非激活失败，`subagent` 名字始终唯一。
+2. **@session**：解析器对空/重复/顺序/大小写/相似词/CJK 标点/超大 token 行为正确；注入只进模型输入，read model 与 SQLite 持久化保留原始 prompt（自引用/未知/重复均不注入，未知有日志）；8000 rune 上下文上限严格且带截断标记。
+3. **reasoning effort**：settings > config > 空；非法值（config 与 session）都省略字段；大小写/空白归一；字段确实出现在 httptest 请求体顶层 `reasoning_effort`；覆盖按 session 隔离不串。
+4. **permission**：workspace 只读白名单精确、写/网络/未知工具仍排队且不通知；full/auto 立即 allow，ask 排队，未知/恶意值回退 ask；切换模式不影响在途请求；并发写设置+请求无死锁/无竞态（-race）；无 settings 时 assembly mode 生效。
+
+### 新链路未覆盖/局限
+
+- team：未打满 Manager 成员上限（`ErrTeamFull`）与 runner 并发上限；Interrupt 与 Send 的细粒度竞争只覆盖“在飞行 run”；agent 模块成功 spawn 依赖本地 httptest OpenAI 兼容服务（SSE），未接真实 provider。
+- @session：8000 rune 上限用单条引用验证；多引用共享预算与“剩余不足 footer”分支未逐一压测；每会话 20 条消息截取只做间接覆盖。
+- reasoning effort：只验证 `Extra`/请求体路径；未验证非 openai provider 的等价字段（rig 内其他 provider 不在本仓）。
+- permission：workspace 白名单是代码常量 4 个工具，与 toolkit 实际注册名的交叉核对未做（若未来改名需同步）；never 的 settings 语义见 AUDIT-P3-8。

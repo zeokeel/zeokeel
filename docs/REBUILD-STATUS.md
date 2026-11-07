@@ -21,6 +21,13 @@
 - 右侧栏「文件」Tab：打开文件夹（mygo 原生 Directory picker）、目录进入/面包屑、文本/Markdown/图片预览、
   刷新与错误状态；E2E 覆盖工作区创建 + 列表 + 预览帧
 
+**TDD-cmd/upd + 反证扩展（2026-11-08）**
+- composer 命令族：/设置目标、/审阅计划、/添加记忆（native Modal；服务可选；ctx.Effect 注销；i18n；session 85 测试）
+- 更新下载：`contracts.UpdateDownloader` + update 模块流式下载/SHA-256/size 校验/`<dataDir>/updates` 暂存/路径穿越防护/并发；
+  设置更新页「下载更新」按钮、下载中禁用、已下载面板（版本/大小/SHA/路径）与手动安装说明（update 22 测试 / settings 55 测试）
+- 反证扩展：internal/regression 新增 20 例覆盖 team/@session/effort/permission（98 PASS / 0 SKIP），发现 4 个 P3 并已修复
+  （TeamService.Wait 最新结果、引用解析分隔符/边界、permission never 映射）
+
 **TDD-refs：@session 引用 + 推理强度（2026-11-08）**
 - agent：`ParseSessionReferences` 展开被引用会话尾部 20 条/8000 rune 上下文，仅注入本次 run 输入；持久化/read model 保留原始 prompt；
   `session_refs` 审计事件；self/unknown/去重/预算反证

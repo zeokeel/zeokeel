@@ -131,6 +131,23 @@ type state struct {
 	// settings is the optional settings store: the permission command and the
 	// composer's permission badge read/write contracts.SettingAgentPermission.
 	settings contracts.SettingsService
+
+	// Optional command-family backends: the /plan and /memory dialogs read
+	// these bridges (the goal bridge lives above with the header chip).
+	planReviewer contracts.PlanReviewer
+	memoryStore  contracts.MemoryStore
+
+	// Command-dialog state (native Modals rendered by the session screen).
+	goalOpen  bool
+	goalText  string
+	goalErr   string
+	planOpen  bool
+	planDraft string
+	planErr   string
+	memOpen   bool
+	memDraft  string
+	memErr    string
+	memNotice string
 }
 
 // tr returns the localized copy for the current frame's language.
@@ -166,13 +183,17 @@ func Module() *module.Descriptor[Config] {
 		config := cfg.resolved()
 		locale, _ := ctx.Get(contracts.KeyLocale)
 		settings, _ := ctx.Get(contracts.KeySettings)
+		planReviewer, _ := ctx.Get(contracts.KeyPlanReviewer)
+		memoryStore, _ := ctx.Get(contracts.KeyMemory)
 		moduleState := &state{
-			locale:     locale,
-			settings:   settings,
-			thinkOpen:  make(map[string]bool),
-			toolOpen:   make(map[string]bool),
-			thumbnails: make(map[string]*ui.Bitmap),
-			ctx:        ctx,
+			locale:       locale,
+			settings:     settings,
+			planReviewer: planReviewer,
+			memoryStore:  memoryStore,
+			thinkOpen:    make(map[string]bool),
+			toolOpen:     make(map[string]bool),
+			thumbnails:   make(map[string]*ui.Bitmap),
+			ctx:          ctx,
 		}
 
 		// Session changes arrive on the agent goroutine; hop to the UI thread
@@ -387,6 +408,30 @@ func sessionCommands(runtime contracts.UIRuntime, navigator contracts.Navigator,
 				exportSession(st, session, config)
 				return nil
 			},
+		},
+		{
+			ID:      "zeokeel.session.goal",
+			Title:   "设置目标",
+			Hint:    "为当前会话设置/清除长期目标",
+			Order:   60,
+			Enabled: func() bool { return st.goalTracker != nil && chat.ActiveSession() != "" },
+			Run:     func() error { openGoalDialog(st, runtime); return nil },
+		},
+		{
+			ID:      "zeokeel.session.plan",
+			Title:   "审阅计划",
+			Hint:    "提交一份计划给用户批准",
+			Order:   61,
+			Enabled: func() bool { return st.planReviewer != nil && chat.ActiveSession() != "" },
+			Run:     func() error { openPlanDialog(st, runtime); return nil },
+		},
+		{
+			ID:      "zeokeel.session.memory",
+			Title:   "添加记忆",
+			Hint:    "保存一条全局记忆",
+			Order:   62,
+			Enabled: func() bool { return st.memoryStore != nil },
+			Run:     func() error { openMemoryDialog(st, runtime); return nil },
 		},
 		{
 			ID:      "zeokeel.session.permission",

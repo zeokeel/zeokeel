@@ -83,6 +83,9 @@ func Module() *module.Descriptor[Config] {
 			return fmt.Errorf("%s: require logger: %w", ModuleID, err)
 		}
 		service := newService(cfg, appInfo, logger)
+		if dataDir, ok := ctx.Get(contracts.KeyDataDir); ok {
+			service.dataDir = strings.TrimSpace(dataDir)
+		}
 		if _, err := ctx.Provide(contracts.KeyUpdate, contracts.UpdateService(service)); err != nil {
 			return fmt.Errorf("%s: provide update service: %w", ModuleID, err)
 		}
@@ -92,6 +95,7 @@ func Module() *module.Descriptor[Config] {
 		AddRequires(
 			module.Requires(contracts.KeyAppInfo),
 			module.Requires(contracts.KeyLogger),
+			module.RequiresOptional(contracts.KeyDataDir),
 		).
 		WithName("ZeoKeel update checker").
 		WithVersion(Version).
@@ -116,6 +120,11 @@ type service struct {
 	appInfo           contracts.AppInfo
 	logger            contracts.Logger
 	client            *http.Client
+	// dataDir is the product data directory (contracts.KeyDataDir); the
+	// download half stages verified assets below <dataDir>/updates. Empty when
+	// the host did not provide the service: Download then reports a readable
+	// error instead of failing activation.
+	dataDir string
 }
 
 var _ contracts.UpdateService = (*service)(nil)

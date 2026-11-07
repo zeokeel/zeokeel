@@ -25,13 +25,22 @@ const (
 )
 
 // updateState is the update page's UI state: the last check result, whether a
-// check is in flight and whether the download link was just copied.
+// check or the asset download is in flight, the verified download (when the
+// backend implements contracts.UpdateDownloader) and whether the download link
+// was just copied.
 type updateState struct {
 	checking bool
 	checked  bool
 	info     contracts.UpdateInfo
 	err      string
 	copied   bool
+
+	// downloading is true while the asset download runs off the UI thread.
+	downloading bool
+	// download is the verified staged asset (nil until a download succeeds).
+	download *contracts.UpdateDownload
+	// downloadErr is the last download error, rendered as the page's danger row.
+	downloadErr string
 }
 
 func newUpdateState() *updateState { return &updateState{} }
@@ -73,8 +82,8 @@ func buildUpdatePage(c *ui.Context, t *design.Tokens, kctx cordis.Context, runti
 			checkLabel = localized(locale, "检查中…", "Checking…")
 		}
 		check := design.Apply(ui.PrimaryButton(c, checkLabel), t.PrimaryButton()).
-			Disabled(st.checking)
-		if check.Clicked() && !st.checking {
+			Disabled(st.checking || st.downloading)
+		if check.Clicked() && !st.checking && !st.downloading {
 			startUpdateCheck(updateService, runtime, st)
 		}
 
@@ -102,6 +111,29 @@ func buildUpdatePage(c *ui.Context, t *design.Tokens, kctx cordis.Context, runti
 		if resource := updateResourceLine(st.info, locale); resource != "" {
 			design.Apply(ui.Text(c, resource), t.Font(design.TypeXXS)).
 				TextColor(t.LabelTertiary).MaxLines(1).Ellipsis("…")
+		}
+
+		// Download half: available only when the update backend also implements
+		// contracts.UpdateDownloader. The result replaces the action once a
+		// verified file is staged.
+		if downloader, canDownload := updateService.(contracts.UpdateDownloader); canDownload {
+			if st.download == nil && st.info.Available {
+				downloadLabel := localized(locale, "下载更新", "Download update")
+				if st.downloading {
+					downloadLabel = localized(locale, "下载中…", "Downloading…")
+				}
+				download := design.Apply(ui.PrimaryButton(c, downloadLabel), t.PrimaryButton()).
+					Disabled(st.downloading)
+				if download.Clicked() && !st.downloading {
+					startUpdateDownload(downloader, runtime, st)
+				}
+			}
+			if st.downloadErr != "" {
+				buildUpdateError(c, t, localized(locale, "下载更新失败：", "Update download failed: ")+st.downloadErr)
+			}
+			if st.download != nil {
+				buildUpdateDownloadResult(c, t, *st.download, locale)
+			}
 		}
 
 		hasURL := strings.TrimSpace(st.info.URL) != ""
@@ -137,9 +169,16 @@ func buildUpdatePage(c *ui.Context, t *design.Tokens, kctx cordis.Context, runti
 // startUpdateCheck runs one update check off the UI thread and publishes the
 // result through UIRuntime.Post (the settings page has no long-lived frame).
 func startUpdateCheck(service contracts.UpdateService, runtime contracts.UIRuntime, st *updateState) {
+	if st.checking || st.downloading {
+		return
+	}
 	st.checking = true
 	st.copied = false
 	st.err = ""
+	// A new check invalidates the previous staged result: it may belong to a
+	// different version.
+	st.download = nil
+	st.downloadErr = ""
 	runtime.Invalidate()
 	go func() {
 		info, err := service.Check(context.Background())
@@ -184,6 +223,69 @@ func formatUpdateSize(size int64) string {
 	default:
 		return fmt.Sprintf("%.1f MB", float64(size)/(1<<20))
 	}
+}
+
+// startUpdateDownload runs one asset download off the UI thread and publishes
+// the verified result through UIRuntime.Post, like startUpdateCheck.
+func startUpdateDownload(downloader contracts.UpdateDownloader, runtime contracts.UIRuntime, st *updateState) {
+	if st.downloading {
+		return
+	}
+	st.downloading = true
+	st.downloadErr = ""
+	runtime.Invalidate()
+	go func() {
+		download, err := downloader.Download(context.Background())
+		runtime.Post(func() {
+			st.downloading = false
+			if err != nil {
+				st.downloadErr = err.Error()
+			} else {
+				st.download = &download
+				st.downloadErr = ""
+			}
+			runtime.Invalidate()
+		})
+	}()
+}
+
+// buildUpdateDownloadResult renders the staged-file summary of a verified
+// download: version/size/checksum, the staging path and the manual-install
+// note (replacing the running binary is a separate host step).
+func buildUpdateDownloadResult(c *ui.Context, t *design.Tokens, download contracts.UpdateDownload, locale contracts.LocaleService) {
+	ui.Column(c).FillWidth().Gap(design.Space2).Children(func() {
+		ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(design.Space2).Children(func() {
+			design.Apply(ui.Badge(c, localized(locale, "已下载", "Downloaded")), t.Badge()).TextColor(t.Success)
+			design.Apply(ui.Text(c, localized(locale,
+				"自动替换暂不支持，请手动安装。",
+				"Automatic replacement is not supported; install the package manually.")),
+				t.Font(design.TypeXS)).TextColor(t.LabelSecondary)
+		})
+		for _, line := range updateDownloadSummary(download, locale) {
+			design.Apply(ui.Text(c, line), t.Font(design.TypeXS)).TextColor(t.LabelPrimary)
+		}
+		if staged := strings.TrimSpace(download.Path); staged != "" {
+			design.Apply(ui.Text(c, localized(locale, "暂存路径", "Staged file")), t.Font(design.TypeXXS)).
+				TextColor(t.LabelTertiary)
+			design.Apply(ui.Text(c, staged), t.MonoFamily()).FontSize(12).TextColor(t.LabelSecondary)
+		}
+	})
+}
+
+// updateDownloadSummary formats the version/size/checksum lines of a staged
+// download (size omitted when the manifest did not advertise one).
+func updateDownloadSummary(download contracts.UpdateDownload, locale contracts.LocaleService) []string {
+	lines := make([]string, 0, 3)
+	if version := strings.TrimSpace(download.Version); version != "" {
+		lines = append(lines, localized(locale, "版本：", "Version: ")+version)
+	}
+	if download.Size > 0 {
+		lines = append(lines, localized(locale, "大小：", "Size: ")+formatUpdateSize(download.Size))
+	}
+	if sha := strings.TrimSpace(download.SHA256); len(sha) >= 8 {
+		lines = append(lines, "SHA256 "+sha[:8])
+	}
+	return lines
 }
 
 // buildUpdateError is the page's danger row.

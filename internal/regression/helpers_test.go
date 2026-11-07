@@ -11,6 +11,7 @@ package regression
 import (
 	"context"
 	"fmt"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -643,3 +644,6 @@ func (c *counter) inc()          { c.value.Add(1) }
 func (c *counter) add(n int64)   { c.value.Add(n) }
 func (c *counter) load() int64   { return c.value.Load() }
 func (c *counter) store(n int64) { c.value.Store(n) }
+
+// itoa formats n for marker names.
+func itoa(n int64) string { return strconv.FormatInt(n, 10) }
