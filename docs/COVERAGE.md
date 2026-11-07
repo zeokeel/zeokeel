@@ -133,33 +133,29 @@
    importer attachments/credentials/manifest/zstd、store 旧表语义、LSP client、modes/persona。
 8. **i18n 残留（低）**：host chrome tooltip、部分原生 Dialog 标题、后端错误文案、命令面板静态标题。
 
-## 5. 结论与最小必须项
+## 5. 结论与最小必须项（Round 60 更新）
 
-**是否完成旧功能覆盖：否。** 但覆盖面由 41.9% 提升到 **54.8% ✅**，剩余 🟡 集中在交互深度而非主路径：
-核心对话/持久化/工作区/审批/设置/右栏/搜索/导出/编排/管理深度已可用，缺口不再阻断日常对话与编排使用。
+**是否完成旧功能覆盖：否（功能面基本齐、深度未齐）。** 当前 62 项：**✅37 / 🟡24 / ❌1**（❌ 仅 winproc，Windows 平台非目标）。
+旧应用的主要用户可见面——首页/侧栏/会话/右栏/审批/工具卡/设置/搜索/导入导出/MCP/计划/目标/团队/工件/自动化/更新/
+托盘/热键/模式/presets/memory/skills/反馈/用量——都已有可用实现；剩余 🟡 集中在交互深度与少数长尾，
+不再阻断日常对话、编排与管理主路径。
 
-若要以旧功能覆盖完成收口，**最小必须项（≤5，按顺序）**：
-1. **Composer 收口**：/compact、/feedback、/goal 子命令、plan-mode 切换 + presets 入口
-   （`internal/ui/session`、`internal/contracts/presets.go` WIP、settings presets 页）。
-2. **Plan 深度**：keep-planning/feedback 修订循环、transcript plan 卡（`internal/ui/interaction`、agent）。
-3. **消息级操作 + 用量**：逐条复制与 usage footer 已落地；剩余 feedback good/bad（`internal/ui/session`）。
-4. **管理深度收口**：插件详情/内置插件开关、memory consolidate/extract、skills 编辑
-   （`internal/ui/plugins`、`internal/modules/memory`、`internal/ui/settings`）。
-5. **宿主桌面收口**：托盘/关闭到托盘 + 窗口几何显式持久化（`internal/host`；Windows 替换标注平台非目标）。
+从 Round 48 的「最小必须项」出发，已完成：
+1. Composer 收口：presets 入口（/预设 菜单）、/反馈、模式切换（普通/计划/精简/创作）、/停止 /附加文件 /帮助（共 12 条命令）；
+2. Plan 深度：计划模式门禁 + plan 审阅 Modal + 计划徽标（keep-planning 修订循环仍未做）；
+3. 消息级操作：逐条复制、usage footer、feedback good/bad + 导出含反馈；
+4. 管理深度：插件 MCP server 详情/工具级开关、Memory 整理/清空、Skills 新建/删除、工件下载；
+5. 宿主桌面：托盘/关闭到托盘、全局热键、安装重启、网络代理、通知开关、窗口几何（mygo StateKey 隐式）。
 
-**明确非目标**：`globalhotkey`、`winproc`、LSP client、PTC/run_code、workflow/ralph 工具（若按旧全量）、
-插件市场、Windows 运行中 exe 替换、artifact 跨重启历史。以上不计入最小必须项。
+**剩余 Top（按用户可见度）**：
+1. Plan keep-planning/反馈修订循环与 transcript plan 卡；
+2. Settings 旧 General 行为项（字号/主题三态/默认权限展开等）与通知页深度（通道/静默）；
+3. 自动化 workspace/permission/model 字段与筛选、Plugins built-in/实验开关与参数页；
+4. 会话级「全部会话」UI（当前在数据与隐私页批量导出/清除）、工作区视图分组/排序；
+5. 托盘「新建会话/设置」入口、更多可编辑窗口快捷键（Cmd+N/Cmd+,/Cmd+P 等）；
+6. ACP 长尾（session/list、fs/terminal/auth 深度）、artifact 跨重启历史、i18n 残留。
 
-## 6. 对外表述建议
-
-- 可说："已支持完整对话、工作区/文件/变更/终端检查、12 页设置（含搜索/MCP/网络）、审批与权限模式、
-  右栏（含团队/任务）、搜索/fork/导出（Markdown+JSONL）/置顶归档、web search、ask_user/present/plan 审阅、
-  真实 subagent/team 编排、per-session 模型与推理强度、@session 引用、MCP HTTP/stdio/工具开关、
-  桌面单实例/autostart/install-on-restart/toast/代理、import/ACP/更新检查与下载安装调度。"
-- 不要声称"old 功能全量迁移"：modes/persona/presets、plan keep-planning、/compact /feedback、
-  消息级 feedback/usage、插件与记忆管理深度、托盘与 Windows 替换仍未完成；globalhotkey/LSP/winproc/PTC 按非目标处理。
-
----
-
+**明确非目标**：`winproc`（Windows 控制台/编码辅助）、PTC/run_code、workflow/ralph 旧全量、插件市场、
+Windows 运行中 exe 替换、artifact 跨重启历史。`globalhotkey` 与可选 LSP 已在 Round 55 落地。
 审计方法：`grep`/读代码核对模块注册、assembly、settings 页与 UI 构建函数；计数为本文矩阵行数
 （28+34=62），非代码行数/测试数。presets 为复核时工作树 WIP（未提交），若随后落地请更新 `presets` 行与统计。
