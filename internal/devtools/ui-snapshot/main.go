@@ -203,6 +203,50 @@ func main() {
 		a.tester.Frame()
 	}
 
+	// present: artifact preview overlay (markdown body + 关闭).
+	if toolkit, tkErr := a.root.Require(contracts.KeyToolkit); tkErr == nil {
+		go func() {
+			_, _ = toolkit.Invoke(context.Background(), rig.ToolCall{
+				ID: "present-snapshot", Name: "present",
+				Arguments: `{"title":"检查报告","content":"# 构建结果\n\n- 30 个测试包通过\n- 0 失败\n\n![badge](https://example.com/badge.svg)"}`,
+			})
+		}()
+		for attempts := 0; attempts < 50; attempts++ {
+			a.tester.Frame()
+			if a.tester.HasText("检查报告") {
+				break
+			}
+			time.Sleep(10 * time.Millisecond)
+		}
+		a.render(outDir + "/p2-artifact.png")
+		if err := a.tester.Click("关闭"); err != nil {
+			fmt.Println("close artifact:", err)
+		}
+		a.tester.Frame()
+	}
+
+	// plan_review: plan overlay with approve/cancel.
+	if toolkit, tkErr := a.root.Require(contracts.KeyToolkit); tkErr == nil {
+		go func() {
+			_, _ = toolkit.Invoke(context.Background(), rig.ToolCall{
+				ID: "plan-snapshot", Name: "plan_review",
+				Arguments: `{"plan":"# 发布计划\n\n1. 运行全量测试\n2. 更新文档与截图\n3. 打 tag 并发布"}`,
+			})
+		}()
+		for attempts := 0; attempts < 50; attempts++ {
+			a.tester.Frame()
+			if a.tester.HasText("计划待审阅") {
+				break
+			}
+			time.Sleep(10 * time.Millisecond)
+		}
+		a.render(outDir + "/p2-plan.png")
+		if err := a.tester.Click("批准"); err != nil {
+			fmt.Println("approve plan:", err)
+		}
+		a.tester.Frame()
+	}
+
 	// Composer model menu (catalog presets + per-session switch).
 	if err := a.tester.Click("snapshot-model"); err == nil {
 		a.tester.Frame()
@@ -449,6 +493,8 @@ func boot(baseURL, dataDir string) *app {
 	provide(root, contracts.KeyScreenLister, uiRoot.ScreenLister())
 	provide(root, contracts.KeyFileDrop, contracts.FileDropService(uiRoot.FileDrop()))
 	provide(root, contracts.KeyUserInteraction, contracts.UserInteraction(uiRoot.UserInteraction()))
+	provide(root, contracts.KeyArtifactPresenter, contracts.ArtifactPresenter(uiRoot.ArtifactPresenter()))
+	provide(root, contracts.KeyPlanReviewer, contracts.PlanReviewer(uiRoot.PlanReviewer()))
 	provide(root, contracts.KeySettings, contracts.SettingsService(&settings{values: map[string]string{
 		contracts.SettingsChatModel:   "snapshot-model",
 		contracts.SettingsChatBaseURL: baseURL,

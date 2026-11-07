@@ -45,6 +45,8 @@ type Root struct {
 	settingsService contracts.SettingsService
 	fileDrop        *fileDropService
 	interaction     *interactionService
+	artifacts       *artifactService
+	plan            *planService
 
 	mu         sync.Mutex
 	invalidate func()
@@ -113,6 +115,8 @@ func New(cfg Config) *Root {
 		settingsService: cfg.Settings,
 		fileDrop:        &fileDropService{},
 		interaction:     newInteractionService(),
+		artifacts:       newArtifactService(),
+		plan:            newPlanService(),
 	}
 	r.theme = &themeService{root: r, dark: cfg.Dark}
 	r.locale = &localeService{root: r, lang: cfg.Language}

@@ -65,6 +65,14 @@ func ModuleWithHost(host *hostcaps.Host) *module.Descriptor[Config] {
 					return interaction.Ask(ctx, question, options)
 				})
 			}
+			if presenter, ok := ctx.Get(contracts.KeyArtifactPresenter); ok {
+				capabilities.Presenter = hostcaps.PresenterFunc(func(ctx context.Context, title, body string) (string, error) {
+					return presenter.Present(ctx, title, body)
+				})
+			}
+			if reviewer, ok := ctx.Get(contracts.KeyPlanReviewer); ok {
+				capabilities.Plan = uiPlanController{reviewer: reviewer}
+			}
 		} else {
 			capabilities = *host
 		}
@@ -88,4 +96,24 @@ func ModuleWithHost(host *hostcaps.Host) *module.Descriptor[Config] {
 	}).
 		AddRequires(module.Requires(contracts.KeyToolkit)).
 		WithName("ZeoKeel host tools")
+}
+
+// uiPlanController adapts the host's contracts.PlanReviewer to the host-tools
+// PlanController seam. Review has no context in that seam (the tool checks the
+// caller's context before invoking it), so the adapter uses Background.
+type uiPlanController struct {
+	reviewer contracts.PlanReviewer
+}
+
+// State implements hostcaps.PlanController.
+func (p uiPlanController) State() string { return p.reviewer.State() }
+
+// Review implements hostcaps.PlanController.
+func (p uiPlanController) Review(content string) (string, error) {
+	return p.reviewer.Review(context.Background(), content)
+}
+
+// Exit implements hostcaps.PlanController.
+func (p uiPlanController) Exit(action string) (string, error) {
+	return p.reviewer.Exit(action)
 }

@@ -29,6 +29,12 @@ func TestProvideServicesDesktopProvidesInteraction(t *testing.T) {
 	if interaction == nil {
 		t.Fatal("desktop host provided a nil UserInteraction")
 	}
+	if presenter, ok := root.Get(contracts.KeyArtifactPresenter); !ok || presenter == nil {
+		t.Fatal("desktop host did not provide KeyArtifactPresenter")
+	}
+	if reviewer, ok := root.Get(contracts.KeyPlanReviewer); !ok || reviewer == nil {
+		t.Fatal("desktop host did not provide KeyPlanReviewer")
+	}
 }
 
 func TestProvideServicesHeadlessSkipsInteraction(t *testing.T) {
@@ -43,5 +49,11 @@ func TestProvideServicesHeadlessSkipsInteraction(t *testing.T) {
 	}
 	if _, ok := root.Get(contracts.KeyUserInteraction); ok {
 		t.Fatal("headless host provided KeyUserInteraction")
+	}
+	if _, ok := root.Get(contracts.KeyArtifactPresenter); ok {
+		t.Fatal("headless host provided KeyArtifactPresenter")
+	}
+	if _, ok := root.Get(contracts.KeyPlanReviewer); ok {
+		t.Fatal("headless host provided KeyPlanReviewer")
 	}
 }

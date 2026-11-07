@@ -1,23 +1,27 @@
-// Package interaction contributes the ask_user dialog: the native overlay that
-// shows an agent's question and resolves it with the user's answer or cancel.
+// Package interaction contributes the agent-to-user overlays: the ask_user
+// dialog, the present artifact preview and the plan review dialog.
 //
-// It is a kernel UI module: activation requires the host UI runtime and the
-// host UserInteraction service, installs the question handler (whose calls hop
-// to the UI thread with UIRuntime.Post), and registers one overlay.dialogs slot
-// item that renders a native mygo Modal. The dialog itself uses only native
-// controls (Modal, TextInput, Buttons); nothing is hand-drawn.
+// It is a kernel UI module: activation requires the host UI runtime, installs
+// the handlers of the optional host bridges (UserInteraction, ArtifactPresenter
+// and PlanReviewer — each handler call hops to the UI thread with
+// UIRuntime.Post), and registers one overlay.dialogs slot item that renders a
+// native mygo Modal. The dialogs use only native controls (Modal, TextInput,
+// Buttons, Markdown) styled with internal/design; nothing is hand-drawn.
 //
-// Questions are handled FIFO one at a time: the handler appends to the queue,
-// the build shows the head, and answering/cancelling pops it so the next
-// question opens on the following frame. Disposal clears the handler and
-// cancels every pending question so an agent tool call can never hang on a
-// dialog that no longer exists.
+// The three overlay kinds share one FIFO queue rendered one at a time: the
+// oldest arrived question/artifact/plan-review is shown, and answering,
+// closing or approving it pops the entry so the next overlay opens on the
+// following frame. Plan review is driven by its bridge's state: reviewing
+// enqueues the plan, approved/cancelled removes it. Disposal clears every
+// handler, cancels pending questions and exits a still-reviewing plan so an
+// agent tool call can never hang on a dialog that no longer exists.
 package interaction
 
 import (
 	"strings"
 
 	"github.com/egoist/mygo/ui"
+	"github.com/egoist/mygo/ui/markdown"
 	cordis "github.com/zeokeel/zeokeel-kernel"
 	"github.com/zeokeel/zeokeel-kernel/module"
 
@@ -33,17 +37,44 @@ const ModuleID = "zeokeel-ui/interaction"
 // SlotID identifies this module's contribution to overlay.dialogs.
 const SlotID = "interaction.dialog"
 
+// maxOverlayBodyHeight bounds the Markdown preview inside the modal.
+const maxOverlayBodyHeight = design.Space6 * 12
+
 // Config is the module's typed assembly config (all copy is localized; the
 // module has no configurable fields).
 type Config struct{}
 
-// state is the module instance's FIFO question queue and dialog state. It is
+// overlayKind distinguishes the unified FIFO entries.
+type overlayKind int
+
+const (
+	kindQuestion overlayKind = iota
+	kindArtifact
+	kindPlan
+)
+
+// overlayItem is one queued overlay. Questions and artifacts carry their
+// payload; plan review reads the live plan state instead.
+type overlayItem struct {
+	kind     overlayKind
+	question contracts.UserQuestion
+	artifact contracts.Artifact
+}
+
+// state is the module instance's FIFO overlay queue and dialog state. It is
 // touched only on the UI thread.
 type state struct {
-	queue     []contracts.UserQuestion
-	currentID string
-	open      bool
-	draft     string
+	interaction contracts.UserInteraction
+	presenter   contracts.ArtifactPresenter
+	reviewer    contracts.PlanReviewer
+
+	overlays   []overlayItem
+	currentKey string
+	open       bool
+	draft      string
+
+	plan    *contracts.PlanReview
+	planErr string
 
 	// locale localizes the dialog copy per frame (zh is the default).
 	locale contracts.LocaleService
@@ -52,43 +83,79 @@ type state struct {
 // tr returns the localized copy for the current frame's language.
 func (st *state) tr(zh, en string) string { return uikit.T(st.locale, zh, en) }
 
-// Module registers the ask_user dialog contribution.
+// Module registers the ask_user / artifact / plan-review overlays.
 func Module() *module.Descriptor[Config] {
 	return module.Define(ModuleID, func(ctx cordis.Context, cfg Config) error {
 		runtime, err := ctx.Require(contracts.KeyUIRuntime)
 		if err != nil {
 			return err
 		}
-		// The host provides the bridge only in desktop products; without it
-		// (headless or a minimal test host) the dialog module degrades to a
-		// no-op instead of failing the whole assembly.
-		interaction, ok := ctx.Get(contracts.KeyUserInteraction)
-		if !ok {
+		// Every bridge is optional: a minimal host may provide only some of
+		// them (or none, in which case the module is a no-op).
+		interaction, _ := ctx.Get(contracts.KeyUserInteraction)
+		presenter, _ := ctx.Get(contracts.KeyArtifactPresenter)
+		reviewer, _ := ctx.Get(contracts.KeyPlanReviewer)
+		if interaction == nil && presenter == nil && reviewer == nil {
 			return nil
 		}
 		locale, _ := ctx.Get(contracts.KeyLocale)
-		st := &state{locale: locale}
+		st := &state{
+			interaction: interaction, presenter: presenter, reviewer: reviewer,
+			locale: locale,
+		}
 
-		// The host invokes the handler from whichever goroutine asks the
-		// question: hop to the UI thread and request a frame. Nothing here
-		// touches frame state.
-		interaction.SetHandler(func(question contracts.UserQuestion) {
-			runtime.Post(func() {
-				st.queue = append(st.queue, question)
-				runtime.Invalidate()
+		if interaction != nil {
+			// The host invokes the handler from whichever goroutine asks the
+			// question: hop to the UI thread and request a frame.
+			interaction.SetHandler(func(question contracts.UserQuestion) {
+				runtime.Post(func() {
+					st.overlays = append(st.overlays, overlayItem{kind: kindQuestion, question: question})
+					runtime.Invalidate()
+				})
 			})
-		})
-		if err := own(ctx, func() (func(), error) {
-			return func() {
+		}
+		if presenter != nil {
+			presenter.SetArtifactHandler(func(artifact contracts.Artifact) {
+				runtime.Post(func() {
+					st.overlays = append(st.overlays, overlayItem{kind: kindArtifact, artifact: artifact})
+					runtime.Invalidate()
+				})
+			})
+		}
+		if reviewer != nil {
+			reviewer.SetPlanHandler(func(review contracts.PlanReview) {
+				runtime.Post(func() {
+					st.plan = &review
+					runtime.Invalidate()
+				})
+			})
+		}
+
+		cleanup := func() {
+			if interaction != nil {
 				interaction.SetHandler(nil)
-				for _, question := range st.queue {
-					interaction.Cancel(question.ID)
+				for _, item := range st.overlays {
+					if item.kind == kindQuestion {
+						interaction.Cancel(item.question.ID)
+					}
 				}
-				st.queue = nil
-				st.currentID = ""
-			}, nil
-		}); err != nil {
-			interaction.SetHandler(nil)
+			}
+			if presenter != nil {
+				presenter.SetArtifactHandler(nil)
+			}
+			if reviewer != nil {
+				reviewer.SetPlanHandler(nil)
+				if st.plan != nil && st.plan.State == "reviewing" {
+					_, _ = reviewer.Exit("cancel")
+				}
+			}
+			st.overlays = nil
+			st.plan = nil
+			st.currentKey = ""
+			st.open = false
+		}
+		if err := own(ctx, func() (func(), error) { return cleanup, nil }); err != nil {
+			cleanup()
 			return err
 		}
 
@@ -97,7 +164,7 @@ func Module() *module.Descriptor[Config] {
 			ID:    SlotID,
 			Order: 20,
 			Build: func(c *ui.Context) {
-				buildDialog(c, runtime, interaction, st)
+				buildDialog(c, runtime, st)
 			},
 		}
 		return own(ctx, func() (func(), error) {
@@ -105,39 +172,172 @@ func Module() *module.Descriptor[Config] {
 		})
 	}).
 		AddRequires(module.Requires(contracts.KeyUIRuntime)).
-		WithName("ZeoKeel ask_user dialog")
+		WithName("ZeoKeel interaction overlays")
 }
 
-// buildDialog renders the oldest pending question in a native Modal, or nothing
-// while the queue is empty. Escape/backdrop dismissal is treated as cancel so
-// the waiting ask_user call always resolves.
-func buildDialog(c *ui.Context, runtime contracts.UIRuntime, interaction contracts.UserInteraction, st *state) {
-	if len(st.queue) == 0 {
-		st.open = false
-		st.currentID = ""
-		st.draft = ""
+// overlayKey is the identity of one queued overlay (the plan kind has a single
+// instance: its state is the plan review itself).
+func overlayKey(item overlayItem) string {
+	switch item.kind {
+	case kindQuestion:
+		return "q:" + item.question.ID
+	case kindArtifact:
+		return "a:" + item.artifact.ID
+	default:
+		return "plan"
+	}
+}
+
+// syncPlanOverlays mirrors the live plan-review state into the unified queue:
+// reviewing enqueues the plan, approved/cancelled removes it.
+func (st *state) syncPlanOverlays() {
+	if st.reviewer == nil || st.plan == nil {
 		return
 	}
-	question := st.queue[0]
-	if st.currentID != question.ID {
-		st.currentID = question.ID
+	switch st.plan.State {
+	case "reviewing":
+		if strings.TrimSpace(st.plan.Content) == "" || st.hasPlanOverlay() {
+			return
+		}
+		st.overlays = append(st.overlays, overlayItem{kind: kindPlan})
+	case "approved", "cancelled":
+		st.removePlanOverlay()
+	}
+}
+
+func (st *state) hasPlanOverlay() bool {
+	for _, item := range st.overlays {
+		if item.kind == kindPlan {
+			return true
+		}
+	}
+	return false
+}
+
+func (st *state) removePlanOverlay() {
+	kept := st.overlays[:0]
+	for _, item := range st.overlays {
+		if item.kind != kindPlan {
+			kept = append(kept, item)
+		}
+	}
+	st.overlays = kept
+}
+
+// buildDialog renders the oldest queued overlay in a native Modal, or nothing
+// while the queue is empty. Escape/backdrop dismissal resolves the overlay as
+// if its cancel action had been used.
+func buildDialog(c *ui.Context, runtime contracts.UIRuntime, st *state) {
+	st.syncPlanOverlays()
+	if len(st.overlays) == 0 {
+		st.open = false
+		st.currentKey = ""
+		st.draft = ""
+		st.planErr = ""
+		return
+	}
+	item := st.overlays[0]
+	key := overlayKey(item)
+	if st.currentKey != key {
+		st.currentKey = key
 		st.open = true
 		st.draft = ""
+		st.planErr = ""
 	}
 	ui.Modal(c, &st.open, func() {
-		questionPanel(c, runtime, interaction, st, question)
+		switch item.kind {
+		case kindArtifact:
+			artifactPanel(c, runtime, st, item.artifact)
+		case kindPlan:
+			planPanel(c, runtime, st)
+		default:
+			questionPanel(c, runtime, st, item.question)
+		}
 	})
-	if !st.open && st.currentID == question.ID {
-		// Escape or a backdrop click closed the native Modal: cancel the
-		// waiting question and advance the queue. A button answer/cancel
-		// already popped the question, so this only handles dismissal.
-		cancelQuestion(runtime, interaction, st, question.ID)
+	if !st.open && st.currentKey == key {
+		// Escape or a backdrop click closed the native Modal: reuse the
+		// overlay's cancel semantics and advance the queue. A button action
+		// already popped the overlay, so this only handles dismissal.
+		dismissOverlay(runtime, st, item)
 	}
+}
+
+// artifactPanel is the present-tool preview: the artifact title over its
+// Markdown body and a close action.
+func artifactPanel(c *ui.Context, runtime contracts.UIRuntime, st *state, artifact contracts.Artifact) {
+	t := design.Of(c)
+	title := firstNonEmpty(artifact.Title, st.tr("工件预览", "Artifact preview"))
+	design.Apply(ui.Column(c).Width(620).Gap(design.Space4), func(el ui.Element) ui.Element {
+		return el.PaddingX(design.Space6).PaddingY(design.Space2)
+	}).Children(func() {
+		ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(design.Space2).Children(func() {
+			ui.Icon(c, icons.Folder()).Size(design.Space5, design.Space5).TextColor(t.Accent)
+			design.Apply(ui.Text(c, title), t.Font(design.TypeL)).FontWeight(600).TextColor(t.LabelPrimary)
+			ui.Spacer(c).Grow(1)
+			if design.Apply(ui.Button(c, st.tr("关闭", "Close")), secondaryButtonStyle(t)).Clicked() {
+				popOverlay(runtime, st)
+			}
+		})
+		body := strings.TrimSpace(artifact.Body)
+		if body == "" {
+			design.Apply(ui.Text(c, st.tr("（无内容）", "(No content)")), t.TextMuted(design.TypeXS))
+			return
+		}
+		ui.Scroll(c).FillWidth().MaxHeight(maxOverlayBodyHeight).Children(func() {
+			markdown.View(c, artifact.Body, nil)
+		})
+	})
+}
+
+// planPanel is the plan review dialog: the plan Markdown, approve and cancel.
+func planPanel(c *ui.Context, runtime contracts.UIRuntime, st *state) {
+	t := design.Of(c)
+	if st.reviewer == nil || st.plan == nil {
+		return
+	}
+	design.Apply(ui.Column(c).Width(620).Gap(design.Space4), func(el ui.Element) ui.Element {
+		return el.PaddingX(design.Space6).PaddingY(design.Space2)
+	}).Children(func() {
+		ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(design.Space2).Children(func() {
+			ui.Icon(c, icons.Activity()).Size(design.Space5, design.Space5).TextColor(t.Accent)
+			design.Apply(ui.Text(c, st.tr("计划待审阅", "Plan review")),
+				t.Font(design.TypeL)).FontWeight(600).TextColor(t.LabelPrimary)
+		})
+		ui.Scroll(c).FillWidth().MaxHeight(maxOverlayBodyHeight).Children(func() {
+			markdown.View(c, st.plan.Content, nil)
+		})
+		if st.planErr != "" {
+			buildErrorLine(c, t, st.planErr)
+		}
+		ui.Row(c).FillWidth().Justify(ui.End).Gap(design.Space2).Children(func() {
+			if design.Apply(ui.PrimaryButton(c, st.tr("批准", "Approve")), t.PrimaryButton()).Clicked() {
+				exitPlan(runtime, st, "approve", st.tr("批准失败：", "Approve failed: "))
+			}
+			if design.Apply(ui.Button(c, st.tr("取消", "Cancel")), secondaryButtonStyle(t)).Clicked() {
+				exitPlan(runtime, st, "cancel", st.tr("取消失败：", "Cancel failed: "))
+			}
+		})
+	})
+}
+
+// exitPlan applies the plan decision through the reviewer bridge; errors stay
+// visible in the dialog instead of closing it silently.
+func exitPlan(runtime contracts.UIRuntime, st *state, action, errPrefix string) {
+	if st.reviewer == nil {
+		return
+	}
+	if _, err := st.reviewer.Exit(action); err != nil {
+		st.planErr = errPrefix + err.Error()
+		runtime.Invalidate()
+		return
+	}
+	markPlanExited(st, action)
+	popOverlay(runtime, st)
 }
 
 // questionPanel is the Modal body: title, the question text, either one native
 // button per option or a free-text input with Submit, and the Cancel action.
-func questionPanel(c *ui.Context, runtime contracts.UIRuntime, interaction contracts.UserInteraction, st *state, question contracts.UserQuestion) {
+func questionPanel(c *ui.Context, runtime contracts.UIRuntime, st *state, question contracts.UserQuestion) {
 	t := design.Of(c)
 	design.Apply(ui.Column(c).Width(520).Gap(design.Space4), func(el ui.Element) ui.Element {
 		return el.PaddingX(design.Space6).PaddingY(design.Space2)
@@ -160,11 +360,11 @@ func questionPanel(c *ui.Context, runtime contracts.UIRuntime, interaction contr
 						button = design.Apply(ui.Button(c, option), secondaryButtonStyle(t))
 					}
 					if button.Clicked() {
-						answerQuestion(runtime, interaction, st, question.ID, option)
+						answerQuestion(runtime, st, question.ID, option)
 					}
 				}
 				if design.Apply(ui.Button(c, st.tr("取消", "Cancel")), secondaryButtonStyle(t)).Clicked() {
-					cancelQuestion(runtime, interaction, st, question.ID)
+					cancelQuestion(runtime, st, question.ID)
 				}
 			})
 			return
@@ -178,38 +378,82 @@ func questionPanel(c *ui.Context, runtime contracts.UIRuntime, interaction contr
 			submit := design.Apply(ui.PrimaryButton(c, st.tr("提交", "Submit")), t.PrimaryButton()).
 				Disabled(answer == "")
 			if submit.Clicked() && answer != "" {
-				answerQuestion(runtime, interaction, st, question.ID, answer)
+				answerQuestion(runtime, st, question.ID, answer)
 			}
 			if design.Apply(ui.Button(c, st.tr("取消", "Cancel")), secondaryButtonStyle(t)).Clicked() {
-				cancelQuestion(runtime, interaction, st, question.ID)
+				cancelQuestion(runtime, st, question.ID)
 			}
 		})
 	})
 }
 
-// answerQuestion resolves the shown question with answer, pops it and asks for
-// the next frame (which opens the next queued question, if any).
-func answerQuestion(runtime contracts.UIRuntime, interaction contracts.UserInteraction, st *state, id, answer string) {
-	interaction.Answer(id, answer)
-	popQuestion(runtime, st)
+// markPlanExited mirrors the decision into the local snapshot so the live
+// reviewing state cannot re-enqueue the dialog before the host handler does.
+func markPlanExited(st *state, action string) {
+	if st.plan == nil {
+		return
+	}
+	switch action {
+	case "approve":
+		st.plan.State = "approved"
+	default:
+		st.plan.State = "cancelled"
+	}
 }
 
-// cancelQuestion dismisses the shown question with an error, pops it and asks
-// for the next frame.
-func cancelQuestion(runtime contracts.UIRuntime, interaction contracts.UserInteraction, st *state, id string) {
-	interaction.Cancel(id)
-	popQuestion(runtime, st)
+// dismissOverlay applies the cancel semantics of one overlay (question cancel,
+// plan exit-cancel, artifact plain close) and pops it.
+func dismissOverlay(runtime contracts.UIRuntime, st *state, item overlayItem) {
+	switch item.kind {
+	case kindQuestion:
+		if st.interaction != nil {
+			st.interaction.Cancel(item.question.ID)
+		}
+	case kindPlan:
+		if st.reviewer != nil {
+			if _, err := st.reviewer.Exit("cancel"); err == nil {
+				markPlanExited(st, "cancel")
+			}
+		}
+	}
+	popOverlay(runtime, st)
 }
 
-// popQuestion removes the displayed question and resets the dialog state.
-func popQuestion(runtime contracts.UIRuntime, st *state) {
-	if len(st.queue) > 0 {
-		st.queue = st.queue[1:]
+// answerQuestion resolves the shown question with answer and pops it.
+func answerQuestion(runtime contracts.UIRuntime, st *state, id, answer string) {
+	if st.interaction != nil {
+		st.interaction.Answer(id, answer)
+	}
+	popOverlay(runtime, st)
+}
+
+// cancelQuestion dismisses the shown question with an error and pops it.
+func cancelQuestion(runtime contracts.UIRuntime, st *state, id string) {
+	if st.interaction != nil {
+		st.interaction.Cancel(id)
+	}
+	popOverlay(runtime, st)
+}
+
+// popOverlay removes the displayed overlay and resets the dialog state.
+func popOverlay(runtime contracts.UIRuntime, st *state) {
+	if len(st.overlays) > 0 {
+		st.overlays = st.overlays[1:]
 	}
 	st.open = false
-	st.currentID = ""
+	st.currentKey = ""
 	st.draft = ""
+	st.planErr = ""
 	runtime.Invalidate()
+}
+
+// buildErrorLine is the dialog's danger row.
+func buildErrorLine(c *ui.Context, t *design.Tokens, text string) {
+	th := t.Theme()
+	ui.Row(c).FillWidth().Gap(design.Space2).AlignItems(ui.Start).Children(func() {
+		ui.Icon(c, icons.AlertTriangle()).Size(th.Space(4), th.Space(4)).TextColor(t.Danger)
+		design.Apply(ui.Text(c, text), t.Font(design.TypeXS)).TextColor(t.DangerText)
+	})
 }
 
 // secondaryButtonStyle is the brand's secondary dialog button.
@@ -234,4 +478,14 @@ func own(ctx cordis.Context, register func() (func(), error)) error {
 		return err
 	}
 	return nil
+}
+
+// firstNonEmpty returns the first non-empty trimmed string.
+func firstNonEmpty(values ...string) string {
+	for _, value := range values {
+		if trimmed := strings.TrimSpace(value); trimmed != "" {
+			return trimmed
+		}
+	}
+	return ""
 }

@@ -10,6 +10,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -531,6 +532,78 @@ func TestP1ApprovalToolsAndPersistence(t *testing.T) {
 		t.Fatal("ask_user tool did not return")
 	}
 
+	// present: the artifact preview overlay shows the agent's artifact.
+	presentCh := make(chan rig.ToolResult, 1)
+	go func() {
+		result, invokeErr := toolkit.Invoke(context.Background(), rig.ToolCall{
+			ID: "present-1", Name: "present",
+			Arguments: `{"title":"检查报告","content":"# 结果\n\n全部通过。"}`,
+		})
+		if invokeErr != nil {
+			result = rig.ToolResult{IsError: true, Content: invokeErr.Error()}
+		}
+		presentCh <- result
+	}()
+	presentDeadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(presentDeadline) {
+		tester.Frame()
+		if tester.HasText("检查报告") {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if !tester.HasText("检查报告") {
+		t.Fatalf("artifact overlay missing; texts = %v", tester.Texts())
+	}
+	select {
+	case result := <-presentCh:
+		if result.IsError || !strings.Contains(result.Content, "artifact-") {
+			t.Fatalf("present result = %+v", result)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("present tool did not return")
+	}
+	if err := tester.Click("关闭"); err != nil {
+		t.Fatalf("close artifact overlay: %v; texts = %v", err, tester.Texts())
+	}
+	tester.Frame()
+
+	// plan_review: the plan overlay approves through the host plan bridge.
+	planCh := make(chan rig.ToolResult, 1)
+	go func() {
+		result, invokeErr := toolkit.Invoke(context.Background(), rig.ToolCall{
+			ID: "plan-1", Name: "plan_review",
+			Arguments: `{"plan":"# 发布计划\n1. 测试\n2. 发布"}`,
+		})
+		if invokeErr != nil {
+			result = rig.ToolResult{IsError: true, Content: invokeErr.Error()}
+		}
+		planCh <- result
+	}()
+	planDeadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(planDeadline) {
+		tester.Frame()
+		if tester.HasText("计划待审阅") {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if !tester.HasText("计划待审阅") {
+		t.Fatalf("plan overlay missing; texts = %v", tester.Texts())
+	}
+	<-planCh
+	if err := tester.Click("批准"); err != nil {
+		t.Fatalf("approve plan: %v; texts = %v", err, tester.Texts())
+	}
+	tester.Frame()
+	planReviewer, err := root.Require(contracts.KeyPlanReviewer)
+	if err != nil {
+		t.Fatalf("require plan reviewer: %v", err)
+	}
+	if state := planReviewer.State(); state != "approved" {
+		t.Fatalf("plan state = %q, want approved", state)
+	}
+
 	// --- restart: the session and its messages come back from SQLite ------
 	title := session.Title
 	if err := loader.Close(); err != nil {
@@ -621,6 +694,8 @@ func bootDesktop(t *testing.T, dataDir string, settings *memSettings) (cordis.Co
 	provide(t, root, contracts.KeyScreenLister, uiRoot.ScreenLister())
 	provide(t, root, contracts.KeyFileDrop, contracts.FileDropService(uiRoot.FileDrop()))
 	provide(t, root, contracts.KeyUserInteraction, contracts.UserInteraction(uiRoot.UserInteraction()))
+	provide(t, root, contracts.KeyArtifactPresenter, contracts.ArtifactPresenter(uiRoot.ArtifactPresenter()))
+	provide(t, root, contracts.KeyPlanReviewer, contracts.PlanReviewer(uiRoot.PlanReviewer()))
 	provide(t, root, contracts.KeySettings, contracts.SettingsService(settings))
 	provide(t, root, contracts.KeyLogger, contracts.Logger(discardLogger{}))
 	loader, err := assembly.LoadWithBuildInfo(root, assembly.ProductDesktop, assembly.BuildInfo{Version: "0.1.0"})

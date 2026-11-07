@@ -5,6 +5,7 @@ package interaction_test
 
 import (
 	"context"
+	"errors"
 	"sync"
 	"testing"
 
@@ -84,15 +85,131 @@ func (f *fakeInteraction) isCleared() bool {
 	return f.cleared
 }
 
+// fakeArtifactPresenter captures the artifact handler; Present is unused by the
+// dialog module (the host records the artifact and returns its id).
+type fakeArtifactPresenter struct {
+	mu      sync.Mutex
+	handler func(contracts.Artifact)
+	cleared bool
+}
+
+func (f *fakeArtifactPresenter) SetArtifactHandler(fn func(contracts.Artifact)) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.handler = fn
+	if fn == nil {
+		f.cleared = true
+	}
+}
+
+func (f *fakeArtifactPresenter) Present(context.Context, string, string) (string, error) {
+	return "", nil
+}
+
+func (f *fakeArtifactPresenter) trigger(artifact contracts.Artifact) {
+	f.mu.Lock()
+	handler := f.handler
+	f.mu.Unlock()
+	if handler != nil {
+		handler(artifact)
+	}
+}
+
+func (f *fakeArtifactPresenter) isCleared() bool {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.cleared
+}
+
+// fakePlanReviewer captures the plan handler and records Exit decisions.
+type fakePlanReviewer struct {
+	mu      sync.Mutex
+	handler func(contracts.PlanReview)
+	cleared bool
+	exits   []string
+	exitErr error
+	state   string
+}
+
+func (f *fakePlanReviewer) SetPlanHandler(fn func(contracts.PlanReview)) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.handler = fn
+	if fn == nil {
+		f.cleared = true
+	}
+}
+
+func (f *fakePlanReviewer) Review(context.Context, string) (string, error) {
+	return "", nil
+}
+
+func (f *fakePlanReviewer) Exit(action string) (string, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.exits = append(f.exits, action)
+	if f.exitErr != nil {
+		return "", f.exitErr
+	}
+	switch action {
+	case "approve":
+		f.state = "approved"
+	case "cancel":
+		f.state = "cancelled"
+	}
+	return action, nil
+}
+
+func (f *fakePlanReviewer) State() string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.state
+}
+
+func (f *fakePlanReviewer) trigger(review contracts.PlanReview) {
+	f.mu.Lock()
+	handler := f.handler
+	f.mu.Unlock()
+	if handler != nil {
+		handler(review)
+	}
+}
+
+func (f *fakePlanReviewer) exitCalls() []string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]string(nil), f.exits...)
+}
+
+func (f *fakePlanReviewer) isCleared() bool {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.cleared
+}
+
 // harness is the minimal host: uiroot services + the fake interaction backend.
 type harness struct {
 	t           *testing.T
 	uiRoot      *uiroot.Root
 	interaction *fakeInteraction
+	artifacts   *fakeArtifactPresenter
+	plan        *fakePlanReviewer
 	fiber       *cordis.Fiber
 }
 
 func newHarness(t *testing.T) *harness {
+	t.Helper()
+	return newHarnessFull(t, true, true)
+}
+
+// newAskOnlyHarness runs the module without the artifact/plan bridges (the
+// degraded no-op mode for a minimal host).
+func newAskOnlyHarness(t *testing.T) *harness {
+	t.Helper()
+	return newHarnessFull(t, false, false)
+}
+
+func newHarnessFull(t *testing.T, withArtifacts, withPlan bool) *harness {
 	t.Helper()
 	uiRoot := uiroot.New(uiroot.Config{AppName: "ZeoKeel"})
 	ctx := cordis.Root()
@@ -101,6 +218,14 @@ func newHarness(t *testing.T) *harness {
 	provide(t, ctx, contracts.KeyUIRuntime, uiRoot.Runtime())
 	provide(t, ctx, contracts.KeyLocale, uiRoot.Locale())
 	provide[contracts.UserInteraction](t, ctx, contracts.KeyUserInteraction, backend)
+	artifacts := &fakeArtifactPresenter{}
+	plan := &fakePlanReviewer{}
+	if withArtifacts {
+		provide[contracts.ArtifactPresenter](t, ctx, contracts.KeyArtifactPresenter, artifacts)
+	}
+	if withPlan {
+		provide[contracts.PlanReviewer](t, ctx, contracts.KeyPlanReviewer, plan)
+	}
 
 	// One screen keeps the host frame non-empty.
 	if _, err := uiRoot.Runtime().RegisterScreen(contracts.ScreenSpec{
@@ -110,7 +235,7 @@ func newHarness(t *testing.T) *harness {
 	}); err != nil {
 		t.Fatalf("register home screen: %v", err)
 	}
-	h := &harness{t: t, uiRoot: uiRoot, interaction: backend}
+	h := &harness{t: t, uiRoot: uiRoot, interaction: backend, artifacts: artifacts, plan: plan}
 	h.fiber = activate(t, ctx, interaction.Module(), interaction.Config{})
 	return h
 }
@@ -337,4 +462,172 @@ func provide[T any](t *testing.T, ctx cordis.Context, key cordis.ServiceKey[T], 
 	if _, err := ctx.Provide(key, value); err != nil {
 		t.Fatalf("provide %s: %v", key.Name(), err)
 	}
+}
+
+// --- artifacts --------------------------------------------------------------
+
+func TestArtifactPreviewShowsMarkdownAndCloses(t *testing.T) {
+	h := newHarness(t)
+	tester := h.tester()
+
+	h.artifacts.trigger(contracts.Artifact{
+		ID: "a1", Title: "巡检报告", Body: "# 报告标题\n\n正文内容",
+	})
+	tester.Frame()
+	h.assertTexts(tester, "巡检报告", "报告标题", "正文内容", "关闭")
+
+	if err := tester.Click("关闭"); err != nil {
+		t.Fatalf("click close: %v; texts = %v", err, tester.Texts())
+	}
+	tester.Frame()
+	h.assertNoTexts(tester, "巡检报告", "正文内容")
+}
+
+func TestArtifactQueueIsFIFO(t *testing.T) {
+	h := newHarness(t)
+	tester := h.tester()
+
+	h.artifacts.trigger(contracts.Artifact{ID: "a1", Title: "第一个工件", Body: "一"})
+	h.artifacts.trigger(contracts.Artifact{ID: "a2", Title: "第二个工件", Body: "二"})
+	tester.Frame()
+	h.assertTexts(tester, "第一个工件")
+	h.assertNoTexts(tester, "第二个工件")
+
+	h.click(tester, "关闭")
+	tester.Frame()
+	h.assertTexts(tester, "第二个工件")
+	h.assertNoTexts(tester, "第一个工件")
+	h.click(tester, "关闭")
+	tester.Frame()
+	h.assertNoTexts(tester, "第二个工件")
+}
+
+// --- plan review ------------------------------------------------------------
+
+func TestPlanReviewApprove(t *testing.T) {
+	h := newHarness(t)
+	tester := h.tester()
+
+	h.plan.trigger(contracts.PlanReview{Content: "# 实施计划\n\n第一步", State: "reviewing"})
+	tester.Frame()
+	h.assertTexts(tester, "计划待审阅", "实施计划", "第一步", "批准", "取消")
+
+	h.click(tester, "批准")
+	if exits := h.plan.exitCalls(); len(exits) != 1 || exits[0] != "approve" {
+		t.Fatalf("Exit calls = %v, want [approve]", exits)
+	}
+	tester.Frame()
+	h.assertNoTexts(tester, "计划待审阅")
+}
+
+func TestPlanReviewCancelAndEscape(t *testing.T) {
+	h := newHarness(t)
+	tester := h.tester()
+
+	h.plan.trigger(contracts.PlanReview{Content: "计划内容", State: "reviewing"})
+	tester.Frame()
+	h.click(tester, "取消")
+	if exits := h.plan.exitCalls(); len(exits) != 1 || exits[0] != "cancel" {
+		t.Fatalf("Exit calls = %v, want [cancel]", exits)
+	}
+
+	// Escape/backdrop dismissal cancels again.
+	h.plan.trigger(contracts.PlanReview{Content: "第二份计划", State: "reviewing"})
+	tester.Frame()
+	h.assertTexts(tester, "计划待审阅")
+	tester.Key(0, ui.KeyEscape)
+	tester.Frame()
+	exits := h.plan.exitCalls()
+	if len(exits) != 2 || exits[1] != "cancel" {
+		t.Fatalf("Exit calls after Escape = %v, want a second cancel", exits)
+	}
+	tester.Frame()
+	h.assertNoTexts(tester, "计划待审阅")
+}
+
+func TestPlanReviewErrorStaysVisible(t *testing.T) {
+	h := newHarness(t)
+	h.plan.exitErr = errors.New("plan is busy")
+	tester := h.tester()
+
+	h.plan.trigger(contracts.PlanReview{Content: "计划内容", State: "reviewing"})
+	tester.Frame()
+	h.click(tester, "批准")
+	h.assertTexts(tester, "批准失败：plan is busy", "批准")
+}
+
+// --- mixed queue / i18n / degraded -----------------------------------------
+
+func TestAskAndArtifactShareOneQueue(t *testing.T) {
+	h := newHarness(t)
+	tester := h.tester()
+
+	h.interaction.trigger(contracts.UserQuestion{ID: "q1", Text: "先回答问题？", Options: []string{"好"}})
+	h.artifacts.trigger(contracts.Artifact{ID: "a1", Title: "后显示的工件", Body: "工件正文"})
+	tester.Frame()
+	h.assertTexts(tester, "先回答问题？")
+	h.assertNoTexts(tester, "后显示的工件")
+
+	h.click(tester, "好")
+	tester.Frame()
+	h.assertTexts(tester, "后显示的工件")
+	h.click(tester, "关闭")
+	tester.Frame()
+	h.assertNoTexts(tester, "后显示的工件")
+}
+
+func TestEnglishOverlayCopy(t *testing.T) {
+	h := newHarness(t)
+	tester := h.tester()
+	h.uiRoot.Locale().SetLanguage("en")
+
+	h.artifacts.trigger(contracts.Artifact{ID: "a1", Title: "Report", Body: "Body"})
+	tester.Frame()
+	h.assertTexts(tester, "Report", "Close")
+
+	h.artifacts.trigger(contracts.Artifact{ID: "a2", Title: "Second", Body: "Body"})
+	tester.Frame()
+	h.click(tester, "Close")
+	tester.Frame()
+	h.click(tester, "Close")
+	tester.Frame()
+
+	h.plan.trigger(contracts.PlanReview{Content: "Plan body", State: "reviewing"})
+	tester.Frame()
+	h.assertTexts(tester, "Plan review", "Approve", "Cancel")
+}
+
+func TestDegradesWithoutOptionalBridges(t *testing.T) {
+	// Only UserInteraction is provided: the ask dialog keeps working and the
+	// module still registers its slot without touching the missing bridges.
+	h := newAskOnlyHarness(t)
+	tester := h.tester()
+	h.interaction.trigger(contracts.UserQuestion{ID: "q1", Text: "还能提问吗？", Options: []string{"能"}})
+	tester.Frame()
+	h.assertTexts(tester, "需要你的确认", "还能提问吗？")
+	h.click(tester, "能")
+	if answers := h.interaction.answered(); len(answers) != 1 || answers[0].answer != "能" {
+		t.Fatalf("answers = %+v, want q1/能", answers)
+	}
+}
+
+func TestDisposeClearsAllHandlers(t *testing.T) {
+	h := newHarness(t)
+	tester := h.tester()
+	h.artifacts.trigger(contracts.Artifact{ID: "a1", Title: "工件", Body: "内容"})
+	h.plan.trigger(contracts.PlanReview{Content: "计划", State: "reviewing"})
+	tester.Frame()
+
+	if err := h.fiber.Dispose(); err != nil {
+		t.Fatalf("dispose: %v", err)
+	}
+	if !h.interaction.isCleared() || !h.artifacts.isCleared() || !h.plan.isCleared() {
+		t.Fatalf("handlers not cleared: interaction=%v artifacts=%v plan=%v",
+			h.interaction.isCleared(), h.artifacts.isCleared(), h.plan.isCleared())
+	}
+	if exits := h.plan.exitCalls(); len(exits) != 1 || exits[0] != "cancel" {
+		t.Fatalf("reviewing plan was not cancelled on dispose: %v", exits)
+	}
+	tester.Frame()
+	h.assertNoTexts(tester, "工件")
 }

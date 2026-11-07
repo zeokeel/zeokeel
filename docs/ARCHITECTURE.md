@@ -192,6 +192,7 @@ if _, err := ctx.Effect(func() cordis.Effect {
 - ✅ 会话归档：settings archive flag + sidebar 视图开关/排序
 - ✅ 会话置顶：settings pin flag + sidebar 置顶排序/菜单
 - ✅ 可配置 chrome 快捷键（settings `ui.shortcut.*` → 宿主每帧 OnShortcut）
+- ✅ present/plan review 宿主桥 + interaction overlay（工件预览、计划批准）
 - ✅ ask_user 交互桥：UserInteraction + hosttools Asker + overlay.dialogs 原生 Modal
 - ✅ Web search：internal/websearch + 动态 web_search（设置「搜索」页）
 - ✅ 模型目录 + per-session 模型切换（composer 菜单）

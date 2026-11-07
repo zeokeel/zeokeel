@@ -21,6 +21,15 @@
 - 右侧栏「文件」Tab：打开文件夹（mygo 原生 Directory picker）、目录进入/面包屑、文本/Markdown/图片预览、
   刷新与错误状态；E2E 覆盖工作区创建 + 列表 + 预览帧
 
+**P5 present 工件 + plan review（2026-11-08）**
+- contracts：ArtifactPresenter（Present→artifact id + handler）、PlanReviewer（Review/Exit/State 状态机）+ keys
+- uiroot：artifactService（artifact-N/handler/trim 校验/ctx）与 planService（idle→reviewing→approved/cancelled；
+  approve/cancel 仅 reviewing 有效；每次状态变化通知）；host 桌面提供两服务；hosttools 用 PresenterFunc/uiPlanController
+  桥接（interactive=false 仍保留 present/plan）
+- interaction UI：统一 FIFO（question|artifact|plan）overlay.dialogs；工件 Modal（markdown Scroll + 关闭）、
+  计划 Modal（计划待审阅 + 批准/取消 + 错误保留）、Esc/遮罩语义、i18n、dispose 清理
+- E2E：present 工具→覆盖层→关闭；plan_review→覆盖层→批准→State=approved；截图 p2-artifact/p2-plan
+
 **P5 ask_user 真实交互（2026-11-08）**
 - contracts.UserInteraction + uiroot 实现（handler/pending map/atomic ID；Ask 阻塞至 Answer/Cancel/ctx；
   无 handler 错误；并发安全）
