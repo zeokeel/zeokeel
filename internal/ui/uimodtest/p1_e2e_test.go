@@ -282,6 +282,15 @@ func TestP1ApprovalToolsAndPersistence(t *testing.T) {
 	if !tester.HasText("发布检查") {
 		t.Fatalf("skill body missing; texts = %v", tester.Texts())
 	}
+	if err := tester.Click("诊断"); err != nil {
+		t.Fatalf("click diagnostics page: %v; texts = %v", err, tester.Texts())
+	}
+	tester.Frame()
+	for _, want := range []string{"诊断", "工具数", "会话数", "zeokeel.db"} {
+		if !tester.HasText(want) {
+			t.Fatalf("diagnostics page missing %q; texts = %v", want, tester.Texts())
+		}
+	}
 	uiRoot.Navigator().CloseSettings()
 	tester.Frame()
 

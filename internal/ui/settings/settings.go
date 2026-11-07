@@ -20,7 +20,12 @@ package settings
 
 import (
 	"fmt"
+	"path/filepath"
+	"runtime"
+	"sort"
 	"strings"
+
+	rigtools "github.com/zeokeel/zeokeel-rig/tools"
 
 	"github.com/egoist/mygo/ui"
 	cordis "github.com/zeokeel/zeokeel-kernel"
@@ -53,6 +58,11 @@ const (
 	// ShortcutsPageOrder places the page after appearance.
 	ShortcutsPageOrder = 30
 
+	// DiagnosticsPageID is the read-only diagnostics page (about section).
+	DiagnosticsPageID = "diagnostics"
+	// DiagnosticsPageOrder places it after the About page.
+	DiagnosticsPageOrder = 95
+
 	// SkillsPageID is the skills discovery/preview page.
 	SkillsPageID = "skills"
 	// SkillsPageSection is the settings sidebar section the skills page lives
@@ -76,6 +86,7 @@ type shortcutRow struct {
 // page): chrome toggles, composer keys and window dismissal.
 var shortcutRows = []shortcutRow{
 	{"折叠 / 展开侧边栏", "Cmd/Ctrl + B"},
+	{"打开命令面板", "Cmd/Ctrl + K"},
 	{"发送消息", "Enter"},
 	{"换行", "Shift + Enter"},
 	{"命令菜单", "输入 /"},
@@ -230,6 +241,45 @@ func buildProvidersPage(c *ui.Context, t *design.Tokens, store contracts.Setting
 	})
 }
 
+// diagnosticRow is one label/value line of the diagnostics page.
+type diagnosticRow struct{ Label, Value string }
+
+// buildDiagnosticsPage renders the read-only runtime/storage summary (the old
+// shell's diagnostics view) with a native copy action.
+func buildDiagnosticsPage(c *ui.Context, t *design.Tokens, rows []diagnosticRow) {
+	ui.Column(c).FillWidth().Gap(design.Space4).Children(func() {
+		design.Apply(ui.Text(c, "诊断"), t.Font(design.TypeL)).FontWeight(600).
+			TextColor(t.LabelPrimary)
+		design.Apply(ui.Text(c, "运行时与存储信息（只读）；可复制后附在问题报告里。"),
+			t.TextMuted(design.TypeXS))
+		panel := ui.Column(c).FillWidth().Gap(0).Padding(design.Space3)
+		design.Apply(panel, t.Panel())
+		panel.Children(func() {
+			for index, row := range rows {
+				if index > 0 {
+					ui.Divider(c)
+				}
+				ui.Row(c).FillWidth().Padding(design.Space2, 0, design.Space2, 0).
+					AlignItems(ui.Center).Gap(design.Space3).Children(func() {
+					design.Apply(ui.Text(c, row.Label), t.Font(design.TypeXS)).
+						TextColor(t.LabelSecondary).Width(160).Shrink(0)
+					design.Apply(ui.Text(c, row.Value), t.MonoFamily()).FontSize(12).
+						TextColor(t.LabelPrimary).Grow(1).MaxLines(2).Ellipsis("…")
+				})
+			}
+		})
+		ui.Row(c).FillWidth().Children(func() {
+			if ui.Button(c, "复制诊断信息").Clicked() {
+				var builder strings.Builder
+				for _, row := range rows {
+					fmt.Fprintf(&builder, "%s: %s\n", row.Label, row.Value)
+				}
+				c.WriteClipboard(strings.TrimRight(builder.String(), "\n"))
+			}
+		})
+	})
+}
+
 // Module registers the model and appearance settings pages.
 func Module() *module.Descriptor[Config] {
 	return module.Define("zeokeel-ui/settings", func(ctx cordis.Context, cfg Config) error {
@@ -298,6 +348,22 @@ func Module() *module.Descriptor[Config] {
 				buildProvidersPage(c, design.Of(c), store)
 			},
 		}
+		// Optional host services for the read-only diagnostics page.
+		info, _ := ctx.Get(contracts.KeyAppInfo)
+		dataDir, _ := ctx.Get(contracts.KeyDataDir)
+		toolkit, _ := ctx.Get(contracts.KeyToolkit)
+		diagnosticsPage := contracts.SettingsPageSpec{
+			ID: DiagnosticsPageID,
+			// "高级" sorts after the 模型/键盘 sections, so diagnostics does not
+			// become the default settings page.
+			Section: "高级",
+			Title:   "诊断",
+			Order:   DiagnosticsPageOrder,
+			Build: func(c *ui.Context) {
+				rows := diagnosticsRows(info, dataDir, toolkit, chat, store)
+				buildDiagnosticsPage(c, design.Of(c), rows)
+			},
+		}
 		shortcutsPage := contracts.SettingsPageSpec{
 			ID:      ShortcutsPageID,
 			Section: "键盘",
@@ -345,7 +411,10 @@ func Module() *module.Descriptor[Config] {
 		if err := own(ctx, func() (func(), error) { return runtime.RegisterSettingsPage(skillsPage) }); err != nil {
 			return err
 		}
-		return own(ctx, func() (func(), error) { return runtime.RegisterSettingsPage(shortcutsPage) })
+		if err := own(ctx, func() (func(), error) { return runtime.RegisterSettingsPage(shortcutsPage) }); err != nil {
+			return err
+		}
+		return own(ctx, func() (func(), error) { return runtime.RegisterSettingsPage(diagnosticsPage) })
 	}).
 		AddRequires(module.Requires(contracts.KeyUIRuntime)).
 		AddRequires(module.Requires(contracts.KeySettings)).
@@ -353,6 +422,53 @@ func Module() *module.Descriptor[Config] {
 		AddRequires(module.Requires(contracts.KeyTheme)).
 		AddRequires(module.Requires(contracts.KeyLocale)).
 		WithName("ZeoKeel settings pages")
+}
+
+// diagnosticsRows collects the read-only diagnostics values. Optional services
+// degrade to explicit "未启用" values instead of hiding the row.
+func diagnosticsRows(info contracts.AppInfo, dataDir string, toolkit *rigtools.Registry,
+	chat contracts.ChatService, store contracts.SettingsService) []diagnosticRow {
+	name := info.Name
+	if name == "" {
+		name = "ZeoKeel"
+	}
+	version := info.Version
+	if version == "" {
+		version = "dev"
+	}
+	rows := []diagnosticRow{
+		{"应用", name + " v" + version},
+		{"Commit", firstNonEmpty(info.Commit, "unknown")},
+		{"构建时间", firstNonEmpty(info.BuildTime, "unknown")},
+		{"Go 版本", firstNonEmpty(info.GoVersion, runtime.Version())},
+		{"平台", runtime.GOOS + "/" + runtime.GOARCH},
+		{"数据目录", firstNonEmpty(dataDir, "未设置")},
+		{"会话数据库", "zeokeel.db（数据目录）"},
+	}
+	if dataDir != "" {
+		rows[6].Value = filepath.Join(dataDir, "zeokeel.db")
+	}
+	toolCount := 0
+	if toolkit != nil {
+		toolCount = len(toolkit.Specs())
+	}
+	rows = append(rows,
+		diagnosticRow{"工具数", fmt.Sprintf("%d", toolCount)},
+		diagnosticRow{"会话数", fmt.Sprintf("%d", len(chat.Sessions()))},
+	)
+	keys := make([]string, 0)
+	if all := store.All(); len(all) > 0 {
+		for key := range all {
+			if key == contracts.SettingsChatAPIKey {
+				keys = append(keys, key+"=已设置(隐藏)")
+				continue
+			}
+			keys = append(keys, key+"="+all[key])
+		}
+		sort.Strings(keys)
+	}
+	rows = append(rows, diagnosticRow{"设置键", firstNonEmpty(strings.Join(keys, " · "), "（空）")})
+	return rows
 }
 
 // newState seeds the drafts from the effective chat config, falling back to the

@@ -283,6 +283,10 @@ func main() {
 		fmt.Println("click shortcuts:", err)
 	}
 	a.render(outDir + "/p2-shortcuts.png")
+	if err := a.tester.Click("诊断"); err != nil {
+		fmt.Println("click diagnostics:", err)
+	}
+	a.render(outDir + "/p2-diagnostics.png")
 	a.ui.Navigator().CloseSettings()
 	if err := a.ui.Navigator().Push("automation"); err != nil {
 		fmt.Println("push automation:", err)

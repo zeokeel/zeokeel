@@ -21,6 +21,11 @@
 - 右侧栏「文件」Tab：打开文件夹（mygo 原生 Directory picker）、目录进入/面包屑、文本/Markdown/图片预览、
   刷新与错误状态；E2E 覆盖工作区创建 + 列表 + 预览帧
 
+**P4 诊断页（2026-11-08）**
+- 设置「诊断」页（高级 section）：AppInfo（版本/commit/构建时间/Go）、平台、数据目录、zeokeel.db 路径、
+  工具数（KeyToolkit）、会话数（ChatService）、设置键（API key 打码）；「复制诊断信息」写剪贴板；
+  E2E 断言工具数/数据库路径/无明文 key；快捷键页补 Cmd/Ctrl+K
+
 **P4 命令面板（2026-11-08）**
 - uiroot 宿主命令面板：Cmd/Ctrl+K 开关（chrome shortcut）、native Modal、搜索命令、点击执行/关闭、Esc；
   单测覆盖过滤/执行/关闭

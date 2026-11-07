@@ -141,6 +141,8 @@ go test ./...
   片段），点击跳转会话；截图 `p2-search.png`
 - ✅ P4 命令面板：宿主持有 Cmd/Ctrl+K（`ui.Context.OnShortcut`）打开 native Modal 命令面板，过滤
   `UIRuntime.Commands()`、点击执行并关闭、Esc 关闭；截图 `p2-palette.png`
+- ✅ P4 诊断页：版本/Commit/构建时间/Go/平台/数据目录/会话数据库路径/工具数/会话数/设置键（API key
+  打码）+「复制诊断信息」；快捷键页补 Cmd/Ctrl+K；截图 `p2-diagnostics.png`
 - ⬜ 后续阶段见 [docs/PRODUCT-REBUILD-PLAN.md](docs/PRODUCT-REBUILD-PLAN.md)：
   P2 剩余（composer 附件/图片/@ 提及、右侧栏 Files/Terminal/Log 页、会话操作上下文菜单）→
   P3 memory/skills/automation/插件/workspace diff/搜索/fork/export → P4 ACP/热键/导入/更新/诊断
