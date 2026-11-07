@@ -120,14 +120,14 @@ type harness struct {
 
 func newHarness(t *testing.T, chat *fakeChat, store *fakeSettings, cfg settings.Config) *harness {
 	t.Helper()
-	return newHarnessFull(t, chat, store, cfg, nil, nil, contracts.AppInfo{})
+	return newHarnessFull(t, chat, store, cfg, nil, nil, contracts.AppInfo{}, nil)
 }
 
 // newHarnessWithSkills is newHarness with an optional skills backend provided
 // as contracts.KeySkills (nil keeps the page's "技能后端未启用" empty state).
 func newHarnessWithSkills(t *testing.T, chat *fakeChat, store *fakeSettings, cfg settings.Config, skills contracts.SkillsService) *harness {
 	t.Helper()
-	return newHarnessFull(t, chat, store, cfg, skills, nil, contracts.AppInfo{})
+	return newHarnessFull(t, chat, store, cfg, skills, nil, contracts.AppInfo{}, nil)
 }
 
 // newHarnessWithUpdate is newHarness with an optional update backend and the
@@ -135,12 +135,20 @@ func newHarnessWithSkills(t *testing.T, chat *fakeChat, store *fakeSettings, cfg
 func newHarnessWithUpdate(t *testing.T, chat *fakeChat, store *fakeSettings, cfg settings.Config,
 	update contracts.UpdateService, info contracts.AppInfo) *harness {
 	t.Helper()
-	return newHarnessFull(t, chat, store, cfg, nil, update, info)
+	return newHarnessFull(t, chat, store, cfg, nil, update, info, nil)
 }
 
 // newHarnessFull builds the settings harness with the optional backends.
+// newHarnessWithImporter is newHarness with an optional DSH importer backend.
+func newHarnessWithImporter(t *testing.T, chat *fakeChat, store *fakeSettings, cfg settings.Config,
+	importer contracts.ImporterService) *harness {
+	t.Helper()
+	return newHarnessFull(t, chat, store, cfg, nil, nil, contracts.AppInfo{}, importer)
+}
+
 func newHarnessFull(t *testing.T, chat *fakeChat, store *fakeSettings, cfg settings.Config,
-	skills contracts.SkillsService, update contracts.UpdateService, info contracts.AppInfo) *harness {
+	skills contracts.SkillsService, update contracts.UpdateService, info contracts.AppInfo,
+	importer contracts.ImporterService) *harness {
 	t.Helper()
 	uiRoot := uiroot.New(uiroot.Config{AppName: "ZeoKeel"})
 	ctx := cordis.Root()
@@ -161,6 +169,9 @@ func newHarnessFull(t *testing.T, chat *fakeChat, store *fakeSettings, cfg setti
 	}
 	if info.Name != "" || info.Version != "" {
 		provide[contracts.AppInfo](t, ctx, contracts.KeyAppInfo, info)
+	}
+	if importer != nil {
+		provide[contracts.ImporterService](t, ctx, contracts.KeyImporter, importer)
 	}
 
 	h := &harness{t: t, ctx: ctx, uiRoot: uiRoot, settings: store, chat: chat}

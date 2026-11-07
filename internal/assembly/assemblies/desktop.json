@@ -74,6 +74,11 @@
       "config": {}
     },
     {
+      "id": "importer",
+      "module": "zeokeel/importer",
+      "config": {}
+    },
+    {
       "id": "ui",
       "module": "zeokeel/host/group",
       "children": [

@@ -21,6 +21,12 @@
 - 右侧栏「文件」Tab：打开文件夹（mygo 原生 Directory picker）、目录进入/面包屑、文本/Markdown/图片预览、
   刷新与错误状态；E2E 覆盖工作区创建 + 列表 + 预览帧
 
+**P4 DSH 导入（2026-11-08）**
+- `zeokeel/importer`：DSH session.v4.jsonl 解析（user source.kind=user、assistant visible text+reasoning、
+  context/tool/image 跳过计数）、Scan 预览（sessions/messages/workspaces/skipped/notes）、Import 写 store
+  （dsh-<id> 幂等、标题首条用户消息、ReplaceHistory、workspace 注册、import 事件）；zstd/附件仅计数说明
+- 设置「导入」页：DSH 目录输入 + 原生浏览 + 扫描预览 + 导入结果/错误；E2E 覆盖扫描→导入→重启可见→侧栏
+
 **P2 拖放附件（2026-11-08）**
 - 宿主窗口 `OnFileDrop` → `FileDropService.Dispatch` → 会话模块处理器 staging（复用 picker 的
   stageAttachmentFiles）；uiroot 服务单测 + session frame test + desktop E2E + 截图

@@ -306,6 +306,10 @@ func main() {
 		fmt.Println("click update:", err)
 	}
 	a.render(outDir + "/p2-update.png")
+	if err := a.tester.Click("导入"); err != nil {
+		fmt.Println("click import:", err)
+	}
+	a.render(outDir + "/p2-import.png")
 	a.ui.Navigator().CloseSettings()
 	if err := a.ui.Navigator().Push("automation"); err != nil {
 		fmt.Println("push automation:", err)

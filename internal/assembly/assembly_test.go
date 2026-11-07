@@ -132,20 +132,20 @@ func TestProductsAndEntries(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Entries(desktop): %v", err)
 	}
-	if len(desktop) != 13 {
-		t.Fatalf("desktop roots = %d, want appinfo + store + approvals + workspace + terminal + skills + memory + toolkit + hosttools + agent + automation + update + ui group", len(desktop))
+	if len(desktop) != 14 {
+		t.Fatalf("desktop roots = %d, want 14 entries", len(desktop))
 	}
 	wantRoots := []string{
 		"zeokeel/appinfo", "zeokeel/sessionstore", "zeokeel/approvals", "zeokeel/workspace",
 		"zeokeel/terminal", "zeokeel/skills", "zeokeel/memory", "zeokeel/toolkit", "zeokeel/hosttools",
-		"zeokeel/agent", "zeokeel/automation", "zeokeel/update", assembly.GroupModuleID,
+		"zeokeel/agent", "zeokeel/automation", "zeokeel/update", "zeokeel/importer", assembly.GroupModuleID,
 	}
 	for index, root := range desktop {
 		if root.Module != wantRoots[index] {
 			t.Fatalf("desktop root %d = %q, want %q", index, root.Module, wantRoots[index])
 		}
 	}
-	if len(desktop[12].Children) != 10 {
+	if len(desktop[13].Children) != 10 {
 		t.Fatalf("UI group children = %d, want 10 UI modules", len(desktop[11].Children))
 	}
 	wantChildren := []string{
@@ -153,7 +153,7 @@ func TestProductsAndEntries(t *testing.T) {
 		"zeokeel-ui/sidebar", "zeokeel-ui/session", "zeokeel-ui/settings", "zeokeel-ui/approval",
 		"zeokeel-ui/rightpanel", "zeokeel-ui/automation", "zeokeel-ui/plugins",
 	}
-	for index, child := range desktop[12].Children {
+	for index, child := range desktop[13].Children {
 		if child.Module != wantChildren[index] {
 			t.Fatalf("UI group child %d = %q, want %q", index, child.Module, wantChildren[index])
 		}
@@ -166,7 +166,7 @@ func TestProductsAndEntries(t *testing.T) {
 	wantHeadless := []string{
 		"zeokeel/appinfo", "zeokeel/sessionstore", "zeokeel/approvals", "zeokeel/workspace",
 		"zeokeel/terminal", "zeokeel/skills", "zeokeel/memory", "zeokeel/toolkit", "zeokeel/hosttools",
-		"zeokeel/agent", "zeokeel/automation", "zeokeel/update",
+		"zeokeel/agent", "zeokeel/automation", "zeokeel/update", "zeokeel/importer",
 	}
 	if len(headless) != len(wantHeadless) {
 		t.Fatalf("headless entries = %d, want %d", len(headless), len(wantHeadless))
@@ -191,6 +191,7 @@ func TestRegistryIsExplicit(t *testing.T) {
 		"zeokeel/hosttools",
 		"zeokeel/automation",
 		"zeokeel/update",
+		"zeokeel/importer",
 		"zeokeel/sessionstore",
 		"zeokeel/workspace",
 		"zeokeel/terminal",
@@ -210,8 +211,8 @@ func TestRegistryIsExplicit(t *testing.T) {
 			t.Fatalf("Registry() lacks module %q", id)
 		}
 	}
-	if got := len(registry.Modules()); got != 24 {
-		t.Fatalf("Registry() modules = %d, want 24", got)
+	if got := len(registry.Modules()); got != 25 {
+		t.Fatalf("Registry() modules = %d, want 25", got)
 	}
 }
 
@@ -243,12 +244,12 @@ func TestDesktopAssemblyLoadsAndUnwinds(t *testing.T) {
 	// approvals provider, the agent consumer and the UI modules settle in
 	// dependency order.
 	instances := loader.Instances()
-	if len(instances) != 23 {
-		t.Fatalf("desktop instances = %d, want 23", len(instances))
+	if len(instances) != 24 {
+		t.Fatalf("desktop instances = %d, want 24", len(instances))
 	}
 	wantIDs := []string{
 		"appinfo", "store", "approvals", "workspace", "terminal", "skills", "memory", "toolkit", "hosttools",
-		"agent", "automation", "update", "ui",
+		"agent", "automation", "update", "importer", "ui",
 		"home", "toolcards", "about", "sidebar", "session", "settings", "approval", "rightpanel",
 		"automation-ui", "plugins-ui",
 	}
@@ -366,8 +367,8 @@ func TestHeadlessAssemblyNeedsNoUIServices(t *testing.T) {
 	}()
 
 	instances := loader.Instances()
-	if len(instances) != 12 {
-		t.Fatalf("headless instances = %d, want appinfo + store + approvals + workspace + terminal + skills + memory + toolkit + hosttools + agent + automation + update", len(instances))
+	if len(instances) != 13 {
+		t.Fatalf("headless instances = %d, want 13", len(instances))
 	}
 	instance := instances[0]
 	if instance.ID() != "appinfo" || instance.ModuleID() != "zeokeel/appinfo" {

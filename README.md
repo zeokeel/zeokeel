@@ -159,6 +159,9 @@ go test ./...
   notes markdown、复制下载链接；仅检查不自动替换）；截图 `p2-update.png`；desktop 23 / headless 12 实例
 - ✅ P2 拖放附件：宿主 `window.OnFileDrop` → `contracts.KeyFileDrop` → 会话 composer 暂存 chips（与原生
   picker 同一路径，10MB/MIME/错误处理复用）；截图 `p2-drop.png`
+- ✅ P4 DSH 导入：`zeokeel/importer`（扫描 `<dsh>/sessions/**/session.v4.jsonl`，解析 header v4 + user/assistant
+  visible text + reasoning，跳过 context/tool/附件/zstd；预览计数；导入为 `dsh-<id>` 会话 + 历史 + workspace
+  注册，幂等）+ 设置「导入」页（目录输入/浏览/扫描预览/导入结果）；截图 `p2-import.png`；desktop 24 / headless 13 实例
 - ⬜ 后续阶段见 [docs/PRODUCT-REBUILD-PLAN.md](docs/PRODUCT-REBUILD-PLAN.md)：
   P2 剩余（composer 附件/图片/@ 提及、右侧栏 Files/Terminal/Log 页、会话操作上下文菜单）→
   P3 memory/skills/automation/插件/workspace diff/搜索/fork/export → P4 ACP/热键/导入/更新/诊断

@@ -405,6 +405,7 @@ func Module() *module.Descriptor[Config] {
 		appearance := &appearanceState{dark: theme.Dark(), language: locale.Language()}
 		skills := newSkillsState()
 		update := newUpdateState()
+		importState := newImportState()
 
 		page := contracts.SettingsPageSpec{
 			ID:      PageID,
@@ -510,6 +511,18 @@ func Module() *module.Descriptor[Config] {
 			},
 		}
 		if err := own(ctx, func() (func(), error) { return runtime.RegisterSettingsPage(updatePage) }); err != nil {
+			return err
+		}
+		importPage := contracts.SettingsPageSpec{
+			ID:      ImportPageID,
+			Section: ImportPageSection,
+			Title:   ImportPageTitle,
+			Order:   ImportPageOrder,
+			Build: func(c *ui.Context) {
+				buildImportPage(c, design.Of(c), ctx, runtime, importState)
+			},
+		}
+		if err := own(ctx, func() (func(), error) { return runtime.RegisterSettingsPage(importPage) }); err != nil {
 			return err
 		}
 		return own(ctx, func() (func(), error) { return runtime.RegisterSettingsPage(diagnosticsPage) })

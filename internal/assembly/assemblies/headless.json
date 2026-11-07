@@ -72,6 +72,11 @@
       "id": "update",
       "module": "zeokeel/update",
       "config": {}
+    },
+    {
+      "id": "importer",
+      "module": "zeokeel/importer",
+      "config": {}
     }
   ]
 }
