@@ -335,6 +335,15 @@ func TestP1ApprovalToolsAndPersistence(t *testing.T) {
 			t.Fatalf("search endpoint = %q", got)
 		}
 	}
+	if err := tester.Click("MCP"); err != nil {
+		t.Fatalf("click MCP settings: %v; texts = %v", err, tester.Texts())
+	}
+	tester.Frame()
+	for _, want := range []string{"MCP", "添加", "还没有配置 MCP 服务器"} {
+		if !tester.HasText(want) {
+			t.Fatalf("MCP settings page missing %q; texts = %v", want, tester.Texts())
+		}
+	}
 	uiRoot.Navigator().CloseSettings()
 	tester.Frame()
 

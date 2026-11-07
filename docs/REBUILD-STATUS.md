@@ -21,6 +21,12 @@
 - 右侧栏「文件」Tab：打开文件夹（mygo 原生 Directory picker）、目录进入/面包屑、文本/Markdown/图片预览、
   刷新与错误状态；E2E 覆盖工作区创建 + 列表 + 预览帧
 
+**P5 MCP 用户配置（2026-11-08）**
+- contracts.SettingMCPServers（mcp.servers JSON [{name,url}]）+ toolkit 启动合并（assembly 优先/URL 去重/非法行 warning/
+  坏 JSON 不失败）
+- 设置「MCP」页：列表/移除/添加（name+url 校验、重复拒绝、顺序保持、坏 JSON 提示、保存回滚、i18n）；
+  E2E 渲染断言；截图 p2-mcp-settings.png
+
 **P5 present 工件 + plan review（2026-11-08）**
 - contracts：ArtifactPresenter（Present→artifact id + handler）、PlanReviewer（Review/Exit/State 状态机）+ keys
 - uiroot：artifactService（artifact-N/handler/trim 校验/ctx）与 planService（idle→reviewing→approved/cancelled；

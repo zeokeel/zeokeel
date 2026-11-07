@@ -545,6 +545,7 @@ func Module() *module.Descriptor[Config] {
 		update := newUpdateState()
 		importState := newImportState()
 		search := newSearchState()
+		mcp := newMCPState()
 		diagnostics := &diagnosticsState{}
 
 		// Optional host services for the read-only diagnostics page.
@@ -644,6 +645,14 @@ func Module() *module.Descriptor[Config] {
 				Build: func(c *ui.Context) {
 					syncer.sync()
 					buildSearchPage(c, ctx, search, locale)
+				},
+			},
+			{
+				ID: MCPPageID, Section: MCPPageSection, Order: MCPPageOrder,
+				zhTitle: "MCP", enTitle: "MCP",
+				Build: func(c *ui.Context) {
+					syncer.sync()
+					buildMCPPage(c, ctx, mcp, locale)
 				},
 			},
 		}

@@ -422,6 +422,10 @@ func main() {
 		fmt.Println("click search settings:", err)
 	}
 	a.render(outDir + "/p2-search-settings.png")
+	if err := a.tester.Click("MCP"); err != nil {
+		fmt.Println("click MCP settings:", err)
+	}
+	a.render(outDir + "/p2-mcp-settings.png")
 	a.ui.Navigator().CloseSettings()
 	if err := a.ui.Navigator().Push("automation"); err != nil {
 		fmt.Println("push automation:", err)

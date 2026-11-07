@@ -193,6 +193,9 @@ go test ./...
   hosttools Presenter/PlanController 桥接）+ interaction 模块统一 FIFO overlay（工件 markdown 预览、计划待审阅
   批准/取消、ask/artifact/plan 三队列、i18n）；E2E present→artifact 覆盖层、plan_review→批准→planState=approved；
   截图 `p2-artifact.png`、`p2-plan.png`
+- ✅ P5 MCP 用户配置：设置「MCP」页（Streamable HTTP 服务器列表/添加/移除，JSON 持久化 `mcp.servers`，
+  校验/重复拒绝/坏 JSON 提示，重启生效）+ toolkit 启动时合并 assembly 与用户配置（assembly 优先、按 URL 去重、
+  非法行 warning）；截图 `p2-mcp-settings.png`
 - ⬜ 后续阶段见 [docs/PRODUCT-REBUILD-PLAN.md](docs/PRODUCT-REBUILD-PLAN.md)：
   P2 剩余（composer 附件/图片/@ 提及、右侧栏 Files/Terminal/Log 页、会话操作上下文菜单）→
   P3 memory/skills/automation/插件/workspace diff/搜索/fork/export → P4 ACP/热键/导入/更新/诊断

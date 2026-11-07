@@ -88,6 +88,12 @@ type Config struct {
 // Module provides the tool registry built from the Rig toolset.
 func Module() *module.Descriptor[Config] {
 	return module.Define("zeokeel/toolkit", func(ctx cordis.Context, cfg Config) error {
+		logger, _ := ctx.Get(contracts.KeyLogger)
+		logf := func(format string, args ...any) {
+			if logger != nil {
+				logger.Printf(format, args...)
+			}
+		}
 		root := strings.TrimSpace(cfg.Root)
 		if root == "" {
 			root = "."
@@ -188,9 +194,15 @@ func Module() *module.Descriptor[Config] {
 			}
 		}
 
+		rawMCPServers := ""
+		if hasSettings {
+			rawMCPServers = settingsService.Get(contracts.SettingMCPServers, "")
+		}
+		servers := mergeMCPServers(cfg.MCPServers, rawMCPServers, logf)
+
 		var clients []*mcp.Client
-		pluginEntries := make([]pluginEntry, 0, len(cfg.MCPServers))
-		for _, server := range cfg.MCPServers {
+		pluginEntries := make([]pluginEntry, 0, len(servers))
+		for _, server := range servers {
 			entry := pluginEntry{plugin: contracts.MCPPlugin{
 				Name:   strings.TrimSpace(server.Name),
 				URL:    strings.TrimSpace(server.URL),

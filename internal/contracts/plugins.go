@@ -34,6 +34,11 @@ type PluginsService interface {
 	Refresh(ctx context.Context) []MCPPlugin
 }
 
+// SettingMCPServers stores user-configured MCP servers as a JSON array of
+// {"name":"...","url":"..."} rows. The toolkit merges them with the assembly's
+// servers on startup (a restart applies changes).
+const SettingMCPServers = "mcp.servers"
+
 // KeyPlugins is provided by the toolkit module (which owns the MCP clients)
 // and consumed by the Plugins screen.
 var KeyPlugins = cordis.NewServiceKey[PluginsService]("zeokeel/plugins")
