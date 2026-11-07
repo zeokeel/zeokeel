@@ -57,3 +57,25 @@ func filterMCPTools(tools []rig.Tool, disabled map[string]bool,
 	}
 	return filtered
 }
+
+// filterDisabledTools drops any registry tool whose trimmed name is disabled by
+// tools.disabled or mcp.disabledTools and logs each skipped name.
+func filterDisabledTools(tools []rig.Tool, disabled map[string]bool,
+	logf func(format string, args ...any)) []rig.Tool {
+	if len(disabled) == 0 || len(tools) == 0 {
+		return tools
+	}
+	if logf == nil {
+		logf = func(string, ...any) {}
+	}
+	filtered := make([]rig.Tool, 0, len(tools))
+	for _, tool := range tools {
+		name := strings.TrimSpace(tool.Name())
+		if !shouldRegisterMCPTool(name, disabled) {
+			logf("[toolkit] skip disabled tool %q", name)
+			continue
+		}
+		filtered = append(filtered, tool)
+	}
+	return filtered
+}

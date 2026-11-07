@@ -55,13 +55,15 @@ type state struct {
 	// locale localizes the screen copy per frame (zh is the default).
 	locale contracts.LocaleService
 
-	// MCP tool switches. disabledTools is loaded from settings on the first
+	// Tool switches. disabledTools is tools.disabled (all tools);
+	// disabledMCPTools is the legacy mcp.disabledTools. Both load on the first
 	// frame; disabledErr surfaces malformed stored JSON.
-	disabledTools  map[string]bool
-	disabledLoaded bool
-	disabledErr    string
-	status         string
-	statusErr      bool
+	disabledTools    map[string]bool
+	disabledMCPTools map[string]bool
+	disabledLoaded   bool
+	disabledErr      string
+	status           string
+	statusErr        bool
 
 	// mcpExpanded remembers the expanded MCP server cards, keyed by server
 	// identity, so a Refresh preserves the open cards.

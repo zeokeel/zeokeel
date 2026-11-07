@@ -226,16 +226,21 @@ func Module() *module.Descriptor[Config] {
 			}
 		}
 
-		disabledMCPTools := make(map[string]bool)
+		// tools.disabled applies to every registry tool; mcp.disabledTools is
+		// kept as a legacy MCP-only alias. The union is applied both while the
+		// MCP clients' tools are collected and once more to the final registry
+		// (built-ins, LSP tools).
+		disabledTools := make(map[string]bool)
 		if hasSettings {
-			rawDisabled := settingsService.Get(contracts.SettingMCPDisabledTools, "")
-			disabledNames, err := contracts.ParseStringListJSON(rawDisabled)
-			if err != nil {
-				logf("[toolkit] parse %s: %v", contracts.SettingMCPDisabledTools, err)
-			} else {
+			for _, key := range []string{contracts.SettingToolsDisabled, contracts.SettingMCPDisabledTools} {
+				disabledNames, err := contracts.ParseStringListJSON(settingsService.Get(key, ""))
+				if err != nil {
+					logf("[toolkit] parse %s: %v", key, err)
+					continue
+				}
 				for _, name := range disabledNames {
 					if trimmed := strings.TrimSpace(name); trimmed != "" {
-						disabledMCPTools[trimmed] = true
+						disabledTools[trimmed] = true
 					}
 				}
 			}
@@ -253,8 +258,8 @@ func Module() *module.Descriptor[Config] {
 			attach := func(client *mcp.Client) {
 				clients = append(clients, client)
 				mcpTools := mcp.Tools(client, "")
-				tools = append(tools, filterMCPTools(mcpTools, disabledMCPTools, logf)...)
-				tools = append(tools, filterMCPTools(mcp.ResourceTools(client, ""), disabledMCPTools, logf)...)
+				tools = append(tools, filterDisabledTools(mcpTools, disabledTools, logf)...)
+				tools = append(tools, filterDisabledTools(mcp.ResourceTools(client, ""), disabledTools, logf)...)
 				entry.client = client
 				entry.plugin.Name = pluginDisplayName(server.Name, client)
 				entry.plugin.ServerName = client.ServerName()
@@ -323,6 +328,7 @@ func Module() *module.Descriptor[Config] {
 		// server is closed when the module unloads.
 		lspTools, closeLSP := startLSPTools(context.Background(), logf, settingsService, hasSettings, tools)
 		tools = append(tools, lspTools...)
+		tools = filterDisabledTools(tools, disabledTools, logf)
 
 		if _, err := ctx.Provide(contracts.KeyToolkit, rigtool.NewRegistry(tools...)); err != nil {
 			closeLSP()

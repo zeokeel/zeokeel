@@ -91,6 +91,11 @@ const SettingMCPWorkspaceOptIn = "mcp.workspaceOptIn"
 // not be registered (per-tool switches in the plugins page; restart applies).
 const SettingMCPDisabledTools = "mcp.disabledTools"
 
+// SettingToolsDisabled stores a JSON array of any tool names (built-in or MCP)
+// that should not be registered (the plugins page's per-tool switches; restart
+// applies). It is merged with SettingMCPDisabledTools.
+const SettingToolsDisabled = "tools.disabled"
+
 // ParseStringListJSON decodes a JSON array of strings ("[]"/"" -> nil).
 func ParseStringListJSON(raw string) ([]string, error) {
 	raw = strings.TrimSpace(raw)

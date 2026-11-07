@@ -75,7 +75,7 @@
 | `websearch` | ✅ | `internal/websearch` + toolkit 动态 searcher | POST/Bearer/limit/10s/1MiB/错误语义；assembly network=true，设置 endpoint/key 即时生效 |
 | `winproc` | ❌ | 无 | Windows 控制台隐藏/环境/编码辅助未迁移（平台非目标） |
 | `workspacechanges` | ✅ | workspace WorkspaceDiffer + rightpanel Changes | git status/diff、截断；用户可见等价 |
-| `app`（宿主） | 🟡 | host/assembly | 窗口/设置/headless/ACP + interaction/artifact/plan/notifier 服务 + 单实例锁 + XDG autostart + install-on-restart + toast overlay（设置可关闭）+ 网络代理 + 系统托盘/关闭到托盘 + 全局热键；窗口几何由 mygo StateKey 隐式持久化；缺 Windows 运行中替换、托盘快捷入口 |
+| `app`（宿主） | 🟡 | host/assembly | 窗口/设置/headless/ACP + interaction/artifact/plan/notifier 服务 + 单实例锁 + XDG autostart + install-on-restart + toast overlay（设置可关闭）+ 网络代理 + 系统托盘（显示/新建会话/设置/退出）+/关闭到托盘 + 全局热键；窗口几何由 mygo StateKey 隐式持久化；缺 Windows 运行中替换 |
 
 ## 3. Shell / UI 能力矩阵（34 项）
 

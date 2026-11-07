@@ -20,47 +20,66 @@ func isMCPToolName(name string) bool {
 	return strings.HasPrefix(strings.TrimSpace(name), "mcp_")
 }
 
-// loadDisabledTools parses mcp.disabledTools once per page visit.
+// loadDisabledTools parses tools.disabled (all tools) and the legacy
+// mcp.disabledTools once per page visit.
 func (st *state) loadDisabledTools(settings contracts.SettingsService, hasSettings bool) {
 	if st.disabledLoaded {
 		return
 	}
 	st.disabledLoaded = true
 	st.disabledTools = make(map[string]bool)
+	st.disabledMCPTools = make(map[string]bool)
 	if !hasSettings || settings == nil {
 		return
 	}
-	names, err := contracts.ParseStringListJSON(settings.Get(contracts.SettingMCPDisabledTools, ""))
-	if err != nil {
-		st.disabledErr = err.Error()
-		return
-	}
-	for _, name := range names {
-		if trimmed := strings.TrimSpace(name); trimmed != "" {
-			st.disabledTools[trimmed] = true
+	var errs []string
+	for _, source := range []struct {
+		key    string
+		target *map[string]bool
+	}{
+		{contracts.SettingToolsDisabled, &st.disabledTools},
+		{contracts.SettingMCPDisabledTools, &st.disabledMCPTools},
+	} {
+		names, err := contracts.ParseStringListJSON(settings.Get(source.key, ""))
+		if err != nil {
+			errs = append(errs, source.key+": "+err.Error())
+			continue
+		}
+		for _, name := range names {
+			if trimmed := strings.TrimSpace(name); trimmed != "" {
+				(*source.target)[trimmed] = true
+			}
 		}
 	}
+	st.disabledErr = strings.Join(errs, "; ")
 }
 
-// setMCPToolEnabled adds/removes one MCP tool from mcp.disabledTools and writes
-// the sorted JSON list back. A failed write is reverted and surfaced in the
-// catalogue status line.
-func (st *state) setMCPToolEnabled(name string, enabled bool, settings contracts.SettingsService) {
+// setToolEnabled adds/removes one tool from its setting (tools.disabled for
+// built-ins, mcp.disabledTools for MCP tools) and writes the sorted JSON list
+// back. A failed write is reverted and surfaced in the status line.
+func (st *state) setToolEnabled(name string, enabled bool, settings contracts.SettingsService, mcp bool) {
 	if st.disabledTools == nil {
 		st.disabledTools = make(map[string]bool)
+	}
+	if st.disabledMCPTools == nil {
+		st.disabledMCPTools = make(map[string]bool)
 	}
 	name = strings.TrimSpace(name)
 	if name == "" {
 		return
 	}
-	wasDisabled := st.disabledTools[name]
-	if enabled {
-		delete(st.disabledTools, name)
-	} else {
-		st.disabledTools[name] = true
+	key, target := contracts.SettingToolsDisabled, st.disabledTools
+	if mcp {
+		key, target = contracts.SettingMCPDisabledTools, st.disabledMCPTools
 	}
-	names := make([]string, 0, len(st.disabledTools))
-	for disabled := range st.disabledTools {
+	wasDisabled := target[name]
+	if enabled {
+		delete(target, name)
+	} else {
+		target[name] = true
+	}
+	names := make([]string, 0, len(target))
+	for disabled := range target {
 		if trimmed := strings.TrimSpace(disabled); trimmed != "" {
 			names = append(names, trimmed)
 		}
@@ -69,13 +88,13 @@ func (st *state) setMCPToolEnabled(name string, enabled bool, settings contracts
 	encoded, encodeErr := contracts.EncodeStringListJSON(names)
 	var writeErr error
 	if encodeErr == nil {
-		writeErr = settings.Set(contracts.SettingMCPDisabledTools, encoded)
+		writeErr = settings.Set(key, encoded)
 	}
 	if failure := encodeErr; failure != nil || writeErr != nil {
 		if wasDisabled {
-			st.disabledTools[name] = true
+			target[name] = true
 		} else {
-			delete(st.disabledTools, name)
+			delete(target, name)
 		}
 		if failure == nil {
 			failure = writeErr
@@ -86,4 +105,10 @@ func (st *state) setMCPToolEnabled(name string, enabled bool, settings contracts
 	}
 	st.status = st.tr("已保存，重启生效", "Saved; restart applies")
 	st.statusErr = false
+}
+
+// setMCPToolEnabled is the legacy MCP-only entry point retained for callers
+// that still use it; it delegates to the generic setting-aware writer.
+func (st *state) setMCPToolEnabled(name string, enabled bool, settings contracts.SettingsService) {
+	st.setToolEnabled(name, enabled, settings, true)
 }

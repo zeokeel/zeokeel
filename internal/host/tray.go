@@ -21,10 +21,20 @@ import (
 const trayID = "zeokeel"
 
 // trayHandler is the window/application side of the tray, injected by tests so
-// the show/quit actions can be asserted without a desktop session.
+// the show/quit actions can be asserted without a desktop session. Its shape is
+// part of the test-only linkname ABI in internal/regression, so it stays the
+// show/quit pair; the extra app actions live in trayActions.
 type trayHandler struct {
 	show func()
 	quit func()
+}
+
+// trayActions are the optional app actions the tray menu offers besides
+// show/quit: start a fresh session and open settings. Both may be nil (the menu
+// item is then omitted); the host wires them to ChatService and Navigator.
+type trayActions struct {
+	NewSession   func() error
+	OpenSettings func()
 }
 
 // trayWindow is the slice of *mygo.Window the tray drives.
@@ -67,15 +77,39 @@ func closeToTrayEnabled(settings *Settings) bool {
 // quit. keepAlive lets the teardown path close the window normally (return false
 // while shutting down). setupTray must run on the UI thread (App.WhenReady):
 // NewTray requires the application to be ready.
+// setupTray creates the desktop tray without app actions (kept as the stable
+// entry point: internal/regression reaches it through a test-only linkname).
 func setupTray(window *mygo.Window, settings *Settings, keepAlive func() bool) (trayHandle, error) {
 	if window == nil {
 		return nil, errors.New("system tray needs a window")
 	}
+	return setupTrayWithActions(window, settings, keepAlive, trayActions{}, nil)
+}
+
+// setupTrayWithActions is setupTray with the optional new-session/settings
+// actions and the host logger for action-failure warnings.
+func setupTrayWithActions(window trayWindow, settings *Settings, keepAlive func() bool,
+	actions trayActions, logger contracts.Logger) (trayHandle, error) {
+	return setupTrayWithFactory(window, settings, keepAlive, actions, newMygoTray, logger)
+}
+
+// setupTrayWithFactory is setupTrayWithActions with an injectable tray factory:
+// tests use it to exercise the menu actions without a desktop session.
+func setupTrayWithFactory(window trayWindow, settings *Settings, keepAlive func() bool,
+	actions trayActions, factory trayFactory, logger contracts.Logger) (trayHandle, error) {
+	if window == nil {
+		return nil, errors.New("system tray needs a window")
+	}
 	handler := trayHandler{
-		show: func() { showWindow(window) },
+		show: func() { showTrayWindow(window) },
 		quit: func() { mygo.App.Quit() },
 	}
-	return createTray(window, handler, closeToTrayEnabled(settings), keepAlive, newMygoTray)
+	var warn func(format string, args ...any)
+	if logger != nil {
+		warn = logger.Printf
+	}
+	return createTrayWithActions(window, handler, actions, warn,
+		closeToTrayEnabled(settings), keepAlive, factory)
 }
 
 // newMygoTray is the production tray factory.
@@ -94,6 +128,14 @@ func newMygoTray(options mygo.TrayOptions) (trayHandle, error) {
 // error returns a readable error and registers nothing.
 func createTray(window trayWindow, handler trayHandler, closeToTray bool,
 	keepAlive func() bool, factory trayFactory) (trayHandle, error) {
+	return createTrayWithActions(window, handler, trayActions{}, nil, closeToTray, keepAlive, factory)
+}
+
+// createTrayWithActions is createTray with the optional new-session/settings
+// menu actions; warn receives a failed new-session warning (may be nil).
+func createTrayWithActions(window trayWindow, handler trayHandler, actions trayActions,
+	warn func(format string, args ...any), closeToTray bool, keepAlive func() bool,
+	factory trayFactory) (trayHandle, error) {
 	if factory == nil {
 		return nil, errors.New("system tray has no factory")
 	}
@@ -101,7 +143,7 @@ func createTray(window trayWindow, handler trayHandler, closeToTray bool,
 		ID:      trayID,
 		Icon:    brand.MarkPNGBytes(),
 		ToolTip: appName,
-		Menu:    newTrayMenu(handler),
+		Menu:    newTrayMenuWithActions(handler, actions, warn),
 	}
 	tray, err := factory(options)
 	if err != nil {
@@ -127,9 +169,18 @@ func createTray(window trayWindow, handler trayHandler, closeToTray bool,
 	return tray, nil
 }
 
-// newTrayMenu builds the tray menu: show the main window, then quit.
+// newTrayMenu builds the legacy show/quit trap menu (kept as the stable shape
+// used by createTray and the regression linkname test).
 func newTrayMenu(handler trayHandler) *mygo.Menu {
-	return mygo.NewMenu([]*mygo.MenuItem{
+	return newTrayMenuWithActions(handler, trayActions{}, nil)
+}
+
+// newTrayMenuWithActions builds the tray menu: show the main window, the
+// optional new-session/settings actions, a separator, then quit. Items whose
+// action is nil are omitted so a host without the action simply does not show
+// it. warn receives a failed new-session warning (may be nil).
+func newTrayMenuWithActions(handler trayHandler, actions trayActions, warn func(format string, args ...any)) *mygo.Menu {
+	items := []*mygo.MenuItem{
 		{
 			ID:    "zeokeel.show",
 			Label: "显示 ZeoKeel",
@@ -139,20 +190,59 @@ func newTrayMenu(handler trayHandler) *mygo.Menu {
 				}
 			},
 		},
-		mygo.Separator(),
-		{
-			ID:    "zeokeel.quit",
-			Label: "退出",
+	}
+	if actions.NewSession != nil {
+		items = append(items, &mygo.MenuItem{
+			ID:    "zeokeel.new-session",
+			Label: "新建会话",
 			Click: func(*mygo.MenuItem, *mygo.Window) {
-				if handler.quit != nil {
-					handler.quit()
+				if err := actions.NewSession(); err != nil {
+					if warn != nil {
+						warn("%s: tray new session: %v", appName, err)
+					}
+					return
+				}
+				if handler.show != nil {
+					handler.show()
 				}
 			},
+		})
+	}
+	if actions.OpenSettings != nil {
+		items = append(items, &mygo.MenuItem{
+			ID:    "zeokeel.settings",
+			Label: "设置",
+			Click: func(*mygo.MenuItem, *mygo.Window) {
+				actions.OpenSettings()
+				if handler.show != nil {
+					handler.show()
+				}
+			},
+		})
+	}
+	items = append(items, mygo.Separator(), &mygo.MenuItem{
+		ID:    "zeokeel.quit",
+		Label: "退出",
+		Click: func(*mygo.MenuItem, *mygo.Window) {
+			if handler.quit != nil {
+				handler.quit()
+			}
 		},
 	})
+	return mygo.NewMenu(items)
 }
 
-// showWindow restores and focuses the main window (tray activation).
+// showTrayWindow restores and focuses the main window (tray activation).
+func showTrayWindow(window trayWindow) {
+	if window == nil {
+		return
+	}
+	window.Show()
+	window.Restore()
+	window.Focus()
+}
+
+// showWindow restores and focuses the main window (other host callers).
 func showWindow(window *mygo.Window) {
 	if window == nil || window.IsDestroyed() {
 		return

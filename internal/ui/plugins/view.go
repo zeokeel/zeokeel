@@ -205,19 +205,26 @@ func buildToolsSection(
 				})
 			}
 		}
-		// Disabled MCP tools are not registered, so they are absent from the
-		// registry; keep them in the catalogue from the setting so the switch
+		// Disabled tools are not registered, so they are absent from the
+		// registry; keep them in the catalogue from either setting so the switch
 		// can turn them back on.
 		if hasSettings && settings != nil {
-			hidden := make([]string, 0)
+			hiddenSet := make(map[string]bool, len(st.disabledTools)+len(st.disabledMCPTools))
 			for name := range st.disabledTools {
-				if isMCPToolName(name) && !catalogHasTool(catalog, name) {
+				hiddenSet[name] = true
+			}
+			for name := range st.disabledMCPTools {
+				hiddenSet[name] = true
+			}
+			hidden := make([]string, 0, len(hiddenSet))
+			for name := range hiddenSet {
+				if !catalogHasTool(catalog, name) {
 					hidden = append(hidden, name)
 				}
 			}
 			sort.Strings(hidden)
 			for _, name := range hidden {
-				catalog = append(catalog, catalogTool{Name: name, MCP: true})
+				catalog = append(catalog, catalogTool{Name: name, MCP: isMCPToolName(name)})
 			}
 		}
 		ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(design.Space2).Children(func() {
@@ -231,7 +238,7 @@ func buildToolsSection(
 			buildPluginsMuted(c, t, st.tr("工具目录未启用", "Tool catalogue not enabled"))
 			return
 		}
-		design.Apply(ui.Text(c, st.tr("MCP 工具开关在重启后生效。", "MCP tool switches apply after a restart.")),
+		design.Apply(ui.Text(c, st.tr("工具开关在重启后生效。", "Tool switches apply after a restart.")),
 			t.Font(design.TypeXXS)).TextColor(t.LabelTertiary)
 		if st.disabledErr != "" {
 			design.Apply(ui.Text(c, st.tr("禁用工具配置无效：", "Invalid disabled-tools configuration: ")+st.disabledErr),
@@ -288,19 +295,20 @@ func buildToolRow(c *ui.Context, t *design.Tokens, tool catalogTool, st *state,
 		} else {
 			ui.Spacer(c).Grow(1)
 		}
-		if !tool.MCP {
-			return
-		}
 		if !hasSettings || settings == nil {
 			design.Apply(ui.Text(c, st.tr("设置存储未启用", "Settings store not enabled")),
 				t.Font(design.TypeXXS)).TextColor(t.LabelTertiary)
 			return
 		}
-		enabled := !st.disabledTools[tool.Name]
-		c.Key("mcp-tool-switch/" + tool.Name)
+		disabled := st.disabledTools
+		if tool.MCP {
+			disabled = st.disabledMCPTools
+		}
+		enabled := !disabled[tool.Name]
+		c.Key("tool-switch/" + tool.Name)
 		toggle := ui.Toggle(c, &enabled, st.tr("启用", "Enabled"))
 		if toggle.Changed() {
-			st.setMCPToolEnabled(tool.Name, enabled, settings)
+			st.setToolEnabled(tool.Name, enabled, settings, tool.MCP)
 			runtime.Invalidate()
 		}
 		if !enabled {

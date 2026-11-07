@@ -21,6 +21,12 @@
 - 右侧栏「文件」Tab：打开文件夹（mygo 原生 Directory picker）、目录进入/面包屑、文本/Markdown/图片预览、
   刷新与错误状态；E2E 覆盖工作区创建 + 列表 + 预览帧
 
+**TDD-tools-toggle/tray-actions（2026-11-08）**
+- 全工具级开关：`tools.disabled` 与 legacy `mcp.disabledTools` 并集过滤（含内建 read_file/bash/web_fetch、LSP 后统一过滤），plugins 每行 Toggle
+  （内建/MCP 分别写各自 setting，过滤条目还原，重启生效）；toolkit 46 / plugins 22 测试
+- 托盘菜单：显示 ZeoKeel / 新建会话 / 设置 / 分隔线 / 退出；host 接线 chat.NewSession→navigator.Push(session)、ToggleSettings，
+  动作失败仅警告；host 66 测试；xvfb exit 124 无 panic
+
 **Round 59 最终验证 + P3-13 修复（2026-11-08）**
 - 全量证据：build/vet 绿；34 测试包 plain+race 全绿；regression 206 PASS / 0 SKIP；三产品冒烟（desktop xvfb 含托盘/热键、
   headless、ACP initialize）无 panic；ui-snapshot 63 渲染步 / 61 唯一 PNG；docs/VERIFICATION.md 记录 Round 59 证据

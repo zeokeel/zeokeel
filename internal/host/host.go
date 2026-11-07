@@ -532,11 +532,30 @@ func runDesktop(opts Options) error {
 				uiRoot.FileDrop().Dispatch(event.Paths)
 			}
 		})
+		// Tray actions: a fresh session (create + push the session screen) and
+		// the settings overlay. ChatService/Navigator are required by the loaded
+		// product; if either is missing the tray just omits that item.
+		trayMenuActions := trayActions{}
+		if chatService, chatErr := root.Require(contracts.KeyChat); chatErr != nil {
+			logger.Printf("%s: tray actions unavailable: %v", appName, chatErr)
+		} else {
+			navigator := uiRoot.Navigator()
+			trayMenuActions.NewSession = func() error {
+				if _, err := chatService.NewSession(""); err != nil {
+					return fmt.Errorf("create session: %w", err)
+				}
+				if err := navigator.Push("session"); err != nil {
+					return fmt.Errorf("show session screen: %w", err)
+				}
+				return nil
+			}
+			trayMenuActions.OpenSettings = func() { navigator.ToggleSettings() }
+		}
 		// System tray (best effort): a session without a tray host, such as a
 		// bare Xvfb display, fails NewTray; log it and keep running. With
 		// close-to-tray enabled the close handler hides the window instead of
 		// quitting; the teardown path (keepAlive false) still closes it.
-		if created, trayErr := setupTray(window, settings, func() bool { return !closing.Load() }); trayErr != nil {
+		if created, trayErr := setupTrayWithActions(window, settings, func() bool { return !closing.Load() }, trayMenuActions, logger); trayErr != nil {
 			logger.Printf("%s: system tray unavailable: %v", appName, trayErr)
 		} else {
 			tray = created
