@@ -102,6 +102,11 @@ type state struct {
 	// the last assistant turn.
 	regenerateErr string
 
+	// goal is the active goal shown in the header (nil when none); goalTracker
+	// is the optional host bridge used to clear it. Both are UI-thread state.
+	goal        *contracts.Goal
+	goalTracker contracts.GoalTracker
+
 	// Composer attachment state: files picked and staged for the next message,
 	// the last picker/read error, the chip sequence and the per-chip image
 	// previews decoded once (keyed by attachment ID).
@@ -189,6 +194,32 @@ func Module() *module.Descriptor[Config] {
 				return func() { drop.SetHandler(nil) }, nil
 			}); err != nil {
 				return err
+			}
+		}
+
+		// The host goal tracker is optional: the session header shows the
+		// active goal and backs its clear action through this bridge.
+		if tracker, ok := ctx.Get(contracts.KeyGoalTracker); ok && tracker != nil {
+			moduleState.goalTracker = tracker
+			tracker.SetHandler(func(goal contracts.Goal, ok bool) {
+				runtime.Post(func() {
+					if ok {
+						copied := goal
+						moduleState.goal = &copied
+					} else {
+						moduleState.goal = nil
+					}
+					runtime.Invalidate()
+				})
+			})
+			if err := own(ctx, func() (func(), error) {
+				return func() { tracker.SetHandler(nil) }, nil
+			}); err != nil {
+				return err
+			}
+			if id, text, status, ok := tracker.Get(); ok {
+				goal := contracts.Goal{ID: id, Text: text, Status: status}
+				moduleState.goal = &goal
 			}
 		}
 

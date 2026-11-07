@@ -613,6 +613,33 @@ func TestP1ApprovalToolsAndPersistence(t *testing.T) {
 		t.Fatalf("plan state = %q, want approved", state)
 	}
 
+	// goal: the agent goal tool surfaces in the session header and can be
+	// cleared from there through the host bridge.
+	if err := uiRoot.Navigator().Push("session"); err != nil {
+		t.Fatalf("Push(session) before goal: %v", err)
+	}
+	tester.Frame()
+	if _, err := toolkit.Invoke(context.Background(), rig.ToolCall{
+		ID: "goal-1", Name: "goal", Arguments: `{"action":"set","text":"完成 Q4 发布清单"}`,
+	}); err != nil {
+		t.Fatalf("set goal: %v", err)
+	}
+	tester.Frame()
+	if !tester.HasText("完成 Q4 发布清单") {
+		t.Fatalf("goal chip missing; texts = %v", tester.Texts())
+	}
+	if err := tester.Click("清除目标"); err != nil {
+		t.Fatalf("clear goal: %v; texts = %v", err, tester.Texts())
+	}
+	tester.Frame()
+	goalTracker, err := root.Require(contracts.KeyGoalTracker)
+	if err != nil {
+		t.Fatalf("require goal tracker: %v", err)
+	}
+	if _, _, _, ok := goalTracker.Get(); ok {
+		t.Fatalf("goal tracker still set after clear")
+	}
+
 	// --- restart: the session and its messages come back from SQLite ------
 	title := session.Title
 	if err := loader.Close(); err != nil {
@@ -705,6 +732,7 @@ func bootDesktop(t *testing.T, dataDir string, settings *memSettings) (cordis.Co
 	provide(t, root, contracts.KeyUserInteraction, contracts.UserInteraction(uiRoot.UserInteraction()))
 	provide(t, root, contracts.KeyArtifactPresenter, contracts.ArtifactPresenter(uiRoot.ArtifactPresenter()))
 	provide(t, root, contracts.KeyPlanReviewer, contracts.PlanReviewer(uiRoot.PlanReviewer()))
+	provide(t, root, contracts.KeyGoalTracker, contracts.GoalTracker(uiRoot.GoalTracker()))
 	provide(t, root, contracts.KeySettings, contracts.SettingsService(settings))
 	provide(t, root, contracts.KeyLogger, contracts.Logger(discardLogger{}))
 	loader, err := assembly.LoadWithBuildInfo(root, assembly.ProductDesktop, assembly.BuildInfo{Version: "0.1.0"})

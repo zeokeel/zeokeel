@@ -29,6 +29,9 @@ func loadBridgeProduct(t *testing.T, uiRoot *uiroot.Root, interactive bool) *pro
 	if _, err := root.Provide(contracts.KeyPlanReviewer, contracts.PlanReviewer(uiRoot.PlanReviewer())); err != nil {
 		t.Fatalf("provide plan reviewer: %v", err)
 	}
+	if _, err := root.Provide(contracts.KeyGoalTracker, contracts.GoalTracker(uiRoot.GoalTracker())); err != nil {
+		t.Fatalf("provide goal tracker: %v", err)
+	}
 	rigRegistry := rigtool.NewRegistry()
 	registry := newKernelRegistry(t, rigRegistry, nil)
 	loader, err := module.Load(root, registry, []module.Entry{
@@ -117,5 +120,53 @@ func TestInteractiveFalseKeepsArtifactAndPlanBridges(t *testing.T) {
 	}
 	if content := product.callError(t, ToolAskUser, `{"question":"q"}`); !strings.Contains(content, "no interactive UI") {
 		t.Fatalf("ask_user with interactive=false = %q", content)
+	}
+}
+
+func TestGoalToolUsesGoalTrackerBridge(t *testing.T) {
+	uiRoot := uiroot.New(uiroot.Config{AppName: "test"})
+	events := make(chan struct {
+		goal contracts.Goal
+		ok   bool
+	}, 8)
+	uiRoot.GoalTracker().SetHandler(func(goal contracts.Goal, ok bool) {
+		events <- struct {
+			goal contracts.Goal
+			ok   bool
+		}{goal: goal, ok: ok}
+	})
+	product := loadBridgeProduct(t, uiRoot, true)
+
+	content := product.callOK(t, ToolGoal, `{"action":"set","text":"Ship v0.5"}`)
+	if !strings.Contains(content, "goal-1") || !strings.Contains(content, "Ship v0.5") {
+		t.Fatalf("goal set content = %q", content)
+	}
+	id, text, status, ok := uiRoot.GoalTracker().Get()
+	if !ok || id != "goal-1" || text != "Ship v0.5" || status != "active" {
+		t.Fatalf("goal tracker after set = %q/%q/%q/%v", id, text, status, ok)
+	}
+	event := <-events
+	if !event.ok || event.goal.Text != "Ship v0.5" {
+		t.Fatalf("goal set event = %+v", event)
+	}
+
+	if content := product.callOK(t, ToolGoal, `{"action":"get"}`); content != "goal goal-1 [active]: Ship v0.5" {
+		t.Fatalf("goal get content = %q", content)
+	}
+	if content := product.callOK(t, ToolGoal, `{"action":"status"}`); !strings.Contains(content, "Ship v0.5") {
+		t.Fatalf("goal status content = %q", content)
+	}
+	if content := product.callOK(t, ToolGoal, `{"action":"clear"}`); content != "goal cleared" {
+		t.Fatalf("goal clear content = %q", content)
+	}
+	if _, _, _, ok := uiRoot.GoalTracker().Get(); ok {
+		t.Fatal("goal survived clear")
+	}
+	event = <-events
+	if event.ok {
+		t.Fatalf("goal clear event = %+v, want ok=false", event)
+	}
+	if content := product.callOK(t, ToolGoal, `{"action":"get"}`); content != "no goal is set" {
+		t.Fatalf("goal get after clear = %q", content)
 	}
 }

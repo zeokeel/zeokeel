@@ -49,7 +49,7 @@ func buildScreen(
 	chatSession, hasSession := chat.Session(activeID)
 
 	ui.Column(c).FillWidth().Grow(1).Children(func() {
-		buildHeader(c, t, cfg, st, chatSession, hasSession)
+		buildHeader(c, t, runtime, cfg, st, chatSession, hasSession)
 		switch st.tab {
 		case tabTrajectory:
 			buildTrajectoryPane(c, t, chatSession, hasSession, st)
@@ -68,7 +68,7 @@ func buildScreen(
 
 // buildHeader is the brand header: one title row (title + running badge) over
 // the native tab strip with the accent underline of the old shell.
-func buildHeader(c *ui.Context, t *design.Tokens, cfg Config, st *state, chatSession contracts.ChatSession, hasSession bool) {
+func buildHeader(c *ui.Context, t *design.Tokens, runtime contracts.UIRuntime, cfg Config, st *state, chatSession contracts.ChatSession, hasSession bool) {
 	th := t.Theme()
 	ui.Column(c).FillWidth().
 		Padding(th.Space(2), th.Space(4), 0, th.Space(4)).
@@ -84,6 +84,7 @@ func buildHeader(c *ui.Context, t *design.Tokens, cfg Config, st *state, chatSes
 			if hasSession && chatSession.Running {
 				design.Apply(ui.Badge(c, st.tr("运行中", "Running")), t.Badge()).TextColor(t.WarningText)
 			}
+			buildGoalChip(c, t, runtime, st)
 			ui.Spacer(c).Grow(1)
 			if hasSession {
 				// Secondary conversation actions live in one overflow menu: three
@@ -139,6 +140,30 @@ func exportSessionJSONL(st *state, chatSession contracts.ChatSession, cfg Config
 		st.exportPath = path
 		st.exportErr = ""
 	}
+}
+
+// buildGoalChip shows the active goal next to the session title: a small
+// "goal" badge, one ellipsized line with the full text in the tooltip, and a
+// native clear action backed by the host GoalTracker. It renders nothing when
+// no goal is active or the backend is absent.
+func buildGoalChip(c *ui.Context, t *design.Tokens, runtime contracts.UIRuntime, st *state) {
+	if st.goal == nil || strings.TrimSpace(st.goal.Text) == "" {
+		return
+	}
+	goal := st.goal
+	ui.Row(c).Gap(design.Space1).AlignItems(ui.Center).Children(func() {
+		design.Apply(ui.Badge(c, st.tr("目标", "Goal")), t.Badge()).TextColor(t.Accent)
+		design.Apply(ui.Text(c, goal.Text), t.Font(design.TypeXS)).FontWeight(600).
+			TextColor(t.LabelSecondary).MaxLines(1).Ellipsis("…").MaxWidth(360).Tooltip(goal.Text)
+		clear := ui.Button(c, st.tr("清除目标", "Clear goal")).
+			Tooltip(st.tr("清除当前目标", "Clear the current goal"))
+		if clear.Clicked() {
+			if st.goalTracker != nil {
+				st.goalTracker.Clear()
+			}
+			runtime.Invalidate()
+		}
+	})
 }
 
 // exportSession writes the conversation as Markdown through the export seam

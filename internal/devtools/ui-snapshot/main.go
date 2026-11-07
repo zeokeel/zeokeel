@@ -247,6 +247,15 @@ func main() {
 		a.tester.Frame()
 	}
 
+	// goal: the agent goal tool shows in the session header.
+	if toolkit, tkErr := a.root.Require(contracts.KeyToolkit); tkErr == nil {
+		_, _ = toolkit.Invoke(context.Background(), rig.ToolCall{
+			ID: "goal-snapshot", Name: "goal", Arguments: `{"action":"set","text":"完成 Q4 发布清单并更新文档"}`,
+		})
+		a.tester.Frame()
+		a.render(outDir + "/p2-goal.png")
+	}
+
 	// Composer model menu (catalog presets + per-session switch).
 	if err := a.tester.Click("snapshot-model"); err == nil {
 		a.tester.Frame()
@@ -499,6 +508,7 @@ func boot(baseURL, dataDir string) *app {
 	provide(root, contracts.KeyUserInteraction, contracts.UserInteraction(uiRoot.UserInteraction()))
 	provide(root, contracts.KeyArtifactPresenter, contracts.ArtifactPresenter(uiRoot.ArtifactPresenter()))
 	provide(root, contracts.KeyPlanReviewer, contracts.PlanReviewer(uiRoot.PlanReviewer()))
+	provide(root, contracts.KeyGoalTracker, contracts.GoalTracker(uiRoot.GoalTracker()))
 	provide(root, contracts.KeySettings, contracts.SettingsService(&settings{values: map[string]string{
 		contracts.SettingsChatModel:   "snapshot-model",
 		contracts.SettingsChatBaseURL: baseURL,

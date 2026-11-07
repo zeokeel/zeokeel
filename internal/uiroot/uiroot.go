@@ -47,6 +47,7 @@ type Root struct {
 	interaction     *interactionService
 	artifacts       *artifactService
 	plan            *planService
+	goal            *goalService
 
 	mu         sync.Mutex
 	invalidate func()
@@ -117,6 +118,7 @@ func New(cfg Config) *Root {
 		interaction:     newInteractionService(),
 		artifacts:       newArtifactService(),
 		plan:            newPlanService(),
+		goal:            newGoalService(),
 	}
 	r.theme = &themeService{root: r, dark: cfg.Dark}
 	r.locale = &localeService{root: r, lang: cfg.Language}

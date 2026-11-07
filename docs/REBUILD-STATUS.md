@@ -21,6 +21,12 @@
 - 右侧栏「文件」Tab：打开文件夹（mygo 原生 Directory picker）、目录进入/面包屑、文本/Markdown/图片预览、
   刷新与错误状态；E2E 覆盖工作区创建 + 列表 + 预览帧
 
+**P5 goal 跟踪（2026-11-08）**
+- contracts.GoalTracker + uiroot goalService（Set/Get/Clear/handler/atomic ID/并发）+ host 桌面提供 +
+  hosttools GoalStore 桥接（无服务 Memory 保持）
+- session header：目标 Badge + 文本（单行省略/Tooltip）+ 清除目标按钮（handler 刷新/i18n/无服务不渲染）
+- E2E：goal 工具 set → header 显示 → 清除后 tracker Get ok=false；截图 p2-goal.png
+
 **P5 JSONL 导出 + 覆盖复核（2026-11-08）**
 - session header「导出 JSONL」：session 头行 + message 行（reasoning/error/tools 扁平化），ExportJSONLSaver seam；
   单测覆盖内容/行数/已导出状态

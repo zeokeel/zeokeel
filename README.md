@@ -200,6 +200,8 @@ go test ./...
   扁平化），独立 native Save 对话框 seam；单测覆盖内容/行数/状态
 - 📊 覆盖审计（最新）：[docs/COVERAGE.md](docs/COVERAGE.md)（✅26 / 🟡27 / ❌9；核心+多数高级 UI 可用，
   剩余集中在编排执行/composer 深度/presets/桌面集成/管理深度）
+- ✅ P5 goal 跟踪：`contracts.GoalTracker` 宿主桥（uiroot goal 服务 + host 提供 + hosttools GoalStore 桥接）+ 会话 header
+  「目标」Badge/文本/「清除目标」；E2E goal 工具→header 显示→清除后 tracker 空；截图 `p2-goal.png`
 - ⬜ 后续阶段见 [docs/PRODUCT-REBUILD-PLAN.md](docs/PRODUCT-REBUILD-PLAN.md)：
   P2 剩余（composer 附件/图片/@ 提及、右侧栏 Files/Terminal/Log 页、会话操作上下文菜单）→
   P3 memory/skills/automation/插件/workspace diff/搜索/fork/export → P4 ACP/热键/导入/更新/诊断

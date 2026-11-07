@@ -73,6 +73,9 @@ func ModuleWithHost(host *hostcaps.Host) *module.Descriptor[Config] {
 			if reviewer, ok := ctx.Get(contracts.KeyPlanReviewer); ok {
 				capabilities.Plan = uiPlanController{reviewer: reviewer}
 			}
+			if tracker, ok := ctx.Get(contracts.KeyGoalTracker); ok {
+				capabilities.Goals = uiGoalTrackerStore{tracker: tracker}
+			}
 		} else {
 			capabilities = *host
 		}
@@ -116,4 +119,26 @@ func (p uiPlanController) Review(content string) (string, error) {
 // Exit implements hostcaps.PlanController.
 func (p uiPlanController) Exit(action string) (string, error) {
 	return p.reviewer.Exit(action)
+}
+
+// uiGoalTrackerStore adapts the host's contracts.GoalTracker to the host-tools
+// GoalStore seam. The goal tool has no context in that seam, so Set uses
+// Background; the tool checks the caller's context before invoking it.
+type uiGoalTrackerStore struct {
+	tracker contracts.GoalTracker
+}
+
+// Set implements hostcaps.GoalStore.
+func (s uiGoalTrackerStore) Set(text string) (string, error) {
+	return s.tracker.Set(context.Background(), text)
+}
+
+// Get implements hostcaps.GoalStore.
+func (s uiGoalTrackerStore) Get() (id, text, status string, ok bool) {
+	return s.tracker.Get()
+}
+
+// Clear implements hostcaps.GoalStore.
+func (s uiGoalTrackerStore) Clear() bool {
+	return s.tracker.Clear()
 }

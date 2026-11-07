@@ -532,6 +532,9 @@ func provideServices(root cordis.Context, dataDir string, settings *Settings, lo
 	if _, err := root.Provide(contracts.KeyPlanReviewer, contracts.PlanReviewer(uiRoot.PlanReviewer())); err != nil {
 		return fmt.Errorf("%s: provide plan reviewer: %w", appName, err)
 	}
+	if _, err := root.Provide(contracts.KeyGoalTracker, contracts.GoalTracker(uiRoot.GoalTracker())); err != nil {
+		return fmt.Errorf("%s: provide goal tracker: %w", appName, err)
+	}
 	return nil
 }
 

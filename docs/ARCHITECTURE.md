@@ -192,6 +192,7 @@ if _, err := ctx.Effect(func() cordis.Effect {
 - ✅ 会话归档：settings archive flag + sidebar 视图开关/排序
 - ✅ 会话置顶：settings pin flag + sidebar 置顶排序/菜单
 - ✅ 可配置 chrome 快捷键（settings `ui.shortcut.*` → 宿主每帧 OnShortcut）
+- ✅ goal 跟踪：GoalTracker 桥 + 会话 header 目标显示/清除
 - ✅ 会话导出：Markdown + JSONL（原生 Save seam）
 - ✅ MCP 用户配置：settings mcp.servers + toolkit 合并 + 设置 MCP 页
 - ✅ present/plan review 宿主桥 + interaction overlay（工件预览、计划批准）
