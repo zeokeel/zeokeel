@@ -7,12 +7,13 @@
 > 网络代理设置、MCP 工具级开关、提示词预设（设置 CRUD + composer 插入）、可编辑模型目录、
 > 消息用量 footer/逐条复制/反馈 good-bad 与 /反馈 命令（导出含反馈）、计划模式、自动化运行历史、
 > Memory 整理/清空、技能新建/删除、工件下载、系统托盘/关闭到托盘、全局热键、LSP 工具、聊天模式（普通/计划/精简/创作）、插件 MCP server 详情；
-> 反证审计 78 例发现 4×P2+4×P3 全部修复，`internal/regression` 0 SKIP。详情：[docs/ADVERSARIAL-AUDIT.md](docs/ADVERSARIAL-AUDIT.md)。
+> 反证审计（六轮）共 187 PASS / 0 SKIP，4×P2+4×P3 全部修复。详情：[docs/ADVERSARIAL-AUDIT.md](docs/ADVERSARIAL-AUDIT.md)。
 >
-> **最终轮状态（Round 40/40）**：可运行的桌面/headless/ACP 产品；32 测试包（含 -race）全绿；
-> 47 步 UI 快照与 60 张截图。旧功能覆盖 **✅26 / 🟡27 / ❌9**（见 [docs/COVERAGE.md](docs/COVERAGE.md)），
-> 因此**覆盖清单尚未 100% 完成**，剩余 Top5：编排执行、composer 高级控制、presets/@session、
-> 更新安装与桌面集成、MCP/插件/artifact/todo 管理深度。验证证据：[docs/VERIFICATION.md](docs/VERIFICATION.md)。
+> **最终验证（2026-11-08，Round 56）**：桌面（xvfb，含托盘与预置全局热键）/headless/ACP 三产品冒烟通过；
+> `go build ./...`、`go vet ./...` 通过；42 个包中 34 个测试包全绿（`go test ./...` 含 `-race`，0 DATA RACE）；
+> `internal/regression` 187 PASS / 0 SKIP；UI 快照渲染 60 步 / 58 张 PNG（输出目录需预先存在）。
+> 旧功能覆盖审计见 [docs/COVERAGE.md](docs/COVERAGE.md)（复核摘要 **✅34 / 🟡24 / ❌4**，仍未 100%）。
+> 验证证据：[docs/VERIFICATION.md](docs/VERIFICATION.md)。
 
 编译期模块化的 Go 桌面 AI agent：**薄总入口 + 内核装配 + 模块贡献点**。
 UI 是 mygo 原生控件（无浏览器/webview）；所有模块一起编译进同一二进制，`assembly.json`

@@ -7,7 +7,7 @@
 
 ## 修复状态（Lead 复核后）
 
-> 首轮 11 个「已知缺陷探针」与第二轮 4 个 P3 均已随 TDD 修复转为 PASS；第三轮 P3-9/10 已修复、P3-11 重开后于 ca2d24c 真正修复；第四轮 P3-12 已修复（ca2d24c）；第五、六轮无新缺陷。`go test ./internal/regression -count=1 -race` 当前 **180 PASS / 0 SKIP**（历史：首轮修复后 92，第二轮后 98，第三轮后 133，第四轮后 153，第五轮后 172）。
+> 首轮 11 个「已知缺陷探针」与第二轮 4 个 P3 均已随 TDD 修复转为 PASS；第三轮 P3-9/10 已修复、P3-11 重开后于 ca2d24c 真正修复；第四轮 P3-12 已修复（ca2d24c）；第五、六、七轮无新缺陷。`go test ./internal/regression -count=1 -race` 当前 **189 PASS / 0 SKIP**（历史：首轮修复后 92，第二轮后 98，第三轮后 133，第四轮后 153，第五轮后 172，第六轮后 180）。
 
 | ID | 优先级 | 状态 | 修复摘要 |
 |----|--------|------|----------|
@@ -31,7 +31,7 @@ $ go test ./internal/regression -count=1                    ok  1.2s
 $ go test ./internal/regression -count=1 -race              ok 12.8s（98 PASS / 0 SKIP）
 ```
 
-测试规模：`internal/regression` 共 180 个顶层 Test（首轮 78 + 第二轮 20 + 第三轮 35 + 第四轮 20 + 第五轮 19 + 第六轮 8；含子用例后更多；另有 `internal/ui/uimodtest` 的 E2E 1 个，不计入本包）。第三轮 P3-9/10 已修复，P3-11 重开后已真正修复，第四轮 P3-12 已修复，第五、六轮无新缺陷；当前 **180 PASS / 0 SKIP**。
+测试规模：`internal/regression` 共 189 个顶层 Test（首轮 78 + 第二轮 20 + 第三轮 35 + 第四轮 20 + 第五轮 19 + 第六轮 8 + 第七轮 9；含子用例后更多；另有 `internal/ui/uimodtest` 的 E2E 1 个，不计入本包）。第三轮 P3-9/10 已修复，P3-11 重开后已真正修复，第四轮 P3-12 已修复，第五~七轮无新缺陷；当前 **189 PASS / 0 SKIP**。
 
 ## 用例矩阵
 
@@ -347,6 +347,7 @@ $ go test ./internal/regression -count=1 -race               ok 27.9s（153 PASS
 
 第四轮回归：`internal/regression` **153 PASS / 0 SKIP**。第五轮复跑确认 P3-11/P3-12 修复未回退；`/feedback` 斜杠命令已在本轮落地。
 第六轮复跑扩张到 **180 PASS / 0 SKIP**（托盘/关闭到托盘、工件下载说明、chat modes 四模式 gate 表），并新增 desktop assembly 的模式菜单 E2E。
+第七轮复跑扩张到 **189 PASS / 0 SKIP**（全局热键、可选 LSP、automation Close 关机语义），并复跑第四~六轮关键探针 104 项确认 0 回退。
 仍有文档化未落地项（plan keep-planning 反馈循环、会话级 feedback 汇总、旧 `/feedback [good|bad]` 参数式直接打分、自动化 runs 之外的历史查询）。
 
 ## 反证审计第五轮：/feedback 命令 / 自动化运行历史 / 反馈复跑 / 记忆与技能编辑（2026-11-08）
@@ -428,3 +429,42 @@ $ go test ./internal/ui/uimodtest -count=1 -race             ok 10.5s（含模�
 - 工件下载未加 regression 层（理由见 #26）；若未来把保存动作抽成 contracts 级 seam，可在导出层补跨层用例。
 - 模式菜单 E2E 使用内存 settings；宿主 settings 文件持久化由 host 设置单测覆盖。
 - chat modes 白名单在 regression 中以期望表锁定（contracts 政策变化时需同步，属有意行为锁）。
+
+## 反证审计第七轮（终审）：全局热键 / 可选 LSP / automation Close（2026-11-08）
+
+范围：`132e386`（全局热键 + 可选 LSP 工具）。只新增 `internal/regression/**` 并改本文件；未改生产代码。
+`internal/regression` 新增 **9** 个顶层 Test（180 → 189）。
+
+```
+$ gofmt -l internal/regression/                              （空）
+$ go vet ./internal/regression                               OK
+$ go test ./internal/regression -count=1 -race               ok 41.3s（189 PASS / 0 SKIP）
+$ go test ./internal/regression -race -run '第四~六轮关键探针'   104 PASS / 0 SKIP（0 回退）
+```
+
+| # | 链路 | 反证点 | 用例 | 结果 |
+|---|------|--------|------|------|
+| 29 | 全局热键（host） | normalizeHotkey 表：空/空白=关闭；别名（commandorcontrol/option/return/esc/del/ins/win/meta）与大小写/trim/顺序归一；F1-F12、字母、数字、命名键；拒绝：仅修饰符、双修饰符无键、多键、未知修饰符/键、重复修饰符（含别名重复）、空 token、F13、超长（>64 rune 及超长组合）。注册成功：归一化 accelerator 注册、回调 Show/Restore/Focus 各 1、shutdown 返回的 off 调用注销；空/nil settings 不注册。失败零副作用：非法值不触达 registrar；注册失败返回可读包装错误、无 off、窗口零调用；nil window/registrar 拒绝 | 3 | PASS |
+| 30 | 可选 LSP | contracts.Parse：空/空白=关闭零配置不报错；坏 JSON/数组文档/null/缺 command/空白 command/command 非字符串/args、env 非数组均报错；标量/args/env trim、空项丢弃、args 逐项 verbatim 不按空格拆分、未知字段忽略。Encode：先归一化再编码；Encode→Parse 往返一致；nil args/env 省略；零配置 Encode 不校验而 Parse 报 command required（记录该不对称）。toolkit：坏 JSON/缺 command/不存在命令/空/空白 5 类配置均激活成功、无 lsp_* 工具、常规工具仍在、日志含 ignoring/start 警告；seam 注入 fake server：lsp_hover/lsp_definition 恰注册一次、与内建 read_file 冲突的名字跳过并记日志、模块卸载 Close 恰一次 | 4 | PASS |
+| 31 | automation Close（关机语义） | RunNow 后立即 DisposeAll（5 轮）：Close 等待 in-flight 完成后返回，automations.json 合法且 runHistory 恰 1 条 success；无 `.automations-*.tmp` 残留；Close 返回后 20ms 内文件字节不变（无关闭后写盘）。3 任务并发 RunNow 后立即 DisposeAll：每任务恰 1 条 success、registry 合法、-race 干净 | 2 | PASS |
+| 32 | 第四~六轮关键探针复跑 | 按名称复跑 usage/plan mode/feedback/toasts/install/host apply/automation/memory/skills/tray/chat modes/references/effort/permission/team/mcp/jobs/approvals 等既有反证：104 PASS / 0 SKIP，无回退 | 复跑 | PASS |
+
+### 第七轮未证伪的关键不变量
+
+1. **热键**：accelerator 语法严格且归一化确定；注册失败是纯无副作用失败（启动不中断）；成功注册的回调只做 show/restore/focus；shutdown 钩子可注销。
+2. **LSP**：配置解析拒绝一切畸形输入、空值安全表示“关闭”；toolkit 的任何 LSP 问题都只降级（激活成功、无 lsp_* 工具、日志可诊断），成功启动的工具恰注册一次且与内建工具冲突时跳过；卸载关闭且只关闭一次。
+3. **automation Close**：Close 等待 in-flight 写盘完成，关闭后 registry 稳定、无临时文件、无关闭后写入；并发运行同样被 flush。
+4. **0 回退**：第四~六轮 104 项关键探针复跑全绿。
+
+### 第七轮发现
+
+- **无新缺陷**（无 P0/P1/P2/P3）。
+- 观察（非缺陷）：`EncodeLSPServerConfig` 不校验空 command（编码层只归一化），由 `ParseLSPServerConfig` 拒绝；UI 保存路径应先 Parse 再 Encode（settings 页现状如此），文档记录该不对称。
+- 观察（非缺陷）：热键 shutdown 注销由 host `runDesktop` teardown 调用 `hotkeyOff`；regression 层验证 off 闭包语义，`runDesktop` 的调用顺序属 host 装配层，未在 regression 重复。
+
+### 第七轮局限
+
+- 热键只测注入 registrar/window；真实 `mygo.GlobalShortcut` 注册需桌面会话（xvfb smoke 属 host 层），系统级占用冲突的真实错误文案未覆盖。
+- LSP 用 seam 注入 fake server 验证注册/关闭所有权；真实语言服务器进程（离线环境无可用 LSP binary）未做进程级集成，`lsp.Start` 的真实 stdio 握手由 rig 单测覆盖。
+- automation Close 用快速 fake chat 的 in-flight 写盘窗口；真实 provider 慢网络下的 Close 阻塞时长未做性能断言（语义是等待完成）。
+- 第四~六轮复跑按测试名前缀选择 104 项，未逐条复跑全部 180 项（全量 -race 已覆盖）。

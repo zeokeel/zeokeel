@@ -92,3 +92,67 @@ $ go test ./... -count=1 -race                            # 33 packages ok
 
 Audit report: docs/ADVERSARIAL-AUDIT.md (78 top-level tests; 4×P2 + 4×P3 found
 and fixed via RED→GREEN; probes now assert instead of skip).
+
+## 最终验证（Round 56，2026-11-08，HEAD 132e386）
+
+环境：go1.27.3 linux/amd64 · 离线（GOPROXY=off/GOSUMDB=off/GOFLAGS=-mod=mod）· 2026-11-08 05:46–05:49（Asia/Shanghai）。
+
+### Build / vet / tests
+```
+$ go build ./...
+exit 0（4s）
+
+$ go vet ./...
+exit 0（1s）
+
+$ go test ./... -count=1
+exit 0 · 12s · 42 个包中 34 个测试包 ok、8 个 no test files、0 FAIL
+
+$ go test ./... -count=1 -race
+exit 0 · 43s · 34 个测试包 ok、8 个 no test files、0 FAIL / 0 DATA RACE
+
+$ go test ./internal/regression/... -count=1 -v
+exit 0 · 9.7s · 187 PASS / 0 SKIP / 0 FAIL
+```
+
+### 三产品冒烟（无 panic）
+```
+$ mkdir -p /tmp/final-desktop
+$ printf '{"ui.globalHotkey":"CmdOrCtrl+Shift+Space"}\n' > /tmp/final-desktop/settings.json
+$ xvfb-run -a timeout -s TERM 8 go run ./cmd/zeokeel --data-dir /tmp/final-desktop
+exit 124
+05:48:12 ZeoKeel: system tray ready (close to tray: false)
+05:48:12 ZeoKeel: global hotkey registered
+05:48:12 ZeoKeel: ... product "desktop" loaded: 27 module instances, screens [home automation session plugins]
+05:48:18 ZeoKeel: quit requested
+NO_PANIC
+
+$ timeout 8 go run ./cmd/zeokeel --headless --data-dir /tmp/final-headless
+exit 124
+05:48:22 ZeoKeel: ... product "headless" loaded
+ready; waiting for SIGINT or SIGTERM
+stopping
+NO_PANIC（14 module instances）
+
+$ printf '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":1}}\n' \
+    | timeout 10 go run ./cmd/zeokeel --acp --data-dir /tmp/final-acp
+exit 0
+{"id":1,"jsonrpc":"2.0","result":{"agentCapabilities":{"promptCapabilities":{"audio":false,"embeddedContext":false,"image":false}},"protocolVersion":1}}
+合法 JSON-RPC 2.0 initialize 响应；NO_PANIC
+```
+
+### UI 快照
+```
+$ mkdir -p /tmp/final-shots
+$ go run ./internal/devtools/ui-snapshot /tmp/final-shots
+exit 0 · 4s
+"wrote ..." 渲染步数: 60
+唯一 PNG 文件: 58
+同名重复写入: p1-chat.png、p2-mentions.png（各 2 次，最终保留最后一次）
+NO_PANIC
+```
+注：ui-snapshot 要求输出目录已存在；首次未建目录时 exit 1（`create /tmp/final-shots/...: no such file or directory`），预先 `mkdir -p` 后通过。
+
+### 结论
+- 构建/vet/测试（含 -race）与反证回归套件全绿；三产品均正常启动/退出，桌面托盘与预置全局热键就绪；
+- 快照渲染 60 步（58 个唯一 PNG，2 个目标名重复）；README 状态行已按本结果同步。
