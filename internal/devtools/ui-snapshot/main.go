@@ -94,6 +94,15 @@ func main() {
 	}
 	a.render(outDir + "/p1-trajectory.png")
 
+	// P2: the window-level right inspector (durable session log pane).
+	a.ui.SetRightPanelOpen(true)
+	a.render(outDir + "/p2-rightpanel.png")
+	if err := a.tester.Click("日志"); err != nil {
+		fmt.Println("click log tab:", err)
+	}
+	a.render(outDir + "/p2-log.png")
+	a.ui.SetRightPanelOpen(false)
+
 	// P2: Home recent sessions and the appearance settings page.
 	if err := a.ui.Navigator().Push("home"); err != nil {
 		fmt.Println("push home:", err)

@@ -397,7 +397,7 @@ func buildComposer(
 		}
 		ui.Row(c).Justify(ui.Center).Children(func() {
 			card := design.Apply(ui.Column(c), t.Panel()).
-				Width(composerWidth).MaxWidthPercent(94).
+				FillWidth().MaxWidth(composerWidth).MaxWidthPercent(94).
 				Radius(design.RadiusXL).
 				Shadow(0, 2, 4, 0, ui.RGBA(0, 0, 0, 0.05)).
 				Padding(th.Space(3)).Gap(design.Space2).

@@ -32,7 +32,7 @@ func (r *Root) view(c *ui.Context) {
 
 	ui.Row(c).Fill().Background(tokens.BgBase).Children(func() {
 		r.sidebar(c)
-		ui.Column(c).FillHeight().Grow(1).Children(func() {
+		ui.Column(c).FillHeight().Grow(1).Shrink(1).MinWidth(0).Children(func() {
 			r.contentHeader(c)
 			r.screen(c)
 		})
@@ -164,7 +164,7 @@ func (r *Root) rightPanel(c *ui.Context) {
 		return
 	}
 	t := design.Of(c)
-	ui.Column(c).Width(320).FillHeight().Background(t.BgSidebar).
+	ui.Column(c).Width(320).Shrink(0).FillHeight().Background(t.BgSidebar).
 		BorderWidth(1, 0, 0, 0).BorderColor(t.BorderL3).
 		Padding(design.Space4).Children(func() {
 		r.slot(c, contracts.SlotSessionPanelRight)

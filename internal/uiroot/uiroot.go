@@ -53,6 +53,21 @@ type Root struct {
 	rightOpen bool
 }
 
+// RightPanelOpen reports whether the window-level right inspector panel is
+// docked open. It is host UI state, not a module's.
+func (r *Root) RightPanelOpen() bool { return r.rightOpen }
+
+// SetRightPanelOpen docks or collapses the window-level right inspector panel
+// and requests a frame when the value changes. The content-column toggle button
+// calls the same state.
+func (r *Root) SetRightPanelOpen(open bool) {
+	if r.rightOpen == open {
+		return
+	}
+	r.rightOpen = open
+	r.requestFrame()
+}
+
 // New creates the UI root. It registers no screens: screen/slot contributions
 // arrive from UI modules during assembly.
 func New(cfg Config) *Root {

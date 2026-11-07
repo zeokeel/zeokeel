@@ -1,6 +1,7 @@
 package rightpanel
 
 import (
+	"context"
 	"fmt"
 	"strings"
 	"time"
@@ -17,12 +18,16 @@ const (
 	tabOverview = iota
 	tabTools
 	tabModel
+	tabLog
 )
+
+// logLimit bounds the session event rows the Log pane reads per frame.
+const logLimit = 50
 
 // buildPanel renders the whole inspector for one frame: heading, the native
 // pane tabs and the selected pane. The host owns the panel width; the module
 // fills it.
-func buildPanel(c *ui.Context, t *design.Tokens, chat contracts.ChatService, cfg Config, st *state) {
+func buildPanel(c *ui.Context, t *design.Tokens, chat contracts.ChatService, log eventReader, cfg Config, st *state) {
 	ui.Column(c).FillWidth().Gap(design.Space3).Children(func() {
 		ui.Row(c).FillWidth().Gap(design.Space2).AlignItems(ui.Center).Children(func() {
 			ui.Icon(c, icons.Sliders()).Size(16, 16).TextColor(t.LabelSecondary)
@@ -38,6 +43,8 @@ func buildPanel(c *ui.Context, t *design.Tokens, chat contracts.ChatService, cfg
 				buildToolsPane(c, t, chat, st)
 			case tabModel:
 				buildModelPane(c, t, chat)
+			case tabLog:
+				buildLogPane(c, t, log, chat)
 			default:
 				buildOverviewPane(c, t, chat, cfg)
 			}
@@ -49,7 +56,7 @@ func buildPanel(c *ui.Context, t *design.Tokens, chat contracts.ChatService, cfg
 // the accent underline (same language as the session header tabs).
 func buildTabs(c *ui.Context, t *design.Tokens, cfg Config, st *state) {
 	th := t.Theme()
-	labels := []string{cfg.OverviewTab, cfg.ToolsTab, cfg.ModelTab}
+	labels := []string{cfg.OverviewTab, cfg.ToolsTab, cfg.ModelTab, cfg.LogTab}
 	tabs := ui.TabsBase(c, &st.tab, len(labels))
 	tabs.List.Height(t.Scale(th.Space(8))).Padding(0, 0, 0, th.Space(1)).
 		Gap(design.Space3).AlignItems(ui.Stretch).Children(func() {
@@ -310,4 +317,65 @@ func truncateSummary(summary string) string {
 		cut--
 	}
 	return summary[:cut] + "…"
+}
+
+// buildLogPane is the inspector's durable session log (the old shell's Log
+// tab): the newest events of the active session, read from the SQLite-backed
+// session log. It degrades to an explanatory empty state without a store.
+func buildLogPane(c *ui.Context, t *design.Tokens, log eventReader, chat contracts.ChatService) {
+	active := chat.ActiveSession()
+	if active == "" {
+		design.Apply(ui.Text(c, "还没有活动会话"), t.TextMuted(design.TypeXS))
+		return
+	}
+	if log == nil {
+		design.Apply(ui.Text(c, "日志需要持久化会话存储"), t.TextMuted(design.TypeXS))
+		return
+	}
+	events, err := log.Last(context.Background(), active, logLimit)
+	if err != nil {
+		design.Apply(ui.Text(c, "读取会话日志失败："+err.Error()), t.TextMuted(design.TypeXS)).
+			TextColor(t.DangerText)
+		return
+	}
+	ui.Column(c).FillWidth().Gap(design.Space2).Children(func() {
+		ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(design.Space2).Children(func() {
+			design.Apply(ui.Text(c, "会话日志"), t.Font(design.TypeS)).FontWeight(600)
+			design.Apply(ui.Badge(c, fmt.Sprintf("%d", len(events))), t.Badge())
+		})
+		if len(events) == 0 {
+			design.Apply(ui.Text(c, "还没有会话事件"), t.TextMuted(design.TypeXS))
+			return
+		}
+		for index := len(events) - 1; index >= 0; index-- {
+			event := events[index]
+			panel := ui.Column(c).FillWidth().Gap(2).Padding(design.Space2)
+			design.Apply(panel, t.Panel())
+			panel.Children(func() {
+				ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(design.Space2).Children(func() {
+					design.Apply(ui.Text(c, fmt.Sprintf("#%d", event.Seq)), t.TextMuted(design.TypeXXXS))
+					design.Apply(ui.Text(c, event.Type), t.Font(design.TypeXXS)).FontWeight(600).
+						TextColor(t.LabelPrimary).Grow(1).MaxLines(1).Ellipsis("…")
+					label := ""
+					if !event.Time.IsZero() {
+						label = event.Time.Local().Format("15:04:05")
+					}
+					design.Apply(ui.Text(c, label), t.TextMuted(design.TypeXXXS))
+				})
+				if payload := strings.TrimSpace(string(event.Payload)); payload != "" {
+					design.Apply(ui.Text(c, truncateRunes(payload, 160)), t.MonoFamily()).
+						FontSize(11).TextColor(t.LabelTertiary).MaxLines(3)
+				}
+			})
+		}
+	})
+}
+
+// truncateRunes cuts s to limit runes, appending an ellipsis when it was cut.
+func truncateRunes(s string, limit int) string {
+	runes := []rune(s)
+	if len(runes) <= limit {
+		return s
+	}
+	return string(runes[:limit]) + "…"
 }

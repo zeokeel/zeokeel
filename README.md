@@ -93,6 +93,8 @@ go test ./...
     附件按钮（禁用占位，附件落 P2 剩余）
   - 会话行的内联操作（对照 old workspaces.go）：每行 native PopoverMenuButton「⋯」提供
     重命名/删除/设为当前；footer 只保留设置入口
+  - 右侧检查栏新增 **日志** 页（对照 old right_sidebar.go 的 Log tab）：读取 SQLite 持久化的
+    session events（seq/type/time/payload 折叠），真实事件流经 E2E 验证；截图 `p2-log.png`
 - ⬜ 后续阶段见 [docs/PRODUCT-REBUILD-PLAN.md](docs/PRODUCT-REBUILD-PLAN.md)：
   P2 剩余（composer 附件/图片/@ 提及、右侧栏 Files/Terminal/Log 页、会话操作上下文菜单）→
   P3 memory/skills/automation/插件/workspace diff/搜索/fork/export → P4 ACP/热键/导入/更新/诊断

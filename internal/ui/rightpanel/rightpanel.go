@@ -20,8 +20,11 @@
 package rightpanel
 
 import (
+	"context"
 	"fmt"
 	"strings"
+
+	"github.com/zeokeel/zeokeel-rig"
 
 	"github.com/egoist/mygo/ui"
 	cordis "github.com/zeokeel/zeokeel-kernel"
@@ -44,10 +47,11 @@ const slotOrder = 10
 type Config struct {
 	// Title is the panel heading (default "检查").
 	Title string `json:"title"`
-	// OverviewTab/ToolsTab/ModelTab are the tab labels.
+	// OverviewTab/ToolsTab/ModelTab/LogTab are the tab labels.
 	OverviewTab string `json:"overviewTab"`
 	ToolsTab    string `json:"toolsTab"`
 	ModelTab    string `json:"modelTab"`
+	LogTab      string `json:"logTab"`
 	// EmptyText is the overview copy when there is no active session.
 	EmptyText string `json:"emptyText"`
 }
@@ -59,6 +63,7 @@ func (c Config) resolved() Config {
 		OverviewTab: firstNonEmpty(c.OverviewTab, "概览"),
 		ToolsTab:    firstNonEmpty(c.ToolsTab, "工具"),
 		ModelTab:    firstNonEmpty(c.ModelTab, "模型"),
+		LogTab:      firstNonEmpty(c.LogTab, "日志"),
 		EmptyText:   firstNonEmpty(c.EmptyText, "还没有活动会话"),
 	}
 }
@@ -83,6 +88,12 @@ func Module() *module.Descriptor[Config] {
 		}
 		config := cfg.resolved()
 		moduleState := &state{open: make(map[string]bool)}
+		// The session log is optional: the inspector still renders without a
+		// durable store (headless tests), it just shows the empty log copy.
+		var log eventReader
+		if raw, ok := ctx.Get(contracts.KeyStore); ok {
+			log, _ = raw.(eventReader)
+		}
 
 		unsubscribe, err := chat.Subscribe(func(string) {
 			runtime.Post(func() { runtime.Invalidate() })
@@ -103,7 +114,7 @@ func Module() *module.Descriptor[Config] {
 				ID:    SlotItemID,
 				Order: slotOrder,
 				Build: func(c *ui.Context) {
-					buildPanel(c, design.Of(c), chat, config, moduleState)
+					buildPanel(c, design.Of(c), chat, log, config, moduleState)
 				},
 			})
 		})
@@ -111,6 +122,12 @@ func Module() *module.Descriptor[Config] {
 		AddRequires(module.Requires(contracts.KeyUIRuntime)).
 		AddRequires(module.Requires(contracts.KeyChat)).
 		WithName("ZeoKeel session inspector")
+}
+
+// eventReader is the narrow slice of the durable session log the Log pane
+// reads; contracts.Store (and therefore the SQLite store module) implements it.
+type eventReader interface {
+	Last(ctx context.Context, sessionID string, limit int) ([]rig.SessionEvent, error)
 }
 
 // own registers one contribution and ties its unregistration to ctx's effect

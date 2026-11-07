@@ -91,6 +91,26 @@ func TestP1ApprovalToolsAndPersistence(t *testing.T) {
 		}
 	}
 
+	// The window-level right inspector opens from the content header: the Log
+	// pane reads the durable session events the agent persisted.
+	uiRoot.SetRightPanelOpen(true)
+	tester.Frame()
+	for _, want := range []string{"概览", "工具", "模型", "日志"} {
+		if !tester.HasText(want) {
+			t.Fatalf("right panel missing %q; texts = %v", want, tester.Texts())
+		}
+	}
+	if err := tester.Click("日志"); err != nil {
+		t.Fatalf("click log tab: %v; texts = %v", err, tester.Texts())
+	}
+	tester.Frame()
+	for _, want := range []string{"会话日志", "user_message", "run_end"} {
+		if !tester.HasText(want) {
+			t.Fatalf("session log missing %q; texts = %v", want, tester.Texts())
+		}
+	}
+	uiRoot.SetRightPanelOpen(false)
+
 	// --- restart: the session and its messages come back from SQLite ------
 	title := session.Title
 	if err := loader.Close(); err != nil {
