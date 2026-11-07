@@ -40,7 +40,7 @@
 | `icons` | ✅ | `internal/icons` | Lucide SVG |
 | `importer` | 🟡 | `internal/modules/importer` + settings 导入页 | DSH session.v4.jsonl Scan/Import、文本+reasoning、workspace；attachments/credentials/manifest/zstd 未迁移 |
 | `lsp` | ❌ | 无；rig 有 `tools/lsp` 但 toolkit 未注册 | 旧 LSP client/servers 配置/工具未接 |
-| `mcp` | 🟡 | toolkit `mcp.StartHTTP` + `mcp_settings.go` + settings MCP 页 | settings `mcp.servers` 增删/校验，启动时与 assembly 按 URL 合并（assembly 优先）；仍无 stdio、workspace mcp.json opt-in、工具级开关 |
+| `mcp` | 🟡 | toolkit `mcp.Start`（stdio+HTTP）+ `mcp_settings.go` + settings MCP 页 | settings `mcp.servers` 支持 **HTTP/stdio** 行（command/args/env）、增删/校验/去重、启动时与 assembly 合并（assembly 优先）、stdio 子进程握手/工具注册/失败诊断；仍无 workspace mcp.json opt-in、工具级开关 |
 | `memory` | 🟡 | `internal/modules/memory` + rig memory tool + session Memory tab | JSON MemoryStore/tool/搜索/添加；consolidate/extract/auto-memory 未迁移 |
 | `modelcatalog` | 🟡 | `internal/modules/modelcatalog` + composer 模型菜单 + 推理强度 | 默认 DeepSeek Chat/Reasoner 预设、per-session 切换、**per-session reasoning effort（low/medium/high，provider reasoning_effort + settings 持久化）**；缺旧 context window/添加编辑/连接检查 |
 | `presets` | ❌ | 无 | 无 agent presets/persona/tool allowlist/用户 JSON 覆盖 |
@@ -92,7 +92,7 @@
 | Plan UI（plan_review/exit_plan_mode/plan 卡） | 🟡 | `internal/ui/interaction` plan Modal | 审阅 Modal 显示 Markdown + 批准/取消（Escape/背景关闭按取消处理）；缺 keep-planning/feedback、plan mode 开关、transcript plan 卡 |
 | Modes UI（standard/minimal/creator） | ❌ | 无 | 无模式选择/工具子集/persona 切换 |
 | Team UI（成员/任务/steer） | ❌ | 无 | 只有 team 工具内存 roster/任务板，无 Team 屏/真实 subagent |
-| Todo UI（会话 todo 面板） | ❌ | 无专用 UI | rig `todo` 工具 + toolcards 卡存在；无旧 todo 面板/进度视图 |
+| Todo UI（会话 todo 面板） | ✅ | toolkit `KeyTaskBoard`（rig team.TaskManager 共享实例）+ rightpanel「任务」tab | 任务列表/状态排序/添加/开始/完成/删除/刷新/错误与空态，与 `team_task_*` 工具共用同一任务板；缺旧 todo 卡内联进度视图 |
 | Artifacts / Present UI | 🟡 | `internal/ui/interaction` artifact Modal | present 工件 Markdown 预览 + 关闭；无旧 Files-tab 打开/历史/下载动作 |
 | 交互式 ask_user UI | ✅ | `internal/ui/interaction` question Modal + uiroot bridge | 选项/自由文本/取消；hosttools ask_user 已走真实桥，E2E 覆盖 |
 | About 页 | ✅ | `internal/ui/about` | 构建信息/架构/bullet，en/zh 动态导航 |

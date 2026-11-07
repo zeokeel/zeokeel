@@ -754,6 +754,45 @@ func TestP1ApprovalToolsAndPersistence(t *testing.T) {
 		t.Fatalf("high effort run did not finish: %+v", refRead)
 	}
 
+	// shared task board: creating a task through the service shows up in the
+	// Tasks inspector and can be completed there.
+	board, err := root.Require(contracts.KeyTaskBoard)
+	if err != nil {
+		t.Fatalf("require task board: %v", err)
+	}
+	task, err := board.Create(context.Background(), "发布前检查", "确认文档与截图")
+	if err != nil {
+		t.Fatalf("TaskBoard.Create: %v", err)
+	}
+	uiRoot.SetRightPanelOpen(true)
+	tester.Frame()
+	if err := tester.Click("任务"); err != nil {
+		t.Fatalf("open tasks tab: %v; texts = %v", err, tester.Texts())
+	}
+	tester.Frame()
+	for _, want := range []string{"发布前检查", "待处理"} {
+		if !tester.HasText(want) {
+			t.Fatalf("tasks pane missing %q; texts = %v", want, tester.Texts())
+		}
+	}
+	if err := tester.Click("完成"); err != nil {
+		t.Fatalf("complete task: %v; texts = %v", err, tester.Texts())
+	}
+	tester.Frame()
+	tasks, err := board.List(context.Background())
+	if err != nil {
+		t.Fatalf("TaskBoard.List: %v", err)
+	}
+	completed := false
+	for _, item := range tasks {
+		if item.ID == task.ID && item.Status == contracts.TaskStatusCompleted {
+			completed = true
+		}
+	}
+	if !completed {
+		t.Fatalf("task not completed: %+v", tasks)
+	}
+
 	// --- restart: the session and its messages come back from SQLite ------
 	title := session.Title
 	if err := loader.Close(); err != nil {

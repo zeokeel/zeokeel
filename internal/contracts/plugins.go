@@ -2,6 +2,8 @@ package contracts
 
 import (
 	"context"
+	"encoding/json"
+	"strings"
 
 	cordis "github.com/zeokeel/zeokeel-kernel"
 )
@@ -42,3 +44,41 @@ const SettingMCPServers = "mcp.servers"
 // KeyPlugins is provided by the toolkit module (which owns the MCP clients)
 // and consumed by the Plugins screen.
 var KeyPlugins = cordis.NewServiceKey[PluginsService]("zeokeel/plugins")
+
+// MCPServerConfig is one user-configured MCP server row stored in settings.
+// Rows with a Command (or Transport "stdio") start a stdio child process; rows
+// with a URL use Streamable HTTP. Existing {name,url} JSON rows stay valid.
+type MCPServerConfig struct {
+	Name      string   `json:"name"`
+	URL       string   `json:"url,omitempty"`
+	Transport string   `json:"transport,omitempty"`
+	Command   string   `json:"command,omitempty"`
+	Args      []string `json:"args,omitempty"`
+	Env       []string `json:"env,omitempty"`
+}
+
+// ParseMCPServersJSON decodes the settings mcp.servers raw value. An empty
+// string is an empty list; malformed JSON returns an error.
+func ParseMCPServersJSON(raw string) ([]MCPServerConfig, error) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return nil, nil
+	}
+	var rows []MCPServerConfig
+	if err := json.Unmarshal([]byte(raw), &rows); err != nil {
+		return nil, err
+	}
+	return rows, nil
+}
+
+// EncodeMCPServersJSON renders rows for the settings mcp.servers value.
+func EncodeMCPServersJSON(rows []MCPServerConfig) (string, error) {
+	if rows == nil {
+		rows = []MCPServerConfig{}
+	}
+	encoded, err := json.Marshal(rows)
+	if err != nil {
+		return "", err
+	}
+	return string(encoded), nil
+}

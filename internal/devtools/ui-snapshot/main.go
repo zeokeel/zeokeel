@@ -423,6 +423,17 @@ func main() {
 	}
 	a.render(outDir + "/p2-terminal.png")
 
+	// Shared task board (todo panel): create two tasks and render the Tasks tab.
+	if board, boardErr := a.root.Require(contracts.KeyTaskBoard); boardErr == nil {
+		_, _ = board.Create(context.Background(), "发布前检查", "确认文档与截图")
+		pending, _ := board.Create(context.Background(), "编写发布说明", "")
+		_, _ = board.SetStatus(context.Background(), pending.ID, contracts.TaskStatusInProgress)
+		if err := a.tester.Click("任务"); err != nil {
+			fmt.Println("open tasks tab:", err)
+		}
+		a.render(outDir + "/p2-tasks.png")
+	}
+
 	// Composer @-mention suggestions over the workspace.
 	if sendRect, ok := a.tester.Find("发送"); ok {
 		a.tester.ClickAt(sendRect.X-120, sendRect.Y-50)

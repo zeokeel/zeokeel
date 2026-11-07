@@ -2,8 +2,8 @@
 // the conversation screen (contracts.SlotSessionPanelRight). It is a UI module
 // (kernel Descriptor + host UI services) rendered entirely with mygo's native
 // controls and the brand design system (internal/design): a native tab strip
-// over the overview, tools, model, log, files, changes and terminal panes
-// inside t.Panel cards. It never draws a control (or a Canvas) itself.
+// over the overview, tools, log, files, changes, terminal, agents and tasks
+// panes inside t.Panel cards. It never draws a control (or a Canvas) itself.
 //
 // The module reads the chat read model (contracts.ChatService) and never writes
 // it: the overview shows the active session's title, message count, update time
@@ -63,6 +63,7 @@ type Config struct {
 	ChangesTab  string `json:"changesTab"`
 	TerminalTab string `json:"terminalTab"`
 	AgentsTab   string `json:"agentsTab"`
+	TasksTab    string `json:"tasksTab"`
 	// EmptyText is the overview copy when there is no active session.
 	EmptyText string `json:"emptyText"`
 }
@@ -80,6 +81,7 @@ func (c Config) resolved() Config {
 		ChangesTab:  strings.TrimSpace(c.ChangesTab),
 		TerminalTab: strings.TrimSpace(c.TerminalTab),
 		AgentsTab:   strings.TrimSpace(c.AgentsTab),
+		TasksTab:    strings.TrimSpace(c.TasksTab),
 		EmptyText:   strings.TrimSpace(c.EmptyText),
 	}
 }
@@ -114,6 +116,10 @@ func (c Config) terminalLabel(locale contracts.LocaleService) string {
 
 func (c Config) agentsLabel(locale contracts.LocaleService) string {
 	return firstNonEmpty(c.AgentsTab, uikit.T(locale, "团队", "Agents"))
+}
+
+func (c Config) tasksLabel(locale contracts.LocaleService) string {
+	return firstNonEmpty(c.TasksTab, uikit.T(locale, "任务", "Tasks"))
 }
 
 func (c Config) emptyLabel(locale contracts.LocaleService) string {
@@ -157,6 +163,13 @@ type state struct {
 	steerDraft       string
 	teamStatus       string
 	teamErr          string
+
+	// Tasks pane state: the cached shared task board (loaded lazily and after
+	// every mutation) and the new-task draft.
+	tasksLoaded bool
+	tasks       []contracts.BoardTask
+	tasksErr    string
+	taskDraft   string
 }
 
 // Module registers the session inspector slot.
@@ -218,7 +231,11 @@ func Module() *module.Descriptor[Config] {
 					if service, ok := ctx.Get(contracts.KeyTeam); ok {
 						team = service
 					}
-					buildPanel(c, design.Of(c), runtime, chat, log, workspace, terminal, team, config, moduleState)
+					var board contracts.TaskBoard
+					if service, ok := ctx.Get(contracts.KeyTaskBoard); ok {
+						board = service
+					}
+					buildPanel(c, design.Of(c), runtime, chat, log, workspace, terminal, team, board, config, moduleState)
 				},
 			})
 		})

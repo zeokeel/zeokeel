@@ -21,6 +21,14 @@
 - 右侧栏「文件」Tab：打开文件夹（mygo 原生 Directory picker）、目录进入/面包屑、文本/Markdown/图片预览、
   刷新与错误状态；E2E 覆盖工作区创建 + 列表 + 预览帧
 
+**TDD-mcp/todo（2026-11-08）**
+- MCP stdio：toolkit 按 `MCPServerConfig` 行分派 stdio（`mcp.Start` Command/Args/Env、握手/tools/resources 注册）与 HTTP；
+  command+args 去重、stdio 优先、失败诊断条目；settings MCP 页新增传输 Select（HTTP/stdio）、命令/参数/环境字段、校验与
+  旧 JSON 兼容（toolkit 29 / settings 62 测试）
+- 共享任务板：toolkit 单一 `team.NewTaskManager()` 同时驱动 `team_task_*` 工具与 `contracts.KeyTaskBoard`；rightpanel
+  第 8 tab「任务」：状态排序/添加/开始/完成/删除/刷新/错误/空态/i18n（rightpanel 56 测试）；E2E 创建→面板→完成
+- 截图 p2-tasks.png、p2-mcp-settings.png（含 Transport 表单）
+
 **TDD-cmd/upd + 反证扩展（2026-11-08）**
 - composer 命令族：/设置目标、/审阅计划、/添加记忆（native Modal；服务可选；ctx.Effect 注销；i18n；session 85 测试）
 - 更新下载：`contracts.UpdateDownloader` + update 模块流式下载/SHA-256/size 校验/`<dataDir>/updates` 暂存/路径穿越防护/并发；

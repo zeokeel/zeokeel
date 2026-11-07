@@ -49,12 +49,21 @@ var defaultCommands = []string{
 	"node", "npm", "python3", "pwsh", "powershell",
 }
 
-// MCPServer configures one remote MCP server reached over Streamable HTTP.
+// MCPServer configures one MCP server: a Streamable HTTP endpoint or a stdio
+// child process. A non-empty Command (or Transport "stdio") selects stdio and
+// takes priority over URL.
 type MCPServer struct {
 	// Name is the server identity used in tool names (default: "remote").
 	Name string `json:"name,omitempty"`
-	// URL is the MCP endpoint (required when the server is listed).
-	URL string `json:"url"`
+	// URL is the MCP endpoint for HTTP transports.
+	URL string `json:"url,omitempty"`
+	// Transport is "", "http" or "stdio"; empty infers from URL/Command.
+	Transport string `json:"transport,omitempty"`
+	// Command is the stdio MCP server executable (required for stdio).
+	Command string `json:"command,omitempty"`
+	// Args and Env are the stdio child process arguments/environment.
+	Args []string `json:"args,omitempty"`
+	Env  []string `json:"env,omitempty"`
 	// Headers are extra request headers (for example Authorization).
 	Headers map[string]string `json:"headers,omitempty"`
 	// TimeoutMs bounds one request (0 = 30s).
@@ -154,7 +163,9 @@ func Module() *module.Descriptor[Config] {
 		} else {
 			tools = append(tools, skill.Tools(nil)...)
 		}
-		tools = append(tools, team.TaskTools(team.NewTaskManager())...)
+		taskManager := team.NewTaskManager()
+		tools = append(tools, team.TaskTools(taskManager)...)
+		taskBoard := newTaskBoard(taskManager)
 		settingsService, hasSettings := ctx.Get(contracts.KeySettings)
 		if hasSettings {
 			tools = append(tools, settings.Tools(settingsService)...)
@@ -203,45 +214,65 @@ func Module() *module.Descriptor[Config] {
 		var clients []*mcp.Client
 		pluginEntries := make([]pluginEntry, 0, len(servers))
 		for _, server := range servers {
+			transport := mcpServerTransport(server)
 			entry := pluginEntry{plugin: contracts.MCPPlugin{
-				Name:   strings.TrimSpace(server.Name),
+				Name:   pluginDisplayName(server.Name, nil),
 				URL:    strings.TrimSpace(server.URL),
 				Status: statusConnectFailed + "未配置 URL",
 			}}
-			if entry.plugin.URL == "" {
-				// Keep a failed entry so the Plugins screen can show the
-				// misconfiguration instead of silently dropping the server.
-				entry.plugin.Name = pluginDisplayName(server.Name, nil)
+			attach := func(client *mcp.Client) {
+				clients = append(clients, client)
+				mcpTools := mcp.Tools(client, "")
+				tools = append(tools, mcpTools...)
+				tools = append(tools, mcp.ResourceTools(client, "")...)
+				entry.client = client
+				entry.plugin.Name = pluginDisplayName(server.Name, client)
+				entry.plugin.ServerName = client.ServerName()
+				entry.plugin.Version = client.ServerVersion()
+				entry.plugin.Protocol = client.ProtocolVersion()
+				entry.plugin.Tools = len(mcpTools)
+				entry.plugin.Status = statusConnected
 				pluginEntries = append(pluginEntries, entry)
-				continue
 			}
-			serverTimeout := time.Duration(server.TimeoutMs) * time.Millisecond
-			client, err := mcp.StartHTTP(context.Background(), mcp.HTTPConfig{
-				URL:        server.URL,
-				Headers:    server.Headers,
-				ServerName: server.Name,
-				Timeout:    serverTimeout,
-			})
-			if err != nil {
-				// A failed server must not fail the whole toolkit activation:
-				// keep the entry with a readable failure status and continue.
-				entry.plugin.Name = pluginDisplayName(server.Name, nil)
-				entry.plugin.Status = statusConnectFailed + err.Error()
+			switch transport {
+			case mcp.TransportStdio:
+				entry.plugin.URL = ""
+				if strings.TrimSpace(server.Command) == "" {
+					entry.plugin.Status = statusConnectFailed + "stdio command is required"
+					pluginEntries = append(pluginEntries, entry)
+					continue
+				}
+				client, err := mcp.Start(context.Background(), mcpStartConfig(server))
+				if err != nil {
+					entry.plugin.Status = statusConnectFailed + err.Error()
+					pluginEntries = append(pluginEntries, entry)
+					continue
+				}
+				attach(client)
+			case mcp.TransportHTTP:
+				if entry.plugin.URL == "" {
+					// Keep a failed entry so the Plugins screen can show the
+					// misconfiguration instead of silently dropping the server.
+					pluginEntries = append(pluginEntries, entry)
+					continue
+				}
+				client, err := startHTTPMCP(server)
+				if err != nil {
+					entry.plugin.Status = statusConnectFailed + err.Error()
+					pluginEntries = append(pluginEntries, entry)
+					continue
+				}
+				attach(client)
+			default:
+				// Legacy assembly rows (and unclassified rows) with no URL keep
+				// the original missing-URL diagnostic.
+				if entry.plugin.URL == "" && strings.TrimSpace(server.Command) == "" {
+					entry.plugin.Status = statusConnectFailed + "未配置 URL"
+				} else {
+					entry.plugin.Status = statusConnectFailed + "unsupported transport"
+				}
 				pluginEntries = append(pluginEntries, entry)
-				continue
 			}
-			clients = append(clients, client)
-			mcpTools := mcp.Tools(client, "")
-			tools = append(tools, mcpTools...)
-			tools = append(tools, mcp.ResourceTools(client, "")...)
-			entry.client = client
-			entry.plugin.Name = pluginDisplayName(server.Name, client)
-			entry.plugin.ServerName = client.ServerName()
-			entry.plugin.Version = client.ServerVersion()
-			entry.plugin.Protocol = client.ProtocolVersion()
-			entry.plugin.Tools = len(mcpTools)
-			entry.plugin.Status = statusConnected
-			pluginEntries = append(pluginEntries, entry)
 		}
 		plugins := newPluginsService(pluginEntries)
 
@@ -262,10 +293,17 @@ func Module() *module.Descriptor[Config] {
 			return err
 		}
 		_, err := ctx.Provide(contracts.KeyPlugins, contracts.PluginsService(plugins))
-		return err
+		if err != nil {
+			return err
+		}
+		if _, err := ctx.Provide(contracts.KeyTaskBoard, contracts.TaskBoard(taskBoard)); err != nil {
+			return err
+		}
+		return nil
 	}).AddProvides(
 		module.Provides(contracts.KeyToolkit),
 		module.Provides(contracts.KeyPlugins),
+		module.Provides(contracts.KeyTaskBoard),
 	).WithName("ZeoKeel Rig toolset")
 }
 

@@ -38,7 +38,7 @@ func TestMCPPageEmptyState(t *testing.T) {
 	tester.Frame()
 	openMCPPage(t, h, tester)
 
-	h.assertTexts(tester, "MCP", "通过 Streamable HTTP 连接 MCP 服务器；修改后重启生效。",
+	h.assertTexts(tester, "MCP", "通过 Streamable HTTP 或 stdio 连接 MCP 服务器；修改后重启生效（stdio 子进程在启动时拉起）。",
 		"MCP 服务器", "还没有配置 MCP 服务器", "添加服务器", "名称", "URL", "添加")
 }
 
@@ -162,7 +162,7 @@ func TestMCPPageEnglishCopy(t *testing.T) {
 
 	h.click(tester, "MCP")
 	h.assertTexts(tester,
-		"Connect MCP servers over Streamable HTTP; changes apply after a restart.",
+		"Connect MCP servers over Streamable HTTP or stdio; changes apply after a restart (stdio subprocesses start on launch).",
 		"MCP servers", "Add server", "Name", "URL", "Add", "Remove")
 	h.assertNoTexts(tester, "添加服务器", "移除")
 }
