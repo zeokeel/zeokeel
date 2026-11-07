@@ -80,9 +80,42 @@ func buildHeader(c *ui.Context, t *design.Tokens, cfg Config, st *state, chatSes
 				design.Apply(ui.Badge(c, "运行中"), t.Badge()).TextColor(t.WarningText)
 			}
 			ui.Spacer(c).Grow(1)
+			if hasSession {
+				copyID := ui.Button(c, "复制 ID").Tooltip("复制会话 ID")
+				if copyID.Clicked() {
+					c.WriteClipboard(chatSession.ID)
+				}
+				copyChat := ui.Button(c, "复制对话").Tooltip("复制会话内容")
+				if copyChat.Clicked() {
+					c.WriteClipboard(transcriptText(chatSession))
+				}
+			}
 		})
 		buildTabs(c, t, cfg, st)
 	})
+}
+
+// transcriptText formats the session read model for the clipboard: one block
+// per message, tool calls summarised inline (the old shell's copy action).
+func transcriptText(chatSession contracts.ChatSession) string {
+	var builder strings.Builder
+	for _, message := range chatSession.Messages {
+		if strings.TrimSpace(message.Text) == "" && len(message.Tools) == 0 {
+			continue
+		}
+		role := message.Role
+		switch role {
+		case "user":
+			role = "用户"
+		case "assistant":
+			role = "助手"
+		}
+		fmt.Fprintf(&builder, "%s: %s\n", role, strings.TrimSpace(message.Text))
+		for _, call := range message.Tools {
+			fmt.Fprintf(&builder, "[工具] %s (%s)\n", call.Name, call.Status)
+		}
+	}
+	return strings.TrimRight(builder.String(), "\n")
 }
 
 // buildTabs draws the Chat/Trajectory/Memory strip with mygo's native tabs

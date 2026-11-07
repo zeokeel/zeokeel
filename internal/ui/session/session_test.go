@@ -907,3 +907,25 @@ func TestComposerToolbar(t *testing.T) {
 		t.Fatal("model chip did not open the settings surface")
 	}
 }
+
+// TestHeaderCopyActions covers the old session header's copy controls: the
+// session ID and the transcript text land on the native clipboard.
+func TestHeaderCopyActions(t *testing.T) {
+	chat := newFakeChat()
+	chat.addSession(contracts.ChatSession{ID: "sess-1", Title: "复制", Messages: []contracts.ChatMessage{
+		{ID: "m1", Role: "user", Text: "你好"},
+		{ID: "m2", Role: "assistant", Text: "你好呀"},
+	}}, true)
+	h := newHarness(t, chat)
+	tester := h.tester()
+
+	h.click(tester, "复制 ID")
+	if got := tester.Clipboard(); got != "sess-1" {
+		t.Fatalf("clipboard = %q, want sess-1", got)
+	}
+	h.click(tester, "复制对话")
+	got := tester.Clipboard()
+	if !strings.Contains(got, "用户: 你好") || !strings.Contains(got, "助手: 你好呀") {
+		t.Fatalf("clipboard = %q, want the transcript", got)
+	}
+}
