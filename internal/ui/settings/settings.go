@@ -1064,21 +1064,28 @@ func buildAppearancePage(c *ui.Context, state *appearanceState, store contracts.
 				t.TextMuted(design.TypeXXS))
 		})
 
-		panel(c, t, func() {
-			sectionTitle(c, t, localized(locale, "系统托盘", "System tray"))
-			trayToggle := ui.Toggle(c, &state.closeToTray,
-				localized(locale, "关闭时最小化到托盘", "Close to system tray"))
-			if trayToggle.Changed() {
-				applyDesktopSetting(state, store, contracts.SettingCloseToTray,
-					fmt.Sprintf("%t", state.closeToTray), locale)
-			}
-			design.Apply(ui.Text(c, localized(locale,
-				"需要系统托盘支持；修改后重启应用生效。",
-				"Requires system tray support; takes effect after restart.")),
-				t.TextMuted(design.TypeXXS))
+		// Tray and hotkey are both small "desktop feature" switches: side by
+		// side they keep the appearance page's save action in view.
+		ui.Row(c).FillWidth().Gap(design.Space2).AlignItems(ui.Start).Children(func() {
+			ui.Column(c).FillWidth().Grow(1).Children(func() {
+				panel(c, t, func() {
+					sectionTitle(c, t, localized(locale, "系统托盘", "System tray"))
+					trayToggle := ui.Toggle(c, &state.closeToTray,
+						localized(locale, "关闭时最小化到托盘", "Close to system tray"))
+					if trayToggle.Changed() {
+						applyDesktopSetting(state, store, contracts.SettingCloseToTray,
+							fmt.Sprintf("%t", state.closeToTray), locale)
+					}
+					design.Apply(ui.Text(c, localized(locale,
+						"需要系统托盘支持；修改后重启应用生效。",
+						"Requires system tray support; takes effect after restart.")),
+						t.TextMuted(design.TypeXXS)).MaxLines(1).Ellipsis("…")
+				})
+			})
+			ui.Column(c).FillWidth().Grow(1).Children(func() {
+				buildGlobalHotkeyPanel(c, t, state, store, locale)
+			})
 		})
-
-		buildGlobalHotkeyPanel(c, t, state, store, locale)
 
 		ui.Row(c).FillWidth().Gap(design.Space2).AlignItems(ui.Center).Children(func() {
 			if brandPrimaryButton(c, t, icons.Globe(), labels.saveLabel).Clicked() {

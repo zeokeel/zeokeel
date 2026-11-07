@@ -185,7 +185,18 @@ func TestAutomationHistoryCappedAndNewestFirst(t *testing.T) {
 		if want > 10 {
 			want = 10
 		}
-		automationHistory(t, service, task.ID, want)
+		waitForLong(t, "automation history run "+strconv.Itoa(run), 15*time.Second, func() bool {
+			all, err := service.List(context.Background())
+			if err != nil {
+				return false
+			}
+			for _, candidate := range all {
+				if candidate.ID == task.ID {
+					return len(candidate.RunHistory) >= want
+				}
+			}
+			return false
+		})
 	}
 	updated := automationTask(t, service, task.ID, func(task contracts.AutomationTask) bool {
 		return len(task.RunHistory) == 10

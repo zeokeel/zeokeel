@@ -52,11 +52,11 @@
 | `automation` | 🟡 | `internal/modules/automation` + `internal/ui/automation` | cron/every/after、持久化、ticker、schedule 工具、列表/新建/运行/删除/**运行历史（每任务最近 10 条，持久化，卡片折叠显示最近状态+摘要，展开列表）**；缺独立 runs 表/统计 |
 | `brand` | ✅ | `internal/brand` | palette/theme/logo/wordmark |
 | `design` | ✅ | `internal/design` | tokens/style/motion/font/components 子集 |
-| `globalhotkey` | ❌ | 无 | 系统级全局热键未实现；只有窗口内快捷键（uiroot，可配置两条） |
+| `globalhotkey` | ✅ | host hotkey.go + mygo `GlobalShortcut` + 外观设置 | 可配置系统级加速键（修饰符+单键，固定顺序规范化），注册后 Show/Restore/Focus 窗口；留空关闭、非法/注册失败仅警告、shutdown 注销；桌面不可用环境安全回退 |
 | `i18n` | 🟡 | uiroot locale + uikit + 各 UI 切片 | 新增页面（toasts/Agents/Tasks/network/MCP/update download/search/import/interaction/rightpanel）已 en/zh；仍缺 host chrome tooltip、部分原生 Dialog 标题、后端错误文案、命令面板部分静态标题 |
 | `icons` | ✅ | `internal/icons` | Lucide SVG |
 | `importer` | 🟡 | `internal/modules/importer` + settings 导入页 | DSH session.v4.jsonl Scan/Import、文本+reasoning、workspace、symlink 跳过/重复 ID 去重；attachments/credentials/manifest/zstd 未迁移 |
-| `lsp` | ❌ | 无；rig 有 `tools/lsp` 但 toolkit 未注册 | 旧 LSP client/servers 配置/工具未接（非目标候选） |
+| `lsp` | 🟡 | toolkit lsp.go（rig `tools/lsp`）+ 设置 LSP 页 | 可选单服务器（command/args/dir/languageId/env JSON），启动后注册 rig 默认 `lsp_*` 工具（hover/definition/references/implementation/diagnostics/symbols），卸载关闭 client；错误仅警告不阻断；缺多服务器/UI 语言服务器选择 |
 | `mcp` | ✅ | toolkit `mcp.Start`（stdio+HTTP）+ settings/workspace 合并 + 工具级开关 | HTTP/stdio 握手/工具注册/失败诊断；assembly>settings>workspace mcp.json（opt-in）；`mcp.disabledTools` 注册前过滤；插件详情/市场在 Shell Plugins 行仍 🟡 |
 | `memory` | 🟡 | `internal/modules/memory` + rig memory tool + session Memory tab | JSON MemoryStore/tool/搜索/添加 + **整理（规范化去重/保留最早）与全部清空（确认对话框）**；缺模型驱动 consolidate/extract/auto-memory |
 | `modelcatalog` | 🟡 | `internal/modules/modelcatalog` + composer 模型菜单 + settings「模型目录」页 | 默认 DeepSeek Chat/Reasoner 预设、per-session 切换/推理强度、**目录编辑（增删/恢复默认，动态生效）**；缺旧 context window/max tokens/efforts 元数据、连接检查按钮 |

@@ -31,7 +31,7 @@ func buildGlobalHotkeyPanel(c *ui.Context, t *design.Tokens, state *appearanceSt
 		design.Apply(ui.Text(c, localized(locale,
 			"留空关闭；需要桌面支持；修改后重启应用生效。",
 			"Leave empty to disable; requires desktop support; takes effect after restart.")),
-			t.TextMuted(design.TypeXXS))
+			t.TextMuted(design.TypeXXS)).MaxLines(1).Ellipsis("…")
 	})
 }
 

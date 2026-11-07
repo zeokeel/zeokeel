@@ -161,6 +161,8 @@ type service struct {
 	stop      chan struct{}
 	done      chan struct{}
 	closeOnce sync.Once
+	// runs tracks in-flight executions so Close can wait for their writes.
+	runs sync.WaitGroup
 }
 
 var _ contracts.AutomationService = (*service)(nil)
@@ -317,11 +319,13 @@ func (s *service) persistLocked() error {
 	return nil
 }
 
-// Close stops the scheduler loop and waits for it to exit. It is idempotent.
+// Close stops the scheduler loop, waits for it to exit and then waits for any
+// in-flight executions to finish their registry writes. It is idempotent.
 func (s *service) Close() {
 	s.closeOnce.Do(func() {
 		close(s.stop)
 		<-s.done
+		s.runs.Wait()
 		s.logger.Printf("%s: scheduler stopped", ModuleID)
 	})
 }
@@ -354,7 +358,7 @@ func (s *service) tick(now time.Time) {
 	}
 	s.mu.Unlock()
 	for _, id := range due {
-		go s.execute(id, false)
+		s.startRun(id, false)
 	}
 }
 
@@ -520,8 +524,18 @@ func (s *service) RunNow(ctx context.Context, id string) error {
 		return fmt.Errorf("%w: %q", ErrTaskNotFound, id)
 	}
 	s.mu.Unlock()
-	go s.execute(id, true)
+	s.startRun(id, true)
 	return nil
+}
+
+// startRun launches one execution and accounts for it so Close waits for the
+// registry writes of in-flight runs.
+func (s *service) startRun(id string, manual bool) {
+	s.runs.Add(1)
+	go func() {
+		defer s.runs.Done()
+		s.execute(id, manual)
+	}()
 }
 
 // Subscribe implements contracts.AutomationService.

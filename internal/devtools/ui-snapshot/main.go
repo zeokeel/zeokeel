@@ -579,6 +579,10 @@ func main() {
 		fmt.Println("click model catalog settings:", err)
 	}
 	a.render(outDir + "/p2-modelcatalog-settings.png")
+	if err := a.tester.Click("LSP"); err != nil {
+		fmt.Println("click LSP settings:", err)
+	}
+	a.render(outDir + "/p2-lsp-settings.png")
 	a.ui.Navigator().CloseSettings()
 	// Automation with a finished run so the history expansion is visible.
 	if automation, err := a.root.Require(contracts.KeyAutomation); err == nil {

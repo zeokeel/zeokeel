@@ -21,6 +21,13 @@
 - 右侧栏「文件」Tab：打开文件夹（mygo 原生 Directory picker）、目录进入/面包屑、文本/Markdown/图片预览、
   刷新与错误状态；E2E 覆盖工作区创建 + 列表 + 预览帧
 
+**TDD-hotkey/lsp（2026-11-08）**
+- 全局热键：host normalizeHotkey（修饰符+单键、固定顺序、别名）+ setupGlobalHotkey（注册后 Show/Restore/Focus、失败仅警告、shutdown 注销）；
+  外观页输入+校验+重启提示；host 63 / settings 108 测试；xvfb 冒烟含预置热键 exit 124 无 panic
+- LSP：contracts LSPServerConfig/Parse/Encode；toolkit 读 `lsp.server` 启动 rig lsp client 并注册 `lsp_*` 工具（seam 可测、卸载关闭、
+  错误不阻断激活）；设置 LSP 页（命令/参数/目录/语言 ID，空=关闭，重启生效）；toolkit 43 / settings 108 测试
+- COVERAGE：globalhotkey ✅、lsp 🟡
+
 **TDD-chat-modes（2026-11-08）**
 - agent gate：plan 最高优先；standard/空沿用 approvals；minimal 只读白名单；creator 隐藏编码工具（fail-closed，绕过 approvals）
 - session：模式 Popover 四项（普通/计划/精简/创作）写 agent.mode+chat.mode，header 徽标（计划/创作 Warning、精简 Accent）、坏值归一、中英；

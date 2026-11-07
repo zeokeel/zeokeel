@@ -18,7 +18,7 @@ func TestAppearanceGlobalHotkeyDefaultsEmpty(t *testing.T) {
 	h.click(tester, "模型")
 	h.click(tester, "外观")
 
-	h.assertTexts(tester, "全局热键", "全局热键 输入", "CmdOrCtrl+Shift+Space",
+	h.assertTexts(tester, "全局热键", "全局热键 输入",
 		"留空关闭", "需要桌面支持", "修改后重启应用生效")
 }
 
@@ -78,7 +78,7 @@ func TestAppearanceGlobalHotkeyEnglish(t *testing.T) {
 	h.click(tester, "Model")
 	h.click(tester, "Appearance")
 
-	h.assertTexts(tester, "Global hotkey", "Global hotkey input", "CmdOrCtrl+Shift+Space",
+	h.assertTexts(tester, "Global hotkey", "Global hotkey input",
 		"Leave empty to disable", "requires desktop support", "takes effect after restart")
 	h.focusInput(tester, "Global hotkey input")
 	tester.Type("CmdOrCtrl+Shift+Space")

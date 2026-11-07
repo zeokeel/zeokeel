@@ -6,7 +6,7 @@
 > 工件历史（Files「产物」）、单实例 + XDG autostart、install-on-restart、toast 通知、workspace mcp.json opt-in、
 > 网络代理设置、MCP 工具级开关、提示词预设（设置 CRUD + composer 插入）、可编辑模型目录、
 > 消息用量 footer/逐条复制/反馈 good-bad 与 /反馈 命令（导出含反馈）、计划模式、自动化运行历史、
-> Memory 整理/清空、技能新建/删除、工件下载、系统托盘/关闭到托盘、聊天模式（普通/计划/精简/创作）、插件 MCP server 详情；
+> Memory 整理/清空、技能新建/删除、工件下载、系统托盘/关闭到托盘、全局热键、LSP 工具、聊天模式（普通/计划/精简/创作）、插件 MCP server 详情；
 > 反证审计 78 例发现 4×P2+4×P3 全部修复，`internal/regression` 0 SKIP。详情：[docs/ADVERSARIAL-AUDIT.md](docs/ADVERSARIAL-AUDIT.md)。
 >
 > **最终轮状态（Round 40/40）**：可运行的桌面/headless/ACP 产品；32 测试包（含 -race）全绿；
