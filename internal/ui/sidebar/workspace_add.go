@@ -18,12 +18,17 @@ import (
 	"github.com/zeokeel/zeokeel/internal/icons"
 )
 
+// WorkspaceDirectoryDialogTitle is the localized title of the default
+// directory dialog; the call site sets it from the current locale right before
+// invoking DirectoryPicker (the seam signature stays stable for tests).
+var WorkspaceDirectoryDialogTitle = "选择工作区目录"
+
 // DirectoryPicker is the sidebar's workspace directory-picker seam: the default
 // opens the native mygo directory dialog; tests replace it with a scripted
 // selection so no desktop backend is needed.
 var DirectoryPicker = func() (string, error) {
 	paths, err := mygo.Dialog.Open(mygo.OpenDialogOptions{
-		Title:     "选择工作区目录",
+		Title:     WorkspaceDirectoryDialogTitle,
 		Directory: true,
 	})
 	if err != nil {
@@ -115,6 +120,7 @@ func buildAddWorkspaceDialog(c *ui.Context, t *design.Tokens, workspace contract
 				ui.TextInput(c, &state.addWorkspaceDir).
 					Label(state.T("目录 输入", "Directory input")).FillWidth()
 				if ui.Button(c, state.T("选择目录…", "Choose folder…")).Clicked() {
+					WorkspaceDirectoryDialogTitle = state.T("选择工作区目录", "Choose workspace folder")
 					dir, err := DirectoryPicker()
 					if err != nil {
 						state.addWorkspaceErr = state.T("无法打开目录选择器：", "Could not open the folder picker: ") + err.Error()

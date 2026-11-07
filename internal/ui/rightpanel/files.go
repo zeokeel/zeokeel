@@ -17,12 +17,17 @@ import (
 	"github.com/zeokeel/zeokeel/internal/uikit"
 )
 
+// DirectoryDialogTitle is the localized title of the default folder dialog; the
+// Files pane sets it from the current locale right before invoking
+// DirectoryPicker (the seam signature stays stable for tests).
+var DirectoryDialogTitle = "选择工作区文件夹"
+
 // DirectoryPicker is the Files pane's "open a folder" seam: the default opens
 // the native mygo directory dialog and returns the first chosen path; tests
 // replace it with a scripted selection so no desktop backend is needed.
 var DirectoryPicker = func() (string, error) {
 	paths, err := mygo.Dialog.Open(mygo.OpenDialogOptions{
-		Title:     "选择工作区文件夹",
+		Title:     DirectoryDialogTitle,
 		Directory: true,
 	})
 	if err != nil {
@@ -237,6 +242,7 @@ func buildOpenWorkspace(c *ui.Context, t *design.Tokens, workspace contracts.Wor
 			MaxLines(2)
 		open := design.Apply(ui.PrimaryButton(c, uikit.T(st.locale, "打开文件夹", "Open folder")), t.PrimaryButton())
 		if open.Clicked() {
+			DirectoryDialogTitle = uikit.T(st.locale, "选择工作区文件夹", "Choose workspace folder")
 			dir, err := DirectoryPicker()
 			switch {
 			case err != nil:

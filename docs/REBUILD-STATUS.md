@@ -21,6 +21,12 @@
 - 右侧栏「文件」Tab：打开文件夹（mygo 原生 Directory picker）、目录进入/面包屑、文本/Markdown/图片预览、
   刷新与错误状态；E2E 覆盖工作区创建 + 列表 + 预览帧
 
+**TDD-keep-planning/i18n（2026-11-08）**
+- Plan keep-planning：计划 Modal 新增反馈输入 +「继续规划」（Exit cancel → chat.Send 反馈到当前会话 → 模型修订后重新 plan_review），Notifier 提示，
+  失败保留 Modal；interaction 23 测试；COVERAGE Plan UI 升 ✅
+- i18n：slash 命令 11 条 Title/Hint 本地化 + 语言切换重注册（斜杠菜单/帮助/命令面板下一帧跟随）、侧栏/右栏目录选择器标题；
+  session 135 / sidebar 63 / rightpanel 69 测试
+
 **Round 56：ACL/主题/侧栏/行为/通知反证 + 快捷键（2026-11-08）**
 - uiroot 窗口快捷键：Cmd/Ctrl+N（解析 chat 绑定/kernel ctx/命令 fallback → NewSession+Push session）、Cmd/Ctrl+,（ToggleSettings），
   panic 安全、与 Cmd+B/K 不冲突；uiroot 74 测试

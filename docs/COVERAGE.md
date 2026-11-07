@@ -54,7 +54,7 @@
 | `brand` | ✅ | `internal/brand` | palette/theme/logo/wordmark |
 | `design` | ✅ | `internal/design` | tokens/style/motion/font/components 子集 |
 | `globalhotkey` | ✅ | host hotkey.go + mygo `GlobalShortcut` + 外观设置 | 可配置系统级加速键（修饰符+单键，固定顺序规范化），注册后 Show/Restore/Focus 窗口；留空关闭、非法/注册失败仅警告、shutdown 注销；桌面不可用环境安全回退 |
-| `i18n` | 🟡 | uiroot locale + uikit + 各 UI 切片 | 新增页面（toasts/Agents/Tasks/network/MCP/update download/search/import/interaction/rightpanel）已 en/zh；仍缺 host chrome tooltip、部分原生 Dialog 标题、后端错误文案、命令面板部分静态标题 |
+| `i18n` | 🟡 | uiroot locale + uikit + 各 UI 切片 | 新增页面已 en/zh；**Round 57 审计修复：11 条 slash 命令 Title/Hint 本地化+语言切换重注册、侧栏/右栏原生目录选择器标题**；仍缺部分 host chrome tooltip、后端错误文案 |
 | `icons` | ✅ | `internal/icons` | Lucide SVG |
 | `importer` | 🟡 | `internal/modules/importer` + settings 导入页 | DSH session.v4.jsonl Scan/Import、文本+reasoning、workspace、symlink 跳过/重复 ID 去重；attachments/credentials/manifest/zstd 未迁移 |
 | `lsp` | 🟡 | toolkit lsp.go（rig `tools/lsp`）+ 设置 LSP 页 | 可选单服务器（command/args/dir/languageId/env JSON），启动后注册 rig 默认 `lsp_*` 工具（hover/definition/references/implementation/diagnostics/symbols），卸载关闭 client；错误仅警告不阻断；缺多服务器/UI 语言服务器选择 |
@@ -107,7 +107,7 @@
 | Skills 页 | 🟡 | settings 技能页 + skills 模块 | 发现/roots/预览/刷新；无创建/编辑/删除 |
 | Memory 页 | 🟡 | session Memory tab + memory 模块 | 搜索/添加/删除 scope；无 consolidate/extract、自动记忆设置 |
 | Workspace→Session 树/分组/计数 | ✅ | sidebar workspace tree | 多 workspace 分组、未分组、计数、搜索、折叠、置顶/归档 |
-| Plan UI（plan_review/exit_plan_mode） | 🟡 | `internal/ui/interaction` plan Modal + /审阅计划 + plan 模式门禁 + toolcards 计划卡 | Markdown 审阅 + 批准/取消 + 计划模式门禁 + **transcript 计划卡（markdown + 状态 Badge，坏参数回退）**；缺 keep-planning/feedback 修订循环 |
+| Plan UI（plan_review/exit_plan_mode） | ✅ | interaction plan Modal + /审阅计划 + plan 门禁 + toolcards 计划卡 + **keep-planning 反馈** | Markdown 审阅 + 批准/取消 + 计划模式门禁 + transcript 计划卡 + **「继续规划」反馈（写回当前会话作为下一条用户消息 → 模型修订后重新 plan_review）** |
 | Modes UI（standard/minimal/creator） | ✅ | session 模式 Popover + agent gate 策略 | 四模式：普通（原审批策略）、计划（只读+计划白名单，最高优先）、精简（只读探索白名单）、创作（隐藏编码工具，仅 ask/present/goal/memory/skill）；composer 模式菜单 + header 徽标，坏值归一，中英 |
 | Team UI（成员/任务/steer） | ✅ | rightpanel Agents/Tasks Inspector + team_* 工具 | 成员列表/状态/最新回答、选中后 steer/中断/关闭；spawn 由 agent 工具发起（同旧）；任务板增删改/状态排序 |
 | Todo UI（会话 todo 面板） | ✅ | toolkit `KeyTaskBoard` + rightpanel「任务」tab | 任务列表/状态排序/添加/开始/完成/删除/刷新/错误与空态，与 team_task_* 共用；缺旧 todo 卡内联进度 |

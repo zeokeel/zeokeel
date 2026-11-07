@@ -397,3 +397,29 @@ func TestFilesCustomTabLabel(t *testing.T) {
 	h.click(tester, "Files")
 	h.assertTexts(tester, "工作区未启用")
 }
+
+// TestFilesDirectoryDialogTitleFollowsLocale pins that the native folder
+// picker's dialog title is localized before the seam runs.
+func TestFilesDirectoryDialogTitleFollowsLocale(t *testing.T) {
+	workspace := newFakeWorkspace()
+	captured := ""
+	setDirectoryPicker(t, func() (string, error) {
+		captured = rightpanel.DirectoryDialogTitle
+		return "", nil // cancel keeps the empty state for the second invocation
+	})
+	h := newLocaleHarness(t, "en", newFakeChat(), rightpanel.Config{}, workspace, nil)
+	tester := h.tester()
+	tester.Frame()
+	h.click(tester, "Files")
+	h.click(tester, "Open folder")
+	if captured != "Choose workspace folder" {
+		t.Fatalf("English directory dialog title = %q, want %q", captured, "Choose workspace folder")
+	}
+
+	h.uiRoot.Locale().SetLanguage("zh")
+	tester.Frame()
+	h.click(tester, "打开文件夹")
+	if captured != "选择工作区文件夹" {
+		t.Fatalf("Chinese directory dialog title = %q, want %q", captured, "选择工作区文件夹")
+	}
+}

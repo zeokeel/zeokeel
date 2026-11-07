@@ -46,6 +46,11 @@ func buildScreen(
 	st *state,
 ) {
 	t := design.Of(c)
+	// Keep the slash commands' registry titles in the host language (the
+	// command palette reads them directly).
+	if st.syncCommandLocale != nil {
+		st.syncCommandLocale()
+	}
 	activeID := chat.ActiveSession()
 	chatSession, hasSession := chat.Session(activeID)
 

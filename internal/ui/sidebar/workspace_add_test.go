@@ -154,3 +154,32 @@ func TestSidebarAddWorkspaceEnglish(t *testing.T) {
 }
 
 var _ = ui.KeyEscape
+
+// TestAddWorkspaceDirectoryDialogTitleFollowsLocale pins that the native
+// directory picker's dialog title is localized before the seam runs.
+func TestAddWorkspaceDirectoryDialogTitleFollowsLocale(t *testing.T) {
+	workspace := &recordingWorkspace{fakeWorkspace: newFakeWorkspace()}
+	h := newLocaleHarness(t, &fakeChat{}, sidebar.Config{}, "en", workspace, nil)
+	captured := ""
+	oldPicker := sidebar.DirectoryPicker
+	sidebar.DirectoryPicker = func() (string, error) {
+		captured = sidebar.WorkspaceDirectoryDialogTitle
+		return "", nil // cancel keeps the modal open for the second invocation
+	}
+	t.Cleanup(func() { sidebar.DirectoryPicker = oldPicker })
+	tester := h.tester()
+	tester.Frame()
+	h.click(tester, "Add workspace")
+	h.click(tester, "Choose folder…")
+	if captured != "Choose workspace folder" {
+		t.Fatalf("English directory dialog title = %q, want %q", captured, "Choose workspace folder")
+	}
+
+	// A language switch localizes the next dialog invocation too.
+	h.uiRoot.Locale().SetLanguage("zh")
+	tester.Frame()
+	h.click(tester, "选择目录…")
+	if captured != "选择工作区目录" {
+		t.Fatalf("Chinese directory dialog title = %q, want %q", captured, "选择工作区目录")
+	}
+}

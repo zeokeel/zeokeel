@@ -67,14 +67,21 @@ type state struct {
 	interaction contracts.UserInteraction
 	presenter   contracts.ArtifactPresenter
 	reviewer    contracts.PlanReviewer
+	chat        contracts.ChatService
+	notifier    contracts.Notifier
 
 	overlays   []overlayItem
 	currentKey string
 	open       bool
 	draft      string
 
-	plan    *contracts.PlanReview
-	planErr string
+	plan         *contracts.PlanReview
+	planErr      string
+	planFeedback string
+	// planHold keeps the plan overlay visible after reviewer.Exit succeeded but
+	// the keep-planning feedback could not be delivered; the cancelled plan
+	// state would otherwise remove the modal on the next frame.
+	planHold bool
 
 	// locale localizes the dialog copy per frame (zh is the default).
 	locale contracts.LocaleService
@@ -95,13 +102,15 @@ func Module() *module.Descriptor[Config] {
 		interaction, _ := ctx.Get(contracts.KeyUserInteraction)
 		presenter, _ := ctx.Get(contracts.KeyArtifactPresenter)
 		reviewer, _ := ctx.Get(contracts.KeyPlanReviewer)
+		chat, _ := ctx.Get(contracts.KeyChat)
+		notifier, _ := ctx.Get(contracts.KeyNotifier)
 		if interaction == nil && presenter == nil && reviewer == nil {
 			return nil
 		}
 		locale, _ := ctx.Get(contracts.KeyLocale)
 		st := &state{
 			interaction: interaction, presenter: presenter, reviewer: reviewer,
-			locale: locale,
+			chat: chat, notifier: notifier, locale: locale,
 		}
 
 		if interaction != nil {
@@ -126,6 +135,11 @@ func Module() *module.Descriptor[Config] {
 			reviewer.SetPlanHandler(func(review contracts.PlanReview) {
 				runtime.Post(func() {
 					st.plan = &review
+					if review.State == "reviewing" {
+						st.planFeedback = ""
+						st.planErr = ""
+						st.planHold = false
+					}
 					runtime.Invalidate()
 				})
 			})
@@ -151,6 +165,9 @@ func Module() *module.Descriptor[Config] {
 			}
 			st.overlays = nil
 			st.plan = nil
+			st.planFeedback = ""
+			st.planErr = ""
+			st.planHold = false
 			st.currentKey = ""
 			st.open = false
 		}
@@ -201,6 +218,9 @@ func (st *state) syncPlanOverlays() {
 		}
 		st.overlays = append(st.overlays, overlayItem{kind: kindPlan})
 	case "approved", "cancelled":
+		if st.planHold {
+			return
+		}
 		st.removePlanOverlay()
 	}
 }
@@ -243,6 +263,8 @@ func buildDialog(c *ui.Context, runtime contracts.UIRuntime, st *state) {
 		st.open = true
 		st.draft = ""
 		st.planErr = ""
+		st.planFeedback = ""
+		st.planHold = false
 	}
 	ui.Modal(c, &st.open, func() {
 		switch item.kind {
@@ -306,12 +328,25 @@ func planPanel(c *ui.Context, runtime contracts.UIRuntime, st *state) {
 		ui.Scroll(c).FillWidth().MaxHeight(maxOverlayBodyHeight).Children(func() {
 			markdown.View(c, st.plan.Content, nil)
 		})
+		if st.chat != nil {
+			ui.TextInput(c, &st.planFeedback).
+				Label(st.tr("继续规划反馈", "Keep-planning feedback")).
+				Placeholder(st.tr("告诉 agent 计划需要怎么改…", "Tell the agent how the plan should change…")).
+				FillWidth()
+		}
 		if st.planErr != "" {
 			buildErrorLine(c, t, st.planErr)
 		}
 		ui.Row(c).FillWidth().Justify(ui.End).Gap(design.Space2).Children(func() {
 			if design.Apply(ui.PrimaryButton(c, st.tr("批准", "Approve")), t.PrimaryButton()).Clicked() {
 				exitPlan(runtime, st, "approve", st.tr("批准失败：", "Approve failed: "))
+			}
+			if st.chat != nil {
+				keep := design.Apply(ui.Button(c, st.tr("继续规划", "Keep planning")), secondaryButtonStyle(t)).
+					Disabled(strings.TrimSpace(st.planFeedback) == "")
+				if keep.Clicked() && strings.TrimSpace(st.planFeedback) != "" {
+					keepPlanning(runtime, st)
+				}
 			}
 			if design.Apply(ui.Button(c, st.tr("取消", "Cancel")), secondaryButtonStyle(t)).Clicked() {
 				exitPlan(runtime, st, "cancel", st.tr("取消失败：", "Cancel failed: "))
@@ -332,6 +367,45 @@ func exitPlan(runtime contracts.UIRuntime, st *state, action, errPrefix string) 
 		return
 	}
 	markPlanExited(st, action)
+	popOverlay(runtime, st)
+}
+
+// keepPlanning implements the keep-planning feedback loop: cancel the current
+// review, send the user's feedback to the active agent turn and pop the dialog.
+// The modal is held open when the plan was cancelled but the feedback could not
+// be delivered (or no session is active), so the failure stays visible.
+func keepPlanning(runtime contracts.UIRuntime, st *state) {
+	if st.reviewer == nil || st.chat == nil {
+		return
+	}
+	feedback := strings.TrimSpace(st.planFeedback)
+	if feedback == "" {
+		return
+	}
+	if _, err := st.reviewer.Exit("cancel"); err != nil {
+		st.planErr = st.tr("继续规划失败：", "Keep planning failed: ") + err.Error()
+		runtime.Invalidate()
+		return
+	}
+	markPlanExited(st, "cancel")
+	sessionID := strings.TrimSpace(st.chat.ActiveSession())
+	if sessionID == "" {
+		st.planErr = st.tr("没有活动会话", "No active session")
+		st.planHold = true
+		runtime.Invalidate()
+		return
+	}
+	message := "请根据以下反馈继续完善计划：\n\n" + feedback
+	if err := st.chat.Send(sessionID, message); err != nil {
+		st.planErr = st.tr("发送继续规划反馈失败：", "Keep-planning send failed: ") + err.Error()
+		st.planHold = true
+		runtime.Invalidate()
+		return
+	}
+	st.planHold = false
+	if st.notifier != nil {
+		st.notifier.Notify(contracts.NotifySuccess, st.tr("已发送继续规划反馈", "Sent keep-planning feedback"))
+	}
 	popOverlay(runtime, st)
 }
 
@@ -444,6 +518,8 @@ func popOverlay(runtime contracts.UIRuntime, st *state) {
 	st.currentKey = ""
 	st.draft = ""
 	st.planErr = ""
+	st.planFeedback = ""
+	st.planHold = false
 	runtime.Invalidate()
 }
 

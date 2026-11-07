@@ -163,6 +163,11 @@ type state struct {
 	commandErr    string
 	helpOpen      bool
 
+	// syncCommandLocale re-registers the slash commands when the host language
+	// changes (nil when the module failed to register them, which cannot happen
+	// for a valid activation).
+	syncCommandLocale func()
+
 	// Memory management state: the tidy/clear notice and the clear-all
 	// confirmation dialog.
 	memoryNotice    string
@@ -295,12 +300,16 @@ func Module() *module.Descriptor[Config] {
 		}); err != nil {
 			return err
 		}
-		for _, command := range sessionCommands(runtime, navigator, chat, config, moduleState) {
-			command := command
-			if err := own(ctx, func() (func(), error) { return runtime.RegisterCommand(command) }); err != nil {
-				return err
-			}
+		commands := newCommandRegistry(runtime, navigator, chat, config, moduleState)
+		if err := commands.start(); err != nil {
+			commands.close()
+			return err
 		}
+		if err := own(ctx, func() (func(), error) { return commands.close, nil }); err != nil {
+			commands.close()
+			return err
+		}
+		moduleState.syncCommandLocale = commands.sync
 		return nil
 	}).
 		AddRequires(module.Requires(contracts.KeyUIRuntime)).
@@ -382,8 +391,8 @@ func sessionCommands(runtime contracts.UIRuntime, navigator contracts.Navigator,
 	commands := []contracts.CommandSpec{
 		{
 			ID:    "zeokeel.session.new",
-			Title: "新会话",
-			Hint:  "新建并打开一个会话",
+			Title: st.tr("新会话", "New conversation"),
+			Hint:  st.tr("新建并打开一个会话", "Start and open a new conversation"),
 			Order: 20,
 			Run: func() error {
 				if _, err := chat.NewSession(""); err != nil {
@@ -396,8 +405,8 @@ func sessionCommands(runtime contracts.UIRuntime, navigator contracts.Navigator,
 		},
 		{
 			ID:    "zeokeel.session.fork",
-			Title: "创建副本",
-			Hint:  "复制当前会话",
+			Title: st.tr("创建副本", "Duplicate conversation"),
+			Hint:  st.tr("复制当前会话", "Copy the current conversation"),
 			Order: 30,
 			Enabled: func() bool {
 				if !forkerOK {
@@ -431,8 +440,8 @@ func sessionCommands(runtime contracts.UIRuntime, navigator contracts.Navigator,
 		},
 		{
 			ID:    "zeokeel.session.export",
-			Title: "导出对话",
-			Hint:  "导出当前会话为 Markdown",
+			Title: st.tr("导出对话", "Export conversation"),
+			Hint:  st.tr("导出当前会话为 Markdown", "Export the current conversation as Markdown"),
 			Order: 40,
 			Enabled: func() bool {
 				_, ok := activeSession()
@@ -449,24 +458,24 @@ func sessionCommands(runtime contracts.UIRuntime, navigator contracts.Navigator,
 		},
 		{
 			ID:      "zeokeel.session.goal",
-			Title:   "设置目标",
-			Hint:    "为当前会话设置/清除长期目标",
+			Title:   st.tr("设置目标", "Set goal"),
+			Hint:    st.tr("为当前会话设置/清除长期目标", "Set or clear a long-term goal for this conversation"),
 			Order:   60,
 			Enabled: func() bool { return st.goalTracker != nil && chat.ActiveSession() != "" },
 			Run:     func() error { openGoalDialog(st, runtime); return nil },
 		},
 		{
 			ID:      "zeokeel.session.plan",
-			Title:   "审阅计划",
-			Hint:    "提交一份计划给用户批准",
+			Title:   st.tr("审阅计划", "Review plan"),
+			Hint:    st.tr("提交一份计划给用户批准", "Submit a plan for the user to approve"),
 			Order:   61,
 			Enabled: func() bool { return st.planReviewer != nil && chat.ActiveSession() != "" },
 			Run:     func() error { openPlanDialog(st, runtime); return nil },
 		},
 		{
 			ID:      "zeokeel.session.memory",
-			Title:   "添加记忆",
-			Hint:    "保存一条全局记忆",
+			Title:   st.tr("添加记忆", "Add memory"),
+			Hint:    st.tr("保存一条全局记忆", "Save a global memory"),
 			Order:   62,
 			Enabled: func() bool { return st.memoryStore != nil },
 			Run:     func() error { openMemoryDialog(st, runtime); return nil },
@@ -490,8 +499,8 @@ func sessionCommands(runtime contracts.UIRuntime, navigator contracts.Navigator,
 		},
 		{
 			ID:      "zeokeel.session.permission",
-			Title:   "权限模式",
-			Hint:    "切换权限模式：询问 → 工作区 → 全部允许",
+			Title:   st.tr("权限模式", "Permission mode"),
+			Hint:    st.tr("切换权限模式：询问 → 工作区 → 全部允许", "Cycle permission: ask → workspace → full"),
 			Order:   45,
 			Enabled: func() bool { return st.settings != nil },
 			Run: func() error {
@@ -502,8 +511,8 @@ func sessionCommands(runtime contracts.UIRuntime, navigator contracts.Navigator,
 		},
 		{
 			ID:    "zeokeel.session.settings",
-			Title: "打开设置",
-			Hint:  "打开设置面板",
+			Title: st.tr("打开设置", "Open settings"),
+			Hint:  st.tr("打开设置面板", "Open the settings panel"),
 			Order: 50,
 			Run: func() error {
 				navigator.ToggleSettings()
@@ -512,8 +521,8 @@ func sessionCommands(runtime contracts.UIRuntime, navigator contracts.Navigator,
 		},
 		{
 			ID:    "zeokeel.session.stop",
-			Title: "停止",
-			Hint:  "停止当前生成的回复",
+			Title: st.tr("停止", "Stop"),
+			Hint:  st.tr("停止当前生成的回复", "Stop the current reply"),
 			Order: 44,
 			Enabled: func() bool {
 				session, ok := activeSession()
@@ -537,8 +546,8 @@ func sessionCommands(runtime contracts.UIRuntime, navigator contracts.Navigator,
 		},
 		{
 			ID:    "zeokeel.session.attach",
-			Title: "附加文件",
-			Hint:  "添加文件或图片到输入框",
+			Title: st.tr("附加文件", "Attach files"),
+			Hint:  st.tr("添加文件或图片到输入框", "Add files or images to the input"),
 			Order: 46,
 			Run: func() error {
 				if _, ok := chat.(contracts.AttachmentSender); !ok {
@@ -560,8 +569,8 @@ func sessionCommands(runtime contracts.UIRuntime, navigator contracts.Navigator,
 		},
 		{
 			ID:    "zeokeel.session.help",
-			Title: "帮助",
-			Hint:  "查看可用命令与快捷键",
+			Title: st.tr("帮助", "Help"),
+			Hint:  st.tr("查看可用命令与快捷键", "Show the available commands and shortcuts"),
 			Order: 55,
 			Run: func() error {
 				st.helpOpen = true

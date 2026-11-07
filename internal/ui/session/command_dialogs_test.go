@@ -415,16 +415,16 @@ func TestCommandDialogsEnglishCopy(t *testing.T) {
 	tester.Frame()
 
 	h.click(tester, "/")
-	h.click(tester, "设置目标")
+	h.click(tester, "Set goal")
 	h.assertTexts(tester, "Goal", "Save", "Clear goal", "Cancel")
 
 	h.click(tester, "Cancel")
 	h.click(tester, "/")
-	h.click(tester, "审阅计划")
+	h.click(tester, "Review plan")
 	h.assertTexts(tester, "Submit plan", "Plan content", "Submit review", "Cancel")
 
 	h.click(tester, "Cancel")
 	h.click(tester, "/")
-	h.click(tester, "添加记忆")
+	h.click(tester, "Add memory")
 	h.assertTexts(tester, "Add memory", "Memory text", "Add", "Cancel")
 }
