@@ -7,7 +7,7 @@
 
 ## 修复状态（Lead 复核后）
 
-> 首轮 11 个「已知缺陷探针」与第二轮 4 个 P3 均已随 TDD 修复转为 PASS；第三轮 P3-9/10 已修复、P3-11 重开后于 ca2d24c 真正修复；第四轮 P3-12 已修复（ca2d24c）。`go test ./internal/regression -count=1 -race` 当前 **172 PASS / 0 SKIP**（历史：首轮修复后 92，第二轮后 98，第三轮后 133，第四轮后 153）。
+> 首轮 11 个「已知缺陷探针」与第二轮 4 个 P3 均已随 TDD 修复转为 PASS；第三轮 P3-9/10 已修复、P3-11 重开后于 ca2d24c 真正修复；第四轮 P3-12 已修复（ca2d24c）；第五、六轮无新缺陷。`go test ./internal/regression -count=1 -race` 当前 **180 PASS / 0 SKIP**（历史：首轮修复后 92，第二轮后 98，第三轮后 133，第四轮后 153，第五轮后 172）。
 
 | ID | 优先级 | 状态 | 修复摘要 |
 |----|--------|------|----------|
@@ -31,7 +31,7 @@ $ go test ./internal/regression -count=1                    ok  1.2s
 $ go test ./internal/regression -count=1 -race              ok 12.8s（98 PASS / 0 SKIP）
 ```
 
-测试规模：`internal/regression` 共 172 个顶层 Test（首轮 78 + 第二轮 20 + 第三轮 35 + 第四轮 20 + 第五轮 19；含子用例后更多）。第三轮 P3-9/10 已修复，P3-11 重开后已真正修复，第四轮 P3-12 已修复，第五轮无新缺陷；当前 **172 PASS / 0 SKIP**。
+测试规模：`internal/regression` 共 180 个顶层 Test（首轮 78 + 第二轮 20 + 第三轮 35 + 第四轮 20 + 第五轮 19 + 第六轮 8；含子用例后更多；另有 `internal/ui/uimodtest` 的 E2E 1 个，不计入本包）。第三轮 P3-9/10 已修复，P3-11 重开后已真正修复，第四轮 P3-12 已修复，第五、六轮无新缺陷；当前 **180 PASS / 0 SKIP**。
 
 ## 用例矩阵
 
@@ -346,6 +346,7 @@ $ go test ./internal/regression -count=1 -race               ok 27.9s（153 PASS
 | AUDIT-P3-12 | ✅ 已修复 | agent `SetMessageFeedback` 增加角色校验（仅 assistant 可评分；user/tool 返回可读错误且零副作用），新增单测 |
 
 第四轮回归：`internal/regression` **153 PASS / 0 SKIP**。第五轮复跑确认 P3-11/P3-12 修复未回退；`/feedback` 斜杠命令已在本轮落地。
+第六轮复跑扩张到 **180 PASS / 0 SKIP**（托盘/关闭到托盘、工件下载说明、chat modes 四模式 gate 表），并新增 desktop assembly 的模式菜单 E2E。
 仍有文档化未落地项（plan keep-planning 反馈循环、会话级 feedback 汇总、旧 `/feedback [good|bad]` 参数式直接打分、自动化 runs 之外的历史查询）。
 
 ## 反证审计第五轮：/feedback 命令 / 自动化运行历史 / 反馈复跑 / 记忆与技能编辑（2026-11-08）
@@ -387,3 +388,43 @@ $ go test ./internal/regression -count=1 -race               ok 30.6s（172 PASS
 - 自动化历史仅验证“缺少 `runHistory` 字段”的旧 JSON；`runHistory` 类型损坏的 registry 会按模块启动错误处理，未作为兼容目标。
 - `/feedback` 旧命令的参数式用法（`/feedback good|bad` 直接给最新回答打分）与 session 级 feedback 行仍未迁移；当前为交互式对话框。
 - 技能编辑器设置页的按钮/模态交互由 settings 包内单测覆盖；本轮反证聚焦模块接口、文件边界与文件系统副作用。
+
+## 反证审计第六轮：系统托盘 / 工件下载 / chat modes（2026-11-08）
+
+范围：`12021a0`（系统托盘 + close-to-tray、工件下载）+ `03c57d7`（chat modes 四模式，本轮并行落地后提交）。
+只新增 `internal/regression/**` 与 `internal/ui/uimodtest`（test-only 包）的 E2E，并改本文件；未改生产代码。
+`internal/regression` 新增 **8** 个顶层 Test（172 → 180），另加 1 个 uimodtest E2E。
+
+```
+$ gofmt -l internal/regression/ internal/ui/uimodtest/      （空）
+$ go vet ./internal/regression ./internal/ui/uimodtest      OK
+$ go test ./internal/regression -count=1 -race               ok 39.7s（180 PASS / 0 SKIP）
+$ go test ./internal/ui/uimodtest -count=1 -race             ok 10.5s（含模式菜单 E2E）
+```
+
+| # | 链路 | 反证点 | 用例 | 结果 |
+|---|------|--------|------|------|
+| 25 | 系统托盘 / 关闭到托盘（host，regression 层） | closeToTray 归一化表（true/TRUE/1/yes/空白=on；空/false/no/0/未知/nil=off）；createTray 选项（ID zeokeel、tooltip ZeoKeel、PNG icon、菜单）；托盘 click 与「显示 ZeoKeel」→ show、「退出」→ quit；工厂缺失/报错/nil tray → 可读错误、不注册 click/close、不隐藏窗口；setupTray nil window 拒绝；close-to-tray on 时关闭 PreventDefault+Hint Hide，keepAlive false（shutdown）放行，keepAlive nil 仍拦截，off 不注册 close handler | 4 | PASS |
+| 26 | 工件下载（rightpanel） | 说明：`internal/ui/rightpanel/artifacts_download_test.go` 已用真实 frame 覆盖保存成功/取消/对话框错误/写入错误/Unicode slug 表/英文文案（6 用例）；下载处理是 rightpanel 包内未导出函数，导出层（Session Markdown/JSONL）与工件下载是两条独立路径，不应合并断言；保存对话框依赖原生 Dialog，headless 无法触发，故 regression 层不重复新增用例 | 0（不重复） | 说明 |
+| 27 | chat modes 四模式 gate 表（agent） | minimal：15 白名单放行且不排队、写/exec/编排 deny 未执行+error/denied；creator：8 白名单放行、read_file/grep/写/exec deny；plan：15 白名单+plan 优先级；standard：写/读均走审批（allow 执行/deny 不执行）；mode 归一（大小写/空白/未知回退 standard）；plan+creator/minimal 组合下 plan 优先（team_task_list/read_file 放行、write deny）；bypass 模式每轮 approvals pending 0 | 4 | PASS |
+| 28 | 模式菜单 E2E（真实 desktop assembly，uimodtest） | 初始「普通」且无模式徽标；切「精简模式」→ `chat.mode=minimal` 且 `agent.mode=normal`、header 徽标「精简模式」、工具栏标签「精简」；切「创作模式」→ `chat.mode=creator`、徽标替换且无旧徽标；切回「普通模式」→ `chat.mode=standard`、所有徽标消失。E2E 合适：assembly 装配→composer popover→settings store→header 渲染的整链只有 E2E 能证明 | 1 E2E | PASS |
+
+### 第六轮未证伪的关键不变量
+
+1. **托盘**：关闭到托盘只在设置归一为真且托盘创建成功时生效；创建失败零副作用（不注册监听、仍可正常退出）；shutdown guard 让 teardown 能真正关窗；菜单/点击动作映射到 show/quit。
+2. **chat modes**：标准=审批流、精简=只读、创作=非编码写作面、计划=最高优先；白名单精确（不误放、不误拒），拒绝的工具不执行且错误可见，切换模式对后续调用立即生效。
+3. **E2E 模式菜单**：菜单项→双 settings 写入→header 徽标/工具栏标签的可见结果与存储值一致，切回普通完全清除徽标。
+
+### 第六轮发现
+
+- **无新缺陷**（无 P0/P1/P2/P3）。
+- 观察（非缺陷）：`createTray` 自身接受 nil window（`setupTray` 才校验）；调用方只有 host 内部，regression 以 setupTray 的 nil-window 拒绝作为对外约束。
+- 观察（非缺陷）：托盘 show 是 window.Show/Restore/Focus 的组合，本层用 handler 计数验证 wiring；真实 window 调用由 host 包既有单测覆盖，真实原生 tray 由 xvfb smoke 覆盖（无 desktop session 时仅告警）。
+
+### 第六轮局限
+
+- 原生托盘图标/菜单需要桌面会话：regression 层只测 seam wiring 与关闭策略，xvfb 下 NewTray 失败路径由 host smoke 覆盖。
+- close-to-tray 的窗口 Show/Restore/Focus 实际调用由 host 单测断言；本层以 handler 计数避免依赖真实 mygo Window。
+- 工件下载未加 regression 层（理由见 #26）；若未来把保存动作抽成 contracts 级 seam，可在导出层补跨层用例。
+- 模式菜单 E2E 使用内存 settings；宿主 settings 文件持久化由 host 设置单测覆盖。
+- chat modes 白名单在 regression 中以期望表锁定（contracts 政策变化时需同步，属有意行为锁）。

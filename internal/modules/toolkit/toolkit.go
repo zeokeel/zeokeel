@@ -319,14 +319,28 @@ func Module() *module.Descriptor[Config] {
 			return err
 		}
 
+		// Optional single LSP server: its tools join the same registry and the
+		// server is closed when the module unloads.
+		lspTools, closeLSP := startLSPTools(context.Background(), logf, settingsService, hasSettings, tools)
+		tools = append(tools, lspTools...)
+
 		if _, err := ctx.Provide(contracts.KeyToolkit, rigtool.NewRegistry(tools...)); err != nil {
+			closeLSP()
 			return err
 		}
 		_, err := ctx.Provide(contracts.KeyPlugins, contracts.PluginsService(plugins))
 		if err != nil {
+			closeLSP()
 			return err
 		}
 		if _, err := ctx.Provide(contracts.KeyTaskBoard, contracts.TaskBoard(taskBoard)); err != nil {
+			closeLSP()
+			return err
+		}
+		if _, err := ctx.Effect(func() cordis.Effect {
+			return cordis.Effect{cordis.CleanupOf(closeLSP)}
+		}); err != nil {
+			closeLSP()
 			return err
 		}
 		return nil

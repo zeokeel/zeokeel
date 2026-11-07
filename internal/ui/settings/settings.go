@@ -19,6 +19,7 @@
 package settings
 
 import (
+	"errors"
 	"fmt"
 	"path/filepath"
 	"runtime"
@@ -247,6 +248,9 @@ type appearanceState struct {
 	autostart      bool
 	singleInstance bool
 	closeToTray    bool
+	// globalHotkey is the accelerator draft persisted with the page's save
+	// action (the host registers it at the next start; empty disables it).
+	globalHotkey string
 }
 
 // singleInstanceSwitchEnabled reads the stored single-instance setting with the
@@ -564,6 +568,7 @@ func Module() *module.Descriptor[Config] {
 			autostart:      store.Get(contracts.SettingAutostart, "false") == "true",
 			singleInstance: singleInstanceSwitchEnabled(store.Get(contracts.SettingSingleInstance, "true")),
 			closeToTray:    closeToTraySettingEnabled(store.Get(contracts.SettingCloseToTray, "false")),
+			globalHotkey:   store.Get(contracts.SettingGlobalHotkey, ""),
 		}
 		skills := newSkillsState()
 		update := newUpdateState()
@@ -572,6 +577,7 @@ func Module() *module.Descriptor[Config] {
 		mcp := newMCPState()
 		presets := newPresetsState()
 		catalog := &catalogState{}
+		lsp := &lspState{}
 		network := newNetworkState()
 		diagnostics := &diagnosticsState{}
 
@@ -680,6 +686,14 @@ func Module() *module.Descriptor[Config] {
 				Build: func(c *ui.Context) {
 					syncer.sync()
 					buildMCPPage(c, ctx, mcp, locale)
+				},
+			},
+			{
+				ID: LSPPageID, Section: LSPPageSection, Order: LSPPageOrder,
+				zhTitle: "LSP", enTitle: "LSP",
+				Build: func(c *ui.Context) {
+					syncer.sync()
+					buildLSPPage(c, store, lsp, locale)
 				},
 			},
 			{
@@ -1064,11 +1078,13 @@ func buildAppearancePage(c *ui.Context, state *appearanceState, store contracts.
 				t.TextMuted(design.TypeXXS))
 		})
 
+		buildGlobalHotkeyPanel(c, t, state, store, locale)
+
 		ui.Row(c).FillWidth().Gap(design.Space2).AlignItems(ui.Center).Children(func() {
 			if brandPrimaryButton(c, t, icons.Globe(), labels.saveLabel).Clicked() {
 				theme.SetDark(state.dark)
 				locale.SetLanguage(state.language)
-				if err := saveAppearance(state, store); err != nil {
+				if err := saveAppearance(state, store, locale); err != nil {
 					state.status = localized(locale, "保存失败：", "Save failed: ") + err.Error()
 					state.statusErr = true
 				} else {
@@ -1084,7 +1100,11 @@ func buildAppearancePage(c *ui.Context, state *appearanceState, store contracts.
 	})
 }
 
-func saveAppearance(state *appearanceState, store contracts.SettingsService) error {
+func saveAppearance(state *appearanceState, store contracts.SettingsService, locale contracts.LocaleService) error {
+	hotkey := strings.TrimSpace(state.globalHotkey)
+	if !validGlobalHotkeyValue(hotkey) {
+		return errors.New(globalHotkeyInvalidMessage(locale))
+	}
 	if err := store.Set(contracts.SettingsUIThemeDark, fmt.Sprintf("%t", state.dark)); err != nil {
 		return err
 	}
@@ -1097,7 +1117,10 @@ func saveAppearance(state *appearanceState, store contracts.SettingsService) err
 	if err := store.Set(contracts.SettingSingleInstance, fmt.Sprintf("%t", state.singleInstance)); err != nil {
 		return err
 	}
-	return store.Set(contracts.SettingCloseToTray, fmt.Sprintf("%t", state.closeToTray))
+	if err := store.Set(contracts.SettingCloseToTray, fmt.Sprintf("%t", state.closeToTray)); err != nil {
+		return err
+	}
+	return store.Set(contracts.SettingGlobalHotkey, hotkey)
 }
 
 // applyDesktopSetting persists one desktop-integration switch immediately (the

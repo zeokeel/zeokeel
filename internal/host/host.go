@@ -422,6 +422,7 @@ func runDesktop(opts Options) error {
 		loader       *module.Loader
 		window       *mygo.Window
 		tray         trayHandle
+		hotkeyOff    func()
 		startupErr   error
 		shutdownOnce sync.Once
 		closing      atomic.Bool
@@ -440,6 +441,10 @@ func runDesktop(opts Options) error {
 					logger.Printf("%s: close assembly: %v", appName, err)
 				}
 				loader = nil
+			}
+			if hotkeyOff != nil {
+				hotkeyOff()
+				hotkeyOff = nil
 			}
 			if tray != nil {
 				tray.Destroy()
@@ -536,6 +541,15 @@ func runDesktop(opts Options) error {
 		} else {
 			tray = created
 			logger.Printf("%s: system tray ready (close to tray: %t)", appName, closeToTrayEnabled(settings))
+		}
+		// Global hotkey (best effort): the appearance page stores the
+		// accelerator; an invalid value or a shortcut owned by the desktop is
+		// logged and skipped. Unregistered again on shutdown.
+		if unregisterHotkey, hotkeyErr := setupGlobalHotkey(window, settings, mygoHotkeyRegistrar{}); hotkeyErr != nil {
+			logger.Printf("%s: global hotkey unavailable: %v", appName, hotkeyErr)
+		} else if unregisterHotkey != nil {
+			hotkeyOff = unregisterHotkey
+			logger.Printf("%s: global hotkey registered", appName)
 		}
 		logger.Printf("%s: %s product %q loaded: %d module instances, screens %v",
 			appName, opts.versionString(), opts.Product, len(loader.Instances()),

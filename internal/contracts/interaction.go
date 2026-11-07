@@ -96,4 +96,8 @@ const (
 	// SettingCloseToTray keeps the app alive in the system tray instead of
 	// quitting when the window is closed (desktop only; default false).
 	SettingCloseToTray = "ui.closeToTray"
+	// SettingGlobalHotkey is a system-wide accelerator (e.g.
+	// "CmdOrCtrl+Shift+Space") that shows and focuses the window; empty disables
+	// it (desktop only).
+	SettingGlobalHotkey = "ui.globalHotkey"
 )
