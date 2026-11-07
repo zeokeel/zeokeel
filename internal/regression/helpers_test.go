@@ -11,6 +11,9 @@ package regression
 import (
 	"context"
 	"fmt"
+	"io"
+	"log"
+	"os"
 	"strconv"
 	"strings"
 	"sync"
@@ -647,3 +650,10 @@ func (c *counter) store(n int64) { c.value.Store(n) }
 
 // itoa formats n for marker names.
 func itoa(n int64) string { return strconv.FormatInt(n, 10) }
+
+// TestMain keeps expected containment logs (production recover paths log through
+// the standard logger) out of the test output.
+func TestMain(m *testing.M) {
+	log.SetOutput(io.Discard)
+	os.Exit(m.Run())
+}

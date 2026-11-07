@@ -3,6 +3,7 @@ package plugins
 import (
 	"context"
 	"fmt"
+	"sort"
 	"strings"
 
 	"github.com/egoist/mygo/ui"
@@ -21,6 +22,9 @@ type toolRegistry = rigtools.Registry
 type catalogTool struct {
 	Name        string
 	Description string
+	// MCP marks tools supplied by an MCP connection (name prefix mcp_); only
+	// those get the per-tool switch.
+	MCP bool
 }
 
 // toolCategoryOrder is the fixed order categories render in.
@@ -33,6 +37,7 @@ func buildScreen(c *ui.Context, runtime contracts.UIRuntime, cfg Config, st *sta
 	t := design.Of(c)
 	pluginsService, hasPlugins := st.ctx.Get(contracts.KeyPlugins)
 	toolkit, hasToolkit := st.ctx.Get(contracts.KeyToolkit)
+	settings, hasSettings := st.ctx.Get(contracts.KeySettings)
 
 	ui.Column(c).FillWidth().Grow(1).Gap(design.Space4).Children(func() {
 		ui.Column(c).FillWidth().Gap(design.Space1).Children(func() {
@@ -47,7 +52,7 @@ func buildScreen(c *ui.Context, runtime contracts.UIRuntime, cfg Config, st *sta
 		ui.Scroll(c).FillWidth().Grow(1).Children(func() {
 			ui.Column(c).FillWidth().Gap(design.Space5).Children(func() {
 				buildMCPsSection(c, t, runtime, pluginsService, hasPlugins, cfg, st)
-				buildToolsSection(c, t, toolkit, hasToolkit, st, cfg)
+				buildToolsSection(c, t, toolkit, hasToolkit, st, cfg, runtime, settings, hasSettings)
 			})
 		})
 	})
@@ -138,12 +143,35 @@ func buildToolsSection(
 	hasToolkit bool,
 	st *state,
 	cfg Config,
+	runtime contracts.UIRuntime,
+	settings contracts.SettingsService,
+	hasSettings bool,
 ) {
 	ui.Column(c).FillWidth().Gap(design.Space2).Children(func() {
+		st.loadDisabledTools(settings, hasSettings)
 		var catalog []catalogTool
 		if hasToolkit && toolkit != nil {
 			for _, spec := range toolkit.Specs() {
-				catalog = append(catalog, catalogTool{Name: spec.Name, Description: spec.Description})
+				catalog = append(catalog, catalogTool{
+					Name:        spec.Name,
+					Description: spec.Description,
+					MCP:         isMCPToolName(spec.Name),
+				})
+			}
+		}
+		// Disabled MCP tools are not registered, so they are absent from the
+		// registry; keep them in the catalogue from the setting so the switch
+		// can turn them back on.
+		if hasSettings && settings != nil {
+			hidden := make([]string, 0)
+			for name := range st.disabledTools {
+				if isMCPToolName(name) && !catalogHasTool(catalog, name) {
+					hidden = append(hidden, name)
+				}
+			}
+			sort.Strings(hidden)
+			for _, name := range hidden {
+				catalog = append(catalog, catalogTool{Name: name, MCP: true})
 			}
 		}
 		ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(design.Space2).Children(func() {
@@ -156,6 +184,19 @@ func buildToolsSection(
 		if !hasToolkit {
 			buildPluginsMuted(c, t, st.tr("工具目录未启用", "Tool catalogue not enabled"))
 			return
+		}
+		design.Apply(ui.Text(c, st.tr("MCP 工具开关在重启后生效。", "MCP tool switches apply after a restart.")),
+			t.Font(design.TypeXXS)).TextColor(t.LabelTertiary)
+		if st.disabledErr != "" {
+			design.Apply(ui.Text(c, st.tr("禁用工具配置无效：", "Invalid disabled-tools configuration: ")+st.disabledErr),
+				t.Font(design.TypeXXS)).TextColor(t.DangerText)
+		}
+		if st.status != "" {
+			color := t.Success
+			if st.statusErr {
+				color = t.DangerText
+			}
+			design.Apply(ui.Text(c, st.status), t.Font(design.TypeXXS)).TextColor(color)
 		}
 		ui.SearchField(c, &st.query).Label(st.tr("搜索工具", "Search tools")).Placeholder(st.tr("搜索工具", "Search tools")).FillWidth()
 		filtered := filterCatalog(catalog, st.query)
@@ -176,27 +217,61 @@ func buildToolsSection(
 			design.Apply(ui.Text(c, st.categoryLabel(category)), t.Font(design.TypeXXS)).
 				FontWeight(600).TextColor(t.LabelTertiary)
 			for _, tool := range tools {
-				buildToolRow(c, t, tool)
+				buildToolRow(c, t, tool, st, runtime, settings, hasSettings)
 			}
 		}
 	})
 }
 
-// buildToolRow is one catalogue entry: mono name plus its description. The
-// catalogue is a dense reference list, so rows are plain (no card per tool);
-// category labels and spacing carry the grouping.
-func buildToolRow(c *ui.Context, t *design.Tokens, tool catalogTool) {
+// buildToolRow is one catalogue entry: mono name plus its description and, for
+// MCP tools, the per-tool enable switch. The catalogue is a dense reference
+// list, so rows are plain (no card per tool); category labels and spacing carry
+// the grouping.
+func buildToolRow(c *ui.Context, t *design.Tokens, tool catalogTool, st *state,
+	runtime contracts.UIRuntime, settings contracts.SettingsService, hasSettings bool) {
 	design.Apply(ui.Row(c), func(el ui.Element) ui.Element {
 		return el.BorderWidth(0, 0, 1, 0).BorderColor(t.BorderL2)
 	}).FillWidth().Gap(design.Space3).
 		AlignItems(ui.Center).Padding(design.Space2, design.Space2).Children(func() {
 		design.Apply(ui.Text(c, tool.Name), t.MonoFamily()).FontSize(12).
 			TextColor(t.LabelPrimary).NoWrap()
-		if description := strings.TrimSpace(tool.Description); description != "" {
+		description := strings.TrimSpace(tool.Description)
+		if description != "" {
 			design.Apply(ui.Text(c, description), t.Font(design.TypeXXS)).
 				TextColor(t.LabelTertiary).Grow(1).MaxLines(1).Ellipsis("…")
+		} else {
+			ui.Spacer(c).Grow(1)
+		}
+		if !tool.MCP {
+			return
+		}
+		if !hasSettings || settings == nil {
+			design.Apply(ui.Text(c, st.tr("设置存储未启用", "Settings store not enabled")),
+				t.Font(design.TypeXXS)).TextColor(t.LabelTertiary)
+			return
+		}
+		enabled := !st.disabledTools[tool.Name]
+		c.Key("mcp-tool-switch/" + tool.Name)
+		toggle := ui.Toggle(c, &enabled, st.tr("启用", "Enabled"))
+		if toggle.Changed() {
+			st.setMCPToolEnabled(tool.Name, enabled, settings)
+			runtime.Invalidate()
+		}
+		if !enabled {
+			design.Apply(ui.Text(c, st.tr("已禁用（重启生效）", "Disabled (restart applies)")),
+				t.Font(design.TypeXXS)).TextColor(t.LabelTertiary)
 		}
 	})
+}
+
+// catalogHasTool reports whether the registered catalogue already contains name.
+func catalogHasTool(catalog []catalogTool, name string) bool {
+	for _, tool := range catalog {
+		if tool.Name == name {
+			return true
+		}
+	}
+	return false
 }
 
 // filterCatalog keeps the tools whose name or description contains the query,

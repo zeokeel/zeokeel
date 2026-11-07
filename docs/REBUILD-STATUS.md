@@ -21,6 +21,14 @@
 - 右侧栏「文件」Tab：打开文件夹（mygo 原生 Directory picker）、目录进入/面包屑、文本/Markdown/图片预览、
   刷新与错误状态；E2E 覆盖工作区创建 + 列表 + 预览帧
 
+**TDD-proxy/mcptoggle + 反证第三轮（2026-11-08）**
+- 网络代理：host `proxyEnv/applyProxySettings`（http/https 校验、HTTP(S)_PROXY 大小写键、NO_PROXY、仅清理本进程设置过的 key；
+  desktop/headless 启动调用）+ 设置「网络」页（代理/NO_PROXY 字段、校验、重启生效）；host 50 / settings 80 测试
+- MCP 工具级开关：toolkit 按 `mcp.disabledTools` 过滤 MCP 工具/资源工具（坏 JSON warning）；plugins 页每个 MCP 工具 Toggle
+  （写入/还原 disabled 列表、重启提示、失败回滚）；toolkit 36 / plugins 13 测试
+- 反证第三轮：internal/regression 新增 35 例（98→133，0 SKIP）覆盖 install(module/host)/toast/workspace-mcp/refs；发现
+  P3-9/10/11（symlink 包含、宿主 SHA 未复检、toast 过期未 Dismiss）已全部修复并加回归单测
+
 **TDD-install/toast/wsmcp（2026-11-08）**
 - install-on-restart：update `UpdateInstaller`（pending.json 原子写、path 包含/sha 复核）、host 启动 `applyPendingUpdate`
   （可注入 ExecutableReplacer，Linux 同目录 temp+rename；失败保留 pending；desktop/headless 都应用）、设置更新页「安装并在下次启动生效」+

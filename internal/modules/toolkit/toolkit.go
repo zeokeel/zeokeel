@@ -226,6 +226,21 @@ func Module() *module.Descriptor[Config] {
 			}
 		}
 
+		disabledMCPTools := make(map[string]bool)
+		if hasSettings {
+			rawDisabled := settingsService.Get(contracts.SettingMCPDisabledTools, "")
+			disabledNames, err := contracts.ParseStringListJSON(rawDisabled)
+			if err != nil {
+				logf("[toolkit] parse %s: %v", contracts.SettingMCPDisabledTools, err)
+			} else {
+				for _, name := range disabledNames {
+					if trimmed := strings.TrimSpace(name); trimmed != "" {
+						disabledMCPTools[trimmed] = true
+					}
+				}
+			}
+		}
+
 		var clients []*mcp.Client
 		pluginEntries := make([]pluginEntry, 0, len(servers))
 		for _, server := range servers {
@@ -238,8 +253,8 @@ func Module() *module.Descriptor[Config] {
 			attach := func(client *mcp.Client) {
 				clients = append(clients, client)
 				mcpTools := mcp.Tools(client, "")
-				tools = append(tools, mcpTools...)
-				tools = append(tools, mcp.ResourceTools(client, "")...)
+				tools = append(tools, filterMCPTools(mcpTools, disabledMCPTools, logf)...)
+				tools = append(tools, filterMCPTools(mcp.ResourceTools(client, ""), disabledMCPTools, logf)...)
 				entry.client = client
 				entry.plugin.Name = pluginDisplayName(server.Name, client)
 				entry.plugin.ServerName = client.ServerName()

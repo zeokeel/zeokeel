@@ -567,6 +567,7 @@ func Module() *module.Descriptor[Config] {
 		importState := newImportState()
 		search := newSearchState()
 		mcp := newMCPState()
+		network := newNetworkState()
 		diagnostics := &diagnosticsState{}
 
 		// Optional host services for the read-only diagnostics page.
@@ -674,6 +675,14 @@ func Module() *module.Descriptor[Config] {
 				Build: func(c *ui.Context) {
 					syncer.sync()
 					buildMCPPage(c, ctx, mcp, locale)
+				},
+			},
+			{
+				ID: NetworkPageID, Section: NetworkPageSection, Order: NetworkPageOrder,
+				zhTitle: "网络", enTitle: "Network",
+				Build: func(c *ui.Context) {
+					syncer.sync()
+					buildNetworkPage(c, store, network, locale)
 				},
 			},
 		}

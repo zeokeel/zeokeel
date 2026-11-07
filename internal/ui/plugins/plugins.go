@@ -54,6 +54,14 @@ type state struct {
 	query string
 	// locale localizes the screen copy per frame (zh is the default).
 	locale contracts.LocaleService
+
+	// MCP tool switches. disabledTools is loaded from settings on the first
+	// frame; disabledErr surfaces malformed stored JSON.
+	disabledTools  map[string]bool
+	disabledLoaded bool
+	disabledErr    string
+	status         string
+	statusErr      bool
 }
 
 // tr returns the localized copy for the current frame's language.

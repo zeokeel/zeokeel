@@ -7,7 +7,7 @@
 
 ## 修复状态（Lead 复核后）
 
-> 所有 11 个「已知缺陷探针」已随 TDD 修复转为 PASS：`go test ./internal/regression -count=1 -v` 中 **0 SKIP / 92 PASS**。
+> 首轮 11 个「已知缺陷探针」与第二轮 4 个 P3 均已随 TDD 修复转为 PASS：`go test ./internal/regression -count=1 -race` 当前 **133 PASS / 0 SKIP**（历史记录：首轮修复后 92 PASS，第二轮后 98 PASS）。
 
 | ID | 优先级 | 状态 | 修复摘要 |
 |----|--------|------|----------|
@@ -31,7 +31,7 @@ $ go test ./internal/regression -count=1                    ok  1.2s
 $ go test ./internal/regression -count=1 -race              ok 12.8s（98 PASS / 0 SKIP）
 ```
 
-测试规模：`internal/regression` 共 98 个顶层 Test（首轮 78 + 新链路扩展 20；含子用例后更多），约 5.3k 行。首轮 11 个「已知缺陷探针」已随 e9ae184 的修复转为通过断言（当前 **98 PASS / 0 SKIP**）；新链路扩展另记录 4 个 P3（AUDIT-P3-5..8，见文末小节，尚未修复）。
+测试规模：`internal/regression` 共 133 个顶层 Test（首轮 78 + 第二轮 20 + 第三轮 35；含子用例后更多）。首轮/第二轮缺陷均已修复，探针按设计转为通过断言（当前 **133 PASS / 0 SKIP**）；第三轮新增 3 个 P3（AUDIT-P3-9..11，见文末小节，尚未修复）。
 
 ## 用例矩阵
 
@@ -199,7 +199,7 @@ $ go build ./... / go vet ./internal/regression              OK
 
 - 首轮 8 个缺陷（P2-1..4、P3-1..4）已随提交 `e9ae184`（"adversarial-audit fixes"）修复：搜索改为解码文本列、importer 跳过 symlink、update nil ctx、uiroot 四桥 panic 遏制、JSONL 前缀/标题、MCP URL 小写去重、importer preview 去重计数。
 - 本次复跑 `go test ./internal/regression -count=1 -race`：**98 PASS / 0 SKIP**——所有遗留探针按设计自动转为断言并通过，无需再跳过。
-- 本小节新链路的 4 个 P3（AUDIT-P3-5..8）是在上述修复提交之后、基于 HEAD `99495c3`（@session 引用 + reasoning effort）与 `38e0ec2`（team 编排）复测得到的**新增记录**，当前代码仍可复现（均为 t.Logf 记录，不影响 CI 绿）。
+- 本小节新链路的 4 个 P3（AUDIT-P3-5..8）在后续提交 `024b84f`（“P3 fixes from round-2 audit”）中全部修复：TeamService.Wait 优先 Manager.Last、ParseSessionReferences 改为分隔符解析、settings permission never 映射 ModeNever；回归用例同步改为断言修复后的行为（见该提交的修复表）。
 
 ### 新链路未被证伪的通过项
 
@@ -214,3 +214,69 @@ $ go build ./... / go vet ./internal/regression              OK
 - @session：8000 rune 上限用单条引用验证；多引用共享预算与“剩余不足 footer”分支未逐一压测；每会话 20 条消息截取只做间接覆盖。
 - reasoning effort：只验证 `Extra`/请求体路径；未验证非 openai provider 的等价字段（rig 内其他 provider 不在本仓）。
 - permission：workspace 白名单是代码常量 4 个工具，与 toolkit 实际注册名的交叉核对未做（若未来改名需同步）；never 的 settings 语义见 AUDIT-P3-8。
+
+## 反证审计第三轮：install-on-restart / toast / workspace mcp.json / references 补充（2026-11-08）
+
+只新增/修改 `internal/regression/**` 与本文件；未改生产代码、未 commit。新增 35 个顶层 Test（包内 98 → 133）。
+
+```
+$ gofmt -l internal/regression/                              （空）
+$ go vet ./internal/regression                               OK
+$ go build ./...                                             OK
+$ go test ./internal/regression -count=1 -race               ok 18.0s（133 PASS / 0 SKIP）
+```
+
+| # | 链路 | 反证点 | 新增用例 | 结果 |
+|---|------|--------|---------|------|
+| 12 | install-on-restart（模块半） | ScheduleInstall 成功/重排替换旧 plan、pending.json 字段与 PendingInstall 往返；非法 plan（空版本/空 sha/文件缺失/越界绝对路径/相对路径/目录/校验和不匹配）不写 plan 且 ErrInstall；被篡改的 pending.json（坏 JSON/缺字段/traversal/绝对外部路径）PendingInstall=false；8 并发调度（-race）原子写、无临时文件泄漏；symlink 绕过包含检查；无 dataDir → ErrNoDataDir | 6 | PASS（发现 AUDIT-P3-9） |
+| 13 | install-on-restart（宿主半） | fake replacer：成功替换后清理 plan+staged；替换失败保留 plan+staged 且重试成功；traversal/绝对外部路径/坏 JSON/缺字段/staged 缺失/目录/CurrentExecutable 失败/nil replacer/空 dataDir 全部不调用 Replace 且保留 plan；无 plan 时无操作；staged 被篡改后宿主不重校验 sha（AUDIT-P3-10） | 5 | PASS（发现 AUDIT-P3-10） |
+| 14 | toast 宿主桥 + 模块帧 | Notifier：空文本有 ID 不投递、Dismiss 幂等（重复/未知/空 ID）、handler panic 遏制、nil handler、20 并发 Notify/Dismiss（-race，唯一 ID）；toasts 帧：6 条只显示最新 4 条（4 个关闭按钮）、关闭按钮移除对应 toast 并 Dismiss 对应 ID、真实 4s TTL 自动消失（auto-expiry 未 Dismiss → AUDIT-P3-11）、空文本不渲染、无 notifier 时 no-op 不注册槽位、dispose 清 handler+清栈、真实 uiroot.Notifier 端到端 | 11 | PASS（发现 AUDIT-P3-11） |
+| 15 | session 导出 Notify 参数 | 成功：Markdown/JSONL、zh/en 各恰一条 success toast 且文案精确（对话已导出 / Conversation exported）；失败：恰一条 error toast，含底层错误且「导出失败：」只出现一次；取消保存不 toast；无 notifier 时导出仍成功且不 panic | 3 | PASS |
+| 16 | workspace mcp.json opt-in | opt-in 归一：仅 "true"/"TRUE"/" true " 开启，false/0/1/yes/on/garbage/空白关闭；对象 {"servers":[]} 与顶层数组两种形状；坏 JSON/含 NUL 行/缺 URL 行记日志跳过、读错误不失败激活；优先级 assembly > settings > workspace 且 URL 大小写归一（文件内重复也去重）；stdio 按 command+args 去重；无 workspace 服务/无 current/空 root/current 报错均安全；opt-in 关闭时即使文件存在也不读 | 8 | PASS |
+| 17 | @session references 补充 | session_refs 事件恰好一条且 ids 只含真正展开的引用（自引用/未知/重复被过滤），无引用 prompt 不记事件；引用块仅注入被引用会话最后 20 条消息（26 条会话中最早 3 轮不出现、块未触发 8000 截断），且持久化仍为原始 prompt | 2 | PASS |
+
+### 第三轮新增缺陷（均只记录，未改生产代码；无 P0/P1/P2）
+
+#### AUDIT-P3-9（P3，边界）ScheduleInstall 的路径包含检查是词法判断，updates 内 symlink 可指向外部文件
+
+- 位置：`internal/modules/update/install.go:45`（ScheduleInstall）→ `:58 os.Stat(staged)`（跟随 symlink）与 `:150 stagedPathBelowUpdates`（仅 filepath.Abs/Rel 词法包含）；宿主同构：`internal/host/install.go:137 applyPendingUpdate` → `:191 stagingPathBelowUpdates`。
+- 复现：`go test ./internal/regression -run TestInstallSymlinkStagedPath -v` → 在 `<dataDir>/updates/linked-asset` 建 symlink 指向 dataDir 外文件，等值 SHA 的 ScheduleInstall 成功并记录该路径（log 记录）。
+- 影响：数据目录归用户所有，攻击者已可写 pending.json/staged 文件，因此无权限提升；但“staged 必须位于 updates 下”的不变量被绕过，宿主随后会把外部文件内容当作更新覆盖可执行文件。建议 `filepath.EvalSymlinks` 后再次做包含检查（并选择拒绝 symlink）。
+
+#### AUDIT-P3-10（P3，完整性）宿主 applyPendingUpdate 不重校验 pending.json 的 sha256
+
+- 位置：`internal/host/install.go:33 pendingInstallFile.SHA256`（解码但全程未使用）与 `:137 applyPendingUpdate`→`:176 replacer.Replace(staged)`；模块侧 `internal/modules/update/install.go` 在 schedule 时校验一次。
+- 复现：`go test ./internal/regression -run TestHostApplyDoesNotReverifyChecksum -v` → schedule 后篡改 staged 文件内容，宿主仍 Replace 成功（log 记录）。
+- 影响：下载校验与安装之间（或 pending.json 被改后）文件可被替换而无检测；仍是本地用户权限范围，属纵深防御缺口。建议宿主在 Replace 前对 staged 重新计算 SHA-256 并与 plan 比对，不匹配则保留 plan 报错。
+
+#### AUDIT-P3-11（P3，宿主桥簿记）toast 自动过期不调用 Notifier.Dismiss，宿主桥 active 表条目滞留
+
+- 位置：`internal/ui/toasts/toasts.go:109 enqueue`（TTL goroutine）→ `:130 removeToast`（只删模块栈，不 Dismiss）；对照关闭按钮 `:184 st.notifier.Dismiss(notification.ID)`；`internal/uiroot/notifier.go:51` Notify 把条目写入 `active` map，只有 `:66 Dismiss` 删除。
+- 复现：`go test ./internal/regression -run TestToastsTTLExpiry -v` → TTL 后 toast 消失但 Dismiss 调用数为 0（log 记录）。
+- 影响：长时间运行且通知频繁的桌面会话中，`active` map 每次通知增长一条（元素很小、无读者），属缓慢内存滞留；不影响 UI/功能。建议自动过期路径也调用 `Notifier.Dismiss(notification.ID)`，或 notifier 的 active 表仅作为 handler 未装时的 pending 缓存并在投递后清除。
+
+### 第三轮未被证伪的通过项
+
+1. **install-on-restart 模块**：合法调度原子写 plan 并可替换；七类非法调度全部拒绝且不产生残留 plan；被篡改/不完整的 pending.json 安全降级为“无安装”；8 并发调度无竞态、无临时文件泄漏、最终 plan 完整；无 dataDir 给可读错误。
+2. **install-on-restart 宿主**：fake replacer 下成功清理 plan+staged、失败保留并可重试；traversal/坏 JSON/缺 staged/目录/CurrentExecutable 失败等所有恶意 plan 都不会调用 Replace；无 plan 时完全 no-op。
+3. **toast**：宿主桥对空文本/未知 Dismiss/handler panic/nil handler/并发均安全；模块帧严格 4 条上限、关闭按钮精确移除并通知宿主、真实 TTL 生效、空 payload 不渲染、无 notifier 时优雅降级、dispose 清理干净、真实桥端到端可达。
+4. **session 导出 toast**：成功/失败各恰一条、level 与中英文文案精确、失败文案无重复前缀、取消不通知、无 notifier 不失败。
+5. **workspace mcp.json**：opt-in 仅显式 true 生效；两种文件形状；任何坏文件/坏行都只记日志不失败激活；三源优先级与 URL/stdio 去重正确；workspace 缺失或异常安全；opt-out 完全不读文件。
+6. **references 补充**：`session_refs` 事件只记真正展开的 ID；无引用不记事件；仅注入尾部 20 条且 8000 预算下不误截断；持久化仍是原始 prompt。
+
+### 第三轮局限
+
+- 宿主 `applyPendingUpdate` 未导出，审计在**测试侧**用 `//go:linkname`（见 `internal/regression/host_install_test.go` 头注释）调用它以遵守“只改 internal/regression”的约束；若宿主重命名/内联需同步调整。未覆盖默认 `defaultExecutableReplacer` 的真实替换（测试用 fake，绝不替换测试二进制）。
+- toasts 的真实 TTL 用生产 4s 等待（`toastTTL` 未导出，模块内测试才能覆写）；TTL 测试单独约 4s。
+- workspace mcp.json 未测试 symlink 文件、成功 MCP 握手（死 URL 只覆盖失败条目与合并顺序）；opt-in 仅启动时读取（重启生效）符合文档。
+- 第三轮无 P0/P1/P2 新发现；AUDIT-P3-9/10 属本地纵深防御，P3-11 属桥簿记滞留。
+
+## 第三轮缺陷修复（Lead 复核，2026-11-08）
+
+| ID | 状态 | 修复摘要 |
+|----|------|----------|
+| AUDIT-P3-9 | ✅ 已修复 | update/host 的 staged 路径包含检查在词法判断后再 `EvalSymlinks` 双侧复检（缺失文件交由宿主校验；指向 dataDir 外的 symlink 拒绝） |
+| AUDIT-P3-10 | ✅ 已修复 | host `applyPendingUpdate` 在 Replace 前重算 staged SHA-256 与 plan 比对（缺失/不匹配保留 plan），新增篡改/缺校验和单测 |
+| AUDIT-P3-11 | ✅ 已修复 | toasts 自动过期路径调用 `Notifier.Dismiss`，uiroot active 表不再滞留 |
+
+第三轮回归：`internal/regression` **133 PASS / 0 SKIP**（新增 35 例：install 模块/宿主、toast、workspace mcp.json、引用补充）。

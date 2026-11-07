@@ -86,3 +86,32 @@ func EncodeMCPServersJSON(rows []MCPServerConfig) (string, error) {
 // SettingMCPWorkspaceOptIn enables reading <workspace>/mcp.json for extra MCP
 // servers (the old shell's workspace opt-in). Applied on startup.
 const SettingMCPWorkspaceOptIn = "mcp.workspaceOptIn"
+
+// SettingMCPDisabledTools stores a JSON array of MCP tool names that should
+// not be registered (per-tool switches in the plugins page; restart applies).
+const SettingMCPDisabledTools = "mcp.disabledTools"
+
+// ParseStringListJSON decodes a JSON array of strings ("[]"/"" -> nil).
+func ParseStringListJSON(raw string) ([]string, error) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return nil, nil
+	}
+	var values []string
+	if err := json.Unmarshal([]byte(raw), &values); err != nil {
+		return nil, err
+	}
+	return values, nil
+}
+
+// EncodeStringListJSON renders a string list for a settings row.
+func EncodeStringListJSON(values []string) (string, error) {
+	if values == nil {
+		values = []string{}
+	}
+	encoded, err := json.Marshal(values)
+	if err != nil {
+		return "", err
+	}
+	return string(encoded), nil
+}

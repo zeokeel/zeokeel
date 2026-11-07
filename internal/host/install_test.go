@@ -7,6 +7,8 @@ package host
 // replace keeps the pending plan for the next start.
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"os"
@@ -47,6 +49,12 @@ func writePendingUpdate(t *testing.T, dataDir string, pending pendingInstallFile
 		if err := os.WriteFile(pending.Path, []byte(stagedContent), 0o644); err != nil {
 			t.Fatalf("write staged asset: %v", err)
 		}
+	}
+	// "abc" is the placeholder the fixtures use when they do not care about the
+	// checksum; fill in the real hash so the new pre-install verification passes.
+	if pending.SHA256 == "abc" {
+		sum := sha256.Sum256([]byte(stagedContent))
+		pending.SHA256 = hex.EncodeToString(sum[:])
 	}
 	body, err := json.Marshal(pending)
 	if err != nil {
@@ -214,3 +222,36 @@ func TestDefaultExecutableReplacerCurrentExecutable(t *testing.T) {
 }
 
 var _ contracts.Logger = (*Logger)(nil)
+
+// TestApplyPendingUpdateRejectsTamperedStagedFile covers the pre-install
+// checksum re-verification: bytes changed after scheduling keep the plan.
+func TestApplyPendingUpdateRejectsTamperedStagedFile(t *testing.T) {
+	dataDir := t.TempDir()
+	staged := filepath.Join(dataDir, "updates", "1.2.0-app.zip")
+	writePendingUpdate(t, dataDir, pendingInstallFile{Version: "1.2.0", Path: staged, SHA256: "abc"}, "new binary")
+	if err := os.WriteFile(staged, []byte("tampered"), 0o644); err != nil {
+		t.Fatalf("tamper staged: %v", err)
+	}
+	replacer := &fakeReplacer{current: "/opt/zeokeel/zeokeel"}
+	if _, err := applyPendingUpdate(dataDir, replacer, nil); err == nil {
+		t.Fatal("tampered staged file was accepted")
+	}
+	if len(replacer.replaced) != 0 {
+		t.Fatalf("replacer called for tampered file: %v", replacer.replaced)
+	}
+	if _, err := os.Stat(pendingJSONPath(dataDir)); err != nil {
+		t.Fatalf("pending plan removed after checksum failure: %v", err)
+	}
+}
+
+// TestApplyPendingUpdateRejectsMissingChecksum covers a pending plan without a
+// checksum (cannot be trusted).
+func TestApplyPendingUpdateRejectsMissingChecksum(t *testing.T) {
+	dataDir := t.TempDir()
+	staged := filepath.Join(dataDir, "updates", "1.2.0-app.zip")
+	writePendingUpdate(t, dataDir, pendingInstallFile{Version: "1.2.0", Path: staged}, "new binary")
+	replacer := &fakeReplacer{current: "/opt/zeokeel/zeokeel"}
+	if _, err := applyPendingUpdate(dataDir, replacer, nil); err == nil {
+		t.Fatal("pending plan without checksum was accepted")
+	}
+}

@@ -8,6 +8,8 @@ package host
 // can never take the UI down with it (errors are logged, never fatal).
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -167,6 +169,20 @@ func applyPendingUpdate(dataDir string, replacer ExecutableReplacer, logger cont
 	if !info.Mode().IsRegular() {
 		return false, fmt.Errorf("staged update %q is not a regular file", staged)
 	}
+	// The schedule phase verified the checksum, but the staged bytes must be
+	// re-checked right before they replace the running executable: anything on
+	// disk between schedule and restart is untrusted.
+	expectedSHA := strings.ToLower(strings.TrimSpace(pending.SHA256))
+	if expectedSHA == "" {
+		return false, errors.New("pending update has no checksum")
+	}
+	actualSHA, err := fileSHA256(staged)
+	if err != nil {
+		return false, fmt.Errorf("hash staged update: %w", err)
+	}
+	if actualSHA != expectedSHA {
+		return false, fmt.Errorf("staged update checksum mismatch (want %s, got %s)", expectedSHA, actualSHA)
+	}
 	if replacer == nil {
 		return false, errors.New("no executable replacer")
 	}
@@ -204,7 +220,37 @@ func stagingPathBelowUpdates(updatesDir, path string) (string, error) {
 	if relative == ".." || strings.HasPrefix(relative, ".."+string(filepath.Separator)) || filepath.IsAbs(relative) {
 		return "", fmt.Errorf("pending update path %q is outside %q", absPath, absUpdates)
 	}
-	return absPath, nil
+	// Resolve symlinks before trusting the containment check.
+	resolvedUpdates, err := filepath.EvalSymlinks(absUpdates)
+	if err != nil {
+		return "", fmt.Errorf("resolve updates dir symlinks: %w", err)
+	}
+	resolvedPath, err := filepath.EvalSymlinks(absPath)
+	if err != nil {
+		return "", fmt.Errorf("resolve pending update symlinks: %w", err)
+	}
+	resolvedRelative, err := filepath.Rel(resolvedUpdates, resolvedPath)
+	if err != nil {
+		return "", fmt.Errorf("relativize resolved pending update path: %w", err)
+	}
+	if resolvedRelative == ".." || strings.HasPrefix(resolvedRelative, ".."+string(filepath.Separator)) || filepath.IsAbs(resolvedRelative) {
+		return "", fmt.Errorf("pending update path %q resolves outside %q", absPath, absUpdates)
+	}
+	return resolvedPath, nil
+}
+
+// fileSHA256 returns the lowercase hex SHA-256 of one file.
+func fileSHA256(path string) (string, error) {
+	file, err := os.Open(path)
+	if err != nil {
+		return "", err
+	}
+	defer file.Close()
+	hash := sha256.New()
+	if _, err := io.Copy(hash, file); err != nil {
+		return "", err
+	}
+	return hex.EncodeToString(hash.Sum(nil)), nil
 }
 
 // applyPendingUpdateOnStartup runs at process start and never blocks startup:

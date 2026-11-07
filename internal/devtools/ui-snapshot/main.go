@@ -524,6 +524,10 @@ func main() {
 		fmt.Println("click MCP settings:", err)
 	}
 	a.render(outDir + "/p2-mcp-settings.png")
+	if err := a.tester.Click("网络"); err != nil {
+		fmt.Println("click network settings:", err)
+	}
+	a.render(outDir + "/p2-network-settings.png")
 	a.ui.Navigator().CloseSettings()
 	if err := a.ui.Navigator().Push("automation"); err != nil {
 		fmt.Println("push automation:", err)

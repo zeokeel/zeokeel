@@ -14,6 +14,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
@@ -167,7 +168,29 @@ func stagedPathBelowUpdates(dataDir, path string) (string, error) {
 	if relative == ".." || strings.HasPrefix(relative, ".."+string(filepath.Separator)) || filepath.IsAbs(relative) {
 		return "", fmt.Errorf("staged asset %q is outside %q", staged, updatesDir)
 	}
-	return staged, nil
+	// The lexical check alone can be bypassed by a symlink inside updates/ that
+	// points outside the data directory; resolve both sides and re-check.
+	resolvedUpdates, err := filepath.EvalSymlinks(updatesDir)
+	if err != nil {
+		return "", fmt.Errorf("resolve updates dir symlinks: %w", err)
+	}
+	resolvedStaged, err := filepath.EvalSymlinks(staged)
+	if err != nil {
+		// A missing staged file is not this helper's problem: reporting the
+		// lexically contained path lets the host re-validate (and keep the plan).
+		if errors.Is(err, fs.ErrNotExist) {
+			return staged, nil
+		}
+		return "", fmt.Errorf("resolve staged asset symlinks: %w", err)
+	}
+	resolvedRelative, err := filepath.Rel(resolvedUpdates, resolvedStaged)
+	if err != nil {
+		return "", fmt.Errorf("relativize resolved staged asset: %w", err)
+	}
+	if resolvedRelative == ".." || strings.HasPrefix(resolvedRelative, ".."+string(filepath.Separator)) || filepath.IsAbs(resolvedRelative) {
+		return "", fmt.Errorf("staged asset %q resolves outside %q", staged, updatesDir)
+	}
+	return resolvedStaged, nil
 }
 
 // fileSHA256 returns the lowercase hex SHA-256 of a regular file.

@@ -80,6 +80,7 @@ func newToolRegistry() *rigtools.Registry {
 type harness struct {
 	t      *testing.T
 	uiRoot *uiroot.Root
+	ctx    cordis.Context
 }
 
 func newHarness(t *testing.T, service contracts.PluginsService, toolkit *rigtools.Registry, cfg plugins.Config) *harness {
@@ -99,7 +100,7 @@ func newHarness(t *testing.T, service contracts.PluginsService, toolkit *rigtool
 		provide(t, ctx, contracts.KeyToolkit, toolkit)
 	}
 	activate(t, ctx, plugins.Module(), cfg)
-	return &harness{t: t, uiRoot: uiRoot}
+	return &harness{t: t, uiRoot: uiRoot, ctx: ctx}
 }
 
 func (h *harness) tester() *ui.Tester {

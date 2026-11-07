@@ -281,6 +281,9 @@ func runHeadless(ctx context.Context, opts Options, out io.Writer) error {
 	if err != nil {
 		return err
 	}
+	if err := applyProxySettings(settings); err != nil {
+		logger.Printf("%s: proxy settings: %v", appName, err)
+	}
 	// Install a scheduled update at startup (the headless product serves the
 	// agent backend and should also apply updates); failures are logged, never
 	// fatal, and keep the pending plan.
@@ -369,6 +372,13 @@ func runDesktop(opts Options) error {
 		appName, opts.versionString(), opts.DataDir, logger.Path())
 	mygo.App.SetName(appName)
 	mygo.App.SetVersion(orDefault(opts.AppVersion, "dev"))
+
+	// Apply the stored outbound proxy to the process environment before any
+	// outbound HTTP happens (clients and child processes inherit it). A bad
+	// setting is logged and never blocks startup.
+	if err := applyProxySettings(settings); err != nil {
+		logger.Printf("%s: proxy settings: %v", appName, err)
+	}
 
 	// Single-instance lock, before mygo starts the GUI backend and before Run:
 	// RequestSingleInstanceLock forwards this launch's arguments to the first
