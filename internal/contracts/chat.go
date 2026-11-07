@@ -148,6 +148,16 @@ const (
 	AgentModePlan    = "plan"
 )
 
+// Chat modes are the old shell's standard/minimal/creator tool policies: the
+// standard mode keeps the normal approval flow, minimal only allows read-only
+// exploration, and creator hides the coding tools (writing persona).
+const (
+	SettingChatMode  = "chat.mode"
+	ChatModeStandard = "standard"
+	ChatModeMinimal  = "minimal"
+	ChatModeCreator  = "creator"
+)
+
 // Attachment is one file or image the user attached to a prompt.
 type Attachment struct {
 	// ID identifies the chip while it is staged.

@@ -91,9 +91,16 @@ func buildHeader(c *ui.Context, t *design.Tokens, runtime contracts.UIRuntime, c
 			if hasSession && chatSession.Running {
 				design.Apply(ui.Badge(c, st.tr("运行中", "Running")), t.Badge()).TextColor(t.WarningText)
 			}
-			if st.settings != nil && agentMode(st.settings) == contracts.AgentModePlan {
-				design.Apply(ui.Badge(c, st.tr("计划模式", "Plan mode")), t.Badge()).
-					TextColor(t.WarningText)
+			if st.settings != nil {
+				option := currentChatModeOption(st.settings)
+				if option.badgeZh != "" {
+					color := t.Accent
+					if option.warn {
+						color = t.WarningText
+					}
+					design.Apply(ui.Badge(c, st.tr(option.badgeZh, option.badgeEn)), t.Badge()).
+						TextColor(color)
+				}
 			}
 			buildGoalChip(c, t, runtime, st)
 			ui.Spacer(c).Grow(1)
@@ -1027,27 +1034,21 @@ func buildComposerToolbar(c *ui.Context, t *design.Tokens, runtime contracts.UIR
 			}
 		}).Tooltip(st.tr("本会话的推理强度", "Reasoning effort for this session"))
 	}
-	// Agent mode selector: normal or plan (per-session setting, hidden without
-	// a settings store). The header shows the 计划模式 badge while plan mode is
-	// active.
+	// Agent/chat mode selector: normal, plan, minimal and creator (hidden
+	// without a settings store). The header shows the active mode badge.
 	if st.settings != nil {
-		mode := agentMode(st.settings)
-		label := st.tr("普通", "Normal")
-		if mode == contracts.AgentModePlan {
-			label = st.tr("计划", "Plan")
-		}
-		ui.PopoverMenuButton(c, label, func(m *ui.Menu) {
-			normal := m.Item(st.tr("普通模式", "Normal mode"))
-			normal.Checked(mode == contracts.AgentModeNormal)
-			if normal.Chosen() && mode != contracts.AgentModeNormal {
-				_ = st.settings.Set(contracts.SettingAgentMode, contracts.AgentModeNormal)
-				runtime.Invalidate()
-			}
-			plan := m.Item(st.tr("计划模式", "Plan mode"))
-			plan.Checked(mode == contracts.AgentModePlan)
-			if plan.Chosen() && mode != contracts.AgentModePlan {
-				_ = st.settings.Set(contracts.SettingAgentMode, contracts.AgentModePlan)
-				runtime.Invalidate()
+		current := currentChatModeOption(st.settings)
+		ui.PopoverMenuButton(c, st.tr(current.shortZh, current.shortEn), func(m *ui.Menu) {
+			for _, option := range chatModeOptions {
+				item := m.Item(st.tr(option.menuZh, option.menuEn))
+				item.Checked(option.key == current.key)
+				if item.Chosen() {
+					// Always write both settings so a malformed stored mode is
+					// normalized to the canonical pair even when it already
+					// resolves to this option.
+					applyChatMode(st.settings, option)
+					runtime.Invalidate()
+				}
 			}
 		}).Tooltip(st.tr("代理模式", "Agent mode"))
 	}

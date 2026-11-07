@@ -107,7 +107,7 @@
 | Memory 页 | 🟡 | session Memory tab + memory 模块 | 搜索/添加/删除 scope；无 consolidate/extract、自动记忆设置 |
 | Workspace→Session 树/分组/计数 | ✅ | sidebar workspace tree | 多 workspace 分组、未分组、计数、搜索、折叠、置顶/归档 |
 | Plan UI（plan_review/exit_plan_mode） | 🟡 | `internal/ui/interaction` plan Modal + /审阅计划 + plan 模式门禁 | Markdown 审阅 + 批准/取消 + **计划模式（设置/徽标 + 只读工具白名单，写/执行 fail-closed）**；缺 keep-planning/feedback、transcript plan 卡 |
-| Modes UI（standard/minimal/creator） | ❌ | 无 | 无模式选择/工具子集/persona 切换；prompt 预设已可用于插入文本，但未接 mode/tool 子集语义 |
+| Modes UI（standard/minimal/creator） | ✅ | session 模式 Popover + agent gate 策略 | 四模式：普通（原审批策略）、计划（只读+计划白名单，最高优先）、精简（只读探索白名单）、创作（隐藏编码工具，仅 ask/present/goal/memory/skill）；composer 模式菜单 + header 徽标，坏值归一，中英 |
 | Team UI（成员/任务/steer） | ✅ | rightpanel Agents/Tasks Inspector + team_* 工具 | 成员列表/状态/最新回答、选中后 steer/中断/关闭；spawn 由 agent 工具发起（同旧）；任务板增删改/状态排序 |
 | Todo UI（会话 todo 面板） | ✅ | toolkit `KeyTaskBoard` + rightpanel「任务」tab | 任务列表/状态排序/添加/开始/完成/删除/刷新/错误与空态，与 team_task_* 共用；缺旧 todo 卡内联进度 |
 | Artifacts / Present UI | 🟡 | interaction Modal + uiroot ArtifactLister + rightpanel Files「产物」 | present 预览 + 最近 50/产物列表最近 10、内嵌 markdown 再预览；缺下载动作、跨重启历史 |

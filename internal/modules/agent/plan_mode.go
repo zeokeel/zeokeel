@@ -35,15 +35,70 @@ var planModeAllowedTools = []string{
 	"web_fetch",
 }
 
-// planModeToolAllowed reports whether a plan-mode tool call is on the whitelist.
-func planModeToolAllowed(name string) bool {
+// minimalModeAllowedTools is the read-only exploration surface for chat.mode
+// minimal; every other tool is denied fail-closed.
+var minimalModeAllowedTools = []string{
+	"read_file",
+	"list_dir",
+	"glob",
+	"grep",
+	"memory",
+	"skill",
+	"skills",
+	"web_fetch",
+	"ask_user",
+	"present",
+	"goal",
+	"plan_review",
+	"exit_plan_mode",
+	"team_task_list",
+	"team_task_get",
+}
+
+// creatorModeAllowedTools is the writing/persona surface for chat.mode creator;
+// coding tools are denied even when they only read files.
+var creatorModeAllowedTools = []string{
+	"ask_user",
+	"present",
+	"goal",
+	"plan_review",
+	"exit_plan_mode",
+	"memory",
+	"skill",
+	"skills",
+}
+
+// toolAllowed checks one tool against a whitelist (exact, trimmed).
+func toolAllowed(name string, allowedTools []string) bool {
 	name = strings.TrimSpace(name)
-	for _, allowed := range planModeAllowedTools {
+	for _, allowed := range allowedTools {
 		if name == allowed {
 			return true
 		}
 	}
 	return false
+}
+
+// planModeToolAllowed reports whether a plan-mode tool call is on the whitelist.
+func planModeToolAllowed(name string) bool {
+	return toolAllowed(name, planModeAllowedTools)
+}
+
+// chatMode reads chat.mode, normalizing unknown/missing values to standard.
+func (s *service) chatMode() string {
+	if s.settings == nil {
+		return contracts.ChatModeStandard
+	}
+	switch strings.ToLower(strings.TrimSpace(s.settings.Get(contracts.SettingChatMode, ""))) {
+	case contracts.ChatModeMinimal:
+		return contracts.ChatModeMinimal
+	case contracts.ChatModeCreator:
+		return contracts.ChatModeCreator
+	case contracts.ChatModeStandard:
+		return contracts.ChatModeStandard
+	default:
+		return contracts.ChatModeStandard
+	}
 }
 
 // agentModePlan reports whether the effective mode setting selects plan mode.
@@ -66,6 +121,18 @@ func (s *service) gate() rig.Gate {
 		}
 		if s.agentModePlan() {
 			if planModeToolAllowed(name) {
+				return rig.DecisionAllow, nil
+			}
+			return rig.DecisionDeny, nil
+		}
+		switch s.chatMode() {
+		case contracts.ChatModeMinimal:
+			if toolAllowed(name, minimalModeAllowedTools) {
+				return rig.DecisionAllow, nil
+			}
+			return rig.DecisionDeny, nil
+		case contracts.ChatModeCreator:
+			if toolAllowed(name, creatorModeAllowedTools) {
 				return rig.DecisionAllow, nil
 			}
 			return rig.DecisionDeny, nil

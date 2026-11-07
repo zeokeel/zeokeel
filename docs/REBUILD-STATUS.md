@@ -21,6 +21,11 @@
 - 右侧栏「文件」Tab：打开文件夹（mygo 原生 Directory picker）、目录进入/面包屑、文本/Markdown/图片预览、
   刷新与错误状态；E2E 覆盖工作区创建 + 列表 + 预览帧
 
+**TDD-chat-modes（2026-11-08）**
+- agent gate：plan 最高优先；standard/空沿用 approvals；minimal 只读白名单；creator 隐藏编码工具（fail-closed，绕过 approvals）
+- session：模式 Popover 四项（普通/计划/精简/创作）写 agent.mode+chat.mode，header 徽标（计划/创作 Warning、精简 Accent）、坏值归一、中英；
+  agent 88 / session 125 测试；E2E 模式切换与反证第六轮（tray/download/modes）并行
+
 **TDD-tray/artifact-download（2026-11-08）**
 - 系统托盘：host `tray.go`（品牌 mark PNG、ID/ToolTip、「显示 ZeoKeel/退出」菜单；NewTray 失败仅告警；xvfb 冒烟 exit 124 无 panic）；
   关闭到托盘：仅当 `ui.closeToTray` 归一 on 且托盘可用 → OnClose PreventDefault+Hide，shutdown guard 放行；外观页新增托盘 Toggle（默认 off，

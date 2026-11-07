@@ -333,6 +333,15 @@ func main() {
 		a.tester.Frame()
 	}
 
+	// Chat modes menu (普通/计划/精简/创作).
+	if modeRect, ok := a.tester.Find("普通"); ok {
+		a.tester.ClickAt(modeRect.X+modeRect.W/2, modeRect.Y+modeRect.H/2)
+		a.tester.Frame()
+		a.render(outDir + "/p2-chat-modes.png")
+		a.tester.Key(0, ui.KeyEscape)
+		a.tester.Frame()
+	}
+
 	// Notification toast overlay.
 	if notifier, notifierErr := a.root.Require(contracts.KeyNotifier); notifierErr == nil {
 		notifier.Notify(contracts.NotifySuccess, "对话已导出")
