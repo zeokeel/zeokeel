@@ -13,6 +13,7 @@ import (
 	"github.com/zeokeel/zeokeel/internal/contracts"
 	"github.com/zeokeel/zeokeel/internal/design"
 	"github.com/zeokeel/zeokeel/internal/icons"
+	"github.com/zeokeel/zeokeel/internal/uikit"
 )
 
 // DirectoryPicker is the Files pane's "open a folder" seam: the default opens
@@ -58,12 +59,12 @@ func buildFilesPane(
 	st *state,
 ) {
 	if workspace == nil {
-		buildEmptyPane(c, t, icons.Folder(), "工作区未启用")
+		buildEmptyPane(c, t, icons.Folder(), uikit.T(st.locale, "工作区未启用", "Workspace is not enabled"))
 		return
 	}
 	current, ok, err := workspace.Current(context.Background())
 	if err != nil {
-		buildErrorLine(c, t, "读取工作区失败："+err.Error())
+		buildErrorLine(c, t, uikit.T(st.locale, "读取工作区失败：", "Failed to read the workspace: ")+err.Error())
 		return
 	}
 	if !ok {
@@ -73,10 +74,11 @@ func buildFilesPane(
 
 	ui.Column(c).FillWidth().Gap(design.Space2).Children(func() {
 		ui.Row(c).FillWidth().Gap(design.Space2).AlignItems(ui.Center).Children(func() {
-			design.Apply(ui.Badge(c, "工作区"), t.Badge())
+			design.Apply(ui.Badge(c, uikit.T(st.locale, "工作区", "Workspace")), t.Badge())
 			design.Apply(ui.Text(c, firstNonEmpty(current.Name, filepath.Base(current.Root))), t.Font(design.TypeXS)).
 				FontWeight(600).TextColor(t.LabelPrimary).Grow(1).MaxLines(1).Ellipsis("…")
-			refresh := ui.Button(c, "刷新").Tooltip("重新读取文件列表")
+			refresh := ui.Button(c, uikit.T(st.locale, "刷新", "Refresh")).
+				Tooltip(uikit.T(st.locale, "重新读取文件列表", "Reload the file list"))
 			if refresh.Clicked() {
 				st.filesPreview = make(map[string]*filePreview)
 				st.filesErr = ""
@@ -94,9 +96,9 @@ func buildFilesPane(
 		entries, filesErr := workspace.Files(context.Background(), dir)
 		switch {
 		case filesErr != nil:
-			buildErrorLine(c, t, "列目录失败："+filesErr.Error())
+			buildErrorLine(c, t, uikit.T(st.locale, "列目录失败：", "Failed to list the directory: ")+filesErr.Error())
 		case len(entries) == 0:
-			design.Apply(ui.Text(c, "目录为空"), t.TextMuted(design.TypeXS))
+			design.Apply(ui.Text(c, uikit.T(st.locale, "目录为空", "The directory is empty")), t.TextMuted(design.TypeXS))
 		default:
 			for _, entry := range entries {
 				buildFileRow(c, t, runtime, st, entry)
@@ -106,7 +108,7 @@ func buildFilesPane(
 		if st.filesSelected != "" {
 			buildFilePreview(c, t, workspace, runtime, st)
 		} else {
-			design.Apply(ui.Text(c, "选择文件以预览"), t.TextMuted(design.TypeXXXS))
+			design.Apply(ui.Text(c, uikit.T(st.locale, "选择文件以预览", "Select a file to preview")), t.TextMuted(design.TypeXXXS))
 		}
 	})
 }
@@ -121,21 +123,21 @@ func buildOpenWorkspace(c *ui.Context, t *design.Tokens, workspace contracts.Wor
 			Radius(design.RadiusMax).Background(t.BgHover).Children(func() {
 			ui.Icon(c, icons.Folder()).Size(th.Space(4), th.Space(4)).TextColor(t.LabelSecondary)
 		})
-		design.Apply(ui.Text(c, "还没有打开工作区"), t.Font(design.TypeXS)).
+		design.Apply(ui.Text(c, uikit.T(st.locale, "还没有打开工作区", "No workspace is open")), t.Font(design.TypeXS)).
 			FontWeight(600).TextColor(t.LabelPrimary)
-		design.Apply(ui.Text(c, "打开一个文件夹作为工作区，浏览其中的文件。"), t.TextMuted(design.TypeXXS)).
+		design.Apply(ui.Text(c, uikit.T(st.locale, "打开一个文件夹作为工作区，浏览其中的文件。", "Open a folder as a workspace to browse its files.")), t.TextMuted(design.TypeXXS)).
 			MaxLines(2)
-		open := design.Apply(ui.PrimaryButton(c, "打开文件夹"), t.PrimaryButton())
+		open := design.Apply(ui.PrimaryButton(c, uikit.T(st.locale, "打开文件夹", "Open folder")), t.PrimaryButton())
 		if open.Clicked() {
 			dir, err := DirectoryPicker()
 			switch {
 			case err != nil:
-				st.filesErr = "无法打开文件夹选择器：" + err.Error()
+				st.filesErr = uikit.T(st.locale, "无法打开文件夹选择器：", "Could not open the folder picker: ") + err.Error()
 			case strings.TrimSpace(dir) == "":
 				// Canceled: nothing changes.
 			default:
 				if _, createErr := workspace.Create(context.Background(), filepath.Base(dir), dir); createErr != nil {
-					st.filesErr = "打开工作区失败：" + createErr.Error()
+					st.filesErr = uikit.T(st.locale, "打开工作区失败：", "Failed to open the workspace: ") + createErr.Error()
 				} else {
 					st.filesDir = ""
 					st.filesSelected = ""
@@ -162,7 +164,7 @@ func buildBreadcrumb(c *ui.Context, t *design.Tokens, workspace contracts.Worksp
 	rootLabel := "/" + firstNonEmpty(current.Name, filepath.Base(current.Root))
 	segments := splitRelPath(st.filesDir)
 	ui.Row(c).FillWidth().Gap(design.Space1).AlignItems(ui.Center).Children(func() {
-		root := ui.Button(c, rootLabel).Tooltip("返回工作区根目录")
+		root := ui.Button(c, rootLabel).Tooltip(uikit.T(st.locale, "返回工作区根目录", "Back to the workspace root"))
 		if root.Clicked() {
 			navigateFiles(st, "", runtime)
 		}
@@ -170,7 +172,7 @@ func buildBreadcrumb(c *ui.Context, t *design.Tokens, workspace contracts.Worksp
 			design.Apply(ui.Text(c, "/"), t.TextMuted(design.TypeXXXS))
 			label := "/" + segment
 			index := index
-			crumb := ui.Button(c, label).Tooltip("返回 " + label)
+			crumb := ui.Button(c, label).Tooltip(uikit.T(st.locale, "返回 ", "Back to ") + label)
 			if crumb.Clicked() {
 				navigateFiles(st, strings.Join(segments[:index+1], "/"), runtime)
 			}
@@ -249,7 +251,8 @@ func buildFilePreview(c *ui.Context, t *design.Tokens, workspace contracts.Works
 			ui.Icon(c, icons.Folder()).Size(design.Space4, design.Space4).TextColor(t.LabelSecondary)
 			design.Apply(ui.Text(c, filepath.Base(path)), t.Font(design.TypeXXS)).
 				FontWeight(600).TextColor(t.LabelPrimary).Grow(1).MaxLines(1).Ellipsis("…")
-			close := ui.Button(c, "关闭预览").Tooltip("关闭预览")
+			close := ui.Button(c, uikit.T(st.locale, "关闭预览", "Close preview")).
+				Tooltip(uikit.T(st.locale, "关闭预览", "Close preview"))
 			if close.Clicked() {
 				st.filesSelected = ""
 				runtime.Invalidate()
@@ -258,7 +261,7 @@ func buildFilePreview(c *ui.Context, t *design.Tokens, workspace contracts.Works
 
 		preview := st.filePreviewFor(workspace, path)
 		if preview.err != "" {
-			buildErrorLine(c, t, "读取文件失败："+preview.err)
+			buildErrorLine(c, t, uikit.T(st.locale, "读取文件失败：", "Failed to read the file: ")+preview.err)
 			return
 		}
 		switch {
@@ -270,12 +273,12 @@ func buildFilePreview(c *ui.Context, t *design.Tokens, workspace contracts.Works
 			design.Apply(ui.Text(c, string(preview.data)), t.MonoFamily()).
 				FontSize(11).TextColor(t.LabelPrimary).MaxLines(40)
 		default:
-			detailRow(c, t, "大小", formatFileSize(int64(len(preview.data))))
-			detailRow(c, t, "类型", strings.TrimPrefix(filepath.Ext(path), "."))
-			design.Apply(ui.Text(c, "暂不支持预览"), t.TextMuted(design.TypeXXS))
+			detailRow(c, t, uikit.T(st.locale, "大小", "Size"), formatFileSize(int64(len(preview.data))))
+			detailRow(c, t, uikit.T(st.locale, "类型", "Type"), strings.TrimPrefix(filepath.Ext(path), "."))
+			design.Apply(ui.Text(c, uikit.T(st.locale, "暂不支持预览", "Preview is not supported")), t.TextMuted(design.TypeXXS))
 		}
 		if preview.truncated {
-			design.Apply(ui.Text(c, "仅显示前 256 KiB"), t.TextMuted(design.TypeXXXS))
+			design.Apply(ui.Text(c, uikit.T(st.locale, "仅显示前 256 KiB", "Showing the first 256 KiB only")), t.TextMuted(design.TypeXXXS))
 		}
 	})
 }

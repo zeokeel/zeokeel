@@ -134,6 +134,12 @@ func main() {
 		a.tester.Frame()
 		a.render(outDir + "/p2-english-settings.png")
 		a.ui.Navigator().CloseSettings()
+		if err := a.ui.Navigator().Push("automation"); err == nil {
+			a.render(outDir + "/p2-english-automation.png")
+		}
+		if err := a.ui.Navigator().Push("session"); err != nil {
+			fmt.Println("push session after english:", err)
+		}
 		locale.SetLanguage("zh")
 		a.tester.Frame()
 	}

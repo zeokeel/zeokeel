@@ -12,6 +12,7 @@ import (
 	"github.com/zeokeel/zeokeel/internal/contracts"
 	"github.com/zeokeel/zeokeel/internal/design"
 	"github.com/zeokeel/zeokeel/internal/icons"
+	"github.com/zeokeel/zeokeel/internal/uikit"
 )
 
 const (
@@ -119,7 +120,7 @@ func buildTerminalPane(
 	st *state,
 ) {
 	if terminal == nil {
-		buildEmptyPane(c, t, icons.Terminal(), "终端未启用")
+		buildEmptyPane(c, t, icons.Terminal(), uikit.T(st.locale, "终端未启用", "Terminal is not enabled"))
 		return
 	}
 	term := st.term
@@ -138,7 +139,7 @@ func buildTerminalPane(
 
 			shellLabel := firstNonEmpty(terminal.Shell(), "shell")
 			shell := ui.ButtonBase(c).Height(th.Space(7)).PaddingX(design.Space2).
-				Radius(design.RadiusSM).Label("选择 shell")
+				Radius(design.RadiusSM).Label(uikit.T(st.locale, "选择 shell", "Choose shell"))
 			if shell.Hovered() {
 				shell = shell.Background(t.BgHover)
 			}
@@ -157,12 +158,12 @@ func buildTerminalPane(
 			})
 
 			clear := ui.ButtonBase(c).Height(th.Space(7)).PaddingX(design.Space2).
-				Radius(design.RadiusSM).Label("清空")
+				Radius(design.RadiusSM).Label(uikit.T(st.locale, "清空", "Clear"))
 			if clear.Hovered() {
 				clear = clear.Background(t.BgHover)
 			}
 			clear.Children(func() {
-				design.Apply(ui.Text(c, "清空"), t.Font(design.TypeXXS)).
+				design.Apply(ui.Text(c, uikit.T(st.locale, "清空", "Clear")), t.Font(design.TypeXXS)).
 					TextColor(t.LabelSecondary)
 			})
 			clear.OnClick(func() {
@@ -178,7 +179,7 @@ func buildTerminalPane(
 		ui.Scroll(c).FillWidth().Grow(1).Children(func() {
 			ui.Column(c).FillWidth().Padding(design.Space2).Children(func() {
 				if strings.TrimSpace(output) == "" {
-					design.Apply(ui.Text(c, "在工作区根目录运行命令"), t.TextMuted(design.TypeXXS))
+					design.Apply(ui.Text(c, uikit.T(st.locale, "在工作区根目录运行命令", "Run commands in the workspace root")), t.TextMuted(design.TypeXXS))
 					return
 				}
 				design.Apply(ui.Text(c, output), t.MonoFamily()).FontSize(11).
@@ -188,22 +189,23 @@ func buildTerminalPane(
 
 		// Input row: native text input submits, Run/Stop swaps while running.
 		ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(design.Space2).Children(func() {
-			ui.TextInput(c, &term.input).Label("命令").Placeholder("输入命令…").
+			ui.TextInput(c, &term.input).Label(uikit.T(st.locale, "命令", "Command")).
+				Placeholder(uikit.T(st.locale, "输入命令…", "Enter a command…")).
 				Grow(1).OnSubmit(func() { runTerminalCommand(terminal, runtime, st) })
 			if running {
-				stop := ui.Button(c, "停止").TextColor(t.DangerText)
+				stop := ui.Button(c, uikit.T(st.locale, "停止", "Stop")).TextColor(t.DangerText)
 				if stop.Clicked() {
 					term.cancelRun()
 				}
 				return
 			}
-			run := design.Apply(ui.PrimaryButton(c, "运行"), t.PrimaryButton()).
+			run := design.Apply(ui.PrimaryButton(c, uikit.T(st.locale, "运行", "Run")), t.PrimaryButton()).
 				Disabled(strings.TrimSpace(term.input) == "")
 			if run.Clicked() && strings.TrimSpace(term.input) != "" {
 				runTerminalCommand(terminal, runtime, st)
 			}
 		})
-		design.Apply(ui.Text(c, "简单命令运行器（无 PTY / 持久 shell）"), t.TextMuted(design.TypeXXXS))
+		design.Apply(ui.Text(c, uikit.T(st.locale, "简单命令运行器（无 PTY / 持久 shell）", "Simple command runner (no PTY / persistent shell)")), t.TextMuted(design.TypeXXXS))
 	})
 }
 
@@ -227,13 +229,13 @@ func buildShellPicker(c *ui.Context, t *design.Tokens, terminal contracts.Termin
 					design.Apply(ui.Text(c, name), t.Font(design.TypeXXS)).
 						TextColor(t.LabelPrimary).Grow(1).MaxLines(1).Ellipsis("…")
 					if name == current {
-						design.Apply(ui.Badge(c, "当前"), t.Badge())
+						design.Apply(ui.Badge(c, uikit.T(st.locale, "当前", "Current")), t.Badge())
 					}
 				})
 			})
 			row.OnClick(func() {
 				if err := terminal.SetShell(name); err != nil {
-					term.err = "设置 shell 失败：" + err.Error()
+					term.err = uikit.T(st.locale, "设置 shell 失败：", "Failed to set the shell: ") + err.Error()
 				} else {
 					term.err = ""
 				}
@@ -270,13 +272,13 @@ func runTerminalCommand(terminal contracts.TerminalService, runtime contracts.UI
 			chunk.WriteString("\n")
 		}
 		if result.ExitCode != 0 {
-			fmt.Fprintf(&chunk, "[退出码 %d]\n", result.ExitCode)
+			fmt.Fprintf(&chunk, uikit.T(st.locale, "[退出码 %d]\n", "[exit code %d]\n"), result.ExitCode)
 		}
 		if err != nil {
 			if stopped {
-				chunk.WriteString("[已停止]\n")
+				chunk.WriteString(uikit.T(st.locale, "[已停止]\n", "[stopped]\n"))
 			} else {
-				chunk.WriteString("错误：" + err.Error() + "\n")
+				chunk.WriteString(uikit.T(st.locale, "错误：", "Error: ") + err.Error() + "\n")
 			}
 		}
 		term.finishRun()

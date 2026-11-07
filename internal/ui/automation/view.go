@@ -20,7 +20,7 @@ func buildScreen(c *ui.Context, runtime contracts.UIRuntime, navigator contracts
 	t := design.Of(c)
 	service, hasService := st.ctx.Get(contracts.KeyAutomation)
 	if !hasService || service == nil {
-		buildAutomationEmpty(c, t, icons.Clock(), "自动化后端未启用")
+		buildAutomationEmpty(c, t, icons.Clock(), st.tr("自动化后端未启用", "Automation backend not enabled"))
 		return
 	}
 
@@ -29,13 +29,14 @@ func buildScreen(c *ui.Context, runtime contracts.UIRuntime, navigator contracts
 		// on the right.
 		ui.Row(c).FillWidth().AlignItems(ui.End).Gap(design.Space3).Children(func() {
 			ui.Column(c).Grow(1).Gap(design.Space1).Children(func() {
-				design.Apply(ui.Text(c, cfg.Title), t.Font(design.TypeL)).
+				design.Apply(ui.Text(c, st.localized(cfg.Title, "自动化", "Automation")), t.Font(design.TypeL)).
 					FontWeight(600).TextColor(t.LabelPrimary).MaxLines(1).Ellipsis("…")
-				design.Apply(ui.Text(c,
-					"按计划自动运行会话任务；可以启停、立即运行或删除。"),
+				design.Apply(ui.Text(c, st.tr(
+					"按计划自动运行会话任务；可以启停、立即运行或删除。",
+					"Runs session tasks on a schedule; start, stop, run now or delete.")),
 					t.TextMuted(design.TypeXS)).MaxLines(2)
 			})
-			if create := design.Apply(ui.PrimaryButton(c, cfg.NewLabel), t.PrimaryButton()); create.Clicked() {
+			if create := design.Apply(ui.PrimaryButton(c, st.localized(cfg.NewLabel, "新建任务", "New task")), t.PrimaryButton()); create.Clicked() {
 				st.formOpen = !st.formOpen
 				st.formErr = ""
 				runtime.Invalidate()
@@ -51,12 +52,14 @@ func buildScreen(c *ui.Context, runtime contracts.UIRuntime, navigator contracts
 
 		tasks, err := service.List(context.Background())
 		if err != nil {
-			buildAutomationError(c, t, "读取任务失败："+err.Error())
+			buildAutomationError(c, t, st.tr("读取任务失败：", "Failed to read tasks: ")+err.Error())
 			return
 		}
 		if len(tasks) == 0 {
-			buildAutomationEmpty(c, t, icons.Clock(), cfg.EmptyText)
-			design.Apply(ui.Text(c, "创建后按计划自动运行；也可以随时立即运行。"),
+			buildAutomationEmpty(c, t, icons.Clock(), st.localized(cfg.EmptyText, "还没有自动化任务", "No automation tasks yet"))
+			design.Apply(ui.Text(c, st.tr(
+				"创建后按计划自动运行；也可以随时立即运行。",
+				"Tasks run on their schedule after creation; you can also run one now.")),
 				t.TextMuted(design.TypeXXS))
 		} else {
 			ui.Scroll(c).FillWidth().Grow(1).Children(func() {
@@ -78,15 +81,16 @@ func buildTaskCard(c *ui.Context, t *design.Tokens, service contracts.Automation
 	card := design.Apply(ui.Column(c), t.Panel()).Padding(design.Space3).Gap(design.Space2)
 	card.Children(func() {
 		ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(design.Space2).Children(func() {
-			design.Apply(ui.Text(c, firstNonEmpty(task.Name, "(未命名任务)")), t.Font(design.TypeS)).
+			design.Apply(ui.Text(c, firstNonEmpty(task.Name, st.tr("(未命名任务)", "(Untitled task)"))), t.Font(design.TypeS)).
 				FontWeight(600).TextColor(t.LabelPrimary).Grow(1).MaxLines(1).Ellipsis("…")
 			enabled := task.Enabled
-			toggle := ui.Toggle(c, &enabled, firstNonEmpty(task.Name, "任务")+" 启用")
+			taskName := firstNonEmpty(task.Name, st.tr("任务", "task"))
+			toggle := ui.Toggle(c, &enabled, st.tr(taskName+" 启用", taskName+" enabled"))
 			if toggle.Changed() {
 				updated := task
 				updated.Enabled = enabled
 				if _, err := service.Update(context.Background(), updated); err != nil {
-					st.pageErr = "更新任务失败：" + err.Error()
+					st.pageErr = st.tr("更新任务失败：", "Failed to update task: ") + err.Error()
 				} else {
 					st.pageErr = ""
 				}
@@ -96,29 +100,29 @@ func buildTaskCard(c *ui.Context, t *design.Tokens, service contracts.Automation
 		design.Apply(ui.Text(c, task.Schedule), t.MonoFamily()).FontSize(11).
 			TextColor(t.LabelTertiary).MaxLines(1).Ellipsis("…")
 		ui.Row(c).FillWidth().Gap(design.Space3).Children(func() {
-			design.Apply(ui.Text(c, "下次运行："+formatTaskTime(task.NextRun)), t.Font(design.TypeXXS)).
+			design.Apply(ui.Text(c, st.tr("下次运行：", "Next run: ")+formatTaskTime(task.NextRun)), t.Font(design.TypeXXS)).
 				TextColor(t.LabelTertiary)
-			design.Apply(ui.Text(c, "上次运行："+formatTaskTime(task.LastRun)), t.Font(design.TypeXXS)).
+			design.Apply(ui.Text(c, st.tr("上次运行：", "Last run: ")+formatTaskTime(task.LastRun)), t.Font(design.TypeXXS)).
 				TextColor(t.LabelTertiary)
 		})
 		if strings.TrimSpace(task.LastError) != "" {
-			buildAutomationError(c, t, "上次错误："+task.LastError)
+			buildAutomationError(c, t, st.tr("上次错误：", "Last error: ")+task.LastError)
 		}
 		ui.Row(c).FillWidth().Gap(design.Space2).AlignItems(ui.Center).Children(func() {
-			runNow := ui.Button(c, "立即运行").Tooltip("立即执行一次该任务")
+			runNow := ui.Button(c, st.tr("立即运行", "Run now")).Tooltip(st.tr("立即执行一次该任务", "Run this task once now"))
 			if runNow.Clicked() {
 				if err := service.RunNow(context.Background(), task.ID); err != nil {
-					st.pageErr = "运行任务失败：" + err.Error()
+					st.pageErr = st.tr("运行任务失败：", "Failed to run task: ") + err.Error()
 				} else {
 					st.pageErr = ""
 				}
 				runtime.Invalidate()
 			}
-			remove := ui.Button(c, "删除").Tooltip("删除该任务").TextColor(t.DangerText)
+			remove := ui.Button(c, st.tr("删除", "Delete")).Tooltip(st.tr("删除该任务", "Delete this task")).TextColor(t.DangerText)
 			if remove.Clicked() {
 				st.deleteOpen = true
 				st.deleteTarget = task.ID
-				st.deleteName = firstNonEmpty(task.Name, "未命名任务")
+				st.deleteName = firstNonEmpty(task.Name, st.tr("未命名任务", "Untitled task"))
 				runtime.Invalidate()
 			}
 		})
@@ -134,27 +138,28 @@ func buildCreateForm(c *ui.Context, t *design.Tokens, service contracts.Automati
 
 	card := design.Apply(ui.Column(c), t.Panel()).Padding(design.Space3).Gap(design.Space2)
 	card.Children(func() {
-		design.Apply(ui.Text(c, "新建自动化任务"), t.Font(design.TypeS)).
+		design.Apply(ui.Text(c, st.tr("新建自动化任务", "New automation task")), t.Font(design.TypeS)).
 			FontWeight(600).TextColor(t.LabelPrimary)
-		ui.TextInput(c, &st.formName).Label("任务名称").
-			Placeholder("例如：每日依赖巡检").FillWidth()
-		ui.TextArea(c, &st.formPrompt).Label("任务提示词").
-			Placeholder("任务触发时发给 agent 的提示词").FillWidth().MinHeight(design.Space6 * 4)
-		ui.TextInput(c, &st.formSchedule).Label("运行计划").
+		ui.TextInput(c, &st.formName).Label(st.tr("任务名称", "Task name")).
+			Placeholder(st.tr("例如：每日依赖巡检", "For example: daily dependency check")).FillWidth()
+		ui.TextArea(c, &st.formPrompt).Label(st.tr("任务提示词", "Task prompt")).
+			Placeholder(st.tr("任务触发时发给 agent 的提示词", "Prompt sent to the agent when the task runs")).FillWidth().MinHeight(design.Space6 * 4)
+		ui.TextInput(c, &st.formSchedule).Label(st.tr("运行计划", "Schedule")).
 			Placeholder("*/5 * * * * 或 every 60s").FillWidth()
-		design.Apply(ui.Text(c,
-			"支持 cron 子集（分 时 日 月 周）与 every <duration>（如 every 60s）。"),
+		design.Apply(ui.Text(c, st.tr(
+			"支持 cron 子集（分 时 日 月 周）与 every <duration>（如 every 60s）。",
+			"Supports a cron subset (minute hour day month weekday) and every <duration> (e.g. every 60s).")),
 			t.TextMuted(design.TypeXXXS)).MaxLines(2)
 		ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(design.Space2).Children(func() {
-			ui.Toggle(c, &st.formEnabled, "启用")
+			ui.Toggle(c, &st.formEnabled, st.tr("启用", "Enabled"))
 			ui.Spacer(c).Grow(1)
-			cancel := ui.Button(c, "取消")
+			cancel := ui.Button(c, st.tr("取消", "Cancel"))
 			if cancel.Clicked() {
 				st.formOpen = false
 				st.formErr = ""
 				runtime.Invalidate()
 			}
-			save := design.Apply(ui.PrimaryButton(c, "保存"), t.PrimaryButton()).Disabled(!valid)
+			save := design.Apply(ui.PrimaryButton(c, st.tr("保存", "Save")), t.PrimaryButton()).Disabled(!valid)
 			if save.Clicked() && valid {
 				_, err := service.Create(context.Background(), contracts.AutomationTask{
 					Name:     name,
@@ -163,7 +168,7 @@ func buildCreateForm(c *ui.Context, t *design.Tokens, service contracts.Automati
 					Enabled:  st.formEnabled,
 				})
 				if err != nil {
-					st.formErr = "创建任务失败：" + err.Error()
+					st.formErr = st.tr("创建任务失败：", "Failed to create task: ") + err.Error()
 				} else {
 					st.formOpen = false
 					st.formName = ""
@@ -186,11 +191,14 @@ func buildDeleteDialog(c *ui.Context, t *design.Tokens, service contracts.Automa
 	if !st.deleteOpen {
 		return
 	}
-	message := fmt.Sprintf("“%s”将被删除，此操作无法撤销。", firstNonEmpty(st.deleteName, "未命名任务"))
-	switch ui.AlertDialog(c, &st.deleteOpen, "删除自动化任务", message, "取消", "确认删除") {
+	message := st.tr(
+		fmt.Sprintf("“%s”将被删除，此操作无法撤销。", firstNonEmpty(st.deleteName, st.tr("未命名任务", "Untitled task"))),
+		fmt.Sprintf("%q will be deleted. This cannot be undone.", firstNonEmpty(st.deleteName, st.tr("未命名任务", "Untitled task"))))
+	switch ui.AlertDialog(c, &st.deleteOpen, st.tr("删除自动化任务", "Delete automation task"),
+		message, st.tr("取消", "Cancel"), st.tr("确认删除", "Delete")) {
 	case 1:
 		if err := service.Delete(context.Background(), st.deleteTarget); err != nil {
-			st.pageErr = "删除任务失败：" + err.Error()
+			st.pageErr = st.tr("删除任务失败：", "Failed to delete task: ") + err.Error()
 		} else {
 			st.pageErr = ""
 		}

@@ -11,6 +11,7 @@ import (
 	"github.com/zeokeel/zeokeel/internal/contracts"
 	"github.com/zeokeel/zeokeel/internal/design"
 	"github.com/zeokeel/zeokeel/internal/icons"
+	"github.com/zeokeel/zeokeel/internal/uikit"
 )
 
 // Inspector pane indexes; they match the module state.
@@ -33,7 +34,7 @@ func buildPanel(c *ui.Context, t *design.Tokens, runtime contracts.UIRuntime, ch
 	ui.Column(c).FillWidth().Gap(design.Space3).Children(func() {
 		ui.Row(c).FillWidth().Gap(design.Space2).AlignItems(ui.Center).Children(func() {
 			ui.Icon(c, icons.Sliders()).Size(16, 16).TextColor(t.LabelSecondary)
-			design.Apply(ui.Text(c, cfg.Title), t.Font(design.TypeS)).
+			design.Apply(ui.Text(c, cfg.titleLabel(st.locale)), t.Font(design.TypeS)).
 				FontWeight(600).TextColor(t.LabelPrimary)
 		})
 		buildTabs(c, t, cfg, st)
@@ -44,7 +45,7 @@ func buildPanel(c *ui.Context, t *design.Tokens, runtime contracts.UIRuntime, ch
 			case tabTools:
 				buildToolsPane(c, t, chat, st)
 			case tabLog:
-				buildLogPane(c, t, log, chat)
+				buildLogPane(c, t, log, chat, st.locale)
 			case tabFiles:
 				buildFilesPane(c, t, workspace, runtime, st)
 			case tabChanges:
@@ -52,7 +53,7 @@ func buildPanel(c *ui.Context, t *design.Tokens, runtime contracts.UIRuntime, ch
 			case tabTerminal:
 				buildTerminalPane(c, t, terminal, runtime, st)
 			default:
-				buildOverviewPane(c, t, chat, cfg)
+				buildOverviewPane(c, t, chat, cfg, st.locale)
 			}
 		})
 	})
@@ -62,7 +63,10 @@ func buildPanel(c *ui.Context, t *design.Tokens, runtime contracts.UIRuntime, ch
 // the accent underline (same language as the session header tabs).
 func buildTabs(c *ui.Context, t *design.Tokens, cfg Config, st *state) {
 	th := t.Theme()
-	labels := []string{cfg.OverviewTab, cfg.ToolsTab, cfg.LogTab, cfg.FilesTab, cfg.ChangesTab, cfg.TerminalTab}
+	labels := []string{
+		cfg.overviewLabel(st.locale), cfg.toolsLabel(st.locale), cfg.logLabel(st.locale),
+		cfg.filesLabel(st.locale), cfg.changesLabel(st.locale), cfg.terminalLabel(st.locale),
+	}
 	tabs := ui.TabsBase(c, &st.tab, len(labels))
 	tabs.List.Height(t.Scale(th.Space(8))).Padding(0, 0, 0, th.Space(1)).
 		Gap(design.Space3).AlignItems(ui.Stretch).Children(func() {
@@ -92,16 +96,17 @@ func buildTabs(c *ui.Context, t *design.Tokens, cfg Config, st *state) {
 // buildOverviewPane shows the active session's title, message count, update
 // time, state badges and error text; without an active session it shows the
 // configured empty copy.
-func buildOverviewPane(c *ui.Context, t *design.Tokens, chat contracts.ChatService, cfg Config) {
+func buildOverviewPane(c *ui.Context, t *design.Tokens, chat contracts.ChatService, cfg Config,
+	locale contracts.LocaleService) {
 	activeID := chat.ActiveSession()
 	chatSession, ok := chat.Session(activeID)
 	if activeID == "" || !ok {
-		buildEmptyPane(c, t, icons.Message(), cfg.EmptyText)
+		buildEmptyPane(c, t, icons.Message(), cfg.emptyLabel(locale))
 		return
 	}
 	title := strings.TrimSpace(chatSession.Title)
 	if title == "" {
-		title = "未命名会话"
+		title = uikit.T(locale, "未命名会话", "Untitled session")
 	}
 	card := design.Apply(ui.Column(c), t.Panel()).Padding(design.Space3).Gap(design.Space2)
 	card.Children(func() {
@@ -110,16 +115,16 @@ func buildOverviewPane(c *ui.Context, t *design.Tokens, chat contracts.ChatServi
 		if chatSession.Running || chatSession.Error != "" {
 			ui.Row(c).FillWidth().Gap(design.Space2).AlignItems(ui.Center).Children(func() {
 				if chatSession.Running {
-					design.Apply(ui.Badge(c, "运行中"), t.Badge()).TextColor(t.WarningText)
+					design.Apply(ui.Badge(c, uikit.T(locale, "运行中", "Running")), t.Badge()).TextColor(t.WarningText)
 				}
 				if chatSession.Error != "" {
-					design.Apply(ui.Badge(c, "错误"), t.Badge()).TextColor(t.DangerText)
+					design.Apply(ui.Badge(c, uikit.T(locale, "错误", "Error")), t.Badge()).TextColor(t.DangerText)
 				}
 			})
 		}
-		detailRow(c, t, "消息", fmt.Sprintf("%d", len(chatSession.Messages)))
-		detailRow(c, t, "更新时间", formatUpdatedAt(chatSession.UpdatedAt))
-		detailRow(c, t, "会话 ID", firstNonEmpty(chatSession.ID, "—"))
+		detailRow(c, t, uikit.T(locale, "消息", "Messages"), fmt.Sprintf("%d", len(chatSession.Messages)))
+		detailRow(c, t, uikit.T(locale, "更新时间", "Updated"), formatUpdatedAt(chatSession.UpdatedAt))
+		detailRow(c, t, uikit.T(locale, "会话 ID", "Session ID"), firstNonEmpty(chatSession.ID, "—"))
 		if chatSession.Error != "" {
 			buildErrorLine(c, t, chatSession.Error)
 		}
@@ -127,20 +132,22 @@ func buildOverviewPane(c *ui.Context, t *design.Tokens, chat contracts.ChatServi
 		// surface (the former 模型 tab was a duplicate of the model settings
 		// page): one panel, a divider and compact rows instead of a second card.
 		ui.Divider(c)
-		design.Apply(ui.Text(c, "模型配置"), t.Font(design.TypeXS)).FontWeight(600).
+		design.Apply(ui.Text(c, uikit.T(locale, "模型配置", "Model configuration")), t.Font(design.TypeXS)).FontWeight(600).
 			TextColor(t.LabelSecondary)
-		cfg := chat.Config()
-		detailRow(c, t, "模型", firstNonEmpty(cfg.Model, "未配置"))
-		if baseURL := strings.TrimSpace(cfg.BaseURL); baseURL != "" {
+		effective := chat.Config()
+		detailRow(c, t, uikit.T(locale, "模型", "Model"), firstNonEmpty(effective.Model, uikit.T(locale, "未配置", "Not configured")))
+		if baseURL := strings.TrimSpace(effective.BaseURL); baseURL != "" {
 			detailRow(c, t, "Base URL", baseURL)
 		}
-		apiKey := "未设置"
-		if strings.TrimSpace(cfg.APIKey) != "" {
-			apiKey = "已设置（已隐藏）"
+		apiKey := uikit.T(locale, "未设置", "Not set")
+		if strings.TrimSpace(effective.APIKey) != "" {
+			apiKey = uikit.T(locale, "已设置（已隐藏）", "Set (hidden)")
 		}
 		detailRow(c, t, "API Key", apiKey)
-		detailRow(c, t, "上下文预算", firstNonEmpty(intLabel(cfg.ContextBudget), "默认"))
-		detailRow(c, t, "最大迭代", firstNonEmpty(intLabel(cfg.MaxIterations), "默认"))
+		detailRow(c, t, uikit.T(locale, "上下文预算", "Context budget"),
+			firstNonEmpty(intLabel(effective.ContextBudget), uikit.T(locale, "默认", "Default")))
+		detailRow(c, t, uikit.T(locale, "最大迭代", "Max iterations"),
+			firstNonEmpty(intLabel(effective.MaxIterations), uikit.T(locale, "默认", "Default")))
 	})
 }
 
@@ -157,7 +164,7 @@ func intLabel(value int) string {
 func buildToolsPane(c *ui.Context, t *design.Tokens, chat contracts.ChatService, st *state) {
 	chatSession, ok := chat.Session(chat.ActiveSession())
 	if !ok {
-		buildEmptyPane(c, t, icons.Terminal(), "还没有工具调用")
+		buildEmptyPane(c, t, icons.Terminal(), uikit.T(st.locale, "还没有工具调用", "No tool calls yet"))
 		return
 	}
 	type toolItem struct {
@@ -174,19 +181,19 @@ func buildToolsPane(c *ui.Context, t *design.Tokens, chat contracts.ChatService,
 		}
 	}
 	if len(items) == 0 {
-		buildEmptyPane(c, t, icons.Terminal(), "还没有工具调用")
+		buildEmptyPane(c, t, icons.Terminal(), uikit.T(st.locale, "还没有工具调用", "No tool calls yet"))
 		return
 	}
 
 	ui.Row(c).FillWidth().Gap(design.Space2).AlignItems(ui.Center).Children(func() {
-		design.Apply(ui.Text(c, "工具调用"), t.Font(design.TypeXS)).
+		design.Apply(ui.Text(c, uikit.T(st.locale, "工具调用", "Tool calls")), t.Font(design.TypeXS)).
 			FontWeight(600).TextColor(t.LabelPrimary)
 		ui.Spacer(c).Grow(1)
 		design.Apply(ui.Badge(c, fmt.Sprintf("%d", len(items))), t.Badge())
 	})
 	for _, item := range items {
 		tool := item.tool
-		status := statusLabel(tool.Status)
+		status := statusLabel(tool.Status, st.locale)
 		color := statusColor(t, tool.Status)
 		card := design.Apply(ui.Column(c), t.Panel()).
 			Padding(design.Space2).Gap(design.Space1)
@@ -203,30 +210,13 @@ func buildToolsPane(c *ui.Context, t *design.Tokens, chat contracts.ChatService,
 			})
 			if summary := strings.TrimSpace(tool.Summary); summary != "" {
 				open := st.open[item.key]
-				ui.Collapsible(c, "摘要", &open, func() {
+				ui.Collapsible(c, uikit.T(st.locale, "摘要", "Summary"), &open, func() {
 					design.Apply(ui.Text(c, truncateSummary(summary)), t.TextMuted(design.TypeXXS))
 				})
 				st.open[item.key] = open
 			}
 		})
 	}
-}
-
-// buildModelPane shows the effective model configuration. The API key is
-// reduced to a set/not-set label: the secret never reaches the screen.
-func buildModelPane(c *ui.Context, t *design.Tokens, chat contracts.ChatService) {
-	config := chat.Config()
-	card := design.Apply(ui.Column(c), t.Panel()).Padding(design.Space3).Gap(design.Space2)
-	card.Children(func() {
-		design.Apply(ui.Text(c, "模型配置"), t.Font(design.TypeM)).
-			FontWeight(600).TextColor(t.LabelPrimary)
-		detailRow(c, t, "模型", firstNonEmpty(config.Model, "未配置"))
-		detailRow(c, t, "Base URL", firstNonEmpty(config.BaseURL, "未配置"))
-		detailRow(c, t, "API Key", apiKeyState(config.APIKey))
-		detailRow(c, t, "上下文预算", budgetLabel(config.ContextBudget))
-		detailRow(c, t, "最大迭代", iterationsLabel(config.MaxIterations))
-		design.Apply(ui.Text(c, "API key 已打码，不会显示明文。"), t.TextMuted(design.TypeXXS))
-	})
 }
 
 // buildEmptyPane is the centered empty state of one pane.
@@ -262,19 +252,19 @@ func detailRow(c *ui.Context, t *design.Tokens, label, value string) {
 }
 
 // statusLabel maps a tool status to its inspector label.
-func statusLabel(status string) string {
+func statusLabel(status string, locale contracts.LocaleService) string {
 	switch normalizeStatus(status) {
 	case "running":
-		return "运行中"
+		return uikit.T(locale, "运行中", "Running")
 	case "ok":
-		return "完成"
+		return uikit.T(locale, "完成", "Completed")
 	case "error":
-		return "失败"
+		return uikit.T(locale, "失败", "Failed")
 	default:
 		if trimmed := strings.TrimSpace(status); trimmed != "" {
 			return trimmed
 		}
-		return "未知"
+		return uikit.T(locale, "未知", "Unknown")
 	}
 }
 
@@ -314,30 +304,6 @@ func formatUpdatedAt(updated time.Time) string {
 	return updated.Local().Format("2006-01-02 15:04")
 }
 
-// apiKeyState reports whether an API key is configured, never the key itself.
-func apiKeyState(apiKey string) string {
-	if strings.TrimSpace(apiKey) == "" {
-		return "未设置"
-	}
-	return "已设置（已隐藏）"
-}
-
-// budgetLabel renders ContextBudget, "默认" when zero.
-func budgetLabel(budget int) string {
-	if budget <= 0 {
-		return "默认"
-	}
-	return fmt.Sprintf("%d tokens", budget)
-}
-
-// iterationsLabel renders MaxIterations, "默认" when zero.
-func iterationsLabel(iterations int) string {
-	if iterations <= 0 {
-		return "默认"
-	}
-	return fmt.Sprintf("%d", iterations)
-}
-
 // truncateSummary bounds an expanded tool summary (UTF-8 safe).
 func truncateSummary(summary string) string {
 	const max = 1200
@@ -354,29 +320,31 @@ func truncateSummary(summary string) string {
 // buildLogPane is the inspector's durable session log (the old shell's Log
 // tab): the newest events of the active session, read from the SQLite-backed
 // session log. It degrades to an explanatory empty state without a store.
-func buildLogPane(c *ui.Context, t *design.Tokens, log eventReader, chat contracts.ChatService) {
+func buildLogPane(c *ui.Context, t *design.Tokens, log eventReader, chat contracts.ChatService,
+	locale contracts.LocaleService) {
 	active := chat.ActiveSession()
 	if active == "" {
-		design.Apply(ui.Text(c, "还没有活动会话"), t.TextMuted(design.TypeXS))
+		design.Apply(ui.Text(c, uikit.T(locale, "还没有活动会话", "No active session")), t.TextMuted(design.TypeXS))
 		return
 	}
 	if log == nil {
-		design.Apply(ui.Text(c, "日志需要持久化会话存储"), t.TextMuted(design.TypeXS))
+		design.Apply(ui.Text(c, uikit.T(locale, "日志需要持久化会话存储", "The log requires a persistent session store")),
+			t.TextMuted(design.TypeXS))
 		return
 	}
 	events, err := log.Last(context.Background(), active, logLimit)
 	if err != nil {
-		design.Apply(ui.Text(c, "读取会话日志失败："+err.Error()), t.TextMuted(design.TypeXS)).
-			TextColor(t.DangerText)
+		design.Apply(ui.Text(c, uikit.T(locale, "读取会话日志失败：", "Failed to read the session log: ")+err.Error()),
+			t.TextMuted(design.TypeXS)).TextColor(t.DangerText)
 		return
 	}
 	ui.Column(c).FillWidth().Gap(design.Space2).Children(func() {
 		ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(design.Space2).Children(func() {
-			design.Apply(ui.Text(c, "会话日志"), t.Font(design.TypeS)).FontWeight(600)
+			design.Apply(ui.Text(c, uikit.T(locale, "会话日志", "Session log")), t.Font(design.TypeS)).FontWeight(600)
 			design.Apply(ui.Badge(c, fmt.Sprintf("%d", len(events))), t.Badge())
 		})
 		if len(events) == 0 {
-			design.Apply(ui.Text(c, "还没有会话事件"), t.TextMuted(design.TypeXS))
+			design.Apply(ui.Text(c, uikit.T(locale, "还没有会话事件", "No session events yet")), t.TextMuted(design.TypeXS))
 			return
 		}
 		for index := len(events) - 1; index >= 0; index-- {

@@ -124,6 +124,7 @@ func newHarness(t *testing.T, cfg approval.Config) *harness {
 	t.Cleanup(func() { _ = ctx.DisposeAll() })
 
 	provide(t, ctx, contracts.KeyUIRuntime, uiRoot.Runtime())
+	provide(t, ctx, contracts.KeyLocale, uiRoot.Locale())
 	provide(t, ctx, contracts.KeyApprovals, contracts.Approvals(approvals))
 
 	// One screen keeps the host frame non-empty ("status.no-screen" otherwise).

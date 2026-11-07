@@ -27,6 +27,7 @@ import (
 	"github.com/zeokeel/zeokeel/internal/contracts"
 	"github.com/zeokeel/zeokeel/internal/design"
 	"github.com/zeokeel/zeokeel/internal/icons"
+	"github.com/zeokeel/zeokeel/internal/uikit"
 )
 
 // ModuleID is the compile-time module identity.
@@ -70,6 +71,8 @@ func (c Config) resolved() Config {
 // state is the module instance's dialog state. It lives in the activation
 // closure (one per loaded module) and is touched only on the UI thread.
 type state struct {
+	// locale localizes the dialog copy per frame (zh is the default).
+	locale contracts.LocaleService
 	// open is the native Modal's open flag; Escape/backdrop clicks set it to
 	// false and are treated as deny.
 	open bool
@@ -93,7 +96,8 @@ func Module() *module.Descriptor[Config] {
 			return err
 		}
 		resolved := cfg.resolved()
-		st := &state{}
+		locale, _ := ctx.Get(contracts.KeyLocale)
+		st := &state{locale: locale}
 
 		// The approvals service notifies synchronously from whichever
 		// goroutine resolves or enqueues a request. Hop to the UI thread and
@@ -134,6 +138,18 @@ func Module() *module.Descriptor[Config] {
 		AddRequires(module.Requires(contracts.KeyUIRuntime)).
 		AddRequires(module.Requires(contracts.KeyApprovals)).
 		WithName("ZeoKeel approval dialog")
+}
+
+// tr returns the localized copy for the current frame's language.
+func (st *state) tr(zh, en string) string { return uikit.T(st.locale, zh, en) }
+
+// localized translates a value that still carries its built-in Chinese default
+// (an assembly-configured custom label is kept verbatim).
+func (st *state) localized(value, zhDefault, enDefault string) string {
+	if strings.TrimSpace(value) == "" || value == zhDefault {
+		return st.tr(zhDefault, enDefault)
+	}
+	return value
 }
 
 // buildDialog renders the oldest pending request in a native Modal, or nothing
@@ -179,6 +195,12 @@ func buildDialog(c *ui.Context, runtime contracts.UIRuntime, approvals contracts
 // buttons. All controls are mygo natives styled with internal/design tokens.
 func requestPanel(c *ui.Context, runtime contracts.UIRuntime, approvals contracts.Approvals, cfg Config, st *state, request contracts.ApprovalRequest) {
 	t := design.Of(c)
+	title := st.localized(cfg.Title, "需要审批", "Approval required")
+	toolLabel := st.localized(cfg.ToolLabel, "工具", "Tool")
+	argumentsLabel := st.localized(cfg.ArgumentsLabel, "参数", "Arguments")
+	allowLabel := st.localized(cfg.AllowLabel, "允许", "Allow")
+	allowAlwaysLabel := st.localized(cfg.AllowAlwaysLabel, "总是允许", "Always allow")
+	denyLabel := st.localized(cfg.DenyLabel, "拒绝", "Deny")
 	// The native Modal sizes its panel around this content; the brand spacing
 	// keeps the dialog on the same 4 DIP grid as the settings pages.
 	design.Apply(ui.Column(c).Width(560).Gap(design.Space4), func(el ui.Element) ui.Element {
@@ -189,13 +211,13 @@ func requestPanel(c *ui.Context, runtime contracts.UIRuntime, approvals contract
 		ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(design.Space2).Children(func() {
 			ui.Icon(c, approvalIcon(request.Tool)).Size(design.Space5, design.Space5).
 				TextColor(t.Accent)
-			design.Apply(ui.Text(c, cfg.Title), t.Font(design.TypeL)).FontWeight(600).
+			design.Apply(ui.Text(c, title), t.Font(design.TypeL)).FontWeight(600).
 				TextColor(t.LabelPrimary)
 			ui.Spacer(c).Grow(1)
 			design.Apply(ui.Text(c, request.Tool), t.Font(design.TypeXS)).TextColor(t.LabelSecondary)
 		})
 		ui.Row(c).AlignItems(ui.Center).Gap(design.Space2).Children(func() {
-			design.Apply(ui.Text(c, cfg.ToolLabel), t.TextMuted(design.TypeXS))
+			design.Apply(ui.Text(c, toolLabel), t.TextMuted(design.TypeXS))
 			design.Apply(ui.Badge(c, request.Tool), t.Badge())
 		})
 		if summary := strings.TrimSpace(request.Summary); summary != "" {
@@ -203,7 +225,7 @@ func requestPanel(c *ui.Context, runtime contracts.UIRuntime, approvals contract
 		}
 		if arguments := strings.TrimSpace(request.Arguments); arguments != "" {
 			ui.Divider(c)
-			design.Apply(ui.Text(c, cfg.ArgumentsLabel), t.TextMuted(design.TypeXS))
+			design.Apply(ui.Text(c, argumentsLabel), t.TextMuted(design.TypeXS))
 			scroll := ui.Scroll(c).Height(140).FillWidth()
 			design.Apply(scroll, func(el ui.Element) ui.Element {
 				return el.Background(t.BgBase).Border(1, t.BorderL2).
@@ -215,13 +237,13 @@ func requestPanel(c *ui.Context, runtime contracts.UIRuntime, approvals contract
 		}
 		ui.Divider(c)
 		ui.Row(c).FillWidth().Justify(ui.End).AlignItems(ui.Center).Gap(design.Space2).Children(func() {
-			if design.Apply(ui.PrimaryButton(c, cfg.AllowLabel), t.PrimaryButton()).Clicked() {
+			if design.Apply(ui.PrimaryButton(c, allowLabel), t.PrimaryButton()).Clicked() {
 				resolve(runtime, approvals, st, contracts.ApprovalAllow)
 			}
-			if design.Apply(ui.Button(c, cfg.AllowAlwaysLabel), secondaryButtonStyle(t)).Clicked() {
+			if design.Apply(ui.Button(c, allowAlwaysLabel), secondaryButtonStyle(t)).Clicked() {
 				resolve(runtime, approvals, st, contracts.ApprovalAllowAlways)
 			}
-			deny := design.Apply(ui.Button(c, cfg.DenyLabel), secondaryButtonStyle(t))
+			deny := design.Apply(ui.Button(c, denyLabel), secondaryButtonStyle(t))
 			deny.TextColor(t.DangerText)
 			if deny.Clicked() {
 				resolve(runtime, approvals, st, contracts.ApprovalDeny)

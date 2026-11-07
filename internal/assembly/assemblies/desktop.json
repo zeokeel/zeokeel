@@ -100,9 +100,7 @@
         {
           "id": "about",
           "module": "zeokeel-ui/about",
-          "config": {
-            "title": "关于"
-          }
+          "config": {}
         },
         {
           "id": "sidebar",

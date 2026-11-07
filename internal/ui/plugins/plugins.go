@@ -17,6 +17,7 @@ import (
 	"github.com/zeokeel/zeokeel-kernel/module"
 
 	"github.com/zeokeel/zeokeel/internal/contracts"
+	"github.com/zeokeel/zeokeel/internal/uikit"
 )
 
 // ModuleID is the compile-time module identity.
@@ -51,6 +52,20 @@ func (c Config) resolved() Config {
 type state struct {
 	ctx   cordis.Context
 	query string
+	// locale localizes the screen copy per frame (zh is the default).
+	locale contracts.LocaleService
+}
+
+// tr returns the localized copy for the current frame's language.
+func (st *state) tr(zh, en string) string { return uikit.T(st.locale, zh, en) }
+
+// localized translates a value that still carries its built-in Chinese default
+// (an assembly-configured custom label is kept verbatim).
+func (st *state) localized(value, zhDefault, enDefault string) string {
+	if strings.TrimSpace(value) == "" || value == zhDefault {
+		return st.tr(zhDefault, enDefault)
+	}
+	return value
 }
 
 // Module registers the Plugins screen.
@@ -66,7 +81,8 @@ func Module() *module.Descriptor[Config] {
 			return err
 		}
 		config := cfg.resolved()
-		moduleState := &state{ctx: ctx}
+		locale, _ := ctx.Get(contracts.KeyLocale)
+		moduleState := &state{ctx: ctx, locale: locale}
 		return own(ctx, func() (func(), error) {
 			return runtime.RegisterScreen(contracts.ScreenSpec{
 				ID:    ScreenID,

@@ -21,6 +21,13 @@
 - 右侧栏「文件」Tab：打开文件夹（mygo 原生 Directory picker）、目录进入/面包屑、文本/Markdown/图片预览、
   刷新与错误状态；E2E 覆盖工作区创建 + 列表 + 预览帧
 
+**P4 i18n 第三切片（2026-11-08）**
+- about：内容 + 页面导航标题语言变化 re-register（Config.title 优先）；rightpanel：Inspector/6 tabs/overview/
+  tools/log/files/changes/terminal 全部文案（后台输出也按当前 locale）；automation/plugins/toolcards/approval
+  页与组件全部 en/zh；E2E 增加 About/Automation 英文断言与 zh 恢复
+- 仍缺：host chrome tooltips（打开右侧栏/折叠侧边栏）、原生 Dialog 标题（导出/选目录）、后端数据文案、
+  demo tool 卡、home 命令面板静态标题
+
 **P4 i18n 第二切片（2026-11-08）**
 - settings：全部 8 个页面 + 浮层标题，每帧 uikit.T；页面标题语言变化时 unregister/re-register SettingsPageSpec
   （Section 稳定 ID 保排序/默认页，导航同帧更新）；诊断新增 Copied 提示；更新/导入异步结果英文

@@ -36,14 +36,17 @@ func buildScreen(c *ui.Context, runtime contracts.UIRuntime, cfg Config, st *sta
 
 	ui.Column(c).FillWidth().Grow(1).Gap(design.Space4).Children(func() {
 		ui.Column(c).FillWidth().Gap(design.Space1).Children(func() {
-			design.Apply(ui.Text(c, cfg.Title), t.Font(design.TypeL)).
+			design.Apply(ui.Text(c, st.localized(cfg.Title, "插件", "Plugins")), t.Font(design.TypeL)).
 				FontWeight(600).TextColor(t.LabelPrimary)
-			design.Apply(ui.Text(c, cfg.Description), t.TextMuted(design.TypeXS)).MaxLines(2)
+			design.Apply(ui.Text(c, st.localized(cfg.Description,
+				"查看已连接的 MCP 服务器与产品内置的工具目录。",
+				"Connected MCP servers and the product's built-in tool catalogue.")),
+				t.TextMuted(design.TypeXS)).MaxLines(2)
 		})
 
 		ui.Scroll(c).FillWidth().Grow(1).Children(func() {
 			ui.Column(c).FillWidth().Gap(design.Space5).Children(func() {
-				buildMCPsSection(c, t, runtime, pluginsService, hasPlugins, cfg)
+				buildMCPsSection(c, t, runtime, pluginsService, hasPlugins, cfg, st)
 				buildToolsSection(c, t, toolkit, hasToolkit, st, cfg)
 			})
 		})
@@ -58,13 +61,14 @@ func buildMCPsSection(
 	service contracts.PluginsService,
 	hasService bool,
 	cfg Config,
+	st *state,
 ) {
 	ui.Column(c).FillWidth().Gap(design.Space2).Children(func() {
 		ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(design.Space2).Children(func() {
-			design.Apply(ui.Text(c, cfg.MCPSection), t.SectionLabel())
+			design.Apply(ui.Text(c, st.localized(cfg.MCPSection, "MCP 插件", "MCP plugins")), t.SectionLabel())
 			ui.Spacer(c).Grow(1)
 			if hasService {
-				refresh := ui.Button(c, "刷新").Tooltip("重新连接并刷新 MCP 服务器状态")
+				refresh := ui.Button(c, st.tr("刷新", "Refresh")).Tooltip(st.tr("重新连接并刷新 MCP 服务器状态", "Reconnect and refresh MCP server status"))
 				if refresh.Clicked() {
 					service.Refresh(context.Background())
 					runtime.Invalidate()
@@ -72,23 +76,24 @@ func buildMCPsSection(
 			}
 		})
 		if !hasService {
-			buildPluginsMuted(c, t, "插件服务未启用")
+			buildPluginsMuted(c, t, st.tr("插件服务未启用", "Plugins service not enabled"))
 			return
 		}
 		servers := service.MCP()
 		if len(servers) == 0 {
-			buildPluginsMuted(c, t, "还没有配置 MCP 服务器（assembly 的 mcpServers）")
+			buildPluginsMuted(c, t, st.tr("还没有配置 MCP 服务器（assembly 的 mcpServers）",
+				"No MCP servers configured yet (assembly mcpServers)"))
 			return
 		}
 		for _, server := range servers {
-			buildMCPCard(c, t, server)
+			buildMCPCard(c, t, st, server)
 		}
 	})
 }
 
 // buildMCPCard is one MCP server: name, connection badge, handshake metadata,
 // URL and its tool count.
-func buildMCPCard(c *ui.Context, t *design.Tokens, server contracts.MCPPlugin) {
+func buildMCPCard(c *ui.Context, t *design.Tokens, st *state, server contracts.MCPPlugin) {
 	card := design.Apply(ui.Column(c), t.Panel()).Padding(design.Space3).Gap(design.Space2)
 	card.Children(func() {
 		ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(design.Space2).Children(func() {
@@ -98,11 +103,11 @@ func buildMCPCard(c *ui.Context, t *design.Tokens, server contracts.MCPPlugin) {
 				icon = icons.Plugin()
 			}
 			ui.Icon(c, icon).Size(16, 16).TextColor(iconColor)
-			design.Apply(ui.Text(c, firstNonEmpty(server.Name, "(未命名服务器)")), t.Font(design.TypeS)).
+			design.Apply(ui.Text(c, firstNonEmpty(server.Name, st.tr("(未命名服务器)", "(Untitled server)"))), t.Font(design.TypeS)).
 				FontWeight(600).TextColor(t.LabelPrimary).Grow(1).MaxLines(1).Ellipsis("…")
-			design.Apply(ui.Badge(c, pluginStatusLabel(server.Status)), t.Badge()).
+			design.Apply(ui.Badge(c, pluginStatusLabel(st, server.Status)), t.Badge()).
 				TextColor(pluginStatusColor(t, server.Status))
-			design.Apply(ui.Badge(c, fmt.Sprintf("%d 个工具", server.Tools)), t.Badge())
+			design.Apply(ui.Badge(c, st.tr(fmt.Sprintf("%d 个工具", server.Tools), fmt.Sprintf("%d tools", server.Tools))), t.Badge())
 		})
 		if meta := mcpMeta(server); meta != "" {
 			design.Apply(ui.Text(c, meta), t.TextMuted(design.TypeXXS)).MaxLines(1).Ellipsis("…")
@@ -142,20 +147,20 @@ func buildToolsSection(
 			}
 		}
 		ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(design.Space2).Children(func() {
-			design.Apply(ui.Text(c, cfg.ToolsSection), t.SectionLabel())
+			design.Apply(ui.Text(c, st.localized(cfg.ToolsSection, "工具目录", "Tool catalogue")), t.SectionLabel())
 			ui.Spacer(c).Grow(1)
 			if hasToolkit {
-				design.Apply(ui.Badge(c, fmt.Sprintf("%d 个工具", len(catalog))), t.Badge())
+				design.Apply(ui.Badge(c, st.tr(fmt.Sprintf("%d 个工具", len(catalog)), fmt.Sprintf("%d tools", len(catalog)))), t.Badge())
 			}
 		})
 		if !hasToolkit {
-			buildPluginsMuted(c, t, "工具目录未启用")
+			buildPluginsMuted(c, t, st.tr("工具目录未启用", "Tool catalogue not enabled"))
 			return
 		}
-		ui.SearchField(c, &st.query).Label("搜索工具").Placeholder("搜索工具").FillWidth()
+		ui.SearchField(c, &st.query).Label(st.tr("搜索工具", "Search tools")).Placeholder(st.tr("搜索工具", "Search tools")).FillWidth()
 		filtered := filterCatalog(catalog, st.query)
 		if len(filtered) == 0 {
-			buildPluginsMuted(c, t, "没有匹配的工具")
+			buildPluginsMuted(c, t, st.tr("没有匹配的工具", "No matching tools"))
 			return
 		}
 		grouped := make(map[string][]catalogTool, len(toolCategoryOrder))
@@ -168,7 +173,7 @@ func buildToolsSection(
 			if len(tools) == 0 {
 				continue
 			}
-			design.Apply(ui.Text(c, category), t.Font(design.TypeXXS)).
+			design.Apply(ui.Text(c, st.categoryLabel(category)), t.Font(design.TypeXXS)).
 				FontWeight(600).TextColor(t.LabelTertiary)
 			for _, tool := range tools {
 				buildToolRow(c, t, tool)
@@ -235,8 +240,26 @@ func toolCategory(name string) string {
 
 // pluginStatusLabel is the connection badge label (the service's own status
 // text, or a generic fallback).
-func pluginStatusLabel(status string) string {
-	return firstNonEmpty(status, "未知状态")
+func pluginStatusLabel(st *state, status string) string {
+	return firstNonEmpty(status, st.tr("未知状态", "Unknown status"))
+}
+
+// categoryLabel translates one canonical catalogue category for display.
+func (st *state) categoryLabel(category string) string {
+	switch category {
+	case "文件":
+		return st.tr("文件", "Files")
+	case "终端与任务":
+		return st.tr("终端与任务", "Terminal & jobs")
+	case "网络":
+		return st.tr("网络", "Web")
+	case "会话与记忆":
+		return st.tr("会话与记忆", "Session & memory")
+	case "团队与编排":
+		return st.tr("团队与编排", "Team & orchestration")
+	default:
+		return st.tr("其他", "Other")
+	}
 }
 
 // pluginStatusColor colors the connection badge.

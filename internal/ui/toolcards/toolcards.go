@@ -30,6 +30,7 @@ import (
 	"github.com/zeokeel/zeokeel/internal/contracts"
 	"github.com/zeokeel/zeokeel/internal/design"
 	"github.com/zeokeel/zeokeel/internal/icons"
+	"github.com/zeokeel/zeokeel/internal/uikit"
 )
 
 // Renderer orders. The demo card keeps its historical order; real cards follow.
@@ -99,7 +100,12 @@ type Config struct {
 type rendererState struct {
 	mu   sync.Mutex
 	open map[string]bool
+	// locale localizes the real cards' copy per frame (zh is the default).
+	locale contracts.LocaleService
 }
+
+// tr returns the localized copy for the current frame's language.
+func (s *rendererState) tr(zh, en string) string { return uikit.T(s.locale, zh, en) }
 
 func newRendererState() *rendererState {
 	return &rendererState{open: make(map[string]bool)}
@@ -125,7 +131,9 @@ func Module() *module.Descriptor[Config] {
 			return err
 		}
 		title := firstNonEmpty(cfg.Title, "工具调用")
+		locale, _ := ctx.Get(contracts.KeyLocale)
 		state := newRendererState()
+		state.locale = locale
 
 		// The demo card stays exactly as it was: the host's capability probe and
 		// its integration test assert its text and raw status.
@@ -192,7 +200,7 @@ func demoBuild(title string) func(c *ui.Context, call contracts.ToolCall) {
 func realBuild(state *rendererState) func(c *ui.Context, call contracts.ToolCall) {
 	return func(c *ui.Context, call contracts.ToolCall) {
 		t := design.Of(c)
-		status := statusLabel(call.Status)
+		status := statusLabel(state, call.Status)
 		color := toolStatusColor(t, call.Status)
 		card := ui.Column(c).FillWidth().Gap(design.Space2)
 		design.Apply(card, t.Panel()).Padding(design.Space3).Children(func() {
@@ -205,7 +213,7 @@ func realBuild(state *rendererState) func(c *ui.Context, call contracts.ToolCall
 					return el.Background(color.Alpha(0.15)).TextColor(color)
 				})
 				ui.Spacer(c).Grow(1)
-				if category := toolCategory(call.Name); category != "" {
+				if category := categoryLabel(state, call.Name); category != "" {
 					design.Apply(ui.Text(c, category), t.Font(design.TypeXXXS)).
 						TextColor(t.LabelTertiary)
 				}
@@ -217,7 +225,7 @@ func realBuild(state *rendererState) func(c *ui.Context, call contracts.ToolCall
 			if summary := strings.TrimSpace(call.Summary); summary != "" {
 				key := call.ID + "\x00" + call.Name
 				open := state.load(key)
-				collapsible := ui.Collapsible(c, "摘要", &open, func() {
+				collapsible := ui.Collapsible(c, state.tr("摘要", "Summary"), &open, func() {
 					design.Apply(ui.Text(c, truncateSummary(summary)), t.TextMuted(design.TypeXS))
 				})
 				design.Apply(collapsible, t.Font(design.TypeXS))
@@ -264,20 +272,20 @@ func toolStatusColor(t *design.Tokens, status string) ui.Color {
 	}
 }
 
-// statusLabel maps a tool status to the Chinese card label.
-func statusLabel(status string) string {
+// statusLabel maps a tool status to the localized card label.
+func statusLabel(state *rendererState, status string) string {
 	switch normalizeStatus(status) {
 	case "running":
-		return "运行中"
+		return state.tr("运行中", "Running")
 	case "ok":
-		return "完成"
+		return state.tr("完成", "Completed")
 	case "error":
-		return "失败"
+		return state.tr("失败", "Failed")
 	default:
 		if trimmed := strings.TrimSpace(status); trimmed != "" {
 			return trimmed
 		}
-		return "未知"
+		return state.tr("未知", "Unknown")
 	}
 }
 
@@ -295,7 +303,7 @@ func normalizeStatus(status string) string {
 	}
 }
 
-// toolCategory is the small inline hint shown at the right of a card header.
+// toolCategory is the canonical (Chinese) category key of a tool name.
 func toolCategory(name string) string {
 	switch name {
 	case "bash":
@@ -314,6 +322,30 @@ func toolCategory(name string) string {
 		return "任务"
 	case "skill":
 		return "技能"
+	default:
+		return ""
+	}
+}
+
+// categoryLabel translates the inline category hint for display.
+func categoryLabel(state *rendererState, name string) string {
+	switch toolCategory(name) {
+	case "shell":
+		return "shell"
+	case "文件":
+		return state.tr("文件", "Files")
+	case "网络":
+		return state.tr("网络", "Web")
+	case "进程":
+		return state.tr("进程", "Processes")
+	case "工作树":
+		return state.tr("工作树", "Worktrees")
+	case "编排":
+		return state.tr("编排", "Orchestration")
+	case "任务":
+		return state.tr("任务", "Tasks")
+	case "技能":
+		return state.tr("技能", "Skills")
 	default:
 		return ""
 	}

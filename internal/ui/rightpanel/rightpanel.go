@@ -38,6 +38,7 @@ import (
 
 	"github.com/zeokeel/zeokeel/internal/contracts"
 	"github.com/zeokeel/zeokeel/internal/design"
+	"github.com/zeokeel/zeokeel/internal/uikit"
 )
 
 // ModuleID is the compile-time module identity.
@@ -65,18 +66,52 @@ type Config struct {
 	EmptyText string `json:"emptyText"`
 }
 
-// resolved fills the configured strings with their defaults.
+// resolved trims the configured strings, keeping explicit overrides only; the
+// localized defaults are resolved per frame from the host locale.
 func (c Config) resolved() Config {
 	return Config{
-		Title:       firstNonEmpty(c.Title, "检查"),
-		OverviewTab: firstNonEmpty(c.OverviewTab, "概览"),
-		ToolsTab:    firstNonEmpty(c.ToolsTab, "工具"),
-		LogTab:      firstNonEmpty(c.LogTab, "日志"),
-		FilesTab:    firstNonEmpty(c.FilesTab, "文件"),
-		ChangesTab:  firstNonEmpty(c.ChangesTab, "变更"),
-		TerminalTab: firstNonEmpty(c.TerminalTab, "终端"),
-		EmptyText:   firstNonEmpty(c.EmptyText, "还没有活动会话"),
+		Title:       strings.TrimSpace(c.Title),
+		OverviewTab: strings.TrimSpace(c.OverviewTab),
+		ToolsTab:    strings.TrimSpace(c.ToolsTab),
+		ModelTab:    strings.TrimSpace(c.ModelTab),
+		LogTab:      strings.TrimSpace(c.LogTab),
+		FilesTab:    strings.TrimSpace(c.FilesTab),
+		ChangesTab:  strings.TrimSpace(c.ChangesTab),
+		TerminalTab: strings.TrimSpace(c.TerminalTab),
+		EmptyText:   strings.TrimSpace(c.EmptyText),
 	}
+}
+
+func (c Config) titleLabel(locale contracts.LocaleService) string {
+	return firstNonEmpty(c.Title, uikit.T(locale, "检查", "Inspector"))
+}
+
+func (c Config) overviewLabel(locale contracts.LocaleService) string {
+	return firstNonEmpty(c.OverviewTab, uikit.T(locale, "概览", "Overview"))
+}
+
+func (c Config) toolsLabel(locale contracts.LocaleService) string {
+	return firstNonEmpty(c.ToolsTab, uikit.T(locale, "工具", "Tools"))
+}
+
+func (c Config) logLabel(locale contracts.LocaleService) string {
+	return firstNonEmpty(c.LogTab, uikit.T(locale, "日志", "Log"))
+}
+
+func (c Config) filesLabel(locale contracts.LocaleService) string {
+	return firstNonEmpty(c.FilesTab, uikit.T(locale, "文件", "Files"))
+}
+
+func (c Config) changesLabel(locale contracts.LocaleService) string {
+	return firstNonEmpty(c.ChangesTab, uikit.T(locale, "变更", "Changes"))
+}
+
+func (c Config) terminalLabel(locale contracts.LocaleService) string {
+	return firstNonEmpty(c.TerminalTab, uikit.T(locale, "终端", "Terminal"))
+}
+
+func (c Config) emptyLabel(locale contracts.LocaleService) string {
+	return firstNonEmpty(c.EmptyText, uikit.T(locale, "还没有活动会话", "No active session"))
 }
 
 // state is the module's UI state (one instance per loaded module, only touched
@@ -88,6 +123,9 @@ type state struct {
 	// ctx is the module's kernel context: the Files pane looks up the optional
 	// workspace backend with ctx.Get(contracts.KeyWorkspace) (no Requires).
 	ctx cordis.Context
+
+	// locale localizes the inspector's own copy on every frame.
+	locale contracts.LocaleService
 
 	// Files pane state: the current relative directory, the selected file, the
 	// last error and the per-path preview cache.
@@ -120,9 +158,11 @@ func Module() *module.Descriptor[Config] {
 			return err
 		}
 		config := cfg.resolved()
+		locale, _ := ctx.Get(contracts.KeyLocale)
 		moduleState := &state{
 			open:         make(map[string]bool),
 			ctx:          ctx,
+			locale:       locale,
 			filesPreview: make(map[string]*filePreview),
 			changesOpen:  make(map[string]bool),
 			term:         newTerminalState(),

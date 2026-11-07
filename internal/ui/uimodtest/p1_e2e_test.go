@@ -391,7 +391,23 @@ func TestP1ApprovalToolsAndPersistence(t *testing.T) {
 			t.Fatalf("english settings missing %q; texts = %v", want, tester.Texts())
 		}
 	}
+	if err := tester.Click("About"); err != nil {
+		t.Fatalf("click english about page: %v; texts = %v", err, tester.Texts())
+	}
+	tester.Frame()
+	if !tester.HasText("About ZeoKeel") || !tester.HasText("Build information") {
+		t.Fatalf("english about page missing; texts = %v", tester.Texts())
+	}
 	uiRoot.Navigator().CloseSettings()
+	if err := uiRoot.Navigator().Push("automation"); err != nil {
+		t.Fatalf("Push(automation): %v", err)
+	}
+	tester.Frame()
+	for _, want := range []string{"Automation", "New task", "No automation tasks yet"} {
+		if !tester.HasText(want) {
+			t.Fatalf("english automation page missing %q; texts = %v", want, tester.Texts())
+		}
+	}
 	locale.SetLanguage("zh")
 	tester.Frame()
 	if !tester.HasText("新对话") {
