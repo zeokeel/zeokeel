@@ -2,8 +2,8 @@
 // the conversation screen (contracts.SlotSessionPanelRight). It is a UI module
 // (kernel Descriptor + host UI services) rendered entirely with mygo's native
 // controls and the brand design system (internal/design): a native tab strip
-// over the overview, tools, model, log and files panes inside t.Panel cards. It
-// never draws a control (or a Canvas) itself.
+// over the overview, tools, model, log, files and changes panes inside t.Panel
+// cards. It never draws a control (or a Canvas) itself.
 //
 // The module reads the chat read model (contracts.ChatService) and never writes
 // it: the overview shows the active session's title, message count, update time
@@ -13,7 +13,8 @@
 // so a secret can never reach the screen; the log pane lists the newest durable
 // session events; the files pane browses the current workspace (contracts.
 // WorkspaceService, looked up optionally) with directory navigation and a
-// read-only text/Markdown/image preview.
+// read-only text/Markdown/image preview; the changes pane lists the current
+// workspace's uncommitted files with native collapsible unified diffs.
 //
 // The host owns the panel width and the open/close control: the module only
 // fills the slot. Chat changes arrive on the agent goroutine, so the module
@@ -56,6 +57,7 @@ type Config struct {
 	ModelTab    string `json:"modelTab"`
 	LogTab      string `json:"logTab"`
 	FilesTab    string `json:"filesTab"`
+	ChangesTab  string `json:"changesTab"`
 	// EmptyText is the overview copy when there is no active session.
 	EmptyText string `json:"emptyText"`
 }
@@ -69,6 +71,7 @@ func (c Config) resolved() Config {
 		ModelTab:    firstNonEmpty(c.ModelTab, "模型"),
 		LogTab:      firstNonEmpty(c.LogTab, "日志"),
 		FilesTab:    firstNonEmpty(c.FilesTab, "文件"),
+		ChangesTab:  firstNonEmpty(c.ChangesTab, "变更"),
 		EmptyText:   firstNonEmpty(c.EmptyText, "还没有活动会话"),
 	}
 }
@@ -89,6 +92,13 @@ type state struct {
 	filesSelected string
 	filesErr      string
 	filesPreview  map[string]*filePreview
+
+	// Changes pane state: the cached uncommitted changes (re-read on the native
+	// Refresh action), the load error and the per-file diff fold state.
+	changesLoaded bool
+	changes       []contracts.FileChange
+	changesErr    error
+	changesOpen   map[string]bool
 }
 
 // Module registers the session inspector slot.
@@ -107,6 +117,7 @@ func Module() *module.Descriptor[Config] {
 			open:         make(map[string]bool),
 			ctx:          ctx,
 			filesPreview: make(map[string]*filePreview),
+			changesOpen:  make(map[string]bool),
 		}
 		// The session log is optional: the inspector still renders without a
 		// durable store (headless tests), it just shows the empty log copy.

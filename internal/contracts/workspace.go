@@ -55,6 +55,26 @@ type WorkspaceService interface {
 	Search(ctx context.Context, query string, limit int) ([]FileEntry, error)
 }
 
+// FileChange is one entry of the current workspace's uncommitted changes
+// (the old shell's workspace-changes view).
+type FileChange struct {
+	// Path is the path relative to the workspace root (slash separated).
+	Path string
+	// Status is the short git status: "M", "A", "D", "R", "??" (untracked).
+	Status string
+	// Diff is the unified diff for this file ("" for untracked/binary files).
+	Diff string
+}
+
+// WorkspaceDiffer is the optional part of the workspace service that reports
+// the uncommitted changes of the current workspace. UI modules type-assert it
+// so hosts without git support still implement WorkspaceService.
+type WorkspaceDiffer interface {
+	// Changes lists the workspace's uncommitted changes, bounded by the
+	// service's configured limits.
+	Changes(ctx context.Context) ([]FileChange, error)
+}
+
 // KeyWorkspace is provided by the workspace backend module and consumed by the
 // Files inspector (and later by @-mentions and the workspace/session tree).
 var KeyWorkspace = cordis.NewServiceKey[WorkspaceService]("zeokeel/workspace")

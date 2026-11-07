@@ -14,6 +14,7 @@
 package workspace
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -21,6 +22,7 @@ import (
 	"io"
 	"io/fs"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -47,6 +49,11 @@ const (
 	DefaultSearchDepth = 6
 	// DefaultSearchLimit caps one Search result set.
 	DefaultSearchLimit = 50
+	// DefaultMaxChanges caps one Changes result set (100 files).
+	DefaultMaxChanges = 100
+	// DefaultMaxDiffBytes caps the total unified diff returned by Changes
+	// (256 KiB).
+	DefaultMaxDiffBytes = 256 << 10
 	// fileMode is the registry file permission.
 	fileMode = 0o600
 	// dirMode is the registry directory permission.
@@ -62,6 +69,11 @@ type Config struct {
 	ReadLimitBytes int `json:"readLimitBytes"`
 	// SearchDepth bounds the recursive Search directory depth (0 = default 6).
 	SearchDepth int `json:"searchDepth"`
+	// MaxChanges caps one Changes result set (0 = default 100).
+	MaxChanges int `json:"maxChanges"`
+	// MaxDiffBytes caps the total unified diff returned by Changes (0 = default
+	// 256 KiB).
+	MaxDiffBytes int `json:"maxDiffBytes"`
 }
 
 // Errors returned by the workspace service.
@@ -123,6 +135,12 @@ func validateConfig(cfg Config) error {
 	if cfg.SearchDepth < 0 {
 		return fmt.Errorf("%s: searchDepth must not be negative", ModuleID)
 	}
+	if cfg.MaxChanges < 0 {
+		return fmt.Errorf("%s: maxChanges must not be negative", ModuleID)
+	}
+	if cfg.MaxDiffBytes < 0 {
+		return fmt.Errorf("%s: maxDiffBytes must not be negative", ModuleID)
+	}
 	return nil
 }
 
@@ -150,14 +168,19 @@ type Service struct {
 	path   string
 	logger contracts.Logger
 
-	readLimit   int
-	searchDepth int
+	readLimit    int
+	searchDepth  int
+	maxChanges   int
+	maxDiffBytes int
 
 	workspaces []contracts.Workspace
 	currentID  string
 }
 
-var _ contracts.WorkspaceService = (*Service)(nil)
+var (
+	_ contracts.WorkspaceService = (*Service)(nil)
+	_ contracts.WorkspaceDiffer  = (*Service)(nil)
+)
 
 // newService resolves the registry path and loads the existing document. A
 // missing file starts an empty registry; an unreadable or malformed file is a
@@ -175,14 +198,24 @@ func newService(dataDir string, cfg Config, logger contracts.Logger) (*Service, 
 	if searchDepth == 0 {
 		searchDepth = DefaultSearchDepth
 	}
+	maxChanges := cfg.MaxChanges
+	if maxChanges == 0 {
+		maxChanges = DefaultMaxChanges
+	}
+	maxDiffBytes := cfg.MaxDiffBytes
+	if maxDiffBytes == 0 {
+		maxDiffBytes = DefaultMaxDiffBytes
+	}
 	if logger == nil {
 		logger = discardLogger{}
 	}
 	service := &Service{
-		path:        path,
-		logger:      logger,
-		readLimit:   readLimit,
-		searchDepth: searchDepth,
+		path:         path,
+		logger:       logger,
+		readLimit:    readLimit,
+		searchDepth:  searchDepth,
+		maxChanges:   maxChanges,
+		maxDiffBytes: maxDiffBytes,
 	}
 	if err := service.load(); err != nil {
 		return nil, err
@@ -775,4 +808,226 @@ func (s *Service) Search(ctx context.Context, query string, limit int) ([]contra
 		return results[i].Path < results[j].Path
 	})
 	return results, nil
+}
+
+// --- uncommitted changes (git) ---------------------------------------------
+
+// errNotGitRepository is wrapped into the readable error Changes returns when
+// the current workspace root is not inside a git working tree.
+var errNotGitRepository = errors.New("workspace: not inside a git repository")
+
+// gitResult is the captured output of one git invocation. A non-zero exit is
+// not an error here; callers decide whether the status is meaningful.
+type gitResult struct {
+	stdout   string
+	stderr   string
+	exitCode int
+}
+
+// runGit runs git in dir with the caller's context. The environment disables
+// prompts and forces a stable locale so porcelain output parses identically on
+// every machine.
+func (s *Service) runGit(ctx context.Context, dir string, args ...string) (gitResult, error) {
+	if _, err := exec.LookPath("git"); err != nil {
+		return gitResult{}, fmt.Errorf("%s: git executable not found: %w", ModuleID, err)
+	}
+	command := exec.CommandContext(ctx, "git", append([]string{"-C", dir}, args...)...)
+	command.Env = append(os.Environ(), "GIT_TERMINAL_PROMPT=0", "LC_ALL=C")
+	var stdout, stderr bytes.Buffer
+	command.Stdout = &stdout
+	command.Stderr = &stderr
+	runErr := command.Run()
+	if ctxErr := contextErr(ctx); ctxErr != nil {
+		return gitResult{}, ctxErr
+	}
+	if runErr != nil {
+		var exitErr *exec.ExitError
+		if errors.As(runErr, &exitErr) {
+			return gitResult{stdout: stdout.String(), stderr: stderr.String(), exitCode: exitErr.ExitCode()}, nil
+		}
+		return gitResult{}, fmt.Errorf("%s: run git: %w", ModuleID, runErr)
+	}
+	return gitResult{stdout: stdout.String(), stderr: stderr.String()}, nil
+}
+
+// gitOutput runs git and returns trimmed stdout, converting a non-zero exit to
+// a readable error.
+func (s *Service) gitOutput(ctx context.Context, dir string, args ...string) (string, error) {
+	result, err := s.runGit(ctx, dir, args...)
+	if err != nil {
+		return "", err
+	}
+	if result.exitCode != 0 {
+		detail := strings.TrimSpace(result.stderr)
+		if detail == "" {
+			detail = strings.TrimSpace(result.stdout)
+		}
+		if detail == "" {
+			return "", fmt.Errorf("%s: git %s failed with exit status %d", ModuleID, strings.Join(args, " "), result.exitCode)
+		}
+		return "", fmt.Errorf("%s: git %s failed: %s", ModuleID, strings.Join(args, " "), detail)
+	}
+	return strings.TrimSpace(result.stdout), nil
+}
+
+// Changes implements contracts.WorkspaceDiffer: the uncommitted changes of the
+// current workspace with bounded per-file unified diffs.
+func (s *Service) Changes(ctx context.Context) ([]contracts.FileChange, error) {
+	if err := contextErr(ctx); err != nil {
+		return nil, err
+	}
+	if _, err := exec.LookPath("git"); err != nil {
+		return nil, fmt.Errorf("%s: git executable not found: %w", ModuleID, err)
+	}
+	_, root, err := s.currentWorkspaceRoot()
+	if err != nil {
+		return nil, err
+	}
+	top, err := s.gitOutput(ctx, root, "rev-parse", "--show-toplevel")
+	if err != nil {
+		return nil, fmt.Errorf("%s: workspace %q is not a git repository: %w", ModuleID, root, errNotGitRepository)
+	}
+	inside, err := s.gitOutput(ctx, root, "rev-parse", "--is-inside-work-tree")
+	if err != nil || strings.TrimSpace(inside) != "true" {
+		return nil, fmt.Errorf("%s: workspace %q is not a git working tree: %w", ModuleID, root, errNotGitRepository)
+	}
+	top = filepath.Clean(strings.TrimSpace(top))
+	if resolved, err := filepath.EvalSymlinks(top); err == nil {
+		top = filepath.Clean(resolved)
+	}
+	rootRelative, err := filepath.Rel(top, root)
+	if err != nil {
+		return nil, fmt.Errorf("%s: workspace root is not inside the repository: %w", ModuleID, err)
+	}
+	rootRelativeSlash := filepath.ToSlash(rootRelative)
+	if rootRelativeSlash == "." {
+		rootRelativeSlash = ""
+	}
+
+	// Porcelain -z output must not be trimmed: the first status column may be
+	// a space (" M path"), and leading/trailing whitespace is part of paths.
+	statusResult, err := s.runGit(ctx, root, "status", "--porcelain=v1", "-z")
+	if err != nil {
+		return nil, err
+	}
+	if statusResult.exitCode != 0 {
+		detail := strings.TrimSpace(statusResult.stderr)
+		if detail == "" {
+			detail = strings.TrimSpace(statusResult.stdout)
+		}
+		return nil, fmt.Errorf("%s: git status failed: %s", ModuleID, detail)
+	}
+	raw := parseGitStatus(statusResult.stdout, rootRelativeSlash, s.maxChanges)
+	changes := make([]contracts.FileChange, 0, len(raw))
+	diffBudget := s.maxDiffBytes
+	for _, item := range raw {
+		change := contracts.FileChange{Path: item.path, Status: item.status}
+		if item.status != "??" && diffBudget > 0 {
+			diff, err := s.gitOutput(ctx, root, "diff", "HEAD", "--no-color", "--", filepath.ToSlash(item.path))
+			if err != nil {
+				return nil, fmt.Errorf("%s: diff %q: %w", ModuleID, item.path, err)
+			}
+			if isBinaryDiff(diff) {
+				diff = ""
+			}
+			if len(diff) > diffBudget {
+				diff = diff[:diffBudget]
+			}
+			change.Diff = diff
+			diffBudget -= len(diff)
+		}
+		changes = append(changes, change)
+	}
+	return changes, nil
+}
+
+// rawChange is one parsed porcelain status entry.
+type rawChange struct {
+	path   string
+	status string
+}
+
+// parseGitStatus parses `git status --porcelain=v1 -z`. Paths are relative to
+// the repository root in git's output, so rootRelative (the workspace root
+// relative to the repository root, "" for the repository root itself) is
+// stripped and changes outside the workspace are skipped.
+func parseGitStatus(output, rootRelative string, maxChanges int) []rawChange {
+	if strings.TrimSpace(output) == "" {
+		return nil
+	}
+	tokens := strings.Split(output, "\x00")
+	changes := make([]rawChange, 0, len(tokens))
+	for index := 0; index < len(tokens); index++ {
+		token := tokens[index]
+		if len(token) < 3 {
+			continue
+		}
+		xy := token[:2]
+		path := token[3:]
+		if strings.ContainsAny(xy, "RC") && index+1 < len(tokens) {
+			// A rename/copy entry carries the original path as the next NUL
+			// separated token; the new path (already read) is the file path.
+			index++
+		}
+		translated, ok := translateGitPath(path, rootRelative)
+		if !ok {
+			continue
+		}
+		changes = append(changes, rawChange{path: translated, status: statusFromXY(xy)})
+		if len(changes) >= maxChanges {
+			break
+		}
+	}
+	return changes
+}
+
+// translateGitPath turns a repository-root-relative git path into a
+// workspace-root-relative path, reporting false for paths outside the root.
+func translateGitPath(path, rootRelative string) (string, bool) {
+	path = strings.TrimPrefix(filepath.ToSlash(path), "./")
+	if path == "" {
+		return "", false
+	}
+	if rootRelative == "" {
+		return path, true
+	}
+	prefix := rootRelative + "/"
+	if !strings.HasPrefix(path, prefix) {
+		return "", false
+	}
+	translated := strings.TrimPrefix(path, prefix)
+	if translated == "" {
+		return "", false
+	}
+	return translated, true
+}
+
+// statusFromXY maps the two porcelain columns to the short status the UI
+// shows: "??" for untracked, otherwise the first non-space column (so both
+// staged and unstaged modifications read "M").
+func statusFromXY(xy string) string {
+	if xy == "??" {
+		return "??"
+	}
+	for _, column := range xy {
+		if column != ' ' && column != '?' && column != '!' {
+			return string(column)
+		}
+	}
+	return strings.TrimSpace(xy)
+}
+
+// isBinaryDiff reports whether a unified diff is git's binary placeholder
+// rather than text hunks.
+func isBinaryDiff(diff string) bool {
+	trimmed := strings.TrimSpace(diff)
+	if trimmed == "" {
+		return false
+	}
+	for _, line := range strings.Split(trimmed, "\n") {
+		if strings.HasPrefix(line, "Binary files ") || line == "GIT binary patch" {
+			return true
+		}
+	}
+	return false
 }

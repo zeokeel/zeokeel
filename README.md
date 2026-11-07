@@ -112,6 +112,10 @@ go test ./...
   面包屑、文本/Markdown/图片预览；截图 `p2-files.png`、`p2-files-preview.png`；desktop 17 / headless 8 实例
 - ✅ P2 @ 提及：composer 输入 `@` 弹出工作区文件建议（`WorkspaceService.Files/Search`，native 面板，
   方向/文件图标 + 大小），选择后写入 `@path `；无工作区不显示、读取错误 DangerText；截图 `p2-mentions.png`
+- ✅ P3 工作区变更（diff）：`WorkspaceDiffer.Changes`（git status porcelain + `git diff HEAD`，二进制/未跟踪/rename
+  语义、maxChanges/maxDiffBytes、非 git 可读错误）；右侧栏「变更」Tab：状态 Badge + ±统计 + Collapsible
+  展开 unified diff（+ 行 Success / − 行 Danger / hunk 表头 muted，mono）；截图 `p2-changes.png`、
+  `p2-changes-diff.png`
 - ⬜ 后续阶段见 [docs/PRODUCT-REBUILD-PLAN.md](docs/PRODUCT-REBUILD-PLAN.md)：
   P2 剩余（composer 附件/图片/@ 提及、右侧栏 Files/Terminal/Log 页、会话操作上下文菜单）→
   P3 memory/skills/automation/插件/workspace diff/搜索/fork/export → P4 ACP/热键/导入/更新/诊断

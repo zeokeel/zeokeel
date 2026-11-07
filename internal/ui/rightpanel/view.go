@@ -20,6 +20,7 @@ const (
 	tabModel
 	tabLog
 	tabFiles
+	tabChanges
 )
 
 // logLimit bounds the session event rows the Log pane reads per frame.
@@ -48,6 +49,8 @@ func buildPanel(c *ui.Context, t *design.Tokens, runtime contracts.UIRuntime, ch
 				buildLogPane(c, t, log, chat)
 			case tabFiles:
 				buildFilesPane(c, t, workspace, runtime, st)
+			case tabChanges:
+				buildChangesPane(c, t, workspace, runtime, st)
 			default:
 				buildOverviewPane(c, t, chat, cfg)
 			}
@@ -59,7 +62,7 @@ func buildPanel(c *ui.Context, t *design.Tokens, runtime contracts.UIRuntime, ch
 // the accent underline (same language as the session header tabs).
 func buildTabs(c *ui.Context, t *design.Tokens, cfg Config, st *state) {
 	th := t.Theme()
-	labels := []string{cfg.OverviewTab, cfg.ToolsTab, cfg.ModelTab, cfg.LogTab, cfg.FilesTab}
+	labels := []string{cfg.OverviewTab, cfg.ToolsTab, cfg.ModelTab, cfg.LogTab, cfg.FilesTab, cfg.ChangesTab}
 	tabs := ui.TabsBase(c, &st.tab, len(labels))
 	tabs.List.Height(t.Scale(th.Space(8))).Padding(0, 0, 0, th.Space(1)).
 		Gap(design.Space3).AlignItems(ui.Stretch).Children(func() {

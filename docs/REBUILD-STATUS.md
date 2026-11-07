@@ -21,6 +21,11 @@
 - 右侧栏「文件」Tab：打开文件夹（mygo 原生 Directory picker）、目录进入/面包屑、文本/Markdown/图片预览、
   刷新与错误状态；E2E 覆盖工作区创建 + 列表 + 预览帧
 
+**P3 工作区变更 diff（2026-11-07 晚）**
+- `WorkspaceDiffer.Changes`：git status --porcelain=v1 -z 解析（M/A/D/R/??、rename 新路径、嵌套 workspace
+  路径翻译）、`git diff HEAD` 生成 unified diff（二进制/untracked 空 diff、maxChanges=100 / maxDiffBytes=256KiB、
+  ctx 取消）；右侧栏「变更」Tab：状态 Badge、±统计、Collapsible 展开 diff 行着色、刷新；E2E 用真实 git 仓库验证
+
 **P2 @ 提及（2026-11-07 晚）**
 - composer `@` 建议面板：读 WorkspaceService（空查询 Files / 非空 Search），native 行插入 `@path `；
   E2E 覆盖真实 desktop assembly 的提及选择 → 发送 → 气泡文本

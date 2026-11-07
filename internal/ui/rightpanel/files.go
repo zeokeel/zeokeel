@@ -141,6 +141,8 @@ func buildOpenWorkspace(c *ui.Context, t *design.Tokens, workspace contracts.Wor
 					st.filesSelected = ""
 					st.filesErr = ""
 					st.filesPreview = make(map[string]*filePreview)
+					st.changesLoaded = false
+					st.changes = nil
 				}
 			}
 			runtime.Invalidate()
