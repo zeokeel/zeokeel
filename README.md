@@ -1,6 +1,7 @@
 # ZeoKeel
 
-> **继续推进（TDD 并行 + 反证审计）**：新增 subagent 同步委派、permission 权限模式（ask/workspace/full）；
+> **继续推进（TDD 并行 + 反证审计）**：新增 subagent 同步委派、permission 权限模式（ask/workspace/full）、
+> team manager 编排与右侧「团队」面板（spawn/steer/interrupt）；
 > 反证审计 78 例发现 4×P2+4×P3 全部修复，`internal/regression` 0 SKIP。详情：[docs/ADVERSARIAL-AUDIT.md](docs/ADVERSARIAL-AUDIT.md)。
 >
 > **最终轮状态（Round 40/40）**：可运行的桌面/headless/ACP 产品；32 测试包（含 -race）全绿；

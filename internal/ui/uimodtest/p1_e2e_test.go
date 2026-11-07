@@ -674,6 +674,50 @@ func TestP1ApprovalToolsAndPersistence(t *testing.T) {
 		t.Fatalf("restore ask permission: %v", err)
 	}
 
+	// team orchestration: spawn_teammate creates a real in-process teammate and
+	// the Agents inspector lists it with its latest result.
+	teamSvc, err := root.Require(contracts.KeyTeam)
+	if err != nil {
+		t.Fatalf("require team service: %v", err)
+	}
+	spawnResult, spawnErr := toolkit.Invoke(context.Background(), rig.ToolCall{
+		ID: "spawn-1", Name: "spawn_teammate",
+		Arguments: `{"name":"研究员","prompt":"研究一下当前工作目录"}`,
+	})
+	if spawnErr != nil || spawnResult.IsError {
+		t.Fatalf("spawn_teammate = %+v (err %v)", spawnResult, spawnErr)
+	}
+	var member contracts.TeamMember
+	teamDeadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(teamDeadline) {
+		for _, candidate := range teamSvc.Members() {
+			if candidate.Name == "研究员" && candidate.Last != "" {
+				member = candidate
+			}
+		}
+		if member.ID != "" {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if member.ID == "" {
+		t.Fatalf("teammate never produced a result: %+v", teamSvc.Members())
+	}
+	if err := uiRoot.Navigator().Push("session"); err != nil {
+		t.Fatalf("Push(session) before team panel: %v", err)
+	}
+	uiRoot.SetRightPanelOpen(true)
+	tester.Frame()
+	if err := tester.Click("团队"); err != nil {
+		t.Fatalf("open agents tab: %v; texts = %v", err, tester.Texts())
+	}
+	tester.Frame()
+	for _, want := range []string{"研究员", member.ID, "运行中"} {
+		if !tester.HasText(want) {
+			t.Fatalf("agents pane missing %q; texts = %v", want, tester.Texts())
+		}
+	}
+
 	// --- restart: the session and its messages come back from SQLite ------
 	title := session.Title
 	if err := loader.Close(); err != nil {

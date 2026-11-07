@@ -21,6 +21,14 @@
 - 右侧栏「文件」Tab：打开文件夹（mygo 原生 Directory picker）、目录进入/面包屑、文本/Markdown/图片预览、
   刷新与错误状态；E2E 覆盖工作区创建 + 列表 + 预览帧
 
+**TDD-team：编排与团队 UI（2026-11-08）**
+- agent `TeamService`（rig team.Manager：Spawn/Send/SendAsync/Wait/Interrupt/Close/Members + Last 结果；惰性 dynamic runner、
+  MaxDepth=1/MaxConcurrent=4、递归工具排除、dispose CloseAll）+ 模型工具注册（team_*/spawn_teammate/list_agents/wait_agent/
+  send_message/interrupt_agent，按 registry 重名跳过同步 subagent）；agent 测试 65
+- rightpanel 第 7 tab「团队」：成员列表（name/id/status/Last）、选中 steer 输入 SendAsync、中断/关闭、空/错误态、i18n；
+  rightpanel 45 测试
+- E2E：spawn_teammate → 真实子代理产出 Last → Inspector 团队面板显示成员/状态；截图 p2-team.png
+
 **TDD 并行推进 + 反证审计修复（2026-11-08）**
 - TDD-1 subagent 同步委派：agent 模块提供 `contracts.Subagents`（rig agent.NewRunner 嵌套、递归排除编排名、fork/模型/迭代覆盖），
   注册 `subagent`/`subagent_fork` 工具；agent 测试 +6

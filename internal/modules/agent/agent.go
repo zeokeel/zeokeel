@@ -36,6 +36,7 @@ import (
 	"github.com/zeokeel/zeokeel-rig/session/compact"
 	rigtools "github.com/zeokeel/zeokeel-rig/tools"
 	rigsession "github.com/zeokeel/zeokeel-rig/tools/session"
+	rigteam "github.com/zeokeel/zeokeel-rig/tools/team"
 
 	"github.com/zeokeel/zeokeel/internal/contracts"
 )
@@ -126,8 +127,48 @@ func Module() *module.Descriptor[Config] {
 				return err
 			}
 		}
+		// The team manager tool set overlaps the synchronous subagent names, so
+		// register only names the shared toolkit does not already have.
+		teamManager := svc.teamManagerService()
+		known := make(map[string]bool, len(registry.Specs()))
+		for _, spec := range registry.Specs() {
+			known[spec.Name] = true
+		}
+		for _, tool := range newTeamTools(teamManager) {
+			name := strings.TrimSpace(tool.Name())
+			if name == "" {
+				continue
+			}
+			if known[name] {
+				logger.Printf("[agent] skip team tool %s: duplicate registry name", name)
+				continue
+			}
+			if err := registry.Register(tool); err != nil {
+				return fmt.Errorf("agent: register team tool %q: %w", name, err)
+			}
+			known[name] = true
+			if _, err := ctx.Effect(func() cordis.Effect {
+				return cordis.Effect{cordis.CleanupOf(func() { registry.Unregister(name) })}
+			}); err != nil {
+				registry.Unregister(name)
+				return err
+			}
+		}
+		if _, err := ctx.Effect(func() cordis.Effect {
+			return cordis.Effect{cordis.CleanupOf(func() {
+				if closeErr := teamManager.CloseAll(); closeErr != nil {
+					logger.Printf("[agent] close team manager: %v", closeErr)
+				}
+			})}
+		}); err != nil {
+			_ = teamManager.CloseAll()
+			return err
+		}
 		if _, err := ctx.Provide(contracts.KeySubagents, contracts.Subagents(svc)); err != nil {
 			return fmt.Errorf("agent: provide subagents: %w", err)
+		}
+		if _, err := ctx.Provide(contracts.KeyTeam, contracts.TeamService(newTeamService(svc))); err != nil {
+			return fmt.Errorf("agent: provide team service: %w", err)
 		}
 		_, err = ctx.Provide(contracts.KeyChat, contracts.ChatService(svc))
 		return err
@@ -135,6 +176,7 @@ func Module() *module.Descriptor[Config] {
 		AddProvides(
 			module.Provides(contracts.KeyChat),
 			module.Provides(contracts.KeySubagents),
+			module.Provides(contracts.KeyTeam),
 		).
 		AddRequires(module.Requires(contracts.KeyToolkit)).
 		AddRequires(module.Requires(contracts.KeySettings)).
@@ -167,6 +209,8 @@ type service struct {
 	nextMessageSeq uint64
 	// nextSubagentSeq names auto-named synchronous subagents (sub-<n>).
 	nextSubagentSeq atomic.Uint64
+	// teamManager owns the session's live teammates (created lazily under mu).
+	teamManager *rigteam.Manager
 
 	// providerFactory builds the provider for one run. It is a field so tests
 	// can script providers; nil uses openai.New with the effective config.

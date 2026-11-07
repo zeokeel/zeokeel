@@ -53,10 +53,12 @@ func subagentExcludedTools() []string {
 		"ralph",
 		"todo",
 		"todo_write",
-		"spawn_teammate",
-		"team_task_create",
-		"team_task_update",
 	} {
+		add(name)
+	}
+	// The team tools are registered later in the same module; children must
+	// never receive them either.
+	for _, name := range teamToolNames() {
 		add(name)
 	}
 	return names

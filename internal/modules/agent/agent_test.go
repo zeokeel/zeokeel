@@ -713,7 +713,7 @@ func TestModuleManifest(t *testing.T) {
 	for _, provider := range descriptor.Provides {
 		provides[provider.Name] = true
 	}
-	for _, name := range []string{contracts.KeyChat.Name(), contracts.KeySubagents.Name()} {
+	for _, name := range []string{contracts.KeyChat.Name(), contracts.KeySubagents.Name(), contracts.KeyTeam.Name()} {
 		if !provides[name] {
 			t.Fatalf("provides = %+v, want %s", descriptor.Provides, name)
 		}

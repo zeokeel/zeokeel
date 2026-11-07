@@ -256,6 +256,36 @@ func main() {
 		a.render(outDir + "/p2-goal.png")
 	}
 
+	// Team orchestration: a real teammate + the Agents inspector.
+	if toolkit, tkErr := a.root.Require(contracts.KeyToolkit); tkErr == nil {
+		_, _ = toolkit.Invoke(context.Background(), rig.ToolCall{
+			ID: "spawn-snapshot", Name: "spawn_teammate",
+			Arguments: `{"name":"研究员","prompt":"研究一下当前工作目录并给出摘要"}`,
+		})
+		if team, teamErr := a.root.Require(contracts.KeyTeam); teamErr == nil {
+			for attempts := 0; attempts < 80; attempts++ {
+				ready := false
+				for _, member := range team.Members() {
+					if member.Last != "" {
+						ready = true
+					}
+				}
+				if ready {
+					break
+				}
+				time.Sleep(10 * time.Millisecond)
+			}
+			a.ui.SetRightPanelOpen(true)
+			a.tester.Frame()
+			if err := a.tester.Click("团队"); err != nil {
+				fmt.Println("open agents tab:", err)
+			}
+			a.render(outDir + "/p2-team.png")
+			a.ui.SetRightPanelOpen(false)
+			a.tester.Frame()
+		}
+	}
+
 	// Permission mode chip (ask → workspace → full, the slash command cycles it).
 	if store, ok := a.root.Get(contracts.KeySettings); ok {
 		_ = store.Set(contracts.SettingAgentPermission, contracts.PermissionFull)

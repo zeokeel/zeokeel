@@ -62,6 +62,7 @@ type Config struct {
 	FilesTab    string `json:"filesTab"`
 	ChangesTab  string `json:"changesTab"`
 	TerminalTab string `json:"terminalTab"`
+	AgentsTab   string `json:"agentsTab"`
 	// EmptyText is the overview copy when there is no active session.
 	EmptyText string `json:"emptyText"`
 }
@@ -78,6 +79,7 @@ func (c Config) resolved() Config {
 		FilesTab:    strings.TrimSpace(c.FilesTab),
 		ChangesTab:  strings.TrimSpace(c.ChangesTab),
 		TerminalTab: strings.TrimSpace(c.TerminalTab),
+		AgentsTab:   strings.TrimSpace(c.AgentsTab),
 		EmptyText:   strings.TrimSpace(c.EmptyText),
 	}
 }
@@ -108,6 +110,10 @@ func (c Config) changesLabel(locale contracts.LocaleService) string {
 
 func (c Config) terminalLabel(locale contracts.LocaleService) string {
 	return firstNonEmpty(c.TerminalTab, uikit.T(locale, "终端", "Terminal"))
+}
+
+func (c Config) agentsLabel(locale contracts.LocaleService) string {
+	return firstNonEmpty(c.AgentsTab, uikit.T(locale, "团队", "Agents"))
 }
 
 func (c Config) emptyLabel(locale contracts.LocaleService) string {
@@ -144,6 +150,13 @@ type state struct {
 	// term is the Terminal pane's state (the command runner appends from a
 	// background goroutine, so its output guard lives in terminalState).
 	term *terminalState
+
+	// Agents pane state: the selected teammate, the steer draft and the last
+	// action status/error.
+	selectedMemberID string
+	steerDraft       string
+	teamStatus       string
+	teamErr          string
 }
 
 // Module registers the session inspector slot.
@@ -201,7 +214,11 @@ func Module() *module.Descriptor[Config] {
 					if service, ok := ctx.Get(contracts.KeyTerminal); ok {
 						terminal = service
 					}
-					buildPanel(c, design.Of(c), runtime, chat, log, workspace, terminal, config, moduleState)
+					var team contracts.TeamService
+					if service, ok := ctx.Get(contracts.KeyTeam); ok {
+						team = service
+					}
+					buildPanel(c, design.Of(c), runtime, chat, log, workspace, terminal, team, config, moduleState)
 				},
 			})
 		})

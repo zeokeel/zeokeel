@@ -22,6 +22,7 @@ const (
 	tabFiles
 	tabChanges
 	tabTerminal
+	tabAgents
 )
 
 // logLimit bounds the session event rows the Log pane reads per frame.
@@ -30,7 +31,7 @@ const logLimit = 50
 // buildPanel renders the whole inspector for one frame: heading, the native
 // pane tabs and the selected pane. The host owns the panel width; the module
 // fills it.
-func buildPanel(c *ui.Context, t *design.Tokens, runtime contracts.UIRuntime, chat contracts.ChatService, log eventReader, workspace contracts.WorkspaceService, terminal contracts.TerminalService, cfg Config, st *state) {
+func buildPanel(c *ui.Context, t *design.Tokens, runtime contracts.UIRuntime, chat contracts.ChatService, log eventReader, workspace contracts.WorkspaceService, terminal contracts.TerminalService, team contracts.TeamService, cfg Config, st *state) {
 	ui.Column(c).FillWidth().Gap(design.Space3).Children(func() {
 		ui.Row(c).FillWidth().Gap(design.Space2).AlignItems(ui.Center).Children(func() {
 			ui.Icon(c, icons.Sliders()).Size(16, 16).TextColor(t.LabelSecondary)
@@ -52,6 +53,8 @@ func buildPanel(c *ui.Context, t *design.Tokens, runtime contracts.UIRuntime, ch
 				buildChangesPane(c, t, workspace, runtime, st)
 			case tabTerminal:
 				buildTerminalPane(c, t, terminal, runtime, st)
+			case tabAgents:
+				buildAgentsPane(c, t, team, runtime, st)
 			default:
 				buildOverviewPane(c, t, chat, cfg, st.locale)
 			}
@@ -66,6 +69,7 @@ func buildTabs(c *ui.Context, t *design.Tokens, cfg Config, st *state) {
 	labels := []string{
 		cfg.overviewLabel(st.locale), cfg.toolsLabel(st.locale), cfg.logLabel(st.locale),
 		cfg.filesLabel(st.locale), cfg.changesLabel(st.locale), cfg.terminalLabel(st.locale),
+		cfg.agentsLabel(st.locale),
 	}
 	tabs := ui.TabsBase(c, &st.tab, len(labels))
 	tabs.List.Height(t.Scale(th.Space(8))).Padding(0, 0, 0, th.Space(1)).
