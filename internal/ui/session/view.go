@@ -54,7 +54,7 @@ func buildScreen(
 			buildChatPane(c, t, runtime, navigator, chat, cfg, st, chatSession, hasSession)
 		}
 		if hasSession {
-			buildComposer(c, t, runtime, chat, cfg, st, activeID, chatSession)
+			buildComposer(c, t, runtime, navigator, chat, cfg, st, activeID, chatSession)
 		}
 	})
 }
@@ -380,6 +380,7 @@ func buildComposer(
 	c *ui.Context,
 	t *design.Tokens,
 	runtime contracts.UIRuntime,
+	navigator contracts.Navigator,
 	chat contracts.ChatService,
 	cfg Config,
 	st *state,
@@ -428,13 +429,14 @@ func buildComposer(
 				}
 				ui.Row(c).FillWidth().AlignItems(ui.Center).
 					Gap(design.Space2).Children(func() {
+					buildComposerToolbar(c, t, runtime, navigator, chat, st, running)
+					ui.Spacer(c).Grow(1)
 					hint := cfg.ComposerHint
 					if running {
 						hint = "正在生成回复…"
 					}
 					design.Apply(ui.Text(c, hint), t.Font(design.TypeXXS)).
 						TextColor(t.LabelTertiary).MaxLines(1)
-					ui.Spacer(c).Grow(1)
 					if running {
 						buildStopButton(c, t, cfg, chat, activeID)
 					} else {
@@ -450,6 +452,31 @@ func buildComposer(
 			}
 		})
 	})
+}
+
+// buildComposerToolbar is the composer's bottom-left control row from the old
+// shell: the model chip (opens the model settings page), the slash-command
+// entry (fills the draft with "/" so the command menu opens) and the attach
+// control (a native button whose file picker lands with the attachment slice).
+func buildComposerToolbar(c *ui.Context, t *design.Tokens, runtime contracts.UIRuntime,
+	navigator contracts.Navigator, chat contracts.ChatService, st *state, running bool) {
+	model := "未配置模型"
+	if cfg := chat.Config(); cfg.Model != "" {
+		model = cfg.Model
+	}
+	modelButton := ui.Button(c, model).Tooltip("打开模型设置")
+	if modelButton.Clicked() {
+		navigator.ToggleSettings()
+	}
+	if !running {
+		slash := ui.Button(c, "/").Tooltip("命令：输入 / 打开命令菜单")
+		if slash.Clicked() {
+			st.draft += "/"
+			runtime.Invalidate()
+		}
+		attach := ui.Button(c, "附件").Tooltip("附件（下一阶段支持）").Disabled(true)
+		_ = attach
+	}
 }
 
 // buildSendButton is the composer's primary control: the native button keeps

@@ -190,7 +190,8 @@ if _, err := ctx.Effect(func() cordis.Effect {
   TypeRole、motion）、`internal/icons`（SVG 图标）；uiroot chrome 使用品牌侧栏/brand row/顶栏，
   `ui/{home,session,sidebar,settings,approval,toolcards}` 全部品牌化（native 控件 + design 样式）
 - ✅ 老 UI 布局对齐：无全局顶栏，屏幕自带头部；侧栏模块化导航（首页/会话/搜索/重命名/删除）；
-  `ui/rightpanel` 提供窗口级 docked 右侧检查栏（概览/工具/模型），宿主右上角开关；composer slash 命令
+  `ui/rightpanel` 提供窗口级 docked 右侧检查栏（概览/工具/模型），宿主右上角开关；composer slash 命令；
+  composer 工具栏（模型 chip / 命令入口 / 附件占位）与 Home 初始设置卡对照 old 实现
 - ✅ 示范模块：`appinfo`（服务）、`ui/home`（screen+command+槽位组合）、`ui/about`
   （settings page + settings.header）、`ui/welcome`（topbar.center + home.hero + command）、
   `ui/toolcards`（ToolRenderer）、`uikit`（共享控件封装）

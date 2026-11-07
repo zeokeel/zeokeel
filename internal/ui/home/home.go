@@ -79,6 +79,7 @@ func Module() *module.Descriptor[Config] {
 									region(c, runtime, contracts.SlotHomeHero, func(c *ui.Context) {
 										buildHero(c, tokens, greeting, info, chat == nil)
 									})
+									buildSetupCard(c, tokens, chat, nav)
 									region(c, runtime, contracts.SlotHomeComposer, func(c *ui.Context) {
 										buildComposer(c, tokens, chat, nav, runtime, composerPlaceholder)
 									})
@@ -104,6 +105,35 @@ func Module() *module.Descriptor[Config] {
 		AddRequires(module.Requires(contracts.KeyNavigator)).
 		AddRequires(module.Requires(contracts.KeyAppInfo)).
 		WithName("ZeoKeel Home screen")
+}
+
+// buildSetupCard is the first-run guidance card from the old shell's
+// homeSetupCard: while no model is configured, Home says what is missing and
+// offers the action that fixes it instead of letting the first send fail.
+func buildSetupCard(c *ui.Context, t *design.Tokens, chat contracts.ChatService, nav contracts.Navigator) {
+	if chat == nil {
+		return
+	}
+	cfg := chat.Config()
+	if cfg.Model != "" {
+		return
+	}
+	panel := ui.Column(c).FillWidth().Gap(design.Space2).Padding(design.Space3)
+	design.Apply(panel, t.Panel())
+	panel.Children(func() {
+		ui.Row(c).Gap(design.Space2).AlignItems(ui.Center).Children(func() {
+			ui.Icon(c, icons.Sparkles()).Size(16, 16).TextColor(t.Accent)
+			design.Apply(ui.Text(c, "完成 ZeoKeel 的初始设置"), t.Font(design.TypeS)).
+				FontWeight(600).TextColor(t.LabelPrimary).Grow(1)
+		})
+		ui.Row(c).Gap(design.Space2).AlignItems(ui.Center).Children(func() {
+			design.Apply(ui.Text(c, "尚未配置模型。添加服务商与密钥后才能发送消息。"), t.TextMuted(design.TypeXS)).
+				Grow(1).MaxLines(2)
+			if ui.Button(c, "配置模型").Clicked() {
+				nav.ToggleSettings()
+			}
+		})
+	})
 }
 
 // buildHero is the default Home hero: the brand mark and wordmark over the

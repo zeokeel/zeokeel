@@ -87,7 +87,10 @@ go test ./...
     删除确认
   - composer slash 命令菜单：读 `UIRuntime.Commands()`，过滤/匹配/点击执行；命令注册表与未来命令面板共用
   - 新增右侧检查面板模块 `zeokeel-ui/rightpanel`（概览/工具/模型，含 API key 打码），由宿主 docked 渲染
-  - Home 简化为老结构：居中 hero（logo+wordmark）+ composer 入口，不再堆 demo 工具卡/设置按钮/最近会话
+  - Home 简化为老结构：居中 hero（logo+wordmark）+ 初始设置卡（缺模型时引导"配置模型"，
+    对照 old homeSetupCard）+ composer 入口，不再堆 demo 工具卡/设置按钮/最近会话
+  - Composer 工具栏（对照 old composer_native）：模型 chip（打开模型设置）、`/` 命令入口、
+    附件按钮（禁用占位，附件落 P2 剩余）
 - ⬜ 后续阶段见 [docs/PRODUCT-REBUILD-PLAN.md](docs/PRODUCT-REBUILD-PLAN.md)：
   P2 剩余（composer 附件/图片/@ 提及、右侧栏 Files/Terminal/Log 页、会话操作上下文菜单）→
   P3 memory/skills/automation/插件/workspace diff/搜索/fork/export → P4 ACP/热键/导入/更新/诊断

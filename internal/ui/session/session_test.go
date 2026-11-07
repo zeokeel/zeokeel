@@ -879,3 +879,31 @@ func TestSlashCommandQueryFiltering(t *testing.T) {
 		}
 	})
 }
+
+// TestComposerToolbar covers the old shell's composer toolbar: the model chip
+// opens the model settings, the slash entry opens the command menu, and the
+// attach control is present but disabled until attachments land.
+func TestComposerToolbar(t *testing.T) {
+	chat := newFakeChat()
+	chat.addSession(contracts.ChatSession{ID: "sess-1", Title: "工具栏"}, true)
+	h := newHarness(t, chat)
+	tester := h.tester()
+	h.assertTexts(tester, "未配置模型", "附件")
+
+	if _, err := h.ui.Runtime().RegisterCommand(contracts.CommandSpec{
+		ID: "toolbar.demo", Title: "工具栏命令", Hint: "测试", Order: 10,
+		Run: func() error { return nil },
+	}); err != nil {
+		t.Fatalf("register command: %v", err)
+	}
+	tester.Frame()
+	h.click(tester, "/")
+	h.assertTexts(tester, "工具栏命令")
+
+	// The model chip opens the settings surface (the chip itself targets the
+	// model page; settings navigation is the host's).
+	h.click(tester, "未配置模型")
+	if !h.ui.Navigator().SettingsOpen() {
+		t.Fatal("model chip did not open the settings surface")
+	}
+}
