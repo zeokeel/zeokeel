@@ -145,13 +145,13 @@ func TestProductsAndEntries(t *testing.T) {
 			t.Fatalf("desktop root %d = %q, want %q", index, root.Module, wantRoots[index])
 		}
 	}
-	if len(desktop[11].Children) != 9 {
-		t.Fatalf("UI group children = %d, want 9 UI modules", len(desktop[11].Children))
+	if len(desktop[11].Children) != 10 {
+		t.Fatalf("UI group children = %d, want 10 UI modules", len(desktop[11].Children))
 	}
 	wantChildren := []string{
 		"zeokeel-ui/home", "zeokeel-ui/toolcards", "zeokeel-ui/about",
 		"zeokeel-ui/sidebar", "zeokeel-ui/session", "zeokeel-ui/settings", "zeokeel-ui/approval",
-		"zeokeel-ui/rightpanel", "zeokeel-ui/automation",
+		"zeokeel-ui/rightpanel", "zeokeel-ui/automation", "zeokeel-ui/plugins",
 	}
 	for index, child := range desktop[11].Children {
 		if child.Module != wantChildren[index] {
@@ -202,14 +202,15 @@ func TestRegistryIsExplicit(t *testing.T) {
 		"zeokeel-ui/approval",
 		"zeokeel-ui/rightpanel",
 		"zeokeel-ui/automation",
+		"zeokeel-ui/plugins",
 		assembly.GroupModuleID,
 	} {
 		if !registry.Has(id) {
 			t.Fatalf("Registry() lacks module %q", id)
 		}
 	}
-	if got := len(registry.Modules()); got != 22 {
-		t.Fatalf("Registry() modules = %d, want 22", got)
+	if got := len(registry.Modules()); got != 23 {
+		t.Fatalf("Registry() modules = %d, want 23", got)
 	}
 }
 
@@ -241,13 +242,14 @@ func TestDesktopAssemblyLoadsAndUnwinds(t *testing.T) {
 	// approvals provider, the agent consumer and the UI modules settle in
 	// dependency order.
 	instances := loader.Instances()
-	if len(instances) != 21 {
-		t.Fatalf("desktop instances = %d, want 21", len(instances))
+	if len(instances) != 22 {
+		t.Fatalf("desktop instances = %d, want 22", len(instances))
 	}
 	wantIDs := []string{
 		"appinfo", "store", "approvals", "workspace", "terminal", "skills", "memory", "toolkit", "hosttools",
 		"agent", "automation", "ui",
-		"home", "toolcards", "about", "sidebar", "session", "settings", "approval", "rightpanel", "automation-ui",
+		"home", "toolcards", "about", "sidebar", "session", "settings", "approval", "rightpanel",
+		"automation-ui", "plugins-ui",
 	}
 	gotIDs := make([]string, len(instances))
 	for index, instance := range instances {
@@ -272,8 +274,8 @@ func TestDesktopAssemblyLoadsAndUnwinds(t *testing.T) {
 	if err := uiRoot.Validate(); err != nil {
 		t.Fatalf("uiroot Validate after load: %v", err)
 	}
-	if screens := uiRoot.ScreenLister().Screens(); !slices.Equal(screens, []string{"home", "automation", "session"}) {
-		t.Fatalf("screens after load = %v, want [home automation session]", screens)
+	if screens := uiRoot.ScreenLister().Screens(); !slices.Equal(screens, []string{"home", "automation", "session", "plugins"}) {
+		t.Fatalf("screens after load = %v, want [home automation session plugins]", screens)
 	}
 	// The modules contributed to the host's reserved slots (ui/welcome) and to
 	// the settings surface (ui/about) without the host knowing about them.

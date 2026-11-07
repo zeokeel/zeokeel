@@ -56,3 +56,26 @@ func TestSidebarSkipsOwnScreens(t *testing.T) {
 		t.Fatalf("会话 labels = %d, want 1 (the section label); texts = %v", got, tester.Texts())
 	}
 }
+
+func TestSidebarListsPluginsScreen(t *testing.T) {
+	h := newHarness(t, &fakeChat{}, sidebar.Config{})
+	if _, err := h.uiRoot.Runtime().RegisterScreen(contracts.ScreenSpec{
+		ID:    "plugins",
+		Title: "插件",
+		Order: 30,
+		Build: func(c *ui.Context) {
+			ui.Text(c, "插件屏幕内容")
+		},
+	}); err != nil {
+		t.Fatalf("register plugins screen: %v", err)
+	}
+	tester := h.tester()
+	tester.Frame()
+	h.assertTexts(tester, "首页", "插件")
+
+	if err := tester.Click("插件"); err != nil {
+		t.Fatalf("click plugins nav item: %v; texts = %v", err, tester.Texts())
+	}
+	tester.Frame()
+	h.assertTexts(tester, "插件屏幕内容")
+}

@@ -133,6 +133,9 @@ go test ./...
   Prompt，RunNow/启停/删除/NextRun/LastError，Subscribe；toolkit schedule_* 工具改绑持久 scheduler）；
   `zeokeel-ui/automation` 自动化页（列表/新建/启停/立即运行/删除，native 控件）+ 侧栏通用屏幕导航；
   截图 `p2-automation.png`；desktop 21 / headless 11 实例
+- ✅ P3 插件页：toolkit 暴露 `KeyPlugins`（MCP 服务器快照/Ping 刷新/工具数）；`zeokeel-ui/plugins` 插件页
+  （MCP 插件状态卡 + 48 工具目录按分类分组 + 搜索过滤）+ 侧栏「插件」导航；截图 `p2-plugins.png`、
+  `p2-plugins-search.png`；desktop 22 实例
 - ⬜ 后续阶段见 [docs/PRODUCT-REBUILD-PLAN.md](docs/PRODUCT-REBUILD-PLAN.md)：
   P2 剩余（composer 附件/图片/@ 提及、右侧栏 Files/Terminal/Log 页、会话操作上下文菜单）→
   P3 memory/skills/automation/插件/workspace diff/搜索/fork/export → P4 ACP/热键/导入/更新/诊断

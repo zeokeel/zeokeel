@@ -288,6 +288,16 @@ func main() {
 		fmt.Println("push automation:", err)
 	}
 	a.render(outDir + "/p2-automation.png")
+	if err := a.ui.Navigator().Push("plugins"); err != nil {
+		fmt.Println("push plugins:", err)
+	}
+	a.render(outDir + "/p2-plugins.png")
+	if rect, ok := a.tester.Find("搜索工具"); ok {
+		a.tester.ClickAt(rect.X+rect.W/2, rect.Y+rect.H/2)
+		a.tester.Frame()
+		a.tester.Type("memory")
+		a.render(outDir + "/p2-plugins-search.png")
+	}
 }
 
 func boot(baseURL, dataDir string) *app {

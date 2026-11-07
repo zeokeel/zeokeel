@@ -156,8 +156,18 @@ func Module() *module.Descriptor[Config] {
 		}
 
 		var clients []*mcp.Client
+		pluginEntries := make([]pluginEntry, 0, len(cfg.MCPServers))
 		for _, server := range cfg.MCPServers {
-			if strings.TrimSpace(server.URL) == "" {
+			entry := pluginEntry{plugin: contracts.MCPPlugin{
+				Name:   strings.TrimSpace(server.Name),
+				URL:    strings.TrimSpace(server.URL),
+				Status: statusConnectFailed + "未配置 URL",
+			}}
+			if entry.plugin.URL == "" {
+				// Keep a failed entry so the Plugins screen can show the
+				// misconfiguration instead of silently dropping the server.
+				entry.plugin.Name = pluginDisplayName(server.Name, nil)
+				pluginEntries = append(pluginEntries, entry)
 				continue
 			}
 			serverTimeout := time.Duration(server.TimeoutMs) * time.Millisecond
@@ -168,15 +178,27 @@ func Module() *module.Descriptor[Config] {
 				Timeout:    serverTimeout,
 			})
 			if err != nil {
-				closeAll(clients)
-				terminals.CloseAll()
-				background.CloseAll()
-				return err
+				// A failed server must not fail the whole toolkit activation:
+				// keep the entry with a readable failure status and continue.
+				entry.plugin.Name = pluginDisplayName(server.Name, nil)
+				entry.plugin.Status = statusConnectFailed + err.Error()
+				pluginEntries = append(pluginEntries, entry)
+				continue
 			}
 			clients = append(clients, client)
-			tools = append(tools, mcp.Tools(client, "")...)
+			mcpTools := mcp.Tools(client, "")
+			tools = append(tools, mcpTools...)
 			tools = append(tools, mcp.ResourceTools(client, "")...)
+			entry.client = client
+			entry.plugin.Name = pluginDisplayName(server.Name, client)
+			entry.plugin.ServerName = client.ServerName()
+			entry.plugin.Version = client.ServerVersion()
+			entry.plugin.Protocol = client.ProtocolVersion()
+			entry.plugin.Tools = len(mcpTools)
+			entry.plugin.Status = statusConnected
+			pluginEntries = append(pluginEntries, entry)
 		}
+		plugins := newPluginsService(pluginEntries)
 
 		if _, err := ctx.Effect(func() cordis.Effect {
 			return cordis.Effect{cordis.CleanupOf(func() {
@@ -191,9 +213,15 @@ func Module() *module.Descriptor[Config] {
 			return err
 		}
 
-		_, err := ctx.Provide(contracts.KeyToolkit, rigtool.NewRegistry(tools...))
+		if _, err := ctx.Provide(contracts.KeyToolkit, rigtool.NewRegistry(tools...)); err != nil {
+			return err
+		}
+		_, err := ctx.Provide(contracts.KeyPlugins, contracts.PluginsService(plugins))
 		return err
-	}).AddProvides(module.Provides(contracts.KeyToolkit)).WithName("ZeoKeel Rig toolset")
+	}).AddProvides(
+		module.Provides(contracts.KeyToolkit),
+		module.Provides(contracts.KeyPlugins),
+	).WithName("ZeoKeel Rig toolset")
 }
 
 func closeAll(clients []*mcp.Client) {

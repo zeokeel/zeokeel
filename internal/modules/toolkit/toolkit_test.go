@@ -143,6 +143,8 @@ func testMCPHTTPServer(t *testing.T) *httptest.Server {
 				"capabilities":    map[string]any{"tools": map[string]any{}},
 				"serverInfo":      map[string]any{"name": "test", "version": "1.0.0"},
 			}
+		case "ping":
+			result = map[string]any{}
 		case "tools/list":
 			result = map[string]any{"tools": []any{
 				map[string]any{

@@ -1,0 +1,109 @@
+// Package plugins contributes the Plugins screen: the MCP plugin connections
+// and the product's tool catalogue (the old shell's Plugins/manage surface),
+// rebuilt with mygo's native controls and the brand design system.
+//
+// It is a UI module like ui/automation: a kernel Descriptor that requires the
+// host UI runtime and navigator, registers the "plugins" screen and reads the
+// optional contracts.PluginsService and contracts.KeyToolkit registry (no
+// Requires). Missing backends degrade to per-section empty states. Every
+// action (the MCP Refresh) runs through the service and invalidates the frame.
+package plugins
+
+import (
+	"strings"
+
+	"github.com/egoist/mygo/ui"
+	cordis "github.com/zeokeel/zeokeel-kernel"
+	"github.com/zeokeel/zeokeel-kernel/module"
+
+	"github.com/zeokeel/zeokeel/internal/contracts"
+)
+
+// ModuleID is the compile-time module identity.
+const ModuleID = "zeokeel-ui/plugins"
+
+// ScreenID is the screen the module contributes.
+const ScreenID = "plugins"
+
+// Config is the module's typed assembly config (all fields have defaults).
+type Config struct {
+	// Title is the screen title and page heading (default "插件").
+	Title string `json:"title"`
+	// Description is the page subtitle.
+	Description string `json:"description"`
+	// MCPSection is the MCP servers section label (default "MCP 插件").
+	MCPSection string `json:"mcpSection"`
+	// ToolsSection is the tool catalogue section label (default "工具目录").
+	ToolsSection string `json:"toolsSection"`
+}
+
+func (c Config) resolved() Config {
+	return Config{
+		Title:        firstNonEmpty(c.Title, "插件"),
+		Description:  firstNonEmpty(c.Description, "查看已连接的 MCP 服务器与产品内置的工具目录。"),
+		MCPSection:   firstNonEmpty(c.MCPSection, "MCP 插件"),
+		ToolsSection: firstNonEmpty(c.ToolsSection, "工具目录"),
+	}
+}
+
+// state is the module's UI state: the tool search query. It is only touched on
+// the UI thread.
+type state struct {
+	ctx   cordis.Context
+	query string
+}
+
+// Module registers the Plugins screen.
+func Module() *module.Descriptor[Config] {
+	return module.Define(ModuleID, func(ctx cordis.Context, cfg Config) error {
+		runtime, err := ctx.Require(contracts.KeyUIRuntime)
+		if err != nil {
+			return err
+		}
+		// The navigator is required so the screen is reachable from the host's
+		// navigation surface; the page itself has no in-page navigation.
+		if _, err := ctx.Require(contracts.KeyNavigator); err != nil {
+			return err
+		}
+		config := cfg.resolved()
+		moduleState := &state{ctx: ctx}
+		return own(ctx, func() (func(), error) {
+			return runtime.RegisterScreen(contracts.ScreenSpec{
+				ID:    ScreenID,
+				Title: config.Title,
+				Order: 30,
+				Build: func(c *ui.Context) {
+					buildScreen(c, runtime, config, moduleState)
+				},
+			})
+		})
+	}).
+		AddRequires(module.Requires(contracts.KeyUIRuntime)).
+		AddRequires(module.Requires(contracts.KeyNavigator)).
+		WithName("ZeoKeel plugins screen")
+}
+
+// own registers one contribution and ties its unregistration to ctx's effect
+// lifetime.
+func own(ctx cordis.Context, register func() (func(), error)) error {
+	unregister, err := register()
+	if err != nil {
+		return err
+	}
+	if _, err := ctx.Effect(func() cordis.Effect {
+		return cordis.Effect{cordis.CleanupOf(unregister)}
+	}); err != nil {
+		unregister()
+		return err
+	}
+	return nil
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, value := range values {
+		if trimmed := strings.TrimSpace(value); trimmed != "" {
+			return trimmed
+		}
+	}
+	return ""
+}

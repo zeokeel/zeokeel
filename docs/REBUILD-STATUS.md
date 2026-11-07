@@ -21,6 +21,12 @@
 - 右侧栏「文件」Tab：打开文件夹（mygo 原生 Directory picker）、目录进入/面包屑、文本/Markdown/图片预览、
   刷新与错误状态；E2E 覆盖工作区创建 + 列表 + 预览帧
 
+**P3 插件页（2026-11-08）**
+- toolkit 提供 `KeyPlugins`：MCP servers 快照（Name/URL/ServerName/Version/Protocol/Tools/Status）、Refresh Ping +
+  ListTools 刷新；连接失败保留条目
+- `zeokeel-ui/plugins`：MCP 插件状态卡 + 工具目录分类/搜索/计数；侧栏通用导航自动出现「插件」；
+  E2E 覆盖工具目录（48 工具）与搜索过滤、MCP 空态
+
 **P3 自动化（2026-11-08）**
 - `zeokeel/automation`：cron 子集（*/N、M H、@hourly/@daily）+ every/after，JSON 持久化，ticker 扫描执行
   （新会话 + prompt）、RunNow/CRUD/启停/NextRun/LastError/Subscribe；toolkit schedule_* 绑定持久 scheduler

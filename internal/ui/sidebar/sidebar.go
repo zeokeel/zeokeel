@@ -236,8 +236,11 @@ func buildSessionList(c *ui.Context, t *design.Tokens, chat contracts.ChatServic
 						continue
 					}
 					icon := icons.Data()
-					if id == "automation" {
+					switch id {
+					case "automation":
 						icon = icons.Clock()
+					case "plugins":
+						icon = icons.Plugin()
 					}
 					item := ui.SidebarItem(c, id, icon, screenNavLabel(id))
 					screenID := id
@@ -432,6 +435,8 @@ func screenNavLabel(id string) string {
 	switch id {
 	case "automation":
 		return "自动化"
+	case "plugins":
+		return "插件"
 	default:
 		return id
 	}

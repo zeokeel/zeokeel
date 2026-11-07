@@ -19,6 +19,7 @@ import (
 	"github.com/zeokeel/zeokeel/internal/ui/approval"
 	automationui "github.com/zeokeel/zeokeel/internal/ui/automation"
 	"github.com/zeokeel/zeokeel/internal/ui/home"
+	"github.com/zeokeel/zeokeel/internal/ui/plugins"
 	"github.com/zeokeel/zeokeel/internal/ui/rightpanel"
 	"github.com/zeokeel/zeokeel/internal/ui/session"
 	"github.com/zeokeel/zeokeel/internal/ui/settings"
@@ -70,6 +71,7 @@ func Registry() *module.Registry {
 	mustRegister(registry, approval.Module())
 	mustRegister(registry, rightpanel.Module())
 	mustRegister(registry, automationui.Module())
+	mustRegister(registry, plugins.Module())
 	mustRegister(registry, GroupModule())
 	return registry
 }

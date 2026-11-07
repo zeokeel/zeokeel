@@ -138,6 +138,11 @@
           "id": "automation-ui",
           "module": "zeokeel-ui/automation",
           "config": {}
+        },
+        {
+          "id": "plugins-ui",
+          "module": "zeokeel-ui/plugins",
+          "config": {}
         }
       ]
     }
