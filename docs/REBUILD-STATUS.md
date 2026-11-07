@@ -21,6 +21,11 @@
 - 右侧栏「文件」Tab：打开文件夹（mygo 原生 Directory picker）、目录进入/面包屑、文本/Markdown/图片预览、
   刷新与错误状态；E2E 覆盖工作区创建 + 列表 + 预览帧
 
+**TDD-fontsize/feedback-export（2026-11-08）**
+- 消息字号：行为页 小/标准/大（12.5/14/16，LineHeight 比例保持），session markdown 选项缓存含 size，设置切换下一帧生效；
+  session 145 / settings 147 测试
+- 反馈导出/统计：导出全部会话含逐条反馈标记与会话汇总；诊断报告新增有帮助/没帮助统计（掩码保持）；settings 147 测试
+
 **TDD-queue/mcp-servers/automation-filter（2026-11-08）**
 - 运行中排队发送：行为页开关 `ui.sendWhileRunning`；Running 且开启时草稿入队（Badge N 条），回合结束订阅/每帧 flush FIFO，
   失败保留重试，切会话清队列；session 142 / settings 139 测试

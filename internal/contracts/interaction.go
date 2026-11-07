@@ -106,6 +106,9 @@ const (
 	// queued prompts are sent when the run finishes (default false = Send is
 	// disabled while running).
 	SettingSendWhileRunning = "ui.sendWhileRunning"
+	// SettingChatFontSize scales the conversation transcript: "small",
+	// "standard" (default) or "large".
+	SettingChatFontSize = "ui.chatFontSize"
 	// SettingThemeMode is the appearance source: "light", "dark" or "system"
 	// (the legacy ui.theme.dark boolean is still written for older builds).
 	SettingThemeMode = "ui.theme.mode"

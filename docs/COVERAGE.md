@@ -65,7 +65,7 @@
 | `prompt` | 🟡 | agent SystemPrompt + settings 模型页提示词 | 无 modes/plan/memory/AGENTS.md 注入策略、auto-title/review prompt |
 | `provider` | ✅ | rig `provider/openai` + agent 模块 | OpenAI Chat Completions 兼容 |
 | `runtime` | 🟡 | agent + rig agent/gate/compact | 循环/审批/压缩/检查点/多模态 parts/subagent runner/team manager/goal 工具与 goal 桥；缺 modes、review、goal 自动驱动、PTC/workflow/ralph |
-| `session` | 🟡 | agent ChatService + Regenerate/Fork/Archive/Pin/ModelSwitcher + usage + 排队发送 | 发送/取消/历史/恢复/压缩/fork/export/附件/重新生成/会话模型/推理强度/turn usage/**运行中排队发送（FIFO，回合结束自动 flush）**；缺 goal 多轮自动执行、tool spill |
+| `session` | 🟡 | agent ChatService + Regenerate/Fork/Archive/Pin/ModelSwitcher + usage + 排队发送 | 发送/取消/历史/恢复/压缩/fork/export/附件/重新生成/会话模型/推理强度/turn usage/运行中排队发送/**消息字号（小/标准/大，即时生效）**；缺 goal 多轮自动执行、tool spill |
 | `sessionreference` | 🟡 | composer @ 菜单 + agent `references.go` | token 持久化、注入尾部 20 条/≤8000 rune、session_refs 事件、self/unknown/重复忽略、分隔符解析；缺旧候选排序细节/URI 语义/预算错误分类 |
 | `skills` | 🟡 | `internal/modules/skills` + settings 技能页 | 多根 List/Read/roots/预览/刷新 + **新建（dataDir/skills，frontmatter/校验）与删除（仅 dataDir，realpath 校验）**；缺 workspace 技能编辑、文件监听 |
 | `state` | ✅ | ChatService 读模型 + uiroot runtime | old broker/projector 被读模型替代；UI 所需投影可用 |
@@ -86,7 +86,7 @@
 | Composer 深度（/goal /plan /memory/权限/effort/@session/presets） | 🟡 | `sessionCommands` + `command_dialogs.go` + `commands_help.go` + `buildComposerToolbar` | 已落地 12 条：/新会话 /创建副本 /导出对话 /打开设置 /设置目标 /审阅计划 /添加记忆 /反馈 /停止 /附加文件 /帮助 + 权限模式、模式切换（普通/计划/精简/创作）、推理强度、@session、预设插入；缺 /compact、/goal 子命令 |
 | Chrome/Sidebar/折叠 rail/右栏 dock | ✅ | uiroot + sidebar | 280px sidebar、64px rail、Cmd/Ctrl+B、**Cmd/Ctrl+N 新建会话、Cmd/Ctrl+, 设置、Cmd/Ctrl+K 命令面板**、右栏开关、添加工作区、视图选项（排序/分组持久化）、工作区搜索/置顶/归档 |
 | 命令面板/窗口内快捷键 | ✅ | uiroot palette/shortcuts | Cmd/Ctrl+K、可配置两条 chrome 快捷键；非系统全局热键 |
-| Settings 外壳与页面 | 🟡 | `internal/ui/settings`、about | 17 页：模型/模型目录/服务商/诊断/快捷键/外观（托盘+热键+主题三态）/技能（编辑）/更新/导入/搜索/MCP/网络/预设/LSP/数据与隐私/通知（总开关+级别过滤）/**行为（默认代理权限）** + 关于；缺内置插件参数页/市场 |
+| Settings 外壳与页面 | 🟡 | `internal/ui/settings`、about | 17 页：…/**行为（默认代理权限、消息字号、运行中排队发送）**/数据与隐私（含反馈统计导出）；缺内置插件参数页/市场 |
 | Approval 审批 Modal | ✅ | `internal/ui/approval` + approvals 模块 | allow/allow-always/deny、ask/workspace/full/never（settings 覆盖、workspace 只读自动 allow） |
 | 右侧检查栏 | ✅ | rightpanel | 8 tab：概览/工具/日志/文件/变更/终端/**团队**/**任务**，en/zh |
 | Files 检查器 | ✅ | rightpanel files + workspace | 打开文件夹/面包屑/文本/Markdown/图片预览/错误态 |

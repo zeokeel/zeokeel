@@ -163,7 +163,77 @@ func buildBehaviorPage(c *ui.Context, runtime contracts.UIRuntime,
 				"Queued prompts are sent one by one after the current turn finishes.")),
 				t.TextMuted(design.TypeXXS)).MaxLines(2)
 		})
+		panel(c, t, func() {
+			ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(design.Space2).Children(func() {
+				sectionTitle(c, t, localized(locale, "消息字号", "Message text size"))
+				ui.Spacer(c).Grow(1)
+				if st.status != "" {
+					statusBadge(c, t, st.status, st.statusErr)
+				}
+			})
+			current := chatFontSizeSetting(store)
+			ui.PopoverMenuButton(c, chatFontSizeLabel(locale, current), func(m *ui.Menu) {
+				for _, choice := range chatFontSizes {
+					choice := choice
+					item := m.Item(localized(locale, choice.zh, choice.en))
+					item.Checked(choice.value == current)
+					if item.Chosen() && choice.value != current {
+						if err := store.Set(contracts.SettingChatFontSize, choice.value); err != nil {
+							st.status = localized(locale, "保存失败：", "Save failed: ") + err.Error()
+							st.statusErr = true
+						} else {
+							st.status = localized(locale, "已保存", "Saved")
+							st.statusErr = false
+						}
+						runtime.Invalidate()
+					}
+				}
+			}).Tooltip(localized(locale, "选择对话文字大小", "Choose the conversation text size"))
+			design.Apply(ui.Text(c, localized(locale,
+				"对话文字大小，立即生效。",
+				"Conversation text size, applies immediately.")),
+				t.TextMuted(design.TypeXXS)).MaxLines(2)
+		})
 	})
+}
+
+// chatFontSizeChoice is one conversation font-size choice.
+type chatFontSizeChoice struct {
+	value string
+	zh    string
+	en    string
+}
+
+var chatFontSizes = []chatFontSizeChoice{
+	{value: "small", zh: "小", en: "Small"},
+	{value: "standard", zh: "标准", en: "Standard"},
+	{value: "large", zh: "大", en: "Large"},
+}
+
+// chatFontSizeSetting normalizes ui.chatFontSize: small/standard/large, with
+// missing and malformed values falling back to standard.
+func chatFontSizeSetting(store contracts.SettingsService) string {
+	if store == nil {
+		return "standard"
+	}
+	switch strings.ToLower(strings.TrimSpace(store.Get(contracts.SettingChatFontSize, ""))) {
+	case "small":
+		return "small"
+	case "large":
+		return "large"
+	default:
+		return "standard"
+	}
+}
+
+// chatFontSizeLabel returns the localized current choice label.
+func chatFontSizeLabel(locale contracts.LocaleService, value string) string {
+	for _, choice := range chatFontSizes {
+		if choice.value == value {
+			return localized(locale, choice.zh, choice.en)
+		}
+	}
+	return localized(locale, "标准", "Standard")
 }
 
 // sendWhileRunningEnabled normalizes the stored ui.sendWhileRunning row: only

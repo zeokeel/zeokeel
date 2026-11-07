@@ -397,7 +397,7 @@ func buildMessage(c *ui.Context, t *design.Tokens, runtime contracts.UIRuntime, 
 				design.Apply(ui.Column(c), t.Panel()).
 					MaxWidthPercent(70).Padding(design.Space3, design.Space4).Children(func() {
 					design.Apply(ui.Text(c, message.Text), t.Font(design.TypeBody)).
-						TextColor(t.LabelPrimary)
+						FontSize(st.messageFontSize()).TextColor(t.LabelPrimary)
 				})
 			}
 			buildMessageAttachments(c, t, st, message.Attachments)
@@ -690,6 +690,7 @@ func buildRegenerateAction(c *ui.Context, t *design.Tokens, runtime contracts.UI
 type markdownCache struct {
 	options *markdown.Options
 	dark    bool
+	size    float32
 }
 
 // markdownOptions returns the brand Markdown configuration: body text at the
@@ -697,11 +698,12 @@ type markdownCache struct {
 // no reveal pacing (the reply is already complete when it is drawn; streaming
 // uses the library's own healing parser).
 func (st *state) markdownOptions(t *design.Tokens) *markdown.Options {
-	if st.md.options != nil && st.md.dark == t.Dark {
+	size := st.messageFontSize()
+	if st.md.options != nil && st.md.dark == t.Dark && st.md.size == size {
 		return st.md.options
 	}
 	theme := markdown.DefaultTheme(t.Theme())
-	theme.FontSize = 14
+	theme.FontSize = size
 	theme.LineHeight = 22.0 / 14
 	st.md.options = &markdown.Options{
 		Theme:      theme,
@@ -709,7 +711,25 @@ func (st *state) markdownOptions(t *design.Tokens) *markdown.Options {
 		Reveal:     &markdown.Reveal{Unit: markdown.AtOnce, Fade: -1},
 	}
 	st.md.dark = t.Dark
+	st.md.size = size
 	return st.md.options
+}
+
+// messageFontSize is the transcript body size from ui.chatFontSize:
+// 12.5 (small), 14 (standard, the default) or 16 (large). Missing and
+// malformed values fall back to standard.
+func (st *state) messageFontSize() float32 {
+	if st == nil || st.settings == nil {
+		return 14
+	}
+	switch strings.ToLower(strings.TrimSpace(st.settings.Get(contracts.SettingChatFontSize, ""))) {
+	case "small":
+		return 12.5
+	case "large":
+		return 16
+	default:
+		return 14
+	}
 }
 
 // buildMemoryPane is the Memory tab's real panel: the workspace memory store's
