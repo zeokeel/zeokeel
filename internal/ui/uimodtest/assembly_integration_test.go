@@ -63,7 +63,7 @@ func TestDesktopProductAssemblyShowsAllDemoModules(t *testing.T) {
 	defer func() { _ = loader.Close() }()
 
 	// Every demo module is Active in the real desktop product.
-	for _, entryID := range []string{"appinfo", "store", "approvals", "workspace", "terminal", "skills", "memory", "toolkit", "hosttools", "agent", "ui", "home", "toolcards", "about", "sidebar", "session", "settings", "approval", "rightpanel", "automation-ui", "plugins-ui"} {
+	for _, entryID := range []string{"appinfo", "store", "approvals", "workspace", "terminal", "skills", "memory", "toolkit", "hosttools", "agent", "automation", "update", "ui", "home", "toolcards", "about", "sidebar", "session", "settings", "approval", "rightpanel", "automation-ui", "plugins-ui"} {
 		instance, ok := loader.Instance(entryID)
 		if !ok {
 			t.Fatalf("desktop assembly has no instance %q; instances = %v", entryID, instanceIDs(loader))

@@ -404,6 +404,7 @@ func Module() *module.Descriptor[Config] {
 		state := newState(chat, store)
 		appearance := &appearanceState{dark: theme.Dark(), language: locale.Language()}
 		skills := newSkillsState()
+		update := newUpdateState()
 
 		page := contracts.SettingsPageSpec{
 			ID:      PageID,
@@ -497,6 +498,18 @@ func Module() *module.Descriptor[Config] {
 			return err
 		}
 		if err := own(ctx, func() (func(), error) { return runtime.RegisterSettingsPage(shortcutsPage) }); err != nil {
+			return err
+		}
+		updatePage := contracts.SettingsPageSpec{
+			ID:      UpdatePageID,
+			Section: UpdatePageSection,
+			Title:   UpdatePageTitle,
+			Order:   UpdatePageOrder,
+			Build: func(c *ui.Context) {
+				buildUpdatePage(c, design.Of(c), ctx, runtime, update)
+			},
+		}
+		if err := own(ctx, func() (func(), error) { return runtime.RegisterSettingsPage(updatePage) }); err != nil {
 			return err
 		}
 		return own(ctx, func() (func(), error) { return runtime.RegisterSettingsPage(diagnosticsPage) })

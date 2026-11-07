@@ -120,12 +120,27 @@ type harness struct {
 
 func newHarness(t *testing.T, chat *fakeChat, store *fakeSettings, cfg settings.Config) *harness {
 	t.Helper()
-	return newHarnessWithSkills(t, chat, store, cfg, nil)
+	return newHarnessFull(t, chat, store, cfg, nil, nil, contracts.AppInfo{})
 }
 
 // newHarnessWithSkills is newHarness with an optional skills backend provided
 // as contracts.KeySkills (nil keeps the page's "技能后端未启用" empty state).
 func newHarnessWithSkills(t *testing.T, chat *fakeChat, store *fakeSettings, cfg settings.Config, skills contracts.SkillsService) *harness {
+	t.Helper()
+	return newHarnessFull(t, chat, store, cfg, skills, nil, contracts.AppInfo{})
+}
+
+// newHarnessWithUpdate is newHarness with an optional update backend and the
+// app info the 更新 page reads its current version from.
+func newHarnessWithUpdate(t *testing.T, chat *fakeChat, store *fakeSettings, cfg settings.Config,
+	update contracts.UpdateService, info contracts.AppInfo) *harness {
+	t.Helper()
+	return newHarnessFull(t, chat, store, cfg, nil, update, info)
+}
+
+// newHarnessFull builds the settings harness with the optional backends.
+func newHarnessFull(t *testing.T, chat *fakeChat, store *fakeSettings, cfg settings.Config,
+	skills contracts.SkillsService, update contracts.UpdateService, info contracts.AppInfo) *harness {
 	t.Helper()
 	uiRoot := uiroot.New(uiroot.Config{AppName: "ZeoKeel"})
 	ctx := cordis.Root()
@@ -140,6 +155,12 @@ func newHarnessWithSkills(t *testing.T, chat *fakeChat, store *fakeSettings, cfg
 	provide(t, ctx, contracts.KeyChat, contracts.ChatService(chat))
 	if skills != nil {
 		provide[contracts.SkillsService](t, ctx, contracts.KeySkills, skills)
+	}
+	if update != nil {
+		provide[contracts.UpdateService](t, ctx, contracts.KeyUpdate, update)
+	}
+	if info.Name != "" || info.Version != "" {
+		provide[contracts.AppInfo](t, ctx, contracts.KeyAppInfo, info)
 	}
 
 	h := &harness{t: t, ctx: ctx, uiRoot: uiRoot, settings: store, chat: chat}
@@ -246,6 +267,7 @@ func TestSettingsPageRendersFieldsAndMasksAPIKey(t *testing.T) {
 	h := newHarness(t, chat, newFakeSettings(nil), settings.Config{})
 	tester := h.tester()
 	tester.Frame()
+	h.click(tester, "模型")
 
 	h.assertTexts(tester, "模型", "Base URL", "API Key", "系统提示词", "保存",
 		"已设置（留空保持不变）", "当前会话", "当前模型")
@@ -268,6 +290,7 @@ func TestSettingsSaveWritesKeys(t *testing.T) {
 	h := newHarness(t, chat, store, settings.Config{})
 	tester := h.tester()
 	tester.Frame()
+	h.click(tester, "模型")
 	h.assertTexts(tester, "当前会话: session-7")
 
 	h.click(tester, "保存")
@@ -315,6 +338,7 @@ func TestSettingsFallbackToStore(t *testing.T) {
 	h := newHarness(t, chat, store, settings.Config{})
 	tester := h.tester()
 	tester.Frame()
+	h.click(tester, "模型")
 	h.assertTexts(tester, "已设置（留空保持不变）")
 	h.assertNoTexts(tester, "stored-key")
 
@@ -340,6 +364,7 @@ func TestSettingsSaveError(t *testing.T) {
 	h := newHarness(t, &fakeChat{config: contracts.ChatConfig{Model: "gpt-4o"}}, store, settings.Config{})
 	tester := h.tester()
 	tester.Frame()
+	h.click(tester, "模型")
 
 	h.click(tester, "保存")
 	h.assertTexts(tester, "保存失败", "disk is read-only")
@@ -358,6 +383,7 @@ func TestSettingsConfigLabels(t *testing.T) {
 	})
 	tester := h.tester()
 	tester.Frame()
+	h.click(tester, "模型服务")
 	h.assertTexts(tester, "模型服务", "模型名", "服务地址", "访问密钥", "系统指令", "保存配置")
 }
 
@@ -366,6 +392,7 @@ func TestSettingsDisposeRemovesPage(t *testing.T) {
 	h := newHarness(t, &fakeChat{}, newFakeSettings(nil), settings.Config{})
 	tester := h.tester()
 	tester.Frame()
+	h.click(tester, "模型")
 	h.assertTexts(tester, "保存")
 
 	if err := h.fiber.Dispose(); err != nil {
@@ -409,6 +436,7 @@ func TestModelPresetsFillDrafts(t *testing.T) {
 	h := newHarness(t, &fakeChat{}, newFakeSettings(nil), settings.Config{})
 	tester := h.tester()
 	tester.Frame()
+	h.click(tester, "模型")
 
 	h.click(tester, "DeepSeek")
 	h.click(tester, "保存")
@@ -427,6 +455,7 @@ func TestAppearancePageTogglesTheme(t *testing.T) {
 	h := newHarness(t, &fakeChat{}, store, settings.Config{})
 	tester := h.tester()
 	tester.Frame()
+	h.click(tester, "模型")
 
 	h.click(tester, "外观")
 	h.assertTexts(tester, "深色模式", "界面语言", "应用")
@@ -450,6 +479,7 @@ func TestShortcutsPage(t *testing.T) {
 	h := newHarness(t, &fakeChat{}, newFakeSettings(nil), settings.Config{})
 	tester := h.tester()
 	tester.Frame()
+	h.click(tester, "模型")
 	h.click(tester, "快捷键")
 	h.assertTexts(tester, "折叠 / 展开侧边栏", "Cmd/Ctrl + B", "发送消息", "Enter",
 		"Shift + Enter", "命令菜单", "Esc")
@@ -462,6 +492,7 @@ func TestProvidersPage(t *testing.T) {
 	h := newHarness(t, &fakeChat{}, store, settings.Config{})
 	tester := h.tester()
 	tester.Frame()
+	h.click(tester, "模型")
 	h.click(tester, "服务商")
 	h.assertTexts(tester, "DeepSeek", "OpenAI", "Ollama",
 		"https://api.deepseek.com/v1", "deepseek-chat", "使用")

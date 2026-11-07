@@ -67,6 +67,11 @@
       "id": "automation",
       "module": "zeokeel/automation",
       "config": {}
+    },
+    {
+      "id": "update",
+      "module": "zeokeel/update",
+      "config": {}
     }
   ]
 }

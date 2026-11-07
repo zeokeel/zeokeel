@@ -21,6 +21,12 @@
 - 右侧栏「文件」Tab：打开文件夹（mygo 原生 Directory picker）、目录进入/面包屑、文本/Markdown/图片预览、
   刷新与错误状态；E2E 覆盖工作区创建 + 列表 + 预览帧
 
+**P4 更新检查（2026-11-08）**
+- `zeokeel/update`：manifest（version/notes/assets）获取、https 强制、1MiB 上限、semver-ish 比较、GOOS/GOARCH
+  asset 选择、错误分类（更新源未配置/清单无效/无平台包，中文）；不下载/不替换
+- 设置「更新」页：当前版本、异步检查（检查中禁用）、可更新/已是最新 Badge、notes markdown、资源信息、
+  复制下载链接；E2E 覆盖无更新源错误展示
+
 **P3 会话归档（2026-11-08）**
 - agent `SessionArchiver`：settings `session.<id>.archived`；`ChatSessionInfo.Archived`
 - sidebar：默认隐藏归档、footer 显示/隐藏已归档（settings 持久化）、行菜单归档/取消、已归档 Badge、

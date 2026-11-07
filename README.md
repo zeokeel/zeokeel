@@ -154,6 +154,9 @@ go test ./...
   （选中态由 tint + accent 图标承担），标题不再被挤断；截图 `p2-pinned.png`
 - ✅ P3 会话归档：archived 标记持久化到 settings（不变 schema），侧栏默认隐藏归档、footer「显示/隐藏已归档」
   视图开关、行菜单「归档会话/取消归档」、归档行「已归档」Badge；排序 置顶→普通→归档；截图 `p2-archived.png`
+- ✅ P4 更新检查：`zeokeel/update`（release manifest 获取、https 策略、semver 比较、平台 asset 选择、
+  ErrDisabled/ErrManifest/ErrNoAsset，中文错误）+ 设置「更新」页（当前版本、检查更新异步、可更新 Badge、
+  notes markdown、复制下载链接；仅检查不自动替换）；截图 `p2-update.png`；desktop 23 / headless 12 实例
 - ⬜ 后续阶段见 [docs/PRODUCT-REBUILD-PLAN.md](docs/PRODUCT-REBUILD-PLAN.md)：
   P2 剩余（composer 附件/图片/@ 提及、右侧栏 Files/Terminal/Log 页、会话操作上下文菜单）→
   P3 memory/skills/automation/插件/workspace diff/搜索/fork/export → P4 ACP/热键/导入/更新/诊断

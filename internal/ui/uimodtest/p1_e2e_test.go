@@ -291,6 +291,27 @@ func TestP1ApprovalToolsAndPersistence(t *testing.T) {
 			t.Fatalf("diagnostics page missing %q; texts = %v", want, tester.Texts())
 		}
 	}
+	if err := tester.Click("更新"); err != nil {
+		t.Fatalf("click update page: %v; texts = %v", err, tester.Texts())
+	}
+	tester.Frame()
+	if !tester.HasText("检查更新") {
+		t.Fatalf("update page missing the check button; texts = %v", tester.Texts())
+	}
+	if err := tester.Click("检查更新"); err != nil {
+		t.Fatalf("click check update: %v; texts = %v", err, tester.Texts())
+	}
+	checkDeadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(checkDeadline) {
+		tester.Frame()
+		if tester.HasText("更新源未配置") {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if !tester.HasText("更新源未配置") {
+		t.Fatalf("update check error missing; texts = %v", tester.Texts())
+	}
 	uiRoot.Navigator().CloseSettings()
 	tester.Frame()
 

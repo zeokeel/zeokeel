@@ -69,6 +69,11 @@
       "config": {}
     },
     {
+      "id": "update",
+      "module": "zeokeel/update",
+      "config": {}
+    },
+    {
       "id": "ui",
       "module": "zeokeel/host/group",
       "children": [

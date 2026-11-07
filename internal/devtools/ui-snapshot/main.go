@@ -288,6 +288,10 @@ func main() {
 		fmt.Println("click diagnostics:", err)
 	}
 	a.render(outDir + "/p2-diagnostics.png")
+	if err := a.tester.Click("更新"); err != nil {
+		fmt.Println("click update:", err)
+	}
+	a.render(outDir + "/p2-update.png")
 	a.ui.Navigator().CloseSettings()
 	if err := a.ui.Navigator().Push("automation"); err != nil {
 		fmt.Println("push automation:", err)

@@ -192,6 +192,7 @@ if _, err := ctx.Effect(func() cordis.Effect {
 - ✅ 会话归档：settings archive flag + sidebar 视图开关/排序
 - ✅ 会话置顶：settings pin flag + sidebar 置顶排序/菜单
 - ✅ 可配置 chrome 快捷键（settings `ui.shortcut.*` → 宿主每帧 OnShortcut）
+- ✅ 更新检查：`internal/modules/update`（manifest/semver/asset）+ 设置更新页
 - ✅ 诊断页：设置「诊断」（运行时/存储/工具/设置键，只读 + 复制）
 - ✅ 命令面板：host Cmd/Ctrl+K palette（UIRuntime.Commands）
 - ✅ 全文搜索：sessionstore `MessageSearcher` + sidebar 消息搜索区
