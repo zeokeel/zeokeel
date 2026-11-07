@@ -41,7 +41,52 @@ const (
 	AppearancePageID = "appearance"
 	// AppearancePageOrder places the page after the model page.
 	AppearancePageOrder = 20
+
+	// ShortcutsPageID is the keyboard-shortcut reference page.
+	ShortcutsPageID = "shortcuts"
+	// ShortcutsPageOrder places the page after appearance.
+	ShortcutsPageOrder = 30
 )
+
+// shortcutRow is one line of the shortcut reference.
+type shortcutRow struct {
+	Action string
+	Keys   string
+}
+
+// shortcutRows is the product's keyboard reference (the old shell's shortcuts
+// page): chrome toggles, composer keys and window dismissal.
+var shortcutRows = []shortcutRow{
+	{"折叠 / 展开侧边栏", "Cmd/Ctrl + B"},
+	{"发送消息", "Enter"},
+	{"换行", "Shift + Enter"},
+	{"命令菜单", "输入 /"},
+	{"关闭弹窗 / 菜单", "Esc"},
+}
+
+// buildShortcutsPage renders the shortcut reference with native rows.
+func buildShortcutsPage(c *ui.Context, t *design.Tokens, title string) {
+	ui.Column(c).FillWidth().Gap(design.Space4).Children(func() {
+		design.Apply(ui.Text(c, title), t.Font(design.TypeL)).FontWeight(600).
+			TextColor(t.LabelPrimary)
+		design.Apply(ui.Text(c, "键盘快捷键参考（与老版本 shell 的快捷键页一致）。"),
+			t.TextMuted(design.TypeXS))
+		panel := ui.Column(c).FillWidth().Gap(0).Padding(design.Space3)
+		design.Apply(panel, t.Panel())
+		panel.Children(func() {
+			for index, row := range shortcutRows {
+				if index > 0 {
+					ui.Divider(c)
+				}
+				ui.Row(c).FillWidth().Padding(design.Space2, 0, design.Space2, 0).
+					AlignItems(ui.Center).Children(func() {
+					design.Apply(ui.Text(c, row.Action), t.Text(design.TypeS)).Grow(1)
+					design.Apply(ui.Badge(c, row.Keys), t.Badge())
+				})
+			}
+		})
+	})
+}
 
 // appearanceState is the appearance page's UI-local state.
 type appearanceState struct {
@@ -180,6 +225,15 @@ func Module() *module.Descriptor[Config] {
 		if err := own(ctx, func() (func(), error) { return runtime.RegisterSettingsPage(page) }); err != nil {
 			return err
 		}
+		shortcutsPage := contracts.SettingsPageSpec{
+			ID:      ShortcutsPageID,
+			Section: "键盘",
+			Title:   "快捷键",
+			Order:   ShortcutsPageOrder,
+			Build: func(c *ui.Context) {
+				buildShortcutsPage(c, design.Of(c), "快捷键")
+			},
+		}
 		appearancePage := contracts.SettingsPageSpec{
 			ID: AppearancePageID,
 			// Same sidebar section as the model page so the section heading does
@@ -197,7 +251,10 @@ func Module() *module.Descriptor[Config] {
 				})
 			},
 		}
-		return own(ctx, func() (func(), error) { return runtime.RegisterSettingsPage(appearancePage) })
+		if err := own(ctx, func() (func(), error) { return runtime.RegisterSettingsPage(appearancePage) }); err != nil {
+			return err
+		}
+		return own(ctx, func() (func(), error) { return runtime.RegisterSettingsPage(shortcutsPage) })
 	}).
 		AddRequires(module.Requires(contracts.KeyUIRuntime)).
 		AddRequires(module.Requires(contracts.KeySettings)).

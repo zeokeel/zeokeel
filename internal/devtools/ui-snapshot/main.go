@@ -119,6 +119,10 @@ func main() {
 		fmt.Println("click appearance:", err)
 	}
 	a.render(outDir + "/p2-appearance.png")
+	if err := a.tester.Click("快捷键"); err != nil {
+		fmt.Println("click shortcuts:", err)
+	}
+	a.render(outDir + "/p2-shortcuts.png")
 	a.ui.Navigator().CloseSettings()
 }
 

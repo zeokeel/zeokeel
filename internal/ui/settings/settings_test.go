@@ -433,3 +433,14 @@ func TestAppearancePageTogglesTheme(t *testing.T) {
 		t.Fatalf("persisted language = %q, want zh", got)
 	}
 }
+
+// TestShortcutsPage covers the keyboard reference page (the old shell's
+// shortcuts page): clicking the page shows the product's key bindings.
+func TestShortcutsPage(t *testing.T) {
+	h := newHarness(t, &fakeChat{}, newFakeSettings(nil), settings.Config{})
+	tester := h.tester()
+	tester.Frame()
+	h.click(tester, "快捷键")
+	h.assertTexts(tester, "折叠 / 展开侧边栏", "Cmd/Ctrl + B", "发送消息", "Enter",
+		"Shift + Enter", "命令菜单", "Esc")
+}
