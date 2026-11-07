@@ -603,6 +603,10 @@ func main() {
 		fmt.Println("click behavior settings:", err)
 	}
 	a.render(outDir + "/p2-behavior.png")
+	if err := a.tester.Click("记忆"); err != nil {
+		fmt.Println("click memory settings:", err)
+	}
+	a.render(outDir + "/p2-memory-settings.png")
 	a.ui.Navigator().CloseSettings()
 	// Automation with a finished run so the history expansion is visible.
 	if automation, err := a.root.Require(contracts.KeyAutomation); err == nil {

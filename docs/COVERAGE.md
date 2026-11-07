@@ -59,10 +59,10 @@
 | `importer` | 🟡 | `internal/modules/importer` + settings 导入页 | DSH session.v4.jsonl Scan/Import、文本+reasoning、workspace、symlink 跳过/重复 ID 去重；attachments/credentials/manifest/zstd 未迁移 |
 | `lsp` | 🟡 | toolkit lsp.go（rig `tools/lsp`）+ 设置 LSP 页 | 可选单服务器（command/args/dir/languageId/env JSON），启动后注册 rig 默认 `lsp_*` 工具（hover/definition/references/implementation/diagnostics/symbols），卸载关闭 client；错误仅警告不阻断；缺多服务器/UI 语言服务器选择 |
 | `mcp` | ✅ | toolkit `mcp.Start`（stdio+HTTP）+ settings/workspace 合并 + 工具级开关 | HTTP/stdio 握手/工具注册/失败诊断；assembly>settings>workspace mcp.json（opt-in）；`mcp.disabledTools` 注册前过滤；插件详情/市场在 Shell Plugins 行仍 🟡 |
-| `memory` | 🟡 | `internal/modules/memory` + rig memory tool + session Memory tab | JSON MemoryStore/tool/搜索/添加 + **整理（规范化去重/保留最早）与全部清空（确认对话框）**；缺模型驱动 consolidate/extract/auto-memory |
+| `memory` | 🟡 | `internal/modules/memory` + rig memory tool + session Memory tab + **设置「记忆」页** | JSON MemoryStore/tool/搜索/添加/整理/清空；设置页可全局搜索/添加/删除并显示 scope/时间；缺模型驱动 consolidate/extract |
 | `modelcatalog` | 🟡 | `internal/modules/modelcatalog` + composer 模型菜单 + settings「模型目录」页 | 默认 DeepSeek Chat/Reasoner 预设、per-session 切换/推理强度、**目录编辑（增删/恢复默认，动态生效）**；缺旧 context window/max tokens/efforts 元数据、连接检查按钮 |
 | `presets` | 🟡 | contracts/presets.go + session presets 菜单 + settings「预设」页（CRUD/排序/恢复默认） | prompt 片段/人设模板已迁移并可在 composer 插入；旧 agent presets 的 systemPrompt/model/tools allowlist JSON 语义未迁移 |
-| `prompt` | 🟡 | agent SystemPrompt + settings 模型页提示词 | 无 modes/plan/memory/AGENTS.md 注入策略、auto-title/review prompt |
+| `prompt` | 🟡 | agent SystemPrompt + settings 模型页提示词 + **AGENTS.md 注入** | 系统提示可配置；**每次运行读取当前工作区 `AGENTS.md`（文件名可配/32KiB 截断/读取失败告警）追加注入**；auto-title 已按首条提示生成；缺 review prompt |
 | `provider` | ✅ | rig `provider/openai` + agent 模块 | OpenAI Chat Completions 兼容 |
 | `runtime` | 🟡 | agent + rig agent/gate/compact | 循环/审批/压缩/检查点/多模态 parts/subagent runner/team manager/goal 工具与 goal 桥；缺 modes、review、goal 自动驱动、PTC/workflow/ralph |
 | `session` | 🟡 | agent ChatService + Regenerate/Fork/Archive/Pin/ModelSwitcher + usage + 排队发送 | 发送/取消/历史/恢复/压缩/fork/export/附件/重新生成/会话模型/推理强度/turn usage/运行中排队发送/**消息字号（小/标准/大，即时生效）**；缺 goal 多轮自动执行、tool spill |

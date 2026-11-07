@@ -19,6 +19,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 	"sort"
 	"strings"
 	"sync"
@@ -54,6 +55,11 @@ const (
 	maxTitleRunes = 32
 	// maxToolSummaryRunes caps a tool result summary carried in the read model.
 	maxToolSummaryRunes = 200
+	// maxWorkspaceInstructionsBytes bounds the injected workspace instruction
+	// file (AGENTS.md by default). Larger files are truncated with a warning.
+	maxWorkspaceInstructionsBytes = 32 << 10
+	// workspaceInstructionsHeading introduces the injected file content.
+	workspaceInstructionsHeading = "# 工作区指令（AGENTS.md）"
 )
 
 // Config is the module's typed assembly config.
@@ -295,6 +301,56 @@ func (s *service) currentWorkspaceID(ctx context.Context) string {
 		return ""
 	}
 	return strings.TrimSpace(workspace.ID)
+}
+
+// withWorkspaceInstructions appends the configured workspace instruction file
+// (agent.agentsFile, AGENTS.md by default) to this run's system prompt. The
+// file is read from the current workspace at run time; a missing file is
+// ignored, a read failure or an over-limit file is logged and skipped/truncated,
+// and an empty setting disables the injection. Only the in-memory run config is
+// changed: nothing is persisted.
+func (s *service) withWorkspaceInstructions(ctx context.Context, cfg contracts.ChatConfig) contracts.ChatConfig {
+	if s.workspace == nil || s.settings == nil {
+		return cfg
+	}
+	name := strings.TrimSpace(s.settings.Get(contracts.SettingAgentsFile, "AGENTS.md"))
+	if name == "" {
+		return cfg
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	workspace, ok, err := s.workspace.Current(ctx)
+	if err != nil {
+		s.logger.Printf("[agent] workspace instructions: current workspace: %v", err)
+		return cfg
+	}
+	if !ok || strings.TrimSpace(workspace.Root) == "" {
+		return cfg
+	}
+	path := filepath.Join(workspace.Root, name)
+	data, err := os.ReadFile(path)
+	if err != nil {
+		if !os.IsNotExist(err) {
+			s.logger.Printf("[agent] read workspace instructions %s: %v", path, err)
+		}
+		return cfg
+	}
+	if len(data) > maxWorkspaceInstructionsBytes {
+		data = data[:maxWorkspaceInstructionsBytes]
+		s.logger.Printf("[agent] workspace instructions %s exceed %d bytes; truncated", path, maxWorkspaceInstructionsBytes)
+	}
+	content := strings.TrimSpace(string(data))
+	if content == "" {
+		return cfg
+	}
+	block := workspaceInstructionsHeading + "\n\n" + content
+	if strings.TrimSpace(cfg.SystemPrompt) == "" {
+		cfg.SystemPrompt = block
+	} else {
+		cfg.SystemPrompt = strings.TrimRight(cfg.SystemPrompt, "\n") + "\n\n" + block
+	}
+	return cfg
 }
 
 // persistSessionWorkspace records the session→workspace association through the
@@ -1136,6 +1192,7 @@ func (s *service) nextMessageIDLocked() string {
 // initial input messages.
 func (s *service) run(ctx context.Context, sessionID string, cfg contracts.ChatConfig, input []rig.Message,
 	history rig.History, effort string) {
+	cfg = s.withWorkspaceInstructions(ctx, cfg)
 	provider, err := s.newProvider(cfg, effort)
 	if err != nil {
 		s.finish(sessionID, ctx, fmt.Errorf("create provider: %w", err))

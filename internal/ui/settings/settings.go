@@ -584,6 +584,7 @@ func Module() *module.Descriptor[Config] {
 		lsp := &lspState{}
 		notifications := &notificationsState{}
 		behavior := &behaviorState{}
+		memoryPage := &memoryPageState{}
 		network := newNetworkState()
 		dataPrivacy := newDataPrivacyState()
 		diagnostics := &diagnosticsState{}
@@ -709,6 +710,14 @@ func Module() *module.Descriptor[Config] {
 				Build: func(c *ui.Context) {
 					syncer.sync()
 					buildBehaviorPage(c, runtime, store, locale, behavior)
+				},
+			},
+			{
+				ID: MemoryPageID, Section: MemoryPageSection, Order: MemoryPageOrder,
+				zhTitle: "记忆", enTitle: "Memory",
+				Build: func(c *ui.Context) {
+					syncer.sync()
+					buildMemoryPage(c, design.Of(c), ctx, memoryPage, locale)
 				},
 			},
 			{

@@ -21,6 +21,11 @@
 - 右侧栏「文件」Tab：打开文件夹（mygo 原生 Directory picker）、目录进入/面包屑、文本/Markdown/图片预览、
   刷新与错误状态；E2E 覆盖工作区创建 + 列表 + 预览帧
 
+**TDD-agents-md/memory-page（2026-11-08）**
+- AGENTS.md 注入：每次 run 从当前工作区读取（文件名可配、空关闭、32KiB 截断、读取错误告警），追加到 system prompt；agent 95 测试；
+  行为页 TextInput 配置
+- 设置「记忆」页：全局记忆搜索/列表（scope/时间）/添加/删除/空态/错误，无后端提示；settings 160 测试
+
 **TDD-fontsize/feedback-export（2026-11-08）**
 - 消息字号：行为页 小/标准/大（12.5/14/16，LineHeight 比例保持），session markdown 选项缓存含 size，设置切换下一帧生效；
   session 145 / settings 147 测试

@@ -60,6 +60,11 @@ var behaviorPermissions = []behaviorPermission{
 type behaviorState struct {
 	status    string
 	statusErr bool
+
+	// agentsFile is the workspace instruction file name draft; loaded once from
+	// settings so an edit is not overwritten by a rebuild.
+	agentsFile       string
+	agentsFileLoaded bool
 }
 
 // agentPermissionMode normalizes the stored agent.permission row: unknown and
@@ -194,7 +199,52 @@ func buildBehaviorPage(c *ui.Context, runtime contracts.UIRuntime,
 				"Conversation text size, applies immediately.")),
 				t.TextMuted(design.TypeXXS)).MaxLines(2)
 		})
+		panel(c, t, func() {
+			ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(design.Space2).Children(func() {
+				sectionTitle(c, t, localized(locale, "工作区指令", "Workspace instructions"))
+				ui.Spacer(c).Grow(1)
+				currentFile := strings.TrimSpace(store.Get(contracts.SettingAgentsFile, "AGENTS.md"))
+				if currentFile == "" {
+					currentFile = localized(locale, "（关闭）", "(off)")
+				}
+				design.Apply(ui.Text(c, localized(locale, "当前文件：", "Current file: ")+currentFile),
+					t.TextMuted(design.TypeXXS))
+				if st.status != "" {
+					statusBadge(c, t, st.status, st.statusErr)
+				}
+			})
+			if !st.agentsFileLoaded {
+				st.agentsFileLoaded = true
+				st.agentsFile = store.Get(contracts.SettingAgentsFile, "AGENTS.md")
+			}
+			ui.TextInput(c, &st.agentsFile).
+				Label(localized(locale, "工作区指令文件", "Workspace instructions file")).
+				Placeholder("AGENTS.md").FillWidth()
+			design.Apply(ui.Text(c, localized(locale,
+				"运行时从当前工作区读取并注入系统提示；重启/下次运行生效。",
+				"Read from the current workspace at run time and appended to the system prompt; takes effect on the next run or restart.")),
+				t.TextMuted(design.TypeXXS)).MaxLines(2)
+			ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(design.Space2).Children(func() {
+				if design.Apply(ui.PrimaryButton(c, localized(locale, "保存", "Save")), t.PrimaryButton()).Clicked() {
+					saveAgentsFile(st, store, locale)
+				}
+			})
+		})
 	})
+}
+
+// saveAgentsFile persists the trimmed workspace instruction file name; an empty
+// value disables the injection.
+func saveAgentsFile(st *behaviorState, store contracts.SettingsService, locale contracts.LocaleService) {
+	name := strings.TrimSpace(st.agentsFile)
+	if err := store.Set(contracts.SettingAgentsFile, name); err != nil {
+		st.status = localized(locale, "保存失败：", "Save failed: ") + err.Error()
+		st.statusErr = true
+		return
+	}
+	st.agentsFile = name
+	st.status = localized(locale, "已保存", "Saved")
+	st.statusErr = false
 }
 
 // chatFontSizeChoice is one conversation font-size choice.

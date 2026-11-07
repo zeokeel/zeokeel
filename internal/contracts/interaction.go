@@ -106,6 +106,9 @@ const (
 	// queued prompts are sent when the run finishes (default false = Send is
 	// disabled while running).
 	SettingSendWhileRunning = "ui.sendWhileRunning"
+	// SettingAgentsFile is the workspace instruction file appended to the
+	// system prompt (default "AGENTS.md"; empty disables the injection).
+	SettingAgentsFile = "agent.agentsFile"
 	// SettingChatFontSize scales the conversation transcript: "small",
 	// "standard" (default) or "large".
 	SettingChatFontSize = "ui.chatFontSize"
