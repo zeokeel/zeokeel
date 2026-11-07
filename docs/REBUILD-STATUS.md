@@ -21,6 +21,10 @@
 - 右侧栏「文件」Tab：打开文件夹（mygo 原生 Directory picker）、目录进入/面包屑、文本/Markdown/图片预览、
   刷新与错误状态；E2E 覆盖工作区创建 + 列表 + 预览帧
 
+**Round 59 终验（2026-11-08）**
+- 干净环境 `./scripts/verify.sh` **10/10 PASS（108s）**：build/vet/test/race/regression(227 PASS 0 SKIP)/snapshot(64/62)/
+  三产品冒烟；唯一修复为 automation 测试等待预算 3s→10s（负载偶发）；覆盖统计终值 **✅38 / 🟡23 / ❌1**
+
 **TDD-keep-planning/i18n（2026-11-08）**
 - Plan keep-planning：计划 Modal 新增反馈输入 +「继续规划」（Exit cancel → chat.Send 反馈到当前会话 → 模型修订后重新 plan_review），Notifier 提示，
   失败保留 Modal；interaction 23 测试；COVERAGE Plan UI 升 ✅

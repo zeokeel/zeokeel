@@ -303,3 +303,12 @@ verify: PASS
 - 第 1 次 `./scripts/verify.sh`：`go test ./... -count=1 -race` FAIL（48s）——automation `TestRunHistoryCappedAtTenNewestFirst` 等待运行超时 3s；该测试单独 `-race` 连跑 5 次均 PASS，属全量并行 -race 下的负载时序偶发。
 - 第 2 次：plain test FAIL（13s）——未提交的 regression `TestWindowShortcutNewSessionAndSettings/TestWindowShortcutsWithoutChatAreSafe`（Cmd+,/Cmd+N 帧断言）；该包单独运行与 -run 连跑均 PASS，属并行负载下 UI 帧时序偶发。
 - 第 3 次（上表）**10/10 PASS，107s**；`gofmt/build/vet/test/-race/regression/snapshot/三产品冒烟` 全部通过。
+
+## 最终验证（Round 59：干净环境一键验证）
+
+- 命令：`./scripts/verify.sh`（无并行 agent 修改工作树时）
+- 结果：**10/10 PASS，108s**：gofmt / go build / go vet / go test / go test -race / regression / ui-snapshot /
+  desktop smoke / headless smoke / ACP smoke。
+- regression 计数：227 PASS / 0 SKIP；ui-snapshot 64 步渲染 / 62 唯一 PNG。
+- 本轮唯一修复：automation 测试 helper 的等待预算 3s→10s（并行载入下偶发超时，非产品回归）；修复后
+  `go test ./internal/modules/automation -count=2` 与完整 verify.sh 均 PASS。
