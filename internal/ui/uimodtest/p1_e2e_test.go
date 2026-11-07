@@ -383,6 +383,17 @@ func TestP1ApprovalToolsAndPersistence(t *testing.T) {
 			t.Fatalf("english UI missing %q; texts = %v", want, tester.Texts())
 		}
 	}
+	// Host chrome (command palette) follows the locale too.
+	tester.Key(ui.Cmd, ui.KeyK)
+	tester.Frame()
+	for _, want := range []string{"Command palette", "Search commands", "Esc to close"} {
+		if !tester.HasText(want) {
+			t.Fatalf("english command palette missing %q; texts = %v", want, tester.Texts())
+		}
+	}
+	tester.Key(0, ui.KeyEscape)
+	tester.Frame()
+
 	// Settings pages follow the locale too.
 	uiRoot.Navigator().ToggleSettings()
 	tester.Frame()

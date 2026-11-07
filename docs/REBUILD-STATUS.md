@@ -21,6 +21,10 @@
 - 右侧栏「文件」Tab：打开文件夹（mygo 原生 Directory picker）、目录进入/面包屑、文本/Markdown/图片预览、
   刷新与错误状态；E2E 覆盖工作区创建 + 列表 + 预览帧
 
+**P4 host chrome i18n + 覆盖审计（2026-11-08）**
+- host uiroot：命令面板（标题/搜索框/空态/Esc 提示）、右侧栏按钮、折叠侧栏按钮按 locale 每帧本地化
+- docs/COVERAGE.md：旧功能 62 项矩阵（✅24/🟡23/❌15）+ top5 缺口 + 结论（核心闭环完成，深度功能仍缺）
+
 **P4 i18n 第三切片（2026-11-08）**
 - about：内容 + 页面导航标题语言变化 re-register（Config.title 优先）；rightpanel：Inspector/6 tabs/overview/
   tools/log/files/changes/terminal 全部文案（后台输出也按当前 locale）；automation/plugins/toolcards/approval

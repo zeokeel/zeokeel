@@ -105,6 +105,15 @@ func (r *Root) sidebar(c *ui.Context) {
 // sidebarRail is the collapsed 64 DIP sidebar from the old shell: the brand
 // mark (click expands), one icon per screen and the settings entry. Module
 // slots compose the expanded sidebar only.
+// tr localizes host chrome strings: English when the user chose English, the
+// product's Chinese default otherwise.
+func (r *Root) tr(zh, en string) string {
+	if r.locale.Language() == "en" {
+		return en
+	}
+	return zh
+}
+
 func (r *Root) sidebarRail(c *ui.Context) {
 	t := design.Of(c)
 	column := ui.Column(c).Width(64).FillHeight().AlignItems(ui.Center).
@@ -114,7 +123,7 @@ func (r *Root) sidebarRail(c *ui.Context) {
 	})
 	column.Children(func() {
 		expand := ui.ButtonBase(c).Size(40, 40).Radius(design.RadiusSM).
-			Label("展开侧边栏").Tooltip("展开侧边栏")
+			Label(r.tr("展开侧边栏", "Expand sidebar")).Tooltip(r.tr("展开侧边栏", "Expand sidebar"))
 		if expand.Hovered() {
 			expand = expand.Background(t.BgHover)
 		}
@@ -211,9 +220,9 @@ func (r *Root) contentHeader(c *ui.Context) {
 		if !r.hasAnySlot(contracts.SlotSessionPanelRight) {
 			return
 		}
-		label := "打开右侧栏"
+		label := r.tr("打开右侧栏", "Open inspector")
 		if r.rightOpen {
-			label = "收起右侧栏"
+			label = r.tr("收起右侧栏", "Close inspector")
 		}
 		button := ui.ButtonBase(c).Size(design.Space6, design.Space6).Center().
 			Label(label).Tooltip(label).Radius(design.RadiusSM)
@@ -270,9 +279,9 @@ func (r *Root) palette(c *ui.Context) {
 	t := design.Of(c)
 	ui.Modal(c, &r.paletteOpen, func() {
 		ui.Column(c).Width(560).Gap(design.Space2).Padding(design.Space4).Children(func() {
-			design.Apply(ui.Text(c, "命令面板"), t.Font(design.TypeM)).FontWeight(600).
+			design.Apply(ui.Text(c, r.tr("命令面板", "Command palette")), t.Font(design.TypeM)).FontWeight(600).
 				TextColor(t.LabelPrimary)
-			ui.TextInput(c, &r.paletteQuery).Label("搜索命令").Placeholder("搜索命令…").FillWidth()
+			ui.TextInput(c, &r.paletteQuery).Label(r.tr("搜索命令", "Search commands")).Placeholder(r.tr("搜索命令…", "Search commands…")).FillWidth()
 			needle := strings.ToLower(strings.TrimSpace(r.paletteQuery))
 			matches := make([]contracts.CommandSpec, 0, 8)
 			for _, cmd := range r.rt.commandSpecs() {
@@ -293,7 +302,7 @@ func (r *Root) palette(c *ui.Context) {
 			ui.Scroll(c).FillWidth().MaxHeight(320).Children(func() {
 				ui.Column(c).FillWidth().Gap(design.Space1).Children(func() {
 					if len(matches) == 0 {
-						design.Apply(ui.Text(c, "没有匹配的命令"), t.TextMuted(design.TypeXS))
+						design.Apply(ui.Text(c, r.tr("没有匹配的命令", "No matching commands")), t.TextMuted(design.TypeXS))
 						return
 					}
 					for _, cmd := range matches {
@@ -320,7 +329,7 @@ func (r *Root) palette(c *ui.Context) {
 					}
 				})
 			})
-			design.Apply(ui.Text(c, "Esc 关闭 · Enter 选择"), t.TextMuted(design.TypeXXXS))
+			design.Apply(ui.Text(c, r.tr("Esc 关闭 · Enter 选择", "Esc to close · Enter to select")), t.TextMuted(design.TypeXXXS))
 		})
 	})
 }

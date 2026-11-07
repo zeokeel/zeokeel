@@ -174,6 +174,9 @@ go test ./...
 - ✅ P4 i18n（第三切片）：About 页（内容 + 导航标题动态重注册）、右侧检查栏（Inspector/6 tabs/全部面板）、
   Automation/Plugins 页面、toolcards、approval 全部 en/zh 每帧切换；desktop assembly 去掉 about 显式 title；
   截图 `p2-english-automation.png`、`p2-english-settings.png`
+- ✅ P4 host chrome i18n：命令面板（Command palette/Search commands/Esc 提示）、打开/收起右侧栏、展开侧边栏；
+  E2E en 断言
+- 📋 旧功能覆盖审计：[docs/COVERAGE.md](docs/COVERAGE.md)（✅24 / 🟡23 / ❌15，附最小必须缺口清单）
 - ⬜ 后续阶段见 [docs/PRODUCT-REBUILD-PLAN.md](docs/PRODUCT-REBUILD-PLAN.md)：
   P2 剩余（composer 附件/图片/@ 提及、右侧栏 Files/Terminal/Log 页、会话操作上下文菜单）→
   P3 memory/skills/automation/插件/workspace diff/搜索/fork/export → P4 ACP/热键/导入/更新/诊断
