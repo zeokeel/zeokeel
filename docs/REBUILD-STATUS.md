@@ -15,6 +15,12 @@
 - 宿主 chrome：280px 侧栏 + 64px brand row + Cmd/Ctrl+B 64px 图标 rail；无全局顶栏，屏幕自带头部；
   右侧检查栏为窗口级 docked 面板
 
+**P2 附件/图片（2026-11-07 晚）**
+- contracts.Attachment / AttachmentSender / ChatMessage.Attachments；agent 图片→rig image part（data URL），
+  非图片→文本 part（text/* 内容 ≤32KiB）；重启从 rig parts 恢复 chips
+- composer：mygo.Dialog.Open 原生多选、48×48 图片缩略图、chips 移除、10MB 限制、MIME 映射；
+  用户气泡只读 chips/缩略图；E2E 验证 provider 请求含 image part 与 UI 帧 chips
+
 **P3 记忆 + Markdown（2026-11-07 晚）**
 - `zeokeel/memory`：JSON 原子持久化 rig.MemoryStore（Add/List/Remove/Search、scope、重启恢复），
   toolkit 用持久 store 注册 memory 工具；desktop 16 / headless 7 实例

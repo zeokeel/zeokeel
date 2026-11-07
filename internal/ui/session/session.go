@@ -92,6 +92,14 @@ type state struct {
 	memoryDraft string
 	memoryError string
 
+	// Composer attachment state: files picked and staged for the next message,
+	// the last picker/read error, the chip sequence and the per-chip image
+	// previews decoded once (keyed by attachment ID).
+	pendingAttachments []contracts.Attachment
+	attachErr          string
+	attachSeq          int
+	thumbnails         map[string]*ui.Bitmap
+
 	// md caches the Markdown renderer options for the current appearance (the
 	// library keeps its parse state per view root and the options must stay
 	// stable across frames).
@@ -119,9 +127,10 @@ func Module() *module.Descriptor[Config] {
 		}
 		config := cfg.resolved()
 		moduleState := &state{
-			thinkOpen: make(map[string]bool),
-			toolOpen:  make(map[string]bool),
-			ctx:       ctx,
+			thinkOpen:  make(map[string]bool),
+			toolOpen:   make(map[string]bool),
+			thumbnails: make(map[string]*ui.Bitmap),
+			ctx:        ctx,
 		}
 
 		// Session changes arrive on the agent goroutine; hop to the UI thread

@@ -217,12 +217,15 @@ func buildHero(c *ui.Context, t *design.Tokens, cfg Config, navigator contracts.
 func buildMessage(c *ui.Context, t *design.Tokens, runtime contracts.UIRuntime, message contracts.ChatMessage, st *state) {
 	switch message.Role {
 	case contracts.ChatRoleUser:
-		ui.Row(c).FillWidth().Justify(ui.End).Children(func() {
-			design.Apply(ui.Column(c), t.Panel()).
-				MaxWidthPercent(70).Padding(design.Space3, design.Space4).Children(func() {
-				design.Apply(ui.Text(c, message.Text), t.Font(design.TypeBody)).
-					TextColor(t.LabelPrimary)
-			})
+		ui.Column(c).FillWidth().AlignItems(ui.End).Gap(design.Space1).Children(func() {
+			if strings.TrimSpace(message.Text) != "" {
+				design.Apply(ui.Column(c), t.Panel()).
+					MaxWidthPercent(70).Padding(design.Space3, design.Space4).Children(func() {
+					design.Apply(ui.Text(c, message.Text), t.Font(design.TypeBody)).
+						TextColor(t.LabelPrimary)
+				})
+			}
+			buildMessageAttachments(c, t, st, message.Attachments)
 		})
 	case contracts.ChatRoleTool, contracts.ChatRoleSystem:
 		ui.Row(c).FillWidth().Gap(design.Space2).AlignItems(ui.Start).Children(func() {
@@ -611,6 +614,7 @@ func buildComposer(
 				Padding(th.Space(3)).Gap(design.Space2).
 				Label("会话输入框")
 			card.Children(func() {
+				buildPendingAttachments(c, t, runtime, st)
 				if !running {
 					input = ui.TextArea(c, &st.draft).
 						Label(cfg.ComposerPlaceholder).
@@ -682,8 +686,16 @@ func buildComposerToolbar(c *ui.Context, t *design.Tokens, runtime contracts.UIR
 			st.draft += "/"
 			runtime.Invalidate()
 		}
-		attach := ui.Button(c, "附件").Tooltip("附件（下一阶段支持）").Disabled(true)
-		_ = attach
+		attach := ui.Button(c, "附件").Tooltip("添加文件或图片")
+		if attach.Clicked() {
+			paths, err := AttachmentPicker()
+			if err != nil {
+				st.attachErr = "无法打开文件选择器：" + err.Error()
+			} else {
+				stageAttachmentFiles(st, paths)
+			}
+			runtime.Invalidate()
+		}
 	}
 }
 
@@ -692,25 +704,25 @@ func buildComposerToolbar(c *ui.Context, t *design.Tokens, runtime contracts.UIR
 // chevron glyph.
 func buildSendButton(c *ui.Context, t *design.Tokens, cfg Config, chat contracts.ChatService, st *state, activeID string) {
 	th := t.Theme()
-	hasDraft := strings.TrimSpace(st.draft) != ""
+	hasContent := strings.TrimSpace(st.draft) != "" || len(st.pendingAttachments) > 0
 	fill, glyph := t.Accent, t.AccentText
-	if !hasDraft {
+	if !hasContent {
 		fill, glyph = t.Accent.Alpha(0.16).Over(t.BgRaised), t.Accent
 	}
 	button := ui.Button(c, cfg.SendLabel).Label(cfg.SendLabel).Tooltip(cfg.SendLabel).
 		Height(t.Scale(th.Space(8))).PaddingX(design.Space3).
-		Radius(th.Radius).Background(fill).TextColor(glyph).Disabled(!hasDraft)
+		Radius(th.Radius).Background(fill).TextColor(glyph).Disabled(!hasContent)
 	button.Children(func() {
 		ui.Icon(c, icons.ChevronRight()).Size(th.Space(4), th.Space(4)).TextColor(glyph)
 	})
 	switch {
-	case !hasDraft:
+	case !hasContent:
 	case button.Pressed():
 		button.Background(t.AccentPressed)
 	case button.Hovered():
 		button.Background(t.AccentHover)
 	}
-	if button.Clicked() && hasDraft {
+	if button.Clicked() && hasContent {
 		submitDraft(chat, activeID, st)
 	}
 }
@@ -730,16 +742,32 @@ func buildStopButton(c *ui.Context, t *design.Tokens, cfg Config, chat contracts
 	}
 }
 
-// submitDraft sends the trimmed draft (if any) and clears it on success.
+// submitDraft sends the trimmed draft and any staged attachments (a message
+// may consist of attachments only) and clears both on success. A backend
+// without contracts.AttachmentSender reports the readable unsupported error
+// instead of silently dropping the files.
 func submitDraft(chat contracts.ChatService, activeID string, st *state) bool {
 	prompt := strings.TrimSpace(st.draft)
-	if prompt == "" || activeID == "" {
+	attachments := append([]contracts.Attachment(nil), st.pendingAttachments...)
+	if (prompt == "" && len(attachments) == 0) || activeID == "" {
 		return false
 	}
-	if err := chat.Send(activeID, prompt); err != nil {
+	if len(attachments) > 0 {
+		sender, ok := chat.(contracts.AttachmentSender)
+		if !ok {
+			st.attachErr = "当前后端不支持附件"
+			return false
+		}
+		if err := sender.SendWithAttachments(activeID, prompt, attachments); err != nil {
+			st.attachErr = "发送附件失败：" + err.Error()
+			return false
+		}
+	} else if err := chat.Send(activeID, prompt); err != nil {
 		return false
 	}
 	st.draft = ""
+	st.pendingAttachments = nil
+	st.attachErr = ""
 	return true
 }
 

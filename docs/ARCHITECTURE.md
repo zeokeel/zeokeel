@@ -189,6 +189,8 @@ if _, err := ctx.Effect(func() cordis.Effect {
 - ✅ 品牌设计体系：`internal/brand`（palette/theme/mark）、`internal/design`（tokens/字阶/间距/组件样式、
   TypeRole、motion）、`internal/icons`（SVG 图标）；uiroot chrome 使用品牌侧栏/brand row/顶栏，
   `ui/{home,session,sidebar,settings,approval,toolcards}` 全部品牌化（native 控件 + design 样式）
+- ✅ 附件/图片：`contracts.Attachment` + 可选 `AttachmentSender`；agent 转 rig image content part；
+  composer 原生 picker/缩略图/chips；用户气泡附件展示
 - ✅ 记忆与 Markdown：`internal/modules/memory`（JSON 持久化 rig.MemoryStore + memory 工具）、
   `ui/session` 记忆 Tab 真实面板、助手正文 mygo `ui/markdown`（原生渲染器）
 - ✅ 老 UI 布局对齐：无全局顶栏，屏幕自带头部；侧栏模块化导航（首页/会话/搜索/重命名/删除）；

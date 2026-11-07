@@ -5,7 +5,9 @@ package agent
 // asserted from the test goroutine. No network or display is involved.
 
 import (
+	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -988,3 +990,323 @@ func (a fakeApprovals) Resolve(id string, decision contracts.ApprovalDecision) e
 	return nil
 }
 func (a fakeApprovals) Subscribe(fn func()) (func(), error) { return func() {}, nil }
+
+// --- P2: attachments and images -------------------------------------------
+
+// captureProvider records every request and answers with one short text delta.
+type captureProvider struct {
+	mu       sync.Mutex
+	requests []rig.Request
+}
+
+func (p *captureProvider) Name() string { return "capture" }
+
+func (p *captureProvider) Stream(_ context.Context, request rig.Request) (rig.Stream, error) {
+	p.mu.Lock()
+	p.requests = append(p.requests, request)
+	p.mu.Unlock()
+	return &scriptedStream{chunks: []rig.Chunk{
+		{Delta: "ok"},
+		{FinishReason: "stop"},
+	}}, nil
+}
+
+func (p *captureProvider) lastRequest() rig.Request {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if len(p.requests) == 0 {
+		return rig.Request{}
+	}
+	return p.requests[len(p.requests)-1]
+}
+
+// newAttachmentService builds a service with a fake durable store and a
+// capturing provider, returning both so tests can assert persistence.
+func newAttachmentService(t *testing.T, provider *captureProvider) (*service, *fakeStore) {
+	t.Helper()
+	store := newFakeStore()
+	svc := newService(Config{}, rigtools.NewRegistry(),
+		contracts.SettingsService(newFakeSettings(nil)), &fakeLogger{}, store, fakeApprovals{})
+	svc.providerFactory = func(contracts.ChatConfig) (rig.Provider, error) { return provider, nil }
+	return svc, store
+}
+
+// lastUserMessage finds the last user message of a captured provider request.
+func lastUserMessage(t *testing.T, request rig.Request) rig.Message {
+	t.Helper()
+	for index := len(request.Messages) - 1; index >= 0; index-- {
+		if request.Messages[index].Role == rig.RoleUser {
+			return request.Messages[index]
+		}
+	}
+	t.Fatalf("request has no user message: %+v", request.Messages)
+	return rig.Message{}
+}
+
+// imageAttachment is a tiny PNG-named attachment.
+func imageAttachment() contracts.Attachment {
+	return contracts.Attachment{
+		ID:   "a-image",
+		Name: "cat.png",
+		MIME: "image/png",
+		Data: []byte{0x89, 'P', 'N', 'G', 0x0d, 0x0a, 0x1a, 0x0a},
+	}
+}
+
+// TestSendWithAttachmentsImage covers an image send: the provider receives an
+// image data URL content part, and the read model carries the attachment chips.
+func TestSendWithAttachmentsImage(t *testing.T) {
+	provider := &captureProvider{}
+	svc, _ := newAttachmentService(t, provider)
+	sender, ok := contracts.ChatService(svc).(contracts.AttachmentSender)
+	if !ok {
+		t.Fatal("service does not implement contracts.AttachmentSender")
+	}
+	sessionID, err := svc.NewSession("")
+	if err != nil {
+		t.Fatalf("NewSession: %v", err)
+	}
+	attachment := imageAttachment()
+	if err := sender.SendWithAttachments(sessionID, "  描述这张图  ", []contracts.Attachment{attachment}); err != nil {
+		t.Fatalf("SendWithAttachments: %v", err)
+	}
+	session := waitIdle(t, svc, sessionID)
+	user := session.Messages[0]
+	if user.Role != contracts.ChatRoleUser || user.Text != "描述这张图" {
+		t.Fatalf("user message = %+v", user)
+	}
+	if len(user.Attachments) != 1 {
+		t.Fatalf("attachments = %+v, want one", user.Attachments)
+	}
+	chip := user.Attachments[0]
+	if chip.Name != attachment.Name || chip.MIME != attachment.MIME || !bytes.Equal(chip.Data, attachment.Data) {
+		t.Fatalf("attachment chip = %+v, want the sent attachment", chip)
+	}
+
+	// The read model is a copy: mutating the snapshot must not change the
+	// session or the caller's buffer.
+	session.Messages[0].Attachments[0].Data[0] = 0xff
+	attachment.Data[0] = 0xff
+	refetched, _ := svc.Session(sessionID)
+	if refetched.Messages[0].Attachments[0].Data[0] != 0x89 {
+		t.Fatalf("read model aliases attachment bytes: %+v", refetched.Messages[0].Attachments[0])
+	}
+
+	userMessage := lastUserMessage(t, provider.lastRequest())
+	var sawText, sawImage bool
+	for _, part := range userMessage.Content {
+		switch part.Type {
+		case rig.PartText:
+			sawText = sawText || part.Text == "描述这张图"
+		case rig.PartImageURL:
+			if !strings.HasPrefix(part.ImageURL, "data:image/png;base64,") {
+				t.Fatalf("image part = %q, want an image/png data URL", part.ImageURL)
+			}
+			encoded := strings.TrimPrefix(part.ImageURL, "data:image/png;base64,")
+			decoded, err := base64.StdEncoding.DecodeString(encoded)
+			if err != nil {
+				t.Fatalf("decode image data URL: %v", err)
+			}
+			if !bytes.Equal(decoded, []byte{0x89, 'P', 'N', 'G', 0x0d, 0x0a, 0x1a, 0x0a}) {
+				t.Fatalf("decoded image bytes = %x", decoded)
+			}
+			sawImage = true
+		}
+	}
+	if !sawText || !sawImage {
+		t.Fatalf("provider content parts = %+v, want text + image", userMessage.Content)
+	}
+}
+
+// TestSendAttachmentsOnly covers a blank prompt with attachments: it is
+// allowed, the title comes from the first attachment and the provider receives
+// only the image part.
+func TestSendAttachmentsOnly(t *testing.T) {
+	provider := &captureProvider{}
+	svc, _ := newAttachmentService(t, provider)
+	sessionID, err := svc.NewSession("")
+	if err != nil {
+		t.Fatalf("NewSession: %v", err)
+	}
+	if err := svc.SendWithAttachments(sessionID, "   ", []contracts.Attachment{imageAttachment()}); err != nil {
+		t.Fatalf("SendWithAttachments(attachment only): %v", err)
+	}
+	session := waitIdle(t, svc, sessionID)
+	user := session.Messages[0]
+	if user.Text != "" || len(user.Attachments) != 1 {
+		t.Fatalf("attachment-only user message = %+v", user)
+	}
+	if session.Title != "cat.png" {
+		t.Fatalf("session title = %q, want the first attachment name", session.Title)
+	}
+	userMessage := lastUserMessage(t, provider.lastRequest())
+	if len(userMessage.Content) != 1 || userMessage.Content[0].Type != rig.PartImageURL {
+		t.Fatalf("attachment-only content = %+v, want exactly one image part", userMessage.Content)
+	}
+}
+
+// TestSendWithAttachmentsValidation covers the empty/unknown cases and the
+// equivalence of an attachment-less send with Send.
+func TestSendWithAttachmentsValidation(t *testing.T) {
+	provider := &captureProvider{}
+	svc, _ := newAttachmentService(t, provider)
+	sessionID, err := svc.NewSession("")
+	if err != nil {
+		t.Fatalf("NewSession: %v", err)
+	}
+	if err := svc.SendWithAttachments(sessionID, "   ", nil); !errors.Is(err, ErrEmptyPrompt) {
+		t.Fatalf("SendWithAttachments(blank, no attachments) = %v, want ErrEmptyPrompt", err)
+	}
+	if err := svc.SendWithAttachments("missing", "hi", []contracts.Attachment{imageAttachment()}); err == nil {
+		t.Fatal("SendWithAttachments(unknown session) returned nil error")
+	}
+	if err := svc.SendWithAttachments(sessionID, "plain prompt", nil); err != nil {
+		t.Fatalf("SendWithAttachments(no attachments): %v", err)
+	}
+	waitIdle(t, svc, sessionID)
+	userMessage := lastUserMessage(t, provider.lastRequest())
+	if len(userMessage.Content) != 1 || userMessage.Content[0].Text != "plain prompt" {
+		t.Fatalf("plain send content = %+v, want one text part", userMessage.Content)
+	}
+}
+
+// TestTextAttachmentParts covers non-image files: a text file carries up to
+// 32 KiB of content, other files only the header, and both keep their chips.
+func TestTextAttachmentParts(t *testing.T) {
+	provider := &captureProvider{}
+	svc, _ := newAttachmentService(t, provider)
+	sessionID, err := svc.NewSession("")
+	if err != nil {
+		t.Fatalf("NewSession: %v", err)
+	}
+	textFile := contracts.Attachment{ID: "t1", Name: "notes.txt", MIME: "text/plain", Data: []byte("hello notes")}
+	pdf := contracts.Attachment{ID: "t2", Name: "spec.pdf", MIME: "application/pdf", Data: []byte("PDF")}
+	if err := svc.SendWithAttachments(sessionID, "看看附件", []contracts.Attachment{textFile, pdf}); err != nil {
+		t.Fatalf("SendWithAttachments: %v", err)
+	}
+	session := waitIdle(t, svc, sessionID)
+	if got := len(session.Messages[0].Attachments); got != 2 {
+		t.Fatalf("attachment chips = %d, want 2", got)
+	}
+
+	userMessage := lastUserMessage(t, provider.lastRequest())
+	var textParts []string
+	for _, part := range userMessage.Content {
+		if part.Type == rig.PartText {
+			textParts = append(textParts, part.Text)
+		}
+	}
+	joined := strings.Join(textParts, "\n")
+	for _, want := range []string{"看看附件", "[附件] notes.txt (11 bytes)", "hello notes", "[附件] spec.pdf (3 bytes)"} {
+		if !strings.Contains(joined, want) {
+			t.Fatalf("text parts %q do not contain %q", joined, want)
+		}
+	}
+	if strings.Contains(joined, "PDF\n") {
+		t.Fatalf("binary file content leaked into the prompt: %q", joined)
+	}
+}
+
+// TestRestoredAttachmentChips covers the restart read model: image data URLs
+// and attachment text parts are turned back into chips without their bytes.
+func TestRestoredAttachmentChips(t *testing.T) {
+	converted := chatMessagesFromRig([]rig.Message{
+		{Role: rig.RoleUser, Content: []rig.ContentPart{
+			rig.TextPart("看看"),
+			rig.ImagePart("data:image/png;base64,AAAA", ""),
+		}},
+		{Role: rig.RoleUser, Content: []rig.ContentPart{
+			rig.TextPart("[附件] notes.txt (5 bytes)\nhello"),
+		}},
+	})
+	if len(converted) != 2 {
+		t.Fatalf("converted messages = %d, want 2", len(converted))
+	}
+	first := converted[0]
+	if first.Text != "看看" || len(first.Attachments) != 1 {
+		t.Fatalf("restored image message = %+v", first)
+	}
+	if first.Attachments[0].Name != "图片" || first.Attachments[0].MIME != "image/png" || len(first.Attachments[0].Data) != 0 {
+		t.Fatalf("restored image chip = %+v", first.Attachments[0])
+	}
+	second := converted[1]
+	if second.Text != "" || len(second.Attachments) != 1 || second.Attachments[0].Name != "notes.txt" {
+		t.Fatalf("restored text-attachment message = %+v", second)
+	}
+}
+
+// TestAttachmentsSurviveRestart covers the durable store round trip: after a
+// service rebuild + restore, the user message still renders attachment chips.
+func TestAttachmentsSurviveRestart(t *testing.T) {
+	provider := &captureProvider{}
+	first, store := newAttachmentService(t, provider)
+	sessionID, err := first.NewSession("")
+	if err != nil {
+		t.Fatalf("NewSession: %v", err)
+	}
+	if err := first.SendWithAttachments(sessionID, "图里是什么", []contracts.Attachment{imageAttachment()}); err != nil {
+		t.Fatalf("SendWithAttachments: %v", err)
+	}
+	waitIdle(t, first, sessionID)
+
+	second := newService(Config{}, rigtools.NewRegistry(),
+		contracts.SettingsService(newFakeSettings(nil)), &fakeLogger{}, store, fakeApprovals{})
+	second.restore(context.Background())
+	session, ok := second.Session(sessionID)
+	if !ok {
+		t.Fatal("restored service has no session")
+	}
+	user := session.Messages[0]
+	if user.Text != "图里是什么" || len(user.Attachments) != 1 {
+		t.Fatalf("restored user message = %+v", user)
+	}
+	if user.Attachments[0].Name != "图片" || user.Attachments[0].MIME != "image/png" {
+		t.Fatalf("restored chip = %+v", user.Attachments[0])
+	}
+}
+
+// TestUserMessageEventCarriesAttachmentNames covers the durable session event.
+func TestUserMessageEventCarriesAttachmentNames(t *testing.T) {
+	provider := &captureProvider{}
+	svc, store := newAttachmentService(t, provider)
+	sessionID, err := svc.NewSession("")
+	if err != nil {
+		t.Fatalf("NewSession: %v", err)
+	}
+	attachments := []contracts.Attachment{
+		imageAttachment(),
+		{ID: "t2", Name: "spec.pdf", MIME: "application/pdf", Data: []byte("PDF")},
+	}
+	if err := svc.SendWithAttachments(sessionID, "两个附件", attachments); err != nil {
+		t.Fatalf("SendWithAttachments: %v", err)
+	}
+	waitIdle(t, svc, sessionID)
+
+	events, err := store.Events(context.Background(), sessionID, 0, 0)
+	if err != nil {
+		t.Fatalf("Events: %v", err)
+	}
+	var found bool
+	for _, event := range events {
+		if event.Type != "user_message" {
+			continue
+		}
+		var payload struct {
+			Text        string   `json:"text"`
+			Attachments []string `json:"attachments"`
+		}
+		if err := json.Unmarshal(event.Payload, &payload); err != nil {
+			t.Fatalf("decode user_message payload: %v", err)
+		}
+		found = true
+		if payload.Text != "两个附件" {
+			t.Fatalf("event text = %q", payload.Text)
+		}
+		if len(payload.Attachments) != 2 || payload.Attachments[0] != "cat.png" || payload.Attachments[1] != "spec.pdf" {
+			t.Fatalf("event attachments = %v, want [cat.png spec.pdf]", payload.Attachments)
+		}
+	}
+	if !found {
+		t.Fatal("no user_message event recorded")
+	}
+}

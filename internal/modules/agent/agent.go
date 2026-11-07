@@ -143,8 +143,9 @@ type service struct {
 }
 
 var (
-	_ contracts.ChatService    = (*service)(nil)
-	_ contracts.SessionRenamer = (*service)(nil)
+	_ contracts.ChatService      = (*service)(nil)
+	_ contracts.SessionRenamer   = (*service)(nil)
+	_ contracts.AttachmentSender = (*service)(nil)
 )
 
 // sessionState is the mutable per-session state.
@@ -472,11 +473,26 @@ var ErrEmptyPrompt = errors.New("agent: prompt is empty")
 var ErrSessionRunning = errors.New("agent: session is already running")
 
 // Send appends the user prompt, creates the streaming assistant placeholder and
-// starts one asynchronous Rig agent run. The run uses the effective config and
-// the shared history; a per-session context makes Cancel possible.
+// starts one asynchronous Rig agent run.
 func (s *service) Send(sessionID, prompt string) error {
+	return s.send(sessionID, prompt, nil)
+}
+
+// SendWithAttachments appends a user message carrying the prompt and file/image
+// attachments, then starts one asynchronous Rig agent run (contracts
+// AttachmentSender). Image attachments travel to the provider as rig image
+// content parts (data URLs); other files become bounded text parts. A blank
+// prompt is allowed when at least one attachment is present.
+func (s *service) SendWithAttachments(sessionID, prompt string, attachments []contracts.Attachment) error {
+	return s.send(sessionID, prompt, attachments)
+}
+
+// send is the shared prompt/attachment send path. The run uses the effective
+// config and the shared history; a per-session context makes Cancel possible.
+func (s *service) send(sessionID, prompt string, attachments []contracts.Attachment) error {
 	prompt = strings.TrimSpace(prompt)
-	if prompt == "" {
+	attachments = cloneAttachments(attachments)
+	if prompt == "" && len(attachments) == 0 {
 		return ErrEmptyPrompt
 	}
 	now := time.Now()
@@ -493,15 +509,20 @@ func (s *service) Send(sessionID, prompt string) error {
 	}
 	titleChanged := false
 	if strings.TrimSpace(state.title) == "" {
-		state.title = truncateTitle(prompt)
+		titleSeed := prompt
+		if titleSeed == "" {
+			titleSeed = attachmentTitle(attachments)
+		}
+		state.title = truncateTitle(titleSeed)
 		titleChanged = true
 	}
 	state.messages = append(state.messages,
 		contracts.ChatMessage{
-			ID:        s.nextMessageIDLocked(),
-			Role:      contracts.ChatRoleUser,
-			Text:      prompt,
-			CreatedAt: now,
+			ID:          s.nextMessageIDLocked(),
+			Role:        contracts.ChatRoleUser,
+			Text:        prompt,
+			Attachments: cloneAttachments(attachments),
+			CreatedAt:   now,
 		},
 		contracts.ChatMessage{
 			ID:        s.nextMessageIDLocked(),
@@ -529,11 +550,105 @@ func (s *service) Send(sessionID, prompt string) error {
 				s.logger.Printf("[agent] rename session %s: %v", sessionID, err)
 			}
 		}
-		s.appendEvent(runCtx, sessionID, "user_message", map[string]any{"text": prompt})
+		s.appendEvent(runCtx, sessionID, "user_message", map[string]any{
+			"text":        prompt,
+			"attachments": attachmentNames(attachments),
+		})
 	}
 	s.notify(sessionID)
-	go s.run(runCtx, sessionID, cfg, prompt)
+	go s.run(runCtx, sessionID, cfg, buildUserInput(prompt, attachments))
 	return nil
+}
+
+// attachmentTitle is the title seed for an attachment-only send.
+func attachmentTitle(attachments []contracts.Attachment) string {
+	for _, attachment := range attachments {
+		if name := attachmentDisplayName(attachment); name != "" {
+			return name
+		}
+	}
+	return "附件"
+}
+
+// attachmentDisplayName is the name shown for one attachment (never empty).
+func attachmentDisplayName(attachment contracts.Attachment) string {
+	if name := strings.TrimSpace(attachment.Name); name != "" {
+		return name
+	}
+	return "附件"
+}
+
+// attachmentNames returns the raw display names carried by the durable
+// user_message event.
+func attachmentNames(attachments []contracts.Attachment) []string {
+	names := make([]string, 0, len(attachments))
+	for _, attachment := range attachments {
+		names = append(names, attachmentDisplayName(attachment))
+	}
+	return names
+}
+
+// cloneAttachments copies the chips and their bytes, so the read model never
+// aliases the caller's buffers.
+func cloneAttachments(attachments []contracts.Attachment) []contracts.Attachment {
+	if len(attachments) == 0 {
+		return nil
+	}
+	out := make([]contracts.Attachment, len(attachments))
+	copy(out, attachments)
+	for index := range out {
+		if len(out[index].Data) > 0 {
+			out[index].Data = append([]byte(nil), out[index].Data...)
+		}
+	}
+	return out
+}
+
+// maxAttachmentTextBytes bounds the text-file body inlined into a text part.
+const maxAttachmentTextBytes = 32 << 10
+
+// buildUserInput turns a prompt plus attachments into the initial user message
+// for one Rig run: a text part for the prompt, image content parts (data URLs)
+// for images and bounded text parts for every other file.
+func buildUserInput(prompt string, attachments []contracts.Attachment) []rig.Message {
+	if len(attachments) == 0 {
+		return []rig.Message{rig.NewMessage(rig.RoleUser, prompt)}
+	}
+	parts := make([]rig.ContentPart, 0, len(attachments)+1)
+	if prompt != "" {
+		parts = append(parts, rig.TextPart(prompt))
+	}
+	for _, attachment := range attachments {
+		if attachment.IsImage() {
+			if dataURL := attachment.DataURL(); dataURL != "" {
+				parts = append(parts, rig.ImagePart(dataURL, ""))
+				continue
+			}
+		}
+		parts = append(parts, rig.TextPart(attachmentText(attachment)))
+	}
+	if len(parts) == 0 {
+		parts = append(parts, rig.TextPart(""))
+	}
+	return []rig.Message{{Role: rig.RoleUser, Content: parts}}
+}
+
+// attachmentText renders one non-image attachment as a text part. Text files
+// carry up to 32 KiB of their content; other files only carry the header.
+func attachmentText(attachment contracts.Attachment) string {
+	header := fmt.Sprintf("[附件] %s (%d bytes)", attachmentDisplayName(attachment), attachment.Size())
+	if attachment.Size() == 0 || !strings.HasPrefix(attachment.MIME, "text/") {
+		return header
+	}
+	content := strings.ToValidUTF8(string(attachment.Data), "")
+	if len(content) > maxAttachmentTextBytes {
+		cut := maxAttachmentTextBytes
+		for cut > 0 && (content[cut]&0xC0) == 0x80 {
+			cut--
+		}
+		content = content[:cut] + "\n[truncated]"
+	}
+	return header + "\n" + content
 }
 
 // nextMessageIDLocked generates a message ID.
@@ -542,8 +657,9 @@ func (s *service) nextMessageIDLocked() string {
 	return fmt.Sprintf("msg-%d", s.nextMessageSeq)
 }
 
-// run executes one Rig agent run in the background.
-func (s *service) run(ctx context.Context, sessionID string, cfg contracts.ChatConfig, prompt string) {
+// run executes one Rig agent run in the background with the already-built
+// initial input messages.
+func (s *service) run(ctx context.Context, sessionID string, cfg contracts.ChatConfig, input []rig.Message) {
 	provider, err := s.newProvider(cfg)
 	if err != nil {
 		s.finish(sessionID, ctx, fmt.Errorf("create provider: %w", err))
@@ -576,7 +692,7 @@ func (s *service) run(ctx context.Context, sessionID string, cfg contracts.ChatC
 	s.appendEvent(ctx, sessionID, "run_start", map[string]any{"model": cfg.Model})
 	_, runErr := runner.Run(ctx, rig.RunRequest{
 		SessionID: sessionID,
-		Input:     []rig.Message{rig.NewMessage(rig.RoleUser, prompt)},
+		Input:     input,
 		Emit:      func(event rig.Event) { s.handleEvent(sessionID, event) },
 	})
 	s.finish(sessionID, ctx, runErr)
@@ -788,10 +904,12 @@ func chatMessagesFromRig(messages []rig.Message) []contracts.ChatMessage {
 	for _, message := range messages {
 		switch message.Role {
 		case rig.RoleUser:
+			text, attachments := userMessageContent(message)
 			out = append(out, contracts.ChatMessage{
-				Role:      contracts.ChatRoleUser,
-				Text:      messageText(message),
-				CreatedAt: messageTime(message),
+				Role:        contracts.ChatRoleUser,
+				Text:        text,
+				Attachments: attachments,
+				CreatedAt:   messageTime(message),
 			})
 		case rig.RoleAssistant:
 			chatMessage := contracts.ChatMessage{
@@ -820,6 +938,75 @@ func messageText(message rig.Message) string {
 	return strings.Join(parts, "")
 }
 
+// userMessageContent reconstructs the user message read model from persisted
+// Rig parts: prompt text is the non-attachment text, attachment chips are
+// restored from text parts written by attachmentText and from image data URLs.
+func userMessageContent(message rig.Message) (string, []contracts.Attachment) {
+	var textParts []string
+	var attachments []contracts.Attachment
+	for _, part := range message.Content {
+		switch part.Type {
+		case rig.PartText:
+			if name, ok := parseAttachmentText(part.Text); ok {
+				attachments = append(attachments, contracts.Attachment{Name: name})
+				continue
+			}
+			if part.Text != "" {
+				textParts = append(textParts, part.Text)
+			}
+		case rig.PartImageURL:
+			if part.ImageURL == "" {
+				continue
+			}
+			attachments = append(attachments, contracts.Attachment{
+				Name: "图片",
+				MIME: dataURLMIME(part.ImageURL),
+			})
+		}
+	}
+	return strings.Join(textParts, ""), attachments
+}
+
+// parseAttachmentText reports whether text is one of the attachment text parts
+// written by attachmentText and returns its display name.
+func parseAttachmentText(text string) (string, bool) {
+	const prefix = "[附件] "
+	if !strings.HasPrefix(text, prefix) {
+		return "", false
+	}
+	header := text
+	if newline := strings.IndexByte(header, '\n'); newline >= 0 {
+		header = header[:newline]
+	}
+	rest := strings.TrimPrefix(header, prefix)
+	name := rest
+	if open := strings.LastIndex(rest, " ("); open >= 0 {
+		if suffix := rest[open:]; strings.HasSuffix(suffix, " bytes)") {
+			name = rest[:open]
+		}
+	}
+	name = strings.TrimSpace(name)
+	if name == "" {
+		name = "附件"
+	}
+	return name, true
+}
+
+// dataURLMIME extracts the media type from a data URL ("" for other URLs).
+func dataURLMIME(dataURL string) string {
+	if !strings.HasPrefix(dataURL, "data:") {
+		return ""
+	}
+	rest := strings.TrimPrefix(dataURL, "data:")
+	if index := strings.IndexByte(rest, ';'); index >= 0 {
+		return rest[:index]
+	}
+	if index := strings.IndexByte(rest, ','); index >= 0 {
+		return rest[:index]
+	}
+	return ""
+}
+
 func messageTime(rig.Message) time.Time { return time.Time{} }
 
 // snapshot returns a deep copy of the session read model.
@@ -836,6 +1023,7 @@ func (state *sessionState) snapshot() contracts.ChatSession {
 	for _, message := range state.messages {
 		copied := message
 		copied.Tools = append([]contracts.ToolCall(nil), message.Tools...)
+		copied.Attachments = cloneAttachments(message.Attachments)
 		out.Messages = append(out.Messages, copied)
 	}
 	return out

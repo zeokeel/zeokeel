@@ -5,6 +5,7 @@ package main
 
 import (
 	"context"
+	"encoding/base64"
 	"fmt"
 	"image/png"
 	"net/http"
@@ -89,12 +90,24 @@ func main() {
 	if err := a.ui.Navigator().Push("session"); err != nil {
 		fail("push", err)
 	}
+	// Send an image attachment through the optional attachment API so the chat
+	// frame shows the staged-message chips and the provider sees an image part.
+	if sender, ok := chat.(contracts.AttachmentSender); ok {
+		if pngBytes, err := base64.StdEncoding.DecodeString("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg=="); err == nil {
+			_ = sender.SendWithAttachments(sessionID, "看看这张图", []contracts.Attachment{{
+				ID: "att-1", Name: "zeokeel.png", MIME: "image/png", Data: pngBytes,
+			}})
+			waitIdle(chat, sessionID, 10*time.Second)
+		}
+	}
+
 	// Seed the durable memory backend and render the Memory tab.
 	if memory, err := a.root.Require(contracts.KeyMemory); err == nil {
 		_, _ = memory.Add(context.Background(), contracts.Memory{Text: "偏好：界面使用中文，回答尽量简洁", Scope: "global"})
 		_, _ = memory.Add(context.Background(), contracts.Memory{Text: "项目根目录是 /data/mygo", Scope: "workspace"})
 	}
 	a.render(outDir + "/p1-chat.png")
+	a.render(outDir + "/p2-attachments.png")
 	if err := a.tester.Click("记忆"); err != nil {
 		fmt.Println("click memory tab:", err)
 	}

@@ -1,6 +1,8 @@
 package contracts
 
 import (
+	"encoding/base64"
+	"strings"
 	"time"
 
 	cordis "github.com/zeokeel/zeokeel-kernel"
@@ -48,6 +50,9 @@ type ChatMessage struct {
 	Streaming bool
 	// Tools lists the tool calls that belong to this message, in call order.
 	Tools []ToolCall
+	// Attachments are the files/images sent with a user message (display
+	// read model; the image bytes also travel as rig image content parts).
+	Attachments []Attachment
 	// Error is set when the message (usually an assistant turn) failed.
 	Error string
 	// CreatedAt is the message timestamp (local time, display only).
@@ -84,6 +89,44 @@ type ChatConfig struct {
 	SystemPrompt  string
 	MaxIterations int
 	ContextBudget int
+}
+
+// Attachment is one file or image the user attached to a prompt.
+type Attachment struct {
+	// ID identifies the chip while it is staged.
+	ID string
+	// Name is the file name shown in the UI.
+	Name string
+	// MIME is the detected content type (image/png, text/plain, ...).
+	MIME string
+	// Data is the raw file content; empty for restored/read-only chips.
+	Data []byte
+}
+
+// IsImage reports whether the attachment is an image the provider can accept
+// as a content part.
+func (a Attachment) IsImage() bool {
+	return strings.HasPrefix(a.MIME, "image/")
+}
+
+// Size is the attachment size in bytes.
+func (a Attachment) Size() int { return len(a.Data) }
+
+// DataURL encodes the attachment as a data URL (used for rig image parts).
+func (a Attachment) DataURL() string {
+	if len(a.Data) == 0 {
+		return ""
+	}
+	return "data:" + a.MIME + ";base64," + base64.StdEncoding.EncodeToString(a.Data)
+}
+
+// AttachmentSender is the optional half of the chat service that accepts file
+// and image attachments with a prompt. UI modules type-assert it so a backend
+// without attachment support still implements ChatService.
+type AttachmentSender interface {
+	// SendWithAttachments appends a user message carrying the prompt and the
+	// attachments, then starts one asynchronous agent run.
+	SendWithAttachments(sessionID, prompt string, attachments []Attachment) error
 }
 
 // ChatService is the product's conversation service: it owns chat sessions,
