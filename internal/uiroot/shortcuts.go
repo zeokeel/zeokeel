@@ -4,6 +4,7 @@ import (
 	"strings"
 
 	"github.com/egoist/mygo/ui"
+	cordis "github.com/zeokeel/zeokeel-kernel"
 
 	"github.com/zeokeel/zeokeel/internal/contracts"
 )
@@ -97,9 +98,71 @@ func parseShortcutChord(raw string) (ui.Modifiers, ui.Key, bool) {
 	return mods, key, true
 }
 
+// newSessionShortcut implements Cmd/Ctrl+N: create a fresh session and show the
+// conversation screen. A nil chat backend falls back to the registered
+// zeokeel.session.new command (the session module owns the ChatService in the
+// desktop host); errors are deliberately silent and panics are contained.
+func (r *Root) newSessionShortcut() {
+	runHandlerSafely("shortcut new-session", func() {
+		r.mu.Lock()
+		chat := r.chatService
+		kernel := r.kernelContext
+		r.mu.Unlock()
+		if chat == nil {
+			if fromKernel, ok := kernel.Get(contracts.KeyChat); ok {
+				chat = fromKernel
+			}
+		}
+		if chat != nil {
+			if _, err := chat.NewSession(""); err != nil {
+				return
+			}
+			_ = r.shortcutNavigator(kernel).Push("session")
+			r.requestFrame()
+			return
+		}
+		for _, command := range r.rt.Commands() {
+			if command.ID != "zeokeel.session.new" {
+				continue
+			}
+			if command.Enabled != nil && !command.Enabled() {
+				return
+			}
+			if command.Run != nil {
+				_ = command.Run()
+			}
+			r.requestFrame()
+			return
+		}
+	})
+}
+
+// settingsShortcut implements Cmd/Ctrl+,: toggle the settings surface.
+func (r *Root) settingsShortcut() {
+	runHandlerSafely("shortcut settings", func() {
+		r.mu.Lock()
+		kernel := r.kernelContext
+		r.mu.Unlock()
+		r.shortcutNavigator(kernel).ToggleSettings()
+		r.requestFrame()
+	})
+}
+
+// shortcutNavigator prefers the kernel-provided KeyNavigator when a kernel
+// context is bound (the host provides the same navigator as r.nav); it falls
+// back to the root-owned navigator otherwise.
+func (r *Root) shortcutNavigator(kernel cordis.Context) contracts.Navigator {
+	if navigator, ok := kernel.Get(contracts.KeyNavigator); ok && navigator != nil {
+		return navigator
+	}
+	return r.nav
+}
+
 // bindChromeShortcuts registers the two configurable chrome shortcuts from the
-// host settings (falling back to the documented defaults). It runs every
-// frame, so a settings change takes effect on the next frame.
+// host settings (falling back to the documented defaults) plus the built-in
+// Cmd/Ctrl+N and Cmd/Ctrl+, actions. It runs every frame, so a settings change
+// takes effect on the next frame; registrations are frame-scoped by mygo's
+// context shortcut hook, so they never accumulate.
 func (r *Root) bindChromeShortcuts(c *ui.Context) {
 	toggleMods, toggleKey := ui.Cmd, ui.KeyB
 	if r.settingsService != nil {
@@ -122,4 +185,8 @@ func (r *Root) bindChromeShortcuts(c *ui.Context) {
 		r.paletteQuery = ""
 		r.requestFrame()
 	})
+
+	// Built-in window shortcuts (not configurable): new session and settings.
+	c.OnShortcut(ui.Cmd, ui.KeyN, r.newSessionShortcut)
+	c.OnShortcut(ui.Cmd, ui.KeyComma, r.settingsShortcut)
 }

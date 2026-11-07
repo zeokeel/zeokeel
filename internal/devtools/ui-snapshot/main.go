@@ -599,6 +599,10 @@ func main() {
 		fmt.Println("click notification settings:", err)
 	}
 	a.render(outDir + "/p2-notifications.png")
+	if err := a.tester.Click("行为"); err != nil {
+		fmt.Println("click behavior settings:", err)
+	}
+	a.render(outDir + "/p2-behavior.png")
 	a.ui.Navigator().CloseSettings()
 	// Automation with a finished run so the history expansion is visible.
 	if automation, err := a.root.Require(contracts.KeyAutomation); err == nil {

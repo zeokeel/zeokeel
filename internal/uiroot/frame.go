@@ -376,7 +376,11 @@ func (r *Root) settings(c *ui.Context) {
 	}
 	selected := pages[r.settingsTab].ID
 	open := true
-	ui.Row(c).Width(760).Height(560).Children(func() {
+	// The surface is tall enough for the growing page list: with more pages
+	// than fit, the sidebar scrolls off-screen items and their nav clicks are
+	// unreachable (the page registry is a product contract with no capacity
+	// limit).
+	ui.Row(c).Width(760).Height(640).Children(func() {
 		ui.Sidebar(c, &selected, func() {
 			ui.SidebarSection(c, r.locale.T("settings.title"), &open, func() {
 				for _, page := range pages {

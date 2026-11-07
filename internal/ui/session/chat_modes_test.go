@@ -144,3 +144,15 @@ func TestChatModeBadgeAccentDistinct(t *testing.T) {
 		t.Fatalf("mode badge missing; texts = %v", tester.Texts())
 	}
 }
+
+// TestPermissionChipNever covers AUDIT-P3-14: the settings behavior page can
+// store agent.permission=never (fail-closed); the composer chip must show that
+// mode instead of falling back to "ask".
+func TestPermissionChipNever(t *testing.T) {
+	settings := &permissionSettings{values: map[string]string{contracts.SettingAgentPermission: contracts.PermissionNever}}
+	h := newPermissionHarness(t, permissionChat(), settings)
+	tester := h.tester()
+	tester.Frame()
+	h.assertTexts(tester, "从不允许")
+	h.assertNoTexts(tester, "询问")
+}

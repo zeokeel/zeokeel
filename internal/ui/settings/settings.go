@@ -583,6 +583,7 @@ func Module() *module.Descriptor[Config] {
 		catalog := &catalogState{}
 		lsp := &lspState{}
 		notifications := &notificationsState{}
+		behavior := &behaviorState{}
 		network := newNetworkState()
 		dataPrivacy := newDataPrivacyState()
 		diagnostics := &diagnosticsState{}
@@ -700,6 +701,14 @@ func Module() *module.Descriptor[Config] {
 				Build: func(c *ui.Context) {
 					syncer.sync()
 					buildNotificationsPage(c, runtime, store, locale, notifications)
+				},
+			},
+			{
+				ID: BehaviorPageID, Section: BehaviorPageSection, Order: BehaviorPageOrder,
+				zhTitle: "行为", enTitle: "Behavior",
+				Build: func(c *ui.Context) {
+					syncer.sync()
+					buildBehaviorPage(c, runtime, store, locale, behavior)
 				},
 			},
 			{

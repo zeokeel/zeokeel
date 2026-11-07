@@ -48,4 +48,6 @@ const (
 	PermissionWorkspace = "workspace"
 	// PermissionFull allows every tool call without asking.
 	PermissionFull = "full"
+	// PermissionNever denies every tool call (fail-closed).
+	PermissionNever = "never"
 )

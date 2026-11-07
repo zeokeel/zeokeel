@@ -16,6 +16,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -48,6 +49,8 @@ const (
 	// ACP method names.
 	MethodInitialize    = "initialize"
 	MethodSessionNew    = "session/new"
+	MethodSessionList   = "session/list"
+	MethodSessionLoad   = "session/load"
 	MethodSessionPrompt = "session/prompt"
 	MethodSessionCancel = "session/cancel"
 	MethodSessionUpdate = "session/update"
@@ -296,6 +299,7 @@ readLoop:
 				result := map[string]any{
 					"protocolVersion": ProtocolVersion,
 					"agentCapabilities": map[string]any{
+						"loadSession": true,
 						"promptCapabilities": map[string]any{
 							"image":           false,
 							"audio":           false,
@@ -316,6 +320,26 @@ readLoop:
 					continue
 				}
 				writer.writeResult(req.ID, map[string]string{"sessionId": sessionID})
+			case MethodSessionList:
+				if !hasID(req) {
+					continue
+				}
+				result, rpcErr := s.handleSessionList(req.Params)
+				if rpcErr != nil {
+					writer.writeError(req.ID, rpcErr)
+					continue
+				}
+				writer.writeResult(req.ID, result)
+			case MethodSessionLoad:
+				if !hasID(req) {
+					continue
+				}
+				result, rpcErr := s.handleSessionLoad(req.Params)
+				if rpcErr != nil {
+					writer.writeError(req.ID, rpcErr)
+					continue
+				}
+				writer.writeResult(req.ID, result)
 			case MethodSessionPrompt:
 				if !hasID(req) {
 					continue
@@ -352,6 +376,93 @@ readLoop:
 		return fmt.Errorf("acp: read protocol stream: %w", scanErr)
 	}
 	return nil
+}
+
+// sessionListItem is one session/list entry. The ACP session/list shape is a
+// deliberately small read model; updatedAt is omitted for zero timestamps.
+type sessionListItem struct {
+	SessionID string `json:"sessionId"`
+	Title     string `json:"title"`
+	UpdatedAt string `json:"updatedAt,omitempty"`
+}
+
+// sessionLoadParams is the params of session/load.
+type sessionLoadParams struct {
+	SessionID string `json:"sessionId"`
+}
+
+// sessionLister is the optional read half session/list needs. ChatService
+// includes Sessions today, so this assertion mainly documents the graceful
+// error path for host implementations that do not.
+type sessionLister interface {
+	Sessions() []contracts.ChatSessionInfo
+}
+
+// handleSessionList implements session/list: newest-updated first, stable for
+// zero/equal timestamps, with the chat service's own titles (no localization).
+func (s *service) handleSessionList(raw json.RawMessage) (any, *RPCError) {
+	if len(bytes.TrimSpace(raw)) > 0 && string(bytes.TrimSpace(raw)) != "null" {
+		var params map[string]any
+		if err := json.Unmarshal(raw, &params); err != nil {
+			return nil, invalidParams("session/list: " + err.Error())
+		}
+	}
+	lister, ok := s.chat.(sessionLister)
+	if !ok {
+		return nil, internalError("session/list: chat service does not expose sessions")
+	}
+	infos := append([]contracts.ChatSessionInfo(nil), lister.Sessions()...)
+	sort.SliceStable(infos, func(i, j int) bool {
+		return infos[i].UpdatedAt.After(infos[j].UpdatedAt)
+	})
+	entries := make([]sessionListItem, 0, len(infos))
+	for _, info := range infos {
+		entry := sessionListItem{SessionID: info.ID, Title: info.Title}
+		if !info.UpdatedAt.IsZero() {
+			entry.UpdatedAt = info.UpdatedAt.Format(time.RFC3339)
+		}
+		entries = append(entries, entry)
+	}
+	return map[string]any{"sessions": entries}, nil
+}
+
+// handleSessionLoad implements session/load: a read-only conversation replay for
+// editor clients. Tool/system messages are skipped; user and assistant text is
+// returned in order. It never changes the active session.
+func (s *service) handleSessionLoad(raw json.RawMessage) (any, *RPCError) {
+	var params sessionLoadParams
+	if err := json.Unmarshal(raw, &params); err != nil {
+		return nil, invalidParams("session/load: " + err.Error())
+	}
+	sessionID := strings.TrimSpace(params.SessionID)
+	if sessionID == "" {
+		return nil, invalidParams("session/load: sessionId is required")
+	}
+	session, ok := s.chat.Session(sessionID)
+	if !ok {
+		return nil, invalidParams(fmt.Sprintf("session/load: unknown session %q", sessionID))
+	}
+	model := strings.TrimSpace(session.Model)
+	if model == "" {
+		model = strings.TrimSpace(s.chat.Config().Model)
+	}
+	messages := make([]map[string]string, 0, len(session.Messages))
+	for _, message := range session.Messages {
+		if message.Role != contracts.ChatRoleUser && message.Role != contracts.ChatRoleAssistant {
+			continue
+		}
+		text := strings.TrimSpace(message.Text)
+		if text == "" {
+			continue
+		}
+		messages = append(messages, map[string]string{"role": string(message.Role), "text": text})
+	}
+	return map[string]any{
+		"sessionId": session.ID,
+		"title":     session.Title,
+		"model":     model,
+		"messages":  messages,
+	}, nil
 }
 
 // handlePrompt implements session/prompt: subscribe to chat updates, send the

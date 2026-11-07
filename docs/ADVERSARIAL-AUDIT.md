@@ -7,7 +7,7 @@
 
 ## 修复状态（Lead 复核后）
 
-> 首轮 11 个「已知缺陷探针」与第二轮 4 个 P3 均已随 TDD 修复转为 PASS；第三轮 P3-9/10 已修复、P3-11 重开后于 ca2d24c 真正修复；第四轮 P3-12 已修复（ca2d24c）；第五~七轮无新缺陷，第八轮发现 1 个 P3（AUDIT-P3-13）并已修复：诊断报告现在对 apiKey/token/secret/password/authorization 类设置整值隐藏，并对 JSON 结构化设置（mcp.servers）递归掩码 Bearer token 与凭证字段；新增单测断言 web.search.apiKey 与 mcp Bearer 不泄漏。`go test ./internal/regression -count=1 -race` 当前 **206 PASS / 0 SKIP**（历史：首轮修复后 92，第二轮后 98，第三轮后 133，第四轮后 153，第五轮后 172，第六轮后 180，第七轮后 189）。
+> 首轮 11 个「已知缺陷探针」与第二轮 4 个 P3 均已随 TDD 修复转为 PASS；第三轮 P3-9/10 已修复、P3-11 重开后于 ca2d24c 真正修复；第四轮 P3-12 已修复（ca2d24c）；第五~七轮无新缺陷，第八轮发现 1 个 P3（AUDIT-P3-13）并已修复：诊断报告现在对 apiKey/token/secret/password/authorization 类设置整值隐藏，并对 JSON 结构化设置（mcp.servers）递归掩码 Bearer token 与凭证字段；新增单测断言 web.search.apiKey 与 mcp Bearer 不泄漏。第九轮发现 1 个 P3（AUDIT-P3-14：agent.permission=never 已存储但会话权限 chip 显示「询问」，待修）。`go test ./internal/regression -count=1 -race` 当前 **220 PASS / 0 SKIP**（历史：首轮修复后 92，第二轮后 98，第三轮后 133，第四轮后 153，第五轮后 172，第六轮后 180，第七轮后 189，第八轮后 208）。
 
 | ID | 优先级 | 状态 | 修复摘要 |
 |----|--------|------|----------|
@@ -31,7 +31,7 @@ $ go test ./internal/regression -count=1                    ok  1.2s
 $ go test ./internal/regression -count=1 -race              ok 12.8s（98 PASS / 0 SKIP）
 ```
 
-测试规模：`internal/regression` 共 206 个顶层 Test（首轮 78 + 第二轮 20 + 第三轮 35 + 第四轮 20 + 第五轮 19 + 第六轮 8 + 第七轮 9 + 第八轮 17；含子用例后更多；另有 `internal/ui/uimodtest` 的 E2E 1 个，不计入本包）。第三轮 P3-9/10 已修复，P3-11 重开后已真正修复，第四轮 P3-12 已修复，第五~七轮无新缺陷，第八轮新增 P3-13（待修）；当前 **206 PASS / 0 SKIP**。
+测试规模：`internal/regression` 共 220 个顶层 Test（首轮 78 + 第二轮 20 + 第三轮 35 + 第四轮 20 + 第五轮 19 + 第六轮 8 + 第七轮 9 + 第八轮 17 + 特性提交补充 2 + 第九轮 12；含子用例后更多；另有 `internal/ui/uimodtest` 的 E2E 1 个，不计入本包）。第三轮 P3-9/10 已修复，P3-11 重开后已真正修复，第四轮 P3-12 已修复，第五~七轮无新缺陷，第八轮 P3-13 已修复（da654e3），第九轮新增 P3-14（待修）；当前 **220 PASS / 0 SKIP**。
 
 ## 用例矩阵
 
@@ -344,11 +344,13 @@ $ go test ./internal/regression -count=1 -race               ok 27.9s（153 PASS
 |----|------|----------|
 | AUDIT-P3-11 | ✅ 已修复（重开→本次真正修复） | toasts TTL 到期路径现在调用 `Notifier.Dismiss(notification.ID)` 再移除栈项；新增断言证明过期后 dismiss 被调用；并修正此前提交说明与代码不一致的问题 |
 | AUDIT-P3-12 | ✅ 已修复 | agent `SetMessageFeedback` 增加角色校验（仅 assistant 可评分；user/tool 返回可读错误且零副作用），新增单测 |
+| AUDIT-P3-13 | ✅ 已修复 | 诊断报告改为按凭据后缀掩码并对 JSON 值递归 redact（Bearer token/secret/apiKey 等），第八轮泄漏探针复跑不再记录 |
 
 第四轮回归：`internal/regression` **153 PASS / 0 SKIP**。第五轮复跑确认 P3-11/P3-12 修复未回退；`/feedback` 斜杠命令已在本轮落地。
 第六轮复跑扩张到 **180 PASS / 0 SKIP**（托盘/关闭到托盘、工件下载说明、chat modes 四模式 gate 表），并新增 desktop assembly 的模式菜单 E2E。
 第七轮复跑扩张到 **189 PASS / 0 SKIP**（全局热键、可选 LSP、automation Close 关机语义），并复跑第四~六轮关键探针 104 项确认 0 回退。
-第八轮扩张到 **206 PASS / 0 SKIP**（Home composer、/停止 /附加文件 /帮助、数据与隐私页、通知开关、侧栏添加工作区），发现 AUDIT-P3-13。
+第八轮扩张到 **206 PASS / 0 SKIP**（Home composer、/停止 /附加文件 /帮助、数据与隐私页、通知开关、侧栏添加工作区），发现 AUDIT-P3-13（已修复）。
+第九轮扩张到 **220 PASS / 0 SKIP**（ACP session/list/load、三态主题、侧栏视图、行为默认权限、通知级别过滤、自动化模型覆盖），发现 AUDIT-P3-14。
 仍有文档化未落地项（plan keep-planning 反馈循环、会话级 feedback 汇总、旧 `/feedback [good|bad]` 参数式直接打分、自动化 runs 之外的历史查询）。
 
 ## 反证审计第五轮：/feedback 命令 / 自动化运行历史 / 反馈复跑 / 记忆与技能编辑（2026-11-08）
@@ -526,3 +528,58 @@ $ go test ./internal/regression -count=1 -race               ok 44.5s（206 PASS
 | ID | 状态 | 修复摘要 |
 |----|------|----------|
 | AUDIT-P3-13 | ✅ 已修复 | `internal/ui/settings/data.go` 诊断报告：敏感键（apikey/api_key/token/secret/password/authorization）整值「已设置(隐藏)」；JSON 设置递归 redact（Bearer → `Bearer ***`、凭证键 → `***`）；新增 settings 单测覆盖 `web.search.apiKey` 与 `mcp.servers` Bearer 泄漏 |
+
+## 反证审计第九轮：ACP session 列表/加载、三态主题、侧栏视图、默认权限、通知级别与自动化模型（2026-11-08）
+
+范围：`bf4618a`（全工具级开关、托盘会话/设置动作）+ `d40d7b3`（三态主题、侧栏视图选项）+ `bd89cf1`（plan transcript 卡、
+自动化模型覆盖、toast 级别过滤）；`session/list`/`session/load` 为工作树并行落地的 ACP 扩展（未提交，审计先按其实现）。
+只新增 `internal/regression/**` 并改本文件；未改生产代码。新增 **12** 个顶层 Test（208 → 220）。
+
+```
+$ gofmt -l internal/regression/                              （空）
+$ go vet ./internal/regression                               OK
+$ go build ./...                                             OK
+$ go test ./internal/regression -count=1 -race               ok 46.7s（220 PASS / 0 SKIP）
+```
+
+| # | 链路 | 反证点 | 用例 | 结果 |
+|---|------|--------|------|------|
+| 38 | ACP `session/list` / `session/load`（真实 JSON-RPC 帧） | initialize 后 list：newest-updated first、空列表返回 `[]`、无 id 通知不产生响应、`params:[]` → -32602（-32602）；load：只回放 user/assistant 非空文本并 trim、顺序不变、model 回退 ChatConfig、未知/缺失/空白/非对象参数 → -32602、**成功与失败都不改变 active session**；initialize 的 `agentCapabilities.loadSession=true` | 2 | PASS（依赖工作树 WIP） |
+| 39 | 三态主题（host 回归层） | `resolveThemeDark` 表：light/dark 强制、system/空/未知跟随、大小写/空白归一（× systemDark 两值）；`initialThemeDark`：nil settings 跟随、空 mode 无 legacy 跟随、legacy true/false/坏值→forced（坏值→light）、mode 优先 legacy、system/未知仍跟随；`applyThemeMode`：system 注册监听并应用更新、强制模式不注册、shutdown hook 注销恰一次、nil theme/system 安全 | 3 | PASS |
+| 40 | 侧栏视图排序/分组 | 默认 recent 顺序；视图菜单选 名称→`sidebar.sort=name` 且大小写不敏感排序；平铺→`sidebar.group=flat`；切回写 recent/workspace；workspace 树显示分组标题、flat 隐藏标题与未分组且会话全在；坏值 `bogus` 回退默认（recent/workspace）不崩溃、不被 frame 覆写 | 2 | PASS |
+| 41 | 行为页默认权限 | 默认 ask 且不写入；选择 完全访问/从不/询问 写同一 `agent.permission` 行 + 「已保存」；坏值显示 ask 且不被覆写；与会话权限 chip 共用 setting：full→chip「全部允许」；never 已存储但 chip 显示「询问」（AUDIT-P3-14） | 2 | PASS（发现 AUDIT-P3-14） |
+| 42 | 通知级别过滤 + 自动化模型覆盖 | toast `ui.notifications.hidden`：缺失/空/坏 JSON 不过滤、四级别过滤且大小写空白归一、未知级别永不过滤、隐藏级别热清栈、行不被 frame 改写；automation model：trim 持久化、RunNow 先 SetSessionModel 后 Send、registry 持久化、无 switcher/switch 失败仍 success 仅告警、无 model 不调用 | 2 | PASS |
+
+### 第九轮发现
+
+#### AUDIT-P3-14（P3，UI 一致性）agent.permission=never 存储但会话权限 chip 显示「询问」
+
+- 位置：`internal/ui/session/session.go` 的 `permissionMode`/`permissionLabel`：只识别 ask/workspace/full，unknown（含 `never`）回退 ask → chip 显示「询问」；而 approvals gate 已正确执行 never（拒绝全部）。行为页（`internal/ui/settings/behavior.go`）提供「从不」选项并写入同一 `agent.permission` 行。
+- 复现：`go test ./internal/regression -run TestBehaviorPermissionSharedWithSessionChip -v` → 存储 `never` 后会话工具栏徽标显示「询问」（log-only 探针）。
+- 影响：用户在行为页选择「从不」后，会话工具栏仍显示「询问」，与真实 fail-closed 行为不一致，可能造成“为何工具全被拒”的困惑；无数据/安全影响（审批本身正确），记 P3。
+- 建议：`permissionLabel` 增加 never→「从不」，或行为页的 never 与会话 chip 的三态 cycle 统一（chip 加第四态）。
+- 另：第八轮 AUDIT-P3-13（诊断报告掩码）已由 da654e3 修复，第八轮泄漏探针本轮复跑不再记录。
+
+### 第九轮未证伪的关键不变量
+
+1. **ACP session 方法**：真实帧往返的 JSON-RPC 形状正确（id/result/error code）；列表排序/空列表/坏参数稳定；load 过滤与 trim 规则确定；load 是只读操作（不改变 active session）；initialize 能力声明与新方法一致。
+2. **主题**：三态归一与 legacy 回退优先级确定；system 的监听只在 system/未知模式注册、更新可传导、shutdown 注销一次；强制模式完全静态。
+3. **侧栏视图**：sort/group 仅两个合法值生效，坏值回退且不写回；name 排序大小写不敏感；flat 真正隐藏分组且不丢会话；选择持久化。
+4. **默认权限**：页面写的就是 approvals/会话 chip 共用的同一 row；ask 默认与坏值归一；full/never 的审批语义（既有 gate 测试）不受页面影响。
+5. **通知级别**：坏配置永不误过滤（fail-open 显示）；已知级别精确过滤并热清栈；行不被渲染路径改写。
+6. **自动化模型**：先设模型再发送；无能力/失败时 best-effort 仍执行；无覆盖不调用。
+
+### 第九轮观察与局限
+
+- ACP `session/list`/`session/load` 为工作树未提交实现；若被回滚/重写，本组测试需同步（依赖导出的 MethodSessionList/MethodSessionLoad 常量与 loadSession 能力）。
+- 主题回归通过 test-only `//go:linkname` 访问 host 未导出 helpers（host 单测已覆盖同样分支，regression 只补关键导出层断言）。
+- 侧栏视图用 scripted `ChatSessionInfo`（fakeChat 的 Sessions 不携带 WorkspaceID），workspace 后端为 recording fake；真实 workspace 模块的创建/打开由既有单测覆盖。
+- toast 级别过滤复用既有 fake-notifier harness；真实 Notifier→toast 链路已有 host bridge 测试，本轮不重复。
+- 自动化模型覆盖用 recording switcher；真实 provider 的每会话模型切换由 agent 模块单测覆盖。
+- 任务要求的「托盘动作 / plan 卡 / 全工具级开关」本轮按“选 2-3 个补导出层断言”选择通知级别过滤 + 自动化模型覆盖；托盘/plan 卡/全工具开关已有模块内单测（host/toolcards/plugins），未在本轮重复。
+
+## 第九轮缺陷修复（Lead 复核，2026-11-08）
+
+| ID | 状态 | 修复摘要 |
+|----|------|----------|
+| AUDIT-P3-14 | ✅ 已修复 | `contracts.PermissionNever` 常量补入；会话 composer 权限 chip 识别 never 并显示「从不允许/Never」（此前回落为「询问」），新增单测；实际 fail-closed 行为与显示一致 |

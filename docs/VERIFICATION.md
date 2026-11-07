@@ -224,3 +224,44 @@ NO_PANIC
 - README 顶部状态更新为 Round 59（HEAD 9d1cbac）与最新数字；构建命令 `go build ./...` / `go test ./...` 核对仍准确。
 - 验证期间工作树含并行 agent 未提交改动（如 `internal/regression/*_test.go`、`internal/ui/settings/data.go` 等）；本任务未修改生产代码。HEAD 9d1cbac 提交态回归 189 PASS，当前工作树 206 PASS / 0 SKIP。
 - 观察（未改矩阵行，超出本轮摘要修正范围）：个别矩阵行证据文案滞后，如 Skills 行仍写“缺创建/编辑/删除”（Round 53 已落地创建/删除）、Artifacts 行仍写“缺下载动作”（工件下载已落地）；状态分布仍与目标 37/24/1 一致。
+
+## 一键验证（scripts/verify.sh）
+
+仓库提供可重复的一键验证脚本，按下面的顺序执行并逐项打印 `PASS/FAIL + 耗时`；任一步失败即非零退出（EXIT trap 仍打印摘要）。所有命令默认使用离线环境（`PATH=/usr/local/go/bin:...`、`GOPROXY=off`、`GOSUMDB=off`、`GOFLAGS=-mod=mod`，均可由外部环境覆盖）。
+
+```sh
+./scripts/verify.sh              # 完整：gofmt/build/vet/test/-race/回归/快照/三产品冒烟，约 100s
+./scripts/verify.sh --quick      # 快速循环：跳过 -race 与产品冒烟，约 40s
+./scripts/verify.sh --no-smoke   # 保留 -race，仅跳过三产品冒烟
+make verify                      # 等价于 ./scripts/verify.sh（可 ARGS=--quick）
+```
+
+步骤与预期输出：
+
+1. `gofmt`：模块包内 Go 文件均已格式化（`gofmt -l` 为空）；
+2. `go build ./...` / `go vet ./...`：通过；
+3. `go test ./... -count=1`（`--quick` 跳过下一步的 race）；
+4. `go test ./... -count=1 -race`；
+5. `go test ./internal/regression -count=1 -v`：打印 `(regression: N PASS / 0 SKIP / 0 FAIL)`；
+6. `go run ./internal/devtools/ui-snapshot <临时目录>`：打印 `(snapshot: 63 steps / 61 PNGs)`，目录用完清理（`VERIFY_KEEP_TEMP=1` 可保留）；
+7. desktop xvfb 冒烟：`xvfb-run -a timeout -s TERM 8 go run ./cmd/zeokeel --data-dir <临时目录>`（预置 `ui.globalHotkey=CmdOrCtrl+Shift+Space`），允许 exit 124，检查 tray ready 与无 panic；
+8. headless 冒烟：`timeout 8 go run ./cmd/zeokeel --headless ...`，允许 exit 124，检查 loaded/ready；
+9. ACP 冒烟：initialize JSON-RPC，检查 `"jsonrpc":"2.0"`、`"protocolVersion":1`。
+
+本机实测（2026-11-08，HEAD bd89cf1，go1.27.3 linux/amd64）：
+
+```
+$ ./scripts/verify.sh --quick
+==> gofmt ... PASS (0s)          ==> go build ./... ... PASS (3s)
+==> go vet ./... ... PASS (1s)   ==> go test ./... -count=1 ... PASS (13s)
+==> regression ... (208 PASS / 0 SKIP / 0 FAIL) PASS (12s)
+==> ui-snapshot ... (63 steps / 61 PNGs) PASS (9s)
+verify summary: 6 passed, 0 failed, 38s total · verify: PASS
+
+$ ./scripts/verify.sh
+==> go test ./... -count=1 -race ... PASS (47s)
+==> desktop smoke (xvfb) ... (exit 124, tray ready: 1) PASS (9s)
+==> headless smoke ... (exit 124) PASS (8s)
+==> ACP smoke ... (ACP exit 0) PASS (0s)
+verify summary: 10 passed, 0 failed, 102s total · verify: PASS
+```

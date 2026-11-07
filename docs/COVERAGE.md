@@ -84,9 +84,9 @@
 | Home / 起始页 | ✅ | `internal/ui/home` | hero/greeting/setup card/**真实 composer（多行输入、Enter 发送、附件选择、工作区/模型/模式只读 chip、发送后建会话并进入）**/最近会话 |
 | Composer 基础（输入/附件/发送/停止/模型 chip/@//） | ✅ | `internal/ui/session/view.go`、`attachments.go` | 文本、附件/图片/拖放、发送/停止、per-session 模型菜单、工作区 @、/ 菜单 |
 | Composer 深度（/goal /plan /memory/权限/effort/@session/presets） | 🟡 | `sessionCommands` + `command_dialogs.go` + `commands_help.go` + `buildComposerToolbar` | 已落地 12 条：/新会话 /创建副本 /导出对话 /打开设置 /设置目标 /审阅计划 /添加记忆 /反馈 /停止 /附加文件 /帮助 + 权限模式、模式切换（普通/计划/精简/创作）、推理强度、@session、预设插入；缺 /compact、/goal 子命令 |
-| Chrome/Sidebar/折叠 rail/右栏 dock | ✅ | uiroot + sidebar | 280px sidebar、64px rail、Cmd/Ctrl+B、右栏开关、添加工作区（目录选择/名称回退/创建后打开）、**视图选项（排序：最近/名称；分组：按工作区/平铺，持久化）**、工作区搜索/置顶/归档 |
+| Chrome/Sidebar/折叠 rail/右栏 dock | ✅ | uiroot + sidebar | 280px sidebar、64px rail、Cmd/Ctrl+B、**Cmd/Ctrl+N 新建会话、Cmd/Ctrl+, 设置、Cmd/Ctrl+K 命令面板**、右栏开关、添加工作区、视图选项（排序/分组持久化）、工作区搜索/置顶/归档 |
 | 命令面板/窗口内快捷键 | ✅ | uiroot palette/shortcuts | Cmd/Ctrl+K、可配置两条 chrome 快捷键；非系统全局热键 |
-| Settings 外壳与页面 | 🟡 | `internal/ui/settings`、about | 16 页：模型/模型目录/服务商/诊断/快捷键/外观（托盘+热键）/技能（编辑）/更新/导入/搜索/MCP/网络/预设/LSP/数据与隐私/**通知（toast 开关）** + 关于；缺内置插件开关/市场 |
+| Settings 外壳与页面 | 🟡 | `internal/ui/settings`、about | 17 页：模型/模型目录/服务商/诊断/快捷键/外观（托盘+热键+主题三态）/技能（编辑）/更新/导入/搜索/MCP/网络/预设/LSP/数据与隐私/通知（总开关+级别过滤）/**行为（默认代理权限）** + 关于；缺内置插件参数页/市场 |
 | Approval 审批 Modal | ✅ | `internal/ui/approval` + approvals 模块 | allow/allow-always/deny、ask/workspace/full/never（settings 覆盖、workspace 只读自动 allow） |
 | 右侧检查栏 | ✅ | rightpanel | 8 tab：概览/工具/日志/文件/变更/终端/**团队**/**任务**，en/zh |
 | Files 检查器 | ✅ | rightpanel files + workspace | 打开文件夹/面包屑/文本/Markdown/图片预览/错误态 |

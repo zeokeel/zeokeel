@@ -320,6 +320,8 @@ func permissionMode(settings contracts.SettingsService) string {
 		return contracts.PermissionWorkspace
 	case contracts.PermissionFull:
 		return contracts.PermissionFull
+	case contracts.PermissionNever:
+		return contracts.PermissionNever
 	case contracts.PermissionAsk:
 		return contracts.PermissionAsk
 	default:
@@ -355,6 +357,8 @@ func (st *state) permissionLabel(mode string) string {
 		return st.tr("工作区", "Workspace")
 	case contracts.PermissionFull:
 		return st.tr("全部允许", "Allow all")
+	case contracts.PermissionNever:
+		return st.tr("从不允许", "Never")
 	default:
 		return st.tr("询问", "Ask")
 	}

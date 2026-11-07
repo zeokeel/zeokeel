@@ -19,6 +19,7 @@ import (
 	"sync/atomic"
 
 	"github.com/egoist/mygo/ui"
+	cordis "github.com/zeokeel/zeokeel-kernel"
 
 	"github.com/zeokeel/zeokeel/internal/contracts"
 )
@@ -31,6 +32,17 @@ type Config struct {
 	// Settings is the host settings service: the frame reads the user's chrome
 	// shortcut overrides from it every frame. Nil falls back to the defaults.
 	Settings contracts.SettingsService
+	// Chat is optional: when set, Cmd/Ctrl+N creates a session directly. The
+	// process host normally leaves it nil and the shortcut falls back to the
+	// registered zeokeel.session.new command (the session module owns chat).
+	Chat contracts.ChatService
+	// ChatService is an alias for Chat (embedders/tests may use either).
+	ChatService contracts.ChatService
+	// Kernel is the optional kernel root context: when set, Cmd/Ctrl+N resolves
+	// KeyChat from it. Embedders may also bind it later with SetKernelContext.
+	Kernel cordis.Context
+	// KernelContext is an alias for Kernel.
+	KernelContext cordis.Context
 }
 
 // Root is the host's UI entry point. It is created by the process host before
@@ -43,12 +55,17 @@ type Root struct {
 	theme           *themeService
 	locale          *localeService
 	settingsService contracts.SettingsService
-	fileDrop        *fileDropService
-	interaction     *interactionService
-	artifacts       *artifactService
-	plan            *planService
-	goal            *goalService
-	notifier        *notifierService
+	// chatService backs the Cmd/Ctrl+N shortcut when set by an embedder or
+	// test; nil falls back to the registered new-session command.
+	chatService contracts.ChatService
+	// kernelContext is the optional kernel root for resolving KeyChat.
+	kernelContext cordis.Context
+	fileDrop      *fileDropService
+	interaction   *interactionService
+	artifacts     *artifactService
+	plan          *planService
+	goal          *goalService
+	notifier      *notifierService
 
 	mu         sync.Mutex
 	invalidate func()
@@ -112,9 +129,19 @@ func New(cfg Config) *Root {
 	if cfg.Language == "" {
 		cfg.Language = "zh"
 	}
+	chatService := cfg.Chat
+	if chatService == nil {
+		chatService = cfg.ChatService
+	}
+	kernelContext := cfg.Kernel
+	if kernelContext == (cordis.Context{}) {
+		kernelContext = cfg.KernelContext
+	}
 	r := &Root{
 		appName:         cfg.AppName,
 		settingsService: cfg.Settings,
+		chatService:     chatService,
+		kernelContext:   kernelContext,
 		fileDrop:        &fileDropService{},
 		interaction:     newInteractionService(),
 		artifacts:       newArtifactService(),
@@ -128,6 +155,36 @@ func New(cfg Config) *Root {
 	r.nav = newNavigator(r)
 	return r
 }
+
+// SetChatService installs the optional chat backend used by Cmd/Ctrl+N. The
+// desktop host relies on the registered new-session command instead; embedders
+// and tests may set one directly. A nil value clears it.
+func (r *Root) SetChatService(chat contracts.ChatService) {
+	r.mu.Lock()
+	r.chatService = chat
+	r.mu.Unlock()
+}
+
+// BindChat is an alias for SetChatService.
+func (r *Root) BindChat(chat contracts.ChatService) { r.SetChatService(chat) }
+
+// SetKernelContext installs the optional kernel root used by window shortcuts
+// (Cmd/Ctrl+N resolves contracts.KeyChat from it). The desktop host may leave it
+// unset; the shortcut then falls back to the registered new-session command.
+func (r *Root) SetKernelContext(ctx cordis.Context) {
+	r.mu.Lock()
+	r.kernelContext = ctx
+	r.mu.Unlock()
+}
+
+// BindKernel is an alias for SetKernelContext.
+func (r *Root) BindKernel(ctx cordis.Context) { r.SetKernelContext(ctx) }
+
+// SetKernel is an alias for SetKernelContext.
+func (r *Root) SetKernel(ctx cordis.Context) { r.SetKernelContext(ctx) }
+
+// SetChat is an alias for SetChatService.
+func (r *Root) SetChat(chat contracts.ChatService) { r.SetChatService(chat) }
 
 // AppName returns the product name shown in the title bar and UI.
 func (r *Root) AppName() string { return r.appName }

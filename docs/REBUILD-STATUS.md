@@ -21,6 +21,19 @@
 - 右侧栏「文件」Tab：打开文件夹（mygo 原生 Directory picker）、目录进入/面包屑、文本/Markdown/图片预览、
   刷新与错误状态；E2E 覆盖工作区创建 + 列表 + 预览帧
 
+**Round 56：ACL/主题/侧栏/行为/通知反证 + 快捷键（2026-11-08）**
+- uiroot 窗口快捷键：Cmd/Ctrl+N（解析 chat 绑定/kernel ctx/命令 fallback → NewSession+Push session）、Cmd/Ctrl+,（ToggleSettings），
+  panic 安全、与 Cmd+B/K 不冲突；uiroot 74 测试
+- 反证第九轮：12 例（ACP list/load、主题三态、侧栏视图、行为权限、通知级别、自动化模型）→ regression 220 PASS / 0 SKIP
+- P3-14 修复：权限 chip 识别 never（「从不允许」）；COVERAGE 快捷键行同步
+
+**TDD-acp-list-load/behavior/verify-script（2026-11-08）**
+- ACP：session/list（倒序、空列表、坏参数）+ session/load（user/assistant 文本简化重放、错误码、active 不变）+ initialize loadSession 能力；acp 14 测试
+- 设置「行为」页：默认代理权限四选（ask/workspace/full/never，与会话权限 chip 共用设置，立即生效说明）；settings 136 测试；修复设置侧栏高度
+  560→640（第 17 页导致数据与隐私导航项 0 高不可点）
+- 工具：scripts/verify.sh + `make verify`（9 步：gofmt/build/vet/test/race/regression/snapshot/desktop/headless/ACP；
+  --quick/--no-smoke；实测 quick 38s PASS、full 102s PASS）；docs/VERIFICATION 一键验证小节
+
 **TDD-plan-card/automation-model/toast-levels（2026-11-08）**
 - toolcards：plan_review 专用卡（Markdown 计划 + PlanReviewer 状态 Badge：审阅中/已批准/已取消/待审阅；坏参数回退摘要）；toolcards 14 测试
 - automation：任务级模型覆盖（Create/Update/load/persist trim；RunNow 前 NewSession→SetSessionModel，失败仅 warning 继续发送）；模块 26 / UI 20 测试

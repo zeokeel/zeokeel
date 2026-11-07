@@ -50,6 +50,9 @@ go build ./...
 go test ./...
 ```
 
+一键重复全部验证（gofmt、build、vet、test、`-race`、回归套件、UI 快照与三产品冒烟）：
+`./scripts/verify.sh`；快速循环 `./scripts/verify.sh --quick`，或 `make verify`（可 `ARGS=--quick`）。
+
 归档的旧工程：`cd old && go build ./...`（独立 module，仅参考）。
 
 ## 状态（2026-11-07 · P1 持久化/审批/工具卡已可运行）

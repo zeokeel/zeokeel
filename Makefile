@@ -21,7 +21,7 @@ export GOFLAGS := -mod=mod
 # Extra arguments for `make run` (e.g. ARGS=--headless --data-dir /tmp/zk).
 ARGS ?=
 
-.PHONY: all build vet test ci run run-headless clean
+.PHONY: all build vet test ci run run-headless clean verify
 
 all: build
 
@@ -40,6 +40,11 @@ test:
 
 # What CI runs.
 ci: build vet test
+
+# One-command reproducible verification: gofmt/build/vet/test/-race/regression/
+# UI snapshot/three-product smokes (scripts/verify.sh --quick for the fast loop).
+verify:
+	./scripts/verify.sh $(ARGS)
 
 # Run the desktop product from source (needs a desktop session).
 run:
