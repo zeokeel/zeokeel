@@ -21,6 +21,13 @@
 - 右侧栏「文件」Tab：打开文件夹（mygo 原生 Directory picker）、目录进入/面包屑、文本/Markdown/图片预览、
   刷新与错误状态；E2E 覆盖工作区创建 + 列表 + 预览帧
 
+**TDD-preset/catalog + 覆盖重审（2026-11-08）**
+- presets：contracts PromptPreset/SettingPromptPresets/Parse/Encode/Legacy；settings「预设」页 CRUD（上移/下移/删除/恢复内置/
+  校验/坏 JSON 回退）；composer「预设」菜单插入提示词（空草稿 set / 非空 append）；session 93 / settings 85 测试
+- modelcatalog：模块每次 Models() 读 settings 覆盖（清洗/去重/坏 JSON 回退+警告一次/空数组=默认/副本）；设置「模型目录」页
+  增删/恢复默认/校验（Lead 实现，写回 settings 动态生效）；modelcatalog 14 / settings 88 测试
+- 覆盖重审：docs/COVERAGE.md 按代码事实更新（62 项 ✅34/🟡24/❌4，presets 落地；modelcatalog 编辑已迁移；settings 14 页）
+
 **TDD-proxy/mcptoggle + 反证第三轮（2026-11-08）**
 - 网络代理：host `proxyEnv/applyProxySettings`（http/https 校验、HTTP(S)_PROXY 大小写键、NO_PROXY、仅清理本进程设置过的 key；
   desktop/headless 启动调用）+ 设置「网络」页（代理/NO_PROXY 字段、校验、重启生效）；host 50 / settings 80 测试

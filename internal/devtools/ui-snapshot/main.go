@@ -325,6 +325,14 @@ func main() {
 		a.render(outDir + "/p2-toast.png")
 	}
 
+	// Composer prompt presets menu (inserts prompt/persona templates).
+	if presetRect, ok := a.tester.Find("预设"); ok {
+		a.tester.ClickAt(presetRect.X+presetRect.W/2, presetRect.Y+presetRect.H/2)
+		a.render(outDir + "/p2-presets.png")
+		a.tester.Key(0, ui.KeyEscape)
+		a.tester.Frame()
+	}
+
 	// Permission mode chip (ask → workspace → full, the slash command cycles it).
 	if store, ok := a.root.Get(contracts.KeySettings); ok {
 		_ = store.Set(contracts.SettingAgentPermission, contracts.PermissionFull)
@@ -528,6 +536,14 @@ func main() {
 		fmt.Println("click network settings:", err)
 	}
 	a.render(outDir + "/p2-network-settings.png")
+	if err := a.tester.Click("预设"); err != nil {
+		fmt.Println("click presets settings:", err)
+	}
+	a.render(outDir + "/p2-presets-settings.png")
+	if err := a.tester.Click("模型目录"); err != nil {
+		fmt.Println("click model catalog settings:", err)
+	}
+	a.render(outDir + "/p2-modelcatalog-settings.png")
 	a.ui.Navigator().CloseSettings()
 	if err := a.ui.Navigator().Push("automation"); err != nil {
 		fmt.Println("push automation:", err)

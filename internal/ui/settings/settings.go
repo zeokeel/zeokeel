@@ -567,6 +567,8 @@ func Module() *module.Descriptor[Config] {
 		importState := newImportState()
 		search := newSearchState()
 		mcp := newMCPState()
+		presets := newPresetsState()
+		catalog := &catalogState{}
 		network := newNetworkState()
 		diagnostics := &diagnosticsState{}
 
@@ -675,6 +677,22 @@ func Module() *module.Descriptor[Config] {
 				Build: func(c *ui.Context) {
 					syncer.sync()
 					buildMCPPage(c, ctx, mcp, locale)
+				},
+			},
+			{
+				ID: PresetsPageID, Section: PresetsPageSection, Order: PresetsPageOrder,
+				zhTitle: "预设", enTitle: "Presets",
+				Build: func(c *ui.Context) {
+					syncer.sync()
+					buildPresetsPage(c, store, presets, locale)
+				},
+			},
+			{
+				ID: ModelCatalogPageID, Section: ModelCatalogPageSection, Order: ModelCatalogPageOrder,
+				zhTitle: "模型目录", enTitle: "Model catalog",
+				Build: func(c *ui.Context) {
+					syncer.sync()
+					buildModelCatalogPage(c, store, catalog, locale)
 				},
 			},
 			{

@@ -927,6 +927,27 @@ func buildComposerToolbar(c *ui.Context, t *design.Tokens, runtime contracts.UIR
 		}).Tooltip(st.tr("本会话的推理强度", "Reasoning effort for this session"))
 	}
 	if !running {
+		presets := effectivePromptPresets(st)
+		ui.PopoverMenuButton(c, st.tr("预设", "Presets"), func(m *ui.Menu) {
+			m.Item(st.tr("插入预设", "Insert preset")).Disabled(true)
+			m.Separator()
+			if len(presets) == 0 {
+				m.Item(st.tr("还没有预设", "No presets yet")).Disabled(true)
+				return
+			}
+			for _, preset := range presets {
+				item := m.Item(strings.TrimSpace(preset.Name))
+				if item.Chosen() {
+					insertPromptPreset(st, preset.Prompt)
+					runtime.Invalidate()
+				}
+				// Native MenuItem has no secondary text; a disabled note line
+				// shows the prompt summary under each title instead.
+				if summary := promptSummary(preset.Prompt); summary != "" {
+					m.Item(summary).Disabled(true)
+				}
+			}
+		}).Tooltip(st.tr("把提示词预设插入当前草稿", "Insert a prompt preset into the draft"))
 		slash := ui.Button(c, "/").Tooltip(st.tr("命令：输入 / 打开命令菜单", "Commands: type / to open the command menu"))
 		if slash.Clicked() {
 			st.draft += "/"

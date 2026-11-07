@@ -8,6 +8,7 @@ package modelcatalog
 import (
 	"fmt"
 	"strings"
+	"sync"
 
 	cordis "github.com/zeokeel/zeokeel-kernel"
 	"github.com/zeokeel/zeokeel-kernel/module"
@@ -53,7 +54,10 @@ func Module() *module.Descriptor[Config] {
 		if err != nil {
 			return fmt.Errorf("%s: require logger: %w", ModuleID, err)
 		}
-		service := newService(cfg, logger)
+		// The settings store is optional: when present the user-edited catalog
+		// overrides the configured/default presets per Models() call.
+		settings, _ := ctx.Get(contracts.KeySettings)
+		service := newServiceWithSettings(cfg, logger, settings)
 		if _, err := ctx.Provide(contracts.KeyModelCatalog, contracts.ModelCatalogService(service)); err != nil {
 			return fmt.Errorf("%s: provide model catalog: %w", ModuleID, err)
 		}
@@ -84,13 +88,23 @@ func validateConfig(cfg Config) error {
 
 // service is the contracts.ModelCatalogService implementation.
 type service struct {
-	models []contracts.ModelInfo
-	logger contracts.Logger
+	models   []contracts.ModelInfo
+	logger   contracts.Logger
+	settings contracts.SettingsService
+
+	mu         sync.Mutex
+	warnedJSON bool
 }
 
-// newService builds the catalog, copying the configured entries so neither the
-// assembly config nor callers can mutate the module's state.
+// newService builds the catalog without a settings store.
 func newService(cfg Config, logger contracts.Logger) *service {
+	return newServiceWithSettings(cfg, logger, nil)
+}
+
+// newServiceWithSettings builds the catalog, copying the configured entries so
+// neither the assembly config nor callers can mutate the module's state. The
+// optional settings store is read on every Models() call.
+func newServiceWithSettings(cfg Config, logger contracts.Logger, settings contracts.SettingsService) *service {
 	models := make([]contracts.ModelInfo, 0, len(cfg.Models))
 	if len(cfg.Models) == 0 {
 		models = append(models, defaultModels...)
@@ -108,13 +122,62 @@ func newService(cfg Config, logger contracts.Logger) *service {
 			})
 		}
 	}
-	return &service{models: models, logger: logger}
+	return &service{models: models, logger: logger, settings: settings}
 }
 
-// Models returns the catalog presets. The caller gets a copy: changing the
-// returned slice or its elements never affects later calls.
+// Models returns the catalog presets: the user-edited settings list when one is
+// configured, else the assembly-configured/default baseline. The caller gets a
+// copy: changing the returned slice or its elements never affects later calls.
+// A malformed settings row falls back to the baseline and logs once.
 func (s *service) Models() []contracts.ModelInfo {
+	if s.settings != nil {
+		raw := s.settings.Get(contracts.SettingModelCatalogModels, "")
+		models, err := contracts.ParseModelInfoList(raw)
+		switch {
+		case err != nil:
+			s.warnMalformedSettings(err)
+		case len(models) > 0:
+			return sanitizeCatalog(models)
+		}
+	}
 	out := make([]contracts.ModelInfo, len(s.models))
 	copy(out, s.models)
+	return out
+}
+
+// warnMalformedSettings logs the malformed catalog row once per service, so a
+// bad settings value cannot spam the log on every frame.
+func (s *service) warnMalformedSettings(err error) {
+	s.mu.Lock()
+	first := !s.warnedJSON
+	s.warnedJSON = true
+	s.mu.Unlock()
+	if first && s.logger != nil {
+		s.logger.Printf("%s: ignoring malformed %s: %v", ModuleID, contracts.SettingModelCatalogModels, err)
+	}
+}
+
+// sanitizeCatalog normalizes the stored override rows: fields are trimmed, empty
+// ids are dropped, a missing name falls back to the id and only the first row
+// of a duplicate id is kept.
+func sanitizeCatalog(models []contracts.ModelInfo) []contracts.ModelInfo {
+	out := make([]contracts.ModelInfo, 0, len(models))
+	seen := make(map[string]bool, len(models))
+	for _, model := range models {
+		id := strings.TrimSpace(model.ID)
+		if id == "" || seen[id] {
+			continue
+		}
+		seen[id] = true
+		name := strings.TrimSpace(model.Name)
+		if name == "" {
+			name = id
+		}
+		out = append(out, contracts.ModelInfo{
+			ID:   id,
+			Name: name,
+			Note: strings.TrimSpace(model.Note),
+		})
+	}
 	return out
 }
