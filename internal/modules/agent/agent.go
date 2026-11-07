@@ -149,12 +149,13 @@ type service struct {
 }
 
 var (
-	_ contracts.ChatService      = (*service)(nil)
-	_ contracts.SessionRenamer   = (*service)(nil)
-	_ contracts.AttachmentSender = (*service)(nil)
-	_ contracts.SessionForker    = (*service)(nil)
-	_ contracts.SessionPinner    = (*service)(nil)
-	_ contracts.SessionArchiver  = (*service)(nil)
+	_ contracts.ChatService        = (*service)(nil)
+	_ contracts.SessionRenamer     = (*service)(nil)
+	_ contracts.AttachmentSender   = (*service)(nil)
+	_ contracts.SessionForker      = (*service)(nil)
+	_ contracts.SessionPinner      = (*service)(nil)
+	_ contracts.SessionArchiver    = (*service)(nil)
+	_ contracts.SessionRegenerator = (*service)(nil)
 )
 
 // sessionState is the mutable per-session state.
@@ -677,8 +678,12 @@ func (s *service) SetActiveSession(sessionID string) error {
 // ErrEmptyPrompt is returned by Send for a blank prompt.
 var ErrEmptyPrompt = errors.New("agent: prompt is empty")
 
-// ErrSessionRunning is returned by Send when the session already runs.
+// ErrSessionRunning is returned by Send/Regenerate when the session already runs.
 var ErrSessionRunning = errors.New("agent: session is already running")
+
+// ErrNoUserMessage is returned by Regenerate when the session has no user
+// message to retry.
+var ErrNoUserMessage = errors.New("agent: no user message to regenerate")
 
 // Send appends the user prompt, creates the streaming assistant placeholder and
 // starts one asynchronous Rig agent run.
@@ -777,6 +782,102 @@ func (s *service) send(sessionID, prompt string, attachments []contracts.Attachm
 	}
 	s.notify(sessionID)
 	go s.run(runCtx, sessionID, cfg, buildUserInput(prompt, attachments))
+	return nil
+}
+
+// Regenerate drops the trailing assistant/tool exchange of sessionID and
+// re-runs the last user message without appending a second user message. The
+// existing user message (text and attachments) is preserved in the read model,
+// while the durable history is replaced with the turn's pre-answer state before
+// the run (trailing assistant/tool messages dropped, the user message kept) so
+// Rig continues from a history that is waiting for an answer.
+//
+// Like Send it returns after starting the asynchronous run. It intentionally
+// does not append another user_message event: the history replacement rewinds
+// the existing turn and the run's own run_start/run_end events describe the
+// retry.
+func (s *service) Regenerate(sessionID string) error {
+	s.mu.Lock()
+	state, ok := s.sessions[sessionID]
+	if !ok {
+		s.mu.Unlock()
+		return fmt.Errorf("agent: unknown chat session %q", sessionID)
+	}
+	if state.running {
+		s.mu.Unlock()
+		return fmt.Errorf("%w: %q", ErrSessionRunning, sessionID)
+	}
+	userIndex := -1
+	for index := len(state.messages) - 1; index >= 0; index-- {
+		if state.messages[index].Role == contracts.ChatRoleUser {
+			userIndex = index
+			break
+		}
+	}
+	if userIndex < 0 {
+		s.mu.Unlock()
+		return ErrNoUserMessage
+	}
+	user := state.messages[userIndex]
+	user.Attachments = cloneAttachments(user.Attachments)
+
+	// Keep the complete previous slice for a rollback when history persistence
+	// fails; the reslice+append below allocates a new backing array anyway.
+	previous := append([]contracts.ChatMessage(nil), state.messages...)
+	previousAssistant := state.assistant
+	previousErr := state.err
+	previousUpdatedAt := state.updatedAt
+
+	now := time.Now()
+	truncated := make([]contracts.ChatMessage, userIndex+1, userIndex+2)
+	copy(truncated, state.messages[:userIndex+1])
+	truncated = append(truncated, contracts.ChatMessage{
+		ID:        s.nextMessageIDLocked(),
+		Role:      contracts.ChatRoleAssistant,
+		Streaming: true,
+		CreatedAt: now,
+	})
+	state.messages = truncated
+	state.assistant = len(state.messages) - 1
+	state.running = true
+	state.err = ""
+	state.updatedAt = now
+	runCtx, cancel := context.WithCancel(context.Background())
+	state.cancel = cancel
+	cfg := s.configLocked()
+	s.mu.Unlock()
+
+	// Persist the rewound turn: the history up to the last user message
+	// (assistant/tool messages after it dropped) plus that user message itself.
+	// The run then starts with no new input, so Rig continues from the
+	// "waiting for an answer" history exactly once. Persisting the user message
+	// here also means an interrupted retry keeps it, matching the read model.
+	var input []rig.Message
+	if s.store != nil {
+		history := forkHistoryMessages(previous[:userIndex])
+		history = append(history, buildUserInput(user.Text, user.Attachments)...)
+		if err := s.store.ReplaceHistory(runCtx, sessionID, history); err != nil {
+			cancel()
+			s.mu.Lock()
+			if current, ok := s.sessions[sessionID]; ok {
+				current.messages = previous
+				current.assistant = previousAssistant
+				current.running = false
+				current.cancel = nil
+				current.err = previousErr
+				current.updatedAt = previousUpdatedAt
+			}
+			s.mu.Unlock()
+			return fmt.Errorf("agent: regenerate history for %q: %w", sessionID, err)
+		}
+	} else {
+		// Without a durable store the in-memory Rig history has no copy of the
+		// user message, so feed it as the run input instead.
+		input = buildUserInput(user.Text, user.Attachments)
+	}
+
+	s.notify(sessionID)
+	go s.run(runCtx, sessionID, cfg, input)
 	return nil
 }
 

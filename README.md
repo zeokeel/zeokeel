@@ -177,6 +177,9 @@ go test ./...
 - ✅ P4 host chrome i18n：命令面板（Command palette/Search commands/Esc 提示）、打开/收起右侧栏、展开侧边栏；
   E2E en 断言
 - 📋 旧功能覆盖审计：[docs/COVERAGE.md](docs/COVERAGE.md)（✅24 / 🟡23 / ❌15，附最小必须缺口清单）
+- ✅ P5 Composer 深度（第一切片）：slash 命令「新会话/创建副本/导出对话/打开设置」（UIRuntime.Commands，
+  `/` 菜单与 Cmd/Ctrl+K 共用）+ 最后一条 assistant 的「重新生成」（agent SessionRegenerator：截断旧回复、
+  复用运行管线、持久化回滚）；截图 `p2-slash.png`
 - ⬜ 后续阶段见 [docs/PRODUCT-REBUILD-PLAN.md](docs/PRODUCT-REBUILD-PLAN.md)：
   P2 剩余（composer 附件/图片/@ 提及、右侧栏 Files/Terminal/Log 页、会话操作上下文菜单）→
   P3 memory/skills/automation/插件/workspace diff/搜索/fork/export → P4 ACP/热键/导入/更新/诊断

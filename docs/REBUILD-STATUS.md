@@ -21,6 +21,14 @@
 - 右侧栏「文件」Tab：打开文件夹（mygo 原生 Directory picker）、目录进入/面包屑、文本/Markdown/图片预览、
   刷新与错误状态；E2E 覆盖工作区创建 + 列表 + 预览帧
 
+**P5 composer 深度第一切片（2026-11-08）**
+- session slash 命令（register/unregister via ctx.Effect）：新会话、创建副本（SessionForker）、导出对话（ExportSaver）、
+  打开设置；`/` 菜单与命令面板共用 UIRuntime.Commands
+- agent `SessionRegenerator.Regenerate`：保留最后 user（含附件），丢弃其后 assistant/tool 消息，ReplaceHistory 持久化
+  后复用 run 管线重新生成（running/notify/事件；失败回滚）；session 末尾「重新生成」按钮（非运行/最后 assistant/
+  空回复禁用，错误 DangerText）
+- E2E：`/` 菜单出现 4 命令并执行「打开设置」；agent 6 个 + session 7 个新测试；截图 p2-slash.png
+
 **P4 host chrome i18n + 覆盖审计（2026-11-08）**
 - host uiroot：命令面板（标题/搜索框/空态/Esc 提示）、右侧栏按钮、折叠侧栏按钮按 locale 每帧本地化
 - docs/COVERAGE.md：旧功能 62 项矩阵（✅24/🟡23/❌15）+ top5 缺口 + 结论（核心闭环完成，深度功能仍缺）

@@ -228,8 +228,12 @@ func buildChatPane(
 				if !hasSession || len(chatSession.Messages) == 0 {
 					buildHero(c, t, cfg, navigator, chat, st)
 				} else {
-					for _, message := range chatSession.Messages {
+					for index, message := range chatSession.Messages {
 						buildMessage(c, t, runtime, message, st)
+						last := index == len(chatSession.Messages)-1
+						if last && message.Role == contracts.ChatRoleAssistant && !chatSession.Running {
+							buildRegenerateAction(c, t, runtime, chat, st, chatSession, message)
+						}
 					}
 				}
 				if hasSession && chatSession.Error != "" {
@@ -451,6 +455,36 @@ func buildTrajectoryCard(c *ui.Context, t *design.Tokens, index int, item trajec
 				design.Apply(ui.Text(c, truncateTrajectorySummary(summary)), t.TextMuted(design.TypeXS))
 			})
 			st.toolOpen[item.key] = open
+		}
+	})
+}
+
+// buildRegenerateAction is the native secondary action under the last assistant
+// turn: it retries the last user message through contracts.SessionRegenerator.
+// It is only built when the backend supports regeneration and the turn is not
+// streaming; an empty or failed reply leaves the action disabled.
+func buildRegenerateAction(c *ui.Context, t *design.Tokens, runtime contracts.UIRuntime,
+	chat contracts.ChatService, st *state, chatSession contracts.ChatSession,
+	message contracts.ChatMessage) {
+	regenerator, ok := chat.(contracts.SessionRegenerator)
+	if !ok {
+		return
+	}
+	label := st.tr("重新生成", "Regenerate")
+	hasContent := strings.TrimSpace(message.Text) != "" || len(message.Tools) > 0
+	disabled := !hasContent || message.Error != ""
+	ui.Column(c).FillWidth().Gap(design.Space1).Children(func() {
+		button := ui.Button(c, label).Tooltip(label).Disabled(disabled)
+		if button.Clicked() && !disabled {
+			if err := regenerator.Regenerate(chatSession.ID); err != nil {
+				st.regenerateErr = st.tr("重新生成失败：", "Regenerate failed: ") + err.Error()
+			} else {
+				st.regenerateErr = ""
+			}
+			runtime.Invalidate()
+		}
+		if st.regenerateErr != "" {
+			buildErrorLine(c, t, st.regenerateErr)
 		}
 	})
 }

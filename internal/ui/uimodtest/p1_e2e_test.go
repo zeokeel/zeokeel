@@ -370,6 +370,31 @@ func TestP1ApprovalToolsAndPersistence(t *testing.T) {
 		t.Fatalf("dropped attachment chip missing; texts = %v", tester.Texts())
 	}
 
+	// Slash commands: the composer menus list the session command surface and
+	// choosing one runs it (打开设置 opens the settings overlay).
+	sendRect, ok := tester.Find("发送")
+	if !ok {
+		t.Fatalf("send control missing; texts = %v", tester.Texts())
+	}
+	tester.ClickAt(sendRect.X-120, sendRect.Y-50)
+	tester.Frame()
+	tester.Type("/")
+	tester.Frame()
+	for _, want := range []string{"新会话", "创建副本", "导出对话", "打开设置"} {
+		if !tester.HasText(want) {
+			t.Fatalf("slash menu missing %q; texts = %v", want, tester.Texts())
+		}
+	}
+	if err := tester.Click("打开设置"); err != nil {
+		t.Fatalf("run slash command: %v; texts = %v", err, tester.Texts())
+	}
+	tester.Frame()
+	if !tester.HasText("模型") && !tester.HasText("Model") {
+		t.Fatalf("slash command did not open settings; texts = %v", tester.Texts())
+	}
+	uiRoot.Navigator().CloseSettings()
+	tester.Frame()
+
 	// Language switching is live: the session screen and the sidebar re-render
 	// in English on the next frame and back to Chinese.
 	locale, err := root.Require(contracts.KeyLocale)

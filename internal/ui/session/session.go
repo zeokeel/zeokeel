@@ -98,6 +98,10 @@ type state struct {
 	exportPath   string
 	exportErr    string
 
+	// regenerateErr is the last message-level 「重新生成」 failure shown under
+	// the last assistant turn.
+	regenerateErr string
+
 	// Composer attachment state: files picked and staged for the next message,
 	// the last picker/read error, the chip sequence and the per-chip image
 	// previews decoded once (keyed by attachment ID).
@@ -188,7 +192,7 @@ func Module() *module.Descriptor[Config] {
 			}
 		}
 
-		return own(ctx, func() (func(), error) {
+		if err := own(ctx, func() (func(), error) {
 			return runtime.RegisterScreen(contracts.ScreenSpec{
 				ID:    ScreenID,
 				Title: config.Title,
@@ -197,12 +201,116 @@ func Module() *module.Descriptor[Config] {
 					buildScreen(c, runtime, navigator, chat, config, moduleState)
 				},
 			})
-		})
+		}); err != nil {
+			return err
+		}
+		for _, command := range sessionCommands(runtime, navigator, chat, config, moduleState) {
+			command := command
+			if err := own(ctx, func() (func(), error) { return runtime.RegisterCommand(command) }); err != nil {
+				return err
+			}
+		}
+		return nil
 	}).
 		AddRequires(module.Requires(contracts.KeyUIRuntime)).
 		AddRequires(module.Requires(contracts.KeyNavigator)).
 		AddRequires(module.Requires(contracts.KeyChat)).
 		WithName("ZeoKeel conversation screen")
+}
+
+// sessionCommands is the conversation screen's slash-command surface: new
+// session, fork, export and settings. The command palette reads these from the
+// UIRuntime command registry; Enabled callbacks expose only the actions that
+// the current session/backends support.
+func sessionCommands(runtime contracts.UIRuntime, navigator contracts.Navigator,
+	chat contracts.ChatService, config Config, st *state) []contracts.CommandSpec {
+	_, forkerOK := chat.(contracts.SessionForker)
+	activeSession := func() (contracts.ChatSession, bool) {
+		id := chat.ActiveSession()
+		if id == "" {
+			return contracts.ChatSession{}, false
+		}
+		return chat.Session(id)
+	}
+	return []contracts.CommandSpec{
+		{
+			ID:    "zeokeel.session.new",
+			Title: "新会话",
+			Hint:  "新建并打开一个会话",
+			Order: 20,
+			Run: func() error {
+				if _, err := chat.NewSession(""); err != nil {
+					return err
+				}
+				_ = navigator.Push(ScreenID)
+				runtime.Invalidate()
+				return nil
+			},
+		},
+		{
+			ID:    "zeokeel.session.fork",
+			Title: "创建副本",
+			Hint:  "复制当前会话",
+			Order: 30,
+			Enabled: func() bool {
+				if !forkerOK {
+					return false
+				}
+				_, ok := activeSession()
+				return ok
+			},
+			Run: func() error {
+				forker, ok := chat.(contracts.SessionForker)
+				if !ok {
+					return nil
+				}
+				session, ok := activeSession()
+				if !ok {
+					return nil
+				}
+				newID, err := forker.ForkSession(session.ID)
+				if err != nil {
+					return err
+				}
+				if strings.TrimSpace(newID) != "" {
+					if err := chat.SetActiveSession(newID); err != nil {
+						return err
+					}
+				}
+				_ = navigator.Push(ScreenID)
+				runtime.Invalidate()
+				return nil
+			},
+		},
+		{
+			ID:    "zeokeel.session.export",
+			Title: "导出对话",
+			Hint:  "导出当前会话为 Markdown",
+			Order: 40,
+			Enabled: func() bool {
+				_, ok := activeSession()
+				return ok
+			},
+			Run: func() error {
+				session, ok := activeSession()
+				if !ok {
+					return nil
+				}
+				exportSession(st, session, config)
+				return nil
+			},
+		},
+		{
+			ID:    "zeokeel.session.settings",
+			Title: "打开设置",
+			Hint:  "打开设置面板",
+			Order: 50,
+			Run: func() error {
+				navigator.ToggleSettings()
+				return nil
+			},
+		},
+	}
 }
 
 // own registers one contribution and ties its unregistration to ctx's effect

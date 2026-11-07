@@ -144,6 +144,14 @@ func SessionPinnedSettingKey(sessionID string) string {
 	return "session." + sessionID + ".pinned"
 }
 
+// SessionRegenerator is the optional half of the chat service that retries the
+// last exchange: it drops the trailing assistant reply and runs the last user
+// message again (the old shell's 重新生成 action).
+type SessionRegenerator interface {
+	// Regenerate re-runs the last user message of sessionID.
+	Regenerate(sessionID string) error
+}
+
 // SessionArchivedSettingKey is the settings row storing a session's archive
 // flag (pins and archives both live in settings, not in the schema).
 func SessionArchivedSettingKey(sessionID string) string {

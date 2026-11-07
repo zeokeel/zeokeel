@@ -192,6 +192,7 @@ if _, err := ctx.Effect(func() cordis.Effect {
 - ✅ 会话归档：settings archive flag + sidebar 视图开关/排序
 - ✅ 会话置顶：settings pin flag + sidebar 置顶排序/菜单
 - ✅ 可配置 chrome 快捷键（settings `ui.shortcut.*` → 宿主每帧 OnShortcut）
+- ✅ composer slash 命令 + 会话重新生成（SessionRegenerator）
 - ✅ 覆盖矩阵：docs/COVERAGE.md（旧功能面 vs 产品）
 - ✅ i18n：uikit.T；sidebar/session/home/settings/about/rightpanel/automation/plugins/toolcards/approval
   en/zh 动态切换（host chrome/dialog 标题/后端数据仍中文）

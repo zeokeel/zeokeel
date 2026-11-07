@@ -168,6 +168,19 @@ func main() {
 		fmt.Println("click chat tab:", err)
 	}
 	a.render(outDir + "/p1-chat.png")
+
+	// Composer slash commands (the old shell's command menu).
+	if sendRect, ok := a.tester.Find("发送"); ok {
+		a.tester.ClickAt(sendRect.X-120, sendRect.Y-50)
+		a.tester.Frame()
+		a.tester.Type("/")
+		a.tester.Frame()
+		a.render(outDir + "/p2-slash.png")
+		a.tester.Key(ui.Cmd, ui.KeyA)
+		a.tester.Key(0, ui.KeyBackspace)
+		a.tester.Frame()
+	}
+
 	if err := a.tester.Click("轨迹"); err != nil {
 		fmt.Println("click trajectory:", err)
 	}
