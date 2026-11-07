@@ -103,6 +103,11 @@ func main() {
 	a.render(outDir + "/p2-log.png")
 	a.ui.SetRightPanelOpen(false)
 
+	// P2: the collapsed 64 DIP sidebar rail (Cmd/Ctrl+B).
+	a.ui.SetSidebarCollapsed(true)
+	a.render(outDir + "/p2-sidebar-collapsed.png")
+	a.ui.SetSidebarCollapsed(false)
+
 	// P2: Home recent sessions and the appearance settings page.
 	if err := a.ui.Navigator().Push("home"); err != nil {
 		fmt.Println("push home:", err)

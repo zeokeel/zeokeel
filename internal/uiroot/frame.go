@@ -8,6 +8,7 @@ import (
 	"github.com/zeokeel/zeokeel/internal/brand"
 	"github.com/zeokeel/zeokeel/internal/contracts"
 	"github.com/zeokeel/zeokeel/internal/design"
+	"github.com/zeokeel/zeokeel/internal/icons"
 )
 
 // view builds one frame. It is the product's single UI entry point:
@@ -25,6 +26,10 @@ func (r *Root) view(c *ui.Context) {
 	// this frame renders its result (contracts.UIRuntime.Post).
 	r.rt.drain()
 	r.frames.Add(1)
+
+	// The old shell's chrome shortcut: Cmd/Ctrl+B collapses or expands the
+	// left sidebar (the 64 DIP icon rail).
+	c.OnShortcut(ui.Cmd, ui.KeyB, r.ToggleSidebarCollapsed)
 
 	// Host applies the brand theme once; modules build with the frame theme.
 	c.SetTheme(r.theme.currentTheme())
@@ -47,6 +52,10 @@ func (r *Root) view(c *ui.Context) {
 // slot, screen navigation with icons, the session tree slot, the footer slot
 // and the host settings entry.
 func (r *Root) sidebar(c *ui.Context) {
+	if r.sidebarCollapsed {
+		r.sidebarRail(c)
+		return
+	}
 	t := design.Of(c)
 	screens := visibleScreens(r.rt.screenSpecs())
 	selected := r.nav.Current()
@@ -89,6 +98,71 @@ func (r *Root) sidebar(c *ui.Context) {
 			log.Printf("uiroot: %v", err)
 		}
 	}
+}
+
+// sidebarRail is the collapsed 64 DIP sidebar from the old shell: the brand
+// mark (click expands), one icon per screen and the settings entry. Module
+// slots compose the expanded sidebar only.
+func (r *Root) sidebarRail(c *ui.Context) {
+	t := design.Of(c)
+	column := ui.Column(c).Width(64).FillHeight().AlignItems(ui.Center).
+		Gap(design.Space1).Padding(design.Space3, 0, design.Space3, 0)
+	design.Apply(column, func(el ui.Element) ui.Element {
+		return el.Background(t.BgSidebar).BorderWidth(0, 1, 0, 0).BorderColor(t.BorderL3)
+	})
+	column.Children(func() {
+		expand := ui.ButtonBase(c).Size(40, 40).Radius(design.RadiusSM).
+			Label("展开侧边栏").Tooltip("展开侧边栏")
+		if expand.Hovered() {
+			expand = expand.Background(t.BgHover)
+		}
+		expand.Children(func() {
+			ui.Image(c, brand.Mark(t.Dark)).Size(24, 24)
+		})
+		if expand.Clicked() {
+			r.SetSidebarCollapsed(false)
+		}
+		for _, spec := range visibleScreens(r.rt.screenSpecs()) {
+			spec := spec
+			icon := icons.Data()
+			switch spec.ID {
+			case "home":
+				icon = icons.NewChat()
+			case "session":
+				icon = icons.Message()
+			case "settings":
+				icon = icons.Sliders()
+			}
+			label := spec.Title
+			button := ui.ButtonBase(c).Size(40, 40).Radius(design.RadiusSM).
+				Label(label).Tooltip(label)
+			if r.nav.Current() == spec.ID {
+				button = button.Background(t.BgHover)
+			}
+			button.Children(func() {
+				ui.Icon(c, icon).Size(18, 18).TextColor(t.LabelSecondary)
+			})
+			if button.Clicked() {
+				if err := r.nav.Push(spec.ID); err != nil {
+					log.Printf("uiroot: %v", err)
+				}
+				r.requestFrame()
+			}
+		}
+		ui.Spacer(c).Grow(1)
+		settings := ui.ButtonBase(c).Size(40, 40).Radius(design.RadiusSM).
+			Label(r.locale.T("nav.settings")).Tooltip(r.locale.T("nav.settings"))
+		if settings.Hovered() {
+			settings = settings.Background(t.BgHover)
+		}
+		settings.Children(func() {
+			ui.Icon(c, icons.Sliders()).Size(18, 18).TextColor(t.LabelSecondary)
+		})
+		if settings.Clicked() {
+			r.nav.ToggleSettings()
+			r.requestFrame()
+		}
+	})
 }
 
 // screen renders the current module screen between the screen header and the

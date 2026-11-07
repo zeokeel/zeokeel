@@ -372,3 +372,35 @@ func TestMultiTesterAlternating(t *testing.T) {
 		requireHasText(t, t2, "state="+itoa(i))
 	}
 }
+
+// TestSidebarCollapseShortcut covers the old shell's Cmd/Ctrl+B chrome
+// shortcut and the collapsed 64 DIP rail: the state flips, the screen body
+// keeps rendering, and expanding returns the full sidebar.
+func TestSidebarCollapseShortcut(t *testing.T) {
+	r := newTestRoot(t)
+	mustScreen(t, r, textScreen("home", "首页", "body-home", 10))
+	tt := newTestTester(t, r, 1200, 800)
+	tt.Frame()
+	requireHasText(t, tt, "body-home")
+
+	tt.Key(ui.Cmd, ui.KeyB)
+	tt.Frame()
+	if !r.SidebarCollapsed() {
+		t.Fatal("Cmd+B did not collapse the sidebar")
+	}
+	requireHasText(t, tt, "body-home") // the screen column survives the rail
+
+	tt.Key(ui.Cmd, ui.KeyB)
+	tt.Frame()
+	if r.SidebarCollapsed() {
+		t.Fatal("Cmd+B did not expand the collapsed sidebar")
+	}
+
+	// The host API and the shortcut share one state.
+	r.SetSidebarCollapsed(true)
+	tt.Frame()
+	if !r.SidebarCollapsed() {
+		t.Fatal("SetSidebarCollapsed(true) had no effect")
+	}
+	r.SetSidebarCollapsed(false)
+}

@@ -51,7 +51,27 @@ type Root struct {
 	// rightOpen is the host-owned right inspector panel state (the old shell's
 	// right sidebar). It is touched on the UI thread only.
 	rightOpen bool
+
+	// sidebarCollapsed is the host-owned left sidebar state: the old shell's
+	// 64 DIP icon rail. It is toggled by Cmd/Ctrl+B or the brand-row control.
+	sidebarCollapsed bool
 }
+
+// SidebarCollapsed reports whether the left sidebar is in its icon-rail form.
+func (r *Root) SidebarCollapsed() bool { return r.sidebarCollapsed }
+
+// SetSidebarCollapsed collapses the left sidebar to the 64 DIP icon rail or
+// expands it, requesting a frame when the value changes.
+func (r *Root) SetSidebarCollapsed(collapsed bool) {
+	if r.sidebarCollapsed == collapsed {
+		return
+	}
+	r.sidebarCollapsed = collapsed
+	r.requestFrame()
+}
+
+// ToggleSidebarCollapsed is the Cmd/Ctrl+B action.
+func (r *Root) ToggleSidebarCollapsed() { r.SetSidebarCollapsed(!r.sidebarCollapsed) }
 
 // RightPanelOpen reports whether the window-level right inspector panel is
 // docked open. It is host UI state, not a module's.
