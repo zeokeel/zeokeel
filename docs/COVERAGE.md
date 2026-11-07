@@ -50,7 +50,7 @@
 |---|---|---|---|
 | `acp` | 🟡 | `internal/modules/acp`、host RunACP | initialize/session-new/prompt/cancel、chunk、错误码；缺 session/list/load、auth、fs/terminal 双向、tool_call 更新 |
 | `agentteam` | ✅ | agent `team.go` + rig `tools/team` + Agents Inspector + team_task 共享板 | 真实异步 subagent runner（spawn/steer/wait/interrupt/close、fork/model/max-iterations）；全局 manager（旧按会话），Inspector 展示全局成员 |
-| `automation` | 🟡 | `internal/modules/automation` + `internal/ui/automation` | cron/every/after、持久化、ticker、schedule 工具、列表/新建/运行/删除/**运行历史（每任务最近 10 条，持久化，卡片折叠显示最近状态+摘要，展开列表）**；缺独立 runs 表/统计 |
+| `automation` | 🟡 | `internal/modules/automation` + `internal/ui/automation` | cron/every/after、持久化、ticker、schedule 工具、列表/新建/运行/删除/运行历史（每任务 10 条，持久化+折叠摘要）/**任务级模型覆盖（SessionModelSwitcher，空=默认；schedule_update 适配器会清空覆盖）**；缺 workspace/permission 字段与筛选、独立 runs 表 |
 | `brand` | ✅ | `internal/brand` | palette/theme/logo/wordmark |
 | `design` | ✅ | `internal/design` | tokens/style/motion/font/components 子集 |
 | `globalhotkey` | ✅ | host hotkey.go + mygo `GlobalShortcut` + 外观设置 | 可配置系统级加速键（修饰符+单键，固定顺序规范化），注册后 Show/Restore/Focus 窗口；留空关闭、非法/注册失败仅警告、shutdown 注销；桌面不可用环境安全回退 |
@@ -102,12 +102,12 @@
 | 消息全文搜索 | ✅ | sidebar + sessionstore SearchMessages | LIKE/转义/片段/限制/跨会话（解码文本匹配） |
 | Fork | ✅ | agent SessionForker + sidebar 行菜单 | 深拷贝消息/附件/tools、持久化历史/事件 |
 | Export | ✅ | session 导出 Markdown + 复制对话 + JSONL + toast | 缺跨重启导出历史（非目标） |
-| Automation 页 | ✅ | `internal/ui/automation` + module | 列表/新建/运行/删除/after/every/cron；无 runs 历史（后端行） |
+| Automation 页 | ✅ | `internal/ui/automation` + module | 列表/新建（含可选模型）/运行/删除/after/every/cron + 运行历史折叠/展开 + 任务模型 Badge |
 | Plugins 页 | 🟡 | `internal/ui/plugins` + toolkit | MCP 状态卡片 + 工具目录 + MCP 工具级开关；缺内置插件开关、插件详情/配置、市场 |
 | Skills 页 | 🟡 | settings 技能页 + skills 模块 | 发现/roots/预览/刷新；无创建/编辑/删除 |
 | Memory 页 | 🟡 | session Memory tab + memory 模块 | 搜索/添加/删除 scope；无 consolidate/extract、自动记忆设置 |
 | Workspace→Session 树/分组/计数 | ✅ | sidebar workspace tree | 多 workspace 分组、未分组、计数、搜索、折叠、置顶/归档 |
-| Plan UI（plan_review/exit_plan_mode） | 🟡 | `internal/ui/interaction` plan Modal + /审阅计划 + plan 模式门禁 | Markdown 审阅 + 批准/取消 + **计划模式（设置/徽标 + 只读工具白名单，写/执行 fail-closed）**；缺 keep-planning/feedback、transcript plan 卡 |
+| Plan UI（plan_review/exit_plan_mode） | 🟡 | `internal/ui/interaction` plan Modal + /审阅计划 + plan 模式门禁 + toolcards 计划卡 | Markdown 审阅 + 批准/取消 + 计划模式门禁 + **transcript 计划卡（markdown + 状态 Badge，坏参数回退）**；缺 keep-planning/feedback 修订循环 |
 | Modes UI（standard/minimal/creator） | ✅ | session 模式 Popover + agent gate 策略 | 四模式：普通（原审批策略）、计划（只读+计划白名单，最高优先）、精简（只读探索白名单）、创作（隐藏编码工具，仅 ask/present/goal/memory/skill）；composer 模式菜单 + header 徽标，坏值归一，中英 |
 | Team UI（成员/任务/steer） | ✅ | rightpanel Agents/Tasks Inspector + team_* 工具 | 成员列表/状态/最新回答、选中后 steer/中断/关闭；spawn 由 agent 工具发起（同旧）；任务板增删改/状态排序 |
 | Todo UI（会话 todo 面板） | ✅ | toolkit `KeyTaskBoard` + rightpanel「任务」tab | 任务列表/状态排序/添加/开始/完成/删除/刷新/错误与空态，与 team_task_* 共用；缺旧 todo 卡内联进度 |

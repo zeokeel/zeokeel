@@ -59,6 +59,7 @@ type state struct {
 	formOpen     bool
 	formName     string
 	formPrompt   string
+	formModel    string
 	formSchedule string
 	formEnabled  bool
 	formErr      string

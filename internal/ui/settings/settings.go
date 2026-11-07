@@ -582,6 +582,7 @@ func Module() *module.Descriptor[Config] {
 		presets := newPresetsState()
 		catalog := &catalogState{}
 		lsp := &lspState{}
+		notifications := &notificationsState{}
 		network := newNetworkState()
 		dataPrivacy := newDataPrivacyState()
 		diagnostics := &diagnosticsState{}
@@ -698,7 +699,7 @@ func Module() *module.Descriptor[Config] {
 				zhTitle: "通知", enTitle: "Notifications",
 				Build: func(c *ui.Context) {
 					syncer.sync()
-					buildNotificationsPage(c, runtime, store, locale)
+					buildNotificationsPage(c, runtime, store, locale, notifications)
 				},
 			},
 			{

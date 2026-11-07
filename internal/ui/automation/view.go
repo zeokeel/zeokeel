@@ -99,6 +99,10 @@ func buildTaskCard(c *ui.Context, t *design.Tokens, service contracts.Automation
 		})
 		design.Apply(ui.Text(c, task.Schedule), t.MonoFamily()).FontSize(11).
 			TextColor(t.LabelTertiary).MaxLines(1).Ellipsis("…")
+		if model := strings.TrimSpace(task.Model); model != "" {
+			design.Apply(ui.Badge(c, st.tr("模型：", "Model: ")+model), t.Badge()).
+				TextColor(t.LabelSecondary)
+		}
 		ui.Row(c).FillWidth().Gap(design.Space3).Children(func() {
 			design.Apply(ui.Text(c, st.tr("下次运行：", "Next run: ")+formatTaskTime(task.NextRun)), t.Font(design.TypeXXS)).
 				TextColor(t.LabelTertiary)
@@ -201,6 +205,8 @@ func buildCreateForm(c *ui.Context, t *design.Tokens, service contracts.Automati
 			Placeholder(st.tr("例如：每日依赖巡检", "For example: daily dependency check")).FillWidth()
 		ui.TextArea(c, &st.formPrompt).Label(st.tr("任务提示词", "Task prompt")).
 			Placeholder(st.tr("任务触发时发给 agent 的提示词", "Prompt sent to the agent when the task runs")).FillWidth().MinHeight(design.Space6 * 4)
+		ui.TextInput(c, &st.formModel).Label(st.tr("模型", "Model")).
+			Placeholder(st.tr("默认模型", "Default model")).FillWidth()
 		ui.TextInput(c, &st.formSchedule).Label(st.tr("运行计划", "Schedule")).
 			Placeholder("*/5 * * * * 或 every 60s").FillWidth()
 		design.Apply(ui.Text(c, st.tr(
@@ -221,6 +227,7 @@ func buildCreateForm(c *ui.Context, t *design.Tokens, service contracts.Automati
 				_, err := service.Create(context.Background(), contracts.AutomationTask{
 					Name:     name,
 					Prompt:   prompt,
+					Model:    strings.TrimSpace(st.formModel),
 					Schedule: schedule,
 					Enabled:  st.formEnabled,
 				})
@@ -230,6 +237,7 @@ func buildCreateForm(c *ui.Context, t *design.Tokens, service contracts.Automati
 					st.formOpen = false
 					st.formName = ""
 					st.formPrompt = ""
+					st.formModel = ""
 					st.formSchedule = ""
 					st.formEnabled = true
 					st.formErr = ""

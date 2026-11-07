@@ -366,3 +366,89 @@ func TestToastWithoutSettingsShows(t *testing.T) {
 	tester.Frame()
 	h.assertTexts(tester, "无设置也显示")
 }
+
+// --- hidden levels ----------------------------------------------------------
+
+// newHiddenSettings builds a settings store with both notification rows.
+func newHiddenSettings(total, hidden string) *toastSettings {
+	settings := newToastSettings(total)
+	if hidden != "" {
+		_ = settings.Set(contracts.SettingNotificationHiddenLevels, hidden)
+	}
+	return settings
+}
+
+func TestToastHiddenLevelIgnored(t *testing.T) {
+	settings := newHiddenSettings("", `["success"]`)
+	h := newSettingsHarness(t, "zh", settings)
+	tester := h.tester()
+	h.notifier.trigger(contracts.Notification{ID: "n1", Level: contracts.NotifySuccess, Text: "成功消息"})
+	h.notifier.trigger(contracts.Notification{ID: "n2", Level: contracts.NotifyError, Text: "错误消息"})
+	tester.Frame()
+	h.assertTexts(tester, "错误消息")
+	h.assertNoTexts(tester, "成功消息")
+}
+
+func TestToastHiddenMultipleLevels(t *testing.T) {
+	settings := newHiddenSettings("", `["info","warning"]`)
+	h := newSettingsHarness(t, "zh", settings)
+	tester := h.tester()
+	h.notifier.trigger(contracts.Notification{ID: "n1", Level: contracts.NotifyInfo, Text: "信息消息"})
+	h.notifier.trigger(contracts.Notification{ID: "n2", Level: contracts.NotifySuccess, Text: "成功消息"})
+	h.notifier.trigger(contracts.Notification{ID: "n3", Level: contracts.NotifyWarning, Text: "警告消息"})
+	h.notifier.trigger(contracts.Notification{ID: "n4", Level: contracts.NotifyError, Text: "错误消息"})
+	tester.Frame()
+	h.assertTexts(tester, "成功消息", "错误消息")
+	h.assertNoTexts(tester, "信息消息", "警告消息")
+}
+
+func TestToastBadHiddenJSONShowsAll(t *testing.T) {
+	settings := newHiddenSettings("", "{bad-json")
+	h := newSettingsHarness(t, "zh", settings)
+	tester := h.tester()
+	h.notifier.trigger(contracts.Notification{ID: "n1", Level: contracts.NotifyWarning, Text: "坏 JSON 也显示"})
+	tester.Frame()
+	h.assertTexts(tester, "坏 JSON 也显示")
+}
+
+func TestToastHiddenLevelsCaseInsensitiveAndUnknown(t *testing.T) {
+	settings := newHiddenSettings("", `[" SUCCESS "]`)
+	h := newSettingsHarness(t, "zh", settings)
+	tester := h.tester()
+	h.notifier.trigger(contracts.Notification{ID: "n1", Level: "Success", Text: "大小写隐藏"})
+	h.notifier.trigger(contracts.Notification{ID: "n2", Level: "custom-level", Text: "未知级别显示"})
+	tester.Frame()
+	h.assertTexts(tester, "未知级别显示")
+	h.assertNoTexts(tester, "大小写隐藏")
+}
+
+func TestToastHiddenLevelsLiveSwitch(t *testing.T) {
+	settings := newHiddenSettings("", "")
+	h := newSettingsHarness(t, "zh", settings)
+	tester := h.tester()
+	h.notifier.trigger(contracts.Notification{ID: "n1", Level: contracts.NotifySuccess, Text: "旧成功"})
+	tester.Frame()
+	h.assertTexts(tester, "旧成功")
+
+	_ = settings.Set(contracts.SettingNotificationHiddenLevels, `["success"]`)
+	tester.Frame()
+	h.assertNoTexts(tester, "旧成功")
+
+	h.notifier.trigger(contracts.Notification{ID: "n2", Level: contracts.NotifySuccess, Text: "新成功"})
+	tester.Frame()
+	h.assertNoTexts(tester, "新成功")
+
+	_ = settings.Set(contracts.SettingNotificationHiddenLevels, "[]")
+	h.notifier.trigger(contracts.Notification{ID: "n3", Level: contracts.NotifySuccess, Text: "再次成功"})
+	tester.Frame()
+	h.assertTexts(tester, "再次成功")
+}
+
+func TestToastTotalSwitchBeatsHiddenLevels(t *testing.T) {
+	settings := newHiddenSettings("false", `["success"]`)
+	h := newSettingsHarness(t, "zh", settings)
+	tester := h.tester()
+	h.notifier.trigger(contracts.Notification{ID: "n1", Level: contracts.NotifyError, Text: "全部关闭"})
+	tester.Frame()
+	h.assertNoTexts(tester, "全部关闭")
+}

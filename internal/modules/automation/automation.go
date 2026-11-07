@@ -124,6 +124,7 @@ type taskRecord struct {
 	Name      string    `json:"name"`
 	Prompt    string    `json:"prompt"`
 	Schedule  string    `json:"schedule"`
+	Model     string    `json:"model,omitempty"`
 	Enabled   bool      `json:"enabled"`
 	CreatedAt time.Time `json:"createdAt"`
 	UpdatedAt time.Time `json:"updatedAt"`
@@ -248,6 +249,7 @@ func (s *service) load() error {
 			Prompt:     record.Prompt,
 			Schedule:   record.Schedule,
 			Enabled:    record.Enabled,
+			Model:      strings.TrimSpace(record.Model),
 			CreatedAt:  record.CreatedAt.UTC(),
 			UpdatedAt:  record.UpdatedAt.UTC(),
 			LastRun:    record.LastRun.UTC(),
@@ -275,6 +277,7 @@ func (s *service) persistLocked() error {
 			Prompt:     task.Prompt,
 			Schedule:   task.Schedule,
 			Enabled:    task.Enabled,
+			Model:      task.Model,
 			CreatedAt:  task.CreatedAt.UTC(),
 			UpdatedAt:  task.UpdatedAt.UTC(),
 			LastRun:    task.LastRun.UTC(),
@@ -417,6 +420,7 @@ func (s *service) Create(ctx context.Context, task contracts.AutomationTask) (co
 		Prompt:    task.Prompt,
 		Schedule:  schedule,
 		Enabled:   task.Enabled,
+		Model:     strings.TrimSpace(task.Model),
 		CreatedAt: now,
 		UpdatedAt: now,
 		NextRun:   nextRun,
@@ -468,6 +472,7 @@ func (s *service) Update(ctx context.Context, task contracts.AutomationTask) (co
 	updated.Name = name
 	updated.Prompt = task.Prompt
 	updated.Schedule = schedule
+	updated.Model = strings.TrimSpace(task.Model)
 	updated.Enabled = task.Enabled
 	updated.NextRun = nextRun
 	updated.UpdatedAt = now
@@ -663,6 +668,17 @@ func (s *service) runTask(task contracts.AutomationTask) (string, error) {
 	if err != nil {
 		s.logger.Printf("%s: run %s: create chat session: %v", ModuleID, task.ID, err)
 		return "", fmt.Errorf("create chat session: %w", err)
+	}
+	if model := strings.TrimSpace(task.Model); model != "" {
+		if switcher, ok := s.chat.(contracts.SessionModelSwitcher); ok {
+			if err := switcher.SetSessionModel(sessionID, model); err != nil {
+				// The model override is best effort: warn and still run the task
+				// with the default model.
+				s.logger.Printf("%s: run %s: set session model %q: %v", ModuleID, task.ID, model, err)
+			}
+		} else {
+			s.logger.Printf("%s: run %s: chat service lacks per-session model switching; using the default model", ModuleID, task.ID)
+		}
 	}
 	if err := s.chat.Send(sessionID, task.Prompt); err != nil {
 		s.logger.Printf("%s: run %s: send prompt: %v", ModuleID, task.ID, err)

@@ -21,6 +21,12 @@
 - 右侧栏「文件」Tab：打开文件夹（mygo 原生 Directory picker）、目录进入/面包屑、文本/Markdown/图片预览、
   刷新与错误状态；E2E 覆盖工作区创建 + 列表 + 预览帧
 
+**TDD-plan-card/automation-model/toast-levels（2026-11-08）**
+- toolcards：plan_review 专用卡（Markdown 计划 + PlanReviewer 状态 Badge：审阅中/已批准/已取消/待审阅；坏参数回退摘要）；toolcards 14 测试
+- automation：任务级模型覆盖（Create/Update/load/persist trim；RunNow 前 NewSession→SetSessionModel，失败仅 warning 继续发送）；模块 26 / UI 20 测试
+- 通知级别过滤：`ui.notifications.hidden`（坏 JSON 忽略、未知级别丢、总开关优先）；toasts 投递+每帧过滤（热切换清栈）；设置通知页四个级别 Toggle；
+  toasts 17 / settings 131 测试
+
 **TDD-theme-mode/sidebar-view（2026-11-08）**
 - 主题三态：host resolveThemeDark/initialThemeDark（legacy ui.theme.dark 兼容）+ mygo.Theme.OnUpdated 跟随系统；外观页 Three-segment（浅色/深色/跟随系统）
   即时切换 + 提示；host 70 / settings 127 测试；xvfb 默认与预置 dark 两次 exit 124 无 panic

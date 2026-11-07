@@ -29,6 +29,9 @@ type AutomationTask struct {
 	// RunHistory lists the most recent finished runs, newest first (the
 	// automation module keeps at most ten).
 	RunHistory []AutomationRunRecord `json:"runHistory,omitempty"`
+	// Model optionally overrides the chat model for this task's runs ("" keeps
+	// the session default).
+	Model string `json:"model,omitempty"`
 }
 
 // Automation run statuses.

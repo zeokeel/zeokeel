@@ -22,7 +22,7 @@ var requiredToolNames = []string{
 	"list_dir", "glob", "grep", "read_image", "web_fetch", "web_search",
 	"job_start", "job_output", "terminal_send", "terminal_read",
 	"enter_worktree", "list_worktrees", "subagent", "workflow", "ralph",
-	"team_task_create", "team_task_update", "todo", "skill",
+	"team_task_create", "team_task_update", "todo", "skill", "plan_review",
 }
 
 type harness struct {

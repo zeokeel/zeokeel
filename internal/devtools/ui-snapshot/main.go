@@ -603,7 +603,8 @@ func main() {
 	// Automation with a finished run so the history expansion is visible.
 	if automation, err := a.root.Require(contracts.KeyAutomation); err == nil {
 		if task, createErr := automation.Create(context.Background(), contracts.AutomationTask{
-			Name: "每日构建检查", Prompt: "检查构建状态并汇总", Schedule: "every 24h", Enabled: false,
+			Name: "每日构建检查", Prompt: "检查构建状态并汇总", Schedule: "every 24h",
+			Enabled: false, Model: "snapshot-model",
 		}); createErr == nil {
 			_ = automation.RunNow(context.Background(), task.ID)
 		}

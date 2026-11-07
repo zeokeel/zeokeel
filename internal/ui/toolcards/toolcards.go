@@ -19,11 +19,13 @@
 package toolcards
 
 import (
+	"encoding/json"
 	"strings"
 	"sync"
 	"unicode/utf8"
 
 	"github.com/egoist/mygo/ui"
+	"github.com/egoist/mygo/ui/markdown"
 	cordis "github.com/zeokeel/zeokeel-kernel"
 	"github.com/zeokeel/zeokeel-kernel/module"
 
@@ -72,6 +74,7 @@ var realToolNames = []string{
 	"team_task_create",
 	"team_task_update",
 	"todo",
+	"plan_review",
 	// skills
 	"skill",
 }
@@ -102,6 +105,8 @@ type rendererState struct {
 	open map[string]bool
 	// locale localizes the real cards' copy per frame (zh is the default).
 	locale contracts.LocaleService
+	// ctx resolves the optional plan reviewer per frame.
+	ctx cordis.Context
 }
 
 // tr returns the localized copy for the current frame's language.
@@ -134,6 +139,7 @@ func Module() *module.Descriptor[Config] {
 		locale, _ := ctx.Get(contracts.KeyLocale)
 		state := newRendererState()
 		state.locale = locale
+		state.ctx = ctx
 
 		// The demo card stays exactly as it was: the host's capability probe and
 		// its integration test assert its text and raw status.
@@ -148,9 +154,12 @@ func Module() *module.Descriptor[Config] {
 			return err
 		}
 
-		build := realBuild(state)
 		for _, name := range realToolNames {
 			tool := name
+			build := realBuild(state)
+			if tool == "plan_review" {
+				build = planReviewBuild(state)
+			}
 			if err := own(ctx, func() (func(), error) {
 				return runtime.RegisterToolRenderer(contracts.ToolRenderer{
 					Tool:  tool,
@@ -251,7 +260,7 @@ func toolIcon(name string) *ui.SVG {
 	case "list_dir", "write_file", "edit_file", "str_replace_editor",
 		"enter_worktree", "list_worktrees":
 		return icons.Folder()
-	case "subagent", "workflow", "ralph", "skill":
+	case "subagent", "workflow", "ralph", "skill", "plan_review":
 		return icons.Sparkles()
 	default:
 		return icons.Message()
@@ -361,6 +370,99 @@ func truncateSummary(summary string) string {
 		cut--
 	}
 	return summary[:cut] + "…"
+}
+
+// planArgs is the plan_review tool argument shape.
+type planArgs struct {
+	Plan    string `json:"plan"`
+	Content string `json:"content"`
+}
+
+// planMarkdownFromSummary extracts the plan/content Markdown when the call
+// summary carries the tool arguments as JSON. The contracts.ToolCall read model
+// has no Arguments field, so the summary is the only available carrier; a
+// non-JSON or field-less summary falls back to the existing raw preview.
+func planMarkdownFromSummary(summary string) (string, bool) {
+	trimmed := strings.TrimSpace(summary)
+	if trimmed == "" || !strings.HasPrefix(trimmed, "{") {
+		return "", false
+	}
+	var args planArgs
+	if err := json.Unmarshal([]byte(trimmed), &args); err != nil {
+		return "", false
+	}
+	if markdownText := strings.TrimSpace(args.Plan); markdownText != "" {
+		return markdownText, true
+	}
+	if markdownText := strings.TrimSpace(args.Content); markdownText != "" {
+		return markdownText, true
+	}
+	return "", false
+}
+
+// planReviewBuild renders the transcript plan card: a titled panel with the
+// optional PlanReviewer state badge and the plan Markdown when the arguments
+// can be recovered, otherwise the existing raw summary disclosure.
+func planReviewBuild(state *rendererState) func(c *ui.Context, call contracts.ToolCall) {
+	return func(c *ui.Context, call contracts.ToolCall) {
+		t := design.Of(c)
+		card := ui.Column(c).FillWidth().Gap(design.Space2)
+		design.Apply(card, t.Panel()).Padding(design.Space3).Children(func() {
+			ui.Row(c).FillWidth().Gap(design.Space2).AlignItems(ui.Center).Children(func() {
+				ui.Icon(c, icons.Sparkles()).Size(design.Space4, design.Space4).
+					TextColor(t.LabelSecondary)
+				design.Apply(ui.Text(c, state.tr("计划审阅", "Plan review")), t.Font(design.TypeS)).FontWeight(600).
+					TextColor(t.LabelPrimary)
+				if label, color, ok := planReviewStateBadge(state, t); ok {
+					design.Apply(ui.Badge(c, label), t.Badge(), func(el ui.Element) ui.Element {
+						return el.Background(color.Alpha(0.15)).TextColor(color)
+					})
+				}
+				ui.Spacer(c).Grow(1)
+				if call.ID != "" {
+					design.Apply(ui.Text(c, call.ID), t.Font(design.TypeXXXS)).
+						TextColor(t.LabelTertiary)
+				}
+			})
+			summary := strings.TrimSpace(call.Summary)
+			if markdownText, ok := planMarkdownFromSummary(summary); ok {
+				markdown.View(c, markdownText, nil)
+				return
+			}
+			if summary == "" {
+				design.Apply(ui.Text(c, state.tr("计划没有内联内容。", "The plan has no inline content.")),
+					t.TextMuted(design.TypeXS))
+				return
+			}
+			key := call.ID + "\x00" + call.Name
+			open := state.load(key)
+			collapsible := ui.Collapsible(c, state.tr("摘要", "Summary"), &open, func() {
+				design.Apply(ui.Text(c, truncateSummary(summary)), t.TextMuted(design.TypeXS))
+			})
+			design.Apply(collapsible, t.Font(design.TypeXS))
+			state.store(key, open)
+		})
+	}
+}
+
+// planReviewStateBadge maps the optional PlanReviewer state to a label/color.
+func planReviewStateBadge(state *rendererState, t *design.Tokens) (string, ui.Color, bool) {
+	reviewer, ok := state.ctx.Get(contracts.KeyPlanReviewer)
+	if !ok || reviewer == nil {
+		return "", ui.Transparent, false
+	}
+	switch strings.ToLower(strings.TrimSpace(reviewer.State())) {
+	case "reviewing":
+		return state.tr("审阅中", "Reviewing"), t.WarningText, true
+	case "approved":
+		return state.tr("已批准", "Approved"), t.Success, true
+	case "cancelled", "canceled":
+		return state.tr("已取消", "Cancelled"), t.DangerText, true
+	case "idle":
+		return state.tr("待审阅", "Pending review"), t.LabelSecondary, true
+	default:
+		return "", ui.Transparent, false
+	}
 }
 
 // own registers one contribution and ties its unregistration to ctx's effect

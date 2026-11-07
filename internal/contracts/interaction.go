@@ -98,6 +98,10 @@ const (
 	SettingCloseToTray = "ui.closeToTray"
 	// SettingNotifications toggles the desktop toast overlay (default true).
 	SettingNotifications = "ui.notifications"
+	// SettingNotificationHiddenLevels is a JSON array of toast levels
+	// ("info","success","warning","error") that should not be shown. Missing
+	// levels are shown (the default).
+	SettingNotificationHiddenLevels = "ui.notifications.hidden"
 	// SettingThemeMode is the appearance source: "light", "dark" or "system"
 	// (the legacy ui.theme.dark boolean is still written for older builds).
 	SettingThemeMode = "ui.theme.mode"

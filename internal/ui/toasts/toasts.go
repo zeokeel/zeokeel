@@ -11,6 +11,8 @@
 package toasts
 
 import (
+	"encoding/json"
+	"log"
 	"strings"
 	"sync/atomic"
 	"time"
@@ -53,9 +55,13 @@ type state struct {
 	nextID   atomic.Uint64
 	locale   contracts.LocaleService
 	notifier contracts.Notifier
-	// settings is the optional host settings store; ui.notifications is read
-	// on every delivery/frame so the switch applies without a restart.
+	// settings is the optional host settings store; ui.notifications and
+	// ui.notifications.hidden are read on every delivery/frame so switches
+	// apply without a restart.
 	settings contracts.SettingsService
+	// badHiddenRaw remembers the last malformed hidden-levels row already
+	// logged, so the per-frame read cannot spam the log.
+	badHiddenRaw string
 }
 
 // Module registers the toast overlay contribution.
@@ -124,12 +130,72 @@ func notificationsEnabled(st *state) bool {
 	}
 }
 
+// notificationLevel normalizes one toast level (trim + lower case); an empty or
+// unknown level is returned as-is and is never filtered.
+func notificationLevel(level string) string {
+	return strings.ToLower(strings.TrimSpace(level))
+}
+
+// knownNotificationLevel reports whether level is one of the four filterable
+// notification levels.
+func knownNotificationLevel(level string) bool {
+	switch level {
+	case contracts.NotifyInfo, contracts.NotifySuccess, contracts.NotifyWarning, contracts.NotifyError:
+		return true
+	default:
+		return false
+	}
+}
+
+// hiddenLevels reads ui.notifications.hidden: a JSON array of levels to hide.
+// Missing/empty rows mean nothing is hidden; a malformed row is logged once and
+// treated as "nothing hidden" (bad values never filter toasts).
+func hiddenLevels(st *state) map[string]bool {
+	if st.settings == nil {
+		return nil
+	}
+	raw := strings.TrimSpace(st.settings.Get(contracts.SettingNotificationHiddenLevels, ""))
+	if raw == "" {
+		return nil
+	}
+	var levels []string
+	if err := json.Unmarshal([]byte(raw), &levels); err != nil {
+		if st.badHiddenRaw != raw {
+			st.badHiddenRaw = raw
+			log.Printf("ui/toasts: ignoring malformed %s: %v", contracts.SettingNotificationHiddenLevels, err)
+		}
+		return nil
+	}
+	hidden := make(map[string]bool, len(levels))
+	for _, level := range levels {
+		normalized := notificationLevel(level)
+		if knownNotificationLevel(normalized) {
+			hidden[normalized] = true
+		}
+	}
+	if len(hidden) == 0 {
+		return nil
+	}
+	return hidden
+}
+
+// levelHidden reports whether one toast level is filtered out. Unknown levels
+// and a missing settings store always show.
+func levelHidden(st *state, level string) bool {
+	hidden := hiddenLevels(st)
+	if len(hidden) == 0 {
+		return false
+	}
+	return hidden[notificationLevel(level)]
+}
+
 // enqueue adds one toast to the stack, keeping at most maxToasts (the oldest is
 // replaced), and schedules its automatic expiry. The handler stays installed
-// while notifications are disabled but drops deliveries here (a later frame
-// re-reads the setting, so the switch is hot).
+// while notifications are disabled or a level is hidden but drops deliveries
+// here (a later frame re-reads the settings, so the switches are hot).
 func enqueue(st *state, runtime contracts.UIRuntime, notification contracts.Notification) {
-	if strings.TrimSpace(notification.Text) == "" || !notificationsEnabled(st) {
+	if strings.TrimSpace(notification.Text) == "" || !notificationsEnabled(st) ||
+		levelHidden(st, notification.Level) {
 		return
 	}
 	key := st.nextID.Add(1)
@@ -164,11 +230,21 @@ func removeToast(st *state, key uint64) {
 
 // buildOverlay renders the toast stack in the bottom-right corner.
 func buildOverlay(c *ui.Context, t *design.Tokens, runtime contracts.UIRuntime, st *state) {
-	// Hot switch: disabling notifications also drops toasts already on screen
-	// instead of leaving them until the next event.
+	// Hot switches: disabling notifications (or hiding a level) also drops the
+	// toasts already on screen instead of leaving them until the next event.
 	if !notificationsEnabled(st) {
 		st.toasts = nil
 		return
+	}
+	if hidden := hiddenLevels(st); len(hidden) > 0 {
+		kept := st.toasts[:0]
+		for _, item := range st.toasts {
+			if hidden[notificationLevel(item.data.Level)] {
+				continue
+			}
+			kept = append(kept, item)
+		}
+		st.toasts = kept
 	}
 	if len(st.toasts) == 0 {
 		return
