@@ -199,11 +199,17 @@ func TestMCPListRenders(t *testing.T) {
 	h := newHarness(t, service, nil, plugins.Config{})
 	tester := h.tester()
 
+	// Collapsed cards show name, status and tool count only.
 	h.assertTexts(tester,
 		"MCP 插件", "刷新",
-		"files", "已连接", "3 个工具",
-		"fake-files · 0.1.0 · 2024-11-05", "http://127.0.0.1:9000/mcp",
+		"files", "已连接", "3 个工具", "详情",
 		"broken", "连接失败")
+	h.assertNoTexts(tester, "fake-files", "http://127.0.0.1:9000/mcp")
+
+	// Expanding the first card reveals the connection details.
+	h.click(tester, "详情")
+	h.assertTexts(tester, "收起", "fake-files", "0.1.0", "2024-11-05",
+		"http://127.0.0.1:9000/mcp")
 }
 
 func TestMCPEmptyState(t *testing.T) {

@@ -129,15 +129,30 @@ func newHarnessWithDataDir(t *testing.T, dataDir string) *harness {
 
 func newHarnessCore(t *testing.T, dataDir string, withBridges bool) *harness {
 	t.Helper()
-	settings := newMemSettings(nil)
+	local := newMemSettings(nil)
+	return newHarnessCoreWith(t, dataDir, withBridges, local, local)
+}
+
+// newHarnessWithSettingsService starts a harness whose kernel-provided settings
+// service is provided (a fault-injection wrapper); h.settings is the writable
+// in-memory store the wrapper delegates to.
+func newHarnessWithSettingsService(t *testing.T, provided contracts.SettingsService) *harness {
+	t.Helper()
+	local := newMemSettings(nil)
+	return newHarnessCoreWith(t, t.TempDir(), true, local, provided)
+}
+
+func newHarnessCoreWith(t *testing.T, dataDir string, withBridges bool, local *memSettings,
+	provided contracts.SettingsService) *harness {
+	t.Helper()
 	logger := &recLogger{}
-	uiRoot := uiroot.New(uiroot.Config{AppName: "ZeoKeel", Settings: settings})
+	uiRoot := uiroot.New(uiroot.Config{AppName: "ZeoKeel", Settings: provided})
 	ctx := cordis.Root()
 	t.Cleanup(func() { _ = ctx.DisposeAll() })
 
-	h := &harness{t: t, ctx: ctx, ui: uiRoot, settings: settings, logger: logger, dataDir: dataDir}
+	h := &harness{t: t, ctx: ctx, ui: uiRoot, settings: local, logger: logger, dataDir: dataDir}
 	provide(t, ctx, contracts.KeyDataDir, h.dataDir)
-	provide(t, ctx, contracts.KeySettings, contracts.SettingsService(settings))
+	provide(t, ctx, contracts.KeySettings, provided)
 	provide(t, ctx, contracts.KeyLogger, contracts.Logger(logger))
 	provide(t, ctx, contracts.KeyUIRuntime, uiRoot.Runtime())
 	provide(t, ctx, contracts.KeyNavigator, uiRoot.Navigator())

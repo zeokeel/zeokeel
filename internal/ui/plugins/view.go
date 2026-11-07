@@ -90,15 +90,34 @@ func buildMCPsSection(
 				"No MCP servers configured yet (assembly mcpServers)"))
 			return
 		}
-		for _, server := range servers {
-			buildMCPCard(c, t, st, server)
+		for index, server := range servers {
+			buildMCPCard(c, t, runtime, st, server, index)
 		}
 	})
 }
 
-// buildMCPCard is one MCP server: name, connection badge, handshake metadata,
-// URL and its tool count.
-func buildMCPCard(c *ui.Context, t *design.Tokens, st *state, server contracts.MCPPlugin) {
+// mcpServerKey identifies one MCP server card across frames and refreshes.
+func mcpServerKey(server contracts.MCPPlugin, index int) string {
+	switch {
+	case strings.TrimSpace(server.Name) != "":
+		return "name:" + strings.TrimSpace(server.Name)
+	case strings.TrimSpace(server.ServerName) != "":
+		return "server:" + strings.TrimSpace(server.ServerName)
+	case strings.TrimSpace(server.URL) != "":
+		return "url:" + strings.TrimSpace(server.URL)
+	default:
+		return fmt.Sprintf("index:%d", index)
+	}
+}
+
+// buildMCPCard is one expandable MCP server card: the collapsed header shows
+// the name, status and tool count; expanding reveals the transport, the
+// handshake metadata and the full status text.
+func buildMCPCard(c *ui.Context, t *design.Tokens, runtime contracts.UIRuntime,
+	st *state, server contracts.MCPPlugin, index int) {
+	key := mcpServerKey(server, index)
+	expanded := st.mcpExpanded[key]
+
 	card := design.Apply(ui.Column(c), t.Panel()).Padding(design.Space3).Gap(design.Space2)
 	card.Children(func() {
 		ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(design.Space2).Children(func() {
@@ -110,29 +129,56 @@ func buildMCPCard(c *ui.Context, t *design.Tokens, st *state, server contracts.M
 			ui.Icon(c, icon).Size(16, 16).TextColor(iconColor)
 			design.Apply(ui.Text(c, firstNonEmpty(server.Name, st.tr("(未命名服务器)", "(Untitled server)"))), t.Font(design.TypeS)).
 				FontWeight(600).TextColor(t.LabelPrimary).Grow(1).MaxLines(1).Ellipsis("…")
-			design.Apply(ui.Badge(c, pluginStatusLabel(st, server.Status)), t.Badge()).
+			// The collapsed badge carries only the short status prefix; the full
+			// diagnostic (which can be very long) lives in the expanded details.
+			design.Apply(ui.Badge(c, pluginStatusLabel(st, collapsedMCPStatus(server.Status))), t.Badge()).
 				TextColor(pluginStatusColor(t, server.Status))
 			design.Apply(ui.Badge(c, st.tr(fmt.Sprintf("%d 个工具", server.Tools), fmt.Sprintf("%d tools", server.Tools))), t.Badge())
+			toggleLabel := st.tr("详情", "Details")
+			if expanded {
+				toggleLabel = st.tr("收起", "Hide")
+			}
+			if ui.Button(c, toggleLabel).Clicked() {
+				st.mcpExpanded[key] = !expanded
+				runtime.Invalidate()
+			}
 		})
-		if meta := mcpMeta(server); meta != "" {
-			design.Apply(ui.Text(c, meta), t.TextMuted(design.TypeXXS)).MaxLines(1).Ellipsis("…")
+		if !expanded {
+			return
 		}
+		ui.Divider(c)
+		transport := st.tr("本地 stdio", "Local stdio")
+		if strings.TrimSpace(server.URL) != "" {
+			transport = "HTTP"
+		}
+		mcpDetailRow(c, t, st.tr("类型", "Type"), transport)
 		if url := strings.TrimSpace(server.URL); url != "" {
-			design.Apply(ui.Text(c, url), t.MonoFamily()).FontSize(11).
-				TextColor(t.LabelTertiary).MaxLines(1).Ellipsis("…")
+			mcpDetailRow(c, t, "URL", url)
 		}
+		mcpDetailRow(c, t, st.tr("服务器", "Server"), mcpDetailValue(server.ServerName))
+		mcpDetailRow(c, t, st.tr("版本", "Version"), mcpDetailValue(server.Version))
+		mcpDetailRow(c, t, st.tr("协议", "Protocol"), mcpDetailValue(server.Protocol))
+		mcpDetailRow(c, t, st.tr("工具数", "Tools"), st.tr(fmt.Sprintf("%d 个工具", server.Tools), fmt.Sprintf("%d tools", server.Tools)))
+		mcpDetailRow(c, t, st.tr("状态", "Status"), mcpDetailValue(server.Status))
 	})
 }
 
-// mcpMeta joins the non-empty handshake fields into one muted line.
-func mcpMeta(server contracts.MCPPlugin) string {
-	parts := make([]string, 0, 3)
-	for _, value := range []string{server.ServerName, server.Version, server.Protocol} {
-		if trimmed := strings.TrimSpace(value); trimmed != "" {
-			parts = append(parts, trimmed)
-		}
+// mcpDetailValue renders one detail value, with an em dash when empty.
+func mcpDetailValue(value string) string {
+	if trimmed := strings.TrimSpace(value); trimmed != "" {
+		return trimmed
 	}
-	return strings.Join(parts, " · ")
+	return "—"
+}
+
+// mcpDetailRow is one label/value row of the expanded card.
+func mcpDetailRow(c *ui.Context, t *design.Tokens, label, value string) {
+	ui.Row(c).FillWidth().Gap(design.Space2).AlignItems(ui.Center).Children(func() {
+		design.Apply(ui.Text(c, label), t.Font(design.TypeXXS)).
+			TextColor(t.LabelTertiary).Width(64).Shrink(0)
+		design.Apply(ui.Text(c, value), t.Font(design.TypeXS)).
+			TextColor(t.LabelPrimary).Grow(1).MaxLines(2).Ellipsis("…")
+	})
 }
 
 // buildToolsSection is the searchable, category-grouped tool catalogue.
@@ -311,6 +357,20 @@ func toolCategory(name string) string {
 	default:
 		return "其他"
 	}
+}
+
+// collapsedMCPStatus shortens a status for the collapsed card header: it keeps
+// the part before the first colon (the state) and bounds its length.
+func collapsedMCPStatus(status string) string {
+	trimmed := strings.TrimSpace(status)
+	if cut := strings.IndexAny(trimmed, ":："); cut >= 0 {
+		trimmed = strings.TrimSpace(trimmed[:cut])
+	}
+	runes := []rune(trimmed)
+	if len(runes) > 12 {
+		return string(runes[:12]) + "…"
+	}
+	return trimmed
 }
 
 // pluginStatusLabel is the connection badge label (the service's own status

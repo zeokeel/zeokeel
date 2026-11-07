@@ -56,6 +56,8 @@ type ChatMessage struct {
 	// Usage is the token/time accounting of the assistant turn (nil when the
 	// provider reported none).
 	Usage *MessageUsage
+	// Feedback is the user's rating of an assistant turn: "", "good" or "bad".
+	Feedback string
 	// Error is set when the message (usually an assistant turn) failed.
 	Error string
 	// CreatedAt is the message timestamp (local time, display only).
@@ -108,6 +110,24 @@ type ChatConfig struct {
 	// "high" or "" for the provider default). Per-session overrides live in
 	// settings (SessionEffortSettingKey).
 	ReasoningEffort string
+}
+
+// Message feedback values.
+const (
+	FeedbackGood = "good"
+	FeedbackBad  = "bad"
+)
+
+// SessionFeedbacker is the optional half of the chat service that records a
+// user's rating of one assistant message (persisted, restart-safe).
+type SessionFeedbacker interface {
+	// SetMessageFeedback records/looks the rating of messageID in sessionID.
+	SetMessageFeedback(sessionID, messageID, feedback string) error
+}
+
+// MessageFeedbackSettingKey stores one message's rating in settings.
+func MessageFeedbackSettingKey(sessionID, messageID string) string {
+	return "feedback." + sessionID + "." + messageID
 }
 
 // MessageUsage is one assistant turn's accounting (rig Usage + wall time).

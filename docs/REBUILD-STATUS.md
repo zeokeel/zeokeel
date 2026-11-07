@@ -21,6 +21,13 @@
 - 右侧栏「文件」Tab：打开文件夹（mygo 原生 Directory picker）、目录进入/面包屑、文本/Markdown/图片预览、
   刷新与错误状态；E2E 覆盖工作区创建 + 列表 + 预览帧
 
+**TDD-feedback/plugins-details（2026-11-08）**
+- 消息反馈：agent `SessionFeedbacker`（good/bad/清除，settings `feedback.<session>.<message>` 持久化，restore 补齐确定性 msg-N ID 以恢复；
+  读模型每帧归一填充）；session assistant 行动区「有帮助/没帮助」（toggle、已反馈徽标、错误提示、i18n）；agent 84 / session 105 测试
+- 插件详情：MCP server 卡片可展开（类型 HTTP/本地 stdio、URL、Server/Version/Protocol、工具数、完整状态；刷新保持展开，i18n）；
+  collapsed 状态徽标只显示状态前缀（长错误收进详情）；plugins 18 测试
+- E2E：点击有帮助/没帮助断言持久化反馈；snapshot p1-chat 刷新；反证第四轮（usage/plan/feedback）由 uiroot-tests 扩展
+
 **TDD-usage/plan-mode（2026-11-08）**
 - agent：assistant turn 用量（rig RunResult/EventUsage → MessageUsage tokens/cached/iterations/duration，usage 事件；无上报→nil）；
   plan 模式门禁（读 SettingAgentMode；只读+计划工具白名单，其余 fail-closed；切回 normal 恢复审批）；agent 78 测试

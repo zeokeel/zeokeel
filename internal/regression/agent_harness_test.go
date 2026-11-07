@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync"
 	"testing"
 
@@ -194,7 +195,21 @@ func startAgent(t *testing.T, agentConfig agent.Config, respond func(body []byte
 // pre-registered in the shared toolkit registry (to force name-conflict paths).
 func startAgentWith(t *testing.T, agentConfig agent.Config, model *fakeModel, seed ...rig.Tool) *agentHarness {
 	t.Helper()
-	h := newHarness(t)
+	return startAgentWithApprovals(t, agentConfig, model, approvals.ModeAuto, seed...)
+}
+
+// startAgentWithApprovals is startAgentWith with a scripted approvals mode.
+func startAgentWithApprovals(t *testing.T, agentConfig agent.Config, model *fakeModel,
+	approvalMode string, seed ...rig.Tool) *agentHarness {
+	t.Helper()
+	return startAgentOn(t, newHarness(t), agentConfig, model, approvalMode, seed...)
+}
+
+// startAgentOn activates the agent chain on a caller-provided harness (so a test
+// can restart it over the same data directory).
+func startAgentOn(t *testing.T, h *harness, agentConfig agent.Config, model *fakeModel,
+	approvalMode string, seed ...rig.Tool) *agentHarness {
+	t.Helper()
 	if err := h.settings.Set(contracts.SettingsChatBaseURL, model.url()); err != nil {
 		t.Fatalf("set chat base URL: %v", err)
 	}
@@ -208,7 +223,7 @@ func startAgentWith(t *testing.T, agentConfig agent.Config, model *fakeModel, se
 	registry := rigtool.NewRegistry(seed...)
 	provide(t, h.ctx, contracts.KeyToolkit, registry)
 	activate(t, h.ctx, sessionstore.Module(), sessionstore.Config{})
-	activate(t, h.ctx, approvals.Module(), approvals.Config{Mode: approvals.ModeAuto})
+	activate(t, h.ctx, approvals.Module(), approvals.Config{Mode: approvalMode})
 	activate(t, h.ctx, agent.Module(), agentConfig)
 	return &agentHarness{
 		h:        h,
@@ -217,6 +232,81 @@ func startAgentWith(t *testing.T, agentConfig agent.Config, model *fakeModel, se
 		registry: registry,
 		model:    model,
 	}
+}
+
+// lastRequestRole returns the role of the last message in one captured provider
+// request ("" when the body cannot be decoded).
+func lastRequestRole(body []byte) string {
+	var payload struct {
+		Messages []struct {
+			Role string `json:"role"`
+		} `json:"messages"`
+	}
+	if err := json.Unmarshal(body, &payload); err != nil || len(payload.Messages) == 0 {
+		return ""
+	}
+	return payload.Messages[len(payload.Messages)-1].Role
+}
+
+// usageWire is the OpenAI streaming usage payload used by the scripted server.
+type usageWire struct {
+	Prompt     int
+	Completion int
+	Total      int
+	Cached     int
+}
+
+// sseUsage renders the usage object of one streaming chunk.
+func sseUsage(usage usageWire) string {
+	return fmt.Sprintf(`{"prompt_tokens":%d,"completion_tokens":%d,"total_tokens":%d,`+
+		`"prompt_tokens_details":{"cached_tokens":%d}}`,
+		usage.Prompt, usage.Completion, usage.Total, usage.Cached)
+}
+
+// sseAnswerWithUsage is sseAnswer whose final chunk also carries usage.
+func sseAnswerWithUsage(text string, usage usageWire) string {
+	encoded, err := json.Marshal(text)
+	if err != nil {
+		panic(err)
+	}
+	return fmt.Sprintf("data: {\"choices\":[{\"delta\":{\"content\":%s},\"index\":0}]}\n\n", encoded) +
+		"data: {\"choices\":[{\"delta\":{},\"index\":0,\"finish_reason\":\"stop\"}]," +
+		"\"usage\":" + sseUsage(usage) + "}\n\n" +
+		"data: [DONE]\n\n"
+}
+
+// sseToolCall returns one streaming completion carrying a single tool call.
+func sseToolCall(name, arguments string) string {
+	return fmt.Sprintf("data: {\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,"+
+		"\"id\":\"call-audit\",\"type\":\"function\",\"function\":{\"name\":%q,\"arguments\":%q}}]},"+
+		"\"index\":0,\"finish_reason\":\"tool_calls\"}]}\n\n", name, arguments) +
+		"data: [DONE]\n\n"
+}
+
+// sseToolCalls returns one streaming completion carrying several tool calls.
+func sseToolCalls(names ...string) string {
+	return fmt.Sprintf("data: {\"choices\":[{\"delta\":{\"tool_calls\":%s},"+
+		"\"index\":0,\"finish_reason\":\"tool_calls\"}]}\n\n", sseToolCallDeltas(names)) +
+		"data: [DONE]\n\n"
+}
+
+// sseToolCallDeltas renders the delta.tool_calls array for names.
+func sseToolCallDeltas(names []string) string {
+	parts := make([]string, 0, len(names))
+	for index, name := range names {
+		parts = append(parts, fmt.Sprintf("{\"index\":%d,\"id\":\"call-%d\",\"type\":\"function\","+
+			"\"function\":{\"name\":%q,\"arguments\":\"{}\"}}", index, index, name))
+	}
+	return "[" + strings.Join(parts, ",") + "]"
+}
+
+// sseToolCallWithUsage is sseToolCall plus a usage chunk (one model iteration).
+func sseToolCallWithUsage(name, arguments string, usage usageWire) string {
+	return fmt.Sprintf("data: {\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,"+
+		"\"id\":\"call-audit\",\"type\":\"function\",\"function\":{\"name\":%q,\"arguments\":%q}}]},"+
+		"\"index\":0,\"finish_reason\":\"tool_calls\"}]}\n\n", name, arguments) +
+		"data: {\"choices\":[],\"usage\":" + sseUsage(usage) + "}\n\n" +
+		"data: [DONE]\n\n"
 }
 
 // newChatSession creates one chat session.
@@ -267,12 +357,19 @@ func (a *agentHarness) bodiesAfter(index int) []modelCall {
 	return calls[index:]
 }
 
-// fakeRigTool is a marker rig.Tool used to force registry name conflicts.
-type fakeRigTool struct{ name string }
+// fakeRigTool is a marker rig.Tool used to force registry name conflicts and to
+// count whether a tool call was actually executed (plan-mode gate probes).
+type fakeRigTool struct {
+	name  string
+	calls *counter
+}
 
 func (t fakeRigTool) Name() string           { return t.name }
 func (t fakeRigTool) Description() string    { return "audit marker tool" }
 func (t fakeRigTool) Schema() map[string]any { return map[string]any{"type": "object"} }
 func (t fakeRigTool) Invoke(_ context.Context, _ rig.ToolCall) (rig.ToolResult, error) {
-	return rig.ToolResult{}, nil
+	if t.calls != nil {
+		t.calls.inc()
+	}
+	return rig.ToolResult{Content: "audit-ok"}, nil
 }

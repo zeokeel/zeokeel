@@ -95,7 +95,7 @@
 | Tool cards | ✅ | `internal/ui/toolcards` | rig 工具卡 + todo/team_task 卡 + demo/兜底；MCP 动态工具走 session 兜底 |
 | Markdown 渲染 | ✅ | mygo ui/markdown | 消息/技能/更新 notes/artifact/plan 预览 |
 | Reasoning 展示 | 🟡 | session buildAssistantMessage | 折叠 Reasoning 文本；缺旧实时 preview/shimmer |
-| 消息级操作（复制/重试/反馈/用量） | 🟡 | session `buildRegenerateAction` + 行动区/usage footer | 「重新生成」+ **逐条复制（剪贴板+已复制 Badge）** + **usage footer（用时/tokens/cached）**；缺 feedback good/bad |
+| 消息级操作（复制/重试/反馈/用量） | ✅ | session 行动区 + usage footer + `SessionFeedbacker` | 「重新生成」+ 逐条复制 + usage footer + **feedback good/bad（settings 持久化、restart-safe、toggle 清除、已反馈徽标）** |
 | `@` mentions | ✅ | session buildMentionMenu + agent references | 工作区文件 + 会话分组（@session，排除当前/过滤/上限 8）；agent 侧展开注入 |
 | 会话搜索 | ✅ | sidebar + agent Sessions | 标题/分组过滤；pin/archive 行菜单与 show-archived 视图 |
 | 消息全文搜索 | ✅ | sidebar + sessionstore SearchMessages | LIKE/转义/片段/限制/跨会话（解码文本匹配） |

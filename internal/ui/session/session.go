@@ -102,6 +102,10 @@ type state struct {
 	// the last assistant turn.
 	regenerateErr string
 
+	// feedbackErr is the last good/bad feedback write failure shown under the
+	// assistant action row.
+	feedbackErr string
+
 	// goal is the active goal shown in the header (nil when none); goalTracker
 	// is the optional host bridge used to clear it. Both are UI-thread state.
 	goal        *contracts.Goal

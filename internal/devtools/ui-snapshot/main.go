@@ -634,6 +634,9 @@ func boot(baseURL, dataDir string) *app {
 	provide(root, contracts.KeySettings, contracts.SettingsService(&settings{values: map[string]string{
 		contracts.SettingsChatModel:   "snapshot-model",
 		contracts.SettingsChatBaseURL: baseURL,
+		// A demo MCP server whose connection fails fast, so the plugins page
+		// shows a diagnostic entry whose details can be expanded.
+		contracts.SettingMCPServers: `[{"name":"demo-mcp","url":"http://127.0.0.1:1/mcp"}]`,
 	}}))
 	provide(root, contracts.KeyLogger, contracts.Logger(logger{}))
 	loader, err := assembly.LoadWithBuildInfo(root, assembly.ProductDesktop, assembly.BuildInfo{Version: "0.1.0"})

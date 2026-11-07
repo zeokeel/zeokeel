@@ -62,6 +62,10 @@ type state struct {
 	disabledErr    string
 	status         string
 	statusErr      bool
+
+	// mcpExpanded remembers the expanded MCP server cards, keyed by server
+	// identity, so a Refresh preserves the open cards.
+	mcpExpanded map[string]bool
 }
 
 // tr returns the localized copy for the current frame's language.
@@ -90,7 +94,7 @@ func Module() *module.Descriptor[Config] {
 		}
 		config := cfg.resolved()
 		locale, _ := ctx.Get(contracts.KeyLocale)
-		moduleState := &state{ctx: ctx, locale: locale}
+		moduleState := &state{ctx: ctx, locale: locale, mcpExpanded: make(map[string]bool)}
 		return own(ctx, func() (func(), error) {
 			return runtime.RegisterScreen(contracts.ScreenSpec{
 				ID:    ScreenID,

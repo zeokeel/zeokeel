@@ -228,6 +228,7 @@ var (
 	_ contracts.SessionArchiver      = (*service)(nil)
 	_ contracts.SessionRegenerator   = (*service)(nil)
 	_ contracts.SessionModelSwitcher = (*service)(nil)
+	_ contracts.SessionFeedbacker    = (*service)(nil)
 	_ contracts.Subagents            = (*service)(nil)
 )
 
@@ -346,6 +347,14 @@ func (s *service) restore(ctx context.Context) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	for _, state := range model {
+		// Rig history carries no message ids; assign deterministic ids so the
+		// settings-backed feedback keys can be hydrated after a restart (the
+		// simple no-regenerate sequence reproduces the original msg-N ids).
+		for index := range state.messages {
+			if strings.TrimSpace(state.messages[index].ID) == "" {
+				state.messages[index].ID = s.nextMessageIDLocked()
+			}
+		}
 		s.sessions[state.id] = state
 	}
 	if len(model) > 0 {
@@ -755,7 +764,7 @@ func (s *service) Session(sessionID string) (contracts.ChatSession, bool) {
 	if !ok {
 		return contracts.ChatSession{}, false
 	}
-	return state.snapshot(s.sessionModelLocked(sessionID)), true
+	return state.snapshot(s.sessionModelLocked(sessionID), s.settings), true
 }
 
 // Sessions lists sessions, newest updated first.
@@ -1459,7 +1468,7 @@ func dataURLMIME(dataURL string) string {
 func messageTime(rig.Message) time.Time { return time.Time{} }
 
 // snapshot returns a deep copy of the session read model.
-func (state *sessionState) snapshot(model string) contracts.ChatSession {
+func (state *sessionState) snapshot(model string, settings contracts.SettingsService) contracts.ChatSession {
 	out := contracts.ChatSession{
 		ID:        state.id,
 		Title:     state.title,
@@ -1474,6 +1483,7 @@ func (state *sessionState) snapshot(model string) contracts.ChatSession {
 		copied := message
 		copied.Tools = append([]contracts.ToolCall(nil), message.Tools...)
 		copied.Attachments = cloneAttachments(message.Attachments)
+		copied.Feedback = messageFeedbackValue(settings, state.id, copied.ID)
 		out.Messages = append(out.Messages, copied)
 	}
 	return out

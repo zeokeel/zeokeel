@@ -411,20 +411,56 @@ func buildAssistantMessage(c *ui.Context, t *design.Tokens, runtime contracts.UI
 				buildToolFallback(c, t, st, call)
 			}
 		}
-		// Message action row: copy the assistant text to the native clipboard.
-		if strings.TrimSpace(message.Text) != "" {
+		// Message action row: copy the assistant text to the native clipboard
+		// and, when the backend implements SessionFeedbacker, rate the turn.
+		hasText := strings.TrimSpace(message.Text) != ""
+		chat, _ := st.ctx.Get(contracts.KeyChat)
+		feedbacker, canRate := chat.(contracts.SessionFeedbacker)
+		sessionID := ""
+		if chat != nil {
+			sessionID = chat.ActiveSession()
+		}
+		showFeedback := canRate && chat != nil && sessionID != "" && message.ID != ""
+		if hasText || showFeedback {
 			ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(design.Space2).Children(func() {
-				copyButton := ui.Button(c, st.tr("复制", "Copy")).
-					Tooltip(st.tr("复制消息", "Copy message"))
-				if copyButton.Clicked() {
-					c.WriteClipboard(message.Text)
-					st.copiedMessage = message.ID
+				if hasText {
+					copyButton := ui.Button(c, st.tr("复制", "Copy")).
+						Tooltip(st.tr("复制消息", "Copy message"))
+					if copyButton.Clicked() {
+						c.WriteClipboard(message.Text)
+						st.copiedMessage = message.ID
+					}
+					if st.copiedMessage == message.ID {
+						design.Apply(ui.Badge(c, st.tr("已复制", "Copied")), t.Badge()).
+							TextColor(t.Success)
+					}
 				}
-				if st.copiedMessage == message.ID {
-					design.Apply(ui.Badge(c, st.tr("已复制", "Copied")), t.Badge()).
-						TextColor(t.Success)
+				if showFeedback {
+					goodButton := ui.Button(c, st.tr("有帮助", "Helpful")).
+						Tooltip(st.tr("这条回复有帮助", "This answer was helpful"))
+					if message.Feedback == contracts.FeedbackGood {
+						design.Apply(goodButton, t.PrimaryButton())
+					}
+					if goodButton.Clicked() {
+						st.toggleMessageFeedback(chat, feedbacker, runtime, message, contracts.FeedbackGood)
+					}
+					badButton := ui.Button(c, st.tr("没帮助", "Not helpful")).
+						Tooltip(st.tr("这条回复没有帮助", "This answer was not helpful"))
+					if message.Feedback == contracts.FeedbackBad {
+						design.Apply(badButton, t.PrimaryButton())
+					}
+					if badButton.Clicked() {
+						st.toggleMessageFeedback(chat, feedbacker, runtime, message, contracts.FeedbackBad)
+					}
+					if message.Feedback != "" {
+						design.Apply(ui.Badge(c, st.tr("已反馈", "Rated")), t.Badge()).
+							TextColor(t.Success)
+					}
 				}
 			})
+			if st.feedbackErr != "" {
+				buildErrorLine(c, t, st.feedbackErr)
+			}
 		}
 		// Usage footer: duration and token accounting of the assistant turn.
 		if message.Usage != nil {
@@ -434,6 +470,26 @@ func buildAssistantMessage(c *ui.Context, t *design.Tokens, runtime contracts.UI
 				t.Font(design.TypeXXXS)).TextColor(t.LabelTertiary)
 		}
 	})
+}
+
+// toggleMessageFeedback writes/toggles one rating through the optional
+// SessionFeedbacker. Clicking the current value clears it.
+func (st *state) toggleMessageFeedback(chat contracts.ChatService, feedbacker contracts.SessionFeedbacker,
+	runtime contracts.UIRuntime, message contracts.ChatMessage, value string) {
+	sessionID := chat.ActiveSession()
+	if sessionID == "" {
+		return
+	}
+	next := value
+	if message.Feedback == value {
+		next = ""
+	}
+	if err := feedbacker.SetMessageFeedback(sessionID, message.ID, next); err != nil {
+		st.feedbackErr = st.tr("反馈保存失败：", "Failed to save feedback: ") + err.Error()
+	} else {
+		st.feedbackErr = ""
+	}
+	runtime.Invalidate()
 }
 
 // buildErrorLine is the brand danger row (icon + WCAG-AA danger text).
