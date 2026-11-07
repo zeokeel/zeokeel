@@ -69,6 +69,13 @@ type harness struct {
 
 func newHarness(t *testing.T, language string) *harness {
 	t.Helper()
+	return newSettingsHarness(t, language, nil)
+}
+
+// newSettingsHarness activates the toasts module with an optional settings
+// store (the ui.notifications switch is read from it on every frame).
+func newSettingsHarness(t *testing.T, language string, settings contracts.SettingsService) *harness {
+	t.Helper()
 	uiRoot := uiroot.New(uiroot.Config{AppName: "ZeoKeel", Language: language})
 	ctx := cordis.Root()
 	t.Cleanup(func() { _ = ctx.DisposeAll() })
@@ -76,6 +83,9 @@ func newHarness(t *testing.T, language string) *harness {
 	provide(t, ctx, contracts.KeyUIRuntime, uiRoot.Runtime())
 	provide(t, ctx, contracts.KeyLocale, uiRoot.Locale())
 	provide[contracts.Notifier](t, ctx, contracts.KeyNotifier, backend)
+	if settings != nil {
+		provide[contracts.SettingsService](t, ctx, contracts.KeySettings, settings)
+	}
 	if _, err := uiRoot.Runtime().RegisterScreen(contracts.ScreenSpec{
 		ID:    "home",
 		Title: "首页",
@@ -87,6 +97,40 @@ func newHarness(t *testing.T, language string) *harness {
 	h.fiber = activate(t, ctx, Module(), Config{})
 	return h
 }
+
+// toastSettings is a mutex-protected settings store for the notification switch.
+type toastSettings struct {
+	mu     sync.Mutex
+	values map[string]string
+}
+
+func newToastSettings(raw string) *toastSettings {
+	values := map[string]string{}
+	if raw != "" {
+		values[contracts.SettingNotifications] = raw
+	}
+	return &toastSettings{values: values}
+}
+
+func (s *toastSettings) Get(key, def string) string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if value, ok := s.values[key]; ok {
+		return value
+	}
+	return def
+}
+
+func (s *toastSettings) Set(key, value string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.values[key] = value
+	return nil
+}
+
+func (s *toastSettings) All() map[string]string { return nil }
+
+func (s *toastSettings) set(raw string) { _ = s.Set(contracts.SettingNotifications, raw) }
 
 func (h *harness) tester() *ui.Tester {
 	h.t.Helper()
@@ -259,4 +303,66 @@ func activate(t *testing.T, ctx cordis.Context, descriptor *module.Descriptor[Co
 		t.Fatalf("module %s state = %s (%v), want Active", descriptor.ID, state, fiber.ErrorDetail())
 	}
 	return fiber
+}
+
+// --- notifications setting --------------------------------------------------
+
+func TestToastSuppressedWhenNotificationsDisabled(t *testing.T) {
+	settings := newToastSettings("false")
+	h := newSettingsHarness(t, "zh", settings)
+	tester := h.tester()
+	h.notifier.trigger(contracts.Notification{ID: "n1", Level: contracts.NotifyInfo, Text: "不该出现"})
+	tester.Frame()
+	h.assertNoTexts(tester, "不该出现", "提示")
+}
+
+func TestToastEnabledForTruthyAndUnknownValues(t *testing.T) {
+	for _, raw := range []string{"", "true", "1", "yes", "bad-value", " TRUE "} {
+		t.Run(raw, func(t *testing.T) {
+			h := newSettingsHarness(t, "zh", newToastSettings(raw))
+			tester := h.tester()
+			h.notifier.trigger(contracts.Notification{ID: "n1", Level: contracts.NotifyInfo, Text: "显示"})
+			tester.Frame()
+			h.assertTexts(tester, "显示")
+		})
+	}
+}
+
+func TestToastHiddenForFalsyValues(t *testing.T) {
+	for _, raw := range []string{"false", "0", "no", " FALSE "} {
+		t.Run(raw, func(t *testing.T) {
+			h := newSettingsHarness(t, "zh", newToastSettings(raw))
+			tester := h.tester()
+			h.notifier.trigger(contracts.Notification{ID: "n1", Level: contracts.NotifyInfo, Text: "隐藏"})
+			tester.Frame()
+			h.assertNoTexts(tester, "隐藏")
+		})
+	}
+}
+
+func TestToastSettingChangeAppliesNextFrame(t *testing.T) {
+	settings := newToastSettings("true")
+	h := newSettingsHarness(t, "zh", settings)
+	tester := h.tester()
+	h.notifier.trigger(contracts.Notification{ID: "n1", Level: contracts.NotifyInfo, Text: "第一条"})
+	tester.Frame()
+	h.assertTexts(tester, "第一条")
+
+	settings.set("false")
+	h.notifier.trigger(contracts.Notification{ID: "n2", Level: contracts.NotifyInfo, Text: "第二条"})
+	tester.Frame()
+	h.assertNoTexts(tester, "第一条", "第二条")
+
+	settings.set("true")
+	h.notifier.trigger(contracts.Notification{ID: "n3", Level: contracts.NotifyInfo, Text: "第三条"})
+	tester.Frame()
+	h.assertTexts(tester, "第三条")
+}
+
+func TestToastWithoutSettingsShows(t *testing.T) {
+	h := newSettingsHarness(t, "zh", nil)
+	tester := h.tester()
+	h.notifier.trigger(contracts.Notification{ID: "n1", Level: contracts.NotifySuccess, Text: "无设置也显示"})
+	tester.Frame()
+	h.assertTexts(tester, "无设置也显示")
 }

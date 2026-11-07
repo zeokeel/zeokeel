@@ -690,6 +690,14 @@ func Module() *module.Descriptor[Config] {
 				},
 			},
 			{
+				ID: NotificationsPageID, Section: NotificationsPageSection, Order: NotificationsPageOrder,
+				zhTitle: "通知", enTitle: "Notifications",
+				Build: func(c *ui.Context) {
+					syncer.sync()
+					buildNotificationsPage(c, runtime, store, locale)
+				},
+			},
+			{
 				ID: LSPPageID, Section: LSPPageSection, Order: LSPPageOrder,
 				zhTitle: "LSP", enTitle: "LSP",
 				Build: func(c *ui.Context) {

@@ -95,6 +95,13 @@ type paneState struct {
 	renameDraft  string
 	renameErr    string
 
+	// Add-workspace dialog state and the last success badge.
+	addWorkspaceOpen   bool
+	addWorkspaceName   string
+	addWorkspaceDir    string
+	addWorkspaceErr    string
+	addWorkspaceStatus string
+
 	deleteOpen   bool
 	deleteTarget string
 	deleteTitle  string
@@ -210,8 +217,17 @@ func Module() *module.Descriptor[Config] {
 				buildRenameDialog(c, design.Of(c), renamer, runtime, state)
 			},
 		}
+		workspaceDialog := contracts.SlotItem{
+			Slot:  contracts.SlotOverlayDialogs,
+			ID:    "sidebar.workspace.dialog",
+			Order: 30,
+			Build: func(c *ui.Context) {
+				workspace, _ := state.ctx.Get(contracts.KeyWorkspace)
+				buildAddWorkspaceDialog(c, design.Of(c), workspace, runtime, state)
+			},
+		}
 
-		for _, item := range []contracts.SlotItem{primary, navSlot, footer, renameDialog} {
+		for _, item := range []contracts.SlotItem{primary, navSlot, footer, renameDialog, workspaceDialog} {
 			if err := own(ctx, func() (func(), error) { return runtime.RegisterSlotItem(item) }); err != nil {
 				return err
 			}
@@ -321,7 +337,7 @@ func buildSessionList(c *ui.Context, t *design.Tokens, chat contracts.ChatServic
 				}
 			}
 			if hasWorkspace {
-				buildWorkspaceSectionHeader(c, t, workspace, state)
+				buildWorkspaceSectionHeader(c, t, workspace, runtime, state)
 			} else {
 				design.Apply(ui.Text(c, title), t.SectionLabel())
 			}
@@ -479,12 +495,33 @@ func buildSidebarError(c *ui.Context, t *design.Tokens, text string) {
 const ungroupedWorkspaceKey = "\x00ungrouped"
 
 // buildWorkspaceSectionHeader is the section label above the workspace tree:
-// the localized "Workspace" plus a badge with the current workspace's name.
-func buildWorkspaceSectionHeader(c *ui.Context, t *design.Tokens, workspace contracts.WorkspaceService, state *paneState) {
+// the localized "Workspace", the current-workspace badge and the native
+// "Add workspace" action.
+func buildWorkspaceSectionHeader(c *ui.Context, t *design.Tokens, workspace contracts.WorkspaceService,
+	runtime contracts.UIRuntime, state *paneState) {
+	th := t.Theme()
 	ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(design.Space2).Children(func() {
 		design.Apply(ui.Text(c, state.T("工作区", "Workspace")), t.SectionLabel())
 		if current, ok, err := workspace.Current(context.Background()); err == nil && ok {
 			design.Apply(ui.Badge(c, firstNonEmpty(current.Name, current.Root)), t.Badge())
+		}
+		if state.addWorkspaceStatus != "" {
+			design.Apply(ui.Badge(c, state.addWorkspaceStatus), t.Badge()).TextColor(t.Success)
+		}
+		ui.Spacer(c).Grow(1)
+		add := ui.ButtonBase(c).Height(th.Space(7)).PaddingX(design.Space1).Gap(design.Space1).
+			Radius(design.RadiusSM).Label(state.T("添加工作区", "Add workspace")).
+			Tooltip(state.T("打开文件夹并添加为工作区", "Open a folder and add it as a workspace"))
+		if add.Hovered() {
+			add = add.Background(t.BgHover)
+		}
+		add.Children(func() {
+			ui.Icon(c, icons.Plus()).Size(design.Space3, design.Space3).TextColor(t.LabelSecondary)
+			design.Apply(ui.Text(c, state.T("添加工作区", "Add workspace")), t.Font(design.TypeXXXS)).
+				TextColor(t.LabelSecondary)
+		})
+		if add.Clicked() {
+			openAddWorkspaceDialog(state, runtime)
 		}
 	})
 }

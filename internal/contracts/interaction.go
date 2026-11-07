@@ -96,6 +96,8 @@ const (
 	// SettingCloseToTray keeps the app alive in the system tray instead of
 	// quitting when the window is closed (desktop only; default false).
 	SettingCloseToTray = "ui.closeToTray"
+	// SettingNotifications toggles the desktop toast overlay (default true).
+	SettingNotifications = "ui.notifications"
 	// SettingGlobalHotkey is a system-wide accelerator (e.g.
 	// "CmdOrCtrl+Shift+Space") that shows and focuses the window; empty disables
 	// it (desktop only).

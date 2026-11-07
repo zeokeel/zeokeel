@@ -21,6 +21,11 @@
 - 右侧栏「文件」Tab：打开文件夹（mygo 原生 Directory picker）、目录进入/面包屑、文本/Markdown/图片预览、
   刷新与错误状态；E2E 覆盖工作区创建 + 列表 + 预览帧
 
+**TDD-sidebar-workspace/notifications（2026-11-08）**
+- 侧栏「添加工作区」：目录选择 seam、名称留空回退 basename、Create/Open、错误保留模态、Badge；sidebar 56 测试
+- 通知设置：`ui.notifications` 归一（仅 false/0/no 关闭）；toasts 投递前+每帧检查（关闭清栈、热切换）；设置「通知」页 Toggle；settings 123 /
+  toasts 11 测试
+
 **TDD-home-composer/commands/data-privacy（2026-11-08）**
 - Home 真实 composer：多行输入（Enter 发送/Shift+Enter 换行）、附件选择/chips/移除、工作区/模型/模式只读 chip、发送建会话→Send→进入会话、
   失败提示、i18n；home 12 测试

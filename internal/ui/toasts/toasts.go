@@ -53,6 +53,9 @@ type state struct {
 	nextID   atomic.Uint64
 	locale   contracts.LocaleService
 	notifier contracts.Notifier
+	// settings is the optional host settings store; ui.notifications is read
+	// on every delivery/frame so the switch applies without a restart.
+	settings contracts.SettingsService
 }
 
 // Module registers the toast overlay contribution.
@@ -70,7 +73,8 @@ func Module() *module.Descriptor[Config] {
 			return nil
 		}
 		locale, _ := ctx.Get(contracts.KeyLocale)
-		st := &state{locale: locale, notifier: notifier}
+		settings, _ := ctx.Get(contracts.KeySettings)
+		st := &state{locale: locale, notifier: notifier, settings: settings}
 
 		notifier.SetHandler(func(notification contracts.Notification) {
 			runtime.Post(func() {
@@ -104,10 +108,28 @@ func Module() *module.Descriptor[Config] {
 		WithName("ZeoKeel toast notifications")
 }
 
+// notificationsEnabled reports whether the desktop toast overlay may show
+// notifications. The ui.notifications row is normalized: "false", "0" and "no"
+// (case-insensitive, trimmed) disable it; anything else — including an empty,
+// malformed or missing value and no settings store at all — keeps it enabled.
+func notificationsEnabled(st *state) bool {
+	if st.settings == nil {
+		return true
+	}
+	switch strings.ToLower(strings.TrimSpace(st.settings.Get(contracts.SettingNotifications, ""))) {
+	case "false", "0", "no":
+		return false
+	default:
+		return true
+	}
+}
+
 // enqueue adds one toast to the stack, keeping at most maxToasts (the oldest is
-// replaced), and schedules its automatic expiry.
+// replaced), and schedules its automatic expiry. The handler stays installed
+// while notifications are disabled but drops deliveries here (a later frame
+// re-reads the setting, so the switch is hot).
 func enqueue(st *state, runtime contracts.UIRuntime, notification contracts.Notification) {
-	if strings.TrimSpace(notification.Text) == "" {
+	if strings.TrimSpace(notification.Text) == "" || !notificationsEnabled(st) {
 		return
 	}
 	key := st.nextID.Add(1)
@@ -142,6 +164,12 @@ func removeToast(st *state, key uint64) {
 
 // buildOverlay renders the toast stack in the bottom-right corner.
 func buildOverlay(c *ui.Context, t *design.Tokens, runtime contracts.UIRuntime, st *state) {
+	// Hot switch: disabling notifications also drops toasts already on screen
+	// instead of leaving them until the next event.
+	if !notificationsEnabled(st) {
+		st.toasts = nil
+		return
+	}
 	if len(st.toasts) == 0 {
 		return
 	}
