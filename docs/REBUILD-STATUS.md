@@ -21,6 +21,14 @@
 - 右侧栏「文件」Tab：打开文件夹（mygo 原生 Directory picker）、目录进入/面包屑、文本/Markdown/图片预览、
   刷新与错误状态；E2E 覆盖工作区创建 + 列表 + 预览帧
 
+**TDD-home-composer/commands/data-privacy（2026-11-08）**
+- Home 真实 composer：多行输入（Enter 发送/Shift+Enter 换行）、附件选择/chips/移除、工作区/模型/模式只读 chip、发送建会话→Send→进入会话、
+  失败提示、i18n；home 12 测试
+- 命令补全：/停止（Cancel）、/附加文件（picker seam）、/帮助（命令+快捷键模态），命令 9→12；session 132 测试
+- 设置「数据与隐私」：数据目录展示/复制/打开（seam）、导出全部会话 Markdown（Sessions/Session 遍历）、清除全部会话（确认+DeleteSession）、
+  诊断报告（app info/dataDir/会话数/设置掩码）；settings 120 测试
+- 覆盖审计 docs/old-gap-final.md 记录剩余差异；snapshot p2-home/p2-data-privacy 刷新
+
 **TDD-hotkey/lsp（2026-11-08）**
 - 全局热键：host normalizeHotkey（修饰符+单键、固定顺序、别名）+ setupGlobalHotkey（注册后 Show/Restore/Focus、失败仅警告、shutdown 注销）；
   外观页输入+校验+重启提示；host 63 / settings 108 测试；xvfb 冒烟含预置热键 exit 124 无 panic

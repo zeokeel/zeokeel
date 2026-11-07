@@ -157,6 +157,12 @@ type state struct {
 	// 「已复制」badge stays until another message is copied).
 	copiedMessage string
 
+	// Composer command feedback: the /stop notice (success badge or danger
+	// line) and the /help modal switch.
+	commandNotice string
+	commandErr    string
+	helpOpen      bool
+
 	// Memory management state: the tidy/clear notice and the clear-all
 	// confirmation dialog.
 	memoryNotice    string
@@ -369,7 +375,7 @@ func sessionCommands(runtime contracts.UIRuntime, navigator contracts.Navigator,
 		}
 		return chat.Session(id)
 	}
-	return []contracts.CommandSpec{
+	commands := []contracts.CommandSpec{
 		{
 			ID:    "zeokeel.session.new",
 			Title: "新会话",
@@ -500,7 +506,67 @@ func sessionCommands(runtime contracts.UIRuntime, navigator contracts.Navigator,
 				return nil
 			},
 		},
+		{
+			ID:    "zeokeel.session.stop",
+			Title: "停止",
+			Hint:  "停止当前生成的回复",
+			Order: 44,
+			Enabled: func() bool {
+				session, ok := activeSession()
+				return ok && session.Running
+			},
+			Run: func() error {
+				session, ok := activeSession()
+				if !ok {
+					return nil
+				}
+				if err := chat.Cancel(session.ID); err != nil {
+					st.commandErr = st.tr("停止失败：", "Stop failed: ") + err.Error()
+					st.commandNotice = ""
+				} else {
+					st.commandErr = ""
+					st.commandNotice = st.tr("已停止", "Stopped")
+				}
+				runtime.Invalidate()
+				return nil
+			},
+		},
+		{
+			ID:    "zeokeel.session.attach",
+			Title: "附加文件",
+			Hint:  "添加文件或图片到输入框",
+			Order: 46,
+			Run: func() error {
+				if _, ok := chat.(contracts.AttachmentSender); !ok {
+					st.attachErr = st.tr("当前后端不支持附件", "This backend does not support attachments")
+					runtime.Invalidate()
+					return nil
+				}
+				AttachmentDialogTitle = st.tr("选择附件", "Choose attachments")
+				AttachmentFilterName = st.tr("文件与图片", "Files and images")
+				paths, err := AttachmentPicker()
+				if err != nil {
+					st.attachErr = st.tr("无法打开文件选择器：", "Could not open the file picker: ") + err.Error()
+				} else {
+					stageAttachmentFiles(st, paths)
+				}
+				runtime.Invalidate()
+				return nil
+			},
+		},
+		{
+			ID:    "zeokeel.session.help",
+			Title: "帮助",
+			Hint:  "查看可用命令与快捷键",
+			Order: 55,
+			Run: func() error {
+				st.helpOpen = true
+				runtime.Invalidate()
+				return nil
+			},
+		},
 	}
+	return commands
 }
 
 // own registers one contribution and ties its unregistration to ctx's effect

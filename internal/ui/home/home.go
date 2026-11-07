@@ -67,6 +67,7 @@ func Module() *module.Descriptor[Config] {
 		tr := func(zh, en string) string { return uikit.T(locale, zh, en) }
 		greeting := cfg.Greeting
 		composerPlaceholder := cfg.ComposerPlaceholder
+		composerState := &homeComposerState{}
 
 		screen := contracts.ScreenSpec{
 			ID:    "home",
@@ -80,7 +81,7 @@ func Module() *module.Descriptor[Config] {
 				}
 				placeholderText := composerPlaceholder
 				if strings.TrimSpace(placeholderText) == "" {
-					placeholderText = tr("向 ZeoKeel 提问…", "Ask ZeoKeel…")
+					placeholderText = tr("问点什么…", "Ask anything…")
 				}
 				tokens := design.Of(c)
 				ui.Column(c).FillWidth().Grow(1).Gap(design.Space6).Children(func() {
@@ -95,7 +96,7 @@ func Module() *module.Descriptor[Config] {
 									})
 									buildSetupCard(c, tokens, chat, nav, tr)
 									region(c, runtime, contracts.SlotHomeComposer, func(c *ui.Context) {
-										buildComposer(c, tokens, chat, nav, runtime, placeholderText, tr)
+										buildHomeComposer(c, tokens, runtime, nav, chat, ctx, composerState, placeholderText, tr)
 									})
 								})
 						})
@@ -174,38 +175,6 @@ func buildHero(c *ui.Context, t *design.Tokens, greeting string, info contracts.
 		if showFallbackHint {
 			design.Apply(ui.Text(c, tr("这是 home 的默认 Hero 空态。",
 				"This is Home's default hero empty state.")), t.TextMuted(design.TypeXS))
-		}
-	})
-}
-
-// buildComposer is the default composer entry: a raised brand panel with the
-// placeholder and the primary "start a new conversation" action.
-func buildComposer(c *ui.Context, t *design.Tokens, chat contracts.ChatService,
-	nav contracts.Navigator, runtime contracts.UIRuntime, placeholder string,
-	tr func(zh, en string) string) {
-	panel := ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(design.Space3).
-		Padding(design.Space4)
-	design.Apply(panel, t.Panel())
-	panel.Children(func() {
-		design.Apply(ui.Text(c, placeholder), t.TextMuted(design.TypeS)).Grow(1).MaxLines(1).Ellipsis("…")
-		start := ui.ButtonBase(c).Height(38).PaddingX(design.Space4).Radius(design.RadiusMD)
-		design.Apply(start, t.PrimaryButton())
-		if start.Pressed() || start.Hovered() {
-			start = start.Background(t.BgHover)
-		}
-		startLabel := tr("开始新对话", "Start a new conversation")
-		start.Label(startLabel)
-		start.Children(func() {
-			ui.Row(c).AlignItems(ui.Center).Gap(design.Space2).Children(func() {
-				ui.Icon(c, icons.NewChat()).Size(16, 16).TextColor(t.LabelPrimary)
-				design.Apply(ui.Text(c, startLabel), t.Text(design.TypeS)).FontWeight(500)
-			})
-		})
-		if start.Clicked() && chat != nil {
-			if _, err := chat.NewSession(""); err == nil {
-				_ = nav.Push("session")
-				runtime.Invalidate()
-			}
 		}
 	})
 }

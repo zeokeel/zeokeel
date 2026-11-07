@@ -77,19 +77,42 @@ func (s *fakeSettings) setKeys() []string {
 	return append([]string(nil), s.sets...)
 }
 
-// fakeChat is a minimal contracts.ChatService: the settings page only needs its
-// effective config and active session.
+// fakeChat is a minimal contracts.ChatService: the settings pages need its
+// effective config, active session and (for the data page) a scriptable session
+// list.
 type fakeChat struct {
-	mu     sync.Mutex
-	config contracts.ChatConfig
-	active string
+	mu        sync.Mutex
+	config    contracts.ChatConfig
+	active    string
+	sessions  []contracts.ChatSession
+	deleteErr error
+	deleted   []string
 }
 
 func (f *fakeChat) Config() contracts.ChatConfig { f.mu.Lock(); defer f.mu.Unlock(); return f.config }
 
-func (f *fakeChat) Sessions() []contracts.ChatSessionInfo { return nil }
+func (f *fakeChat) Sessions() []contracts.ChatSessionInfo {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	infos := make([]contracts.ChatSessionInfo, 0, len(f.sessions))
+	for _, session := range f.sessions {
+		infos = append(infos, contracts.ChatSessionInfo{
+			ID: session.ID, Title: session.Title, MessageCount: len(session.Messages),
+			UpdatedAt: session.UpdatedAt,
+		})
+	}
+	return infos
+}
 
-func (f *fakeChat) Session(string) (contracts.ChatSession, bool) {
+func (f *fakeChat) Session(sessionID string) (contracts.ChatSession, bool) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	for _, session := range f.sessions {
+		if session.ID == sessionID {
+			session.Messages = append([]contracts.ChatMessage(nil), session.Messages...)
+			return session, true
+		}
+	}
 	return contracts.ChatSession{}, false
 }
 
@@ -99,7 +122,39 @@ func (f *fakeChat) SetActiveSession(string) error { return nil }
 
 func (f *fakeChat) NewSession(string) (string, error) { return "new-1", nil }
 
-func (f *fakeChat) DeleteSession(string) error { return nil }
+func (f *fakeChat) DeleteSession(sessionID string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.deleted = append(f.deleted, sessionID)
+	if f.deleteErr != nil {
+		return f.deleteErr
+	}
+	remaining := f.sessions[:0]
+	for _, session := range f.sessions {
+		if session.ID != sessionID {
+			remaining = append(remaining, session)
+		}
+	}
+	f.sessions = remaining
+	if f.active == sessionID {
+		f.active = ""
+	}
+	return nil
+}
+
+// addSession appends one scripted session for the data-page tests.
+func (f *fakeChat) addSession(session contracts.ChatSession) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.sessions = append(f.sessions, session)
+}
+
+// deletions returns the DeleteSession calls recorded so far.
+func (f *fakeChat) deletions() []string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]string(nil), f.deleted...)
+}
 
 func (f *fakeChat) Send(string, string) error { return nil }
 

@@ -39,6 +39,7 @@ type fakeChat struct {
 	subs      []func(string)
 	sendCalls []sendCall
 	cancelIDs []string
+	cancelErr error
 	newCalls  []string
 	nextID    int
 }
@@ -164,6 +165,11 @@ func (f *fakeChat) Send(sessionID, prompt string) error {
 
 func (f *fakeChat) Cancel(sessionID string) error {
 	f.mu.Lock()
+	if f.cancelErr != nil {
+		err := f.cancelErr
+		f.mu.Unlock()
+		return err
+	}
 	session, ok := f.sessions[sessionID]
 	if !ok {
 		f.mu.Unlock()
@@ -218,6 +224,13 @@ func (f *fakeChat) updateSession(session contracts.ChatSession) {
 }
 
 // emit calls every subscriber synchronously, like the agent backend does.
+// setCancelError scripts the next Cancel failure.
+func (f *fakeChat) setCancelError(err error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.cancelErr = err
+}
+
 func (f *fakeChat) emit(sessionID string) {
 	f.mu.Lock()
 	subs := append([]func(string){}, f.subs...)

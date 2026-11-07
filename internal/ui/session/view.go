@@ -68,6 +68,7 @@ func buildScreen(
 		buildPlanDialog(c, t, runtime, st)
 		buildMemoryDialog(c, t, runtime, st)
 		buildFeedbackDialog(c, t, runtime, st)
+		buildHelpDialog(c, t, runtime, st)
 	})
 }
 

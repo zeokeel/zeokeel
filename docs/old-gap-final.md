@@ -1,3 +1,5 @@
+> 追加（Round 57）：已补 Home 真实 composer、/stop /file /help 命令（会话命令 9→12）、设置「数据与隐私」页（打开数据目录/导出全部会话/清除全部会话/诊断报告）。以下清单为核对时快照，未再逐行重写。
+
 # old/ → 当前实现最终缺口核对（只读审计）
 
 审计时间：2026-11-08。范围：`old/internal/shell`、`old/internal/app`、`old/internal/*` 的用户可见面，对照当前

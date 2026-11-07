@@ -344,10 +344,18 @@ func main() {
 
 	// Notification toast overlay.
 	if notifier, notifierErr := a.root.Require(contracts.KeyNotifier); notifierErr == nil {
-		notifier.Notify(contracts.NotifySuccess, "对话已导出")
-		notifier.Notify(contracts.NotifyInfo, "更新已下载到暂存目录")
+		first := notifier.Notify(contracts.NotifySuccess, "对话已导出")
+		second := notifier.Notify(contracts.NotifyInfo, "更新已下载到暂存目录")
 		a.tester.Frame()
 		a.render(outDir + "/p2-toast.png")
+		// Clear the toast stack so later screenshots are not covered by it.
+		notifier.Dismiss(first.ID)
+		notifier.Dismiss(second.ID)
+		a.tester.Frame()
+		// Earlier export/update flows also raised toasts; let the TTL clear the
+		// whole stack so later screenshots are not covered.
+		time.Sleep(4300 * time.Millisecond)
+		a.tester.Frame()
 	}
 
 	// Composer prompt presets menu (inserts prompt/persona templates).
@@ -583,6 +591,10 @@ func main() {
 		fmt.Println("click LSP settings:", err)
 	}
 	a.render(outDir + "/p2-lsp-settings.png")
+	if err := a.tester.Click("数据与隐私"); err != nil {
+		fmt.Println("click data settings:", err)
+	}
+	a.render(outDir + "/p2-data-privacy.png")
 	a.ui.Navigator().CloseSettings()
 	// Automation with a finished run so the history expansion is visible.
 	if automation, err := a.root.Require(contracts.KeyAutomation); err == nil {

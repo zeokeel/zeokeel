@@ -142,7 +142,8 @@ func formatAttachmentSize(size int) string {
 // buildPendingAttachments renders the staged chips (and the staging error) at
 // the top of the composer card.
 func buildPendingAttachments(c *ui.Context, t *design.Tokens, runtime contracts.UIRuntime, st *state) {
-	if len(st.pendingAttachments) == 0 && st.attachErr == "" {
+	if len(st.pendingAttachments) == 0 && st.attachErr == "" &&
+		st.commandNotice == "" && st.commandErr == "" {
 		return
 	}
 	ui.Column(c).FillWidth().Gap(design.Space1).Children(func() {
@@ -159,6 +160,11 @@ func buildPendingAttachments(c *ui.Context, t *design.Tokens, runtime contracts.
 		}
 		if st.attachErr != "" {
 			buildErrorLine(c, t, st.attachErr)
+		}
+		if st.commandErr != "" {
+			buildErrorLine(c, t, st.commandErr)
+		} else if st.commandNotice != "" {
+			design.Apply(ui.Badge(c, st.commandNotice), t.Badge()).TextColor(t.Success)
 		}
 	})
 }

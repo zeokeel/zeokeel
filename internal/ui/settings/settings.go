@@ -579,6 +579,7 @@ func Module() *module.Descriptor[Config] {
 		catalog := &catalogState{}
 		lsp := &lspState{}
 		network := newNetworkState()
+		dataPrivacy := newDataPrivacyState()
 		diagnostics := &diagnosticsState{}
 
 		// Optional host services for the read-only diagnostics page.
@@ -718,6 +719,14 @@ func Module() *module.Descriptor[Config] {
 				Build: func(c *ui.Context) {
 					syncer.sync()
 					buildNetworkPage(c, store, network, locale)
+				},
+			},
+			{
+				ID: DataPrivacyPageID, Section: DataPrivacyPageSection, Order: DataPrivacyPageOrder,
+				zhTitle: "数据与隐私", enTitle: "Data & privacy",
+				Build: func(c *ui.Context) {
+					syncer.sync()
+					buildDataPrivacyPage(c, design.Of(c), ctx, chat, store, dataPrivacy, locale)
 				},
 			},
 		}
