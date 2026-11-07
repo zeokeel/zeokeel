@@ -143,6 +143,12 @@ go test ./...
   `UIRuntime.Commands()`、点击执行并关闭、Esc 关闭；截图 `p2-palette.png`
 - ✅ P4 诊断页：版本/Commit/构建时间/Go/平台/数据目录/会话数据库路径/工具数/会话数/设置键（API key
   打码）+「复制诊断信息」；快捷键页补 Cmd/Ctrl+K；截图 `p2-diagnostics.png`
+- ✅ P4 可配置全局快捷键：设置「快捷键」页两项 chrome 快捷键（Cmd/Ctrl+B、Cmd/Ctrl+K）用 native Select
+  持久化到 `ui.shortcut.*`，宿主每帧解析并注册 OnShortcut（改动下一帧生效、恢复默认）；解析器支持
+  cmd/ctrl/alt/shift 组合；E2E 覆盖改键 Alt+B 生效与恢复默认
+- ✅ 设计复核（design-guide）：会话头部三枚等权按钮收敛为⿾更多⿿原生溢出菜单；右侧栏去掉重复「模型」
+  tab（6 tabs），模型配置并入概览同一面板（分隔线+紧凑行）；插件页 48 工具由「每工具卡片」改为紧凑行
+  （分隔线分组），降低视觉噪音；快捷键页可编辑项保持一行一个控件
 - ⬜ 后续阶段见 [docs/PRODUCT-REBUILD-PLAN.md](docs/PRODUCT-REBUILD-PLAN.md)：
   P2 剩余（composer 附件/图片/@ 提及、右侧栏 Files/Terminal/Log 页、会话操作上下文菜单）→
   P3 memory/skills/automation/插件/workspace diff/搜索/fork/export → P4 ACP/热键/导入/更新/诊断

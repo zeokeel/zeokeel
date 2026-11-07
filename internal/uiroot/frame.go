@@ -30,14 +30,7 @@ func (r *Root) view(c *ui.Context) {
 
 	// The old shell's chrome shortcut: Cmd/Ctrl+B collapses or expands the
 	// left sidebar (the 64 DIP icon rail).
-	c.OnShortcut(ui.Cmd, ui.KeyB, r.ToggleSidebarCollapsed)
-	// The command palette (the old shell's Cmd/Ctrl+K) lists the registered
-	// command surface and runs the chosen command.
-	c.OnShortcut(ui.Cmd, ui.KeyK, func() {
-		r.paletteOpen = !r.paletteOpen
-		r.paletteQuery = ""
-		r.requestFrame()
-	})
+	r.bindChromeShortcuts(c)
 
 	// Host applies the brand theme once; modules build with the frame theme.
 	c.SetTheme(r.theme.currentTheme())

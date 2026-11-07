@@ -52,8 +52,9 @@ func TestExportWritesMarkdown(t *testing.T) {
 	})
 	h := newHarness(t, chat)
 	tester := h.tester()
-	h.assertTexts(tester, "导出")
-	h.click(tester, "导出")
+	h.assertTexts(tester, "更多")
+	h.click(tester, "更多")
+	h.click(tester, "导出 Markdown")
 
 	if gotName != "项目讨论.md" {
 		t.Fatalf("default name = %q, want 项目讨论.md", gotName)
@@ -85,7 +86,8 @@ func TestExportSanitizesDefaultName(t *testing.T) {
 	})
 	h := newHarness(t, chat)
 	tester := h.tester()
-	h.click(tester, "导出")
+	h.click(tester, "更多")
+	h.click(tester, "导出 Markdown")
 
 	if !strings.HasSuffix(gotName, ".md") {
 		t.Fatalf("default name %q has no .md suffix", gotName)
@@ -104,7 +106,8 @@ func TestExportCancelAndError(t *testing.T) {
 		setExportSaver(t, func(string, string) (string, error) { return "", nil })
 		h := newHarness(t, chat)
 		tester := h.tester()
-		h.click(tester, "导出")
+		h.click(tester, "更多")
+		h.click(tester, "导出 Markdown")
 		h.assertNoTexts(tester, "已导出", "导出失败")
 	})
 
@@ -115,7 +118,8 @@ func TestExportCancelAndError(t *testing.T) {
 		})
 		h := newHarness(t, chat)
 		tester := h.tester()
-		h.click(tester, "导出")
+		h.click(tester, "更多")
+		h.click(tester, "导出 Markdown")
 		h.assertTexts(tester, "导出失败：disk full")
 		h.assertNoTexts(tester, "已导出")
 	})
@@ -126,5 +130,5 @@ func TestExportHiddenWithoutActiveSession(t *testing.T) {
 	h := newHarness(t, chat)
 	tester := h.tester()
 	h.assertTexts(tester, "开始新对话")
-	h.assertNoTexts(tester, "导出")
+	h.assertNoTexts(tester, "更多")
 }

@@ -311,6 +311,7 @@ func runDesktop(opts Options) error {
 		AppName:  appName,
 		Dark:     settings.Get(settingDark, "false") == "true",
 		Language: settings.Get(settingLanguage, "zh"),
+		Settings: settings,
 	})
 	root := cordis.Root()
 	if err := provideServices(root, opts.DataDir, settings, logger, uiRoot); err != nil {

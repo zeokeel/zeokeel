@@ -327,15 +327,16 @@ func TestOverviewRendersSession(t *testing.T) {
 	h := newHarness(t, chat, rightpanel.Config{})
 	tester := h.tester()
 
-	h.assertTexts(tester, "检查", "概览", "工具", "模型",
+	h.assertTexts(tester, "检查", "概览", "工具",
 		"项目讨论", "运行中", "错误", "上一次运行失败：超时",
-		"消息", "3", "更新时间", "会话 ID", "s1")
+		"消息", "3", "更新时间", "会话 ID", "s1",
+		"模型配置")
 }
 
 func TestOverviewEmptyState(t *testing.T) {
 	h := newHarness(t, newFakeChat(), rightpanel.Config{})
 	tester := h.tester()
-	h.assertTexts(tester, "检查", "概览", "工具", "模型", "还没有活动会话")
+	h.assertTexts(tester, "检查", "概览", "工具", "还没有活动会话")
 }
 
 func TestToolsPaneAggregatesAndFolds(t *testing.T) {
@@ -395,12 +396,9 @@ func TestModelPaneHidesAPIKey(t *testing.T) {
 	h := newHarness(t, chat, rightpanel.Config{})
 	tester := h.tester()
 	h.assertNoTexts(tester, secret)
-	h.click(tester, "模型")
-
 	h.assertTexts(tester, "模型配置", "deepseek-chat",
 		"https://api.example.com/v1", "API Key", "已设置（已隐藏）",
-		"上下文预算", "默认", "最大迭代", "5",
-		"API key 已打码，不会显示明文。")
+		"上下文预算", "默认", "最大迭代", "5")
 	h.assertNoTexts(tester, secret)
 
 	// The key must not leak from any pane.
@@ -451,11 +449,8 @@ func TestCustomConfigLabels(t *testing.T) {
 		Title:       "Inspector",
 		OverviewTab: "Overview",
 		ToolsTab:    "Tools",
-		ModelTab:    "Model",
 		EmptyText:   "No active session",
 	})
 	tester := h.tester()
-	h.assertTexts(tester, "Inspector", "Overview", "Tools", "Model", "No active session")
-	h.click(tester, "Model")
-	h.assertTexts(tester, "模型配置", "m")
+	h.assertTexts(tester, "Inspector", "Overview", "Tools", "No active session")
 }

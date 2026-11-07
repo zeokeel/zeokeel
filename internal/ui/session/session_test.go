@@ -929,10 +929,12 @@ func TestHeaderCopyActions(t *testing.T) {
 	h := newHarness(t, chat)
 	tester := h.tester()
 
-	h.click(tester, "复制 ID")
+	h.click(tester, "更多")
+	h.click(tester, "复制会话 ID")
 	if got := tester.Clipboard(); got != "sess-1" {
 		t.Fatalf("clipboard = %q, want sess-1", got)
 	}
+	h.click(tester, "更多")
 	h.click(tester, "复制对话")
 	got := tester.Clipboard()
 	if !strings.Contains(got, "用户: 你好") || !strings.Contains(got, "助手: 你好呀") {

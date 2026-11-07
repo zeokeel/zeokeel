@@ -21,6 +21,12 @@
 - 右侧栏「文件」Tab：打开文件夹（mygo 原生 Directory picker）、目录进入/面包屑、文本/Markdown/图片预览、
   刷新与错误状态；E2E 覆盖工作区创建 + 列表 + 预览帧
 
+**P4 可配置快捷键 + 设计复核（2026-11-08）**
+- `ui.shortcut.toggleSidebar` / `ui.shortcut.commandPalette`：设置页 native Select 持久化，宿主每帧解析
+  chord（cmd/ctrl/alt/shift）并注册 OnShortcut，改动即时生效；E2E 验证 Alt+B 覆盖与恢复默认
+- design-guide 复核修正：会话头部复制/导出收敛为「更多」溢出菜单；移除右侧栏重复模型 tab 并合并进概览
+  单面板；插件工具目录由卡片墙改为紧凑分隔行；遵循「不重复造控件、复用 design tokens/icons」
+
 **P4 诊断页（2026-11-08）**
 - 设置「诊断」页（高级 section）：AppInfo（版本/commit/构建时间/Go）、平台、数据目录、zeokeel.db 路径、
   工具数（KeyToolkit）、会话数（ChatService）、设置键（API key 打码）；「复制诊断信息」写剪贴板；

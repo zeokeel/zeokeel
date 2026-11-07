@@ -93,13 +93,89 @@ var shortcutRows = []shortcutRow{
 	{"关闭弹窗 / 菜单", "Esc"},
 }
 
-// buildShortcutsPage renders the shortcut reference with native rows.
-func buildShortcutsPage(c *ui.Context, t *design.Tokens, title string) {
+// shortcutChoices maps the editable chrome shortcuts to their native Select
+// options: display label -> canonical chord.
+type shortcutChoice struct{ Label, Chord string }
+
+var toggleSidebarChoices = []shortcutChoice{
+	{"Cmd/Ctrl + B", "cmd+b"},
+	{"Ctrl + B", "ctrl+b"},
+	{"Alt + B", "alt+b"},
+	{"Cmd/Ctrl + Shift + B", "cmd+shift+b"},
+}
+
+var commandPaletteChoices = []shortcutChoice{
+	{"Cmd/Ctrl + K", "cmd+k"},
+	{"Ctrl + K", "ctrl+k"},
+	{"Alt + K", "alt+k"},
+	{"Cmd/Ctrl + Shift + K", "cmd+shift+k"},
+}
+
+// shortcutDisplay returns the display label of a stored chord (falling back to
+// the first choice when the value is not one of the options).
+func shortcutDisplay(choices []shortcutChoice, chord string) string {
+	for _, choice := range choices {
+		if choice.Chord == chord {
+			return choice.Label
+		}
+	}
+	return choices[0].Label
+}
+
+// shortcutChord returns the canonical chord of a display label.
+func shortcutChord(choices []shortcutChoice, label string) string {
+	for _, choice := range choices {
+		if choice.Label == label {
+			return choice.Chord
+		}
+	}
+	return choices[0].Chord
+}
+
+// buildShortcutsPage renders the shortcut reference with native rows and the
+// two editable chrome shortcuts (persisted through the host settings).
+func buildShortcutsPage(c *ui.Context, t *design.Tokens, title string, store contracts.SettingsService) {
 	ui.Column(c).FillWidth().Gap(design.Space4).Children(func() {
 		design.Apply(ui.Text(c, title), t.Font(design.TypeL)).FontWeight(600).
 			TextColor(t.LabelPrimary)
-		design.Apply(ui.Text(c, "键盘快捷键参考（与老版本 shell 的快捷键页一致）。"),
+		design.Apply(ui.Text(c, "键盘快捷键参考；下面两项 chrome 快捷键可修改并立即生效。"),
 			t.TextMuted(design.TypeXS))
+		configurable := ui.Column(c).FillWidth().Gap(0).Padding(design.Space3)
+		design.Apply(configurable, t.Panel())
+		configurable.Children(func() {
+			toggleDisplay := shortcutDisplay(toggleSidebarChoices,
+				store.Get(contracts.SettingsUIShortcutToggleSidebar, contracts.DefaultShortcutToggleSidebar))
+			ui.Row(c).FillWidth().Padding(design.Space2, 0, design.Space2, 0).
+				AlignItems(ui.Center).Gap(design.Space3).Children(func() {
+				design.Apply(ui.Text(c, "折叠 / 展开侧边栏"), t.Text(design.TypeS)).Grow(1)
+				choice := toggleDisplay
+				selectControl := ui.Select(c, &choice, shortcutChoiceLabels(toggleSidebarChoices)).
+					Label("侧边栏快捷键")
+				if selectControl.Changed() {
+					_ = store.Set(contracts.SettingsUIShortcutToggleSidebar, shortcutChord(toggleSidebarChoices, choice))
+				}
+			})
+			ui.Divider(c)
+			paletteDisplay := shortcutDisplay(commandPaletteChoices,
+				store.Get(contracts.SettingsUIShortcutCommandPalette, contracts.DefaultShortcutCommandPalette))
+			ui.Row(c).FillWidth().Padding(design.Space2, 0, design.Space2, 0).
+				AlignItems(ui.Center).Gap(design.Space3).Children(func() {
+				design.Apply(ui.Text(c, "打开命令面板"), t.Text(design.TypeS)).Grow(1)
+				choice := paletteDisplay
+				selectControl := ui.Select(c, &choice, shortcutChoiceLabels(commandPaletteChoices)).
+					Label("命令面板快捷键")
+				if selectControl.Changed() {
+					_ = store.Set(contracts.SettingsUIShortcutCommandPalette, shortcutChord(commandPaletteChoices, choice))
+				}
+			})
+			ui.Divider(c)
+			ui.Row(c).FillWidth().Justify(ui.End).Children(func() {
+				if ui.Button(c, "恢复默认").Clicked() {
+					_ = store.Set(contracts.SettingsUIShortcutToggleSidebar, contracts.DefaultShortcutToggleSidebar)
+					_ = store.Set(contracts.SettingsUIShortcutCommandPalette, contracts.DefaultShortcutCommandPalette)
+				}
+			})
+		})
 		panel := ui.Column(c).FillWidth().Gap(0).Padding(design.Space3)
 		design.Apply(panel, t.Panel())
 		panel.Children(func() {
@@ -115,6 +191,15 @@ func buildShortcutsPage(c *ui.Context, t *design.Tokens, title string) {
 			}
 		})
 	})
+}
+
+// shortcutChoiceLabels returns the Select options of a shortcut table.
+func shortcutChoiceLabels(choices []shortcutChoice) []string {
+	labels := make([]string, len(choices))
+	for index, choice := range choices {
+		labels[index] = choice.Label
+	}
+	return labels
 }
 
 // appearanceState is the appearance page's UI-local state.
@@ -370,7 +455,7 @@ func Module() *module.Descriptor[Config] {
 			Title:   "快捷键",
 			Order:   ShortcutsPageOrder,
 			Build: func(c *ui.Context) {
-				buildShortcutsPage(c, design.Of(c), "快捷键")
+				buildShortcutsPage(c, design.Of(c), "快捷键", store)
 			},
 		}
 		appearancePage := contracts.SettingsPageSpec{

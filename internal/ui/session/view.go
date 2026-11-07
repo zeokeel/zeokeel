@@ -86,29 +86,20 @@ func buildHeader(c *ui.Context, t *design.Tokens, cfg Config, st *state, chatSes
 			}
 			ui.Spacer(c).Grow(1)
 			if hasSession {
-				copyID := ui.Button(c, "复制 ID").Tooltip("复制会话 ID")
-				if copyID.Clicked() {
-					c.WriteClipboard(chatSession.ID)
-				}
-				copyChat := ui.Button(c, "复制对话").Tooltip("复制会话内容")
-				if copyChat.Clicked() {
-					c.WriteClipboard(transcriptText(chatSession))
-				}
-				export := ui.Button(c, "导出").Tooltip("把会话导出为 Markdown 文件")
-				if export.Clicked() {
-					title := firstNonEmpty(chatSession.Title, cfg.Title, "会话")
-					path, err := ExportSaver(sanitizeExportFilename(title)+".md", exportTranscript(chatSession, title))
-					switch {
-					case err != nil:
-						st.exportErr = "导出失败：" + err.Error()
-						st.exportStatus = ""
-						st.exportPath = ""
-					case strings.TrimSpace(path) != "":
-						st.exportStatus = "已导出"
-						st.exportPath = path
-						st.exportErr = ""
+				// Secondary conversation actions live in one overflow menu: three
+				// equal-weight buttons in the header competed with the title and
+				// the tabs for attention.
+				ui.PopoverMenuButton(c, "更多", func(m *ui.Menu) {
+					if m.Item("复制会话 ID").Chosen() {
+						c.WriteClipboard(chatSession.ID)
 					}
-				}
+					if m.Item("复制对话").Chosen() {
+						c.WriteClipboard(transcriptText(chatSession))
+					}
+					if m.Item("导出 Markdown").Chosen() {
+						exportSession(st, chatSession, cfg)
+					}
+				})
 			}
 		})
 		if st.exportErr != "" {
@@ -124,6 +115,23 @@ func buildHeader(c *ui.Context, t *design.Tokens, cfg Config, st *state, chatSes
 		}
 		buildTabs(c, t, cfg, st)
 	})
+}
+
+// exportSession writes the conversation as Markdown through the export seam
+// and records the result for the header status line.
+func exportSession(st *state, chatSession contracts.ChatSession, cfg Config) {
+	title := firstNonEmpty(chatSession.Title, cfg.Title, "会话")
+	path, err := ExportSaver(sanitizeExportFilename(title)+".md", exportTranscript(chatSession, title))
+	switch {
+	case err != nil:
+		st.exportErr = "导出失败：" + err.Error()
+		st.exportStatus = ""
+		st.exportPath = ""
+	case strings.TrimSpace(path) != "":
+		st.exportStatus = "已导出"
+		st.exportPath = path
+		st.exportErr = ""
+	}
 }
 
 // transcriptText formats the session read model for the clipboard: one block

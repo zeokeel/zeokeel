@@ -189,6 +189,7 @@ if _, err := ctx.Effect(func() cordis.Effect {
 - ✅ 品牌设计体系：`internal/brand`（palette/theme/mark）、`internal/design`（tokens/字阶/间距/组件样式、
   TypeRole、motion）、`internal/icons`（SVG 图标）；uiroot chrome 使用品牌侧栏/brand row/顶栏，
   `ui/{home,session,sidebar,settings,approval,toolcards}` 全部品牌化（native 控件 + design 样式）
+- ✅ 可配置 chrome 快捷键（settings `ui.shortcut.*` → 宿主每帧 OnShortcut）
 - ✅ 诊断页：设置「诊断」（运行时/存储/工具/设置键，只读 + 复制）
 - ✅ 命令面板：host Cmd/Ctrl+K palette（UIRuntime.Commands）
 - ✅ 全文搜索：sessionstore `MessageSearcher` + sidebar 消息搜索区

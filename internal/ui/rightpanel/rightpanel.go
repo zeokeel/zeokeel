@@ -71,7 +71,6 @@ func (c Config) resolved() Config {
 		Title:       firstNonEmpty(c.Title, "检查"),
 		OverviewTab: firstNonEmpty(c.OverviewTab, "概览"),
 		ToolsTab:    firstNonEmpty(c.ToolsTab, "工具"),
-		ModelTab:    firstNonEmpty(c.ModelTab, "模型"),
 		LogTab:      firstNonEmpty(c.LogTab, "日志"),
 		FilesTab:    firstNonEmpty(c.FilesTab, "文件"),
 		ChangesTab:  firstNonEmpty(c.ChangesTab, "变更"),

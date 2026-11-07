@@ -17,7 +17,6 @@ import (
 const (
 	tabOverview = iota
 	tabTools
-	tabModel
 	tabLog
 	tabFiles
 	tabChanges
@@ -44,8 +43,6 @@ func buildPanel(c *ui.Context, t *design.Tokens, runtime contracts.UIRuntime, ch
 			switch st.tab {
 			case tabTools:
 				buildToolsPane(c, t, chat, st)
-			case tabModel:
-				buildModelPane(c, t, chat)
 			case tabLog:
 				buildLogPane(c, t, log, chat)
 			case tabFiles:
@@ -65,7 +62,7 @@ func buildPanel(c *ui.Context, t *design.Tokens, runtime contracts.UIRuntime, ch
 // the accent underline (same language as the session header tabs).
 func buildTabs(c *ui.Context, t *design.Tokens, cfg Config, st *state) {
 	th := t.Theme()
-	labels := []string{cfg.OverviewTab, cfg.ToolsTab, cfg.ModelTab, cfg.LogTab, cfg.FilesTab, cfg.ChangesTab, cfg.TerminalTab}
+	labels := []string{cfg.OverviewTab, cfg.ToolsTab, cfg.LogTab, cfg.FilesTab, cfg.ChangesTab, cfg.TerminalTab}
 	tabs := ui.TabsBase(c, &st.tab, len(labels))
 	tabs.List.Height(t.Scale(th.Space(8))).Padding(0, 0, 0, th.Space(1)).
 		Gap(design.Space3).AlignItems(ui.Stretch).Children(func() {
@@ -126,7 +123,33 @@ func buildOverviewPane(c *ui.Context, t *design.Tokens, chat contracts.ChatServi
 		if chatSession.Error != "" {
 			buildErrorLine(c, t, chatSession.Error)
 		}
+		// The effective model configuration belongs to the same inspection
+		// surface (the former 模型 tab was a duplicate of the model settings
+		// page): one panel, a divider and compact rows instead of a second card.
+		ui.Divider(c)
+		design.Apply(ui.Text(c, "模型配置"), t.Font(design.TypeXS)).FontWeight(600).
+			TextColor(t.LabelSecondary)
+		cfg := chat.Config()
+		detailRow(c, t, "模型", firstNonEmpty(cfg.Model, "未配置"))
+		if baseURL := strings.TrimSpace(cfg.BaseURL); baseURL != "" {
+			detailRow(c, t, "Base URL", baseURL)
+		}
+		apiKey := "未设置"
+		if strings.TrimSpace(cfg.APIKey) != "" {
+			apiKey = "已设置（已隐藏）"
+		}
+		detailRow(c, t, "API Key", apiKey)
+		detailRow(c, t, "上下文预算", firstNonEmpty(intLabel(cfg.ContextBudget), "默认"))
+		detailRow(c, t, "最大迭代", firstNonEmpty(intLabel(cfg.MaxIterations), "默认"))
 	})
+}
+
+// intLabel renders a positive integer or "" for zero.
+func intLabel(value int) string {
+	if value <= 0 {
+		return ""
+	}
+	return fmt.Sprintf("%d", value)
 }
 
 // buildToolsPane aggregates every ToolCall of the session, in message order,

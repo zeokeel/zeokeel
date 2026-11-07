@@ -28,6 +28,9 @@ type Config struct {
 	AppName  string
 	Dark     bool
 	Language string
+	// Settings is the host settings service: the frame reads the user's chrome
+	// shortcut overrides from it every frame. Nil falls back to the defaults.
+	Settings contracts.SettingsService
 }
 
 // Root is the host's UI entry point. It is created by the process host before
@@ -35,10 +38,11 @@ type Config struct {
 type Root struct {
 	appName string
 
-	rt     *runtime
-	nav    *navigator
-	theme  *themeService
-	locale *localeService
+	rt              *runtime
+	nav             *navigator
+	theme           *themeService
+	locale          *localeService
+	settingsService contracts.SettingsService
 
 	mu         sync.Mutex
 	invalidate func()
@@ -102,7 +106,7 @@ func New(cfg Config) *Root {
 	if cfg.Language == "" {
 		cfg.Language = "zh"
 	}
-	r := &Root{appName: cfg.AppName}
+	r := &Root{appName: cfg.AppName, settingsService: cfg.Settings}
 	r.theme = &themeService{root: r, dark: cfg.Dark}
 	r.locale = &localeService{root: r, lang: cfg.Language}
 	r.rt = newRuntime(r)

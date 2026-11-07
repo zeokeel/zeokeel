@@ -311,6 +311,28 @@ func TestP1ApprovalToolsAndPersistence(t *testing.T) {
 		t.Fatalf("memory tab does not show the entry; texts = %v", tester.Texts())
 	}
 
+	// The chrome shortcuts are configurable through the host settings: an
+	// override applies on the next frame, and restoring the default switches
+	// the binding back.
+	if err := settings.Set(contracts.SettingsUIShortcutToggleSidebar, "alt+b"); err != nil {
+		t.Fatalf("set shortcut setting: %v", err)
+	}
+	tester.Frame()
+	tester.Key(ui.Alt, ui.KeyB)
+	tester.Frame()
+	if !uiRoot.SidebarCollapsed() {
+		t.Fatal("Alt+B did not collapse the sidebar after the override")
+	}
+	if err := settings.Set(contracts.SettingsUIShortcutToggleSidebar, contracts.DefaultShortcutToggleSidebar); err != nil {
+		t.Fatalf("reset shortcut setting: %v", err)
+	}
+	tester.Frame()
+	tester.Key(ui.Cmd, ui.KeyB)
+	tester.Frame()
+	if uiRoot.SidebarCollapsed() {
+		t.Fatal("Cmd+B did not expand the sidebar after restoring the default")
+	}
+
 	// --- restart: the session and its messages come back from SQLite ------
 	title := session.Title
 	if err := loader.Close(); err != nil {
@@ -392,7 +414,7 @@ func scriptedToolServer(t *testing.T) *httptest.Server {
 func bootDesktop(t *testing.T, dataDir string, settings *memSettings) (cordis.Context, *uiroot.Root, loaderCloser) {
 	t.Helper()
 	root := cordis.Root()
-	uiRoot := uiroot.New(uiroot.Config{AppName: "ZeoKeel"})
+	uiRoot := uiroot.New(uiroot.Config{AppName: "ZeoKeel", Settings: settings})
 	provide(t, root, contracts.KeyDataDir, dataDir)
 	provide(t, root, contracts.KeyUIRuntime, uiRoot.Runtime())
 	provide(t, root, contracts.KeyNavigator, uiRoot.Navigator())

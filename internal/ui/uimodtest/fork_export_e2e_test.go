@@ -87,7 +87,11 @@ func TestSessionForkAndExportEndToEnd(t *testing.T) {
 	}
 	tester := ui.NewTester(uiRoot.View, 1280, 800)
 	tester.Frame()
-	if err := tester.Click("导出"); err != nil {
+	if err := tester.Click("更多"); err != nil {
+		t.Fatalf("open session actions: %v; texts = %v", err, tester.Texts())
+	}
+	tester.Frame()
+	if err := tester.Click("导出 Markdown"); err != nil {
 		t.Fatalf("click export: %v; texts = %v", err, tester.Texts())
 	}
 	tester.Frame()

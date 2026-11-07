@@ -177,10 +177,14 @@ func buildToolsSection(
 	})
 }
 
-// buildToolRow is one catalogue entry: mono name plus its description.
+// buildToolRow is one catalogue entry: mono name plus its description. The
+// catalogue is a dense reference list, so rows are plain (no card per tool);
+// category labels and spacing carry the grouping.
 func buildToolRow(c *ui.Context, t *design.Tokens, tool catalogTool) {
-	design.Apply(ui.Row(c), t.Panel()).FillWidth().Gap(design.Space3).
-		AlignItems(ui.Center).Padding(design.Space2, design.Space3).Children(func() {
+	design.Apply(ui.Row(c), func(el ui.Element) ui.Element {
+		return el.BorderWidth(0, 0, 1, 0).BorderColor(t.BorderL2)
+	}).FillWidth().Gap(design.Space3).
+		AlignItems(ui.Center).Padding(design.Space2, design.Space2).Children(func() {
 		design.Apply(ui.Text(c, tool.Name), t.MonoFamily()).FontSize(12).
 			TextColor(t.LabelPrimary).NoWrap()
 		if description := strings.TrimSpace(tool.Description); description != "" {
