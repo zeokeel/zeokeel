@@ -7,7 +7,7 @@
 
 ## 修复状态（Lead 复核后）
 
-> 首轮 11 个「已知缺陷探针」与第二轮 4 个 P3 均已随 TDD 修复转为 PASS；第三轮 3 个 P3 中 P3-9/10 已修复、P3-11 复核发现修复未落地（见第四轮）；第四轮新增 P3-12。`go test ./internal/regression -count=1 -race` 当前 **153 PASS / 0 SKIP**（历史：首轮修复后 92，第二轮后 98，第三轮后 133）。
+> 首轮 11 个「已知缺陷探针」与第二轮 4 个 P3 均已随 TDD 修复转为 PASS；第三轮 P3-9/10 已修复、P3-11 重开后于 ca2d24c 真正修复；第四轮 P3-12 已修复（ca2d24c）。`go test ./internal/regression -count=1 -race` 当前 **172 PASS / 0 SKIP**（历史：首轮修复后 92，第二轮后 98，第三轮后 133，第四轮后 153）。
 
 | ID | 优先级 | 状态 | 修复摘要 |
 |----|--------|------|----------|
@@ -31,7 +31,7 @@ $ go test ./internal/regression -count=1                    ok  1.2s
 $ go test ./internal/regression -count=1 -race              ok 12.8s（98 PASS / 0 SKIP）
 ```
 
-测试规模：`internal/regression` 共 153 个顶层 Test（首轮 78 + 第二轮 20 + 第三轮 35 + 第四轮 20；含子用例后更多）。首轮/第二轮缺陷已修复；第三轮 P3-9/10 已修复，P3-11 复核为**声明修复但代码未落地**；第四轮新增 P3-12；当前 **153 PASS / 0 SKIP**。
+测试规模：`internal/regression` 共 172 个顶层 Test（首轮 78 + 第二轮 20 + 第三轮 35 + 第四轮 20 + 第五轮 19；含子用例后更多）。第三轮 P3-9/10 已修复，P3-11 重开后已真正修复，第四轮 P3-12 已修复，第五轮无新缺陷；当前 **172 PASS / 0 SKIP**。
 
 ## 用例矩阵
 
@@ -345,5 +345,45 @@ $ go test ./internal/regression -count=1 -race               ok 27.9s（153 PASS
 | AUDIT-P3-11 | ✅ 已修复（重开→本次真正修复） | toasts TTL 到期路径现在调用 `Notifier.Dismiss(notification.ID)` 再移除栈项；新增断言证明过期后 dismiss 被调用；并修正此前提交说明与代码不一致的问题 |
 | AUDIT-P3-12 | ✅ 已修复 | agent `SetMessageFeedback` 增加角色校验（仅 assistant 可评分；user/tool 返回可读错误且零副作用），新增单测 |
 
-第四轮回归：`internal/regression` **153 PASS / 0 SKIP**。仍有文档化未落地项（/feedback 斜杠命令、plan keep-planning 反馈循环、
-会话级 feedback 汇总/导出）。
+第四轮回归：`internal/regression` **153 PASS / 0 SKIP**。第五轮复跑确认 P3-11/P3-12 修复未回退；`/feedback` 斜杠命令已在本轮落地。
+仍有文档化未落地项（plan keep-planning 反馈循环、会话级 feedback 汇总、旧 `/feedback [good|bad]` 参数式直接打分、自动化 runs 之外的历史查询）。
+
+## 反证审计第五轮：/feedback 命令 / 自动化运行历史 / 反馈复跑 / 记忆与技能编辑（2026-11-08）
+
+范围：HEAD `8074fb2`（/feedback 命令、自动化运行历史）+ `37190ed`（记忆整理/清空、技能创建/删除；本轮并行落地，审计先按
+工作树 WIP 写用例，随后随该提交落地）。只新增 `internal/regression/**` 并改本文件；未改生产代码、未 commit。
+新增 **19** 个顶层 Test（包内 153 → 172）。
+
+```
+$ gofmt -l internal/regression/                              （空）
+$ go vet ./internal/regression                               OK
+$ go build ./...                                             OK
+$ go test ./internal/regression -count=1 -race               ok 30.6s（172 PASS / 0 SKIP）
+```
+
+| # | 链路 | 反证点 | 用例 | 结果 |
+|---|------|--------|------|------|
+| 21 | `/feedback` 命令与导出 | Enabled 条件（无 SessionFeedbacker / 无 active session / 无 assistant 回答均禁用）；禁用时 Run 无对话框且不 panic；对话框给最新 assistant 打分/清空并同步读模型；后端写失败保持对话框+本地化错误、读模型不变；导出 JSONL 仅含 good/bad（非法读模型值不导出）、Markdown zh/en 输出“用户反馈/User feedback”行且不导出非法值 | 5 | PASS |
+| 22 | 自动化运行历史 | RunNow 成功记录（时间戳有序+摘要+持久化）；失败记录（status=error、摘要含 send prompt、≤200 runes、LastError、持久化）；ticker 自动运行记录；12 次运行后 cap 10 且 newest-first；旧 registry JSON 无 `runHistory` 字段正常加载并继续追加；并发 RunNow（多任务+同任务 in-flight 折叠，-race）每任务至少一条记录 | 6 | PASS |
+| 23 | 第四轮消息反馈/P3 修复复跑 | `go test -run 'TestFeedback|TestToasts' -race` → 19 PASS：P3-12 角色校验拒绝 user 消息评分（错误含 assistant/unknown）；P3-11 TTL 过期调用 Notifier.Dismiss 且断言 dismiss；第四轮 13 个反馈用例全部通过 | 复跑 | PASS（未回退） |
+| 24 | 记忆整理/清空 + 技能编辑（本轮落地） | memory：tidy 按 trim/空白折叠/小写归一保留最早一条并报告删除数；无重复 no-op；清空确认（取消保留/确认清空/空 store 安全/持久化为空）；List、Remove 故障显示错误行不 panic；skills：draft 校验（空名/空 body/空格·点·斜杠·换行/超长名）、frontmatter 折行、重复名拒绝且不覆盖、中文 slug 可创建、删除边界（未知/穿越/配置根只读/无 SKILL.md 目录/symlink 拒绝）、嵌套文件随技能删除、ctx 取消零副作用 | 8 | PASS |
+
+### 第五轮未证伪的关键不变量
+
+1. **/feedback**：命令可见性完全由（feedbacker、active session、最新 assistant）三者决定；对话框只写最新 assistant；写失败不改读模型且可重试；导出层对畸形 Feedback 值做白名单归一（非法值静默忽略，不污染 JSONL/Markdown）。
+2. **自动化历史**：每次执行（RunNow/ticker）恰一条记录且同步落盘；失败摘要截断到 200 runes；历史上限 10 且 newest-first；旧 JSON 无新字段向后兼容；并发调用不死锁、不重复记录（in-flight 折叠）、-race 干净。
+3. **P3 修复未回退**：P3-12 角色守卫与 P3-11 dismiss 行为均被既有用例锁定并复跑通过。
+4. **记忆/技能（WIP→37190ed）**：tidy 的归一化键与保留策略确定；清空有确认且空 store 安全；故障注入只产生可读错误；技能写路径仅 `<dataDir>/skills`，名称白名单阻断路径穿越，重复创建 O_EXCL 不覆盖，删除前做包含+realpath+symlink 检查，配置/工作区根只读，取消上下文零副作用。
+
+### 第五轮发现
+
+- **无新缺陷**（无 P0/P1/P2/P3）。P3-11 与 P3-12 经 ca2d24c 修复后本轮复跑确认仍未回退。
+- 观察（非缺陷）：记忆 tidy/clear 在 UI 层用 List+逐条 Remove 实现，单 UI 线程下正确；不是原子批量 API，大量条目时写放大明显，未来若做后端批量接口可再评估。
+- 观察（非缺陷）：技能描述的 frontmatter 未做 YAML 引号转义，但实现会折叠空白（阻断换行注入），实测 `inject: value`/`#hash`/`[list]` 等值可原样往返，未构成注入。
+
+### 第五轮局限
+
+- 记忆整理/清空为 UI 层实现：本轮通过真实 memory 后端与故障注入 store 覆盖，未覆盖“外部进程同时写 memory.json”的并发语义（store 自身有互斥与原子写，模块内单测覆盖）。
+- 自动化历史仅验证“缺少 `runHistory` 字段”的旧 JSON；`runHistory` 类型损坏的 registry 会按模块启动错误处理，未作为兼容目标。
+- `/feedback` 旧命令的参数式用法（`/feedback good|bad` 直接给最新回答打分）与 session 级 feedback 行仍未迁移；当前为交互式对话框。
+- 技能编辑器设置页的按钮/模态交互由 settings 包内单测覆盖；本轮反证聚焦模块接口、文件边界与文件系统副作用。
