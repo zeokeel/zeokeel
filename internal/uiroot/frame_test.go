@@ -404,3 +404,51 @@ func TestSidebarCollapseShortcut(t *testing.T) {
 	}
 	r.SetSidebarCollapsed(false)
 }
+
+// TestCommandPaletteShortcut covers Cmd/Ctrl+K: the host palette lists the
+// registered commands, filters them and runs the chosen one.
+func TestCommandPaletteShortcut(t *testing.T) {
+	r := newTestRoot(t)
+	mustScreen(t, r, textScreen("home", "首页", "body-home", 10))
+	var runs counter
+	mustCommand(t, r, contracts.CommandSpec{ID: "open.settings", Title: "打开设置",
+		Hint: "设置面板", Order: 10, Run: func() error { runs.Inc(); return nil }})
+	mustCommand(t, r, contracts.CommandSpec{ID: "other", Title: "其他命令",
+		Order: 20, Run: func() error { return nil }})
+
+	tt := newTestTester(t, r, 1200, 800)
+	tt.Frame()
+	tt.Key(ui.Cmd, ui.KeyK)
+	tt.Frame()
+	for _, want := range []string{"命令面板", "打开设置", "其他命令", "Esc 关闭"} {
+		requireHasText(t, tt, want)
+	}
+
+	// The filter narrows the list.
+	if rect, ok := tt.Find("搜索命令"); ok {
+		tt.ClickAt(rect.X+rect.W/2, rect.Y+rect.H/2)
+		tt.Frame()
+		tt.Type("其他")
+		tt.Frame()
+		requireHasText(t, tt, "其他命令")
+		requireNoText(t, tt, "打开设置")
+	}
+	// Choosing a command closes the palette and runs it.
+	if err := tt.Click("其他命令"); err != nil {
+		t.Fatalf("click palette command: %v; texts = %v", err, tt.Texts())
+	}
+	tt.Frame()
+	requireNoText(t, tt, "命令面板")
+	requireHasText(t, tt, "body-home")
+
+	// Cmd+K again, then Escape dismisses the palette without running.
+	tt.Key(ui.Cmd, ui.KeyK)
+	tt.Frame()
+	requireHasText(t, tt, "命令面板")
+	tt.Key(0, ui.KeyEscape)
+	tt.Frame()
+	requireNoText(t, tt, "命令面板")
+	if got := runs.Load(); got != 0 {
+		t.Fatalf("commands ran %d times, want 0", got)
+	}
+}

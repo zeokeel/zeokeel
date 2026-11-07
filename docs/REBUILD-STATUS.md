@@ -21,6 +21,10 @@
 - 右侧栏「文件」Tab：打开文件夹（mygo 原生 Directory picker）、目录进入/面包屑、文本/Markdown/图片预览、
   刷新与错误状态；E2E 覆盖工作区创建 + 列表 + 预览帧
 
+**P4 命令面板（2026-11-08）**
+- uiroot 宿主命令面板：Cmd/Ctrl+K 开关（chrome shortcut）、native Modal、搜索命令、点击执行/关闭、Esc；
+  单测覆盖过滤/执行/关闭
+
 **P3 全文搜索（2026-11-08）**
 - sessionstore `SearchMessages`：跨会话消息 LIKE（大小写不敏感、%/_/\ 字面转义）、SessionTitle、Role、
   CreatedAt、rune 安全 snippet（去 Markdown 代码块/标题标记）、limit 默认 50/上限 200、新→旧

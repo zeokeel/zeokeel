@@ -2,6 +2,7 @@ package uiroot
 
 import (
 	"log"
+	"strings"
 
 	"github.com/egoist/mygo/ui"
 
@@ -30,6 +31,13 @@ func (r *Root) view(c *ui.Context) {
 	// The old shell's chrome shortcut: Cmd/Ctrl+B collapses or expands the
 	// left sidebar (the 64 DIP icon rail).
 	c.OnShortcut(ui.Cmd, ui.KeyB, r.ToggleSidebarCollapsed)
+	// The command palette (the old shell's Cmd/Ctrl+K) lists the registered
+	// command surface and runs the chosen command.
+	c.OnShortcut(ui.Cmd, ui.KeyK, func() {
+		r.paletteOpen = !r.paletteOpen
+		r.paletteQuery = ""
+		r.requestFrame()
+	})
 
 	// Host applies the brand theme once; modules build with the frame theme.
 	c.SetTheme(r.theme.currentTheme())
@@ -44,6 +52,7 @@ func (r *Root) view(c *ui.Context) {
 		r.rightPanel(c)
 	})
 
+	r.palette(c)
 	r.overlays(c)
 }
 
@@ -257,6 +266,70 @@ func (r *Root) hasAnySlot(names ...string) bool {
 		}
 	}
 	return false
+}
+
+// palette is the host command palette: a native Modal with a filter field and
+// the registered commands; choosing one closes the palette and runs it.
+func (r *Root) palette(c *ui.Context) {
+	if !r.paletteOpen {
+		return
+	}
+	t := design.Of(c)
+	ui.Modal(c, &r.paletteOpen, func() {
+		ui.Column(c).Width(560).Gap(design.Space2).Padding(design.Space4).Children(func() {
+			design.Apply(ui.Text(c, "命令面板"), t.Font(design.TypeM)).FontWeight(600).
+				TextColor(t.LabelPrimary)
+			ui.TextInput(c, &r.paletteQuery).Label("搜索命令").Placeholder("搜索命令…").FillWidth()
+			needle := strings.ToLower(strings.TrimSpace(r.paletteQuery))
+			matches := make([]contracts.CommandSpec, 0, 8)
+			for _, cmd := range r.rt.commandSpecs() {
+				if cmd.Enabled != nil && !cmd.Enabled() {
+					continue
+				}
+				if needle != "" {
+					haystack := strings.ToLower(cmd.Title + "\x00" + cmd.ID + "\x00" + cmd.Hint)
+					if !strings.Contains(haystack, needle) {
+						continue
+					}
+				}
+				matches = append(matches, cmd)
+				if len(matches) == 8 {
+					break
+				}
+			}
+			ui.Scroll(c).FillWidth().MaxHeight(320).Children(func() {
+				ui.Column(c).FillWidth().Gap(design.Space1).Children(func() {
+					if len(matches) == 0 {
+						design.Apply(ui.Text(c, "没有匹配的命令"), t.TextMuted(design.TypeXS))
+						return
+					}
+					for _, cmd := range matches {
+						cmd := cmd
+						row := ui.ButtonBase(c).FillWidth().Padding(design.Space2).
+							Radius(design.RadiusSM).Label(cmd.Title)
+						if row.Hovered() {
+							row.Background(t.BgHover)
+						}
+						row.Children(func() {
+							design.Apply(ui.Text(c, cmd.Title), t.Font(design.TypeXS)).FontWeight(600).
+								TextColor(t.LabelPrimary).Grow(1)
+							if hint := strings.TrimSpace(cmd.Hint); hint != "" {
+								design.Apply(ui.Text(c, hint), t.TextMuted(design.TypeXXXS))
+							}
+						})
+						if row.Clicked() {
+							r.paletteOpen = false
+							if cmd.Run != nil {
+								_ = cmd.Run()
+							}
+							r.requestFrame()
+						}
+					}
+				})
+			})
+			design.Apply(ui.Text(c, "Esc 关闭 · Enter 选择"), t.TextMuted(design.TypeXXXS))
+		})
+	})
 }
 
 // overlays renders the settings surface and any module-declared overlay slots.

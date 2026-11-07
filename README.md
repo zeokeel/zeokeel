@@ -139,6 +139,8 @@ go test ./...
 - ✅ P3 全文搜索：sessionstore `MessageSearcher`（跨会话消息 LIKE 搜索、LIKE 字面转义、snippet 去
   Markdown 标记、新旧排序、limit 上限）；侧栏搜索框输入后显示「消息搜索」命中列表（标题/角色/时间/
   片段），点击跳转会话；截图 `p2-search.png`
+- ✅ P4 命令面板：宿主持有 Cmd/Ctrl+K（`ui.Context.OnShortcut`）打开 native Modal 命令面板，过滤
+  `UIRuntime.Commands()`、点击执行并关闭、Esc 关闭；截图 `p2-palette.png`
 - ⬜ 后续阶段见 [docs/PRODUCT-REBUILD-PLAN.md](docs/PRODUCT-REBUILD-PLAN.md)：
   P2 剩余（composer 附件/图片/@ 提及、右侧栏 Files/Terminal/Log 页、会话操作上下文菜单）→
   P3 memory/skills/automation/插件/workspace diff/搜索/fork/export → P4 ACP/热键/导入/更新/诊断

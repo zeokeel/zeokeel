@@ -306,6 +306,10 @@ func main() {
 		a.tester.Type("工作目录")
 		a.render(outDir + "/p2-search.png")
 	}
+
+	// Host command palette (Cmd/Ctrl+K).
+	a.tester.Key(ui.Cmd, ui.KeyK)
+	a.render(outDir + "/p2-palette.png")
 }
 
 func boot(baseURL, dataDir string) *app {

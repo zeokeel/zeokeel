@@ -55,6 +55,11 @@ type Root struct {
 	// sidebarCollapsed is the host-owned left sidebar state: the old shell's
 	// 64 DIP icon rail. It is toggled by Cmd/Ctrl+B or the brand-row control.
 	sidebarCollapsed bool
+
+	// paletteOpen is the host-owned command palette state (Cmd/Ctrl+K) and
+	// paletteQuery its filter draft. UI thread only.
+	paletteOpen  bool
+	paletteQuery string
 }
 
 // SidebarCollapsed reports whether the left sidebar is in its icon-rail form.
