@@ -180,6 +180,9 @@ go test ./...
 - ✅ P5 Composer 深度（第一切片）：slash 命令「新会话/创建副本/导出对话/打开设置」（UIRuntime.Commands，
   `/` 菜单与 Cmd/Ctrl+K 共用）+ 最后一条 assistant 的「重新生成」（agent SessionRegenerator：截断旧回复、
   复用运行管线、持久化回滚）；截图 `p2-slash.png`
+- ✅ P5 模型切换：`zeokeel/modelcatalog` 预设（DeepSeek Chat/Reasoner）+ agent per-session 模型覆盖
+  （`SessionModelSwitcher`，settings 持久化，Send/Regenerate 使用会话模型）+ composer 模型菜单（打勾/当前/打开模型
+  设置回退）；desktop 25 实例 / registry 27；截图 `p2-modelmenu.png`、`p2-model-switched.png`
 - ⬜ 后续阶段见 [docs/PRODUCT-REBUILD-PLAN.md](docs/PRODUCT-REBUILD-PLAN.md)：
   P2 剩余（composer 附件/图片/@ 提及、右侧栏 Files/Terminal/Log 页、会话操作上下文菜单）→
   P3 memory/skills/automation/插件/workspace diff/搜索/fork/export → P4 ACP/热键/导入/更新/诊断

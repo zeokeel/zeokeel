@@ -770,13 +770,58 @@ func buildComposer(
 // control (a native button whose file picker lands with the attachment slice).
 func buildComposerToolbar(c *ui.Context, t *design.Tokens, runtime contracts.UIRuntime,
 	navigator contracts.Navigator, chat contracts.ChatService, st *state, running bool) {
-	model := st.tr("未配置模型", "No model configured")
-	if cfg := chat.Config(); cfg.Model != "" {
-		model = cfg.Model
+	// The model chip shows the session's effective model (session override,
+	// then the configured model) and opens the native model menu when the chat
+	// backend can switch a session's model. Without that half (or without an
+	// active session) it keeps the old behavior: open the settings surface.
+	activeID := chat.ActiveSession()
+	activeSession, hasSession := chat.Session(activeID)
+	effectiveModel := ""
+	if hasSession {
+		effectiveModel = strings.TrimSpace(activeSession.Model)
 	}
-	modelButton := ui.Button(c, model).Tooltip(st.tr("打开模型设置", "Open model settings"))
-	if modelButton.Clicked() {
-		navigator.ToggleSettings()
+	if effectiveModel == "" {
+		effectiveModel = strings.TrimSpace(chat.Config().Model)
+	}
+	model := effectiveModel
+	if model == "" {
+		model = st.tr("未配置模型", "No model configured")
+	}
+	switcher, canSwitch := chat.(contracts.SessionModelSwitcher)
+	catalog, hasCatalog := st.ctx.Get(contracts.KeyModelCatalog)
+	if canSwitch && hasSession && activeID != "" {
+		ui.PopoverMenuButton(c, model, func(m *ui.Menu) {
+			m.Item(st.tr("选择模型", "Choose a model")).Disabled(true)
+			m.Separator()
+			if hasCatalog && catalog != nil {
+				for _, info := range catalog.Models() {
+					label := modelMenuLabel(info)
+					item := m.Item(label)
+					item.Checked(info.ID == effectiveModel)
+					if item.Chosen() {
+						// Model-switch failures stay quiet: the chip keeps
+						// showing the effective model of the next frame.
+						if err := switcher.SetSessionModel(activeID, info.ID); err == nil {
+							runtime.Invalidate()
+						}
+					}
+				}
+			} else {
+				current := model
+				item := m.Item(current)
+				item.Checked(true)
+				item.Disabled(true)
+			}
+			m.Separator()
+			if m.Item(st.tr("打开模型设置", "Open model settings")).Chosen() {
+				navigator.ToggleSettings()
+			}
+		}).Tooltip(st.tr("切换本会话模型", "Switch this session's model"))
+	} else {
+		modelButton := ui.Button(c, model).Tooltip(st.tr("打开模型设置", "Open model settings"))
+		if modelButton.Clicked() {
+			navigator.ToggleSettings()
+		}
 	}
 	if !running {
 		slash := ui.Button(c, "/").Tooltip(st.tr("命令：输入 / 打开命令菜单", "Commands: type / to open the command menu"))
@@ -797,6 +842,19 @@ func buildComposerToolbar(c *ui.Context, t *design.Tokens, runtime contracts.UIR
 			runtime.Invalidate()
 		}
 	}
+}
+
+// modelMenuLabel is one model menu row: the display name plus its note, when
+// the catalogue provides one.
+func modelMenuLabel(info contracts.ModelInfo) string {
+	name := strings.TrimSpace(info.Name)
+	if name == "" {
+		name = info.ID
+	}
+	if note := strings.TrimSpace(info.Note); note != "" {
+		return name + " · " + note
+	}
+	return name
 }
 
 // buildSendButton is the composer's primary control: the native button keeps

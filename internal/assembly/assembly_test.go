@@ -132,21 +132,22 @@ func TestProductsAndEntries(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Entries(desktop): %v", err)
 	}
-	if len(desktop) != 14 {
-		t.Fatalf("desktop roots = %d, want 14 entries", len(desktop))
+	if len(desktop) != 15 {
+		t.Fatalf("desktop roots = %d, want 15 entries", len(desktop))
 	}
 	_ = desktop
 	wantRoots := []string{
 		"zeokeel/appinfo", "zeokeel/sessionstore", "zeokeel/approvals", "zeokeel/workspace",
 		"zeokeel/terminal", "zeokeel/skills", "zeokeel/memory", "zeokeel/toolkit", "zeokeel/hosttools",
-		"zeokeel/agent", "zeokeel/automation", "zeokeel/update", "zeokeel/importer", assembly.GroupModuleID,
+		"zeokeel/agent", "zeokeel/automation", "zeokeel/update", "zeokeel/importer",
+		"zeokeel/modelcatalog", assembly.GroupModuleID,
 	}
 	for index, root := range desktop {
 		if root.Module != wantRoots[index] {
 			t.Fatalf("desktop root %d = %q, want %q", index, root.Module, wantRoots[index])
 		}
 	}
-	if len(desktop[13].Children) != 10 {
+	if len(desktop[14].Children) != 10 {
 		t.Fatalf("UI group children = %d, want 10 UI modules", len(desktop[11].Children))
 	}
 	wantChildren := []string{
@@ -154,7 +155,7 @@ func TestProductsAndEntries(t *testing.T) {
 		"zeokeel-ui/sidebar", "zeokeel-ui/session", "zeokeel-ui/settings", "zeokeel-ui/approval",
 		"zeokeel-ui/rightpanel", "zeokeel-ui/automation", "zeokeel-ui/plugins",
 	}
-	for index, child := range desktop[13].Children {
+	for index, child := range desktop[14].Children {
 		if child.Module != wantChildren[index] {
 			t.Fatalf("UI group child %d = %q, want %q", index, child.Module, wantChildren[index])
 		}
@@ -194,6 +195,7 @@ func TestRegistryIsExplicit(t *testing.T) {
 		"zeokeel/update",
 		"zeokeel/importer",
 		"zeokeel/acp",
+		"zeokeel/modelcatalog",
 		"zeokeel/sessionstore",
 		"zeokeel/workspace",
 		"zeokeel/terminal",
@@ -213,8 +215,8 @@ func TestRegistryIsExplicit(t *testing.T) {
 			t.Fatalf("Registry() lacks module %q", id)
 		}
 	}
-	if got := len(registry.Modules()); got != 26 {
-		t.Fatalf("Registry() modules = %d, want 26", got)
+	if got := len(registry.Modules()); got != 27 {
+		t.Fatalf("Registry() modules = %d, want 27", got)
 	}
 }
 
@@ -246,12 +248,12 @@ func TestDesktopAssemblyLoadsAndUnwinds(t *testing.T) {
 	// approvals provider, the agent consumer and the UI modules settle in
 	// dependency order.
 	instances := loader.Instances()
-	if len(instances) != 24 {
-		t.Fatalf("desktop instances = %d, want 24", len(instances))
+	if len(instances) != 25 {
+		t.Fatalf("desktop instances = %d, want 25", len(instances))
 	}
 	wantIDs := []string{
 		"appinfo", "store", "approvals", "workspace", "terminal", "skills", "memory", "toolkit", "hosttools",
-		"agent", "automation", "update", "importer", "ui",
+		"agent", "automation", "update", "importer", "modelcatalog", "ui",
 		"home", "toolcards", "about", "sidebar", "session", "settings", "approval", "rightpanel",
 		"automation-ui", "plugins-ui",
 	}

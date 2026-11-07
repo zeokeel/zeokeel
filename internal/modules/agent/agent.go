@@ -149,13 +149,14 @@ type service struct {
 }
 
 var (
-	_ contracts.ChatService        = (*service)(nil)
-	_ contracts.SessionRenamer     = (*service)(nil)
-	_ contracts.AttachmentSender   = (*service)(nil)
-	_ contracts.SessionForker      = (*service)(nil)
-	_ contracts.SessionPinner      = (*service)(nil)
-	_ contracts.SessionArchiver    = (*service)(nil)
-	_ contracts.SessionRegenerator = (*service)(nil)
+	_ contracts.ChatService          = (*service)(nil)
+	_ contracts.SessionRenamer       = (*service)(nil)
+	_ contracts.AttachmentSender     = (*service)(nil)
+	_ contracts.SessionForker        = (*service)(nil)
+	_ contracts.SessionPinner        = (*service)(nil)
+	_ contracts.SessionArchiver      = (*service)(nil)
+	_ contracts.SessionRegenerator   = (*service)(nil)
+	_ contracts.SessionModelSwitcher = (*service)(nil)
 )
 
 // sessionState is the mutable per-session state.
@@ -311,24 +312,32 @@ func (s *service) Config() contracts.ChatConfig {
 	return s.configLocked()
 }
 
-// configLocked resolves the effective config; the caller holds s.mu.
+// configLocked resolves the effective config; the caller holds s.mu. A nil
+// settings store falls back to the assembly config (tests and embedders may run
+// without one; the product always provides it).
 func (s *service) configLocked() contracts.ChatConfig {
-	model := strings.TrimSpace(s.settings.Get(contracts.SettingsChatModel, ""))
+	model := ""
+	baseURL := ""
+	systemPrompt := ""
+	apiKey := ""
+	if s.settings != nil {
+		model = strings.TrimSpace(s.settings.Get(contracts.SettingsChatModel, ""))
+		baseURL = strings.TrimRight(strings.TrimSpace(s.settings.Get(contracts.SettingsChatBaseURL, "")), "/")
+		systemPrompt = strings.TrimSpace(s.settings.Get(contracts.SettingsChatSystemPrompt, ""))
+		apiKey = strings.TrimSpace(s.settings.Get(contracts.SettingsChatAPIKey, ""))
+	}
 	if model == "" {
 		model = s.cfg.Model
 	}
 	if model == "" {
 		model = DefaultModel
 	}
-	baseURL := strings.TrimRight(strings.TrimSpace(s.settings.Get(contracts.SettingsChatBaseURL, "")), "/")
 	if baseURL == "" {
 		baseURL = s.cfg.BaseURL
 	}
-	systemPrompt := strings.TrimSpace(s.settings.Get(contracts.SettingsChatSystemPrompt, ""))
 	if systemPrompt == "" {
 		systemPrompt = s.cfg.SystemPrompt
 	}
-	apiKey := strings.TrimSpace(s.settings.Get(contracts.SettingsChatAPIKey, ""))
 	if apiKey == "" {
 		env := s.cfg.ApiKeyEnv
 		if env == "" {
@@ -344,6 +353,28 @@ func (s *service) configLocked() contracts.ChatConfig {
 		MaxIterations: s.cfg.MaxIterations,
 		ContextBudget: s.cfg.ContextBudget,
 	}
+}
+
+// sessionModelLocked resolves the model a session's next run uses: the
+// per-session settings override when one was chosen, else the effective
+// chat.model from the global settings/config. The caller holds s.mu.
+func (s *service) sessionModelLocked(sessionID string) string {
+	model := s.configLocked().Model
+	if s.settings == nil {
+		return model
+	}
+	if override := strings.TrimSpace(s.settings.Get(contracts.SessionModelSettingKey(sessionID), "")); override != "" {
+		return override
+	}
+	return model
+}
+
+// configForSessionLocked is configLocked with the session's model override
+// applied; the caller holds s.mu.
+func (s *service) configForSessionLocked(sessionID string) contracts.ChatConfig {
+	cfg := s.configLocked()
+	cfg.Model = s.sessionModelLocked(sessionID)
+	return cfg
 }
 
 // RenameSession updates a session's display title in the read model and, when a
@@ -447,6 +478,32 @@ func sessionArchived(settings contracts.SettingsService, sessionID string) bool 
 		return false
 	}
 	return settings.Get(contracts.SessionArchivedSettingKey(sessionID), "false") == "true"
+}
+
+// SetSessionModel implements contracts.SessionModelSwitcher: it persists the
+// per-session model override, which the next run and ChatSession.Model read.
+// An empty model or unknown session is rejected; a failed write leaves the
+// effective model unchanged.
+func (s *service) SetSessionModel(sessionID, model string) error {
+	model = strings.TrimSpace(model)
+	if model == "" {
+		return errors.New("agent: session model must not be empty")
+	}
+	s.mu.Lock()
+	_, ok := s.sessions[sessionID]
+	settings := s.settings
+	s.mu.Unlock()
+	if !ok {
+		return fmt.Errorf("agent: unknown chat session %q", sessionID)
+	}
+	if settings == nil {
+		return ErrSettingsUnavailable
+	}
+	if err := settings.Set(contracts.SessionModelSettingKey(sessionID), model); err != nil {
+		return fmt.Errorf("agent: persist model of session %q: %w", sessionID, err)
+	}
+	s.notify(sessionID)
+	return nil
 }
 
 // --- ChatService: sessions -------------------------------------------------
@@ -624,7 +681,7 @@ func (s *service) Session(sessionID string) (contracts.ChatSession, bool) {
 	if !ok {
 		return contracts.ChatSession{}, false
 	}
-	return state.snapshot(), true
+	return state.snapshot(s.sessionModelLocked(sessionID)), true
 }
 
 // Sessions lists sessions, newest updated first.
@@ -684,6 +741,10 @@ var ErrSessionRunning = errors.New("agent: session is already running")
 // ErrNoUserMessage is returned by Regenerate when the session has no user
 // message to retry.
 var ErrNoUserMessage = errors.New("agent: no user message to regenerate")
+
+// ErrSettingsUnavailable is returned by SetSessionModel when the service was
+// built without a settings store to persist the override.
+var ErrSettingsUnavailable = errors.New("agent: settings store is not available")
 
 // Send appends the user prompt, creates the streaming assistant placeholder and
 // starts one asynchronous Rig agent run.
@@ -760,7 +821,7 @@ func (s *service) send(sessionID, prompt string, attachments []contracts.Attachm
 	runCtx, cancel := context.WithCancel(context.Background())
 	state.cancel = cancel
 	title := state.title
-	cfg := s.configLocked()
+	cfg := s.configForSessionLocked(sessionID)
 	s.mu.Unlock()
 
 	if s.store != nil {
@@ -844,7 +905,7 @@ func (s *service) Regenerate(sessionID string) error {
 	state.updatedAt = now
 	runCtx, cancel := context.WithCancel(context.Background())
 	state.cancel = cancel
-	cfg := s.configLocked()
+	cfg := s.configForSessionLocked(sessionID)
 	s.mu.Unlock()
 
 	// Persist the rewound turn: the history up to the last user message
@@ -1331,10 +1392,11 @@ func dataURLMIME(dataURL string) string {
 func messageTime(rig.Message) time.Time { return time.Time{} }
 
 // snapshot returns a deep copy of the session read model.
-func (state *sessionState) snapshot() contracts.ChatSession {
+func (state *sessionState) snapshot(model string) contracts.ChatSession {
 	out := contracts.ChatSession{
 		ID:        state.id,
 		Title:     state.title,
+		Model:     model,
 		Running:   state.running,
 		Error:     state.err,
 		CreatedAt: state.createdAt,

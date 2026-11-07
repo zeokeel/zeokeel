@@ -1,0 +1,120 @@
+// Package modelcatalog is ZeoKeel's model-catalog backend module: it lists the
+// model presets the composer's model switcher offers. The catalog is static
+// product data (assembly config overrides the built-in presets); it deliberately
+// does not talk to any provider or persist the user's selection — the agent
+// module owns per-session model overrides in settings.
+package modelcatalog
+
+import (
+	"fmt"
+	"strings"
+
+	cordis "github.com/zeokeel/zeokeel-kernel"
+	"github.com/zeokeel/zeokeel-kernel/module"
+
+	"github.com/zeokeel/zeokeel/internal/contracts"
+)
+
+const (
+	// ModuleID is the stable module identity used by assembly documents.
+	ModuleID = "zeokeel/modelcatalog"
+	// Version is the module's semantic version.
+	Version = "1.0.0"
+)
+
+// Model is one configurable catalog entry (assembly JSON).
+type Model struct {
+	// ID is the model identifier sent to the provider (chat.model).
+	ID string `json:"id"`
+	// Name is the display label (empty falls back to ID).
+	Name string `json:"name"`
+	// Note is a short hint (capability or provider).
+	Note string `json:"note"`
+}
+
+// Config is the module's typed assembly config.
+type Config struct {
+	// Models replaces the built-in presets when non-empty.
+	Models []Model `json:"models"`
+}
+
+// defaultModels are the presets shipped when the assembly config is empty:
+// DeepSeek leads because it is the product's primary provider.
+var defaultModels = []contracts.ModelInfo{
+	{ID: "deepseek-chat", Name: "DeepSeek Chat", Note: "通用对话"},
+	{ID: "deepseek-reasoner", Name: "DeepSeek Reasoner", Note: "深度推理"},
+}
+
+// Module is the model-catalog backend descriptor. It provides
+// contracts.KeyModelCatalog.
+func Module() *module.Descriptor[Config] {
+	return module.Define(ModuleID, func(ctx cordis.Context, cfg Config) error {
+		logger, err := ctx.Require(contracts.KeyLogger)
+		if err != nil {
+			return fmt.Errorf("%s: require logger: %w", ModuleID, err)
+		}
+		service := newService(cfg, logger)
+		if _, err := ctx.Provide(contracts.KeyModelCatalog, contracts.ModelCatalogService(service)); err != nil {
+			return fmt.Errorf("%s: provide model catalog: %w", ModuleID, err)
+		}
+		return nil
+	}).
+		AddProvides(module.Provides(contracts.KeyModelCatalog)).
+		AddRequires(module.Requires(contracts.KeyLogger)).
+		WithName("ZeoKeel model catalog").
+		WithVersion(Version).
+		WithValidate(validateConfig)
+}
+
+// validateConfig rejects entries the selector could not render unambiguously.
+func validateConfig(cfg Config) error {
+	seen := make(map[string]int, len(cfg.Models))
+	for index, model := range cfg.Models {
+		id := strings.TrimSpace(model.ID)
+		if id == "" {
+			return fmt.Errorf("%s: models[%d].id is empty", ModuleID, index)
+		}
+		if first, duplicate := seen[id]; duplicate {
+			return fmt.Errorf("%s: models[%d].id %q duplicates models[%d]", ModuleID, index, id, first)
+		}
+		seen[id] = index
+	}
+	return nil
+}
+
+// service is the contracts.ModelCatalogService implementation.
+type service struct {
+	models []contracts.ModelInfo
+	logger contracts.Logger
+}
+
+// newService builds the catalog, copying the configured entries so neither the
+// assembly config nor callers can mutate the module's state.
+func newService(cfg Config, logger contracts.Logger) *service {
+	models := make([]contracts.ModelInfo, 0, len(cfg.Models))
+	if len(cfg.Models) == 0 {
+		models = append(models, defaultModels...)
+	} else {
+		for _, model := range cfg.Models {
+			id := strings.TrimSpace(model.ID)
+			name := strings.TrimSpace(model.Name)
+			if name == "" {
+				name = id
+			}
+			models = append(models, contracts.ModelInfo{
+				ID:   id,
+				Name: name,
+				Note: strings.TrimSpace(model.Note),
+			})
+		}
+	}
+	return &service{models: models, logger: logger}
+}
+
+// Models returns the catalog presets. The caller gets a copy: changing the
+// returned slice or its elements never affects later calls.
+func (s *service) Models() []contracts.ModelInfo {
+	out := make([]contracts.ModelInfo, len(s.models))
+	copy(out, s.models)
+	return out
+}

@@ -61,8 +61,11 @@ type ChatMessage struct {
 
 // ChatSession is the read model of one conversation.
 type ChatSession struct {
-	ID        string
-	Title     string
+	ID    string
+	Title string
+	// Model is the effective model for this session: the session override when
+	// one was chosen in the composer, else the configured chat.model.
+	Model     string
 	Messages  []ChatMessage
 	Running   bool
 	Error     string
@@ -142,6 +145,19 @@ type AttachmentSender interface {
 // (the old shell persisted pins in settings, not in the session schema).
 func SessionPinnedSettingKey(sessionID string) string {
 	return "session." + sessionID + ".pinned"
+}
+
+// SessionModelSwitcher is the optional half of the chat service that changes
+// the model of one session (the old shell's composer model switcher).
+type SessionModelSwitcher interface {
+	// SetSessionModel points sessionID at model for its following runs and
+	// persists the choice.
+	SetSessionModel(sessionID, model string) error
+}
+
+// Session model override settings key.
+func SessionModelSettingKey(sessionID string) string {
+	return "session." + sessionID + ".model"
 }
 
 // SessionRegenerator is the optional half of the chat service that retries the

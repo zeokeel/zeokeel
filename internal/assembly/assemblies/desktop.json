@@ -79,6 +79,11 @@
       "config": {}
     },
     {
+      "id": "modelcatalog",
+      "module": "zeokeel/modelcatalog",
+      "config": {}
+    },
+    {
       "id": "ui",
       "module": "zeokeel/host/group",
       "children": [

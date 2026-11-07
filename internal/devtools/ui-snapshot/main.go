@@ -180,6 +180,15 @@ func main() {
 		a.tester.Key(0, ui.KeyBackspace)
 		a.tester.Frame()
 	}
+	// Composer model menu (catalog presets + per-session switch).
+	if err := a.tester.Click("snapshot-model"); err == nil {
+		a.tester.Frame()
+		a.render(outDir + "/p2-modelmenu.png")
+		if err := a.tester.Click("DeepSeek Reasoner · 深度推理"); err == nil {
+			a.tester.Frame()
+			a.render(outDir + "/p2-model-switched.png")
+		}
+	}
 
 	if err := a.tester.Click("轨迹"); err != nil {
 		fmt.Println("click trajectory:", err)

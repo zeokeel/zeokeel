@@ -21,6 +21,13 @@
 - 右侧栏「文件」Tab：打开文件夹（mygo 原生 Directory picker）、目录进入/面包屑、文本/Markdown/图片预览、
   刷新与错误状态；E2E 覆盖工作区创建 + 列表 + 预览帧
 
+**P5 模型切换 + 模型目录（2026-11-08）**
+- modelcatalog 模块：默认 deepseek-chat/deepseek-reasoner 预设，Config 覆盖，Validate/副本语义
+- agent per-session 模型：SessionModelSwitcher（settings session.<id>.model；effective model 进 ChatSession.Model；
+  Send/Regenerate 使用会话模型；restore 后自动生效）+ 5 个新测试
+- composer 模型 chip：可交互 PopoverMenuButton（catalog 菜单/当前打勾/Note/打开模型设置回退/i18n）；7 个新测试；
+  E2E 切换后 Session().Model=deepseek-chat；截图 p2-modelmenu.png/p2-model-switched.png
+
 **P5 composer 深度第一切片（2026-11-08）**
 - session slash 命令（register/unregister via ctx.Effect）：新会话、创建副本（SessionForker）、导出对话（ExportSaver）、
   打开设置；`/` 菜单与命令面板共用 UIRuntime.Commands

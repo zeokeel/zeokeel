@@ -395,6 +395,24 @@ func TestP1ApprovalToolsAndPersistence(t *testing.T) {
 	uiRoot.Navigator().CloseSettings()
 	tester.Frame()
 
+	// Composer model menu: the catalog presets switch the session model.
+	if err := tester.Click("test-model"); err != nil {
+		t.Fatalf("open model menu: %v; texts = %v", err, tester.Texts())
+	}
+	tester.Frame()
+	if !tester.HasText("DeepSeek Chat · 通用对话") {
+		t.Fatalf("model catalog missing; texts = %v", tester.Texts())
+	}
+	if err := tester.Click("DeepSeek Chat · 通用对话"); err != nil {
+		t.Fatalf("choose catalog model: %v; texts = %v", err, tester.Texts())
+	}
+	tester.Frame()
+	activeID := chat.ActiveSession()
+	modelSession, ok := chat.Session(activeID)
+	if !ok || modelSession.Model != "deepseek-chat" {
+		t.Fatalf("session model = %q (ok %v), want deepseek-chat", modelSession.Model, ok)
+	}
+
 	// Language switching is live: the session screen and the sidebar re-render
 	// in English on the next frame and back to Chinese.
 	locale, err := root.Require(contracts.KeyLocale)
