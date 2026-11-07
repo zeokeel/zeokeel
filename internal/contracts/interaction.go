@@ -93,4 +93,7 @@ const (
 	// SettingSingleInstance keeps one running instance and hands new launches
 	// to it (default true).
 	SettingSingleInstance = "ui.singleInstance"
+	// SettingCloseToTray keeps the app alive in the system tray instead of
+	// quitting when the window is closed (desktop only; default false).
+	SettingCloseToTray = "ui.closeToTray"
 )

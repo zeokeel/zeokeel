@@ -421,6 +421,7 @@ func runDesktop(opts Options) error {
 	var (
 		loader       *module.Loader
 		window       *mygo.Window
+		tray         trayHandle
 		startupErr   error
 		shutdownOnce sync.Once
 		closing      atomic.Bool
@@ -439,6 +440,10 @@ func runDesktop(opts Options) error {
 					logger.Printf("%s: close assembly: %v", appName, err)
 				}
 				loader = nil
+			}
+			if tray != nil {
+				tray.Destroy()
+				tray = nil
 			}
 			if window != nil && !window.IsDestroyed() {
 				window.Close()
@@ -522,6 +527,16 @@ func runDesktop(opts Options) error {
 				uiRoot.FileDrop().Dispatch(event.Paths)
 			}
 		})
+		// System tray (best effort): a session without a tray host, such as a
+		// bare Xvfb display, fails NewTray; log it and keep running. With
+		// close-to-tray enabled the close handler hides the window instead of
+		// quitting; the teardown path (keepAlive false) still closes it.
+		if created, trayErr := setupTray(window, settings, func() bool { return !closing.Load() }); trayErr != nil {
+			logger.Printf("%s: system tray unavailable: %v", appName, trayErr)
+		} else {
+			tray = created
+			logger.Printf("%s: system tray ready (close to tray: %t)", appName, closeToTrayEnabled(settings))
+		}
 		logger.Printf("%s: %s product %q loaded: %d module instances, screens %v",
 			appName, opts.versionString(), opts.Product, len(loader.Instances()),
 			uiRoot.ScreenLister().Screens())

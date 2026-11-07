@@ -85,7 +85,7 @@
 | Composer 深度（/goal /plan /memory/权限/effort/@session/presets） | 🟡 | `sessionCommands` + `command_dialogs.go` + `buildComposerToolbar` | 已落地：/新会话 /创建副本 /导出对话 /打开设置 /设置目标 /审阅计划 /添加记忆 /反馈（共 9 条）、权限模式、模式切换（普通/计划）、推理强度、@session、预设插入；缺 /compact、/goal 子命令 |
 | Chrome/Sidebar/折叠 rail/右栏 dock | ✅ | uiroot + sidebar | 280px sidebar、64px rail、Cmd/Ctrl+B、右栏开关 |
 | 命令面板/窗口内快捷键 | ✅ | uiroot palette/shortcuts | Cmd/Ctrl+K、可配置两条 chrome 快捷键；非系统全局热键 |
-| Settings 外壳与页面 | 🟡 | `internal/ui/settings`、about | 14 页：模型/模型目录/服务商/诊断/快捷键/外观/技能/更新/导入/搜索/MCP/网络/预设 + 关于，en/zh；更新页含下载/暂存/重启安装；缺记忆管理页、内置插件开关/详情 |
+| Settings 外壳与页面 | 🟡 | `internal/ui/settings`、about | 14 页：模型/模型目录/服务商/诊断/快捷键/外观（含托盘开关）/技能（编辑）/更新/导入/搜索/MCP/网络/预设 + 关于，en/zh；更新页含下载/暂存/重启安装；缺独立记忆管理页（会话 Memory tab 已含管理）、内置插件开关/市场 |
 | Approval 审批 Modal | ✅ | `internal/ui/approval` + approvals 模块 | allow/allow-always/deny、ask/workspace/full/never（settings 覆盖、workspace 只读自动 allow） |
 | 右侧检查栏 | ✅ | rightpanel | 8 tab：概览/工具/日志/文件/变更/终端/**团队**/**任务**，en/zh |
 | Files 检查器 | ✅ | rightpanel files + workspace | 打开文件夹/面包屑/文本/Markdown/图片预览/错误态 |

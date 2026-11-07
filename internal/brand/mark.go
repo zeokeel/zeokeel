@@ -37,6 +37,13 @@ func brandBitmap(data []byte, name string) *ui.Bitmap {
 	return ui.NewBitmap(img)
 }
 
+// MarkPNGBytes returns a copy of the embedded light brand mark PNG: the raw
+// image bytes for consumers outside the UI, such as the system tray icon. The
+// copy keeps the embedded asset read-only.
+func MarkPNGBytes() []byte {
+	return append([]byte(nil), markPNG...)
+}
+
 // Mark returns the brand mark bitmap for the given appearance.
 func Mark(dark bool) *ui.Bitmap {
 	if dark {

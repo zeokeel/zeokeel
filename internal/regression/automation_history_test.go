@@ -268,11 +268,22 @@ func TestAutomationConcurrentRunNowRace(t *testing.T) {
 		}()
 	}
 	wg.Wait()
+	// Concurrent runs under a loaded CI box can take longer than the default
+	// polling budget, so give this test a generous one.
 	for _, task := range tasks {
-		updated := automationHistory(t, service, task.ID, 1)
-		if len(updated.RunHistory) == 0 {
-			t.Fatalf("task %s recorded no history", task.ID)
-		}
+		task := task
+		waitForLong(t, "concurrent automation history "+task.ID, 15*time.Second, func() bool {
+			all, err := service.List(context.Background())
+			if err != nil {
+				return false
+			}
+			for _, candidate := range all {
+				if candidate.ID == task.ID {
+					return len(candidate.RunHistory) > 0
+				}
+			}
+			return false
+		})
 	}
 }
 

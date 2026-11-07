@@ -242,9 +242,11 @@ type appearanceState struct {
 	statusErr bool
 
 	// Desktop integration switches (persisted immediately, applied by the
-	// process host: XDG autostart entry and the single-instance lock).
+	// process host: XDG autostart entry and the single-instance lock) plus the
+	// close-to-tray switch (the host hides the window instead of quitting).
 	autostart      bool
 	singleInstance bool
+	closeToTray    bool
 }
 
 // singleInstanceSwitchEnabled reads the stored single-instance setting with the
@@ -561,6 +563,7 @@ func Module() *module.Descriptor[Config] {
 			language:       locale.Language(),
 			autostart:      store.Get(contracts.SettingAutostart, "false") == "true",
 			singleInstance: singleInstanceSwitchEnabled(store.Get(contracts.SettingSingleInstance, "true")),
+			closeToTray:    closeToTraySettingEnabled(store.Get(contracts.SettingCloseToTray, "false")),
 		}
 		skills := newSkillsState()
 		update := newUpdateState()
@@ -1047,6 +1050,20 @@ func buildAppearancePage(c *ui.Context, state *appearanceState, store contracts.
 				t.TextMuted(design.TypeXXS))
 		})
 
+		panel(c, t, func() {
+			sectionTitle(c, t, localized(locale, "系统托盘", "System tray"))
+			trayToggle := ui.Toggle(c, &state.closeToTray,
+				localized(locale, "关闭时最小化到托盘", "Close to system tray"))
+			if trayToggle.Changed() {
+				applyDesktopSetting(state, store, contracts.SettingCloseToTray,
+					fmt.Sprintf("%t", state.closeToTray), locale)
+			}
+			design.Apply(ui.Text(c, localized(locale,
+				"需要系统托盘支持；修改后重启应用生效。",
+				"Requires system tray support; takes effect after restart.")),
+				t.TextMuted(design.TypeXXS))
+		})
+
 		ui.Row(c).FillWidth().Gap(design.Space2).AlignItems(ui.Center).Children(func() {
 			if brandPrimaryButton(c, t, icons.Globe(), labels.saveLabel).Clicked() {
 				theme.SetDark(state.dark)
@@ -1077,7 +1094,10 @@ func saveAppearance(state *appearanceState, store contracts.SettingsService) err
 	if err := store.Set(contracts.SettingAutostart, fmt.Sprintf("%t", state.autostart)); err != nil {
 		return err
 	}
-	return store.Set(contracts.SettingSingleInstance, fmt.Sprintf("%t", state.singleInstance))
+	if err := store.Set(contracts.SettingSingleInstance, fmt.Sprintf("%t", state.singleInstance)); err != nil {
+		return err
+	}
+	return store.Set(contracts.SettingCloseToTray, fmt.Sprintf("%t", state.closeToTray))
 }
 
 // applyDesktopSetting persists one desktop-integration switch immediately (the

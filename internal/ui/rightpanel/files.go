@@ -90,6 +90,19 @@ func buildArtifactsSection(c *ui.Context, t *design.Tokens, artifacts contracts.
 			design.Apply(ui.Text(c, uikit.T(st.locale, "产物", "Artifacts")), t.Font(design.TypeXXS)).
 				FontWeight(600).TextColor(t.LabelSecondary).Grow(1)
 		})
+		if st.artifactsErr != "" {
+			buildErrorLine(c, t, st.artifactsErr)
+		}
+		if st.artifactsNotice != "" {
+			ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(design.Space2).Children(func() {
+				design.Apply(ui.Badge(c, st.artifactsNotice), t.Badge()).TextColor(t.Success)
+				if st.artifactsSavedPath != "" {
+					design.Apply(ui.Text(c, st.artifactsSavedPath), t.Font(design.TypeXXXS)).
+						TextColor(t.LabelTertiary).Grow(1).MaxLines(1).Ellipsis("…").
+						Tooltip(st.artifactsSavedPath)
+				}
+			})
+		}
 		if len(history) == 0 {
 			design.Apply(ui.Text(c, uikit.T(st.locale, "还没有产物", "No artifacts yet")),
 				t.TextMuted(design.TypeXXS))
@@ -129,6 +142,11 @@ func buildArtifactsSection(c *ui.Context, t *design.Tokens, artifacts contracts.
 				}
 				if ui.Button(c, previewLabel).Clicked() {
 					toggle()
+				}
+				download := ui.Button(c, uikit.T(st.locale, "下载", "Download")).
+					Tooltip(uikit.T(st.locale, "保存为 Markdown", "Save as Markdown"))
+				if download.Clicked() {
+					saveArtifact(st, runtime, artifact)
 				}
 			})
 			if open {

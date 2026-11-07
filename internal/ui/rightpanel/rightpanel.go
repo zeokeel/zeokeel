@@ -165,8 +165,11 @@ type state struct {
 	teamErr          string
 
 	// Files pane artifact history: the expanded preview rows (keyed by
-	// artifact id).
-	artifactsOpen map[string]bool
+	// artifact id) and the last download status.
+	artifactsOpen      map[string]bool
+	artifactsNotice    string
+	artifactsErr       string
+	artifactsSavedPath string
 
 	// Tasks pane state: the cached shared task board (loaded lazily and after
 	// every mutation) and the new-task draft.

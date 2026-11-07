@@ -21,6 +21,13 @@
 - 右侧栏「文件」Tab：打开文件夹（mygo 原生 Directory picker）、目录进入/面包屑、文本/Markdown/图片预览、
   刷新与错误状态；E2E 覆盖工作区创建 + 列表 + 预览帧
 
+**TDD-tray/artifact-download（2026-11-08）**
+- 系统托盘：host `tray.go`（品牌 mark PNG、ID/ToolTip、「显示 ZeoKeel/退出」菜单；NewTray 失败仅告警；xvfb 冒烟 exit 124 无 panic）；
+  关闭到托盘：仅当 `ui.closeToTray` 归一 on 且托盘可用 → OnClose PreventDefault+Hide，shutdown guard 放行；外观页新增托盘 Toggle（默认 off，
+  坏值归一，重启生效）；host 58 / settings 98 测试
+- 工件下载：rightpanel Files「产物」每条新增「下载」（原生保存对话框、Unicode slug、Markdown 内容、成功 Badge+路径/失败错误、取消无操作）；
+  rightpanel 68 测试
+
 **TDD-memory/skills-edit（2026-11-08）**
 - Memory tab 管理：统计行 +「整理记忆」（规范化去重、保留最早、Remove 重复、失败计数）+「全部清空」（native 确认）＋i18n；session 120 测试
 - 技能编辑：contracts `SkillsEditor/KeySkillsEditor`；skills 模块新建（name/body 校验、frontmatter、O_EXCL、即时可见）与删除（仅 dataDir、
