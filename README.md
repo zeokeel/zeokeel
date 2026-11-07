@@ -1,5 +1,10 @@
 # ZeoKeel
 
+> **最终轮状态（Round 40/40）**：可运行的桌面/headless/ACP 产品；32 测试包（含 -race）全绿；
+> 47 步 UI 快照与 60 张截图。旧功能覆盖 **✅26 / 🟡27 / ❌9**（见 [docs/COVERAGE.md](docs/COVERAGE.md)），
+> 因此**覆盖清单尚未 100% 完成**，剩余 Top5：编排执行、composer 高级控制、presets/@session、
+> 更新安装与桌面集成、MCP/插件/artifact/todo 管理深度。验证证据：[docs/VERIFICATION.md](docs/VERIFICATION.md)。
+
 编译期模块化的 Go 桌面 AI agent：**薄总入口 + 内核装配 + 模块贡献点**。
 UI 是 mygo 原生控件（无浏览器/webview）；所有模块一起编译进同一二进制，`assembly.json`
 只决定启用/裁剪哪些模块。
