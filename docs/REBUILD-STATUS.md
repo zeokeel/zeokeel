@@ -21,6 +21,15 @@
 - 右侧栏「文件」Tab：打开文件夹（mygo 原生 Directory picker）、目录进入/面包屑、文本/Markdown/图片预览、
   刷新与错误状态；E2E 覆盖工作区创建 + 列表 + 预览帧
 
+**TDD 并行推进 + 反证审计修复（2026-11-08）**
+- TDD-1 subagent 同步委派：agent 模块提供 `contracts.Subagents`（rig agent.NewRunner 嵌套、递归排除编排名、fork/模型/迭代覆盖），
+  注册 `subagent`/`subagent_fork` 工具；agent 测试 +6
+- TDD-2 permission 权限模式：approvals 动态读 `agent.permission`（ask/workspace/full→auto），workspace 只读工具免问；
+  composer 「权限模式」slash 命令循环 + Badge（询问/工作区/全部允许）；approvals +11/session +10 测试
+- 反证审计 `internal/regression`（78 顶层 Test，7 区，-race 10s）：发现 4 个 P2 + 4 个 P3，全部 TDD 修复，探针 0 SKIP/92 PASS
+  （搜索文本语义、importer symlink 逃逸、update nil ctx、uiroot handler panic 遏制、JSONL 文案/i18n、MCP 去重、预览计数）
+- E2E：subagent 工具返回真实子代理回答；permission full 自动放行不排队、恢复 ask
+
 **Round 39 最终验证（2026-11-08）**
 - build/vet OK；32 测试包（含 -race）全绿；CGO_ENABLED=0 UI 定向绿
 - desktop（xvfb，26 实例 / 4 screens）、headless（14 实例）、ACP（initialize/session-new，exit 0）冒烟通过

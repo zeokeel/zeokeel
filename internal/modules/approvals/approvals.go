@@ -78,7 +78,8 @@ func Module() *module.Descriptor[Config] {
 		if err != nil {
 			return err
 		}
-		service, err := newService(cfg.Mode, logger)
+		settings, _ := ctx.Get(contracts.KeySettings)
+		service, err := newServiceWithSettings(cfg.Mode, logger, settings)
 		if err != nil {
 			return err
 		}
@@ -113,6 +114,11 @@ type service struct {
 	mode   string
 	logger contracts.Logger
 
+	// settings is the optional permissions store: a non-empty
+	// contracts.SettingAgentPermission overrides the assembly mode on every
+	// call, so a runtime switch applies to the next tool call.
+	settings contracts.SettingsService
+
 	nextSeq uint64
 	pending map[string]*pendingRequest
 
@@ -127,6 +133,12 @@ var _ contracts.Approvals = (*service)(nil)
 
 // newService validates and normalizes the configured mode.
 func newService(mode string, logger contracts.Logger) (*service, error) {
+	return newServiceWithSettings(mode, logger, nil)
+}
+
+// newServiceWithSettings builds the service with the optional permissions
+// store (contracts.SettingAgentPermission). A nil store keeps the config mode.
+func newServiceWithSettings(mode string, logger contracts.Logger, settings contracts.SettingsService) (*service, error) {
 	normalized, err := normalizeMode(mode)
 	if err != nil {
 		return nil, err
@@ -137,6 +149,7 @@ func newService(mode string, logger contracts.Logger) (*service, error) {
 	return &service{
 		mode:     normalized,
 		logger:   logger,
+		settings: settings,
 		pending:  make(map[string]*pendingRequest),
 		resolved: make(map[string]contracts.ApprovalDecision),
 	}, nil
@@ -160,11 +173,46 @@ type discardLogger struct{}
 
 func (discardLogger) Printf(string, ...any) {}
 
-// Mode implements contracts.Approvals.
+// Mode implements contracts.Approvals: it reports the effective policy for the
+// current permissions setting ("ask", "workspace", "auto" or "never").
 func (s *service) Mode() string {
+	return s.effectiveMode()
+}
+
+// effectiveMode resolves the configured mode and the optional permissions
+// setting: a non-empty setting wins; ask/workspace/full map onto the policy,
+// unknown values degrade to ask and the legacy "auto" value is an alias of
+// full.
+func (s *service) effectiveMode() string {
 	s.mu.Lock()
-	defer s.mu.Unlock()
-	return s.mode
+	configured := s.mode
+	s.mu.Unlock()
+	if s.settings == nil {
+		return configured
+	}
+	raw := strings.ToLower(strings.TrimSpace(s.settings.Get(contracts.SettingAgentPermission, "")))
+	if raw == "" {
+		return configured
+	}
+	switch raw {
+	case contracts.PermissionAsk:
+		return ModeAsk
+	case contracts.PermissionWorkspace:
+		return contracts.PermissionWorkspace
+	case contracts.PermissionFull, ModeAuto:
+		return ModeAuto
+	default:
+		return ModeAsk
+	}
+}
+
+// workspaceReadOnlyTools are the tools the workspace permission mode allows
+// without asking (read-only workspace inspection).
+var workspaceReadOnlyTools = map[string]bool{
+	"read_file": true,
+	"list_dir":  true,
+	"glob":      true,
+	"grep":      true,
 }
 
 // Request implements contracts.Approvals: auto/never answer immediately, ask
@@ -173,14 +221,15 @@ func (s *service) Request(ctx context.Context, request contracts.ApprovalRequest
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	s.mu.Lock()
-	mode := s.mode
-	s.mu.Unlock()
-	switch mode {
+	switch mode := s.effectiveMode(); mode {
 	case ModeAuto:
 		return contracts.ApprovalAllow, nil
 	case ModeNever:
 		return contracts.ApprovalDeny, nil
+	case contracts.PermissionWorkspace:
+		if workspaceReadOnlyTools[strings.TrimSpace(request.Tool)] {
+			return contracts.ApprovalAllow, nil
+		}
 	}
 
 	s.mu.Lock()

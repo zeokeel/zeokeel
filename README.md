@@ -1,5 +1,8 @@
 # ZeoKeel
 
+> **继续推进（TDD 并行 + 反证审计）**：新增 subagent 同步委派、permission 权限模式（ask/workspace/full）；
+> 反证审计 78 例发现 4×P2+4×P3 全部修复，`internal/regression` 0 SKIP。详情：[docs/ADVERSARIAL-AUDIT.md](docs/ADVERSARIAL-AUDIT.md)。
+>
 > **最终轮状态（Round 40/40）**：可运行的桌面/headless/ACP 产品；32 测试包（含 -race）全绿；
 > 47 步 UI 快照与 60 张截图。旧功能覆盖 **✅26 / 🟡27 / ❌9**（见 [docs/COVERAGE.md](docs/COVERAGE.md)），
 > 因此**覆盖清单尚未 100% 完成**，剩余 Top5：编排执行、composer 高级控制、presets/@session、

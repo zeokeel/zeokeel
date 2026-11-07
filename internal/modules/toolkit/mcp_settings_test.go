@@ -263,3 +263,32 @@ func mustJSON(t *testing.T, value any) string {
 	}
 	return string(encoded)
 }
+
+// TestMergeMCPServersURLCaseInsensitive covers AUDIT-P3-1: URLs differing only
+// by case are the same endpoint for deduplication; the assembly entry still
+// wins and the first user occurrence is kept.
+func TestMergeMCPServersURLCaseInsensitive(t *testing.T) {
+	var warnings []string
+	logf := func(format string, args ...any) { warnings = append(warnings, fmt.Sprintf(format, args...)) }
+
+	assembly := []MCPServer{{Name: "assembly", URL: "http://127.0.0.1:1/shared"}}
+	merged := mergeMCPServers(assembly, `[{"name":"cased","url":"HTTP://127.0.0.1:1/SHARED"}]`, logf)
+	if len(merged) != 1 || merged[0].Name != "assembly" {
+		t.Fatalf("case-different assembly conflict merged = %+v, want the assembly entry", merged)
+	}
+	if len(warnings) != 1 || !strings.Contains(warnings[0], "duplicate") {
+		t.Fatalf("warnings = %v, want one duplicate warning", warnings)
+	}
+
+	warnings = nil
+	merged = mergeMCPServers(nil, `[
+		{"name":"first","url":"HTTP://Host.Example/A/Path"},
+		{"name":"second","url":"http://host.example/a/path"}
+	]`, logf)
+	if len(merged) != 1 || merged[0].Name != "first" {
+		t.Fatalf("case-different user dedupe merged = %+v, want the first occurrence", merged)
+	}
+	if len(warnings) != 1 || !strings.Contains(warnings[0], "duplicate") {
+		t.Fatalf("warnings = %v, want one duplicate warning", warnings)
+	}
+}

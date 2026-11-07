@@ -127,6 +127,10 @@ type state struct {
 	// locale is the host locale service (optional). Copy is generated per frame
 	// with uikit.T so switching the language applies on the next frame.
 	locale contracts.LocaleService
+
+	// settings is the optional settings store: the permission command and the
+	// composer's permission badge read/write contracts.SettingAgentPermission.
+	settings contracts.SettingsService
 }
 
 // tr returns the localized copy for the current frame's language.
@@ -161,8 +165,10 @@ func Module() *module.Descriptor[Config] {
 		}
 		config := cfg.resolved()
 		locale, _ := ctx.Get(contracts.KeyLocale)
+		settings, _ := ctx.Get(contracts.KeySettings)
 		moduleState := &state{
 			locale:     locale,
+			settings:   settings,
 			thinkOpen:  make(map[string]bool),
 			toolOpen:   make(map[string]bool),
 			thumbnails: make(map[string]*ui.Bitmap),
@@ -249,8 +255,59 @@ func Module() *module.Descriptor[Config] {
 		WithName("ZeoKeel conversation screen")
 }
 
+// permissionMode reads the effective agent permission mode from the settings
+// store (ask when unset/unknown or without a store).
+func permissionMode(settings contracts.SettingsService) string {
+	if settings == nil {
+		return contracts.PermissionAsk
+	}
+	switch strings.ToLower(strings.TrimSpace(settings.Get(contracts.SettingAgentPermission, ""))) {
+	case contracts.PermissionWorkspace:
+		return contracts.PermissionWorkspace
+	case contracts.PermissionFull:
+		return contracts.PermissionFull
+	case contracts.PermissionAsk:
+		return contracts.PermissionAsk
+	default:
+		return contracts.PermissionAsk
+	}
+}
+
+// nextPermissionMode cycles ask → workspace → full → ask.
+func nextPermissionMode(mode string) string {
+	switch mode {
+	case contracts.PermissionAsk:
+		return contracts.PermissionWorkspace
+	case contracts.PermissionWorkspace:
+		return contracts.PermissionFull
+	default:
+		return contracts.PermissionAsk
+	}
+}
+
+// cyclePermissionMode advances the stored permission mode by one step.
+func cyclePermissionMode(st *state) {
+	if st.settings == nil {
+		return
+	}
+	_ = st.settings.Set(contracts.SettingAgentPermission,
+		nextPermissionMode(permissionMode(st.settings)))
+}
+
+// permissionLabel renders one permission mode for the composer badge.
+func (st *state) permissionLabel(mode string) string {
+	switch mode {
+	case contracts.PermissionWorkspace:
+		return st.tr("工作区", "Workspace")
+	case contracts.PermissionFull:
+		return st.tr("全部允许", "Allow all")
+	default:
+		return st.tr("询问", "Ask")
+	}
+}
+
 // sessionCommands is the conversation screen's slash-command surface: new
-// session, fork, export and settings. The command palette reads these from the
+// session, fork, export, the permission-mode cycle and settings. The command palette reads these from the
 // UIRuntime command registry; Enabled callbacks expose only the actions that
 // the current session/backends support.
 func sessionCommands(runtime contracts.UIRuntime, navigator contracts.Navigator,
@@ -328,6 +385,18 @@ func sessionCommands(runtime contracts.UIRuntime, navigator contracts.Navigator,
 					return nil
 				}
 				exportSession(st, session, config)
+				return nil
+			},
+		},
+		{
+			ID:      "zeokeel.session.permission",
+			Title:   "权限模式",
+			Hint:    "切换权限模式：询问 → 工作区 → 全部允许",
+			Order:   45,
+			Enabled: func() bool { return st.settings != nil },
+			Run: func() error {
+				cyclePermissionMode(st)
+				runtime.Invalidate()
 				return nil
 			},
 		},

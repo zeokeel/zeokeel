@@ -144,7 +144,15 @@ func newService(cfg Config, appInfo contracts.AppInfo, logger contracts.Logger) 
 }
 
 // Check implements contracts.UpdateService.
+//
+// A nil context is treated as context.Background(), like the other host-facing
+// services (approvals, interaction, artifacts, plan, goal): callers such as a
+// future CLI may not have a run context, and a nil dereference here would be a
+// panic rather than a readable error.
 func (s *service) Check(ctx context.Context) (contracts.UpdateInfo, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	if err := ctx.Err(); err != nil {
 		return contracts.UpdateInfo{}, err
 	}

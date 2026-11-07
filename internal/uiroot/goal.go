@@ -57,7 +57,8 @@ func (s *goalService) Set(ctx context.Context, text string) (string, error) {
 	handler := s.handler
 	s.mu.Unlock()
 	if handler != nil {
-		handler(goal, true)
+		// A panicking display handler is contained; the goal is committed.
+		runHandlerSafely("goal", func() { handler(goal, true) })
 	}
 	return goal.ID, nil
 }
@@ -81,7 +82,7 @@ func (s *goalService) Clear() bool {
 	handler := s.handler
 	s.mu.Unlock()
 	if existed && handler != nil {
-		handler(contracts.Goal{}, false)
+		runHandlerSafely("goal", func() { handler(contracts.Goal{}, false) })
 	}
 	return existed
 }

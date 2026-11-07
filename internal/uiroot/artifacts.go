@@ -54,7 +54,9 @@ func (s *artifactService) Present(ctx context.Context, title, body string) (stri
 	handler := s.handler
 	s.mu.Unlock()
 	if handler != nil {
-		handler(artifact)
+		// A panicking display handler is contained: the artifact is already
+		// recorded and its id is still returned to the agent tool.
+		runHandlerSafely("artifact", func() { handler(artifact) })
 	}
 	return id, nil
 }

@@ -5,8 +5,11 @@ package sessionstore
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -286,5 +289,135 @@ func TestSearchMessagesSnippetLength(t *testing.T) {
 	}
 	if got := len([]rune(hits[0].Snippet)); got != searchSnippetFallback {
 		t.Fatalf("fallback snippet has %d runes, want %d", got, searchSnippetFallback)
+	}
+}
+
+// TestSearchMessagesQuotedAndBackslashText is the regression lock for
+// AUDIT-P2-1: matching must use decoded text, so literal quotes and backslashes
+// are searchable and a lone structural quote cannot match every message.
+func TestSearchMessagesQuotedAndBackslashText(t *testing.T) {
+	current := openTestStore(t)
+	ctx := context.Background()
+	if err := current.CreateSession(ctx, "quoted", "Quoted"); err != nil {
+		t.Fatalf("CreateSession: %v", err)
+	}
+	appendText(t, current, "quoted",
+		rig.NewMessage(rig.RoleUser, `the "quoted" answer`),
+		rig.NewMessage(rig.RoleUser, `path C:\tmp\file`),
+	)
+	if err := current.CreateSession(ctx, "plain", "Plain"); err != nil {
+		t.Fatalf("CreateSession: %v", err)
+	}
+	appendText(t, current, "plain", rig.NewMessage(rig.RoleUser, "message without quotes"))
+
+	hits, err := current.SearchMessages(ctx, `"quoted"`, 10)
+	if err != nil {
+		t.Fatalf("SearchMessages(quoted): %v", err)
+	}
+	if len(hits) != 1 || hits[0].SessionID != "quoted" || !strings.Contains(hits[0].Snippet, `"quoted"`) {
+		t.Fatalf("quoted hits = %+v, want the quoted message", hits)
+	}
+	hits, err = current.SearchMessages(ctx, `C:\tmp\file`, 10)
+	if err != nil {
+		t.Fatalf("SearchMessages(backslash path): %v", err)
+	}
+	if len(hits) != 1 || hits[0].SessionID != "quoted" || !strings.Contains(hits[0].Snippet, `C:\tmp\file`) {
+		t.Fatalf("backslash hits = %+v, want the literal path", hits)
+	}
+	// A lone quote is real text only in the quoted message; the structural
+	// JSON quotes in every payload must not match.
+	hits, err = current.SearchMessages(ctx, `"`, 10)
+	if err != nil {
+		t.Fatalf("SearchMessages(lone quote): %v", err)
+	}
+	if len(hits) != 1 || hits[0].SessionID != "quoted" || !strings.Contains(hits[0].Snippet, `"quoted"`) {
+		t.Fatalf("lone quote hits = %+v, want only the literal quoted message", hits)
+	}
+}
+
+// TestEventSearchQuotedPayloadText is the event-log half of AUDIT-P2-1.
+func TestEventSearchQuotedPayloadText(t *testing.T) {
+	current := openTestStore(t)
+	ctx := context.Background()
+	for _, event := range []rig.SessionEvent{
+		{SessionID: "events", Type: "tool_call", Payload: []byte(`{"summary":"the \"quoted\" answer"}`)},
+		{SessionID: "events", Type: "tool_call", Payload: []byte(`{"summary":"plain answer"}`)},
+	} {
+		if err := current.AppendEvent(ctx, event); err != nil {
+			t.Fatalf("AppendEvent: %v", err)
+		}
+	}
+	hits, err := current.Search(ctx, `"quoted"`, 10)
+	if err != nil {
+		t.Fatalf("Search(quoted): %v", err)
+	}
+	if len(hits) != 1 || !strings.Contains(string(hits[0].Payload), "quoted") {
+		t.Fatalf("Search(quoted) = %+v, want the quoted event", hits)
+	}
+	hits, err = current.Search(ctx, `"`, 10)
+	if err != nil {
+		t.Fatalf("Search(lone quote): %v", err)
+	}
+	if len(hits) != 1 {
+		t.Fatalf("Search(lone quote) = %d hits, want only the literal quote event", len(hits))
+	}
+	// Context/type matching and empty queries keep their old semantics.
+	if hits, err := current.Search(ctx, "tool_call", 10); err != nil || len(hits) != 2 {
+		t.Fatalf("Search(type) = %d/%v, want both events", len(hits), err)
+	}
+	if hits, err := current.Search(ctx, "  ", 10); err != nil || len(hits) != 2 {
+		t.Fatalf("Search(empty) = %d/%v, want both events", len(hits), err)
+	}
+}
+
+// TestSearchMigrationBackfillsDecodedText builds a pre-fix database (raw JSON
+// payloads, no search columns), reopens it through openStore and verifies the
+// migration backfills the decoded text and the searches work.
+func TestSearchMigrationBackfillsDecodedText(t *testing.T) {
+	dataDir := t.TempDir()
+	if err := os.MkdirAll(dataDir, 0o700); err != nil {
+		t.Fatalf("MkdirAll: %v", err)
+	}
+	path := filepath.Join(dataDir, DBFileName)
+	raw, err := sql.Open("sqlite", path)
+	if err != nil {
+		t.Fatalf("open raw db: %v", err)
+	}
+	for _, statement := range []string{
+		`CREATE TABLE sessions (id TEXT PRIMARY KEY, title TEXT, created_at INTEGER, updated_at INTEGER)`,
+		`CREATE TABLE messages (id INTEGER PRIMARY KEY AUTOINCREMENT, session_id TEXT NOT NULL, ordinal INTEGER, payload BLOB NOT NULL, created_at INTEGER)`,
+		`CREATE TABLE events (seq INTEGER PRIMARY KEY AUTOINCREMENT, session_id TEXT, type TEXT, payload BLOB, created_at INTEGER)`,
+		`INSERT INTO sessions(id, title, created_at, updated_at) VALUES('old', 'Old', 1, 1)`,
+		`INSERT INTO messages(session_id, ordinal, payload, created_at) VALUES('old', 1, '{"role":"user","content":[{"type":"text","text":"legacy \"quoted\" text"}]}', 1)`,
+		`INSERT INTO events(session_id, type, payload, created_at) VALUES('old', 'tool_call', '{"summary":"legacy \"quoted\" event"}', 1)`,
+	} {
+		if _, err := raw.Exec(statement); err != nil {
+			t.Fatalf("seed old schema: %v", err)
+		}
+	}
+	if err := raw.Close(); err != nil {
+		t.Fatalf("close raw db: %v", err)
+	}
+
+	current := openTestStoreAt(t, dataDir)
+	ctx := context.Background()
+	hits, err := current.SearchMessages(ctx, `"quoted"`, 10)
+	if err != nil || len(hits) != 1 || hits[0].SessionID != "old" {
+		t.Fatalf("migrated SearchMessages = %+v/%v, want the legacy quoted message", hits, err)
+	}
+	if !strings.Contains(hits[0].Snippet, `"quoted"`) {
+		t.Fatalf("migrated snippet = %q", hits[0].Snippet)
+	}
+	events, err := current.Search(ctx, `"quoted"`, 10)
+	if err != nil || len(events) != 1 {
+		t.Fatalf("migrated event Search = %+v/%v, want the legacy quoted event", events, err)
+	}
+	// Migration is idempotent and the backfilled text survives reopen.
+	if err := current.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+	reopened := openTestStoreAt(t, dataDir)
+	if hits, err := reopened.SearchMessages(ctx, `"quoted"`, 10); err != nil || len(hits) != 1 {
+		t.Fatalf("reopened SearchMessages = %+v/%v", hits, err)
 	}
 }

@@ -736,3 +736,112 @@ func TestImportUnknownDir(t *testing.T) {
 		t.Fatal("Import(missing dir) returned nil error")
 	}
 }
+
+// TestScanSkipsSymlinks covers AUDIT-P2-2: the scan must not follow symlinks
+// below sessions/ (neither a session log symlink, nor a symlinked directory,
+// nor a symlink named like a log pointing at a directory). Symlinks are skipped
+// with a note, not counted as skipped logs, and never parsed/imported.
+func TestScanSkipsSymlinks(t *testing.T) {
+	home := t.TempDir()
+	outside := t.TempDir()
+	cwd := t.TempDir()
+	writeSession(t, home, "real", "s-real", goodSessionLines(t, "s-real", cwd)...)
+
+	outsideFile := filepath.Join(outside, sessionFileName)
+	if err := os.WriteFile(outsideFile, []byte(strings.Join(goodSessionLines(t, "s-outside", cwd), "")), 0o600); err != nil {
+		t.Fatalf("write outside session: %v", err)
+	}
+	linkDir := filepath.Join(home, "sessions", "linked-session")
+	if err := os.MkdirAll(linkDir, 0o700); err != nil {
+		t.Fatalf("mkdir linked session: %v", err)
+	}
+	if err := os.Symlink(outsideFile, filepath.Join(linkDir, sessionFileName)); err != nil {
+		t.Skipf("symlinks unavailable: %v", err)
+	}
+	if err := os.Symlink(outside, filepath.Join(home, "sessions", "linked-dir")); err != nil {
+		t.Fatalf("symlink directory: %v", err)
+	}
+	weirdDir := filepath.Join(home, "sessions", "weird")
+	if err := os.MkdirAll(weirdDir, 0o700); err != nil {
+		t.Fatalf("mkdir weird: %v", err)
+	}
+	if err := os.Symlink(outside, filepath.Join(weirdDir, sessionFileName)); err != nil {
+		t.Fatalf("symlink weird log: %v", err)
+	}
+
+	store := newFakeStore()
+	service := newTestService(t, Config{SourceDir: home}, store, nil)
+	preview, err := service.Scan(context.Background(), "")
+	if err != nil {
+		t.Fatalf("Scan: %v", err)
+	}
+	if preview.Sessions != 1 || preview.Messages != 2 {
+		t.Fatalf("preview = %+v, want only the real session (2 messages)", preview)
+	}
+	if preview.Skipped != 0 {
+		t.Fatalf("preview.Skipped = %d, want symlinks ignored entirely", preview.Skipped)
+	}
+	notes := strings.Join(preview.Notes, "\n")
+	if !strings.Contains(notes, "symlink") {
+		t.Fatalf("notes = %q, want a symlink note", notes)
+	}
+
+	result, err := service.Import(context.Background(), "")
+	if err != nil {
+		t.Fatalf("Import: %v", err)
+	}
+	if result.ImportedSessions != 1 {
+		t.Fatalf("ImportedSessions = %d, want 1", result.ImportedSessions)
+	}
+	if _, ok := store.sessions["dsh-s-outside"]; ok {
+		t.Fatal("imported a session through a symlink")
+	}
+	if _, ok := store.sessions["dsh-s-real"]; !ok {
+		t.Fatal("the real session was not imported")
+	}
+}
+
+// TestScanPreviewDeduplicatesSourceSessionIDs covers AUDIT-P3-3: two logs with
+// the same DSH session ID are one importable session in the preview, while an
+// import still reports the duplicate as skipped (existing Skipped semantics).
+func TestScanPreviewDeduplicatesSourceSessionIDs(t *testing.T) {
+	home := t.TempDir()
+	cwd := t.TempDir()
+	writeSession(t, home, "first", "same-id", goodSessionLines(t, "same-id", cwd)...)
+	writeSession(t, home, "second", "same-id", goodSessionLines(t, "same-id", cwd)...)
+
+	store := newFakeStore()
+	service := newTestService(t, Config{SourceDir: home}, store, newFakeWorkspace())
+	preview, err := service.Scan(context.Background(), "")
+	if err != nil {
+		t.Fatalf("Scan: %v", err)
+	}
+	if preview.Sessions != 1 || preview.Messages != 2 {
+		t.Fatalf("preview = %+v, want the duplicate counted once", preview)
+	}
+	notes := strings.Join(preview.Notes, "\n")
+	if !strings.Contains(notes, "duplicate") {
+		t.Fatalf("notes = %q, want a duplicate-session note", notes)
+	}
+
+	result, err := service.Import(context.Background(), "")
+	if err != nil {
+		t.Fatalf("Import: %v", err)
+	}
+	if result.ImportedSessions != 1 || result.Skipped != 1 || len(result.Errors) != 0 {
+		t.Fatalf("Import = %+v, want 1 imported and 1 skipped duplicate", result)
+	}
+	if metas := sessionsForTest(t, store); len(metas) != 1 {
+		t.Fatalf("stored sessions = %+v, want one", metas)
+	}
+}
+
+// sessionsForTest returns the fake store's session metadata.
+func sessionsForTest(t *testing.T, store *fakeStore) []contracts.SessionMeta {
+	t.Helper()
+	metas, err := store.Sessions(context.Background())
+	if err != nil {
+		t.Fatalf("Sessions: %v", err)
+	}
+	return metas
+}

@@ -132,6 +132,8 @@ var schemaStatements = []string{
 		session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
 		ordinal INTEGER,
 		payload BLOB NOT NULL,
+		text TEXT NOT NULL DEFAULT '',
+		search_text TEXT NOT NULL DEFAULT '',
 		created_at INTEGER
 	)`,
 	`CREATE INDEX IF NOT EXISTS idx_messages_session_ordinal ON messages(session_id, ordinal)`,
@@ -140,6 +142,7 @@ var schemaStatements = []string{
 		session_id TEXT,
 		type TEXT,
 		payload BLOB,
+		text TEXT NOT NULL DEFAULT '',
 		created_at INTEGER
 	)`,
 	`CREATE INDEX IF NOT EXISTS idx_events_session_seq ON events(session_id, seq)`,
@@ -228,7 +231,10 @@ func (s *store) initSchema(ctx context.Context) error {
 			return fmt.Errorf("sessionstore: initialize schema: %w", err)
 		}
 	}
-	return s.migrateWorkspaceColumn(ctx)
+	if err := s.migrateWorkspaceColumn(ctx); err != nil {
+		return err
+	}
+	return s.migrateSearchColumns(ctx)
 }
 
 // migrateWorkspaceColumn adds sessions.workspace_id to databases created before
@@ -528,13 +534,14 @@ func (s *store) appendMessages(ctx context.Context, sessionID string, messages [
 	if len(messages) == 0 {
 		return ctx.Err()
 	}
-	payloads := make([][]byte, 0, len(messages))
+	encoded := make([]encodedMessage, 0, len(messages))
 	for index, message := range messages {
 		payload, err := json.Marshal(message)
 		if err != nil {
 			return fmt.Errorf("sessionstore: encode message %d of session %q: %w", index, id, err)
 		}
-		payloads = append(payloads, payload)
+		text, searchText := messageSearchTextColumns(message)
+		encoded = append(encoded, encodedMessage{payload: payload, text: text, searchText: searchText})
 	}
 	now := nowNanos()
 	tx, err := s.db.BeginTx(ctx, nil)
@@ -551,10 +558,10 @@ func (s *store) appendMessages(ctx context.Context, sessionID string, messages [
 		Scan(&baseOrdinal); err != nil {
 		return fmt.Errorf("sessionstore: append history %q: %w", id, err)
 	}
-	for index, payload := range payloads {
+	for index, message := range encoded {
 		if _, err := tx.ExecContext(ctx,
-			`INSERT INTO messages(session_id, ordinal, payload, created_at) VALUES(?, ?, ?, ?)`,
-			id, baseOrdinal+int64(index)+1, payload, now); err != nil {
+			`INSERT INTO messages(session_id, ordinal, payload, text, search_text, created_at) VALUES(?, ?, ?, ?, ?, ?)`,
+			id, baseOrdinal+int64(index)+1, message.payload, message.text, message.searchText, now); err != nil {
 			return fmt.Errorf("sessionstore: append history %q: %w", id, err)
 		}
 	}
@@ -570,13 +577,14 @@ func (s *store) ReplaceHistory(ctx context.Context, sessionID string, messages [
 	if err != nil {
 		return err
 	}
-	payloads := make([][]byte, 0, len(messages))
+	encoded := make([]encodedMessage, 0, len(messages))
 	for index, message := range messages {
 		payload, err := json.Marshal(message)
 		if err != nil {
 			return fmt.Errorf("sessionstore: encode message %d of session %q: %w", index, id, err)
 		}
-		payloads = append(payloads, payload)
+		text, searchText := messageSearchTextColumns(message)
+		encoded = append(encoded, encodedMessage{payload: payload, text: text, searchText: searchText})
 	}
 	now := nowNanos()
 	tx, err := s.db.BeginTx(ctx, nil)
@@ -590,10 +598,10 @@ func (s *store) ReplaceHistory(ctx context.Context, sessionID string, messages [
 	if _, err := tx.ExecContext(ctx, `DELETE FROM messages WHERE session_id = ?`, id); err != nil {
 		return fmt.Errorf("sessionstore: replace history %q: %w", id, err)
 	}
-	for index, payload := range payloads {
+	for index, message := range encoded {
 		if _, err := tx.ExecContext(ctx,
-			`INSERT INTO messages(session_id, ordinal, payload, created_at) VALUES(?, ?, ?, ?)`,
-			id, int64(index)+1, payload, now); err != nil {
+			`INSERT INTO messages(session_id, ordinal, payload, text, search_text, created_at) VALUES(?, ?, ?, ?, ?, ?)`,
+			id, int64(index)+1, message.payload, message.text, message.searchText, now); err != nil {
 			return fmt.Errorf("sessionstore: replace history %q: %w", id, err)
 		}
 	}
@@ -706,8 +714,8 @@ func (s *store) AppendEvent(ctx context.Context, event rig.SessionEvent) error {
 		return err
 	}
 	if _, err := tx.ExecContext(ctx,
-		`INSERT INTO events(session_id, type, payload, created_at) VALUES(?, ?, ?, ?)`,
-		id, event.Type, payload, createdAt); err != nil {
+		`INSERT INTO events(session_id, type, payload, text, created_at) VALUES(?, ?, ?, ?, ?)`,
+		id, event.Type, payload, eventPayloadSearchText(payload), createdAt); err != nil {
 		return fmt.Errorf("sessionstore: append event: %w", err)
 	}
 	if err := tx.Commit(); err != nil {
@@ -756,7 +764,7 @@ func (s *store) Search(ctx context.Context, query string, limit int) ([]rig.Sess
 	var args []any
 	if trimmed != "" {
 		pattern := "%" + escapeLike(trimmed) + "%"
-		statement += ` WHERE (type LIKE ? ESCAPE '\' OR CAST(payload AS TEXT) LIKE ? ESCAPE '\')`
+		statement += ` WHERE (type LIKE ? ESCAPE '\' OR text LIKE ? ESCAPE '\')`
 		args = append(args, pattern, pattern)
 	}
 	statement += ` ORDER BY seq ASC`

@@ -1,9 +1,10 @@
 package sessionstore
 
 // Cross-session message full-text search: the durable half behind the old
-// shell's session search. The SQL is a case-insensitive substring match over the
-// JSON payload (which carries the message text), newest message first; snippets
-// are built from the decoded rig.Message text.
+// shell's session search. The SQL matches the decoded search_text column
+// (message text, reasoning and decoded tool-call values — never raw JSON
+// escaping) plus the session title, newest message first; snippets are built
+// from the plain text column.
 
 import (
 	"context"
@@ -53,12 +54,14 @@ func (s *store) SearchMessages(ctx context.Context, query string, limit int) ([]
 	}
 	pattern := escapeLike(trimmed)
 	rows, err := s.db.QueryContext(ctx, `
-		SELECT m.session_id, m.payload, m.created_at, COALESCE(s.title, '')
+		SELECT m.session_id, m.payload, m.text, m.created_at, COALESCE(s.title, '')
 		FROM messages m
 		JOIN sessions s ON s.id = m.session_id
-		WHERE LOWER(CAST(m.payload AS TEXT)) LIKE '%' || LOWER(?) || '%' ESCAPE '\'
+		WHERE LOWER(m.text) LIKE '%' || LOWER(?) || '%' ESCAPE '\'
+		   OR LOWER(m.search_text) LIKE '%' || LOWER(?) || '%' ESCAPE '\'
+		   OR LOWER(COALESCE(s.title, '')) LIKE '%' || LOWER(?) || '%' ESCAPE '\'
 		ORDER BY m.id DESC
-		LIMIT ?`, pattern, limit)
+		LIMIT ?`, pattern, pattern, pattern, limit)
 	if err != nil {
 		return nil, fmt.Errorf("sessionstore: search messages: %w", err)
 	}
@@ -72,10 +75,11 @@ func (s *store) SearchMessages(ctx context.Context, query string, limit int) ([]
 		var (
 			sessionID string
 			payload   []byte
+			text      string
 			created   sql.NullInt64
 			title     string
 		)
-		if err := rows.Scan(&sessionID, &payload, &created, &title); err != nil {
+		if err := rows.Scan(&sessionID, &payload, &text, &created, &title); err != nil {
 			return nil, fmt.Errorf("sessionstore: scan message search hit: %w", err)
 		}
 		var message rig.Message
@@ -87,7 +91,6 @@ func (s *store) SearchMessages(ctx context.Context, query string, limit int) ([]
 		if strings.TrimSpace(title) == "" {
 			title = unnamedSessionTitle
 		}
-		text := message.Text()
 		hits = append(hits, contracts.MessageSearchHit{
 			SessionID:    sessionID,
 			SessionTitle: title,

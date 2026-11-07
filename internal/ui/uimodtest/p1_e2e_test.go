@@ -640,6 +640,40 @@ func TestP1ApprovalToolsAndPersistence(t *testing.T) {
 		t.Fatalf("goal tracker still set after clear")
 	}
 
+	// subagent: the agent module registers the synchronous delegation tools and
+	// a real nested rig runner produces the answer.
+	subResult, subErr := toolkit.Invoke(context.Background(), rig.ToolCall{
+		ID: "sub-1", Name: "subagent", Arguments: `{"prompt":"总结当前工作目录"}`,
+	})
+	if subErr != nil || subResult.IsError {
+		t.Fatalf("subagent = %+v (err %v)", subResult, subErr)
+	}
+	if !strings.Contains(subResult.Content, "已读取工作目录") {
+		t.Fatalf("subagent content = %q", subResult.Content)
+	}
+
+	// permission modes: full permission auto-allows tool calls without asking;
+	// restoring ask mode asks again.
+	approvalsSvc := requireApprovals(t, root)
+	if err := settings.Set(contracts.SettingAgentPermission, contracts.PermissionFull); err != nil {
+		t.Fatalf("set permission full: %v", err)
+	}
+	if mode := approvalsSvc.Mode(); mode != "auto" {
+		t.Fatalf("mode with full permission = %q, want auto", mode)
+	}
+	permDecision, permErr := approvalsSvc.Request(context.Background(), contracts.ApprovalRequest{
+		Tool: "bash", Summary: "permission e2e",
+	})
+	if permErr != nil || permDecision != contracts.ApprovalAllow {
+		t.Fatalf("full permission decision = %v (err %v)", permDecision, permErr)
+	}
+	if pending := approvalsSvc.Pending(); len(pending) != 0 {
+		t.Fatalf("full permission queued approvals: %+v", pending)
+	}
+	if err := settings.Set(contracts.SettingAgentPermission, contracts.PermissionAsk); err != nil {
+		t.Fatalf("restore ask permission: %v", err)
+	}
+
 	// --- restart: the session and its messages come back from SQLite ------
 	title := session.Title
 	if err := loader.Close(); err != nil {

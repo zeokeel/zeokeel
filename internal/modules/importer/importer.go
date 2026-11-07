@@ -173,6 +173,7 @@ func (s *service) scan(ctx context.Context, dir string) ([]scannedSession, contr
 		return nil, preview, fmt.Errorf("%s: %q is not a directory", ModuleID, sessionsRoot)
 	}
 	workspaceDirs := make(map[string]bool)
+	seenSourceIDs := make(map[string]bool)
 	scanned := make([]scannedSession, 0)
 	walkErr := filepath.WalkDir(sessionsRoot, func(path string, entry fs.DirEntry, walkErr error) error {
 		if walkErr != nil {
@@ -181,11 +182,21 @@ func (s *service) scan(ctx context.Context, dir string) ([]scannedSession, contr
 		if err := ctx.Err(); err != nil {
 			return err
 		}
+		relative := relativeSourcePath(dir, path)
+		// WalkDir does not descend into symlinked directories, but it does
+		// report the symlink entries themselves; parseSessionFile would then
+		// follow a symlinked session log out of the DSH home. Skip every
+		// symlink (file or directory) and record it: the import boundary is
+		// the scanned sessions tree only.
+		if entry.Type()&fs.ModeSymlink != 0 {
+			preview.Notes = append(preview.Notes,
+				fmt.Sprintf("skipped symlink %s (not followed)", relative))
+			return nil
+		}
 		if entry.IsDir() {
 			return nil
 		}
 		name := strings.ToLower(entry.Name())
-		relative := relativeSourcePath(dir, path)
 		if strings.HasSuffix(name, ".zstd") {
 			preview.Skipped++
 			preview.Notes = append(preview.Notes,
@@ -205,6 +216,19 @@ func (s *service) scan(ctx context.Context, dir string) ([]scannedSession, contr
 				preview.Notes = append(preview.Notes, fmt.Sprintf("skipped %s: %v", relative, err))
 			}
 			return nil
+		}
+		// Two logs can carry the same DSH session ID; only the first one is
+		// importable, so count the preview the way Import will actually
+		// behave. The duplicate stays in scanned so Import still reports it
+		// as skipped (existing sessions are skipped, not errors).
+		if parsed.ID != "" {
+			if seenSourceIDs[parsed.ID] {
+				preview.Notes = append(preview.Notes,
+					fmt.Sprintf("duplicate session id %q in %s; the first log is imported", parsed.ID, relative))
+				scanned = append(scanned, scannedSession{session: parsed, sourcePath: relative})
+				return nil
+			}
+			seenSourceIDs[parsed.ID] = true
 		}
 		if parsed.DroppedAttachments > 0 {
 			preview.Skipped += parsed.DroppedAttachments

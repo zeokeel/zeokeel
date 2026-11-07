@@ -58,7 +58,9 @@ func (s *planService) Review(ctx context.Context, content string) (string, error
 	snapshot := contracts.PlanReview{Content: s.content, State: s.state}
 	s.mu.Unlock()
 	if handler != nil {
-		handler(snapshot)
+		// A panicking display handler is contained; the plan stays reviewing
+		// and the caller gets the committed state.
+		runHandlerSafely("plan", func() { handler(snapshot) })
 	}
 	return PlanReviewing, nil
 }
@@ -91,7 +93,7 @@ func (s *planService) Exit(action string) (string, error) {
 		snapshot := contracts.PlanReview{Content: s.content, State: next}
 		s.mu.Unlock()
 		if handler != nil {
-			handler(snapshot)
+			runHandlerSafely("plan", func() { handler(snapshot) })
 		}
 		return next, nil
 	default:

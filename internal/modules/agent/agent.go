@@ -22,6 +22,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	cordis "github.com/zeokeel/zeokeel-kernel"
@@ -109,10 +110,32 @@ func Module() *module.Descriptor[Config] {
 				logger.Printf("[agent] register session tool %s: %v", tool.Name(), err)
 			}
 		}
+		// The agent owns the synchronous delegation tools: they need the live
+		// service (provider config, session history for fork and the child
+		// runner), so they register straight into the shared toolkit registry
+		// and unregister through kernel effects.
+		for _, tool := range newSubagentTools(svc) {
+			if err := registry.Register(tool); err != nil {
+				return fmt.Errorf("agent: register %q: %w", tool.Name(), err)
+			}
+			name := tool.Name()
+			if _, err := ctx.Effect(func() cordis.Effect {
+				return cordis.Effect{cordis.CleanupOf(func() { registry.Unregister(name) })}
+			}); err != nil {
+				registry.Unregister(name)
+				return err
+			}
+		}
+		if _, err := ctx.Provide(contracts.KeySubagents, contracts.Subagents(svc)); err != nil {
+			return fmt.Errorf("agent: provide subagents: %w", err)
+		}
 		_, err = ctx.Provide(contracts.KeyChat, contracts.ChatService(svc))
 		return err
 	}).
-		AddProvides(module.Provides(contracts.KeyChat)).
+		AddProvides(
+			module.Provides(contracts.KeyChat),
+			module.Provides(contracts.KeySubagents),
+		).
 		AddRequires(module.Requires(contracts.KeyToolkit)).
 		AddRequires(module.Requires(contracts.KeySettings)).
 		AddRequires(module.Requires(contracts.KeyLogger)).
@@ -142,6 +165,8 @@ type service struct {
 	subscribers    []*subscription
 	nextSessionSeq uint64
 	nextMessageSeq uint64
+	// nextSubagentSeq names auto-named synchronous subagents (sub-<n>).
+	nextSubagentSeq atomic.Uint64
 
 	// providerFactory builds the provider for one run. It is a field so tests
 	// can script providers; nil uses openai.New with the effective config.
@@ -157,6 +182,7 @@ var (
 	_ contracts.SessionArchiver      = (*service)(nil)
 	_ contracts.SessionRegenerator   = (*service)(nil)
 	_ contracts.SessionModelSwitcher = (*service)(nil)
+	_ contracts.Subagents            = (*service)(nil)
 )
 
 // sessionState is the mutable per-session state.

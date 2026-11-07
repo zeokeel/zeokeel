@@ -395,3 +395,25 @@ func TestCheckConcurrent(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+// TestCheckNilContext covers AUDIT-P2-3: a nil context is treated as
+// context.Background() (like the other host services), so Check neither panics
+// nor loses the normal disabled/request flow.
+func TestCheckNilContext(t *testing.T) {
+	disabled := newTestService(t, Config{}, "1.0.0")
+	info, err := disabled.Check(nil)
+	if !errors.Is(err, ErrDisabled) {
+		t.Fatalf("Check(nil) on a disabled service = %+v, %v; want ErrDisabled", info, err)
+	}
+
+	server := manifestServer(t, manifestJSON("2.0.0", "notes", []map[string]any{platformAsset()}))
+	defer server.Close()
+	service := newTestService(t, Config{FeedURL: server.URL, AllowInsecureHTTP: true}, "1.0.0")
+	info, err = service.Check(nil)
+	if err != nil {
+		t.Fatalf("Check(nil) with a live feed: %v", err)
+	}
+	if !info.Available || info.LatestVersion != "2.0.0" || info.CurrentVersion != "1.0.0" {
+		t.Fatalf("Check(nil) = %+v, want an available 2.0.0 update", info)
+	}
+}

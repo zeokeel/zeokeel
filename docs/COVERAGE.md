@@ -46,13 +46,13 @@
 | `presets` | ❌ | 无 | 无 agent presets/persona/tool allowlist/用户 JSON 覆盖 |
 | `prompt` | 🟡 | agent 静态 SystemPrompt + settings | 无 modes/plan/memory/AGENTS.md 注入策略、auto-title/review prompt |
 | `provider` | ✅ | rig `provider/openai` + agent 模块 | OpenAI Chat Completions 兼容 |
-| `runtime` | 🟡 | agent + rig agent/gate/compact | 循环/审批/压缩/检查点/多模态 parts；缺 modes、review、subagent runtime、goal driver、PTC/workflow |
+| `runtime` | 🟡 | agent + rig agent/gate/compact | 循环/审批/压缩/检查点/多模态 parts/**subagent runner（同进程嵌套 rig runner，工具注册+递归排除）**/goal 跟踪桥；缺 modes、review、goal 自动 driver、PTC/workflow |
 | `session` | 🟡 | agent ChatService + SessionRegenerator + per-session model | 发送/取消/历史/恢复/压缩/fork/export/附件/重新生成/会话模型覆盖；缺 goal 多轮驱动、tool spill、per-message 反馈、附件服务 |
 | `sessionreference` | ❌ | 无 | `@session` 引用/候选人/上下文摘要/预算错误分类未迁移 |
 | `skills` | 🟡 | `internal/modules/skills` + settings 技能页 | 多根 List/Read/roots/预览；缺技能管理/编辑、文件监听 |
 | `state` | ✅ | ChatService 读模型 + uiroot runtime | old broker/projector 被读模型替代；UI 所需投影可用 |
 | `store` | 🟡 | `internal/modules/sessionstore` | sessions/messages/events/checkpoints/search/workspace_id；旧 attachments/automation_runs/feedback/model/setting 表语义分散或未迁移 |
-| `tools` | 🟡 | toolkit + hosttools + rig tools | ask_user/present/plan_review/exit_plan_mode/goal 已接真实宿主桥（goal 显示在会话 header）；team 仍 Memory；缺 subagent/workflow/ralph/review/inspect/report/lsp 注册与 tool allowlist/presets |
+| `tools` | 🟡 | toolkit + hosttools + rig tools | ask_user/present/plan_review/exit_plan_mode/goal 已接真实宿主桥；**subagent/subagent_fork 已接真实 runner**；team 仍 Memory；缺 workflow/ralph/review/inspect/report/lsp 注册与 tool allowlist/presets |
 | `updater` | 🟡 | `internal/modules/update` + settings 更新页 | 检查（manifest/https/1MiB/semver/asset）；download/SHA256/stage/install 未迁移 |
 | `websearch` | ✅ | `internal/websearch` + toolkit 动态 searcher | 旧 HTTP 协议（POST/Bearer/limit/10s/1MiB）、错误语义；assembly network=true，设置搜索页 endpoint/key 即时生效；无旧代理/多后端选择（旧也只有通用端点） |
 | `winproc` | ❌ | 无 | Windows 控制台隐藏/环境/编码辅助未迁移 |
@@ -65,7 +65,7 @@
 |---|---|---|---|
 | Home / 起始页 | ✅ | `internal/ui/home` | hero/greeting/setup card/composer/最近会话 |
 | Composer 基础（输入/附件/发送/停止/模型 chip/@/） | 🟡 | `internal/ui/session/view.go`、`attachments.go` | 文本、附件/图片/拖放、发送/停止、模型 chip、工作区 `@`、`/` 菜单；per-session 模型菜单已接 modelcatalog |
-| Composer 深度菜单/权限/plan/goal/compact | 🟡 | session `sessionCommands` + `buildComposerToolbar` | 已有 /新会话、/创建副本、/导出对话、/打开设置 + 消息级重新生成 + per-session 模型切换；缺 /permission 访问模式、推理强度、/plan /goal /compact /feedback /memory、plan/mode 入口 |
+| Composer 深度菜单/权限/plan/goal/compact | 🟡 | session `sessionCommands` + `buildComposerToolbar` | 已有 /新会话、/创建副本、/导出对话、/打开设置、**权限模式命令+Badge（ask/workspace/full 即时生效）** + 消息级重新生成 + per-session 模型切换；缺 /推理强度、/plan /goal /compact /feedback /memory、plan/mode 入口 |
 | Chrome/Sidebar/折叠 rail/右栏 dock | ✅ | uiroot + sidebar | 280px sidebar、64px rail、Cmd/Ctrl+B、右栏开关 |
 | 命令面板/窗口内快捷键 | ✅ | uiroot palette/shortcuts | Cmd/Ctrl+K、可配置两条 chrome 快捷键；非系统全局热键 |
 | Settings 外壳与页面 | 🟡 | `internal/ui/settings`、about | 10 页：模型/服务商/外观/快捷键/技能/诊断/更新/导入/搜索/MCP + 关于，en/zh；缺 presets、内置插件开关/详情、记忆管理页 |

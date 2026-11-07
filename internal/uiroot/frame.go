@@ -412,6 +412,22 @@ func (r *Root) runCommand(cmd contracts.CommandSpec) {
 	}
 }
 
+// runHandlerSafely runs one host-bridge handler, containing a panic so a
+// UI-module bug cannot cross the bridge boundary into the caller's goroutine
+// (same convention as safeBuild and the approvals subscriber notify). A
+// contained panic is logged and reported; the bridge then keeps its committed
+// state and returns its normal result.
+func runHandlerSafely(what string, fn func()) (panicked bool) {
+	defer func() {
+		if recovered := recover(); recovered != nil {
+			log.Printf("uiroot: %s handler: %v", what, recovered)
+			panicked = true
+		}
+	}()
+	fn()
+	return
+}
+
 // safeBuild contains a module builder panic so one broken module cannot take
 // down the frame loop (the kernel contains the same class of panic at its own
 // activation/cleanup boundaries).

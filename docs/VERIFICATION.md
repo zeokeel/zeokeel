@@ -79,3 +79,16 @@ $ printf initialize+session/new | go run ./cmd/zeokeel --acp --data-dir <tmp>
   {"id":2,...,"result":{"sessionId":"sess-..."}}                  # exit 0
 $ go run ./internal/devtools/ui-snapshot <tmp>                    # 47 PNG steps, no errors
 ```
+
+## Adversarial regression suite (after TDD fixes)
+
+```
+$ go test ./internal/regression/... -count=1 -race        # ok (~10s)
+$ go test ./internal/regression/... -count=1 -v | grep -c SKIP   # 0
+$ go test ./internal/regression/... -count=1 -v | grep -c PASS   # 92
+$ go test ./... -count=1                                  # 33 packages ok
+$ go test ./... -count=1 -race                            # 33 packages ok
+```
+
+Audit report: docs/ADVERSARIAL-AUDIT.md (78 top-level tests; 4×P2 + 4×P3 found
+and fixed via RED→GREEN; probes now assert instead of skip).

@@ -709,8 +709,14 @@ func TestModuleManifest(t *testing.T) {
 	if descriptor.Factory == nil {
 		t.Fatal("module has a nil factory")
 	}
-	if len(descriptor.Provides) != 1 || descriptor.Provides[0].Name != contracts.KeyChat.Name() {
-		t.Fatalf("provides = %+v, want KeyChat", descriptor.Provides)
+	provides := make(map[string]bool, len(descriptor.Provides))
+	for _, provider := range descriptor.Provides {
+		provides[provider.Name] = true
+	}
+	for _, name := range []string{contracts.KeyChat.Name(), contracts.KeySubagents.Name()} {
+		if !provides[name] {
+			t.Fatalf("provides = %+v, want %s", descriptor.Provides, name)
+		}
 	}
 	required := make(map[string]bool, len(descriptor.Requires))
 	for _, requirement := range descriptor.Requires {

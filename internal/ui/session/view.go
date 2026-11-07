@@ -123,20 +123,24 @@ func buildHeader(c *ui.Context, t *design.Tokens, runtime contracts.UIRuntime, c
 
 // exportSessionJSONL writes the conversation as JSON Lines through its seam.
 func exportSessionJSONL(st *state, chatSession contracts.ChatSession, cfg Config) {
-	title := firstNonEmpty(chatSession.Title, cfg.Title, "会话")
+	title := firstNonEmpty(chatSession.Title, cfg.Title, st.tr("会话", "Conversation"))
+	// Localize the save dialog title per frame, like the Markdown path.
+	ExportJSONLDialogTitle = st.tr("导出会话", "Export conversation")
 	content, err := exportJSONLTranscript(chatSession)
 	if err != nil {
-		st.exportErr = "导出失败：" + err.Error()
+		st.exportErr = err.Error()
 		return
 	}
 	path, err := ExportJSONLSaver(sanitizeExportFilename(title)+".jsonl", content)
 	switch {
 	case err != nil:
-		st.exportErr = "导出失败：" + err.Error()
+		// Store the bare error: the header renders the localized prefix once,
+		// exactly like the Markdown path (AUDIT-P3-4).
+		st.exportErr = err.Error()
 		st.exportStatus = ""
 		st.exportPath = ""
 	case strings.TrimSpace(path) != "":
-		st.exportStatus = "已导出"
+		st.exportStatus = "ok"
 		st.exportPath = path
 		st.exportErr = ""
 	}
@@ -872,6 +876,13 @@ func buildComposerToolbar(c *ui.Context, t *design.Tokens, runtime contracts.UIR
 		if modelButton.Clicked() {
 			navigator.ToggleSettings()
 		}
+	}
+	// The current agent permission mode sits next to the model chip; the
+	// 权限模式 slash command cycles it, this badge only reports it (per frame,
+	// so the switch applies on the next frame).
+	if st.settings != nil {
+		badge := design.Apply(ui.Badge(c, st.permissionLabel(permissionMode(st.settings))), t.Badge())
+		badge.Tooltip(st.tr("当前权限模式", "Current permission mode"))
 	}
 	if !running {
 		slash := ui.Button(c, "/").Tooltip(st.tr("命令：输入 / 打开命令菜单", "Commands: type / to open the command menu"))

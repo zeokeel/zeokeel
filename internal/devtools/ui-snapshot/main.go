@@ -256,6 +256,15 @@ func main() {
 		a.render(outDir + "/p2-goal.png")
 	}
 
+	// Permission mode chip (ask → workspace → full, the slash command cycles it).
+	if store, ok := a.root.Get(contracts.KeySettings); ok {
+		_ = store.Set(contracts.SettingAgentPermission, contracts.PermissionFull)
+		a.tester.Frame()
+		a.render(outDir + "/p2-permission.png")
+		_ = store.Set(contracts.SettingAgentPermission, contracts.PermissionAsk)
+		a.tester.Frame()
+	}
+
 	// Composer model menu (catalog presets + per-session switch).
 	if err := a.tester.Click("snapshot-model"); err == nil {
 		a.tester.Frame()

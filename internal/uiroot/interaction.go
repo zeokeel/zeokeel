@@ -79,11 +79,18 @@ func (s *interactionService) Ask(ctx context.Context, text string, options []str
 	s.pending[id] = pending
 	s.mu.Unlock()
 
-	handler(contracts.UserQuestion{
-		ID:      id,
-		Text:    text,
-		Options: append([]string(nil), options...),
-	})
+	if panicked := runHandlerSafely("interaction", func() {
+		handler(contracts.UserQuestion{
+			ID:      id,
+			Text:    text,
+			Options: append([]string(nil), options...),
+		})
+	}); panicked {
+		// A broken UI handler must not leak the parked question: drop it and
+		// return a readable error so the agent tool call fails clearly.
+		s.remove(id)
+		return "", fmt.Errorf("uiroot: question handler panicked")
+	}
 
 	select {
 	case answer := <-pending.answers:
