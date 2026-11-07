@@ -99,6 +99,9 @@ func buildHeader(c *ui.Context, t *design.Tokens, cfg Config, st *state, chatSes
 					if m.Item(st.tr("导出 Markdown", "Export Markdown")).Chosen() {
 						exportSession(st, chatSession, cfg)
 					}
+					if m.Item(st.tr("导出 JSONL", "Export JSONL")).Chosen() {
+						exportSessionJSONL(st, chatSession, cfg)
+					}
 				})
 			}
 		})
@@ -115,6 +118,27 @@ func buildHeader(c *ui.Context, t *design.Tokens, cfg Config, st *state, chatSes
 		}
 		buildTabs(c, t, cfg, st)
 	})
+}
+
+// exportSessionJSONL writes the conversation as JSON Lines through its seam.
+func exportSessionJSONL(st *state, chatSession contracts.ChatSession, cfg Config) {
+	title := firstNonEmpty(chatSession.Title, cfg.Title, "会话")
+	content, err := exportJSONLTranscript(chatSession)
+	if err != nil {
+		st.exportErr = "导出失败：" + err.Error()
+		return
+	}
+	path, err := ExportJSONLSaver(sanitizeExportFilename(title)+".jsonl", content)
+	switch {
+	case err != nil:
+		st.exportErr = "导出失败：" + err.Error()
+		st.exportStatus = ""
+		st.exportPath = ""
+	case strings.TrimSpace(path) != "":
+		st.exportStatus = "已导出"
+		st.exportPath = path
+		st.exportErr = ""
+	}
 }
 
 // exportSession writes the conversation as Markdown through the export seam

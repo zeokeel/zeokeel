@@ -1,9 +1,11 @@
 package session
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/egoist/mygo"
 
@@ -14,6 +16,29 @@ import (
 // header sets it from the current locale right before invoking the seam (the
 // seam signature stays stable for tests).
 var ExportDialogTitle = "导出会话"
+
+// ExportJSONLDialogTitle is the localized title of the JSONL export dialog.
+var ExportJSONLDialogTitle = "导出会话"
+
+// ExportJSONLSaver is the JSONL export seam (same contract as ExportSaver):
+// the default opens the native save dialog and writes the JSONL transcript.
+var ExportJSONLSaver = func(defaultName, content string) (string, error) {
+	path, err := mygo.Dialog.Save(mygo.SaveDialogOptions{
+		Title:       ExportJSONLDialogTitle,
+		DefaultPath: defaultName,
+		Filters: []mygo.FileFilter{{
+			Name:       "JSONL",
+			Extensions: []string{"jsonl"},
+		}},
+	})
+	if err != nil || path == "" {
+		return "", err
+	}
+	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+		return "", err
+	}
+	return path, nil
+}
 
 // ExportSaver is the session export seam: the default opens the native mygo
 // save dialog and writes the content there; tests replace it so no desktop
@@ -35,6 +60,60 @@ var ExportSaver = func(defaultName, content string) (string, error) {
 		return "", err
 	}
 	return path, nil
+}
+
+// exportJSONLTranscript renders the session as JSON Lines: one session header
+// line, then one record per message. Tool calls are flattened to
+// {name, summary, status} so the file stays portable.
+func exportJSONLTranscript(chatSession contracts.ChatSession) (string, error) {
+	var builder strings.Builder
+	header := map[string]any{
+		"type":      "session",
+		"id":        chatSession.ID,
+		"title":     chatSession.Title,
+		"model":     chatSession.Model,
+		"createdAt": chatSession.CreatedAt.Format(time.RFC3339),
+		"updatedAt": chatSession.UpdatedAt.Format(time.RFC3339),
+	}
+	encoded, err := json.Marshal(header)
+	if err != nil {
+		return "", err
+	}
+	builder.Write(encoded)
+	builder.WriteByte('\n')
+	for _, message := range chatSession.Messages {
+		record := map[string]any{
+			"type":      "message",
+			"id":        message.ID,
+			"role":      message.Role,
+			"text":      message.Text,
+			"createdAt": message.CreatedAt.Format(time.RFC3339),
+		}
+		if message.Reasoning != "" {
+			record["reasoning"] = message.Reasoning
+		}
+		if message.Error != "" {
+			record["error"] = message.Error
+		}
+		if len(message.Tools) > 0 {
+			tools := make([]map[string]any, 0, len(message.Tools))
+			for _, tool := range message.Tools {
+				tools = append(tools, map[string]any{
+					"name":    tool.Name,
+					"summary": tool.Summary,
+					"status":  tool.Status,
+				})
+			}
+			record["tools"] = tools
+		}
+		encoded, err := json.Marshal(record)
+		if err != nil {
+			return "", err
+		}
+		builder.Write(encoded)
+		builder.WriteByte('\n')
+	}
+	return builder.String(), nil
 }
 
 // exportTranscript renders a session as a Markdown document for the export

@@ -4,6 +4,7 @@ package session_test
 // content/default file name, the success badge and the cancel/error paths.
 
 import (
+	"encoding/json"
 	"errors"
 	"strings"
 	"testing"
@@ -131,4 +132,60 @@ func TestExportHiddenWithoutActiveSession(t *testing.T) {
 	tester := h.tester()
 	h.assertTexts(tester, "开始新对话")
 	h.assertNoTexts(tester, "更多")
+}
+
+// TestExportJSONL covers the JSONL transcript export: a session header line and
+// one record per message, written through the JSONL seam.
+func TestExportJSONL(t *testing.T) {
+	chat := newFakeChat()
+	chat.addSession(contracts.ChatSession{
+		ID: "sess-1", Title: "JSONL 导出", Model: "deepseek-chat",
+		CreatedAt: time.Unix(1700000000, 0), UpdatedAt: time.Unix(1700000100, 0),
+		Messages: []contracts.ChatMessage{
+			{ID: "m1", Role: contracts.ChatRoleUser, Text: "你好"},
+			{ID: "m2", Role: contracts.ChatRoleAssistant, Text: "你好！", Reasoning: "思考",
+				Tools: []contracts.ToolCall{{ID: "c1", Name: "bash", Summary: "ls", Status: "completed"}}},
+		},
+	}, true)
+	h := newHarness(t, chat)
+	var savedPath, savedContent string
+	old := session.ExportJSONLSaver
+	session.ExportJSONLSaver = func(name, content string) (string, error) {
+		savedPath = name
+		savedContent = content
+		return "/tmp/" + name, nil
+	}
+	t.Cleanup(func() { session.ExportJSONLSaver = old })
+	tester := h.tester()
+	h.click(tester, "更多")
+	h.click(tester, "导出 JSONL")
+	tester.Frame()
+	if !strings.HasSuffix(savedPath, ".jsonl") {
+		t.Fatalf("export name = %q", savedPath)
+	}
+	lines := strings.Split(strings.TrimSpace(savedContent), "\n")
+	if len(lines) != 3 {
+		t.Fatalf("jsonl lines = %d, want 3", len(lines))
+	}
+	var header, first, second map[string]any
+	for index, target := range []*map[string]any{&header, &first, &second} {
+		if err := json.Unmarshal([]byte(lines[index]), target); err != nil {
+			t.Fatalf("line %d: %v", index, err)
+		}
+	}
+	if header["type"] != "session" || header["id"] != "sess-1" || header["model"] != "deepseek-chat" {
+		t.Fatalf("header = %+v", header)
+	}
+	if first["role"] != "user" || first["text"] != "你好" {
+		t.Fatalf("first = %+v", first)
+	}
+	if second["role"] != "assistant" || second["reasoning"] != "思考" {
+		t.Fatalf("second = %+v", second)
+	}
+	if !strings.Contains(savedContent, "bash") {
+		t.Fatalf("tool call missing from jsonl: %s", savedContent)
+	}
+	if !tester.HasText("已导出") {
+		t.Fatalf("export status missing; texts = %v", tester.Texts())
+	}
 }

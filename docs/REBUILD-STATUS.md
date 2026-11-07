@@ -21,6 +21,12 @@
 - 右侧栏「文件」Tab：打开文件夹（mygo 原生 Directory picker）、目录进入/面包屑、文本/Markdown/图片预览、
   刷新与错误状态；E2E 覆盖工作区创建 + 列表 + 预览帧
 
+**P5 JSONL 导出 + 覆盖复核（2026-11-08）**
+- session header「导出 JSONL」：session 头行 + message 行（reasoning/error/tools 扁平化），ExportJSONLSaver seam；
+  单测覆盖内容/行数/已导出状态
+- COVERAGE 复核：62 项 → ✅26 / 🟡27 / ❌9；websearch 升 ✅，hosttools ask_user ✅ / present+plan 🟡，
+  composer/MCP/presets 等升 🟡；Top5 缺口更新（编排执行、composer 高级控制、presets/@session、桌面集成、管理深度）
+
 **P5 MCP 用户配置（2026-11-08）**
 - contracts.SettingMCPServers（mcp.servers JSON [{name,url}]）+ toolkit 启动合并（assembly 优先/URL 去重/非法行 warning/
   坏 JSON 不失败）
