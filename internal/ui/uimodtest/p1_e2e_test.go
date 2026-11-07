@@ -383,6 +383,15 @@ func TestP1ApprovalToolsAndPersistence(t *testing.T) {
 			t.Fatalf("english UI missing %q; texts = %v", want, tester.Texts())
 		}
 	}
+	// Settings pages follow the locale too.
+	uiRoot.Navigator().ToggleSettings()
+	tester.Frame()
+	for _, want := range []string{"Settings", "Model", "Appearance", "Shortcuts", "Diagnostics", "Update", "Import"} {
+		if !tester.HasText(want) {
+			t.Fatalf("english settings missing %q; texts = %v", want, tester.Texts())
+		}
+	}
+	uiRoot.Navigator().CloseSettings()
 	locale.SetLanguage("zh")
 	tester.Frame()
 	if !tester.HasText("新对话") {

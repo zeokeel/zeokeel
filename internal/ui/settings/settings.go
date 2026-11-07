@@ -34,6 +34,7 @@ import (
 	"github.com/zeokeel/zeokeel/internal/contracts"
 	"github.com/zeokeel/zeokeel/internal/design"
 	"github.com/zeokeel/zeokeel/internal/icons"
+	"github.com/zeokeel/zeokeel/internal/uikit"
 )
 
 // Settings page constants. ID and Section are stable contracts the host renders
@@ -134,11 +135,14 @@ func shortcutChord(choices []shortcutChoice, label string) string {
 
 // buildShortcutsPage renders the shortcut reference with native rows and the
 // two editable chrome shortcuts (persisted through the host settings).
-func buildShortcutsPage(c *ui.Context, t *design.Tokens, title string, store contracts.SettingsService) {
+func buildShortcutsPage(c *ui.Context, t *design.Tokens, title string, store contracts.SettingsService,
+	locale contracts.LocaleService) {
 	ui.Column(c).FillWidth().Gap(design.Space4).Children(func() {
 		design.Apply(ui.Text(c, title), t.Font(design.TypeL)).FontWeight(600).
 			TextColor(t.LabelPrimary)
-		design.Apply(ui.Text(c, "键盘快捷键参考；下面两项 chrome 快捷键可修改并立即生效。"),
+		design.Apply(ui.Text(c, localized(locale,
+			"键盘快捷键参考；下面两项 chrome 快捷键可修改并立即生效。",
+			"Keyboard reference; the two chrome shortcuts below are editable and apply immediately.")),
 			t.TextMuted(design.TypeXS))
 		configurable := ui.Column(c).FillWidth().Gap(0).Padding(design.Space3)
 		design.Apply(configurable, t.Panel())
@@ -147,10 +151,11 @@ func buildShortcutsPage(c *ui.Context, t *design.Tokens, title string, store con
 				store.Get(contracts.SettingsUIShortcutToggleSidebar, contracts.DefaultShortcutToggleSidebar))
 			ui.Row(c).FillWidth().Padding(design.Space2, 0, design.Space2, 0).
 				AlignItems(ui.Center).Gap(design.Space3).Children(func() {
-				design.Apply(ui.Text(c, "折叠 / 展开侧边栏"), t.Text(design.TypeS)).Grow(1)
+				design.Apply(ui.Text(c, localized(locale, "折叠 / 展开侧边栏", "Collapse / expand sidebar")),
+					t.Text(design.TypeS)).Grow(1)
 				choice := toggleDisplay
 				selectControl := ui.Select(c, &choice, shortcutChoiceLabels(toggleSidebarChoices)).
-					Label("侧边栏快捷键")
+					Label(localized(locale, "侧边栏快捷键", "Sidebar shortcut"))
 				if selectControl.Changed() {
 					_ = store.Set(contracts.SettingsUIShortcutToggleSidebar, shortcutChord(toggleSidebarChoices, choice))
 				}
@@ -160,17 +165,18 @@ func buildShortcutsPage(c *ui.Context, t *design.Tokens, title string, store con
 				store.Get(contracts.SettingsUIShortcutCommandPalette, contracts.DefaultShortcutCommandPalette))
 			ui.Row(c).FillWidth().Padding(design.Space2, 0, design.Space2, 0).
 				AlignItems(ui.Center).Gap(design.Space3).Children(func() {
-				design.Apply(ui.Text(c, "打开命令面板"), t.Text(design.TypeS)).Grow(1)
+				design.Apply(ui.Text(c, localized(locale, "打开命令面板", "Open command palette")),
+					t.Text(design.TypeS)).Grow(1)
 				choice := paletteDisplay
 				selectControl := ui.Select(c, &choice, shortcutChoiceLabels(commandPaletteChoices)).
-					Label("命令面板快捷键")
+					Label(localized(locale, "命令面板快捷键", "Command palette shortcut"))
 				if selectControl.Changed() {
 					_ = store.Set(contracts.SettingsUIShortcutCommandPalette, shortcutChord(commandPaletteChoices, choice))
 				}
 			})
 			ui.Divider(c)
 			ui.Row(c).FillWidth().Justify(ui.End).Children(func() {
-				if ui.Button(c, "恢复默认").Clicked() {
+				if ui.Button(c, localized(locale, "恢复默认", "Restore defaults")).Clicked() {
 					_ = store.Set(contracts.SettingsUIShortcutToggleSidebar, contracts.DefaultShortcutToggleSidebar)
 					_ = store.Set(contracts.SettingsUIShortcutCommandPalette, contracts.DefaultShortcutCommandPalette)
 				}
@@ -179,7 +185,7 @@ func buildShortcutsPage(c *ui.Context, t *design.Tokens, title string, store con
 		panel := ui.Column(c).FillWidth().Gap(0).Padding(design.Space3)
 		design.Apply(panel, t.Panel())
 		panel.Children(func() {
-			for index, row := range shortcutRows {
+			for index, row := range localizedShortcutRows(locale) {
 				if index > 0 {
 					ui.Divider(c)
 				}
@@ -191,6 +197,32 @@ func buildShortcutsPage(c *ui.Context, t *design.Tokens, title string, store con
 			}
 		})
 	})
+}
+
+// localizedShortcutRows returns the keyboard reference in the current language;
+// only the action labels are translated, the key chords stay verbatim.
+func localizedShortcutRows(locale contracts.LocaleService) []shortcutRow {
+	rows := make([]shortcutRow, 0, len(shortcutRows))
+	translations := map[string]string{
+		"折叠 / 展开侧边栏": "Collapse / expand sidebar",
+		"打开命令面板":     "Open command palette",
+		"发送消息":       "Send message",
+		"换行":         "New line",
+		"命令菜单":       "Command menu",
+		"关闭弹窗 / 菜单":  "Close dialog / menu",
+	}
+	for _, row := range shortcutRows {
+		action := row.Action
+		if en, ok := translations[action]; ok {
+			action = localized(locale, action, en)
+		}
+		keys := row.Keys
+		if keys == "输入 /" {
+			keys = localized(locale, keys, "Type /")
+		}
+		rows = append(rows, shortcutRow{Action: action, Keys: keys})
+	}
+	return rows
 }
 
 // shortcutChoiceLabels returns the Select options of a shortcut table.
@@ -282,6 +314,109 @@ type buildLabels struct {
 	saveLabel         string
 }
 
+// localized returns the copy for the current host language.
+func localized(locale contracts.LocaleService, zh, en string) string {
+	return uikit.T(locale, zh, en)
+}
+
+// pageDefinition is one settings page contribution with its Chinese/English
+// titles. Sections stay the internal stable identifiers (they only drive the
+// host's ordering); only the displayed Title follows the locale.
+type pageDefinition struct {
+	ID            string
+	Section       string
+	Order         int
+	zhTitle       string
+	enTitle       string
+	titleOverride string
+	Build         contracts.BuildFunc
+}
+
+// pageSyncer keeps the registered settings pages in sync with the host locale.
+// The host reads page titles from the runtime registry every frame, so a
+// language switch re-registers the pages (from an invisible sidebar slot built
+// before the settings overlay) to make the navigation labels change on the next
+// frame without restarting the module.
+type pageSyncer struct {
+	runtime    contracts.UIRuntime
+	locale     contracts.LocaleService
+	pages      []pageDefinition
+	registered map[string]func()
+	lang       string
+}
+
+func newPageSyncer(runtime contracts.UIRuntime, locale contracts.LocaleService) *pageSyncer {
+	return &pageSyncer{runtime: runtime, locale: locale, registered: map[string]func(){}}
+}
+
+// title resolves one page title for the current locale.
+func (s *pageSyncer) title(def pageDefinition) string {
+	if override := strings.TrimSpace(def.titleOverride); override != "" {
+		return override
+	}
+	return localized(s.locale, def.zhTitle, def.enTitle)
+}
+
+// register adds or replaces one page contribution.
+func (s *pageSyncer) register(def pageDefinition) error {
+	unregister, err := s.runtime.RegisterSettingsPage(contracts.SettingsPageSpec{
+		ID:      def.ID,
+		Section: def.Section,
+		Title:   s.title(def),
+		Order:   def.Order,
+		Build:   def.Build,
+	})
+	if err != nil {
+		return err
+	}
+	if old := s.registered[def.ID]; old != nil {
+		old()
+	}
+	s.registered[def.ID] = unregister
+	return nil
+}
+
+// start registers every page once (activation).
+func (s *pageSyncer) start() error {
+	for _, def := range s.pages {
+		if err := s.register(def); err != nil {
+			s.close()
+			return err
+		}
+	}
+	s.lang = s.locale.Language()
+	return nil
+}
+
+// sync re-registers the pages when the host language changed since the last
+// frame. It is a cheap no-op while the language is stable.
+func (s *pageSyncer) sync() {
+	lang := s.locale.Language()
+	if lang == s.lang {
+		return
+	}
+	for _, def := range s.pages {
+		if old := s.registered[def.ID]; old != nil {
+			old()
+			delete(s.registered, def.ID)
+		}
+		if err := s.register(def); err != nil {
+			continue
+		}
+	}
+	s.lang = lang
+}
+
+// close unregisters every current page contribution.
+func (s *pageSyncer) close() {
+	for _, unregister := range s.registered {
+		if unregister != nil {
+			unregister()
+		}
+	}
+	s.registered = map[string]func(){}
+}
+
 // providerPreset is one built-in OpenAI-compatible provider.
 type providerPreset struct {
 	Name    string
@@ -299,11 +434,14 @@ var providerPresets = []providerPreset{
 
 // buildProvidersPage renders the provider catalogue as native brand cards; the
 // action writes the chat settings keys (the agent reads them on next start).
-func buildProvidersPage(c *ui.Context, t *design.Tokens, store contracts.SettingsService) {
+func buildProvidersPage(c *ui.Context, t *design.Tokens, store contracts.SettingsService,
+	locale contracts.LocaleService) {
 	ui.Column(c).FillWidth().Gap(design.Space3).Children(func() {
-		design.Apply(ui.Text(c, "服务商"), t.Font(design.TypeL)).FontWeight(600).
-			TextColor(t.LabelPrimary)
-		design.Apply(ui.Text(c, "选择内置的 OpenAI 兼容服务商；保存后下次启动生效。"),
+		design.Apply(ui.Text(c, localized(locale, "服务商", "Providers")), t.Font(design.TypeL)).
+			FontWeight(600).TextColor(t.LabelPrimary)
+		design.Apply(ui.Text(c, localized(locale,
+			"选择内置的 OpenAI 兼容服务商；保存后下次启动生效。",
+			"Choose a built-in OpenAI-compatible provider; changes apply on the next launch.")),
 			t.TextMuted(design.TypeXS))
 		for _, preset := range providerPresets {
 			preset := preset
@@ -315,7 +453,7 @@ func buildProvidersPage(c *ui.Context, t *design.Tokens, store contracts.Setting
 						TextColor(t.LabelPrimary)
 					design.Apply(ui.Badge(c, preset.Model), t.Badge())
 					ui.Spacer(c).Grow(1)
-					if ui.Button(c, "使用").Clicked() {
+					if ui.Button(c, localized(locale, "使用", "Use")).Clicked() {
 						_ = store.Set(contracts.SettingsChatModel, preset.Model)
 						_ = store.Set(contracts.SettingsChatBaseURL, preset.BaseURL)
 					}
@@ -329,13 +467,20 @@ func buildProvidersPage(c *ui.Context, t *design.Tokens, store contracts.Setting
 // diagnosticRow is one label/value line of the diagnostics page.
 type diagnosticRow struct{ Label, Value string }
 
+// diagnosticsState is the diagnostics page's UI state: whether the copy action
+// just ran (so the page can show a short confirmation).
+type diagnosticsState struct{ copied bool }
+
 // buildDiagnosticsPage renders the read-only runtime/storage summary (the old
 // shell's diagnostics view) with a native copy action.
-func buildDiagnosticsPage(c *ui.Context, t *design.Tokens, rows []diagnosticRow) {
+func buildDiagnosticsPage(c *ui.Context, t *design.Tokens, state *diagnosticsState,
+	rows []diagnosticRow, locale contracts.LocaleService) {
 	ui.Column(c).FillWidth().Gap(design.Space4).Children(func() {
-		design.Apply(ui.Text(c, "诊断"), t.Font(design.TypeL)).FontWeight(600).
-			TextColor(t.LabelPrimary)
-		design.Apply(ui.Text(c, "运行时与存储信息（只读）；可复制后附在问题报告里。"),
+		design.Apply(ui.Text(c, localized(locale, "诊断", "Diagnostics")), t.Font(design.TypeL)).
+			FontWeight(600).TextColor(t.LabelPrimary)
+		design.Apply(ui.Text(c, localized(locale,
+			"运行时与存储信息（只读）；可复制后附在问题报告里。",
+			"Read-only runtime and storage details; copy them into a bug report.")),
 			t.TextMuted(design.TypeXS))
 		panel := ui.Column(c).FillWidth().Gap(0).Padding(design.Space3)
 		design.Apply(panel, t.Panel())
@@ -353,13 +498,18 @@ func buildDiagnosticsPage(c *ui.Context, t *design.Tokens, rows []diagnosticRow)
 				})
 			}
 		})
-		ui.Row(c).FillWidth().Children(func() {
-			if ui.Button(c, "复制诊断信息").Clicked() {
+		ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(design.Space2).Children(func() {
+			if ui.Button(c, localized(locale, "复制诊断信息", "Copy diagnostics")).Clicked() {
 				var builder strings.Builder
 				for _, row := range rows {
 					fmt.Fprintf(&builder, "%s: %s\n", row.Label, row.Value)
 				}
 				c.WriteClipboard(strings.TrimRight(builder.String(), "\n"))
+				state.copied = true
+			}
+			if state.copied {
+				design.Apply(ui.Badge(c, localized(locale, "已复制", "Copied")), t.Badge()).
+					TextColor(design.Of(c).Success)
 			}
 		})
 	})
@@ -389,143 +539,131 @@ func Module() *module.Descriptor[Config] {
 			return err
 		}
 
-		title := firstNonEmpty(cfg.Title, "模型")
-		modelLabel := firstNonEmpty(cfg.ModelLabel, "模型")
-		baseURLLabel := firstNonEmpty(cfg.BaseURLLabel, "Base URL")
-		apiKeyLabel := firstNonEmpty(cfg.APIKeyLabel, "API Key")
-		systemPromptLabel := firstNonEmpty(cfg.SystemPromptLabel, "系统提示词")
-		saveLabel := firstNonEmpty(cfg.SaveLabel, "保存")
-		providersTitle := "服务商"
-		appearanceTitle := firstNonEmpty(cfg.AppearanceTitle, "外观")
-		themeLabel := firstNonEmpty(cfg.ThemeLabel, "深色模式")
-		languageLabel := firstNonEmpty(cfg.LanguageLabel, "界面语言")
-		saveAppearanceLabel := firstNonEmpty(cfg.SaveAppearanceLabel, "应用")
-
 		state := newState(chat, store)
 		appearance := &appearanceState{dark: theme.Dark(), language: locale.Language()}
 		skills := newSkillsState()
 		update := newUpdateState()
 		importState := newImportState()
+		diagnostics := &diagnosticsState{}
 
-		page := contracts.SettingsPageSpec{
-			ID:      PageID,
-			Section: PageSection,
-			Title:   title,
-			Order:   PageOrder,
-			Build: func(c *ui.Context) {
-				buildPage(c, state, chat, buildLabels{
-					title:             title,
-					modelLabel:        modelLabel,
-					baseURLLabel:      baseURLLabel,
-					apiKeyLabel:       apiKeyLabel,
-					systemPromptLabel: systemPromptLabel,
-					saveLabel:         saveLabel,
-				}, store)
-			},
-		}
-		if err := own(ctx, func() (func(), error) { return runtime.RegisterSettingsPage(page) }); err != nil {
-			return err
-		}
-		providersPage := contracts.SettingsPageSpec{
-			ID:      ProvidersPageID,
-			Section: PageSection,
-			Title:   providersTitle,
-			Order:   ProvidersPageOrder,
-			Build: func(c *ui.Context) {
-				buildProvidersPage(c, design.Of(c), store)
-			},
-		}
 		// Optional host services for the read-only diagnostics page.
 		info, _ := ctx.Get(contracts.KeyAppInfo)
 		dataDir, _ := ctx.Get(contracts.KeyDataDir)
 		toolkit, _ := ctx.Get(contracts.KeyToolkit)
-		diagnosticsPage := contracts.SettingsPageSpec{
-			ID: DiagnosticsPageID,
-			// "高级" sorts after the 模型/键盘 sections, so diagnostics does not
-			// become the default settings page.
-			Section: "高级",
-			Title:   "诊断",
-			Order:   DiagnosticsPageOrder,
-			Build: func(c *ui.Context) {
-				rows := diagnosticsRows(info, dataDir, toolkit, chat, store)
-				buildDiagnosticsPage(c, design.Of(c), rows)
+
+		modelLabels := func() buildLabels {
+			return buildLabels{
+				title:             firstNonEmpty(cfg.Title, localized(locale, "模型", "Model")),
+				modelLabel:        firstNonEmpty(cfg.ModelLabel, localized(locale, "模型", "Model")),
+				baseURLLabel:      firstNonEmpty(cfg.BaseURLLabel, "Base URL"),
+				apiKeyLabel:       firstNonEmpty(cfg.APIKeyLabel, "API Key"),
+				systemPromptLabel: firstNonEmpty(cfg.SystemPromptLabel, localized(locale, "系统提示词", "System prompt")),
+				saveLabel:         firstNonEmpty(cfg.SaveLabel, localized(locale, "保存", "Save")),
+			}
+		}
+		appearanceLabels := func() buildAppearanceLabels {
+			return buildAppearanceLabels{
+				title:         firstNonEmpty(cfg.AppearanceTitle, localized(locale, "外观", "Appearance")),
+				themeLabel:    firstNonEmpty(cfg.ThemeLabel, localized(locale, "深色模式", "Dark mode")),
+				languageLabel: firstNonEmpty(cfg.LanguageLabel, localized(locale, "界面语言", "Interface language")),
+				saveLabel:     firstNonEmpty(cfg.SaveAppearanceLabel, localized(locale, "应用", "Apply")),
+			}
+		}
+
+		syncer := newPageSyncer(runtime, locale)
+		definitions := []pageDefinition{
+			{
+				ID: PageID, Section: PageSection, Order: PageOrder,
+				zhTitle: "模型", enTitle: "Model", titleOverride: cfg.Title,
+				Build: func(c *ui.Context) {
+					syncer.sync()
+					buildPage(c, state, chat, modelLabels(), store, locale)
+				},
+			},
+			{
+				ID: ProvidersPageID, Section: PageSection, Order: ProvidersPageOrder,
+				zhTitle: "服务商", enTitle: "Providers",
+				Build: func(c *ui.Context) {
+					syncer.sync()
+					buildProvidersPage(c, design.Of(c), store, locale)
+				},
+			},
+			{
+				ID: DiagnosticsPageID, Section: "高级", Order: DiagnosticsPageOrder,
+				zhTitle: "诊断", enTitle: "Diagnostics",
+				Build: func(c *ui.Context) {
+					syncer.sync()
+					rows := diagnosticsRows(info, dataDir, toolkit, chat, store, locale)
+					buildDiagnosticsPage(c, design.Of(c), diagnostics, rows, locale)
+				},
+			},
+			{
+				ID: ShortcutsPageID, Section: "键盘", Order: ShortcutsPageOrder,
+				zhTitle: "快捷键", enTitle: "Shortcuts",
+				Build: func(c *ui.Context) {
+					syncer.sync()
+					buildShortcutsPage(c, design.Of(c), localized(locale, "快捷键", "Shortcuts"), store, locale)
+				},
+			},
+			{
+				ID: AppearancePageID, Section: PageSection, Order: AppearancePageOrder,
+				zhTitle: "外观", enTitle: "Appearance", titleOverride: cfg.AppearanceTitle,
+				Build: func(c *ui.Context) {
+					syncer.sync()
+					buildAppearancePage(c, appearance, store, theme, locale, appearanceLabels())
+				},
+			},
+			{
+				ID: SkillsPageID, Section: SkillsPageSection, Order: SkillsPageOrder,
+				zhTitle: "技能", enTitle: "Skills",
+				Build: func(c *ui.Context) {
+					syncer.sync()
+					buildSkillsPage(c, design.Of(c), ctx, skills, locale)
+				},
+			},
+			{
+				ID: UpdatePageID, Section: UpdatePageSection, Order: UpdatePageOrder,
+				zhTitle: "更新", enTitle: "Update",
+				Build: func(c *ui.Context) {
+					syncer.sync()
+					buildUpdatePage(c, design.Of(c), ctx, runtime, update, locale)
+				},
+			},
+			{
+				ID: ImportPageID, Section: ImportPageSection, Order: ImportPageOrder,
+				zhTitle: "导入", enTitle: "Import",
+				Build: func(c *ui.Context) {
+					syncer.sync()
+					buildImportPage(c, design.Of(c), ctx, runtime, importState, locale)
+				},
 			},
 		}
-		shortcutsPage := contracts.SettingsPageSpec{
-			ID:      ShortcutsPageID,
-			Section: "键盘",
-			Title:   "快捷键",
-			Order:   ShortcutsPageOrder,
-			Build: func(c *ui.Context) {
-				buildShortcutsPage(c, design.Of(c), "快捷键", store)
-			},
-		}
-		appearancePage := contracts.SettingsPageSpec{
-			ID: AppearancePageID,
-			// Same sidebar section as the model page so the section heading does
-			// not reorder the pages ahead of the model page; Order keeps the
-			// model page first.
-			Section: PageSection,
-			Title:   appearanceTitle,
-			Order:   AppearancePageOrder,
-			Build: func(c *ui.Context) {
-				buildAppearancePage(c, appearance, store, theme, locale, buildAppearanceLabels{
-					title:         appearanceTitle,
-					themeLabel:    themeLabel,
-					languageLabel: languageLabel,
-					saveLabel:     saveAppearanceLabel,
-				})
-			},
-		}
-		if err := own(ctx, func() (func(), error) { return runtime.RegisterSettingsPage(appearancePage) }); err != nil {
+		syncer.pages = definitions
+		if err := syncer.start(); err != nil {
 			return err
 		}
-		if err := own(ctx, func() (func(), error) { return runtime.RegisterSettingsPage(providersPage) }); err != nil {
+		if _, err := ctx.Effect(func() cordis.Effect {
+			return cordis.Effect{cordis.CleanupOf(syncer.close)}
+		}); err != nil {
+			syncer.close()
 			return err
 		}
-		skillsPage := contracts.SettingsPageSpec{
-			ID:      SkillsPageID,
-			Section: SkillsPageSection,
-			Title:   SkillsPageTitle,
-			Order:   SkillsPageOrder,
-			Build: func(c *ui.Context) {
-				// The skills backend is optional: it is looked up lazily so the
-				// settings surface still renders (with an empty state) when no
-				// skills module is part of the assembly.
-				buildSkillsPage(c, design.Of(c), ctx, skills)
-			},
+		// Invisible slot contribution: re-registers page titles when the host
+		// language changed. The host sidebar slot is built before the settings
+		// overlay, so a switch updates the navigation in the same frame.
+		localeSync := contracts.SlotItem{
+			Slot:  contracts.SlotSidebarFooter,
+			ID:    "settings.locale-sync",
+			Order: 1000,
+			Build: func(*ui.Context) { syncer.sync() },
 		}
-		if err := own(ctx, func() (func(), error) { return runtime.RegisterSettingsPage(skillsPage) }); err != nil {
+		if err := own(ctx, func() (func(), error) {
+			return runtime.RegisterSlotItem(localeSync)
+		}); err != nil {
+			syncer.close()
 			return err
 		}
-		if err := own(ctx, func() (func(), error) { return runtime.RegisterSettingsPage(shortcutsPage) }); err != nil {
-			return err
-		}
-		updatePage := contracts.SettingsPageSpec{
-			ID:      UpdatePageID,
-			Section: UpdatePageSection,
-			Title:   UpdatePageTitle,
-			Order:   UpdatePageOrder,
-			Build: func(c *ui.Context) {
-				buildUpdatePage(c, design.Of(c), ctx, runtime, update)
-			},
-		}
-		if err := own(ctx, func() (func(), error) { return runtime.RegisterSettingsPage(updatePage) }); err != nil {
-			return err
-		}
-		importPage := contracts.SettingsPageSpec{
-			ID:      ImportPageID,
-			Section: ImportPageSection,
-			Title:   ImportPageTitle,
-			Order:   ImportPageOrder,
-			Build: func(c *ui.Context) {
-				buildImportPage(c, design.Of(c), ctx, runtime, importState)
-			},
-		}
-		if err := own(ctx, func() (func(), error) { return runtime.RegisterSettingsPage(importPage) }); err != nil {
-			return err
-		}
-		return own(ctx, func() (func(), error) { return runtime.RegisterSettingsPage(diagnosticsPage) })
+		return nil
 	}).
 		AddRequires(module.Requires(contracts.KeyUIRuntime)).
 		AddRequires(module.Requires(contracts.KeySettings)).
@@ -538,7 +676,7 @@ func Module() *module.Descriptor[Config] {
 // diagnosticsRows collects the read-only diagnostics values. Optional services
 // degrade to explicit "未启用" values instead of hiding the row.
 func diagnosticsRows(info contracts.AppInfo, dataDir string, toolkit *rigtools.Registry,
-	chat contracts.ChatService, store contracts.SettingsService) []diagnosticRow {
+	chat contracts.ChatService, store contracts.SettingsService, locale contracts.LocaleService) []diagnosticRow {
 	name := info.Name
 	if name == "" {
 		name = "ZeoKeel"
@@ -548,13 +686,13 @@ func diagnosticsRows(info contracts.AppInfo, dataDir string, toolkit *rigtools.R
 		version = "dev"
 	}
 	rows := []diagnosticRow{
-		{"应用", name + " v" + version},
+		{localized(locale, "应用", "Application"), name + " v" + version},
 		{"Commit", firstNonEmpty(info.Commit, "unknown")},
-		{"构建时间", firstNonEmpty(info.BuildTime, "unknown")},
-		{"Go 版本", firstNonEmpty(info.GoVersion, runtime.Version())},
-		{"平台", runtime.GOOS + "/" + runtime.GOARCH},
-		{"数据目录", firstNonEmpty(dataDir, "未设置")},
-		{"会话数据库", "zeokeel.db（数据目录）"},
+		{localized(locale, "构建时间", "Build time"), firstNonEmpty(info.BuildTime, "unknown")},
+		{localized(locale, "Go 版本", "Go version"), firstNonEmpty(info.GoVersion, runtime.Version())},
+		{localized(locale, "平台", "Platform"), runtime.GOOS + "/" + runtime.GOARCH},
+		{localized(locale, "数据目录", "Data directory"), firstNonEmpty(dataDir, localized(locale, "未设置", "not set"))},
+		{localized(locale, "会话数据库", "Session database"), localized(locale, "zeokeel.db（数据目录）", "zeokeel.db (data directory)")},
 	}
 	if dataDir != "" {
 		rows[6].Value = filepath.Join(dataDir, "zeokeel.db")
@@ -564,21 +702,24 @@ func diagnosticsRows(info contracts.AppInfo, dataDir string, toolkit *rigtools.R
 		toolCount = len(toolkit.Specs())
 	}
 	rows = append(rows,
-		diagnosticRow{"工具数", fmt.Sprintf("%d", toolCount)},
-		diagnosticRow{"会话数", fmt.Sprintf("%d", len(chat.Sessions()))},
+		diagnosticRow{localized(locale, "工具数", "Tools"), fmt.Sprintf("%d", toolCount)},
+		diagnosticRow{localized(locale, "会话数", "Sessions"), fmt.Sprintf("%d", len(chat.Sessions()))},
 	)
 	keys := make([]string, 0)
 	if all := store.All(); len(all) > 0 {
 		for key := range all {
 			if key == contracts.SettingsChatAPIKey {
-				keys = append(keys, key+"=已设置(隐藏)")
+				keys = append(keys, key+"="+localized(locale, "已设置(隐藏)", "set (hidden)"))
 				continue
 			}
 			keys = append(keys, key+"="+all[key])
 		}
 		sort.Strings(keys)
 	}
-	rows = append(rows, diagnosticRow{"设置键", firstNonEmpty(strings.Join(keys, " · "), "（空）")})
+	rows = append(rows, diagnosticRow{
+		localized(locale, "设置键", "Setting keys"),
+		firstNonEmpty(strings.Join(keys, " · "), localized(locale, "（空）", "(empty)")),
+	})
 	return rows
 }
 
@@ -691,22 +832,30 @@ func modelPresets() []preset {
 	}
 }
 
+// inputLabel appends the localized "input" suffix used by native input labels.
+func inputLabel(locale contracts.LocaleService, label string) string {
+	return label + localized(locale, " 输入", " input")
+}
+
 // buildPage builds the model settings page with branded native controls.
-func buildPage(c *ui.Context, state *moduleState, chat contracts.ChatService, labels buildLabels, store contracts.SettingsService) {
+func buildPage(c *ui.Context, state *moduleState, chat contracts.ChatService, labels buildLabels,
+	store contracts.SettingsService, locale contracts.LocaleService) {
 	t := design.Of(c)
 	ui.Column(c).FillWidth().Gap(design.Space2).Children(func() {
-		pageHeader(c, t, labels.title, "配置对话使用的模型、API 地址与系统提示词。")
+		pageHeader(c, t, labels.title, localized(locale,
+			"配置对话使用的模型、API 地址与系统提示词。",
+			"Configure the model, API base URL and system prompt used by the conversation."))
 
 		panel(c, t, func() {
 			ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(design.Space2).Children(func() {
-				sectionTitle(c, t, "快速预设")
+				sectionTitle(c, t, localized(locale, "快速预设", "Quick presets"))
 				ui.Spacer(c).Grow(1)
 				for _, option := range modelPresets() {
 					option := option
 					if brandButton(c, t, option.icon, option.label).Clicked() {
 						state.model = option.model
 						state.baseURL = option.baseURL
-						state.status = "已填入 " + option.label + " 预设，保存后生效"
+						state.status = localized(locale, "已填入 ", "Filled the ") + option.label + localized(locale, " 预设，保存后生效", " preset; save to apply")
 						state.statusErr = false
 					}
 				}
@@ -714,44 +863,44 @@ func buildPage(c *ui.Context, state *moduleState, chat contracts.ChatService, la
 		})
 
 		panel(c, t, func() {
-			sectionTitle(c, t, "连接")
+			sectionTitle(c, t, localized(locale, "连接", "Connection"))
 			ui.Row(c).FillWidth().Gap(design.Space3).AlignItems(ui.Start).Children(func() {
 				ui.Column(c).FillWidth().Grow(1).Gap(design.Space1).Children(func() {
 					fieldLabel(c, t, labels.modelLabel)
-					ui.TextInput(c, &state.model).Label(labels.modelLabel + " 输入").FillWidth()
+					ui.TextInput(c, &state.model).Label(inputLabel(locale, labels.modelLabel)).FillWidth()
 				})
 				ui.Column(c).FillWidth().Grow(1).Gap(design.Space1).Children(func() {
 					fieldLabel(c, t, labels.baseURLLabel)
-					ui.TextInput(c, &state.baseURL).Label(labels.baseURLLabel + " 输入").FillWidth()
+					ui.TextInput(c, &state.baseURL).Label(inputLabel(locale, labels.baseURLLabel)).FillWidth()
 				})
 			})
 			ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(design.Space2).Children(func() {
 				fieldLabel(c, t, labels.apiKeyLabel)
 				ui.Spacer(c).Grow(1)
 				if state.apiKeySet {
-					design.Apply(ui.Text(c, "已设置（留空保持不变）"), t.TextMuted(design.TypeXXS))
+					design.Apply(ui.Text(c, localized(locale, "已设置（留空保持不变）", "Configured (leave blank to keep)")), t.TextMuted(design.TypeXXS))
 				} else {
-					design.Apply(ui.Text(c, "未设置"), t.TextMuted(design.TypeXXS))
+					design.Apply(ui.Text(c, localized(locale, "未设置", "Not configured")), t.TextMuted(design.TypeXXS))
 				}
 			})
-			ui.TextInput(c, &state.apiKey).Label(labels.apiKeyLabel + " 输入").
-				Placeholder("输入新的 API key；留空保持不变").FillWidth()
+			ui.TextInput(c, &state.apiKey).Label(inputLabel(locale, labels.apiKeyLabel)).
+				Placeholder(localized(locale, "输入新的 API key；留空保持不变", "Enter a new API key; leave blank to keep")).FillWidth()
 		})
 
 		panel(c, t, func() {
-			sectionTitle(c, t, "提示词")
+			sectionTitle(c, t, localized(locale, "提示词", "Prompt"))
 			fieldLabel(c, t, labels.systemPromptLabel)
-			ui.TextArea(c, &state.systemPrompt).Label(labels.systemPromptLabel + " 输入").
+			ui.TextArea(c, &state.systemPrompt).Label(inputLabel(locale, labels.systemPromptLabel)).
 				FillWidth().Height(56)
 		})
 
 		ui.Row(c).FillWidth().Gap(design.Space2).AlignItems(ui.Center).Children(func() {
 			if brandPrimaryButton(c, t, icons.Sliders(), labels.saveLabel).Clicked() {
 				if err := save(state, store); err != nil {
-					state.status = "保存失败：" + err.Error()
+					state.status = localized(locale, "保存失败：", "Save failed: ") + err.Error()
 					state.statusErr = true
 				} else {
-					state.status = "已保存"
+					state.status = localized(locale, "已保存", "Saved")
 					state.statusErr = false
 				}
 			}
@@ -765,10 +914,11 @@ func buildPage(c *ui.Context, state *moduleState, chat contracts.ChatService, la
 		// informational text, not a control.
 		active := strings.TrimSpace(chat.ActiveSession())
 		if active == "" {
-			active = "无活动会话"
+			active = localized(locale, "无活动会话", "No active session")
 		}
 		ui.Divider(c)
-		design.Apply(ui.Textf(c, "当前会话: %s · 当前模型: %s", active, firstNonEmpty(state.model, "未配置")),
+		design.Apply(ui.Textf(c, localized(locale, "当前会话: %s · 当前模型: %s", "Current session: %s · Current model: %s"),
+			active, firstNonEmpty(state.model, localized(locale, "未配置", "Not configured"))),
 			t.Font(design.TypeXXS)).TextColor(t.LabelTertiary)
 	})
 }
@@ -781,32 +931,34 @@ func buildAppearancePage(c *ui.Context, state *appearanceState, store contracts.
 	theme contracts.ThemeService, locale contracts.LocaleService, labels buildAppearanceLabels) {
 	t := design.Of(c)
 	ui.Column(c).FillWidth().Gap(design.Space2).Children(func() {
-		pageHeader(c, t, labels.title, "主题与界面语言；保存后立即生效并写入产品设置。")
+		pageHeader(c, t, labels.title, localized(locale,
+			"主题与界面语言；保存后立即生效并写入产品设置。",
+			"Theme and interface language; changes apply immediately and are saved to the product settings."))
 
 		panel(c, t, func() {
-			sectionTitle(c, t, "主题")
+			sectionTitle(c, t, localized(locale, "主题", "Theme"))
 			toggle := ui.Toggle(c, &state.dark, labels.themeLabel)
 			if toggle.Changed() {
 				theme.SetDark(state.dark)
 				_ = store.Set(contracts.SettingsUIThemeDark, fmt.Sprintf("%t", state.dark))
-				state.status = "主题已切换"
+				state.status = localized(locale, "主题已切换", "Theme switched")
 				state.statusErr = false
 			}
-			design.Apply(ui.Text(c, "跟随系统或固定浅色/深色外观，切换立即预览。"), t.TextMuted(design.TypeXXS))
+			design.Apply(ui.Text(c, localized(locale, "跟随系统或固定浅色/深色外观，切换立即预览。", "Follow the system theme or force light/dark; the change previews immediately.")), t.TextMuted(design.TypeXXS))
 		})
 
 		panel(c, t, func() {
-			sectionTitle(c, t, "语言")
+			sectionTitle(c, t, localized(locale, "语言", "Language"))
 			choice := languageChoice(state.language)
 			selectControl := ui.Select(c, &choice, languageOptions).Label(labels.languageLabel)
 			if selectControl.Changed() {
 				state.language = languageCode(choice)
 				locale.SetLanguage(state.language)
 				_ = store.Set(contracts.SettingsUILanguage, state.language)
-				state.status = "语言已切换"
+				state.status = localized(locale, "语言已切换", "Language switched")
 				state.statusErr = false
 			}
-			design.Apply(ui.Text(c, "界面文案与日期格式随语言切换。"), t.TextMuted(design.TypeXXS))
+			design.Apply(ui.Text(c, localized(locale, "界面文案与日期格式随语言切换。", "Interface copy and date formats follow the language.")), t.TextMuted(design.TypeXXS))
 		})
 
 		ui.Row(c).FillWidth().Gap(design.Space2).AlignItems(ui.Center).Children(func() {
@@ -814,10 +966,10 @@ func buildAppearancePage(c *ui.Context, state *appearanceState, store contracts.
 				theme.SetDark(state.dark)
 				locale.SetLanguage(state.language)
 				if err := saveAppearance(state, store); err != nil {
-					state.status = "保存失败：" + err.Error()
+					state.status = localized(locale, "保存失败：", "Save failed: ") + err.Error()
 					state.statusErr = true
 				} else {
-					state.status = "已保存"
+					state.status = localized(locale, "已保存", "Saved")
 					state.statusErr = false
 				}
 			}

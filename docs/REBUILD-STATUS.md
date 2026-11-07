@@ -21,6 +21,14 @@
 - 右侧栏「文件」Tab：打开文件夹（mygo 原生 Directory picker）、目录进入/面包屑、文本/Markdown/图片预览、
   刷新与错误状态；E2E 覆盖工作区创建 + 列表 + 预览帧
 
+**P4 i18n 第二切片（2026-11-08）**
+- settings：全部 8 个页面 + 浮层标题，每帧 uikit.T；页面标题语言变化时 unregister/re-register SettingsPageSpec
+  （Section 稳定 ID 保排序/默认页，导航同帧更新）；诊断新增 Copied 提示；更新/导入异步结果英文
+- home：hero/greeting/setup card/composer placeholder/主按钮 en/zh；sidebar screen 导航标题 Home/Automation/
+  Plugins 显示层映射（未知 ID 回退注册 ID，未改 contracts）
+- assembly 去掉显式中文 settings title；E2E en 设置导航 + 中文恢复，截图 p2-english-settings.png
+- 仍缺：About 页（internal/ui/about）、右侧栏、automation/plugins 页面、toolcards/approval、home 命令面板静态标题
+
 **P4 i18n 第一切片（2026-11-08）**
 - `internal/uikit/locale.go`：T(locale, zh, en) / Language
 - sidebar：新对话/搜索/工作区/未分组/消息搜索/空态/行菜单/重命名/删除确认/Badge/Footer/显示归档全部 en/zh

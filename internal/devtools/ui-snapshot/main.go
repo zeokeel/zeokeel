@@ -130,6 +130,10 @@ func main() {
 		locale.SetLanguage("en")
 		a.tester.Frame()
 		a.render(outDir + "/p2-english.png")
+		a.ui.Navigator().ToggleSettings()
+		a.tester.Frame()
+		a.render(outDir + "/p2-english-settings.png")
+		a.ui.Navigator().CloseSettings()
 		locale.SetLanguage("zh")
 		a.tester.Frame()
 	}

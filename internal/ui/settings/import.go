@@ -57,31 +57,34 @@ func newImportState() *importState { return &importState{} }
 // buildImportPage renders the page: the source directory row (native input +
 // browse seam + scan), the read-only scan preview and the import action with
 // its result. No progress percentages: the service reports counts only.
-func buildImportPage(c *ui.Context, t *design.Tokens, kctx cordis.Context, runtime contracts.UIRuntime, st *importState) {
+func buildImportPage(c *ui.Context, t *design.Tokens, kctx cordis.Context, runtime contracts.UIRuntime,
+	st *importState, locale contracts.LocaleService) {
 	importer, hasImporter := kctx.Get(contracts.KeyImporter)
 
 	ui.Column(c).FillWidth().Gap(design.Space4).Children(func() {
 		ui.Column(c).Gap(design.Space1).Children(func() {
-			design.Apply(ui.Text(c, ImportPageTitle), t.Font(design.TypeL)).
+			design.Apply(ui.Text(c, localized(locale, "导入", "Import")), t.Font(design.TypeL)).
 				FontWeight(600).TextColor(t.LabelPrimary)
-			design.Apply(ui.Text(c,
-				"从 DSH 桌面数据导入会话与工作区；扫描只读，导入会写入本产品存储。"),
+			design.Apply(ui.Text(c, localized(locale,
+				"从 DSH 桌面数据导入会话与工作区；扫描只读，导入会写入本产品存储。",
+				"Import sessions and workspaces from DSH desktop data; scanning is read-only, importing writes to this product's store.")),
 				t.TextMuted(design.TypeXS)).MaxLines(2)
 		})
 		if !hasImporter {
-			design.Apply(ui.Text(c, "导入服务未启用"), t.TextMuted(design.TypeXS))
+			design.Apply(ui.Text(c, localized(locale, "导入服务未启用", "Import service is not enabled")), t.TextMuted(design.TypeXS))
 			return
 		}
 
 		ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(design.Space2).Children(func() {
-			ui.TextInput(c, &st.dir).Label("DSH 数据目录").
+			ui.TextInput(c, &st.dir).Label(localized(locale, "DSH 数据目录", "DSH data directory")).
 				Placeholder("~/.dsh").Grow(1)
-			browse := ui.Button(c, "浏览…").Tooltip("选择 DSH 数据目录")
+			browse := ui.Button(c, localized(locale, "浏览…", "Browse…")).
+				Tooltip(localized(locale, "选择 DSH 数据目录", "Choose the DSH data directory"))
 			if browse.Clicked() {
 				dir, err := ImportDirectoryPicker()
 				switch {
 				case err != nil:
-					st.dirErr = "无法打开目录选择器：" + err.Error()
+					st.dirErr = err.Error()
 				case strings.TrimSpace(dir) != "":
 					st.dir = dir
 					st.dirErr = ""
@@ -92,47 +95,49 @@ func buildImportPage(c *ui.Context, t *design.Tokens, kctx cordis.Context, runti
 				}
 				runtime.Invalidate()
 			}
-			scanLabel := "扫描"
+			scanLabel := localized(locale, "扫描", "Scan")
 			if st.scanning {
-				scanLabel = "扫描中…"
+				scanLabel = localized(locale, "扫描中…", "Scanning…")
 			}
-			scan := ui.Button(c, scanLabel).Tooltip("只读扫描该目录，不写入任何数据")
+			scan := ui.Button(c, scanLabel).
+				Tooltip(localized(locale, "只读扫描该目录，不写入任何数据", "Scan the directory read-only; nothing is written"))
 			scan.Disabled(st.scanning || st.importing || strings.TrimSpace(st.dir) == "")
 			if scan.Clicked() && !st.scanning && !st.importing {
 				startImportScan(importer, runtime, st)
 			}
 		})
 		if st.dirErr != "" {
-			buildImportError(c, t, st.dirErr)
+			buildImportError(c, t, localized(locale, "无法打开目录选择器：", "Could not open the directory picker: ")+st.dirErr)
 		}
 		if st.scanErr != "" {
-			buildImportError(c, t, st.scanErr)
+			buildImportError(c, t, localized(locale, "扫描失败：", "Scan failed: ")+st.scanErr)
 		}
 
 		if st.preview != nil {
-			buildImportPreview(c, t, importer, runtime, st)
+			buildImportPreview(c, t, importer, runtime, st, locale)
 		}
 		if st.importErr != "" {
-			buildImportError(c, t, st.importErr)
+			buildImportError(c, t, localized(locale, "导入失败：", "Import failed: ")+st.importErr)
 		}
 		if st.result != nil {
-			buildImportResult(c, t, *st.result)
+			buildImportResult(c, t, *st.result, locale)
 		}
 	})
 }
 
 // buildImportPreview renders the scan counts, the findings notes and the
 // import action (which only exists once a preview did).
-func buildImportPreview(c *ui.Context, t *design.Tokens, importer contracts.ImporterService, runtime contracts.UIRuntime, st *importState) {
+func buildImportPreview(c *ui.Context, t *design.Tokens, importer contracts.ImporterService,
+	runtime contracts.UIRuntime, st *importState, locale contracts.LocaleService) {
 	preview := *st.preview
 	card := design.Apply(ui.Column(c), t.Panel()).Padding(design.Space3).Gap(design.Space2)
 	card.Children(func() {
-		design.Apply(ui.Text(c, "扫描结果"), t.Font(design.TypeS)).
+		design.Apply(ui.Text(c, localized(locale, "扫描结果", "Scan result")), t.Font(design.TypeS)).
 			FontWeight(600).TextColor(t.LabelPrimary)
-		importStatRow(c, t, "会话", preview.Sessions)
-		importStatRow(c, t, "消息", preview.Messages)
-		importStatRow(c, t, "工作区", preview.Workspaces)
-		importStatRow(c, t, "跳过", preview.Skipped)
+		importStatRow(c, t, localized(locale, "会话", "Sessions"), preview.Sessions)
+		importStatRow(c, t, localized(locale, "消息", "Messages"), preview.Messages)
+		importStatRow(c, t, localized(locale, "工作区", "Workspaces"), preview.Workspaces)
+		importStatRow(c, t, localized(locale, "跳过", "Skipped"), preview.Skipped)
 		for _, note := range preview.Notes {
 			text := design.Apply(ui.Text(c, note), t.Font(design.TypeXXS))
 			if importNoteIsSkip(note) {
@@ -141,9 +146,9 @@ func buildImportPreview(c *ui.Context, t *design.Tokens, importer contracts.Impo
 				text.TextColor(t.LabelTertiary)
 			}
 		}
-		importLabel := "导入数据"
+		importLabel := localized(locale, "导入数据", "Import data")
 		if st.importing {
-			importLabel = "导入中…"
+			importLabel = localized(locale, "导入中…", "Importing…")
 		}
 		importButton := design.Apply(ui.PrimaryButton(c, importLabel), t.PrimaryButton()).
 			Disabled(st.importing || st.scanning)
@@ -154,17 +159,18 @@ func buildImportPreview(c *ui.Context, t *design.Tokens, importer contracts.Impo
 }
 
 // buildImportResult renders what the import run actually wrote.
-func buildImportResult(c *ui.Context, t *design.Tokens, result contracts.ImportResult) {
+func buildImportResult(c *ui.Context, t *design.Tokens, result contracts.ImportResult,
+	locale contracts.LocaleService) {
 	card := design.Apply(ui.Column(c), t.Panel()).Padding(design.Space3).Gap(design.Space2)
 	card.Children(func() {
-		design.Apply(ui.Text(c, "导入结果"), t.Font(design.TypeS)).
+		design.Apply(ui.Text(c, localized(locale, "导入结果", "Import result")), t.Font(design.TypeS)).
 			FontWeight(600).TextColor(t.LabelPrimary)
-		importStatRow(c, t, "导入会话", result.ImportedSessions)
-		importStatRow(c, t, "导入消息", result.ImportedMessages)
-		importStatRow(c, t, "导入工作区", result.ImportedWorkspaces)
-		importStatRow(c, t, "跳过", result.Skipped)
+		importStatRow(c, t, localized(locale, "导入会话", "Imported sessions"), result.ImportedSessions)
+		importStatRow(c, t, localized(locale, "导入消息", "Imported messages"), result.ImportedMessages)
+		importStatRow(c, t, localized(locale, "导入工作区", "Imported workspaces"), result.ImportedWorkspaces)
+		importStatRow(c, t, localized(locale, "跳过", "Skipped"), result.Skipped)
 		if len(result.Errors) == 0 {
-			design.Apply(ui.Text(c, "没有错误"), t.TextMuted(design.TypeXXS))
+			design.Apply(ui.Text(c, localized(locale, "没有错误", "No errors")), t.TextMuted(design.TypeXXS))
 			return
 		}
 		for _, entry := range result.Errors {
@@ -209,7 +215,7 @@ func startImportScan(importer contracts.ImporterService, runtime contracts.UIRun
 		runtime.Post(func() {
 			st.scanning = false
 			if err != nil {
-				st.scanErr = "扫描失败：" + err.Error()
+				st.scanErr = err.Error()
 			} else {
 				st.preview = &preview
 				st.scanErr = ""
@@ -231,7 +237,7 @@ func startImportData(importer contracts.ImporterService, runtime contracts.UIRun
 		runtime.Post(func() {
 			st.importing = false
 			if err != nil {
-				st.importErr = "导入失败：" + err.Error()
+				st.importErr = err.Error()
 			} else {
 				st.result = &result
 				st.importErr = ""

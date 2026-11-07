@@ -273,7 +273,7 @@ func buildSessionList(c *ui.Context, t *design.Tokens, chat contracts.ChatServic
 	nav contracts.Navigator, runtime contracts.UIRuntime, state *paneState, title string) {
 	ui.Column(c).FillWidth().Gap(design.Space1).Padding(design.Space2, 0, 0, 0).
 		Children(func() {
-			home := ui.SidebarItem(c, "home", icons.NewChat(), "首页")
+			home := ui.SidebarItem(c, "home", icons.NewChat(), state.T("首页", "Home"))
 			home.OnClick(func() {
 				if err := nav.Push("home"); err == nil {
 					runtime.Invalidate()
@@ -295,7 +295,7 @@ func buildSessionList(c *ui.Context, t *design.Tokens, chat contracts.ChatServic
 					case "plugins":
 						icon = icons.Plugin()
 					}
-					item := ui.SidebarItem(c, id, icon, screenNavLabel(id))
+					item := ui.SidebarItem(c, id, icon, state.screenNavLabel(id))
 					screenID := id
 					item.OnClick(func() {
 						if err := nav.Push(screenID); err == nil {
@@ -604,13 +604,18 @@ func buildWorkspaceGroup(
 }
 
 // screenNavLabel renders a registered screen id as a sidebar label: the known
-// product screens get their localized title, other ids fall back to the id.
-func screenNavLabel(id string) string {
+// product screens get their localized title, other ids fall back to the id (the
+// screen's registered title is not exposed by the ScreenLister read model).
+func (state *paneState) screenNavLabel(id string) string {
 	switch id {
+	case "home":
+		return state.T("首页", "Home")
+	case "session":
+		return state.T("会话", "Chats")
 	case "automation":
-		return "自动化"
+		return state.T("自动化", "Automation")
 	case "plugins":
-		return "插件"
+		return state.T("插件", "Plugins")
 	default:
 		return id
 	}

@@ -119,10 +119,7 @@
         {
           "id": "settings",
           "module": "zeokeel-ui/settings",
-          "config": {
-            "title": "模型",
-            "saveLabel": "保存"
-          }
+          "config": {}
         },
         {
           "id": "approval",

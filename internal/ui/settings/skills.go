@@ -45,10 +45,11 @@ func (s *skillsState) refresh() {
 
 // buildSkillsPage renders the skills page: heading, description, scanned roots,
 // one panel card per skill and its native collapsible Markdown content.
-func buildSkillsPage(c *ui.Context, t *design.Tokens, kctx cordis.Context, st *skillsState) {
+func buildSkillsPage(c *ui.Context, t *design.Tokens, kctx cordis.Context, st *skillsState,
+	locale contracts.LocaleService) {
 	skills, hasSkills := kctx.Get(contracts.KeySkills)
 	if !hasSkills || skills == nil {
-		buildSkillsEmpty(c, t, "技能后端未启用")
+		buildSkillsEmpty(c, t, localized(locale, "技能后端未启用", "Skills backend is not enabled"))
 		return
 	}
 	if !st.loaded {
@@ -60,22 +61,24 @@ func buildSkillsPage(c *ui.Context, t *design.Tokens, kctx cordis.Context, st *s
 	ui.Column(c).FillWidth().Gap(design.Space4).Children(func() {
 		// Heading row with the native refresh action.
 		ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(design.Space2).Children(func() {
-			design.Apply(ui.Text(c, SkillsPageTitle), t.Font(design.TypeL)).
+			design.Apply(ui.Text(c, localized(locale, "技能", "Skills")), t.Font(design.TypeL)).
 				FontWeight(600).TextColor(t.LabelPrimary)
 			ui.Spacer(c).Grow(1)
-			refresh := ui.Button(c, "刷新").Tooltip("重新扫描技能目录")
+			refresh := ui.Button(c, localized(locale, "刷新", "Refresh")).
+				Tooltip(localized(locale, "重新扫描技能目录", "Rescan the skill directories"))
 			if refresh.Clicked() {
 				st.refresh()
 				c.Invalidate()
 			}
 		})
-		design.Apply(ui.Text(c,
-			"从配置目录、dataDir/skills 与工作区 /skills 中发现的 SKILL.md 技能。"),
+		design.Apply(ui.Text(c, localized(locale,
+			"从配置目录、dataDir/skills 与工作区 /skills 中发现的 SKILL.md 技能。",
+			"SKILL.md skills discovered in the configured directories, dataDir/skills and the workspace /skills.")),
 			t.TextMuted(design.TypeXS))
 
 		if len(st.roots) > 0 {
 			ui.Column(c).FillWidth().Gap(2).Children(func() {
-				design.Apply(ui.Text(c, "扫描目录"), t.Font(design.TypeXXS)).
+				design.Apply(ui.Text(c, localized(locale, "扫描目录", "Scanned directories")), t.Font(design.TypeXXS)).
 					TextColor(t.LabelTertiary)
 				for _, root := range st.roots {
 					design.Apply(ui.Text(c, root), t.MonoFamily()).FontSize(11).
@@ -85,26 +88,28 @@ func buildSkillsPage(c *ui.Context, t *design.Tokens, kctx cordis.Context, st *s
 		}
 
 		if st.listErr != nil {
-			buildSkillsErrorLine(c, t, "读取技能失败："+st.listErr.Error())
+			buildSkillsErrorLine(c, t, localized(locale, "读取技能失败：", "Failed to read skills: ")+st.listErr.Error())
 			return
 		}
 		if len(st.skills) == 0 {
-			buildSkillsEmpty(c, t, "还没有发现技能")
-			design.Apply(ui.Text(c,
-				"在工作区 /skills 或 dataDir/skills 放置 <name>/SKILL.md 后点击刷新。"),
+			buildSkillsEmpty(c, t, localized(locale, "还没有发现技能", "No skills discovered yet"))
+			design.Apply(ui.Text(c, localized(locale,
+				"在工作区 /skills 或 dataDir/skills 放置 <name>/SKILL.md 后点击刷新。",
+				"Place <name>/SKILL.md in the workspace /skills or dataDir/skills, then refresh.")),
 				t.TextMuted(design.TypeXXS)).MaxLines(2)
 			return
 		}
 		for _, skill := range st.skills {
-			buildSkillCard(c, t, skills, st, skill)
+			buildSkillCard(c, t, skills, st, skill, locale)
 		}
 	})
 }
 
 // buildSkillCard is one discovered skill: name, description, path and the
 // native collapsible content preview.
-func buildSkillCard(c *ui.Context, t *design.Tokens, skills contracts.SkillsService, st *skillsState, skill contracts.Skill) {
-	name := firstNonEmpty(skill.Name, "(未命名技能)")
+func buildSkillCard(c *ui.Context, t *design.Tokens, skills contracts.SkillsService, st *skillsState,
+	skill contracts.Skill, locale contracts.LocaleService) {
+	name := firstNonEmpty(skill.Name, localized(locale, "(未命名技能)", "(Unnamed skill)"))
 	key := name + "\x00" + skill.Path
 	card := design.Apply(ui.Column(c), t.Panel()).Padding(design.Space3).Gap(design.Space2)
 	card.Children(func() {
@@ -118,14 +123,14 @@ func buildSkillCard(c *ui.Context, t *design.Tokens, skills contracts.SkillsServ
 				TextColor(t.LabelTertiary).MaxLines(1).Ellipsis("…")
 		}
 		open := st.open[key]
-		ui.Collapsible(c, "查看内容", &open, func() {
+		ui.Collapsible(c, localized(locale, "查看内容", "View content"), &open, func() {
 			body, bodyErr := skillBody(skills, st, skill)
 			if bodyErr != "" {
-				buildSkillsErrorLine(c, t, "读取技能内容失败："+bodyErr)
+				buildSkillsErrorLine(c, t, localized(locale, "读取技能内容失败：", "Failed to read skill content: ")+bodyErr)
 				return
 			}
 			if strings.TrimSpace(body) == "" {
-				design.Apply(ui.Text(c, "技能内容为空"), t.TextMuted(design.TypeXXS))
+				design.Apply(ui.Text(c, localized(locale, "技能内容为空", "Skill content is empty")), t.TextMuted(design.TypeXXS))
 				return
 			}
 			ui.Scroll(c).FillWidth().MaxHeight(design.Space6 * 10).Children(func() {

@@ -23,6 +23,7 @@ import (
 	"github.com/zeokeel/zeokeel/internal/contracts"
 	"github.com/zeokeel/zeokeel/internal/design"
 	"github.com/zeokeel/zeokeel/internal/icons"
+	"github.com/zeokeel/zeokeel/internal/uikit"
 )
 
 // Config is the module's typed assembly config.
@@ -60,14 +61,27 @@ func Module() *module.Descriptor[Config] {
 		// the agent backend; with it the composer creates a real session.
 		chat, _ := ctx.Get(contracts.KeyChat)
 		title := firstNonEmpty(cfg.Title, "首页")
-		greeting := firstNonEmpty(cfg.Greeting, "编译期模块化的桌面 AI agent。")
-		composerPlaceholder := firstNonEmpty(cfg.ComposerPlaceholder, "向 ZeoKeel 提问…")
+		// The locale is optional: copy is generated per frame so a language
+		// switch applies on the next frame (zh stays the default).
+		locale, _ := ctx.Get(contracts.KeyLocale)
+		tr := func(zh, en string) string { return uikit.T(locale, zh, en) }
+		greeting := cfg.Greeting
+		composerPlaceholder := cfg.ComposerPlaceholder
 
 		screen := contracts.ScreenSpec{
 			ID:    "home",
 			Title: title,
 			Order: 10,
 			Build: func(c *ui.Context) {
+				greetingText := greeting
+				if strings.TrimSpace(greetingText) == "" {
+					greetingText = tr("编译期模块化的桌面 AI agent。",
+						"A compile-time modular desktop AI agent.")
+				}
+				placeholderText := composerPlaceholder
+				if strings.TrimSpace(placeholderText) == "" {
+					placeholderText = tr("向 ZeoKeel 提问…", "Ask ZeoKeel…")
+				}
 				tokens := design.Of(c)
 				ui.Column(c).FillWidth().Grow(1).Gap(design.Space6).Children(func() {
 					// The brand column: centered vertically in the free space,
@@ -77,11 +91,11 @@ func Module() *module.Descriptor[Config] {
 							ui.Column(c).FillWidth().MaxWidth(homeColumnWidth).Gap(design.Space6).
 								Children(func() {
 									region(c, runtime, contracts.SlotHomeHero, func(c *ui.Context) {
-										buildHero(c, tokens, greeting, info, chat == nil)
+										buildHero(c, tokens, greetingText, info, chat == nil, tr)
 									})
-									buildSetupCard(c, tokens, chat, nav)
+									buildSetupCard(c, tokens, chat, nav, tr)
 									region(c, runtime, contracts.SlotHomeComposer, func(c *ui.Context) {
-										buildComposer(c, tokens, chat, nav, runtime, composerPlaceholder)
+										buildComposer(c, tokens, chat, nav, runtime, placeholderText, tr)
 									})
 								})
 						})
@@ -110,7 +124,8 @@ func Module() *module.Descriptor[Config] {
 // buildSetupCard is the first-run guidance card from the old shell's
 // homeSetupCard: while no model is configured, Home says what is missing and
 // offers the action that fixes it instead of letting the first send fail.
-func buildSetupCard(c *ui.Context, t *design.Tokens, chat contracts.ChatService, nav contracts.Navigator) {
+func buildSetupCard(c *ui.Context, t *design.Tokens, chat contracts.ChatService,
+	nav contracts.Navigator, tr func(zh, en string) string) {
 	if chat == nil {
 		return
 	}
@@ -123,13 +138,14 @@ func buildSetupCard(c *ui.Context, t *design.Tokens, chat contracts.ChatService,
 	panel.Children(func() {
 		ui.Row(c).Gap(design.Space2).AlignItems(ui.Center).Children(func() {
 			ui.Icon(c, icons.Sparkles()).Size(16, 16).TextColor(t.Accent)
-			design.Apply(ui.Text(c, "完成 ZeoKeel 的初始设置"), t.Font(design.TypeS)).
+			design.Apply(ui.Text(c, tr("完成 ZeoKeel 的初始设置", "Finish setting up ZeoKeel")), t.Font(design.TypeS)).
 				FontWeight(600).TextColor(t.LabelPrimary).Grow(1)
 		})
 		ui.Row(c).Gap(design.Space2).AlignItems(ui.Center).Children(func() {
-			design.Apply(ui.Text(c, "尚未配置模型。添加服务商与密钥后才能发送消息。"), t.TextMuted(design.TypeXS)).
-				Grow(1).MaxLines(2)
-			if ui.Button(c, "配置模型").Clicked() {
+			design.Apply(ui.Text(c, tr("尚未配置模型。添加服务商与密钥后才能发送消息。",
+				"No model configured yet. Add a provider and API key before sending messages.")),
+				t.TextMuted(design.TypeXS)).Grow(1).MaxLines(2)
+			if ui.Button(c, tr("配置模型", "Configure model")).Clicked() {
 				nav.ToggleSettings()
 			}
 		})
@@ -138,7 +154,8 @@ func buildSetupCard(c *ui.Context, t *design.Tokens, chat contracts.ChatService,
 
 // buildHero is the default Home hero: the brand mark and wordmark over the
 // tagline and the build badges, centered with generous whitespace.
-func buildHero(c *ui.Context, t *design.Tokens, greeting string, info contracts.AppInfo, showFallbackHint bool) {
+func buildHero(c *ui.Context, t *design.Tokens, greeting string, info contracts.AppInfo,
+	showFallbackHint bool, tr func(zh, en string) string) {
 	ui.Column(c).FillWidth().AlignItems(ui.Center).Gap(design.Space3).Children(func() {
 		ui.Row(c).AlignItems(ui.Center).Gap(design.Space3).Children(func() {
 			ui.Image(c, brand.Mark(t.Dark)).Size(48, 48)
@@ -155,7 +172,8 @@ func buildHero(c *ui.Context, t *design.Tokens, greeting string, info contracts.
 		// (see region). With a chat backend the product Home is not an empty
 		// state, so the hint is only shown in chat-less assemblies.
 		if showFallbackHint {
-			design.Apply(ui.Text(c, "这是 home 的默认 Hero 空态。"), t.TextMuted(design.TypeXS))
+			design.Apply(ui.Text(c, tr("这是 home 的默认 Hero 空态。",
+				"This is Home's default hero empty state.")), t.TextMuted(design.TypeXS))
 		}
 	})
 }
@@ -163,7 +181,8 @@ func buildHero(c *ui.Context, t *design.Tokens, greeting string, info contracts.
 // buildComposer is the default composer entry: a raised brand panel with the
 // placeholder and the primary "start a new conversation" action.
 func buildComposer(c *ui.Context, t *design.Tokens, chat contracts.ChatService,
-	nav contracts.Navigator, runtime contracts.UIRuntime, placeholder string) {
+	nav contracts.Navigator, runtime contracts.UIRuntime, placeholder string,
+	tr func(zh, en string) string) {
 	panel := ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(design.Space3).
 		Padding(design.Space4)
 	design.Apply(panel, t.Panel())
@@ -174,11 +193,12 @@ func buildComposer(c *ui.Context, t *design.Tokens, chat contracts.ChatService,
 		if start.Pressed() || start.Hovered() {
 			start = start.Background(t.BgHover)
 		}
-		start.Label("开始新对话")
+		startLabel := tr("开始新对话", "Start a new conversation")
+		start.Label(startLabel)
 		start.Children(func() {
 			ui.Row(c).AlignItems(ui.Center).Gap(design.Space2).Children(func() {
 				ui.Icon(c, icons.NewChat()).Size(16, 16).TextColor(t.LabelPrimary)
-				design.Apply(ui.Text(c, "开始新对话"), t.Text(design.TypeS)).FontWeight(500)
+				design.Apply(ui.Text(c, startLabel), t.Text(design.TypeS)).FontWeight(500)
 			})
 		})
 		if start.Clicked() && chat != nil {

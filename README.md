@@ -168,6 +168,9 @@ go test ./...
 - ✅ P4 i18n（第一切片）：`uikit.T(locale, zh, en)`；侧栏与会话界面全部自有文案接入 `LocaleService`
   （en/zh 每帧切换即时生效；导航 screen 标题/设置页仍中文，后续切片）；桌面 assembly 移除显式中文 labels
   以便本地化默认值生效；截图 `p2-english.png`
+- ✅ P4 i18n（第二切片）：设置全部页面（模型/服务商/外观/技能/快捷键/诊断/更新/导入 + Settings 浮层标题，
+  页面标题语言变化动态重注册）+ Home（hero/setup/composer）+ 侧栏导航标题（Home/Automation/Plugins）；
+  desktop assembly 去掉显式中文 settings title 让本地化默认值生效；截图 `p2-english`/`p2-english-settings.png`
 - ⬜ 后续阶段见 [docs/PRODUCT-REBUILD-PLAN.md](docs/PRODUCT-REBUILD-PLAN.md)：
   P2 剩余（composer 附件/图片/@ 提及、右侧栏 Files/Terminal/Log 页、会话操作上下文菜单）→
   P3 memory/skills/automation/插件/workspace diff/搜索/fork/export → P4 ACP/热键/导入/更新/诊断

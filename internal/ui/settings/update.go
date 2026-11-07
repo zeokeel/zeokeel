@@ -39,7 +39,8 @@ func newUpdateState() *updateState { return &updateState{} }
 // buildUpdatePage renders the page: current version, the native check action,
 // the version/status result, the release-notes Markdown preview and the copy
 // link action. It never downloads or replaces the binary.
-func buildUpdatePage(c *ui.Context, t *design.Tokens, kctx cordis.Context, runtime contracts.UIRuntime, st *updateState) {
+func buildUpdatePage(c *ui.Context, t *design.Tokens, kctx cordis.Context, runtime contracts.UIRuntime,
+	st *updateState, locale contracts.LocaleService) {
 	updateService, hasUpdate := kctx.Get(contracts.KeyUpdate)
 	appInfo, _ := kctx.Get(contracts.KeyAppInfo)
 
@@ -47,28 +48,29 @@ func buildUpdatePage(c *ui.Context, t *design.Tokens, kctx cordis.Context, runti
 
 	ui.Column(c).FillWidth().Gap(design.Space4).Children(func() {
 		ui.Column(c).Gap(design.Space1).Children(func() {
-			design.Apply(ui.Text(c, UpdatePageTitle), t.Font(design.TypeL)).
+			design.Apply(ui.Text(c, localized(locale, "更新", "Update")), t.Font(design.TypeL)).
 				FontWeight(600).TextColor(t.LabelPrimary)
-			design.Apply(ui.Text(c,
-				"自动替换暂不支持；检查更新后手动下载安装包。"),
+			design.Apply(ui.Text(c, localized(locale,
+				"自动替换暂不支持；检查更新后手动下载安装包。",
+				"Automatic replacement is not supported; check for updates and install the package manually.")),
 				t.TextMuted(design.TypeXS)).MaxLines(2)
 		})
 
 		ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(design.Space3).Children(func() {
-			design.Apply(ui.Text(c, "当前版本"), t.Font(design.TypeXS)).
+			design.Apply(ui.Text(c, localized(locale, "当前版本", "Current version")), t.Font(design.TypeXS)).
 				TextColor(t.LabelSecondary)
 			design.Apply(ui.Text(c, current), t.MonoFamily()).FontSize(12).
 				TextColor(t.LabelPrimary)
 		})
 
 		if !hasUpdate {
-			design.Apply(ui.Text(c, "更新服务未启用"), t.TextMuted(design.TypeXS))
+			design.Apply(ui.Text(c, localized(locale, "更新服务未启用", "Update service is not enabled")), t.TextMuted(design.TypeXS))
 			return
 		}
 
-		checkLabel := "检查更新"
+		checkLabel := localized(locale, "检查更新", "Check for updates")
 		if st.checking {
-			checkLabel = "检查中…"
+			checkLabel = localized(locale, "检查中…", "Checking…")
 		}
 		check := design.Apply(ui.PrimaryButton(c, checkLabel), t.PrimaryButton()).
 			Disabled(st.checking)
@@ -77,7 +79,7 @@ func buildUpdatePage(c *ui.Context, t *design.Tokens, kctx cordis.Context, runti
 		}
 
 		if st.err != "" {
-			buildUpdateError(c, t, st.err)
+			buildUpdateError(c, t, localized(locale, "检查更新失败：", "Update check failed: ")+st.err)
 		}
 		if !st.checked || st.err != "" {
 			return
@@ -85,47 +87,49 @@ func buildUpdatePage(c *ui.Context, t *design.Tokens, kctx cordis.Context, runti
 
 		latest := firstNonEmpty(st.info.LatestVersion, current)
 		ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(design.Space3).Children(func() {
-			design.Apply(ui.Text(c, "最新版本"), t.Font(design.TypeXS)).
+			design.Apply(ui.Text(c, localized(locale, "最新版本", "Latest version")), t.Font(design.TypeXS)).
 				TextColor(t.LabelSecondary)
 			design.Apply(ui.Text(c, latest), t.MonoFamily()).FontSize(12).
 				TextColor(t.LabelPrimary)
 			ui.Spacer(c).Grow(1)
 			if st.info.Available {
-				design.Apply(ui.Badge(c, "可更新"), t.Badge()).TextColor(t.Success)
+				design.Apply(ui.Badge(c, localized(locale, "可更新", "Update available")), t.Badge()).TextColor(t.Success)
 			} else {
-				design.Apply(ui.Badge(c, "已是最新"), t.Badge()).TextColor(t.LabelSecondary)
+				design.Apply(ui.Badge(c, localized(locale, "已是最新", "Up to date")), t.Badge()).TextColor(t.LabelSecondary)
 			}
 		})
 
-		if resource := updateResourceLine(st.info); resource != "" {
+		if resource := updateResourceLine(st.info, locale); resource != "" {
 			design.Apply(ui.Text(c, resource), t.Font(design.TypeXXS)).
 				TextColor(t.LabelTertiary).MaxLines(1).Ellipsis("…")
 		}
 
 		hasURL := strings.TrimSpace(st.info.URL) != ""
 		ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(design.Space2).Children(func() {
-			copyLink := ui.Button(c, "复制下载链接").Tooltip(firstNonEmpty(st.info.URL, "没有可下载的链接"))
+			copyLink := ui.Button(c, localized(locale, "复制下载链接", "Copy download link")).
+				Tooltip(firstNonEmpty(st.info.URL, localized(locale, "没有可下载的链接", "No download link")))
 			copyLink.Disabled(!hasURL)
 			if copyLink.Clicked() && hasURL {
 				c.WriteClipboard(st.info.URL)
 				st.copied = true
 			}
 			if st.copied && hasURL {
-				design.Apply(ui.Badge(c, "已复制"), t.Badge()).TextColor(t.Success)
+				design.Apply(ui.Badge(c, localized(locale, "已复制", "Copied")), t.Badge()).TextColor(t.Success)
 			}
 		})
 		if !hasURL {
-			design.Apply(ui.Text(c, "没有匹配当前平台的下载资源"), t.TextMuted(design.TypeXXS))
+			design.Apply(ui.Text(c, localized(locale, "没有匹配当前平台的下载资源",
+				"No download asset for the current platform")), t.TextMuted(design.TypeXXS))
 		}
 
 		if notes := strings.TrimSpace(st.info.Notes); notes != "" {
-			design.Apply(ui.Text(c, "更新说明"), t.Font(design.TypeS)).
+			design.Apply(ui.Text(c, localized(locale, "更新说明", "Release notes")), t.Font(design.TypeS)).
 				FontWeight(600).TextColor(t.LabelPrimary)
 			ui.Scroll(c).FillWidth().MaxHeight(design.Space6 * 10).Children(func() {
 				markdown.View(c, notes, nil)
 			})
 		} else {
-			design.Apply(ui.Text(c, "暂无更新说明"), t.TextMuted(design.TypeXXS))
+			design.Apply(ui.Text(c, localized(locale, "暂无更新说明", "No release notes")), t.TextMuted(design.TypeXXS))
 		}
 	})
 }
@@ -142,7 +146,7 @@ func startUpdateCheck(service contracts.UpdateService, runtime contracts.UIRunti
 		runtime.Post(func() {
 			st.checking = false
 			if err != nil {
-				st.err = "检查更新失败：" + err.Error()
+				st.err = err.Error()
 				st.checked = false
 			} else {
 				st.info = info
@@ -155,11 +159,11 @@ func startUpdateCheck(service contracts.UpdateService, runtime contracts.UIRunti
 }
 
 // updateResourceLine describes the matching asset for this platform.
-func updateResourceLine(info contracts.UpdateInfo) string {
+func updateResourceLine(info contracts.UpdateInfo, locale contracts.LocaleService) string {
 	parts := make([]string, 0, 3)
 	platform := runtime.GOOS + "/" + runtime.GOARCH
 	if info.Size > 0 || strings.TrimSpace(info.SHA256) != "" {
-		parts = append(parts, "资源："+platform)
+		parts = append(parts, localized(locale, "资源：", "Asset: ")+platform)
 	}
 	if info.Size > 0 {
 		parts = append(parts, formatUpdateSize(info.Size))
