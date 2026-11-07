@@ -718,6 +718,42 @@ func TestP1ApprovalToolsAndPersistence(t *testing.T) {
 		}
 	}
 
+	// @session references + reasoning effort: the reference token persists in
+	// the transcript while the model input expands the referenced transcript.
+	refSource := chat.ActiveSession()
+	refSession, err := chat.NewSession("引用测试")
+	if err != nil {
+		t.Fatalf("NewSession reference: %v", err)
+	}
+	refPrompt := "@session:" + refSource + " 请总结上面的会话"
+	if err := chat.Send(refSession, refPrompt); err != nil {
+		t.Fatalf("Send with session reference: %v", err)
+	}
+	waitIdle(t, chat, refSession, 5*time.Second)
+	refRead, ok := chat.Session(refSession)
+	if !ok || len(refRead.Messages) == 0 {
+		t.Fatalf("reference session read model = %+v (ok %v)", refRead, ok)
+	}
+	lastUser := ""
+	for _, message := range refRead.Messages {
+		if message.Role == contracts.ChatRoleUser {
+			lastUser = message.Text
+		}
+	}
+	if lastUser != refPrompt {
+		t.Fatalf("persisted user prompt = %q, want the raw reference token", lastUser)
+	}
+	if err := settings.Set(contracts.SessionEffortSettingKey(refSession), contracts.SessionEffortHigh); err != nil {
+		t.Fatalf("set session effort: %v", err)
+	}
+	if err := chat.Send(refSession, "再总结一次"); err != nil {
+		t.Fatalf("Send with high effort: %v", err)
+	}
+	waitIdle(t, chat, refSession, 5*time.Second)
+	if refRead, ok := chat.Session(refSession); !ok || refRead.Running {
+		t.Fatalf("high effort run did not finish: %+v", refRead)
+	}
+
 	// --- restart: the session and its messages come back from SQLite ------
 	title := session.Title
 	if err := loader.Close(); err != nil {

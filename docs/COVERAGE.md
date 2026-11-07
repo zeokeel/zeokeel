@@ -42,13 +42,13 @@
 | `lsp` | ❌ | 无；rig 有 `tools/lsp` 但 toolkit 未注册 | 旧 LSP client/servers 配置/工具未接 |
 | `mcp` | 🟡 | toolkit `mcp.StartHTTP` + `mcp_settings.go` + settings MCP 页 | settings `mcp.servers` 增删/校验，启动时与 assembly 按 URL 合并（assembly 优先）；仍无 stdio、workspace mcp.json opt-in、工具级开关 |
 | `memory` | 🟡 | `internal/modules/memory` + rig memory tool + session Memory tab | JSON MemoryStore/tool/搜索/添加；consolidate/extract/auto-memory 未迁移 |
-| `modelcatalog` | 🟡 | `internal/modules/modelcatalog` + composer 模型菜单 | 默认 DeepSeek Chat/Reasoner 预设、per-session 切换；缺旧 context window/reasoning effort/添加编辑/连接检查 |
+| `modelcatalog` | 🟡 | `internal/modules/modelcatalog` + composer 模型菜单 + 推理强度 | 默认 DeepSeek Chat/Reasoner 预设、per-session 切换、**per-session reasoning effort（low/medium/high，provider reasoning_effort + settings 持久化）**；缺旧 context window/添加编辑/连接检查 |
 | `presets` | ❌ | 无 | 无 agent presets/persona/tool allowlist/用户 JSON 覆盖 |
 | `prompt` | 🟡 | agent 静态 SystemPrompt + settings | 无 modes/plan/memory/AGENTS.md 注入策略、auto-title/review prompt |
 | `provider` | ✅ | rig `provider/openai` + agent 模块 | OpenAI Chat Completions 兼容 |
 | `runtime` | 🟡 | agent + rig agent/gate/compact | 循环/审批/压缩/检查点/多模态 parts/subagent runner/**team manager（spawn/steer/wait/interrupt/close + 工具注册去重）**/goal 跟踪桥；缺 modes、review、goal 自动 driver、PTC/workflow |
 | `session` | 🟡 | agent ChatService + SessionRegenerator + per-session model | 发送/取消/历史/恢复/压缩/fork/export/附件/重新生成/会话模型覆盖；缺 goal 多轮驱动、tool spill、per-message 反馈、附件服务 |
-| `sessionreference` | ❌ | 无 | `@session` 引用/候选人/上下文摘要/预算错误分类未迁移 |
+| `sessionreference` | 🟡 | composer @ 菜单 + agent references.go | **@session 引用已迁移**（@ 菜单列其它会话、token 持久化、agent 注入尾部 20 条/8000 rune 上下文、session_refs 事件、self/unknown 忽略）；缺旧候选排序/预算错误分类 |
 | `skills` | 🟡 | `internal/modules/skills` + settings 技能页 | 多根 List/Read/roots/预览；缺技能管理/编辑、文件监听 |
 | `state` | ✅ | ChatService 读模型 + uiroot runtime | old broker/projector 被读模型替代；UI 所需投影可用 |
 | `store` | 🟡 | `internal/modules/sessionstore` | sessions/messages/events/checkpoints/search/workspace_id；旧 attachments/automation_runs/feedback/model/setting 表语义分散或未迁移 |
@@ -65,7 +65,7 @@
 |---|---|---|---|
 | Home / 起始页 | ✅ | `internal/ui/home` | hero/greeting/setup card/composer/最近会话 |
 | Composer 基础（输入/附件/发送/停止/模型 chip/@/） | 🟡 | `internal/ui/session/view.go`、`attachments.go` | 文本、附件/图片/拖放、发送/停止、模型 chip、工作区 `@`、`/` 菜单；per-session 模型菜单已接 modelcatalog |
-| Composer 深度菜单/权限/plan/goal/compact | 🟡 | session `sessionCommands` + `buildComposerToolbar` | 已有 /新会话、/创建副本、/导出对话、/打开设置、**权限模式命令+Badge（ask/workspace/full 即时生效）** + 消息级重新生成 + per-session 模型切换；缺 /推理强度、/plan /goal /compact /feedback /memory、plan/mode 入口 |
+| Composer 深度菜单/权限/plan/goal/compact | 🟡 | session `sessionCommands` + `buildComposerToolbar` | 已有 /新会话、/创建副本、/导出对话、/打开设置、**权限模式命令+Badge（ask/workspace/full 即时生效）**、**推理强度菜单（默认/低/中/高）**、**@session 引用菜单** + 消息级重新生成 + per-session 模型切换；缺 /plan /goal /compact /feedback /memory、plan/mode 入口 |
 | Chrome/Sidebar/折叠 rail/右栏 dock | ✅ | uiroot + sidebar | 280px sidebar、64px rail、Cmd/Ctrl+B、右栏开关 |
 | 命令面板/窗口内快捷键 | ✅ | uiroot palette/shortcuts | Cmd/Ctrl+K、可配置两条 chrome 快捷键；非系统全局热键 |
 | Settings 外壳与页面 | 🟡 | `internal/ui/settings`、about | 10 页：模型/服务商/外观/快捷键/技能/诊断/更新/导入/搜索/MCP + 关于，en/zh；缺 presets、内置插件开关/详情、记忆管理页 |
@@ -79,7 +79,7 @@
 | Markdown 渲染 | ✅ | mygo ui/markdown | 消息/技能/更新 notes/artifact/plan 预览 |
 | Reasoning 展示 | 🟡 | session buildAssistantMessage | 折叠 Reasoning 文本；缺旧实时 preview/shimmer |
 | 消息级操作（复制/重试/反馈/用量） | 🟡 | session `buildRegenerateAction` | 最后 assistant 下有「重新生成」（SessionRegenerator）；缺逐条复制、feedback good/bad、usage/tool footer |
-| `@` mentions | 🟡 | session buildMentionMenu | 仅工作区文件；无 `@session` 引用/上下文摘要 |
+| `@` mentions | ✅ | session buildMentionMenu | 工作区文件 + **会话分组（@session 引用，排除当前会话/过滤/上限 8）**；agent 侧展开引用上下文 |
 | 会话搜索 | ✅ | sidebar + agent Sessions | 标题/分组过滤 |
 | 消息全文搜索 | ✅ | sidebar + sessionstore SearchMessages | LIKE/转义/片段/限制/跨会话 |
 | Fork | ✅ | agent SessionForker + sidebar 行菜单 | 深拷贝消息/附件/tools、持久化历史/事件 |

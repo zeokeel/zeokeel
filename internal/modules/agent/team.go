@@ -75,8 +75,8 @@ type dynamicTeamRunner struct {
 
 // Start implements rig.SubagentRunner.
 func (r *dynamicTeamRunner) Start(ctx context.Context, spec rig.SubagentSpec) (rig.Subagent, error) {
-	cfg, _ := r.service.subagentParent()
-	provider, err := r.service.newProvider(cfg)
+	cfg, active := r.service.subagentParent()
+	provider, err := r.service.newProvider(cfg, r.service.sessionEffort(active))
 	if err != nil {
 		return nil, fmt.Errorf("agent: team member %q: create provider: %w", strings.TrimSpace(spec.Name), err)
 	}

@@ -73,6 +73,9 @@ type Config struct {
 	MaxIterations int `json:"maxIterations"`
 	// ContextBudget is the estimated prompt token budget (0 = unlimited).
 	ContextBudget int `json:"contextBudget"`
+	// ReasoningEffort is the default provider reasoning effort (low/medium/high;
+	// empty omits the field). A per-session setting overrides it.
+	ReasoningEffort string `json:"reasoningEffort"`
 }
 
 // Module is the agent backend descriptor. It provides contracts.KeyChat.
@@ -416,12 +419,13 @@ func (s *service) configLocked() contracts.ChatConfig {
 		apiKey = strings.TrimSpace(os.Getenv(env))
 	}
 	return contracts.ChatConfig{
-		Model:         model,
-		BaseURL:       baseURL,
-		APIKey:        apiKey,
-		SystemPrompt:  systemPrompt,
-		MaxIterations: s.cfg.MaxIterations,
-		ContextBudget: s.cfg.ContextBudget,
+		Model:           model,
+		BaseURL:         baseURL,
+		APIKey:          apiKey,
+		SystemPrompt:    systemPrompt,
+		MaxIterations:   s.cfg.MaxIterations,
+		ContextBudget:   s.cfg.ContextBudget,
+		ReasoningEffort: sanitizeReasoningEffort(s.cfg.ReasoningEffort),
 	}
 }
 
@@ -444,6 +448,7 @@ func (s *service) sessionModelLocked(sessionID string) string {
 func (s *service) configForSessionLocked(sessionID string) contracts.ChatConfig {
 	cfg := s.configLocked()
 	cfg.Model = s.sessionModelLocked(sessionID)
+	cfg.ReasoningEffort = s.sessionEffort(sessionID)
 	return cfg
 }
 
@@ -911,8 +916,18 @@ func (s *service) send(sessionID, prompt string, attachments []contracts.Attachm
 			"attachments": attachmentNames(attachments),
 		})
 	}
+	expandedPrompt, referenceIDs := s.expandSessionReferences(sessionID, prompt)
+	if s.store != nil && len(referenceIDs) > 0 {
+		s.appendEvent(runCtx, sessionID, "session_refs", map[string]any{"ids": referenceIDs})
+	}
+	input := buildUserInput(expandedPrompt, attachments)
+	history := s.historyView()
+	if expandedPrompt != prompt {
+		originalInput := buildUserInput(prompt, attachments)
+		history = newRewritingHistory(history, sessionID, input[0], originalInput[0])
+	}
 	s.notify(sessionID)
-	go s.run(runCtx, sessionID, cfg, buildUserInput(prompt, attachments))
+	go s.run(runCtx, sessionID, cfg, input, history, s.sessionEffort(sessionID))
 	return nil
 }
 
@@ -1008,7 +1023,7 @@ func (s *service) Regenerate(sessionID string) error {
 	}
 
 	s.notify(sessionID)
-	go s.run(runCtx, sessionID, cfg, input)
+	go s.run(runCtx, sessionID, cfg, input, s.historyView(), s.sessionEffort(sessionID))
 	return nil
 }
 
@@ -1111,11 +1126,15 @@ func (s *service) nextMessageIDLocked() string {
 
 // run executes one Rig agent run in the background with the already-built
 // initial input messages.
-func (s *service) run(ctx context.Context, sessionID string, cfg contracts.ChatConfig, input []rig.Message) {
-	provider, err := s.newProvider(cfg)
+func (s *service) run(ctx context.Context, sessionID string, cfg contracts.ChatConfig, input []rig.Message,
+	history rig.History, effort string) {
+	provider, err := s.newProvider(cfg, effort)
 	if err != nil {
 		s.finish(sessionID, ctx, fmt.Errorf("create provider: %w", err))
 		return
+	}
+	if history == nil {
+		history = s.historyView()
 	}
 	spec := rig.AgentSpec{
 		Provider:        provider,
@@ -1123,7 +1142,7 @@ func (s *service) run(ctx context.Context, sessionID string, cfg contracts.ChatC
 		SystemPrompt:    cfg.SystemPrompt,
 		MaxIterations:   cfg.MaxIterations,
 		Tools:           s.registry.Tools(),
-		History:         s.historyView(),
+		History:         history,
 		Gate:            s.gate(),
 		ContextBudget:   cfg.ContextBudget,
 		Logger:          s.logger,
@@ -1151,20 +1170,29 @@ func (s *service) run(ctx context.Context, sessionID string, cfg contracts.ChatC
 }
 
 // newProvider constructs the run provider, honouring the test seam.
-func (s *service) newProvider(cfg contracts.ChatConfig) (rig.Provider, error) {
+func (s *service) newProvider(cfg contracts.ChatConfig, effort string) (rig.Provider, error) {
 	if s.providerFactory != nil {
-		return s.providerFactory(cfg)
+		provider, err := s.providerFactory(cfg)
+		if err != nil {
+			return nil, err
+		}
+		return withReasoningEffort(provider, effort), nil
 	}
 	env := s.cfg.ApiKeyEnv
 	if env == "" {
 		env = DefaultAPIKeyEnv
 	}
-	return openai.New(openai.Config{
-		BaseURL:      cfg.BaseURL,
-		APIKey:       cfg.APIKey,
-		APIKeyEnv:    env,
-		DefaultModel: cfg.Model,
+	provider, err := openai.New(openai.Config{
+		BaseURL:                cfg.BaseURL,
+		APIKey:                 cfg.APIKey,
+		APIKeyEnv:              env,
+		DefaultModel:           cfg.Model,
+		DefaultReasoningEffort: sanitizeReasoningEffort(effort),
 	})
+	if err != nil {
+		return nil, err
+	}
+	return withReasoningEffort(provider, effort), nil
 }
 
 // gate builds the approval gate: the approvals service when wired (its mode

@@ -21,6 +21,15 @@
 - 右侧栏「文件」Tab：打开文件夹（mygo 原生 Directory picker）、目录进入/面包屑、文本/Markdown/图片预览、
   刷新与错误状态；E2E 覆盖工作区创建 + 列表 + 预览帧
 
+**TDD-refs：@session 引用 + 推理强度（2026-11-08）**
+- agent：`ParseSessionReferences` 展开被引用会话尾部 20 条/8000 rune 上下文，仅注入本次 run 输入；持久化/read model 保留原始 prompt；
+  `session_refs` 审计事件；self/unknown/去重/预算反证
+- reasoning effort：agent Config/每会话 `SessionEffortSettingKey`（low/medium/high，非法→空）→ openai `DefaultReasoningEffort` +
+  `Request.Extra["reasoning_effort"]`；Send/Regenerate/子代理/team 全链路
+- UI：composer @ 菜单新增「会话」分组（排除 active/过滤/上限 8，插入 `@session:<id>`）；工具栏「推理：默认/低/中/高」
+  菜单写 settings；i18n
+- E2E：引用 token 持久化原文、effort=high 发送完成；截图 p2-sessionrefs.png
+
 **TDD-team：编排与团队 UI（2026-11-08）**
 - agent `TeamService`（rig team.Manager：Spawn/Send/SendAsync/Wait/Interrupt/Close/Members + Last 结果；惰性 dynamic runner、
   MaxDepth=1/MaxConcurrent=4、递归工具排除、dispose CloseAll）+ 模型工具注册（team_*/spawn_teammate/list_agents/wait_agent/

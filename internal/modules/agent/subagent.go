@@ -98,7 +98,7 @@ func (s *service) Run(ctx context.Context, req contracts.SubagentRequest) (contr
 	}
 
 	cfg, active := s.subagentParent()
-	provider, err := s.newProvider(cfg)
+	provider, err := s.newProvider(cfg, s.sessionEffort(active))
 	if err != nil {
 		return contracts.SubagentResult{}, fmt.Errorf("agent: subagent %q: create provider: %w", name, err)
 	}

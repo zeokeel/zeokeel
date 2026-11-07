@@ -126,6 +126,27 @@ func main() {
 		}
 	}
 
+	// @session references: the composer @ menu also lists other conversations.
+	if chat, chatErr := a.root.Require(contracts.KeyChat); chatErr == nil {
+		activeBefore := chat.ActiveSession()
+		if _, err := chat.NewSession("参考会话"); err == nil && activeBefore != "" {
+			_ = chat.SetActiveSession(activeBefore)
+		}
+		a.tester.Frame()
+	}
+	if sendRect, ok := a.tester.Find("发送"); ok {
+		a.tester.ClickAt(sendRect.X-120, sendRect.Y-50)
+		a.tester.Frame()
+		a.tester.Type("@")
+		a.tester.Frame()
+		a.render(outDir + "/p2-sessionrefs.png")
+		a.tester.Key(0, ui.KeyEscape)
+		for i := 0; i < 3; i++ {
+			a.tester.Key(0, ui.KeyBackspace)
+		}
+		a.tester.Frame()
+	}
+
 	// English UI (live locale switch): the session screen + sidebar re-render.
 	if locale, err := a.root.Require(contracts.KeyLocale); err == nil {
 		locale.SetLanguage("en")

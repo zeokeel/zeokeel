@@ -101,6 +101,10 @@ type ChatConfig struct {
 	SystemPrompt  string
 	MaxIterations int
 	ContextBudget int
+	// ReasoningEffort is the default openai reasoning_effort ("low", "medium",
+	// "high" or "" for the provider default). Per-session overrides live in
+	// settings (SessionEffortSettingKey).
+	ReasoningEffort string
 }
 
 // Attachment is one file or image the user attached to a prompt.

@@ -744,12 +744,16 @@ func buildComposer(
 	var input ui.Element
 
 	ui.Column(c).FillWidth().PaddingY(th.Space(2)).AlignItems(ui.Center).Children(func() {
-		// "@" mentions reference files of the current workspace (the old
-		// composer's file mentions); the suggestion panel sits above the
-		// composer exactly like the slash menu.
-		if workspace, ok := st.ctx.Get(contracts.KeyWorkspace); ok {
-			if query, tokenStart, active := mentionQuery(st.draft); active {
-				buildMentionMenu(c, t, runtime, workspace, st, query, tokenStart)
+		// "@" mentions reference workspace files and other conversations (the
+		// old composer's file/chat mentions); the suggestion panel sits above
+		// the composer exactly like the slash menu.
+		if query, tokenStart, active := mentionQuery(st.draft); active {
+			var workspace contracts.WorkspaceService
+			if service, ok := st.ctx.Get(contracts.KeyWorkspace); ok {
+				workspace = service
+			}
+			if workspace != nil || len(mentionSessionRows(chat, query)) > 0 {
+				buildMentionMenu(c, t, runtime, workspace, chat, st, query, tokenStart)
 			}
 		}
 		if query, active := slashQuery(st.draft); active {
@@ -884,6 +888,23 @@ func buildComposerToolbar(c *ui.Context, t *design.Tokens, runtime contracts.UIR
 		badge := design.Apply(ui.Badge(c, st.permissionLabel(permissionMode(st.settings))), t.Badge())
 		badge.Tooltip(st.tr("当前权限模式", "Current permission mode"))
 	}
+	// Reasoning-effort selector: per-session setting, hidden without a store.
+	if st.settings != nil && activeID != "" {
+		current := effortValue(st.settings, activeID)
+		ui.PopoverMenuButton(c, st.tr("推理：", "Reasoning: ")+st.effortLabel(current), func(m *ui.Menu) {
+			m.Item(st.tr("推理强度", "Reasoning effort")).Disabled(true)
+			m.Separator()
+			for _, option := range effortOptions {
+				option := option
+				item := m.Item(st.effortLabel(option.value))
+				item.Checked(option.value == current)
+				if item.Chosen() {
+					_ = st.settings.Set(contracts.SessionEffortSettingKey(activeID), option.value)
+					runtime.Invalidate()
+				}
+			}
+		}).Tooltip(st.tr("本会话的推理强度", "Reasoning effort for this session"))
+	}
 	if !running {
 		slash := ui.Button(c, "/").Tooltip(st.tr("命令：输入 / 打开命令菜单", "Commands: type / to open the command menu"))
 		if slash.Clicked() {
@@ -916,6 +937,44 @@ func modelMenuLabel(info contracts.ModelInfo) string {
 		return name + " · " + note
 	}
 	return name
+}
+
+// effortOption is one reasoning-effort choice: the stored value ("" = default)
+// and its short label.
+type effortOption struct {
+	value string
+	zh    string
+	en    string
+}
+
+// effortOptions lists the reasoning-effort choices in menu order.
+var effortOptions = []effortOption{
+	{value: "", zh: "默认", en: "Default"},
+	{value: contracts.SessionEffortLow, zh: "低", en: "Low"},
+	{value: contracts.SessionEffortMedium, zh: "中", en: "Medium"},
+	{value: contracts.SessionEffortHigh, zh: "高", en: "High"},
+}
+
+// effortValue reads the session's stored effort, normalizing unknown values to
+// the default ("").
+func effortValue(settings contracts.SettingsService, sessionID string) string {
+	raw := strings.ToLower(strings.TrimSpace(settings.Get(contracts.SessionEffortSettingKey(sessionID), "")))
+	switch raw {
+	case contracts.SessionEffortLow, contracts.SessionEffortMedium, contracts.SessionEffortHigh:
+		return raw
+	default:
+		return ""
+	}
+}
+
+// effortLabel renders one effort value with its short localized label.
+func (st *state) effortLabel(value string) string {
+	for _, option := range effortOptions {
+		if option.value == value {
+			return st.tr(option.zh, option.en)
+		}
+	}
+	return st.tr("默认", "Default")
 }
 
 // buildSendButton is the composer's primary control: the native button keeps
@@ -1079,68 +1138,135 @@ func mentionQuery(draft string) (query string, tokenStart int, ok bool) {
 	return query, start, true
 }
 
-// buildMentionMenu is the composer's workspace-file suggestion panel: a brand
-// card listing the files the query matches, one native row each; choosing one
-// inserts "@path " into the draft.
+// mentionSessionRows lists the other conversations the @ menu offers: the
+// active session is excluded, the query matches the title or id
+// case-insensitively, and the list is capped like the file suggestions.
+func mentionSessionRows(chat contracts.ChatService, query string) []contracts.ChatSessionInfo {
+	active := chat.ActiveSession()
+	needle := strings.ToLower(strings.TrimSpace(query))
+	rows := make([]contracts.ChatSessionInfo, 0, maxMentionFiles)
+	for _, info := range chat.Sessions() {
+		if info.ID == active {
+			continue
+		}
+		if needle != "" && !strings.Contains(strings.ToLower(info.Title+"\x00"+info.ID), needle) {
+			continue
+		}
+		rows = append(rows, info)
+		if len(rows) == maxMentionFiles {
+			break
+		}
+	}
+	return rows
+}
+
+// buildMentionMenu is the composer's @ suggestion panel: a brand card listing
+// the workspace files the query matches and, when other conversations exist,
+// a 会话 group referencing them. Choosing a file inserts "@path " into the
+// draft; choosing a conversation inserts "@session:<id>" (the backend expands
+// the referenced transcript when the prompt is sent).
 func buildMentionMenu(c *ui.Context, t *design.Tokens, runtime contracts.UIRuntime,
-	workspace contracts.WorkspaceService, st *state, query string, tokenStart int) {
+	workspace contracts.WorkspaceService, chat contracts.ChatService, st *state,
+	query string, tokenStart int) {
 	ctx := context.Background()
 	var (
 		entries []contracts.FileEntry
 		loadErr error
 	)
-	if strings.TrimSpace(query) == "" {
-		entries, loadErr = workspace.Files(ctx, "")
-	} else {
-		entries, loadErr = workspace.Search(ctx, query, maxMentionFiles)
+	if workspace != nil {
+		if strings.TrimSpace(query) == "" {
+			entries, loadErr = workspace.Files(ctx, "")
+		} else {
+			entries, loadErr = workspace.Search(ctx, query, maxMentionFiles)
+		}
+		if len(entries) > maxMentionFiles {
+			entries = entries[:maxMentionFiles]
+		}
 	}
-	if len(entries) > maxMentionFiles {
-		entries = entries[:maxMentionFiles]
+	sessions := mentionSessionRows(chat, query)
+	if workspace == nil && len(sessions) == 0 {
+		return
 	}
 	menu := design.Apply(ui.Column(c), t.Panel()).
 		Width(composerWidth).MaxWidthPercent(94).Shrink(0).
 		Padding(design.Space2).Gap(design.Space1)
 	menu.Children(func() {
-		ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(design.Space2).Children(func() {
-			ui.Icon(c, icons.Search()).Size(design.Space3, design.Space3).
-				TextColor(t.LabelTertiary)
-			design.Apply(ui.Text(c, st.tr("工作区文件", "Workspace files")), t.TextMuted(design.TypeXXS)).Grow(1)
-			design.Apply(ui.Text(c, st.tr("@ 引用文件", "@ reference a file")), t.TextMuted(design.TypeXXXS))
-		})
-		switch {
-		case loadErr != nil:
-			design.Apply(ui.Text(c, st.tr("读取工作区失败：", "Failed to read the workspace: ")+loadErr.Error()), t.TextMuted(design.TypeXS)).
-				TextColor(t.DangerText).PaddingX(design.Space2)
-			return
-		case len(entries) == 0:
-			design.Apply(ui.Text(c, st.tr("没有匹配的文件", "No matching files")), t.TextMuted(design.TypeXS)).
-				PaddingX(design.Space2).PaddingY(design.Space1)
-			return
-		}
-		for _, entry := range entries {
-			entry := entry
-			row := ui.ButtonBase(c).FillWidth().AlignItems(ui.Center).
-				Gap(design.Space2).Padding(design.Space1, design.Space2).
-				Radius(design.RadiusSM)
-			if row.Hovered() {
-				row.Background(t.BgHover)
-			}
-			row.Children(func() {
-				icon := icons.Globe()
-				if entry.Dir {
-					icon = icons.Folder()
-				}
-				ui.Icon(c, icon).Size(design.Space3, design.Space3).
-					TextColor(t.LabelSecondary)
-				design.Apply(ui.Text(c, "/"+entry.Path), t.Font(design.TypeXS)).
-					TextColor(t.LabelPrimary).Grow(1).MaxLines(1).Ellipsis("…")
-				if !entry.Dir {
-					design.Apply(ui.Text(c, formatAttachmentSize(int(entry.Size))), t.TextMuted(design.TypeXXXS))
-				}
+		if workspace != nil {
+			ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(design.Space2).Children(func() {
+				ui.Icon(c, icons.Search()).Size(design.Space3, design.Space3).
+					TextColor(t.LabelTertiary)
+				design.Apply(ui.Text(c, st.tr("工作区文件", "Workspace files")), t.TextMuted(design.TypeXXS)).Grow(1)
+				design.Apply(ui.Text(c, st.tr("@ 引用文件", "@ reference a file")), t.TextMuted(design.TypeXXXS))
 			})
-			if row.Clicked() {
-				st.draft = st.draft[:tokenStart] + "@" + entry.Path + " "
-				runtime.Invalidate()
+			switch {
+			case loadErr != nil:
+				design.Apply(ui.Text(c, st.tr("读取工作区失败：", "Failed to read the workspace: ")+loadErr.Error()),
+					t.TextMuted(design.TypeXS)).TextColor(t.DangerText).PaddingX(design.Space2)
+			case len(entries) == 0:
+				design.Apply(ui.Text(c, st.tr("没有匹配的文件", "No matching files")), t.TextMuted(design.TypeXS)).
+					PaddingX(design.Space2).PaddingY(design.Space1)
+			default:
+				for _, entry := range entries {
+					entry := entry
+					row := ui.ButtonBase(c).FillWidth().AlignItems(ui.Center).
+						Gap(design.Space2).Padding(design.Space1, design.Space2).
+						Radius(design.RadiusSM)
+					if row.Hovered() {
+						row.Background(t.BgHover)
+					}
+					row.Children(func() {
+						icon := icons.Globe()
+						if entry.Dir {
+							icon = icons.Folder()
+						}
+						ui.Icon(c, icon).Size(design.Space3, design.Space3).
+							TextColor(t.LabelSecondary)
+						design.Apply(ui.Text(c, "/"+entry.Path), t.Font(design.TypeXS)).
+							TextColor(t.LabelPrimary).Grow(1).MaxLines(1).Ellipsis("…")
+						if !entry.Dir {
+							design.Apply(ui.Text(c, formatAttachmentSize(int(entry.Size))),
+								t.TextMuted(design.TypeXXXS))
+						}
+					})
+					if row.Clicked() {
+						st.draft = st.draft[:tokenStart] + "@" + entry.Path + " "
+						runtime.Invalidate()
+					}
+				}
+			}
+		}
+		if len(sessions) > 0 {
+			if workspace != nil {
+				ui.Divider(c)
+			}
+			ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(design.Space2).Children(func() {
+				ui.Icon(c, icons.Message()).Size(design.Space3, design.Space3).
+					TextColor(t.LabelTertiary)
+				design.Apply(ui.Text(c, st.tr("会话", "Chats")), t.TextMuted(design.TypeXXS)).Grow(1)
+				design.Apply(ui.Text(c, st.tr("@ 引用会话", "@ reference a chat")),
+					t.TextMuted(design.TypeXXXS))
+			})
+			for _, info := range sessions {
+				info := info
+				title := firstNonEmpty(info.Title, info.ID)
+				row := ui.ButtonBase(c).FillWidth().AlignItems(ui.Center).
+					Gap(design.Space2).Padding(design.Space1, design.Space2).
+					Radius(design.RadiusSM).Label(title)
+				if row.Hovered() {
+					row.Background(t.BgHover)
+				}
+				row.Children(func() {
+					ui.Icon(c, icons.Message()).Size(design.Space3, design.Space3).
+						TextColor(t.LabelSecondary)
+					design.Apply(ui.Text(c, title), t.Font(design.TypeXS)).
+						TextColor(t.LabelPrimary).Grow(1).MaxLines(1).Ellipsis("…")
+					design.Apply(ui.Text(c, info.ID), t.MonoFamily()).FontSize(10).
+						TextColor(t.LabelTertiary).NoWrap()
+				})
+				if row.Clicked() {
+					st.draft = st.draft[:tokenStart] + " " + contracts.FormatSessionReference(info.ID) + " "
+					runtime.Invalidate()
+				}
 			}
 		}
 	})
