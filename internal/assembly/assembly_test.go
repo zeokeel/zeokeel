@@ -135,6 +135,7 @@ func TestProductsAndEntries(t *testing.T) {
 	if len(desktop) != 14 {
 		t.Fatalf("desktop roots = %d, want 14 entries", len(desktop))
 	}
+	_ = desktop
 	wantRoots := []string{
 		"zeokeel/appinfo", "zeokeel/sessionstore", "zeokeel/approvals", "zeokeel/workspace",
 		"zeokeel/terminal", "zeokeel/skills", "zeokeel/memory", "zeokeel/toolkit", "zeokeel/hosttools",
@@ -166,7 +167,7 @@ func TestProductsAndEntries(t *testing.T) {
 	wantHeadless := []string{
 		"zeokeel/appinfo", "zeokeel/sessionstore", "zeokeel/approvals", "zeokeel/workspace",
 		"zeokeel/terminal", "zeokeel/skills", "zeokeel/memory", "zeokeel/toolkit", "zeokeel/hosttools",
-		"zeokeel/agent", "zeokeel/automation", "zeokeel/update", "zeokeel/importer",
+		"zeokeel/agent", "zeokeel/automation", "zeokeel/update", "zeokeel/importer", "zeokeel/acp",
 	}
 	if len(headless) != len(wantHeadless) {
 		t.Fatalf("headless entries = %d, want %d", len(headless), len(wantHeadless))
@@ -192,6 +193,7 @@ func TestRegistryIsExplicit(t *testing.T) {
 		"zeokeel/automation",
 		"zeokeel/update",
 		"zeokeel/importer",
+		"zeokeel/acp",
 		"zeokeel/sessionstore",
 		"zeokeel/workspace",
 		"zeokeel/terminal",
@@ -211,8 +213,8 @@ func TestRegistryIsExplicit(t *testing.T) {
 			t.Fatalf("Registry() lacks module %q", id)
 		}
 	}
-	if got := len(registry.Modules()); got != 25 {
-		t.Fatalf("Registry() modules = %d, want 25", got)
+	if got := len(registry.Modules()); got != 26 {
+		t.Fatalf("Registry() modules = %d, want 26", got)
 	}
 }
 
@@ -367,8 +369,8 @@ func TestHeadlessAssemblyNeedsNoUIServices(t *testing.T) {
 	}()
 
 	instances := loader.Instances()
-	if len(instances) != 13 {
-		t.Fatalf("headless instances = %d, want 13", len(instances))
+	if len(instances) != 14 {
+		t.Fatalf("headless instances = %d, want 14", len(instances))
 	}
 	instance := instances[0]
 	if instance.ID() != "appinfo" || instance.ModuleID() != "zeokeel/appinfo" {

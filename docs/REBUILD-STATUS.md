@@ -21,6 +21,12 @@
 - 右侧栏「文件」Tab：打开文件夹（mygo 原生 Directory picker）、目录进入/面包屑、文本/Markdown/图片预览、
   刷新与错误状态；E2E 覆盖工作区创建 + 列表 + 预览帧
 
+**P4 ACP 适配器（2026-11-08）**
+- `zeokeel/acp` 模块：newline-framed JSON-RPC 2.0，initialize/session-new/session-prompt（Subscribe 增量
+  agent_message_chunk，end_turn/cancelled）/session-cancel，错误码与 EOF/ctx 取消；后端可继续用同一 ChatService
+- host `--acp`（RunACP）：加载 headless assembly、Require KeyACP、stdio Serve；desktop/headless 计数 24/14，
+  registry 26；CLI 冒烟：initialize→session/new→未知方法 -32601→EOF 退出
+
 **P4 DSH 导入（2026-11-08）**
 - `zeokeel/importer`：DSH session.v4.jsonl 解析（user source.kind=user、assistant visible text+reasoning、
   context/tool/image 跳过计数）、Scan 预览（sessions/messages/workspaces/skipped/notes）、Import 写 store

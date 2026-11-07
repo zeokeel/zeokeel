@@ -192,6 +192,7 @@ if _, err := ctx.Effect(func() cordis.Effect {
 - ✅ 会话归档：settings archive flag + sidebar 视图开关/排序
 - ✅ 会话置顶：settings pin flag + sidebar 置顶排序/菜单
 - ✅ 可配置 chrome 快捷键（settings `ui.shortcut.*` → 宿主每帧 OnShortcut）
+- ✅ ACP 模式：`internal/modules/acp` + host `--acp`（stdio JSON-RPC，编辑器接入）
 - ✅ DSH 导入：`internal/modules/importer`（session.v4.jsonl → store）+ 设置导入页
 - ✅ 拖放附件：window.OnFileDrop → KeyFileDrop → composer 附件
 - ✅ 更新检查：`internal/modules/update`（manifest/semver/asset）+ 设置更新页

@@ -77,6 +77,11 @@
       "id": "importer",
       "module": "zeokeel/importer",
       "config": {}
+    },
+    {
+      "id": "acp",
+      "module": "zeokeel/acp",
+      "config": {}
     }
   ]
 }

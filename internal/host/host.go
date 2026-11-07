@@ -90,6 +90,9 @@ type Options struct {
 	AppVersion   string
 	AppCommit    string
 	AppBuildTime string
+	// ACP runs the Agent Client Protocol stdio server instead of the desktop
+	// or headless wait loop (editor integration).
+	ACP bool
 }
 
 // normalize fills zero-valued options with their process defaults. Product
@@ -164,6 +167,7 @@ func mainWithStreams(args []string, stdout, stderr io.Writer) int {
 	dataDir := flags.String("data-dir", "", "data directory")
 	showVersion := flags.Bool("version", false, "print version information and exit")
 	listProducts := flags.Bool("list-products", false, "print the embedded assembly products and exit")
+	acpMode := flags.Bool("acp", false, "run the Agent Client Protocol (ACP) stdio server")
 
 	if err := flags.Parse(args); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
@@ -194,6 +198,13 @@ func mainWithStreams(args []string, stdout, stderr io.Writer) int {
 			productSet = true
 		}
 	})
+	if *acpMode {
+		if productSet && strings.TrimSuffix(strings.TrimSpace(*product), ".json") != assembly.ProductHeadless {
+			fmt.Fprintf(stderr, "%s: --acp conflicts with --product %q\n\n%s", appName, *product, usageText)
+			return 2
+		}
+		*headless = true
+	}
 	if *headless {
 		if productSet && strings.TrimSuffix(strings.TrimSpace(*product), ".json") != assembly.ProductHeadless {
 			fmt.Fprintf(stderr, "%s: --headless conflicts with --product %q\n\n%s", appName, *product, usageText)
@@ -208,6 +219,16 @@ func mainWithStreams(args []string, stdout, stderr io.Writer) int {
 		AppVersion:   Version,
 		AppCommit:    Commit,
 		AppBuildTime: BuildTime,
+		ACP:          *acpMode,
+	}
+	if opts.ACP {
+		ctx, stop := signal.NotifyContext(context.Background(), terminationSignals...)
+		defer stop()
+		if err := RunACP(ctx, opts, os.Stdin, os.Stdout); err != nil {
+			fmt.Fprintf(stderr, "%s: %v\n", appName, err)
+			return 1
+		}
+		return 0
 	}
 	if err := Run(opts); err != nil {
 		fmt.Fprintf(stderr, "%s: %v\n", appName, err)
@@ -224,6 +245,7 @@ Usage:
 Flags:
   --product <name>   assembly product to run (default "desktop")
   --headless         run without a window (same as --product headless)
+  --acp              run the Agent Client Protocol stdio server (editor integration)
   --data-dir <dir>   data directory (default $ZEOKEEL_DATA_DIR or ~/.zeokeel)
   --version          print version information and exit
   --list-products    print the embedded assembly products and exit
@@ -291,6 +313,44 @@ func runHeadless(ctx context.Context, opts Options, out io.Writer) error {
 		return fmt.Errorf("%s: close assembly: %w", appName, err)
 	}
 	return nil
+}
+
+// RunACP loads the headless assembly and serves the Agent Client Protocol over
+// the given streams (the process runs as an editor's agent backend).
+func RunACP(ctx context.Context, opts Options, in io.Reader, out io.Writer) error {
+	opts = opts.normalize()
+	opts.ACP = true
+	logger := NewLogger(opts.DataDir)
+	defer func() { _ = logger.Close() }()
+
+	settings, err := NewSettings(opts.DataDir)
+	if err != nil {
+		return err
+	}
+	root := cordis.Root()
+	defer func() {
+		if err := root.DisposeAll(); err != nil {
+			logger.Printf("%s: dispose kernel root: %v", appName, err)
+		}
+	}()
+	if err := provideServices(root, opts.DataDir, settings, logger, nil); err != nil {
+		return err
+	}
+	loader, err := assembly.LoadWithBuildInfo(root, assembly.ProductHeadless, buildInfo(opts))
+	if err != nil {
+		return fmt.Errorf("%s: load product %q: %w", appName, assembly.ProductHeadless, err)
+	}
+	defer func() {
+		if err := loader.Close(); err != nil {
+			logger.Printf("%s: close assembly: %v", appName, err)
+		}
+	}()
+	server, err := root.Require(contracts.KeyACP)
+	if err != nil {
+		return fmt.Errorf("%s: require ACP service: %w", appName, err)
+	}
+	logger.Printf("%s: ACP server ready over stdio", appName)
+	return server.Serve(ctx, in, out)
 }
 
 // runDesktop runs the windowed product.
