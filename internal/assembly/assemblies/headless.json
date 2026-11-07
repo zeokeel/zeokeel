@@ -26,6 +26,11 @@
       "config": {}
     },
     {
+      "id": "terminal",
+      "module": "zeokeel/terminal",
+      "config": {}
+    },
+    {
       "id": "memory",
       "module": "zeokeel/memory",
       "config": {}

@@ -119,6 +119,9 @@ go test ./...
 - ✅ P3 会话↔工作区 + workspace 树：sessionstore 幂等迁移 `workspace_id`（旧库兼容）+ agent 在新建/首次发送时
   记录当前工作区；侧栏会话区按工作区分组（当前工作区高亮、组折叠、会话数、未分组、搜索跨组）；截图
   `p2-workspace-tree.png`
+- ✅ P3 终端：`zeokeel/terminal`（workspace root 为 cwd 的简单命令运行器，shell 探测/选择、timeout、
+  输出截断、ctx 取消；无 PTY/持久 shell，与 old terminalPanel 一致）；右侧栏「终端」Tab：cwd/shell/清空、
+  mono 输出、输入 + 运行/停止、退出码；截图 `p2-terminal.png`；desktop 18 / headless 9 实例
 - ⬜ 后续阶段见 [docs/PRODUCT-REBUILD-PLAN.md](docs/PRODUCT-REBUILD-PLAN.md)：
   P2 剩余（composer 附件/图片/@ 提及、右侧栏 Files/Terminal/Log 页、会话操作上下文菜单）→
   P3 memory/skills/automation/插件/workspace diff/搜索/fork/export → P4 ACP/热键/导入/更新/诊断

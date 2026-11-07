@@ -175,6 +175,31 @@ func TestP1ApprovalToolsAndPersistence(t *testing.T) {
 	if !tester.HasText("示例文件") {
 		t.Fatalf("file preview missing; texts = %v", tester.Texts())
 	}
+
+	// The terminal tab runs real commands in the workspace root.
+	if err := tester.Click("终端"); err != nil {
+		t.Fatalf("click terminal tab: %v; texts = %v", err, tester.Texts())
+	}
+	tester.Frame()
+	if runRect, ok := tester.Find("运行"); ok {
+		tester.ClickAt(runRect.X-140, runRect.Y+runRect.H/2)
+		tester.Frame()
+		tester.Type("echo zeokeel-terminal")
+		if err := tester.Click("运行"); err != nil {
+			t.Fatalf("run terminal command: %v; texts = %v", err, tester.Texts())
+		}
+		deadline := time.Now().Add(5 * time.Second)
+		for time.Now().Before(deadline) {
+			tester.Frame()
+			if tester.HasText("zeokeel-terminal") {
+				break
+			}
+			time.Sleep(10 * time.Millisecond)
+		}
+		if !tester.HasText("zeokeel-terminal") {
+			t.Fatalf("terminal output missing; texts = %v", tester.Texts())
+		}
+	}
 	uiRoot.SetRightPanelOpen(false)
 	if err := tester.Click("对话"); err != nil {
 		t.Fatalf("click chat tab: %v; texts = %v", err, tester.Texts())

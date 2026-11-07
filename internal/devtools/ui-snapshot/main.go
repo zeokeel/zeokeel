@@ -184,6 +184,29 @@ func main() {
 	}
 	a.tester.Advance(200 * time.Millisecond)
 	a.render(outDir + "/p2-changes-diff.png")
+	// Terminal tab: run a real command in the workspace root.
+	if err := a.tester.Click("终端"); err != nil {
+		fmt.Println("click terminal tab:", err)
+	}
+	a.tester.Frame()
+	if runRect, ok := a.tester.Find("运行"); ok {
+		a.tester.ClickAt(runRect.X-140, runRect.Y+runRect.H/2)
+		a.tester.Frame()
+		a.tester.Type("echo ZeoKeel terminal")
+		if err := a.tester.Click("运行"); err != nil {
+			fmt.Println("run terminal:", err)
+		}
+		deadline := time.Now().Add(5 * time.Second)
+		for time.Now().Before(deadline) {
+			a.tester.Frame()
+			if a.tester.HasText("ZeoKeel terminal") {
+				break
+			}
+			time.Sleep(10 * time.Millisecond)
+		}
+	}
+	a.render(outDir + "/p2-terminal.png")
+
 	// Composer @-mention suggestions over the workspace.
 	if sendRect, ok := a.tester.Find("发送"); ok {
 		a.tester.ClickAt(sendRect.X-120, sendRect.Y-50)

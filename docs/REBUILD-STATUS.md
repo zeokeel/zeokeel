@@ -21,6 +21,11 @@
 - 右侧栏「文件」Tab：打开文件夹（mygo 原生 Directory picker）、目录进入/面包屑、文本/Markdown/图片预览、
   刷新与错误状态；E2E 覆盖工作区创建 + 列表 + 预览帧
 
+**P3 终端（2026-11-07 晚）**
+- `zeokeel/terminal`：运行器（workspace cwd、bash/sh/zsh/pwsh 探测与选择、CombinedOutput、退出码、
+  timeout/ctx 取消、输出截断）；rightpanel「终端」Tab 全 native（cwd/shell/清空/输出/输入/运行/停止）；
+  E2E 真跑 `echo` 命令并断言帧输出
+
 **P3 会话↔工作区（2026-11-07 晚）**
 - sessionstore：sessions 表幂等迁移 workspace_id（旧库兼容、重启不重复）+ SessionWorkspaceStore.SetSessionWorkspace
 - agent：NewSession/首次 Send 绑定当前工作区并持久化，ChatSessionInfo.WorkspaceID/restore 恢复
