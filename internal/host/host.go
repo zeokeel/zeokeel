@@ -265,7 +265,7 @@ func runHeadless(ctx context.Context, opts Options, out io.Writer) error {
 			logger.Printf("%s: dispose kernel root: %v", appName, err)
 		}
 	}()
-	if err := provideServices(root, settings, logger, nil); err != nil {
+	if err := provideServices(root, opts.DataDir, settings, logger, nil); err != nil {
 		return err
 	}
 
@@ -313,7 +313,7 @@ func runDesktop(opts Options) error {
 		Language: settings.Get(settingLanguage, "zh"),
 	})
 	root := cordis.Root()
-	if err := provideServices(root, settings, logger, uiRoot); err != nil {
+	if err := provideServices(root, opts.DataDir, settings, logger, uiRoot); err != nil {
 		_ = root.DisposeAll()
 		return err
 	}
@@ -424,7 +424,10 @@ func runDesktop(opts Options) error {
 // provideServices provides the process-host services on the kernel root before
 // any assembly loads. uiRoot is nil for the headless product, which provides
 // only settings and log.
-func provideServices(root cordis.Context, settings *Settings, logger *Logger, uiRoot *uiroot.Root) error {
+func provideServices(root cordis.Context, dataDir string, settings *Settings, logger *Logger, uiRoot *uiroot.Root) error {
+	if _, err := root.Provide(contracts.KeyDataDir, dataDir); err != nil {
+		return fmt.Errorf("%s: provide data dir: %w", appName, err)
+	}
 	var settingsService contracts.SettingsService = settings
 	if _, err := root.Provide(contracts.KeySettings, settingsService); err != nil {
 		return fmt.Errorf("%s: provide settings: %w", appName, err)

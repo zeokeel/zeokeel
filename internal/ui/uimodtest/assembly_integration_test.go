@@ -52,6 +52,7 @@ func TestDesktopProductAssemblyShowsAllDemoModules(t *testing.T) {
 	provide(t, root, contracts.KeyTheme, uiRoot.Theme())
 	provide(t, root, contracts.KeyLocale, uiRoot.Locale())
 	provide(t, root, contracts.KeyScreenLister, uiRoot.ScreenLister())
+	provide(t, root, contracts.KeyDataDir, t.TempDir())
 	provide(t, root, contracts.KeySettings, contracts.SettingsService(&memSettings{values: map[string]string{}}))
 	provide(t, root, contracts.KeyLogger, contracts.Logger(discardLogger{}))
 

@@ -475,10 +475,10 @@ func TestTabPlaceholdersAreNativeTabs(t *testing.T) {
 	h := newHarness(t, chat)
 	tester := h.tester()
 	h.assertTexts(tester, "对话", "轨迹", "记忆", "第一条消息")
-	h.assertNoTexts(tester, "轨迹面板将在后续阶段接入。")
+	h.assertNoTexts(tester, "本次会话还没有工具调用。")
 
 	h.click(tester, "轨迹")
-	h.assertTexts(tester, "轨迹面板将在后续阶段接入。")
+	h.assertTexts(tester, "本次会话还没有工具调用。")
 	h.assertNoTexts(tester, "第一条消息")
 
 	h.click(tester, "记忆")
@@ -615,4 +615,52 @@ func newHarnessConfig(t *testing.T, chat *fakeChat, config session.Config) *harn
 	provide[contracts.ChatService](t, ctx, contracts.KeyChat, chat)
 	activate(t, ctx, session.Module(), config)
 	return &harness{t: t, ctx: ctx, ui: uiRoot, chat: chat}
+}
+
+func TestTrajectoryTimelineShowsToolCalls(t *testing.T) {
+	chat := newFakeChat()
+	chat.addSession(contracts.ChatSession{
+		ID:    "sess-1",
+		Title: "轨迹会话",
+		Messages: []contracts.ChatMessage{
+			message("m1", contracts.ChatRoleUser, "运行一下"),
+			{
+				ID:   "m2",
+				Role: contracts.ChatRoleAssistant,
+				Text: "好的",
+				Tools: []contracts.ToolCall{
+					{ID: "t1", Name: "bash", Status: "running", Summary: "stdout: all tests passed"},
+				},
+			},
+			{
+				ID:   "m3",
+				Role: contracts.ChatRoleAssistant,
+				Text: "完成",
+				Tools: []contracts.ToolCall{
+					{ID: "t2", Name: "read_file", Status: "error"},
+				},
+			},
+		},
+	}, true)
+	h := newHarness(t, chat)
+	tester := h.tester()
+
+	h.click(tester, "轨迹")
+	h.assertTexts(tester,
+		"步骤 1", "bash", "运行中",
+		"步骤 2", "read_file", "失败",
+		"结果摘要")
+	h.assertNoTexts(tester, "stdout: all tests passed") // collapsed by default
+	h.assertNoTexts(tester, "运行一下")
+
+	h.click(tester, "结果摘要")
+	h.assertTexts(tester, "stdout: all tests passed")
+
+	// The chat tab is unchanged: the tool call still renders there (fallback
+	// card in this test because no toolcards module is active). Re-focus the
+	// tab strip (the summary click moved focus) and press Home for tab 0.
+	h.click(tester, "轨迹")
+	tester.Key(0, ui.KeyHome)
+	tester.Frame()
+	h.assertTexts(tester, "运行一下", "bash")
 }

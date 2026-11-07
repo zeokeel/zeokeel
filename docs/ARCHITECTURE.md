@@ -180,7 +180,10 @@ if _, err := ctx.Effect(func() cordis.Effect {
   plan_review/exit_plan_mode/goal/team）注册进同一注册表，证明产品「只做组装」
 - ✅ Phase-1 聊天产品：`internal/modules/agent`（ChatService：rig provider/agent/工具/历史 + 流式
   事件读模型）、`internal/ui/session`（对话页，mygo 原生控件）、`internal/ui/sidebar`（会话侧栏）、
-  `internal/ui/settings`（模型设置页）；desktop 12 实例 / headless 4 实例
+  `internal/ui/settings`（模型设置页）
+- ✅ P1 持久化/审批：`internal/modules/sessionstore`（SQLite History/SessionLog/CheckpointStore）、
+  `internal/modules/approvals` + `internal/ui/approval`（审批队列与 native Modal）、
+  `internal/ui/toolcards` 真实工具卡、`ui/session` 轨迹时间线；desktop 15 实例 / headless 6 实例
 - ✅ 示范模块：`appinfo`（服务）、`ui/home`（screen+command+槽位组合）、`ui/about`
   （settings page + settings.header）、`ui/welcome`（topbar.center + home.hero + command）、
   `ui/toolcards`（ToolRenderer）、`uikit`（共享控件封装）

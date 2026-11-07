@@ -9,6 +9,18 @@
       }
     },
     {
+      "id": "store",
+      "module": "zeokeel/sessionstore",
+      "config": {}
+    },
+    {
+      "id": "approvals",
+      "module": "zeokeel/approvals",
+      "config": {
+        "mode": "ask"
+      }
+    },
+    {
       "id": "toolkit",
       "module": "zeokeel/toolkit",
       "config": {
@@ -91,6 +103,13 @@
           "config": {
             "title": "模型",
             "saveLabel": "保存"
+          }
+        },
+        {
+          "id": "approval",
+          "module": "zeokeel-ui/approval",
+          "config": {
+            "title": "需要审批"
           }
         }
       ]

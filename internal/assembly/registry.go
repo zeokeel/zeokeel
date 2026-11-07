@@ -6,9 +6,12 @@ import (
 	"github.com/zeokeel/zeokeel/internal/contracts"
 	"github.com/zeokeel/zeokeel/internal/modules/agent"
 	"github.com/zeokeel/zeokeel/internal/modules/appinfo"
+	"github.com/zeokeel/zeokeel/internal/modules/approvals"
 	"github.com/zeokeel/zeokeel/internal/modules/hosttools"
+	"github.com/zeokeel/zeokeel/internal/modules/sessionstore"
 	"github.com/zeokeel/zeokeel/internal/modules/toolkit"
 	"github.com/zeokeel/zeokeel/internal/ui/about"
+	"github.com/zeokeel/zeokeel/internal/ui/approval"
 	"github.com/zeokeel/zeokeel/internal/ui/home"
 	"github.com/zeokeel/zeokeel/internal/ui/session"
 	"github.com/zeokeel/zeokeel/internal/ui/settings"
@@ -35,8 +38,13 @@ func Registry() *module.Registry {
 	registry := module.NewRegistry()
 	registry.AddBuiltin(contracts.KeySettings)
 	registry.AddBuiltin(contracts.KeyLogger)
+	// KeyDataDir is provided by the process host in every product: the store
+	// module opens its database under it.
+	registry.AddBuiltin(contracts.KeyDataDir)
 
 	mustRegister(registry, appinfo.Module())
+	mustRegister(registry, sessionstore.Module())
+	mustRegister(registry, approvals.Module())
 	mustRegister(registry, toolkit.Module())
 	mustRegister(registry, agent.Module())
 	mustRegister(registry, hosttools.Module())
@@ -47,6 +55,7 @@ func Registry() *module.Registry {
 	mustRegister(registry, sidebar.Module())
 	mustRegister(registry, session.Module())
 	mustRegister(registry, settings.Module())
+	mustRegister(registry, approval.Module())
 	mustRegister(registry, GroupModule())
 	return registry
 }

@@ -15,6 +15,7 @@ package agent
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -31,7 +32,9 @@ import (
 	"github.com/zeokeel/zeokeel-rig/gate"
 	"github.com/zeokeel/zeokeel-rig/provider/openai"
 	"github.com/zeokeel/zeokeel-rig/session"
+	"github.com/zeokeel/zeokeel-rig/session/compact"
 	rigtools "github.com/zeokeel/zeokeel-rig/tools"
+	rigsession "github.com/zeokeel/zeokeel-rig/tools/session"
 
 	"github.com/zeokeel/zeokeel/internal/contracts"
 )
@@ -85,13 +88,33 @@ func Module() *module.Descriptor[Config] {
 		if err != nil {
 			return err
 		}
-		_, err = ctx.Provide(contracts.KeyChat, contracts.ChatService(newService(cfg, registry, settings, logger)))
+		store, err := ctx.Require(contracts.KeyStore)
+		if err != nil {
+			return err
+		}
+		approvals, err := ctx.Require(contracts.KeyApprovals)
+		if err != nil {
+			return err
+		}
+		svc := newService(cfg, registry, settings, logger, store, approvals)
+		svc.restore(context.Background())
+		// The durable store now backs the session-query tools: register them
+		// into the shared toolkit registry (the toolkit module has no store
+		// dependency, so the session tools join here).
+		for _, tool := range rigsession.Tools(store) {
+			if err := registry.Register(tool); err != nil {
+				logger.Printf("[agent] register session tool %s: %v", tool.Name(), err)
+			}
+		}
+		_, err = ctx.Provide(contracts.KeyChat, contracts.ChatService(svc))
 		return err
 	}).
 		AddProvides(module.Provides(contracts.KeyChat)).
 		AddRequires(module.Requires(contracts.KeyToolkit)).
 		AddRequires(module.Requires(contracts.KeySettings)).
 		AddRequires(module.Requires(contracts.KeyLogger)).
+		AddRequires(module.Requires(contracts.KeyStore)).
+		AddRequires(module.Requires(contracts.KeyApprovals)).
 		WithName("ZeoKeel agent backend")
 }
 
@@ -99,11 +122,13 @@ func Module() *module.Descriptor[Config] {
 type service struct {
 	mu sync.Mutex
 
-	cfg      Config
-	registry *rigtools.Registry
-	settings contracts.SettingsService
-	logger   contracts.Logger
-	history  rig.History
+	cfg       Config
+	registry  *rigtools.Registry
+	settings  contracts.SettingsService
+	logger    contracts.Logger
+	history   rig.History // fallback in-memory history when no store is wired
+	store     contracts.Store
+	approvals contracts.Approvals
 
 	sessions map[string]*sessionState
 	active   string
@@ -139,18 +164,70 @@ type subscription struct {
 }
 
 // newService builds a service; it is called by the module factory and tests.
-func newService(cfg Config, registry *rigtools.Registry, settings contracts.SettingsService, logger contracts.Logger) *service {
+func newService(cfg Config, registry *rigtools.Registry, settings contracts.SettingsService,
+	logger contracts.Logger, store contracts.Store, approvals contracts.Approvals) *service {
 	cfg = cfg.normalized()
 	if logger == nil {
 		logger = discardLogger{}
 	}
 	return &service{
-		cfg:      cfg,
-		registry: registry,
-		settings: settings,
-		logger:   logger,
-		history:  session.NewMemory(),
-		sessions: make(map[string]*sessionState),
+		cfg:       cfg,
+		registry:  registry,
+		settings:  settings,
+		logger:    logger,
+		history:   session.NewMemory(),
+		store:     store,
+		approvals: approvals,
+		sessions:  make(map[string]*sessionState),
+	}
+}
+
+// historyView is the Rig History the loop persists to: the durable store when
+// configured, the in-memory fallback otherwise.
+func (s *service) historyView() rig.History {
+	if s.store != nil {
+		return s.store.History()
+	}
+	return s.history
+}
+
+// restore loads durable sessions (metadata + messages) into the in-memory read
+// model. Failures are logged and leave the product usable with an empty list.
+func (s *service) restore(ctx context.Context) {
+	if s.store == nil {
+		return
+	}
+	metas, err := s.store.Sessions(ctx)
+	if err != nil {
+		s.logger.Printf("[agent] restore: list sessions: %v", err)
+		return
+	}
+	history := s.store.History()
+	model := make([]*sessionState, 0, len(metas))
+	for _, meta := range metas {
+		state := &sessionState{
+			id:        meta.ID,
+			title:     meta.Title,
+			createdAt: meta.CreatedAt,
+			updatedAt: meta.UpdatedAt,
+			assistant: -1,
+		}
+		if history != nil {
+			if messages, err := history.Load(ctx, meta.ID); err == nil {
+				state.messages = chatMessagesFromRig(messages)
+			} else {
+				s.logger.Printf("[agent] restore: load %s: %v", meta.ID, err)
+			}
+		}
+		model = append(model, state)
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, state := range model {
+		s.sessions[state.id] = state
+	}
+	if len(model) > 0 {
+		s.active = model[0].id
 	}
 }
 
@@ -237,6 +314,11 @@ func (s *service) NewSession(title string) (string, error) {
 	s.sessions[id] = state
 	s.active = id
 	s.mu.Unlock()
+	if s.store != nil {
+		if err := s.store.CreateSession(context.Background(), id, state.title); err != nil {
+			s.logger.Printf("[agent] create session %s: %v", id, err)
+		}
+	}
 	s.notify(id)
 	return id, nil
 }
@@ -272,6 +354,11 @@ func (s *service) DeleteSession(sessionID string) error {
 
 	if cancel != nil {
 		cancel()
+	}
+	if s.store != nil {
+		if err := s.store.DeleteSession(context.Background(), sessionID); err != nil {
+			s.logger.Printf("[agent] delete session %s: %v", sessionID, err)
+		}
 	}
 	s.notify(sessionID)
 	if active != sessionID {
@@ -375,8 +462,10 @@ func (s *service) Send(sessionID, prompt string) error {
 		s.mu.Unlock()
 		return fmt.Errorf("%w: %q", ErrSessionRunning, sessionID)
 	}
+	titleChanged := false
 	if strings.TrimSpace(state.title) == "" {
 		state.title = truncateTitle(prompt)
+		titleChanged = true
 	}
 	state.messages = append(state.messages,
 		contracts.ChatMessage{
@@ -398,9 +487,21 @@ func (s *service) Send(sessionID, prompt string) error {
 	state.updatedAt = now
 	runCtx, cancel := context.WithCancel(context.Background())
 	state.cancel = cancel
+	title := state.title
 	cfg := s.configLocked()
 	s.mu.Unlock()
 
+	if s.store != nil {
+		if err := s.store.CreateSession(runCtx, sessionID, title); err != nil {
+			s.logger.Printf("[agent] persist session %s: %v", sessionID, err)
+		}
+		if titleChanged {
+			if err := s.store.RenameSession(runCtx, sessionID, title); err != nil {
+				s.logger.Printf("[agent] rename session %s: %v", sessionID, err)
+			}
+		}
+		s.appendEvent(runCtx, sessionID, "user_message", map[string]any{"text": prompt})
+	}
 	s.notify(sessionID)
 	go s.run(runCtx, sessionID, cfg, prompt)
 	return nil
@@ -419,21 +520,31 @@ func (s *service) run(ctx context.Context, sessionID string, cfg contracts.ChatC
 		s.finish(sessionID, ctx, fmt.Errorf("create provider: %w", err))
 		return
 	}
-	runner, err := rigagent.New(rig.AgentSpec{
-		Provider:      provider,
-		Model:         cfg.Model,
-		SystemPrompt:  cfg.SystemPrompt,
-		MaxIterations: cfg.MaxIterations,
-		Tools:         s.registry.Tools(),
-		History:       s.history,
-		Gate:          gate.AllowAll(),
-		ContextBudget: cfg.ContextBudget,
-		Logger:        s.logger,
-	})
+	spec := rig.AgentSpec{
+		Provider:        provider,
+		Model:           cfg.Model,
+		SystemPrompt:    cfg.SystemPrompt,
+		MaxIterations:   cfg.MaxIterations,
+		Tools:           s.registry.Tools(),
+		History:         s.historyView(),
+		Gate:            s.gate(),
+		ContextBudget:   cfg.ContextBudget,
+		Logger:          s.logger,
+		CheckpointStore: s.checkpointStore(),
+	}
+	if cfg.ContextBudget > 0 {
+		spec.Compactor = compact.LLMCompactor{
+			Provider: provider,
+			Model:    cfg.Model,
+			Fallback: compact.WindowCompactor{},
+		}
+	}
+	runner, err := rigagent.New(spec)
 	if err != nil {
 		s.finish(sessionID, ctx, fmt.Errorf("create agent: %w", err))
 		return
 	}
+	s.appendEvent(ctx, sessionID, "run_start", map[string]any{"model": cfg.Model})
 	_, runErr := runner.Run(ctx, rig.RunRequest{
 		SessionID: sessionID,
 		Input:     []rig.Message{rig.NewMessage(rig.RoleUser, prompt)},
@@ -459,6 +570,67 @@ func (s *service) newProvider(cfg contracts.ChatConfig) (rig.Provider, error) {
 	})
 }
 
+// gate builds the approval gate: the approvals service when wired (its mode
+// decides whether it asks, auto-allows or denies), a permissive gate otherwise.
+func (s *service) gate() rig.Gate {
+	if s.approvals == nil {
+		return gate.AllowAll()
+	}
+	return gate.Func(func(ctx context.Context, tool rig.Tool, call rig.ToolCall) (rig.Decision, error) {
+		name := call.Name
+		if tool != nil && strings.TrimSpace(tool.Name()) != "" {
+			name = tool.Name()
+		}
+		summary := summarizeToolArguments(call.Arguments)
+		decision, err := s.approvals.Request(ctx, contracts.ApprovalRequest{
+			Tool:      name,
+			Summary:   summary,
+			Arguments: call.Arguments,
+			CreatedAt: time.Now(),
+		})
+		if err != nil {
+			return "", err
+		}
+		switch decision {
+		case contracts.ApprovalAllow:
+			return rig.DecisionAllow, nil
+		case contracts.ApprovalAllowAlways:
+			return rig.DecisionAllowAlways, nil
+		default:
+			return rig.DecisionDeny, nil
+		}
+	})
+}
+
+// checkpointStore returns the durable checkpoint view when a store is wired.
+func (s *service) checkpointStore() rig.CheckpointStore {
+	if s.store == nil {
+		return nil
+	}
+	return s.store.CheckpointStore()
+}
+
+// appendEvent records one durable session event; store failures are logged but
+// never break a run.
+func (s *service) appendEvent(ctx context.Context, sessionID, eventType string, fields map[string]any) {
+	if s.store == nil {
+		return
+	}
+	payload, err := json.Marshal(fields)
+	if err != nil {
+		s.logger.Printf("[agent] marshal %s event: %v", eventType, err)
+		return
+	}
+	if err := s.store.AppendEvent(ctx, rig.SessionEvent{
+		SessionID: sessionID,
+		Type:      eventType,
+		Time:      time.Now(),
+		Payload:   payload,
+	}); err != nil {
+		s.logger.Printf("[agent] append %s event: %v", eventType, err)
+	}
+}
+
 // handleEvent applies one Rig event to the current assistant message and
 // notifies subscribers. The callback runs on the run goroutine.
 func (s *service) handleEvent(sessionID string, event rig.Event) {
@@ -481,6 +653,9 @@ func (s *service) handleEvent(sessionID string, event rig.Event) {
 					Name:   event.Call.Name,
 					Status: "running",
 				})
+				s.appendEvent(context.Background(), sessionID, "tool_call", map[string]any{
+					"id": event.Call.ID, "name": event.Call.Name, "arguments": event.Call.Arguments,
+				})
 			}
 		case rig.EventToolResult:
 			if event.Call != nil && event.Result != nil {
@@ -494,6 +669,10 @@ func (s *service) handleEvent(sessionID string, event rig.Event) {
 					}
 					message.Tools[index].Status = status
 					message.Tools[index].Summary = summarizeToolResult(event.Result.Content)
+					s.appendEvent(context.Background(), sessionID, "tool_result", map[string]any{
+						"id": event.Call.ID, "name": event.Call.Name,
+						"status": status, "content": summarizeToolResult(event.Result.Content),
+					})
 					break
 				}
 			}
@@ -553,11 +732,66 @@ func (s *service) finish(sessionID string, ctx context.Context, runErr error) {
 	state.updatedAt = time.Now()
 	s.mu.Unlock()
 
+	s.appendEvent(context.Background(), sessionID, "run_end", map[string]any{
+		"ok": errText == "", "error": errText,
+	})
 	s.notify(sessionID)
 	if runErr != nil && !errors.Is(runErr, context.Canceled) && !errors.Is(runErr, context.DeadlineExceeded) {
 		s.logger.Printf("[agent] session %s run failed: %v", sessionID, runErr)
 	}
 }
+
+// summarizeToolArguments bounds the raw tool-call arguments shown to the user.
+func summarizeToolArguments(arguments string) string {
+	summary := strings.Join(strings.Fields(arguments), " ")
+	runes := []rune(summary)
+	if len(runes) <= maxToolSummaryRunes {
+		return summary
+	}
+	return string(runes[:maxToolSummaryRunes]) + "…"
+}
+
+// chatMessagesFromRig converts persisted Rig messages into the UI read model.
+// Tool results are represented on the assistant tool list; tool messages
+// themselves are skipped because the trajectory comes from events.
+func chatMessagesFromRig(messages []rig.Message) []contracts.ChatMessage {
+	out := make([]contracts.ChatMessage, 0, len(messages))
+	for _, message := range messages {
+		switch message.Role {
+		case rig.RoleUser:
+			out = append(out, contracts.ChatMessage{
+				Role:      contracts.ChatRoleUser,
+				Text:      messageText(message),
+				CreatedAt: messageTime(message),
+			})
+		case rig.RoleAssistant:
+			chatMessage := contracts.ChatMessage{
+				Role:      contracts.ChatRoleAssistant,
+				Text:      messageText(message),
+				CreatedAt: messageTime(message),
+			}
+			for _, call := range message.ToolCalls {
+				chatMessage.Tools = append(chatMessage.Tools, contracts.ToolCall{
+					ID: call.ID, Name: call.Name, Status: "ok",
+				})
+			}
+			out = append(out, chatMessage)
+		}
+	}
+	return out
+}
+
+func messageText(message rig.Message) string {
+	var parts []string
+	for _, part := range message.Content {
+		if part.Type == rig.PartText && part.Text != "" {
+			parts = append(parts, part.Text)
+		}
+	}
+	return strings.Join(parts, "")
+}
+
+func messageTime(rig.Message) time.Time { return time.Time{} }
 
 // snapshot returns a deep copy of the session read model.
 func (state *sessionState) snapshot() contracts.ChatSession {

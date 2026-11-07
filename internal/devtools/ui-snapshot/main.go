@@ -1,5 +1,6 @@
-// Command ui-snapshot renders the Phase-1 product frames to PNG files for
-// visual review. It is a development tool: headless, no window, no real model.
+// Command ui-snapshot renders Phase-1/Phase-2 product frames to PNG files for
+// visual review. It is a headless development tool: no window, no real model;
+// a scripted OpenAI-compatible server drives one tool call + approval + answer.
 package main
 
 import (
@@ -8,10 +9,12 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"sync/atomic"
 	"time"
 
 	"github.com/egoist/mygo/ui"
 	cordis "github.com/zeokeel/zeokeel-kernel"
+	"github.com/zeokeel/zeokeel-kernel/module"
 
 	"github.com/zeokeel/zeokeel/internal/assembly"
 	"github.com/zeokeel/zeokeel/internal/contracts"
@@ -33,40 +36,32 @@ type logger struct{}
 
 func (logger) Printf(string, ...any) {}
 
+type app struct {
+	ui      *uiroot.Root
+	tester  *ui.Tester
+	loader  *module.Loader
+	root    cordis.Context
+	cleanup func()
+}
+
 func main() {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "text/event-stream")
-		fmt.Fprint(w, "data: {\"choices\":[{\"delta\":{\"content\":\"你好！我是 ZeoKeel，有什么可以帮你？\"},\"index\":0}]}\n\n")
-		fmt.Fprint(w, "data: [DONE]\n\n")
-	}))
+	outDir := "/tmp"
+	if len(os.Args) > 1 {
+		outDir = os.Args[1]
+	}
+	dataDir, err := os.MkdirTemp("", "zeokeel-snapshot")
+	if err != nil {
+		fail("temp dir", err)
+	}
+	defer os.RemoveAll(dataDir)
+
+	server := scriptedServer()
 	defer server.Close()
 
-	root := cordis.Root()
-	defer func() { _ = root.DisposeAll() }()
-	uiRoot := uiroot.New(uiroot.Config{AppName: "ZeoKeel"})
-	provide(root, contracts.KeyUIRuntime, uiRoot.Runtime())
-	provide(root, contracts.KeyNavigator, uiRoot.Navigator())
-	provide(root, contracts.KeyTheme, uiRoot.Theme())
-	provide(root, contracts.KeyLocale, uiRoot.Locale())
-	provide(root, contracts.KeyScreenLister, uiRoot.ScreenLister())
-	provide(root, contracts.KeySettings, contracts.SettingsService(&settings{values: map[string]string{
-		contracts.SettingsChatModel:   "snapshot-model",
-		contracts.SettingsChatBaseURL: server.URL,
-	}}))
-	provide(root, contracts.KeyLogger, contracts.Logger(logger{}))
+	a := boot(server.URL, dataDir)
+	defer a.cleanup()
 
-	loader, err := assembly.LoadWithBuildInfo(root, assembly.ProductDesktop, assembly.BuildInfo{Version: "0.1.0"})
-	if err != nil {
-		fail("load", err)
-	}
-	defer func() { _ = loader.Close() }()
-
-	tester := ui.NewTester(uiRoot.View, 1280, 800)
-	render(tester, "/tmp/zeokeel-home.png", nil)
-	ui := uiRoot
-	_ = ui
-
-	chat, err := root.Require(contracts.KeyChat)
+	chat, err := a.root.Require(contracts.KeyChat)
 	if err != nil {
 		fail("chat", err)
 	}
@@ -74,38 +69,61 @@ func main() {
 	if err != nil {
 		fail("new session", err)
 	}
-	if err := chat.Send(sessionID, "你好，帮我介绍一下 ZeoKeel"); err != nil {
+	if err := chat.Send(sessionID, "看看当前工作目录，然后告诉我"); err != nil {
 		fail("send", err)
 	}
-	deadline := time.Now().Add(5 * time.Second)
-	for time.Now().Before(deadline) {
-		session, ok := chat.Session(sessionID)
-		if ok && !session.Running {
-			break
-		}
-		time.Sleep(10 * time.Millisecond)
+	approvals, err := a.root.Require(contracts.KeyApprovals)
+	if err != nil {
+		fail("approvals", err)
 	}
-	if err := uiRoot.Navigator().Push("session"); err != nil {
+	waitPending(approvals, 5*time.Second)
+	a.render(outDir + "/p1-approval.png")
+
+	for _, pending := range approvals.Pending() {
+		if err := approvals.Resolve(pending.ID, contracts.ApprovalAllow); err != nil {
+			fail("resolve", err)
+		}
+	}
+	waitIdle(chat, sessionID, 10*time.Second)
+	if err := a.ui.Navigator().Push("session"); err != nil {
 		fail("push", err)
 	}
-	render(tester, "/tmp/zeokeel-session.png", nil)
-
-	uiRoot.Navigator().ToggleSettings()
-	tester.Frame()
-	if err := tester.Click("模型"); err != nil {
-		// The settings modal may already show the model page.
-		fmt.Println("click model:", err)
+	a.render(outDir + "/p1-chat.png")
+	if err := a.tester.Click("轨迹"); err != nil {
+		fmt.Println("click trajectory:", err)
 	}
-	render(tester, "/tmp/zeokeel-settings.png", nil)
+	a.render(outDir + "/p1-trajectory.png")
 }
 
-func render(tester *ui.Tester, path string, edit func()) {
-	tester.Frame()
-	if edit != nil {
-		edit()
-		tester.Frame()
+func boot(baseURL, dataDir string) *app {
+	root := cordis.Root()
+	uiRoot := uiroot.New(uiroot.Config{AppName: "ZeoKeel"})
+	provide(root, contracts.KeyDataDir, dataDir)
+	provide(root, contracts.KeyUIRuntime, uiRoot.Runtime())
+	provide(root, contracts.KeyNavigator, uiRoot.Navigator())
+	provide(root, contracts.KeyTheme, uiRoot.Theme())
+	provide(root, contracts.KeyLocale, uiRoot.Locale())
+	provide(root, contracts.KeyScreenLister, uiRoot.ScreenLister())
+	provide(root, contracts.KeySettings, contracts.SettingsService(&settings{values: map[string]string{
+		contracts.SettingsChatModel:   "snapshot-model",
+		contracts.SettingsChatBaseURL: baseURL,
+	}}))
+	provide(root, contracts.KeyLogger, contracts.Logger(logger{}))
+	loader, err := assembly.LoadWithBuildInfo(root, assembly.ProductDesktop, assembly.BuildInfo{Version: "0.1.0"})
+	if err != nil {
+		fail("load", err)
 	}
-	img := tester.Image()
+	a := &app{ui: uiRoot, tester: ui.NewTester(uiRoot.View, 1280, 800), loader: loader, root: root}
+	a.cleanup = func() {
+		_ = loader.Close()
+		_ = root.DisposeAll()
+	}
+	return a
+}
+
+func (a *app) render(path string) {
+	a.tester.Frame()
+	img := a.tester.Image()
 	file, err := os.Create(path)
 	if err != nil {
 		fail("create "+path, err)
@@ -115,6 +133,46 @@ func render(tester *ui.Tester, path string, edit func()) {
 	}
 	_ = file.Close()
 	fmt.Println("wrote", path, img.Bounds().Size())
+}
+
+func scriptedServer() *httptest.Server {
+	var calls atomic.Int64
+	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		if calls.Add(1) == 1 {
+			fmt.Fprint(w, "data: {\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"call-1\",\"type\":\"function\",\"function\":{\"name\":\"working_directory\",\"arguments\":\"{}\"}}]},\"index\":0,\"finish_reason\":\"tool_calls\"}]}\n\n")
+		} else {
+			fmt.Fprint(w, "data: {\"choices\":[{\"delta\":{\"content\":\"当前工作目录已经确认，可以开始下一步了。\"},\"index\":0}]}\n\n")
+			fmt.Fprint(w, "data: {\"choices\":[{\"delta\":{},\"index\":0,\"finish_reason\":\"stop\"}]}\n\n")
+		}
+		fmt.Fprint(w, "data: [DONE]\n\n")
+	}))
+}
+
+func waitPending(approvals contracts.Approvals, timeout time.Duration) {
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		if len(approvals.Pending()) > 0 {
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	fail("approvals", fmt.Errorf("no pending request within %s", timeout))
+}
+
+func waitIdle(chat contracts.ChatService, sessionID string, timeout time.Duration) {
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		if session, ok := chat.Session(sessionID); ok && !session.Running {
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	fail("wait idle", fmt.Errorf("session %s still running", sessionID))
 }
 
 func provide[T any](root cordis.Context, key cordis.ServiceKey[T], value T) {

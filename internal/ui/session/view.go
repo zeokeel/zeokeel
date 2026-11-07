@@ -1,7 +1,9 @@
 package session
 
 import (
+	"fmt"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/egoist/mygo/ui"
 
@@ -51,7 +53,7 @@ func buildScreen(
 		ui.Tabs(c, &st.tab, cfg.TabChat, cfg.TabTrajectory, cfg.TabMemory)
 		switch st.tab {
 		case tabTrajectory:
-			emptyPanel(c, "轨迹面板将在后续阶段接入。", theme.TextMuted)
+			buildTrajectoryTab(c, chatSession, hasSession, st)
 		case tabMemory:
 			emptyPanel(c, "记忆面板将在后续阶段接入。", theme.TextMuted)
 		default:
@@ -245,4 +247,120 @@ func startNewSession(chat contracts.ChatService, navigator contracts.Navigator) 
 		return
 	}
 	_ = navigator.Push(ScreenID)
+}
+
+// buildTrajectoryTab renders the real tool timeline for the active session:
+// every ToolCall of every message in order, as a native scrollable list.
+func buildTrajectoryTab(
+	c *ui.Context,
+	chatSession contracts.ChatSession,
+	hasSession bool,
+	st *state,
+) {
+	theme := c.Theme()
+	if !hasSession {
+		emptyPanel(c, "还没有会话，暂无可查看的轨迹。", theme.TextMuted)
+		return
+	}
+	type timelineItem struct {
+		key  string
+		tool contracts.ToolCall
+	}
+	items := make([]timelineItem, 0, 8)
+	for messageIndex, message := range chatSession.Messages {
+		for toolIndex, tool := range message.Tools {
+			key := fmt.Sprintf("%d-%d-%s", messageIndex, toolIndex, tool.ID)
+			items = append(items, timelineItem{key: key, tool: tool})
+		}
+	}
+	if len(items) == 0 {
+		emptyPanel(c, "本次会话还没有工具调用。", theme.TextMuted)
+		return
+	}
+
+	ui.Scroll(c).FillWidth().Grow(1).Children(func() {
+		for index, item := range items {
+			tool := item.tool
+			status := trajectoryStatusLabel(tool.Status)
+			color := trajectoryStatusColor(theme, tool.Status)
+			ui.Column(c).FillWidth().Gap(4).Padding(8).Radius(8).
+				Background(theme.Surface).Children(func() {
+				ui.Row(c).FillWidth().Gap(8).AlignItems(ui.Center).Children(func() {
+					ui.Badge(c, fmt.Sprintf("步骤 %d", index+1))
+					ui.Badge(c, status).Background(color.Alpha(0.15)).TextColor(color)
+					ui.Text(c, tool.Name).Bold().FontSize(13)
+					if tool.ID != "" {
+						ui.Text(c, tool.ID).FontSize(11).TextColor(theme.TextMuted)
+					}
+					ui.Spacer(c).Grow(1)
+				})
+				if summary := strings.TrimSpace(tool.Summary); summary != "" {
+					open := st.toolOpen[item.key]
+					ui.Collapsible(c, "结果摘要", &open, func() {
+						ui.Text(c, truncateTrajectorySummary(summary)).FontSize(12).TextColor(theme.TextMuted)
+					})
+					st.toolOpen[item.key] = open
+				}
+			})
+			ui.Divider(c)
+		}
+	})
+}
+
+// trajectoryStatusLabel maps a tool status to the timeline badge label.
+func trajectoryStatusLabel(status string) string {
+	switch normalizeTrajectoryStatus(status) {
+	case "running":
+		return "运行中"
+	case "ok":
+		return "完成"
+	case "error":
+		return "失败"
+	default:
+		if trimmed := strings.TrimSpace(status); trimmed != "" {
+			return trimmed
+		}
+		return "未知"
+	}
+}
+
+// trajectoryStatusColor maps a tool status to its theme color.
+func trajectoryStatusColor(theme *ui.Theme, status string) ui.Color {
+	switch normalizeTrajectoryStatus(status) {
+	case "running":
+		return theme.Warning
+	case "ok":
+		return theme.Success
+	case "error":
+		return theme.Danger
+	default:
+		return theme.TextMuted
+	}
+}
+
+// normalizeTrajectoryStatus folds the status spellings Rig uses.
+func normalizeTrajectoryStatus(status string) string {
+	switch strings.ToLower(strings.TrimSpace(status)) {
+	case "running", "in_progress", "in-progress", "active", "started":
+		return "running"
+	case "ok", "success", "succeeded", "done", "complete", "completed":
+		return "ok"
+	case "error", "failed", "failure", "canceled", "cancelled":
+		return "error"
+	default:
+		return ""
+	}
+}
+
+// truncateTrajectorySummary bounds an expanded tool summary.
+func truncateTrajectorySummary(summary string) string {
+	const max = 1200
+	if len(summary) <= max {
+		return summary
+	}
+	cut := max
+	for cut > 0 && !utf8.RuneStart(summary[cut]) {
+		cut--
+	}
+	return summary[:cut] + "…"
 }

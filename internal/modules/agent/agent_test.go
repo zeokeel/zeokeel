@@ -12,6 +12,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"sort"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -108,6 +109,8 @@ func newTestService(t *testing.T, cfg Config, settings *fakeSettings, logger *fa
 	provide(t, ctx, contracts.KeyToolkit, registry)
 	provide(t, ctx, contracts.KeySettings, contracts.SettingsService(settings))
 	provide(t, ctx, contracts.KeyLogger, contracts.Logger(logger))
+	provide(t, ctx, contracts.KeyStore, contracts.Store(newFakeStore()))
+	provide(t, ctx, contracts.KeyApprovals, contracts.Approvals(fakeApprovals{}))
 	if err := Module().Factory(ctx, cfg); err != nil {
 		t.Fatalf("activate agent module: %v", err)
 	}
@@ -782,3 +785,206 @@ func (s *scriptedStream) Recv() (rig.Chunk, error) {
 	s.index++
 	return chunk, nil
 }
+
+// --- in-memory test doubles for the P1 durable store and approvals ---------
+
+// fakeStore is an in-memory contracts.Store used by the module unit tests; the
+// real SQLite implementation is tested in internal/modules/sessionstore.
+type fakeStore struct {
+	mu          sync.Mutex
+	sessions    map[string]*fakeSession
+	checkpoints map[string]*rig.Checkpoint
+}
+
+type fakeSession struct {
+	title    string
+	created  time.Time
+	updated  time.Time
+	messages []rig.Message
+	events   []rig.SessionEvent
+}
+
+func newFakeStore() *fakeStore {
+	return &fakeStore{sessions: map[string]*fakeSession{}, checkpoints: map[string]*rig.Checkpoint{}}
+}
+
+func (s *fakeStore) sessionLocked(id string) *fakeSession {
+	state, ok := s.sessions[id]
+	if !ok {
+		now := time.Now()
+		state = &fakeSession{created: now, updated: now}
+		s.sessions[id] = state
+	}
+	return state
+}
+
+func (s *fakeStore) CreateSession(ctx context.Context, id, title string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	state := s.sessionLocked(id)
+	if state.title == "" {
+		state.title = title
+	}
+	return nil
+}
+
+func (s *fakeStore) DeleteSession(ctx context.Context, id string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	delete(s.sessions, id)
+	delete(s.checkpoints, id)
+	return nil
+}
+
+func (s *fakeStore) RenameSession(ctx context.Context, id, title string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.sessionLocked(id).title = title
+	return nil
+}
+
+func (s *fakeStore) Sessions(ctx context.Context) ([]contracts.SessionMeta, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	out := make([]contracts.SessionMeta, 0, len(s.sessions))
+	for id, state := range s.sessions {
+		out = append(out, contracts.SessionMeta{
+			ID: id, Title: state.title, MessageCount: len(state.messages),
+			CreatedAt: state.created, UpdatedAt: state.updated,
+		})
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].UpdatedAt.After(out[j].UpdatedAt) })
+	return out, nil
+}
+
+func (s *fakeStore) GetSessionMeta(ctx context.Context, id string) (contracts.SessionMeta, bool, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	state, ok := s.sessions[id]
+	if !ok {
+		return contracts.SessionMeta{}, false, nil
+	}
+	return contracts.SessionMeta{ID: id, Title: state.title, MessageCount: len(state.messages),
+		CreatedAt: state.created, UpdatedAt: state.updated}, true, nil
+}
+
+func (s *fakeStore) AppendEvent(ctx context.Context, event rig.SessionEvent) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	state := s.sessionLocked(event.SessionID)
+	event.Seq = int64(len(state.events) + 1)
+	state.events = append(state.events, event)
+	state.updated = time.Now()
+	return nil
+}
+
+func (s *fakeStore) Events(ctx context.Context, sessionID string, from, to int64) ([]rig.SessionEvent, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	state := s.sessionLocked(sessionID)
+	var out []rig.SessionEvent
+	for _, event := range state.events {
+		if event.Seq >= from && (to <= 0 || event.Seq <= to) {
+			out = append(out, event)
+		}
+	}
+	return out, nil
+}
+
+func (s *fakeStore) Search(ctx context.Context, query string, limit int) ([]rig.SessionEvent, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	var out []rig.SessionEvent
+	for _, state := range s.sessions {
+		for _, event := range state.events {
+			if query == "" || strings.Contains(event.Type+" "+string(event.Payload), query) {
+				out = append(out, event)
+				if limit > 0 && len(out) >= limit {
+					return out, nil
+				}
+			}
+		}
+	}
+	return out, nil
+}
+
+func (s *fakeStore) Last(ctx context.Context, sessionID string, limit int) ([]rig.SessionEvent, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	state := s.sessionLocked(sessionID)
+	events := state.events
+	if limit > 0 && len(events) > limit {
+		events = events[len(events)-limit:]
+	}
+	return append([]rig.SessionEvent(nil), events...), nil
+}
+
+func (s *fakeStore) History() rig.History                 { return fakeHistory{store: s} }
+func (s *fakeStore) CheckpointStore() rig.CheckpointStore { return fakeCheckpoints{store: s} }
+
+func (s *fakeStore) ReplaceHistory(ctx context.Context, sessionID string, messages []rig.Message) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	state := s.sessionLocked(sessionID)
+	state.messages = append([]rig.Message(nil), messages...)
+	state.updated = time.Now()
+	return nil
+}
+
+type fakeHistory struct{ store *fakeStore }
+
+func (h fakeHistory) Load(ctx context.Context, sessionID string) ([]rig.Message, error) {
+	h.store.mu.Lock()
+	defer h.store.mu.Unlock()
+	state := h.store.sessionLocked(sessionID)
+	return append([]rig.Message(nil), state.messages...), nil
+}
+
+func (h fakeHistory) Append(ctx context.Context, sessionID string, messages ...rig.Message) error {
+	h.store.mu.Lock()
+	defer h.store.mu.Unlock()
+	state := h.store.sessionLocked(sessionID)
+	state.messages = append(state.messages, messages...)
+	state.updated = time.Now()
+	return nil
+}
+
+type fakeCheckpoints struct{ store *fakeStore }
+
+func (c fakeCheckpoints) Load(ctx context.Context, sessionID string) (*rig.Checkpoint, error) {
+	c.store.mu.Lock()
+	defer c.store.mu.Unlock()
+	return c.store.checkpoints[sessionID], nil
+}
+
+func (c fakeCheckpoints) Save(ctx context.Context, sessionID string, checkpoint *rig.Checkpoint) error {
+	c.store.mu.Lock()
+	defer c.store.mu.Unlock()
+	c.store.checkpoints[sessionID] = checkpoint
+	return nil
+}
+
+func (c fakeCheckpoints) Clear(ctx context.Context, sessionID string) error {
+	c.store.mu.Lock()
+	defer c.store.mu.Unlock()
+	delete(c.store.checkpoints, sessionID)
+	return nil
+}
+
+// fakeApprovals auto-allows every tool call by default.
+type fakeApprovals struct{ mode string }
+
+func (a fakeApprovals) Mode() string {
+	if a.mode == "" {
+		return "auto"
+	}
+	return a.mode
+}
+func (a fakeApprovals) Request(ctx context.Context, request contracts.ApprovalRequest) (contracts.ApprovalDecision, error) {
+	return contracts.ApprovalAllow, nil
+}
+func (a fakeApprovals) Pending() []contracts.ApprovalRequest { return nil }
+func (a fakeApprovals) Resolve(id string, decision contracts.ApprovalDecision) error {
+	return nil
+}
+func (a fakeApprovals) Subscribe(fn func()) (func(), error) { return func() {}, nil }

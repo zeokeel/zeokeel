@@ -178,7 +178,7 @@ func TestProvideServicesSatisfiesDesktopAssembly(t *testing.T) {
 	}
 	logger := NewLogger("")
 	uiRoot := uiroot.New(uiroot.Config{AppName: appName})
-	if err := provideServices(root, settings, logger, uiRoot); err != nil {
+	if err := provideServices(root, "/tmp/zeokeel-test-data", settings, logger, uiRoot); err != nil {
 		t.Fatalf("provideServices: %v", err)
 	}
 	loader, err := assembly.LoadWithBuildInfo(root, assembly.ProductDesktop, assembly.BuildInfo{

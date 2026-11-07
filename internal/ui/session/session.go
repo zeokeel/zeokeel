@@ -70,6 +70,7 @@ type state struct {
 	tab       int
 	draft     string
 	thinkOpen map[string]bool
+	toolOpen  map[string]bool
 }
 
 // Module registers the conversation screen.
@@ -88,7 +89,10 @@ func Module() *module.Descriptor[Config] {
 			return err
 		}
 		config := cfg.resolved()
-		moduleState := &state{thinkOpen: make(map[string]bool)}
+		moduleState := &state{
+			thinkOpen: make(map[string]bool),
+			toolOpen:  make(map[string]bool),
+		}
 
 		// Session changes arrive on the agent goroutine; hop to the UI thread
 		// and request a frame. The unsubscribe is kernel-effect owned.

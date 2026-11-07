@@ -36,7 +36,7 @@ go test ./...
 
 归档的旧工程：`cd old && go build ./...`（独立 module，仅参考）。
 
-## 状态（2026-11-07 · Phase-1 可聊天产品已可运行）
+## 状态（2026-11-07 · P1 持久化/审批/工具卡已可运行）
 
 - ✅ 编译期装配：`internal/assembly`（显式 registry + 内嵌 `assemblies/desktop.json`、`headless.json`
   + kernel 预检 + required 失败整树回滚 + UI 子组级联卸载）
@@ -60,9 +60,20 @@ go test ./...
     `zeokeel-ui/settings`（模型配置页：TextInput/TextArea，API key 打码）
   - 端到端验证：真实 desktop assembly + 假 OpenAI SSE 服务 → 流式聊天 → 帧断言；Xvfb 真窗口冒烟
     （12 实例、screens [home session]）；截图见 `docs/screenshots/phase-1-*.png`
+- ✅ P1 会话持久化 + 审批 + 工具卡/轨迹（新增 kernel 模块）：
+  - `zeokeel/sessionstore`（SQLite，modernc.org/sqlite 纯 Go）：rig History / SessionLog /
+    CheckpointStore / HistoryReplacer + 会话元数据 CRUD；重启后会话与消息自动恢复
+  - `zeokeel/approvals`（backend）：ask/auto/never 模式、阻塞式审批队列、Subscribe；
+    agent 后端用 `gate.Func` 接入，模型工具调用需人工允许/总是允许/拒绝
+  - `zeokeel-ui/approval`（UI）：native `ui.Modal` 审批弹窗（允许/总是允许/拒绝，Esc=拒绝）
+  - `zeokeel-ui/toolcards`：24 个真实工具卡（native Badge + Collapsible 摘要）；
+    `zeokeel-ui/session` 轨迹 Tab 接入真实工具时间线
+  - 装配：desktop 15 实例、headless 6 实例（store/approvals 后端 + approval UI）；
+    E2E 覆盖「工具调用→审批弹窗→允许→工具执行→工具卡/轨迹展示→重启恢复」
+  - 截图：`docs/screenshots/p1-approval.png`、`p1-chat.png`、`p1-trajectory.png`
 - ⬜ 后续阶段见 [docs/PRODUCT-REBUILD-PLAN.md](docs/PRODUCT-REBUILD-PLAN.md)：
-  P1 会话持久化/工具卡/轨迹/审批 → P2 composer 增强/设置扩展 → P3 memory/skills/automation/插件 →
-  P4 ACP/热键/导入/更新/诊断
+  P2 composer 增强（slash/@/附件/图片）/设置扩展（模型目录/外观/语言）→ P3 memory/skills/
+  automation/插件/workspace diff/搜索/fork/export → P4 ACP/热键/导入/更新/诊断
 - ✅ `make ci` 全绿；uiroot 29 个 headless 测试（覆盖率 99.3%）；desktop/headless 装配集成测试；
   Xvfb 真窗口冒烟通过
 - ⬜ 逐模块迁移（后端 20 + UI 16，见 `docs/research/kernel-split/05-ui-module-map.md`）：

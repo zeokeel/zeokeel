@@ -1,3 +1,8 @@
+> **P1 落地状态（2026-11-07）**：会话持久化 `zeokeel/sessionstore`（SQLite）、审批后端
+> `zeokeel/approvals` + 审批弹窗 `zeokeel-ui/approval`、工具卡/轨迹（`zeokeel-ui/toolcards`、
+> `zeokeel-ui/session`）已完成并接入 kernel assembly；desktop 15 实例 / headless 6 实例，
+> E2E 覆盖审批、工具执行与重启恢复。下一轮 P2。
+
 # ZeoKeel 产品重建计划 — old → rig v0.13.0 + mygo 原生 UI
 
 > 版本：v1（Phase-1 D 产出）· 写作时间：2026-11-07

@@ -9,6 +9,18 @@
       }
     },
     {
+      "id": "store",
+      "module": "zeokeel/sessionstore",
+      "config": {}
+    },
+    {
+      "id": "approvals",
+      "module": "zeokeel/approvals",
+      "config": {
+        "mode": "auto"
+      }
+    },
+    {
       "id": "toolkit",
       "module": "zeokeel/toolkit",
       "config": {
