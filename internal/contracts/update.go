@@ -55,3 +55,23 @@ type UpdateDownload struct {
 type UpdateDownloader interface {
 	Download(ctx context.Context) (UpdateDownload, error)
 }
+
+// UpdateInstallPlan is a downloaded update scheduled for install-on-restart.
+type UpdateInstallPlan struct {
+	// Version is the staged version.
+	Version string
+	// Path is the staged asset inside <dataDir>/updates.
+	Path string
+	// SHA256 is the verified checksum.
+	SHA256 string
+}
+
+// UpdateInstaller is the optional install half of the update service: it
+// schedules a downloaded update for install-on-restart. Replacing the running
+// executable is the host's deliberate step on the next start.
+type UpdateInstaller interface {
+	// ScheduleInstall records the downloaded update as pending.
+	ScheduleInstall(download UpdateDownload) (UpdateInstallPlan, error)
+	// PendingInstall reports the scheduled install (ok=false when none).
+	PendingInstall() (UpdateInstallPlan, bool)
+}

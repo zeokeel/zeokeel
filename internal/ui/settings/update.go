@@ -41,6 +41,15 @@ type updateState struct {
 	download *contracts.UpdateDownload
 	// downloadErr is the last download error, rendered as the page's danger row.
 	downloadErr string
+
+	// Install half (contracts.UpdateInstaller): the install-on-next-launch
+	// action after a verified download, its in-flight state/error and the
+	// pending plan read once when the page first opens.
+	installing    bool
+	install       *contracts.UpdateInstallPlan
+	installErr    string
+	pendingLoaded bool
+	pending       *contracts.UpdateInstallPlan
 }
 
 func newUpdateState() *updateState { return &updateState{} }
@@ -75,6 +84,22 @@ func buildUpdatePage(c *ui.Context, t *design.Tokens, kctx cordis.Context, runti
 		if !hasUpdate {
 			design.Apply(ui.Text(c, localized(locale, "更新服务未启用", "Update service is not enabled")), t.TextMuted(design.TypeXS))
 			return
+		}
+
+		// Install half: the backend may also implement contracts.UpdateInstaller
+		// (schedule the verified download for install-on-next-launch). The
+		// pending plan is read once when the page opens, so a plan scheduled in
+		// an earlier run is visible before any check.
+		installer, canInstall := updateService.(contracts.UpdateInstaller)
+		if canInstall && !st.pendingLoaded {
+			st.pendingLoaded = true
+			if plan, ok := installer.PendingInstall(); ok {
+				pending := plan
+				st.pending = &pending
+			}
+		}
+		if st.pending != nil {
+			buildPendingInstall(c, t, *st.pending, locale)
 		}
 
 		checkLabel := localized(locale, "检查更新", "Check for updates")
@@ -136,6 +161,29 @@ func buildUpdatePage(c *ui.Context, t *design.Tokens, kctx cordis.Context, runti
 			}
 		}
 
+		// Install action: only after a verified download, and only while no
+		// install is already pending/scheduled. It runs off the UI thread like
+		// the download; both actions are disabled while either is in flight.
+		if canInstall {
+			if st.download != nil && st.pending == nil && st.install == nil {
+				installLabel := localized(locale, "安装并在下次启动生效", "Install and apply on next launch")
+				if st.installing {
+					installLabel = localized(locale, "安装中…", "Scheduling…")
+				}
+				install := design.Apply(ui.PrimaryButton(c, installLabel), t.PrimaryButton()).
+					Disabled(st.downloading || st.installing)
+				if install.Clicked() && !st.downloading && !st.installing {
+					startUpdateInstall(installer, runtime, st, *st.download)
+				}
+			}
+			if st.installErr != "" {
+				buildUpdateError(c, t, localized(locale, "安装计划失败：", "Failed to schedule install: ")+st.installErr)
+			}
+			if st.install != nil {
+				buildScheduledInstall(c, t, *st.install, locale)
+			}
+		}
+
 		hasURL := strings.TrimSpace(st.info.URL) != ""
 		ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(design.Space2).Children(func() {
 			copyLink := ui.Button(c, localized(locale, "复制下载链接", "Copy download link")).
@@ -179,6 +227,7 @@ func startUpdateCheck(service contracts.UpdateService, runtime contracts.UIRunti
 	// different version.
 	st.download = nil
 	st.downloadErr = ""
+	st.installErr = ""
 	runtime.Invalidate()
 	go func() {
 		info, err := service.Check(context.Background())
@@ -247,6 +296,63 @@ func startUpdateDownload(downloader contracts.UpdateDownloader, runtime contract
 			runtime.Invalidate()
 		})
 	}()
+}
+
+// startUpdateInstall schedules the verified download for install on the next
+// launch, off the UI thread, and publishes the plan/error through UIRuntime.Post.
+func startUpdateInstall(installer contracts.UpdateInstaller, runtime contracts.UIRuntime, st *updateState, download contracts.UpdateDownload) {
+	if st.installing {
+		return
+	}
+	st.installing = true
+	st.installErr = ""
+	runtime.Invalidate()
+	go func() {
+		plan, err := installer.ScheduleInstall(download)
+		runtime.Post(func() {
+			st.installing = false
+			if err != nil {
+				st.installErr = err.Error()
+			} else {
+				st.install = &plan
+				st.installErr = ""
+			}
+			runtime.Invalidate()
+		})
+	}()
+}
+
+// buildPendingInstall shows an already scheduled install (from an earlier run)
+// before any check: the host applies it at the next start.
+func buildPendingInstall(c *ui.Context, t *design.Tokens, plan contracts.UpdateInstallPlan, locale contracts.LocaleService) {
+	ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(design.Space2).Children(func() {
+		design.Apply(ui.Badge(c,
+			localized(locale, "待安装：", "Pending install: v")+strings.TrimSpace(plan.Version)),
+			t.Badge()).TextColor(t.WarningText)
+		if staged := strings.TrimSpace(plan.Path); staged != "" {
+			design.Apply(ui.Text(c, staged), t.MonoFamily()).FontSize(11).
+				TextColor(t.LabelTertiary).MaxLines(1).Ellipsis("…")
+		}
+	})
+}
+
+// buildScheduledInstall renders the install plan scheduled in this session:
+// the badge plus the version and staged path the host will install on restart.
+func buildScheduledInstall(c *ui.Context, t *design.Tokens, plan contracts.UpdateInstallPlan, locale contracts.LocaleService) {
+	ui.Column(c).FillWidth().Gap(design.Space1).Children(func() {
+		ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(design.Space2).Children(func() {
+			design.Apply(ui.Badge(c, localized(locale, "已计划安装", "Install scheduled")), t.Badge()).
+				TextColor(t.Success)
+			design.Apply(ui.Text(c, localized(locale, "版本：", "Version: ")+strings.TrimSpace(plan.Version)),
+				t.Font(design.TypeXS)).TextColor(t.LabelPrimary)
+		})
+		if staged := strings.TrimSpace(plan.Path); staged != "" {
+			design.Apply(ui.Text(c, localized(locale, "暂存路径", "Staged file")), t.Font(design.TypeXXS)).
+				TextColor(t.LabelTertiary)
+			design.Apply(ui.Text(c, staged), t.MonoFamily()).FontSize(12).
+				TextColor(t.LabelSecondary).MaxLines(1).Ellipsis("…")
+		}
+	})
 }
 
 // buildUpdateDownloadResult renders the staged-file summary of a verified

@@ -147,10 +147,12 @@ func exportSessionJSONL(st *state, chatSession contracts.ChatSession, cfg Config
 		st.exportErr = err.Error()
 		st.exportStatus = ""
 		st.exportPath = ""
+		notifyExport(st, contracts.NotifyError, st.tr("导出失败：", "Export failed: ")+err.Error())
 	case strings.TrimSpace(path) != "":
 		st.exportStatus = "ok"
 		st.exportPath = path
 		st.exportErr = ""
+		notifyExport(st, contracts.NotifySuccess, st.tr("对话已导出", "Conversation exported"))
 	}
 }
 
@@ -191,11 +193,22 @@ func exportSession(st *state, chatSession contracts.ChatSession, cfg Config) {
 		st.exportErr = err.Error()
 		st.exportStatus = ""
 		st.exportPath = ""
+		notifyExport(st, contracts.NotifyError, st.tr("导出失败：", "Export failed: ")+err.Error())
 	case strings.TrimSpace(path) != "":
 		st.exportStatus = "ok"
 		st.exportPath = path
 		st.exportErr = ""
+		notifyExport(st, contracts.NotifySuccess, st.tr("对话已导出", "Conversation exported"))
 	}
+}
+
+// notifyExport raises the optional desktop toast for one export outcome; the
+// header badge/status stays the source of truth when no notifier is present.
+func notifyExport(st *state, level, text string) {
+	if st.notifier == nil {
+		return
+	}
+	st.notifier.Notify(level, text)
 }
 
 // transcriptText formats the session read model for the clipboard: one block

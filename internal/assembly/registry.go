@@ -29,6 +29,7 @@ import (
 	"github.com/zeokeel/zeokeel/internal/ui/session"
 	"github.com/zeokeel/zeokeel/internal/ui/settings"
 	"github.com/zeokeel/zeokeel/internal/ui/sidebar"
+	"github.com/zeokeel/zeokeel/internal/ui/toasts"
 	"github.com/zeokeel/zeokeel/internal/ui/toolcards"
 	"github.com/zeokeel/zeokeel/internal/ui/welcome"
 )
@@ -73,6 +74,7 @@ func Registry() *module.Registry {
 	mustRegister(registry, home.Module())
 	mustRegister(registry, about.Module())
 	mustRegister(registry, interaction.Module())
+	mustRegister(registry, toasts.Module())
 	mustRegister(registry, welcome.Module())
 	mustRegister(registry, toolcards.Module())
 	mustRegister(registry, sidebar.Module())

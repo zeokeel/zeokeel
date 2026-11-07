@@ -21,6 +21,16 @@
 - 右侧栏「文件」Tab：打开文件夹（mygo 原生 Directory picker）、目录进入/面包屑、文本/Markdown/图片预览、
   刷新与错误状态；E2E 覆盖工作区创建 + 列表 + 预览帧
 
+**TDD-install/toast/wsmcp（2026-11-08）**
+- install-on-restart：update `UpdateInstaller`（pending.json 原子写、path 包含/sha 复核）、host 启动 `applyPendingUpdate`
+  （可注入 ExecutableReplacer，Linux 同目录 temp+rename；失败保留 pending；desktop/headless 都应用）、设置更新页「安装并在下次启动生效」+
+  待安装 Badge（update 29/host 44/settings 74 测试）
+- 通知 overlay：uiroot Notifier（notice-N/空文本不投递/panic 遏制）、host 桌面提供、新模块 `zeokeel-ui/toasts`（overlay.toasts、
+  4 条上限、级别 Badge、4s 自动消失、关闭按钮、i18n；位于 composer 上方 140 DIP）；session 导出成功/失败接 toast；
+  desktop 27 实例 / registry 29；E2E Notify→帧显示
+- workspace mcp.json opt-in：toolkit 仅在设置开关开启且有当前工作区时读 `<root>/mcp.json`（对象/数组、assembly>settings>workspace
+  去重），设置 MCP 页 Toggle；toolkit 33 / settings 74 测试
+
 **TDD-artifact/desktop（2026-11-08）**
 - 工件历史：uiroot artifactService 保留最近 50（ArtifactLister，newest-first 深拷贝、CreatedAt、panic/nil 也记录）；rightpanel Files
   「产物」section 最近 10 条 + 内嵌 markdown 预览/收起；E2E present→Files 产物→预览

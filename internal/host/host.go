@@ -281,6 +281,10 @@ func runHeadless(ctx context.Context, opts Options, out io.Writer) error {
 	if err != nil {
 		return err
 	}
+	// Install a scheduled update at startup (the headless product serves the
+	// agent backend and should also apply updates); failures are logged, never
+	// fatal, and keep the pending plan.
+	applyPendingUpdateOnStartup(opts.DataDir, logger)
 	root := cordis.Root()
 	defer func() {
 		if err := root.DisposeAll(); err != nil {
@@ -376,6 +380,12 @@ func runDesktop(opts Options) error {
 		logger.Printf("%s: another instance is already running; this launch exits", appName)
 		return nil
 	}
+
+	// Install a scheduled update before the GUI and assembly start: the update
+	// page wrote <dataDir>/updates/pending.json, the host replaces its own
+	// executable here (it takes effect on the next start) and never blocks on a
+	// failure (the plan is kept for a retry).
+	applyPendingUpdateOnStartup(opts.DataDir, logger)
 
 	// Best-effort XDG autostart entry sync (only the owning instance manages
 	// the entry): the appearance page writes the setting; this keeps
@@ -565,6 +575,9 @@ func provideServices(root cordis.Context, dataDir string, settings *Settings, lo
 	}
 	if _, err := root.Provide(contracts.KeyGoalTracker, contracts.GoalTracker(uiRoot.GoalTracker())); err != nil {
 		return fmt.Errorf("%s: provide goal tracker: %w", appName, err)
+	}
+	if _, err := root.Provide(contracts.KeyNotifier, contracts.Notifier(uiRoot.Notifier())); err != nil {
+		return fmt.Errorf("%s: provide notifier: %w", appName, err)
 	}
 	return nil
 }

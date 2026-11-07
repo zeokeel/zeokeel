@@ -211,6 +211,21 @@ func Module() *module.Descriptor[Config] {
 		}
 		servers := mergeMCPServers(cfg.MCPServers, rawMCPServers, logf)
 
+		// Workspace mcp.json is the lowest-priority source and only when the
+		// user explicitly opted in; the workspace module is optional here.
+		workspaceOptIn := false
+		if hasSettings {
+			workspaceOptIn = mcpWorkspaceOptInEnabled(settingsService.Get(contracts.SettingMCPWorkspaceOptIn, ""))
+		}
+		if workspaceOptIn {
+			if workspaceService, ok := ctx.Get(contracts.KeyWorkspace); ok && workspaceService != nil {
+				workspaceRows := readWorkspaceMCPServers(context.Background(), workspaceService, logf)
+				if len(workspaceRows) > 0 {
+					servers = mergeMCPServerRows(servers, workspaceRows, "workspace mcp.json", false, logf)
+				}
+			}
+		}
+
 		var clients []*mcp.Client
 		pluginEntries := make([]pluginEntry, 0, len(servers))
 		for _, server := range servers {

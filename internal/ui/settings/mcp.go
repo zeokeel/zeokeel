@@ -1,6 +1,9 @@
 package settings
 
 import (
+	"context"
+	"fmt"
+	"path/filepath"
 	"strings"
 
 	"github.com/egoist/mygo/ui"
@@ -40,6 +43,11 @@ type mcpState struct {
 
 	status    string
 	statusErr bool
+
+	// Workspace mcp.json opt-in state (loaded once per page visit).
+	workspaceOptIn  bool
+	workspaceLoaded bool
+	workspaceRoot   string
 }
 
 func newMCPState() *mcpState { return &mcpState{transport: mcpTransportHTTP} }
@@ -62,6 +70,27 @@ func mcpRowAddress(row contracts.MCPServerConfig) string {
 		return strings.TrimSpace(strings.TrimSpace(row.Command) + " " + strings.Join(row.Args, " "))
 	}
 	return row.URL
+}
+
+// mcpWorkspaceOptInEnabled normalizes the stored opt-in value: only an explicit
+// true enables reading the workspace file; absent/malformed values stay off.
+func mcpWorkspaceOptInEnabled(raw string) bool {
+	return strings.EqualFold(strings.TrimSpace(raw), "true")
+}
+
+// loadMCPWorkspaceState reads the opt-in setting and the current workspace root
+// once per page visit. The workspace service is optional.
+func loadMCPWorkspaceState(st *mcpState, store contracts.SettingsService, kctx cordis.Context) {
+	st.workspaceLoaded = true
+	st.workspaceOptIn = mcpWorkspaceOptInEnabled(store.Get(contracts.SettingMCPWorkspaceOptIn, "false"))
+	workspace, ok := kctx.Get(contracts.KeyWorkspace)
+	if !ok || workspace == nil {
+		return
+	}
+	current, has, err := workspace.Current(context.Background())
+	if err == nil && has {
+		st.workspaceRoot = current.Root
+	}
 }
 
 // buildMCPPage renders the MCP server CRUD page: the stored server rows with
@@ -88,6 +117,9 @@ func buildMCPPage(c *ui.Context, kctx cordis.Context, st *mcpState, locale contr
 		}
 		if !st.loaded {
 			loadMCPServers(st, store, locale)
+		}
+		if !st.workspaceLoaded {
+			loadMCPWorkspaceState(st, store, kctx)
 		}
 		if st.parseErr != "" {
 			buildMCPServerError(c, t, st.parseErr)
@@ -120,6 +152,32 @@ func buildMCPPage(c *ui.Context, kctx cordis.Context, st *mcpState, locale contr
 					}
 				})
 			}
+		})
+
+		// Workspace mcp.json opt-in: applied on the next app start.
+		panel(c, t, func() {
+			sectionTitle(c, t, localized(locale, "工作区 MCP", "Workspace MCP"))
+			toggle := ui.Toggle(c, &st.workspaceOptIn, localized(locale,
+				"读取工作区 mcp.json", "Read workspace mcp.json"))
+			if toggle.Changed() {
+				if err := store.Set(contracts.SettingMCPWorkspaceOptIn, fmt.Sprintf("%t", st.workspaceOptIn)); err != nil {
+					st.status = localized(locale, "保存失败：", "Save failed: ") + err.Error()
+					st.statusErr = true
+				} else {
+					st.status = localized(locale, "已保存", "Saved")
+					st.statusErr = false
+				}
+			}
+			hint := localized(locale,
+				"当前没有打开工作区；打开工作区并重启后读取其 mcp.json。",
+				"No workspace is open; open one and restart to read its mcp.json.")
+			if root := strings.TrimSpace(st.workspaceRoot); root != "" {
+				path := filepath.Join(root, "mcp.json")
+				hint = localized(locale,
+					"当前工作区："+root+"；启动时读取 "+path+" 中的额外服务器，修改后重启生效。",
+					"Current workspace: "+root+"; extra servers are read from "+path+" on launch, after a restart.")
+			}
+			design.Apply(ui.Text(c, hint), t.TextMuted(design.TypeXXS))
 		})
 
 		// Add form.

@@ -151,6 +151,11 @@
           "id": "interaction",
           "module": "zeokeel-ui/interaction",
           "config": {}
+        },
+        {
+          "id": "toasts",
+          "module": "zeokeel-ui/toasts",
+          "config": {}
         }
       ]
     }

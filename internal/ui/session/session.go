@@ -137,6 +137,10 @@ type state struct {
 	planReviewer contracts.PlanReviewer
 	memoryStore  contracts.MemoryStore
 
+	// notifier is the optional desktop toast bridge: export actions raise a
+	// success/error toast in addition to the header badge.
+	notifier contracts.Notifier
+
 	// Command-dialog state (native Modals rendered by the session screen).
 	goalOpen  bool
 	goalText  string
@@ -185,11 +189,13 @@ func Module() *module.Descriptor[Config] {
 		settings, _ := ctx.Get(contracts.KeySettings)
 		planReviewer, _ := ctx.Get(contracts.KeyPlanReviewer)
 		memoryStore, _ := ctx.Get(contracts.KeyMemory)
+		notifier, _ := ctx.Get(contracts.KeyNotifier)
 		moduleState := &state{
 			locale:       locale,
 			settings:     settings,
 			planReviewer: planReviewer,
 			memoryStore:  memoryStore,
+			notifier:     notifier,
 			thinkOpen:    make(map[string]bool),
 			toolOpen:     make(map[string]bool),
 			thumbnails:   make(map[string]*ui.Bitmap),

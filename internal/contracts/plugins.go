@@ -82,3 +82,7 @@ func EncodeMCPServersJSON(rows []MCPServerConfig) (string, error) {
 	}
 	return string(encoded), nil
 }
+
+// SettingMCPWorkspaceOptIn enables reading <workspace>/mcp.json for extra MCP
+// servers (the old shell's workspace opt-in). Applied on startup.
+const SettingMCPWorkspaceOptIn = "mcp.workspaceOptIn"

@@ -814,6 +814,18 @@ func TestP1ApprovalToolsAndPersistence(t *testing.T) {
 	uiRoot.SetRightPanelOpen(false)
 	tester.Frame()
 
+	// notifications: a toast raised through the host bridge renders in the
+	// overlay.toasts slot and can be dismissed with its close button.
+	notifier, err := root.Require(contracts.KeyNotifier)
+	if err != nil {
+		t.Fatalf("require notifier: %v", err)
+	}
+	notifier.Notify(contracts.NotifySuccess, "E2E 通知")
+	tester.Frame()
+	if !tester.HasText("E2E 通知") {
+		t.Fatalf("toast missing; texts = %v", tester.Texts())
+	}
+
 	// --- restart: the session and its messages come back from SQLite ------
 	title := session.Title
 	if err := loader.Close(); err != nil {
@@ -907,6 +919,7 @@ func bootDesktop(t *testing.T, dataDir string, settings *memSettings) (cordis.Co
 	provide(t, root, contracts.KeyArtifactPresenter, contracts.ArtifactPresenter(uiRoot.ArtifactPresenter()))
 	provide(t, root, contracts.KeyPlanReviewer, contracts.PlanReviewer(uiRoot.PlanReviewer()))
 	provide(t, root, contracts.KeyGoalTracker, contracts.GoalTracker(uiRoot.GoalTracker()))
+	provide(t, root, contracts.KeyNotifier, contracts.Notifier(uiRoot.Notifier()))
 	provide(t, root, contracts.KeySettings, contracts.SettingsService(settings))
 	provide(t, root, contracts.KeyLogger, contracts.Logger(discardLogger{}))
 	loader, err := assembly.LoadWithBuildInfo(root, assembly.ProductDesktop, assembly.BuildInfo{Version: "0.1.0"})

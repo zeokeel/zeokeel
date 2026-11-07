@@ -40,7 +40,7 @@
 | `icons` | ✅ | `internal/icons` | Lucide SVG |
 | `importer` | 🟡 | `internal/modules/importer` + settings 导入页 | DSH session.v4.jsonl Scan/Import、文本+reasoning、workspace；attachments/credentials/manifest/zstd 未迁移 |
 | `lsp` | ❌ | 无；rig 有 `tools/lsp` 但 toolkit 未注册 | 旧 LSP client/servers 配置/工具未接 |
-| `mcp` | 🟡 | toolkit `mcp.Start`（stdio+HTTP）+ `mcp_settings.go` + settings MCP 页 | settings `mcp.servers` 支持 **HTTP/stdio** 行（command/args/env）、增删/校验/去重、启动时与 assembly 合并（assembly 优先）、stdio 子进程握手/工具注册/失败诊断；仍无 workspace mcp.json opt-in、工具级开关 |
+| `mcp` | 🟡 | toolkit `mcp.Start`（stdio+HTTP）+ `mcp_settings.go` + settings MCP 页 | settings `mcp.servers` 支持 HTTP/stdio 行（command/args/env）、增删/校验/去重、启动合并（assembly 优先）、stdio 握手/工具注册/失败诊断；**workspace `<root>/mcp.json` opt-in**（`{"servers":[...]}` 或顶层数组、priority assembly>settings>workspace、设置开关）；仍缺工具级开关 |
 | `memory` | 🟡 | `internal/modules/memory` + rig memory tool + session Memory tab | JSON MemoryStore/tool/搜索/添加；consolidate/extract/auto-memory 未迁移 |
 | `modelcatalog` | 🟡 | `internal/modules/modelcatalog` + composer 模型菜单 + 推理强度 | 默认 DeepSeek Chat/Reasoner 预设、per-session 切换、**per-session reasoning effort（low/medium/high，provider reasoning_effort + settings 持久化）**；缺旧 context window/添加编辑/连接检查 |
 | `presets` | ❌ | 无 | 无 agent presets/persona/tool allowlist/用户 JSON 覆盖 |
@@ -57,7 +57,7 @@
 | `websearch` | ✅ | `internal/websearch` + toolkit 动态 searcher | 旧 HTTP 协议（POST/Bearer/limit/10s/1MiB）、错误语义；assembly network=true，设置搜索页 endpoint/key 即时生效；无旧代理/多后端选择（旧也只有通用端点） |
 | `winproc` | ❌ | 无 | Windows 控制台隐藏/环境/编码辅助未迁移 |
 | `workspacechanges` | ✅ | workspace WorkspaceDiffer + rightpanel Changes | git status/diff、截断；用户可见等价 |
-| `app`（宿主） | 🟡 | host/assembly | 窗口/设置/headless/ACP + interaction/artifact/plan 服务 + **单实例锁（OnSecondInstance 聚焦）** + **XDG autostart（外观页开关）**；缺窗口几何显式持久化（mygo StateKey 已隐式）、通知、网络代理、update install |
+| `app`（宿主） | 🟡 | host/assembly | 窗口/设置/headless/ACP + interaction/artifact/plan/notifier 服务 + 单实例锁（OnSecondInstance 聚焦）+ XDG autostart + **install-on-restart（pending.json + 可注入 Replacer，启动时替换）** + **toast 通知 overlay（成功/失败导出、下载提示，4s 自动消失）**；缺窗口几何显式持久化（mygo StateKey 已隐式）、网络代理、Windows 替换 |
 
 ## 3. Shell / UI 能力矩阵（34 项）
 

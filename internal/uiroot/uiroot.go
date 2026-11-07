@@ -48,6 +48,7 @@ type Root struct {
 	artifacts       *artifactService
 	plan            *planService
 	goal            *goalService
+	notifier        *notifierService
 
 	mu         sync.Mutex
 	invalidate func()
@@ -119,6 +120,7 @@ func New(cfg Config) *Root {
 		artifacts:       newArtifactService(),
 		plan:            newPlanService(),
 		goal:            newGoalService(),
+		notifier:        newNotifierService(),
 	}
 	r.theme = &themeService{root: r, dark: cfg.Dark}
 	r.locale = &localeService{root: r, lang: cfg.Language}

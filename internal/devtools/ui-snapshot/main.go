@@ -317,6 +317,14 @@ func main() {
 		}
 	}
 
+	// Notification toast overlay.
+	if notifier, notifierErr := a.root.Require(contracts.KeyNotifier); notifierErr == nil {
+		notifier.Notify(contracts.NotifySuccess, "对话已导出")
+		notifier.Notify(contracts.NotifyInfo, "更新已下载到暂存目录")
+		a.tester.Frame()
+		a.render(outDir + "/p2-toast.png")
+	}
+
 	// Permission mode chip (ask → workspace → full, the slash command cycles it).
 	if store, ok := a.root.Get(contracts.KeySettings); ok {
 		_ = store.Set(contracts.SettingAgentPermission, contracts.PermissionFull)
@@ -590,6 +598,7 @@ func boot(baseURL, dataDir string) *app {
 	provide(root, contracts.KeyArtifactPresenter, contracts.ArtifactPresenter(uiRoot.ArtifactPresenter()))
 	provide(root, contracts.KeyPlanReviewer, contracts.PlanReviewer(uiRoot.PlanReviewer()))
 	provide(root, contracts.KeyGoalTracker, contracts.GoalTracker(uiRoot.GoalTracker()))
+	provide(root, contracts.KeyNotifier, contracts.Notifier(uiRoot.Notifier()))
 	provide(root, contracts.KeySettings, contracts.SettingsService(&settings{values: map[string]string{
 		contracts.SettingsChatModel:   "snapshot-model",
 		contracts.SettingsChatBaseURL: baseURL,

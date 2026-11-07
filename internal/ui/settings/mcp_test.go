@@ -4,7 +4,10 @@ package settings_test
 // JSON write-back, validation, malformed configuration and the English copy.
 
 import (
+	"context"
 	"errors"
+	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/egoist/mygo/ui"
@@ -165,4 +168,94 @@ func TestMCPPageEnglishCopy(t *testing.T) {
 		"Connect MCP servers over Streamable HTTP or stdio; changes apply after a restart (stdio subprocesses start on launch).",
 		"MCP servers", "Add server", "Name", "URL", "Add", "Remove")
 	h.assertNoTexts(tester, "添加服务器", "移除")
+}
+
+// --- workspace mcp.json opt-in ---------------------------------------------
+
+// fakeSettingsWorkspace is the minimal WorkspaceService for the opt-in toggle's
+// current-workspace copy.
+type fakeSettingsWorkspace struct {
+	current contracts.Workspace
+	has     bool
+}
+
+func (w *fakeSettingsWorkspace) List(context.Context) ([]contracts.Workspace, error) {
+	if !w.has {
+		return nil, nil
+	}
+	return []contracts.Workspace{w.current}, nil
+}
+
+func (w *fakeSettingsWorkspace) Current(context.Context) (contracts.Workspace, bool, error) {
+	return w.current, w.has, nil
+}
+
+func (w *fakeSettingsWorkspace) Create(context.Context, string, string) (contracts.Workspace, error) {
+	return contracts.Workspace{}, nil
+}
+
+func (w *fakeSettingsWorkspace) Open(context.Context, string) (contracts.Workspace, error) {
+	return contracts.Workspace{}, nil
+}
+
+func (w *fakeSettingsWorkspace) Delete(context.Context, string) error { return nil }
+
+func (w *fakeSettingsWorkspace) Files(context.Context, string) ([]contracts.FileEntry, error) {
+	return nil, nil
+}
+
+func (w *fakeSettingsWorkspace) ReadFile(context.Context, string, int) ([]byte, error) {
+	return nil, nil
+}
+
+func (w *fakeSettingsWorkspace) Search(context.Context, string, int) ([]contracts.FileEntry, error) {
+	return nil, nil
+}
+
+func TestMCPPageWorkspaceOptInToggle(t *testing.T) {
+	store := newFakeSettings(nil)
+	h := newHarness(t, &fakeChat{}, store, settings.Config{})
+	tester := h.tester()
+	tester.Frame()
+	openMCPPage(t, h, tester)
+
+	h.assertTexts(tester, "工作区 MCP", "读取工作区 mcp.json", "当前没有打开工作区")
+	if got := store.get(contracts.SettingMCPWorkspaceOptIn); got != "" {
+		t.Fatalf("default opt-in = %q, want unset/off", got)
+	}
+	h.click(tester, "读取工作区 mcp.json")
+	if got := store.get(contracts.SettingMCPWorkspaceOptIn); got != "true" {
+		t.Fatalf("opt-in after enable = %q, want true", got)
+	}
+	h.click(tester, "读取工作区 mcp.json")
+	if got := store.get(contracts.SettingMCPWorkspaceOptIn); got != "false" {
+		t.Fatalf("opt-in after disable = %q, want false", got)
+	}
+
+	// A malformed stored value normalizes to off; enabling writes a clean true.
+	store.values[contracts.SettingMCPWorkspaceOptIn] = "yes"
+	h = newHarness(t, &fakeChat{}, store, settings.Config{})
+	tester = h.tester()
+	tester.Frame()
+	openMCPPage(t, h, tester)
+	h.click(tester, "读取工作区 mcp.json")
+	if got := store.get(contracts.SettingMCPWorkspaceOptIn); got != "true" {
+		t.Fatalf("malformed opt-in enable = %q, want true", got)
+	}
+}
+
+func TestMCPPageWorkspaceOptInShowsRootAndEnglish(t *testing.T) {
+	store := newFakeSettings(nil)
+	h := newHarness(t, &fakeChat{}, store, settings.Config{})
+	root := t.TempDir()
+	provide(t, h.ctx, contracts.KeyWorkspace, contracts.WorkspaceService(&fakeSettingsWorkspace{
+		current: contracts.Workspace{ID: "ws", Name: "ws", Root: root},
+		has:     true,
+	}))
+	h.uiRoot.Locale().SetLanguage("en")
+	tester := h.tester()
+	tester.Frame()
+	openMCPPage(t, h, tester)
+	h.assertTexts(tester, "Workspace MCP", "Read workspace mcp.json",
+		strings.TrimSuffix(root, string(filepath.Separator))+"/mcp.json")
 }
