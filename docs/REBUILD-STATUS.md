@@ -21,6 +21,11 @@
 - 右侧栏「文件」Tab：打开文件夹（mygo 原生 Directory picker）、目录进入/面包屑、文本/Markdown/图片预览、
   刷新与错误状态；E2E 覆盖工作区创建 + 列表 + 预览帧
 
+**P3 会话置顶（2026-11-08）**
+- agent `SessionPinner`：settings `session.<id>.pinned` 持久化，`ChatSessionInfo.Pinned`；未知会话/无 settings 错误
+- sidebar：行菜单切换置顶、组内置顶优先排序、置顶 Badge；E2E 验证排序/徽标/取消置顶；design-guide 复核
+  删除冗余「当前」Badge（选中态由 accent 图标+tint 表达）
+
 **P4 可配置快捷键 + 设计复核（2026-11-08）**
 - `ui.shortcut.toggleSidebar` / `ui.shortcut.commandPalette`：设置页 native Select 持久化，宿主每帧解析
   chord（cmd/ctrl/alt/shift）并注册 OnShortcut，改动即时生效；E2E 验证 Alt+B 覆盖与恢复默认

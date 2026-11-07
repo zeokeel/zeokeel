@@ -75,8 +75,11 @@ type ChatSessionInfo struct {
 	ID string
 	// WorkspaceID is the workspace the session was created in ("" when none
 	// was open or the backend does not track workspaces).
-	WorkspaceID  string
-	Title        string
+	WorkspaceID string
+	Title       string
+	// Pinned marks a pinned session: the sidebar sorts pinned sessions first
+	// within their workspace group.
+	Pinned       bool
 	MessageCount int
 	Running      bool
 	UpdatedAt    time.Time
@@ -130,6 +133,19 @@ type AttachmentSender interface {
 	// SendWithAttachments appends a user message carrying the prompt and the
 	// attachments, then starts one asynchronous agent run.
 	SendWithAttachments(sessionID, prompt string, attachments []Attachment) error
+}
+
+// SessionPinnedSettingKey is the settings row storing a session's pin flag
+// (the old shell persisted pins in settings, not in the session schema).
+func SessionPinnedSettingKey(sessionID string) string {
+	return "session." + sessionID + ".pinned"
+}
+
+// SessionPinner is the optional half of the chat service that pins or
+// unpins a session. UI modules type-assert it.
+type SessionPinner interface {
+	// SetSessionPinned persists the session's pin flag.
+	SetSessionPinned(sessionID string, pinned bool) error
 }
 
 // SessionForker is the optional half of the chat service that duplicates a

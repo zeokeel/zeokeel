@@ -149,6 +149,9 @@ go test ./...
 - ✅ 设计复核（design-guide）：会话头部三枚等权按钮收敛为⿾更多⿿原生溢出菜单；右侧栏去掉重复「模型」
   tab（6 tabs），模型配置并入概览同一面板（分隔线+紧凑行）；插件页 48 工具由「每工具卡片」改为紧凑行
   （分隔线分组），降低视觉噪音；快捷键页可编辑项保持一行一个控件
+- ✅ P3 会话置顶：pin 标记持久化到 settings `session.<id>.pinned`（不变 DB schema），`ChatSessionInfo.Pinned`；
+  侧栏行菜单「置顶会话/取消置顶」，各组内置顶优先排序 + 「置顶」Badge；设计复核移除冗余「当前」Badge
+  （选中态由 tint + accent 图标承担），标题不再被挤断；截图 `p2-pinned.png`
 - ⬜ 后续阶段见 [docs/PRODUCT-REBUILD-PLAN.md](docs/PRODUCT-REBUILD-PLAN.md)：
   P2 剩余（composer 附件/图片/@ 提及、右侧栏 Files/Terminal/Log 页、会话操作上下文菜单）→
   P3 memory/skills/automation/插件/workspace diff/搜索/fork/export → P4 ACP/热键/导入/更新/诊断

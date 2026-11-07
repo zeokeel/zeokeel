@@ -1940,3 +1940,162 @@ func TestForkConcurrent(t *testing.T) {
 		t.Fatalf("forks = %d, want %d", len(seen), workers)
 	}
 }
+
+// --- P3: session pinning ---------------------------------------------------
+
+// failingSettings implements contracts.SettingsService with a failing Set.
+type failingSettings struct{}
+
+func (failingSettings) Get(key, fallback string) string { return fallback }
+func (failingSettings) Set(key, value string) error {
+	return errors.New("settings write failed")
+}
+func (failingSettings) All() map[string]string { return nil }
+
+// TestSetSessionPinnedPersistsAndNotifies covers the settings key, the read
+// model flag and subscriber notification.
+func TestSetSessionPinnedPersistsAndNotifies(t *testing.T) {
+	settings := newFakeSettings(nil)
+	svc := newTestService(t, Config{}, settings, nil)
+	sessionID, err := svc.NewSession("pin me")
+	if err != nil {
+		t.Fatalf("NewSession: %v", err)
+	}
+	pinner, ok := contracts.ChatService(svc).(contracts.SessionPinner)
+	if !ok {
+		t.Fatal("service does not implement contracts.SessionPinner")
+	}
+	notifications := make(chan string, 4)
+	unsubscribe, err := svc.Subscribe(func(id string) { notifications <- id })
+	if err != nil {
+		t.Fatalf("Subscribe: %v", err)
+	}
+	defer unsubscribe()
+
+	key := contracts.SessionPinnedSettingKey(sessionID)
+	if info := sessionInfoOf(t, svc, sessionID); info.Pinned {
+		t.Fatal("new session is pinned")
+	}
+	if err := pinner.SetSessionPinned(sessionID, true); err != nil {
+		t.Fatalf("SetSessionPinned(true): %v", err)
+	}
+	if got := settings.Get(key, ""); got != "true" {
+		t.Fatalf("settings %q = %q, want true", key, got)
+	}
+	if info := sessionInfoOf(t, svc, sessionID); !info.Pinned {
+		t.Fatal("Sessions().Pinned did not reflect the persisted flag")
+	}
+	select {
+	case notified := <-notifications:
+		if notified != sessionID {
+			t.Fatalf("notification = %q, want %q", notified, sessionID)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("SetSessionPinned did not notify subscribers")
+	}
+
+	if err := pinner.SetSessionPinned(sessionID, false); err != nil {
+		t.Fatalf("SetSessionPinned(false): %v", err)
+	}
+	if got := settings.Get(key, ""); got != "false" {
+		t.Fatalf("settings %q = %q, want false", key, got)
+	}
+	if info := sessionInfoOf(t, svc, sessionID); info.Pinned {
+		t.Fatal("Sessions().Pinned still true after unpin")
+	}
+	select {
+	case <-notifications:
+	case <-time.After(time.Second):
+		t.Fatal("unpin did not notify subscribers")
+	}
+
+	if err := pinner.SetSessionPinned("missing", true); err == nil || !strings.Contains(err.Error(), "unknown") {
+		t.Fatalf("SetSessionPinned(missing) = %v, want a readable unknown-session error", err)
+	}
+}
+
+// TestSessionPinnedWithoutSettingsOrOnFailure covers a missing settings service
+// and a failing settings write: pinning fails readably, listing stays false.
+func TestSessionPinnedWithoutSettingsOrOnFailure(t *testing.T) {
+	noSettings := newService(Config{}, rigtools.NewRegistry(), nil, &fakeLogger{}, newFakeStore(), fakeApprovals{})
+	sessionID, err := noSettings.NewSession("no settings")
+	if err != nil {
+		t.Fatalf("NewSession: %v", err)
+	}
+	if info := sessionInfoOf(t, noSettings, sessionID); info.Pinned {
+		t.Fatal("session without a settings service is pinned")
+	}
+	if err := noSettings.SetSessionPinned(sessionID, true); err == nil {
+		t.Fatal("SetSessionPinned without settings returned nil error")
+	}
+	if info := sessionInfoOf(t, noSettings, sessionID); info.Pinned {
+		t.Fatal("failed pin changed the read model")
+	}
+
+	failing := newTestService(t, Config{}, nil, nil)
+	// Replace the working fake settings with the failing implementation.
+	failing.settings = failingSettings{}
+	failingID, err := failing.NewSession("failing settings")
+	if err != nil {
+		t.Fatalf("NewSession: %v", err)
+	}
+	if err := failing.SetSessionPinned(failingID, true); err == nil || !strings.Contains(err.Error(), "settings write failed") {
+		t.Fatalf("SetSessionPinned with failing settings = %v, want the write error", err)
+	}
+	if info := sessionInfoOf(t, failing, failingID); info.Pinned {
+		t.Fatal("failed settings write changed the read model")
+	}
+}
+
+// TestSessionPinnedSurvivesRestore covers pins persisted in settings across a
+// service rebuild.
+func TestSessionPinnedSurvivesRestore(t *testing.T) {
+	settings := newFakeSettings(nil)
+	store := newFakeStore()
+	first := newService(Config{}, rigtools.NewRegistry(), settings, &fakeLogger{}, store, fakeApprovals{})
+	sessionID, err := first.NewSession("restored pin")
+	if err != nil {
+		t.Fatalf("NewSession: %v", err)
+	}
+	if err := first.SetSessionPinned(sessionID, true); err != nil {
+		t.Fatalf("SetSessionPinned: %v", err)
+	}
+
+	restarted := newService(Config{}, rigtools.NewRegistry(), settings, &fakeLogger{}, store, fakeApprovals{})
+	restarted.restore(context.Background())
+	infos := restarted.Sessions()
+	if len(infos) != 1 || !infos[0].Pinned {
+		t.Fatalf("restored Sessions = %+v, want the session pinned", infos)
+	}
+}
+
+// TestSessionPinnedConcurrent covers concurrent pin/unpin and listing.
+func TestSessionPinnedConcurrent(t *testing.T) {
+	settings := newFakeSettings(nil)
+	svc := newTestService(t, Config{}, settings, nil)
+	sessionID, err := svc.NewSession("concurrent pin")
+	if err != nil {
+		t.Fatalf("NewSession: %v", err)
+	}
+	const workers = 4
+	var waitGroup sync.WaitGroup
+	errs := make(chan error, workers)
+	for index := 0; index < workers; index++ {
+		waitGroup.Add(1)
+		go func(number int) {
+			defer waitGroup.Done()
+			for iteration := 0; iteration < 20; iteration++ {
+				if err := svc.SetSessionPinned(sessionID, (number+iteration)%2 == 0); err != nil {
+					errs <- err
+					return
+				}
+				_ = svc.Sessions()
+			}
+		}(index)
+	}
+	waitGroup.Wait()
+	close(errs)
+	for err := range errs {
+		t.Fatal(err)
+	}
+}

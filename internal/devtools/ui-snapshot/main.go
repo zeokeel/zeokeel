@@ -311,9 +311,27 @@ func main() {
 		a.render(outDir + "/p2-search.png")
 	}
 
-	// Host command palette (Cmd/Ctrl+K).
+	// Clear the sidebar search, then render the host command palette.
+	if rect, ok := a.tester.Find("工作目录"); ok {
+		a.tester.ClickAt(rect.X+rect.W/2, rect.Y+rect.H/2)
+	}
+	a.tester.Key(ui.Cmd, ui.KeyA)
+	a.tester.Key(0, ui.KeyBackspace)
+	a.tester.Frame()
 	a.tester.Key(ui.Cmd, ui.KeyK)
 	a.render(outDir + "/p2-palette.png")
+	a.tester.Key(0, ui.KeyEscape)
+	a.tester.Frame()
+
+	// Pinned session in the sidebar (agent SessionPinner + settings pin flag).
+	if pinner, ok := chat.(contracts.SessionPinner); ok {
+		for _, info := range chat.Sessions() {
+			if info.Title == "工作区会话" {
+				_ = pinner.SetSessionPinned(info.ID, true)
+			}
+		}
+		a.render(outDir + "/p2-pinned.png")
+	}
 }
 
 func boot(baseURL, dataDir string) *app {

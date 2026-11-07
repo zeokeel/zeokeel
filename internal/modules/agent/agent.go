@@ -153,6 +153,7 @@ var (
 	_ contracts.SessionRenamer   = (*service)(nil)
 	_ contracts.AttachmentSender = (*service)(nil)
 	_ contracts.SessionForker    = (*service)(nil)
+	_ contracts.SessionPinner    = (*service)(nil)
 )
 
 // sessionState is the mutable per-session state.
@@ -369,6 +370,45 @@ func (s *service) RenameSession(sessionID, title string) error {
 	return nil
 }
 
+// SetSessionPinned implements contracts.SessionPinner: the pin flag is stored
+// in the settings store (the old shell persisted pins there, not in the session
+// schema), and subscribers are notified so the sidebar can re-sort.
+func (s *service) SetSessionPinned(sessionID string, pinned bool) error {
+	sessionID = strings.TrimSpace(sessionID)
+	s.mu.Lock()
+	_, exists := s.sessions[sessionID]
+	s.mu.Unlock()
+	if !exists {
+		return fmt.Errorf("agent: unknown chat session %q", sessionID)
+	}
+	if s.settings == nil {
+		return errors.New("agent: settings service is unavailable")
+	}
+	value := "false"
+	if pinned {
+		value = "true"
+	}
+	if err := s.settings.Set(contracts.SessionPinnedSettingKey(sessionID), value); err != nil {
+		return fmt.Errorf("agent: persist pinned flag of session %q: %w", sessionID, err)
+	}
+	s.mu.Lock()
+	_, exists = s.sessions[sessionID]
+	s.mu.Unlock()
+	if exists {
+		s.notify(sessionID)
+	}
+	return nil
+}
+
+// sessionPinned reads one session's persisted pin flag ("false" when absent or
+// when no settings service is wired).
+func sessionPinned(settings contracts.SettingsService, sessionID string) bool {
+	if settings == nil {
+		return false
+	}
+	return settings.Get(contracts.SessionPinnedSettingKey(sessionID), "false") == "true"
+}
+
 // --- ChatService: sessions -------------------------------------------------
 
 // NewSession creates an empty session, marks it active and returns its ID.
@@ -557,6 +597,7 @@ func (s *service) Sessions() []contracts.ChatSessionInfo {
 			ID:           state.id,
 			WorkspaceID:  state.workspaceID,
 			Title:        state.title,
+			Pinned:       sessionPinned(s.settings, state.id),
 			MessageCount: len(state.messages),
 			Running:      state.running,
 			UpdatedAt:    state.updatedAt,

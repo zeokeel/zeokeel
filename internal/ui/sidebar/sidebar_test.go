@@ -277,8 +277,8 @@ func activate[T any](t *testing.T, ctx cordis.Context, descriptor *module.Descri
 	return fiber
 }
 
-// TestSidebarRendersSessionsAndActions covers the session list, the active
-// badge, the primary new-chat action and session switching.
+// TestSidebarRendersSessionsAndActions covers the session list, the active row
+// state, the primary new-chat action and session switching.
 func TestSidebarRendersSessionsAndActions(t *testing.T) {
 	chat := &fakeChat{
 		sessions: []contracts.ChatSessionInfo{
@@ -290,7 +290,7 @@ func TestSidebarRendersSessionsAndActions(t *testing.T) {
 	h := newHarness(t, chat, sidebar.Config{})
 	tester := h.tester()
 
-	h.assertTexts(tester, "新对话", "会话", "项目讨论", "另一个会话", "当前", "设置")
+	h.assertTexts(tester, "新对话", "会话", "项目讨论", "另一个会话", "设置")
 	h.assertNoTexts(tester, "还没有会话")
 
 	// The primary action creates a session (which NewSession marks active) and
@@ -318,7 +318,8 @@ func TestSidebarRendersSessionsAndActions(t *testing.T) {
 		t.Fatalf("current screen = %q, want session", current)
 	}
 	tester.Frame()
-	h.assertTexts(tester, "当前") // the badge moved to s2 (same text, rendered once)
+	// The active state is the accent icon + selected-row tint; no badge text.
+	h.assertNoTexts(tester, "当前")
 }
 
 // TestSidebarEmptyStateAndSettingsButton covers the empty session state and the

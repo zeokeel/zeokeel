@@ -286,7 +286,7 @@ func buildSessionList(c *ui.Context, t *design.Tokens, chat contracts.ChatServic
 
 			query := strings.TrimSpace(state.query)
 			allSessions := chat.Sessions()
-			sessions := filterSessions(allSessions, query)
+			sessions := pinnedFirst(filterSessions(allSessions, query))
 			switch {
 			case len(sessions) == 0:
 				empty := "还没有会话"
@@ -583,6 +583,28 @@ func filterSessions(sessions []contracts.ChatSessionInfo, query string) []contra
 	return filtered
 }
 
+// pinnedFirst moves pinned sessions to the front while keeping the existing
+// order inside both partitions. Sessions arrive newest-updated first, so this
+// only reorders pinned vs unpinned; workspace groups and search results inherit
+// the same order.
+func pinnedFirst(sessions []contracts.ChatSessionInfo) []contracts.ChatSessionInfo {
+	if len(sessions) < 2 {
+		return sessions
+	}
+	ordered := make([]contracts.ChatSessionInfo, 0, len(sessions))
+	for _, session := range sessions {
+		if session.Pinned {
+			ordered = append(ordered, session)
+		}
+	}
+	for _, session := range sessions {
+		if !session.Pinned {
+			ordered = append(ordered, session)
+		}
+	}
+	return ordered
+}
+
 // buildSessionRow is one brand session row: a native ButtonBase at the brand row
 // metrics (36 DIP, 8 DIP radius, hover/selected tint) with the accessible label
 // and the native click behavior.
@@ -592,6 +614,7 @@ func buildSessionRow(c *ui.Context, t *design.Tokens, chat contracts.ChatService
 	label := sessionTitle(session)
 	renamer, _ := chat.(contracts.SessionRenamer)
 	forker, _ := chat.(contracts.SessionForker)
+	pinner, _ := chat.(contracts.SessionPinner)
 	ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(design.Space1).
 		Padding(0, 0, 0, indent).Children(func() {
 		row := ui.ButtonBase(c).Grow(1).Height(36).PaddingX(design.Space3).
@@ -610,9 +633,12 @@ func buildSessionRow(c *ui.Context, t *design.Tokens, chat contracts.ChatService
 				ui.Icon(c, icon).Size(16, 16).TextColor(iconColor)
 				design.Apply(ui.Text(c, label), t.Text(design.TypeS)).
 					Grow(1).MaxLines(1).Ellipsis("…")
-				if active {
-					design.Apply(ui.Badge(c, "当前"), t.Badge())
+				if session.Pinned {
+					design.Apply(ui.Badge(c, "置顶"), t.Badge())
 				}
+				// The active session is already carried by the accent icon and
+				// the selected-row tint; a 当前 badge was redundant and stole
+				// width from the title.
 				if session.Running {
 					design.Apply(ui.Badge(c, "运行中"), t.Badge())
 				}
@@ -640,6 +666,17 @@ func buildSessionRow(c *ui.Context, t *design.Tokens, chat contracts.ChatService
 					_ = chat.SetActiveSession(newID)
 					runtime.Post(func() { _ = nav.Push("session") })
 					runtime.Invalidate()
+				}
+			}
+			if pinner != nil {
+				pinLabel := "置顶会话"
+				if session.Pinned {
+					pinLabel = "取消置顶"
+				}
+				if m.Item(pinLabel).Chosen() {
+					if err := pinner.SetSessionPinned(session.ID, !session.Pinned); err == nil {
+						runtime.Invalidate()
+					}
 				}
 			}
 			if m.Item("删除").Chosen() {
