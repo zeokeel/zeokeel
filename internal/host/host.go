@@ -363,6 +363,25 @@ func runDesktop(opts Options) error {
 	defer func() { _ = logger.Close() }()
 	logger.Printf("%s: starting %s, data dir %q, log %q",
 		appName, opts.versionString(), opts.DataDir, logger.Path())
+	mygo.App.SetName(appName)
+	mygo.App.SetVersion(orDefault(opts.AppVersion, "dev"))
+
+	// Single-instance lock, before mygo starts the GUI backend and before Run:
+	// RequestSingleInstanceLock forwards this launch's arguments to the first
+	// instance and returns false here; the second process must exit without a
+	// window. The lock is released by mygo on quit. The handshake needs the GUI
+	// event loop, so it is not unit-tested (singleInstanceEnabled is).
+	singleInstance := singleInstanceSetting(settings)
+	if singleInstance && !mygo.App.RequestSingleInstanceLock() {
+		logger.Printf("%s: another instance is already running; this launch exits", appName)
+		return nil
+	}
+
+	// Best-effort XDG autostart entry sync (only the owning instance manages
+	// the entry): the appearance page writes the setting; this keeps
+	// <configHome>/autostart/zeokeel.desktop in step with it. A failure is
+	// logged by syncAutostart and never blocks startup.
+	_ = syncAutostart(settings, logger)
 
 	// The UI root exists before the assembly loads: UI modules require its
 	// services during activation. It owns the frame and every contribution
@@ -411,8 +430,20 @@ func runDesktop(opts Options) error {
 		})
 	}
 
-	mygo.App.SetName(appName)
-	mygo.App.SetVersion(orDefault(opts.AppVersion, "dev"))
+	if singleInstance {
+		// Later launches hand their command line to this instance; bring the
+		// existing window to the front. The callback runs on the UI thread, and
+		// the window may still be nil during startup, so both are guarded.
+		mygo.App.OnSecondInstance(func(args []string, workingDir string) {
+			logger.Printf("%s: second launch forwarded (args %v, cwd %q)", appName, args, workingDir)
+			if window != nil && !window.IsDestroyed() {
+				window.Show()
+				window.Restore()
+				window.Focus()
+			}
+		})
+	}
+
 	// A quit (Cmd+Q, tray/OS quit, SIGINT/SIGTERM) runs the teardown before
 	// mygo closes the windows, so the assembly is unloaded while the UI thread
 	// and the window still exist.
@@ -548,6 +579,9 @@ func persistPreferences(settings *Settings, uiRoot *uiroot.Root, logger *Logger)
 	if err := settings.Set(settingLanguage, uiRoot.Locale().Language()); err != nil {
 		logger.Printf("%s: persist language: %v", appName, err)
 	}
+	// The appearance page already persists the switches; this keeps the
+	// desktop entry in step with the final settings on the exit path too.
+	_ = syncAutostart(settings, logger)
 }
 
 // buildInfo maps host options to the assembly's build-identity overlay.

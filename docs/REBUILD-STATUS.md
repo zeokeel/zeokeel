@@ -21,6 +21,13 @@
 - 右侧栏「文件」Tab：打开文件夹（mygo 原生 Directory picker）、目录进入/面包屑、文本/Markdown/图片预览、
   刷新与错误状态；E2E 覆盖工作区创建 + 列表 + 预览帧
 
+**TDD-artifact/desktop（2026-11-08）**
+- 工件历史：uiroot artifactService 保留最近 50（ArtifactLister，newest-first 深拷贝、CreatedAt、panic/nil 也记录）；rightpanel Files
+  「产物」section 最近 10 条 + 内嵌 markdown 预览/收起；E2E present→Files 产物→预览
+- 桌面集成：单实例锁（mygo RequestSingleInstanceLock + OnSecondInstance 聚焦/恢复；cfg 默认 on、可关）、XDG autostart
+  （`<config>/autostart/zeokeel.desktop`，Exec 转义/权限/幂等/禁用删除，启动+退出同步）；外观页「桌面集成」两个 Toggle；
+  host 32 / settings 66 测试；截图 p2-artifact-history.png
+
 **TDD-mcp/todo（2026-11-08）**
 - MCP stdio：toolkit 按 `MCPServerConfig` 行分派 stdio（`mcp.Start` Command/Args/Env、握手/tools/resources 注册）与 HTTP；
   command+args 去重、stdio 优先、失败诊断条目；settings MCP 页新增传输 Select（HTTP/stdio）、命令/参数/环境字段、校验与

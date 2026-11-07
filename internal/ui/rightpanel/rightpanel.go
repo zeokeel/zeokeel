@@ -164,6 +164,10 @@ type state struct {
 	teamStatus       string
 	teamErr          string
 
+	// Files pane artifact history: the expanded preview rows (keyed by
+	// artifact id).
+	artifactsOpen map[string]bool
+
 	// Tasks pane state: the cached shared task board (loaded lazily and after
 	// every mutation) and the new-task draft.
 	tasksLoaded bool
@@ -186,12 +190,13 @@ func Module() *module.Descriptor[Config] {
 		config := cfg.resolved()
 		locale, _ := ctx.Get(contracts.KeyLocale)
 		moduleState := &state{
-			open:         make(map[string]bool),
-			ctx:          ctx,
-			locale:       locale,
-			filesPreview: make(map[string]*filePreview),
-			changesOpen:  make(map[string]bool),
-			term:         newTerminalState(),
+			open:          make(map[string]bool),
+			ctx:           ctx,
+			locale:        locale,
+			filesPreview:  make(map[string]*filePreview),
+			changesOpen:   make(map[string]bool),
+			artifactsOpen: make(map[string]bool),
+			term:          newTerminalState(),
 		}
 		// The session log is optional: the inspector still renders without a
 		// durable store (headless tests), it just shows the empty log copy.
@@ -235,7 +240,13 @@ func Module() *module.Descriptor[Config] {
 					if service, ok := ctx.Get(contracts.KeyTaskBoard); ok {
 						board = service
 					}
-					buildPanel(c, design.Of(c), runtime, chat, log, workspace, terminal, team, board, config, moduleState)
+					// The artifact history is the optional lister half of the
+					// host artifact presenter; the Files pane only reads it.
+					var artifacts contracts.ArtifactLister
+					if service, ok := ctx.Get(contracts.KeyArtifactPresenter); ok {
+						artifacts, _ = service.(contracts.ArtifactLister)
+					}
+					buildPanel(c, design.Of(c), runtime, chat, log, workspace, terminal, team, board, artifacts, config, moduleState)
 				},
 			})
 		})

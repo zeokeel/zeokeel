@@ -57,7 +57,7 @@
 | `websearch` | ✅ | `internal/websearch` + toolkit 动态 searcher | 旧 HTTP 协议（POST/Bearer/limit/10s/1MiB）、错误语义；assembly network=true，设置搜索页 endpoint/key 即时生效；无旧代理/多后端选择（旧也只有通用端点） |
 | `winproc` | ❌ | 无 | Windows 控制台隐藏/环境/编码辅助未迁移 |
 | `workspacechanges` | ✅ | workspace WorkspaceDiffer + rightpanel Changes | git status/diff、截断；用户可见等价 |
-| `app`（宿主） | 🟡 | host/assembly | 窗口/设置/headless/ACP + interaction/artifact/plan 服务；缺 autostart、single-instance、窗口几何持久化、通知、网络代理、update install |
+| `app`（宿主） | 🟡 | host/assembly | 窗口/设置/headless/ACP + interaction/artifact/plan 服务 + **单实例锁（OnSecondInstance 聚焦）** + **XDG autostart（外观页开关）**；缺窗口几何显式持久化（mygo StateKey 已隐式）、通知、网络代理、update install |
 
 ## 3. Shell / UI 能力矩阵（34 项）
 
@@ -93,7 +93,7 @@
 | Modes UI（standard/minimal/creator） | ❌ | 无 | 无模式选择/工具子集/persona 切换 |
 | Team UI（成员/任务/steer） | ❌ | 无 | 只有 team 工具内存 roster/任务板，无 Team 屏/真实 subagent |
 | Todo UI（会话 todo 面板） | ✅ | toolkit `KeyTaskBoard`（rig team.TaskManager 共享实例）+ rightpanel「任务」tab | 任务列表/状态排序/添加/开始/完成/删除/刷新/错误与空态，与 `team_task_*` 工具共用同一任务板；缺旧 todo 卡内联进度视图 |
-| Artifacts / Present UI | 🟡 | `internal/ui/interaction` artifact Modal | present 工件 Markdown 预览 + 关闭；无旧 Files-tab 打开/历史/下载动作 |
+| Artifacts / Present UI | 🟡 | `internal/ui/interaction` Modal + uiroot ArtifactLister + rightpanel Files「产物」 | present 预览 + 历史（最近 50，Files 内「产物」列表最近 10、内嵌 markdown 再预览）；缺下载动作/跨重启历史 |
 | 交互式 ask_user UI | ✅ | `internal/ui/interaction` question Modal + uiroot bridge | 选项/自由文本/取消；hosttools ask_user 已走真实桥，E2E 覆盖 |
 | About 页 | ✅ | `internal/ui/about` | 构建信息/架构/bullet，en/zh 动态导航 |
 | Welcome/start tab | ✅ | `internal/ui/home`（welcome 为演示模块） | Home 起始页覆盖旧 start tab 主路径 |

@@ -240,6 +240,22 @@ type appearanceState struct {
 	language  string
 	status    string
 	statusErr bool
+
+	// Desktop integration switches (persisted immediately, applied by the
+	// process host: XDG autostart entry and the single-instance lock).
+	autostart      bool
+	singleInstance bool
+}
+
+// singleInstanceSwitchEnabled reads the stored single-instance setting with the
+// host's default (on); only recognizable off values disable it.
+func singleInstanceSwitchEnabled(raw string) bool {
+	switch strings.ToLower(strings.TrimSpace(raw)) {
+	case "false", "0", "no", "off":
+		return false
+	default:
+		return true
+	}
 }
 
 // buildAppearanceLabels is the resolved copy of the appearance page.
@@ -540,7 +556,12 @@ func Module() *module.Descriptor[Config] {
 		}
 
 		state := newState(chat, store)
-		appearance := &appearanceState{dark: theme.Dark(), language: locale.Language()}
+		appearance := &appearanceState{
+			dark:           theme.Dark(),
+			language:       locale.Language(),
+			autostart:      store.Get(contracts.SettingAutostart, "false") == "true",
+			singleInstance: singleInstanceSwitchEnabled(store.Get(contracts.SettingSingleInstance, "true")),
+		}
 		skills := newSkillsState()
 		update := newUpdateState()
 		importState := newImportState()
@@ -979,6 +1000,26 @@ func buildAppearancePage(c *ui.Context, state *appearanceState, store contracts.
 			design.Apply(ui.Text(c, localized(locale, "界面文案与日期格式随语言切换。", "Interface copy and date formats follow the language.")), t.TextMuted(design.TypeXXS))
 		})
 
+		panel(c, t, func() {
+			sectionTitle(c, t, localized(locale, "桌面集成", "Desktop integration"))
+			autostart := ui.Toggle(c, &state.autostart, localized(locale, "开机自启动", "Launch at login"))
+			if autostart.Changed() {
+				applyDesktopSetting(state, store, contracts.SettingAutostart, fmt.Sprintf("%t", state.autostart), locale)
+			}
+			design.Apply(ui.Text(c, localized(locale,
+				"登录时自动启动 ZeoKeel（Linux XDG autostart）。",
+				"Start ZeoKeel automatically when you log in (Linux XDG autostart).")),
+				t.TextMuted(design.TypeXXS))
+			single := ui.Toggle(c, &state.singleInstance, localized(locale, "单实例运行", "Single instance"))
+			if single.Changed() {
+				applyDesktopSetting(state, store, contracts.SettingSingleInstance, fmt.Sprintf("%t", state.singleInstance), locale)
+			}
+			design.Apply(ui.Text(c, localized(locale,
+				"关闭后允许多开；修改需要重启应用生效。",
+				"When off, multiple instances may run; takes effect after restart.")),
+				t.TextMuted(design.TypeXXS))
+		})
+
 		ui.Row(c).FillWidth().Gap(design.Space2).AlignItems(ui.Center).Children(func() {
 			if brandPrimaryButton(c, t, icons.Globe(), labels.saveLabel).Clicked() {
 				theme.SetDark(state.dark)
@@ -1003,7 +1044,26 @@ func saveAppearance(state *appearanceState, store contracts.SettingsService) err
 	if err := store.Set(contracts.SettingsUIThemeDark, fmt.Sprintf("%t", state.dark)); err != nil {
 		return err
 	}
-	return store.Set(contracts.SettingsUILanguage, state.language)
+	if err := store.Set(contracts.SettingsUILanguage, state.language); err != nil {
+		return err
+	}
+	if err := store.Set(contracts.SettingAutostart, fmt.Sprintf("%t", state.autostart)); err != nil {
+		return err
+	}
+	return store.Set(contracts.SettingSingleInstance, fmt.Sprintf("%t", state.singleInstance))
+}
+
+// applyDesktopSetting persists one desktop-integration switch immediately (the
+// page's other controls also apply immediately) and reports success or the
+// readable store error in the page's status badge.
+func applyDesktopSetting(state *appearanceState, store contracts.SettingsService, key, value string, locale contracts.LocaleService) {
+	if err := store.Set(key, value); err != nil {
+		state.status = localized(locale, "保存失败：", "Save failed: ") + err.Error()
+		state.statusErr = true
+		return
+	}
+	state.status = localized(locale, "桌面集成设置已更新", "Desktop integration updated")
+	state.statusErr = false
 }
 
 // save writes the draft to the settings store. The API key is only written when

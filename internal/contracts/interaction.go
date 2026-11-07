@@ -2,6 +2,7 @@ package contracts
 
 import (
 	"context"
+	"time"
 
 	cordis "github.com/zeokeel/zeokeel-kernel"
 )
@@ -41,6 +42,15 @@ type Artifact struct {
 	// Title and Body are the presented content (Body is Markdown).
 	Title string
 	Body  string
+	// CreatedAt is when the artifact was presented.
+	CreatedAt time.Time
+}
+
+// ArtifactLister is the optional history half of the artifact presenter: the
+// inspector lists previously presented artifacts and can preview them again.
+type ArtifactLister interface {
+	// Artifacts returns the retained history, newest first.
+	Artifacts() []Artifact
 }
 
 // ArtifactPresenter bridges the agent's present tool to the desktop UI: the
@@ -73,4 +83,14 @@ type PlanReviewer interface {
 var (
 	KeyArtifactPresenter = cordis.NewServiceKey[ArtifactPresenter]("zeokeel/artifacts")
 	KeyPlanReviewer      = cordis.NewServiceKey[PlanReviewer]("zeokeel/plan")
+)
+
+// Desktop integration settings applied by the process host.
+const (
+	// SettingAutostart installs/removes the per-user autostart entry (Linux
+	// XDG autostart today).
+	SettingAutostart = "ui.autostart"
+	// SettingSingleInstance keeps one running instance and hands new launches
+	// to it (default true).
+	SettingSingleInstance = "ui.singleInstance"
 )

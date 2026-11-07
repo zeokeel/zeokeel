@@ -32,7 +32,7 @@ const logLimit = 50
 // buildPanel renders the whole inspector for one frame: heading, the native
 // pane tabs and the selected pane. The host owns the panel width; the module
 // fills it.
-func buildPanel(c *ui.Context, t *design.Tokens, runtime contracts.UIRuntime, chat contracts.ChatService, log eventReader, workspace contracts.WorkspaceService, terminal contracts.TerminalService, team contracts.TeamService, board contracts.TaskBoard, cfg Config, st *state) {
+func buildPanel(c *ui.Context, t *design.Tokens, runtime contracts.UIRuntime, chat contracts.ChatService, log eventReader, workspace contracts.WorkspaceService, terminal contracts.TerminalService, team contracts.TeamService, board contracts.TaskBoard, artifacts contracts.ArtifactLister, cfg Config, st *state) {
 	ui.Column(c).FillWidth().Gap(design.Space3).Children(func() {
 		ui.Row(c).FillWidth().Gap(design.Space2).AlignItems(ui.Center).Children(func() {
 			ui.Icon(c, icons.Sliders()).Size(16, 16).TextColor(t.LabelSecondary)
@@ -49,7 +49,7 @@ func buildPanel(c *ui.Context, t *design.Tokens, runtime contracts.UIRuntime, ch
 			case tabLog:
 				buildLogPane(c, t, log, chat, st.locale)
 			case tabFiles:
-				buildFilesPane(c, t, workspace, runtime, st)
+				buildFilesPane(c, t, workspace, artifacts, runtime, st)
 			case tabChanges:
 				buildChangesPane(c, t, workspace, runtime, st)
 			case tabTerminal:

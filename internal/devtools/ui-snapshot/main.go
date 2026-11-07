@@ -246,6 +246,16 @@ func main() {
 		a.tester.Frame()
 	}
 
+	// Artifact history in the Files inspector (preview from the history list).
+	a.ui.SetRightPanelOpen(true)
+	a.tester.Frame()
+	if err := a.tester.Click("文件"); err != nil {
+		fmt.Println("open files tab:", err)
+	}
+	a.render(outDir + "/p2-artifact-history.png")
+	a.ui.SetRightPanelOpen(false)
+	a.tester.Frame()
+
 	// plan_review: plan overlay with approve/cancel.
 	if toolkit, tkErr := a.root.Require(contracts.KeyToolkit); tkErr == nil {
 		go func() {

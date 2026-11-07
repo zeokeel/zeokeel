@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"path/filepath"
+	"sort"
 	"strings"
 
 	"github.com/egoist/mygo"
@@ -49,9 +50,98 @@ type filePreview struct {
 	err       string
 }
 
-// buildFilesPane is the Files tab: workspace header, breadcrumb navigation, the
+// buildFilesPane is the Files tab: the artifact history (when the host
+// presenter exposes it) above the workspace header, breadcrumb navigation, the
 // native directory listing and the read-only preview of the selected file.
 func buildFilesPane(
+	c *ui.Context,
+	t *design.Tokens,
+	workspace contracts.WorkspaceService,
+	artifacts contracts.ArtifactLister,
+	runtime contracts.UIRuntime,
+	st *state,
+) {
+	ui.Column(c).FillWidth().Gap(design.Space3).Children(func() {
+		if artifacts != nil {
+			buildArtifactsSection(c, t, artifacts, runtime, st)
+		}
+		buildFilesWorkspaceSection(c, t, workspace, runtime, st)
+	})
+}
+
+// buildArtifactsSection is the read-only artifact history: the newest ten
+// presented artifacts with an expandable Markdown preview. It never registers a
+// presenter handler: the interaction module owns display.
+func buildArtifactsSection(c *ui.Context, t *design.Tokens, artifacts contracts.ArtifactLister,
+	runtime contracts.UIRuntime, st *state) {
+	history := append([]contracts.Artifact(nil), artifacts.Artifacts()...)
+	sort.SliceStable(history, func(i, j int) bool {
+		return history[i].CreatedAt.After(history[j].CreatedAt)
+	})
+	const maxArtifactRows = 10
+	if len(history) > maxArtifactRows {
+		history = history[:maxArtifactRows]
+	}
+
+	card := design.Apply(ui.Column(c), t.Panel()).Padding(design.Space2).Gap(design.Space1)
+	card.Children(func() {
+		ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(design.Space2).Children(func() {
+			ui.Icon(c, icons.Data()).Size(design.Space3, design.Space3).TextColor(t.LabelTertiary)
+			design.Apply(ui.Text(c, uikit.T(st.locale, "产物", "Artifacts")), t.Font(design.TypeXXS)).
+				FontWeight(600).TextColor(t.LabelSecondary).Grow(1)
+		})
+		if len(history) == 0 {
+			design.Apply(ui.Text(c, uikit.T(st.locale, "还没有产物", "No artifacts yet")),
+				t.TextMuted(design.TypeXXS))
+			return
+		}
+		for index, artifact := range history {
+			artifact := artifact
+			key := strings.TrimSpace(artifact.ID)
+			if key == "" {
+				key = fmt.Sprintf("artifact-%d", index)
+			}
+			open := st.artifactsOpen[key]
+			toggle := func() {
+				st.artifactsOpen[key] = !st.artifactsOpen[key]
+				runtime.Invalidate()
+			}
+			title := firstNonEmpty(artifact.Title, uikit.T(st.locale, "未命名产物", "Untitled artifact"))
+			ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(design.Space2).Children(func() {
+				info := ui.ButtonBase(c).Grow(1).Padding(design.Space1).Radius(design.RadiusSM).Label(title)
+				if info.Hovered() {
+					info.Background(t.BgHover)
+				}
+				info.Children(func() {
+					ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(design.Space2).Children(func() {
+						design.Apply(ui.Text(c, title), t.Font(design.TypeXS)).FontWeight(600).
+							TextColor(t.LabelPrimary).Grow(1).MaxLines(1).Ellipsis("…")
+						design.Apply(ui.Text(c, artifact.CreatedAt.Local().Format("15:04")),
+							t.Font(design.TypeXXXS)).TextColor(t.LabelTertiary).NoWrap()
+					})
+				})
+				if info.Clicked() {
+					toggle()
+				}
+				previewLabel := uikit.T(st.locale, "预览", "Preview")
+				if open {
+					previewLabel = uikit.T(st.locale, "收起", "Hide")
+				}
+				if ui.Button(c, previewLabel).Clicked() {
+					toggle()
+				}
+			})
+			if open {
+				ui.Scroll(c).FillWidth().MaxHeight(design.Space6 * 8).Children(func() {
+					markdown.View(c, artifact.Body, nil)
+				})
+			}
+		}
+	})
+}
+
+// buildFilesWorkspaceSection is the workspace half of the Files tab.
+func buildFilesWorkspaceSection(
 	c *ui.Context,
 	t *design.Tokens,
 	workspace contracts.WorkspaceService,

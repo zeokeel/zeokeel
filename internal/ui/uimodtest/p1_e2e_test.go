@@ -793,6 +793,27 @@ func TestP1ApprovalToolsAndPersistence(t *testing.T) {
 		t.Fatalf("task not completed: %+v", tasks)
 	}
 
+	// artifact history: the presented artifact is listed in Files and can be
+	// previewed again from there.
+	uiRoot.SetRightPanelOpen(true)
+	tester.Frame()
+	if err := tester.Click("文件"); err != nil {
+		t.Fatalf("open files tab: %v; texts = %v", err, tester.Texts())
+	}
+	tester.Frame()
+	if !tester.HasText("产物") || !tester.HasText("检查报告") {
+		t.Fatalf("artifact history missing; texts = %v", tester.Texts())
+	}
+	if err := tester.Click("预览"); err != nil {
+		t.Fatalf("preview artifact: %v; texts = %v", err, tester.Texts())
+	}
+	tester.Frame()
+	if !tester.HasText("全部通过") {
+		t.Fatalf("artifact preview body missing; texts = %v", tester.Texts())
+	}
+	uiRoot.SetRightPanelOpen(false)
+	tester.Frame()
+
 	// --- restart: the session and its messages come back from SQLite ------
 	title := session.Title
 	if err := loader.Close(); err != nil {
