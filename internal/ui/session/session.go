@@ -1,8 +1,15 @@
 // Package session contributes the conversation screen: the main chat surface of
-// ZeoKeel. It is a UI module (kernel Descriptor + host UI services) and renders
-// exclusively with mygo's native controls — Tabs, Scroll, TextArea, Collapsible,
-// Badge, Toolbar/Row, Text/Textf, Divider, buttons and Spacer. It never draws a
-// widget itself.
+// ZeoKeel. It is a UI module (kernel Descriptor + host UI services) rendered
+// with mygo's native controls and the brand design system (internal/design):
+// TabsBase, Scroll, TextArea, Collapsible, Badge, Box, Row/Column, Text, buttons
+// and icons. It never draws a widget (or Canvas) itself.
+//
+// The branded layout follows the retired shell: a title header with the
+// Chat/Trajectory/Memory underline tabs, a centered transcript column with
+// right-aligned raised user bubbles and plain assistant body text (reasoning in
+// a collapsible, tool cards through UIRuntime.RenderTool), a raised composer
+// card with a borderless multiline input and a hint/stop-send toolbar, and the
+// tool timeline on the Trajectory tab.
 //
 // The module reads the chat read model from contracts.ChatService (owned by the
 // agent backend module) and calls its operations on user actions:
@@ -11,7 +18,8 @@
 //   - navigator.Push(session);
 //   - chat tab: messages, streaming text, collapsible reasoning, tool cards via
 //     UIRuntime.RenderTool, errors;
-//   - trajectory/memory tabs: native empty-state placeholders (Phase 1);
+//   - trajectory tab: the session's tool-call timeline; memory stays an empty
+//     pane for Phase 1;
 //   - composer: native TextArea + send button (Send) or stop button (Cancel)
 //     while a run is in flight.
 //
@@ -47,6 +55,9 @@ type Config struct {
 	TabChat             string `json:"tabChat"`
 	TabTrajectory       string `json:"tabTrajectory"`
 	TabMemory           string `json:"tabMemory"`
+	// ComposerHint is the muted toolbar hint at the bottom-left of the composer
+	// card ("Enter sends, Shift+Enter breaks the line" by default).
+	ComposerHint string `json:"composerHint"`
 }
 
 // copy resolves the configured strings with their defaults.
@@ -60,6 +71,7 @@ func (c Config) resolved() Config {
 		TabChat:             firstNonEmpty(c.TabChat, "对话"),
 		TabTrajectory:       firstNonEmpty(c.TabTrajectory, "轨迹"),
 		TabMemory:           firstNonEmpty(c.TabMemory, "记忆"),
+		ComposerHint:        firstNonEmpty(c.ComposerHint, "Enter 发送 · Shift+Enter 换行"),
 	}
 }
 

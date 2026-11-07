@@ -186,6 +186,9 @@ if _, err := ctx.Effect(func() cordis.Effect {
   `internal/ui/toolcards` 真实工具卡、`ui/session` 轨迹时间线；desktop 15 实例 / headless 6 实例
 - ✅ P2 第一批：`ui/home` 真实最近会话 + 新对话；`ui/settings` 外观页（主题/语言，native Toggle/Select，
   持久化 host 键）与模型快速预设
+- ✅ 品牌设计体系：`internal/brand`（palette/theme/mark）、`internal/design`（tokens/字阶/间距/组件样式、
+  TypeRole、motion）、`internal/icons`（SVG 图标）；uiroot chrome 使用品牌侧栏/brand row/顶栏，
+  `ui/{home,session,sidebar,settings,approval,toolcards}` 全部品牌化（native 控件 + design 样式）
 - ✅ 示范模块：`appinfo`（服务）、`ui/home`（screen+command+槽位组合）、`ui/about`
   （settings page + settings.header）、`ui/welcome`（topbar.center + home.hero + command）、
   `ui/toolcards`（ToolRenderer）、`uikit`（共享控件封装）

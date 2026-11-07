@@ -38,6 +38,10 @@ go test ./...
 
 ## 状态（2026-11-07 · P1 持久化/审批/工具卡已可运行）
 
+- ✅ **品牌设计体系已从 old 移植**：`internal/brand`（品牌色板/主题/logo 资源）、`internal/design`
+  （Design Tokens、字阶、间距、组件样式）、`internal/icons`（Lucide SVG 图标集）；宿主 chrome 使用 280px
+  品牌侧栏 + 64px brand row（logo+wordmark）+ 52px 顶栏；全部 UI 模块（对话/Home/侧栏/设置/审批/工具卡）
+  已按老 UI 设计重做（mygo 原生控件 + design 样式，无自绘）
 - ✅ 编译期装配：`internal/assembly`（显式 registry + 内嵌 `assemblies/desktop.json`、`headless.json`
   + kernel 预检 + required 失败整树回滚 + UI 子组级联卸载）
 - ✅ UI 总入口 `internal/uiroot`：帧根、布局区域、五张贡献点注册表、Post 队列、导航、设置面、

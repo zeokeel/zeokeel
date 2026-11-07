@@ -397,7 +397,7 @@ func TestEmptyStateAndNewConversation(t *testing.T) {
 	h := newHarness(t, chat)
 	tester := h.tester()
 
-	h.assertTexts(tester, "对话", "还没有消息，开始一段新对话吧。", "新对话")
+	h.assertTexts(tester, "对话", "开始新对话", "还没有消息，开始一段新对话吧。", "新对话")
 	if len(chat.sends()) != 0 {
 		t.Fatalf("send calls = %v, want none", chat.sends())
 	}
@@ -409,8 +409,10 @@ func TestEmptyStateAndNewConversation(t *testing.T) {
 	if active := chat.ActiveSession(); active == "" {
 		t.Fatal("active session is still empty after 新对话")
 	}
-	// A fresh stack frames the new active session: same empty text plus composer.
-	h.assertTexts(tester, "还没有消息，开始一段新对话吧。", "发送", "输入消息…")
+	// A fresh frame of the new active session: the branded hero plus the
+	// composer card with its hint and send control.
+	h.assertTexts(tester, "开始新对话", "还没有消息，开始一段新对话吧。", "发送",
+		"Enter 发送 · Shift+Enter 换行")
 }
 
 func TestRendersMessagesAndRunningBadges(t *testing.T) {
@@ -439,16 +441,16 @@ func TestRendersMessagesAndRunningBadges(t *testing.T) {
 	tester := h.tester()
 
 	h.assertTexts(tester,
-		"修复登录",       // session title in the screen header
+		"修复登录",       // session title in the brand header
 		"运行中",        // running badge
-		"你",          // user badge
-		"帮我修复登录",     // user text
+		"帮我修复登录",     // user bubble text
 		"好的，正在检查。",   // assistant text
 		"思考",         // collapsible reasoning label
 		"生成中",        // streaming badge
 		"read_file",  // tool fallback badge
 		"auth.go",    // tool summary
 		"上一次运行失败：超时", // session error
+		"正在生成回复…",    // running composer hint
 		"停止",         // stop button while running
 	)
 	h.assertNoTexts(tester, "内部推理：先看认证模块") // collapsed by default
@@ -555,7 +557,7 @@ func TestComposerSendCallsService(t *testing.T) {
 	chat.addSession(contracts.ChatSession{ID: "sess-1", Title: "发送测试"}, true)
 	h := newHarness(t, chat)
 	tester := h.tester()
-	h.assertTexts(tester, "发送", "输入消息…")
+	h.assertTexts(tester, "发送", "Enter 发送 · Shift+Enter 换行")
 
 	// Focus the native TextArea (it is directly above the send button), type
 	// and send. Text inputs paint their text, so the assertion is the service
@@ -597,9 +599,10 @@ func TestCustomConfigLabels(t *testing.T) {
 		TabChat:             "Chat",
 		TabTrajectory:       "Trajectory",
 		TabMemory:           "Memory",
+		ComposerHint:        "Press Enter to send",
 	})
 	tester := h.tester()
-	h.assertTexts(tester, "Chat", "Trajectory", "Memory", "Type a message", "Send")
+	h.assertTexts(tester, "Chat", "Trajectory", "Memory", "Type a message", "Press Enter to send", "Send")
 }
 
 func newHarnessConfig(t *testing.T, chat *fakeChat, config session.Config) *harness {
@@ -663,4 +666,78 @@ func TestTrajectoryTimelineShowsToolCalls(t *testing.T) {
 	tester.Key(0, ui.KeyHome)
 	tester.Frame()
 	h.assertTexts(tester, "运行一下", "bash")
+}
+
+func TestBrandedLayoutGeometryAndHints(t *testing.T) {
+	chat := newFakeChat()
+	chat.addSession(contracts.ChatSession{
+		ID:    "sess-1",
+		Title: "品牌会话",
+		Messages: []contracts.ChatMessage{
+			message("m1", contracts.ChatRoleUser, "右边的问题"),
+			{ID: "m2", Role: contracts.ChatRoleAssistant, Text: "左边的回答", CreatedAt: time.Unix(1700000001, 0)},
+		},
+	}, true)
+	h := newHarness(t, chat)
+	tester := h.tester()
+	h.assertTexts(tester, "品牌会话", "对话", "轨迹", "记忆",
+		"Enter 发送 · Shift+Enter 换行", "发送")
+
+	titleRect, ok := tester.Find("品牌会话")
+	if !ok || titleRect.H <= 0 || titleRect.W <= 0 {
+		t.Fatalf("brand header title missing or empty: %+v ok=%v", titleRect, ok)
+	}
+	if titleRect.Y > 140 {
+		t.Fatalf("header title at y=%.1f, want the page header near the top", titleRect.Y)
+	}
+
+	hintRect, ok := tester.Find("Enter 发送 · Shift+Enter 换行")
+	if !ok {
+		t.Fatalf("composer hint missing; texts = %v", tester.Texts())
+	}
+	if hintRect.Y < 600 {
+		t.Fatalf("composer hint at y=%.1f, want the bottom composer area", hintRect.Y)
+	}
+
+	userRect, ok := tester.Find("右边的问题")
+	if !ok {
+		t.Fatalf("user message missing; texts = %v", tester.Texts())
+	}
+	assistantRect, ok := tester.Find("左边的回答")
+	if !ok {
+		t.Fatalf("assistant message missing; texts = %v", tester.Texts())
+	}
+	if userRect.X+userRect.W/2 <= assistantRect.X+assistantRect.W/2 {
+		t.Fatalf("user bubble (x=%.1f w=%.1f) is not right of the assistant text (x=%.1f w=%.1f)",
+			userRect.X, userRect.W, assistantRect.X, assistantRect.W)
+	}
+}
+
+func TestComposerEnterSends(t *testing.T) {
+	chat := newFakeChat()
+	chat.addSession(contracts.ChatSession{ID: "sess-1", Title: "回车测试"}, true)
+	h := newHarness(t, chat)
+	tester := h.tester()
+	h.assertTexts(tester, "Enter 发送 · Shift+Enter 换行", "发送")
+
+	sendRect, ok := tester.Find("发送")
+	if !ok {
+		t.Fatalf("send control missing; texts = %v", tester.Texts())
+	}
+	tester.ClickAt(sendRect.X-120, sendRect.Y-50)
+	tester.Frame()
+	if !tester.Focused("输入消息…") {
+		t.Fatalf("TextArea did not take focus; texts = %v", tester.Texts())
+	}
+	tester.Type("回车发送的消息")
+	tester.Frame()
+	tester.Key(0, ui.KeyEnter)
+	tester.Frame()
+
+	sends := chat.sends()
+	if len(sends) != 1 || sends[0].prompt != "回车发送的消息" {
+		t.Fatalf("Enter send calls = %v, want one with the draft", sends)
+	}
+	// The fake marks the session running and emits; the composer shows Stop.
+	h.assertTexts(tester, "回车发送的消息", "正在生成回复…", "停止")
 }

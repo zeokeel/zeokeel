@@ -144,12 +144,11 @@ func TestProductsAndEntries(t *testing.T) {
 			t.Fatalf("desktop root %d = %q, want %q", index, root.Module, wantRoots[index])
 		}
 	}
-	if len(desktop[6].Children) != 8 {
-		t.Fatalf("UI group children = %d, want 8 UI modules",
-			len(desktop[6].Children))
+	if len(desktop[6].Children) != 7 {
+		t.Fatalf("UI group children = %d, want 7 UI modules", len(desktop[6].Children))
 	}
 	wantChildren := []string{
-		"zeokeel-ui/home", "zeokeel-ui/welcome", "zeokeel-ui/toolcards", "zeokeel-ui/about",
+		"zeokeel-ui/home", "zeokeel-ui/toolcards", "zeokeel-ui/about",
 		"zeokeel-ui/sidebar", "zeokeel-ui/session", "zeokeel-ui/settings", "zeokeel-ui/approval",
 	}
 	for index, child := range desktop[6].Children {
@@ -232,12 +231,12 @@ func TestDesktopAssemblyLoadsAndUnwinds(t *testing.T) {
 	// approvals provider, the agent consumer and the UI modules settle in
 	// dependency order.
 	instances := loader.Instances()
-	if len(instances) != 15 {
-		t.Fatalf("desktop instances = %d, want 15", len(instances))
+	if len(instances) != 14 {
+		t.Fatalf("desktop instances = %d, want 14", len(instances))
 	}
 	wantIDs := []string{
 		"appinfo", "store", "approvals", "toolkit", "hosttools", "agent", "ui",
-		"home", "welcome", "toolcards", "about", "sidebar", "session", "settings", "approval",
+		"home", "toolcards", "about", "sidebar", "session", "settings", "approval",
 	}
 	gotIDs := make([]string, len(instances))
 	for index, instance := range instances {
@@ -269,9 +268,11 @@ func TestDesktopAssemblyLoadsAndUnwinds(t *testing.T) {
 	// the settings surface (ui/about) without the host knowing about them.
 	slots := uiRoot.Runtime().Slots()
 	for _, want := range []string{
-		contracts.SlotTopBarCenter,
-		contracts.SlotHomeHero,
+		contracts.SlotSidebarPrimary,
+		contracts.SlotSidebarNav,
+		contracts.SlotSidebarFooter,
 		contracts.SlotSettingsHeader,
+		contracts.SlotOverlayDialogs,
 	} {
 		if !slices.Contains(slots, want) {
 			t.Fatalf("registered slots = %v, want it to contain %q", slots, want)

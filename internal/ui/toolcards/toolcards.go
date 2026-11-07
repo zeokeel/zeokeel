@@ -28,6 +28,8 @@ import (
 	"github.com/zeokeel/zeokeel-kernel/module"
 
 	"github.com/zeokeel/zeokeel/internal/contracts"
+	"github.com/zeokeel/zeokeel/internal/design"
+	"github.com/zeokeel/zeokeel/internal/icons"
 )
 
 // Renderer orders. The demo card keeps its historical order; real cards follow.
@@ -158,54 +160,107 @@ func Module() *module.Descriptor[Config] {
 		WithName("ZeoKeel tool cards")
 }
 
-// demoBuild is the original demo card, kept byte-compatible with the existing
-// host integration test (title, raw status badge, summary, call ID).
+// demoBuild is the demo card used by the host's capability probe. It keeps its
+// historical content (title, raw status badge, summary, call ID) but uses the
+// same brand panel as the real tool cards so the Home demo looks native.
 func demoBuild(title string) func(c *ui.Context, call contracts.ToolCall) {
 	return func(c *ui.Context, call contracts.ToolCall) {
-		theme := c.Theme()
-		ui.Column(c).FillWidth().Gap(6).Padding(10).Radius(8).
-			Background(theme.Surface).Children(func() {
-			ui.Row(c).FillWidth().Gap(8).AlignItems(ui.Center).Children(func() {
-				ui.Text(c, title+": "+call.Name).Bold().FontSize(13)
-				ui.Badge(c, call.Status)
-				ui.Text(c, call.ID).FontSize(11).TextColor(theme.TextMuted)
+		t := design.Of(c)
+		card := ui.Column(c).FillWidth().Gap(design.Space2)
+		design.Apply(card, t.Panel()).Padding(design.Space3).Children(func() {
+			ui.Row(c).FillWidth().Gap(design.Space2).AlignItems(ui.Center).Children(func() {
+				ui.Icon(c, icons.Message()).Size(design.Space4, design.Space4).
+					TextColor(t.LabelSecondary)
+				design.Apply(ui.Text(c, title+": "+call.Name), t.Font(design.TypeS)).FontWeight(600).
+					TextColor(t.LabelPrimary)
+				design.Apply(ui.Badge(c, call.Status), t.Badge())
+				if call.ID != "" {
+					design.Apply(ui.Text(c, call.ID), t.Font(design.TypeXXXS)).
+						TextColor(t.LabelTertiary)
+				}
 			})
 			if call.Summary != "" {
-				ui.Text(c, call.Summary).FontSize(13)
+				design.Apply(ui.Text(c, call.Summary), t.TextMuted(design.TypeXS))
 			}
 		})
 	}
 }
 
-// realBuild builds one real tool card: status badge + name + call ID + a native
-// collapsible summary. The same builder serves every registered tool name.
+// realBuild builds one real tool card: a brand panel with a category icon, the
+// tool name, a status badge, the call ID, the category hint and a native
+// collapsible summary. The same builder serves all real tool names.
 func realBuild(state *rendererState) func(c *ui.Context, call contracts.ToolCall) {
 	return func(c *ui.Context, call contracts.ToolCall) {
-		theme := c.Theme()
+		t := design.Of(c)
 		status := statusLabel(call.Status)
-		color := statusColor(theme, call.Status)
-		ui.Column(c).FillWidth().Gap(6).Padding(10).Radius(8).
-			Background(theme.Surface).Children(func() {
-			ui.Row(c).FillWidth().Gap(8).AlignItems(ui.Center).Children(func() {
-				ui.Badge(c, status).Background(color.Alpha(0.15)).TextColor(color)
-				ui.Text(c, call.Name).Bold().FontSize(13)
-				if call.ID != "" {
-					ui.Text(c, call.ID).FontSize(11).TextColor(theme.TextMuted)
-				}
+		color := toolStatusColor(t, call.Status)
+		card := ui.Column(c).FillWidth().Gap(design.Space2)
+		design.Apply(card, t.Panel()).Padding(design.Space3).Children(func() {
+			ui.Row(c).FillWidth().Gap(design.Space2).AlignItems(ui.Center).Children(func() {
+				ui.Icon(c, toolIcon(call.Name)).Size(design.Space4, design.Space4).
+					TextColor(t.LabelSecondary)
+				design.Apply(ui.Text(c, call.Name), t.Font(design.TypeS)).FontWeight(600).
+					TextColor(t.LabelPrimary)
+				design.Apply(ui.Badge(c, status), t.Badge(), func(el ui.Element) ui.Element {
+					return el.Background(color.Alpha(0.15)).TextColor(color)
+				})
 				ui.Spacer(c).Grow(1)
 				if category := toolCategory(call.Name); category != "" {
-					ui.Text(c, category).FontSize(11).TextColor(theme.TextMuted)
+					design.Apply(ui.Text(c, category), t.Font(design.TypeXXXS)).
+						TextColor(t.LabelTertiary)
 				}
 			})
+			if call.ID != "" {
+				design.Apply(ui.Text(c, call.ID), t.Font(design.TypeXXXS)).
+					TextColor(t.LabelTertiary)
+			}
 			if summary := strings.TrimSpace(call.Summary); summary != "" {
 				key := call.ID + "\x00" + call.Name
 				open := state.load(key)
-				ui.Collapsible(c, "摘要", &open, func() {
-					ui.Text(c, truncateSummary(summary)).FontSize(12).TextColor(theme.TextMuted)
+				collapsible := ui.Collapsible(c, "摘要", &open, func() {
+					design.Apply(ui.Text(c, truncateSummary(summary)), t.TextMuted(design.TypeXS))
 				})
+				design.Apply(collapsible, t.Font(design.TypeXS))
 				state.store(key, open)
 			}
 		})
+	}
+}
+
+// toolIcon maps a tool name to its brand glyph: shell/process tools use the
+// terminal, file and web reads the globe, searches the magnifier, task tools
+// the data glyph and everything else the message glyph.
+func toolIcon(name string) *ui.SVG {
+	switch name {
+	case "bash", "job_start", "job_output", "terminal_send", "terminal_read":
+		return icons.Terminal()
+	case "read_file", "web_fetch", "web_search", "read_image":
+		return icons.Globe()
+	case "grep", "glob":
+		return icons.Search()
+	case "todo", "team_task_create", "team_task_update":
+		return icons.Data()
+	case "list_dir", "write_file", "edit_file", "str_replace_editor",
+		"enter_worktree", "list_worktrees":
+		return icons.Folder()
+	case "subagent", "workflow", "ralph", "skill":
+		return icons.Sparkles()
+	default:
+		return icons.Message()
+	}
+}
+
+// toolStatusColor maps a tool status to a brand semantic color.
+func toolStatusColor(t *design.Tokens, status string) ui.Color {
+	switch normalizeStatus(status) {
+	case "running":
+		return t.Warning
+	case "ok":
+		return t.Success
+	case "error":
+		return t.Danger
+	default:
+		return t.LabelTertiary
 	}
 }
 
@@ -223,20 +278,6 @@ func statusLabel(status string) string {
 			return trimmed
 		}
 		return "未知"
-	}
-}
-
-// statusColor maps a tool status to its theme color.
-func statusColor(theme *ui.Theme, status string) ui.Color {
-	switch normalizeStatus(status) {
-	case "running":
-		return theme.Warning
-	case "ok":
-		return theme.Success
-	case "error":
-		return theme.Danger
-	default:
-		return theme.TextMuted
 	}
 }
 

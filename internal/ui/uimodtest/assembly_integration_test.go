@@ -63,7 +63,7 @@ func TestDesktopProductAssemblyShowsAllDemoModules(t *testing.T) {
 	defer func() { _ = loader.Close() }()
 
 	// Every demo module is Active in the real desktop product.
-	for _, entryID := range []string{"appinfo", "ui", "home", "welcome", "toolcards", "about"} {
+	for _, entryID := range []string{"appinfo", "ui", "home", "toolcards", "about", "sidebar", "session", "settings", "approval"} {
 		instance, ok := loader.Instance(entryID)
 		if !ok {
 			t.Fatalf("desktop assembly has no instance %q; instances = %v", entryID, instanceIDs(loader))
@@ -74,13 +74,10 @@ func TestDesktopProductAssemblyShowsAllDemoModules(t *testing.T) {
 	}
 
 	tester := ui.NewTester(uiRoot.View, 1200, 800)
-	// home screen + welcome (topbar.center + home.hero) + toolcards demo card.
-	// None of these need a host or home edit: they are assembly entries.
+	// Home screen + toolcards demo card + the demo sidebar/session modules.
 	for _, want := range []string{
 		"首页",
-		"via ui/welcome",
-		"欢迎使用 ZeoKeel",
-		"复制版本",
+		"新对话",
 		"工具调用: demo",
 		"示例工具调用：由 ui/toolcards 模块渲染",
 	} {
@@ -106,7 +103,7 @@ func TestDesktopProductAssemblyShowsAllDemoModules(t *testing.T) {
 		t.Fatalf("loader.Close: %v", err)
 	}
 	tester.Frame()
-	if tester.HasText("via ui/welcome") || tester.HasText("工具调用: demo") {
+	if tester.HasText("工具调用: demo") {
 		t.Fatalf("module contributions survived loader.Close; texts = %v", tester.Texts())
 	}
 }

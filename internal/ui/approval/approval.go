@@ -25,6 +25,8 @@ import (
 	"github.com/zeokeel/zeokeel-kernel/module"
 
 	"github.com/zeokeel/zeokeel/internal/contracts"
+	"github.com/zeokeel/zeokeel/internal/design"
+	"github.com/zeokeel/zeokeel/internal/icons"
 )
 
 // ModuleID is the compile-time module identity.
@@ -172,38 +174,80 @@ func buildDialog(c *ui.Context, runtime contracts.UIRuntime, approvals contracts
 	}
 }
 
-// requestPanel is the Modal body: title, tool, summary, arguments and the
-// three decision buttons. All controls are mygo natives.
+// requestPanel is the Modal body: a brand title row with an approval icon, the
+// tool badge, the summary, a monospaced arguments block and the three decision
+// buttons. All controls are mygo natives styled with internal/design tokens.
 func requestPanel(c *ui.Context, runtime contracts.UIRuntime, approvals contracts.Approvals, cfg Config, st *state, request contracts.ApprovalRequest) {
-	ui.Column(c).Gap(10).Children(func() {
-		ui.Text(c, cfg.Title).Bold().FontSize(16)
-		ui.Row(c).AlignItems(ui.Center).Gap(8).Children(func() {
-			ui.Text(c, cfg.ToolLabel).FontSize(12).TextColor(c.Theme().TextMuted)
-			ui.Badge(c, request.Tool)
+	t := design.Of(c)
+	// The native Modal sizes its panel around this content; the brand spacing
+	// keeps the dialog on the same 4 DIP grid as the settings pages.
+	design.Apply(ui.Column(c).Width(560).Gap(design.Space4), func(el ui.Element) ui.Element {
+		// The dialog body keeps the brand's Space6 side margin inside the
+		// native Modal panel, so the content and its buttons breathe.
+		return el.PaddingX(design.Space6).PaddingY(design.Space2)
+	}).Children(func() {
+		ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(design.Space2).Children(func() {
+			ui.Icon(c, approvalIcon(request.Tool)).Size(design.Space5, design.Space5).
+				TextColor(t.Accent)
+			design.Apply(ui.Text(c, cfg.Title), t.Font(design.TypeL)).FontWeight(600).
+				TextColor(t.LabelPrimary)
+			ui.Spacer(c).Grow(1)
+			design.Apply(ui.Text(c, request.Tool), t.Font(design.TypeXS)).TextColor(t.LabelSecondary)
+		})
+		ui.Row(c).AlignItems(ui.Center).Gap(design.Space2).Children(func() {
+			design.Apply(ui.Text(c, cfg.ToolLabel), t.TextMuted(design.TypeXS))
+			design.Apply(ui.Badge(c, request.Tool), t.Badge())
 		})
 		if summary := strings.TrimSpace(request.Summary); summary != "" {
-			ui.Text(c, summary).FontSize(13)
+			design.Apply(ui.Text(c, summary), t.Font(design.TypeBody)).TextColor(t.LabelPrimary)
 		}
 		if arguments := strings.TrimSpace(request.Arguments); arguments != "" {
 			ui.Divider(c)
-			ui.Text(c, cfg.ArgumentsLabel).FontSize(12).TextColor(c.Theme().TextMuted)
-			ui.Scroll(c).Height(120).Children(func() {
-				ui.Text(c, truncate(arguments, maxArgumentsRunes)).FontSize(12)
+			design.Apply(ui.Text(c, cfg.ArgumentsLabel), t.TextMuted(design.TypeXS))
+			scroll := ui.Scroll(c).Height(140).FillWidth()
+			design.Apply(scroll, func(el ui.Element) ui.Element {
+				return el.Background(t.BgBase).Border(1, t.BorderL2).
+					Radius(design.RadiusSM).Padding(design.Space2)
+			}).Children(func() {
+				design.Apply(ui.Text(c, truncate(arguments, maxArgumentsRunes)),
+					t.TextMuted(design.TypeXS), t.MonoFamily())
 			})
 		}
 		ui.Divider(c)
-		ui.Row(c).Justify(ui.End).AlignItems(ui.Center).Gap(8).Children(func() {
-			if ui.PrimaryButton(c, cfg.AllowLabel).Clicked() {
+		ui.Row(c).FillWidth().Justify(ui.End).AlignItems(ui.Center).Gap(design.Space2).Children(func() {
+			if design.Apply(ui.PrimaryButton(c, cfg.AllowLabel), t.PrimaryButton()).Clicked() {
 				resolve(runtime, approvals, st, contracts.ApprovalAllow)
 			}
-			if ui.Button(c, cfg.AllowAlwaysLabel).Clicked() {
+			if design.Apply(ui.Button(c, cfg.AllowAlwaysLabel), secondaryButtonStyle(t)).Clicked() {
 				resolve(runtime, approvals, st, contracts.ApprovalAllowAlways)
 			}
-			if ui.Button(c, cfg.DenyLabel).Clicked() {
+			deny := design.Apply(ui.Button(c, cfg.DenyLabel), secondaryButtonStyle(t))
+			deny.TextColor(t.DangerText)
+			if deny.Clicked() {
 				resolve(runtime, approvals, st, contracts.ApprovalDeny)
 			}
 		})
 	})
+}
+
+// approvalIcon picks the header glyph for the tool being approved: destructive
+// shell/file tools get the alert triangle, everything else the shield.
+func approvalIcon(tool string) *ui.SVG {
+	switch strings.ToLower(strings.TrimSpace(tool)) {
+	case "bash", "write_file", "edit_file", "str_replace_editor",
+		"terminal_send", "job_start", "enter_worktree":
+		return icons.AlertTriangle()
+	default:
+		return icons.Shield()
+	}
+}
+
+// secondaryButtonStyle is the brand's secondary dialog button.
+func secondaryButtonStyle(t *design.Tokens) design.Style {
+	return func(el ui.Element) ui.Element {
+		return el.Height(36).PaddingX(design.Space3).Radius(design.RadiusMD).
+			Background(t.BgRaised).Border(1, t.BorderL2).TextColor(t.LabelPrimary)
+	}
 }
 
 // resolve answers the displayed request once and closes the dialog. The

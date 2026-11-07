@@ -46,9 +46,9 @@ func TestReservedSlotsAppearInHostRegions(t *testing.T) {
 	tt.Frame()
 
 	// Sidebar region: primary actions, screens, nav slot, tree, footer.
-	requireTextBefore(t, tt, "sidebar-primary", "界面", "首页", "sidebar-nav-a", "sidebar-nav-b", "sidebar-tree", "sidebar-footer")
-	// Top bar region: brand, product name, center/actions slots, settings entry.
-	requireTextBefore(t, tt, "brand-mark", "ZeoKeelTest", "topbar-center", "topbar-actions", "设置")
+	requireTextBefore(t, tt, "ZeoKeelTest", "sidebar-primary", "界面", "首页", "sidebar-nav-a", "sidebar-nav-b", "sidebar-tree", "sidebar-footer")
+	// Top bar region: brand contributions, center/actions slots, settings entry.
+	requireTextBefore(t, tt, "brand-mark", "topbar-center", "topbar-actions", "设置")
 	// Screen region: header, actions, body, the module's trajectory bar, footer.
 	requireTextBefore(t, tt, "screen-header", "screen-actions", "screen-body", "traj-bar", "screen-footer")
 	// Overlay region is painted after the window content.
@@ -72,8 +72,8 @@ func TestReservedSlotsAppearInHostRegions(t *testing.T) {
 		if !ok {
 			t.Fatalf("frame does not show sidebar text %q", text)
 		}
-		if rect.X+rect.W > 220 {
-			t.Fatalf("%q is not inside the 220 DIP sidebar: x=%v w=%v", text, rect.X, rect.W)
+		if rect.X+rect.W > 280 {
+			t.Fatalf("%q is not inside the 280 DIP sidebar: x=%v w=%v", text, rect.X, rect.W)
 		}
 	}
 	for _, text := range []string{"brand-mark", "screen-header", "screen-body"} {
@@ -81,7 +81,7 @@ func TestReservedSlotsAppearInHostRegions(t *testing.T) {
 		if !ok {
 			t.Fatalf("frame does not show screen-region text %q", text)
 		}
-		if rect.X < 220 {
+		if rect.X < 280 {
 			t.Fatalf("%q is not in the content column right of the sidebar: x=%v", text, rect.X)
 		}
 	}

@@ -8,6 +8,7 @@ import (
 
 	"github.com/egoist/mygo/ui"
 
+	"github.com/zeokeel/zeokeel/internal/brand"
 	"github.com/zeokeel/zeokeel/internal/contracts"
 )
 
@@ -48,9 +49,10 @@ func TestThemeServiceDrivesFrameTheme(t *testing.T) {
 		t.Fatalf("frame theme = {accent %v, background %v, surface %v}, want the host light theme",
 			got.Accent, got.Background, got.Surface)
 	}
-	// The window paints the light sidebar (surface) and content (background).
-	requirePixelColor(t, tt, 5, 5, light.Surface)
-	requirePixelColor(t, tt, 600, 300, light.Background)
+	// The window paints the brand light sidebar and content backgrounds.
+	lightPalette := brand.LightPalette()
+	requirePixelColor(t, tt, 5, 5, lightPalette.Sidebar)
+	requirePixelColor(t, tt, 600, 300, lightPalette.Background)
 
 	// Dark theme: state, frame theme and painted pixels all follow.
 	r.Theme().SetDark(true)
@@ -71,8 +73,9 @@ func TestThemeServiceDrivesFrameTheme(t *testing.T) {
 		t.Fatalf("frame theme = {accent %v, background %v, surface %v}, want the host dark theme",
 			got.Accent, got.Background, got.Surface)
 	}
-	requirePixelColor(t, tt, 5, 5, dark.Surface)
-	requirePixelColor(t, tt, 600, 300, dark.Background)
+	darkPalette := brand.DarkPalette()
+	requirePixelColor(t, tt, 5, 5, darkPalette.Sidebar)
+	requirePixelColor(t, tt, 600, 300, darkPalette.Background)
 	requireHasText(t, tt, "body-home") // the frame still builds cleanly
 
 	// Toggle returns the new state and flips the rendered frame back.

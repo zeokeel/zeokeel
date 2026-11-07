@@ -1,3 +1,7 @@
+> **UI 设计体系落地（2026-11-07）**：old 的 `internal/{design,brand,icons}` 已移植进新工程（原样，
+> 仅改 import 路径），宿主 chrome 与全部 UI 模块按老 UI 的设计/布局重做，截图更新在
+> `docs/screenshots/`。这是对"UI 完全不对"的修复：不是自创样式，而是复用 old 的设计系统。
+>
 > **P2 第一批落地（2026-11-07）**：Home 真实最近会话/新对话入口、外观设置页（深色模式+界面语言，
 > 持久化到 `ui.theme.dark`/`ui.language`）、模型快速预设；composer slash/@/附件与图片留待下一批。
 >
