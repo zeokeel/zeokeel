@@ -24,6 +24,17 @@ type skillsState struct {
 	bodies  map[string]string
 	bodyErr map[string]string
 	open    map[string]bool
+
+	// Editor half (skills_edit.go): the create modal draft/error, the success
+	// badge and the delete confirmation.
+	creating         bool
+	draftName        string
+	draftDescription string
+	draftBody        string
+	editStatus       string
+	editErr          string
+	confirmDelete    bool
+	pendingDelete    string
 }
 
 func newSkillsState() *skillsState {
@@ -57,6 +68,7 @@ func buildSkillsPage(c *ui.Context, t *design.Tokens, kctx cordis.Context, st *s
 		st.skills, st.listErr = skills.List(context.Background())
 		st.roots = skills.Roots()
 	}
+	editor, dataDir := skillsEditor(kctx)
 
 	ui.Column(c).FillWidth().Gap(design.Space4).Children(func() {
 		// Heading row with the native refresh action.
@@ -64,6 +76,13 @@ func buildSkillsPage(c *ui.Context, t *design.Tokens, kctx cordis.Context, st *s
 			design.Apply(ui.Text(c, localized(locale, "技能", "Skills")), t.Font(design.TypeL)).
 				FontWeight(600).TextColor(t.LabelPrimary)
 			ui.Spacer(c).Grow(1)
+			if editor != nil {
+				create := design.Apply(ui.PrimaryButton(c, localized(locale, "新建技能", "New skill")),
+					t.PrimaryButton())
+				if create.Clicked() {
+					startCreateSkill(c, st)
+				}
+			}
 			refresh := ui.Button(c, localized(locale, "刷新", "Refresh")).
 				Tooltip(localized(locale, "重新扫描技能目录", "Rescan the skill directories"))
 			if refresh.Clicked() {
@@ -75,6 +94,11 @@ func buildSkillsPage(c *ui.Context, t *design.Tokens, kctx cordis.Context, st *s
 			"从配置目录、dataDir/skills 与工作区 /skills 中发现的 SKILL.md 技能。",
 			"SKILL.md skills discovered in the configured directories, dataDir/skills and the workspace /skills.")),
 			t.TextMuted(design.TypeXS))
+
+		if st.editStatus != "" {
+			statusBadge(c, t, st.editStatus, false)
+		}
+		buildSkillsEditorDialogs(c, t, st, editor, locale)
 
 		if len(st.roots) > 0 {
 			ui.Column(c).FillWidth().Gap(2).Children(func() {
@@ -97,10 +121,10 @@ func buildSkillsPage(c *ui.Context, t *design.Tokens, kctx cordis.Context, st *s
 				"在工作区 /skills 或 dataDir/skills 放置 <name>/SKILL.md 后点击刷新。",
 				"Place <name>/SKILL.md in the workspace /skills or dataDir/skills, then refresh.")),
 				t.TextMuted(design.TypeXXS)).MaxLines(2)
-			return
-		}
-		for _, skill := range st.skills {
-			buildSkillCard(c, t, skills, st, skill, locale)
+		} else {
+			for _, skill := range st.skills {
+				buildSkillCard(c, t, skills, st, skill, editor, dataDir, locale)
+			}
 		}
 	})
 }
@@ -108,7 +132,7 @@ func buildSkillsPage(c *ui.Context, t *design.Tokens, kctx cordis.Context, st *s
 // buildSkillCard is one discovered skill: name, description, path and the
 // native collapsible content preview.
 func buildSkillCard(c *ui.Context, t *design.Tokens, skills contracts.SkillsService, st *skillsState,
-	skill contracts.Skill, locale contracts.LocaleService) {
+	skill contracts.Skill, editor contracts.SkillsEditor, dataDir string, locale contracts.LocaleService) {
 	name := firstNonEmpty(skill.Name, localized(locale, "(未命名技能)", "(Unnamed skill)"))
 	key := name + "\x00" + skill.Path
 	card := design.Apply(ui.Column(c), t.Panel()).Padding(design.Space3).Gap(design.Space2)
@@ -121,6 +145,18 @@ func buildSkillCard(c *ui.Context, t *design.Tokens, skills contracts.SkillsServ
 		if path := strings.TrimSpace(skill.Path); path != "" {
 			design.Apply(ui.Text(c, path), t.MonoFamily()).FontSize(11).
 				TextColor(t.LabelTertiary).MaxLines(1).Ellipsis("…")
+		}
+		if editor != nil && skillsEditActionsAllowed(skill.Path, dataDir) {
+			ui.Row(c).FillWidth().Justify(ui.End).Gap(design.Space2).Children(func() {
+				remove := ui.Button(c, localized(locale, "删除", "Delete")).
+					Tooltip(localized(locale, "删除这个技能", "Delete this skill"))
+				if remove.Clicked() {
+					st.pendingDelete = skill.Name
+					st.confirmDelete = true
+					st.editErr = ""
+					c.Invalidate()
+				}
+			})
 		}
 		open := st.open[key]
 		ui.Collapsible(c, localized(locale, "查看内容", "View content"), &open, func() {

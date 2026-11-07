@@ -149,8 +149,14 @@ func TestModuleDescriptorAndValidation(t *testing.T) {
 	if descriptor.Name == "" || descriptor.Version != Version {
 		t.Fatalf("name/version = %q/%q", descriptor.Name, descriptor.Version)
 	}
-	if len(descriptor.Provides) != 1 || descriptor.Provides[0].Name != contracts.KeySkills.Name() {
-		t.Fatalf("provides = %+v, want KeySkills", descriptor.Provides)
+	provides := make(map[string]bool, len(descriptor.Provides))
+	for _, provided := range descriptor.Provides {
+		provides[provided.Name] = true
+	}
+	for _, key := range []string{contracts.KeySkills.Name(), contracts.KeySkillsEditor.Name()} {
+		if !provides[key] {
+			t.Fatalf("provides = %+v, missing %q", descriptor.Provides, key)
+		}
 	}
 	required := make(map[string]bool, len(descriptor.Requires))
 	for _, requirement := range descriptor.Requires {

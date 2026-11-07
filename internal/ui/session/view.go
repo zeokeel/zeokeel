@@ -728,6 +728,8 @@ func buildMemoryPane(c *ui.Context, t *design.Tokens, runtime contracts.UIRuntim
 				// Search (store.Search for a non-empty query, List otherwise).
 				ui.SearchField(c, &st.memoryQuery).
 					Label(st.tr("搜索记忆", "Search memory")).Placeholder(st.tr("搜索记忆", "Search memory")).FillWidth()
+				// Management: the memory count, duplicate tidy and clear-all.
+				buildMemoryTools(c, t, runtime, store, st, len(memories))
 				if listErr != nil {
 					buildErrorLine(c, t, st.tr("读取记忆失败：", "Failed to read memory: ")+listErr.Error())
 				}

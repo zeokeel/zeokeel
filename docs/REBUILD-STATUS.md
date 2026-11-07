@@ -21,6 +21,12 @@
 - 右侧栏「文件」Tab：打开文件夹（mygo 原生 Directory picker）、目录进入/面包屑、文本/Markdown/图片预览、
   刷新与错误状态；E2E 覆盖工作区创建 + 列表 + 预览帧
 
+**TDD-memory/skills-edit（2026-11-08）**
+- Memory tab 管理：统计行 +「整理记忆」（规范化去重、保留最早、Remove 重复、失败计数）+「全部清空」（native 确认）＋i18n；session 120 测试
+- 技能编辑：contracts `SkillsEditor/KeySkillsEditor`；skills 模块新建（name/body 校验、frontmatter、O_EXCL、即时可见）与删除（仅 dataDir、
+  containment/realpath、workspace 只读）；settings 技能页「新建技能」模态 + dataDir 技能「删除」确认；skills 18 / settings 95 测试
+- 反证第五轮进行中（/feedback、自动化历史、memory tidy、skills edit）
+
 **TDD-feedback-cmd/automation-runs（2026-11-08）**
 - /反馈 命令（第 9 条）：最近 assistant 摘要 + 有帮助/没帮助/清除评价/取消，写 SessionFeedbacker；JSONL/Markdown 导出含反馈（空/非法不输出）；
   session 111 测试

@@ -182,6 +182,10 @@ func main() {
 	if memory, err := a.root.Require(contracts.KeyMemory); err == nil {
 		_, _ = memory.Add(context.Background(), contracts.Memory{Text: "偏好：界面使用中文，回答尽量简洁", Scope: "global"})
 		_, _ = memory.Add(context.Background(), contracts.Memory{Text: "项目根目录是 /data/mygo", Scope: "workspace"})
+		// Duplicates for the Memory tab's tidy action screenshot.
+		_, _ = memory.Add(context.Background(), contracts.Memory{Text: "  项目根目录是   /data/mygo ", Scope: "workspace"})
+		_, _ = memory.Add(context.Background(), contracts.Memory{Text: "PREFER: concise answers", Scope: "global"})
+		_, _ = memory.Add(context.Background(), contracts.Memory{Text: "prefer: concise answers", Scope: "global"})
 	}
 	a.render(outDir + "/p1-chat.png")
 	a.render(outDir + "/p2-attachments.png")
@@ -515,6 +519,16 @@ func main() {
 		fmt.Println("click skills:", err)
 	}
 	a.render(outDir + "/p2-skills.png")
+	if err := a.tester.Click("新建技能"); err == nil {
+		a.tester.Frame()
+		a.render(outDir + "/p2-skills-new.png")
+		if ok := a.tester.HasText("创建"); ok {
+			if cancel, found := a.tester.Find("取消"); found {
+				a.tester.ClickAt(cancel.X+cancel.W/2, cancel.Y+cancel.H/2)
+				a.tester.Frame()
+			}
+		}
+	}
 	if err := a.tester.Click("查看内容"); err != nil {
 		fmt.Println("expand skill:", err)
 	}

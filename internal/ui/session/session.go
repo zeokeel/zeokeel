@@ -157,6 +157,11 @@ type state struct {
 	// 「已复制」badge stays until another message is copied).
 	copiedMessage string
 
+	// Memory management state: the tidy/clear notice and the clear-all
+	// confirmation dialog.
+	memoryNotice    string
+	memoryClearOpen bool
+
 	// Command-dialog state (native Modals rendered by the session screen).
 	goalOpen  bool
 	goalText  string

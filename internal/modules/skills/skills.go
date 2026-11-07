@@ -1,6 +1,7 @@
 // Package skills implements ZeoKeel's skills backend module: the discovery and
 // reading layer for filesystem-backed agent skills, exposed to the toolkit
-// (skill tool) and the settings skills page.
+// (skill tool) and the settings skills page, plus the optional editor half that
+// creates/deletes skills below the product data directory.
 //
 // It is a kernel backend module: it requires the product data directory and the
 // host logger, and optionally consumes the workspace service. For every call it
@@ -61,9 +62,18 @@ func Module() *module.Descriptor[Config] {
 		if _, err := ctx.Provide(contracts.KeySkills, contracts.SkillsService(skillsService)); err != nil {
 			return fmt.Errorf("%s: provide skills service: %w", ModuleID, err)
 		}
+		// The same service also provides the optional write half, so the
+		// settings page can create/delete data-dir skills without the toolkit
+		// gaining write access through its read-only key.
+		if _, err := ctx.Provide(contracts.KeySkillsEditor, contracts.SkillsEditor(skillsService)); err != nil {
+			return fmt.Errorf("%s: provide skills editor: %w", ModuleID, err)
+		}
 		return nil
 	}).
-		AddProvides(module.Provides(contracts.KeySkills)).
+		AddProvides(
+			module.Provides(contracts.KeySkills),
+			module.Provides(contracts.KeySkillsEditor),
+		).
 		AddRequires(
 			module.Requires(contracts.KeyDataDir),
 			module.Requires(contracts.KeyLogger),

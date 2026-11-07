@@ -58,7 +58,7 @@
 | `importer` | 🟡 | `internal/modules/importer` + settings 导入页 | DSH session.v4.jsonl Scan/Import、文本+reasoning、workspace、symlink 跳过/重复 ID 去重；attachments/credentials/manifest/zstd 未迁移 |
 | `lsp` | ❌ | 无；rig 有 `tools/lsp` 但 toolkit 未注册 | 旧 LSP client/servers 配置/工具未接（非目标候选） |
 | `mcp` | ✅ | toolkit `mcp.Start`（stdio+HTTP）+ settings/workspace 合并 + 工具级开关 | HTTP/stdio 握手/工具注册/失败诊断；assembly>settings>workspace mcp.json（opt-in）；`mcp.disabledTools` 注册前过滤；插件详情/市场在 Shell Plugins 行仍 🟡 |
-| `memory` | 🟡 | `internal/modules/memory` + rig memory tool + session Memory tab | JSON MemoryStore/tool/搜索/添加；consolidate/extract/auto-memory 未迁移 |
+| `memory` | 🟡 | `internal/modules/memory` + rig memory tool + session Memory tab | JSON MemoryStore/tool/搜索/添加 + **整理（规范化去重/保留最早）与全部清空（确认对话框）**；缺模型驱动 consolidate/extract/auto-memory |
 | `modelcatalog` | 🟡 | `internal/modules/modelcatalog` + composer 模型菜单 + settings「模型目录」页 | 默认 DeepSeek Chat/Reasoner 预设、per-session 切换/推理强度、**目录编辑（增删/恢复默认，动态生效）**；缺旧 context window/max tokens/efforts 元数据、连接检查按钮 |
 | `presets` | 🟡 | contracts/presets.go + session presets 菜单 + settings「预设」页（CRUD/排序/恢复默认） | prompt 片段/人设模板已迁移并可在 composer 插入；旧 agent presets 的 systemPrompt/model/tools allowlist JSON 语义未迁移 |
 | `prompt` | 🟡 | agent SystemPrompt + settings 模型页提示词 | 无 modes/plan/memory/AGENTS.md 注入策略、auto-title/review prompt |
