@@ -64,6 +64,11 @@ type paneState struct {
 	ctx         cordis.Context
 	wsCollapsed map[string]bool
 
+	// screens lists the registered screens so the sidebar can offer a
+	// generic navigation item for every module screen except the two the
+	// sidebar draws itself (home destination + the session list).
+	screens contracts.ScreenLister
+
 	renameOpen   bool
 	renameTarget string
 	renameDraft  string
@@ -99,6 +104,9 @@ func Module() *module.Descriptor[Config] {
 		state := &paneState{
 			ctx:         ctx,
 			wsCollapsed: make(map[string]bool),
+		}
+		if lister, ok := ctx.Get(contracts.KeyScreenLister); ok {
+			state.screens = lister
 		}
 
 		// The chat service notifies from the agent goroutine; hop to the UI
@@ -218,6 +226,28 @@ func buildSessionList(c *ui.Context, t *design.Tokens, chat contracts.ChatServic
 					runtime.Invalidate()
 				}
 			})
+			// Generic module-screen destinations: every registered screen the
+			// sidebar does not own itself (home destination and the session list
+			// are handled above) gets one native navigation item, so a new screen
+			// module (for example ui/automation) appears without a sidebar edit.
+			if state.screens != nil {
+				for _, id := range state.screens.Screens() {
+					if id == "home" || id == "session" || strings.TrimSpace(id) == "" {
+						continue
+					}
+					icon := icons.Data()
+					if id == "automation" {
+						icon = icons.Clock()
+					}
+					item := ui.SidebarItem(c, id, icon, screenNavLabel(id))
+					screenID := id
+					item.OnClick(func() {
+						if err := nav.Push(screenID); err == nil {
+							runtime.Invalidate()
+						}
+					})
+				}
+			}
 			// The old UI separated the destinations from the conversation list
 			// with one empty line before the section label.
 			ui.Box(c).Height(design.Space2)
@@ -393,6 +423,17 @@ func buildWorkspaceGroup(
 	}
 	for _, info := range sessions {
 		buildSessionRow(c, t, chat, nav, runtime, state, info, info.ID == activeID, design.Space3)
+	}
+}
+
+// screenNavLabel renders a registered screen id as a sidebar label: the known
+// product screens get their localized title, other ids fall back to the id.
+func screenNavLabel(id string) string {
+	switch id {
+	case "automation":
+		return "自动化"
+	default:
+		return id
 	}
 }
 

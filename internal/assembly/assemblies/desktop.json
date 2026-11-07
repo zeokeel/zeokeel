@@ -64,6 +64,11 @@
       }
     },
     {
+      "id": "automation",
+      "module": "zeokeel/automation",
+      "config": {}
+    },
+    {
       "id": "ui",
       "module": "zeokeel/host/group",
       "children": [
@@ -127,6 +132,11 @@
         {
           "id": "rightpanel",
           "module": "zeokeel-ui/rightpanel",
+          "config": {}
+        },
+        {
+          "id": "automation-ui",
+          "module": "zeokeel-ui/automation",
           "config": {}
         }
       ]

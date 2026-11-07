@@ -7,6 +7,7 @@ import (
 	"github.com/zeokeel/zeokeel/internal/modules/agent"
 	"github.com/zeokeel/zeokeel/internal/modules/appinfo"
 	"github.com/zeokeel/zeokeel/internal/modules/approvals"
+	"github.com/zeokeel/zeokeel/internal/modules/automation"
 	"github.com/zeokeel/zeokeel/internal/modules/hosttools"
 	"github.com/zeokeel/zeokeel/internal/modules/memory"
 	"github.com/zeokeel/zeokeel/internal/modules/sessionstore"
@@ -16,6 +17,7 @@ import (
 	"github.com/zeokeel/zeokeel/internal/modules/workspace"
 	"github.com/zeokeel/zeokeel/internal/ui/about"
 	"github.com/zeokeel/zeokeel/internal/ui/approval"
+	automationui "github.com/zeokeel/zeokeel/internal/ui/automation"
 	"github.com/zeokeel/zeokeel/internal/ui/home"
 	"github.com/zeokeel/zeokeel/internal/ui/rightpanel"
 	"github.com/zeokeel/zeokeel/internal/ui/session"
@@ -56,6 +58,7 @@ func Registry() *module.Registry {
 	mustRegister(registry, memory.Module())
 	mustRegister(registry, toolkit.Module())
 	mustRegister(registry, agent.Module())
+	mustRegister(registry, automation.Module())
 	mustRegister(registry, hosttools.Module())
 	mustRegister(registry, home.Module())
 	mustRegister(registry, about.Module())
@@ -66,6 +69,7 @@ func Registry() *module.Registry {
 	mustRegister(registry, settings.Module())
 	mustRegister(registry, approval.Module())
 	mustRegister(registry, rightpanel.Module())
+	mustRegister(registry, automationui.Module())
 	mustRegister(registry, GroupModule())
 	return registry
 }

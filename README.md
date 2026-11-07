@@ -129,6 +129,10 @@ go test ./...
 - ✅ P3 会话 fork / 导出：`SessionForker.ForkSession`（深拷贝消息/附件/Tools，标题「副本 - …」，持久化历史+事件，
   重启恢复）；会话行「⋯」菜单「创建副本」；会话头部「导出」→ mygo 原生保存对话框写 Markdown（标题/时间/
   transcript，测试 seam 可替换）；截图 `p2-fork.png`
+- ✅ P3 自动化：`zeokeel/automation`（cron 子集 + every/after，JSON 持久化，ticker 到点执行 → 新会话 +
+  Prompt，RunNow/启停/删除/NextRun/LastError，Subscribe；toolkit schedule_* 工具改绑持久 scheduler）；
+  `zeokeel-ui/automation` 自动化页（列表/新建/启停/立即运行/删除，native 控件）+ 侧栏通用屏幕导航；
+  截图 `p2-automation.png`；desktop 21 / headless 11 实例
 - ⬜ 后续阶段见 [docs/PRODUCT-REBUILD-PLAN.md](docs/PRODUCT-REBUILD-PLAN.md)：
   P2 剩余（composer 附件/图片/@ 提及、右侧栏 Files/Terminal/Log 页、会话操作上下文菜单）→
   P3 memory/skills/automation/插件/workspace diff/搜索/fork/export → P4 ACP/热键/导入/更新/诊断

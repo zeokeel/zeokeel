@@ -103,6 +103,13 @@ func main() {
 		}
 	}
 
+	// Seed one persisted automation task for the Automation screen.
+	if automation, err := a.root.Require(contracts.KeyAutomation); err == nil {
+		_, _ = automation.Create(context.Background(), contracts.AutomationTask{
+			Name: "每日构建检查", Prompt: "检查构建是否通过并总结", Schedule: "*/30 * * * *", Enabled: true,
+		})
+	}
+
 	// Fork the finished conversation (agent SessionForker): the sidebar shows
 	// the copy and it becomes the active session.
 	if forker, ok := chat.(contracts.SessionForker); ok {
@@ -277,6 +284,10 @@ func main() {
 	}
 	a.render(outDir + "/p2-shortcuts.png")
 	a.ui.Navigator().CloseSettings()
+	if err := a.ui.Navigator().Push("automation"); err != nil {
+		fmt.Println("push automation:", err)
+	}
+	a.render(outDir + "/p2-automation.png")
 }
 
 func boot(baseURL, dataDir string) *app {

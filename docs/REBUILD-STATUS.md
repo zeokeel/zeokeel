@@ -21,6 +21,12 @@
 - 右侧栏「文件」Tab：打开文件夹（mygo 原生 Directory picker）、目录进入/面包屑、文本/Markdown/图片预览、
   刷新与错误状态；E2E 覆盖工作区创建 + 列表 + 预览帧
 
+**P3 自动化（2026-11-08）**
+- `zeokeel/automation`：cron 子集（*/N、M H、@hourly/@daily）+ every/after，JSON 持久化，ticker 扫描执行
+  （新会话 + prompt）、RunNow/CRUD/启停/NextRun/LastError/Subscribe；toolkit schedule_* 绑定持久 scheduler
+- `zeokeel-ui/automation`：自动化页（任务卡/启停 Toggle/立即运行/删除确认/内联新建表单）+ 侧栏通用屏幕导航；
+  E2E 覆盖 RunNow 新建会话执行、schedule_create/list 持久化、页面渲染
+
 **P3 会话 fork / 导出（2026-11-08）**
 - agent `SessionForker`：深拷贝读模型（新消息 ID/附件/Tools/Reasoning），标题「副本 - …」，active 切换，
   store 持久化（Create/Rename/ReplaceHistory/fork 事件），重启恢复
