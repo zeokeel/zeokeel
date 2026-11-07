@@ -21,6 +21,10 @@
 - 右侧栏「文件」Tab：打开文件夹（mygo 原生 Directory picker）、目录进入/面包屑、文本/Markdown/图片预览、
   刷新与错误状态；E2E 覆盖工作区创建 + 列表 + 预览帧
 
+**P2 拖放附件（2026-11-08）**
+- 宿主窗口 `OnFileDrop` → `FileDropService.Dispatch` → 会话模块处理器 staging（复用 picker 的
+  stageAttachmentFiles）；uiroot 服务单测 + session frame test + desktop E2E + 截图
+
 **P4 更新检查（2026-11-08）**
 - `zeokeel/update`：manifest（version/notes/assets）获取、https 强制、1MiB 上限、semver-ish 比较、GOOS/GOARCH
   asset 选择、错误分类（更新源未配置/清单无效/无平台包，中文）；不下载/不替换

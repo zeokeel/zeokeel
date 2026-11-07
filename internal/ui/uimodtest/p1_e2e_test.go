@@ -354,6 +354,22 @@ func TestP1ApprovalToolsAndPersistence(t *testing.T) {
 		t.Fatal("Cmd+B did not expand the sidebar after restoring the default")
 	}
 
+	// A native window drop stages the same composer attachments as the picker.
+	dropPath := filepath.Join(t.TempDir(), "dropped-note.txt")
+	if err := os.WriteFile(dropPath, []byte("dropped content"), 0o600); err != nil {
+		t.Fatalf("write drop file: %v", err)
+	}
+	drop, err := root.Require(contracts.KeyFileDrop)
+	if err != nil {
+		t.Fatalf("require file drop: %v", err)
+	}
+	drop.Dispatch([]string{dropPath})
+	tester.Frame()
+	tester.Frame()
+	if !tester.HasText("dropped-note.txt") {
+		t.Fatalf("dropped attachment chip missing; texts = %v", tester.Texts())
+	}
+
 	// --- restart: the session and its messages come back from SQLite ------
 	title := session.Title
 	if err := loader.Close(); err != nil {
@@ -442,6 +458,7 @@ func bootDesktop(t *testing.T, dataDir string, settings *memSettings) (cordis.Co
 	provide(t, root, contracts.KeyTheme, uiRoot.Theme())
 	provide(t, root, contracts.KeyLocale, uiRoot.Locale())
 	provide(t, root, contracts.KeyScreenLister, uiRoot.ScreenLister())
+	provide(t, root, contracts.KeyFileDrop, contracts.FileDropService(uiRoot.FileDrop()))
 	provide(t, root, contracts.KeySettings, contracts.SettingsService(settings))
 	provide(t, root, contracts.KeyLogger, contracts.Logger(discardLogger{}))
 	loader, err := assembly.LoadWithBuildInfo(root, assembly.ProductDesktop, assembly.BuildInfo{Version: "0.1.0"})

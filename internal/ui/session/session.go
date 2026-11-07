@@ -150,6 +150,22 @@ func Module() *module.Descriptor[Config] {
 			return err
 		}
 
+		// Dropped files (the native window's drop) stage as composer
+		// attachments, exactly like the native picker's selection.
+		if drop, ok := ctx.Get(contracts.KeyFileDrop); ok {
+			drop.SetHandler(func(paths []string) {
+				runtime.Post(func() {
+					stageAttachmentFiles(moduleState, paths)
+					runtime.Invalidate()
+				})
+			})
+			if err := own(ctx, func() (func(), error) {
+				return func() { drop.SetHandler(nil) }, nil
+			}); err != nil {
+				return err
+			}
+		}
+
 		return own(ctx, func() (func(), error) {
 			return runtime.RegisterScreen(contracts.ScreenSpec{
 				ID:    ScreenID,

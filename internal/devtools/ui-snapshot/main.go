@@ -111,6 +111,20 @@ func main() {
 		})
 	}
 
+	// A native window drop stages a composer attachment (same path as the
+	// picker): dispatch two paths and render the staged chips.
+	if drop, err := a.root.Require(contracts.KeyFileDrop); err == nil {
+		dropDir, dirErr := os.MkdirTemp("", "zeokeel-drop")
+		if dirErr == nil {
+			notePath := filepath.Join(dropDir, "dropped-note.md")
+			_ = os.WriteFile(notePath, []byte("# 拖放进来的笔记\n\n来自窗口拖放。\n"), 0o600)
+			drop.Dispatch([]string{notePath})
+			a.tester.Frame()
+			a.tester.Frame()
+			a.render(outDir + "/p2-drop.png")
+		}
+	}
+
 	// Fork the finished conversation (agent SessionForker): the sidebar shows
 	// the copy and it becomes the active session.
 	if forker, ok := chat.(contracts.SessionForker); ok {
@@ -361,6 +375,7 @@ func boot(baseURL, dataDir string) *app {
 	provide(root, contracts.KeyTheme, uiRoot.Theme())
 	provide(root, contracts.KeyLocale, uiRoot.Locale())
 	provide(root, contracts.KeyScreenLister, uiRoot.ScreenLister())
+	provide(root, contracts.KeyFileDrop, contracts.FileDropService(uiRoot.FileDrop()))
 	provide(root, contracts.KeySettings, contracts.SettingsService(&settings{values: map[string]string{
 		contracts.SettingsChatModel:   "snapshot-model",
 		contracts.SettingsChatBaseURL: baseURL,

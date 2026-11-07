@@ -406,6 +406,11 @@ func runDesktop(opts Options) error {
 			Content:   ui.View(uiRoot.View),
 		})
 		uiRoot.SetInvalidator(window.Invalidate)
+		window.OnFileDrop(func(event *mygo.FileDropEvent) {
+			if event != nil {
+				uiRoot.FileDrop().Dispatch(event.Paths)
+			}
+		})
 		logger.Printf("%s: %s product %q loaded: %d module instances, screens %v",
 			appName, opts.versionString(), opts.Product, len(loader.Instances()),
 			uiRoot.ScreenLister().Screens())
@@ -454,6 +459,9 @@ func provideServices(root cordis.Context, dataDir string, settings *Settings, lo
 	}
 	if _, err := root.Provide(contracts.KeyScreenLister, uiRoot.ScreenLister()); err != nil {
 		return fmt.Errorf("%s: provide screen lister: %w", appName, err)
+	}
+	if _, err := root.Provide(contracts.KeyFileDrop, contracts.FileDropService(uiRoot.FileDrop())); err != nil {
+		return fmt.Errorf("%s: provide file drop: %w", appName, err)
 	}
 	return nil
 }
