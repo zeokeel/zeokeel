@@ -22,6 +22,14 @@
       "config": {
         "interactive": false
       }
+    },
+    {
+      "id": "agent",
+      "module": "zeokeel/agent",
+      "config": {
+        "model": "gpt-4o-mini",
+        "maxIterations": 20
+      }
     }
   ]
 }

@@ -1,0 +1,115 @@
+package contracts
+
+import (
+	"time"
+
+	cordis "github.com/zeokeel/zeokeel-kernel"
+)
+
+// Settings keys owned by the chat surface. Both the agent backend module and
+// the settings UI read and write these through contracts.SettingsService, so
+// the model configuration has one home.
+const (
+	SettingsChatModel        = "chat.model"
+	SettingsChatBaseURL      = "chat.baseURL"
+	SettingsChatAPIKey       = "chat.apiKey"
+	SettingsChatSystemPrompt = "chat.systemPrompt"
+)
+
+// Chat roles used by ChatMessage.Role.
+const (
+	ChatRoleUser      = "user"
+	ChatRoleAssistant = "assistant"
+	ChatRoleTool      = "tool"
+	ChatRoleSystem    = "system"
+)
+
+// ChatMessage is one message of a session as the UI reads it. The agent module
+// owns the write path; UI modules treat it as a read model.
+type ChatMessage struct {
+	// ID is stable for the lifetime of the message.
+	ID string
+	// Role is one of the ChatRole* constants.
+	Role string
+	// Text is the message body (assistant text streams into it).
+	Text string
+	// Reasoning is the model's thinking text when the provider streams it.
+	Reasoning string
+	// Streaming marks the assistant message currently being produced.
+	Streaming bool
+	// Tools lists the tool calls that belong to this message, in call order.
+	Tools []ToolCall
+	// Error is set when the message (usually an assistant turn) failed.
+	Error string
+	// CreatedAt is the message timestamp (local time, display only).
+	CreatedAt time.Time
+}
+
+// ChatSession is the read model of one conversation.
+type ChatSession struct {
+	ID        string
+	Title     string
+	Messages  []ChatMessage
+	Running   bool
+	Error     string
+	CreatedAt time.Time
+	UpdatedAt time.Time
+}
+
+// ChatSessionInfo is the list-item view of a session for the sidebar.
+type ChatSessionInfo struct {
+	ID           string
+	Title        string
+	MessageCount int
+	Running      bool
+	UpdatedAt    time.Time
+}
+
+// ChatConfig is the model configuration the agent module uses for new runs.
+// Empty fields fall back to module config, then to the settings store keys
+// above (SettingsChat*), then to the process environment (OPENAI_API_KEY).
+type ChatConfig struct {
+	Model         string
+	BaseURL       string
+	APIKey        string
+	SystemPrompt  string
+	MaxIterations int
+	ContextBudget int
+}
+
+// ChatService is the product's conversation service: it owns chat sessions,
+// runs the ZeoKeel Rig agent, and exposes a read model plus change
+// notifications for the UI.
+//
+// Concurrency: every method is safe to call from any goroutine. Subscribers are
+// called synchronously from the agent goroutine after a session changed; a UI
+// module must hop to the UI thread itself (UIRuntime.Post).
+type ChatService interface {
+	// Config reports the effective model configuration.
+	Config() ChatConfig
+	// Sessions lists sessions, newest updated first.
+	Sessions() []ChatSessionInfo
+	// Session returns one session read model.
+	Session(sessionID string) (ChatSession, bool)
+	// ActiveSession is the session the UI currently shows ("" when none).
+	ActiveSession() string
+	// SetActiveSession switches the active session.
+	SetActiveSession(sessionID string) error
+	// NewSession creates an empty session, marks it active and returns its ID.
+	NewSession(title string) (string, error)
+	// DeleteSession removes a session; the active session becomes the newest
+	// remaining one (or "").
+	DeleteSession(sessionID string) error
+	// Send appends the user prompt and starts one asynchronous agent run.
+	// It returns a conflict error when the session is already running.
+	Send(sessionID, prompt string) error
+	// Cancel stops the in-flight run of a session (idempotent).
+	Cancel(sessionID string) error
+	// Subscribe receives the session ID whenever a session changed. The
+	// returned function unsubscribes; nil callbacks are ignored.
+	Subscribe(fn func(sessionID string)) (unsubscribe func(), err error)
+}
+
+// KeyChat is provided by the agent backend module (zeokeel/agent) and consumed
+// by the chat UI modules.
+var KeyChat = cordis.NewServiceKey[ChatService]("zeokeel/chat")

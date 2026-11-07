@@ -131,19 +131,24 @@ func TestProductsAndEntries(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Entries(desktop): %v", err)
 	}
-	if len(desktop) != 4 {
-		t.Fatalf("desktop roots = %d, want appinfo + toolkit + hosttools + ui group", len(desktop))
+	if len(desktop) != 5 {
+		t.Fatalf("desktop roots = %d, want appinfo + toolkit + hosttools + agent + ui group", len(desktop))
 	}
 	if desktop[0].Module != "zeokeel/appinfo" || desktop[1].Module != "zeokeel/toolkit" ||
-		desktop[2].Module != "zeokeel/hosttools" || desktop[3].Module != assembly.GroupModuleID {
-		t.Fatalf("desktop roots = %q/%q/%q/%q, want appinfo/toolkit/hosttools/group",
-			desktop[0].Module, desktop[1].Module, desktop[2].Module, desktop[3].Module)
+		desktop[2].Module != "zeokeel/hosttools" || desktop[3].Module != "zeokeel/agent" ||
+		desktop[4].Module != assembly.GroupModuleID {
+		t.Fatalf("desktop roots = %q/%q/%q/%q/%q, want appinfo/toolkit/hosttools/agent/group",
+			desktop[0].Module, desktop[1].Module, desktop[2].Module, desktop[3].Module, desktop[4].Module)
 	}
-	if len(desktop[3].Children) != 4 {
-		t.Fatalf("UI group children = %d, want home + welcome + toolcards + about", len(desktop[3].Children))
+	if len(desktop[4].Children) != 7 {
+		t.Fatalf("UI group children = %d, want home + welcome + toolcards + about + sidebar + session + settings",
+			len(desktop[4].Children))
 	}
-	wantChildren := []string{"zeokeel-ui/home", "zeokeel-ui/welcome", "zeokeel-ui/toolcards", "zeokeel-ui/about"}
-	for index, child := range desktop[3].Children {
+	wantChildren := []string{
+		"zeokeel-ui/home", "zeokeel-ui/welcome", "zeokeel-ui/toolcards", "zeokeel-ui/about",
+		"zeokeel-ui/sidebar", "zeokeel-ui/session", "zeokeel-ui/settings",
+	}
+	for index, child := range desktop[4].Children {
 		if child.Module != wantChildren[index] {
 			t.Fatalf("UI group child %d = %q, want %q", index, child.Module, wantChildren[index])
 		}
@@ -153,9 +158,10 @@ func TestProductsAndEntries(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Entries(headless): %v", err)
 	}
-	if len(headless) != 3 || headless[0].Module != "zeokeel/appinfo" ||
-		headless[1].Module != "zeokeel/toolkit" || headless[2].Module != "zeokeel/hosttools" {
-		t.Fatalf("headless entries = %+v, want appinfo + toolkit + hosttools", headless)
+	if len(headless) != 4 || headless[0].Module != "zeokeel/appinfo" ||
+		headless[1].Module != "zeokeel/toolkit" || headless[2].Module != "zeokeel/hosttools" ||
+		headless[3].Module != "zeokeel/agent" {
+		t.Fatalf("headless entries = %+v, want appinfo + toolkit + hosttools + agent", headless)
 	}
 }
 
@@ -168,15 +174,19 @@ func TestRegistryIsExplicit(t *testing.T) {
 		"zeokeel-ui/welcome",
 		"zeokeel-ui/toolcards",
 		"zeokeel/toolkit",
+		"zeokeel/agent",
 		"zeokeel/hosttools",
+		"zeokeel-ui/sidebar",
+		"zeokeel-ui/session",
+		"zeokeel-ui/settings",
 		assembly.GroupModuleID,
 	} {
 		if !registry.Has(id) {
 			t.Fatalf("Registry() lacks module %q", id)
 		}
 	}
-	if got := len(registry.Modules()); got != 8 {
-		t.Fatalf("Registry() modules = %d, want 8", got)
+	if got := len(registry.Modules()); got != 12 {
+		t.Fatalf("Registry() modules = %d, want 12", got)
 	}
 }
 
@@ -203,15 +213,18 @@ func TestDesktopAssemblyLoadsAndUnwinds(t *testing.T) {
 		t.Fatalf("LoadWithBuildInfo(desktop): %v", err)
 	}
 
-	// Seven modules (appinfo/toolkit/hosttools/home/welcome/toolcards/about)
-	// plus the no-op UI group container are all active after the synchronous
-	// load: the toolkit provider and its hosttools consumer settle in
+	// Backend modules (appinfo/toolkit/hosttools/agent) and the UI group with
+	// its seven UI modules are all active after the synchronous load: the
+	// toolkit provider, the agent consumer and the UI modules settle in
 	// dependency order.
 	instances := loader.Instances()
-	if len(instances) != 8 {
-		t.Fatalf("desktop instances = %d, want 8", len(instances))
+	if len(instances) != 12 {
+		t.Fatalf("desktop instances = %d, want 12", len(instances))
 	}
-	wantIDs := []string{"appinfo", "toolkit", "hosttools", "ui", "home", "welcome", "toolcards", "about"}
+	wantIDs := []string{
+		"appinfo", "toolkit", "hosttools", "agent", "ui",
+		"home", "welcome", "toolcards", "about", "sidebar", "session", "settings",
+	}
 	gotIDs := make([]string, len(instances))
 	for index, instance := range instances {
 		gotIDs[index] = instance.ID()
@@ -235,8 +248,8 @@ func TestDesktopAssemblyLoadsAndUnwinds(t *testing.T) {
 	if err := uiRoot.Validate(); err != nil {
 		t.Fatalf("uiroot Validate after load: %v", err)
 	}
-	if screens := uiRoot.ScreenLister().Screens(); !slices.Equal(screens, []string{"home"}) {
-		t.Fatalf("screens after load = %v, want [home]", screens)
+	if screens := uiRoot.ScreenLister().Screens(); !slices.Equal(screens, []string{"home", "session"}) {
+		t.Fatalf("screens after load = %v, want [home session]", screens)
 	}
 	// The modules contributed to the host's reserved slots (ui/welcome) and to
 	// the settings surface (ui/about) without the host knowing about them.
@@ -324,8 +337,8 @@ func TestHeadlessAssemblyNeedsNoUIServices(t *testing.T) {
 	}()
 
 	instances := loader.Instances()
-	if len(instances) != 3 {
-		t.Fatalf("headless instances = %d, want appinfo + toolkit + hosttools", len(instances))
+	if len(instances) != 4 {
+		t.Fatalf("headless instances = %d, want appinfo + toolkit + hosttools + agent", len(instances))
 	}
 	instance := instances[0]
 	if instance.ID() != "appinfo" || instance.ModuleID() != "zeokeel/appinfo" {

@@ -8,7 +8,7 @@ import (
 
 	cordis "github.com/zeokeel/zeokeel-kernel"
 	"github.com/zeokeel/zeokeel-kernel/module"
-	v1 "github.com/zeokeel/zeokeel-rig/contracts/v1"
+	rig "github.com/zeokeel/zeokeel-rig"
 	rigtool "github.com/zeokeel/zeokeel-rig/tools"
 
 	"github.com/zeokeel/zeokeel/internal/contracts"
@@ -79,9 +79,9 @@ func loadProduct(t *testing.T, host *hostcaps.Host, interactive bool) *product {
 	return &product{root: root, loader: loader, registry: rigRegistry}
 }
 
-func (p *product) call(t *testing.T, name, arguments string) (v1.ToolResult, error) {
+func (p *product) call(t *testing.T, name, arguments string) (rig.ToolResult, error) {
 	t.Helper()
-	return p.registry.Invoke(context.Background(), v1.ToolCall{ID: "call-1", Name: name, Arguments: arguments})
+	return p.registry.Invoke(context.Background(), rig.ToolCall{ID: "call-1", Name: name, Arguments: arguments})
 }
 
 func (p *product) callOK(t *testing.T, name, arguments string) string {
@@ -385,12 +385,12 @@ func TestToolContextCancellation(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 	tool := findTool(t, product.registry, ToolGoal)
-	if _, err := tool.Invoke(ctx, v1.ToolCall{Name: ToolGoal, Arguments: `{"action":"get"}`}); !errors.Is(err, context.Canceled) {
+	if _, err := tool.Invoke(ctx, rig.ToolCall{Name: ToolGoal, Arguments: `{"action":"get"}`}); !errors.Is(err, context.Canceled) {
 		t.Fatalf("Invoke(cancelled ctx) = %v, want context.Canceled", err)
 	}
 }
 
-// dummyTool is a minimal v1.Tool used to occupy a tool name.
+// dummyTool is a minimal rig.Tool used to occupy a tool name.
 type dummyTool struct {
 	name string
 }
@@ -398,11 +398,11 @@ type dummyTool struct {
 func (d dummyTool) Name() string           { return d.name }
 func (d dummyTool) Description() string    { return "dummy" }
 func (d dummyTool) Schema() map[string]any { return map[string]any{"type": "object"} }
-func (d dummyTool) Invoke(context.Context, v1.ToolCall) (v1.ToolResult, error) {
-	return v1.ToolResult{Content: "dummy"}, nil
+func (d dummyTool) Invoke(context.Context, rig.ToolCall) (rig.ToolResult, error) {
+	return rig.ToolResult{Content: "dummy"}, nil
 }
 
-func findTool(t *testing.T, registry *rigtool.Registry, name string) v1.Tool {
+func findTool(t *testing.T, registry *rigtool.Registry, name string) rig.Tool {
 	t.Helper()
 	for _, tool := range registry.Tools() {
 		if tool.Name() == name {

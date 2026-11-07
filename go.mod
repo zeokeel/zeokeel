@@ -5,7 +5,7 @@ go 1.27.3
 require (
 	github.com/egoist/mygo v0.7.4
 	github.com/zeokeel/zeokeel-kernel v0.1.1
-	github.com/zeokeel/zeokeel-rig v0.8.0
+	github.com/zeokeel/zeokeel-rig v0.13.0
 )
 
 require (
@@ -14,4 +14,5 @@ require (
 	golang.org/x/image v0.46.0 // indirect
 	golang.org/x/net v0.59.0 // indirect
 	golang.org/x/text v0.43.0 // indirect
+	mvdan.cc/sh/v3 v3.14.1 // indirect
 )

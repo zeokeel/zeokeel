@@ -24,6 +24,14 @@
       }
     },
     {
+      "id": "agent",
+      "module": "zeokeel/agent",
+      "config": {
+        "model": "gpt-4o-mini",
+        "maxIterations": 20
+      }
+    },
+    {
       "id": "ui",
       "module": "zeokeel/host/group",
       "children": [
@@ -55,6 +63,34 @@
           "module": "zeokeel-ui/about",
           "config": {
             "title": "关于"
+          }
+        },
+        {
+          "id": "sidebar",
+          "module": "zeokeel-ui/sidebar",
+          "config": {
+            "newChatLabel": "新对话",
+            "sessionsTitle": "会话",
+            "settingsLabel": "设置"
+          }
+        },
+        {
+          "id": "session",
+          "module": "zeokeel-ui/session",
+          "config": {
+            "title": "对话",
+            "emptyText": "还没有消息，开始一段新对话吧。",
+            "composerPlaceholder": "向 ZeoKeel 提问…",
+            "sendLabel": "发送",
+            "stopLabel": "停止"
+          }
+        },
+        {
+          "id": "settings",
+          "module": "zeokeel-ui/settings",
+          "config": {
+            "title": "模型",
+            "saveLabel": "保存"
           }
         }
       ]

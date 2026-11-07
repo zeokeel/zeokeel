@@ -7,7 +7,7 @@ import (
 	"fmt"
 	"strings"
 
-	v1 "github.com/zeokeel/zeokeel-rig/contracts/v1"
+	rig "github.com/zeokeel/zeokeel-rig"
 
 	hostcaps "github.com/zeokeel/zeokeel/internal/hosttools"
 )
@@ -26,8 +26,8 @@ const (
 // newTools builds the host tools bound to capabilities. Every tool is always
 // constructed (a stable tool catalog); a missing capability becomes a readable
 // tool error instead of changing the catalog between products.
-func newTools(capabilities hostcaps.Host) []v1.Tool {
-	return []v1.Tool{
+func newTools(capabilities hostcaps.Host) []rig.Tool {
+	return []rig.Tool{
 		&askUserTool{asker: capabilities.Asker},
 		&presentTool{presenter: capabilities.Presenter},
 		&planReviewTool{plan: capabilities.Plan},
@@ -59,16 +59,16 @@ func (t *askUserTool) Schema() map[string]any {
 	}, "question")
 }
 
-func (t *askUserTool) Invoke(ctx context.Context, call v1.ToolCall) (v1.ToolResult, error) {
+func (t *askUserTool) Invoke(ctx context.Context, call rig.ToolCall) (rig.ToolResult, error) {
 	var args struct {
 		Question string   `json:"question"`
 		Options  []string `json:"options"`
 	}
 	if err := decodeArguments(call, &args); err != nil {
-		return v1.ToolResult{}, err
+		return rig.ToolResult{}, err
 	}
 	if err := contextError(ctx); err != nil {
-		return v1.ToolResult{}, err
+		return rig.ToolResult{}, err
 	}
 	if strings.TrimSpace(args.Question) == "" {
 		return errorResult("ask_user: question is required"), nil
@@ -79,17 +79,17 @@ func (t *askUserTool) Invoke(ctx context.Context, call v1.ToolCall) (v1.ToolResu
 	answer, err := t.asker.Ask(ctx, strings.TrimSpace(args.Question), args.Options)
 	if err != nil {
 		if contextErr := contextError(ctx); contextErr != nil {
-			return v1.ToolResult{}, contextErr
+			return rig.ToolResult{}, contextErr
 		}
 		if errors.Is(err, hostcaps.ErrNoInteractive) {
 			return noInteractiveResult(), nil
 		}
 		return errorResult("ask_user: %v", err), nil
 	}
-	return v1.ToolResult{Content: "user answered: " + answer}, nil
+	return rig.ToolResult{Content: "user answered: " + answer}, nil
 }
 
-func noInteractiveResult() v1.ToolResult {
+func noInteractiveResult() rig.ToolResult {
 	return errorResult("ask_user: no interactive UI is available in this session; " +
 		"put the question in your final message instead and wait for the user's reply")
 }
@@ -115,16 +115,16 @@ func (t *presentTool) Schema() map[string]any {
 	}, "title", "content")
 }
 
-func (t *presentTool) Invoke(ctx context.Context, call v1.ToolCall) (v1.ToolResult, error) {
+func (t *presentTool) Invoke(ctx context.Context, call rig.ToolCall) (rig.ToolResult, error) {
 	var args struct {
 		Title   string `json:"title"`
 		Content string `json:"content"`
 	}
 	if err := decodeArguments(call, &args); err != nil {
-		return v1.ToolResult{}, err
+		return rig.ToolResult{}, err
 	}
 	if err := contextError(ctx); err != nil {
-		return v1.ToolResult{}, err
+		return rig.ToolResult{}, err
 	}
 	if strings.TrimSpace(args.Title) == "" {
 		return errorResult("present: title is required"), nil
@@ -135,11 +135,11 @@ func (t *presentTool) Invoke(ctx context.Context, call v1.ToolCall) (v1.ToolResu
 	artifactID, err := t.presenter.Present(ctx, strings.TrimSpace(args.Title), args.Content)
 	if err != nil {
 		if contextErr := contextError(ctx); contextErr != nil {
-			return v1.ToolResult{}, contextErr
+			return rig.ToolResult{}, contextErr
 		}
 		return errorResult("present: %v", err), nil
 	}
-	return v1.ToolResult{Content: fmt.Sprintf("presented artifact %s: %s", artifactID, strings.TrimSpace(args.Title))}, nil
+	return rig.ToolResult{Content: fmt.Sprintf("presented artifact %s: %s", artifactID, strings.TrimSpace(args.Title))}, nil
 }
 
 // --- plan_review ------------------------------------------------------------
@@ -162,15 +162,15 @@ func (t *planReviewTool) Schema() map[string]any {
 	}, "plan")
 }
 
-func (t *planReviewTool) Invoke(ctx context.Context, call v1.ToolCall) (v1.ToolResult, error) {
+func (t *planReviewTool) Invoke(ctx context.Context, call rig.ToolCall) (rig.ToolResult, error) {
 	var args struct {
 		Plan string `json:"plan"`
 	}
 	if err := decodeArguments(call, &args); err != nil {
-		return v1.ToolResult{}, err
+		return rig.ToolResult{}, err
 	}
 	if err := contextError(ctx); err != nil {
-		return v1.ToolResult{}, err
+		return rig.ToolResult{}, err
 	}
 	if strings.TrimSpace(args.Plan) == "" {
 		return errorResult("plan_review: plan is required"), nil
@@ -181,11 +181,11 @@ func (t *planReviewTool) Invoke(ctx context.Context, call v1.ToolCall) (v1.ToolR
 	verdict, err := t.plan.Review(args.Plan)
 	if err != nil {
 		if contextErr := contextError(ctx); contextErr != nil {
-			return v1.ToolResult{}, contextErr
+			return rig.ToolResult{}, contextErr
 		}
 		return errorResult("plan_review: %v", err), nil
 	}
-	return v1.ToolResult{Content: fmt.Sprintf(
+	return rig.ToolResult{Content: fmt.Sprintf(
 		"plan submitted for review (state: %s); use exit_plan_mode with approve, cancel or status", verdict)}, nil
 }
 
@@ -209,15 +209,15 @@ func (t *exitPlanModeTool) Schema() map[string]any {
 	}, "action")
 }
 
-func (t *exitPlanModeTool) Invoke(ctx context.Context, call v1.ToolCall) (v1.ToolResult, error) {
+func (t *exitPlanModeTool) Invoke(ctx context.Context, call rig.ToolCall) (rig.ToolResult, error) {
 	var args struct {
 		Action string `json:"action"`
 	}
 	if err := decodeArguments(call, &args); err != nil {
-		return v1.ToolResult{}, err
+		return rig.ToolResult{}, err
 	}
 	if err := contextError(ctx); err != nil {
-		return v1.ToolResult{}, err
+		return rig.ToolResult{}, err
 	}
 	if strings.TrimSpace(args.Action) == "" {
 		return errorResult("exit_plan_mode: action is required (approve, cancel or status)"), nil
@@ -228,11 +228,11 @@ func (t *exitPlanModeTool) Invoke(ctx context.Context, call v1.ToolCall) (v1.Too
 	state, err := t.plan.Exit(args.Action)
 	if err != nil {
 		if contextErr := contextError(ctx); contextErr != nil {
-			return v1.ToolResult{}, contextErr
+			return rig.ToolResult{}, contextErr
 		}
 		return errorResult("exit_plan_mode: %v", err), nil
 	}
-	return v1.ToolResult{Content: "plan mode: " + state}, nil
+	return rig.ToolResult{Content: "plan mode: " + state}, nil
 }
 
 // --- goal -------------------------------------------------------------------
@@ -256,16 +256,16 @@ func (t *goalTool) Schema() map[string]any {
 	}, "action")
 }
 
-func (t *goalTool) Invoke(ctx context.Context, call v1.ToolCall) (v1.ToolResult, error) {
+func (t *goalTool) Invoke(ctx context.Context, call rig.ToolCall) (rig.ToolResult, error) {
 	var args struct {
 		Action string `json:"action"`
 		Text   string `json:"text"`
 	}
 	if err := decodeArguments(call, &args); err != nil {
-		return v1.ToolResult{}, err
+		return rig.ToolResult{}, err
 	}
 	if err := contextError(ctx); err != nil {
-		return v1.ToolResult{}, err
+		return rig.ToolResult{}, err
 	}
 	if t.goals == nil {
 		return errorResult("goal: no goal store is available in this product"), nil
@@ -280,22 +280,22 @@ func (t *goalTool) Invoke(ctx context.Context, call v1.ToolCall) (v1.ToolResult,
 		id, err := t.goals.Set(text)
 		if err != nil {
 			if contextErr := contextError(ctx); contextErr != nil {
-				return v1.ToolResult{}, contextErr
+				return rig.ToolResult{}, contextErr
 			}
 			return errorResult("goal: %v", err), nil
 		}
-		return v1.ToolResult{Content: fmt.Sprintf("goal set (%s): %s", id, text)}, nil
+		return rig.ToolResult{Content: fmt.Sprintf("goal set (%s): %s", id, text)}, nil
 	case "get", "status":
 		id, text, status, ok := t.goals.Get()
 		if !ok {
-			return v1.ToolResult{Content: "no goal is set"}, nil
+			return rig.ToolResult{Content: "no goal is set"}, nil
 		}
-		return v1.ToolResult{Content: fmt.Sprintf("goal %s [%s]: %s", id, status, text)}, nil
+		return rig.ToolResult{Content: fmt.Sprintf("goal %s [%s]: %s", id, status, text)}, nil
 	case "clear":
 		if t.goals.Clear() {
-			return v1.ToolResult{Content: "goal cleared"}, nil
+			return rig.ToolResult{Content: "goal cleared"}, nil
 		}
-		return v1.ToolResult{Content: "no goal is set"}, nil
+		return rig.ToolResult{Content: "no goal is set"}, nil
 	default:
 		return errorResult("goal: action must be one of set, get, clear, status"), nil
 	}
@@ -324,17 +324,17 @@ func (t *teamTool) Schema() map[string]any {
 	}, "action")
 }
 
-func (t *teamTool) Invoke(ctx context.Context, call v1.ToolCall) (v1.ToolResult, error) {
+func (t *teamTool) Invoke(ctx context.Context, call rig.ToolCall) (rig.ToolResult, error) {
 	var args struct {
 		Action string `json:"action"`
 		Name   string `json:"name"`
 		ID     string `json:"id"`
 	}
 	if err := decodeArguments(call, &args); err != nil {
-		return v1.ToolResult{}, err
+		return rig.ToolResult{}, err
 	}
 	if err := contextError(ctx); err != nil {
-		return v1.ToolResult{}, err
+		return rig.ToolResult{}, err
 	}
 	if t.team == nil {
 		return errorResult("team: no team manager is available in this product"), nil
@@ -349,21 +349,21 @@ func (t *teamTool) Invoke(ctx context.Context, call v1.ToolCall) (v1.ToolResult,
 		id, err := t.team.Spawn(name)
 		if err != nil {
 			if contextErr := contextError(ctx); contextErr != nil {
-				return v1.ToolResult{}, contextErr
+				return rig.ToolResult{}, contextErr
 			}
 			return errorResult("team: %v", err), nil
 		}
-		return v1.ToolResult{Content: fmt.Sprintf("spawned team member %s (%s)", name, id)}, nil
+		return rig.ToolResult{Content: fmt.Sprintf("spawned team member %s (%s)", name, id)}, nil
 	case "list":
 		members := t.team.List()
 		if len(members) == 0 {
-			return v1.ToolResult{Content: "no team members"}, nil
+			return rig.ToolResult{Content: "no team members"}, nil
 		}
 		lines := make([]string, 0, len(members))
 		for _, member := range members {
 			lines = append(lines, fmt.Sprintf("%s\t%s\t%s", member.ID, member.Name, member.Status))
 		}
-		return v1.ToolResult{Content: strings.Join(lines, "\n")}, nil
+		return rig.ToolResult{Content: strings.Join(lines, "\n")}, nil
 	case "close":
 		id := strings.TrimSpace(args.ID)
 		if id == "" {
@@ -372,7 +372,7 @@ func (t *teamTool) Invoke(ctx context.Context, call v1.ToolCall) (v1.ToolResult,
 		if err := t.team.Close(id); err != nil {
 			return errorResult("team: %v", err), nil
 		}
-		return v1.ToolResult{Content: "closed team member " + id}, nil
+		return rig.ToolResult{Content: "closed team member " + id}, nil
 	case "interrupt":
 		id := strings.TrimSpace(args.ID)
 		if id == "" {
@@ -381,7 +381,7 @@ func (t *teamTool) Invoke(ctx context.Context, call v1.ToolCall) (v1.ToolResult,
 		if err := t.team.Interrupt(id); err != nil {
 			return errorResult("team: %v", err), nil
 		}
-		return v1.ToolResult{Content: "interrupted team member " + id}, nil
+		return rig.ToolResult{Content: "interrupted team member " + id}, nil
 	default:
 		return errorResult("team: action must be one of spawn, list, close, interrupt"), nil
 	}
@@ -391,7 +391,7 @@ func (t *teamTool) Invoke(ctx context.Context, call v1.ToolCall) (v1.ToolResult,
 
 // decodeArguments decodes one call's raw arguments; an empty argument string is
 // the empty object.
-func decodeArguments(call v1.ToolCall, target any) error {
+func decodeArguments(call rig.ToolCall, target any) error {
 	raw := strings.TrimSpace(call.Arguments)
 	if raw == "" {
 		raw = "{}"
@@ -411,8 +411,8 @@ func contextError(ctx context.Context) error {
 }
 
 // errorResult is a model-facing tool failure.
-func errorResult(format string, args ...any) v1.ToolResult {
-	return v1.ToolResult{Content: fmt.Sprintf(format, args...), IsError: true}
+func errorResult(format string, args ...any) rig.ToolResult {
+	return rig.ToolResult{Content: fmt.Sprintf(format, args...), IsError: true}
 }
 
 // objectSchema builds the JSON Schema object advertised for one tool.

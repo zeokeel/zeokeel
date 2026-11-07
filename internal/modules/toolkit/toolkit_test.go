@@ -112,6 +112,13 @@ func TestModuleWiresRemoteMCPServer(t *testing.T) {
 func testMCPHTTPServer(t *testing.T) *httptest.Server {
 	t.Helper()
 	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// v0.13 MCP clients send a session DELETE on Close (and may open a GET
+		// notification stream when a handler is registered); the fake server
+		// only answers JSON-RPC POSTs and acknowledges the rest.
+		if r.Method != http.MethodPost {
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
 		body, _ := io.ReadAll(r.Body)
 		var request struct {
 			ID     any             `json:"id"`
