@@ -4,6 +4,7 @@ package uimodtest
 // trajectory view, driven through the real desktop assembly.
 
 import (
+	"context"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -111,6 +112,23 @@ func TestP1ApprovalToolsAndPersistence(t *testing.T) {
 	}
 	uiRoot.SetRightPanelOpen(false)
 
+	// The durable memory backend is wired into the product: entries persist and
+	// the session Memory tab renders them.
+	memory, err := root.Require(contracts.KeyMemory)
+	if err != nil {
+		t.Fatalf("require memory: %v", err)
+	}
+	if _, err := memory.Add(context.Background(), contracts.Memory{Text: "记住：用中文回复", Scope: "global"}); err != nil {
+		t.Fatalf("add memory: %v", err)
+	}
+	if err := tester.Click("记忆"); err != nil {
+		t.Fatalf("click memory tab: %v; texts = %v", err, tester.Texts())
+	}
+	tester.Frame()
+	if !tester.HasText("记住：用中文回复") {
+		t.Fatalf("memory tab does not show the entry; texts = %v", tester.Texts())
+	}
+
 	// --- restart: the session and its messages come back from SQLite ------
 	title := session.Title
 	if err := loader.Close(); err != nil {
@@ -139,6 +157,14 @@ func TestP1ApprovalToolsAndPersistence(t *testing.T) {
 	}
 	if !hasAssistantText(restored, "已读取工作目录") {
 		t.Fatalf("restored assistant text missing: %+v", restored.Messages)
+	}
+	memory2, err := root2.Require(contracts.KeyMemory)
+	if err != nil {
+		t.Fatalf("require memory after restart: %v", err)
+	}
+	entries, err := memory2.List(context.Background())
+	if err != nil || len(entries) != 1 || entries[0].Text != "记住：用中文回复" {
+		t.Fatalf("restored memories = %+v (err %v)", entries, err)
 	}
 
 	if err := uiRoot2.Navigator().Push("session"); err != nil {

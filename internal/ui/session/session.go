@@ -83,6 +83,23 @@ type state struct {
 	draft     string
 	thinkOpen map[string]bool
 	toolOpen  map[string]bool
+
+	// Memory tab state: the search query, the add-input draft and the last
+	// store error shown in DangerText. The store itself is looked up lazily
+	// from the kernel context (contracts.KeyMemory) so the module loads without
+	// a memory backend.
+	memoryQuery string
+	memoryDraft string
+	memoryError string
+
+	// md caches the Markdown renderer options for the current appearance (the
+	// library keeps its parse state per view root and the options must stay
+	// stable across frames).
+	md markdownCache
+
+	// ctx is the module's kernel context, used for the optional memory backend
+	// lookup (ctx.Get(contracts.KeyMemory)); it is not a Requires dependency.
+	ctx cordis.Context
 }
 
 // Module registers the conversation screen.
@@ -104,6 +121,7 @@ func Module() *module.Descriptor[Config] {
 		moduleState := &state{
 			thinkOpen: make(map[string]bool),
 			toolOpen:  make(map[string]bool),
+			ctx:       ctx,
 		}
 
 		// Session changes arrive on the agent goroutine; hop to the UI thread

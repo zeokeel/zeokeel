@@ -4,6 +4,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"image/png"
 	"net/http"
@@ -87,6 +88,19 @@ func main() {
 	waitIdle(chat, sessionID, 10*time.Second)
 	if err := a.ui.Navigator().Push("session"); err != nil {
 		fail("push", err)
+	}
+	// Seed the durable memory backend and render the Memory tab.
+	if memory, err := a.root.Require(contracts.KeyMemory); err == nil {
+		_, _ = memory.Add(context.Background(), contracts.Memory{Text: "偏好：界面使用中文，回答尽量简洁", Scope: "global"})
+		_, _ = memory.Add(context.Background(), contracts.Memory{Text: "项目根目录是 /data/mygo", Scope: "workspace"})
+	}
+	a.render(outDir + "/p1-chat.png")
+	if err := a.tester.Click("记忆"); err != nil {
+		fmt.Println("click memory tab:", err)
+	}
+	a.render(outDir + "/p2-memory.png")
+	if err := a.tester.Click("对话"); err != nil {
+		fmt.Println("click chat tab:", err)
 	}
 	a.render(outDir + "/p1-chat.png")
 	if err := a.tester.Click("轨迹"); err != nil {
@@ -184,7 +198,7 @@ func scriptedServer() *httptest.Server {
 		if calls.Add(1) == 1 {
 			fmt.Fprint(w, "data: {\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"call-1\",\"type\":\"function\",\"function\":{\"name\":\"working_directory\",\"arguments\":\"{}\"}}]},\"index\":0,\"finish_reason\":\"tool_calls\"}]}\n\n")
 		} else {
-			fmt.Fprint(w, "data: {\"choices\":[{\"delta\":{\"content\":\"当前工作目录已经确认，可以开始下一步了。\"},\"index\":0}]}\n\n")
+			fmt.Fprint(w, "data: {\"choices\":[{\"delta\":{\"content\":\"## 工作目录已确认\\n\\n- 路径：当前工作目录\\n- 可以开始下一步了\\n\\n```text\\n/data/mygo\\n```\"},\"index\":0}]}\n\n")
 			fmt.Fprint(w, "data: {\"choices\":[{\"delta\":{},\"index\":0,\"finish_reason\":\"stop\"}]}\n\n")
 		}
 		fmt.Fprint(w, "data: [DONE]\n\n")

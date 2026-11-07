@@ -15,6 +15,12 @@
 - 宿主 chrome：280px 侧栏 + 64px brand row + Cmd/Ctrl+B 64px 图标 rail；无全局顶栏，屏幕自带头部；
   右侧检查栏为窗口级 docked 面板
 
+**P3 记忆 + Markdown（2026-11-07 晚）**
+- `zeokeel/memory`：JSON 原子持久化 rig.MemoryStore（Add/List/Remove/Search、scope、重启恢复），
+  toolkit 用持久 store 注册 memory 工具；desktop 16 / headless 7 实例
+- 对话页「记忆」Tab：列表/搜索/添加/删除/错误提示/空态（native 控件 + design 样式）
+- 助手正文 mygo `ui/markdown`：GFM 表格/任务列表/代码块（语言标签+复制）/流式增量
+
 **垂直切片**
 1. agent 宿主：`zeokeel/agent`（ChatService：provider/agent/gate/流式读模型、compaction、checkpoint）
 2. 会话/持久化：`zeokeel/sessionstore`（SQLite：History/SessionLog/CheckpointStore/HistoryReplacer + 会话元数据），

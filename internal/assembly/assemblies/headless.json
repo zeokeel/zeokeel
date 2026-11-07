@@ -21,6 +21,11 @@
       }
     },
     {
+      "id": "memory",
+      "module": "zeokeel/memory",
+      "config": {}
+    },
+    {
       "id": "toolkit",
       "module": "zeokeel/toolkit",
       "config": {

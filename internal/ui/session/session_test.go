@@ -274,6 +274,13 @@ type harness struct {
 
 func newHarness(t *testing.T, chat *fakeChat) *harness {
 	t.Helper()
+	return newHarnessWithMemory(t, chat, nil)
+}
+
+// newHarnessWithMemory is newHarness with an optional memory backend provided
+// as contracts.KeyMemory (nil means the session module runs without one).
+func newHarnessWithMemory(t *testing.T, chat *fakeChat, memory contracts.MemoryStore) *harness {
+	t.Helper()
 	uiRoot := uiroot.New(uiroot.Config{AppName: "ZeoKeel"})
 	ctx := cordis.Root()
 	t.Cleanup(func() { _ = ctx.DisposeAll() })
@@ -284,6 +291,9 @@ func newHarness(t *testing.T, chat *fakeChat) *harness {
 	provide(t, ctx, contracts.KeyLocale, uiRoot.Locale())
 	provide(t, ctx, contracts.KeyScreenLister, uiRoot.ScreenLister())
 	provide[contracts.ChatService](t, ctx, contracts.KeyChat, chat)
+	if memory != nil {
+		provide[contracts.MemoryStore](t, ctx, contracts.KeyMemory, memory)
+	}
 
 	activate(t, ctx, session.Module(), session.Config{})
 	return &harness{t: t, ctx: ctx, ui: uiRoot, chat: chat}
@@ -484,7 +494,7 @@ func TestTabPlaceholdersAreNativeTabs(t *testing.T) {
 	h.assertNoTexts(tester, "第一条消息")
 
 	h.click(tester, "记忆")
-	h.assertTexts(tester, "记忆面板将在后续阶段接入。")
+	h.assertTexts(tester, "记忆后端未启用")
 
 	// Return to the first tab: clicking "对话" is ambiguous (the sidebar also
 	// shows the screen title), so use the native tab keyboard navigation

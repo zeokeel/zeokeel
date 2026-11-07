@@ -130,7 +130,13 @@ func Module() *module.Descriptor[Config] {
 		tools = append(tools,
 			background.Tools()...,
 		)
-		tools = append(tools, memory.Tools(nil)...)
+		if memoryStore, ok := ctx.Get(contracts.KeyMemory); ok {
+			// The memory backend provides the durable rig.MemoryStore; without
+			// it the memory tools fall back to their in-memory default.
+			tools = append(tools, memory.Tools(memoryStore)...)
+		} else {
+			tools = append(tools, memory.Tools(nil)...)
+		}
 		tools = append(tools, schedule.Tools(nil)...)
 		tools = append(tools, worktree.Tools(policy)...)
 		tools = append(tools, skill.Tools(nil)...)

@@ -1,11 +1,15 @@
 package session
 
 import (
+	"context"
 	"fmt"
 	"strings"
+	"time"
 	"unicode/utf8"
 
 	"github.com/egoist/mygo/ui"
+	"github.com/egoist/mygo/ui/markdown"
+	"github.com/egoist/mygo/ui/markdown/parser"
 
 	"github.com/zeokeel/zeokeel/internal/contracts"
 	"github.com/zeokeel/zeokeel/internal/design"
@@ -49,7 +53,7 @@ func buildScreen(
 		case tabTrajectory:
 			buildTrajectoryPane(c, t, chatSession, hasSession, st)
 		case tabMemory:
-			buildMemoryPane(c, t)
+			buildMemoryPane(c, t, runtime, st)
 		default:
 			buildChatPane(c, t, runtime, navigator, chat, cfg, st, chatSession, hasSession)
 		}
@@ -243,8 +247,14 @@ func buildAssistantMessage(c *ui.Context, t *design.Tokens, runtime contracts.UI
 			st.thinkOpen[message.ID] = open
 		}
 		if message.Text != "" {
-			design.Apply(ui.Text(c, message.Text), t.Font(design.TypeBody)).
-				TextColor(t.LabelPrimary)
+			// Assistant prose is rendered by mygo's official Markdown view: the
+			// streaming turn heals half-written syntax and the finished turn
+			// reuses the same node position (and parse state) as a full view.
+			if message.Streaming {
+				markdown.Stream(c, message.Text, st.markdownOptions(t))
+			} else {
+				markdown.View(c, message.Text, st.markdownOptions(t))
+			}
 		}
 		if message.Streaming {
 			ui.Row(c).Gap(design.Space2).AlignItems(ui.Center).Children(func() {
@@ -389,19 +399,184 @@ func buildTrajectoryCard(c *ui.Context, t *design.Tokens, index int, item trajec
 	})
 }
 
-// buildMemoryPane keeps the Phase-1 memory placeholder, in brand copy.
-func buildMemoryPane(c *ui.Context, t *design.Tokens) {
+// markdownCache keeps the renderer options for one appearance so the Markdown
+// views do not rebuild their configuration (and reparse) every frame.
+type markdownCache struct {
+	options *markdown.Options
+	dark    bool
+}
+
+// markdownOptions returns the brand Markdown configuration: body text at the
+// design body size (14) with its 22 DIP line box, the default extension set and
+// no reveal pacing (the reply is already complete when it is drawn; streaming
+// uses the library's own healing parser).
+func (st *state) markdownOptions(t *design.Tokens) *markdown.Options {
+	if st.md.options != nil && st.md.dark == t.Dark {
+		return st.md.options
+	}
+	theme := markdown.DefaultTheme(t.Theme())
+	theme.FontSize = 14
+	theme.LineHeight = 22.0 / 14
+	st.md.options = &markdown.Options{
+		Theme:      theme,
+		Extensions: parser.Default,
+		Reveal:     &markdown.Reveal{Unit: markdown.AtOnce, Fade: -1},
+	}
+	st.md.dark = t.Dark
+	return st.md.options
+}
+
+// buildMemoryPane is the Memory tab's real panel: the workspace memory store's
+// entries (or search results), native per-entry delete buttons and an add row.
+// Without a memory backend (contracts.KeyMemory is not provided) it shows the
+// disabled empty state instead of failing.
+func buildMemoryPane(c *ui.Context, t *design.Tokens, runtime contracts.UIRuntime, st *state) {
+	store, hasStore := st.ctx.Get(contracts.KeyMemory)
+	var memories []contracts.Memory
+	var listErr error
+	if hasStore {
+		if query := strings.TrimSpace(st.memoryQuery); query != "" {
+			memories, listErr = store.Search(context.Background(), query)
+		} else {
+			memories, listErr = store.List(context.Background())
+		}
+	}
+
 	ui.Scroll(c).FillWidth().Grow(1).Children(func() {
 		ui.Row(c).FillWidth().Justify(ui.Center).AlignItems(ui.Start).Children(func() {
-			design.Apply(ui.Column(c), t.Gap(design.Space3)).
+			design.Apply(ui.Column(c), t.Gap(design.Space4)).
 				Width(transcriptWidth).MaxWidthPercent(92).
 				PaddingY(design.Space5).Children(func() {
-				design.Apply(ui.Text(c, "记忆"), t.Font(design.TypeS)).
-					FontWeight(600).TextColor(t.LabelPrimary)
-				buildPaneEmpty(c, t, "记忆面板将在后续阶段接入。")
+				// Heading: title + entry count.
+				ui.Row(c).FillWidth().Gap(design.Space2).AlignItems(ui.Center).Children(func() {
+					design.Apply(ui.Text(c, "记忆"), t.Font(design.TypeS)).
+						FontWeight(600).TextColor(t.LabelPrimary)
+					if hasStore && listErr == nil {
+						design.Apply(ui.Badge(c, fmt.Sprintf("%d", len(memories))), t.Badge())
+					}
+					ui.Spacer(c).Grow(1)
+				})
+				if !hasStore {
+					buildPaneEmpty(c, t, "记忆后端未启用")
+					return
+				}
+
+				// Search (store.Search for a non-empty query, List otherwise).
+				ui.SearchField(c, &st.memoryQuery).
+					Label("搜索记忆").Placeholder("搜索记忆").FillWidth()
+				if listErr != nil {
+					buildErrorLine(c, t, "读取记忆失败："+listErr.Error())
+				}
+
+				switch {
+				case listErr != nil:
+					// The error row above is the whole content.
+				case len(memories) == 0 && strings.TrimSpace(st.memoryQuery) != "":
+					buildPaneEmpty(c, t, "没有匹配的记忆")
+				case len(memories) == 0:
+					buildPaneEmpty(c, t, "还没有记忆")
+				default:
+					for _, memory := range memories {
+						buildMemoryCard(c, t, runtime, store, st, memory)
+					}
+				}
+
+				// Add row: native input + primary action, disabled while empty.
+				buildMemoryAdd(c, t, runtime, store, st)
 			})
 		})
 	})
+}
+
+// buildMemoryCard is one memory entry: body text, scope/created metadata and a
+// native delete action.
+func buildMemoryCard(c *ui.Context, t *design.Tokens, runtime contracts.UIRuntime, store contracts.MemoryStore, st *state, memory contracts.Memory) {
+	th := t.Theme()
+	card := design.Apply(ui.Column(c), t.Panel()).
+		Padding(design.Space3).Gap(design.Space2)
+	card.Children(func() {
+		ui.Row(c).FillWidth().Gap(design.Space2).AlignItems(ui.Start).Children(func() {
+			design.Apply(ui.Text(c, memory.Text), t.Font(design.TypeBody)).
+				TextColor(t.LabelPrimary).Grow(1)
+			remove := ui.Button(c, "删除").Label("删除记忆").Height(th.Space(7)).
+				PaddingX(design.Space2).Radius(design.RadiusSM).TextColor(t.DangerText)
+			if remove.Clicked() {
+				if store.Remove(context.Background(), memory.ID) {
+					st.memoryError = ""
+				} else {
+					st.memoryError = "删除记忆失败：" + firstNonEmpty(memory.ID, "未知条目")
+				}
+				runtime.Invalidate()
+			}
+		})
+		meta := formatTimestamp(memory.Created)
+		if scope := memoryScopeLabel(memory.Scope); scope != "" {
+			meta = scope + " · " + meta
+		}
+		design.Apply(ui.Text(c, meta), t.Font(design.TypeXXS)).TextColor(t.LabelTertiary)
+	})
+}
+
+// buildMemoryAdd is the native add row at the bottom of the Memory tab.
+func buildMemoryAdd(c *ui.Context, t *design.Tokens, runtime contracts.UIRuntime, store contracts.MemoryStore, st *state) {
+	draft := strings.TrimSpace(st.memoryDraft)
+	card := design.Apply(ui.Column(c), t.Panel()).
+		Padding(design.Space3).Gap(design.Space2)
+	card.Children(func() {
+		design.Apply(ui.Text(c, "新建记忆"), t.Font(design.TypeS)).
+			FontWeight(600).TextColor(t.LabelPrimary)
+		ui.TextInput(c, &st.memoryDraft).Label("记忆内容").
+			Placeholder("输入要记住的内容").FillWidth()
+		if draft == "" {
+			design.Apply(ui.Text(c, "输入内容后可添加。"), t.TextMuted(design.TypeXXS))
+		}
+		ui.Row(c).FillWidth().AlignItems(ui.Center).Children(func() {
+			ui.Spacer(c).Grow(1)
+			add := design.Apply(ui.PrimaryButton(c, "添加记忆"), t.PrimaryButton()).
+				Disabled(draft == "")
+			if add.Clicked() && draft != "" {
+				if _, err := store.Add(context.Background(), contracts.Memory{
+					Text:  draft,
+					Scope: memoryScopeWorkspace,
+				}); err != nil {
+					st.memoryError = "添加记忆失败：" + err.Error()
+				} else {
+					st.memoryDraft = ""
+					st.memoryError = ""
+				}
+				runtime.Invalidate()
+			}
+		})
+		if st.memoryError != "" {
+			buildErrorLine(c, t, st.memoryError)
+		}
+	})
+}
+
+// formatTimestamp renders a local display timestamp, "—" when unset.
+func formatTimestamp(value time.Time) string {
+	if value.IsZero() {
+		return "—"
+	}
+	return value.Local().Format("2006-01-02 15:04")
+}
+
+// memoryScopeWorkspace is the scope the session panel writes; the store owns
+// the normalized value, this is the display fallback.
+const memoryScopeWorkspace = "workspace"
+
+// memoryScopeLabel renders a memory scope for the metadata line.
+func memoryScopeLabel(scope string) string {
+	switch strings.ToLower(strings.TrimSpace(scope)) {
+	case "workspace", "工作区":
+		return "工作区"
+	case "global", "全局":
+		return "全局"
+	case "":
+		return ""
+	default:
+		return scope
+	}
 }
 
 // --- composer ---------------------------------------------------------------
@@ -428,7 +603,7 @@ func buildComposer(
 		if query, active := slashQuery(st.draft); active {
 			buildSlashMenu(c, t, runtime, st, query)
 		}
-		ui.Row(c).Justify(ui.Center).Children(func() {
+		ui.Row(c).FillWidth().Justify(ui.Center).Children(func() {
 			card := design.Apply(ui.Column(c), t.Panel()).
 				FillWidth().MaxWidth(composerWidth).MaxWidthPercent(94).
 				Radius(design.RadiusXL).
