@@ -147,13 +147,14 @@ func TestProductsAndEntries(t *testing.T) {
 			t.Fatalf("desktop root %d = %q, want %q", index, root.Module, wantRoots[index])
 		}
 	}
-	if len(desktop[14].Children) != 10 {
+	if len(desktop[14].Children) != 11 {
 		t.Fatalf("UI group children = %d, want 10 UI modules", len(desktop[11].Children))
 	}
 	wantChildren := []string{
 		"zeokeel-ui/home", "zeokeel-ui/toolcards", "zeokeel-ui/about",
 		"zeokeel-ui/sidebar", "zeokeel-ui/session", "zeokeel-ui/settings", "zeokeel-ui/approval",
 		"zeokeel-ui/rightpanel", "zeokeel-ui/automation", "zeokeel-ui/plugins",
+		"zeokeel-ui/interaction",
 	}
 	for index, child := range desktop[14].Children {
 		if child.Module != wantChildren[index] {
@@ -196,6 +197,7 @@ func TestRegistryIsExplicit(t *testing.T) {
 		"zeokeel/importer",
 		"zeokeel/acp",
 		"zeokeel/modelcatalog",
+		"zeokeel-ui/interaction",
 		"zeokeel/sessionstore",
 		"zeokeel/workspace",
 		"zeokeel/terminal",
@@ -215,8 +217,8 @@ func TestRegistryIsExplicit(t *testing.T) {
 			t.Fatalf("Registry() lacks module %q", id)
 		}
 	}
-	if got := len(registry.Modules()); got != 27 {
-		t.Fatalf("Registry() modules = %d, want 27", got)
+	if got := len(registry.Modules()); got != 28 {
+		t.Fatalf("Registry() modules = %d, want 28", got)
 	}
 }
 
@@ -248,14 +250,14 @@ func TestDesktopAssemblyLoadsAndUnwinds(t *testing.T) {
 	// approvals provider, the agent consumer and the UI modules settle in
 	// dependency order.
 	instances := loader.Instances()
-	if len(instances) != 25 {
-		t.Fatalf("desktop instances = %d, want 25", len(instances))
+	if len(instances) != 26 {
+		t.Fatalf("desktop instances = %d, want 26", len(instances))
 	}
 	wantIDs := []string{
 		"appinfo", "store", "approvals", "workspace", "terminal", "skills", "memory", "toolkit", "hosttools",
 		"agent", "automation", "update", "importer", "modelcatalog", "ui",
 		"home", "toolcards", "about", "sidebar", "session", "settings", "approval", "rightpanel",
-		"automation-ui", "plugins-ui",
+		"automation-ui", "plugins-ui", "interaction",
 	}
 	gotIDs := make([]string, len(instances))
 	for index, instance := range instances {

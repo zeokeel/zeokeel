@@ -44,6 +44,7 @@ type Root struct {
 	locale          *localeService
 	settingsService contracts.SettingsService
 	fileDrop        *fileDropService
+	interaction     *interactionService
 
 	mu         sync.Mutex
 	invalidate func()
@@ -107,7 +108,12 @@ func New(cfg Config) *Root {
 	if cfg.Language == "" {
 		cfg.Language = "zh"
 	}
-	r := &Root{appName: cfg.AppName, settingsService: cfg.Settings, fileDrop: &fileDropService{}}
+	r := &Root{
+		appName:         cfg.AppName,
+		settingsService: cfg.Settings,
+		fileDrop:        &fileDropService{},
+		interaction:     newInteractionService(),
+	}
 	r.theme = &themeService{root: r, dark: cfg.Dark}
 	r.locale = &localeService{root: r, lang: cfg.Language}
 	r.rt = newRuntime(r)

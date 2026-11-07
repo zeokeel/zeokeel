@@ -21,6 +21,14 @@
 - 右侧栏「文件」Tab：打开文件夹（mygo 原生 Directory picker）、目录进入/面包屑、文本/Markdown/图片预览、
   刷新与错误状态；E2E 覆盖工作区创建 + 列表 + 预览帧
 
+**P5 ask_user 真实交互（2026-11-08）**
+- contracts.UserInteraction + uiroot 实现（handler/pending map/atomic ID；Ask 阻塞至 Answer/Cancel/ctx；
+  无 handler 错误；并发安全）
+- 桌面 host provideServices 提供 KeyUserInteraction；hosttools Module 激活时可选桥接为真实 Asker（无则 MemoryAsker）
+- 新 UI 模块 zeokeel-ui/interaction：SlotOverlayDialogs 原生 Modal（问题文本/选项按钮/自由文本/FIFO/Esc→Cancel/i18n，
+  dispose 清 handler+cancel 全部）
+- E2E：toolkit.Invoke("ask_user") 阻塞 → 帧出现对话框 → 点选项 → 返回 user answered: sqlite；截图 p2-ask.png
+
 **P5 web search（2026-11-08）**
 - internal/websearch 移植（Config/NewSearcher/Search：POST JSON、Bearer、limit clamp、10s/ctx、1MiB、错误语义）
 - toolkit：network=true 注册 web_fetch；有 KeySettings 时动态 web_search（每次调用读 web.search.endpoint/apiKey，

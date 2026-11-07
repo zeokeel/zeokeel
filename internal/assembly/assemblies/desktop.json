@@ -146,6 +146,11 @@
           "id": "plugins-ui",
           "module": "zeokeel-ui/plugins",
           "config": {}
+        },
+        {
+          "id": "interaction",
+          "module": "zeokeel-ui/interaction",
+          "config": {}
         }
       ]
     }

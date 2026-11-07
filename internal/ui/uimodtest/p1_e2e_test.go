@@ -490,6 +490,47 @@ func TestP1ApprovalToolsAndPersistence(t *testing.T) {
 		t.Fatalf("chinese UI did not come back; texts = %v", tester.Texts())
 	}
 
+	// ask_user reaches the real native dialog through the host bridge: the tool
+	// parks until the user picks an option, then returns the answer.
+	toolkit, err := root.Require(contracts.KeyToolkit)
+	if err != nil {
+		t.Fatalf("require toolkit: %v", err)
+	}
+	answerCh := make(chan rig.ToolResult, 1)
+	go func() {
+		result, invokeErr := toolkit.Invoke(context.Background(), rig.ToolCall{
+			ID: "ask-1", Name: "ask_user",
+			Arguments: `{"question":"选择数据库","options":["sqlite","postgres"]}`,
+		})
+		if invokeErr != nil {
+			result = rig.ToolResult{IsError: true, Content: invokeErr.Error()}
+		}
+		answerCh <- result
+	}()
+	askDeadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(askDeadline) {
+		tester.Frame()
+		if tester.HasText("选择数据库") {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if !tester.HasText("选择数据库") {
+		t.Fatalf("ask_user dialog missing; texts = %v", tester.Texts())
+	}
+	if err := tester.Click("sqlite"); err != nil {
+		t.Fatalf("answer ask_user: %v; texts = %v", err, tester.Texts())
+	}
+	tester.Frame()
+	select {
+	case result := <-answerCh:
+		if result.IsError || result.Content != "user answered: sqlite" {
+			t.Fatalf("ask_user result = %+v", result)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("ask_user tool did not return")
+	}
+
 	// --- restart: the session and its messages come back from SQLite ------
 	title := session.Title
 	if err := loader.Close(); err != nil {
@@ -579,6 +620,7 @@ func bootDesktop(t *testing.T, dataDir string, settings *memSettings) (cordis.Co
 	provide(t, root, contracts.KeyLocale, uiRoot.Locale())
 	provide(t, root, contracts.KeyScreenLister, uiRoot.ScreenLister())
 	provide(t, root, contracts.KeyFileDrop, contracts.FileDropService(uiRoot.FileDrop()))
+	provide(t, root, contracts.KeyUserInteraction, contracts.UserInteraction(uiRoot.UserInteraction()))
 	provide(t, root, contracts.KeySettings, contracts.SettingsService(settings))
 	provide(t, root, contracts.KeyLogger, contracts.Logger(discardLogger{}))
 	loader, err := assembly.LoadWithBuildInfo(root, assembly.ProductDesktop, assembly.BuildInfo{Version: "0.1.0"})

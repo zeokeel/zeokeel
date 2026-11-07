@@ -20,6 +20,7 @@ import (
 	"github.com/egoist/mygo/ui"
 	cordis "github.com/zeokeel/zeokeel-kernel"
 	"github.com/zeokeel/zeokeel-kernel/module"
+	rig "github.com/zeokeel/zeokeel-rig"
 
 	"github.com/zeokeel/zeokeel/internal/assembly"
 	"github.com/zeokeel/zeokeel/internal/contracts"
@@ -180,6 +181,28 @@ func main() {
 		a.tester.Key(0, ui.KeyBackspace)
 		a.tester.Frame()
 	}
+	// ask_user: the host bridge + native overlay dialog (the tool parks).
+	if toolkit, tkErr := a.root.Require(contracts.KeyToolkit); tkErr == nil {
+		go func() {
+			_, _ = toolkit.Invoke(context.Background(), rig.ToolCall{
+				ID: "ask-snapshot", Name: "ask_user",
+				Arguments: `{"question":"要使用哪个数据库？","options":["SQLite（本地文件）","PostgreSQL（服务端）"]}`,
+			})
+		}()
+		for attempts := 0; attempts < 50; attempts++ {
+			a.tester.Frame()
+			if a.tester.HasText("要使用哪个数据库？") {
+				break
+			}
+			time.Sleep(10 * time.Millisecond)
+		}
+		a.render(outDir + "/p2-ask.png")
+		if err := a.tester.Click("SQLite（本地文件）"); err != nil {
+			fmt.Println("answer ask dialog:", err)
+		}
+		a.tester.Frame()
+	}
+
 	// Composer model menu (catalog presets + per-session switch).
 	if err := a.tester.Click("snapshot-model"); err == nil {
 		a.tester.Frame()
@@ -425,6 +448,7 @@ func boot(baseURL, dataDir string) *app {
 	provide(root, contracts.KeyLocale, uiRoot.Locale())
 	provide(root, contracts.KeyScreenLister, uiRoot.ScreenLister())
 	provide(root, contracts.KeyFileDrop, contracts.FileDropService(uiRoot.FileDrop()))
+	provide(root, contracts.KeyUserInteraction, contracts.UserInteraction(uiRoot.UserInteraction()))
 	provide(root, contracts.KeySettings, contracts.SettingsService(&settings{values: map[string]string{
 		contracts.SettingsChatModel:   "snapshot-model",
 		contracts.SettingsChatBaseURL: baseURL,

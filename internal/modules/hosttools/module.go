@@ -14,6 +14,7 @@
 package hosttools
 
 import (
+	"context"
 	"fmt"
 
 	cordis "github.com/zeokeel/zeokeel-kernel"
@@ -55,6 +56,15 @@ func ModuleWithHost(host *hostcaps.Host) *module.Descriptor[Config] {
 		capabilities := hostcaps.Host{}
 		if host == nil {
 			capabilities = *hostcaps.NewMemoryHost()
+			// The desktop host provides a UserInteraction bridge; route the
+			// product ask_user tool to it so the question renders in the UI and
+			// the tool parks until the user answers. Headless products have no
+			// bridge and keep the memory asker's no-interactive behavior.
+			if interaction, ok := ctx.Get(contracts.KeyUserInteraction); ok {
+				capabilities.Asker = hostcaps.AskerFunc(func(ctx context.Context, question string, options []string) (string, error) {
+					return interaction.Ask(ctx, question, options)
+				})
+			}
 		} else {
 			capabilities = *host
 		}

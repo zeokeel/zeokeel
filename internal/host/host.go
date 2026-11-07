@@ -523,6 +523,9 @@ func provideServices(root cordis.Context, dataDir string, settings *Settings, lo
 	if _, err := root.Provide(contracts.KeyFileDrop, contracts.FileDropService(uiRoot.FileDrop())); err != nil {
 		return fmt.Errorf("%s: provide file drop: %w", appName, err)
 	}
+	if _, err := root.Provide(contracts.KeyUserInteraction, contracts.UserInteraction(uiRoot.UserInteraction())); err != nil {
+		return fmt.Errorf("%s: provide user interaction: %w", appName, err)
+	}
 	return nil
 }
 
