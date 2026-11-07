@@ -370,6 +370,25 @@ func TestP1ApprovalToolsAndPersistence(t *testing.T) {
 		t.Fatalf("dropped attachment chip missing; texts = %v", tester.Texts())
 	}
 
+	// Language switching is live: the session screen and the sidebar re-render
+	// in English on the next frame and back to Chinese.
+	locale, err := root.Require(contracts.KeyLocale)
+	if err != nil {
+		t.Fatalf("require locale: %v", err)
+	}
+	locale.SetLanguage("en")
+	tester.Frame()
+	for _, want := range []string{"New chat", "Search sessions", "Settings", "Chat", "Ask ZeoKeel…", "Send"} {
+		if !tester.HasText(want) {
+			t.Fatalf("english UI missing %q; texts = %v", want, tester.Texts())
+		}
+	}
+	locale.SetLanguage("zh")
+	tester.Frame()
+	if !tester.HasText("新对话") {
+		t.Fatalf("chinese UI did not come back; texts = %v", tester.Texts())
+	}
+
 	// --- restart: the session and its messages come back from SQLite ------
 	title := session.Title
 	if err := loader.Close(); err != nil {

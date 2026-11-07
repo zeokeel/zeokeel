@@ -75,38 +75,38 @@ func buildHeader(c *ui.Context, t *design.Tokens, cfg Config, st *state, chatSes
 		BorderWidth(0, 0, 1, 0).BorderColor(t.BorderL2).Children(func() {
 		ui.Row(c).FillWidth().Height(t.Scale(th.Space(8))).AlignItems(ui.Center).
 			Gap(design.Space2).Children(func() {
-			title := cfg.Title
+			title := st.localized(cfg.Title, "对话", "Chat")
 			if hasSession && strings.TrimSpace(chatSession.Title) != "" {
 				title = chatSession.Title
 			}
 			design.Apply(ui.Text(c, title), t.Font(design.TypeL)).
 				FontWeight(600).TextColor(t.LabelPrimary).MaxLines(1).Ellipsis("…")
 			if hasSession && chatSession.Running {
-				design.Apply(ui.Badge(c, "运行中"), t.Badge()).TextColor(t.WarningText)
+				design.Apply(ui.Badge(c, st.tr("运行中", "Running")), t.Badge()).TextColor(t.WarningText)
 			}
 			ui.Spacer(c).Grow(1)
 			if hasSession {
 				// Secondary conversation actions live in one overflow menu: three
 				// equal-weight buttons in the header competed with the title and
 				// the tabs for attention.
-				ui.PopoverMenuButton(c, "更多", func(m *ui.Menu) {
-					if m.Item("复制会话 ID").Chosen() {
+				ui.PopoverMenuButton(c, st.tr("更多", "More"), func(m *ui.Menu) {
+					if m.Item(st.tr("复制会话 ID", "Copy session ID")).Chosen() {
 						c.WriteClipboard(chatSession.ID)
 					}
-					if m.Item("复制对话").Chosen() {
-						c.WriteClipboard(transcriptText(chatSession))
+					if m.Item(st.tr("复制对话", "Copy conversation")).Chosen() {
+						c.WriteClipboard(transcriptText(chatSession, st.english()))
 					}
-					if m.Item("导出 Markdown").Chosen() {
+					if m.Item(st.tr("导出 Markdown", "Export Markdown")).Chosen() {
 						exportSession(st, chatSession, cfg)
 					}
 				})
 			}
 		})
 		if st.exportErr != "" {
-			buildErrorLine(c, t, st.exportErr)
+			buildErrorLine(c, t, st.tr("导出失败：", "Export failed: ")+st.exportErr)
 		} else if st.exportStatus != "" {
 			ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(design.Space2).Children(func() {
-				badge := design.Apply(ui.Badge(c, st.exportStatus), t.Badge()).
+				badge := design.Apply(ui.Badge(c, st.tr("已导出", "Exported")), t.Badge()).
 					TextColor(t.Success)
 				if st.exportPath != "" {
 					badge.Tooltip(st.exportPath)
@@ -120,15 +120,17 @@ func buildHeader(c *ui.Context, t *design.Tokens, cfg Config, st *state, chatSes
 // exportSession writes the conversation as Markdown through the export seam
 // and records the result for the header status line.
 func exportSession(st *state, chatSession contracts.ChatSession, cfg Config) {
-	title := firstNonEmpty(chatSession.Title, cfg.Title, "会话")
-	path, err := ExportSaver(sanitizeExportFilename(title)+".md", exportTranscript(chatSession, title))
+	title := firstNonEmpty(chatSession.Title, cfg.Title, st.tr("会话", "Conversation"))
+	ExportDialogTitle = st.tr("导出会话", "Export conversation")
+	path, err := ExportSaver(sanitizeExportFilename(title)+".md",
+		exportTranscript(chatSession, title, st.english()))
 	switch {
 	case err != nil:
-		st.exportErr = "导出失败：" + err.Error()
+		st.exportErr = err.Error()
 		st.exportStatus = ""
 		st.exportPath = ""
 	case strings.TrimSpace(path) != "":
-		st.exportStatus = "已导出"
+		st.exportStatus = "ok"
 		st.exportPath = path
 		st.exportErr = ""
 	}
@@ -136,7 +138,7 @@ func exportSession(st *state, chatSession contracts.ChatSession, cfg Config) {
 
 // transcriptText formats the session read model for the clipboard: one block
 // per message, tool calls summarised inline (the old shell's copy action).
-func transcriptText(chatSession contracts.ChatSession) string {
+func transcriptText(chatSession contracts.ChatSession, english bool) string {
 	var builder strings.Builder
 	for _, message := range chatSession.Messages {
 		if strings.TrimSpace(message.Text) == "" && len(message.Tools) == 0 {
@@ -146,12 +148,22 @@ func transcriptText(chatSession contracts.ChatSession) string {
 		switch role {
 		case "user":
 			role = "用户"
+			if english {
+				role = "User"
+			}
 		case "assistant":
 			role = "助手"
+			if english {
+				role = "Assistant"
+			}
 		}
 		fmt.Fprintf(&builder, "%s: %s\n", role, strings.TrimSpace(message.Text))
 		for _, call := range message.Tools {
-			fmt.Fprintf(&builder, "[工具] %s (%s)\n", call.Name, call.Status)
+			toolLabel := "工具"
+			if english {
+				toolLabel = "Tool"
+			}
+			fmt.Fprintf(&builder, "[%s] %s (%s)\n", toolLabel, call.Name, call.Status)
 		}
 	}
 	return strings.TrimRight(builder.String(), "\n")
@@ -162,7 +174,11 @@ func transcriptText(chatSession contracts.ChatSession) string {
 // quiet label + accent underline.
 func buildTabs(c *ui.Context, t *design.Tokens, cfg Config, st *state) {
 	th := t.Theme()
-	labels := []string{cfg.TabChat, cfg.TabTrajectory, cfg.TabMemory}
+	labels := []string{
+		st.localized(cfg.TabChat, "对话", "Chat"),
+		st.localized(cfg.TabTrajectory, "轨迹", "Trajectory"),
+		st.localized(cfg.TabMemory, "记忆", "Memory"),
+	}
 	tabs := ui.TabsBase(c, &st.tab, len(labels))
 	tabs.List.Height(t.Scale(th.Space(9))).Margin(design.Space2, 0, 0, 0).
 		Padding(0, 0, 0, th.Space(1)).Gap(design.Space4).
@@ -210,7 +226,7 @@ func buildChatPane(
 				Width(transcriptWidth).MaxWidthPercent(92).
 				PaddingY(design.Space5).Children(func() {
 				if !hasSession || len(chatSession.Messages) == 0 {
-					buildHero(c, t, cfg, navigator, chat)
+					buildHero(c, t, cfg, navigator, chat, st)
 				} else {
 					for _, message := range chatSession.Messages {
 						buildMessage(c, t, runtime, message, st)
@@ -226,7 +242,7 @@ func buildChatPane(
 
 // buildHero is the branded first-run empty state: icon badge, title, hint and
 // the native new-conversation action.
-func buildHero(c *ui.Context, t *design.Tokens, cfg Config, navigator contracts.Navigator, chat contracts.ChatService) {
+func buildHero(c *ui.Context, t *design.Tokens, cfg Config, navigator contracts.Navigator, chat contracts.ChatService, st *state) {
 	th := t.Theme()
 	ui.Column(c).FillWidth().AlignItems(ui.Center).Gap(design.Space3).
 		PaddingY(design.Space8).Children(func() {
@@ -235,13 +251,15 @@ func buildHero(c *ui.Context, t *design.Tokens, cfg Config, navigator contracts.
 			ui.Icon(c, icons.NewChat()).Size(th.Space(5), th.Space(5)).
 				TextColor(t.LabelSecondary)
 		})
-		design.Apply(ui.Text(c, "开始新对话"), t.Font(design.TypeM)).
-			FontWeight(600).TextColor(t.LabelPrimary)
-		design.Apply(ui.Text(c, cfg.EmptyText), t.Font(design.TypeXXS)).
-			TextColor(t.LabelTertiary).MaxLines(2)
-		button := design.Apply(ui.PrimaryButton(c, "新对话"), t.PrimaryButton())
+		design.Apply(ui.Text(c, st.tr("开始新对话", "Start a new conversation")),
+			t.Font(design.TypeM)).FontWeight(600).TextColor(t.LabelPrimary)
+		design.Apply(ui.Text(c, st.localized(cfg.EmptyText,
+			"还没有消息，开始一段新对话吧。",
+			"No messages yet. Start a new conversation.")),
+			t.Font(design.TypeXXS)).TextColor(t.LabelTertiary).MaxLines(2)
+		button := design.Apply(ui.PrimaryButton(c, st.tr("新对话", "New conversation")), t.PrimaryButton())
 		if button.Clicked() {
-			startNewSession(chat, navigator)
+			startNewSession(st, chat, navigator)
 		}
 	})
 }
@@ -279,7 +297,7 @@ func buildAssistantMessage(c *ui.Context, t *design.Tokens, runtime contracts.UI
 	ui.Column(c).FillWidth().Gap(design.Space2).Children(func() {
 		if message.Reasoning != "" {
 			open := st.thinkOpen[message.ID]
-			ui.Collapsible(c, "思考", &open, func() {
+			ui.Collapsible(c, st.tr("思考", "Reasoning"), &open, func() {
 				design.Apply(ui.Text(c, message.Reasoning), t.TextMuted(design.TypeXS))
 			})
 			st.thinkOpen[message.ID] = open
@@ -296,7 +314,7 @@ func buildAssistantMessage(c *ui.Context, t *design.Tokens, runtime contracts.UI
 		}
 		if message.Streaming {
 			ui.Row(c).Gap(design.Space2).AlignItems(ui.Center).Children(func() {
-				design.Apply(ui.Badge(c, "生成中"), t.Badge()).TextColor(t.Accent)
+				design.Apply(ui.Badge(c, st.tr("生成中", "Generating")), t.Badge()).TextColor(t.Accent)
 				ui.Icon(c, icons.Sparkles()).Size(th.Space(4), th.Space(4)).TextColor(t.Accent)
 			})
 		}
@@ -306,7 +324,7 @@ func buildAssistantMessage(c *ui.Context, t *design.Tokens, runtime contracts.UI
 		for _, tool := range message.Tools {
 			call := contracts.ToolCall{ID: tool.ID, Name: tool.Name, Status: tool.Status, Summary: tool.Summary}
 			if !runtime.RenderTool(c, call) {
-				buildToolFallback(c, t, call)
+				buildToolFallback(c, t, st, call)
 			}
 		}
 	})
@@ -322,8 +340,8 @@ func buildErrorLine(c *ui.Context, t *design.Tokens, text string) {
 }
 
 // buildToolFallback is the native card used when no toolcards module is active.
-func buildToolFallback(c *ui.Context, t *design.Tokens, call contracts.ToolCall) {
-	status := statusLabel(call.Status)
+func buildToolFallback(c *ui.Context, t *design.Tokens, st *state, call contracts.ToolCall) {
+	status := statusLabel(call.Status, st)
 	color := statusColor(t, call.Status)
 	card := design.Apply(ui.Column(c), t.Panel()).
 		Padding(design.Space3).Gap(design.Space1)
@@ -376,17 +394,17 @@ func buildTrajectoryPane(c *ui.Context, t *design.Tokens, chatSession contracts.
 				Width(transcriptWidth).MaxWidthPercent(92).
 				PaddingY(design.Space5).Children(func() {
 				ui.Row(c).FillWidth().Gap(design.Space2).AlignItems(ui.Center).Children(func() {
-					design.Apply(ui.Text(c, "轨迹"), t.Font(design.TypeS)).
+					design.Apply(ui.Text(c, st.tr("轨迹", "Trajectory")), t.Font(design.TypeS)).
 						FontWeight(600).TextColor(t.LabelPrimary)
 					if len(items) > 0 {
-						design.Apply(ui.Badge(c, fmt.Sprintf("%d 个工具调用", len(items))), t.Badge())
+						design.Apply(ui.Badge(c, fmt.Sprintf(st.tr("%d 个工具调用", "%d tool calls"), len(items))), t.Badge())
 					}
 				})
 				switch {
 				case !hasSession:
-					buildPaneEmpty(c, t, "还没有会话，暂无可查看的轨迹。")
+					buildPaneEmpty(c, t, st.tr("还没有会话，暂无可查看的轨迹。", "No session yet; nothing to inspect."))
 				case len(items) == 0:
-					buildPaneEmpty(c, t, "本次会话还没有工具调用。")
+					buildPaneEmpty(c, t, st.tr("本次会话还没有工具调用。", "No tool calls in this conversation yet."))
 				default:
 					for index, item := range items {
 						buildTrajectoryCard(c, t, index, item, st)
@@ -412,13 +430,13 @@ func buildPaneEmpty(c *ui.Context, t *design.Tokens, text string) {
 // buildTrajectoryCard renders one tool call of the timeline.
 func buildTrajectoryCard(c *ui.Context, t *design.Tokens, index int, item trajectoryItem, st *state) {
 	tool := item.tool
-	status := statusLabel(tool.Status)
+	status := statusLabel(tool.Status, st)
 	color := statusColor(t, tool.Status)
 	card := design.Apply(ui.Column(c), t.Panel()).
 		Padding(design.Space3).Gap(design.Space1)
 	card.Children(func() {
 		ui.Row(c).FillWidth().Gap(design.Space2).AlignItems(ui.Center).Children(func() {
-			design.Apply(ui.Badge(c, fmt.Sprintf("步骤 %d", index+1)), t.Badge())
+			design.Apply(ui.Badge(c, fmt.Sprintf(st.tr("步骤 %d", "Step %d"), index+1)), t.Badge())
 			design.Apply(ui.Badge(c, status), t.Badge()).TextColor(color)
 			design.Apply(ui.Text(c, tool.Name), t.Font(design.TypeXS)).
 				FontWeight(600).TextColor(t.LabelPrimary)
@@ -429,7 +447,7 @@ func buildTrajectoryCard(c *ui.Context, t *design.Tokens, index int, item trajec
 		})
 		if summary := strings.TrimSpace(tool.Summary); summary != "" {
 			open := st.toolOpen[item.key]
-			ui.Collapsible(c, "结果摘要", &open, func() {
+			ui.Collapsible(c, st.tr("结果摘要", "Result summary"), &open, func() {
 				design.Apply(ui.Text(c, truncateTrajectorySummary(summary)), t.TextMuted(design.TypeXS))
 			})
 			st.toolOpen[item.key] = open
@@ -487,7 +505,7 @@ func buildMemoryPane(c *ui.Context, t *design.Tokens, runtime contracts.UIRuntim
 				PaddingY(design.Space5).Children(func() {
 				// Heading: title + entry count.
 				ui.Row(c).FillWidth().Gap(design.Space2).AlignItems(ui.Center).Children(func() {
-					design.Apply(ui.Text(c, "记忆"), t.Font(design.TypeS)).
+					design.Apply(ui.Text(c, st.tr("记忆", "Memory")), t.Font(design.TypeS)).
 						FontWeight(600).TextColor(t.LabelPrimary)
 					if hasStore && listErr == nil {
 						design.Apply(ui.Badge(c, fmt.Sprintf("%d", len(memories))), t.Badge())
@@ -495,24 +513,24 @@ func buildMemoryPane(c *ui.Context, t *design.Tokens, runtime contracts.UIRuntim
 					ui.Spacer(c).Grow(1)
 				})
 				if !hasStore {
-					buildPaneEmpty(c, t, "记忆后端未启用")
+					buildPaneEmpty(c, t, st.tr("记忆后端未启用", "Memory backend not enabled"))
 					return
 				}
 
 				// Search (store.Search for a non-empty query, List otherwise).
 				ui.SearchField(c, &st.memoryQuery).
-					Label("搜索记忆").Placeholder("搜索记忆").FillWidth()
+					Label(st.tr("搜索记忆", "Search memory")).Placeholder(st.tr("搜索记忆", "Search memory")).FillWidth()
 				if listErr != nil {
-					buildErrorLine(c, t, "读取记忆失败："+listErr.Error())
+					buildErrorLine(c, t, st.tr("读取记忆失败：", "Failed to read memory: ")+listErr.Error())
 				}
 
 				switch {
 				case listErr != nil:
 					// The error row above is the whole content.
 				case len(memories) == 0 && strings.TrimSpace(st.memoryQuery) != "":
-					buildPaneEmpty(c, t, "没有匹配的记忆")
+					buildPaneEmpty(c, t, st.tr("没有匹配的记忆", "No matching memories"))
 				case len(memories) == 0:
-					buildPaneEmpty(c, t, "还没有记忆")
+					buildPaneEmpty(c, t, st.tr("还没有记忆", "No memories yet"))
 				default:
 					for _, memory := range memories {
 						buildMemoryCard(c, t, runtime, store, st, memory)
@@ -536,19 +554,19 @@ func buildMemoryCard(c *ui.Context, t *design.Tokens, runtime contracts.UIRuntim
 		ui.Row(c).FillWidth().Gap(design.Space2).AlignItems(ui.Start).Children(func() {
 			design.Apply(ui.Text(c, memory.Text), t.Font(design.TypeBody)).
 				TextColor(t.LabelPrimary).Grow(1)
-			remove := ui.Button(c, "删除").Label("删除记忆").Height(th.Space(7)).
+			remove := ui.Button(c, st.tr("删除", "Delete")).Label(st.tr("删除记忆", "Delete memory")).Height(th.Space(7)).
 				PaddingX(design.Space2).Radius(design.RadiusSM).TextColor(t.DangerText)
 			if remove.Clicked() {
 				if store.Remove(context.Background(), memory.ID) {
 					st.memoryError = ""
 				} else {
-					st.memoryError = "删除记忆失败：" + firstNonEmpty(memory.ID, "未知条目")
+					st.memoryError = st.tr("删除记忆失败：", "Delete failed: ") + firstNonEmpty(memory.ID, st.tr("未知条目", "unknown entry"))
 				}
 				runtime.Invalidate()
 			}
 		})
 		meta := formatTimestamp(memory.Created)
-		if scope := memoryScopeLabel(memory.Scope); scope != "" {
+		if scope := memoryScopeLabel(st, memory.Scope); scope != "" {
 			meta = scope + " · " + meta
 		}
 		design.Apply(ui.Text(c, meta), t.Font(design.TypeXXS)).TextColor(t.LabelTertiary)
@@ -561,23 +579,23 @@ func buildMemoryAdd(c *ui.Context, t *design.Tokens, runtime contracts.UIRuntime
 	card := design.Apply(ui.Column(c), t.Panel()).
 		Padding(design.Space3).Gap(design.Space2)
 	card.Children(func() {
-		design.Apply(ui.Text(c, "新建记忆"), t.Font(design.TypeS)).
+		design.Apply(ui.Text(c, st.tr("新建记忆", "New memory")), t.Font(design.TypeS)).
 			FontWeight(600).TextColor(t.LabelPrimary)
-		ui.TextInput(c, &st.memoryDraft).Label("记忆内容").
-			Placeholder("输入要记住的内容").FillWidth()
+		ui.TextInput(c, &st.memoryDraft).Label(st.tr("记忆内容", "Memory text")).
+			Placeholder(st.tr("输入要记住的内容", "Enter something to remember")).FillWidth()
 		if draft == "" {
-			design.Apply(ui.Text(c, "输入内容后可添加。"), t.TextMuted(design.TypeXXS))
+			design.Apply(ui.Text(c, st.tr("输入内容后可添加。", "Type something to add it.")), t.TextMuted(design.TypeXXS))
 		}
 		ui.Row(c).FillWidth().AlignItems(ui.Center).Children(func() {
 			ui.Spacer(c).Grow(1)
-			add := design.Apply(ui.PrimaryButton(c, "添加记忆"), t.PrimaryButton()).
+			add := design.Apply(ui.PrimaryButton(c, st.tr("添加记忆", "Add memory")), t.PrimaryButton()).
 				Disabled(draft == "")
 			if add.Clicked() && draft != "" {
 				if _, err := store.Add(context.Background(), contracts.Memory{
 					Text:  draft,
 					Scope: memoryScopeWorkspace,
 				}); err != nil {
-					st.memoryError = "添加记忆失败：" + err.Error()
+					st.memoryError = st.tr("添加记忆失败：", "Add failed: ") + err.Error()
 				} else {
 					st.memoryDraft = ""
 					st.memoryError = ""
@@ -604,12 +622,12 @@ func formatTimestamp(value time.Time) string {
 const memoryScopeWorkspace = "workspace"
 
 // memoryScopeLabel renders a memory scope for the metadata line.
-func memoryScopeLabel(scope string) string {
+func memoryScopeLabel(st *state, scope string) string {
 	switch strings.ToLower(strings.TrimSpace(scope)) {
 	case "workspace", "工作区":
-		return "工作区"
+		return st.tr("工作区", "Workspace")
 	case "global", "全局":
-		return "全局"
+		return st.tr("全局", "Global")
 	case "":
 		return ""
 	default:
@@ -655,13 +673,14 @@ func buildComposer(
 				Radius(design.RadiusXL).
 				Shadow(0, 2, 4, 0, ui.RGBA(0, 0, 0, 0.05)).
 				Padding(th.Space(3)).Gap(design.Space2).
-				Label("会话输入框")
+				Label(st.tr("会话输入框", "Session composer"))
 			card.Children(func() {
 				buildPendingAttachments(c, t, runtime, st)
+				placeholder := st.localized(cfg.ComposerPlaceholder, "输入消息…", "Ask ZeoKeel…")
 				if !running {
 					input = ui.TextArea(c, &st.draft).
-						Label(cfg.ComposerPlaceholder).
-						Placeholder(cfg.ComposerPlaceholder).
+						Label(placeholder).
+						Placeholder(placeholder).
 						Background(ui.Transparent).Border(0, ui.Transparent).
 						Padding(0, th.Space(1)).
 						MinHeight(th.Space(9)).Grow(1).
@@ -686,14 +705,16 @@ func buildComposer(
 					Gap(design.Space2).Children(func() {
 					buildComposerToolbar(c, t, runtime, navigator, chat, st, running)
 					ui.Spacer(c).Grow(1)
-					hint := cfg.ComposerHint
+					hint := st.localized(cfg.ComposerHint,
+						"Enter 发送 · Shift+Enter 换行",
+						"Enter to send · Shift+Enter for newline")
 					if running {
-						hint = "正在生成回复…"
+						hint = st.tr("正在生成回复…", "Generating a reply…")
 					}
 					design.Apply(ui.Text(c, hint), t.Font(design.TypeXXS)).
 						TextColor(t.LabelTertiary).MaxLines(1)
 					if running {
-						buildStopButton(c, t, cfg, chat, activeID)
+						buildStopButton(c, t, cfg, chat, st, activeID)
 					} else {
 						buildSendButton(c, t, cfg, chat, st, activeID)
 					}
@@ -715,25 +736,27 @@ func buildComposer(
 // control (a native button whose file picker lands with the attachment slice).
 func buildComposerToolbar(c *ui.Context, t *design.Tokens, runtime contracts.UIRuntime,
 	navigator contracts.Navigator, chat contracts.ChatService, st *state, running bool) {
-	model := "未配置模型"
+	model := st.tr("未配置模型", "No model configured")
 	if cfg := chat.Config(); cfg.Model != "" {
 		model = cfg.Model
 	}
-	modelButton := ui.Button(c, model).Tooltip("打开模型设置")
+	modelButton := ui.Button(c, model).Tooltip(st.tr("打开模型设置", "Open model settings"))
 	if modelButton.Clicked() {
 		navigator.ToggleSettings()
 	}
 	if !running {
-		slash := ui.Button(c, "/").Tooltip("命令：输入 / 打开命令菜单")
+		slash := ui.Button(c, "/").Tooltip(st.tr("命令：输入 / 打开命令菜单", "Commands: type / to open the command menu"))
 		if slash.Clicked() {
 			st.draft += "/"
 			runtime.Invalidate()
 		}
-		attach := ui.Button(c, "附件").Tooltip("添加文件或图片")
+		attach := ui.Button(c, st.tr("附件", "Attach")).Tooltip(st.tr("添加文件或图片", "Add files or images"))
 		if attach.Clicked() {
+			AttachmentDialogTitle = st.tr("选择附件", "Choose attachments")
+			AttachmentFilterName = st.tr("文件与图片", "Files and images")
 			paths, err := AttachmentPicker()
 			if err != nil {
-				st.attachErr = "无法打开文件选择器：" + err.Error()
+				st.attachErr = st.tr("无法打开文件选择器：", "Could not open the file picker: ") + err.Error()
 			} else {
 				stageAttachmentFiles(st, paths)
 			}
@@ -752,7 +775,8 @@ func buildSendButton(c *ui.Context, t *design.Tokens, cfg Config, chat contracts
 	if !hasContent {
 		fill, glyph = t.Accent.Alpha(0.16).Over(t.BgRaised), t.Accent
 	}
-	button := ui.Button(c, cfg.SendLabel).Label(cfg.SendLabel).Tooltip(cfg.SendLabel).
+	sendLabel := st.localized(cfg.SendLabel, "发送", "Send")
+	button := ui.Button(c, sendLabel).Label(sendLabel).Tooltip(sendLabel).
 		Height(t.Scale(th.Space(8))).PaddingX(design.Space3).
 		Radius(th.Radius).Background(fill).TextColor(glyph).Disabled(!hasContent)
 	button.Children(func() {
@@ -772,9 +796,10 @@ func buildSendButton(c *ui.Context, t *design.Tokens, cfg Config, chat contracts
 
 // buildStopButton is the running composer's control: a native button with the
 // stop square glyph, calling Cancel.
-func buildStopButton(c *ui.Context, t *design.Tokens, cfg Config, chat contracts.ChatService, activeID string) {
+func buildStopButton(c *ui.Context, t *design.Tokens, cfg Config, chat contracts.ChatService, st *state, activeID string) {
 	th := t.Theme()
-	button := ui.Button(c, cfg.StopLabel).Label(cfg.StopLabel).Tooltip(cfg.StopLabel).
+	stopLabel := st.localized(cfg.StopLabel, "停止", "Stop")
+	button := ui.Button(c, stopLabel).Label(stopLabel).Tooltip(stopLabel).
 		Height(t.Scale(th.Space(8))).PaddingX(design.Space3).
 		Radius(th.Radius).Background(t.BgStrong).TextColor(t.LabelPrimary)
 	button.Children(func() {
@@ -798,11 +823,11 @@ func submitDraft(chat contracts.ChatService, activeID string, st *state) bool {
 	if len(attachments) > 0 {
 		sender, ok := chat.(contracts.AttachmentSender)
 		if !ok {
-			st.attachErr = "当前后端不支持附件"
+			st.attachErr = st.tr("当前后端不支持附件", "This backend does not support attachments")
 			return false
 		}
 		if err := sender.SendWithAttachments(activeID, prompt, attachments); err != nil {
-			st.attachErr = "发送附件失败：" + err.Error()
+			st.attachErr = st.tr("发送附件失败：", "Failed to send attachments: ") + err.Error()
 			return false
 		}
 	} else if err := chat.Send(activeID, prompt); err != nil {
@@ -857,7 +882,7 @@ func buildSlashMenu(c *ui.Context, t *design.Tokens, runtime contracts.UIRuntime
 		Padding(design.Space2).Gap(design.Space1)
 	menu.Children(func() {
 		if len(matches) == 0 {
-			design.Apply(ui.Text(c, "没有匹配的命令"), t.TextMuted(design.TypeXS)).
+			design.Apply(ui.Text(c, st.tr("没有匹配的命令", "No matching commands")), t.TextMuted(design.TypeXS)).
 				PaddingX(design.Space2).PaddingY(design.Space1)
 			return
 		}
@@ -926,16 +951,16 @@ func buildMentionMenu(c *ui.Context, t *design.Tokens, runtime contracts.UIRunti
 		ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(design.Space2).Children(func() {
 			ui.Icon(c, icons.Search()).Size(design.Space3, design.Space3).
 				TextColor(t.LabelTertiary)
-			design.Apply(ui.Text(c, "工作区文件"), t.TextMuted(design.TypeXXS)).Grow(1)
-			design.Apply(ui.Text(c, "@ 引用文件"), t.TextMuted(design.TypeXXXS))
+			design.Apply(ui.Text(c, st.tr("工作区文件", "Workspace files")), t.TextMuted(design.TypeXXS)).Grow(1)
+			design.Apply(ui.Text(c, st.tr("@ 引用文件", "@ reference a file")), t.TextMuted(design.TypeXXXS))
 		})
 		switch {
 		case loadErr != nil:
-			design.Apply(ui.Text(c, "读取工作区失败："+loadErr.Error()), t.TextMuted(design.TypeXS)).
+			design.Apply(ui.Text(c, st.tr("读取工作区失败：", "Failed to read the workspace: ")+loadErr.Error()), t.TextMuted(design.TypeXS)).
 				TextColor(t.DangerText).PaddingX(design.Space2)
 			return
 		case len(entries) == 0:
-			design.Apply(ui.Text(c, "没有匹配的文件"), t.TextMuted(design.TypeXS)).
+			design.Apply(ui.Text(c, st.tr("没有匹配的文件", "No matching files")), t.TextMuted(design.TypeXS)).
 				PaddingX(design.Space2).PaddingY(design.Space1)
 			return
 		}
@@ -981,19 +1006,19 @@ func executeSlashCommand(runtime contracts.UIRuntime, st *state, cmd contracts.C
 // --- helpers ----------------------------------------------------------------
 
 // statusLabel maps a tool status to its card label.
-func statusLabel(status string) string {
+func statusLabel(status string, st *state) string {
 	switch normalizeStatus(status) {
 	case "running":
-		return "运行中"
+		return st.tr("运行中", "Running")
 	case "ok":
-		return "完成"
+		return st.tr("完成", "Completed")
 	case "error":
-		return "失败"
+		return st.tr("失败", "Failed")
 	default:
 		if trimmed := strings.TrimSpace(status); trimmed != "" {
 			return trimmed
 		}
-		return "未知"
+		return st.tr("未知", "Unknown")
 	}
 }
 
@@ -1039,8 +1064,8 @@ func truncateTrajectorySummary(summary string) string {
 }
 
 // startNewSession creates a session, makes it active and navigates to it.
-func startNewSession(chat contracts.ChatService, navigator contracts.Navigator) {
-	id, err := chat.NewSession("新对话")
+func startNewSession(st *state, chat contracts.ChatService, navigator contracts.Navigator) {
+	id, err := chat.NewSession(st.tr("新对话", "New conversation"))
 	if err != nil {
 		return
 	}

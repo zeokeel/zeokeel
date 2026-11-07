@@ -40,6 +40,7 @@ import (
 	"github.com/zeokeel/zeokeel/internal/contracts"
 	"github.com/zeokeel/zeokeel/internal/design"
 	"github.com/zeokeel/zeokeel/internal/icons"
+	"github.com/zeokeel/zeokeel/internal/uikit"
 )
 
 // Config is the module's typed assembly config.
@@ -59,6 +60,15 @@ type Config struct {
 // the UI thread.
 type paneState struct {
 	query string
+
+	// locale localizes the sidebar's own copy on every frame, so a language
+	// switch takes effect on the next frame without restarting the module.
+	locale contracts.LocaleService
+	// cfgNewChatLabel/cfgSettingsLabel/cfgSessionsTitle are explicit assembly
+	// overrides; when empty the localized defaults are used.
+	cfgNewChatLabel  string
+	cfgSettingsLabel string
+	cfgSessionsTitle string
 
 	// ctx resolves the optional workspace backend lazily (no Requires), and
 	// wsCollapsed remembers the per-workspace tree fold state.
@@ -90,6 +100,32 @@ type paneState struct {
 	deleteTitle  string
 }
 
+// T returns the localized copy for the current frame.
+func (state *paneState) T(zh, en string) string { return uikit.T(state.locale, zh, en) }
+
+// newChatLabel is the primary action label for the current frame.
+func (state *paneState) newChatLabel() string {
+	return firstNonEmpty(state.cfgNewChatLabel, state.T("新对话", "New chat"))
+}
+
+// settingsLabel is the footer settings label for the current frame.
+func (state *paneState) settingsLabel() string {
+	return firstNonEmpty(state.cfgSettingsLabel, state.T("设置", "Settings"))
+}
+
+// sessionsTitle is the flat session-list section label for the current frame.
+func (state *paneState) sessionsTitle() string {
+	return firstNonEmpty(state.cfgSessionsTitle, state.T("会话", "Chats"))
+}
+
+// sessionTitle is the displayed title of one session in the current language.
+func (state *paneState) sessionTitle(info contracts.ChatSessionInfo) string {
+	if title := strings.TrimSpace(info.Title); title != "" {
+		return title
+	}
+	return state.T("未命名会话", "Untitled session")
+}
+
 // Module registers the sidebar slots.
 func Module() *module.Descriptor[Config] {
 	return module.Define("zeokeel-ui/sidebar", func(ctx cordis.Context, cfg Config) error {
@@ -109,12 +145,15 @@ func Module() *module.Descriptor[Config] {
 		// rest of the sidebar and simply does not get the rename entry.
 		renamer, _ := chat.(contracts.SessionRenamer)
 
-		newChatLabel := firstNonEmpty(cfg.NewChatLabel, "新对话")
-		settingsLabel := firstNonEmpty(cfg.SettingsLabel, "设置")
-		sessionsTitle := firstNonEmpty(cfg.SessionsTitle, "会话")
 		state := &paneState{
-			ctx:         ctx,
-			wsCollapsed: make(map[string]bool),
+			ctx:              ctx,
+			wsCollapsed:      make(map[string]bool),
+			cfgNewChatLabel:  strings.TrimSpace(cfg.NewChatLabel),
+			cfgSettingsLabel: strings.TrimSpace(cfg.SettingsLabel),
+			cfgSessionsTitle: strings.TrimSpace(cfg.SessionsTitle),
+		}
+		if locale, ok := ctx.Get(contracts.KeyLocale); ok {
+			state.locale = locale
 		}
 		if lister, ok := ctx.Get(contracts.KeyScreenLister); ok {
 			state.screens = lister
@@ -144,7 +183,7 @@ func Module() *module.Descriptor[Config] {
 			ID:    "sidebar.primary.new-chat",
 			Order: 10,
 			Build: func(c *ui.Context) {
-				buildPrimary(c, design.Of(c), chat, nav, runtime, newChatLabel)
+				buildPrimary(c, design.Of(c), chat, nav, runtime, state.newChatLabel())
 			},
 		}
 		navSlot := contracts.SlotItem{
@@ -152,7 +191,7 @@ func Module() *module.Descriptor[Config] {
 			ID:    "sidebar.nav.sessions",
 			Order: 10,
 			Build: func(c *ui.Context) {
-				buildSessionList(c, design.Of(c), chat, nav, runtime, state, sessionsTitle)
+				buildSessionList(c, design.Of(c), chat, nav, runtime, state, state.sessionsTitle())
 			},
 		}
 		footer := contracts.SlotItem{
@@ -160,7 +199,7 @@ func Module() *module.Descriptor[Config] {
 			ID:    "sidebar.footer.actions",
 			Order: 10,
 			Build: func(c *ui.Context) {
-				buildFooter(c, design.Of(c), chat, nav, runtime, state, settingsLabel)
+				buildFooter(c, design.Of(c), chat, nav, runtime, state, state.settingsLabel())
 			},
 		}
 		renameDialog := contracts.SlotItem{
@@ -282,13 +321,15 @@ func buildSessionList(c *ui.Context, t *design.Tokens, chat contracts.ChatServic
 				}
 			}
 			if hasWorkspace {
-				buildWorkspaceSectionHeader(c, t, workspace)
+				buildWorkspaceSectionHeader(c, t, workspace, state)
 			} else {
 				design.Apply(ui.Text(c, title), t.SectionLabel())
 			}
 			ui.Row(c).FillWidth().Padding(0, design.Space1, 0, design.Space1).
 				Children(func() {
-					ui.SearchField(c, &state.query).Label("搜索会话").Placeholder("搜索会话").FillWidth()
+					ui.SearchField(c, &state.query).
+						Label(state.T("搜索会话", "Search sessions")).
+						Placeholder(state.T("搜索会话", "Search sessions")).FillWidth()
 				})
 
 			query := strings.TrimSpace(state.query)
@@ -297,9 +338,9 @@ func buildSessionList(c *ui.Context, t *design.Tokens, chat contracts.ChatServic
 			sessions := orderSessionList(filterSessions(allSessions, query), includeArchived)
 			switch {
 			case len(sessions) == 0:
-				empty := "还没有会话"
+				empty := state.T("还没有会话", "No sessions yet")
 				if query != "" {
-					empty = "没有匹配的会话"
+					empty = state.T("没有匹配的会话", "No matching sessions")
 				}
 				design.Apply(ui.Text(c, empty), t.TextMuted(design.TypeXXS)).
 					Padding(design.Space1, design.Space2, 0, design.Space2)
@@ -345,23 +386,23 @@ func buildMessageSearch(c *ui.Context, t *design.Tokens, chat contracts.ChatServ
 	ui.Column(c).FillWidth().Gap(design.Space1).Padding(design.Space2, 0, 0, 0).
 		Children(func() {
 			ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(design.Space2).Children(func() {
-				design.Apply(ui.Text(c, "消息搜索"), t.SectionLabel())
+				design.Apply(ui.Text(c, state.T("消息搜索", "Message search")), t.SectionLabel())
 				ui.Spacer(c).Grow(1)
 				if state.searchErr == nil {
 					design.Apply(ui.Badge(c, strconv.Itoa(len(state.searchHits))), t.Badge())
 				}
 			})
 			if state.searchErr != nil {
-				buildSidebarError(c, t, "搜索消息失败："+state.searchErr.Error())
+				buildSidebarError(c, t, state.T("搜索消息失败：", "Message search failed: ")+state.searchErr.Error())
 				return
 			}
 			if len(state.searchHits) == 0 {
-				design.Apply(ui.Text(c, "没有匹配的消息"), t.TextMuted(design.TypeXXS)).
+				design.Apply(ui.Text(c, state.T("没有匹配的消息", "No matching messages")), t.TextMuted(design.TypeXXS)).
 					Padding(design.Space1, design.Space2, 0, design.Space2)
 				return
 			}
 			for _, hit := range state.searchHits {
-				buildMessageHitRow(c, t, chat, nav, runtime, hit)
+				buildMessageHitRow(c, t, chat, nav, runtime, state, hit)
 			}
 		})
 }
@@ -369,8 +410,8 @@ func buildMessageSearch(c *ui.Context, t *design.Tokens, chat contracts.ChatServ
 // buildMessageHitRow is one full-text hit: session title, role, time and the
 // matching snippet; clicking activates that session and opens it.
 func buildMessageHitRow(c *ui.Context, t *design.Tokens, chat contracts.ChatService,
-	nav contracts.Navigator, runtime contracts.UIRuntime, hit contracts.MessageSearchHit) {
-	title := firstNonEmpty(hit.SessionTitle, "未命名会话")
+	nav contracts.Navigator, runtime contracts.UIRuntime, state *paneState, hit contracts.MessageSearchHit) {
+	title := firstNonEmpty(hit.SessionTitle, state.T("未命名会话", "Untitled session"))
 	label := title + " " + firstNonEmpty(hit.Snippet, hit.Role)
 	row := ui.ButtonBase(c).FillWidth().Padding(design.Space1, design.Space2).
 		Radius(design.RadiusSM).Label(label)
@@ -382,7 +423,7 @@ func buildMessageHitRow(c *ui.Context, t *design.Tokens, chat contracts.ChatServ
 			ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(design.Space2).Children(func() {
 				design.Apply(ui.Text(c, title), t.Font(design.TypeXS)).
 					FontWeight(600).TextColor(t.LabelPrimary).Grow(1).MaxLines(1).Ellipsis("…")
-				design.Apply(ui.Text(c, messageRoleLabel(hit.Role)), t.Font(design.TypeXXXS)).
+				design.Apply(ui.Text(c, messageRoleLabel(hit.Role, state)), t.Font(design.TypeXXXS)).
 					TextColor(t.LabelTertiary)
 				design.Apply(ui.Text(c, formatHitTime(hit.CreatedAt)), t.Font(design.TypeXXXS)).
 					TextColor(t.LabelTertiary)
@@ -401,16 +442,16 @@ func buildMessageHitRow(c *ui.Context, t *design.Tokens, chat contracts.ChatServ
 }
 
 // messageRoleLabel renders a message role for a search hit.
-func messageRoleLabel(role string) string {
+func messageRoleLabel(role string, state *paneState) string {
 	switch strings.ToLower(strings.TrimSpace(role)) {
 	case "user":
-		return "用户"
+		return state.T("用户", "User")
 	case "assistant":
-		return "助手"
+		return state.T("助手", "Assistant")
 	case "tool":
-		return "工具"
+		return state.T("工具", "Tool")
 	case "":
-		return "消息"
+		return state.T("消息", "Message")
 	default:
 		return strings.TrimSpace(role)
 	}
@@ -438,10 +479,10 @@ func buildSidebarError(c *ui.Context, t *design.Tokens, text string) {
 const ungroupedWorkspaceKey = "\x00ungrouped"
 
 // buildWorkspaceSectionHeader is the section label above the workspace tree:
-// "工作区" plus a badge with the current workspace's name.
-func buildWorkspaceSectionHeader(c *ui.Context, t *design.Tokens, workspace contracts.WorkspaceService) {
+// the localized "Workspace" plus a badge with the current workspace's name.
+func buildWorkspaceSectionHeader(c *ui.Context, t *design.Tokens, workspace contracts.WorkspaceService, state *paneState) {
 	ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(design.Space2).Children(func() {
-		design.Apply(ui.Text(c, "工作区"), t.SectionLabel())
+		design.Apply(ui.Text(c, state.T("工作区", "Workspace")), t.SectionLabel())
 		if current, ok, err := workspace.Current(context.Background()); err == nil && ok {
 			design.Apply(ui.Badge(c, firstNonEmpty(current.Name, current.Root)), t.Badge())
 		}
@@ -494,7 +535,7 @@ func buildWorkspaceTree(
 			continue
 		}
 		buildWorkspaceGroup(c, t, chat, nav, runtime, state, ws.ID,
-			firstNonEmpty(ws.Name, ws.Root, "未命名工作区"), sessions, totals[ws.ID],
+			firstNonEmpty(ws.Name, ws.Root, state.T("未命名工作区", "Untitled workspace")), sessions, totals[ws.ID],
 			ws.ID == currentID, activeID)
 	}
 
@@ -503,7 +544,7 @@ func buildWorkspaceTree(
 		return
 	}
 	buildWorkspaceGroup(c, t, chat, nav, runtime, state, ungroupedWorkspaceKey,
-		"未分组", sessions, totals[""], false, activeID)
+		state.T("未分组", "Ungrouped"), sessions, totals[""], false, activeID)
 }
 
 // buildWorkspaceGroup renders one collapsible workspace row and, while it is
@@ -664,7 +705,7 @@ func orderSessionList(sessions []contracts.ChatSessionInfo, includeArchived bool
 func buildSessionRow(c *ui.Context, t *design.Tokens, chat contracts.ChatService,
 	nav contracts.Navigator, runtime contracts.UIRuntime, state *paneState,
 	session contracts.ChatSessionInfo, active bool, indent float32) {
-	label := sessionTitle(session)
+	label := state.sessionTitle(session)
 	renamer, _ := chat.(contracts.SessionRenamer)
 	forker, _ := chat.(contracts.SessionForker)
 	pinner, _ := chat.(contracts.SessionPinner)
@@ -688,16 +729,16 @@ func buildSessionRow(c *ui.Context, t *design.Tokens, chat contracts.ChatService
 				design.Apply(ui.Text(c, label), t.Text(design.TypeS)).
 					Grow(1).MaxLines(1).Ellipsis("…")
 				if session.Pinned {
-					design.Apply(ui.Badge(c, "置顶"), t.Badge())
+					design.Apply(ui.Badge(c, state.T("置顶", "Pinned")), t.Badge())
 				}
 				if session.Archived {
-					design.Apply(ui.Badge(c, "已归档"), t.Badge())
+					design.Apply(ui.Badge(c, state.T("已归档", "Archived")), t.Badge())
 				}
 				// The active session is already carried by the accent icon and
 				// the selected-row tint; a 当前 badge was redundant and stole
 				// width from the title.
 				if session.Running {
-					design.Apply(ui.Badge(c, "运行中"), t.Badge())
+					design.Apply(ui.Badge(c, state.T("运行中", "Running")), t.Badge())
 				}
 			})
 		})
@@ -712,13 +753,13 @@ func buildSessionRow(c *ui.Context, t *design.Tokens, chat contracts.ChatService
 		// The old shell composed inline row actions: a native popover menu on
 		// the row itself (rename/delete/activate) instead of footer buttons.
 		ui.PopoverMenuButton(c, "⋯", func(m *ui.Menu) {
-			if renamer != nil && m.Item("重命名").Chosen() {
+			if renamer != nil && m.Item(state.T("重命名", "Rename")).Chosen() {
 				state.renameOpen = true
 				state.renameErr = ""
 				state.renameTarget = session.ID
-				state.renameDraft = sessionTitleByID(chat, session.ID)
+				state.renameDraft = sessionTitleByID(chat, session.ID, state)
 			}
-			if forker != nil && m.Item("创建副本").Chosen() {
+			if forker != nil && m.Item(state.T("创建副本", "Duplicate")).Chosen() {
 				if newID, err := forker.ForkSession(session.ID); err == nil && strings.TrimSpace(newID) != "" {
 					_ = chat.SetActiveSession(newID)
 					runtime.Post(func() { _ = nav.Push("session") })
@@ -726,9 +767,9 @@ func buildSessionRow(c *ui.Context, t *design.Tokens, chat contracts.ChatService
 				}
 			}
 			if pinner != nil {
-				pinLabel := "置顶会话"
+				pinLabel := state.T("置顶会话", "Pin session")
 				if session.Pinned {
-					pinLabel = "取消置顶"
+					pinLabel = state.T("取消置顶", "Unpin session")
 				}
 				if m.Item(pinLabel).Chosen() {
 					if err := pinner.SetSessionPinned(session.ID, !session.Pinned); err == nil {
@@ -737,9 +778,9 @@ func buildSessionRow(c *ui.Context, t *design.Tokens, chat contracts.ChatService
 				}
 			}
 			if archiver != nil {
-				archiveLabel := "归档会话"
+				archiveLabel := state.T("归档会话", "Archive session")
 				if session.Archived {
-					archiveLabel = "取消归档"
+					archiveLabel = state.T("取消归档", "Unarchive session")
 				}
 				if m.Item(archiveLabel).Chosen() {
 					if err := archiver.SetSessionArchived(session.ID, !session.Archived); err == nil {
@@ -747,14 +788,14 @@ func buildSessionRow(c *ui.Context, t *design.Tokens, chat contracts.ChatService
 					}
 				}
 			}
-			if m.Item("删除").Chosen() {
+			if m.Item(state.T("删除", "Delete")).Chosen() {
 				state.deleteOpen = true
 				state.deleteTarget = session.ID
-				state.deleteTitle = sessionTitle(session)
+				state.deleteTitle = state.sessionTitle(session)
 			}
 			if !active {
 				m.Separator()
-				if m.Item("设为当前").Chosen() {
+				if m.Item(state.T("设为当前", "Set as current")).Chosen() {
 					_ = chat.SetActiveSession(session.ID)
 					runtime.Invalidate()
 				}
@@ -770,8 +811,13 @@ func buildFooter(c *ui.Context, t *design.Tokens, chat contracts.ChatService,
 	nav contracts.Navigator, runtime contracts.UIRuntime,
 	state *paneState, label string) {
 	if state.deleteOpen {
-		message := fmt.Sprintf("“%s”及其全部消息将被删除，此操作无法撤销。", firstNonEmpty(state.deleteTitle, "未命名会话"))
-		switch ui.AlertDialog(c, &state.deleteOpen, "删除会话", message, "取消", "删除") {
+		deleteTitle := firstNonEmpty(state.deleteTitle, state.T("未命名会话", "Untitled session"))
+		messageTemplate := state.T("“%s”及其全部消息将被删除，此操作无法撤销。",
+			"“%s” and all its messages will be deleted. This cannot be undone.")
+		message := fmt.Sprintf(messageTemplate, deleteTitle)
+		switch ui.AlertDialog(c, &state.deleteOpen,
+			state.T("删除会话", "Delete session"), message,
+			state.T("取消", "Cancel"), state.T("删除", "Delete")) {
 		case 1:
 			if err := chat.DeleteSession(state.deleteTarget); err == nil {
 				runtime.Invalidate()
@@ -802,12 +848,14 @@ func buildFooter(c *ui.Context, t *design.Tokens, chat contracts.ChatService,
 			// under the settings entry, writing the product view option.
 			if state.settings != nil {
 				showArchived := showArchivedSetting(state)
-				toggleLabel := "显示已归档"
+				toggleLabel := state.T("显示已归档", "Show archived")
 				if showArchived {
-					toggleLabel = "隐藏已归档"
+					toggleLabel = state.T("隐藏已归档", "Hide archived")
 				}
 				ui.Row(c).FillWidth().Children(func() {
-					toggle := ui.Button(c, toggleLabel).Tooltip("切换侧栏是否显示已归档会话")
+					toggle := ui.Button(c, toggleLabel).
+						Tooltip(state.T("切换侧栏是否显示已归档会话",
+							"Toggle whether archived sessions appear in the sidebar"))
 					if toggle.Clicked() {
 						_ = state.settings.Set(contracts.SettingSessionsShowArchived,
 							strconv.FormatBool(!showArchived))
@@ -829,27 +877,27 @@ func buildRenameDialog(c *ui.Context, t *design.Tokens, renamer contracts.Sessio
 	target := state.renameTarget
 	ui.Modal(c, &state.renameOpen, func() {
 		ui.Column(c).Width(360).Gap(design.Space3).Children(func() {
-			design.Apply(ui.Text(c, "重命名会话"), t.Text(design.TypeM)).FontWeight(600)
-			ui.TextInput(c, &state.renameDraft).Label("会话标题").FillWidth()
+			design.Apply(ui.Text(c, state.T("重命名会话", "Rename session")), t.Text(design.TypeM)).FontWeight(600)
+			ui.TextInput(c, &state.renameDraft).Label(state.T("会话标题", "Session title")).FillWidth()
 			if state.renameErr != "" {
 				design.Apply(ui.Text(c, state.renameErr), t.TextMuted(design.TypeXS)).
 					TextColor(t.DangerText)
 			}
 			ui.Row(c).FillWidth().Justify(ui.End).Gap(design.Space2).Children(func() {
-				cancel := ui.Button(c, "取消")
+				cancel := ui.Button(c, state.T("取消", "Cancel"))
 				if cancel.Clicked() {
 					state.renameOpen = false
 					state.renameErr = ""
 					runtime.Invalidate()
 				}
-				save := ui.PrimaryButton(c, "保存")
+				save := ui.PrimaryButton(c, state.T("保存", "Save"))
 				if save.Clicked() {
 					title := strings.TrimSpace(state.renameDraft)
 					switch {
 					case title == "":
-						state.renameErr = "标题不能为空"
+						state.renameErr = state.T("标题不能为空", "Title cannot be empty")
 					case target == "":
-						state.renameErr = "没有活动会话"
+						state.renameErr = state.T("没有活动会话", "No active session")
 					default:
 						if err := renamer.RenameSession(target, title); err != nil {
 							state.renameErr = err.Error()
@@ -874,7 +922,7 @@ func sessionTitle(info contracts.ChatSessionInfo) string {
 }
 
 // sessionTitleByID looks a session up and returns its display title.
-func sessionTitleByID(chat contracts.ChatService, sessionID string) string {
+func sessionTitleByID(chat contracts.ChatService, sessionID string, state *paneState) string {
 	if session, ok := chat.Session(sessionID); ok {
 		if title := strings.TrimSpace(session.Title); title != "" {
 			return title
@@ -882,10 +930,10 @@ func sessionTitleByID(chat contracts.ChatService, sessionID string) string {
 	}
 	for _, info := range chat.Sessions() {
 		if info.ID == sessionID {
-			return sessionTitle(info)
+			return state.sessionTitle(info)
 		}
 	}
-	return "未命名会话"
+	return state.T("未命名会话", "Untitled session")
 }
 
 // own registers one contribution and ties its unregistration to ctx's effect

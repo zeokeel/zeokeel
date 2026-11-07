@@ -37,6 +37,7 @@ import (
 	"github.com/zeokeel/zeokeel-kernel/module"
 
 	"github.com/zeokeel/zeokeel/internal/contracts"
+	"github.com/zeokeel/zeokeel/internal/uikit"
 )
 
 // ModuleID is the compile-time module identity.
@@ -113,7 +114,26 @@ type state struct {
 	// ctx is the module's kernel context, used for the optional memory backend
 	// lookup (ctx.Get(contracts.KeyMemory)); it is not a Requires dependency.
 	ctx cordis.Context
+
+	// locale is the host locale service (optional). Copy is generated per frame
+	// with uikit.T so switching the language applies on the next frame.
+	locale contracts.LocaleService
 }
+
+// tr returns the localized copy for the current frame's language.
+func (st *state) tr(zh, en string) string { return uikit.T(st.locale, zh, en) }
+
+// localized translates a value that still carries its built-in Chinese default
+// (an assembly-configured custom label is kept verbatim).
+func (st *state) localized(value, zhDefault, enDefault string) string {
+	if strings.TrimSpace(value) == "" || value == zhDefault {
+		return st.tr(zhDefault, enDefault)
+	}
+	return value
+}
+
+// english reports whether the current frame renders English copy.
+func (st *state) english() bool { return uikit.Language(st.locale) == "en" }
 
 // Module registers the conversation screen.
 func Module() *module.Descriptor[Config] {
@@ -131,7 +151,9 @@ func Module() *module.Descriptor[Config] {
 			return err
 		}
 		config := cfg.resolved()
+		locale, _ := ctx.Get(contracts.KeyLocale)
 		moduleState := &state{
+			locale:     locale,
 			thinkOpen:  make(map[string]bool),
 			toolOpen:   make(map[string]bool),
 			thumbnails: make(map[string]*ui.Bitmap),

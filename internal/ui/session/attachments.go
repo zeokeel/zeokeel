@@ -14,15 +14,23 @@ import (
 	"github.com/zeokeel/zeokeel/internal/icons"
 )
 
+// AttachmentDialogTitle / AttachmentFilterName are the localized copy the
+// default AttachmentPicker uses; the toolbar sets them from the current locale
+// right before invoking the seam (the seam signature stays stable for tests).
+var (
+	AttachmentDialogTitle = "选择附件"
+	AttachmentFilterName  = "文件与图片"
+)
+
 // AttachmentPicker is the composer's file-picker seam: the default opens the
 // native mygo file dialog; tests replace it with a scripted selection so no
 // desktop backend is needed. It returns absolute paths.
 var AttachmentPicker = func() ([]string, error) {
 	return mygo.Dialog.Open(mygo.OpenDialogOptions{
-		Title:    "选择附件",
+		Title:    AttachmentDialogTitle,
 		Multiple: true,
 		Filters: []mygo.FileFilter{{
-			Name: "文件与图片",
+			Name: AttachmentFilterName,
 			Extensions: []string{
 				"png", "jpg", "jpeg", "gif", "webp",
 				"txt", "md", "json", "yaml", "yml", "go", "log", "csv",
@@ -64,16 +72,16 @@ func stageAttachmentFiles(st *state, paths []string) {
 		name := filepath.Base(path)
 		info, err := os.Stat(path)
 		if err != nil || !info.Mode().IsRegular() {
-			st.attachErr = "无法添加 " + name + "：不是可读的普通文件"
+			st.attachErr = st.tr("无法添加 "+name+"：不是可读的普通文件", "Could not add "+name+": not a readable regular file")
 			continue
 		}
 		if info.Size() > maxAttachmentBytes {
-			st.attachErr = fmt.Sprintf("%s 超过 10 MB 附件上限", name)
+			st.attachErr = st.tr(fmt.Sprintf("%s 超过 10 MB 附件上限", name), fmt.Sprintf("%s exceeds the 10 MB attachment limit", name))
 			continue
 		}
 		data, err := os.ReadFile(path)
 		if err != nil {
-			st.attachErr = "无法读取 " + name + "：" + err.Error()
+			st.attachErr = st.tr("无法读取 "+name+"：", "Could not read "+name+": ") + err.Error()
 			continue
 		}
 		st.attachSeq++
@@ -184,15 +192,15 @@ func buildAttachmentChip(c *ui.Context, t *design.Tokens, st *state, attachment 
 			}
 			ui.Icon(c, icon).Size(th.Space(4), th.Space(4)).TextColor(t.LabelSecondary)
 		}
-		design.Apply(ui.Text(c, firstNonEmpty(attachment.Name, "未命名附件")), t.Font(design.TypeXXS)).
+		design.Apply(ui.Text(c, firstNonEmpty(attachment.Name, st.tr("未命名附件", "Untitled attachment"))), t.Font(design.TypeXXS)).
 			TextColor(t.LabelPrimary).MaxLines(1).Ellipsis("…")
 		if attachment.Size() > 0 {
 			design.Apply(ui.Text(c, formatAttachmentSize(attachment.Size())), t.Font(design.TypeXXS)).
 				TextColor(t.LabelTertiary).NoWrap()
 		}
 		if removable {
-			remove := ui.Button(c, "×").Label("移除附件 " + attachment.Name).
-				Tooltip("移除附件").Height(th.Space(5)).PaddingX(design.Space1).
+			remove := ui.Button(c, "×").Label(st.tr("移除附件 ", "Remove attachment ") + attachment.Name).
+				Tooltip(st.tr("移除附件", "Remove attachment")).Height(th.Space(5)).PaddingX(design.Space1).
 				Radius(design.RadiusSM).TextColor(t.LabelSecondary)
 			if remove.Clicked() && onRemove != nil {
 				onRemove()

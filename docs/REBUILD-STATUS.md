@@ -21,6 +21,15 @@
 - 右侧栏「文件」Tab：打开文件夹（mygo 原生 Directory picker）、目录进入/面包屑、文本/Markdown/图片预览、
   刷新与错误状态；E2E 覆盖工作区创建 + 列表 + 预览帧
 
+**P4 i18n 第一切片（2026-11-08）**
+- `internal/uikit/locale.go`：T(locale, zh, en) / Language
+- sidebar：新对话/搜索/工作区/未分组/消息搜索/空态/行菜单/重命名/删除确认/Badge/Footer/显示归档全部 en/zh
+- session：tabs/More 菜单/运行状态/导出状态/对话框标题/composer（placeholder/发送/停止/附件/提示/附件错误/@与/
+  菜单）/transcript 空态/Reasoning/工具状态/轨迹/记忆 全部 en/zh
+- 动态切换（SetLanguage 下一帧生效）；assembly 移除 sidebar 显式中文 labels 与 session 的 emptyText/
+  composerPlaceholder/sendLabel/stopLabel，让本地化默认值生效；E2E 断言 en→zh 往返；截图 p2-english.png
+- 未覆盖：其他模块注册的 screen 导航标题（首页/自动化/插件）、设置页、home、automation/plugins 页面（后续切片）
+
 **P4 ACP 适配器（2026-11-08）**
 - `zeokeel/acp` 模块：newline-framed JSON-RPC 2.0，initialize/session-new/session-prompt（Subscribe 增量
   agent_message_chunk，end_turn/cancelled）/session-cancel，错误码与 EOF/ctx 取消；后端可继续用同一 ChatService

@@ -10,13 +10,18 @@ import (
 	"github.com/zeokeel/zeokeel/internal/contracts"
 )
 
+// ExportDialogTitle is the localized title the default ExportSaver shows; the
+// header sets it from the current locale right before invoking the seam (the
+// seam signature stays stable for tests).
+var ExportDialogTitle = "导出会话"
+
 // ExportSaver is the session export seam: the default opens the native mygo
 // save dialog and writes the content there; tests replace it so no desktop
 // backend is needed. It returns the written path, "" when the user canceled,
 // or an error.
 var ExportSaver = func(defaultName, content string) (string, error) {
 	path, err := mygo.Dialog.Save(mygo.SaveDialogOptions{
-		Title:       "导出会话",
+		Title:       ExportDialogTitle,
 		DefaultPath: defaultName,
 		Filters: []mygo.FileFilter{{
 			Name:       "Markdown",
@@ -35,15 +40,27 @@ var ExportSaver = func(defaultName, content string) (string, error) {
 // exportTranscript renders a session as a Markdown document for the export
 // dialog: a title heading followed by the plain transcript (the same text the
 // "复制对话" action copies).
-func exportTranscript(chatSession contracts.ChatSession, title string) string {
+func exportTranscript(chatSession contracts.ChatSession, title string, english bool) string {
 	var builder strings.Builder
-	fmt.Fprintf(&builder, "# %s\n\n", firstNonEmpty(title, "会话"))
-	if createdAt := formatTimestamp(chatSession.CreatedAt); createdAt != "" && createdAt != "—" {
-		fmt.Fprintf(&builder, "创建时间：%s\n\n", createdAt)
+	fallback := "会话"
+	if english {
+		fallback = "Conversation"
 	}
-	transcript := transcriptText(chatSession)
+	fmt.Fprintf(&builder, "# %s\n\n", firstNonEmpty(title, fallback))
+	if createdAt := formatTimestamp(chatSession.CreatedAt); createdAt != "" && createdAt != "—" {
+		if english {
+			fmt.Fprintf(&builder, "Created: %s\n\n", createdAt)
+		} else {
+			fmt.Fprintf(&builder, "创建时间：%s\n\n", createdAt)
+		}
+	}
+	transcript := transcriptText(chatSession, english)
 	if strings.TrimSpace(transcript) == "" {
-		builder.WriteString("（此会话还没有消息）\n")
+		if english {
+			builder.WriteString("(No messages in this conversation yet)\n")
+		} else {
+			builder.WriteString("（此会话还没有消息）\n")
+		}
 	} else {
 		builder.WriteString(transcript)
 		builder.WriteString("\n")

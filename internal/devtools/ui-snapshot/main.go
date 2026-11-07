@@ -125,6 +125,15 @@ func main() {
 		}
 	}
 
+	// English UI (live locale switch): the session screen + sidebar re-render.
+	if locale, err := a.root.Require(contracts.KeyLocale); err == nil {
+		locale.SetLanguage("en")
+		a.tester.Frame()
+		a.render(outDir + "/p2-english.png")
+		locale.SetLanguage("zh")
+		a.tester.Frame()
+	}
+
 	// Fork the finished conversation (agent SessionForker): the sidebar shows
 	// the copy and it becomes the active session.
 	if forker, ok := chat.(contracts.SessionForker); ok {
