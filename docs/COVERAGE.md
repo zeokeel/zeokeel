@@ -29,7 +29,8 @@
 - **presets 已落地**：prompt 片段契约 + composer「预设/Presets」插入菜单 + 设置「预设」页 CRUD（名称/提示词/排序/
   恢复默认）+ 设置「模型目录」编辑页（modelcatalog.settings 动态读取）；旧 agent presets 的 tool allowlist 语义仍未迁移，
   故 presets 记 🟡。
-- 复核统计：62 项中 **✅34 / 🟡24 / ❌4**（上一版 34/23/5；移除 presets ❌）。核心对话/持久化/工作区/审批/设置/
+- 复核统计：62 项中 **✅37 / 🟡24 / ❌1**（上一版统计 34/24/4、表内 34/23/5，按 §2/§3 矩阵实际状态校正；
+  技能新建/删除、数据与隐私页、Home composer、通知开关、工作区创建等轮次落地后更新）。核心对话/持久化/工作区/审批/设置/
   右栏/搜索/导入/更新检查继续可用；编排、composer 控制、MCP 管理、宿主桌面能力大幅补齐。
 - **旧功能全量覆盖仍未完成**，但已从"核心 + 多数高级 UI"推进到"核心 + 编排 + 管理深度可用"，
   剩余缺口以 composer 收尾、plan/modes 深度、消息级操作、插件/记忆管理深度与少量平台项为主。
@@ -38,9 +39,9 @@
 
 | 状态 | 数量 | 占比 | 含义 |
 |---|---:|---:|---|
-| ✅ 已迁移 | 34 | 54.8% | 当前代码有对应实现，且进入 desktop/headless 装配或明确等价 |
-| 🟡 部分迁移 | 23 | 37.1% | 主路径可用，但仍缺子功能/交互/执行语义/管理能力 |
-| ❌ 未迁移 | 5 | 8.1% | 当前无等价实现（含系统级/明确非目标） |
+| ✅ 已迁移 | 37 | 59.7% | 当前代码有对应实现，且进入 desktop/headless 装配或明确等价 |
+| 🟡 部分迁移 | 24 | 38.7% | 主路径可用，但仍缺子功能/交互/执行语义/管理能力 |
+| ❌ 未迁移 | 1 | 1.6% | 当前无等价实现（含系统级/明确非目标） |
 | 合计 | 62 | 100% | 28 后端能力 + 34 Shell/UI 能力 |
 
 ## 2. 后端能力矩阵（28 项）
@@ -66,7 +67,7 @@
 | `runtime` | 🟡 | agent + rig agent/gate/compact | 循环/审批/压缩/检查点/多模态 parts/subagent runner/team manager/goal 工具与 goal 桥；缺 modes、review、goal 自动驱动、PTC/workflow/ralph |
 | `session` | 🟡 | agent ChatService + Regenerate/Fork/Archive/Pin/ModelSwitcher + usage | 发送/取消/历史/恢复/压缩/fork/export/附件/重新生成/会话模型/推理强度/**turn usage（tokens/duration/cached + usage 事件）**；缺 goal 多轮自动执行、tool spill、per-message feedback |
 | `sessionreference` | 🟡 | composer @ 菜单 + agent `references.go` | token 持久化、注入尾部 20 条/≤8000 rune、session_refs 事件、self/unknown/重复忽略、分隔符解析；缺旧候选排序细节/URI 语义/预算错误分类 |
-| `skills` | 🟡 | `internal/modules/skills` + settings 技能页 | 多根 List/Read/roots/预览/刷新；缺创建/编辑/删除、文件监听 |
+| `skills` | 🟡 | `internal/modules/skills` + settings 技能页 | 多根 List/Read/roots/预览/刷新 + **新建（dataDir/skills，frontmatter/校验）与删除（仅 dataDir，realpath 校验）**；缺 workspace 技能编辑、文件监听 |
 | `state` | ✅ | ChatService 读模型 + uiroot runtime | old broker/projector 被读模型替代；UI 所需投影可用 |
 | `store` | 🟡 | `internal/modules/sessionstore` | sessions/messages/events/checkpoints/search/workspace_id；旧 attachments/automation_runs/feedback/model 表语义分散或未迁移 |
 | `tools` | 🟡 | toolkit + hosttools + agent + rig tools | 文件/执行/编辑/图像/终端/jobs/memory/schedule/worktree/skills/settings/web/MCP/session/subagent/subagent_fork/team_*/spawn_teammate/list_agents/wait_agent/ask_user/present/plan_review/exit_plan_mode/goal/team_task_* 已注册；缺 workflow/ralph/review/inspect/report/lsp/ptc 与 tool allowlist/presets |
@@ -110,7 +111,7 @@
 | Modes UI（standard/minimal/creator） | ✅ | session 模式 Popover + agent gate 策略 | 四模式：普通（原审批策略）、计划（只读+计划白名单，最高优先）、精简（只读探索白名单）、创作（隐藏编码工具，仅 ask/present/goal/memory/skill）；composer 模式菜单 + header 徽标，坏值归一，中英 |
 | Team UI（成员/任务/steer） | ✅ | rightpanel Agents/Tasks Inspector + team_* 工具 | 成员列表/状态/最新回答、选中后 steer/中断/关闭；spawn 由 agent 工具发起（同旧）；任务板增删改/状态排序 |
 | Todo UI（会话 todo 面板） | ✅ | toolkit `KeyTaskBoard` + rightpanel「任务」tab | 任务列表/状态排序/添加/开始/完成/删除/刷新/错误与空态，与 team_task_* 共用；缺旧 todo 卡内联进度 |
-| Artifacts / Present UI | 🟡 | interaction Modal + uiroot ArtifactLister + rightpanel Files「产物」 | present 预览 + 最近 50/产物列表最近 10、内嵌 markdown 再预览；缺下载动作、跨重启历史 |
+| Artifacts / Present UI | 🟡 | interaction Modal + uiroot ArtifactLister + rightpanel Files「产物」 | present 预览 + 最近 50/产物列表最近 10、内嵌 markdown 再预览 + **下载为 Markdown（原生保存对话框/slug）**；缺跨重启历史 |
 | 交互式 ask_user UI | ✅ | `internal/ui/interaction` question Modal + uiroot bridge | 选项/自由文本/取消；hosttools ask_user 已走真实桥，E2E 覆盖 |
 | About 页 | ✅ | `internal/ui/about` | 构建信息/架构/bullet，en/zh 动态导航 |
 | Welcome/start tab | ✅ | `internal/ui/home`（welcome 为演示模块） | Home 起始页覆盖旧 start tab 主路径 |

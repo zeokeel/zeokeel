@@ -311,15 +311,18 @@ func waitFor(t *testing.T, what string, condition func() bool) {
 // fakeChat is a scripted contracts.ChatService: tests install ChatSession read
 // models and the UI module renders them, with no agent backend involved.
 type fakeChat struct {
-	mu          sync.Mutex
-	active      string
-	order       []string
-	sessions    map[string]contracts.ChatSession
-	subs        []func(string)
-	sends       []string
-	cancels     []string
-	sendErr     error
-	feedbackErr error
+	mu            sync.Mutex
+	active        string
+	order         []string
+	sessions      map[string]contracts.ChatSession
+	subs          []func(string)
+	sends         []string
+	cancels       []string
+	sendErr       error
+	newSessionErr error
+	cancelErr     error
+	deleteErr     error
+	feedbackErr   error
 }
 
 func newFakeChat() *fakeChat {
@@ -383,6 +386,9 @@ func (f *fakeChat) SetActiveSession(sessionID string) error {
 func (f *fakeChat) NewSession(title string) (string, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	if f.newSessionErr != nil {
+		return "", f.newSessionErr
+	}
 	id := fmt.Sprintf("sess-%d", len(f.order)+1)
 	now := time.Unix(1700000000, 0)
 	f.sessions[id] = contracts.ChatSession{ID: id, Title: title, CreatedAt: now, UpdatedAt: now}
@@ -394,6 +400,9 @@ func (f *fakeChat) NewSession(title string) (string, error) {
 func (f *fakeChat) DeleteSession(sessionID string) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	if f.deleteErr != nil {
+		return f.deleteErr
+	}
 	if _, ok := f.sessions[sessionID]; !ok {
 		return fmt.Errorf("fakeChat: unknown session %q", sessionID)
 	}
@@ -501,7 +510,49 @@ func (f *fakeChat) Cancel(sessionID string) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.cancels = append(f.cancels, sessionID)
-	return nil
+	return f.cancelErr
+}
+
+// setNewSessionError injects a NewSession failure.
+func (f *fakeChat) setNewSessionError(err error) {
+	f.mu.Lock()
+	f.newSessionErr = err
+	f.mu.Unlock()
+}
+
+// setCancelError injects a Cancel failure.
+func (f *fakeChat) setCancelError(err error) {
+	f.mu.Lock()
+	f.cancelErr = err
+	f.mu.Unlock()
+}
+
+// setDeleteError injects a DeleteSession failure.
+func (f *fakeChat) setDeleteError(err error) {
+	f.mu.Lock()
+	f.deleteErr = err
+	f.mu.Unlock()
+}
+
+// recordedSends returns the recorded Send prompts ("session:prompt").
+func (f *fakeChat) recordedSends() []string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]string(nil), f.sends...)
+}
+
+// cancelCalls returns the recorded Cancel session ids.
+func (f *fakeChat) cancelCalls() []string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]string(nil), f.cancels...)
+}
+
+// sessionCount returns the number of sessions the fake knows.
+func (f *fakeChat) sessionCount() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return len(f.sessions)
 }
 
 func (f *fakeChat) Subscribe(fn func(string)) (func(), error) {

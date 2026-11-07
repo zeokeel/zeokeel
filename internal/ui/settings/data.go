@@ -6,6 +6,7 @@ package settings
 // dialog), so it works headlessly in tests without a desktop backend.
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -351,6 +352,70 @@ func exportDiagnosticReport(kctx cordis.Context, store contracts.SettingsService
 
 // diagnosticReportText renders the plain-text report: app identity/runtime/
 // data directory/session count, then every setting key (API key masked).
+// maskedSettingValue hides credentials in the exported diagnostic report:
+// whole values for API-key/token-ish settings, and Bearer tokens inside JSON
+// structured settings (such as mcp.servers headers).
+func maskedSettingValue(locale contracts.LocaleService, key, value string) string {
+	if strings.TrimSpace(value) == "" {
+		return value
+	}
+	hidden := localized(locale, "已设置(隐藏)", "set (hidden)")
+	lower := strings.ToLower(key)
+	for _, marker := range []string{"apikey", "api_key", "token", "secret", "password", "authorization"} {
+		if strings.Contains(lower, marker) {
+			return hidden
+		}
+	}
+	trimmed := strings.TrimSpace(value)
+	if strings.HasPrefix(trimmed, "{") || strings.HasPrefix(trimmed, "[") {
+		var decoded any
+		if err := json.Unmarshal([]byte(trimmed), &decoded); err == nil {
+			encoded, encodeErr := json.Marshal(redactJSONSecrets(decoded))
+			if encodeErr == nil {
+				return string(encoded)
+			}
+		}
+		return hidden
+	}
+	if strings.Contains(trimmed, "Bearer ") {
+		return hidden
+	}
+	return value
+}
+
+// redactJSONSecrets walks decoded JSON and hides Bearer tokens and values of
+// credential-looking object keys.
+func redactJSONSecrets(value any) any {
+	switch typed := value.(type) {
+	case map[string]any:
+		redacted := make(map[string]any, len(typed))
+		for key, item := range typed {
+			lower := strings.ToLower(key)
+			if strings.Contains(lower, "token") || strings.Contains(lower, "authorization") ||
+				strings.Contains(lower, "secret") || strings.Contains(lower, "apikey") ||
+				strings.Contains(lower, "password") {
+				redacted[key] = "***"
+				continue
+			}
+			redacted[key] = redactJSONSecrets(item)
+		}
+		return redacted
+	case []any:
+		redacted := make([]any, len(typed))
+		for index, item := range typed {
+			redacted[index] = redactJSONSecrets(item)
+		}
+		return redacted
+	case string:
+		if strings.Contains(typed, "Bearer ") {
+			return "Bearer ***"
+		}
+		return typed
+	default:
+		return value
+	}
+}
+
 func diagnosticReportText(kctx cordis.Context, store contracts.SettingsService, chat contracts.ChatService, locale contracts.LocaleService) string {
 	info, _ := kctx.Get(contracts.KeyAppInfo)
 	dataDir, _ := kctx.Get(contracts.KeyDataDir)
@@ -378,11 +443,7 @@ func diagnosticReportText(kctx cordis.Context, store contracts.SettingsService, 
 	}
 	sort.Strings(keys)
 	for _, key := range keys {
-		value := values[key]
-		if key == contracts.SettingsChatAPIKey && value != "" {
-			value = localized(locale, "已设置(隐藏)", "set (hidden)")
-		}
-		fmt.Fprintf(&builder, "  %s=%s\n", key, value)
+		fmt.Fprintf(&builder, "  %s=%s\n", key, maskedSettingValue(locale, key, values[key]))
 	}
 	return builder.String()
 }

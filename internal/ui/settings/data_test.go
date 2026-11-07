@@ -207,9 +207,11 @@ func TestDataPrivacyClearFailures(t *testing.T) {
 
 func TestDataPrivacyDiagnosticReport(t *testing.T) {
 	store := newFakeSettings(map[string]string{
-		contracts.SettingsChatModel:  "deepseek-chat",
-		contracts.SettingsChatAPIKey: "sk-secret",
-		"ui.language":                "zh",
+		contracts.SettingsChatModel:      "deepseek-chat",
+		contracts.SettingsChatAPIKey:     "sk-secret",
+		contracts.SettingWebSearchAPIKey: "search-secret",
+		contracts.SettingMCPServers:      `[{"name":"mcp1","url":"https://mcp.example/mcp","headers":["Authorization: Bearer mcp-token-123"]}]`,
+		"ui.language":                    "zh",
 	})
 	chat := &fakeChat{}
 	seedDataPageSessions(chat)
@@ -233,8 +235,15 @@ func TestDataPrivacyDiagnosticReport(t *testing.T) {
 			t.Fatalf("diagnostic report missing %q:\n%s", want, gotContent)
 		}
 	}
-	if strings.Contains(gotContent, "sk-secret") {
-		t.Fatalf("diagnostic report leaked the API key:\n%s", gotContent)
+	for _, leaked := range []string{"sk-secret", "search-secret", "mcp-token-123"} {
+		if strings.Contains(gotContent, leaked) {
+			t.Fatalf("diagnostic report leaked %q:\n%s", leaked, gotContent)
+		}
+	}
+	for _, want := range []string{"web.search.apiKey=已设置(隐藏)", "Bearer ***"} {
+		if !strings.Contains(gotContent, want) {
+			t.Fatalf("diagnostic report missing masked form %q:\n%s", want, gotContent)
+		}
 	}
 	h.assertTexts(tester, "已导出诊断报告", "/tmp/diagnostics.txt")
 }

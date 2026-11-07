@@ -7,7 +7,7 @@
 
 ## 修复状态（Lead 复核后）
 
-> 首轮 11 个「已知缺陷探针」与第二轮 4 个 P3 均已随 TDD 修复转为 PASS；第三轮 P3-9/10 已修复、P3-11 重开后于 ca2d24c 真正修复；第四轮 P3-12 已修复（ca2d24c）；第五、六、七轮无新缺陷。`go test ./internal/regression -count=1 -race` 当前 **189 PASS / 0 SKIP**（历史：首轮修复后 92，第二轮后 98，第三轮后 133，第四轮后 153，第五轮后 172，第六轮后 180）。
+> 首轮 11 个「已知缺陷探针」与第二轮 4 个 P3 均已随 TDD 修复转为 PASS；第三轮 P3-9/10 已修复、P3-11 重开后于 ca2d24c 真正修复；第四轮 P3-12 已修复（ca2d24c）；第五~七轮无新缺陷，第八轮发现 1 个 P3（AUDIT-P3-13）并已修复：诊断报告现在对 apiKey/token/secret/password/authorization 类设置整值隐藏，并对 JSON 结构化设置（mcp.servers）递归掩码 Bearer token 与凭证字段；新增单测断言 web.search.apiKey 与 mcp Bearer 不泄漏。`go test ./internal/regression -count=1 -race` 当前 **206 PASS / 0 SKIP**（历史：首轮修复后 92，第二轮后 98，第三轮后 133，第四轮后 153，第五轮后 172，第六轮后 180，第七轮后 189）。
 
 | ID | 优先级 | 状态 | 修复摘要 |
 |----|--------|------|----------|
@@ -31,7 +31,7 @@ $ go test ./internal/regression -count=1                    ok  1.2s
 $ go test ./internal/regression -count=1 -race              ok 12.8s（98 PASS / 0 SKIP）
 ```
 
-测试规模：`internal/regression` 共 189 个顶层 Test（首轮 78 + 第二轮 20 + 第三轮 35 + 第四轮 20 + 第五轮 19 + 第六轮 8 + 第七轮 9；含子用例后更多；另有 `internal/ui/uimodtest` 的 E2E 1 个，不计入本包）。第三轮 P3-9/10 已修复，P3-11 重开后已真正修复，第四轮 P3-12 已修复，第五~七轮无新缺陷；当前 **189 PASS / 0 SKIP**。
+测试规模：`internal/regression` 共 206 个顶层 Test（首轮 78 + 第二轮 20 + 第三轮 35 + 第四轮 20 + 第五轮 19 + 第六轮 8 + 第七轮 9 + 第八轮 17；含子用例后更多；另有 `internal/ui/uimodtest` 的 E2E 1 个，不计入本包）。第三轮 P3-9/10 已修复，P3-11 重开后已真正修复，第四轮 P3-12 已修复，第五~七轮无新缺陷，第八轮新增 P3-13（待修）；当前 **206 PASS / 0 SKIP**。
 
 ## 用例矩阵
 
@@ -348,6 +348,7 @@ $ go test ./internal/regression -count=1 -race               ok 27.9s（153 PASS
 第四轮回归：`internal/regression` **153 PASS / 0 SKIP**。第五轮复跑确认 P3-11/P3-12 修复未回退；`/feedback` 斜杠命令已在本轮落地。
 第六轮复跑扩张到 **180 PASS / 0 SKIP**（托盘/关闭到托盘、工件下载说明、chat modes 四模式 gate 表），并新增 desktop assembly 的模式菜单 E2E。
 第七轮复跑扩张到 **189 PASS / 0 SKIP**（全局热键、可选 LSP、automation Close 关机语义），并复跑第四~六轮关键探针 104 项确认 0 回退。
+第八轮扩张到 **206 PASS / 0 SKIP**（Home composer、/停止 /附加文件 /帮助、数据与隐私页、通知开关、侧栏添加工作区），发现 AUDIT-P3-13。
 仍有文档化未落地项（plan keep-planning 反馈循环、会话级 feedback 汇总、旧 `/feedback [good|bad]` 参数式直接打分、自动化 runs 之外的历史查询）。
 
 ## 反证审计第五轮：/feedback 命令 / 自动化运行历史 / 反馈复跑 / 记忆与技能编辑（2026-11-08）
@@ -468,3 +469,60 @@ $ go test ./internal/regression -race -run '第四~六轮关键探针'   104 PAS
 - LSP 用 seam 注入 fake server 验证注册/关闭所有权；真实语言服务器进程（离线环境无可用 LSP binary）未做进程级集成，`lsp.Start` 的真实 stdio 握手由 rig 单测覆盖。
 - automation Close 用快速 fake chat 的 in-flight 写盘窗口；真实 provider 慢网络下的 Close 阻塞时长未做性能断言（语义是等待完成）。
 - 第四~六轮复跑按测试名前缀选择 104 项，未逐条复跑全部 180 项（全量 -race 已覆盖）。
+
+## 反证审计第八轮：Home composer / 会话命令 / 数据与隐私 / 通知开关 / 侧栏工作区（2026-11-08）
+
+范围：`a3ef7ec`（Home composer、/停止 /附加文件 /帮助、数据与隐私页）+ `9d1cbac`（侧栏添加工作区、ui.notifications 开关）。
+只新增 `internal/regression/**` 并改本文件；未改生产代码。新增 **17** 个顶层 Test（189 → 206）。
+
+```
+$ gofmt -l internal/regression/                              （空）
+$ go vet ./internal/regression                               OK
+$ go build ./...                                             OK
+$ go test ./internal/regression -count=1 -race               ok 44.5s（206 PASS / 0 SKIP）
+```
+
+| # | 链路 | 反证点 | 用例 | 结果 |
+|---|------|--------|------|------|
+| 33 | Home composer | 空草稿点击发送 / Enter 均不建会话不发送；无 chat 后端仍安全渲染且发送禁用；Enter 发送 trim 后建会话+Send+导航 session，Shift+Enter 不发送；附件：picker 成功暂存 chip、无 AttachmentSender 时回退 plain prompt 并提示「附件需在会话中发送」、picker 失败可读错误；NewSession / Send 失败可读错误且不导航、不丢状态 | 4 | PASS |
+| 34 | /停止 /附加文件 /帮助 | /stop：非运行禁用、运行启用、调用 Cancel + 「已停止」徽标、Cancel 失败错误行；/附加文件：无 AttachmentSender →「当前后端不支持附件」、picker 成功暂存 chips、取消 no-op、错误可读；/帮助：模态含帮助/斜杠命令/快捷键/Esc 关闭/Cmd/Ctrl+K 与关键命令标题、注册命令 ≥12，Esc 关闭且注册量不变 | 3 | PASS |
+| 35 | 数据与隐私页 | 导出全部：Markdown 含 3 个会话标题与 role/text、默认文件名、成功徽标、取消静默、保存失败错误行；清除全部：确认文案带会话数、取消保留、确认清空、部分失败「已清除 2 个会话，1 个失败」；诊断报告含应用/Commit/会话数/设置项且 chat.apiKey 掩码；打开数据目录 seam 失败错误行；无会话空态；报告取消/失败 | 4 | PASS（发现 AUDIT-P3-13） |
+| 36 | 通知开关 ui.notifications | 归一化行为矩阵：false/FALSE/空白/0/no 抑制；缺失/空/true/1/yes/banana/2/off/disabled 显示（缺失默认开）；热切换：禁用时清空已显示栈、禁用期投递忽略、重新启用后可显示；设置页 toggle 写 false/true、坏值起始为开 | 3 | PASS |
+| 37 | 侧栏添加工作区 | 空名称回退目录 basename（含尾斜杠）、自定义名优先、Create 收到 trim 后参数、Open 新 ID、成功徽标、模态关闭；空目录本地拒绝不调用 Create、picker 失败/取消、Create 失败保留模态+可读错误；无 workspace 后端隐藏入口 | 3 | PASS |
+
+### 第八轮发现
+
+#### AUDIT-P3-13（P3，隐私）诊断报告只掩码 chat.apiKey，其他含密钥设置明文导出
+
+- 位置：`internal/ui/settings/data.go` 的 `diagnosticReportText`：`if key == contracts.SettingsChatAPIKey && value != "" { value = "已设置(隐藏)" }`，其余 key 原样输出。
+- 复现：`go test ./internal/regression -run TestDataPrivacyDiagnosticReportMasking -v` → 设置 `web.search.apiKey="sk-search-secret-456"` 与 `mcp.servers` 含 `Authorization: Bearer sk-mcp-secret-789`，导出的诊断报告包含两处明文（探针 t.Logf 记录，不 fail）。
+- 影响：用户按页面引导导出诊断报告用于支持/排障时，会把搜索服务 key、MCP server headers 内的 token 等敏感值写入磁盘文件；属于隐私泄露（需用户主动导出，故记 P3）。
+- 建议：按 key 后缀（`apiKey`/`api_key`/`token`/`secret` 等）或显式敏感清单掩码；对 JSON 值（如 `mcp.servers`）递归 redact 敏感字段；并补一条报告内容白名单测试。
+
+### 第八轮未证伪的关键不变量
+
+1. **Home composer**：空草稿与修饰键组合不发送；发送成功才清草稿/附件并导航；失败保留状态并展示可读错误；附件回退不静默丢提示；无 chat 后端不 panic 且禁用发送。
+2. **会话命令**：/stop 的 Enabled 与运行态一致且 Cancel 结果可见；/file 需要 AttachmentSender，picker 三种结果（成功/取消/错误）各自正确；/help 列出真实注册命令与快捷键，Esc 关闭不改变注册表。
+3. **数据与隐私**：批量导出/清除的非取消路径可见结果、取消静默、错误可读；清除部分失败有计数；诊断报告只掩码 chat.apiKey（见 P3-13）。
+4. **通知开关**：只有 false/0/no 关闭，缺失/坏值保持开启；热切换清栈且不重启生效。
+5. **侧栏工作区**：名称回退与 Create 参数确定；失败保留模态；无后端不显示入口。
+
+### 第八轮观察（非缺陷）
+
+- Home 附件回退在设置 notice 后立即导航到会话，提示可能不可见；是否改为 toast 属 UX 决策，已在文档记录行为。
+- /stop 的 Enabled 只在调色板路径生效；直接程序化 Run 仍会调用 Cancel（不可达路径，测试按 UI 约束断言）。
+- 通知设置页对坏值显示为「开」并在首次 toggle 写入规范值；符合“缺失/坏值默认开”的约定。
+
+### 第八轮局限
+
+- Home/settings/sidebar 测试用内存 settings 与 fake chat/workspace；宿主 settings 文件持久化、真实 provider 网络错误语义由模块/宿主单测覆盖。
+- 原生 picker/save/open 对话框均以 seam 替换（headless）；真实桌面对话框路径由桌面 smoke 覆盖，CI 不可触发。
+- 数据页导出内容在 seam 处捕获；默认 seam 的磁盘写入错误未在本轮覆盖（seam 错误路径已覆盖）。
+- 通知 TTL 的 4s 真实过期未在本轮重复（既有 TestToastsTTLExpiry 覆盖）。
+- Home 附件大小上限（10MB）与非法文件仅按实现路径推断，未在本轮构造超大文件（避免 CI 磁盘压力）。
+
+## 第八轮缺陷修复（Lead 复核，2026-11-08）
+
+| ID | 状态 | 修复摘要 |
+|----|------|----------|
+| AUDIT-P3-13 | ✅ 已修复 | `internal/ui/settings/data.go` 诊断报告：敏感键（apikey/api_key/token/secret/password/authorization）整值「已设置(隐藏)」；JSON 设置递归 redact（Bearer → `Bearer ***`、凭证键 → `***`）；新增 settings 单测覆盖 `web.search.apiKey` 与 `mcp.servers` Bearer 泄漏 |

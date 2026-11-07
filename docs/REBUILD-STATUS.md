@@ -21,6 +21,12 @@
 - 右侧栏「文件」Tab：打开文件夹（mygo 原生 Directory picker）、目录进入/面包屑、文本/Markdown/图片预览、
   刷新与错误状态；E2E 覆盖工作区创建 + 列表 + 预览帧
 
+**Round 59 最终验证 + P3-13 修复（2026-11-08）**
+- 全量证据：build/vet 绿；34 测试包 plain+race 全绿；regression 206 PASS / 0 SKIP；三产品冒烟（desktop xvfb 含托盘/热键、
+  headless、ACP initialize）无 panic；ui-snapshot 63 渲染步 / 61 唯一 PNG；docs/VERIFICATION.md 记录 Round 59 证据
+- 反证第八轮发现 P3-13（诊断报告泄漏 web.search.apiKey / mcp Bearer）→ 已修复并加单测；COVERAGE 摘要校正为 62 项
+  ✅37 / 🟡24 / ❌1，矩阵 Skills/Artifacts 行同步
+
 **TDD-sidebar-workspace/notifications（2026-11-08）**
 - 侧栏「添加工作区」：目录选择 seam、名称留空回退 basename、Create/Open、错误保留模态、Badge；sidebar 56 测试
 - 通知设置：`ui.notifications` 归一（仅 false/0/no 关闭）；toasts 投递前+每帧检查（关闭清栈、热切换）；设置「通知」页 Toggle；settings 123 /
