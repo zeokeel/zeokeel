@@ -2099,3 +2099,192 @@ func TestSessionPinnedConcurrent(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+// --- P3: session archiving -------------------------------------------------
+
+// TestSetSessionArchivedPersistsAndNotifies covers the settings key, the read
+// model flag and subscriber notification.
+func TestSetSessionArchivedPersistsAndNotifies(t *testing.T) {
+	settings := newFakeSettings(nil)
+	svc := newTestService(t, Config{}, settings, nil)
+	sessionID, err := svc.NewSession("archive me")
+	if err != nil {
+		t.Fatalf("NewSession: %v", err)
+	}
+	archiver, ok := contracts.ChatService(svc).(contracts.SessionArchiver)
+	if !ok {
+		t.Fatal("service does not implement contracts.SessionArchiver")
+	}
+	notifications := make(chan string, 4)
+	unsubscribe, err := svc.Subscribe(func(id string) { notifications <- id })
+	if err != nil {
+		t.Fatalf("Subscribe: %v", err)
+	}
+	defer unsubscribe()
+
+	key := contracts.SessionArchivedSettingKey(sessionID)
+	if info := sessionInfoOf(t, svc, sessionID); info.Archived {
+		t.Fatal("new session is archived")
+	}
+	if err := archiver.SetSessionArchived(sessionID, true); err != nil {
+		t.Fatalf("SetSessionArchived(true): %v", err)
+	}
+	if got := settings.Get(key, ""); got != "true" {
+		t.Fatalf("settings %q = %q, want true", key, got)
+	}
+	if info := sessionInfoOf(t, svc, sessionID); !info.Archived {
+		t.Fatal("Sessions().Archived did not reflect the persisted flag")
+	}
+	select {
+	case notified := <-notifications:
+		if notified != sessionID {
+			t.Fatalf("notification = %q, want %q", notified, sessionID)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("SetSessionArchived did not notify subscribers")
+	}
+
+	if err := archiver.SetSessionArchived(sessionID, false); err != nil {
+		t.Fatalf("SetSessionArchived(false): %v", err)
+	}
+	if got := settings.Get(key, ""); got != "false" {
+		t.Fatalf("settings %q = %q, want false", key, got)
+	}
+	if info := sessionInfoOf(t, svc, sessionID); info.Archived {
+		t.Fatal("Sessions().Archived still true after unarchive")
+	}
+	select {
+	case <-notifications:
+	case <-time.After(time.Second):
+		t.Fatal("unarchive did not notify subscribers")
+	}
+
+	if err := archiver.SetSessionArchived("missing", true); err == nil || !strings.Contains(err.Error(), "unknown") {
+		t.Fatalf("SetSessionArchived(missing) = %v, want a readable unknown-session error", err)
+	}
+}
+
+// TestSessionArchivedWithoutSettingsOrOnFailure covers a missing settings
+// service and a failing settings write.
+func TestSessionArchivedWithoutSettingsOrOnFailure(t *testing.T) {
+	noSettings := newService(Config{}, rigtools.NewRegistry(), nil, &fakeLogger{}, newFakeStore(), fakeApprovals{})
+	sessionID, err := noSettings.NewSession("no settings archive")
+	if err != nil {
+		t.Fatalf("NewSession: %v", err)
+	}
+	if info := sessionInfoOf(t, noSettings, sessionID); info.Archived {
+		t.Fatal("session without a settings service is archived")
+	}
+	if err := noSettings.SetSessionArchived(sessionID, true); err == nil {
+		t.Fatal("SetSessionArchived without settings returned nil error")
+	}
+	if info := sessionInfoOf(t, noSettings, sessionID); info.Archived {
+		t.Fatal("failed archive changed the read model")
+	}
+
+	failing := newTestService(t, Config{}, nil, nil)
+	failing.settings = failingSettings{}
+	failingID, err := failing.NewSession("failing settings archive")
+	if err != nil {
+		t.Fatalf("NewSession: %v", err)
+	}
+	if err := failing.SetSessionArchived(failingID, true); err == nil || !strings.Contains(err.Error(), "settings write failed") {
+		t.Fatalf("SetSessionArchived with failing settings = %v, want the write error", err)
+	}
+	if info := sessionInfoOf(t, failing, failingID); info.Archived {
+		t.Fatal("failed settings write changed the archive read model")
+	}
+}
+
+// TestSessionPinnedAndArchivedIndependent covers the two flags living in
+// separate settings keys and not influencing each other.
+func TestSessionPinnedAndArchivedIndependent(t *testing.T) {
+	settings := newFakeSettings(nil)
+	svc := newTestService(t, Config{}, settings, nil)
+	sessionID, err := svc.NewSession("both flags")
+	if err != nil {
+		t.Fatalf("NewSession: %v", err)
+	}
+	if err := svc.SetSessionPinned(sessionID, true); err != nil {
+		t.Fatalf("SetSessionPinned: %v", err)
+	}
+	if err := svc.SetSessionArchived(sessionID, true); err != nil {
+		t.Fatalf("SetSessionArchived: %v", err)
+	}
+	info := sessionInfoOf(t, svc, sessionID)
+	if !info.Pinned || !info.Archived {
+		t.Fatalf("info = %+v, want both flags true", info)
+	}
+	if got := settings.Get(contracts.SessionPinnedSettingKey(sessionID), ""); got != "true" {
+		t.Fatalf("pinned key = %q", got)
+	}
+	if got := settings.Get(contracts.SessionArchivedSettingKey(sessionID), ""); got != "true" {
+		t.Fatalf("archived key = %q", got)
+	}
+
+	if err := svc.SetSessionPinned(sessionID, false); err != nil {
+		t.Fatalf("unpin: %v", err)
+	}
+	if info := sessionInfoOf(t, svc, sessionID); info.Pinned || !info.Archived {
+		t.Fatalf("after unpin info = %+v, want pinned=false archived=true", info)
+	}
+	if err := svc.SetSessionArchived(sessionID, false); err != nil {
+		t.Fatalf("unarchive: %v", err)
+	}
+	if info := sessionInfoOf(t, svc, sessionID); info.Pinned || info.Archived {
+		t.Fatalf("after unarchive info = %+v, want both false", info)
+	}
+}
+
+// TestSessionArchivedSurvivesRestore covers archive flags persisted in settings
+// across a service rebuild.
+func TestSessionArchivedSurvivesRestore(t *testing.T) {
+	settings := newFakeSettings(nil)
+	store := newFakeStore()
+	first := newService(Config{}, rigtools.NewRegistry(), settings, &fakeLogger{}, store, fakeApprovals{})
+	sessionID, err := first.NewSession("restored archive")
+	if err != nil {
+		t.Fatalf("NewSession: %v", err)
+	}
+	if err := first.SetSessionArchived(sessionID, true); err != nil {
+		t.Fatalf("SetSessionArchived: %v", err)
+	}
+
+	restarted := newService(Config{}, rigtools.NewRegistry(), settings, &fakeLogger{}, store, fakeApprovals{})
+	restarted.restore(context.Background())
+	infos := restarted.Sessions()
+	if len(infos) != 1 || !infos[0].Archived || infos[0].Pinned {
+		t.Fatalf("restored Sessions = %+v, want archived only", infos)
+	}
+}
+
+// TestSessionArchivedConcurrent covers concurrent archive/unarchive and listing.
+func TestSessionArchivedConcurrent(t *testing.T) {
+	settings := newFakeSettings(nil)
+	svc := newTestService(t, Config{}, settings, nil)
+	sessionID, err := svc.NewSession("concurrent archive")
+	if err != nil {
+		t.Fatalf("NewSession: %v", err)
+	}
+	const workers = 4
+	var waitGroup sync.WaitGroup
+	errs := make(chan error, workers)
+	for index := 0; index < workers; index++ {
+		waitGroup.Add(1)
+		go func(number int) {
+			defer waitGroup.Done()
+			for iteration := 0; iteration < 20; iteration++ {
+				if err := svc.SetSessionArchived(sessionID, (number+iteration)%2 == 0); err != nil {
+					errs <- err
+					return
+				}
+				_ = svc.Sessions()
+			}
+		}(index)
+	}
+	waitGroup.Wait()
+	close(errs)
+	for err := range errs {
+		t.Fatal(err)
+	}
+}

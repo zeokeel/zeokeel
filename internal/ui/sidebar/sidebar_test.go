@@ -145,26 +145,40 @@ type harness struct {
 
 func newHarness(t *testing.T, chat contracts.ChatService, cfg sidebar.Config) *harness {
 	t.Helper()
-	return newHarnessFull(t, chat, cfg, nil, nil)
+	return newHarnessFull(t, chat, cfg, nil, nil, nil)
 }
 
 // newHarnessWithWorkspace is newHarness with an optional workspace backend
 // provided as contracts.KeyWorkspace (nil keeps the legacy flat session list).
 func newHarnessWithWorkspace(t *testing.T, chat contracts.ChatService, cfg sidebar.Config, workspace contracts.WorkspaceService) *harness {
 	t.Helper()
-	return newHarnessFull(t, chat, cfg, workspace, nil)
+	return newHarnessFull(t, chat, cfg, workspace, nil, nil)
 }
 
 // newHarnessWithStore is newHarness with an optional durable store provided as
 // contracts.KeyStore (its MessageSearcher half powers the message-search area).
 func newHarnessWithStore(t *testing.T, chat contracts.ChatService, store contracts.Store, cfg sidebar.Config) *harness {
 	t.Helper()
-	return newHarnessFull(t, chat, cfg, nil, store)
+	return newHarnessFull(t, chat, cfg, nil, store, nil)
+}
+
+// newHarnessWithSettings is newHarness with an optional settings store (the
+// archived-sessions view toggle lives there).
+func newHarnessWithSettings(t *testing.T, chat contracts.ChatService, settings contracts.SettingsService, cfg sidebar.Config) *harness {
+	t.Helper()
+	return newHarnessFull(t, chat, cfg, nil, nil, settings)
+}
+
+// newHarnessWithSettingsAndWorkspace adds both the workspace and settings
+// backends (the workspace tree's archived group counts need both).
+func newHarnessWithSettingsAndWorkspace(t *testing.T, chat contracts.ChatService, settings contracts.SettingsService, workspace contracts.WorkspaceService, cfg sidebar.Config) *harness {
+	t.Helper()
+	return newHarnessFull(t, chat, cfg, workspace, nil, settings)
 }
 
 // newHarnessFull builds the sidebar harness with the optional workspace and
 // durable store backends.
-func newHarnessFull(t *testing.T, chat contracts.ChatService, cfg sidebar.Config, workspace contracts.WorkspaceService, store contracts.Store) *harness {
+func newHarnessFull(t *testing.T, chat contracts.ChatService, cfg sidebar.Config, workspace contracts.WorkspaceService, store contracts.Store, settings contracts.SettingsService) *harness {
 	t.Helper()
 	uiRoot := uiroot.New(uiroot.Config{AppName: "ZeoKeel"})
 	ctx := cordis.Root()
@@ -181,6 +195,9 @@ func newHarnessFull(t *testing.T, chat contracts.ChatService, cfg sidebar.Config
 	}
 	if store != nil {
 		provide[contracts.Store](t, ctx, contracts.KeyStore, store)
+	}
+	if settings != nil {
+		provide[contracts.SettingsService](t, ctx, contracts.KeySettings, settings)
 	}
 
 	// The destination screens must exist for nav.Push to succeed. The host no

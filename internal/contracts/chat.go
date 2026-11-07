@@ -79,7 +79,10 @@ type ChatSessionInfo struct {
 	Title       string
 	// Pinned marks a pinned session: the sidebar sorts pinned sessions first
 	// within their workspace group.
-	Pinned       bool
+	Pinned bool
+	// Archived marks an archived session: hidden from the sidebar unless the
+	// "show archived" view option is on.
+	Archived     bool
 	MessageCount int
 	Running      bool
 	UpdatedAt    time.Time
@@ -140,6 +143,23 @@ type AttachmentSender interface {
 func SessionPinnedSettingKey(sessionID string) string {
 	return "session." + sessionID + ".pinned"
 }
+
+// SessionArchivedSettingKey is the settings row storing a session's archive
+// flag (pins and archives both live in settings, not in the schema).
+func SessionArchivedSettingKey(sessionID string) string {
+	return "session." + sessionID + ".archived"
+}
+
+// SessionArchiver is the optional half of the chat service that archives or
+// restores a session. UI modules type-assert it.
+type SessionArchiver interface {
+	// SetSessionArchived persists the session's archive flag.
+	SetSessionArchived(sessionID string, archived bool) error
+}
+
+// SettingSessionsShowArchived is the sidebar view option to list archived
+// sessions ("true"/"false").
+const SettingSessionsShowArchived = "ui.sessions.showArchived"
 
 // SessionPinner is the optional half of the chat service that pins or
 // unpins a session. UI modules type-assert it.

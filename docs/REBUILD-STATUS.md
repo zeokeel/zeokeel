@@ -21,6 +21,11 @@
 - 右侧栏「文件」Tab：打开文件夹（mygo 原生 Directory picker）、目录进入/面包屑、文本/Markdown/图片预览、
   刷新与错误状态；E2E 覆盖工作区创建 + 列表 + 预览帧
 
+**P3 会话归档（2026-11-08）**
+- agent `SessionArchiver`：settings `session.<id>.archived`；`ChatSessionInfo.Archived`
+- sidebar：默认隐藏归档、footer 显示/隐藏已归档（settings 持久化）、行菜单归档/取消、已归档 Badge、
+  排序 置顶→普通→归档、搜索/分组/计数一致；E2E 验证隐藏→显示
+
 **P3 会话置顶（2026-11-08）**
 - agent `SessionPinner`：settings `session.<id>.pinned` 持久化，`ChatSessionInfo.Pinned`；未知会话/无 settings 错误
 - sidebar：行菜单切换置顶、组内置顶优先排序、置顶 Badge；E2E 验证排序/徽标/取消置顶；design-guide 复核

@@ -76,6 +76,10 @@ type paneState struct {
 	searchHits  []contracts.MessageSearchHit
 	searchErr   error
 
+	// settings is the optional settings store: the footer's "show archived"
+	// view toggle reads/writes contracts.SettingSessionsShowArchived there.
+	settings contracts.SettingsService
+
 	renameOpen   bool
 	renameTarget string
 	renameDraft  string
@@ -114,6 +118,9 @@ func Module() *module.Descriptor[Config] {
 		}
 		if lister, ok := ctx.Get(contracts.KeyScreenLister); ok {
 			state.screens = lister
+		}
+		if settings, ok := ctx.Get(contracts.KeySettings); ok {
+			state.settings = settings
 		}
 
 		// The chat service notifies from the agent goroutine; hop to the UI
@@ -285,8 +292,9 @@ func buildSessionList(c *ui.Context, t *design.Tokens, chat contracts.ChatServic
 				})
 
 			query := strings.TrimSpace(state.query)
-			allSessions := chat.Sessions()
-			sessions := pinnedFirst(filterSessions(allSessions, query))
+			includeArchived := showArchivedSetting(state)
+			allSessions := filterArchivedSessions(chat.Sessions(), includeArchived)
+			sessions := orderSessionList(filterSessions(allSessions, query), includeArchived)
 			switch {
 			case len(sessions) == 0:
 				empty := "还没有会话"
@@ -605,6 +613,51 @@ func pinnedFirst(sessions []contracts.ChatSessionInfo) []contracts.ChatSessionIn
 	return ordered
 }
 
+// showArchivedSetting reports the footer's "show archived" view option. A
+// missing settings store (or missing value) means archived sessions are hidden.
+func showArchivedSetting(state *paneState) bool {
+	if state.settings == nil {
+		return false
+	}
+	return strings.EqualFold(strings.TrimSpace(state.settings.Get(contracts.SettingSessionsShowArchived, "false")), "true")
+}
+
+// filterArchivedSessions drops archived sessions unless the view option shows
+// them. The remaining order is untouched (updated newest first).
+func filterArchivedSessions(sessions []contracts.ChatSessionInfo, includeArchived bool) []contracts.ChatSessionInfo {
+	if includeArchived {
+		return sessions
+	}
+	visible := make([]contracts.ChatSessionInfo, 0, len(sessions))
+	for _, session := range sessions {
+		if session.Archived {
+			continue
+		}
+		visible = append(visible, session)
+	}
+	return visible
+}
+
+// orderSessionList applies the sidebar's priority: pinned first, then the
+// ordinary sessions, then archived ones (archived keep the updated order).
+// Archived sessions only appear when the view option is on.
+func orderSessionList(sessions []contracts.ChatSessionInfo, includeArchived bool) []contracts.ChatSessionInfo {
+	active := make([]contracts.ChatSessionInfo, 0, len(sessions))
+	archived := make([]contracts.ChatSessionInfo, 0)
+	for _, session := range sessions {
+		if session.Archived {
+			archived = append(archived, session)
+			continue
+		}
+		active = append(active, session)
+	}
+	ordered := pinnedFirst(active)
+	if includeArchived {
+		ordered = append(ordered, archived...)
+	}
+	return ordered
+}
+
 // buildSessionRow is one brand session row: a native ButtonBase at the brand row
 // metrics (36 DIP, 8 DIP radius, hover/selected tint) with the accessible label
 // and the native click behavior.
@@ -615,6 +668,7 @@ func buildSessionRow(c *ui.Context, t *design.Tokens, chat contracts.ChatService
 	renamer, _ := chat.(contracts.SessionRenamer)
 	forker, _ := chat.(contracts.SessionForker)
 	pinner, _ := chat.(contracts.SessionPinner)
+	archiver, _ := chat.(contracts.SessionArchiver)
 	ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(design.Space1).
 		Padding(0, 0, 0, indent).Children(func() {
 		row := ui.ButtonBase(c).Grow(1).Height(36).PaddingX(design.Space3).
@@ -635,6 +689,9 @@ func buildSessionRow(c *ui.Context, t *design.Tokens, chat contracts.ChatService
 					Grow(1).MaxLines(1).Ellipsis("…")
 				if session.Pinned {
 					design.Apply(ui.Badge(c, "置顶"), t.Badge())
+				}
+				if session.Archived {
+					design.Apply(ui.Badge(c, "已归档"), t.Badge())
 				}
 				// The active session is already carried by the accent icon and
 				// the selected-row tint; a 当前 badge was redundant and stole
@@ -675,6 +732,17 @@ func buildSessionRow(c *ui.Context, t *design.Tokens, chat contracts.ChatService
 				}
 				if m.Item(pinLabel).Chosen() {
 					if err := pinner.SetSessionPinned(session.ID, !session.Pinned); err == nil {
+						runtime.Invalidate()
+					}
+				}
+			}
+			if archiver != nil {
+				archiveLabel := "归档会话"
+				if session.Archived {
+					archiveLabel = "取消归档"
+				}
+				if m.Item(archiveLabel).Chosen() {
+					if err := archiver.SetSessionArchived(session.ID, !session.Archived); err == nil {
 						runtime.Invalidate()
 					}
 				}
@@ -730,6 +798,23 @@ func buildFooter(c *ui.Context, t *design.Tokens, chat contracts.ChatService,
 					nav.ToggleSettings()
 				}
 			})
+			// The quiet archived-sessions view toggle: one native text button
+			// under the settings entry, writing the product view option.
+			if state.settings != nil {
+				showArchived := showArchivedSetting(state)
+				toggleLabel := "显示已归档"
+				if showArchived {
+					toggleLabel = "隐藏已归档"
+				}
+				ui.Row(c).FillWidth().Children(func() {
+					toggle := ui.Button(c, toggleLabel).Tooltip("切换侧栏是否显示已归档会话")
+					if toggle.Clicked() {
+						_ = state.settings.Set(contracts.SettingSessionsShowArchived,
+							strconv.FormatBool(!showArchived))
+						runtime.Invalidate()
+					}
+				})
+			}
 		})
 }
 

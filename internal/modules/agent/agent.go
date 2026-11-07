@@ -154,6 +154,7 @@ var (
 	_ contracts.AttachmentSender = (*service)(nil)
 	_ contracts.SessionForker    = (*service)(nil)
 	_ contracts.SessionPinner    = (*service)(nil)
+	_ contracts.SessionArchiver  = (*service)(nil)
 )
 
 // sessionState is the mutable per-session state.
@@ -400,6 +401,36 @@ func (s *service) SetSessionPinned(sessionID string, pinned bool) error {
 	return nil
 }
 
+// SetSessionArchived implements contracts.SessionArchiver: the archive flag is
+// stored in the settings store, exactly like pins, and subscribers are notified
+// so the sidebar can hide/show the session.
+func (s *service) SetSessionArchived(sessionID string, archived bool) error {
+	sessionID = strings.TrimSpace(sessionID)
+	s.mu.Lock()
+	_, exists := s.sessions[sessionID]
+	s.mu.Unlock()
+	if !exists {
+		return fmt.Errorf("agent: unknown chat session %q", sessionID)
+	}
+	if s.settings == nil {
+		return errors.New("agent: settings service is unavailable")
+	}
+	value := "false"
+	if archived {
+		value = "true"
+	}
+	if err := s.settings.Set(contracts.SessionArchivedSettingKey(sessionID), value); err != nil {
+		return fmt.Errorf("agent: persist archive flag of session %q: %w", sessionID, err)
+	}
+	s.mu.Lock()
+	_, exists = s.sessions[sessionID]
+	s.mu.Unlock()
+	if exists {
+		s.notify(sessionID)
+	}
+	return nil
+}
+
 // sessionPinned reads one session's persisted pin flag ("false" when absent or
 // when no settings service is wired).
 func sessionPinned(settings contracts.SettingsService, sessionID string) bool {
@@ -407,6 +438,14 @@ func sessionPinned(settings contracts.SettingsService, sessionID string) bool {
 		return false
 	}
 	return settings.Get(contracts.SessionPinnedSettingKey(sessionID), "false") == "true"
+}
+
+// sessionArchived reads one session's persisted archive flag.
+func sessionArchived(settings contracts.SettingsService, sessionID string) bool {
+	if settings == nil {
+		return false
+	}
+	return settings.Get(contracts.SessionArchivedSettingKey(sessionID), "false") == "true"
 }
 
 // --- ChatService: sessions -------------------------------------------------
@@ -598,6 +637,7 @@ func (s *service) Sessions() []contracts.ChatSessionInfo {
 			WorkspaceID:  state.workspaceID,
 			Title:        state.title,
 			Pinned:       sessionPinned(s.settings, state.id),
+			Archived:     sessionArchived(s.settings, state.id),
 			MessageCount: len(state.messages),
 			Running:      state.running,
 			UpdatedAt:    state.updatedAt,

@@ -13,6 +13,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"sync/atomic"
 	"time"
 
@@ -331,6 +332,19 @@ func main() {
 			}
 		}
 		a.render(outDir + "/p2-pinned.png")
+	}
+
+	// Archived sessions (agent SessionArchiver + sidebar view option).
+	if archiver, ok := chat.(contracts.SessionArchiver); ok {
+		for _, info := range chat.Sessions() {
+			if strings.HasPrefix(info.Title, "看看当前工作目录") {
+				_ = archiver.SetSessionArchived(info.ID, true)
+			}
+		}
+		if settingsStore, ok := a.root.Get(contracts.KeySettings); ok {
+			_ = settingsStore.Set(contracts.SettingSessionsShowArchived, "true")
+		}
+		a.render(outDir + "/p2-archived.png")
 	}
 }
 
