@@ -21,6 +21,12 @@
 - 右侧栏「文件」Tab：打开文件夹（mygo 原生 Directory picker）、目录进入/面包屑、文本/Markdown/图片预览、
   刷新与错误状态；E2E 覆盖工作区创建 + 列表 + 预览帧
 
+**TDD-context-window/model-check（2026-11-08）**
+- 模型元数据：ModelInfo.ContextWindow（默认 128000，settings/assembly 两源、清洗、JSON 往返）；usage footer 追加预算（`· 预算 128k`/`· 128k context`）；
+  modelcatalog 18 / session 150 / settings 170 测试
+- 模型连接检查：模型页显示生效地址/模型 + 测试连接（GET /models，5s，防重复，2xx→正常+N 模型，非 2xx/网络错误可读）；
+  COVERAGE modelcatalog 升 ✅
+
 **TDD-agents-md/memory-page（2026-11-08）**
 - AGENTS.md 注入：每次 run 从当前工作区读取（文件名可配、空关闭、32KiB 截断、读取错误告警），追加到 system prompt；agent 95 测试；
   行为页 TextInput 配置

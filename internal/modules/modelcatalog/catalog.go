@@ -31,6 +31,8 @@ type Model struct {
 	Name string `json:"name"`
 	// Note is a short hint (capability or provider).
 	Note string `json:"note"`
+	// ContextWindow is the model's context-window size in tokens (0 = unknown).
+	ContextWindow int `json:"contextWindow,omitempty"`
 }
 
 // Config is the module's typed assembly config.
@@ -42,8 +44,8 @@ type Config struct {
 // defaultModels are the presets shipped when the assembly config is empty:
 // DeepSeek leads because it is the product's primary provider.
 var defaultModels = []contracts.ModelInfo{
-	{ID: "deepseek-chat", Name: "DeepSeek Chat", Note: "通用对话"},
-	{ID: "deepseek-reasoner", Name: "DeepSeek Reasoner", Note: "深度推理"},
+	{ID: "deepseek-chat", Name: "DeepSeek Chat", Note: "通用对话", ContextWindow: 128000},
+	{ID: "deepseek-reasoner", Name: "DeepSeek Reasoner", Note: "深度推理", ContextWindow: 128000},
 }
 
 // Module is the model-catalog backend descriptor. It provides
@@ -115,10 +117,15 @@ func newServiceWithSettings(cfg Config, logger contracts.Logger, settings contra
 			if name == "" {
 				name = id
 			}
+			contextWindow := model.ContextWindow
+			if contextWindow < 0 {
+				contextWindow = 0
+			}
 			models = append(models, contracts.ModelInfo{
-				ID:   id,
-				Name: name,
-				Note: strings.TrimSpace(model.Note),
+				ID:            id,
+				Name:          name,
+				Note:          strings.TrimSpace(model.Note),
+				ContextWindow: contextWindow,
 			})
 		}
 	}
@@ -173,10 +180,15 @@ func sanitizeCatalog(models []contracts.ModelInfo) []contracts.ModelInfo {
 		if name == "" {
 			name = id
 		}
+		contextWindow := model.ContextWindow
+		if contextWindow <= 0 {
+			contextWindow = 0
+		}
 		out = append(out, contracts.ModelInfo{
-			ID:   id,
-			Name: name,
-			Note: strings.TrimSpace(model.Note),
+			ID:            id,
+			Name:          name,
+			Note:          strings.TrimSpace(model.Note),
+			ContextWindow: contextWindow,
 		})
 	}
 	return out

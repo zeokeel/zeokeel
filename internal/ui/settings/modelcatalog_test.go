@@ -95,3 +95,58 @@ func TestModelCatalogPageRestoreDefaults(t *testing.T) {
 		t.Fatalf("restore wrote %q, want []", got)
 	}
 }
+
+func TestModelCatalogPageContextWindow(t *testing.T) {
+	store := newFakeSettings(nil)
+	h := newHarness(t, &fakeChat{}, store, settings.Config{})
+	tester := h.tester()
+	tester.Frame()
+	if err := tester.Click("模型目录"); err != nil {
+		t.Fatalf("click 模型目录: %v", err)
+	}
+	tester.Frame()
+	h.assertTexts(tester, "上下文 128k")
+
+	// A non-numeric context window is stored as 0 (not shown in the list).
+	clearAndType(t, h, tester, "名称 输入", "Bad Window")
+	clearAndType(t, h, tester, "模型 ID 输入", "bad-window")
+	clearAndType(t, h, tester, "上下文窗口 输入", "not-a-number")
+	if err := tester.Click("添加"); err != nil {
+		t.Fatalf("add bad window: %v", err)
+	}
+	tester.Frame()
+	models, err := contracts.ParseModelInfoList(store.get(contracts.SettingModelCatalogModels))
+	if err != nil {
+		t.Fatalf("parse stored catalog: %v", err)
+	}
+	if len(models) != 3 || models[2].ContextWindow != 0 {
+		t.Fatalf("bad window stored = %+v", models)
+	}
+
+	clearAndType(t, h, tester, "名称 输入", "Windowed")
+	clearAndType(t, h, tester, "模型 ID 输入", "windowed")
+	clearAndType(t, h, tester, "上下文窗口 输入", "128000")
+	if err := tester.Click("添加"); err != nil {
+		t.Fatalf("add windowed: %v", err)
+	}
+	tester.Frame()
+	models, _ = contracts.ParseModelInfoList(store.get(contracts.SettingModelCatalogModels))
+	if len(models) != 4 || models[3].ContextWindow != 128000 {
+		t.Fatalf("context window stored = %+v", models)
+	}
+	h.assertTexts(tester, "上下文 128k")
+}
+
+func TestModelCatalogPageContextWindowEnglish(t *testing.T) {
+	store := newFakeSettings(map[string]string{
+		contracts.SettingModelCatalogModels: `[{"id":"x","name":"X","contextWindow":128000}]`,
+	})
+	h := newLocaleHarness(t, &fakeChat{}, store, settings.Config{}, "en")
+	tester := h.tester()
+	tester.Frame()
+	if err := tester.Click("Model catalog"); err != nil {
+		t.Fatalf("click Model catalog: %v", err)
+	}
+	tester.Frame()
+	h.assertTexts(tester, "128k context")
+}

@@ -10,6 +10,9 @@ type ModelInfo struct {
 	Name string
 	// Note is a short hint (capability or provider).
 	Note string
+	// ContextWindow is the model's context-window size in tokens (0 = unknown,
+	// not displayed).
+	ContextWindow int `json:"contextWindow,omitempty"`
 }
 
 // ModelCatalogService lists the model presets offered by the product.

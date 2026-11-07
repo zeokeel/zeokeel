@@ -585,6 +585,7 @@ func Module() *module.Descriptor[Config] {
 		notifications := &notificationsState{}
 		behavior := &behaviorState{}
 		memoryPage := &memoryPageState{}
+		modelCheck := &modelCheckState{}
 		network := newNetworkState()
 		dataPrivacy := newDataPrivacyState()
 		diagnostics := &diagnosticsState{}
@@ -620,7 +621,7 @@ func Module() *module.Descriptor[Config] {
 				zhTitle: "模型", enTitle: "Model", titleOverride: cfg.Title,
 				Build: func(c *ui.Context) {
 					syncer.sync()
-					buildPage(c, state, chat, modelLabels(), store, locale)
+					buildPage(c, runtime, state, chat, modelLabels(), store, locale, modelCheck)
 				},
 			},
 			{
@@ -961,8 +962,9 @@ func inputLabel(locale contracts.LocaleService, label string) string {
 }
 
 // buildPage builds the model settings page with branded native controls.
-func buildPage(c *ui.Context, state *moduleState, chat contracts.ChatService, labels buildLabels,
-	store contracts.SettingsService, locale contracts.LocaleService) {
+func buildPage(c *ui.Context, runtime contracts.UIRuntime, state *moduleState, chat contracts.ChatService,
+	labels buildLabels, store contracts.SettingsService, locale contracts.LocaleService,
+	check *modelCheckState) {
 	t := design.Of(c)
 	ui.Column(c).FillWidth().Gap(design.Space2).Children(func() {
 		pageHeader(c, t, labels.title, localized(locale,
@@ -1009,6 +1011,8 @@ func buildPage(c *ui.Context, state *moduleState, chat contracts.ChatService, la
 			ui.TextInput(c, &state.apiKey).Label(inputLabel(locale, labels.apiKeyLabel)).
 				Placeholder(localized(locale, "输入新的 API key；留空保持不变", "Enter a new API key; leave blank to keep")).FillWidth()
 		})
+
+		buildModelCheckPanel(c, t, runtime, chat, store, locale, check)
 
 		panel(c, t, func() {
 			sectionTitle(c, t, localized(locale, "提示词", "Prompt"))

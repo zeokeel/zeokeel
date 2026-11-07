@@ -504,7 +504,7 @@ func buildAssistantMessage(c *ui.Context, t *design.Tokens, runtime contracts.UI
 		if message.Usage != nil {
 			design.Apply(ui.Text(c, st.tr("用时 ", "Took ")+formatUsageDuration(message.Usage.DurationMS)+
 				" · "+formatTokenCount(usageTotalTokens(message.Usage))+" tokens"+
-				usageCachedSuffix(st, message.Usage)),
+				usageCachedSuffix(st, message.Usage)+st.usageContextWindowSuffix()),
 				t.Font(design.TypeXXXS)).TextColor(t.LabelTertiary)
 		}
 	})
@@ -1223,6 +1223,53 @@ func usageTotalTokens(usage *contracts.MessageUsage) int {
 		return usage.TotalTokens
 	}
 	return usage.PromptTokens + usage.CompletionTokens
+}
+
+// usageContextWindowSuffix renders the model context-window budget suffix from
+// the optional model catalogue (empty when there is no catalogue, the model is
+// unknown, or its ContextWindow is unset).
+func (st *state) usageContextWindowSuffix() string {
+	catalog, ok := st.ctx.Get(contracts.KeyModelCatalog)
+	if !ok || catalog == nil {
+		return ""
+	}
+	chat, ok := st.ctx.Get(contracts.KeyChat)
+	if !ok || chat == nil {
+		return ""
+	}
+	sessionID := chat.ActiveSession()
+	model := ""
+	if session, ok := chat.Session(sessionID); ok {
+		model = strings.TrimSpace(session.Model)
+	}
+	if model == "" {
+		model = strings.TrimSpace(chat.Config().Model)
+	}
+	if model == "" {
+		return ""
+	}
+	for _, info := range catalog.Models() {
+		if info.ID == model && info.ContextWindow > 0 {
+			size := formatContextWindow(info.ContextWindow)
+			if st.english() {
+				return " · " + size + " context"
+			}
+			return " · 预算 " + size
+		}
+	}
+	return ""
+}
+
+// formatContextWindow renders a token count for the usage footer: exact
+// thousands as "128k", other positive values with one decimal ("32.8k").
+func formatContextWindow(tokens int) string {
+	if tokens <= 0 {
+		return ""
+	}
+	if tokens%1000 == 0 {
+		return fmt.Sprintf("%dk", tokens/1000)
+	}
+	return fmt.Sprintf("%.1fk", float64(tokens)/1000)
 }
 
 // usageCachedSuffix renders the cached-token suffix (empty when none).

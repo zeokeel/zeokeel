@@ -5,6 +5,7 @@ package settings
 // call, so saved changes are visible without a restart.
 
 import (
+	"strconv"
 	"strings"
 
 	"github.com/egoist/mygo/ui"
@@ -24,17 +25,18 @@ const (
 // defaultCatalogModels mirrors the modelcatalog module's built-in presets; the
 // page shows them when the user has not configured a list yet.
 var defaultCatalogModels = []contracts.ModelInfo{
-	{ID: "deepseek-chat", Name: "DeepSeek Chat", Note: "通用对话"},
-	{ID: "deepseek-reasoner", Name: "DeepSeek Reasoner", Note: "深度推理"},
+	{ID: "deepseek-chat", Name: "DeepSeek Chat", Note: "通用对话", ContextWindow: 128000},
+	{ID: "deepseek-reasoner", Name: "DeepSeek Reasoner", Note: "深度推理", ContextWindow: 128000},
 }
 
 // catalogState is the add-model form draft (UI thread only).
 type catalogState struct {
-	id     string
-	name   string
-	note   string
-	status string
-	err    bool
+	id            string
+	name          string
+	note          string
+	contextWindow string
+	status        string
+	err           bool
 }
 
 // catalogModels returns the effective editable list: the user's settings row
@@ -61,6 +63,28 @@ func writeCatalogModels(store contracts.SettingsService, models []contracts.Mode
 		return err
 	}
 	return store.Set(contracts.SettingModelCatalogModels, encoded)
+}
+
+// parseContextWindow parses the optional context-window draft: a malformed,
+// empty or non-positive value becomes 0 (not displayed and not budgeted).
+func parseContextWindow(raw string) int {
+	parsed, err := strconv.Atoi(strings.TrimSpace(raw))
+	if err != nil || parsed <= 0 {
+		return 0
+	}
+	return parsed
+}
+
+// formatContextWindow renders a token count for the catalog list: exact
+// thousands as "128k", other positive values with one decimal.
+func formatContextWindow(tokens int) string {
+	if tokens <= 0 {
+		return ""
+	}
+	if tokens%1000 == 0 {
+		return strconv.Itoa(tokens/1000) + "k"
+	}
+	return strconv.FormatFloat(float64(tokens)/1000, 'f', 1, 64) + "k"
 }
 
 // buildModelCatalogPage renders the editable catalog.
@@ -95,6 +119,11 @@ func buildModelCatalogPage(c *ui.Context, store contracts.SettingsService, st *c
 							if note := strings.TrimSpace(model.Note); note != "" {
 								design.Apply(ui.Text(c, note), t.TextMuted(design.TypeXXS))
 							}
+							if model.ContextWindow > 0 {
+								size := formatContextWindow(model.ContextWindow)
+								design.Apply(ui.Text(c, localized(locale, "上下文 "+size, size+" context")),
+									t.TextMuted(design.TypeXXS))
+							}
 						})
 					})
 					if ui.Button(c, localized(locale, "删除", "Remove")).Clicked() {
@@ -124,6 +153,15 @@ func buildModelCatalogPage(c *ui.Context, store contracts.SettingsService, st *c
 				ui.TextInput(c, &st.note).Label(inputLabel(locale, localized(locale, "备注", "Note"))).
 					Placeholder(localized(locale, "可选", "optional")).Grow(1)
 			})
+			ui.Row(c).FillWidth().Gap(design.Space2).Children(func() {
+				ui.TextInput(c, &st.contextWindow).
+					Label(inputLabel(locale, localized(locale, "上下文窗口", "Context window"))).
+					Placeholder("128000").Grow(1)
+				design.Apply(ui.Text(c, localized(locale,
+					"可选，单位 tokens；无效数字按 0（不显示）。",
+					"Optional, in tokens; invalid numbers become 0 (hidden).")),
+					t.TextMuted(design.TypeXXS)).Grow(1)
+			})
 			ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(design.Space2).Children(func() {
 				if ui.PrimaryButton(c, localized(locale, "添加", "Add")).Clicked() {
 					id := strings.TrimSpace(st.id)
@@ -141,10 +179,11 @@ func buildModelCatalogPage(c *ui.Context, store contracts.SettingsService, st *c
 							st.status, st.err = localized(locale, "模型 ID 已存在", "Model ID already exists"), true
 						} else if err := writeCatalogModels(store, append(models, contracts.ModelInfo{
 							ID: id, Name: name, Note: strings.TrimSpace(st.note),
+							ContextWindow: parseContextWindow(st.contextWindow),
 						})); err != nil {
 							st.status, st.err = localized(locale, "保存失败：", "Save failed: ")+err.Error(), true
 						} else {
-							st.name, st.id, st.note = "", "", ""
+							st.name, st.id, st.note, st.contextWindow = "", "", "", ""
 							st.status, st.err = localized(locale, "已保存", "Saved"), false
 						}
 					}
