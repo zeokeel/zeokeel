@@ -119,6 +119,9 @@ func enqueue(st *state, runtime contracts.UIRuntime, notification contracts.Noti
 	go func() {
 		time.Sleep(ttl)
 		runtime.Post(func() {
+			// Release the notifier's active entry as well; otherwise a long
+			// session slowly accumulates expired notification ids.
+			st.notifier.Dismiss(notification.ID)
 			removeToast(st, key)
 			runtime.Invalidate()
 		})

@@ -44,9 +44,11 @@ func (s *service) SetMessageFeedback(sessionID, messageID, feedback string) erro
 		return fmt.Errorf("agent: unknown chat session %q", sessionID)
 	}
 	found := false
+	assistant := false
 	for _, message := range state.messages {
 		if message.ID == messageID {
 			found = true
+			assistant = message.Role == contracts.ChatRoleAssistant
 			break
 		}
 	}
@@ -54,6 +56,11 @@ func (s *service) SetMessageFeedback(sessionID, messageID, feedback string) erro
 	s.mu.Unlock()
 	if !found {
 		return fmt.Errorf("agent: unknown message %q in session %q", messageID, sessionID)
+	}
+	// Ratings only apply to assistant turns (the contract and the UI agree);
+	// rejecting other roles keeps the settings rows meaningful.
+	if !assistant {
+		return fmt.Errorf("agent: message %q in session %q is not an assistant message", messageID, sessionID)
 	}
 	if settings == nil {
 		return ErrSettingsUnavailable

@@ -186,6 +186,19 @@ func TestToastExpires(t *testing.T) {
 		}
 		time.Sleep(5 * time.Millisecond)
 	}
+	// Expiry must release the notifier entry too (not just the local stack).
+	deadline = time.Now().Add(2 * time.Second)
+	for {
+		for _, id := range h.notifier.dismissedIDs() {
+			if id == "n1" {
+				return
+			}
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("expired toast did not dismiss notifier id; dismissed = %v", h.notifier.dismissedIDs())
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
 }
 
 func TestToastDisposeClearsHandler(t *testing.T) {

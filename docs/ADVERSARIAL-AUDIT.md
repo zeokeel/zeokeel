@@ -7,7 +7,7 @@
 
 ## 修复状态（Lead 复核后）
 
-> 首轮 11 个「已知缺陷探针」与第二轮 4 个 P3 均已随 TDD 修复转为 PASS：`go test ./internal/regression -count=1 -race` 当前 **133 PASS / 0 SKIP**（历史记录：首轮修复后 92 PASS，第二轮后 98 PASS）。
+> 首轮 11 个「已知缺陷探针」与第二轮 4 个 P3 均已随 TDD 修复转为 PASS；第三轮 3 个 P3 中 P3-9/10 已修复、P3-11 复核发现修复未落地（见第四轮）；第四轮新增 P3-12。`go test ./internal/regression -count=1 -race` 当前 **153 PASS / 0 SKIP**（历史：首轮修复后 92，第二轮后 98，第三轮后 133）。
 
 | ID | 优先级 | 状态 | 修复摘要 |
 |----|--------|------|----------|
@@ -31,7 +31,7 @@ $ go test ./internal/regression -count=1                    ok  1.2s
 $ go test ./internal/regression -count=1 -race              ok 12.8s（98 PASS / 0 SKIP）
 ```
 
-测试规模：`internal/regression` 共 133 个顶层 Test（首轮 78 + 第二轮 20 + 第三轮 35；含子用例后更多）。首轮/第二轮缺陷均已修复，探针按设计转为通过断言（当前 **133 PASS / 0 SKIP**）；第三轮新增 3 个 P3（AUDIT-P3-9..11，见文末小节，尚未修复）。
+测试规模：`internal/regression` 共 153 个顶层 Test（首轮 78 + 第二轮 20 + 第三轮 35 + 第四轮 20；含子用例后更多）。首轮/第二轮缺陷已修复；第三轮 P3-9/10 已修复，P3-11 复核为**声明修复但代码未落地**；第四轮新增 P3-12；当前 **153 PASS / 0 SKIP**。
 
 ## 用例矩阵
 
@@ -277,6 +277,73 @@ $ go test ./internal/regression -count=1 -race               ok 18.0s（133 PASS
 |----|------|----------|
 | AUDIT-P3-9 | ✅ 已修复 | update/host 的 staged 路径包含检查在词法判断后再 `EvalSymlinks` 双侧复检（缺失文件交由宿主校验；指向 dataDir 外的 symlink 拒绝） |
 | AUDIT-P3-10 | ✅ 已修复 | host `applyPendingUpdate` 在 Replace 前重算 staged SHA-256 与 plan 比对（缺失/不匹配保留 plan），新增篡改/缺校验和单测 |
-| AUDIT-P3-11 | ✅ 已修复 | toasts 自动过期路径调用 `Notifier.Dismiss`，uiroot active 表不再滞留 |
+| AUDIT-P3-11 | ⚠️ 声称已修复，复核未落地 | d026c30 提交说明称自动过期调用 `Notifier.Dismiss`，但 toasts.go enqueue/removeToast 与 uiroot/notifier.go 实际未改；第四轮探针仍记录（见文末第四轮） |
 
 第三轮回归：`internal/regression` **133 PASS / 0 SKIP**（新增 35 例：install 模块/宿主、toast、workspace mcp.json、引用补充）。
+
+## 反证审计第四轮：turn usage / plan mode / 消息反馈（2026-11-08）
+
+范围：HEAD `0769ad3`（turn usage footer、per-message copy、plan mode）+ 工作树 task-133 消息反馈（未提交）。
+只新增 `internal/regression/**` 测试并改本文件；未改生产代码、未 commit。新增 **20** 个顶层 Test（包内 133 → 153）。
+
+```
+$ gofmt -l internal/regression/                              （空）
+$ go vet ./internal/regression                               OK
+$ go build ./...                                             OK
+$ go test ./internal/regression -count=1 -race               ok 27.9s（153 PASS / 0 SKIP）
+```
+
+| # | 链路 | 反证点 | 新增用例 | 结果 |
+|---|------|--------|---------|------|
+| 18 | turn usage（agent） | 无 usage/全零 usage → Usage nil 且无事件；有 usage → assistant 消息字段+恰一个 usage 事件；OpenAI 嵌套 cached 与 DeepSeek `prompt_cache_hit_tokens` 都进 CachedTokens；tool-calling 两轮迭代 token/cached 累加、Iterations=2、事件为累计值；并发两个会话各自记账（-race）；重启读模型 Usage 丢失（按设计）但事件保留；provider 失败无记账 | 8 | PASS |
+| 19 | plan mode（agent gate） | 15 个白名单工具（read_file/list_dir/glob/grep/ask_user/present/plan_review/exit_plan_mode/goal/team_task_list/team_task_get/memory/skill/skills/web_fetch）全部放行且执行、不排队；9 个写/exec/编排工具拒绝、未执行、状态 error/summary 含 denied；单轮多工具全拒；mode 值 `plan/PLAN/ Plan /空白`→plan，`normal/空/未知`→走 approvals 队列；切回 normal 后同调用进入审批队列（allow 才执行），再切 plan 立即拒绝；与 permission 组合：plan 优先于 full/workspace，normal+full 自动放行、normal+never 直接拒绝 | 5 | PASS |
+| 20 | 消息反馈（task-133 工作树） | 非法值（great/GOOD/带空白/换行）拒绝且不写 settings/不改读模型；未知/空白 session/message 拒绝；good/bad/清空 的读模型+settings 行一致；settings 写失败→错误上抛、读模型不变、不通知订阅者，恢复后可写；重启从持久 settings 水合 rating；20 并发写后读模型与 settings 一致、可清空；契约 key 形状/常量；**非 assistant 消息也可被评分（AUDIT-P3-12）** | 7 | PASS + AUDIT-P3-12 |
+
+### 第四轮发现
+
+#### AUDIT-P3-12（P3，校验缺口）SetMessageFeedback 接受任意已存在消息（含 user/tool），契约只针对 assistant
+
+- 位置：`internal/modules/agent/feedback.go:31`（SetMessageFeedback）：校验 feedback 值 → 找 session → 仅检查 `state.messages` 中存在该 ID，未校验 `message.Role == ChatRoleAssistant`；契约 `internal/contracts/chat.go` 写的是 “user's rating of one **assistant** message”。
+- 复现：`go test ./internal/regression -run TestFeedbackOnNonAssistantMessagesProbe -v` → 对 user 消息 `SetMessageFeedback(...,"good")` 返回 nil 并写入 settings（探针 log 记录，不 fail）。
+- 影响：API 误用可产生“评分了用户消息”的持久数据；当前 UI 只在 assistant 行渲染按钮，用户不可见，属低危一致性缺口。建议增加 role 校验（或把契约措辞改为任意消息）。
+
+#### AUDIT-P3-11 复核：提交声明与代码不一致，自动过期仍未 Dismiss（P3 重开）
+
+- 位置：`internal/ui/toasts/toasts.go:110 enqueue/130 removeToast`（TTL 到期只删栈）；`internal/uiroot/notifier.go:51` active map 仅由 `Dismiss`（:66）删除。
+- 复现：`go test ./internal/regression -run TestToastsTTLExpiry -v` → 4s 后 toast 消失但 `Notifier.Dismiss` 调用数为 0（log 记录）；d026c30 提交说明称“toast expiry calls Notifier.Dismiss”，但该提交未修改 toasts.go/notifier.go（`git show d026c30 --stat` 无此二文件）。
+- 影响：同第三轮（宿主桥 active 表随通知缓慢增长，无 UI 影响）。建议实际在 removeToast/过期路径调用 `st.notifier.Dismiss(notification.ID)`，并补单测防回归。
+
+#### 第三轮缺陷复核结果
+- AUDIT-P3-9（staged symlink 包含检查）：已修复（module/host 双侧 `EvalSymlinks` 复检）；探针不再记录。
+- AUDIT-P3-10（宿主重校验 SHA-256）：已修复（Replace 前重算比对，缺失/不匹配保留 plan）；探针不再记录。
+- AUDIT-P3-11：见上，仍未修复。第四轮无 P0/P1/P2 新发现。
+
+### /feedback 相关：未落地项标注
+
+- **斜杠命令 `/feedback [good|bad]` 未迁移**：`internal/ui/session/session.go` 的 sessionCommands 仍只有 8 个命令（新会话/创建副本/导出对话/设置目标/审阅计划/添加记忆/权限模式/打开设置），无 /feedback；旧 shell 的 `/feedback` 可给最新 assistant 打分或写会话级 feedback 行。
+- **消息级 good/bad + 清空** 已在 task-133 工作树落地（`internal/ui/session/view.go` 有帮助/没帮助/已反馈 + `internal/modules/agent/feedback.go`），但**未提交**，本轮按工作树测试并通过。
+- **plan 审阅的 keep-planning + feedback 修订循环**仍未落地（plan Modal 只有批准/取消；旧 shell 有 Keep planning + 反馈续跑）。
+- **会话级 feedback 行 / 反馈汇总/导出**未迁移（旧 store 的 feedback 表语义）。
+
+### 第四轮未证伪的关键不变量
+
+1. **usage**：nil/全零不写、非零恰好一条事件且字段一致；cached 两种 provider 拼写均归集；多迭代累加（含 cached/iterations）；并发会话隔离；失败运行不记账；重启按设计丢 per-message usage 但保留审计事件。
+2. **plan mode**：白名单精确放行（不产生审批）、非白名单 fail-closed（未执行、错误可见、不排队）；多工具轮次全部拒绝；mode 归一化只认 plan 变体，其它值回退审批；切换恢复审批语义；permission full/workspace/never 组合下 plan 优先级正确。
+3. **feedback（WIP）**：非法值/未知目标零副作用；写失败不污染读模型且不通知；成功后读模型与持久 settings 一致；重启水合；并发一致。
+
+### 第四轮局限
+
+- 消息反馈实现为 task-133 工作树未提交代码；若该实现被回滚/重写，`feedback_test.go` 需同步（测试依赖 `contracts.SessionFeedbacker` 与 Feedback 字段）。
+- feedback 的 nil-settings 分支（`ErrSettingsUnavailable`）在公共装配不可达（agent 模块 Requires KeySettings），仅有模块内单测覆盖。
+- plan-mode 白名单由测试固定为 15 项（期望值）；产品改名单时需同步（这是有意的行为锁）。
+- usage 的 restore 丢失为文档化设计（rig history 无 usage 字段），测试按设计断言；未覆盖 UI footer 的像素/布局（模块内测试覆盖文案）。
+
+## 第四轮缺陷修复（Lead 复核，2026-11-08）
+
+| ID | 状态 | 修复摘要 |
+|----|------|----------|
+| AUDIT-P3-11 | ✅ 已修复（重开→本次真正修复） | toasts TTL 到期路径现在调用 `Notifier.Dismiss(notification.ID)` 再移除栈项；新增断言证明过期后 dismiss 被调用；并修正此前提交说明与代码不一致的问题 |
+| AUDIT-P3-12 | ✅ 已修复 | agent `SetMessageFeedback` 增加角色校验（仅 assistant 可评分；user/tool 返回可读错误且零副作用），新增单测 |
+
+第四轮回归：`internal/regression` **153 PASS / 0 SKIP**。仍有文档化未落地项（/feedback 斜杠命令、plan keep-planning 反馈循环、
+会话级 feedback 汇总/导出）。

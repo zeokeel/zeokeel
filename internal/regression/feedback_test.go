@@ -296,11 +296,9 @@ func TestFeedbackContractSurface(t *testing.T) {
 	}
 }
 
-// TestFeedbackOnNonAssistantMessagesProbe is an adversarial probe for the
-// contract wording "user's rating of one assistant message": the service only
-// checks that the message ID exists, so it also accepts a rating on a user or
-// tool message. Recorded as AUDIT-P3-12 (API-misuse gap; the UI only offers the
-// control on assistant rows).
+// TestFeedbackOnNonAssistantMessagesProbe pins the AUDIT-P3-12 fix: only
+// assistant turns can be rated, so a user/tool message id is rejected with a
+// readable role error (previously it was accepted silently).
 func TestFeedbackOnNonAssistantMessagesProbe(t *testing.T) {
 	harness := startAgent(t, agent.Config{}, nil)
 	feedbacker := requireFeedbacker(t, harness.chat)
@@ -318,9 +316,11 @@ func TestFeedbackOnNonAssistantMessagesProbe(t *testing.T) {
 	if userMessage == "" || assistantID == "" {
 		t.Fatalf("session lacks a user/assistant message: %+v", session.Messages)
 	}
-	if err := feedbacker.SetMessageFeedback(sessionID, userMessage, contracts.FeedbackGood); err == nil {
-		t.Logf("AUDIT-P3-12: feedback is accepted on a user message (%q); the contract says assistant turns only", userMessage)
-	} else if !strings.Contains(err.Error(), "unknown") {
-		t.Fatalf("feedback on a user message error = %v, want either acceptance (logged) or unknown", err)
+	err := feedbacker.SetMessageFeedback(sessionID, userMessage, contracts.FeedbackGood)
+	if err == nil {
+		t.Fatalf("feedback accepted on a user message (%q); want a role error", userMessage)
+	}
+	if !strings.Contains(err.Error(), "assistant") && !strings.Contains(err.Error(), "unknown") {
+		t.Fatalf("feedback on a user message error = %v, want a role/unknown error", err)
 	}
 }

@@ -130,6 +130,64 @@ func TestUsageRecordedOnMessageAndEvent(t *testing.T) {
 	}
 }
 
+// sseAnswerWithUsageJSON is sseAnswer whose final chunk carries an arbitrary
+// usage object (for provider-specific fields such as prompt_cache_hit_tokens).
+func sseAnswerWithUsageJSON(text, usageJSON string) string {
+	return "data: {\"choices\":[{\"delta\":{\"content\":" + mustJSONLocal(text) + "},\"index\":0}]}\n\n" +
+		"data: {\"choices\":[{\"delta\":{},\"index\":0,\"finish_reason\":\"stop\"}]," +
+		"\"usage\":" + usageJSON + "}\n\n" +
+		"data: [DONE]\n\n"
+}
+
+// mustJSONLocal quotes s as a JSON string literal.
+func mustJSONLocal(s string) string {
+	encoded, err := json.Marshal(s)
+	if err != nil {
+		panic(err)
+	}
+	return string(encoded)
+}
+
+// TestUsageCachedTokensDeepSeekField covers the provider-specific cached-token
+// spelling (prompt_cache_hit_tokens): it must land in Usage.CachedTokens.
+func TestUsageCachedTokensDeepSeekField(t *testing.T) {
+	harness := startAgent(t, agent.Config{}, func([]byte) (int, string) {
+		return 0, sseAnswerWithUsageJSON("cached answer",
+			`{"prompt_tokens":9,"completion_tokens":3,"total_tokens":12,"prompt_cache_hit_tokens":5}`)
+	})
+	sessionID := harness.newChatSession(t, "cached")
+	harness.sendAndWait(t, sessionID, "hello")
+	session, _ := harness.chat.Session(sessionID)
+	usage := lastAssistant(t, session).Usage
+	if usage == nil {
+		t.Fatal("assistant Usage = nil for a DeepSeek-style usage chunk")
+	}
+	if usage.CachedTokens != 5 || usage.PromptTokens != 9 || usage.TotalTokens != 12 {
+		t.Fatalf("Usage = %+v, want cached 5/prompt 9/total 12", usage)
+	}
+	if events := usageEventsOf(t, harness, sessionID); len(events) != 1 || events[0].CachedTokens != 5 {
+		t.Fatalf("usage events = %+v, want one with cached 5", events)
+	}
+}
+
+// TestUsageAllZeroTreatedAsAbsent covers a provider that emits a zero-valued
+// usage object: it is treated as "no usage" (nil message Usage, no event).
+func TestUsageAllZeroTreatedAsAbsent(t *testing.T) {
+	harness := startAgent(t, agent.Config{}, func([]byte) (int, string) {
+		return 0, sseAnswerWithUsageJSON("zero usage",
+			`{"prompt_tokens":0,"completion_tokens":0,"total_tokens":0}`)
+	})
+	sessionID := harness.newChatSession(t, "zero")
+	harness.sendAndWait(t, sessionID, "hello")
+	session, _ := harness.chat.Session(sessionID)
+	if usage := lastAssistant(t, session).Usage; usage != nil {
+		t.Fatalf("assistant Usage = %+v for an all-zero usage object, want nil", usage)
+	}
+	if events := usageEventsOf(t, harness, sessionID); len(events) != 0 {
+		t.Fatalf("all-zero usage wrote events: %+v", events)
+	}
+}
+
 // TestUsageAccumulatesAcrossIterations covers a tool-calling run with two model
 // iterations: the recorded usage is the sum, cached tokens included, and the
 // audit event reports the iteration count.

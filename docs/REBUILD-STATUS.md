@@ -21,6 +21,10 @@
 - 右侧栏「文件」Tab：打开文件夹（mygo 原生 Directory picker）、目录进入/面包屑、文本/Markdown/图片预览、
   刷新与错误状态；E2E 覆盖工作区创建 + 列表 + 预览帧
 
+**反证第四轮修复（2026-11-08）**
+- P3-11 重开：toast TTL 过期补齐 `Notifier.Dismiss`（附过期断言）；P3-12：消息反馈增加 assistant 角色校验（user/tool 拒绝且零副作用）
+- internal/regression 第四轮 20 例（usage/plan/feedback）→ 153 PASS / 0 SKIP；文档修复表同步
+
 **TDD-feedback/plugins-details（2026-11-08）**
 - 消息反馈：agent `SessionFeedbacker`（good/bad/清除，settings `feedback.<session>.<message>` 持久化，restore 补齐确定性 msg-N ID 以恢复；
   读模型每帧归一填充）；session assistant 行动区「有帮助/没帮助」（toggle、已反馈徽标、错误提示、i18n）；agent 84 / session 105 测试

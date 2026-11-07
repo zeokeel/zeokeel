@@ -195,3 +195,32 @@ func TestSetMessageFeedbackConcurrent(t *testing.T) {
 		t.Fatalf("concurrent final feedback = %q", got)
 	}
 }
+
+// TestSetMessageFeedbackRejectsNonAssistantMessages covers the role guard: the
+// contract only rates assistant turns, so user/tool ids are rejected without
+// touching settings.
+func TestSetMessageFeedbackRejectsNonAssistantMessages(t *testing.T) {
+	settings := newFakeSettings(nil)
+	svc := newFeedbackService(t, nil, settings, nil)
+	sessionID, _ := sendFeedbackMessage(t, svc)
+	session, ok := svc.Session(sessionID)
+	if !ok {
+		t.Fatalf("Session(%q) missing", sessionID)
+	}
+	var userID string
+	for _, message := range session.Messages {
+		if message.Role == contracts.ChatRoleUser {
+			userID = message.ID
+			break
+		}
+	}
+	if userID == "" {
+		t.Fatalf("no user message in %+v", session.Messages)
+	}
+	if err := svc.SetMessageFeedback(sessionID, userID, contracts.FeedbackGood); err == nil {
+		t.Fatal("SetMessageFeedback accepted a user message")
+	}
+	if got := settings.Get(contracts.MessageFeedbackSettingKey(sessionID, userID), ""); got != "" {
+		t.Fatalf("rejected feedback wrote settings: %q", got)
+	}
+}
