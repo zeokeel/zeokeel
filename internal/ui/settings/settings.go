@@ -42,6 +42,11 @@ const (
 	// AppearancePageOrder places the page after the model page.
 	AppearancePageOrder = 20
 
+	// ProvidersPageID is the provider catalogue page.
+	ProvidersPageID = "providers"
+	// ProvidersPageOrder places the page between model and appearance.
+	ProvidersPageOrder = 15
+
 	// ShortcutsPageID is the keyboard-shortcut reference page.
 	ShortcutsPageID = "shortcuts"
 	// ShortcutsPageOrder places the page after appearance.
@@ -168,6 +173,50 @@ type buildLabels struct {
 	saveLabel         string
 }
 
+// providerPreset is one built-in OpenAI-compatible provider.
+type providerPreset struct {
+	Name    string
+	Model   string
+	BaseURL string
+}
+
+// providerPresets is the product's provider catalogue (old models_ui page):
+// the endpoint/model pairs a first-run user can select with one click.
+var providerPresets = []providerPreset{
+	{"DeepSeek", "deepseek-chat", "https://api.deepseek.com/v1"},
+	{"OpenAI", "gpt-4o-mini", "https://api.openai.com/v1"},
+	{"Ollama", "llama3.1", "http://localhost:11434/v1"},
+}
+
+// buildProvidersPage renders the provider catalogue as native brand cards; the
+// action writes the chat settings keys (the agent reads them on next start).
+func buildProvidersPage(c *ui.Context, t *design.Tokens, store contracts.SettingsService) {
+	ui.Column(c).FillWidth().Gap(design.Space3).Children(func() {
+		design.Apply(ui.Text(c, "服务商"), t.Font(design.TypeL)).FontWeight(600).
+			TextColor(t.LabelPrimary)
+		design.Apply(ui.Text(c, "选择内置的 OpenAI 兼容服务商；保存后下次启动生效。"),
+			t.TextMuted(design.TypeXS))
+		for _, preset := range providerPresets {
+			preset := preset
+			card := ui.Column(c).FillWidth().Gap(2).Padding(design.Space3)
+			design.Apply(card, t.Panel())
+			card.Children(func() {
+				ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(design.Space2).Children(func() {
+					design.Apply(ui.Text(c, preset.Name), t.Font(design.TypeS)).FontWeight(600).
+						TextColor(t.LabelPrimary)
+					design.Apply(ui.Badge(c, preset.Model), t.Badge())
+					ui.Spacer(c).Grow(1)
+					if ui.Button(c, "使用").Clicked() {
+						_ = store.Set(contracts.SettingsChatModel, preset.Model)
+						_ = store.Set(contracts.SettingsChatBaseURL, preset.BaseURL)
+					}
+				})
+				design.Apply(ui.Text(c, preset.BaseURL), t.TextMuted(design.TypeXXS))
+			})
+		}
+	})
+}
+
 // Module registers the model and appearance settings pages.
 func Module() *module.Descriptor[Config] {
 	return module.Define("zeokeel-ui/settings", func(ctx cordis.Context, cfg Config) error {
@@ -198,6 +247,7 @@ func Module() *module.Descriptor[Config] {
 		apiKeyLabel := firstNonEmpty(cfg.APIKeyLabel, "API Key")
 		systemPromptLabel := firstNonEmpty(cfg.SystemPromptLabel, "系统提示词")
 		saveLabel := firstNonEmpty(cfg.SaveLabel, "保存")
+		providersTitle := "服务商"
 		appearanceTitle := firstNonEmpty(cfg.AppearanceTitle, "外观")
 		themeLabel := firstNonEmpty(cfg.ThemeLabel, "深色模式")
 		languageLabel := firstNonEmpty(cfg.LanguageLabel, "界面语言")
@@ -224,6 +274,15 @@ func Module() *module.Descriptor[Config] {
 		}
 		if err := own(ctx, func() (func(), error) { return runtime.RegisterSettingsPage(page) }); err != nil {
 			return err
+		}
+		providersPage := contracts.SettingsPageSpec{
+			ID:      ProvidersPageID,
+			Section: PageSection,
+			Title:   providersTitle,
+			Order:   ProvidersPageOrder,
+			Build: func(c *ui.Context) {
+				buildProvidersPage(c, design.Of(c), store)
+			},
 		}
 		shortcutsPage := contracts.SettingsPageSpec{
 			ID:      ShortcutsPageID,
@@ -252,6 +311,9 @@ func Module() *module.Descriptor[Config] {
 			},
 		}
 		if err := own(ctx, func() (func(), error) { return runtime.RegisterSettingsPage(appearancePage) }); err != nil {
+			return err
+		}
+		if err := own(ctx, func() (func(), error) { return runtime.RegisterSettingsPage(providersPage) }); err != nil {
 			return err
 		}
 		return own(ctx, func() (func(), error) { return runtime.RegisterSettingsPage(shortcutsPage) })

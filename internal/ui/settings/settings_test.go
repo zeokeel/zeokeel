@@ -444,3 +444,22 @@ func TestShortcutsPage(t *testing.T) {
 	h.assertTexts(tester, "折叠 / 展开侧边栏", "Cmd/Ctrl + B", "发送消息", "Enter",
 		"Shift + Enter", "命令菜单", "Esc")
 }
+
+// TestProvidersPage covers the provider catalogue: the built-in endpoints are
+// listed and "使用" writes the chat settings keys.
+func TestProvidersPage(t *testing.T) {
+	store := newFakeSettings(nil)
+	h := newHarness(t, &fakeChat{}, store, settings.Config{})
+	tester := h.tester()
+	tester.Frame()
+	h.click(tester, "服务商")
+	h.assertTexts(tester, "DeepSeek", "OpenAI", "Ollama",
+		"https://api.deepseek.com/v1", "deepseek-chat", "使用")
+	h.click(tester, "使用")
+	if got := store.get(contracts.SettingsChatModel); got != "deepseek-chat" {
+		t.Fatalf("saved model = %q, want deepseek-chat", got)
+	}
+	if got := store.get(contracts.SettingsChatBaseURL); got != "https://api.deepseek.com/v1" {
+		t.Fatalf("saved base URL = %q", got)
+	}
+}

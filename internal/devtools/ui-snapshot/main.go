@@ -118,6 +118,13 @@ func main() {
 	if err := a.tester.Click("外观"); err != nil {
 		fmt.Println("click appearance:", err)
 	}
+	if err := a.tester.Click("服务商"); err != nil {
+		fmt.Println("click providers:", err)
+	}
+	a.render(outDir + "/p2-providers.png")
+	if err := a.tester.Click("外观"); err != nil {
+		fmt.Println("click appearance:", err)
+	}
 	a.render(outDir + "/p2-appearance.png")
 	if err := a.tester.Click("快捷键"); err != nil {
 		fmt.Println("click shortcuts:", err)

@@ -95,6 +95,8 @@ go test ./...
     重命名/删除/设为当前；footer 只保留设置入口
   - 老 chrome 快捷键：Cmd/Ctrl+B 折叠/展开左侧栏为 64 DIP 图标 rail（品牌 mark 展开、屏幕图标、
     设置入口），与宿主 API 共享状态；截图 `p2-sidebar-collapsed.png`
+  - 设置新增「服务商」页（对照 old models_ui）：DeepSeek/OpenAI/Ollama 内置兼容服务商卡片，
+    "使用"写入模型/BaseURL 设置；截图 `p2-providers.png`
   - 设置新增「快捷键」页（对照 old shortcuts 页）：折叠侧栏/发送/换行/命令菜单/Esc 参考；
     截图 `p2-shortcuts.png`
   - 右侧检查栏新增 **日志** 页（对照 old right_sidebar.go 的 Log tab）：读取 SQLite 持久化的
