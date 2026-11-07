@@ -63,3 +63,19 @@ docs/screenshots files: 48
 Everything above is tracked in `docs/COVERAGE.md`; the core conversation product,
 settings, inspector, search, MCP configuration, web search, ask_user/present/plan
 review and goal tracking are implemented and covered by tests/snapshots.
+
+## Re-verification (round 39, current HEAD)
+
+```
+$ go build ./... && go vet ./...                                  # OK
+$ go test ./... -count=1                                          # 32 packages ok
+$ go test ./... -count=1 -race                                    # 32 packages ok
+$ xvfb-run -a timeout -s TERM 7 go run ./cmd/zeokeel --data-dir <tmp>
+  ZeoKeel ... product "desktop" loaded: 26 module instances, screens [home automation session plugins]
+$ timeout -s TERM 5 go run ./cmd/zeokeel --headless --data-dir <tmp>
+  product: headless (no window) ... ready; waiting for SIGINT or SIGTERM / stopping
+$ printf initialize+session/new | go run ./cmd/zeokeel --acp --data-dir <tmp>
+  {"id":1,...,"result":{"agentCapabilities":{...},"protocolVersion":1}}
+  {"id":2,...,"result":{"sessionId":"sess-..."}}                  # exit 0
+$ go run ./internal/devtools/ui-snapshot <tmp>                    # 47 PNG steps, no errors
+```

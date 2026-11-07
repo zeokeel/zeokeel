@@ -21,6 +21,12 @@
 - 右侧栏「文件」Tab：打开文件夹（mygo 原生 Directory picker）、目录进入/面包屑、文本/Markdown/图片预览、
   刷新与错误状态；E2E 覆盖工作区创建 + 列表 + 预览帧
 
+**Round 39 最终验证（2026-11-08）**
+- build/vet OK；32 测试包（含 -race）全绿；CGO_ENABLED=0 UI 定向绿
+- desktop（xvfb，26 实例 / 4 screens）、headless（14 实例）、ACP（initialize/session-new，exit 0）冒烟通过
+- ui-snapshot 47 步全部渲染无错误；docs/screenshots 60 个 PNG
+- 证据与剩余缺口见 [docs/VERIFICATION.md](VERIFICATION.md) / [docs/COVERAGE.md](COVERAGE.md)
+
 **P5 goal 跟踪（2026-11-08）**
 - contracts.GoalTracker + uiroot goalService（Set/Get/Clear/handler/atomic ID/并发）+ host 桌面提供 +
   hosttools GoalStore 桥接（无服务 Memory 保持）
