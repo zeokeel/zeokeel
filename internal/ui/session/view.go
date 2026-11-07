@@ -171,6 +171,7 @@ func buildGoalChip(c *ui.Context, t *design.Tokens, runtime contracts.UIRuntime,
 func exportSession(st *state, chatSession contracts.ChatSession, cfg Config) {
 	title := firstNonEmpty(chatSession.Title, cfg.Title, st.tr("会话", "Conversation"))
 	ExportDialogTitle = st.tr("导出会话", "Export conversation")
+	ExportJSONLDialogTitle = st.tr("导出会话", "Export conversation")
 	path, err := ExportSaver(sanitizeExportFilename(title)+".md",
 		exportTranscript(chatSession, title, st.english()))
 	switch {

@@ -48,8 +48,13 @@ func TestSessionI18nSwitchToEnglishAndBack(t *testing.T) {
 	h.click(tester, "More")
 	h.click(tester, "Export Markdown")
 	h.assertTexts(tester, "Exported")
-	if session.ExportDialogTitle != "Export conversation" {
-		t.Fatalf("ExportDialogTitle = %q, want Export conversation", session.ExportDialogTitle)
+	for name, title := range map[string]string{
+		"ExportDialogTitle":      session.ExportDialogTitle,
+		"ExportJSONLDialogTitle": session.ExportJSONLDialogTitle,
+	} {
+		if title != "Export conversation" {
+			t.Fatalf("%s = %q, want Export conversation", name, title)
+		}
 	}
 
 	// The trajectory and memory panes' empty states are translated.
