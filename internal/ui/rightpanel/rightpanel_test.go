@@ -163,6 +163,13 @@ type harness struct {
 
 func newHarness(t *testing.T, chat *fakeChat, cfg rightpanel.Config) *harness {
 	t.Helper()
+	return newHarnessWithWorkspace(t, chat, cfg, nil)
+}
+
+// newHarnessWithWorkspace is newHarness with an optional workspace backend
+// provided as contracts.KeyWorkspace (nil means the Files pane has no backend).
+func newHarnessWithWorkspace(t *testing.T, chat *fakeChat, cfg rightpanel.Config, workspace contracts.WorkspaceService) *harness {
+	t.Helper()
 	uiRoot := uiroot.New(uiroot.Config{AppName: "ZeoKeel"})
 	ctx := cordis.Root()
 	t.Cleanup(func() { _ = ctx.DisposeAll() })
@@ -173,6 +180,9 @@ func newHarness(t *testing.T, chat *fakeChat, cfg rightpanel.Config) *harness {
 	provide(t, ctx, contracts.KeyLocale, uiRoot.Locale())
 	provide(t, ctx, contracts.KeyScreenLister, uiRoot.ScreenLister())
 	provide[contracts.ChatService](t, ctx, contracts.KeyChat, chat)
+	if workspace != nil {
+		provide[contracts.WorkspaceService](t, ctx, contracts.KeyWorkspace, workspace)
+	}
 
 	// The host (session screen) owns the layout: this test screen renders the
 	// frozen right-panel slot, exactly like the conversation screen will.

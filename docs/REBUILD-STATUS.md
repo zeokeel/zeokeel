@@ -15,6 +15,12 @@
 - 宿主 chrome：280px 侧栏 + 64px brand row + Cmd/Ctrl+B 64px 图标 rail；无全局顶栏，屏幕自带头部；
   右侧检查栏为窗口级 docked 面板
 
+**P3 工作区 + Files 检查器（2026-11-07 晚）**
+- `zeokeel/workspace`：workspaces.json 注册表（Create/Open/Delete/current 持久化）、沙箱 Files/ReadFile/
+  Search（绝对路径/`..`/symlink 逃逸拒绝，深度与 limit）、原子写；desktop 17 / headless 8 实例
+- 右侧栏「文件」Tab：打开文件夹（mygo 原生 Directory picker）、目录进入/面包屑、文本/Markdown/图片预览、
+  刷新与错误状态；E2E 覆盖工作区创建 + 列表 + 预览帧
+
 **P2 附件/图片（2026-11-07 晚）**
 - contracts.Attachment / AttachmentSender / ChatMessage.Attachments；agent 图片→rig image part（data URL），
   非图片→文本 part（text/* 内容 ≤32KiB）；重启从 rig parts 恢复 chips

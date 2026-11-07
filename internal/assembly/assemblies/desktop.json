@@ -21,6 +21,11 @@
       }
     },
     {
+      "id": "workspace",
+      "module": "zeokeel/workspace",
+      "config": {}
+    },
+    {
       "id": "memory",
       "module": "zeokeel/memory",
       "config": {}

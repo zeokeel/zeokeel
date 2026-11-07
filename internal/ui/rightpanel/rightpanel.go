@@ -2,15 +2,18 @@
 // the conversation screen (contracts.SlotSessionPanelRight). It is a UI module
 // (kernel Descriptor + host UI services) rendered entirely with mygo's native
 // controls and the brand design system (internal/design): a native tab strip
-// over three panes — overview, tools and model — inside t.Panel cards. It never
-// draws a control (or a Canvas) itself.
+// over the overview, tools, model, log and files panes inside t.Panel cards. It
+// never draws a control (or a Canvas) itself.
 //
 // The module reads the chat read model (contracts.ChatService) and never writes
 // it: the overview shows the active session's title, message count, update time
 // and running/error badges; the tools pane aggregates every ToolCall of the
 // session with a status badge and a collapsible summary; the model pane shows
 // the effective model configuration, with the API key reduced to "set/not set"
-// so a secret can never reach the screen.
+// so a secret can never reach the screen; the log pane lists the newest durable
+// session events; the files pane browses the current workspace (contracts.
+// WorkspaceService, looked up optionally) with directory navigation and a
+// read-only text/Markdown/image preview.
 //
 // The host owns the panel width and the open/close control: the module only
 // fills the slot. Chat changes arrive on the agent goroutine, so the module
@@ -47,11 +50,12 @@ const slotOrder = 10
 type Config struct {
 	// Title is the panel heading (default "检查").
 	Title string `json:"title"`
-	// OverviewTab/ToolsTab/ModelTab/LogTab are the tab labels.
+	// OverviewTab/ToolsTab/ModelTab/LogTab/FilesTab are the tab labels.
 	OverviewTab string `json:"overviewTab"`
 	ToolsTab    string `json:"toolsTab"`
 	ModelTab    string `json:"modelTab"`
 	LogTab      string `json:"logTab"`
+	FilesTab    string `json:"filesTab"`
 	// EmptyText is the overview copy when there is no active session.
 	EmptyText string `json:"emptyText"`
 }
@@ -64,6 +68,7 @@ func (c Config) resolved() Config {
 		ToolsTab:    firstNonEmpty(c.ToolsTab, "工具"),
 		ModelTab:    firstNonEmpty(c.ModelTab, "模型"),
 		LogTab:      firstNonEmpty(c.LogTab, "日志"),
+		FilesTab:    firstNonEmpty(c.FilesTab, "文件"),
 		EmptyText:   firstNonEmpty(c.EmptyText, "还没有活动会话"),
 	}
 }
@@ -73,6 +78,17 @@ func (c Config) resolved() Config {
 type state struct {
 	tab  int
 	open map[string]bool
+
+	// ctx is the module's kernel context: the Files pane looks up the optional
+	// workspace backend with ctx.Get(contracts.KeyWorkspace) (no Requires).
+	ctx cordis.Context
+
+	// Files pane state: the current relative directory, the selected file, the
+	// last error and the per-path preview cache.
+	filesDir      string
+	filesSelected string
+	filesErr      string
+	filesPreview  map[string]*filePreview
 }
 
 // Module registers the session inspector slot.
@@ -87,7 +103,11 @@ func Module() *module.Descriptor[Config] {
 			return err
 		}
 		config := cfg.resolved()
-		moduleState := &state{open: make(map[string]bool)}
+		moduleState := &state{
+			open:         make(map[string]bool),
+			ctx:          ctx,
+			filesPreview: make(map[string]*filePreview),
+		}
 		// The session log is optional: the inspector still renders without a
 		// durable store (headless tests), it just shows the empty log copy.
 		var log eventReader
@@ -114,7 +134,11 @@ func Module() *module.Descriptor[Config] {
 				ID:    SlotItemID,
 				Order: slotOrder,
 				Build: func(c *ui.Context) {
-					buildPanel(c, design.Of(c), chat, log, config, moduleState)
+					var workspace contracts.WorkspaceService
+					if service, ok := ctx.Get(contracts.KeyWorkspace); ok {
+						workspace = service
+					}
+					buildPanel(c, design.Of(c), runtime, chat, log, workspace, config, moduleState)
 				},
 			})
 		})

@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"path/filepath"
 	"sync/atomic"
 	"time"
 
@@ -121,9 +122,37 @@ func main() {
 	}
 	a.render(outDir + "/p1-trajectory.png")
 
+	// P2: the Files inspector reads the workspace backend.
+	workspaceRoot, err := os.MkdirTemp("", "zeokeel-snapshot-workspace")
+	if err != nil {
+		fail("workspace dir", err)
+	}
+	if err := os.WriteFile(filepath.Join(workspaceRoot, "README.md"),
+		[]byte("# ZeoKeel 工作区\n\n这是右侧 Files 检查器的示例文件。\n\n- 目录浏览\n- 文本与 Markdown 预览\n"), 0o600); err != nil {
+		fail("write README", err)
+	}
+	if err := os.MkdirAll(filepath.Join(workspaceRoot, "internal"), 0o700); err != nil {
+		fail("mkdir internal", err)
+	}
+	if err := os.WriteFile(filepath.Join(workspaceRoot, "internal", "main.go"),
+		[]byte("package main\n\nfunc main() {}\n"), 0o600); err != nil {
+		fail("write main.go", err)
+	}
+	if workspaces, err := a.root.Require(contracts.KeyWorkspace); err == nil {
+		_, _ = workspaces.Create(context.Background(), "mygo", workspaceRoot)
+	}
+
 	// P2: the window-level right inspector (durable session log pane).
 	a.ui.SetRightPanelOpen(true)
 	a.render(outDir + "/p2-rightpanel.png")
+	if err := a.tester.Click("文件"); err != nil {
+		fmt.Println("click files tab:", err)
+	}
+	a.render(outDir + "/p2-files.png")
+	if err := a.tester.Click("README.md"); err != nil {
+		fmt.Println("click README:", err)
+	}
+	a.render(outDir + "/p2-files-preview.png")
 	if err := a.tester.Click("日志"); err != nil {
 		fmt.Println("click log tab:", err)
 	}

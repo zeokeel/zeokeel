@@ -8,6 +8,8 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -109,6 +111,42 @@ func TestP1ApprovalToolsAndPersistence(t *testing.T) {
 		if !tester.HasText(want) {
 			t.Fatalf("session log missing %q; texts = %v", want, tester.Texts())
 		}
+	}
+	uiRoot.SetRightPanelOpen(false)
+
+	// The workspace backend is wired too: register a temp folder and inspect it
+	// through the docked Files tab (directory listing + text preview).
+	workspaceRoot := t.TempDir()
+	if err := os.WriteFile(filepath.Join(workspaceRoot, "README.md"), []byte("# ZeoKeel 工作区\n\n示例文件。"), 0o600); err != nil {
+		t.Fatalf("write README: %v", err)
+	}
+	if err := os.MkdirAll(filepath.Join(workspaceRoot, "src"), 0o700); err != nil {
+		t.Fatalf("mkdir src: %v", err)
+	}
+	workspaces, err := root.Require(contracts.KeyWorkspace)
+	if err != nil {
+		t.Fatalf("require workspace: %v", err)
+	}
+	if _, err := workspaces.Create(context.Background(), "demo", workspaceRoot); err != nil {
+		t.Fatalf("create workspace: %v", err)
+	}
+	uiRoot.SetRightPanelOpen(true)
+	tester.Frame()
+	if err := tester.Click("文件"); err != nil {
+		t.Fatalf("click files tab: %v; texts = %v", err, tester.Texts())
+	}
+	tester.Frame()
+	for _, want := range []string{"README.md", "src"} {
+		if !tester.HasText(want) {
+			t.Fatalf("files tab missing %q; texts = %v", want, tester.Texts())
+		}
+	}
+	if err := tester.Click("README.md"); err != nil {
+		t.Fatalf("click README: %v; texts = %v", err, tester.Texts())
+	}
+	tester.Frame()
+	if !tester.HasText("示例文件") {
+		t.Fatalf("file preview missing; texts = %v", tester.Texts())
 	}
 	uiRoot.SetRightPanelOpen(false)
 
