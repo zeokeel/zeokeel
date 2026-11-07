@@ -21,6 +21,12 @@
 - 右侧栏「文件」Tab：打开文件夹（mygo 原生 Directory picker）、目录进入/面包屑、文本/Markdown/图片预览、
   刷新与错误状态；E2E 覆盖工作区创建 + 列表 + 预览帧
 
+**TDD-feedback-cmd/automation-runs（2026-11-08）**
+- /反馈 命令（第 9 条）：最近 assistant 摘要 + 有帮助/没帮助/清除评价/取消，写 SessionFeedbacker；JSONL/Markdown 导出含反馈（空/非法不输出）；
+  session 111 测试
+- 自动化运行历史：AutomationRunRecord（起止/状态/摘要≤200，最近 10 条、持久化兼容旧 JSON）；卡片折叠显示最近状态+摘要，「历史」展开逐条；
+  后端 20 / automation UI 16 测试
+
 **反证第四轮修复（2026-11-08）**
 - P3-11 重开：toast TTL 过期补齐 `Notifier.Dismiss`（附过期断言）；P3-12：消息反馈增加 assistant 角色校验（user/tool 拒绝且零副作用）
 - internal/regression 第四轮 20 例（usage/plan/feedback）→ 153 PASS / 0 SKIP；文档修复表同步

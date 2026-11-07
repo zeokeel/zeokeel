@@ -67,6 +67,7 @@ func buildScreen(
 		buildGoalDialog(c, t, runtime, st)
 		buildPlanDialog(c, t, runtime, st)
 		buildMemoryDialog(c, t, runtime, st)
+		buildFeedbackDialog(c, t, runtime, st)
 	})
 }
 
@@ -245,6 +246,21 @@ func transcriptText(chatSession contracts.ChatSession, english bool) string {
 			}
 			fmt.Fprintf(&builder, "[%s] %s (%s)\n", toolLabel, call.Name, call.Status)
 		}
+		if feedback := normalizeSessionFeedback(message.Feedback); feedback != "" {
+			label := "有帮助"
+			if feedback == contracts.FeedbackBad {
+				label = "没帮助"
+			}
+			if english {
+				label = "Helpful"
+				if feedback == contracts.FeedbackBad {
+					label = "Not helpful"
+				}
+				fmt.Fprintf(&builder, "> User feedback: %s\n", label)
+			} else {
+				fmt.Fprintf(&builder, "> 用户反馈：%s\n", label)
+			}
+		}
 	}
 	return strings.TrimRight(builder.String(), "\n")
 }
@@ -420,7 +436,7 @@ func buildAssistantMessage(c *ui.Context, t *design.Tokens, runtime contracts.UI
 		if chat != nil {
 			sessionID = chat.ActiveSession()
 		}
-		showFeedback := canRate && chat != nil && sessionID != "" && message.ID != ""
+		showFeedback := canRate && chat != nil && sessionID != "" && message.ID != "" && !st.feedbackOpen
 		if hasText || showFeedback {
 			ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(design.Space2).Children(func() {
 				if hasText {

@@ -26,6 +26,28 @@ type AutomationTask struct {
 	NextRun time.Time
 	// LastError is the last execution error ("" when the last run succeeded).
 	LastError string
+	// RunHistory lists the most recent finished runs, newest first (the
+	// automation module keeps at most ten).
+	RunHistory []AutomationRunRecord `json:"runHistory,omitempty"`
+}
+
+// Automation run statuses.
+const (
+	// AutomationRunSuccess marks a run whose prompt was sent successfully.
+	AutomationRunSuccess = "success"
+	// AutomationRunFailure marks a run that failed (see Summary).
+	AutomationRunFailure = "error"
+)
+
+// AutomationRunRecord is one finished automation run (memory + persisted in
+// automations.json; old files without the field load with an empty history).
+type AutomationRunRecord struct {
+	StartedAt  time.Time `json:"startedAt"`
+	FinishedAt time.Time `json:"finishedAt"`
+	// Status is AutomationRunSuccess or AutomationRunFailure.
+	Status string `json:"status"`
+	// Summary is the short run outcome (truncated to 200 runes).
+	Summary string `json:"summary,omitempty"`
 }
 
 // AutomationService is the product's persisted automation surface: CRUD for

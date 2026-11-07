@@ -68,6 +68,9 @@ type state struct {
 	deleteName   string
 
 	pageErr string
+
+	// historyOpen remembers the expanded run-history sections per task id.
+	historyOpen map[string]bool
 }
 
 // Module registers the Automation screen.
@@ -83,7 +86,7 @@ func Module() *module.Descriptor[Config] {
 		}
 		config := cfg.resolved()
 		locale, _ := ctx.Get(contracts.KeyLocale)
-		moduleState := &state{ctx: ctx, locale: locale, formEnabled: true}
+		moduleState := &state{ctx: ctx, locale: locale, formEnabled: true, historyOpen: make(map[string]bool)}
 
 		// The automation backend is optional: without it the screen still
 		// renders, with an explanatory empty state. When present, its change

@@ -130,6 +130,9 @@ type taskRecord struct {
 	LastRun   time.Time `json:"lastRun"`
 	NextRun   time.Time `json:"nextRun"`
 	LastError string    `json:"lastError"`
+
+	// RunHistory is the persisted recent-run list (newest first).
+	RunHistory []contracts.AutomationRunRecord `json:"runHistory,omitempty"`
 }
 
 // registryDocument is the on-disk registry.
@@ -238,16 +241,17 @@ func (s *service) load() error {
 			continue
 		}
 		tasks = append(tasks, contracts.AutomationTask{
-			ID:        record.ID,
-			Name:      record.Name,
-			Prompt:    record.Prompt,
-			Schedule:  record.Schedule,
-			Enabled:   record.Enabled,
-			CreatedAt: record.CreatedAt.UTC(),
-			UpdatedAt: record.UpdatedAt.UTC(),
-			LastRun:   record.LastRun.UTC(),
-			NextRun:   record.NextRun.UTC(),
-			LastError: record.LastError,
+			ID:         record.ID,
+			Name:       record.Name,
+			Prompt:     record.Prompt,
+			Schedule:   record.Schedule,
+			Enabled:    record.Enabled,
+			CreatedAt:  record.CreatedAt.UTC(),
+			UpdatedAt:  record.UpdatedAt.UTC(),
+			LastRun:    record.LastRun.UTC(),
+			NextRun:    record.NextRun.UTC(),
+			LastError:  record.LastError,
+			RunHistory: append([]contracts.AutomationRunRecord(nil), record.RunHistory...),
 		})
 	}
 	s.tasks = tasks
@@ -264,16 +268,17 @@ func (s *service) persistLocked() error {
 	document := registryDocument{Tasks: make([]taskRecord, 0, len(s.tasks))}
 	for _, task := range s.tasks {
 		document.Tasks = append(document.Tasks, taskRecord{
-			ID:        task.ID,
-			Name:      task.Name,
-			Prompt:    task.Prompt,
-			Schedule:  task.Schedule,
-			Enabled:   task.Enabled,
-			CreatedAt: task.CreatedAt.UTC(),
-			UpdatedAt: task.UpdatedAt.UTC(),
-			LastRun:   task.LastRun.UTC(),
-			NextRun:   task.NextRun.UTC(),
-			LastError: task.LastError,
+			ID:         task.ID,
+			Name:       task.Name,
+			Prompt:     task.Prompt,
+			Schedule:   task.Schedule,
+			Enabled:    task.Enabled,
+			CreatedAt:  task.CreatedAt.UTC(),
+			UpdatedAt:  task.UpdatedAt.UTC(),
+			LastRun:    task.LastRun.UTC(),
+			NextRun:    task.NextRun.UTC(),
+			LastError:  task.LastError,
+			RunHistory: append([]contracts.AutomationRunRecord(nil), task.RunHistory...),
 		})
 	}
 	data, err := json.MarshalIndent(document, "", "  ")
@@ -599,7 +604,8 @@ func (s *service) execute(taskID string, force bool) {
 	s.inFlight[taskID] = true
 	s.mu.Unlock()
 
-	runErr := s.runTask(task)
+	startedAt := time.Now().UTC()
+	summary, runErr := s.runTask(task)
 	now := time.Now().UTC()
 
 	s.mu.Lock()
@@ -607,10 +613,22 @@ func (s *service) execute(taskID string, force bool) {
 		current := s.tasks[index]
 		current.LastRun = now
 		current.UpdatedAt = now
+		record := contracts.AutomationRunRecord{
+			StartedAt:  startedAt,
+			FinishedAt: now,
+			Status:     contracts.AutomationRunSuccess,
+		}
 		if runErr != nil {
 			current.LastError = runErr.Error()
+			record.Status = contracts.AutomationRunFailure
+			record.Summary = truncateRunSummary(runErr.Error())
 		} else {
 			current.LastError = ""
+			record.Summary = truncateRunSummary(summary)
+		}
+		current.RunHistory = append([]contracts.AutomationRunRecord{record}, current.RunHistory...)
+		if len(current.RunHistory) > maxRunHistory {
+			current.RunHistory = current.RunHistory[:maxRunHistory]
 		}
 		current.NextRun, current.Enabled = s.rescheduleLocked(current, now)
 		s.tasks[index] = current
@@ -623,20 +641,34 @@ func (s *service) execute(taskID string, force bool) {
 	s.notify()
 }
 
-// runTask creates the automation chat session and sends the prompt.
-func (s *service) runTask(task contracts.AutomationTask) error {
+// runTask creates the automation chat session and sends the prompt, returning
+// the run summary for the history (the session reference on success).
+func (s *service) runTask(task contracts.AutomationTask) (string, error) {
 	title := "自动化: " + task.Name
 	sessionID, err := s.chat.NewSession(title)
 	if err != nil {
 		s.logger.Printf("%s: run %s: create chat session: %v", ModuleID, task.ID, err)
-		return fmt.Errorf("create chat session: %w", err)
+		return "", fmt.Errorf("create chat session: %w", err)
 	}
 	if err := s.chat.Send(sessionID, task.Prompt); err != nil {
 		s.logger.Printf("%s: run %s: send prompt: %v", ModuleID, task.ID, err)
-		return fmt.Errorf("send prompt: %w", err)
+		return "", fmt.Errorf("send prompt: %w", err)
 	}
 	s.logger.Printf("%s: ran task %s in chat session %s", ModuleID, task.ID, sessionID)
-	return nil
+	return fmt.Sprintf("ran in chat session %s", sessionID), nil
+}
+
+// maxRunHistory bounds the per-task run history.
+const maxRunHistory = 10
+
+// truncateRunSummary bounds one history summary to 200 runes.
+func truncateRunSummary(summary string) string {
+	const limit = 200
+	runes := []rune(summary)
+	if len(runes) <= limit {
+		return summary
+	}
+	return string(runes[:limit-1]) + "…"
 }
 
 // rescheduleLocked computes the next firing after one run: one-shot tasks

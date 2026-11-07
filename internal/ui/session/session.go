@@ -106,6 +106,14 @@ type state struct {
 	// assistant action row.
 	feedbackErr string
 
+	// /feedback dialog target and state.
+	feedbackOpen        bool
+	feedbackSessionID   string
+	feedbackMessageID   string
+	feedbackMessageText string
+	feedbackCurrent     string
+	feedbackDialogErr   string
+
 	// goal is the active goal shown in the header (nil when none); goalTracker
 	// is the optional host bridge used to clear it. Both are UI-thread state.
 	goal        *contracts.Goal
@@ -348,6 +356,7 @@ func (st *state) permissionLabel(mode string) string {
 func sessionCommands(runtime contracts.UIRuntime, navigator contracts.Navigator,
 	chat contracts.ChatService, config Config, st *state) []contracts.CommandSpec {
 	_, forkerOK := chat.(contracts.SessionForker)
+	_, feedbackerOK := chat.(contracts.SessionFeedbacker)
 	activeSession := func() (contracts.ChatSession, bool) {
 		id := chat.ActiveSession()
 		if id == "" {
@@ -446,6 +455,23 @@ func sessionCommands(runtime contracts.UIRuntime, navigator contracts.Navigator,
 			Order:   62,
 			Enabled: func() bool { return st.memoryStore != nil },
 			Run:     func() error { openMemoryDialog(st, runtime); return nil },
+		},
+		{
+			ID:    "zeokeel.session.feedback",
+			Title: st.tr("反馈", "Feedback"),
+			Hint:  st.tr("评价最近一条回答", "Rate the latest answer"),
+			Order: 63,
+			Enabled: func() bool {
+				if !feedbackerOK {
+					return false
+				}
+				_, message, ok := latestAssistantTarget(chat)
+				return ok && strings.TrimSpace(message.ID) != ""
+			},
+			Run: func() error {
+				openFeedbackDialog(st, runtime, chat)
+				return nil
+			},
 		},
 		{
 			ID:      "zeokeel.session.permission",

@@ -49,7 +49,7 @@
 |---|---|---|---|
 | `acp` | 🟡 | `internal/modules/acp`、host RunACP | initialize/session-new/prompt/cancel、chunk、错误码；缺 session/list/load、auth、fs/terminal 双向、tool_call 更新 |
 | `agentteam` | ✅ | agent `team.go` + rig `tools/team` + Agents Inspector + team_task 共享板 | 真实异步 subagent runner（spawn/steer/wait/interrupt/close、fork/model/max-iterations）；全局 manager（旧按会话），Inspector 展示全局成员 |
-| `automation` | 🟡 | `internal/modules/automation` + `internal/ui/automation` | cron/every/after、持久化、ticker、schedule 工具、列表/新建/运行/删除；缺 automation_runs 历史 |
+| `automation` | 🟡 | `internal/modules/automation` + `internal/ui/automation` | cron/every/after、持久化、ticker、schedule 工具、列表/新建/运行/删除/**运行历史（每任务最近 10 条，持久化，卡片折叠显示最近状态+摘要，展开列表）**；缺独立 runs 表/统计 |
 | `brand` | ✅ | `internal/brand` | palette/theme/logo/wordmark |
 | `design` | ✅ | `internal/design` | tokens/style/motion/font/components 子集 |
 | `globalhotkey` | ❌ | 无 | 系统级全局热键未实现；只有窗口内快捷键（uiroot，可配置两条） |
@@ -82,7 +82,7 @@
 |---|---|---|---|
 | Home / 起始页 | ✅ | `internal/ui/home` | hero/greeting/setup card/composer/最近会话 |
 | Composer 基础（输入/附件/发送/停止/模型 chip/@//） | ✅ | `internal/ui/session/view.go`、`attachments.go` | 文本、附件/图片/拖放、发送/停止、per-session 模型菜单、工作区 @、/ 菜单 |
-| Composer 深度（/goal /plan /memory/权限/effort/@session/presets） | 🟡 | `sessionCommands` + `command_dialogs.go` + `buildComposerToolbar` | 已落地：/新会话 /创建副本 /导出对话 /打开设置 /设置目标 /审阅计划 /添加记忆、权限模式、**模式切换（普通/计划模式，header 徽标 + 工具白名单门禁）**、推理强度、@session、预设插入；缺 /compact /feedback、/goal 子命令 |
+| Composer 深度（/goal /plan /memory/权限/effort/@session/presets） | 🟡 | `sessionCommands` + `command_dialogs.go` + `buildComposerToolbar` | 已落地：/新会话 /创建副本 /导出对话 /打开设置 /设置目标 /审阅计划 /添加记忆 /反馈（共 9 条）、权限模式、模式切换（普通/计划）、推理强度、@session、预设插入；缺 /compact、/goal 子命令 |
 | Chrome/Sidebar/折叠 rail/右栏 dock | ✅ | uiroot + sidebar | 280px sidebar、64px rail、Cmd/Ctrl+B、右栏开关 |
 | 命令面板/窗口内快捷键 | ✅ | uiroot palette/shortcuts | Cmd/Ctrl+K、可配置两条 chrome 快捷键；非系统全局热键 |
 | Settings 外壳与页面 | 🟡 | `internal/ui/settings`、about | 14 页：模型/模型目录/服务商/诊断/快捷键/外观/技能/更新/导入/搜索/MCP/网络/预设 + 关于，en/zh；更新页含下载/暂存/重启安装；缺记忆管理页、内置插件开关/详情 |
@@ -95,7 +95,7 @@
 | Tool cards | ✅ | `internal/ui/toolcards` | rig 工具卡 + todo/team_task 卡 + demo/兜底；MCP 动态工具走 session 兜底 |
 | Markdown 渲染 | ✅ | mygo ui/markdown | 消息/技能/更新 notes/artifact/plan 预览 |
 | Reasoning 展示 | 🟡 | session buildAssistantMessage | 折叠 Reasoning 文本；缺旧实时 preview/shimmer |
-| 消息级操作（复制/重试/反馈/用量） | ✅ | session 行动区 + usage footer + `SessionFeedbacker` | 「重新生成」+ 逐条复制 + usage footer + **feedback good/bad（settings 持久化、restart-safe、toggle 清除、已反馈徽标）** |
+| 消息级操作（复制/重试/反馈/用量） | ✅ | session 行动区 + usage footer + `SessionFeedbacker` + /feedback + 导出 | 「重新生成」+ 逐条复制 + usage footer + feedback good/bad + **/反馈 命令（摘要/三按钮）**，**Markdown/JSONL 导出含反馈** |
 | `@` mentions | ✅ | session buildMentionMenu + agent references | 工作区文件 + 会话分组（@session，排除当前/过滤/上限 8）；agent 侧展开注入 |
 | 会话搜索 | ✅ | sidebar + agent Sessions | 标题/分组过滤；pin/archive 行菜单与 show-archived 视图 |
 | 消息全文搜索 | ✅ | sidebar + sessionstore SearchMessages | LIKE/转义/片段/限制/跨会话（解码文本匹配） |

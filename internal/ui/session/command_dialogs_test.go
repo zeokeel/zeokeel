@@ -208,16 +208,16 @@ func TestCommandFamilyRegisteredAndEnabled(t *testing.T) {
 		}
 	}
 
-	// The session command family now registers eight commands (new/fork/
-	// export/permission/settings + goal/plan/memory).
+	// The session command family now registers nine commands (new/fork/
+	// export/permission/settings + goal/plan/memory/feedback).
 	count := 0
 	for _, command := range h.ui.Runtime().Commands() {
 		if strings.HasPrefix(command.ID, "zeokeel.session.") {
 			count++
 		}
 	}
-	if count != 8 {
-		t.Fatalf("session commands = %d, want 8", count)
+	if count != 9 {
+		t.Fatalf("session commands = %d, want 9", count)
 	}
 
 	// Without the optional backends the commands stay registered but disabled.

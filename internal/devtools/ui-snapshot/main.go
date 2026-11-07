@@ -557,6 +557,14 @@ func main() {
 	}
 	a.render(outDir + "/p2-modelcatalog-settings.png")
 	a.ui.Navigator().CloseSettings()
+	// Automation with a finished run so the history expansion is visible.
+	if automation, err := a.root.Require(contracts.KeyAutomation); err == nil {
+		if task, createErr := automation.Create(context.Background(), contracts.AutomationTask{
+			Name: "每日构建检查", Prompt: "检查构建状态并汇总", Schedule: "every 24h", Enabled: false,
+		}); createErr == nil {
+			_ = automation.RunNow(context.Background(), task.ID)
+		}
+	}
 	if err := a.ui.Navigator().Push("automation"); err != nil {
 		fmt.Println("push automation:", err)
 	}

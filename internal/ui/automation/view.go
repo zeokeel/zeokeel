@@ -108,6 +108,7 @@ func buildTaskCard(c *ui.Context, t *design.Tokens, service contracts.Automation
 		if strings.TrimSpace(task.LastError) != "" {
 			buildAutomationError(c, t, st.tr("上次错误：", "Last error: ")+task.LastError)
 		}
+		buildTaskHistory(c, t, st, runtime, task)
 		ui.Row(c).FillWidth().Gap(design.Space2).AlignItems(ui.Center).Children(func() {
 			runNow := ui.Button(c, st.tr("立即运行", "Run now")).Tooltip(st.tr("立即执行一次该任务", "Run this task once now"))
 			if runNow.Clicked() {
@@ -127,6 +128,62 @@ func buildTaskCard(c *ui.Context, t *design.Tokens, service contracts.Automation
 			}
 		})
 	})
+}
+
+// runStatusLabel renders one run status label.
+func runStatusLabel(st *state, status string) string {
+	if status == contracts.AutomationRunFailure {
+		return st.tr("失败", "Failed")
+	}
+	return st.tr("成功", "Success")
+}
+
+// runStatusColor maps one run status to its semantic color.
+func runStatusColor(t *design.Tokens, status string) ui.Color {
+	if status == contracts.AutomationRunFailure {
+		return t.DangerText
+	}
+	return t.Success
+}
+
+// buildTaskHistory is the task card's run-history disclosure: the latest run
+// summary when collapsed and the recent runs (newest first) when expanded.
+func buildTaskHistory(c *ui.Context, t *design.Tokens, st *state, runtime contracts.UIRuntime, task contracts.AutomationTask) {
+	open := st.historyOpen[task.ID]
+	ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(design.Space2).Children(func() {
+		if len(task.RunHistory) > 0 {
+			latest := task.RunHistory[0]
+			design.Apply(ui.Badge(c, runStatusLabel(st, latest.Status)), t.Badge()).
+				TextColor(runStatusColor(t, latest.Status))
+			design.Apply(ui.Text(c, firstNonEmpty(latest.Summary, "—")), t.Font(design.TypeXXS)).
+				TextColor(t.LabelTertiary).Grow(1).MaxLines(1).Ellipsis("…")
+		} else {
+			ui.Spacer(c).Grow(1)
+		}
+		if ui.Button(c, st.tr("历史", "History")).Tooltip(st.tr("查看运行历史", "Show run history")).Clicked() {
+			st.historyOpen[task.ID] = !open
+			runtime.Invalidate()
+		}
+	})
+	if !open {
+		return
+	}
+	ui.Divider(c)
+	if len(task.RunHistory) == 0 {
+		design.Apply(ui.Text(c, st.tr("还没有运行记录", "No runs yet")), t.TextMuted(design.TypeXXS))
+		return
+	}
+	for _, record := range task.RunHistory {
+		record := record
+		ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(design.Space2).Children(func() {
+			design.Apply(ui.Text(c, record.StartedAt.Local().Format("15:04:05")), t.MonoFamily()).
+				FontSize(10).TextColor(t.LabelTertiary).NoWrap()
+			design.Apply(ui.Badge(c, runStatusLabel(st, record.Status)), t.Badge()).
+				TextColor(runStatusColor(t, record.Status))
+			design.Apply(ui.Text(c, firstNonEmpty(record.Summary, "—")), t.Font(design.TypeXXS)).
+				TextColor(t.LabelSecondary).Grow(1).MaxLines(1).Ellipsis("…")
+		})
+	}
 }
 
 // buildCreateForm is the inline task creation card.
