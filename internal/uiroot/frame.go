@@ -8,7 +8,6 @@ import (
 	"github.com/zeokeel/zeokeel/internal/brand"
 	"github.com/zeokeel/zeokeel/internal/contracts"
 	"github.com/zeokeel/zeokeel/internal/design"
-	"github.com/zeokeel/zeokeel/internal/icons"
 )
 
 // view builds one frame. It is the product's single UI entry point:
@@ -34,49 +33,13 @@ func (r *Root) view(c *ui.Context) {
 	ui.Row(c).Fill().Background(tokens.BgBase).Children(func() {
 		r.sidebar(c)
 		ui.Column(c).FillHeight().Grow(1).Children(func() {
-			r.topBar(c)
+			r.contentHeader(c)
 			r.screen(c)
 		})
+		r.rightPanel(c)
 	})
 
 	r.overlays(c)
-}
-
-// topBar renders the top region: the current screen title, brand/command
-// contributions from modules, center/action contributions and the settings
-// entry. Geometry and type come from the brand tokens so every screen shares
-// one header rhythm.
-func (r *Root) topBar(c *ui.Context) {
-	t := design.Of(c)
-	ui.Row(c).FillWidth().Height(52).Padding(0, design.Space5, 0, design.Space5).
-		Gap(design.Space2).AlignItems(ui.Center).Children(func() {
-		title := r.appName
-		if spec, ok := r.rt.screen(r.nav.Current()); ok {
-			title = spec.Title
-		}
-		design.Apply(ui.Text(c, title), t.Font(design.TypeM)).FontWeight(600).
-			TextColor(t.LabelPrimary)
-		r.slot(c, contracts.SlotTopBarBrand)
-		for _, cmd := range r.rt.commandSpecs() {
-			if cmd.Enabled != nil && !cmd.Enabled() {
-				continue
-			}
-			if ui.Button(c, cmd.Title).Clicked() {
-				r.runCommand(cmd)
-			}
-		}
-		ui.Spacer(c).Grow(1)
-		r.slot(c, contracts.SlotTopBarCenter)
-		r.slot(c, contracts.SlotTopBarActions)
-		settingsButton := ui.Button(c, r.locale.T("nav.settings"))
-		settingsButton.Children(func() {
-			ui.Icon(c, icons.Sliders()).Size(design.Space4, design.Space4).
-				TextColor(t.LabelSecondary)
-		})
-		if settingsButton.Clicked() {
-			r.nav.ToggleSettings()
-		}
-	})
 }
 
 // sidebar renders the main sidebar region with the brand geometry: the 280 DIP
@@ -87,11 +50,13 @@ func (r *Root) sidebar(c *ui.Context) {
 	t := design.Of(c)
 	screens := visibleScreens(r.rt.screenSpecs())
 	selected := r.nav.Current()
-	if selected == "" && len(screens) > 0 {
+	initial := selected == ""
+	if initial && len(screens) > 0 {
 		selected = screens[0].ID
 	}
 	column := ui.Column(c).FillHeight()
 	design.Apply(column, t.Sidebar())
+	changed := false
 	column.Children(func() {
 		// Brand row: the mark, the ZeoKeel wordmark.
 		brandRow := ui.Row(c).FillWidth().AlignItems(ui.Center).
@@ -102,39 +67,27 @@ func (r *Root) sidebar(c *ui.Context) {
 				TextColor(t.LabelPrimary).Grow(1).MaxLines(1).Ellipsis("…")
 		})
 
-		open := true
+		// The host no longer paints a screen list: the destination rows, the
+		// session list and the footer are module contributions (the old UI's
+		// Home/Plugins/Automation + workspaces tree + More footer). The native
+		// Sidebar still owns selection, keyboard navigation and scrolling.
 		sidebar := ui.Sidebar(c, &selected, func() {
 			r.slot(c, contracts.SlotSidebarPrimary)
-			ui.SidebarSection(c, r.locale.T("nav.screens"), &open, func() {
-				for _, spec := range screens {
-					ui.SidebarItem(c, spec.ID, screenIcon(spec.ID), spec.Title)
-				}
-				r.slot(c, contracts.SlotSidebarNav)
-			})
+			r.slot(c, contracts.SlotSidebarNav)
 			r.slot(c, contracts.SlotSidebarTree)
 			r.slot(c, contracts.SlotSidebarFooter)
 		}).FillHeight()
 		sidebar.Background(t.BgSidebar)
+		changed = sidebar.Changed()
 	})
-	if selected != r.nav.Current() && selected != "" {
+	// Only a real user choice in the native Sidebar navigates: modules often
+	// call Navigator.Push in the same frame (session rows, new-chat buttons),
+	// and the canonical selection starts as the current screen, so a stale
+	// selection must not overwrite that navigation.
+	if (changed || initial) && selected != "" && selected != r.nav.Current() {
 		if err := r.nav.Push(selected); err != nil {
 			log.Printf("uiroot: %v", err)
 		}
-	}
-}
-
-// screenIcon maps the well-known screen IDs to their sidebar glyph; modules may
-// add more screens and get a neutral message glyph until they are mapped.
-func screenIcon(id string) *ui.SVG {
-	switch id {
-	case "home":
-		return icons.Message()
-	case "session":
-		return icons.NewChat()
-	case "settings":
-		return icons.Sliders()
-	default:
-		return icons.Data()
 	}
 }
 
@@ -153,14 +106,83 @@ func (r *Root) screen(c *ui.Context) {
 		spec = specs[0]
 	}
 	ui.Column(c).FillWidth().Grow(1).Padding(design.Space6).Gap(design.Space4).Children(func() {
-		ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(design.Space2).Children(func() {
-			r.slot(c, contracts.SlotScreenHeader)
-			ui.Spacer(c).Grow(1)
-			r.slot(c, contracts.SlotScreenActions)
-		})
+		// Screens own their header (the old UI's session header, home header,
+		// ...); the host only offers the two header slots when a module
+		// contributes to them, so no empty toolbar is reserved.
+		if r.hasAnySlot(contracts.SlotScreenHeader, contracts.SlotScreenActions) {
+			ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(design.Space2).Children(func() {
+				r.slot(c, contracts.SlotScreenHeader)
+				ui.Spacer(c).Grow(1)
+				r.slot(c, contracts.SlotScreenActions)
+			})
+		}
 		r.safeBuild(c, spec.Build)
 		r.slot(c, contracts.SlotScreenFooter)
 	})
+}
+
+// panelRightIcon is the old shell's right-panel glyph, drawn as an SVG asset
+// (not hand-painted by a module).
+var panelRightIcon = ui.MustParseSVG([]byte(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><line x1="15" x2="15" y1="3" y2="21"/></svg>`))
+
+// contentHeader is the old shell's screen header band: the right-panel toggle
+// sits at the top-right of the content column, on every screen.
+func (r *Root) contentHeader(c *ui.Context) {
+	t := design.Of(c)
+	ui.Row(c).FillWidth().Height(40).PaddingX(design.Space4).
+		AlignItems(ui.Center).Children(func() {
+		ui.Spacer(c).Grow(1)
+		if !r.hasAnySlot(contracts.SlotSessionPanelRight) {
+			return
+		}
+		label := "打开右侧栏"
+		if r.rightOpen {
+			label = "收起右侧栏"
+		}
+		button := ui.ButtonBase(c).Size(design.Space6, design.Space6).Center().
+			Label(label).Tooltip(label).Radius(design.RadiusSM)
+		if button.Hovered() {
+			button = button.Background(t.BgHover)
+		}
+		button.Children(func() {
+			ui.Icon(c, panelRightIcon).Size(design.Space4, design.Space4).
+				TextColor(t.LabelSecondary)
+		})
+		if button.Clicked() {
+			r.rightOpen = !r.rightOpen
+			r.requestFrame()
+		}
+	})
+}
+
+// rightPanel docks the workspace-wide inspector panel on the right edge when
+// the user opened it and a module contributes to
+// contracts.SlotSessionPanelRight (the old UI's right sidebar). It belongs to
+// the window, not to one screen, so it survives screen switches.
+func (r *Root) rightPanel(c *ui.Context) {
+	if !r.rightOpen || !r.hasAnySlot(contracts.SlotSessionPanelRight) {
+		return
+	}
+	t := design.Of(c)
+	ui.Column(c).Width(320).FillHeight().Background(t.BgSidebar).
+		BorderWidth(1, 0, 0, 0).BorderColor(t.BorderL3).
+		Padding(design.Space4).Children(func() {
+		r.slot(c, contracts.SlotSessionPanelRight)
+	})
+}
+
+// hasAnySlot reports whether at least one of the named slots currently has a
+// registered contribution.
+func (r *Root) hasAnySlot(names ...string) bool {
+	registered := r.rt.Slots()
+	for _, name := range names {
+		for _, candidate := range registered {
+			if candidate == name {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // overlays renders the settings surface and any module-declared overlay slots.

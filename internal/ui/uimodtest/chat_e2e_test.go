@@ -72,8 +72,8 @@ func TestDesktopChatPipelineEndToEnd(t *testing.T) {
 	if !tester.HasText("开始新对话") {
 		t.Fatalf("home composer action missing; texts = %v", tester.Texts())
 	}
-	if !tester.HasText("你好") {
-		t.Fatalf("home recent list missing the session title; texts = %v", tester.Texts())
+	if !tester.HasText("ZeoKeel") {
+		t.Fatalf("home hero missing the brand; texts = %v", tester.Texts())
 	}
 
 	// The real product frame: side bar + chat screen + settings page.

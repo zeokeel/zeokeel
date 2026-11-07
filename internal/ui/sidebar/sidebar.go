@@ -1,14 +1,29 @@
 // Package sidebar contributes the runtime sidebar of the product: the primary
-// "new chat" action, the chat session list and the settings entry.
+// "new chat" action, the searchable chat session list, the session lifecycle
+// actions and the settings entry.
 //
 // It is a UI module like ui/home: a kernel Descriptor that requires the host UI
-// runtime and the chat read model, registers three SlotItems on activation and
-// hands the unregister functions (and the chat subscription) to kernel effects
-// so disposal unwinds them. The host owns the native Sidebar/SidebarSection
-// shell; this module only injects native ui.ButtonBase / ui.Button / ui.Icon /
-// ui.Text controls into the reserved slots and styles them through
-// internal/design (the brand accent, row metrics, type scale and badges). It
+// runtime and the chat read model, registers slot items on activation and hands
+// the unregister functions (and the chat subscription) to kernel effects so
+// disposal unwinds them. The host owns the native Sidebar/SidebarSection shell;
+// this module only injects native controls (SearchField, ButtonBase, Button,
+// Modal, AlertDialog, Icon, Text, Badge) styled through internal/design. It
 // never draws a control by hand.
+//
+// # Session operations
+//
+// The list filters case-insensitively by session title (an empty title is shown
+// as "未命名会话"). When an active session exists the footer shows the quiet
+// rename/delete actions:
+//
+//   - rename is only offered when the chat service also implements
+//     contracts.SessionRenamer; the button opens a native Modal with a
+//     TextInput, save/cancel and an inline error (an empty title is rejected);
+//   - delete opens a native AlertDialog that names the session and warns the
+//     action cannot be undone; only the last button deletes.
+//
+// The rename Modal is a second slot item on contracts.SlotOverlayDialogs
+// (id sidebar.rename.dialog), so it can render above the whole window.
 package sidebar
 
 import (
@@ -34,6 +49,24 @@ type Config struct {
 	SessionsTitle string `json:"sessionsTitle"`
 }
 
+// paneState is the module instance's UI state, shared by the slot builds that
+// render from it: the search query, the rename dialog draft/error and the
+// pending delete confirmation. It lives on the capture heap (one per module
+// activation) and is only touched while building a frame / handling a click on
+// the UI thread.
+type paneState struct {
+	query string
+
+	renameOpen   bool
+	renameTarget string
+	renameDraft  string
+	renameErr    string
+
+	deleteOpen   bool
+	deleteTarget string
+	deleteTitle  string
+}
+
 // Module registers the sidebar slots.
 func Module() *module.Descriptor[Config] {
 	return module.Define("zeokeel-ui/sidebar", func(ctx cordis.Context, cfg Config) error {
@@ -49,10 +82,14 @@ func Module() *module.Descriptor[Config] {
 		if err != nil {
 			return err
 		}
+		// Renaming is optional: a host that only implements ChatService keeps the
+		// rest of the sidebar and simply does not get the rename entry.
+		renamer, _ := chat.(contracts.SessionRenamer)
 
 		newChatLabel := firstNonEmpty(cfg.NewChatLabel, "新对话")
 		settingsLabel := firstNonEmpty(cfg.SettingsLabel, "设置")
 		sessionsTitle := firstNonEmpty(cfg.SessionsTitle, "会话")
+		state := &paneState{}
 
 		// The chat service notifies from the agent goroutine; hop to the UI
 		// thread with Post and let the host schedule a frame. The subscription
@@ -83,7 +120,7 @@ func Module() *module.Descriptor[Config] {
 			ID:    "sidebar.nav.sessions",
 			Order: 10,
 			Build: func(c *ui.Context) {
-				buildSessionList(c, design.Of(c), chat, nav, runtime, sessionsTitle)
+				buildSessionList(c, design.Of(c), chat, nav, runtime, state, sessionsTitle)
 			},
 		}
 		footer := contracts.SlotItem{
@@ -91,11 +128,19 @@ func Module() *module.Descriptor[Config] {
 			ID:    "sidebar.footer.actions",
 			Order: 10,
 			Build: func(c *ui.Context) {
-				buildFooter(c, design.Of(c), nav, settingsLabel)
+				buildFooter(c, design.Of(c), chat, renamer, nav, runtime, state, settingsLabel)
+			},
+		}
+		renameDialog := contracts.SlotItem{
+			Slot:  contracts.SlotOverlayDialogs,
+			ID:    "sidebar.rename.dialog",
+			Order: 20,
+			Build: func(c *ui.Context) {
+				buildRenameDialog(c, design.Of(c), renamer, runtime, state)
 			},
 		}
 
-		for _, item := range []contracts.SlotItem{primary, navSlot, footer} {
+		for _, item := range []contracts.SlotItem{primary, navSlot, footer, renameDialog} {
 			if err := own(ctx, func() (func(), error) { return runtime.RegisterSlotItem(item) }); err != nil {
 				return err
 			}
@@ -137,24 +182,48 @@ func buildPrimary(c *ui.Context, t *design.Tokens, chat contracts.ChatService,
 				// headless or partial assembly may not have the screen yet, so a
 				// failed push must not break the frame.
 				if _, err := chat.NewSession(""); err == nil {
-					_ = nav.Push("session")
+					// The host reconciles its native Sidebar selection after this
+					// build and may push the previously selected screen again; go
+					// to the session screen on the next frame so that the
+					// reconciliation sees the new destination.
+					runtime.Post(func() { _ = nav.Push("session") })
 					runtime.Invalidate()
 				}
 			}
 		})
 }
 
-// buildSessionList renders the brand session list inside the host's sidebar nav
-// section: a SectionLabel heading and one native row per session with a message
-// glyph, an ellipsized title and the current/running badges.
+// buildSessionList renders the sidebar's navigation column the way the old UI
+// did: the Home destination first, an empty line, the "会话" section label, the
+// search field and one native row per session that matches the query. Session
+// rows are the only way into a conversation (there is no separate "对话" nav
+// item): clicking one activates it and opens the session screen.
 func buildSessionList(c *ui.Context, t *design.Tokens, chat contracts.ChatService,
-	nav contracts.Navigator, runtime contracts.UIRuntime, title string) {
+	nav contracts.Navigator, runtime contracts.UIRuntime, state *paneState, title string) {
 	ui.Column(c).FillWidth().Gap(design.Space1).Padding(design.Space2, 0, 0, 0).
 		Children(func() {
+			home := ui.SidebarItem(c, "home", icons.NewChat(), "首页")
+			home.OnClick(func() {
+				if err := nav.Push("home"); err == nil {
+					runtime.Invalidate()
+				}
+			})
+			// The old UI separated the destinations from the conversation list
+			// with one empty line before the section label.
+			ui.Box(c).Height(design.Space2)
 			design.Apply(ui.Text(c, title), t.SectionLabel())
-			sessions := chat.Sessions()
+			ui.Row(c).FillWidth().Padding(0, design.Space1, 0, design.Space1).
+				Children(func() {
+					ui.SearchField(c, &state.query).Label("搜索会话").Placeholder("搜索会话").FillWidth()
+				})
+			query := strings.TrimSpace(state.query)
+			sessions := filterSessions(chat.Sessions(), query)
 			if len(sessions) == 0 {
-				design.Apply(ui.Text(c, "还没有会话"), t.TextMuted(design.TypeXXS)).
+				empty := "还没有会话"
+				if query != "" {
+					empty = "没有匹配的会话"
+				}
+				design.Apply(ui.Text(c, empty), t.TextMuted(design.TypeXXS)).
 					Padding(design.Space1, design.Space2, 0, design.Space2)
 				return
 			}
@@ -165,15 +234,28 @@ func buildSessionList(c *ui.Context, t *design.Tokens, chat contracts.ChatServic
 		})
 }
 
+// filterSessions keeps the sessions whose display title contains query, case
+// insensitively. An empty query keeps every session.
+func filterSessions(sessions []contracts.ChatSessionInfo, query string) []contracts.ChatSessionInfo {
+	if query == "" {
+		return sessions
+	}
+	needle := strings.ToLower(query)
+	filtered := make([]contracts.ChatSessionInfo, 0, len(sessions))
+	for _, info := range sessions {
+		if strings.Contains(strings.ToLower(sessionTitle(info)), needle) {
+			filtered = append(filtered, info)
+		}
+	}
+	return filtered
+}
+
 // buildSessionRow is one brand session row: a native ButtonBase at the brand row
 // metrics (36 DIP, 8 DIP radius, hover/selected tint) with the accessible label
 // and the native click behavior.
 func buildSessionRow(c *ui.Context, t *design.Tokens, chat contracts.ChatService,
 	nav contracts.Navigator, runtime contracts.UIRuntime, session contracts.ChatSessionInfo, active bool) {
-	label := strings.TrimSpace(session.Title)
-	if label == "" {
-		label = "未命名会话"
-	}
+	label := sessionTitle(session)
 	row := ui.ButtonBase(c).FillWidth().Height(36).PaddingX(design.Space3).
 		Radius(design.RadiusSM).Label(label)
 	if active || row.Hovered() {
@@ -200,26 +282,143 @@ func buildSessionRow(c *ui.Context, t *design.Tokens, chat contracts.ChatService
 	})
 	row.OnClick(func() {
 		_ = chat.SetActiveSession(session.ID)
-		_ = nav.Push("session")
+		// Queue the screen switch for the next frame: this frame's host-side
+		// native Sidebar reconciliation would otherwise restore the previously
+		// selected destination.
+		runtime.Post(func() { _ = nav.Push("session") })
 		runtime.Invalidate()
 	})
 }
 
-// buildFooter is the quiet sidebar footer: the native settings button with its
-// sliders glyph, so the settings surface stays reachable without competing with
-// the primary action.
-func buildFooter(c *ui.Context, t *design.Tokens, nav contracts.Navigator, label string) {
-	ui.Row(c).FillWidth().
+// buildFooter is the quiet sidebar footer: the native settings button and, when
+// a session is active, the low-key rename/delete actions. The delete
+// confirmation is a native AlertDialog rendered here; while it is open the rest
+// of the footer is hidden so only the dialog's buttons are in the frame.
+func buildFooter(c *ui.Context, t *design.Tokens, chat contracts.ChatService,
+	renamer contracts.SessionRenamer, nav contracts.Navigator, runtime contracts.UIRuntime,
+	state *paneState, label string) {
+	if state.deleteOpen {
+		message := fmt.Sprintf("“%s”及其全部消息将被删除，此操作无法撤销。", firstNonEmpty(state.deleteTitle, "未命名会话"))
+		switch ui.AlertDialog(c, &state.deleteOpen, "删除会话", message, "取消", "删除") {
+		case 1:
+			if err := chat.DeleteSession(state.deleteTarget); err == nil {
+				runtime.Invalidate()
+			}
+			state.deleteTarget = ""
+			state.deleteTitle = ""
+		case 0, ui.AlertDismissed:
+			state.deleteTarget = ""
+			state.deleteTitle = ""
+			runtime.Invalidate()
+		}
+		return
+	}
+
+	ui.Column(c).FillWidth().Gap(design.Space1).
 		Padding(design.Space2, design.Space3, design.Space2, design.Space3).
 		Children(func() {
-			button := ui.Button(c, label)
-			button.Children(func() {
-				ui.Icon(c, icons.Sliders()).Size(16, 16).TextColor(t.LabelSecondary)
+			ui.Row(c).FillWidth().Children(func() {
+				settings := ui.Button(c, label)
+				settings.Children(func() {
+					ui.Icon(c, icons.Sliders()).Size(16, 16).TextColor(t.LabelSecondary)
+				})
+				if settings.Clicked() {
+					nav.ToggleSettings()
+				}
 			})
-			if button.Clicked() {
-				nav.ToggleSettings()
+
+			active := chat.ActiveSession()
+			if active == "" {
+				return
 			}
+			ui.Row(c).FillWidth().Gap(design.Space1).Children(func() {
+				if renamer != nil {
+					rename := design.Apply(ui.Button(c, "重命名"), t.TextMuted(design.TypeXS))
+					if rename.Clicked() {
+						state.renameOpen = true
+						state.renameErr = ""
+						state.renameTarget = active
+						state.renameDraft = sessionTitleByID(chat, active)
+					}
+				}
+				del := design.Apply(ui.Button(c, "删除"), t.TextMuted(design.TypeXS))
+				if del.Clicked() {
+					state.deleteOpen = true
+					state.deleteTarget = active
+					state.deleteTitle = sessionTitleByID(chat, active)
+				}
+			})
 		})
+}
+
+// buildRenameDialog renders the rename Modal on the window-level overlay slot.
+// It is only visible while the footer's rename action asked for it; Escape or a
+// click outside closes it through the native Modal's open pointer.
+func buildRenameDialog(c *ui.Context, t *design.Tokens, renamer contracts.SessionRenamer,
+	runtime contracts.UIRuntime, state *paneState) {
+	if !state.renameOpen || renamer == nil {
+		return
+	}
+	target := state.renameTarget
+	ui.Modal(c, &state.renameOpen, func() {
+		ui.Column(c).Width(360).Gap(design.Space3).Children(func() {
+			design.Apply(ui.Text(c, "重命名会话"), t.Text(design.TypeM)).FontWeight(600)
+			ui.TextInput(c, &state.renameDraft).Label("会话标题").FillWidth()
+			if state.renameErr != "" {
+				design.Apply(ui.Text(c, state.renameErr), t.TextMuted(design.TypeXS)).
+					TextColor(t.DangerText)
+			}
+			ui.Row(c).FillWidth().Justify(ui.End).Gap(design.Space2).Children(func() {
+				cancel := ui.Button(c, "取消")
+				if cancel.Clicked() {
+					state.renameOpen = false
+					state.renameErr = ""
+					runtime.Invalidate()
+				}
+				save := ui.PrimaryButton(c, "保存")
+				if save.Clicked() {
+					title := strings.TrimSpace(state.renameDraft)
+					switch {
+					case title == "":
+						state.renameErr = "标题不能为空"
+					case target == "":
+						state.renameErr = "没有活动会话"
+					default:
+						if err := renamer.RenameSession(target, title); err != nil {
+							state.renameErr = err.Error()
+						} else {
+							state.renameOpen = false
+							state.renameErr = ""
+							runtime.Invalidate()
+						}
+					}
+				}
+			})
+		})
+	})
+}
+
+// sessionTitle is the display title of one session ("未命名会话" when blank).
+func sessionTitle(info contracts.ChatSessionInfo) string {
+	if title := strings.TrimSpace(info.Title); title != "" {
+		return title
+	}
+	return "未命名会话"
+}
+
+// sessionTitleByID looks a session up and returns its display title.
+func sessionTitleByID(chat contracts.ChatService, sessionID string) string {
+	if session, ok := chat.Session(sessionID); ok {
+		if title := strings.TrimSpace(session.Title); title != "" {
+			return title
+		}
+	}
+	for _, info := range chat.Sessions() {
+		if info.ID == sessionID {
+			return sessionTitle(info)
+		}
+	}
+	return "未命名会话"
 }
 
 // own registers one contribution and ties its unregistration to ctx's effect

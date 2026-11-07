@@ -41,6 +41,11 @@ func newRuntime(root *Root) *runtime {
 
 // --- contracts.UIRuntime ---
 
+// Commands returns the registered commands, sorted by Order then ID.
+func (r *runtime) Commands() []contracts.CommandSpec {
+	return r.commandSpecs()
+}
+
 func (r *runtime) Post(fn func()) {
 	if fn == nil {
 		return

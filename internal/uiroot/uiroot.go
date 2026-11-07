@@ -47,6 +47,10 @@ type Root struct {
 	// settingsTab is host-owned UI state (which settings page is shown); it is
 	// not part of any module.
 	settingsTab int
+
+	// rightOpen is the host-owned right inspector panel state (the old shell's
+	// right sidebar). It is touched on the UI thread only.
+	rightOpen bool
 }
 
 // New creates the UI root. It registers no screens: screen/slot contributions

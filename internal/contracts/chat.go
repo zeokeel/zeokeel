@@ -119,6 +119,14 @@ type ChatService interface {
 	Subscribe(fn func(sessionID string)) (unsubscribe func(), err error)
 }
 
+// SessionRenamer is the optional half of the chat service that renames a
+// session's display title. UI modules type-assert it so a host that only
+// implements ChatService still works.
+type SessionRenamer interface {
+	// RenameSession updates the display title of an existing session.
+	RenameSession(sessionID, title string) error
+}
+
 // KeyChat is provided by the agent backend module (zeokeel/agent) and consumed
 // by the chat UI modules.
 var KeyChat = cordis.NewServiceKey[ChatService]("zeokeel/chat")

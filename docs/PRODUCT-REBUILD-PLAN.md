@@ -1,3 +1,7 @@
+> **P2 功能位置对齐（2026-11-07）**：按 old/internal/shell 的实际布局重排——无全局顶栏、屏幕自带头部；
+> 侧栏 = 品牌行→新对话→首页→会话（搜索/行/重命名/删除）→footer；右侧检查栏改回窗口级 docked 面板
+> （内容列右上角开关）；Home 只保留 hero+composer；新增 composer slash 命令菜单与 rightpanel 模块。
+>
 > **UI 设计体系落地（2026-11-07）**：old 的 `internal/{design,brand,icons}` 已移植进新工程（原样，
 > 仅改 import 路径），宿主 chrome 与全部 UI 模块按老 UI 的设计/布局重做，截图更新在
 > `docs/screenshots/`。这是对"UI 完全不对"的修复：不是自创样式，而是复用 old 的设计系统。

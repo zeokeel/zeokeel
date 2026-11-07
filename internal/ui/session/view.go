@@ -15,8 +15,10 @@ import (
 // Layout measures of the conversation surface: one centered reading measure
 // for the transcript, the old shell's composer card width.
 const (
-	transcriptWidth float32 = 840
-	composerWidth   float32 = 868
+	transcriptWidth  float32 = 840
+	composerWidth    float32 = 868
+	rightPanelWidth  float32 = 300
+	maxSlashCommands         = 8
 )
 
 // Tab indexes used by the native ui.Tabs control; they match the state field.
@@ -43,18 +45,16 @@ func buildScreen(
 
 	ui.Column(c).FillWidth().Grow(1).Children(func() {
 		buildHeader(c, t, cfg, st, chatSession, hasSession)
-		ui.Row(c).FillWidth().Grow(1).AlignItems(ui.Stretch).Children(func() {
-			switch st.tab {
-			case tabTrajectory:
-				buildTrajectoryPane(c, t, chatSession, hasSession, st)
-			case tabMemory:
-				buildMemoryPane(c, t)
-			default:
-				buildChatPane(c, t, runtime, navigator, chat, cfg, st, chatSession, hasSession)
-			}
-		})
+		switch st.tab {
+		case tabTrajectory:
+			buildTrajectoryPane(c, t, chatSession, hasSession, st)
+		case tabMemory:
+			buildMemoryPane(c, t)
+		default:
+			buildChatPane(c, t, runtime, navigator, chat, cfg, st, chatSession, hasSession)
+		}
 		if hasSession {
-			buildComposer(c, t, chat, cfg, st, activeID, chatSession)
+			buildComposer(c, t, runtime, chat, cfg, st, activeID, chatSession)
 		}
 	})
 }
@@ -379,6 +379,7 @@ func buildMemoryPane(c *ui.Context, t *design.Tokens) {
 func buildComposer(
 	c *ui.Context,
 	t *design.Tokens,
+	runtime contracts.UIRuntime,
 	chat contracts.ChatService,
 	cfg Config,
 	st *state,
@@ -390,6 +391,9 @@ func buildComposer(
 	var input ui.Element
 
 	ui.Column(c).FillWidth().PaddingY(th.Space(2)).AlignItems(ui.Center).Children(func() {
+		if query, active := slashQuery(st.draft); active {
+			buildSlashMenu(c, t, runtime, st, query)
+		}
 		ui.Row(c).Justify(ui.Center).Children(func() {
 			card := design.Apply(ui.Column(c), t.Panel()).
 				Width(composerWidth).MaxWidthPercent(94).
@@ -414,6 +418,13 @@ func buildComposer(
 							}
 							return true
 						})
+					// The slash menu is inserted above the composer, which
+					// shifts the frame's element order; keep the native text
+					// input focused so typing and Enter keep working while the
+					// menu is open (P2 keeps the send semantics unchanged).
+					if _, slashActive := slashQuery(st.draft); slashActive {
+						input.Focus()
+					}
 				}
 				ui.Row(c).FillWidth().AlignItems(ui.Center).
 					Gap(design.Space2).Children(func() {
@@ -495,6 +506,88 @@ func submitDraft(chat contracts.ChatService, activeID string, st *state) bool {
 	}
 	st.draft = ""
 	return true
+}
+
+// slashQuery reports whether draft starts with "/" (after whitespace) and
+// returns the query typed after it.
+func slashQuery(draft string) (string, bool) {
+	trimmed := strings.TrimSpace(draft)
+	if !strings.HasPrefix(trimmed, "/") {
+		return "", false
+	}
+	return strings.TrimSpace(strings.TrimPrefix(trimmed, "/")), true
+}
+
+// matchingCommands filters the command surface for the slash query: commands
+// with Enabled()==false are always hidden, and a non-empty query matches the
+// title, ID or hint case-insensitively. The result is capped for the menu.
+func matchingCommands(runtime contracts.UIRuntime, query string) []contracts.CommandSpec {
+	needle := strings.ToLower(strings.TrimSpace(query))
+	matches := make([]contracts.CommandSpec, 0, maxSlashCommands)
+	for _, cmd := range runtime.Commands() {
+		if cmd.Enabled != nil && !cmd.Enabled() {
+			continue
+		}
+		if needle != "" {
+			haystack := strings.ToLower(cmd.Title + "\x00" + cmd.ID + "\x00" + cmd.Hint)
+			if !strings.Contains(haystack, needle) {
+				continue
+			}
+		}
+		matches = append(matches, cmd)
+		if len(matches) == maxSlashCommands {
+			break
+		}
+	}
+	return matches
+}
+
+// buildSlashMenu is the painter-free composer suggestion panel: a brand card
+// above the composer, one native ButtonBase row per matching command.
+func buildSlashMenu(c *ui.Context, t *design.Tokens, runtime contracts.UIRuntime, st *state, query string) {
+	matches := matchingCommands(runtime, query)
+	menu := design.Apply(ui.Column(c), t.Panel()).
+		Width(composerWidth).MaxWidthPercent(94).Shrink(0).
+		Padding(design.Space2).Gap(design.Space1)
+	menu.Children(func() {
+		if len(matches) == 0 {
+			design.Apply(ui.Text(c, "没有匹配的命令"), t.TextMuted(design.TypeXS)).
+				PaddingX(design.Space2).PaddingY(design.Space1)
+			return
+		}
+		for _, cmd := range matches {
+			cmd := cmd
+			row := ui.ButtonBase(c).FillWidth().AlignItems(ui.Center).
+				Gap(design.Space2).Padding(design.Space1, design.Space2).
+				Radius(design.RadiusSM)
+			if row.Hovered() {
+				row.Background(t.BgHover)
+			}
+			row.Children(func() {
+				ui.Icon(c, icons.ChevronRight()).Size(design.Space3, design.Space3).
+					TextColor(t.LabelTertiary)
+				title := firstNonEmpty(cmd.Title, cmd.ID)
+				design.Apply(ui.Text(c, title), t.Font(design.TypeXS)).FontWeight(600).
+					TextColor(t.LabelPrimary)
+				if hint := strings.TrimSpace(cmd.Hint); hint != "" {
+					design.Apply(ui.Text(c, hint), t.TextMuted(design.TypeXXXS))
+				}
+			})
+			if row.Clicked() {
+				executeSlashCommand(runtime, st, cmd)
+			}
+		}
+	})
+}
+
+// executeSlashCommand clears the composer draft, runs the command (nil safe)
+// and requests the frame that hides the menu.
+func executeSlashCommand(runtime contracts.UIRuntime, st *state, cmd contracts.CommandSpec) {
+	st.draft = ""
+	if cmd.Run != nil {
+		_ = cmd.Run()
+	}
+	runtime.Invalidate()
 }
 
 // --- helpers ----------------------------------------------------------------

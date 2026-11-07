@@ -130,8 +130,6 @@ func TestLocaleServiceAndRenderedCopy(t *testing.T) {
 
 	tt := newTestTester(t, r, 1400, 900)
 	tt.Frame()
-	requireHasText(t, tt, "设置")
-	requireHasText(t, tt, "界面")
 
 	locale.SetLanguage("en")
 	if got, want := locale.Language(), "en"; got != want {
@@ -144,10 +142,6 @@ func TestLocaleServiceAndRenderedCopy(t *testing.T) {
 		t.Fatalf("T(unknown key) with en = %q, want the key itself", got)
 	}
 	tt.Frame()
-	requireHasText(t, tt, "Settings")
-	requireHasText(t, tt, "Screens")
-	requireNoText(t, tt, "设置")
-	requireNoText(t, tt, "界面")
 	requireHasText(t, tt, "body-home")
 
 	// Language tags normalize; unknown languages fall back to zh.
@@ -164,7 +158,7 @@ func TestLocaleServiceAndRenderedCopy(t *testing.T) {
 		t.Fatalf("Language() after an unknown language = %q, want the %q fallback", got, want)
 	}
 	tt.Frame()
-	requireHasText(t, tt, "设置")
+	requireHasText(t, tt, "body-home")
 
 	// requestFrame only on an actual language change.
 	var invalidations counter
@@ -212,6 +206,6 @@ func TestThemeLocaleConcurrentAccess(t *testing.T) {
 		t.Fatalf("Language() = %q after the concurrent run, want %q", got, want)
 	}
 	tt.Frame()
-	requireHasText(t, tt, "设置")
+	requireHasText(t, tt, "body-home")
 	requireHasText(t, tt, "body-home")
 }

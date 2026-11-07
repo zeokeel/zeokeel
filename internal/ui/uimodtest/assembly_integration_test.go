@@ -63,7 +63,7 @@ func TestDesktopProductAssemblyShowsAllDemoModules(t *testing.T) {
 	defer func() { _ = loader.Close() }()
 
 	// Every demo module is Active in the real desktop product.
-	for _, entryID := range []string{"appinfo", "ui", "home", "toolcards", "about", "sidebar", "session", "settings", "approval"} {
+	for _, entryID := range []string{"appinfo", "ui", "home", "toolcards", "about", "sidebar", "session", "settings", "approval", "rightpanel"} {
 		instance, ok := loader.Instance(entryID)
 		if !ok {
 			t.Fatalf("desktop assembly has no instance %q; instances = %v", entryID, instanceIDs(loader))
@@ -74,12 +74,11 @@ func TestDesktopProductAssemblyShowsAllDemoModules(t *testing.T) {
 	}
 
 	tester := ui.NewTester(uiRoot.View, 1200, 800)
-	// Home screen + toolcards demo card + the demo sidebar/session modules.
+	// Home screen + the brand sidebar controls.
 	for _, want := range []string{
 		"首页",
 		"新对话",
-		"工具调用: demo",
-		"示例工具调用：由 ui/toolcards 模块渲染",
+		"开始新对话",
 	} {
 		if !tester.HasText(want) {
 			t.Fatalf("desktop frame does not show %q; texts = %v", want, tester.Texts())
@@ -103,7 +102,7 @@ func TestDesktopProductAssemblyShowsAllDemoModules(t *testing.T) {
 		t.Fatalf("loader.Close: %v", err)
 	}
 	tester.Frame()
-	if tester.HasText("工具调用: demo") {
+	if tester.HasText("开始新对话") {
 		t.Fatalf("module contributions survived loader.Close; texts = %v", tester.Texts())
 	}
 }

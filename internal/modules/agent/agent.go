@@ -142,7 +142,10 @@ type service struct {
 	providerFactory func(contracts.ChatConfig) (rig.Provider, error)
 }
 
-var _ contracts.ChatService = (*service)(nil)
+var (
+	_ contracts.ChatService    = (*service)(nil)
+	_ contracts.SessionRenamer = (*service)(nil)
+)
 
 // sessionState is the mutable per-session state.
 type sessionState struct {
@@ -295,6 +298,32 @@ func (s *service) configLocked() contracts.ChatConfig {
 		MaxIterations: s.cfg.MaxIterations,
 		ContextBudget: s.cfg.ContextBudget,
 	}
+}
+
+// RenameSession updates a session's display title in the read model and, when a
+// store is wired, in the durable session row.
+func (s *service) RenameSession(sessionID, title string) error {
+	title = truncateTitle(strings.TrimSpace(title))
+	if title == "" {
+		return errors.New("agent: session title must not be empty")
+	}
+	s.mu.Lock()
+	state, ok := s.sessions[sessionID]
+	if !ok {
+		s.mu.Unlock()
+		return fmt.Errorf("agent: unknown chat session %q", sessionID)
+	}
+	state.title = title
+	state.updatedAt = time.Now()
+	s.mu.Unlock()
+	if s.store != nil {
+		if err := s.store.RenameSession(context.Background(), sessionID, title); err != nil {
+			s.logger.Printf("[agent] rename session %s: %v", sessionID, err)
+			return err
+		}
+	}
+	s.notify(sessionID)
+	return nil
 }
 
 // --- ChatService: sessions -------------------------------------------------

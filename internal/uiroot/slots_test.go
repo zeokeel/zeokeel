@@ -45,10 +45,14 @@ func TestReservedSlotsAppearInHostRegions(t *testing.T) {
 	tt := newTestTester(t, r, 1600, 1000)
 	tt.Frame()
 
-	// Sidebar region: primary actions, screens, nav slot, tree, footer.
-	requireTextBefore(t, tt, "ZeoKeelTest", "sidebar-primary", "界面", "首页", "sidebar-nav-a", "sidebar-nav-b", "sidebar-tree", "sidebar-footer")
-	// Top bar region: brand contributions, center/actions slots, settings entry.
-	requireTextBefore(t, tt, "brand-mark", "topbar-center", "topbar-actions", "设置")
+	// Sidebar region: brand row, primary actions, nav slot, tree, footer. The
+	// destination rows are module contributions now, so the host paints no
+	// screen list ("界面"/"首页") of its own.
+	requireTextBefore(t, tt, "ZeoKeelTest", "sidebar-primary", "sidebar-nav-a", "sidebar-nav-b", "sidebar-tree", "sidebar-footer")
+	// Top-bar slots stay part of the host surface but are only drawn when a
+	// module uses them; with no contribution the frame has no global bar.
+	requireNoText(t, tt, "brand-mark")
+	requireNoText(t, tt, "topbar-center")
 	// Screen region: header, actions, body, the module's trajectory bar, footer.
 	requireTextBefore(t, tt, "screen-header", "screen-actions", "screen-body", "traj-bar", "screen-footer")
 	// Overlay region is painted after the window content.
@@ -61,11 +65,9 @@ func TestReservedSlotsAppearInHostRegions(t *testing.T) {
 	// Region geometry: the sidebar is a left column, the top bar sits above the
 	// screen, and the screen header/body/footer stack in that order.
 	requireRegionLeftOf(t, tt, "sidebar-nav-a", "screen-header")
-	requireRegionAbove(t, tt, "brand-mark", "screen-header")
 	requireRegionAbove(t, tt, "screen-header", "screen-body")
 	requireRegionAbove(t, tt, "screen-body", "traj-bar")
 	requireRegionAbove(t, tt, "traj-bar", "screen-footer")
-	requireRegionLeftOf(t, tt, "topbar-center", "topbar-actions")
 
 	for _, text := range []string{"sidebar-primary", "sidebar-tree", "sidebar-footer"} {
 		rect, ok := tt.Find(text)
@@ -76,7 +78,7 @@ func TestReservedSlotsAppearInHostRegions(t *testing.T) {
 			t.Fatalf("%q is not inside the 280 DIP sidebar: x=%v w=%v", text, rect.X, rect.W)
 		}
 	}
-	for _, text := range []string{"brand-mark", "screen-header", "screen-body"} {
+	for _, text := range []string{"screen-header", "screen-body"} {
 		rect, ok := tt.Find(text)
 		if !ok {
 			t.Fatalf("frame does not show screen-region text %q", text)

@@ -741,3 +741,141 @@ func TestComposerEnterSends(t *testing.T) {
 	// The fake marks the session running and emits; the composer shows Stop.
 	h.assertTexts(tester, "回车发送的消息", "正在生成回复…", "停止")
 }
+
+// --- P2: composer slash commands and the right inspection panel -------------
+
+// registerTestCommands registers one enabled and one disabled command on the
+// harness runtime and returns the enabled command's run counter.
+func registerTestCommands(t *testing.T, h *harness, run func()) {
+	t.Helper()
+	unregister, err := h.ui.Runtime().RegisterCommand(contracts.CommandSpec{
+		ID:    "test.settings",
+		Title: "打开偏好设置",
+		Hint:  "打开设置面板",
+		Order: 10,
+		Run:   func() error { run(); return nil },
+	})
+	if err != nil {
+		t.Fatalf("register command: %v", err)
+	}
+	t.Cleanup(unregister)
+	disabled, err := h.ui.Runtime().RegisterCommand(contracts.CommandSpec{
+		ID:      "test.disabled",
+		Title:   "已禁用的命令",
+		Hint:    "不应出现",
+		Order:   20,
+		Enabled: func() bool { return false },
+		Run:     func() error { return nil },
+	})
+	if err != nil {
+		t.Fatalf("register disabled command: %v", err)
+	}
+	t.Cleanup(disabled)
+}
+
+// focusComposer focuses the native composer TextArea the same way the existing
+// composer tests do.
+func focusComposer(t *testing.T, tester *ui.Tester) {
+	t.Helper()
+	sendRect, ok := tester.Find("发送")
+	if !ok {
+		t.Fatalf("send control missing; texts = %v", tester.Texts())
+	}
+	tester.ClickAt(sendRect.X-120, sendRect.Y-50)
+	tester.Frame()
+	if !tester.Focused("输入消息…") {
+		t.Fatalf("composer TextArea did not take focus; texts = %v", tester.Texts())
+	}
+}
+
+// TestSlashCommandMenu covers the suggestion panel: "/" shows the enabled
+// commands with hints, a disabled command is hidden and clicking a row clears
+// the draft and runs the command.
+func TestSlashCommandMenu(t *testing.T) {
+	chat := newFakeChat()
+	chat.addSession(contracts.ChatSession{ID: "sess-1", Title: "斜杠命令"}, true)
+	h := newHarness(t, chat)
+	runs := 0
+	registerTestCommands(t, h, func() { runs++ })
+	tester := h.tester()
+	h.assertNoTexts(tester, "打开设置面板", "没有匹配的命令")
+
+	focusComposer(t, tester)
+	tester.Type("/")
+	tester.Frame()
+
+	h.assertTexts(tester, "打开偏好设置", "打开设置面板")
+	h.assertNoTexts(tester, "已禁用的命令", "不应出现")
+
+	// The menu is above the composer card: its row hint sits above the send
+	// control.
+	menuRect, ok := tester.Find("打开设置面板")
+	if !ok {
+		t.Fatalf("slash hint missing; texts = %v", tester.Texts())
+	}
+	sendRect, ok := tester.Find("发送")
+	if !ok {
+		t.Fatalf("send control missing; texts = %v", tester.Texts())
+	}
+	if menuRect.Y >= sendRect.Y {
+		t.Fatalf("slash menu (y=%.1f) is not above the composer (y=%.1f)", menuRect.Y, sendRect.Y)
+	}
+
+	// Clicking the row's hint clicks the native button row itself.
+	h.click(tester, "打开设置面板")
+	if runs != 1 {
+		t.Fatalf("command run calls = %d, want 1", runs)
+	}
+	h.assertNoTexts(tester, "打开设置面板", "没有匹配的命令")
+
+	// The draft was cleared: Enter no longer submits anything.
+	tester.Key(0, ui.KeyEnter)
+	tester.Frame()
+	if sends := chat.sends(); len(sends) != 0 {
+		t.Fatalf("Send calls after a cleared draft = %v, want none", sends)
+	}
+}
+
+// TestSlashCommandQueryFiltering covers query matching, the no-match copy and
+// that Enter still submits a slash draft without a selection.
+func TestSlashCommandQueryFiltering(t *testing.T) {
+	t.Run("query matches title", func(t *testing.T) {
+		chat := newFakeChat()
+		chat.addSession(contracts.ChatSession{ID: "sess-1", Title: "命令过滤"}, true)
+		h := newHarness(t, chat)
+		registerTestCommands(t, h, func() {})
+		tester := h.tester()
+		focusComposer(t, tester)
+
+		tester.Type("/设置")
+		tester.Frame()
+		h.assertTexts(tester, "打开偏好设置", "打开设置面板")
+		h.assertNoTexts(tester, "已禁用的命令", "没有匹配的命令")
+	})
+
+	t.Run("no match and Enter sends", func(t *testing.T) {
+		chat := newFakeChat()
+		chat.addSession(contracts.ChatSession{ID: "sess-1", Title: "命令过滤"}, true)
+		h := newHarness(t, chat)
+		registerTestCommands(t, h, func() {})
+		tester := h.tester()
+		focusComposer(t, tester)
+
+		tester.Type("/xyz")
+		tester.Frame()
+		h.assertTexts(tester, "没有匹配的命令")
+		h.assertNoTexts(tester, "打开设置面板")
+		if !tester.Focused("输入消息…") {
+			t.Fatalf("composer lost focus after the slash menu appeared; texts=%v", tester.Texts())
+		}
+
+		// Enter must keep sending the draft verbatim even while the menu is
+		// open without a selection (P2 keeps the existing send semantics).
+		tester.Key(0, ui.KeyEnter)
+		tester.Frame()
+		sends := chat.sends()
+		if len(sends) != 1 || sends[0].prompt != "/xyz" {
+			t.Fatalf("Send calls = %v, want the slash draft sent", sends)
+		}
+	})
+}

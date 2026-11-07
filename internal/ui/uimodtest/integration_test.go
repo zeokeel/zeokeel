@@ -32,10 +32,8 @@ func TestHomeRendersInjectionPointRegions(t *testing.T) {
 	}
 
 	tester := h.tester()
-	h.assertTexts(tester, "首页", "编译期模块化的桌面 AI agent。",
-		"这是 home 的默认 Hero 空态。", "最近会话", "工具卡", "打开设置")
-	// With no renderer module active, home shows its own demo-call empty state.
-	h.assertTexts(tester, "还没有 demo 工具卡渲染器（由 ui/toolcards 模块提供）。")
+	h.assertTexts(tester, "编译期模块化的桌面 AI agent。",
+		"这是 home 的默认 Hero 空态。", "向 ZeoKeel 提问…", "开始新对话")
 
 	// A third-party contribution to home.hero replaces the module's default
 	// hero; home is not edited for this.
@@ -58,21 +56,24 @@ func TestHomeRendersInjectionPointRegions(t *testing.T) {
 	h.assertTexts(tester, "这是 home 的默认 Hero 空态。") // default hero is back
 }
 
-// TestWelcomeExtendsTopBarAndHomeHero is the "new module, no host change" proof:
-// ui/welcome is activated on top of the existing product and its contributions
-// appear in the host top bar and inside home's hero region; disposing it
-// removes both again.
-func TestWelcomeExtendsTopBarAndHomeHero(t *testing.T) {
+// TestWelcomeExtendsHomeHero is the "new module, no host change" proof:
+// ui/welcome is activated on top of the existing product and its hero
+// contribution replaces home's default; disposing it removes it again. The
+// welcome module also registers a top-bar part, which stays in the host's slot
+// surface (the host only draws it when a window chrome layer uses it).
+func TestWelcomeExtendsHomeHero(t *testing.T) {
 	h := newHarness(t)
 	activate(t, h.ctx, home.Module(), home.Config{})
 	tester := h.tester()
-	h.assertNoTexts(tester, "via ui/welcome", "欢迎使用 ZeoKeel")
+	h.assertNoTexts(tester, "欢迎使用 ZeoKeel")
 
 	welcomeFiber := activate(t, h.ctx, welcome.Module(), welcome.Config{})
 	tester.Frame()
-	h.assertTexts(tester, "via ui/welcome", "欢迎使用 ZeoKeel",
-		"这是一个独立编译的 UI 模块，通过注入点出现在宿主中。",
-		"复制版本") // command rendered by the host's command surface
+	h.assertTexts(tester, "欢迎使用 ZeoKeel",
+		"这是一个独立编译的 UI 模块，通过注入点出现在宿主中。")
+	if slots := h.ui.Runtime().Slots(); !containsString(slots, contracts.SlotTopBarCenter) {
+		t.Fatalf("welcome's top-bar part is not registered: %v", slots)
+	}
 
 	// No host or home edit was needed for any of the above. Disposing the
 	// module unwinds the contributions through its kernel effects.
@@ -80,22 +81,44 @@ func TestWelcomeExtendsTopBarAndHomeHero(t *testing.T) {
 		t.Fatalf("dispose welcome: %v", err)
 	}
 	tester.Frame()
-	h.assertNoTexts(tester, "via ui/welcome", "欢迎使用 ZeoKeel")
+	h.assertNoTexts(tester, "欢迎使用 ZeoKeel")
 	h.assertTexts(tester, "编译期模块化的桌面 AI agent。") // home's own hero fallback
 }
 
-// TestToolcardsRenderDemoCall proves the tool-card injection point: home always
-// renders its example call through UIRuntime.RenderTool, and a tool-card module
-// activated later starts decorating it.
+func containsString(values []string, want string) bool {
+	for _, value := range values {
+		if value == want {
+			return true
+		}
+	}
+	return false
+}
+
+// TestToolcardsRenderDemoCall proves the tool-card injection point through a
+// minimal screen: UIRuntime.RenderTool falls back to an empty state until the
+// tool-card module is active, and the module's renderer takes over afterwards.
 func TestToolcardsRenderDemoCall(t *testing.T) {
 	h := newHarness(t)
-	activate(t, h.ctx, home.Module(), home.Config{})
+	call := contracts.ToolCall{ID: "demo-1", Name: "demo", Status: "ok",
+		Summary: "示例工具调用：由 ui/toolcards 模块渲染"}
+	unregister, err := h.ui.Runtime().RegisterScreen(contracts.ScreenSpec{
+		ID: "tool-demo", Title: "工具卡", Order: 10,
+		Build: func(c *ui.Context) {
+			if !h.ui.Runtime().RenderTool(c, call) {
+				ui.Text(c, "还没有 demo 工具卡渲染器（由 ui/toolcards 模块提供）。")
+			}
+		},
+	})
+	if err != nil {
+		t.Fatalf("register tool demo screen: %v", err)
+	}
+	defer unregister()
 	tester := h.tester()
 	h.assertTexts(tester, "还没有 demo 工具卡渲染器（由 ui/toolcards 模块提供）。")
 
 	toolcardsFiber := activate(t, h.ctx, toolcards.Module(), toolcards.Config{})
 	tester.Frame()
-	h.assertTexts(tester, "工具调用: demo", "示例工具调用：由 ui/toolcards 模块渲染", "demo-1", "ok")
+	h.assertTexts(tester, "示例工具调用：由 ui/toolcards 模块渲染")
 	h.assertNoTexts(tester, "还没有 demo 工具卡渲染器（由 ui/toolcards 模块提供）。")
 
 	if err := toolcardsFiber.Dispose(); err != nil {

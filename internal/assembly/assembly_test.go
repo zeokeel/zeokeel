@@ -144,12 +144,13 @@ func TestProductsAndEntries(t *testing.T) {
 			t.Fatalf("desktop root %d = %q, want %q", index, root.Module, wantRoots[index])
 		}
 	}
-	if len(desktop[6].Children) != 7 {
-		t.Fatalf("UI group children = %d, want 7 UI modules", len(desktop[6].Children))
+	if len(desktop[6].Children) != 8 {
+		t.Fatalf("UI group children = %d, want 8 UI modules", len(desktop[6].Children))
 	}
 	wantChildren := []string{
 		"zeokeel-ui/home", "zeokeel-ui/toolcards", "zeokeel-ui/about",
 		"zeokeel-ui/sidebar", "zeokeel-ui/session", "zeokeel-ui/settings", "zeokeel-ui/approval",
+		"zeokeel-ui/rightpanel",
 	}
 	for index, child := range desktop[6].Children {
 		if child.Module != wantChildren[index] {
@@ -192,14 +193,15 @@ func TestRegistryIsExplicit(t *testing.T) {
 		"zeokeel-ui/session",
 		"zeokeel-ui/settings",
 		"zeokeel-ui/approval",
+		"zeokeel-ui/rightpanel",
 		assembly.GroupModuleID,
 	} {
 		if !registry.Has(id) {
 			t.Fatalf("Registry() lacks module %q", id)
 		}
 	}
-	if got := len(registry.Modules()); got != 15 {
-		t.Fatalf("Registry() modules = %d, want 15", got)
+	if got := len(registry.Modules()); got != 16 {
+		t.Fatalf("Registry() modules = %d, want 16", got)
 	}
 }
 
@@ -231,12 +233,12 @@ func TestDesktopAssemblyLoadsAndUnwinds(t *testing.T) {
 	// approvals provider, the agent consumer and the UI modules settle in
 	// dependency order.
 	instances := loader.Instances()
-	if len(instances) != 14 {
-		t.Fatalf("desktop instances = %d, want 14", len(instances))
+	if len(instances) != 15 {
+		t.Fatalf("desktop instances = %d, want 15", len(instances))
 	}
 	wantIDs := []string{
 		"appinfo", "store", "approvals", "toolkit", "hosttools", "agent", "ui",
-		"home", "toolcards", "about", "sidebar", "session", "settings", "approval",
+		"home", "toolcards", "about", "sidebar", "session", "settings", "approval", "rightpanel",
 	}
 	gotIDs := make([]string, len(instances))
 	for index, instance := range instances {

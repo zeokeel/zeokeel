@@ -79,9 +79,18 @@ go test ./...
   native Select 界面语言，写 `ui.theme.dark`/`ui.language` 并立即生效）；模型页新增 DeepSeek/OpenAI/
   Ollama 快速预设（native Button 填 draft，保存生效）。截图：`docs/screenshots/p2-home.png`、
   `p2-appearance.png`
+- ✅ P2（第二批，按老 UI 布局/功能对齐）：
+  - 宿主布局改为老结构：品牌侧栏 → 新对话 → 首页导航 → 会话区（搜索/会话行/重命名/删除）→ footer；
+    去掉自创的全局顶栏，屏幕自己拥有 header；右侧检查栏为**窗口级 docked 面板**（内容列右上角开关，
+    老 UI 的 right sidebar 位置），跨屏保持
+  - 侧栏会话操作：native SearchField 搜索、native Modal 重命名（SessionRenamer）、native AlertDialog
+    删除确认
+  - composer slash 命令菜单：读 `UIRuntime.Commands()`，过滤/匹配/点击执行；命令注册表与未来命令面板共用
+  - 新增右侧检查面板模块 `zeokeel-ui/rightpanel`（概览/工具/模型，含 API key 打码），由宿主 docked 渲染
+  - Home 简化为老结构：居中 hero（logo+wordmark）+ composer 入口，不再堆 demo 工具卡/设置按钮/最近会话
 - ⬜ 后续阶段见 [docs/PRODUCT-REBUILD-PLAN.md](docs/PRODUCT-REBUILD-PLAN.md)：
-  P2 剩余（composer slash 命令/@ 提及/附件与图片）→ P3 memory/skills/automation/插件/
-  workspace diff/搜索/fork/export → P4 ACP/热键/导入/更新/诊断
+  P2 剩余（composer 附件/图片/@ 提及、右侧栏 Files/Terminal/Log 页、会话操作上下文菜单）→
+  P3 memory/skills/automation/插件/workspace diff/搜索/fork/export → P4 ACP/热键/导入/更新/诊断
 - ✅ `make ci` 全绿；uiroot 29 个 headless 测试（覆盖率 99.3%）；desktop/headless 装配集成测试；
   Xvfb 真窗口冒烟通过
 - ⬜ 逐模块迁移（后端 20 + UI 16，见 `docs/research/kernel-split/05-ui-module-map.md`）：

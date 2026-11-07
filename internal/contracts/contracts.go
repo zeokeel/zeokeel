@@ -184,6 +184,10 @@ type UIRuntime interface {
 	Invalidate()
 	// Frame returns the number of frames built so far.
 	Frame() uint64
+	// Commands returns the registered command surface in sorted order. The
+	// host uses it for the palette; a composer menu (slash commands) reads the
+	// same list so both share one registry.
+	Commands() []CommandSpec
 
 	RegisterScreen(ScreenSpec) (unregister func(), err error)
 	RegisterSlotItem(SlotItem) (unregister func(), err error)

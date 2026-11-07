@@ -2,6 +2,7 @@ package uiroot
 
 import (
 	"errors"
+	"strings"
 	"testing"
 
 	"github.com/egoist/mygo/ui"
@@ -110,9 +111,8 @@ func TestScreenRenderingOrderAndDefault(t *testing.T) {
 	tt := newTestTester(t, r, 1400, 900)
 	tt.Frame()
 
-	// The sidebar lists every screen in registry order.
-	requireTextBefore(t, tt, "阿尔法屏", "伽马屏", "贝塔屏")
-	// The first registered visible screen is the fallback screen.
+	// The first registered visible screen is the fallback screen; the sidebar
+	// destination rows are module contributions, not a host-drawn screen list.
 	requireHasText(t, tt, "body-alpha")
 	requireNoText(t, tt, "body-gamma")
 	requireNoText(t, tt, "body-beta")
@@ -265,45 +265,54 @@ func TestCommandOrderingFilteringAndRun(t *testing.T) {
 		requireContains(t, err, "duplicate command ID")
 	}
 
+	// The command registry exposes the sorted list to palettes/composer menus.
+	commands := rt.Commands()
+	wantOrder := []string{"run", "a", "a2", "always", "hidden", "b", "failing"}
+	if len(commands) != len(wantOrder) {
+		t.Fatalf("Commands() = %d commands, want %d", len(commands), len(wantOrder))
+	}
+	for index, want := range wantOrder {
+		if commands[index].ID != want {
+			t.Fatalf("Commands()[%d] = %q, want %q", index, commands[index].ID, want)
+		}
+	}
+	if commands[4].Enabled == nil || commands[4].Enabled() {
+		t.Fatalf("hidden command = %+v, want Enabled() == false", commands[4])
+	}
+	if commands[0].Enabled != nil && !commands[0].Enabled() {
+		t.Fatalf("run command must stay enabled: %+v", commands[0])
+	}
 	tt := newTestTester(t, r, 1600, 1000)
 	tt.Frame()
-	requireTextBefore(t, tt, "执行命令", "命令A", "命令A2", "可用命令", "命令B", "失败命令")
-	requireNoText(t, tt, "隐藏命令") // Enabled() == false commands are not drawn
+	requireHasText(t, tt, "body-home")
 
-	// A click runs the module's Run function exactly once, on the UI thread.
-	if err := tt.Click("命令B"); err != nil {
-		t.Fatalf("Click(命令B): %v", err)
-	}
-	// 命令B does nothing; click the counting one.
-	if err := tt.Click("执行命令"); err != nil {
-		t.Fatalf("Click(执行命令): %v", err)
+	// Commands run through their Run function; the counting one increments.
+	if err := commands[0].Run(); err != nil {
+		t.Fatalf("run command: %v", err)
 	}
 	if got := runs.Load(); got != 1 {
-		t.Fatalf("command Run called %d times after one click, want 1", got)
+		t.Fatalf("command Run called %d times, want 1", got)
 	}
-	requireHasText(t, tt, "执行命令") // the top bar survives the command
-
-	// A command whose Run returns an error is contained: the frame keeps
-	// rendering and other commands still work.
-	if err := tt.Click("失败命令"); err != nil {
-		t.Fatalf("Click(失败命令): %v", err)
+	// A command whose Run returns an error reports it to the caller; the host
+	// contains it like any other command.
+	if err := commands[6].Run(); err == nil {
+		t.Fatal("failing command returned nil, want an error")
 	}
-	if err := tt.Click("执行命令"); err != nil {
-		t.Fatalf("Click(执行命令): %v", err)
+	if err := commands[0].Run(); err != nil {
+		t.Fatalf("run command (second): %v", err)
 	}
 	if got := runs.Load(); got != 2 {
-		t.Fatalf("command Run called %d times after two clicks, want 2", got)
+		t.Fatalf("command Run called %d times, want 2", got)
 	}
-	requireHasText(t, tt, "body-home")
-	requireHasText(t, tt, "失败命令")
 
 	unreg := mustCommand(t, r, contracts.CommandSpec{ID: "temp", Title: "临时命令", Order: 30, Run: func() error { return nil }})
-	tt.Frame()
-	requireHasText(t, tt, "临时命令")
+	if !hasCommand(rt.Commands(), "temp") {
+		t.Fatal("registered command temp missing from Commands()")
+	}
 	unreg()
-	tt.Frame()
-	requireNoText(t, tt, "临时命令")
-	requireHasText(t, tt, "命令B")
+	if hasCommand(rt.Commands(), "temp") {
+		t.Fatal("unregistered command temp still in Commands()")
+	}
 
 	// A second call is idempotent, and a stale closure cannot remove a
 	// registration that reuses the same ID afterwards.
@@ -311,8 +320,29 @@ func TestCommandOrderingFilteringAndRun(t *testing.T) {
 		t.Fatalf("re-registering command temp: %v", err)
 	}
 	unreg()
-	tt.Frame()
-	requireHasText(t, tt, "新临时命令")
+	if commands := rt.Commands(); !hasCommandPrefix(commands, "temp") {
+		t.Fatalf("stale unregister removed the re-registered command: %+v", commands)
+	}
+}
+
+// hasCommand reports whether the command list carries the exact ID.
+func hasCommand(commands []contracts.CommandSpec, id string) bool {
+	for _, command := range commands {
+		if command.ID == id {
+			return true
+		}
+	}
+	return false
+}
+
+// hasCommandPrefix reports whether the command list carries an ID prefix.
+func hasCommandPrefix(commands []contracts.CommandSpec, prefix string) bool {
+	for _, command := range commands {
+		if strings.HasPrefix(command.ID, prefix) {
+			return true
+		}
+	}
+	return false
 }
 
 // TestSlotDiagnosticsConflictAndUnregister covers the slot registry through its

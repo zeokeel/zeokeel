@@ -103,6 +103,11 @@
           "config": {
             "title": "需要审批"
           }
+        },
+        {
+          "id": "rightpanel",
+          "module": "zeokeel-ui/rightpanel",
+          "config": {}
         }
       ]
     }

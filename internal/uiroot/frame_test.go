@@ -191,10 +191,10 @@ func TestSettingsSurface(t *testing.T) {
 	}
 }
 
-// TestSettingsEntryInTopBarAndEscapeClose covers the host's own settings entry:
-// the top bar button toggles the surface, and Escape dismisses it (the Modal
-// reports its open flag back to the host navigator).
-func TestSettingsEntryInTopBarAndEscapeClose(t *testing.T) {
+// TestSettingsSurfaceEscapeClose covers the settings surface: a module footer
+// action (or a command) opens it through the navigator, and Escape dismisses it
+// (the Modal reports its open flag back to the host navigator).
+func TestSettingsSurfaceEscapeClose(t *testing.T) {
 	r := newTestRoot(t)
 	mustScreen(t, r, textScreen("home", "首页", "body-home", 10))
 	mustPage(t, r, contracts.SettingsPageSpec{ID: "appearance", Section: "general", Title: "外观设置", Order: 10,
@@ -205,13 +205,12 @@ func TestSettingsEntryInTopBarAndEscapeClose(t *testing.T) {
 	tt.Frame()
 	requireNoText(t, tt, "外观设置")
 
-	// The settings button lives in the top bar; clicking it opens the surface.
-	if err := tt.Click("设置"); err != nil {
-		t.Fatalf("Click(设置): %v", err)
-	}
+	// The settings entry is a module contribution (the sidebar footer); the
+	// navigator opens the surface, exactly as that button does.
+	nav.ToggleSettings()
 	tt.Frame()
 	if !nav.SettingsOpen() {
-		t.Fatal("the top bar settings button did not open the settings surface")
+		t.Fatal("the navigator did not open the settings surface")
 	}
 	requireHasText(t, tt, "外观设置")
 
@@ -308,8 +307,6 @@ func TestScreenBuildPanicIsContained(t *testing.T) {
 	tt.Frame()
 	// The shell still renders; only the broken screen body is missing.
 	requireHasText(t, tt, "ZeoKeelTest")
-	requireHasText(t, tt, "坏屏")
-	requireHasText(t, tt, "好屏")
 	requireNoText(t, tt, "body-good")
 
 	if err := r.Navigator().Push("good"); err != nil {
