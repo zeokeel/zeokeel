@@ -149,6 +149,34 @@ func TestP1ApprovalToolsAndPersistence(t *testing.T) {
 		t.Fatalf("file preview missing; texts = %v", tester.Texts())
 	}
 	uiRoot.SetRightPanelOpen(false)
+	if err := tester.Click("对话"); err != nil {
+		t.Fatalf("click chat tab: %v; texts = %v", err, tester.Texts())
+	}
+	tester.Frame()
+
+	// The composer's @-mention menu lists workspace files; choosing one writes
+	// the reference into the draft and the prompt carries it to the agent.
+	if sendRect, ok := tester.Find("发送"); ok {
+		tester.ClickAt(sendRect.X-120, sendRect.Y-50)
+		tester.Frame()
+		tester.Type("@REA")
+		tester.Frame()
+		if !tester.HasText("/README.md") {
+			t.Fatalf("mention menu missing workspace file; texts = %v", tester.Texts())
+		}
+		if err := tester.Click("/README.md"); err != nil {
+			t.Fatalf("click mention: %v; texts = %v", err, tester.Texts())
+		}
+		tester.Frame()
+		if err := tester.Click("发送"); err != nil {
+			t.Fatalf("send mention: %v; texts = %v", err, tester.Texts())
+		}
+		waitIdle(t, chat, sessionID, 10*time.Second)
+		tester.Frame()
+		if !tester.HasText("@README.md") {
+			t.Fatalf("sent prompt does not show the mention; texts = %v", tester.Texts())
+		}
+	}
 
 	// The durable memory backend is wired into the product: entries persist and
 	// the session Memory tab renders them.

@@ -23,6 +23,7 @@ const (
 	composerWidth    float32 = 868
 	rightPanelWidth  float32 = 300
 	maxSlashCommands         = 8
+	maxMentionFiles          = 8
 )
 
 // Tab indexes used by the native ui.Tabs control; they match the state field.
@@ -603,6 +604,14 @@ func buildComposer(
 	var input ui.Element
 
 	ui.Column(c).FillWidth().PaddingY(th.Space(2)).AlignItems(ui.Center).Children(func() {
+		// "@" mentions reference files of the current workspace (the old
+		// composer's file mentions); the suggestion panel sits above the
+		// composer exactly like the slash menu.
+		if workspace, ok := st.ctx.Get(contracts.KeyWorkspace); ok {
+			if query, tokenStart, active := mentionQuery(st.draft); active {
+				buildMentionMenu(c, t, runtime, workspace, st, query, tokenStart)
+			}
+		}
 		if query, active := slashQuery(st.draft); active {
 			buildSlashMenu(c, t, runtime, st, query)
 		}
@@ -838,6 +847,88 @@ func buildSlashMenu(c *ui.Context, t *design.Tokens, runtime contracts.UIRuntime
 			})
 			if row.Clicked() {
 				executeSlashCommand(runtime, st, cmd)
+			}
+		}
+	})
+}
+
+// mentionQuery reports whether the composer's current token is an "@" mention
+// and returns the query after "@" plus the token's start offset in the draft.
+func mentionQuery(draft string) (query string, tokenStart int, ok bool) {
+	start := strings.LastIndexAny(draft, " \t\n") + 1
+	token := draft[start:]
+	if !strings.HasPrefix(token, "@") {
+		return "", 0, false
+	}
+	query = token[1:]
+	if strings.ContainsAny(query, " \t\n") {
+		return "", 0, false
+	}
+	return query, start, true
+}
+
+// buildMentionMenu is the composer's workspace-file suggestion panel: a brand
+// card listing the files the query matches, one native row each; choosing one
+// inserts "@path " into the draft.
+func buildMentionMenu(c *ui.Context, t *design.Tokens, runtime contracts.UIRuntime,
+	workspace contracts.WorkspaceService, st *state, query string, tokenStart int) {
+	ctx := context.Background()
+	var (
+		entries []contracts.FileEntry
+		loadErr error
+	)
+	if strings.TrimSpace(query) == "" {
+		entries, loadErr = workspace.Files(ctx, "")
+	} else {
+		entries, loadErr = workspace.Search(ctx, query, maxMentionFiles)
+	}
+	if len(entries) > maxMentionFiles {
+		entries = entries[:maxMentionFiles]
+	}
+	menu := design.Apply(ui.Column(c), t.Panel()).
+		Width(composerWidth).MaxWidthPercent(94).Shrink(0).
+		Padding(design.Space2).Gap(design.Space1)
+	menu.Children(func() {
+		ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(design.Space2).Children(func() {
+			ui.Icon(c, icons.Search()).Size(design.Space3, design.Space3).
+				TextColor(t.LabelTertiary)
+			design.Apply(ui.Text(c, "工作区文件"), t.TextMuted(design.TypeXXS)).Grow(1)
+			design.Apply(ui.Text(c, "@ 引用文件"), t.TextMuted(design.TypeXXXS))
+		})
+		switch {
+		case loadErr != nil:
+			design.Apply(ui.Text(c, "读取工作区失败："+loadErr.Error()), t.TextMuted(design.TypeXS)).
+				TextColor(t.DangerText).PaddingX(design.Space2)
+			return
+		case len(entries) == 0:
+			design.Apply(ui.Text(c, "没有匹配的文件"), t.TextMuted(design.TypeXS)).
+				PaddingX(design.Space2).PaddingY(design.Space1)
+			return
+		}
+		for _, entry := range entries {
+			entry := entry
+			row := ui.ButtonBase(c).FillWidth().AlignItems(ui.Center).
+				Gap(design.Space2).Padding(design.Space1, design.Space2).
+				Radius(design.RadiusSM)
+			if row.Hovered() {
+				row.Background(t.BgHover)
+			}
+			row.Children(func() {
+				icon := icons.Globe()
+				if entry.Dir {
+					icon = icons.Folder()
+				}
+				ui.Icon(c, icon).Size(design.Space3, design.Space3).
+					TextColor(t.LabelSecondary)
+				design.Apply(ui.Text(c, "/"+entry.Path), t.Font(design.TypeXS)).
+					TextColor(t.LabelPrimary).Grow(1).MaxLines(1).Ellipsis("…")
+				if !entry.Dir {
+					design.Apply(ui.Text(c, formatAttachmentSize(int(entry.Size))), t.TextMuted(design.TypeXXXS))
+				}
+			})
+			if row.Clicked() {
+				st.draft = st.draft[:tokenStart] + "@" + entry.Path + " "
+				runtime.Invalidate()
 			}
 		}
 	})

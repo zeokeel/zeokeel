@@ -153,6 +153,16 @@ func main() {
 		fmt.Println("click README:", err)
 	}
 	a.render(outDir + "/p2-files-preview.png")
+	// Composer @-mention suggestions over the workspace.
+	if sendRect, ok := a.tester.Find("发送"); ok {
+		a.tester.ClickAt(sendRect.X-120, sendRect.Y-50)
+		a.tester.Frame()
+		a.tester.Type("@REA")
+		a.render(outDir + "/p2-mentions.png")
+		a.tester.Key(ui.Cmd, ui.KeyA)
+		a.tester.Key(0, ui.KeyBackspace)
+		a.render(outDir + "/p2-mentions.png")
+	}
 	if err := a.tester.Click("日志"); err != nil {
 		fmt.Println("click log tab:", err)
 	}

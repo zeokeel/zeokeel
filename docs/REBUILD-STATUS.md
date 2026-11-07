@@ -21,6 +21,10 @@
 - 右侧栏「文件」Tab：打开文件夹（mygo 原生 Directory picker）、目录进入/面包屑、文本/Markdown/图片预览、
   刷新与错误状态；E2E 覆盖工作区创建 + 列表 + 预览帧
 
+**P2 @ 提及（2026-11-07 晚）**
+- composer `@` 建议面板：读 WorkspaceService（空查询 Files / 非空 Search），native 行插入 `@path `；
+  E2E 覆盖真实 desktop assembly 的提及选择 → 发送 → 气泡文本
+
 **P2 附件/图片（2026-11-07 晚）**
 - contracts.Attachment / AttachmentSender / ChatMessage.Attachments；agent 图片→rig image part（data URL），
   非图片→文本 part（text/* 内容 ≤32KiB）；重启从 rig parts 恢复 chips

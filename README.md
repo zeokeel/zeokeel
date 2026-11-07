@@ -110,6 +110,8 @@ go test ./...
 - ✅ P3 工作区 + Files 检查器：`zeokeel/workspace`（JSON 注册表 + 沙箱文件树/Files/ReadFile/Search，
   symlink 逃逸防护、原子持久化）；右侧栏「文件」Tab：打开文件夹（native Directory picker）、目录浏览/
   面包屑、文本/Markdown/图片预览；截图 `p2-files.png`、`p2-files-preview.png`；desktop 17 / headless 8 实例
+- ✅ P2 @ 提及：composer 输入 `@` 弹出工作区文件建议（`WorkspaceService.Files/Search`，native 面板，
+  方向/文件图标 + 大小），选择后写入 `@path `；无工作区不显示、读取错误 DangerText；截图 `p2-mentions.png`
 - ⬜ 后续阶段见 [docs/PRODUCT-REBUILD-PLAN.md](docs/PRODUCT-REBUILD-PLAN.md)：
   P2 剩余（composer 附件/图片/@ 提及、右侧栏 Files/Terminal/Log 页、会话操作上下文菜单）→
   P3 memory/skills/automation/插件/workspace diff/搜索/fork/export → P4 ACP/热键/导入/更新/诊断
