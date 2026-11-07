@@ -31,6 +31,11 @@
       "config": {}
     },
     {
+      "id": "skills",
+      "module": "zeokeel/skills",
+      "config": {}
+    },
+    {
       "id": "memory",
       "module": "zeokeel/memory",
       "config": {}

@@ -120,6 +120,13 @@ type harness struct {
 
 func newHarness(t *testing.T, chat *fakeChat, store *fakeSettings, cfg settings.Config) *harness {
 	t.Helper()
+	return newHarnessWithSkills(t, chat, store, cfg, nil)
+}
+
+// newHarnessWithSkills is newHarness with an optional skills backend provided
+// as contracts.KeySkills (nil keeps the page's "技能后端未启用" empty state).
+func newHarnessWithSkills(t *testing.T, chat *fakeChat, store *fakeSettings, cfg settings.Config, skills contracts.SkillsService) *harness {
+	t.Helper()
 	uiRoot := uiroot.New(uiroot.Config{AppName: "ZeoKeel"})
 	ctx := cordis.Root()
 	t.Cleanup(func() { _ = ctx.DisposeAll() })
@@ -131,6 +138,9 @@ func newHarness(t *testing.T, chat *fakeChat, store *fakeSettings, cfg settings.
 	provide(t, ctx, contracts.KeyScreenLister, uiRoot.ScreenLister())
 	provide(t, ctx, contracts.KeySettings, contracts.SettingsService(store))
 	provide(t, ctx, contracts.KeyChat, contracts.ChatService(chat))
+	if skills != nil {
+		provide[contracts.SkillsService](t, ctx, contracts.KeySkills, skills)
+	}
 
 	h := &harness{t: t, ctx: ctx, uiRoot: uiRoot, settings: store, chat: chat}
 	h.fiber = activate(t, ctx, settings.Module(), cfg)

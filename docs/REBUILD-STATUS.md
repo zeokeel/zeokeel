@@ -21,6 +21,12 @@
 - 右侧栏「文件」Tab：打开文件夹（mygo 原生 Directory picker）、目录进入/面包屑、文本/Markdown/图片预览、
   刷新与错误状态；E2E 覆盖工作区创建 + 列表 + 预览帧
 
+**P3 技能（2026-11-08）**
+- `zeokeel/skills`：rig skill.FileStore 组合多根（config/dataDir/workspace，动态生效），List/Read + Roots；
+  body 去 frontmatter；toolkit skill 工具绑定持久 store
+- 设置「技能」页：roots 列表、技能卡（名称/描述/路径）、Collapsible markdown 预览、刷新/错误/空态；
+  E2E 覆盖工作区 SKILL.md 发现 + skill 工具 list + 设置页展开
+
 **P3 终端（2026-11-07 晚）**
 - `zeokeel/terminal`：运行器（workspace cwd、bash/sh/zsh/pwsh 探测与选择、CombinedOutput、退出码、
   timeout/ctx 取消、输出截断）；rightpanel「终端」Tab 全 native（cwd/shell/清空/输出/输入/运行/停止）；

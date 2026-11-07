@@ -139,7 +139,13 @@ func Module() *module.Descriptor[Config] {
 		}
 		tools = append(tools, schedule.Tools(nil)...)
 		tools = append(tools, worktree.Tools(policy)...)
-		tools = append(tools, skill.Tools(nil)...)
+		if skillStore, ok := ctx.Get(contracts.KeySkills); ok {
+			// The skills backend discovers SKILL.md files from the data dir and
+			// the current workspace; the skill tool lists/searches/loads them.
+			tools = append(tools, skill.Tools(skillStore)...)
+		} else {
+			tools = append(tools, skill.Tools(nil)...)
+		}
 		tools = append(tools, team.TaskTools(team.NewTaskManager())...)
 		if settingsService, ok := ctx.Get(contracts.KeySettings); ok {
 			tools = append(tools, settings.Tools(settingsService)...)

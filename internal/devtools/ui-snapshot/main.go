@@ -139,6 +139,14 @@ func main() {
 		[]byte("package main\n\nfunc main() {}\n"), 0o600); err != nil {
 		fail("write main.go", err)
 	}
+	skillDir := filepath.Join(workspaceRoot, "skills", "release-checklist")
+	if err := os.MkdirAll(skillDir, 0o700); err != nil {
+		fail("mkdir skill", err)
+	}
+	if err := os.WriteFile(filepath.Join(skillDir, "SKILL.md"),
+		[]byte("---\nname: release-checklist\ndescription: 发布前检查清单\n---\n# 发布检查\n\n- 跑测试\n- 更新 changelog\n"), 0o600); err != nil {
+		fail("write SKILL.md", err)
+	}
 	// Make the workspace a git repository with one uncommitted edit and one
 	// untracked file so the 变更 tab has content.
 	gitEnv := append(os.Environ(),
@@ -246,6 +254,15 @@ func main() {
 		fmt.Println("click appearance:", err)
 	}
 	a.render(outDir + "/p2-appearance.png")
+	if err := a.tester.Click("技能"); err != nil {
+		fmt.Println("click skills:", err)
+	}
+	a.render(outDir + "/p2-skills.png")
+	if err := a.tester.Click("查看内容"); err != nil {
+		fmt.Println("expand skill:", err)
+	}
+	a.tester.Advance(200 * time.Millisecond)
+	a.render(outDir + "/p2-skills-content.png")
 	if err := a.tester.Click("快捷键"); err != nil {
 		fmt.Println("click shortcuts:", err)
 	}

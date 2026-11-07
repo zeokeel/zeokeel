@@ -17,7 +17,9 @@ import (
 	"github.com/egoist/mygo/ui"
 	cordis "github.com/zeokeel/zeokeel-kernel"
 
+	rig "github.com/zeokeel/zeokeel-rig"
 	"github.com/zeokeel/zeokeel/internal/assembly"
+
 	"github.com/zeokeel/zeokeel/internal/contracts"
 	"github.com/zeokeel/zeokeel/internal/uiroot"
 )
@@ -122,6 +124,14 @@ func TestP1ApprovalToolsAndPersistence(t *testing.T) {
 	}
 	if err := os.MkdirAll(filepath.Join(workspaceRoot, "src"), 0o700); err != nil {
 		t.Fatalf("mkdir src: %v", err)
+	}
+	skillDir := filepath.Join(workspaceRoot, "skills", "release-checklist")
+	if err := os.MkdirAll(skillDir, 0o700); err != nil {
+		t.Fatalf("mkdir skill: %v", err)
+	}
+	skillBody := "---\nname: release-checklist\ndescription: 发布前检查清单\n---\n# 发布检查\n\n- 跑测试\n- 更新 changelog\n"
+	if err := os.WriteFile(filepath.Join(skillDir, "SKILL.md"), []byte(skillBody), 0o600); err != nil {
+		t.Fatalf("write SKILL.md: %v", err)
 	}
 	workspaces, err := root.Require(contracts.KeyWorkspace)
 	if err != nil {
@@ -229,6 +239,51 @@ func TestP1ApprovalToolsAndPersistence(t *testing.T) {
 			t.Fatalf("sent prompt does not show the mention; texts = %v", tester.Texts())
 		}
 	}
+
+	// Skills are discovered from the workspace and exposed both to the settings
+	// skills page and to the agent's skill tool through the toolkit.
+	skillsService, err := root.Require(contracts.KeySkills)
+	if err != nil {
+		t.Fatalf("require skills: %v", err)
+	}
+	skills, err := skillsService.List(context.Background())
+	if err != nil || len(skills) != 1 || skills[0].Name != "release-checklist" {
+		t.Fatalf("skills = %+v (err %v), want release-checklist", skills, err)
+	}
+	registry, ok := root.Get(contracts.KeyToolkit)
+	if !ok {
+		t.Fatal("toolkit registry missing")
+	}
+	result, err := registry.Invoke(context.Background(), rig.ToolCall{
+		Name: "skill", Arguments: `{"action":"list"}`,
+	})
+	if err != nil {
+		t.Fatalf("skill tool list: %v", err)
+	}
+	skillList := result.Content
+	if !containsText(skillList, "release-checklist") {
+		t.Fatalf("skill tool list = %q, want release-checklist", skillList)
+	}
+	uiRoot.Navigator().ToggleSettings()
+	tester.Frame()
+	if err := tester.Click("技能"); err != nil {
+		t.Fatalf("click skills page: %v; texts = %v", err, tester.Texts())
+	}
+	tester.Frame()
+	for _, want := range []string{"release-checklist", "发布前检查清单"} {
+		if !tester.HasText(want) {
+			t.Fatalf("skills page missing %q; texts = %v", want, tester.Texts())
+		}
+	}
+	if err := tester.Click("查看内容"); err != nil {
+		t.Fatalf("expand skill: %v; texts = %v", err, tester.Texts())
+	}
+	tester.Frame()
+	if !tester.HasText("发布检查") {
+		t.Fatalf("skill body missing; texts = %v", tester.Texts())
+	}
+	uiRoot.Navigator().CloseSettings()
+	tester.Frame()
 
 	// The durable memory backend is wired into the product: entries persist and
 	// the session Memory tab renders them.

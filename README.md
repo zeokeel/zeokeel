@@ -122,6 +122,10 @@ go test ./...
 - ✅ P3 终端：`zeokeel/terminal`（workspace root 为 cwd 的简单命令运行器，shell 探测/选择、timeout、
   输出截断、ctx 取消；无 PTY/持久 shell，与 old terminalPanel 一致）；右侧栏「终端」Tab：cwd/shell/清空、
   mono 输出、输入 + 运行/停止、退出码；截图 `p2-terminal.png`；desktop 18 / headless 9 实例
+- ✅ P3 技能：`zeokeel/skills`（rig `skill.FileStore` 多根发现：config dirs → dataDir/skills →
+  workspace/skills，动态 roots、frontmatter 解析、body 去 frontmatter）；toolkit 的 skill 工具改用该持久
+  store；设置「技能」页：roots、名称/描述/路径、Collapsible + markdown 预览、刷新/错误；截图
+  `p2-skills.png`、`p2-skills-content.png`；desktop 19 / headless 10 实例
 - ⬜ 后续阶段见 [docs/PRODUCT-REBUILD-PLAN.md](docs/PRODUCT-REBUILD-PLAN.md)：
   P2 剩余（composer 附件/图片/@ 提及、右侧栏 Files/Terminal/Log 页、会话操作上下文菜单）→
   P3 memory/skills/automation/插件/workspace diff/搜索/fork/export → P4 ACP/热键/导入/更新/诊断

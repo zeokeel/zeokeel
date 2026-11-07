@@ -1,5 +1,6 @@
-// Package settings contributes the model and appearance pages to the settings
-// surface, rebuilt with the ZeoKeel brand design system.
+// Package settings contributes the model, providers, appearance, skills and
+// shortcuts pages to the settings surface, rebuilt with the ZeoKeel brand design
+// system.
 //
 // It is a UI module like ui/about: a kernel Descriptor that requires the host UI
 // runtime, the settings store, the chat read model, the theme and the locale, and
@@ -51,6 +52,18 @@ const (
 	ShortcutsPageID = "shortcuts"
 	// ShortcutsPageOrder places the page after appearance.
 	ShortcutsPageOrder = 30
+
+	// SkillsPageID is the skills discovery/preview page.
+	SkillsPageID = "skills"
+	// SkillsPageSection is the settings sidebar section the skills page lives
+	// in. The host sorts pages by Section first, so it uses the same section as
+	// the model page: a new section like "工具" would sort before "模型" and
+	// become the default page, changing what opening Settings shows.
+	SkillsPageSection = PageSection
+	// SkillsPageOrder places the page between appearance and shortcuts.
+	SkillsPageOrder = 25
+	// SkillsPageTitle is the page title and heading.
+	SkillsPageTitle = "技能"
 )
 
 // shortcutRow is one line of the shortcut reference.
@@ -255,6 +268,7 @@ func Module() *module.Descriptor[Config] {
 
 		state := newState(chat, store)
 		appearance := &appearanceState{dark: theme.Dark(), language: locale.Language()}
+		skills := newSkillsState()
 
 		page := contracts.SettingsPageSpec{
 			ID:      PageID,
@@ -314,6 +328,21 @@ func Module() *module.Descriptor[Config] {
 			return err
 		}
 		if err := own(ctx, func() (func(), error) { return runtime.RegisterSettingsPage(providersPage) }); err != nil {
+			return err
+		}
+		skillsPage := contracts.SettingsPageSpec{
+			ID:      SkillsPageID,
+			Section: SkillsPageSection,
+			Title:   SkillsPageTitle,
+			Order:   SkillsPageOrder,
+			Build: func(c *ui.Context) {
+				// The skills backend is optional: it is looked up lazily so the
+				// settings surface still renders (with an empty state) when no
+				// skills module is part of the assembly.
+				buildSkillsPage(c, design.Of(c), ctx, skills)
+			},
+		}
+		if err := own(ctx, func() (func(), error) { return runtime.RegisterSettingsPage(skillsPage) }); err != nil {
 			return err
 		}
 		return own(ctx, func() (func(), error) { return runtime.RegisterSettingsPage(shortcutsPage) })
