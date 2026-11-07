@@ -439,6 +439,16 @@ func clearTextField(t *testing.T, tester *ui.Tester, label string) {
 }
 
 // clickLabel clicks a control by its accessible label or visible text.
+
+// openRowMenu opens the native popover menu of the only session row: the old
+// shell's inline row actions (rename/delete/activate).
+func openRowMenu(t *testing.T, tester *ui.Tester) {
+	t.Helper()
+	if err := tester.Click("⋯"); err != nil {
+		t.Fatalf("open row menu: %v; texts = %v", err, tester.Texts())
+	}
+	tester.Frame()
+}
 func clickLabel(t *testing.T, tester *ui.Tester, label string) {
 	t.Helper()
 	if err := tester.Click(label); err != nil {
@@ -505,8 +515,9 @@ func TestSidebarRenameFlow(t *testing.T) {
 	chat := &renamerChat{fakeChat: base}
 	h := newHarness(t, chat, sidebar.Config{})
 	tester := h.tester()
-	h.assertTexts(tester, "重命名", "删除")
+	h.assertTexts(tester, "⋯")
 
+	openRowMenu(t, tester)
 	clickLabel(t, tester, "重命名")
 	h.assertTexts(tester, "重命名会话", "会话标题", "保存", "取消")
 
@@ -537,6 +548,7 @@ func TestSidebarRenameCancelAndEmptyTitle(t *testing.T) {
 	tester := h.tester()
 
 	// Cancel closes without renaming.
+	openRowMenu(t, tester)
 	clickLabel(t, tester, "重命名")
 	clickLabel(t, tester, "取消")
 	h.assertNoTexts(tester, "重命名会话")
@@ -545,6 +557,7 @@ func TestSidebarRenameCancelAndEmptyTitle(t *testing.T) {
 	}
 
 	// An empty draft is rejected with an inline error, and the dialog stays open.
+	openRowMenu(t, tester)
 	clickLabel(t, tester, "重命名")
 	clearTextField(t, tester, "会话标题")
 	clickLabel(t, tester, "保存")
@@ -564,6 +577,7 @@ func TestSidebarRenameErrorShown(t *testing.T) {
 	chat.setRenameErr(errors.New("rename failed on disk"))
 	h := newHarness(t, chat, sidebar.Config{})
 	tester := h.tester()
+	openRowMenu(t, tester)
 	clickLabel(t, tester, "重命名")
 	clickLabel(t, tester, "保存")
 	h.assertTexts(tester, "rename failed on disk", "重命名会话")
@@ -577,25 +591,26 @@ func TestSidebarRenameHiddenWithoutRenamer(t *testing.T) {
 	}
 	h := newHarness(t, chat, sidebar.Config{})
 	tester := h.tester()
+	openRowMenu(t, tester)
 	h.assertTexts(tester, "删除")
 	h.assertNoTexts(tester, "重命名")
+
+	// Escape dismisses the popover menu again.
+	tester.Key(0, ui.KeyEscape)
+	tester.Frame()
+	h.assertNoTexts(tester, "删除")
 }
 
-func TestSidebarActionsHiddenWithoutActiveSession(t *testing.T) {
+func TestSidebarRowMenuWithoutActiveSession(t *testing.T) {
 	chat := &fakeChat{
 		sessions: []contracts.ChatSessionInfo{{ID: "s1", Title: "Not active"}},
 	}
 	h := newHarness(t, chat, sidebar.Config{})
 	tester := h.tester()
-	h.assertNoTexts(tester, "重命名", "删除")
-
-	// Activating a session (as a chat notification would) shows the actions.
-	if err := chat.SetActiveSession("s1"); err != nil {
-		t.Fatalf("SetActiveSession: %v", err)
-	}
-	chat.notify("s1")
-	tester.Frame()
-	h.assertTexts(tester, "删除")
+	// Row actions belong to the row (old shell), not to the active session.
+	openRowMenu(t, tester)
+	h.assertTexts(tester, "删除", "设为当前")
+	h.assertNoTexts(tester, "重命名")
 }
 
 func TestSidebarDeleteConfirmation(t *testing.T) {
@@ -605,9 +620,9 @@ func TestSidebarDeleteConfirmation(t *testing.T) {
 	}
 	h := newHarness(t, chat, sidebar.Config{})
 	tester := h.tester()
-	h.assertTexts(tester, "删除")
 
 	// Cancel closes the alert without deleting.
+	openRowMenu(t, tester)
 	h.click(tester, "删除")
 	h.assertTexts(tester, "删除会话", "取消")
 	if !strings.Contains(strings.Join(tester.Texts(), "\n"), "要删除的会话") {
@@ -620,7 +635,8 @@ func TestSidebarDeleteConfirmation(t *testing.T) {
 	}
 	h.assertNoTexts(tester, "删除会话")
 
-	// Confirm deletes the active session.
+	// Confirm deletes the session.
+	openRowMenu(t, tester)
 	h.click(tester, "删除")
 	h.click(tester, "删除")
 	if deleted := chat.deletedSessions(); len(deleted) != 1 || deleted[0] != "s1" {

@@ -91,6 +91,8 @@ go test ./...
     对照 old homeSetupCard）+ composer 入口，不再堆 demo 工具卡/设置按钮/最近会话
   - Composer 工具栏（对照 old composer_native）：模型 chip（打开模型设置）、`/` 命令入口、
     附件按钮（禁用占位，附件落 P2 剩余）
+  - 会话行的内联操作（对照 old workspaces.go）：每行 native PopoverMenuButton「⋯」提供
+    重命名/删除/设为当前；footer 只保留设置入口
 - ⬜ 后续阶段见 [docs/PRODUCT-REBUILD-PLAN.md](docs/PRODUCT-REBUILD-PLAN.md)：
   P2 剩余（composer 附件/图片/@ 提及、右侧栏 Files/Terminal/Log 页、会话操作上下文菜单）→
   P3 memory/skills/automation/插件/workspace diff/搜索/fork/export → P4 ACP/热键/导入/更新/诊断

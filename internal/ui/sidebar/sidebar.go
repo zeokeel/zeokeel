@@ -128,7 +128,7 @@ func Module() *module.Descriptor[Config] {
 			ID:    "sidebar.footer.actions",
 			Order: 10,
 			Build: func(c *ui.Context) {
-				buildFooter(c, design.Of(c), chat, renamer, nav, runtime, state, settingsLabel)
+				buildFooter(c, design.Of(c), chat, nav, runtime, state, settingsLabel)
 			},
 		}
 		renameDialog := contracts.SlotItem{
@@ -229,7 +229,7 @@ func buildSessionList(c *ui.Context, t *design.Tokens, chat contracts.ChatServic
 			}
 			active := chat.ActiveSession()
 			for _, info := range sessions {
-				buildSessionRow(c, t, chat, nav, runtime, info, info.ID == active)
+				buildSessionRow(c, t, chat, nav, runtime, state, info, info.ID == active)
 			}
 		})
 }
@@ -254,48 +254,73 @@ func filterSessions(sessions []contracts.ChatSessionInfo, query string) []contra
 // metrics (36 DIP, 8 DIP radius, hover/selected tint) with the accessible label
 // and the native click behavior.
 func buildSessionRow(c *ui.Context, t *design.Tokens, chat contracts.ChatService,
-	nav contracts.Navigator, runtime contracts.UIRuntime, session contracts.ChatSessionInfo, active bool) {
+	nav contracts.Navigator, runtime contracts.UIRuntime, state *paneState,
+	session contracts.ChatSessionInfo, active bool) {
 	label := sessionTitle(session)
-	row := ui.ButtonBase(c).FillWidth().Height(36).PaddingX(design.Space3).
-		Radius(design.RadiusSM).Label(label)
-	if active || row.Hovered() {
-		row = row.Background(t.BgHover)
-	}
-	row.Children(func() {
-		ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(design.Space2).Children(func() {
-			icon := icons.Message()
-			iconColor := t.LabelSecondary
-			if active {
-				icon = icons.NewChat()
-				iconColor = t.Accent
+	renamer, _ := chat.(contracts.SessionRenamer)
+	ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(design.Space1).Children(func() {
+		row := ui.ButtonBase(c).Grow(1).Height(36).PaddingX(design.Space3).
+			Radius(design.RadiusSM).Label(label)
+		if active || row.Hovered() {
+			row = row.Background(t.BgHover)
+		}
+		row.Children(func() {
+			ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(design.Space2).Children(func() {
+				icon := icons.Message()
+				iconColor := t.LabelSecondary
+				if active {
+					icon = icons.NewChat()
+					iconColor = t.Accent
+				}
+				ui.Icon(c, icon).Size(16, 16).TextColor(iconColor)
+				design.Apply(ui.Text(c, label), t.Text(design.TypeS)).
+					Grow(1).MaxLines(1).Ellipsis("…")
+				if active {
+					design.Apply(ui.Badge(c, "当前"), t.Badge())
+				}
+				if session.Running {
+					design.Apply(ui.Badge(c, "运行中"), t.Badge())
+				}
+			})
+		})
+		row.OnClick(func() {
+			_ = chat.SetActiveSession(session.ID)
+			// Queue the screen switch for the next frame: this frame's host-side
+			// native Sidebar reconciliation would otherwise restore the previously
+			// selected destination.
+			runtime.Post(func() { _ = nav.Push("session") })
+			runtime.Invalidate()
+		})
+		// The old shell composed inline row actions: a native popover menu on
+		// the row itself (rename/delete/activate) instead of footer buttons.
+		ui.PopoverMenuButton(c, "⋯", func(m *ui.Menu) {
+			if renamer != nil && m.Item("重命名").Chosen() {
+				state.renameOpen = true
+				state.renameErr = ""
+				state.renameTarget = session.ID
+				state.renameDraft = sessionTitleByID(chat, session.ID)
 			}
-			ui.Icon(c, icon).Size(16, 16).TextColor(iconColor)
-			design.Apply(ui.Text(c, label), t.Text(design.TypeS)).
-				Grow(1).MaxLines(1).Ellipsis("…")
-			if active {
-				design.Apply(ui.Badge(c, "当前"), t.Badge())
+			if m.Item("删除").Chosen() {
+				state.deleteOpen = true
+				state.deleteTarget = session.ID
+				state.deleteTitle = sessionTitle(session)
 			}
-			if session.Running {
-				design.Apply(ui.Badge(c, "运行中"), t.Badge())
+			if !active {
+				m.Separator()
+				if m.Item("设为当前").Chosen() {
+					_ = chat.SetActiveSession(session.ID)
+					runtime.Invalidate()
+				}
 			}
 		})
 	})
-	row.OnClick(func() {
-		_ = chat.SetActiveSession(session.ID)
-		// Queue the screen switch for the next frame: this frame's host-side
-		// native Sidebar reconciliation would otherwise restore the previously
-		// selected destination.
-		runtime.Post(func() { _ = nav.Push("session") })
-		runtime.Invalidate()
-	})
 }
 
-// buildFooter is the quiet sidebar footer: the native settings button and, when
-// a session is active, the low-key rename/delete actions. The delete
-// confirmation is a native AlertDialog rendered here; while it is open the rest
-// of the footer is hidden so only the dialog's buttons are in the frame.
+// buildFooter is the quiet sidebar footer from the old shell: the settings
+// entry, plus the window-level delete confirmation (session rename/delete live
+// on the row's native popover menu).
 func buildFooter(c *ui.Context, t *design.Tokens, chat contracts.ChatService,
-	renamer contracts.SessionRenamer, nav contracts.Navigator, runtime contracts.UIRuntime,
+	nav contracts.Navigator, runtime contracts.UIRuntime,
 	state *paneState, label string) {
 	if state.deleteOpen {
 		message := fmt.Sprintf("“%s”及其全部消息将被删除，此操作无法撤销。", firstNonEmpty(state.deleteTitle, "未命名会话"))
@@ -324,28 +349,6 @@ func buildFooter(c *ui.Context, t *design.Tokens, chat contracts.ChatService,
 				})
 				if settings.Clicked() {
 					nav.ToggleSettings()
-				}
-			})
-
-			active := chat.ActiveSession()
-			if active == "" {
-				return
-			}
-			ui.Row(c).FillWidth().Gap(design.Space1).Children(func() {
-				if renamer != nil {
-					rename := design.Apply(ui.Button(c, "重命名"), t.TextMuted(design.TypeXS))
-					if rename.Clicked() {
-						state.renameOpen = true
-						state.renameErr = ""
-						state.renameTarget = active
-						state.renameDraft = sessionTitleByID(chat, active)
-					}
-				}
-				del := design.Apply(ui.Button(c, "删除"), t.TextMuted(design.TypeXS))
-				if del.Clicked() {
-					state.deleteOpen = true
-					state.deleteTarget = active
-					state.deleteTitle = sessionTitleByID(chat, active)
 				}
 			})
 		})
