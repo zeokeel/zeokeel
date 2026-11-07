@@ -1598,3 +1598,345 @@ func TestWorkspaceFailuresAreLoggedNotFatal(t *testing.T) {
 		t.Fatalf("persist failure was not logged: %v", logger.lines)
 	}
 }
+
+// --- P3: session fork ------------------------------------------------------
+
+// TestForkSessionCopiesMessages covers the in-memory fork: new ID/title,
+// deep-copied messages with fresh IDs, active switch and subscriber notify.
+func TestForkSessionCopiesMessages(t *testing.T) {
+	provider := &captureProvider{}
+	svc, _ := newAttachmentService(t, provider)
+	sourceID, err := svc.NewSession("源会话")
+	if err != nil {
+		t.Fatalf("NewSession: %v", err)
+	}
+	attachment := contracts.Attachment{ID: "a1", Name: "notes.txt", MIME: "text/plain", Data: []byte("hello")}
+	if err := svc.SendWithAttachments(sourceID, "问题", []contracts.Attachment{attachment}); err != nil {
+		t.Fatalf("SendWithAttachments: %v", err)
+	}
+	waitIdle(t, svc, sourceID)
+
+	// Give the assistant turn reasoning/tools so the deep copy is exercised.
+	svc.mu.Lock()
+	source := svc.sessions[sourceID]
+	source.messages[1].Reasoning = "思考过程"
+	source.messages[1].Tools = []contracts.ToolCall{{ID: "call-1", Name: "memory", Status: "ok"}}
+	svc.mu.Unlock()
+	sourceBefore, _ := svc.Session(sourceID)
+
+	notifications := make(chan string, 4)
+	unsubscribe, err := svc.Subscribe(func(sessionID string) { notifications <- sessionID })
+	if err != nil {
+		t.Fatalf("Subscribe: %v", err)
+	}
+	defer unsubscribe()
+
+	forker, ok := contracts.ChatService(svc).(contracts.SessionForker)
+	if !ok {
+		t.Fatal("service does not implement contracts.SessionForker")
+	}
+	newID, err := forker.ForkSession(sourceID)
+	if err != nil {
+		t.Fatalf("ForkSession: %v", err)
+	}
+	if newID == sourceID || !strings.HasPrefix(newID, "sess-") {
+		t.Fatalf("fork ID = %q, want a fresh sess- ID", newID)
+	}
+	select {
+	case notified := <-notifications:
+		if notified != newID {
+			t.Fatalf("notification = %q, want the forked session %q", notified, newID)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("fork did not notify subscribers")
+	}
+
+	info := sessionInfoOf(t, svc, newID)
+	if info.Title != "副本 - 源会话" {
+		t.Fatalf("fork title = %q, want 副本 - 源会话", info.Title)
+	}
+	if got := svc.ActiveSession(); got != newID {
+		t.Fatalf("active session = %q, want the fork %q", got, newID)
+	}
+	forked, ok := svc.Session(newID)
+	if !ok {
+		t.Fatal("forked session missing")
+	}
+	if len(forked.Messages) != len(sourceBefore.Messages) {
+		t.Fatalf("fork has %d messages, want %d", len(forked.Messages), len(sourceBefore.Messages))
+	}
+	sourceIDs := make(map[string]bool, len(sourceBefore.Messages))
+	for _, message := range sourceBefore.Messages {
+		sourceIDs[message.ID] = true
+	}
+	forkIDs := make(map[string]bool, len(forked.Messages))
+	for index, copied := range forked.Messages {
+		original := sourceBefore.Messages[index]
+		if copied.ID == "" || copied.ID == original.ID || sourceIDs[copied.ID] || forkIDs[copied.ID] {
+			t.Fatalf("forked message %d ID = %q, original %q (must be fresh and unique)", index, copied.ID, original.ID)
+		}
+		forkIDs[copied.ID] = true
+		if copied.Role != original.Role || copied.Text != original.Text ||
+			copied.Reasoning != original.Reasoning || copied.Error != original.Error || copied.Streaming {
+			t.Fatalf("forked message %d = %+v, want a copy of %+v", index, copied, original)
+		}
+		if len(copied.Tools) != len(original.Tools) || len(copied.Attachments) != len(original.Attachments) {
+			t.Fatalf("forked message %d tools/attachments = %d/%d, want %d/%d", index,
+				len(copied.Tools), len(copied.Attachments), len(original.Tools), len(original.Attachments))
+		}
+	}
+	if len(forked.Messages[0].Attachments) != 1 || string(forked.Messages[0].Attachments[0].Data) != "hello" {
+		t.Fatalf("forked user attachments = %+v", forked.Messages[0].Attachments)
+	}
+	if len(forked.Messages[1].Tools) != 1 || forked.Messages[1].Tools[0].ID != "call-1" {
+		t.Fatalf("forked assistant tools = %+v", forked.Messages[1].Tools)
+	}
+
+	// Mutating the fork must not affect the source (deep copies).
+	forked.Messages[0].Text = "mutated"
+	forked.Messages[0].Attachments[0].Data[0] = 'X'
+	forked.Messages[1].Tools[0].Status = "error"
+	reloadedSource, _ := svc.Session(sourceID)
+	if reloadedSource.Messages[0].Text != sourceBefore.Messages[0].Text ||
+		string(reloadedSource.Messages[0].Attachments[0].Data) != "hello" ||
+		reloadedSource.Messages[1].Tools[0].Status != "ok" {
+		t.Fatalf("fork aliases source messages: %+v", reloadedSource.Messages)
+	}
+}
+
+// TestForkRunningSourceSnapshots covers forking a running session: the copy gets
+// the current text, is not running itself and the source is not cancelled.
+func TestForkRunningSourceSnapshots(t *testing.T) {
+	svc := newTestService(t, Config{}, nil, nil)
+	sourceID, err := svc.NewSession("running")
+	if err != nil {
+		t.Fatalf("NewSession: %v", err)
+	}
+	svc.mu.Lock()
+	source := svc.sessions[sourceID]
+	source.messages = []contracts.ChatMessage{
+		{ID: svc.nextMessageIDLocked(), Role: contracts.ChatRoleUser, Text: "question"},
+		{ID: svc.nextMessageIDLocked(), Role: contracts.ChatRoleAssistant, Text: "partial answer", Streaming: true},
+	}
+	source.running = true
+	source.assistant = 1
+	svc.mu.Unlock()
+
+	newID, err := svc.ForkSession(sourceID)
+	if err != nil {
+		t.Fatalf("ForkSession: %v", err)
+	}
+	forked, _ := svc.Session(newID)
+	if forked.Running {
+		t.Fatal("forked session is running")
+	}
+	if len(forked.Messages) != 2 || forked.Messages[1].Text != "partial answer" || forked.Messages[1].Streaming {
+		t.Fatalf("forked snapshot = %+v, want the current text without Streaming", forked.Messages)
+	}
+	svc.mu.Lock()
+	stillRunning := svc.sessions[sourceID].running
+	stillStreaming := svc.sessions[sourceID].messages[1].Streaming
+	svc.sessions[sourceID].running = false
+	svc.mu.Unlock()
+	if !stillRunning || !stillStreaming {
+		t.Fatalf("fork cancelled/mutated the running source: running=%v streaming=%v", stillRunning, stillStreaming)
+	}
+}
+
+// TestForkUnknownSession covers the unknown source case.
+func TestForkUnknownSession(t *testing.T) {
+	svc := newTestService(t, Config{}, nil, nil)
+	activeBefore := svc.ActiveSession()
+	if _, err := svc.ForkSession("missing"); err == nil || !strings.Contains(err.Error(), "unknown") {
+		t.Fatalf("ForkSession(missing) = %v, want a readable unknown-session error", err)
+	}
+	if got := svc.ActiveSession(); got != activeBefore {
+		t.Fatalf("failed fork changed the active session: %q -> %q", activeBefore, got)
+	}
+}
+
+// TestForkTitleFallbacks covers the empty-title placeholder and truncation.
+func TestForkTitleFallbacks(t *testing.T) {
+	svc := newTestService(t, Config{}, nil, nil)
+	emptyID, err := svc.NewSession("")
+	if err != nil {
+		t.Fatalf("NewSession: %v", err)
+	}
+	forkedEmpty, err := svc.ForkSession(emptyID)
+	if err != nil {
+		t.Fatalf("ForkSession(empty title): %v", err)
+	}
+	if info := sessionInfoOf(t, svc, forkedEmpty); info.Title != "副本 - 未命名会话" {
+		t.Fatalf("empty-title fork title = %q", info.Title)
+	}
+
+	longID, err := svc.NewSession(strings.Repeat("长", 40))
+	if err != nil {
+		t.Fatalf("NewSession: %v", err)
+	}
+	forkedLong, err := svc.ForkSession(longID)
+	if err != nil {
+		t.Fatalf("ForkSession(long title): %v", err)
+	}
+	title := sessionInfoOf(t, svc, forkedLong).Title
+	if got := len([]rune(title)); got > maxTitleRunes+1 {
+		t.Fatalf("fork title has %d runes, want at most %d", got, maxTitleRunes+1)
+	}
+	if !strings.HasPrefix(title, "副本 - ") || !strings.HasSuffix(title, "…") {
+		t.Fatalf("truncated fork title = %q", title)
+	}
+}
+
+// TestForkPersistsHistoryAndEvent covers the durable store writes: session row,
+// title, rebuilt rig history (user/assistant text + reasoning, no tools) and
+// the optional fork event.
+func TestForkPersistsHistoryAndEvent(t *testing.T) {
+	provider := &captureProvider{}
+	svc, store := newAttachmentService(t, provider)
+	sourceID, err := svc.NewSession("持久化")
+	if err != nil {
+		t.Fatalf("NewSession: %v", err)
+	}
+	if err := svc.Send(sourceID, "hello"); err != nil {
+		t.Fatalf("Send: %v", err)
+	}
+	waitIdle(t, svc, sourceID)
+	svc.mu.Lock()
+	svc.sessions[sourceID].messages[1].Reasoning = "因为所以"
+	svc.mu.Unlock()
+
+	newID, err := svc.ForkSession(sourceID)
+	if err != nil {
+		t.Fatalf("ForkSession: %v", err)
+	}
+	ctx := context.Background()
+	metas, err := store.Sessions(ctx)
+	if err != nil {
+		t.Fatalf("store.Sessions: %v", err)
+	}
+	var meta contracts.SessionMeta
+	found := false
+	for _, candidate := range metas {
+		if candidate.ID == newID {
+			meta, found = candidate, true
+			break
+		}
+	}
+	if !found || meta.Title != "副本 - 持久化" || meta.MessageCount != 2 {
+		t.Fatalf("stored fork meta = %+v found=%v", meta, found)
+	}
+	history, err := store.History().Load(ctx, newID)
+	if err != nil {
+		t.Fatalf("history.Load(fork): %v", err)
+	}
+	if len(history) != 2 {
+		t.Fatalf("stored fork history = %+v, want 2 messages", history)
+	}
+	if history[0].Role != rig.RoleUser || history[0].Text() != "hello" {
+		t.Fatalf("stored user message = %+v", history[0])
+	}
+	if history[1].Role != rig.RoleAssistant || history[1].Text() != "ok" || history[1].Reasoning != "因为所以" {
+		t.Fatalf("stored assistant message = %+v", history[1])
+	}
+	if len(history[1].ToolCalls) != 0 {
+		t.Fatalf("stored assistant tool calls = %+v, want none", history[1].ToolCalls)
+	}
+	events, err := store.Events(ctx, newID, 0, 0)
+	if err != nil {
+		t.Fatalf("store.Events: %v", err)
+	}
+	forkEvent := false
+	for _, event := range events {
+		if event.Type != "fork" {
+			continue
+		}
+		forkEvent = true
+		var payload map[string]any
+		if err := json.Unmarshal(event.Payload, &payload); err != nil {
+			t.Fatalf("fork event payload: %v", err)
+		}
+		if payload["source"] != sourceID {
+			t.Fatalf("fork event source = %v, want %q", payload["source"], sourceID)
+		}
+	}
+	if !forkEvent {
+		t.Fatalf("no fork event stored: %+v", events)
+	}
+}
+
+// TestForkSourceKeepsWorking covers that a fork does not disturb later sends on
+// the source session.
+func TestForkSourceKeepsWorking(t *testing.T) {
+	provider := &captureProvider{}
+	svc, _ := newAttachmentService(t, provider)
+	sourceID, err := svc.NewSession("source")
+	if err != nil {
+		t.Fatalf("NewSession: %v", err)
+	}
+	if err := svc.Send(sourceID, "one"); err != nil {
+		t.Fatalf("Send(one): %v", err)
+	}
+	waitIdle(t, svc, sourceID)
+	newID, err := svc.ForkSession(sourceID)
+	if err != nil {
+		t.Fatalf("ForkSession: %v", err)
+	}
+	forkedBefore, _ := svc.Session(newID)
+	if err := svc.Send(sourceID, "two"); err != nil {
+		t.Fatalf("Send(two) after fork: %v", err)
+	}
+	waitIdle(t, svc, sourceID)
+	source, _ := svc.Session(sourceID)
+	if len(source.Messages) != 4 {
+		t.Fatalf("source messages after second send = %d, want 4", len(source.Messages))
+	}
+	forkedAfter, _ := svc.Session(newID)
+	if len(forkedAfter.Messages) != len(forkedBefore.Messages) {
+		t.Fatalf("fork changed when the source ran again: %d -> %d", len(forkedBefore.Messages), len(forkedAfter.Messages))
+	}
+}
+
+// TestForkConcurrent covers two forks of the same session producing distinct
+// sessions.
+func TestForkConcurrent(t *testing.T) {
+	svc := newTestService(t, Config{}, nil, nil)
+	sourceID, err := svc.NewSession("concurrent")
+	if err != nil {
+		t.Fatalf("NewSession: %v", err)
+	}
+	const workers = 2
+	var waitGroup sync.WaitGroup
+	ids := make(chan string, workers)
+	errs := make(chan error, workers)
+	for index := 0; index < workers; index++ {
+		waitGroup.Add(1)
+		go func() {
+			defer waitGroup.Done()
+			id, err := svc.ForkSession(sourceID)
+			if err != nil {
+				errs <- err
+				return
+			}
+			ids <- id
+		}()
+	}
+	waitGroup.Wait()
+	close(ids)
+	close(errs)
+	for err := range errs {
+		t.Fatal(err)
+	}
+	seen := map[string]bool{}
+	for id := range ids {
+		if id == sourceID || seen[id] {
+			t.Fatalf("duplicate/bad fork ID %q", id)
+		}
+		seen[id] = true
+		if _, ok := svc.Session(id); !ok {
+			t.Fatalf("concurrent fork %q missing", id)
+		}
+	}
+	if len(seen) != workers {
+		t.Fatalf("forks = %d, want %d", len(seen), workers)
+	}
+}

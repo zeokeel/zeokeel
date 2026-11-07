@@ -103,6 +103,15 @@ func main() {
 		}
 	}
 
+	// Fork the finished conversation (agent SessionForker): the sidebar shows
+	// the copy and it becomes the active session.
+	if forker, ok := chat.(contracts.SessionForker); ok {
+		if forkID, forkErr := forker.ForkSession(sessionID); forkErr == nil {
+			_ = forkID
+			a.render(outDir + "/p2-fork.png")
+		}
+	}
+
 	// Seed the durable memory backend and render the Memory tab.
 	if memory, err := a.root.Require(contracts.KeyMemory); err == nil {
 		_, _ = memory.Add(context.Background(), contracts.Memory{Text: "偏好：界面使用中文，回答尽量简洁", Scope: "global"})

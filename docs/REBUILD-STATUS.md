@@ -21,6 +21,12 @@
 - 右侧栏「文件」Tab：打开文件夹（mygo 原生 Directory picker）、目录进入/面包屑、文本/Markdown/图片预览、
   刷新与错误状态；E2E 覆盖工作区创建 + 列表 + 预览帧
 
+**P3 会话 fork / 导出（2026-11-08）**
+- agent `SessionForker`：深拷贝读模型（新消息 ID/附件/Tools/Reasoning），标题「副本 - …」，active 切换，
+  store 持久化（Create/Rename/ReplaceHistory/fork 事件），重启恢复
+- sidebar 行菜单「创建副本」；session 头部「导出」→ mygo.Dialog.Save 写 Markdown（转写+元信息），
+  成功 Badge/失败 DangerText；E2E 覆盖 fork→持久化重启、导出文件内容
+
 **P3 技能（2026-11-08）**
 - `zeokeel/skills`：rig skill.FileStore 组合多根（config/dataDir/workspace，动态生效），List/Read + Roots；
   body 去 frontmatter；toolkit skill 工具绑定持久 store

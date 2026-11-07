@@ -132,6 +132,14 @@ type AttachmentSender interface {
 	SendWithAttachments(sessionID, prompt string, attachments []Attachment) error
 }
 
+// SessionForker is the optional half of the chat service that duplicates a
+// conversation into a new session (the old shell's "fork session" action).
+type SessionForker interface {
+	// ForkSession copies sessionID's messages into a new session, makes the
+	// copy active and returns its ID.
+	ForkSession(sessionID string) (string, error)
+}
+
 // ChatService is the product's conversation service: it owns chat sessions,
 // runs the ZeoKeel Rig agent, and exposes a read model plus change
 // notifications for the UI.

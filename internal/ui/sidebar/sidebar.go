@@ -420,6 +420,7 @@ func buildSessionRow(c *ui.Context, t *design.Tokens, chat contracts.ChatService
 	session contracts.ChatSessionInfo, active bool, indent float32) {
 	label := sessionTitle(session)
 	renamer, _ := chat.(contracts.SessionRenamer)
+	forker, _ := chat.(contracts.SessionForker)
 	ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(design.Space1).
 		Padding(0, 0, 0, indent).Children(func() {
 		row := ui.ButtonBase(c).Grow(1).Height(36).PaddingX(design.Space3).
@@ -462,6 +463,13 @@ func buildSessionRow(c *ui.Context, t *design.Tokens, chat contracts.ChatService
 				state.renameErr = ""
 				state.renameTarget = session.ID
 				state.renameDraft = sessionTitleByID(chat, session.ID)
+			}
+			if forker != nil && m.Item("创建副本").Chosen() {
+				if newID, err := forker.ForkSession(session.ID); err == nil && strings.TrimSpace(newID) != "" {
+					_ = chat.SetActiveSession(newID)
+					runtime.Post(func() { _ = nav.Push("session") })
+					runtime.Invalidate()
+				}
 			}
 			if m.Item("删除").Chosen() {
 				state.deleteOpen = true

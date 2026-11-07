@@ -92,6 +92,11 @@ type state struct {
 	memoryDraft string
 	memoryError string
 
+	// Export state: the last export status/error shown under the session header.
+	exportStatus string
+	exportPath   string
+	exportErr    string
+
 	// Composer attachment state: files picked and staged for the next message,
 	// the last picker/read error, the chip sequence and the per-chip image
 	// previews decoded once (keyed by attachment ID).

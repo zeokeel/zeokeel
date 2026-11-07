@@ -126,6 +126,9 @@ go test ./...
   workspace/skills，动态 roots、frontmatter 解析、body 去 frontmatter）；toolkit 的 skill 工具改用该持久
   store；设置「技能」页：roots、名称/描述/路径、Collapsible + markdown 预览、刷新/错误；截图
   `p2-skills.png`、`p2-skills-content.png`；desktop 19 / headless 10 实例
+- ✅ P3 会话 fork / 导出：`SessionForker.ForkSession`（深拷贝消息/附件/Tools，标题「副本 - …」，持久化历史+事件，
+  重启恢复）；会话行「⋯」菜单「创建副本」；会话头部「导出」→ mygo 原生保存对话框写 Markdown（标题/时间/
+  transcript，测试 seam 可替换）；截图 `p2-fork.png`
 - ⬜ 后续阶段见 [docs/PRODUCT-REBUILD-PLAN.md](docs/PRODUCT-REBUILD-PLAN.md)：
   P2 剩余（composer 附件/图片/@ 提及、右侧栏 Files/Terminal/Log 页、会话操作上下文菜单）→
   P3 memory/skills/automation/插件/workspace diff/搜索/fork/export → P4 ACP/热键/导入/更新/诊断

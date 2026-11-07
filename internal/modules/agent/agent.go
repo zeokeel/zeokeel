@@ -152,6 +152,7 @@ var (
 	_ contracts.ChatService      = (*service)(nil)
 	_ contracts.SessionRenamer   = (*service)(nil)
 	_ contracts.AttachmentSender = (*service)(nil)
+	_ contracts.SessionForker    = (*service)(nil)
 )
 
 // sessionState is the mutable per-session state.
@@ -397,6 +398,85 @@ func (s *service) NewSession(title string) (string, error) {
 	}
 	s.notify(id)
 	return id, nil
+}
+
+// ForkSession implements contracts.SessionForker: it duplicates a session's
+// read-model messages into a fresh session, makes the copy active, persists it
+// best-effort (CreateSession/RenameSession/ReplaceHistory plus a "fork" event)
+// and notifies subscribers. A running source is snapshotted, never cancelled.
+func (s *service) ForkSession(sessionID string) (string, error) {
+	now := time.Now()
+	s.mu.Lock()
+	source, ok := s.sessions[sessionID]
+	if !ok {
+		s.mu.Unlock()
+		return "", fmt.Errorf("agent: unknown chat session %q", sessionID)
+	}
+	newID := s.newSessionIDLocked()
+	title := strings.TrimSpace(source.title)
+	if title == "" {
+		title = "未命名会话"
+	}
+	title = truncateTitle("副本 - " + title)
+	messages := make([]contracts.ChatMessage, 0, len(source.messages))
+	for _, message := range source.messages {
+		copied := message
+		copied.ID = s.nextMessageIDLocked()
+		copied.Streaming = false
+		copied.Tools = append([]contracts.ToolCall(nil), message.Tools...)
+		copied.Attachments = cloneAttachments(message.Attachments)
+		messages = append(messages, copied)
+	}
+	state := &sessionState{
+		id:          newID,
+		title:       title,
+		workspaceID: source.workspaceID,
+		createdAt:   now,
+		updatedAt:   now,
+		messages:    messages,
+		assistant:   -1,
+	}
+	s.sessions[newID] = state
+	s.active = newID
+	s.mu.Unlock()
+
+	if s.store != nil {
+		ctx := context.Background()
+		if err := s.store.CreateSession(ctx, newID, title); err != nil {
+			s.logger.Printf("[agent] fork: create session %s: %v", newID, err)
+		}
+		if err := s.store.RenameSession(ctx, newID, title); err != nil {
+			s.logger.Printf("[agent] fork: rename session %s: %v", newID, err)
+		}
+		history := forkHistoryMessages(messages)
+		if err := s.store.ReplaceHistory(ctx, newID, history); err != nil {
+			s.logger.Printf("[agent] fork: replace history %s: %v", newID, err)
+		}
+		s.appendEvent(ctx, newID, "fork", map[string]any{"source": sessionID})
+	}
+	if state.workspaceID != "" {
+		s.persistSessionWorkspace(newID, state.workspaceID)
+	}
+	s.notify(newID)
+	return newID, nil
+}
+
+// forkHistoryMessages rebuilds a Rig history from a forked read model: user and
+// assistant messages only (tool calls are not replayed), with assistant
+// reasoning preserved.
+func forkHistoryMessages(messages []contracts.ChatMessage) []rig.Message {
+	out := make([]rig.Message, 0, len(messages))
+	for _, message := range messages {
+		switch message.Role {
+		case contracts.ChatRoleUser:
+			out = append(out, rig.NewMessage(rig.RoleUser, message.Text))
+		case contracts.ChatRoleAssistant:
+			forked := rig.NewMessage(rig.RoleAssistant, message.Text)
+			forked.Reasoning = message.Reasoning
+			out = append(out, forked)
+		}
+	}
+	return out
 }
 
 // newSessionIDLocked generates a unique "sess-<unixnano>" ID.
