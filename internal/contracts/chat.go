@@ -53,6 +53,9 @@ type ChatMessage struct {
 	// Attachments are the files/images sent with a user message (display
 	// read model; the image bytes also travel as rig image content parts).
 	Attachments []Attachment
+	// Usage is the token/time accounting of the assistant turn (nil when the
+	// provider reported none).
+	Usage *MessageUsage
 	// Error is set when the message (usually an assistant turn) failed.
 	Error string
 	// CreatedAt is the message timestamp (local time, display only).
@@ -106,6 +109,24 @@ type ChatConfig struct {
 	// settings (SessionEffortSettingKey).
 	ReasoningEffort string
 }
+
+// MessageUsage is one assistant turn's accounting (rig Usage + wall time).
+type MessageUsage struct {
+	PromptTokens     int
+	CompletionTokens int
+	TotalTokens      int
+	CachedTokens     int
+	Iterations       int
+	DurationMS       int64
+}
+
+// Agent operating modes. Plan mode restricts the tool gate to read-only
+// exploration plus the planning tools; normal mode uses the permission policy.
+const (
+	SettingAgentMode = "agent.mode"
+	AgentModeNormal  = "normal"
+	AgentModePlan    = "plan"
+)
 
 // Attachment is one file or image the user attached to a prompt.
 type Attachment struct {

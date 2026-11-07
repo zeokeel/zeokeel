@@ -141,9 +141,12 @@ func main() {
 		a.tester.Frame()
 		a.render(outDir + "/p2-sessionrefs.png")
 		a.tester.Key(0, ui.KeyEscape)
-		for i := 0; i < 3; i++ {
-			a.tester.Key(0, ui.KeyBackspace)
+		if rect, ok := a.tester.Find("发送"); ok {
+			a.tester.ClickAt(rect.X-120, rect.Y-50)
+			a.tester.Frame()
 		}
+		a.tester.Key(ui.Cmd, ui.KeyA)
+		a.tester.Key(0, ui.KeyBackspace)
 		a.tester.Frame()
 	}
 
@@ -315,6 +318,15 @@ func main() {
 			a.ui.SetRightPanelOpen(false)
 			a.tester.Frame()
 		}
+	}
+
+	// Plan mode: the header badge and composer mode chip.
+	if store, ok := a.root.Get(contracts.KeySettings); ok {
+		_ = store.Set(contracts.SettingAgentMode, contracts.AgentModePlan)
+		a.tester.Frame()
+		a.render(outDir + "/p2-plan-mode.png")
+		_ = store.Set(contracts.SettingAgentMode, contracts.AgentModeNormal)
+		a.tester.Frame()
 	}
 
 	// Notification toast overlay.
@@ -662,7 +674,7 @@ func scriptedServer() *httptest.Server {
 			fmt.Fprint(w, "data: {\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"call-1\",\"type\":\"function\",\"function\":{\"name\":\"working_directory\",\"arguments\":\"{}\"}}]},\"index\":0,\"finish_reason\":\"tool_calls\"}]}\n\n")
 		} else {
 			fmt.Fprint(w, "data: {\"choices\":[{\"delta\":{\"content\":\"## 工作目录已确认\\n\\n- 路径：当前工作目录\\n- 可以开始下一步了\\n\\n```text\\n/data/mygo\\n```\"},\"index\":0}]}\n\n")
-			fmt.Fprint(w, "data: {\"choices\":[{\"delta\":{},\"index\":0,\"finish_reason\":\"stop\"}]}\n\n")
+			fmt.Fprint(w, "data: {\"choices\":[{\"delta\":{},\"index\":0,\"finish_reason\":\"stop\"}],\"usage\":{\"prompt_tokens\":120,\"completion_tokens\":340,\"total_tokens\":460,\"prompt_cache_hit_tokens\":20}}\n\n")
 		}
 		fmt.Fprint(w, "data: [DONE]\n\n")
 	}))

@@ -3,6 +3,7 @@ package session
 import (
 	"context"
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -88,6 +89,10 @@ func buildHeader(c *ui.Context, t *design.Tokens, runtime contracts.UIRuntime, c
 				FontWeight(600).TextColor(t.LabelPrimary).MaxLines(1).Ellipsis("…")
 			if hasSession && chatSession.Running {
 				design.Apply(ui.Badge(c, st.tr("运行中", "Running")), t.Badge()).TextColor(t.WarningText)
+			}
+			if st.settings != nil && agentMode(st.settings) == contracts.AgentModePlan {
+				design.Apply(ui.Badge(c, st.tr("计划模式", "Plan mode")), t.Badge()).
+					TextColor(t.WarningText)
 			}
 			buildGoalChip(c, t, runtime, st)
 			ui.Spacer(c).Grow(1)
@@ -405,6 +410,28 @@ func buildAssistantMessage(c *ui.Context, t *design.Tokens, runtime contracts.UI
 			if !runtime.RenderTool(c, call) {
 				buildToolFallback(c, t, st, call)
 			}
+		}
+		// Message action row: copy the assistant text to the native clipboard.
+		if strings.TrimSpace(message.Text) != "" {
+			ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(design.Space2).Children(func() {
+				copyButton := ui.Button(c, st.tr("复制", "Copy")).
+					Tooltip(st.tr("复制消息", "Copy message"))
+				if copyButton.Clicked() {
+					c.WriteClipboard(message.Text)
+					st.copiedMessage = message.ID
+				}
+				if st.copiedMessage == message.ID {
+					design.Apply(ui.Badge(c, st.tr("已复制", "Copied")), t.Badge()).
+						TextColor(t.Success)
+				}
+			})
+		}
+		// Usage footer: duration and token accounting of the assistant turn.
+		if message.Usage != nil {
+			design.Apply(ui.Text(c, st.tr("用时 ", "Took ")+formatUsageDuration(message.Usage.DurationMS)+
+				" · "+formatTokenCount(usageTotalTokens(message.Usage))+" tokens"+
+				usageCachedSuffix(st, message.Usage)),
+				t.Font(design.TypeXXXS)).TextColor(t.LabelTertiary)
 		}
 	})
 }
@@ -926,6 +953,30 @@ func buildComposerToolbar(c *ui.Context, t *design.Tokens, runtime contracts.UIR
 			}
 		}).Tooltip(st.tr("本会话的推理强度", "Reasoning effort for this session"))
 	}
+	// Agent mode selector: normal or plan (per-session setting, hidden without
+	// a settings store). The header shows the 计划模式 badge while plan mode is
+	// active.
+	if st.settings != nil {
+		mode := agentMode(st.settings)
+		label := st.tr("普通", "Normal")
+		if mode == contracts.AgentModePlan {
+			label = st.tr("计划", "Plan")
+		}
+		ui.PopoverMenuButton(c, label, func(m *ui.Menu) {
+			normal := m.Item(st.tr("普通模式", "Normal mode"))
+			normal.Checked(mode == contracts.AgentModeNormal)
+			if normal.Chosen() && mode != contracts.AgentModeNormal {
+				_ = st.settings.Set(contracts.SettingAgentMode, contracts.AgentModeNormal)
+				runtime.Invalidate()
+			}
+			plan := m.Item(st.tr("计划模式", "Plan mode"))
+			plan.Checked(mode == contracts.AgentModePlan)
+			if plan.Chosen() && mode != contracts.AgentModePlan {
+				_ = st.settings.Set(contracts.SettingAgentMode, contracts.AgentModePlan)
+				runtime.Invalidate()
+			}
+		}).Tooltip(st.tr("代理模式", "Agent mode"))
+	}
 	if !running {
 		presets := effectivePromptPresets(st)
 		ui.PopoverMenuButton(c, st.tr("预设", "Presets"), func(m *ui.Menu) {
@@ -1017,6 +1068,66 @@ func (st *state) effortLabel(value string) string {
 		}
 	}
 	return st.tr("默认", "Default")
+}
+
+// agentMode reads the stored agent mode (normal when unset/unknown or without
+// a settings store).
+func agentMode(settings contracts.SettingsService) string {
+	if settings == nil {
+		return contracts.AgentModeNormal
+	}
+	switch strings.ToLower(strings.TrimSpace(settings.Get(contracts.SettingAgentMode, ""))) {
+	case contracts.AgentModePlan:
+		return contracts.AgentModePlan
+	default:
+		return contracts.AgentModeNormal
+	}
+}
+
+// usageTotalTokens returns the accounting total, falling back to the prompt+
+// completion sum when the provider only reported the parts.
+func usageTotalTokens(usage *contracts.MessageUsage) int {
+	if usage.TotalTokens > 0 {
+		return usage.TotalTokens
+	}
+	return usage.PromptTokens + usage.CompletionTokens
+}
+
+// usageCachedSuffix renders the cached-token suffix (empty when none).
+func usageCachedSuffix(st *state, usage *contracts.MessageUsage) string {
+	if usage.CachedTokens <= 0 {
+		return ""
+	}
+	return " · " + st.tr("缓存 ", "cached ") + formatTokenCount(usage.CachedTokens)
+}
+
+// formatUsageDuration renders a turn duration: milliseconds under one second,
+// otherwise one decimal of seconds.
+func formatUsageDuration(durationMS int64) string {
+	if durationMS < 1000 {
+		return fmt.Sprintf("%dms", durationMS)
+	}
+	return fmt.Sprintf("%.1fs", float64(durationMS)/1000)
+}
+
+// formatTokenCount groups thousands with commas (1234 → 1,234).
+func formatTokenCount(count int) string {
+	digits := strconv.Itoa(count)
+	if len(digits) <= 3 {
+		return digits
+	}
+	var builder strings.Builder
+	first := len(digits) % 3
+	if first > 0 {
+		builder.WriteString(digits[:first])
+	}
+	for index := first; index < len(digits); index += 3 {
+		if builder.Len() > 0 {
+			builder.WriteByte(',')
+		}
+		builder.WriteString(digits[index : index+3])
+	}
+	return builder.String()
 }
 
 // buildSendButton is the composer's primary control: the native button keeps

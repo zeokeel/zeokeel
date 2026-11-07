@@ -21,6 +21,13 @@
 - 右侧栏「文件」Tab：打开文件夹（mygo 原生 Directory picker）、目录进入/面包屑、文本/Markdown/图片预览、
   刷新与错误状态；E2E 覆盖工作区创建 + 列表 + 预览帧
 
+**TDD-usage/plan-mode（2026-11-08）**
+- agent：assistant turn 用量（rig RunResult/EventUsage → MessageUsage tokens/cached/iterations/duration，usage 事件；无上报→nil）；
+  plan 模式门禁（读 SettingAgentMode；只读+计划工具白名单，其余 fail-closed；切回 normal 恢复审批）；agent 78 测试
+- session UI：每条 assistant usage footer（用时/tokens/缓存）、逐条「复制」+已复制 Badge、模式菜单（普通/计划）与
+  header「计划模式」徽标；session 101 测试
+- E2E：真实 SSE 注入 usage → footer 显示；plan 模式徽标出现/恢复；snapshot p2-plan-mode.png、p1-chat 刷新
+
 **TDD-preset/catalog + 覆盖重审（2026-11-08）**
 - presets：contracts PromptPreset/SettingPromptPresets/Parse/Encode/Legacy；settings「预设」页 CRUD（上移/下移/删除/恢复内置/
   校验/坏 JSON 回退）；composer「预设」菜单插入提示词（空草稿 set / 非空 append）；session 93 / settings 85 测试

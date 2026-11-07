@@ -4,7 +4,8 @@
 > team manager 编排与右侧「团队」面板（spawn/steer/interrupt）、@session 引用与推理强度（low/medium/high）、
 > composer /goal /plan /memory 对话框、更新下载+SHA256 暂存、MCP stdio 服务器、右侧「任务」面板、
 > 工件历史（Files「产物」）、单实例 + XDG autostart、install-on-restart、toast 通知、workspace mcp.json opt-in、
-> 网络代理设置、MCP 工具级开关、提示词预设（设置 CRUD + composer 插入）、可编辑模型目录；
+> 网络代理设置、MCP 工具级开关、提示词预设（设置 CRUD + composer 插入）、可编辑模型目录、
+> 消息用量 footer/逐条复制、计划模式（只读工具白名单）；
 > 反证审计 78 例发现 4×P2+4×P3 全部修复，`internal/regression` 0 SKIP。详情：[docs/ADVERSARIAL-AUDIT.md](docs/ADVERSARIAL-AUDIT.md)。
 >
 > **最终轮状态（Round 40/40）**：可运行的桌面/headless/ACP 产品；32 测试包（含 -race）全绿；

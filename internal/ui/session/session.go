@@ -141,6 +141,10 @@ type state struct {
 	// success/error toast in addition to the header badge.
 	notifier contracts.Notifier
 
+	// copiedMessage is the last assistant message whose copy action ran (its
+	// 「已复制」badge stays until another message is copied).
+	copiedMessage string
+
 	// Command-dialog state (native Modals rendered by the session screen).
 	goalOpen  bool
 	goalText  string

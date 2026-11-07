@@ -64,7 +64,7 @@
 | `prompt` | 🟡 | agent SystemPrompt + settings 模型页提示词 | 无 modes/plan/memory/AGENTS.md 注入策略、auto-title/review prompt |
 | `provider` | ✅ | rig `provider/openai` + agent 模块 | OpenAI Chat Completions 兼容 |
 | `runtime` | 🟡 | agent + rig agent/gate/compact | 循环/审批/压缩/检查点/多模态 parts/subagent runner/team manager/goal 工具与 goal 桥；缺 modes、review、goal 自动驱动、PTC/workflow/ralph |
-| `session` | 🟡 | agent ChatService + Regenerate/Fork/Archive/Pin/ModelSwitcher | 发送/取消/历史/恢复/压缩/fork/export/附件/重新生成/会话模型覆盖/reasoning effort；缺 goal 多轮自动执行、tool spill、per-message feedback/usage |
+| `session` | 🟡 | agent ChatService + Regenerate/Fork/Archive/Pin/ModelSwitcher + usage | 发送/取消/历史/恢复/压缩/fork/export/附件/重新生成/会话模型/推理强度/**turn usage（tokens/duration/cached + usage 事件）**；缺 goal 多轮自动执行、tool spill、per-message feedback |
 | `sessionreference` | 🟡 | composer @ 菜单 + agent `references.go` | token 持久化、注入尾部 20 条/≤8000 rune、session_refs 事件、self/unknown/重复忽略、分隔符解析；缺旧候选排序细节/URI 语义/预算错误分类 |
 | `skills` | 🟡 | `internal/modules/skills` + settings 技能页 | 多根 List/Read/roots/预览/刷新；缺创建/编辑/删除、文件监听 |
 | `state` | ✅ | ChatService 读模型 + uiroot runtime | old broker/projector 被读模型替代；UI 所需投影可用 |
@@ -82,7 +82,7 @@
 |---|---|---|---|
 | Home / 起始页 | ✅ | `internal/ui/home` | hero/greeting/setup card/composer/最近会话 |
 | Composer 基础（输入/附件/发送/停止/模型 chip/@//） | ✅ | `internal/ui/session/view.go`、`attachments.go` | 文本、附件/图片/拖放、发送/停止、per-session 模型菜单、工作区 @、/ 菜单 |
-| Composer 深度（/goal /plan /memory/权限/effort/@session/presets） | 🟡 | `sessionCommands` + `command_dialogs.go` + `buildComposerToolbar` | 已落地：/新会话 /创建副本 /导出对话 /打开设置 /设置目标 /审阅计划 /添加记忆、权限模式、推理强度、@session、**预设插入菜单**；缺 /compact /feedback、/goal pause/resume/complete 子命令、plan-mode 切换 |
+| Composer 深度（/goal /plan /memory/权限/effort/@session/presets） | 🟡 | `sessionCommands` + `command_dialogs.go` + `buildComposerToolbar` | 已落地：/新会话 /创建副本 /导出对话 /打开设置 /设置目标 /审阅计划 /添加记忆、权限模式、**模式切换（普通/计划模式，header 徽标 + 工具白名单门禁）**、推理强度、@session、预设插入；缺 /compact /feedback、/goal 子命令 |
 | Chrome/Sidebar/折叠 rail/右栏 dock | ✅ | uiroot + sidebar | 280px sidebar、64px rail、Cmd/Ctrl+B、右栏开关 |
 | 命令面板/窗口内快捷键 | ✅ | uiroot palette/shortcuts | Cmd/Ctrl+K、可配置两条 chrome 快捷键；非系统全局热键 |
 | Settings 外壳与页面 | 🟡 | `internal/ui/settings`、about | 14 页：模型/模型目录/服务商/诊断/快捷键/外观/技能/更新/导入/搜索/MCP/网络/预设 + 关于，en/zh；更新页含下载/暂存/重启安装；缺记忆管理页、内置插件开关/详情 |
@@ -95,7 +95,7 @@
 | Tool cards | ✅ | `internal/ui/toolcards` | rig 工具卡 + todo/team_task 卡 + demo/兜底；MCP 动态工具走 session 兜底 |
 | Markdown 渲染 | ✅ | mygo ui/markdown | 消息/技能/更新 notes/artifact/plan 预览 |
 | Reasoning 展示 | 🟡 | session buildAssistantMessage | 折叠 Reasoning 文本；缺旧实时 preview/shimmer |
-| 消息级操作（复制/重试/反馈/用量） | 🟡 | session `buildRegenerateAction` | 最后 assistant 下有「重新生成」（SessionRegenerator）；缺逐条复制、feedback good/bad、usage/tool footer |
+| 消息级操作（复制/重试/反馈/用量） | 🟡 | session `buildRegenerateAction` + 行动区/usage footer | 「重新生成」+ **逐条复制（剪贴板+已复制 Badge）** + **usage footer（用时/tokens/cached）**；缺 feedback good/bad |
 | `@` mentions | ✅ | session buildMentionMenu + agent references | 工作区文件 + 会话分组（@session，排除当前/过滤/上限 8）；agent 侧展开注入 |
 | 会话搜索 | ✅ | sidebar + agent Sessions | 标题/分组过滤；pin/archive 行菜单与 show-archived 视图 |
 | 消息全文搜索 | ✅ | sidebar + sessionstore SearchMessages | LIKE/转义/片段/限制/跨会话（解码文本匹配） |
@@ -106,7 +106,7 @@
 | Skills 页 | 🟡 | settings 技能页 + skills 模块 | 发现/roots/预览/刷新；无创建/编辑/删除 |
 | Memory 页 | 🟡 | session Memory tab + memory 模块 | 搜索/添加/删除 scope；无 consolidate/extract、自动记忆设置 |
 | Workspace→Session 树/分组/计数 | ✅ | sidebar workspace tree | 多 workspace 分组、未分组、计数、搜索、折叠、置顶/归档 |
-| Plan UI（plan_review/exit_plan_mode） | 🟡 | `internal/ui/interaction` plan Modal + /审阅计划 | Markdown 审阅 + 批准/取消（Escape/背景=取消）；缺 keep-planning/feedback、plan mode 开关、transcript plan 卡 |
+| Plan UI（plan_review/exit_plan_mode） | 🟡 | `internal/ui/interaction` plan Modal + /审阅计划 + plan 模式门禁 | Markdown 审阅 + 批准/取消 + **计划模式（设置/徽标 + 只读工具白名单，写/执行 fail-closed）**；缺 keep-planning/feedback、transcript plan 卡 |
 | Modes UI（standard/minimal/creator） | ❌ | 无 | 无模式选择/工具子集/persona 切换；prompt 预设已可用于插入文本，但未接 mode/tool 子集语义 |
 | Team UI（成员/任务/steer） | ✅ | rightpanel Agents/Tasks Inspector + team_* 工具 | 成员列表/状态/最新回答、选中后 steer/中断/关闭；spawn 由 agent 工具发起（同旧）；任务板增删改/状态排序 |
 | Todo UI（会话 todo 面板） | ✅ | toolkit `KeyTaskBoard` + rightpanel「任务」tab | 任务列表/状态排序/添加/开始/完成/删除/刷新/错误与空态，与 team_task_* 共用；缺旧 todo 卡内联进度 |
@@ -121,7 +121,7 @@
    预设/persona 的管理页已落地（预设片段），仍缺 /compact /feedback 与 plan-mode 切换。
 2. **Plan 深度（中高）**：keep-planning + 反馈修订循环、plan mode 工具策略切换、transcript plan 卡；
    当前只有批准/取消两键。
-3. **消息级操作/用量（中）**：逐条复制、feedback good/bad、usage/tool footer；当前仅「重新生成」。
+3. **消息级操作/用量（低）**：已实现逐条复制与 usage footer；仅缺 feedback good/bad。
 4. **管理深度（中）**：插件详情/内置插件开关/配置；memory consolidate/extract/自动记忆设置；
    skills 创建/编辑/删除；artifact 下载动作。
 5. **编排执行深度（中）**：goal 自动驱动（多轮自动继续）、review/PTC/workflow/ralph 工具接线；
@@ -141,7 +141,7 @@
 1. **Composer 收口**：/compact、/feedback、/goal 子命令、plan-mode 切换 + presets 入口
    （`internal/ui/session`、`internal/contracts/presets.go` WIP、settings presets 页）。
 2. **Plan 深度**：keep-planning/feedback 修订循环、transcript plan 卡（`internal/ui/interaction`、agent）。
-3. **消息级操作 + 用量**：逐条复制、feedback、usage footer（`internal/ui/session`）。
+3. **消息级操作 + 用量**：逐条复制与 usage footer 已落地；剩余 feedback good/bad（`internal/ui/session`）。
 4. **管理深度收口**：插件详情/内置插件开关、memory consolidate/extract、skills 编辑
    （`internal/ui/plugins`、`internal/modules/memory`、`internal/ui/settings`）。
 5. **宿主桌面收口**：托盘/关闭到托盘 + 窗口几何显式持久化（`internal/host`；Windows 替换标注平台非目标）。

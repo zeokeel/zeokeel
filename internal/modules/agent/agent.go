@@ -30,7 +30,6 @@ import (
 
 	rig "github.com/zeokeel/zeokeel-rig"
 	rigagent "github.com/zeokeel/zeokeel-rig/agent"
-	"github.com/zeokeel/zeokeel-rig/gate"
 	"github.com/zeokeel/zeokeel-rig/provider/openai"
 	"github.com/zeokeel/zeokeel-rig/session"
 	"github.com/zeokeel/zeokeel-rig/session/compact"
@@ -1161,11 +1160,13 @@ func (s *service) run(ctx context.Context, sessionID string, cfg contracts.ChatC
 		return
 	}
 	s.appendEvent(ctx, sessionID, "run_start", map[string]any{"model": cfg.Model})
-	_, runErr := runner.Run(ctx, rig.RunRequest{
+	startedAt := time.Now()
+	result, runErr := runner.Run(ctx, rig.RunRequest{
 		SessionID: sessionID,
 		Input:     input,
 		Emit:      func(event rig.Event) { s.handleEvent(sessionID, event) },
 	})
+	s.recordRunUsage(ctx, sessionID, result, time.Since(startedAt).Milliseconds())
 	s.finish(sessionID, ctx, runErr)
 }
 
@@ -1193,38 +1194,6 @@ func (s *service) newProvider(cfg contracts.ChatConfig, effort string) (rig.Prov
 		return nil, err
 	}
 	return withReasoningEffort(provider, effort), nil
-}
-
-// gate builds the approval gate: the approvals service when wired (its mode
-// decides whether it asks, auto-allows or denies), a permissive gate otherwise.
-func (s *service) gate() rig.Gate {
-	if s.approvals == nil {
-		return gate.AllowAll()
-	}
-	return gate.Func(func(ctx context.Context, tool rig.Tool, call rig.ToolCall) (rig.Decision, error) {
-		name := call.Name
-		if tool != nil && strings.TrimSpace(tool.Name()) != "" {
-			name = tool.Name()
-		}
-		summary := summarizeToolArguments(call.Arguments)
-		decision, err := s.approvals.Request(ctx, contracts.ApprovalRequest{
-			Tool:      name,
-			Summary:   summary,
-			Arguments: call.Arguments,
-			CreatedAt: time.Now(),
-		})
-		if err != nil {
-			return "", err
-		}
-		switch decision {
-		case contracts.ApprovalAllow:
-			return rig.DecisionAllow, nil
-		case contracts.ApprovalAllowAlways:
-			return rig.DecisionAllowAlways, nil
-		default:
-			return rig.DecisionDeny, nil
-		}
-	})
 }
 
 // checkpointStore returns the durable checkpoint view when a store is wired.
