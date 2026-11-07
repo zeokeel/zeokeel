@@ -50,7 +50,7 @@
 |---|---|---|---|
 | `acp` | 🟡 | `internal/modules/acp`、host RunACP | initialize/session-new/prompt/cancel、chunk、错误码；缺 session/list/load、auth、fs/terminal 双向、tool_call 更新 |
 | `agentteam` | ✅ | agent `team.go` + rig `tools/team` + Agents Inspector + team_task 共享板 | 真实异步 subagent runner（spawn/steer/wait/interrupt/close、fork/model/max-iterations）；全局 manager（旧按会话），Inspector 展示全局成员 |
-| `automation` | 🟡 | `internal/modules/automation` + `internal/ui/automation` | cron/every/after、持久化、ticker、schedule 工具、列表/新建/运行/删除/运行历史（每任务 10 条，持久化+折叠摘要）/**任务级模型覆盖（SessionModelSwitcher，空=默认；schedule_update 适配器会清空覆盖）**；缺 workspace/permission 字段与筛选、独立 runs 表 |
+| `automation` | 🟡 | `internal/modules/automation` + `internal/ui/automation` | cron/every/after、持久化、ticker、schedule 工具、列表/新建/运行/删除/运行历史/任务级模型覆盖/**搜索与启用筛选**；缺 workspace/permission 字段、独立 runs 表 |
 | `brand` | ✅ | `internal/brand` | palette/theme/logo/wordmark |
 | `design` | ✅ | `internal/design` | tokens/style/motion/font/components 子集 |
 | `globalhotkey` | ✅ | host hotkey.go + mygo `GlobalShortcut` + 外观设置 | 可配置系统级加速键（修饰符+单键，固定顺序规范化），注册后 Show/Restore/Focus 窗口；留空关闭、非法/注册失败仅警告、shutdown 注销；桌面不可用环境安全回退 |
@@ -65,7 +65,7 @@
 | `prompt` | 🟡 | agent SystemPrompt + settings 模型页提示词 | 无 modes/plan/memory/AGENTS.md 注入策略、auto-title/review prompt |
 | `provider` | ✅ | rig `provider/openai` + agent 模块 | OpenAI Chat Completions 兼容 |
 | `runtime` | 🟡 | agent + rig agent/gate/compact | 循环/审批/压缩/检查点/多模态 parts/subagent runner/team manager/goal 工具与 goal 桥；缺 modes、review、goal 自动驱动、PTC/workflow/ralph |
-| `session` | 🟡 | agent ChatService + Regenerate/Fork/Archive/Pin/ModelSwitcher + usage | 发送/取消/历史/恢复/压缩/fork/export/附件/重新生成/会话模型/推理强度/**turn usage（tokens/duration/cached + usage 事件）**；缺 goal 多轮自动执行、tool spill、per-message feedback |
+| `session` | 🟡 | agent ChatService + Regenerate/Fork/Archive/Pin/ModelSwitcher + usage + 排队发送 | 发送/取消/历史/恢复/压缩/fork/export/附件/重新生成/会话模型/推理强度/turn usage/**运行中排队发送（FIFO，回合结束自动 flush）**；缺 goal 多轮自动执行、tool spill |
 | `sessionreference` | 🟡 | composer @ 菜单 + agent `references.go` | token 持久化、注入尾部 20 条/≤8000 rune、session_refs 事件、self/unknown/重复忽略、分隔符解析；缺旧候选排序细节/URI 语义/预算错误分类 |
 | `skills` | 🟡 | `internal/modules/skills` + settings 技能页 | 多根 List/Read/roots/预览/刷新 + **新建（dataDir/skills，frontmatter/校验）与删除（仅 dataDir，realpath 校验）**；缺 workspace 技能编辑、文件监听 |
 | `state` | ✅ | ChatService 读模型 + uiroot runtime | old broker/projector 被读模型替代；UI 所需投影可用 |

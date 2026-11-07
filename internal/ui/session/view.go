@@ -53,6 +53,15 @@ func buildScreen(
 	}
 	activeID := chat.ActiveSession()
 	chatSession, hasSession := chat.Session(activeID)
+	syncQueuedSession(st, activeID)
+	// Frame-time fallback for hosts that update the session state without an
+	// extra notification: retry the queue once the run has settled.
+	if len(st.queuedPrompts) > 0 && !chatSession.Running && st.queueSessionID == activeID {
+		runtime.Post(func() {
+			processQueuedPrompts(chat, st, activeID)
+			runtime.Invalidate()
+		})
+	}
 
 	ui.Column(c).FillWidth().Grow(1).Children(func() {
 		buildHeader(c, t, runtime, cfg, st, chatSession, hasSession)
@@ -876,6 +885,7 @@ func buildComposer(
 ) {
 	th := t.Theme()
 	running := chatSession.Running
+	queueAllowed := running && sendWhileRunningEnabled(st.settings)
 	var input ui.Element
 
 	ui.Column(c).FillWidth().PaddingY(th.Space(2)).AlignItems(ui.Center).Children(func() {
@@ -904,7 +914,7 @@ func buildComposer(
 			card.Children(func() {
 				buildPendingAttachments(c, t, runtime, st)
 				placeholder := st.localized(cfg.ComposerPlaceholder, "输入消息…", "Ask ZeoKeel…")
-				if !running {
+				if !running || queueAllowed {
 					input = ui.TextArea(c, &st.draft).
 						Label(placeholder).
 						Placeholder(placeholder).
@@ -914,6 +924,13 @@ func buildComposer(
 						OnTextKey(func(k ui.TextKey) bool {
 							if k.Key != ui.KeyEnter || k.Mods != 0 {
 								return false
+							}
+							if running {
+								if queueAllowed && queueDraft(st, activeID) {
+									k.SetText("")
+									runtime.Invalidate()
+								}
+								return true
 							}
 							if submitDraft(chat, activeID, st) {
 								k.SetText("")
@@ -928,6 +945,17 @@ func buildComposer(
 						input.Focus()
 					}
 				}
+				if len(st.queuedPrompts) > 0 || st.queueErr != "" {
+					ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(design.Space2).Children(func() {
+						if len(st.queuedPrompts) > 0 {
+							design.Apply(ui.Badge(c, fmt.Sprintf(st.tr("已排队 %d 条", "%d queued"), len(st.queuedPrompts))),
+								t.Badge()).TextColor(t.Accent)
+						}
+						if st.queueErr != "" {
+							buildErrorLine(c, t, st.queueErr)
+						}
+					})
+				}
 				ui.Row(c).FillWidth().AlignItems(ui.Center).
 					Gap(design.Space2).Children(func() {
 					buildComposerToolbar(c, t, runtime, navigator, chat, st, running)
@@ -941,6 +969,9 @@ func buildComposer(
 					design.Apply(ui.Text(c, hint), t.Font(design.TypeXXS)).
 						TextColor(t.LabelTertiary).MaxLines(1)
 					if running {
+						if queueAllowed {
+							buildQueueSendButton(c, t, cfg, chat, st, activeID)
+						}
 						buildStopButton(c, t, cfg, chat, st, activeID)
 					} else {
 						buildSendButton(c, t, cfg, chat, st, activeID)
@@ -1237,6 +1268,38 @@ func buildSendButton(c *ui.Context, t *design.Tokens, cfg Config, chat contracts
 	}
 	if button.Clicked() && hasContent {
 		submitDraft(chat, activeID, st)
+	}
+}
+
+// buildQueueSendButton is the running composer's send control when
+// ui.sendWhileRunning is on: it appends the draft to the prompt queue instead
+// of calling chat.Send while the current turn is still running.
+func buildQueueSendButton(c *ui.Context, t *design.Tokens, cfg Config, chat contracts.ChatService, st *state, activeID string) {
+	th := t.Theme()
+	hasContent := strings.TrimSpace(st.draft) != ""
+	fill, glyph := t.Accent, t.AccentText
+	if !hasContent {
+		fill, glyph = t.Accent.Alpha(0.16).Over(t.BgRaised), t.Accent
+	}
+	sendLabel := st.localized(cfg.SendLabel, "发送", "Send")
+	button := ui.Button(c, sendLabel).Label(sendLabel).Tooltip(sendLabel).
+		Height(t.Scale(th.Space(8))).PaddingX(design.Space3).
+		Radius(th.Radius).Background(fill).TextColor(glyph).Disabled(!hasContent)
+	button.Children(func() {
+		ui.Icon(c, icons.ChevronRight()).Size(th.Space(4), th.Space(4)).TextColor(glyph)
+	})
+	switch {
+	case !hasContent:
+	case button.Pressed():
+		button.Background(t.AccentPressed)
+	case button.Hovered():
+		button.Background(t.AccentHover)
+	}
+	if button.Clicked() && hasContent {
+		if queueDraft(st, activeID) {
+			_ = chat
+			st.queueErr = ""
+		}
 	}
 }
 

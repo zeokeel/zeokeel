@@ -65,6 +65,11 @@ type state struct {
 	status           string
 	statusErr        bool
 
+	// MCP server-level switches (mcp.disabledServers): parsed once; matching is
+	// trimmed/case-insensitive.
+	disabledServers       map[string]bool
+	disabledServersLoaded bool
+
 	// mcpExpanded remembers the expanded MCP server cards, keyed by server
 	// identity, so a Refresh preserves the open cards.
 	mcpExpanded map[string]bool

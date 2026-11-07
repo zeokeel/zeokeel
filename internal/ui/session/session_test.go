@@ -38,6 +38,7 @@ type fakeChat struct {
 	sessions  map[string]contracts.ChatSession
 	subs      []func(string)
 	sendCalls []sendCall
+	sendErr   error
 	cancelIDs []string
 	cancelErr error
 	newCalls  []string
@@ -148,6 +149,11 @@ func (f *fakeChat) Send(sessionID, prompt string) error {
 	if session.Running {
 		f.mu.Unlock()
 		return errors.New("fake: session is already running")
+	}
+	if f.sendErr != nil {
+		err := f.sendErr
+		f.mu.Unlock()
+		return err
 	}
 	f.sendCalls = append(f.sendCalls, sendCall{sessionID: sessionID, prompt: prompt})
 	session.Running = true

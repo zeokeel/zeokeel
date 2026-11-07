@@ -226,6 +226,19 @@ func Module() *module.Descriptor[Config] {
 			}
 		}
 
+		// mcp.disabledServers drops whole servers after the assembly/settings/
+		// workspace merge and before any connection is attempted: a disabled
+		// server is not started and its tools are not registered. Bad JSON is a
+		// warning and starts everything (never fails activation).
+		if hasSettings {
+			var skipped int
+			servers, skipped = filterDisabledMCPServers(servers,
+				settingsService.Get(contracts.SettingMCPDisabledServers, ""), logf)
+			if skipped > 0 {
+				logf("[toolkit] skipped %d disabled MCP server(s) (%s)", skipped, contracts.SettingMCPDisabledServers)
+			}
+		}
+
 		// tools.disabled applies to every registry tool; mcp.disabledTools is
 		// kept as a legacy MCP-only alias. The union is applied both while the
 		// MCP clients' tools are collected and once more to the final registry

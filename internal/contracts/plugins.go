@@ -91,6 +91,10 @@ const SettingMCPWorkspaceOptIn = "mcp.workspaceOptIn"
 // not be registered (per-tool switches in the plugins page; restart applies).
 const SettingMCPDisabledTools = "mcp.disabledTools"
 
+// SettingMCPDisabledServers stores a JSON array of MCP server names that are
+// not started (their tools are not registered; restart applies).
+const SettingMCPDisabledServers = "mcp.disabledServers"
+
 // SettingToolsDisabled stores a JSON array of any tool names (built-in or MCP)
 // that should not be registered (the plugins page's per-tool switches; restart
 // applies). It is merged with SettingMCPDisabledTools.

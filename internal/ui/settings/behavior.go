@@ -5,6 +5,7 @@ package settings
 // applies immediately (the session composer's permission chip shares the key).
 
 import (
+	"strconv"
 	"strings"
 
 	"github.com/egoist/mygo/ui"
@@ -136,5 +137,40 @@ func buildBehaviorPage(c *ui.Context, runtime contracts.UIRuntime,
 				"Changes apply immediately (approvals read it dynamically and it is shared with the session toolbar).")),
 				t.TextMuted(design.TypeXXS)).MaxLines(2)
 		})
+		panel(c, t, func() {
+			ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(design.Space2).Children(func() {
+				sectionTitle(c, t, localized(locale, "运行中发送", "Sending while running"))
+				ui.Spacer(c).Grow(1)
+				if st.status != "" {
+					statusBadge(c, t, st.status, st.statusErr)
+				}
+			})
+			enabled := sendWhileRunningEnabled(store)
+			toggle := ui.Toggle(c, &enabled, localized(locale,
+				"运行中允许排队发送", "Queue prompts while running"))
+			if toggle.Changed() {
+				if err := store.Set(contracts.SettingSendWhileRunning, strconv.FormatBool(enabled)); err != nil {
+					st.status = localized(locale, "保存失败：", "Save failed: ") + err.Error()
+					st.statusErr = true
+				} else {
+					st.status = localized(locale, "已保存", "Saved")
+					st.statusErr = false
+				}
+				runtime.Invalidate()
+			}
+			design.Apply(ui.Text(c, localized(locale,
+				"发送的提示会在当前回合结束后依次发出。",
+				"Queued prompts are sent one by one after the current turn finishes.")),
+				t.TextMuted(design.TypeXXS)).MaxLines(2)
+		})
 	})
+}
+
+// sendWhileRunningEnabled normalizes the stored ui.sendWhileRunning row: only
+// "true" enables queueing; missing, empty and malformed values are off.
+func sendWhileRunningEnabled(store contracts.SettingsService) bool {
+	if store == nil {
+		return false
+	}
+	return strings.EqualFold(strings.TrimSpace(store.Get(contracts.SettingSendWhileRunning, "")), "true")
 }

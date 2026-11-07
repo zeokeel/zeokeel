@@ -55,16 +55,25 @@ func buildScreen(c *ui.Context, runtime contracts.UIRuntime, navigator contracts
 			buildAutomationError(c, t, st.tr("读取任务失败：", "Failed to read tasks: ")+err.Error())
 			return
 		}
-		if len(tasks) == 0 {
+		buildTaskToolbar(c, t, runtime, st)
+		filtered := filterAutomationTasks(tasks, st.query, st.taskFilter)
+		if len(tasks) > 0 {
+			design.Apply(ui.Text(c, automationTaskCountLabel(st, len(filtered))),
+				t.Font(design.TypeXXS)).TextColor(t.LabelTertiary)
+		}
+		switch {
+		case len(tasks) == 0:
 			buildAutomationEmpty(c, t, icons.Clock(), st.localized(cfg.EmptyText, "还没有自动化任务", "No automation tasks yet"))
 			design.Apply(ui.Text(c, st.tr(
 				"创建后按计划自动运行；也可以随时立即运行。",
 				"Tasks run on their schedule after creation; you can also run one now.")),
 				t.TextMuted(design.TypeXXS))
-		} else {
+		case len(filtered) == 0:
+			buildAutomationEmpty(c, t, icons.Search(), st.tr("没有匹配的任务", "No matching tasks"))
+		default:
 			ui.Scroll(c).FillWidth().Grow(1).Children(func() {
 				ui.Column(c).FillWidth().Gap(design.Space2).Children(func() {
-					for _, task := range tasks {
+					for _, task := range filtered {
 						buildTaskCard(c, t, service, runtime, st, task)
 					}
 				})
@@ -73,6 +82,77 @@ func buildScreen(c *ui.Context, runtime contracts.UIRuntime, navigator contracts
 	})
 
 	buildDeleteDialog(c, t, service, runtime, st)
+}
+
+// Task filter values of the enable-state PopoverMenuButton (session-local).
+const (
+	taskFilterAll      = ""
+	taskFilterEnabled  = "enabled"
+	taskFilterDisabled = "disabled"
+)
+
+// automationTaskCountLabel renders the filtered result count.
+func automationTaskCountLabel(st *state, count int) string {
+	if st.english() {
+		if count == 1 {
+			return "1 task"
+		}
+		return fmt.Sprintf("%d tasks", count)
+	}
+	return fmt.Sprintf("%d 个任务", count)
+}
+
+// filterAutomationTasks keeps the tasks matching the case-insensitive search
+// (name or prompt substring) and the enable-state filter.
+func filterAutomationTasks(tasks []contracts.AutomationTask, query, filter string) []contracts.AutomationTask {
+	needle := strings.ToLower(strings.TrimSpace(query))
+	out := make([]contracts.AutomationTask, 0, len(tasks))
+	for _, task := range tasks {
+		switch filter {
+		case taskFilterEnabled:
+			if !task.Enabled {
+				continue
+			}
+		case taskFilterDisabled:
+			if task.Enabled {
+				continue
+			}
+		}
+		if needle != "" {
+			name := strings.ToLower(task.Name)
+			prompt := strings.ToLower(task.Prompt)
+			if !strings.Contains(name, needle) && !strings.Contains(prompt, needle) {
+				continue
+			}
+		}
+		out = append(out, task)
+	}
+	return out
+}
+
+// buildTaskToolbar is the list toolbar: the search field and the enable-state
+// filter menu (the filter is session-local state, not persisted).
+func buildTaskToolbar(c *ui.Context, t *design.Tokens, runtime contracts.UIRuntime, st *state) {
+	ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(design.Space2).Children(func() {
+		ui.SearchField(c, &st.query).
+			Label(st.tr("搜索任务", "Search tasks")).
+			Placeholder(st.tr("搜索任务…", "Search tasks…")).Grow(1)
+		ui.PopoverMenuButton(c, st.tr("筛选", "Filter"), func(m *ui.Menu) {
+			choices := []struct{ value, zh, en string }{
+				{taskFilterAll, "全部", "All"},
+				{taskFilterEnabled, "仅启用", "Enabled only"},
+				{taskFilterDisabled, "仅停用", "Disabled only"},
+			}
+			for _, choice := range choices {
+				item := m.Item(st.tr(choice.zh, choice.en))
+				item.Checked(st.taskFilter == choice.value)
+				if item.Chosen() && st.taskFilter != choice.value {
+					st.taskFilter = choice.value
+					runtime.Invalidate()
+				}
+			}
+		}).Tooltip(st.tr("按启用状态筛选任务", "Filter tasks by enabled state"))
+	})
 }
 
 // buildTaskCard is one scheduled task: name, native enable toggle, schedule,

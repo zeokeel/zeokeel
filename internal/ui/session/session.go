@@ -157,6 +157,13 @@ type state struct {
 	// 「已复制」badge stays until another message is copied).
 	copiedMessage string
 
+	// queuedPrompts holds prompts submitted while a turn was running (only
+	// when ui.sendWhileRunning is on); queueSessionID is the session they
+	// belong to and queueErr the last delivery failure. UI thread only.
+	queuedPrompts  []string
+	queueSessionID string
+	queueErr       string
+
 	// Composer command feedback: the /stop notice (success badge or danger
 	// line) and the /help modal switch.
 	commandNotice string
@@ -236,8 +243,11 @@ func Module() *module.Descriptor[Config] {
 
 		// Session changes arrive on the agent goroutine; hop to the UI thread
 		// and request a frame. The unsubscribe is kernel-effect owned.
-		unsubscribe, err := chat.Subscribe(func(string) {
-			runtime.Post(func() { runtime.Invalidate() })
+		unsubscribe, err := chat.Subscribe(func(sessionID string) {
+			runtime.Post(func() {
+				processQueuedPrompts(chat, moduleState, sessionID)
+				runtime.Invalidate()
+			})
 		})
 		if err != nil {
 			return err
@@ -605,4 +615,72 @@ func firstNonEmpty(values ...string) string {
 		}
 	}
 	return ""
+}
+
+// sendWhileRunningEnabled normalizes ui.sendWhileRunning: only "true" enables
+// queueing; missing, empty and malformed values are off.
+func sendWhileRunningEnabled(settings contracts.SettingsService) bool {
+	if settings == nil {
+		return false
+	}
+	return strings.EqualFold(strings.TrimSpace(settings.Get(contracts.SettingSendWhileRunning, "")), "true")
+}
+
+// syncQueuedSession drops the pending queue when the active session changes.
+// Queued prompts intentionally stay with the session they were typed in: they
+// are never replayed into a different conversation on a switch/new session.
+func syncQueuedSession(st *state, activeID string) {
+	if st == nil || st.queueSessionID == "" || st.queueSessionID == activeID {
+		return
+	}
+	st.queuedPrompts = nil
+	st.queueSessionID = ""
+	st.queueErr = ""
+}
+
+// queueDraft appends the trimmed draft to the prompt queue, clears the draft
+// and returns false for empty text. Attachments are not queued.
+func queueDraft(st *state, activeID string) bool {
+	if st == nil || activeID == "" {
+		return false
+	}
+	prompt := strings.TrimSpace(st.draft)
+	if prompt == "" {
+		return false
+	}
+	st.queuedPrompts = append(st.queuedPrompts, prompt)
+	st.queueSessionID = activeID
+	st.draft = ""
+	st.queueErr = ""
+	return true
+}
+
+// processQueuedPrompts sends the first queued prompt once the session it
+// belongs to is no longer running. A failed Send keeps the prompt and surfaces
+// the danger line; the next notification (or frame check) retries it.
+func processQueuedPrompts(chat contracts.ChatService, st *state, sessionID string) {
+	if st == nil {
+		return
+	}
+	// A notification from the old session may arrive after the user switched
+	// conversations; the queue belongs to the session it was typed in and must
+	// never replay into (or after leaving) another one.
+	syncQueuedSession(st, strings.TrimSpace(chat.ActiveSession()))
+	if len(st.queuedPrompts) == 0 || st.queueSessionID != sessionID {
+		return
+	}
+	session, ok := chat.Session(sessionID)
+	if !ok || session.Running {
+		return
+	}
+	prompt := st.queuedPrompts[0]
+	if err := chat.Send(sessionID, prompt); err != nil {
+		st.queueErr = st.tr("排队发送失败：", "Queued send failed: ") + err.Error()
+		return
+	}
+	st.queuedPrompts = st.queuedPrompts[1:]
+	st.queueErr = ""
+	if len(st.queuedPrompts) == 0 {
+		st.queueSessionID = ""
+	}
 }

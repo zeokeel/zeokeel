@@ -21,6 +21,13 @@
 - 右侧栏「文件」Tab：打开文件夹（mygo 原生 Directory picker）、目录进入/面包屑、文本/Markdown/图片预览、
   刷新与错误状态；E2E 覆盖工作区创建 + 列表 + 预览帧
 
+**TDD-queue/mcp-servers/automation-filter（2026-11-08）**
+- 运行中排队发送：行为页开关 `ui.sendWhileRunning`；Running 且开启时草稿入队（Badge N 条），回合结束订阅/每帧 flush FIFO，
+  失败保留重试，切会话清队列；session 142 / settings 139 测试
+- MCP server 级开关：toolkit 合并后按 `mcp.disabledServers` 过滤（不连接/不注册/不出现在输出，坏 JSON 忽略），plugins 详情 Toggle +
+  「已停用」Badge + settings 还原行；toolkit 49 / plugins 28 测试
+- 自动化搜索/筛选：名称/提示词搜索 + 全部/启用/停用筛选 + 计数 + 无匹配空态；automation UI 26 测试
+
 **Round 59 终验（2026-11-08）**
 - 干净环境 `./scripts/verify.sh` **10/10 PASS（108s）**：build/vet/test/race/regression(227 PASS 0 SKIP)/snapshot(64/62)/
   三产品冒烟；唯一修复为 automation 测试等待预算 3s→10s（负载偶发）；覆盖统计终值 **✅38 / 🟡23 / ❌1**

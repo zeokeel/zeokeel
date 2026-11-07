@@ -49,9 +49,17 @@ func buildScreen(c *ui.Context, runtime contracts.UIRuntime, cfg Config, st *sta
 				t.TextMuted(design.TypeXS)).MaxLines(2)
 		})
 
+		if st.status != "" {
+			color := t.Success
+			if st.statusErr {
+				color = t.DangerText
+			}
+			design.Apply(ui.Text(c, st.status), t.Font(design.TypeXXS)).TextColor(color)
+		}
+
 		ui.Scroll(c).FillWidth().Grow(1).Children(func() {
 			ui.Column(c).FillWidth().Gap(design.Space5).Children(func() {
-				buildMCPsSection(c, t, runtime, pluginsService, hasPlugins, cfg, st)
+				buildMCPsSection(c, t, runtime, pluginsService, hasPlugins, cfg, st, settings, hasSettings)
 				buildToolsSection(c, t, toolkit, hasToolkit, st, cfg, runtime, settings, hasSettings)
 			})
 		})
@@ -67,6 +75,8 @@ func buildMCPsSection(
 	hasService bool,
 	cfg Config,
 	st *state,
+	settings contracts.SettingsService,
+	hasSettings bool,
 ) {
 	ui.Column(c).FillWidth().Gap(design.Space2).Children(func() {
 		ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(design.Space2).Children(func() {
@@ -80,18 +90,25 @@ func buildMCPsSection(
 				}
 			}
 		})
-		if !hasService {
-			buildPluginsMuted(c, t, st.tr("插件服务未启用", "Plugins service not enabled"))
-			return
+		st.loadDisabledServers(settings, hasSettings)
+		var servers []contracts.MCPPlugin
+		if hasService {
+			servers = service.MCP()
 		}
-		servers := service.MCP()
+		// Disabled servers are not started, so the service omits them; settings
+		// still knows the user-configured rows, which restore their cards.
+		servers = append(servers, st.disabledServerRows(settings, hasSettings, servers)...)
 		if len(servers) == 0 {
+			if !hasService {
+				buildPluginsMuted(c, t, st.tr("插件服务未启用", "Plugins service not enabled"))
+				return
+			}
 			buildPluginsMuted(c, t, st.tr("还没有配置 MCP 服务器（assembly 的 mcpServers）",
 				"No MCP servers configured yet (assembly mcpServers)"))
 			return
 		}
 		for index, server := range servers {
-			buildMCPCard(c, t, runtime, st, server, index)
+			buildMCPCard(c, t, runtime, st, server, index, settings, hasSettings)
 		}
 	})
 }
@@ -114,7 +131,7 @@ func mcpServerKey(server contracts.MCPPlugin, index int) string {
 // the name, status and tool count; expanding reveals the transport, the
 // handshake metadata and the full status text.
 func buildMCPCard(c *ui.Context, t *design.Tokens, runtime contracts.UIRuntime,
-	st *state, server contracts.MCPPlugin, index int) {
+	st *state, server contracts.MCPPlugin, index int, settings contracts.SettingsService, hasSettings bool) {
 	key := mcpServerKey(server, index)
 	expanded := st.mcpExpanded[key]
 
@@ -131,6 +148,10 @@ func buildMCPCard(c *ui.Context, t *design.Tokens, runtime contracts.UIRuntime,
 				FontWeight(600).TextColor(t.LabelPrimary).Grow(1).MaxLines(1).Ellipsis("…")
 			// The collapsed badge carries only the short status prefix; the full
 			// diagnostic (which can be very long) lives in the expanded details.
+			if st.serverDisabled(server.Name) {
+				design.Apply(ui.Badge(c, st.tr("已停用（重启生效）", "Disabled (restart applies)")), t.Badge()).
+					TextColor(t.LabelTertiary)
+			}
 			design.Apply(ui.Badge(c, pluginStatusLabel(st, collapsedMCPStatus(server.Status))), t.Badge()).
 				TextColor(pluginStatusColor(t, server.Status))
 			design.Apply(ui.Badge(c, st.tr(fmt.Sprintf("%d 个工具", server.Tools), fmt.Sprintf("%d tools", server.Tools))), t.Badge())
@@ -160,6 +181,17 @@ func buildMCPCard(c *ui.Context, t *design.Tokens, runtime contracts.UIRuntime,
 		mcpDetailRow(c, t, st.tr("协议", "Protocol"), mcpDetailValue(server.Protocol))
 		mcpDetailRow(c, t, st.tr("工具数", "Tools"), st.tr(fmt.Sprintf("%d 个工具", server.Tools), fmt.Sprintf("%d tools", server.Tools)))
 		mcpDetailRow(c, t, st.tr("状态", "Status"), mcpDetailValue(server.Status))
+		if hasSettings && settings != nil {
+			if name := firstNonEmpty(server.Name, server.ServerName); name != "" {
+				enabled := !st.serverDisabled(name)
+				c.Key("mcp-server-switch/" + key)
+				toggle := ui.Toggle(c, &enabled, st.tr("启用", "Enabled"))
+				if toggle.Changed() {
+					st.setServerEnabled(name, enabled, settings)
+					runtime.Invalidate()
+				}
+			}
+		}
 	})
 }
 
@@ -243,13 +275,6 @@ func buildToolsSection(
 		if st.disabledErr != "" {
 			design.Apply(ui.Text(c, st.tr("禁用工具配置无效：", "Invalid disabled-tools configuration: ")+st.disabledErr),
 				t.Font(design.TypeXXS)).TextColor(t.DangerText)
-		}
-		if st.status != "" {
-			color := t.Success
-			if st.statusErr {
-				color = t.DangerText
-			}
-			design.Apply(ui.Text(c, st.status), t.Font(design.TypeXXS)).TextColor(color)
 		}
 		ui.SearchField(c, &st.query).Label(st.tr("搜索工具", "Search tools")).Placeholder(st.tr("搜索工具", "Search tools")).FillWidth()
 		filtered := filterCatalog(catalog, st.query)

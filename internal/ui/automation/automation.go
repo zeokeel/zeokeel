@@ -72,6 +72,11 @@ type state struct {
 
 	// historyOpen remembers the expanded run-history sections per task id.
 	historyOpen map[string]bool
+
+	// Search/filter state of the task list. It is session-local (not persisted):
+	// reopening the screen restores the unfiltered list.
+	query      string
+	taskFilter string
 }
 
 // Module registers the Automation screen.
@@ -125,6 +130,9 @@ func Module() *module.Descriptor[Config] {
 
 // tr returns the localized copy for the current frame's language.
 func (st *state) tr(zh, en string) string { return uikit.T(st.locale, zh, en) }
+
+// english reports whether the current frame renders English copy.
+func (st *state) english() bool { return uikit.Language(st.locale) == "en" }
 
 // localized translates a value that still carries its built-in Chinese default
 // (an assembly-configured custom label is kept verbatim).

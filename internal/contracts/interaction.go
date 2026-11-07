@@ -102,6 +102,10 @@ const (
 	// ("info","success","warning","error") that should not be shown. Missing
 	// levels are shown (the default).
 	SettingNotificationHiddenLevels = "ui.notifications.hidden"
+	// SettingSendWhileRunning allows queueing prompts while a turn is running;
+	// queued prompts are sent when the run finishes (default false = Send is
+	// disabled while running).
+	SettingSendWhileRunning = "ui.sendWhileRunning"
 	// SettingThemeMode is the appearance source: "light", "dark" or "system"
 	// (the legacy ui.theme.dark boolean is still written for older builds).
 	SettingThemeMode = "ui.theme.mode"
