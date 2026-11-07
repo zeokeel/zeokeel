@@ -189,6 +189,7 @@ if _, err := ctx.Effect(func() cordis.Effect {
 - ✅ 品牌设计体系：`internal/brand`（palette/theme/mark）、`internal/design`（tokens/字阶/间距/组件样式、
   TypeRole、motion）、`internal/icons`（SVG 图标）；uiroot chrome 使用品牌侧栏/brand row/顶栏，
   `ui/{home,session,sidebar,settings,approval,toolcards}` 全部品牌化（native 控件 + design 样式）
+- ✅ 全文搜索：sessionstore `MessageSearcher` + sidebar 消息搜索区
 - ✅ 插件：toolkit `KeyPlugins`（MCP 状态）+ `ui/plugins` 页面（MCP + 工具目录）
 - ✅ 自动化：`internal/modules/automation`（cron/every/after + 持久化 + 执行）+ `ui/automation` 页面
 - ✅ 会话 fork/导出：`SessionForker` + 侧栏创建副本 + 头部原生保存对话框导出 Markdown

@@ -298,6 +298,14 @@ func main() {
 		a.tester.Type("memory")
 		a.render(outDir + "/p2-plugins-search.png")
 	}
+
+	// Sidebar full-text message search over the stored sessions.
+	if rect, ok := a.tester.Find("搜索会话"); ok {
+		a.tester.ClickAt(rect.X+rect.W/2, rect.Y+rect.H/2)
+		a.tester.Frame()
+		a.tester.Type("工作目录")
+		a.render(outDir + "/p2-search.png")
+	}
 }
 
 func boot(baseURL, dataDir string) *app {

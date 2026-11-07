@@ -31,6 +31,7 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/egoist/mygo/ui"
 	cordis "github.com/zeokeel/zeokeel-kernel"
@@ -68,6 +69,12 @@ type paneState struct {
 	// generic navigation item for every module screen except the two the
 	// sidebar draws itself (home destination + the session list).
 	screens contracts.ScreenLister
+
+	// Full-text message search state: the query the cached hits belong to and
+	// the last result/error. Hits are re-queried only when the query changes.
+	searchQuery string
+	searchHits  []contracts.MessageSearchHit
+	searchErr   error
 
 	renameOpen   bool
 	renameTarget string
@@ -280,25 +287,143 @@ func buildSessionList(c *ui.Context, t *design.Tokens, chat contracts.ChatServic
 			query := strings.TrimSpace(state.query)
 			allSessions := chat.Sessions()
 			sessions := filterSessions(allSessions, query)
-			if len(sessions) == 0 {
+			switch {
+			case len(sessions) == 0:
 				empty := "还没有会话"
 				if query != "" {
 					empty = "没有匹配的会话"
 				}
 				design.Apply(ui.Text(c, empty), t.TextMuted(design.TypeXXS)).
 					Padding(design.Space1, design.Space2, 0, design.Space2)
-				return
-			}
-			active := chat.ActiveSession()
-			if hasWorkspace {
+			case hasWorkspace:
 				buildWorkspaceTree(c, t, chat, nav, runtime, state, workspace,
-					workspaces, allSessions, sessions, active, query)
-				return
+					workspaces, allSessions, sessions, chat.ActiveSession(), query)
+			default:
+				active := chat.ActiveSession()
+				for _, info := range sessions {
+					buildSessionRow(c, t, chat, nav, runtime, state, info, info.ID == active, 0)
+				}
 			}
-			for _, info := range sessions {
-				buildSessionRow(c, t, chat, nav, runtime, state, info, info.ID == active, 0)
+			// Full-text message search below the title-filtered list: a query
+			// can match messages of sessions whose title does not match, so this
+			// section renders even when the list above is empty.
+			if query != "" {
+				buildMessageSearch(c, t, chat, nav, runtime, state, query)
 			}
 		})
+}
+
+// maxMessageHits bounds the message-search result rows shown per query.
+const maxMessageHits = 8
+
+// buildMessageSearch renders the durable full-text search results for the
+// current query. The optional store must implement contracts.MessageSearcher;
+// results are cached per query so repeated frames do not re-run the query.
+func buildMessageSearch(c *ui.Context, t *design.Tokens, chat contracts.ChatService,
+	nav contracts.Navigator, runtime contracts.UIRuntime, state *paneState, query string) {
+	store, ok := state.ctx.Get(contracts.KeyStore)
+	if !ok || store == nil {
+		return
+	}
+	searcher, ok := store.(contracts.MessageSearcher)
+	if !ok {
+		return
+	}
+	if state.searchQuery != query {
+		state.searchQuery = query
+		state.searchHits, state.searchErr = searcher.SearchMessages(context.Background(), query, maxMessageHits)
+	}
+
+	ui.Column(c).FillWidth().Gap(design.Space1).Padding(design.Space2, 0, 0, 0).
+		Children(func() {
+			ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(design.Space2).Children(func() {
+				design.Apply(ui.Text(c, "消息搜索"), t.SectionLabel())
+				ui.Spacer(c).Grow(1)
+				if state.searchErr == nil {
+					design.Apply(ui.Badge(c, strconv.Itoa(len(state.searchHits))), t.Badge())
+				}
+			})
+			if state.searchErr != nil {
+				buildSidebarError(c, t, "搜索消息失败："+state.searchErr.Error())
+				return
+			}
+			if len(state.searchHits) == 0 {
+				design.Apply(ui.Text(c, "没有匹配的消息"), t.TextMuted(design.TypeXXS)).
+					Padding(design.Space1, design.Space2, 0, design.Space2)
+				return
+			}
+			for _, hit := range state.searchHits {
+				buildMessageHitRow(c, t, chat, nav, runtime, hit)
+			}
+		})
+}
+
+// buildMessageHitRow is one full-text hit: session title, role, time and the
+// matching snippet; clicking activates that session and opens it.
+func buildMessageHitRow(c *ui.Context, t *design.Tokens, chat contracts.ChatService,
+	nav contracts.Navigator, runtime contracts.UIRuntime, hit contracts.MessageSearchHit) {
+	title := firstNonEmpty(hit.SessionTitle, "未命名会话")
+	label := title + " " + firstNonEmpty(hit.Snippet, hit.Role)
+	row := ui.ButtonBase(c).FillWidth().Padding(design.Space1, design.Space2).
+		Radius(design.RadiusSM).Label(label)
+	if row.Hovered() {
+		row.Background(t.BgHover)
+	}
+	row.Children(func() {
+		ui.Column(c).FillWidth().Gap(design.Space1).Children(func() {
+			ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(design.Space2).Children(func() {
+				design.Apply(ui.Text(c, title), t.Font(design.TypeXS)).
+					FontWeight(600).TextColor(t.LabelPrimary).Grow(1).MaxLines(1).Ellipsis("…")
+				design.Apply(ui.Text(c, messageRoleLabel(hit.Role)), t.Font(design.TypeXXXS)).
+					TextColor(t.LabelTertiary)
+				design.Apply(ui.Text(c, formatHitTime(hit.CreatedAt)), t.Font(design.TypeXXXS)).
+					TextColor(t.LabelTertiary)
+			})
+			if snippet := strings.TrimSpace(hit.Snippet); snippet != "" {
+				design.Apply(ui.Text(c, snippet), t.Font(design.TypeXXS)).
+					TextColor(t.LabelSecondary).MaxLines(2)
+			}
+		})
+	})
+	row.OnClick(func() {
+		_ = chat.SetActiveSession(hit.SessionID)
+		runtime.Post(func() { _ = nav.Push("session") })
+		runtime.Invalidate()
+	})
+}
+
+// messageRoleLabel renders a message role for a search hit.
+func messageRoleLabel(role string) string {
+	switch strings.ToLower(strings.TrimSpace(role)) {
+	case "user":
+		return "用户"
+	case "assistant":
+		return "助手"
+	case "tool":
+		return "工具"
+	case "":
+		return "消息"
+	default:
+		return strings.TrimSpace(role)
+	}
+}
+
+// formatHitTime renders a hit timestamp compactly (empty when unset).
+func formatHitTime(value time.Time) string {
+	if value.IsZero() {
+		return ""
+	}
+	return value.Local().Format("01-02 15:04")
+}
+
+// buildSidebarError is the sidebar's danger row.
+func buildSidebarError(c *ui.Context, t *design.Tokens, text string) {
+	th := t.Theme()
+	ui.Row(c).FillWidth().Gap(design.Space2).AlignItems(ui.Start).Children(func() {
+		ui.Icon(c, icons.AlertTriangle()).Size(th.Space(3), th.Space(3)).TextColor(t.Danger)
+		design.Apply(ui.Text(c, text), t.Font(design.TypeXXXS)).
+			TextColor(t.DangerText).MaxLines(2)
+	})
 }
 
 // ungroupedWorkspaceKey is the fold key of the synthetic "未分组" group.

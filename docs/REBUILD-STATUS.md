@@ -21,6 +21,11 @@
 - 右侧栏「文件」Tab：打开文件夹（mygo 原生 Directory picker）、目录进入/面包屑、文本/Markdown/图片预览、
   刷新与错误状态；E2E 覆盖工作区创建 + 列表 + 预览帧
 
+**P3 全文搜索（2026-11-08）**
+- sessionstore `SearchMessages`：跨会话消息 LIKE（大小写不敏感、%/_/\ 字面转义）、SessionTitle、Role、
+  CreatedAt、rune 安全 snippet（去 Markdown 代码块/标题标记）、limit 默认 50/上限 200、新→旧
+- sidebar：搜索框非空时「消息搜索」区（命中数 + 标题/角色/时间/片段），点击跳转会话；E2E 验证发送→搜索→跳转
+
 **P3 插件页（2026-11-08）**
 - toolkit 提供 `KeyPlugins`：MCP servers 快照（Name/URL/ServerName/Version/Protocol/Tools/Status）、Refresh Ping +
   ListTools 刷新；连接失败保留条目

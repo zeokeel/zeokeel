@@ -136,6 +136,9 @@ go test ./...
 - ✅ P3 插件页：toolkit 暴露 `KeyPlugins`（MCP 服务器快照/Ping 刷新/工具数）；`zeokeel-ui/plugins` 插件页
   （MCP 插件状态卡 + 48 工具目录按分类分组 + 搜索过滤）+ 侧栏「插件」导航；截图 `p2-plugins.png`、
   `p2-plugins-search.png`；desktop 22 实例
+- ✅ P3 全文搜索：sessionstore `MessageSearcher`（跨会话消息 LIKE 搜索、LIKE 字面转义、snippet 去
+  Markdown 标记、新旧排序、limit 上限）；侧栏搜索框输入后显示「消息搜索」命中列表（标题/角色/时间/
+  片段），点击跳转会话；截图 `p2-search.png`
 - ⬜ 后续阶段见 [docs/PRODUCT-REBUILD-PLAN.md](docs/PRODUCT-REBUILD-PLAN.md)：
   P2 剩余（composer 附件/图片/@ 提及、右侧栏 Files/Terminal/Log 页、会话操作上下文菜单）→
   P3 memory/skills/automation/插件/workspace diff/搜索/fork/export → P4 ACP/热键/导入/更新/诊断

@@ -145,12 +145,26 @@ type harness struct {
 
 func newHarness(t *testing.T, chat contracts.ChatService, cfg sidebar.Config) *harness {
 	t.Helper()
-	return newHarnessWithWorkspace(t, chat, cfg, nil)
+	return newHarnessFull(t, chat, cfg, nil, nil)
 }
 
 // newHarnessWithWorkspace is newHarness with an optional workspace backend
 // provided as contracts.KeyWorkspace (nil keeps the legacy flat session list).
 func newHarnessWithWorkspace(t *testing.T, chat contracts.ChatService, cfg sidebar.Config, workspace contracts.WorkspaceService) *harness {
+	t.Helper()
+	return newHarnessFull(t, chat, cfg, workspace, nil)
+}
+
+// newHarnessWithStore is newHarness with an optional durable store provided as
+// contracts.KeyStore (its MessageSearcher half powers the message-search area).
+func newHarnessWithStore(t *testing.T, chat contracts.ChatService, store contracts.Store, cfg sidebar.Config) *harness {
+	t.Helper()
+	return newHarnessFull(t, chat, cfg, nil, store)
+}
+
+// newHarnessFull builds the sidebar harness with the optional workspace and
+// durable store backends.
+func newHarnessFull(t *testing.T, chat contracts.ChatService, cfg sidebar.Config, workspace contracts.WorkspaceService, store contracts.Store) *harness {
 	t.Helper()
 	uiRoot := uiroot.New(uiroot.Config{AppName: "ZeoKeel"})
 	ctx := cordis.Root()
@@ -164,6 +178,9 @@ func newHarnessWithWorkspace(t *testing.T, chat contracts.ChatService, cfg sideb
 	provide(t, ctx, contracts.KeyChat, contracts.ChatService(chat))
 	if workspace != nil {
 		provide[contracts.WorkspaceService](t, ctx, contracts.KeyWorkspace, workspace)
+	}
+	if store != nil {
+		provide[contracts.Store](t, ctx, contracts.KeyStore, store)
 	}
 
 	// The destination screens must exist for nav.Push to succeed. The host no
