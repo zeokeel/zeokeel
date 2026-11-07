@@ -127,9 +127,36 @@ func TestP1ApprovalToolsAndPersistence(t *testing.T) {
 	if err != nil {
 		t.Fatalf("require workspace: %v", err)
 	}
-	if _, err := workspaces.Create(context.Background(), "demo", workspaceRoot); err != nil {
+	workspace, err := workspaces.Create(context.Background(), "demo", workspaceRoot)
+	if err != nil {
 		t.Fatalf("create workspace: %v", err)
 	}
+	// A session created while the workspace is current carries the association
+	// and appears nested under the workspace in the sidebar tree.
+	workspaceSessionID, err := chat.NewSession("工作区会话")
+	if err != nil {
+		t.Fatalf("NewSession in workspace: %v", err)
+	}
+	associated := false
+	for _, info := range chat.Sessions() {
+		if info.ID == workspaceSessionID && info.WorkspaceID == workspace.ID {
+			associated = true
+		}
+	}
+	if !associated {
+		t.Fatalf("workspace session is not associated: %+v", chat.Sessions())
+	}
+	tester.Frame()
+	for _, want := range []string{"工作区", "demo", "工作区会话"} {
+		if !tester.HasText(want) {
+			t.Fatalf("workspace tree missing %q; texts = %v", want, tester.Texts())
+		}
+	}
+	// Keep the original conversation active for the remaining assertions.
+	if err := chat.SetActiveSession(sessionID); err != nil {
+		t.Fatalf("reactivate original session: %v", err)
+	}
+	tester.Frame()
 	uiRoot.SetRightPanelOpen(true)
 	tester.Frame()
 	if err := tester.Click("文件"); err != nil {
@@ -211,11 +238,20 @@ func TestP1ApprovalToolsAndPersistence(t *testing.T) {
 	}()
 	chat2 := requireChat(t, root2)
 	sessions := chat2.Sessions()
-	if len(sessions) != 1 || sessions[0].ID != sessionID {
+	var restoredInfo *contracts.ChatSessionInfo
+	for index := range sessions {
+		if sessions[index].ID == sessionID {
+			restoredInfo = &sessions[index]
+		}
+	}
+	if restoredInfo == nil {
 		t.Fatalf("restored sessions = %+v, want session %q", sessions, sessionID)
 	}
-	if sessions[0].Title != title {
-		t.Fatalf("restored title = %q, want %q", sessions[0].Title, title)
+	if restoredInfo.Title != title {
+		t.Fatalf("restored title = %q, want %q", restoredInfo.Title, title)
+	}
+	if err := chat2.SetActiveSession(sessionID); err != nil {
+		t.Fatalf("reactivate restored session: %v", err)
 	}
 	restored, ok := chat2.Session(sessionID)
 	if !ok || len(restored.Messages) == 0 {

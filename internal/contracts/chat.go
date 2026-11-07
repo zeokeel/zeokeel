@@ -72,7 +72,10 @@ type ChatSession struct {
 
 // ChatSessionInfo is the list-item view of a session for the sidebar.
 type ChatSessionInfo struct {
-	ID           string
+	ID string
+	// WorkspaceID is the workspace the session was created in ("" when none
+	// was open or the backend does not track workspaces).
+	WorkspaceID  string
 	Title        string
 	MessageCount int
 	Running      bool

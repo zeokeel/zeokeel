@@ -21,6 +21,11 @@
 - 右侧栏「文件」Tab：打开文件夹（mygo 原生 Directory picker）、目录进入/面包屑、文本/Markdown/图片预览、
   刷新与错误状态；E2E 覆盖工作区创建 + 列表 + 预览帧
 
+**P3 会话↔工作区（2026-11-07 晚）**
+- sessionstore：sessions 表幂等迁移 workspace_id（旧库兼容、重启不重复）+ SessionWorkspaceStore.SetSessionWorkspace
+- agent：NewSession/首次 Send 绑定当前工作区并持久化，ChatSessionInfo.WorkspaceID/restore 恢复
+- sidebar：workspace→session 树（组头折叠/会话数/当前工作区高亮/未分组/跨组搜索），E2E 覆盖关联与树渲染
+
 **P3 工作区变更 diff（2026-11-07 晚）**
 - `WorkspaceDiffer.Changes`：git status --porcelain=v1 -z 解析（M/A/D/R/??、rename 新路径、嵌套 workspace
   路径翻译）、`git diff HEAD` 生成 unified diff（二进制/untracked 空 diff、maxChanges=100 / maxDiffBytes=256KiB、

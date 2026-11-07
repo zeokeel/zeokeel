@@ -189,6 +189,7 @@ if _, err := ctx.Effect(func() cordis.Effect {
 - ✅ 品牌设计体系：`internal/brand`（palette/theme/mark）、`internal/design`（tokens/字阶/间距/组件样式、
   TypeRole、motion）、`internal/icons`（SVG 图标）；uiroot chrome 使用品牌侧栏/brand row/顶栏，
   `ui/{home,session,sidebar,settings,approval,toolcards}` 全部品牌化（native 控件 + design 样式）
+- ✅ 会话↔工作区：sessionstore `workspace_id` 迁移 + agent 记录 + sidebar workspace→session 树
 - ✅ 工作区变更：`WorkspaceDiffer`（git status/diff）→ `ui/rightpanel` 变更页（diff 行着色）
 - ✅ 工作区：`internal/modules/workspace`（注册表 + 沙箱 Files/ReadFile/Search）；`ui/rightpanel` Files 页
   （打开文件夹/目录浏览/预览）

@@ -8,7 +8,8 @@
 //
 // The schema is created idempotently on open:
 //
-//	sessions(id TEXT PRIMARY KEY, title TEXT, created_at INTEGER, updated_at INTEGER)
+//	sessions(id TEXT PRIMARY KEY, workspace_id TEXT NOT NULL DEFAULT '',
+//	         title TEXT, created_at INTEGER, updated_at INTEGER)
 //	messages(id INTEGER PRIMARY KEY AUTOINCREMENT, session_id TEXT NOT NULL
 //	         REFERENCES sessions(id) ON DELETE CASCADE, ordinal INTEGER,
 //	         payload BLOB NOT NULL, created_at INTEGER)
@@ -102,7 +103,10 @@ type store struct {
 	logger contracts.Logger
 }
 
-var _ contracts.Store = (*store)(nil)
+var (
+	_ contracts.Store                 = (*store)(nil)
+	_ contracts.SessionWorkspaceStore = (*store)(nil)
+)
 
 // historyView is the rig.History view of a store.
 type historyView struct{ store *store }
@@ -118,6 +122,7 @@ var _ rig.CheckpointStore = checkpointView{}
 var schemaStatements = []string{
 	`CREATE TABLE IF NOT EXISTS sessions (
 		id TEXT PRIMARY KEY,
+		workspace_id TEXT NOT NULL DEFAULT '',
 		title TEXT,
 		created_at INTEGER,
 		updated_at INTEGER
@@ -223,7 +228,54 @@ func (s *store) initSchema(ctx context.Context) error {
 			return fmt.Errorf("sessionstore: initialize schema: %w", err)
 		}
 	}
+	return s.migrateWorkspaceColumn(ctx)
+}
+
+// migrateWorkspaceColumn adds sessions.workspace_id to databases created before
+// workspace association existed. SQLite has no ADD COLUMN IF NOT EXISTS, so the
+// column list is inspected first; the migration is idempotent.
+func (s *store) migrateWorkspaceColumn(ctx context.Context) error {
+	exists, err := s.hasColumn(ctx, "sessions", "workspace_id")
+	if err != nil {
+		return err
+	}
+	if exists {
+		return nil
+	}
+	if _, err := s.db.ExecContext(ctx,
+		`ALTER TABLE sessions ADD COLUMN workspace_id TEXT NOT NULL DEFAULT ''`); err != nil {
+		return fmt.Errorf("sessionstore: add sessions.workspace_id: %w", err)
+	}
 	return nil
+}
+
+// hasColumn reports whether table has the named column.
+func (s *store) hasColumn(ctx context.Context, table, column string) (bool, error) {
+	rows, err := s.db.QueryContext(ctx, "PRAGMA table_info("+table+")")
+	if err != nil {
+		return false, fmt.Errorf("sessionstore: inspect schema of %s: %w", table, err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var (
+			cid          int
+			name         string
+			columnType   string
+			notNull      int
+			defaultValue any
+			primaryKey   int
+		)
+		if err := rows.Scan(&cid, &name, &columnType, &notNull, &defaultValue, &primaryKey); err != nil {
+			return false, fmt.Errorf("sessionstore: inspect schema of %s: %w", table, err)
+		}
+		if name == column {
+			return true, nil
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return false, fmt.Errorf("sessionstore: inspect schema of %s: %w", table, err)
+	}
+	return false, nil
 }
 
 // Close closes the database. It is called by the module cleanup effect.
@@ -353,13 +405,40 @@ func (s *store) RenameSession(ctx context.Context, id, title string) error {
 	return nil
 }
 
+// SetSessionWorkspace implements contracts.SessionWorkspaceStore: it records
+// which workspace a durable session belongs to. Unknown sessions return
+// ErrUnknownSession; an empty workspace ID clears the association.
+func (s *store) SetSessionWorkspace(ctx context.Context, sessionID, workspaceID string) error {
+	id, err := requireSessionID(sessionID)
+	if err != nil {
+		return err
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	result, err := s.db.ExecContext(ctx,
+		`UPDATE sessions SET workspace_id = ? WHERE id = ?`,
+		strings.TrimSpace(workspaceID), id)
+	if err != nil {
+		return fmt.Errorf("sessionstore: set workspace of session %q: %w", id, err)
+	}
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("sessionstore: set workspace of session %q: %w", id, err)
+	}
+	if affected == 0 {
+		return fmt.Errorf("%w: %q", ErrUnknownSession, id)
+	}
+	return nil
+}
+
 // Sessions implements contracts.Store: newest updated first.
 func (s *store) Sessions(ctx context.Context) ([]contracts.SessionMeta, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
 	rows, err := s.db.QueryContext(ctx, `
-		SELECT s.id, s.title, s.created_at, s.updated_at,
+		SELECT s.id, s.workspace_id, s.title, s.created_at, s.updated_at,
 		       (SELECT COUNT(*) FROM messages m WHERE m.session_id = s.id)
 		FROM sessions s
 		ORDER BY s.updated_at DESC, s.id ASC`)
@@ -391,7 +470,7 @@ func (s *store) GetSessionMeta(ctx context.Context, id string) (contracts.Sessio
 		return contracts.SessionMeta{}, false, err
 	}
 	row := s.db.QueryRowContext(ctx, `
-		SELECT s.id, s.title, s.created_at, s.updated_at,
+		SELECT s.id, s.workspace_id, s.title, s.created_at, s.updated_at,
 		       (SELECT COUNT(*) FROM messages m WHERE m.session_id = s.id)
 		FROM sessions s WHERE s.id = ?`, id)
 	meta, err := scanSessionMetaRow(row)
@@ -748,15 +827,17 @@ func ensureSessionTx(ctx context.Context, tx execer, id string, now int64) error
 // scanSessionMeta scans one session row from rows.
 func scanSessionMeta(rows *sql.Rows) (contracts.SessionMeta, error) {
 	var (
-		meta    contracts.SessionMeta
-		title   sql.NullString
-		created sql.NullInt64
-		updated sql.NullInt64
-		count   int64
+		meta      contracts.SessionMeta
+		workspace sql.NullString
+		title     sql.NullString
+		created   sql.NullInt64
+		updated   sql.NullInt64
+		count     int64
 	)
-	if err := rows.Scan(&meta.ID, &title, &created, &updated, &count); err != nil {
+	if err := rows.Scan(&meta.ID, &workspace, &title, &created, &updated, &count); err != nil {
 		return contracts.SessionMeta{}, fmt.Errorf("sessionstore: scan session: %w", err)
 	}
+	meta.WorkspaceID = workspace.String
 	meta.Title = title.String
 	meta.CreatedAt = timeFromNanos(created.Int64)
 	meta.UpdatedAt = timeFromNanos(updated.Int64)
@@ -767,15 +848,17 @@ func scanSessionMeta(rows *sql.Rows) (contracts.SessionMeta, error) {
 // scanSessionMetaRow is scanSessionMeta for a single *sql.Row.
 func scanSessionMetaRow(row *sql.Row) (contracts.SessionMeta, error) {
 	var (
-		meta    contracts.SessionMeta
-		title   sql.NullString
-		created sql.NullInt64
-		updated sql.NullInt64
-		count   int64
+		meta      contracts.SessionMeta
+		workspace sql.NullString
+		title     sql.NullString
+		created   sql.NullInt64
+		updated   sql.NullInt64
+		count     int64
 	)
-	if err := row.Scan(&meta.ID, &title, &created, &updated, &count); err != nil {
+	if err := row.Scan(&meta.ID, &workspace, &title, &created, &updated, &count); err != nil {
 		return contracts.SessionMeta{}, err
 	}
+	meta.WorkspaceID = workspace.String
 	meta.Title = title.String
 	meta.CreatedAt = timeFromNanos(created.Int64)
 	meta.UpdatedAt = timeFromNanos(updated.Int64)

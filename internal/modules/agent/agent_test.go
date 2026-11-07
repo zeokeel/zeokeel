@@ -80,6 +80,17 @@ func (l *fakeLogger) Printf(format string, args ...any) {
 	l.lines = append(l.lines, fmt.Sprintf(format, args...))
 }
 
+func (l *fakeLogger) contains(fragment string) bool {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	for _, line := range l.lines {
+		if strings.Contains(line, fragment) {
+			return true
+		}
+	}
+	return false
+}
+
 func (l *fakeLogger) count() int {
 	l.mu.Lock()
 	defer l.mu.Unlock()
@@ -796,18 +807,33 @@ type fakeStore struct {
 	mu          sync.Mutex
 	sessions    map[string]*fakeSession
 	checkpoints map[string]*rig.Checkpoint
+
+	workspace    map[string]string
+	workspaceLog []workspaceCall
+	workspaceErr error
+}
+
+// workspaceCall records one SetSessionWorkspace invocation.
+type workspaceCall struct {
+	sessionID   string
+	workspaceID string
 }
 
 type fakeSession struct {
-	title    string
-	created  time.Time
-	updated  time.Time
-	messages []rig.Message
-	events   []rig.SessionEvent
+	title       string
+	workspaceID string
+	created     time.Time
+	updated     time.Time
+	messages    []rig.Message
+	events      []rig.SessionEvent
 }
 
 func newFakeStore() *fakeStore {
-	return &fakeStore{sessions: map[string]*fakeSession{}, checkpoints: map[string]*rig.Checkpoint{}}
+	return &fakeStore{
+		sessions:    map[string]*fakeSession{},
+		checkpoints: map[string]*rig.Checkpoint{},
+		workspace:   map[string]string{},
+	}
 }
 
 func (s *fakeStore) sessionLocked(id string) *fakeSession {
@@ -845,13 +871,44 @@ func (s *fakeStore) RenameSession(ctx context.Context, id, title string) error {
 	return nil
 }
 
+// SetSessionWorkspace implements contracts.SessionWorkspaceStore.
+func (s *fakeStore) SetSessionWorkspace(ctx context.Context, sessionID, workspaceID string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.workspaceLog = append(s.workspaceLog, workspaceCall{sessionID: sessionID, workspaceID: workspaceID})
+	if s.workspaceErr != nil {
+		return s.workspaceErr
+	}
+	state, ok := s.sessions[sessionID]
+	if !ok {
+		return errors.New("fake store: unknown session")
+	}
+	state.workspaceID = workspaceID
+	s.workspace[sessionID] = workspaceID
+	return nil
+}
+
+// workspaceOf returns the recorded workspace association ("" when none).
+func (s *fakeStore) workspaceOf(sessionID string) string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.workspace[sessionID]
+}
+
+// workspaceCalls returns a copy of the SetSessionWorkspace log.
+func (s *fakeStore) workspaceCalls() []workspaceCall {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return append([]workspaceCall(nil), s.workspaceLog...)
+}
+
 func (s *fakeStore) Sessions(ctx context.Context) ([]contracts.SessionMeta, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	out := make([]contracts.SessionMeta, 0, len(s.sessions))
 	for id, state := range s.sessions {
 		out = append(out, contracts.SessionMeta{
-			ID: id, Title: state.title, MessageCount: len(state.messages),
+			ID: id, WorkspaceID: state.workspaceID, Title: state.title, MessageCount: len(state.messages),
 			CreatedAt: state.created, UpdatedAt: state.updated,
 		})
 	}
@@ -866,8 +923,8 @@ func (s *fakeStore) GetSessionMeta(ctx context.Context, id string) (contracts.Se
 	if !ok {
 		return contracts.SessionMeta{}, false, nil
 	}
-	return contracts.SessionMeta{ID: id, Title: state.title, MessageCount: len(state.messages),
-		CreatedAt: state.created, UpdatedAt: state.updated}, true, nil
+	return contracts.SessionMeta{ID: id, WorkspaceID: state.workspaceID, Title: state.title,
+		MessageCount: len(state.messages), CreatedAt: state.created, UpdatedAt: state.updated}, true, nil
 }
 
 func (s *fakeStore) AppendEvent(ctx context.Context, event rig.SessionEvent) error {
@@ -1308,5 +1365,236 @@ func TestUserMessageEventCarriesAttachmentNames(t *testing.T) {
 	}
 	if !found {
 		t.Fatal("no user_message event recorded")
+	}
+}
+
+// --- P3: session ↔ workspace association -----------------------------------
+
+// fakeWorkspace is a minimal contracts.WorkspaceService: only Current is used
+// by the agent, the file APIs report "not implemented".
+type fakeWorkspace struct {
+	mu         sync.Mutex
+	current    contracts.Workspace
+	hasCurrent bool
+	currentErr error
+}
+
+func (f *fakeWorkspace) setCurrent(workspace contracts.Workspace, ok bool) {
+	f.mu.Lock()
+	f.current, f.hasCurrent = workspace, ok
+	f.mu.Unlock()
+}
+
+func (f *fakeWorkspace) setCurrentError(err error) {
+	f.mu.Lock()
+	f.currentErr = err
+	f.mu.Unlock()
+}
+
+func (f *fakeWorkspace) Current(context.Context) (contracts.Workspace, bool, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.currentErr != nil {
+		return contracts.Workspace{}, false, f.currentErr
+	}
+	return f.current, f.hasCurrent, nil
+}
+
+func (f *fakeWorkspace) List(context.Context) ([]contracts.Workspace, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if !f.hasCurrent {
+		return nil, nil
+	}
+	return []contracts.Workspace{f.current}, nil
+}
+
+func (f *fakeWorkspace) Create(context.Context, string, string) (contracts.Workspace, error) {
+	return contracts.Workspace{}, errors.New("fake workspace: not implemented")
+}
+
+func (f *fakeWorkspace) Open(context.Context, string) (contracts.Workspace, error) {
+	return contracts.Workspace{}, errors.New("fake workspace: not implemented")
+}
+
+func (f *fakeWorkspace) Delete(context.Context, string) error {
+	return errors.New("fake workspace: not implemented")
+}
+
+func (f *fakeWorkspace) Files(context.Context, string) ([]contracts.FileEntry, error) {
+	return nil, errors.New("fake workspace: not implemented")
+}
+
+func (f *fakeWorkspace) ReadFile(context.Context, string, int) ([]byte, error) {
+	return nil, errors.New("fake workspace: not implemented")
+}
+
+func (f *fakeWorkspace) Search(context.Context, string, int) ([]contracts.FileEntry, error) {
+	return nil, errors.New("fake workspace: not implemented")
+}
+
+// newWorkspaceBackedService activates the module with a KeyWorkspace service
+// and returns the concrete service plus its fake durable store.
+func newWorkspaceBackedService(t *testing.T, workspace contracts.WorkspaceService,
+	settings *fakeSettings, logger *fakeLogger) (*service, *fakeStore) {
+	t.Helper()
+	if settings == nil {
+		settings = newFakeSettings(nil)
+	}
+	if logger == nil {
+		logger = &fakeLogger{}
+	}
+	store := newFakeStore()
+	registry := rigtools.NewRegistry()
+	ctx := cordis.Root()
+	t.Cleanup(func() { _ = ctx.DisposeAll() })
+	provide(t, ctx, contracts.KeyToolkit, registry)
+	provide(t, ctx, contracts.KeySettings, contracts.SettingsService(settings))
+	provide(t, ctx, contracts.KeyLogger, contracts.Logger(logger))
+	provide(t, ctx, contracts.KeyStore, contracts.Store(store))
+	provide(t, ctx, contracts.KeyApprovals, contracts.Approvals(fakeApprovals{}))
+	provide(t, ctx, contracts.KeyWorkspace, workspace)
+	if err := Module().Factory(ctx, Config{}); err != nil {
+		t.Fatalf("activate agent module: %v", err)
+	}
+	chat, err := ctx.Require(contracts.KeyChat)
+	if err != nil {
+		t.Fatalf("require KeyChat: %v", err)
+	}
+	svc, ok := chat.(*service)
+	if !ok {
+		t.Fatalf("KeyChat is %T, want *service", chat)
+	}
+	return svc, store
+}
+
+// sessionInfoOf finds one session info by ID.
+func sessionInfoOf(t *testing.T, svc *service, sessionID string) contracts.ChatSessionInfo {
+	t.Helper()
+	for _, info := range svc.Sessions() {
+		if info.ID == sessionID {
+			return info
+		}
+	}
+	t.Fatalf("session %q not in Sessions()", sessionID)
+	return contracts.ChatSessionInfo{}
+}
+
+// TestNewSessionRecordsWorkspace covers the NewSession path: the current
+// workspace is stored on the read model and persisted through the store.
+func TestNewSessionRecordsWorkspace(t *testing.T) {
+	workspace := &fakeWorkspace{}
+	workspace.setCurrent(contracts.Workspace{ID: "ws-session"}, true)
+	svc, store := newWorkspaceBackedService(t, workspace, nil, nil)
+
+	sessionID, err := svc.NewSession("")
+	if err != nil {
+		t.Fatalf("NewSession: %v", err)
+	}
+	if info := sessionInfoOf(t, svc, sessionID); info.WorkspaceID != "ws-session" {
+		t.Fatalf("WorkspaceID = %q, want ws-session", info.WorkspaceID)
+	}
+	calls := store.workspaceCalls()
+	if len(calls) != 1 || calls[0].sessionID != sessionID || calls[0].workspaceID != "ws-session" {
+		t.Fatalf("persist calls = %+v, want one for %s/ws-session", calls, sessionID)
+	}
+}
+
+// TestFirstSendBindsWorkspace covers a session created with no workspace: the
+// first send records the workspace current at that moment.
+func TestFirstSendBindsWorkspace(t *testing.T) {
+	workspace := &fakeWorkspace{}
+	svc, store := newWorkspaceBackedService(t, workspace, nil, nil)
+	provider := &captureProvider{}
+	svc.providerFactory = func(contracts.ChatConfig) (rig.Provider, error) { return provider, nil }
+
+	sessionID, err := svc.NewSession("")
+	if err != nil {
+		t.Fatalf("NewSession: %v", err)
+	}
+	if info := sessionInfoOf(t, svc, sessionID); info.WorkspaceID != "" {
+		t.Fatalf("WorkspaceID before workspace = %q, want empty", info.WorkspaceID)
+	}
+	if calls := store.workspaceCalls(); len(calls) != 0 {
+		t.Fatalf("workspace persisted before one existed: %+v", calls)
+	}
+
+	workspace.setCurrent(contracts.Workspace{ID: "ws-send"}, true)
+	if err := svc.Send(sessionID, "hello"); err != nil {
+		t.Fatalf("Send: %v", err)
+	}
+	waitIdle(t, svc, sessionID)
+	if info := sessionInfoOf(t, svc, sessionID); info.WorkspaceID != "ws-send" {
+		t.Fatalf("WorkspaceID after first send = %q, want ws-send", info.WorkspaceID)
+	}
+	if got := store.workspaceOf(sessionID); got != "ws-send" {
+		t.Fatalf("durable workspace = %q, want ws-send", got)
+	}
+}
+
+// TestRestoreWorkspaceID covers restore from the durable session metadata.
+func TestRestoreWorkspaceID(t *testing.T) {
+	store := newFakeStore()
+	ctx := context.Background()
+	if err := store.CreateSession(ctx, "sess-restored", "Restored"); err != nil {
+		t.Fatalf("CreateSession: %v", err)
+	}
+	if err := store.SetSessionWorkspace(ctx, "sess-restored", "ws-restored"); err != nil {
+		t.Fatalf("SetSessionWorkspace: %v", err)
+	}
+	svc := newService(Config{}, rigtools.NewRegistry(), newFakeSettings(nil), &fakeLogger{}, store, fakeApprovals{})
+	svc.restore(ctx)
+	infos := svc.Sessions()
+	if len(infos) != 1 || infos[0].WorkspaceID != "ws-restored" {
+		t.Fatalf("restored sessions = %+v, want WorkspaceID ws-restored", infos)
+	}
+}
+
+// TestNoWorkspaceServiceLeavesEmpty covers a host without the workspace
+// module: sessions keep an empty workspace and nothing is persisted.
+func TestNoWorkspaceServiceLeavesEmpty(t *testing.T) {
+	svc := newTestService(t, Config{}, nil, nil)
+	if svc.workspace != nil {
+		t.Fatal("workspace service wired without a provider")
+	}
+	sessionID, err := svc.NewSession("")
+	if err != nil {
+		t.Fatalf("NewSession: %v", err)
+	}
+	if info := sessionInfoOf(t, svc, sessionID); info.WorkspaceID != "" {
+		t.Fatalf("WorkspaceID = %q, want empty", info.WorkspaceID)
+	}
+}
+
+// TestWorkspaceFailuresAreLoggedNotFatal covers lookup and persistence errors:
+// the session still works and the errors go to the logger.
+func TestWorkspaceFailuresAreLoggedNotFatal(t *testing.T) {
+	workspace := &fakeWorkspace{currentErr: errors.New("workspace lookup exploded")}
+	logger := &fakeLogger{}
+	svc, store := newWorkspaceBackedService(t, workspace, nil, logger)
+	sessionID, err := svc.NewSession("")
+	if err != nil {
+		t.Fatalf("NewSession: %v", err)
+	}
+	if info := sessionInfoOf(t, svc, sessionID); info.WorkspaceID != "" {
+		t.Fatalf("WorkspaceID = %q, want empty after a lookup error", info.WorkspaceID)
+	}
+
+	workspace.setCurrentError(nil)
+	workspace.setCurrent(contracts.Workspace{ID: "ws-failing"}, true)
+	store.mu.Lock()
+	store.workspaceErr = errors.New("disk full")
+	store.mu.Unlock()
+	provider := &captureProvider{}
+	svc.providerFactory = func(contracts.ChatConfig) (rig.Provider, error) { return provider, nil }
+	if err := svc.Send(sessionID, "hello"); err != nil {
+		t.Fatalf("Send: %v", err)
+	}
+	waitIdle(t, svc, sessionID)
+	if info := sessionInfoOf(t, svc, sessionID); info.WorkspaceID != "ws-failing" {
+		t.Fatalf("WorkspaceID = %q, want ws-failing in the read model", info.WorkspaceID)
+	}
+	if !logger.contains("persist workspace") {
+		t.Fatalf("persist failure was not logged: %v", logger.lines)
 	}
 }

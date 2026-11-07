@@ -145,6 +145,13 @@ type harness struct {
 
 func newHarness(t *testing.T, chat contracts.ChatService, cfg sidebar.Config) *harness {
 	t.Helper()
+	return newHarnessWithWorkspace(t, chat, cfg, nil)
+}
+
+// newHarnessWithWorkspace is newHarness with an optional workspace backend
+// provided as contracts.KeyWorkspace (nil keeps the legacy flat session list).
+func newHarnessWithWorkspace(t *testing.T, chat contracts.ChatService, cfg sidebar.Config, workspace contracts.WorkspaceService) *harness {
+	t.Helper()
 	uiRoot := uiroot.New(uiroot.Config{AppName: "ZeoKeel"})
 	ctx := cordis.Root()
 	t.Cleanup(func() { _ = ctx.DisposeAll() })
@@ -155,6 +162,9 @@ func newHarness(t *testing.T, chat contracts.ChatService, cfg sidebar.Config) *h
 	provide(t, ctx, contracts.KeyLocale, uiRoot.Locale())
 	provide(t, ctx, contracts.KeyScreenLister, uiRoot.ScreenLister())
 	provide(t, ctx, contracts.KeyChat, contracts.ChatService(chat))
+	if workspace != nil {
+		provide[contracts.WorkspaceService](t, ctx, contracts.KeyWorkspace, workspace)
+	}
 
 	// The destination screens must exist for nav.Push to succeed. The host no
 	// longer paints a screen list: the sidebar module contributes the Home

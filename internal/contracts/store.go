@@ -17,10 +17,19 @@ var KeyDataDir = cordis.NewServiceKey[string]("zeokeel/datadir")
 // whether it currently runs.
 type SessionMeta struct {
 	ID           string
+	WorkspaceID  string
 	Title        string
 	MessageCount int
 	CreatedAt    time.Time
 	UpdatedAt    time.Time
+}
+
+// SessionWorkspaceStore is the optional durable half that records which
+// workspace a session belongs to. The agent backend type-asserts the store so
+// stores that predate workspaces keep working.
+type SessionWorkspaceStore interface {
+	// SetSessionWorkspace records the workspace of an existing session.
+	SetSessionWorkspace(ctx context.Context, sessionID, workspaceID string) error
 }
 
 // KeyStore is provided by the session store module: SQLite-backed persistence

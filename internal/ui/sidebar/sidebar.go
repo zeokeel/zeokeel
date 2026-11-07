@@ -27,7 +27,9 @@
 package sidebar
 
 import (
+	"context"
 	"fmt"
+	"strconv"
 	"strings"
 
 	"github.com/egoist/mygo/ui"
@@ -56,6 +58,11 @@ type Config struct {
 // the UI thread.
 type paneState struct {
 	query string
+
+	// ctx resolves the optional workspace backend lazily (no Requires), and
+	// wsCollapsed remembers the per-workspace tree fold state.
+	ctx         cordis.Context
+	wsCollapsed map[string]bool
 
 	renameOpen   bool
 	renameTarget string
@@ -89,7 +96,10 @@ func Module() *module.Descriptor[Config] {
 		newChatLabel := firstNonEmpty(cfg.NewChatLabel, "新对话")
 		settingsLabel := firstNonEmpty(cfg.SettingsLabel, "设置")
 		sessionsTitle := firstNonEmpty(cfg.SessionsTitle, "会话")
-		state := &paneState{}
+		state := &paneState{
+			ctx:         ctx,
+			wsCollapsed: make(map[string]bool),
+		}
 
 		// The chat service notifies from the agent goroutine; hop to the UI
 		// thread with Post and let the host schedule a frame. The subscription
@@ -193,11 +203,11 @@ func buildPrimary(c *ui.Context, t *design.Tokens, chat contracts.ChatService,
 		})
 }
 
-// buildSessionList renders the sidebar's navigation column the way the old UI
-// did: the Home destination first, an empty line, the "会话" section label, the
-// search field and one native row per session that matches the query. Session
-// rows are the only way into a conversation (there is no separate "对话" nav
-// item): clicking one activates it and opens the session screen.
+// buildSessionList renders the sidebar's navigation column: the Home
+// destination first, then the "工作区" → session tree when a workspace backend
+// is available (contracts.KeyWorkspace) or the legacy flat session list
+// otherwise. The search field filters session titles across every group;
+// clicking a session activates it and opens the session screen.
 func buildSessionList(c *ui.Context, t *design.Tokens, chat contracts.ChatService,
 	nav contracts.Navigator, runtime contracts.UIRuntime, state *paneState, title string) {
 	ui.Column(c).FillWidth().Gap(design.Space1).Padding(design.Space2, 0, 0, 0).
@@ -211,13 +221,32 @@ func buildSessionList(c *ui.Context, t *design.Tokens, chat contracts.ChatServic
 			// The old UI separated the destinations from the conversation list
 			// with one empty line before the section label.
 			ui.Box(c).Height(design.Space2)
-			design.Apply(ui.Text(c, title), t.SectionLabel())
+
+			// The workspace backend is optional: without it (or when its list
+			// fails) the sidebar keeps the flat list it always had.
+			workspace, hasWorkspace := state.ctx.Get(contracts.KeyWorkspace)
+			var workspaces []contracts.Workspace
+			if hasWorkspace {
+				listed, err := workspace.List(context.Background())
+				if err != nil {
+					hasWorkspace = false
+				} else {
+					workspaces = listed
+				}
+			}
+			if hasWorkspace {
+				buildWorkspaceSectionHeader(c, t, workspace)
+			} else {
+				design.Apply(ui.Text(c, title), t.SectionLabel())
+			}
 			ui.Row(c).FillWidth().Padding(0, design.Space1, 0, design.Space1).
 				Children(func() {
 					ui.SearchField(c, &state.query).Label("搜索会话").Placeholder("搜索会话").FillWidth()
 				})
+
 			query := strings.TrimSpace(state.query)
-			sessions := filterSessions(chat.Sessions(), query)
+			allSessions := chat.Sessions()
+			sessions := filterSessions(allSessions, query)
 			if len(sessions) == 0 {
 				empty := "还没有会话"
 				if query != "" {
@@ -228,10 +257,143 @@ func buildSessionList(c *ui.Context, t *design.Tokens, chat contracts.ChatServic
 				return
 			}
 			active := chat.ActiveSession()
+			if hasWorkspace {
+				buildWorkspaceTree(c, t, chat, nav, runtime, state, workspace,
+					workspaces, allSessions, sessions, active, query)
+				return
+			}
 			for _, info := range sessions {
-				buildSessionRow(c, t, chat, nav, runtime, state, info, info.ID == active)
+				buildSessionRow(c, t, chat, nav, runtime, state, info, info.ID == active, 0)
 			}
 		})
+}
+
+// ungroupedWorkspaceKey is the fold key of the synthetic "未分组" group.
+const ungroupedWorkspaceKey = "\x00ungrouped"
+
+// buildWorkspaceSectionHeader is the section label above the workspace tree:
+// "工作区" plus a badge with the current workspace's name.
+func buildWorkspaceSectionHeader(c *ui.Context, t *design.Tokens, workspace contracts.WorkspaceService) {
+	ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(design.Space2).Children(func() {
+		design.Apply(ui.Text(c, "工作区"), t.SectionLabel())
+		if current, ok, err := workspace.Current(context.Background()); err == nil && ok {
+			design.Apply(ui.Badge(c, firstNonEmpty(current.Name, current.Root)), t.Badge())
+		}
+	})
+}
+
+// buildWorkspaceTree renders the workspace → session groups. Sessions with an
+// empty or unknown WorkspaceID go to the trailing "未分组" group; a non-empty
+// search query keeps only the groups that still have matching sessions.
+func buildWorkspaceTree(
+	c *ui.Context,
+	t *design.Tokens,
+	chat contracts.ChatService,
+	nav contracts.Navigator,
+	runtime contracts.UIRuntime,
+	state *paneState,
+	workspace contracts.WorkspaceService,
+	workspaces []contracts.Workspace,
+	allSessions, matched []contracts.ChatSessionInfo,
+	activeID, query string,
+) {
+	known := make(map[string]bool, len(workspaces))
+	for _, ws := range workspaces {
+		known[ws.ID] = true
+	}
+	groupOf := func(info contracts.ChatSessionInfo) string {
+		id := strings.TrimSpace(info.WorkspaceID)
+		if id == "" || !known[id] {
+			return ""
+		}
+		return id
+	}
+	totals := make(map[string]int, len(workspaces)+1)
+	for _, info := range allSessions {
+		totals[groupOf(info)]++
+	}
+	byGroup := make(map[string][]contracts.ChatSessionInfo, len(workspaces)+1)
+	for _, info := range matched {
+		key := groupOf(info)
+		byGroup[key] = append(byGroup[key], info)
+	}
+	currentID := ""
+	if current, ok, err := workspace.Current(context.Background()); err == nil && ok {
+		currentID = current.ID
+	}
+
+	for _, ws := range workspaces {
+		sessions := byGroup[ws.ID]
+		if query != "" && len(sessions) == 0 {
+			continue
+		}
+		buildWorkspaceGroup(c, t, chat, nav, runtime, state, ws.ID,
+			firstNonEmpty(ws.Name, ws.Root, "未命名工作区"), sessions, totals[ws.ID],
+			ws.ID == currentID, activeID)
+	}
+
+	sessions := byGroup[""]
+	if len(sessions) == 0 && (query != "" || totals[""] == 0) {
+		return
+	}
+	buildWorkspaceGroup(c, t, chat, nav, runtime, state, ungroupedWorkspaceKey,
+		"未分组", sessions, totals[""], false, activeID)
+}
+
+// buildWorkspaceGroup renders one collapsible workspace row and, while it is
+// expanded, its indented session rows.
+func buildWorkspaceGroup(
+	c *ui.Context,
+	t *design.Tokens,
+	chat contracts.ChatService,
+	nav contracts.Navigator,
+	runtime contracts.UIRuntime,
+	state *paneState,
+	key, name string,
+	sessions []contracts.ChatSessionInfo,
+	count int,
+	current bool,
+	activeID string,
+) {
+	collapsed := state.wsCollapsed[key]
+	row := ui.ButtonBase(c).FillWidth().Height(32).PaddingX(design.Space2).
+		Radius(design.RadiusSM).Label(name)
+	if row.Hovered() || current {
+		row = row.Background(t.BgHover)
+	}
+	row.Children(func() {
+		ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(design.Space2).Children(func() {
+			icon := icons.Folder()
+			iconColor := t.LabelSecondary
+			if current {
+				icon = icons.FolderOpen()
+				iconColor = t.Accent
+			}
+			ui.Icon(c, icon).Size(16, 16).TextColor(iconColor)
+			textColor := t.LabelSecondary
+			if current {
+				textColor = t.LabelPrimary
+			}
+			design.Apply(ui.Text(c, name), t.Text(design.TypeXS)).
+				FontWeight(500).TextColor(textColor).Grow(1).MaxLines(1).Ellipsis("…")
+			design.Apply(ui.Badge(c, strconv.Itoa(count)), t.Badge())
+			chevron := icons.ChevronDown()
+			if collapsed {
+				chevron = icons.ChevronRight()
+			}
+			ui.Icon(c, chevron).Size(14, 14).TextColor(t.LabelTertiary)
+		})
+	})
+	row.OnClick(func() {
+		state.wsCollapsed[key] = !state.wsCollapsed[key]
+		runtime.Invalidate()
+	})
+	if collapsed {
+		return
+	}
+	for _, info := range sessions {
+		buildSessionRow(c, t, chat, nav, runtime, state, info, info.ID == activeID, design.Space3)
+	}
 }
 
 // filterSessions keeps the sessions whose display title contains query, case
@@ -255,10 +417,11 @@ func filterSessions(sessions []contracts.ChatSessionInfo, query string) []contra
 // and the native click behavior.
 func buildSessionRow(c *ui.Context, t *design.Tokens, chat contracts.ChatService,
 	nav contracts.Navigator, runtime contracts.UIRuntime, state *paneState,
-	session contracts.ChatSessionInfo, active bool) {
+	session contracts.ChatSessionInfo, active bool, indent float32) {
 	label := sessionTitle(session)
 	renamer, _ := chat.(contracts.SessionRenamer)
-	ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(design.Space1).Children(func() {
+	ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(design.Space1).
+		Padding(0, 0, 0, indent).Children(func() {
 		row := ui.ButtonBase(c).Grow(1).Height(36).PaddingX(design.Space3).
 			Radius(design.RadiusSM).Label(label)
 		if active || row.Hovered() {

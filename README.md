@@ -116,6 +116,9 @@ go test ./...
   语义、maxChanges/maxDiffBytes、非 git 可读错误）；右侧栏「变更」Tab：状态 Badge + ±统计 + Collapsible
   展开 unified diff（+ 行 Success / − 行 Danger / hunk 表头 muted，mono）；截图 `p2-changes.png`、
   `p2-changes-diff.png`
+- ✅ P3 会话↔工作区 + workspace 树：sessionstore 幂等迁移 `workspace_id`（旧库兼容）+ agent 在新建/首次发送时
+  记录当前工作区；侧栏会话区按工作区分组（当前工作区高亮、组折叠、会话数、未分组、搜索跨组）；截图
+  `p2-workspace-tree.png`
 - ⬜ 后续阶段见 [docs/PRODUCT-REBUILD-PLAN.md](docs/PRODUCT-REBUILD-PLAN.md)：
   P2 剩余（composer 附件/图片/@ 提及、右侧栏 Files/Terminal/Log 页、会话操作上下文菜单）→
   P3 memory/skills/automation/插件/workspace diff/搜索/fork/export → P4 ACP/热键/导入/更新/诊断

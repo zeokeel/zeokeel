@@ -156,7 +156,12 @@ func main() {
 		[]byte("# ZeoKeel 工作区\n\n这是右侧 Files 检查器的示例文件。\n\n- 目录浏览\n- 文本与 Markdown 预览\n- 工作区变更 diff\n"), 0o600)
 	_ = os.WriteFile(filepath.Join(workspaceRoot, "notes.txt"), []byte("临时笔记\n"), 0o600)
 	if workspaces, err := a.root.Require(contracts.KeyWorkspace); err == nil {
-		_, _ = workspaces.Create(context.Background(), "mygo", workspaceRoot)
+		if workspace, createErr := workspaces.Create(context.Background(), "mygo", workspaceRoot); createErr == nil {
+			_ = workspace
+			if _, sessionErr := chat.NewSession("工作区会话"); sessionErr == nil {
+				a.render(outDir + "/p2-workspace-tree.png")
+			}
+		}
 	}
 
 	// P2: the window-level right inspector (durable session log pane).

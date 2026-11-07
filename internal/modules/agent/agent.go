@@ -97,6 +97,9 @@ func Module() *module.Descriptor[Config] {
 			return err
 		}
 		svc := newService(cfg, registry, settings, logger, store, approvals)
+		if workspace, ok := ctx.Get(contracts.KeyWorkspace); ok {
+			svc.workspace = workspace
+		}
 		svc.restore(context.Background())
 		// The durable store now backs the session-query tools: register them
 		// into the shared toolkit registry (the toolkit module has no store
@@ -129,6 +132,9 @@ type service struct {
 	history   rig.History // fallback in-memory history when no store is wired
 	store     contracts.Store
 	approvals contracts.Approvals
+	// workspace is optional: when the workspace module is active the backend
+	// records which workspace each session belongs to.
+	workspace contracts.WorkspaceService
 
 	sessions map[string]*sessionState
 	active   string
@@ -150,14 +156,15 @@ var (
 
 // sessionState is the mutable per-session state.
 type sessionState struct {
-	id        string
-	title     string
-	createdAt time.Time
-	updatedAt time.Time
-	messages  []contracts.ChatMessage
-	running   bool
-	err       string
-	cancel    context.CancelFunc
+	id          string
+	title       string
+	workspaceID string
+	createdAt   time.Time
+	updatedAt   time.Time
+	messages    []contracts.ChatMessage
+	running     bool
+	err         string
+	cancel      context.CancelFunc
 	// assistant is the index of the streaming assistant placeholder, or -1.
 	assistant int
 }
@@ -195,6 +202,39 @@ func (s *service) historyView() rig.History {
 	return s.history
 }
 
+// currentWorkspaceID reports the current workspace ID when the workspace module
+// is wired, ignoring/logging lookup failures (association is best effort).
+func (s *service) currentWorkspaceID(ctx context.Context) string {
+	if s.workspace == nil {
+		return ""
+	}
+	workspace, ok, err := s.workspace.Current(ctx)
+	if err != nil {
+		s.logger.Printf("[agent] current workspace: %v", err)
+		return ""
+	}
+	if !ok {
+		return ""
+	}
+	return strings.TrimSpace(workspace.ID)
+}
+
+// persistSessionWorkspace records the session→workspace association through the
+// optional durable half of the store. Failures are logged: the read model and
+// the conversation must not fail because the association could not be saved.
+func (s *service) persistSessionWorkspace(sessionID, workspaceID string) {
+	if s.store == nil || strings.TrimSpace(workspaceID) == "" {
+		return
+	}
+	recorder, ok := s.store.(contracts.SessionWorkspaceStore)
+	if !ok {
+		return
+	}
+	if err := recorder.SetSessionWorkspace(context.Background(), sessionID, workspaceID); err != nil {
+		s.logger.Printf("[agent] persist workspace of session %s: %v", sessionID, err)
+	}
+}
+
 // restore loads durable sessions (metadata + messages) into the in-memory read
 // model. Failures are logged and leave the product usable with an empty list.
 func (s *service) restore(ctx context.Context) {
@@ -210,11 +250,12 @@ func (s *service) restore(ctx context.Context) {
 	model := make([]*sessionState, 0, len(metas))
 	for _, meta := range metas {
 		state := &sessionState{
-			id:        meta.ID,
-			title:     meta.Title,
-			createdAt: meta.CreatedAt,
-			updatedAt: meta.UpdatedAt,
-			assistant: -1,
+			id:          meta.ID,
+			title:       meta.Title,
+			workspaceID: meta.WorkspaceID,
+			createdAt:   meta.CreatedAt,
+			updatedAt:   meta.UpdatedAt,
+			assistant:   -1,
 		}
 		if history != nil {
 			if messages, err := history.Load(ctx, meta.ID); err == nil {
@@ -332,14 +373,16 @@ func (s *service) RenameSession(sessionID, title string) error {
 // NewSession creates an empty session, marks it active and returns its ID.
 func (s *service) NewSession(title string) (string, error) {
 	now := time.Now()
+	workspaceID := s.currentWorkspaceID(context.Background())
 	s.mu.Lock()
 	id := s.newSessionIDLocked()
 	state := &sessionState{
-		id:        id,
-		title:     strings.TrimSpace(title),
-		createdAt: now,
-		updatedAt: now,
-		assistant: -1,
+		id:          id,
+		title:       strings.TrimSpace(title),
+		workspaceID: workspaceID,
+		createdAt:   now,
+		updatedAt:   now,
+		assistant:   -1,
 	}
 	s.sessions[id] = state
 	s.active = id
@@ -348,6 +391,9 @@ func (s *service) NewSession(title string) (string, error) {
 		if err := s.store.CreateSession(context.Background(), id, state.title); err != nil {
 			s.logger.Printf("[agent] create session %s: %v", id, err)
 		}
+	}
+	if workspaceID != "" {
+		s.persistSessionWorkspace(id, workspaceID)
 	}
 	s.notify(id)
 	return id, nil
@@ -429,6 +475,7 @@ func (s *service) Sessions() []contracts.ChatSessionInfo {
 	for _, state := range s.sessions {
 		infos = append(infos, contracts.ChatSessionInfo{
 			ID:           state.id,
+			WorkspaceID:  state.workspaceID,
 			Title:        state.title,
 			MessageCount: len(state.messages),
 			Running:      state.running,
@@ -535,6 +582,15 @@ func (s *service) send(sessionID, prompt string, attachments []contracts.Attachm
 	state.running = true
 	state.err = ""
 	state.updatedAt = now
+	// A session created while no workspace was open binds the workspace that
+	// is current on its first send (NewSession otherwise already recorded it).
+	boundWorkspaceID := ""
+	if state.workspaceID == "" && s.workspace != nil {
+		if current := s.currentWorkspaceID(context.Background()); current != "" {
+			state.workspaceID = current
+			boundWorkspaceID = current
+		}
+	}
 	runCtx, cancel := context.WithCancel(context.Background())
 	state.cancel = cancel
 	title := state.title
@@ -544,6 +600,9 @@ func (s *service) send(sessionID, prompt string, attachments []contracts.Attachm
 	if s.store != nil {
 		if err := s.store.CreateSession(runCtx, sessionID, title); err != nil {
 			s.logger.Printf("[agent] persist session %s: %v", sessionID, err)
+		}
+		if boundWorkspaceID != "" {
+			s.persistSessionWorkspace(sessionID, boundWorkspaceID)
 		}
 		if titleChanged {
 			if err := s.store.RenameSession(runCtx, sessionID, title); err != nil {
