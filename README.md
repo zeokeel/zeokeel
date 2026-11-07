@@ -183,6 +183,9 @@ go test ./...
 - ✅ P5 模型切换：`zeokeel/modelcatalog` 预设（DeepSeek Chat/Reasoner）+ agent per-session 模型覆盖
   （`SessionModelSwitcher`，settings 持久化，Send/Regenerate 使用会话模型）+ composer 模型菜单（打勾/当前/打开模型
   设置回退）；desktop 25 实例 / registry 27；截图 `p2-modelmenu.png`、`p2-model-switched.png`
+- ✅ P5 Web search：`internal/websearch`（迁移旧 HTTP 搜索后端：POST/Bearer/limit/超时/1MiB）+ toolkit 动态注册
+  `web_search`/`web_fetch`（assembly `toolkit.network=true`，settings 变更下一次调用生效）+ 设置「搜索」页；
+  截图 `p2-search-settings.png`
 - ⬜ 后续阶段见 [docs/PRODUCT-REBUILD-PLAN.md](docs/PRODUCT-REBUILD-PLAN.md)：
   P2 剩余（composer 附件/图片/@ 提及、右侧栏 Files/Terminal/Log 页、会话操作上下文菜单）→
   P3 memory/skills/automation/插件/workspace diff/搜索/fork/export → P4 ACP/热键/导入/更新/诊断

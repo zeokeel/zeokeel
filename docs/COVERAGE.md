@@ -53,7 +53,7 @@
 | `store` | 🟡 | `internal/modules/sessionstore`（SQLite） | sessions/messages/events/checkpoints/search/workspace_id 可用；旧 attachments/automation_runs/feedback/model/setting/transcript 表语义分散到各模块 JSON/settings 或未迁移 |
 | `tools` | 🟡 | `internal/modules/toolkit` + `internal/modules/hosttools` + rig tools | 文件/shell/editor/image/terminal/jobs/memory/schedule/worktree/skill/team 任务板/settings/MCP + hosttools ask_user/present/plan/goal/team；缺 rig 的 subagent/workflow/ralph/review/inspect/report/lsp 注册与旧 tool allowlist/presets |
 | `updater` | 🟡 | `internal/modules/update` + settings 更新页 | 检查（manifest/https/1MiB/semver/asset）可用；旧 download/SHA256 校验/stage/install-on-restart 未迁移（P4 只做 check） |
-| `websearch` | 🟡 | rig `tools/web`（`web_fetch`/`web_search`）+ toolkit | 默认 desktop assembly `toolkit.network=false`，web 工具不注册；无旧 websearch endpoint/key 设置与代理语义 |
+| `websearch` | ✅ | `internal/websearch`（迁移旧 HTTP searcher：Bearer/limit/超时/1MiB）+ toolkit 动态 `web_search`/`web_fetch`（assembly `toolkit.network=true`）+ 设置「搜索」页（endpoint/key，即时生效） | 无旧代理/多后端选择语义（旧实现也只有通用 HTTP 端点，行为一致） |
 | `winproc` | ❌ | 无 | Windows 控制台隐藏/环境/编码辅助未迁移；rig pwsh 仅部分覆盖 |
 | `workspacechanges` | ✅ | `internal/modules/workspace`（WorkspaceDiffer）+ rightpanel Changes | git status/diff、二进制/超大截断、路径翻译；用户可见变更视图等价 |
 | `app`（宿主组合根） | 🟡 | `internal/host`、`internal/assembly` | 窗口/设置/headless/ACP 已有；缺旧 autostart、single-instance、窗口几何持久化、通知、网络代理、update install（部分标为非目标） |

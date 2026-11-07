@@ -45,7 +45,8 @@
       "module": "zeokeel/toolkit",
       "config": {
         "root": ".",
-        "shellTimeoutMs": 30000
+        "shellTimeoutMs": 30000,
+        "network": true
       }
     },
     {

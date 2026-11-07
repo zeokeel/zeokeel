@@ -13,6 +13,7 @@ package toolkit
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"time"
 
@@ -37,6 +38,7 @@ import (
 	"github.com/zeokeel/zeokeel-rig/tools/worktree"
 
 	"github.com/zeokeel/zeokeel/internal/contracts"
+	"github.com/zeokeel/zeokeel/internal/websearch"
 )
 
 // defaultCommands is the shell allowlist used when the assembly does not set
@@ -147,12 +149,43 @@ func Module() *module.Descriptor[Config] {
 			tools = append(tools, skill.Tools(nil)...)
 		}
 		tools = append(tools, team.TaskTools(team.NewTaskManager())...)
-		if settingsService, ok := ctx.Get(contracts.KeySettings); ok {
+		settingsService, hasSettings := ctx.Get(contracts.KeySettings)
+		if hasSettings {
 			tools = append(tools, settings.Tools(settingsService)...)
 		}
 
 		if cfg.Network {
 			tools = append(tools, web.NewFetcher(policy))
+			// The search backend is read from settings on every call so an
+			// endpoint/key change applies to the next search without a restart.
+			// Without a settings service there is nowhere to configure it, so
+			// web_search stays unregistered (except for the fetcher above).
+			if hasSettings {
+				tools = append(tools, web.NewSearcher(web.SearcherFunc(func(ctx context.Context, query string, limit int) ([]web.SearchResult, error) {
+					endpoint := strings.TrimSpace(settingsService.Get(contracts.SettingWebSearchEndpoint, ""))
+					if endpoint == "" {
+						return nil, fmt.Errorf("web search endpoint 未配置（%s）", contracts.SettingWebSearchEndpoint)
+					}
+					apiKey := strings.TrimSpace(settingsService.Get(contracts.SettingWebSearchAPIKey, ""))
+					searcher, err := websearch.NewSearcher(websearch.Config{Endpoint: endpoint, APIKey: apiKey})
+					if err != nil {
+						return nil, fmt.Errorf("web search: %w", err)
+					}
+					found, err := searcher.Search(ctx, query, limit)
+					if err != nil {
+						return nil, err
+					}
+					results := make([]web.SearchResult, 0, len(found))
+					for _, result := range found {
+						results = append(results, web.SearchResult{
+							Title:   result.Title,
+							URL:     result.URL,
+							Snippet: result.Snippet,
+						})
+					}
+					return results, nil
+				})))
+			}
 		}
 
 		var clients []*mcp.Client

@@ -192,6 +192,7 @@ if _, err := ctx.Effect(func() cordis.Effect {
 - ✅ 会话归档：settings archive flag + sidebar 视图开关/排序
 - ✅ 会话置顶：settings pin flag + sidebar 置顶排序/菜单
 - ✅ 可配置 chrome 快捷键（settings `ui.shortcut.*` → 宿主每帧 OnShortcut）
+- ✅ Web search：internal/websearch + 动态 web_search（设置「搜索」页）
 - ✅ 模型目录 + per-session 模型切换（composer 菜单）
 - ✅ composer slash 命令 + 会话重新生成（SessionRegenerator）
 - ✅ 覆盖矩阵：docs/COVERAGE.md（旧功能面 vs 产品）

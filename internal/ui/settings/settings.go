@@ -544,6 +544,7 @@ func Module() *module.Descriptor[Config] {
 		skills := newSkillsState()
 		update := newUpdateState()
 		importState := newImportState()
+		search := newSearchState()
 		diagnostics := &diagnosticsState{}
 
 		// Optional host services for the read-only diagnostics page.
@@ -635,6 +636,14 @@ func Module() *module.Descriptor[Config] {
 				Build: func(c *ui.Context) {
 					syncer.sync()
 					buildImportPage(c, design.Of(c), ctx, runtime, importState, locale)
+				},
+			},
+			{
+				ID: SearchPageID, Section: SearchPageSection, Order: SearchPageOrder,
+				zhTitle: "搜索", enTitle: "Search",
+				Build: func(c *ui.Context) {
+					syncer.sync()
+					buildSearchPage(c, ctx, search, locale)
 				},
 			},
 		}

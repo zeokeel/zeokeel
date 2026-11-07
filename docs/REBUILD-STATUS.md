@@ -21,6 +21,13 @@
 - 右侧栏「文件」Tab：打开文件夹（mygo 原生 Directory picker）、目录进入/面包屑、文本/Markdown/图片预览、
   刷新与错误状态；E2E 覆盖工作区创建 + 列表 + 预览帧
 
+**P5 web search（2026-11-08）**
+- internal/websearch 移植（Config/NewSearcher/Search：POST JSON、Bearer、limit clamp、10s/ctx、1MiB、错误语义）
+- toolkit：network=true 注册 web_fetch；有 KeySettings 时动态 web_search（每次调用读 web.search.endpoint/apiKey，
+  无 endpoint 报可读错误，配置变更即时生效）；desktop/headless assembly network=true
+- 设置「搜索」页：endpoint/API key（write-only 保留）、非法 URL 校验、已保存/未配置 Badge、即时生效说明；
+  E2E 保存后 settings 键写入；plugins 工具目录出现 web 工具；截图 p2-search-settings.png
+
 **P5 模型切换 + 模型目录（2026-11-08）**
 - modelcatalog 模块：默认 deepseek-chat/deepseek-reasoner 预设，Config 覆盖，Validate/副本语义
 - agent per-session 模型：SessionModelSwitcher（settings session.<id>.model；effective model 进 ChatSession.Model；

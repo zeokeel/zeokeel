@@ -312,6 +312,28 @@ func TestP1ApprovalToolsAndPersistence(t *testing.T) {
 	if !tester.HasText("更新源未配置") {
 		t.Fatalf("update check error missing; texts = %v", tester.Texts())
 	}
+	if err := tester.Click("搜索"); err != nil {
+		t.Fatalf("click search settings: %v; texts = %v", err, tester.Texts())
+	}
+	tester.Frame()
+	for _, want := range []string{"搜索", "搜索端点", "API Key", "保存"} {
+		if !tester.HasText(want) {
+			t.Fatalf("search settings missing %q; texts = %v", want, tester.Texts())
+		}
+	}
+	if rect, ok := tester.Find("https://search.example.com/search"); ok {
+		tester.ClickAt(rect.X+rect.W/2, rect.Y+rect.H/2)
+		tester.Frame()
+		tester.Type("https://search.example.com/search")
+		tester.Frame()
+		if err := tester.Click("保存"); err != nil {
+			t.Fatalf("save search settings: %v; texts = %v", err, tester.Texts())
+		}
+		tester.Frame()
+		if got := settings.Get(contracts.SettingWebSearchEndpoint, ""); got != "https://search.example.com/search" {
+			t.Fatalf("search endpoint = %q", got)
+		}
+	}
 	uiRoot.Navigator().CloseSettings()
 	tester.Frame()
 

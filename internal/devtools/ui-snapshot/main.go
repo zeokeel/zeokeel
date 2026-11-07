@@ -351,6 +351,10 @@ func main() {
 		fmt.Println("click import:", err)
 	}
 	a.render(outDir + "/p2-import.png")
+	if err := a.tester.Click("搜索"); err != nil {
+		fmt.Println("click search settings:", err)
+	}
+	a.render(outDir + "/p2-search-settings.png")
 	a.ui.Navigator().CloseSettings()
 	if err := a.ui.Navigator().Push("automation"); err != nil {
 		fmt.Println("push automation:", err)
