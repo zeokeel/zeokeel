@@ -1,0 +1,4 @@
+github.com/zeokeel/zeokeel-rig v0.13.0 h1:jZ5kTUSbZxlhJjiv0k710WBEr+U+a8alqcE7ql+oGVY=
+github.com/zeokeel/zeokeel-rig v0.13.0/go.mod h1:B00A4YCGjMifwsh4UNphW8ADXyJu/wovwQaNL+B03qI=
+mvdan.cc/sh/v3 v3.14.1 h1:bXkhQWNHCs0KZEChF8hYS6FC+T2N9mUZLbQv9blditI=
+mvdan.cc/sh/v3 v3.14.1/go.mod h1:syYCoFET8w9tvevxiXUtY8/ICrU+l26jHmhJDra3Vwo=

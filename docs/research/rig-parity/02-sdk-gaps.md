@@ -1,5 +1,10 @@
 # SDK 待补功能清单（`old/` → Rig，属于 SDK 的部分）
 
+> **2026-11-07 复核更新**：`rig v0.13.0` 已补齐本清单全部 **12 项**（compaction、LSP
+> references/implementation、spill、review/ask gate、checkpoint、MCP 通知流、goal driver、
+> presets、reasoning effort、owner 作用域、UTF-16），逐项证据见
+> [`03-v0.13.0-verification.md`](03-v0.13.0-verification.md)。本文保留为 v0.12.1 时的审计基线。
+
 > 用途：只列**属于 SDK 职责**、目前 Rig v0.12.1 还缺（或只有部分）的功能，并给出 `old/` 中的
 > 具体参考路径，方便直接去补 Rig。
 > old 根目录：**`/data/mygo/old`**；Rig 根目录：`/data/zeokeel-rig`。
