@@ -423,6 +423,7 @@ func runDesktop(opts Options) error {
 		window       *mygo.Window
 		tray         trayHandle
 		hotkeyOff    func()
+		themeOff     func()
 		startupErr   error
 		shutdownOnce sync.Once
 		closing      atomic.Bool
@@ -441,6 +442,10 @@ func runDesktop(opts Options) error {
 					logger.Printf("%s: close assembly: %v", appName, err)
 				}
 				loader = nil
+			}
+			if themeOff != nil {
+				themeOff()
+				themeOff = nil
 			}
 			if hotkeyOff != nil {
 				hotkeyOff()
@@ -496,6 +501,10 @@ func runDesktop(opts Options) error {
 	// every UI module activates and registers its contributions on the UI
 	// thread, synchronously, before the first frame.
 	mygo.App.WhenReady(func() {
+		// Appearance mode: mygo is ready here, so Theme.IsDark and the desktop
+		// appearance listener are available. System mode keeps following the
+		// desktop; light/dark force the app theme.
+		themeOff = applyThemeMode(uiRoot.Theme(), settings, mygo.Theme)
 		defer func() {
 			if recovered := recover(); recovered != nil {
 				startupErr = fmt.Errorf("%s: startup panic: %v", appName, recovered)

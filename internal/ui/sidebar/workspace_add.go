@@ -92,7 +92,10 @@ func submitAddWorkspace(state *paneState, workspace contracts.WorkspaceService, 
 // buildAddWorkspaceDialog renders the add-workspace native modal.
 func buildAddWorkspaceDialog(c *ui.Context, t *design.Tokens, workspace contracts.WorkspaceService,
 	runtime contracts.UIRuntime, state *paneState) {
-	if !state.addWorkspaceOpen || workspace == nil {
+	// The Modal must be rendered every frame (showing only while the open flag
+	// is true): removing it from the tree on close leaves its overlay behind,
+	// which then swallows pointer events when the dialog is opened again.
+	if workspace == nil {
 		return
 	}
 	ui.Modal(c, &state.addWorkspaceOpen, func() {

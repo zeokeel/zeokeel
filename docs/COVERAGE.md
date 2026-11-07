@@ -75,7 +75,7 @@
 | `websearch` | ✅ | `internal/websearch` + toolkit 动态 searcher | POST/Bearer/limit/10s/1MiB/错误语义；assembly network=true，设置 endpoint/key 即时生效 |
 | `winproc` | ❌ | 无 | Windows 控制台隐藏/环境/编码辅助未迁移（平台非目标） |
 | `workspacechanges` | ✅ | workspace WorkspaceDiffer + rightpanel Changes | git status/diff、截断；用户可见等价 |
-| `app`（宿主） | 🟡 | host/assembly | 窗口/设置/headless/ACP + interaction/artifact/plan/notifier 服务 + 单实例锁 + XDG autostart + install-on-restart + toast overlay（设置可关闭）+ 网络代理 + 系统托盘（显示/新建会话/设置/退出）+/关闭到托盘 + 全局热键；窗口几何由 mygo StateKey 隐式持久化；缺 Windows 运行中替换 |
+| `app`（宿主） | 🟡 | host/assembly | 窗口/设置/headless/ACP + interaction/artifact/plan/notifier 服务 + 单实例锁 + XDG autostart + install-on-restart + toast overlay（设置可关闭）+ 网络代理 + 系统托盘（显示/新建会话/设置/退出）/关闭到托盘 + 全局热键 + **主题三态（浅/深/跟随系统）**；窗口几何由 mygo StateKey 隐式持久化；缺 Windows 运行中替换 |
 
 ## 3. Shell / UI 能力矩阵（34 项）
 
@@ -84,7 +84,7 @@
 | Home / 起始页 | ✅ | `internal/ui/home` | hero/greeting/setup card/**真实 composer（多行输入、Enter 发送、附件选择、工作区/模型/模式只读 chip、发送后建会话并进入）**/最近会话 |
 | Composer 基础（输入/附件/发送/停止/模型 chip/@//） | ✅ | `internal/ui/session/view.go`、`attachments.go` | 文本、附件/图片/拖放、发送/停止、per-session 模型菜单、工作区 @、/ 菜单 |
 | Composer 深度（/goal /plan /memory/权限/effort/@session/presets） | 🟡 | `sessionCommands` + `command_dialogs.go` + `commands_help.go` + `buildComposerToolbar` | 已落地 12 条：/新会话 /创建副本 /导出对话 /打开设置 /设置目标 /审阅计划 /添加记忆 /反馈 /停止 /附加文件 /帮助 + 权限模式、模式切换（普通/计划/精简/创作）、推理强度、@session、预设插入；缺 /compact、/goal 子命令 |
-| Chrome/Sidebar/折叠 rail/右栏 dock | ✅ | uiroot + sidebar | 280px sidebar、64px rail、Cmd/Ctrl+B、右栏开关、**添加工作区（目录选择/名称回退 basename/创建后打开）**、工作区搜索/置顶/归档 |
+| Chrome/Sidebar/折叠 rail/右栏 dock | ✅ | uiroot + sidebar | 280px sidebar、64px rail、Cmd/Ctrl+B、右栏开关、添加工作区（目录选择/名称回退/创建后打开）、**视图选项（排序：最近/名称；分组：按工作区/平铺，持久化）**、工作区搜索/置顶/归档 |
 | 命令面板/窗口内快捷键 | ✅ | uiroot palette/shortcuts | Cmd/Ctrl+K、可配置两条 chrome 快捷键；非系统全局热键 |
 | Settings 外壳与页面 | 🟡 | `internal/ui/settings`、about | 16 页：模型/模型目录/服务商/诊断/快捷键/外观（托盘+热键）/技能（编辑）/更新/导入/搜索/MCP/网络/预设/LSP/数据与隐私/**通知（toast 开关）** + 关于；缺内置插件开关/市场 |
 | Approval 审批 Modal | ✅ | `internal/ui/approval` + approvals 模块 | allow/allow-always/deny、ask/workspace/full/never（settings 覆盖、workspace 只读自动 allow） |

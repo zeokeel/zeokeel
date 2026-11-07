@@ -105,7 +105,7 @@ func TestDesktopChatPipelineEndToEnd(t *testing.T) {
 		t.Fatalf("click appearance page: %v; texts = %v", err, tester.Texts())
 	}
 	tester.Frame()
-	for _, want := range []string{"深色模式", "界面语言", "应用"} {
+	for _, want := range []string{"外观模式", "浅色", "深色", "跟随系统", "界面语言", "应用"} {
 		if !tester.HasText(want) {
 			t.Fatalf("appearance page does not show %q; texts = %v", want, tester.Texts())
 		}

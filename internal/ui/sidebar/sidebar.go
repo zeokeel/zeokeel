@@ -339,7 +339,7 @@ func buildSessionList(c *ui.Context, t *design.Tokens, chat contracts.ChatServic
 			if hasWorkspace {
 				buildWorkspaceSectionHeader(c, t, workspace, runtime, state)
 			} else {
-				design.Apply(ui.Text(c, title), t.SectionLabel())
+				buildSidebarListTitle(c, t, runtime, state, title)
 			}
 			ui.Row(c).FillWidth().Padding(0, design.Space1, 0, design.Space1).
 				Children(func() {
@@ -350,8 +350,9 @@ func buildSessionList(c *ui.Context, t *design.Tokens, chat contracts.ChatServic
 
 			query := strings.TrimSpace(state.query)
 			includeArchived := showArchivedSetting(state)
+			sortMode, groupMode := sidebarViewSettings(state.settings)
 			allSessions := filterArchivedSessions(chat.Sessions(), includeArchived)
-			sessions := orderSessionList(filterSessions(allSessions, query), includeArchived)
+			sessions := orderSessionList(filterSessions(allSessions, query), includeArchived, sortMode)
 			switch {
 			case len(sessions) == 0:
 				empty := state.T("还没有会话", "No sessions yet")
@@ -360,7 +361,7 @@ func buildSessionList(c *ui.Context, t *design.Tokens, chat contracts.ChatServic
 				}
 				design.Apply(ui.Text(c, empty), t.TextMuted(design.TypeXXS)).
 					Padding(design.Space1, design.Space2, 0, design.Space2)
-			case hasWorkspace:
+			case hasWorkspace && groupMode == sidebarGroupTree:
 				buildWorkspaceTree(c, t, chat, nav, runtime, state, workspace,
 					workspaces, allSessions, sessions, chat.ActiveSession(), query)
 			default:
@@ -502,15 +503,16 @@ func buildWorkspaceSectionHeader(c *ui.Context, t *design.Tokens, workspace cont
 	th := t.Theme()
 	ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(design.Space2).Children(func() {
 		design.Apply(ui.Text(c, state.T("工作区", "Workspace")), t.SectionLabel())
-		if current, ok, err := workspace.Current(context.Background()); err == nil && ok {
-			design.Apply(ui.Badge(c, firstNonEmpty(current.Name, current.Root)), t.Badge())
-		}
-		if state.addWorkspaceStatus != "" {
-			design.Apply(ui.Badge(c, state.addWorkspaceStatus), t.Badge()).TextColor(t.Success)
+		_, groupMode := sidebarViewSettings(state.settings)
+		if groupMode != sidebarGroupFlat {
+			if current, ok, err := workspace.Current(context.Background()); err == nil && ok {
+				design.Apply(ui.Badge(c, firstNonEmpty(current.Name, current.Root)), t.Badge())
+			}
 		}
 		ui.Spacer(c).Grow(1)
+		buildSidebarViewMenu(c, runtime, state)
 		add := ui.ButtonBase(c).Height(th.Space(7)).PaddingX(design.Space1).Gap(design.Space1).
-			Radius(design.RadiusSM).Label(state.T("添加工作区", "Add workspace")).
+			Radius(design.RadiusSM).
 			Tooltip(state.T("打开文件夹并添加为工作区", "Open a folder and add it as a workspace"))
 		if add.Hovered() {
 			add = add.Background(t.BgHover)
@@ -524,6 +526,13 @@ func buildWorkspaceSectionHeader(c *ui.Context, t *design.Tokens, workspace cont
 			openAddWorkspaceDialog(state, runtime)
 		}
 	})
+	// The status line lives below the header: two badges in the 280px header
+	// would squeeze the add action to zero width.
+	if state.addWorkspaceStatus != "" {
+		ui.Row(c).FillWidth().Children(func() {
+			design.Apply(ui.Badge(c, state.addWorkspaceStatus), t.Badge()).TextColor(t.Success)
+		})
+	}
 }
 
 // buildWorkspaceTree renders the workspace → session groups. Sessions with an
@@ -724,7 +733,7 @@ func filterArchivedSessions(sessions []contracts.ChatSessionInfo, includeArchive
 // orderSessionList applies the sidebar's priority: pinned first, then the
 // ordinary sessions, then archived ones (archived keep the updated order).
 // Archived sessions only appear when the view option is on.
-func orderSessionList(sessions []contracts.ChatSessionInfo, includeArchived bool) []contracts.ChatSessionInfo {
+func orderSessionList(sessions []contracts.ChatSessionInfo, includeArchived bool, sortMode string) []contracts.ChatSessionInfo {
 	active := make([]contracts.ChatSessionInfo, 0, len(sessions))
 	archived := make([]contracts.ChatSessionInfo, 0)
 	for _, session := range sessions {
@@ -734,9 +743,9 @@ func orderSessionList(sessions []contracts.ChatSessionInfo, includeArchived bool
 		}
 		active = append(active, session)
 	}
-	ordered := pinnedFirst(active)
+	ordered := pinnedFirst(sortSidebarSessions(active, sortMode))
 	if includeArchived {
-		ordered = append(ordered, archived...)
+		ordered = append(ordered, sortSidebarSessions(archived, sortMode)...)
 	}
 	return ordered
 }

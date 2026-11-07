@@ -237,7 +237,8 @@ func shortcutChoiceLabels(choices []shortcutChoice) []string {
 
 // appearanceState is the appearance page's UI-local state.
 type appearanceState struct {
-	dark      bool
+	// themeMode is the segmented appearance selection: light/dark/system.
+	themeMode int
 	language  string
 	status    string
 	statusErr bool
@@ -563,7 +564,10 @@ func Module() *module.Descriptor[Config] {
 
 		state := newState(chat, store)
 		appearance := &appearanceState{
-			dark:           theme.Dark(),
+			themeMode: appearanceThemeMode(
+				store.Get(contracts.SettingThemeMode, ""),
+				store.Get(contracts.SettingsUIThemeDark, ""),
+			),
 			language:       locale.Language(),
 			autostart:      store.Get(contracts.SettingAutostart, "false") == "true",
 			singleInstance: singleInstanceSwitchEnabled(store.Get(contracts.SettingSingleInstance, "true")),
@@ -600,7 +604,7 @@ func Module() *module.Descriptor[Config] {
 		appearanceLabels := func() buildAppearanceLabels {
 			return buildAppearanceLabels{
 				title:         firstNonEmpty(cfg.AppearanceTitle, localized(locale, "外观", "Appearance")),
-				themeLabel:    firstNonEmpty(cfg.ThemeLabel, localized(locale, "深色模式", "Dark mode")),
+				themeLabel:    firstNonEmpty(cfg.ThemeLabel, localized(locale, "外观模式", "Appearance mode")),
 				languageLabel: firstNonEmpty(cfg.LanguageLabel, localized(locale, "界面语言", "Interface language")),
 				saveLabel:     firstNonEmpty(cfg.SaveAppearanceLabel, localized(locale, "应用", "Apply")),
 			}
@@ -1037,14 +1041,19 @@ func buildAppearancePage(c *ui.Context, state *appearanceState, store contracts.
 
 		panel(c, t, func() {
 			sectionTitle(c, t, localized(locale, "主题", "Theme"))
-			toggle := ui.Toggle(c, &state.dark, labels.themeLabel)
-			if toggle.Changed() {
-				theme.SetDark(state.dark)
-				_ = store.Set(contracts.SettingsUIThemeDark, fmt.Sprintf("%t", state.dark))
-				state.status = localized(locale, "主题已切换", "Theme switched")
-				state.statusErr = false
+			segmented := ui.Segmented(c, &state.themeMode,
+				localized(locale, "浅色", "Light"),
+				localized(locale, "深色", "Dark"),
+				localized(locale, "跟随系统", "System"),
+			).Label(labels.themeLabel)
+			if segmented.Changed() {
+				applyThemeModeSelection(state, store, theme, locale)
+				c.Invalidate()
 			}
-			design.Apply(ui.Text(c, localized(locale, "跟随系统或固定浅色/深色外观，切换立即预览。", "Follow the system theme or force light/dark; the change previews immediately.")), t.TextMuted(design.TypeXXS))
+			design.Apply(ui.Text(c, localized(locale,
+				"修改立即生效；跟随系统由桌面外观决定（需要桌面支持）。",
+				"Changes apply immediately; System follows the desktop appearance (desktop support required).")),
+				t.TextMuted(design.TypeXXS)).MaxLines(2)
 		})
 
 		panel(c, t, func() {
@@ -1106,7 +1115,6 @@ func buildAppearancePage(c *ui.Context, state *appearanceState, store contracts.
 
 		ui.Row(c).FillWidth().Gap(design.Space2).AlignItems(ui.Center).Children(func() {
 			if brandPrimaryButton(c, t, icons.Globe(), labels.saveLabel).Clicked() {
-				theme.SetDark(state.dark)
 				locale.SetLanguage(state.language)
 				if err := saveAppearance(state, store, locale); err != nil {
 					state.status = localized(locale, "保存失败：", "Save failed: ") + err.Error()
@@ -1129,7 +1137,11 @@ func saveAppearance(state *appearanceState, store contracts.SettingsService, loc
 	if !validGlobalHotkeyValue(hotkey) {
 		return errors.New(globalHotkeyInvalidMessage(locale))
 	}
-	if err := store.Set(contracts.SettingsUIThemeDark, fmt.Sprintf("%t", state.dark)); err != nil {
+	legacyDark := themeModeName(state.themeMode) == "dark"
+	if err := store.Set(contracts.SettingsUIThemeDark, fmt.Sprintf("%t", legacyDark)); err != nil {
+		return err
+	}
+	if err := store.Set(contracts.SettingThemeMode, themeModeName(state.themeMode)); err != nil {
 		return err
 	}
 	if err := store.Set(contracts.SettingsUILanguage, state.language); err != nil {

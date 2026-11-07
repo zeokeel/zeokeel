@@ -21,6 +21,12 @@
 - 右侧栏「文件」Tab：打开文件夹（mygo 原生 Directory picker）、目录进入/面包屑、文本/Markdown/图片预览、
   刷新与错误状态；E2E 覆盖工作区创建 + 列表 + 预览帧
 
+**TDD-theme-mode/sidebar-view（2026-11-08）**
+- 主题三态：host resolveThemeDark/initialThemeDark（legacy ui.theme.dark 兼容）+ mygo.Theme.OnUpdated 跟随系统；外观页 Three-segment（浅色/深色/跟随系统）
+  即时切换 + 提示；host 70 / settings 127 测试；xvfb 默认与预置 dark 两次 exit 124 无 panic
+- 侧栏视图：视图菜单（排序最近/名称、分组按工作区/平铺，Checked，持久化 sidebar.sort/sidebar.group），name/flat 渲染正确；sidebar 62 测试
+- 修复：侧栏头部状态 badge 导致添加工作区按钮被挤成 0 宽（创建后无法再次打开对话框）→ 状态行移到 header 下方，新增 reopen 回归
+
 **TDD-tools-toggle/tray-actions（2026-11-08）**
 - 全工具级开关：`tools.disabled` 与 legacy `mcp.disabledTools` 并集过滤（含内建 read_file/bash/web_fetch、LSP 后统一过滤），plugins 每行 Toggle
   （内建/MCP 分别写各自 setting，过滤条目还原，重启生效）；toolkit 46 / plugins 22 测试

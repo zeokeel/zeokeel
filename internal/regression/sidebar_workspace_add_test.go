@@ -160,14 +160,18 @@ func TestSidebarAddWorkspaceBasenameAndCreate(t *testing.T) {
 	requireNoText(t, tester, "选择目录…") // the dialog closed
 	requireHasText(t, tester, "已添加工作区")
 
-	// A typed name overrides the directory basename.
+	// A typed name overrides the directory basename. A fresh UI keeps the
+	// dialog lifecycle independent of the first create (the sidebar's add
+	// dialog is a single overlay instance).
+	workspace2 := &auditWorkspace{}
+	_, tester2 := startSidebarUI(t, workspace2)
 	overrideSidebarPicker(t, func() (string, error) { return "/tmp/other", nil })
-	clickSidebar(t, tester, "添加工作区")
-	typeSidebar(t, tester, "名称 输入", "自定义工作区")
-	clickSidebar(t, tester, "选择目录…")
-	clickSidebar(t, tester, "添加")
-	calls, name, root = workspace.createRecord()
-	if calls != 2 || name != "自定义工作区" || root != "/tmp/other" {
+	clickSidebar(t, tester2, "添加工作区")
+	typeSidebar(t, tester2, "名称 输入", "自定义工作区")
+	clickSidebar(t, tester2, "选择目录…")
+	clickSidebar(t, tester2, "添加")
+	calls, name, root = workspace2.createRecord()
+	if calls != 1 || name != "自定义工作区" || root != "/tmp/other" {
 		t.Fatalf("custom Create = calls %d name %q root %q", calls, name, root)
 	}
 }
@@ -218,4 +222,34 @@ func TestSidebarAddWorkspaceHiddenWithoutBackend(t *testing.T) {
 	_, tester := startSidebarUI(t, nil)
 	requireNoText(t, tester, "添加工作区")
 	requireNoText(t, tester, "选择目录…")
+}
+
+// TestSidebarAddWorkspaceReopensAfterCreate guards the dialog lifecycle: after
+// a successful create (which closes the overlay), the add button must open the
+// dialog again (the header used to squeeze the button to zero width once the
+// status badge appeared).
+func TestSidebarAddWorkspaceReopensAfterCreate(t *testing.T) {
+	workspace := &auditWorkspace{}
+	_, tester := startSidebarUI(t, workspace)
+	overrideSidebarPicker(t, func() (string, error) { return "/tmp/first", nil })
+	clickSidebar(t, tester, "添加工作区")
+	clickSidebar(t, tester, "选择目录…")
+	clickSidebar(t, tester, "添加")
+	requireHasText(t, tester, "已添加工作区")
+
+	clickSidebar(t, tester, "添加工作区")
+	requireHasText(t, tester, "选择目录…")
+}
+
+// TestSidebarAddWorkspaceReopensAfterCancel isolates whether the reopen issue
+// is specific to the successful-submit path or to modal dismissal in general.
+func TestSidebarAddWorkspaceReopensAfterCancel(t *testing.T) {
+	workspace := &auditWorkspace{}
+	_, tester := startSidebarUI(t, workspace)
+	clickSidebar(t, tester, "添加工作区")
+	requireHasText(t, tester, "选择目录…")
+	clickSidebar(t, tester, "取消")
+	requireNoText(t, tester, "选择目录…")
+	clickSidebar(t, tester, "添加工作区")
+	requireHasText(t, tester, "选择目录…")
 }

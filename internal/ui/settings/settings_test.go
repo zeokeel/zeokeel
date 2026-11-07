@@ -514,9 +514,11 @@ func TestModelPresetsFillDrafts(t *testing.T) {
 	}
 }
 
-// TestAppearancePageTogglesTheme covers the appearance page: the native toggle
-// switches the host theme and saving persists the UI preference keys.
-func TestAppearancePageTogglesTheme(t *testing.T) {
+// TestAppearancePageThemeMode covers the appearance page's three-state theme
+// control: dark previews immediately and saving persists the mode plus the
+// legacy dark flag (the detailed switching/fallback matrix lives in
+// theme_mode_test.go).
+func TestAppearancePageThemeMode(t *testing.T) {
 	store := newFakeSettings(nil)
 	h := newHarness(t, &fakeChat{}, store, settings.Config{})
 	tester := h.tester()
@@ -524,13 +526,16 @@ func TestAppearancePageTogglesTheme(t *testing.T) {
 	h.click(tester, "模型")
 
 	h.click(tester, "外观")
-	h.assertTexts(tester, "深色模式", "界面语言", "应用")
+	h.assertTexts(tester, "外观模式", "浅色", "深色", "跟随系统", "界面语言", "应用")
 
-	h.click(tester, "深色模式")
+	h.click(tester, "深色")
 	if !h.uiRoot.Theme().Dark() {
-		t.Fatalf("theme did not switch to dark after clicking the toggle")
+		t.Fatalf("theme did not switch to dark after selecting 深色")
 	}
 	h.click(tester, "应用")
+	if got := store.get(contracts.SettingThemeMode); got != "dark" {
+		t.Fatalf("persisted %s = %q, want dark", contracts.SettingThemeMode, got)
+	}
 	if got := store.get(contracts.SettingsUIThemeDark); got != "true" {
 		t.Fatalf("persisted dark = %q, want true", got)
 	}

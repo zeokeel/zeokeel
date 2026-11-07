@@ -98,6 +98,12 @@ const (
 	SettingCloseToTray = "ui.closeToTray"
 	// SettingNotifications toggles the desktop toast overlay (default true).
 	SettingNotifications = "ui.notifications"
+	// SettingThemeMode is the appearance source: "light", "dark" or "system"
+	// (the legacy ui.theme.dark boolean is still written for older builds).
+	SettingThemeMode = "ui.theme.mode"
+	// Sidebar view options: session sort and grouping.
+	SettingSidebarSort  = "sidebar.sort"  // "recent" (default) or "name"
+	SettingSidebarGroup = "sidebar.group" // "workspace" (default) or "flat"
 	// SettingGlobalHotkey is a system-wide accelerator (e.g.
 	// "CmdOrCtrl+Shift+Space") that shows and focuses the window; empty disables
 	// it (desktop only).
