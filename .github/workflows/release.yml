@@ -152,7 +152,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           VERSION: ${{ steps.version.outputs.version }}
-        run: gh release delete-asset "v${VERSION}" checksums.txt --yes
+        run: gh release delete-asset "v${VERSION}" checksums.txt --yes || true
 
       - name: Publish GitHub release
         uses: softprops/action-gh-release@v3
