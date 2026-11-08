@@ -27,8 +27,10 @@ type fakeSkillsEditor struct {
 
 	skills    *fakeSkills
 	creates   []contracts.SkillDraft
+	updates   []contracts.SkillDraft
 	deletes   []string
 	createErr error
+	updateErr error
 	deleteErr error
 }
 
@@ -48,6 +50,27 @@ func (f *fakeSkillsEditor) CreateSkill(_ context.Context, draft contracts.SkillD
 	if f.skills != nil {
 		f.skills.mu.Lock()
 		f.skills.list = append(f.skills.list, skill)
+		f.skills.mu.Unlock()
+	}
+	return skill, nil
+}
+
+func (f *fakeSkillsEditor) UpdateSkill(_ context.Context, name string, draft contracts.SkillDraft) (contracts.Skill, error) {
+	f.mu.Lock()
+	f.updates = append(f.updates, draft)
+	err := f.updateErr
+	f.mu.Unlock()
+	if err != nil {
+		return contracts.Skill{}, err
+	}
+	skill := contracts.Skill{Name: name, Description: draft.Description, Path: "/updated/" + name + "/SKILL.md", Body: draft.Body}
+	if f.skills != nil {
+		f.skills.mu.Lock()
+		for index := range f.skills.list {
+			if f.skills.list[index].Name == name {
+				f.skills.list[index] = skill
+			}
+		}
 		f.skills.mu.Unlock()
 	}
 	return skill, nil
@@ -79,6 +102,12 @@ func (f *fakeSkillsEditor) created() []contracts.SkillDraft {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	return append([]contracts.SkillDraft(nil), f.creates...)
+}
+
+func (f *fakeSkillsEditor) updated() []contracts.SkillDraft {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]contracts.SkillDraft(nil), f.updates...)
 }
 
 func (f *fakeSkillsEditor) deleted() []string {
@@ -292,4 +321,85 @@ func TestSkillsEditorEnglish(t *testing.T) {
 	h.assertTexts(tester, "Delete skill", "Confirm delete")
 	h.click(tester, "Confirm delete")
 	h.assertTexts(tester, "Skill deleted")
+}
+
+func dataDirSkill(dataDir, name, description, body string) contracts.Skill {
+	return contracts.Skill{
+		Name: name, Description: description, Body: body,
+		Path: filepath.Join(dataDir, "skills", name, "SKILL.md"),
+	}
+}
+
+func TestSkillsEditModalPrefillsAndSaves(t *testing.T) {
+	dataDir := t.TempDir()
+	skills := newFakeSkills()
+	skills.setList(dataDirSkill(dataDir, "alpha", "old desc", "# old body"))
+	editor := newFakeSkillsEditor(skills)
+	h := skillsEditorHarness(t, skills, editor, dataDir)
+	tester := h.tester()
+	h.assertTexts(tester, "编辑")
+
+	h.click(tester, "编辑")
+	h.assertTexts(tester, "编辑技能", "alpha", "名称不可修改", "描述", "内容", "保存", "取消")
+	h.focusInput(tester, "描述")
+	tester.Key(ui.Cmd, ui.KeyA)
+	tester.Key(0, ui.KeyBackspace)
+	tester.Type("new desc")
+	tester.Frame()
+	h.focusInput(tester, "内容")
+	tester.Key(ui.Cmd, ui.KeyA)
+	tester.Key(0, ui.KeyBackspace)
+	tester.Type("# new body")
+	tester.Frame()
+	h.click(tester, "保存")
+
+	updates := editor.updated()
+	if len(updates) != 1 || updates[0].Name != "alpha" || updates[0].Description != "new desc" || updates[0].Body != "# new body" {
+		t.Fatalf("UpdateSkill calls = %+v", updates)
+	}
+	h.assertTexts(tester, "已保存", "new desc")
+	if got := exactTextCount(tester.Texts(), "编辑技能"); got != 0 {
+		t.Fatalf("edit modal still open: %d", got)
+	}
+}
+
+func TestSkillsEditFailureKeepsModal(t *testing.T) {
+	dataDir := t.TempDir()
+	skills := newFakeSkills()
+	skills.setList(dataDirSkill(dataDir, "alpha", "desc", "body"))
+	editor := newFakeSkillsEditor(skills)
+	editor.updateErr = errors.New("read-only filesystem")
+	h := skillsEditorHarness(t, skills, editor, dataDir)
+	tester := h.tester()
+	h.click(tester, "编辑")
+	h.click(tester, "保存")
+	h.assertTexts(tester, "编辑技能失败：read-only filesystem", "编辑技能", "保存")
+}
+
+func TestSkillsEditHiddenWithoutEditor(t *testing.T) {
+	dataDir := t.TempDir()
+	skills := newFakeSkills()
+	skills.setList(dataDirSkill(dataDir, "alpha", "desc", "body"))
+	h := skillsEditorHarness(t, skills, nil, dataDir)
+	tester := h.tester()
+	h.assertNoTexts(tester, "编辑", "删除", "新建技能")
+}
+
+func TestSkillsEditEnglish(t *testing.T) {
+	dataDir := t.TempDir()
+	skills := newFakeSkills()
+	skills.setList(dataDirSkill(dataDir, "alpha", "desc", "body"))
+	editor := newFakeSkillsEditor(skills)
+	h := newLocaleSkillsEditorHarness(t, "en", skills, editor, dataDir)
+	tester := h.tester()
+	tester.Frame()
+	h.click(tester, "Skills")
+	h.assertTexts(tester, "Edit")
+	h.click(tester, "Edit")
+	h.assertTexts(tester, "Edit skill", "Name cannot be changed", "Save", "Cancel")
+	h.click(tester, "Save")
+	if got := editor.updated(); len(got) != 1 || got[0].Name != "alpha" {
+		t.Fatalf("English UpdateSkill calls = %+v", got)
+	}
+	h.assertTexts(tester, "Saved")
 }

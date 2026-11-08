@@ -87,6 +87,99 @@ func (s *service) CreateSkill(ctx context.Context, draft contracts.SkillDraft) (
 	return contracts.Skill{Name: name, Description: description, Path: path, Body: body}, nil
 }
 
+// UpdateSkill implements contracts.SkillsEditor: it rewrites an existing
+// data-dir skill's SKILL.md atomically (temp file in the skill directory,
+// chmod 0644, rename over the old file). The draft name must match the target
+// name; configured and workspace skills stay read-only. The service has no
+// cache, so List/Read see the new content immediately.
+func (s *service) UpdateSkill(ctx context.Context, name string, draft contracts.SkillDraft) (contracts.Skill, error) {
+	if err := contextErr(ctx); err != nil {
+		return contracts.Skill{}, err
+	}
+	targetName, err := normalizeSkillName(name)
+	if err != nil {
+		return contracts.Skill{}, err
+	}
+	draftName, err := normalizeSkillName(draft.Name)
+	if err != nil {
+		return contracts.Skill{}, err
+	}
+	if draftName != targetName {
+		return contracts.Skill{}, fmt.Errorf("skill name cannot be changed (got %q, want %q)", draftName, targetName)
+	}
+	body := strings.TrimSpace(draft.Body)
+	if body == "" {
+		return contracts.Skill{}, errors.New("skill body is required")
+	}
+	description := normalizeSkillDescription(draft.Description)
+	baseDir, err := s.dataDirSkillsDir()
+	if err != nil {
+		return contracts.Skill{}, err
+	}
+	targetDir := filepath.Join(baseDir, targetName)
+	if !pathWithinDir(baseDir, targetDir) {
+		return contracts.Skill{}, fmt.Errorf("skill %q escapes the data directory", targetName)
+	}
+	info, err := os.Lstat(targetDir)
+	if errors.Is(err, os.ErrNotExist) {
+		return contracts.Skill{}, fmt.Errorf("skill %q not found in the data directory", targetName)
+	}
+	if err != nil {
+		return contracts.Skill{}, fmt.Errorf("stat skill directory: %w", err)
+	}
+	if info.Mode()&os.ModeSymlink != 0 {
+		return contracts.Skill{}, fmt.Errorf("skill %q is a symlink; refusing to update it", targetName)
+	}
+	if !info.IsDir() {
+		return contracts.Skill{}, fmt.Errorf("skill %q is not a skill directory", targetName)
+	}
+	path := filepath.Join(targetDir, "SKILL.md")
+	if fileInfo, err := os.Lstat(path); errors.Is(err, os.ErrNotExist) {
+		return contracts.Skill{}, fmt.Errorf("skill %q not found in the data directory", targetName)
+	} else if err != nil {
+		return contracts.Skill{}, fmt.Errorf("stat skill file: %w", err)
+	} else if fileInfo.Mode()&os.ModeSymlink != 0 {
+		return contracts.Skill{}, fmt.Errorf("skill %q is a symlink; refusing to update it", targetName)
+	}
+	content := fmt.Sprintf("---\nname: %s\ndescription: %s\n---\n\n%s", targetName, description, body)
+	if err := writeSkillFileAtomic(path, content); err != nil {
+		return contracts.Skill{}, err
+	}
+	s.logger.Printf("%s: updated skill %q at %s", ModuleID, targetName, path)
+	return contracts.Skill{Name: targetName, Description: description, Path: path, Body: body}, nil
+}
+
+// writeSkillFileAtomic writes content to a temporary file in the target
+// directory, fixes its mode to 0644 and renames it over path so a concurrent
+// reader never sees a partially written SKILL.md.
+func writeSkillFileAtomic(path, content string) error {
+	dir := filepath.Dir(path)
+	temp, err := os.CreateTemp(dir, ".SKILL.md.tmp-*")
+	if err != nil {
+		return fmt.Errorf("create temporary skill file: %w", err)
+	}
+	tempPath := temp.Name()
+	cleanup := func() { _ = os.Remove(tempPath) }
+	if _, err := temp.WriteString(content); err != nil {
+		_ = temp.Close()
+		cleanup()
+		return fmt.Errorf("write temporary skill file: %w", err)
+	}
+	if err := temp.Close(); err != nil {
+		cleanup()
+		return fmt.Errorf("close temporary skill file: %w", err)
+	}
+	if err := os.Chmod(tempPath, 0o644); err != nil {
+		cleanup()
+		return fmt.Errorf("chmod temporary skill file: %w", err)
+	}
+	if err := os.Rename(tempPath, path); err != nil {
+		cleanup()
+		return fmt.Errorf("replace skill file: %w", err)
+	}
+	return nil
+}
+
 // DeleteSkill implements contracts.SkillsEditor: it deletes one skill directory
 // below <dataDir>/skills. Names that are unsafe, absent, or that belong to
 // another root (configured/workspace) are rejected with a readable error; a

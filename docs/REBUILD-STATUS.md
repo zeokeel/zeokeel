@@ -21,6 +21,11 @@
 - 右侧栏「文件」Tab：打开文件夹（mygo 原生 Directory picker）、目录进入/面包屑、文本/Markdown/图片预览、
   刷新与错误状态；E2E 覆盖工作区创建 + 列表 + 预览帧
 
+**TDD-skills-update/memory-admin（2026-11-08）**
+- 技能编辑：SkillsEditor.UpdateSkill（仅 dataDir、名称不可改、frontmatter+body 原子重写、即时可见）；设置技能页编辑 Modal 预填/保存/失败保留；
+  skills 21 / settings 181 测试
+- 设置记忆页管理：整理（规范化去重保留最早）与全部清空（AlertDialog 确认）；settings 181 测试
+
 **TDD-context-window/model-check（2026-11-08）**
 - 模型元数据：ModelInfo.ContextWindow（默认 128000，settings/assembly 两源、清洗、JSON 往返）；usage footer 追加预算（`· 预算 128k`/`· 128k context`）；
   modelcatalog 18 / session 150 / settings 170 测试

@@ -25,12 +25,16 @@ type skillsState struct {
 	bodyErr map[string]string
 	open    map[string]bool
 
-	// Editor half (skills_edit.go): the create modal draft/error, the success
+	// Editor half (skills_edit.go): the create/edit modal drafts, the success
 	// badge and the delete confirmation.
 	creating         bool
 	draftName        string
 	draftDescription string
 	draftBody        string
+	editing          bool
+	editName         string
+	editDescription  string
+	editBody         string
 	editStatus       string
 	editErr          string
 	confirmDelete    bool
@@ -148,6 +152,16 @@ func buildSkillCard(c *ui.Context, t *design.Tokens, skills contracts.SkillsServ
 		}
 		if editor != nil && skillsEditActionsAllowed(skill.Path, dataDir) {
 			ui.Row(c).FillWidth().Justify(ui.End).Gap(design.Space2).Children(func() {
+				edit := ui.Button(c, localized(locale, "编辑", "Edit")).
+					Tooltip(localized(locale, "编辑这个技能", "Edit this skill"))
+				if edit.Clicked() {
+					body, bodyErr := skillBody(skills, st, skill)
+					if bodyErr != "" {
+						st.editErr = localized(locale, "读取技能内容失败：", "Failed to read skill content: ") + bodyErr
+						body = ""
+					}
+					startEditSkill(c, st, skill, body)
+				}
 				remove := ui.Button(c, localized(locale, "删除", "Delete")).
 					Tooltip(localized(locale, "删除这个技能", "Delete this skill"))
 				if remove.Clicked() {

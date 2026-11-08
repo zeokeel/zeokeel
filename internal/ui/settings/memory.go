@@ -7,6 +7,7 @@ package settings
 import (
 	"context"
 	"fmt"
+	"sort"
 	"strings"
 	"time"
 
@@ -28,10 +29,11 @@ const (
 
 // memoryPageState is the page's UI-local state (UI thread only).
 type memoryPageState struct {
-	query     string
-	draft     string
-	notice    string
-	noticeErr bool
+	query        string
+	draft        string
+	notice       string
+	noticeErr    bool
+	confirmClear bool
 }
 
 // memoryStatsLabel renders the entry count.
@@ -94,12 +96,31 @@ func buildMemoryPage(c *ui.Context, t *design.Tokens, kctx cordis.Context,
 			ui.SearchField(c, &st.query).
 				Label(localized(locale, "搜索记忆", "Search memory")).
 				Placeholder(localized(locale, "搜索记忆…", "Search memory…")).FillWidth()
+			// The management row stays available even when the initial read
+			// failed, so tidy/clear can retry the store.
+			ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(design.Space2).Children(func() {
+				if loadErr == nil {
+					design.Apply(ui.Text(c, memoryStatsLabel(locale, len(memories))),
+						t.Font(design.TypeXXS)).TextColor(t.LabelTertiary).Grow(1)
+				} else {
+					ui.Spacer(c).Grow(1)
+				}
+				if ui.Button(c, localized(locale, "整理记忆", "Tidy")).
+					Tooltip(localized(locale, "删除重复的记忆，保留最早的一条", "Remove duplicate memories, keeping the earliest")).Clicked() {
+					tidyMemoriesPage(store, st, locale)
+					c.Invalidate()
+				}
+				clear := ui.Button(c, localized(locale, "全部清空", "Clear all")).
+					Tooltip(localized(locale, "删除全部记忆", "Delete every memory")).TextColor(t.DangerText)
+				if clear.Clicked() {
+					st.confirmClear = true
+					c.Invalidate()
+				}
+			})
 			if loadErr != nil {
 				buildMemoryPageError(c, t, localized(locale, "读取记忆失败：", "Failed to read memory: ")+loadErr.Error())
 				return
 			}
-			design.Apply(ui.Text(c, memoryStatsLabel(locale, len(memories))),
-				t.Font(design.TypeXXS)).TextColor(t.LabelTertiary)
 
 			switch {
 			case len(memories) == 0 && query != "":
@@ -147,7 +168,103 @@ func buildMemoryPage(c *ui.Context, t *design.Tokens, kctx cordis.Context,
 				}
 			})
 		})
+
+		// Clear-all confirmation: a native AlertDialog above the page content.
+		if st.confirmClear {
+			switch ui.AlertDialog(c, &st.confirmClear,
+				localized(locale, "清空全部记忆", "Clear all memories"),
+				localized(locale, "确认删除全部记忆？此操作无法撤销。",
+					"Delete all memories? This cannot be undone."),
+				localized(locale, "取消", "Cancel"),
+				localized(locale, "清空", "Clear")) {
+			case 1:
+				clearMemoriesPage(store, st, locale)
+				c.Invalidate()
+			default:
+				c.Invalidate()
+			}
+		}
 	})
+}
+
+// normalizeMemoryKey is the duplicate key of the tidy action: trimmed, inner
+// whitespace collapsed and case-insensitive.
+func normalizeMemoryKey(text string) string {
+	return strings.ToLower(strings.Join(strings.Fields(strings.TrimSpace(text)), " "))
+}
+
+// memoryNotice renders one success/error result in the add panel's row.
+func setMemoryNotice(st *memoryPageState, text string, failed bool) {
+	st.notice = text
+	st.noticeErr = failed
+}
+
+// tidyMemoriesPage removes duplicate memories, keeping the earliest of each
+// normalized text; failures land in the page's danger line.
+func tidyMemoriesPage(store contracts.MemoryStore, st *memoryPageState, locale contracts.LocaleService) {
+	ctx := context.Background()
+	memories, err := store.List(ctx)
+	if err != nil {
+		setMemoryNotice(st, localized(locale, "读取记忆失败：", "Failed to read memory: ")+err.Error(), true)
+		return
+	}
+	sort.SliceStable(memories, func(i, j int) bool {
+		return memories[i].Created.Before(memories[j].Created)
+	})
+	seen := make(map[string]bool, len(memories))
+	removed, failed := 0, 0
+	for _, memory := range memories {
+		key := normalizeMemoryKey(memory.Text)
+		if seen[key] {
+			if store.Remove(ctx, memory.ID) {
+				removed++
+			} else {
+				failed++
+			}
+			continue
+		}
+		seen[key] = true
+	}
+	switch {
+	case failed > 0:
+		setMemoryNotice(st, localized(locale, "整理记忆失败：", "Tidy failed: ")+fmt.Sprintf("%d", failed), true)
+	case removed > 0:
+		setMemoryNotice(st, memoryTidiedLabel(locale, removed), false)
+	default:
+		setMemoryNotice(st, localized(locale, "没有可整理的重复记忆", "No duplicate memories to tidy"), false)
+	}
+}
+
+// memoryTidiedLabel renders the tidy success count.
+func memoryTidiedLabel(locale contracts.LocaleService, count int) string {
+	if localized(locale, "zh", "en") == "en" {
+		if count == 1 {
+			return "Tidied 1 memory"
+		}
+		return fmt.Sprintf("Tidied %d memories", count)
+	}
+	return fmt.Sprintf("已整理 %d 条", count)
+}
+
+// clearMemoriesPage removes every memory; failures land in the danger line.
+func clearMemoriesPage(store contracts.MemoryStore, st *memoryPageState, locale contracts.LocaleService) {
+	ctx := context.Background()
+	memories, err := store.List(ctx)
+	if err != nil {
+		setMemoryNotice(st, localized(locale, "清空失败：", "Clear failed: ")+err.Error(), true)
+		return
+	}
+	failed := 0
+	for _, memory := range memories {
+		if !store.Remove(ctx, memory.ID) {
+			failed++
+		}
+	}
+	if failed > 0 {
+		setMemoryNotice(st, localized(locale, "清空失败：", "Clear failed: ")+fmt.Sprintf("%d", failed), true)
+		return
+	}
+	setMemoryNotice(st, localized(locale, "已清空", "Cleared"), false)
 }
 
 // buildMemoryPageEntry renders one memory row: body, scope/time metadata and a

@@ -67,7 +67,7 @@
 | `runtime` | 🟡 | agent + rig agent/gate/compact | 循环/审批/压缩/检查点/多模态 parts/subagent runner/team manager/goal 工具与 goal 桥；缺 modes、review、goal 自动驱动、PTC/workflow/ralph |
 | `session` | 🟡 | agent ChatService + Regenerate/Fork/Archive/Pin/ModelSwitcher + usage + 排队发送 | 发送/取消/历史/恢复/压缩/fork/export/附件/重新生成/会话模型/推理强度/turn usage（含 **context budget 显示**）/运行中排队发送/消息字号；缺 goal 多轮自动执行、tool spill |
 | `sessionreference` | 🟡 | composer @ 菜单 + agent `references.go` | token 持久化、注入尾部 20 条/≤8000 rune、session_refs 事件、self/unknown/重复忽略、分隔符解析；缺旧候选排序细节/URI 语义/预算错误分类 |
-| `skills` | 🟡 | `internal/modules/skills` + settings 技能页 | 多根 List/Read/roots/预览/刷新 + **新建（dataDir/skills，frontmatter/校验）与删除（仅 dataDir，realpath 校验）**；缺 workspace 技能编辑、文件监听 |
+| `skills` | 🟡 | `internal/modules/skills` + settings 技能页 | 多根 List/Read/roots/预览/刷新 + 新建/**编辑（dataDir 内 frontmatter+body 原子重写、名称不可改、旧内容清除）**/删除（仅 dataDir，realpath 校验）；缺 workspace 技能编辑、文件监听 |
 | `state` | ✅ | ChatService 读模型 + uiroot runtime | old broker/projector 被读模型替代；UI 所需投影可用 |
 | `store` | 🟡 | `internal/modules/sessionstore` | sessions/messages/events/checkpoints/search/workspace_id；旧 attachments/automation_runs/feedback/model 表语义分散或未迁移 |
 | `tools` | 🟡 | toolkit + hosttools + agent + rig tools | 文件/执行/编辑/图像/终端/jobs/memory/schedule/worktree/skills/settings/web/MCP/session/subagent/subagent_fork/team_*/spawn_teammate/list_agents/wait_agent/ask_user/present/plan_review/exit_plan_mode/goal/team_task_* 已注册；缺 workflow/ralph/review/inspect/report/lsp/ptc 与 tool allowlist/presets |

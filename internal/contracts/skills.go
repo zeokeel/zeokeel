@@ -40,6 +40,10 @@ type SkillsEditor interface {
 	// CreateSkill writes <dataDir>/skills/<slug>/SKILL.md and returns the
 	// created skill. A name that already exists is rejected.
 	CreateSkill(ctx context.Context, draft SkillDraft) (Skill, error)
+	// UpdateSkill rewrites one existing data-dir skill's SKILL.md. The draft
+	// name must match the existing directory name (the name is not changed);
+	// skills from other roots are rejected.
+	UpdateSkill(ctx context.Context, name string, draft SkillDraft) (Skill, error)
 	// DeleteSkill removes one data-dir skill directory. Skills from other roots
 	// are rejected.
 	DeleteSkill(ctx context.Context, name string) error

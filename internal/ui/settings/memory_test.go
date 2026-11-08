@@ -267,3 +267,128 @@ func TestMemoryPageEnglishCopy(t *testing.T) {
 	h.click(tester, "Add")
 	h.assertTexts(tester, "Added", "2 memories")
 }
+
+// --- management: tidy / clear all -------------------------------------------
+
+func memoryAt(id, text string, created time.Time) contracts.Memory {
+	return contracts.Memory{ID: id, Text: text, Scope: "global", Created: created}
+}
+
+func TestMemoryPageTidyRemovesDuplicatesKeepsEarliest(t *testing.T) {
+	base := time.Unix(1700000000, 0)
+	store := newFakeMemoryStore(
+		memoryAt("mem-1", "Alpha 项目", base),
+		memoryAt("mem-2", "alpha   项目", base.Add(time.Second)),
+		memoryAt("mem-3", "Beta 计划", base.Add(2*time.Second)),
+		memoryAt("mem-4", " ALPHA 项目 ", base.Add(3*time.Second)),
+	)
+	h := memoryPageHarness(t, store)
+	tester := h.tester()
+
+	h.click(tester, "整理记忆")
+	h.assertTexts(tester, "已整理 2 条")
+	if removes := store.removes(); len(removes) != 2 || removes[0] != "mem-2" || removes[1] != "mem-4" {
+		t.Fatalf("Remove calls = %v, want [mem-2 mem-4]", removes)
+	}
+	remaining := store.snapshot()
+	if len(remaining) != 2 || remaining[0].ID != "mem-1" || remaining[1].ID != "mem-3" {
+		t.Fatalf("remaining memories = %+v", remaining)
+	}
+}
+
+func TestMemoryPageTidyWithoutDuplicates(t *testing.T) {
+	store := newFakeMemoryStore(
+		memoryEntry("mem-1", "Alpha"),
+		memoryEntry("mem-2", "Beta"),
+	)
+	h := memoryPageHarness(t, store)
+	tester := h.tester()
+	h.click(tester, "整理记忆")
+	h.assertTexts(tester, "没有可整理的重复记忆")
+	if removes := store.removes(); len(removes) != 0 {
+		t.Fatalf("Remove calls = %v, want none", removes)
+	}
+}
+
+func TestMemoryPageTidyErrors(t *testing.T) {
+	store := newFakeMemoryStore(
+		memoryEntry("mem-1", "Alpha"),
+		memoryEntry("mem-2", "alpha"),
+	)
+	store.removeErr = true
+	h := memoryPageHarness(t, store)
+	tester := h.tester()
+	h.click(tester, "整理记忆")
+	h.assertTexts(tester, "整理记忆失败")
+
+	listStore := newFakeMemoryStore()
+	listStore.listErr = errors.New("tidy list boom")
+	h2 := memoryPageHarness(t, listStore)
+	tester2 := h2.tester()
+	h2.click(tester2, "整理记忆")
+	h2.assertTexts(tester2, "读取记忆失败：tidy list boom")
+}
+
+func TestMemoryPageClearAllConfirmed(t *testing.T) {
+	store := newFakeMemoryStore(
+		memoryEntry("mem-1", "Alpha"),
+		memoryEntry("mem-2", "Beta"),
+		memoryEntry("mem-3", "Gamma"),
+	)
+	h := memoryPageHarness(t, store)
+	tester := h.tester()
+
+	h.click(tester, "全部清空")
+	h.assertTexts(tester, "清空全部记忆", "取消", "清空")
+	h.click(tester, "清空")
+	h.assertTexts(tester, "已清空")
+	if remaining := store.snapshot(); len(remaining) != 0 {
+		t.Fatalf("memories after clear = %+v, want none", remaining)
+	}
+	if removes := store.removes(); len(removes) != 3 {
+		t.Fatalf("Remove calls = %v, want all three", removes)
+	}
+}
+
+func TestMemoryPageClearAllCancelled(t *testing.T) {
+	store := newFakeMemoryStore(memoryEntry("mem-1", "Alpha"))
+	h := memoryPageHarness(t, store)
+	tester := h.tester()
+	h.click(tester, "全部清空")
+	h.click(tester, "取消")
+	if removes := store.removes(); len(removes) != 0 {
+		t.Fatalf("cancelled clear called Remove: %v", removes)
+	}
+	if remaining := store.snapshot(); len(remaining) != 1 {
+		t.Fatalf("memories after cancel = %+v", remaining)
+	}
+}
+
+func TestMemoryPageClearAllErrors(t *testing.T) {
+	store := newFakeMemoryStore(memoryEntry("mem-1", "Alpha"))
+	store.removeErr = true
+	h := memoryPageHarness(t, store)
+	tester := h.tester()
+	h.click(tester, "全部清空")
+	h.click(tester, "清空")
+	h.assertTexts(tester, "清空失败")
+}
+
+func TestMemoryPageAdminEnglishCopy(t *testing.T) {
+	store := newFakeMemoryStore(
+		memoryAt("mem-1", "Alpha", time.Unix(1700000000, 0)),
+		memoryAt("mem-2", "alpha", time.Unix(1700000001, 0)),
+	)
+	h := newLocaleHarness(t, &fakeChat{}, newFakeSettings(nil), settings.Config{}, "en")
+	provide[contracts.MemoryStore](t, h.ctx, contracts.KeyMemory, store)
+	tester := h.tester()
+	tester.Frame()
+	h.click(tester, "Memory")
+	h.assertTexts(tester, "Tidy", "Clear all")
+	h.click(tester, "Tidy")
+	h.assertTexts(tester, "Tidied 1 memory")
+	h.click(tester, "Clear all")
+	h.assertTexts(tester, "Clear all memories", "Cancel", "Clear")
+	h.click(tester, "Clear")
+	h.assertTexts(tester, "Cleared")
+}
