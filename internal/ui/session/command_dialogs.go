@@ -71,7 +71,17 @@ func buildGoalDialog(c *ui.Context, t *design.Tokens, runtime contracts.UIRuntim
 				save := design.Apply(ui.PrimaryButton(c, st.tr("保存", "Save")), t.PrimaryButton()).
 					Disabled(strings.TrimSpace(st.goalText) == "")
 				if save.Clicked() {
-					if _, err := st.goalTracker.Set(context.Background(), strings.TrimSpace(st.goalText)); err != nil {
+					// Editing an existing goal keeps its ID (and therefore the
+					// auto-continue budget, AUDIT-P3-16); only a fresh goal gets
+					// a new identity through Set.
+					_, _, _, hasGoal := st.goalTracker.Get()
+					var err error
+					if lifecycler, ok := st.goalTracker.(contracts.GoalLifecycler); ok && hasGoal {
+						_, err = lifecycler.Edit(strings.TrimSpace(st.goalText))
+					} else {
+						_, err = st.goalTracker.Set(context.Background(), strings.TrimSpace(st.goalText))
+					}
+					if err != nil {
 						st.goalErr = st.tr("保存目标失败：", "Save goal failed: ") + err.Error()
 					} else {
 						st.goalOpen = false

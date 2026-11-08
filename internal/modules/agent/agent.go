@@ -215,6 +215,9 @@ type service struct {
 	// (ask/workspace/full/never); they live until session deletion or process
 	// exit and never persist to settings.
 	sessionPermissions map[string]string
+	// sessionPresets stores the optional per-session agent-preset selection
+	// (preset ID); cleared on session deletion, never persisted.
+	sessionPresets map[string]string
 
 	subscribers    []*subscription
 	nextSessionSeq uint64
@@ -244,6 +247,7 @@ var (
 	_ contracts.SessionModelSwitcher      = (*service)(nil)
 	_ contracts.SessionWorkspaceSwitcher  = (*service)(nil)
 	_ contracts.SessionPermissionSwitcher = (*service)(nil)
+	_ contracts.SessionPresetSetter       = (*service)(nil)
 	_ contracts.SessionFeedbacker         = (*service)(nil)
 	_ contracts.Subagents                 = (*service)(nil)
 )
@@ -285,6 +289,7 @@ func newService(cfg Config, registry *rigtools.Registry, settings contracts.Sett
 		approvals:          approvals,
 		sessions:           make(map[string]*sessionState),
 		sessionPermissions: make(map[string]string),
+		sessionPresets:     make(map[string]string),
 	}
 }
 
@@ -514,6 +519,9 @@ func (s *service) sessionModelLocked(sessionID string) string {
 	}
 	if override := strings.TrimSpace(s.settings.Get(contracts.SessionModelSettingKey(sessionID), "")); override != "" {
 		return override
+	}
+	if preset, ok := s.agentPresetForSessionLocked(sessionID); ok && strings.TrimSpace(preset.Model) != "" {
+		return strings.TrimSpace(preset.Model)
 	}
 	return model
 }
@@ -851,6 +859,7 @@ func (s *service) DeleteSession(sessionID string) error {
 	cancel := state.cancel
 	delete(s.sessions, sessionID)
 	delete(s.sessionPermissions, sessionID)
+	delete(s.sessionPresets, sessionID)
 	active := s.active
 	if active == sessionID {
 		s.active = s.newestSessionLocked()
@@ -1278,6 +1287,8 @@ func (s *service) nextMessageIDLocked() string {
 func (s *service) run(ctx context.Context, sessionID string, cfg contracts.ChatConfig, input []rig.Message,
 	history rig.History, effort string) {
 	cfg = s.withWorkspaceInstructions(ctx, cfg)
+	cfg = s.withPresetInstructions(sessionID, cfg)
+	tools := s.toolsForSession(sessionID)
 	provider, err := s.newProvider(cfg, effort)
 	if err != nil {
 		s.finish(sessionID, ctx, fmt.Errorf("create provider: %w", err))
@@ -1291,7 +1302,7 @@ func (s *service) run(ctx context.Context, sessionID string, cfg contracts.ChatC
 		Model:           cfg.Model,
 		SystemPrompt:    cfg.SystemPrompt,
 		MaxIterations:   cfg.MaxIterations,
-		Tools:           s.registry.Tools(),
+		Tools:           tools,
 		History:         s.spilledHistory(history),
 		Gate:            s.gate(sessionID),
 		ContextBudget:   cfg.ContextBudget,

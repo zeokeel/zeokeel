@@ -80,3 +80,65 @@ func EncodeModelInfoList(models []ModelInfo) (string, error) {
 	}
 	return string(encoded), nil
 }
+
+// AgentPreset is one declarative agent preset: a persona/prompt fragment, an
+// optional model default and an optional model-visible tool allowlist. A
+// session stores only the preset ID; the agent backend applies the preset on
+// every run.
+type AgentPreset struct {
+	// ID is the stable identifier a session stores. Required and unique.
+	ID string `json:"id"`
+	// Name is the display label.
+	Name string `json:"name"`
+	// Tools is the tool allowlist (empty = every registered tool).
+	Tools []string `json:"tools,omitempty"`
+	// Prompt is extra system-prompt guidance appended after the persona.
+	Prompt string `json:"prompt,omitempty"`
+	// Persona is the persona prefix text appended after the base prompt and
+	// workspace instructions.
+	Persona string `json:"persona,omitempty"`
+	// Model is the preset's default model (a session model override wins).
+	Model string `json:"model,omitempty"`
+	// Order sorts presets in the picker; ties fall back to ID.
+	Order int `json:"order,omitempty"`
+}
+
+// LegacyAgentPresets returns the built-in agent presets. There are none (the
+// legacy product shipped an empty per-user preset set), so this is always nil.
+func LegacyAgentPresets() []AgentPreset { return nil }
+
+// SettingAgentPresets stores the user-edited agent presets as a JSON array.
+const SettingAgentPresets = "presets.agents"
+
+// ParseAgentPresets decodes the presets.agents settings row. Empty returns
+// nil; malformed JSON is an error.
+func ParseAgentPresets(raw string) ([]AgentPreset, error) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return nil, nil
+	}
+	var presets []AgentPreset
+	if err := json.Unmarshal([]byte(raw), &presets); err != nil {
+		return nil, err
+	}
+	return presets, nil
+}
+
+// EncodeAgentPresets renders the presets.agents settings row.
+func EncodeAgentPresets(presets []AgentPreset) (string, error) {
+	if presets == nil {
+		presets = []AgentPreset{}
+	}
+	encoded, err := json.Marshal(presets)
+	if err != nil {
+		return "", err
+	}
+	return string(encoded), nil
+}
+
+// SessionPresetSetter is the optional chat half that selects one agent preset
+// per session ("" clears the selection). The UI's persona picker uses it.
+type SessionPresetSetter interface {
+	SetSessionPreset(sessionID, presetID string) error
+	SessionPreset(sessionID string) string
+}

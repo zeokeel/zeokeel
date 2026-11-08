@@ -5,6 +5,7 @@ package session_test
 
 import (
 	"errors"
+	"github.com/egoist/mygo/ui"
 	"sync"
 	"testing"
 
@@ -247,5 +248,35 @@ func TestGoalAutoContinueSkipsCompletedAndAbandoned(t *testing.T) {
 				t.Fatalf("auto-continue ran for a %s goal: %v", status, sends)
 			}
 		})
+	}
+}
+
+// TestGoalDialogEditsExistingGoal covers AUDIT-P3-16: saving the /goal dialog
+// for an existing goal edits it in place (same ID, auto-continue budget kept)
+// instead of creating a new goal.
+func TestGoalDialogEditsExistingGoal(t *testing.T) {
+	chat := permissionChat()
+	goal := newLifecycleTracker()
+	goal.setGoal("g1", "旧目标", contracts.GoalStatusActive)
+	h := newCommandDialogHarness(t, chat, "zh", goal, &fakePlanBridger{}, &fakeMemory{})
+	tester := h.tester()
+	tester.Frame()
+	command := findSessionCommand(t, h, "zeokeel.session.goal")
+	if err := command.Run(); err != nil {
+		t.Fatalf("run goal command: %v", err)
+	}
+	tester.Frame()
+	focusDialogInput(t, tester, "目标内容")
+	tester.Key(ui.Cmd, ui.KeyA)
+	tester.Type("新目标")
+	tester.Frame()
+	h.click(tester, "保存")
+	tester.Frame()
+	complete, abandon, edit := goal.lifecycleCalls()
+	if complete != 0 || abandon != 0 || edit != 1 {
+		t.Fatalf("lifecycle calls = complete %d, abandon %d, edit %d; want only one edit", complete, abandon, edit)
+	}
+	if _, text, _, _ := goal.Get(); text != "新目标" {
+		t.Fatalf("goal text = %q, want 新目标", text)
 	}
 }

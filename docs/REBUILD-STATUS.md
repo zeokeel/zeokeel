@@ -21,6 +21,12 @@
 - 右侧栏「文件」Tab：打开文件夹（mygo 原生 Directory picker）、目录进入/面包屑、文本/Markdown/图片预览、
   刷新与错误状态；E2E 覆盖工作区创建 + 列表 + 预览帧
 
+**Round 65 / presets + P3-16（2026-11-08）**
+- 代理预设：contracts AgentPreset（persona/prompt/tools/model/order）+ SessionPresetSetter；agent run 应用（base→AGENTS→persona→prompt，
+  model 默认、tools allowlist 交集）；settings 代理预设 CRUD；composer 人设选择器 + 徽标；agent 122 / settings 213 / session 185 测试
+- P3-16 修复：/goal 对话框对已存在目标改走 Edit（保 ID、续跑配额不重置），新增回归；presets 行升 ✅
+- COVERAGE **✅59 / 🟡2 / ❌1**
+
 **Round 64 / spill+sessionref：工具结果落盘 + 引用细节（2026-11-08）**
 - tool spill：rig History 包装层，>32KiB tool 结果写 `<workspace>/.zeokeel/tool-results`（原子/0644/sha 文件名/prune 100），持久化
   头部 2KiB+路径，当前 run 全文不变，无 workspace/失败回退；agent 116 测试

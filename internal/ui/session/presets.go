@@ -9,7 +9,10 @@ package session
 import (
 	"strings"
 
+	"github.com/egoist/mygo/ui"
+
 	"github.com/zeokeel/zeokeel/internal/contracts"
+	"github.com/zeokeel/zeokeel/internal/design"
 )
 
 // promptSummary truncates a preset prompt for the menu's muted note line.
@@ -62,4 +65,83 @@ func insertPromptPreset(st *state, prompt string) {
 		return
 	}
 	st.draft = strings.TrimRight(st.draft, "\n") + "\n\n" + prompt
+}
+
+// effectiveAgentPresets parses presets.agents for the persona picker. Missing
+// or malformed settings yield no presets (the picker is hidden).
+func effectiveAgentPresets(st *state) []contracts.AgentPreset {
+	if st == nil || st.settings == nil {
+		return nil
+	}
+	presets, err := contracts.ParseAgentPresets(st.settings.Get(contracts.SettingAgentPresets, ""))
+	if err != nil {
+		return nil
+	}
+	out := make([]contracts.AgentPreset, 0, len(presets))
+	for _, preset := range presets {
+		preset.ID = strings.TrimSpace(preset.ID)
+		preset.Name = strings.TrimSpace(preset.Name)
+		if preset.ID == "" || preset.Name == "" {
+			continue
+		}
+		out = append(out, preset)
+	}
+	return out
+}
+
+// buildAgentPresetPicker renders the composer's persona picker (only when the
+// chat backend implements contracts.SessionPresetSetter and presets exist).
+func buildAgentPresetPicker(c *ui.Context, t *design.Tokens, chat contracts.ChatService, st *state, runtime contracts.UIRuntime, activeID string) {
+	setter, ok := chat.(contracts.SessionPresetSetter)
+	if !ok || activeID == "" {
+		return
+	}
+	presets := effectiveAgentPresets(st)
+	if len(presets) == 0 {
+		return
+	}
+	currentID := strings.TrimSpace(setter.SessionPreset(activeID))
+	currentName := ""
+	for _, preset := range presets {
+		if preset.ID == currentID {
+			currentName = preset.Name
+			break
+		}
+	}
+	label := st.tr("人设：无", "Persona: None")
+	if currentName != "" {
+		label = st.tr("人设：", "Persona: ") + currentName
+	}
+	ui.PopoverMenuButton(c, label, func(m *ui.Menu) {
+		m.Item(st.tr("选择代理预设", "Choose an agent preset")).Disabled(true)
+		m.Separator()
+		none := m.Item(st.tr("无", "None"))
+		none.Checked(currentID == "")
+		if none.Chosen() && currentID != "" {
+			applySessionPreset(setter, st, runtime, activeID, "")
+		}
+		for _, preset := range presets {
+			preset := preset
+			item := m.Item(preset.Name)
+			item.Checked(preset.ID == currentID)
+			if item.Chosen() && preset.ID != currentID {
+				applySessionPreset(setter, st, runtime, activeID, preset.ID)
+			}
+		}
+	}).Tooltip(st.tr("为本会话选择代理预设（人设）", "Choose an agent preset (persona) for this session"))
+	if currentName != "" {
+		design.Apply(ui.Badge(c, st.tr("已应用人设：", "Persona applied: ")+currentName), t.Badge()).
+			TextColor(t.Accent)
+	}
+}
+
+// applySessionPreset selects/clears the active session's preset, surfacing a
+// failure in the composer's command error line.
+func applySessionPreset(setter contracts.SessionPresetSetter, st *state, runtime contracts.UIRuntime, sessionID, presetID string) {
+	if err := setter.SetSessionPreset(sessionID, presetID); err != nil {
+		st.commandErr = st.tr("应用人设失败：", "Failed to apply persona: ") + err.Error()
+	} else {
+		st.commandErr = ""
+	}
+	runtime.Invalidate()
 }

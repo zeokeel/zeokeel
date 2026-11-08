@@ -29,7 +29,7 @@
 - **presets 已落地**：prompt 片段契约 + composer「预设/Presets」插入菜单 + 设置「预设」页 CRUD（名称/提示词/排序/
   恢复默认）+ 设置「模型目录」编辑页（modelcatalog.settings 动态读取）；旧 agent presets 的 tool allowlist 语义仍未迁移，
   故 presets 记 🟡。
-- 复核统计（Round 63 进行中）：62 项中 **✅58 / 🟡3 / ❌1**。✅ 为有等价实现或剩余差异属明确非目标；🟡 为已实现但存在
+- 复核统计（Round 64 进行中）：62 项中 **✅59 / 🟡2 / ❌1**。✅ 为有等价实现或剩余差异属明确非目标；🟡 为已实现但存在
   深度/长尾差异（§5.1）；❌ 仅 winproc（Windows 平台非目标）。核心对话/持久化/工作区/审批/设置/右栏/搜索/导入/更新/
   编排/composer 控制/MCP 管理/宿主桌面能力均已可用。
 - **功能面覆盖已完成**：旧应用的用户可见功能均有等价实现；剩余工作为 §5.1 的交互深度精修与 §5.2 的明确非目标。
@@ -38,8 +38,8 @@
 
 | 状态 | 数量 | 占比 | 含义 |
 |---|---:|---:|---|
-| ✅ 已迁移/等价 | 58 | 93.5% | 当前代码有对应实现，进入 desktop/headless 装配或剩余差异属明确非目标 |
-| 🟡 已实现（深度限制） | 3 | 4.8% | 功能已可用，存在子功能/交互/执行语义的深度差异（§5.1） |
+| ✅ 已迁移/等价 | 59 | 95.2% | 当前代码有对应实现，进入 desktop/headless 装配或剩余差异属明确非目标 |
+| 🟡 已实现（深度限制） | 2 | 3.2% | 功能已可用，存在子功能/交互/执行语义的深度差异（§5.1） |
 | ❌ 未迁移 | 1 | 1.6% | 仅 winproc（Windows 平台非目标） |
 | 合计 | 62 | 100% | 28 后端能力 + 34 Shell/UI 能力 |
 
@@ -60,7 +60,8 @@
 | `mcp` | ✅ | toolkit `mcp.Start`（stdio+HTTP）+ settings/workspace 合并 + 工具级开关 | HTTP/stdio 握手/工具注册/失败诊断；assembly>settings>workspace mcp.json（opt-in）；`mcp.disabledTools` 注册前过滤；插件详情/市场在 Shell Plugins 行仍 🟡 |
 | `memory` | 🟡 | `internal/modules/memory` + rig memory tool + session Memory tab + 设置「记忆」页 | JSON MemoryStore/tool/搜索/添加/整理/清空 + **确定性 consolidation（最大条目数/保留天数，设置页策略）**；缺模型驱动 extract |
 | `modelcatalog` | ✅ | `internal/modules/modelcatalog` + composer 模型菜单 + settings「模型目录」页 + **连接检查** | 默认预设（含 128k context window）、per-session 切换/推理强度、目录编辑（增删/恢复默认/上下文窗口）、usage footer 预算显示、**连接检查（GET /models，成功/失败/防重复）** |
-| `presets` | 🟡 | contracts/presets.go + session presets 菜单 + settings「预设」页（CRUD/排序/恢复默认） | prompt 片段/人设模板已迁移并可在 composer 插入；旧 agent presets 的 systemPrompt/model/tools allowlist JSON 语义未迁移 |
+| `presets` | ✅ | contracts/presets.go + session presets 菜单/人设选择器 + settings「预设」页 | prompt 片段 CRUD/插入 + **AgentPreset（persona/prompt/tools allowlist/model/order）**：settings 代理预设 CRUD、composer「人设」选择器
+（per-session 设置）、agent 每 run 应用（base→AGENTS→persona→prompt，model 默认、tool allowlist 与模式门禁叠加） |
 | `prompt` | ✅ | agent SystemPrompt + settings 模型页提示词 + **AGENTS.md 注入** | 系统提示可配置；每次运行读取当前工作区 `AGENTS.md`（文件名可配/32KiB 截断/读取失败告警）追加注入；auto-title 按首条提示生成；review prompt 属 review 工具非目标 |
 | `provider` | ✅ | rig `provider/openai` + agent 模块 + 模型页预设 | OpenAI Chat Completions 兼容 + **服务商预设快填（DeepSeek/OpenAI/Ollama/自定义，匹配高亮）** |
 | `runtime` | ✅ | agent + rig agent/gate/compact | 循环/审批/自动压缩/检查点/多模态 parts/subagent runner/team manager/goal 工具与 goal 桥 + **聊天模式（普通/计划/精简/创作）** + **目标暂停/自动续跑**；PTC/workflow/ralph/review 工具为明确非目标 |
@@ -142,7 +143,6 @@
 | 项 | 现状 | 未对齐的部分 |
 |----|------|--------------|
 | `memory` | 搜索/添加/删除/整理/清空 + 上限/保留期 consolidation | 旧模型驱动 extract（高风险项，另行排期） |
-| `presets` | prompt/人设片段 CRUD+插入 | 旧 agent presets 的 systemPrompt/tool allowlist JSON 语义 |
 
 ### 5.2 明确非目标（不计入覆盖缺口）
 

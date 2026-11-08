@@ -7,7 +7,7 @@
 
 ## 修复状态（Lead 复核后）
 
-> 首轮 11 个「已知缺陷探针」与第二轮 4 个 P3 均已随 TDD 修复转为 PASS；第三轮 P3-9/10 已修复、P3-11 重开后于 ca2d24c 真正修复；第四轮 P3-12 已修复（ca2d24c）；第五~七轮无新缺陷，第八轮发现 1 个 P3（AUDIT-P3-13）并已修复：诊断报告现在对 apiKey/token/secret/password/authorization 类设置整值隐藏，并对 JSON 结构化设置（mcp.servers）递归掩码 Bearer token 与凭证字段；新增单测断言 web.search.apiKey 与 mcp Bearer 不泄漏。第九轮发现 1 个 P3（AUDIT-P3-14：agent.permission=never 已存储但会话权限 chip 显示「询问」，**已修复**）；第十~十二轮无新缺陷；第十三轮发现 1 个 P3（AUDIT-P3-15，服务商预设部分写入无回滚，**已修复**）。`go test ./internal/regression -count=1 -race` 当前 **263 PASS / 0 SKIP**（历史：首轮修复后 92，第二轮后 98，第三轮后 133，第四轮后 153，第五轮后 172，第六轮后 180，第七轮后 189，第八轮后 208，第九轮后 220，第十轮后 227，第十一轮后 241，第十二轮后 251，第十三轮后 258）；已知缺陷已全部修复。
+> 首轮 11 个「已知缺陷探针」与第二轮 4 个 P3 均已随 TDD 修复转为 PASS；第三轮 P3-9/10 已修复、P3-11 重开后于 ca2d24c 真正修复；第四轮 P3-12 已修复（ca2d24c）；第五~七轮无新缺陷，第八轮发现 1 个 P3（AUDIT-P3-13）并已修复：诊断报告现在对 apiKey/token/secret/password/authorization 类设置整值隐藏，并对 JSON 结构化设置（mcp.servers）递归掩码 Bearer token 与凭证字段；新增单测断言 web.search.apiKey 与 mcp Bearer 不泄漏。第九轮发现 1 个 P3（AUDIT-P3-14：agent.permission=never 已存储但会话权限 chip 显示「询问」，**已修复**）；第十~十二轮无新缺陷；第十三轮发现 1 个 P3（AUDIT-P3-15，服务商预设部分写入无回滚，**已修复**）；第十四轮无新缺陷；第十五轮发现 1 个 P3（AUDIT-P3-16，goal Edit 生命周期仅契约/host 实现、会话 UI 无编辑入口，待修）。`go test ./internal/regression -count=1 -race` 当前 **277 PASS / 0 SKIP**（历史：首轮修复后 92，第二轮后 98，第三轮后 133，第四轮后 153，第五轮后 172，第六轮后 180，第七轮后 189，第八轮后 208，第九轮后 220，第十轮后 227，第十一轮后 241，第十二轮后 251，第十三轮后 258，第十四轮后 263）。
 
 | ID | 优先级 | 状态 | 修复摘要 |
 |----|--------|------|----------|
@@ -31,7 +31,7 @@ $ go test ./internal/regression -count=1                    ok  1.2s
 $ go test ./internal/regression -count=1 -race              ok 12.8s（98 PASS / 0 SKIP）
 ```
 
-测试规模：`internal/regression` 共 263 个顶层 Test（首轮 78 + 第二轮 20 + 第三轮 35 + 第四轮 20 + 第五轮 19 + 第六轮 8 + 第七轮 9 + 第八轮 17 + 特性提交补充 2 + 第九轮 12 + 第十轮 7 + 第十一轮 14 + 第十二轮 10 + 第十三轮 7 + 第十四轮 5；含子用例后更多；另有 `internal/ui/uimodtest` 的 E2E 1 个，不计入本包）。第三轮 P3-9/10 已修复，P3-11 重开后已真正修复，第四轮 P3-12 已修复，第五~七轮无新缺陷，第八轮 P3-13 已修复（da654e3），第九轮新增 P3-14（已修复），第十~十二轮无新缺陷，第十三轮新增 P3-15（已修复）；第十四轮无新缺陷，两者的修复探针复跑均静默；当前 **263 PASS / 0 SKIP**。
+测试规模：`internal/regression` 共 277 个顶层 Test（首轮 78 + 第二轮 20 + 第三轮 35 + 第四轮 20 + 第五轮 19 + 第六轮 8 + 第七轮 9 + 第八轮 17 + 特性提交补充 2 + 第九轮 12 + 第十轮 7 + 第十一轮 14 + 第十二轮 10 + 第十三轮 7 + 第十四轮 5 + 第十五轮 14；含子用例后更多；另有 `internal/ui/uimodtest` 的 E2E 1 个，不计入本包）。第三轮 P3-9/10 已修复，P3-11 重开后已真正修复，第四轮 P3-12 已修复，第五~七轮无新缺陷，第八轮 P3-13 已修复（da654e3），第九轮新增 P3-14（已修复），第十~十二轮无新缺陷，第十三轮新增 P3-15（已修复）；第十四轮无新缺陷，两者的修复探针复跑均静默；第十五轮新增 P3-16（待修）；当前 **277 PASS / 0 SKIP**。
 
 ## 用例矩阵
 
@@ -356,6 +356,7 @@ $ go test ./internal/regression -count=1 -race               ok 27.9s（153 PASS
 第十二轮扩张到 **251 PASS / 0 SKIP**（技能编辑 UpdateSkill、设置记忆整理/清空、内置模块清单、第十一轮关键链路复跑）。
 第十三轮扩张到 **258 PASS / 0 SKIP**（goal 自动续跑、实时 reasoning 预览、服务商预设、第十二轮关键链路复跑），发现 AUDIT-P3-15。
 第十四轮扩张到 **263 PASS / 0 SKIP**（goal 暂停/继续状态机与芯片、插件连接配置掩码、第十三轮关键链路复跑），确认 P3-14/P3-15 修复未回退。
+第十五轮扩张到 **277 PASS / 0 SKIP**（tool spill、sessionreference 候选/URI/预算、手动压缩、goal 生命周期、记忆 consolidation、第十三/十四轮关键链路复跑），发现 AUDIT-P3-16。
 仍有文档化未落地项（plan keep-planning 反馈循环、会话级 feedback 汇总、旧 `/feedback [good|bad]` 参数式直接打分、自动化 runs 之外的历史查询）。
 
 ## 反证审计第五轮：/feedback 命令 / 自动化运行历史 / 反馈复跑 / 记忆与技能编辑（2026-11-08）
@@ -801,3 +802,59 @@ $ go test ./internal/regression -run 'P3-14/P3-15 修复探针'        静默（
 - 插件连接配置用 fake PluginsService + 真实 settings store；stdin 进程/真实 MCP 握手不在本轮范围。
 - 第十三轮复跑按前缀 7 项；全量 263 项 -race 已单独跑绿。
 - 本轮为最终反证：已知缺陷（P3-14/P3-15）均确认修复，探针静默；无其它已知缺陷。
+
+## 反证审计第十五轮：tool spill / sessionreference / 手动压缩 / goal 生命周期 / 记忆整理（2026-11-08）
+
+范围：`980d311`（automation/LSP/ACP）、`344d626`（/compact + LSP workspace opt-in）、`7cd1d99`（goal lifecycle + 记忆
+consolidation）、`2d7fd9f`（i18n 错误与插件设置）、`bd17b56`（tool spill + sessionreference）。
+只新增 `internal/regression/**` 并改本文件；未改生产代码。新增 **14** 个顶层 Test（263 → 277）。
+
+```
+$ gofmt -l internal/regression/                              （空）
+$ go vet ./internal/regression                               OK
+$ go build ./...                                             OK
+$ go test ./internal/regression -count=1 -race               ok 62.9s（277 PASS / 0 SKIP）
+$ go test ./internal/regression -race -run '第十三/十四轮关键链路'  12 PASS / 0 SKIP（0 回退）
+```
+
+| # | 链路 | 反证点 | 用例 | 结果 |
+|---|------|--------|------|------|
+| 64 | tool spill（>32KiB） | 真实 run 的 40KiB 工具结果：持久化 history 为头部 2KiB+「[完整结果: path]」、文件全文 0644 且位于 workspace `.zeokeel/tool-results`、当前 run 的后续 provider 请求仍是全文；无 workspace 时全量持久化+warning；已含指针/小结果/非 tool 幂等透传；105 个结果 prune 后 ≤100 文件 | 4 | PASS |
+| 65 | sessionreference 细节 | 候选排序：ID 精确 > ID 前缀 > 标题包含、重复 ID 折叠取最优、空 query 最新优先且默认上限 8、limit 显式、空白候选丢弃；URI 往返（含 `/`/中文/百分号）与空/空格/控制字符/坏百分号拒绝、裸 ID 兼容；预算 typed error（messages 先于 runes、errors.Is、Used）；真实 run 的 session_refs 事件记录 budget{messages,used=2}，注入保留尾部 20 条且小引用无 budget | 3 | PASS |
+| 66 | 手动压缩（/compact） | CompactNow 成功：替换持久化 history、Replaced/Saved 与 token 估算下降、active 不变、再压缩报错；运行中→ErrCompactRunning；预算 0→ErrCompactUnavailable；空会话→ErrCompactNothing；未知会话报错；/compact Enabled 条件（缺 compactor/运行中/空会话）、成功「已压缩：N 条 → M 条（tokens）」、四种稳定错误本地化、压缩中重复 Run 不触发第二次 | 3 | PASS |
+| 67 | 目标生命周期 | 状态机：无 goal 安全且零通知；active→complete 终态；终态重复 complete/abandon no-op 不通知；paused→abandon 允许；Edit 保持 ID、重置 active（重开 completed）；空白 Edit 拒绝；会话命令 complete/abandon 的 Enabled 门（active/paused）；终态 chip 保留但不 auto-continue；Edit 恢复后按新文本续跑；无 GoalLifecycler 时命令禁用 | 2 | PASS（发现 AUDIT-P3-16） |
+| 68 | 记忆 consolidation | store：零策略不删；MaxAge 严格早于 cutoff 才删（数量/剩余精确）；MaxEntries 先过期后按最旧删除、持久化文件 ID 精确；取消 ctx 不删；设置页：读取已存策略、按策略整理写回并执行、notice 计数、非法数字→0（不限）+ warning 且持久化 0 | 2 | PASS |
+| 69 | 第十三/十四轮关键链路复跑 | goal 续跑/reasoning 预览/服务商预设/goal 暂停/连接配置 按前缀 12 PASS / 0 SKIP，0 回退 | 复跑 | PASS |
+
+### 第十五轮发现
+
+#### AUDIT-P3-16（P3，UI 可及性）GoalLifecycler.Edit 已实现但会话 UI 没有编辑入口
+
+- 位置：`internal/contracts/goal.go:55-68` 新增 `GoalLifecycler.Edit`，`internal/uiroot/goal.go:173-193` 实现（同 ID、
+  重置 active、通知）；但 `internal/ui/session` 只注册了 complete/abandon 命令与 chip 按钮，`/goal` 对话框
+  （`command_dialogs.go:14-25`）预填文本后仍调用 `Set`（新 ID、自动续跑计数重置）；没有 `/goal edit` 命令或“编辑目标”按钮。
+- 复现：`go test ./internal/regression -run TestGoalLifecycleCommandsAndTerminalAutoContinue -v` → 探针输出
+  `AUDIT-P3-16`（命令列表中无 goal.edit，帧文本无「编辑目标」）；目标文本可通过 /goal 对话框重设，但语义是“替换目标”
+  而非“编辑”，旧 /goal edit 的保 ID/保续跑预算语义缺失。
+- 影响：用户/agent 无法在不重置自动续跑配额（5 次/目标）的情况下修改目标描述；Edit 目前仅 host/测试可达。属可用性/一致性 P3。
+- 建议：`/goal edit <text>` 命令或对话框在已有 goal 时调用 `GoalLifecycler.Edit`（保留 ID→保留 auto-continue 计数），
+  chip 增加“编辑”动作；补命令 Enabled/帧回归。
+
+### 第十五轮未证伪的关键不变量
+
+1. **tool spill**：只改持久化层、不改 live run；无 workspace 降级全文；幂等与 100 文件保留；文件内容与指针一致。
+2. **sessionreference**：排序/URI/预算契约为纯函数且确定；真实 run 的 budget 事件与尾部注入一致。
+3. **手动压缩**：running guard、稳定错误码、持久化替换与 active 会话不变。
+4. **goal 生命周期**：complete/abandon 终态幂等、Edit 同 ID 重开、终态不自动续跑。
+5. **记忆整理**：确定性（无模型调用）、过期先于超限、持久化与设置页策略一致。
+6. **0 回退**：第十三/十四轮 12 项关键链路复跑全绿。
+
+### 第十五轮观察与局限
+
+- 观察（非缺陷）：手动压缩只替换持久化历史，会话 read model 仍显示压缩前的对话（命令注释“never changes the active
+  session”）；UI 提示已压缩，刷新/重启后才看到压缩后的历史。若产品希望即时刷新 transcript，需要额外 reload 设计。
+- 观察（非缺陷）：spill 文件按内容哈希命名，重复结果复用同一文件；tool spill 的完整 run 测试用 fake model + fake workspace，
+  prune/幂等/fallback 通过 test-only `//go:linkname` 直接测未导出 transform（生产 seam 与单测一致）。
+- 局限：压缩“保存失败”路径仅由 agent 内部单测覆盖（外部 store 无法注入失败）；/compact UI 用 fake SessionCompactor；
+  sessionreference 排序/URI/预算为契约级测试；goal UI 用真实 uiroot tracker；记忆 store/设置页均用真实模块。
+- 第十五轮复跑按前缀 12 项；全量 277 项 -race 已单独跑绿。

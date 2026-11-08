@@ -1246,6 +1246,10 @@ func buildComposerToolbar(c *ui.Context, t *design.Tokens, runtime contracts.UIR
 			}
 		}).Tooltip(st.tr("代理模式", "Agent mode"))
 	}
+	if setter, ok := chat.(contracts.SessionPresetSetter); ok && activeID != "" {
+		_ = setter
+		buildAgentPresetPicker(c, t, chat, st, runtime, activeID)
+	}
 	if !running {
 		presets := effectivePromptPresets(st)
 		ui.PopoverMenuButton(c, st.tr("预设", "Presets"), func(m *ui.Menu) {
