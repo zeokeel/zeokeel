@@ -56,3 +56,19 @@ const SettingMemoryMaxEntries = "memory.maxEntries"
 // SettingMemoryMaxAgeDays stores the retention window in days (0/empty = no
 // expiry).
 const SettingMemoryMaxAgeDays = "memory.maxAgeDays"
+
+// SettingMemoryExtractEnabled enables model-driven memory extraction (only the
+// exact "true" value enables it; default off).
+const SettingMemoryExtractEnabled = "memory.extract"
+
+// MemoryExtractionService turns recent session messages into new stored
+// memories through the model (the session Memory tab's opt-in extract action).
+type MemoryExtractionService interface {
+	// ExtractFromSession extracts at most max memories from sessionID and adds
+	// the non-duplicate ones to the memory store. max<=0 means 5, capped at 5.
+	ExtractFromSession(ctx context.Context, sessionID string, max int) ([]Memory, error)
+}
+
+// KeyMemoryExtractor is provided by the agent module when a memory store is
+// available.
+var KeyMemoryExtractor = cordis.NewServiceKey[MemoryExtractionService]("zeokeel/memory/extract")

@@ -21,6 +21,12 @@
 - 右侧栏「文件」Tab：打开文件夹（mygo 原生 Directory picker）、目录进入/面包屑、文本/Markdown/图片预览、
   刷新与错误状态；E2E 覆盖工作区创建 + 列表 + 预览帧
 
+**Round 66 / memory extract（2026-11-08）**
+- 后端：contracts MemoryExtractionService/KeyMemoryExtractor + `memory.extract` opt-in；agent 从最近 20 条对话提取最新 ≤5 条记忆
+  （JSON 解析/围栏容忍/去重/忙碌守卫/Add 失败返回已添加）；agent 129 测试
+- UI：设置记忆页「模型提取」Toggle + 手动提取按钮（隐私/成本提示、防重复、成功 Badge/失败 Danger、无 active 会话说明）；settings 221 测试
+- COVERAGE 收口 **✅61 / 🟡0 / ❌1（winproc 平台非目标）**；§5.1 深度限制全部关闭
+
 **Round 65 / presets + P3-16（2026-11-08）**
 - 代理预设：contracts AgentPreset（persona/prompt/tools/model/order）+ SessionPresetSetter；agent run 应用（base→AGENTS→persona→prompt，
   model 默认、tools allowlist 交集）；settings 代理预设 CRUD；composer 人设选择器 + 徽标；agent 122 / settings 213 / session 185 测试

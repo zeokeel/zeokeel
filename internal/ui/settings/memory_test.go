@@ -392,3 +392,234 @@ func TestMemoryPageAdminEnglishCopy(t *testing.T) {
 	h.click(tester, "Clear")
 	h.assertTexts(tester, "Cleared")
 }
+
+// --- model extraction (opt-in) ----------------------------------------------
+
+// extractCall is one recorded ExtractFromSession invocation.
+type extractCall struct {
+	sessionID string
+	max       int
+}
+
+// fakeMemoryExtractor is a scriptable contracts.MemoryExtractionService.
+type fakeMemoryExtractor struct {
+	mu      sync.Mutex
+	calls   []extractCall
+	result  []contracts.Memory
+	err     error
+	block   chan struct{}
+	publish func([]contracts.Memory)
+}
+
+func (f *fakeMemoryExtractor) ExtractFromSession(ctx context.Context, sessionID string, max int) ([]contracts.Memory, error) {
+	f.mu.Lock()
+	f.calls = append(f.calls, extractCall{sessionID: sessionID, max: max})
+	block := f.block
+	result := append([]contracts.Memory(nil), f.result...)
+	err := f.err
+	publish := f.publish
+	f.mu.Unlock()
+	if block != nil {
+		select {
+		case <-block:
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		}
+	}
+	if err != nil {
+		return nil, err
+	}
+	if publish != nil {
+		publish(result)
+	}
+	return result, nil
+}
+
+func (f *fakeMemoryExtractor) callCount() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return len(f.calls)
+}
+
+func (f *fakeMemoryExtractor) lastCall() extractCall {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if len(f.calls) == 0 {
+		return extractCall{}
+	}
+	return f.calls[len(f.calls)-1]
+}
+
+// memoryExtractHarness opens the Memory page with an optional extraction
+// backend and memory store.
+func memoryExtractHarness(t *testing.T, chat *fakeChat, store *fakeSettings,
+	memory contracts.MemoryStore, extractor contracts.MemoryExtractionService) (*harness, *ui.Tester) {
+	t.Helper()
+	h := newHarness(t, chat, store, settings.Config{})
+	if memory != nil {
+		provide[contracts.MemoryStore](t, h.ctx, contracts.KeyMemory, memory)
+	}
+	if extractor != nil {
+		provide[contracts.MemoryExtractionService](t, h.ctx, contracts.KeyMemoryExtractor, extractor)
+	}
+	tester := h.tester()
+	tester.Frame()
+	h.click(tester, "记忆")
+	return h, tester
+}
+
+// waitMemoryText frames until the text appears (extraction runs async).
+func waitMemoryText(t *testing.T, tester *ui.Tester, want string) {
+	t.Helper()
+	deadline := time.Now().Add(3 * time.Second)
+	for {
+		tester.Frame()
+		if tester.HasText(want) {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("memory page did not show %q; texts = %v", want, tester.Texts())
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+}
+
+func memoryExtractChat() *fakeChat {
+	chat := &fakeChat{}
+	chat.addSession(contracts.ChatSession{ID: "sess-1", Title: "记忆会话"})
+	chat.mu.Lock()
+	chat.active = "sess-1"
+	chat.mu.Unlock()
+	return chat
+}
+
+func memoryExtractSettings(raw string) *fakeSettings {
+	if raw == "" {
+		return newFakeSettings(nil)
+	}
+	return newFakeSettings(map[string]string{contracts.SettingMemoryExtractEnabled: raw})
+}
+
+func TestMemoryExtractToggleDefaultOff(t *testing.T) {
+	store := newFakeMemoryStore()
+	settingsStore := memoryExtractSettings("")
+	extractor := &fakeMemoryExtractor{}
+	h, tester := memoryExtractHarness(t, memoryExtractChat(), settingsStore, store, extractor)
+	h.assertTexts(tester, "模型提取", "启用模型提取（从最近对话提取记忆，会调用模型）",
+		"最近 20 条消息", "最多写入 5 条记忆", "从当前会话提取")
+	if raw := settingsStore.get(contracts.SettingMemoryExtractEnabled); raw != "" {
+		t.Fatalf("defaults wrote memory.extract: %q", raw)
+	}
+	// The extract action is disabled while the opt-in is off.
+	h.click(tester, "从当前会话提取")
+	if extractor.callCount() != 0 {
+		t.Fatalf("extraction ran while disabled: %v", extractor.calls)
+	}
+
+	h.click(tester, "启用模型提取（从最近对话提取记忆，会调用模型）")
+	if raw := settingsStore.get(contracts.SettingMemoryExtractEnabled); raw != "true" {
+		t.Fatalf("enabling wrote %q, want true", raw)
+	}
+	h.click(tester, "启用模型提取（从最近对话提取记忆，会调用模型）")
+	if raw := settingsStore.get(contracts.SettingMemoryExtractEnabled); raw != "" {
+		t.Fatalf("disabling wrote %q, want empty", raw)
+	}
+}
+
+func TestMemoryExtractBadValueShowsOff(t *testing.T) {
+	store := newFakeMemoryStore()
+	settingsStore := memoryExtractSettings("yes")
+	extractor := &fakeMemoryExtractor{}
+	h, tester := memoryExtractHarness(t, memoryExtractChat(), settingsStore, store, extractor)
+	_ = tester
+	// The malformed value displays as off, so one click enables it.
+	h.click(tester, "启用模型提取（从最近对话提取记忆，会调用模型）")
+	if raw := settingsStore.get(contracts.SettingMemoryExtractEnabled); raw != "true" {
+		t.Fatalf("toggle from a malformed value wrote %q, want true", raw)
+	}
+}
+
+func TestMemoryExtractHiddenWithoutExtractor(t *testing.T) {
+	store := newFakeMemoryStore()
+	h, tester := memoryExtractHarness(t, memoryExtractChat(), memoryExtractSettings("true"), store, nil)
+	h.assertTexts(tester, "未启用记忆提取后端")
+	if tester.HasText("从当前会话提取") {
+		t.Fatalf("extract action rendered without a backend; texts = %v", tester.Texts())
+	}
+}
+
+func TestMemoryExtractSuccessAddsMemories(t *testing.T) {
+	store := newFakeMemoryStore()
+	extractor := &fakeMemoryExtractor{
+		result: []contracts.Memory{
+			{ID: "new-1", Text: "偏好使用 Go 1.27", Scope: "global"},
+			{ID: "new-2", Text: "提交前运行 race 测试", Scope: "global"},
+		},
+		publish: func(memories []contracts.Memory) {
+			for _, memory := range memories {
+				_, _ = store.Add(context.Background(), memory)
+			}
+		},
+	}
+	h, tester := memoryExtractHarness(t, memoryExtractChat(), memoryExtractSettings("true"), store, extractor)
+	h.click(tester, "从当前会话提取")
+	waitMemoryText(t, tester, "已添加 2 条记忆")
+	call := extractor.lastCall()
+	if call.sessionID != "sess-1" || call.max != 5 {
+		t.Fatalf("Extract call = %+v, want sess-1/5", call)
+	}
+	h.assertTexts(tester, "偏好使用 Go 1.27", "提交前运行 race 测试")
+}
+
+func TestMemoryExtractFailureDanger(t *testing.T) {
+	store := newFakeMemoryStore()
+	extractor := &fakeMemoryExtractor{err: errors.New("provider boom")}
+	h, tester := memoryExtractHarness(t, memoryExtractChat(), memoryExtractSettings("true"), store, extractor)
+	h.click(tester, "从当前会话提取")
+	waitMemoryText(t, tester, "提取失败：provider boom")
+}
+
+func TestMemoryExtractIgnoresRepeatedClicks(t *testing.T) {
+	store := newFakeMemoryStore()
+	extractor := &fakeMemoryExtractor{block: make(chan struct{}), result: []contracts.Memory{}}
+	h, tester := memoryExtractHarness(t, memoryExtractChat(), memoryExtractSettings("true"), store, extractor)
+	h.click(tester, "从当前会话提取")
+	h.assertTexts(tester, "提取中…")
+	h.click(tester, "提取中…")
+	tester.Frame()
+	if got := extractor.callCount(); got != 1 {
+		t.Fatalf("Extract calls = %d, want 1 while running", got)
+	}
+	close(extractor.block)
+	waitMemoryText(t, tester, "已添加 0 条记忆")
+}
+
+func TestMemoryExtractDisabledWithoutActiveSession(t *testing.T) {
+	store := newFakeMemoryStore()
+	extractor := &fakeMemoryExtractor{}
+	chat := &fakeChat{} // no active session
+	h, tester := memoryExtractHarness(t, chat, memoryExtractSettings("true"), store, extractor)
+	h.assertTexts(tester, "当前没有活动会话")
+	h.click(tester, "从当前会话提取")
+	if extractor.callCount() != 0 {
+		t.Fatalf("extraction ran without an active session: %v", extractor.calls)
+	}
+}
+
+func TestMemoryExtractEnglishCopy(t *testing.T) {
+	store := newFakeMemoryStore()
+	extractor := &fakeMemoryExtractor{result: []contracts.Memory{
+		{ID: "new-1", Text: "prefers Go", Scope: "global"},
+		{ID: "new-2", Text: "runs race tests", Scope: "global"},
+	}}
+	h := newLocaleHarness(t, memoryExtractChat(), memoryExtractSettings("true"), settings.Config{}, "en")
+	provide[contracts.MemoryStore](t, h.ctx, contracts.KeyMemory, store)
+	provide[contracts.MemoryExtractionService](t, h.ctx, contracts.KeyMemoryExtractor, extractor)
+	tester := h.tester()
+	tester.Frame()
+	h.click(tester, "Memory")
+	h.assertTexts(tester, "Model extraction", "Enable model extraction",
+		"Extract from current session", "recent 20 messages", "at most 5")
+	h.click(tester, "Extract from current session")
+	waitMemoryText(t, tester, "Added 2 memories")
+}

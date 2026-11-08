@@ -110,6 +110,12 @@ func Module() *module.Descriptor[Config] {
 		if workspace, ok := ctx.Get(contracts.KeyWorkspace); ok {
 			svc.workspace = workspace
 		}
+		if memoryStore, ok := ctx.Get(contracts.KeyMemory); ok && memoryStore != nil {
+			svc.memoryStore = memoryStore
+			if _, err := ctx.Provide(contracts.KeyMemoryExtractor, contracts.MemoryExtractionService(svc)); err != nil {
+				return fmt.Errorf("agent: provide memory extractor: %w", err)
+			}
+		}
 		svc.restore(context.Background())
 		// The durable store now backs the session-query tools: register them
 		// into the shared toolkit registry (the toolkit module has no store
@@ -185,6 +191,7 @@ func Module() *module.Descriptor[Config] {
 			module.Provides(contracts.KeyChat),
 			module.Provides(contracts.KeySubagents),
 			module.Provides(contracts.KeyTeam),
+			module.Provides(contracts.KeyMemoryExtractor),
 		).
 		AddRequires(module.Requires(contracts.KeyToolkit)).
 		AddRequires(module.Requires(contracts.KeySettings)).
@@ -218,6 +225,10 @@ type service struct {
 	// sessionPresets stores the optional per-session agent-preset selection
 	// (preset ID); cleared on session deletion, never persisted.
 	sessionPresets map[string]string
+	// memoryStore is the optional durable memory backend used by model-driven
+	// extraction; extracting is its single-flight guard.
+	memoryStore contracts.MemoryStore
+	extracting  atomic.Bool
 
 	subscribers    []*subscription
 	nextSessionSeq uint64

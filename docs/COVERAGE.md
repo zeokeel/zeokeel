@@ -29,7 +29,7 @@
 - **presets 已落地**：prompt 片段契约 + composer「预设/Presets」插入菜单 + 设置「预设」页 CRUD（名称/提示词/排序/
   恢复默认）+ 设置「模型目录」编辑页（modelcatalog.settings 动态读取）；旧 agent presets 的 tool allowlist 语义仍未迁移，
   故 presets 记 🟡。
-- 复核统计（Round 64 进行中）：62 项中 **✅59 / 🟡2 / ❌1**。✅ 为有等价实现或剩余差异属明确非目标；🟡 为已实现但存在
+- 复核统计（Round 65 终值）：62 项中 **✅61 / 🟡0 / ❌1**（❌ 仅 winproc，Windows 平台非目标）。✅ 为有等价实现或剩余差异属明确非目标；🟡 为已实现但存在
   深度/长尾差异（§5.1）；❌ 仅 winproc（Windows 平台非目标）。核心对话/持久化/工作区/审批/设置/右栏/搜索/导入/更新/
   编排/composer 控制/MCP 管理/宿主桌面能力均已可用。
 - **功能面覆盖已完成**：旧应用的用户可见功能均有等价实现；剩余工作为 §5.1 的交互深度精修与 §5.2 的明确非目标。
@@ -38,8 +38,8 @@
 
 | 状态 | 数量 | 占比 | 含义 |
 |---|---:|---:|---|
-| ✅ 已迁移/等价 | 59 | 95.2% | 当前代码有对应实现，进入 desktop/headless 装配或剩余差异属明确非目标 |
-| 🟡 已实现（深度限制） | 2 | 3.2% | 功能已可用，存在子功能/交互/执行语义的深度差异（§5.1） |
+| ✅ 已迁移/等价 | 61 | 98.4% | 当前代码有对应实现，进入 desktop/headless 装配或剩余差异属明确非目标 |
+| 🟡 已实现（深度限制） | 0 | 0% | （全部关闭） |
 | ❌ 未迁移 | 1 | 1.6% | 仅 winproc（Windows 平台非目标） |
 | 合计 | 62 | 100% | 28 后端能力 + 34 Shell/UI 能力 |
 
@@ -58,7 +58,7 @@
 | `importer` | ✅ | `internal/modules/importer` + settings 导入页 | DSH session.v4.jsonl Scan/Import、文本+reasoning、workspace、symlink 跳过/重复 ID 去重；旧 DSH 私有长尾（attachments/credentials/manifest/zstd 压缩）为明确非目标（预览中计数说明） |
 | `lsp` | ✅ | toolkit lsp.go + 设置 LSP 页 | **多服务器列表 + 活动服务器选择 + workspace `.zeokeel/lsp.json` opt-in**（默认关、显式 allow、settings 优先合并）；启动活动服务器并注册 `lsp_*` 工具，卸载关闭；错误仅警告 |
 | `mcp` | ✅ | toolkit `mcp.Start`（stdio+HTTP）+ settings/workspace 合并 + 工具级开关 | HTTP/stdio 握手/工具注册/失败诊断；assembly>settings>workspace mcp.json（opt-in）；`mcp.disabledTools` 注册前过滤；插件详情/市场在 Shell Plugins 行仍 🟡 |
-| `memory` | 🟡 | `internal/modules/memory` + rig memory tool + session Memory tab + 设置「记忆」页 | JSON MemoryStore/tool/搜索/添加/整理/清空 + **确定性 consolidation（最大条目数/保留天数，设置页策略）**；缺模型驱动 extract |
+| `memory` | ✅ | `internal/modules/memory` + rig memory tool + session Memory tab + 设置「记忆」页 | JSON MemoryStore/tool/搜索/添加/整理/清空 + 确定性 consolidation（上限/保留期）+ **模型驱动 extract（opt-in 手动触发，最近 20 条→≤5 条，去重/忙碌守卫/坏 JSON 错误）** |
 | `modelcatalog` | ✅ | `internal/modules/modelcatalog` + composer 模型菜单 + settings「模型目录」页 + **连接检查** | 默认预设（含 128k context window）、per-session 切换/推理强度、目录编辑（增删/恢复默认/上下文窗口）、usage footer 预算显示、**连接检查（GET /models，成功/失败/防重复）** |
 | `presets` | ✅ | contracts/presets.go + session presets 菜单/人设选择器 + settings「预设」页 | prompt 片段 CRUD/插入 + **AgentPreset（persona/prompt/tools allowlist/model/order）**：settings 代理预设 CRUD、composer「人设」选择器
 （per-session 设置）、agent 每 run 应用（base→AGENTS→persona→prompt，model 默认、tool allowlist 与模式门禁叠加） |
@@ -105,7 +105,7 @@
 | Automation 页 | ✅ | `internal/ui/automation` + module | 列表/新建（含可选模型）/运行/删除/after/every/cron + 运行历史折叠/展开 + 任务模型 Badge |
 | Plugins 页 | ✅ | `internal/ui/plugins` + toolkit + ModuleLister | MCP 状态/工具目录/工具级与 server 级开关/详情/连接配置/内置模块清单 + **插件参数 section（仅已接线键：web search endpoint/key、mcp opt-in、子代理编译期常量；避免死配置）**；插件市场为明确非目标 |
 | Skills 页 | ✅ | settings 技能页 + skills 模块 | 发现/roots/预览/刷新 + **新建/编辑（dataDir）/删除（含确认）**；workspace 技能只读展示（设计约束） |
-| Memory 页 | 🟡 | session Memory tab + 设置「记忆」页 | 会话工作区内存管理 + 设置页全局搜索/添加/删除/整理/清空/**上限/保留期策略**；缺模型驱动 extract |
+| Memory 页 | ✅ | session Memory tab + 设置「记忆」页 | 会话工作区内存管理 + 设置页全局搜索/添加/删除/整理/清空/上限保留期策略 + **模型提取开关与手动提取入口（隐私/成本提示、防重复）** |
 | Workspace→Session 树/分组/计数 | ✅ | sidebar workspace tree | 多 workspace 分组、未分组、计数、搜索、折叠、置顶/归档 |
 | Plan UI（plan_review/exit_plan_mode） | ✅ | interaction plan Modal + /审阅计划 + plan 门禁 + toolcards 计划卡 + **keep-planning 反馈** | Markdown 审阅 + 批准/取消 + 计划模式门禁 + transcript 计划卡 + **「继续规划」反馈（写回当前会话作为下一条用户消息 → 模型修订后重新 plan_review）** |
 | Modes UI（standard/minimal/creator） | ✅ | session 模式 Popover + agent gate 策略 | 四模式：普通（原审批策略）、计划（只读+计划白名单，最高优先）、精简（只读探索白名单）、创作（隐藏编码工具，仅 ask/present/goal/memory/skill）；composer 模式菜单 + header 徽标，坏值归一，中英 |
@@ -135,14 +135,14 @@
 
 ## 5. 结论与收口分类（Round 59 终版）
 
-**功能面覆盖结论：旧应用的用户可见功能均已落地等价实现**；矩阵中 ✅ 项直接对应，🟡 项为“已实现但深度/长尾未完全对齐”，
-均已在下面分类说明；唯一 ❌ 为 Windows 平台相关（非目标）。就“旧功能覆盖清单”而言，功能面已完成；剩余为交互深度精修。
+**功能面覆盖结论：旧应用的用户可见功能均已落地等价实现（✅61/62）**；唯一 ❌ 为 winproc（Windows 平台相关，明确非目标）。
+此前 §5.1 列出的 13 项深度限制已全部关闭：automation 字段、LSP 多服务器+workspace opt-in、memory consolidation+extract、agent presets、
+session tool spill、sessionreference URI/预算、i18n 错误分类、/compact 与 /goal 生命周期、插件参数页、ACP tool_call、skills CRUD。
+非目标见 §5.2。
 
-### 5.1 深度限制（已实现，范围内继续可选精修）
+### 5.1 深度限制（已全部关闭）
 
-| 项 | 现状 | 未对齐的部分 |
-|----|------|--------------|
-| `memory` | 搜索/添加/删除/整理/清空 + 上限/保留期 consolidation | 旧模型驱动 extract（高风险项，另行排期） |
+无。原 13 项深度限制均已在本轮开发中落地并有测试/反证覆盖，详见 `docs/REBUILD-STATUS.md` 与 `docs/coverage-gaps-worklist.md`。
 
 ### 5.2 明确非目标（不计入覆盖缺口）
 

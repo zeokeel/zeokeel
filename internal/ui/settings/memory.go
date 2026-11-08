@@ -43,6 +43,9 @@ type memoryPageState struct {
 	policyWarn   string
 	policyNotice string
 	policyErr    bool
+
+	// Model extraction (opt-in): one manual extraction at a time.
+	extractRunning bool
 }
 
 // memoryStatsLabel renders the entry count.
@@ -147,6 +150,8 @@ func buildMemoryPage(c *ui.Context, t *design.Tokens, kctx cordis.Context,
 		})
 
 		buildMemoryConsolidationPanel(c, t, store, settingsStore, st, locale)
+
+		buildMemoryExtractionPanel(c, t, kctx, settingsStore, st, locale)
 
 		panel(c, t, func() {
 			sectionTitle(c, t, localized(locale, "添加记忆", "Add memory"))
@@ -380,6 +385,118 @@ func clearMemoriesPage(store contracts.MemoryStore, st *memoryPageState, locale 
 		return
 	}
 	setMemoryNotice(st, localized(locale, "已清空", "Cleared"), false)
+}
+
+// memoryExtractEnabled reports whether model extraction is enabled: only the
+// exact "true" value turns it on (default and malformed values are off).
+func memoryExtractEnabled(raw string) bool {
+	return strings.EqualFold(strings.TrimSpace(raw), "true")
+}
+
+// memoryExtractedLabel renders the extraction success count.
+func memoryExtractedLabel(locale contracts.LocaleService, count int) string {
+	if localized(locale, "zh", "en") == "en" {
+		if count == 1 {
+			return "Added 1 memory"
+		}
+		return fmt.Sprintf("Added %d memories", count)
+	}
+	return fmt.Sprintf("已添加 %d 条记忆", count)
+}
+
+// startMemoryExtraction runs one manual extraction off the UI thread and posts
+// its result back. The caller owns the running flag, so repeated clicks are
+// ignored while a run is in flight.
+func startMemoryExtraction(runtime contracts.UIRuntime,
+	extractor contracts.MemoryExtractionService, st *memoryPageState,
+	sessionID string, locale contracts.LocaleService) {
+	st.extractRunning = true
+	finish := func(memories []contracts.Memory, err error) {
+		st.extractRunning = false
+		if err != nil {
+			st.notice = localized(locale, "提取失败：", "Extraction failed: ") + err.Error()
+			st.noticeErr = true
+			return
+		}
+		st.notice = memoryExtractedLabel(locale, len(memories))
+		st.noticeErr = false
+	}
+	go func() {
+		memories, err := extractor.ExtractFromSession(context.Background(), sessionID, 5)
+		if runtime == nil {
+			finish(memories, err)
+			return
+		}
+		runtime.Post(func() {
+			finish(memories, err)
+			runtime.Invalidate()
+		})
+	}()
+}
+
+// buildMemoryExtractionPanel renders the opt-in model-extraction block: the
+// enable toggle, its privacy/cost note and the manual "extract from current
+// session" action (shown only when a backend is provided).
+func buildMemoryExtractionPanel(c *ui.Context, t *design.Tokens, kctx cordis.Context,
+	settingsStore contracts.SettingsService, st *memoryPageState, locale contracts.LocaleService) {
+	panel(c, t, func() {
+		sectionTitle(c, t, localized(locale, "模型提取", "Model extraction"))
+		enabled := memoryExtractEnabled(settingsStore.Get(contracts.SettingMemoryExtractEnabled, ""))
+		toggleLabel := localized(locale,
+			"启用模型提取（从最近对话提取记忆，会调用模型）",
+			"Enable model extraction (extract memories from recent chats; calls the model)")
+		toggle := ui.Toggle(c, &enabled, toggleLabel)
+		if toggle.Changed() {
+			value := ""
+			if enabled {
+				value = "true"
+			}
+			if err := settingsStore.Set(contracts.SettingMemoryExtractEnabled, value); err != nil {
+				setMemoryNotice(st, localized(locale, "保存失败：", "Save failed: ")+err.Error(), true)
+			} else {
+				setMemoryNotice(st, localized(locale, "已保存", "Saved"), false)
+			}
+			c.Invalidate()
+		}
+		design.Apply(ui.Text(c, localized(locale,
+			"调用当前服务商，读取最近 20 条消息，最多写入 5 条记忆；仅手动触发，不做后台定时提取。",
+			"Calls the current provider, reads the recent 20 messages and stores at most 5 memories; manual trigger only, no background extraction.")),
+			t.TextMuted(design.TypeXXS)).MaxLines(3)
+		design.Apply(ui.Text(c, localized(locale,
+			"会消耗模型额度并向服务商发送对话内容。",
+			"Uses your model quota and sends conversation content to the provider.")),
+			t.Font(design.TypeXXS)).TextColor(t.DangerText).MaxLines(2)
+
+		extractor, hasExtractor := kctx.Get(contracts.KeyMemoryExtractor)
+		if !hasExtractor || extractor == nil {
+			design.Apply(ui.Text(c, localized(locale, "未启用记忆提取后端", "Memory extraction backend not enabled")),
+				t.TextMuted(design.TypeXXS))
+			return
+		}
+		activeID := ""
+		if chat, ok := kctx.Get(contracts.KeyChat); ok && chat != nil {
+			activeID = strings.TrimSpace(chat.ActiveSession())
+		}
+		label := localized(locale, "从当前会话提取", "Extract from current session")
+		if st.extractRunning {
+			label = localized(locale, "提取中…", "Extracting…")
+		}
+		disabled := !enabled || activeID == "" || st.extractRunning
+		button := design.Apply(ui.PrimaryButton(c, label), t.PrimaryButton()).Disabled(disabled)
+		if button.Clicked() && !disabled && !st.extractRunning {
+			runtime, _ := kctx.Get(contracts.KeyUIRuntime)
+			startMemoryExtraction(runtime, extractor, st, activeID, locale)
+			c.Invalidate()
+		}
+		switch {
+		case !enabled:
+			design.Apply(ui.Text(c, localized(locale, "先启用模型提取后再提取", "Enable model extraction first")),
+				t.TextMuted(design.TypeXXXS))
+		case activeID == "":
+			design.Apply(ui.Text(c, localized(locale, "当前没有活动会话", "No active session")),
+				t.TextMuted(design.TypeXXXS))
+		}
+	})
 }
 
 // buildMemoryPageEntry renders one memory row: body, scope/time metadata and a
