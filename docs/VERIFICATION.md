@@ -204,43 +204,62 @@ NO_PANIC
 - docs/COVERAGE.md 矩阵（§2 28 项 + §3 34 项 = 62）重算 **✅39 / 🟡22 / ❌1**；摘要与统计表一致（62.9% / 35.5% / 1.6%），本轮无差异。
 - README 状态行更新为 Round 59（HEAD 51e8e59）。
 
-## 最终验证（Round 58，2026-11-08，HEAD d27e449）
+## 最终验证（Round 58，2026-11-08，HEAD 364a988）
 
-环境：go1.27.3 linux/amd64 · 离线（GOPROXY=off/GOSUMDB=off/GOFLAGS=-mod=mod）· 2026-11-08 07:53–07:56（Asia/Shanghai）。
-命令：`./scripts/verify.sh`（完整）。
+环境：go1.27.3 linux/amd64 · 离线（GOPROXY=off/GOSUMDB=off/GOFLAGS=-mod=mod）· 2026-11-08 09:03–09:08（Asia/Shanghai）。
+命令：`./scripts/verify.sh`（完整）。验证时工作树含第十四轮审计已落地的未提交文件
+（`internal/regression/{goal_pause,mcp_connection_config}_test.go`），计数以该工作树为准。
 
-### 一键验证结果（首次即 PASS，无需重跑）
+### 一键验证结果（两次均 PASS，无失败步骤）
 ```
 $ ./scripts/verify.sh
 ==> gofmt ... PASS (1s)
-==> go build ./... ... PASS (4s)
-==> go vet ./... ... PASS (0s)
-==> go test ./... -count=1 ... PASS (14s)
-==> go test ./... -count=1 -race ... PASS (51s)
-==> regression (-v) ... (regression: 227 PASS / 0 SKIP / 0 FAIL) PASS (13s)
-==> ui-snapshot ... (snapshot: 65 steps / 63 PNGs) PASS (8s)
+==> go build ./... ... PASS (3s)
+==> go vet ./... ... PASS (1s)
+==> go test ./... -count=1 ... PASS (15s)
+==> go test ./... -count=1 -race ... PASS (60s)
+==> regression (-v) ... (regression: 263 PASS / 0 SKIP / 0 FAIL) PASS (16s)
+==> ui-snapshot ... (snapshot: 66 steps / 64 PNGs) PASS (8s)
 ==> desktop smoke (xvfb) ... (desktop exit 124, tray ready: 1) PASS (8s)
 ==> headless smoke ... (headless exit 124) PASS (8s)
-==> ACP smoke ... (ACP exit 0) PASS (0s)
-verify summary: 10 passed, 0 failed, 107s total
+==> ACP smoke ... (ACP exit 0) PASS (1s)
+verify summary: 10 passed, 0 failed, 121s total
 verify: PASS
 ```
-regression **227 PASS / 0 SKIP / 0 FAIL**；UI 快照 **65 步渲染 / 63 个唯一 PNG**；三产品冒烟均无 panic：desktop exit 124（tray ready 1）、headless exit 124、ACP exit 0。本轮无与预期不符/失败步骤。
+第 1 次 PASS（118s，HEAD 提交态）；第十四轮两个审计文件落到工作树后第 2 次复跑 PASS（121s，计数同为 263），
+判定：验证过程无偶发失败，复跑仅为纳入新落地的审计用例。
+regression **263 PASS / 0 SKIP / 0 FAIL**（含第十四轮 goal_pause 3 项 + mcp_connection_config 2 项；第十四轮其余用例尚未落地）；
+UI 快照 **66 步渲染 / 64 个唯一 PNG**；三产品冒烟无 panic。
 
-### 新功能冒烟
-- **ACP session/list + session/load 真实帧**（`go run ./cmd/zeokeel --acp`，同一 data-dir 两次连接）：
+### xvfb 桌面冒烟（模块实例数/无 panic）
+```
+$ xvfb-run -a timeout -s TERM 8 go run ./cmd/zeokeel --data-dir <tmp>
+exit 124（允许）
+09:05:59 ZeoKeel: system tray ready (close to tray: false)
+09:05:59 ZeoKeel: ... product "desktop" loaded: 27 module instances, screens [home automation session plugins]
+09:06:07 ZeoKeel: quit requested
+NO_PANIC
+```
+`grep -c '27 module instances'` = 1；无 panic/runtime error/SIGSEGV。
+
+### 新功能冒烟（单测证据 + ACP 真实帧）
+- **目标暂停/恢复**：`go test ./internal/uiroot -run TestGoalPause` → **2 PASS**（暂停/恢复状态机、并发）；
+  `go test ./internal/ui/session -run 'TestGoalPause|TestGoalAutoContinueSkipsPausedGoal'` → **5 PASS**
+  （chip 与动作、失败 Danger、无 GoalPauser 隐藏、暂停目标跳过自动续跑、en）。
+- **插件连接配置**：`go test ./internal/ui/plugins -run TestMCPConfig` → **5 PASS**
+  （stdio command/args/env 展示、env 键值含 KEY/TOKEN/SECRET/PASSWORD/AUTHORIZATION 脱敏、HTTP 仅 URL、
+  无匹配 settings 行隐藏、坏 JSON 可读报错、en）。
+- **ACP session/list + session/load 真实帧**（同一 data-dir 两次 `--acp`）：
 ```
 {"id":1,"jsonrpc":"2.0","result":{"agentCapabilities":{"loadSession":true,...},"protocolVersion":1}}
-{"id":2,"jsonrpc":"2.0","result":{"sessionId":"sess-1794095740740741703"}}          # session/new
-{"id":3,"jsonrpc":"2.0","result":{"sessions":[{"sessionId":"sess-1794095740740741703","title":"","updatedAt":"2026-11-08T07:55:40+08:00"}]}}
-{"id":2,"jsonrpc":"2.0","result":{"messages":[],"model":"gpt-4o-mini","sessionId":"sess-1794095740740741703","title":""}}   # session/load
+{"id":2,"jsonrpc":"2.0","result":{"sessionId":"sess-1794099982300810356"}}
+{"id":3,"jsonrpc":"2.0","result":{"sessions":[{"sessionId":"sess-1794099982300810356","title":"","updatedAt":"2026-11-08T09:06:22+08:00"}]}}
+{"id":2,"jsonrpc":"2.0","result":{"messages":[],"model":"gpt-4o-mini","sessionId":"sess-1794099982300810356","title":""}}   # session/load
 ```
-- **模型连接检查（离线 fake，未做网络请求）**：`go test ./internal/ui/settings/ -run TestModelCheck -count=1` → **8 PASS**（成功、HTTP 失败、网络错误、无 BaseURL、重复点击、en 文案、chat config 回退、状态文案本地化）；测试通过 `ModelListGetter` seam 脚本化 `/models` 响应，不访问网络。
-- **plan keep-planning**：`go test ./internal/ui/interaction/ -run TestKeepPlanning -count=1` → 7 PASS（发送反馈/必填/失败保留模态/无活动会话/无 chat 隐藏/en）；无需触发 UI。
 
 ### 文档核对
-- docs/COVERAGE.md 矩阵（§2 28 项 + §3 34 项 = 62）实际 **✅39 / 🟡22 / ❌1**；摘要与统计表已同步为 39/22/1（62.9% / 35.5% / 1.6%）。
-- README 状态行更新为 Round 58（HEAD d27e449）；构建/验证命令核对仍准确。
+- docs/COVERAGE.md 矩阵重算（§2 28 + §3 34 = 62）：**✅40 / 🟡21 / ❌1**；摘要与统计表一致（64.5% / 33.9% / 1.6%），本轮无差异。
+- README 状态行更新为 Round 58（HEAD 364a988）。
 
 ## 最终验证（Round 59：干净环境一键验证）
 

@@ -8,13 +8,13 @@
 > 消息用量 footer/逐条复制/反馈 good-bad 与 /反馈 命令（导出含反馈）、计划模式 + keep-planning、自动化运行历史、
 > Memory 整理/清空、技能新建/删除、工件下载、系统托盘/关闭到托盘、全局热键、LSP 工具、聊天模式（普通/计划/精简/创作）、
 > Home 真实 composer、/停止 /附加文件 /帮助、数据与隐私页、通知开关、侧栏添加工作区、插件 MCP server 详情；
-> 反证审计共 258 PASS / 0 SKIP（含最新审计补充），4×P2+4×P3 全部修复。详情：[docs/ADVERSARIAL-AUDIT.md](docs/ADVERSARIAL-AUDIT.md)。
+> 反证审计共 263 PASS / 0 SKIP（含最新审计补充），4×P2+4×P3 全部修复。详情：[docs/ADVERSARIAL-AUDIT.md](docs/ADVERSARIAL-AUDIT.md)。
 >
-> **最终验证（2026-11-08，Round 57 · HEAD 02f6612）**：`./scripts/verify.sh` 全量 **10/10 PASS（122s）**；
+> **最终验证（2026-11-08，Round 58 · HEAD 364a988）**：`./scripts/verify.sh` 全量 **10/10 PASS（121s）**；
 > 桌面（xvfb，托盘+全局热键）/headless/ACP 冒烟通过，xfvb 日志确认 **27 module instances、NO_PANIC**；
-> regression **258 PASS / 0 SKIP**（含工作树第十三轮审计）；UI 快照 65 步 / 63 张 PNG。
-> 新功能单测：goal 自动续跑 **2+3 项**、实时思考预览 **3+2 项**、服务商预设 **8+2 项**；ACP
-> `session/list`/`session/load` 真实帧已验证。旧功能覆盖矩阵见 [docs/COVERAGE.md](docs/COVERAGE.md)
+> regression **263 PASS / 0 SKIP**（含工作树第十四轮审计）；UI 快照 66 步 / 64 张 PNG。
+> 新功能单测：目标暂停/恢复 **2+5 项**、插件连接配置 **5 项**；ACP `session/list`/`session/load`
+> 真实帧已验证。旧功能覆盖矩阵见 [docs/COVERAGE.md](docs/COVERAGE.md)
 > （62 项：✅40 / 🟡21 / ❌1，未 100%）。验证证据：[docs/VERIFICATION.md](docs/VERIFICATION.md)。
 
 编译期模块化的 Go 桌面 AI agent：**薄总入口 + 内核装配 + 模块贡献点**。

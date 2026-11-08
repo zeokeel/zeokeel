@@ -7,7 +7,7 @@
 
 ## 修复状态（Lead 复核后）
 
-> 首轮 11 个「已知缺陷探针」与第二轮 4 个 P3 均已随 TDD 修复转为 PASS；第三轮 P3-9/10 已修复、P3-11 重开后于 ca2d24c 真正修复；第四轮 P3-12 已修复（ca2d24c）；第五~七轮无新缺陷，第八轮发现 1 个 P3（AUDIT-P3-13）并已修复：诊断报告现在对 apiKey/token/secret/password/authorization 类设置整值隐藏，并对 JSON 结构化设置（mcp.servers）递归掩码 Bearer token 与凭证字段；新增单测断言 web.search.apiKey 与 mcp Bearer 不泄漏。第九轮发现 1 个 P3（AUDIT-P3-14：agent.permission=never 已存储但会话权限 chip 显示「询问」，**已修复**）；第十~十二轮无新缺陷；第十三轮发现 1 个 P3（AUDIT-P3-15，服务商预设部分写入无回滚，**已修复**）。`go test ./internal/regression -count=1 -race` 当前 **258 PASS / 0 SKIP**（历史：首轮修复后 92，第二轮后 98，第三轮后 133，第四轮后 153，第五轮后 172，第六轮后 180，第七轮后 189，第八轮后 208，第九轮后 220，第十轮后 227，第十一轮后 241，第十二轮后 251）。
+> 首轮 11 个「已知缺陷探针」与第二轮 4 个 P3 均已随 TDD 修复转为 PASS；第三轮 P3-9/10 已修复、P3-11 重开后于 ca2d24c 真正修复；第四轮 P3-12 已修复（ca2d24c）；第五~七轮无新缺陷，第八轮发现 1 个 P3（AUDIT-P3-13）并已修复：诊断报告现在对 apiKey/token/secret/password/authorization 类设置整值隐藏，并对 JSON 结构化设置（mcp.servers）递归掩码 Bearer token 与凭证字段；新增单测断言 web.search.apiKey 与 mcp Bearer 不泄漏。第九轮发现 1 个 P3（AUDIT-P3-14：agent.permission=never 已存储但会话权限 chip 显示「询问」，**已修复**）；第十~十二轮无新缺陷；第十三轮发现 1 个 P3（AUDIT-P3-15，服务商预设部分写入无回滚，**已修复**）。`go test ./internal/regression -count=1 -race` 当前 **263 PASS / 0 SKIP**（历史：首轮修复后 92，第二轮后 98，第三轮后 133，第四轮后 153，第五轮后 172，第六轮后 180，第七轮后 189，第八轮后 208，第九轮后 220，第十轮后 227，第十一轮后 241，第十二轮后 251，第十三轮后 258）；已知缺陷已全部修复。
 
 | ID | 优先级 | 状态 | 修复摘要 |
 |----|--------|------|----------|
@@ -31,7 +31,7 @@ $ go test ./internal/regression -count=1                    ok  1.2s
 $ go test ./internal/regression -count=1 -race              ok 12.8s（98 PASS / 0 SKIP）
 ```
 
-测试规模：`internal/regression` 共 258 个顶层 Test（首轮 78 + 第二轮 20 + 第三轮 35 + 第四轮 20 + 第五轮 19 + 第六轮 8 + 第七轮 9 + 第八轮 17 + 特性提交补充 2 + 第九轮 12 + 第十轮 7 + 第十一轮 14 + 第十二轮 10 + 第十三轮 7；含子用例后更多；另有 `internal/ui/uimodtest` 的 E2E 1 个，不计入本包）。第三轮 P3-9/10 已修复，P3-11 重开后已真正修复，第四轮 P3-12 已修复，第五~七轮无新缺陷，第八轮 P3-13 已修复（da654e3），第九轮新增 P3-14（已修复），第十~十二轮无新缺陷，第十三轮新增 P3-15（已修复）；当前 **258 PASS / 0 SKIP**。
+测试规模：`internal/regression` 共 263 个顶层 Test（首轮 78 + 第二轮 20 + 第三轮 35 + 第四轮 20 + 第五轮 19 + 第六轮 8 + 第七轮 9 + 第八轮 17 + 特性提交补充 2 + 第九轮 12 + 第十轮 7 + 第十一轮 14 + 第十二轮 10 + 第十三轮 7 + 第十四轮 5；含子用例后更多；另有 `internal/ui/uimodtest` 的 E2E 1 个，不计入本包）。第三轮 P3-9/10 已修复，P3-11 重开后已真正修复，第四轮 P3-12 已修复，第五~七轮无新缺陷，第八轮 P3-13 已修复（da654e3），第九轮新增 P3-14（已修复），第十~十二轮无新缺陷，第十三轮新增 P3-15（已修复）；第十四轮无新缺陷，两者的修复探针复跑均静默；当前 **263 PASS / 0 SKIP**。
 
 ## 用例矩阵
 
@@ -355,6 +355,7 @@ $ go test ./internal/regression -count=1 -race               ok 27.9s（153 PASS
 第十一轮扩张到 **241 PASS / 0 SKIP**（排队发送、MCP 服务器开关、自动化筛选、消息字号、AGENTS.md/记忆页/连接检查/上下文预算/反馈导出）。
 第十二轮扩张到 **251 PASS / 0 SKIP**（技能编辑 UpdateSkill、设置记忆整理/清空、内置模块清单、第十一轮关键链路复跑）。
 第十三轮扩张到 **258 PASS / 0 SKIP**（goal 自动续跑、实时 reasoning 预览、服务商预设、第十二轮关键链路复跑），发现 AUDIT-P3-15。
+第十四轮扩张到 **263 PASS / 0 SKIP**（goal 暂停/继续状态机与芯片、插件连接配置掩码、第十三轮关键链路复跑），确认 P3-14/P3-15 修复未回退。
 仍有文档化未落地项（plan keep-planning 反馈循环、会话级 feedback 汇总、旧 `/feedback [good|bad]` 参数式直接打分、自动化 runs 之外的历史查询）。
 
 ## 反证审计第五轮：/feedback 命令 / 自动化运行历史 / 反馈复跑 / 记忆与技能编辑（2026-11-08）
@@ -760,3 +761,43 @@ $ go test ./internal/regression -race -run '第十二轮关键链路'      10 PA
 |----|------|----------|
 | AUDIT-P3-14 | ✅ 已修复（复核确认） | 会话权限 chip 识别 `never` 并显示「从不允许/Never」（contracts.PermissionNever），单测覆盖 |
 | AUDIT-P3-15 | ✅ 已修复 | `applyProviderPreset` 先快照 chat.baseURL/model，任一步写入失败即回滚两行并报错；新增按 key 注入失败的 rollback 单测（baseURL 恢复旧值、model 不变） |
+
+## 反证审计第十四轮（最终）：goal 暂停/继续 / 插件连接配置（2026-11-08）
+
+范围：`364a988`（goal pause/resume、plugin connection details）+ `f06fdf3`（P3-15 回滚修复与第十三轮证据）。
+只新增 `internal/regression/**` 并改本文件；未改生产代码。新增 **5** 个顶层 Test（258 → 263）。
+
+```
+$ gofmt -l internal/regression/                              （空）
+$ go vet ./internal/regression                               OK
+$ go build ./...                                             OK
+$ go test ./internal/regression -count=1 -race               ok 58.1s（263 PASS / 0 SKIP）
+$ go test ./internal/regression -race -run '第十三轮关键链路'      7 PASS / 0 SKIP（0 回退）
+$ go test ./internal/regression -run 'P3-14/P3-15 修复探针'        静默（不再记录 AUDIT）
+```
+
+| # | 链路 | 反证点 | 用例 | 结果 |
+|---|------|--------|------|------|
+| 60 | goal 暂停/继续（host 状态机） | 无 goal 时 Pause/Resume/Clear 安全且零通知；Set→active+通知 1 次；Pause→paused+通知，重复 Pause no-op 不重复通知；Resume→active+通知，重复 Resumed no-op；Set 把 paused 重置为 active 且换 ID；Clear 通知 ok=false；空文本/取消 ctx 的 Set 拒绝；16 并发 Pause/Resume/Get/Clear -race 状态一致 | 2 | PASS |
+| 61 | session 芯片与自动续跑门 | goal 芯片显示「目标」+文本+暂停/清除；点暂停→「目标已暂停」+「继续目标」，paused 状态下 settle 不自动续跑；点继续→恢复「目标」，settle 后再续跑且含 goal 文本；Clear 隐藏芯片；无 GoalPauser 的 tracker 隐藏暂停/继续但保留清除 | 1 | PASS |
+| 62 | 插件连接配置（settings 源） | stdio env 掩码：KEY/TOKEN/SECRET/PASSWORD/AUTHORIZATION 类值显示「*** · 值已隐藏」、键保留、非敏感值可见、原始 secret 不出现在帧；HTTP 行只显示 URL；无匹配 settings 行隐藏「连接配置」；坏 mcp.servers 行显示「配置无法解析」；英文 Connection/value hidden 且不泄漏 | 2 | PASS |
+| 63 | 第十三轮关键链路复跑 + 修复探针 | goal 续跑/reasoning 预览/服务商预设 按前缀 7 PASS / 0 SKIP，0 回退；**P3-14/P3-15 修复探针复跑静默**（chip 显示「从不允许」、预设失败回滚不再残留 baseURL） | 复跑 | PASS |
+
+### 第十四轮未证伪的关键不变量
+
+1. **goal 暂停/继续**：状态机只有 active↔paused，重复操作幂等且不重复通知；Set 总是回到 active 并换 ID；无 goal 安全；并发下状态一致（-race）；暂停的 goal 保持在会话芯片可见但自动续跑门关闭，恢复后继续。
+2. **插件连接配置**：settings 源的连接细节只对同名行出现；敏感 env 值永不进入帧，键与普通值保留；HTTP 只展示 URL；坏配置只显示可读解析错误。
+3. **修复未回退**：P3-14（never chip）与 P3-15（预设回滚）的探针本轮复跑均静默。
+
+### 第十四轮发现
+
+- **无新缺陷**（无 P0/P1/P2/P3）。
+- 观察（非缺陷）：env 掩码按 key/value 子串匹配敏感标记（如值里含 "TOKEN" 也会被隐藏），属于偏保守的设计；本轮断言的是“不泄露”，未要求最小化掩码。
+- 观察（非缺陷）：连接配置的英文断言需显式设置 locale（页面文案按帧生成，测试中未自动切换）。
+
+### 第十四轮局限
+
+- goal 暂停/继续用真实 uiroot goal service（公开 GoalTracker/GoalPauser API），并发测试覆盖状态机；会话自动续跑仍用 fake Chat 的 Running 翻转 + runtime.Post 多帧 pump。
+- 插件连接配置用 fake PluginsService + 真实 settings store；stdin 进程/真实 MCP 握手不在本轮范围。
+- 第十三轮复跑按前缀 7 项；全量 263 项 -race 已单独跑绿。
+- 本轮为最终反证：已知缺陷（P3-14/P3-15）均确认修复，探针静默；无其它已知缺陷。
