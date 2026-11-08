@@ -61,6 +61,8 @@ func buildScreen(c *ui.Context, runtime contracts.UIRuntime, cfg Config, st *sta
 			ui.Column(c).FillWidth().Gap(design.Space5).Children(func() {
 				buildMCPsSection(c, t, runtime, pluginsService, hasPlugins, cfg, st, settings, hasSettings)
 				buildToolsSection(c, t, toolkit, hasToolkit, st, cfg, runtime, settings, hasSettings)
+				modulesLister, hasModules := st.ctx.Get(contracts.KeyModuleLister)
+				buildModulesSection(c, t, st, modulesLister, hasModules)
 			})
 		})
 	})

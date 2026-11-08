@@ -297,11 +297,16 @@ func runHeadless(ctx context.Context, opts Options, out io.Writer) error {
 	if err := provideServices(root, opts.DataDir, settings, logger, nil); err != nil {
 		return err
 	}
+	moduleLister, err := provideModuleLister(root)
+	if err != nil {
+		return fmt.Errorf("%s: provide module lister: %w", appName, err)
+	}
 
 	loader, err := assembly.LoadWithBuildInfo(root, opts.Product, buildInfo(opts))
 	if err != nil {
 		return fmt.Errorf("%s: load product %q: %w", appName, opts.Product, err)
 	}
+	moduleLister.set(moduleInfos(loadedModulesFromInstances(loader.Instances())))
 	logger.Printf("%s: %s product %q loaded", appName, opts.versionString(), opts.Product)
 	fmt.Fprintf(out, "%s\n", opts.versionString())
 	fmt.Fprintf(out, "product: %s (no window)\n", opts.Product)
@@ -417,6 +422,11 @@ func runDesktop(opts Options) error {
 		_ = root.DisposeAll()
 		return err
 	}
+	moduleLister, err := provideModuleLister(root)
+	if err != nil {
+		_ = root.DisposeAll()
+		return fmt.Errorf("%s: provide module lister: %w", appName, err)
+	}
 
 	var (
 		loader       *module.Loader
@@ -520,6 +530,7 @@ func runDesktop(opts Options) error {
 			return
 		}
 		loader = loaded
+		moduleLister.set(moduleInfos(loadedModulesFromInstances(loaded.Instances())))
 		if err := uiRoot.Validate(); err != nil {
 			startupErr = fmt.Errorf("%s: %w", appName, err)
 			logger.Printf("%v", startupErr)

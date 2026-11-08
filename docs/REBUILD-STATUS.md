@@ -21,6 +21,11 @@
 - 右侧栏「文件」Tab：打开文件夹（mygo 原生 Directory picker）、目录进入/面包屑、文本/Markdown/图片预览、
   刷新与错误状态；E2E 覆盖工作区创建 + 列表 + 预览帧
 
+**TDD-module-lister（2026-11-08）**
+- host：ModuleLister 在 assembly 加载前提供、加载后填充 27 实例（EntryID/ModuleID/State，保留最后快照）；desktop+headless
+- 诊断页「已加载模块 N 个」+ 模块列表（≤40 条，state badge）；Plugins 页「内置模块」section（折叠、只读、state badge）；
+  host 73 / settings 185 / plugins 31 测试
+
 **TDD-skills-update/memory-admin（2026-11-08）**
 - 技能编辑：SkillsEditor.UpdateSkill（仅 dataDir、名称不可改、frontmatter+body 原子重写、即时可见）；设置技能页编辑 Modal 预填/保存/失败保留；
   skills 21 / settings 181 测试

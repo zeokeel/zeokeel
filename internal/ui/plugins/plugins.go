@@ -70,6 +70,9 @@ type state struct {
 	disabledServers       map[string]bool
 	disabledServersLoaded bool
 
+	// modulesOpen is the built-in module section's disclosure state.
+	modulesOpen bool
+
 	// mcpExpanded remembers the expanded MCP server cards, keyed by server
 	// identity, so a Refresh preserves the open cards.
 	mcpExpanded map[string]bool

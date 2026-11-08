@@ -492,12 +492,15 @@ type diagnosticRow struct{ Label, Value string }
 
 // diagnosticsState is the diagnostics page's UI state: whether the copy action
 // just ran (so the page can show a short confirmation).
-type diagnosticsState struct{ copied bool }
+type diagnosticsState struct {
+	copied      bool
+	modulesOpen bool
+}
 
 // buildDiagnosticsPage renders the read-only runtime/storage summary (the old
 // shell's diagnostics view) with a native copy action.
 func buildDiagnosticsPage(c *ui.Context, t *design.Tokens, state *diagnosticsState,
-	rows []diagnosticRow, locale contracts.LocaleService) {
+	rows []diagnosticRow, modules []contracts.ModuleInfo, locale contracts.LocaleService) {
 	ui.Column(c).FillWidth().Gap(design.Space4).Children(func() {
 		design.Apply(ui.Text(c, localized(locale, "诊断", "Diagnostics")), t.Font(design.TypeL)).
 			FontWeight(600).TextColor(t.LabelPrimary)
@@ -521,6 +524,8 @@ func buildDiagnosticsPage(c *ui.Context, t *design.Tokens, state *diagnosticsSta
 				})
 			}
 		})
+		buildLoadedModulesSection(c, t, state, locale, modules)
+
 		ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(design.Space2).Children(func() {
 			if ui.Button(c, localized(locale, "复制诊断信息", "Copy diagnostics")).Clicked() {
 				var builder strings.Builder
@@ -638,7 +643,8 @@ func Module() *module.Descriptor[Config] {
 				Build: func(c *ui.Context) {
 					syncer.sync()
 					rows := diagnosticsRows(info, dataDir, toolkit, chat, store, locale)
-					buildDiagnosticsPage(c, design.Of(c), diagnostics, rows, locale)
+					modules := loadedModulesFromContext(ctx)
+					buildDiagnosticsPage(c, design.Of(c), diagnostics, rows, modules, locale)
 				},
 			},
 			{
