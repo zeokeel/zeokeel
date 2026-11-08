@@ -21,7 +21,10 @@ Every asset name includes its OS and CPU architecture:
 | macOS | x86-64 (amd64), Apple Silicon (arm64) | `zeokeel_<version>_darwin_<arch>.tar.gz` |
 | Windows | x86-64 (amd64), ARM64 | `zeokeel_<version>_windows_<arch>.zip` (contains `zeokeel.exe`) |
 
-`SHA256SUMS.txt` lists the checksum of every archive.
+`SHA256SUMS.txt` lists the checksum of every archive. Release binaries are
+built with `CGO_ENABLED=0` (no cgo compilation), stripped with `-s -w -buildid=`,
+and the archives are gzip/zip compressed (about 9–10 MB per archive; the
+uncompressed binary is ~23 MB).
 
 ```sh
 # Desktop product (needs a desktop session; on Windows use zeokeel.exe)

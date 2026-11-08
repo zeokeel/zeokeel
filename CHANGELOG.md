@@ -40,9 +40,11 @@ controls (no webview, no browser engine).
 - **Packaging**: cross-platform release builds with explicit OS + architecture
   asset names — `linux/amd64`, `linux/arm64`, `darwin/amd64`, `darwin/arm64`
   (`.tar.gz`) and `windows/amd64`, `windows/arm64` (`.zip` with `zeokeel.exe`);
-  version/commit/build-time injected at link time, `SHA256SUMS.txt` and a
-  download table in the release notes; CI on push/PR (including a cross-compile
-  check for every release target) and a tag-driven release workflow.
+  version/commit/build-time injected at link time, `CGO_ENABLED=0` pure-Go
+  builds stripped with `-s -w`, gzip/zip-compressed archives, `SHA256SUMS.txt`
+  and a download table in the release notes; CI on push/PR (including a
+  cross-compile check for every release target) and a tag-driven release
+  workflow.
 
 ### Fixed
 

@@ -22,11 +22,11 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
 
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v7
         with:
           go-version-file: go.mod
           cache: true
@@ -65,8 +65,11 @@ jobs:
             if [ "$goos" = "windows" ]; then
               binary="zeokeel.exe"
             fi
-            GOOS="$goos" GOARCH="$goarch" CGO_ENABLED=0 go build -trimpath \
-              -ldflags "-s -w \
+            # CGO is disabled for every target (the product is pure Go), the
+            # binary is stripped and VCS/build-id metadata is omitted, and the
+            # archive itself is gzip/zip compressed.
+            GOOS="$goos" GOARCH="$goarch" CGO_ENABLED=0 go build -trimpath -buildvcs=false \
+              -ldflags "-s -w -buildid= \
                 -X github.com/zeokeel/zeokeel/internal/host.Version=v${VERSION} \
                 -X github.com/zeokeel/zeokeel/internal/host.Commit=${commit} \
                 -X github.com/zeokeel/zeokeel/internal/host.BuildTime=${build_time}" \
@@ -129,6 +132,8 @@ jobs:
               echo "| ${platform} | ${arch} | \`${archive}\` |"
             done
             echo ""
+            echo "**Build:** CGO disabled, stripped with \`-s -w\`, archives gzip/zip compressed."
+            echo ""
             echo "**Checksums:** \`SHA256SUMS.txt\` (sha256 of every archive)."
             echo ""
             echo '```sh'
@@ -150,7 +155,7 @@ jobs:
         run: gh release delete-asset "v${VERSION}" checksums.txt --yes
 
       - name: Publish GitHub release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           tag_name: v${{ steps.version.outputs.version }}
           name: ZeoKeel v${{ steps.version.outputs.version }}

@@ -61,8 +61,8 @@ clean:
 # Usage: make release VERSION=0.1.0
 VERSION ?= $(shell cat VERSION 2>/dev/null || echo 0.1.0)
 release:
-	$(GO) build -trimpath \
-		-ldflags "-s -w \
+	$(GO) build -trimpath -buildvcs=false \
+		-ldflags "-s -w -buildid= \
 			-X github.com/zeokeel/zeokeel/internal/host.Version=v$(VERSION) \
 			-X github.com/zeokeel/zeokeel/internal/host.Commit=$$(git rev-parse --short=12 HEAD 2>/dev/null || echo unknown) \
 			-X github.com/zeokeel/zeokeel/internal/host.BuildTime=$$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
