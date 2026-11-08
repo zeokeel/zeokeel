@@ -1,8 +1,9 @@
 package settings
 
-// LSP page: edit the optional single language server the toolkit exposes as
-// lsp_* tools. The page writes the same lsp.server settings row the toolkit
-// reads at activation, so a saved server applies after a restart.
+// LSP page: manage the multi-server language-server configuration the toolkit
+// reads at activation (lsp.servers + lsp.active). Only the active server is
+// started; the legacy single-server lsp.server row is still read as a fallback
+// but saving the list migrates to the multi-server rows and clears it.
 
 import (
 	"strings"
@@ -22,151 +23,252 @@ const (
 	LSPPageOrder = 105
 )
 
-// lspState is the page's form draft and status (UI thread only). The row is
-// loaded once per module visit; malformed stored JSON is flagged instead of
-// pre-filling the fields.
+// lspState is the page's list, active-selection and add-form state (UI thread
+// only). The rows are loaded once per module visit; malformed stored JSON is
+// flagged instead of pre-filling the form.
 type lspState struct {
-	loaded bool
-	broken bool
+	loaded  bool
+	listErr string
 
+	servers      []contracts.LSPServerConfig
+	active       string
+	activeStored string
+
+	name       string
 	command    string
 	args       string
 	dir        string
 	languageID string
-	env        []string
 
 	status    string
 	statusErr bool
 }
 
-// loadLSPState reads the stored row once: valid values pre-fill the form; a
-// malformed row sets broken (the fields stay empty and a danger line explains
-// that saving overwrites it).
+// loadLSPState reads the stored rows once (multi-server list first, then the
+// legacy single row as a "default" entry).
 func loadLSPState(st *lspState, store contracts.SettingsService) {
 	if st.loaded || store == nil {
 		return
 	}
 	st.loaded = true
-	raw := store.Get(contracts.SettingLSPServer, "")
-	cfg, err := contracts.ParseLSPServerConfig(raw)
+	servers, err := contracts.ResolveLSPServerConfigs(
+		store.Get(contracts.SettingLSPServers, ""),
+		store.Get(contracts.SettingLSPServer, ""),
+	)
 	if err != nil {
-		st.broken = true
-		return
+		st.listErr = err.Error()
+		st.servers = nil
+	} else {
+		st.servers = servers
 	}
-	st.command = cfg.Command
-	st.args = strings.Join(cfg.Args, " ")
-	st.dir = cfg.Dir
-	st.languageID = cfg.LanguageID
-	st.env = append([]string(nil), cfg.Env...)
+	st.activeStored = strings.TrimSpace(store.Get(contracts.SettingLSPActive, ""))
+	st.refreshActive()
 }
 
-// saveLSPState validates the draft and writes the lsp.server row. An empty
-// command disables the server (the row is cleared).
-func saveLSPState(st *lspState, store contracts.SettingsService, locale contracts.LocaleService) {
-	command := strings.TrimSpace(st.command)
-	if command == "" {
-		if err := store.Set(contracts.SettingLSPServer, ""); err != nil {
-			st.status = localized(locale, "保存失败：", "Save failed: ") + err.Error()
-			st.statusErr = true
-			return
-		}
-		st.broken = false
-		st.args = ""
-		st.dir = ""
-		st.languageID = ""
-		st.env = nil
-		st.status = localized(locale, "已关闭语言服务器", "Language server disabled")
-		st.statusErr = false
-		return
+// refreshActive resolves the effective active server name (first when unset or
+// unknown).
+func (st *lspState) refreshActive() {
+	st.active = ""
+	if cfg, ok := contracts.ActiveLSPServer(st.servers, st.activeStored); ok {
+		st.active = cfg.Name
 	}
-	cfg := contracts.LSPServerConfig{
-		Command:    command,
-		Args:       strings.Fields(st.args),
-		Dir:        strings.TrimSpace(st.dir),
-		LanguageID: strings.TrimSpace(st.languageID),
-		Env:        st.env,
-	}
-	encoded, err := contracts.EncodeLSPServerConfig(cfg)
+}
+
+// writeLSPServers persists the list and clears the legacy single-server row so
+// there is a single source of truth.
+func writeLSPServers(st *lspState, store contracts.SettingsService,
+	locale contracts.LocaleService, success string) bool {
+	encoded, err := contracts.EncodeLSPServerConfigList(st.servers)
 	if err == nil {
-		err = store.Set(contracts.SettingLSPServer, encoded)
+		err = store.Set(contracts.SettingLSPServers, encoded)
+	}
+	if err == nil {
+		err = store.Set(contracts.SettingLSPServer, "")
 	}
 	if err != nil {
 		st.status = localized(locale, "保存失败：", "Save failed: ") + err.Error()
 		st.statusErr = true
-		return
+		return false
 	}
-	st.broken = false
-	st.status = localized(locale, "已保存（重启后生效）", "Saved (applies after restart)")
+	st.listErr = ""
+	st.status = success
 	st.statusErr = false
+	return true
 }
 
-// buildLSPPage renders the optional language-server configuration.
+// addLSPServer validates the add form and appends the server.
+func addLSPServer(st *lspState, store contracts.SettingsService, locale contracts.LocaleService) {
+	name := strings.TrimSpace(st.name)
+	command := strings.TrimSpace(st.command)
+	if name == "" || command == "" {
+		st.status = localized(locale, "名称和命令不能为空", "Name and command are required")
+		st.statusErr = true
+		return
+	}
+	for _, server := range st.servers {
+		if strings.EqualFold(strings.TrimSpace(server.Name), name) {
+			st.status = localized(locale, "该名称已存在", "That name already exists")
+			st.statusErr = true
+			return
+		}
+	}
+	st.servers = append(st.servers, contracts.LSPServerConfig{
+		Name:       name,
+		Command:    command,
+		Args:       strings.Fields(st.args),
+		Dir:        strings.TrimSpace(st.dir),
+		LanguageID: strings.TrimSpace(st.languageID),
+	})
+	previous := append([]contracts.LSPServerConfig(nil), st.servers[:len(st.servers)-1]...)
+	if !writeLSPServers(st, store, locale, localized(locale, "已添加（重启后生效）", "Added (applies after restart)")) {
+		st.servers = previous
+		return
+	}
+	st.name = ""
+	st.command = ""
+	st.args = ""
+	st.dir = ""
+	st.languageID = ""
+	st.refreshActive()
+}
+
+// removeLSPServer removes one configured server.
+func removeLSPServer(st *lspState, store contracts.SettingsService,
+	name string, locale contracts.LocaleService) {
+	previous := append([]contracts.LSPServerConfig(nil), st.servers...)
+	kept := make([]contracts.LSPServerConfig, 0, len(st.servers))
+	for _, server := range st.servers {
+		if server.Name != name {
+			kept = append(kept, server)
+		}
+	}
+	if len(kept) == len(st.servers) {
+		return
+	}
+	st.servers = kept
+	if !writeLSPServers(st, store, locale, localized(locale, "已移除（重启后生效）", "Removed (applies after restart)")) {
+		st.servers = previous
+		return
+	}
+	if strings.EqualFold(st.activeStored, name) || st.active == name {
+		st.activeStored = ""
+		_ = store.Set(contracts.SettingLSPActive, "")
+	}
+	st.refreshActive()
+}
+
+// setActiveLSPServer stores the active server choice.
+func setActiveLSPServer(st *lspState, store contracts.SettingsService,
+	name string, locale contracts.LocaleService) {
+	if err := store.Set(contracts.SettingLSPActive, name); err != nil {
+		st.status = localized(locale, "保存失败：", "Save failed: ") + err.Error()
+		st.statusErr = true
+		return
+	}
+	st.activeStored = name
+	st.status = localized(locale, "已设为活动（重启后生效）", "Set as active (applies after restart)")
+	st.statusErr = false
+	st.refreshActive()
+}
+
+// buildLSPPage renders the multi-server language-server configuration.
 func buildLSPPage(c *ui.Context, store contracts.SettingsService, st *lspState, locale contracts.LocaleService) {
 	t := design.Of(c)
 	ui.Column(c).FillWidth().Gap(design.Space2).Children(func() {
 		pageHeader(c, t, "LSP", localized(locale,
-			"可选的语言服务器（单个）：配置后重启生效，其能力以 lsp_* 工具提供。",
-			"Optional single language server: applies after a restart; its capabilities are exposed as lsp_* tools."))
+			"可选的语言服务器（可配置多个）；仅活动服务器在启动时拉起，重启生效，其能力以 lsp_* 工具提供。",
+			"Optional language servers (multiple allowed); only the active server starts at launch. Restart to apply; capabilities are exposed as lsp_* tools."))
 		if store == nil {
 			design.Apply(ui.Text(c, localized(locale, "设置存储未启用", "Settings store not enabled")),
 				t.TextMuted(design.TypeXS))
 			return
 		}
 		loadLSPState(st, store)
-		if st.broken {
-			design.Apply(ui.Text(c, localized(locale,
-				"当前配置无法解析；保存有效配置可覆盖它。",
-				"Current configuration is invalid; saving a valid one overwrites it.")),
+		if st.listErr != "" {
+			design.Apply(ui.Text(c, localized(locale, "配置无法解析：", "Configuration could not be parsed: ")+st.listErr),
 				t.Font(design.TypeXS)).TextColor(t.DangerText)
 		}
+
 		panel(c, t, func() {
-			ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(design.Space2).Children(func() {
-				sectionTitle(c, t, localized(locale, "语言服务器", "Language server"))
-				ui.Spacer(c).Grow(1)
-				if !st.broken && strings.TrimSpace(st.command) != "" {
-					design.Apply(ui.Badge(c, localized(locale, "已配置", "Configured")), t.Badge()).
-						TextColor(t.Success)
-				}
-			})
-			if !st.broken {
-				current := strings.TrimSpace(st.command)
-				if current == "" {
-					design.Apply(ui.Text(c, localized(locale, "当前未配置语言服务器", "No language server configured")),
-						t.TextMuted(design.TypeXXS))
-				} else {
-					summary := current
-					if args := strings.Join(strings.Fields(st.args), " "); args != "" {
+			sectionTitle(c, t, localized(locale, "语言服务器", "Language servers"))
+			if len(st.servers) == 0 && st.listErr == "" {
+				design.Apply(ui.Text(c, localized(locale, "还没有配置语言服务器", "No language servers configured")),
+					t.TextMuted(design.TypeXXS))
+			}
+			for _, server := range st.servers {
+				server := server
+				active := st.active != "" && server.Name == st.active
+				ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(design.Space2).Children(func() {
+					design.Apply(ui.Text(c, server.Name), t.Font(design.TypeS)).
+						FontWeight(600).TextColor(t.LabelPrimary)
+					summary := server.Command
+					if args := strings.Join(server.Args, " "); args != "" {
 						summary += " " + args
 					}
-					design.Apply(ui.Text(c, localized(locale, "当前：", "Current: ")+summary),
-						t.MonoFamily()).FontSize(11).TextColor(t.LabelTertiary)
-				}
+					design.Apply(ui.Text(c, summary), t.MonoFamily()).FontSize(11).
+						TextColor(t.LabelTertiary).Grow(1).MaxLines(1).Ellipsis("…")
+					if active {
+						design.Apply(ui.Badge(c, localized(locale, "活动中", "Active")), t.Badge()).
+							TextColor(t.Success)
+					} else {
+						if ui.Button(c, localized(locale, "设为活动", "Set active")).Clicked() {
+							setActiveLSPServer(st, store, server.Name, locale)
+							c.Invalidate()
+						}
+					}
+					remove := ui.Button(c, localized(locale, "移除", "Remove")).TextColor(t.DangerText)
+					if remove.Clicked() {
+						removeLSPServer(st, store, server.Name, locale)
+						c.Invalidate()
+					}
+				})
 			}
-			field(c, t, localized(locale, "命令", "Command"), func() {
-				ui.TextInput(c, &st.command).Label(inputLabel(locale, localized(locale, "命令", "Command"))).
-					Placeholder(localized(locale, "例如 gopls", "e.g. gopls")).FillWidth()
-			})
-			field(c, t, localized(locale, "参数", "Arguments"), func() {
-				ui.TextInput(c, &st.args).Label(inputLabel(locale, localized(locale, "参数", "Arguments"))).
-					Placeholder(localized(locale, "空格分隔，例如 serve -rpc.trace", "Space-separated, e.g. serve -rpc.trace")).FillWidth()
-			})
-			field(c, t, localized(locale, "工作目录", "Working directory"), func() {
-				ui.TextInput(c, &st.dir).Label(inputLabel(locale, localized(locale, "工作目录", "Working directory"))).
-					Placeholder(localized(locale, "可选，默认为当前目录", "Optional, defaults to the current directory")).FillWidth()
-			})
-			field(c, t, localized(locale, "语言 ID", "Language ID"), func() {
-				ui.TextInput(c, &st.languageID).Label(inputLabel(locale, localized(locale, "语言 ID", "Language ID"))).
-					Placeholder(localized(locale, "例如 go、python", "e.g. go, python")).FillWidth()
-			})
-			design.Apply(ui.Text(c, localized(locale,
-				"保存后重启生效；工具名前缀为 lsp_（如 lsp_hover）。命令留空保存即关闭语言服务器。",
-				"Applies after a restart; tools are prefixed lsp_ (e.g. lsp_hover). Saving an empty command disables the server.")),
-				t.TextMuted(design.TypeXXS)).MaxLines(2)
+			design.Apply(ui.Text(c, localized(locale, "重启生效；仅活动服务器在启动时拉起。",
+				"Restart to apply; only the active server starts at launch.")),
+				t.TextMuted(design.TypeXXXS)).MaxLines(2)
 		})
+
+		panel(c, t, func() {
+			sectionTitle(c, t, localized(locale, "新增服务器", "Add server"))
+			ui.Row(c).FillWidth().Gap(design.Space2).AlignItems(ui.Start).Children(func() {
+				ui.Column(c).FillWidth().Grow(1).Children(func() {
+					ui.TextInput(c, &st.name).Label(inputLabel(locale, localized(locale, "名称", "Name"))).
+						Placeholder(localized(locale, "例如 go", "e.g. go")).FillWidth()
+				})
+				ui.Column(c).FillWidth().Grow(1).Children(func() {
+					ui.TextInput(c, &st.command).Label(inputLabel(locale, localized(locale, "命令", "Command"))).
+						Placeholder(localized(locale, "例如 gopls", "e.g. gopls")).FillWidth()
+				})
+			})
+			ui.Row(c).FillWidth().Gap(design.Space2).AlignItems(ui.Start).Children(func() {
+				ui.Column(c).FillWidth().Grow(1).Children(func() {
+					ui.TextInput(c, &st.args).Label(inputLabel(locale, localized(locale, "参数", "Arguments"))).
+						Placeholder(localized(locale, "空格分隔，例如 serve -rpc.trace", "Space-separated, e.g. serve -rpc.trace")).FillWidth()
+				})
+				ui.Column(c).FillWidth().Grow(1).Children(func() {
+					ui.TextInput(c, &st.dir).Label(inputLabel(locale, localized(locale, "工作目录", "Working directory"))).
+						Placeholder(localized(locale, "可选", "optional")).FillWidth()
+				})
+			})
+			ui.TextInput(c, &st.languageID).Label(inputLabel(locale, localized(locale, "语言 ID", "Language ID"))).
+				Placeholder(localized(locale, "例如 go、python", "e.g. go, python")).FillWidth()
+			design.Apply(ui.Text(c, localized(locale,
+				"保存后重启生效；工具名前缀为 lsp_（如 lsp_hover）。",
+				"Applies after a restart; tools are prefixed lsp_ (e.g. lsp_hover).")),
+				t.TextMuted(design.TypeXXS)).MaxLines(2)
+			if add := design.Apply(ui.PrimaryButton(c, localized(locale, "添加", "Add")), t.PrimaryButton()); add.Clicked() {
+				addLSPServer(st, store, locale)
+				c.Invalidate()
+			}
+		})
+
 		ui.Row(c).FillWidth().Gap(design.Space2).AlignItems(ui.Center).Children(func() {
-			save := design.Apply(ui.PrimaryButton(c, localized(locale, "保存", "Save")), t.PrimaryButton())
-			if save.Clicked() {
-				saveLSPState(st, store, locale)
+			if save := design.Apply(ui.PrimaryButton(c, localized(locale, "保存", "Save")), t.PrimaryButton()); save.Clicked() {
+				if writeLSPServers(st, store, locale,
+					localized(locale, "已保存（重启后生效）", "Saved (applies after restart)")) {
+					st.refreshActive()
+				}
+				c.Invalidate()
 			}
 			ui.Spacer(c).Grow(1)
 			if st.status != "" {

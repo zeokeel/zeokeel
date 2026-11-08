@@ -108,7 +108,7 @@ func (s *service) Run(ctx context.Context, req contracts.SubagentRequest) (contr
 		SystemPrompt:  cfg.SystemPrompt,
 		MaxIterations: cfg.MaxIterations,
 		Tools:         s.registry.Tools(),
-		Gate:          s.gate(),
+		Gate:          s.gate(active),
 		History:       s.historyView(),
 		Logger:        s.logger,
 	}

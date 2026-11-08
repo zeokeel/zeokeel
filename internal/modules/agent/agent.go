@@ -211,6 +211,10 @@ type service struct {
 
 	sessions map[string]*sessionState
 	active   string
+	// sessionPermissions stores the optional per-session permission overrides
+	// (ask/workspace/full/never); they live until session deletion or process
+	// exit and never persist to settings.
+	sessionPermissions map[string]string
 
 	subscribers    []*subscription
 	nextSessionSeq uint64
@@ -226,16 +230,18 @@ type service struct {
 }
 
 var (
-	_ contracts.ChatService          = (*service)(nil)
-	_ contracts.SessionRenamer       = (*service)(nil)
-	_ contracts.AttachmentSender     = (*service)(nil)
-	_ contracts.SessionForker        = (*service)(nil)
-	_ contracts.SessionPinner        = (*service)(nil)
-	_ contracts.SessionArchiver      = (*service)(nil)
-	_ contracts.SessionRegenerator   = (*service)(nil)
-	_ contracts.SessionModelSwitcher = (*service)(nil)
-	_ contracts.SessionFeedbacker    = (*service)(nil)
-	_ contracts.Subagents            = (*service)(nil)
+	_ contracts.ChatService               = (*service)(nil)
+	_ contracts.SessionRenamer            = (*service)(nil)
+	_ contracts.AttachmentSender          = (*service)(nil)
+	_ contracts.SessionForker             = (*service)(nil)
+	_ contracts.SessionPinner             = (*service)(nil)
+	_ contracts.SessionArchiver           = (*service)(nil)
+	_ contracts.SessionRegenerator        = (*service)(nil)
+	_ contracts.SessionModelSwitcher      = (*service)(nil)
+	_ contracts.SessionWorkspaceSwitcher  = (*service)(nil)
+	_ contracts.SessionPermissionSwitcher = (*service)(nil)
+	_ contracts.SessionFeedbacker         = (*service)(nil)
+	_ contracts.Subagents                 = (*service)(nil)
 )
 
 // sessionState is the mutable per-session state.
@@ -266,14 +272,15 @@ func newService(cfg Config, registry *rigtools.Registry, settings contracts.Sett
 		logger = discardLogger{}
 	}
 	return &service{
-		cfg:       cfg,
-		registry:  registry,
-		settings:  settings,
-		logger:    logger,
-		history:   session.NewMemory(),
-		store:     store,
-		approvals: approvals,
-		sessions:  make(map[string]*sessionState),
+		cfg:                cfg,
+		registry:           registry,
+		settings:           settings,
+		logger:             logger,
+		history:            session.NewMemory(),
+		store:              store,
+		approvals:          approvals,
+		sessions:           make(map[string]*sessionState),
+		sessionPermissions: make(map[string]string),
 	}
 }
 
@@ -768,6 +775,68 @@ func (s *service) newSessionIDLocked() string {
 
 // DeleteSession removes a session, cancels its run and moves the active session
 // to the newest remaining one (or "").
+// SetSessionWorkspace implements contracts.SessionWorkspaceSwitcher: it moves
+// one of this service's sessions to a workspace (empty clears the binding). The
+// workspace service owns existence checks; the agent records the durable
+// association when the store exposes SessionWorkspaceStore and updates its
+// read model either way.
+func (s *service) SetSessionWorkspace(sessionID, workspaceID string) error {
+	sessionID = strings.TrimSpace(sessionID)
+	workspaceID = strings.TrimSpace(workspaceID)
+	s.mu.Lock()
+	_, ok := s.sessions[sessionID]
+	recorder, canRecord := s.store.(contracts.SessionWorkspaceStore)
+	s.mu.Unlock()
+	if !ok {
+		return fmt.Errorf("agent: unknown chat session %q", sessionID)
+	}
+	if workspaceID != "" && !canRecord {
+		s.logger.Printf("[agent] session workspace switch: store lacks SessionWorkspaceStore")
+	}
+	if canRecord {
+		if err := recorder.SetSessionWorkspace(context.Background(), sessionID, workspaceID); err != nil {
+			return fmt.Errorf("agent: record workspace of session %q: %w", sessionID, err)
+		}
+	}
+	s.mu.Lock()
+	if state, exists := s.sessions[sessionID]; exists {
+		state.workspaceID = workspaceID
+		state.updatedAt = time.Now()
+	}
+	s.mu.Unlock()
+	s.notify(sessionID)
+	return nil
+}
+
+// SetSessionPermission implements contracts.SessionPermissionSwitcher: it
+// overrides one session's approval mode for the rest of its lifetime. Plan and
+// chat modes still take precedence in the gate; deleting the session drops the
+// override (overrides never touch the global settings).
+func (s *service) SetSessionPermission(sessionID, mode string) error {
+	sessionID = strings.TrimSpace(sessionID)
+	mode = strings.ToLower(strings.TrimSpace(mode))
+	switch mode {
+	case contracts.PermissionAsk, contracts.PermissionWorkspace, contracts.PermissionFull, contracts.PermissionNever:
+	default:
+		return fmt.Errorf("agent: invalid session permission mode %q", mode)
+	}
+	s.mu.Lock()
+	if _, ok := s.sessions[sessionID]; !ok {
+		s.mu.Unlock()
+		return fmt.Errorf("agent: unknown chat session %q", sessionID)
+	}
+	s.sessionPermissions[sessionID] = mode
+	s.mu.Unlock()
+	return nil
+}
+
+// sessionPermission returns the stored override ("" when none).
+func (s *service) sessionPermission(sessionID string) string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.sessionPermissions[sessionID]
+}
+
 func (s *service) DeleteSession(sessionID string) error {
 	s.mu.Lock()
 	state, ok := s.sessions[sessionID]
@@ -777,6 +846,7 @@ func (s *service) DeleteSession(sessionID string) error {
 	}
 	cancel := state.cancel
 	delete(s.sessions, sessionID)
+	delete(s.sessionPermissions, sessionID)
 	active := s.active
 	if active == sessionID {
 		s.active = s.newestSessionLocked()
@@ -1208,7 +1278,7 @@ func (s *service) run(ctx context.Context, sessionID string, cfg contracts.ChatC
 		MaxIterations:   cfg.MaxIterations,
 		Tools:           s.registry.Tools(),
 		History:         history,
-		Gate:            s.gate(),
+		Gate:            s.gate(sessionID),
 		ContextBudget:   cfg.ContextBudget,
 		Logger:          s.logger,
 		CheckpointStore: s.checkpointStore(),

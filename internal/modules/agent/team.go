@@ -86,7 +86,7 @@ func (r *dynamicTeamRunner) Start(ctx context.Context, spec rig.SubagentSpec) (r
 		SystemPrompt:  cfg.SystemPrompt,
 		MaxIterations: cfg.MaxIterations,
 		Tools:         r.service.registry.Tools(),
-		Gate:          r.service.gate(),
+		Gate:          r.service.gate(active),
 		History:       r.service.historyView(),
 		Logger:        r.service.logger,
 	}

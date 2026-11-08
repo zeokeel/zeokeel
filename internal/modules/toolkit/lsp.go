@@ -9,7 +9,6 @@ import (
 	"context"
 	"net/url"
 	"path/filepath"
-	"strings"
 	"sync"
 
 	rig "github.com/zeokeel/zeokeel-rig"
@@ -46,9 +45,10 @@ var lspStartFunc = func(ctx context.Context, cfg lsp.Config) (lspSession, error)
 	return lspClientSession{client: client}, nil
 }
 
-// startLSPTools reads the optional lsp.server settings row and, when it names a
-// command, starts the server and returns its tools plus the ownership cleanup.
-// It never fails: parse/start/conflict problems only log warnings.
+// startLSPTools reads the optional multi-server LSP settings rows (lsp.servers +
+// lsp.active, falling back to the legacy lsp.server row), starts the ACTIVE
+// server only and returns its tools plus the ownership cleanup. It never fails:
+// parse/start/conflict problems only log warnings.
 func startLSPTools(
 	ctx context.Context,
 	logf func(string, ...any),
@@ -60,14 +60,23 @@ func startLSPTools(
 	if !hasSettings || settings == nil {
 		return nil, noop
 	}
-	cfg, err := contracts.ParseLSPServerConfig(settings.Get(contracts.SettingLSPServer, ""))
+	servers, err := contracts.ResolveLSPServerConfigs(
+		settings.Get(contracts.SettingLSPServers, ""),
+		settings.Get(contracts.SettingLSPServer, ""),
+	)
 	if err != nil {
-		logf("toolkit: lsp: ignoring %s: %v", contracts.SettingLSPServer, err)
+		logf("toolkit: lsp: ignoring %s/%s: %v",
+			contracts.SettingLSPServers, contracts.SettingLSPServer, err)
 		return nil, noop
 	}
-	if strings.TrimSpace(cfg.Command) == "" {
+	if len(servers) == 0 {
 		return nil, noop
 	}
+	cfg, ok := contracts.ActiveLSPServer(servers, settings.Get(contracts.SettingLSPActive, ""))
+	if !ok {
+		return nil, noop
+	}
+	logf("toolkit: lsp: starting server %q (command %q, %d configured)", cfg.Name, cfg.Command, len(servers))
 	session, err := lspStartFunc(ctx, lsp.Config{
 		Command:    cfg.Command,
 		Args:       cfg.Args,

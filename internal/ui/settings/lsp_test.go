@@ -1,97 +1,185 @@
 package settings_test
 
-// TDD tests (RED first) for the LSP settings page (single optional language
-// server; saved JSON applies after a restart).
+// TDD tests (RED first) for the multi-server LSP settings page: list, active
+// server selection, add/remove, legacy single-server compatibility and i18n.
 
 import (
+	"strings"
 	"testing"
+
+	"github.com/egoist/mygo/ui"
 
 	"github.com/zeokeel/zeokeel/internal/contracts"
 	"github.com/zeokeel/zeokeel/internal/ui/settings"
 )
 
-// storeLSPConfig parses the stored LSP row.
-func storeLSPConfig(t *testing.T, store *fakeSettings) (contracts.LSPServerConfig, bool, error) {
+// storedLSPServers parses the stored lsp.servers row.
+func storedLSPServers(t *testing.T, store *fakeSettings) []contracts.LSPServerConfig {
 	t.Helper()
-	raw := store.get(contracts.SettingLSPServer)
-	cfg, err := contracts.ParseLSPServerConfig(raw)
-	return cfg, raw != "", err
+	raw := store.get(contracts.SettingLSPServers)
+	if strings.TrimSpace(raw) == "" {
+		return nil
+	}
+	servers, err := contracts.ParseLSPServerConfigList(raw)
+	if err != nil {
+		t.Fatalf("stored lsp.servers %q is invalid: %v", raw, err)
+	}
+	return servers
 }
 
-func TestLSPPageDefaults(t *testing.T) {
-	store := newFakeSettings(nil)
+func lspPage(t *testing.T, store *fakeSettings) (*harness, *ui.Tester) {
+	t.Helper()
 	h := newHarness(t, &fakeChat{}, store, settings.Config{})
 	tester := h.tester()
 	tester.Frame()
 	h.click(tester, "LSP")
-	h.assertTexts(tester, "LSP", "命令 输入", "参数 输入", "工作目录 输入", "语言 ID 输入",
-		"保存", "当前未配置语言服务器")
-	if raw := store.get(contracts.SettingLSPServer); raw != "" {
-		t.Fatalf("defaults wrote the LSP row: %q", raw)
+	return h, tester
+}
+
+// --- tests ------------------------------------------------------------------
+
+func TestLSPPageEmptyState(t *testing.T) {
+	store := newFakeSettings(nil)
+	h, tester := lspPage(t, store)
+	h.assertTexts(tester, "LSP", "还没有配置语言服务器", "新增服务器",
+		"名称 输入", "命令 输入", "添加", "重启生效")
+	if raw := store.get(contracts.SettingLSPServers); raw != "" {
+		t.Fatalf("empty page wrote lsp.servers: %q", raw)
 	}
 }
 
-func TestLSPPageSaveWritesJSON(t *testing.T) {
-	store := newFakeSettings(nil)
-	h := newHarness(t, &fakeChat{}, store, settings.Config{})
-	tester := h.tester()
-	tester.Frame()
-	h.click(tester, "LSP")
+func TestLSPPageListsServersAndActiveBadge(t *testing.T) {
+	store := newFakeSettings(map[string]string{
+		contracts.SettingLSPServers: `[{"name":"go","command":"gopls","args":["serve"]},{"name":"rs","command":"rust-analyzer"}]`,
+		contracts.SettingLSPActive:  "rs",
+	})
+	h, tester := lspPage(t, store)
+	h.assertTexts(tester, "go", "gopls", "rs", "rust-analyzer", "活动中", "设为活动", "移除")
+	if got := strings.Count(strings.Join(tester.Texts(), "\n"), "活动中"); got != 1 {
+		t.Fatalf("active badges = %d, want 1; texts = %v", got, tester.Texts())
+	}
+}
 
+func TestLSPPageAddServer(t *testing.T) {
+	store := newFakeSettings(nil)
+	h, tester := lspPage(t, store)
+	h.assertTexts(tester, "还没有配置语言服务器")
+
+	clearAndType(t, h, tester, "名称 输入", "go")
 	clearAndType(t, h, tester, "命令 输入", "gopls")
-	clearAndType(t, h, tester, "参数 输入", "serve -rpc.trace")
+	clearAndType(t, h, tester, "参数 输入", "serve")
 	clearAndType(t, h, tester, "工作目录 输入", "/tmp/project")
 	clearAndType(t, h, tester, "语言 ID 输入", "go")
-	h.click(tester, "保存")
+	h.click(tester, "添加")
 
-	cfg, present, err := storeLSPConfig(t, store)
-	if err != nil || !present {
-		t.Fatalf("stored LSP config = %q, err %v", store.get(contracts.SettingLSPServer), err)
+	servers := storedLSPServers(t, store)
+	if len(servers) != 1 || servers[0].Name != "go" || servers[0].Command != "gopls" ||
+		len(servers[0].Args) != 1 || servers[0].Args[0] != "serve" ||
+		servers[0].Dir != "/tmp/project" || servers[0].LanguageID != "go" {
+		t.Fatalf("stored servers = %+v", servers)
 	}
-	if cfg.Command != "gopls" || cfg.Dir != "/tmp/project" || cfg.LanguageID != "go" ||
-		len(cfg.Args) != 2 || cfg.Args[0] != "serve" || cfg.Args[1] != "-rpc.trace" {
-		t.Fatalf("stored config = %+v", cfg)
+	if got := store.get(contracts.SettingLSPServer); got != "" {
+		t.Fatalf("adding a server did not clear the legacy row: %q", got)
 	}
-	h.assertTexts(tester, "已保存")
+	h.assertTexts(tester, "go", "gopls", "活动中", "已添加（重启后生效）")
 }
 
-func TestLSPPageClearDisablesServer(t *testing.T) {
+func TestLSPPageRemoveServerClearsLegacy(t *testing.T) {
+	store := newFakeSettings(map[string]string{
+		contracts.SettingLSPServers: `[{"name":"go","command":"gopls"},{"name":"rs","command":"rust-analyzer"}]`,
+		contracts.SettingLSPActive:  "go",
+		contracts.SettingLSPServer:  `{"command":"legacy"}`,
+	})
+	h, tester := lspPage(t, store)
+	h.click(tester, "移除") // removes the first server (go, the active one)
+
+	servers := storedLSPServers(t, store)
+	if len(servers) != 1 || servers[0].Name != "rs" {
+		t.Fatalf("servers after remove = %+v", servers)
+	}
+	if got := store.get(contracts.SettingLSPServer); got != "" {
+		t.Fatalf("remove did not clear the legacy row: %q", got)
+	}
+	h.assertTexts(tester, "rs", "已移除（重启后生效）")
+	h.assertNoTexts(tester, "gopls")
+}
+
+func TestLSPPageSetActiveServer(t *testing.T) {
+	store := newFakeSettings(map[string]string{
+		contracts.SettingLSPServers: `[{"name":"go","command":"gopls"},{"name":"rs","command":"rust-analyzer"}]`,
+		contracts.SettingLSPActive:  "go",
+	})
+	h, tester := lspPage(t, store)
+	h.click(tester, "设为活动")
+	if got := store.get(contracts.SettingLSPActive); got != "rs" {
+		t.Fatalf("lsp.active = %q, want rs", got)
+	}
+	h.assertTexts(tester, "已设为活动（重启后生效）")
+	if got := strings.Count(strings.Join(tester.Texts(), "\n"), "活动中"); got != 1 {
+		t.Fatalf("active badges = %d, want 1", got)
+	}
+}
+
+func TestLSPPageLegacySingleServerCompatibility(t *testing.T) {
 	store := newFakeSettings(map[string]string{
 		contracts.SettingLSPServer: `{"command":"gopls","args":["serve"]}`,
 	})
-	h := newHarness(t, &fakeChat{}, store, settings.Config{})
-	tester := h.tester()
-	tester.Frame()
-	h.click(tester, "LSP")
-	h.assertTexts(tester, "gopls")
+	h, tester := lspPage(t, store)
+	h.assertTexts(tester, "default", "gopls", "活动中")
 
-	clearAndType(t, h, tester, "命令 输入", "")
+	// Saving the list migrates the legacy row and clears it (single source).
 	h.click(tester, "保存")
-	if raw := store.get(contracts.SettingLSPServer); raw != "" {
-		t.Fatalf("clearing the command wrote %q, want empty", raw)
+	servers := storedLSPServers(t, store)
+	if len(servers) != 1 || servers[0].Name != "default" || servers[0].Command != "gopls" {
+		t.Fatalf("migrated servers = %+v", servers)
 	}
-	h.assertTexts(tester, "已关闭语言服务器")
+	if got := store.get(contracts.SettingLSPServer); got != "" {
+		t.Fatalf("save kept the legacy row: %q", got)
+	}
+	h.assertTexts(tester, "已保存（重启后生效）")
 }
 
-func TestLSPPageMalformedCurrentValue(t *testing.T) {
+func TestLSPPageBadServersJSON(t *testing.T) {
 	store := newFakeSettings(map[string]string{
-		contracts.SettingLSPServer: `{not-json`,
+		contracts.SettingLSPServers: `{bad-json`,
 	})
-	h := newHarness(t, &fakeChat{}, store, settings.Config{})
-	tester := h.tester()
-	tester.Frame()
-	h.click(tester, "LSP")
-	h.assertTexts(tester, "当前配置无法解析")
+	h, tester := lspPage(t, store)
+	h.assertTexts(tester, "配置无法解析", "名称 输入")
+}
+
+func TestLSPPageValidation(t *testing.T) {
+	store := newFakeSettings(nil)
+	h, tester := lspPage(t, store)
+	h.click(tester, "添加")
+	h.assertTexts(tester, "名称和命令不能为空")
+	if servers := storedLSPServers(t, store); len(servers) != 0 {
+		t.Fatalf("empty form wrote servers: %+v", servers)
+	}
+
+	clearAndType(t, h, tester, "名称 输入", "go")
+	clearAndType(t, h, tester, "命令 输入", "gopls")
+	h.click(tester, "添加")
+	clearAndType(t, h, tester, "名称 输入", "GO")
+	clearAndType(t, h, tester, "命令 输入", "gopls2")
+	h.click(tester, "添加")
+	h.assertTexts(tester, "该名称已存在")
 }
 
 func TestLSPPageEnglishCopy(t *testing.T) {
 	store := newFakeSettings(nil)
-	h := newHarness(t, &fakeChat{}, store, settings.Config{})
+	h := newLocaleHarness(t, &fakeChat{}, store, settings.Config{}, "en")
 	tester := h.tester()
 	tester.Frame()
-	h.uiRoot.Locale().SetLanguage("en")
-	tester.Frame()
 	h.click(tester, "LSP")
-	h.assertTexts(tester, "LSP", "Command input", "Arguments input", "Working directory input",
-		"Language ID input", "Save", "No language server configured")
+	h.assertTexts(tester, "LSP", "No language servers configured", "Add server",
+		"Name input", "Command input", "Add", "Restart to apply")
+
+	clearAndType(t, h, tester, "Name input", "go")
+	clearAndType(t, h, tester, "Command input", "gopls")
+	h.click(tester, "Add")
+	servers := storedLSPServers(t, store)
+	if len(servers) != 1 || servers[0].Name != "go" {
+		t.Fatalf("English add stored %+v", servers)
+	}
+	h.assertTexts(tester, "Added (applies after restart)", "Active")
 }

@@ -175,6 +175,7 @@ func (f *fakeAutomation) isUnsubscribed() bool {
 
 type harness struct {
 	t      *testing.T
+	ctx    cordis.Context
 	uiRoot *uiroot.Root
 	fiber  *cordis.Fiber
 }
@@ -193,7 +194,7 @@ func newHarness(t *testing.T, service contracts.AutomationService, cfg automatio
 		provide[contracts.AutomationService](t, ctx, contracts.KeyAutomation, service)
 	}
 	fiber := activate(t, ctx, automation.Module(), cfg)
-	return &harness{t: t, uiRoot: uiRoot, fiber: fiber}
+	return &harness{t: t, ctx: ctx, uiRoot: uiRoot, fiber: fiber}
 }
 
 func (h *harness) tester() *ui.Tester {

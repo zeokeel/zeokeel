@@ -304,3 +304,177 @@ func TestToolkitLSPClosesOnUnload(t *testing.T) {
 		t.Fatal("LSP session was not closed on unload")
 	}
 }
+
+// --- multi-server configuration ---------------------------------------------
+
+// newLSPMultiSettings builds a settings store with explicit LSP rows.
+func newLSPMultiSettings(values map[string]string) *lspSettings {
+	if values == nil {
+		values = map[string]string{}
+	}
+	return &lspSettings{values: values}
+}
+
+func TestParseLSPServerConfigListTable(t *testing.T) {
+	if servers, err := contracts.ParseLSPServerConfigList(""); err != nil || len(servers) != 0 {
+		t.Fatalf("empty list = %+v, %v", servers, err)
+	}
+	servers, err := contracts.ParseLSPServerConfigList(`[
+		{"name":" go ","command":" gopls ","args":[" serve ",""],"dir":" /tmp "},
+		{"name":"rs","command":"rust-analyzer","languageId":" rust "}
+	]`)
+	if err != nil {
+		t.Fatalf("Parse list: %v", err)
+	}
+	if len(servers) != 2 || servers[0].Name != "go" || servers[0].Command != "gopls" ||
+		len(servers[0].Args) != 1 || servers[0].Args[0] != "serve" ||
+		servers[1].Name != "rs" || servers[1].LanguageID != "rust" {
+		t.Fatalf("parsed list = %+v", servers)
+	}
+
+	for _, raw := range []string{
+		`[{"command":"gopls"}]`,                                   // name missing
+		`[{"name":"a","command":" "}]`,                            // command missing
+		`[{"name":"a","command":"x"},{"name":"A","command":"y"}]`, // duplicate name
+		`{bad-json`, // bad JSON
+	} {
+		if _, err := contracts.ParseLSPServerConfigList(raw); err == nil {
+			t.Fatalf("Parse list(%q) succeeded, want error", raw)
+		}
+	}
+}
+
+func TestEncodeLSPServerConfigListRoundTrip(t *testing.T) {
+	encoded, err := contracts.EncodeLSPServerConfigList([]contracts.LSPServerConfig{
+		{Name: " go ", Command: " gopls ", Args: []string{" serve ", ""}},
+	})
+	if err != nil {
+		t.Fatalf("Encode list: %v", err)
+	}
+	servers, err := contracts.ParseLSPServerConfigList(encoded)
+	if err != nil || len(servers) != 1 || servers[0].Name != "go" || servers[0].Command != "gopls" ||
+		len(servers[0].Args) != 1 || servers[0].Args[0] != "serve" {
+		t.Fatalf("round trip = %+v, %v", servers, err)
+	}
+	if empty, err := contracts.EncodeLSPServerConfigList(nil); err != nil || empty != "[]" {
+		t.Fatalf("Encode nil = %q, %v; want []", empty, err)
+	}
+}
+
+func TestResolveLSPServerConfigsLegacyFallback(t *testing.T) {
+	if servers, err := contracts.ResolveLSPServerConfigs("", ""); err != nil || len(servers) != 0 {
+		t.Fatalf("empty resolve = %+v, %v", servers, err)
+	}
+	legacy, err := contracts.ResolveLSPServerConfigs("", `{"command":"gopls"}`)
+	if err != nil || len(legacy) != 1 || legacy[0].Name != "default" || legacy[0].Command != "gopls" {
+		t.Fatalf("legacy fallback = %+v, %v", legacy, err)
+	}
+	list, err := contracts.ResolveLSPServerConfigs(
+		`[{"name":"go","command":"gopls"}]`, `{"command":"legacy"}`)
+	if err != nil || len(list) != 1 || list[0].Name != "go" {
+		t.Fatalf("list should win = %+v, %v", list, err)
+	}
+	if _, err := contracts.ResolveLSPServerConfigs("{bad", ""); err == nil {
+		t.Fatal("bad servers list resolved without error")
+	}
+}
+
+func TestActiveLSPServerSelection(t *testing.T) {
+	servers := []contracts.LSPServerConfig{
+		{Name: "go", Command: "gopls"},
+		{Name: "rs", Command: "rust-analyzer"},
+	}
+	if got, ok := contracts.ActiveLSPServer(servers, ""); !ok || got.Name != "go" {
+		t.Fatalf("empty active = %+v, %v", got, ok)
+	}
+	if got, ok := contracts.ActiveLSPServer(servers, "rs"); !ok || got.Name != "rs" {
+		t.Fatalf("explicit active = %+v, %v", got, ok)
+	}
+	if got, ok := contracts.ActiveLSPServer(servers, "missing"); !ok || got.Name != "go" {
+		t.Fatalf("unknown active = %+v, %v", got, ok)
+	}
+}
+
+func TestToolkitStartsOnlyActiveServer(t *testing.T) {
+	session := &fakeLSPSession{tools: []rig.Tool{fakeLSPTool{name: "lsp_hover"}}}
+	var captured lsp.Config
+	withLSPStart(t, func(_ context.Context, cfg lsp.Config) (lspSession, error) {
+		captured = cfg
+		return session, nil
+	})
+	settings := newLSPMultiSettings(map[string]string{
+		contracts.SettingLSPServers: `[{"name":"go","command":"gopls"},{"name":"rs","command":"rust-analyzer","args":["serve"]}]`,
+		contracts.SettingLSPActive:  "rs",
+	})
+	root, loader, logger := loadToolkit(t, settings, true)
+	defer func() { _ = loader.Close() }()
+
+	if captured.Command != "rust-analyzer" || len(captured.Args) != 1 || captured.Args[0] != "serve" {
+		t.Fatalf("started LSP config = %+v, want the active rs server", captured)
+	}
+	if !lspToolNames(t, root)["lsp_hover"] {
+		t.Fatalf("active server tools were not registered: %v", lspToolNames(t, root))
+	}
+	if !logger.contains("rust-analyzer") || !logger.contains("2 configured") {
+		t.Fatalf("activation log = %v", logger.lines)
+	}
+}
+
+func TestToolkitLSPActiveMissingUsesFirstServer(t *testing.T) {
+	var captured lsp.Config
+	withLSPStart(t, func(_ context.Context, cfg lsp.Config) (lspSession, error) {
+		captured = cfg
+		return &fakeLSPSession{tools: []rig.Tool{fakeLSPTool{name: "lsp_hover"}}}, nil
+	})
+	settings := newLSPMultiSettings(map[string]string{
+		contracts.SettingLSPServers: `[{"name":"go","command":"gopls"},{"name":"rs","command":"rust-analyzer"}]`,
+		contracts.SettingLSPActive:  "unknown",
+	})
+	_, loader, _ := loadToolkit(t, settings, true)
+	defer func() { _ = loader.Close() }()
+	if captured.Command != "gopls" {
+		t.Fatalf("unknown active started %q, want the first server", captured.Command)
+	}
+}
+
+func TestToolkitLSPLegacySingleServerStillStarts(t *testing.T) {
+	var captured lsp.Config
+	withLSPStart(t, func(_ context.Context, cfg lsp.Config) (lspSession, error) {
+		captured = cfg
+		return &fakeLSPSession{tools: []rig.Tool{fakeLSPTool{name: "lsp_hover"}}}, nil
+	})
+	settings := newLSPMultiSettings(map[string]string{
+		contracts.SettingLSPServer: `{"command":"gopls"}`,
+	})
+	_, loader, logger := loadToolkit(t, settings, true)
+	defer func() { _ = loader.Close() }()
+	if captured.Command != "gopls" {
+		t.Fatalf("legacy server started %q, want gopls", captured.Command)
+	}
+	if !logger.contains("default") {
+		t.Fatalf("legacy fallback log = %v", logger.lines)
+	}
+}
+
+func TestToolkitLSPBadServerListSkips(t *testing.T) {
+	called := atomic.Bool{}
+	withLSPStart(t, func(context.Context, lsp.Config) (lspSession, error) {
+		called.Store(true)
+		return &fakeLSPSession{}, nil
+	})
+	settings := newLSPMultiSettings(map[string]string{
+		contracts.SettingLSPServers: "{bad-json",
+		contracts.SettingLSPServer:  `{"command":"gopls"}`,
+	})
+	root, loader, logger := loadToolkit(t, settings, true)
+	defer func() { _ = loader.Close() }()
+	if called.Load() {
+		t.Fatal("bad servers list still started a server")
+	}
+	if names := lspToolNames(t, root); names["lsp_hover"] {
+		t.Fatalf("bad servers list registered tools: %v", names)
+	}
+	if !logger.contains("lsp") {
+		t.Fatalf("bad servers list did not warn: %v", logger.lines)
+	}
+}

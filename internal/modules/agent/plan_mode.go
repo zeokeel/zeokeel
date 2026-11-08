@@ -110,10 +110,24 @@ func (s *service) agentModePlan() bool {
 		contracts.AgentModePlan)
 }
 
-// gate builds the tool approval gate. Plan mode is checked on every call and
-// bypasses approvals for the read-only whitelist; otherwise the approvals
-// service's policy applies (or a permissive gate when none is wired).
-func (s *service) gate() rig.Gate {
+// workspaceReadOnlyTools are the tools a per-session "workspace" permission
+// override auto-allows; other tools fall through to the approvals service.
+var workspaceReadOnlyTools = map[string]bool{
+	"read_file": true,
+	"list_dir":  true,
+	"glob":      true,
+	"grep":      true,
+}
+
+// gate builds the tool approval gate for one session. Plan and chat modes are
+// checked on every call (highest priority); then an optional per-session
+// permission override applies (full allows, never denies, workspace allows the
+// read-only tools); otherwise the approvals service's global policy applies.
+func (s *service) gate(sessionIDs ...string) rig.Gate {
+	sessionID := ""
+	if len(sessionIDs) > 0 {
+		sessionID = strings.TrimSpace(sessionIDs[0])
+	}
 	return gate.Func(func(ctx context.Context, tool rig.Tool, call rig.ToolCall) (rig.Decision, error) {
 		name := call.Name
 		if tool != nil && strings.TrimSpace(tool.Name()) != "" {
@@ -136,6 +150,18 @@ func (s *service) gate() rig.Gate {
 				return rig.DecisionAllow, nil
 			}
 			return rig.DecisionDeny, nil
+		}
+		if override := s.sessionPermission(sessionID); override != "" {
+			switch override {
+			case contracts.PermissionFull:
+				return rig.DecisionAllow, nil
+			case contracts.PermissionNever:
+				return rig.DecisionDeny, nil
+			case contracts.PermissionWorkspace:
+				if workspaceReadOnlyTools[name] {
+					return rig.DecisionAllow, nil
+				}
+			}
 		}
 		if s.approvals == nil {
 			return rig.DecisionAllow, nil

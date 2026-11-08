@@ -21,6 +21,15 @@
 - 右侧栏「文件」Tab：打开文件夹（mygo 原生 Directory picker）、目录进入/面包屑、文本/Markdown/图片预览、
   刷新与错误状态；E2E 覆盖工作区创建 + 列表 + 预览帧
 
+**Round 60 / P0：四项深度限制收口（2026-11-08）**
+- automation：任务 WorkspaceID/Permission 字段 + 运行前切换（SessionWorkspaceSwitcher/SessionPermissionSwitcher，gate 优先级
+  plan>chat mode>session override>全局）+ UI 选择/徽章；agent 100 / automation 31 / UI 30 测试
+- LSP 多服务器：lsp.servers 列表 + lsp.active 选择 + 旧 lsp.server 回退，settings 页增删/激活；toolkit 57 / settings 199 测试
+  （workspace 配置 opt-in 仍待做，row 保持 🟡）
+- ACP：tool_call/tool_call_update 流式更新（in_progress/completed/failed、4KiB 截断、历史不重放）；acp 20 测试
+- gap-audit：docs/coverage-gaps-worklist.md（13 项现状/方案/风险/5 个工作包）
+- COVERAGE：automation/acp/skills 升 ✅ → **✅51 / 🟡10 / ❌1**
+
 **Round 59 覆盖收口（2026-11-08）**
 - COVERAGE 矩阵按当前事实修订（acp list/load、runtime 模式与目标续跑、tools lsp/全工具开关、store 语义映射、app 平台非目标、
   prompt AGENTS、skills 页 CRUD、artifacts 下载等）→ **✅48 / 🟡13 / ❌1**

@@ -120,17 +120,19 @@ func validateConfig(cfg Config) error {
 
 // taskRecord is one task in the JSON registry.
 type taskRecord struct {
-	ID        string    `json:"id"`
-	Name      string    `json:"name"`
-	Prompt    string    `json:"prompt"`
-	Schedule  string    `json:"schedule"`
-	Model     string    `json:"model,omitempty"`
-	Enabled   bool      `json:"enabled"`
-	CreatedAt time.Time `json:"createdAt"`
-	UpdatedAt time.Time `json:"updatedAt"`
-	LastRun   time.Time `json:"lastRun"`
-	NextRun   time.Time `json:"nextRun"`
-	LastError string    `json:"lastError"`
+	ID          string    `json:"id"`
+	Name        string    `json:"name"`
+	Prompt      string    `json:"prompt"`
+	Schedule    string    `json:"schedule"`
+	Model       string    `json:"model,omitempty"`
+	WorkspaceID string    `json:"workspaceId,omitempty"`
+	Permission  string    `json:"permission,omitempty"`
+	Enabled     bool      `json:"enabled"`
+	CreatedAt   time.Time `json:"createdAt"`
+	UpdatedAt   time.Time `json:"updatedAt"`
+	LastRun     time.Time `json:"lastRun"`
+	NextRun     time.Time `json:"nextRun"`
+	LastError   string    `json:"lastError"`
 
 	// RunHistory is the persisted recent-run list (newest first).
 	RunHistory []contracts.AutomationRunRecord `json:"runHistory,omitempty"`
@@ -244,18 +246,20 @@ func (s *service) load() error {
 			continue
 		}
 		tasks = append(tasks, contracts.AutomationTask{
-			ID:         record.ID,
-			Name:       record.Name,
-			Prompt:     record.Prompt,
-			Schedule:   record.Schedule,
-			Enabled:    record.Enabled,
-			Model:      strings.TrimSpace(record.Model),
-			CreatedAt:  record.CreatedAt.UTC(),
-			UpdatedAt:  record.UpdatedAt.UTC(),
-			LastRun:    record.LastRun.UTC(),
-			NextRun:    record.NextRun.UTC(),
-			LastError:  record.LastError,
-			RunHistory: append([]contracts.AutomationRunRecord(nil), record.RunHistory...),
+			ID:          record.ID,
+			Name:        record.Name,
+			Prompt:      record.Prompt,
+			Schedule:    record.Schedule,
+			Enabled:     record.Enabled,
+			Model:       strings.TrimSpace(record.Model),
+			WorkspaceID: strings.TrimSpace(record.WorkspaceID),
+			Permission:  strings.TrimSpace(record.Permission),
+			CreatedAt:   record.CreatedAt.UTC(),
+			UpdatedAt:   record.UpdatedAt.UTC(),
+			LastRun:     record.LastRun.UTC(),
+			NextRun:     record.NextRun.UTC(),
+			LastError:   record.LastError,
+			RunHistory:  append([]contracts.AutomationRunRecord(nil), record.RunHistory...),
 		})
 	}
 	s.tasks = tasks
@@ -272,18 +276,20 @@ func (s *service) persistLocked() error {
 	document := registryDocument{Tasks: make([]taskRecord, 0, len(s.tasks))}
 	for _, task := range s.tasks {
 		document.Tasks = append(document.Tasks, taskRecord{
-			ID:         task.ID,
-			Name:       task.Name,
-			Prompt:     task.Prompt,
-			Schedule:   task.Schedule,
-			Enabled:    task.Enabled,
-			Model:      task.Model,
-			CreatedAt:  task.CreatedAt.UTC(),
-			UpdatedAt:  task.UpdatedAt.UTC(),
-			LastRun:    task.LastRun.UTC(),
-			NextRun:    task.NextRun.UTC(),
-			LastError:  task.LastError,
-			RunHistory: append([]contracts.AutomationRunRecord(nil), task.RunHistory...),
+			ID:          task.ID,
+			Name:        task.Name,
+			Prompt:      task.Prompt,
+			Schedule:    task.Schedule,
+			Enabled:     task.Enabled,
+			Model:       task.Model,
+			WorkspaceID: task.WorkspaceID,
+			Permission:  task.Permission,
+			CreatedAt:   task.CreatedAt.UTC(),
+			UpdatedAt:   task.UpdatedAt.UTC(),
+			LastRun:     task.LastRun.UTC(),
+			NextRun:     task.NextRun.UTC(),
+			LastError:   task.LastError,
+			RunHistory:  append([]contracts.AutomationRunRecord(nil), task.RunHistory...),
 		})
 	}
 	data, err := json.MarshalIndent(document, "", "  ")
@@ -415,15 +421,17 @@ func (s *service) Create(ctx context.Context, task contracts.AutomationTask) (co
 		nextRun = next
 	}
 	created := contracts.AutomationTask{
-		ID:        id,
-		Name:      name,
-		Prompt:    task.Prompt,
-		Schedule:  schedule,
-		Enabled:   task.Enabled,
-		Model:     strings.TrimSpace(task.Model),
-		CreatedAt: now,
-		UpdatedAt: now,
-		NextRun:   nextRun,
+		ID:          id,
+		Name:        name,
+		Prompt:      task.Prompt,
+		Schedule:    schedule,
+		Enabled:     task.Enabled,
+		Model:       strings.TrimSpace(task.Model),
+		WorkspaceID: strings.TrimSpace(task.WorkspaceID),
+		Permission:  strings.TrimSpace(task.Permission),
+		CreatedAt:   now,
+		UpdatedAt:   now,
+		NextRun:     nextRun,
 	}
 	previous := append([]contracts.AutomationTask(nil), s.tasks...)
 	s.tasks = append(s.tasks, created)
@@ -473,6 +481,8 @@ func (s *service) Update(ctx context.Context, task contracts.AutomationTask) (co
 	updated.Prompt = task.Prompt
 	updated.Schedule = schedule
 	updated.Model = strings.TrimSpace(task.Model)
+	updated.WorkspaceID = strings.TrimSpace(task.WorkspaceID)
+	updated.Permission = strings.TrimSpace(task.Permission)
 	updated.Enabled = task.Enabled
 	updated.NextRun = nextRun
 	updated.UpdatedAt = now
@@ -668,6 +678,25 @@ func (s *service) runTask(task contracts.AutomationTask) (string, error) {
 	if err != nil {
 		s.logger.Printf("%s: run %s: create chat session: %v", ModuleID, task.ID, err)
 		return "", fmt.Errorf("create chat session: %w", err)
+	}
+	if workspaceID := strings.TrimSpace(task.WorkspaceID); workspaceID != "" {
+		if switcher, ok := s.chat.(contracts.SessionWorkspaceSwitcher); ok {
+			if err := switcher.SetSessionWorkspace(sessionID, workspaceID); err != nil {
+				// The workspace binding is best effort: warn and still run.
+				s.logger.Printf("%s: run %s: set session workspace %q: %v", ModuleID, task.ID, workspaceID, err)
+			}
+		} else {
+			s.logger.Printf("%s: run %s: chat service lacks session workspace switching; using the current workspace", ModuleID, task.ID)
+		}
+	}
+	if permission := strings.TrimSpace(task.Permission); permission != "" {
+		if switcher, ok := s.chat.(contracts.SessionPermissionSwitcher); ok {
+			if err := switcher.SetSessionPermission(sessionID, permission); err != nil {
+				s.logger.Printf("%s: run %s: set session permission %q: %v", ModuleID, task.ID, permission, err)
+			}
+		} else {
+			s.logger.Printf("%s: run %s: chat service lacks session permission switching; using the global permission", ModuleID, task.ID)
+		}
 	}
 	if model := strings.TrimSpace(task.Model); model != "" {
 		if switcher, ok := s.chat.(contracts.SessionModelSwitcher); ok {

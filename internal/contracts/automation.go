@@ -32,6 +32,24 @@ type AutomationTask struct {
 	// Model optionally overrides the chat model for this task's runs ("" keeps
 	// the session default).
 	Model string `json:"model,omitempty"`
+	// WorkspaceID optionally binds each run's fresh session to a workspace
+	// ("" keeps the current workspace behavior).
+	WorkspaceID string `json:"workspaceId,omitempty"`
+	// Permission optionally overrides the run session's permission mode
+	// (ask/workspace/full/never; "" keeps the global setting).
+	Permission string `json:"permission,omitempty"`
+}
+
+// SessionWorkspaceSwitcher is the optional chat half that moves one session to
+// a workspace (the automation module applies task.WorkspaceID through it).
+type SessionWorkspaceSwitcher interface {
+	SetSessionWorkspace(sessionID, workspaceID string) error
+}
+
+// SessionPermissionSwitcher is the optional chat half that overrides one
+// session's permission mode (ask/workspace/full/never).
+type SessionPermissionSwitcher interface {
+	SetSessionPermission(sessionID, mode string) error
 }
 
 // Automation run statuses.

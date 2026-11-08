@@ -86,3 +86,98 @@ func trimStrings(values []string) []string {
 	}
 	return out
 }
+
+// SettingLSPServers stores the multi-server LSP configuration as a JSON array
+// of LSPServerConfig (name required, unique). SettingLSPActive names the active
+// server; when empty/unknown the first configured server is used.
+const (
+	SettingLSPServers = "lsp.servers"
+	SettingLSPActive  = "lsp.active"
+)
+
+// ParseLSPServerConfigList decodes the lsp.servers settings row. An empty value
+// returns nil without error; every entry requires a command and a unique name.
+func ParseLSPServerConfigList(raw string) ([]LSPServerConfig, error) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return nil, nil
+	}
+	var rows []LSPServerConfig
+	if err := json.Unmarshal([]byte(raw), &rows); err != nil {
+		return nil, fmt.Errorf("%s: parse: %w", SettingLSPServers, err)
+	}
+	servers := make([]LSPServerConfig, 0, len(rows))
+	seen := make(map[string]bool, len(rows))
+	for index, cfg := range rows {
+		cfg.normalize()
+		if cfg.Command == "" {
+			return nil, fmt.Errorf("%s: servers[%d]: command is required", SettingLSPServers, index)
+		}
+		if cfg.Name == "" {
+			return nil, fmt.Errorf("%s: servers[%d]: name is required", SettingLSPServers, index)
+		}
+		key := strings.ToLower(cfg.Name)
+		if seen[key] {
+			return nil, fmt.Errorf("%s: servers[%d]: duplicate name %q", SettingLSPServers, index, cfg.Name)
+		}
+		seen[key] = true
+		servers = append(servers, cfg)
+	}
+	return servers, nil
+}
+
+// EncodeLSPServerConfigList renders the lsp.servers settings row, normalizing
+// every entry exactly like ParseLSPServerConfig does.
+func EncodeLSPServerConfigList(servers []LSPServerConfig) (string, error) {
+	normalized := make([]LSPServerConfig, len(servers))
+	for index, cfg := range servers {
+		cfg.normalize()
+		normalized[index] = cfg
+	}
+	encoded, err := json.Marshal(normalized)
+	if err != nil {
+		return "", fmt.Errorf("%s: encode: %w", SettingLSPServers, err)
+	}
+	return string(encoded), nil
+}
+
+// ResolveLSPServerConfigs merges the multi-server list with the legacy single
+// lsp.server row: a non-empty list wins; otherwise a configured legacy server
+// becomes the single "default" entry (empty/absent means LSP disabled).
+func ResolveLSPServerConfigs(serversRaw, legacyRaw string) ([]LSPServerConfig, error) {
+	servers, err := ParseLSPServerConfigList(serversRaw)
+	if err != nil {
+		return nil, err
+	}
+	if len(servers) > 0 {
+		return servers, nil
+	}
+	legacy, err := ParseLSPServerConfig(legacyRaw)
+	if err != nil {
+		return nil, err
+	}
+	if legacy.Command == "" {
+		return nil, nil
+	}
+	if legacy.Name == "" {
+		legacy.Name = "default"
+	}
+	return []LSPServerConfig{legacy}, nil
+}
+
+// ActiveLSPServer returns the config named by active, falling back to the first
+// configured server when the name is empty or unknown.
+func ActiveLSPServer(servers []LSPServerConfig, active string) (LSPServerConfig, bool) {
+	if len(servers) == 0 {
+		return LSPServerConfig{}, false
+	}
+	name := strings.TrimSpace(active)
+	if name != "" {
+		for _, cfg := range servers {
+			if strings.EqualFold(cfg.Name, name) {
+				return cfg, true
+			}
+		}
+	}
+	return servers[0], true
+}

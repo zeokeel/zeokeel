@@ -56,13 +56,16 @@ type state struct {
 	// locale localizes the screen copy per frame (zh is the default).
 	locale contracts.LocaleService
 
-	formOpen     bool
-	formName     string
-	formPrompt   string
-	formModel    string
-	formSchedule string
-	formEnabled  bool
-	formErr      string
+	formOpen          bool
+	formName          string
+	formPrompt        string
+	formModel         string
+	formSchedule      string
+	formWorkspaceID   string
+	formWorkspaceName string
+	formPermission    string
+	formEnabled       bool
+	formErr           string
 
 	deleteOpen   bool
 	deleteTarget string

@@ -183,6 +183,14 @@ func buildTaskCard(c *ui.Context, t *design.Tokens, service contracts.Automation
 			design.Apply(ui.Badge(c, st.tr("模型：", "Model: ")+model), t.Badge()).
 				TextColor(t.LabelSecondary)
 		}
+		if workspaceID := strings.TrimSpace(task.WorkspaceID); workspaceID != "" {
+			design.Apply(ui.Badge(c, st.tr("工作区：", "Workspace: ")+workspaceID), t.Badge()).
+				TextColor(t.LabelSecondary)
+		}
+		if permission := strings.TrimSpace(task.Permission); permission != "" {
+			design.Apply(ui.Badge(c, st.tr("权限：", "Permission: ")+automationPermissionLabel(st, permission)),
+				t.Badge()).TextColor(t.LabelSecondary)
+		}
 		ui.Row(c).FillWidth().Gap(design.Space3).Children(func() {
 			design.Apply(ui.Text(c, st.tr("下次运行：", "Next run: ")+formatTaskTime(task.NextRun)), t.Font(design.TypeXXS)).
 				TextColor(t.LabelTertiary)
@@ -285,8 +293,12 @@ func buildCreateForm(c *ui.Context, t *design.Tokens, service contracts.Automati
 			Placeholder(st.tr("例如：每日依赖巡检", "For example: daily dependency check")).FillWidth()
 		ui.TextArea(c, &st.formPrompt).Label(st.tr("任务提示词", "Task prompt")).
 			Placeholder(st.tr("任务触发时发给 agent 的提示词", "Prompt sent to the agent when the task runs")).FillWidth().MinHeight(design.Space6 * 4)
-		ui.TextInput(c, &st.formModel).Label(st.tr("模型", "Model")).
-			Placeholder(st.tr("默认模型", "Default model")).FillWidth()
+		ui.Row(c).FillWidth().AlignItems(ui.End).Gap(design.Space3).Children(func() {
+			ui.TextInput(c, &st.formModel).Label(st.tr("模型", "Model")).
+				Placeholder(st.tr("默认模型", "Default model")).Grow(2)
+			buildWorkspaceSelector(c, st)
+			buildPermissionSelector(c, st)
+		})
 		ui.TextInput(c, &st.formSchedule).Label(st.tr("运行计划", "Schedule")).
 			Placeholder("*/5 * * * * 或 every 60s").FillWidth()
 		design.Apply(ui.Text(c, st.tr(
@@ -305,11 +317,13 @@ func buildCreateForm(c *ui.Context, t *design.Tokens, service contracts.Automati
 			save := design.Apply(ui.PrimaryButton(c, st.tr("保存", "Save")), t.PrimaryButton()).Disabled(!valid)
 			if save.Clicked() && valid {
 				_, err := service.Create(context.Background(), contracts.AutomationTask{
-					Name:     name,
-					Prompt:   prompt,
-					Model:    strings.TrimSpace(st.formModel),
-					Schedule: schedule,
-					Enabled:  st.formEnabled,
+					Name:        name,
+					Prompt:      prompt,
+					Model:       strings.TrimSpace(st.formModel),
+					Schedule:    schedule,
+					WorkspaceID: strings.TrimSpace(st.formWorkspaceID),
+					Permission:  strings.TrimSpace(st.formPermission),
+					Enabled:     st.formEnabled,
 				})
 				if err != nil {
 					st.formErr = st.tr("创建任务失败：", "Failed to create task: ") + err.Error()
@@ -319,6 +333,9 @@ func buildCreateForm(c *ui.Context, t *design.Tokens, service contracts.Automati
 					st.formPrompt = ""
 					st.formModel = ""
 					st.formSchedule = ""
+					st.formWorkspaceID = ""
+					st.formWorkspaceName = ""
+					st.formPermission = ""
 					st.formEnabled = true
 					st.formErr = ""
 				}
@@ -329,6 +346,92 @@ func buildCreateForm(c *ui.Context, t *design.Tokens, service contracts.Automati
 			buildAutomationError(c, t, st.formErr)
 		}
 	})
+}
+
+// automationPermissionChoice is one permission option in the task form and
+// cards.
+type automationPermissionChoice struct {
+	value string
+	zh    string
+	en    string
+}
+
+var automationPermissions = []automationPermissionChoice{
+	{value: contracts.PermissionAsk, zh: "询问", en: "Ask"},
+	{value: contracts.PermissionWorkspace, zh: "工作区", en: "Workspace"},
+	{value: contracts.PermissionFull, zh: "全部", en: "Full access"},
+	{value: contracts.PermissionNever, zh: "从不", en: "Never"},
+}
+
+// automationPermissionLabel renders one permission value (unknown values show
+// their raw value).
+func automationPermissionLabel(st *state, value string) string {
+	for _, choice := range automationPermissions {
+		if choice.value == value {
+			return st.tr(choice.zh, choice.en)
+		}
+	}
+	return value
+}
+
+// buildWorkspaceSelector renders the optional workspace popover; an empty
+// selection means "use the current workspace" (WorkspaceID stays empty).
+func buildWorkspaceSelector(c *ui.Context, st *state) {
+	label := st.tr("工作区：当前工作区", "Workspace: Current workspace")
+	if id := strings.TrimSpace(st.formWorkspaceID); id != "" {
+		name := firstNonEmpty(st.formWorkspaceName, id)
+		label = st.tr("工作区：", "Workspace: ") + name
+	}
+	ui.PopoverMenuButton(c, label, func(m *ui.Menu) {
+		current := m.Item(st.tr("当前工作区", "Current workspace"))
+		current.Checked(strings.TrimSpace(st.formWorkspaceID) == "")
+		if current.Chosen() {
+			st.formWorkspaceID = ""
+			st.formWorkspaceName = ""
+		}
+		service, ok := st.ctx.Get(contracts.KeyWorkspace)
+		if !ok || service == nil {
+			return
+		}
+		workspaces, err := service.List(context.Background())
+		if err != nil {
+			return
+		}
+		for _, workspace := range workspaces {
+			workspace := workspace
+			name := firstNonEmpty(workspace.Name, workspace.ID)
+			item := m.Item(name)
+			item.Checked(workspace.ID == strings.TrimSpace(st.formWorkspaceID))
+			if item.Chosen() {
+				st.formWorkspaceID = workspace.ID
+				st.formWorkspaceName = name
+			}
+		}
+	}).Tooltip(st.tr("选择任务运行的工作区", "Choose the workspace the task runs in"))
+}
+
+// buildPermissionSelector renders the optional per-task permission override;
+// an empty selection keeps the global approval setting.
+func buildPermissionSelector(c *ui.Context, st *state) {
+	label := st.tr("权限：默认全局", "Permission: Global default")
+	if permission := strings.TrimSpace(st.formPermission); permission != "" {
+		label = st.tr("权限：", "Permission: ") + automationPermissionLabel(st, permission)
+	}
+	ui.PopoverMenuButton(c, label, func(m *ui.Menu) {
+		global := m.Item(st.tr("默认全局", "Global default"))
+		global.Checked(strings.TrimSpace(st.formPermission) == "")
+		if global.Chosen() {
+			st.formPermission = ""
+		}
+		for _, choice := range automationPermissions {
+			choice := choice
+			item := m.Item(st.tr(choice.zh, choice.en))
+			item.Checked(choice.value == strings.TrimSpace(st.formPermission))
+			if item.Chosen() {
+				st.formPermission = choice.value
+			}
+		}
+	}).Tooltip(st.tr("选择任务会话的权限模式", "Choose the task session's permission mode"))
 }
 
 // buildDeleteDialog is the native delete confirmation for one task.

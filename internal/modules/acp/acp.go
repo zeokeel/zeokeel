@@ -488,9 +488,17 @@ func (s *service) handlePrompt(ctx context.Context, writer *frameWriter, req req
 	s.cancelRequested[sessionID] = false
 	s.mu.Unlock()
 
-	state := &promptState{signal: make(chan struct{})}
+	state := &promptState{
+		signal:     make(chan struct{}),
+		toolStates: map[string]string{},
+		toolIDs:    map[string]string{},
+	}
 	if snapshot, ok := s.chat.Session(sessionID); ok {
 		state.lastText = assistantText(snapshot)
+		state.seedToolState(snapshot)
+	}
+	emitTool := func(event toolEvent) {
+		s.writeToolEvent(writer, sessionID, event)
 	}
 	unsubscribe, err := s.chat.Subscribe(func(changedSession string) {
 		if changedSession != sessionID {
@@ -508,7 +516,7 @@ func (s *service) handlePrompt(ctx context.Context, writer *frameWriter, req req
 					"content":       map[string]any{"type": "text", "text": delta},
 				},
 			})
-		})
+		}, emitTool)
 	})
 	if err != nil {
 		writer.writeError(req.ID, internalError("session/prompt: subscribe: "+err.Error()))
@@ -529,7 +537,7 @@ func (s *service) handlePrompt(ctx context.Context, writer *frameWriter, req req
 					"content":       map[string]any{"type": "text", "text": delta},
 				},
 			})
-		})
+		}, emitTool)
 	}
 	var timeout <-chan time.Time
 	if s.timeout > 0 {
@@ -563,11 +571,19 @@ type promptState struct {
 	lastText string
 	finished bool
 	signal   chan struct{}
+
+	// Tool-call streaming state: the last status per tool call (keyed by the
+	// stable id or read-model position), the emitted id for empty ids and the
+	// generated-id counter.
+	toolStates map[string]string
+	toolIDs    map[string]string
+	generated  int
 }
 
-// process emits the new assistant text delta and closes signal when the
-// session is no longer running.
-func (state *promptState) process(snapshot contracts.ChatSession, emit func(string)) {
+// process emits the new assistant text delta and the new/changed tool-call
+// events of one snapshot, then closes signal when the session is no longer
+// running. Events are emitted in snapshot order: text first, then tools.
+func (state *promptState) process(snapshot contracts.ChatSession, emitText func(string), emitTool func(toolEvent)) {
 	state.mu.Lock()
 	if state.finished {
 		state.mu.Unlock()
@@ -579,10 +595,16 @@ func (state *promptState) process(snapshot contracts.ChatSession, emit func(stri
 		delta = text[len(state.lastText):]
 		state.lastText = text
 	}
+	toolEvents := state.observeToolEventsLocked(snapshot)
 	running := snapshot.Running
 	state.mu.Unlock()
 	if delta != "" {
-		emit(delta)
+		emitText(delta)
+	}
+	if emitTool != nil {
+		for _, event := range toolEvents {
+			emitTool(event)
+		}
 	}
 	if running {
 		return
