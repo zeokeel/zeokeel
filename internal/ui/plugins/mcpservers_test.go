@@ -21,17 +21,15 @@ func TestMCPServerSwitchDisablesAndEnables(t *testing.T) {
 	tester := h.tester()
 	h.assertTexts(tester, "srv", "详情")
 
-	// The server toggle lives in the expanded details.
-	h.click(tester, "详情")
-	h.assertTexts(tester, "启用", "已连接")
-	h.click(tester, "启用")
+	// The server's switch lives on its row, visible without expanding details.
+	h.click(tester, "启用服务器 srv")
 	if got := store.get(contracts.SettingMCPDisabledServers); got != `["srv"]` {
 		t.Fatalf("%s = %q, want [%q]", contracts.SettingMCPDisabledServers, got, "srv")
 	}
 	h.assertTexts(tester, "已停用（重启生效）", "已保存")
 
 	// Enabling removes it again.
-	h.click(tester, "启用")
+	h.click(tester, "启用服务器 srv")
 	if got := store.get(contracts.SettingMCPDisabledServers); got != "[]" {
 		t.Fatalf("%s after enable = %q, want []", contracts.SettingMCPDisabledServers, got)
 	}
@@ -52,7 +50,7 @@ func TestMCPServerRestoredFromSettingsWhenDisabled(t *testing.T) {
 
 	h.click(tester, "详情")
 	h.assertTexts(tester, "http://127.0.0.1:9/mcp")
-	h.click(tester, "启用")
+	h.click(tester, "启用服务器 srv")
 	if got := store.get(contracts.SettingMCPDisabledServers); got != "[]" {
 		t.Fatalf("%s after restore/enable = %q, want []", contracts.SettingMCPDisabledServers, got)
 	}
@@ -81,10 +79,8 @@ func TestMCPServerSwitchCaseInsensitiveAndSorted(t *testing.T) {
 	tester := h.tester()
 	h.assertTexts(tester, "已停用（重启生效）")
 
-	h.click(tester, "详情")
-	h.assertTexts(tester, "已停用（重启生效）")
 	// Enabling "a" (stored as "a") removes only the case-insensitive match.
-	h.click(tester, "启用")
+	h.click(tester, "启用服务器 a")
 	if got := store.get(contracts.SettingMCPDisabledServers); got != `["B"]` {
 		t.Fatalf("%s after enable a = %q, want [\"B\"]", contracts.SettingMCPDisabledServers, got)
 	}
@@ -96,8 +92,7 @@ func TestMCPServerSwitchFailureRollsBack(t *testing.T) {
 	service := &fakePlugins{mcp: []contracts.MCPPlugin{{Name: "srv", Status: "已连接"}}}
 	h := newHarnessWithSettings(t, service, nil, plugins.Config{}, store)
 	tester := h.tester()
-	h.click(tester, "详情")
-	h.click(tester, "启用")
+	h.click(tester, "启用服务器 srv")
 	h.assertTexts(tester, "保存失败：denied")
 	h.assertNoTexts(tester, "已停用（重启生效）")
 }
@@ -112,9 +107,7 @@ func TestMCPServerSwitchEnglish(t *testing.T) {
 	h.uiRoot.Locale().SetLanguage("en")
 	tester.Frame()
 	h.assertTexts(tester, "Disabled (restart applies)")
-	h.click(tester, "Details")
-	h.assertTexts(tester, "Enabled")
-	h.click(tester, "Enabled")
+	h.click(tester, "Enable server srv")
 	if got := store.get(contracts.SettingMCPDisabledServers); got != "[]" {
 		t.Fatalf("%s after enable = %q, want []", contracts.SettingMCPDisabledServers, got)
 	}

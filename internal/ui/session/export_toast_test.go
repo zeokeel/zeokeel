@@ -21,6 +21,16 @@ type fakeSessionNotifier struct {
 	mu            sync.Mutex
 	notifications []sessionToast
 	dismissed     []string
+	// actions keeps the undo actions offered through contracts.ActionNotifier.
+	actions []notifierAction
+}
+
+// notifierAction is one undo action a toast offered.
+type notifierAction struct {
+	level  string
+	text   string
+	label  string
+	action func()
 }
 
 type sessionToast struct {
@@ -137,5 +147,6 @@ func TestExportWithoutNotifierStillWorks(t *testing.T) {
 	h.click(tester, "更多")
 	h.click(tester, "导出 Markdown")
 	tester.Frame()
-	h.assertTexts(tester, "已导出")
+	// Without a notifier the export still succeeds; no resident badge appears.
+	h.assertNoTexts(tester, "已导出", "导出失败")
 }

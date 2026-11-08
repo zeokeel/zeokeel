@@ -42,6 +42,19 @@ type SettingsPageSpec struct {
 	Order   int
 	Visible func() bool
 	Build   BuildFunc
+	// Footer, when set, renders the page's pinned action row (its save/apply
+	// controls) in the host's fixed footer outside the scrolling body, so the
+	// page's primary action is visible without scrolling. The host renders it
+	// only for the selected page, on the standard 4 DIP grid, under a divider.
+	Footer BuildFunc
+	// Dirty reports whether the page holds unsaved edits; the host shows the
+	// "unsaved" state in the settings header and asks before closing. Nil means
+	// the page has no unsaved state (it applies every change immediately).
+	Dirty func() bool
+	// Discard, when set, throws the page's drafts away and re-reads the saved
+	// values. The host calls it when the user chooses "Discard" in the unsaved
+	// close guard, so the next open does not show edits the user abandoned.
+	Discard func()
 }
 
 // ToolCall is the read-only summary a tool renderer receives. The full tool
@@ -52,6 +65,9 @@ type ToolCall struct {
 	Name    string
 	Status  string
 	Summary string
+	// Arguments is the raw JSON arguments of the call (empty when the provider
+	// reported none); ACP tool notifications and diagnostics render it.
+	Arguments string
 }
 
 // ToolRenderer draws one tool call (a tool card). Several renderers may match
@@ -72,6 +88,10 @@ type CommandSpec struct {
 	Order   int
 	Enabled func() bool
 	Run     func() error
+	// Shortcut is the human-readable chord the host also binds for this
+	// command ("Cmd/Ctrl + Alt + →"), shown in the command palette. Empty when
+	// the command has no keyboard chord; the palette simply omits it.
+	Shortcut string
 }
 
 // AppInfo is the build identity provided by the appinfo module.

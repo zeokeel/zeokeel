@@ -123,10 +123,7 @@ func startMemoryPolicyPage(t *testing.T, seed []contracts.Memory, values map[str
 	h.ui.Navigator().ToggleSettings()
 	tester := h.tester(1280, 1100)
 	tester.Frame()
-	if err := tester.Click("记忆"); err != nil {
-		t.Fatalf("open memory page: %v; texts = %v", err, tester.Texts())
-	}
-	tester.Frame()
+	openSettingsPage(t, tester, 1280, 1100, "记忆")
 	return h, tester
 }
 
@@ -140,6 +137,7 @@ func TestMemoryConsolidationSettingsPage(t *testing.T) {
 		contracts.SettingMemoryMaxAgeDays: "0",
 	})
 	requireHasTexts(t, tester, "整理策略", "最大条目数 输入", "保留天数 输入", "按策略整理")
+	revealSettings(t, tester, "按策略整理")
 	if err := tester.Click("按策略整理"); err != nil {
 		t.Fatalf("consolidate: %v; texts = %v", err, tester.Texts())
 	}
@@ -153,6 +151,7 @@ func TestMemoryConsolidationSettingsPage(t *testing.T) {
 	}
 
 	// Invalid numbers normalize to 0 (unlimited) and are persisted that way.
+	revealSettings(t, tester, "最大条目数 输入")
 	if err := tester.Click("最大条目数 输入"); err != nil {
 		t.Fatalf("focus max entries: %v; texts = %v", err, tester.Texts())
 	}
@@ -160,6 +159,7 @@ func TestMemoryConsolidationSettingsPage(t *testing.T) {
 	tester.Key(ui.Cmd, ui.KeyA)
 	tester.Type("abc")
 	tester.Frame()
+	revealSettings(t, tester, "保留天数 输入")
 	if err := tester.Click("保留天数 输入"); err != nil {
 		t.Fatalf("focus max age: %v; texts = %v", err, tester.Texts())
 	}
@@ -167,6 +167,7 @@ func TestMemoryConsolidationSettingsPage(t *testing.T) {
 	tester.Key(ui.Cmd, ui.KeyA)
 	tester.Type("xyz")
 	tester.Frame()
+	revealSettings(t, tester, "按策略整理")
 	if err := tester.Click("按策略整理"); err != nil {
 		t.Fatalf("consolidate invalid: %v; texts = %v", err, tester.Texts())
 	}

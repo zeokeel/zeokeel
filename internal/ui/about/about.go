@@ -3,17 +3,20 @@
 // settings page on activation and hands its unregister function to the kernel
 // effect.
 //
-// It also demonstrates extending the settings surface itself: the header slot
-// (settings.header) shows the build identity above every settings page, which
-// the host renders without knowing which module contributed it.
+// The only settings extension it contributes is the page itself (and an
+// invisible locale-sync item): build metadata belongs on this page, not in a
+// header above every settings page.
 package about
 
 import (
+	"strings"
+
 	"github.com/egoist/mygo/ui"
 	cordis "github.com/zeokeel/zeokeel-kernel"
 	"github.com/zeokeel/zeokeel-kernel/module"
 
 	"github.com/zeokeel/zeokeel/internal/contracts"
+	"github.com/zeokeel/zeokeel/internal/design"
 	"github.com/zeokeel/zeokeel/internal/uikit"
 )
 
@@ -32,6 +35,9 @@ type aboutPage struct {
 	title      string
 	unregister func()
 	lang       string
+	// devOpen is the "development information" disclosure state (H22): the
+	// architecture notes are developer material and stay collapsed.
+	devOpen bool
 }
 
 // pageTitle resolves the page/navigation title for the current locale.
@@ -50,12 +56,12 @@ func (p *aboutPage) register() error {
 	}
 	unregister, err := p.runtime.RegisterSettingsPage(contracts.SettingsPageSpec{
 		ID:      "about",
-		Section: "general",
+		Section: "关于",
 		Title:   p.pageTitle(),
-		Order:   90,
+		Order:   900,
 		Build: func(c *ui.Context) {
 			p.sync()
-			buildAboutPage(c, p.info, p.title, p.locale)
+			buildAboutPage(c, p.info, p.title, p.locale, &p.devOpen)
 		},
 	})
 	if err != nil {
@@ -84,38 +90,55 @@ func (p *aboutPage) close() {
 	}
 }
 
-// buildAboutPage renders the localized About copy.
+// aboutValue renders one build value, replacing empty and the assembly's raw
+// "unknown" build metadata with a friendly placeholder (H22).
+func aboutValue(locale contracts.LocaleService, value string) string {
+	trimmed := strings.TrimSpace(value)
+	if trimmed == "" || strings.EqualFold(trimmed, "unknown") {
+		return uikit.T(locale, "未知", "Unknown")
+	}
+	return trimmed
+}
+
+// buildAboutPage renders the localized About copy: the version/build identity
+// for everyone, and the architecture notes folded into a "development
+// information" disclosure instead of being the page's main content (H22).
 func buildAboutPage(c *ui.Context, info contracts.AppInfo, title string,
-	locale contracts.LocaleService) {
+	locale contracts.LocaleService, devOpen *bool) {
 	heading := firstNonEmpty(title, uikit.T(locale, "关于", "About")) + " " + info.Name
-	ui.Column(c).FillWidth().Gap(14).Children(func() {
+	ui.Column(c).FillWidth().Gap(design.Space3).Children(func() {
 		uikit.PageHeader(c, heading, uikit.T(locale,
-			"所有模块编译进同一二进制，由 assembly 选择启用。",
-			"All modules are compiled into one binary and enabled by the assembly."))
+			"版本与构建信息；开发说明在下方折叠。",
+			"Version and build information; the development notes are folded below."))
 		uikit.Section(c, uikit.T(locale, "构建信息", "Build information"), func(c *ui.Context) {
 			uikit.KeyValueRows(c, []uikit.KeyValue{
-				{Key: uikit.T(locale, "名称", "Name"), Value: info.Name},
-				{Key: uikit.T(locale, "版本", "Version"), Value: info.Version},
-				{Key: uikit.T(locale, "提交", "Commit"), Value: info.Commit},
-				{Key: uikit.T(locale, "构建时间", "Build time"), Value: info.BuildTime},
-				{Key: "Go", Value: info.GoVersion},
+				{Key: uikit.T(locale, "名称", "Name"), Value: aboutValue(locale, info.Name)},
+				{Key: uikit.T(locale, "版本", "Version"), Value: aboutValue(locale, info.Version)},
+				{Key: uikit.T(locale, "提交", "Commit"), Value: aboutValue(locale, info.Commit)},
+				{Key: uikit.T(locale, "构建时间", "Build time"), Value: aboutValue(locale, info.BuildTime)},
+				{Key: "Go", Value: aboutValue(locale, info.GoVersion)},
 			})
 		})
-		uikit.Section(c, uikit.T(locale, "架构", "Architecture"), func(c *ui.Context) {
-			uikit.Bullet(c, uikit.T(locale,
-				"UI 是 mygo 原生控件，没有浏览器/webview。",
-				"The UI is built from native mygo controls; there is no browser or webview."))
-			uikit.Bullet(c, uikit.T(locale,
-				"模块通过注入点贡献界面，宿主只负责布局与帧。",
-				"Modules contribute UI through injection points; the host owns layout and frames."))
-			uikit.Bullet(c, uikit.T(locale,
-				"注册随模块激活生效，注销随 kernel effect 逆序撤销。",
-				"Registrations activate with the module and are disposed in reverse order by kernel effects."))
+		uikit.Section(c, uikit.T(locale, "开发信息", "Development information"), func(c *ui.Context) {
+			if devOpen == nil {
+				return
+			}
+			ui.Collapsible(c, uikit.T(locale, "架构说明", "Architecture notes"), devOpen, func() {
+				uikit.Bullet(c, uikit.T(locale,
+					"UI 是 mygo 原生控件，没有浏览器/webview。",
+					"The UI is built from native mygo controls; there is no browser or webview."))
+				uikit.Bullet(c, uikit.T(locale,
+					"模块通过注入点贡献界面，宿主只负责布局与帧。",
+					"Modules contribute UI through injection points; the host owns layout and frames."))
+				uikit.Bullet(c, uikit.T(locale,
+					"注册随模块激活生效，注销随 kernel effect 逆序撤销。",
+					"Registrations activate with the module and are disposed in reverse order by kernel effects."))
+			})
 		})
 	})
 }
 
-// Module registers the About settings page and the settings header item.
+// Module registers the About settings page and the locale-sync item.
 func Module() *module.Descriptor[Config] {
 	return module.Define("zeokeel-ui/about", func(ctx cordis.Context, cfg Config) error {
 		runtime, err := ctx.Require(contracts.KeyUIRuntime)
@@ -157,31 +180,13 @@ func Module() *module.Descriptor[Config] {
 			return err
 		}
 
-		// Extend the settings surface with a header item. The host renders
-		// settings.header for every settings page; about's item needs no host
-		// change.
-		return own(ctx, func() (func(), error) {
-			return runtime.RegisterSlotItem(contracts.SlotItem{
-				Slot:  contracts.SlotSettingsHeader,
-				ID:    "about.header",
-				Order: 10,
-				Build: func(c *ui.Context) {
-					page.sync()
-					ui.Row(c).Gap(8).AlignItems(ui.Center).Children(func() {
-						ui.Text(c, "ZeoKeel v"+info.Version).FontSize(13).TextColor(c.Theme().TextMuted)
-						ui.Badge(c, uikit.T(locale, "构建 ", "Build ")+info.BuildTime)
-					})
-				},
-			})
-		})
+		return nil
 	}).
 		AddRequires(module.Requires(contracts.KeyUIRuntime)).
 		AddRequires(module.Requires(contracts.KeyAppInfo)).
 		WithName("ZeoKeel About settings page")
 }
 
-// own registers one contribution and ties its unregistration to ctx's effect
-// lifetime, so activation failure and module disposal leave no residue.
 func own(ctx cordis.Context, register func() (func(), error)) error {
 	unregister, err := register()
 	if err != nil {

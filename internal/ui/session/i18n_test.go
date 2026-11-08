@@ -7,6 +7,8 @@ package session_test
 import (
 	"testing"
 
+	"github.com/egoist/mygo/ui"
+
 	"github.com/zeokeel/zeokeel/internal/contracts"
 	"github.com/zeokeel/zeokeel/internal/ui/session"
 )
@@ -26,15 +28,13 @@ func TestSessionI18nSwitchToEnglishAndBack(t *testing.T) {
 	tester := h.tester()
 
 	// Default: the existing Chinese copy is unchanged.
-	h.assertTexts(tester, "对话", "轨迹", "记忆", "更多", "输入消息…", "发送",
-		"Enter 发送 · Shift+Enter 换行", "思考")
+	h.assertTexts(tester, "对话", "轨迹", "记忆", "更多", "输入消息…", "发送", "思考")
 
 	h.ui.Locale().SetLanguage("en")
 	tester.Frame()
 	h.assertTexts(tester,
 		"Chat", "Trajectory", "Memory", "More",
-		"Ask ZeoKeel…", "Send", "Enter to send · Shift+Enter for newline",
-		"Reasoning")
+		"Ask ZeoKeel…", "Send", "Reasoning")
 
 	// The header overflow menu is translated too.
 	h.click(tester, "More")
@@ -44,10 +44,10 @@ func TestSessionI18nSwitchToEnglishAndBack(t *testing.T) {
 		t.Fatalf("clipboard = %q, want sess-1", got)
 	}
 
-	// Export status + dialog title use English copy.
+	// Export dialog title uses English copy (the success feedback is a toast).
 	h.click(tester, "More")
 	h.click(tester, "Export Markdown")
-	h.assertTexts(tester, "Exported")
+	h.assertNoTexts(tester, "导出失败", "Export failed")
 	for name, title := range map[string]string{
 		"ExportDialogTitle":      session.ExportDialogTitle,
 		"ExportJSONLDialogTitle": session.ExportJSONLDialogTitle,
@@ -62,14 +62,16 @@ func TestSessionI18nSwitchToEnglishAndBack(t *testing.T) {
 	h.assertTexts(tester, "No tool calls in this conversation yet.")
 	h.click(tester, "Memory")
 	h.assertTexts(tester, "Memory backend not enabled")
-	h.click(tester, "Chat")
+	// The tab strip keeps the focus: Home returns to the first tab (clicking
+	// the tab label is ambiguous with the page title).
+	tester.Key(0, ui.KeyHome)
+	tester.Frame()
 	h.assertTexts(tester, "Send")
 
 	// Switching back restores the Chinese copy on the next frame.
 	h.ui.Locale().SetLanguage("zh")
 	tester.Frame()
-	h.assertTexts(tester, "对话", "轨迹", "记忆", "更多", "输入消息…", "发送",
-		"Enter 发送 · Shift+Enter 换行", "思考", "已导出")
+	h.assertTexts(tester, "对话", "轨迹", "记忆", "更多", "输入消息…", "发送", "思考")
 }
 
 func TestSessionI18nEmptyHero(t *testing.T) {
@@ -108,6 +110,6 @@ func TestSessionI18nRunningAndToolStatus(t *testing.T) {
 
 	h.ui.Locale().SetLanguage("en")
 	tester.Frame()
-	h.assertTexts(tester, "Running", "Stop", "Reasoning", "Generating a reply…")
+	h.assertTexts(tester, "Running", "Stop", "Reasoning")
 	h.assertNoTexts(tester, "停止")
 }

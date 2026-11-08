@@ -56,7 +56,7 @@ func (s *service) CompactNow(ctx context.Context, sessionID string) (contracts.C
 		compactor, err = factory(cfg)
 	} else {
 		var provider rig.Provider
-		provider, err = s.newProvider(cfg, s.sessionEffort(sessionID))
+		provider, err = s.newProvider(cfg, s.thinkingParamsForSession(sessionID, cfg.Model))
 		if err == nil {
 			compactor = compact.LLMCompactor{Provider: provider, Model: cfg.Model}
 		}

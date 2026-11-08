@@ -202,7 +202,7 @@ func assertContains(t *testing.T, tester *ui.Tester, fragments ...string) {
 func TestFilesPaneWithoutBackend(t *testing.T) {
 	h := newHarness(t, newFakeChat(), rightpanel.Config{})
 	tester := h.tester()
-	h.click(tester, "文件")
+	h.selectPane(tester, "文件")
 	h.assertTexts(tester, "工作区未启用")
 }
 
@@ -211,7 +211,7 @@ func TestFilesOpenWorkspaceFlow(t *testing.T) {
 	setDirectoryPicker(t, func() (string, error) { return "/tmp/proj-alpha", nil })
 	h := newHarnessWithWorkspace(t, newFakeChat(), rightpanel.Config{}, workspace)
 	tester := h.tester()
-	h.click(tester, "文件")
+	h.selectPane(tester, "文件")
 	h.assertTexts(tester, "还没有打开工作区", "打开文件夹")
 
 	h.click(tester, "打开文件夹")
@@ -230,7 +230,7 @@ func TestFilesOpenWorkspaceErrors(t *testing.T) {
 		setDirectoryPicker(t, func() (string, error) { return "", errors.New("dialog failed") })
 		h := newHarnessWithWorkspace(t, newFakeChat(), rightpanel.Config{}, workspace)
 		tester := h.tester()
-		h.click(tester, "文件")
+		h.selectPane(tester, "文件")
 		h.click(tester, "打开文件夹")
 		h.assertTexts(tester, "无法打开文件夹选择器：dialog failed")
 	})
@@ -241,7 +241,7 @@ func TestFilesOpenWorkspaceErrors(t *testing.T) {
 		setDirectoryPicker(t, func() (string, error) { return "/root/forbidden", nil })
 		h := newHarnessWithWorkspace(t, newFakeChat(), rightpanel.Config{}, workspace)
 		tester := h.tester()
-		h.click(tester, "文件")
+		h.selectPane(tester, "文件")
 		h.click(tester, "打开文件夹")
 		h.assertTexts(tester, "打开工作区失败：permission denied")
 	})
@@ -251,7 +251,7 @@ func TestFilesOpenWorkspaceErrors(t *testing.T) {
 		setDirectoryPicker(t, func() (string, error) { return "", nil })
 		h := newHarnessWithWorkspace(t, newFakeChat(), rightpanel.Config{}, workspace)
 		tester := h.tester()
-		h.click(tester, "文件")
+		h.selectPane(tester, "文件")
 		h.click(tester, "打开文件夹")
 		if creates := workspace.creates(); len(creates) != 0 {
 			t.Fatalf("Create calls = %+v, want none on cancel", creates)
@@ -286,7 +286,7 @@ func TestFilesNavigationAndBreadcrumb(t *testing.T) {
 	workspace := filesTreeWorkspace()
 	h := newHarnessWithWorkspace(t, newFakeChat(), rightpanel.Config{}, workspace)
 	tester := h.tester()
-	h.click(tester, "文件")
+	h.selectPane(tester, "文件")
 	h.assertTexts(tester, "proj", "/work/proj", "/proj", "docs", "main.go", "chart.png")
 
 	// Enter a directory, then a nested one; the breadcrumb grows.
@@ -307,7 +307,7 @@ func TestFilesTextAndMarkdownPreview(t *testing.T) {
 	workspace := filesTreeWorkspace()
 	h := newHarnessWithWorkspace(t, newFakeChat(), rightpanel.Config{}, workspace)
 	tester := h.tester()
-	h.click(tester, "文件")
+	h.selectPane(tester, "文件")
 	h.assertTexts(tester, "选择文件以预览")
 
 	// Plain text file: the preview shows its content as native text.
@@ -333,7 +333,7 @@ func TestFilesImagePreview(t *testing.T) {
 	workspace := filesTreeWorkspace()
 	h := newHarnessWithWorkspace(t, newFakeChat(), rightpanel.Config{}, workspace)
 	tester := h.tester()
-	h.click(tester, "文件")
+	h.selectPane(tester, "文件")
 	if err := tester.Click("chart.png"); err != nil {
 		t.Fatalf("open image: %v; texts = %v", err, tester.Texts())
 	}
@@ -349,7 +349,7 @@ func TestFilesUnsupportedPreview(t *testing.T) {
 	workspace.setFile("data.bin", []byte{0x00, 0x01, 0x02, 0x03})
 	h := newHarnessWithWorkspace(t, newFakeChat(), rightpanel.Config{}, workspace)
 	tester := h.tester()
-	h.click(tester, "文件")
+	h.selectPane(tester, "文件")
 	if err := tester.Click("data.bin"); err != nil {
 		t.Fatalf("open bin: %v; texts = %v", err, tester.Texts())
 	}
@@ -363,7 +363,7 @@ func TestFilesErrors(t *testing.T) {
 		workspace.currentErr = errors.New("registry unavailable")
 		h := newHarnessWithWorkspace(t, newFakeChat(), rightpanel.Config{}, workspace)
 		tester := h.tester()
-		h.click(tester, "文件")
+		h.selectPane(tester, "文件")
 		h.assertTexts(tester, "读取工作区失败：registry unavailable")
 	})
 
@@ -372,7 +372,7 @@ func TestFilesErrors(t *testing.T) {
 		workspace.filesErr = errors.New("permission denied")
 		h := newHarnessWithWorkspace(t, newFakeChat(), rightpanel.Config{}, workspace)
 		tester := h.tester()
-		h.click(tester, "文件")
+		h.selectPane(tester, "文件")
 		h.assertTexts(tester, "列目录失败：permission denied")
 	})
 
@@ -381,7 +381,7 @@ func TestFilesErrors(t *testing.T) {
 		workspace.readErrs["main.go"] = errors.New("file vanished")
 		h := newHarnessWithWorkspace(t, newFakeChat(), rightpanel.Config{}, workspace)
 		tester := h.tester()
-		h.click(tester, "文件")
+		h.selectPane(tester, "文件")
 		if err := tester.Click("main.go"); err != nil {
 			t.Fatalf("open main.go: %v", err)
 		}
@@ -393,9 +393,8 @@ func TestFilesErrors(t *testing.T) {
 func TestFilesCustomTabLabel(t *testing.T) {
 	h := newHarness(t, newFakeChat(), rightpanel.Config{FilesTab: "Files"})
 	tester := h.tester()
-	h.assertTexts(tester, "Files")
-	h.click(tester, "Files")
-	h.assertTexts(tester, "工作区未启用")
+	h.selectPane(tester, "Files")
+	h.assertTexts(tester, "Files", "工作区未启用")
 }
 
 // TestFilesDirectoryDialogTitleFollowsLocale pins that the native folder
@@ -410,7 +409,7 @@ func TestFilesDirectoryDialogTitleFollowsLocale(t *testing.T) {
 	h := newLocaleHarness(t, "en", newFakeChat(), rightpanel.Config{}, workspace, nil)
 	tester := h.tester()
 	tester.Frame()
-	h.click(tester, "Files")
+	h.selectPane(tester, "Files")
 	h.click(tester, "Open folder")
 	if captured != "Choose workspace folder" {
 		t.Fatalf("English directory dialog title = %q, want %q", captured, "Choose workspace folder")
@@ -422,4 +421,46 @@ func TestFilesDirectoryDialogTitleFollowsLocale(t *testing.T) {
 	if captured != "选择工作区文件夹" {
 		t.Fatalf("Chinese directory dialog title = %q, want %q", captured, "选择工作区文件夹")
 	}
+}
+
+// TestFilesHiddenEntriesAndFilter covers H21: dot entries are folded by default,
+// the "show hidden" switch reveals them, and the name filter narrows the list.
+func TestFilesHiddenEntriesAndFilter(t *testing.T) {
+	workspace := newFakeWorkspace()
+	workspace.setDir("",
+		contracts.FileEntry{Name: ".git", Path: ".git", Dir: true},
+		contracts.FileEntry{Name: ".env", Path: ".env", Size: 5},
+		contracts.FileEntry{Name: "notes.txt", Path: "notes.txt", Size: 3},
+		contracts.FileEntry{Name: "main.go", Path: "main.go", Size: 9},
+	)
+	if _, err := workspace.Create(context.Background(), "proj", "/tmp/proj"); err != nil {
+		t.Fatalf("create workspace: %v", err)
+	}
+	h := newHarnessWithWorkspace(t, newFakeChat(), rightpanel.Config{}, workspace)
+	tester := h.tester()
+	h.selectPane(tester, "文件")
+	h.assertTexts(tester, "notes.txt", "main.go")
+	h.assertNoTexts(tester, ".git", ".env")
+
+	// The switch is an accessible control named for the toggle, and reveals the
+	// dot entries.
+	if err := tester.Click("显示隐藏文件"); err != nil {
+		t.Fatalf("toggle hidden files: %v; texts = %v", err, tester.Texts())
+	}
+	tester.Frame()
+	h.assertTexts(tester, ".git", ".env", "notes.txt")
+
+	// The filter narrows the visible entries by name.
+	if err := tester.Click("筛选文件"); err != nil {
+		t.Fatalf("focus file filter: %v; texts = %v", err, tester.Texts())
+	}
+	tester.Type("notes")
+	tester.Frame()
+	h.assertTexts(tester, "notes.txt")
+	h.assertNoTexts(tester, "main.go", ".git")
+
+	tester.Key(ui.Cmd, ui.KeyA)
+	tester.Type("zzz")
+	tester.Frame()
+	h.assertTexts(tester, "没有匹配的条目")
 }

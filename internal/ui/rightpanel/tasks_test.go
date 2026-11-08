@@ -178,7 +178,7 @@ func newTasksHarness(t *testing.T, language string, chat *fakeChat, cfg rightpan
 func openTasks(t *testing.T, h *harness, tester *ui.Tester) {
 	t.Helper()
 	tester.Frame()
-	h.click(tester, "任务")
+	h.selectPane(tester, "任务")
 }
 
 // typeTask fills the add-task input.
@@ -217,13 +217,24 @@ func textIndex(texts []string, want string) int {
 
 // --- tests ------------------------------------------------------------------
 
+// openTaskMenu opens one task row's overflow menu by the row's accessible name.
+func openTaskMenu(t *testing.T, tester *ui.Tester, subject string) {
+	t.Helper()
+	label := "任务操作：" + subject
+	if !tester.HasText(label) {
+		label = "Task actions: " + subject
+	}
+	if err := tester.Click(label); err != nil {
+		t.Fatalf("open task menu for %q: %v; texts = %v", subject, err, tester.Texts())
+	}
+	tester.Frame()
+}
+
 func TestTasksTabEmptyStateWithoutService(t *testing.T) {
 	h := newTasksHarness(t, "zh", newFakeChat(), rightpanel.Config{}, nil)
 	tester := h.tester()
 	tester.Frame()
-	h.assertTexts(tester, "任务")
-
-	h.click(tester, "任务")
+	h.selectPane(tester, "任务")
 	h.assertTexts(tester, "任务板未启用")
 	h.assertNoTexts(tester, "还没有任务")
 }
@@ -242,7 +253,12 @@ func TestTasksListSortsAndRendersFields(t *testing.T) {
 
 	h.assertTexts(tester, "第一个待办", "第二个待办", "正在做的", "已完成的",
 		"待处理", "进行中", "已完成", "alice", "负责人：alice",
-		"开始", "完成", "删除", "新任务", "添加", "刷新")
+		"任务操作：第一个待办", "新任务", "添加", "刷新")
+	// The row actions live in the row's overflow menu.
+	openTaskMenu(t, tester, "第一个待办")
+	h.assertTexts(tester, "开始", "完成", "删除")
+	tester.Key(0, ui.KeyEscape)
+	tester.Frame()
 
 	texts := tester.Texts()
 	order := []string{"第一个待办", "第二个待办", "正在做的", "已完成的"}
@@ -296,6 +312,7 @@ func TestTasksStartAndComplete(t *testing.T) {
 	openTasks(t, h, tester)
 	h.assertTexts(tester, "写迁移脚本", "待处理")
 
+	openTaskMenu(t, tester, "写迁移脚本")
 	h.click(tester, "开始")
 	calls := board.statuses()
 	if len(calls) != 1 || calls[0].id != "t1" || calls[0].status != contracts.TaskStatusInProgress {
@@ -303,6 +320,7 @@ func TestTasksStartAndComplete(t *testing.T) {
 	}
 	h.assertTexts(tester, "进行中")
 
+	openTaskMenu(t, tester, "写迁移脚本")
 	h.click(tester, "完成")
 	calls = board.statuses()
 	if len(calls) != 2 || calls[1].id != "t1" || calls[1].status != contracts.TaskStatusCompleted {
@@ -322,6 +340,9 @@ func TestTasksDelete(t *testing.T) {
 	openTasks(t, h, tester)
 	h.assertTexts(tester, "临时任务")
 
+	openTaskMenu(t, tester, "临时任务")
+	h.click(tester, "删除")
+	// The menu's Delete asks for confirmation first.
 	h.click(tester, "删除")
 	if got := board.deleted(); len(got) != 1 || got[0] != "t1" {
 		t.Fatalf("Delete calls = %v, want [t1]", got)
@@ -378,6 +399,7 @@ func TestTasksErrors(t *testing.T) {
 		h := newTasksHarness(t, "zh", newFakeChat(), rightpanel.Config{}, board)
 		tester := h.tester()
 		openTasks(t, h, tester)
+		openTaskMenu(t, tester, "任务")
 		h.click(tester, "开始")
 		h.assertTexts(tester, "更新任务失败：denied")
 	})
@@ -390,6 +412,8 @@ func TestTasksErrors(t *testing.T) {
 		h := newTasksHarness(t, "zh", newFakeChat(), rightpanel.Config{}, board)
 		tester := h.tester()
 		openTasks(t, h, tester)
+		openTaskMenu(t, tester, "任务")
+		h.click(tester, "删除")
 		h.click(tester, "删除")
 		h.assertTexts(tester, "删除任务失败：locked")
 	})
@@ -403,10 +427,14 @@ func TestTasksEnglishCopy(t *testing.T) {
 	h := newTasksHarness(t, "en", newFakeChat(), rightpanel.Config{}, board)
 	tester := h.tester()
 	tester.Frame()
-	h.click(tester, "Tasks")
+	h.selectPane(tester, "Tasks")
 
 	h.assertTexts(tester, "Tasks", "Ship the release", "Pending", "Owner: alice",
-		"Start", "Complete", "Delete", "New task", "Add", "Refresh")
+		"New task", "Add", "Refresh")
+	openTaskMenu(t, tester, "Ship the release")
+	h.assertTexts(tester, "Start", "Complete", "Delete")
+	tester.Key(0, ui.KeyEscape)
+	tester.Frame()
 }
 
 func TestTasksEmptyAndMissingServiceEnglish(t *testing.T) {
@@ -414,15 +442,15 @@ func TestTasksEmptyAndMissingServiceEnglish(t *testing.T) {
 	h := newTasksHarness(t, "en", newFakeChat(), rightpanel.Config{}, nil)
 	tester := h.tester()
 	tester.Frame()
-	h.click(tester, "Tasks")
+	h.selectPane(tester, "Tasks")
 	h.assertTexts(tester, "Task board is not enabled")
 
 	// Empty board: the English empty list copy.
 	empty := newTasksHarness(t, "en", newFakeChat(), rightpanel.Config{}, newFakeTaskBoard())
-	tester = empty.tester()
-	tester.Frame()
-	empty.click(tester, "Tasks")
-	empty.assertTexts(tester, "No tasks yet")
+	emptyTester := empty.tester()
+	emptyTester.Frame()
+	empty.selectPane(emptyTester, "Tasks")
+	empty.assertTexts(emptyTester, "No tasks yet")
 }
 
 func TestTasksConfigTabLabelOverride(t *testing.T) {
@@ -430,10 +458,10 @@ func TestTasksConfigTabLabelOverride(t *testing.T) {
 	h := newTasksHarness(t, "zh", newFakeChat(), rightpanel.Config{TasksTab: "Work"}, board)
 	tester := h.tester()
 	tester.Frame()
-	// The native tab strip contributes the label twice: once as the
-	// accessibility label and once as the rendered text node.
-	if got := exactTextCount(tester.Texts(), "Work"); got != 2 {
-		t.Fatalf("Work tab labels = %d, want 2; texts = %v", got, tester.Texts())
+	h.selectPane(tester, "Work")
+	// The compact picker names the pane that shows.
+	if got := exactTextCount(tester.Texts(), "Work"); got != 1 {
+		t.Fatalf("Work pane labels = %d, want 1; texts = %v", got, tester.Texts())
 	}
 	if got := exactTextCount(tester.Texts(), "任务"); got != 0 {
 		t.Fatalf("default 任务 tab label = %d, want 0 with the override; texts = %v", got, tester.Texts())

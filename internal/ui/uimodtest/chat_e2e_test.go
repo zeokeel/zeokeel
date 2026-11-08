@@ -69,8 +69,8 @@ func TestDesktopChatPipelineEndToEnd(t *testing.T) {
 	// Home shows the real recent-session list (and a composer action).
 	tester := ui.NewTester(uiRoot.View, 1280, 800)
 	tester.Frame()
-	if !tester.HasText("开始新对话") {
-		t.Fatalf("home composer action missing; texts = %v", tester.Texts())
+	if !tester.HasText("问点什么…") || !tester.HasText("发送") {
+		t.Fatalf("home composer missing; texts = %v", tester.Texts())
 	}
 	if !tester.HasText("ZeoKeel") {
 		t.Fatalf("home hero missing the brand; texts = %v", tester.Texts())

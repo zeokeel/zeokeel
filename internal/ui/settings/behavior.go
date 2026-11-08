@@ -1,8 +1,11 @@
 package settings
 
-// Behavior page: the default agent permission mode. The page writes the same
-// agent.permission row the approvals gate reads dynamically, so a selection
-// applies immediately (the session composer's permission chip shares the key).
+// Behavior page: the default agent permission mode (daily) plus the page's
+// lower-frequency conversation options behind one collapsed disclosure. Every
+// control applies immediately (the page has no save button): the permission menu
+// writes the shared agent.permission row the approvals gate reads dynamically,
+// the switches persist on change and the workspace instruction file saves as it
+// is edited.
 
 import (
 	"strconv"
@@ -12,15 +15,18 @@ import (
 
 	"github.com/zeokeel/zeokeel/internal/contracts"
 	"github.com/zeokeel/zeokeel/internal/design"
+	"github.com/zeokeel/zeokeel/internal/uikit"
 )
 
 const (
 	// BehaviorPageID is the behavior page identity.
 	BehaviorPageID = "behavior"
 	// BehaviorPageSection places it in the general group.
-	BehaviorPageSection = "general"
-	// BehaviorPageOrder places it next to Diagnostics (95) and Notifications (99).
-	BehaviorPageOrder = 96
+	BehaviorPageSection = "常用"
+	// BehaviorPageOrder makes this the first page of the general group and thus
+	// the page the settings surface opens on (the host shows the group's lowest
+	// Order as the default; About moved to the last group).
+	BehaviorPageOrder = 20
 	// permissionNever denies every tool call (fail-closed); the approvals gate
 	// owns the enforcement while this page only persists the choice.
 	permissionNever = "never"
@@ -52,7 +58,7 @@ var behaviorPermissions = []behaviorPermission{
 	},
 	{
 		value: permissionNever, zh: "从不", en: "Never",
-		meaningZh: "全部拒绝（fail-closed）", meaningEn: "Deny everything (fail-closed)",
+		meaningZh: "全部拒绝，不执行任何工具", meaningEn: "Deny every tool call",
 	},
 }
 
@@ -60,6 +66,10 @@ var behaviorPermissions = []behaviorPermission{
 type behaviorState struct {
 	status    string
 	statusErr bool
+
+	// moreOpen is the 更多对话设置 disclosure state; native collapsibles need a
+	// persistent *bool so the open/closed animation survives frame rebuilds.
+	moreOpen bool
 
 	// agentsFile is the workspace instruction file name draft; loaded once from
 	// settings so an edit is not overwritten by a rebuild.
@@ -92,26 +102,38 @@ func behaviorPermissionLabel(locale contracts.LocaleService, mode string) string
 	return localized(locale, "询问", "Ask")
 }
 
-// buildBehaviorPage renders the default-permission settings.
+// buildBehaviorPage renders the default-permission settings. Every control on
+// the page applies at once (the page has no save button): the permission menu
+// writes the shared agent row, the switches persist on change and the workspace
+// instruction file saves as it is edited.
 func buildBehaviorPage(c *ui.Context, runtime contracts.UIRuntime,
 	store contracts.SettingsService, locale contracts.LocaleService, st *behaviorState) {
 	t := design.Of(c)
-	ui.Column(c).FillWidth().Gap(design.Space2).Children(func() {
-		pageHeader(c, t, localized(locale, "行为", "Behavior"), localized(locale,
-			"代理的默认权限与工具行为。",
-			"Default agent permissions and tool behavior."))
-		panel(c, t, func() {
+	applyBool := func(key string, value bool) {
+		if err := store.Set(key, strconv.FormatBool(value)); err != nil {
+			st.status = localized(locale, "保存失败：", "Save failed: ") + err.Error()
+			st.statusErr = true
+		} else {
+			st.status = localized(locale, "已保存", "Saved")
+			st.statusErr = false
+		}
+		runtime.Invalidate()
+	}
+	ui.Column(c).FillWidth().Gap(design.Space4).Children(func() {
+		uikit.PageHeader(c, localized(locale, "行为", "Behavior"), localized(locale,
+			"代理的默认权限与工具行为；修改立即生效。",
+			"Default agent permissions and tool behavior; changes apply immediately."))
+		uikit.Section(c, localized(locale, "默认代理权限", "Default agent permission"), func(*ui.Context) {
+			current := agentPermissionMode(store.Get(contracts.SettingAgentPermission, ""))
 			ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(design.Space2).Children(func() {
-				sectionTitle(c, t, localized(locale, "默认代理权限", "Default agent permission"))
+				design.Apply(ui.Text(c, localized(locale, "当前：", "Current: ")+
+					behaviorPermissionLabel(locale, current)), t.Font(design.TypeXS)).
+					TextColor(t.LabelSecondary)
 				ui.Spacer(c).Grow(1)
 				if st.status != "" {
 					statusBadge(c, t, st.status, st.statusErr)
 				}
 			})
-			current := agentPermissionMode(store.Get(contracts.SettingAgentPermission, ""))
-			design.Apply(ui.Text(c, localized(locale, "当前：", "Current: ")+
-				behaviorPermissionLabel(locale, current)), t.Font(design.TypeXS)).
-				TextColor(t.LabelSecondary)
 			ui.PopoverMenuButton(c, behaviorPermissionLabel(locale, current), func(m *ui.Menu) {
 				for _, choice := range behaviorPermissions {
 					choice := choice
@@ -131,123 +153,110 @@ func buildBehaviorPage(c *ui.Context, runtime contracts.UIRuntime,
 			}).Tooltip(localized(locale, "选择默认权限模式", "Choose the default permission mode"))
 			ui.Column(c).FillWidth().Gap(design.Space1).PaddingY(design.Space1).Children(func() {
 				for _, choice := range behaviorPermissions {
-					design.Apply(ui.Text(c,
-						localized(locale, choice.zh, choice.en)+localized(locale, "：", ": ")+
-							localized(locale, choice.meaningZh, choice.meaningEn)),
-						t.TextMuted(design.TypeXXS)).Grow(1)
+					uikit.Bullet(c, localized(locale, choice.zh, choice.en)+localized(locale, "：", ": ")+
+						localized(locale, choice.meaningZh, choice.meaningEn))
 				}
 			})
 			design.Apply(ui.Text(c, localized(locale,
-				"修改立即生效（approvals 动态读取该设置，与会话工具栏的权限模式共用）。",
-				"Changes apply immediately (approvals read it dynamically and it is shared with the session toolbar).")),
+				"修改立即生效（与会话「会话设置」菜单的权限模式共用）。",
+				"Changes apply immediately (shared with the session toolbar).")),
 				t.TextMuted(design.TypeXXS)).MaxLines(2)
 		})
-		panel(c, t, func() {
-			ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(design.Space2).Children(func() {
-				sectionTitle(c, t, localized(locale, "运行中发送", "Sending while running"))
-				ui.Spacer(c).Grow(1)
-				goalEnabled := goalAutoContinueEnabled(store)
-				goalToggle := ui.Toggle(c, &goalEnabled, localized(locale,
-					"目标自动续跑", "Auto-continue goal"))
-				if goalToggle.Changed() {
-					if err := store.Set(contracts.SettingGoalAutoContinue, strconv.FormatBool(goalEnabled)); err != nil {
-						st.status = localized(locale, "保存失败：", "Save failed: ") + err.Error()
-						st.statusErr = true
-					} else {
-						st.status = localized(locale, "已保存", "Saved")
-						st.statusErr = false
-					}
-					runtime.Invalidate()
-				}
-				if st.status != "" {
-					statusBadge(c, t, st.status, st.statusErr)
-				}
-			})
-			enabled := sendWhileRunningEnabled(store)
-			toggle := ui.Toggle(c, &enabled, localized(locale,
-				"运行中允许排队发送", "Queue prompts while running"))
-			if toggle.Changed() {
-				if err := store.Set(contracts.SettingSendWhileRunning, strconv.FormatBool(enabled)); err != nil {
-					st.status = localized(locale, "保存失败：", "Save failed: ") + err.Error()
-					st.statusErr = true
-				} else {
-					st.status = localized(locale, "已保存", "Saved")
-					st.statusErr = false
-				}
-				runtime.Invalidate()
-			}
-			design.Apply(ui.Text(c, localized(locale,
-				"发送的提示会在当前回合结束后依次发出。",
-				"Queued prompts are sent one by one after the current turn finishes.")),
-				t.TextMuted(design.TypeXXS)).MaxLines(2)
-			design.Apply(ui.Text(c, localized(locale,
-				"回合结束后若目标仍激活，自动发送继续推进提示（每个目标最多 5 次）。",
-				"After a turn ends while the goal is still active, automatically send a continuation prompt (at most 5 times per goal).")),
-				t.TextMuted(design.TypeXXS)).MaxLines(2)
-		})
-		panel(c, t, func() {
-			ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(design.Space2).Children(func() {
-				sectionTitle(c, t, localized(locale, "消息字号", "Message text size"))
-				ui.Spacer(c).Grow(1)
-				if st.status != "" {
-					statusBadge(c, t, st.status, st.statusErr)
-				}
-			})
-			current := chatFontSizeSetting(store)
-			ui.PopoverMenuButton(c, chatFontSizeLabel(locale, current), func(m *ui.Menu) {
-				for _, choice := range chatFontSizes {
-					choice := choice
-					item := m.Item(localized(locale, choice.zh, choice.en))
-					item.Checked(choice.value == current)
-					if item.Chosen() && choice.value != current {
-						if err := store.Set(contracts.SettingChatFontSize, choice.value); err != nil {
-							st.status = localized(locale, "保存失败：", "Save failed: ") + err.Error()
-							st.statusErr = true
-						} else {
-							st.status = localized(locale, "已保存", "Saved")
-							st.statusErr = false
+		// Progressive disclosure (settings-complexity audit P4): only the daily
+		// permission choice stays visible; the page's other conversation options
+		// live behind one native disclosure, collapsed by default, so the page
+		// reads as one clear setting. A muted summary keeps the collapsed state
+		// informative without repeating the controls.
+		ui.Collapsible(c, localized(locale, "更多对话设置", "More conversation settings"), &st.moreOpen, func() {
+			ui.Column(c).FillWidth().Gap(design.Space4).Children(func() {
+				uikit.Section(c, localized(locale, "运行中发送", "Sending while running"), func(*ui.Context) {
+					ui.Form(c, func() {
+						enabled := sendWhileRunningEnabled(store)
+						if switchField(c,
+							localized(locale, "运行中允许排队发送", "Queue prompts while running"),
+							localized(locale, "发送的提示会在当前回合结束后依次发出。",
+								"Queued prompts are sent one by one after the current turn finishes."),
+							&enabled) {
+							applyBool(contracts.SettingSendWhileRunning, enabled)
 						}
-						runtime.Invalidate()
+					})
+				})
+				uikit.Section(c, localized(locale, "目标", "Goals"), func(*ui.Context) {
+					ui.Form(c, func() {
+						goalEnabled := goalAutoContinueEnabled(store)
+						if switchField(c,
+							localized(locale, "目标自动续跑", "Auto-continue goal"),
+							localized(locale,
+								"回合结束后若目标仍激活，自动发送继续推进提示（每个目标最多 5 次）。",
+								"After a turn ends while the goal is still active, automatically send a continuation prompt (at most 5 times per goal)."),
+							&goalEnabled) {
+							applyBool(contracts.SettingGoalAutoContinue, goalEnabled)
+						}
+					})
+				})
+				uikit.Section(c, localized(locale, "消息字号", "Message text size"), func(*ui.Context) {
+					current := chatFontSizeSetting(store)
+					ui.PopoverMenuButton(c, chatFontSizeLabel(locale, current), func(m *ui.Menu) {
+						for _, choice := range chatFontSizes {
+							choice := choice
+							item := m.Item(localized(locale, choice.zh, choice.en))
+							item.Checked(choice.value == current)
+							if item.Chosen() && choice.value != current {
+								if err := store.Set(contracts.SettingChatFontSize, choice.value); err != nil {
+									st.status = localized(locale, "保存失败：", "Save failed: ") + err.Error()
+									st.statusErr = true
+								} else {
+									st.status = localized(locale, "已保存", "Saved")
+									st.statusErr = false
+								}
+								runtime.Invalidate()
+							}
+						}
+					}).Tooltip(localized(locale, "选择对话文字大小", "Choose the conversation text size"))
+				})
+				uikit.Section(c, localized(locale, "工作区指令", "Workspace instructions"), func(*ui.Context) {
+					if !st.agentsFileLoaded {
+						st.agentsFileLoaded = true
+						st.agentsFile = store.Get(contracts.SettingAgentsFile, "AGENTS.md")
 					}
-				}
-			}).Tooltip(localized(locale, "选择对话文字大小", "Choose the conversation text size"))
-			design.Apply(ui.Text(c, localized(locale,
-				"对话文字大小，立即生效。",
-				"Conversation text size, applies immediately.")),
-				t.TextMuted(design.TypeXXS)).MaxLines(2)
-		})
-		panel(c, t, func() {
-			ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(design.Space2).Children(func() {
-				sectionTitle(c, t, localized(locale, "工作区指令", "Workspace instructions"))
-				ui.Spacer(c).Grow(1)
-				currentFile := strings.TrimSpace(store.Get(contracts.SettingAgentsFile, "AGENTS.md"))
-				if currentFile == "" {
-					currentFile = localized(locale, "（关闭）", "(off)")
-				}
-				design.Apply(ui.Text(c, localized(locale, "当前文件：", "Current file: ")+currentFile),
-					t.TextMuted(design.TypeXXS))
-				if st.status != "" {
-					statusBadge(c, t, st.status, st.statusErr)
-				}
+					ui.Field(c, localized(locale, "工作区指令文件", "Workspace instructions file"), func() {
+						input := ui.TextInput(c, &st.agentsFile).
+							Label(localized(locale, "工作区指令文件", "Workspace instructions file")).
+							Placeholder("AGENTS.md").FillWidth()
+						if input.Changed() {
+							saveAgentsFile(st, store, locale)
+						}
+					}).Description(localized(locale,
+						"运行时从当前工作区读取并注入系统提示；重启/下次运行生效；留空关闭。",
+						"Read from the current workspace at run time and appended to the system prompt; takes effect on the next run; empty disables it."))
+				})
 			})
-			if !st.agentsFileLoaded {
-				st.agentsFileLoaded = true
-				st.agentsFile = store.Get(contracts.SettingAgentsFile, "AGENTS.md")
-			}
-			ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(design.Space2).Children(func() {
-				ui.TextInput(c, &st.agentsFile).
-					Label(localized(locale, "工作区指令文件", "Workspace instructions file")).
-					Placeholder("AGENTS.md").Grow(1)
-				if design.Apply(ui.PrimaryButton(c, localized(locale, "保存", "Save")), t.PrimaryButton()).Clicked() {
-					saveAgentsFile(st, store, locale)
-				}
-			})
-			design.Apply(ui.Text(c, localized(locale,
-				"运行时从当前工作区读取并注入系统提示；重启/下次运行生效。",
-				"Read from the current workspace at run time and appended to the system prompt; takes effect on the next run or restart.")),
-				t.TextMuted(design.TypeXXS)).MaxLines(2)
 		})
+		if !st.moreOpen {
+			design.Apply(ui.Text(c, behaviorMoreSummary(locale, store)), t.TextMuted(design.TypeXXS)).MaxLines(2)
+		}
 	})
+}
+
+// behaviorMoreSummary is the one muted line shown while 更多对话设置 is collapsed:
+// a compact digest of the four settings it holds.
+func behaviorMoreSummary(locale contracts.LocaleService, store contracts.SettingsService) string {
+	onOff := func(value bool) string {
+		if value {
+			return localized(locale, "开", "On")
+		}
+		return localized(locale, "关", "Off")
+	}
+	agentsFile := strings.TrimSpace(store.Get(contracts.SettingAgentsFile, "AGENTS.md"))
+	if agentsFile == "" {
+		agentsFile = localized(locale, "已关闭", "Off")
+	}
+	return localized(locale, "排队发送：", "Queue: ") + onOff(sendWhileRunningEnabled(store)) +
+		" · " + localized(locale, "目标续跑：", "Goal auto-continue: ") +
+		onOff(goalAutoContinueEnabled(store)) +
+		" · " + localized(locale, "消息字号：", "Text size: ") +
+		chatFontSizeLabel(locale, chatFontSizeSetting(store)) +
+		" · " + localized(locale, "指令文件：", "Instructions: ") + agentsFile
 }
 
 // saveAgentsFile persists the trimmed workspace instruction file name; an empty

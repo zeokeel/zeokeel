@@ -17,6 +17,33 @@ const (
 	Space8 float32 = Space1 * 8
 )
 
+// Brand layout measures. They are the single source of the shell geometry so
+// the host and the modules cannot drift: window chrome (sidebar, rail,
+// inspector), the readable content column and the settings surface.
+const (
+	// SidebarWidth is the expanded source column.
+	SidebarWidth float32 = 280
+	// SidebarRailWidth is the collapsed icon rail.
+	SidebarRailWidth float32 = 64
+	// InspectorWidth is the right inspector's preferred width.
+	InspectorWidth float32 = 320
+	// InspectorMinWidth is the narrowest usable inspector.
+	InspectorMinWidth float32 = 260
+	// ContentMinWidth is the narrowest the main column may become before the
+	// inspector collapses to an overlay.
+	ContentMinWidth float32 = 520
+	// SettingsWidth/SettingsHeight are the settings surface's preferred size;
+	// it never grows past the window minus SettingsMargin.
+	SettingsWidth  float32 = 820
+	SettingsHeight float32 = 760
+	// SettingsMargin is the free space kept around the settings surface; the
+	// surface grows with the window so a long page list stays visible rather
+	// than scrolling the last pages out of reach.
+	SettingsMargin float32 = 24
+	// TranscriptWidth is the conversation reading measure.
+	TranscriptWidth float32 = 840
+)
+
 // Brand radii. RadiusMD is the control corner of the theme (brand.Radius);
 // the smaller steps round inline chips and the larger ones the nested
 // surfaces above a control: cards, the composer and dialogs. RadiusMax is
@@ -30,55 +57,11 @@ const (
 	RadiusMax float32 = 999
 )
 
-// RowState is a list row's interaction state.
-type RowState int
-
-const (
-	RowNormal RowState = iota
-	RowHover
-	RowSelected
-)
-
-// Page fills a screen area with the page background.
-func (t *Tokens) Page() Style {
-	return func(el ui.Element) ui.Element {
-		return el.Background(t.BgBase)
-	}
-}
-
-// Sidebar is the 280px source list. The width is the brand layout's fixed
-// source column, kept from the current screens until the native-layout stage
-// revisits the shell geometry.
+// Sidebar is the source list column.
 func (t *Tokens) Sidebar() Style {
 	return func(el ui.Element) ui.Element {
-		return el.Width(280).Background(t.BgSidebar).
+		return el.Width(SidebarWidth).Background(t.BgSidebar).
 			BorderWidth(0, 1, 0, 0).BorderColor(t.BorderL3)
-	}
-}
-
-// Main is the flexible content column.
-func (t *Tokens) Main() Style {
-	return func(el ui.Element) ui.Element {
-		return el.Grow(1).Background(t.BgBase)
-	}
-}
-
-// BrandRow is the top row of the sidebar: logo + wordmark. Its 64px height
-// follows docs/wordmark.md (the mark is vertically centred in it).
-func (t *Tokens) BrandRow() Style {
-	return func(el ui.Element) ui.Element {
-		return el.Height(64).PaddingX(Space4).Gap(Space2)
-	}
-}
-
-// NavRow is a sidebar navigation row.
-func (t *Tokens) NavRow(active bool) Style {
-	return func(el ui.Element) ui.Element {
-		el = el.Height(36).PaddingX(Space3).Radius(RadiusSM)
-		if active {
-			return el.Background(t.BgHover)
-		}
-		return el
 	}
 }
 
@@ -91,60 +74,63 @@ func (t *Tokens) SectionLabel() Style {
 	}
 }
 
-// Row is a list row (session, plugin, task).
-func (t *Tokens) Row(state RowState) Style {
-	return func(el ui.Element) ui.Element {
-		el = el.Height(40).PaddingX(Space3).Radius(RadiusSM)
-		if state != RowNormal {
-			el = el.Background(t.BgHover)
-		}
-		return el
-	}
-}
-
-// Panel is a bordered surface (cards, composer, dialogs).
+// Panel is a bordered surface (independent cards, composer, dialogs). Use it
+// for objects, not for every section: sections are spacing and a title.
 func (t *Tokens) Panel() Style {
 	return func(el ui.Element) ui.Element {
 		return el.Background(t.BgRaised).Border(1, t.BorderL2).Radius(RadiusLG)
 	}
 }
 
-// Composer is the message input box: the 868×116 brand geometry, kept from
-// the current screens until the native-layout stage revisits it.
+// ShadowComposer is the soft elevation of the composer card.
+func (t *Tokens) ShadowComposer() Style {
+	return func(el ui.Element) ui.Element {
+		return el.Shadow(0, 2, 4, 0, ui.RGBA(0, 0, 0, 0.05))
+	}
+}
+
+// Composer is the message input box: the brand's raised, rounded card with
+// the soft composer shadow. The width is left to the content column so the
+// composer can never be wider than the surface it lives in.
 func (t *Tokens) Composer() Style {
 	return func(el ui.Element) ui.Element {
-		return Apply(el, t.Panel(), func(e ui.Element) ui.Element {
-			return e.Width(868).Radius(RadiusXL).Shadow(0, 2, 4, 0, ui.RGBA(0, 0, 0, 0.05))
+		return Apply(el, t.Panel(), t.ShadowComposer(), func(e ui.Element) ui.Element {
+			return e.Radius(RadiusXL)
 		})
 	}
 }
 
-// PrimaryButton is the brand "New Session" button: the strong surface fill,
-// a 1px BorderL3 edge, the readable LabelPrimary foreground, 38px tall and
-// the theme's control radius. BgStrong is the cool brand neutral (#F1F3F5
-// light, #272736 dark), so LabelPrimary contrasts in both themes; OnPrimary
-// is reserved for accent-filled controls, where it is the text color on the
-// brand fill.
+// PrimaryButton is the brand's main action: accent fill, OnPrimary text, 38
+// DIP tall, the theme's control radius. Apply it to a ui.PrimaryButton so
+// mygo keeps the native hover/pressed/disabled state machine; overriding the
+// background here would disable those states (mygo styleButton only tints a
+// button whose background is the theme's base).
 func (t *Tokens) PrimaryButton() Style {
 	return func(el ui.Element) ui.Element {
-		return el.Height(38).PaddingX(Space4).Radius(RadiusMD).
-			Background(t.BgStrong).Border(1, t.BorderL3).
-			TextColor(t.LabelPrimary).FontWeight(500)
+		return el.Height(38).PaddingX(Space4).Radius(RadiusMD).FontWeight(500)
 	}
 }
 
-// Tab is a Chat/Trajectory tab.
-func (t *Tokens) Tab(active bool) Style {
+// SecondaryButton is a neutral outlined action for dialogs and forms. Apply
+// it to a plain ui.Button: mygo keeps the native surface, border, hover and
+// pressed states, the brand only fixes the control metrics.
+func (t *Tokens) SecondaryButton() Style {
 	return func(el ui.Element) ui.Element {
-		el = el.Height(25).PaddingX(Space2)
-		if active {
-			return el.TextColor(t.Accent)
-		}
-		return el.TextColor(t.LabelSecondary)
+		return el.Height(36).PaddingX(Space3).Radius(RadiusMD).FontWeight(500)
 	}
 }
 
-// Badge is a small rounded label ("Preview", counts).
+// DangerButton is a destructive action: danger text on the neutral control.
+// Apply it to a plain ui.Button; callers must confirm irreversible actions.
+func (t *Tokens) DangerButton() Style {
+	return func(el ui.Element) ui.Element {
+		return el.Height(36).PaddingX(Space3).Radius(RadiusMD).
+			TextColor(t.DangerText).FontWeight(500)
+	}
+}
+
+// Badge is a small rounded label for status, type, permission and counts —
+// not for ordinary metadata.
 func (t *Tokens) Badge() Style {
 	return func(el ui.Element) ui.Element {
 		return el.PaddingX(Space2).PaddingY(Space1).Radius(RadiusMax).

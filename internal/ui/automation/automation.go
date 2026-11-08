@@ -56,6 +56,11 @@ type state struct {
 	// locale localizes the screen copy per frame (zh is the default).
 	locale contracts.LocaleService
 
+	// runtime requests frames and notifier raises the delete toast (with Undo
+	// when the host implements the optional action half).
+	runtime  contracts.UIRuntime
+	notifier contracts.Notifier
+
 	formOpen          bool
 	formName          string
 	formPrompt        string
@@ -66,10 +71,18 @@ type state struct {
 	formPermission    string
 	formEnabled       bool
 	formErr           string
+	// formEditID non-empty means the inline form is editing that task instead
+	// of creating one; formEditTask snapshots the row so the update keeps its
+	// id and run bookkeeping.
+	formEditID   string
+	formEditTask contracts.AutomationTask
 
 	deleteOpen   bool
 	deleteTarget string
 	deleteName   string
+	// deleteTask snapshots the task the delete dialog is confirming, so the
+	// undo action can re-create it.
+	deleteTask contracts.AutomationTask
 
 	pageErr string
 
@@ -95,7 +108,10 @@ func Module() *module.Descriptor[Config] {
 		}
 		config := cfg.resolved()
 		locale, _ := ctx.Get(contracts.KeyLocale)
-		moduleState := &state{ctx: ctx, locale: locale, formEnabled: true, historyOpen: make(map[string]bool)}
+		moduleState := &state{ctx: ctx, locale: locale, runtime: runtime, formEnabled: true, historyOpen: make(map[string]bool)}
+		if notifier, ok := ctx.Get(contracts.KeyNotifier); ok {
+			moduleState.notifier = notifier
+		}
 
 		// The automation backend is optional: without it the screen still
 		// renders, with an explanatory empty state. When present, its change

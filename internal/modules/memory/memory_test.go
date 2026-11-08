@@ -306,8 +306,9 @@ func TestModuleCustomPathAndScope(t *testing.T) {
 	}
 }
 
-// TestToolkitToolRegistration covers registering the Rig memory tool into the
-// shared registry and unregistering it on disposal.
+// TestToolkitToolRegistration covers registering the product memory tool (the
+// Rig tool plus the update action) into the shared registry and unregistering
+// it on disposal.
 func TestToolkitToolRegistration(t *testing.T) {
 	dataDir := t.TempDir()
 	registry := rigtools.NewRegistry()
@@ -321,6 +322,20 @@ func TestToolkitToolRegistration(t *testing.T) {
 	}
 	if names := toolNames(registry.Tools()); len(names) != 1 || names[0] != rigmemory.ToolName {
 		t.Fatalf("toolkit names = %v, want [%s]", names, rigmemory.ToolName)
+	}
+	tool := registry.Tools()[0]
+	if !strings.Contains(tool.Description(), "- update:") {
+		t.Fatalf("registered tool description has no update action:\n%s", tool.Description())
+	}
+	properties, _ := tool.Schema()["properties"].(map[string]any)
+	actionProperty, _ := properties["action"].(map[string]any)
+	enum, _ := actionProperty["enum"].([]string)
+	hasUpdate := false
+	for _, action := range enum {
+		hasUpdate = hasUpdate || action == "update"
+	}
+	if !hasUpdate {
+		t.Fatalf("registered tool action enum = %v, want update", enum)
 	}
 
 	result, err := registry.Invoke(context.Background(), rig.ToolCall{
@@ -337,6 +352,31 @@ func TestToolkitToolRegistration(t *testing.T) {
 	list, err := h.store.List(context.Background())
 	if err != nil || len(list) != 1 || list[0].Text != "durable through the tool" {
 		t.Fatalf("store after tool add = %+v/%v", list, err)
+	}
+
+	// The durable store's update half is reachable through the registered
+	// tool, so edit UIs, the model tool and the persisted file agree.
+	addFields := strings.Fields(result.Content)
+	if len(addFields) < 3 || addFields[0] != "added" || addFields[1] != "memory" {
+		t.Fatalf("unexpected add result %q", result.Content)
+	}
+	updated, err := registry.Invoke(context.Background(), rig.ToolCall{
+		ID:        "call-2",
+		Name:      rigmemory.ToolName,
+		Arguments: fmt.Sprintf(`{"action":"update","id":%q,"text":"edited through the tool"}`, addFields[2]),
+	})
+	if err != nil {
+		t.Fatalf("Invoke memory update: %v", err)
+	}
+	if updated.IsError {
+		t.Fatalf("memory update error: %s", updated.Content)
+	}
+	if !strings.Contains(updated.Content, "updated memory "+addFields[2]) {
+		t.Fatalf("update result = %q", updated.Content)
+	}
+	list, err = h.store.List(context.Background())
+	if err != nil || len(list) != 1 || list[0].ID != addFields[2] || list[0].Text != "edited through the tool" {
+		t.Fatalf("store after tool update = %+v/%v", list, err)
 	}
 
 	h.close()
@@ -480,6 +520,129 @@ func TestStoreConcurrency(t *testing.T) {
 	}
 }
 
+// TestModuleProvidesUpdater pins the optional half the UIs rely on: the
+// provided contracts.MemoryStore's concrete store also implements
+// contracts.MemoryUpdater, and updates survive a module restart.
+func TestModuleProvidesUpdater(t *testing.T) {
+	dataDir := t.TempDir()
+	first := mustLoadMemory(t, dataDir, nil, nil)
+	ctx := context.Background()
+	added, err := first.store.Add(ctx, contracts.Memory{Text: "original text", Scope: "global"})
+	if err != nil {
+		t.Fatalf("Add: %v", err)
+	}
+	updater, ok := first.store.(contracts.MemoryUpdater)
+	if !ok {
+		t.Fatalf("provided store %T does not implement contracts.MemoryUpdater", first.store)
+	}
+	updated, err := updater.Update(ctx, added.ID, "  edited text  ", "")
+	if err != nil {
+		t.Fatalf("Update: %v", err)
+	}
+	if updated.ID != added.ID || !updated.Created.Equal(added.Created) {
+		t.Fatalf("updated memory = %+v, want the same ID and creation time", updated)
+	}
+	if updated.Text != "edited text" {
+		t.Fatalf("updated text = %q, want the trimmed new text", updated.Text)
+	}
+	if updated.Scope != "global" {
+		t.Fatalf("updated scope = %q, want the existing global scope kept", updated.Scope)
+	}
+	first.close()
+
+	second := mustLoadMemory(t, dataDir, nil, nil)
+	list, err := second.store.List(ctx)
+	if err != nil || len(list) != 1 || list[0].ID != added.ID || list[0].Text != "edited text" {
+		t.Fatalf("reloaded store = %+v/%v, want the persisted update", list, err)
+	}
+	// The reloaded store remains the documented store + updater.
+	if _, ok := second.store.(contracts.MemoryUpdater); !ok {
+		t.Fatal("reloaded store does not implement contracts.MemoryUpdater")
+	}
+}
+
+// TestStoreUpdate covers the store's update semantics directly: trimmed text,
+// optional scope, unchanged ID/creation slot and every validation error.
+func TestStoreUpdate(t *testing.T) {
+	directory := t.TempDir()
+	store, err := newStore(directory, Config{})
+	if err != nil {
+		t.Fatalf("newStore: %v", err)
+	}
+	ctx := context.Background()
+	first, err := store.Add(ctx, contracts.Memory{Text: "first text", Scope: "global"})
+	if err != nil {
+		t.Fatalf("Add: %v", err)
+	}
+	second, err := store.Add(ctx, contracts.Memory{Text: "second text", Scope: "workspace"})
+	if err != nil {
+		t.Fatalf("Add: %v", err)
+	}
+
+	updated, err := store.Update(ctx, second.ID, "  rewritten  ", "")
+	if err != nil {
+		t.Fatalf("Update: %v", err)
+	}
+	if updated.ID != second.ID || !updated.Created.Equal(second.Created) {
+		t.Fatalf("updated = %+v, want the original ID and creation time", updated)
+	}
+	if updated.Text != "rewritten" || updated.Scope != "workspace" {
+		t.Fatalf("updated = %+v, want trimmed text and the existing workspace scope", updated)
+	}
+
+	// A provided scope is normalized like every stored scope.
+	scoped, err := store.Update(ctx, first.ID, "first rewritten", " WORKSPACE ")
+	if err != nil {
+		t.Fatalf("Update with scope: %v", err)
+	}
+	if scoped.Scope != "workspace" {
+		t.Fatalf("updated scope = %q, want the normalized workspace", scoped.Scope)
+	}
+
+	// The update reaches disk: a reloaded store shows both rewritten entries in
+	// insertion order.
+	reloaded, err := newStore(directory, Config{})
+	if err != nil {
+		t.Fatalf("reload: %v", err)
+	}
+	list, err := reloaded.List(ctx)
+	if err != nil || len(list) != 2 {
+		t.Fatalf("reloaded list = %+v/%v", list, err)
+	}
+	if list[0].ID != first.ID || list[0].Text != "first rewritten" || list[0].Scope != "workspace" {
+		t.Fatalf("reloaded first = %+v", list[0])
+	}
+	if list[1].ID != second.ID || list[1].Text != "rewritten" || list[1].Scope != "workspace" {
+		t.Fatalf("reloaded second = %+v", list[1])
+	}
+
+	// Validation errors never touch the document.
+	if _, err := store.Update(ctx, "missing-id", "text", ""); err == nil ||
+		!strings.Contains(err.Error(), "no memory with id") {
+		t.Fatalf("Update(unknown id) = %v, want a readable unknown-id error", err)
+	}
+	if _, err := store.Update(ctx, first.ID, "   ", ""); err == nil ||
+		!strings.Contains(err.Error(), "text is required") {
+		t.Fatalf("Update(empty text) = %v, want a text-required error", err)
+	}
+	if _, err := store.Update(ctx, "  ", "text", ""); err == nil ||
+		!strings.Contains(err.Error(), "id is required") {
+		t.Fatalf("Update(empty id) = %v, want an id-required error", err)
+	}
+	if _, err := store.Update(ctx, first.ID, "text", "team"); err == nil ||
+		!strings.Contains(err.Error(), "invalid scope") {
+		t.Fatalf("Update(invalid scope) = %v, want an invalid-scope error", err)
+	}
+	cancelled, cancel := context.WithCancel(ctx)
+	cancel()
+	if _, err := store.Update(cancelled, first.ID, "text", ""); err == nil {
+		t.Fatal("Update(cancelled ctx) returned nil error")
+	}
+	if list, _ := store.List(ctx); list[0].Text != "first rewritten" || list[1].Text != "rewritten" {
+		t.Fatalf("failed updates changed the store: %+v", list)
+	}
+}
+
 // TestStoreWriteFailureRollsBack covers persistence failures.
 func TestStoreWriteFailureRollsBack(t *testing.T) {
 	directory := t.TempDir()
@@ -513,6 +676,12 @@ func TestStoreWriteFailureRollsBack(t *testing.T) {
 	}
 	if list, _ := store.List(ctx); len(list) != 1 || list[0].ID != first.ID {
 		t.Fatalf("store after failed Remove = %+v, want the entry kept", list)
+	}
+	if _, err := store.Update(ctx, first.ID, "changed", ""); err == nil {
+		t.Fatal("Update with an unwritable target returned nil error")
+	}
+	if list, _ := store.List(ctx); len(list) != 1 || list[0].Text != "first" {
+		t.Fatalf("store after failed Update = %+v, want the entry rolled back", list)
 	}
 }
 

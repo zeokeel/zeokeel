@@ -224,14 +224,22 @@ func TestSessionGoalPauseChipAndAutoContinue(t *testing.T) {
 		t.Fatalf("Set: %v", err)
 	}
 	harness.tester.Frame()
-	requireHasTexts(t, harness.tester, "目标", "Pausable goal", "暂停目标", "清除目标")
+	requireHasTexts(t, harness.tester, "目标", "Pausable goal")
 
-	// Pause through the chip: the badge changes and the action becomes Resume.
+	// The goal actions live in the chip's popover.
+	if err := harness.tester.Click("目标"); err != nil {
+		t.Fatalf("open goal menu: %v; texts = %v", err, harness.tester.Texts())
+	}
+	harness.tester.Frame()
+	requireHasTexts(t, harness.tester, "暂停目标", "删除目标记录")
+
+	// Pause through the chip menu: the chip label changes; Resume lives in the
+	// same menu.
 	if err := harness.tester.Click("暂停目标"); err != nil {
 		t.Fatalf("click pause: %v; texts = %v", err, harness.tester.Texts())
 	}
 	harness.tester.Frame()
-	requireHasTexts(t, harness.tester, "目标已暂停", "继续目标")
+	requireHasTexts(t, harness.tester, "目标已暂停", "Pausable goal")
 
 	// A settled run with a paused goal must not auto-continue.
 	harness.settle(t)
@@ -243,6 +251,11 @@ func TestSessionGoalPauseChipAndAutoContinue(t *testing.T) {
 	requireHasText(t, harness.tester, "Pausable goal")
 
 	// Resume: the next settled run continues again.
+	if err := harness.tester.Click("目标已暂停"); err != nil {
+		t.Fatalf("reopen goal menu: %v; texts = %v", err, harness.tester.Texts())
+	}
+	harness.tester.Frame()
+	requireHasText(t, harness.tester, "继续目标")
 	if err := harness.tester.Click("继续目标"); err != nil {
 		t.Fatalf("click resume: %v; texts = %v", err, harness.tester.Texts())
 	}
@@ -264,7 +277,12 @@ func TestSessionGoalPauseChipAndAutoContinue(t *testing.T) {
 	plain := startGoalAuto(t, "true")
 	plain.goal.install("goal-plain", "Plain goal")
 	plain.tester.Frame()
-	requireHasTexts(t, plain.tester, "目标", "Plain goal", "清除目标")
+	requireHasTexts(t, plain.tester, "目标", "Plain goal")
+	if err := plain.tester.Click("目标"); err != nil {
+		t.Fatalf("open plain goal menu: %v; texts = %v", err, plain.tester.Texts())
+	}
+	plain.tester.Frame()
+	requireHasText(t, plain.tester, "删除目标记录")
 	requireNoText(t, plain.tester, "暂停目标")
 	requireNoText(t, plain.tester, "继续目标")
 }

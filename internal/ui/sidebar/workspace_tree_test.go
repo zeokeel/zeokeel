@@ -110,7 +110,7 @@ func TestWorkspaceTreeGroupsAndIndent(t *testing.T) {
 	h.assertTexts(tester, "工作区", "项目一", "项目二", "未分组",
 		"A 会话", "B 会话", "C 会话", "D 会话", "E 会话")
 	// The "工作区" header replaces the flat "会话" section label (the search
-	// field's "搜索会话" is a different, longer text node).
+	// field's "搜索会话与消息" is a different, longer text node).
 	if got := countText(tester, "会话"); got != 0 {
 		t.Fatalf("flat section label still rendered %d times; texts = %v", got, tester.Texts())
 	}
@@ -188,13 +188,13 @@ func TestWorkspaceTreeSearchAcrossGroups(t *testing.T) {
 	tester := h.tester()
 	h.assertTexts(tester, "A 会话", "C 会话", "D 会话")
 
-	clickLabel(t, tester, "搜索会话")
+	clickLabel(t, tester, "搜索会话与消息")
 	tester.Type("C 会话")
 	tester.Frame()
 	h.assertTexts(tester, "项目二", "C 会话")
 	h.assertNoTexts(tester, "项目一", "A 会话", "B 会话", "未分组", "D 会话", "E 会话")
 
-	clickLabel(t, tester, "搜索会话")
+	clickLabel(t, tester, "搜索会话与消息")
 	tester.Key(ui.Cmd, ui.KeyA)
 	tester.Key(0, ui.KeyBackspace)
 	tester.Frame()

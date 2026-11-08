@@ -33,7 +33,7 @@ func TestHomeRendersInjectionPointRegions(t *testing.T) {
 
 	tester := h.tester()
 	h.assertTexts(tester, "编译期模块化的桌面 AI agent。",
-		"这是 home 的默认 Hero 空态。", "向 ZeoKeel 提问…", "开始新对话")
+		"这是 home 的默认 Hero 空态。", "问点什么…")
 
 	// A third-party contribution to home.hero replaces the module's default
 	// hero; home is not edited for this.
@@ -128,9 +128,9 @@ func TestToolcardsRenderDemoCall(t *testing.T) {
 	h.assertTexts(tester, "还没有 demo 工具卡渲染器（由 ui/toolcards 模块提供）。")
 }
 
-// TestAboutExtendsSettingsSurface proves a module can contribute a settings
-// page and extend the settings header slot without changing the host: the host
-// renders settings.header for every page and about's item appears there.
+// TestAboutExtendsSettingsSurface proves a module can contribute a settings page
+// without changing the host; the page itself carries the build identity (the
+// old settings.header build-metadata item was removed by the design review).
 func TestAboutExtendsSettingsSurface(t *testing.T) {
 	h := newHarness(t)
 	aboutFiber := activate(t, h.ctx, about.Module(), about.Config{})
@@ -140,7 +140,6 @@ func TestAboutExtendsSettingsSurface(t *testing.T) {
 		"关于",                   // sidebar page + page title
 		"关于 ZeoKeel",           // page header (title + app name)
 		"构建信息",                 // page body section
-		"ZeoKeel v0.1.0",       // settings.header slot item contributed by about
 		"2026-01-01T00:00:00Z", // build time from appinfo config
 	)
 
@@ -148,7 +147,7 @@ func TestAboutExtendsSettingsSurface(t *testing.T) {
 		t.Fatalf("dispose about: %v", err)
 	}
 	tester.Frame()
-	h.assertNoTexts(tester, "构建信息", "ZeoKeel v0.1.0")
+	h.assertNoTexts(tester, "构建信息", "关于 ZeoKeel")
 	h.assertTexts(tester, "还没有注册任何设置页。") // host empty state
 }
 

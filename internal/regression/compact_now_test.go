@@ -158,13 +158,23 @@ func (c *compactScriptChat) setCompactResult(result contracts.CompactResult, err
 // startCompactSessionUI boots the session screen over chat.
 func startCompactSessionUI(t *testing.T, chat contracts.ChatService) (*harness, *ui.Tester) {
 	t.Helper()
+	h, tester, _ := startCompactSessionUIWith(t, chat)
+	return h, tester
+}
+
+// startCompactSessionUIWith also returns the capture notifier: a successful
+// compaction reports through a transient toast, not a resident notice.
+func startCompactSessionUIWith(t *testing.T, chat contracts.ChatService) (*harness, *ui.Tester, *fakeNotifier) {
+	t.Helper()
 	h := newBareHarness(t)
+	notifier := &fakeNotifier{}
 	provide(t, h.ctx, contracts.KeyChat, chat)
+	provide(t, h.ctx, contracts.KeyNotifier, contracts.Notifier(notifier))
 	activate(t, h.ctx, sessionui.Module(), sessionui.Config{})
 	h.push(sessionui.ScreenID)
 	tester := h.tester(1280, 800)
 	tester.Frame()
-	return h, tester
+	return h, tester, notifier
 }
 
 // pumpCompactNotice renders frames until the composer shows text.
@@ -204,7 +214,7 @@ func TestCompactCommand(t *testing.T) {
 			{ID: "m3", Role: contracts.ChatRoleUser, Text: "follow up"},
 			{ID: "m4", Role: contracts.ChatRoleAssistant, Text: "final"},
 		}}, true)
-	h, tester := startCompactSessionUI(t, contracts.ChatService(chat))
+	h, tester, notifier := startCompactSessionUIWith(t, contracts.ChatService(chat))
 	command = sessionCommandByID(t, h, "zeokeel.session.compact")
 	if !command.Enabled() {
 		t.Fatalf("compact command disabled for a compactable session")
@@ -213,8 +223,12 @@ func TestCompactCommand(t *testing.T) {
 	if err := command.Run(); err != nil {
 		t.Fatalf("Run /compact: %v", err)
 	}
-	pumpCompactNotice(t, h, tester, "已压缩：4 条 → 2 条")
-	requireHasText(t, tester, "（100 → 40 tokens）")
+	// The compaction result arrives through runtime.Post: render frames while
+	// waiting for the toast.
+	waitFor(t, "compact toast", func() bool {
+		tester.Frame()
+		return toastMatches(notifier, "已压缩：4 条 → 2 条", "（100 → 40 tokens）")
+	})
 	if chat.calls != 1 {
 		t.Fatalf("compact calls = %d, want 1", chat.calls)
 	}

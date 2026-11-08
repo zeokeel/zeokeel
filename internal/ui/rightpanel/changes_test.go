@@ -63,7 +63,7 @@ func (d *differWorkspace) callCount() int {
 func TestChangesPaneWithoutBackend(t *testing.T) {
 	h := newHarness(t, newFakeChat(), rightpanel.Config{})
 	tester := h.tester()
-	h.click(tester, "变更")
+	h.selectPane(tester, "变更")
 	h.assertTexts(tester, "工作区未启用")
 }
 
@@ -72,14 +72,14 @@ func TestChangesPaneWithoutDiffer(t *testing.T) {
 	// optional WorkspaceDiffer.
 	h := newHarnessWithWorkspace(t, newFakeChat(), rightpanel.Config{}, filesTreeWorkspace())
 	tester := h.tester()
-	h.click(tester, "变更")
+	h.selectPane(tester, "变更")
 	h.assertTexts(tester, "当前工作区不支持变更视图")
 }
 
 func TestChangesPaneWithoutWorkspace(t *testing.T) {
 	h := newHarnessWithWorkspace(t, newFakeChat(), rightpanel.Config{}, newDifferWorkspaceWithoutCurrent())
 	tester := h.tester()
-	h.click(tester, "变更")
+	h.selectPane(tester, "变更")
 	h.assertTexts(tester, "还没有打开工作区")
 }
 
@@ -102,7 +102,7 @@ func TestChangesListStatsAndExpand(t *testing.T) {
 	)
 	h := newHarnessWithWorkspace(t, newFakeChat(), rightpanel.Config{}, workspace)
 	tester := h.tester()
-	h.click(tester, "变更")
+	h.selectPane(tester, "变更")
 
 	h.assertTexts(tester,
 		"变更", "main.go", "added.txt", "gone.go", "renamed.go", "untracked.md",
@@ -128,7 +128,7 @@ func TestChangesListStatsAndExpand(t *testing.T) {
 func TestChangesEmpty(t *testing.T) {
 	h := newHarnessWithWorkspace(t, newFakeChat(), rightpanel.Config{}, newDifferWorkspace())
 	tester := h.tester()
-	h.click(tester, "变更")
+	h.selectPane(tester, "变更")
 	h.assertTexts(tester, "工作区没有未提交的变更")
 }
 
@@ -137,7 +137,7 @@ func TestChangesError(t *testing.T) {
 	workspace.err = errors.New("not a git repository")
 	h := newHarnessWithWorkspace(t, newFakeChat(), rightpanel.Config{}, workspace)
 	tester := h.tester()
-	h.click(tester, "变更")
+	h.selectPane(tester, "变更")
 	h.assertTexts(tester, "读取变更失败：not a git repository")
 }
 
@@ -145,7 +145,7 @@ func TestChangesRefreshReloads(t *testing.T) {
 	workspace := newDifferWorkspace(contracts.FileChange{Path: "first.go", Status: "M", Diff: ""})
 	h := newHarnessWithWorkspace(t, newFakeChat(), rightpanel.Config{}, workspace)
 	tester := h.tester()
-	h.click(tester, "变更")
+	h.selectPane(tester, "变更")
 	if calls := workspace.callCount(); calls != 1 {
 		t.Fatalf("Changes calls = %d, want 1 after opening the pane", calls)
 	}
@@ -172,7 +172,7 @@ func TestChangesDiffTruncation(t *testing.T) {
 	workspace := newDifferWorkspace(contracts.FileChange{Path: "big.go", Status: "M", Diff: builder.String()})
 	h := newHarnessWithWorkspace(t, newFakeChat(), rightpanel.Config{}, workspace)
 	tester := h.tester()
-	h.click(tester, "变更")
+	h.selectPane(tester, "变更")
 	h.assertTexts(tester, "+450") // the stat counter still counts every line
 	if err := tester.Click("查看 diff"); err != nil {
 		t.Fatalf("expand diff: %v", err)
@@ -186,7 +186,7 @@ func TestChangesCustomTabLabel(t *testing.T) {
 	workspace := newDifferWorkspace()
 	h := newHarnessWithWorkspace(t, newFakeChat(), rightpanel.Config{ChangesTab: "Changes"}, workspace)
 	tester := h.tester()
-	h.assertTexts(tester, "Changes")
-	h.click(tester, "Changes")
-	h.assertTexts(tester, "工作区没有未提交的变更")
+	h.selectPane(tester, "Changes")
+	// The compact pane picker names the pane that shows.
+	h.assertTexts(tester, "Changes", "工作区没有未提交的变更")
 }

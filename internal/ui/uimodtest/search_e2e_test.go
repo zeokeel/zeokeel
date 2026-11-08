@@ -51,7 +51,7 @@ func TestMessageSearchEndToEnd(t *testing.T) {
 
 	tester := ui.NewTester(uiRoot.View, 1280, 800)
 	tester.Frame()
-	field, ok := tester.Find("搜索会话")
+	field, ok := tester.Find("搜索会话与消息")
 	if !ok {
 		t.Fatalf("sidebar search field missing; texts = %v", tester.Texts())
 	}

@@ -134,7 +134,7 @@ func TestUpdatePageWithoutBackend(t *testing.T) {
 	tester := h.tester()
 	tester.Frame()
 	h.click(tester, "更新")
-	h.assertTexts(tester, "更新", "自动替换暂不支持", "当前版本", "dev", "更新服务未启用")
+	h.assertTexts(tester, "更新", "检查更新并下载安装包", "当前版本", "dev", "更新服务未启用")
 	// The description mentions 检查更新; the action button itself must be absent.
 	if got := exactTextCount(tester.Texts(), "检查更新"); got != 0 {
 		t.Fatalf("检查更新 button labels = %d, want 0; texts = %v", got, tester.Texts())

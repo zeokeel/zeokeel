@@ -1,7 +1,9 @@
 package toasts
 
-// Frame tests (written before the implementation, TDD) for the toast overlay
-// module: rendering, dismissal, the four-toast cap, expiry and disposal.
+// Frame tests for the notification bridge: notifications become mygo's native
+// toasts (the framework owns fading, hover pause, Escape, announcements,
+// stacking and the timeout), while the product's notification switches still
+// filter levels.
 
 import (
 	"sync"
@@ -155,47 +157,156 @@ func (h *harness) assertNoTexts(tester *ui.Tester, unwanted ...string) {
 	}
 }
 
-func (h *harness) click(tester *ui.Tester, label string) {
-	h.t.Helper()
-	if err := tester.Click(label); err != nil {
-		h.t.Fatalf("click %q: %v; texts = %v", label, err, tester.Texts())
+// countText counts how often text shows in the frame.
+func countText(tester *ui.Tester, text string) int {
+	count := 0
+	for _, shown := range tester.Texts() {
+		if shown == text {
+			count++
+		}
 	}
-	tester.Frame()
+	return count
 }
 
-// withToastTTL overrides the auto-dismiss duration for one test.
-func withToastTTL(t *testing.T, ttl time.Duration) {
-	t.Helper()
-	previous := toastTTL
-	toastTTL = ttl
-	t.Cleanup(func() { toastTTL = previous })
-}
+// --- native toasts ----------------------------------------------------------
 
-// --- tests ------------------------------------------------------------------
-
-func TestToastRendersTextAndLevel(t *testing.T) {
+func TestNotificationBecomesBrandedNativeToast(t *testing.T) {
 	h := newHarness(t, "zh")
 	tester := h.tester()
 	h.notifier.trigger(contracts.Notification{ID: "n1", Level: contracts.NotifyError, Text: "导出失败"})
 	tester.Frame()
-	h.assertTexts(tester, "导出失败", "错误", "×")
+	// The native ToastBase renders our branded look: the level (icon + label),
+	// the copy and a close control, all owned by the framework's toast.
+	h.assertTexts(tester, "导出失败", "错误", "关闭通知")
+	if got := countText(tester, "导出失败"); got != 1 {
+		t.Fatalf("queued toast rendered %d times in one frame; texts = %v", got, tester.Texts())
+	}
+
+	// Further frames neither duplicate nor re-add the drained notification.
+	tester.Frame()
+	if got := countText(tester, "导出失败"); got != 1 {
+		t.Fatalf("toast rendered %d times after two frames; texts = %v", got, tester.Texts())
+	}
 }
 
-func TestToastCloseDismisses(t *testing.T) {
+func TestToastLevelVisualsAndEnglishCopy(t *testing.T) {
+	cases := []struct {
+		level string
+		label string
+	}{
+		{contracts.NotifyInfo, "提示"},
+		{contracts.NotifySuccess, "成功"},
+		{contracts.NotifyWarning, "警告"},
+		{contracts.NotifyError, "错误"},
+	}
+	for _, tc := range cases {
+		h := newHarness(t, "zh")
+		tester := h.tester()
+		h.notifier.trigger(contracts.Notification{ID: "n-" + tc.level, Level: tc.level, Text: "级别"})
+		tester.Frame()
+		h.assertTexts(tester, tc.label)
+	}
+
+	h := newHarness(t, "en")
+	tester := h.tester()
+	h.notifier.trigger(contracts.Notification{ID: "n-en", Level: contracts.NotifyError, Text: "export failed"})
+	tester.Frame()
+	h.assertTexts(tester, "Error", "Close notification", "export failed")
+}
+
+func TestToastActionRendersAndRuns(t *testing.T) {
+	// contracts.ActionNotifier: the toast shows the action label and running it
+	// calls the notification's callback on the UI thread, then closes the toast.
 	h := newHarness(t, "zh")
 	tester := h.tester()
-	h.notifier.trigger(contracts.Notification{ID: "n1", Level: contracts.NotifyInfo, Text: "提示消息"})
+	calls := 0
+	h.notifier.trigger(contracts.Notification{
+		ID: "n1", Level: contracts.NotifySuccess, Text: "已删除任务",
+		ActionLabel: "撤销", Action: func() { calls++ },
+	})
 	tester.Frame()
-	h.assertTexts(tester, "提示消息")
+	h.assertTexts(tester, "已删除任务", "撤销")
 
-	h.click(tester, "×")
-	h.assertNoTexts(tester, "提示消息")
+	if err := tester.Click("撤销"); err != nil {
+		t.Fatalf("click toast action: %v; texts = %v", err, tester.Texts())
+	}
+	tester.Frame()
+	if calls != 1 {
+		t.Fatalf("action calls = %d, want 1", calls)
+	}
+	h.assertNoTexts(tester, "已删除任务")
+}
+
+func TestToastCloseButtonDismisses(t *testing.T) {
+	h := newHarness(t, "zh")
+	tester := h.tester()
+	h.notifier.trigger(contracts.Notification{ID: "n1", Level: contracts.NotifyInfo, Text: "可关闭"})
+	tester.Frame()
+	h.assertTexts(tester, "可关闭")
+
+	if err := tester.Click("关闭通知"); err != nil {
+		t.Fatalf("click toast close: %v; texts = %v", err, tester.Texts())
+	}
+	tester.Frame()
+	h.assertNoTexts(tester, "可关闭")
 	if ids := h.notifier.dismissedIDs(); len(ids) != 1 || ids[0] != "n1" {
 		t.Fatalf("Dismiss calls = %v, want [n1]", ids)
 	}
 }
 
-func TestToastMaxFourNewestWin(t *testing.T) {
+func TestToastStackClearsComposerHeight(t *testing.T) {
+	// The stack sits in the bottom-right corner above the conversation
+	// composer: its copy ends at least the composer inset above the window
+	// bottom, so a toast can never cover the send row.
+	h := newHarness(t, "zh")
+	tester := h.tester()
+	h.notifier.trigger(contracts.Notification{ID: "n1", Level: contracts.NotifyInfo, Text: "不遮挡输入区"})
+	tester.Frame()
+	rect, ok := tester.Find("不遮挡输入区")
+	if !ok {
+		t.Fatalf("toast text missing; texts = %v", tester.Texts())
+	}
+	const windowHeight = 800
+	if bottom := rect.Y + rect.H; bottom > windowHeight-toastBottomInset+1 {
+		t.Fatalf("toast bottom = %.1f, want it above the composer reserve (%.1f)", bottom, windowHeight-toastBottomInset)
+	}
+}
+
+func TestNotificationLevelMapsToNativeType(t *testing.T) {
+	cases := map[string]string{
+		contracts.NotifyInfo:    "info",
+		contracts.NotifySuccess: "success",
+		contracts.NotifyWarning: "warning",
+		contracts.NotifyError:   "error",
+		"":                      "",
+		"custom-level":          "",
+		" ERROR ":               "error",
+	}
+	for level, want := range cases {
+		if got := notificationType(level); got != want {
+			t.Errorf("notificationType(%q) = %q, want %q", level, got, want)
+		}
+	}
+}
+
+func TestToastExpiresThroughTheFramework(t *testing.T) {
+	h := newHarness(t, "zh")
+	tester := h.tester()
+	h.notifier.trigger(contracts.Notification{ID: "n1", Level: contracts.NotifySuccess, Text: "自动消失"})
+	tester.Frame()
+	h.assertTexts(tester, "自动消失")
+
+	// The module keeps no TTL goroutine: advancing the tester's clock past the
+	// toast timeout runs the framework's expiry frame.
+	tester.Advance(5 * time.Second)
+	tester.Frame()
+	h.assertNoTexts(tester, "自动消失")
+	if ids := h.notifier.dismissedIDs(); len(ids) == 0 || ids[0] != "n1" {
+		t.Fatalf("native toast close did not dismiss the notifier entry; dismissed = %v", h.notifier.dismissedIDs())
+	}
+}
+
+func TestToastShowsAtMostTwoAndQueuesRest(t *testing.T) {
 	h := newHarness(t, "zh")
 	tester := h.tester()
 	for index := 1; index <= 5; index++ {
@@ -207,42 +318,20 @@ func TestToastMaxFourNewestWin(t *testing.T) {
 	}
 	tester.Frame()
 
-	h.assertTexts(tester, "消息2", "消息3", "消息4", "消息5")
-	h.assertNoTexts(tester, "消息1")
-}
+	// H14: at most two toasts show at once; the rest wait in the module's queue
+	// with a visible count so a burst never stacks over the transcript.
+	h.assertTexts(tester, "消息1", "消息2", "+ 3 条通知排队")
+	h.assertNoTexts(tester, "消息3", "消息4", "消息5")
 
-func TestToastExpires(t *testing.T) {
-	withToastTTL(t, 25*time.Millisecond)
-	h := newHarness(t, "zh")
-	tester := h.tester()
-	h.notifier.trigger(contracts.Notification{ID: "n1", Level: contracts.NotifySuccess, Text: "自动消失"})
+	// As the front toasts expire, queued notifications take their slots.
+	tester.Advance(5 * time.Second)
 	tester.Frame()
-	h.assertTexts(tester, "自动消失")
+	h.assertTexts(tester, "消息3", "消息4", "+ 1 条通知排队")
+	h.assertNoTexts(tester, "消息1", "消息2", "消息5")
 
-	deadline := time.Now().Add(2 * time.Second)
-	for {
-		tester.Frame()
-		if !tester.HasText("自动消失") {
-			break
-		}
-		if time.Now().After(deadline) {
-			t.Fatalf("toast did not expire; texts = %v", tester.Texts())
-		}
-		time.Sleep(5 * time.Millisecond)
-	}
-	// Expiry must release the notifier entry too (not just the local stack).
-	deadline = time.Now().Add(2 * time.Second)
-	for {
-		for _, id := range h.notifier.dismissedIDs() {
-			if id == "n1" {
-				return
-			}
-		}
-		if time.Now().After(deadline) {
-			t.Fatalf("expired toast did not dismiss notifier id; dismissed = %v", h.notifier.dismissedIDs())
-		}
-		time.Sleep(5 * time.Millisecond)
-	}
+	tester.Advance(5 * time.Second)
+	tester.Frame()
+	h.assertTexts(tester, "消息5")
 }
 
 func TestToastDisposeClearsHandler(t *testing.T) {
@@ -250,6 +339,7 @@ func TestToastDisposeClearsHandler(t *testing.T) {
 	tester := h.tester()
 	h.notifier.trigger(contracts.Notification{ID: "n1", Level: contracts.NotifyInfo, Text: "待清理"})
 	tester.Frame()
+	h.assertTexts(tester, "待清理")
 
 	if err := h.fiber.Dispose(); err != nil {
 		t.Fatalf("dispose: %v", err)
@@ -257,16 +347,20 @@ func TestToastDisposeClearsHandler(t *testing.T) {
 	if !h.notifier.isCleared() {
 		t.Fatal("dispose did not clear the notifier handler")
 	}
+	// A disposed module queues nothing new.
+	h.notifier.trigger(contracts.Notification{ID: "n2", Level: contracts.NotifyInfo, Text: "不应出现"})
+	tester.Advance(5 * time.Second)
 	tester.Frame()
-	h.assertNoTexts(tester, "待清理")
+	h.assertNoTexts(tester, "待清理", "不应出现")
 }
 
-func TestToastEnglishCopy(t *testing.T) {
-	h := newHarness(t, "en")
+func TestToastIgnoresEmptyPayload(t *testing.T) {
+	h := newHarness(t, "zh")
 	tester := h.tester()
-	h.notifier.trigger(contracts.Notification{ID: "n1", Level: contracts.NotifyWarning, Text: "careful"})
+	h.notifier.trigger(contracts.Notification{ID: "n1", Level: contracts.NotifyInfo, Text: "   "})
 	tester.Frame()
-	h.assertTexts(tester, "careful", "Warning")
+	h.assertNoTexts(tester, "   ")
+	h.assertTexts(tester, "主屏幕")
 }
 
 // --- helpers ----------------------------------------------------------------
@@ -430,6 +524,7 @@ func TestToastHiddenLevelsLiveSwitch(t *testing.T) {
 	tester.Frame()
 	h.assertTexts(tester, "旧成功")
 
+	// Hiding a level closes the native toast already showing it.
 	_ = settings.Set(contracts.SettingNotificationHiddenLevels, `["success"]`)
 	tester.Frame()
 	h.assertNoTexts(tester, "旧成功")

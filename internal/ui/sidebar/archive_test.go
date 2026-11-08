@@ -5,8 +5,10 @@ package sidebar_test
 // "已归档" row badge and the per-group counts.
 
 import (
+	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/zeokeel/zeokeel/internal/contracts"
 	"github.com/zeokeel/zeokeel/internal/ui/sidebar"
@@ -107,137 +109,132 @@ func archivedSession(id, title string) contracts.ChatSessionInfo {
 
 // --- tests ------------------------------------------------------------------
 
-func TestArchivedHiddenByDefault(t *testing.T) {
-	chat := newArchiveChat(
-		contracts.ChatSessionInfo{ID: "s1", Title: "普通会话"},
-		archivedSession("s2", "归档会话"),
-	)
-	settings := newSidebarSettings(nil)
-	h := newHarnessWithSettings(t, chat, settings, sidebar.Config{})
-	tester := h.tester()
-
-	h.assertTexts(tester, "普通会话", "显示已归档")
-	h.assertNoTexts(tester, "归档会话")
-	if got := countText(tester, "已归档"); got != 0 {
-		t.Fatalf("已归档 badges = %d, want 0; texts = %v", got, tester.Texts())
-	}
-}
-
-func TestArchivedShownAndSortedLast(t *testing.T) {
-	settings := newSidebarSettings(map[string]string{
-		contracts.SettingSessionsShowArchived: "true",
-	})
-	chat := newArchiveChat(
-		archivedSession("s1", "归档一"),
-		contracts.ChatSessionInfo{ID: "s2", Title: "置顶普通", Pinned: true},
-		contracts.ChatSessionInfo{ID: "s3", Title: "普通二"},
-		archivedSession("s4", "归档二"),
-	)
-	h := newHarnessWithSettings(t, chat, settings, sidebar.Config{})
-	tester := h.tester()
-
-	h.assertTexts(tester, "归档一", "置顶普通", "普通二", "归档二", "已归档", "隐藏已归档")
-	if got := countText(tester, "已归档"); got != 2 {
-		t.Fatalf("已归档 badges = %d, want 2; texts = %v", got, tester.Texts())
-	}
-	texts := tester.Texts()
-	pinned, plain, archivedOne, archivedTwo := textIndex(texts, "置顶普通"),
-		textIndex(texts, "普通二"), textIndex(texts, "归档一"), textIndex(texts, "归档二")
-	if !(pinned >= 0 && pinned < plain && plain < archivedOne && archivedOne < archivedTwo) {
-		t.Fatalf("archive order wrong: pinned=%d plain=%d arch1=%d arch2=%d; texts = %v",
-			pinned, plain, archivedOne, archivedTwo, texts)
-	}
-}
-
-func TestArchiveMenuTogglesState(t *testing.T) {
-	t.Run("archive", func(t *testing.T) {
-		chat := newArchiveChat(contracts.ChatSessionInfo{ID: "s1", Title: "会话一"})
-		h := newHarness(t, chat, sidebar.Config{})
-		tester := h.tester()
-		openRowMenu(t, tester)
-		h.assertTexts(tester, "归档会话")
-		h.click(tester, "归档会话")
-
-		calls := chat.archiveCalls()
-		if len(calls) != 1 || calls[0].id != "s1" || !calls[0].archived {
-			t.Fatalf("SetSessionArchived calls = %+v, want s1/true", calls)
-		}
-		// Hidden again by default: the row and its badge disappear.
-		h.assertNoTexts(tester, "会话一", "已归档")
-	})
-
-	t.Run("unarchive", func(t *testing.T) {
-		settings := newSidebarSettings(map[string]string{
-			contracts.SettingSessionsShowArchived: "true",
-		})
-		chat := newArchiveChat(archivedSession("s2", "归档会话"))
+func TestArchivedSessionsNeverAppearInSidebar(t *testing.T) {
+	// Even with the legacy settings row set, archived sessions stay out of the
+	// sidebar: the settings surface's archive page owns them now.
+	for _, settings := range []*sidebarSettings{
+		newSidebarSettings(nil),
+		newSidebarSettings(map[string]string{contracts.SettingSessionsShowArchived: "true"}),
+	} {
+		chat := newArchiveChat(
+			contracts.ChatSessionInfo{ID: "s1", Title: "普通会话"},
+			archivedSession("s2", "归档会话"),
+		)
 		h := newHarnessWithSettings(t, chat, settings, sidebar.Config{})
 		tester := h.tester()
-		h.assertTexts(tester, "归档会话", "已归档")
-		openRowMenu(t, tester)
-		h.assertTexts(tester, "取消归档")
-		h.click(tester, "取消归档")
-
-		calls := chat.archiveCalls()
-		if len(calls) != 1 || calls[0].id != "s2" || calls[0].archived {
-			t.Fatalf("SetSessionArchived calls = %+v, want s2/false", calls)
-		}
-		if got := countText(tester, "已归档"); got != 0 {
-			t.Fatalf("已归档 badges = %d after unarchive, want 0; texts = %v", got, tester.Texts())
-		}
-	})
+		h.assertTexts(tester, "普通会话")
+		h.assertNoTexts(tester, "归档会话", "已归档", "显示已归档", "隐藏已归档")
+	}
 }
 
-func TestArchivedFooterToggle(t *testing.T) {
-	settings := newSidebarSettings(nil)
+func TestNoArchivedViewToggleInSidebar(t *testing.T) {
+	chat := newArchiveChat(contracts.ChatSessionInfo{ID: "s1", Title: "会话一"})
+	h := newHarnessWithSettings(t, chat, newSidebarSettings(nil), sidebar.Config{})
+	tester := h.tester()
+	h.assertTexts(tester, "设置")
+	h.assertNoTexts(tester, "显示已归档", "隐藏已归档", "Show archived", "Hide archived")
+
+	h.uiRoot.Locale().SetLanguage("en")
+	tester.Frame()
+	h.assertTexts(tester, "Settings")
+	h.assertNoTexts(tester, "显示已归档", "隐藏已归档", "Show archived", "Hide archived")
+}
+
+func TestArchivedSessionsExcludedFromMessageSearch(t *testing.T) {
 	chat := newArchiveChat(
 		contracts.ChatSessionInfo{ID: "s1", Title: "普通会话"},
 		archivedSession("s2", "归档会话"),
 	)
-	h := newHarnessWithSettings(t, chat, settings, sidebar.Config{})
+	store := &fakeStore{hits: []contracts.MessageSearchHit{
+		hit("s1", "普通会话", "user", "可见命中片段", time.Unix(1700000000, 0)),
+		hit("s2", "归档会话", "user", "归档命中片段", time.Unix(1700000001, 0)),
+	}}
+	h := newHarnessWithStore(t, chat, store, sidebar.Config{})
 	tester := h.tester()
-	h.assertTexts(tester, "显示已归档")
-	h.assertNoTexts(tester, "归档会话")
+	tester.Frame()
+	clickLabel(t, tester, "搜索会话与消息")
+	tester.Type("命中")
+	tester.Frame()
 
-	h.click(tester, "显示已归档")
-	if got := settings.get(contracts.SettingSessionsShowArchived); got != "true" {
-		t.Fatalf("persisted showArchived = %q, want true", got)
-	}
-	h.assertTexts(tester, "隐藏已归档", "归档会话", "已归档")
-
-	h.click(tester, "隐藏已归档")
-	if got := settings.get(contracts.SettingSessionsShowArchived); got != "false" {
-		t.Fatalf("persisted showArchived = %q, want false", got)
-	}
-	h.assertTexts(tester, "显示已归档")
-	h.assertNoTexts(tester, "归档会话")
+	h.assertTexts(tester, "消息搜索", "可见命中片段")
+	h.assertNoTexts(tester, "归档会话", "归档命中片段")
 }
 
-func TestArchivedGroupCountsFollowViewOption(t *testing.T) {
+func TestArchiveActionHidesSessionAndRaisesUndoToast(t *testing.T) {
+	notifier := &archiveNotifier{}
+	chat := newArchiveChat(contracts.ChatSessionInfo{ID: "s1", Title: "会话一"})
+	h := newHarnessWithNotifier(t, chat, notifier)
+	tester := h.tester()
+	openRowMenu(t, tester, "会话一")
+	h.assertTexts(tester, "归档会话")
+	h.click(tester, "归档会话")
+
+	calls := chat.archiveCalls()
+	if len(calls) != 1 || calls[0].id != "s1" || !calls[0].archived {
+		t.Fatalf("SetSessionArchived calls = %+v, want s1/true", calls)
+	}
+	h.assertNoTexts(tester, "会话一")
+
+	// The success feedback is a toast with an Undo action; invoking the action
+	// restores the session.
+	actions := notifier.actionCalls()
+	if len(actions) != 1 {
+		t.Fatalf("action toasts = %+v, want one archive notice", actions)
+	}
+	action := actions[0]
+	if action.level != contracts.NotifySuccess || !strings.Contains(action.text, "会话一") {
+		t.Fatalf("archive notice = %+v", action)
+	}
+	if action.actionLabel == "" || action.action == nil {
+		t.Fatalf("archive notice has no undo action: %+v", action)
+	}
+	action.action()
+	tester.Frame()
+	h.assertTexts(tester, "会话一")
+	calls = chat.archiveCalls()
+	if len(calls) != 2 || calls[1].id != "s1" || calls[1].archived {
+		t.Fatalf("undo calls = %+v, want s1/false", calls)
+	}
+}
+
+func TestArchiveActionFallsBackToPlainToast(t *testing.T) {
+	// A host notifier without the optional action half still gets the archive
+	// feedback, as a plain success toast.
+	notifier := &plainNotifier{}
+	chat := newArchiveChat(contracts.ChatSessionInfo{ID: "s1", Title: "会话一"})
+	h := newHarnessWithNotifier(t, chat, notifier)
+	tester := h.tester()
+	openRowMenu(t, tester, "会话一")
+	h.click(tester, "归档会话")
+
+	if len(notifier.notifications) != 1 {
+		t.Fatalf("plain notifications = %+v, want one", notifier.notifications)
+	}
+	if got := notifier.notifications[0].Level; got != contracts.NotifySuccess {
+		t.Fatalf("notification level = %q, want success", got)
+	}
+	h.assertNoTexts(tester, "会话一")
+}
+
+func TestArchivedGroupCountsExcludeArchived(t *testing.T) {
 	workspace := newFakeWorkspace(treeWorkspaces()...)
 	chat := newArchiveChat(
 		contracts.ChatSessionInfo{ID: "s1", Title: "普通一", WorkspaceID: "w1"},
 		contracts.ChatSessionInfo{ID: "s2", Title: "普通二", WorkspaceID: "w1"},
 		contracts.ChatSessionInfo{ID: "s3", Title: "归档三", WorkspaceID: "w1", Archived: true},
 	)
-
-	hidden := newSidebarSettings(nil)
-	h := newHarnessWithSettingsAndWorkspace(t, chat, hidden, workspace, sidebar.Config{})
+	h := newHarnessWithSettingsAndWorkspace(t, chat,
+		newSidebarSettings(map[string]string{contracts.SettingSessionsShowArchived: "true"}), workspace, sidebar.Config{})
 	tester := h.tester()
+	// The workspace's count is the visible sessions only (2), and the archived
+	// one never appears in the tree.
 	h.assertTexts(tester, "2")
-	h.assertNoTexts(tester, "归档三")
-
-	shown := newSidebarSettings(map[string]string{
-		contracts.SettingSessionsShowArchived: "true",
-	})
-	h2 := newHarnessWithSettingsAndWorkspace(t, chat, shown, workspace, sidebar.Config{})
-	tester2 := h2.tester()
-	h2.assertTexts(tester2, "3", "归档三", "已归档")
+	h.assertNoTexts(tester, "归档三", "已归档")
 }
 
 func TestArchiveDegradesWithoutBackends(t *testing.T) {
-	// No settings store and no SessionArchiver: archives stay hidden, the
-	// footer toggle is absent and the row menu has no archive item.
+	// No settings store and no SessionArchiver: archived sessions stay hidden
+	// and the row menu has no archive item.
 	chat := &fakeChat{sessions: []contracts.ChatSessionInfo{
 		{ID: "s1", Title: "普通会话"},
 		archivedSession("s2", "归档会话"),
@@ -246,9 +243,51 @@ func TestArchiveDegradesWithoutBackends(t *testing.T) {
 	tester := h.tester()
 	h.assertTexts(tester, "普通会话")
 	h.assertNoTexts(tester, "归档会话", "显示已归档", "隐藏已归档")
-	if got := countText(tester, "已归档"); got != 0 {
-		t.Fatalf("已归档 badges = %d, want 0; texts = %v", got, tester.Texts())
-	}
-	openRowMenu(t, tester)
+	openRowMenu(t, tester, "普通会话")
 	h.assertNoTexts(tester, "归档会话", "取消归档")
 }
+
+// --- toast doubles ----------------------------------------------------------
+
+// archiveNotifier is a host notifier with the optional ActionNotifier half: it
+// records action toasts so the archive undo path can be asserted.
+type archiveNotifier struct {
+	mu      sync.Mutex
+	actions []archiveActionCall
+}
+
+type archiveActionCall struct {
+	level       string
+	text        string
+	actionLabel string
+	action      func()
+}
+
+func (n *archiveNotifier) SetHandler(func(contracts.Notification)) {}
+func (n *archiveNotifier) Notify(level, text string) contracts.Notification {
+	return contracts.Notification{ID: "plain", Level: level, Text: text}
+}
+func (n *archiveNotifier) Dismiss(string) {}
+func (n *archiveNotifier) NotifyAction(level, text, actionLabel string, action func()) contracts.Notification {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	n.actions = append(n.actions, archiveActionCall{level: level, text: text, actionLabel: actionLabel, action: action})
+	return contracts.Notification{ID: "action", Level: level, Text: text}
+}
+func (n *archiveNotifier) actionCalls() []archiveActionCall {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	return append([]archiveActionCall(nil), n.actions...)
+}
+
+// plainNotifier is a host notifier without the optional action half.
+type plainNotifier struct {
+	notifications []contracts.Notification
+}
+
+func (n *plainNotifier) SetHandler(func(contracts.Notification)) {}
+func (n *plainNotifier) Notify(level, text string) contracts.Notification {
+	n.notifications = append(n.notifications, contracts.Notification{ID: "plain", Level: level, Text: text})
+	return n.notifications[len(n.notifications)-1]
+}
+func (n *plainNotifier) Dismiss(string) {}

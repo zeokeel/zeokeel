@@ -46,7 +46,6 @@ func runCompactCommand(chat contracts.ChatService, st *state, runtime contracts.
 	}
 	sessionID := chat.ActiveSession()
 	st.compacting = true
-	st.commandNotice = st.tr("压缩中…", "Compacting…")
 	st.commandErr = ""
 	runtime.Invalidate()
 	go func() {
@@ -54,24 +53,27 @@ func runCompactCommand(chat contracts.ChatService, st *state, runtime contracts.
 		runtime.Post(func() {
 			st.compacting = false
 			if err != nil {
-				st.commandNotice = ""
 				st.commandErr = compactErrorText(st, err)
 				runtime.Invalidate()
 				return
 			}
 			st.commandErr = ""
+			notice := ""
 			if st.english() {
-				st.commandNotice = fmt.Sprintf("Compacted: %d → %d messages", result.Replaced, result.Saved)
+				notice = fmt.Sprintf("Compacted: %d → %d messages", result.Replaced, result.Saved)
 			} else {
-				st.commandNotice = fmt.Sprintf("已压缩：%d 条 → %d 条", result.Replaced, result.Saved)
+				notice = fmt.Sprintf("已压缩：%d 条 → %d 条", result.Replaced, result.Saved)
 			}
 			if result.BeforeTokens > 0 || result.AfterTokens > 0 {
 				if st.english() {
-					st.commandNotice += fmt.Sprintf(" (%d → %d tokens)", result.BeforeTokens, result.AfterTokens)
+					notice += fmt.Sprintf(" (%d → %d tokens)", result.BeforeTokens, result.AfterTokens)
 				} else {
-					st.commandNotice += fmt.Sprintf("（%d → %d tokens）", result.BeforeTokens, result.AfterTokens)
+					notice += fmt.Sprintf("（%d → %d tokens）", result.BeforeTokens, result.AfterTokens)
 				}
 			}
+			// The completed compaction is a transient toast, never a resident
+			// status badge in the composer.
+			st.toast(contracts.NotifySuccess, notice)
 			runtime.Invalidate()
 		})
 	}()

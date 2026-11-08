@@ -155,9 +155,7 @@ func TestAgentsTabEmptyStateWithoutService(t *testing.T) {
 	h := newAgentsHarness(t, newFakeChat(), rightpanel.Config{}, nil, "zh")
 	tester := h.tester()
 	tester.Frame()
-	h.assertTexts(tester, "团队")
-
-	h.click(tester, "团队")
+	h.selectPane(tester, "团队")
 	h.assertTexts(tester, "团队服务未启用")
 }
 
@@ -165,7 +163,7 @@ func TestAgentsListRendersMembers(t *testing.T) {
 	h := newAgentsHarness(t, newFakeChat(), rightpanel.Config{}, newFakeTeam(), "zh")
 	tester := h.tester()
 	tester.Frame()
-	h.click(tester, "团队")
+	h.selectPane(tester, "团队")
 
 	h.assertTexts(tester, "研究员", "member-1", "运行中", "已整理三份资料",
 		"审阅者", "member-2", "已中断", "还没有结果")
@@ -175,6 +173,7 @@ func TestAgentsCustomTabLabel(t *testing.T) {
 	h := newAgentsHarness(t, newFakeChat(), rightpanel.Config{AgentsTab: "Crew"}, newFakeTeam(), "zh")
 	tester := h.tester()
 	tester.Frame()
+	h.selectPane(tester, "Crew")
 	h.assertTexts(tester, "Crew")
 	h.assertNoTexts(tester, "团队")
 }
@@ -184,7 +183,7 @@ func TestAgentsSelectThenSend(t *testing.T) {
 	h := newAgentsHarness(t, newFakeChat(), rightpanel.Config{}, team, "zh")
 	tester := h.tester()
 	tester.Frame()
-	h.click(tester, "团队")
+	h.selectPane(tester, "团队")
 
 	selectAgent(t, h, tester, "研究员")
 	h.assertTexts(tester, "发送", "中断", "关闭")
@@ -203,7 +202,7 @@ func TestAgentsInterruptAndClose(t *testing.T) {
 	h := newAgentsHarness(t, newFakeChat(), rightpanel.Config{}, team, "zh")
 	tester := h.tester()
 	tester.Frame()
-	h.click(tester, "团队")
+	h.selectPane(tester, "团队")
 	selectAgent(t, h, tester, "研究员")
 
 	h.click(tester, "中断")
@@ -213,7 +212,14 @@ func TestAgentsInterruptAndClose(t *testing.T) {
 	h.assertTexts(tester, "已中断")
 
 	selectAgent(t, h, tester, "审阅者")
+	// Closing a teammate is destructive: the button opens the native
+	// confirmation and only the dialog's action closes it.
 	h.click(tester, "关闭")
+	if got := team.closed(); len(got) != 0 {
+		t.Fatalf("Close calls before confirming = %v, want none", got)
+	}
+	h.assertTexts(tester, "关闭队友", "确认关闭")
+	h.click(tester, "确认关闭")
 	if got := team.closed(); len(got) != 1 || got[0] != "member-2" {
 		t.Fatalf("Close calls = %v, want [member-2]", got)
 	}
@@ -225,7 +231,7 @@ func TestAgentsSendErrorShown(t *testing.T) {
 	h := newAgentsHarness(t, newFakeChat(), rightpanel.Config{}, team, "zh")
 	tester := h.tester()
 	tester.Frame()
-	h.click(tester, "团队")
+	h.selectPane(tester, "团队")
 	selectAgent(t, h, tester, "研究员")
 	typeSteer(t, h, tester, "hi")
 	h.click(tester, "发送")
@@ -242,7 +248,7 @@ func TestAgentsInterruptErrorShown(t *testing.T) {
 	h := newAgentsHarness(t, newFakeChat(), rightpanel.Config{}, team, "zh")
 	tester := h.tester()
 	tester.Frame()
-	h.click(tester, "团队")
+	h.selectPane(tester, "团队")
 	selectAgent(t, h, tester, "研究员")
 	h.click(tester, "中断")
 	h.assertTexts(tester, "中断失败：not running")
@@ -252,8 +258,8 @@ func TestAgentsEnglishCopy(t *testing.T) {
 	h := newAgentsHarness(t, newFakeChat(), rightpanel.Config{}, newFakeTeam(), "en")
 	tester := h.tester()
 	tester.Frame()
+	h.selectPane(tester, "Agents")
 	h.assertTexts(tester, "Agents")
-	h.click(tester, "Agents")
 
 	h.assertTexts(tester, "研究员", "member-1", "Running", "已整理三份资料",
 		"审阅者", "Interrupted", "No result yet",

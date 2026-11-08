@@ -29,17 +29,36 @@ const (
 // logLimit bounds the session event rows the Log pane reads per frame.
 const logLimit = 50
 
-// buildPanel renders the whole inspector for one frame: heading, the native
-// pane tabs and the selected pane. The host owns the panel width; the module
-// fills it.
+// paneLabels returns the pane names in tab order, localized for the frame.
+func paneLabels(cfg Config, locale contracts.LocaleService) []string {
+	return []string{
+		cfg.overviewLabel(locale), cfg.toolsLabel(locale), cfg.logLabel(locale),
+		cfg.filesLabel(locale), cfg.changesLabel(locale), cfg.terminalLabel(locale),
+		cfg.agentsLabel(locale), cfg.tasksLabel(locale),
+	}
+}
+
+// buildPanel renders the whole inspector for one frame: the compact pane
+// selector with the active pane's action, and the selected pane. Eight tabs do
+// not fit a 320 DIP inspector, so the pane strip became one menu button naming
+// the current pane; the host owns the panel width and the module fills it.
 func buildPanel(c *ui.Context, t *design.Tokens, runtime contracts.UIRuntime, chat contracts.ChatService, log eventReader, workspace contracts.WorkspaceService, terminal contracts.TerminalService, team contracts.TeamService, board contracts.TaskBoard, artifacts contracts.ArtifactLister, cfg Config, st *state) {
-	ui.Column(c).FillWidth().Gap(design.Space3).Children(func() {
-		ui.Row(c).FillWidth().Gap(design.Space2).AlignItems(ui.Center).Children(func() {
-			ui.Icon(c, icons.Sliders()).Size(16, 16).TextColor(t.LabelSecondary)
-			design.Apply(ui.Text(c, cfg.titleLabel(st.locale)), t.Font(design.TypeS)).
-				FontWeight(600).TextColor(t.LabelPrimary)
+	// The pane-switch commands' palette hint names the current pane.
+	st.syncPaneCommands()
+	ui.Column(c).FillWidth().Gap(design.Space2).Children(func() {
+		// One header line: the pane selector names the current pane and the
+		// pane's action plus the close control sit at its right edge. The
+		// inspector's own title is assistive-only: the host's drawer header
+		// already names it ("Inspector"), so drawing a visible title too would
+		// stack two headings above the pane.
+		header := ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(design.Space2)
+		header.Label(cfg.titleLabel(st.locale))
+		header.Children(func() {
+			buildPaneSelector(c, cfg, st, runtime)
+			ui.Spacer(c).Grow(1)
+			buildPaneAction(c, runtime, terminal, st)
+			buildPaneClose(c, t, runtime, st)
 		})
-		buildTabs(c, t, cfg, st)
 		// The inspector can outgrow a short rail (a long tool list); the native
 		// scroll keeps the pane usable without the module owning the geometry.
 		ui.Scroll(c).FillWidth().Grow(1).Children(func() {
@@ -59,64 +78,129 @@ func buildPanel(c *ui.Context, t *design.Tokens, runtime contracts.UIRuntime, ch
 			case tabTasks:
 				buildTasksPane(c, t, board, runtime, st)
 			default:
-				buildOverviewPane(c, t, chat, cfg, st.locale)
+				buildOverviewPane(c, t, chat, cfg, st.locale, st)
 			}
 		})
 	})
 }
 
-// buildTabs is the native pane strip, painted as the brand's quiet label with
-// the accent underline (same language as the session header tabs).
-func buildTabs(c *ui.Context, t *design.Tokens, cfg Config, st *state) {
-	th := t.Theme()
-	labels := []string{
-		cfg.overviewLabel(st.locale), cfg.toolsLabel(st.locale), cfg.logLabel(st.locale),
-		cfg.filesLabel(st.locale), cfg.changesLabel(st.locale), cfg.terminalLabel(st.locale),
-		cfg.agentsLabel(st.locale), cfg.tasksLabel(st.locale),
+// buildPaneSelector is the compact pane picker: one menu button naming the
+// pane that shows, with every pane as a checked menu item. It replaces the
+// eight-tab strip, whose ink already overflowed the 320 DIP inspector.
+func buildPaneSelector(c *ui.Context, cfg Config, st *state, runtime contracts.UIRuntime) {
+	labels := paneLabels(cfg, st.locale)
+	if st.tab < 0 || st.tab >= len(labels) {
+		st.tab = 0
 	}
-	tabs := ui.TabsBase(c, &st.tab, len(labels))
-	tabs.List.Height(t.Scale(th.Space(8))).Padding(0, 0, 0, th.Space(1)).
-		Gap(design.Space3).AlignItems(ui.Stretch).Children(func() {
-		for index, label := range labels {
-			index, label := index, label
-			active := st.tab == index
-			tab := tabs.Tab(index).Height(t.Scale(th.Space(8))).PaddingX(0).
-				Gap(0).Label(label)
-			tab.Children(func() {
-				ui.Column(c).Height(t.Scale(th.Space(8))).Justify(ui.SpaceBetween).Children(func() {
-					color, weight := t.LabelSecondary, 500
-					if active {
-						color, weight = t.LabelPrimary, 600
-					}
-					design.Apply(ui.Text(c, label), t.Font(design.TypeXS)).
-						FontWeight(weight).NoWrap().TextColor(color)
-					underline := ui.Box(c).Height(th.Space(0.5)).Radius(th.Space(0.25))
-					if active {
-						underline.Background(t.Accent)
-					}
-				})
-			})
+	label := uikit.T(st.locale, "切换面板", "Switch pane")
+	selector := ui.PopoverMenuButton(c, labels[st.tab], func(m *ui.Menu) {
+		for index, pane := range labels {
+			index, pane := index, pane
+			if m.Item(pane).Checked(index == st.tab).Chosen() && st.tab != index {
+				st.tab = index
+				runtime.Invalidate()
+			}
 		}
 	})
+	selector.Label(label).Tooltip(label)
 }
 
-// buildOverviewPane shows the active session's title, message count, update
-// time, state badges and error text; without an active session it shows the
-// configured empty copy.
+// inspectorToggleCommandID is the host command that opens or closes the docked
+// inspector. The module's own close control runs it, so the header's right edge
+// has the close affordance in both the docked and the drawer presentation.
+const inspectorToggleCommandID = "uiroot.toggle-inspector"
+
+// buildPaneClose is the inspector's close control: it runs the host's
+// toggle-inspector command when the host registered it (the command is the one
+// source for the open state). Hosts without the command simply have no close
+// control here; the window chrome remains the entry.
+func buildPaneClose(c *ui.Context, t *design.Tokens, runtime contracts.UIRuntime, st *state) {
+	// In the drawer presentation the host already draws the panel's header with
+	// its own close control, so a second X in the module's header row would be
+	// redundant. The drawer is used when the window cannot dock the inspector;
+	// the same geometry the host uses tells this module which presentation it is
+	// in (expanded sidebar worst case).
+	if width, _ := c.Size(); width > 0 && width < design.SidebarWidth+design.ContentMinWidth+design.Space6+design.InspectorMinWidth {
+		return
+	}
+	var run func() error
+	for _, command := range runtime.Commands() {
+		if command.ID == inspectorToggleCommandID && command.Run != nil {
+			run = command.Run
+			break
+		}
+	}
+	if run == nil {
+		return
+	}
+	label := st.tr("关闭检查器", "Close inspector")
+	close := ui.ButtonBase(c).Size(24, 24).Center().Radius(design.RadiusSM).
+		Label(label).Tooltip(label)
+	close = rowTint(t, close, false)
+	close.Children(func() {
+		ui.Icon(c, icons.Close()).Size(14, 14).TextColor(t.LabelSecondary)
+	})
+	if close.Clicked() {
+		_ = run()
+		runtime.Invalidate()
+	}
+}
+
+// buildPaneAction is the one pane-level action of the active pane, at the
+// pane header's right edge. Panes without a page action keep it empty.
+func buildPaneAction(c *ui.Context, runtime contracts.UIRuntime, terminal contracts.TerminalService, st *state) {
+	switch st.tab {
+	case tabFiles:
+		if ui.Button(c, st.tr("刷新", "Refresh")).
+			Tooltip(st.tr("重新读取文件列表", "Reload the file list")).Clicked() {
+			st.filesPreview = make(map[string]*filePreview)
+			st.filesErr = ""
+			runtime.Invalidate()
+		}
+	case tabChanges:
+		if ui.Button(c, st.tr("刷新", "Refresh")).
+			Tooltip(st.tr("重新读取工作区变更", "Reload the workspace changes")).Clicked() {
+			st.changesLoaded = false
+			st.changesErr = nil
+			runtime.Invalidate()
+		}
+	case tabTasks:
+		if ui.Button(c, st.tr("刷新", "Refresh")).
+			Tooltip(st.tr("重新加载任务", "Reload tasks")).Clicked() {
+			st.tasksLoaded = false
+			st.tasksErr = ""
+			runtime.Invalidate()
+		}
+	case tabTerminal:
+		if ui.Button(c, st.tr("清空", "Clear")).Clicked() {
+			if st.term != nil {
+				st.term.clearOutput()
+			}
+			runtime.Invalidate()
+		}
+	}
+}
+
+// buildOverviewPane shows the conversation's user-facing overview: title, run
+// state, message count, update time and the model in use. The developer
+// metadata (session ID, endpoint, API-key state, budget, iteration cap) lives in
+// a collapsed "Diagnostics" disclosure so it is one click away without being the
+// first thing the inspector shows.
 func buildOverviewPane(c *ui.Context, t *design.Tokens, chat contracts.ChatService, cfg Config,
-	locale contracts.LocaleService) {
+	locale contracts.LocaleService, st *state) {
 	activeID := chat.ActiveSession()
 	chatSession, ok := chat.Session(activeID)
 	if activeID == "" || !ok {
-		buildEmptyPane(c, t, icons.Message(), cfg.emptyLabel(locale))
+		buildEmptyPane(c, cfg.emptyLabel(locale))
 		return
 	}
 	title := strings.TrimSpace(chatSession.Title)
 	if title == "" {
 		title = uikit.T(locale, "未命名会话", "Untitled session")
 	}
-	card := design.Apply(ui.Column(c), t.Panel()).Padding(design.Space3).Gap(design.Space2)
-	card.Children(func() {
+	effective := chat.Config()
+	model := firstNonEmpty(strings.TrimSpace(effective.Model), uikit.T(locale, "未配置", "Not configured"))
+	ui.Column(c).FillWidth().Gap(design.Space2).Children(func() {
 		design.Apply(ui.Text(c, title), t.Font(design.TypeM)).
 			FontWeight(600).TextColor(t.LabelPrimary).MaxLines(1).Ellipsis("…")
 		if chatSession.Running || chatSession.Error != "" {
@@ -129,32 +213,38 @@ func buildOverviewPane(c *ui.Context, t *design.Tokens, chat contracts.ChatServi
 				}
 			})
 		}
-		detailRow(c, t, uikit.T(locale, "消息", "Messages"), fmt.Sprintf("%d", len(chatSession.Messages)))
-		detailRow(c, t, uikit.T(locale, "更新时间", "Updated"), formatUpdatedAt(chatSession.UpdatedAt))
-		detailRow(c, t, uikit.T(locale, "会话 ID", "Session ID"), firstNonEmpty(chatSession.ID, "—"))
+		uikit.KeyValueRows(c, []uikit.KeyValue{
+			{Key: uikit.T(locale, "消息", "Messages"), Value: fmt.Sprintf("%d", len(chatSession.Messages))},
+			{Key: uikit.T(locale, "更新时间", "Updated"), Value: formatUpdatedAt(locale, chatSession.UpdatedAt)},
+			{Key: uikit.T(locale, "模型", "Model"), Value: model},
+		})
 		if chatSession.Error != "" {
-			buildErrorLine(c, t, chatSession.Error)
+			uikit.ErrorLine(c, chatSession.Error)
 		}
-		// The effective model configuration belongs to the same inspection
-		// surface (the former 模型 tab was a duplicate of the model settings
-		// page): one panel, a divider and compact rows instead of a second card.
-		ui.Divider(c)
-		design.Apply(ui.Text(c, uikit.T(locale, "模型配置", "Model configuration")), t.Font(design.TypeXS)).FontWeight(600).
-			TextColor(t.LabelSecondary)
-		effective := chat.Config()
-		detailRow(c, t, uikit.T(locale, "模型", "Model"), firstNonEmpty(effective.Model, uikit.T(locale, "未配置", "Not configured")))
-		if baseURL := strings.TrimSpace(effective.BaseURL); baseURL != "" {
-			detailRow(c, t, "Base URL", baseURL)
-		}
-		apiKey := uikit.T(locale, "未设置", "Not set")
-		if strings.TrimSpace(effective.APIKey) != "" {
-			apiKey = uikit.T(locale, "已设置（已隐藏）", "Set (hidden)")
-		}
-		detailRow(c, t, "API Key", apiKey)
-		detailRow(c, t, uikit.T(locale, "上下文预算", "Context budget"),
-			firstNonEmpty(intLabel(effective.ContextBudget), uikit.T(locale, "默认", "Default")))
-		detailRow(c, t, uikit.T(locale, "最大迭代", "Max iterations"),
-			firstNonEmpty(intLabel(effective.MaxIterations), uikit.T(locale, "默认", "Default")))
+		// Diagnostics: the technical metadata the overview used to put on the
+		// first screen, collapsed by default.
+		open := st.open["overview/diagnostics"]
+		ui.Collapsible(c, uikit.T(locale, "诊断信息", "Diagnostics"), &open, func() {
+			diag := []uikit.KeyValue{
+				{Key: uikit.T(locale, "会话 ID", "Session ID"), Value: firstNonEmpty(chatSession.ID, "—")},
+			}
+			if baseURL := strings.TrimSpace(effective.BaseURL); baseURL != "" {
+				diag = append(diag, uikit.KeyValue{Key: "Base URL", Value: baseURL})
+			}
+			apiKey := uikit.T(locale, "未设置", "Not set")
+			if strings.TrimSpace(effective.APIKey) != "" {
+				apiKey = uikit.T(locale, "已设置（已隐藏）", "Set (hidden)")
+			}
+			diag = append(diag,
+				uikit.KeyValue{Key: "API Key", Value: apiKey},
+				uikit.KeyValue{Key: uikit.T(locale, "上下文预算", "Context budget"),
+					Value: firstNonEmpty(intLabel(effective.ContextBudget), uikit.T(locale, "默认", "Default"))},
+				uikit.KeyValue{Key: uikit.T(locale, "最大迭代", "Max iterations"),
+					Value: firstNonEmpty(intLabel(effective.MaxIterations), uikit.T(locale, "默认", "Default"))},
+			)
+			uikit.KeyValueRows(c, diag)
+		})
+		st.open["overview/diagnostics"] = open
 	})
 }
 
@@ -167,11 +257,12 @@ func intLabel(value int) string {
 }
 
 // buildToolsPane aggregates every ToolCall of the session, in message order,
-// each with a status badge and a collapsible summary.
+// each with a status badge and a collapsible summary. Rows and dividers carry
+// the list; a per-row card would turn the 320 DIP inspector into a card wall.
 func buildToolsPane(c *ui.Context, t *design.Tokens, chat contracts.ChatService, st *state) {
 	chatSession, ok := chat.Session(chat.ActiveSession())
 	if !ok {
-		buildEmptyPane(c, t, icons.Terminal(), uikit.T(st.locale, "还没有工具调用", "No tool calls yet"))
+		buildEmptyPane(c, uikit.T(st.locale, "还没有工具调用", "No tool calls yet"))
 		return
 	}
 	type toolItem struct {
@@ -188,74 +279,64 @@ func buildToolsPane(c *ui.Context, t *design.Tokens, chat contracts.ChatService,
 		}
 	}
 	if len(items) == 0 {
-		buildEmptyPane(c, t, icons.Terminal(), uikit.T(st.locale, "还没有工具调用", "No tool calls yet"))
+		buildEmptyPane(c, uikit.T(st.locale, "还没有工具调用", "No tool calls yet"))
 		return
 	}
 
-	ui.Row(c).FillWidth().Gap(design.Space2).AlignItems(ui.Center).Children(func() {
-		design.Apply(ui.Text(c, uikit.T(st.locale, "工具调用", "Tool calls")), t.Font(design.TypeXS)).
-			FontWeight(600).TextColor(t.LabelPrimary)
-		ui.Spacer(c).Grow(1)
-		design.Apply(ui.Badge(c, fmt.Sprintf("%d", len(items))), t.Badge())
-	})
-	for _, item := range items {
-		tool := item.tool
-		status := statusLabel(tool.Status, st.locale)
-		color := statusColor(t, tool.Status)
-		card := design.Apply(ui.Column(c), t.Panel()).
-			Padding(design.Space2).Gap(design.Space1)
-		card.Children(func() {
-			ui.Row(c).FillWidth().Gap(design.Space2).AlignItems(ui.Center).Children(func() {
-				design.Apply(ui.Badge(c, status), t.Badge()).TextColor(color)
-				design.Apply(ui.Text(c, tool.Name), t.Font(design.TypeXS)).
-					FontWeight(600).TextColor(t.LabelPrimary).MaxLines(1).Ellipsis("…")
-				ui.Spacer(c).Grow(1)
-				if tool.ID != "" {
-					design.Apply(ui.Text(c, tool.ID), t.Font(design.TypeXXS)).
-						TextColor(t.LabelTertiary).MaxLines(1).Ellipsis("…")
-				}
-			})
-			if summary := strings.TrimSpace(tool.Summary); summary != "" {
-				open := st.open[item.key]
-				ui.Collapsible(c, uikit.T(st.locale, "摘要", "Summary"), &open, func() {
-					design.Apply(ui.Text(c, truncateSummary(summary)), t.TextMuted(design.TypeXXS))
+	ui.Column(c).FillWidth().Gap(design.Space2).Children(func() {
+		design.Apply(ui.Text(c, uikit.T(st.locale,
+			fmt.Sprintf("%d 个工具调用", len(items)), fmt.Sprintf("%d tool calls", len(items)))),
+			t.Font(design.TypeXXS)).TextColor(t.LabelTertiary)
+		for _, item := range items {
+			tool := item.tool
+			c.Key("tool/" + item.key)
+			status := statusLabel(tool.Status, st.locale)
+			color := statusColor(t, tool.Status)
+			ui.Column(c).FillWidth().Gap(design.Space1).Children(func() {
+				ui.Row(c).FillWidth().Gap(design.Space2).AlignItems(ui.Center).Children(func() {
+					design.Apply(ui.Badge(c, status), t.Badge()).TextColor(color)
+					design.Apply(ui.Text(c, tool.Name), t.Font(design.TypeXS)).
+						FontWeight(600).TextColor(t.LabelPrimary).MaxLines(1).Ellipsis("…")
+					ui.Spacer(c).Grow(1)
+					if tool.ID != "" {
+						design.Apply(ui.Text(c, tool.ID), t.Font(design.TypeXXS)).
+							TextColor(t.LabelTertiary).MaxLines(1).Ellipsis("…")
+					}
 				})
-				st.open[item.key] = open
-			}
-		})
+				if summary := strings.TrimSpace(tool.Summary); summary != "" {
+					open := st.open[item.key]
+					ui.Collapsible(c, uikit.T(st.locale, "摘要", "Summary"), &open, func() {
+						design.Apply(ui.Text(c, truncateSummary(summary)), t.TextMuted(design.TypeXXS))
+					})
+					st.open[item.key] = open
+				}
+				ui.Divider(c)
+			})
+		}
+	})
+}
+
+// rowTint paints a self-drawn ButtonBase row's interaction states: selected and
+// pressed use the stronger selection tint, hover the lighter hover tint. The
+// inspector's dense rows are ButtonBase controls (no native look) and must draw
+// pressed feedback themselves.
+func rowTint(t *design.Tokens, el ui.Element, selected bool) ui.Element {
+	switch {
+	case el.Pressed():
+		return el.Background(t.BgSelected)
+	case selected:
+		return el.Background(t.BgSelected)
+	case el.Hovered():
+		return el.Background(t.BgHover)
+	default:
+		return el
 	}
 }
 
-// buildEmptyPane is the centered empty state of one pane.
-func buildEmptyPane(c *ui.Context, t *design.Tokens, icon *ui.SVG, text string) {
-	th := t.Theme()
-	ui.Column(c).FillWidth().AlignItems(ui.Center).Gap(design.Space2).
-		PaddingY(design.Space6).Children(func() {
-		ui.Row(c).Size(th.Space(9), th.Space(9)).Center().
-			Radius(design.RadiusMax).Background(t.BgHover).Children(func() {
-			ui.Icon(c, icon).Size(th.Space(4), th.Space(4)).TextColor(t.LabelSecondary)
-		})
-		design.Apply(ui.Text(c, text), t.TextMuted(design.TypeXS))
-	})
-}
-
-// buildErrorLine is the inspector's danger row.
-func buildErrorLine(c *ui.Context, t *design.Tokens, text string) {
-	th := t.Theme()
-	ui.Row(c).FillWidth().Gap(design.Space2).AlignItems(ui.Start).Children(func() {
-		ui.Icon(c, icons.AlertTriangle()).Size(th.Space(4), th.Space(4)).TextColor(t.Danger)
-		design.Apply(ui.Text(c, text), t.Font(design.TypeXXS)).TextColor(t.DangerText)
-	})
-}
-
-// detailRow is one label/value row of an inspector card.
-func detailRow(c *ui.Context, t *design.Tokens, label, value string) {
-	ui.Row(c).FillWidth().Gap(design.Space2).AlignItems(ui.Center).Children(func() {
-		design.Apply(ui.Text(c, label), t.Font(design.TypeXXS)).TextColor(t.LabelTertiary)
-		ui.Spacer(c).Grow(1)
-		design.Apply(ui.Text(c, value), t.Font(design.TypeXS)).
-			TextColor(t.LabelPrimary).MaxLines(1).Ellipsis("…")
-	})
+// buildEmptyPane is the centered empty state of one pane: a title and hint in
+// flow, without the decorative icon-in-a-colored-circle anti-pattern.
+func buildEmptyPane(c *ui.Context, text string) {
+	uikit.EmptyStateBlock(c, text, "", nil)
 }
 
 // statusLabel maps a tool status to its inspector label.
@@ -275,13 +356,13 @@ func statusLabel(status string, locale contracts.LocaleService) string {
 	}
 }
 
-// statusColor maps a tool status to its brand color.
+// statusColor maps a tool status to its brand text color token.
 func statusColor(t *design.Tokens, status string) ui.Color {
 	switch normalizeStatus(status) {
 	case "running":
 		return t.WarningText
 	case "ok":
-		return t.Success
+		return t.SuccessText
 	case "error":
 		return t.DangerText
 	default:
@@ -303,12 +384,10 @@ func normalizeStatus(status string) string {
 	}
 }
 
-// formatUpdatedAt renders a session update timestamp, "—" when unset.
-func formatUpdatedAt(updated time.Time) string {
-	if updated.IsZero() {
-		return "—"
-	}
-	return updated.Local().Format("2006-01-02 15:04")
+// formatUpdatedAt renders a session update timestamp in the user's date
+// format, "—" when unset. It goes through the shared locale helper.
+func formatUpdatedAt(locale contracts.LocaleService, updated time.Time) string {
+	return firstNonEmpty(uikit.FormatDateTime(locale, updated), "—")
 }
 
 // truncateSummary bounds an expanded tool summary (UTF-8 safe).
@@ -331,48 +410,41 @@ func buildLogPane(c *ui.Context, t *design.Tokens, log eventReader, chat contrac
 	locale contracts.LocaleService) {
 	active := chat.ActiveSession()
 	if active == "" {
-		design.Apply(ui.Text(c, uikit.T(locale, "还没有活动会话", "No active session")), t.TextMuted(design.TypeXS))
+		buildEmptyPane(c, uikit.T(locale, "还没有活动会话", "No active session"))
 		return
 	}
 	if log == nil {
-		design.Apply(ui.Text(c, uikit.T(locale, "日志需要持久化会话存储", "The log requires a persistent session store")),
-			t.TextMuted(design.TypeXS))
+		buildEmptyPane(c, uikit.T(locale, "日志需要持久化会话存储", "The log requires a persistent session store"))
 		return
 	}
 	events, err := log.Last(context.Background(), active, logLimit)
 	if err != nil {
-		design.Apply(ui.Text(c, uikit.T(locale, "读取会话日志失败：", "Failed to read the session log: ")+err.Error()),
-			t.TextMuted(design.TypeXS)).TextColor(t.DangerText)
+		uikit.ErrorLine(c, uikit.T(locale, "读取会话日志失败：", "Failed to read the session log: ")+err.Error())
 		return
 	}
 	ui.Column(c).FillWidth().Gap(design.Space2).Children(func() {
-		ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(design.Space2).Children(func() {
-			design.Apply(ui.Text(c, uikit.T(locale, "会话日志", "Session log")), t.Font(design.TypeS)).FontWeight(600)
-			design.Apply(ui.Badge(c, fmt.Sprintf("%d", len(events))), t.Badge())
-		})
+		design.Apply(ui.Text(c, uikit.T(locale,
+			fmt.Sprintf("%d 条会话事件", len(events)), fmt.Sprintf("%d session events", len(events)))),
+			t.Font(design.TypeXXS)).TextColor(t.LabelTertiary)
 		if len(events) == 0 {
-			design.Apply(ui.Text(c, uikit.T(locale, "还没有会话事件", "No session events yet")), t.TextMuted(design.TypeXS))
+			buildEmptyPane(c, uikit.T(locale, "还没有会话事件", "No session events yet"))
 			return
 		}
 		for index := len(events) - 1; index >= 0; index-- {
 			event := events[index]
-			panel := ui.Column(c).FillWidth().Gap(2).Padding(design.Space2)
-			design.Apply(panel, t.Panel())
-			panel.Children(func() {
+			c.Key(fmt.Sprintf("log/%d", event.Seq))
+			ui.Column(c).FillWidth().Gap(design.Space1).Children(func() {
 				ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(design.Space2).Children(func() {
 					design.Apply(ui.Text(c, fmt.Sprintf("#%d", event.Seq)), t.TextMuted(design.TypeXXXS))
 					design.Apply(ui.Text(c, event.Type), t.Font(design.TypeXXS)).FontWeight(600).
 						TextColor(t.LabelPrimary).Grow(1).MaxLines(1).Ellipsis("…")
-					label := ""
-					if !event.Time.IsZero() {
-						label = event.Time.Local().Format("15:04:05")
-					}
-					design.Apply(ui.Text(c, label), t.TextMuted(design.TypeXXXS))
+					design.Apply(ui.Text(c, uikit.FormatClock(locale, event.Time)), t.TextMuted(design.TypeXXXS))
 				})
 				if payload := strings.TrimSpace(string(event.Payload)); payload != "" {
 					design.Apply(ui.Text(c, truncateRunes(payload, 160)), t.MonoFamily()).
 						FontSize(11).TextColor(t.LabelTertiary).MaxLines(3)
 				}
+				ui.Divider(c)
 			})
 		}
 	})

@@ -161,7 +161,7 @@ func runTerminalCommand(t *testing.T, h *harness, tester *ui.Tester, command str
 func TestTerminalPaneWithoutBackend(t *testing.T) {
 	h := newHarness(t, newFakeChat(), rightpanel.Config{})
 	tester := h.tester()
-	h.click(tester, "终端")
+	h.selectPane(tester, "终端")
 	h.assertTexts(tester, "终端未启用")
 }
 
@@ -169,7 +169,7 @@ func TestTerminalPaneHeaderShellAndClear(t *testing.T) {
 	terminal := newFakeTerminal()
 	h := newHarnessWithTerminal(t, newFakeChat(), rightpanel.Config{}, terminal)
 	tester := h.tester()
-	h.click(tester, "终端")
+	h.selectPane(tester, "终端")
 
 	h.assertTexts(tester,
 		"/work/proj", "bash", "清空", "运行",
@@ -200,7 +200,7 @@ func TestTerminalRunAsyncAndClear(t *testing.T) {
 	terminal.setRunOutput(contracts.TerminalOutput{Output: "hello output\n", ExitCode: 0})
 	h := newHarnessWithTerminal(t, newFakeChat(), rightpanel.Config{}, terminal)
 	tester := h.tester()
-	h.click(tester, "终端")
+	h.selectPane(tester, "终端")
 
 	runTerminalCommand(t, h, tester, "echo hi")
 	waitForRun(t, terminal)
@@ -228,7 +228,7 @@ func TestTerminalNonZeroExit(t *testing.T) {
 	terminal.setRunOutput(contracts.TerminalOutput{Output: "boom\n", ExitCode: 3})
 	h := newHarnessWithTerminal(t, newFakeChat(), rightpanel.Config{}, terminal)
 	tester := h.tester()
-	h.click(tester, "终端")
+	h.selectPane(tester, "终端")
 
 	runTerminalCommand(t, h, tester, "false")
 	waitForText(t, tester, "[退出码 3]")
@@ -239,7 +239,7 @@ func TestTerminalRunError(t *testing.T) {
 	terminal.setRunErr(errors.New("spawn failed"))
 	h := newHarnessWithTerminal(t, newFakeChat(), rightpanel.Config{}, terminal)
 	tester := h.tester()
-	h.click(tester, "终端")
+	h.selectPane(tester, "终端")
 
 	runTerminalCommand(t, h, tester, "boom")
 	waitForText(t, tester, "错误：spawn failed")
@@ -250,7 +250,7 @@ func TestTerminalSubmitRuns(t *testing.T) {
 	terminal.setRunOutput(contracts.TerminalOutput{Output: "ok\n"})
 	h := newHarnessWithTerminal(t, newFakeChat(), rightpanel.Config{}, terminal)
 	tester := h.tester()
-	h.click(tester, "终端")
+	h.selectPane(tester, "终端")
 
 	h.click(tester, "命令")
 	tester.Type("echo ok")
@@ -266,7 +266,7 @@ func TestTerminalStopCancelsRun(t *testing.T) {
 	terminal.runBlock = true
 	h := newHarnessWithTerminal(t, newFakeChat(), rightpanel.Config{}, terminal)
 	tester := h.tester()
-	h.click(tester, "终端")
+	h.selectPane(tester, "终端")
 
 	runTerminalCommand(t, h, tester, "sleep 60")
 	waitForRun(t, terminal)
@@ -282,7 +282,6 @@ func TestTerminalStopCancelsRun(t *testing.T) {
 func TestTerminalCustomTabLabel(t *testing.T) {
 	h := newHarness(t, newFakeChat(), rightpanel.Config{TerminalTab: "Terminal"})
 	tester := h.tester()
-	h.assertTexts(tester, "Terminal")
-	h.click(tester, "Terminal")
-	h.assertTexts(tester, "终端未启用")
+	h.selectPane(tester, "Terminal")
+	h.assertTexts(tester, "Terminal", "终端未启用")
 }

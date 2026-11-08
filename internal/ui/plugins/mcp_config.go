@@ -12,6 +12,7 @@ import (
 
 	"github.com/zeokeel/zeokeel/internal/contracts"
 	"github.com/zeokeel/zeokeel/internal/design"
+	"github.com/zeokeel/zeokeel/internal/uikit"
 )
 
 // sensitiveMCPEnvMarkers are the env key/value markers whose values are masked
@@ -67,8 +68,7 @@ func buildMCPConnectionConfig(c *ui.Context, t *design.Tokens, st *state,
 	}
 	rows, err := contracts.ParseMCPServersJSON(settings.Get(contracts.SettingMCPServers, ""))
 	if err != nil {
-		design.Apply(ui.Text(c, st.tr("配置无法解析", "Configuration could not be parsed")),
-			t.Font(design.TypeXS)).TextColor(t.DangerText)
+		uikit.ErrorLine(c, st.tr("配置无法解析", "Configuration could not be parsed"))
 		return
 	}
 	row, ok := findMCPServerConfig(rows, firstNonEmpty(server.Name, server.ServerName))
@@ -77,22 +77,24 @@ func buildMCPConnectionConfig(c *ui.Context, t *design.Tokens, st *state,
 	}
 	design.Apply(ui.Text(c, st.tr("连接配置", "Connection")), t.Font(design.TypeXXS)).
 		FontWeight(600).TextColor(t.LabelSecondary)
+	details := make([]uikit.KeyValue, 0, 8)
 	if name := strings.TrimSpace(row.Name); name != "" {
-		mcpDetailRow(c, t, st.tr("名称", "Name"), name)
+		details = append(details, uikit.KeyValue{Key: st.tr("名称", "Name"), Value: name})
 	}
 	if transport := strings.TrimSpace(row.Transport); transport != "" {
-		mcpDetailRow(c, t, st.tr("传输", "Transport"), transport)
+		details = append(details, uikit.KeyValue{Key: st.tr("传输", "Transport"), Value: transport})
 	}
 	if url := strings.TrimSpace(row.URL); url != "" {
-		mcpDetailRow(c, t, "URL", url)
+		details = append(details, uikit.KeyValue{Key: "URL", Value: url})
 	}
 	if command := strings.TrimSpace(row.Command); command != "" {
-		mcpDetailRow(c, t, st.tr("命令", "Command"), command)
+		details = append(details, uikit.KeyValue{Key: st.tr("命令", "Command"), Value: command})
 	}
 	if len(row.Args) > 0 {
-		mcpDetailRow(c, t, st.tr("参数", "Arguments"), strings.Join(row.Args, " "))
+		details = append(details, uikit.KeyValue{Key: st.tr("参数", "Arguments"), Value: strings.Join(row.Args, " ")})
 	}
 	for _, env := range row.Env {
-		mcpDetailRow(c, t, st.tr("环境", "Environment"), maskMCPEnvValue(st, env))
+		details = append(details, uikit.KeyValue{Key: st.tr("环境", "Environment"), Value: maskMCPEnvValue(st, env)})
 	}
+	uikit.KeyValueRows(c, details)
 }

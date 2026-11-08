@@ -90,7 +90,7 @@ func TestMCPToolSwitchesRenderAndWrite(t *testing.T) {
 	service := &fakePlugins{mcp: []contracts.MCPPlugin{{Name: "srv", Status: "已连接", Tools: 2}}}
 	h := newHarnessWithSettings(t, service, newMCPToolRegistry(), plugins.Config{}, store)
 	tester := h.tester()
-	h.assertTexts(tester, "mcp__srv__echo", "mcp__srv__second", "启用", "已禁用（重启生效）")
+	h.assertTexts(tester, "mcp__srv__echo", "mcp__srv__second", "启用工具", "已禁用（重启生效）")
 
 	// Built-in tools have no MCP switch: narrow to bash and check.
 	h.click(tester, "搜索工具")
@@ -106,7 +106,7 @@ func TestMCPToolSwitchesRenderAndWrite(t *testing.T) {
 	tester.Key(0, 0)
 	tester.Type("echo")
 	tester.Frame()
-	h.click(tester, "启用")
+	h.click(tester, "启用工具 mcp__srv__echo")
 	if got := store.get(contracts.SettingMCPDisabledTools); got != "[]" {
 		t.Fatalf("disabled list after enable = %q, want []", got)
 	}
@@ -114,7 +114,7 @@ func TestMCPToolSwitchesRenderAndWrite(t *testing.T) {
 	h.assertNoTexts(tester, "已禁用（重启生效）")
 
 	// Flip it off again: the tool is added back to the setting.
-	h.click(tester, "启用")
+	h.click(tester, "启用工具 mcp__srv__echo")
 	if got := store.get(contracts.SettingMCPDisabledTools); got != `["mcp__srv__echo"]` {
 		t.Fatalf("disabled list after disable = %q", got)
 	}
@@ -129,11 +129,11 @@ func TestMCPToolSwitchShowsFilteredEntryAndFailure(t *testing.T) {
 	})
 	h := newHarnessWithSettings(t, nil, newMCPToolRegistry(), plugins.Config{}, store)
 	tester := h.tester()
-	h.assertTexts(tester, "mcp__gone__tool", "已禁用（重启生效）", "启用")
+	h.assertTexts(tester, "mcp__gone__tool", "已禁用（重启生效）", "启用工具")
 	h.click(tester, "搜索工具")
 	tester.Type("gone")
 	tester.Frame()
-	h.click(tester, "启用")
+	h.click(tester, "启用工具 mcp__gone__tool")
 	if got := store.get(contracts.SettingMCPDisabledTools); got != "[]" {
 		t.Fatalf("disabled list after re-enable = %q, want []", got)
 	}
@@ -143,8 +143,8 @@ func TestMCPToolSwitchShowsFilteredEntryAndFailure(t *testing.T) {
 	failing.setErr = errPluginSettingsWrite
 	h = newHarnessWithSettings(t, nil, newMCPToolRegistry(), plugins.Config{}, failing)
 	tester = h.tester()
-	h.assertTexts(tester, "启用")
-	h.click(tester, "启用")
+	h.assertTexts(tester, "启用工具")
+	h.click(tester, "启用工具 mcp__srv__echo")
 	h.assertTexts(tester, "保存失败")
 	if got := failing.get(contracts.SettingMCPDisabledTools); got != "" {
 		t.Fatalf("failed write persisted %q", got)
@@ -158,7 +158,7 @@ func TestMCPToolSwitchesEnglishAndBadConfig(t *testing.T) {
 	h := newHarnessWithSettings(t, nil, newMCPToolRegistry(), plugins.Config{}, store)
 	h.uiRoot.Locale().SetLanguage("en")
 	tester := h.tester()
-	h.assertTexts(tester, "Enabled", "Invalid disabled-tools configuration")
+	h.assertTexts(tester, "Enable tool", "Invalid disabled-tools configuration")
 	h.assertNoTexts(tester, "已禁用（重启生效）")
 }
 

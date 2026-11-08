@@ -22,6 +22,7 @@ import (
 
 	"github.com/zeokeel/zeokeel/internal/contracts"
 	"github.com/zeokeel/zeokeel/internal/design"
+	"github.com/zeokeel/zeokeel/internal/uikit"
 )
 
 // Data & Privacy page constants. Section "高级" matches Diagnostics; Order 106
@@ -29,7 +30,7 @@ import (
 const (
 	DataPrivacyPageID      = "data-privacy"
 	DataPrivacyPageSection = "高级"
-	DataPrivacyPageOrder   = 106
+	DataPrivacyPageOrder   = 80
 	DataPrivacyPageTitle   = "数据与隐私"
 )
 
@@ -121,7 +122,9 @@ type dataPrivacyState struct {
 func newDataPrivacyState() *dataPrivacyState { return &dataPrivacyState{} }
 
 // buildDataPrivacyPage renders the data directory, bulk session actions and the
-// diagnostic report export.
+// diagnostic report export. The page has one primary action (open the data
+// directory); the exports are secondary and the bulk clear is a danger action
+// behind the native confirmation dialog.
 func buildDataPrivacyPage(c *ui.Context, t *design.Tokens, kctx cordis.Context,
 	chat contracts.ChatService, store contracts.SettingsService, st *dataPrivacyState,
 	locale contracts.LocaleService) {
@@ -130,32 +133,29 @@ func buildDataPrivacyPage(c *ui.Context, t *design.Tokens, kctx cordis.Context,
 	sessions, hasSessionList := dataSessionList(chat)
 
 	ui.Column(c).FillWidth().Gap(design.Space4).Children(func() {
-		ui.Column(c).Gap(design.Space1).Children(func() {
-			design.Apply(ui.Text(c, localized(locale, DataPrivacyPageTitle, "Data & privacy")),
-				t.Font(design.TypeL)).FontWeight(600).TextColor(t.LabelPrimary)
-			design.Apply(ui.Text(c, localized(locale,
-				"数据目录、会话导出/清除与诊断报告。",
-				"Data directory, session export/clear and a diagnostic report.")),
-				t.TextMuted(design.TypeXS)).MaxLines(2)
-		})
+		uikit.PageHeader(c, localized(locale, DataPrivacyPageTitle, "Data & privacy"), localized(locale,
+			"数据目录、会话导出/清除与诊断报告。",
+			"Data directory, session export/clear and a diagnostic report."))
 
 		if st.notice != "" {
-			statusBadge(c, t, st.notice, st.noticeErr)
+			if st.noticeErr {
+				uikit.ErrorLine(c, st.notice)
+			} else {
+				statusBadgesRow(c, t, st.notice, false)
+			}
 		}
 		if st.noticeDetail != "" {
-			design.Apply(ui.Text(c, st.noticeDetail), t.MonoFamily()).FontSize(11).
-				TextColor(t.LabelTertiary).MaxLines(1).Ellipsis("…")
+			design.Apply(ui.Text(c, st.noticeDetail), t.Font(design.TypeXXS), t.MonoFamily()).
+				TextColor(t.LabelTertiary).MaxLines(2)
 		}
 
-		panel(c, t, func() {
-			sectionTitle(c, t, localized(locale, "数据目录", "Data directory"))
+		uikit.Section(c, localized(locale, "数据目录", "Data directory"), func(*ui.Context) {
 			ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(design.Space2).Children(func() {
-				design.Apply(ui.Text(c, localized(locale, "数据目录", "Data directory")),
-					t.Font(design.TypeXS)).TextColor(t.LabelSecondary)
 				value := firstNonEmpty(dataDir, localized(locale, "未设置", "Not set"))
-				design.Apply(ui.Text(c, value), t.MonoFamily()).FontSize(12).
-					TextColor(t.LabelPrimary).Grow(1).MaxLines(1).Ellipsis("…")
-				copyButton := ui.Button(c, localized(locale, "复制", "Copy")).
+				design.Apply(ui.Text(c, value), t.Font(design.TypeXXS), t.MonoFamily()).
+					TextColor(t.LabelPrimary).Grow(1).MaxLines(2)
+				copyButton := design.Apply(ui.Button(c, localized(locale, "复制", "Copy")),
+					t.SecondaryButton()).
 					Tooltip(localized(locale, "复制数据目录路径", "Copy the data directory path"))
 				copyButton.Disabled(dataDir == "")
 				if copyButton.Clicked() && dataDir != "" {
@@ -165,49 +165,60 @@ func buildDataPrivacyPage(c *ui.Context, t *design.Tokens, kctx cordis.Context,
 				}
 				if st.copied && dataDir != "" {
 					design.Apply(ui.Badge(c, localized(locale, "已复制", "Copied")), t.Badge()).
-						TextColor(t.Success)
+						TextColor(t.SuccessText)
 				}
 			})
-			openButton := design.Apply(ui.PrimaryButton(c,
-				localized(locale, "打开数据目录", "Open data directory")), t.PrimaryButton()).
-				Disabled(dataDir == "")
-			if openButton.Clicked() && dataDir != "" {
-				if err := openPathFunc(dataDir); err != nil {
-					st.notice = localized(locale, "打开数据目录失败：", "Failed to open data directory: ") + err.Error()
-					st.noticeErr = true
-					st.noticeDetail = ""
-				} else {
-					st.notice = ""
-					st.noticeErr = false
-					st.noticeDetail = ""
-				}
-				c.Invalidate()
-			}
+			design.Apply(ui.Text(c, localized(locale,
+				"设置、会话与记忆都保存在这个目录。",
+				"Settings, sessions and memories are stored in this directory.")),
+				t.TextMuted(design.TypeXXS))
+			uikit.DialogFooter(c, []uikit.DialogAction{{
+				Label: localized(locale, "打开数据目录", "Open data directory"), Primary: true,
+				Disabled: dataDir == "",
+				OnClick: func() {
+					if dataDir == "" {
+						return
+					}
+					if err := openPathFunc(dataDir); err != nil {
+						st.notice = localized(locale, "打开数据目录失败：",
+							"Failed to open data directory: ") + err.Error()
+						st.noticeErr = true
+						st.noticeDetail = ""
+					} else {
+						st.notice = ""
+						st.noticeErr = false
+						st.noticeDetail = ""
+					}
+					c.Invalidate()
+				},
+			}})
 		})
 
-		panel(c, t, func() {
-			sectionTitle(c, t, localized(locale, "会话数据", "Session data"))
+		uikit.Section(c, localized(locale, "会话数据", "Session data"), func(*ui.Context) {
 			switch {
 			case !hasSessionList:
-				design.Apply(ui.Text(c, localized(locale,
+				uikit.EmptyState(c, localized(locale,
 					"会话列表不可用，无法导出或清除。",
-					"The session list is unavailable; exporting and clearing are disabled.")),
-					t.TextMuted(design.TypeXXS)).MaxLines(2)
+					"The session list is unavailable; exporting and clearing are disabled."))
 			case len(sessions) == 0:
-				design.Apply(ui.Text(c, localized(locale,
+				uikit.EmptyState(c, localized(locale,
 					"没有可导出或清除的会话",
-					"No sessions to export or clear.")), t.TextMuted(design.TypeXXS))
+					"No sessions to export or clear."))
 			default:
-				design.Apply(ui.Text(c, fmt.Sprintf(localized(locale, "共 %d 个会话", "%d sessions"), len(sessions))),
+				design.Apply(ui.Text(c, fmt.Sprintf(localized(locale,
+					"共 %d 个会话", "%d sessions"), len(sessions))),
 					t.Font(design.TypeXS)).TextColor(t.LabelSecondary)
 				ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(design.Space2).Children(func() {
-					if ui.Button(c, localized(locale, "导出全部会话", "Export all sessions")).Clicked() {
+					if design.Apply(ui.Button(c, localized(locale,
+						"导出全部会话", "Export all sessions")),
+						t.SecondaryButton()).Clicked() {
 						exportDataSessions(chat, st, locale)
 						c.Invalidate()
 					}
-					clear := ui.Button(c, localized(locale, "清除全部会话", "Clear all sessions"))
-					clear.TextColor(t.DangerText)
-					if clear.Clicked() {
+					ui.Spacer(c).Grow(1)
+					if design.Apply(ui.Button(c, localized(locale,
+						"清除全部会话", "Clear all sessions")),
+						t.DangerButton()).Clicked() {
 						st.confirmClear = true
 						c.Invalidate()
 					}
@@ -215,16 +226,19 @@ func buildDataPrivacyPage(c *ui.Context, t *design.Tokens, kctx cordis.Context,
 			}
 		})
 
-		panel(c, t, func() {
-			sectionTitle(c, t, localized(locale, "诊断报告", "Diagnostic report"))
+		uikit.Section(c, localized(locale, "诊断报告", "Diagnostic report"), func(*ui.Context) {
 			design.Apply(ui.Text(c, localized(locale,
 				"导出应用版本、数据目录、会话数与设置项（API key 不会写入）。",
 				"Export the app version, data directory, session count and settings (the API key is never written).")),
 				t.TextMuted(design.TypeXXS)).MaxLines(2)
-			if ui.Button(c, localized(locale, "导出诊断报告", "Export diagnostic report")).Clicked() {
-				exportDiagnosticReport(kctx, store, chat, st, locale)
-				c.Invalidate()
-			}
+			ui.Row(c).FillWidth().Justify(ui.End).Children(func() {
+				if design.Apply(ui.Button(c, localized(locale,
+					"导出诊断报告", "Export diagnostic report")),
+					t.SecondaryButton()).Clicked() {
+					exportDiagnosticReport(kctx, store, chat, st, locale)
+					c.Invalidate()
+				}
+			})
 		})
 
 		if st.confirmClear && hasSessionList && len(sessions) > 0 {

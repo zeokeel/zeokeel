@@ -3,8 +3,9 @@
 // It is a kernel backend module like the session store: it requires the product
 // data directory and the host logger, loads a JSON memory file (creating an
 // empty store when the file does not exist yet), provides the durable
-// contracts.KeyMemory store and registers the Rig memory tool into the shared
-// toolkit registry when that registry is already available.
+// contracts.KeyMemory store and registers the product memory tool (the Rig tool
+// plus the update action) into the shared toolkit registry when that registry is
+// already available.
 //
 // The store implements rig.MemoryStore (contracts.MemoryStore is its product
 // alias) over a JSON document {"entries": [...]}: every mutation is written
@@ -30,9 +31,9 @@ import (
 	"github.com/zeokeel/zeokeel-kernel/module"
 
 	rigtools "github.com/zeokeel/zeokeel-rig/tools"
-	rigmemory "github.com/zeokeel/zeokeel-rig/tools/memory"
 
 	"github.com/zeokeel/zeokeel/internal/contracts"
+	"github.com/zeokeel/zeokeel/internal/memorytools"
 )
 
 const (
@@ -113,12 +114,12 @@ func validateConfig(cfg Config) error {
 	return nil
 }
 
-// registerMemoryTools registers the Rig memory tool bound to store into the
-// shared toolkit registry and unregisters it again on module disposal. Errors
-// (for example a duplicate name owned by the toolkit module) are logged and do
-// not fail activation.
+// registerMemoryTools registers the product memory tool (the Rig memory tool
+// plus the update action) bound to store into the shared toolkit registry and
+// unregisters it again on module disposal. Errors (for example a duplicate name
+// owned by the toolkit module) are logged and do not fail activation.
 func registerMemoryTools(ctx cordis.Context, registry *rigtools.Registry, store contracts.MemoryStore, logger contracts.Logger) {
-	for _, tool := range rigmemory.Tools(store) {
+	for _, tool := range memorytools.Tools(store) {
 		name := tool.Name()
 		if err := registry.Register(tool); err != nil {
 			logger.Printf("%s: register tool %q: %v", ModuleID, name, err)
@@ -166,6 +167,7 @@ type Store struct {
 }
 
 var _ contracts.MemoryStore = (*Store)(nil)
+var _ contracts.MemoryUpdater = (*Store)(nil)
 var _ contracts.MemoryConsolidator = (*Store)(nil)
 
 // newStore resolves the configured path and loads the existing document. A
@@ -289,6 +291,59 @@ func (s *Store) Add(ctx context.Context, memory contracts.Memory) (contracts.Mem
 		return contracts.Memory{}, err
 	}
 	return memory, nil
+}
+
+// Update implements contracts.MemoryUpdater: it replaces one entry's text while
+// keeping its ID, creation time and (unless a non-empty scope is passed) its
+// scope. Unknown IDs, blank text and invalid scopes are reported without
+// touching the document; a persistence failure rolls the in-memory entry back.
+func (s *Store) Update(ctx context.Context, id, text, scope string) (contracts.Memory, error) {
+	if err := contextErr(ctx); err != nil {
+		return contracts.Memory{}, err
+	}
+	id = strings.TrimSpace(id)
+	if id == "" {
+		return contracts.Memory{}, fmt.Errorf("%s: update: id is required", ModuleID)
+	}
+	text = strings.TrimSpace(text)
+	if text == "" {
+		return contracts.Memory{}, fmt.Errorf("%s: update: text is required", ModuleID)
+	}
+	// An omitted scope keeps the entry's current scope; a provided one is
+	// validated exactly like a stored scope.
+	normalizedScope := ""
+	if strings.TrimSpace(scope) != "" {
+		normalized, err := normalizeScope(scope)
+		if err != nil {
+			return contracts.Memory{}, err
+		}
+		normalizedScope = normalized
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	index := -1
+	for position, memory := range s.entries {
+		if memory.ID == id {
+			index = position
+			break
+		}
+	}
+	if index < 0 {
+		return contracts.Memory{}, fmt.Errorf("%s: update: no memory with id %q", ModuleID, id)
+	}
+	updated := s.entries[index]
+	updated.Text = text
+	if normalizedScope != "" {
+		updated.Scope = normalizedScope
+	}
+	previous := cloneEntries(s.entries)
+	s.entries[index] = updated
+	if err := s.persistLocked(); err != nil {
+		s.entries = previous
+		return contracts.Memory{}, err
+	}
+	return updated, nil
 }
 
 // newIDLocked generates a unique "mem-<unixnano>" ID.

@@ -52,6 +52,20 @@ func newHarness(t *testing.T, language string, cfg about.Config, info contracts.
 	return uiRoot
 }
 
+// aboutHarness wraps the bare root and tester with the click helper the shared
+// settings harness provides.
+type aboutHarness struct {
+	root   *uiroot.Root
+	tester *ui.Tester
+}
+
+func (h *aboutHarness) click(label string) {
+	if err := h.tester.Click(label); err != nil {
+		panic("click " + label + ": " + err.Error())
+	}
+	h.tester.Frame()
+}
+
 func TestAboutEnglishAndLanguageSwitch(t *testing.T) {
 	uiRoot := newHarness(t, "en", about.Config{}, contracts.AppInfo{
 		Name: "ZeoKeel", Version: "1.2.3", Commit: "abc123",
@@ -60,9 +74,8 @@ func TestAboutEnglishAndLanguageSwitch(t *testing.T) {
 	tester := ui.NewTester(uiRoot.View, 1200, 800)
 	tester.Frame()
 	for _, want := range []string{"Settings", "About", "About ZeoKeel",
-		"All modules are compiled into one binary and enabled by the assembly.",
-		"Build information", "Architecture", "Name", "Version", "Commit",
-		"Build time", "Build 2026-01-02", "1.2.3", "abc123", "go1.27.3"} {
+		"Build information", "Development information", "Architecture notes",
+		"Name", "Version", "Commit", "Build time", "1.2.3", "abc123", "go1.27.3"} {
 		if !tester.HasText(want) {
 			t.Fatalf("English About frame missing %q; texts = %v", want, tester.Texts())
 		}
@@ -72,12 +85,27 @@ func TestAboutEnglishAndLanguageSwitch(t *testing.T) {
 			t.Fatalf("English About frame still shows %q", unwanted)
 		}
 	}
+	// The developer notes are folded: expanding the disclosure reveals them.
+	if tester.HasText("The UI is built from native mygo controls") {
+		t.Fatal("the architecture notes are expanded by default")
+	}
+	h := &aboutHarness{root: uiRoot, tester: tester}
+	h.click("Architecture notes")
+	if !tester.HasText("The UI is built from native mygo controls; there is no browser or webview.") {
+		t.Fatalf("expanding Architecture notes did not reveal the notes; texts = %v", tester.Texts())
+	}
 
 	// Switching back to zh updates the navigation and the page content.
 	uiRoot.Locale().SetLanguage("zh")
 	tester.Frame()
+	// The disclosure keeps its state across the language switch; expand it if
+	// it is closed here before checking the localized bullets.
+	if !tester.HasText("UI 是 mygo 原生控件") {
+		h.click("架构说明")
+	}
 	for _, want := range []string{"设置", "关于", "关于 ZeoKeel", "构建信息",
-		"架构", "名称", "版本", "提交", "构建时间", "构建 2026-01-02"} {
+		"开发信息", "架构说明", "名称", "版本", "提交", "构建时间",
+		"UI 是 mygo 原生控件，没有浏览器/webview。"} {
 		if !tester.HasText(want) {
 			t.Fatalf("Chinese About frame missing %q; texts = %v", want, tester.Texts())
 		}
@@ -92,5 +120,21 @@ func TestAboutConfigTitleWins(t *testing.T) {
 	tester.Frame()
 	if !tester.HasText("Credits ZeoKeel") || tester.HasText("About ZeoKeel") {
 		t.Fatalf("config title not honored; texts = %v", tester.Texts())
+	}
+}
+
+// TestAboutUnknownBuildValuesFriendly pins H22: empty build metadata renders a
+// friendly placeholder instead of the raw "unknown".
+func TestAboutUnknownBuildValuesFriendly(t *testing.T) {
+	uiRoot := newHarness(t, "en", about.Config{}, contracts.AppInfo{
+		Name: "ZeoKeel", Commit: "unknown", BuildTime: "unknown",
+	})
+	tester := ui.NewTester(uiRoot.View, 1200, 800)
+	tester.Frame()
+	if tester.HasText("unknown") {
+		t.Fatalf("About shows the raw unknown placeholder; texts = %v", tester.Texts())
+	}
+	if !tester.HasText("Unknown") {
+		t.Fatalf("About lacks the friendly placeholder; texts = %v", tester.Texts())
 	}
 }

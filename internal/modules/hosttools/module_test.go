@@ -111,7 +111,7 @@ func (p *product) callError(t *testing.T, name, arguments string) string {
 // --- registration -----------------------------------------------------------
 
 func TestModuleRegistersHostTools(t *testing.T) {
-	product := loadProduct(t, nil, false)
+	product := loadProduct(t, nil, true)
 
 	names := make([]string, 0, 6)
 	for _, spec := range product.registry.Specs() {
@@ -141,6 +141,46 @@ func TestModuleRegistersHostTools(t *testing.T) {
 	}
 	if state := instance.State().String(); state != "active" {
 		t.Fatalf("hosttools state = %s, want active", state)
+	}
+}
+
+// TestNonInteractiveProductOmitsPlanTools pins the headless/ACP product: with
+// interactive=false no user can ever approve a plan, so the plan-review tools
+// must not be registered at all (a submitted plan would stall the run); the
+// other host tools stay available.
+func TestNonInteractiveProductOmitsPlanTools(t *testing.T) {
+	product := loadProduct(t, nil, false)
+
+	names := make([]string, 0, 4)
+	for _, spec := range product.registry.Specs() {
+		names = append(names, spec.Name)
+	}
+	want := []string{ToolAskUser, ToolGoal, ToolPresent, ToolTeam}
+	if len(names) != len(want) {
+		t.Fatalf("non-interactive registered tools = %v, want %v", names, want)
+	}
+	for index, name := range want {
+		if names[index] != name {
+			t.Fatalf("non-interactive registered tools = %v, want %v", names, want)
+		}
+	}
+
+	// The plan tools are gone from the registry, not merely disabled: a call
+	// is an ordinary unknown-tool error the model can recover from.
+	for _, name := range []string{ToolPlanReview, ToolExitPlanMode} {
+		if _, err := product.call(t, name, `{"plan":"# p","action":"status"}`); !errors.Is(err, rig.ErrToolNotFound) {
+			t.Fatalf("%s in a non-interactive product = %v, want rig.ErrToolNotFound", name, err)
+		}
+	}
+	// The remaining tools keep working in a headless product.
+	if content := product.callOK(t, ToolGoal, `{"action":"get"}`); content != "no goal is set" {
+		t.Fatalf("headless goal get = %q", content)
+	}
+	if content := product.callOK(t, ToolTeam, `{"action":"list"}`); content != "no team members" {
+		t.Fatalf("headless team list = %q", content)
+	}
+	if content := product.callOK(t, ToolPresent, `{"title":"t","content":"c"}`); !strings.Contains(content, "artifact-1") {
+		t.Fatalf("headless present = %q", content)
 	}
 }
 
@@ -331,8 +371,8 @@ func TestMissingCapabilitiesAreToolErrors(t *testing.T) {
 
 func TestModuleCloseUnregistersTools(t *testing.T) {
 	product := loadProduct(t, nil, false)
-	if got := len(product.registry.Specs()); got != 6 {
-		t.Fatalf("tools after load = %d, want 6", got)
+	if got := len(product.registry.Specs()); got != 4 {
+		t.Fatalf("tools after load = %d, want 4 (non-interactive product without plan tools)", got)
 	}
 	if err := product.loader.Close(); err != nil {
 		t.Fatalf("loader.Close: %v", err)

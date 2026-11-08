@@ -11,15 +11,15 @@ import (
 
 	"github.com/zeokeel/zeokeel/internal/contracts"
 	"github.com/zeokeel/zeokeel/internal/design"
-	"github.com/zeokeel/zeokeel/internal/icons"
+	"github.com/zeokeel/zeokeel/internal/uikit"
 )
 
 // MCP page constants. Section "general" sits after 搜索 (93) and 导入 (94); the
 // default page stays About.
 const (
 	MCPPageID      = "mcp"
-	MCPPageSection = "general"
-	MCPPageOrder   = 96
+	MCPPageSection = "集成"
+	MCPPageOrder   = 10
 	MCPPageTitle   = "MCP"
 
 	mcpTransportHTTP  = "http"
@@ -48,9 +48,15 @@ type mcpState struct {
 	workspaceOptIn  bool
 	workspaceLoaded bool
 	workspaceRoot   string
+
+	// confirmRemove is the index of the server row whose removal waits for the
+	// native confirmation dialog (-1 when none is open).
+	confirmRemove int
 }
 
-func newMCPState() *mcpState { return &mcpState{transport: mcpTransportHTTP} }
+func newMCPState() *mcpState {
+	return &mcpState{transport: mcpTransportHTTP, confirmRemove: -1}
+}
 
 // mcpRowTransport reports the effective transport of one stored row: rows with
 // a command (or an explicit stdio transport) run a child process, everything
@@ -94,24 +100,23 @@ func loadMCPWorkspaceState(st *mcpState, store contracts.SettingsService, kctx c
 }
 
 // buildMCPPage renders the MCP server CRUD page: the stored server rows with
-// their transport badge and native remove actions, the transport-aware add form
-// and the serialized write-back status. Changes apply on the next app start
-// (stdio subprocesses are started from the stored rows on launch).
+// their transport badge and native remove actions (confirmed with the native
+// alert dialog), the workspace opt-in switch and the transport-aware add form.
+// Changes apply on the next app start (stdio subprocesses are started from the
+// stored rows on launch).
 func buildMCPPage(c *ui.Context, kctx cordis.Context, st *mcpState, locale contracts.LocaleService) {
 	t := design.Of(c)
 	store, hasStore := kctx.Get(contracts.KeySettings)
 
-	ui.Column(c).FillWidth().Gap(design.Space2).Children(func() {
-		pageHeader(c, t, MCPPageTitle, localized(locale,
+	ui.Column(c).FillWidth().Gap(design.Space4).Children(func() {
+		uikit.PageHeader(c, MCPPageTitle, localized(locale,
 			"通过 Streamable HTTP 或 stdio 连接 MCP 服务器；修改后重启生效（stdio 子进程在启动时拉起）。",
 			"Connect MCP servers over Streamable HTTP or stdio; changes apply after a restart (stdio subprocesses start on launch)."))
 		if !hasStore || store == nil {
-			panel(c, t, func() {
-				sectionTitle(c, t, localized(locale, "设置存储未启用", "Settings store not enabled"))
-				design.Apply(ui.Text(c, localized(locale,
+			uikit.Section(c, localized(locale, "设置存储未启用", "Settings store not enabled"), func(*ui.Context) {
+				uikit.EmptyState(c, localized(locale,
 					"没有可用的设置存储，无法保存 MCP 服务器配置。",
-					"No settings store is available, so the MCP servers cannot be saved.")),
-					t.TextMuted(design.TypeXXS))
+					"No settings store is available, so the MCP servers cannot be saved."))
 			})
 			return
 		}
@@ -122,15 +127,14 @@ func buildMCPPage(c *ui.Context, kctx cordis.Context, st *mcpState, locale contr
 			loadMCPWorkspaceState(st, store, kctx)
 		}
 		if st.parseErr != "" {
-			buildMCPServerError(c, t, st.parseErr)
+			uikit.ErrorLine(c, st.parseErr)
 		}
 
-		// Stored server rows.
-		panel(c, t, func() {
-			sectionTitle(c, t, localized(locale, "MCP 服务器", "MCP servers"))
+		// Stored server rows: rows separated by hairlines, not cards.
+		uikit.Section(c, localized(locale, "MCP 服务器", "MCP servers"), func(*ui.Context) {
 			if len(st.servers) == 0 {
-				design.Apply(ui.Text(c, localized(locale,
-					"还没有配置 MCP 服务器", "No MCP servers configured yet")), t.TextMuted(design.TypeXXS))
+				uikit.EmptyState(c, localized(locale,
+					"还没有配置 MCP 服务器", "No MCP servers configured yet"))
 				return
 			}
 			for index, server := range st.servers {
@@ -144,104 +148,141 @@ func buildMCPPage(c *ui.Context, kctx cordis.Context, st *mcpState, locale contr
 					if transport == mcpTransportStdio {
 						badge.TextColor(t.Accent)
 					}
-					design.Apply(ui.Text(c, mcpRowAddress(server)), t.MonoFamily()).FontSize(12).
+					design.Apply(ui.Text(c, mcpRowAddress(server)),
+						t.Font(design.TypeXS), t.MonoFamily()).
 						TextColor(t.LabelTertiary).Grow(1).MaxLines(1).Ellipsis("…")
 					if design.Apply(ui.Button(c, localized(locale, "移除", "Remove")),
-						secondaryButtonStyle(t)).Tooltip(localized(locale, "移除该服务器", "Remove this server")).Clicked() {
-						removeMCPServer(st, store, locale, index)
+						t.DangerButton()).Tooltip(localized(locale,
+						"移除该服务器", "Remove this server")).Clicked() {
+						st.confirmRemove = index
+						c.Invalidate()
 					}
 				})
 			}
 		})
 
 		// Workspace mcp.json opt-in: applied on the next app start.
-		panel(c, t, func() {
-			sectionTitle(c, t, localized(locale, "工作区 MCP", "Workspace MCP"))
-			toggle := ui.Toggle(c, &st.workspaceOptIn, localized(locale,
-				"读取工作区 mcp.json", "Read workspace mcp.json"))
-			if toggle.Changed() {
-				if err := store.Set(contracts.SettingMCPWorkspaceOptIn, fmt.Sprintf("%t", st.workspaceOptIn)); err != nil {
-					st.status = localized(locale, "保存失败：", "Save failed: ") + err.Error()
-					st.statusErr = true
-				} else {
-					st.status = localized(locale, "已保存", "Saved")
-					st.statusErr = false
+		uikit.Section(c, localized(locale, "工作区 MCP", "Workspace MCP"), func(*ui.Context) {
+			ui.Form(c, func() {
+				if switchField(c, localized(locale, "读取工作区 mcp.json", "Read workspace mcp.json"),
+					mcpWorkspaceHint(st, locale), &st.workspaceOptIn) {
+					if err := store.Set(contracts.SettingMCPWorkspaceOptIn,
+						fmt.Sprintf("%t", st.workspaceOptIn)); err != nil {
+						st.status = localized(locale, "保存失败：", "Save failed: ") + err.Error()
+						st.statusErr = true
+					} else {
+						st.status = localized(locale, "已保存", "Saved")
+						st.statusErr = false
+					}
+					c.Invalidate()
 				}
-			}
-			hint := localized(locale,
-				"当前没有打开工作区；打开工作区并重启后读取其 mcp.json。",
-				"No workspace is open; open one and restart to read its mcp.json.")
-			if root := strings.TrimSpace(st.workspaceRoot); root != "" {
-				path := filepath.Join(root, "mcp.json")
-				hint = localized(locale,
-					"当前工作区："+root+"；启动时读取 "+path+" 中的额外服务器，修改后重启生效。",
-					"Current workspace: "+root+"; extra servers are read from "+path+" on launch, after a restart.")
-			}
-			design.Apply(ui.Text(c, hint), t.TextMuted(design.TypeXXS))
+			})
 		})
 
-		// Add form.
-		panel(c, t, func() {
-			sectionTitle(c, t, localized(locale, "添加服务器", "Add server"))
+		// Add form: every input has a visible field label and a description.
+		uikit.Section(c, localized(locale, "添加服务器", "Add server"), func(*ui.Context) {
 			stdio := st.transport == mcpTransportStdio
-			ui.Row(c).FillWidth().Gap(design.Space3).AlignItems(ui.End).Children(func() {
-				ui.Column(c).Width(150).Grow(0).Shrink(0).Gap(design.Space1).Children(func() {
-					fieldLabel(c, t, localized(locale, "传输", "Transport"))
-					choice := transportDisplay(st.transport)
-					selector := ui.Select(c, &choice, []string{"HTTP", "STDIO"}).
-						Label(localized(locale, "传输", "Transport"))
-					if selector.Changed() {
-						st.transport = transportValue(choice)
-						stdio = st.transport == mcpTransportStdio
-					}
+			ui.Row(c).FillWidth().Gap(design.Space3).AlignItems(ui.Start).Children(func() {
+				ui.Column(c).Width(150).Grow(0).Shrink(0).Children(func() {
+					ui.Field(c, localized(locale, "传输", "Transport"), func() {
+						choice := transportDisplay(st.transport)
+						selector := ui.Select(c, &choice, []string{"HTTP", "STDIO"}).
+							Label(localized(locale, "传输", "Transport"))
+						if selector.Changed() {
+							st.transport = transportValue(choice)
+							stdio = st.transport == mcpTransportStdio
+						}
+					}).Description(localized(locale, "HTTP 用 URL 连接；STDIO 启动本地子进程。",
+						"HTTP connects by URL; STDIO starts a local subprocess."))
 				})
-				ui.Column(c).FillWidth().Grow(1).Gap(design.Space1).Children(func() {
-					fieldLabel(c, t, localized(locale, "名称", "Name"))
-					ui.TextInput(c, &st.name).Label(inputLabel(locale, localized(locale, "名称", "Name"))).
-						Placeholder(localized(locale, "例如：files", "For example: files")).FillWidth()
+				ui.Column(c).FillWidth().Grow(1).Children(func() {
+					ui.Field(c, localized(locale, "名称", "Name"), func() {
+						ui.TextInput(c, &st.name).
+							Label(inputLabel(locale, localized(locale, "名称", "Name"))).
+							Placeholder(localized(locale, "例如：files", "For example: files")).FillWidth()
+					}).Description(localized(locale, "在服务器列表中显示的名称。",
+						"The name shown in the server list."))
 				})
 			})
 			if stdio {
 				ui.Row(c).FillWidth().Gap(design.Space3).AlignItems(ui.Start).Children(func() {
-					ui.Column(c).FillWidth().Grow(1).Gap(design.Space1).Children(func() {
-						fieldLabel(c, t, localized(locale, "命令", "Command"))
-						ui.TextInput(c, &st.command).Label(inputLabel(locale, localized(locale, "命令", "Command"))).
-							Placeholder(localized(locale, "例如：npx", "For example: npx")).FillWidth()
+					ui.Column(c).FillWidth().Grow(1).Children(func() {
+						ui.Field(c, localized(locale, "命令", "Command"), func() {
+							ui.TextInput(c, &st.command).
+								Label(inputLabel(locale, localized(locale, "命令", "Command"))).
+								Placeholder(localized(locale, "例如：npx", "For example: npx")).FillWidth()
+						}).Description(localized(locale, "启动子进程的可执行文件。",
+							"The executable that starts the subprocess."))
 					})
-					ui.Column(c).FillWidth().Grow(2).Gap(design.Space1).Children(func() {
-						fieldLabel(c, t, localized(locale, "参数", "Arguments"))
-						ui.TextInput(c, &st.args).Label(inputLabel(locale, localized(locale, "参数", "Arguments"))).
-							Placeholder(localized(locale,
-								"空格分隔，例如：-y server-github",
-								"Space-separated, e.g. -y server-github")).FillWidth()
+					ui.Column(c).FillWidth().Grow(2).Children(func() {
+						ui.Field(c, localized(locale, "参数", "Arguments"), func() {
+							ui.TextInput(c, &st.args).
+								Label(inputLabel(locale, localized(locale, "参数", "Arguments"))).
+								Placeholder(localized(locale,
+									"空格分隔，例如：-y server-github",
+									"Space-separated, e.g. -y server-github")).FillWidth()
+						}).Description(localized(locale, "按空格拆分为参数列表。",
+							"Split on spaces into the argument list."))
 					})
 				})
-				ui.Column(c).FillWidth().Gap(design.Space1).Children(func() {
-					fieldLabel(c, t, localized(locale, "环境变量", "Environment"))
-					ui.TextInput(c, &st.env).Label(inputLabel(locale, localized(locale, "环境变量", "Environment"))).
+				ui.Field(c, localized(locale, "环境变量", "Environment"), func() {
+					ui.TextInput(c, &st.env).
+						Label(inputLabel(locale, localized(locale, "环境变量", "Environment"))).
 						Placeholder(localized(locale,
 							"每行 KEY=VALUE，例如：TOKEN=abc",
 							"One KEY=VALUE per line, e.g. TOKEN=abc")).FillWidth()
-				})
+				}).Description(localized(locale, "传给子进程的环境变量。",
+					"Environment variables passed to the subprocess."))
 			} else {
-				ui.Column(c).FillWidth().Gap(design.Space1).Children(func() {
-					fieldLabel(c, t, "URL")
+				ui.Field(c, "URL", func() {
 					ui.TextInput(c, &st.url).Label(inputLabel(locale, "URL")).
 						Placeholder("https://mcp.example.com/mcp").FillWidth()
-				})
+				}).Description(localized(locale, "Streamable HTTP 端点。",
+					"The Streamable HTTP endpoint."))
 			}
-			ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(design.Space2).Children(func() {
-				if design.Apply(ui.PrimaryButton(c, localized(locale, "添加", "Add")),
-					t.PrimaryButton()).Clicked() {
+			statusBadgesRow(c, t, st.status, st.statusErr)
+			uikit.DialogFooter(c, []uikit.DialogAction{{
+				Label: localized(locale, "添加", "Add"), Primary: true,
+				OnClick: func() {
 					addMCPServer(st, store, locale)
-				}
-				ui.Spacer(c).Grow(1)
-				if st.status != "" {
-					statusBadge(c, t, st.status, st.statusErr)
-				}
-			})
+					c.Invalidate()
+				},
+			}})
 		})
+
+		// Removing a server is destructive: confirm it with the native dialog.
+		if st.confirmRemove >= 0 && st.confirmRemove < len(st.servers) {
+			index := st.confirmRemove
+			open := true
+			switch ui.AlertDialog(c, &open,
+				localized(locale, "移除 MCP 服务器", "Remove MCP server"),
+				localized(locale, "确认移除「", "Remove ")+st.servers[index].Name+
+					localized(locale, "」？此操作无法撤销。", "? This cannot be undone."),
+				localized(locale, "取消", "Cancel"),
+				localized(locale, "移除服务器", "Remove server")) {
+			case 1:
+				removeMCPServer(st, store, locale, index)
+				st.confirmRemove = -1
+				c.Invalidate()
+			}
+			if !open {
+				st.confirmRemove = -1
+			}
+		}
 	})
+}
+
+// mcpWorkspaceHint describes the workspace file the opt-in reads.
+func mcpWorkspaceHint(st *mcpState, locale contracts.LocaleService) string {
+	if root := strings.TrimSpace(st.workspaceRoot); root != "" {
+		path := filepath.Join(root, "mcp.json")
+		return localized(locale,
+			"当前工作区："+root+"；启动时读取 "+path+" 中的额外服务器，修改后重启生效。",
+			"Current workspace: "+root+"; extra servers are read from "+path+" on launch, after a restart.")
+	}
+	return localized(locale,
+		"当前没有打开工作区；打开工作区并重启后读取其 mcp.json。",
+		"No workspace is open; open one and restart to read its mcp.json.")
 }
 
 // transportDisplay maps the stored transport to the selector's display text.
@@ -405,13 +446,4 @@ func saveMCPServers(st *mcpState, store contracts.SettingsService, locale contra
 	st.status = localized(locale, "已保存", "Saved")
 	st.statusErr = false
 	return true
-}
-
-// buildMCPServerError is the page's danger row.
-func buildMCPServerError(c *ui.Context, t *design.Tokens, text string) {
-	th := t.Theme()
-	ui.Row(c).FillWidth().Gap(design.Space2).AlignItems(ui.Start).Children(func() {
-		ui.Icon(c, icons.AlertTriangle()).Size(th.Space(4), th.Space(4)).TextColor(t.Danger)
-		design.Apply(ui.Text(c, text), t.Font(design.TypeXS)).TextColor(t.DangerText)
-	})
 }

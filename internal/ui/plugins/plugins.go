@@ -86,6 +86,11 @@ type state struct {
 	// mcpExpanded remembers the expanded MCP server cards, keyed by server
 	// identity, so a Refresh preserves the open cards.
 	mcpExpanded map[string]bool
+
+	// pendingRestartTools remembers tool switches flipped on this page: the
+	// toolkit only re-registers its tools at process start, so each flipped tool
+	// shows "restart needed" until the app restarts.
+	pendingRestartTools map[string]bool
 }
 
 // tr returns the localized copy for the current frame's language.

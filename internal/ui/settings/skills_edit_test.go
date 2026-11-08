@@ -403,3 +403,24 @@ func TestSkillsEditEnglish(t *testing.T) {
 	}
 	h.assertTexts(tester, "Saved")
 }
+
+// TestSkillsDeleteConfirmEscapeCancels pins the native alert dialog semantics of
+// the skills delete confirmation: Esc dismisses it and deletes nothing.
+func TestSkillsDeleteConfirmEscapeCancels(t *testing.T) {
+	dataDir := t.TempDir()
+	skills := newFakeSkills()
+	skills.setList(contracts.Skill{Name: "alpha", Path: filepath.Join(dataDir, "skills", "alpha", "SKILL.md")})
+	editor := newFakeSkillsEditor(skills)
+	h := skillsEditorHarness(t, skills, editor, dataDir)
+	tester := h.tester()
+
+	h.click(tester, "删除")
+	h.assertTexts(tester, "删除技能", "确认删除")
+	tester.Key(0, ui.KeyEscape)
+	tester.Frame()
+	if got := editor.deleted(); len(got) != 0 {
+		t.Fatalf("Esc on the delete dialog deleted %v", got)
+	}
+	h.assertNoTexts(tester, "确认删除")
+	h.assertTexts(tester, "alpha")
+}

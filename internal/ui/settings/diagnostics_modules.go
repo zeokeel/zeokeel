@@ -45,14 +45,16 @@ func buildLoadedModulesSection(c *ui.Context, t *design.Tokens, state *diagnosti
 				return
 			}
 			ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(design.Space2).Children(func() {
-				design.Apply(ui.Text(c, strings.TrimSpace(module.EntryID)), t.MonoFamily()).
-					FontSize(11).TextColor(t.LabelSecondary).Width(160).Shrink(0).NoWrap()
-				design.Apply(ui.Text(c, strings.TrimSpace(module.ModuleID)), t.MonoFamily()).
-					FontSize(11).TextColor(t.LabelPrimary).Grow(1).MaxLines(1).Ellipsis("…")
+				design.Apply(ui.Text(c, strings.TrimSpace(module.EntryID)),
+					t.Font(design.TypeXXXS), t.MonoFamily()).
+					TextColor(t.LabelSecondary).Width(160).Shrink(0).NoWrap()
+				design.Apply(ui.Text(c, strings.TrimSpace(module.ModuleID)),
+					t.Font(design.TypeXXXS), t.MonoFamily()).
+					TextColor(t.LabelPrimary).Grow(1).MaxLines(1).Ellipsis("…")
 				state := strings.TrimSpace(module.State)
 				color := t.LabelTertiary
 				if state == "active" {
-					color = t.Success
+					color = t.SuccessText
 				}
 				design.Apply(ui.Badge(c, state), t.Badge()).TextColor(color)
 			})

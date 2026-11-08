@@ -54,6 +54,10 @@ func TestContextBudgetSuffix(t *testing.T) {
 		}}
 		tester := startBudgetSession(t, "audit-model", catalog)
 		requireHasText(t, tester, "1,900 tokens")
+		// The budget lives in the usage line's expanded breakdown.
+		if err := tester.Click("用时 120ms · 1,900 tokens"); err != nil {
+			t.Fatalf("expand usage: %v; texts = %v", err, tester.Texts())
+		}
 		requireHasText(t, tester, "预算 128k")
 	})
 
@@ -62,6 +66,9 @@ func TestContextBudgetSuffix(t *testing.T) {
 			{ID: "audit-model", ContextWindow: 32_768},
 		}}
 		tester := startBudgetSession(t, "audit-model", catalog)
+		if err := tester.Click("用时 120ms · 1,900 tokens"); err != nil {
+			t.Fatalf("expand usage: %v; texts = %v", err, tester.Texts())
+		}
 		requireHasText(t, tester, "预算 32.8k")
 	})
 

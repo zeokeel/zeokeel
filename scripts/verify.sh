@@ -202,8 +202,12 @@ check_desktop_smoke() {
 	cat >"$data_dir/settings.json" <<'JSON'
 {"ui.globalHotkey":"CmdOrCtrl+Shift+Space"}
 JSON
+	# Startup under Xvfb + llvmpipe takes ~18 s on this host (the window is up
+	# late because the GL surface initializes on the CPU); the previous 8 s
+	# budget only ever measured the compile+init tail and was flaky. Keep the
+	# smoke focused on "loads without panic", not on a stopwatch.
 	set +e
-	xvfb-run -a timeout -s TERM 8 "$GO" run ./cmd/zeokeel --data-dir "$data_dir" >"$log" 2>&1
+	xvfb-run -a timeout -s TERM 40 "$GO" run ./cmd/zeokeel --data-dir "$data_dir" >"$log" 2>&1
 	local code=$?
 	set -e
 	if [[ $code -ne 0 && $code -ne 124 ]]; then
@@ -228,7 +232,7 @@ check_headless_smoke() {
 	log=$(mktemp "${TMPDIR:-/tmp}/zeokeel-headless.XXXXXX")
 	temp_dirs+=("$log")
 	set +e
-	timeout 8 "$GO" run ./cmd/zeokeel --headless --data-dir "$data_dir" >"$log" 2>&1
+	timeout 20 "$GO" run ./cmd/zeokeel --headless --data-dir "$data_dir" >"$log" 2>&1
 	local code=$?
 	set -e
 	if [[ $code -ne 0 && $code -ne 124 ]]; then
@@ -254,7 +258,7 @@ check_acp_smoke() {
 	temp_dirs+=("$out" "$err")
 	set +e
 	printf '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":1}}\n' |
-		timeout 10 "$GO" run ./cmd/zeokeel --acp --data-dir "$data_dir" >"$out" 2>"$err"
+		timeout 20 "$GO" run ./cmd/zeokeel --acp --data-dir "$data_dir" >"$out" 2>"$err"
 	local code=$?
 	set -e
 	if [[ $code -ne 0 ]]; then

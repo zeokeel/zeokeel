@@ -64,12 +64,53 @@ func (n *navigator) SettingsOpen() bool {
 	return n.settings
 }
 
-// ToggleSettings flips the settings surface.
+// ToggleSettings flips the settings surface. Opening it scrolls the remembered
+// page into view in the grouped navigation, so the current page is never left
+// off-screen (the closing/reopening case the reviewer found).
 func (n *navigator) ToggleSettings() {
 	n.mu.Lock()
 	n.settings = !n.settings
+	opened := n.settings
 	n.mu.Unlock()
+	if opened {
+		n.root.settingsScrollToSelected = true
+	}
 	n.root.requestFrame()
+}
+
+// OpenSettings shows the settings surface, keeping the page it last showed.
+func (n *navigator) OpenSettings() {
+	n.mu.Lock()
+	changed := !n.settings
+	n.settings = true
+	n.mu.Unlock()
+	if changed {
+		n.root.requestFrame()
+	}
+}
+
+// OpenSettingsPage shows the settings surface on one contributed page, for
+// commands and deep links ("open the model settings"). The pages are addressed
+// in the same grouped order the settings navigation renders, so the index is
+// stable across frames.
+func (n *navigator) OpenSettingsPage(pageID string) error {
+	ordered := flattenSettingsGroups(groupSettingsPages(visiblePages(n.rt.settingsPages())))
+	for index, page := range ordered {
+		if page.ID != pageID {
+			continue
+		}
+		n.mu.Lock()
+		n.settings = true
+		n.root.settingsTab = index
+		if page.Section == "高级" {
+			n.root.settingsAdvancedOpen = true
+		}
+		n.root.settingsScrollToSelected = true
+		n.mu.Unlock()
+		n.root.requestFrame()
+		return nil
+	}
+	return &UnknownSettingsPageError{ID: pageID}
 }
 
 // CloseSettings hides the settings surface.
@@ -81,6 +122,14 @@ func (n *navigator) CloseSettings() {
 	if changed {
 		n.root.requestFrame()
 	}
+}
+
+// UnknownSettingsPageError reports a deep link to a settings page no module
+// registered (or one that is currently hidden).
+type UnknownSettingsPageError struct{ ID string }
+
+func (e *UnknownSettingsPageError) Error() string {
+	return "uiroot: unknown settings page " + e.ID
 }
 
 // UnknownScreenError reports a navigation to a screen ID no module registered.

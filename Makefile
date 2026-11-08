@@ -21,7 +21,7 @@ export GOFLAGS := -mod=mod
 # Extra arguments for `make run` (e.g. ARGS=--headless --data-dir /tmp/zk).
 ARGS ?=
 
-.PHONY: all build vet test ci run run-headless clean verify
+.PHONY: all build vet test ci run run-headless clean verify release
 
 all: build
 
@@ -56,3 +56,15 @@ run-headless:
 
 clean:
 	$(GO) clean ./...
+
+# Release packaging (local convenience; CI/release.yml builds all four targets).
+# Usage: make release VERSION=0.1.0
+VERSION ?= $(shell cat VERSION 2>/dev/null || echo 0.1.0)
+release:
+	$(GO) build -trimpath \
+		-ldflags "-s -w \
+			-X github.com/zeokeel/zeokeel/internal/host.Version=v$(VERSION) \
+			-X github.com/zeokeel/zeokeel/internal/host.Commit=$$(git rev-parse --short=12 HEAD 2>/dev/null || echo unknown) \
+			-X github.com/zeokeel/zeokeel/internal/host.BuildTime=$$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+		-o dist/zeokeel ./cmd/zeokeel
+	@echo "built dist/zeokeel v$(VERSION)"

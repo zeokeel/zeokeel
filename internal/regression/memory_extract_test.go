@@ -253,10 +253,7 @@ func startExtractionPage(t *testing.T, extractor contracts.MemoryExtractionServi
 	h.ui.Navigator().ToggleSettings()
 	tester := h.tester(1280, 1000)
 	tester.Frame()
-	if err := tester.Click("记忆"); err != nil {
-		t.Fatalf("open memory page: %v; texts = %v", err, tester.Texts())
-	}
-	tester.Frame()
+	openSettingsPage(t, tester, 1280, 1000, "记忆")
 	return h, tester
 }
 
@@ -283,6 +280,7 @@ func TestMemoryExtractSettingsPage(t *testing.T) {
 	requireHasText(t, tester, "启用模型提取（从最近对话提取记忆，会调用模型）")
 	requireHasText(t, tester, "先启用模型提取后再提取")
 	// Disabled: clicking the button must not call the extractor.
+	revealSettings(t, tester, "从当前会话提取")
 	if err := tester.Click("从当前会话提取"); err == nil {
 		tester.Frame()
 	}
@@ -291,6 +289,7 @@ func TestMemoryExtractSettingsPage(t *testing.T) {
 	}
 
 	// Enable: the setting is saved and the action runs.
+	revealSettings(t, tester, "启用模型提取（从最近对话提取记忆，会调用模型）")
 	if err := tester.Click("启用模型提取（从最近对话提取记忆，会调用模型）"); err != nil {
 		t.Fatalf("toggle extraction: %v; texts = %v", err, tester.Texts())
 	}
@@ -298,6 +297,7 @@ func TestMemoryExtractSettingsPage(t *testing.T) {
 	if got := h.settings.Get(contracts.SettingMemoryExtractEnabled, ""); got != "true" {
 		t.Fatalf("memory.extract = %q, want true", got)
 	}
+	revealSettings(t, tester, "从当前会话提取")
 	if err := tester.Click("从当前会话提取"); err != nil {
 		t.Fatalf("extract: %v; texts = %v", err, tester.Texts())
 	}
@@ -311,6 +311,7 @@ func TestMemoryExtractSettingsPage(t *testing.T) {
 
 	// Failure renders the error line.
 	extractor.setScript(nil, errors.New("provider boom"))
+	revealSettings(t, tester, "从当前会话提取")
 	if err := tester.Click("从当前会话提取"); err != nil {
 		t.Fatalf("extract failure: %v; texts = %v", err, tester.Texts())
 	}
@@ -328,6 +329,7 @@ func TestMemoryExtractSettingsPage(t *testing.T) {
 	extractor.mu.Lock()
 	before := extractor.calls
 	extractor.mu.Unlock()
+	revealSettings(t, tester, "从当前会话提取")
 	if err := tester.Click("从当前会话提取"); err != nil {
 		t.Fatalf("blocked extract: %v; texts = %v", err, tester.Texts())
 	}
@@ -337,6 +339,7 @@ func TestMemoryExtractSettingsPage(t *testing.T) {
 		t.Fatal("the extraction never started")
 	}
 	pumpExtractionFrame(t, tester, "提取中…")
+	revealSettings(t, tester, "提取中…")
 	if err := tester.Click("提取中…"); err == nil {
 		tester.Frame()
 	}

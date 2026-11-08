@@ -91,7 +91,8 @@ func TestLSPPageRemoveServerClearsLegacy(t *testing.T) {
 		contracts.SettingLSPServer:  `{"command":"legacy"}`,
 	})
 	h, tester := lspPage(t, store)
-	h.click(tester, "移除") // removes the first server (go, the active one)
+	h.click(tester, "移除") // opens the confirmation for the first server (go)
+	h.click(tester, "移除服务器")
 
 	servers := storedLSPServers(t, store)
 	if len(servers) != 1 || servers[0].Name != "rs" {
@@ -127,16 +128,19 @@ func TestLSPPageLegacySingleServerCompatibility(t *testing.T) {
 	h, tester := lspPage(t, store)
 	h.assertTexts(tester, "default", "gopls", "活动中")
 
-	// Saving the list migrates the legacy row and clears it (single source).
-	h.click(tester, "保存")
+	// The first write to the multi-server list migrates the legacy row and
+	// clears it (single source of truth); there is no separate save action.
+	clearAndType(t, h, tester, "名称 输入", "go")
+	clearAndType(t, h, tester, "命令 输入", "gopls")
+	h.click(tester, "添加")
 	servers := storedLSPServers(t, store)
-	if len(servers) != 1 || servers[0].Name != "default" || servers[0].Command != "gopls" {
+	if len(servers) != 2 || servers[1].Name != "go" || servers[1].Command != "gopls" {
 		t.Fatalf("migrated servers = %+v", servers)
 	}
 	if got := store.get(contracts.SettingLSPServer); got != "" {
-		t.Fatalf("save kept the legacy row: %q", got)
+		t.Fatalf("write kept the legacy row: %q", got)
 	}
-	h.assertTexts(tester, "已保存（重启后生效）")
+	h.assertTexts(tester, "已添加（重启后生效）")
 }
 
 func TestLSPPageBadServersJSON(t *testing.T) {

@@ -77,5 +77,5 @@ func TestHelpModalEnglishCommandTitles(t *testing.T) {
 	}
 	tester.Frame()
 	h.assertTexts(tester, "Help", "Slash commands", "New conversation", "Stop",
-		"Attach files", "Permission mode", "Esc to close")
+		"Attach files", "Permission mode", "Toggle the inspector", "Enter")
 }

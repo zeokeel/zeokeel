@@ -11,23 +11,24 @@ import (
 
 	"github.com/zeokeel/zeokeel/internal/contracts"
 	"github.com/zeokeel/zeokeel/internal/design"
-	"github.com/zeokeel/zeokeel/internal/icons"
+	"github.com/zeokeel/zeokeel/internal/uikit"
 )
 
 // Import page constants. Section "general" matches About (90) and 更新 (92);
 // Order 94 keeps this page after both, so the default page stays About.
 const (
 	ImportPageID      = "import"
-	ImportPageSection = "general"
-	ImportPageOrder   = 94
+	ImportPageSection = "高级"
+	ImportPageOrder   = 30
 	ImportPageTitle   = "导入"
 )
 
 // ImportDirectoryPicker is the DSH data-directory seam: the default opens the
-// native mygo directory dialog; tests replace it with a scripted selection.
-var ImportDirectoryPicker = func() (string, error) {
+// native mygo directory dialog with a localized title; tests replace it with a
+// scripted selection.
+var ImportDirectoryPicker = func(title string) (string, error) {
 	paths, err := mygo.Dialog.Open(mygo.OpenDialogOptions{
-		Title:     "选择 DSH 数据目录",
+		Title:     title,
 		Directory: true,
 	})
 	if err != nil || len(paths) == 0 {
@@ -62,62 +63,89 @@ func buildImportPage(c *ui.Context, t *design.Tokens, kctx cordis.Context, runti
 	importer, hasImporter := kctx.Get(contracts.KeyImporter)
 
 	ui.Column(c).FillWidth().Gap(design.Space4).Children(func() {
-		ui.Column(c).Gap(design.Space1).Children(func() {
-			design.Apply(ui.Text(c, localized(locale, "导入", "Import")), t.Font(design.TypeL)).
-				FontWeight(600).TextColor(t.LabelPrimary)
-			design.Apply(ui.Text(c, localized(locale,
-				"从 DSH 桌面数据导入会话与工作区；扫描只读，导入会写入本产品存储。",
-				"Import sessions and workspaces from DSH desktop data; scanning is read-only, importing writes to this product's store.")),
-				t.TextMuted(design.TypeXS)).MaxLines(2)
-		})
+		uikit.PageHeader(c, localized(locale, "导入", "Import"), localized(locale,
+			"从 DSH 桌面版把会话和工作区搬过来：选好它的数据目录，先扫描预览，确认后再导入。扫描不会改动任何数据。",
+			"Bring your sessions and workspaces over from DSH desktop: pick its data directory, scan to preview, then import. Scanning changes nothing."))
 		if !hasImporter {
-			design.Apply(ui.Text(c, localized(locale, "导入服务未启用", "Import service is not enabled")), t.TextMuted(design.TypeXS))
+			uikit.EmptyState(c, localized(locale,
+				"导入服务未启用", "Import service is not enabled"))
 			return
 		}
 
-		ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(design.Space2).Children(func() {
-			ui.TextInput(c, &st.dir).Label(localized(locale, "DSH 数据目录", "DSH data directory")).
-				Placeholder("~/.dsh").Grow(1)
-			browse := ui.Button(c, localized(locale, "浏览…", "Browse…")).
-				Tooltip(localized(locale, "选择 DSH 数据目录", "Choose the DSH data directory"))
-			if browse.Clicked() {
-				dir, err := ImportDirectoryPicker()
-				switch {
-				case err != nil:
-					st.dirErr = err.Error()
-				case strings.TrimSpace(dir) != "":
-					st.dir = dir
-					st.dirErr = ""
-					st.preview = nil
-					st.result = nil
-					st.scanErr = ""
-					st.importErr = ""
+		uikit.Section(c, localized(locale, "数据来源", "Source"), func(*ui.Context) {
+			ui.Field(c, localized(locale, "DSH 数据目录", "DSH data directory"), func() {
+				ui.TextInput(c, &st.dir).
+					Label(localized(locale, "DSH 数据目录", "DSH data directory")).
+					Placeholder("~/.dsh").FillWidth()
+			}).Description(localized(locale,
+				"DSH 桌面版的数据目录；先扫描预览，再导入。",
+				"The DSH desktop data directory; scan to preview, then import."))
+			ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(design.Space2).Children(func() {
+				if design.Apply(ui.Button(c, localized(locale, "浏览…", "Browse…")),
+					t.SecondaryButton()).Tooltip(localized(locale,
+					"选择 DSH 数据目录", "Choose the DSH data directory")).Clicked() {
+					dir, err := ImportDirectoryPicker(localized(locale,
+						"选择 DSH 数据目录", "Choose the DSH data directory"))
+					switch {
+					case err != nil:
+						st.dirErr = err.Error()
+					case strings.TrimSpace(dir) != "":
+						st.dir = dir
+						st.dirErr = ""
+						st.preview = nil
+						st.result = nil
+						st.scanErr = ""
+						st.importErr = ""
+					}
+					runtime.Invalidate()
 				}
-				runtime.Invalidate()
+				scanLabel := localized(locale, "扫描", "Scan")
+				if st.scanning {
+					scanLabel = localized(locale, "扫描中…", "Scanning…")
+				}
+				// H24: with a directory chosen, scanning is the obvious next
+				// step, so it becomes the section's accent primary action.
+				dirChosen := strings.TrimSpace(st.dir) != ""
+				var scanButton ui.Element
+				var scanStyle design.Style
+				if dirChosen {
+					scanButton = ui.PrimaryButton(c, scanLabel)
+					scanStyle = t.PrimaryButton()
+				} else {
+					scanButton = ui.Button(c, scanLabel)
+					scanStyle = t.SecondaryButton()
+				}
+				scan := design.Apply(scanButton, scanStyle).
+					Tooltip(localized(locale,
+						"只读扫描该目录，不写入任何数据",
+						"Scan the directory read-only; nothing is written"))
+				scan.Disabled(st.scanning || st.importing || strings.TrimSpace(st.dir) == "")
+				if scan.Clicked() && !st.scanning && !st.importing {
+					startImportScan(importer, runtime, st)
+				}
+			})
+			if st.dirErr != "" {
+				uikit.ErrorLine(c, localized(locale, "无法打开目录选择器：",
+					"Could not open the directory picker: ")+st.dirErr)
 			}
-			scanLabel := localized(locale, "扫描", "Scan")
-			if st.scanning {
-				scanLabel = localized(locale, "扫描中…", "Scanning…")
+			if st.scanErr != "" {
+				uikit.ErrorLine(c, localized(locale, "扫描失败：", "Scan failed: ")+st.scanErr)
 			}
-			scan := ui.Button(c, scanLabel).
-				Tooltip(localized(locale, "只读扫描该目录，不写入任何数据", "Scan the directory read-only; nothing is written"))
-			scan.Disabled(st.scanning || st.importing || strings.TrimSpace(st.dir) == "")
-			if scan.Clicked() && !st.scanning && !st.importing {
-				startImportScan(importer, runtime, st)
+			if st.preview == nil && st.result == nil && st.dirErr == "" && st.scanErr == "" &&
+				!st.scanning && !st.importing {
+				uikit.EmptyStateBlock(c,
+					localized(locale, "还没有可导入的数据", "Nothing to import yet"),
+					localized(locale, "选择一个 DSH 数据目录，先「扫描」预览，再「导入数据」。",
+						"Choose a DSH data directory, Scan to preview, then Import data."),
+					nil)
 			}
 		})
-		if st.dirErr != "" {
-			buildImportError(c, t, localized(locale, "无法打开目录选择器：", "Could not open the directory picker: ")+st.dirErr)
-		}
-		if st.scanErr != "" {
-			buildImportError(c, t, localized(locale, "扫描失败：", "Scan failed: ")+st.scanErr)
-		}
 
 		if st.preview != nil {
 			buildImportPreview(c, t, importer, runtime, st, locale)
 		}
 		if st.importErr != "" {
-			buildImportError(c, t, localized(locale, "导入失败：", "Import failed: ")+st.importErr)
+			uikit.ErrorLine(c, localized(locale, "导入失败：", "Import failed: ")+st.importErr)
 		}
 		if st.result != nil {
 			buildImportResult(c, t, *st.result, locale)
@@ -130,10 +158,7 @@ func buildImportPage(c *ui.Context, t *design.Tokens, kctx cordis.Context, runti
 func buildImportPreview(c *ui.Context, t *design.Tokens, importer contracts.ImporterService,
 	runtime contracts.UIRuntime, st *importState, locale contracts.LocaleService) {
 	preview := *st.preview
-	card := design.Apply(ui.Column(c), t.Panel()).Padding(design.Space3).Gap(design.Space2)
-	card.Children(func() {
-		design.Apply(ui.Text(c, localized(locale, "扫描结果", "Scan result")), t.Font(design.TypeS)).
-			FontWeight(600).TextColor(t.LabelPrimary)
+	uikit.Section(c, localized(locale, "扫描结果", "Scan result"), func(*ui.Context) {
 		importStatRow(c, t, localized(locale, "会话", "Sessions"), preview.Sessions)
 		importStatRow(c, t, localized(locale, "消息", "Messages"), preview.Messages)
 		importStatRow(c, t, localized(locale, "工作区", "Workspaces"), preview.Workspaces)
@@ -150,31 +175,34 @@ func buildImportPreview(c *ui.Context, t *design.Tokens, importer contracts.Impo
 		if st.importing {
 			importLabel = localized(locale, "导入中…", "Importing…")
 		}
-		importButton := design.Apply(ui.PrimaryButton(c, importLabel), t.PrimaryButton()).
-			Disabled(st.importing || st.scanning)
-		if importButton.Clicked() && !st.importing && !st.scanning {
-			startImportData(importer, runtime, st)
-		}
+		uikit.DialogFooter(c, []uikit.DialogAction{{
+			Label: importLabel, Primary: true,
+			Disabled: st.importing || st.scanning,
+			OnClick: func() {
+				if !st.importing && !st.scanning {
+					startImportData(importer, runtime, st)
+					c.Invalidate()
+				}
+			},
+		}})
 	})
 }
 
 // buildImportResult renders what the import run actually wrote.
 func buildImportResult(c *ui.Context, t *design.Tokens, result contracts.ImportResult,
 	locale contracts.LocaleService) {
-	card := design.Apply(ui.Column(c), t.Panel()).Padding(design.Space3).Gap(design.Space2)
-	card.Children(func() {
-		design.Apply(ui.Text(c, localized(locale, "导入结果", "Import result")), t.Font(design.TypeS)).
-			FontWeight(600).TextColor(t.LabelPrimary)
+	uikit.Section(c, localized(locale, "导入结果", "Import result"), func(*ui.Context) {
 		importStatRow(c, t, localized(locale, "导入会话", "Imported sessions"), result.ImportedSessions)
 		importStatRow(c, t, localized(locale, "导入消息", "Imported messages"), result.ImportedMessages)
 		importStatRow(c, t, localized(locale, "导入工作区", "Imported workspaces"), result.ImportedWorkspaces)
 		importStatRow(c, t, localized(locale, "跳过", "Skipped"), result.Skipped)
 		if len(result.Errors) == 0 {
-			design.Apply(ui.Text(c, localized(locale, "没有错误", "No errors")), t.TextMuted(design.TypeXXS))
+			design.Apply(ui.Text(c, localized(locale, "没有错误", "No errors")),
+				t.TextMuted(design.TypeXXS))
 			return
 		}
 		for _, entry := range result.Errors {
-			buildImportError(c, t, entry)
+			uikit.ErrorLine(c, entry)
 		}
 	})
 }
@@ -245,13 +273,4 @@ func startImportData(importer contracts.ImporterService, runtime contracts.UIRun
 			runtime.Invalidate()
 		})
 	}()
-}
-
-// buildImportError is the page's danger row.
-func buildImportError(c *ui.Context, t *design.Tokens, text string) {
-	th := t.Theme()
-	ui.Row(c).FillWidth().Gap(design.Space2).AlignItems(ui.Start).Children(func() {
-		ui.Icon(c, icons.AlertTriangle()).Size(th.Space(4), th.Space(4)).TextColor(t.Danger)
-		design.Apply(ui.Text(c, text), t.Font(design.TypeXS)).TextColor(t.DangerText)
-	})
 }

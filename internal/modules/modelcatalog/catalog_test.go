@@ -5,6 +5,7 @@ package modelcatalog
 
 import (
 	"fmt"
+	"reflect"
 	"strings"
 	"sync"
 	"testing"
@@ -82,7 +83,7 @@ func TestConfiguredCatalogOverridesDefaults(t *testing.T) {
 	if len(models) != 2 {
 		t.Fatalf("configured models = %+v, want 2", models)
 	}
-	if models[0] != (contracts.ModelInfo{ID: "m1", Name: "Model One", Note: "fast"}) {
+	if !reflect.DeepEqual(models[0], contracts.ModelInfo{ID: "m1", Name: "Model One", Note: "fast"}) {
 		t.Fatalf("configured first = %+v", models[0])
 	}
 	if models[1].ID != "m2" || models[1].Name != "m2" || models[1].Note != "deep" {
@@ -153,5 +154,36 @@ func TestActivationRequiresLogger(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "requires service") {
 		t.Fatalf("activation error = %v, want missing-service hint", err)
+	}
+}
+
+// TestThinkingConfigPassesThrough covers the model thinking metadata: assembly
+// config and user settings rows must survive into contracts.ModelInfo.
+func TestThinkingConfigPassesThrough(t *testing.T) {
+	cfg := Config{Models: []Model{{
+		ID: "qwen-x", Family: "qwen", DefaultThinking: "qwen-on",
+		ThinkingModes: []contracts.ThinkingMode{{ID: "fast", NameZH: "快", Params: map[string]any{"enable_thinking": false}}},
+	}}}
+	svc := newService(cfg, &fakeLogger{})
+	models := svc.Models()
+	if len(models) != 1 {
+		t.Fatalf("models = %+v", models)
+	}
+	got := models[0]
+	if got.Family != "qwen" || got.DefaultThinking != "qwen-on" {
+		t.Fatalf("family/default = %+v", got)
+	}
+	if len(got.ThinkingModes) != 1 || got.ThinkingModes[0].ID != "fast" ||
+		got.ThinkingModes[0].Params["enable_thinking"] != false {
+		t.Fatalf("custom modes = %+v", got.ThinkingModes)
+	}
+
+	store := newSettingsStore(nil)
+	store.setModels(`[{"id":"m","family":"deepseek","defaultThinking":"reasoning-high","thinkingModes":[{"id":"x","nameZh":"自定义","params":{"reasoning_effort":"low"}}]}]`)
+	svc2, _ := modelService(t, Config{}, store)
+	models = svc2.Models()
+	if len(models) != 1 || models[0].Family != "deepseek" ||
+		models[0].DefaultThinking != "reasoning-high" || len(models[0].ThinkingModes) != 1 {
+		t.Fatalf("settings passthrough = %+v", models)
 	}
 }

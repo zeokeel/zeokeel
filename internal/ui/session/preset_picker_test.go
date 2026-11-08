@@ -86,30 +86,45 @@ func TestPersonaPickerSelectAndClear(t *testing.T) {
 	chat := presetSessionChat(newPresetChat())
 	h := newPresetsHarness(t, chat, presetStore(t))
 	tester := h.tester()
-	h.assertTexts(tester, "人设：无")
-	h.click(tester, "人设：无")
+	// The persona rows live in the one session menu now, not on a chip.
+	if got := exactTextCount(tester.Texts(), "人设"); got != 0 {
+		t.Fatalf("standalone persona chip rendered; texts = %v", tester.Texts())
+	}
+	h.assertTexts(tester, "会话设置")
+	h.openSessionMenu(tester)
+	h.assertTexts(tester, "人设")
+	h.clickExact(tester, "人设")
 	h.assertTexts(tester, "Reviewer", "Writer", "无")
-	h.click(tester, "Reviewer")
+	h.clickExact(tester, "Reviewer")
 	tester.Frame()
-	h.assertTexts(tester, "人设：Reviewer", "已应用人设：Reviewer")
 	if calls := chat.selectedCalls(); len(calls) != 1 || calls[0] != "sess-1:p1" {
 		t.Fatalf("SetSessionPreset calls = %v", calls)
 	}
+	// The picker keeps the composer row calm: the choice is reflected inside the
+	// menu (checked row), not by renaming the button.
+	h.assertTexts(tester, "会话设置")
 
-	h.click(tester, "人设：Reviewer")
-	h.click(tester, "无")
+	h.openSessionMenu(tester)
+	h.clickExact(tester, "人设")
+	h.assertTexts(tester, "Reviewer", "无")
+	h.clickExact(tester, "无")
 	tester.Frame()
-	h.assertTexts(tester, "人设：无")
 	if calls := chat.selectedCalls(); len(calls) != 2 || calls[1] != "sess-1:" {
 		t.Fatalf("clear call = %v", calls)
 	}
 }
 
 func TestPersonaPickerHiddenWithoutPresetsOrSetter(t *testing.T) {
-	// A preset-less backend hides the picker.
+	// A preset-less backend hides the persona group.
 	h := newPresetsHarness(t, presetSessionChat(newPresetChat()), newPermissionSettings(nil))
 	tester := h.tester()
-	h.assertNoTexts(tester, "人设：无")
+	if got := exactTextCount(tester.Texts(), "人设"); got != 0 {
+		t.Fatalf("persona picker rendered without presets; texts = %v", tester.Texts())
+	}
+	h.openSessionMenu(tester)
+	if got := exactTextCount(tester.Texts(), "人设"); got != 0 {
+		t.Fatalf("persona group rendered in the menu without presets; texts = %v", tester.Texts())
+	}
 
 	// A backend without SessionPresetSetter hides it even with presets.
 	plain := newFakeChat()
@@ -117,7 +132,13 @@ func TestPersonaPickerHiddenWithoutPresetsOrSetter(t *testing.T) {
 		Messages: []contracts.ChatMessage{{ID: "m1", Role: contracts.ChatRoleUser, Text: "x"}}}, true)
 	h = newPresetsHarness(t, plain, presetStore(t))
 	tester = h.tester()
-	h.assertNoTexts(tester, "人设：无")
+	if got := exactTextCount(tester.Texts(), "人设"); got != 0 {
+		t.Fatalf("persona picker rendered without a setter; texts = %v", tester.Texts())
+	}
+	h.openSessionMenu(tester)
+	if got := exactTextCount(tester.Texts(), "人设"); got != 0 {
+		t.Fatalf("persona group rendered in the menu without a setter; texts = %v", tester.Texts())
+	}
 }
 
 func TestPersonaPickerEnglish(t *testing.T) {
@@ -126,9 +147,15 @@ func TestPersonaPickerEnglish(t *testing.T) {
 	h.ui.Locale().SetLanguage("en")
 	tester := h.tester()
 	tester.Frame()
-	h.assertTexts(tester, "Persona: None")
-	h.click(tester, "Persona: None")
-	h.click(tester, "Reviewer")
+	h.assertTexts(tester, "Settings")
+	h.openSessionMenu(tester)
+	h.assertTexts(tester, "Persona")
+	h.clickExact(tester, "Persona")
+	h.assertTexts(tester, "Reviewer", "None")
+	h.clickExact(tester, "Reviewer")
 	tester.Frame()
-	h.assertTexts(tester, "Persona: Reviewer", "Persona applied: Reviewer")
+	if calls := chat.selectedCalls(); len(calls) != 1 || calls[0] != "sess-1:p1" {
+		t.Fatalf("SetSessionPreset calls = %v", calls)
+	}
+	h.assertTexts(tester, "Settings")
 }

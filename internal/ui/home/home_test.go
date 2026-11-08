@@ -17,10 +17,13 @@ import (
 	"github.com/zeokeel/zeokeel/internal/uiroot"
 )
 
-type fakeChat struct{ config contracts.ChatConfig }
+type fakeChat struct {
+	config   contracts.ChatConfig
+	sessions []contracts.ChatSessionInfo
+}
 
 func (f *fakeChat) Config() contracts.ChatConfig          { return f.config }
-func (f *fakeChat) Sessions() []contracts.ChatSessionInfo { return nil }
+func (f *fakeChat) Sessions() []contracts.ChatSessionInfo { return f.sessions }
 func (f *fakeChat) Session(string) (contracts.ChatSession, bool) {
 	return contracts.ChatSession{}, false
 }
@@ -32,14 +35,15 @@ func (f *fakeChat) Send(string, string) error              { return nil }
 func (f *fakeChat) Cancel(string) error                    { return nil }
 func (f *fakeChat) Subscribe(func(string)) (func(), error) { return func() {}, nil }
 
-func TestHomeSetupCardWithoutModel(t *testing.T) {
+func TestHomeEmptyStateOffersFirstSteps(t *testing.T) {
 	h := newHarness(t, &fakeChat{})
 	activate(t, h, home.Module(), home.Config{})
 	tester := ui.NewTester(h.ui.View, 1200, 800)
 	tester.Frame()
 
-	h.assertTexts(tester, "完成 ZeoKeel 的初始设置",
-		"尚未配置模型。添加服务商与密钥后才能发送消息。", "配置模型")
+	// No conversations yet: the empty state offers the next steps, including
+	// configuring the model that is still missing.
+	h.assertTexts(tester, "还没有会话。开始第一次对话，或先完成下面的准备：", "配置模型", "新对话")
 	if err := tester.Click("配置模型"); err != nil {
 		t.Fatalf("click configure model: %v; texts = %v", err, tester.Texts())
 	}
@@ -48,13 +52,26 @@ func TestHomeSetupCardWithoutModel(t *testing.T) {
 	}
 }
 
-func TestHomeSetupCardHiddenWithModel(t *testing.T) {
+func TestHomeSetupCardShownOnceConversationsExist(t *testing.T) {
+	h := newHarness(t, &fakeChat{
+		sessions: []contracts.ChatSessionInfo{{ID: "s1", Title: "旧会话"}},
+	})
+	activate(t, h, home.Module(), home.Config{})
+	tester := ui.NewTester(h.ui.View, 1200, 800)
+	tester.Frame()
+	// With a conversation there is no empty state: the first-run card still
+	// explains the missing model.
+	h.assertTexts(tester, "完成 ZeoKeel 的初始设置", "配置模型")
+	h.assertNoTexts(tester, "新对话")
+}
+
+func TestHomeEmptyStateHiddenWithModel(t *testing.T) {
 	h := newHarness(t, &fakeChat{config: contracts.ChatConfig{Model: "test-model"}})
 	activate(t, h, home.Module(), home.Config{})
 	tester := ui.NewTester(h.ui.View, 1200, 800)
 	tester.Frame()
-	h.assertNoTexts(tester, "完成 ZeoKeel 的初始设置")
-	h.assertTexts(tester, "向 ZeoKeel 提问…", "开始新对话")
+	h.assertNoTexts(tester, "完成 ZeoKeel 的初始设置", "配置模型")
+	h.assertTexts(tester, "问点什么…", "新对话")
 }
 
 // harness is the minimal headless product: uiroot host services + appinfo + the

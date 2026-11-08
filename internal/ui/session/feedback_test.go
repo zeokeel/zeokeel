@@ -102,6 +102,9 @@ func TestFeedbackButtonsToggle(t *testing.T) {
 	chat := feedbackSessionChat()
 	h := newFeedbackHarness(t, chat)
 	tester := h.tester()
+	// The rating buttons live behind the resident ⋯ message-actions entry.
+	h.assertNoTexts(tester, "有帮助", "没帮助")
+	h.click(tester, "消息操作")
 	h.assertTexts(tester, "有帮助", "没帮助")
 
 	// good: write good; clicking it again clears.
@@ -110,7 +113,7 @@ func TestFeedbackButtonsToggle(t *testing.T) {
 	if call.sessionID != "sess-1" || call.messageID != "msg-assistant" || call.feedback != contracts.FeedbackGood {
 		t.Fatalf("good feedback call = %+v", call)
 	}
-	h.assertTexts(tester, "已反馈")
+	h.assertNoTexts(tester, "已反馈")
 	h.click(tester, "有帮助")
 	if call := chat.lastCall(t); call.feedback != "" {
 		t.Fatalf("toggle clear call = %+v", call)
@@ -145,6 +148,7 @@ func TestFeedbackButtonsShowError(t *testing.T) {
 	chat.setErr = errors.New("feedback write failed")
 	h := newFeedbackHarness(t, chat)
 	tester := h.tester()
+	h.click(tester, "消息操作")
 	h.click(tester, "有帮助")
 	h.assertTexts(tester, "feedback write failed")
 }
@@ -154,7 +158,8 @@ func TestFeedbackButtonsEnglish(t *testing.T) {
 	h := newFeedbackHarness(t, chat)
 	h.ui.Locale().SetLanguage("en")
 	tester := h.tester()
+	h.click(tester, "Message actions")
 	h.assertTexts(tester, "Helpful", "Not helpful")
 	h.click(tester, "Helpful")
-	h.assertTexts(tester, "Rated")
+	h.assertNoTexts(tester, "Rated")
 }

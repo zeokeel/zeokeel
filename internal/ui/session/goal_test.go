@@ -1,7 +1,8 @@
 package session_test
 
-// Session-header goal chip: the host GoalTracker drives a visible goal badge,
-// its clear action, i18n and the optional-backend behavior.
+// Session-header goal chip (uiroot goal bridge): the compact chip, its popover
+// action menu, the native clear confirmation, i18n and the
+// optional-backend behavior.
 
 import (
 	"context"
@@ -36,29 +37,34 @@ func TestGoalChipShowsAndClears(t *testing.T) {
 	h, uiRoot := newGoalHarness(t, newFakeChat())
 	tester := h.tester()
 	tester.Frame()
-	h.assertNoTexts(tester, "目标", "清除目标")
+	h.assertNoTexts(tester, "目标", "删除目标记录")
 
 	if _, err := uiRoot.GoalTracker().Set(context.Background(), "  Ship release  "); err != nil {
 		t.Fatalf("Set goal: %v", err)
 	}
 	tester.Frame()
-	h.assertTexts(tester, "目标", "Ship release", "清除目标")
+	// The header keeps one compact chip: the status label plus the truncated
+	// goal text (the full text is the chip's tooltip).
+	h.assertTexts(tester, "目标", "Ship release")
 
 	// A replacement goal updates the chip in place.
 	if _, err := uiRoot.GoalTracker().Set(context.Background(), "Ship v2"); err != nil {
 		t.Fatalf("Set second goal: %v", err)
 	}
 	tester.Frame()
-	h.assertTexts(tester, "目标", "Ship v2", "清除目标")
-	h.assertNoTexts(tester, "Ship release")
+	h.assertTexts(tester, "目标", "Ship v2")
 
-	// The header clear action drives the tracker bridge.
-	h.click(tester, "清除目标")
+	// The chip's popover carries the clear action, which confirms first.
+	openGoalActions(t, h, tester, "目标")
+	h.assertTexts(tester, "删除目标记录")
+	h.click(tester, "删除目标记录")
+	h.assertTexts(tester, "删除目标记录", "取消", "确认删除")
+	h.click(tester, "确认删除")
 	if _, _, _, ok := uiRoot.GoalTracker().Get(); ok {
-		t.Fatal("goal survived the header clear action")
+		t.Fatal("goal survived the confirmed header delete action")
 	}
 	tester.Frame()
-	h.assertNoTexts(tester, "Ship v2", "清除目标", "目标")
+	h.assertNoTexts(tester, "目标", "删除目标记录")
 }
 
 func TestGoalChipInitializesFromExistingGoal(t *testing.T) {
@@ -80,6 +86,8 @@ func TestGoalChipInitializesFromExistingGoal(t *testing.T) {
 	tester.Frame()
 	h := &harness{t: t, ctx: ctx, ui: uiRoot}
 	h.assertTexts(tester, "目标", "Existing goal")
+	h.click(tester, "目标")
+	h.assertTexts(tester, "暂停目标", "完成目标", "结束目标（保留记录）", "删除目标记录")
 }
 
 func TestGoalChipEnglish(t *testing.T) {
@@ -91,19 +99,23 @@ func TestGoalChipEnglish(t *testing.T) {
 		t.Fatalf("Set goal: %v", err)
 	}
 	tester.Frame()
-	h.assertTexts(tester, "Goal", "Ship release", "Clear goal")
-	h.assertNoTexts(tester, "目标", "清除目标")
-	h.click(tester, "Clear goal")
+	h.assertTexts(tester, "Goal", "Ship release")
+	h.assertNoTexts(tester, "目标")
+	h.click(tester, "Goal")
+	h.assertTexts(tester, "Delete goal record")
+	h.click(tester, "Delete goal record")
+	h.assertTexts(tester, "Cancel", "Delete")
+	h.click(tester, "Delete")
 	if _, _, _, ok := uiRoot.GoalTracker().Get(); ok {
 		t.Fatal("goal survived the English clear action")
 	}
 	tester.Frame()
-	h.assertNoTexts(tester, "Ship release", "Clear goal")
+	h.assertNoTexts(tester, "Clear goal")
 }
 
 func TestGoalChipWithoutTracker(t *testing.T) {
 	h := newHarness(t, newFakeChat())
 	tester := h.tester()
 	tester.Frame()
-	h.assertNoTexts(tester, "目标", "清除目标", "Goal", "Clear goal")
+	h.assertNoTexts(tester, "目标", "删除目标记录", "Goal", "Delete goal record")
 }

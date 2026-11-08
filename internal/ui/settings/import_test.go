@@ -153,7 +153,7 @@ func openImportPage(t *testing.T, h *harness) *ui.Tester {
 func setImportPicker(t *testing.T, fn func() (string, error)) {
 	t.Helper()
 	previous := settings.ImportDirectoryPicker
-	settings.ImportDirectoryPicker = fn
+	settings.ImportDirectoryPicker = func(string) (string, error) { return fn() }
 	t.Cleanup(func() { settings.ImportDirectoryPicker = previous })
 }
 
@@ -172,7 +172,7 @@ func TestImportPageWithoutBackend(t *testing.T) {
 	tester := h.tester()
 	tester.Frame()
 	h.click(tester, "导入")
-	h.assertTexts(tester, "导入", "从 DSH 桌面数据导入会话与工作区", "导入服务未启用")
+	h.assertTexts(tester, "导入", "从 DSH 桌面版把会话和工作区搬过来", "导入服务未启用")
 }
 
 func TestImportBrowseSeamFillsDirectory(t *testing.T) {

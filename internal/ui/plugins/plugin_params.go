@@ -28,6 +28,7 @@ import (
 
 	"github.com/zeokeel/zeokeel/internal/contracts"
 	"github.com/zeokeel/zeokeel/internal/design"
+	"github.com/zeokeel/zeokeel/internal/uikit"
 )
 
 // pluginParamSpec describes one row of the plugin settings section.
@@ -81,46 +82,35 @@ func pluginParamSpecs() []pluginParamSpec {
 	}
 }
 
-// buildPluginParamsSection renders the collapsed plugin parameter section and
-// its native edit modal. Hidden without a settings service.
+// buildPluginParamsSection renders the plugin parameter section as a
+// uikit.Section (the same title/divider language as the other settings pages)
+// holding a native Collapsible with the rows, plus its native edit modal.
+// Hidden without a settings service.
 func buildPluginParamsSection(c *ui.Context, t *design.Tokens, st *state,
 	settings contracts.SettingsService, hasSettings bool) {
 	if !hasSettings || settings == nil {
 		return
 	}
 	specs := pluginParamSpecs()
-	ui.Column(c).FillWidth().Gap(design.Space2).Children(func() {
-		ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(design.Space2).Children(func() {
-			design.Apply(ui.Text(c, st.tr("插件参数", "Plugin settings")), t.SectionLabel())
-			design.Apply(ui.Badge(c, st.tr("已接线", "Wired")), t.Badge()).TextColor(t.LabelSecondary)
-		})
+	uikit.Section(c, st.tr("插件参数", "Plugin settings"), func(c *ui.Context) {
 		design.Apply(ui.Text(c, st.tr(
 			"只展示已被产品实际消费的设置；敏感值仅显示是否已设置。",
 			"Only settings actually consumed by the product are shown; sensitive values only report whether they are set.")),
 			t.Font(design.TypeXXS)).TextColor(t.LabelTertiary).MaxLines(2)
 		if st.paramNotice != "" {
 			if st.paramErr {
-				design.Apply(ui.Text(c, st.paramNotice), t.Font(design.TypeXXS)).TextColor(t.DangerText)
+				uikit.ErrorLine(c, st.paramNotice)
 			} else {
-				design.Apply(ui.Badge(c, st.paramNotice), t.Badge()).TextColor(t.Success)
+				design.Apply(ui.Text(c, st.paramNotice), t.Font(design.TypeXXS)).TextColor(t.SuccessText)
 			}
 		}
-		// A plain disclosure button is used instead of ui.Collapsible so the
-		// rows keep their normal flex layout (the collapsible body does not give
-		// child rows a usable width for interactive buttons here).
-		disclosure := st.tr("展开参数", "Show parameters")
-		if st.paramsOpen {
-			disclosure = st.tr("收起参数", "Hide parameters")
-		}
-		if ui.Button(c, disclosure).Clicked() {
-			st.paramsOpen = !st.paramsOpen
-			c.Invalidate()
-		}
-		if st.paramsOpen {
+		open := st.paramsOpen
+		ui.Collapsible(c, st.tr("显示参数", "Show parameters"), &open, func() {
 			for _, spec := range specs {
 				buildPluginParamRow(c, t, st, settings, spec)
 			}
-		}
+		})
+		st.paramsOpen = open
 	})
 	if st.paramEditing {
 		buildPluginParamModal(c, t, st, settings)
@@ -132,7 +122,12 @@ func buildPluginParamsSection(c *ui.Context, t *design.Tokens, st *state,
 func buildPluginParamRow(c *ui.Context, t *design.Tokens, st *state,
 	settings contracts.SettingsService, spec pluginParamSpec) {
 	value, note := pluginParamValue(st, settings, spec)
-	design.Apply(ui.Column(c), t.Panel()).FillWidth().Padding(design.Space2).Gap(design.Space1).Children(func() {
+	if spec.Key != "" {
+		c.Key("plugin-param/" + spec.Key)
+	} else {
+		c.Key("plugin-param/" + spec.TitleZH)
+	}
+	ui.Column(c).FillWidth().Padding(design.Space2, 0).Gap(design.Space1).Children(func() {
 		ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(design.Space2).Children(func() {
 			design.Apply(ui.Text(c, st.tr(spec.TitleZH, spec.TitleEN)), t.Font(design.TypeXS)).
 				FontWeight(600).TextColor(t.LabelPrimary).NoWrap()
@@ -164,6 +159,7 @@ func buildPluginParamRow(c *ui.Context, t *design.Tokens, st *state,
 			design.Apply(ui.Text(c, st.tr(spec.DescZH, spec.DescEN)), t.Font(design.TypeXXS)).
 				TextColor(t.LabelTertiary).MaxLines(2)
 		})
+		ui.Divider(c)
 	})
 }
 
@@ -211,19 +207,18 @@ func buildPluginParamModal(c *ui.Context, t *design.Tokens, st *state, settings 
 				Label(st.tr("新值：", "New value: ") + st.paramTitle).
 				Placeholder(st.tr("留空保持不变", "Leave blank to keep the current value")).FillWidth()
 			if st.paramErrText != "" {
-				design.Apply(ui.Text(c, st.paramErrText), t.Font(design.TypeXXS)).TextColor(t.DangerText)
+				uikit.ErrorLine(c, st.paramErrText)
 			}
-			ui.Row(c).FillWidth().Justify(ui.End).Gap(design.Space2).Children(func() {
-				if ui.Button(c, st.tr("取消", "Cancel")).Clicked() {
+			uikit.DialogFooter(c, []uikit.DialogAction{
+				{Label: st.tr("取消", "Cancel"), OnClick: func() {
 					st.paramEditing = false
 					st.paramErrText = ""
 					c.Invalidate()
-				}
-				save := design.Apply(ui.PrimaryButton(c, st.tr("保存", "Save")), t.PrimaryButton())
-				if save.Clicked() {
+				}},
+				{Label: st.tr("保存", "Save"), Primary: true, OnClick: func() {
 					st.savePluginParam(settings)
 					c.Invalidate()
-				}
+				}},
 			})
 		})
 	})

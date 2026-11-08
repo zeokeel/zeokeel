@@ -18,6 +18,20 @@ type MemoryStore interface {
 	rig.MemoryStore
 }
 
+// MemoryUpdater is the optional update half of the memory surface: it replaces
+// one entry's text while keeping the entry's ID and creation time. The rig
+// MemoryStore has no update action, so the settings/session memory UIs
+// type-assert a MemoryStore to MemoryUpdater; a backend that cannot edit
+// entries simply does not implement it and the edit controls stay hidden.
+type MemoryUpdater interface {
+	// Update replaces the text of the memory with the given ID. The scope is
+	// optional: an empty scope keeps the entry's current scope, a non-empty
+	// one is validated like any stored scope. Unknown IDs, empty text and
+	// invalid scopes are errors; a successful update returns the stored entry
+	// (same ID and creation time).
+	Update(ctx context.Context, id, text, scope string) (Memory, error)
+}
+
 // KeyMemory is provided by the memory backend module and consumed by the
 // session Memory tab (and registered into the toolkit as the rig memory tools'
 // store).

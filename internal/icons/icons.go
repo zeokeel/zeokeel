@@ -52,10 +52,8 @@ func get(name string) *ui.SVG {
 var (
 	Folder        = func() *ui.SVG { return get("folder") }
 	FolderOpen    = func() *ui.SVG { return get("folder-open") }
-	FolderPlus    = func() *ui.SVG { return get("folder-plus") }
 	Plug          = func() *ui.SVG { return get("plug") }
 	Plugin        = func() *ui.SVG { return get("plugin") }
-	CirclePlus    = func() *ui.SVG { return get("circle-plus") }
 	Clock         = func() *ui.SVG { return get("clock") }
 	Search        = func() *ui.SVG { return get("search") }
 	Plus          = func() *ui.SVG { return get("plus") }
@@ -71,11 +69,18 @@ var (
 	Data          = func() *ui.SVG { return get("data") }
 	Reload        = func() *ui.SVG { return get("reload") }
 	AlertTriangle = func() *ui.SVG { return get("alert-triangle") }
-	Bell          = func() *ui.SVG { return get("bell") }
 	Shield        = func() *ui.SVG { return get("shield") }
 	Activity      = func() *ui.SVG { return get("activity") }
 	Globe         = func() *ui.SVG { return get("globe") }
-	Download      = func() *ui.SVG { return get("download") }
+	Close         = func() *ui.SVG { return get("x") }
+	Check         = func() *ui.SVG { return get("check") }
+	Send          = func() *ui.SVG { return get("send") }
+	Stop          = func() *ui.SVG { return get("square") }
+	Trash         = func() *ui.SVG { return get("trash") }
+	File          = func() *ui.SVG { return get("file") }
+	Image         = func() *ui.SVG { return get("image") }
+	PanelRight    = func() *ui.SVG { return get("panel-right") }
+	Copy          = func() *ui.SVG { return get("copy") }
 )
 
 // Semantic aliases keep call sites readable where the DSH name differs from

@@ -13,6 +13,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strings"
 	"sync/atomic"
 	"time"
@@ -48,12 +49,21 @@ type app struct {
 	loader  *module.Loader
 	root    cordis.Context
 	cleanup func()
+	// pane is the inspector pane whose label the pane selector currently
+	// shows, so the snapshot can open the selector and choose another pane.
+	pane string
 }
 
 func main() {
 	outDir := "/tmp"
 	if len(os.Args) > 1 {
 		outDir = os.Args[1]
+	}
+	if err := os.MkdirAll(outDir, 0o755); err != nil {
+		fail("output dir", err)
+	}
+	if err := os.MkdirAll(outDir+"/narrow", 0o755); err != nil {
+		fail("narrow dir", err)
 	}
 	dataDir, err := os.MkdirTemp("", "zeokeel-snapshot")
 	if err != nil {
@@ -103,6 +113,16 @@ func main() {
 			}})
 			waitIdle(chat, sessionID, 10*time.Second)
 		}
+	}
+
+	// Seed one archived session for the settings Archived page (H series).
+	if archiver, ok := chat.(contracts.SessionArchiver); ok {
+		if archivedID, err := chat.NewSession("归档的发布计划"); err == nil {
+			_ = chat.Send(archivedID, "整理发布前的检查清单")
+			waitIdle(chat, archivedID, 10*time.Second)
+			_ = archiver.SetSessionArchived(archivedID, true)
+		}
+		_ = chat.SetActiveSession(sessionID)
 	}
 
 	// Seed one persisted automation task for the Automation screen.
@@ -256,8 +276,8 @@ func main() {
 	// Artifact history in the Files inspector (preview from the history list).
 	a.ui.SetRightPanelOpen(true)
 	a.tester.Frame()
-	if err := a.tester.Click("文件"); err != nil {
-		fmt.Println("open files tab:", err)
+	if err := a.openPane("文件"); err != nil {
+		fail("artifact history pane", err)
 	}
 	a.render(outDir + "/p2-artifact-history.png")
 	a.ui.SetRightPanelOpen(false)
@@ -321,8 +341,8 @@ func main() {
 			}
 			a.ui.SetRightPanelOpen(true)
 			a.tester.Frame()
-			if err := a.tester.Click("团队"); err != nil {
-				fmt.Println("open agents tab:", err)
+			if err := a.openPane("团队"); err != nil {
+				fmt.Println("open agents pane:", err)
 			}
 			a.render(outDir + "/p2-team.png")
 			a.ui.SetRightPanelOpen(false)
@@ -352,15 +372,17 @@ func main() {
 	if notifier, notifierErr := a.root.Require(contracts.KeyNotifier); notifierErr == nil {
 		first := notifier.Notify(contracts.NotifySuccess, "对话已导出")
 		second := notifier.Notify(contracts.NotifyInfo, "更新已下载到暂存目录")
+		// Native toasts are added to the window by the frame that drains the
+		// queue and paint their fade-in on the next pass; advance a little so
+		// the screenshot shows them, not an empty viewport.
 		a.tester.Frame()
+		a.tester.Advance(300 * time.Millisecond)
 		a.render(outDir + "/p2-toast.png")
 		// Clear the toast stack so later screenshots are not covered by it.
 		notifier.Dismiss(first.ID)
 		notifier.Dismiss(second.ID)
 		a.tester.Frame()
-		// Earlier export/update flows also raised toasts; let the TTL clear the
-		// whole stack so later screenshots are not covered.
-		time.Sleep(4300 * time.Millisecond)
+		a.tester.Advance(5 * time.Second)
 		a.tester.Frame()
 	}
 
@@ -447,27 +469,34 @@ func main() {
 
 	// P2: the window-level right inspector (durable session log pane).
 	a.ui.SetRightPanelOpen(true)
+	a.tester.Frame()
+	// The pane selection is module state that survived the earlier inspector
+	// steps (the team pane); reset it so the overview screenshot shows the
+	// overview pane.
+	if err := a.openPane("概览"); err != nil {
+		fail("reset inspector pane", err)
+	}
 	a.render(outDir + "/p2-rightpanel.png")
-	if err := a.tester.Click("文件"); err != nil {
-		fmt.Println("click files tab:", err)
+	if err := a.openPane("文件"); err != nil {
+		fail("files pane", err)
 	}
 	a.render(outDir + "/p2-files.png")
 	if err := a.tester.Click("README.md"); err != nil {
-		fmt.Println("click README:", err)
+		fail("open README.md", err)
 	}
 	a.render(outDir + "/p2-files-preview.png")
-	if err := a.tester.Click("变更"); err != nil {
-		fmt.Println("click changes tab:", err)
+	if err := a.openPane("变更"); err != nil {
+		fail("changes pane", err)
 	}
 	a.render(outDir + "/p2-changes.png")
 	if err := a.tester.Click("查看 diff"); err != nil {
-		fmt.Println("expand diff:", err)
+		fail("expand diff", err)
 	}
 	a.tester.Advance(200 * time.Millisecond)
 	a.render(outDir + "/p2-changes-diff.png")
-	// Terminal tab: run a real command in the workspace root.
-	if err := a.tester.Click("终端"); err != nil {
-		fmt.Println("click terminal tab:", err)
+	// Terminal pane: run a real command in the workspace root.
+	if err := a.openPane("终端"); err != nil {
+		fail("terminal pane", err)
 	}
 	a.tester.Frame()
 	if runRect, ok := a.tester.Find("运行"); ok {
@@ -493,8 +522,8 @@ func main() {
 		_, _ = board.Create(context.Background(), "发布前检查", "确认文档与截图")
 		pending, _ := board.Create(context.Background(), "编写发布说明", "")
 		_, _ = board.SetStatus(context.Background(), pending.ID, contracts.TaskStatusInProgress)
-		if err := a.tester.Click("任务"); err != nil {
-			fmt.Println("open tasks tab:", err)
+		if err := a.openPane("任务"); err != nil {
+			fail("tasks pane", err)
 		}
 		a.render(outDir + "/p2-tasks.png")
 	}
@@ -509,8 +538,8 @@ func main() {
 		a.tester.Key(0, ui.KeyBackspace)
 		a.render(outDir + "/p2-mentions.png")
 	}
-	if err := a.tester.Click("日志"); err != nil {
-		fmt.Println("click log tab:", err)
+	if err := a.openPane("日志"); err != nil {
+		fail("log pane", err)
 	}
 	a.render(outDir + "/p2-log.png")
 	a.ui.SetRightPanelOpen(false)
@@ -527,21 +556,63 @@ func main() {
 	a.render(outDir + "/p2-home.png")
 	a.ui.Navigator().ToggleSettings()
 	a.tester.Frame()
-	if err := a.tester.Click("外观"); err != nil {
-		fmt.Println("click appearance:", err)
+	if err := a.clickSettingsItem("模型"); err != nil {
+		fmt.Println("click model settings:", err)
 	}
-	if err := a.tester.Click("服务商"); err != nil {
-		fmt.Println("click providers:", err)
+	a.render(outDir + "/p2-model-settings.png")
+	if err := a.clickSettingsItem("模型目录"); err != nil {
+		fmt.Println("click model catalog:", err)
 	}
-	a.render(outDir + "/p2-providers.png")
-	if err := a.tester.Click("外观"); err != nil {
+	a.render(outDir + "/p2-model-catalog-settings.png")
+	if err := a.clickSettingsItem("外观"); err != nil {
 		fmt.Println("click appearance:", err)
 	}
 	a.render(outDir + "/p2-appearance.png")
-	if err := a.tester.Click("技能"); err != nil {
+	// The hotkey recorder (H6): press Record and show the capture field.
+	a.tester.Scroll(740, 500, 0, 260)
+	a.tester.Frame()
+	if err := a.tester.Click("录入"); err != nil {
+		fmt.Println("click hotkey record:", err)
+	}
+	a.tester.Frame()
+	a.render(outDir + "/p2-hotkey-record.png")
+	a.tester.Key(0, ui.KeyEscape)
+	a.tester.Frame()
+	a.tester.Scroll(740, 500, 0, -260)
+	a.tester.Frame()
+	a.ui.Locale().SetLanguage("en")
+	a.tester.Frame()
+	a.render(outDir + "/p2-english-appearance.png")
+	a.ui.Locale().SetLanguage("zh")
+	a.tester.Frame()
+	a.tester.Scroll(740, 500, 0, 240)
+	a.tester.Frame()
+	a.render(outDir + "/p2-appearance-actions.png")
+	a.tester.Scroll(740, 500, 0, -240)
+	a.tester.Frame()
+	// A data-directory skill makes the destructive delete confirmation
+	// reachable in the snapshot (workspace skills are read-only).
+	if editor, err := a.root.Require(contracts.KeySkillsEditor); err == nil && editor != nil {
+		_, _ = editor.CreateSkill(context.Background(), contracts.SkillDraft{
+			Name:        "release-check",
+			Description: "发布前检查清单",
+			Body:        "# 发布前检查\n\n- 跑测试\n- 更新版本号",
+		})
+	}
+	if err := a.clickSettingsItem("技能"); err != nil {
 		fmt.Println("click skills:", err)
 	}
 	a.render(outDir + "/p2-skills.png")
+	if err := a.tester.Click("删除"); err == nil {
+		a.tester.Frame()
+		a.render(outDir + "/p2-skills-delete.png")
+		if cancel, ok := a.tester.Find("取消"); ok {
+			a.tester.ClickAt(cancel.X+cancel.W/2, cancel.Y+cancel.H/2)
+			a.tester.Frame()
+		}
+	} else {
+		fmt.Println("skills delete:", err)
+	}
 	if err := a.tester.Click("新建技能"); err == nil {
 		a.tester.Frame()
 		a.render(outDir + "/p2-skills-new.png")
@@ -557,62 +628,103 @@ func main() {
 	}
 	a.tester.Advance(200 * time.Millisecond)
 	a.render(outDir + "/p2-skills-content.png")
-	if err := a.tester.Click("快捷键"); err != nil {
+	if err := a.clickSettingsItem("快捷键"); err != nil {
 		fmt.Println("click shortcuts:", err)
 	}
 	a.render(outDir + "/p2-shortcuts.png")
-	if err := a.tester.Click("诊断"); err != nil {
+	if err := a.clickSettingsItem("诊断"); err != nil {
 		fmt.Println("click diagnostics:", err)
 	}
 	a.render(outDir + "/p2-diagnostics.png")
-	if err := a.tester.Click("更新"); err != nil {
+	if err := a.clickSettingsItem("更新"); err != nil {
 		fmt.Println("click update:", err)
 	}
 	a.render(outDir + "/p2-update.png")
-	if err := a.tester.Click("导入"); err != nil {
+	if err := a.clickSettingsItem("导入"); err != nil {
 		fmt.Println("click import:", err)
 	}
 	a.render(outDir + "/p2-import.png")
-	if err := a.tester.Click("搜索"); err != nil {
+	// With a directory typed, Scan is the section's accent primary action (H24).
+	if rect, ok := a.tester.Find("DSH 数据目录"); ok {
+		a.tester.ClickAt(rect.X+rect.W/2, rect.Y+rect.H/2)
+		a.tester.Type("/tmp/dsh-data")
+		a.tester.Frame()
+		a.render(outDir + "/p2-import-selected.png")
+	}
+	if err := a.clickSettingsItem("搜索"); err != nil {
 		fmt.Println("click search settings:", err)
 	}
 	a.render(outDir + "/p2-search-settings.png")
-	if err := a.tester.Click("MCP"); err != nil {
+	if err := a.clickSettingsItem("MCP"); err != nil {
 		fmt.Println("click MCP settings:", err)
 	}
 	a.render(outDir + "/p2-mcp-settings.png")
-	if err := a.tester.Click("网络"); err != nil {
+	if err := a.clickSettingsItem("网络"); err != nil {
 		fmt.Println("click network settings:", err)
 	}
 	a.render(outDir + "/p2-network-settings.png")
-	if err := a.tester.Click("预设"); err != nil {
+	if err := a.clickSettingsItem("预设"); err != nil {
 		fmt.Println("click presets settings:", err)
 	}
 	a.render(outDir + "/p2-presets-settings.png")
-	if err := a.tester.Click("模型目录"); err != nil {
+	a.tester.Scroll(740, 500, 0, 400)
+	a.tester.Frame()
+	a.render(outDir + "/p2-presets-agent-meta.png")
+	a.tester.Scroll(740, 500, 0, -400)
+	a.tester.Frame()
+	if err := a.clickSettingsItem("模型目录"); err != nil {
 		fmt.Println("click model catalog settings:", err)
 	}
 	a.render(outDir + "/p2-modelcatalog-settings.png")
-	if err := a.tester.Click("LSP"); err != nil {
+	if err := a.clickSettingsItem("LSP"); err != nil {
 		fmt.Println("click LSP settings:", err)
 	}
 	a.render(outDir + "/p2-lsp-settings.png")
-	if err := a.tester.Click("数据与隐私"); err != nil {
+	if err := a.clickSettingsItem("数据与隐私"); err != nil {
 		fmt.Println("click data settings:", err)
 	}
 	a.render(outDir + "/p2-data-privacy.png")
-	if err := a.tester.Click("通知"); err != nil {
+	if err := a.clickSettingsItem("通知"); err != nil {
 		fmt.Println("click notification settings:", err)
 	}
 	a.render(outDir + "/p2-notifications.png")
-	if err := a.tester.Click("行为"); err != nil {
+	if err := a.clickSettingsItem("行为"); err != nil {
 		fmt.Println("click behavior settings:", err)
 	}
 	a.render(outDir + "/p2-behavior.png")
-	if err := a.tester.Click("记忆"); err != nil {
-		fmt.Println("click memory settings:", err)
+	if err := a.clickSettingsItem("归档"); err != nil {
+		fmt.Println("click archived settings:", err)
 	}
+	a.render(outDir + "/p2-archive-settings.png")
+	a.ui.Locale().SetLanguage("en")
+	a.tester.Frame()
+	a.render(outDir + "/p2-english-archive-settings.png")
+	a.ui.Locale().SetLanguage("zh")
+	a.tester.Frame()
+	// The archived page in the dark theme (H series asks for both themes).
+	a.ui.Theme().SetDark(true)
+	a.tester.Frame()
+	a.render(outDir + "/p2-archive-settings-dark.png")
+	a.ui.Theme().SetDark(false)
+	a.tester.Frame()
+	// The last navigation item sits below the grouped nav's visible area; open
+	// the page through the host's deep link instead of scrolling the sidebar.
+	if err := a.ui.OpenSettingsPage("memory"); err != nil {
+		fmt.Println("open memory settings:", err)
+	}
+	a.tester.Frame()
 	a.render(outDir + "/p2-memory-settings.png")
+	// The memory timestamps must follow the interface language (FormatDateTime).
+	a.ui.Locale().SetLanguage("en")
+	a.tester.Frame()
+	a.render(outDir + "/p2-english-memory-settings.png")
+	a.ui.Locale().SetLanguage("zh")
+	a.tester.Frame()
+	if err := a.ui.OpenSettingsPage("about"); err != nil {
+		fmt.Println("open about settings:", err)
+	}
+	a.tester.Frame()
+	a.render(outDir + "/p2-about-settings.png")
 	a.ui.Navigator().CloseSettings()
 	// Automation with a finished run so the history expansion is visible.
 	if automation, err := a.root.Require(contracts.KeyAutomation); err == nil {
@@ -639,7 +751,7 @@ func main() {
 	}
 
 	// Sidebar full-text message search over the stored sessions.
-	if rect, ok := a.tester.Find("搜索会话"); ok {
+	if rect, ok := a.tester.Find("搜索会话与消息"); ok {
 		a.tester.ClickAt(rect.X+rect.W/2, rect.Y+rect.H/2)
 		a.tester.Frame()
 		a.tester.Type("工作目录")
@@ -668,17 +780,123 @@ func main() {
 		a.render(outDir + "/p2-pinned.png")
 	}
 
-	// Archived sessions (agent SessionArchiver + sidebar view option).
+	// Archived sessions moved into the settings surface (the sidebar always
+	// hides them now): capture the Archive page and its restore action.
 	if archiver, ok := chat.(contracts.SessionArchiver); ok {
 		for _, info := range chat.Sessions() {
 			if strings.HasPrefix(info.Title, "看看当前工作目录") {
 				_ = archiver.SetSessionArchived(info.ID, true)
 			}
 		}
-		if settingsStore, ok := a.root.Get(contracts.KeySettings); ok {
-			_ = settingsStore.Set(contracts.SettingSessionsShowArchived, "true")
+		if err := a.ui.OpenSettingsPage("archive"); err != nil {
+			fail("open archive settings page", err)
 		}
-		a.render(outDir + "/p2-archived.png")
+		a.tester.Frame()
+		if err := a.tester.Click("恢复"); err != nil {
+			fail("restore archived session", err)
+		}
+		a.tester.Frame()
+		a.render(outDir + "/p2-archive-restored.png")
+		a.ui.Navigator().CloseSettings()
+		a.tester.Frame()
+	}
+	// Narrow-window and dark-theme evidence: the responsive shell and the dark
+	// theme are part of the design review, so each snapshot run renders them
+	// too (the desktop default window is 1280x800).
+	if err := a.ui.Navigator().Push("session"); err != nil {
+		fmt.Println("push session for narrow:", err)
+	}
+	a.tester.SetSize(1024, 720)
+	a.tester.Frame()
+	a.render(outDir + "/narrow/narrow-session.png")
+	a.ui.SetRightPanelOpen(true)
+	a.tester.Frame()
+	a.render(outDir + "/narrow/narrow-session-inspector.png")
+	a.ui.SetRightPanelOpen(false)
+	a.tester.Frame()
+	if err := a.ui.Navigator().Push("home"); err == nil {
+		a.render(outDir + "/narrow/narrow-home.png")
+	}
+	a.ui.Navigator().ToggleSettings()
+	a.tester.Frame()
+	a.render(outDir + "/narrow/narrow-settings.png")
+	a.ui.Navigator().CloseSettings()
+	a.tester.SetSize(1280, 800)
+	a.tester.Frame()
+	a.ui.Theme().SetDark(true)
+	a.tester.Frame()
+	if err := a.ui.Navigator().Push("home"); err == nil {
+		a.render(outDir + "/narrow/dark-home.png")
+	}
+	if err := a.ui.Navigator().Push("session"); err == nil {
+		a.render(outDir + "/narrow/dark-session.png")
+	}
+	a.ui.Navigator().ToggleSettings()
+	a.tester.Frame()
+	a.render(outDir + "/narrow/dark-settings.png")
+	a.ui.Navigator().CloseSettings()
+	a.ui.Theme().SetDark(false)
+	a.tester.Frame()
+	writeManifest(outDir)
+}
+
+// openPane opens one inspector pane through the pane selector: the module shows
+// the panes as one menu button naming the current pane (eight tabs do not fit a
+// 320 DIP inspector), so a snapshot clicks the selector and then the pane.
+func (a *app) openPane(name string) error {
+	current := a.pane
+	if current == "" {
+		current = "概览"
+	}
+	if err := a.tester.Click(current); err != nil {
+		return fmt.Errorf("open pane selector %q: %w", current, err)
+	}
+	a.tester.Frame()
+	if err := a.tester.Click(name); err != nil {
+		return fmt.Errorf("choose pane %q: %w", name, err)
+	}
+	a.pane = name
+	a.tester.Frame()
+	return nil
+}
+
+// writeManifest records what produced a snapshot run, so a reviewer can tell
+// whether the PNGs match the working tree they are looking at.
+func writeManifest(outDir string) {
+	var b strings.Builder
+	fmt.Fprintf(&b, "zeokeel ui-snapshot\n")
+	fmt.Fprintf(&b, "generated: %s\n", time.Now().Format(time.RFC3339))
+	if out, err := exec.Command("git", "-C", ".", "rev-parse", "HEAD").Output(); err == nil {
+		fmt.Fprintf(&b, "head: %s", out)
+	}
+	if out, err := exec.Command("git", "-C", ".", "status", "--porcelain").Output(); err == nil {
+		dirty := strings.Split(strings.TrimSpace(string(out)), "\n")
+		count := 0
+		if len(dirty) == 1 && dirty[0] == "" {
+			count = 0
+		} else {
+			count = len(dirty)
+		}
+		fmt.Fprintf(&b, "changed files: %d\n", count)
+	}
+	var files []string
+	_ = filepath.WalkDir(outDir, func(path string, entry os.DirEntry, err error) error {
+		if err != nil || entry.IsDir() || !strings.HasSuffix(entry.Name(), ".png") {
+			return nil
+		}
+		rel, relErr := filepath.Rel(outDir, path)
+		if relErr == nil {
+			files = append(files, rel)
+		}
+		return nil
+	})
+	sort.Strings(files)
+	fmt.Fprintf(&b, "screenshots: %d\n", len(files))
+	for _, file := range files {
+		fmt.Fprintf(&b, "  %s\n", file)
+	}
+	if err := os.WriteFile(filepath.Join(outDir, "manifest.txt"), []byte(b.String()), 0o644); err != nil {
+		fmt.Println("write manifest:", err)
 	}
 }
 
@@ -715,6 +933,47 @@ func boot(baseURL, dataDir string) *app {
 		_ = root.DisposeAll()
 	}
 	return a
+}
+
+// settingsPageIDs maps the page titles the snapshot clicks to the page
+// identifiers the host deep link (and the navigation row) address.
+var settingsPageIDs = map[string]string{
+	"模型":    "model",
+	"外观":    "appearance",
+	"技能":    "skills",
+	"快捷键":   "shortcuts",
+	"诊断":    "diagnostics",
+	"更新":    "update",
+	"导入":    "import",
+	"搜索":    "search",
+	"MCP":   "mcp",
+	"网络":    "network",
+	"预设":    "presets",
+	"模型目录":  "modelcatalog",
+	"LSP":   "lsp",
+	"数据与隐私": "data-privacy",
+	"通知":    "notifications",
+	"行为":    "behavior",
+	"归档":    "archive",
+}
+
+// clickSettingsItem opens one settings page through the host's deep link, the
+// same path the product's own "open model settings" links use. The grouped
+// navigation scrolls, so clicking a row below the fold would silently miss;
+// the deep link also verifies the page actually rendered.
+func (a *app) clickSettingsItem(label string) error {
+	id, ok := settingsPageIDs[label]
+	if !ok {
+		return fmt.Errorf("no settings page id for %q", label)
+	}
+	if err := a.ui.OpenSettingsPage(id); err != nil {
+		return fmt.Errorf("open settings page %q: %w", label, err)
+	}
+	a.tester.Frame()
+	if !a.tester.HasText(label) {
+		return fmt.Errorf("settings page %q did not render", label)
+	}
+	return nil
 }
 
 func (a *app) render(path string) {

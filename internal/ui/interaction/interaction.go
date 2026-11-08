@@ -277,6 +277,13 @@ func buildDialog(c *ui.Context, runtime contracts.UIRuntime, st *state) {
 		}
 	})
 	if !st.open && st.currentKey == key {
+		if item.kind == kindPlan {
+			// Esc (or a click outside) must not cancel a plan: the review stays
+			// open and the footer's explicit Approve/Cancel actions decide.
+			st.open = true
+			runtime.Invalidate()
+			return
+		}
 		// Escape or a backdrop click closed the native Modal: reuse the
 		// overlay's cancel semantics and advance the queue. A button action
 		// already popped the overlay, so this only handles dismissal.
@@ -285,38 +292,45 @@ func buildDialog(c *ui.Context, runtime contracts.UIRuntime, st *state) {
 }
 
 // artifactPanel is the present-tool preview: the artifact title over its
-// Markdown body and a close action.
+// Markdown body, with the close action in the same footer position every other
+// overlay uses.
 func artifactPanel(c *ui.Context, runtime contracts.UIRuntime, st *state, artifact contracts.Artifact) {
 	t := design.Of(c)
 	title := firstNonEmpty(artifact.Title, st.tr("工件预览", "Artifact preview"))
+	close := func() { popOverlay(runtime, st) }
+	dialogEnter(c, close)
 	design.Apply(ui.Column(c).Width(620).Gap(design.Space4), func(el ui.Element) ui.Element {
 		return el.PaddingX(design.Space6).PaddingY(design.Space2)
 	}).Children(func() {
 		ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(design.Space2).Children(func() {
 			ui.Icon(c, icons.Folder()).Size(design.Space5, design.Space5).TextColor(t.Accent)
 			design.Apply(ui.Text(c, title), t.Font(design.TypeL)).FontWeight(600).TextColor(t.LabelPrimary)
-			ui.Spacer(c).Grow(1)
-			if design.Apply(ui.Button(c, st.tr("关闭", "Close")), secondaryButtonStyle(t)).Clicked() {
-				popOverlay(runtime, st)
-			}
 		})
 		body := strings.TrimSpace(artifact.Body)
 		if body == "" {
 			design.Apply(ui.Text(c, st.tr("（无内容）", "(No content)")), t.TextMuted(design.TypeXS))
-			return
+		} else {
+			ui.Scroll(c).FillWidth().MaxHeight(maxOverlayBodyHeight).Children(func() {
+				markdown.View(c, artifact.Body, nil)
+			})
 		}
-		ui.Scroll(c).FillWidth().MaxHeight(maxOverlayBodyHeight).Children(func() {
-			markdown.View(c, artifact.Body, nil)
+		ui.Divider(c)
+		uikit.DialogFooter(c, []uikit.DialogAction{
+			{Label: st.tr("关闭", "Close"), Primary: true, OnClick: close},
 		})
 	})
 }
 
-// planPanel is the plan review dialog: the plan Markdown, approve and cancel.
+// planPanel is the plan review dialog: the plan Markdown, the keep-planning
+// feedback and the decision footer. Approve is the accent primary on the right
+// (Enter); cancel is an ordinary secondary action on the left, never the
+// dangerous default. Escape does not cancel the plan (see buildDialog).
 func planPanel(c *ui.Context, runtime contracts.UIRuntime, st *state) {
 	t := design.Of(c)
 	if st.reviewer == nil || st.plan == nil {
 		return
 	}
+	approve := func() { exitPlan(runtime, st, "approve", st.tr("批准失败：", "Approve failed: ")) }
 	design.Apply(ui.Column(c).Width(620).Gap(design.Space4), func(el ui.Element) ui.Element {
 		return el.PaddingX(design.Space6).PaddingY(design.Space2)
 	}).Children(func() {
@@ -329,29 +343,55 @@ func planPanel(c *ui.Context, runtime contracts.UIRuntime, st *state) {
 			markdown.View(c, st.plan.Content, nil)
 		})
 		if st.chat != nil {
+			// Enter submits the form's current content: a non-empty feedback
+			// goes to Keep planning (the agent receives it); approving the plan
+			// always needs the explicit button or the focused Approve button.
 			ui.TextInput(c, &st.planFeedback).
 				Label(st.tr("继续规划反馈", "Keep-planning feedback")).
 				Placeholder(st.tr("告诉 agent 计划需要怎么改…", "Tell the agent how the plan should change…")).
-				FillWidth()
+				FillWidth().
+				OnTextKey(func(k ui.TextKey) bool {
+					if k.Key != ui.KeyEnter || k.Mods != 0 {
+						return false
+					}
+					if strings.TrimSpace(st.planFeedback) != "" {
+						keepPlanning(runtime, st)
+					}
+					// An empty feedback never approves: the decision is explicit.
+					return true
+				})
 		}
 		if st.planErr != "" {
-			buildErrorLine(c, t, st.planErr)
+			uikit.ErrorLine(c, st.planErr)
 		}
-		ui.Row(c).FillWidth().Justify(ui.End).Gap(design.Space2).Children(func() {
-			if design.Apply(ui.PrimaryButton(c, st.tr("批准", "Approve")), t.PrimaryButton()).Clicked() {
-				exitPlan(runtime, st, "approve", st.tr("批准失败：", "Approve failed: "))
-			}
-			if st.chat != nil {
-				keep := design.Apply(ui.Button(c, st.tr("继续规划", "Keep planning")), secondaryButtonStyle(t)).
-					Disabled(strings.TrimSpace(st.planFeedback) == "")
-				if keep.Clicked() && strings.TrimSpace(st.planFeedback) != "" {
-					keepPlanning(runtime, st)
-				}
-			}
-			if design.Apply(ui.Button(c, st.tr("取消", "Cancel")), secondaryButtonStyle(t)).Clicked() {
+		ui.Divider(c)
+		actions := []uikit.DialogAction{
+			{Label: st.tr("取消计划", "Cancel plan"), OnClick: func() {
 				exitPlan(runtime, st, "cancel", st.tr("取消失败：", "Cancel failed: "))
-			}
+			}},
+		}
+		if st.chat != nil {
+			actions = append(actions, uikit.DialogAction{
+				Label:    st.tr("继续规划", "Keep planning"),
+				Disabled: strings.TrimSpace(st.planFeedback) == "",
+				OnClick:  func() { keepPlanning(runtime, st) },
+			})
+		}
+		actions = append(actions, uikit.DialogAction{
+			Label: st.tr("批准", "Approve"), Primary: true, OnClick: approve,
 		})
+		uikit.DialogFooter(c, actions)
+		hint := st.tr("点击「批准」批准计划 · Esc 不会取消计划",
+			"Click Approve to accept · Esc does not cancel the plan")
+		if st.chat != nil {
+			hint = st.tr("输入反馈后按 Enter = 继续规划 · 点击「批准」批准计划 · Esc 不会取消计划",
+				"Enter with feedback = keep planning · Click Approve to accept · Esc does not cancel the plan")
+			if strings.TrimSpace(st.planFeedback) != "" {
+				hint = st.tr("Enter = 继续规划（发送反馈给 agent）· 点击「批准」批准计划",
+					"Enter = keep planning with your feedback · Click Approve to accept")
+			}
+		}
+		design.Apply(ui.Text(c, hint), t.TextMuted(design.TypeXXS))
 	})
 }
 
@@ -395,7 +435,8 @@ func keepPlanning(runtime contracts.UIRuntime, st *state) {
 		runtime.Invalidate()
 		return
 	}
-	message := "请根据以下反馈继续完善计划：\n\n" + feedback
+	message := st.tr("请根据以下反馈继续完善计划：\n\n"+feedback,
+		"Keep refining the plan with this feedback:\n\n"+feedback)
 	if err := st.chat.Send(sessionID, message); err != nil {
 		st.planErr = st.tr("发送继续规划反馈失败：", "Keep-planning send failed: ") + err.Error()
 		st.planHold = true
@@ -410,7 +451,8 @@ func keepPlanning(runtime contracts.UIRuntime, st *state) {
 }
 
 // questionPanel is the Modal body: title, the question text, either one native
-// button per option or a free-text input with Submit, and the Cancel action.
+// full-width option button per choice (equal weight, vertically stacked) or a
+// free-text input with Submit, and the Cancel action on the left of the footer.
 func questionPanel(c *ui.Context, runtime contracts.UIRuntime, st *state, question contracts.UserQuestion) {
 	t := design.Of(c)
 	design.Apply(ui.Column(c).Width(520).Gap(design.Space4), func(el ui.Element) ui.Element {
@@ -424,41 +466,66 @@ func questionPanel(c *ui.Context, runtime contracts.UIRuntime, st *state, questi
 		design.Apply(ui.Text(c, question.Text), t.Font(design.TypeBody)).TextColor(t.LabelPrimary)
 
 		if len(question.Options) > 0 {
-			ui.Row(c).FillWidth().Justify(ui.End).Wrap().Gap(design.Space2).Children(func() {
-				for index, option := range question.Options {
+			// Options are equal choices: one full-width row each, no primary
+			// hierarchy that would silently rank them, no Enter default.
+			ui.Column(c).FillWidth().AlignItems(ui.Stretch).Gap(design.Space2).Children(func() {
+				for _, option := range question.Options {
 					option := option
-					var button ui.Element
-					if index == 0 {
-						button = design.Apply(ui.PrimaryButton(c, option), t.PrimaryButton())
-					} else {
-						button = design.Apply(ui.Button(c, option), secondaryButtonStyle(t))
-					}
+					button := design.Apply(ui.Button(c, option), t.SecondaryButton()).FillWidth()
 					if button.Clicked() {
 						answerQuestion(runtime, st, question.ID, option)
 					}
 				}
-				if design.Apply(ui.Button(c, st.tr("取消", "Cancel")), secondaryButtonStyle(t)).Clicked() {
-					cancelQuestion(runtime, st, question.ID)
-				}
 			})
+			ui.Divider(c)
+			uikit.DialogFooter(c, []uikit.DialogAction{
+				{Label: st.tr("取消", "Cancel"), OnClick: func() { cancelQuestion(runtime, st, question.ID) }},
+			})
+			design.Apply(ui.Text(c, st.tr("Esc = 取消", "Esc = cancel")),
+				t.TextMuted(design.TypeXXS))
 			return
 		}
 
-		// Free-text question.
+		// Free-text question: Enter submits the answer.
+		submit := func(answer string) {
+			if strings.TrimSpace(answer) == "" {
+				return
+			}
+			answerQuestion(runtime, st, question.ID, answer)
+		}
+		dialogEnter(c, func() { submit(st.draft) })
 		ui.TextInput(c, &st.draft).Label(st.tr("回答", "Answer")).
-			Placeholder(st.tr("输入你的回答", "Type your answer")).FillWidth()
+			Placeholder(st.tr("输入你的回答", "Type your answer")).FillWidth().
+			OnTextKey(enterTo(func() { submit(st.draft) }))
 		answer := strings.TrimSpace(st.draft)
-		ui.Row(c).FillWidth().Justify(ui.End).Gap(design.Space2).Children(func() {
-			submit := design.Apply(ui.PrimaryButton(c, st.tr("提交", "Submit")), t.PrimaryButton()).
-				Disabled(answer == "")
-			if submit.Clicked() && answer != "" {
-				answerQuestion(runtime, st, question.ID, answer)
-			}
-			if design.Apply(ui.Button(c, st.tr("取消", "Cancel")), secondaryButtonStyle(t)).Clicked() {
-				cancelQuestion(runtime, st, question.ID)
-			}
+		ui.Divider(c)
+		uikit.DialogFooter(c, []uikit.DialogAction{
+			{Label: st.tr("取消", "Cancel"), OnClick: func() { cancelQuestion(runtime, st, question.ID) }},
+			{Label: st.tr("提交", "Submit"), Primary: true, Disabled: answer == "",
+				OnClick: func() { submit(st.draft) }},
 		})
 	})
+}
+
+// dialogEnter runs a dialog's primary action on Enter from the overlay scope,
+// so it reaches the key wherever the focus is (a focused button clicks
+// natively first; a text input forwards Enter through OnTextKey/enterTo).
+func dialogEnter(c *ui.Context, action func()) {
+	if action == nil {
+		return
+	}
+	c.OnShortcut(0, ui.KeyEnter, action)
+}
+
+// enterTo adapts a primary action to a single-line text input's OnTextKey.
+func enterTo(action func()) func(ui.TextKey) bool {
+	return func(k ui.TextKey) bool {
+		if k.Key != ui.KeyEnter || k.Mods != 0 {
+			return false
+		}
+		action()
+		return true
+	}
 }
 
 // markPlanExited mirrors the decision into the local snapshot so the live
@@ -530,14 +597,6 @@ func buildErrorLine(c *ui.Context, t *design.Tokens, text string) {
 		ui.Icon(c, icons.AlertTriangle()).Size(th.Space(4), th.Space(4)).TextColor(t.Danger)
 		design.Apply(ui.Text(c, text), t.Font(design.TypeXS)).TextColor(t.DangerText)
 	})
-}
-
-// secondaryButtonStyle is the brand's secondary dialog button.
-func secondaryButtonStyle(t *design.Tokens) design.Style {
-	return func(el ui.Element) ui.Element {
-		return el.Height(36).PaddingX(design.Space3).Radius(design.RadiusMD).
-			Background(t.BgRaised).Border(1, t.BorderL2).TextColor(t.LabelPrimary)
-	}
 }
 
 // own registers one contribution and ties its unregistration to ctx's effect

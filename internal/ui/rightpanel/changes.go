@@ -9,7 +9,6 @@ import (
 
 	"github.com/zeokeel/zeokeel/internal/contracts"
 	"github.com/zeokeel/zeokeel/internal/design"
-	"github.com/zeokeel/zeokeel/internal/icons"
 	"github.com/zeokeel/zeokeel/internal/uikit"
 )
 
@@ -23,19 +22,19 @@ const maxDiffLines = 400
 // workspace and without a differ.
 func buildChangesPane(c *ui.Context, t *design.Tokens, workspace contracts.WorkspaceService, runtime contracts.UIRuntime, st *state) {
 	if workspace == nil {
-		buildEmptyPane(c, t, icons.Activity(), uikit.T(st.locale, "工作区未启用", "Workspace is not enabled"))
+		buildEmptyPane(c, uikit.T(st.locale, "工作区未启用", "Workspace is not enabled"))
 		return
 	}
 	if _, ok, err := workspace.Current(context.Background()); err != nil {
-		buildErrorLine(c, t, uikit.T(st.locale, "读取工作区失败：", "Failed to read the workspace: ")+err.Error())
+		uikit.ErrorLine(c, uikit.T(st.locale, "读取工作区失败：", "Failed to read the workspace: ")+err.Error())
 		return
 	} else if !ok {
-		buildEmptyPane(c, t, icons.Folder(), uikit.T(st.locale, "还没有打开工作区", "No workspace is open"))
+		buildEmptyPane(c, uikit.T(st.locale, "还没有打开工作区", "No workspace is open"))
 		return
 	}
 	differ, ok := workspace.(contracts.WorkspaceDiffer)
 	if !ok {
-		buildEmptyPane(c, t, icons.Activity(), uikit.T(st.locale, "当前工作区不支持变更视图", "The current workspace does not support the changes view"))
+		buildEmptyPane(c, uikit.T(st.locale, "当前工作区不支持变更视图", "The current workspace does not support the changes view"))
 		return
 	}
 	if !st.changesLoaded {
@@ -44,23 +43,15 @@ func buildChangesPane(c *ui.Context, t *design.Tokens, workspace contracts.Works
 	}
 
 	ui.Column(c).FillWidth().Gap(design.Space2).Children(func() {
-		ui.Row(c).FillWidth().Gap(design.Space2).AlignItems(ui.Center).Children(func() {
-			design.Apply(ui.Text(c, uikit.T(st.locale, "变更", "Changes")), t.Font(design.TypeS)).
-				FontWeight(600).TextColor(t.LabelPrimary)
-			if st.changesErr == nil {
-				design.Apply(ui.Badge(c, fmt.Sprintf("%d", len(st.changes))), t.Badge())
-			}
-			ui.Spacer(c).Grow(1)
-			refresh := ui.Button(c, uikit.T(st.locale, "刷新", "Refresh")).
-				Tooltip(uikit.T(st.locale, "重新读取工作区变更", "Reload the workspace changes"))
-			if refresh.Clicked() {
-				st.changesLoaded = false
-				st.changesErr = nil
-				runtime.Invalidate()
-			}
-		})
+		// The refresh lives in the pane header; the body carries the count and
+		// the changed files as rows.
+		if st.changesErr == nil {
+			design.Apply(ui.Text(c, uikit.T(st.locale,
+				fmt.Sprintf("%d 个变更文件", len(st.changes)), fmt.Sprintf("%d changed files", len(st.changes)))),
+				t.Font(design.TypeXXS)).TextColor(t.LabelTertiary)
+		}
 		if st.changesErr != nil {
-			buildErrorLine(c, t, uikit.T(st.locale, "读取变更失败：", "Failed to read changes: ")+st.changesErr.Error())
+			uikit.ErrorLine(c, uikit.T(st.locale, "读取变更失败：", "Failed to read changes: ")+st.changesErr.Error())
 			return
 		}
 		if len(st.changes) == 0 {
@@ -68,20 +59,21 @@ func buildChangesPane(c *ui.Context, t *design.Tokens, workspace contracts.Works
 			return
 		}
 		for _, change := range st.changes {
-			buildChangeCard(c, t, st, change)
+			buildChangeRow(c, t, st, change)
 		}
 	})
 }
 
-// buildChangeCard is one changed file: status badge, path, +/- stats and a
-// native collapsible with the unified diff (collapsed by default).
-func buildChangeCard(c *ui.Context, t *design.Tokens, st *state, change contracts.FileChange) {
+// buildChangeRow is one changed file: status badge, path, +/- stats and a
+// native collapsible with the unified diff (collapsed by default). Rows and
+// dividers, not cards: a 320 DIP inspector only holds a card or two.
+func buildChangeRow(c *ui.Context, t *design.Tokens, st *state, change contracts.FileChange) {
 	path := firstNonEmpty(change.Path, uikit.T(st.locale, "(未知路径)", "(unknown path)"))
 	key := path + "\x00" + change.Status
+	c.Key("change/" + key)
 	additions, deletions := diffLineStats(change.Diff)
 
-	card := design.Apply(ui.Column(c), t.Panel()).Padding(design.Space2).Gap(design.Space1)
-	card.Children(func() {
+	ui.Column(c).FillWidth().Padding(0, design.Space2).Gap(design.Space1).Children(func() {
 		ui.Row(c).FillWidth().Gap(design.Space2).AlignItems(ui.Center).Children(func() {
 			design.Apply(ui.Badge(c, changeStatusLabel(change.Status, st.locale)), t.Badge()).
 				TextColor(changeStatusColor(t, change.Status))
@@ -89,7 +81,7 @@ func buildChangeCard(c *ui.Context, t *design.Tokens, st *state, change contract
 				TextColor(t.LabelPrimary).Grow(1).MaxLines(1).Ellipsis("…")
 			if additions > 0 {
 				design.Apply(ui.Text(c, fmt.Sprintf("+%d", additions)), t.Font(design.TypeXXXS)).
-					TextColor(t.Success)
+					TextColor(t.SuccessText)
 			}
 			if deletions > 0 {
 				design.Apply(ui.Text(c, fmt.Sprintf("-%d", deletions)), t.Font(design.TypeXXXS)).
@@ -105,6 +97,7 @@ func buildChangeCard(c *ui.Context, t *design.Tokens, st *state, change contract
 			buildDiff(c, t, change.Diff, st.locale)
 		})
 		st.changesOpen[key] = open
+		ui.Divider(c)
 	})
 }
 
@@ -143,7 +136,7 @@ func diffLineColor(t *design.Tokens, line string) ui.Color {
 		strings.HasPrefix(line, "rename"):
 		return t.LabelTertiary
 	case strings.HasPrefix(line, "+"):
-		return t.Success
+		return t.SuccessText
 	case strings.HasPrefix(line, "-"):
 		return t.DangerText
 	default:
@@ -191,7 +184,7 @@ func changeStatusLabel(status string, locale contracts.LocaleService) string {
 func changeStatusColor(t *design.Tokens, status string) ui.Color {
 	switch strings.ToUpper(strings.TrimSpace(status)) {
 	case "A":
-		return t.Success
+		return t.SuccessText
 	case "M":
 		return t.WarningText
 	case "D":

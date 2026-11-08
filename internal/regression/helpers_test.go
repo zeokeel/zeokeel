@@ -252,6 +252,32 @@ func activate[T any](t *testing.T, ctx cordis.Context, descriptor *module.Descri
 
 // requireHasText / requireNoText / frame helpers ---------------------------------
 
+// settleFrames drives frames until cond is true (asynchronous UI work such as
+// the attachment picker publishes its result through runtime.Post on the next
+// frame start), failing with the visible texts after a short deadline.
+func settleFrames(t *testing.T, tester *ui.Tester, what string, cond func() bool) {
+	t.Helper()
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		tester.Frame()
+		if cond() {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("frame never satisfied %s; texts = %v", what, tester.Texts())
+		}
+		time.Sleep(time.Millisecond)
+	}
+}
+
+// spinFrames drives a small number of frames for asynchronous completions that
+// have no positive text to wait for.
+func spinFrames(tester *ui.Tester, frames int) {
+	for i := 0; i < frames; i++ {
+		tester.Frame()
+	}
+}
+
 func requireHasText(t *testing.T, tester *ui.Tester, want string) {
 	t.Helper()
 	if !tester.HasText(want) {

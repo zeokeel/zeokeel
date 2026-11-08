@@ -6,6 +6,7 @@ package interaction_test
 import (
 	"context"
 	"errors"
+	"strings"
 	"sync"
 	"testing"
 
@@ -194,6 +195,7 @@ type harness struct {
 	interaction *fakeInteraction
 	artifacts   *fakeArtifactPresenter
 	plan        *fakePlanReviewer
+	chat        *planChat
 	fiber       *cordis.Fiber
 }
 
@@ -209,14 +211,58 @@ func newAskOnlyHarness(t *testing.T) *harness {
 	return newHarnessFull(t, false, false)
 }
 
+// planChat is a minimal ChatService: the plan-review feedback path needs the
+// active session and Send, nothing else.
+type planChat struct {
+	mu     sync.Mutex
+	active string
+	sends  []string
+}
+
+func (c *planChat) Config() contracts.ChatConfig          { return contracts.ChatConfig{} }
+func (c *planChat) Sessions() []contracts.ChatSessionInfo { return nil }
+func (c *planChat) Session(string) (contracts.ChatSession, bool) {
+	return contracts.ChatSession{}, false
+}
+func (c *planChat) ActiveSession() string {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.active
+}
+func (c *planChat) SetActiveSession(id string) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.active = id
+	return nil
+}
+func (c *planChat) NewSession(string) (string, error) { return "", nil }
+func (c *planChat) DeleteSession(string) error        { return nil }
+func (c *planChat) Send(_, prompt string) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.sends = append(c.sends, prompt)
+	return nil
+}
+func (c *planChat) Cancel(string) error { return nil }
+func (c *planChat) Subscribe(func(string)) (func(), error) {
+	return func() {}, nil
+}
+func (c *planChat) sent() []string {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return append([]string(nil), c.sends...)
+}
+
 func newHarnessFull(t *testing.T, withArtifacts, withPlan bool) *harness {
 	t.Helper()
 	uiRoot := uiroot.New(uiroot.Config{AppName: "ZeoKeel"})
 	ctx := cordis.Root()
 	t.Cleanup(func() { _ = ctx.DisposeAll() })
 	backend := &fakeInteraction{}
+	planChatService := &planChat{active: "sess-plan"}
 	provide(t, ctx, contracts.KeyUIRuntime, uiRoot.Runtime())
 	provide(t, ctx, contracts.KeyLocale, uiRoot.Locale())
+	provide[contracts.ChatService](t, ctx, contracts.KeyChat, planChatService)
 	provide[contracts.UserInteraction](t, ctx, contracts.KeyUserInteraction, backend)
 	artifacts := &fakeArtifactPresenter{}
 	plan := &fakePlanReviewer{}
@@ -235,7 +281,7 @@ func newHarnessFull(t *testing.T, withArtifacts, withPlan bool) *harness {
 	}); err != nil {
 		t.Fatalf("register home screen: %v", err)
 	}
-	h := &harness{t: t, uiRoot: uiRoot, interaction: backend, artifacts: artifacts, plan: plan}
+	h := &harness{t: t, uiRoot: uiRoot, interaction: backend, artifacts: artifacts, plan: plan, chat: planChatService}
 	h.fiber = activate(t, ctx, interaction.Module(), interaction.Config{})
 	return h
 }
@@ -510,7 +556,7 @@ func TestPlanReviewApprove(t *testing.T) {
 
 	h.plan.trigger(contracts.PlanReview{Content: "# 实施计划\n\n第一步", State: "reviewing"})
 	tester.Frame()
-	h.assertTexts(tester, "计划待审阅", "实施计划", "第一步", "批准", "取消")
+	h.assertTexts(tester, "计划待审阅", "实施计划", "第一步", "批准", "取消计划")
 
 	h.click(tester, "批准")
 	if exits := h.plan.exitCalls(); len(exits) != 1 || exits[0] != "approve" {
@@ -526,20 +572,28 @@ func TestPlanReviewCancelAndEscape(t *testing.T) {
 
 	h.plan.trigger(contracts.PlanReview{Content: "计划内容", State: "reviewing"})
 	tester.Frame()
-	h.click(tester, "取消")
+	h.click(tester, "取消计划")
 	if exits := h.plan.exitCalls(); len(exits) != 1 || exits[0] != "cancel" {
 		t.Fatalf("Exit calls = %v, want [cancel]", exits)
 	}
 
-	// Escape/backdrop dismissal cancels again.
+	// Escape must not cancel a plan: the review stays open and only an
+	// explicit footer action decides. The footer says so.
 	h.plan.trigger(contracts.PlanReview{Content: "第二份计划", State: "reviewing"})
 	tester.Frame()
-	h.assertTexts(tester, "计划待审阅")
+	h.assertTexts(tester, "计划待审阅", "Esc 不会取消计划")
 	tester.Key(0, ui.KeyEscape)
 	tester.Frame()
+	if exits := h.plan.exitCalls(); len(exits) != 1 {
+		t.Fatalf("Exit calls after Escape = %v, want the earlier explicit cancel only", exits)
+	}
+	h.assertTexts(tester, "计划待审阅")
+
+	// The explicit cancel is still available and cancels.
+	h.click(tester, "取消计划")
 	exits := h.plan.exitCalls()
 	if len(exits) != 2 || exits[1] != "cancel" {
-		t.Fatalf("Exit calls after Escape = %v, want a second cancel", exits)
+		t.Fatalf("Exit calls after the cancel action = %v, want a second cancel", exits)
 	}
 	tester.Frame()
 	h.assertNoTexts(tester, "计划待审阅")
@@ -630,4 +684,86 @@ func TestDisposeClearsAllHandlers(t *testing.T) {
 	}
 	tester.Frame()
 	h.assertNoTexts(tester, "工件")
+}
+
+// TestQuestionOptionsStackedAndCancelInFooter covers the ask_user layout: the
+// equal choices stack vertically in one column, and cancel sits in the footer
+// to the left of nothing (the options are the primary actions).
+func TestQuestionOptionsStackedAndCancelInFooter(t *testing.T) {
+	h := newHarness(t)
+	tester := h.tester()
+
+	h.interaction.trigger(contracts.UserQuestion{ID: "q1", Text: "选一个", Options: []string{"staging", "prod"}})
+	tester.Frame()
+	first, ok := tester.Find("staging")
+	if !ok {
+		t.Fatalf("option missing; texts = %v", tester.Texts())
+	}
+	second, ok := tester.Find("prod")
+	if !ok {
+		t.Fatalf("second option missing; texts = %v", tester.Texts())
+	}
+	if first.X+first.W/2 != second.X+second.W/2 {
+		t.Fatalf("options are not stacked in one column: centers = %.1f and %.1f",
+			first.X+first.W/2, second.X+second.W/2)
+	}
+	if second.Y <= first.Y {
+		t.Fatalf("options are not vertical: y = %.1f then %.1f", first.Y, second.Y)
+	}
+
+	h.click(tester, "staging")
+	if answers := h.interaction.answered(); len(answers) != 1 || answers[0].answer != "staging" {
+		t.Fatalf("answers = %+v, want staging", answers)
+	}
+}
+
+// TestPlanReviewEnterKeepsPlanning covers H3: Enter in the feedback input never
+// approves the plan. With text it sends the feedback through Keep planning;
+// with no text it does nothing, so the feedback can never be dropped by an
+// approval-by-accident.
+func TestPlanReviewEnterKeepsPlanning(t *testing.T) {
+	h := newHarness(t)
+	tester := h.tester()
+	h.plan.trigger(contracts.PlanReview{Content: "计划内容", State: "reviewing"})
+	tester.Frame()
+	h.assertTexts(tester, "继续规划反馈", "输入反馈后按 Enter = 继续规划")
+
+	// Empty feedback: Enter leaves the review open and approves nothing.
+	tester.Key(0, ui.KeyEnter)
+	tester.Frame()
+	if exits := h.plan.exitCalls(); len(exits) != 0 {
+		t.Fatalf("Exit calls with empty feedback = %v, want none", exits)
+	}
+	h.assertTexts(tester, "计划待审阅")
+
+	// Typed feedback: Enter keeps planning and sends the feedback to the agent.
+	if err := tester.Click("继续规划反馈"); err != nil {
+		t.Fatalf("focus feedback: %v; texts = %v", err, tester.Texts())
+	}
+	tester.Frame()
+	tester.Type("先补回归测试")
+	tester.Frame()
+	h.assertTexts(tester, "Enter = 继续规划（发送反馈给 agent）")
+	tester.Key(0, ui.KeyEnter)
+	tester.Frame()
+	exits := h.plan.exitCalls()
+	if len(exits) != 1 || exits[0] != "cancel" {
+		t.Fatalf("Exit calls after Enter with feedback = %v, want [cancel]", exits)
+	}
+	sends := h.chat.sent()
+	if len(sends) != 1 || !strings.Contains(sends[0], "先补回归测试") {
+		t.Fatalf("feedback sends = %v, want the typed feedback delivered", sends)
+	}
+	tester.Frame()
+	h.assertNoTexts(tester, "计划待审阅")
+
+	// Approving stays an explicit action.
+	h2 := newHarness(t)
+	tester2 := h2.tester()
+	h2.plan.trigger(contracts.PlanReview{Content: "第二份计划", State: "reviewing"})
+	tester2.Frame()
+	h2.click(tester2, "批准")
+	if exits := h2.plan.exitCalls(); len(exits) != 1 || exits[0] != "approve" {
+		t.Fatalf("Exit calls after clicking Approve = %v, want [approve]", exits)
+	}
 }

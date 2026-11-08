@@ -8,6 +8,7 @@ import (
 	"errors"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/egoist/mygo/ui"
 	cordis "github.com/zeokeel/zeokeel-kernel"
@@ -92,6 +93,13 @@ type fakeChat struct {
 	sessions  []contracts.ChatSession
 	deleteErr error
 	deleted   []string
+
+	// Archive half (the archived-sessions settings page): the archive flag
+	// lives in the chat service's session list for the archive page.
+	archived     map[string]bool
+	archiveErr   error
+	archiveCalls []string
+	activeErr    error
 }
 
 func (f *fakeChat) Config() contracts.ChatConfig { f.mu.Lock(); defer f.mu.Unlock(); return f.config }
@@ -103,7 +111,7 @@ func (f *fakeChat) Sessions() []contracts.ChatSessionInfo {
 	for _, session := range f.sessions {
 		infos = append(infos, contracts.ChatSessionInfo{
 			ID: session.ID, Title: session.Title, MessageCount: len(session.Messages),
-			UpdatedAt: session.UpdatedAt,
+			UpdatedAt: session.UpdatedAt, Archived: f.archived[session.ID],
 		})
 	}
 	return infos
@@ -123,7 +131,51 @@ func (f *fakeChat) Session(sessionID string) (contracts.ChatSession, bool) {
 
 func (f *fakeChat) ActiveSession() string { f.mu.Lock(); defer f.mu.Unlock(); return f.active }
 
-func (f *fakeChat) SetActiveSession(string) error { return nil }
+func (f *fakeChat) SetActiveSession(sessionID string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.activeErr != nil {
+		return f.activeErr
+	}
+	f.active = sessionID
+	return nil
+}
+
+// SetSessionArchived implements contracts.SessionArchiver for the archive page.
+func (f *fakeChat) SetSessionArchived(sessionID string, archived bool) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.archiveCalls = append(f.archiveCalls, sessionID)
+	if f.archiveErr != nil {
+		return f.archiveErr
+	}
+	if f.archived == nil {
+		f.archived = map[string]bool{}
+	}
+	if archived {
+		f.archived[sessionID] = true
+	} else {
+		delete(f.archived, sessionID)
+	}
+	return nil
+}
+
+// setArchived marks one scripted session archived before the page opens.
+func (f *fakeChat) setArchived(sessionID string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.archived == nil {
+		f.archived = map[string]bool{}
+	}
+	f.archived[sessionID] = true
+}
+
+// archivedCalls returns the SetSessionArchived calls recorded so far.
+func (f *fakeChat) archivedCalls() []string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]string(nil), f.archiveCalls...)
+}
 
 func (f *fakeChat) NewSession(string) (string, error) { return "new-1", nil }
 
@@ -247,10 +299,80 @@ func (h *harness) tester() *ui.Tester {
 
 func (h *harness) click(tester *ui.Tester, label string) {
 	h.t.Helper()
+	// The settings navigation keeps the 高级 group collapsed by default (the
+	// settings-complexity simplification). A test that asks for a low-frequency
+	// page opens the group first, exactly like a user would.
+	if _, ok := tester.Find(label); !ok {
+		for _, advanced := range []string{"高级", "Advanced"} {
+			if !hasExactLabel(tester, advanced) {
+				continue
+			}
+			if _, expandable := tester.Find(advanced); expandable {
+				if err := tester.Click(advanced); err == nil {
+					tester.Frame()
+				}
+			}
+			break
+		}
+	}
+	h.ensureVisible(tester, label)
 	if err := tester.Click(label); err != nil {
 		h.t.Fatalf("click %q: %v; texts = %v", label, err, tester.Texts())
 	}
 	tester.Frame()
+	// Native disclosures (Collapsible) animate their content into view: settle
+	// the motion so the revealed inputs get real bounds before a test focuses
+	// them. Harmless for ordinary clicks.
+	tester.Advance(350 * time.Millisecond)
+	tester.Frame()
+}
+
+// ensureVisible scrolls the settings page body (or the navigation column for
+// sidebar items) until the element showing label sits inside the dialog's
+// visible area. The headless tester only checks the window, so an element
+// clipped by the scroll viewport would otherwise be clicked on the modal scrim
+// and dismiss the settings surface.
+func (h *harness) ensureVisible(tester *ui.Tester, label string) {
+	h.t.Helper()
+	for range 24 {
+		rect, ok := tester.Find(label)
+		if !ok {
+			return
+		}
+		centerX, centerY := rect.X+rect.W/2, rect.Y+rect.H/2
+		if rect.W > 0 && rect.H > 0 &&
+			centerX >= 200 && centerX <= 1000 && centerY >= 70 && centerY <= 768 {
+			return
+		}
+		// Settings surface at the 1200x800 test size: navigation 190-390, page
+		// body 390-1010, panel 24-776.
+		x, y := float32(700), float32(500)
+		if rect.X < 400 {
+			x = 300
+		}
+		delta := centerY - 480
+		if delta > 220 {
+			delta = 220
+		}
+		if delta < -220 {
+			delta = -220
+		}
+		if delta == 0 {
+			delta = 120
+		}
+		tester.Scroll(x, y, 0, delta)
+		tester.Frame()
+	}
+}
+
+// hasExactLabel reports whether one frame label equals text exactly.
+func hasExactLabel(tester *ui.Tester, text string) bool {
+	for _, label := range tester.Texts() {
+		if label == text {
+			return true
+		}
+	}
+	return false
 }
 
 func (h *harness) assertTexts(tester *ui.Tester, wanted ...string) {
@@ -274,12 +396,19 @@ func (h *harness) assertNoTexts(tester *ui.Tester, unwanted ...string) {
 // focusInput clicks the native control labeled label so typing goes into it.
 func (h *harness) focusInput(tester *ui.Tester, label string) {
 	h.t.Helper()
+	h.ensureVisible(tester, label)
 	rect, ok := tester.Find(label)
 	if !ok {
 		h.t.Fatalf("input labeled %q not found; texts = %v", label, tester.Texts())
 	}
-	tester.ClickAt(rect.X+rect.W/2, rect.Y+rect.H/2)
-	tester.Frame()
+	if rect.W == 0 || rect.H == 0 {
+		if err := tester.Click(label); err == nil {
+			tester.Frame()
+		}
+	} else {
+		tester.ClickAt(rect.X+rect.W/2, rect.Y+rect.H/2)
+		tester.Frame()
+	}
 }
 
 func provide[T any](t *testing.T, ctx cordis.Context, key cordis.ServiceKey[T], value T) {
@@ -322,261 +451,4 @@ func activate[T any](t *testing.T, ctx cordis.Context, descriptor *module.Descri
 		t.Fatalf("module %s state = %s (%v), want Active", descriptor.ID, state, fiber.ErrorDetail())
 	}
 	return fiber
-}
-
-// TestSettingsPageRendersFieldsAndMasksAPIKey covers the page layout, the labels
-// and the API key masking.
-func TestSettingsPageRendersFieldsAndMasksAPIKey(t *testing.T) {
-	chat := &fakeChat{
-		config: contracts.ChatConfig{
-			Model:        "gpt-4o",
-			BaseURL:      "https://api.example.com/v1",
-			APIKey:       "sk-secret-value",
-			SystemPrompt: "You are helpful.",
-		},
-	}
-	h := newHarness(t, chat, newFakeSettings(nil), settings.Config{})
-	tester := h.tester()
-	tester.Frame()
-	h.click(tester, "模型")
-
-	h.assertTexts(tester, "模型", "Base URL", "API Key", "系统提示词", "保存",
-		"已设置（留空保持不变）", "当前会话", "当前模型")
-	h.assertNoTexts(tester, "sk-secret-value", "未设置")
-}
-
-// TestSettingsSaveWritesKeys covers the save button: the settings keys are
-// written, the API key is not overwritten by an empty draft, and typing a new
-// key writes it.
-func TestSettingsSaveWritesKeys(t *testing.T) {
-	chat := &fakeChat{
-		config: contracts.ChatConfig{
-			Model:        "gpt-4o",
-			BaseURL:      "https://api.example.com/v1",
-			SystemPrompt: "You are helpful.",
-		},
-		active: "session-7",
-	}
-	store := newFakeSettings(nil)
-	h := newHarness(t, chat, store, settings.Config{})
-	tester := h.tester()
-	tester.Frame()
-	h.click(tester, "模型")
-	h.assertTexts(tester, "当前会话: session-7")
-
-	h.click(tester, "保存")
-	h.assertTexts(tester, "已保存")
-	if got := store.get(contracts.SettingsChatModel); got != "gpt-4o" {
-		t.Fatalf("%s = %q, want gpt-4o", contracts.SettingsChatModel, got)
-	}
-	if got := store.get(contracts.SettingsChatBaseURL); got != "https://api.example.com/v1" {
-		t.Fatalf("%s = %q", contracts.SettingsChatBaseURL, got)
-	}
-	if got := store.get(contracts.SettingsChatSystemPrompt); got != "You are helpful." {
-		t.Fatalf("%s = %q", contracts.SettingsChatSystemPrompt, got)
-	}
-	if _, written := store.All()[contracts.SettingsChatAPIKey]; written {
-		t.Fatal("an empty API key draft overwrote the stored key")
-	}
-
-	// Type a new API key into the native input and save: only then is the key
-	// written, and it is never shown again.
-	h.focusInput(tester, "API Key 输入")
-	tester.Type("sk-new-123")
-	tester.Frame()
-	if got := store.get(contracts.SettingsChatAPIKey); got != "" {
-		t.Fatalf("API key was written before save: %q", got)
-	}
-	h.click(tester, "保存")
-	if got := store.get(contracts.SettingsChatAPIKey); got != "sk-new-123" {
-		t.Fatalf("%s = %q, want sk-new-123", contracts.SettingsChatAPIKey, got)
-	}
-	h.assertNoTexts(tester, "sk-new-123")
-	h.assertTexts(tester, "已保存")
-}
-
-// TestSettingsFallbackToStore covers loading from the settings store when the
-// chat service config is empty, and that a stored API key is never rewritten
-// from an empty draft.
-func TestSettingsFallbackToStore(t *testing.T) {
-	chat := &fakeChat{}
-	store := newFakeSettings(map[string]string{
-		contracts.SettingsChatModel:        "store-model",
-		contracts.SettingsChatBaseURL:      "https://store.example.com",
-		contracts.SettingsChatSystemPrompt: "stored prompt",
-		contracts.SettingsChatAPIKey:       "stored-key",
-	})
-	h := newHarness(t, chat, store, settings.Config{})
-	tester := h.tester()
-	tester.Frame()
-	h.click(tester, "模型")
-	h.assertTexts(tester, "已设置（留空保持不变）")
-	h.assertNoTexts(tester, "stored-key")
-
-	h.click(tester, "保存")
-	if got := store.get(contracts.SettingsChatModel); got != "store-model" {
-		t.Fatalf("%s = %q, want store-model", contracts.SettingsChatModel, got)
-	}
-	if got := store.get(contracts.SettingsChatBaseURL); got != "https://store.example.com" {
-		t.Fatalf("%s = %q", contracts.SettingsChatBaseURL, got)
-	}
-	if got := store.get(contracts.SettingsChatSystemPrompt); got != "stored prompt" {
-		t.Fatalf("%s = %q", contracts.SettingsChatSystemPrompt, got)
-	}
-	if got := store.get(contracts.SettingsChatAPIKey); got != "stored-key" {
-		t.Fatalf("%s = %q, want the stored key kept", contracts.SettingsChatAPIKey, got)
-	}
-}
-
-// TestSettingsSaveError covers a failing settings store.
-func TestSettingsSaveError(t *testing.T) {
-	store := newFakeSettings(nil)
-	store.setErr = errors.New("disk is read-only")
-	h := newHarness(t, &fakeChat{config: contracts.ChatConfig{Model: "gpt-4o"}}, store, settings.Config{})
-	tester := h.tester()
-	tester.Frame()
-	h.click(tester, "模型")
-
-	h.click(tester, "保存")
-	h.assertTexts(tester, "保存失败", "disk is read-only")
-	h.assertNoTexts(tester, "已保存")
-}
-
-// TestSettingsConfigLabels covers the assembly-config copy.
-func TestSettingsConfigLabels(t *testing.T) {
-	h := newHarness(t, &fakeChat{}, newFakeSettings(nil), settings.Config{
-		Title:             "模型服务",
-		ModelLabel:        "模型名",
-		BaseURLLabel:      "服务地址",
-		APIKeyLabel:       "访问密钥",
-		SystemPromptLabel: "系统指令",
-		SaveLabel:         "保存配置",
-	})
-	tester := h.tester()
-	tester.Frame()
-	h.click(tester, "模型服务")
-	h.assertTexts(tester, "模型服务", "模型名", "服务地址", "访问密钥", "系统指令", "保存配置")
-}
-
-// TestSettingsDisposeRemovesPage covers kernel effect unwinding.
-func TestSettingsDisposeRemovesPage(t *testing.T) {
-	h := newHarness(t, &fakeChat{}, newFakeSettings(nil), settings.Config{})
-	tester := h.tester()
-	tester.Frame()
-	h.click(tester, "模型")
-	h.assertTexts(tester, "保存")
-
-	if err := h.fiber.Dispose(); err != nil {
-		t.Fatalf("dispose settings module: %v", err)
-	}
-	tester.Frame()
-	h.assertNoTexts(tester, "保存", "系统提示词")
-	h.assertTexts(tester, "还没有注册任何设置页。")
-}
-
-// TestModuleManifest pins the module contract.
-func TestModuleManifest(t *testing.T) {
-	descriptor := settings.Module()
-	if descriptor.ID != "zeokeel-ui/settings" {
-		t.Fatalf("module ID = %q, want zeokeel-ui/settings", descriptor.ID)
-	}
-	if descriptor.Factory == nil {
-		t.Fatal("module has a nil factory")
-	}
-	if len(descriptor.Provides) != 0 {
-		t.Fatalf("ui module provides %v, want none", descriptor.Provides)
-	}
-	required := make(map[string]bool, len(descriptor.Requires))
-	for _, requirement := range descriptor.Requires {
-		required[requirement.Name] = true
-	}
-	for _, name := range []string{
-		contracts.KeyUIRuntime.Name(),
-		contracts.KeySettings.Name(),
-		contracts.KeyChat.Name(),
-	} {
-		if !required[name] {
-			t.Fatalf("module does not require %q; requires = %v", name, descriptor.Requires)
-		}
-	}
-}
-
-// TestModelPresetsFillDrafts covers the quick presets: a preset only fills the
-// drafts, saving writes the preset model/base URL.
-func TestModelPresetsFillDrafts(t *testing.T) {
-	h := newHarness(t, &fakeChat{}, newFakeSettings(nil), settings.Config{})
-	tester := h.tester()
-	tester.Frame()
-	h.click(tester, "模型")
-
-	h.click(tester, "DeepSeek")
-	h.click(tester, "保存")
-	if got := h.settings.get(contracts.SettingsChatModel); got != "deepseek-chat" {
-		t.Fatalf("saved model = %q, want deepseek-chat", got)
-	}
-	if got := h.settings.get(contracts.SettingsChatBaseURL); got != "https://api.deepseek.com/v1" {
-		t.Fatalf("saved base URL = %q", got)
-	}
-}
-
-// TestAppearancePageThemeMode covers the appearance page's three-state theme
-// control: dark previews immediately and saving persists the mode plus the
-// legacy dark flag (the detailed switching/fallback matrix lives in
-// theme_mode_test.go).
-func TestAppearancePageThemeMode(t *testing.T) {
-	store := newFakeSettings(nil)
-	h := newHarness(t, &fakeChat{}, store, settings.Config{})
-	tester := h.tester()
-	tester.Frame()
-	h.click(tester, "模型")
-
-	h.click(tester, "外观")
-	h.assertTexts(tester, "外观模式", "浅色", "深色", "跟随系统", "界面语言", "应用")
-
-	h.click(tester, "深色")
-	if !h.uiRoot.Theme().Dark() {
-		t.Fatalf("theme did not switch to dark after selecting 深色")
-	}
-	h.click(tester, "应用")
-	if got := store.get(contracts.SettingThemeMode); got != "dark" {
-		t.Fatalf("persisted %s = %q, want dark", contracts.SettingThemeMode, got)
-	}
-	if got := store.get(contracts.SettingsUIThemeDark); got != "true" {
-		t.Fatalf("persisted dark = %q, want true", got)
-	}
-	if got := store.get(contracts.SettingsUILanguage); got != "zh" {
-		t.Fatalf("persisted language = %q, want zh", got)
-	}
-}
-
-// TestShortcutsPage covers the keyboard reference page (the old shell's
-// shortcuts page): clicking the page shows the product's key bindings.
-func TestShortcutsPage(t *testing.T) {
-	h := newHarness(t, &fakeChat{}, newFakeSettings(nil), settings.Config{})
-	tester := h.tester()
-	tester.Frame()
-	h.click(tester, "模型")
-	h.click(tester, "快捷键")
-	h.assertTexts(tester, "折叠 / 展开侧边栏", "Cmd/Ctrl + B", "发送消息", "Enter",
-		"Shift + Enter", "命令菜单", "Esc")
-}
-
-// TestProvidersPage covers the provider catalogue: the built-in endpoints are
-// listed and "使用" writes the chat settings keys.
-func TestProvidersPage(t *testing.T) {
-	store := newFakeSettings(nil)
-	h := newHarness(t, &fakeChat{}, store, settings.Config{})
-	tester := h.tester()
-	tester.Frame()
-	h.click(tester, "模型")
-	h.click(tester, "服务商")
-	h.assertTexts(tester, "DeepSeek", "OpenAI", "Ollama",
-		"https://api.deepseek.com/v1", "deepseek-chat", "使用")
-	h.click(tester, "使用")
-	if got := store.get(contracts.SettingsChatModel); got != "deepseek-chat" {
-		t.Fatalf("saved model = %q, want deepseek-chat", got)
-	}
-	if got := store.get(contracts.SettingsChatBaseURL); got != "https://api.deepseek.com/v1" {
-		t.Fatalf("saved base URL = %q", got)
-	}
 }

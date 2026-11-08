@@ -71,7 +71,8 @@ func TestExportWritesMarkdown(t *testing.T) {
 			t.Fatalf("exported content does not contain %q:\n%s", want, gotContent)
 		}
 	}
-	h.assertTexts(tester, "已导出")
+	// Success is a transient toast, never a resident header badge.
+	h.assertNoTexts(tester, "已导出")
 }
 
 func TestExportSanitizesDefaultName(t *testing.T) {
@@ -185,7 +186,7 @@ func TestExportJSONL(t *testing.T) {
 	if !strings.Contains(savedContent, "bash") {
 		t.Fatalf("tool call missing from jsonl: %s", savedContent)
 	}
-	if !tester.HasText("已导出") {
-		t.Fatalf("export status missing; texts = %v", tester.Texts())
+	if tester.HasText("导出失败") {
+		t.Fatalf("export failed; texts = %v", tester.Texts())
 	}
 }

@@ -120,7 +120,7 @@ func buildTerminalPane(
 	st *state,
 ) {
 	if terminal == nil {
-		buildEmptyPane(c, t, icons.Terminal(), uikit.T(st.locale, "终端未启用", "Terminal is not enabled"))
+		buildEmptyPane(c, uikit.T(st.locale, "终端未启用", "Terminal is not enabled"))
 		return
 	}
 	term := st.term
@@ -140,9 +140,7 @@ func buildTerminalPane(
 			shellLabel := firstNonEmpty(terminal.Shell(), "shell")
 			shell := ui.ButtonBase(c).Height(th.Space(7)).PaddingX(design.Space2).
 				Radius(design.RadiusSM).Label(uikit.T(st.locale, "选择 shell", "Choose shell"))
-			if shell.Hovered() {
-				shell = shell.Background(t.BgHover)
-			}
+			shell = rowTint(t, shell, false)
 			shell.Children(func() {
 				ui.Icon(c, icons.Terminal()).Size(design.Space3, design.Space3).
 					TextColor(t.LabelSecondary)
@@ -157,22 +155,9 @@ func buildTerminalPane(
 				buildShellPicker(c, t, terminal, runtime, st)
 			})
 
-			clear := ui.ButtonBase(c).Height(th.Space(7)).PaddingX(design.Space2).
-				Radius(design.RadiusSM).Label(uikit.T(st.locale, "清空", "Clear"))
-			if clear.Hovered() {
-				clear = clear.Background(t.BgHover)
-			}
-			clear.Children(func() {
-				design.Apply(ui.Text(c, uikit.T(st.locale, "清空", "Clear")), t.Font(design.TypeXXS)).
-					TextColor(t.LabelSecondary)
-			})
-			clear.OnClick(func() {
-				term.clearOutput()
-				runtime.Invalidate()
-			})
 		})
 		if term.err != "" {
-			buildErrorLine(c, t, term.err)
+			uikit.ErrorLine(c, term.err)
 		}
 
 		// Output: one mono text in a native scroll, with the empty hint.
@@ -219,11 +204,10 @@ func buildShellPicker(c *ui.Context, t *design.Tokens, terminal contracts.Termin
 	panel.Children(func() {
 		for _, name := range terminal.Shells() {
 			name := name
+			c.Key("shell/" + name)
 			row := ui.ButtonBase(c).FillWidth().Height(28).PaddingX(design.Space2).
 				Radius(design.RadiusSM).Label(name)
-			if name == current || row.Hovered() {
-				row = row.Background(t.BgHover)
-			}
+			row = rowTint(t, row, name == current)
 			row.Children(func() {
 				ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(design.Space2).Children(func() {
 					design.Apply(ui.Text(c, name), t.Font(design.TypeXXS)).

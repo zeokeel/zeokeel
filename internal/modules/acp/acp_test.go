@@ -37,6 +37,7 @@ func (l *fakeLogger) Printf(format string, args ...any) {
 type fakeSession struct {
 	messages []contracts.ChatMessage
 	running  bool
+	errText  string
 }
 
 // fakeChat is a scriptable contracts.ChatService.
@@ -52,6 +53,9 @@ type fakeChat struct {
 	sendErr       error
 	cancelErr     error
 
+	// model is the configured chat model Config reports (session/new returns it).
+	model string
+
 	sendHook   func(*fakeChat, string, string)
 	cancelHook func(*fakeChat, string)
 
@@ -64,7 +68,11 @@ func newFakeChat() *fakeChat {
 	return &fakeChat{sessions: map[string]*fakeSession{}, subscribers: map[uint64]func(string){}}
 }
 
-func (c *fakeChat) Config() contracts.ChatConfig { return contracts.ChatConfig{} }
+func (c *fakeChat) Config() contracts.ChatConfig {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return contracts.ChatConfig{Model: c.model}
+}
 
 func (c *fakeChat) Sessions() []contracts.ChatSessionInfo {
 	c.mu.Lock()
@@ -83,7 +91,7 @@ func (c *fakeChat) Session(id string) (contracts.ChatSession, bool) {
 	if !ok {
 		return contracts.ChatSession{}, false
 	}
-	out := contracts.ChatSession{ID: id, Running: session.running,
+	out := contracts.ChatSession{ID: id, Running: session.running, Error: session.errText,
 		Messages: append([]contracts.ChatMessage(nil), session.messages...)}
 	return out, true
 }
@@ -184,6 +192,19 @@ func (c *fakeChat) setAssistantText(sessionID, text string, running bool) {
 	session.running = running
 	c.mu.Unlock()
 	c.notifyAll(sessionID)
+}
+
+// setSessionError records a terminal run error on the session (no
+// notification; callers notify themselves when subscribers must observe it).
+func (c *fakeChat) setSessionError(sessionID, text string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	session, ok := c.sessions[sessionID]
+	if !ok {
+		session = &fakeSession{}
+		c.sessions[sessionID] = session
+	}
+	session.errText = text
 }
 
 // setAssistantTextQuiet mutates state without notifying subscribers.
@@ -360,7 +381,12 @@ func TestInitializeUnknownMethodAndBadJSON(t *testing.T) {
 	if initResult.ProtocolVersion != ProtocolVersion {
 		t.Fatalf("protocolVersion = %d, want %d", initResult.ProtocolVersion, ProtocolVersion)
 	}
-	for _, key := range []string{"image", "audio", "embeddedContext"} {
+	// Image prompts are supported (they are forwarded to the attachment-capable
+	// chat backend); audio and embedded context are not.
+	if image, ok := initResult.AgentCapabilities.PromptCapabilities["image"]; !ok || !image {
+		t.Fatalf("promptCapabilities[\"image\"] = %v/%v, want present true", image, ok)
+	}
+	for _, key := range []string{"audio", "embeddedContext"} {
 		value, ok := initResult.AgentCapabilities.PromptCapabilities[key]
 		if !ok || value {
 			t.Fatalf("promptCapabilities[%q] = %v/%v, want present false", key, value, ok)
@@ -552,6 +578,30 @@ func TestPromptCancelSettlesCancelled(t *testing.T) {
 	}
 	if len(chat.cancelCalls) != 1 || chat.cancelCalls[0] != "sess-1" {
 		t.Fatalf("cancel calls = %v", chat.cancelCalls)
+	}
+}
+
+// TestPromptRunFailureReturnsJSONRPCError covers the verification finding that
+// a failed run used to look like a successful end_turn with no text: the chat
+// read model carries the run error, and the ACP response must expose it.
+func TestPromptRunFailureReturnsJSONRPCError(t *testing.T) {
+	chat := newFakeChat()
+	chat.sendHook = func(c *fakeChat, sessionID, prompt string) {
+		c.setAssistantTextQuiet(sessionID, "partial answer", false)
+		c.setSessionError(sessionID, `openai: chat completions failed: 401 Unauthorized`)
+		c.notifyAll(sessionID)
+	}
+	service := newService(Config{}, chat, &fakeLogger{})
+	frames := serveLines(t, service, promptLine(1, "sess-1", "hi"))
+	last := frames[len(frames)-1]
+	if last.Error == nil {
+		t.Fatalf("frames = %+v, want a JSON-RPC error response", frames)
+	}
+	if !strings.Contains(last.Error.Message, "401 Unauthorized") {
+		t.Fatalf("error message = %q, want the run error text", last.Error.Message)
+	}
+	if len(last.Result) != 0 {
+		t.Fatalf("error response also carried result %s", last.Result)
 	}
 }
 

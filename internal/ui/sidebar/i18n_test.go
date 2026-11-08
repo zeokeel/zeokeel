@@ -93,12 +93,13 @@ func TestSidebarEnglishCopyAndLanguageSwitch(t *testing.T) {
 	tester := h.tester()
 	tester.Frame()
 
-	h.assertTexts(tester, "New chat", "Search sessions", "Settings", "Show archived", "Project Alpha",
+	h.assertTexts(tester, "New chat", "Search chats and messages", "Settings", "Project Alpha",
 		"Home", "Automation", "Plugins")
-	h.assertNoTexts(tester, "新对话", "搜索会话", "设置", "显示已归档", "首页", "自动化", "插件")
+	h.assertNoTexts(tester, "Show archived", "Hide archived")
+	h.assertNoTexts(tester, "新对话", "搜索会话与消息", "设置", "显示已归档", "首页", "自动化", "插件")
 
 	// Row menu: every session action is English.
-	openRowMenu(t, tester)
+	openRowMenu(t, tester, "Project Alpha")
 	h.assertTexts(tester, "Rename", "Delete", "Duplicate", "Set as current",
 		"Pin session", "Archive session")
 	h.assertNoTexts(tester, "重命名", "删除", "创建副本", "设为当前", "置顶会话", "归档会话")
@@ -111,7 +112,7 @@ func TestSidebarEnglishCopyAndLanguageSwitch(t *testing.T) {
 	h.assertNoTexts(tester, "Rename session")
 
 	// Delete confirmation dialog.
-	openRowMenu(t, tester)
+	openRowMenu(t, tester, "Project Alpha")
 	clickLabel(t, tester, "Delete")
 	h.assertTexts(tester, "Delete session", "Cancel", "Delete")
 	texts := strings.Join(tester.Texts(), "\n")
@@ -124,11 +125,11 @@ func TestSidebarEnglishCopyAndLanguageSwitch(t *testing.T) {
 	// Switching the host language takes effect on the next frame.
 	h.uiRoot.Locale().SetLanguage("zh")
 	tester.Frame()
-	h.assertTexts(tester, "新对话", "搜索会话", "设置", "显示已归档",
+	h.assertTexts(tester, "新对话", "搜索会话与消息", "设置",
 		"首页", "自动化", "插件")
-	h.assertNoTexts(tester, "New chat", "Search sessions", "Settings", "Show archived",
-		"Home", "Automation", "Plugins")
-	openRowMenu(t, tester)
+	h.assertNoTexts(tester, "New chat", "Search chats and messages", "Settings", "Show archived",
+		"Home", "Automation", "Plugins", "显示已归档", "隐藏已归档")
+	openRowMenu(t, tester, "Project Alpha")
 	h.assertTexts(tester, "重命名", "删除", "创建副本", "设为当前", "置顶会话", "归档会话")
 }
 
@@ -147,16 +148,18 @@ func TestSidebarEnglishWorkspaceBadgesAndEmptyStates(t *testing.T) {
 	h := newLocaleHarness(t, chat, sidebar.Config{}, "en", workspace, settings)
 	tester := h.tester()
 	tester.Frame()
-	h.assertTexts(tester, "Workspace", "Ungrouped", "Alpha", "Beta", "Gamma",
-		"Pinned", "Archived", "Running", "Hide archived")
-	h.assertNoTexts(tester, "工作区", "未分组", "置顶", "已归档", "运行中")
+	// The archived session (Beta) is owned by the settings archive page now: it
+	// never renders in the sidebar, even with the legacy view setting on.
+	h.assertTexts(tester, "Workspace", "Ungrouped", "Alpha", "Gamma", "Pinned")
+	h.assertNoTexts(tester, "Beta", "Archived", "Running", "Show archived", "Hide archived",
+		"工作区", "未分组", "置顶", "已归档", "运行中")
 
 	// Empty state for a fresh sidebar.
 	empty := newLocaleHarness(t, &i18nChat{fakeChat: &fakeChat{}}, sidebar.Config{}, "en", nil, nil)
 	emptyTester := empty.tester()
 	emptyTester.Frame()
 	empty.assertTexts(emptyTester, "No sessions yet")
-	clickLabel(t, emptyTester, "Search sessions")
+	clickLabel(t, emptyTester, "Search chats and messages")
 	emptyTester.Type("zzz")
 	emptyTester.Frame()
 	empty.assertTexts(emptyTester, "No matching sessions")

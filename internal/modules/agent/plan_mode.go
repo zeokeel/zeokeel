@@ -119,10 +119,29 @@ var workspaceReadOnlyTools = map[string]bool{
 	"grep":      true,
 }
 
+// interactionTools are the host tools that interact with the user directly:
+// ask_user, present and goal render their own question/artifact/goal overlay,
+// and plan_review/exit_plan_mode drive the plan-review overlay. They are exempt
+// from the generic tool approval prompt because that prompt would be a second,
+// meaningless modal in front of the real interaction (asking the user to
+// approve asking a question); denying it silently drops the interaction
+// entirely. The names are model-visible literals because the host-tools
+// constants live in internal/modules/hosttools, which this module does not
+// import.
+var interactionTools = map[string]bool{
+	"ask_user":       true,
+	"present":        true,
+	"plan_review":    true,
+	"exit_plan_mode": true,
+	"goal":           true,
+}
+
 // gate builds the tool approval gate for one session. Plan and chat modes are
 // checked on every call (highest priority); then an optional per-session
 // permission override applies (full allows, never denies, workspace allows the
-// read-only tools); otherwise the approvals service's global policy applies.
+// read-only tools); interaction/presentation host tools are then allowed
+// without an approval prompt (their own overlay is the user interaction);
+// otherwise the approvals service's global policy applies.
 func (s *service) gate(sessionIDs ...string) rig.Gate {
 	sessionID := ""
 	if len(sessionIDs) > 0 {
@@ -162,6 +181,15 @@ func (s *service) gate(sessionIDs ...string) rig.Gate {
 					return rig.DecisionAllow, nil
 				}
 			}
+		}
+		if interactionTools[name] {
+			// A global "never" policy is an explicit deny-all switch: it must
+			// still deny the interaction tools even though the default "ask"
+			// prompt is skipped for them.
+			if s.approvals != nil && strings.EqualFold(strings.TrimSpace(s.approvals.Mode()), contracts.PermissionNever) {
+				return rig.DecisionDeny, nil
+			}
+			return rig.DecisionAllow, nil
 		}
 		if s.approvals == nil {
 			return rig.DecisionAllow, nil

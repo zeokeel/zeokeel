@@ -21,6 +21,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -81,6 +82,12 @@ type Config struct {
 	// ReasoningEffort is the default provider reasoning effort (low/medium/high;
 	// empty omits the field). A per-session setting overrides it.
 	ReasoningEffort string `json:"reasoningEffort"`
+	// RequireFinishReason treats a stream that ends without a finish reason as a
+	// truncated/failed turn. The provider hides the [DONE] terminator behind a
+	// clean EOF, so this is the product-side guard against silently truncated
+	// answers (SDK ErrIncompleteStream covers the definitive signal once
+	// available). Settings key chat.requireFinishReason overrides it.
+	RequireFinishReason bool `json:"requireFinishReason"`
 }
 
 // Module is the agent backend descriptor. It provides contracts.KeyChat.
@@ -106,7 +113,12 @@ func Module() *module.Descriptor[Config] {
 		if err != nil {
 			return err
 		}
+		dataDir, err := ctx.Require(contracts.KeyDataDir)
+		if err != nil {
+			return err
+		}
 		svc := newService(cfg, registry, settings, logger, store, approvals)
+		svc.dataDir = dataDir
 		if workspace, ok := ctx.Get(contracts.KeyWorkspace); ok {
 			svc.workspace = workspace
 		}
@@ -198,6 +210,7 @@ func Module() *module.Descriptor[Config] {
 		AddRequires(module.Requires(contracts.KeyLogger)).
 		AddRequires(module.Requires(contracts.KeyStore)).
 		AddRequires(module.Requires(contracts.KeyApprovals)).
+		AddRequires(module.Requires(contracts.KeyDataDir)).
 		WithName("ZeoKeel agent backend")
 }
 
@@ -212,6 +225,9 @@ type service struct {
 	history   rig.History // fallback in-memory history when no store is wired
 	store     contracts.Store
 	approvals contracts.Approvals
+	// dataDir is the product data directory: the spill fallback for headless
+	// sessions that have no registered workspace.
+	dataDir string
 	// workspace is optional: when the workspace module is active the backend
 	// records which workspace each session belongs to.
 	workspace contracts.WorkspaceService
@@ -408,7 +424,12 @@ func (s *service) restore(ctx context.Context) {
 		return
 	}
 	history := s.store.History()
-	model := make([]*sessionState, 0, len(metas))
+	type restoredSession struct {
+		state   *sessionState
+		lastErr string
+		errTime time.Time
+	}
+	restored := make([]restoredSession, 0, len(metas))
 	for _, meta := range metas {
 		state := &sessionState{
 			id:          meta.ID,
@@ -425,11 +446,13 @@ func (s *service) restore(ctx context.Context) {
 				s.logger.Printf("[agent] restore: load %s: %v", meta.ID, err)
 			}
 		}
-		model = append(model, state)
+		lastErr, errTime := s.lastRunError(ctx, meta.ID)
+		restored = append(restored, restoredSession{state: state, lastErr: lastErr, errTime: errTime})
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	for _, state := range model {
+	for _, restored := range restored {
+		state := restored.state
 		// Rig history carries no message ids; assign deterministic ids so the
 		// settings-backed feedback keys can be hydrated after a restart (the
 		// simple no-regenerate sequence reproduces the original msg-N ids).
@@ -438,11 +461,78 @@ func (s *service) restore(ctx context.Context) {
 				state.messages[index].ID = s.nextMessageIDLocked()
 			}
 		}
+		// A failed or cancelled last turn keeps its durable run_end event; put
+		// the error back on the read model so the failure (and its retry
+		// affordance) does not vanish when the app restarts.
+		s.hydrateRunErrorLocked(state, restored.lastErr, restored.errTime)
 		s.sessions[state.id] = state
 	}
-	if len(model) > 0 {
-		s.active = model[0].id
+	if len(restored) > 0 {
+		s.active = restored[0].state.id
 	}
+}
+
+// lastRunError returns the durable failure of a session's most recent run.
+// Only a run_end that is the session's last event counts: a later user message
+// means the failed turn was already superseded by newer work.
+func (s *service) lastRunError(ctx context.Context, sessionID string) (string, time.Time) {
+	if s.store == nil {
+		return "", time.Time{}
+	}
+	events, err := s.store.Last(ctx, sessionID, 1)
+	if err != nil {
+		s.logger.Printf("[agent] restore: last event of %s: %v", sessionID, err)
+		return "", time.Time{}
+	}
+	if len(events) == 0 || events[len(events)-1].Type != "run_end" {
+		return "", time.Time{}
+	}
+	event := events[len(events)-1]
+	var payload struct {
+		OK    bool   `json:"ok"`
+		Error string `json:"error"`
+	}
+	if err := json.Unmarshal(event.Payload, &payload); err != nil {
+		s.logger.Printf("[agent] restore: decode run_end of %s: %v", sessionID, err)
+		return "", time.Time{}
+	}
+	if payload.OK {
+		return "", time.Time{}
+	}
+	return strings.TrimSpace(payload.Error), event.Time
+}
+
+// hydrateRunErrorLocked attaches a durable run failure to the restored read
+// model: a persisted partial assistant message gets the error, otherwise a
+// synthetic assistant error row is appended. The caller holds s.mu.
+func (s *service) hydrateRunErrorLocked(state *sessionState, errText string, at time.Time) {
+	if state == nil || errText == "" {
+		return
+	}
+	state.err = errText
+	kind := classifyRestoredError(errText)
+	last := len(state.messages) - 1
+	if last >= 0 && state.messages[last].Role == contracts.ChatRoleAssistant {
+		state.messages[last].Streaming = false
+		state.messages[last].Error = errText
+		state.messages[last].ErrorKind = kind
+		return
+	}
+	state.messages = append(state.messages, contracts.ChatMessage{
+		ID:        s.nextMessageIDLocked(),
+		Role:      contracts.ChatRoleAssistant,
+		Error:     errText,
+		ErrorKind: kind,
+		CreatedAt: at,
+	})
+}
+
+// classifyRestoredError classifies a durable run error string for the UI.
+func classifyRestoredError(errText string) string {
+	if strings.EqualFold(strings.TrimSpace(errText), "cancelled") {
+		return contracts.MessageErrorKindCancelled
+	}
+	return contracts.ClassifyError(nil, errText)
 }
 
 // normalized applies config defaults.
@@ -514,10 +604,28 @@ func (s *service) configLocked() contracts.ChatConfig {
 		BaseURL:         baseURL,
 		APIKey:          apiKey,
 		SystemPrompt:    systemPrompt,
-		MaxIterations:   s.cfg.MaxIterations,
-		ContextBudget:   s.cfg.ContextBudget,
+		MaxIterations:   s.settingInt(contracts.SettingsChatMaxIterations, s.cfg.MaxIterations, 1),
+		ContextBudget:   s.settingInt(contracts.SettingsChatContextBudget, s.cfg.ContextBudget, 0),
 		ReasoningEffort: sanitizeReasoningEffort(s.cfg.ReasoningEffort),
 	}
+}
+
+// settingInt resolves an integer settings override: an empty or malformed row
+// keeps the module config, and values below min are ignored (min=0 still accepts
+// an explicit 0, which is meaningful for "unlimited"/"disabled").
+func (s *service) settingInt(key string, fallback, min int) int {
+	if s.settings == nil {
+		return fallback
+	}
+	raw := strings.TrimSpace(s.settings.Get(key, ""))
+	if raw == "" {
+		return fallback
+	}
+	value, err := strconv.Atoi(raw)
+	if err != nil || value < min {
+		return fallback
+	}
+	return value
 }
 
 // sessionModelLocked resolves the model a session's next run uses: the
@@ -1096,7 +1204,7 @@ func (s *service) send(sessionID, prompt string, attachments []contracts.Attachm
 		history = newRewritingHistory(history, sessionID, input[0], originalInput[0])
 	}
 	s.notify(sessionID)
-	go s.run(runCtx, sessionID, cfg, input, history, s.sessionEffort(sessionID))
+	go s.run(runCtx, sessionID, cfg, input, history, s.thinkingParamsForSession(sessionID, cfg.Model))
 	return nil
 }
 
@@ -1192,7 +1300,7 @@ func (s *service) Regenerate(sessionID string) error {
 	}
 
 	s.notify(sessionID)
-	go s.run(runCtx, sessionID, cfg, input, s.historyView(), s.sessionEffort(sessionID))
+	go s.run(runCtx, sessionID, cfg, input, s.historyView(), s.thinkingParamsForSession(sessionID, cfg.Model))
 	return nil
 }
 
@@ -1296,11 +1404,11 @@ func (s *service) nextMessageIDLocked() string {
 // run executes one Rig agent run in the background with the already-built
 // initial input messages.
 func (s *service) run(ctx context.Context, sessionID string, cfg contracts.ChatConfig, input []rig.Message,
-	history rig.History, effort string) {
+	history rig.History, thinking map[string]any) {
 	cfg = s.withWorkspaceInstructions(ctx, cfg)
 	cfg = s.withPresetInstructions(sessionID, cfg)
 	tools := s.toolsForSession(sessionID)
-	provider, err := s.newProvider(cfg, effort)
+	provider, err := s.newProvider(cfg, thinking)
 	if err != nil {
 		s.finish(sessionID, ctx, fmt.Errorf("create provider: %w", err))
 		return
@@ -1308,11 +1416,15 @@ func (s *service) run(ctx context.Context, sessionID string, cfg contracts.ChatC
 	if history == nil {
 		history = s.historyView()
 	}
+	generation := s.modelCatalogInfo(cfg.Model)
 	spec := rig.AgentSpec{
 		Provider:        provider,
 		Model:           cfg.Model,
 		SystemPrompt:    cfg.SystemPrompt,
 		MaxIterations:   cfg.MaxIterations,
+		Temperature:     generation.Temperature,
+		TopP:            generation.TopP,
+		MaxTokens:       generation.MaxTokens,
 		Tools:           tools,
 		History:         s.spilledHistory(history),
 		Gate:            s.gate(sessionID),
@@ -1343,30 +1455,34 @@ func (s *service) run(ctx context.Context, sessionID string, cfg contracts.ChatC
 	s.finish(sessionID, ctx, runErr)
 }
 
-// newProvider constructs the run provider, honouring the test seam.
-func (s *service) newProvider(cfg contracts.ChatConfig, effort string) (rig.Provider, error) {
+// newProvider constructs the run provider, honouring the test seam. thinking
+// carries the already-resolved per-session request fields.
+func (s *service) newProvider(cfg contracts.ChatConfig, thinking map[string]any) (rig.Provider, error) {
 	if s.providerFactory != nil {
 		provider, err := s.providerFactory(cfg)
 		if err != nil {
 			return nil, err
 		}
-		return withReasoningEffort(provider, effort), nil
+		return withThinkingParams(provider, thinking), nil
 	}
 	env := s.cfg.ApiKeyEnv
 	if env == "" {
 		env = DefaultAPIKeyEnv
 	}
 	provider, err := openai.New(openai.Config{
-		BaseURL:                cfg.BaseURL,
-		APIKey:                 cfg.APIKey,
-		APIKeyEnv:              env,
-		DefaultModel:           cfg.Model,
-		DefaultReasoningEffort: sanitizeReasoningEffort(effort),
+		BaseURL:      cfg.BaseURL,
+		APIKey:       cfg.APIKey,
+		APIKeyEnv:    env,
+		DefaultModel: cfg.Model,
+		// The SDK detects a stream that ends before a finish_reason or [DONE]
+		// and returns openai.ErrIncompleteStream; the product only decides
+		// whether a clean terminator is required (chat.requireFinishReason).
+		RequireCompleteStream: s.requireFinishReason(),
 	})
 	if err != nil {
 		return nil, err
 	}
-	return withReasoningEffort(provider, effort), nil
+	return withThinkingParams(provider, thinking), nil
 }
 
 // checkpointStore returns the durable checkpoint view when a store is wired.
@@ -1416,9 +1532,10 @@ func (s *service) handleEvent(sessionID string, event rig.Event) {
 		case rig.EventToolCall:
 			if event.Call != nil {
 				message.Tools = append(message.Tools, contracts.ToolCall{
-					ID:     event.Call.ID,
-					Name:   event.Call.Name,
-					Status: "running",
+					ID:        event.Call.ID,
+					Name:      event.Call.Name,
+					Status:    "running",
+					Arguments: event.Call.Arguments,
 				})
 				s.appendEvent(context.Background(), sessionID, "tool_call", map[string]any{
 					"id": event.Call.ID, "name": event.Call.Name, "arguments": event.Call.Arguments,
@@ -1514,9 +1631,75 @@ func (s *service) finish(sessionID string, ctx context.Context, runErr error) {
 	s.appendEvent(context.Background(), sessionID, "run_end", map[string]any{
 		"ok": errText == "", "error": errText,
 	})
+	if errText != "" {
+		s.persistInterruptedTurn(sessionID, errText)
+	}
 	s.notify(sessionID)
 	if runErr != nil && !errors.Is(runErr, context.Canceled) && !errors.Is(runErr, context.DeadlineExceeded) {
 		s.logger.Printf("[agent] session %s run failed: %v", sessionID, runErr)
+	}
+}
+
+// persistInterruptedTurn makes a failed or cancelled run survive a restart:
+// the streamed assistant text is persisted into the durable history and the
+// graceful stop clears the interruption checkpoint. Without this the user's
+// partial answer was lost and the next run injected Rig's crash-recovery
+// marker ("ZeoKeel exited before it finished") for a user-initiated stop.
+//
+// Only text-only assistant turns are persisted: a partial turn that already
+// requested tools cannot be replayed without its tool results, so it stays in
+// the read model while the durable run_end event lets restore synthesize the
+// error row.
+func (s *service) persistInterruptedTurn(sessionID, errText string) {
+	if s.store == nil || errText == "" {
+		return
+	}
+	ctx := context.Background()
+	// A graceful stop is not a crash: clear the checkpoint so the next run
+	// does not replay the "interrupted" repair marker for it.
+	if checkpoints := s.store.CheckpointStore(); checkpoints != nil {
+		if err := checkpoints.Clear(ctx, sessionID); err != nil {
+			s.logger.Printf("[agent] clear checkpoint of %s: %v", sessionID, err)
+		}
+	}
+	s.mu.Lock()
+	state, ok := s.sessions[sessionID]
+	if !ok {
+		s.mu.Unlock()
+		return
+	}
+	message := state.assistantMessage()
+	partial := contracts.ChatMessage{}
+	save := message != nil && len(message.Tools) == 0 &&
+		(strings.TrimSpace(message.Text) != "" || strings.TrimSpace(message.Reasoning) != "")
+	if save {
+		partial = *message
+		partial.Streaming = false
+	}
+	s.mu.Unlock()
+	if !save {
+		return
+	}
+	history := s.store.History()
+	if history == nil {
+		return
+	}
+	messages, err := history.Load(ctx, sessionID)
+	if err != nil {
+		s.logger.Printf("[agent] load history of %s: %v", sessionID, err)
+		return
+	}
+	// The runner persists the user message before running; only append the
+	// partial assistant answer after it. A non-user tail means the runner
+	// already recorded more of this turn (do not append a second assistant).
+	if len(messages) > 0 && messages[len(messages)-1].Role != rig.RoleUser {
+		return
+	}
+	assistant := rig.NewMessage(rig.RoleAssistant, partial.Text)
+	assistant.Reasoning = partial.Reasoning
+	messages = append(messages, assistant)
+	if err := s.store.ReplaceHistory(ctx, sessionID, messages); err != nil {
+		s.logger.Printf("[agent] persist interrupted turn of %s: %v", sessionID, err)
 	}
 }
 
@@ -1549,6 +1732,7 @@ func chatMessagesFromRig(messages []rig.Message) []contracts.ChatMessage {
 			chatMessage := contracts.ChatMessage{
 				Role:      contracts.ChatRoleAssistant,
 				Text:      messageText(message),
+				Reasoning: message.Reasoning,
 				CreatedAt: messageTime(message),
 			}
 			for _, call := range message.ToolCalls {

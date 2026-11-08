@@ -5,6 +5,7 @@ package modelcatalog
 // configured/default presets for empty or malformed values.
 
 import (
+	"reflect"
 	"sync"
 	"testing"
 
@@ -78,11 +79,11 @@ func TestSettingsOverrideModels(t *testing.T) {
 	if len(models) != 2 {
 		t.Fatalf("models = %+v, want the two overridden models", models)
 	}
-	if models[0] != (contracts.ModelInfo{ID: "user-a", Name: "User A", Note: "custom"}) {
+	if !reflect.DeepEqual(models[0], contracts.ModelInfo{ID: "user-a", Name: "User A", Note: "custom"}) {
 		t.Fatalf("first override = %+v", models[0])
 	}
 	// A model without a name falls back to its id.
-	if models[1] != (contracts.ModelInfo{ID: "user-b", Name: "user-b"}) {
+	if !reflect.DeepEqual(models[1], contracts.ModelInfo{ID: "user-b", Name: "user-b"}) {
 		t.Fatalf("second override = %+v", models[1])
 	}
 
@@ -148,13 +149,13 @@ func TestSettingsSanitizesOverride(t *testing.T) {
 	if len(models) != 3 {
 		t.Fatalf("sanitized models = %+v, want a/b/c", models)
 	}
-	if models[0] != (contracts.ModelInfo{ID: "a", Name: "A", Note: "n"}) {
+	if !reflect.DeepEqual(models[0], contracts.ModelInfo{ID: "a", Name: "A", Note: "n"}) {
 		t.Fatalf("trimmed first = %+v", models[0])
 	}
 	if models[1].ID != "b" || models[1].Name != "b" {
 		t.Fatalf("name fallback = %+v", models[1])
 	}
-	if models[2] != (contracts.ModelInfo{ID: "c", Name: "c"}) {
+	if !reflect.DeepEqual(models[2], contracts.ModelInfo{ID: "c", Name: "c"}) {
 		t.Fatalf("trimmed last = %+v", models[2])
 	}
 }

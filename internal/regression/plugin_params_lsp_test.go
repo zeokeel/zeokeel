@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 	_ "unsafe"
 
 	cordis "github.com/zeokeel/zeokeel-kernel"
@@ -53,12 +54,12 @@ func startPluginParamsUI(t *testing.T, values map[string]string) (*harness, *ui.
 // persisting to the settings store.
 func TestPluginParamsSection(t *testing.T) {
 	h, tester := startPluginParamsUI(t, map[string]string{contracts.SettingMCPWorkspaceOptIn: "false"})
-	requireHasTexts(t, tester, "插件参数", "已接线")
+	requireHasTexts(t, tester, "插件参数")
 	requireNoText(t, tester, "web.search.endpoint")
-	if err := tester.Click("展开参数"); err != nil {
+	if err := tester.Click("显示参数"); err != nil {
 		t.Fatalf("expand params: %v; texts = %v", err, tester.Texts())
 	}
-	tester.Frame()
+	settlePluginFrame(tester)
 	requireHasTexts(t, tester,
 		"搜索端点", "web.search.endpoint", "https://search.example.test/api",
 		"API Key", "API Key 已设置",
@@ -81,7 +82,7 @@ func TestPluginParamsSection(t *testing.T) {
 	if err := tester.Click("编辑 搜索端点"); err != nil {
 		t.Fatalf("edit endpoint: %v; texts = %v", err, tester.Texts())
 	}
-	tester.Frame()
+	settlePluginFrame(tester)
 	requireHasTexts(t, tester, "编辑参数", "参数：web.search.endpoint", "新值：搜索端点", "保存")
 	if err := tester.Click("新值：搜索端点"); err != nil {
 		t.Fatalf("focus endpoint input: %v; texts = %v", err, tester.Texts())
@@ -239,4 +240,11 @@ func TestLSPWorkspaceOptIn(t *testing.T) {
 		merged[1].Name != "extra" || merged[1].Command != "extra-lsp" {
 		t.Fatalf("merged servers = %+v", merged)
 	}
+}
+
+// settlePluginFrame finishes the disclosure/modal opening animations, whose
+// controls have no bounds until the motion settles.
+func settlePluginFrame(tester *ui.Tester) {
+	tester.Advance(400 * time.Millisecond)
+	tester.Frame()
 }

@@ -13,6 +13,8 @@
 package home
 
 import (
+	"context"
+	"sort"
 	"strings"
 
 	"github.com/egoist/mygo/ui"
@@ -38,6 +40,17 @@ type Config struct {
 // heroTitle is the brand wordmark in the hero.
 const heroTitle = "ZeoKeel"
 
+// Product-default copy. The assembly may carry the Chinese default in its
+// config (desktop.json does); comparing against these defaults is what lets an
+// English UI fall back to English instead of showing the configured Chinese
+// string.
+const (
+	defaultGreetingZH    = "编译期模块化的桌面 AI agent。"
+	defaultGreetingEN    = "A compile-time modular desktop AI agent."
+	defaultPlaceholderZH = "问点什么…"
+	defaultPlaceholderEN = "Ask anything…"
+)
+
 // homeColumnWidth caps the centered content column so the composer reads as a
 // card on a wide window instead of a full-width bar.
 const homeColumnWidth float32 = 720
@@ -53,8 +66,10 @@ func Module() *module.Descriptor[Config] {
 		if err != nil {
 			return err
 		}
-		info, err := ctx.Require(contracts.KeyAppInfo)
-		if err != nil {
+		// The host's build info remains a declared dependency of every product
+		// module; the Home screen itself no longer prints it (About owns the
+		// version): the front page only carries the product's one-line value.
+		if _, err := ctx.Require(contracts.KeyAppInfo); err != nil {
 			return err
 		}
 		// Chat is optional so the Home screen still loads in products without
@@ -69,19 +84,65 @@ func Module() *module.Descriptor[Config] {
 		composerPlaceholder := cfg.ComposerPlaceholder
 		composerState := &homeComposerState{}
 
+		// The home command lives in the host command palette, whose titles are
+		// fixed at registration: keep it registered in the current language and
+		// re-register when the language changes (the session commands' pattern).
+		var unregisterCommand func()
+		commandLang := ""
+		registerCommand := func() error {
+			if unregisterCommand != nil {
+				unregisterCommand()
+				unregisterCommand = nil
+			}
+			unregister, err := runtime.RegisterCommand(contracts.CommandSpec{
+				ID:    "home.settings",
+				Title: uikit.T(locale, "设置", "Settings"),
+				Hint:  uikit.T(locale, "打开设置", "Open settings"),
+				Order: 10,
+				Run:   func() error { nav.ToggleSettings(); return nil },
+			})
+			if err != nil {
+				return err
+			}
+			unregisterCommand = unregister
+			commandLang = uikit.Language(locale)
+			return nil
+		}
+		if err := registerCommand(); err != nil {
+			return err
+		}
+		if _, err := ctx.Effect(func() cordis.Effect {
+			return cordis.Effect{cordis.CleanupOf(func() {
+				if unregisterCommand != nil {
+					unregisterCommand()
+					unregisterCommand = nil
+				}
+			})}
+		}); err != nil {
+			if unregisterCommand != nil {
+				unregisterCommand()
+			}
+			return err
+		}
+
 		screen := contracts.ScreenSpec{
 			ID:    "home",
 			Title: title,
 			Order: 10,
 			Build: func(c *ui.Context) {
-				greetingText := greeting
-				if strings.TrimSpace(greetingText) == "" {
-					greetingText = tr("编译期模块化的桌面 AI agent。",
-						"A compile-time modular desktop AI agent.")
+				// A language switch re-registers the palette command for the next
+				// frame; the registration itself is a UI-thread side effect of the
+				// current frame, guarded by the language check.
+				if uikit.Language(locale) != commandLang {
+					_ = registerCommand()
 				}
-				placeholderText := composerPlaceholder
-				if strings.TrimSpace(placeholderText) == "" {
-					placeholderText = tr("问点什么…", "Ask anything…")
+				greetingText := strings.TrimSpace(greeting)
+				if greetingText == "" || (uikit.Language(locale) == "en" && greetingText == defaultGreetingZH) {
+					greetingText = tr(defaultGreetingZH, defaultGreetingEN)
+				}
+				placeholderText := strings.TrimSpace(composerPlaceholder)
+				if placeholderText == "" || (uikit.Language(locale) == "en" && placeholderText == defaultPlaceholderZH) {
+					placeholderText = tr(defaultPlaceholderZH, defaultPlaceholderEN)
 				}
 				tokens := design.Of(c)
 				ui.Column(c).FillWidth().Grow(1).Gap(design.Space6).Children(func() {
@@ -92,29 +153,20 @@ func Module() *module.Descriptor[Config] {
 							ui.Column(c).FillWidth().MaxWidth(homeColumnWidth).Gap(design.Space6).
 								Children(func() {
 									region(c, runtime, contracts.SlotHomeHero, func(c *ui.Context) {
-										buildHero(c, tokens, greetingText, info, chat == nil, tr)
+										buildHero(c, tokens, greetingText, chat == nil, tr)
 									})
 									buildSetupCard(c, tokens, chat, nav, tr)
 									region(c, runtime, contracts.SlotHomeComposer, func(c *ui.Context) {
 										buildHomeComposer(c, tokens, runtime, nav, chat, ctx, composerState, placeholderText, tr)
 									})
+									buildRecentSessions(c, tokens, runtime, nav, chat, tr)
+									buildNextSteps(c, tokens, runtime, nav, chat, ctx, composerState, tr)
 								})
 						})
 				})
 			},
 		}
-		if err := own(ctx, func() (func(), error) { return runtime.RegisterScreen(screen) }); err != nil {
-			return err
-		}
-		return own(ctx, func() (func(), error) {
-			return runtime.RegisterCommand(contracts.CommandSpec{
-				ID:    "home.settings",
-				Title: "设置",
-				Hint:  "打开设置",
-				Order: 10,
-				Run:   func() error { nav.ToggleSettings(); return nil },
-			})
-		})
+		return own(ctx, func() (func(), error) { return runtime.RegisterScreen(screen) })
 	}).
 		AddRequires(module.Requires(contracts.KeyUIRuntime)).
 		AddRequires(module.Requires(contracts.KeyNavigator)).
@@ -124,14 +176,16 @@ func Module() *module.Descriptor[Config] {
 
 // buildSetupCard is the first-run guidance card from the old shell's
 // homeSetupCard: while no model is configured, Home says what is missing and
-// offers the action that fixes it instead of letting the first send fail.
+// offers the action that fixes it instead of letting the first send fail. It is
+// the non-empty-state form of the guidance: with no conversations yet,
+// buildNextSteps carries the same "Configure model" action in the empty state.
 func buildSetupCard(c *ui.Context, t *design.Tokens, chat contracts.ChatService,
 	nav contracts.Navigator, tr func(zh, en string) string) {
 	if chat == nil {
 		return
 	}
 	cfg := chat.Config()
-	if cfg.Model != "" {
+	if cfg.Model != "" || len(homeVisibleSessions(chat)) == 0 {
 		return
 	}
 	panel := ui.Column(c).FillWidth().Gap(design.Space2).Padding(design.Space3)
@@ -153,22 +207,146 @@ func buildSetupCard(c *ui.Context, t *design.Tokens, chat contracts.ChatService,
 	})
 }
 
-// buildHero is the default Home hero: the brand mark and wordmark over the
-// tagline and the build badges, centered with generous whitespace.
-func buildHero(c *ui.Context, t *design.Tokens, greeting string, info contracts.AppInfo,
-	showFallbackHint bool, tr func(zh, en string) string) {
+// homeVisibleSessions lists the conversations the sidebar would show: archived
+// sessions belong to the settings archive page and never appear on Home.
+func homeVisibleSessions(chat contracts.ChatService) []contracts.ChatSessionInfo {
+	if chat == nil {
+		return nil
+	}
+	visible := make([]contracts.ChatSessionInfo, 0, 8)
+	for _, session := range chat.Sessions() {
+		if session.Archived {
+			continue
+		}
+		visible = append(visible, session)
+	}
+	return visible
+}
+
+// homeRecentLimit is how many recent conversations Home lists.
+const homeRecentLimit = 5
+
+// buildRecentSessions is Home's recent-conversation list: the newest few
+// conversations (archived excluded) so the user can resume without hunting
+// through the sidebar. Clicking one activates it and opens the conversation.
+func buildRecentSessions(c *ui.Context, t *design.Tokens, runtime contracts.UIRuntime,
+	nav contracts.Navigator, chat contracts.ChatService, tr func(zh, en string) string) {
+	visible := homeVisibleSessions(chat)
+	if len(visible) == 0 {
+		return
+	}
+	sort.SliceStable(visible, func(left, right int) bool {
+		if !visible[left].UpdatedAt.Equal(visible[right].UpdatedAt) {
+			return visible[left].UpdatedAt.After(visible[right].UpdatedAt)
+		}
+		return visible[left].ID < visible[right].ID
+	})
+	if len(visible) > homeRecentLimit {
+		visible = visible[:homeRecentLimit]
+	}
+	ui.Column(c).FillWidth().Gap(design.Space1).Children(func() {
+		design.Apply(ui.Text(c, tr("最近会话", "Recent chats")), t.SectionLabel()).NoWrap().MaxLines(1)
+		for _, session := range visible {
+			session := session
+			title := strings.TrimSpace(session.Title)
+			if title == "" {
+				title = tr("未命名会话", "Untitled session")
+			}
+			c.Key("home/recent/" + session.ID)
+			row := ui.ButtonBase(c).FillWidth().Height(36).PaddingX(design.Space2).
+				Radius(design.RadiusSM).Label(title)
+			switch {
+			case row.Pressed():
+				row = row.Background(t.BgSelected)
+			case row.Hovered():
+				row = row.Background(t.BgHover)
+			}
+			row.Children(func() {
+				ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(design.Space2).Children(func() {
+					ui.Icon(c, icons.Message()).Size(16, 16).TextColor(t.LabelSecondary)
+					design.Apply(ui.Text(c, title), t.Text(design.TypeS)).
+						TextColor(t.LabelSecondary).Grow(1).MaxLines(1).Ellipsis("…")
+					if !session.UpdatedAt.IsZero() {
+						design.Apply(ui.Text(c, uikit.FormatDateTime(nil, session.UpdatedAt)),
+							t.TextMuted(design.TypeXXXS)).NoWrap()
+					}
+				})
+			})
+			row.OnClick(func() {
+				_ = chat.SetActiveSession(session.ID)
+				runtime.Post(func() { _ = nav.Push("session") })
+				runtime.Invalidate()
+			})
+		}
+	})
+}
+
+// buildNextSteps is Home's empty state: with no conversations yet, the front
+// page offers the actions that get a first chat started (configure a model,
+// open a workspace, start the conversation) instead of leaving the composer as
+// the only entry. Only the steps that still need doing are shown.
+func buildNextSteps(c *ui.Context, t *design.Tokens, runtime contracts.UIRuntime,
+	nav contracts.Navigator, chat contracts.ChatService, kctx cordis.Context,
+	st *homeComposerState, tr func(zh, en string) string) {
+	if chat == nil || len(homeVisibleSessions(chat)) > 0 {
+		return
+	}
+	modelConfigured := strings.TrimSpace(chat.Config().Model) != ""
+	var workspaceService contracts.WorkspaceService
+	if raw, ok := kctx.Get(contracts.KeyWorkspace); ok {
+		workspaceService, _ = raw.(contracts.WorkspaceService)
+	}
+	workspaceOpen := false
+	if workspaceService != nil {
+		if current, ok, err := workspaceService.Current(context.Background()); err == nil && ok && strings.TrimSpace(current.ID) != "" {
+			workspaceOpen = true
+		}
+	}
+
+	ui.Column(c).FillWidth().AlignItems(ui.Center).Gap(design.Space2).Children(func() {
+		design.Apply(ui.Text(c, tr(
+			"还没有会话。开始第一次对话，或先完成下面的准备：",
+			"No conversations yet. Start the first one, or get these ready first:")),
+			t.TextMuted(design.TypeXXS)).MaxLines(2)
+		ui.Row(c).AlignItems(ui.Center).Gap(design.Space2).Children(func() {
+			if !modelConfigured {
+				configure := design.Apply(ui.Button(c, tr("配置模型", "Configure model")), t.SecondaryButton())
+				if configure.Clicked() {
+					nav.ToggleSettings()
+				}
+			}
+			if workspaceService != nil && !workspaceOpen {
+				addWorkspace := design.Apply(ui.Button(c, tr("添加工作区", "Add workspace")), t.SecondaryButton())
+				if addWorkspace.Clicked() {
+					addHomeWorkspace(workspaceService, st, tr)
+					runtime.Invalidate()
+				}
+			}
+			start := design.Apply(ui.PrimaryButton(c, tr("新对话", "New chat")), t.PrimaryButton())
+			if start.Clicked() {
+				if _, err := chat.NewSession(""); err == nil {
+					_ = nav.Push("session")
+					runtime.Invalidate()
+				}
+			}
+		})
+		if st.nextStepErr != "" {
+			uikit.ErrorLine(c, st.nextStepErr)
+		}
+	})
+}
+
+// buildHero is the default Home hero: the brand mark and wordmark over one
+// user-facing value line. Build metadata (version, Go version) belongs to About,
+// not to the product's front page.
+func buildHero(c *ui.Context, t *design.Tokens, greeting string, showFallbackHint bool,
+	tr func(zh, en string) string) {
 	ui.Column(c).FillWidth().AlignItems(ui.Center).Gap(design.Space3).Children(func() {
 		ui.Row(c).AlignItems(ui.Center).Gap(design.Space3).Children(func() {
 			ui.Image(c, brand.Mark(t.Dark)).Size(48, 48)
 			design.Apply(ui.Text(c, heroTitle), t.Text(design.TypeXL)).FontWeight(600)
 		})
 		design.Apply(ui.Text(c, greeting), t.TextMuted(design.TypeM))
-		ui.Row(c).Gap(design.Space2).Children(func() {
-			design.Apply(ui.Badge(c, "v"+firstNonEmpty(info.Version, "dev")), t.Badge())
-			if goVersion := strings.TrimSpace(info.GoVersion); goVersion != "" {
-				design.Apply(ui.Badge(c, goVersion), t.Badge())
-			}
-		})
 		// Default hero hint; replaced when another module contributes home.hero
 		// (see region). With a chat backend the product Home is not an empty
 		// state, so the hint is only shown in chat-less assemblies.

@@ -21,19 +21,22 @@ import (
 
 // sessionCommandHarness is the session screen with a scripted chat backend.
 type sessionCommandHarness struct {
-	h      *harness
-	chat   contracts.ChatService
-	tester *ui.Tester
+	h        *harness
+	chat     contracts.ChatService
+	tester   *ui.Tester
+	notifier *fakeNotifier
 }
 
 // startSessionCommands activates the session screen with the given chat.
 func startSessionCommands(t *testing.T, chat contracts.ChatService) *sessionCommandHarness {
 	t.Helper()
 	h := newBareHarness(t)
+	notifier := &fakeNotifier{}
 	provide(t, h.ctx, contracts.KeyChat, chat)
+	provide(t, h.ctx, contracts.KeyNotifier, contracts.Notifier(notifier))
 	activate(t, h.ctx, sessionui.Module(), sessionui.Config{})
 	h.push(sessionui.ScreenID)
-	harness := &sessionCommandHarness{h: h, chat: chat, tester: h.tester(1280, 800)}
+	harness := &sessionCommandHarness{h: h, chat: chat, tester: h.tester(1280, 800), notifier: notifier}
 	harness.tester.Frame()
 	return harness
 }
@@ -100,7 +103,7 @@ func TestStopCommandEnabledAndCancel(t *testing.T) {
 	if got := chat.cancelCalls(); len(got) != 1 || got[0] != "sess-run" {
 		t.Fatalf("Cancel calls = %v, want [sess-run]", got)
 	}
-	requireHasText(t, harness.tester, "已停止")
+	requireToast(t, harness.notifier, "已停止")
 
 	// Cancel failure is readable and leaves the stack usable.
 	chat.setCancelError(errors.New("cancel timeout"))
@@ -146,16 +149,16 @@ func TestFileCommandVariants(t *testing.T) {
 	if err := attach.Run(); err != nil {
 		t.Fatalf("Run /附加文件 (rich): %v", err)
 	}
-	richHarness.tester.Frame()
-	requireHasText(t, richHarness.tester, "audit-notes.md")
-	requireHasText(t, richHarness.tester, "shot.png")
+	settleFrames(t, richHarness.tester, "staged attachment chips", func() bool {
+		return richHarness.tester.HasText("audit-notes.md") && richHarness.tester.HasText("shot.png")
+	})
 
 	// Cancel (empty selection) is a quiet no-op.
 	overrideSessionPicker(t, func() ([]string, error) { return nil, nil })
 	if err := attach.Run(); err != nil {
 		t.Fatalf("Run /附加文件 (cancel): %v", err)
 	}
-	richHarness.tester.Frame()
+	spinFrames(richHarness.tester, 3)                       // async picker result: empty selection is a no-op
 	requireHasText(t, richHarness.tester, "audit-notes.md") // previously staged chips stay
 
 	// Picker failure is readable.
@@ -163,8 +166,9 @@ func TestFileCommandVariants(t *testing.T) {
 	if err := attach.Run(); err != nil {
 		t.Fatalf("Run /附加文件 (error): %v", err)
 	}
-	richHarness.tester.Frame()
-	requireHasText(t, richHarness.tester, "无法打开文件选择器：picker failed")
+	settleFrames(t, richHarness.tester, "picker error line", func() bool {
+		return richHarness.tester.HasText("无法打开文件选择器：picker failed")
+	})
 }
 
 // TestHelpCommandModalAndEscape covers /帮助: the modal lists the registered
@@ -182,8 +186,8 @@ func TestHelpCommandModalAndEscape(t *testing.T) {
 		t.Fatalf("Run /帮助: %v", err)
 	}
 	harness.tester.Frame()
-	for _, want := range []string{"帮助", "斜杠命令", "快捷键", "Esc 关闭", "Cmd/Ctrl + K",
-		"新会话", "停止", "附加文件", "帮助"} {
+	for _, want := range []string{"帮助", "斜杠命令", "快捷键", "关闭", "Cmd/Ctrl + K",
+		"Cmd/Ctrl + Alt + I", "切换右侧栏", "新会话", "停止", "附加文件", "帮助"} {
 		requireHasText(t, harness.tester, want)
 	}
 	// The modal lists every registered command (session commands included).
@@ -207,7 +211,7 @@ func TestHelpCommandModalAndEscape(t *testing.T) {
 	harness.tester.Key(0, ui.KeyEscape)
 	harness.tester.Frame()
 	requireNoText(t, harness.tester, "快捷键")
-	requireNoText(t, harness.tester, "Esc 关闭")
+	requireNoText(t, harness.tester, "切换右侧栏")
 	// The command registry is untouched by opening/closing help.
 	if got := len(harness.h.ui.Runtime().Commands()); got != commandCount {
 		t.Fatalf("command count changed from %d to %d", commandCount, got)

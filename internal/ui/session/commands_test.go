@@ -98,7 +98,7 @@ func TestSessionSlashCommandsRegistered(t *testing.T) {
 		{"zeokeel.session.new", "新会话", "新建并打开一个会话"},
 		{"zeokeel.session.fork", "创建副本", "复制当前会话"},
 		{"zeokeel.session.export", "导出对话", "导出当前会话为 Markdown"},
-		{"zeokeel.session.settings", "打开设置", "打开设置面板"},
+		{"zeokeel.session.settings", "设置", "打开设置面板"},
 	}
 	for _, want := range wanted {
 		command := sessionCommand(t, h, want.id)
@@ -136,8 +136,8 @@ func TestSessionSlashCommandActions(t *testing.T) {
 	tester := h.tester()
 
 	// 新会话: creates and navigates.
-	h.click(tester, "/")
-	h.assertTexts(tester, "新会话", "创建副本", "导出对话", "打开设置")
+	h.typeSlash(tester)
+	h.assertTexts(tester, "新会话", "创建副本", "导出对话", "设置")
 	h.click(tester, "新会话")
 	if ids := chat.newSessionIDs(); len(ids) != 1 {
 		t.Fatalf("NewSession calls = %v, want one", ids)
@@ -148,7 +148,7 @@ func TestSessionSlashCommandActions(t *testing.T) {
 
 	// 创建副本: forks the active session and navigates.
 	before := len(chat.newSessionIDs())
-	h.click(tester, "/")
+	h.typeSlash(tester)
 	h.click(tester, "创建副本")
 	forks, _ := chat.calls()
 	if len(forks) != 1 || forks[0] == "" {
@@ -162,13 +162,14 @@ func TestSessionSlashCommandActions(t *testing.T) {
 	}
 
 	// 导出对话: writes the active session through the export seam.
-	h.click(tester, "/")
+	h.typeSlash(tester)
 	h.click(tester, "导出对话")
-	h.assertTexts(tester, "已导出")
+	h.assertNoTexts(tester, "导出失败")
 
-	// 打开设置: toggles the settings surface.
-	h.click(tester, "/")
-	h.click(tester, "打开设置")
+	// 设置: toggles the settings surface (the palette de-duplicates it against
+	// the home module's command of the same title).
+	h.typeSlash(tester)
+	h.click(tester, "设置")
 	if !h.ui.Navigator().SettingsOpen() {
 		t.Fatal("settings command did not open the settings surface")
 	}
@@ -186,7 +187,7 @@ func TestSessionSlashCommandExportSeam(t *testing.T) {
 	}}, true)
 	h := newCommandHarness(t, chat)
 	tester := h.tester()
-	h.click(tester, "/")
+	h.typeSlash(tester)
 	h.click(tester, "导出对话")
 	if len(names) != 1 || !strings.HasSuffix(names[0], ".md") {
 		t.Fatalf("ExportSaver names = %v, want one .md file", names)

@@ -1,7 +1,9 @@
 package session
 
 // /feedback slash command: rate the latest assistant answer from a native modal
-// and keep the message action row's Feedback value in sync.
+// and keep the message action row's Feedback value in sync. The dialog follows
+// the product's footer convention: cancel on the left, save (accent, Enter) on
+// the right; the two ratings are equal-weight choices, not one primary button.
 
 import (
 	"strings"
@@ -10,6 +12,7 @@ import (
 
 	"github.com/zeokeel/zeokeel/internal/contracts"
 	"github.com/zeokeel/zeokeel/internal/design"
+	"github.com/zeokeel/zeokeel/internal/uikit"
 )
 
 // normalizeSessionFeedback keeps only the two documented rating values.
@@ -68,6 +71,7 @@ func openFeedbackDialog(st *state, runtime contracts.UIRuntime, chat contracts.C
 	st.feedbackMessageID = message.ID
 	st.feedbackMessageText = message.Text
 	st.feedbackCurrent = normalizeSessionFeedback(message.Feedback)
+	st.feedbackRating = st.feedbackCurrent
 	st.feedbackDialogErr = ""
 	runtime.Invalidate()
 }
@@ -91,11 +95,18 @@ func buildFeedbackDialog(c *ui.Context, t *design.Tokens, runtime contracts.UIRu
 		}
 		st.feedbackOpen = false
 		st.feedbackDialogErr = ""
+		if value == "" {
+			st.toast(contracts.NotifyInfo, st.tr("已清除评价", "Rating cleared"))
+		} else {
+			st.toast(contracts.NotifySuccess, st.tr("已保存评价", "Rating saved"))
+		}
 		runtime.Invalidate()
 	}
+	save := func() { apply(st.feedbackRating) }
 	ui.Modal(c, &st.feedbackOpen, func() {
-		design.Apply(ui.Column(c).Width(480).Gap(design.Space3), func(el ui.Element) ui.Element {
-			return el.PaddingX(design.Space5).PaddingY(design.Space2)
+		dialogEnter(c, save)
+		design.Apply(ui.Column(c).Width(520).Gap(design.Space4), func(el ui.Element) ui.Element {
+			return el.PaddingX(design.Space6).PaddingY(design.Space2)
 		}).Children(func() {
 			design.Apply(ui.Text(c, st.tr("评价回答", "Rate answer")), t.Font(design.TypeL)).
 				FontWeight(600).TextColor(t.LabelPrimary)
@@ -104,37 +115,49 @@ func buildFeedbackDialog(c *ui.Context, t *design.Tokens, runtime contracts.UIRu
 				summary = st.tr("（这条回答没有文本）", "(This answer has no text)")
 			}
 			design.Apply(ui.Text(c, summary), t.TextMuted(design.TypeXS)).MaxLines(2).Ellipsis("…")
-			if st.feedbackCurrent != "" {
-				design.Apply(ui.Badge(c, st.tr("已反馈", "Rated")), t.Badge()).TextColor(t.Success)
-			}
-			if st.feedbackDialogErr != "" {
-				buildDialogError(c, t, st.feedbackDialogErr)
-			}
-			ui.Row(c).FillWidth().Justify(ui.End).Gap(design.Space2).Children(func() {
-				good := ui.PrimaryButton(c, st.tr("有帮助", "Helpful"))
-				design.Apply(good, t.PrimaryButton())
+			// The two ratings are equal-weight toggle buttons: the current
+			// choice is shown by the selected token, not by a resident badge.
+			ui.Row(c).FillWidth().Gap(design.Space2).Children(func() {
+				good := design.Apply(ui.Button(c, st.tr("有帮助", "Helpful")), t.SecondaryButton())
+				if st.feedbackRating == contracts.FeedbackGood {
+					good.BorderColor(t.Accent).TextColor(t.Accent)
+				}
 				if good.Clicked() {
-					apply(contracts.FeedbackGood)
+					st.feedbackRating = contracts.FeedbackGood
+					runtime.Invalidate()
 				}
-				bad := ui.Button(c, st.tr("没帮助", "Not helpful"))
-				design.Apply(bad, func(el ui.Element) ui.Element {
-					if st.feedbackCurrent == contracts.FeedbackBad {
-						return el.BorderColor(t.Accent)
-					}
-					return el
-				})
+				bad := design.Apply(ui.Button(c, st.tr("没帮助", "Not helpful")), t.SecondaryButton())
+				if st.feedbackRating == contracts.FeedbackBad {
+					bad.BorderColor(t.DangerText).TextColor(t.DangerText)
+				}
 				if bad.Clicked() {
-					apply(contracts.FeedbackBad)
-				}
-				if ui.Button(c, st.tr("清除评价", "Clear rating")).Clicked() {
-					apply("")
-				}
-				if ui.Button(c, st.tr("取消", "Cancel")).Clicked() {
-					st.feedbackOpen = false
-					st.feedbackDialogErr = ""
+					st.feedbackRating = contracts.FeedbackBad
 					runtime.Invalidate()
 				}
 			})
+			if st.feedbackDialogErr != "" {
+				uikit.ErrorLine(c, st.feedbackDialogErr)
+			}
+			ui.Divider(c)
+			actions := []uikit.DialogAction{
+				{Label: st.tr("取消", "Cancel"), OnClick: func() {
+					st.feedbackOpen = false
+					st.feedbackDialogErr = ""
+					runtime.Invalidate()
+				}},
+			}
+			if st.feedbackCurrent != "" {
+				actions = append(actions, uikit.DialogAction{
+					Label:   st.tr("清除评价", "Clear rating"),
+					OnClick: func() { apply("") },
+				})
+			}
+			actions = append(actions, uikit.DialogAction{
+				Label: st.tr("保存", "Save"), Primary: true,
+				Disabled: st.feedbackRating == st.feedbackCurrent,
+				OnClick:  save,
+			})
+			uikit.DialogFooter(c, actions)
 		})
 	})
 }

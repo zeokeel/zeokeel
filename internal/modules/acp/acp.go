@@ -3,7 +3,8 @@
 // ChatService for editor clients such as Zed.
 //
 // The ported surface is deliberately small: initialize, session/new,
-// session/prompt (streaming agent_message_chunk notifications) and
+// session/prompt (streaming agent_message_chunk notifications, with image
+// prompt blocks forwarded to the chat backend as attachments) and
 // session/cancel. Protocol frames are the only bytes written to out;
 // diagnostics go through the host logger.
 package acp
@@ -12,6 +13,7 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -36,8 +38,11 @@ const (
 	JSONRPCVersion = "2.0"
 	// ProtocolVersion is the ACP protocol version advertised by initialize.
 	ProtocolVersion = 1
-	// maxFrameBytes bounds one JSON-RPC frame (8 MiB).
-	maxFrameBytes = 8 << 20
+	// maxFrameBytes bounds one JSON-RPC frame (16 MiB): a prompt image at the
+	// maxPromptImageBytes limit expands to ~13.3 MiB in base64 plus framing.
+	maxFrameBytes = 16 << 20
+	// maxPromptImageBytes bounds the decoded size of one prompt image (10 MiB).
+	maxPromptImageBytes = 10 << 20
 
 	// JSON-RPC 2.0 error codes.
 	CodeParseError     = -32700
@@ -155,11 +160,13 @@ type request struct {
 	Params  json.RawMessage `json:"params"`
 }
 
-// contentBlock is one ACP prompt content block (text is the only supported
-// kind).
+// contentBlock is one ACP prompt content block. Text blocks carry Text; image
+// blocks carry the base64 Data plus MimeType of ACP's image block shape.
 type contentBlock struct {
-	Type string `json:"type"`
-	Text string `json:"text"`
+	Type     string `json:"type"`
+	Text     string `json:"text"`
+	Data     string `json:"data"`
+	MimeType string `json:"mimeType"`
 }
 
 // promptParams is the params of session/prompt. Content is accepted as a
@@ -301,7 +308,7 @@ readLoop:
 					"agentCapabilities": map[string]any{
 						"loadSession": true,
 						"promptCapabilities": map[string]any{
-							"image":           false,
+							"image":           true,
 							"audio":           false,
 							"embeddedContext": false,
 						},
@@ -319,7 +326,10 @@ readLoop:
 					writer.writeError(req.ID, internalError("session/new: "+err.Error()))
 					continue
 				}
-				writer.writeResult(req.ID, map[string]string{"sessionId": sessionID})
+				writer.writeResult(req.ID, map[string]string{
+					"sessionId": sessionID,
+					"model":     strings.TrimSpace(s.chat.Config().Model),
+				})
 			case MethodSessionList:
 				if !hasID(req) {
 					continue
@@ -479,10 +489,25 @@ func (s *service) handlePrompt(ctx context.Context, writer *frameWriter, req req
 		writer.writeError(req.ID, invalidParams("session/prompt: sessionId is required"))
 		return
 	}
-	text := promptText(params)
-	if text == "" {
-		writer.writeError(req.ID, invalidParams("session/prompt: prompt text is required"))
+	attachments, rpcErr := promptImages(params)
+	if rpcErr != nil {
+		writer.writeError(req.ID, rpcErr)
 		return
+	}
+	text := promptText(params)
+	if text == "" && len(attachments) == 0 {
+		writer.writeError(req.ID, invalidParams("session/prompt: prompt text or image content is required"))
+		return
+	}
+	var attachmentSender contracts.AttachmentSender
+	if len(attachments) > 0 {
+		sender, ok := s.chat.(contracts.AttachmentSender)
+		if !ok {
+			writer.writeError(req.ID, internalError(
+				"session/prompt: chat backend does not support image attachments"))
+			return
+		}
+		attachmentSender = sender
 	}
 	s.mu.Lock()
 	s.cancelRequested[sessionID] = false
@@ -523,8 +548,14 @@ func (s *service) handlePrompt(ctx context.Context, writer *frameWriter, req req
 		return
 	}
 	defer unsubscribe()
-	if err := s.chat.Send(sessionID, text); err != nil {
-		writer.writeError(req.ID, internalError("session/prompt: send: "+err.Error()))
+	var sendErr error
+	if len(attachments) == 0 {
+		sendErr = s.chat.Send(sessionID, text)
+	} else {
+		sendErr = attachmentSender.SendWithAttachments(sessionID, text, attachments)
+	}
+	if sendErr != nil {
+		writer.writeError(req.ID, internalError("session/prompt: send: "+sendErr.Error()))
 		return
 	}
 	// The fake/agent may have completed synchronously without a notification.
@@ -558,11 +589,20 @@ func (s *service) handlePrompt(ctx context.Context, writer *frameWriter, req req
 	s.mu.Lock()
 	cancelled := s.cancelRequested[sessionID]
 	s.mu.Unlock()
-	stopReason := StopReasonEndTurn
 	if cancelled {
-		stopReason = StopReasonCancelled
+		writer.writeResult(req.ID, map[string]string{"stopReason": StopReasonCancelled})
+		return
 	}
-	writer.writeResult(req.ID, map[string]string{"stopReason": stopReason})
+	// A run failure must not look like a successful empty turn to an ACP
+	// client: the chat read model carries the run error, so surface it as a
+	// JSON-RPC error (the turn result would otherwise always be end_turn).
+	if snapshot, ok := s.chat.Session(sessionID); ok {
+		if errText := strings.TrimSpace(snapshot.Error); errText != "" {
+			writer.writeError(req.ID, internalError("session/prompt: "+errText))
+			return
+		}
+	}
+	writer.writeResult(req.ID, map[string]string{"stopReason": StopReasonEndTurn})
 }
 
 // promptState tracks the streamed assistant text of one prompt.
@@ -634,14 +674,100 @@ func (s *service) handleCancel(raw json.RawMessage) *RPCError {
 	return nil
 }
 
-// promptText concatenates the text blocks of a prompt request.
-func promptText(params promptParams) string {
-	blocks := params.Prompt
-	if len(blocks) == 0 {
-		blocks = params.Content
+// promptBlocks returns the block list of a prompt request. Content is accepted
+// as a fallback for clients that use it instead of prompt.
+func promptBlocks(params promptParams) []contentBlock {
+	if len(params.Prompt) > 0 {
+		return params.Prompt
+	}
+	return params.Content
+}
+
+// promptImages decodes the image blocks of a prompt request into attachments.
+// Each image block must carry an image/* mimeType and a non-empty, decodable
+// base64 payload no larger than maxPromptImageBytes; violations are -32602.
+func promptImages(params promptParams) ([]contracts.Attachment, *RPCError) {
+	var attachments []contracts.Attachment
+	for index, block := range promptBlocks(params) {
+		if !strings.EqualFold(strings.TrimSpace(block.Type), "image") {
+			continue
+		}
+		position := index + 1
+		mimeType := strings.TrimSpace(block.MimeType)
+		if mimeType == "" {
+			return nil, invalidParams(fmt.Sprintf(
+				"session/prompt: image block %d: mimeType is required", position))
+		}
+		if !strings.HasPrefix(strings.ToLower(mimeType), "image/") {
+			return nil, invalidParams(fmt.Sprintf(
+				"session/prompt: image block %d: mimeType %q must be an image/* type", position, mimeType))
+		}
+		data := strings.TrimSpace(block.Data)
+		if data == "" {
+			return nil, invalidParams(fmt.Sprintf(
+				"session/prompt: image block %d: data (base64) is required", position))
+		}
+		decoded, err := decodePromptImage(data)
+		if err != nil {
+			return nil, invalidParams(fmt.Sprintf(
+				"session/prompt: image block %d: invalid base64 data: %v", position, err))
+		}
+		if len(decoded) == 0 {
+			return nil, invalidParams(fmt.Sprintf(
+				"session/prompt: image block %d: decoded image data is empty", position))
+		}
+		if len(decoded) > maxPromptImageBytes {
+			return nil, invalidParams(fmt.Sprintf(
+				"session/prompt: image block %d: decoded image is %d bytes, over the %d MiB limit",
+				position, len(decoded), maxPromptImageBytes>>20))
+		}
+		ordinal := len(attachments) + 1
+		attachments = append(attachments, contracts.Attachment{
+			ID:   fmt.Sprintf("acp-image-%d", ordinal),
+			Name: fmt.Sprintf("image-%d.%s", ordinal, imageExtension(mimeType)),
+			MIME: mimeType,
+			Data: decoded,
+		})
+	}
+	return attachments, nil
+}
+
+// decodePromptImage decodes ACP image data as standard base64, tolerating the
+// unpadded encoding some clients emit.
+func decodePromptImage(data string) ([]byte, error) {
+	if decoded, err := base64.StdEncoding.DecodeString(data); err == nil {
+		return decoded, nil
+	}
+	return base64.RawStdEncoding.DecodeString(data)
+}
+
+// imageExtension derives a safe file-name suffix from an image MIME type: the
+// subtype without parameters or structured-syntax suffixes ("image/png" ->
+// "png", "image/svg+xml" -> "svg"), else "img".
+func imageExtension(mimeType string) string {
+	subtype := strings.ToLower(strings.TrimSpace(mimeType))
+	if slash := strings.IndexByte(subtype, '/'); slash >= 0 {
+		subtype = subtype[slash+1:]
+	}
+	if plus := strings.IndexByte(subtype, '+'); plus >= 0 {
+		subtype = subtype[:plus]
 	}
 	var builder strings.Builder
-	for _, block := range blocks {
+	for _, char := range subtype {
+		if (char >= 'a' && char <= 'z') || (char >= '0' && char <= '9') {
+			builder.WriteRune(char)
+		}
+	}
+	if builder.Len() == 0 {
+		return "img"
+	}
+	return builder.String()
+}
+
+// promptText concatenates the text blocks of a prompt request.
+func promptText(params promptParams) string {
+	var builder strings.Builder
+	for _, block := range promptBlocks(params) {
 		if !strings.EqualFold(strings.TrimSpace(block.Type), "text") {
 			continue
 		}

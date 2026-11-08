@@ -9,6 +9,7 @@ package regression
 
 import (
 	"testing"
+	"time"
 
 	"github.com/zeokeel/zeokeel/internal/contracts"
 )
@@ -17,7 +18,14 @@ import (
 func TestChatFontSizeSelectorMapping(t *testing.T) {
 	harness := startBehaviorUI(t, false)
 	harness.openSettingsPage(t, "行为")
-	requireHasTexts(t, harness.tester, "消息字号", "标准", "对话文字大小，立即生效")
+	// 消息字号 lives inside the collapsed 更多对话设置 disclosure.
+	if err := harness.tester.Click("更多对话设置"); err != nil {
+		t.Fatalf("expand more settings: %v; texts = %v", err, harness.tester.Texts())
+	}
+	harness.tester.Frame()
+	harness.tester.Advance(350 * time.Millisecond)
+	harness.tester.Frame()
+	requireHasTexts(t, harness.tester, "消息字号", "标准")
 
 	// Default: standard label, no stored row.
 	if got := harness.h.settings.Get(contracts.SettingChatFontSize, ""); got != "" {

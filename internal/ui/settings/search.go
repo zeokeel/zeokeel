@@ -9,15 +9,15 @@ import (
 
 	"github.com/zeokeel/zeokeel/internal/contracts"
 	"github.com/zeokeel/zeokeel/internal/design"
-	"github.com/zeokeel/zeokeel/internal/icons"
+	"github.com/zeokeel/zeokeel/internal/uikit"
 )
 
 // Search page constants. Section "general" matches About (90) and sits between
 // 更新 (92) and 导入 (94); the default page stays About.
 const (
 	SearchPageID      = "search"
-	SearchPageSection = "general"
-	SearchPageOrder   = 93
+	SearchPageSection = "集成"
+	SearchPageOrder   = 20
 	SearchPageTitle   = "搜索"
 )
 
@@ -43,17 +43,15 @@ func buildSearchPage(c *ui.Context, kctx cordis.Context, st *searchState, locale
 	t := design.Of(c)
 	store, hasStore := kctx.Get(contracts.KeySettings)
 
-	ui.Column(c).FillWidth().Gap(design.Space2).Children(func() {
-		pageHeader(c, t, localized(locale, SearchPageTitle, "Search"), localized(locale,
+	ui.Column(c).FillWidth().Gap(design.Space4).Children(func() {
+		uikit.PageHeader(c, localized(locale, SearchPageTitle, "Search"), localized(locale,
 			"web_search 工具调用的搜索后端；留空则禁用 web_search。",
 			"Search backend used by the web_search tool; leave the endpoint blank to disable web_search."))
 		if !hasStore || store == nil {
-			panel(c, t, func() {
-				sectionTitle(c, t, localized(locale, "设置存储未启用", "Settings store not enabled"))
-				design.Apply(ui.Text(c, localized(locale,
+			uikit.Section(c, localized(locale, "设置存储未启用", "Settings store not enabled"), func(*ui.Context) {
+				uikit.EmptyState(c, localized(locale,
 					"没有可用的设置存储，无法保存搜索配置。",
-					"No settings store is available, so the search configuration cannot be saved.")),
-					t.TextMuted(design.TypeXXS))
+					"No settings store is available, so the search configuration cannot be saved."))
 			})
 			return
 		}
@@ -65,13 +63,11 @@ func buildSearchPage(c *ui.Context, kctx cordis.Context, st *searchState, locale
 		apiKeySet := firstNonEmpty(store.Get(contracts.SettingWebSearchAPIKey, ""), st.apiKey) != ""
 		configured := strings.TrimSpace(st.endpoint) != ""
 
-		panel(c, t, func() {
+		uikit.Section(c, localized(locale, "搜索后端", "Search backend"), func(*ui.Context) {
 			ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(design.Space2).Children(func() {
-				sectionTitle(c, t, localized(locale, "搜索后端", "Search backend"))
-				ui.Spacer(c).Grow(1)
 				if configured {
 					design.Apply(ui.Badge(c, localized(locale, "已配置", "Configured")), t.Badge()).
-						TextColor(t.Success)
+						TextColor(t.SuccessText)
 				} else {
 					design.Apply(ui.Badge(c, localized(locale, "未配置", "Not configured")), t.Badge())
 				}
@@ -79,33 +75,55 @@ func buildSearchPage(c *ui.Context, kctx cordis.Context, st *searchState, locale
 					design.Apply(ui.Badge(c, localized(locale, "API Key 已设置", "API key set")), t.Badge())
 				}
 			})
-
-			field(c, t, localized(locale, "搜索端点", "Search endpoint"), func() {
-				ui.TextInput(c, &st.endpoint).Label(inputLabel(locale, localized(locale, "搜索端点", "Search endpoint"))).
+			ui.Field(c, localized(locale, "搜索端点", "Search endpoint"), func() {
+				ui.TextInput(c, &st.endpoint).
+					Label(inputLabel(locale, localized(locale, "搜索端点", "Search endpoint"))).
 					Placeholder("https://search.example.com/search").FillWidth()
-			})
-			field(c, t, "API Key", func() {
+			}).Description(localized(locale,
+				"接收查询并返回结果的 http(s) 端点；留空禁用。",
+				"The http(s) endpoint that receives queries and returns results; empty disables it."))
+			ui.Field(c, "API Key", func() {
 				ui.TextInput(c, &st.apiKey).Label(inputLabel(locale, "API Key")).
 					Placeholder(localized(locale,
 						"API Key 以 Authorization: Bearer 发送；留空保持不变",
 						"The API key is sent as Authorization: Bearer; leave blank to keep it")).FillWidth()
-			})
+			}).Description(localized(locale, "只保存在本机；留空保持已设置的密钥。",
+				"Stored locally only; leave blank to keep the configured key."))
 			design.Apply(ui.Text(c, localized(locale,
 				"修改后下一次 web_search 调用生效，无需重启。",
 				"Changes apply to the next web_search call; no restart needed.")),
-				t.TextMuted(design.TypeXXS))
+				t.TextMuted(design.TypeXXS)).MaxLines(2)
 		})
 
-		ui.Row(c).FillWidth().Gap(design.Space2).AlignItems(ui.Center).Children(func() {
-			if brandPrimaryButton(c, t, icons.Search(), localized(locale, "保存", "Save")).Clicked() {
-				saveSearchSettings(st, store, locale)
-			}
-			ui.Spacer(c).Grow(1)
-			if st.status != "" {
-				statusBadge(c, t, st.status, st.statusErr)
-			}
-		})
+		// H1: the save action lives in the host's fixed footer; the body keeps
+		// the status line.
+		statusBadgesRow(c, t, st.status, st.statusErr)
 	})
+}
+
+// discardDrafts re-reads the persisted endpoint into the draft, drops the typed
+// (write-only) API key and clears the page status.
+func (st *searchState) discardDrafts(store contracts.SettingsService) {
+	st.loaded = true
+	st.endpoint = ""
+	if store != nil {
+		st.endpoint = store.Get(contracts.SettingWebSearchEndpoint, "")
+	}
+	st.apiKey = ""
+	st.status = ""
+	st.statusErr = false
+}
+
+// dirty reports whether the page has an unsaved endpoint or a typed API key
+// (the key is write-only, so any typed key is pending work).
+func (st *searchState) dirty(store contracts.SettingsService) bool {
+	if strings.TrimSpace(st.apiKey) != "" {
+		return true
+	}
+	if store == nil {
+		return false
+	}
+	return strings.TrimSpace(st.endpoint) != strings.TrimSpace(store.Get(contracts.SettingWebSearchEndpoint, ""))
 }
 
 // saveSearchSettings validates the endpoint and writes the two settings rows.

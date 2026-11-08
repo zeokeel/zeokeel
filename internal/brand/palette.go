@@ -86,9 +86,11 @@ type Palette struct {
 	SurfaceStrong  ui.Color
 	SurfacePressed ui.Color
 
-	// Hover is the tint of a hovered or selected row, menu item or tab;
-	// SurfacePressed the fill of a pressed control.
-	Hover ui.Color
+	// Hover is the tint of a hovered row, menu item or tab; RowSelected the
+	// stronger tint of the current one, so hover and selection stay
+	// distinguishable; SurfacePressed the fill of a pressed control.
+	Hover       ui.Color
+	RowSelected ui.Color
 
 	// Text, from primary ink down to tertiary labels.
 	Text          ui.Color
@@ -120,7 +122,10 @@ type Palette struct {
 	// logo palette. WarningText is the WCAG-AA text companion of Warning,
 	// which is too light for small text on the page background.
 	Success ui.Color
-	Danger  ui.Color
+	// SuccessText is the WCAG-AA foreground for success message text on the
+	// page background; Success stays the fill/border/icon color.
+	SuccessText ui.Color
+	Danger      ui.Color
 	// DangerText is the WCAG-AA foreground for danger message text on a
 	// danger tint; Danger itself is the fill/border/icon color.
 	DangerText  ui.Color
@@ -141,6 +146,7 @@ func LightPalette() Palette {
 		SurfaceStrong:  ui.Hex("#F1F3F5"),
 		SurfacePressed: ui.RGBA(13, 68, 246, 0.10), // brand royal blue at 10%
 		Hover:          ui.RGBA(13, 68, 246, 0.06), // brand royal blue at 6%
+		RowSelected:    ui.RGBA(13, 68, 246, 0.12), // brand royal blue at 12%
 		Text:           ui.Hex(HexInk),             // wordmark light ink, 18.9:1 on white
 		TextSecondary:  ui.Hex("#5B6373"),          // ink cooled toward blue, 6.0:1 on white
 		// Tertiary carries 11–13px explanations, timestamps and usage numbers,
@@ -161,6 +167,7 @@ func LightPalette() Palette {
 		Scrollbar:     ui.RGBA(15, 17, 21, 0.30),
 		Scrim:         ui.RGBA(15, 17, 21, 0.30), // ink scrim, modal backdrop
 		Success:       ui.Hex("#16A34A"),
+		SuccessText:   ui.Hex("#15803D"), // 4.6:1 on white
 		Danger:        ui.Hex("#DC2626"), // 4.8:1 on white
 		DangerText:    ui.Hex("#B91C1C"), // 5.7:1 on the 8% danger tint
 		Warning:       ui.Hex("#D97706"),
@@ -179,6 +186,7 @@ func DarkPalette() Palette {
 		SurfaceStrong:  ui.Hex("#272736"),
 		SurfacePressed: ui.RGBA(55, 231, 254, 0.16), // logo cyan at 16%
 		Hover:          ui.RGBA(55, 231, 254, 0.10), // logo cyan at 10%
+		RowSelected:    ui.RGBA(55, 231, 254, 0.18), // logo cyan at 18%
 		Text:           ui.Hex(HexInkDark),          // wordmark dark ink, 18.5:1 on the night
 		TextSecondary:  ui.Hex("#C7CAD9"),           // 11.9:1
 		TextTertiary:   ui.Hex("#9AA0B4"),           // 7.4:1
@@ -194,6 +202,7 @@ func DarkPalette() Palette {
 		Scrollbar:      ui.RGBA(255, 255, 255, 0.35),
 		Scrim:          ui.RGBA(0, 0, 0, 0.55),
 		Success:        ui.Hex("#22C55E"),
+		SuccessText:    ui.Hex("#4ADE80"), // 9.4:1 on the night
 		Danger:         ui.Hex("#F87171"),
 		DangerText:     ui.Hex("#FCA5A5"), // AA on the dark danger tint
 		Warning:        ui.Hex("#F59E0B"),

@@ -88,16 +88,19 @@ func TestPresetsPageAddDeleteReorderAndRestore(t *testing.T) {
 	if len(stored) != 4 || stored[0].Name != "代码审查" || stored[1].Name != "简洁回答" {
 		t.Fatalf("stored presets after move down = %+v", stored)
 	}
-	// Deleting the first row persists the remaining order.
+	// Deleting the first row asks for confirmation, then persists the rest.
 	h.click(tester, "删除")
+	h.click(tester, "确认删除")
 	stored = decodePresets(t, store.get(contracts.SettingPromptPresets))
 	if len(stored) != 3 || stored[0].Name != "简洁回答" {
 		t.Fatalf("stored presets after delete = %+v", stored)
 	}
 	h.assertTexts(tester, "已保存")
 
-	// Restore built-in defaults writes the explicit empty list.
+	// Restore built-in defaults asks for confirmation, then writes the explicit
+	// empty list.
 	h.click(tester, "恢复内置默认")
+	h.click(tester, "恢复默认")
 	if got := store.get(contracts.SettingPromptPresets); got != "[]" {
 		t.Fatalf("stored presets after restore = %q, want []", got)
 	}

@@ -204,11 +204,11 @@ func TestSettingsPageOrderingAndConflicts(t *testing.T) {
 
 	r.Navigator().ToggleSettings()
 	tt.Frame()
-	// Sections sort alphabetically, then Order, then ID.
-	requireTextBefore(t, tt, "账户", "通用一", "通用一B", "通用二", "Z页")
+	// Sections are grouped by rank (general first), then Order, then ID.
+	requireTextBefore(t, tt, "通用一", "通用一B", "通用二", "账户", "Z页")
 	// The first page of the sorted list is the selected one.
-	requireHasText(t, tt, "account-body")
-	requireNoText(t, tt, "general-1-body")
+	requireHasText(t, tt, "general-1-body")
+	requireNoText(t, tt, "account-body")
 
 	// Unregistering a page removes it from the surface on the next frame.
 	unreg := mustPage(t, r, contracts.SettingsPageSpec{ID: "temp", Section: "general", Title: "临时页", Order: 15,
@@ -267,7 +267,8 @@ func TestCommandOrderingFilteringAndRun(t *testing.T) {
 
 	// The command registry exposes the sorted list to palettes/composer menus.
 	commands := rt.Commands()
-	wantOrder := []string{"run", "a", "a2", "always", "hidden", "b", "failing"}
+	// The host registers its own window commands too (the inspector toggle).
+	wantOrder := []string{"run", "a", "a2", "always", "hidden", "b", "failing", "uiroot.toggle-inspector"}
 	if len(commands) != len(wantOrder) {
 		t.Fatalf("Commands() = %d commands, want %d", len(commands), len(wantOrder))
 	}

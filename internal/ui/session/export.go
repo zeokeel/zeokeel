@@ -122,14 +122,14 @@ func exportJSONLTranscript(chatSession contracts.ChatSession) (string, error) {
 // exportTranscript renders a session as a Markdown document for the export
 // dialog: a title heading followed by the plain transcript (the same text the
 // "复制对话" action copies).
-func exportTranscript(chatSession contracts.ChatSession, title string, english bool) string {
+func exportTranscript(chatSession contracts.ChatSession, title string, english bool, locale contracts.LocaleService) string {
 	var builder strings.Builder
 	fallback := "会话"
 	if english {
 		fallback = "Conversation"
 	}
 	fmt.Fprintf(&builder, "# %s\n\n", firstNonEmpty(title, fallback))
-	if createdAt := formatTimestamp(chatSession.CreatedAt); createdAt != "" && createdAt != "—" {
+	if createdAt := formatTimestamp(locale, chatSession.CreatedAt); createdAt != "" && createdAt != "—" {
 		if english {
 			fmt.Fprintf(&builder, "Created: %s\n\n", createdAt)
 		} else {

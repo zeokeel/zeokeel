@@ -7,6 +7,12 @@
 // the user, an artifact presenter, plan-review state, a goal store and a team
 // manager (see internal/hosttools).
 //
+// Interactive products (the desktop app) register all six. Non-interactive
+// products (headless/ACP) cannot show a question or get a plan approved by a
+// user, so they omit the plan-review pair entirely — a plan submitted there
+// could never leave "reviewing" — and ask_user reports that no interactive UI
+// is available instead of blocking the run.
+//
 // Registration is explicit and reversible: every tool is registered during
 // activation and its unregistration is owned by a kernel effect, so disposing
 // the module (or a failed activation of a later tool) removes every tool it
@@ -29,9 +35,11 @@ const ModuleID = "zeokeel/hosttools"
 
 // Config is the module's typed assembly config.
 type Config struct {
-	// Interactive says whether this product can ask the user questions (and
-	// show plan reviews / artifacts) in real time. When false, ask_user reports
-	// that no interactive UI is available instead of blocking a headless run.
+	// Interactive says whether this product has a live user who can answer
+	// questions, review plans and view artifacts in real time. When false,
+	// ask_user reports that no interactive UI is available instead of blocking
+	// a headless run, and the plan-review tools are not registered at all
+	// (nobody could approve the plan, so a submission would stall the run).
 	Interactive bool `json:"interactive"`
 }
 
@@ -83,7 +91,7 @@ func ModuleWithHost(host *hostcaps.Host) *module.Descriptor[Config] {
 			capabilities.Asker = nil
 		}
 
-		for _, tool := range newTools(capabilities) {
+		for _, tool := range toolListFor(capabilities, cfg.Interactive) {
 			if err := registry.Register(tool); err != nil {
 				return fmt.Errorf("%s: register %q: %w", ModuleID, tool.Name(), err)
 			}

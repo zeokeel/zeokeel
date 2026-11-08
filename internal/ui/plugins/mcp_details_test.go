@@ -49,10 +49,10 @@ func TestMCPCardExpandsAndCollapses(t *testing.T) {
 	tester := h.tester()
 
 	h.click(tester, "详情")
-	h.assertTexts(tester, "收起", "类型", "HTTP", "http://127.0.0.1:9000/mcp",
+	h.assertTexts(tester, "详情", "类型", "HTTP", "http://127.0.0.1:9000/mcp",
 		"fake-files", "0.1.0", "2024-11-05", "3 个工具", "已连接")
 
-	h.click(tester, "收起")
+	h.click(tester, "详情")
 	h.assertTexts(tester, "详情")
 	h.assertNoTexts(tester, "http://127.0.0.1:9000/mcp")
 }
@@ -96,5 +96,5 @@ func TestMCPDetailsEnglishCopy(t *testing.T) {
 
 	h.assertTexts(tester, "Details")
 	h.click(tester, "Details")
-	h.assertTexts(tester, "Hide", "Type", "HTTP", "Server", "Version", "Protocol", "Status")
+	h.assertTexts(tester, "Details", "Type", "HTTP", "Server", "Version", "Protocol", "Status")
 }

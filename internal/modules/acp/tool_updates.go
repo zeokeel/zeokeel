@@ -8,6 +8,7 @@ package acp
 // that already existed when the prompt started is seeded and not replayed.
 
 import (
+	"encoding/json"
 	"fmt"
 	"strings"
 	"unicode/utf8"
@@ -31,6 +32,7 @@ const (
 type toolEvent struct {
 	ID      string
 	Title   string
+	Input   string
 	Started bool
 	Final   bool
 	Failed  bool
@@ -73,7 +75,7 @@ func (state *promptState) observeToolEventsLocked(snapshot contracts.ChatSession
 			status := strings.TrimSpace(tool.Status)
 			previous, seen := state.toolStates[key]
 			final, failed := toolFinalStatus(status)
-			event := toolEvent{ID: id, Title: strings.TrimSpace(tool.Name)}
+			event := toolEvent{ID: id, Title: strings.TrimSpace(tool.Name), Input: strings.TrimSpace(tool.Arguments)}
 			if !seen {
 				event.Started = true
 				state.toolStates[key] = status
@@ -177,7 +179,7 @@ func (s *service) writeToolEvent(writer *frameWriter, sessionID string, event to
 					"title":      event.Title,
 					"kind":       toolKindOther,
 					"status":     "in_progress",
-					"rawInput":   "",
+					"rawInput":   toolRawInput(event.Input),
 				},
 			},
 		})
@@ -193,6 +195,12 @@ func (s *service) writeToolEvent(writer *frameWriter, sessionID string, event to
 	if event.Failed {
 		update["status"] = "failed"
 	}
+	if event.Title != "" {
+		update["title"] = event.Title
+	}
+	if event.Input != "" {
+		update["rawInput"] = toolRawInput(event.Input)
+	}
 	if content := strings.TrimSpace(event.Content); content != "" {
 		update["content"] = []any{map[string]any{
 			"type":    "content",
@@ -203,4 +211,19 @@ func (s *service) writeToolEvent(writer *frameWriter, sessionID string, event to
 		"sessionId": sessionID,
 		"update":    update,
 	})
+}
+
+// toolRawInput renders a tool's raw JSON arguments as an ACP rawInput value:
+// the decoded JSON value when the string is valid JSON, the original string
+// otherwise, and "" when the provider reported no arguments.
+func toolRawInput(input string) any {
+	input = strings.TrimSpace(input)
+	if input == "" {
+		return ""
+	}
+	var value any
+	if err := json.Unmarshal([]byte(input), &value); err != nil {
+		return input
+	}
+	return value
 }

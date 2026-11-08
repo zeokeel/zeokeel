@@ -173,6 +173,18 @@ func (h *harness) assertNoTexts(tester *ui.Tester, unwanted ...string) {
 	}
 }
 
+// assertNoExactTexts asserts no element shows exactly one of the unwanted
+// labels: unlike assertNoTexts (substring), it can check a default label that
+// also occurs inside a longer sentence (the copy starts with "允许后…").
+func (h *harness) assertNoExactTexts(tester *ui.Tester, unwanted ...string) {
+	h.t.Helper()
+	for _, text := range unwanted {
+		if _, ok := tester.Find(text); ok {
+			h.t.Fatalf("frame unexpectedly shows the label %q; texts = %v", text, tester.Texts())
+		}
+	}
+}
+
 func provide[T any](t *testing.T, ctx cordis.Context, key cordis.ServiceKey[T], value T) {
 	t.Helper()
 	if _, err := ctx.Provide(key, value); err != nil {
@@ -246,9 +258,34 @@ func TestPendingShowsOldestRequest(t *testing.T) {
 	h.approvals.add(pendingRequest("a2", "write_file", "写入文件", `{"path":"x"}`))
 	tester.Frame()
 
-	h.assertTexts(tester, "需要审批", "工具", "bash", "运行命令 ls", "command", "参数",
-		"允许", "总是允许", "拒绝")
+	// The summary is promoted (a command for shell tools) and the raw
+	// arguments are details, collapsed.
+	h.assertTexts(tester, "需要审批", "工具", "bash", "命令", "运行命令 ls", "参数",
+		"显示原始参数", "允许", "本次运行内始终允许", "拒绝")
+	// Two labels only: the section label and the disclosure — never a third
+	// 「参数详情」 layer (N3).
+	h.assertNoTexts(tester, "参数详情", `{"command":"ls"}`)
 	h.assertNoTexts(tester, "write_file", "写入文件")
+}
+
+// TestCopyStatesSandboxLimits covers the ZK-02 copy fix: an approval only lets
+// the call through the gate; the sandbox policy still runs it and may deny it,
+// so the dialog must not promise that the call executes immediately.
+func TestCopyStatesSandboxLimits(t *testing.T) {
+	h := newHarness(t, approval.Config{})
+	tester := h.tester()
+	h.approvals.add(pendingRequest("p1", "bash", "运行命令 ls", `{"command":"ls"}`))
+	tester.Frame()
+
+	const zh = "允许后将在沙箱策略限制内执行；策略仍可能拒绝该调用。"
+	const en = "It runs within the sandbox policy after approval; the policy may still reject the call."
+	h.assertTexts(tester, zh)
+	h.assertNoTexts(tester, "立即执行", "runs right away")
+
+	h.uiRoot.Locale().SetLanguage("en")
+	tester.Frame()
+	h.assertTexts(tester, en)
+	h.assertNoTexts(tester, "立即执行", "runs right away")
 }
 
 // TestDecisionButtons covers the three buttons: each resolves the request with
@@ -259,7 +296,7 @@ func TestDecisionButtons(t *testing.T) {
 		decision contracts.ApprovalDecision
 	}{
 		{label: "允许", decision: contracts.ApprovalAllow},
-		{label: "总是允许", decision: contracts.ApprovalAllowAlways},
+		{label: "本次运行内始终允许", decision: contracts.ApprovalAllowAlways},
 		{label: "拒绝", decision: contracts.ApprovalDeny},
 	}
 	for _, test := range cases {
@@ -403,8 +440,9 @@ func TestConfigLabels(t *testing.T) {
 	h.approvals.add(pendingRequest("c1", "bash", "run", `{"command":"ls"}`))
 	tester.Frame()
 	h.assertTexts(tester, "Approve tool call", "Tool", "Arguments", "bash",
-		"Allow once", "Always allow", "Reject")
-	h.assertNoTexts(tester, "需要审批", "允许", "拒绝")
+		"Allow once", "Always allow", "Reject", "Esc = 拒绝本次调用")
+	h.assertNoTexts(tester, "需要审批")
+	h.assertNoExactTexts(tester, "允许")
 }
 
 // TestLongArgumentsAreTruncated covers the bounded arguments block: a huge
@@ -420,7 +458,10 @@ func TestLongArgumentsAreTruncated(t *testing.T) {
 	long = append(long, `"}`...)
 	h.approvals.add(pendingRequest("l1", "bash", "大参数", string(long)))
 	tester.Frame()
-	h.assertTexts(tester, "需要审批", `{"data":"`)
+	h.assertTexts(tester, "需要审批", "参数", "显示原始参数")
+	h.assertNoTexts(tester, `{"data":"`) // collapsed by default
+	h.click(tester, "显示原始参数")
+	h.assertTexts(tester, `{"data":"`)
 	if tester.HasText(string(long)) {
 		t.Fatal("the full arguments payload was rendered instead of the truncated block")
 	}
@@ -449,5 +490,55 @@ func TestModuleManifest(t *testing.T) {
 		if !required[name] {
 			t.Fatalf("module does not require %q; requires = %v", name, descriptor.Requires)
 		}
+	}
+}
+
+// TestFooterOrderAndSafeDefault covers H4: the dangerous deny is the leftmost
+// action, the run-scoped allow is secondary in the middle, the accent allow is
+// rightmost — and the dialog's safe default focus is Deny, so Enter denies
+// instead of allowing a high-risk tool with a stray key.
+func TestFooterOrderAndSafeDefault(t *testing.T) {
+	h := newHarness(t, approval.Config{})
+	tester := h.tester()
+	h.approvals.add(pendingRequest("r1", "bash", "运行命令", `{"command":"ls"}`))
+	tester.Frame()
+
+	deny, ok := tester.Find("拒绝")
+	if !ok {
+		t.Fatalf("deny button missing; texts = %v", tester.Texts())
+	}
+	always, ok := tester.Find("本次运行内始终允许")
+	if !ok {
+		t.Fatalf("run-scoped allow button missing; texts = %v", tester.Texts())
+	}
+	allow, ok := tester.Find("允许")
+	if !ok {
+		t.Fatalf("allow button missing; texts = %v", tester.Texts())
+	}
+	if !(deny.X < always.X && always.X < allow.X) {
+		t.Fatalf("footer order x = deny %.1f, always %.1f, allow %.1f; want deny < always < allow",
+			deny.X, always.X, allow.X)
+	}
+	if !tester.Focused("拒绝") {
+		t.Fatalf("safe default focus is not on Deny; texts = %v", tester.Texts())
+	}
+
+	// Enter presses the focused button (Deny), never a dialog-wide Allow.
+	tester.Key(0, ui.KeyEnter)
+	tester.Frame()
+	if got := h.approvals.resolved(); len(got) != 1 || got[0] != contracts.ApprovalDeny {
+		t.Fatalf("decisions after Enter = %v, want [deny]", got)
+	}
+	tester.Frame()
+	h.assertNoTexts(tester, "需要审批")
+
+	// Allowing is explicit: a click on Allow records allow.
+	h2 := newHarness(t, approval.Config{})
+	tester2 := h2.tester()
+	h2.approvals.add(pendingRequest("r2", "bash", "运行命令", `{"command":"ls"}`))
+	tester2.Frame()
+	h2.click(tester2, "允许")
+	if got := h2.approvals.resolved(); len(got) != 1 || got[0] != contracts.ApprovalAllow {
+		t.Fatalf("decisions after clicking Allow = %v, want [allow]", got)
 	}
 }

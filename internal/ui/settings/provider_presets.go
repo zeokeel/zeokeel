@@ -64,54 +64,24 @@ func matchingProviderPreset(baseURL string) *providerQuickPreset {
 	return nil
 }
 
-// applyProviderPreset writes the preset's settings rows (base URL + model;
-// the custom entry only clears the base URL) and updates the page state so the
-// inputs and the match badge follow immediately.
-func applyProviderPreset(preset providerQuickPreset, state *moduleState,
-	store contracts.SettingsService, locale contracts.LocaleService) {
-	if store == nil {
-		state.status = localized(locale, "应用预设失败：", "Failed to apply preset: ") + "settings unavailable"
-		state.statusErr = true
-		return
-	}
-	// Applying a preset updates two rows; snapshot the old values first so a
-	// partially failed write can roll back instead of leaving a mixed
-	// baseURL/model pair (AUDIT-P3-15).
-	oldBaseURL := store.Get(contracts.SettingsChatBaseURL, "")
-	oldModel := store.Get(contracts.SettingsChatModel, "")
-	rollback := func() {
-		_ = store.Set(contracts.SettingsChatBaseURL, oldBaseURL)
-		if preset.id != "custom" {
-			_ = store.Set(contracts.SettingsChatModel, oldModel)
-		}
-	}
-	fail := func(err error) {
-		rollback()
-		state.status = localized(locale, "应用预设失败：", "Failed to apply preset: ") + err.Error()
-		state.statusErr = true
-	}
-	if err := store.Set(contracts.SettingsChatBaseURL, preset.baseURL); err != nil {
-		fail(err)
-		return
-	}
-	// The custom entry keeps the current model; the named providers set their
-	// documented default model.
+// applyProviderPreset fills the model/base URL drafts from a preset (the custom
+// entry only clears the base URL). Presets are form helpers, not a second
+// writer: the page's single Save action persists the filled form, so the model
+// page has exactly one save semantic.
+func applyProviderPreset(preset providerQuickPreset, state *moduleState, locale contracts.LocaleService) {
 	if preset.id != "custom" {
-		if err := store.Set(contracts.SettingsChatModel, preset.model); err != nil {
-			fail(err)
-			return
-		}
 		state.model = preset.model
 	}
 	state.baseURL = preset.baseURL
-	state.status = localized(locale, "已应用预设：", "Applied preset: ") + providerQuickPresetName(preset, locale)
+	state.status = localized(locale, "已填入预设：", "Preset filled: ") +
+		providerQuickPresetName(preset, locale)
 	state.statusErr = false
 }
 
-// buildProviderPresets renders the provider preset row inside the model page's
-// quick-preset panel.
+// providerPresetRow renders the provider preset row inside the model page's
+// quick-preset section. The chip matching the draft base URL is highlighted.
 func buildProviderPresets(c *ui.Context, t *design.Tokens, state *moduleState,
-	store contracts.SettingsService, locale contracts.LocaleService) {
+	locale contracts.LocaleService) {
 	current := matchingProviderPreset(state.baseURL)
 	ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(design.Space2).Children(func() {
 		design.Apply(ui.Text(c, localized(locale, "服务商预设", "Provider presets")),
@@ -119,20 +89,14 @@ func buildProviderPresets(c *ui.Context, t *design.Tokens, state *moduleState,
 		for _, preset := range providerQuickPresets {
 			preset := preset
 			label := providerQuickPresetName(preset, locale)
-			button := ui.Button(c, label)
-			match := current != nil && preset.id != "custom" && current.id == preset.id
-			if match {
-				button = design.Apply(button, t.PrimaryButton())
-			} else {
-				button = design.Apply(button, secondaryButtonStyle(t))
-			}
+			button := design.Apply(ui.Button(c, label), t.SecondaryButton())
 			if button.Clicked() {
-				applyProviderPreset(preset, state, store, locale)
+				applyProviderPreset(preset, state, locale)
 				c.Invalidate()
 			}
-			if match {
+			if current != nil && preset.id != "custom" && current.id == preset.id {
 				design.Apply(ui.Badge(c, localized(locale, "已匹配", "Active")), t.Badge()).
-					TextColor(t.Success)
+					TextColor(t.SuccessText)
 			}
 		}
 	})

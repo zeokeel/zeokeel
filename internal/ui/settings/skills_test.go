@@ -11,6 +11,8 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/egoist/mygo/ui"
+
 	"github.com/zeokeel/zeokeel/internal/contracts"
 	"github.com/zeokeel/zeokeel/internal/ui/settings"
 )
@@ -114,8 +116,10 @@ func TestSkillsPageRendersSkills(t *testing.T) {
 	h.assertTexts(tester,
 		"技能", "从配置目录、dataDir/skills 与工作区 /skills 中发现的 SKILL.md 技能。",
 		"/data/skills", "/work/proj/skills",
-		"alpha", "Alpha 技能说明", "/data/skills/alpha/SKILL.md",
-		"beta", "/data/skills/beta/SKILL.md", "查看内容", "刷新")
+		"alpha", "Alpha 技能说明", "workspace · alpha/SKILL.md",
+		"beta", "workspace · beta/SKILL.md", "查看内容", "刷新")
+	// H20: the card never dumps the absolute path (it lives in the tooltip).
+	h.assertNoTexts(tester, "/data/skills/alpha/SKILL.md", "/data/skills/beta/SKILL.md")
 	h.assertNoTexts(tester, "还没有发现技能", "技能后端未启用")
 }
 
@@ -189,7 +193,7 @@ func TestSkillsPageRefreshReloads(t *testing.T) {
 	if calls := skills.listCallCount(); calls != 2 {
 		t.Fatalf("List calls = %d after refresh, want 2", calls)
 	}
-	h.assertTexts(tester, "gamma", "/g/SKILL.md")
+	h.assertTexts(tester, "gamma", "g/SKILL.md")
 	h.assertNoTexts(tester, "alpha")
 }
 
@@ -225,4 +229,30 @@ func TestSkillsPageEmptyState(t *testing.T) {
 		"还没有发现技能",
 		"在工作区 /skills 或 dataDir/skills 放置 <name>/SKILL.md 后点击刷新。",
 		"/data/skills")
+}
+
+// TestSkillsPageSearchFilters covers H20's search box: it narrows the cards by
+// name, description or path and shows a no-match empty state.
+func TestSkillsPageSearchFilters(t *testing.T) {
+	skills := newFakeSkills()
+	skills.roots = []string{"/data/skills"}
+	skills.setList(
+		contracts.Skill{Name: "alpha", Description: "代码审查清单", Path: "/data/skills/alpha/SKILL.md"},
+		contracts.Skill{Name: "beta", Description: "发布检查", Path: "/data/skills/beta/SKILL.md"},
+	)
+	h := skillPageHarness(t, skills)
+	tester := h.tester()
+
+	h.focusInput(tester, "搜索技能")
+	tester.Type("发布")
+	tester.Frame()
+	h.assertTexts(tester, "beta", "1 / 2 个技能")
+	h.assertNoTexts(tester, "alpha")
+	h.focusInput(tester, "搜索技能")
+	tester.Key(ui.Cmd, ui.KeyA)
+	tester.Key(0, ui.KeyBackspace)
+	tester.Type("zzz")
+	tester.Frame()
+	h.assertTexts(tester, "没有匹配的技能")
+	h.assertNoTexts(tester, "alpha", "beta")
 }

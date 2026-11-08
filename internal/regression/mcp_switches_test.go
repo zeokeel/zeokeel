@@ -129,7 +129,7 @@ func TestPluginsMCPServerSwitch(t *testing.T) {
 		requireHasText(t, tester, "已停用（重启生效）")
 		clickPlugins(t, tester, "详情")
 		requireHasText(t, tester, "http://127.0.0.1:9/mcp")
-		clickPlugins(t, tester, "启用")
+		clickPlugins(t, tester, "启用服务器 srv")
 		if got := h.settings.Get(contracts.SettingMCPDisabledServers, ""); got != "[]" {
 			t.Fatalf("disabledServers after enable = %q, want []", got)
 		}
@@ -140,8 +140,7 @@ func TestPluginsMCPServerSwitch(t *testing.T) {
 		h, tester := startPluginsUI(t, &pluginsServiceFake{mcp: []contracts.MCPPlugin{
 			{Name: "a", Status: "已连接", URL: "http://127.0.0.1:9/mcp"},
 		}}, map[string]string{contracts.SettingMCPDisabledServers: `["zeta"]`})
-		clickPlugins(t, tester, "详情")
-		clickPlugins(t, tester, "启用")
+		clickPlugins(t, tester, "启用服务器 a")
 		if got := h.settings.Get(contracts.SettingMCPDisabledServers, ""); got != `["a","zeta"]` {
 			t.Fatalf("disabledServers after disabling a = %q, want the sorted combined list", got)
 		}

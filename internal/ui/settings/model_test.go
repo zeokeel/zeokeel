@@ -5,6 +5,7 @@ package settings_test
 import (
 	"context"
 	"errors"
+	"regexp"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -34,6 +35,29 @@ func withModelListGetter(t *testing.T,
 	previous := settings.ModelListGetter
 	settings.ModelListGetter = fn
 	t.Cleanup(func() { settings.ModelListGetter = previous })
+}
+
+// latencySuffix matches the formatted check latency that ends the success
+// detail.
+var latencySuffix = regexp.MustCompile(`^(?:\d+ ms|\d+\.\d s)$`)
+
+// requireModelCheckDetail asserts that the frame shows one success detail line
+// starting with prefix and ending with a formatted latency. The scripted getter
+// returns in microseconds, so the exact number is not pinned here; the
+// formatting itself is covered deterministically by
+// model_check_internal_test.go.
+func requireModelCheckDetail(t *testing.T, tester *ui.Tester, prefix string) string {
+	t.Helper()
+	for _, text := range tester.Texts() {
+		if !strings.HasPrefix(text, prefix) {
+			continue
+		}
+		if latencySuffix.MatchString(strings.TrimPrefix(text, prefix)) {
+			return text
+		}
+	}
+	t.Fatalf("no success detail starting %q with a latency; texts = %v", prefix, tester.Texts())
+	return ""
 }
 
 // waitModelCheckText frames until the text appears (the check runs async).
@@ -73,10 +97,13 @@ func TestModelCheckSuccess(t *testing.T) {
 	})
 	h := modelCheckHarness(t, configuredStore(), &fakeChat{})
 	tester := h.tester()
-	h.assertTexts(tester, "连接检查", "测试连接", "https://api.example.com/v1", "deepseek-chat")
-	h.click(tester, "测试连接")
+	h.assertTexts(tester, "连接检查", "测试当前输入", "https://api.example.com/v1", "deepseek-chat")
+	h.click(tester, "测试当前输入")
 	waitModelCheckText(t, h, tester, "连接正常")
-	h.assertTexts(tester, "2 个模型")
+	// ZK-14: the success line carries the discovered models and the measured
+	// latency, bounded to one line.
+	requireModelCheckDetail(t, tester, "2 个模型：model-a、model-b · ")
+	h.assertTexts(tester, "2 个模型", "model-a", "model-b")
 	mu.Lock()
 	defer mu.Unlock()
 	if gotURL != "https://api.example.com/v1" || gotKey != "sk-test" {
@@ -90,7 +117,7 @@ func TestModelCheckHTTPFailure(t *testing.T) {
 	})
 	h := modelCheckHarness(t, configuredStore(), &fakeChat{})
 	tester := h.tester()
-	h.click(tester, "测试连接")
+	h.click(tester, "测试当前输入")
 	waitModelCheckText(t, h, tester, "连接失败：HTTP 500")
 }
 
@@ -100,7 +127,7 @@ func TestModelCheckNetworkError(t *testing.T) {
 	})
 	h := modelCheckHarness(t, configuredStore(), &fakeChat{})
 	tester := h.tester()
-	h.click(tester, "测试连接")
+	h.click(tester, "测试当前输入")
 	waitModelCheckText(t, h, tester, "连接失败：dial tcp: connection refused")
 }
 
@@ -113,7 +140,7 @@ func TestModelCheckWithoutBaseURL(t *testing.T) {
 	h := modelCheckHarness(t, newFakeSettings(nil), &fakeChat{})
 	tester := h.tester()
 	h.assertTexts(tester, "尚未配置服务地址")
-	h.click(tester, "测试连接")
+	h.click(tester, "测试当前输入")
 	if called.Load() != 0 {
 		t.Fatalf("disabled check called the getter %d times", called.Load())
 	}
@@ -129,7 +156,7 @@ func TestModelCheckIgnoresRepeatedClicks(t *testing.T) {
 	})
 	h := modelCheckHarness(t, configuredStore(), &fakeChat{})
 	tester := h.tester()
-	h.click(tester, "测试连接")
+	h.click(tester, "测试当前输入")
 	tester.Frame()
 	h.assertTexts(tester, "检查中…")
 	h.click(tester, "检查中…")
@@ -149,10 +176,11 @@ func TestModelCheckEnglishCopy(t *testing.T) {
 	tester := h.tester()
 	h.uiRoot.Locale().SetLanguage("en")
 	tester.Frame()
-	h.assertTexts(tester, "Connection check", "Test connection", "Current",
+	h.assertTexts(tester, "Connection check", "Test current input", "Current",
 		"https://api.example.com/v1", "deepseek-chat")
-	h.click(tester, "Test connection")
+	h.click(tester, "Test current input")
 	waitModelCheckText(t, h, tester, "Connection OK")
+	requireModelCheckDetail(t, tester, "1 model: a · ")
 	h.assertTexts(tester, "1 model")
 
 	// The unconfigured state is translated too.
@@ -175,7 +203,7 @@ func TestModelCheckUsesChatConfigFallback(t *testing.T) {
 	}}
 	h := modelCheckHarness(t, newFakeSettings(nil), chat)
 	tester := h.tester()
-	h.click(tester, "测试连接")
+	h.click(tester, "测试当前输入")
 	waitModelCheckText(t, h, tester, "连接正常")
 }
 
@@ -185,7 +213,7 @@ func TestModelCheckStatusTextsAreLocalized(t *testing.T) {
 	})
 	h := modelCheckHarness(t, configuredStore(), &fakeChat{})
 	tester := h.tester()
-	h.click(tester, "测试连接")
+	h.click(tester, "测试当前输入")
 	waitModelCheckText(t, h, tester, "连接正常")
 	if strings.Contains(strings.Join(tester.Texts(), "\n"), "Connection OK") {
 		t.Fatal("Chinese frame shows the English result")

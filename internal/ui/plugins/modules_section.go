@@ -13,10 +13,11 @@ import (
 
 	"github.com/zeokeel/zeokeel/internal/contracts"
 	"github.com/zeokeel/zeokeel/internal/design"
+	"github.com/zeokeel/zeokeel/internal/uikit"
 )
 
-// buildModulesSection renders the built-in module inventory; hidden entirely
-// when the host provides no lister (optional product wiring).
+// buildModulesSection renders the built-in module inventory as a uikit.Section;
+// hidden entirely when the host provides no lister (optional product wiring).
 func buildModulesSection(c *ui.Context, t *design.Tokens, st *state,
 	lister contracts.ModuleLister, hasLister bool) {
 	if !hasLister || lister == nil {
@@ -30,13 +31,13 @@ func buildModulesSection(c *ui.Context, t *design.Tokens, st *state,
 	default:
 		countLabel = fmt.Sprintf(st.tr("%d 个模块", "%d modules"), len(modules))
 	}
-	ui.Column(c).FillWidth().Gap(design.Space2).Children(func() {
+	uikit.Section(c, st.tr("内置模块", "Built-in modules"), func(c *ui.Context) {
 		ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(design.Space2).Children(func() {
-			design.Apply(ui.Text(c, st.tr("内置模块", "Built-in modules")), t.SectionLabel())
-			design.Apply(ui.Badge(c, countLabel), t.Badge()).TextColor(t.LabelSecondary)
+			design.Apply(ui.Text(c, countLabel), t.Font(design.TypeXXS)).TextColor(t.LabelTertiary)
+			ui.Spacer(c).Grow(1)
+			design.Apply(ui.Text(c, st.tr("编译期装配，只读。", "Compiled-in, read-only.")),
+				t.Font(design.TypeXXS)).TextColor(t.LabelTertiary)
 		})
-		design.Apply(ui.Text(c, st.tr("编译期装配，只读。", "Compiled-in, read-only.")),
-			t.Font(design.TypeXXS)).TextColor(t.LabelTertiary)
 		open := st.modulesOpen
 		ui.Collapsible(c, st.tr("展开模块列表", "Show modules"), &open, func() {
 			for _, module := range modules {
@@ -46,7 +47,7 @@ func buildModulesSection(c *ui.Context, t *design.Tokens, st *state,
 					state := strings.TrimSpace(module.State)
 					color := t.LabelTertiary
 					if state == "active" {
-						color = t.Success
+						color = t.SuccessText
 					}
 					design.Apply(ui.Badge(c, state), t.Badge()).TextColor(color)
 				})

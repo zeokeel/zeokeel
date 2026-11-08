@@ -17,6 +17,7 @@ import (
 
 	"github.com/zeokeel/zeokeel/internal/contracts"
 	"github.com/zeokeel/zeokeel/internal/design"
+	"github.com/zeokeel/zeokeel/internal/uikit"
 )
 
 const (
@@ -25,16 +26,25 @@ const (
 	// MemoryPageSection places it with the other advanced pages.
 	MemoryPageSection = "高级"
 	// MemoryPageOrder places the page after data & privacy.
-	MemoryPageOrder = 107
+	MemoryPageOrder = 60
 )
 
 // memoryPageState is the page's UI-local state (UI thread only).
 type memoryPageState struct {
-	query        string
-	draft        string
-	notice       string
-	noticeErr    bool
-	confirmClear bool
+	query         string
+	draft         string
+	notice        string
+	noticeErr     bool
+	confirmClear  bool
+	confirmDelete string // memory ID waiting for the native confirmation dialog
+
+	// Per-entry editing (optional: only with a contracts.MemoryUpdater store).
+	// The modal keeps the entry's ID and scope so saving is an update in place.
+	editing   bool
+	editID    string
+	editText  string
+	editScope string
+	editErr   string
 
 	// Consolidation policy row (optional: only with a MemoryConsolidator).
 	policyLoaded bool
@@ -71,27 +81,33 @@ func memoryScopeLabel(locale contracts.LocaleService, scope string) string {
 	}
 }
 
-// memoryTimestamp renders one memory's creation time (empty when unset).
-func memoryTimestamp(created time.Time) string {
-	if created.IsZero() {
-		return ""
-	}
-	return created.Local().Format("2006-01-02 15:04")
+// memoryTimestamp renders one memory's creation time in the interface language
+// (empty when unset); uikit.FormatDateTime keeps it consistent with the other
+// product timestamps and makes the appearance page's date-format promise true.
+func memoryTimestamp(locale contracts.LocaleService, created time.Time) string {
+	return uikit.FormatDateTime(locale, created.Local())
 }
 
-// buildMemoryPage renders the memory management page.
+// buildMemoryPage renders the memory management page. Entries are rows with a
+// hairline divider (not cards inside a card), every destructive action asks for
+// confirmation with the native alert dialog, and the section controls say
+// whether they apply at once.
 func buildMemoryPage(c *ui.Context, t *design.Tokens, kctx cordis.Context,
 	st *memoryPageState, settingsStore contracts.SettingsService, locale contracts.LocaleService) {
-	ui.Column(c).FillWidth().Gap(design.Space2).Children(func() {
-		pageHeader(c, t, localized(locale, "记忆", "Memory"), localized(locale,
+	ui.Column(c).FillWidth().Gap(design.Space4).Children(func() {
+		uikit.PageHeader(c, localized(locale, "记忆", "Memory"), localized(locale,
 			"查看、搜索与管理全局记忆。",
 			"Browse, search and manage global memories."))
 		store, hasStore := kctx.Get(contracts.KeyMemory)
 		if !hasStore || store == nil {
-			design.Apply(ui.Text(c, localized(locale, "未启用记忆后端", "Memory backend not enabled")),
-				t.TextMuted(design.TypeXS))
+			uikit.EmptyState(c, localized(locale, "未启用记忆后端", "Memory backend not enabled"))
 			return
 		}
+		// Editing needs the optional update half. Backends that only implement
+		// the rig store keep their row actions unchanged (delete still works);
+		// the edit button is hidden rather than rendered disabled, because a
+		// permanently disabled control gives no reason and no path forward.
+		updater, _ := store.(contracts.MemoryUpdater)
 
 		query := strings.TrimSpace(st.query)
 		var (
@@ -104,7 +120,7 @@ func buildMemoryPage(c *ui.Context, t *design.Tokens, kctx cordis.Context,
 			memories, loadErr = store.List(context.Background())
 		}
 
-		panel(c, t, func() {
+		uikit.Section(c, localized(locale, "全部记忆", "All memories"), func(*ui.Context) {
 			ui.SearchField(c, &st.query).
 				Label(localized(locale, "搜索记忆", "Search memory")).
 				Placeholder(localized(locale, "搜索记忆…", "Search memory…")).FillWidth()
@@ -117,60 +133,60 @@ func buildMemoryPage(c *ui.Context, t *design.Tokens, kctx cordis.Context,
 				} else {
 					ui.Spacer(c).Grow(1)
 				}
-				if ui.Button(c, localized(locale, "整理记忆", "Tidy")).
-					Tooltip(localized(locale, "删除重复的记忆，保留最早的一条", "Remove duplicate memories, keeping the earliest")).Clicked() {
+				if design.Apply(ui.Button(c, localized(locale, "整理记忆", "Tidy")),
+					t.SecondaryButton()).Tooltip(localized(locale,
+					"删除重复的记忆，保留最早的一条", "Remove duplicate memories, keeping the earliest")).Clicked() {
 					tidyMemoriesPage(store, st, locale)
 					c.Invalidate()
 				}
-				clear := ui.Button(c, localized(locale, "全部清空", "Clear all")).
-					Tooltip(localized(locale, "删除全部记忆", "Delete every memory")).TextColor(t.DangerText)
-				if clear.Clicked() {
+				if design.Apply(ui.Button(c, localized(locale, "全部清空", "Clear all")),
+					t.DangerButton()).Tooltip(localized(locale,
+					"删除全部记忆", "Delete every memory")).Clicked() {
 					st.confirmClear = true
 					c.Invalidate()
 				}
 			})
 			if loadErr != nil {
-				buildMemoryPageError(c, t, localized(locale, "读取记忆失败：", "Failed to read memory: ")+loadErr.Error())
+				uikit.ErrorLine(c, localized(locale, "读取记忆失败：", "Failed to read memory: ")+loadErr.Error())
 				return
 			}
 
 			switch {
 			case len(memories) == 0 && query != "":
-				design.Apply(ui.Text(c, localized(locale, "没有匹配的记忆", "No matching memories")),
-					t.TextMuted(design.TypeXS))
+				uikit.EmptyState(c, localized(locale, "没有匹配的记忆", "No matching memories"))
 			case len(memories) == 0:
-				design.Apply(ui.Text(c, localized(locale, "还没有记忆", "No memories yet")),
-					t.TextMuted(design.TypeXS))
+				uikit.EmptyState(c, localized(locale, "还没有记忆", "No memories yet"))
 			default:
 				for _, memory := range memories {
 					memory := memory
-					buildMemoryPageEntry(c, t, store, st, memory, locale)
+					ui.Divider(c)
+					buildMemoryPageEntry(c, t, store, updater, st, memory, locale)
 				}
 			}
 		})
 
-		buildMemoryConsolidationPanel(c, t, store, settingsStore, st, locale)
-
-		buildMemoryExtractionPanel(c, t, kctx, settingsStore, st, locale)
-
-		panel(c, t, func() {
-			sectionTitle(c, t, localized(locale, "添加记忆", "Add memory"))
-			ui.TextInput(c, &st.draft).
-				Label(inputLabel(locale, localized(locale, "记忆内容", "Memory text"))).
-				Placeholder(localized(locale, "记忆内容", "Memory text")).FillWidth()
-			ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(design.Space2).Children(func() {
-				if st.notice != "" {
-					if st.noticeErr {
-						buildMemoryPageError(c, t, st.notice)
-					} else {
-						statusBadge(c, t, st.notice, false)
+		// Adding a memory stays next to the list it extends, before the policy
+		// and extraction sections (H19): the old order buried the add form
+		// below two long policy blocks.
+		uikit.Section(c, localized(locale, "添加记忆", "Add memory"), func(*ui.Context) {
+			draft := strings.TrimSpace(st.draft)
+			ui.Field(c, localized(locale, "记忆内容", "Memory text"), func() {
+				ui.TextInput(c, &st.draft).
+					Label(inputLabel(locale, localized(locale, "记忆内容", "Memory text"))).
+					Placeholder(localized(locale, "记忆内容", "Memory text")).FillWidth()
+			}).Description(localized(locale,
+				"添加一条全局记忆；新记忆会出现在列表顶部。",
+				"Adds one global memory; it appears at the top of the list."))
+			if st.notice != "" && st.noticeErr {
+				uikit.ErrorLine(c, st.notice)
+			}
+			uikit.DialogFooter(c, []uikit.DialogAction{{
+				Label: localized(locale, "添加", "Add"), Primary: true,
+				Disabled: draft == "",
+				OnClick: func() {
+					if draft == "" {
+						return
 					}
-				}
-				ui.Spacer(c).Grow(1)
-				draft := strings.TrimSpace(st.draft)
-				add := design.Apply(ui.PrimaryButton(c, localized(locale, "添加", "Add")), t.PrimaryButton()).
-					Disabled(draft == "")
-				if add.Clicked() && draft != "" {
 					_, err := store.Add(context.Background(), contracts.Memory{Text: draft, Scope: "global"})
 					if err != nil {
 						st.notice = localized(locale, "添加记忆失败：", "Failed to add memory: ") + err.Error()
@@ -181,9 +197,22 @@ func buildMemoryPage(c *ui.Context, t *design.Tokens, kctx cordis.Context,
 						st.noticeErr = false
 					}
 					c.Invalidate()
-				}
-			})
+				},
+			}})
+			if st.notice != "" && !st.noticeErr {
+				statusBadgesRow(c, t, st.notice, false)
+			}
 		})
+
+		buildMemoryConsolidationPanel(c, t, store, settingsStore, st, locale)
+
+		buildMemoryExtractionPanel(c, t, kctx, settingsStore, st, locale)
+
+		// Per-entry edit dialog: only a store with the optional update half
+		// gets 编辑 buttons, so this opens only from one of those rows.
+		if updater != nil && st.editing {
+			buildMemoryEditDialog(c, t, updater, st, locale)
+		}
 
 		// Clear-all confirmation: a native AlertDialog above the page content.
 		if st.confirmClear {
@@ -198,6 +227,32 @@ func buildMemoryPage(c *ui.Context, t *design.Tokens, kctx cordis.Context,
 				c.Invalidate()
 			default:
 				c.Invalidate()
+			}
+		}
+
+		// One-entry deletion: confirmed with the same native dialog pattern.
+		if st.confirmDelete != "" {
+			target := st.confirmDelete
+			open := true
+			switch ui.AlertDialog(c, &open,
+				localized(locale, "删除记忆", "Delete memory"),
+				localized(locale, "确认删除这条记忆？此操作无法撤销。",
+					"Delete this memory? This cannot be undone."),
+				localized(locale, "取消", "Cancel"),
+				localized(locale, "确认删除", "Confirm delete")) {
+			case 1:
+				if store.Remove(context.Background(), target) {
+					st.notice = ""
+					st.noticeErr = false
+				} else {
+					st.notice = localized(locale, "删除记忆失败：", "Failed to delete memory: ") + target
+					st.noticeErr = true
+				}
+				st.confirmDelete = ""
+				c.Invalidate()
+			}
+			if !open {
+				st.confirmDelete = ""
 			}
 		}
 	})
@@ -233,33 +288,42 @@ func buildMemoryConsolidationPanel(c *ui.Context, t *design.Tokens, store contra
 			st.maxAgeDays = strings.TrimSpace(settingsStore.Get(contracts.SettingMemoryMaxAgeDays, ""))
 		}
 	}
-	panel(c, t, func() {
-		sectionTitle(c, t, localized(locale, "整理策略", "Consolidation policy"))
+	uikit.Section(c, localized(locale, "整理策略", "Consolidation policy"), func(*ui.Context) {
 		design.Apply(ui.Text(c, localized(locale,
 			"按策略确定性整理（不调用模型）：过期删除 + 超限保留最新；0 或留空表示不限制。",
 			"Deterministic consolidation (no model call): drop expired entries, then keep the newest up to the cap; 0 or empty means unlimited.")),
-			t.Font(design.TypeXXS)).TextColor(t.LabelTertiary).MaxLines(2)
-		ui.TextInput(c, &st.maxEntries).
-			Label(inputLabel(locale, localized(locale, "最大条目数", "Max entries"))).
-			Placeholder(localized(locale, "0（不限）", "0 (unlimited)")).FillWidth()
-		ui.TextInput(c, &st.maxAgeDays).
-			Label(inputLabel(locale, localized(locale, "保留天数", "Max age (days)"))).
-			Placeholder(localized(locale, "0（不限）", "0 (unlimited)")).FillWidth()
-		ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(design.Space2).Children(func() {
-			if ui.Button(c, localized(locale, "按策略整理", "Consolidate")).Clicked() {
-				applyMemoryPolicy(c, consolidator, settingsStore, st, locale)
-			}
-			ui.Spacer(c).Grow(1)
-			if st.policyNotice != "" && !st.policyErr {
-				statusBadge(c, t, st.policyNotice, false)
-			}
+			t.TextMuted(design.TypeXXS)).MaxLines(2)
+		ui.Row(c).FillWidth().Gap(design.Space3).AlignItems(ui.Start).Children(func() {
+			ui.Column(c).FillWidth().Grow(1).Children(func() {
+				ui.Field(c, localized(locale, "最大条目数", "Max entries"), func() {
+					ui.TextInput(c, &st.maxEntries).
+						Label(inputLabel(locale, localized(locale, "最大条目数", "Max entries"))).
+						Placeholder(localized(locale, "0（不限）", "0 (unlimited)")).FillWidth()
+				}).Description(localized(locale, "超过后删除最旧的记忆；0 表示不限。",
+					"Entries beyond the cap are the oldest ones; 0 means unlimited."))
+			})
+			ui.Column(c).FillWidth().Grow(1).Children(func() {
+				ui.Field(c, localized(locale, "保留天数", "Max age (days)"), func() {
+					ui.TextInput(c, &st.maxAgeDays).
+						Label(inputLabel(locale, localized(locale, "保留天数", "Max age (days)"))).
+						Placeholder(localized(locale, "0（不限）", "0 (unlimited)")).FillWidth()
+				}).Description(localized(locale, "早于该天数的记忆会被删除；0 表示不限。",
+					"Memories older than this many days are dropped; 0 means unlimited."))
+			})
 		})
 		if st.policyWarn != "" {
-			buildMemoryPageError(c, t, st.policyWarn)
+			uikit.ErrorLine(c, st.policyWarn)
 		}
 		if st.policyNotice != "" && st.policyErr {
-			buildMemoryPageError(c, t, st.policyNotice)
+			uikit.ErrorLine(c, st.policyNotice)
 		}
+		statusBadgesRow(c, t, st.policyNotice, st.policyErr)
+		uikit.DialogFooter(c, []uikit.DialogAction{{
+			Label: localized(locale, "按策略整理", "Consolidate"), Primary: true,
+			OnClick: func() {
+				applyMemoryPolicy(c, consolidator, settingsStore, st, locale)
+			},
+		}})
 	})
 }
 
@@ -435,42 +499,41 @@ func startMemoryExtraction(runtime contracts.UIRuntime,
 }
 
 // buildMemoryExtractionPanel renders the opt-in model-extraction block: the
-// enable toggle, its privacy/cost note and the manual "extract from current
+// enable switch, its privacy/cost note and the manual "extract from current
 // session" action (shown only when a backend is provided).
 func buildMemoryExtractionPanel(c *ui.Context, t *design.Tokens, kctx cordis.Context,
 	settingsStore contracts.SettingsService, st *memoryPageState, locale contracts.LocaleService) {
-	panel(c, t, func() {
-		sectionTitle(c, t, localized(locale, "模型提取", "Model extraction"))
+	uikit.Section(c, localized(locale, "模型提取", "Model extraction"), func(*ui.Context) {
 		enabled := memoryExtractEnabled(settingsStore.Get(contracts.SettingMemoryExtractEnabled, ""))
 		toggleLabel := localized(locale,
 			"启用模型提取（从最近对话提取记忆，会调用模型）",
 			"Enable model extraction (extract memories from recent chats; calls the model)")
-		toggle := ui.Toggle(c, &enabled, toggleLabel)
-		if toggle.Changed() {
-			value := ""
-			if enabled {
-				value = "true"
+		ui.Form(c, func() {
+			if switchField(c, toggleLabel,
+				localized(locale,
+					"调用当前服务商，读取最近 20 条消息，最多写入 5 条记忆；仅手动触发，不做后台定时提取。",
+					"Calls the current provider, reads the recent 20 messages and stores at most 5 memories; manual trigger only, no background extraction."),
+				&enabled) {
+				value := ""
+				if enabled {
+					value = "true"
+				}
+				if err := settingsStore.Set(contracts.SettingMemoryExtractEnabled, value); err != nil {
+					setMemoryNotice(st, localized(locale, "保存失败：", "Save failed: ")+err.Error(), true)
+				} else {
+					setMemoryNotice(st, localized(locale, "已保存", "Saved"), false)
+				}
+				c.Invalidate()
 			}
-			if err := settingsStore.Set(contracts.SettingMemoryExtractEnabled, value); err != nil {
-				setMemoryNotice(st, localized(locale, "保存失败：", "Save failed: ")+err.Error(), true)
-			} else {
-				setMemoryNotice(st, localized(locale, "已保存", "Saved"), false)
-			}
-			c.Invalidate()
-		}
-		design.Apply(ui.Text(c, localized(locale,
-			"调用当前服务商，读取最近 20 条消息，最多写入 5 条记忆；仅手动触发，不做后台定时提取。",
-			"Calls the current provider, reads the recent 20 messages and stores at most 5 memories; manual trigger only, no background extraction.")),
-			t.TextMuted(design.TypeXXS)).MaxLines(3)
-		design.Apply(ui.Text(c, localized(locale,
+		})
+		uikit.ErrorLine(c, localized(locale,
 			"会消耗模型额度并向服务商发送对话内容。",
-			"Uses your model quota and sends conversation content to the provider.")),
-			t.Font(design.TypeXXS)).TextColor(t.DangerText).MaxLines(2)
+			"Uses your model quota and sends conversation content to the provider."))
 
 		extractor, hasExtractor := kctx.Get(contracts.KeyMemoryExtractor)
 		if !hasExtractor || extractor == nil {
-			design.Apply(ui.Text(c, localized(locale, "未启用记忆提取后端", "Memory extraction backend not enabled")),
-				t.TextMuted(design.TypeXXS))
+			uikit.EmptyState(c, localized(locale,
+				"未启用记忆提取后端", "Memory extraction backend not enabled"))
 			return
 		}
 		activeID := ""
@@ -482,12 +545,17 @@ func buildMemoryExtractionPanel(c *ui.Context, t *design.Tokens, kctx cordis.Con
 			label = localized(locale, "提取中…", "Extracting…")
 		}
 		disabled := !enabled || activeID == "" || st.extractRunning
-		button := design.Apply(ui.PrimaryButton(c, label), t.PrimaryButton()).Disabled(disabled)
-		if button.Clicked() && !disabled && !st.extractRunning {
-			runtime, _ := kctx.Get(contracts.KeyUIRuntime)
-			startMemoryExtraction(runtime, extractor, st, activeID, locale)
-			c.Invalidate()
-		}
+		uikit.DialogFooter(c, []uikit.DialogAction{{
+			Label: label, Primary: true, Disabled: disabled,
+			OnClick: func() {
+				if disabled || st.extractRunning {
+					return
+				}
+				runtime, _ := kctx.Get(contracts.KeyUIRuntime)
+				startMemoryExtraction(runtime, extractor, st, activeID, locale)
+				c.Invalidate()
+			},
+		}})
 		switch {
 		case !enabled:
 			design.Apply(ui.Text(c, localized(locale, "先启用模型提取后再提取", "Enable model extraction first")),
@@ -499,24 +567,27 @@ func buildMemoryExtractionPanel(c *ui.Context, t *design.Tokens, kctx cordis.Con
 	})
 }
 
-// buildMemoryPageEntry renders one memory row: body, scope/time metadata and a
-// native delete action.
+// buildMemoryPageEntry renders one memory row: the body, scope/time metadata and
+// the native actions — 编辑 (only when the store implements
+// contracts.MemoryUpdater) and the confirmed danger delete.
 func buildMemoryPageEntry(c *ui.Context, t *design.Tokens, store contracts.MemoryStore,
-	st *memoryPageState, memory contracts.Memory, locale contracts.LocaleService) {
-	design.Apply(ui.Column(c), t.Panel()).Padding(design.Space2).Gap(design.Space1).Children(func() {
+	updater contracts.MemoryUpdater, st *memoryPageState, memory contracts.Memory,
+	locale contracts.LocaleService) {
+	ui.Column(c).FillWidth().PaddingY(design.Space2).Children(func() {
 		ui.Row(c).FillWidth().AlignItems(ui.Start).Gap(design.Space2).Children(func() {
 			design.Apply(ui.Text(c, memory.Text), t.Font(design.TypeXS)).
 				TextColor(t.LabelPrimary).Grow(1).MaxLines(3)
-			remove := ui.Button(c, localized(locale, "删除", "Delete")).
-				TextColor(t.DangerText).Shrink(0)
-			if remove.Clicked() {
-				if store.Remove(context.Background(), memory.ID) {
-					st.notice = ""
-					st.noticeErr = false
-				} else {
-					st.notice = localized(locale, "删除记忆失败：", "Failed to delete memory: ") + memory.ID
-					st.noticeErr = true
+			if updater != nil {
+				if design.Apply(ui.Button(c, localized(locale, "编辑", "Edit")),
+					t.SecondaryButton()).Tooltip(localized(locale,
+					"编辑这条记忆", "Edit this memory")).Clicked() {
+					startMemoryEdit(c, st, memory)
 				}
+			}
+			if design.Apply(ui.Button(c, localized(locale, "删除", "Delete")),
+				t.DangerButton()).Tooltip(localized(locale,
+				"删除这条记忆", "Delete this memory")).Clicked() {
+				st.confirmDelete = memory.ID
 				c.Invalidate()
 			}
 		})
@@ -524,7 +595,7 @@ func buildMemoryPageEntry(c *ui.Context, t *design.Tokens, store contracts.Memor
 		if scope := memoryScopeLabel(locale, memory.Scope); scope != "" {
 			meta = append(meta, scope)
 		}
-		if created := memoryTimestamp(memory.Created); created != "" {
+		if created := memoryTimestamp(locale, memory.Created); created != "" {
 			meta = append(meta, created)
 		}
 		if len(meta) > 0 {
@@ -534,9 +605,78 @@ func buildMemoryPageEntry(c *ui.Context, t *design.Tokens, store contracts.Memor
 	})
 }
 
-// buildMemoryPageError renders one DangerText error line.
-func buildMemoryPageError(c *ui.Context, t *design.Tokens, text string) {
-	ui.Row(c).FillWidth().Children(func() {
-		design.Apply(ui.Text(c, text), t.Font(design.TypeXS)).TextColor(t.DangerText)
+// startMemoryEdit opens the edit modal prefilled with one entry's text. The
+// entry's scope rides along in the draft so saving preserves it (the dialog
+// edits the text only; editing scope is not a product feature).
+func startMemoryEdit(c *ui.Context, st *memoryPageState, memory contracts.Memory) {
+	st.editing = true
+	st.editID = memory.ID
+	st.editText = memory.Text
+	st.editScope = memory.Scope
+	st.editErr = ""
+	c.Invalidate()
+}
+
+// buildMemoryEditDialog renders the native edit modal: the current text in a
+// text area, a cancel action that closes without saving, and a primary save
+// that calls contracts.MemoryUpdater.Update with the entry's ID, the new text
+// and its existing scope. Failures keep the modal open with an inline error.
+func buildMemoryEditDialog(c *ui.Context, t *design.Tokens, updater contracts.MemoryUpdater,
+	st *memoryPageState, locale contracts.LocaleService) {
+	ui.Modal(c, &st.editing, func() {
+		design.Apply(ui.Column(c).Width(560).Gap(design.Space3), func(element ui.Element) ui.Element {
+			return element.PaddingX(design.Space5).PaddingY(design.Space2)
+		}).Children(func() {
+			design.Apply(ui.Text(c, localized(locale, "编辑记忆", "Edit memory")),
+				t.Font(design.TypeL)).FontWeight(600).TextColor(t.LabelPrimary)
+			design.Apply(ui.Text(c, localized(locale,
+				"保存后保持原 ID、创建时间与作用域。",
+				"Saving keeps the same ID, creation time and scope.")),
+				t.TextMuted(design.TypeXS)).MaxLines(2)
+			ui.Field(c, localized(locale, "编辑内容", "Edit text"), func() {
+				ui.TextArea(c, &st.editText).
+					Label(inputLabel(locale, localized(locale, "编辑内容", "Edit text"))).
+					FillWidth().MinHeight(design.Space6 * 4)
+			}).Description(localized(locale, "这条记忆的新内容。",
+				"The memory's new text."))
+			if st.editErr != "" {
+				uikit.ErrorLine(c, st.editErr)
+			}
+			uikit.DialogFooter(c, []uikit.DialogAction{
+				{Label: localized(locale, "取消", "Cancel"), OnClick: func() {
+					st.editing = false
+					st.editErr = ""
+					c.Invalidate()
+				}},
+				{Label: localized(locale, "保存", "Save"), Primary: true, OnClick: func() {
+					saveMemoryEdit(c, updater, st, locale)
+				}},
+			})
+		})
 	})
+}
+
+// saveMemoryEdit validates the draft and saves it in place: success closes the
+// modal and shows the page's success badge, a failure keeps it open with the
+// danger line so the user can fix the entry.
+func saveMemoryEdit(c *ui.Context, updater contracts.MemoryUpdater,
+	st *memoryPageState, locale contracts.LocaleService) {
+	text := strings.TrimSpace(st.editText)
+	if text == "" {
+		st.editErr = localized(locale, "内容不能为空", "Text is required")
+		c.Invalidate()
+		return
+	}
+	if _, err := updater.Update(context.Background(), st.editID, text, st.editScope); err != nil {
+		st.editErr = localized(locale, "更新记忆失败：", "Failed to update memory: ") + err.Error()
+		c.Invalidate()
+		return
+	}
+	st.editing = false
+	st.editErr = ""
+	st.editID = ""
+	st.editText = ""
+	st.editScope = ""
+	setMemoryNotice(st, localized(locale, "已更新", "Updated"), false)
+	c.Invalidate()
 }

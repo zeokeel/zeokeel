@@ -116,6 +116,11 @@ func TestDSHImportEndToEnd(t *testing.T) {
 	}
 	uiRoot.Navigator().ToggleSettings()
 	tester.Frame()
+	// 导入 lives in the collapsed 高级 settings group.
+	if err := tester.Click("高级"); err != nil {
+		t.Fatalf("expand advanced settings: %v; texts = %v", err, tester.Texts())
+	}
+	tester.Frame()
 	if err := tester.Click("导入"); err != nil {
 		t.Fatalf("click import page: %v; texts = %v", err, tester.Texts())
 	}

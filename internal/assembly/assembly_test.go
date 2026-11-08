@@ -285,14 +285,16 @@ func TestDesktopAssemblyLoadsAndUnwinds(t *testing.T) {
 	if screens := uiRoot.ScreenLister().Screens(); !slices.Equal(screens, []string{"home", "automation", "session", "plugins"}) {
 		t.Fatalf("screens after load = %v, want [home automation session plugins]", screens)
 	}
-	// The modules contributed to the host's reserved slots (ui/welcome) and to
-	// the settings surface (ui/about) without the host knowing about them.
+	// The modules contributed to the host's reserved slots (ui/welcome, the
+	// right inspector, the overlay dialogs) without the host knowing about them.
+	// The settings header no longer hosts build metadata (it moved to the About
+	// page), so it is not registered in the desktop assembly.
 	slots := uiRoot.Runtime().Slots()
 	for _, want := range []string{
 		contracts.SlotSidebarPrimary,
 		contracts.SlotSidebarNav,
 		contracts.SlotSidebarFooter,
-		contracts.SlotSettingsHeader,
+		contracts.SlotSessionPanelRight,
 		contracts.SlotOverlayDialogs,
 	} {
 		if !slices.Contains(slots, want) {
@@ -391,8 +393,11 @@ func TestHeadlessAssemblyNeedsNoUIServices(t *testing.T) {
 	if state := hostInstance.State(); state != cordis.Active {
 		t.Fatalf("hosttools state = %s, want Active", state)
 	}
-	// Host tools are registered even in a non-interactive product: the catalog
-	// is stable, only the ask_user capability is unavailable.
+	// The non-interactive product keeps the host tools that can still act
+	// without a UI (ask_user degrades to a readable message; present/goal/team
+	// keep their in-process behavior) but hides the plan-review pair: a plan
+	// submitted for review could never be approved in a headless session, so
+	// exposing plan_review/exit_plan_mode only dead-ends the agent.
 	toolkitRegistry, ok := root.Get(contracts.KeyToolkit)
 	if !ok {
 		t.Fatal("KeyToolkit service is not available on the headless root")
@@ -401,9 +406,14 @@ func TestHeadlessAssemblyNeedsNoUIServices(t *testing.T) {
 	for _, spec := range toolkitRegistry.Specs() {
 		registered[spec.Name] = true
 	}
-	for _, name := range []string{"ask_user", "exit_plan_mode", "goal", "plan_review", "present", "team"} {
+	for _, name := range []string{"ask_user", "goal", "present", "team"} {
 		if !registered[name] {
 			t.Fatalf("headless toolkit registry lacks host tool %q", name)
+		}
+	}
+	for _, name := range []string{"plan_review", "exit_plan_mode"} {
+		if registered[name] {
+			t.Fatalf("headless toolkit registry exposes plan tool %q, want it hidden", name)
 		}
 	}
 	if warnings := loader.Warnings(); len(warnings) != 0 {

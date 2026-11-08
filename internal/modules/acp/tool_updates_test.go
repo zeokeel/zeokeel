@@ -126,6 +126,41 @@ func TestToolCallStreamingOrder(t *testing.T) {
 	}
 }
 
+// TestToolCallCarriesRawInput covers the verification finding that ACP tool
+// notifications dropped the call arguments entirely: the read model now keeps
+// the raw JSON and both the start and completion updates expose it.
+func TestToolCallCarriesRawInput(t *testing.T) {
+	chat := newFakeChat()
+	call := contracts.ToolCall{ID: "call-9", Name: "read_file", Status: "running",
+		Arguments: `{"path":"a.txt"}`}
+	chat.sendHook = func(c *fakeChat, sessionID, prompt string) {
+		c.setAssistantTools(sessionID, "", []contracts.ToolCall{call}, true)
+		call.Status, call.Summary = "ok", "done"
+		c.setAssistantTools(sessionID, "", []contracts.ToolCall{call}, false)
+	}
+	service := newService(Config{}, chat, &fakeLogger{})
+	frames := serveLines(t, service, promptLine(1, "sess-1", "read it"))
+	updates := notificationUpdates(t, frames)
+	if len(updates) != 2 {
+		t.Fatalf("updates = %+v, want tool_call + tool_call_update", updates)
+	}
+	callPayload, _ := updates[0]["toolCall"].(map[string]any)
+	if callPayload == nil {
+		t.Fatalf("tool_call payload = %+v", updates[0])
+	}
+	raw, _ := callPayload["rawInput"].(map[string]any)
+	if raw == nil || raw["path"] != "a.txt" {
+		t.Fatalf("tool_call rawInput = %#v, want the decoded arguments", callPayload["rawInput"])
+	}
+	if updates[1]["title"] != "read_file" {
+		t.Fatalf("tool_call_update title = %v, want the tool name", updates[1]["title"])
+	}
+	rawDone, _ := updates[1]["rawInput"].(map[string]any)
+	if rawDone == nil || rawDone["path"] != "a.txt" {
+		t.Fatalf("tool_call_update rawInput = %#v", updates[1]["rawInput"])
+	}
+}
+
 func TestToolCallFailureStatus(t *testing.T) {
 	chat := newFakeChat()
 	chat.sendHook = func(c *fakeChat, sessionID, prompt string) {

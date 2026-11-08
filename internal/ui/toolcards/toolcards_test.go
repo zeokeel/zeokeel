@@ -5,6 +5,8 @@ package toolcards_test
 // native collapsibles and the demo card keeps its historical output.
 
 import (
+	"time"
+
 	"testing"
 
 	"github.com/egoist/mygo/ui"
@@ -189,6 +191,13 @@ func TestEveryToolNameHasRenderer(t *testing.T) {
 		if !matched[name] {
 			t.Fatalf("RenderTool reported no renderer for %q", name)
 		}
+		if name == "plan_review" {
+			// The plan card is titled with its localized product name.
+			if !tester.HasText("计划审阅") {
+				t.Fatalf("frame does not render the plan card; texts = %v", tester.Texts())
+			}
+			continue
+		}
 		if !tester.HasText(name) {
 			t.Fatalf("frame does not render a card for %q; texts = %v", name, tester.Texts())
 		}
@@ -211,8 +220,8 @@ func TestDemoCardPreserved(t *testing.T) {
 	h.assertTexts(tester,
 		"工具调用: demo",
 		"示例工具调用：由 ui/toolcards 模块渲染",
-		"demo-1",
 		"ok")
+	h.assertNoTexts(tester, "demo-1")
 }
 
 func TestStatusBadgesUseThemeSemantics(t *testing.T) {
@@ -236,14 +245,17 @@ func TestSummaryCollapsible(t *testing.T) {
 		ID: "b1", Name: "bash", Status: "ok", Summary: summary,
 	}}, nil, nil)
 	tester := h.tester()
-	h.assertTexts(tester, "摘要", "bash", "b1", "完成")
-	h.assertNoTexts(tester, summary) // collapsed by default
+	// H15: a short result starts expanded, and the disclosure row says 详情.
+	h.assertTexts(tester, "详情", "bash", "完成", summary)
+	h.assertNoTexts(tester, "b1") // internal call ID is hidden
 
-	h.click(tester, "摘要")
-	h.assertTexts(tester, summary)
-
-	h.click(tester, "摘要")
+	h.click(tester, "详情")
+	tester.Advance(300 * time.Millisecond) // the 200 ms close animation
 	h.assertNoTexts(tester, summary)
+
+	h.click(tester, "详情")
+	tester.Advance(300 * time.Millisecond)
+	h.assertTexts(tester, summary)
 }
 
 func TestDisposeRemovesCards(t *testing.T) {

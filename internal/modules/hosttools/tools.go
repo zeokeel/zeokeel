@@ -23,9 +23,9 @@ const (
 	ToolTeam         = "team"
 )
 
-// newTools builds the host tools bound to capabilities. Every tool is always
-// constructed (a stable tool catalog); a missing capability becomes a readable
-// tool error instead of changing the catalog between products.
+// newTools builds the full host-tool catalog bound to capabilities. Every tool
+// is constructed; a missing capability becomes a readable tool error instead of
+// silently changing the catalog.
 func newTools(capabilities hostcaps.Host) []rig.Tool {
 	return []rig.Tool{
 		&askUserTool{asker: capabilities.Asker},
@@ -35,6 +35,29 @@ func newTools(capabilities hostcaps.Host) []rig.Tool {
 		&goalTool{goals: capabilities.Goals},
 		&teamTool{team: capabilities.Team},
 	}
+}
+
+// toolListFor returns the tools one product registers: interactive products
+// get the full catalog, non-interactive (headless/ACP) products omit the
+// plan-review pair. A plan can only leave "reviewing" through a user decision
+// (exit_plan_mode approve/cancel), which a headless run can never obtain, so
+// exposing plan_review there would make the model submit a plan and stall with
+// the task silently unfinished. The remaining tools keep their behavior;
+// ask_user already degrades to a readable "no interactive UI" error.
+func toolListFor(capabilities hostcaps.Host, interactive bool) []rig.Tool {
+	tools := newTools(capabilities)
+	if interactive {
+		return tools
+	}
+	headless := make([]rig.Tool, 0, len(tools))
+	for _, tool := range tools {
+		switch tool.Name() {
+		case ToolPlanReview, ToolExitPlanMode:
+			continue
+		}
+		headless = append(headless, tool)
+	}
+	return headless
 }
 
 // --- ask_user ---------------------------------------------------------------

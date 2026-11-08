@@ -7,7 +7,7 @@
 // read_file, grep, web_search, subagent, ...) plus the original "demo" card the
 // host uses as a capability probe. All real cards share one native composition:
 // a status badge (theme-colored: running=warning, ok=success, error=danger), the
-// tool name, the call ID and, when the read model carries a summary, a
+// tool name and, when the read model carries a summary, a
 // ui.Collapsible("摘要") with a truncated result/argument excerpt. No Canvas or
 // hand-drawn widget is involved.
 //
@@ -122,6 +122,16 @@ func (s *rendererState) load(key string) bool {
 	return s.open[key]
 }
 
+// loadSeen reports the stored disclosure state and whether the reader ever
+// touched it, so a fresh card can start from the H15 default (failures and very
+// short results expanded).
+func (s *rendererState) loadSeen(key string) (open, seen bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	open, seen = s.open[key]
+	return open, seen
+}
+
 func (s *rendererState) store(key string, open bool) {
 	s.mu.Lock()
 	s.open[key] = open
@@ -178,7 +188,7 @@ func Module() *module.Descriptor[Config] {
 }
 
 // demoBuild is the demo card used by the host's capability probe. It keeps its
-// historical content (title, raw status badge, summary, call ID) but uses the
+// historical content (title, raw status badge, summary) but uses the
 // same brand panel as the real tool cards so the Home demo looks native.
 func demoBuild(title string) func(c *ui.Context, call contracts.ToolCall) {
 	return func(c *ui.Context, call contracts.ToolCall) {
@@ -191,10 +201,6 @@ func demoBuild(title string) func(c *ui.Context, call contracts.ToolCall) {
 				design.Apply(ui.Text(c, title+": "+call.Name), t.Font(design.TypeS)).FontWeight(600).
 					TextColor(t.LabelPrimary)
 				design.Apply(ui.Badge(c, call.Status), t.Badge())
-				if call.ID != "" {
-					design.Apply(ui.Text(c, call.ID), t.Font(design.TypeXXXS)).
-						TextColor(t.LabelTertiary)
-				}
 			})
 			if call.Summary != "" {
 				design.Apply(ui.Text(c, call.Summary), t.TextMuted(design.TypeXS))
@@ -204,7 +210,7 @@ func demoBuild(title string) func(c *ui.Context, call contracts.ToolCall) {
 }
 
 // realBuild builds one real tool card: a brand panel with a category icon, the
-// tool name, a status badge, the call ID, the category hint and a native
+// tool name, a status badge, the category hint and a native
 // collapsible summary. The same builder serves all real tool names.
 func realBuild(state *rendererState) func(c *ui.Context, call contracts.ToolCall) {
 	return func(c *ui.Context, call contracts.ToolCall) {
@@ -212,14 +218,17 @@ func realBuild(state *rendererState) func(c *ui.Context, call contracts.ToolCall
 		status := statusLabel(state, call.Status)
 		color := toolStatusColor(t, call.Status)
 		card := ui.Column(c).FillWidth().Gap(design.Space2)
-		design.Apply(card, t.Panel()).Padding(design.Space3).Children(func() {
+		design.Apply(card, t.Panel()).Padding(design.Space3).Gap(design.Space2).Children(func() {
+			// The card anatomy shared with the transcript fallback and the
+			// trajectory timeline: category icon, tool name, status badge, then
+			// the muted category at the row end.
 			ui.Row(c).FillWidth().Gap(design.Space2).AlignItems(ui.Center).Children(func() {
 				ui.Icon(c, toolIcon(call.Name)).Size(design.Space4, design.Space4).
 					TextColor(t.LabelSecondary)
 				design.Apply(ui.Text(c, call.Name), t.Font(design.TypeS)).FontWeight(600).
 					TextColor(t.LabelPrimary)
 				design.Apply(ui.Badge(c, status), t.Badge(), func(el ui.Element) ui.Element {
-					return el.Background(color.Alpha(0.15)).TextColor(color)
+					return el.Background(color.Alpha(toolStatusTintAlpha(call.Status))).TextColor(toolStatusTextColor(t, call.Status))
 				})
 				ui.Spacer(c).Grow(1)
 				if category := categoryLabel(state, call.Name); category != "" {
@@ -227,14 +236,13 @@ func realBuild(state *rendererState) func(c *ui.Context, call contracts.ToolCall
 						TextColor(t.LabelTertiary)
 				}
 			})
-			if call.ID != "" {
-				design.Apply(ui.Text(c, call.ID), t.Font(design.TypeXXXS)).
-					TextColor(t.LabelTertiary)
-			}
 			if summary := strings.TrimSpace(call.Summary); summary != "" {
 				key := call.ID + "\x00" + call.Name
-				open := state.load(key)
-				collapsible := ui.Collapsible(c, state.tr("摘要", "Summary"), &open, func() {
+				open, seen := state.loadSeen(key)
+				if !seen {
+					open = SummaryDefaultOpen(call.Status, summary)
+				}
+				collapsible := ui.Collapsible(c, state.tr("详情", "Details"), &open, func() {
 					design.Apply(ui.Text(c, truncateSummary(summary)), t.TextMuted(design.TypeXS))
 				})
 				design.Apply(collapsible, t.Font(design.TypeXS))
@@ -267,7 +275,7 @@ func toolIcon(name string) *ui.SVG {
 	}
 }
 
-// toolStatusColor maps a tool status to a brand semantic color.
+// toolStatusColor maps a tool status to the badge's tint/fill color.
 func toolStatusColor(t *design.Tokens, status string) ui.Color {
 	switch normalizeStatus(status) {
 	case "running":
@@ -276,6 +284,30 @@ func toolStatusColor(t *design.Tokens, status string) ui.Color {
 		return t.Success
 	case "error":
 		return t.Danger
+	default:
+		return t.LabelTertiary
+	}
+}
+
+// toolStatusTintAlpha is the badge fill opacity of a status: lighter for
+// success so SuccessText keeps WCAG-AA contrast on the tint.
+func toolStatusTintAlpha(status string) float32 {
+	if normalizeStatus(status) == "ok" {
+		return 0.08
+	}
+	return 0.12
+}
+
+// toolStatusTextColor is the badge's WCAG-AA foreground of a status (the
+// status color itself is a fill/icon color, too light for small text).
+func toolStatusTextColor(t *design.Tokens, status string) ui.Color {
+	switch normalizeStatus(status) {
+	case "running":
+		return t.WarningText
+	case "error":
+		return t.DangerText
+	case "ok":
+		return t.SuccessText
 	default:
 		return t.LabelTertiary
 	}
@@ -400,6 +432,17 @@ func planMarkdownFromSummary(summary string) (string, bool) {
 	return "", false
 }
 
+// SummaryDefaultOpen reports whether a card's detail section starts expanded
+// (H15): failures first, and very short results are cheap to show. The session
+// transcript's fallback card uses the same rule, so a tool call never gets two
+// different disclosure defaults.
+func SummaryDefaultOpen(status, summary string) bool {
+	if normalizeStatus(status) == "error" {
+		return true
+	}
+	return len([]rune(strings.TrimSpace(summary))) <= 160
+}
+
 // planReviewBuild renders the transcript plan card: a titled panel with the
 // optional PlanReviewer state badge and the plan Markdown when the arguments
 // can be recovered, otherwise the existing raw summary disclosure.
@@ -413,16 +456,12 @@ func planReviewBuild(state *rendererState) func(c *ui.Context, call contracts.To
 					TextColor(t.LabelSecondary)
 				design.Apply(ui.Text(c, state.tr("计划审阅", "Plan review")), t.Font(design.TypeS)).FontWeight(600).
 					TextColor(t.LabelPrimary)
-				if label, color, ok := planReviewStateBadge(state, t); ok {
+				if label, fill, text, tint, ok := planReviewStateBadge(state, t); ok {
 					design.Apply(ui.Badge(c, label), t.Badge(), func(el ui.Element) ui.Element {
-						return el.Background(color.Alpha(0.15)).TextColor(color)
+						return el.Background(fill.Alpha(tint)).TextColor(text)
 					})
 				}
 				ui.Spacer(c).Grow(1)
-				if call.ID != "" {
-					design.Apply(ui.Text(c, call.ID), t.Font(design.TypeXXXS)).
-						TextColor(t.LabelTertiary)
-				}
 			})
 			summary := strings.TrimSpace(call.Summary)
 			if markdownText, ok := planMarkdownFromSummary(summary); ok {
@@ -435,8 +474,11 @@ func planReviewBuild(state *rendererState) func(c *ui.Context, call contracts.To
 				return
 			}
 			key := call.ID + "\x00" + call.Name
-			open := state.load(key)
-			collapsible := ui.Collapsible(c, state.tr("摘要", "Summary"), &open, func() {
+			open, seen := state.loadSeen(key)
+			if !seen {
+				open = SummaryDefaultOpen(call.Status, summary)
+			}
+			collapsible := ui.Collapsible(c, state.tr("详情", "Details"), &open, func() {
 				design.Apply(ui.Text(c, truncateSummary(summary)), t.TextMuted(design.TypeXS))
 			})
 			design.Apply(collapsible, t.Font(design.TypeXS))
@@ -445,23 +487,24 @@ func planReviewBuild(state *rendererState) func(c *ui.Context, call contracts.To
 	}
 }
 
-// planReviewStateBadge maps the optional PlanReviewer state to a label/color.
-func planReviewStateBadge(state *rendererState, t *design.Tokens) (string, ui.Color, bool) {
+// planReviewStateBadge maps the optional PlanReviewer state to a label, the
+// badge's fill tint and its WCAG-AA text variant.
+func planReviewStateBadge(state *rendererState, t *design.Tokens) (string, ui.Color, ui.Color, float32, bool) {
 	reviewer, ok := state.ctx.Get(contracts.KeyPlanReviewer)
 	if !ok || reviewer == nil {
-		return "", ui.Transparent, false
+		return "", ui.Transparent, ui.Transparent, 0, false
 	}
 	switch strings.ToLower(strings.TrimSpace(reviewer.State())) {
 	case "reviewing":
-		return state.tr("审阅中", "Reviewing"), t.WarningText, true
+		return state.tr("审阅中", "Reviewing"), t.Warning, t.WarningText, 0.12, true
 	case "approved":
-		return state.tr("已批准", "Approved"), t.Success, true
+		return state.tr("已批准", "Approved"), t.Success, t.SuccessText, 0.08, true
 	case "cancelled", "canceled":
-		return state.tr("已取消", "Cancelled"), t.DangerText, true
+		return state.tr("已取消", "Cancelled"), t.Danger, t.DangerText, 0.12, true
 	case "idle":
-		return state.tr("待审阅", "Pending review"), t.LabelSecondary, true
+		return state.tr("待审阅", "Pending review"), t.LabelTertiary, t.LabelSecondary, 0.12, true
 	default:
-		return "", ui.Transparent, false
+		return "", ui.Transparent, ui.Transparent, 0, false
 	}
 }
 

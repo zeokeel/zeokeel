@@ -15,6 +15,7 @@ func TestBehaviorPageSendWhileRunningDefaultsOff(t *testing.T) {
 	tester := h.tester()
 	tester.Frame()
 	h.click(tester, "行为")
+	expandMoreConversationSettings(t, tester, "更多对话设置")
 	h.assertTexts(tester, "运行中发送", "运行中允许排队发送",
 		"发送的提示会在当前回合结束后依次发出。")
 	if raw := store.get(contracts.SettingSendWhileRunning); raw != "" {
@@ -39,6 +40,7 @@ func TestBehaviorPageSendWhileRunningBadValueIsOff(t *testing.T) {
 	tester := h.tester()
 	tester.Frame()
 	h.click(tester, "行为")
+	expandMoreConversationSettings(t, tester, "更多对话设置")
 	// A malformed value is rendered as off, so one click enables it.
 	h.click(tester, "运行中允许排队发送")
 	if raw := store.get(contracts.SettingSendWhileRunning); raw != "true" {
@@ -52,6 +54,7 @@ func TestBehaviorPageSendWhileRunningEnglish(t *testing.T) {
 	tester := h.tester()
 	tester.Frame()
 	h.click(tester, "Behavior")
+	expandMoreConversationSettings(t, tester, "More conversation settings")
 	h.assertTexts(tester, "Sending while running", "Queue prompts while running",
 		"Queued prompts are sent one by one after the current turn finishes.")
 	h.click(tester, "Queue prompts while running")

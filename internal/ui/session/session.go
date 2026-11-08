@@ -80,23 +80,83 @@ func (c Config) resolved() Config {
 // instance per loaded module) and is only touched on the UI thread: tab
 // selection, the composer draft and the per-message reasoning fold state.
 type state struct {
-	tab       int
-	draft     string
+	tab int
+	// lastTab is the tab rendered in the previous frame: entering the Memory
+	// tab refreshes its cached read model, so entries written by the agent while
+	// the user was elsewhere show up.
+	lastTab int
+	draft   string
+	// draftSession is the conversation the live draft/pendingAttachments/
+	// attachErr below belong to; composerDrafts keeps the drafts of the other
+	// conversations (keyed by session ID) so switching never leaks text or
+	// attachments into another conversation.
+	draftSession   string
+	composerDrafts map[string]composerDraft
+	// composerInput is the composer TextArea's persistent identity. The
+	// suggestion menu is inserted above the composer, so the native text input
+	// needs a stable identity to keep the focus (and the caret) as the tree
+	// around it changes; it is never focused again from the frame builder.
+	composerInput ui.Handle
+
 	thinkOpen map[string]bool
 	toolOpen  map[string]bool
 
-	// Memory tab state: the search query, the add-input draft and the last
-	// store error shown in DangerText. The store itself is looked up lazily
-	// from the kernel context (contracts.KeyMemory) so the module loads without
-	// a memory backend.
-	memoryQuery string
-	memoryDraft string
-	memoryError string
+	// Slash/@ suggestion menu state. slashSel and mentionSel are the
+	// highlighted rows (keys move them, Enter/Tab accept, Esc closes the menu
+	// without clearing the draft); slashDismissed/mentionDismissed hold the
+	// draft the user dismissed the menu at, so typing opens it again. The
+	// menu rows are BgSelected-tinted and reachable from the keyboard.
+	slashSel         int
+	slashDismissed   string
+	mentionSel       int
+	mentionDismissed string
 
-	// Export state: the last export status/error shown under the session header.
-	exportStatus string
-	exportPath   string
-	exportErr    string
+	// expandedActions is the message whose rating actions the ⋯ entry unfolded.
+	// usageOpen holds the expanded usage details by message ID.
+	expandedActions string
+	usageOpen       map[string]bool
+	// headerWidth is the header row's width from the last laid-out frame: when
+	// the conversation column gets narrow (e.g. the right inspector docks at
+	// 1024), the title must keep room and the goal chip drops its text.
+	headerWidth float32
+
+	// Scroll positions of the three panes: every pane keeps its own offset,
+	// and while the user stays at the end the pane follows the streaming
+	// content. scrollSession is the session the offsets belong to; switching
+	// sessions starts the new transcript at its end.
+	chatScroll    ui.ScrollState
+	trajScroll    ui.ScrollState
+	memoryScroll  ui.ScrollState
+	scrollSession string
+
+	// Memory tab state: the search query, the add-input draft, the last store
+	// error shown in DangerText and the cached read model. The cache is
+	// refreshed only when the query changes or a mutation asks for it, so the
+	// frame builder never reads the store while nothing changed.
+	memoryQuery    string
+	memoryDraft    string
+	memoryError    string
+	memoryEditOpen bool
+	memoryEditID   string
+	memoryEditText string
+	memoryEditErr  string
+	memories       []contracts.Memory
+	memoriesErr    error
+	memoriesQuery  string
+	memoriesFresh  bool
+	memoryRefresh  bool
+
+	// @ suggestion cache: the workspace files the current query resolves to,
+	// refreshed only when the query changes. The frame builder never lists or
+	// searches the workspace.
+	mentionFiles []contracts.FileEntry
+	mentionErr   error
+	mentionQuery string
+	mentionFresh bool
+
+	// Export state: the last export error shown under the session header.
+	// Successes are transient host toasts, never a permanent header badge.
+	exportErr string
 
 	// regenerateErr is the last message-level 「重新生成」 failure shown under
 	// the last assistant turn.
@@ -118,10 +178,13 @@ type state struct {
 	// is the optional host bridge used to clear it. Both are UI-thread state.
 	goal        *contracts.Goal
 	goalTracker contracts.GoalTracker
-	// goalActionErr is the last goal-lifecycle failure (DangerText row);
-	// goalNotice is the last lifecycle success badge (e.g. after a command).
+	// goalActionErr is the last goal-lifecycle failure (DangerText row).
+	// Successes go to a transient toast. goalMenuOpen drives the goal chip's
+	// popover; goalConfirm is the destructive action ("abandon"/"clear")
+	// waiting for its AlertDialog confirmation.
 	goalActionErr string
-	goalNotice    string
+	goalMenuOpen  bool
+	goalConfirm   string
 
 	// Composer attachment state: files picked and staged for the next message,
 	// the last picker/read error, the chip sequence and the per-chip image
@@ -130,6 +193,15 @@ type state struct {
 	attachErr          string
 	attachSeq          int
 	thumbnails         map[string]*ui.Bitmap
+	// attachBusy is true while the native picker runs off the UI thread: the
+	// attach actions show 选择中…/Choosing… and stay disabled until the result
+	// is posted back, because mygo's dialog blocks its caller.
+	attachBusy bool
+	// attachPathsOpen/attachPathDraft/attachPathErr drive the manual path-entry
+	// fallback for environments without a working native picker (ZK-09).
+	attachPathsOpen bool
+	attachPathDraft string
+	attachPathErr   string
 
 	// md caches the Markdown renderer options for the current appearance (the
 	// library keeps its parse state per view root and the options must stay
@@ -144,6 +216,13 @@ type state struct {
 	// with uikit.T so switching the language applies on the next frame.
 	locale contracts.LocaleService
 
+	// navigator is the host navigator; the composer's "open settings" entries
+	// deep-link to the page they mention when the host supports it.
+	navigator contracts.Navigator
+	// runtime is the host UI runtime, kept so an undo action the host invokes
+	// later can request the frame that shows the restored state.
+	runtime contracts.UIRuntime
+
 	// settings is the optional settings store: the permission command and the
 	// composer's permission badge read/write contracts.SettingAgentPermission.
 	settings contracts.SettingsService
@@ -153,12 +232,14 @@ type state struct {
 	planReviewer contracts.PlanReviewer
 	memoryStore  contracts.MemoryStore
 
-	// notifier is the optional desktop toast bridge: export actions raise a
-	// success/error toast in addition to the header badge.
+	// notifier is the optional desktop toast bridge: transient successes and
+	// errors (export, stop, compaction, goal lifecycle, copied/footers) go
+	// there instead of permanent header badges.
 	notifier contracts.Notifier
 
-	// copiedMessage is the last assistant message whose copy action ran (its
-	// 「已复制」badge stays until another message is copied).
+	// copiedMessage is the assistant message whose copy action just ran; the
+	// row shows a check icon while it is the last one copied (transient state,
+	// never a resident badge).
 	copiedMessage string
 
 	// queuedPrompts holds prompts submitted while a turn was running (only
@@ -167,6 +248,8 @@ type state struct {
 	queuedPrompts  []string
 	queueSessionID string
 	queueErr       string
+	// queueMenuOpen is the queued-prompts popover (view/cancel/clear).
+	queueMenuOpen bool
 
 	// Goal auto-continue state: the per-goal send budget, the goal it belongs
 	// to, the last observed run phase and the last delivery error. UI thread
@@ -178,22 +261,24 @@ type state struct {
 	autoContinueSawRunning bool
 	autoContinueSessionID  string
 
-	// Composer command feedback: the /stop and /compact notices (success badge
-	// or danger line) and the /help modal switch.
-	commandNotice string
-	commandErr    string
-	compacting    bool
-	helpOpen      bool
+	// Composer command feedback: the last error line and the /compact loading
+	// state (a success is a transient toast, never a resident badge).
+	commandErr string
+	compacting bool
+	helpOpen   bool
 
 	// syncCommandLocale re-registers the slash commands when the host language
 	// changes (nil when the module failed to register them, which cannot happen
-	// for a valid activation).
+	// for a valid activation). commandLocale is the language the registry was
+	// last built for, so the frame builder only syncs on an actual change.
 	syncCommandLocale func()
+	commandLocale     string
 
-	// Memory management state: the tidy/clear notice and the clear-all
-	// confirmation dialog.
-	memoryNotice    string
+	// Memory management state: the clear-all confirmation dialog and the
+	// destructive action waiting for its confirmation (the ID of the memory
+	// to delete, or "tidy" for the duplicate tidy).
 	memoryClearOpen bool
+	memoryConfirm   string
 
 	// Command-dialog state (native Modals rendered by the session screen).
 	goalOpen  bool
@@ -205,7 +290,10 @@ type state struct {
 	memOpen   bool
 	memDraft  string
 	memErr    string
-	memNotice string
+
+	// /feedback dialog: the message being rated and the rating chosen in the
+	// dialog before it is saved (empty = no rating).
+	feedbackRating string
 }
 
 // tr returns the localized copy for the current frame's language.
@@ -222,6 +310,53 @@ func (st *state) localized(value, zhDefault, enDefault string) string {
 
 // english reports whether the current frame renders English copy.
 func (st *state) english() bool { return uikit.Language(st.locale) == "en" }
+
+// openSettingsPage opens the settings surface on one page through the host's
+// optional deep-link capability (contracts.Navigator is extended by the
+// OpenSettingsPage interface). The fallback toggles the surface as before.
+func openSettingsPage(navigator contracts.Navigator, pageID string) {
+	if navigator == nil {
+		return
+	}
+	if opener, ok := navigator.(interface{ OpenSettingsPage(string) error }); ok {
+		if err := opener.OpenSettingsPage(pageID); err == nil {
+			return
+		}
+	}
+	navigator.ToggleSettings()
+}
+
+// Settings page identities the conversation links to (the settings module's
+// public PageID/BehaviorPageID/MemoryPageID values).
+const (
+	settingsPageModel    = "model"
+	settingsPageBehavior = "behavior"
+	settingsPageMemory   = "memory"
+)
+
+// toast raises one transient host toast (nil-safe). Transient feedback —
+// export/stop/compaction/goal outcomes, copy confirmations — goes here instead
+// of a permanent header badge.
+func (st *state) toast(level, text string) {
+	if st == nil || st.notifier == nil || strings.TrimSpace(text) == "" {
+		return
+	}
+	st.notifier.Notify(level, text)
+}
+
+// notifyUndo raises a toast with one undo action when the host's notifier
+// implements contracts.ActionNotifier (the product's recoverable-destructive
+// pattern), and a plain toast otherwise.
+func (st *state) notifyUndo(text, actionLabel string, action func()) {
+	if st == nil || st.notifier == nil {
+		return
+	}
+	if actionNotifier, ok := st.notifier.(contracts.ActionNotifier); ok && action != nil {
+		actionNotifier.NotifyAction(contracts.NotifySuccess, text, actionLabel, action)
+		return
+	}
+	st.notifier.Notify(contracts.NotifySuccess, text)
+}
 
 // Module registers the conversation screen.
 func Module() *module.Descriptor[Config] {
@@ -246,12 +381,16 @@ func Module() *module.Descriptor[Config] {
 		notifier, _ := ctx.Get(contracts.KeyNotifier)
 		moduleState := &state{
 			locale:       locale,
+			runtime:      runtime,
+			lastTab:      -1,
+			navigator:    navigator,
 			settings:     settings,
 			planReviewer: planReviewer,
 			memoryStore:  memoryStore,
 			notifier:     notifier,
 			thinkOpen:    make(map[string]bool),
 			toolOpen:     make(map[string]bool),
+			usageOpen:    make(map[string]bool),
 			thumbnails:   make(map[string]*ui.Bitmap),
 			ctx:          ctx,
 		}
@@ -410,6 +549,23 @@ func (st *state) permissionLabel(mode string) string {
 	}
 }
 
+// permissionHint explains the current permission mode in plain language (H7):
+// the chip labels are internal terms ("询问/工作区"), the tooltip says what the
+// agent will do.
+func permissionHint(st *state, mode string) string {
+	switch mode {
+	case contracts.PermissionWorkspace:
+		return st.tr("工作区内的只读操作自动允许，其他操作前询问",
+			"read-only actions inside the workspace are allowed; others ask first")
+	case contracts.PermissionFull:
+		return st.tr("全部自动允许，不再询问", "everything is allowed without asking")
+	case contracts.PermissionNever:
+		return st.tr("全部拒绝，不执行任何工具", "everything is denied; no tool runs")
+	default:
+		return st.tr("危险操作前询问", "ask before risky actions")
+	}
+}
+
 // goalLifecycle returns the optional goal lifecycle half of the host bridge.
 func goalLifecycle(st *state) (contracts.GoalLifecycler, bool) {
 	if st == nil || st.goalTracker == nil {
@@ -555,9 +711,8 @@ func sessionCommands(runtime contracts.UIRuntime, navigator contracts.Navigator,
 				}
 				if lifecycle.Complete() {
 					st.goalActionErr = ""
-					st.goalNotice = st.tr("目标已完成", "Goal completed")
+					st.toast(contracts.NotifySuccess, st.tr("目标已完成", "Goal completed"))
 				} else {
-					st.goalNotice = ""
 					st.goalActionErr = st.tr("完成目标失败：", "Complete goal failed: ") + st.tr("目标不存在", "no active goal")
 				}
 				runtime.Invalidate()
@@ -580,9 +735,8 @@ func sessionCommands(runtime contracts.UIRuntime, navigator contracts.Navigator,
 				}
 				if lifecycle.Abandon() {
 					st.goalActionErr = ""
-					st.goalNotice = st.tr("目标已放弃", "Goal abandoned")
+					st.toast(contracts.NotifySuccess, st.tr("目标已放弃", "Goal abandoned"))
 				} else {
-					st.goalNotice = ""
 					st.goalActionErr = st.tr("放弃目标失败：", "Abandon goal failed: ") + st.tr("目标不存在", "no active goal")
 				}
 				runtime.Invalidate()
@@ -635,8 +789,10 @@ func sessionCommands(runtime contracts.UIRuntime, navigator contracts.Navigator,
 			},
 		},
 		{
-			ID:    "zeokeel.session.settings",
-			Title: st.tr("打开设置", "Open settings"),
+			ID: "zeokeel.session.settings",
+			// The title matches the home module's "设置" command: the palette
+			// de-duplicates by Title, so the same action is listed once.
+			Title: st.tr("设置", "Settings"),
 			Hint:  st.tr("打开设置面板", "Open the settings panel"),
 			Order: 50,
 			Run: func() error {
@@ -661,10 +817,9 @@ func sessionCommands(runtime contracts.UIRuntime, navigator contracts.Navigator,
 				st.autoContinueSuppressed = true
 				if err := chat.Cancel(session.ID); err != nil {
 					st.commandErr = st.tr("停止失败：", "Stop failed: ") + err.Error()
-					st.commandNotice = ""
 				} else {
 					st.commandErr = ""
-					st.commandNotice = st.tr("已停止", "Stopped")
+					st.toast(contracts.NotifySuccess, st.tr("已停止", "Stopped"))
 				}
 				runtime.Invalidate()
 				return nil
@@ -681,15 +836,7 @@ func sessionCommands(runtime contracts.UIRuntime, navigator contracts.Navigator,
 					runtime.Invalidate()
 					return nil
 				}
-				AttachmentDialogTitle = st.tr("选择附件", "Choose attachments")
-				AttachmentFilterName = st.tr("文件与图片", "Files and images")
-				paths, err := AttachmentPicker()
-				if err != nil {
-					st.attachErr = st.tr("无法打开文件选择器：", "Could not open the file picker: ") + err.Error()
-				} else {
-					stageAttachmentFiles(st, paths)
-				}
-				runtime.Invalidate()
+				startAttachmentPick(runtime, st)
 				return nil
 			},
 		},
@@ -740,6 +887,97 @@ func sendWhileRunningEnabled(settings contracts.SettingsService) bool {
 		return false
 	}
 	return strings.EqualFold(strings.TrimSpace(settings.Get(contracts.SettingSendWhileRunning, "")), "true")
+}
+
+// composerDraft is one conversation's unsent composer state. Attachments are
+// the staged files (their bytes) and attachErr keeps a per-conversation staging
+// error with the draft it belongs to.
+type composerDraft struct {
+	text        string
+	attachments []contracts.Attachment
+	attachErr   string
+}
+
+// saveComposerDraft stores the live composer state under sessionID and clears
+// it, so the caller can load another conversation's state without copying the
+// previous one over it. An empty draft is dropped instead of cached.
+func (st *state) saveComposerDraft(sessionID string) {
+	if sessionID == "" {
+		return
+	}
+	if strings.TrimSpace(st.draft) == "" && len(st.pendingAttachments) == 0 && st.attachErr == "" {
+		if st.composerDrafts != nil {
+			delete(st.composerDrafts, sessionID)
+		}
+		return
+	}
+	if st.composerDrafts == nil {
+		st.composerDrafts = make(map[string]composerDraft)
+	}
+	st.composerDrafts[sessionID] = composerDraft{
+		text:        st.draft,
+		attachments: st.pendingAttachments,
+		attachErr:   st.attachErr,
+	}
+	st.draft = ""
+	st.pendingAttachments = nil
+	st.attachErr = ""
+}
+
+// loadComposerDraft restores sessionID's saved composer state (nothing for a
+// fresh conversation) into the live fields.
+func (st *state) loadComposerDraft(sessionID string) {
+	st.draft = ""
+	st.pendingAttachments = nil
+	st.attachErr = ""
+	if st.composerDrafts == nil {
+		return
+	}
+	saved, ok := st.composerDrafts[sessionID]
+	if !ok {
+		return
+	}
+	st.draft = saved.text
+	st.pendingAttachments = saved.attachments
+	st.attachErr = saved.attachErr
+	delete(st.composerDrafts, sessionID)
+}
+
+// withComposerSession applies fn to the composer state that belongs to
+// sessionID. When that is the active conversation fn runs directly; otherwise
+// the live state is stashed, the composer is temporarily reset for fn (an
+// attachment picker opened before a conversation switch must not stage its
+// result into the newly opened conversation), the updated state is saved back
+// and the live state restored.
+func (st *state) withComposerSession(sessionID string, fn func()) {
+	if fn == nil || sessionID == "" || st.draftSession == sessionID {
+		fn()
+		return
+	}
+	currentID := st.draftSession
+	if currentID == "" {
+		st.draft = ""
+		st.pendingAttachments = nil
+		st.attachErr = ""
+	} else {
+		st.saveComposerDraft(currentID)
+	}
+	fn()
+	st.saveComposerDraft(sessionID)
+	st.loadComposerDraft(currentID)
+}
+
+// syncComposerDraft moves the live composer state onto the conversation it
+// belongs to and restores the one being opened: the composer draft and staged
+// attachments are per-conversation, so text typed in one conversation can never
+// be sent to another. It runs at frame start before the composer builds.
+func (st *state) syncComposerDraft(activeID string) {
+	if st.draftSession == activeID {
+		return
+	}
+	st.saveComposerDraft(st.draftSession)
+	st.loadComposerDraft(activeID)
+	st.draftSession = activeID
 }
 
 // syncQueuedSession drops the pending queue when the active session changes.
@@ -902,7 +1140,9 @@ func maybeAutoContinue(chat contracts.ChatService, st *state, runtime contracts.
 		return
 	}
 	st.autoContinueCount++
-	message := "请继续推进目标：" + text + "\n\n完成后请更新或清除目标。"
+	message := st.tr(
+		"请继续推进目标："+text+"\n\n完成后请更新或清除目标。",
+		"Continue working toward the goal: "+text+"\n\nUpdate or clear the goal when it is done.")
 	if err := chat.Send(activeID, message); err != nil {
 		st.autoContinueErr = st.tr("自动续跑发送失败：", "Auto-continue send failed: ") + err.Error()
 		runtime.Invalidate()

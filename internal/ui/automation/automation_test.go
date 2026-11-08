@@ -9,6 +9,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -182,6 +183,13 @@ type harness struct {
 
 func newHarness(t *testing.T, service contracts.AutomationService, cfg automation.Config) *harness {
 	t.Helper()
+	return newHarnessWithNotifier(t, service, nil, cfg)
+}
+
+// newHarnessWithNotifier is newHarness with the host toast bridge provided, for
+// the delete/undo toast tests.
+func newHarnessWithNotifier(t *testing.T, service contracts.AutomationService, notifier contracts.Notifier, cfg automation.Config) *harness {
+	t.Helper()
 	uiRoot := uiroot.New(uiroot.Config{AppName: "ZeoKeel"})
 	ctx := cordis.Root()
 	t.Cleanup(func() { _ = ctx.DisposeAll() })
@@ -192,6 +200,9 @@ func newHarness(t *testing.T, service contracts.AutomationService, cfg automatio
 	provide(t, ctx, contracts.KeyScreenLister, uiRoot.ScreenLister())
 	if service != nil {
 		provide[contracts.AutomationService](t, ctx, contracts.KeyAutomation, service)
+	}
+	if notifier != nil {
+		provide[contracts.Notifier](t, ctx, contracts.KeyNotifier, notifier)
 	}
 	fiber := activate(t, ctx, automation.Module(), cfg)
 	return &harness{t: t, ctx: ctx, uiRoot: uiRoot, fiber: fiber}
@@ -293,9 +304,9 @@ func TestTaskListRenders(t *testing.T) {
 	tester := h.tester()
 
 	h.assertTexts(tester, "自动化", "新建任务",
-		"每日依赖巡检", "every 60s", "下次运行：", "上次运行：",
-		"立即运行", "删除",
-		"停用任务", "*/5 * * * *", "上次错误：exit status 1")
+		"每日依赖巡检", "每 1 分钟", "下次运行：", "上次运行：",
+		"立即运行", "编辑", "删除",
+		"停用任务", "每 5 分钟", "上次错误：exit status 1")
 }
 
 func TestCreateTaskFlow(t *testing.T) {
@@ -325,7 +336,7 @@ func TestCreateTaskFlow(t *testing.T) {
 		t.Fatalf("Create args = %+v", created[0])
 	}
 	h.assertNoTexts(tester, "新建自动化任务")
-	h.assertTexts(tester, "每日巡检", "every 60s")
+	h.assertTexts(tester, "每日巡检", "每 1 分钟")
 }
 
 func TestCreateValidation(t *testing.T) {
@@ -346,9 +357,11 @@ func TestToggleUpdatesTask(t *testing.T) {
 	})
 	h := newHarness(t, service, automation.Config{})
 	tester := h.tester()
-	h.assertTexts(tester, "巡检 启用")
+	// The card shows the task name and a native switch in a field labeled
+	// "启用"; the task name is not repeated in the switch label.
+	h.assertTexts(tester, "巡检", "启用")
 
-	h.click(tester, "巡检 启用")
+	h.click(tester, "启用任务")
 	updated := service.updated()
 	if len(updated) != 1 {
 		t.Fatalf("Update calls = %+v, want one", updated)
@@ -457,4 +470,127 @@ func TestDisposeUnsubscribes(t *testing.T) {
 	}
 	tester.Frame()
 	h.assertNoTexts(tester, "自动化后端未启用", "新建任务")
+}
+
+// automationNotifier records action toasts for the delete/undo test.
+type automationNotifier struct {
+	mu      sync.Mutex
+	actions []automationActionCall
+	plain   []contracts.Notification
+}
+
+type automationActionCall struct {
+	level, text, actionLabel string
+	action                   func()
+}
+
+func (n *automationNotifier) SetHandler(func(contracts.Notification)) {}
+func (n *automationNotifier) Notify(level, text string) contracts.Notification {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	n.plain = append(n.plain, contracts.Notification{ID: "plain", Level: level, Text: text})
+	return n.plain[len(n.plain)-1]
+}
+func (n *automationNotifier) Dismiss(string) {}
+func (n *automationNotifier) NotifyAction(level, text, actionLabel string, action func()) contracts.Notification {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	n.actions = append(n.actions, automationActionCall{level: level, text: text, actionLabel: actionLabel, action: action})
+	return contracts.Notification{ID: "action", Level: level, Text: text}
+}
+func (n *automationNotifier) actionCalls() []automationActionCall {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	return append([]automationActionCall(nil), n.actions...)
+}
+
+func TestDeleteTaskRaisesUndoToast(t *testing.T) {
+	service := newFakeAutomation(contracts.AutomationTask{
+		ID: "task-1", Name: "巡检", Prompt: "检查构建", Schedule: "every 60s", Enabled: true,
+	})
+	notifier := &automationNotifier{}
+	h := newHarnessWithNotifier(t, service, notifier, automation.Config{})
+	tester := h.tester()
+	h.click(tester, "删除")
+	h.click(tester, "确认删除")
+
+	actions := notifier.actionCalls()
+	if len(actions) != 1 {
+		t.Fatalf("action toasts = %+v, want one delete notice", actions)
+	}
+	action := actions[0]
+	if action.level != contracts.NotifySuccess || !strings.Contains(action.text, "巡检") {
+		t.Fatalf("delete notice = %+v", action)
+	}
+	if action.actionLabel == "" || action.action == nil {
+		t.Fatalf("delete notice has no undo action: %+v", action)
+	}
+
+	// Undo re-creates the same task (fresh id assigned by the backend).
+	action.action()
+	creates := service.createCalls
+	if len(creates) != 1 {
+		t.Fatalf("Create calls = %d, want the undo's one", len(creates))
+	}
+	if creates[0].Name != "巡检" || creates[0].Prompt != "检查构建" || creates[0].Schedule != "every 60s" {
+		t.Fatalf("undo re-created %+v, want the deleted task's fields", creates[0])
+	}
+	if creates[0].ID != "" {
+		t.Fatalf("undo re-created with fixed id %q, want a fresh id", creates[0].ID)
+	}
+}
+
+// TestEditTaskFlow covers H11: a task can be edited in place (the form prefills
+// the row and Save calls Update instead of Create), so changing a schedule does
+// not mean deleting and recreating the task.
+func TestEditTaskFlow(t *testing.T) {
+	service := newFakeAutomation(contracts.AutomationTask{
+		ID: "task-1", Name: "每周巡检", Prompt: "检查依赖", Schedule: "0 9 * * *",
+		Enabled: true, NextRun: time.Unix(1700003600, 0),
+	})
+	h := newHarness(t, service, automation.Config{})
+	tester := h.tester()
+	h.assertTexts(tester, "每周巡检", "每天 09:00")
+
+	h.click(tester, "编辑")
+	h.assertTexts(tester, "编辑自动化任务", "任务名称", "运行计划")
+
+	// Replace the name and the schedule, then save.
+	h.click(tester, "任务名称")
+	tester.Key(ui.Cmd, ui.KeyA)
+	tester.Type("每周巡检 v2")
+	h.click(tester, "运行计划")
+	tester.Key(ui.Cmd, ui.KeyA)
+	tester.Type("*/30 * * * *")
+	tester.Frame()
+	h.click(tester, "保存")
+
+	updates := service.updated()
+	if len(updates) != 1 {
+		t.Fatalf("Update calls = %+v, want one", updates)
+	}
+	updated := updates[0]
+	if updated.ID != "task-1" || updated.Name != "每周巡检 v2" ||
+		updated.Schedule != "*/30 * * * *" || !updated.Enabled {
+		t.Fatalf("Update args = %+v", updated)
+	}
+	if !updated.NextRun.Equal(time.Unix(1700003600, 0)) {
+		t.Fatalf("Update lost the task's next run: %v", updated.NextRun)
+	}
+	h.assertNoTexts(tester, "编辑自动化任务")
+}
+
+// TestTaskCardHumanizesSchedules covers the human-readable schedule line: the
+// documented shapes lead with "每 N 分钟/小时" or "每天 HH:MM" and an
+// unrecognized expression falls back to the raw text.
+func TestTaskCardHumanizesSchedules(t *testing.T) {
+	service := newFakeAutomation(
+		contracts.AutomationTask{ID: "a", Name: "分钟", Prompt: "p", Schedule: "*/15 * * * *", Enabled: true},
+		contracts.AutomationTask{ID: "b", Name: "小时", Prompt: "p", Schedule: "0 */4 * * *", Enabled: true},
+		contracts.AutomationTask{ID: "c", Name: "每天", Prompt: "p", Schedule: "30 9 * * *", Enabled: true},
+		contracts.AutomationTask{ID: "d", Name: "原样", Prompt: "p", Schedule: "unsupported schedule", Enabled: true},
+	)
+	h := newHarness(t, service, automation.Config{})
+	tester := h.tester()
+	h.assertTexts(tester, "每 15 分钟", "每 4 小时", "每天 09:30", "unsupported schedule")
 }

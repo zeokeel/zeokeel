@@ -117,8 +117,10 @@ func TestFeedbackCommandDialogRateAndClear(t *testing.T) {
 	requireHasText(t, harness.tester, "评价回答")
 	requireHasText(t, harness.tester, "有帮助")
 	requireHasText(t, harness.tester, "没帮助")
-	requireHasText(t, harness.tester, "清除评价")
+	requireHasText(t, harness.tester, "保存")
 	requireHasText(t, harness.tester, "取消")
+	// No rating yet: there is nothing to clear.
+	requireNoText(t, harness.tester, "清除评价")
 	// The answer preview is truncated in the dialog (the transcript behind the
 	// modal still shows the full answer, so assert on the dialog's preview label).
 	truncated := string([]rune(longAnswer)[:120]) + "…"
@@ -128,6 +130,12 @@ func TestFeedbackCommandDialogRateAndClear(t *testing.T) {
 
 	if err := harness.tester.Click("有帮助"); err != nil {
 		t.Fatalf("click Helpful: %v; texts = %v", err, harness.tester.Texts())
+	}
+	harness.tester.Frame()
+	// The rating is a choice in the dialog; Save (the accent primary) commits.
+	requireHasText(t, harness.tester, "评价回答")
+	if err := harness.tester.Click("保存"); err != nil {
+		t.Fatalf("save rating: %v; texts = %v", err, harness.tester.Texts())
 	}
 	harness.tester.Frame()
 	requireNoText(t, harness.tester, "评价回答") // the dialog closes on success
@@ -147,7 +155,7 @@ func TestFeedbackCommandDialogRateAndClear(t *testing.T) {
 		t.Fatalf("Run feedback command again: %v", err)
 	}
 	harness.tester.Frame()
-	requireHasText(t, harness.tester, "已反馈")
+	requireHasText(t, harness.tester, "清除评价")
 	if err := harness.tester.Click("清除评价"); err != nil {
 		t.Fatalf("click Clear rating: %v; texts = %v", err, harness.tester.Texts())
 	}
@@ -196,6 +204,10 @@ func TestFeedbackCommandSaveFailureKeepsDialog(t *testing.T) {
 	harness.tester.Frame()
 	if err := harness.tester.Click("有帮助"); err != nil {
 		t.Fatalf("click Helpful: %v; texts = %v", err, harness.tester.Texts())
+	}
+	harness.tester.Frame()
+	if err := harness.tester.Click("保存"); err != nil {
+		t.Fatalf("save rating: %v; texts = %v", err, harness.tester.Texts())
 	}
 	harness.tester.Frame()
 	requireHasText(t, harness.tester, "评价回答") // the dialog stays open to retry

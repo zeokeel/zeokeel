@@ -124,6 +124,7 @@ func newTestService(t *testing.T, cfg Config, settings *fakeSettings, logger *fa
 	provide(t, ctx, contracts.KeyLogger, contracts.Logger(logger))
 	provide(t, ctx, contracts.KeyStore, contracts.Store(newFakeStore()))
 	provide(t, ctx, contracts.KeyApprovals, contracts.Approvals(fakeApprovals{}))
+	provide(t, ctx, contracts.KeyDataDir, t.TempDir())
 	if err := Module().Factory(ctx, cfg); err != nil {
 		t.Fatalf("activate agent module: %v", err)
 	}
@@ -1463,6 +1464,7 @@ func newWorkspaceBackedService(t *testing.T, workspace contracts.WorkspaceServic
 	provide(t, ctx, contracts.KeyLogger, contracts.Logger(logger))
 	provide(t, ctx, contracts.KeyStore, contracts.Store(store))
 	provide(t, ctx, contracts.KeyApprovals, contracts.Approvals(fakeApprovals{}))
+	provide(t, ctx, contracts.KeyDataDir, t.TempDir())
 	provide(t, ctx, contracts.KeyWorkspace, workspace)
 	if err := Module().Factory(ctx, Config{}); err != nil {
 		t.Fatalf("activate agent module: %v", err)

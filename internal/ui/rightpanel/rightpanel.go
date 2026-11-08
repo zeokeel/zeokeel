@@ -138,13 +138,26 @@ type state struct {
 
 	// locale localizes the inspector's own copy on every frame.
 	locale contracts.LocaleService
+	// cfg is the resolved module config: the pane-switch commands need the
+	// localized pane names for their current-pane hint.
+	cfg Config
+	// runtime registers the pane-switch commands and requests frames.
+	runtime contracts.UIRuntime
+	// paneCommands are the registered command unregisters plus the language and
+	// pane they were built for, so the hint follows a pane/language switch.
+	paneCommands    []func()
+	paneCommandLang string
+	paneCommandTab  int
 
 	// Files pane state: the current relative directory, the selected file, the
-	// last error and the per-path preview cache.
-	filesDir      string
-	filesSelected string
-	filesErr      string
-	filesPreview  map[string]*filePreview
+	// last error, the per-path preview cache, the name filter and whether hidden
+	// (dot) entries show.
+	filesDir        string
+	filesSelected   string
+	filesErr        string
+	filesPreview    map[string]*filePreview
+	filesFilter     string
+	filesShowHidden bool
 
 	// Changes pane state: the cached uncommitted changes (re-read on the native
 	// Refresh action), the load error and the per-file diff fold state.
@@ -157,12 +170,16 @@ type state struct {
 	// background goroutine, so its output guard lives in terminalState).
 	term *terminalState
 
-	// Agents pane state: the selected teammate, the steer draft and the last
-	// action status/error.
+	// Agents pane state: the selected teammate, the steer draft, the last
+	// action status/error and the close confirmation (closing a teammate is
+	// destructive, so it goes through a native AlertDialog).
 	selectedMemberID string
 	steerDraft       string
 	teamStatus       string
 	teamErr          string
+	memberCloseOpen  bool
+	memberCloseID    string
+	memberCloseName  string
 
 	// Files pane artifact history: the expanded preview rows (keyed by
 	// artifact id) and the last download status.
@@ -172,12 +189,19 @@ type state struct {
 	artifactsSavedPath string
 
 	// Tasks pane state: the cached shared task board (loaded lazily and after
-	// every mutation) and the new-task draft.
-	tasksLoaded bool
-	tasks       []contracts.BoardTask
-	tasksErr    string
-	taskDraft   string
+	// every mutation), the new-task draft and the row menu's delete
+	// confirmation.
+	tasksLoaded       bool
+	tasks             []contracts.BoardTask
+	tasksErr          string
+	taskDraft         string
+	taskDeleteOpen    bool
+	taskDeleteID      string
+	taskDeleteSubject string
 }
+
+// tr localizes the inspector's own copy for the current frame.
+func (st *state) tr(zh, en string) string { return uikit.T(st.locale, zh, en) }
 
 // Module registers the session inspector slot.
 func Module() *module.Descriptor[Config] {
@@ -196,10 +220,24 @@ func Module() *module.Descriptor[Config] {
 			open:          make(map[string]bool),
 			ctx:           ctx,
 			locale:        locale,
+			cfg:           config,
+			runtime:       runtime,
 			filesPreview:  make(map[string]*filePreview),
 			changesOpen:   make(map[string]bool),
 			artifactsOpen: make(map[string]bool),
 			term:          newTerminalState(),
+		}
+		// The host binds Cmd/Ctrl+Alt+Left/Right to these two window commands and
+		// shows them in the command palette: they cycle the inspector's pane
+		// without opening the picker first.
+		if err := moduleState.registerPaneCommands(); err != nil {
+			return err
+		}
+		if _, err := ctx.Effect(func() cordis.Effect {
+			return cordis.Effect{cordis.CleanupOf(moduleState.closePaneCommands)}
+		}); err != nil {
+			moduleState.closePaneCommands()
+			return err
 		}
 		// The session log is optional: the inspector still renders without a
 		// durable store (headless tests), it just shows the empty log copy.
@@ -257,6 +295,90 @@ func Module() *module.Descriptor[Config] {
 		AddRequires(module.Requires(contracts.KeyUIRuntime)).
 		AddRequires(module.Requires(contracts.KeyChat)).
 		WithName("ZeoKeel session inspector")
+}
+
+// Pane-switch command metadata. The host binds the shortcuts and the command
+// palette renders CommandSpec.Shortcut verbatim.
+const (
+	panePrevCommandID = "rightpanel.pane.prev"
+	paneNextCommandID = "rightpanel.pane.next"
+	panePrevShortcut  = "Cmd/Ctrl + Alt + ←"
+	paneNextShortcut  = "Cmd/Ctrl + Alt + →"
+)
+
+// registerPaneCommands (re)registers the pane-switch commands with the current
+// pane's name as their hint. The host re-registers nothing: the module keeps its
+// two commands in sync with the pane and the host language.
+func (st *state) registerPaneCommands() error {
+	if st.runtime == nil {
+		return nil
+	}
+	st.closePaneCommands()
+	labels := paneLabels(st.cfg, st.locale)
+	if len(labels) == 0 {
+		return nil
+	}
+	if st.tab < 0 || st.tab >= len(labels) {
+		st.tab = 0
+	}
+	hint := st.tr("当前：", "Current: ") + labels[st.tab]
+	prev, err := st.runtime.RegisterCommand(contracts.CommandSpec{
+		ID:       panePrevCommandID,
+		Title:    st.tr("上一个检查器面板", "Previous inspector pane"),
+		Hint:     hint,
+		Order:    910,
+		Shortcut: panePrevShortcut,
+		Run:      func() error { st.stepPane(-1); return nil },
+	})
+	if err != nil {
+		return err
+	}
+	next, err := st.runtime.RegisterCommand(contracts.CommandSpec{
+		ID:       paneNextCommandID,
+		Title:    st.tr("下一个检查器面板", "Next inspector pane"),
+		Hint:     hint,
+		Order:    911,
+		Shortcut: paneNextShortcut,
+		Run:      func() error { st.stepPane(1); return nil },
+	})
+	if err != nil {
+		prev()
+		return err
+	}
+	st.paneCommands = []func(){prev, next}
+	st.paneCommandLang = uikit.Language(st.locale)
+	st.paneCommandTab = st.tab
+	return nil
+}
+
+// closePaneCommands unregisters the pane-switch commands.
+func (st *state) closePaneCommands() {
+	for _, unregister := range st.paneCommands {
+		unregister()
+	}
+	st.paneCommands = nil
+}
+
+// syncPaneCommands re-registers the commands when the pane or language changed,
+// so the palette hint always names the pane that is showing.
+func (st *state) syncPaneCommands() {
+	if st.paneCommands == nil ||
+		uikit.Language(st.locale) != st.paneCommandLang || st.tab != st.paneCommandTab {
+		_ = st.registerPaneCommands()
+	}
+}
+
+// stepPane moves the inspector's selection by delta, wrapping around the pane
+// ring; the host shortcut and the command palette both run it.
+func (st *state) stepPane(delta int) {
+	labels := paneLabels(st.cfg, st.locale)
+	if len(labels) == 0 {
+		return
+	}
+	st.tab = (st.tab + delta + len(labels)) % len(labels)
+	if st.runtime != nil {
+		st.runtime.Invalidate()
+	}
 }
 
 // eventReader is the narrow slice of the durable session log the Log pane

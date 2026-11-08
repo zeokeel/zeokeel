@@ -7,6 +7,7 @@ import (
 	"github.com/egoist/mygo/ui"
 
 	"github.com/zeokeel/zeokeel/internal/contracts"
+	"github.com/zeokeel/zeokeel/internal/design"
 )
 
 // TestValidateLifecycle covers Root.Validate: a UI assembly without a screen is
@@ -139,29 +140,29 @@ func TestSettingsSurface(t *testing.T) {
 	if !nav.SettingsOpen() {
 		t.Fatal("ToggleSettings did not open the settings surface")
 	}
-	// The settings sidebar lists pages in section/order/id order, before the
-	// settings.sidebar extension slot.
-	requireTextBefore(t, tt, "账户设置", "外观设置", "settings-sidebar-extra")
+	// The settings sidebar groups pages by section (the general group first),
+	// before the settings.sidebar extension slot.
+	requireTextBefore(t, tt, "外观设置", "账户设置", "settings-sidebar-extra")
 	// The selected page (the first of the sorted pages) is built inside the
 	// page regions, between the header and footer slots.
 	requireTextBefore(t, tt, "settings-header-slot", "settings-pagebody-slot",
-		"settings-account-body", "settings-footer-slot")
+		"settings-appearance-body", "settings-footer-slot")
 	// Only the selected page body is built.
-	requireNoText(t, tt, "settings-appearance-body")
+	requireNoText(t, tt, "settings-account-body")
 	// The page list sits in the settings sidebar, the body in the page column.
-	requireRegionLeftOf(t, tt, "账户设置", "settings-account-body")
-	requireRegionAbove(t, tt, "settings-header-slot", "settings-account-body")
-	requireRegionAbove(t, tt, "settings-account-body", "settings-footer-slot")
+	requireRegionLeftOf(t, tt, "外观设置", "settings-appearance-body")
+	requireRegionAbove(t, tt, "settings-header-slot", "settings-appearance-body")
+	requireRegionAbove(t, tt, "settings-appearance-body", "settings-footer-slot")
 
 	// Selecting another page in the settings sidebar switches the page body.
-	if err := tt.Click("外观设置"); err != nil {
-		t.Fatalf("Click(外观设置): %v", err)
+	if err := tt.Click("账户设置"); err != nil {
+		t.Fatalf("Click(账户设置): %v", err)
 	}
 	tt.Frame()
-	requireHasText(t, tt, "settings-appearance-body")
-	requireNoText(t, tt, "settings-account-body")
+	requireHasText(t, tt, "settings-account-body")
+	requireNoText(t, tt, "settings-appearance-body")
 
-	// Unregistering the selected page moves the surface back to a valid page.
+	// Unregistering the other page leaves the selected one in place.
 	unregAppearance()
 	tt.Frame()
 	requireHasText(t, tt, "settings-account-body")
@@ -451,4 +452,177 @@ func TestCommandPaletteShortcut(t *testing.T) {
 	if got := runs.Load(); got != 0 {
 		t.Fatalf("commands ran %d times, want 0", got)
 	}
+}
+
+// TestSettingsPinnedFooter covers the usability fix H1: a page's primary
+// action contributes a Footer that the host renders in a fixed footer outside
+// the scrolling body, so a long page still shows its action without scrolling.
+func TestSettingsPinnedFooter(t *testing.T) {
+	r := newTestRoot(t)
+	mustScreen(t, r, textScreen("home", "首页", "body-home", 10))
+	mustPage(t, r, contracts.SettingsPageSpec{
+		ID: "long", Section: "general", Title: "长页设置", Order: 10,
+		Build: func(c *ui.Context) {
+			// Far taller than the 800 DIP window: an inline footer would be laid
+			// out below the visible area.
+			for i := 0; i < 40; i++ {
+				ui.Text(c, "row-line").Height(32)
+			}
+		},
+		Footer: func(c *ui.Context) { ui.Text(c, "pinned-primary-action") },
+	})
+	tt := newTestTester(t, r, 1280, 800)
+	r.Navigator().ToggleSettings()
+	tt.Frame()
+	requireHasText(t, tt, "pinned-primary-action")
+	box, ok := tt.Find("pinned-primary-action")
+	if !ok {
+		t.Fatalf("pinned action not found; texts: %v", tt.Texts())
+	}
+	// The fixed footer must sit inside the window, near the bottom: an inline
+	// action after 40 tall rows would be far past this Y.
+	if box.Y < 500 || box.Y+box.H > 800 {
+		t.Fatalf("pinned action box = y %v h %v, want inside the lower window area", box.Y, box.H)
+	}
+}
+
+// TestSettingsSearchFiltersNavigation covers H5's host half: the grouped
+// settings navigation gets a search field that filters pages by title.
+func TestSettingsSearchFiltersNavigation(t *testing.T) {
+	r := newTestRoot(t)
+	mustScreen(t, r, textScreen("home", "首页", "body-home", 10))
+	mustPage(t, r, contracts.SettingsPageSpec{ID: "appearance", Section: "general", Title: "外观设置", Order: 10,
+		Build: func(c *ui.Context) { ui.Text(c, "settings-appearance-body") }})
+	mustPage(t, r, contracts.SettingsPageSpec{ID: "account", Section: "general", Title: "账户设置", Order: 20,
+		Build: func(c *ui.Context) { ui.Text(c, "settings-account-body") }})
+	tt := newTestTester(t, r, 1400, 900)
+	r.Navigator().ToggleSettings()
+	tt.Frame()
+	requireHasText(t, tt, "外观设置")
+	requireHasText(t, tt, "账户设置")
+
+	if err := tt.Click("搜索设置"); err != nil {
+		t.Fatalf("Click(搜索设置): %v", err)
+	}
+	tt.Type("账户")
+	tt.Frame()
+	requireNoText(t, tt, "外观设置")
+	requireHasText(t, tt, "账户设置")
+	requireHasText(t, tt, "settings-account-body")
+}
+
+// TestSettingsUnsavedCloseGuard covers H1's close guard: closing the settings
+// surface with a dirty page keeps it open and offers keep-editing/discard.
+func TestSettingsUnsavedCloseGuard(t *testing.T) {
+	r := newTestRoot(t)
+	mustScreen(t, r, textScreen("home", "首页", "body-home", 10))
+	dirty := false
+	discarded := false
+	mustPage(t, r, contracts.SettingsPageSpec{
+		ID: "draft", Section: "general", Title: "草稿设置", Order: 10,
+		Build:  func(c *ui.Context) { ui.Text(c, "draft-body") },
+		Footer: func(c *ui.Context) { ui.Text(c, "draft-save") },
+		Dirty:  func() bool { return dirty },
+		Discard: func() {
+			discarded = true
+			dirty = false
+		},
+	})
+	tt := newTestTester(t, r, 1280, 800)
+	nav := r.Navigator()
+	nav.ToggleSettings()
+	tt.Frame()
+	dirty = true
+	tt.Frame()
+	requireHasText(t, tt, "未保存")
+
+	// Escape closes the native modal; the host must keep the surface open and
+	// ask instead of discarding the draft.
+	tt.Key(0, ui.KeyEscape)
+	tt.Frame()
+	if !nav.SettingsOpen() {
+		t.Fatal("Escape closed the settings surface with unsaved edits")
+	}
+	requireHasText(t, tt, "有未保存的修改")
+
+	if err := tt.Click("继续编辑"); err != nil {
+		t.Fatalf("Click(继续编辑): %v", err)
+	}
+	tt.Frame()
+	requireNoText(t, tt, "有未保存的修改")
+
+	tt.Key(0, ui.KeyEscape)
+	tt.Frame()
+	requireHasText(t, tt, "有未保存的修改")
+	if err := tt.Click("放弃修改"); err != nil {
+		t.Fatalf("Click(放弃修改): %v", err)
+	}
+	tt.Frame()
+	if nav.SettingsOpen() {
+		t.Fatal("Discard did not close the settings surface")
+	}
+	if !discarded {
+		t.Fatal("Discard did not call the page's Discard hook")
+	}
+}
+
+// TestInspectorDrawerLeavesContentWidth covers H17: when the inspector renders
+// as a drawer over a narrow window, the content column reserves its width, so
+// the drawer does not cover the composer's send control.
+func TestInspectorDrawerLeavesContentWidth(t *testing.T) {
+	r := newTestRoot(t)
+	mustScreen(t, r, textScreen("home", "首页", "body-home", 10))
+	mustSlot(t, r, textSlotItem(contracts.SlotSessionPanelRight, "pane", "inspector-pane", 10))
+	tt := newTestTester(t, r, 1000, 720)
+	tt.Frame()
+	if _, ok := tt.Find("body-home"); !ok {
+		t.Fatalf("body-home not found; texts: %v", tt.Texts())
+	}
+
+	tt.Key(ui.Cmd|ui.Alt, ui.KeyI)
+	tt.Frame()
+	requireHasText(t, tt, "inspector-pane")
+	box, ok := tt.Find("body-home")
+	if !ok {
+		t.Fatalf("body-home not found with the drawer open; texts: %v", tt.Texts())
+	}
+	if box.X+box.W > 1000-float32(design.InspectorWidth-8) {
+		t.Fatalf("content x right = %v overlaps the open drawer", box.X+box.W)
+	}
+}
+
+// TestInspectorPaneShortcut covers H26: Cmd/Ctrl+Alt+Left/Right run the
+// inspector's module-registered pane cycling commands.
+func TestInspectorPaneShortcut(t *testing.T) {
+	r := newTestRoot(t)
+	mustScreen(t, r, textScreen("home", "首页", "body-home", 10))
+	next, prev := 0, 0
+	mustCommand(t, r, contracts.CommandSpec{ID: "rightpanel.pane.next", Title: "下一个面板", Order: 10,
+		Run: func() error { next++; return nil }})
+	mustCommand(t, r, contracts.CommandSpec{ID: "rightpanel.pane.prev", Title: "上一个面板", Order: 11,
+		Run: func() error { prev++; return nil }})
+	tt := newTestTester(t, r, 1280, 800)
+	tt.Frame()
+	tt.Key(ui.Cmd|ui.Alt, ui.KeyRight)
+	tt.Frame()
+	tt.Key(ui.Cmd|ui.Alt, ui.KeyLeft)
+	tt.Frame()
+	if next != 1 || prev != 1 {
+		t.Fatalf("pane cycling commands ran next=%d prev=%d, want 1/1", next, prev)
+	}
+}
+
+// TestPaletteShowsCommandShortcut covers H26's palette half: a command that
+// declares a shortcut shows it in the palette row.
+func TestPaletteShowsCommandShortcut(t *testing.T) {
+	r := newTestRoot(t)
+	mustScreen(t, r, textScreen("home", "首页", "body-home", 10))
+	mustCommand(t, r, contracts.CommandSpec{ID: "demo.action", Title: "演示命令", Order: 10,
+		Shortcut: "Cmd/Ctrl + Alt + D", Run: func() error { return nil }})
+	tt := newTestTester(t, r, 1280, 800)
+	tt.Frame()
+	tt.Key(ui.Cmd, ui.KeyK)
+	tt.Frame()
+	requireHasText(t, tt, "演示命令")
+	requireHasText(t, tt, "Cmd/Ctrl + Alt + D")
 }

@@ -1,13 +1,15 @@
 package session_test
 
-// TDD tests (RED first) for the goal lifecycle UI: complete/abandon actions on
-// the header chip, the two slash commands and auto-continue suppression.
+// TDD tests for the goal lifecycle UI: complete/abandon actions in the header
+// chip's popover, their confirmations, the two slash commands and
+// auto-continue suppression.
 
 import (
 	"errors"
-	"github.com/egoist/mygo/ui"
 	"sync"
 	"testing"
+
+	"github.com/egoist/mygo/ui"
 
 	"github.com/zeokeel/zeokeel/internal/contracts"
 )
@@ -90,15 +92,18 @@ func TestGoalChipLifecycleComplete(t *testing.T) {
 	h, tester := newGoalPauseHarness(t, chat, nil, goal)
 	goal.setGoal("g1", "ship it", contracts.GoalStatusActive)
 	tester.Frame()
-	h.assertTexts(tester, "完成目标", "放弃目标", "暂停目标", "清除目标")
+	openGoalActions(t, h, tester, "目标")
+	h.assertTexts(tester, "完成目标", "结束目标（保留记录）", "暂停目标", "删除目标记录")
 
 	h.click(tester, "完成目标")
 	if complete, _, _ := goal.lifecycleCalls(); complete != 1 {
 		t.Fatalf("Complete calls = %d", complete)
 	}
 	tester.Frame()
-	h.assertTexts(tester, "已完成", "清除目标")
-	h.assertNoTexts(tester, "完成目标", "放弃目标", "暂停目标", "继续目标")
+	h.assertTexts(tester, "目标已完成", "ship it")
+	openGoalActions(t, h, tester, "目标已完成")
+	h.assertTexts(tester, "删除目标记录")
+	h.assertNoTexts(tester, "完成目标", "结束目标（保留记录）", "暂停目标", "继续目标")
 }
 
 func TestGoalChipLifecycleAbandon(t *testing.T) {
@@ -107,13 +112,19 @@ func TestGoalChipLifecycleAbandon(t *testing.T) {
 	h, tester := newGoalPauseHarness(t, chat, nil, goal)
 	goal.setGoal("g1", "ship it", contracts.GoalStatusActive)
 	tester.Frame()
-	h.click(tester, "放弃目标")
+	openGoalActions(t, h, tester, "目标")
+	h.click(tester, "结束目标（保留记录）")
+	// Ending keeps the record; the dialog explains the difference.
+	h.assertTexts(tester, "结束目标", "取消", "确认结束")
+	h.click(tester, "确认结束")
 	if _, abandon, _ := goal.lifecycleCalls(); abandon != 1 {
 		t.Fatalf("Abandon calls = %d", abandon)
 	}
 	tester.Frame()
-	h.assertTexts(tester, "已放弃", "清除目标")
-	h.assertNoTexts(tester, "完成目标", "放弃目标", "暂停目标")
+	h.assertTexts(tester, "目标已放弃", "ship it")
+	openGoalActions(t, h, tester, "目标已放弃")
+	h.assertTexts(tester, "删除目标记录")
+	h.assertNoTexts(tester, "完成目标", "结束目标（保留记录）", "暂停目标")
 }
 
 func TestGoalChipLifecycleHiddenWithoutLifecycler(t *testing.T) {
@@ -122,8 +133,9 @@ func TestGoalChipLifecycleHiddenWithoutLifecycler(t *testing.T) {
 	h, tester := newGoalPauseHarness(t, chat, nil, goal)
 	goal.setGoal("g1", "ship it", contracts.GoalStatusActive)
 	tester.Frame()
-	h.assertTexts(tester, "暂停目标", "清除目标")
-	h.assertNoTexts(tester, "完成目标", "放弃目标")
+	openGoalActions(t, h, tester, "目标")
+	h.assertTexts(tester, "暂停目标", "删除目标记录")
+	h.assertNoTexts(tester, "完成目标", "结束目标（保留记录）")
 }
 
 func TestGoalChipLifecycleFailureDanger(t *testing.T) {
@@ -133,6 +145,7 @@ func TestGoalChipLifecycleFailureDanger(t *testing.T) {
 	h, tester := newGoalPauseHarness(t, chat, nil, goal)
 	goal.setGoal("g1", "ship it", contracts.GoalStatusActive)
 	tester.Frame()
+	openGoalActions(t, h, tester, "目标")
 	h.click(tester, "完成目标")
 	tester.Frame()
 	h.assertTexts(tester, "完成目标失败")
@@ -145,11 +158,15 @@ func TestGoalChipLifecycleEnglish(t *testing.T) {
 	goal.setGoal("g1", "ship it", contracts.GoalStatusActive)
 	h.ui.Locale().SetLanguage("en")
 	tester.Frame()
-	h.assertTexts(tester, "Complete goal", "Abandon goal", "Pause goal", "Clear goal")
+	h.assertTexts(tester, "Goal")
+	h.click(tester, "Goal")
+	h.assertTexts(tester, "Complete goal", "End goal (keep record)", "Pause goal", "Delete goal record")
 	h.click(tester, "Complete goal")
 	tester.Frame()
-	h.assertTexts(tester, "Completed", "Clear goal")
-	h.assertNoTexts(tester, "Complete goal", "Abandon goal", "Pause goal")
+	h.assertTexts(tester, "Goal completed", "ship it")
+	h.click(tester, "Goal completed")
+	h.assertTexts(tester, "Delete goal record")
+	h.assertNoTexts(tester, "Complete goal", "End goal (keep record)", "Pause goal")
 }
 
 // --- slash commands ---------------------------------------------------------
@@ -218,7 +235,7 @@ func TestGoalLifecycleCommandsRun(t *testing.T) {
 		t.Fatalf("Complete calls = %d", completeCalls)
 	}
 	tester.Frame()
-	h.assertTexts(tester, "目标已完成", "已完成")
+	h.assertTexts(tester, "目标已完成")
 
 	// Failure surfaces in DangerText.
 	goal2 := newLifecycleTracker()

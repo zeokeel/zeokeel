@@ -55,8 +55,10 @@ func TestDiagnosticsPage(t *testing.T) {
 	uiRoot.Navigator().ToggleSettings()
 	tester := ui.NewTester(uiRoot.View, 1200, 800)
 	tester.Frame()
-	if err := tester.Click("诊断"); err != nil {
-		t.Fatalf("click diagnostics page: %v; texts = %v", err, tester.Texts())
+	// The grouped navigation scrolls; open the page through the stable deep
+	// link rather than relying on the item being on the first screen.
+	if err := uiRoot.OpenSettingsPage("diagnostics"); err != nil {
+		t.Fatalf("open diagnostics page: %v", err)
 	}
 	tester.Frame()
 	for _, want := range []string{"诊断", "ZeoKeel v1.2.3", "abc124", "go1.27.3",

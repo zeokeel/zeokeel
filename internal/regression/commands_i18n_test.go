@@ -24,7 +24,7 @@ var englishSessionCommands = map[string][2]string{
 	"zeokeel.session.memory":     {"Add memory", "Save a global memory"},
 	"zeokeel.session.feedback":   {"Feedback", "Rate the latest answer"},
 	"zeokeel.session.permission": {"Permission mode", "Cycle permission: ask → workspace → full"},
-	"zeokeel.session.settings":   {"Open settings", "Open the settings panel"},
+	"zeokeel.session.settings":   {"Settings", "Open the settings panel"},
 	"zeokeel.session.stop":       {"Stop", "Stop the current reply"},
 	"zeokeel.session.attach":     {"Attach files", "Add files or images to the input"},
 	"zeokeel.session.help":       {"Help", "Show the available commands and shortcuts"},
@@ -114,7 +114,7 @@ func TestSessionCommandLocaleSwitchNextFrame(t *testing.T) {
 	}
 	tester.Frame()
 	requireHasTexts(t, tester, "Help", "Slash commands", "New conversation", "Stop",
-		"Attach files", "Permission mode", "Esc to close")
+		"Attach files", "Permission mode", "Toggle the inspector", "Close")
 	requireNoText(t, tester, "斜杠命令")
 
 	// Escape closes the modal; switching back restores the Chinese registry.

@@ -26,9 +26,10 @@ import (
 
 // memoryHarness is the session screen on the Memory tab.
 type memoryHarness struct {
-	h      *harness
-	store  contracts.MemoryStore
-	tester *ui.Tester
+	h        *harness
+	store    contracts.MemoryStore
+	tester   *ui.Tester
+	notifier *fakeNotifier
 }
 
 // seedMemoryFile writes one memory registry document below the data directory.
@@ -54,7 +55,9 @@ func startMemoryUI(t *testing.T, seed []contracts.Memory, provided contracts.Mem
 	chat := newFakeChat()
 	chat.addSession(contracts.ChatSession{ID: "sess-memory", Title: "Memory audit",
 		Messages: []contracts.ChatMessage{{ID: "m1", Role: contracts.ChatRoleUser, Text: "hi"}}}, true)
+	notifier := &fakeNotifier{}
 	provide(t, h.ctx, contracts.KeyChat, contracts.ChatService(chat))
+	provide(t, h.ctx, contracts.KeyNotifier, contracts.Notifier(notifier))
 	if provided != nil {
 		provide(t, h.ctx, contracts.KeyMemory, provided)
 	} else {
@@ -63,7 +66,7 @@ func startMemoryUI(t *testing.T, seed []contracts.Memory, provided contracts.Mem
 	activate(t, h.ctx, sessionui.Module(), sessionui.Config{})
 	h.push(sessionui.ScreenID)
 	harness := &memoryHarness{h: h, store: requireService(t, h.ctx, contracts.KeyMemory),
-		tester: h.tester(1280, 800)}
+		tester: h.tester(1280, 800), notifier: notifier}
 	harness.tester.Frame()
 	if err := harness.tester.Click("记忆"); err != nil {
 		t.Fatalf("open Memory tab: %v; texts = %v", err, harness.tester.Texts())
@@ -135,7 +138,8 @@ func TestMemoryTidyKeepsEarliestDuplicate(t *testing.T) {
 	requireHasText(t, harness.tester, "5 条记忆")
 
 	harness.click(t, "整理记忆")
-	requireHasText(t, harness.tester, "已整理 2 条")
+	harness.click(t, "整理") // the native confirmation
+	requireToast(t, harness.notifier, "已整理 2 条")
 	requireHasText(t, harness.tester, "3 条记忆")
 
 	texts := harness.texts(t)
@@ -165,7 +169,8 @@ func TestMemoryTidyKeepsEarliestDuplicate(t *testing.T) {
 func TestMemoryTidyWithoutDuplicatesIsNoop(t *testing.T) {
 	harness := startMemoryUI(t, []contracts.Memory{memorySeed(0, "alpha"), memorySeed(1, "beta")}, nil)
 	harness.click(t, "整理记忆")
-	requireHasText(t, harness.tester, "没有可整理的重复记忆")
+	harness.click(t, "整理")
+	requireToast(t, harness.notifier, "没有可整理的重复记忆")
 	if got := len(harness.entries(t)); got != 2 {
 		t.Fatalf("memories after no-op tidy = %d, want 2", got)
 	}
@@ -191,7 +196,7 @@ func TestMemoryClearAllConfirmCancel(t *testing.T) {
 	if got := len(harness.entries(t)); got != 0 {
 		t.Fatalf("memories after clear = %d, want 0", got)
 	}
-	requireHasText(t, harness.tester, "已清空")
+	requireToast(t, harness.notifier, "已清空")
 	requireHasText(t, harness.tester, "0 条记忆")
 	requireHasText(t, harness.tester, "还没有记忆")
 
@@ -218,7 +223,7 @@ func TestMemoryClearAllEmptyStore(t *testing.T) {
 	requireHasText(t, harness.tester, "还没有记忆")
 	harness.click(t, "全部清空")
 	harness.click(t, "清空")
-	requireHasText(t, harness.tester, "已清空")
+	requireToast(t, harness.notifier, "已清空")
 	requireNoText(t, harness.tester, "清空失败")
 	if got := len(harness.entries(t)); got != 0 {
 		t.Fatalf("memories after clearing an empty store = %d, want 0", got)
@@ -287,6 +292,7 @@ func TestMemoryManagementFailuresAreReadable(t *testing.T) {
 	harness := startMemoryUI(t, nil, listFault)
 	requireHasText(t, harness.tester, "读取记忆失败")
 	harness.click(t, "整理记忆")
+	harness.click(t, "整理")
 	requireHasText(t, harness.tester, "读取记忆失败")
 	harness.click(t, "全部清空")
 	harness.click(t, "清空")
@@ -298,6 +304,7 @@ func TestMemoryManagementFailuresAreReadable(t *testing.T) {
 	}, failRemove: true}
 	harness = startMemoryUI(t, nil, removeFault)
 	harness.click(t, "整理记忆")
+	harness.click(t, "整理")
 	requireHasText(t, harness.tester, "整理记忆失败：1")
 	harness.click(t, "全部清空")
 	harness.click(t, "清空")

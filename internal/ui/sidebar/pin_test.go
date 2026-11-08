@@ -90,7 +90,7 @@ func TestPinnedMenuTogglesState(t *testing.T) {
 	h.assertTexts(tester, "Pinned Chat", "置顶")
 
 	// The first row is the pinned session: its menu offers 取消置顶.
-	openRowMenu(t, tester)
+	openRowMenu(t, tester, "Pinned Chat")
 	h.assertTexts(tester, "取消置顶")
 	h.assertNoTexts(tester, "置顶会话")
 	h.click(tester, "取消置顶")
@@ -102,7 +102,7 @@ func TestPinnedMenuTogglesState(t *testing.T) {
 	tester.Frame()
 	// Both sessions are unpinned now and keep their original order, so the
 	// first row is still Pinned Chat and its menu offers 置顶会话.
-	openRowMenu(t, tester)
+	openRowMenu(t, tester, "Pinned Chat")
 	h.assertTexts(tester, "置顶会话")
 	if err := tester.Click("置顶会话"); err != nil {
 		t.Fatalf("click 置顶会话: %v", err)
@@ -150,7 +150,7 @@ func TestPinnedSortAppliesToSearchResults(t *testing.T) {
 	)
 	h := newHarness(t, chat, sidebar.Config{})
 	tester := h.tester()
-	h.click(tester, "搜索会话")
+	h.click(tester, "搜索会话与消息")
 	tester.Type("Alpha")
 	tester.Frame()
 
@@ -167,7 +167,7 @@ func TestPinMenuHiddenWithoutPinner(t *testing.T) {
 	chat := &fakeChat{sessions: []contracts.ChatSessionInfo{{ID: "s1", Title: "会话一"}}}
 	h := newHarness(t, chat, sidebar.Config{})
 	tester := h.tester()
-	openRowMenu(t, tester)
+	openRowMenu(t, tester, "会话一")
 	h.assertTexts(tester, "删除")
 	h.assertNoTexts(tester, "置顶会话", "取消置顶")
 }

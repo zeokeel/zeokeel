@@ -33,6 +33,16 @@ type Model struct {
 	Note string `json:"note"`
 	// ContextWindow is the model's context-window size in tokens (0 = unknown).
 	ContextWindow int `json:"contextWindow,omitempty"`
+	// Family selects the built-in thinking protocol (qwen/deepseek/other/custom).
+	Family string `json:"family,omitempty"`
+	// DefaultThinking is the model's default thinking-mode ID.
+	DefaultThinking string `json:"defaultThinking,omitempty"`
+	// ThinkingModes are custom thinking modes on top of the family built-ins.
+	ThinkingModes []contracts.ThinkingMode `json:"thinkingModes,omitempty"`
+	// Temperature/TopP/MaxTokens are per-model sampling options.
+	Temperature *float64 `json:"temperature,omitempty"`
+	TopP        *float64 `json:"topP,omitempty"`
+	MaxTokens   int      `json:"maxTokens,omitempty"`
 }
 
 // Config is the module's typed assembly config.
@@ -42,11 +52,9 @@ type Config struct {
 }
 
 // defaultModels are the presets shipped when the assembly config is empty:
-// DeepSeek leads because it is the product's primary provider.
-var defaultModels = []contracts.ModelInfo{
-	{ID: "deepseek-chat", Name: "DeepSeek Chat", Note: "通用对话", ContextWindow: 128000},
-	{ID: "deepseek-reasoner", Name: "DeepSeek Reasoner", Note: "深度推理", ContextWindow: 128000},
-}
+// DeepSeek leads because it is the product's primary provider. The list lives
+// in contracts so the settings editor and the backend cannot drift apart.
+var defaultModels = contracts.DefaultModelCatalog()
 
 // Module is the model-catalog backend descriptor. It provides
 // contracts.KeyModelCatalog.
@@ -121,11 +129,18 @@ func newServiceWithSettings(cfg Config, logger contracts.Logger, settings contra
 			if contextWindow < 0 {
 				contextWindow = 0
 			}
+			temperature, topP, maxTokens := contracts.SanitizeGeneration(model.Temperature, model.TopP, model.MaxTokens)
 			models = append(models, contracts.ModelInfo{
-				ID:            id,
-				Name:          name,
-				Note:          strings.TrimSpace(model.Note),
-				ContextWindow: contextWindow,
+				ID:              id,
+				Name:            name,
+				Note:            strings.TrimSpace(model.Note),
+				ContextWindow:   contextWindow,
+				Family:          strings.TrimSpace(model.Family),
+				DefaultThinking: strings.TrimSpace(model.DefaultThinking),
+				ThinkingModes:   contracts.SanitizeThinkingModes(model.ThinkingModes),
+				Temperature:     temperature,
+				TopP:            topP,
+				MaxTokens:       maxTokens,
 			})
 		}
 	}
@@ -184,11 +199,18 @@ func sanitizeCatalog(models []contracts.ModelInfo) []contracts.ModelInfo {
 		if contextWindow <= 0 {
 			contextWindow = 0
 		}
+		temperature, topP, maxTokens := contracts.SanitizeGeneration(model.Temperature, model.TopP, model.MaxTokens)
 		out = append(out, contracts.ModelInfo{
-			ID:            id,
-			Name:          name,
-			Note:          strings.TrimSpace(model.Note),
-			ContextWindow: contextWindow,
+			ID:              id,
+			Name:            name,
+			Note:            strings.TrimSpace(model.Note),
+			ContextWindow:   contextWindow,
+			Family:          strings.TrimSpace(model.Family),
+			DefaultThinking: strings.TrimSpace(model.DefaultThinking),
+			ThinkingModes:   contracts.SanitizeThinkingModes(model.ThinkingModes),
+			Temperature:     temperature,
+			TopP:            topP,
+			MaxTokens:       maxTokens,
 		})
 	}
 	return out

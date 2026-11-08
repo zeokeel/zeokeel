@@ -9,6 +9,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/egoist/mygo/ui"
 	cordis "github.com/zeokeel/zeokeel-kernel"
@@ -110,9 +111,16 @@ func (h *harness) tester() *ui.Tester {
 
 func (h *harness) click(tester *ui.Tester, label string) {
 	h.t.Helper()
+	// Frames settle the native List's measurement passes, and advancing the
+	// clock finishes a disclosure's opening animation: a control inside a
+	// panel that is still animating has no bounds yet, so a click aimed at its
+	// text would miss.
+	tester.Frame()
 	if err := tester.Click(label); err != nil {
 		h.t.Fatalf("click %q: %v; texts = %v", label, err, tester.Texts())
 	}
+	tester.Frame()
+	tester.Advance(400 * time.Millisecond)
 	tester.Frame()
 }
 
@@ -208,7 +216,7 @@ func TestMCPListRenders(t *testing.T) {
 
 	// Expanding the first card reveals the connection details.
 	h.click(tester, "详情")
-	h.assertTexts(tester, "收起", "fake-files", "0.1.0", "2024-11-05",
+	h.assertTexts(tester, "fake-files", "0.1.0", "2024-11-05",
 		"http://127.0.0.1:9000/mcp")
 }
 
@@ -306,5 +314,64 @@ func TestModuleMetadata(t *testing.T) {
 	}
 	if strings.TrimSpace(plugins.Module().ID) != plugins.ModuleID {
 		t.Fatalf("descriptor ID = %q", plugins.Module().ID)
+	}
+}
+
+// --- H12: failed connections, pending restarts, scannable descriptions -------
+
+func TestMCPFailedRowOffersInlineRetry(t *testing.T) {
+	service := &fakePlugins{
+		mcp: []contracts.MCPPlugin{{
+			Name: "broken", Status: "连接失败: dial tcp 127.0.0.1:9: connection refused", Tools: 0,
+		}},
+		refreshed: []contracts.MCPPlugin{{Name: "broken", Status: "已连接", Tools: 2}},
+	}
+	h := newHarness(t, service, nil, plugins.Config{})
+	tester := h.tester()
+	h.assertTexts(tester, "broken", "连接失败", "重试连接")
+	// The failure reason is visible without expanding the details.
+	h.assertTexts(tester, "dial tcp 127.0.0.1:9: connection refused")
+
+	h.click(tester, "重试连接")
+	if calls := service.calls(); calls != 1 {
+		t.Fatalf("Refresh calls = %d, want the inline retry's one", calls)
+	}
+	h.assertTexts(tester, "已连接", "2 个工具")
+}
+
+func TestToolSwitchShowsPendingRestart(t *testing.T) {
+	store := newFakePluginSettings(nil)
+	h := newHarnessWithSettings(t, nil, newToolRegistry(), plugins.Config{}, store)
+	tester := h.tester()
+	h.assertNoTexts(tester, "待重启")
+
+	h.click(tester, "启用工具 read_file")
+	h.assertTexts(tester, "待重启")
+	h.assertForTextCount(tester, "待重启", 1)
+}
+
+func TestToolDescriptionIsScannableAndKeepsFullTextInTooltip(t *testing.T) {
+	long := "Read a UTF-8 text file inside the tool root and return numbered lines. " +
+		"Use offset (1-based line) and limit (max lines) to page through it. " +
+		"This sentence is documentation the row should not show in full."
+	registry := rigtools.NewRegistry(fakeTool{name: "read_file", desc: long})
+	h := newHarness(t, nil, registry, plugins.Config{})
+	tester := h.tester()
+	// The row shows a short first-phrase summary, not the developer docs blob.
+	h.assertTexts(tester, "Read a UTF-8 text file inside the tool root and return numbered lines")
+	h.assertNoTexts(tester, "This sentence is documentation the row should not show in full")
+}
+
+// assertForTextCount checks how many text nodes contain want.
+func (h *harness) assertForTextCount(tester *ui.Tester, want string, count int) {
+	h.t.Helper()
+	got := 0
+	for _, text := range tester.Texts() {
+		if strings.Contains(text, want) {
+			got++
+		}
+	}
+	if got != count {
+		h.t.Fatalf("%q shows %d times, want %d; texts = %v", want, got, count, tester.Texts())
 	}
 }

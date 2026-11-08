@@ -3,8 +3,10 @@ package regression
 // Adversarial audit: spilling oversized tool results into the persisted history.
 // >32KiB tool results are saved to <workspace>/.zeokeel/tool-results/ and the
 // persisted message keeps a 2KiB head + the file path; the live run still sends
-// the full text to the model; without a workspace the full text is persisted;
-// the transform is idempotent and prunes the directory to 100 files.
+// the full text to the model; without a workspace the product data directory is
+// the fallback (headless/ACP sessions), and only a missing directory falls back
+// to the full text; the transform is idempotent and prunes the directory to 100
+// files.
 
 import (
 	"context"
@@ -132,8 +134,9 @@ func TestToolSpillRoundTrip(t *testing.T) {
 	}
 }
 
-// TestToolSpillNoWorkspaceFallback covers a harness without a workspace backend:
-// the persisted history keeps the full text and no spill pointer is written.
+// TestToolSpillNoWorkspaceFallback covers a harness without a workspace backend
+// (the headless/ACP case): the product data directory is the spill fallback, so
+// oversized results are still spilled instead of being resent inline forever.
 func TestToolSpillNoWorkspaceFallback(t *testing.T) {
 	payload := strings.Repeat("B", 40<<10)
 	var calls atomic.Int32
@@ -159,11 +162,25 @@ func TestToolSpillNoWorkspaceFallback(t *testing.T) {
 			persisted = message.Text()
 		}
 	}
-	if persisted != payload {
-		t.Fatalf("persisted tool text = %d bytes, want the full %d bytes without a workspace", len(persisted), len(payload))
+	if persisted == "" {
+		t.Fatalf("persisted history has no tool message: %+v", messages)
 	}
-	if strings.Contains(persisted, "[完整结果: ") {
-		t.Fatalf("no-workspace fallback still wrote a spill pointer")
+	if len(persisted) >= len(payload) {
+		t.Fatalf("persisted tool text = %d bytes, want it spilled (%d-byte payload)",
+			len(persisted), len(payload))
+	}
+	if !strings.Contains(persisted, "[完整结果: ") {
+		t.Fatalf("data-dir fallback wrote no spill pointer: %q", persisted[:minInt(len(persisted), 120)])
+	}
+	path := spillPathFromText(t, persisted)
+	dataSpillDir := filepath.Join(harness.h.dataDir, ".zeokeel", "tool-results")
+	if !strings.HasPrefix(path, dataSpillDir+string(filepath.Separator)) {
+		t.Fatalf("spill file %q is outside the data-dir fallback %q", path, dataSpillDir)
+	}
+	content, err := os.ReadFile(path)
+	if err != nil || string(content) != payload {
+		t.Fatalf("spill file content = %d bytes (err %v), want the full %d-byte payload",
+			len(content), err, len(payload))
 	}
 }
 

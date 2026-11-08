@@ -75,7 +75,8 @@ func TestStopCommandCancelsRunningSession(t *testing.T) {
 		t.Fatalf("Cancel calls = %v, want sess-1", ids)
 	}
 	tester.Frame()
-	h.assertTexts(tester, "已停止")
+	// The stop result is a transient toast (no resident status badge).
+	h.assertNoTexts(tester, "已停止", "停止失败")
 }
 
 func TestStopCommandDisabledAndError(t *testing.T) {
@@ -118,15 +119,16 @@ func TestFileCommandStagesAttachments(t *testing.T) {
 	if err := attach.Run(); err != nil {
 		t.Fatalf("attach Run: %v", err)
 	}
-	tester.Frame()
-	h.assertTexts(tester, "note.txt")
+	// The picker runs off the UI thread: its staged result arrives on a later
+	// frame through UIRuntime.Post.
+	h.waitFor(tester, "note.txt")
 
 	// Cancellation is a no-op.
 	setAttachmentPicker(t, func() ([]string, error) { return nil, nil })
 	if err := attach.Run(); err != nil {
 		t.Fatalf("cancelled attach Run: %v", err)
 	}
-	tester.Frame()
+	h.settle(tester)
 	h.assertTexts(tester, "note.txt")
 }
 
@@ -160,7 +162,8 @@ func TestHelpModalListsCommandsAndShortcuts(t *testing.T) {
 	}
 	tester.Frame()
 	h.assertTexts(tester, "帮助", "斜杠命令", "停止", "附加文件", "帮助",
-		"快捷键", "Cmd/Ctrl + K", "打开命令面板", "Cmd/Ctrl + B", "Esc 关闭")
+		"快捷键", "Cmd/Ctrl + K", "打开命令面板", "Cmd/Ctrl + B",
+		"Cmd/Ctrl + Alt + I", "切换右侧栏", "Enter", "发送消息")
 
 	tester.Key(0, ui.KeyEscape)
 	tester.Frame()
@@ -178,5 +181,51 @@ func TestHelpModalEnglishCopy(t *testing.T) {
 	}
 	tester.Frame()
 	h.assertTexts(tester, "Help", "Slash commands", "Keyboard shortcuts",
-		"Open the command palette", "Esc to close", "Close")
+		"Open the command palette", "Toggle the inspector", "Close")
+}
+
+// TestHelpModalShortcutsFollowSettings covers R2-06: the help reference lists
+// the product's desktop chords, and the two configurable ones render the live
+// settings values (with the documented defaults when unset).
+func TestHelpModalShortcutsFollowSettings(t *testing.T) {
+	settings := newPermissionSettings(nil)
+	h := newPermissionHarness(t, permissionChat(), settings)
+	tester := h.tester()
+	tester.Frame()
+	help := findSessionCommand(t, h, "zeokeel.session.help")
+	if err := help.Run(); err != nil {
+		t.Fatalf("help Run: %v", err)
+	}
+	tester.Frame()
+
+	// Defaults plus the fixed chords the host and composer register.
+	for _, want := range []string{"Cmd/Ctrl + N", "Cmd/Ctrl + ,", "Cmd/Ctrl + K",
+		"Cmd/Ctrl + B", "Cmd/Ctrl + Alt + I", "新会话", "设置", "发送消息"} {
+		requireSessionText(t, tester, want)
+	}
+
+	// A customized chord is rendered as the product's display label.
+	settings.set(contracts.SettingsUIShortcutCommandPalette, "alt+k")
+	settings.set(contracts.SettingsUIShortcutToggleSidebar, "ctrl+b")
+	tester.Frame()
+	requireSessionText(t, tester, "Alt + K")
+	requireSessionText(t, tester, "Ctrl + B")
+	requireSessionNoText(t, tester, "Cmd/Ctrl + K")
+	requireSessionNoText(t, tester, "Cmd/Ctrl + B")
+}
+
+// requireSessionText fails when the frame does not show text.
+func requireSessionText(t *testing.T, tester *ui.Tester, text string) {
+	t.Helper()
+	if !tester.HasText(text) {
+		t.Fatalf("frame does not show %q; texts = %v", text, tester.Texts())
+	}
+}
+
+// requireSessionNoText fails when the frame shows text.
+func requireSessionNoText(t *testing.T, tester *ui.Tester, text string) {
+	t.Helper()
+	if tester.HasText(text) {
+		t.Fatalf("frame still shows %q; texts = %v", text, tester.Texts())
+	}
 }

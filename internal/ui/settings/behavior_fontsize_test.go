@@ -15,7 +15,8 @@ func TestBehaviorPageChatFontSizeDefaultsStandard(t *testing.T) {
 	tester := h.tester()
 	tester.Frame()
 	h.click(tester, "行为")
-	h.assertTexts(tester, "消息字号", "标准", "对话文字大小，立即生效")
+	expandMoreConversationSettings(t, tester, "更多对话设置")
+	h.assertTexts(tester, "消息字号", "标准")
 	if raw := store.get(contracts.SettingChatFontSize); raw != "" {
 		t.Fatalf("defaults wrote the chat-font-size row: %q", raw)
 	}
@@ -42,6 +43,7 @@ func TestBehaviorPageChatFontSizeBadValueNormalized(t *testing.T) {
 	tester := h.tester()
 	tester.Frame()
 	h.click(tester, "行为")
+	expandMoreConversationSettings(t, tester, "更多对话设置")
 	h.assertTexts(tester, "标准")
 	h.click(tester, "标准")
 	h.click(tester, "小")
@@ -56,8 +58,8 @@ func TestBehaviorPageChatFontSizeEnglish(t *testing.T) {
 	tester := h.tester()
 	tester.Frame()
 	h.click(tester, "Behavior")
-	h.assertTexts(tester, "Message text size", "Standard",
-		"Conversation text size, applies immediately")
+	expandMoreConversationSettings(t, tester, "More conversation settings")
+	h.assertTexts(tester, "Message text size", "Standard")
 	h.click(tester, "Standard")
 	h.click(tester, "Large")
 	if raw := store.get(contracts.SettingChatFontSize); raw != "large" {

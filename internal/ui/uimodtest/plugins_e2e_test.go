@@ -30,17 +30,33 @@ func TestPluginsScreenEndToEnd(t *testing.T) {
 	}
 	tester := ui.NewTester(uiRoot.View, 1280, 800)
 	tester.Frame()
-	for _, want := range []string{"插件", "MCP 插件", "还没有配置 MCP 服务器", "工具目录", "bash", "read_file", "memory", "schedule_create", "skill"} {
+	for _, want := range []string{"插件", "MCP 插件", "还没有配置 MCP 服务器", "工具目录", "bash"} {
 		if !tester.HasText(want) {
 			t.Fatalf("plugins frame missing %q; texts = %v", want, tester.Texts())
 		}
 	}
-	// The catalog search filters both name and description.
+	// The catalogue is a virtualized native List: a tool deep in the list is
+	// reached through the search rather than built up front.
 	searchRect, ok := tester.Find("搜索工具")
 	if !ok {
 		t.Fatalf("tool search field not found; texts = %v", tester.Texts())
 	}
 	tester.ClickAt(searchRect.X+searchRect.W/2, searchRect.Y+searchRect.H/2)
+	tester.Frame()
+	for _, name := range []string{"read_file", "memory", "schedule_create", "skill"} {
+		tester.Key(ui.Cmd, ui.KeyA)
+		tester.Key(0, ui.KeyBackspace)
+		tester.Frame()
+		tester.Type(name)
+		tester.Frame()
+		if !tester.HasText(name) {
+			t.Fatalf("search %q did not show the tool; texts = %v", name, tester.Texts())
+		}
+	}
+	// The search filters both name and description: a name search hides the
+	// other tools (the previous case narrowed to memory tools).
+	tester.Key(ui.Cmd, ui.KeyA)
+	tester.Key(0, ui.KeyBackspace)
 	tester.Frame()
 	tester.Type("memory")
 	tester.Frame()

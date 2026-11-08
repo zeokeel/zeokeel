@@ -137,7 +137,11 @@ func TestGoalPauseResumeChipAndActions(t *testing.T) {
 	h, tester := newGoalPauseHarness(t, chat, nil, goal)
 	goal.setGoal("g1", "ship it", "active")
 	tester.Frame()
-	h.assertTexts(tester, "目标", "暂停目标", "清除目标")
+	h.assertTexts(tester, "目标")
+	h.assertNoTexts(tester, "暂停目标", "继续目标", "删除目标记录")
+
+	openGoalActions(t, h, tester, "目标")
+	h.assertTexts(tester, "暂停目标", "删除目标记录")
 	h.assertNoTexts(tester, "继续目标")
 
 	h.click(tester, "暂停目标")
@@ -145,7 +149,10 @@ func TestGoalPauseResumeChipAndActions(t *testing.T) {
 	if pauseCalls, _ := goal.calls(); pauseCalls != 1 {
 		t.Fatalf("Pause calls = %d", pauseCalls)
 	}
-	h.assertTexts(tester, "目标已暂停", "继续目标", "清除目标")
+	h.assertTexts(tester, "目标已暂停", "ship it")
+
+	openGoalActions(t, h, tester, "目标已暂停")
+	h.assertTexts(tester, "继续目标", "删除目标记录")
 	h.assertNoTexts(tester, "暂停目标")
 
 	h.click(tester, "继续目标")
@@ -153,7 +160,7 @@ func TestGoalPauseResumeChipAndActions(t *testing.T) {
 	if _, resumeCalls := goal.calls(); resumeCalls != 1 {
 		t.Fatalf("Resume calls = %d", resumeCalls)
 	}
-	h.assertTexts(tester, "目标", "暂停目标")
+	h.assertTexts(tester, "目标")
 }
 
 func TestGoalPauseFailureDanger(t *testing.T) {
@@ -162,6 +169,7 @@ func TestGoalPauseFailureDanger(t *testing.T) {
 	h, tester := newGoalPauseHarness(t, chat, nil, goal)
 	goal.setGoal("g1", "ship it", "active")
 	tester.Frame()
+	openGoalActions(t, h, tester, "目标")
 	h.click(tester, "暂停目标")
 	tester.Frame()
 	h.assertTexts(tester, "暂停目标失败", "目标")
@@ -173,7 +181,8 @@ func TestGoalPauseHiddenWithoutPauser(t *testing.T) {
 	setFakeGoal(goal, "g1", "ship it")
 	h, tester := newGoalPauseHarness(t, chat, nil, goal)
 	tester.Frame()
-	h.assertTexts(tester, "目标", "清除目标")
+	openGoalActions(t, h, tester, "目标")
+	h.assertTexts(tester, "删除目标记录")
 	h.assertNoTexts(tester, "暂停目标", "继续目标")
 }
 
@@ -196,5 +205,7 @@ func TestGoalPauseEnglish(t *testing.T) {
 	goal.setGoal("g1", "ship it", "paused")
 	h.ui.Locale().SetLanguage("en")
 	tester.Frame()
-	h.assertTexts(tester, "Goal paused", "Resume goal", "Clear goal")
+	h.assertTexts(tester, "Goal paused")
+	h.click(tester, "Goal paused")
+	h.assertTexts(tester, "Resume goal", "Delete goal record")
 }

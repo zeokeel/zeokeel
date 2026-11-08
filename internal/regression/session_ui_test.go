@@ -24,9 +24,10 @@ import (
 
 // sessionHarness boots the session UI module with a scripted chat read model.
 type sessionHarness struct {
-	h      *harness
-	chat   *fakeChat
-	tester *ui.Tester
+	h        *harness
+	chat     *fakeChat
+	tester   *ui.Tester
+	notifier *fakeNotifier
 }
 
 // startSessionUI activates the session screen with the given sessions; the
@@ -38,13 +39,50 @@ func startSessionUI(t *testing.T, sessions ...contracts.ChatSession) *sessionHar
 	for index, chatSession := range sessions {
 		chat.addSession(chatSession, index == 0)
 	}
+	notifier := &fakeNotifier{}
 	provide(t, h.ctx, contracts.KeyChat, contracts.ChatService(chat))
 	provide(t, h.ctx, contracts.KeyFileDrop, contracts.FileDropService(h.ui.FileDrop()))
+	provide(t, h.ctx, contracts.KeyNotifier, contracts.Notifier(notifier))
 	activate(t, h.ctx, sessionui.Module(), sessionui.Config{})
 	h.push(sessionui.ScreenID)
-	harness := &sessionHarness{h: h, chat: chat, tester: h.tester(1280, 800)}
+	harness := &sessionHarness{h: h, chat: chat, tester: h.tester(1280, 800), notifier: notifier}
 	harness.tester.Frame()
 	return harness
+}
+
+// notifierTexts returns the toasts a fakeNotifier recorded.
+func notifierTexts(notifier *fakeNotifier) []contracts.Notification {
+	if notifier == nil {
+		return nil
+	}
+	notifier.mu.Lock()
+	defer notifier.mu.Unlock()
+	return append([]contracts.Notification(nil), notifier.delivered...)
+}
+
+// toastMatches reports whether one recorded toast contains every fragment.
+func toastMatches(notifier *fakeNotifier, fragments ...string) bool {
+	for _, toast := range notifierTexts(notifier) {
+		matched := true
+		for _, fragment := range fragments {
+			if !strings.Contains(toast.Text, fragment) {
+				matched = false
+				break
+			}
+		}
+		if matched {
+			return true
+		}
+	}
+	return false
+}
+
+// requireToast waits for one recorded toast containing every fragment.
+func requireToast(t *testing.T, notifier *fakeNotifier, fragments ...string) {
+	t.Helper()
+	waitFor(t, "toast "+strings.Join(fragments, "/"), func() bool {
+		return toastMatches(notifier, fragments...)
+	})
 }
 
 // installExportSeam replaces the JSONL save seam and captures the written
@@ -111,7 +149,7 @@ func TestSessionExportJSONLHostileContent(t *testing.T) {
 	harness := startSessionUI(t, chatSession)
 	captured := harness.installExportSeam(t, nil)
 	harness.exportJSONL(t)
-	requireHasText(t, harness.tester, "已导出")
+	requireToast(t, harness.notifier, "对话已导出")
 
 	lines := strings.Split(strings.TrimSuffix(*captured, "\n"), "\n")
 	if len(lines) != 1+len(chatSession.Messages) {
@@ -168,7 +206,7 @@ func TestSessionExportJSONLEmptySession(t *testing.T) {
 	})
 	captured := harness.installExportSeam(t, nil)
 	harness.exportJSONL(t)
-	requireHasText(t, harness.tester, "已导出")
+	requireToast(t, harness.notifier, "对话已导出")
 	lines := strings.Split(strings.TrimSpace(*captured), "\n")
 	if len(lines) != 1 {
 		t.Fatalf("empty session export has %d lines, want 1 header line", len(lines))
@@ -336,15 +374,25 @@ func TestSessionGoalChipEmptyText(t *testing.T) {
 	tester.Frame()
 	requireNoExactText(t, tester, "目标")
 
-	// A real goal renders the badge and the text.
+	// A real goal renders the status label and the (truncated) goal text.
 	tracker.trigger(contracts.Goal{ID: "goal-1", Text: "ship the audit", Status: "active"}, true)
 	tester.Frame()
 	requireExactText(t, tester, "目标")
 	requireHasText(t, tester, "ship the audit")
 
-	// Clearing through the header calls the host tracker.
-	if err := tester.Click("清除目标"); err != nil {
-		t.Fatalf("click clear goal: %v; texts = %v", err, tester.Texts())
+	// Clearing through the header calls the host tracker: the chip's popover
+	// carries the action, which confirms first.
+	if err := tester.Click("目标"); err != nil {
+		t.Fatalf("open goal menu: %v; texts = %v", err, tester.Texts())
+	}
+	tester.Frame()
+	if err := tester.Click("删除目标记录"); err != nil {
+		t.Fatalf("click delete goal: %v; texts = %v", err, tester.Texts())
+	}
+	tester.Frame()
+	requireHasText(t, tester, "确认删除")
+	if err := tester.Click("确认删除"); err != nil {
+		t.Fatalf("confirm delete goal: %v; texts = %v", err, tester.Texts())
 	}
 	tester.Frame()
 	if tracker.clears == 0 {

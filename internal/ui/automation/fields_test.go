@@ -57,17 +57,17 @@ func TestCreateFormWorkspaceAndPermissionSelectors(t *testing.T) {
 	h, _ := workspaceAutomationHarness(t, service)
 	tester := h.tester()
 	h.click(tester, "新建任务")
-	h.assertTexts(tester, "工作区：当前工作区", "权限：默认全局")
+	h.assertTexts(tester, "跟随当前工作区", "默认全局")
 
-	h.click(tester, "工作区：当前工作区")
+	h.click(tester, "跟随当前工作区")
 	h.assertTexts(tester, "当前工作区", "项目一", "项目二")
 	h.click(tester, "项目一")
-	h.assertTexts(tester, "工作区：项目一")
+	h.assertTexts(tester, "项目一")
 
-	h.click(tester, "权限：默认全局")
+	h.click(tester, "默认全局")
 	h.assertTexts(tester, "询问", "工作区", "全部", "从不")
 	h.click(tester, "全部")
-	h.assertTexts(tester, "权限：全部")
+	h.assertTexts(tester, "全部")
 
 	h.click(tester, "任务名称")
 	tester.Type("巡检")
@@ -123,7 +123,7 @@ func TestAutomationFieldsEnglish(t *testing.T) {
 	tester.Frame()
 	h.assertTexts(tester, "Workspace: w1", "Permission: Full access")
 	h.click(tester, "New task")
-	h.assertTexts(tester, "Workspace: Current workspace", "Permission: Global default")
-	h.click(tester, "Permission: Global default")
+	h.assertTexts(tester, "Follow the current workspace", "Global default")
+	h.click(tester, "Global default")
 	h.assertTexts(tester, "Ask", "Workspace", "Full access", "Never")
 }

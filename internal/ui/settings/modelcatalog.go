@@ -12,24 +12,23 @@ import (
 
 	"github.com/zeokeel/zeokeel/internal/contracts"
 	"github.com/zeokeel/zeokeel/internal/design"
+	"github.com/zeokeel/zeokeel/internal/uikit"
 )
 
 const (
 	// ModelCatalogPageID is the editable model catalog page.
 	ModelCatalogPageID = "modelcatalog"
 	// ModelCatalogPageSection and order place it in the 模型 group after Model.
-	ModelCatalogPageSection = "模型"
+	ModelCatalogPageSection = "常用"
 	ModelCatalogPageOrder   = 15
 )
 
 // defaultCatalogModels mirrors the modelcatalog module's built-in presets; the
 // page shows them when the user has not configured a list yet.
-var defaultCatalogModels = []contracts.ModelInfo{
-	{ID: "deepseek-chat", Name: "DeepSeek Chat", Note: "通用对话", ContextWindow: 128000},
-	{ID: "deepseek-reasoner", Name: "DeepSeek Reasoner", Note: "深度推理", ContextWindow: 128000},
-}
+var defaultCatalogModels = contracts.DefaultModelCatalog()
 
-// catalogState is the add-model form draft (UI thread only).
+// catalogState is the add-model form draft and the per-row editor state (UI
+// thread only).
 type catalogState struct {
 	id            string
 	name          string
@@ -37,6 +36,29 @@ type catalogState struct {
 	contextWindow string
 	status        string
 	err           bool
+
+	// addFamily is the family the next added model gets. The add form infers it
+	// from the typed model ID until the user picks one explicitly
+	// (familyTouched), so typing "qwen…" pre-selects the Qwen family.
+	addFamily     string
+	familyTouched bool
+	// addOpen/addErr drive the add-model modal (the list stays the page; adding
+	// is an explicit action) and its inline validation error.
+	addOpen bool
+	addErr  string
+
+	// editAdvanced expands the editor's advanced group (generation options and
+	// custom thinking modes); it starts collapsed.
+	editAdvanced bool
+
+	// Confirmation state of the two destructive actions.
+	confirmRemove  string
+	confirmRestore bool
+
+	// editorOpen/edit drive the per-model editor modal; edit is nil while it is
+	// closed.
+	editorOpen bool
+	edit       *catalogEditDraft
 }
 
 // catalogModels returns the effective editable list: the user's settings row
@@ -65,6 +87,38 @@ func writeCatalogModels(store contracts.SettingsService, models []contracts.Mode
 	return store.Set(contracts.SettingModelCatalogModels, encoded)
 }
 
+// catalogHasModel reports whether id matches one of the effective catalog
+// presets (the user's edited list, or the built-in defaults when unset). The
+// match is trimmed and case-insensitive, mirroring how the composer reads the
+// menu ids.
+func catalogHasModel(store contracts.SettingsService, id string) bool {
+	id = strings.TrimSpace(id)
+	if id == "" {
+		return false
+	}
+	models, _ := catalogModels(store)
+	for _, model := range models {
+		if strings.EqualFold(strings.TrimSpace(model.ID), id) {
+			return true
+		}
+	}
+	return false
+}
+
+// hasModelID reports whether id matches one of the discovered model ids.
+func hasModelID(ids []string, id string) bool {
+	id = strings.TrimSpace(id)
+	if id == "" {
+		return false
+	}
+	for _, candidate := range ids {
+		if strings.EqualFold(strings.TrimSpace(candidate), id) {
+			return true
+		}
+	}
+	return false
+}
+
 // parseContextWindow parses the optional context-window draft: a malformed,
 // empty or non-positive value becomes 0 (not displayed and not budgeted).
 func parseContextWindow(raw string) int {
@@ -87,37 +141,43 @@ func formatContextWindow(tokens int) string {
 	return strconv.FormatFloat(float64(tokens)/1000, 'f', 1, 64) + "k"
 }
 
-// buildModelCatalogPage renders the editable catalog.
+// buildModelCatalogPage renders the editable catalog. Changes save at once
+// (the list is the control surface itself); the destructive actions — removing
+// a model and restoring the defaults over a custom list — ask for confirmation
+// with the native alert dialog.
 func buildModelCatalogPage(c *ui.Context, store contracts.SettingsService, st *catalogState, locale contracts.LocaleService) {
 	t := design.Of(c)
 	models, ok := catalogModels(store)
-	ui.Column(c).FillWidth().Gap(design.Space2).Children(func() {
-		pageHeader(c, t, localized(locale, "模型目录", "Model catalog"), localized(locale,
-			"composer 模型菜单展示的预设；保存后立即生效。",
+	ui.Column(c).FillWidth().Gap(design.Space4).Children(func() {
+		uikit.PageHeader(c, localized(locale, "模型目录", "Model catalog"), localized(locale,
+			"对话输入框的模型菜单展示的预设；保存后立即生效。",
 			"Presets shown in the composer model menu; changes apply immediately."))
 		if !ok {
-			design.Apply(ui.Text(c, localized(locale,
+			uikit.ErrorLine(c, localized(locale,
 				"配置解析失败：请修复模型目录设置或恢复默认。",
-				"Invalid catalog setting; fix it or restore the defaults.")),
-				t.Font(design.TypeXS)).TextColor(t.DangerText)
+				"Invalid catalog setting; fix it or restore the defaults."))
 		}
 
-		panel(c, t, func() {
-			sectionTitle(c, t, localized(locale, "模型列表", "Models"))
+		uikit.Section(c, localized(locale, "模型列表", "Models"), func(*ui.Context) {
+			if len(models) == 0 {
+				uikit.EmptyState(c, localized(locale, "模型列表为空", "The model list is empty"))
+			}
 			for index, model := range models {
 				if index > 0 {
 					ui.Divider(c)
 				}
 				model := model
-				ui.Row(c).FillWidth().Padding(design.Space2, 0, design.Space2, 0).
+				ui.Row(c).FillWidth().PaddingY(design.Space2).
 					AlignItems(ui.Center).Gap(design.Space2).Children(func() {
 					ui.Column(c).Gap(design.Space1).Grow(1).Children(func() {
 						design.Apply(ui.Text(c, firstNonEmpty(model.Name, model.ID)), t.Text(design.TypeS)).
 							FontWeight(600).TextColor(t.LabelPrimary)
 						ui.Row(c).Gap(design.Space2).Children(func() {
-							design.Apply(ui.Text(c, model.ID), t.MonoFamily()).FontSize(11).TextColor(t.LabelSecondary)
+							design.Apply(ui.Text(c, model.ID), t.Font(design.TypeXS), t.MonoFamily()).
+								TextColor(t.LabelSecondary)
 							if note := strings.TrimSpace(model.Note); note != "" {
-								design.Apply(ui.Text(c, note), t.TextMuted(design.TypeXXS))
+								design.Apply(ui.Text(c, localizedCatalogNote(locale, note)),
+									t.TextMuted(design.TypeXXS))
 							}
 							if model.ContextWindow > 0 {
 								size := formatContextWindow(model.ContextWindow)
@@ -125,84 +185,242 @@ func buildModelCatalogPage(c *ui.Context, store contracts.SettingsService, st *c
 									t.TextMuted(design.TypeXXS))
 							}
 						})
+						// Family and thinking configuration: the family picks the
+						// built-in mode list, so show its effective value (an
+						// empty stored family is inferred from the model ID).
+						design.Apply(ui.Text(c, catalogThinkingSummary(locale, model)),
+							t.Font(design.TypeXXS)).TextColor(t.LabelTertiary)
+						if generation := catalogGenerationSummary(locale, model); generation != "" {
+							design.Apply(ui.Text(c, generation),
+								t.Font(design.TypeXXS)).TextColor(t.LabelTertiary)
+						}
 					})
-					if ui.Button(c, localized(locale, "删除", "Remove")).Clicked() {
-						next := make([]contracts.ModelInfo, 0, len(models)-1)
-						for _, candidate := range models {
-							if candidate.ID != model.ID {
-								next = append(next, candidate)
-							}
-						}
-						if err := writeCatalogModels(store, next); err != nil {
-							st.status, st.err = localized(locale, "保存失败：", "Save failed: ")+err.Error(), true
-						} else {
-							st.status, st.err = localized(locale, "已保存", "Saved"), false
-						}
+					if design.Apply(ui.Button(c, localized(locale, "编辑", "Edit")),
+						t.SecondaryButton()).
+						Label(localized(locale, "编辑模型 ", "Edit model ") + model.ID).
+						Tooltip(localized(locale, "编辑系列与思考配置",
+							"Edit the family and thinking configuration")).Clicked() {
+						st.edit = newCatalogEditDraft(model)
+						st.editorOpen = true
+						st.editAdvanced = false
+						c.Invalidate()
+					}
+					if design.Apply(ui.Button(c, localized(locale, "删除", "Remove")),
+						t.DangerButton()).Clicked() {
+						st.confirmRemove = model.ID
+						c.Invalidate()
 					}
 				})
 			}
 		})
 
-		panel(c, t, func() {
-			sectionTitle(c, t, localized(locale, "新增模型", "Add model"))
-			ui.Row(c).FillWidth().Gap(design.Space2).Children(func() {
-				ui.TextInput(c, &st.name).Label(inputLabel(locale, localized(locale, "名称", "Name"))).
-					Placeholder(localized(locale, "例如 DeepSeek Chat", "e.g. DeepSeek Chat")).Grow(1)
-				ui.TextInput(c, &st.id).Label(inputLabel(locale, localized(locale, "模型 ID", "Model ID"))).
-					Placeholder("deepseek-chat").Grow(1)
-				ui.TextInput(c, &st.note).Label(inputLabel(locale, localized(locale, "备注", "Note"))).
-					Placeholder(localized(locale, "可选", "optional")).Grow(1)
+		// The list is the page: adding a model is one explicit action that opens
+		// the form in a modal, so the page stays short. Restoring the built-in
+		// defaults is destructive and asks for confirmation.
+		ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(design.Space2).Children(func() {
+			if design.Apply(ui.PrimaryButton(c, localized(locale, "添加模型", "Add model")),
+				t.PrimaryButton()).Clicked() {
+				st.addOpen = true
+				st.addErr = ""
+				c.Invalidate()
+			}
+			ui.Spacer(c).Grow(1)
+			if design.Apply(ui.Button(c, localized(locale, "恢复默认", "Restore defaults")),
+				t.DangerButton()).Tooltip(localized(locale,
+				"覆盖当前列表并恢复内置模型", "Overwrite the list with the built-in models")).Clicked() {
+				st.confirmRestore = true
+				c.Invalidate()
+			}
+		})
+		if st.status != "" {
+			if st.err {
+				uikit.ErrorLine(c, st.status)
+			} else {
+				statusBadgesRow(c, t, st.status, false)
+			}
+		}
+
+		if st.confirmRemove != "" {
+			id := st.confirmRemove
+			open := true
+			switch ui.AlertDialog(c, &open,
+				localized(locale, "删除模型", "Remove model"),
+				localized(locale, "确认从模型目录删除「", "Remove ")+id+
+					localized(locale, "」？", " from the model catalog?"),
+				localized(locale, "取消", "Cancel"),
+				localized(locale, "确认删除", "Confirm remove")) {
+			case 1:
+				next := make([]contracts.ModelInfo, 0, len(models))
+				for _, candidate := range models {
+					if candidate.ID != id {
+						next = append(next, candidate)
+					}
+				}
+				if err := writeCatalogModels(store, next); err != nil {
+					st.status, st.err = localized(locale, "保存失败：", "Save failed: ")+err.Error(), true
+				} else {
+					st.status, st.err = localized(locale, "已保存", "Saved"), false
+				}
+				st.confirmRemove = ""
+				c.Invalidate()
+			}
+			if !open {
+				st.confirmRemove = ""
+			}
+		}
+		if st.confirmRestore {
+			open := true
+			switch ui.AlertDialog(c, &open,
+				localized(locale, "恢复默认模型", "Restore default models"),
+				localized(locale, "恢复默认会覆盖当前的模型列表。此操作无法撤销。",
+					"Restoring the defaults overwrites the current model list. This cannot be undone."),
+				localized(locale, "取消", "Cancel"),
+				localized(locale, "恢复默认值", "Restore defaults")) {
+			case 1:
+				if err := writeCatalogModels(store, nil); err != nil {
+					st.status, st.err = localized(locale, "保存失败：", "Save failed: ")+err.Error(), true
+				} else {
+					st.status, st.err = localized(locale, "已恢复默认", "Defaults restored"), false
+				}
+				st.confirmRestore = false
+				c.Invalidate()
+			}
+			if !open {
+				st.confirmRestore = false
+			}
+		}
+		if st.addOpen {
+			buildCatalogAddDialog(c, t, store, models, st, locale)
+		}
+		if st.edit != nil {
+			buildCatalogEditDialog(c, t, store, models, st, locale)
+		}
+	})
+}
+
+// localizedCatalogNote localizes the built-in default notes, which are stored
+// as data; user notes pass through unchanged.
+func localizedCatalogNote(locale contracts.LocaleService, note string) string {
+	switch note {
+	case "通用对话":
+		return localized(locale, note, "General chat")
+	case "深度推理":
+		return localized(locale, note, "Deep reasoning")
+	default:
+		return note
+	}
+}
+
+// addCatalogModel validates and appends one model to the persisted catalog. A
+// failure stays inline in the add-model modal; success closes it and reports on
+// the page, where the list updates immediately.
+func addCatalogModel(st *catalogState, store contracts.SettingsService,
+	models []contracts.ModelInfo, locale contracts.LocaleService) bool {
+	id := strings.TrimSpace(st.id)
+	name := strings.TrimSpace(st.name)
+	if id == "" {
+		st.addErr = localized(locale, "模型 ID 不能为空", "Model ID is required")
+		return false
+	}
+	for _, candidate := range models {
+		if strings.EqualFold(candidate.ID, id) {
+			st.addErr = localized(locale, "模型 ID 已存在", "Model ID already exists")
+			return false
+		}
+	}
+	if err := writeCatalogModels(store, append(models, contracts.ModelInfo{
+		ID: id, Name: name, Note: strings.TrimSpace(st.note),
+		ContextWindow: parseContextWindow(st.contextWindow),
+		Family:        catalogAddFamily(st),
+	})); err != nil {
+		st.addErr = localized(locale, "保存失败：", "Save failed: ") + err.Error()
+		return false
+	}
+	st.name, st.id, st.note, st.contextWindow = "", "", "", ""
+	st.addFamily, st.familyTouched = "", false
+	st.addOpen, st.addErr = false, ""
+	st.status, st.err = localized(locale, "已保存", "Saved"), false
+	return true
+}
+
+// buildCatalogAddDialog renders the add-model form in a native modal: the same
+// optional fields as before, with the family inferred from the typed model ID
+// until the user chooses one. It closes on a successful add or on cancel.
+func buildCatalogAddDialog(c *ui.Context, t *design.Tokens, store contracts.SettingsService,
+	models []contracts.ModelInfo, st *catalogState, locale contracts.LocaleService) {
+	ui.Modal(c, &st.addOpen, func() {
+		design.Apply(ui.Column(c).Width(640).Gap(design.Space3), func(element ui.Element) ui.Element {
+			return element.PaddingX(design.Space5).PaddingY(design.Space2)
+		}).Children(func() {
+			design.Apply(ui.Text(c, localized(locale, "新增模型", "Add model")),
+				t.Font(design.TypeL)).FontWeight(600).TextColor(t.LabelPrimary)
+			design.Apply(ui.Text(c, localized(locale,
+				"添加后立即出现在模型菜单中。",
+				"The model appears in the composer menu immediately.")),
+				t.TextMuted(design.TypeXS)).MaxLines(1)
+			ui.Row(c).FillWidth().Gap(design.Space3).AlignItems(ui.Start).Children(func() {
+				ui.Column(c).FillWidth().Grow(1).Children(func() {
+					ui.Field(c, localized(locale, "名称", "Name"), func() {
+						ui.TextInput(c, &st.name).
+							Label(inputLabel(locale, localized(locale, "名称", "Name"))).
+							Placeholder(localized(locale, "例如 DeepSeek Chat", "e.g. DeepSeek Chat")).FillWidth()
+					})
+				})
+				ui.Column(c).FillWidth().Grow(1).Children(func() {
+					ui.Field(c, localized(locale, "模型 ID", "Model ID"), func() {
+						ui.TextInput(c, &st.id).
+							Label(inputLabel(locale, localized(locale, "模型 ID", "Model ID"))).
+							Placeholder("deepseek-chat").FillWidth()
+					})
+				})
 			})
-			ui.Row(c).FillWidth().Gap(design.Space2).Children(func() {
-				ui.TextInput(c, &st.contextWindow).
-					Label(inputLabel(locale, localized(locale, "上下文窗口", "Context window"))).
-					Placeholder("128000").Grow(1)
-				design.Apply(ui.Text(c, localized(locale,
-					"可选，单位 tokens；无效数字按 0（不显示）。",
-					"Optional, in tokens; invalid numbers become 0 (hidden).")),
-					t.TextMuted(design.TypeXXS)).Grow(1)
+			ui.Row(c).FillWidth().Gap(design.Space3).AlignItems(ui.Start).Children(func() {
+				ui.Column(c).FillWidth().Grow(1).Children(func() {
+					ui.Field(c, localized(locale, "备注", "Note"), func() {
+						ui.TextInput(c, &st.note).
+							Label(inputLabel(locale, localized(locale, "备注", "Note"))).
+							Placeholder(localized(locale, "可选", "optional")).FillWidth()
+					})
+				})
+				ui.Column(c).FillWidth().Grow(1).Children(func() {
+					ui.Field(c, localized(locale, "上下文窗口", "Context window"), func() {
+						ui.TextInput(c, &st.contextWindow).
+							Label(inputLabel(locale, localized(locale, "上下文窗口", "Context window"))).
+							Placeholder("128000").FillWidth()
+					})
+				})
 			})
-			ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(design.Space2).Children(func() {
-				if ui.PrimaryButton(c, localized(locale, "添加", "Add")).Clicked() {
-					id := strings.TrimSpace(st.id)
-					name := strings.TrimSpace(st.name)
-					if id == "" {
-						st.status, st.err = localized(locale, "模型 ID 不能为空", "Model ID is required"), true
-					} else {
-						dup := false
-						for _, candidate := range models {
-							if strings.EqualFold(candidate.ID, id) {
-								dup = true
-							}
-						}
-						if dup {
-							st.status, st.err = localized(locale, "模型 ID 已存在", "Model ID already exists"), true
-						} else if err := writeCatalogModels(store, append(models, contracts.ModelInfo{
-							ID: id, Name: name, Note: strings.TrimSpace(st.note),
-							ContextWindow: parseContextWindow(st.contextWindow),
-						})); err != nil {
-							st.status, st.err = localized(locale, "保存失败：", "Save failed: ")+err.Error(), true
-						} else {
-							st.name, st.id, st.note, st.contextWindow = "", "", "", ""
-							st.status, st.err = localized(locale, "已保存", "Saved"), false
-						}
+			ui.Field(c, localized(locale, "模型系列", "Model family"), func() {
+				choice := catalogFamilyLabel(locale, catalogAddFamily(st))
+				selector := ui.Select(c.Key("catalog.addFamily"), &choice,
+					catalogFamilyOptions(locale)).
+					Label(localized(locale, "模型系列菜单", "Model family menu"))
+				if selector.Changed() {
+					if family := catalogFamilyValue(locale, choice); family != "" {
+						st.addFamily, st.familyTouched = family, true
 					}
+					c.Invalidate()
 				}
-				if ui.Button(c, localized(locale, "恢复默认", "Restore defaults")).Clicked() {
-					if err := writeCatalogModels(store, nil); err != nil {
-						st.status, st.err = localized(locale, "保存失败：", "Save failed: ")+err.Error(), true
-					} else {
-						st.status, st.err = localized(locale, "已恢复默认", "Defaults restored"), false
-					}
-				}
-				if st.status != "" {
-					color := t.Success
-					if st.err {
-						color = t.DangerText
-					}
-					design.Apply(ui.Text(c, st.status), t.Font(design.TypeXS)).TextColor(color)
-				}
+			}).Description(localized(locale,
+				"决定内置的思考模式；按模型 ID 自动推断，可手动修改。",
+				"Selects the built-in thinking modes; inferred from the model ID, editable."))
+			if st.addErr != "" {
+				uikit.ErrorLine(c, st.addErr)
+			}
+			uikit.DialogFooter(c, []uikit.DialogAction{
+				{Label: localized(locale, "取消", "Cancel"), OnClick: func() {
+					st.addOpen, st.addErr = false, ""
+					c.Invalidate()
+				}},
+				{Label: localized(locale, "添加", "Add"), Primary: true, OnClick: func() {
+					addCatalogModel(st, store, models, locale)
+					c.Invalidate()
+				}},
 			})
 		})
 	})
+	if !st.addOpen {
+		// Escape or a backdrop click dismissed the modal without saving.
+		st.addErr = ""
+	}
 }

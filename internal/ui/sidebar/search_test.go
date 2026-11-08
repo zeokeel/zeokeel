@@ -146,7 +146,7 @@ func TestMessageSearchRendersHits(t *testing.T) {
 	tester := h.tester()
 	tester.Frame()
 
-	h.click(tester, "搜索会话")
+	h.click(tester, "搜索会话与消息")
 	tester.Type("登录")
 	tester.Frame()
 
@@ -172,7 +172,7 @@ func TestMessageSearchClickOpensSession(t *testing.T) {
 	h := newHarnessWithStore(t, chat, store, sidebar.Config{})
 	tester := h.tester()
 	tester.Frame()
-	h.click(tester, "搜索会话")
+	h.click(tester, "搜索会话与消息")
 	tester.Type("登录")
 	tester.Frame()
 
@@ -190,7 +190,7 @@ func TestMessageSearchEmptyAndError(t *testing.T) {
 		h := newHarnessWithStore(t, searchChat(), &fakeStore{}, sidebar.Config{})
 		tester := h.tester()
 		tester.Frame()
-		h.click(tester, "搜索会话")
+		h.click(tester, "搜索会话与消息")
 		tester.Type("不存在")
 		tester.Frame()
 		h.assertTexts(tester, "消息搜索", "没有匹配的消息")
@@ -201,7 +201,7 @@ func TestMessageSearchEmptyAndError(t *testing.T) {
 		h := newHarnessWithStore(t, searchChat(), store, sidebar.Config{})
 		tester := h.tester()
 		tester.Frame()
-		h.click(tester, "搜索会话")
+		h.click(tester, "搜索会话与消息")
 		tester.Type("登录")
 		tester.Frame()
 		h.assertTexts(tester, "消息搜索", "搜索消息失败：fts unavailable")
@@ -215,7 +215,7 @@ func TestMessageSearchShownWhenTitlesDoNotMatch(t *testing.T) {
 	h := newHarnessWithStore(t, searchChat(), store, sidebar.Config{})
 	tester := h.tester()
 	tester.Frame()
-	h.click(tester, "搜索会话")
+	h.click(tester, "搜索会话与消息")
 	tester.Type("登录")
 	tester.Frame()
 
@@ -230,7 +230,7 @@ func TestMessageSearchQueryCache(t *testing.T) {
 	h := newHarnessWithStore(t, searchChat(), store, sidebar.Config{})
 	tester := h.tester()
 	tester.Frame()
-	h.click(tester, "搜索会话")
+	h.click(tester, "搜索会话与消息")
 	tester.Type("登录")
 	tester.Frame()
 	if calls := store.callCount(); calls != 1 {
@@ -245,7 +245,7 @@ func TestMessageSearchQueryCache(t *testing.T) {
 	}
 
 	// A new query searches again; clearing the field hides the section.
-	h.click(tester, "搜索会话")
+	h.click(tester, "搜索会话与消息")
 	tester.Key(ui.Cmd, ui.KeyA)
 	tester.Type("认证")
 	tester.Frame()
@@ -253,7 +253,7 @@ func TestMessageSearchQueryCache(t *testing.T) {
 		t.Fatalf("calls = %d last query = %q, want 2/认证", store.callCount(), store.lastQuery())
 	}
 	// Clearing the field hides the section again.
-	h.click(tester, "搜索会话")
+	h.click(tester, "搜索会话与消息")
 	tester.Key(ui.Cmd, ui.KeyA)
 	tester.Key(0, ui.KeyBackspace)
 	tester.Frame()
@@ -269,7 +269,7 @@ func TestMessageSearchLimit(t *testing.T) {
 	h := newHarnessWithStore(t, searchChat(), store, sidebar.Config{})
 	tester := h.tester()
 	tester.Frame()
-	h.click(tester, "搜索会话")
+	h.click(tester, "搜索会话与消息")
 	tester.Type("片段")
 	tester.Frame()
 	if limit := store.lastLimit(); limit != 8 {
@@ -289,7 +289,7 @@ func TestSearchWithoutSearcherKeepsTitleFilter(t *testing.T) {
 	h := newHarness(t, chat, sidebar.Config{}) // no KeyStore provided
 	tester := h.tester()
 	tester.Frame()
-	h.click(tester, "搜索会话")
+	h.click(tester, "搜索会话与消息")
 	tester.Type("另一")
 	tester.Frame()
 	h.assertTexts(tester, "另一个会话")

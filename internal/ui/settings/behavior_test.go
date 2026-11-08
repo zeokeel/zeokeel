@@ -5,6 +5,9 @@ package settings_test
 import (
 	"errors"
 	"testing"
+	"time"
+
+	"github.com/egoist/mygo/ui"
 
 	"github.com/zeokeel/zeokeel/internal/contracts"
 	"github.com/zeokeel/zeokeel/internal/ui/settings"
@@ -95,12 +98,30 @@ func TestBehaviorPageEnglishCopy(t *testing.T) {
 // errBehaviorStoreWrite scripts one settings write failure.
 var errBehaviorStoreWrite = errors.New("behavior store boom")
 
+// expandMoreConversationSettings opens the collapsed 更多对话设置 / More conversation
+// settings disclosure and settles its opening motion (the native Collapsible
+// animates for 200ms, so the inner controls are not laid out until the frame is
+// advanced; same shape as rightpanel_test.go's Diagnostics disclosure helper).
+func expandMoreConversationSettings(t *testing.T, tester *ui.Tester, label string) {
+	t.Helper()
+	tester.Frame()
+	tester.Advance(350 * time.Millisecond)
+	tester.Frame()
+	if err := tester.Click(label); err != nil {
+		t.Fatalf("expand %q: %v; texts = %v", label, err, tester.Texts())
+	}
+	tester.Frame()
+	tester.Advance(350 * time.Millisecond)
+	tester.Frame()
+}
+
 func TestBehaviorPageGoalAutoContinue(t *testing.T) {
 	store := newFakeSettings(nil)
 	h := newHarness(t, &fakeChat{}, store, settings.Config{})
 	tester := h.tester()
 	tester.Frame()
 	h.click(tester, "行为")
+	expandMoreConversationSettings(t, tester, "更多对话设置")
 	h.assertTexts(tester, "目标自动续跑",
 		"回合结束后若目标仍激活，自动发送继续推进提示（每个目标最多 5 次）")
 	if raw := store.get(contracts.SettingGoalAutoContinue); raw != "" {
@@ -122,10 +143,69 @@ func TestBehaviorPageGoalAutoContinueBadValueAndEnglish(t *testing.T) {
 	tester := h.tester()
 	tester.Frame()
 	h.click(tester, "Behavior")
+	expandMoreConversationSettings(t, tester, "More conversation settings")
 	h.assertTexts(tester, "Auto-continue goal",
 		"After a turn ends while the goal is still active, automatically send a continuation prompt (at most 5 times per goal)")
 	h.click(tester, "Auto-continue goal")
 	if raw := store.get(contracts.SettingGoalAutoContinue); raw != "true" {
 		t.Fatalf("English bad-value toggle wrote %q, want true", raw)
 	}
+}
+
+// TestBehaviorPageCollapsesLowFrequencySections covers the page's progressive
+// disclosure: the daily permission setting stays visible, the four
+// lower-frequency conversation controls are collapsed behind one trigger, and
+// only the muted summary hints at them.
+func TestBehaviorPageCollapsesLowFrequencySections(t *testing.T) {
+	store := newFakeSettings(nil)
+	h := newHarness(t, &fakeChat{}, store, settings.Config{})
+	tester := h.tester()
+	tester.Frame()
+	h.click(tester, "行为")
+	h.assertTexts(tester, "默认代理权限", "更多对话设置", "排队发送：关")
+	h.assertNoTexts(tester, "运行中允许排队发送", "目标自动续跑",
+		"工作区指令文件", "选择对话文字大小")
+
+	// Expanding reveals every moved control and the summary gives way to them.
+	expandMoreConversationSettings(t, tester, "更多对话设置")
+	h.assertTexts(tester, "运行中发送", "运行中允许排队发送", "目标自动续跑",
+		"消息字号", "工作区指令文件")
+	h.assertNoTexts(tester, "排队发送：")
+
+	// A representative setting still persists from inside the disclosure.
+	h.click(tester, "运行中允许排队发送")
+	if raw := store.get(contracts.SettingSendWhileRunning); raw != "true" {
+		t.Fatalf("collapsed-section queue toggle wrote %q, want true", raw)
+	}
+}
+
+// TestBehaviorPageCollapsedSummaryReflectsSettings covers the muted digest shown
+// while the disclosure is closed.
+func TestBehaviorPageCollapsedSummaryReflectsSettings(t *testing.T) {
+	store := newFakeSettings(map[string]string{
+		contracts.SettingSendWhileRunning: "true",
+		contracts.SettingGoalAutoContinue: "true",
+		contracts.SettingChatFontSize:     "large",
+		contracts.SettingAgentsFile:       "RULES.md",
+	})
+	h := newHarness(t, &fakeChat{}, store, settings.Config{})
+	tester := h.tester()
+	tester.Frame()
+	h.click(tester, "行为")
+	h.assertTexts(tester, "排队发送：开", "目标续跑：开", "消息字号：大",
+		"指令文件：RULES.md")
+}
+
+// TestBehaviorPageMoreSettingsEnglish covers the English copy of the disclosure
+// trigger, the digest and the expanded controls.
+func TestBehaviorPageMoreSettingsEnglish(t *testing.T) {
+	store := newFakeSettings(nil)
+	h := newLocaleHarness(t, &fakeChat{}, store, settings.Config{}, "en")
+	tester := h.tester()
+	tester.Frame()
+	h.click(tester, "Behavior")
+	h.assertTexts(tester, "More conversation settings", "Queue: Off")
+	expandMoreConversationSettings(t, tester, "More conversation settings")
+	h.assertTexts(tester, "Sending while running", "Queue prompts while running",
+		"Auto-continue goal", "Message text size", "Workspace instructions file")
 }

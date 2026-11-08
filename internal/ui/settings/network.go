@@ -13,15 +13,15 @@ import (
 
 	"github.com/zeokeel/zeokeel/internal/contracts"
 	"github.com/zeokeel/zeokeel/internal/design"
-	"github.com/zeokeel/zeokeel/internal/icons"
+	"github.com/zeokeel/zeokeel/internal/uikit"
 )
 
 // Network page constants. Section "general" keeps it in the same settings
 // section as About/Update/Import; Order 97 places it after them.
 const (
 	NetworkPageID      = "network"
-	NetworkPageSection = "general"
-	NetworkPageOrder   = 97
+	NetworkPageSection = "集成"
+	NetworkPageOrder   = 30
 	NetworkPageTitle   = "网络"
 )
 
@@ -41,8 +41,8 @@ func newNetworkState() *networkState { return &networkState{} }
 // host at the next start.
 func buildNetworkPage(c *ui.Context, store contracts.SettingsService, st *networkState, locale contracts.LocaleService) {
 	t := design.Of(c)
-	ui.Column(c).FillWidth().Gap(design.Space2).Children(func() {
-		pageHeader(c, t, localized(locale, NetworkPageTitle, "Network"), localized(locale,
+	ui.Column(c).FillWidth().Gap(design.Space4).Children(func() {
+		uikit.PageHeader(c, localized(locale, NetworkPageTitle, "Network"), localized(locale,
 			"出站 HTTP(S) 代理；保存后重启应用生效。",
 			"Outbound HTTP(S) proxy; restart the app to apply changes."))
 
@@ -54,51 +54,60 @@ func buildNetworkPage(c *ui.Context, store contracts.SettingsService, st *networ
 		effectiveProxy := strings.TrimSpace(store.Get(contracts.SettingNetProxy, ""))
 		effectiveNoProxy := strings.TrimSpace(store.Get(contracts.SettingNetNoProxy, ""))
 
-		panel(c, t, func() {
-			sectionTitle(c, t, localized(locale, "当前生效", "Currently applied"))
-			networkValueRow(c, t, localized(locale, "代理地址", "Proxy URL"),
-				firstNonEmpty(effectiveProxy, localized(locale, "直连", "Direct")))
-			networkValueRow(c, t, "NO_PROXY",
-				firstNonEmpty(effectiveNoProxy, localized(locale, "未设置", "Not set")))
+		uikit.Section(c, localized(locale, "当前生效", "Currently applied"), func(*ui.Context) {
+			uikit.KeyValueRows(c, []uikit.KeyValue{
+				{Key: localized(locale, "代理地址", "Proxy URL"),
+					Value: firstNonEmpty(effectiveProxy, localized(locale, "直连", "Direct"))},
+				{Key: "NO_PROXY",
+					Value: firstNonEmpty(effectiveNoProxy, localized(locale, "未设置", "Not set"))},
+			})
 		})
 
-		panel(c, t, func() {
-			sectionTitle(c, t, localized(locale, "代理配置", "Proxy configuration"))
-			field(c, t, localized(locale, "代理地址", "Proxy URL"), func() {
+		uikit.Section(c, localized(locale, "代理配置", "Proxy configuration"), func(*ui.Context) {
+			ui.Field(c, localized(locale, "代理地址", "Proxy URL"), func() {
 				ui.TextInput(c, &st.proxy).
 					Label(inputLabel(locale, localized(locale, "代理地址", "Proxy URL"))).
 					Placeholder("http://127.0.0.1:7890").FillWidth()
-			})
-			field(c, t, "NO_PROXY", func() {
+			}).Description(localized(locale, "留空表示直连。", "Leave empty to connect directly."))
+			ui.Field(c, "NO_PROXY", func() {
 				ui.TextInput(c, &st.noProxy).
 					Label(inputLabel(locale, "NO_PROXY")).
 					Placeholder("localhost,127.0.0.1,::1").FillWidth()
-			})
+			}).Description(localized(locale, "逗号分隔的直连主机列表。",
+				"Comma-separated hosts that connect directly."))
 			design.Apply(ui.Text(c, localized(locale,
 				"代理设置由进程启动时应用；修改后需要重启应用生效。",
 				"The proxy is applied when the process starts; restart the app to apply changes.")),
-				t.TextMuted(design.TypeXXS))
+				t.TextMuted(design.TypeXXS)).MaxLines(2)
 		})
 
-		ui.Row(c).FillWidth().Gap(design.Space2).AlignItems(ui.Center).Children(func() {
-			if brandPrimaryButton(c, t, icons.Globe(), localized(locale, "保存", "Save")).Clicked() {
-				saveNetworkSettings(st, store, locale)
-			}
-			ui.Spacer(c).Grow(1)
-			if st.status != "" {
-				statusBadge(c, t, st.status, st.statusErr)
-			}
-		})
+		// H1: the save action lives in the host's fixed footer; the body keeps
+		// the status line.
+		statusBadgesRow(c, t, st.status, st.statusErr)
 	})
 }
 
-// networkValueRow is one read-only "currently applied" line.
-func networkValueRow(c *ui.Context, t *design.Tokens, label, value string) {
-	ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(design.Space2).Children(func() {
-		design.Apply(ui.Text(c, label), t.Font(design.TypeXS)).TextColor(t.LabelSecondary)
-		design.Apply(ui.Text(c, value), t.MonoFamily()).FontSize(12).
-			TextColor(t.LabelPrimary).Grow(1).MaxLines(1).Ellipsis("…")
-	})
+// discardDrafts re-reads the persisted proxy rows into the drafts and clears
+// the page status, so reopening after "Discard" shows the saved values.
+func (st *networkState) discardDrafts(store contracts.SettingsService) {
+	st.loaded = true
+	st.proxy = ""
+	st.noProxy = ""
+	if store != nil {
+		st.proxy = store.Get(contracts.SettingNetProxy, "")
+		st.noProxy = store.Get(contracts.SettingNetNoProxy, "")
+	}
+	st.status = ""
+	st.statusErr = false
+}
+
+// dirty reports whether the proxy drafts differ from the persisted rows.
+func (st *networkState) dirty(store contracts.SettingsService) bool {
+	if store == nil {
+		return false
+	}
+	return strings.TrimSpace(st.proxy) != strings.TrimSpace(store.Get(contracts.SettingNetProxy, "")) ||
+		strings.TrimSpace(st.noProxy) != strings.TrimSpace(store.Get(contracts.SettingNetNoProxy, ""))
 }
 
 // saveNetworkSettings validates the proxy URL (empty means direct) and writes

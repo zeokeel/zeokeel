@@ -38,10 +38,20 @@ func (s *notifierService) SetHandler(fn func(contracts.Notification)) {
 // Notify posts one toast and returns it with its generated ID. The text is
 // trimmed; a notification with no text still gets an ID but is not delivered.
 func (s *notifierService) Notify(level, text string) contracts.Notification {
+	return s.NotifyAction(level, text, "", nil)
+}
+
+// NotifyAction posts one toast with an optional action button ("Undo") that
+// runs action on the UI thread when pressed. It implements the optional
+// contracts.ActionNotifier half, so callers that support undo can offer it
+// without making plain notifiers grow the capability.
+func (s *notifierService) NotifyAction(level, text, actionLabel string, action func()) contracts.Notification {
 	notification := contracts.Notification{
-		ID:    fmt.Sprintf("notice-%d", s.nextID.Add(1)),
-		Level: level,
-		Text:  strings.TrimSpace(text),
+		ID:          fmt.Sprintf("notice-%d", s.nextID.Add(1)),
+		Level:       level,
+		Text:        strings.TrimSpace(text),
+		ActionLabel: strings.TrimSpace(actionLabel),
+		Action:      action,
 	}
 	s.mu.Lock()
 	if notification.Text != "" {

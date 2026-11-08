@@ -48,7 +48,9 @@ func openDiagnostics(t *testing.T, lister contracts.ModuleLister) *ui.Tester {
 	h.ui.Navigator().ToggleSettings()
 	tester := h.tester(1280, 800)
 	tester.Frame()
-	if err := tester.Click("诊断"); err != nil {
+	// The grouped navigation scrolls; open the page through its stable deep link
+	// instead of a nav row that may sit below the fold.
+	if err := h.ui.OpenSettingsPage("diagnostics"); err != nil {
 		t.Fatalf("open diagnostics: %v; texts = %v", err, tester.Texts())
 	}
 	tester.Frame()

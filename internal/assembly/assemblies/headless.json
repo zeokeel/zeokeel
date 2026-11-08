@@ -46,7 +46,8 @@
       "config": {
         "root": ".",
         "shellTimeoutMs": 30000,
-        "network": true
+        "network": true,
+        "allowShellOperators": true
       }
     },
     {
@@ -61,7 +62,8 @@
       "module": "zeokeel/agent",
       "config": {
         "model": "gpt-4o-mini",
-        "maxIterations": 20
+        "maxIterations": 20,
+        "requireFinishReason": true
       }
     },
     {

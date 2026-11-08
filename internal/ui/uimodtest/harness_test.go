@@ -24,6 +24,24 @@ import (
 	"github.com/zeokeel/zeokeel/internal/uiroot"
 )
 
+// selectInspectorPane switches the right inspector to one pane through its
+// compact pane picker (the selector names the current pane).
+func selectInspectorPane(t *testing.T, tester *ui.Tester, label string) {
+	t.Helper()
+	selector := "切换面板"
+	if !tester.HasText(selector) {
+		selector = "Switch pane"
+	}
+	if err := tester.Click(selector); err != nil {
+		t.Fatalf("open inspector pane selector: %v; texts = %v", err, tester.Texts())
+	}
+	tester.Frame()
+	if err := tester.Click(label); err != nil {
+		t.Fatalf("select inspector pane %q: %v; texts = %v", label, err, tester.Texts())
+	}
+	tester.Frame()
+}
+
 // harness is one headless product: kernel root, uiroot services and product appinfo.
 type harness struct {
 	t   *testing.T

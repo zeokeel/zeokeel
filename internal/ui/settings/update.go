@@ -12,15 +12,15 @@ import (
 
 	"github.com/zeokeel/zeokeel/internal/contracts"
 	"github.com/zeokeel/zeokeel/internal/design"
-	"github.com/zeokeel/zeokeel/internal/icons"
+	"github.com/zeokeel/zeokeel/internal/uikit"
 )
 
 // Update page constants. Section "general" matches the About page's, and Order
 // 92 keeps this page after About (90) instead of becoming the default page.
 const (
 	UpdatePageID      = "update"
-	UpdatePageSection = "general"
-	UpdatePageOrder   = 92
+	UpdatePageSection = "高级"
+	UpdatePageOrder   = 40
 	UpdatePageTitle   = "更新"
 )
 
@@ -56,7 +56,8 @@ func newUpdateState() *updateState { return &updateState{} }
 
 // buildUpdatePage renders the page: current version, the native check action,
 // the version/status result, the release-notes Markdown preview and the copy
-// link action. It never downloads or replaces the binary.
+// link action. Downloading and scheduling install-on-next-launch are offered
+// when the backend implements those optional halves.
 func buildUpdatePage(c *ui.Context, t *design.Tokens, kctx cordis.Context, runtime contracts.UIRuntime,
 	st *updateState, locale contracts.LocaleService) {
 	updateService, hasUpdate := kctx.Get(contracts.KeyUpdate)
@@ -65,24 +66,19 @@ func buildUpdatePage(c *ui.Context, t *design.Tokens, kctx cordis.Context, runti
 	current := firstNonEmpty(appInfo.Version, st.info.CurrentVersion, "dev")
 
 	ui.Column(c).FillWidth().Gap(design.Space4).Children(func() {
-		ui.Column(c).Gap(design.Space1).Children(func() {
-			design.Apply(ui.Text(c, localized(locale, "更新", "Update")), t.Font(design.TypeL)).
-				FontWeight(600).TextColor(t.LabelPrimary)
-			design.Apply(ui.Text(c, localized(locale,
-				"自动替换暂不支持；检查更新后手动下载安装包。",
-				"Automatic replacement is not supported; check for updates and install the package manually.")),
-				t.TextMuted(design.TypeXS)).MaxLines(2)
-		})
+		uikit.PageHeader(c, localized(locale, "更新", "Update"), localized(locale,
+			"检查更新并下载安装包；下载后可安排在下次启动安装。",
+			"Check for updates and download the package; schedule the install for the next launch."))
 
-		ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(design.Space3).Children(func() {
-			design.Apply(ui.Text(c, localized(locale, "当前版本", "Current version")), t.Font(design.TypeXS)).
-				TextColor(t.LabelSecondary)
-			design.Apply(ui.Text(c, current), t.MonoFamily()).FontSize(12).
-				TextColor(t.LabelPrimary)
+		uikit.Section(c, localized(locale, "当前版本", "Current version"), func(*ui.Context) {
+			uikit.KeyValueRows(c, []uikit.KeyValue{
+				{Key: localized(locale, "版本", "Version"), Value: current},
+			})
 		})
 
 		if !hasUpdate {
-			design.Apply(ui.Text(c, localized(locale, "更新服务未启用", "Update service is not enabled")), t.TextMuted(design.TypeXS))
+			uikit.EmptyState(c, localized(locale,
+				"更新服务未启用", "Update service is not enabled"))
 			return
 		}
 
@@ -99,44 +95,53 @@ func buildUpdatePage(c *ui.Context, t *design.Tokens, kctx cordis.Context, runti
 			}
 		}
 		if st.pending != nil {
-			buildPendingInstall(c, t, *st.pending, locale)
+			uikit.Section(c, localized(locale, "待安装", "Pending install"), func(*ui.Context) {
+				buildPendingInstall(c, t, *st.pending, locale)
+			})
 		}
 
 		checkLabel := localized(locale, "检查更新", "Check for updates")
 		if st.checking {
 			checkLabel = localized(locale, "检查中…", "Checking…")
 		}
-		check := design.Apply(ui.PrimaryButton(c, checkLabel), t.PrimaryButton()).
-			Disabled(st.checking || st.downloading)
-		if check.Clicked() && !st.checking && !st.downloading {
-			startUpdateCheck(updateService, runtime, st)
-		}
+		uikit.DialogFooter(c, []uikit.DialogAction{{
+			Label: checkLabel, Primary: true, Disabled: st.checking || st.downloading,
+			OnClick: func() {
+				if !st.checking && !st.downloading {
+					startUpdateCheck(updateService, runtime, st)
+					c.Invalidate()
+				}
+			},
+		}})
 
 		if st.err != "" {
-			buildUpdateError(c, t, localized(locale, "检查更新失败：", "Update check failed: ")+st.err)
+			uikit.ErrorLine(c, localized(locale, "检查更新失败：", "Update check failed: ")+st.err)
 		}
 		if !st.checked || st.err != "" {
 			return
 		}
 
 		latest := firstNonEmpty(st.info.LatestVersion, current)
-		ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(design.Space3).Children(func() {
-			design.Apply(ui.Text(c, localized(locale, "最新版本", "Latest version")), t.Font(design.TypeXS)).
-				TextColor(t.LabelSecondary)
-			design.Apply(ui.Text(c, latest), t.MonoFamily()).FontSize(12).
-				TextColor(t.LabelPrimary)
-			ui.Spacer(c).Grow(1)
-			if st.info.Available {
-				design.Apply(ui.Badge(c, localized(locale, "可更新", "Update available")), t.Badge()).TextColor(t.Success)
-			} else {
-				design.Apply(ui.Badge(c, localized(locale, "已是最新", "Up to date")), t.Badge()).TextColor(t.LabelSecondary)
+		uikit.Section(c, localized(locale, "更新状态", "Update status"), func(*ui.Context) {
+			ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(design.Space3).Children(func() {
+				design.Apply(ui.Text(c, localized(locale, "最新版本", "Latest version")),
+					t.Font(design.TypeXS)).TextColor(t.LabelSecondary)
+				design.Apply(ui.Text(c, latest), t.Font(design.TypeXS), t.MonoFamily()).
+					TextColor(t.LabelPrimary)
+				ui.Spacer(c).Grow(1)
+				if st.info.Available {
+					design.Apply(ui.Badge(c, localized(locale, "可更新", "Update available")),
+						t.Badge()).TextColor(t.SuccessText)
+				} else {
+					design.Apply(ui.Badge(c, localized(locale, "已是最新", "Up to date")),
+						t.Badge()).TextColor(t.LabelSecondary)
+				}
+			})
+			if resource := updateResourceLine(st.info, locale); resource != "" {
+				design.Apply(ui.Text(c, resource), t.Font(design.TypeXXS)).
+					TextColor(t.LabelTertiary).MaxLines(1).Ellipsis("…")
 			}
 		})
-
-		if resource := updateResourceLine(st.info, locale); resource != "" {
-			design.Apply(ui.Text(c, resource), t.Font(design.TypeXXS)).
-				TextColor(t.LabelTertiary).MaxLines(1).Ellipsis("…")
-		}
 
 		// Download half: available only when the update backend also implements
 		// contracts.UpdateDownloader. The result replaces the action once a
@@ -147,17 +152,24 @@ func buildUpdatePage(c *ui.Context, t *design.Tokens, kctx cordis.Context, runti
 				if st.downloading {
 					downloadLabel = localized(locale, "下载中…", "Downloading…")
 				}
-				download := design.Apply(ui.PrimaryButton(c, downloadLabel), t.PrimaryButton()).
-					Disabled(st.downloading)
-				if download.Clicked() && !st.downloading {
-					startUpdateDownload(downloader, runtime, st)
-				}
+				uikit.DialogFooter(c, []uikit.DialogAction{{
+					Label: downloadLabel, Primary: true, Disabled: st.downloading,
+					OnClick: func() {
+						if !st.downloading {
+							startUpdateDownload(downloader, runtime, st)
+							c.Invalidate()
+						}
+					},
+				}})
 			}
 			if st.downloadErr != "" {
-				buildUpdateError(c, t, localized(locale, "下载更新失败：", "Update download failed: ")+st.downloadErr)
+				uikit.ErrorLine(c, localized(locale,
+					"下载更新失败：", "Update download failed: ")+st.downloadErr)
 			}
 			if st.download != nil {
-				buildUpdateDownloadResult(c, t, *st.download, locale)
+				uikit.Section(c, localized(locale, "已下载", "Downloaded"), func(*ui.Context) {
+					buildUpdateDownloadResult(c, t, *st.download, locale)
+				})
 			}
 		}
 
@@ -170,31 +182,42 @@ func buildUpdatePage(c *ui.Context, t *design.Tokens, kctx cordis.Context, runti
 				if st.installing {
 					installLabel = localized(locale, "安装中…", "Scheduling…")
 				}
-				install := design.Apply(ui.PrimaryButton(c, installLabel), t.PrimaryButton()).
-					Disabled(st.downloading || st.installing)
-				if install.Clicked() && !st.downloading && !st.installing {
-					startUpdateInstall(installer, runtime, st, *st.download)
-				}
+				uikit.DialogFooter(c, []uikit.DialogAction{{
+					Label: installLabel, Primary: true, Disabled: st.downloading || st.installing,
+					OnClick: func() {
+						if !st.downloading && !st.installing {
+							startUpdateInstall(installer, runtime, st, *st.download)
+							c.Invalidate()
+						}
+					},
+				}})
 			}
 			if st.installErr != "" {
-				buildUpdateError(c, t, localized(locale, "安装计划失败：", "Failed to schedule install: ")+st.installErr)
+				uikit.ErrorLine(c, localized(locale,
+					"安装计划失败：", "Failed to schedule install: ")+st.installErr)
 			}
 			if st.install != nil {
-				buildScheduledInstall(c, t, *st.install, locale)
+				uikit.Section(c, localized(locale, "安装计划", "Install plan"), func(*ui.Context) {
+					buildScheduledInstall(c, t, *st.install, locale)
+				})
 			}
 		}
 
 		hasURL := strings.TrimSpace(st.info.URL) != ""
 		ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(design.Space2).Children(func() {
-			copyLink := ui.Button(c, localized(locale, "复制下载链接", "Copy download link")).
-				Tooltip(firstNonEmpty(st.info.URL, localized(locale, "没有可下载的链接", "No download link")))
+			copyLink := design.Apply(ui.Button(c,
+				localized(locale, "复制下载链接", "Copy download link")), t.SecondaryButton()).
+				Tooltip(firstNonEmpty(st.info.URL,
+					localized(locale, "没有可下载的链接", "No download link")))
 			copyLink.Disabled(!hasURL)
 			if copyLink.Clicked() && hasURL {
 				c.WriteClipboard(st.info.URL)
 				st.copied = true
+				c.Invalidate()
 			}
 			if st.copied && hasURL {
-				design.Apply(ui.Badge(c, localized(locale, "已复制", "Copied")), t.Badge()).TextColor(t.Success)
+				design.Apply(ui.Badge(c, localized(locale, "已复制", "Copied")), t.Badge()).
+					TextColor(t.SuccessText)
 			}
 		})
 		if !hasURL {
@@ -202,14 +225,14 @@ func buildUpdatePage(c *ui.Context, t *design.Tokens, kctx cordis.Context, runti
 				"No download asset for the current platform")), t.TextMuted(design.TypeXXS))
 		}
 
+		// H22: only show the release-notes section when there are notes; an
+		// empty "no release notes" line was noise under the result rows.
 		if notes := strings.TrimSpace(st.info.Notes); notes != "" {
-			design.Apply(ui.Text(c, localized(locale, "更新说明", "Release notes")), t.Font(design.TypeS)).
-				FontWeight(600).TextColor(t.LabelPrimary)
-			ui.Scroll(c).FillWidth().MaxHeight(design.Space6 * 10).Children(func() {
-				markdown.View(c, notes, nil)
+			uikit.Section(c, localized(locale, "更新说明", "Release notes"), func(*ui.Context) {
+				ui.Scroll(c).FillWidth().MaxHeight(design.Space6 * 10).Children(func() {
+					markdown.View(c, notes, nil)
+				})
 			})
-		} else {
-			design.Apply(ui.Text(c, localized(locale, "暂无更新说明", "No release notes")), t.TextMuted(design.TypeXXS))
 		}
 	})
 }
@@ -330,7 +353,7 @@ func buildPendingInstall(c *ui.Context, t *design.Tokens, plan contracts.UpdateI
 			localized(locale, "待安装：", "Pending install: v")+strings.TrimSpace(plan.Version)),
 			t.Badge()).TextColor(t.WarningText)
 		if staged := strings.TrimSpace(plan.Path); staged != "" {
-			design.Apply(ui.Text(c, staged), t.MonoFamily()).FontSize(11).
+			design.Apply(ui.Text(c, staged), t.Font(design.TypeXXXS), t.MonoFamily()).
 				TextColor(t.LabelTertiary).MaxLines(1).Ellipsis("…")
 		}
 	})
@@ -342,14 +365,14 @@ func buildScheduledInstall(c *ui.Context, t *design.Tokens, plan contracts.Updat
 	ui.Column(c).FillWidth().Gap(design.Space1).Children(func() {
 		ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(design.Space2).Children(func() {
 			design.Apply(ui.Badge(c, localized(locale, "已计划安装", "Install scheduled")), t.Badge()).
-				TextColor(t.Success)
+				TextColor(t.SuccessText)
 			design.Apply(ui.Text(c, localized(locale, "版本：", "Version: ")+strings.TrimSpace(plan.Version)),
 				t.Font(design.TypeXS)).TextColor(t.LabelPrimary)
 		})
 		if staged := strings.TrimSpace(plan.Path); staged != "" {
 			design.Apply(ui.Text(c, localized(locale, "暂存路径", "Staged file")), t.Font(design.TypeXXS)).
 				TextColor(t.LabelTertiary)
-			design.Apply(ui.Text(c, staged), t.MonoFamily()).FontSize(12).
+			design.Apply(ui.Text(c, staged), t.Font(design.TypeXXS), t.MonoFamily()).
 				TextColor(t.LabelSecondary).MaxLines(1).Ellipsis("…")
 		}
 	})
@@ -361,10 +384,10 @@ func buildScheduledInstall(c *ui.Context, t *design.Tokens, plan contracts.Updat
 func buildUpdateDownloadResult(c *ui.Context, t *design.Tokens, download contracts.UpdateDownload, locale contracts.LocaleService) {
 	ui.Column(c).FillWidth().Gap(design.Space2).Children(func() {
 		ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(design.Space2).Children(func() {
-			design.Apply(ui.Badge(c, localized(locale, "已下载", "Downloaded")), t.Badge()).TextColor(t.Success)
+			design.Apply(ui.Badge(c, localized(locale, "已下载", "Downloaded")), t.Badge()).TextColor(t.SuccessText)
 			design.Apply(ui.Text(c, localized(locale,
-				"自动替换暂不支持，请手动安装。",
-				"Automatic replacement is not supported; install the package manually.")),
+				"下载完成，可安排在下次启动安装。",
+				"Download complete; schedule it for the next launch.")),
 				t.Font(design.TypeXS)).TextColor(t.LabelSecondary)
 		})
 		for _, line := range updateDownloadSummary(download, locale) {
@@ -373,7 +396,8 @@ func buildUpdateDownloadResult(c *ui.Context, t *design.Tokens, download contrac
 		if staged := strings.TrimSpace(download.Path); staged != "" {
 			design.Apply(ui.Text(c, localized(locale, "暂存路径", "Staged file")), t.Font(design.TypeXXS)).
 				TextColor(t.LabelTertiary)
-			design.Apply(ui.Text(c, staged), t.MonoFamily()).FontSize(12).TextColor(t.LabelSecondary)
+			design.Apply(ui.Text(c, staged), t.Font(design.TypeXXS), t.MonoFamily()).
+				TextColor(t.LabelSecondary)
 		}
 	})
 }
@@ -392,13 +416,4 @@ func updateDownloadSummary(download contracts.UpdateDownload, locale contracts.L
 		lines = append(lines, "SHA256 "+sha[:8])
 	}
 	return lines
-}
-
-// buildUpdateError is the page's danger row.
-func buildUpdateError(c *ui.Context, t *design.Tokens, text string) {
-	th := t.Theme()
-	ui.Row(c).FillWidth().Gap(design.Space2).AlignItems(ui.Start).Children(func() {
-		ui.Icon(c, icons.AlertTriangle()).Size(th.Space(4), th.Space(4)).TextColor(t.Danger)
-		design.Apply(ui.Text(c, text), t.Font(design.TypeXS)).TextColor(t.DangerText)
-	})
 }

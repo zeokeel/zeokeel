@@ -128,6 +128,34 @@ func (h *attachmentHarness) click(tester *ui.Tester, label string) {
 	tester.Frame()
 }
 
+// clickExact clicks the first element whose text or label equals label exactly
+// (Tester.Click matches substrings, which is ambiguous in menu frames).
+func (h *attachmentHarness) clickExact(tester *ui.Tester, label string) {
+	h.t.Helper()
+	rect, ok := tester.Find(label)
+	if !ok {
+		h.t.Fatalf("no element shows exactly %q; texts = %v", label, tester.Texts())
+	}
+	tester.ClickAt(rect.X+rect.W/2, rect.Y+rect.H/2)
+	tester.Frame()
+}
+
+// attachFiles opens the composer's single 附件 menu and chooses the native
+// picker item. The picker itself runs off the UI thread: callers keep waiting on
+// frames for the staged result.
+func (h *attachmentHarness) attachFiles(tester *ui.Tester) {
+	h.t.Helper()
+	h.click(tester, "附件")
+	h.click(tester, "选择文件…")
+}
+
+// attachManualPaths opens the 附件 menu and chooses the manual path-entry item.
+func (h *attachmentHarness) attachManualPaths(tester *ui.Tester) {
+	h.t.Helper()
+	h.click(tester, "附件")
+	h.click(tester, "手动输入路径…")
+}
+
 func (h *attachmentHarness) assertTexts(tester *ui.Tester, wanted ...string) {
 	h.t.Helper()
 	for _, want := range wanted {
@@ -143,6 +171,43 @@ func (h *attachmentHarness) assertNoTexts(tester *ui.Tester, unwanted ...string)
 		if tester.HasText(text) {
 			h.t.Fatalf("frame unexpectedly shows %q; texts = %v", text, tester.Texts())
 		}
+	}
+}
+
+// waitFor drives frames until every wanted text is visible. The native picker
+// runs off the UI thread and publishes through UIRuntime.Post, so its result
+// lands on a later frame than the click.
+func (h *attachmentHarness) waitFor(tester *ui.Tester, wanted ...string) {
+	h.t.Helper()
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		missing := ""
+		for _, want := range wanted {
+			if !tester.HasText(want) {
+				missing = want
+				break
+			}
+		}
+		if missing == "" {
+			return
+		}
+		if time.Now().After(deadline) {
+			h.t.Fatalf("frame does not show %q (wanted %v); texts = %v",
+				missing, wanted, tester.Texts())
+		}
+		time.Sleep(2 * time.Millisecond)
+		tester.Frame()
+	}
+}
+
+// settle drives frames for a short while so background work that will never
+// publish (a cancelled picker) has had its chance to post before an absence is
+// asserted.
+func (h *attachmentHarness) settle(tester *ui.Tester) {
+	h.t.Helper()
+	for i := 0; i < 25; i++ {
+		time.Sleep(2 * time.Millisecond)
+		tester.Frame()
 	}
 }
 
@@ -181,8 +246,8 @@ func TestAttachmentStagingAndRemoval(t *testing.T) {
 
 	h := newAttachmentHarness(t, activeSessionChat())
 	tester := h.tester()
-	h.click(tester, "附件")
-	h.assertTexts(tester, "note.txt", "pic.png", "16 B")
+	h.attachFiles(tester)
+	h.waitFor(tester, "note.txt", "pic.png", "16 B")
 
 	// Removing one chip drops only that attachment.
 	if err := tester.Click("移除附件 note.txt"); err != nil {
@@ -198,8 +263,8 @@ func TestAttachmentPickerErrors(t *testing.T) {
 		setAttachmentPicker(t, func() ([]string, error) { return nil, fmt.Errorf("dialog failed") })
 		h := newAttachmentHarness(t, activeSessionChat())
 		tester := h.tester()
-		h.click(tester, "附件")
-		h.assertTexts(tester, "无法打开文件选择器：dialog failed")
+		h.attachFiles(tester)
+		h.waitFor(tester, "无法打开文件选择器：dialog failed")
 	})
 
 	t.Run("missing file", func(t *testing.T) {
@@ -208,8 +273,8 @@ func TestAttachmentPickerErrors(t *testing.T) {
 		})
 		h := newAttachmentHarness(t, activeSessionChat())
 		tester := h.tester()
-		h.click(tester, "附件")
-		h.assertTexts(tester, "无法添加 missing.txt：不是可读的普通文件")
+		h.attachFiles(tester)
+		h.waitFor(tester, "无法添加 missing.txt：不是可读的普通文件")
 	})
 
 	t.Run("too large", func(t *testing.T) {
@@ -229,8 +294,8 @@ func TestAttachmentPickerErrors(t *testing.T) {
 		setAttachmentPicker(t, func() ([]string, error) { return []string{bigPath}, nil })
 		h := newAttachmentHarness(t, activeSessionChat())
 		tester := h.tester()
-		h.click(tester, "附件")
-		h.assertTexts(tester, "huge.bin 超过 10 MB 附件上限")
+		h.attachFiles(tester)
+		h.waitFor(tester, "huge.bin 超过 10 MB 附件上限")
 	})
 }
 
@@ -246,8 +311,8 @@ func TestSendWithAttachments(t *testing.T) {
 	chat.fakeChat.addSession(contracts.ChatSession{ID: "sess-1", Title: "附件会话"}, true)
 	h := newAttachmentHarness(t, chat)
 	tester := h.tester()
-	h.click(tester, "附件")
-	h.assertTexts(tester, "note.txt", "pic.png")
+	h.attachFiles(tester)
+	h.waitFor(tester, "note.txt", "pic.png")
 
 	h.click(tester, "输入消息…")
 	tester.Type("看看这些文件")
@@ -279,7 +344,7 @@ func TestSendWithAttachments(t *testing.T) {
 	}
 
 	// The staged chips were cleared and the sent user message shows its chips.
-	h.assertTexts(tester, "看看这些文件", "note.txt", "pic.png", "正在生成回复…")
+	h.assertTexts(tester, "看看这些文件", "note.txt", "pic.png", "运行中")
 	if got := chat.sends(); len(got) != 0 {
 		t.Fatalf("plain Send calls = %v, want none (attachments use SendWithAttachments)", got)
 	}
@@ -294,8 +359,8 @@ func TestSendAttachmentOnlyByEnter(t *testing.T) {
 	chat.fakeChat.addSession(contracts.ChatSession{ID: "sess-1", Title: "附件会话"}, true)
 	h := newAttachmentHarness(t, chat)
 	tester := h.tester()
-	h.click(tester, "附件")
-	h.assertTexts(tester, "note.md", "6 B")
+	h.attachFiles(tester)
+	h.waitFor(tester, "note.md", "6 B")
 
 	// An empty draft with a staged attachment is still sendable (Enter too).
 	h.click(tester, "输入消息…")
@@ -317,8 +382,8 @@ func TestSendAttachmentsUnsupportedBackend(t *testing.T) {
 	chat := activeSessionChat() // *fakeChat does not implement AttachmentSender
 	h := newAttachmentHarness(t, chat)
 	tester := h.tester()
-	h.click(tester, "附件")
-	h.assertTexts(tester, "note.txt")
+	h.attachFiles(tester)
+	h.waitFor(tester, "note.txt")
 	h.click(tester, "发送")
 	tester.Frame()
 

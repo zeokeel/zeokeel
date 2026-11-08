@@ -4,11 +4,13 @@ package hosttools
 // plan implementations) must drive the ask_user/present/plan tools.
 
 import (
+	"errors"
 	"strings"
 	"testing"
 
 	cordis "github.com/zeokeel/zeokeel-kernel"
 	"github.com/zeokeel/zeokeel-kernel/module"
+	rig "github.com/zeokeel/zeokeel-rig"
 	rigtool "github.com/zeokeel/zeokeel-rig/tools"
 
 	"github.com/zeokeel/zeokeel/internal/contracts"
@@ -103,9 +105,11 @@ func TestPlanToolsUsePlanBridge(t *testing.T) {
 	}
 }
 
-// TestInteractiveFalseKeepsArtifactAndPlanBridges pins that the flag only
-// removes the ask_user capability in this backend slice.
-func TestInteractiveFalseKeepsArtifactAndPlanBridges(t *testing.T) {
+// TestInteractiveFalseKeepsArtifactBridgeHidesPlanTools pins the headless
+// product slice: interactive=false keeps the artifact bridge and the other host
+// tools, but the plan-review tools are not registered — no user could ever
+// approve a plan there (ZK-07).
+func TestInteractiveFalseKeepsArtifactBridgeHidesPlanTools(t *testing.T) {
 	uiRoot := uiroot.New(uiroot.Config{AppName: "test"})
 	artifacts := make(chan contracts.Artifact, 1)
 	uiRoot.ArtifactPresenter().SetArtifactHandler(func(artifact contracts.Artifact) { artifacts <- artifact })
@@ -115,11 +119,13 @@ func TestInteractiveFalseKeepsArtifactAndPlanBridges(t *testing.T) {
 		t.Fatalf("present with interactive=false = %q", content)
 	}
 	<-artifacts
-	if content := product.callOK(t, ToolPlanReview, `{"plan":"# p"}`); !strings.Contains(content, "reviewing") {
-		t.Fatalf("plan_review with interactive=false = %q", content)
-	}
 	if content := product.callError(t, ToolAskUser, `{"question":"q"}`); !strings.Contains(content, "no interactive UI") {
 		t.Fatalf("ask_user with interactive=false = %q", content)
+	}
+	for _, name := range []string{ToolPlanReview, ToolExitPlanMode} {
+		if _, err := product.call(t, name, `{}`); !errors.Is(err, rig.ErrToolNotFound) {
+			t.Fatalf("%s with interactive=false = %v, want rig.ErrToolNotFound", name, err)
+		}
 	}
 }
 

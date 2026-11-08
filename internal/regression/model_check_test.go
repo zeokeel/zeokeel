@@ -63,8 +63,8 @@ func pumpModelCheck(t *testing.T, tester *ui.Tester, condition func() bool) {
 // clickModelCheck clicks the check button and pumps until condition holds.
 func clickModelCheck(t *testing.T, tester *ui.Tester, condition func() bool) {
 	t.Helper()
-	if err := tester.Click("测试连接"); err != nil {
-		t.Fatalf("click 测试连接: %v; texts = %v", err, tester.Texts())
+	if err := tester.Click("测试当前输入"); err != nil {
+		t.Fatalf("click 测试当前输入: %v; texts = %v", err, tester.Texts())
 	}
 	tester.Frame()
 	pumpModelCheck(t, tester, condition)
@@ -119,7 +119,7 @@ func TestModelConnectionCheck(t *testing.T) {
 		_, tester := startModelSettings(t, nil)
 		requireHasText(t, tester, "尚未配置服务地址")
 		// The action is disabled: clicking it is a no-op and never calls the seam.
-		_ = tester.Click("测试连接")
+		_ = tester.Click("测试当前输入")
 		tester.Frame()
 		pumpModelCheck(t, tester, func() bool { return len(*calls) == 0 })
 	})

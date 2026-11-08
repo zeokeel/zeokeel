@@ -37,16 +37,14 @@ func openMemoryAdmin(t *testing.T, seed []contracts.Memory, provided contracts.M
 	h.ui.Navigator().ToggleSettings()
 	tester := h.tester(1280, 800)
 	tester.Frame()
-	if err := tester.Click("记忆"); err != nil {
-		t.Fatalf("open memory page: %v; texts = %v", err, tester.Texts())
-	}
-	tester.Frame()
+	openSettingsPage(t, tester, 1280, 800, "记忆")
 	return h, tester
 }
 
 // clickMemoryAdmin clicks one label and repaints.
 func clickMemoryAdmin(t *testing.T, tester *ui.Tester, label string) {
 	t.Helper()
+	revealSettings(t, tester, label)
 	if err := tester.Click(label); err != nil {
 		t.Fatalf("click %q: %v; texts = %v", label, err, tester.Texts())
 	}

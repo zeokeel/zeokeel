@@ -63,7 +63,7 @@ func (c Config) resolved() Config {
 		ToolLabel:        firstNonEmpty(c.ToolLabel, "工具"),
 		ArgumentsLabel:   firstNonEmpty(c.ArgumentsLabel, "参数"),
 		AllowLabel:       firstNonEmpty(c.AllowLabel, "允许"),
-		AllowAlwaysLabel: firstNonEmpty(c.AllowAlwaysLabel, "总是允许"),
+		AllowAlwaysLabel: firstNonEmpty(c.AllowAlwaysLabel, "本次运行内始终允许"),
 		DenyLabel:        firstNonEmpty(c.DenyLabel, "拒绝"),
 	}
 }
@@ -82,6 +82,12 @@ type state struct {
 	// Pending for a frame or two while the backend settles, and the dialog
 	// must not reopen for it.
 	resolvedID string
+	// denyButton is the safe default action; a new request focuses it once so
+	// Enter presses Deny, never a one-key Allow. argsOpen keeps the collapsed
+	// argument details across frames.
+	denyButton ui.Handle
+	focusDeny  bool
+	argsOpen   bool
 }
 
 // Module registers the approval dialog contribution.
@@ -173,6 +179,11 @@ func buildDialog(c *ui.Context, runtime contracts.UIRuntime, approvals contracts
 	if request.ID != st.shownID {
 		st.shownID = request.ID
 		st.open = true
+		// Safe default: focus Deny as the request opens; Enter then presses
+		// the focused button (the native button behaviour), so a high-risk
+		// tool is never allowed with one stray Enter.
+		st.focusDeny = true
+		st.argsOpen = false
 	}
 	ui.Modal(c, &st.open, func() {
 		requestPanel(c, runtime, approvals, cfg, st, request)
@@ -191,16 +202,26 @@ func buildDialog(c *ui.Context, runtime contracts.UIRuntime, approvals contracts
 }
 
 // requestPanel is the Modal body: a brand title row with an approval icon, the
-// tool badge, the summary, a monospaced arguments block and the three decision
-// buttons. All controls are mygo natives styled with internal/design tokens.
+// tool, a one-line impact statement, the summary first (a command for shell
+// tools), the argument details collapsed and the decision footer.
+//
+// Safety default (H4): there is no dialog-wide Enter shortcut. The Deny button
+// is focused as the request opens, so Enter presses the focused button — a
+// high-risk tool is never allowed by a stray Enter; allowing needs Tab-to-Allow
+// (or a click). The footer order follows the product convention: danger first,
+// secondary, accent primary last.
 func requestPanel(c *ui.Context, runtime contracts.UIRuntime, approvals contracts.Approvals, cfg Config, st *state, request contracts.ApprovalRequest) {
 	t := design.Of(c)
 	title := st.localized(cfg.Title, "需要审批", "Approval required")
 	toolLabel := st.localized(cfg.ToolLabel, "工具", "Tool")
 	argumentsLabel := st.localized(cfg.ArgumentsLabel, "参数", "Arguments")
 	allowLabel := st.localized(cfg.AllowLabel, "允许", "Allow")
-	allowAlwaysLabel := st.localized(cfg.AllowAlwaysLabel, "总是允许", "Always allow")
+	allowAlwaysLabel := st.localized(cfg.AllowAlwaysLabel, "本次运行内始终允许", "Always allow this run")
 	denyLabel := st.localized(cfg.DenyLabel, "拒绝", "Deny")
+	summary := strings.TrimSpace(request.Summary)
+	arguments := strings.TrimSpace(request.Arguments)
+	emptyArguments := arguments == "" || arguments == "{}" || arguments == "[]" || arguments == "null"
+
 	// The native Modal sizes its panel around this content; the brand spacing
 	// keeps the dialog on the same 4 DIP grid as the settings pages.
 	design.Apply(ui.Column(c).Width(560).Gap(design.Space4), func(el ui.Element) ui.Element {
@@ -213,43 +234,106 @@ func requestPanel(c *ui.Context, runtime contracts.UIRuntime, approvals contract
 				TextColor(t.Accent)
 			design.Apply(ui.Text(c, title), t.Font(design.TypeL)).FontWeight(600).
 				TextColor(t.LabelPrimary)
-			ui.Spacer(c).Grow(1)
-			design.Apply(ui.Text(c, request.Tool), t.Font(design.TypeXS)).TextColor(t.LabelSecondary)
 		})
+		// The tool is named once: label + badge, with the impact in one line.
 		ui.Row(c).AlignItems(ui.Center).Gap(design.Space2).Children(func() {
 			design.Apply(ui.Text(c, toolLabel), t.TextMuted(design.TypeXS))
 			design.Apply(ui.Badge(c, request.Tool), t.Badge())
 		})
-		if summary := strings.TrimSpace(request.Summary); summary != "" {
-			design.Apply(ui.Text(c, summary), t.Font(design.TypeBody)).TextColor(t.LabelPrimary)
-		}
-		if arguments := strings.TrimSpace(request.Arguments); arguments != "" {
-			ui.Divider(c)
-			design.Apply(ui.Text(c, argumentsLabel), t.TextMuted(design.TypeXS))
-			scroll := ui.Scroll(c).Height(140).FillWidth()
-			design.Apply(scroll, func(el ui.Element) ui.Element {
+		// The approval only lets the call through the gate: the sandbox policy
+		// still runs it and may deny it, so the copy must not promise execution
+		// (ZK-02: "会立即执行" was false when the sandbox rejected the command).
+		design.Apply(ui.Text(c, st.tr("允许后将在沙箱策略限制内执行；策略仍可能拒绝该调用。",
+			"It runs within the sandbox policy after approval; the policy may still reject the call.")),
+			t.Font(design.TypeXS)).
+			TextColor(t.LabelSecondary)
+		// What will run comes first: the summary (a command for shell tools) is
+		// the thing the user is judging.
+		if summary != "" && summary != arguments {
+			summaryLabel := st.tr("摘要", "Summary")
+			if commandLikeTool(request.Tool) {
+				summaryLabel = st.tr("命令", "Command")
+			}
+			design.Apply(ui.Text(c, summaryLabel), t.TextMuted(design.TypeXS))
+			design.Apply(ui.Row(c).FillWidth(), func(el ui.Element) ui.Element {
 				return el.Background(t.BgBase).Border(1, t.BorderL2).
 					Radius(design.RadiusSM).Padding(design.Space2)
 			}).Children(func() {
-				design.Apply(ui.Text(c, truncate(arguments, maxArgumentsRunes)),
-					t.TextMuted(design.TypeXS), t.MonoFamily())
+				design.Apply(ui.Text(c, truncate(summary, maxArgumentsRunes)),
+					t.Font(design.TypeXS), t.MonoFamily()).TextColor(t.LabelPrimary)
 			})
 		}
+		// The raw arguments are details: collapsed, and "no arguments" instead
+		// of an empty box when the call carries {} / [] / null.
 		ui.Divider(c)
-		ui.Row(c).FillWidth().Justify(ui.End).AlignItems(ui.Center).Gap(design.Space2).Children(func() {
-			if design.Apply(ui.PrimaryButton(c, allowLabel), t.PrimaryButton()).Clicked() {
-				resolve(runtime, approvals, st, contracts.ApprovalAllow)
+		design.Apply(ui.Text(c, argumentsLabel), t.TextMuted(design.TypeXS))
+		if emptyArguments {
+			design.Apply(ui.Text(c, st.tr("无参数", "No arguments")),
+				t.TextMuted(design.TypeXS))
+		} else {
+			// Two layers only: the configurable section label (参数/Arguments)
+			// above the disclosure itself.
+			ui.Collapsible(c.Key("approval.arguments."+request.ID),
+				st.tr("显示原始参数", "Show raw arguments"), &st.argsOpen, func() {
+					scroll := ui.Scroll(c).Height(140).FillWidth()
+					design.Apply(scroll, func(el ui.Element) ui.Element {
+						return el.Background(t.BgBase).Border(1, t.BorderL2).
+							Radius(design.RadiusSM).Padding(design.Space2)
+					}).Children(func() {
+						design.Apply(ui.Text(c, truncate(arguments, maxArgumentsRunes)),
+							t.TextMuted(design.TypeXS), t.MonoFamily())
+					})
+				})
+		}
+		ui.Divider(c)
+		// The footer mirrors uikit.DialogFooter's order and metrics; approval
+		// alone needs a bound button so the safe default (Deny) can take the
+		// focus as the request opens.
+		ui.Row(c).FillWidth().Justify(ui.End).AlignItems(ui.Center).
+			Gap(design.Space2).Children(func() {
+			deny := design.Apply(ui.Button(c, denyLabel), t.DangerButton()).
+				Label(denyLabel).
+				Tooltip(st.tr("拒绝本次调用（默认焦点）", "Deny this call (default focus)")).
+				Bind(&st.denyButton)
+			if st.focusDeny {
+				st.denyButton.Focus(c)
+				st.focusDeny = false
 			}
-			if design.Apply(ui.Button(c, allowAlwaysLabel), secondaryButtonStyle(t)).Clicked() {
-				resolve(runtime, approvals, st, contracts.ApprovalAllowAlways)
-			}
-			deny := design.Apply(ui.Button(c, denyLabel), secondaryButtonStyle(t))
-			deny.TextColor(t.DangerText)
 			if deny.Clicked() {
 				resolve(runtime, approvals, st, contracts.ApprovalDeny)
 			}
+			allowAlways := design.Apply(ui.Button(c, allowAlwaysLabel), t.SecondaryButton()).
+				Label(allowAlwaysLabel).
+				Tooltip(st.tr("本次运行内对同一工具不再询问；运行结束后恢复询问",
+					"Don't ask again for this tool during this run; asking resumes on the next run"))
+			if allowAlways.Clicked() {
+				resolve(runtime, approvals, st, contracts.ApprovalAllowAlways)
+			}
+			allow := design.Apply(ui.PrimaryButton(c, allowLabel), t.PrimaryButton()).
+				Label(allowLabel).
+				Tooltip(st.tr("允许这一次调用", "Allow this call"))
+			if allow.Clicked() {
+				resolve(runtime, approvals, st, contracts.ApprovalAllow)
+			}
 		})
+		// The key semantics are visible: Esc denies, and Enter presses whatever
+		// control has the focus (Deny by default) — never a dialog-wide Allow.
+		design.Apply(ui.Text(c, st.tr("Esc = 拒绝本次调用 · Enter 执行当前聚焦的按钮",
+			"Esc = deny this call · Enter presses the focused button")),
+			t.TextMuted(design.TypeXXS))
 	})
+}
+
+// commandLikeTool reports whether a tool's summary is a command line, so the
+// approval dialog can show it monospaced first.
+func commandLikeTool(tool string) bool {
+	switch strings.ToLower(strings.TrimSpace(tool)) {
+	case "bash", "terminal_send", "job_start", "web_fetch", "web_search",
+		"read_file", "write_file", "edit_file", "str_replace_editor":
+		return true
+	default:
+		return false
+	}
 }
 
 // approvalIcon picks the header glyph for the tool being approved: destructive
@@ -261,14 +345,6 @@ func approvalIcon(tool string) *ui.SVG {
 		return icons.AlertTriangle()
 	default:
 		return icons.Shield()
-	}
-}
-
-// secondaryButtonStyle is the brand's secondary dialog button.
-func secondaryButtonStyle(t *design.Tokens) design.Style {
-	return func(el ui.Element) ui.Element {
-		return el.Height(36).PaddingX(design.Space3).Radius(design.RadiusMD).
-			Background(t.BgRaised).Border(1, t.BorderL2).TextColor(t.LabelPrimary)
 	}
 }
 

@@ -29,7 +29,9 @@ func TestUsageFooterShowsContextWindowBudget(t *testing.T) {
 	}}
 	h := newModelHarness(t, chat, catalog)
 	tester := h.tester()
-	h.assertTexts(tester, "用时 1.2s · 460 tokens · 预算 128k")
+	h.assertTexts(tester, "用时 1.2s · 460 tokens")
+	h.click(tester, "用时 1.2s · 460 tokens")
+	h.assertTexts(tester, "上下文预算", "预算 128k")
 }
 
 func TestUsageFooterContextWindowEnglish(t *testing.T) {
@@ -41,7 +43,9 @@ func TestUsageFooterContextWindowEnglish(t *testing.T) {
 	h.ui.Locale().SetLanguage("en")
 	tester := h.tester()
 	tester.Frame()
-	h.assertTexts(tester, "Took 1.2s · 460 tokens · 128k context")
+	h.assertTexts(tester, "Took 1.2s · 460 tokens")
+	h.click(tester, "Took 1.2s · 460 tokens")
+	h.assertTexts(tester, "Context budget", "128k context")
 }
 
 func TestUsageFooterBudgetHiddenWithoutCatalog(t *testing.T) {
@@ -77,5 +81,7 @@ func TestUsageFooterBudgetUsesConfiguredModelFallback(t *testing.T) {
 	}}
 	h := newModelHarness(t, chat, catalog)
 	tester := h.tester()
-	h.assertTexts(tester, "预算 64k")
+	h.assertTexts(tester, "用时 1.2s · 460 tokens")
+	h.click(tester, "用时 1.2s · 460 tokens")
+	h.assertTexts(tester, "上下文预算", "预算 64k")
 }

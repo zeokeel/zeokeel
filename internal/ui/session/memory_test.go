@@ -154,13 +154,22 @@ func TestMemoryListsAndDeletes(t *testing.T) {
 	h.click(tester, "记忆")
 
 	h.assertTexts(tester, "记忆", "项目 Alpha 使用 Go 1.27", "提交前运行 go test -race",
-		"工作区", "删除", "新建记忆", "添加记忆", "输入内容后可添加。")
+		"工作区", "删除记忆", "新建记忆", "添加记忆")
 	h.assertNoTexts(tester, "记忆后端未启用")
+	// H25: the 记忆 tab is the only page title; the pane starts with the
+	// search field instead of a repeated big heading (tab labels appear twice:
+	// accessible label + visible text, like 对话/轨迹).
+	if got, want := exactTextCount(tester.Texts(), "记忆"), exactTextCount(tester.Texts(), "对话"); got != want {
+		t.Fatalf("记忆 appears %d times, 对话 %d; the pane repeats its tab title: %v", got, want, tester.Texts())
+	}
 
-	if err := tester.Click("删除"); err != nil {
+	// Deleting one entry asks through a native AlertDialog first.
+	if err := tester.Click("删除记忆"); err != nil {
 		t.Fatalf("click first delete: %v; texts = %v", err, tester.Texts())
 	}
 	tester.Frame()
+	h.assertTexts(tester, "删除记忆", "取消", "删除")
+	h.click(tester, "删除")
 	if got := store.removes(); len(got) != 1 || got[0] != "mem-1" {
 		t.Fatalf("Remove calls = %v, want [mem-1]", got)
 	}
@@ -212,7 +221,7 @@ func TestMemoryAddRefreshes(t *testing.T) {
 	h.click(tester, "记忆")
 	h.assertTexts(tester, "还没有记忆")
 
-	h.click(tester, "记忆内容")
+	h.click(tester, "新建记忆")
 	tester.Type("记住：发布前跑全量测试")
 	tester.Frame()
 	h.click(tester, "添加记忆")
@@ -252,7 +261,7 @@ func TestMemoryErrorsAreShown(t *testing.T) {
 		h := newHarnessWithMemory(t, chat, store)
 		tester := h.tester()
 		h.click(tester, "记忆")
-		h.click(tester, "记忆内容")
+		h.click(tester, "新建记忆")
 		tester.Type("一条会失败的记忆")
 		tester.Frame()
 		h.click(tester, "添加记忆")
@@ -271,10 +280,11 @@ func TestMemoryErrorsAreShown(t *testing.T) {
 		h := newHarnessWithMemory(t, chat, store)
 		tester := h.tester()
 		h.click(tester, "记忆")
-		if err := tester.Click("删除"); err != nil {
+		if err := tester.Click("删除记忆"); err != nil {
 			t.Fatalf("click delete: %v", err)
 		}
 		tester.Frame()
+		h.click(tester, "删除")
 		h.assertTexts(tester, "删除记忆失败：mem-1")
 		h.assertTexts(tester, "删不掉的记忆") // the entry stays listed
 	})
@@ -343,4 +353,36 @@ func TestStreamingAssistantMarkdownRendering(t *testing.T) {
 	if strings.Contains(texts, "**认证模块**") {
 		t.Fatalf("streaming markdown markers leaked: %v", tester.Texts())
 	}
+}
+
+// TestMemoryPaneOpensAtTop covers N4: the Memory pane is not a streaming log, so
+// it opens at the top with its title, search and management row visible instead
+// of scrolling to the end like the transcript.
+func TestMemoryPaneOpensAtTop(t *testing.T) {
+	entries := make([]contracts.Memory, 0, 30)
+	for index := 0; index < 30; index++ {
+		entries = append(entries, memory(fmt.Sprintf("mem-%d", index),
+			fmt.Sprintf("记忆内容 %d：%s", index, strings.Repeat("细节 ", 20))))
+	}
+	store := newFakeMemoryStore(entries...)
+	chat := newFakeChat()
+	chat.addSession(contracts.ChatSession{ID: "sess-1", Title: "记忆顶部"}, true)
+	h := newHarnessWithMemory(t, chat, store)
+	tester := h.tester()
+	h.click(tester, "记忆")
+
+	for _, label := range []string{"搜索记忆", "整理记忆", "全部清空"} {
+		rect, ok := tester.Find(label)
+		if !ok {
+			t.Fatalf("%q missing; texts = %v", label, tester.Texts())
+		}
+		if rect.Y < 0 || rect.Y > 780 {
+			t.Fatalf("%q at y=%.1f, want it inside the window (the pane opens at the top)", label, rect.Y)
+		}
+	}
+
+	// The chat transcript is the only pane that follows the streaming end.
+	h.click(tester, "对话")
+	tester.Frame()
+	h.assertNoTexts(tester, "回到最新")
 }

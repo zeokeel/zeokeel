@@ -159,8 +159,9 @@ func TestAgentPresetSelectionAndRunApplication(t *testing.T) {
 	}
 }
 
-// TestAgentPresetPickerUI covers the composer picker: the label shows the
-// current selection, choosing a preset updates the session, and "None" clears.
+// TestAgentPresetPickerUI covers the composer picker: the persona rows live in
+// the single 会话设置 menu, choosing a preset updates the session, and "None"
+// clears it.
 func TestAgentPresetPickerUI(t *testing.T) {
 	harness := startAgentWith(t, agent.Config{},
 		newFakeModel(t, func([]byte) (int, string) { return 0, sseAnswer("ok") }))
@@ -170,32 +171,40 @@ func TestAgentPresetPickerUI(t *testing.T) {
 	harness.h.push(sessionui.ScreenID)
 	tester := harness.h.tester(1280, 800)
 	tester.Frame()
-	requireHasText(t, tester, "人设：无")
+	// The persona picker lives in the single 会话设置 menu.
+	requireHasText(t, tester, "会话设置")
 
-	if err := tester.Click("人设：无"); err != nil {
-		t.Fatalf("open preset picker: %v; texts = %v", err, tester.Texts())
+	if err := tester.Click("会话设置"); err != nil {
+		t.Fatalf("open session menu: %v; texts = %v", err, tester.Texts())
 	}
 	tester.Frame()
-	requireHasTexts(t, tester, "选择代理预设", "无", "Alpha", "Beta")
+	requireHasText(t, tester, "人设")
+	if err := tester.Click("人设"); err != nil {
+		t.Fatalf("open persona submenu: %v; texts = %v", err, tester.Texts())
+	}
+	tester.Frame()
+	requireHasTexts(t, tester, "无", "Alpha", "Beta")
 	if err := tester.Click("Alpha"); err != nil {
 		t.Fatalf("choose Alpha: %v; texts = %v", err, tester.Texts())
 	}
 	tester.Frame()
-	requireHasText(t, tester, "人设：Alpha")
 	setter := harness.chat.(contracts.SessionPresetSetter)
 	if got := setter.SessionPreset(sessionID); got != "alpha" {
 		t.Fatalf("selected preset = %q, want alpha", got)
 	}
 
-	if err := tester.Click("人设：Alpha"); err != nil {
-		t.Fatalf("reopen preset picker: %v; texts = %v", err, tester.Texts())
+	if err := tester.Click("会话设置"); err != nil {
+		t.Fatalf("reopen session menu: %v; texts = %v", err, tester.Texts())
+	}
+	tester.Frame()
+	if err := tester.Click("人设"); err != nil {
+		t.Fatalf("reopen persona submenu: %v; texts = %v", err, tester.Texts())
 	}
 	tester.Frame()
 	if err := tester.Click("无"); err != nil {
 		t.Fatalf("choose None: %v; texts = %v", err, tester.Texts())
 	}
 	tester.Frame()
-	requireHasText(t, tester, "人设：无")
 	if got := setter.SessionPreset(sessionID); got != "" {
 		t.Fatalf("preset after None = %q, want empty", got)
 	}

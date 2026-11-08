@@ -1,5 +1,45 @@
 # ZeoKeel
 
+[![CI](https://github.com/zeokeel/zeokeel/actions/workflows/ci.yml/badge.svg)](https://github.com/zeokeel/zeokeel/actions/workflows/ci.yml)
+[![Release](https://img.shields.io/github/v/release/zeokeel/zeokeel)](https://github.com/zeokeel/zeokeel/releases)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+
+> **v0.1.0 — first public release** (2026-11-08). Native, compile-time modular
+> AI agent for desktop, headless and ACP (Zed/editor) use; one Go binary, no
+> webview. Final verification: **10/10 PASS** (`./scripts/verify.sh`), regression
+> **284 PASS / 0 SKIP / 0 FAIL**, desktop (Xvfb) / headless / ACP smokes green.
+> See [CHANGELOG.md](CHANGELOG.md) for the release notes.
+
+## 下载与运行 / Download and run
+
+Prebuilt binaries are attached to the [latest release](https://github.com/zeokeel/zeokeel/releases/latest):
+`linux/amd64`, `linux/arm64`, `darwin/amd64`, `darwin/arm64` (tar.gz + `checksums.txt`).
+
+```sh
+# Desktop product (needs a desktop session)
+./zeokeel
+
+# Headless product (no window; tools/memory/sessions/automation)
+./zeokeel --headless
+
+# ACP stdio server for editor integration
+./zeokeel --acp
+
+./zeokeel --version     # version, commit, build time
+```
+
+Build from source: Go 1.27 and the pinned module set (`go.mod`/`go.sum`):
+
+```sh
+make build            # go build ./...
+make ci               # build + vet + test
+./scripts/verify.sh   # full local verification (Linux/Xvfb extras optional)
+```
+
+CI runs on every push/PR (`.github/workflows/ci.yml`); pushing a `v*` tag runs
+`.github/workflows/release.yml`, which builds the four release archives,
+verifies the Linux binary, and publishes the GitHub release with checksums.
+
 > **继续推进（TDD 并行 + 反证审计）**：新增 subagent 同步委派、permission 权限模式（ask/workspace/full）、
 > team manager 编排与右侧「团队」面板（spawn/steer/interrupt）、@session 引用与推理强度（low/medium/high）、
 > composer /goal /plan /memory 对话框、更新下载+SHA256 暂存、MCP stdio 服务器、右侧「任务」面板、
@@ -239,6 +279,8 @@ make ci            # build + vet + test
 make run           # 桌面产品（需要桌面会话）
 make run-headless  # headless 产品（无窗口，等 SIGINT/SIGTERM）
 make build ARGS=   # 仅构建
+make verify        # 全量验证（gofmt/build/vet/test/-race/regression/snapshot/smokes）
+make release       # 本地按 VERSION 构建发布包（可选）
 ```
 
 注入点清单与灵活性规则：[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) §4/§5；

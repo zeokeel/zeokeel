@@ -1,13 +1,13 @@
 package uimodtest
 
-// Archived sessions end-to-end: archiving hides a session from the sidebar and
-// the "show archived" view option brings it back with the 已归档 badge.
+// Archived sessions end-to-end (H-series migration): archiving hides a session
+// from the sidebar; archived sessions live on the settings "归档" page, where
+// they can be restored. The old "show archived" sidebar view option is gone.
 
 import (
 	"testing"
 
 	"github.com/egoist/mygo/ui"
-	cordis "github.com/zeokeel/zeokeel-kernel"
 
 	"github.com/zeokeel/zeokeel/internal/contracts"
 )
@@ -46,37 +46,53 @@ func TestArchivedSessionsEndToEnd(t *testing.T) {
 	tester := ui.NewTester(uiRoot.View, 1280, 800)
 	tester.Frame()
 	if tester.HasText("待归档会话") {
-		t.Fatalf("archived session visible by default; texts = %v", tester.Texts())
+		t.Fatalf("archived session visible in the sidebar by default; texts = %v", tester.Texts())
 	}
 	if !tester.HasText("保留会话") {
 		t.Fatalf("kept session missing; texts = %v", tester.Texts())
 	}
-
-	// The footer view option (persisted in settings) shows archived sessions.
-	if err := settingsSet(t, root, contracts.SettingSessionsShowArchived, "true"); err != nil {
-		t.Fatalf("set show archived: %v", err)
-	}
-	tester.Frame()
-	if !tester.HasText("待归档会话") {
-		t.Fatalf("archived session still hidden; texts = %v", tester.Texts())
-	}
-	hasBadge := false
-	for _, text := range tester.Texts() {
-		if text == "已归档" {
-			hasBadge = true
+	// The sidebar's old "show archived" view toggle is gone.
+	for _, unwanted := range []string{"显示已归档", "隐藏已归档"} {
+		if tester.HasText(unwanted) {
+			t.Fatalf("sidebar still shows the archived view toggle %q; texts = %v", unwanted, tester.Texts())
 		}
 	}
-	if !hasBadge {
-		t.Fatalf("archived badge missing; texts = %v", tester.Texts())
-	}
-}
 
-// settingsSet writes through the product settings service on the kernel root.
-func settingsSet(t *testing.T, root cordis.Context, key, value string) error {
-	t.Helper()
-	store, ok := root.Get(contracts.KeySettings)
-	if !ok {
-		t.Fatalf("settings service missing")
+	// Archived sessions are managed on the settings 归档 page now.
+	if err := uiRoot.OpenSettingsPage("archive"); err != nil {
+		t.Fatalf("OpenSettingsPage(archive): %v", err)
 	}
-	return store.Set(key, value)
+	tester.Frame()
+	tester.Frame()
+	if !tester.HasText("待归档会话") {
+		t.Fatalf("archive page does not list the archived session; texts = %v", tester.Texts())
+	}
+	if !tester.HasText("恢复") {
+		t.Fatalf("archive page lacks the restore action; texts = %v", tester.Texts())
+	}
+
+	// Restoring it brings it back to the sidebar.
+	if err := tester.Click("恢复"); err != nil {
+		t.Fatalf("click restore: %v; texts = %v", err, tester.Texts())
+	}
+	tester.Frame()
+	tester.Frame()
+	restored := false
+	for _, info := range chat.Sessions() {
+		if info.ID == archivedID && !info.Archived {
+			restored = true
+		}
+	}
+	if !restored {
+		t.Fatalf("session is still archived after restore: %+v", chat.Sessions())
+	}
+	if !tester.HasText("没有归档的会话") {
+		t.Fatalf("archive page does not show the empty state after restore; texts = %v", tester.Texts())
+	}
+	uiRoot.Navigator().CloseSettings()
+	tester.Frame()
+	tester.Frame()
+	if !tester.HasText("待归档会话") {
+		t.Fatalf("restored session is missing from the sidebar; texts = %v", tester.Texts())
+	}
 }

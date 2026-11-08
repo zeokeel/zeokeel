@@ -86,9 +86,13 @@ type paneState struct {
 	searchHits  []contracts.MessageSearchHit
 	searchErr   error
 
-	// settings is the optional settings store: the footer's "show archived"
-	// view toggle reads/writes contracts.SettingSessionsShowArchived there.
+	// settings is the optional settings store: the sidebar view options (sort
+	// and grouping) persist there. Archived sessions are no longer a sidebar
+	// view option: they live in the settings surface's archive page.
 	settings contracts.SettingsService
+	// notifier is the optional host toast bridge: archiving a session reports
+	// success there (with Undo when the host supports action toasts).
+	notifier contracts.Notifier
 
 	renameOpen   bool
 	renameTarget string
@@ -167,6 +171,9 @@ func Module() *module.Descriptor[Config] {
 		}
 		if settings, ok := ctx.Get(contracts.KeySettings); ok {
 			state.settings = settings
+		}
+		if notifier, ok := ctx.Get(contracts.KeyNotifier); ok {
+			state.notifier = notifier
 		}
 
 		// The chat service notifies from the agent goroutine; hop to the UI
@@ -304,14 +311,7 @@ func buildSessionList(c *ui.Context, t *design.Tokens, chat contracts.ChatServic
 					if id == "home" || id == "session" || strings.TrimSpace(id) == "" {
 						continue
 					}
-					icon := icons.Data()
-					switch id {
-					case "automation":
-						icon = icons.Clock()
-					case "plugins":
-						icon = icons.Plugin()
-					}
-					item := ui.SidebarItem(c, id, icon, state.screenNavLabel(id))
+					item := ui.SidebarItem(c, id, screenNavIcon(id), state.screenNavLabel(id))
 					screenID := id
 					item.OnClick(func() {
 						if err := nav.Push(screenID); err == nil {
@@ -343,16 +343,19 @@ func buildSessionList(c *ui.Context, t *design.Tokens, chat contracts.ChatServic
 			}
 			ui.Row(c).FillWidth().Padding(0, design.Space1, 0, design.Space1).
 				Children(func() {
+					searchLabel := state.T("搜索会话与消息", "Search chats and messages")
 					ui.SearchField(c, &state.query).
-						Label(state.T("搜索会话", "Search sessions")).
-						Placeholder(state.T("搜索会话", "Search sessions")).FillWidth()
+						Label(searchLabel).
+						Placeholder(searchLabel).FillWidth()
 				})
 
 			query := strings.TrimSpace(state.query)
-			includeArchived := showArchivedSetting(state)
 			sortMode, groupMode := sidebarViewSettings(state.settings)
-			allSessions := filterArchivedSessions(chat.Sessions(), includeArchived)
-			sessions := orderSessionList(filterSessions(allSessions, query), includeArchived, sortMode)
+			// Archived sessions never render in the sidebar (the settings
+			// surface's archive page owns them), not in the list and not as a
+			// search result.
+			allSessions := visibleSessions(chat.Sessions())
+			sessions := orderSessionList(filterSessions(allSessions, query), sortMode)
 			switch {
 			case len(sessions) == 0:
 				empty := state.T("还没有会话", "No sessions yet")
@@ -383,8 +386,9 @@ func buildSessionList(c *ui.Context, t *design.Tokens, chat contracts.ChatServic
 const maxMessageHits = 8
 
 // buildMessageSearch renders the durable full-text search results for the
-// current query. The optional store must implement contracts.MessageSearcher;
-// results are cached per query so repeated frames do not re-run the query.
+// current query, grouped by conversation: each session gets one small header
+// with the number of matching messages, and its hits below it (the old list
+// repeated the session title on every row).
 func buildMessageSearch(c *ui.Context, t *design.Tokens, chat contracts.ChatService,
 	nav contracts.Navigator, runtime contracts.UIRuntime, state *paneState, query string) {
 	store, ok := state.ctx.Get(contracts.KeyStore)
@@ -397,52 +401,126 @@ func buildMessageSearch(c *ui.Context, t *design.Tokens, chat contracts.ChatServ
 	}
 	if state.searchQuery != query {
 		state.searchQuery = query
-		state.searchHits, state.searchErr = searcher.SearchMessages(context.Background(), query, maxMessageHits)
+		hits, err := searcher.SearchMessages(context.Background(), query, maxMessageHits)
+		state.searchHits, state.searchErr = dedupeMessageHits(hits), err
 	}
+	// The search results are store-owned and carry no archive flag, so archived
+	// conversations are filtered here on every frame (archiving closes the
+	// session's rows immediately instead of waiting for a new query).
+	visibleHits := visibleMessageHits(state.searchHits, archivedSessionIDs(chat), maxMessageHits)
 
 	ui.Column(c).FillWidth().Gap(design.Space1).Padding(design.Space2, 0, 0, 0).
 		Children(func() {
-			ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(design.Space2).Children(func() {
-				design.Apply(ui.Text(c, state.T("消息搜索", "Message search")), t.SectionLabel())
-				ui.Spacer(c).Grow(1)
-				if state.searchErr == nil {
-					design.Apply(ui.Badge(c, strconv.Itoa(len(state.searchHits))), t.Badge())
-				}
-			})
+			design.Apply(ui.Text(c, state.T("消息搜索", "Message search")), t.SectionLabel()).
+				NoWrap().MaxLines(1)
 			if state.searchErr != nil {
-				buildSidebarError(c, t, state.T("搜索消息失败：", "Message search failed: ")+state.searchErr.Error())
+				uikit.ErrorLine(c, state.T("搜索消息失败：", "Message search failed: ")+state.searchErr.Error())
 				return
 			}
-			if len(state.searchHits) == 0 {
+			if len(visibleHits) == 0 {
 				design.Apply(ui.Text(c, state.T("没有匹配的消息", "No matching messages")), t.TextMuted(design.TypeXXS)).
 					Padding(design.Space1, design.Space2, 0, design.Space2)
 				return
 			}
-			for _, hit := range state.searchHits {
-				buildMessageHitRow(c, t, chat, nav, runtime, state, hit)
+			design.Apply(ui.Text(c, state.T(
+				strconv.Itoa(len(visibleHits))+" 条消息", strconv.Itoa(len(visibleHits))+" messages")),
+				t.Font(design.TypeXXXS)).TextColor(t.LabelTertiary)
+			for _, group := range groupMessageHits(visibleHits, state) {
+				ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(design.Space2).
+					Padding(design.Space2, design.Space2, 0, design.Space2).Children(func() {
+					design.Apply(ui.Text(c, group.title), t.Font(design.TypeXXS)).FontWeight(600).
+						TextColor(t.LabelSecondary).Grow(1).MaxLines(1).Ellipsis("…")
+					design.Apply(ui.Badge(c, strconv.Itoa(len(group.hits))), t.Badge())
+				})
+				for hitIndex, hit := range group.hits {
+					buildMessageHitRow(c, t, chat, nav, runtime, state, hit, false, hitIndex)
+				}
 			}
 		})
 }
 
-// buildMessageHitRow is one full-text hit: session title, role, time and the
-// matching snippet; clicking activates that session and opens it.
+// messageHitGroup is one conversation's matching message hits.
+type messageHitGroup struct {
+	title string
+	hits  []contracts.MessageSearchHit
+}
+
+// messageHitKey identifies one stored message hit; the durable search backend
+// can return the same message twice (an imported index can hold it twice), and
+// showing it twice would also duplicate the row's control identity.
+func messageHitKey(hit contracts.MessageSearchHit) string {
+	return hit.SessionID + "\x00" + hit.Role + "\x00" +
+		hit.CreatedAt.UTC().Format(time.RFC3339Nano) + "\x00" + hit.Snippet
+}
+
+// dedupeMessageHits removes duplicate stored messages from a search result,
+// preserving the order the search returned.
+func dedupeMessageHits(hits []contracts.MessageSearchHit) []contracts.MessageSearchHit {
+	seen := make(map[string]bool, len(hits))
+	out := hits[:0]
+	for _, hit := range hits {
+		key := messageHitKey(hit)
+		if seen[key] {
+			continue
+		}
+		seen[key] = true
+		out = append(out, hit)
+	}
+	return out
+}
+
+// groupMessageHits folds the flat hit list into one group per conversation,
+// preserving the order the search returned.
+func groupMessageHits(hits []contracts.MessageSearchHit, state *paneState) []messageHitGroup {
+	index := make(map[string]int, len(hits))
+	groups := make([]messageHitGroup, 0, len(hits))
+	for _, hit := range hits {
+		key := strings.TrimSpace(hit.SessionID)
+		if key == "" {
+			key = "\x00" + hit.SessionTitle
+		}
+		at, ok := index[key]
+		if !ok {
+			at = len(groups)
+			index[key] = at
+			groups = append(groups, messageHitGroup{
+				title: firstNonEmpty(hit.SessionTitle, state.T("未命名会话", "Untitled session")),
+			})
+		}
+		groups[at].hits = append(groups[at].hits, hit)
+	}
+	return groups
+}
+
+// buildMessageHitRow is one full-text hit: the session title (unless the group
+// header already names it), role, time and the matching snippet; clicking
+// activates that session and opens it.
 func buildMessageHitRow(c *ui.Context, t *design.Tokens, chat contracts.ChatService,
-	nav contracts.Navigator, runtime contracts.UIRuntime, state *paneState, hit contracts.MessageSearchHit) {
+	nav contracts.Navigator, runtime contracts.UIRuntime, state *paneState,
+	hit contracts.MessageSearchHit, showTitle bool, ordinal int) {
 	title := firstNonEmpty(hit.SessionTitle, state.T("未命名会话", "Untitled session"))
 	label := title + " " + firstNonEmpty(hit.Snippet, hit.Role)
+	// Two stored messages may carry the same role, time and snippet (a replayed
+	// conversation): the row ordinal keeps every key unique under the parent.
+	c.Key("search-hit/" + strconv.Itoa(ordinal) + "/" + hit.SessionID + "\x00" + hit.Role + "\x00" +
+		hit.CreatedAt.UTC().Format(time.RFC3339Nano) + "\x00" + hit.Snippet)
 	row := ui.ButtonBase(c).FillWidth().Padding(design.Space1, design.Space2).
 		Radius(design.RadiusSM).Label(label)
-	if row.Hovered() {
-		row.Background(t.BgHover)
-	}
+	// A hit in the active conversation keeps the selected tint, so the search
+	// results show which conversation is open.
+	row = rowTint(t, row, hit.SessionID == chat.ActiveSession())
 	row.Children(func() {
 		ui.Column(c).FillWidth().Gap(design.Space1).Children(func() {
 			ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(design.Space2).Children(func() {
-				design.Apply(ui.Text(c, title), t.Font(design.TypeXS)).
-					FontWeight(600).TextColor(t.LabelPrimary).Grow(1).MaxLines(1).Ellipsis("…")
+				if showTitle {
+					design.Apply(ui.Text(c, title), t.Font(design.TypeXS)).
+						FontWeight(600).TextColor(t.LabelPrimary).Grow(1).MaxLines(1).Ellipsis("…")
+				} else {
+					ui.Spacer(c).Grow(1)
+				}
 				design.Apply(ui.Text(c, messageRoleLabel(hit.Role, state)), t.Font(design.TypeXXXS)).
 					TextColor(t.LabelTertiary)
-				design.Apply(ui.Text(c, formatHitTime(hit.CreatedAt)), t.Font(design.TypeXXXS)).
+				design.Apply(ui.Text(c, formatHitTime(state.locale, hit.CreatedAt)), t.Font(design.TypeXXXS)).
 					TextColor(t.LabelTertiary)
 			})
 			if snippet := strings.TrimSpace(hit.Snippet); snippet != "" {
@@ -474,12 +552,10 @@ func messageRoleLabel(role string, state *paneState) string {
 	}
 }
 
-// formatHitTime renders a hit timestamp compactly (empty when unset).
-func formatHitTime(value time.Time) string {
-	if value.IsZero() {
-		return ""
-	}
-	return value.Local().Format("01-02 15:04")
+// formatHitTime renders a hit timestamp in the user's date format (empty when
+// unset), through the shared locale helper.
+func formatHitTime(locale contracts.LocaleService, value time.Time) string {
+	return uikit.FormatDateTime(locale, value)
 }
 
 // buildSidebarError is the sidebar's danger row.
@@ -495,42 +571,56 @@ func buildSidebarError(c *ui.Context, t *design.Tokens, text string) {
 // ungroupedWorkspaceKey is the fold key of the synthetic "未分组" group.
 const ungroupedWorkspaceKey = "\x00ungrouped"
 
-// buildWorkspaceSectionHeader is the section label above the workspace tree:
-// the localized "Workspace", the current-workspace badge and the native
-// "Add workspace" action.
+// buildWorkspaceSectionHeader is the two-line workspace heading above the
+// workspace tree: the localized "Workspace" label with the view menu and the
+// add-workspace icon on the first line, and the current workspace's name on a
+// second line. Splitting them keeps every label on one line in the 280 DIP
+// sidebar (the audit found "工作区" crushed into a vertical stack and the
+// English add action clipped at the sidebar edge); the current workspace is
+// plain muted text, not a second badge repeating the group row.
 func buildWorkspaceSectionHeader(c *ui.Context, t *design.Tokens, workspace contracts.WorkspaceService,
 	runtime contracts.UIRuntime, state *paneState) {
-	th := t.Theme()
-	ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(design.Space2).Children(func() {
-		design.Apply(ui.Text(c, state.T("工作区", "Workspace")), t.SectionLabel())
-		_, groupMode := sidebarViewSettings(state.settings)
-		if groupMode != sidebarGroupFlat {
-			if current, ok, err := workspace.Current(context.Background()); err == nil && ok {
-				design.Apply(ui.Badge(c, firstNonEmpty(current.Name, current.Root)), t.Badge())
+	ui.Column(c).FillWidth().Gap(design.Space1).Children(func() {
+		ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(design.Space2).Children(func() {
+			design.Apply(ui.Text(c, state.T("工作区", "Workspace")), t.SectionLabel()).
+				NoWrap().MaxLines(1)
+			ui.Spacer(c).Grow(1)
+			buildSidebarViewMenu(c, runtime, state)
+			addLabel := state.T("添加工作区", "Add workspace")
+			add := ui.ButtonBase(c).Size(24, 24).Center().Radius(design.RadiusSM).
+				Label(addLabel).Tooltip(state.T("打开文件夹并添加为工作区", "Open a folder and add it as a workspace"))
+			add = rowTint(t, add, false)
+			add.Children(func() {
+				ui.Icon(c, icons.Plus()).Size(design.Space4, design.Space4).TextColor(t.LabelSecondary)
+			})
+			if add.Clicked() {
+				openAddWorkspaceDialog(state, runtime)
 			}
-		}
-		ui.Spacer(c).Grow(1)
-		buildSidebarViewMenu(c, runtime, state)
-		add := ui.ButtonBase(c).Height(th.Space(7)).PaddingX(design.Space1).Gap(design.Space1).
-			Radius(design.RadiusSM).
-			Tooltip(state.T("打开文件夹并添加为工作区", "Open a folder and add it as a workspace"))
-		if add.Hovered() {
-			add = add.Background(t.BgHover)
-		}
-		add.Children(func() {
-			ui.Icon(c, icons.Plus()).Size(design.Space3, design.Space3).TextColor(t.LabelSecondary)
-			design.Apply(ui.Text(c, state.T("添加工作区", "Add workspace")), t.Font(design.TypeXXXS)).
-				TextColor(t.LabelSecondary)
 		})
-		if add.Clicked() {
-			openAddWorkspaceDialog(state, runtime)
+		_, groupMode := sidebarViewSettings(state.settings)
+		if groupMode == sidebarGroupFlat {
+			return
 		}
+		current, ok, err := workspace.Current(context.Background())
+		if err != nil || !ok {
+			return
+		}
+		name := firstNonEmpty(current.Name, current.Root)
+		if strings.TrimSpace(name) == "" {
+			return
+		}
+		ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(design.Space1).
+			Padding(0, design.Space1, 0, design.Space1).Children(func() {
+			ui.Icon(c, icons.FolderOpen()).Size(design.Space3, design.Space3).TextColor(t.LabelTertiary)
+			design.Apply(ui.Text(c, name), t.Font(design.TypeXXS)).
+				TextColor(t.LabelTertiary).Grow(1).MaxLines(1).NoWrap().Ellipsis("…")
+		})
 	})
 	// The status line lives below the header: two badges in the 280px header
 	// would squeeze the add action to zero width.
 	if state.addWorkspaceStatus != "" {
 		ui.Row(c).FillWidth().Children(func() {
-			design.Apply(ui.Badge(c, state.addWorkspaceStatus), t.Badge()).TextColor(t.Success)
+			design.Apply(ui.Badge(c, state.addWorkspaceStatus), t.Badge()).TextColor(t.SuccessText)
 		})
 	}
 }
@@ -609,11 +699,12 @@ func buildWorkspaceGroup(
 	activeID string,
 ) {
 	collapsed := state.wsCollapsed[key]
+	c.Key("workspace/" + key)
 	row := ui.ButtonBase(c).FillWidth().Height(32).PaddingX(design.Space2).
 		Radius(design.RadiusSM).Label(name)
-	if row.Hovered() || current {
-		row = row.Background(t.BgHover)
-	}
+	// The current workspace group is a selection, not a hover: BgSelected keeps
+	// it distinguishable from the row under the pointer.
+	row = rowTint(t, row, current)
 	row.Children(func() {
 		ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(design.Space2).Children(func() {
 			icon := icons.Folder()
@@ -649,23 +740,72 @@ func buildWorkspaceGroup(
 	}
 }
 
+// rowTint paints a self-drawn ButtonBase row's interaction states: selected and
+// pressed use the stronger selection tint, hover the lighter hover tint. mygo's
+// ButtonBase has no look of its own, so a row must paint all three explicitly
+// (native buttons carry their own state machine).
+func rowTint(t *design.Tokens, el ui.Element, selected bool) ui.Element {
+	switch {
+	case el.Pressed():
+		return el.Background(t.BgSelected)
+	case selected:
+		return el.Background(t.BgSelected)
+	case el.Hovered():
+		return el.Background(t.BgHover)
+	default:
+		return el
+	}
+}
+
+// ScreenNavSpec is the single navigation mapping for a registered screen id:
+// its glyph and its localized labels. The expanded sidebar rows and the host's
+// collapsed rail must both read it (the host rail draws the same destinations),
+// so a new screen adds its entry here once and the rail cannot drift onto a
+// different glyph or an untranslated label.
+func ScreenNavSpec(id string) (icon *ui.SVG, zh, en string) {
+	switch id {
+	case "home":
+		return icons.NewChat(), "首页", "Home"
+	case "session":
+		return icons.Message(), "对话", "Chat"
+	case "automation":
+		return icons.Clock(), "自动化", "Automation"
+	case "plugins":
+		return icons.Plugin(), "插件", "Plugins"
+	case "settings":
+		return icons.Sliders(), "设置", "Settings"
+	default:
+		return icons.Data(), "", ""
+	}
+}
+
+// ScreenNavIcon is ScreenNavSpec's glyph, for the sidebar rows.
+func ScreenNavIcon(id string) *ui.SVG {
+	icon, _, _ := ScreenNavSpec(id)
+	return icon
+}
+
+// ScreenNavLabel is ScreenNavSpec's localized label; an unregistered id falls
+// back to the id itself.
+func ScreenNavLabel(locale contracts.LocaleService, id string) string {
+	_, zh, en := ScreenNavSpec(id)
+	if zh == "" && en == "" {
+		return id
+	}
+	return uikit.T(locale, zh, en)
+}
+
+// screenNavIcon maps a registered screen id to the same glyph the host's
+// collapsed rail uses, through the package's single ScreenNavSpec.
+func screenNavIcon(id string) *ui.SVG { return ScreenNavIcon(id) }
+
+// screenNavLabel renders a registered screen id as a sidebar label, through the
+// package's single ScreenNavSpec.
+func (state *paneState) screenNavLabel(id string) string { return ScreenNavLabel(state.locale, id) }
+
 // screenNavLabel renders a registered screen id as a sidebar label: the known
 // product screens get their localized title, other ids fall back to the id (the
 // screen's registered title is not exposed by the ScreenLister read model).
-func (state *paneState) screenNavLabel(id string) string {
-	switch id {
-	case "home":
-		return state.T("首页", "Home")
-	case "session":
-		return state.T("会话", "Chats")
-	case "automation":
-		return state.T("自动化", "Automation")
-	case "plugins":
-		return state.T("插件", "Plugins")
-	default:
-		return id
-	}
-}
 
 // filterSessions keeps the sessions whose display title contains query, case
 // insensitively. An empty query keeps every session.
@@ -705,21 +845,10 @@ func pinnedFirst(sessions []contracts.ChatSessionInfo) []contracts.ChatSessionIn
 	return ordered
 }
 
-// showArchivedSetting reports the footer's "show archived" view option. A
-// missing settings store (or missing value) means archived sessions are hidden.
-func showArchivedSetting(state *paneState) bool {
-	if state.settings == nil {
-		return false
-	}
-	return strings.EqualFold(strings.TrimSpace(state.settings.Get(contracts.SettingSessionsShowArchived, "false")), "true")
-}
-
-// filterArchivedSessions drops archived sessions unless the view option shows
-// them. The remaining order is untouched (updated newest first).
-func filterArchivedSessions(sessions []contracts.ChatSessionInfo, includeArchived bool) []contracts.ChatSessionInfo {
-	if includeArchived {
-		return sessions
-	}
+// visibleSessions drops archived sessions: they never appear in the sidebar's
+// session list or the workspace tree (the settings surface's archive page owns
+// them). The remaining order is untouched (updated newest first).
+func visibleSessions(sessions []contracts.ChatSessionInfo) []contracts.ChatSessionInfo {
 	visible := make([]contracts.ChatSessionInfo, 0, len(sessions))
 	for _, session := range sessions {
 		if session.Archived {
@@ -730,29 +859,46 @@ func filterArchivedSessions(sessions []contracts.ChatSessionInfo, includeArchive
 	return visible
 }
 
-// orderSessionList applies the sidebar's priority: pinned first, then the
-// ordinary sessions, then archived ones (archived keep the updated order).
-// Archived sessions only appear when the view option is on.
-func orderSessionList(sessions []contracts.ChatSessionInfo, includeArchived bool, sortMode string) []contracts.ChatSessionInfo {
-	active := make([]contracts.ChatSessionInfo, 0, len(sessions))
-	archived := make([]contracts.ChatSessionInfo, 0)
-	for _, session := range sessions {
+// orderSessionList applies the sidebar's priority: pinned first, then ordinary
+// sessions (archived sessions were already filtered out).
+func orderSessionList(sessions []contracts.ChatSessionInfo, sortMode string) []contracts.ChatSessionInfo {
+	return pinnedFirst(sortSidebarSessions(sessions, sortMode))
+}
+
+// archivedSessionIDs is the set of archived conversations, for filtering the
+// full-text search results (which come from the store and carry no archive
+// flag of their own).
+func archivedSessionIDs(chat contracts.ChatService) map[string]bool {
+	archived := make(map[string]bool)
+	for _, session := range chat.Sessions() {
 		if session.Archived {
-			archived = append(archived, session)
+			archived[session.ID] = true
+		}
+	}
+	return archived
+}
+
+// visibleMessageHits drops search hits of archived conversations and applies
+// the row limit after that filter, so archived messages never take a slot.
+func visibleMessageHits(hits []contracts.MessageSearchHit, archived map[string]bool, limit int) []contracts.MessageSearchHit {
+	visible := make([]contracts.MessageSearchHit, 0, len(hits))
+	for _, hit := range hits {
+		if archived[hit.SessionID] {
 			continue
 		}
-		active = append(active, session)
+		visible = append(visible, hit)
+		if len(visible) == limit {
+			break
+		}
 	}
-	ordered := pinnedFirst(sortSidebarSessions(active, sortMode))
-	if includeArchived {
-		ordered = append(ordered, sortSidebarSessions(archived, sortMode)...)
-	}
-	return ordered
+	return visible
 }
 
 // buildSessionRow is one brand session row: a native ButtonBase at the brand row
 // metrics (36 DIP, 8 DIP radius, hover/selected tint) with the accessible label
-// and the native click behavior.
+// and the native click behavior. The row's overflow menu is one quiet More icon
+// that only shows while the row is hovered, focused or selected, so the title
+// keeps the width the old "⋯ ⌄" pair used to take.
 func buildSessionRow(c *ui.Context, t *design.Tokens, chat contracts.ChatService,
 	nav contracts.Navigator, runtime contracts.UIRuntime, state *paneState,
 	session contracts.ChatSessionInfo, active bool, indent float32) {
@@ -761,13 +907,67 @@ func buildSessionRow(c *ui.Context, t *design.Tokens, chat contracts.ChatService
 	forker, _ := chat.(contracts.SessionForker)
 	pinner, _ := chat.(contracts.SessionPinner)
 	archiver, _ := chat.(contracts.SessionArchiver)
-	ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(design.Space1).
-		Padding(0, 0, 0, indent).Children(func() {
+	menu := func(m *ui.Menu) {
+		if renamer != nil && m.Item(state.T("重命名", "Rename")).Chosen() {
+			state.renameOpen = true
+			state.renameErr = ""
+			state.renameTarget = session.ID
+			state.renameDraft = sessionTitleByID(chat, session.ID, state)
+		}
+		if forker != nil && m.Item(state.T("创建副本", "Duplicate")).Chosen() {
+			if newID, err := forker.ForkSession(session.ID); err == nil && strings.TrimSpace(newID) != "" {
+				_ = chat.SetActiveSession(newID)
+				runtime.Post(func() { _ = nav.Push("session") })
+				runtime.Invalidate()
+			}
+		}
+		if pinner != nil {
+			pinLabel := state.T("置顶会话", "Pin session")
+			if session.Pinned {
+				pinLabel = state.T("取消置顶", "Unpin session")
+			}
+			if m.Item(pinLabel).Chosen() {
+				if err := pinner.SetSessionPinned(session.ID, !session.Pinned); err == nil {
+					runtime.Invalidate()
+				}
+			}
+		}
+		if archiver != nil && !session.Archived {
+			// Archived sessions never render here; the settings surface's
+			// archive page is where they can be restored. Archiving reports
+			// success through a toast (with Undo when the host supports it).
+			if m.Item(state.T("归档会话", "Archive session")).Chosen() {
+				if err := archiver.SetSessionArchived(session.ID, true); err == nil {
+					raiseSessionArchivedToast(state, chat, runtime, session.ID, label)
+					runtime.Invalidate()
+				}
+			}
+		}
+		if m.Item(state.T("删除", "Delete")).Chosen() {
+			state.deleteOpen = true
+			state.deleteTarget = session.ID
+			state.deleteTitle = state.sessionTitle(session)
+		}
+		if !active {
+			m.Separator()
+			if m.Item(state.T("设为当前", "Set as current")).Chosen() {
+				_ = chat.SetActiveSession(session.ID)
+				runtime.Invalidate()
+			}
+		}
+	}
+	c.Key("session/" + session.ID)
+	container := ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(design.Space1).
+		Padding(0, 0, 0, indent)
+	// The menu control is built always (so assistive technology describes it)
+	// but stays invisible and out of the pointer's way until the row is
+	// hovered, focused or selected, as mygo's IgnoreInput pattern for a row
+	// action asks.
+	revealed := active || container.Hovered() || container.FocusWithin()
+	container.Children(func() {
 		row := ui.ButtonBase(c).Grow(1).Height(36).PaddingX(design.Space3).
 			Radius(design.RadiusSM).Label(label)
-		if active || row.Hovered() {
-			row = row.Background(t.BgHover)
-		}
+		row = rowTint(t, row, active)
 		row.Children(func() {
 			ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(design.Space2).Children(func() {
 				icon := icons.Message()
@@ -781,9 +981,6 @@ func buildSessionRow(c *ui.Context, t *design.Tokens, chat contracts.ChatService
 					Grow(1).MaxLines(1).Ellipsis("…")
 				if session.Pinned {
 					design.Apply(ui.Badge(c, state.T("置顶", "Pinned")), t.Badge())
-				}
-				if session.Archived {
-					design.Apply(ui.Badge(c, state.T("已归档", "Archived")), t.Badge())
 				}
 				// The active session is already carried by the accent icon and
 				// the selected-row tint; a 当前 badge was redundant and stole
@@ -801,63 +998,30 @@ func buildSessionRow(c *ui.Context, t *design.Tokens, chat contracts.ChatService
 			runtime.Post(func() { _ = nav.Push("session") })
 			runtime.Invalidate()
 		})
-		// The old shell composed inline row actions: a native popover menu on
-		// the row itself (rename/delete/activate) instead of footer buttons.
-		ui.PopoverMenuButton(c, "⋯", func(m *ui.Menu) {
-			if renamer != nil && m.Item(state.T("重命名", "Rename")).Chosen() {
-				state.renameOpen = true
-				state.renameErr = ""
-				state.renameTarget = session.ID
-				state.renameDraft = sessionTitleByID(chat, session.ID, state)
-			}
-			if forker != nil && m.Item(state.T("创建副本", "Duplicate")).Chosen() {
-				if newID, err := forker.ForkSession(session.ID); err == nil && strings.TrimSpace(newID) != "" {
-					_ = chat.SetActiveSession(newID)
-					runtime.Post(func() { _ = nav.Push("session") })
-					runtime.Invalidate()
-				}
-			}
-			if pinner != nil {
-				pinLabel := state.T("置顶会话", "Pin session")
-				if session.Pinned {
-					pinLabel = state.T("取消置顶", "Unpin session")
-				}
-				if m.Item(pinLabel).Chosen() {
-					if err := pinner.SetSessionPinned(session.ID, !session.Pinned); err == nil {
-						runtime.Invalidate()
-					}
-				}
-			}
-			if archiver != nil {
-				archiveLabel := state.T("归档会话", "Archive session")
-				if session.Archived {
-					archiveLabel = state.T("取消归档", "Unarchive session")
-				}
-				if m.Item(archiveLabel).Chosen() {
-					if err := archiver.SetSessionArchived(session.ID, !session.Archived); err == nil {
-						runtime.Invalidate()
-					}
-				}
-			}
-			if m.Item(state.T("删除", "Delete")).Chosen() {
-				state.deleteOpen = true
-				state.deleteTarget = session.ID
-				state.deleteTitle = state.sessionTitle(session)
-			}
-			if !active {
-				m.Separator()
-				if m.Item(state.T("设为当前", "Set as current")).Chosen() {
-					_ = chat.SetActiveSession(session.ID)
-					runtime.Invalidate()
-				}
-			}
+		// The same menu on the row itself, as desktop session lists have: a
+		// right click opens it without hunting for the hover control.
+		row.PopoverMenu(menu)
+		menuLabel := state.T("会话操作：", "Session actions: ") + label
+		c.Key("session/" + session.ID + "/menu")
+		more := ui.ButtonBase(c).Size(24, 24).Center().Radius(design.RadiusSM).
+			Label(menuLabel).Tooltip(menuLabel)
+		more = rowTint(t, more, false)
+		if !revealed {
+			more = more.Opacity(0).IgnoreInput(true)
+		}
+		more.Children(func() {
+			ui.Icon(c, icons.More()).Size(16, 16).TextColor(t.LabelSecondary)
 		})
+		more.PopoverMenuButton(menu)
 	})
 }
 
-// buildFooter is the quiet sidebar footer from the old shell: the settings
-// entry, plus the window-level delete confirmation (session rename/delete live
-// on the row's native popover menu).
+// buildFooter is the docked sidebar footer from the old shell: the settings
+// entry plus the archived-sessions view option, both as navigation rows (36
+// DIP, icon and label, the whole row clickable) so the footer reads as part of
+// the sidebar instead of two small outlined buttons. It also owns the
+// window-level delete confirmation; session rename/delete live on the row's
+// native popover menu.
 func buildFooter(c *ui.Context, t *design.Tokens, chat contracts.ChatService,
 	nav contracts.Navigator, runtime contracts.UIRuntime,
 	state *paneState, label string) {
@@ -886,33 +1050,19 @@ func buildFooter(c *ui.Context, t *design.Tokens, chat contracts.ChatService,
 	ui.Column(c).FillWidth().Gap(design.Space1).
 		Padding(design.Space2, design.Space3, design.Space2, design.Space3).
 		Children(func() {
-			ui.Row(c).FillWidth().Children(func() {
-				settings := ui.Button(c, label)
-				settings.Children(func() {
+			c.Key("sidebar/footer/settings")
+			settingsRow := ui.ButtonBase(c).FillWidth().Height(36).PaddingX(design.Space3).
+				Radius(design.RadiusSM).Label(label)
+			settingsRow = rowTint(t, settingsRow, false)
+			settingsRow.Children(func() {
+				ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(design.Space2).Children(func() {
 					ui.Icon(c, icons.Sliders()).Size(16, 16).TextColor(t.LabelSecondary)
+					design.Apply(ui.Text(c, label), t.Text(design.TypeS)).TextColor(t.LabelSecondary)
 				})
-				if settings.Clicked() {
-					nav.ToggleSettings()
-				}
 			})
-			// The quiet archived-sessions view toggle: one native text button
-			// under the settings entry, writing the product view option.
-			if state.settings != nil {
-				showArchived := showArchivedSetting(state)
-				toggleLabel := state.T("显示已归档", "Show archived")
-				if showArchived {
-					toggleLabel = state.T("隐藏已归档", "Hide archived")
-				}
-				ui.Row(c).FillWidth().Children(func() {
-					toggle := ui.Button(c, toggleLabel).
-						Tooltip(state.T("切换侧栏是否显示已归档会话",
-							"Toggle whether archived sessions appear in the sidebar"))
-					if toggle.Clicked() {
-						_ = state.settings.Set(contracts.SettingSessionsShowArchived,
-							strconv.FormatBool(!showArchived))
-						runtime.Invalidate()
-					}
-				})
+			if settingsRow.Clicked() {
+				nav.ToggleSettings()
+				runtime.Invalidate()
 			}
 		})
 }

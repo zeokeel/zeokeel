@@ -72,8 +72,12 @@ type Tokens struct {
 	BgBase    ui.Color // page background
 	BgSidebar ui.Color // sidebar background
 	BgRaised  ui.Color // raised surface: cards, composer, panels
-	BgStrong  ui.Color // strong raised surface: primary buttons
-	BgHover   ui.Color // hover/selected row tint
+	BgStrong  ui.Color // strong raised surface: filled neutral controls
+	BgHover   ui.Color // hovered row tint
+	// BgSelected is the stronger tint of the current row, menu item or tab;
+	// keeping it apart from BgHover is what makes hover and selection
+	// distinguishable.
+	BgSelected ui.Color
 
 	LabelPrimary   ui.Color
 	LabelSecondary ui.Color
@@ -92,7 +96,10 @@ type Tokens struct {
 	OnPrimary ui.Color
 
 	Success ui.Color
-	Danger  ui.Color
+	// SuccessText is the WCAG-AA foreground for success message text; Success
+	// stays the fill/border/icon color.
+	SuccessText ui.Color
+	Danger      ui.Color
 	// DangerText is the WCAG-AA foreground for danger message text on a
 	// danger tint (Danger stays the fill/border/icon color).
 	DangerText ui.Color
@@ -124,6 +131,7 @@ func fromPalette(p brand.Palette, dark bool) *Tokens {
 		BgRaised:       p.Surface,
 		BgStrong:       p.SurfaceStrong,
 		BgHover:        p.Hover,
+		BgSelected:     p.RowSelected,
 		LabelPrimary:   p.Text,
 		LabelSecondary: p.TextSecondary,
 		LabelTertiary:  p.TextTertiary,
@@ -135,6 +143,7 @@ func fromPalette(p brand.Palette, dark bool) *Tokens {
 		AccentText:     p.AccentText,
 		OnPrimary:      p.OnPrimary,
 		Success:        p.Success,
+		SuccessText:    p.SuccessText,
 		Danger:         p.Danger,
 		DangerText:     p.DangerText,
 		Warning:        p.Warning,

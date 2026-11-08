@@ -131,53 +131,71 @@ func TestPermissionCommandCyclesMode(t *testing.T) {
 	h := newPermissionHarness(t, permissionChat(), settings)
 	tester := h.tester()
 
-	h.assertTexts(tester, "询问")
-	h.click(tester, "/")
-	h.click(tester, "权限模式")
+	// Ask is the default: the composer shows the quiet session-menu label and
+	// the state lives in the menu, not on a resident chip.
+	h.assertTexts(tester, "会话设置")
+	h.assertNoTexts(tester, "询问")
+
+	h.typeSlash(tester)
+	h.clickExact(tester, "权限模式")
 	if got := settings.get(contracts.SettingAgentPermission); got != contracts.PermissionWorkspace {
 		t.Fatalf("after first cycle = %q, want workspace", got)
 	}
-	h.assertTexts(tester, "工作区")
+	h.assertTexts(tester, "工作区权限")
 
-	h.click(tester, "/")
-	h.click(tester, "权限模式")
+	h.typeSlash(tester)
+	h.clickExact(tester, "权限模式")
 	if got := settings.get(contracts.SettingAgentPermission); got != contracts.PermissionFull {
 		t.Fatalf("after second cycle = %q, want full", got)
 	}
 	h.assertTexts(tester, "全部允许")
 
-	h.click(tester, "/")
-	h.click(tester, "权限模式")
+	h.typeSlash(tester)
+	h.clickExact(tester, "权限模式")
 	if got := settings.get(contracts.SettingAgentPermission); got != contracts.PermissionAsk {
 		t.Fatalf("after third cycle = %q, want ask", got)
 	}
-	h.assertTexts(tester, "询问")
+	h.assertTexts(tester, "会话设置")
+	h.assertNoTexts(tester, "全部允许", "工作区权限")
 }
 
 func TestPermissionBadgeReflectsSettings(t *testing.T) {
 	settings := newPermissionSettings(nil)
 	h := newPermissionHarness(t, permissionChat(), settings)
 	tester := h.tester()
-	h.assertTexts(tester, "询问")
+	// The ask default keeps the quiet label; no resident mode chip.
+	h.assertTexts(tester, "会话设置")
+	h.assertNoTexts(tester, "询问", "工作区", "全部允许")
 
 	settings.set(contracts.SettingAgentPermission, contracts.PermissionWorkspace)
 	tester.Frame()
-	h.assertTexts(tester, "工作区")
+	h.assertTexts(tester, "工作区权限")
 
-	settings.set(contracts.SettingAgentPermission, contracts.PermissionFull)
-	tester.Frame()
+	// The one session menu lists every permission mode; the current one is a
+	// radio row and choosing another writes it through.
+	h.openSessionMenu(tester)
+	h.assertTexts(tester, "权限模式", "询问", "工作区", "全部允许", "从不允许")
+	h.clickExact(tester, "全部允许")
+	if got := settings.get(contracts.SettingAgentPermission); got != contracts.PermissionFull {
+		t.Fatalf("menu choice stored %q, want full", got)
+	}
 	h.assertTexts(tester, "全部允许")
 
-	// Unknown values degrade to the default ask badge.
+	// Unknown values degrade to the default (ask) label.
 	settings.set(contracts.SettingAgentPermission, "unexpected")
 	tester.Frame()
-	h.assertTexts(tester, "询问")
+	h.assertTexts(tester, "会话设置")
 }
 
 func TestPermissionBadgeHiddenWithoutSettings(t *testing.T) {
 	h := newPermissionHarness(t, permissionChat(), nil)
 	tester := h.tester()
-	h.assertNoTexts(tester, "询问", "工作区", "全部允许")
+	h.assertNoTexts(tester, "询问", "工作区权限", "全部允许", "禁止工具")
+	// Without a settings store the session menu exists for the built-in
+	// presets, but it offers no permission modes at all.
+	h.openSessionMenu(tester)
+	h.assertTexts(tester, "插入预设")
+	h.assertNoTexts(tester, "权限模式", "对话模式")
 }
 
 func TestPermissionBadgeEnglishCopy(t *testing.T) {
@@ -190,11 +208,16 @@ func TestPermissionBadgeEnglishCopy(t *testing.T) {
 	tester.Frame()
 	h.assertTexts(tester, "Workspace")
 
+	// The ask default is the quiet label; it does not expose "Ask" on the row.
 	settings.set(contracts.SettingAgentPermission, contracts.PermissionAsk)
 	tester.Frame()
-	h.assertTexts(tester, "Ask")
+	h.assertTexts(tester, "Settings")
 
 	settings.set(contracts.SettingAgentPermission, contracts.PermissionFull)
 	tester.Frame()
 	h.assertTexts(tester, "Allow all")
+
+	settings.set(contracts.SettingAgentPermission, contracts.PermissionNever)
+	tester.Frame()
+	h.assertTexts(tester, "Tools off")
 }

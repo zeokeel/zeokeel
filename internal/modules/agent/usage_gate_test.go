@@ -336,3 +336,161 @@ func TestGateNilApprovalsNormalModeAllows(t *testing.T) {
 		t.Fatalf("nil approvals plan bash = %q/%v, want deny", decision, err)
 	}
 }
+
+// --- interaction-tool approval exemption (ZK-08) ----------------------------
+
+// interactionToolNames are the host tools that interact with the user directly;
+// their own overlay (question, artifact, goal, plan review) is the interaction,
+// so the gate must not front-load a generic tool approval prompt.
+var interactionToolNames = []string{"ask_user", "present", "plan_review", "exit_plan_mode", "goal"}
+
+// recordingApprovals is a contracts.Approvals that records every request and
+// answers with a fixed decision; fakeApprovals auto-allows but cannot record.
+type recordingApprovals struct {
+	mu       sync.Mutex
+	requests []contracts.ApprovalRequest
+	decision contracts.ApprovalDecision
+	mode     string
+}
+
+func (a *recordingApprovals) Mode() string {
+	if a.mode == "" {
+		return "ask"
+	}
+	return a.mode
+}
+
+func (a *recordingApprovals) Request(_ context.Context, request contracts.ApprovalRequest) (contracts.ApprovalDecision, error) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.requests = append(a.requests, request)
+	if a.decision == "" {
+		return contracts.ApprovalAllow, nil
+	}
+	return a.decision, nil
+}
+
+func (a *recordingApprovals) Pending() []contracts.ApprovalRequest { return nil }
+
+func (a *recordingApprovals) Resolve(string, contracts.ApprovalDecision) error { return nil }
+
+func (a *recordingApprovals) Subscribe(func()) (func(), error) { return func() {}, nil }
+
+// askedTools returns the tool names of the recorded requests.
+func (a *recordingApprovals) askedTools() []string {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	names := make([]string, 0, len(a.requests))
+	for _, request := range a.requests {
+		names = append(names, request.Tool)
+	}
+	return names
+}
+
+func TestGateInteractionToolsSkipApprovalPrompt(t *testing.T) {
+	approvals := &recordingApprovals{}
+	settings := newFakeSettings(nil)
+	svc := newService(Config{}, rigtools.NewRegistry(), contracts.SettingsService(settings),
+		&fakeLogger{}, newFakeStore(), approvals)
+	gate := svc.gate()
+
+	for _, name := range interactionToolNames {
+		decision, err := gate.Approve(context.Background(), &gateTestTool{name: name}, rig.ToolCall{Name: name})
+		if err != nil {
+			t.Fatalf("Approve(%q): %v", name, err)
+		}
+		if decision != rig.DecisionAllow {
+			t.Fatalf("%q decision = %q, want allow without an approval prompt", name, decision)
+		}
+	}
+	if asked := approvals.askedTools(); len(asked) != 0 {
+		t.Fatalf("interaction tools requested approval: %v, want none", asked)
+	}
+
+	// A normal tool still goes through the approvals service exactly once.
+	decision, err := gate.Approve(context.Background(), &gateTestTool{name: "bash"}, rig.ToolCall{Name: "bash"})
+	if err != nil || decision != rig.DecisionAllow {
+		t.Fatalf("bash decision = %q/%v, want allow through approvals", decision, err)
+	}
+	if asked := approvals.askedTools(); len(asked) != 1 || asked[0] != "bash" {
+		t.Fatalf("approval requests = %v, want [bash]", asked)
+	}
+}
+
+func TestGateInteractionToolsRespectPermissionOverrides(t *testing.T) {
+	approvals := &recordingApprovals{}
+	svc := newService(Config{}, rigtools.NewRegistry(), contracts.SettingsService(newFakeSettings(nil)),
+		&fakeLogger{}, newFakeStore(), approvals)
+	sessionID, err := svc.NewSession("")
+	if err != nil {
+		t.Fatalf("NewSession: %v", err)
+	}
+	if err := svc.SetSessionPermission(sessionID, contracts.PermissionNever); err != nil {
+		t.Fatalf("SetSessionPermission(never): %v", err)
+	}
+	gate := svc.gate(sessionID)
+	for _, name := range interactionToolNames {
+		decision, err := gate.Approve(context.Background(), &gateTestTool{name: name}, rig.ToolCall{Name: name})
+		if err != nil {
+			t.Fatalf("Approve(%q): %v", name, err)
+		}
+		if decision != rig.DecisionDeny {
+			t.Fatalf("%q decision = %q, want deny from the never override", name, decision)
+		}
+	}
+	if err := svc.SetSessionPermission(sessionID, contracts.PermissionFull); err != nil {
+		t.Fatalf("SetSessionPermission(full): %v", err)
+	}
+	if decision, err := gate.Approve(context.Background(), &gateTestTool{name: "ask_user"}, rig.ToolCall{Name: "ask_user"}); err != nil ||
+		decision != rig.DecisionAllow {
+		t.Fatalf("ask_user with full override = %q/%v, want allow", decision, err)
+	}
+	if asked := approvals.askedTools(); len(asked) != 0 {
+		t.Fatalf("permission overrides requested approval: %v, want none", asked)
+	}
+}
+
+// TestGateInteractionToolsGlobalNeverDenies covers the deny-all backend policy:
+// skipping the generic prompt for interaction tools must not bypass an explicit
+// global "never" mode.
+func TestGateInteractionToolsGlobalNeverDenies(t *testing.T) {
+	approvals := &recordingApprovals{mode: contracts.PermissionNever}
+	svc := newService(Config{}, rigtools.NewRegistry(), contracts.SettingsService(newFakeSettings(nil)),
+		&fakeLogger{}, newFakeStore(), approvals)
+	gate := svc.gate()
+	for _, name := range interactionToolNames {
+		decision, err := gate.Approve(context.Background(), &gateTestTool{name: name}, rig.ToolCall{Name: name})
+		if err != nil {
+			t.Fatalf("Approve(%q): %v", name, err)
+		}
+		if decision != rig.DecisionDeny {
+			t.Fatalf("%q decision = %q, want deny from global never mode", name, decision)
+		}
+	}
+	if asked := approvals.askedTools(); len(asked) != 0 {
+		t.Fatalf("global never mode requested approval: %v, want none", asked)
+	}
+}
+
+func TestGatePlanModeInteractionToolsSkipApprovalPrompt(t *testing.T) {
+	approvals := &recordingApprovals{}
+	settings := newFakeSettings(map[string]string{contracts.SettingAgentMode: contracts.AgentModePlan})
+	svc := newService(Config{}, rigtools.NewRegistry(), contracts.SettingsService(settings),
+		&fakeLogger{}, newFakeStore(), approvals)
+	gate := svc.gate()
+
+	for _, name := range interactionToolNames {
+		decision, err := gate.Approve(context.Background(), &gateTestTool{name: name}, rig.ToolCall{Name: name})
+		if err != nil || decision != rig.DecisionAllow {
+			t.Fatalf("plan mode %q = %q/%v, want allow", name, decision, err)
+		}
+	}
+	// Plan mode still denies the tools it does not whitelist, without asking.
+	decision, err := gate.Approve(context.Background(), &gateTestTool{name: "bash"}, rig.ToolCall{Name: "bash"})
+	if err != nil || decision != rig.DecisionDeny {
+		t.Fatalf("plan mode bash = %q/%v, want deny", decision, err)
+	}
+	if asked := approvals.askedTools(); len(asked) != 0 {
+		t.Fatalf("plan mode requested approval: %v, want none", asked)
+	}
+}

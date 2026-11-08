@@ -5,13 +5,17 @@ package session_test
 import (
 	"context"
 	"errors"
+	"strings"
 	"sync"
 	"testing"
 	"time"
 
 	"github.com/egoist/mygo/ui"
+	cordis "github.com/zeokeel/zeokeel-kernel"
 
 	"github.com/zeokeel/zeokeel/internal/contracts"
+	"github.com/zeokeel/zeokeel/internal/ui/session"
+	"github.com/zeokeel/zeokeel/internal/uiroot"
 )
 
 // compactChat adds contracts.SessionCompactor to the session fake.
@@ -123,16 +127,41 @@ func TestCompactCommandRegisteredAndEnabled(t *testing.T) {
 func TestCompactCommandSuccessBadge(t *testing.T) {
 	chat := compactSessionChat()
 	chat.result = contracts.CompactResult{Replaced: 8, Saved: 3, BeforeTokens: 1000, AfterTokens: 420}
-	h := newModelHarness(t, chat, nil)
+	notifier := &fakeSessionNotifier{}
+	h := newCompactNotifierHarness(t, chat, notifier)
 	tester := h.tester()
 	command := findCompactCommand(t, h)
 	if err := command.Run(); err != nil {
 		t.Fatalf("compact Run: %v", err)
 	}
-	waitCompactNotice(t, h, tester)
-	h.assertTexts(tester, "已压缩：8 条 → 3 条")
+	if !waitCompactToast(t, h, tester, notifier, "已压缩：8 条 → 3 条") {
+		t.Fatalf("compact success toast missing; texts = %v", tester.Texts())
+	}
+	// The completed compaction never becomes a resident badge.
+	h.assertNoTexts(tester, "已压缩")
 	if got := chat.callsCount(); got != 1 {
 		t.Fatalf("CompactNow calls = %d", got)
+	}
+}
+
+// TestCompactCommandShowsLoading covers the in-flight compaction state: the
+// composer shows 压缩中… while the backend works, and the result goes to a toast.
+func TestCompactCommandShowsLoading(t *testing.T) {
+	chat := compactSessionChat()
+	chat.release = make(chan struct{})
+	notifier := &fakeSessionNotifier{}
+	h := newCompactNotifierHarness(t, chat, notifier)
+	tester := h.tester()
+	if err := findCompactCommand(t, h).Run(); err != nil {
+		t.Fatalf("compact Run: %v", err)
+	}
+	tester.Frame()
+	if !tester.HasText("压缩中…") {
+		t.Fatalf("in-flight compaction has no loading state; texts = %v", tester.Texts())
+	}
+	close(chat.release)
+	if !waitCompactToast(t, h, tester, notifier, "已压缩") {
+		t.Fatalf("compaction result toast missing; texts = %v", tester.Texts())
 	}
 }
 
@@ -186,17 +215,47 @@ func TestCompactCommandPreventsDuplicates(t *testing.T) {
 func TestCompactCommandEnglish(t *testing.T) {
 	chat := compactSessionChat()
 	chat.result = contracts.CompactResult{Replaced: 4, Saved: 2}
-	h := newModelHarness(t, chat, nil)
+	notifier := &fakeSessionNotifier{}
+	h := newCompactNotifierHarness(t, chat, notifier)
 	h.ui.Locale().SetLanguage("en")
 	tester := h.tester()
 	if err := findCompactCommand(t, h).Run(); err != nil {
 		t.Fatalf("compact Run: %v", err)
 	}
-	for attempt := 0; attempt < 100; attempt++ {
+	if !waitCompactToast(t, h, tester, notifier, "Compacted: 4 → 2 messages") {
+		t.Fatalf("English compaction toast missing; texts = %v", tester.Texts())
+	}
+}
+
+// newCompactNotifierHarness is newModelHarness plus the optional host notifier:
+// compaction results are transient toasts whose handler records them.
+func newCompactNotifierHarness(t *testing.T, chat contracts.ChatService, notifier contracts.Notifier) *harness {
+	t.Helper()
+	uiRoot := uiroot.New(uiroot.Config{AppName: "ZeoKeel"})
+	ctx := cordis.Root()
+	t.Cleanup(func() { _ = ctx.DisposeAll() })
+	provide(t, ctx, contracts.KeyUIRuntime, uiRoot.Runtime())
+	provide(t, ctx, contracts.KeyNavigator, uiRoot.Navigator())
+	provide(t, ctx, contracts.KeyTheme, uiRoot.Theme())
+	provide(t, ctx, contracts.KeyLocale, uiRoot.Locale())
+	provide(t, ctx, contracts.KeyScreenLister, uiRoot.ScreenLister())
+	provide[contracts.ChatService](t, ctx, contracts.KeyChat, chat)
+	provide[contracts.Notifier](t, ctx, contracts.KeyNotifier, notifier)
+	activate(t, ctx, session.Module(), session.Config{})
+	return &harness{t: t, ctx: ctx, ui: uiRoot}
+}
+
+// waitCompactToast advances frames until the notifier recorded a toast
+// containing fragment, and reports whether it appeared.
+func waitCompactToast(t *testing.T, h *harness, tester *ui.Tester, notifier *fakeSessionNotifier, fragment string) bool {
+	t.Helper()
+	for attempt := 0; attempt < 200; attempt++ {
 		tester.Frame()
-		if tester.HasText("Compacted") {
-			break
+		for _, toast := range notifier.toasts() {
+			if strings.Contains(toast.text, fragment) {
+				return true
+			}
 		}
 	}
-	h.assertTexts(tester, "Compacted: 4 → 2 messages")
+	return false
 }

@@ -7,6 +7,8 @@ package settings_test
 import (
 	"testing"
 
+	"github.com/egoist/mygo/ui"
+
 	"github.com/zeokeel/zeokeel/internal/contracts"
 	"github.com/zeokeel/zeokeel/internal/ui/settings"
 )
@@ -19,7 +21,7 @@ func TestAppearanceGlobalHotkeyDefaultsEmpty(t *testing.T) {
 	h.click(tester, "外观")
 
 	h.assertTexts(tester, "全局热键", "全局热键 输入",
-		"留空关闭", "需要桌面支持", "修改后重启应用生效")
+		"留空关闭", "按「录入」直接按组合键", "修改后重启应用生效")
 }
 
 func TestAppearanceGlobalHotkeySavesTrimmedValue(t *testing.T) {
@@ -38,7 +40,7 @@ func TestAppearanceGlobalHotkeySavesTrimmedValue(t *testing.T) {
 	if got := store.get(contracts.SettingGlobalHotkey); got != "Ctrl+Shift+K" {
 		t.Fatalf("%s = %q, want the trimmed accelerator", contracts.SettingGlobalHotkey, got)
 	}
-	h.assertTexts(tester, "已保存", "Ctrl+Shift+K")
+	h.assertTexts(tester, "已保存", "Ctrl + Shift + K")
 }
 
 func TestAppearanceGlobalHotkeyRejectsInvalidValue(t *testing.T) {
@@ -68,7 +70,7 @@ func TestAppearanceGlobalHotkeyShowsCurrentValue(t *testing.T) {
 	h.click(tester, "模型")
 	h.click(tester, "外观")
 
-	h.assertTexts(tester, "全局热键", "Ctrl+Alt+K", "当前：Ctrl+Alt+K")
+	h.assertTexts(tester, "全局热键", "Ctrl + Alt + K", "当前：Ctrl + Alt + K")
 }
 
 func TestAppearanceGlobalHotkeyEnglish(t *testing.T) {
@@ -79,7 +81,7 @@ func TestAppearanceGlobalHotkeyEnglish(t *testing.T) {
 	h.click(tester, "Appearance")
 
 	h.assertTexts(tester, "Global hotkey", "Global hotkey input",
-		"Leave empty to disable", "requires desktop support", "takes effect after restart")
+		"Leave empty to disable", "press Record and press the keys", "takes effect after restart")
 	h.focusInput(tester, "Global hotkey input")
 	tester.Type("CmdOrCtrl+Shift+Space")
 	tester.Frame()
@@ -88,4 +90,62 @@ func TestAppearanceGlobalHotkeyEnglish(t *testing.T) {
 		t.Fatalf("%s = %q", contracts.SettingGlobalHotkey, got)
 	}
 	h.assertTexts(tester, "Saved")
+}
+
+// TestHotkeyRecordCapture covers H6's key recorder: clicking Record and pressing
+// a combination fills the friendly accelerator form, and Esc cancels recording.
+func TestHotkeyRecordCapture(t *testing.T) {
+	store := newFakeSettings(nil)
+	h := newHarness(t, &fakeChat{}, store, settings.Config{})
+	tester := h.tester()
+	tester.Frame()
+	h.click(tester, "外观")
+
+	h.click(tester, "录入")
+	h.assertTexts(tester, "按下组合键，Esc 取消")
+	tester.Key(ui.Cmd|ui.Shift, ui.KeyK)
+	tester.Frame()
+	h.assertNoTexts(tester, "按下组合键，Esc 取消")
+	h.assertTexts(tester, "Cmd/Ctrl + Shift + K", "未应用")
+	h.click(tester, "应用")
+	if got := store.get(contracts.SettingGlobalHotkey); got != "CmdOrCtrl+Shift+K" {
+		t.Fatalf("recorded hotkey = %q, want CmdOrCtrl+Shift+K", got)
+	}
+
+	// Esc leaves the recorder without changing the draft.
+	h.focusInput(tester, "全局热键 输入")
+	tester.Key(ui.Cmd, ui.KeyA)
+	tester.Key(0, ui.KeyBackspace)
+	tester.Frame()
+	h.click(tester, "录入")
+	tester.Key(0, ui.KeyEscape)
+	tester.Frame()
+	h.assertNoTexts(tester, "按下组合键，Esc 取消")
+}
+
+// TestHotkeyPresetChips covers the one-click accelerator presets.
+func TestHotkeyPresetChips(t *testing.T) {
+	store := newFakeSettings(nil)
+	h := newHarness(t, &fakeChat{}, store, settings.Config{})
+	tester := h.tester()
+	tester.Frame()
+	h.click(tester, "外观")
+	h.click(tester, "Cmd/Ctrl + Alt + Space")
+	h.assertTexts(tester, "未应用")
+	h.click(tester, "应用")
+	if got := store.get(contracts.SettingGlobalHotkey); got != "CmdOrCtrl+Alt+Space" {
+		t.Fatalf("preset hotkey = %q", got)
+	}
+}
+
+// TestHotkeyInvalidDraftShowsInlineError covers the inline validation message.
+func TestHotkeyInvalidDraftShowsInlineError(t *testing.T) {
+	h := newHarness(t, &fakeChat{}, newFakeSettings(nil), settings.Config{})
+	tester := h.tester()
+	tester.Frame()
+	h.click(tester, "外观")
+	h.focusInput(tester, "全局热键 输入")
+	tester.Type("banana")
+	tester.Frame()
+	h.assertTexts(tester, "全局热键格式无效")
 }

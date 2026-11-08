@@ -29,7 +29,7 @@ func TestAutomationEnglishCopyAndLanguageSwitch(t *testing.T) {
 	h.uiRoot.Locale().SetLanguage("en")
 	tester.Frame()
 	h.assertTexts(tester, "Automation", "New task", "Run now", "Delete",
-		"Last run: —", "Next run: —", "Nightly check enabled")
+		"Last run: —", "Next run: —", "Nightly check", "Enabled")
 	h.assertNoTexts(tester, "自动化", "新建任务", "立即运行", "上次运行：")
 
 	// The inline create form is translated as well.

@@ -33,7 +33,7 @@ func downloadHarness(t *testing.T, artifact contracts.Artifact, language string)
 
 func openFilesTab(t *testing.T, h *harness, tester *ui.Tester) {
 	t.Helper()
-	h.click(tester, "文件")
+	h.selectPane(tester, "文件")
 }
 
 // artifactForDownload builds one artifact with a fixed body.
@@ -148,7 +148,7 @@ func TestArtifactDownloadEnglishCopy(t *testing.T) {
 	h := downloadHarness(t, artifactForDownload("Report", "body"), "en")
 	tester := h.tester()
 	tester.Frame()
-	h.click(tester, "Files")
+	h.selectPane(tester, "Files")
 	h.click(tester, "Download")
 	if captured.Title != "Save artifact" {
 		t.Fatalf("dialog title = %q, want Save artifact", captured.Title)

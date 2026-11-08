@@ -5,12 +5,16 @@ package session_test
 
 import (
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/egoist/mygo/ui"
+	cordis "github.com/zeokeel/zeokeel-kernel"
 
 	"github.com/zeokeel/zeokeel/internal/contracts"
+	"github.com/zeokeel/zeokeel/internal/ui/session"
+	"github.com/zeokeel/zeokeel/internal/uiroot"
 )
 
 func memoryAt(id, text string, at time.Time) contracts.Memory {
@@ -38,12 +42,17 @@ func TestMemoryTidyRemovesDuplicatesKeepsEarliest(t *testing.T) {
 		memoryAt("mem-3", "Beta 计划", base.Add(2*time.Second)),
 		memoryAt("mem-4", " ALPHA 项目 ", base.Add(3*time.Second)),
 	)
-	h := newHarnessWithMemory(t, tidyChat(), store)
+	notifier := &fakeSessionNotifier{}
+	h := newMemoryNotifierHarness(t, tidyChat(), store, notifier)
 	tester := h.tester()
 	openMemoryTab(t, h, tester)
 
 	h.click(tester, "整理记忆")
-	h.assertTexts(tester, "已整理 2 条")
+	h.assertTexts(tester, "整理记忆", "取消", "整理")
+	h.click(tester, "整理")
+	if !memoryToastContains(notifier, "已整理 2 条") {
+		t.Fatalf("tidy toast missing; toasts = %+v", notifier.toasts())
+	}
 	removes := store.removes()
 	if len(removes) != 2 || removes[0] != "mem-2" || removes[1] != "mem-4" {
 		t.Fatalf("Remove calls = %v, want [mem-2 mem-4]", removes)
@@ -63,11 +72,15 @@ func TestMemoryTidyWithoutDuplicates(t *testing.T) {
 		memory("mem-1", "Alpha"),
 		memory("mem-2", "Beta"),
 	)
-	h := newHarnessWithMemory(t, tidyChat(), store)
+	notifier := &fakeSessionNotifier{}
+	h := newMemoryNotifierHarness(t, tidyChat(), store, notifier)
 	tester := h.tester()
 	openMemoryTab(t, h, tester)
 	h.click(tester, "整理记忆")
-	h.assertTexts(tester, "没有可整理的重复记忆")
+	h.click(tester, "整理")
+	if !memoryToastContains(notifier, "没有可整理的重复记忆") {
+		t.Fatalf("tidy info toast missing; toasts = %+v", notifier.toasts())
+	}
 	if removes := store.removes(); len(removes) != 0 {
 		t.Fatalf("Remove calls = %v, want none", removes)
 	}
@@ -80,6 +93,7 @@ func TestMemoryTidyErrors(t *testing.T) {
 	tester := h.tester()
 	openMemoryTab(t, h, tester)
 	h.click(tester, "整理记忆")
+	h.click(tester, "整理")
 	h.assertTexts(tester, "读取记忆失败：memory store down")
 
 	store2 := newFakeMemoryStore(
@@ -91,6 +105,7 @@ func TestMemoryTidyErrors(t *testing.T) {
 	tester2 := h2.tester()
 	openMemoryTab(t, h2, tester2)
 	h2.click(tester2, "整理记忆")
+	h2.click(tester2, "整理")
 	h2.assertTexts(tester2, "整理记忆失败")
 }
 
@@ -102,14 +117,17 @@ func TestMemoryClearAllConfirmed(t *testing.T) {
 		memory("mem-2", "Beta"),
 		memory("mem-3", "Gamma"),
 	)
-	h := newHarnessWithMemory(t, tidyChat(), store)
+	notifier := &fakeSessionNotifier{}
+	h := newMemoryNotifierHarness(t, tidyChat(), store, notifier)
 	tester := h.tester()
 	openMemoryTab(t, h, tester)
 
 	h.click(tester, "全部清空")
 	h.assertTexts(tester, "清空记忆", "取消", "清空")
 	h.click(tester, "清空")
-	h.assertTexts(tester, "已清空")
+	if !memoryToastContains(notifier, "已清空") {
+		t.Fatalf("clear toast missing; toasts = %+v", notifier.toasts())
+	}
 	if remaining := store.snapshot(); len(remaining) != 0 {
 		t.Fatalf("memories after clear = %+v, want none", remaining)
 	}
@@ -168,13 +186,48 @@ func TestMemoryToolsHiddenWithoutStore(t *testing.T) {
 
 func TestMemoryToolsEnglishCopy(t *testing.T) {
 	store := newFakeMemoryStore(memory("mem-1", "Alpha"), memory("mem-2", "Beta"))
-	h := newHarnessWithMemory(t, tidyChat(), store)
+	notifier := &fakeSessionNotifier{}
+	h := newMemoryNotifierHarness(t, tidyChat(), store, notifier)
 	tester := h.tester()
 	h.ui.Locale().SetLanguage("en")
 	tester.Frame()
 	h.click(tester, "Memory")
 
-	h.assertTexts(tester, "2 memories", "Tidy", "Clear all")
+	h.assertTexts(tester, "2 memories", "Tidy memories", "Clear all")
+	h.click(tester, "Tidy memories")
 	h.click(tester, "Tidy")
-	h.assertTexts(tester, "No duplicate memories to tidy")
+	if !memoryToastContains(notifier, "No duplicate memories to tidy") {
+		t.Fatalf("English tidy toast missing; toasts = %+v", notifier.toasts())
+	}
+}
+
+// newMemoryNotifierHarness builds the session screen with the memory backend
+// and the host notifier: the management actions report their outcome as
+// transient toasts instead of resident badges.
+func newMemoryNotifierHarness(t *testing.T, chat *fakeChat, memory contracts.MemoryStore, notifier contracts.Notifier) *harness {
+	t.Helper()
+	uiRoot := uiroot.New(uiroot.Config{AppName: "ZeoKeel"})
+	ctx := cordis.Root()
+	t.Cleanup(func() { _ = ctx.DisposeAll() })
+	provide(t, ctx, contracts.KeyUIRuntime, uiRoot.Runtime())
+	provide(t, ctx, contracts.KeyNavigator, uiRoot.Navigator())
+	provide(t, ctx, contracts.KeyTheme, uiRoot.Theme())
+	provide(t, ctx, contracts.KeyLocale, uiRoot.Locale())
+	provide(t, ctx, contracts.KeyScreenLister, uiRoot.ScreenLister())
+	provide[contracts.ChatService](t, ctx, contracts.KeyChat, chat)
+	provide[contracts.MemoryStore](t, ctx, contracts.KeyMemory, memory)
+	provide[contracts.Notifier](t, ctx, contracts.KeyNotifier, notifier)
+	activate(t, ctx, session.Module(), session.Config{})
+	return &harness{t: t, ctx: ctx, ui: uiRoot, chat: chat}
+}
+
+// memoryToastContains reports whether the notifier recorded a toast containing
+// fragment.
+func memoryToastContains(notifier *fakeSessionNotifier, fragment string) bool {
+	for _, toast := range notifier.toasts() {
+		if strings.Contains(toast.text, fragment) {
+			return true
+		}
+	}
+	return false
 }

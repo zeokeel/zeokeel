@@ -18,6 +18,10 @@ type Notification struct {
 	Level string
 	// Text is the toast copy.
 	Text string
+	// ActionLabel names the optional action button ("Undo"); Action runs on the
+	// UI thread when it is pressed. Both empty/zero for a plain notification.
+	ActionLabel string
+	Action      func()
 }
 
 // Notifier lets modules raise transient toasts (the old shell's overlay
@@ -33,3 +37,10 @@ type Notifier interface {
 
 // KeyNotifier is provided by the desktop host.
 var KeyNotifier = cordis.NewServiceKey[Notifier]("zeokeel/notifier")
+
+// ActionNotifier is the optional half of a Notifier that shows one action
+// button on a toast ("Undo" after a reversible deletion). A backend that does
+// not implement it still gets the plain notification.
+type ActionNotifier interface {
+	NotifyAction(level, text, actionLabel string, action func()) Notification
+}

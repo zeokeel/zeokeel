@@ -15,6 +15,7 @@
 package uiroot
 
 import (
+	"log"
 	"sync"
 	"sync/atomic"
 
@@ -74,6 +75,31 @@ type Root struct {
 	// settingsTab is host-owned UI state (which settings page is shown); it is
 	// not part of any module.
 	settingsTab int
+	// settingsScrollToSelected scrolls the grouped settings navigation to the
+	// selected page on the next frame, for deep links to pages far down the
+	// list (About, Memory), which a click would have scrolled to by hand.
+	settingsScrollToSelected bool
+	// settingsQuery filters the grouped settings navigation (H5: the 19-page
+	// list needs a search field, not only scrolling).
+	settingsQuery string
+	// settingsDiscard is the host's unsaved-changes guard: closing the settings
+	// surface with a dirty page keeps it open and shows the discard bar.
+	settingsDiscard bool
+	// settingsAdvancedOpen controls the collapsed 高级 group in the settings
+	// navigation: daily pages stay visible, while diagnostics/import/update and
+	// the other low-frequency pages unfold on demand (the settings-complexity
+	// simplification). Search always expands the group.
+	settingsAdvancedOpen bool
+	// settingsSelectedID is the page last shown, so selecting an advanced page
+	// opens (but never re-opens) the advanced group; an explicit collapse stays
+	// collapsed until the user chooses another page.
+	settingsSelectedID string
+
+	// hostCommands unregisters the host's own window commands; hostLang is the
+	// language they were registered in, so a language switch re-registers them
+	// with localized titles.
+	hostCommands func()
+	hostLang     string
 
 	// rightOpen is the host-owned right inspector panel state (the old shell's
 	// right sidebar). It is touched on the UI thread only.
@@ -87,6 +113,16 @@ type Root struct {
 	// paletteQuery its filter draft. UI thread only.
 	paletteOpen  bool
 	paletteQuery string
+	// paletteList/paletteSelected are the native list state of the palette:
+	// its selected row follows the keyboard (Up/Down, Enter runs it).
+	paletteList     ui.ListState
+	paletteSelected int
+	// paletteFilter is the query the selection was last reset for, and
+	// paletteCount the number of matches the last frame showed, for the
+	// Up/Down shortcuts that move the choice while the search field has the
+	// focus.
+	paletteFilter string
+	paletteCount  int
 }
 
 // SidebarCollapsed reports whether the left sidebar is in its icon-rail form.
@@ -153,7 +189,47 @@ func New(cfg Config) *Root {
 	r.locale = &localeService{root: r, lang: cfg.Language}
 	r.rt = newRuntime(r)
 	r.nav = newNavigator(r)
+	r.registerHostCommands()
 	return r
+}
+
+// OpenSettingsPage opens the settings surface on a contributed page. Modules
+// that link to a settings page (the composer's "open model settings", the
+// provider presets) use it through an optional interface instead of opening
+// settings on whichever page happened to be last.
+func (r *Root) OpenSettingsPage(pageID string) error { return r.nav.OpenSettingsPage(pageID) }
+
+// registerHostCommands adds the window-level commands the shell owns: the
+// inspector toggle, so the shortcut and the command palette reach it like any
+// other action. It re-registers when the language changes.
+func (r *Root) registerHostCommands() {
+	if r.hostCommands != nil {
+		r.hostCommands()
+		r.hostCommands = nil
+	}
+	r.hostLang = r.locale.Language()
+	unregister, err := r.rt.RegisterCommand(contracts.CommandSpec{
+		ID:       "uiroot.toggle-inspector",
+		Title:    r.tr("切换右侧栏", "Toggle inspector"),
+		Hint:     r.tr("打开或收起检查器", "Open or close the inspector"),
+		Order:    900,
+		Shortcut: "Cmd/Ctrl + Alt + I",
+		Run: func() error {
+			if !r.hasAnySlot(contracts.SlotSessionPanelRight) {
+				return nil
+			}
+			r.rightOpen = !r.rightOpen
+			r.requestFrame()
+			return nil
+		},
+	})
+	if err != nil {
+		// A command registry the host cannot extend is a programming error, not
+		// a runtime condition; log it instead of failing the whole UI root.
+		log.Printf("uiroot: register host command: %v", err)
+		return
+	}
+	r.hostCommands = unregister
 }
 
 // SetChatService installs the optional chat backend used by Cmd/Ctrl+N. The

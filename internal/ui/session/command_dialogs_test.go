@@ -255,9 +255,9 @@ func TestGoalDialogPrefillsSavesAndCloses(t *testing.T) {
 	h := newCommandDialogHarness(t, permissionChat(), "zh", goal, nil, nil)
 	tester := h.tester()
 
-	h.click(tester, "/")
+	h.typeSlash(tester)
 	h.click(tester, "设置目标")
-	h.assertTexts(tester, "设置目标", "保存", "清除目标", "取消")
+	h.assertTexts(tester, "设置目标", "保存", "删除目标记录", "取消")
 
 	// The input is prefilled with the active goal: saving it unchanged writes
 	// the same text back.
@@ -271,7 +271,7 @@ func TestGoalDialogPrefillsSavesAndCloses(t *testing.T) {
 	goal2 := &fakeGoalTracker{id: "g0", text: "旧目标"}
 	h2 := newCommandDialogHarness(t, permissionChat(), "zh", goal2, nil, nil)
 	tester2 := h2.tester()
-	h2.click(tester2, "/")
+	h2.typeSlash(tester2)
 	h2.click(tester2, "设置目标")
 	focusDialogInput(t, tester2, "目标内容")
 	tester2.Key(ui.Cmd, ui.KeyA)
@@ -285,21 +285,23 @@ func TestGoalDialogPrefillsSavesAndCloses(t *testing.T) {
 }
 
 func TestGoalDialogClearAndCancel(t *testing.T) {
-	// No active goal: the header goal chip (whose clear action shares the same
-	// label) is absent, so the dialog's clear button is the only one.
-	goal := &fakeGoalTracker{}
+	// An existing goal makes the dialog offer its destructive clear action,
+	// which asks through the native AlertDialog before clearing.
+	goal := &fakeGoalTracker{id: "g0", text: "旧目标"}
 	h := newCommandDialogHarness(t, permissionChat(), "zh", goal, nil, nil)
 	tester := h.tester()
 
-	h.click(tester, "/")
+	h.typeSlash(tester)
 	h.click(tester, "设置目标")
-	h.click(tester, "清除目标")
+	h.click(tester, "删除目标记录")
+	h.assertNoTexts(tester, "设置目标")
+	h.assertTexts(tester, "删除目标记录", "取消", "确认删除")
+	h.click(tester, "确认删除")
 	if got := goal.clearCalls(); got != 1 {
 		t.Fatalf("GoalTracker.Clear calls = %d, want 1", got)
 	}
-	h.assertNoTexts(tester, "设置目标")
 
-	h.click(tester, "/")
+	h.typeSlash(tester)
 	h.click(tester, "设置目标")
 	h.click(tester, "取消")
 	h.assertNoTexts(tester, "设置目标")
@@ -309,21 +311,21 @@ func TestGoalDialogEmptySaveDisabled(t *testing.T) {
 	goal := &fakeGoalTracker{}
 	h := newCommandDialogHarness(t, permissionChat(), "zh", goal, nil, nil)
 	tester := h.tester()
-	h.click(tester, "/")
+	h.typeSlash(tester)
 	h.click(tester, "设置目标")
 	h.click(tester, "保存")
 	if got := goal.setCalls(); len(got) != 0 {
 		t.Fatalf("empty goal was saved: %v", got)
 	}
 	// The dialog stays open after the disabled save.
-	h.assertTexts(tester, "清除目标")
+	h.assertTexts(tester, "保存", "取消")
 }
 
 func TestGoalDialogErrorShown(t *testing.T) {
 	goal := &fakeGoalTracker{id: "g0", text: "旧目标", setErr: errors.New("goal store down")}
 	h := newCommandDialogHarness(t, permissionChat(), "zh", goal, nil, nil)
 	tester := h.tester()
-	h.click(tester, "/")
+	h.typeSlash(tester)
 	h.click(tester, "设置目标")
 	h.click(tester, "保存")
 	h.assertTexts(tester, "保存目标失败：goal store down")
@@ -336,7 +338,7 @@ func TestPlanDialogSubmitsAndCloses(t *testing.T) {
 	h := newCommandDialogHarness(t, permissionChat(), "zh", nil, plan, nil)
 	tester := h.tester()
 
-	h.click(tester, "/")
+	h.typeSlash(tester)
 	h.click(tester, "审阅计划")
 	h.assertTexts(tester, "提交计划", "计划内容", "提交审阅", "取消")
 
@@ -354,7 +356,7 @@ func TestPlanDialogEmptySubmitDisabled(t *testing.T) {
 	plan := &fakePlanBridger{}
 	h := newCommandDialogHarness(t, permissionChat(), "zh", nil, plan, nil)
 	tester := h.tester()
-	h.click(tester, "/")
+	h.typeSlash(tester)
 	h.click(tester, "审阅计划")
 	h.click(tester, "提交审阅")
 	if got := plan.reviewCalls(); len(got) != 0 {
@@ -367,7 +369,7 @@ func TestPlanDialogErrorShown(t *testing.T) {
 	plan := &fakePlanBridger{reviewErr: errors.New("plan busy")}
 	h := newCommandDialogHarness(t, permissionChat(), "zh", nil, plan, nil)
 	tester := h.tester()
-	h.click(tester, "/")
+	h.typeSlash(tester)
 	h.click(tester, "审阅计划")
 	focusDialogInput(t, tester, "计划内容")
 	tester.Type("计划")
@@ -383,7 +385,7 @@ func TestMemoryDialogAddsAndShowsBadge(t *testing.T) {
 	h := newCommandDialogHarness(t, permissionChat(), "zh", nil, nil, memory)
 	tester := h.tester()
 
-	h.click(tester, "/")
+	h.typeSlash(tester)
 	h.click(tester, "添加记忆")
 	h.assertTexts(tester, "添加记忆", "记忆内容", "添加", "取消")
 	focusDialogInput(t, tester, "记忆内容")
@@ -396,14 +398,15 @@ func TestMemoryDialogAddsAndShowsBadge(t *testing.T) {
 		t.Fatalf("MemoryStore.Add calls = %+v, want global/记住这次结论", added)
 	}
 	h.assertNoTexts(tester, "取消")
-	h.assertTexts(tester, "已添加")
+	// The add success is a transient toast, not a resident badge.
+	h.assertNoTexts(tester, "已添加")
 }
 
 func TestMemoryDialogErrorShown(t *testing.T) {
 	memory := &fakeMemory{addErr: errors.New("memory full")}
 	h := newCommandDialogHarness(t, permissionChat(), "zh", nil, nil, memory)
 	tester := h.tester()
-	h.click(tester, "/")
+	h.typeSlash(tester)
 	h.click(tester, "添加记忆")
 	focusDialogInput(t, tester, "记忆内容")
 	tester.Type("记住")
@@ -416,7 +419,7 @@ func TestMemoryDialogEmptyAddDisabled(t *testing.T) {
 	memory := &fakeMemory{}
 	h := newCommandDialogHarness(t, permissionChat(), "zh", nil, nil, memory)
 	tester := h.tester()
-	h.click(tester, "/")
+	h.typeSlash(tester)
 	h.click(tester, "添加记忆")
 	h.click(tester, "添加")
 	if got := memory.addCalls(); len(got) != 0 {
@@ -432,17 +435,17 @@ func TestCommandDialogsEnglishCopy(t *testing.T) {
 	tester := h.tester()
 	tester.Frame()
 
-	h.click(tester, "/")
+	h.typeSlash(tester)
 	h.click(tester, "Set goal")
-	h.assertTexts(tester, "Goal", "Save", "Clear goal", "Cancel")
+	h.assertTexts(tester, "Goal", "Save", "Delete goal record", "Cancel")
 
 	h.click(tester, "Cancel")
-	h.click(tester, "/")
+	h.typeSlash(tester)
 	h.click(tester, "Review plan")
 	h.assertTexts(tester, "Submit plan", "Plan content", "Submit review", "Cancel")
 
 	h.click(tester, "Cancel")
-	h.click(tester, "/")
+	h.typeSlash(tester)
 	h.click(tester, "Add memory")
 	h.assertTexts(tester, "Add memory", "Memory text", "Add", "Cancel")
 }

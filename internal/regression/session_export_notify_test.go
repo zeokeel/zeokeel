@@ -153,11 +153,12 @@ func TestSessionExportNotifyCancelAndAbsentNotifier(t *testing.T) {
 	if delivered := notifier.delivered; len(delivered) != 0 {
 		t.Fatalf("a cancelled export raised toasts: %+v", delivered)
 	}
-	requireNoText(t, cancelHarness.tester, "已导出")
+	requireNoText(t, cancelHarness.tester, "导出失败")
 
-	// No notifier: the header status is the only feedback and nothing panics.
+	// No notifier: the export still succeeds quietly (no resident badge, no
+	// error line) and nothing panics.
 	noNotifier := startSessionUIWithNotifier(t, nil)
 	installExportSeams(t, func(name, content string) (string, error) { return "/tmp/" + name, nil }, cancel)
 	clickExport(t, noNotifier, "导出 Markdown")
-	requireHasText(t, noNotifier.tester, "已导出")
+	requireNoText(t, noNotifier.tester, "导出失败")
 }

@@ -1,0 +1,156 @@
+package settings_test
+
+// Tests for the archived-sessions settings page: listing archived sessions,
+// restoring, deleting (native confirmation) and opening one, plus the empty
+// state and the English copy.
+
+import (
+	"testing"
+	"time"
+
+	"github.com/egoist/mygo/ui"
+
+	"github.com/zeokeel/zeokeel/internal/contracts"
+	"github.com/zeokeel/zeokeel/internal/ui/settings"
+)
+
+// archiveHarness opens the settings surface on the archived-sessions page.
+func archiveHarness(t *testing.T, chat *fakeChat) (*harness, *ui.Tester) {
+	t.Helper()
+	h := newHarness(t, chat, newFakeSettings(nil), settings.Config{})
+	tester := h.tester()
+	tester.Frame()
+	h.click(tester, "归档")
+	return h, tester
+}
+
+// archiveSession seeds one archived session with a fixed update time.
+func archiveSession(chat *fakeChat, id, title string, messages int, updated time.Time) {
+	chat.addSession(contracts.ChatSession{
+		ID:        id,
+		Title:     title,
+		UpdatedAt: updated,
+		Messages:  make([]contracts.ChatMessage, messages),
+	})
+	chat.setArchived(id)
+}
+
+// TestArchivePageListsOnlyArchived covers the list: archived sessions appear
+// with their title, update time and message count; active ones do not.
+func TestArchivePageListsOnlyArchived(t *testing.T) {
+	chat := &fakeChat{}
+	updated := time.Date(2026, 11, 8, 13, 30, 0, 0, time.Local)
+	archiveSession(chat, "arch-1", "归档的计划", 3, updated)
+	chat.addSession(contracts.ChatSession{ID: "live-1", Title: "进行中的会话", UpdatedAt: updated})
+
+	_, tester := archiveHarness(t, chat)
+	tester.Frame()
+	if !tester.HasText("归档的计划") || !tester.HasText("3 条消息") {
+		t.Fatalf("archived session row missing; texts = %v", tester.Texts())
+	}
+	if !tester.HasText("2026-11-08 13:30") {
+		t.Fatalf("archived session update time missing; texts = %v", tester.Texts())
+	}
+	if tester.HasText("进行中的会话") {
+		t.Fatalf("the page listed a non-archived session; texts = %v", tester.Texts())
+	}
+	h := newHarness(t, chat, newFakeSettings(nil), settings.Config{})
+	tester2 := h.tester()
+	tester2.Frame()
+	h.click(tester2, "归档")
+	if tester2.HasText("进行中的会话") {
+		t.Fatalf("the page listed a non-archived session; texts = %v", tester2.Texts())
+	}
+}
+
+// TestArchivePageEmptyState covers the empty state explaining the feature.
+func TestArchivePageEmptyState(t *testing.T) {
+	h := newHarness(t, &fakeChat{}, newFakeSettings(nil), settings.Config{})
+	tester := h.tester()
+	tester.Frame()
+	h.click(tester, "归档")
+	h.assertTexts(tester, "没有归档的会话", "归档的会话会出现在这里")
+}
+
+// TestArchivePageRestore covers the restore action: it clears the archive flag
+// and the row leaves the list.
+func TestArchivePageRestore(t *testing.T) {
+	chat := &fakeChat{}
+	archiveSession(chat, "arch-1", "旧会话", 2, time.Now())
+	h, tester := archiveHarness(t, chat)
+	tester.Frame()
+	h.click(tester, "恢复")
+	if calls := chat.archivedCalls(); len(calls) != 1 || calls[0] != "arch-1" {
+		t.Fatalf("SetSessionArchived calls = %v, want [arch-1]", calls)
+	}
+	h.assertTexts(tester, "没有归档的会话")
+	h.assertNoTexts(tester, "旧会话")
+}
+
+// TestArchivePageDeleteConfirmation covers the destructive delete: it asks for
+// confirmation, Esc cancels, the confirm button deletes the session.
+func TestArchivePageDeleteConfirmation(t *testing.T) {
+	chat := &fakeChat{}
+	archiveSession(chat, "arch-1", "要删除的会话", 1, time.Now())
+	h, tester := archiveHarness(t, chat)
+	tester.Frame()
+
+	h.click(tester, "删除")
+	h.assertTexts(tester, "删除归档会话", "要删除的会话")
+	tester.Key(0, ui.KeyEscape)
+	tester.Frame()
+	if got := chat.deletions(); len(got) != 0 {
+		t.Fatalf("Esc on the delete dialog deleted %v", got)
+	}
+	h.assertTexts(tester, "要删除的会话")
+
+	h.click(tester, "删除")
+	h.click(tester, "确认删除")
+	if got := chat.deletions(); len(got) != 1 || got[0] != "arch-1" {
+		t.Fatalf("DeleteSession calls = %v, want [arch-1]", got)
+	}
+	h.assertTexts(tester, "没有归档的会话")
+}
+
+// TestArchivePageOpenSession covers clicking the title: the settings surface
+// closes, the session becomes active and the conversation screen is pushed.
+func TestArchivePageOpenSession(t *testing.T) {
+	chat := &fakeChat{}
+	archiveSession(chat, "arch-1", "要打开的会话", 4, time.Now())
+	h, tester := archiveHarness(t, chat)
+	tester.Frame()
+	h.click(tester, "要打开的会话")
+	if got := chat.ActiveSession(); got != "arch-1" {
+		t.Fatalf("active session = %q, want arch-1", got)
+	}
+	if h.uiRoot.Navigator().SettingsOpen() {
+		t.Fatal("the settings surface stayed open after opening an archived session")
+	}
+}
+
+// TestArchivePageEnglishCopy pins the English copy and the localized date.
+func TestArchivePageEnglishCopy(t *testing.T) {
+	chat := &fakeChat{}
+	archiveSession(chat, "arch-1", "Old plan", 2, time.Date(2026, 11, 8, 13, 30, 0, 0, time.Local))
+	h := newLocaleHarness(t, chat, newFakeSettings(nil), settings.Config{}, "en")
+	tester := h.tester()
+	tester.Frame()
+	h.click(tester, "Archived")
+	h.assertTexts(tester, "Archived sessions",
+		"Archived sessions stay out of the sidebar",
+		"Old plan", "2 messages", "Nov 8, 2026 1:30 PM", "Restore", "Delete")
+}
+
+// TestArchivePageDeepLink covers opening the page by its stable ID.
+func TestArchivePageDeepLink(t *testing.T) {
+	chat := &fakeChat{}
+	archiveSession(chat, "arch-1", "深链会话", 1, time.Now())
+	h := newHarness(t, chat, newFakeSettings(nil), settings.Config{})
+	tester := h.tester()
+	tester.Frame()
+	if err := h.uiRoot.OpenSettingsPage(settings.ArchivePageID); err != nil {
+		t.Fatalf("open archive page by ID: %v", err)
+	}
+	tester.Frame()
+	h.assertTexts(tester, "归档", "深链会话")
+}

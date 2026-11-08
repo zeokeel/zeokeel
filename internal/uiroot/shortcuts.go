@@ -1,6 +1,7 @@
 package uiroot
 
 import (
+	"log"
 	"strings"
 
 	"github.com/egoist/mygo/ui"
@@ -183,10 +184,47 @@ func (r *Root) bindChromeShortcuts(c *ui.Context) {
 	c.OnShortcut(paletteMods, paletteKey, func() {
 		r.paletteOpen = !r.paletteOpen
 		r.paletteQuery = ""
+		r.paletteFilter = ""
+		r.paletteSelected = 0
 		r.requestFrame()
 	})
+
+	// Built-in inspector shortcut: the right panel has a visible toggle, and a
+	// keyboard path so the keyboard-first shell reaches it without a mouse.
+	c.OnShortcut(ui.Cmd|ui.Alt, ui.KeyI, func() {
+		if !r.hasAnySlot(contracts.SlotSessionPanelRight) {
+			return
+		}
+		r.rightOpen = !r.rightOpen
+		r.requestFrame()
+	})
+
+	// Inspector pane cycling: the inspector module registers the commands, the
+	// host binds the chord (H26: pane switching should not require opening the
+	// pane menu with the pointer).
+	c.OnShortcut(ui.Cmd|ui.Alt, ui.KeyLeft, func() { r.runCommandByID("rightpanel.pane.prev") })
+	c.OnShortcut(ui.Cmd|ui.Alt, ui.KeyRight, func() { r.runCommandByID("rightpanel.pane.next") })
 
 	// Built-in window shortcuts (not configurable): new session and settings.
 	c.OnShortcut(ui.Cmd, ui.KeyN, r.newSessionShortcut)
 	c.OnShortcut(ui.Cmd, ui.KeyComma, r.settingsShortcut)
+}
+
+// runCommandByID runs one registered command by id, if it exists and is
+// enabled. The host uses it for chrome shortcuts whose action belongs to a
+// module (the inspector's pane cycling).
+func (r *Root) runCommandByID(id string) {
+	for _, cmd := range r.rt.commandSpecs() {
+		if cmd.ID != id {
+			continue
+		}
+		if cmd.Enabled != nil && !cmd.Enabled() {
+			return
+		}
+		if err := runSafelyErr(cmd.Run); err != nil {
+			log.Printf("uiroot: command %q: %v", id, err)
+		}
+		r.requestFrame()
+		return
+	}
 }

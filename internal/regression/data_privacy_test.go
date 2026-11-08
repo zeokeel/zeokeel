@@ -37,10 +37,9 @@ func startDataPrivacy(t *testing.T, chat contracts.ChatService) *dataPrivacyHarn
 	h.ui.Navigator().ToggleSettings()
 	harness := &dataPrivacyHarness{h: h, chat: chat, tester: h.tester(1280, 800)}
 	harness.tester.Frame()
-	if err := harness.tester.Click("数据与隐私"); err != nil {
-		t.Fatalf("open data & privacy page: %v; texts = %v", err, harness.tester.Texts())
-	}
-	harness.tester.Frame()
+	// The grouped navigation scrolls: the data page sits at the bottom of the
+	// advanced group, below the first screen at 1280x800.
+	openSettingsPage(t, harness.tester, 1280, 800, "数据与隐私")
 	return harness
 }
 

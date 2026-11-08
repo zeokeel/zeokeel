@@ -349,6 +349,51 @@ func (h *harness) click(tester *ui.Tester, label string) {
 	tester.Frame()
 }
 
+// clickExact clicks the first element whose text or label equals label exactly.
+// Tester.Click matches substrings, which is ambiguous now that the composer's
+// 会话设置 button contains the slash command title 设置.
+func (h *harness) clickExact(tester *ui.Tester, label string) {
+	h.t.Helper()
+	rect, ok := tester.Find(label)
+	if !ok {
+		h.t.Fatalf("no element shows exactly %q; texts = %v", label, tester.Texts())
+	}
+	tester.ClickAt(rect.X+rect.W/2, rect.Y+rect.H/2)
+	tester.Frame()
+}
+
+// typeSlash opens the slash-command menu. The standalone "/" toolbar button is
+// gone after the composer redesign: the menu is keyboard-first, so focus the
+// composer input and type the slash.
+func (h *harness) typeSlash(tester *ui.Tester) {
+	h.t.Helper()
+	focusComposer(h.t, tester)
+	tester.Type("/")
+	tester.Frame()
+}
+
+// sessionMenuLabels are the labels the single 会话设置 button can show: the
+// quiet default plus the contextual permission/mode state that owns it.
+var sessionMenuLabels = []string{
+	"会话设置", "全部允许", "禁止工具", "工作区权限", "计划模式", "精简", "创作",
+	"Settings", "Allow all", "Tools off", "Workspace", "Plan mode", "Minimal", "Creator",
+}
+
+// openSessionMenu clicks the composer's single session menu by whichever label
+// it currently shows (a non-default security/mode state owns the label).
+func (h *harness) openSessionMenu(tester *ui.Tester) {
+	h.t.Helper()
+	for _, label := range sessionMenuLabels {
+		for _, text := range tester.Texts() {
+			if text == label {
+				h.clickExact(tester, label)
+				return
+			}
+		}
+	}
+	h.t.Fatalf("session menu button not found; texts = %v", tester.Texts())
+}
+
 func provide[T any](t *testing.T, ctx cordis.Context, key cordis.ServiceKey[T], value T) {
 	t.Helper()
 	if _, err := ctx.Provide(key, value); err != nil {
@@ -440,8 +485,7 @@ func TestEmptyStateAndNewConversation(t *testing.T) {
 	}
 	// A fresh frame of the new active session: the branded hero plus the
 	// composer card with its hint and send control.
-	h.assertTexts(tester, "开始新对话", "还没有消息，开始一段新对话吧。", "发送",
-		"Enter 发送 · Shift+Enter 换行")
+	h.assertTexts(tester, "开始新对话", "还没有消息，开始一段新对话吧。", "发送")
 }
 
 func TestRendersMessagesAndRunningBadges(t *testing.T) {
@@ -477,15 +521,20 @@ func TestRendersMessagesAndRunningBadges(t *testing.T) {
 		"思考",         // collapsible reasoning label
 		"生成中",        // streaming badge
 		"read_file",  // tool fallback badge
-		"auth.go",    // tool summary
 		"上一次运行失败：超时", // session error
-		"正在生成回复…",    // running composer hint
 		"停止",         // stop button while running
 	)
+	// H15: a very short tool result starts expanded under a 详情 disclosure;
+	// the internal call ID is not shown.
+	h.assertTexts(tester, "详情", "auth.go")
+	h.assertNoTexts(tester, "t1")
+	h.click(tester, "详情")
+	tester.Advance(300 * time.Millisecond) // the 200 ms close animation
+	h.assertNoTexts(tester, "auth.go")
 	// While streaming, the live reasoning preview shows the tail; the
 	// collapsed Reasoning block still holds the full text.
 	h.assertTexts(tester, "思考中…", "内部推理：先看认证模块")
-	h.assertNoTexts(tester, "发送")
+	h.assertNoTexts(tester, "发送", "排队")
 
 	// The native Collapsible expands on click.
 	h.click(tester, "思考")
@@ -588,7 +637,7 @@ func TestComposerSendCallsService(t *testing.T) {
 	chat.addSession(contracts.ChatSession{ID: "sess-1", Title: "发送测试"}, true)
 	h := newHarness(t, chat)
 	tester := h.tester()
-	h.assertTexts(tester, "发送", "Enter 发送 · Shift+Enter 换行")
+	h.assertTexts(tester, "发送")
 
 	// Focus the native TextArea (it is directly above the send button), type
 	// and send. Text inputs paint their text, so the assertion is the service
@@ -633,7 +682,7 @@ func TestCustomConfigLabels(t *testing.T) {
 		ComposerHint:        "Press Enter to send",
 	})
 	tester := h.tester()
-	h.assertTexts(tester, "Chat", "Trajectory", "Memory", "Type a message", "Press Enter to send", "Send")
+	h.assertTexts(tester, "Chat", "Trajectory", "Memory", "Type a message", "Send")
 }
 
 func newHarnessConfig(t *testing.T, chat *fakeChat, config session.Config) *harness {
@@ -683,12 +732,11 @@ func TestTrajectoryTimelineShowsToolCalls(t *testing.T) {
 	h.assertTexts(tester,
 		"步骤 1", "bash", "运行中",
 		"步骤 2", "read_file", "失败",
-		"结果摘要")
-	h.assertNoTexts(tester, "stdout: all tests passed") // collapsed by default
-	h.assertNoTexts(tester, "运行一下")
-
-	h.click(tester, "结果摘要")
+		"详情")
+	// H15: short results start expanded, internal call IDs are hidden.
 	h.assertTexts(tester, "stdout: all tests passed")
+	h.assertNoTexts(tester, "t1", "t2")
+	h.assertNoTexts(tester, "运行一下")
 
 	// The chat tab is unchanged: the tool call still renders there (fallback
 	// card in this test because no toolcards module is active). Re-focus the
@@ -711,8 +759,7 @@ func TestBrandedLayoutGeometryAndHints(t *testing.T) {
 	}, true)
 	h := newHarness(t, chat)
 	tester := h.tester()
-	h.assertTexts(tester, "品牌会话", "对话", "轨迹", "记忆",
-		"Enter 发送 · Shift+Enter 换行", "发送")
+	h.assertTexts(tester, "品牌会话", "对话", "轨迹", "记忆", "发送")
 
 	titleRect, ok := tester.Find("品牌会话")
 	if !ok || titleRect.H <= 0 || titleRect.W <= 0 {
@@ -722,12 +769,13 @@ func TestBrandedLayoutGeometryAndHints(t *testing.T) {
 		t.Fatalf("header title at y=%.1f, want the page header near the top", titleRect.Y)
 	}
 
-	hintRect, ok := tester.Find("Enter 发送 · Shift+Enter 换行")
+	// The primary action sits in the composer at the bottom of the surface.
+	sendRect, ok := tester.Find("发送")
 	if !ok {
-		t.Fatalf("composer hint missing; texts = %v", tester.Texts())
+		t.Fatalf("composer send control missing; texts = %v", tester.Texts())
 	}
-	if hintRect.Y < 600 {
-		t.Fatalf("composer hint at y=%.1f, want the bottom composer area", hintRect.Y)
+	if sendRect.Y < 600 {
+		t.Fatalf("send control at y=%.1f, want the bottom composer area", sendRect.Y)
 	}
 
 	userRect, ok := tester.Find("右边的问题")
@@ -749,7 +797,7 @@ func TestComposerEnterSends(t *testing.T) {
 	chat.addSession(contracts.ChatSession{ID: "sess-1", Title: "回车测试"}, true)
 	h := newHarness(t, chat)
 	tester := h.tester()
-	h.assertTexts(tester, "Enter 发送 · Shift+Enter 换行", "发送")
+	h.assertTexts(tester, "发送")
 
 	sendRect, ok := tester.Find("发送")
 	if !ok {
@@ -770,7 +818,7 @@ func TestComposerEnterSends(t *testing.T) {
 		t.Fatalf("Enter send calls = %v, want one with the draft", sends)
 	}
 	// The fake marks the session running and emits; the composer shows Stop.
-	h.assertTexts(tester, "回车发送的消息", "正在生成回复…", "停止")
+	h.assertTexts(tester, "回车发送的消息", "停止")
 }
 
 // --- P2: composer slash commands and the right inspection panel -------------
@@ -810,11 +858,14 @@ func focusComposer(t *testing.T, tester *ui.Tester) {
 	t.Helper()
 	sendRect, ok := tester.Find("发送")
 	if !ok {
+		sendRect, ok = tester.Find("Send")
+	}
+	if !ok {
 		t.Fatalf("send control missing; texts = %v", tester.Texts())
 	}
 	tester.ClickAt(sendRect.X-120, sendRect.Y-50)
 	tester.Frame()
-	if !tester.Focused("输入消息…") {
+	if !tester.Focused("输入消息…") && !tester.Focused("Ask ZeoKeel…") {
 		t.Fatalf("composer TextArea did not take focus; texts = %v", tester.Texts())
 	}
 }
@@ -884,7 +935,7 @@ func TestSlashCommandQueryFiltering(t *testing.T) {
 		h.assertNoTexts(tester, "已禁用的命令", "没有匹配的命令")
 	})
 
-	t.Run("no match and Enter sends", func(t *testing.T) {
+	t.Run("no match sends the slash draft", func(t *testing.T) {
 		chat := newFakeChat()
 		chat.addSession(contracts.ChatSession{ID: "sess-1", Title: "命令过滤"}, true)
 		h := newHarness(t, chat)
@@ -900,26 +951,36 @@ func TestSlashCommandQueryFiltering(t *testing.T) {
 			t.Fatalf("composer lost focus after the slash menu appeared; texts=%v", tester.Texts())
 		}
 
-		// Enter must keep sending the draft verbatim even while the menu is
-		// open without a selection (P2 keeps the existing send semantics).
+		// Esc closes the menu and keeps the draft; typing reopens it.
+		tester.Key(0, ui.KeyEscape)
+		tester.Frame()
+		h.assertNoTexts(tester, "没有匹配的命令")
+		tester.Type("x")
+		tester.Frame()
+		h.assertTexts(tester, "没有匹配的命令")
+
+		// Enter with no highlighted match sends the draft like the Send
+		// button would (the dismissal does not turn "/xyz" into an error).
 		tester.Key(0, ui.KeyEnter)
 		tester.Frame()
 		sends := chat.sends()
-		if len(sends) != 1 || sends[0].prompt != "/xyz" {
+		if len(sends) != 1 || !strings.HasPrefix(sends[0].prompt, "/xyz") {
 			t.Fatalf("Send calls = %v, want the slash draft sent", sends)
 		}
 	})
 }
 
-// TestComposerToolbar covers the old shell's composer toolbar: the model chip
-// opens the model settings, the slash entry opens the command menu, and the
-// attach control is present but disabled until attachments land.
+// TestComposerToolbar covers the redesigned composer action row: the attach
+// menu, the model chip and the single session menu beside the fixed send
+// control. The slash menu is keyboard-first now (type "/"), with no toolbar
+// entry of its own.
 func TestComposerToolbar(t *testing.T) {
 	chat := newFakeChat()
 	chat.addSession(contracts.ChatSession{ID: "sess-1", Title: "工具栏"}, true)
 	h := newHarness(t, chat)
 	tester := h.tester()
-	h.assertTexts(tester, "未配置模型", "附件")
+	h.assertTexts(tester, "未配置", "附件", "会话设置", "发送")
+	h.assertNoTexts(tester, "命令", "更多工具")
 
 	if _, err := h.ui.Runtime().RegisterCommand(contracts.CommandSpec{
 		ID: "toolbar.demo", Title: "工具栏命令", Hint: "测试", Order: 10,
@@ -928,12 +989,12 @@ func TestComposerToolbar(t *testing.T) {
 		t.Fatalf("register command: %v", err)
 	}
 	tester.Frame()
-	h.click(tester, "/")
+	h.typeSlash(tester)
 	h.assertTexts(tester, "工具栏命令")
 
 	// The model chip opens the settings surface (the chip itself targets the
 	// model page; settings navigation is the host's).
-	h.click(tester, "未配置模型")
+	h.click(tester, "未配置")
 	if !h.ui.Navigator().SettingsOpen() {
 		t.Fatal("model chip did not open the settings surface")
 	}
@@ -961,4 +1022,30 @@ func TestHeaderCopyActions(t *testing.T) {
 	if !strings.Contains(got, "用户: 你好") || !strings.Contains(got, "助手: 你好呀") {
 		t.Fatalf("clipboard = %q, want the transcript", got)
 	}
+}
+
+// --- helpers for the fixed interaction tests --------------------------------
+
+// hoverMessage moves the pointer over a message text so the assistant turn's
+// hover-only action row is built on the next frame.
+func hoverMessage(t *testing.T, tester *ui.Tester, text string) {
+	t.Helper()
+	rect, ok := tester.Find(text)
+	if !ok {
+		t.Fatalf("message text %q missing; texts = %v", text, tester.Texts())
+	}
+	tester.Move(rect.X+rect.W/2, rect.Y+rect.H/2)
+	tester.Frame()
+}
+
+// openGoalActions opens the header goal chip's popover menu.
+func openGoalActions(t *testing.T, h *harness, tester *ui.Tester, chip string) {
+	t.Helper()
+	h.click(tester, chip)
+}
+
+// confirmAlertDialog clicks the confirm button of an open native AlertDialog.
+func confirmAlertDialog(t *testing.T, h *harness, tester *ui.Tester, confirm string) {
+	t.Helper()
+	h.click(tester, confirm)
 }

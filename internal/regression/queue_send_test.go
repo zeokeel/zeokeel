@@ -65,8 +65,8 @@ func (q *queueHarness) pumpFrames(t *testing.T, what string, condition func() bo
 	})
 }
 
-// typeQueuePrompt focuses the composer, types one prompt and clicks Send,
-// then repaints.
+// typeQueuePrompt focuses the composer, types one prompt and queues it with
+// the running composer's 排队 control, then repaints.
 func (q *queueHarness) typeQueuePrompt(t *testing.T, label, prompt string) {
 	t.Helper()
 	rect, ok := q.tester.Find(label)
@@ -77,8 +77,8 @@ func (q *queueHarness) typeQueuePrompt(t *testing.T, label, prompt string) {
 	q.tester.Frame()
 	q.tester.Type(prompt)
 	q.tester.Frame()
-	if err := q.tester.Click("发送"); err != nil {
-		t.Fatalf("click 发送: %v; texts = %v", err, q.tester.Texts())
+	if err := q.tester.Click("排队"); err != nil {
+		t.Fatalf("click 排队: %v; texts = %v", err, q.tester.Texts())
 	}
 	q.tester.Frame()
 }
@@ -88,8 +88,9 @@ func (q *queueHarness) typeQueuePrompt(t *testing.T, label, prompt string) {
 func TestQueueSwitchOffKeepsComposerDisabled(t *testing.T) {
 	for _, value := range []string{"", "false", "bogus", "0"} {
 		harness := startQueueUI(t, value)
-		requireHasTexts(t, harness.tester, "停止", "正在生成回复…")
+		requireHasText(t, harness.tester, "停止")
 		requireNoText(t, harness.tester, "输入消息…")
+		requireNoText(t, harness.tester, "排队")
 		requireNoText(t, harness.tester, "已排队")
 		if got := len(harness.chat.recordedSends()); got != 0 {
 			t.Fatalf("switch %q sent %d prompts", value, got)
@@ -104,9 +105,9 @@ func TestQueueFIFOFlushAndFailure(t *testing.T) {
 	harness := startQueueUI(t, "true")
 	requireHasText(t, harness.tester, "输入消息…")
 
-	harness.typeQueuePrompt(t, "发送", "第一条")
+	harness.typeQueuePrompt(t, "排队", "第一条")
 	requireHasText(t, harness.tester, "已排队 1 条")
-	harness.typeQueuePrompt(t, "停止", "第二条")
+	harness.typeQueuePrompt(t, "排队", "第二条")
 	requireHasText(t, harness.tester, "已排队 2 条")
 	if got := len(harness.chat.recordedSends()); got != 0 {
 		t.Fatalf("queued prompts were sent while running: %v", harness.chat.recordedSends())
@@ -146,7 +147,7 @@ func TestQueueFIFOFlushAndFailure(t *testing.T) {
 func TestQueueClearsOnSessionSwitch(t *testing.T) {
 	harness := startQueueUI(t, "true")
 	harness.chat.addSession(contracts.ChatSession{ID: "sess-other", Title: "Other"}, false)
-	harness.typeQueuePrompt(t, "发送", "给第一个会话")
+	harness.typeQueuePrompt(t, "排队", "给第一个会话")
 	requireHasText(t, harness.tester, "已排队 1 条")
 
 	// Switch to another session: the queue badge disappears (queue cleared).

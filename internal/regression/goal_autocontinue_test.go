@@ -255,15 +255,15 @@ func TestGoalAutoContinueSuppressionClearAndFailure(t *testing.T) {
 		harness.setRunning(t, true)
 		harness.tester.Frame()
 		// Type and queue one prompt while the run is active.
-		rect, ok := harness.tester.Find("发送")
+		rect, ok := harness.tester.Find("排队")
 		if !ok {
-			t.Fatalf("send button missing; texts = %v", harness.tester.Texts())
+			t.Fatalf("queue control missing; texts = %v", harness.tester.Texts())
 		}
 		harness.tester.ClickAt(rect.X-120, rect.Y-50)
 		harness.tester.Frame()
 		harness.tester.Type("queued prompt")
 		harness.tester.Frame()
-		if err := harness.tester.Click("发送"); err != nil {
+		if err := harness.tester.Click("排队"); err != nil {
 			t.Fatalf("queue prompt: %v", err)
 		}
 		harness.tester.Frame()

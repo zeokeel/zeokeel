@@ -85,7 +85,7 @@ func TestArtifactsSectionHiddenWithoutLister(t *testing.T) {
 	h := newArtifactsHarness(t, newFakeChat(), rightpanel.Config{}, nil, nil, "zh")
 	tester := h.tester()
 	tester.Frame()
-	h.click(tester, "文件")
+	h.selectPane(tester, "文件")
 	h.assertNoTexts(tester, "产物", "还没有产物")
 }
 
@@ -93,7 +93,7 @@ func TestArtifactsEmptyState(t *testing.T) {
 	h := newArtifactsHarness(t, newFakeChat(), rightpanel.Config{}, nil, &fakeArtifactService{}, "zh")
 	tester := h.tester()
 	tester.Frame()
-	h.click(tester, "文件")
+	h.selectPane(tester, "文件")
 	h.assertTexts(tester, "产物", "还没有产物")
 }
 
@@ -106,7 +106,7 @@ func TestArtifactsListNewestFirst(t *testing.T) {
 	h := newArtifactsHarness(t, newFakeChat(), rightpanel.Config{}, nil, &fakeArtifactService{history: history}, "zh")
 	tester := h.tester()
 	tester.Frame()
-	h.click(tester, "文件")
+	h.selectPane(tester, "文件")
 
 	h.assertTexts(tester, "产物", "新工件", "旧工件", "预览")
 	newest := artifactTextIndex(tester.Texts(), "新工件")
@@ -125,7 +125,7 @@ func TestArtifactPreviewExpandsAndCollapses(t *testing.T) {
 	h := newArtifactsHarness(t, newFakeChat(), rightpanel.Config{}, nil, &fakeArtifactService{history: history}, "zh")
 	tester := h.tester()
 	tester.Frame()
-	h.click(tester, "文件")
+	h.selectPane(tester, "文件")
 	h.assertNoTexts(tester, "工件的正文内容")
 
 	h.click(tester, "预览")
@@ -148,7 +148,7 @@ func TestArtifactsMaxTenRows(t *testing.T) {
 	h := newArtifactsHarness(t, newFakeChat(), rightpanel.Config{}, nil, &fakeArtifactService{history: history}, "zh")
 	tester := h.tester()
 	tester.Frame()
-	h.click(tester, "文件")
+	h.selectPane(tester, "文件")
 
 	// Only the ten newest artifacts are listed.
 	h.assertTexts(tester, "工件-l", "工件-c")
@@ -163,14 +163,14 @@ func TestArtifactsEnglishCopy(t *testing.T) {
 	empty := newArtifactsHarness(t, newFakeChat(), rightpanel.Config{}, nil, &fakeArtifactService{}, "en")
 	tester := empty.tester()
 	tester.Frame()
-	empty.click(tester, "Files")
+	empty.selectPane(tester, "Files")
 	empty.assertTexts(tester, "Artifacts", "No artifacts yet")
 
 	withHistory := newArtifactsHarness(t, newFakeChat(), rightpanel.Config{}, nil,
 		&fakeArtifactService{history: history}, "en")
 	tester2 := withHistory.tester()
 	tester2.Frame()
-	withHistory.click(tester2, "Files")
+	withHistory.selectPane(tester2, "Files")
 	withHistory.assertTexts(tester2, "Artifacts", "Report", "Preview")
 	withHistory.click(tester2, "Preview")
 	withHistory.assertTexts(tester2, "Artifact body", "Hide")

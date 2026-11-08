@@ -8,6 +8,7 @@ package plugins_test
 import (
 	"errors"
 	"testing"
+	"time"
 
 	"github.com/egoist/mygo/ui"
 
@@ -27,6 +28,9 @@ func newParamsHarness(t *testing.T, values map[string]string) (*harness, *fakePl
 // focusParamInput clicks one TextInput by its composite label ("label input").
 func focusParamInput(t *testing.T, h *harness, tester *ui.Tester, label string) {
 	t.Helper()
+	tester.Frame()
+	tester.Advance(400 * time.Millisecond)
+	tester.Frame()
 	rect, ok := tester.Find(label)
 	if !ok {
 		t.Fatalf("input %q not found; texts = %v", label, tester.Texts())
@@ -41,10 +45,10 @@ func TestPluginParamsSectionRendersWiredKeys(t *testing.T) {
 		contracts.SettingWebSearchAPIKey:   "sk-secret-value",
 	})
 	tester := h.tester()
-	h.assertTexts(tester, "插件参数", "展开参数")
+	h.assertTexts(tester, "插件参数")
 	h.assertNoTexts(tester, "web.search.endpoint", "sk-secret-value")
 
-	h.click(tester, "展开参数")
+	h.click(tester, "显示参数")
 	h.assertTexts(tester,
 		"搜索端点", "web.search.endpoint", "https://search.example.com/search",
 		"API Key", "web.search.apiKey", "API Key 已设置",
@@ -56,7 +60,7 @@ func TestPluginParamsSectionRendersWiredKeys(t *testing.T) {
 func TestPluginParamsMasksUnsetAPIKey(t *testing.T) {
 	h, _ := newParamsHarness(t, nil)
 	tester := h.tester()
-	h.click(tester, "展开参数")
+	h.click(tester, "显示参数")
 	h.assertTexts(tester, "API Key 未设置")
 }
 
@@ -65,7 +69,7 @@ func TestPluginParamsEditPersists(t *testing.T) {
 		contracts.SettingWebSearchEndpoint: "https://old.example.com/search",
 	})
 	tester := h.tester()
-	h.click(tester, "展开参数")
+	h.click(tester, "显示参数")
 	h.click(tester, "编辑 搜索端点")
 	h.assertTexts(tester, "编辑参数", "保存", "取消")
 
@@ -87,7 +91,7 @@ func TestPluginParamsSensitiveEditKeepsValuePrivate(t *testing.T) {
 		contracts.SettingWebSearchAPIKey: "sk-old",
 	})
 	tester := h.tester()
-	h.click(tester, "展开参数")
+	h.click(tester, "显示参数")
 	h.click(tester, "编辑 API Key")
 	h.assertNoTexts(tester, "sk-old")
 	focusParamInput(t, h, tester, "新值：API Key")
@@ -104,7 +108,7 @@ func TestPluginParamsEditFailureDanger(t *testing.T) {
 	h, store := newParamsHarness(t, nil)
 	store.setErr = errors.New("settings read-only")
 	tester := h.tester()
-	h.click(tester, "展开参数")
+	h.click(tester, "显示参数")
 	h.click(tester, "编辑 搜索端点")
 	focusParamInput(t, h, tester, "新值：搜索端点")
 	tester.Type("https://x.example.com/search")
@@ -116,14 +120,14 @@ func TestPluginParamsEditFailureDanger(t *testing.T) {
 func TestPluginParamsReadOnlyRowsHaveNoEdit(t *testing.T) {
 	h, _ := newParamsHarness(t, nil)
 	tester := h.tester()
-	h.click(tester, "展开参数")
+	h.click(tester, "显示参数")
 	h.assertNoTexts(tester, "编辑 工作区 mcp.json", "编辑 子代理深度", "编辑 子代理并发")
 }
 
 func TestPluginParamsHiddenWithoutSettings(t *testing.T) {
 	h := newHarness(t, nil, nil, plugins.Config{})
 	tester := h.tester()
-	h.assertNoTexts(tester, "插件参数", "展开参数", "web.search.endpoint")
+	h.assertNoTexts(tester, "插件参数", "web.search.endpoint")
 }
 
 func TestPluginParamsEnglish(t *testing.T) {
@@ -131,7 +135,7 @@ func TestPluginParamsEnglish(t *testing.T) {
 	tester := h.tester()
 	h.uiRoot.Locale().SetLanguage("en")
 	tester.Frame()
-	h.assertTexts(tester, "Plugin settings", "Show parameters")
+	h.assertTexts(tester, "Plugin settings")
 	h.click(tester, "Show parameters")
 	h.assertTexts(tester,
 		"Search endpoint", "web.search.endpoint", "API Key", "API key not set",

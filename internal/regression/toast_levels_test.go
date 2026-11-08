@@ -24,14 +24,18 @@ func setHiddenLevels(t *testing.T, harness *toastsHarness, raw string) {
 func TestToastLevelFiltering(t *testing.T) {
 	harness := startToastsUI(t)
 
-	// No hidden row: every level shows.
+	// No hidden row: every level is delivered, but the stack shows at most two
+	// toasts and queues the rest in order.
 	for _, level := range []string{contracts.NotifyInfo, contracts.NotifySuccess, contracts.NotifyWarning, contracts.NotifyError} {
 		harness.raise(t, "notice-all-"+level, level, "toast-all-"+level)
 	}
 	harness.tester.Frame()
-	for _, level := range []string{"info", "success", "warning", "error"} {
-		requireHasText(t, harness.tester, "toast-all-"+level)
+	requireHasText(t, harness.tester, "toast-all-info")
+	requireHasText(t, harness.tester, "toast-all-success")
+	for _, level := range []string{"warning", "error"} {
+		requireNoText(t, harness.tester, "toast-all-"+level)
 	}
+	flushToasts(harness)
 
 	// Hide info: only info disappears; the other levels keep showing.
 	setHiddenLevels(t, harness, `["info"]`)
@@ -44,6 +48,7 @@ func TestToastLevelFiltering(t *testing.T) {
 	// Case/whitespace variants normalize; unknown levels are never filtered and
 	// unknown names in the row are ignored.
 	setHiddenLevels(t, harness, `[" INFO ", "Warning"]`)
+	flushToasts(harness)
 	harness.raise(t, "notice-info-2", contracts.NotifyInfo, "toast-info-2")
 	harness.raise(t, "notice-warning-2", contracts.NotifyWarning, "toast-warning-2")
 	harness.raise(t, "notice-custom", "custom-level", "toast-custom")
@@ -53,12 +58,14 @@ func TestToastLevelFiltering(t *testing.T) {
 	requireNoText(t, harness.tester, "toast-warning-2")
 	requireHasText(t, harness.tester, "toast-custom")
 	requireHasText(t, harness.tester, "toast-error-2")
+	flushToasts(harness)
 
 	// Malformed JSON is treated as "nothing hidden" (bad values never filter).
 	setHiddenLevels(t, harness, `["info"`)
 	harness.raise(t, "notice-malformed", contracts.NotifyInfo, "toast-malformed")
 	harness.tester.Frame()
 	requireHasText(t, harness.tester, "toast-malformed")
+	flushToasts(harness)
 
 	// An empty array hides nothing.
 	setHiddenLevels(t, harness, `[]`)

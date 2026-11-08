@@ -1,13 +1,13 @@
 package rightpanel
 
 import (
+	"fmt"
 	"strings"
 
 	"github.com/egoist/mygo/ui"
 
 	"github.com/zeokeel/zeokeel/internal/contracts"
 	"github.com/zeokeel/zeokeel/internal/design"
-	"github.com/zeokeel/zeokeel/internal/icons"
 	"github.com/zeokeel/zeokeel/internal/uikit"
 )
 
@@ -17,17 +17,16 @@ import (
 // without it (or without members) the pane shows an explicit empty state.
 func buildAgentsPane(c *ui.Context, t *design.Tokens, team contracts.TeamService, runtime contracts.UIRuntime, st *state) {
 	if team == nil {
-		buildEmptyPane(c, t, icons.Data(), uikit.T(st.locale, "团队服务未启用", "Team service not enabled"))
+		buildEmptyPane(c, uikit.T(st.locale, "团队服务未启用", "Team service not enabled"))
 		return
 	}
 	members := team.Members()
 	if len(members) == 0 {
-		buildEmptyPane(c, t, icons.Data(), uikit.T(st.locale, "还没有队友", "No teammates yet"))
+		buildEmptyPane(c, uikit.T(st.locale, "还没有队友", "No teammates yet"))
 		return
 	}
 
-	list := design.Apply(ui.Column(c), t.Panel()).Padding(design.Space2).Gap(design.Space1)
-	list.Children(func() {
+	ui.Column(c).FillWidth().Gap(design.Space1).Children(func() {
 		for _, member := range members {
 			member := member
 			buildAgentRow(c, t, member, runtime, st)
@@ -59,14 +58,13 @@ func selectedAgent(members []contracts.TeamMember, id string) *contracts.TeamMem
 	return nil
 }
 
-// buildAgentRow is one teammate card: selectable row with name, id, status and
-// the latest answer summary.
+// buildAgentRow is one teammate row: selectable, with name, id, status and the
+// latest answer summary, followed by a divider.
 func buildAgentRow(c *ui.Context, t *design.Tokens, member contracts.TeamMember, runtime contracts.UIRuntime, st *state) {
 	name := firstNonEmpty(member.Name, member.ID)
+	c.Key("agent/" + member.ID)
 	row := ui.ButtonBase(c).FillWidth().Padding(design.Space2).Radius(design.RadiusSM).Label(name)
-	if member.ID == st.selectedMemberID {
-		row.Background(t.BgHover)
-	}
+	row = rowTint(t, row, member.ID == st.selectedMemberID)
 	row.Children(func() {
 		ui.Column(c).FillWidth().Gap(design.Space1).Children(func() {
 			ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(design.Space2).Children(func() {
@@ -77,7 +75,7 @@ func buildAgentRow(c *ui.Context, t *design.Tokens, member contracts.TeamMember,
 				switch strings.ToLower(label) {
 				case "active":
 					label = uikit.T(st.locale, "运行中", "Running")
-					color = t.Success
+					color = t.SuccessText
 				case "interrupted":
 					label = uikit.T(st.locale, "已中断", "Interrupted")
 					color = t.WarningText
@@ -87,7 +85,7 @@ func buildAgentRow(c *ui.Context, t *design.Tokens, member contracts.TeamMember,
 				}
 				design.Apply(ui.Badge(c, label), t.Badge()).TextColor(color)
 			})
-			design.Apply(ui.Text(c, member.ID), t.MonoFamily()).FontSize(10).
+			design.Apply(ui.Text(c, member.ID), t.Font(design.TypeXXXS)).
 				TextColor(t.LabelTertiary)
 			last := strings.TrimSpace(member.Last)
 			if last == "" {
@@ -103,6 +101,7 @@ func buildAgentRow(c *ui.Context, t *design.Tokens, member contracts.TeamMember,
 		st.teamErr = ""
 		runtime.Invalidate()
 	})
+	ui.Divider(c)
 }
 
 // buildAgentControls is the steer panel for the selected teammate.
@@ -141,24 +140,51 @@ func buildAgentControls(c *ui.Context, t *design.Tokens, team contracts.TeamServ
 				}
 				runtime.Invalidate()
 			}
-			if ui.Button(c, uikit.T(st.locale, "关闭", "Close")).Clicked() {
-				if err := team.Close(member.ID); err != nil {
-					st.teamErr = uikit.T(st.locale, "关闭失败：", "Close failed: ") + err.Error()
-					st.teamStatus = ""
-				} else {
-					st.teamErr = ""
-					st.teamStatus = uikit.T(st.locale, "已关闭", "Closed")
-					st.selectedMemberID = ""
-					st.steerDraft = ""
-				}
+			if design.Apply(ui.Button(c, uikit.T(st.locale, "关闭", "Close")), t.DangerButton()).Clicked() {
+				st.memberCloseOpen = true
+				st.memberCloseID = member.ID
+				st.memberCloseName = name
 				runtime.Invalidate()
 			}
 		})
 		if st.teamStatus != "" {
-			design.Apply(ui.Badge(c, st.teamStatus), t.Badge()).TextColor(t.Success)
+			design.Apply(ui.Badge(c, st.teamStatus), t.Badge()).TextColor(t.SuccessText)
 		}
 		if st.teamErr != "" {
-			buildErrorLine(c, t, st.teamErr)
+			uikit.ErrorLine(c, st.teamErr)
 		}
 	})
+	buildMemberCloseDialog(c, team, runtime, st)
+}
+
+// buildMemberCloseDialog is the native confirmation of the destructive "close
+// teammate" action: the member row stays, the action is not one click away.
+func buildMemberCloseDialog(c *ui.Context, team contracts.TeamService, runtime contracts.UIRuntime, st *state) {
+	if !st.memberCloseOpen {
+		return
+	}
+	name := firstNonEmpty(st.memberCloseName, st.memberCloseID)
+	message := st.tr(
+		fmt.Sprintf("“%s”将被停止并移除，此操作无法撤销。", name),
+		fmt.Sprintf("%q will be stopped and removed. This cannot be undone.", name))
+	switch ui.AlertDialog(c, &st.memberCloseOpen, st.tr("关闭队友", "Close teammate"),
+		message, st.tr("取消", "Cancel"), st.tr("确认关闭", "Close teammate")) {
+	case 1:
+		if err := team.Close(st.memberCloseID); err != nil {
+			st.teamErr = st.tr("关闭失败：", "Close failed: ") + err.Error()
+			st.teamStatus = ""
+		} else {
+			st.teamErr = ""
+			st.teamStatus = st.tr("已关闭", "Closed")
+			st.selectedMemberID = ""
+			st.steerDraft = ""
+		}
+		st.memberCloseID = ""
+		st.memberCloseName = ""
+		runtime.Invalidate()
+	case 0, ui.AlertDismissed:
+		st.memberCloseID = ""
+		st.memberCloseName = ""
+		runtime.Invalidate()
+	}
 }

@@ -10,6 +10,7 @@ import (
 	"github.com/zeokeel/zeokeel-kernel/module"
 
 	"github.com/zeokeel/zeokeel/internal/contracts"
+	"github.com/zeokeel/zeokeel/internal/design"
 	"github.com/zeokeel/zeokeel/internal/uikit"
 )
 
@@ -26,23 +27,26 @@ func Module() *module.Descriptor[Config] {
 		if err != nil {
 			return err
 		}
-		info, err := ctx.Require(contracts.KeyAppInfo)
-		if err != nil {
+		// The example module still declares the host AppInfo dependency (the
+		// product modules all get the build info from it); it deliberately does
+		// not surface that build metadata in the UI: the About page owns it.
+		if _, err := ctx.Require(contracts.KeyAppInfo); err != nil {
 			return err
 		}
 		title := firstNonEmpty(cfg.Title, "欢迎使用 ZeoKeel")
 		message := firstNonEmpty(cfg.Message, "这是一个独立编译的 UI 模块，通过注入点出现在宿主中。")
 
-		// 1. Top bar center: a version badge next to the product name.
+		// 1. Top bar center: the module marker (the build metadata belongs to
+		// About, not to the product chrome).
 		if err := own(ctx, func() (func(), error) {
 			return runtime.RegisterSlotItem(contracts.SlotItem{
 				Slot:  contracts.SlotTopBarCenter,
 				ID:    "welcome.topbar",
 				Order: 10,
 				Build: func(c *ui.Context) {
-					ui.Row(c).Gap(6).AlignItems(ui.Center).Children(func() {
-						ui.Badge(c, "v"+info.Version)
-						ui.Text(c, "via ui/welcome").FontSize(12).TextColor(c.Theme().TextMuted)
+					t := design.Of(c)
+					ui.Row(c).Gap(design.Space2).AlignItems(ui.Center).Children(func() {
+						design.Apply(ui.Text(c, "ui/welcome"), t.TextMuted(design.TypeXXS))
 					})
 				},
 			})
@@ -51,19 +55,18 @@ func Module() *module.Descriptor[Config] {
 		}
 
 		// 2. Home hero: replaces home's default hero with the welcome content.
+		// The version is only shown in About, so the example hero keeps the
+		// message alone.
 		if err := own(ctx, func() (func(), error) {
 			return runtime.RegisterSlotItem(contracts.SlotItem{
 				Slot:  contracts.SlotHomeHero,
 				ID:    "welcome.hero",
 				Order: 10,
 				Build: func(c *ui.Context) {
-					ui.Column(c).FillWidth().Gap(8).Children(func() {
+					t := design.Of(c)
+					ui.Column(c).FillWidth().Gap(design.Space3).Children(func() {
 						uikit.PageHeader(c, title, "")
-						ui.Text(c, message).FontSize(14)
-						ui.Row(c).Gap(8).AlignItems(ui.Center).Children(func() {
-							ui.Badge(c, "v"+info.Version)
-							ui.Badge(c, info.GoVersion)
-						})
+						design.Apply(ui.Text(c, message), t.Text(design.TypeBody))
 					})
 				},
 			})

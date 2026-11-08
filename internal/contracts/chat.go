@@ -18,6 +18,19 @@ const (
 	SettingsChatBaseURL      = "chat.baseURL"
 	SettingsChatAPIKey       = "chat.apiKey"
 	SettingsChatSystemPrompt = "chat.systemPrompt"
+	// SettingsChatRequireFinishReason overrides the agent module's
+	// RequireFinishReason config: "true" treats a stream that ends without a
+	// finish reason as a truncated/failed turn, "false" keeps the historical
+	// clean-EOF behavior, empty follows the module config.
+	SettingsChatRequireFinishReason = "chat.requireFinishReason"
+	// SettingsChatMaxIterations overrides the agent module's MaxIterations
+	// (model/tool rounds per run); empty or a non-positive value follows the
+	// module config.
+	SettingsChatMaxIterations = "chat.maxIterations"
+	// SettingsChatContextBudget overrides the prompt-token budget used by the
+	// automatic compactor; empty follows the module config and an explicit "0"
+	// disables the budget (no automatic compaction).
+	SettingsChatContextBudget = "chat.contextBudget"
 )
 
 // Host-owned UI preference keys. The process host persists these between runs;
@@ -93,8 +106,9 @@ type ChatSessionInfo struct {
 	// Pinned marks a pinned session: the sidebar sorts pinned sessions first
 	// within their workspace group.
 	Pinned bool
-	// Archived marks an archived session: hidden from the sidebar unless the
-	// "show archived" view option is on.
+	// Archived marks an archived session: the sidebar always hides it; the
+	// settings surface's Archive page is the one place that lists archived
+	// sessions and can restore or delete them (H-series usability fix).
 	Archived     bool
 	MessageCount int
 	Running      bool
@@ -317,8 +331,12 @@ type SessionArchiver interface {
 	SetSessionArchived(sessionID string, archived bool) error
 }
 
-// SettingSessionsShowArchived is the sidebar view option to list archived
-// sessions ("true"/"false").
+// SettingSessionsShowArchived is the old sidebar view option that listed
+// archived sessions.
+//
+// Deprecated: the sidebar always hides archived sessions now; the settings
+// surface's Archive page lists them. The key stays defined for older workspaces
+// that still carry the setting row.
 const SettingSessionsShowArchived = "ui.sessions.showArchived"
 
 // SessionPinner is the optional half of the chat service that pins or

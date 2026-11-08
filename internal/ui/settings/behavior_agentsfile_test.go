@@ -17,6 +17,7 @@ func TestBehaviorPageAgentsFileDefaultsToAGENTSmd(t *testing.T) {
 	tester := h.tester()
 	tester.Frame()
 	h.click(tester, "行为")
+	expandMoreConversationSettings(t, tester, "更多对话设置")
 	h.assertTexts(tester, "工作区指令文件",
 		"运行时从当前工作区读取并注入系统提示；重启/下次运行生效")
 	if raw := store.get(contracts.SettingAgentsFile); raw != "" {
@@ -28,7 +29,6 @@ func TestBehaviorPageAgentsFileDefaultsToAGENTSmd(t *testing.T) {
 	tester.Key(0, ui.KeyBackspace)
 	tester.Type("CUSTOM.md")
 	tester.Frame()
-	h.click(tester, "保存")
 	if raw := store.get(contracts.SettingAgentsFile); raw != "CUSTOM.md" {
 		t.Fatalf("saving custom name wrote %q", raw)
 	}
@@ -40,11 +40,11 @@ func TestBehaviorPageAgentsFileEmptyDisables(t *testing.T) {
 	tester := h.tester()
 	tester.Frame()
 	h.click(tester, "行为")
+	expandMoreConversationSettings(t, tester, "更多对话设置")
 	h.focusInput(tester, "工作区指令文件")
 	tester.Key(ui.Cmd, ui.KeyA)
 	tester.Key(0, ui.KeyBackspace)
 	tester.Frame()
-	h.click(tester, "保存")
 	if raw := store.get(contracts.SettingAgentsFile); raw != "" {
 		t.Fatalf("clearing the setting wrote %q, want empty", raw)
 	}
@@ -57,7 +57,10 @@ func TestBehaviorPageAgentsFileWriteFailure(t *testing.T) {
 	tester := h.tester()
 	tester.Frame()
 	h.click(tester, "行为")
-	h.click(tester, "保存")
+	expandMoreConversationSettings(t, tester, "更多对话设置")
+	h.focusInput(tester, "工作区指令文件")
+	tester.Type("x")
+	tester.Frame()
 	h.assertTexts(tester, "保存失败：")
 }
 
@@ -67,6 +70,7 @@ func TestBehaviorPageAgentsFileEnglish(t *testing.T) {
 	tester := h.tester()
 	tester.Frame()
 	h.click(tester, "Behavior")
+	expandMoreConversationSettings(t, tester, "More conversation settings")
 	h.assertTexts(tester, "Workspace instructions file",
-		"Read from the current workspace at run time and appended to the system prompt; takes effect on the next run or restart")
+		"Read from the current workspace at run time and appended to the system prompt; takes effect on the next run; empty disables it")
 }

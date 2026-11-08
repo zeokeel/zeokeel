@@ -12,6 +12,7 @@ import (
 
 	"github.com/zeokeel/zeokeel/internal/contracts"
 	"github.com/zeokeel/zeokeel/internal/design"
+	"github.com/zeokeel/zeokeel/internal/uikit"
 )
 
 const (
@@ -20,7 +21,7 @@ const (
 	// LSPPageSection places it in the 高级 group with diagnostics/update.
 	LSPPageSection = "高级"
 	// LSPPageOrder places the page after diagnostics (95) and shortcuts.
-	LSPPageOrder = 105
+	LSPPageOrder = 70
 )
 
 // lspState is the page's list, active-selection and add-form state (UI thread
@@ -42,6 +43,10 @@ type lspState struct {
 
 	status    string
 	statusErr bool
+
+	// confirmRemove names the server whose removal waits for the native
+	// confirmation dialog ("" when none is open).
+	confirmRemove string
 }
 
 // loadLSPState reads the stored rows once (multi-server list first, then the
@@ -178,54 +183,61 @@ func lspWorkspaceOptIn(raw string) bool {
 	return strings.EqualFold(strings.TrimSpace(raw), "allow")
 }
 
-// buildLSPPage renders the multi-server language-server configuration.
+// buildLSPPage renders the multi-server language-server configuration. The
+// list, add and remove actions write the store at once (there is no separate
+// save button: a second save would only rewrite the same rows); removal asks
+// for confirmation with the native alert dialog.
 func buildLSPPage(c *ui.Context, store contracts.SettingsService, st *lspState, locale contracts.LocaleService) {
 	t := design.Of(c)
-	ui.Column(c).FillWidth().Gap(design.Space2).Children(func() {
-		pageHeader(c, t, "LSP", localized(locale,
+	ui.Column(c).FillWidth().Gap(design.Space4).Children(func() {
+		uikit.PageHeader(c, "LSP", localized(locale,
 			"可选的语言服务器（可配置多个）；仅活动服务器在启动时拉起，重启生效，其能力以 lsp_* 工具提供。",
 			"Optional language servers (multiple allowed); only the active server starts at launch. Restart to apply; capabilities are exposed as lsp_* tools."))
 		if store == nil {
-			design.Apply(ui.Text(c, localized(locale, "设置存储未启用", "Settings store not enabled")),
-				t.TextMuted(design.TypeXS))
+			uikit.Section(c, localized(locale, "设置存储未启用", "Settings store not enabled"), func(*ui.Context) {
+				uikit.EmptyState(c, localized(locale, "设置存储未启用，无法保存语言服务器。",
+					"The settings store is not enabled, so language servers cannot be saved."))
+			})
 			return
 		}
 		loadLSPState(st, store)
 		if st.listErr != "" {
-			design.Apply(ui.Text(c, localized(locale, "配置无法解析：", "Configuration could not be parsed: ")+st.listErr),
-				t.Font(design.TypeXS)).TextColor(t.DangerText)
+			uikit.ErrorLine(c, localized(locale,
+				"配置无法解析：", "Configuration could not be parsed: ")+st.listErr)
 		}
 
-		panel(c, t, func() {
-			sectionTitle(c, t, localized(locale, "语言服务器", "Language servers"))
+		uikit.Section(c, localized(locale, "语言服务器", "Language servers"), func(*ui.Context) {
 			if len(st.servers) == 0 && st.listErr == "" {
-				design.Apply(ui.Text(c, localized(locale, "还没有配置语言服务器", "No language servers configured")),
-					t.TextMuted(design.TypeXXS))
+				uikit.EmptyState(c, localized(locale,
+					"还没有配置语言服务器", "No language servers configured"))
 			}
 			for _, server := range st.servers {
 				server := server
 				active := st.active != "" && server.Name == st.active
-				ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(design.Space2).Children(func() {
+				ui.Divider(c)
+				ui.Row(c).FillWidth().PaddingY(design.Space1).
+					AlignItems(ui.Center).Gap(design.Space2).Children(func() {
 					design.Apply(ui.Text(c, server.Name), t.Font(design.TypeS)).
 						FontWeight(600).TextColor(t.LabelPrimary)
 					summary := server.Command
 					if args := strings.Join(server.Args, " "); args != "" {
 						summary += " " + args
 					}
-					design.Apply(ui.Text(c, summary), t.MonoFamily()).FontSize(11).
+					design.Apply(ui.Text(c, summary), t.Font(design.TypeXS), t.MonoFamily()).
 						TextColor(t.LabelTertiary).Grow(1).MaxLines(1).Ellipsis("…")
 					if active {
 						design.Apply(ui.Badge(c, localized(locale, "活动中", "Active")), t.Badge()).
-							TextColor(t.Success)
+							TextColor(t.SuccessText)
 					} else {
-						if ui.Button(c, localized(locale, "设为活动", "Set active")).Clicked() {
+						if design.Apply(ui.Button(c, localized(locale, "设为活动", "Set active")),
+							t.SecondaryButton()).Clicked() {
 							setActiveLSPServer(st, store, server.Name, locale)
 							c.Invalidate()
 						}
 					}
-					remove := ui.Button(c, localized(locale, "移除", "Remove")).TextColor(t.DangerText)
-					if remove.Clicked() {
-						removeLSPServer(st, store, server.Name, locale)
+					if design.Apply(ui.Button(c, localized(locale, "移除", "Remove")),
+						t.DangerButton()).Clicked() {
+						st.confirmRemove = server.Name
 						c.Invalidate()
 					}
 				})
@@ -235,82 +247,107 @@ func buildLSPPage(c *ui.Context, store contracts.SettingsService, st *lspState, 
 				t.TextMuted(design.TypeXXXS)).MaxLines(2)
 		})
 
-		panel(c, t, func() {
-			sectionTitle(c, t, localized(locale, "工作区配置", "Workspace configuration"))
-			allow := lspWorkspaceOptIn(store.Get(contracts.SettingLSPWorkspaceConfig, ""))
-			toggle := ui.Toggle(c, &allow, localized(locale,
-				"读取工作区 LSP 配置（.zeokeel/lsp.json）",
-				"Read workspace LSP config (.zeokeel/lsp.json)"))
-			if toggle.Changed() {
-				value := ""
-				if allow {
-					value = "allow"
+		uikit.Section(c, localized(locale, "工作区配置", "Workspace configuration"), func(*ui.Context) {
+			ui.Form(c, func() {
+				allow := lspWorkspaceOptIn(store.Get(contracts.SettingLSPWorkspaceConfig, ""))
+				if switchField(c,
+					localized(locale, "读取工作区 LSP 配置（.zeokeel/lsp.json）",
+						"Read workspace LSP config (.zeokeel/lsp.json)"),
+					localized(locale,
+						"仓库中的 .zeokeel/lsp.json 可声明语言服务器命令；默认关闭，开启后重启生效；设置页中的配置优先。",
+						"The repository's .zeokeel/lsp.json can declare language-server commands; off by default, restart to apply; settings-page configuration wins."),
+					&allow) {
+					value := ""
+					if allow {
+						value = "allow"
+					}
+					if err := store.Set(contracts.SettingLSPWorkspaceConfig, value); err != nil {
+						st.status = localized(locale, "保存失败：", "Save failed: ") + err.Error()
+						st.statusErr = true
+					} else {
+						st.status = localized(locale, "已保存（重启后生效）", "Saved (applies after restart)")
+						st.statusErr = false
+					}
+					c.Invalidate()
 				}
-				if err := store.Set(contracts.SettingLSPWorkspaceConfig, value); err != nil {
-					st.status = localized(locale, "保存失败：", "Save failed: ") + err.Error()
-					st.statusErr = true
-				} else {
-					st.status = localized(locale, "已保存（重启后生效）", "Saved (applies after restart)")
-					st.statusErr = false
-				}
-				c.Invalidate()
-			}
-			design.Apply(ui.Text(c, localized(locale,
-				"仓库中的 .zeokeel/lsp.json 可声明语言服务器命令；默认关闭，开启后重启生效；设置页中的配置优先。",
-				"The repository's .zeokeel/lsp.json can declare language-server commands; off by default, restart to apply; settings-page configuration wins.")),
-				t.TextMuted(design.TypeXXS)).MaxLines(3)
-			design.Apply(ui.Text(c, localized(locale,
+			})
+			uikit.ErrorLine(c, localized(locale,
 				"风险：只应在你信任的仓库中开启；恶意仓库可通过该文件让工具启动任意命令。",
-				"Risk: enable only in repositories you trust; a malicious repository could make tools launch arbitrary commands.")),
-				t.Font(design.TypeXXS)).TextColor(t.DangerText).MaxLines(3)
+				"Risk: enable only in repositories you trust; a malicious repository could make tools launch arbitrary commands."))
 		})
 
-		panel(c, t, func() {
-			sectionTitle(c, t, localized(locale, "新增服务器", "Add server"))
-			ui.Row(c).FillWidth().Gap(design.Space2).AlignItems(ui.Start).Children(func() {
+		uikit.Section(c, localized(locale, "新增服务器", "Add server"), func(*ui.Context) {
+			ui.Row(c).FillWidth().Gap(design.Space3).AlignItems(ui.Start).Children(func() {
 				ui.Column(c).FillWidth().Grow(1).Children(func() {
-					ui.TextInput(c, &st.name).Label(inputLabel(locale, localized(locale, "名称", "Name"))).
-						Placeholder(localized(locale, "例如 go", "e.g. go")).FillWidth()
+					ui.Field(c, localized(locale, "名称", "Name"), func() {
+						ui.TextInput(c, &st.name).
+							Label(inputLabel(locale, localized(locale, "名称", "Name"))).
+							Placeholder(localized(locale, "例如 go", "e.g. go")).FillWidth()
+					}).Description(localized(locale, "活动服务器的唯一名称。",
+						"A unique name for the active server."))
 				})
 				ui.Column(c).FillWidth().Grow(1).Children(func() {
-					ui.TextInput(c, &st.command).Label(inputLabel(locale, localized(locale, "命令", "Command"))).
-						Placeholder(localized(locale, "例如 gopls", "e.g. gopls")).FillWidth()
-				})
-			})
-			ui.Row(c).FillWidth().Gap(design.Space2).AlignItems(ui.Start).Children(func() {
-				ui.Column(c).FillWidth().Grow(1).Children(func() {
-					ui.TextInput(c, &st.args).Label(inputLabel(locale, localized(locale, "参数", "Arguments"))).
-						Placeholder(localized(locale, "空格分隔，例如 serve -rpc.trace", "Space-separated, e.g. serve -rpc.trace")).FillWidth()
-				})
-				ui.Column(c).FillWidth().Grow(1).Children(func() {
-					ui.TextInput(c, &st.dir).Label(inputLabel(locale, localized(locale, "工作目录", "Working directory"))).
-						Placeholder(localized(locale, "可选", "optional")).FillWidth()
+					ui.Field(c, localized(locale, "命令", "Command"), func() {
+						ui.TextInput(c, &st.command).
+							Label(inputLabel(locale, localized(locale, "命令", "Command"))).
+							Placeholder(localized(locale, "例如 gopls", "e.g. gopls")).FillWidth()
+					}).Description(localized(locale, "启动语言服务器的可执行文件。",
+						"The executable that starts the language server."))
 				})
 			})
-			ui.TextInput(c, &st.languageID).Label(inputLabel(locale, localized(locale, "语言 ID", "Language ID"))).
-				Placeholder(localized(locale, "例如 go、python", "e.g. go, python")).FillWidth()
-			design.Apply(ui.Text(c, localized(locale,
-				"保存后重启生效；工具名前缀为 lsp_（如 lsp_hover）。",
-				"Applies after a restart; tools are prefixed lsp_ (e.g. lsp_hover).")),
-				t.TextMuted(design.TypeXXS)).MaxLines(2)
-			if add := design.Apply(ui.PrimaryButton(c, localized(locale, "添加", "Add")), t.PrimaryButton()); add.Clicked() {
-				addLSPServer(st, store, locale)
-				c.Invalidate()
-			}
+			ui.Row(c).FillWidth().Gap(design.Space3).AlignItems(ui.Start).Children(func() {
+				ui.Column(c).FillWidth().Grow(1).Children(func() {
+					ui.Field(c, localized(locale, "参数", "Arguments"), func() {
+						ui.TextInput(c, &st.args).
+							Label(inputLabel(locale, localized(locale, "参数", "Arguments"))).
+							Placeholder(localized(locale, "空格分隔，例如 serve -rpc.trace",
+								"Space-separated, e.g. serve -rpc.trace")).FillWidth()
+					}).Description(localized(locale, "按空格拆分为参数列表。",
+						"Split on spaces into the argument list."))
+				})
+				ui.Column(c).FillWidth().Grow(1).Children(func() {
+					ui.Field(c, localized(locale, "工作目录", "Working directory"), func() {
+						ui.TextInput(c, &st.dir).
+							Label(inputLabel(locale, localized(locale, "工作目录", "Working directory"))).
+							Placeholder(localized(locale, "可选", "optional")).FillWidth()
+					}).Description(localized(locale, "可选；留空使用工作区根目录。",
+						"Optional; empty uses the workspace root."))
+				})
+			})
+			ui.Field(c, localized(locale, "语言 ID", "Language ID"), func() {
+				ui.TextInput(c, &st.languageID).
+					Label(inputLabel(locale, localized(locale, "语言 ID", "Language ID"))).
+					Placeholder(localized(locale, "例如 go、python", "e.g. go, python")).FillWidth()
+			}).Description(localized(locale,
+				"重启后生效；工具名前缀为 lsp_（如 lsp_hover）。",
+				"Applies after a restart; tools are prefixed lsp_ (e.g. lsp_hover)."))
+			statusBadgesRow(c, t, st.status, st.statusErr)
+			uikit.DialogFooter(c, []uikit.DialogAction{{
+				Label: localized(locale, "添加", "Add"), Primary: true,
+				OnClick: func() {
+					addLSPServer(st, store, locale)
+					c.Invalidate()
+				},
+			}})
 		})
 
-		ui.Row(c).FillWidth().Gap(design.Space2).AlignItems(ui.Center).Children(func() {
-			if save := design.Apply(ui.PrimaryButton(c, localized(locale, "保存", "Save")), t.PrimaryButton()); save.Clicked() {
-				if writeLSPServers(st, store, locale,
-					localized(locale, "已保存（重启后生效）", "Saved (applies after restart)")) {
-					st.refreshActive()
-				}
+		if st.confirmRemove != "" {
+			name := st.confirmRemove
+			open := true
+			switch ui.AlertDialog(c, &open,
+				localized(locale, "移除语言服务器", "Remove language server"),
+				localized(locale, "确认移除「", "Remove ")+name+
+					localized(locale, "」？此操作无法撤销。", "? This cannot be undone."),
+				localized(locale, "取消", "Cancel"),
+				localized(locale, "移除服务器", "Remove server")) {
+			case 1:
+				removeLSPServer(st, store, name, locale)
+				st.confirmRemove = ""
 				c.Invalidate()
 			}
-			ui.Spacer(c).Grow(1)
-			if st.status != "" {
-				statusBadge(c, t, st.status, st.statusErr)
+			if !open {
+				st.confirmRemove = ""
 			}
-		})
+		}
 	})
 }

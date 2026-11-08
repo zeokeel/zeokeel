@@ -24,6 +24,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"sort"
+	"strconv"
 	"strings"
 
 	rigtools "github.com/zeokeel/zeokeel-rig/tools"
@@ -34,46 +35,44 @@ import (
 
 	"github.com/zeokeel/zeokeel/internal/contracts"
 	"github.com/zeokeel/zeokeel/internal/design"
-	"github.com/zeokeel/zeokeel/internal/icons"
 	"github.com/zeokeel/zeokeel/internal/uikit"
 )
 
 // Settings page constants. ID and Section are stable contracts the host renders
-// in its settings sidebar; Order places the model page before About (90).
+// in its grouped settings sidebar; the host sorts the nav by Section rank first
+// (general → 模型 → 外观 → 键盘 → 高级 → 关于) and by Order inside a section.
+// Order only needs to be unique inside one section.
 const (
 	PageID      = "model"
-	PageSection = "模型"
+	PageSection = "常用"
 	PageOrder   = 10
 
 	// AppearancePageID is the appearance page identity (theme + language).
 	AppearancePageID = "appearance"
-	// AppearancePageOrder places the page after the model page.
-	AppearancePageOrder = 20
-
-	// ProvidersPageID is the provider catalogue page.
-	ProvidersPageID = "providers"
-	// ProvidersPageOrder places the page between model and appearance.
-	ProvidersPageOrder = 15
+	// AppearancePageSection is the "appearance & skills" nav group.
+	AppearancePageSection = "外观"
+	// AppearancePageOrder places the page after the model group.
+	AppearancePageOrder = 10
 
 	// ShortcutsPageID is the keyboard-shortcut reference page.
 	ShortcutsPageID = "shortcuts"
 	// ShortcutsPageOrder places the page after appearance.
 	ShortcutsPageOrder = 30
 
-	// DiagnosticsPageID is the read-only diagnostics page (about section).
+	// DiagnosticsPageID is the read-only diagnostics page (advanced section).
 	DiagnosticsPageID = "diagnostics"
-	// DiagnosticsPageOrder places it after the About page.
-	DiagnosticsPageOrder = 95
+	// DiagnosticsPageSection places it in the advanced group.
+	DiagnosticsPageSection = "高级"
+	// DiagnosticsPageOrder places it first in the advanced group.
+	DiagnosticsPageOrder = 50
 
 	// SkillsPageID is the skills discovery/preview page.
 	SkillsPageID = "skills"
-	// SkillsPageSection is the settings sidebar section the skills page lives
-	// in. The host sorts pages by Section first, so it uses the same section as
-	// the model page: a new section like "工具" would sort before "模型" and
-	// become the default page, changing what opening Settings shows.
-	SkillsPageSection = PageSection
-	// SkillsPageOrder places the page between appearance and shortcuts.
-	SkillsPageOrder = 25
+	// SkillsPageSection places the skills page in the appearance group; skills
+	// are how the assistant's capabilities look to the user.
+	SkillsPageSection = "外观"
+	// SkillsPageOrder places the page after appearance.
+	SkillsPageOrder = 20
 	// SkillsPageTitle is the page title and heading.
 	SkillsPageTitle = "技能"
 )
@@ -84,15 +83,19 @@ type shortcutRow struct {
 	Keys   string
 }
 
-// shortcutRows is the product's keyboard reference (the old shell's shortcuts
-// page): chrome toggles, composer keys and window dismissal.
-var shortcutRows = []shortcutRow{
-	{"折叠 / 展开侧边栏", "Cmd/Ctrl + B"},
-	{"打开命令面板", "Cmd/Ctrl + K"},
-	{"发送消息", "Enter"},
-	{"换行", "Shift + Enter"},
-	{"命令菜单", "输入 /"},
-	{"关闭弹窗 / 菜单", "Esc"},
+// shortcutReferenceRows builds the read-only keyboard reference. H5: the two
+// configurable shortcuts are edited in the section above and are not repeated
+// here; this table lists the fixed window shortcuts only.
+func shortcutReferenceRows(locale contracts.LocaleService) []shortcutRow {
+	return []shortcutRow{
+		{localized(locale, "新会话", "New session"), "Cmd/Ctrl + N"},
+		{localized(locale, "切换右侧栏", "Toggle right panel"), "Cmd/Ctrl + Alt + I"},
+		{localized(locale, "发送消息", "Send message"), "Enter"},
+		{localized(locale, "换行", "New line"), "Shift + Enter"},
+		{localized(locale, "命令菜单", "Command menu"), localized(locale, "输入 /", "Type /")},
+		{localized(locale, "设置", "Settings"), "Cmd/Ctrl + ,"},
+		{localized(locale, "关闭弹窗 / 菜单", "Close dialog / menu"), "Esc"},
+	}
 }
 
 // shortcutChoices maps the editable chrome shortcuts to their native Select
@@ -134,26 +137,38 @@ func shortcutChord(choices []shortcutChoice, label string) string {
 	return choices[0].Chord
 }
 
+// shortcutsState is the shortcut page's local state: the confirmation of the
+// destructive "restore defaults" action.
+type shortcutsState struct {
+	confirmRestore bool
+}
+
 // buildShortcutsPage renders the shortcut reference with native rows and the
-// two editable chrome shortcuts (persisted through the host settings).
+// two editable desktop shortcuts (persisted through the host settings). Every
+// control on the page applies immediately, so there is no save button.
 func buildShortcutsPage(c *ui.Context, t *design.Tokens, title string, store contracts.SettingsService,
-	locale contracts.LocaleService) {
+	locale contracts.LocaleService, st *shortcutsState) {
 	ui.Column(c).FillWidth().Gap(design.Space4).Children(func() {
-		design.Apply(ui.Text(c, title), t.Font(design.TypeL)).FontWeight(600).
-			TextColor(t.LabelPrimary)
-		design.Apply(ui.Text(c, localized(locale,
-			"键盘快捷键参考；下面两项 chrome 快捷键可修改并立即生效。",
-			"Keyboard reference; the two chrome shortcuts below are editable and apply immediately.")),
-			t.TextMuted(design.TypeXS))
-		configurable := ui.Column(c).FillWidth().Gap(0).Padding(design.Space3)
-		design.Apply(configurable, t.Panel())
-		configurable.Children(func() {
+		uikit.PageHeader(c, title, localized(locale,
+			"键盘快捷键参考；下面两项桌面快捷键可修改并立即生效。",
+			"Keyboard reference; the two desktop shortcuts below are editable and apply immediately."))
+		uikit.Section(c, localized(locale, "桌面快捷键", "Desktop shortcuts"), func(*ui.Context) {
+			// H23: restoring the defaults is a page action, not a form row: it
+			// sits at the section's top right, away from the editable fields.
+			ui.Row(c).FillWidth().Justify(ui.End).Children(func() {
+				if design.Apply(ui.Button(c, localized(locale, "恢复默认", "Restore defaults")),
+					t.DangerButton()).Tooltip(localized(locale,
+					"恢复两项快捷键的默认值", "Restore both default shortcuts")).Clicked() {
+					st.confirmRestore = true
+					c.Invalidate()
+				}
+			})
 			toggleDisplay := shortcutDisplay(toggleSidebarChoices,
 				store.Get(contracts.SettingsUIShortcutToggleSidebar, contracts.DefaultShortcutToggleSidebar))
-			ui.Row(c).FillWidth().Padding(design.Space2, 0, design.Space2, 0).
+			ui.Row(c).FillWidth().PaddingY(design.Space2).
 				AlignItems(ui.Center).Gap(design.Space3).Children(func() {
 				design.Apply(ui.Text(c, localized(locale, "折叠 / 展开侧边栏", "Collapse / expand sidebar")),
-					t.Text(design.TypeS)).Grow(1)
+					t.Text(design.TypeBody)).Grow(1)
 				choice := toggleDisplay
 				selectControl := ui.Select(c, &choice, shortcutChoiceLabels(toggleSidebarChoices)).
 					Label(localized(locale, "侧边栏快捷键", "Sidebar shortcut"))
@@ -164,10 +179,10 @@ func buildShortcutsPage(c *ui.Context, t *design.Tokens, title string, store con
 			ui.Divider(c)
 			paletteDisplay := shortcutDisplay(commandPaletteChoices,
 				store.Get(contracts.SettingsUIShortcutCommandPalette, contracts.DefaultShortcutCommandPalette))
-			ui.Row(c).FillWidth().Padding(design.Space2, 0, design.Space2, 0).
+			ui.Row(c).FillWidth().PaddingY(design.Space2).
 				AlignItems(ui.Center).Gap(design.Space3).Children(func() {
 				design.Apply(ui.Text(c, localized(locale, "打开命令面板", "Open command palette")),
-					t.Text(design.TypeS)).Grow(1)
+					t.Text(design.TypeBody)).Grow(1)
 				choice := paletteDisplay
 				selectControl := ui.Select(c, &choice, shortcutChoiceLabels(commandPaletteChoices)).
 					Label(localized(locale, "命令面板快捷键", "Command palette shortcut"))
@@ -175,55 +190,38 @@ func buildShortcutsPage(c *ui.Context, t *design.Tokens, title string, store con
 					_ = store.Set(contracts.SettingsUIShortcutCommandPalette, shortcutChord(commandPaletteChoices, choice))
 				}
 			})
-			ui.Divider(c)
-			ui.Row(c).FillWidth().Justify(ui.End).Children(func() {
-				if ui.Button(c, localized(locale, "恢复默认", "Restore defaults")).Clicked() {
-					_ = store.Set(contracts.SettingsUIShortcutToggleSidebar, contracts.DefaultShortcutToggleSidebar)
-					_ = store.Set(contracts.SettingsUIShortcutCommandPalette, contracts.DefaultShortcutCommandPalette)
-				}
-			})
 		})
-		panel := ui.Column(c).FillWidth().Gap(0).Padding(design.Space3)
-		design.Apply(panel, t.Panel())
-		panel.Children(func() {
-			for index, row := range localizedShortcutRows(locale) {
+		uikit.Section(c, localized(locale, "全部快捷键", "All shortcuts"), func(*ui.Context) {
+			for index, row := range shortcutReferenceRows(locale) {
 				if index > 0 {
 					ui.Divider(c)
 				}
-				ui.Row(c).FillWidth().Padding(design.Space2, 0, design.Space2, 0).
+				ui.Row(c).FillWidth().PaddingY(design.Space2).
 					AlignItems(ui.Center).Children(func() {
-					design.Apply(ui.Text(c, row.Action), t.Text(design.TypeS)).Grow(1)
-					design.Apply(ui.Badge(c, row.Keys), t.Badge())
+					design.Apply(ui.Text(c, row.Action), t.Text(design.TypeBody)).Grow(1)
+					design.Apply(ui.Text(c, row.Keys), t.Font(design.TypeXS), t.MonoFamily()).
+						TextColor(t.LabelTertiary).Shrink(0)
 				})
 			}
 		})
+		// Restoring the defaults overwrites the user's custom chords: confirm it
+		// with the native alert dialog.
+		if st.confirmRestore {
+			switch ui.AlertDialog(c, &st.confirmRestore,
+				localized(locale, "恢复默认快捷键", "Restore default shortcuts"),
+				localized(locale, "恢复默认会覆盖你自定义的两项快捷键。",
+					"Restoring the defaults overwrites your two custom shortcuts."),
+				localized(locale, "取消", "Cancel"),
+				localized(locale, "恢复默认", "Restore")) {
+			case 1:
+				_ = store.Set(contracts.SettingsUIShortcutToggleSidebar, contracts.DefaultShortcutToggleSidebar)
+				_ = store.Set(contracts.SettingsUIShortcutCommandPalette, contracts.DefaultShortcutCommandPalette)
+				c.Invalidate()
+			default:
+				c.Invalidate()
+			}
+		}
 	})
-}
-
-// localizedShortcutRows returns the keyboard reference in the current language;
-// only the action labels are translated, the key chords stay verbatim.
-func localizedShortcutRows(locale contracts.LocaleService) []shortcutRow {
-	rows := make([]shortcutRow, 0, len(shortcutRows))
-	translations := map[string]string{
-		"折叠 / 展开侧边栏": "Collapse / expand sidebar",
-		"打开命令面板":     "Open command palette",
-		"发送消息":       "Send message",
-		"换行":         "New line",
-		"命令菜单":       "Command menu",
-		"关闭弹窗 / 菜单":  "Close dialog / menu",
-	}
-	for _, row := range shortcutRows {
-		action := row.Action
-		if en, ok := translations[action]; ok {
-			action = localized(locale, action, en)
-		}
-		keys := row.Keys
-		if keys == "输入 /" {
-			keys = localized(locale, keys, "Type /")
-		}
-		rows = append(rows, shortcutRow{Action: action, Keys: keys})
-	}
-	return rows
 }
 
 // shortcutChoiceLabels returns the Select options of a shortcut table.
@@ -249,9 +247,24 @@ type appearanceState struct {
 	autostart      bool
 	singleInstance bool
 	closeToTray    bool
-	// globalHotkey is the accelerator draft persisted with the page's save
-	// action (the host registers it at the next start; empty disables it).
+	// globalHotkey is the canonical accelerator draft. Theme, language and the
+	// desktop switches apply at once; the hotkey is the page's one explicit-save
+	// field (the host registers it at the next start; empty disables it).
 	globalHotkey string
+	// hotkeyText is the friendly display draft bound to the input
+	// ("Cmd/Ctrl + Shift + Space"), parsed back into globalHotkey on edit.
+	hotkeyText  string
+	hotkeyError string
+	// savingHotkey/captureText/captureFocus/captureInput are the key recorder's
+	// state: while capturing, a focused text input turns pressed combinations
+	// into the accelerator.
+	capturing    bool
+	captureText  string
+	captureFocus bool
+	captureInput ui.Handle
+	// savedHotkey is the persisted accelerator the draft was seeded from, so the
+	// page can show an "unapplied" hint and its action a dirty state.
+	savedHotkey string
 }
 
 // singleInstanceSwitchEnabled reads the stored single-instance setting with the
@@ -325,6 +338,39 @@ type moduleState struct {
 	apiKeySet bool
 	status    string
 	statusErr bool
+
+	// seenModel/seenBaseURL/seenSystemPrompt snapshot the persisted
+	// configuration the drafts were seeded from. The build compares it with the
+	// current effective config so a write from another surface (the provider
+	// page, a provider preset, a second window) refreshes the drafts instead of
+	// the stale draft silently overwriting it on the next save.
+	seenModel        string
+	seenBaseURL      string
+	seenSystemPrompt string
+
+	// runtimeOpen controls the model page's collapsed 高级选项 (runtime limits):
+	// the daily form stays short, the low-frequency knobs unfold on demand.
+	runtimeOpen bool
+
+	// Persistent input identities: the sync never rewrites a draft whose input
+	// holds the focus, so it can not replace text under the caret.
+	modelInput   ui.Handle
+	baseURLInput ui.Handle
+	apiKeyInput  ui.Handle
+	promptInput  ui.Handle
+
+	// Runtime limit drafts (persisted by the page's footer Save) plus their
+	// per-field inline validation messages. An empty numeric draft means "use
+	// the module config", so saving it clears the settings row. The stream
+	// completeness switch is immediate-write and therefore has no draft.
+	maxIterations     string
+	contextBudget     string
+	iterationsErr     string
+	contextBudgetErr  string
+	seenMaxIterations string
+	seenContextBudget string
+	iterationsInput   ui.Handle
+	budgetInput       ui.Handle
 }
 
 // buildLabels is the resolved copy of one page build.
@@ -353,6 +399,14 @@ type pageDefinition struct {
 	enTitle       string
 	titleOverride string
 	Build         contracts.BuildFunc
+	// Footer renders the page's pinned action row in the host's fixed settings
+	// footer (outside the scrolling body), and Dirty reports unsaved edits so
+	// the host can show the unsaved state and guard closing the surface.
+	Footer contracts.BuildFunc
+	Dirty  func() bool
+	// Discard throws the drafts away and re-reads the saved values; the host
+	// calls it when the user closes the settings with "Discard".
+	Discard func()
 }
 
 // pageSyncer keeps the registered settings pages in sync with the host locale.
@@ -388,6 +442,9 @@ func (s *pageSyncer) register(def pageDefinition) error {
 		Title:   s.title(def),
 		Order:   def.Order,
 		Build:   def.Build,
+		Footer:  def.Footer,
+		Dirty:   def.Dirty,
+		Discard: def.Discard,
 	})
 	if err != nil {
 		return err
@@ -440,53 +497,6 @@ func (s *pageSyncer) close() {
 	s.registered = map[string]func(){}
 }
 
-// providerPreset is one built-in OpenAI-compatible provider.
-type providerPreset struct {
-	Name    string
-	Model   string
-	BaseURL string
-}
-
-// providerPresets is the product's provider catalogue (old models_ui page):
-// the endpoint/model pairs a first-run user can select with one click.
-var providerPresets = []providerPreset{
-	{"DeepSeek", "deepseek-chat", "https://api.deepseek.com/v1"},
-	{"OpenAI", "gpt-4o-mini", "https://api.openai.com/v1"},
-	{"Ollama", "llama3.1", "http://localhost:11434/v1"},
-}
-
-// buildProvidersPage renders the provider catalogue as native brand cards; the
-// action writes the chat settings keys (the agent reads them on next start).
-func buildProvidersPage(c *ui.Context, t *design.Tokens, store contracts.SettingsService,
-	locale contracts.LocaleService) {
-	ui.Column(c).FillWidth().Gap(design.Space3).Children(func() {
-		design.Apply(ui.Text(c, localized(locale, "服务商", "Providers")), t.Font(design.TypeL)).
-			FontWeight(600).TextColor(t.LabelPrimary)
-		design.Apply(ui.Text(c, localized(locale,
-			"选择内置的 OpenAI 兼容服务商；保存后下次启动生效。",
-			"Choose a built-in OpenAI-compatible provider; changes apply on the next launch.")),
-			t.TextMuted(design.TypeXS))
-		for _, preset := range providerPresets {
-			preset := preset
-			card := ui.Column(c).FillWidth().Gap(2).Padding(design.Space3)
-			design.Apply(card, t.Panel())
-			card.Children(func() {
-				ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(design.Space2).Children(func() {
-					design.Apply(ui.Text(c, preset.Name), t.Font(design.TypeS)).FontWeight(600).
-						TextColor(t.LabelPrimary)
-					design.Apply(ui.Badge(c, preset.Model), t.Badge())
-					ui.Spacer(c).Grow(1)
-					if ui.Button(c, localized(locale, "使用", "Use")).Clicked() {
-						_ = store.Set(contracts.SettingsChatModel, preset.Model)
-						_ = store.Set(contracts.SettingsChatBaseURL, preset.BaseURL)
-					}
-				})
-				design.Apply(ui.Text(c, preset.BaseURL), t.TextMuted(design.TypeXXS))
-			})
-		}
-	})
-}
-
 // diagnosticRow is one label/value line of the diagnostics page.
 type diagnosticRow struct{ Label, Value string }
 
@@ -502,27 +512,26 @@ type diagnosticsState struct {
 func buildDiagnosticsPage(c *ui.Context, t *design.Tokens, state *diagnosticsState,
 	rows []diagnosticRow, modules []contracts.ModuleInfo, locale contracts.LocaleService) {
 	ui.Column(c).FillWidth().Gap(design.Space4).Children(func() {
-		design.Apply(ui.Text(c, localized(locale, "诊断", "Diagnostics")), t.Font(design.TypeL)).
-			FontWeight(600).TextColor(t.LabelPrimary)
-		design.Apply(ui.Text(c, localized(locale,
+		uikit.PageHeader(c, localized(locale, "诊断", "Diagnostics"), localized(locale,
 			"运行时与存储信息（只读）；可复制后附在问题报告里。",
-			"Read-only runtime and storage details; copy them into a bug report.")),
-			t.TextMuted(design.TypeXS))
-		panel := ui.Column(c).FillWidth().Gap(0).Padding(design.Space3)
-		design.Apply(panel, t.Panel())
-		panel.Children(func() {
-			for index, row := range rows {
-				if index > 0 {
-					ui.Divider(c)
+			"Read-only runtime and storage details; copy them into a bug report."))
+		uikit.Section(c, localized(locale, "运行时信息", "Runtime information"), func(*ui.Context) {
+			ui.Column(c).FillWidth().Gap(design.Space1).Children(func() {
+				for index, row := range rows {
+					if index > 0 {
+						ui.Divider(c)
+					}
+					ui.Row(c).FillWidth().PaddingY(design.Space1).
+						AlignItems(ui.Center).Gap(design.Space3).Children(func() {
+						design.Apply(ui.Text(c, row.Label), t.TextMuted(design.TypeXS)).
+							Width(160).Shrink(0)
+						// H22: long setting-key rows wrap instead of being
+						// truncated to two or three lines with an ellipsis.
+						design.Apply(ui.Text(c, row.Value), t.Font(design.TypeXS), t.MonoFamily()).
+							TextColor(t.LabelPrimary).Grow(1).MaxLines(8)
+					})
 				}
-				ui.Row(c).FillWidth().Padding(design.Space2, 0, design.Space2, 0).
-					AlignItems(ui.Center).Gap(design.Space3).Children(func() {
-					design.Apply(ui.Text(c, row.Label), t.Font(design.TypeXS)).
-						TextColor(t.LabelSecondary).Width(160).Shrink(0)
-					design.Apply(ui.Text(c, row.Value), t.MonoFamily()).FontSize(12).
-						TextColor(t.LabelPrimary).Grow(1).MaxLines(2).Ellipsis("…")
-				})
-			}
+			})
 		})
 		buildLoadedModulesSection(c, t, state, locale, modules)
 
@@ -537,7 +546,7 @@ func buildDiagnosticsPage(c *ui.Context, t *design.Tokens, state *diagnosticsSta
 			}
 			if state.copied {
 				design.Apply(ui.Badge(c, localized(locale, "已复制", "Copied")), t.Badge()).
-					TextColor(design.Of(c).Success)
+					TextColor(t.SuccessText)
 			}
 		})
 	})
@@ -578,7 +587,11 @@ func Module() *module.Descriptor[Config] {
 			singleInstance: singleInstanceSwitchEnabled(store.Get(contracts.SettingSingleInstance, "true")),
 			closeToTray:    closeToTraySettingEnabled(store.Get(contracts.SettingCloseToTray, "false")),
 			globalHotkey:   store.Get(contracts.SettingGlobalHotkey, ""),
+			hotkeyText:     formatHotkeyDisplay(store.Get(contracts.SettingGlobalHotkey, "")),
+			savedHotkey:    store.Get(contracts.SettingGlobalHotkey, ""),
 		}
+		shortcuts := &shortcutsState{}
+		archive := &archiveState{}
 		skills := newSkillsState()
 		update := newUpdateState()
 		importState := newImportState()
@@ -628,17 +641,26 @@ func Module() *module.Descriptor[Config] {
 					syncer.sync()
 					buildPage(c, runtime, state, chat, modelLabels(), store, locale, modelCheck)
 				},
-			},
-			{
-				ID: ProvidersPageID, Section: PageSection, Order: ProvidersPageOrder,
-				zhTitle: "服务商", enTitle: "Providers",
-				Build: func(c *ui.Context) {
-					syncer.sync()
-					buildProvidersPage(c, design.Of(c), store, locale)
+				Footer: func(c *ui.Context) {
+					uikit.DialogFooter(c, []uikit.DialogAction{{
+						Label: modelLabels().saveLabel, Primary: true,
+						OnClick: func() {
+							saveModelPage(c, state, store, locale)
+						},
+					}})
+				},
+				Dirty: state.dirty,
+				Discard: func() {
+					state.discardDrafts(effectiveChatConfig(chat, store), chat, store)
+					modelCheck.running = false
+					modelCheck.result = ""
+					modelCheck.resultErr = false
+					modelCheck.modelCount = 0
+					modelCheck.modelCountKnown = false
 				},
 			},
 			{
-				ID: DiagnosticsPageID, Section: "高级", Order: DiagnosticsPageOrder,
+				ID: DiagnosticsPageID, Section: DiagnosticsPageSection, Order: DiagnosticsPageOrder,
 				zhTitle: "诊断", enTitle: "Diagnostics",
 				Build: func(c *ui.Context) {
 					syncer.sync()
@@ -648,19 +670,31 @@ func Module() *module.Descriptor[Config] {
 				},
 			},
 			{
-				ID: ShortcutsPageID, Section: "键盘", Order: ShortcutsPageOrder,
+				ID: ShortcutsPageID, Section: "外观", Order: ShortcutsPageOrder,
 				zhTitle: "快捷键", enTitle: "Shortcuts",
 				Build: func(c *ui.Context) {
 					syncer.sync()
-					buildShortcutsPage(c, design.Of(c), localized(locale, "快捷键", "Shortcuts"), store, locale)
+					buildShortcutsPage(c, design.Of(c), localized(locale, "快捷键", "Shortcuts"), store, locale, shortcuts)
 				},
 			},
 			{
-				ID: AppearancePageID, Section: PageSection, Order: AppearancePageOrder,
+				ID: AppearancePageID, Section: AppearancePageSection, Order: AppearancePageOrder,
 				zhTitle: "外观", enTitle: "Appearance", titleOverride: cfg.AppearanceTitle,
 				Build: func(c *ui.Context) {
 					syncer.sync()
 					buildAppearancePage(c, appearance, store, theme, locale, appearanceLabels())
+				},
+				Footer: func(c *ui.Context) {
+					uikit.DialogFooter(c, []uikit.DialogAction{{
+						Label: appearanceLabels().saveLabel, Primary: true,
+						OnClick: func() {
+							applyAppearancePage(c, appearance, store, locale)
+						},
+					}})
+				},
+				Dirty: appearance.dirty,
+				Discard: func() {
+					appearance.discardHotkey(store)
 				},
 			},
 			{
@@ -694,6 +728,21 @@ func Module() *module.Descriptor[Config] {
 					syncer.sync()
 					buildSearchPage(c, ctx, search, locale)
 				},
+				Footer: func(c *ui.Context) {
+					uikit.DialogFooter(c, []uikit.DialogAction{{
+						Label: localized(locale, "保存", "Save"), Primary: true,
+						OnClick: func() {
+							if store, ok := ctx.Get(contracts.KeySettings); ok && store != nil {
+								saveSearchSettings(search, store, locale)
+							}
+							c.Invalidate()
+						},
+					}})
+				},
+				Dirty: func() bool { return search.dirty(store) },
+				Discard: func() {
+					search.discardDrafts(store)
+				},
 			},
 			{
 				ID: MCPPageID, Section: MCPPageSection, Order: MCPPageOrder,
@@ -701,6 +750,14 @@ func Module() *module.Descriptor[Config] {
 				Build: func(c *ui.Context) {
 					syncer.sync()
 					buildMCPPage(c, ctx, mcp, locale)
+				},
+			},
+			{
+				ID: ArchivePageID, Section: ArchivePageSection, Order: ArchivePageOrder,
+				zhTitle: "归档", enTitle: "Archived",
+				Build: func(c *ui.Context) {
+					syncer.sync()
+					buildArchivePage(c, design.Of(c), ctx, archive, locale)
 				},
 			},
 			{
@@ -757,6 +814,19 @@ func Module() *module.Descriptor[Config] {
 				Build: func(c *ui.Context) {
 					syncer.sync()
 					buildNetworkPage(c, store, network, locale)
+				},
+				Footer: func(c *ui.Context) {
+					uikit.DialogFooter(c, []uikit.DialogAction{{
+						Label: localized(locale, "保存", "Save"), Primary: true,
+						OnClick: func() {
+							saveNetworkSettings(network, store, locale)
+							c.Invalidate()
+						},
+					}})
+				},
+				Dirty: func() bool { return network.dirty(store) },
+				Discard: func() {
+					network.discardDrafts(store)
 				},
 			},
 			{
@@ -853,89 +923,234 @@ func diagnosticsRows(info contracts.AppInfo, dataDir string, toolkit *rigtools.R
 	return rows
 }
 
-// newState seeds the drafts from the effective chat config, falling back to the
-// settings store for values the agent backend did not resolve.
-func newState(chat contracts.ChatService, store contracts.SettingsService) *moduleState {
-	effective := chat.Config()
-	state := &moduleState{
-		model:        firstNonEmpty(effective.Model, store.Get(contracts.SettingsChatModel, "")),
-		baseURL:      firstNonEmpty(effective.BaseURL, store.Get(contracts.SettingsChatBaseURL, "")),
-		systemPrompt: firstNonEmpty(effective.SystemPrompt, store.Get(contracts.SettingsChatSystemPrompt, "")),
+// runtimeSummary is the one-line effective runtime state shown under the
+// collapsed 高级选项 disclosure.
+func runtimeSummary(state *moduleState, store contracts.SettingsService, locale contracts.LocaleService) string {
+	iterations := strings.TrimSpace(state.maxIterations)
+	if iterations == "" {
+		iterations = localized(locale, "默认", "default")
 	}
-	state.apiKeySet = firstNonEmpty(effective.APIKey, store.Get(contracts.SettingsChatAPIKey, "")) != ""
+	budget := strings.TrimSpace(state.contextBudget)
+	if budget == "" {
+		budget = localized(locale, "默认", "default")
+	}
+	stream := localized(locale, "开", "on")
+	if !requireFinishReasonEnabled(store) {
+		stream = localized(locale, "关", "off")
+	}
+	return localized(locale, "最大迭代 ", "Max iterations ") + iterations +
+		localized(locale, " · 上下文预算 ", " · context budget ") + budget +
+		localized(locale, " · 流完整性校验 ", " · stream completeness ") + stream
+}
+
+// saveModelPage is the model page's pinned footer action: it validates the
+// runtime-limit drafts, persists the drafts and reports the result in the
+// page's status line. Invalid numbers keep their drafts and inline errors and
+// persist nothing.
+func saveModelPage(c *ui.Context, state *moduleState, store contracts.SettingsService,
+	locale contracts.LocaleService) {
+	if !validateRuntimeDrafts(state, locale) {
+		state.status = localized(locale, "运行参数有误，未保存",
+			"Runtime parameters are invalid; nothing was saved")
+		state.statusErr = true
+		c.Invalidate()
+		return
+	}
+	if err := save(state, store); err != nil {
+		state.status = localized(locale, "保存失败：", "Save failed: ") + err.Error()
+		state.statusErr = true
+	} else {
+		state.status = localized(locale, "已保存", "Saved")
+		state.statusErr = false
+	}
+	c.Invalidate()
+}
+
+// applyAppearancePage is the appearance page's pinned footer action: it applies
+// the explicit-save values and reports the result in the page status line.
+func applyAppearancePage(c *ui.Context, state *appearanceState, store contracts.SettingsService,
+	locale contracts.LocaleService) {
+	if err := applyAppearance(state, store, locale); err != nil {
+		state.status = localized(locale, "保存失败：", "Save failed: ") + err.Error()
+		state.statusErr = true
+	} else {
+		state.status = localized(locale, "已保存", "Saved")
+		state.statusErr = false
+	}
+	c.Invalidate()
+}
+
+// effectiveChatConfig resolves the configuration that actually applies. The
+// agent backend resolves the settings store over the assembly config, so the
+// store is read first and the backend value is the fallback.
+func effectiveChatConfig(chat contracts.ChatService, store contracts.SettingsService) contracts.ChatConfig {
+	var effective contracts.ChatConfig
+	if chat != nil {
+		effective = chat.Config()
+	}
+	if store == nil {
+		return effective
+	}
+	if value := strings.TrimSpace(store.Get(contracts.SettingsChatModel, "")); value != "" {
+		effective.Model = value
+	}
+	if value := strings.TrimRight(strings.TrimSpace(store.Get(contracts.SettingsChatBaseURL, "")), "/"); value != "" {
+		effective.BaseURL = value
+	}
+	if value := strings.TrimSpace(store.Get(contracts.SettingsChatSystemPrompt, "")); value != "" {
+		effective.SystemPrompt = value
+	}
+	if value := strings.TrimSpace(store.Get(contracts.SettingsChatAPIKey, "")); value != "" {
+		effective.APIKey = value
+	}
+	return effective
+}
+
+// newState seeds the drafts from the effective chat config.
+func newState(chat contracts.ChatService, store contracts.SettingsService) *moduleState {
+	state := &moduleState{}
+	state.seed(effectiveChatConfig(chat, store))
+	state.seedRuntime(chat, store)
 	return state
 }
 
-// --- brand building blocks -------------------------------------------------
+// seed replaces the drafts with the persisted configuration and records it as
+// the snapshot the build compares against.
+func (st *moduleState) seed(cfg contracts.ChatConfig) {
+	st.model = cfg.Model
+	st.baseURL = cfg.BaseURL
+	st.systemPrompt = cfg.SystemPrompt
+	st.seenModel = cfg.Model
+	st.seenBaseURL = cfg.BaseURL
+	st.seenSystemPrompt = cfg.SystemPrompt
+	st.apiKeySet = strings.TrimSpace(cfg.APIKey) != ""
+}
 
-// pageHeader draws the brand page header: type L title and a muted description.
-func pageHeader(c *ui.Context, t *design.Tokens, title, description string) {
-	ui.Column(c).FillWidth().Gap(2).Children(func() {
-		design.Apply(ui.Text(c, title), t.Font(design.TypeL)).FontWeight(500).
-			TextColor(t.LabelPrimary)
-		if description != "" {
-			design.Apply(ui.Text(c, description), t.TextMuted(design.TypeXXS))
+// runtimeDrafts resolves the numeric runtime-limit drafts. An explicit settings
+// row (including "0") wins over the effective chat config; a non-positive
+// module value renders as an empty draft so the field shows the placeholder and
+// saving it clears the row (fallback to the module config).
+func runtimeDrafts(chat contracts.ChatService, store contracts.SettingsService) (iterations, contextBudget string) {
+	var cfg contracts.ChatConfig
+	if chat != nil {
+		cfg = chat.Config()
+	}
+	if store != nil {
+		iterations = strings.TrimSpace(store.Get(contracts.SettingsChatMaxIterations, ""))
+		contextBudget = strings.TrimSpace(store.Get(contracts.SettingsChatContextBudget, ""))
+	}
+	if iterations == "" && cfg.MaxIterations > 0 {
+		iterations = strconv.Itoa(cfg.MaxIterations)
+	}
+	if contextBudget == "" && cfg.ContextBudget != 0 {
+		contextBudget = strconv.Itoa(cfg.ContextBudget)
+	}
+	return iterations, contextBudget
+}
+
+// seedRuntime replaces the runtime-limit drafts and their persisted snapshot.
+func (st *moduleState) seedRuntime(chat contracts.ChatService, store contracts.SettingsService) {
+	st.maxIterations, st.contextBudget = runtimeDrafts(chat, store)
+	st.seenMaxIterations, st.seenContextBudget = st.maxIterations, st.contextBudget
+	st.iterationsErr, st.contextBudgetErr = "", ""
+}
+
+// requireFinishReasonEnabled reports the stream-completeness switch state:
+// explicit "false"/"0"/"off"/"no" disables the check, anything else (including
+// the unset row, which follows the assembly default of on) keeps it enabled.
+func requireFinishReasonEnabled(store contracts.SettingsService) bool {
+	if store == nil {
+		return true
+	}
+	switch strings.ToLower(strings.TrimSpace(store.Get(contracts.SettingsChatRequireFinishReason, ""))) {
+	case "false", "0", "off", "no":
+		return false
+	}
+	return true
+}
+
+// validateRuntimeDrafts parses the numeric drafts and fills their inline
+// errors. It reports whether both drafts are valid and can be saved.
+func validateRuntimeDrafts(st *moduleState, locale contracts.LocaleService) bool {
+	st.iterationsErr, st.contextBudgetErr = "", ""
+	if raw := strings.TrimSpace(st.maxIterations); raw != "" {
+		value, err := strconv.Atoi(raw)
+		if err != nil || value < 1 {
+			st.iterationsErr = localized(locale,
+				"请输入大于 0 的整数；留空使用模块默认值。",
+				"Enter an integer greater than 0; leave blank to use the module default.")
+		}
+	}
+	if raw := strings.TrimSpace(st.contextBudget); raw != "" {
+		value, err := strconv.Atoi(raw)
+		if err != nil || value < 0 {
+			st.contextBudgetErr = localized(locale,
+				"请输入大于或等于 0 的整数；留空使用模块默认值。",
+				"Enter an integer greater than or equal to 0; leave blank to use the module default.")
+		}
+	}
+	return st.iterationsErr == "" && st.contextBudgetErr == ""
+}
+
+// syncFromConfig refreshes the drafts when the persisted configuration changed
+// outside this page (the provider page's "Use", a preset write, another window,
+// the runtime-limit rows). It never overwrites a draft whose input holds the
+// focus, so the caret and the text being typed survive; the next frame after
+// the focus leaves syncs.
+func (st *moduleState) syncFromConfig(c *ui.Context, chat contracts.ChatService, store contracts.SettingsService) {
+	cfg := effectiveChatConfig(chat, store)
+	iterations, contextBudget := runtimeDrafts(chat, store)
+	if cfg.Model == st.seenModel && cfg.BaseURL == st.seenBaseURL &&
+		cfg.SystemPrompt == st.seenSystemPrompt &&
+		iterations == st.seenMaxIterations && contextBudget == st.seenContextBudget {
+		return
+	}
+	if st.modelInput.Focused(c) || st.baseURLInput.Focused(c) ||
+		st.apiKeyInput.Focused(c) || st.promptInput.Focused(c) ||
+		st.iterationsInput.Focused(c) || st.budgetInput.Focused(c) {
+		return
+	}
+	st.seed(cfg)
+	st.seedRuntime(chat, store)
+}
+
+// discardDrafts throws the page's edits away: the drafts are re-seeded from the
+// persisted configuration and the transient status/test state is cleared, so a
+// reopened settings page shows the saved values and no "unsaved" hint.
+func (st *moduleState) discardDrafts(cfg contracts.ChatConfig, chat contracts.ChatService,
+	store contracts.SettingsService) {
+	st.seed(cfg)
+	st.seedRuntime(chat, store)
+	st.apiKey = ""
+	st.status = ""
+	st.statusErr = false
+}
+
+// dirty reports whether the drafts differ from the persisted configuration; a
+// typed API key counts as unsaved input. The immediate-write stream switch is
+// persisted on change and therefore never dirties the page.
+func (st *moduleState) dirty() bool {
+	return st.model != st.seenModel || st.baseURL != st.seenBaseURL ||
+		st.systemPrompt != st.seenSystemPrompt ||
+		st.maxIterations != st.seenMaxIterations ||
+		st.contextBudget != st.seenContextBudget ||
+		strings.TrimSpace(st.apiKey) != ""
+}
+
+// statusRow renders the page's unsaved hint and its last save status. The
+// action itself stays the page's single primary button below.
+func statusRow(c *ui.Context, t *design.Tokens, st *moduleState, locale contracts.LocaleService) {
+	ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(design.Space2).Children(func() {
+		if st.dirty() {
+			design.Apply(ui.Text(c, localized(locale, "未保存", "Unsaved")), t.TextMuted(design.TypeXS))
+		}
+		if st.status != "" {
+			statusBadge(c, t, st.status, st.statusErr)
 		}
 	})
 }
 
-// panel draws one brand panel card (raised surface, border, radius) with its
-// content padding on the 4 DIP grid. It is used for every settings block.
-func panel(c *ui.Context, t *design.Tokens, body func()) {
-	design.Apply(ui.Column(c).FillWidth().Gap(design.Space2), t.Panel()).
-		Padding(design.Space3).Children(body)
-}
-
-// sectionTitle draws one panel section title: type S, weight 600, primary text.
-func sectionTitle(c *ui.Context, t *design.Tokens, title string) {
-	design.Apply(ui.Text(c, title), t.Font(design.TypeS)).FontWeight(600).
-		TextColor(t.LabelPrimary)
-}
-
-// fieldLabel draws the muted label above one input.
-func fieldLabel(c *ui.Context, t *design.Tokens, label string) {
-	design.Apply(ui.Text(c, label), t.TextMuted(design.TypeXS))
-}
-
-// field stacks one label and its native control in a panel.
-func field(c *ui.Context, t *design.Tokens, label string, control func()) {
-	ui.Column(c).FillWidth().Gap(design.Space1).Children(func() {
-		fieldLabel(c, t, label)
-		control()
-	})
-}
-
-// secondaryButtonStyle is the brand's secondary button: raised fill, regular
-// border, control radius and 36 DIP height.
-func secondaryButtonStyle(t *design.Tokens) design.Style {
-	return func(el ui.Element) ui.Element {
-		return el.Height(32).PaddingX(design.Space3).Radius(design.RadiusMD).
-			Background(t.BgRaised).Border(1, t.BorderL2).TextColor(t.LabelPrimary)
-	}
-}
-
-// brandButton builds a secondary button with a leading icon and label using
-// native controls only (ui.Button + ui.Icon + ui.Text).
-func brandButton(c *ui.Context, t *design.Tokens, icon *ui.SVG, label string) ui.Element {
-	button := ui.Button(c, "").Children(func() {
-		ui.Icon(c, icon).Size(design.Space4, design.Space4).TextColor(t.LabelSecondary)
-		design.Apply(ui.Text(c, label), t.Font(design.TypeBody))
-	})
-	return design.Apply(button, secondaryButtonStyle(t))
-}
-
-// brandPrimaryButton builds the brand primary action: native PrimaryButton with
-// a leading icon and label, styled with the design system's primary button.
-func brandPrimaryButton(c *ui.Context, t *design.Tokens, icon *ui.SVG, label string) ui.Element {
-	button := ui.PrimaryButton(c, "").Children(func() {
-		ui.Icon(c, icon).Size(design.Space4, design.Space4)
-		design.Apply(ui.Text(c, label), t.Font(design.TypeBody))
-	})
-	return design.Apply(button, t.PrimaryButton())
-}
-
-// statusBadge renders the save status as a brand badge, with danger text when
-// the save failed.
+// statusBadge renders one status badge; a failed status uses danger text.
 func statusBadge(c *ui.Context, t *design.Tokens, text string, failed bool) {
 	badge := design.Apply(ui.Badge(c, text), t.Badge())
 	if failed {
@@ -943,23 +1158,31 @@ func statusBadge(c *ui.Context, t *design.Tokens, text string, failed bool) {
 	}
 }
 
-// --- model page ------------------------------------------------------------
-
-// preset is one quick model preset.
-type preset struct {
-	label   string
-	model   string
-	baseURL string
-	icon    *ui.SVG
+// statusBadgesRow renders one page status line, hiding it while it is empty.
+func statusBadgesRow(c *ui.Context, t *design.Tokens, status string, failed bool) {
+	if status == "" {
+		return
+	}
+	ui.Row(c).FillWidth().Children(func() {
+		statusBadge(c, t, status, failed)
+	})
 }
 
-// modelPresets are the brand quick presets (filled into the drafts only).
-func modelPresets() []preset {
-	return []preset{
-		{label: "DeepSeek", model: "deepseek-chat", baseURL: "https://api.deepseek.com/v1", icon: icons.Sparkles()},
-		{label: "OpenAI", model: "gpt-4o-mini", baseURL: "https://api.openai.com/v1", icon: icons.Globe()},
-		{label: "Ollama", model: "llama3.1", baseURL: "http://localhost:11434/v1", icon: icons.Terminal()},
-	}
+// switchField renders one boolean setting as a native form Field: the visible
+// label (which toggles the switch when clicked), the native ui.Switch with the
+// same accessible name, and the description below the control. Its caller puts
+// Fields in one ui.Form so their labels share the macOS-style label column, and
+// handles the Changed result right where the setting lives.
+func switchField(c *ui.Context, label, description string, value *bool) bool {
+	var changed bool
+	ui.Field(c, label, func() {
+		// The field names the switch for assistive technology; do not set a
+		// second Label on it, which would make the field's visible label
+		// untargetable.
+		sw := ui.Switch(c, value)
+		changed = sw.Changed()
+	}).Description(description)
+	return changed
 }
 
 // inputLabel appends the localized "input" suffix used by native input labels.
@@ -967,98 +1190,209 @@ func inputLabel(locale contracts.LocaleService, label string) string {
 	return label + localized(locale, " 输入", " input")
 }
 
-// buildPage builds the model settings page with branded native controls.
+// modelCatalogHint returns a localized, non-blocking warning when the model
+// draft is neither a model-catalog preset nor — once the connection check has
+// discovered a model list — one of the discovered ids. The endpoint accepts
+// unknown ids silently and may fall back to its own default model, so the page
+// says the name is kept while the id may not take effect (ZK-15). An empty
+// string means "show nothing".
+func modelCatalogHint(check *modelCheckState, store contracts.SettingsService, model string,
+	locale contracts.LocaleService) string {
+	model = strings.TrimSpace(model)
+	if model == "" || catalogHasModel(store, model) {
+		return ""
+	}
+	// A list is only known when the last check succeeded and its body parsed as
+	// an OpenAI-style model list; while a check runs it does not count as
+	// discovered evidence.
+	discovered := check != nil && !check.running && !check.resultErr &&
+		check.modelCountKnown && len(check.modelNames) > 0
+	if discovered && hasModelID(check.modelNames, model) {
+		return ""
+	}
+	if discovered {
+		return localized(locale,
+			"该模型不在内置/已发现目录中；保存后仍会使用该名称，端点可能回退到默认模型。",
+			"This model is not in the built-in/discovered catalog; it is still used as entered and the endpoint may fall back to its default.")
+	}
+	return localized(locale,
+		"该模型不在内置目录中；保存后仍会使用该名称，端点可能回退到默认模型。",
+		"This model is not in the built-in catalog; it is still used as entered and the endpoint may fall back to its default.")
+}
+
+// buildPage builds the model settings page: one explicit-save form (the page's
+// single primary action) plus the read-only effective context. The provider
+// presets only fill the drafts, so the whole page has one save semantic.
 func buildPage(c *ui.Context, runtime contracts.UIRuntime, state *moduleState, chat contracts.ChatService,
 	labels buildLabels, store contracts.SettingsService, locale contracts.LocaleService,
 	check *modelCheckState) {
 	t := design.Of(c)
-	ui.Column(c).FillWidth().Gap(design.Space2).Children(func() {
-		pageHeader(c, t, labels.title, localized(locale,
-			"配置对话使用的模型、API 地址与系统提示词。",
-			"Configure the model, API base URL and system prompt used by the conversation."))
+	// A write from another settings surface (provider page, another window)
+	// refreshes the drafts before they render, so this page can never save a
+	// stale configuration over it.
+	state.syncFromConfig(c, chat, store)
+	ui.Column(c).FillWidth().Gap(design.Space4).Children(func() {
+		uikit.PageHeader(c, labels.title, localized(locale,
+			"配置对话使用的模型、API 地址与系统提示词；修改后点击「保存」生效。",
+			"Configure the model, API base URL and system prompt used by the conversation; save to apply."))
 
-		panel(c, t, func() {
-			sectionTitle(c, t, localized(locale, "快速预设", "Quick presets"))
-			buildProviderPresets(c, t, state, store, locale)
+		uikit.Section(c, localized(locale, "快速预设", "Quick presets"), func(*ui.Context) {
+			buildProviderPresets(c, t, state, locale)
 		})
 
-		panel(c, t, func() {
-			sectionTitle(c, t, localized(locale, "连接", "Connection"))
+		uikit.Section(c, localized(locale, "连接", "Connection"), func(*ui.Context) {
 			ui.Row(c).FillWidth().Gap(design.Space3).AlignItems(ui.Start).Children(func() {
-				ui.Column(c).FillWidth().Grow(1).Gap(design.Space1).Children(func() {
-					fieldLabel(c, t, labels.modelLabel)
-					ui.TextInput(c, &state.model).Label(inputLabel(locale, labels.modelLabel)).FillWidth()
+				ui.Column(c).FillWidth().Grow(1).Children(func() {
+					ui.Field(c, labels.modelLabel, func() {
+						ui.TextInput(c, &state.model).Label(inputLabel(locale, labels.modelLabel)).
+							Bind(&state.modelInput).FillWidth()
+					}).Description(localized(locale,
+						"服务商提供的模型 ID，例如 deepseek-chat。",
+						"The model ID the provider exposes, for example deepseek-chat."))
 				})
-				ui.Column(c).FillWidth().Grow(1).Gap(design.Space1).Children(func() {
-					fieldLabel(c, t, labels.baseURLLabel)
-					ui.TextInput(c, &state.baseURL).Label(inputLabel(locale, labels.baseURLLabel)).FillWidth()
+				ui.Column(c).FillWidth().Grow(1).Children(func() {
+					ui.Field(c, labels.baseURLLabel, func() {
+						ui.TextInput(c, &state.baseURL).Label(inputLabel(locale, labels.baseURLLabel)).
+							Bind(&state.baseURLInput).FillWidth()
+					}).Description(localized(locale,
+						"OpenAI 兼容接口，例如 https://api.deepseek.com/v1。",
+						"OpenAI-compatible endpoint, for example https://api.deepseek.com/v1."))
 				})
 			})
-			ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(design.Space2).Children(func() {
-				fieldLabel(c, t, labels.apiKeyLabel)
-				ui.Spacer(c).Grow(1)
-				if state.apiKeySet {
-					design.Apply(ui.Text(c, localized(locale, "已设置（留空保持不变）", "Configured (leave blank to keep)")), t.TextMuted(design.TypeXXS))
-				} else {
-					design.Apply(ui.Text(c, localized(locale, "未设置", "Not configured")), t.TextMuted(design.TypeXXS))
-				}
+			// ZK-15: a restrained, non-blocking hint next to the model draft.
+			// Unknown ids are accepted and saved, but the endpoint may silently
+			// fall back to its default model, so the user is told.
+			if hint := modelCatalogHint(check, store, state.model, locale); hint != "" {
+				design.Apply(ui.Text(c, hint), t.Font(design.TypeXXS)).
+					TextColor(t.WarningText).MaxLines(2)
+			}
+			apiKeyDescription := localized(locale, "未设置；密钥只保存在本机。",
+				"Not configured; the key is stored locally only.")
+			if state.apiKeySet {
+				apiKeyDescription = localized(locale, "已设置（留空保持不变）。",
+					"Configured (leave this blank to keep it).")
+			}
+			ui.Field(c, labels.apiKeyLabel, func() {
+				ui.TextInput(c, &state.apiKey).Label(inputLabel(locale, labels.apiKeyLabel)).
+					Bind(&state.apiKeyInput).
+					Placeholder(localized(locale, "输入新的 API key；留空保持不变",
+						"Enter a new API key; leave blank to keep")).
+					FillWidth()
+			}).Description(apiKeyDescription)
+		})
+
+		// H2: the check tests the drafts shown above (never the saved store),
+		// with the stored key only as the documented "blank keeps it" fallback.
+		testAPIKey := firstNonEmpty(strings.TrimSpace(state.apiKey),
+			effectiveChatConfig(chat, store).APIKey)
+		buildModelCheckPanel(c, t, runtime, check, state.model, state.baseURL, testAPIKey, locale)
+
+		uikit.Section(c, localized(locale, "提示词", "Prompt"), func(*ui.Context) {
+			ui.Field(c, labels.systemPromptLabel, func() {
+				ui.TextArea(c, &state.systemPrompt).Label(inputLabel(locale, labels.systemPromptLabel)).
+					Bind(&state.promptInput).FillWidth().Height(56)
+			}).Description(localized(locale,
+				"追加到每次对话的系统提示前；留空使用服务商默认。",
+				"Prepended to every conversation's system prompt; empty uses the provider default."))
+		})
+
+		// Runtime limits are low-frequency knobs: a native disclosure keeps the
+		// daily model form (connection, check, prompt) short. The numeric drafts
+		// still save with the page footer; the stream switch applies immediately.
+		ui.Collapsible(c, localized(locale, "高级选项", "Advanced options"), &state.runtimeOpen, func() {
+			uikit.Section(c, localized(locale, "运行参数", "Runtime"), func(*ui.Context) {
+				ui.Row(c).FillWidth().Gap(design.Space3).AlignItems(ui.Start).Children(func() {
+					ui.Column(c).FillWidth().Grow(1).Children(func() {
+						ui.Field(c, localized(locale, "最大迭代次数", "Max iterations"), func() {
+							ui.TextInput(c, &state.maxIterations).
+								Label(inputLabel(locale, localized(locale, "最大迭代次数", "Max iterations"))).
+								Bind(&state.iterationsInput).
+								Placeholder(localized(locale, "模块默认值", "Module default")).FillWidth()
+						}).Description(localized(locale,
+							"模型/工具轮数上限；留空使用模块默认值。",
+							"Model/tool rounds per run; leave blank to use the module default."))
+						if state.iterationsErr != "" {
+							uikit.ErrorLine(c, state.iterationsErr)
+						}
+					})
+					ui.Column(c).FillWidth().Grow(1).Children(func() {
+						ui.Field(c, localized(locale, "上下文预算", "Context budget"), func() {
+							ui.TextInput(c, &state.contextBudget).
+								Label(inputLabel(locale, localized(locale, "上下文预算", "Context budget"))).
+								Bind(&state.budgetInput).
+								Placeholder(localized(locale, "模块默认值", "Module default")).FillWidth()
+						}).Description(localized(locale,
+							"自动压缩的 prompt token 预算，0 = 不自动压缩；留空使用模块默认值。",
+							"Prompt-token budget for automatic compaction; 0 = no automatic compaction. Leave blank to use the module default."))
+						if state.contextBudgetErr != "" {
+							uikit.ErrorLine(c, state.contextBudgetErr)
+						}
+					})
+				})
+				ui.Form(c, func() {
+					requireComplete := requireFinishReasonEnabled(store)
+					if switchField(c,
+						localized(locale, "流完整性校验", "Stream completeness"),
+						localized(locale,
+							"缺少 finish_reason 的流按截断失败处理；极简兼容服务器可关闭。",
+							"A stream without a finish_reason is treated as truncated; disable it for minimal compatible servers."),
+						&requireComplete) {
+						if err := store.Set(contracts.SettingsChatRequireFinishReason,
+							strconv.FormatBool(requireComplete)); err != nil {
+							state.status = localized(locale, "保存失败：", "Save failed: ") + err.Error()
+							state.statusErr = true
+						} else {
+							state.status = localized(locale, "已保存", "Saved")
+							state.statusErr = false
+						}
+						c.Invalidate()
+					}
+				})
 			})
-			ui.TextInput(c, &state.apiKey).Label(inputLabel(locale, labels.apiKeyLabel)).
-				Placeholder(localized(locale, "输入新的 API key；留空保持不变", "Enter a new API key; leave blank to keep")).FillWidth()
 		})
+		if !state.runtimeOpen {
+			design.Apply(ui.Text(c, runtimeSummary(state, store, locale)),
+				t.Font(design.TypeXXXS)).TextColor(t.LabelTertiary)
+		}
 
-		buildModelCheckPanel(c, t, runtime, chat, store, locale, check)
+		// H1: the page's single primary action (save) lives in the host's
+		// fixed footer; the body keeps the unsaved/saved status line.
+		statusRow(c, t, state, locale)
 
-		panel(c, t, func() {
-			sectionTitle(c, t, localized(locale, "提示词", "Prompt"))
-			fieldLabel(c, t, labels.systemPromptLabel)
-			ui.TextArea(c, &state.systemPrompt).Label(inputLabel(locale, labels.systemPromptLabel)).
-				FillWidth().Height(56)
-		})
-
-		ui.Row(c).FillWidth().Gap(design.Space2).AlignItems(ui.Center).Children(func() {
-			if brandPrimaryButton(c, t, icons.Sliders(), labels.saveLabel).Clicked() {
-				if err := save(state, store); err != nil {
-					state.status = localized(locale, "保存失败：", "Save failed: ") + err.Error()
-					state.statusErr = true
-				} else {
-					state.status = localized(locale, "已保存", "Saved")
-					state.statusErr = false
-				}
-			}
-			ui.Spacer(c).Grow(1)
-			if state.status != "" {
-				statusBadge(c, t, state.status, state.statusErr)
-			}
-		})
-
-		// Read-only context: the host owns navigation, so this is a plain
-		// informational text, not a control.
+		// Read-only effective configuration: reads the store/backend values that
+		// actually apply, never the unsaved drafts (an unsaved model edit must
+		// not report itself as current).
+		effective := effectiveChatConfig(chat, store)
 		active := strings.TrimSpace(chat.ActiveSession())
 		if active == "" {
 			active = localized(locale, "无活动会话", "No active session")
 		}
-		ui.Divider(c)
-		design.Apply(ui.Textf(c, localized(locale, "当前会话: %s · 当前模型: %s", "Current session: %s · Current model: %s"),
-			active, firstNonEmpty(state.model, localized(locale, "未配置", "Not configured"))),
-			t.Font(design.TypeXXS)).TextColor(t.LabelTertiary)
+		uikit.Section(c, localized(locale, "当前", "Current"), func(*ui.Context) {
+			uikit.KeyValueRows(c, []uikit.KeyValue{
+				{Key: localized(locale, "当前会话", "Current session"), Value: active},
+				{Key: localized(locale, "当前模型", "Current model"),
+					Value: firstNonEmpty(effective.Model,
+						localized(locale, "未配置", "Not configured"))},
+			})
+		})
 	})
 }
 
 // --- appearance page -------------------------------------------------------
 
-// buildAppearancePage builds the theme/language page with branded native
-// controls.
+// buildAppearancePage builds the theme/language/desktop page. Theme, language
+// and the desktop switches apply at once (they are switches, the mygo control
+// for a setting that takes effect immediately); the global hotkey is the page's
+// only explicit-save field and says so next to its input.
 func buildAppearancePage(c *ui.Context, state *appearanceState, store contracts.SettingsService,
 	theme contracts.ThemeService, locale contracts.LocaleService, labels buildAppearanceLabels) {
 	t := design.Of(c)
-	ui.Column(c).FillWidth().Gap(design.Space2).Children(func() {
-		pageHeader(c, t, labels.title, localized(locale,
-			"主题与界面语言；保存后立即生效并写入产品设置。",
-			"Theme and interface language; changes apply immediately and are saved to the product settings."))
+	ui.Column(c).FillWidth().Gap(design.Space4).Children(func() {
+		uikit.PageHeader(c, labels.title, localized(locale,
+			"主题、界面语言与桌面集成即时生效；全局热键修改后点击「应用」写入。",
+			"Theme, interface language and desktop integration apply immediately; apply the global hotkey to save it."))
 
-		panel(c, t, func() {
-			sectionTitle(c, t, localized(locale, "主题", "Theme"))
+		uikit.Section(c, localized(locale, "主题", "Theme"), func(*ui.Context) {
 			segmented := ui.Segmented(c, &state.themeMode,
 				localized(locale, "浅色", "Light"),
 				localized(locale, "深色", "Dark"),
@@ -1074,8 +1408,7 @@ func buildAppearancePage(c *ui.Context, state *appearanceState, store contracts.
 				t.TextMuted(design.TypeXXS)).MaxLines(2)
 		})
 
-		panel(c, t, func() {
-			sectionTitle(c, t, localized(locale, "语言", "Language"))
+		uikit.Section(c, localized(locale, "语言", "Language"), func(*ui.Context) {
 			choice := languageChoice(state.language)
 			selectControl := ui.Select(c, &choice, languageOptions).Label(labels.languageLabel)
 			if selectControl.Changed() {
@@ -1085,73 +1418,83 @@ func buildAppearancePage(c *ui.Context, state *appearanceState, store contracts.
 				state.status = localized(locale, "语言已切换", "Language switched")
 				state.statusErr = false
 			}
-			design.Apply(ui.Text(c, localized(locale, "界面文案与日期格式随语言切换。", "Interface copy and date formats follow the language.")), t.TextMuted(design.TypeXXS))
-		})
-
-		panel(c, t, func() {
-			sectionTitle(c, t, localized(locale, "桌面集成", "Desktop integration"))
-			autostart := ui.Toggle(c, &state.autostart, localized(locale, "开机自启动", "Launch at login"))
-			if autostart.Changed() {
-				applyDesktopSetting(state, store, contracts.SettingAutostart, fmt.Sprintf("%t", state.autostart), locale)
-			}
 			design.Apply(ui.Text(c, localized(locale,
-				"登录时自动启动 ZeoKeel（Linux XDG autostart）。",
-				"Start ZeoKeel automatically when you log in (Linux XDG autostart).")),
-				t.TextMuted(design.TypeXXS))
-			single := ui.Toggle(c, &state.singleInstance, localized(locale, "单实例运行", "Single instance"))
-			if single.Changed() {
-				applyDesktopSetting(state, store, contracts.SettingSingleInstance, fmt.Sprintf("%t", state.singleInstance), locale)
-			}
-			design.Apply(ui.Text(c, localized(locale,
-				"关闭后允许多开；修改需要重启应用生效。",
-				"When off, multiple instances may run; takes effect after restart.")),
+				"界面文案与日期格式随语言切换，立即生效。",
+				"Interface copy and date formats follow the language and apply immediately.")),
 				t.TextMuted(design.TypeXXS))
 		})
 
-		// Tray and hotkey are both small "desktop feature" switches: side by
-		// side they keep the appearance page's save action in view.
-		ui.Row(c).FillWidth().Gap(design.Space2).AlignItems(ui.Start).Children(func() {
-			ui.Column(c).FillWidth().Grow(1).Children(func() {
-				panel(c, t, func() {
-					sectionTitle(c, t, localized(locale, "系统托盘", "System tray"))
-					trayToggle := ui.Toggle(c, &state.closeToTray,
-						localized(locale, "关闭时最小化到托盘", "Close to system tray"))
-					if trayToggle.Changed() {
-						applyDesktopSetting(state, store, contracts.SettingCloseToTray,
-							fmt.Sprintf("%t", state.closeToTray), locale)
-					}
-					design.Apply(ui.Text(c, localized(locale,
-						"需要系统托盘支持；修改后重启应用生效。",
-						"Requires system tray support; takes effect after restart.")),
-						t.TextMuted(design.TypeXXS)).MaxLines(1).Ellipsis("…")
-				})
-			})
-			ui.Column(c).FillWidth().Grow(1).Children(func() {
-				buildGlobalHotkeyPanel(c, t, state, store, locale)
-			})
-		})
-
-		ui.Row(c).FillWidth().Gap(design.Space2).AlignItems(ui.Center).Children(func() {
-			if brandPrimaryButton(c, t, icons.Globe(), labels.saveLabel).Clicked() {
-				locale.SetLanguage(state.language)
-				if err := saveAppearance(state, store, locale); err != nil {
-					state.status = localized(locale, "保存失败：", "Save failed: ") + err.Error()
-					state.statusErr = true
-				} else {
-					state.status = localized(locale, "已保存", "Saved")
-					state.statusErr = false
+		uikit.Section(c, localized(locale, "桌面集成", "Desktop integration"), func(*ui.Context) {
+			ui.Form(c, func() {
+				if switchField(c,
+					localized(locale, "开机自启动", "Launch at login"),
+					localized(locale, "登录时自动启动 ZeoKeel（Linux XDG autostart）。",
+						"Start ZeoKeel automatically when you log in (Linux XDG autostart)."),
+					&state.autostart) {
+					applyDesktopSetting(state, store, contracts.SettingAutostart,
+						fmt.Sprintf("%t", state.autostart), locale)
 				}
-			}
-			ui.Spacer(c).Grow(1)
-			if state.status != "" {
-				statusBadge(c, t, state.status, state.statusErr)
-			}
+				if switchField(c,
+					localized(locale, "单实例运行", "Single instance"),
+					localized(locale, "关闭后允许多开；修改需要重启应用生效。",
+						"When off, multiple instances may run; takes effect after restart."),
+					&state.singleInstance) {
+					applyDesktopSetting(state, store, contracts.SettingSingleInstance,
+						fmt.Sprintf("%t", state.singleInstance), locale)
+				}
+				if switchField(c,
+					localized(locale, "关闭时最小化到托盘", "Close to system tray"),
+					localized(locale, "需要系统托盘支持；修改后重启应用生效。",
+						"Requires system tray support; takes effect after restart."),
+					&state.closeToTray) {
+					applyDesktopSetting(state, store, contracts.SettingCloseToTray,
+						fmt.Sprintf("%t", state.closeToTray), locale)
+				}
+			})
 		})
+
+		buildGlobalHotkeySection(c, t, state, store, locale)
+
+		// H1: the apply action lives in the host's fixed footer; the body keeps
+		// the status/unsaved line.
+		statusBadgesRow(c, t, state.status, state.statusErr)
 	})
 }
 
-func saveAppearance(state *appearanceState, store contracts.SettingsService, locale contracts.LocaleService) error {
+// discardHotkey re-reads the persisted accelerator and clears the inline error
+// and status, so the page reopens clean after "Discard".
+func (st *appearanceState) discardHotkey(store contracts.SettingsService) {
+	saved := ""
+	if store != nil {
+		saved = strings.TrimSpace(store.Get(contracts.SettingGlobalHotkey, ""))
+	}
+	st.globalHotkey = saved
+	st.savedHotkey = saved
+	st.hotkeyText = formatHotkeyDisplay(saved)
+	st.hotkeyError = ""
+	st.capturing = false
+	st.captureText = ""
+	st.captureFocus = false
+	st.status = ""
+	st.statusErr = false
+}
+
+// dirty reports whether the appearance page holds an unsaved edit: theme,
+// language and the desktop switches apply at once, so only the global-hotkey
+// draft can be pending (the host shows "unsaved" and guards closing for it).
+func (st *appearanceState) dirty() bool {
+	return strings.TrimSpace(st.globalHotkey) != strings.TrimSpace(st.savedHotkey)
+}
+
+// applyAppearance persists the page's explicit-save fields. Theme, language and
+// the desktop switches already apply at once; repeating their writes here is
+// idempotent and keeps the page's single "Apply" action a complete snapshot
+// (it also normalizes legacy rows such as the old ui.theme.dark flag).
+func applyAppearance(state *appearanceState, store contracts.SettingsService, locale contracts.LocaleService) error {
 	hotkey := strings.TrimSpace(state.globalHotkey)
+	if state.hotkeyError != "" {
+		return errors.New(state.hotkeyError)
+	}
 	if !validGlobalHotkeyValue(hotkey) {
 		return errors.New(globalHotkeyInvalidMessage(locale))
 	}
@@ -1174,14 +1517,25 @@ func saveAppearance(state *appearanceState, store contracts.SettingsService, loc
 	if err := store.Set(contracts.SettingCloseToTray, fmt.Sprintf("%t", state.closeToTray)); err != nil {
 		return err
 	}
-	return store.Set(contracts.SettingGlobalHotkey, hotkey)
+	if err := store.Set(contracts.SettingGlobalHotkey, hotkey); err != nil {
+		return err
+	}
+	state.savedHotkey = hotkey
+	state.globalHotkey = hotkey
+	state.hotkeyText = formatHotkeyDisplay(hotkey)
+	state.hotkeyError = ""
+	return nil
 }
 
 // applyDesktopSetting persists one desktop-integration switch immediately (the
-// page's other controls also apply immediately) and reports success or the
-// readable store error in the page's status badge.
+// page's switches also apply immediately) and reports success or the readable
+// store error in the page's status badge. A failed write re-reads the stored
+// value so the switch never lies about the persisted state.
 func applyDesktopSetting(state *appearanceState, store contracts.SettingsService, key, value string, locale contracts.LocaleService) {
 	if err := store.Set(key, value); err != nil {
+		state.autostart = store.Get(contracts.SettingAutostart, "false") == "true"
+		state.singleInstance = singleInstanceSwitchEnabled(store.Get(contracts.SettingSingleInstance, "true"))
+		state.closeToTray = closeToTraySettingEnabled(store.Get(contracts.SettingCloseToTray, "false"))
 		state.status = localized(locale, "保存失败：", "Save failed: ") + err.Error()
 		state.statusErr = true
 		return
@@ -1192,7 +1546,8 @@ func applyDesktopSetting(state *appearanceState, store contracts.SettingsService
 
 // save writes the draft to the settings store. The API key is only written when
 // the user typed one, and the plaintext draft is cleared afterwards so it never
-// lingers in UI state.
+// lingers in UI state. The effective-config snapshot is recorded so the page
+// renders as clean right after a successful save.
 func save(state *moduleState, store contracts.SettingsService) error {
 	if err := store.Set(contracts.SettingsChatModel, state.model); err != nil {
 		return fmt.Errorf("model: %w", err)
@@ -1203,6 +1558,16 @@ func save(state *moduleState, store contracts.SettingsService) error {
 	if err := store.Set(contracts.SettingsChatSystemPrompt, state.systemPrompt); err != nil {
 		return fmt.Errorf("system prompt: %w", err)
 	}
+	// Runtime limits: an empty draft clears the row so the agent falls back to
+	// the module config (an explicit "0" budget stays meaningful).
+	state.maxIterations = strings.TrimSpace(state.maxIterations)
+	state.contextBudget = strings.TrimSpace(state.contextBudget)
+	if err := store.Set(contracts.SettingsChatMaxIterations, state.maxIterations); err != nil {
+		return fmt.Errorf("max iterations: %w", err)
+	}
+	if err := store.Set(contracts.SettingsChatContextBudget, state.contextBudget); err != nil {
+		return fmt.Errorf("context budget: %w", err)
+	}
 	if key := strings.TrimSpace(state.apiKey); key != "" {
 		if err := store.Set(contracts.SettingsChatAPIKey, key); err != nil {
 			return fmt.Errorf("API key: %w", err)
@@ -1210,6 +1575,12 @@ func save(state *moduleState, store contracts.SettingsService) error {
 		state.apiKeySet = true
 	}
 	state.apiKey = ""
+	state.seenModel = state.model
+	state.seenBaseURL = state.baseURL
+	state.seenSystemPrompt = state.systemPrompt
+	state.seenMaxIterations = state.maxIterations
+	state.seenContextBudget = state.contextBudget
+	state.iterationsErr, state.contextBudgetErr = "", ""
 	return nil
 }
 

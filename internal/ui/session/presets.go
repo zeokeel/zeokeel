@@ -89,7 +89,6 @@ func effectiveAgentPresets(st *state) []contracts.AgentPreset {
 	return out
 }
 
-// buildAgentPresetPicker renders the composer's persona picker (only when the
 // chat backend implements contracts.SessionPresetSetter and presets exist).
 func buildAgentPresetPicker(c *ui.Context, t *design.Tokens, chat contracts.ChatService, st *state, runtime contracts.UIRuntime, activeID string) {
 	setter, ok := chat.(contracts.SessionPresetSetter)
@@ -108,7 +107,9 @@ func buildAgentPresetPicker(c *ui.Context, t *design.Tokens, chat contracts.Chat
 			break
 		}
 	}
-	label := st.tr("人设：无", "Persona: None")
+	// The chip stays short (the toolbar has to fit the window): it names the
+	// feature, and the selected preset name when one is applied.
+	label := st.tr("人设", "Persona")
 	if currentName != "" {
 		label = st.tr("人设：", "Persona: ") + currentName
 	}
@@ -129,10 +130,6 @@ func buildAgentPresetPicker(c *ui.Context, t *design.Tokens, chat contracts.Chat
 			}
 		}
 	}).Tooltip(st.tr("为本会话选择代理预设（人设）", "Choose an agent preset (persona) for this session"))
-	if currentName != "" {
-		design.Apply(ui.Badge(c, st.tr("已应用人设：", "Persona applied: ")+currentName), t.Badge()).
-			TextColor(t.Accent)
-	}
 }
 
 // applySessionPreset selects/clears the active session's preset, surfacing a

@@ -12,7 +12,7 @@ import (
 
 	"github.com/zeokeel/zeokeel/internal/contracts"
 	"github.com/zeokeel/zeokeel/internal/design"
-	"github.com/zeokeel/zeokeel/internal/icons"
+	"github.com/zeokeel/zeokeel/internal/uikit"
 )
 
 // Presets page constants. Section "general" keeps it in the same settings
@@ -20,8 +20,8 @@ import (
 // and before the default About page.
 const (
 	PresetsPageID      = "presets"
-	PresetsPageSection = "general"
-	PresetsPageOrder   = 98
+	PresetsPageSection = "常用"
+	PresetsPageOrder   = 30
 	PresetsPageTitle   = "预设"
 )
 
@@ -48,6 +48,12 @@ type presetsState struct {
 
 	status    string
 	statusErr bool
+
+	// confirmKind/confirmIndex name the destructive action waiting for the
+	// native confirmation dialog ("", "delete-preset", "delete-agent",
+	// "restore-builtins", "restore-agents").
+	confirmKind  string
+	confirmIndex int
 }
 
 func newPresetsState() *presetsState { return &presetsState{} }
@@ -326,120 +332,183 @@ func (st *presetsState) restoreBuiltIns(store contracts.SettingsService, locale 
 
 // buildPresetsPage renders the effective list (custom first, built-in defaults
 // when unset) with reorder/delete controls, the add form and the restore action.
+// The page stays one page with instant-save rows; restoring the built-ins and
+// deleting a preset overwrite/remove user data, so both ask for confirmation.
 func buildPresetsPage(c *ui.Context, store contracts.SettingsService, st *presetsState, locale contracts.LocaleService) {
 	t := design.Of(c)
 	st.load(store, locale)
 	st.loadAgentPresets(store)
-	ui.Column(c).FillWidth().Gap(design.Space2).Children(func() {
-		pageHeader(c, t, localized(locale, PresetsPageTitle, "Presets"), localized(locale,
-			"提示词预设：可插入 composer 的提示词/人设模板；修改后立即保存。",
-			"Prompt presets: prompt/persona templates the composer can insert; edits save immediately."))
+	ui.Column(c).FillWidth().Gap(design.Space4).Children(func() {
+		uikit.PageHeader(c, localized(locale, PresetsPageTitle, "Presets"), localized(locale,
+			"提示词预设：可插入对话输入框的提示词/人设模板；修改后立即保存。",
+			"Prompt presets: prompt/persona templates the conversation composer can insert; edits save immediately."))
 
 		if st.parseErr != "" {
-			design.Apply(ui.Row(c).FillWidth().Gap(design.Space2).AlignItems(ui.Start), func(el ui.Element) ui.Element {
-				return el
-			}).Children(func() {
-				th := t.Theme()
-				ui.Icon(c, icons.AlertTriangle()).Size(th.Space(4), th.Space(4)).TextColor(t.Danger)
-				design.Apply(ui.Text(c, localized(locale, "配置解析失败：", "Failed to parse configuration: ")+st.parseErr),
-					t.Font(design.TypeXS)).TextColor(t.DangerText)
-			})
+			uikit.ErrorLine(c, localized(locale,
+				"配置解析失败：", "Failed to parse configuration: ")+st.parseErr)
 		}
 
-		panel(c, t, func() {
-			sectionTitle(c, t, localized(locale, "预设列表", "Presets"))
+		uikit.Section(c, localized(locale, "预设列表", "Presets"), func(*ui.Context) {
 			if st.usingLegacy {
 				design.Apply(ui.Text(c, localized(locale,
 					"内置默认（保存后自定义生效）", "Built-in defaults (save to customize)")),
 					t.TextMuted(design.TypeXXS))
 			}
 			if len(st.presets) == 0 {
-				design.Apply(ui.Text(c, localized(locale, "还没有预设", "No presets yet")),
-					t.TextMuted(design.TypeXS))
+				uikit.EmptyState(c, localized(locale, "还没有预设", "No presets yet"))
 				return
 			}
 			for index, preset := range st.presets {
+				if index > 0 {
+					ui.Divider(c)
+				}
 				buildPresetRow(c, t, store, st, locale, index, preset)
 			}
 		})
 
-		panel(c, t, func() {
-			sectionTitle(c, t, localized(locale, "新增预设", "Add preset"))
-			field(c, t, localized(locale, "名称", "Name"), func() {
+		uikit.Section(c, localized(locale, "新增预设", "Add preset"), func(*ui.Context) {
+			ui.Field(c, localized(locale, "名称", "Name"), func() {
 				ui.TextInput(c, &st.name).
 					Label(inputLabel(locale, localized(locale, "预设名称", "Preset name"))).
 					Placeholder(localized(locale, "例如：简洁回答", "e.g. Concise answers")).
 					FillWidth()
-			})
-			field(c, t, localized(locale, "提示词", "Prompt"), func() {
+			}).Description(localized(locale, "在对话输入框的预设菜单中显示的名称。",
+				"The name shown in the conversation composer's preset menu."))
+			ui.Field(c, localized(locale, "提示词", "Prompt"), func() {
 				ui.TextArea(c, &st.prompt).
 					Label(inputLabel(locale, localized(locale, "预设提示词", "Preset prompt"))).
 					Placeholder(localized(locale, "输入要插入的提示词…", "Prompt text to insert…")).
 					MinHeight(72).FillWidth()
-			})
+			}).Description(localized(locale, "插入到对话输入框的文本。",
+				"The text inserted into the conversation composer."))
 			ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(design.Space2).Children(func() {
-				if brandPrimaryButton(c, t, icons.Plus(), localized(locale, "添加", "Add")).Clicked() {
-					st.addPreset(store, locale)
-				}
-				restore := ui.Button(c, localized(locale, "恢复内置默认", "Restore built-in defaults"))
-				design.Apply(restore, secondaryButtonStyle(t)).Tooltip(localized(locale,
-					"清空自定义列表，重新使用内置默认。", "Clear the custom list and use the built-in defaults again."))
-				if restore.Clicked() {
-					st.restoreBuiltIns(store, locale)
+				if design.Apply(ui.Button(c,
+					localized(locale, "恢复内置默认", "Restore built-in defaults")),
+					t.DangerButton()).Tooltip(localized(locale,
+					"清空自定义列表，重新使用内置默认。",
+					"Clear the custom list and use the built-in defaults again.")).Clicked() {
+					st.confirmKind = "restore-builtins"
+					c.Invalidate()
 				}
 				ui.Spacer(c).Grow(1)
-				if st.status != "" {
-					statusBadge(c, t, st.status, st.statusErr)
-				}
+				uikit.DialogFooter(c, []uikit.DialogAction{{
+					Label: localized(locale, "添加", "Add"), Primary: true,
+					OnClick: func() {
+						st.addPreset(store, locale)
+						c.Invalidate()
+					},
+				}})
 			})
+			statusBadgesRow(c, t, st.status, st.statusErr)
 		})
 
-		// Agent presets: a compact section with a modal add/edit form (the page
-		// is already long; a modal keeps the controls reachable) and inline
-		// reorder/delete rows.
-		panel(c, t, func() {
-			ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(design.Space2).Children(func() {
-				sectionTitle(c, t, localized(locale, "代理预设", "Agent presets"))
-				ui.Spacer(c).Grow(1)
-				if brandPrimaryButton(c, t, icons.Plus(), localized(locale, "添加代理预设", "Add agent preset")).Clicked() {
-					st.agentFormOpen = true
-					st.agentName, st.agentPersona, st.agentPrompt, st.agentTools, st.agentModel = "", "", "", "", ""
-					st.status = ""
-				}
-				if ui.Button(c, localized(locale, "恢复默认人设", "Restore default persona presets")).Clicked() {
-					st.restoreAgentPresets(store, locale)
-				}
-				if st.status != "" {
-					statusBadge(c, t, st.status, st.statusErr)
-				}
-			})
+		// Agent presets: a section with a modal add form (the page is already
+		// long; a modal keeps the controls reachable) and inline reorder rows.
+		uikit.Section(c, localized(locale, "代理预设", "Agent presets"), func(*ui.Context) {
 			design.Apply(ui.Text(c, localized(locale,
 				"人设会追加到系统提示末尾；工具允许列表为空表示不过滤；模型是会话默认值（会话覆盖优先）。",
 				"Persona is appended to the system prompt; an empty tool allowlist keeps every tool; model is the session default (a session override wins).")),
-				t.TextMuted(design.TypeXXS)).MaxLines(2)
+				t.TextMuted(design.TypeXXS)).MaxLines(3)
 			if len(st.agentPresets) == 0 {
-				design.Apply(ui.Text(c, localized(locale, "还没有代理预设", "No agent presets yet")),
-					t.TextMuted(design.TypeXS))
-				return
+				uikit.EmptyState(c, localized(locale, "还没有代理预设", "No agent presets yet"))
 			}
 			for index, preset := range st.agentPresets {
+				if index > 0 {
+					ui.Divider(c)
+				}
 				buildAgentPresetRow(c, t, store, st, locale, index, preset)
 			}
+			ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(design.Space2).Children(func() {
+				if design.Apply(ui.Button(c,
+					localized(locale, "恢复默认人设", "Restore default persona presets")),
+					t.DangerButton()).Tooltip(localized(locale,
+					"覆盖当前人设列表，恢复内置默认。",
+					"Overwrite the current persona list with the built-in defaults.")).Clicked() {
+					st.confirmKind = "restore-agents"
+					c.Invalidate()
+				}
+				ui.Spacer(c).Grow(1)
+				uikit.DialogFooter(c, []uikit.DialogAction{{
+					Label: localized(locale, "添加代理预设", "Add agent preset"), Primary: true,
+					OnClick: func() {
+						st.agentFormOpen = true
+						st.agentName, st.agentPersona, st.agentPrompt, st.agentTools, st.agentModel = "", "", "", "", ""
+						st.status = ""
+						c.Invalidate()
+					},
+				}})
+			})
 		})
+
 		buildAgentPresetDialog(c, t, store, st, locale)
+
+		if st.confirmKind != "" {
+			buildPresetConfirmDialog(c, t, store, st, locale)
+		}
 	})
+}
+
+// buildPresetConfirmDialog renders the native confirmation for the destructive
+// preset actions and dispatches the confirmed one.
+func buildPresetConfirmDialog(c *ui.Context, t *design.Tokens, store contracts.SettingsService,
+	st *presetsState, locale contracts.LocaleService) {
+	title := localized(locale, "确认操作", "Confirm action")
+	message := localized(locale, "此操作无法撤销。", "This cannot be undone.")
+	cancel := localized(locale, "取消", "Cancel")
+	confirm := localized(locale, "确认", "Confirm")
+	kind, index := st.confirmKind, st.confirmIndex
+	switch kind {
+	case "delete-preset":
+		title = localized(locale, "删除预设", "Delete preset")
+		message = localized(locale, "确认删除该提示词预设？此操作无法撤销。",
+			"Delete this prompt preset? This cannot be undone.")
+		confirm = localized(locale, "确认删除", "Confirm delete")
+	case "delete-agent":
+		title = localized(locale, "删除代理预设", "Delete agent preset")
+		message = localized(locale, "确认删除该代理预设？此操作无法撤销。",
+			"Delete this agent preset? This cannot be undone.")
+		confirm = localized(locale, "确认删除", "Confirm delete")
+	case "restore-builtins":
+		title = localized(locale, "恢复内置默认", "Restore built-in defaults")
+		message = localized(locale, "恢复内置默认会覆盖当前的自定义预设列表。此操作无法撤销。",
+			"Restoring the built-in defaults overwrites the current custom preset list. This cannot be undone.")
+		confirm = localized(locale, "恢复默认", "Restore defaults")
+	case "restore-agents":
+		title = localized(locale, "恢复默认人设", "Restore default persona presets")
+		message = localized(locale, "恢复默认人设会覆盖当前的代理预设列表。此操作无法撤销。",
+			"Restoring the default persona presets overwrites the current agent preset list. This cannot be undone.")
+		confirm = localized(locale, "恢复默认", "Restore defaults")
+	}
+	open := true
+	switch ui.AlertDialog(c, &open, title, message, cancel, confirm) {
+	case 1:
+		switch kind {
+		case "delete-preset":
+			st.deletePreset(store, locale, index)
+		case "delete-agent":
+			st.deleteAgentPreset(store, locale, index)
+		case "restore-builtins":
+			st.restoreBuiltIns(store, locale)
+		case "restore-agents":
+			st.restoreAgentPresets(store, locale)
+		}
+		st.confirmKind = ""
+		c.Invalidate()
+	}
+	if !open {
+		st.confirmKind = ""
+	}
 }
 
 // buildPresetRow renders one preset with its two-line prompt summary and the
 // native move/delete actions.
 func buildPresetRow(c *ui.Context, t *design.Tokens, store contracts.SettingsService, st *presetsState,
 	locale contracts.LocaleService, index int, preset contracts.PromptPreset) {
-	design.Apply(ui.Row(c), func(el ui.Element) ui.Element {
-		return el.BorderWidth(0, 0, 1, 0).BorderColor(t.BorderL2)
-	}).FillWidth().Gap(design.Space2).AlignItems(ui.Center).
-		Padding(design.Space2, design.Space1).Children(func() {
-		ui.Column(c).Grow(1).Gap(1).Children(func() {
-			design.Apply(ui.Text(c, firstNonEmpty(strings.TrimSpace(preset.Name), localized(locale, "(未命名预设)", "(Untitled preset)"))),
+	ui.Row(c).FillWidth().Gap(design.Space2).AlignItems(ui.Center).
+		PaddingY(design.Space1).Children(func() {
+		ui.Column(c).Grow(1).Gap(design.Space1).Children(func() {
+			design.Apply(ui.Text(c, firstNonEmpty(strings.TrimSpace(preset.Name),
+				localized(locale, "(未命名预设)", "(Untitled preset)"))),
 				t.Font(design.TypeS)).FontWeight(600).TextColor(t.LabelPrimary)
 			summary := strings.TrimSpace(preset.Prompt)
 			if summary == "" {
@@ -448,20 +517,21 @@ func buildPresetRow(c *ui.Context, t *design.Tokens, store contracts.SettingsSer
 			design.Apply(ui.Text(c, summary), t.Font(design.TypeXXS)).
 				TextColor(t.LabelTertiary).MaxLines(2).Ellipsis("…")
 		})
-		up := ui.Button(c, localized(locale, "上移", "Up"))
-		design.Apply(up, secondaryButtonStyle(t)).Tooltip(localized(locale, "上移一位", "Move up"))
-		if up.Clicked() {
+		if design.Apply(ui.Button(c, localized(locale, "上移", "Up")),
+			t.SecondaryButton()).Tooltip(localized(locale, "上移一位", "Move up")).Clicked() {
 			st.movePreset(store, locale, index, -1)
+			c.Invalidate()
 		}
-		down := ui.Button(c, localized(locale, "下移", "Down"))
-		design.Apply(down, secondaryButtonStyle(t)).Tooltip(localized(locale, "下移一位", "Move down"))
-		if down.Clicked() {
+		if design.Apply(ui.Button(c, localized(locale, "下移", "Down")),
+			t.SecondaryButton()).Tooltip(localized(locale, "下移一位", "Move down")).Clicked() {
 			st.movePreset(store, locale, index, 1)
+			c.Invalidate()
 		}
-		remove := ui.Button(c, localized(locale, "删除", "Delete"))
-		design.Apply(remove, secondaryButtonStyle(t)).Tooltip(localized(locale, "删除该预设", "Delete this preset"))
-		if remove.Clicked() {
-			st.deletePreset(store, locale, index)
+		if design.Apply(ui.Button(c, localized(locale, "删除", "Delete")),
+			t.DangerButton()).Tooltip(localized(locale,
+			"删除该预设", "Delete this preset")).Clicked() {
+			st.confirmKind, st.confirmIndex = "delete-preset", index
+			c.Invalidate()
 		}
 	})
 }
@@ -478,31 +548,48 @@ func buildAgentPresetDialog(c *ui.Context, t *design.Tokens, store contracts.Set
 		}).Children(func() {
 			design.Apply(ui.Text(c, localized(locale, "新增代理预设", "New agent preset")),
 				t.Font(design.TypeL)).FontWeight(600).TextColor(t.LabelPrimary)
-			ui.TextInput(c, &st.agentName).
-				Label(inputLabel(locale, localized(locale, "人设名称", "Persona name"))).FillWidth()
-			ui.TextArea(c, &st.agentPersona).
-				Label(inputLabel(locale, localized(locale, "人设", "Persona"))).
-				Placeholder(localized(locale, "追加到系统提示的人设前缀", "Persona prefix appended to the system prompt")).
-				MinHeight(design.Space6 * 2).FillWidth()
-			ui.TextArea(c, &st.agentPrompt).
-				Label(inputLabel(locale, localized(locale, "人设提示词", "Persona prompt"))).
-				MinHeight(design.Space6 * 2).FillWidth()
-			ui.TextInput(c, &st.agentTools).
-				Label(inputLabel(locale, localized(locale, "允许工具（逗号分隔）", "Allowed tools (comma separated)"))).
-				Placeholder("read_file, bash").FillWidth()
-			ui.TextInput(c, &st.agentModel).
-				Label(inputLabel(locale, localized(locale, "默认模型", "Default model"))).FillWidth()
-			ui.Row(c).FillWidth().Justify(ui.End).Gap(design.Space2).Children(func() {
-				if brandPrimaryButton(c, t, icons.Plus(), localized(locale, "保存人设", "Save persona")).Clicked() {
-					st.addAgentPreset(store, locale)
-					if st.statusErr == false && st.status != "" {
-						st.agentFormOpen = false
-					}
-				}
-				if ui.Button(c, localized(locale, "取消", "Cancel")).Clicked() {
+			ui.Field(c, localized(locale, "人设名称", "Persona name"), func() {
+				ui.TextInput(c, &st.agentName).
+					Label(inputLabel(locale, localized(locale, "人设名称", "Persona name"))).FillWidth()
+			}).Description(localized(locale, "在代理预设列表中显示的名称。",
+				"The name shown in the agent preset list."))
+			ui.Field(c, localized(locale, "人设", "Persona"), func() {
+				ui.TextArea(c, &st.agentPersona).
+					Label(inputLabel(locale, localized(locale, "人设", "Persona"))).
+					Placeholder(localized(locale, "追加到系统提示的人设前缀",
+						"Persona prefix appended to the system prompt")).
+					MinHeight(design.Space6 * 2).FillWidth()
+			}).Description(localized(locale, "追加到系统提示末尾的一段文字。",
+				"Text appended to the end of the system prompt."))
+			ui.Field(c, localized(locale, "人设提示词", "Persona prompt"), func() {
+				ui.TextArea(c, &st.agentPrompt).
+					Label(inputLabel(locale, localized(locale, "人设提示词", "Persona prompt"))).
+					MinHeight(design.Space6 * 2).FillWidth()
+			}).Description(localized(locale, "该人设默认使用的系统提示词。",
+				"The system prompt this persona uses by default."))
+			ui.Field(c, localized(locale, "允许工具（逗号分隔）", "Allowed tools (comma separated)"), func() {
+				ui.TextInput(c, &st.agentTools).
+					Label(inputLabel(locale, localized(locale, "允许工具（逗号分隔）",
+						"Allowed tools (comma separated)"))).
+					Placeholder("read_file, bash").FillWidth()
+			}).Description(localized(locale, "留空表示不过滤工具。", "Empty keeps every tool."))
+			ui.Field(c, localized(locale, "默认模型", "Default model"), func() {
+				ui.TextInput(c, &st.agentModel).
+					Label(inputLabel(locale, localized(locale, "默认模型", "Default model"))).FillWidth()
+			}).Description(localized(locale, "留空沿用当前模型。", "Empty keeps the current model."))
+			uikit.DialogFooter(c, []uikit.DialogAction{
+				{Label: localized(locale, "取消", "Cancel"), OnClick: func() {
 					st.agentFormOpen = false
 					st.status = ""
-				}
+					c.Invalidate()
+				}},
+				{Label: localized(locale, "保存人设", "Save persona"), Primary: true, OnClick: func() {
+					st.addAgentPreset(store, locale)
+					if !st.statusErr && st.status != "" {
+						st.agentFormOpen = false
+					}
+					c.Invalidate()
+				}},
 			})
 		})
 	})
@@ -512,12 +599,11 @@ func buildAgentPresetDialog(c *ui.Context, t *design.Tokens, store contracts.Set
 // tool/model badges and move/delete actions.
 func buildAgentPresetRow(c *ui.Context, t *design.Tokens, store contracts.SettingsService, st *presetsState,
 	locale contracts.LocaleService, index int, preset contracts.AgentPreset) {
-	design.Apply(ui.Row(c), func(el ui.Element) ui.Element {
-		return el.BorderWidth(0, 0, 1, 0).BorderColor(t.BorderL2)
-	}).FillWidth().Gap(design.Space2).AlignItems(ui.Center).
-		Padding(design.Space2, design.Space1).Children(func() {
-		ui.Column(c).Grow(1).Gap(1).Children(func() {
-			design.Apply(ui.Text(c, firstNonEmpty(strings.TrimSpace(preset.Name), localized(locale, "(未命名人设)", "(Untitled persona)"))),
+	ui.Row(c).FillWidth().Gap(design.Space2).AlignItems(ui.Center).
+		PaddingY(design.Space1).Children(func() {
+		ui.Column(c).Grow(1).Gap(design.Space1).Children(func() {
+			design.Apply(ui.Text(c, firstNonEmpty(strings.TrimSpace(preset.Name),
+				localized(locale, "(未命名人设)", "(Untitled persona)"))),
 				t.Font(design.TypeS)).FontWeight(600).TextColor(t.LabelPrimary)
 			summary := strings.TrimSpace(preset.Persona)
 			if summary == "" {
@@ -526,28 +612,32 @@ func buildAgentPresetRow(c *ui.Context, t *design.Tokens, store contracts.Settin
 			if summary != "" {
 				design.Apply(ui.Text(c, presetSummary(summary)), t.TextMuted(design.TypeXXS)).MaxLines(1)
 			}
-			ui.Row(c).Gap(design.Space2).Children(func() {
-				if len(preset.Tools) > 0 {
-					design.Apply(ui.Badge(c, localized(locale, "工具：", "Tools: ")+strings.Join(preset.Tools, ", ")),
-						t.Badge()).TextColor(t.LabelSecondary)
-				}
-				if model := strings.TrimSpace(preset.Model); model != "" {
-					design.Apply(ui.Badge(c, localized(locale, "模型：", "Model: ")+model),
-						t.Badge()).TextColor(t.LabelSecondary)
-				}
-			})
+			meta := make([]string, 0, 2)
+			if len(preset.Tools) > 0 {
+				meta = append(meta, localized(locale, "工具：", "Tools: ")+strings.Join(preset.Tools, ", "))
+			}
+			if model := strings.TrimSpace(preset.Model); model != "" {
+				meta = append(meta, localized(locale, "模型：", "Model: ")+model)
+			}
+			if len(meta) > 0 {
+				design.Apply(ui.Text(c, strings.Join(meta, " · ")),
+					t.TextMuted(design.TypeXXS)).MaxLines(1)
+			}
 		})
-		up := ui.Button(c, localized(locale, "上移", "Up"))
-		if up.Clicked() {
+		if design.Apply(ui.Button(c, localized(locale, "上移", "Up")),
+			t.SecondaryButton()).Clicked() {
 			st.moveAgentPreset(store, locale, index, -1)
+			c.Invalidate()
 		}
-		down := ui.Button(c, localized(locale, "下移", "Down"))
-		if down.Clicked() {
+		if design.Apply(ui.Button(c, localized(locale, "下移", "Down")),
+			t.SecondaryButton()).Clicked() {
 			st.moveAgentPreset(store, locale, index, 1)
+			c.Invalidate()
 		}
-		remove := ui.Button(c, localized(locale, "删除", "Delete"))
-		if remove.Clicked() {
-			st.deleteAgentPreset(store, locale, index)
+		if design.Apply(ui.Button(c, localized(locale, "删除", "Delete")),
+			t.DangerButton()).Clicked() {
+			st.confirmKind, st.confirmIndex = "delete-agent", index
+			c.Invalidate()
 		}
 	})
 }

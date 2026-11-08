@@ -16,6 +16,7 @@ import (
 
 	"github.com/zeokeel/zeokeel/internal/contracts"
 	"github.com/zeokeel/zeokeel/internal/design"
+	"github.com/zeokeel/zeokeel/internal/uikit"
 )
 
 // skillsEditor looks up the optional editor half and the product data directory
@@ -75,7 +76,9 @@ func startEditSkill(c *ui.Context, st *skillsState, skill contracts.Skill, body 
 
 // buildSkillsEditorDialogs renders the optional create/edit/delete modals. It is
 // called before the list early-returns so a create modal also works when the
-// current list is empty or failed.
+// current list is empty or failed. Every input has a visible field label and a
+// description; the action bars follow the product's dialog order (cancel left,
+// primary right) through uikit.DialogFooter.
 func buildSkillsEditorDialogs(c *ui.Context, t *design.Tokens, st *skillsState,
 	editor contracts.SkillsEditor, locale contracts.LocaleService) {
 	if editor == nil {
@@ -92,24 +95,34 @@ func buildSkillsEditorDialogs(c *ui.Context, t *design.Tokens, st *skillsState,
 					"技能保存为 dataDir/skills/<名称>/SKILL.md。",
 					"Skills are saved as dataDir/skills/<name>/SKILL.md.")),
 					t.TextMuted(design.TypeXS)).MaxLines(2)
-				ui.TextInput(c, &st.draftName).Label(localized(locale, "名称", "Name")).FillWidth()
-				ui.TextInput(c, &st.draftDescription).Label(localized(locale, "描述", "Description")).FillWidth()
-				ui.TextArea(c, &st.draftBody).Label(localized(locale, "内容", "Body")).
-					FillWidth().MinHeight(design.Space6 * 5)
+				ui.Field(c, localized(locale, "名称", "Name"), func() {
+					ui.TextInput(c, &st.draftName).
+						Label(localized(locale, "名称", "Name")).FillWidth()
+				}).Description(localized(locale, "技能目录名，也是技能菜单中的名称。",
+					"The skill's directory and menu name."))
+				ui.Field(c, localized(locale, "描述", "Description"), func() {
+					ui.TextInput(c, &st.draftDescription).
+						Label(localized(locale, "描述", "Description")).FillWidth()
+				}).Description(localized(locale, "给模型看的一句话说明。",
+					"One sentence the model sees in the skill menu."))
+				ui.Field(c, localized(locale, "内容", "Body"), func() {
+					ui.TextArea(c, &st.draftBody).
+						Label(localized(locale, "内容", "Body")).
+						FillWidth().MinHeight(design.Space6 * 5)
+				}).Description(localized(locale, "SKILL.md 的 Markdown 正文。",
+					"The Markdown body of SKILL.md."))
 				if st.editErr != "" {
-					buildSkillsErrorLine(c, t, st.editErr)
+					uikit.ErrorLine(c, st.editErr)
 				}
-				ui.Row(c).FillWidth().Justify(ui.End).Gap(design.Space2).Children(func() {
-					create := design.Apply(ui.PrimaryButton(c, localized(locale, "创建", "Create")),
-						t.PrimaryButton())
-					if create.Clicked() {
-						createSkillFromDraft(c, editor, st, locale)
-					}
-					if ui.Button(c, localized(locale, "取消", "Cancel")).Clicked() {
+				uikit.DialogFooter(c, []uikit.DialogAction{
+					{Label: localized(locale, "取消", "Cancel"), OnClick: func() {
 						st.creating = false
 						st.editErr = ""
 						c.Invalidate()
-					}
+					}},
+					{Label: localized(locale, "创建", "Create"), Primary: true, OnClick: func() {
+						createSkillFromDraft(c, editor, st, locale)
+					}},
 				})
 			})
 		})
@@ -127,55 +140,51 @@ func buildSkillsEditorDialogs(c *ui.Context, t *design.Tokens, st *skillsState,
 					"名称不可修改；保存会重写 dataDir/skills/<名称>/SKILL.md。",
 					"Name cannot be changed; saving rewrites dataDir/skills/<name>/SKILL.md.")),
 					t.TextMuted(design.TypeXXS)).MaxLines(2)
-				ui.TextInput(c, &st.editDescription).Label(localized(locale, "描述", "Description")).FillWidth()
-				ui.TextArea(c, &st.editBody).Label(localized(locale, "内容", "Body")).
-					FillWidth().MinHeight(design.Space6 * 5)
+				ui.Field(c, localized(locale, "描述", "Description"), func() {
+					ui.TextInput(c, &st.editDescription).
+						Label(localized(locale, "描述", "Description")).FillWidth()
+				}).Description(localized(locale, "给模型看的一句话说明。",
+					"One sentence the model sees in the skill menu."))
+				ui.Field(c, localized(locale, "内容", "Body"), func() {
+					ui.TextArea(c, &st.editBody).
+						Label(localized(locale, "内容", "Body")).
+						FillWidth().MinHeight(design.Space6 * 5)
+				}).Description(localized(locale, "SKILL.md 的 Markdown 正文。",
+					"The Markdown body of SKILL.md."))
 				if st.editErr != "" {
-					buildSkillsErrorLine(c, t, st.editErr)
+					uikit.ErrorLine(c, st.editErr)
 				}
-				ui.Row(c).FillWidth().Justify(ui.End).Gap(design.Space2).Children(func() {
-					save := design.Apply(ui.PrimaryButton(c, localized(locale, "保存", "Save")),
-						t.PrimaryButton())
-					if save.Clicked() {
-						updateSkillFromDraft(c, editor, st, locale)
-					}
-					if ui.Button(c, localized(locale, "取消", "Cancel")).Clicked() {
+				uikit.DialogFooter(c, []uikit.DialogAction{
+					{Label: localized(locale, "取消", "Cancel"), OnClick: func() {
 						st.editing = false
 						st.editErr = ""
 						c.Invalidate()
-					}
+					}},
+					{Label: localized(locale, "保存", "Save"), Primary: true, OnClick: func() {
+						updateSkillFromDraft(c, editor, st, locale)
+					}},
 				})
 			})
 		})
 	}
+	// Deleting a skill is destructive: the native alert dialog gives it the
+	// same confirm/cancel order, Esc handling, focus return and default action
+	// as the product's other sixteen confirmations.
 	if st.confirmDelete {
-		ui.Modal(c, &st.confirmDelete, func() {
-			design.Apply(ui.Column(c).Width(480).Gap(design.Space3), func(element ui.Element) ui.Element {
-				return element.PaddingX(design.Space5).PaddingY(design.Space2)
-			}).Children(func() {
-				design.Apply(ui.Text(c, localized(locale, "删除技能", "Delete skill")),
-					t.Font(design.TypeL)).FontWeight(600).TextColor(t.LabelPrimary)
-				design.Apply(ui.Text(c, localized(locale, "确定删除技能「", "Delete skill \"")+
-					st.pendingDelete+localized(locale, "」？此操作不可撤销。", "\"? This cannot be undone.")),
-					t.TextMuted(design.TypeXS)).MaxLines(3)
-				if st.editErr != "" {
-					buildSkillsErrorLine(c, t, st.editErr)
-				}
-				ui.Row(c).FillWidth().Justify(ui.End).Gap(design.Space2).Children(func() {
-					if ui.Button(c, localized(locale, "取消", "Cancel")).Clicked() {
-						st.confirmDelete = false
-						st.editErr = ""
-						st.pendingDelete = ""
-						c.Invalidate()
-					}
-					confirm := design.Apply(ui.PrimaryButton(c, localized(locale, "确认删除", "Confirm delete")),
-						t.PrimaryButton())
-					if confirm.Clicked() {
-						deleteSkillByName(c, editor, st, locale)
-					}
-				})
-			})
-		})
+		switch ui.AlertDialog(c, &st.confirmDelete,
+			localized(locale, "删除技能", "Delete skill"),
+			localized(locale, "确定删除技能「", "Delete skill \"")+
+				st.pendingDelete+localized(locale, "」？此操作不可撤销。", "\"? This cannot be undone."),
+			localized(locale, "取消", "Cancel"),
+			localized(locale, "确认删除", "Confirm delete")) {
+		case 1:
+			deleteSkillByName(c, editor, st, locale)
+		case ui.AlertDismissed:
+			// Esc/backdrop cancel: drop the pending name, keep no error.
+			st.editErr = ""
+			st.pendingDelete = ""
+			c.Invalidate()
+		}
 	}
 }
 

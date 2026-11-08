@@ -2,8 +2,9 @@ package uimodtest
 
 // End-to-end proof of the composer's four-way mode selector on the real desktop
 // assembly: the mode menu is a native popover; choosing 精简/创作 writes
-// chat.mode (and keeps agent.mode normal), the header badge appears, and
-// switching back to 普通 clears both the badge and the chat mode.
+// chat.mode (and keeps agent.mode normal), the composer selector chip changes,
+// and switching back to 普通 restores the standard mode. The old header badge
+// is gone: the mode lives in one place (the composer chip).
 
 import (
 	"testing"
@@ -56,18 +57,23 @@ func TestChatModeSelectorEndToEnd(t *testing.T) {
 	tester := ui.NewTester(uiRoot.View, 1280, 800)
 	tester.Frame()
 
-	// Initial: standard mode, no mode badge.
-	if !tester.HasText("普通") {
+	// Initial: standard mode, the composer's single 会话设置 menu owns the mode,
+	// and no mode badge (or stale menu copy) is left in the header.
+	if !tester.HasText("会话设置") {
 		t.Fatalf("mode selector is not on 普通 by default; texts = %v", tester.Texts())
 	}
 	if tester.HasText("精简模式") || tester.HasText("创作模式") || tester.HasText("计划模式") {
 		t.Fatalf("a mode badge is visible before selecting a mode; texts = %v", tester.Texts())
 	}
 
-	// Switch to 精简: writes chat.mode=minimal, keeps agent.mode=normal, shows badge.
-	clickMode(t, tester, "普通", "精简模式")
-	if !tester.HasText("精简模式") {
-		t.Fatalf("header lacks the 精简模式 badge; texts = %v", tester.Texts())
+	// Switch to 精简: writes chat.mode=minimal, keeps agent.mode=normal, and the
+	// composer chip becomes the single mode indicator.
+	clickMode(t, tester, "会话设置", "精简模式")
+	if tester.HasText("精简模式") {
+		t.Fatalf("the removed header mode badge is still rendered; texts = %v", tester.Texts())
+	}
+	if !tester.HasText("精简") {
+		t.Fatalf("composer mode chip did not switch to 精简; texts = %v", tester.Texts())
 	}
 	if got := settings.Get(contracts.SettingChatMode, ""); got != contracts.ChatModeMinimal {
 		t.Fatalf("chat.mode after choosing 精简 = %q, want minimal", got)
@@ -79,13 +85,13 @@ func TestChatModeSelectorEndToEnd(t *testing.T) {
 		t.Fatalf("composer selector label did not switch to 精简; texts = %v", tester.Texts())
 	}
 
-	// Switch to 创作: writes chat.mode=creator and replaces the badge.
+	// Switch to 创作: writes chat.mode=creator and the chip follows.
 	clickMode(t, tester, "精简", "创作模式")
-	if !tester.HasText("创作模式") {
-		t.Fatalf("header lacks the 创作模式 badge; texts = %v", tester.Texts())
+	if tester.HasText("创作模式") || tester.HasText("精简模式") {
+		t.Fatalf("a mode badge remains after choosing 创作; texts = %v", tester.Texts())
 	}
-	if tester.HasText("精简模式") {
-		t.Fatalf("stale 精简模式 badge remains after choosing 创作; texts = %v", tester.Texts())
+	if !tester.HasText("创作") {
+		t.Fatalf("composer mode chip did not switch to 创作; texts = %v", tester.Texts())
 	}
 	if got := settings.Get(contracts.SettingChatMode, ""); got != contracts.ChatModeCreator {
 		t.Fatalf("chat.mode after choosing 创作 = %q, want creator", got)
@@ -94,10 +100,10 @@ func TestChatModeSelectorEndToEnd(t *testing.T) {
 		t.Fatalf("agent.mode after choosing 创作 = %q, want normal", got)
 	}
 
-	// Back to 普通: chat.mode returns to standard and every badge disappears.
+	// Back to 普通: chat.mode returns to standard and the chip returns.
 	clickMode(t, tester, "创作", "普通模式")
-	if tester.HasText("精简模式") || tester.HasText("创作模式") || tester.HasText("计划模式") {
-		t.Fatalf("a mode badge remains after switching back to 普通; texts = %v", tester.Texts())
+	if tester.HasText("精简") || tester.HasText("创作") {
+		t.Fatalf("a mode indicator remains after switching back to 普通; texts = %v", tester.Texts())
 	}
 	if got := settings.Get(contracts.SettingChatMode, ""); got != contracts.ChatModeStandard {
 		t.Fatalf("chat.mode after choosing 普通 = %q, want standard", got)
@@ -105,8 +111,8 @@ func TestChatModeSelectorEndToEnd(t *testing.T) {
 	if got := settings.Get(contracts.SettingAgentMode, ""); got != contracts.AgentModeNormal {
 		t.Fatalf("agent.mode after choosing 普通 = %q, want normal", got)
 	}
-	if !tester.HasText("普通") {
-		t.Fatalf("composer selector did not return to 普通; texts = %v", tester.Texts())
+	if !tester.HasText("会话设置") {
+		t.Fatalf("composer selector did not return to the neutral 会话设置 label; texts = %v", tester.Texts())
 	}
 }
 

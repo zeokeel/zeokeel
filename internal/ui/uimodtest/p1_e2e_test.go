@@ -101,16 +101,11 @@ func TestP1ApprovalToolsAndPersistence(t *testing.T) {
 	// pane reads the durable session events the agent persisted.
 	uiRoot.SetRightPanelOpen(true)
 	tester.Frame()
-	for _, want := range []string{"概览", "工具", "模型", "日志"} {
-		if !tester.HasText(want) {
-			t.Fatalf("right panel missing %q; texts = %v", want, tester.Texts())
-		}
+	if !tester.HasText("概览") || !tester.HasText("检查") {
+		t.Fatalf("right panel missing the overview pane; texts = %v", tester.Texts())
 	}
-	if err := tester.Click("日志"); err != nil {
-		t.Fatalf("click log tab: %v; texts = %v", err, tester.Texts())
-	}
-	tester.Frame()
-	for _, want := range []string{"会话日志", "user_message", "run_end"} {
+	selectInspectorPane(t, tester, "日志")
+	for _, want := range []string{"user_message", "run_end"} {
 		if !tester.HasText(want) {
 			t.Fatalf("session log missing %q; texts = %v", want, tester.Texts())
 		}
@@ -170,10 +165,7 @@ func TestP1ApprovalToolsAndPersistence(t *testing.T) {
 	tester.Frame()
 	uiRoot.SetRightPanelOpen(true)
 	tester.Frame()
-	if err := tester.Click("文件"); err != nil {
-		t.Fatalf("click files tab: %v; texts = %v", err, tester.Texts())
-	}
-	tester.Frame()
+	selectInspectorPane(t, tester, "文件")
 	for _, want := range []string{"README.md", "src"} {
 		if !tester.HasText(want) {
 			t.Fatalf("files tab missing %q; texts = %v", want, tester.Texts())
@@ -188,10 +180,7 @@ func TestP1ApprovalToolsAndPersistence(t *testing.T) {
 	}
 
 	// The terminal tab runs real commands in the workspace root.
-	if err := tester.Click("终端"); err != nil {
-		t.Fatalf("click terminal tab: %v; texts = %v", err, tester.Texts())
-	}
-	tester.Frame()
+	selectInspectorPane(t, tester, "终端")
 	if runRect, ok := tester.Find("运行"); ok {
 		tester.ClickAt(runRect.X-140, runRect.Y+runRect.H/2)
 		tester.Frame()
@@ -267,9 +256,10 @@ func TestP1ApprovalToolsAndPersistence(t *testing.T) {
 	}
 	uiRoot.Navigator().ToggleSettings()
 	tester.Frame()
-	if err := tester.Click("技能"); err != nil {
-		t.Fatalf("click skills page: %v; texts = %v", err, tester.Texts())
+	if err := uiRoot.OpenSettingsPage("skills"); err != nil {
+		t.Fatalf("open skills page: %v", err)
 	}
+	tester.Frame()
 	tester.Frame()
 	for _, want := range []string{"release-checklist", "发布前检查清单"} {
 		if !tester.HasText(want) {
@@ -283,18 +273,20 @@ func TestP1ApprovalToolsAndPersistence(t *testing.T) {
 	if !tester.HasText("发布检查") {
 		t.Fatalf("skill body missing; texts = %v", tester.Texts())
 	}
-	if err := tester.Click("诊断"); err != nil {
-		t.Fatalf("click diagnostics page: %v; texts = %v", err, tester.Texts())
+	if err := uiRoot.OpenSettingsPage("diagnostics"); err != nil {
+		t.Fatalf("open diagnostics page: %v", err)
 	}
+	tester.Frame()
 	tester.Frame()
 	for _, want := range []string{"诊断", "工具数", "会话数", "zeokeel.db"} {
 		if !tester.HasText(want) {
 			t.Fatalf("diagnostics page missing %q; texts = %v", want, tester.Texts())
 		}
 	}
-	if err := tester.Click("更新"); err != nil {
-		t.Fatalf("click update page: %v; texts = %v", err, tester.Texts())
+	if err := uiRoot.OpenSettingsPage("update"); err != nil {
+		t.Fatalf("open update page: %v", err)
 	}
+	tester.Frame()
 	tester.Frame()
 	if !tester.HasText("检查更新") {
 		t.Fatalf("update page missing the check button; texts = %v", tester.Texts())
@@ -313,9 +305,10 @@ func TestP1ApprovalToolsAndPersistence(t *testing.T) {
 	if !tester.HasText("更新源未配置") {
 		t.Fatalf("update check error missing; texts = %v", tester.Texts())
 	}
-	if err := tester.Click("搜索"); err != nil {
-		t.Fatalf("click search settings: %v; texts = %v", err, tester.Texts())
+	if err := uiRoot.OpenSettingsPage("search"); err != nil {
+		t.Fatalf("open search settings: %v", err)
 	}
+	tester.Frame()
 	tester.Frame()
 	for _, want := range []string{"搜索", "搜索端点", "API Key", "保存"} {
 		if !tester.HasText(want) {
@@ -335,9 +328,10 @@ func TestP1ApprovalToolsAndPersistence(t *testing.T) {
 			t.Fatalf("search endpoint = %q", got)
 		}
 	}
-	if err := tester.Click("MCP"); err != nil {
-		t.Fatalf("click MCP settings: %v; texts = %v", err, tester.Texts())
+	if err := uiRoot.OpenSettingsPage("mcp"); err != nil {
+		t.Fatalf("open MCP settings: %v", err)
 	}
+	tester.Frame()
 	tester.Frame()
 	for _, want := range []string{"MCP", "添加", "还没有配置 MCP 服务器"} {
 		if !tester.HasText(want) {
@@ -362,6 +356,18 @@ func TestP1ApprovalToolsAndPersistence(t *testing.T) {
 	tester.Frame()
 	if !tester.HasText("记住：用中文回复") {
 		t.Fatalf("memory tab does not show the entry; texts = %v", tester.Texts())
+	}
+	// H25: the tab label is the only 「记忆」 title; the body no longer repeats
+	// it as a big heading.
+	memoryLabels := 0
+	for _, text := range tester.Texts() {
+		if text == "记忆" {
+			memoryLabels++
+		}
+	}
+	if memoryLabels > 2 {
+		t.Fatalf("memory tab repeats its body title (%d exact 「记忆」labels); texts = %v",
+			memoryLabels, tester.Texts())
 	}
 
 	// The chrome shortcuts are configurable through the host settings: an
@@ -453,7 +459,7 @@ func TestP1ApprovalToolsAndPersistence(t *testing.T) {
 	}
 	locale.SetLanguage("en")
 	tester.Frame()
-	for _, want := range []string{"New chat", "Search sessions", "Settings", "Chat", "Ask ZeoKeel…", "Send"} {
+	for _, want := range []string{"New chat", "Search chats and messages", "Settings", "Chat", "Ask ZeoKeel…", "Send"} {
 		if !tester.HasText(want) {
 			t.Fatalf("english UI missing %q; texts = %v", want, tester.Texts())
 		}
@@ -469,7 +475,9 @@ func TestP1ApprovalToolsAndPersistence(t *testing.T) {
 	tester.Key(0, ui.KeyEscape)
 	tester.Frame()
 
-	// Settings pages follow the locale too.
+	// Settings pages follow the locale too. The grouped navigation is longer
+	// than the dialog, so the about page is opened through the host's deep
+	// link instead of clicking a nav item that may sit below the fold.
 	uiRoot.Navigator().ToggleSettings()
 	tester.Frame()
 	for _, want := range []string{"Settings", "Model", "Appearance", "Shortcuts", "Diagnostics", "Update", "Import"} {
@@ -477,9 +485,10 @@ func TestP1ApprovalToolsAndPersistence(t *testing.T) {
 			t.Fatalf("english settings missing %q; texts = %v", want, tester.Texts())
 		}
 	}
-	if err := tester.Click("About"); err != nil {
-		t.Fatalf("click english about page: %v; texts = %v", err, tester.Texts())
+	if err := uiRoot.OpenSettingsPage("about"); err != nil {
+		t.Fatalf("open english about page: %v", err)
 	}
+	tester.Frame()
 	tester.Frame()
 	if !tester.HasText("About ZeoKeel") || !tester.HasText("Build information") {
 		t.Fatalf("english about page missing; texts = %v", tester.Texts())
@@ -613,8 +622,9 @@ func TestP1ApprovalToolsAndPersistence(t *testing.T) {
 		t.Fatalf("plan state = %q, want approved", state)
 	}
 
-	// goal: the agent goal tool surfaces in the session header and can be
-	// cleared from there through the host bridge.
+	// goal: the agent goal tool surfaces as one chip in the session header
+	// (the old flat row of four actions is gone); the destructive clear runs
+	// through the chip's popover and a native confirmation dialog.
 	if err := uiRoot.Navigator().Push("session"); err != nil {
 		t.Fatalf("Push(session) before goal: %v", err)
 	}
@@ -625,17 +635,34 @@ func TestP1ApprovalToolsAndPersistence(t *testing.T) {
 		t.Fatalf("set goal: %v", err)
 	}
 	tester.Frame()
-	if !tester.HasText("完成 Q4 发布清单") {
-		t.Fatalf("goal chip missing; texts = %v", tester.Texts())
-	}
-	if err := tester.Click("清除目标"); err != nil {
-		t.Fatalf("clear goal: %v; texts = %v", err, tester.Texts())
-	}
-	tester.Frame()
 	goalTracker, err := root.Require(contracts.KeyGoalTracker)
 	if err != nil {
 		t.Fatalf("require goal tracker: %v", err)
 	}
+	if _, text, _, ok := goalTracker.Get(); !ok || text != "完成 Q4 发布清单" {
+		t.Fatalf("goal tracker = %q (ok %v), want the set goal", text, ok)
+	}
+	if !tester.HasText("目标") {
+		t.Fatalf("goal chip missing; texts = %v", tester.Texts())
+	}
+	if err := tester.Click("目标"); err != nil {
+		t.Fatalf("open goal chip menu: %v; texts = %v", err, tester.Texts())
+	}
+	tester.Frame()
+	if !tester.HasText("删除目标记录") {
+		t.Fatalf("goal chip menu lacks the delete-record action; texts = %v", tester.Texts())
+	}
+	if err := tester.Click("删除目标记录"); err != nil {
+		t.Fatalf("choose delete goal record: %v; texts = %v", err, tester.Texts())
+	}
+	tester.Frame()
+	if !tester.HasText("确认删除") {
+		t.Fatalf("delete-goal-record confirmation missing; texts = %v", tester.Texts())
+	}
+	if err := tester.Click("确认删除"); err != nil {
+		t.Fatalf("confirm delete goal record: %v; texts = %v", err, tester.Texts())
+	}
+	tester.Frame()
 	if _, _, _, ok := goalTracker.Get(); ok {
 		t.Fatalf("goal tracker still set after clear")
 	}
@@ -708,10 +735,7 @@ func TestP1ApprovalToolsAndPersistence(t *testing.T) {
 	}
 	uiRoot.SetRightPanelOpen(true)
 	tester.Frame()
-	if err := tester.Click("团队"); err != nil {
-		t.Fatalf("open agents tab: %v; texts = %v", err, tester.Texts())
-	}
-	tester.Frame()
+	selectInspectorPane(t, tester, "团队")
 	for _, want := range []string{"研究员", member.ID, "运行中"} {
 		if !tester.HasText(want) {
 			t.Fatalf("agents pane missing %q; texts = %v", want, tester.Texts())
@@ -766,15 +790,16 @@ func TestP1ApprovalToolsAndPersistence(t *testing.T) {
 	}
 	uiRoot.SetRightPanelOpen(true)
 	tester.Frame()
-	if err := tester.Click("任务"); err != nil {
-		t.Fatalf("open tasks tab: %v; texts = %v", err, tester.Texts())
-	}
-	tester.Frame()
+	selectInspectorPane(t, tester, "任务")
 	for _, want := range []string{"发布前检查", "待处理"} {
 		if !tester.HasText(want) {
 			t.Fatalf("tasks pane missing %q; texts = %v", want, tester.Texts())
 		}
 	}
+	if err := tester.Click("任务操作：发布前检查"); err != nil {
+		t.Fatalf("open task menu: %v; texts = %v", err, tester.Texts())
+	}
+	tester.Frame()
 	if err := tester.Click("完成"); err != nil {
 		t.Fatalf("complete task: %v; texts = %v", err, tester.Texts())
 	}
@@ -797,10 +822,7 @@ func TestP1ApprovalToolsAndPersistence(t *testing.T) {
 	// previewed again from there.
 	uiRoot.SetRightPanelOpen(true)
 	tester.Frame()
-	if err := tester.Click("文件"); err != nil {
-		t.Fatalf("open files tab: %v; texts = %v", err, tester.Texts())
-	}
-	tester.Frame()
+	selectInspectorPane(t, tester, "文件")
 	if !tester.HasText("产物") || !tester.HasText("检查报告") {
 		t.Fatalf("artifact history missing; texts = %v", tester.Texts())
 	}

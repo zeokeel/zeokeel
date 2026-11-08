@@ -76,7 +76,7 @@ func (s *service) ExtractFromSession(ctx context.Context, sessionID string, max 
 	prompt := "You extract durable user memories from a conversation.\n" +
 		"Return ONLY JSON: {\"memories\":[\"...\"]}. At most " + fmt.Sprint(max) + " items, each at most 200 characters.\n" +
 		"Deduplicate; never include secrets, API keys or passwords.\n\nConversation:\n" + transcript
-	provider, err := s.newProvider(cfg, s.sessionEffort(sessionID))
+	provider, err := s.newProvider(cfg, s.thinkingParamsForSession(sessionID, cfg.Model))
 	if err != nil {
 		return nil, fmt.Errorf("agent: memory extraction provider: %w", err)
 	}

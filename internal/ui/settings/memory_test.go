@@ -5,6 +5,7 @@ package settings_test
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"sync"
 	"testing"
@@ -213,6 +214,7 @@ func TestMemoryPageDelete(t *testing.T) {
 	h := memoryPageHarness(t, store)
 	tester := h.tester()
 	h.click(tester, "删除")
+	h.click(tester, "确认删除")
 	if removes := store.removes(); len(removes) != 1 || removes[0] != "mem-1" {
 		t.Fatalf("Remove calls = %v, want [mem-1]", removes)
 	}
@@ -242,6 +244,7 @@ func TestMemoryPageErrors(t *testing.T) {
 	h3 := memoryPageHarness(t, removeStore)
 	tester3 := h3.tester()
 	h3.click(tester3, "删除")
+	h3.click(tester3, "确认删除")
 	h3.assertTexts(tester3, "删除记忆失败：mem-1")
 }
 
@@ -622,4 +625,210 @@ func TestMemoryExtractEnglishCopy(t *testing.T) {
 		"Extract from current session", "recent 20 messages", "at most 5")
 	h.click(tester, "Extract from current session")
 	waitMemoryText(t, tester, "Added 2 memories")
+}
+
+// TestMemoryTimestampFollowsLanguage pins the Round-2 localized timestamp: the
+// memory metadata row uses uikit.FormatDateTime, so the appearance page's
+// date-format promise holds for English as well.
+func TestMemoryTimestampFollowsLanguage(t *testing.T) {
+	created := time.Date(2026, 11, 8, 12, 0, 0, 0, time.Local)
+	entry := contracts.Memory{ID: "mem-1", Text: "note", Scope: "global", Created: created}
+
+	zhStore := newFakeMemoryStore(entry)
+	zh := newHarness(t, &fakeChat{}, newFakeSettings(nil), settings.Config{})
+	provide[contracts.MemoryStore](t, zh.ctx, contracts.KeyMemory, zhStore)
+	zhTester := zh.tester()
+	zhTester.Frame()
+	zh.click(zhTester, "记忆")
+	zh.assertTexts(zhTester, "2026-11-08 12:00")
+
+	enStore := newFakeMemoryStore(entry)
+	en := newLocaleHarness(t, &fakeChat{}, newFakeSettings(nil), settings.Config{}, "en")
+	provide[contracts.MemoryStore](t, en.ctx, contracts.KeyMemory, enStore)
+	enTester := en.tester()
+	enTester.Frame()
+	en.click(enTester, "Memory")
+	en.assertTexts(enTester, "Nov 8, 2026 12:00 PM")
+}
+
+// --- per-entry editing (contracts.MemoryUpdater) ----------------------------
+
+// memoryEditCall is one recorded MemoryUpdater.Update invocation.
+type memoryEditCall struct {
+	id    string
+	text  string
+	scope string
+}
+
+// fakeUpdatableMemoryStore is a fakeMemoryStore that also implements the
+// optional contracts.MemoryUpdater half; successful updates rewrite the fake
+// list so the page's next frame shows the new text.
+type fakeUpdatableMemoryStore struct {
+	*fakeMemoryStore
+
+	edits     []memoryEditCall
+	updateErr error
+}
+
+func newFakeUpdatableMemoryStore(items ...contracts.Memory) *fakeUpdatableMemoryStore {
+	return &fakeUpdatableMemoryStore{fakeMemoryStore: newFakeMemoryStore(items...)}
+}
+
+func (m *fakeUpdatableMemoryStore) Update(_ context.Context, id, text, scope string) (contracts.Memory, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.edits = append(m.edits, memoryEditCall{id: id, text: text, scope: scope})
+	if m.updateErr != nil {
+		return contracts.Memory{}, m.updateErr
+	}
+	for index, memory := range m.items {
+		if memory.ID != id {
+			continue
+		}
+		m.items[index].Text = text
+		if strings.TrimSpace(scope) != "" {
+			m.items[index].Scope = scope
+		}
+		return m.items[index], nil
+	}
+	return contracts.Memory{}, fmt.Errorf("no memory with id %q", id)
+}
+
+func (m *fakeUpdatableMemoryStore) updateCalls() []memoryEditCall {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return append([]memoryEditCall(nil), m.edits...)
+}
+
+// TestMemoryPageEditsEntryInPlace covers the edit flow: the row offers 编辑, the
+// modal prefills the current text, and saving calls MemoryUpdater.Update with
+// the entry's ID, the new text and its existing scope; the row then shows the
+// new text.
+func TestMemoryPageEditsEntryInPlace(t *testing.T) {
+	store := newFakeUpdatableMemoryStore(
+		memoryEntry("mem-1", "旧内容"),
+		memoryEntry("mem-2", "另一条"),
+	)
+	h := memoryPageHarness(t, store)
+	tester := h.tester()
+	h.assertTexts(tester, "编辑", "删除")
+	if got := exactTextCount(tester.Texts(), "编辑"); got != 2 {
+		t.Fatalf("edit buttons = %d, want one per row (2); texts = %v", got, tester.Texts())
+	}
+
+	h.click(tester, "编辑")
+	h.assertTexts(tester, "编辑记忆", "编辑内容", "保存", "取消")
+	clearAndType(t, h, tester, "编辑内容 输入", "新内容")
+	h.click(tester, "保存")
+
+	calls := store.updateCalls()
+	if len(calls) != 1 {
+		t.Fatalf("Update calls = %+v, want 1", calls)
+	}
+	if calls[0].id != "mem-1" || calls[0].text != "新内容" || calls[0].scope != "global" {
+		t.Fatalf("Update call = %+v, want mem-1/新内容/global", calls[0])
+	}
+	h.assertTexts(tester, "已更新", "新内容")
+	h.assertNoTexts(tester, "旧内容")
+	if got := exactTextCount(tester.Texts(), "保存"); got != 0 {
+		t.Fatalf("edit modal still open after save; texts = %v", tester.Texts())
+	}
+}
+
+// TestMemoryPageEditPrefillsCurrentText saves without typing: the modal must
+// already hold the entry's text (and keep its scope).
+func TestMemoryPageEditPrefillsCurrentText(t *testing.T) {
+	store := newFakeUpdatableMemoryStore(memoryEntry("mem-1", "原文"))
+	h := memoryPageHarness(t, store)
+	tester := h.tester()
+	h.click(tester, "编辑")
+	h.click(tester, "保存")
+
+	calls := store.updateCalls()
+	if len(calls) != 1 || calls[0].id != "mem-1" || calls[0].text != "原文" || calls[0].scope != "global" {
+		t.Fatalf("Update calls = %+v, want the prefilled text and scope", calls)
+	}
+}
+
+// TestMemoryPageEditCancelDoesNotSave covers Cancel: the draft is dropped, no
+// store call happens and the row keeps its text.
+func TestMemoryPageEditCancelDoesNotSave(t *testing.T) {
+	store := newFakeUpdatableMemoryStore(memoryEntry("mem-1", "原文"))
+	h := memoryPageHarness(t, store)
+	tester := h.tester()
+	h.click(tester, "编辑")
+	clearAndType(t, h, tester, "编辑内容 输入", "不保存的草稿")
+	h.click(tester, "取消")
+
+	if calls := store.updateCalls(); len(calls) != 0 {
+		t.Fatalf("cancelled edit called Update: %+v", calls)
+	}
+	h.assertTexts(tester, "原文")
+	h.assertNoTexts(tester, "编辑记忆", "不保存的草稿")
+}
+
+// TestMemoryPageEditValidation covers the inline empty-text error: the modal
+// stays open and the store is not called.
+func TestMemoryPageEditValidation(t *testing.T) {
+	store := newFakeUpdatableMemoryStore(memoryEntry("mem-1", "原文"))
+	h := memoryPageHarness(t, store)
+	tester := h.tester()
+	h.click(tester, "编辑")
+	clearAndType(t, h, tester, "编辑内容 输入", "   ")
+	h.click(tester, "保存")
+
+	if calls := store.updateCalls(); len(calls) != 0 {
+		t.Fatalf("invalid edit called Update: %+v", calls)
+	}
+	h.assertTexts(tester, "内容不能为空", "编辑记忆")
+}
+
+// TestMemoryPageEditFailureKeepsModal covers a failed update: the danger line
+// is inline, the modal stays open so the draft can be retried.
+func TestMemoryPageEditFailureKeepsModal(t *testing.T) {
+	store := newFakeUpdatableMemoryStore(memoryEntry("mem-1", "原文"))
+	store.updateErr = errors.New("disk full")
+	h := memoryPageHarness(t, store)
+	tester := h.tester()
+	h.click(tester, "编辑")
+	clearAndType(t, h, tester, "编辑内容 输入", "改后内容")
+	h.click(tester, "保存")
+
+	h.assertTexts(tester, "更新记忆失败：disk full", "编辑记忆")
+	if calls := store.updateCalls(); len(calls) != 1 {
+		t.Fatalf("Update calls = %+v, want the one failed attempt", calls)
+	}
+}
+
+// TestMemoryPageEditHiddenWithoutUpdater covers a store without the optional
+// update half: rows keep only 删除 and no edit modal can open.
+func TestMemoryPageEditHiddenWithoutUpdater(t *testing.T) {
+	store := newFakeMemoryStore(memoryEntry("mem-1", "只读后端的记忆"))
+	h := memoryPageHarness(t, store)
+	tester := h.tester()
+	h.assertTexts(tester, "只读后端的记忆", "删除")
+	h.assertNoTexts(tester, "编辑")
+}
+
+// TestMemoryPageEditEnglishCopy pins the English edit copy and that a
+// workspace-scoped entry keeps its scope through the update.
+func TestMemoryPageEditEnglishCopy(t *testing.T) {
+	entry := memoryEntry("mem-1", "Alpha note")
+	entry.Scope = "workspace"
+	store := newFakeUpdatableMemoryStore(entry)
+	h := newLocaleHarness(t, &fakeChat{}, newFakeSettings(nil), settings.Config{}, "en")
+	provide[contracts.MemoryStore](t, h.ctx, contracts.KeyMemory, store)
+	tester := h.tester()
+	tester.Frame()
+	h.click(tester, "Memory")
+	h.assertTexts(tester, "Edit", "Delete")
+
+	h.click(tester, "Edit")
+	h.assertTexts(tester, "Edit memory", "Edit text", "Save", "Cancel")
+	h.click(tester, "Save")
+	h.assertTexts(tester, "Updated")
+	calls := store.updateCalls()
+	if len(calls) != 1 || calls[0].id != "mem-1" || calls[0].text != "Alpha note" || calls[0].scope != "workspace" {
+		t.Fatalf("Update calls = %+v, want mem-1/Alpha note/workspace", calls)
+	}
 }

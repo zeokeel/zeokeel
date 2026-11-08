@@ -62,9 +62,7 @@ func TestWorkspaceChangesEndToEnd(t *testing.T) {
 	uiRoot.SetRightPanelOpen(true)
 	tester := ui.NewTester(uiRoot.View, 1280, 800)
 	tester.Frame()
-	if err := tester.Click("变更"); err != nil {
-		t.Fatalf("click changes tab: %v; texts = %v", err, tester.Texts())
-	}
+	selectInspectorPane(t, tester, "变更")
 	tester.Frame()
 	for _, want := range []string{"app.go", "notes.txt", "修改", "未跟踪"} {
 		if !tester.HasText(want) {

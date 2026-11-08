@@ -3,7 +3,6 @@ package session_test
 // Tests for the four chat modes: normal, plan, minimal and creator.
 
 import (
-	"strings"
 	"testing"
 
 	"github.com/zeokeel/zeokeel/internal/contracts"
@@ -23,55 +22,57 @@ func TestChatModeSelectorFourOptions(t *testing.T) {
 	settings := newPermissionSettings(nil)
 	h := newPermissionHarness(t, permissionChat(), settings)
 	tester := h.tester()
-	h.assertTexts(tester, "普通")
+	// The standard mode is the quiet default: the mode lives inside the one
+	// session menu instead of a resident chip.
+	h.assertTexts(tester, "会话设置")
 	if got := textsContaining(tester.Texts(), "模式"); got != 0 {
-		t.Fatalf("mode badge rendered in normal mode; texts = %v", tester.Texts())
+		t.Fatalf("mode control rendered outside the session menu; texts = %v", tester.Texts())
 	}
 
-	h.click(tester, "普通")
-	h.assertTexts(tester, "普通模式", "计划模式", "精简模式", "创作模式")
+	h.openSessionMenu(tester)
+	h.assertTexts(tester, "对话模式", "普通模式", "计划模式", "精简模式", "创作模式")
 
-	// Minimal: normal agent mode + chat.mode minimal, with its badge and label.
-	h.click(tester, "精简模式")
+	// Minimal: normal agent mode + chat.mode minimal, with its contextual label.
+	h.clickExact(tester, "精简模式")
 	if got := settings.get(contracts.SettingAgentMode); got != contracts.AgentModeNormal {
 		t.Fatalf("minimal agent mode = %q, want normal", got)
 	}
 	if got := settings.get(contracts.SettingChatMode); got != contracts.ChatModeMinimal {
 		t.Fatalf("stored chat mode = %q, want minimal", got)
 	}
-	h.assertTexts(tester, "精简", "精简模式")
+	h.assertTexts(tester, "精简")
 
 	// Creator: normal agent mode + chat.mode creator.
-	h.click(tester, "精简")
-	h.click(tester, "创作模式")
+	h.openSessionMenu(tester)
+	h.clickExact(tester, "创作模式")
 	if got := settings.get(contracts.SettingChatMode); got != contracts.ChatModeCreator {
 		t.Fatalf("stored chat mode = %q, want creator", got)
 	}
-	h.assertTexts(tester, "创作", "创作模式")
+	h.assertTexts(tester, "创作")
 
 	// Plan: agent plan + chat standard (plan has gate priority).
-	h.click(tester, "创作")
-	h.click(tester, "计划模式")
+	h.openSessionMenu(tester)
+	h.clickExact(tester, "计划模式")
 	if got := settings.get(contracts.SettingAgentMode); got != contracts.AgentModePlan {
 		t.Fatalf("plan agent mode = %q, want plan", got)
 	}
 	if got := settings.get(contracts.SettingChatMode); got != contracts.ChatModeStandard {
 		t.Fatalf("plan chat mode = %q, want standard", got)
 	}
-	h.assertTexts(tester, "计划", "计划模式")
+	h.assertTexts(tester, "计划模式")
 
 	// Back to normal writes both settings.
-	h.click(tester, "计划")
-	h.click(tester, "普通模式")
+	h.openSessionMenu(tester)
+	h.clickExact(tester, "普通模式")
 	if got := settings.get(contracts.SettingAgentMode); got != contracts.AgentModeNormal {
 		t.Fatalf("normal agent mode = %q", got)
 	}
 	if got := settings.get(contracts.SettingChatMode); got != contracts.ChatModeStandard {
 		t.Fatalf("normal chat mode = %q", got)
 	}
-	h.assertTexts(tester, "普通")
+	h.assertTexts(tester, "会话设置")
 	if got := textsContaining(tester.Texts(), "计划模式"); got != 0 {
-		t.Fatalf("plan badge after normal; texts = %v", tester.Texts())
+		t.Fatalf("plan state still on the composer row; texts = %v", tester.Texts())
 	}
 }
 
@@ -82,13 +83,13 @@ func TestChatModeNormalizesBadValues(t *testing.T) {
 	})
 	h := newPermissionHarness(t, permissionChat(), settings)
 	tester := h.tester()
-	h.assertTexts(tester, "普通")
+	h.assertTexts(tester, "会话设置")
 	if got := textsContaining(tester.Texts(), "模式"); got != 0 {
-		t.Fatalf("bad mode rendered a badge; texts = %v", tester.Texts())
+		t.Fatalf("bad mode rendered a chip; texts = %v", tester.Texts())
 	}
 	// Selecting the already-effective normal option normalizes the stored pair.
-	h.click(tester, "普通")
-	h.click(tester, "普通模式")
+	h.openSessionMenu(tester)
+	h.clickExact(tester, "普通模式")
 	if got := settings.get(contracts.SettingChatMode); got != contracts.ChatModeStandard {
 		t.Fatalf("normalized chat mode = %q, want standard", got)
 	}
@@ -96,19 +97,27 @@ func TestChatModeNormalizesBadValues(t *testing.T) {
 		t.Fatalf("normalized agent mode = %q, want normal", got)
 	}
 
-	// Plan badge wins over a creator chat mode (plan gate priority).
+	// Plan owns the contextual label over a creator chat mode (plan priority).
 	settings.set(contracts.SettingAgentMode, contracts.AgentModePlan)
 	settings.set(contracts.SettingChatMode, contracts.ChatModeCreator)
 	tester.Frame()
-	h.assertTexts(tester, "计划", "计划模式")
+	h.assertTexts(tester, "计划模式")
 }
 
 func TestChatModeHiddenWithoutSettings(t *testing.T) {
 	h := newPermissionHarness(t, permissionChat(), nil)
 	tester := h.tester()
-	for _, text := range []string{"普通", "精简", "创作", "精简模式", "创作模式", "计划模式"} {
+	for _, text := range []string{"普通", "精简", "创作"} {
 		if got := modeTextCount(tester.Texts(), text); got != 0 {
 			t.Fatalf("mode control %q rendered without settings; texts = %v", text, tester.Texts())
+		}
+	}
+	// The quiet session menu still exists for the built-in prompt presets, but
+	// it offers no mode header or options.
+	h.openSessionMenu(tester)
+	for _, text := range []string{"对话模式", "普通模式", "精简模式", "创作模式", "计划模式"} {
+		if got := exactTextCount(tester.Texts(), text); got != 0 {
+			t.Fatalf("mode option %q rendered without settings; texts = %v", text, tester.Texts())
 		}
 	}
 }
@@ -118,31 +127,28 @@ func TestChatModeEnglish(t *testing.T) {
 	h := newPermissionHarness(t, permissionChat(), settings)
 	h.ui.Locale().SetLanguage("en")
 	tester := h.tester()
-	h.assertTexts(tester, "Normal")
-	h.click(tester, "Normal")
-	h.assertTexts(tester, "Normal mode", "Plan mode", "Minimal mode", "Creator mode")
-	h.click(tester, "Minimal mode")
+	h.assertTexts(tester, "Settings")
+	h.openSessionMenu(tester)
+	h.assertTexts(tester, "Conversation mode", "Normal mode", "Plan mode", "Minimal mode", "Creator mode")
+	h.clickExact(tester, "Minimal mode")
 	if got := settings.get(contracts.SettingChatMode); got != contracts.ChatModeMinimal {
 		t.Fatalf("English stored chat mode = %q", got)
 	}
-	h.assertTexts(tester, "Minimal", "Minimal mode")
+	h.assertTexts(tester, "Minimal")
 }
 
 func TestChatModeBadgeAccentDistinct(t *testing.T) {
 	settings := newPermissionSettings(nil)
 	h := newPermissionHarness(t, permissionChat(), settings)
 	tester := h.tester()
-	// The badges are text-asserted (colors are theme values); minimal vs plan
-	// must both be present as mode labels.
+	// The chip label is the active mode; colors are theme values.
 	settings.set(contracts.SettingChatMode, contracts.ChatModeMinimal)
 	tester.Frame()
-	h.assertTexts(tester, "精简模式")
+	h.assertTexts(tester, "精简")
 	settings.set(contracts.SettingChatMode, contracts.ChatModeCreator)
 	tester.Frame()
-	h.assertTexts(tester, "创作模式")
-	if got := strings.Count(strings.Join(tester.Texts(), "\x00"), "模式"); got == 0 {
-		t.Fatalf("mode badge missing; texts = %v", tester.Texts())
-	}
+	h.assertTexts(tester, "创作")
+	h.assertNoTexts(tester, "精简")
 }
 
 // TestPermissionChipNever covers AUDIT-P3-14: the settings behavior page can
@@ -153,6 +159,10 @@ func TestPermissionChipNever(t *testing.T) {
 	h := newPermissionHarness(t, permissionChat(), settings)
 	tester := h.tester()
 	tester.Frame()
-	h.assertTexts(tester, "从不允许")
+	// Fail-closed (never) owns the contextual label; the menu row keeps the
+	// longer "从不允许" wording.
+	h.assertTexts(tester, "禁止工具")
 	h.assertNoTexts(tester, "询问")
+	h.openSessionMenu(tester)
+	h.assertTexts(tester, "权限模式", "从不允许")
 }

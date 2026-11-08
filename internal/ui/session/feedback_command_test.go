@@ -76,13 +76,14 @@ func TestFeedbackDialogRendersAndRates(t *testing.T) {
 	}
 	tester := h.tester()
 	tester.Frame()
-	h.assertTexts(tester, "评价回答", "有帮助", "没帮助", "清除评价", "取消")
+	h.assertTexts(tester, "评价回答", "有帮助", "没帮助", "保存", "取消")
 	if !tester.HasText("这是一条很长的回答。…") && !tester.HasText("…") {
 		t.Fatalf("truncated answer summary missing; texts = %v", tester.Texts())
 	}
 
-	// Good closes the dialog and records the target ids.
+	// Choosing a rating then saving closes the dialog and records the ids.
 	h.click(tester, "有帮助")
+	h.click(tester, "保存")
 	call := chat.lastCall(t)
 	if call.sessionID != "sess-1" || call.messageID != "a1" || call.feedback != contracts.FeedbackGood {
 		t.Fatalf("good call = %+v", call)
@@ -95,6 +96,7 @@ func TestFeedbackDialogRendersAndRates(t *testing.T) {
 	}
 	tester.Frame()
 	h.click(tester, "没帮助")
+	h.click(tester, "保存")
 	if call := chat.lastCall(t); call.feedback != contracts.FeedbackBad {
 		t.Fatalf("bad call = %+v", call)
 	}
@@ -118,6 +120,7 @@ func TestFeedbackDialogErrorAndCancel(t *testing.T) {
 	tester := h.tester()
 	tester.Frame()
 	h.click(tester, "有帮助")
+	h.click(tester, "保存")
 	h.assertTexts(tester, "反馈保存失败：feedback write failed", "评价回答")
 
 	chat.mu.Lock()
@@ -136,8 +139,9 @@ func TestFeedbackDialogEnglish(t *testing.T) {
 	}
 	tester := h.tester()
 	tester.Frame()
-	h.assertTexts(tester, "Rate answer", "Helpful", "Not helpful", "Clear rating", "Cancel")
+	h.assertTexts(tester, "Rate answer", "Helpful", "Not helpful", "Save", "Cancel")
 	h.click(tester, "Helpful")
+	h.click(tester, "Save")
 	if call := chat.lastCall(t); call.feedback != contracts.FeedbackGood {
 		t.Fatalf("English good call = %+v", call)
 	}

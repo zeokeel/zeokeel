@@ -3,6 +3,8 @@ package toolcards_test
 // Tests for the transcript plan review card (plan_review tool).
 
 import (
+	"time"
+
 	"context"
 	"testing"
 
@@ -71,10 +73,11 @@ func TestPlanReviewCardBadArgumentsFallBack(t *testing.T) {
 		ID: "plan-2", Name: "plan_review", Status: "ok", Summary: "not-json",
 	}}, nil, nil)
 	tester := h.tester()
-	h.assertTexts(tester, "计划审阅", "摘要")
+	h.assertTexts(tester, "计划审阅", "详情")
+	h.assertTexts(tester, "not-json") // short/failed payload starts expanded (H15)
+	h.click(tester, "详情")
+	tester.Advance(300 * time.Millisecond) // the 200 ms close animation
 	h.assertNoTexts(tester, "not-json")
-	h.click(tester, "摘要")
-	h.assertTexts(tester, "not-json")
 }
 
 func TestPlanReviewCardWithoutServiceHasNoStatus(t *testing.T) {

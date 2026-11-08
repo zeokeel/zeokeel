@@ -112,9 +112,13 @@ func TestAutomationTasksEndToEnd(t *testing.T) {
 	}
 	tester := ui.NewTester(uiRoot.View, 1280, 800)
 	tester.Frame()
-	for _, want := range []string{"自动化", "每日摘要", "工具任务", "every 60s"} {
+	// H11: schedules render human-readable, and cards expose Edit.
+	for _, want := range []string{"自动化", "每日摘要", "工具任务", "每 1 分钟", "立即运行", "编辑", "删除"} {
 		if !tester.HasText(want) {
 			t.Fatalf("automation frame missing %q; texts = %v", want, tester.Texts())
 		}
+	}
+	if tester.HasText("every 60s") {
+		t.Fatalf("automation frame still shows the raw schedule; texts = %v", tester.Texts())
 	}
 }

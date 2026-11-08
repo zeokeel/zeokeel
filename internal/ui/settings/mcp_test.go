@@ -55,8 +55,10 @@ func TestMCPPageShowsAndRemovesServers(t *testing.T) {
 	h.assertTexts(tester, "files", "http://127.0.0.1:9000/mcp",
 		"web", "https://mcp.example.com/mcp", "移除")
 
-	// Removing the first row writes the remaining server back as JSON.
+	// Removing the first row asks for confirmation, then writes the remaining
+	// server back as JSON.
 	h.click(tester, "移除")
+	h.click(tester, "移除服务器")
 	want := `[{"name":"web","url":"https://mcp.example.com/mcp"}]`
 	if got := store.get(contracts.SettingMCPServers); got != want {
 		t.Fatalf("stored MCP servers = %s, want %s", got, want)

@@ -13,15 +13,16 @@ import (
 
 	"github.com/zeokeel/zeokeel/internal/contracts"
 	"github.com/zeokeel/zeokeel/internal/design"
+	"github.com/zeokeel/zeokeel/internal/uikit"
 )
 
 const (
 	// NotificationsPageID is the notification-toast page identity.
 	NotificationsPageID = "notifications"
 	// NotificationsPageSection places it in the general group.
-	NotificationsPageSection = "general"
+	NotificationsPageSection = "高级"
 	// NotificationsPageOrder places it next to Update/Import (99).
-	NotificationsPageOrder = 99
+	NotificationsPageOrder = 10
 )
 
 // notificationsSettingEnabled normalizes ui.notifications: "false", "0" and
@@ -113,34 +114,41 @@ func setNotificationLevelHidden(store contracts.SettingsService, level string, h
 	return store.Set(contracts.SettingNotificationHiddenLevels, encodeNotificationHiddenLevels(current))
 }
 
-// buildNotificationsPage renders the notification settings.
+// buildNotificationsPage renders the notification settings. The master switch
+// applies at once; the per-level filters are native check boxes (they select
+// several levels, which is what a check box is for) and are disabled while the
+// master switch is off, matching the copy.
 func buildNotificationsPage(c *ui.Context, runtime contracts.UIRuntime,
 	store contracts.SettingsService, locale contracts.LocaleService, st *notificationsState) {
 	t := design.Of(c)
-	ui.Column(c).FillWidth().Gap(design.Space2).Children(func() {
-		pageHeader(c, t, localized(locale, "通知", "Notifications"), localized(locale,
-			"桌面通知与提示气泡。",
-			"Desktop notifications and toast bubbles."))
-		panel(c, t, func() {
-			enabled := notificationsSettingEnabled(store.Get(contracts.SettingNotifications, ""))
-			toggle := ui.Toggle(c, &enabled,
-				localized(locale, "显示通知气泡", "Show notification toasts"))
-			if toggle.Changed() {
-				if err := store.Set(contracts.SettingNotifications, fmt.Sprintf("%t", enabled)); err != nil {
-					// Keep the stored value untouched on failure; the next frame
-					// re-reads it and the description below stays accurate.
+	ui.Column(c).FillWidth().Gap(design.Space4).Children(func() {
+		uikit.PageHeader(c, localized(locale, "通知", "Notifications"), localized(locale,
+			"桌面通知与提示气泡；修改立即生效。",
+			"Desktop notifications and toast bubbles; changes apply immediately."))
+		uikit.Section(c, localized(locale, "通知气泡", "Notification toasts"), func(*ui.Context) {
+			ui.Form(c, func() {
+				enabled := notificationsSettingEnabled(store.Get(contracts.SettingNotifications, ""))
+				if switchField(c,
+					localized(locale, "显示通知气泡", "Show notification toasts"),
+					localized(locale,
+						"关闭后导出、更新等提示不再以气泡显示，仍可在界面内查看状态。",
+						"When off, export and update notices stay in the app instead of showing toasts."),
+					&enabled) {
+					if err := store.Set(contracts.SettingNotifications, fmt.Sprintf("%t", enabled)); err != nil {
+						st.status = localized(locale, "保存失败：", "Save failed: ") + err.Error()
+						st.statusErr = true
+					} else {
+						st.status = localized(locale, "已保存", "Saved")
+						st.statusErr = false
+					}
+					// Keep the stored value untouched on failure; the next
+					// frame re-reads it and the description below stays accurate.
 					runtime.Invalidate()
-					return
 				}
-				runtime.Invalidate()
-			}
-			design.Apply(ui.Text(c, localized(locale,
-				"关闭后导出、更新等提示不再以气泡显示，仍可在界面内查看状态。",
-				"When off, export and update notices stay in the app instead of showing toasts")),
-				t.TextMuted(design.TypeXXS)).MaxLines(2)
+			})
 		})
-		panel(c, t, func() {
-			sectionTitle(c, t, localized(locale, "按级别过滤", "Filter by level"))
+		uikit.Section(c, localized(locale, "按级别过滤", "Filter by level"), func(*ui.Context) {
+			enabled := notificationsSettingEnabled(store.Get(contracts.SettingNotifications, ""))
 			design.Apply(ui.Text(c, localized(locale,
 				"按级别过滤通知气泡；关闭的级别不再显示（总开关关闭时全部隐藏）。",
 				"Filter toast bubbles by level; disabled levels are hidden (the master switch still hides everything).")),
@@ -149,8 +157,9 @@ func buildNotificationsPage(c *ui.Context, runtime contracts.UIRuntime,
 			for _, filter := range notificationLevelFilters {
 				filter := filter
 				shown := !hidden[filter.level]
-				toggle := ui.Toggle(c, &shown, localized(locale, filter.zh, filter.en))
-				if toggle.Changed() {
+				check := ui.Checkbox(c, &shown, localized(locale, filter.zh, filter.en)).
+					Disabled(!enabled)
+				if check.Changed() && enabled {
 					if err := setNotificationLevelHidden(store, filter.level, !shown); err != nil {
 						st.status = localized(locale, "保存失败：", "Save failed: ") + err.Error()
 						st.statusErr = true
@@ -162,9 +171,7 @@ func buildNotificationsPage(c *ui.Context, runtime contracts.UIRuntime,
 					runtime.Invalidate()
 				}
 			}
-			if st.status != "" {
-				statusBadge(c, t, st.status, st.statusErr)
-			}
+			statusBadgesRow(c, t, st.status, st.statusErr)
 		})
 	})
 }

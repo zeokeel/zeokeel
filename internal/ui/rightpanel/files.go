@@ -88,7 +88,7 @@ func buildArtifactsSection(c *ui.Context, t *design.Tokens, artifacts contracts.
 		history = history[:maxArtifactRows]
 	}
 
-	card := design.Apply(ui.Column(c), t.Panel()).Padding(design.Space2).Gap(design.Space1)
+	card := ui.Column(c).FillWidth().Gap(design.Space1)
 	card.Children(func() {
 		ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(design.Space2).Children(func() {
 			ui.Icon(c, icons.Data()).Size(design.Space3, design.Space3).TextColor(t.LabelTertiary)
@@ -96,11 +96,11 @@ func buildArtifactsSection(c *ui.Context, t *design.Tokens, artifacts contracts.
 				FontWeight(600).TextColor(t.LabelSecondary).Grow(1)
 		})
 		if st.artifactsErr != "" {
-			buildErrorLine(c, t, st.artifactsErr)
+			uikit.ErrorLine(c, st.artifactsErr)
 		}
 		if st.artifactsNotice != "" {
 			ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(design.Space2).Children(func() {
-				design.Apply(ui.Badge(c, st.artifactsNotice), t.Badge()).TextColor(t.Success)
+				design.Apply(ui.Badge(c, st.artifactsNotice), t.Badge()).TextColor(t.SuccessText)
 				if st.artifactsSavedPath != "" {
 					design.Apply(ui.Text(c, st.artifactsSavedPath), t.Font(design.TypeXXXS)).
 						TextColor(t.LabelTertiary).Grow(1).MaxLines(1).Ellipsis("…").
@@ -119,6 +119,7 @@ func buildArtifactsSection(c *ui.Context, t *design.Tokens, artifacts contracts.
 			if key == "" {
 				key = fmt.Sprintf("artifact-%d", index)
 			}
+			c.Key("artifact/" + key)
 			open := st.artifactsOpen[key]
 			toggle := func() {
 				st.artifactsOpen[key] = !st.artifactsOpen[key]
@@ -127,14 +128,12 @@ func buildArtifactsSection(c *ui.Context, t *design.Tokens, artifacts contracts.
 			title := firstNonEmpty(artifact.Title, uikit.T(st.locale, "未命名产物", "Untitled artifact"))
 			ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(design.Space2).Children(func() {
 				info := ui.ButtonBase(c).Grow(1).Padding(design.Space1).Radius(design.RadiusSM).Label(title)
-				if info.Hovered() {
-					info.Background(t.BgHover)
-				}
+				info = rowTint(t, info, open)
 				info.Children(func() {
 					ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(design.Space2).Children(func() {
 						design.Apply(ui.Text(c, title), t.Font(design.TypeXS)).FontWeight(600).
 							TextColor(t.LabelPrimary).Grow(1).MaxLines(1).Ellipsis("…")
-						design.Apply(ui.Text(c, artifact.CreatedAt.Local().Format("15:04")),
+						design.Apply(ui.Text(c, uikit.FormatClock(st.locale, artifact.CreatedAt)),
 							t.Font(design.TypeXXXS)).TextColor(t.LabelTertiary).NoWrap()
 					})
 				})
@@ -172,12 +171,12 @@ func buildFilesWorkspaceSection(
 	st *state,
 ) {
 	if workspace == nil {
-		buildEmptyPane(c, t, icons.Folder(), uikit.T(st.locale, "工作区未启用", "Workspace is not enabled"))
+		buildEmptyPane(c, uikit.T(st.locale, "工作区未启用", "Workspace is not enabled"))
 		return
 	}
 	current, ok, err := workspace.Current(context.Background())
 	if err != nil {
-		buildErrorLine(c, t, uikit.T(st.locale, "读取工作区失败：", "Failed to read the workspace: ")+err.Error())
+		uikit.ErrorLine(c, uikit.T(st.locale, "读取工作区失败：", "Failed to read the workspace: ")+err.Error())
 		return
 	}
 	if !ok {
@@ -186,34 +185,51 @@ func buildFilesWorkspaceSection(
 	}
 
 	ui.Column(c).FillWidth().Gap(design.Space2).Children(func() {
+		// The refresh lives in the pane header; this row names the workspace.
 		ui.Row(c).FillWidth().Gap(design.Space2).AlignItems(ui.Center).Children(func() {
-			design.Apply(ui.Badge(c, uikit.T(st.locale, "工作区", "Workspace")), t.Badge())
+			// A muted label, not a badge: the workspace is context, the name is the
+			// information.
+			design.Apply(ui.Text(c, uikit.T(st.locale, "工作区", "Workspace")), t.TextMuted(design.TypeXXXS)).NoWrap()
 			design.Apply(ui.Text(c, firstNonEmpty(current.Name, filepath.Base(current.Root))), t.Font(design.TypeXS)).
 				FontWeight(600).TextColor(t.LabelPrimary).Grow(1).MaxLines(1).Ellipsis("…")
-			refresh := ui.Button(c, uikit.T(st.locale, "刷新", "Refresh")).
-				Tooltip(uikit.T(st.locale, "重新读取文件列表", "Reload the file list"))
-			if refresh.Clicked() {
-				st.filesPreview = make(map[string]*filePreview)
-				st.filesErr = ""
-				runtime.Invalidate()
-			}
 		})
-		design.Apply(ui.Text(c, current.Root), t.Font(design.TypeXXXS)).
-			TextColor(t.LabelTertiary).MaxLines(1).Ellipsis("…")
+		// The workspace root is context: show the compressed path, keep the full
+		// path in the tooltip.
+		design.Apply(ui.Text(c, compressPath(current.Root)), t.Font(design.TypeXXXS)).
+			TextColor(t.LabelTertiary).MaxLines(1).Ellipsis("…").Tooltip(current.Root)
 		buildBreadcrumb(c, t, workspace, runtime, st)
+		// Filter and hidden-entry controls sit together right above the list.
+		ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(design.Space2).Children(func() {
+			c.Key("files/filter")
+			filterLabel := uikit.T(st.locale, "筛选文件", "Filter files")
+			ui.SearchField(c, &st.filesFilter).Label(filterLabel).
+				Placeholder(filterLabel).Grow(1)
+			showLabel := uikit.T(st.locale, "显示隐藏文件", "Show hidden files")
+			design.Apply(ui.Text(c, uikit.T(st.locale, "显示隐藏", "Show hidden")), t.TextMuted(design.TypeXXXS)).NoWrap()
+			c.Key("files/show-hidden")
+			ui.Switch(c, &st.filesShowHidden).Label(showLabel)
+		})
 		if st.filesErr != "" {
-			buildErrorLine(c, t, st.filesErr)
+			uikit.ErrorLine(c, st.filesErr)
 		}
 
 		dir := st.filesDir
 		entries, filesErr := workspace.Files(context.Background(), dir)
+		visible := filterFileEntries(entries, st.filesFilter, st.filesShowHidden)
 		switch {
 		case filesErr != nil:
-			buildErrorLine(c, t, uikit.T(st.locale, "列目录失败：", "Failed to list the directory: ")+filesErr.Error())
-		case len(entries) == 0:
+			uikit.ErrorLine(c, uikit.T(st.locale, "列目录失败：", "Failed to list the directory: ")+filesErr.Error())
+		case len(visible) == 0 && strings.TrimSpace(st.filesFilter) != "":
+			design.Apply(ui.Text(c, uikit.T(st.locale, "没有匹配的条目", "No matching entries")), t.TextMuted(design.TypeXS))
+		case len(visible) == 0 && len(entries) > 0:
+			// Only hidden entries here: say so instead of looking broken.
+			design.Apply(ui.Text(c, uikit.T(st.locale,
+				"目录里只有隐藏文件（可打开「显示隐藏」）", "Only hidden entries here (turn on Show hidden)")),
+				t.TextMuted(design.TypeXS))
+		case len(visible) == 0:
 			design.Apply(ui.Text(c, uikit.T(st.locale, "目录为空", "The directory is empty")), t.TextMuted(design.TypeXS))
 		default:
-			for _, entry := range entries {
+			for _, entry := range visible {
 				buildFileRow(c, t, runtime, st, entry)
 			}
 		}
@@ -264,7 +280,7 @@ func buildOpenWorkspace(c *ui.Context, t *design.Tokens, workspace contracts.Wor
 			runtime.Invalidate()
 		}
 		if st.filesErr != "" {
-			buildErrorLine(c, t, st.filesErr)
+			uikit.ErrorLine(c, st.filesErr)
 		}
 	})
 }
@@ -277,18 +293,44 @@ func buildBreadcrumb(c *ui.Context, t *design.Tokens, workspace contracts.Worksp
 	}
 	rootLabel := "/" + firstNonEmpty(current.Name, filepath.Base(current.Root))
 	segments := splitRelPath(st.filesDir)
+	fullPath := rootLabel
+	if len(segments) > 0 {
+		fullPath += "/" + strings.Join(segments, "/")
+	}
 	ui.Row(c).FillWidth().Gap(design.Space1).AlignItems(ui.Center).Children(func() {
 		root := ui.Button(c, rootLabel).Tooltip(uikit.T(st.locale, "返回工作区根目录", "Back to the workspace root"))
 		if root.Clicked() {
 			navigateFiles(st, "", runtime)
 		}
-		for index, segment := range segments {
+		// Deep paths collapse their middle: first segment, an ellipsis, then the
+		// last two segments; every crumb keeps its full path in the tooltip.
+		visible := segments
+		skipped := false
+		if len(segments) > 3 {
+			visible = append([]string{segments[0], "…"}, segments[len(segments)-2:]...)
+			skipped = true
+		}
+		base := 0
+		for index, segment := range visible {
 			design.Apply(ui.Text(c, "/"), t.TextMuted(design.TypeXXXS))
+			if segment == "…" && skipped {
+				design.Apply(ui.Text(c, "…"), t.TextMuted(design.TypeXXXS)).Tooltip(fullPath)
+				base = len(segments) - 2
+				continue
+			}
 			label := "/" + segment
 			index := index
-			crumb := ui.Button(c, label).Tooltip(uikit.T(st.locale, "返回 ", "Back to ") + label)
+			crumbIndex := index
+			if skipped {
+				crumbIndex = base + index - 1
+				if index == 0 {
+					crumbIndex = 0
+				}
+			}
+			crumb := ui.Button(c, label).
+				Tooltip(uikit.T(st.locale, "返回 ", "Back to ") + "/" + strings.Join(segments[:crumbIndex+1], "/"))
 			if crumb.Clicked() {
-				navigateFiles(st, strings.Join(segments[:index+1], "/"), runtime)
+				navigateFiles(st, strings.Join(segments[:crumbIndex+1], "/"), runtime)
 			}
 		}
 	})
@@ -319,15 +361,57 @@ func navigateFiles(st *state, dir string, runtime contracts.UIRuntime) {
 	runtime.Invalidate()
 }
 
+// compressPath shortens one path for display: short paths stay as they are,
+// long ones keep their first and last segments with an ellipsis between. The
+// caller keeps the full path in a tooltip.
+func compressPath(path string) string {
+	trimmed := strings.TrimSpace(path)
+	if len([]rune(trimmed)) <= 56 {
+		return trimmed
+	}
+	parts := strings.Split(trimmed, "/")
+	kept := parts[:0]
+	for _, part := range parts {
+		if part != "" {
+			kept = append(kept, part)
+		}
+	}
+	if len(kept) < 4 {
+		return trimmed
+	}
+	prefix := "/"
+	if !strings.HasPrefix(trimmed, "/") {
+		prefix = ""
+	}
+	return prefix + kept[0] + "/…/" + strings.Join(kept[len(kept)-2:], "/")
+}
+
+// filterFileEntries applies the Files pane's controls: hidden (dot) entries are
+// folded unless showHidden, and the name filter matches case-insensitively.
+func filterFileEntries(entries []contracts.FileEntry, filter string, showHidden bool) []contracts.FileEntry {
+	needle := strings.ToLower(strings.TrimSpace(filter))
+	visible := make([]contracts.FileEntry, 0, len(entries))
+	for _, entry := range entries {
+		name := firstNonEmpty(entry.Name, filepath.Base(entry.Path))
+		if !showHidden && strings.HasPrefix(name, ".") {
+			continue
+		}
+		if needle != "" && !strings.Contains(strings.ToLower(name), needle) {
+			continue
+		}
+		visible = append(visible, entry)
+	}
+	return visible
+}
+
 // buildFileRow is one native directory row: folder or file glyph, the name and
 // the click action (enter a directory, select a file for the preview).
 func buildFileRow(c *ui.Context, t *design.Tokens, runtime contracts.UIRuntime, st *state, entry contracts.FileEntry) {
 	name := firstNonEmpty(entry.Name, filepath.Base(entry.Path))
+	c.Key("file/" + firstNonEmpty(entry.Path, entry.Name))
 	row := ui.ButtonBase(c).FillWidth().Height(fileRowHeight).PaddingX(design.Space2).
 		Radius(design.RadiusSM).Label(name)
-	if row.Hovered() {
-		row.Background(t.BgHover)
-	}
+	row = rowTint(t, row, false)
 	row.Children(func() {
 		ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(design.Space2).Children(func() {
 			icon := icons.Folder()
@@ -375,7 +459,7 @@ func buildFilePreview(c *ui.Context, t *design.Tokens, workspace contracts.Works
 
 		preview := st.filePreviewFor(workspace, path)
 		if preview.err != "" {
-			buildErrorLine(c, t, uikit.T(st.locale, "读取文件失败：", "Failed to read the file: ")+preview.err)
+			uikit.ErrorLine(c, uikit.T(st.locale, "读取文件失败：", "Failed to read the file: ")+preview.err)
 			return
 		}
 		switch {
@@ -387,8 +471,10 @@ func buildFilePreview(c *ui.Context, t *design.Tokens, workspace contracts.Works
 			design.Apply(ui.Text(c, string(preview.data)), t.MonoFamily()).
 				FontSize(11).TextColor(t.LabelPrimary).MaxLines(40)
 		default:
-			detailRow(c, t, uikit.T(st.locale, "大小", "Size"), formatFileSize(int64(len(preview.data))))
-			detailRow(c, t, uikit.T(st.locale, "类型", "Type"), strings.TrimPrefix(filepath.Ext(path), "."))
+			uikit.KeyValueRows(c, []uikit.KeyValue{
+				{Key: uikit.T(st.locale, "大小", "Size"), Value: formatFileSize(int64(len(preview.data)))},
+				{Key: uikit.T(st.locale, "类型", "Type"), Value: strings.TrimPrefix(filepath.Ext(path), ".")},
+			})
 			design.Apply(ui.Text(c, uikit.T(st.locale, "暂不支持预览", "Preview is not supported")), t.TextMuted(design.TypeXXS))
 		}
 		if preview.truncated {

@@ -32,6 +32,7 @@ func newSubagentModuleService(t *testing.T) (*service, cordis.Context) {
 	provide(t, ctx, contracts.KeyLogger, contracts.Logger(logger))
 	provide(t, ctx, contracts.KeyStore, contracts.Store(store))
 	provide(t, ctx, contracts.KeyApprovals, contracts.Approvals(fakeApprovals{}))
+	provide(t, ctx, contracts.KeyDataDir, t.TempDir())
 	if err := Module().Factory(ctx, Config{}); err != nil {
 		t.Fatalf("activate agent module: %v", err)
 	}
@@ -263,6 +264,7 @@ func TestSubagentToolsUnregisterOnDispose(t *testing.T) {
 	provide(t, ctx, contracts.KeyLogger, contracts.Logger(&fakeLogger{}))
 	provide(t, ctx, contracts.KeyStore, contracts.Store(newFakeStore()))
 	provide(t, ctx, contracts.KeyApprovals, contracts.Approvals(fakeApprovals{}))
+	provide(t, ctx, contracts.KeyDataDir, t.TempDir())
 	if err := Module().Factory(ctx, Config{}); err != nil {
 		t.Fatalf("activate agent module: %v", err)
 	}

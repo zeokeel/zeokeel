@@ -231,18 +231,21 @@ func pruneSpillDir(dir string, keep int) {
 // spillDir resolves the current workspace's spill directory ("" when no
 // workspace is open or the workspace backend is unavailable).
 func (s *service) spillDir(ctx context.Context) string {
-	if s.workspace == nil {
-		return ""
+	if s.workspace != nil {
+		workspace, ok, err := s.workspace.Current(ctx)
+		if err != nil {
+			s.logger.Printf("[agent] spill dir: current workspace: %v", err)
+		} else if ok && strings.TrimSpace(workspace.Root) != "" {
+			return filepath.Join(workspace.Root, filepath.FromSlash(spillDirName))
+		}
 	}
-	workspace, ok, err := s.workspace.Current(ctx)
-	if err != nil {
-		s.logger.Printf("[agent] spill dir: current workspace: %v", err)
-		return ""
+	// Headless/ACP sessions have no registered workspace; spill under the
+	// product data directory instead of resending oversized tool results in
+	// every following model round (verification finding ZK-13).
+	if dataDir := strings.TrimSpace(s.dataDir); dataDir != "" {
+		return filepath.Join(dataDir, filepath.FromSlash(spillDirName))
 	}
-	if !ok || strings.TrimSpace(workspace.Root) == "" {
-		return ""
-	}
-	return filepath.Join(workspace.Root, filepath.FromSlash(spillDirName))
+	return ""
 }
 
 // spilledHistory wraps the agent run's persistence history in the spill

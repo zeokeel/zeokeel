@@ -29,6 +29,7 @@ func newTeamModuleService(t *testing.T) (*service, contracts.TeamService, cordis
 	provide(t, ctx, contracts.KeyLogger, contracts.Logger(&fakeLogger{}))
 	provide(t, ctx, contracts.KeyStore, contracts.Store(newFakeStore()))
 	provide(t, ctx, contracts.KeyApprovals, contracts.Approvals(fakeApprovals{}))
+	provide(t, ctx, contracts.KeyDataDir, t.TempDir())
 	if err := Module().Factory(ctx, Config{}); err != nil {
 		t.Fatalf("activate agent module: %v", err)
 	}

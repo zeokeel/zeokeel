@@ -40,7 +40,10 @@ func TestAssistantUsageFooterRenders(t *testing.T) {
 	})
 	h := newHarness(t, chat)
 	tester := h.tester()
-	h.assertTexts(tester, "用时 3.2s · 1,234 tokens · 缓存 200")
+	// The summary line is compact and muted; the breakdown expands on click.
+	h.assertTexts(tester, "用时 3.2s · 1,234 tokens")
+	h.click(tester, "用时 3.2s · 1,234 tokens")
+	h.assertTexts(tester, "缓存 tokens", "200")
 }
 
 func TestAssistantUsageDurationFormats(t *testing.T) {
@@ -67,7 +70,9 @@ func TestAssistantUsageEnglishCopy(t *testing.T) {
 	tester := h.tester()
 	h.ui.Locale().SetLanguage("en")
 	tester.Frame()
-	h.assertTexts(tester, "Took 3.2s · 1,234 tokens · cached 200")
+	h.assertTexts(tester, "Took 3.2s · 1,234 tokens")
+	h.click(tester, "Took 3.2s · 1,234 tokens")
+	h.assertTexts(tester, "Cached tokens", "200")
 }
 
 // --- message copy -----------------------------------------------------------
@@ -76,13 +81,14 @@ func TestAssistantCopyWritesClipboard(t *testing.T) {
 	chat := usageChat(contracts.ChatMessage{ID: "a1", Role: contracts.ChatRoleAssistant, Text: "可复制的回答"})
 	h := newHarness(t, chat)
 	tester := h.tester()
-	h.assertTexts(tester, "复制")
-
-	h.click(tester, "复制")
+	// H15: copy is resident under the turn (no hover or pin needed).
+	h.assertTexts(tester, "复制消息")
+	h.click(tester, "复制消息")
 	if got := tester.Clipboard(); got != "可复制的回答" {
 		t.Fatalf("clipboard = %q, want the assistant text", got)
 	}
-	h.assertTexts(tester, "已复制")
+	// The copied state is the check glyph plus tooltip, never a resident badge.
+	h.assertNoTexts(tester, "已复制")
 }
 
 func TestAssistantCopyHiddenForEmptyText(t *testing.T) {
@@ -103,26 +109,29 @@ func TestAgentModePlanBadgeAndToggle(t *testing.T) {
 	settings := newPermissionSettings(nil)
 	h := newPermissionHarness(t, permissionChat(), settings)
 	tester := h.tester()
-	h.assertTexts(tester, "普通")
+	// Normal mode keeps the quiet session-menu label; plan mode owns the label
+	// (and the warning colour) when it is active.
+	h.assertTexts(tester, "会话设置")
 	if got := textsContaining(tester.Texts(), "计划模式"); got != 0 {
-		t.Fatalf("plan badge rendered in normal mode; texts = %v", tester.Texts())
+		t.Fatalf("plan state rendered outside the session menu; texts = %v", tester.Texts())
 	}
 
-	h.click(tester, "普通")
-	h.assertTexts(tester, "普通模式", "计划模式")
-	h.click(tester, "计划模式")
+	h.openSessionMenu(tester)
+	h.assertTexts(tester, "对话模式", "普通模式", "计划模式")
+	h.clickExact(tester, "计划模式")
 	if got := settings.get(contracts.SettingAgentMode); got != contracts.AgentModePlan {
 		t.Fatalf("stored agent mode = %q, want plan", got)
 	}
 	h.assertTexts(tester, "计划模式")
 
-	h.click(tester, "计划")
-	h.click(tester, "普通模式")
+	h.openSessionMenu(tester)
+	h.clickExact(tester, "普通模式")
 	if got := settings.get(contracts.SettingAgentMode); got != contracts.AgentModeNormal {
 		t.Fatalf("stored agent mode = %q, want normal", got)
 	}
+	h.assertTexts(tester, "会话设置")
 	if got := textsContaining(tester.Texts(), "计划模式"); got != 0 {
-		t.Fatalf("plan badge still rendered after switching back; texts = %v", tester.Texts())
+		t.Fatalf("plan state still rendered after switching back; texts = %v", tester.Texts())
 	}
 }
 
@@ -130,11 +139,14 @@ func TestAgentModeHiddenWithoutSettings(t *testing.T) {
 	h := newPermissionHarness(t, permissionChat(), nil)
 	tester := h.tester()
 	if got := exactTextCount(tester.Texts(), "普通"); got != 0 {
-		t.Fatalf("mode selector rendered without a settings store; texts = %v", tester.Texts())
+		t.Fatalf("mode control rendered without a settings store; texts = %v", tester.Texts())
 	}
 	if got := textsContaining(tester.Texts(), "计划模式"); got != 0 {
-		t.Fatalf("plan mode badge rendered without a settings store; texts = %v", tester.Texts())
+		t.Fatalf("plan mode state rendered without a settings store; texts = %v", tester.Texts())
 	}
+	// The session menu still carries the built-in presets, but no mode group.
+	h.openSessionMenu(tester)
+	h.assertNoTexts(tester, "对话模式", "普通模式", "计划模式")
 }
 
 func TestAgentModeEnglishCopy(t *testing.T) {
@@ -143,11 +155,11 @@ func TestAgentModeEnglishCopy(t *testing.T) {
 	tester := h.tester()
 	h.ui.Locale().SetLanguage("en")
 	tester.Frame()
-	h.assertTexts(tester, "Normal")
+	h.assertTexts(tester, "Settings")
 
-	h.click(tester, "Normal")
-	h.assertTexts(tester, "Normal mode", "Plan mode")
-	h.click(tester, "Plan mode")
+	h.openSessionMenu(tester)
+	h.assertTexts(tester, "Conversation mode", "Normal mode", "Plan mode")
+	h.clickExact(tester, "Plan mode")
 	if got := settings.get(contracts.SettingAgentMode); got != contracts.AgentModePlan {
 		t.Fatalf("stored agent mode = %q, want plan", got)
 	}

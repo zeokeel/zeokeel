@@ -181,7 +181,7 @@ func TestUpdateDownloadSuccess(t *testing.T) {
 	waitForText(t, tester, "已下载")
 
 	h.assertTexts(tester, "已下载", "版本：1.2.0", "大小：2.0 MB", "SHA256 abcdef01",
-		"暂存路径", "1.2.0-zeokeel-1.2.0.zip", "请手动安装")
+		"暂存路径", "1.2.0-zeokeel-1.2.0.zip", "下载完成，可安排在下次启动安装")
 	if got := update.downloadCount(); got != 1 {
 		t.Fatalf("Download calls = %d, want 1", got)
 	}
@@ -273,5 +273,5 @@ func TestUpdateDownloadEnglishCopy(t *testing.T) {
 	h.click(tester, "Download update")
 	waitForText(t, tester, "Downloaded")
 	h.assertTexts(tester, "Version: 1.2.0", "Size: 2.0 MB", "SHA256 abcdef01", "Staged file",
-		"1.2.0-zeokeel-1.2.0.zip", "Automatic replacement is not supported")
+		"1.2.0-zeokeel-1.2.0.zip", "Download complete; schedule it for the next launch")
 }

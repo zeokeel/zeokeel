@@ -49,7 +49,7 @@ func TestSidebarForkSessionFromRowMenu(t *testing.T) {
 	chat.active = "s1"
 	h := newHarness(t, chat, sidebar.Config{})
 	tester := h.tester()
-	openRowMenu(t, tester)
+	openRowMenu(t, tester, "会话一")
 
 	h.assertTexts(tester, "创建副本", "删除")
 	h.click(tester, "创建副本")
@@ -66,7 +66,7 @@ func TestSidebarForkHiddenWithoutForker(t *testing.T) {
 	chat := &fakeChat{sessions: []contracts.ChatSessionInfo{{ID: "s1", Title: "会话一"}}}
 	h := newHarness(t, chat, sidebar.Config{})
 	tester := h.tester()
-	openRowMenu(t, tester)
+	openRowMenu(t, tester, "会话一")
 	h.assertTexts(tester, "删除", "设为当前")
 	h.assertNoTexts(tester, "创建副本")
 }

@@ -7,6 +7,7 @@ package rightpanel_test
 
 import (
 	"fmt"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -231,6 +232,24 @@ func (h *harness) click(tester *ui.Tester, label string) {
 	tester.Frame()
 }
 
+// selectPane switches the inspector to one pane through its compact picker:
+// the menu button names the current pane, and the menu lists every pane.
+func (h *harness) selectPane(tester *ui.Tester, label string) {
+	h.t.Helper()
+	selector := "切换面板"
+	if !tester.HasText(selector) {
+		selector = "Switch pane"
+	}
+	if err := tester.Click(selector); err != nil {
+		h.t.Fatalf("open pane selector: %v; texts = %v", err, tester.Texts())
+	}
+	tester.Frame()
+	if err := tester.Click(label); err != nil {
+		h.t.Fatalf("select pane %q: %v; texts = %v", label, err, tester.Texts())
+	}
+	tester.Frame()
+}
+
 func (h *harness) assertTexts(tester *ui.Tester, wanted ...string) {
 	h.t.Helper()
 	for _, want := range wanted {
@@ -327,16 +346,21 @@ func TestOverviewRendersSession(t *testing.T) {
 	h := newHarness(t, chat, rightpanel.Config{})
 	tester := h.tester()
 
-	h.assertTexts(tester, "检查", "概览", "工具",
+	// The first screen keeps the user-facing facts only.
+	h.assertTexts(tester, "检查", "概览",
 		"项目讨论", "运行中", "错误", "上一次运行失败：超时",
-		"消息", "3", "更新时间", "会话 ID", "s1",
-		"模型配置")
+		"消息", "3", "更新时间", "模型", "未配置")
+	h.assertNoTexts(tester, "会话 ID", "s1")
+
+	// The technical metadata sits in the collapsed Diagnostics disclosure.
+	expandOverviewDiagnostics(t, h, tester, "诊断信息")
+	h.assertTexts(tester, "会话 ID", "s1", "API Key", "上下文预算", "最大迭代")
 }
 
 func TestOverviewEmptyState(t *testing.T) {
 	h := newHarness(t, newFakeChat(), rightpanel.Config{})
 	tester := h.tester()
-	h.assertTexts(tester, "检查", "概览", "工具", "还没有活动会话")
+	h.assertTexts(tester, "检查", "概览", "还没有活动会话")
 }
 
 func TestToolsPaneAggregatesAndFolds(t *testing.T) {
@@ -364,7 +388,7 @@ func TestToolsPaneAggregatesAndFolds(t *testing.T) {
 	}, true)
 	h := newHarness(t, chat, rightpanel.Config{})
 	tester := h.tester()
-	h.click(tester, "工具")
+	h.selectPane(tester, "工具")
 
 	h.assertTexts(tester, "工具调用", "bash", "read_file", "web_search",
 		"运行中", "完成", "失败", "摘要", "bash")
@@ -378,7 +402,7 @@ func TestToolsPaneEmpty(t *testing.T) {
 	chat.addSession(contracts.ChatSession{ID: "s1", Title: "空会话"}, true)
 	h := newHarness(t, chat, rightpanel.Config{})
 	tester := h.tester()
-	h.click(tester, "工具")
+	h.selectPane(tester, "工具")
 	h.assertTexts(tester, "还没有工具调用")
 }
 
@@ -396,15 +420,19 @@ func TestModelPaneHidesAPIKey(t *testing.T) {
 	h := newHarness(t, chat, rightpanel.Config{})
 	tester := h.tester()
 	h.assertNoTexts(tester, secret)
-	h.assertTexts(tester, "模型配置", "deepseek-chat",
-		"https://api.example.com/v1", "API Key", "已设置（已隐藏）",
+	// The user-facing overview shows the model name; the endpoint and key state
+	// live in the collapsed diagnostics.
+	h.assertTexts(tester, "deepseek-chat", "模型")
+	h.assertNoTexts(tester, "https://api.example.com/v1", "API Key", "上下文预算", "最大迭代")
+	expandOverviewDiagnostics(t, h, tester, "诊断信息")
+	h.assertTexts(tester, "https://api.example.com/v1", "API Key", "已设置（已隐藏）",
 		"上下文预算", "默认", "最大迭代", "5")
 	h.assertNoTexts(tester, secret)
 
 	// The key must not leak from any pane.
-	h.click(tester, "工具")
+	h.selectPane(tester, "工具")
 	h.assertNoTexts(tester, secret)
-	h.click(tester, "概览")
+	h.selectPane(tester, "概览")
 	h.assertNoTexts(tester, secret)
 }
 
@@ -452,5 +480,91 @@ func TestCustomConfigLabels(t *testing.T) {
 		EmptyText:   "No active session",
 	})
 	tester := h.tester()
-	h.assertTexts(tester, "Inspector", "Overview", "Tools", "No active session")
+	h.assertTexts(tester, "Inspector", "Overview", "No active session")
+	if err := tester.Click("切换面板"); err != nil {
+		t.Fatalf("open pane selector: %v", err)
+	}
+	tester.Frame()
+	h.assertTexts(tester, "Tools")
+}
+
+// expandOverviewDiagnostics opens the overview's collapsed Diagnostics
+// disclosure (the Collapsible content needs its opening motion settled before
+// the rows are laid out).
+func expandOverviewDiagnostics(t *testing.T, h *harness, tester *ui.Tester, label string) {
+	t.Helper()
+	tester.Frame()
+	tester.Advance(400 * time.Millisecond)
+	tester.Frame()
+	if err := tester.Click(label); err != nil {
+		t.Fatalf("expand diagnostics %q: %v; texts = %v", label, err, tester.Texts())
+	}
+	tester.Frame()
+	tester.Advance(400 * time.Millisecond)
+	tester.Frame()
+}
+
+// TestPaneSwitchCommands covers the host commands the inspector registers for
+// the pane ring: the palette shows their shortcut and current-pane hint, and
+// running them cycles the panes (wrapping around).
+func TestPaneSwitchCommands(t *testing.T) {
+	chat := newFakeChat()
+	chat.addSession(contracts.ChatSession{ID: "s1", Title: "会话"}, true)
+	h := newHarness(t, chat, rightpanel.Config{})
+	tester := h.tester()
+	tester.Frame()
+
+	command := func(id string) contracts.CommandSpec {
+		t.Helper()
+		for _, spec := range h.uiRoot.Runtime().Commands() {
+			if spec.ID == id {
+				return spec
+			}
+		}
+		t.Fatalf("command %q is not registered; commands = %v", id, h.uiRoot.Runtime().Commands())
+		return contracts.CommandSpec{}
+	}
+	prev := command("rightpanel.pane.prev")
+	next := command("rightpanel.pane.next")
+	if prev.Shortcut != "Cmd/Ctrl + Alt + ←" || next.Shortcut != "Cmd/Ctrl + Alt + →" {
+		t.Fatalf("pane command shortcuts = %q / %q", prev.Shortcut, next.Shortcut)
+	}
+	if !strings.Contains(prev.Hint, "概览") || !strings.Contains(next.Hint, "概览") {
+		t.Fatalf("pane command hints = %q / %q, want the current pane", prev.Hint, next.Hint)
+	}
+	if next.Run == nil {
+		t.Fatal("next pane command has no Run")
+	}
+	if err := next.Run(); err != nil {
+		t.Fatalf("run next pane command: %v", err)
+	}
+	tester.Frame()
+	h.assertTexts(tester, "工具")
+	next = command("rightpanel.pane.next")
+	if !strings.Contains(next.Hint, "工具") {
+		t.Fatalf("next command hint after switching = %q, want 工具", next.Hint)
+	}
+
+	// The ring wraps: a full lap comes back to 工具, then previous steps onto
+	// 概览 and wraps again onto the last pane (任务).
+	for i := 0; i < 8; i++ {
+		prev = command("rightpanel.pane.prev")
+		if err := prev.Run(); err != nil {
+			t.Fatalf("run previous pane command: %v", err)
+		}
+		tester.Frame()
+	}
+	h.assertTexts(tester, "工具")
+	prev = command("rightpanel.pane.prev")
+	if err := prev.Run(); err != nil {
+		t.Fatalf("run previous pane command: %v", err)
+	}
+	tester.Frame()
+	h.assertTexts(tester, "概览")
+	prev = command("rightpanel.pane.prev")
+	if err := prev.Run(); err != nil {
+		t.Fatalf("run previous pane command: %v", err)
+	}
+	tester.Frame()
+	h.assertTexts(tester, "任务")
 }

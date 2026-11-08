@@ -145,40 +145,47 @@ type harness struct {
 
 func newHarness(t *testing.T, chat contracts.ChatService, cfg sidebar.Config) *harness {
 	t.Helper()
-	return newHarnessFull(t, chat, cfg, nil, nil, nil)
+	return newHarnessFull(t, chat, cfg, nil, nil, nil, nil)
 }
 
 // newHarnessWithWorkspace is newHarness with an optional workspace backend
 // provided as contracts.KeyWorkspace (nil keeps the legacy flat session list).
 func newHarnessWithWorkspace(t *testing.T, chat contracts.ChatService, cfg sidebar.Config, workspace contracts.WorkspaceService) *harness {
 	t.Helper()
-	return newHarnessFull(t, chat, cfg, workspace, nil, nil)
+	return newHarnessFull(t, chat, cfg, workspace, nil, nil, nil)
 }
 
 // newHarnessWithStore is newHarness with an optional durable store provided as
 // contracts.KeyStore (its MessageSearcher half powers the message-search area).
 func newHarnessWithStore(t *testing.T, chat contracts.ChatService, store contracts.Store, cfg sidebar.Config) *harness {
 	t.Helper()
-	return newHarnessFull(t, chat, cfg, nil, store, nil)
+	return newHarnessFull(t, chat, cfg, nil, store, nil, nil)
 }
 
 // newHarnessWithSettings is newHarness with an optional settings store (the
 // archived-sessions view toggle lives there).
 func newHarnessWithSettings(t *testing.T, chat contracts.ChatService, settings contracts.SettingsService, cfg sidebar.Config) *harness {
 	t.Helper()
-	return newHarnessFull(t, chat, cfg, nil, nil, settings)
+	return newHarnessFull(t, chat, cfg, nil, nil, settings, nil)
 }
 
 // newHarnessWithSettingsAndWorkspace adds both the workspace and settings
 // backends (the workspace tree's archived group counts need both).
 func newHarnessWithSettingsAndWorkspace(t *testing.T, chat contracts.ChatService, settings contracts.SettingsService, workspace contracts.WorkspaceService, cfg sidebar.Config) *harness {
 	t.Helper()
-	return newHarnessFull(t, chat, cfg, workspace, nil, settings)
+	return newHarnessFull(t, chat, cfg, workspace, nil, settings, nil)
 }
 
 // newHarnessFull builds the sidebar harness with the optional workspace and
 // durable store backends.
-func newHarnessFull(t *testing.T, chat contracts.ChatService, cfg sidebar.Config, workspace contracts.WorkspaceService, store contracts.Store, settings contracts.SettingsService) *harness {
+// newHarnessWithNotifier is newHarness with the host toast bridge provided, for
+// the toast-action tests (archive success + undo).
+func newHarnessWithNotifier(t *testing.T, chat contracts.ChatService, notifier contracts.Notifier) *harness {
+	t.Helper()
+	return newHarnessFull(t, chat, sidebar.Config{}, nil, nil, nil, notifier)
+}
+
+func newHarnessFull(t *testing.T, chat contracts.ChatService, cfg sidebar.Config, workspace contracts.WorkspaceService, store contracts.Store, settings contracts.SettingsService, notifier contracts.Notifier) *harness {
 	t.Helper()
 	uiRoot := uiroot.New(uiroot.Config{AppName: "ZeoKeel"})
 	ctx := cordis.Root()
@@ -198,6 +205,9 @@ func newHarnessFull(t *testing.T, chat contracts.ChatService, cfg sidebar.Config
 	}
 	if settings != nil {
 		provide[contracts.SettingsService](t, ctx, contracts.KeySettings, settings)
+	}
+	if notifier != nil {
+		provide[contracts.Notifier](t, ctx, contracts.KeyNotifier, notifier)
 	}
 
 	// The destination screens must exist for nav.Push to succeed. The host no
@@ -485,12 +495,12 @@ func clearTextField(t *testing.T, tester *ui.Tester, label string) {
 
 // clickLabel clicks a control by its accessible label or visible text.
 
-// openRowMenu opens the native popover menu of the only session row: the old
-// shell's inline row actions (rename/delete/activate).
-func openRowMenu(t *testing.T, tester *ui.Tester) {
+// openRowMenu opens a session row's menu by right-clicking its title: the row's
+// own context menu is the same native popover menu as its hover More button.
+func openRowMenu(t *testing.T, tester *ui.Tester, title string) {
 	t.Helper()
-	if err := tester.Click("⋯"); err != nil {
-		t.Fatalf("open row menu: %v; texts = %v", err, tester.Texts())
+	if err := tester.RightClick(title); err != nil {
+		t.Fatalf("open row menu for %q: %v; texts = %v", title, err, tester.Texts())
 	}
 	tester.Frame()
 }
@@ -516,21 +526,21 @@ func TestSidebarSearchFiltersSessions(t *testing.T) {
 	h.assertTexts(tester, "Project Alpha", "Beta Notes", "Gamma")
 
 	// Type a case-insensitive query: only the matching title remains.
-	clickLabel(t, tester, "搜索会话")
+	clickLabel(t, tester, "搜索会话与消息")
 	tester.Type("PROJECT")
 	tester.Frame()
 	h.assertTexts(tester, "Project Alpha")
 	h.assertNoTexts(tester, "Beta Notes", "Gamma")
 
 	// No match shows the empty state instead of an empty list.
-	clearTextField(t, tester, "搜索会话")
+	clearTextField(t, tester, "搜索会话与消息")
 	tester.Type("zzz")
 	tester.Frame()
 	h.assertTexts(tester, "没有匹配的会话")
 	h.assertNoTexts(tester, "Project Alpha", "Beta Notes", "Gamma")
 
 	// Clearing the query restores every session.
-	clearTextField(t, tester, "搜索会话")
+	clearTextField(t, tester, "搜索会话与消息")
 	h.assertTexts(tester, "Project Alpha", "Beta Notes", "Gamma")
 	h.assertNoTexts(tester, "没有匹配的会话")
 }
@@ -545,7 +555,7 @@ func TestSidebarSearchMatchesUntitledSessions(t *testing.T) {
 	h := newHarness(t, chat, sidebar.Config{})
 	tester := h.tester()
 	h.assertTexts(tester, "未命名会话")
-	clickLabel(t, tester, "搜索会话")
+	clickLabel(t, tester, "搜索会话与消息")
 	tester.Type("未命名")
 	tester.Frame()
 	h.assertTexts(tester, "未命名会话")
@@ -560,9 +570,11 @@ func TestSidebarRenameFlow(t *testing.T) {
 	chat := &renamerChat{fakeChat: base}
 	h := newHarness(t, chat, sidebar.Config{})
 	tester := h.tester()
-	h.assertTexts(tester, "⋯")
+	// The old double glyph "⋯ ⌄" is gone: the row menu is one More icon that
+	// shows while the row is hovered or selected.
+	h.assertNoTexts(tester, "⋯")
 
-	openRowMenu(t, tester)
+	openRowMenu(t, tester, "旧标题")
 	clickLabel(t, tester, "重命名")
 	h.assertTexts(tester, "重命名会话", "会话标题", "保存", "取消")
 
@@ -593,7 +605,7 @@ func TestSidebarRenameCancelAndEmptyTitle(t *testing.T) {
 	tester := h.tester()
 
 	// Cancel closes without renaming.
-	openRowMenu(t, tester)
+	openRowMenu(t, tester, "keep me")
 	clickLabel(t, tester, "重命名")
 	clickLabel(t, tester, "取消")
 	h.assertNoTexts(tester, "重命名会话")
@@ -602,7 +614,7 @@ func TestSidebarRenameCancelAndEmptyTitle(t *testing.T) {
 	}
 
 	// An empty draft is rejected with an inline error, and the dialog stays open.
-	openRowMenu(t, tester)
+	openRowMenu(t, tester, "keep me")
 	clickLabel(t, tester, "重命名")
 	clearTextField(t, tester, "会话标题")
 	clickLabel(t, tester, "保存")
@@ -622,7 +634,7 @@ func TestSidebarRenameErrorShown(t *testing.T) {
 	chat.setRenameErr(errors.New("rename failed on disk"))
 	h := newHarness(t, chat, sidebar.Config{})
 	tester := h.tester()
-	openRowMenu(t, tester)
+	openRowMenu(t, tester, "标题")
 	clickLabel(t, tester, "重命名")
 	clickLabel(t, tester, "保存")
 	h.assertTexts(tester, "rename failed on disk", "重命名会话")
@@ -636,7 +648,7 @@ func TestSidebarRenameHiddenWithoutRenamer(t *testing.T) {
 	}
 	h := newHarness(t, chat, sidebar.Config{})
 	tester := h.tester()
-	openRowMenu(t, tester)
+	openRowMenu(t, tester, "Plain chat")
 	h.assertTexts(tester, "删除")
 	h.assertNoTexts(tester, "重命名")
 
@@ -653,7 +665,7 @@ func TestSidebarRowMenuWithoutActiveSession(t *testing.T) {
 	h := newHarness(t, chat, sidebar.Config{})
 	tester := h.tester()
 	// Row actions belong to the row (old shell), not to the active session.
-	openRowMenu(t, tester)
+	openRowMenu(t, tester, "Not active")
 	h.assertTexts(tester, "删除", "设为当前")
 	h.assertNoTexts(tester, "重命名")
 }
@@ -667,7 +679,7 @@ func TestSidebarDeleteConfirmation(t *testing.T) {
 	tester := h.tester()
 
 	// Cancel closes the alert without deleting.
-	openRowMenu(t, tester)
+	openRowMenu(t, tester, "要删除的会话")
 	h.click(tester, "删除")
 	h.assertTexts(tester, "删除会话", "取消")
 	if !strings.Contains(strings.Join(tester.Texts(), "\n"), "要删除的会话") {
@@ -681,7 +693,7 @@ func TestSidebarDeleteConfirmation(t *testing.T) {
 	h.assertNoTexts(tester, "删除会话")
 
 	// Confirm deletes the session.
-	openRowMenu(t, tester)
+	openRowMenu(t, tester, "要删除的会话")
 	h.click(tester, "删除")
 	h.click(tester, "删除")
 	if deleted := chat.deletedSessions(); len(deleted) != 1 || deleted[0] != "s1" {

@@ -1,20 +1,25 @@
-// Package toasts contributes the transient notification overlay: the desktop
-// notifier bridge hands notifications to this module, which renders them as
-// native toast cards in the bottom-right corner of the window.
+// Package toasts contributes the desktop notification bridge to the product's
+// one toast system: mygo's native toasts (ui.Context.AddToast).
 //
 // It is a kernel UI module: activation requires the host UI runtime and the
 // host Notifier, installs the notification handler (whose calls hop to the UI
-// thread with UIRuntime.Post) and registers one overlay.toasts slot item. Each
-// toast disappears on its own after toastTTL via a goroutine that posts the
-// frame removing it, or immediately through its native close button. The module
+// thread with UIRuntime.Post) and registers one overlay.toasts slot item. The
+// handler only queues the notification; the overlay's build drains the queue
+// into native toasts and paints them with a branded look of our own
+// (ui.ToastViewportBase), so the notification never covers the conversation
+// composer or a dialog footer: the stack sits in the bottom-right corner above
+// the composer's reserved height. At most toastMaxVisible toasts show at once
+// (the rest wait in a visible queue count) and an ActionNotification's action
+// label renders as the toast's button. Fading, hover/focus pause, the timeout,
+// Escape and the screen-reader announcements stay the framework's. The module
 // is only loaded by products with the desktop notifier bridge.
 package toasts
 
 import (
 	"encoding/json"
 	"log"
+	"strconv"
 	"strings"
-	"sync/atomic"
 	"time"
 
 	"github.com/egoist/mygo/ui"
@@ -23,6 +28,7 @@ import (
 
 	"github.com/zeokeel/zeokeel/internal/contracts"
 	"github.com/zeokeel/zeokeel/internal/design"
+	"github.com/zeokeel/zeokeel/internal/icons"
 	"github.com/zeokeel/zeokeel/internal/uikit"
 )
 
@@ -32,29 +38,48 @@ const ModuleID = "zeokeel-ui/toasts"
 // SlotID identifies this module's contribution to overlay.toasts.
 const SlotID = "toasts.notifications"
 
-// maxToasts bounds the visible stack; a newer toast replaces the oldest.
-const maxToasts = 4
+// toastTimeout is how long one native toast shows. The framework pauses it
+// while the pointer or keyboard focus rests on the toast, so it is the visible
+// time, not the wall-clock time.
+const toastTimeout = 4 * time.Second
 
-// toastTTL is how long one toast stays visible. Tests shorten it through the
-// package variable (the module always reads the current value when queueing).
-var toastTTL = 4 * time.Second
+// maxPending bounds the queue while the window renders no frames; the oldest
+// queued notifications are dropped, as the too-old ones would not be useful.
+const maxPending = 32
 
-// Config is the module's typed assembly config (all copy is localized; the
-// module has no configurable fields).
+// Toast placement. The conversation composer is a card pinned to the bottom of
+// the content column (about 116 DIP tall, inside the screen's 24 DIP bottom
+// padding), so the toast stack reserves its height plus a gap instead of
+// floating over the send row. Below the breakpoint the composer's toolbar wraps
+// to a taller card, hence the larger inset.
+// toastMaxVisible bounds how many toasts show at once (H14): further
+// notifications wait in the module's queue and appear as earlier ones close.
+const toastMaxVisible = 2
+
+const (
+	// The composer card with a staged attachment is about 178 DIP tall on a
+	// wide window (the screenshot probe shows its top edge at y≈598 of 800) and
+	// taller when its toolbar wraps on a narrow one; the stack keeps its bottom
+	// above the card so no toast touches the input, the send row or a settings
+	// page footer.
+	toastBottomInset        float32 = 220
+	toastBottomInsetNarrow  float32 = 236
+	toastBottomInsetBreakAt float32 = 1120
+	toastMaxWidth           float32 = 360
+	toastCloseButtonSize    float32 = 20
+)
+
+// Config is the module's typed assembly config (all copy comes from the
+// notification; the module has no configurable fields).
 type Config struct{}
 
-// toast is one queued notification with its internal key and expiry.
-type toast struct {
-	key  uint64
-	data contracts.Notification
-}
-
-// state is the module instance's toast stack (UI thread only).
+// state is the module instance's UI-thread state: the notification queue
+// between the notifier handler and the overlay build, and the native toasts it
+// added (by native toast id, to close the ones an updated setting now hides).
 type state struct {
-	toasts   []toast
-	nextID   atomic.Uint64
-	locale   contracts.LocaleService
 	notifier contracts.Notifier
+	// locale localizes the toast chrome (the level label and the close hint).
+	locale contracts.LocaleService
 	// settings is the optional host settings store; ui.notifications and
 	// ui.notifications.hidden are read on every delivery/frame so switches
 	// apply without a restart.
@@ -62,6 +87,17 @@ type state struct {
 	// badHiddenRaw remembers the last malformed hidden-levels row already
 	// logged, so the per-frame read cannot spam the log.
 	badHiddenRaw string
+	// runtime requests the next frame after a toast closes so the queue's head
+	// can take the freed slot.
+	runtime contracts.UIRuntime
+
+	pending []contracts.Notification
+	// queue holds accepted notifications waiting for a free slot; at most
+	// toastMaxVisible toasts render at once.
+	queue []contracts.Notification
+	// showing maps a native toast id to its notification level, so the level
+	// filter can close toasts already on screen.
+	showing map[string]string
 }
 
 // Module registers the toast overlay contribution.
@@ -78,20 +114,27 @@ func Module() *module.Descriptor[Config] {
 		if !ok {
 			return nil
 		}
-		locale, _ := ctx.Get(contracts.KeyLocale)
 		settings, _ := ctx.Get(contracts.KeySettings)
-		st := &state{locale: locale, notifier: notifier, settings: settings}
+		locale, _ := ctx.Get(contracts.KeyLocale)
+		st := &state{notifier: notifier, locale: locale, settings: settings, runtime: runtime, showing: make(map[string]string)}
 
+		// The handler may run on the notifier's goroutine: only queue the
+		// notification, and let the UI thread's frame drain it (mygo's native
+		// toasts must be added from a build callback).
 		notifier.SetHandler(func(notification contracts.Notification) {
 			runtime.Post(func() {
-				enqueue(st, runtime, notification)
+				if len(st.pending) >= maxPending {
+					st.pending = st.pending[len(st.pending)-maxPending+1:]
+				}
+				st.pending = append(st.pending, notification)
 				runtime.Invalidate()
 			})
 		})
 		if err := own(ctx, func() (func(), error) {
 			return func() {
 				notifier.SetHandler(nil)
-				st.toasts = nil
+				st.pending = nil
+				st.queue = nil
 			}, nil
 		}); err != nil {
 			notifier.SetHandler(nil)
@@ -103,7 +146,7 @@ func Module() *module.Descriptor[Config] {
 			ID:    SlotID,
 			Order: 10,
 			Build: func(c *ui.Context) {
-				buildOverlay(c, design.Of(c), runtime, st)
+				buildOverlay(c, st)
 			},
 		}
 		return own(ctx, func() (func(), error) {
@@ -147,6 +190,24 @@ func knownNotificationLevel(level string) bool {
 	}
 }
 
+// notificationType maps a notification level to the native toast Type ("error",
+// "info", "success", "warning"); an unknown level keeps the theme's default
+// look.
+func notificationType(level string) string {
+	switch notificationLevel(level) {
+	case contracts.NotifyError:
+		return "error"
+	case contracts.NotifyWarning:
+		return "warning"
+	case contracts.NotifySuccess:
+		return "success"
+	case contracts.NotifyInfo:
+		return "info"
+	default:
+		return ""
+	}
+}
+
 // hiddenLevels reads ui.notifications.hidden: a JSON array of levels to hide.
 // Missing/empty rows mean nothing is hidden; a malformed row is logged once and
 // treated as "nothing hidden" (bad values never filter toasts).
@@ -179,122 +240,200 @@ func hiddenLevels(st *state) map[string]bool {
 	return hidden
 }
 
-// levelHidden reports whether one toast level is filtered out. Unknown levels
-// and a missing settings store always show.
-func levelHidden(st *state, level string) bool {
+// buildOverlay is the overlay slot's build callback: it drains the queued
+// notifications into mygo's native toasts, closes the ones a switch now hides,
+// and paints the native toast stack with the product's branded look. Draining a
+// queue here is the module's one guarded one-shot side effect, run on the UI
+// thread inside the frame that renders the result.
+func buildOverlay(c *ui.Context, st *state) {
+	enabled := notificationsEnabled(st)
 	hidden := hiddenLevels(st)
-	if len(hidden) == 0 {
-		return false
-	}
-	return hidden[notificationLevel(level)]
-}
-
-// enqueue adds one toast to the stack, keeping at most maxToasts (the oldest is
-// replaced), and schedules its automatic expiry. The handler stays installed
-// while notifications are disabled or a level is hidden but drops deliveries
-// here (a later frame re-reads the settings, so the switches are hot).
-func enqueue(st *state, runtime contracts.UIRuntime, notification contracts.Notification) {
-	if strings.TrimSpace(notification.Text) == "" || !notificationsEnabled(st) ||
-		levelHidden(st, notification.Level) {
-		return
-	}
-	key := st.nextID.Add(1)
-	st.toasts = append(st.toasts, toast{key: key, data: notification})
-	if len(st.toasts) > maxToasts {
-		st.toasts = st.toasts[len(st.toasts)-maxToasts:]
-	}
-	ttl := toastTTL
-	go func() {
-		time.Sleep(ttl)
-		runtime.Post(func() {
-			// Release the notifier's active entry as well; otherwise a long
-			// session slowly accumulates expired notification ids.
-			st.notifier.Dismiss(notification.ID)
-			removeToast(st, key)
-			runtime.Invalidate()
-		})
-	}()
-}
-
-// removeToast drops the toast identified by its internal key (no-op when it was
-// already closed or replaced).
-func removeToast(st *state, key uint64) {
-	kept := st.toasts[:0]
-	for _, item := range st.toasts {
-		if item.key != key {
-			kept = append(kept, item)
+	// Hot switches: hiding a level (or all notifications) also drops the
+	// native toasts already on screen instead of leaving them until they time
+	// out.
+	for id, level := range st.showing {
+		if !enabled || hidden[notificationLevel(level)] {
+			delete(st.showing, id)
+			c.CloseToast(id)
 		}
 	}
-	st.toasts = kept
-}
-
-// buildOverlay renders the toast stack in the bottom-right corner.
-func buildOverlay(c *ui.Context, t *design.Tokens, runtime contracts.UIRuntime, st *state) {
-	// Hot switches: disabling notifications (or hiding a level) also drops the
-	// toasts already on screen instead of leaving them until the next event.
-	if !notificationsEnabled(st) {
-		st.toasts = nil
-		return
-	}
-	if hidden := hiddenLevels(st); len(hidden) > 0 {
-		kept := st.toasts[:0]
-		for _, item := range st.toasts {
-			if hidden[notificationLevel(item.data.Level)] {
+	pending := st.pending
+	st.pending = nil
+	if !enabled {
+		st.queue = nil
+	} else {
+		for _, notification := range pending {
+			text := strings.TrimSpace(notification.Text)
+			if text == "" || hidden[notificationLevel(notification.Level)] {
 				continue
 			}
-			kept = append(kept, item)
+			st.queue = append(st.queue, notification)
 		}
-		st.toasts = kept
-	}
-	if len(st.toasts) == 0 {
-		return
-	}
-	// Keep the stack clear of the composer card pinned to the bottom of the
-	// conversation screen.
-	ui.Column(c).FillWidth().Grow(1).Justify(ui.End).AlignItems(ui.End).
-		Padding(design.Space4, design.Space4, 140, design.Space4).Gap(design.Space2).Children(func() {
-		for _, item := range st.toasts {
-			item := item
-			buildToast(c, t, runtime, st, item)
+		// At most toastMaxVisible toasts render at once; the rest wait in the
+		// FIFO queue and take a slot as earlier toasts close (H14: a burst must
+		// not stack a wall of notifications over the transcript).
+		for len(st.showing) < toastMaxVisible && len(st.queue) > 0 {
+			notification := st.queue[0]
+			st.queue = st.queue[1:]
+			level := notificationLevel(notification.Level)
+			notificationID := notification.ID
+			notifier := st.notifier
+			runtime := st.runtime
+			// The closure names the native toast the framework will create: the
+			// id is assigned before AddToast returns, and OnClose only runs later.
+			var toastID string
+			// The action half (contracts.ActionNotifier) rides on the
+			// notification: show its label as the toast's action button and run
+			// the callback (on the UI thread) when pressed. A panicking callback
+			// must not take the window down.
+			action := notification.Action
+			toastID = c.AddToast(ui.Toast{
+				ID:      strings.TrimSpace(notification.ID),
+				Title:   strings.TrimSpace(notification.Text),
+				Type:    notificationType(level),
+				Timeout: toastTimeout,
+				Action:  strings.TrimSpace(notification.ActionLabel),
+				OnAction: func() {
+					if action == nil {
+						return
+					}
+					defer func() {
+						if panicValue := recover(); panicValue != nil {
+							log.Printf("ui/toasts: notification action panic: %v", panicValue)
+						}
+					}()
+					action()
+				},
+				OnClose: func() {
+					delete(st.showing, toastID)
+					if notifier != nil {
+						notifier.Dismiss(notificationID)
+					}
+					// A free slot: the next queued notification takes it on the
+					// next frame.
+					if runtime != nil {
+						runtime.Invalidate()
+					}
+				},
+			})
+			st.showing[toastID] = level
 		}
+	}
+	// The viewport is built every frame: the framework removes expired toasts,
+	// runs their OnClose and keeps the exit transition when the last one goes,
+	// and our look decides where and how they show.
+	ui.ToastViewportBase(c, func(viewport ui.Element, toasts []ui.Toast) {
+		buildToastViewport(c, st, viewport, toasts)
 	})
 }
 
-// buildToast is one native toast panel: level badge, copy and a close action.
-func buildToast(c *ui.Context, t *design.Tokens, runtime contracts.UIRuntime, st *state, item toast) {
-	notification := item.data
-	level := strings.ToLower(strings.TrimSpace(notification.Level))
-	label := uikit.T(st.locale, "提示", "Info")
-	color := t.Accent
-	switch level {
-	case contracts.NotifySuccess:
-		label = uikit.T(st.locale, "成功", "Success")
-		color = t.Success
-	case contracts.NotifyWarning:
-		label = uikit.T(st.locale, "警告", "Warning")
-		color = t.WarningText
-	case contracts.NotifyError:
-		label = uikit.T(st.locale, "错误", "Error")
-		color = t.DangerText
+// buildToastViewport places the toast stack in the bottom-right corner above the
+// conversation composer. The composer is a card pinned to the bottom of the
+// content column, so the stack reserves its height (plus a gap) instead of
+// floating over the send row or a settings page footer; the framework keeps the
+// pointer pass-through, hover pause and screen-reader roles.
+func buildToastViewport(c *ui.Context, st *state, viewport ui.Element, toasts []ui.Toast) {
+	width, _ := c.Size()
+	bottom := toastBottomInset
+	if width > 0 && width < toastBottomInsetBreakAt {
+		bottom = toastBottomInsetNarrow
 	}
-	panel := design.Apply(ui.Column(c), t.Panel()).Padding(design.Space2, design.Space3).
-		MinWidth(220).MaxWidth(360)
-	panel.Children(func() {
-		ui.Row(c).FillWidth().AlignItems(ui.Start).Gap(design.Space2).Children(func() {
-			design.Apply(ui.Badge(c, label), t.Badge()).TextColor(color)
-			design.Apply(ui.Text(c, notification.Text), t.Font(design.TypeXS)).
-				TextColor(t.LabelPrimary).Grow(1).MaxLines(3)
-			close := ui.Button(c, "×").Tooltip(uikit.T(st.locale, "关闭通知", "Close notification"))
-			if close.Clicked() {
-				removeToast(st, item.key)
-				if st.notifier != nil {
-					st.notifier.Dismiss(notification.ID)
+	viewport.FillWidth().Padding(design.Space3, design.Space4, bottom, design.Space4).
+		AlignItems(ui.End).Justify(ui.End).Gap(design.Space2)
+	for _, toast := range toasts {
+		buildToast(c, st, toast)
+	}
+	if queued := len(st.queue); queued > 0 {
+		design.Apply(ui.Text(c, st.tr(
+			"+ "+strconv.Itoa(queued)+" 条通知排队", "+ "+strconv.Itoa(queued)+" more queued")),
+			design.Of(c).Font(design.TypeXXXS)).TextColor(design.Of(c).LabelTertiary).NoWrap()
+	}
+}
+
+// toastLevel is the branded presentation of one notification level: a short
+// label, its text color token and an icon, so success/error/warning are
+// distinguishable at a glance without a large badge.
+type toastLevel struct {
+	label string
+	color ui.Color
+	icon  *ui.SVG
+}
+
+// toastLevelFor resolves the look of a toast Type (the level the module mapped
+// from the notification). Info keeps the plain label: the icon set has no info
+// glyph, and a made-up one would be noise.
+func (st *state) toastLevelFor(t *design.Tokens, toastType string) toastLevel {
+	switch strings.ToLower(strings.TrimSpace(toastType)) {
+	case "error":
+		return toastLevel{label: st.tr("错误", "Error"), color: t.DangerText, icon: icons.AlertTriangle()}
+	case "warning":
+		return toastLevel{label: st.tr("警告", "Warning"), color: t.WarningText, icon: icons.AlertTriangle()}
+	case "success":
+		return toastLevel{label: st.tr("成功", "Success"), color: t.SuccessText, icon: icons.Check()}
+	default:
+		return toastLevel{label: st.tr("提示", "Info"), color: t.LabelTertiary}
+	}
+}
+
+// buildToast is one branded toast: the level (icon + label), the copy and the
+// close control, on the raised surface with the product's border and a soft
+// floating shadow. Timing, pause and announcements stay with ToastBase.
+func buildToast(c *ui.Context, st *state, toast ui.Toast) {
+	t := design.Of(c)
+	p := ui.ToastBase(c, toast)
+	level := st.toastLevelFor(t, toast.Type)
+	box := p.Root.Row().AlignItems(ui.Start).Gap(design.Space2).
+		MaxWidth(toastMaxWidth).Padding(design.Space2, design.Space3).
+		Radius(design.RadiusMD).Background(t.BgRaised).Border(1, t.BorderL2)
+	// Floating layer: the shadow is a neutral elevation cue, not a brand color.
+	box.Shadow(0, 6, 16, 0, ui.RGBA(0, 0, 0, 0.18))
+	box.Children(func() {
+		ui.Column(c).Grow(1).Gap(design.Space1).Children(func() {
+			ui.Row(c).AlignItems(ui.Center).Gap(design.Space1).Children(func() {
+				if level.icon != nil {
+					ui.Icon(c, level.icon).Size(design.Space3, design.Space3).TextColor(level.color)
 				}
-				runtime.Invalidate()
+				design.Apply(ui.Text(c, level.label), t.Font(design.TypeXXXS)).
+					FontWeight(600).TextColor(level.color)
+			})
+			design.Apply(ui.Text(c, toast.Title), t.Font(design.TypeXS)).
+				TextColor(t.LabelPrimary).MaxLines(2)
+			if toast.Description != "" {
+				design.Apply(ui.Text(c, toast.Description), t.Font(design.TypeXXS)).
+					TextColor(t.LabelSecondary).MaxLines(2)
 			}
+			if toast.Action != "" {
+				action := p.ActionButton().Padding(design.Space1, design.Space2).
+					Radius(design.RadiusSM).Label(toast.Action)
+				switch {
+				case action.Pressed():
+					action = action.Background(t.BgSelected)
+				case action.Hovered():
+					action = action.Background(t.BgHover)
+				}
+				action.Children(func() {
+					design.Apply(ui.Text(c, toast.Action), t.Font(design.TypeXS)).
+						FontWeight(600).TextColor(t.Accent)
+				})
+			}
+		})
+		closeLabel := st.tr("关闭通知", "Close notification")
+		close := p.CloseButton().Size(toastCloseButtonSize, toastCloseButtonSize).
+			Center().Radius(design.RadiusSM).Label(closeLabel).Tooltip(closeLabel)
+		switch {
+		case close.Pressed():
+			close = close.Background(t.BgSelected)
+		case close.Hovered():
+			close = close.Background(t.BgHover)
+		}
+		close.Children(func() {
+			ui.Icon(c, icons.Close()).Size(14, 14).TextColor(t.LabelTertiary)
 		})
 	})
 }
+
+// tr localizes the toast chrome for the current frame.
+func (st *state) tr(zh, en string) string { return uikit.T(st.locale, zh, en) }
 
 // own registers one contribution and ties its unregistration to ctx's effect
 // lifetime, so activation failure and module disposal leave no residue.

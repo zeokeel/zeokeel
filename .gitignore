@@ -12,6 +12,9 @@
 /old/zeokeel.exe
 /old/*.test
 
+# Local agent tooling (not product code)
+/.agents/
+
 # Research probes (not product code)
 /.probe/
 /.cache/

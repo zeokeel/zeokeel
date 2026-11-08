@@ -35,8 +35,8 @@ func TestBuiltinToolSwitchWritesToolsDisabled(t *testing.T) {
 	h.click(tester, "搜索工具")
 	tester.Type("read_file")
 	tester.Frame()
-	h.assertTexts(tester, "read_file", "启用")
-	h.click(tester, "启用")
+	h.assertTexts(tester, "read_file", "启用工具")
+	h.click(tester, "启用工具 read_file")
 	if got := store.get(contracts.SettingToolsDisabled); got != `["read_file"]` {
 		t.Fatalf("tools.disabled after disable = %q", got)
 	}
@@ -44,7 +44,7 @@ func TestBuiltinToolSwitchWritesToolsDisabled(t *testing.T) {
 		t.Fatalf("MCP setting written for a built-in tool: %q", got)
 	}
 	// Toggling the same row again enables it.
-	h.click(tester, "启用")
+	h.click(tester, "启用工具 read_file")
 	if got := store.get(contracts.SettingToolsDisabled); got != "[]" {
 		t.Fatalf("tools.disabled after enable = %q", got)
 	}
@@ -56,11 +56,11 @@ func TestBuiltinFilteredEntryRestoredFromSettings(t *testing.T) {
 	})
 	h := newGenericHarness(t, store, newGenericToolRegistry())
 	tester := h.tester()
-	h.assertTexts(tester, "read_file", "已禁用（重启生效）", "启用")
+	h.assertTexts(tester, "read_file", "已禁用（重启生效）", "启用工具")
 	h.click(tester, "搜索工具")
 	tester.Type("read_file")
 	tester.Frame()
-	h.click(tester, "启用")
+	h.click(tester, "启用工具 read_file")
 	if got := store.get(contracts.SettingToolsDisabled); got != "[]" {
 		t.Fatalf("tools.disabled after re-enable = %q", got)
 	}
@@ -79,7 +79,7 @@ func TestBuiltinAndMCPTogglesCoexist(t *testing.T) {
 	h.click(tester, "搜索工具")
 	tester.Type("read_file")
 	tester.Frame()
-	h.click(tester, "启用")
+	h.click(tester, "启用工具 read_file")
 	if got := store.get(contracts.SettingToolsDisabled); got != "[]" {
 		t.Fatalf("tools.disabled = %q", got)
 	}
@@ -95,7 +95,7 @@ func TestBuiltinAndMCPTogglesCoexist(t *testing.T) {
 	h.click(tester, "搜索工具")
 	tester.Type("mcp__srv__echo")
 	tester.Frame()
-	h.click(tester, "启用")
+	h.click(tester, "启用工具 mcp__srv__echo")
 	if got := store.get(contracts.SettingMCPDisabledTools); got != "[]" {
 		t.Fatalf("mcp.disabledTools = %q", got)
 	}
@@ -112,7 +112,7 @@ func TestToolsDisabledBadJSONAndEnglish(t *testing.T) {
 	h.uiRoot.Locale().SetLanguage("en")
 	tester := h.tester()
 	tester.Frame()
-	h.assertTexts(tester, "Enabled", "Invalid disabled-tools configuration")
+	h.assertTexts(tester, "Enable tool", "Invalid disabled-tools configuration")
 	if strings.Contains(strings.Join(tester.Texts(), " "), "工具") {
 		t.Fatalf("Chinese copy in English frame: %v", tester.Texts())
 	}

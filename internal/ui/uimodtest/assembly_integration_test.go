@@ -78,21 +78,25 @@ func TestDesktopProductAssemblyShowsAllDemoModules(t *testing.T) {
 	for _, want := range []string{
 		"首页",
 		"新对话",
-		"开始新对话",
+		"还没有会话",
 	} {
 		if !tester.HasText(want) {
 			t.Fatalf("desktop frame does not show %q; texts = %v", want, tester.Texts())
 		}
 	}
 
-	// about's settings page and settings.header extension are visible in the
-	// settings surface.
+	// about's settings page is visible in the settings surface with its build
+	// information section (the build identity lives on the page, not in a
+	// header above every page). The grouped navigation starts on the first
+	// general business page, so open About through the host's page deep link.
 	uiRoot.Navigator().ToggleSettings()
 	tester.Frame()
-	// Version comes from the product assembly's appinfo entry ("dev" here), so
-	// the assertion checks the header's shape rather than one build number.
-	if !tester.HasText("构建信息") || !tester.HasText("ZeoKeel v") {
-		t.Fatalf("settings frame does not show about's page/header; texts = %v", tester.Texts())
+	if err := uiRoot.OpenSettingsPage("about"); err != nil {
+		t.Fatalf("open about settings page: %v", err)
+	}
+	tester.Frame()
+	if !tester.HasText("构建信息") {
+		t.Fatalf("settings frame does not show about's page; texts = %v", tester.Texts())
 	}
 	uiRoot.Navigator().CloseSettings()
 
@@ -102,7 +106,7 @@ func TestDesktopProductAssemblyShowsAllDemoModules(t *testing.T) {
 		t.Fatalf("loader.Close: %v", err)
 	}
 	tester.Frame()
-	if tester.HasText("开始新对话") {
+	if tester.HasText("还没有会话") {
 		t.Fatalf("module contributions survived loader.Close; texts = %v", tester.Texts())
 	}
 }

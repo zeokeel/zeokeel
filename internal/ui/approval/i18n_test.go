@@ -16,19 +16,19 @@ func TestApprovalEnglishCopyAndLanguageSwitch(t *testing.T) {
 	tester.Frame()
 
 	// Default Chinese copy is unchanged.
-	h.assertTexts(tester, "需要审批", "工具", "参数", "允许", "总是允许", "拒绝")
+	h.assertTexts(tester, "需要审批", "工具", "参数", "允许", "本次运行内始终允许", "拒绝")
 
 	h.uiRoot.Locale().SetLanguage("en")
 	tester.Frame()
 	h.assertTexts(tester, "Approval required", "Tool", "Arguments",
-		"Allow", "Always allow", "Deny")
+		"Allow", "Always allow this run", "Deny")
 	h.assertNoTexts(tester, "需要审批", "总是允许", "拒绝")
 
 	// Switching back restores the Chinese copy on the next frame.
 	h.uiRoot.Locale().SetLanguage("zh")
 	tester.Frame()
-	h.assertTexts(tester, "需要审批", "工具", "参数", "允许", "总是允许", "拒绝")
-	h.assertNoTexts(tester, "Approval required", "Always allow")
+	h.assertTexts(tester, "需要审批", "工具", "参数", "允许", "本次运行内始终允许", "拒绝")
+	h.assertNoTexts(tester, "Approval required", "Always allow this run")
 }
 
 func TestApprovalCustomLabelsStayVerbatim(t *testing.T) {
@@ -44,5 +44,5 @@ func TestApprovalCustomLabelsStayVerbatim(t *testing.T) {
 	tester.Frame()
 	// Custom labels are kept; untouched defaults become English.
 	h.assertTexts(tester, "确认执行", "执行", "Tool", "Arguments",
-		"Always allow", "Deny")
+		"Always allow this run", "Deny")
 }

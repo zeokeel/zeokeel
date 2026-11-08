@@ -27,7 +27,6 @@ import (
 	"github.com/zeokeel/zeokeel-rig/tools/image"
 	"github.com/zeokeel/zeokeel-rig/tools/jobs"
 	"github.com/zeokeel/zeokeel-rig/tools/mcp"
-	"github.com/zeokeel/zeokeel-rig/tools/memory"
 	"github.com/zeokeel/zeokeel-rig/tools/misc"
 	"github.com/zeokeel/zeokeel-rig/tools/schedule"
 	"github.com/zeokeel/zeokeel-rig/tools/settings"
@@ -38,14 +37,25 @@ import (
 	"github.com/zeokeel/zeokeel-rig/tools/worktree"
 
 	"github.com/zeokeel/zeokeel/internal/contracts"
+	"github.com/zeokeel/zeokeel/internal/memorytools"
 	"github.com/zeokeel/zeokeel/internal/websearch"
 )
 
 // defaultCommands is the shell allowlist used when the assembly does not set
 // one. An explicit empty list in assembly.json disables shell execution.
+//
+// Besides the language/build/runtime commands it carries the routine
+// inspection and navigation commands an agent needs for real development work
+// (pwd, cd, echo, mkdir, ...). The previous list rejected even `pwd`/`echo`
+// with "not in the allowlist", so an already-approved tool call could still
+// not run and real tasks burned iterations on policy errors.
 var defaultCommands = []string{
-	"bash", "sh", "zsh", "git", "go", "make",
+	"bash", "sh", "zsh", "git", "go", "make", "gofmt",
 	"rg", "grep", "sed", "awk", "cat", "ls", "find", "head", "tail", "wc",
+	"pwd", "cd", "echo", "printf", "env", "export", "mkdir", "cp", "mv", "rm",
+	"touch", "tee", "date", "seq", "sort", "uniq", "cut", "tr", "xargs",
+	"test", "true", "false", "which", "basename", "dirname", "realpath",
+	"stat", "file", "diff", "patch", "tar", "unzip", "zip", "curl", "wget",
 	"node", "npm", "python3", "pwsh", "powershell",
 }
 
@@ -83,6 +93,12 @@ type Config struct {
 	Network bool `json:"network"`
 	// CommandAllowlist is the shell allowlist; nil means defaultCommands.
 	CommandAllowlist []string `json:"commandAllowlist"`
+	// AllowShellOperators permits shell grammar (pipes, lists, &&, ||,
+	// redirections and leading environment assignments) in the shell tool.
+	// The default (false) keeps Rig's strict single-simple-command policy;
+	// products that want the agent to run normal development commands enable
+	// it. The command allowlist still applies to the first command of a line.
+	AllowShellOperators bool `json:"allowShellOperators"`
 	// DeniedGlobs hides files (e.g. "**/.env") from every file tool.
 	DeniedGlobs []string `json:"deniedGlobs"`
 	// MaxOutputBytes caps one tool result (0 = tool default).
@@ -111,19 +127,7 @@ func Module() *module.Descriptor[Config] {
 		if timeout <= 0 {
 			timeout = 30 * time.Second
 		}
-		commands := cfg.CommandAllowlist
-		if commands == nil {
-			commands = defaultCommands
-		}
-		policy := sandbox.New(
-			sandbox.WithRoots(root),
-			sandbox.WithReadOnly(cfg.ReadOnly),
-			sandbox.WithNetwork(cfg.Network),
-			sandbox.WithTimeout(timeout),
-			sandbox.WithMaxOutputBytes(cfg.MaxOutputBytes),
-			sandbox.WithDeniedGlobs(cfg.DeniedGlobs...),
-			sandbox.WithCommandAllowlist(commands...),
-		)
+		policy := newPolicy(cfg, root, timeout)
 
 		tools := builtin.NewWithPolicy(policy)
 		tools = append(tools,
@@ -149,10 +153,12 @@ func Module() *module.Descriptor[Config] {
 		)
 		if memoryStore, ok := ctx.Get(contracts.KeyMemory); ok {
 			// The memory backend provides the durable rig.MemoryStore; without
-			// it the memory tools fall back to their in-memory default.
-			tools = append(tools, memory.Tools(memoryStore)...)
+			// it the memory tools fall back to their in-memory default. The
+			// product wrapper keeps the stable "memory" tool name and adds the
+			// update action over the store's MemoryUpdater half.
+			tools = append(tools, memorytools.Tools(memoryStore)...)
 		} else {
-			tools = append(tools, memory.Tools(nil)...)
+			tools = append(tools, memorytools.Tools(nil)...)
 		}
 		tools = append(tools, schedule.Tools(nil)...)
 		tools = append(tools, worktree.Tools(policy)...)
@@ -281,6 +287,8 @@ func Module() *module.Descriptor[Config] {
 				entry.plugin.Tools = len(mcpTools)
 				entry.plugin.Status = statusConnected
 				pluginEntries = append(pluginEntries, entry)
+				logf("[toolkit] mcp %q connected: %d tool(s), protocol %s",
+					entry.plugin.Name, len(mcpTools), entry.plugin.Protocol)
 			}
 			switch transport {
 			case mcp.TransportStdio:
@@ -288,12 +296,14 @@ func Module() *module.Descriptor[Config] {
 				if strings.TrimSpace(server.Command) == "" {
 					entry.plugin.Status = statusConnectFailed + "stdio command is required"
 					pluginEntries = append(pluginEntries, entry)
+					logf("[toolkit] mcp %q: stdio command is required", entry.plugin.Name)
 					continue
 				}
 				client, err := mcp.Start(context.Background(), mcpStartConfig(server))
 				if err != nil {
 					entry.plugin.Status = statusConnectFailed + err.Error()
 					pluginEntries = append(pluginEntries, entry)
+					logf("[toolkit] mcp %q: start failed: %v", entry.plugin.Name, err)
 					continue
 				}
 				attach(client)
@@ -302,12 +312,14 @@ func Module() *module.Descriptor[Config] {
 					// Keep a failed entry so the Plugins screen can show the
 					// misconfiguration instead of silently dropping the server.
 					pluginEntries = append(pluginEntries, entry)
+					logf("[toolkit] mcp %q: url is required for the http transport", entry.plugin.Name)
 					continue
 				}
 				client, err := startHTTPMCP(server)
 				if err != nil {
 					entry.plugin.Status = statusConnectFailed + err.Error()
 					pluginEntries = append(pluginEntries, entry)
+					logf("[toolkit] mcp %q: connect failed: %v", entry.plugin.Name, err)
 					continue
 				}
 				attach(client)
@@ -320,6 +332,7 @@ func Module() *module.Descriptor[Config] {
 					entry.plugin.Status = statusConnectFailed + "unsupported transport"
 				}
 				pluginEntries = append(pluginEntries, entry)
+				logf("[toolkit] mcp %q: unsupported transport %q", entry.plugin.Name, transport)
 			}
 		}
 		plugins := newPluginsService(pluginEntries)
@@ -374,4 +387,27 @@ func closeAll(clients []*mcp.Client) {
 	for _, client := range clients {
 		_ = client.Close()
 	}
+}
+
+// newPolicy builds the sandbox policy from the module config. It is a helper so
+// the shell-policy behavior (allowlist, optional shell grammar) has a direct
+// unit-test seam.
+func newPolicy(cfg Config, root string, timeout time.Duration) *sandbox.Policy {
+	commands := cfg.CommandAllowlist
+	if commands == nil {
+		commands = defaultCommands
+	}
+	options := []sandbox.Option{
+		sandbox.WithRoots(root),
+		sandbox.WithReadOnly(cfg.ReadOnly),
+		sandbox.WithNetwork(cfg.Network),
+		sandbox.WithTimeout(timeout),
+		sandbox.WithMaxOutputBytes(cfg.MaxOutputBytes),
+		sandbox.WithDeniedGlobs(cfg.DeniedGlobs...),
+		sandbox.WithCommandAllowlist(commands...),
+	}
+	if cfg.AllowShellOperators {
+		options = append(options, sandbox.WithAllowShellOperators())
+	}
+	return sandbox.New(options...)
 }

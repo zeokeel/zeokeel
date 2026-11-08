@@ -17,6 +17,7 @@ import (
 
 	"github.com/zeokeel/zeokeel/internal/contracts"
 	"github.com/zeokeel/zeokeel/internal/design"
+	"github.com/zeokeel/zeokeel/internal/uikit"
 )
 
 // modelCheckTimeout bounds one connection check (5s, as the page documents).
@@ -48,38 +49,29 @@ var ModelListGetter = func(ctx context.Context, baseURL, apiKey string) (int, []
 	return response.StatusCode, body, nil
 }
 
+// Bounds for the success detail: the result line stays one readable row even
+// when the endpoint serves a large model catalogue.
+const (
+	maxModelNamesShown = 2
+	maxModelNameRunes  = 24
+)
+
 // modelCheckState is the connection-check block's UI-local state.
 type modelCheckState struct {
 	running         bool
 	result          string
 	resultErr       bool
 	modelCount      int
+	modelNames      []string
 	modelCountKnown bool
+	elapsed         time.Duration
 }
 
-// modelCheckConfig resolves the effective check configuration: the saved
-// settings rows first, then the chat backend's own config as fallback.
-func modelCheckConfig(chat contracts.ChatService, store contracts.SettingsService) (baseURL, model, apiKey string) {
-	var effective contracts.ChatConfig
-	if chat != nil {
-		effective = chat.Config()
-	}
-	saved := func(key string) string {
-		if store == nil {
-			return ""
-		}
-		return strings.TrimSpace(store.Get(key, ""))
-	}
-	return firstNonEmpty(saved(contracts.SettingsChatBaseURL), strings.TrimSpace(effective.BaseURL)),
-		firstNonEmpty(saved(contracts.SettingsChatModel), strings.TrimSpace(effective.Model)),
-		firstNonEmpty(saved(contracts.SettingsChatAPIKey), strings.TrimSpace(effective.APIKey))
-}
-
-// parseModelListCount counts the models in an OpenAI-style `{"data":[...]}`
-// response; known=false when the body is not that shape.
-func parseModelListCount(body []byte) (count int, known bool) {
+// parseModelList reports the non-empty model ids in an OpenAI-style
+// `{"data":[...]}` response; known=false when the body is not that shape.
+func parseModelList(body []byte) (names []string, known bool) {
 	if len(body) == 0 {
-		return 0, false
+		return nil, false
 	}
 	var decoded struct {
 		Data []struct {
@@ -87,17 +79,20 @@ func parseModelListCount(body []byte) (count int, known bool) {
 		} `json:"data"`
 	}
 	if err := json.Unmarshal(body, &decoded); err != nil || decoded.Data == nil {
-		return 0, false
+		return nil, false
 	}
-	return len(decoded.Data), true
+	names = make([]string, 0, len(decoded.Data))
+	for _, model := range decoded.Data {
+		if id := strings.TrimSpace(model.ID); id != "" {
+			names = append(names, id)
+		}
+	}
+	return names, true
 }
 
-// modelCountLabel renders the discovered model count, if known.
-func modelCountLabel(locale contracts.LocaleService, count int, known bool) string {
-	if !known {
-		return ""
-	}
-	if localized(locale, "zh", "en") == "en" {
+// modelCountLabel renders the discovered model count in the current language.
+func modelCountLabel(locale contracts.LocaleService, count int) string {
+	if uikit.T(locale, "zh", "en") == "en" {
 		if count == 1 {
 			return "1 model"
 		}
@@ -106,23 +101,88 @@ func modelCountLabel(locale contracts.LocaleService, count int, known bool) stri
 	return fmt.Sprintf("%d 个模型", count)
 }
 
+// modelCountDetail renders the count with a bounded id listing:
+// "2 个模型：model-a、model-b" / "2 models: model-a, model-b".
+func modelCountDetail(locale contracts.LocaleService, count int, names []string) string {
+	label := modelCountLabel(locale, count)
+	english := uikit.T(locale, "zh", "en") == "en"
+	shown := make([]string, 0, maxModelNamesShown)
+	for _, name := range names {
+		if len(shown) == maxModelNamesShown {
+			break
+		}
+		shown = append(shown, truncateModelName(name))
+	}
+	if len(shown) == 0 {
+		return label
+	}
+	separator := "、"
+	if english {
+		separator = ", "
+	}
+	listing := strings.Join(shown, separator)
+	if len(shown) < len(names) {
+		listing += "…"
+	}
+	if english {
+		return label + ": " + listing
+	}
+	return label + "：" + listing
+}
+
+// truncateModelName bounds one listed id to maxModelNameRunes runes.
+func truncateModelName(name string) string {
+	runes := []rune(name)
+	if len(runes) <= maxModelNameRunes {
+		return name
+	}
+	return string(runes[:maxModelNameRunes]) + "…"
+}
+
+// formatModelCheckDuration renders the measured check latency: milliseconds
+// below a second, tenths of a second above it (the check is capped at 5s).
+func formatModelCheckDuration(elapsed time.Duration) string {
+	if elapsed < time.Second {
+		return fmt.Sprintf("%d ms", elapsed.Milliseconds())
+	}
+	return fmt.Sprintf("%.1f s", elapsed.Seconds())
+}
+
+// modelCheckDetailLabel renders the success detail shown next to the status
+// badge: the discovered model list and the measured latency, bounded to one
+// line ("2 个模型：model-a、model-b · 812 ms" / "2 models: a, b · 812 ms").
+func modelCheckDetailLabel(locale contracts.LocaleService, count int, names []string, known bool, elapsed time.Duration) string {
+	parts := make([]string, 0, 2)
+	if known {
+		parts = append(parts, modelCountDetail(locale, count, names))
+	}
+	parts = append(parts, formatModelCheckDuration(elapsed))
+	return strings.Join(parts, " · ")
+}
+
 // startModelCheck launches one background check and posts its result to the UI.
 // The running guard makes repeated clicks a no-op.
 func startModelCheck(runtime contracts.UIRuntime, check *modelCheckState,
-	chat contracts.ChatService, store contracts.SettingsService, locale contracts.LocaleService) {
-	baseURL, _, apiKey := modelCheckConfig(chat, store)
-	if check.running || strings.TrimSpace(baseURL) == "" {
+	baseURL, apiKey string, locale contracts.LocaleService) {
+	baseURL = strings.TrimSpace(baseURL)
+	if check.running || baseURL == "" {
 		return
 	}
 	check.running = true
 	check.result = ""
 	check.resultErr = false
+	check.modelCount = 0
+	check.modelNames = nil
 	check.modelCountKnown = false
+	check.elapsed = 0
 	go func() {
+		started := time.Now()
 		status, body, err := ModelListGetter(context.Background(), baseURL, apiKey)
-		count, known := parseModelListCount(body)
+		elapsed := time.Since(started)
+		names, known := parseModelList(body)
 		runtime.Post(func() {
 			check.running = false
+			check.elapsed = elapsed
 			switch {
 			case err != nil:
 				check.result = localized(locale, "连接失败：", "Connection failed: ") + err.Error()
@@ -135,7 +195,8 @@ func startModelCheck(runtime contracts.UIRuntime, check *modelCheckState,
 			default:
 				check.result = localized(locale, "连接正常", "Connection OK")
 				check.resultErr = false
-				check.modelCount = count
+				check.modelCount = len(names)
+				check.modelNames = names
 				check.modelCountKnown = known
 			}
 			runtime.Invalidate()
@@ -144,43 +205,56 @@ func startModelCheck(runtime contracts.UIRuntime, check *modelCheckState,
 }
 
 // buildModelCheckPanel renders the "connection check" block of the model page.
+// H2: it tests the drafts currently in the form (base URL/model as typed, with
+// the stored API key kept while its field is blank), not the saved store; the
+// action is a secondary button because the page's primary action is Save in the
+// fixed footer.
 func buildModelCheckPanel(c *ui.Context, t *design.Tokens, runtime contracts.UIRuntime,
-	chat contracts.ChatService, store contracts.SettingsService, locale contracts.LocaleService,
-	check *modelCheckState) {
-	baseURL, model, _ := modelCheckConfig(chat, store)
-	panel(c, t, func() {
-		sectionTitle(c, t, localized(locale, "连接检查", "Connection check"))
+	check *modelCheckState, model, baseURL, apiKey string, locale contracts.LocaleService) {
+	baseURL = strings.TrimSpace(baseURL)
+	uikit.Section(c, localized(locale, "连接检查", "Connection check"), func(*ui.Context) {
 		ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(design.Space2).Children(func() {
 			design.Apply(ui.Text(c, localized(locale, "服务地址：", "Service URL: ")+
-				firstNonEmpty(baseURL, localized(locale, "未配置", "not configured"))),
+				firstNonEmpty(baseURL, localized(locale, "未填写", "not entered"))),
 				t.Font(design.TypeXXS)).TextColor(t.LabelTertiary).Grow(1)
 			design.Apply(ui.Text(c, localized(locale, "模型：", "Model: ")+
-				firstNonEmpty(model, localized(locale, "未配置", "not configured"))),
+				firstNonEmpty(strings.TrimSpace(model), localized(locale, "未填写", "not entered"))),
 				t.Font(design.TypeXXS)).TextColor(t.LabelTertiary)
 		})
-		if strings.TrimSpace(baseURL) == "" {
-			buildMemoryPageError(c, t, localized(locale, "尚未配置服务地址", "No service URL configured"))
+		design.Apply(ui.Text(c, localized(locale,
+			"测试会使用当前输入，不会保存配置。",
+			"Tests the input above; nothing is saved.")),
+			t.TextMuted(design.TypeXXS)).MaxLines(2)
+		if baseURL == "" {
+			uikit.ErrorLine(c, localized(locale, "尚未配置服务地址", "No service URL configured"))
 		}
-		label := localized(locale, "测试连接", "Test connection")
-		disabled := strings.TrimSpace(baseURL) == ""
+		label := localized(locale, "测试当前输入", "Test current input")
+		disabled := baseURL == ""
 		if check.running {
 			label = localized(locale, "检查中…", "Checking…")
 			disabled = true
 		}
-		button := design.Apply(ui.PrimaryButton(c, label), t.PrimaryButton()).Disabled(disabled)
-		if button.Clicked() && !check.running && !disabled {
-			startModelCheck(runtime, check, chat, store, locale)
-		}
+		ui.Row(c).FillWidth().Justify(ui.End).AlignItems(ui.Center).Gap(design.Space2).Children(func() {
+			button := design.Apply(ui.Button(c, label), t.SecondaryButton())
+			button.Disabled(disabled)
+			if button.Clicked() && !check.running && !disabled {
+				startModelCheck(runtime, check, baseURL, apiKey, locale)
+				c.Invalidate()
+			}
+		})
 		if check.result != "" {
 			if check.resultErr {
-				buildMemoryPageError(c, t, check.result)
+				uikit.ErrorLine(c, check.result)
 			} else {
+				// The badge stays the short state; the detail carries the
+				// measured latency and the discovered models (ZK-14) as one
+				// bounded metadata line.
 				ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(design.Space2).Children(func() {
 					statusBadge(c, t, check.result, false)
-					if countLabel := modelCountLabel(locale, check.modelCount, check.modelCountKnown); countLabel != "" {
-						design.Apply(ui.Text(c, countLabel), t.Font(design.TypeXXS)).
-							TextColor(t.LabelTertiary)
-					}
+					detail := modelCheckDetailLabel(locale, check.modelCount, check.modelNames,
+						check.modelCountKnown, check.elapsed)
+					design.Apply(ui.Text(c, detail), t.Font(design.TypeXXS)).
+						TextColor(t.LabelTertiary).MaxLines(1)
 				})
 			}
 		}
