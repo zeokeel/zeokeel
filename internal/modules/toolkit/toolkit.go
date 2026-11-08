@@ -339,7 +339,7 @@ func Module() *module.Descriptor[Config] {
 
 		// Optional single LSP server: its tools join the same registry and the
 		// server is closed when the module unloads.
-		lspTools, closeLSP := startLSPTools(context.Background(), logf, settingsService, hasSettings, tools)
+		lspTools, closeLSP := startLSPTools(context.Background(), ctx, logf, settingsService, hasSettings, tools)
 		tools = append(tools, lspTools...)
 		tools = filterDisabledTools(tools, disabledTools, logf)
 

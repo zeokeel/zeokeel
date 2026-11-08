@@ -106,19 +106,26 @@ func ParseLSPServerConfigList(raw string) ([]LSPServerConfig, error) {
 	if err := json.Unmarshal([]byte(raw), &rows); err != nil {
 		return nil, fmt.Errorf("%s: parse: %w", SettingLSPServers, err)
 	}
+	return normalizeLSPServerList(rows, SettingLSPServers)
+}
+
+// normalizeLSPServerList normalizes and validates a server list (shared by the
+// settings rows and the workspace config file): command and name are required,
+// names must be unique case-insensitively.
+func normalizeLSPServerList(rows []LSPServerConfig, source string) ([]LSPServerConfig, error) {
 	servers := make([]LSPServerConfig, 0, len(rows))
 	seen := make(map[string]bool, len(rows))
 	for index, cfg := range rows {
 		cfg.normalize()
 		if cfg.Command == "" {
-			return nil, fmt.Errorf("%s: servers[%d]: command is required", SettingLSPServers, index)
+			return nil, fmt.Errorf("%s: servers[%d]: command is required", source, index)
 		}
 		if cfg.Name == "" {
-			return nil, fmt.Errorf("%s: servers[%d]: name is required", SettingLSPServers, index)
+			return nil, fmt.Errorf("%s: servers[%d]: name is required", source, index)
 		}
 		key := strings.ToLower(cfg.Name)
 		if seen[key] {
-			return nil, fmt.Errorf("%s: servers[%d]: duplicate name %q", SettingLSPServers, index, cfg.Name)
+			return nil, fmt.Errorf("%s: servers[%d]: duplicate name %q", source, index, cfg.Name)
 		}
 		seen[key] = true
 		servers = append(servers, cfg)
@@ -180,4 +187,37 @@ func ActiveLSPServer(servers []LSPServerConfig, active string) (LSPServerConfig,
 		}
 	}
 	return servers[0], true
+}
+
+// SettingLSPWorkspaceConfig opts into reading the repository's LSP config file
+// (.zeokeel/lsp.json): only the exact value "allow" enables it (default off).
+const SettingLSPWorkspaceConfig = "lsp.workspace_config"
+
+// LSPWorkspaceConfigFile is the workspace-relative path of the opt-in LSP
+// configuration file (a JSON object with "servers", or a top-level array).
+const LSPWorkspaceConfigFile = ".zeokeel/lsp.json"
+
+// ParseLSPWorkspaceConfigFile decodes a workspace LSP config file: either a
+// {"servers":[...]} object or a top-level array of servers. The entries follow
+// the same rules as lsp.servers (normalize; command/name required; unique
+// names); empty data is an empty list and malformed JSON is an error.
+func ParseLSPWorkspaceConfigFile(data []byte) ([]LSPServerConfig, error) {
+	trimmed := strings.TrimSpace(string(data))
+	if trimmed == "" {
+		return nil, nil
+	}
+	if strings.HasPrefix(trimmed, "{") {
+		var document struct {
+			Servers []LSPServerConfig `json:"servers"`
+		}
+		if err := json.Unmarshal(data, &document); err != nil {
+			return nil, fmt.Errorf("%s: parse: %w", LSPWorkspaceConfigFile, err)
+		}
+		return normalizeLSPServerList(document.Servers, LSPWorkspaceConfigFile)
+	}
+	var rows []LSPServerConfig
+	if err := json.Unmarshal(data, &rows); err != nil {
+		return nil, fmt.Errorf("%s: parse: %w", LSPWorkspaceConfigFile, err)
+	}
+	return normalizeLSPServerList(rows, LSPWorkspaceConfigFile)
 }

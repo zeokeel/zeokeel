@@ -176,10 +176,11 @@ type state struct {
 	autoContinueSawRunning bool
 	autoContinueSessionID  string
 
-	// Composer command feedback: the /stop notice (success badge or danger
-	// line) and the /help modal switch.
+	// Composer command feedback: the /stop and /compact notices (success badge
+	// or danger line) and the /help modal switch.
 	commandNotice string
 	commandErr    string
+	compacting    bool
 	helpOpen      bool
 
 	// syncCommandLocale re-registers the slash commands when the host language
@@ -489,6 +490,14 @@ func sessionCommands(runtime contracts.UIRuntime, navigator contracts.Navigator,
 				exportSession(st, session, config)
 				return nil
 			},
+		},
+		{
+			ID:      "zeokeel.session.compact",
+			Title:   st.tr("压缩上下文", "Compact context"),
+			Hint:    st.tr("压缩当前会话的历史，节省上下文预算", "Compact the conversation history to save context budget"),
+			Order:   47,
+			Enabled: func() bool { return compactCommandEnabled(chat, st) },
+			Run:     func() error { runCompactCommand(chat, st, runtime); return nil },
 		},
 		{
 			ID:      "zeokeel.session.goal",

@@ -38,8 +38,8 @@
 
 | 状态 | 数量 | 占比 | 含义 |
 |---|---:|---:|---|
-| ✅ 已迁移/等价 | 51 | 82.3% | 当前代码有对应实现，进入 desktop/headless 装配或剩余差异属明确非目标 |
-| 🟡 已实现（深度限制） | 10 | 16.1% | 功能已可用，存在子功能/交互/执行语义的深度差异（§5.1） |
+| ✅ 已迁移/等价 | 53 | 85.5% | 当前代码有对应实现，进入 desktop/headless 装配或剩余差异属明确非目标 |
+| 🟡 已实现（深度限制） | 8 | 12.9% | 功能已可用，存在子功能/交互/执行语义的深度差异（§5.1） |
 | ❌ 未迁移 | 1 | 1.6% | 仅 winproc（Windows 平台非目标） |
 | 合计 | 62 | 100% | 28 后端能力 + 34 Shell/UI 能力 |
 
@@ -56,7 +56,7 @@
 | `i18n` | 🟡 | uiroot locale + uikit + 各 UI 切片 | 新增页面已 en/zh；**Round 57 审计修复：11 条 slash 命令 Title/Hint 本地化+语言切换重注册、侧栏/右栏原生目录选择器标题**；仍缺部分 host chrome tooltip、后端错误文案 |
 | `icons` | ✅ | `internal/icons` | Lucide SVG |
 | `importer` | ✅ | `internal/modules/importer` + settings 导入页 | DSH session.v4.jsonl Scan/Import、文本+reasoning、workspace、symlink 跳过/重复 ID 去重；旧 DSH 私有长尾（attachments/credentials/manifest/zstd 压缩）为明确非目标（预览中计数说明） |
-| `lsp` | 🟡 | toolkit lsp.go（rig `tools/lsp`）+ 设置 LSP 页 | 可选单服务器（command/args/dir/languageId/env JSON），启动后注册 rig 默认 `lsp_*` 工具（hover/definition/references/implementation/diagnostics/symbols），卸载关闭 client；错误仅警告不阻断；缺多服务器/UI 语言服务器选择 |
+| `lsp` | ✅ | toolkit lsp.go + 设置 LSP 页 | **多服务器列表 + 活动服务器选择 + workspace `.zeokeel/lsp.json` opt-in**（默认关、显式 allow、settings 优先合并）；启动活动服务器并注册 `lsp_*` 工具，卸载关闭；错误仅警告 |
 | `mcp` | ✅ | toolkit `mcp.Start`（stdio+HTTP）+ settings/workspace 合并 + 工具级开关 | HTTP/stdio 握手/工具注册/失败诊断；assembly>settings>workspace mcp.json（opt-in）；`mcp.disabledTools` 注册前过滤；插件详情/市场在 Shell Plugins 行仍 🟡 |
 | `memory` | 🟡 | `internal/modules/memory` + rig memory tool + session Memory tab + **设置「记忆」页** | JSON MemoryStore/tool/搜索/添加/整理/清空；设置页可全局搜索/添加/删除并显示 scope/时间；缺模型驱动 consolidate/extract |
 | `modelcatalog` | ✅ | `internal/modules/modelcatalog` + composer 模型菜单 + settings「模型目录」页 + **连接检查** | 默认预设（含 128k context window）、per-session 切换/推理强度、目录编辑（增删/恢复默认/上下文窗口）、usage footer 预算显示、**连接检查（GET /models，成功/失败/防重复）** |
@@ -82,7 +82,7 @@
 |---|---|---|---|
 | Home / 起始页 | ✅ | `internal/ui/home` | hero/greeting/setup card/**真实 composer（多行输入、Enter 发送、附件选择、工作区/模型/模式只读 chip、发送后建会话并进入）**/最近会话 |
 | Composer 基础（输入/附件/发送/停止/模型 chip/@//） | ✅ | `internal/ui/session/view.go`、`attachments.go` | 文本、附件/图片/拖放、发送/停止、per-session 模型菜单、工作区 @、/ 菜单 |
-| Composer 深度（/goal /plan /memory/权限/effort/@session/presets） | 🟡 | `sessionCommands` + `command_dialogs.go` + `commands_help.go` + `buildComposerToolbar` | 已落地 12 条：/新会话 /创建副本 /导出对话 /打开设置 /设置目标 /审阅计划 /添加记忆 /反馈 /停止 /附加文件 /帮助 + 权限模式、模式切换（普通/计划/精简/创作）、推理强度、@session、预设插入；缺 /compact、/goal 子命令 |
+| Composer 深度（/goal /plan /memory/权限/effort/@session/presets） | 🟡 | `sessionCommands` + `command_dialogs.go` + `commands_help.go` + `compact_command.go` | 13 条命令（含 **/compact 手动压缩**、停止/附加/帮助/反馈）、权限模式、聊天模式、推理强度、@session、预设；**缺 /goal complete/abandon/edit 子命令**（pause/resume 已由 header 提供） |
 | Chrome/Sidebar/折叠 rail/右栏 dock | ✅ | uiroot + sidebar | 280px sidebar、64px rail、Cmd/Ctrl+B、**Cmd/Ctrl+N 新建会话、Cmd/Ctrl+, 设置、Cmd/Ctrl+K 命令面板**、右栏开关、添加工作区、视图选项（排序/分组持久化）、工作区搜索/置顶/归档 |
 | 命令面板/窗口内快捷键 | ✅ | uiroot palette/shortcuts | Cmd/Ctrl+K、可配置两条 chrome 快捷键；非系统全局热键 |
 | Settings 外壳与页面 | 🟡 | `internal/ui/settings`、about | 17 页：…/**行为（默认代理权限、消息字号、运行中排队发送）**/数据与隐私（含反馈统计导出）；缺内置插件参数页/市场 |
@@ -141,13 +141,12 @@
 
 | 项 | 现状 | 未对齐的部分 |
 |----|------|--------------|
-| `lsp` | 可选单服务器 + `lsp_*` 工具 | 多服务器/UI 语言服务器选择 |
 | `memory` | 搜索/添加/删除/整理/清空 + 设置页 | 旧模型驱动 consolidate/extract |
 | `presets` | prompt/人设片段 CRUD+插入 | 旧 agent presets 的 systemPrompt/tool allowlist JSON 语义 |
 | `session` | fork/压缩/导出/usage/排队/字号/目标续跑 | 旧 “tool spill” 展示（内核内部实现，产品层未单列） |
 | `sessionreference` | @session 注入、事件、边界 | 旧候选排序/URI 语义细节 |
 | `i18n` | 全部 UI 页面 en/zh + 命令动态重注册 | 少量 host chrome tooltip 与后端错误原文 |
-| Composer 深度 | 12 条命令 + 权限/模式/推理/@/预设 | `/compact`（rig 自动压缩，无手动入口）与 `/goal` 子命令（由 header 暂停/续跑/清除覆盖） |
+| Composer 深度 | 13 条命令（含 /compact）+ 权限/模式/推理/@/预设 | `/goal complete/abandon/edit` 子命令（pause/resume 已由 header 覆盖） |
 | Settings/Plugins 页 | 17 页设置、插件详情/连接配置/工具与服务器开关 | 旧插件参数编辑页/市场（市场为非目标） |
 
 ### 5.2 明确非目标（不计入覆盖缺口）

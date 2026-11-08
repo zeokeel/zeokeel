@@ -183,3 +183,54 @@ func TestLSPPageEnglishCopy(t *testing.T) {
 	}
 	h.assertTexts(tester, "Added (applies after restart)", "Active")
 }
+
+// --- workspace LSP config opt-in --------------------------------------------
+
+func TestLSPWorkspaceConfigToggleDefaultOff(t *testing.T) {
+	store := newFakeSettings(nil)
+	h, tester := lspPage(t, store)
+	h.assertTexts(tester, "工作区配置", "读取工作区 LSP 配置（.zeokeel/lsp.json）",
+		"默认关闭", "风险")
+	if raw := store.get(contracts.SettingLSPWorkspaceConfig); raw != "" {
+		t.Fatalf("defaults wrote lsp.workspace_config: %q", raw)
+	}
+}
+
+func TestLSPWorkspaceConfigToggleOnOff(t *testing.T) {
+	store := newFakeSettings(nil)
+	h, tester := lspPage(t, store)
+	h.click(tester, "读取工作区 LSP 配置（.zeokeel/lsp.json）")
+	if raw := store.get(contracts.SettingLSPWorkspaceConfig); raw != "allow" {
+		t.Fatalf("enabling wrote %q, want allow", raw)
+	}
+	h.click(tester, "读取工作区 LSP 配置（.zeokeel/lsp.json）")
+	if raw := store.get(contracts.SettingLSPWorkspaceConfig); raw != "" {
+		t.Fatalf("disabling wrote %q, want empty", raw)
+	}
+}
+
+func TestLSPWorkspaceConfigBadValueShowsOff(t *testing.T) {
+	store := newFakeSettings(map[string]string{
+		contracts.SettingLSPWorkspaceConfig: "yes",
+	})
+	h, tester := lspPage(t, store)
+	// The malformed value displays as off, so one click enables the opt-in.
+	h.click(tester, "读取工作区 LSP 配置（.zeokeel/lsp.json）")
+	if raw := store.get(contracts.SettingLSPWorkspaceConfig); raw != "allow" {
+		t.Fatalf("toggle from a malformed value wrote %q, want allow", raw)
+	}
+}
+
+func TestLSPWorkspaceConfigEnglishCopy(t *testing.T) {
+	store := newFakeSettings(nil)
+	h := newLocaleHarness(t, &fakeChat{}, store, settings.Config{}, "en")
+	tester := h.tester()
+	tester.Frame()
+	h.click(tester, "LSP")
+	label := "Read workspace LSP config (.zeokeel/lsp.json)"
+	h.assertTexts(tester, "Workspace configuration", label, "off by default", "Risk")
+	h.click(tester, label)
+	if raw := store.get(contracts.SettingLSPWorkspaceConfig); raw != "allow" {
+		t.Fatalf("English toggle wrote %q, want allow", raw)
+	}
+}

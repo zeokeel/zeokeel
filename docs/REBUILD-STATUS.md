@@ -21,6 +21,13 @@
 - 右侧栏「文件」Tab：打开文件夹（mygo 原生 Directory picker）、目录进入/面包屑、文本/Markdown/图片预览、
   刷新与错误状态；E2E 覆盖工作区创建 + 列表 + 预览帧
 
+**Round 61 / P1-P3B：手动压缩 + LSP workspace opt-in（2026-11-08）**
+- /compact：contracts SessionCompactor/CompactResult + 稳定错误；agent CompactNow（running/budget/nothing/save 分类，ReplaceHistory）；
+  session 第 13 条命令（压缩中/成功 N→M/本地化错误/防重复）；agent 105 / session 168 测试
+- LSP workspace：`lsp.workspace_config` opt-in（默认关，显式 allow）+ `.zeokeel/lsp.json`（servers 对象/数组，settings 优先合并，
+  坏 JSON 告警）+ 设置页 Toggle 与风险提示；toolkit 64 / settings 203 测试；COVERAGE lsp 升 ✅
+- COVERAGE 累计 **✅53 / 🟡8 / ❌1**
+
 **Round 60 / P0：四项深度限制收口（2026-11-08）**
 - automation：任务 WorkspaceID/Permission 字段 + 运行前切换（SessionWorkspaceSwitcher/SessionPermissionSwitcher，gate 优先级
   plan>chat mode>session override>全局）+ UI 选择/徽章；agent 100 / automation 31 / UI 30 测试

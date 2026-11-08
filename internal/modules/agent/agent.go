@@ -227,6 +227,10 @@ type service struct {
 	// providerFactory builds the provider for one run. It is a field so tests
 	// can script providers; nil uses openai.New with the effective config.
 	providerFactory func(contracts.ChatConfig) (rig.Provider, error)
+	// compactorFactory builds the manual-compaction compactor for one run's
+	// config. It is a field so tests can script compaction; nil builds the LLM
+	// compactor over a fresh provider.
+	compactorFactory func(contracts.ChatConfig) (rig.Compactor, error)
 }
 
 var (

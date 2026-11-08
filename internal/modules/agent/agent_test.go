@@ -817,6 +817,7 @@ type fakeStore struct {
 	workspace    map[string]string
 	workspaceLog []workspaceCall
 	workspaceErr error
+	replaceErr   error
 }
 
 // workspaceCall records one SetSessionWorkspace invocation.
@@ -991,6 +992,9 @@ func (s *fakeStore) ReplaceHistory(ctx context.Context, sessionID string, messag
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	state := s.sessionLocked(sessionID)
+	if s.replaceErr != nil {
+		return s.replaceErr
+	}
 	state.messages = append([]rig.Message(nil), messages...)
 	state.updated = time.Now()
 	return nil

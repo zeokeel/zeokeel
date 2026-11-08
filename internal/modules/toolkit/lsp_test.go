@@ -7,6 +7,8 @@ package toolkit
 import (
 	"context"
 	"errors"
+	"os"
+	"path/filepath"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -93,6 +95,14 @@ func withLSPStart(t *testing.T, start func(context.Context, lsp.Config) (lspSess
 // loadToolkit activates the toolkit with the given settings store.
 func loadToolkit(t *testing.T, settings contracts.SettingsService, withSettings bool) (cordis.Context, *module.Loader, *captureLogger) {
 	t.Helper()
+	return loadToolkitFull(t, settings, withSettings, nil)
+}
+
+// loadToolkitFull activates the toolkit with optional settings and workspace
+// services (nil keeps them absent).
+func loadToolkitFull(t *testing.T, settings contracts.SettingsService, withSettings bool,
+	workspace contracts.WorkspaceService) (cordis.Context, *module.Loader, *captureLogger) {
+	t.Helper()
 	root := cordis.Root()
 	t.Cleanup(func() { _ = root.DisposeAll() })
 	logger := &captureLogger{}
@@ -102,6 +112,11 @@ func loadToolkit(t *testing.T, settings contracts.SettingsService, withSettings 
 	if withSettings {
 		if _, err := root.Provide(contracts.KeySettings, settings); err != nil {
 			t.Fatalf("provide settings: %v", err)
+		}
+	}
+	if workspace != nil {
+		if _, err := root.Provide(contracts.KeyWorkspace, workspace); err != nil {
+			t.Fatalf("provide workspace: %v", err)
 		}
 	}
 	registry := module.NewRegistry()
@@ -476,5 +491,221 @@ func TestToolkitLSPBadServerListSkips(t *testing.T) {
 	}
 	if !logger.contains("lsp") {
 		t.Fatalf("bad servers list did not warn: %v", logger.lines)
+	}
+}
+
+// --- workspace LSP config opt-in --------------------------------------------
+
+// fakeLSPWorkspace implements contracts.WorkspaceService with one current root.
+type fakeLSPWorkspace struct {
+	current    contracts.Workspace
+	has        bool
+	currentErr error
+}
+
+func (w *fakeLSPWorkspace) List(context.Context) ([]contracts.Workspace, error) {
+	return nil, nil
+}
+
+func (w *fakeLSPWorkspace) Current(context.Context) (contracts.Workspace, bool, error) {
+	return w.current, w.has, w.currentErr
+}
+
+func (w *fakeLSPWorkspace) Create(context.Context, string, string) (contracts.Workspace, error) {
+	return contracts.Workspace{}, nil
+}
+
+func (w *fakeLSPWorkspace) Open(context.Context, string) (contracts.Workspace, error) {
+	return contracts.Workspace{}, nil
+}
+
+func (w *fakeLSPWorkspace) Delete(context.Context, string) error { return nil }
+
+func (w *fakeLSPWorkspace) Files(context.Context, string) ([]contracts.FileEntry, error) {
+	return nil, nil
+}
+
+func (w *fakeLSPWorkspace) ReadFile(context.Context, string, int) ([]byte, error) {
+	return nil, errFakeLSPStart
+}
+
+func (w *fakeLSPWorkspace) Search(context.Context, string, int) ([]contracts.FileEntry, error) {
+	return nil, nil
+}
+
+// writeWorkspaceLSPConfig writes <root>/.zeokeel/lsp.json and returns the root.
+func writeWorkspaceLSPConfig(t *testing.T, content string) string {
+	t.Helper()
+	root := t.TempDir()
+	dir := filepath.Join(root, ".zeokeel")
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		t.Fatalf("mkdir workspace config dir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "lsp.json"), []byte(content), 0o600); err != nil {
+		t.Fatalf("write workspace config: %v", err)
+	}
+	return root
+}
+
+func TestToolkitLSPWorkspaceNotOptedInDoesNotRead(t *testing.T) {
+	root := writeWorkspaceLSPConfig(t, `{bad-json`)
+	withLSPStart(t, func(context.Context, lsp.Config) (lspSession, error) {
+		return &fakeLSPSession{tools: []rig.Tool{fakeLSPTool{name: "lsp_hover"}}}, nil
+	})
+	settings := newLSPMultiSettings(map[string]string{})
+	_, loader, logger := loadToolkitFull(t, settings, true, &fakeLSPWorkspace{
+		current: contracts.Workspace{ID: "w1", Root: root}, has: true,
+	})
+	defer func() { _ = loader.Close() }()
+	if logger.contains("workspace") {
+		t.Fatalf("not opted-in activation touched the workspace config: %v", logger.lines)
+	}
+}
+
+func TestToolkitLSPWorkspaceOptInUsesWorkspaceServers(t *testing.T) {
+	root := writeWorkspaceLSPConfig(t,
+		`{"servers":[{"name":"ws","command":"ws-lsp","args":["--stdio"]}]}`)
+	var captured lsp.Config
+	withLSPStart(t, func(_ context.Context, cfg lsp.Config) (lspSession, error) {
+		captured = cfg
+		return &fakeLSPSession{tools: []rig.Tool{fakeLSPTool{name: "lsp_hover"}}}, nil
+	})
+	settings := newLSPMultiSettings(map[string]string{
+		contracts.SettingLSPWorkspaceConfig: "allow",
+	})
+	_, loader, logger := loadToolkitFull(t, settings, true, &fakeLSPWorkspace{
+		current: contracts.Workspace{ID: "w1", Root: root}, has: true,
+	})
+	defer func() { _ = loader.Close() }()
+	if captured.Command != "ws-lsp" || len(captured.Args) != 1 || captured.Args[0] != "--stdio" {
+		t.Fatalf("started config = %+v, want the workspace server", captured)
+	}
+	if !logger.contains("workspace") {
+		t.Fatalf("activation log does not mention the workspace source: %v", logger.lines)
+	}
+}
+
+func TestToolkitLSPWorkspaceSettingsOverrideSameName(t *testing.T) {
+	root := writeWorkspaceLSPConfig(t,
+		`[{"name":"GO","command":"workspace-gopls"}]`)
+	var captured lsp.Config
+	withLSPStart(t, func(_ context.Context, cfg lsp.Config) (lspSession, error) {
+		captured = cfg
+		return &fakeLSPSession{tools: []rig.Tool{fakeLSPTool{name: "lsp_hover"}}}, nil
+	})
+	settings := newLSPMultiSettings(map[string]string{
+		contracts.SettingLSPServers:         `[{"name":"go","command":"gopls"}]`,
+		contracts.SettingLSPActive:          "go",
+		contracts.SettingLSPWorkspaceConfig: "allow",
+	})
+	_, loader, logger := loadToolkitFull(t, settings, true, &fakeLSPWorkspace{
+		current: contracts.Workspace{ID: "w1", Root: root}, has: true,
+	})
+	defer func() { _ = loader.Close() }()
+	if captured.Command != "gopls" {
+		t.Fatalf("settings did not win the name conflict: %+v", captured)
+	}
+	if !logger.contains("1 configured") {
+		t.Fatalf("merged count log = %v", logger.lines)
+	}
+}
+
+func TestToolkitLSPWorkspaceOnlyServerCanBeActive(t *testing.T) {
+	root := writeWorkspaceLSPConfig(t,
+		`{"servers":[{"name":"ws","command":"ws-lsp"}]}`)
+	var captured lsp.Config
+	withLSPStart(t, func(_ context.Context, cfg lsp.Config) (lspSession, error) {
+		captured = cfg
+		return &fakeLSPSession{}, nil
+	})
+	settings := newLSPMultiSettings(map[string]string{
+		contracts.SettingLSPServers:         `[{"name":"go","command":"gopls"}]`,
+		contracts.SettingLSPActive:          "ws",
+		contracts.SettingLSPWorkspaceConfig: "allow",
+	})
+	_, loader, _ := loadToolkitFull(t, settings, true, &fakeLSPWorkspace{
+		current: contracts.Workspace{ID: "w1", Root: root}, has: true,
+	})
+	defer func() { _ = loader.Close() }()
+	if captured.Command != "ws-lsp" {
+		t.Fatalf("workspace-only active server started %q", captured.Command)
+	}
+}
+
+func TestToolkitLSPWorkspaceBadJSONKeepsSettings(t *testing.T) {
+	root := writeWorkspaceLSPConfig(t, `{bad-json`)
+	var captured lsp.Config
+	withLSPStart(t, func(_ context.Context, cfg lsp.Config) (lspSession, error) {
+		captured = cfg
+		return &fakeLSPSession{}, nil
+	})
+	settings := newLSPMultiSettings(map[string]string{
+		contracts.SettingLSPServers:         `[{"name":"go","command":"gopls"}]`,
+		contracts.SettingLSPWorkspaceConfig: "allow",
+	})
+	_, loader, logger := loadToolkitFull(t, settings, true, &fakeLSPWorkspace{
+		current: contracts.Workspace{ID: "w1", Root: root}, has: true,
+	})
+	defer func() { _ = loader.Close() }()
+	if captured.Command != "gopls" {
+		t.Fatalf("bad workspace config broke settings activation: %+v", captured)
+	}
+	if !logger.contains("workspace") {
+		t.Fatalf("bad workspace config did not warn: %v", logger.lines)
+	}
+}
+
+func TestToolkitLSPWorkspaceMissingFileAndService(t *testing.T) {
+	var captured lsp.Config
+	withLSPStart(t, func(_ context.Context, cfg lsp.Config) (lspSession, error) {
+		captured = cfg
+		return &fakeLSPSession{}, nil
+	})
+	settings := newLSPMultiSettings(map[string]string{
+		contracts.SettingLSPServers:         `[{"name":"go","command":"gopls"}]`,
+		contracts.SettingLSPWorkspaceConfig: "allow",
+	})
+	emptyRoot := t.TempDir() // no .zeokeel/lsp.json
+	_, loader, _ := loadToolkitFull(t, settings, true, &fakeLSPWorkspace{
+		current: contracts.Workspace{ID: "w1", Root: emptyRoot}, has: true,
+	})
+	_ = loader.Close()
+	if captured.Command != "gopls" {
+		t.Fatalf("missing workspace file broke activation: %+v", captured)
+	}
+
+	// No workspace service at all is equally safe.
+	_, loader2, _ := loadToolkitFull(t, settings, true, nil)
+	defer func() { _ = loader2.Close() }()
+	if captured.Command != "gopls" {
+		t.Fatalf("missing workspace service broke activation: %+v", captured)
+	}
+}
+
+func TestParseLSPWorkspaceConfigFileTable(t *testing.T) {
+	object, err := contracts.ParseLSPWorkspaceConfigFile([]byte(
+		`{"servers":[{"name":" go ","command":" gopls ","args":[" serve ",""]}]}`))
+	if err != nil || len(object) != 1 || object[0].Name != "go" || object[0].Command != "gopls" ||
+		len(object[0].Args) != 1 || object[0].Args[0] != "serve" {
+		t.Fatalf("object form = %+v, %v", object, err)
+	}
+	array, err := contracts.ParseLSPWorkspaceConfigFile([]byte(`[{"name":"rs","command":"rust-analyzer"}]`))
+	if err != nil || len(array) != 1 || array[0].Name != "rs" {
+		t.Fatalf("array form = %+v, %v", array, err)
+	}
+	if empty, err := contracts.ParseLSPWorkspaceConfigFile(nil); err != nil || len(empty) != 0 {
+		t.Fatalf("empty file = %+v, %v", empty, err)
+	}
+	if empty, err := contracts.ParseLSPWorkspaceConfigFile([]byte(`{"servers":[]}`)); err != nil || len(empty) != 0 {
+		t.Fatalf("empty servers = %+v, %v", empty, err)
+	}
+	for _, raw := range []string{
+		`{bad-json`,
+		`{"servers":[{"command":"gopls"}]}`,
+		`[{"name":"a","command":"x"},{"name":"A","command":"y"}]`,
+	} {
+		if _, err := contracts.ParseLSPWorkspaceConfigFile([]byte(raw)); err == nil {
+			t.Fatalf("workspace config %q parsed without error", raw)
+		}
 	}
 }

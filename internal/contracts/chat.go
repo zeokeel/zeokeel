@@ -1,7 +1,9 @@
 package contracts
 
 import (
+	"context"
 	"encoding/base64"
+	"errors"
 	"strings"
 	"time"
 
@@ -123,6 +125,31 @@ const (
 type SessionFeedbacker interface {
 	// SetMessageFeedback records/looks the rating of messageID in sessionID.
 	SetMessageFeedback(sessionID, messageID, feedback string) error
+}
+
+// Manual context compaction (the /compact command). The agent backend replaces
+// the session history with the compactor's result; the error values let the UI
+// render a specific message.
+var (
+	ErrCompactRunning     = errors.New("session is running")
+	ErrCompactUnavailable = errors.New("context compaction is unavailable")
+	ErrCompactNothing     = errors.New("nothing to compact")
+	ErrCompactSave        = errors.New("failed to save compacted history")
+)
+
+// CompactResult reports one manual compaction: the message counts and the
+// estimated token counts before/after (0 when unknown).
+type CompactResult struct {
+	Replaced     int
+	Saved        int
+	BeforeTokens int
+	AfterTokens  int
+}
+
+// SessionCompactor is the optional half of the chat service that compacts one
+// idle session's persisted history on demand.
+type SessionCompactor interface {
+	CompactNow(ctx context.Context, sessionID string) (CompactResult, error)
 }
 
 // MessageFeedbackSettingKey stores one message's rating in settings.

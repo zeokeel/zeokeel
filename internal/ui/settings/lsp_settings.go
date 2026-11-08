@@ -171,6 +171,13 @@ func setActiveLSPServer(st *lspState, store contracts.SettingsService,
 	st.refreshActive()
 }
 
+// lspWorkspaceOptIn reports whether the workspace config file is enabled: only
+// the exact value "allow" turns it on (everything else, including malformed
+// values, is off).
+func lspWorkspaceOptIn(raw string) bool {
+	return strings.EqualFold(strings.TrimSpace(raw), "allow")
+}
+
 // buildLSPPage renders the multi-server language-server configuration.
 func buildLSPPage(c *ui.Context, store contracts.SettingsService, st *lspState, locale contracts.LocaleService) {
 	t := design.Of(c)
@@ -226,6 +233,36 @@ func buildLSPPage(c *ui.Context, store contracts.SettingsService, st *lspState, 
 			design.Apply(ui.Text(c, localized(locale, "重启生效；仅活动服务器在启动时拉起。",
 				"Restart to apply; only the active server starts at launch.")),
 				t.TextMuted(design.TypeXXXS)).MaxLines(2)
+		})
+
+		panel(c, t, func() {
+			sectionTitle(c, t, localized(locale, "工作区配置", "Workspace configuration"))
+			allow := lspWorkspaceOptIn(store.Get(contracts.SettingLSPWorkspaceConfig, ""))
+			toggle := ui.Toggle(c, &allow, localized(locale,
+				"读取工作区 LSP 配置（.zeokeel/lsp.json）",
+				"Read workspace LSP config (.zeokeel/lsp.json)"))
+			if toggle.Changed() {
+				value := ""
+				if allow {
+					value = "allow"
+				}
+				if err := store.Set(contracts.SettingLSPWorkspaceConfig, value); err != nil {
+					st.status = localized(locale, "保存失败：", "Save failed: ") + err.Error()
+					st.statusErr = true
+				} else {
+					st.status = localized(locale, "已保存（重启后生效）", "Saved (applies after restart)")
+					st.statusErr = false
+				}
+				c.Invalidate()
+			}
+			design.Apply(ui.Text(c, localized(locale,
+				"仓库中的 .zeokeel/lsp.json 可声明语言服务器命令；默认关闭，开启后重启生效；设置页中的配置优先。",
+				"The repository's .zeokeel/lsp.json can declare language-server commands; off by default, restart to apply; settings-page configuration wins.")),
+				t.TextMuted(design.TypeXXS)).MaxLines(3)
+			design.Apply(ui.Text(c, localized(locale,
+				"风险：只应在你信任的仓库中开启；恶意仓库可通过该文件让工具启动任意命令。",
+				"Risk: enable only in repositories you trust; a malicious repository could make tools launch arbitrary commands.")),
+				t.Font(design.TypeXXS)).TextColor(t.DangerText).MaxLines(3)
 		})
 
 		panel(c, t, func() {
