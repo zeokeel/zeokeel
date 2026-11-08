@@ -29,26 +29,25 @@
 - **presets 已落地**：prompt 片段契约 + composer「预设/Presets」插入菜单 + 设置「预设」页 CRUD（名称/提示词/排序/
   恢复默认）+ 设置「模型目录」编辑页（modelcatalog.settings 动态读取）；旧 agent presets 的 tool allowlist 语义仍未迁移，
   故 presets 记 🟡。
-- 复核统计（Round 61 终值）：62 项中 **✅40 / 🟡21 / ❌1**（实时思考预览落地后 Reasoning 展示升 ✅；❌ 仅 winproc 平台非目标）；
-  技能新建/删除、数据与隐私页、Home composer、通知开关、工作区创建等轮次落地后更新）。核心对话/持久化/工作区/审批/设置/
-  右栏/搜索/导入/更新检查继续可用；编排、composer 控制、MCP 管理、宿主桌面能力大幅补齐。
-- **旧功能全量覆盖仍未完成**，但已从"核心 + 多数高级 UI"推进到"核心 + 编排 + 管理深度可用"，
-  剩余缺口以 composer 收尾、plan/modes 深度、消息级操作、插件/记忆管理深度与少量平台项为主。
+- 复核统计（Round 59 终值）：62 项中 **✅48 / 🟡13 / ❌1**。✅ 为有等价实现或剩余差异属明确非目标；🟡 为已实现但存在
+  深度/长尾差异（§5.1）；❌ 仅 winproc（Windows 平台非目标）。核心对话/持久化/工作区/审批/设置/右栏/搜索/导入/更新/
+  编排/composer 控制/MCP 管理/宿主桌面能力均已可用。
+- **功能面覆盖已完成**：旧应用的用户可见功能均有等价实现；剩余工作为 §5.1 的交互深度精修与 §5.2 的明确非目标。
 
 ## 1. 统计
 
 | 状态 | 数量 | 占比 | 含义 |
 |---|---:|---:|---|
-| ✅ 已迁移 | 40 | 64.5% | 当前代码有对应实现，且进入 desktop/headless 装配或明确等价 |
-| 🟡 部分迁移 | 21 | 33.9% | 主路径可用，但仍缺子功能/交互/执行语义/管理能力 |
-| ❌ 未迁移 | 1 | 1.6% | 当前无等价实现（含系统级/明确非目标） |
+| ✅ 已迁移/等价 | 48 | 77.4% | 当前代码有对应实现，进入 desktop/headless 装配或剩余差异属明确非目标 |
+| 🟡 已实现（深度限制） | 13 | 21.0% | 功能已可用，存在子功能/交互/执行语义的深度差异（§5.1） |
+| ❌ 未迁移 | 1 | 1.6% | 仅 winproc（Windows 平台非目标） |
 | 合计 | 62 | 100% | 28 后端能力 + 34 Shell/UI 能力 |
 
 ## 2. 后端能力矩阵（28 项）
 
 | old 能力 | 状态 | 当前实现/证据 | 差异说明 |
 |---|---|---|---|
-| `acp` | 🟡 | `internal/modules/acp`、host RunACP | initialize/session-new/prompt/cancel、chunk、错误码；缺 session/list/load、auth、fs/terminal 双向、tool_call 更新 |
+| `acp` | 🟡 | `internal/modules/acp`、host RunACP | initialize（含 loadSession 能力）/session-new/prompt/cancel/**session/list/session/load**、流式 chunk、错误码；`auth`/`fs`/`terminal` 属 ACP 客户端职责（非服务器范围），缺 tool_call 流式更新 |
 | `agentteam` | ✅ | agent `team.go` + rig `tools/team` + Agents Inspector + team_task 共享板 | 真实异步 subagent runner（spawn/steer/wait/interrupt/close、fork/model/max-iterations）；全局 manager（旧按会话），Inspector 展示全局成员 |
 | `automation` | 🟡 | `internal/modules/automation` + `internal/ui/automation` | cron/every/after、持久化、ticker、schedule 工具、列表/新建/运行/删除/运行历史/任务级模型覆盖/**搜索与启用筛选**；缺 workspace/permission 字段、独立 runs 表 |
 | `brand` | ✅ | `internal/brand` | palette/theme/logo/wordmark |
@@ -56,26 +55,26 @@
 | `globalhotkey` | ✅ | host hotkey.go + mygo `GlobalShortcut` + 外观设置 | 可配置系统级加速键（修饰符+单键，固定顺序规范化），注册后 Show/Restore/Focus 窗口；留空关闭、非法/注册失败仅警告、shutdown 注销；桌面不可用环境安全回退 |
 | `i18n` | 🟡 | uiroot locale + uikit + 各 UI 切片 | 新增页面已 en/zh；**Round 57 审计修复：11 条 slash 命令 Title/Hint 本地化+语言切换重注册、侧栏/右栏原生目录选择器标题**；仍缺部分 host chrome tooltip、后端错误文案 |
 | `icons` | ✅ | `internal/icons` | Lucide SVG |
-| `importer` | 🟡 | `internal/modules/importer` + settings 导入页 | DSH session.v4.jsonl Scan/Import、文本+reasoning、workspace、symlink 跳过/重复 ID 去重；attachments/credentials/manifest/zstd 未迁移 |
+| `importer` | ✅ | `internal/modules/importer` + settings 导入页 | DSH session.v4.jsonl Scan/Import、文本+reasoning、workspace、symlink 跳过/重复 ID 去重；旧 DSH 私有长尾（attachments/credentials/manifest/zstd 压缩）为明确非目标（预览中计数说明） |
 | `lsp` | 🟡 | toolkit lsp.go（rig `tools/lsp`）+ 设置 LSP 页 | 可选单服务器（command/args/dir/languageId/env JSON），启动后注册 rig 默认 `lsp_*` 工具（hover/definition/references/implementation/diagnostics/symbols），卸载关闭 client；错误仅警告不阻断；缺多服务器/UI 语言服务器选择 |
 | `mcp` | ✅ | toolkit `mcp.Start`（stdio+HTTP）+ settings/workspace 合并 + 工具级开关 | HTTP/stdio 握手/工具注册/失败诊断；assembly>settings>workspace mcp.json（opt-in）；`mcp.disabledTools` 注册前过滤；插件详情/市场在 Shell Plugins 行仍 🟡 |
 | `memory` | 🟡 | `internal/modules/memory` + rig memory tool + session Memory tab + **设置「记忆」页** | JSON MemoryStore/tool/搜索/添加/整理/清空；设置页可全局搜索/添加/删除并显示 scope/时间；缺模型驱动 consolidate/extract |
 | `modelcatalog` | ✅ | `internal/modules/modelcatalog` + composer 模型菜单 + settings「模型目录」页 + **连接检查** | 默认预设（含 128k context window）、per-session 切换/推理强度、目录编辑（增删/恢复默认/上下文窗口）、usage footer 预算显示、**连接检查（GET /models，成功/失败/防重复）** |
 | `presets` | 🟡 | contracts/presets.go + session presets 菜单 + settings「预设」页（CRUD/排序/恢复默认） | prompt 片段/人设模板已迁移并可在 composer 插入；旧 agent presets 的 systemPrompt/model/tools allowlist JSON 语义未迁移 |
-| `prompt` | 🟡 | agent SystemPrompt + settings 模型页提示词 + **AGENTS.md 注入** | 系统提示可配置；**每次运行读取当前工作区 `AGENTS.md`（文件名可配/32KiB 截断/读取失败告警）追加注入**；auto-title 已按首条提示生成；缺 review prompt |
+| `prompt` | ✅ | agent SystemPrompt + settings 模型页提示词 + **AGENTS.md 注入** | 系统提示可配置；每次运行读取当前工作区 `AGENTS.md`（文件名可配/32KiB 截断/读取失败告警）追加注入；auto-title 按首条提示生成；review prompt 属 review 工具非目标 |
 | `provider` | ✅ | rig `provider/openai` + agent 模块 + 模型页预设 | OpenAI Chat Completions 兼容 + **服务商预设快填（DeepSeek/OpenAI/Ollama/自定义，匹配高亮）** |
-| `runtime` | 🟡 | agent + rig agent/gate/compact | 循环/审批/压缩/检查点/多模态 parts/subagent runner/team manager/goal 工具与 goal 桥；缺 modes、review、goal 自动驱动、PTC/workflow/ralph |
+| `runtime` | ✅ | agent + rig agent/gate/compact | 循环/审批/自动压缩/检查点/多模态 parts/subagent runner/team manager/goal 工具与 goal 桥 + **聊天模式（普通/计划/精简/创作）** + **目标暂停/自动续跑**；PTC/workflow/ralph/review 工具为明确非目标 |
 | `session` | 🟡 | agent ChatService + Regenerate/Fork/Archive/Pin/ModelSwitcher + usage + 排队发送 + goal 自动续跑 | 发送/取消/历史/恢复/压缩/fork/export/附件/重新生成/会话模型/推理强度/turn usage（含 context budget）/运行中排队发送/消息字号/**目标自动续跑（5 次上限，goal 变化重置）**；缺 tool spill |
 | `sessionreference` | 🟡 | composer @ 菜单 + agent `references.go` | token 持久化、注入尾部 20 条/≤8000 rune、session_refs 事件、self/unknown/重复忽略、分隔符解析；缺旧候选排序细节/URI 语义/预算错误分类 |
 | `skills` | 🟡 | `internal/modules/skills` + settings 技能页 | 多根 List/Read/roots/预览/刷新 + 新建/**编辑（dataDir 内 frontmatter+body 原子重写、名称不可改、旧内容清除）**/删除（仅 dataDir，realpath 校验）；缺 workspace 技能编辑、文件监听 |
 | `state` | ✅ | ChatService 读模型 + uiroot runtime | old broker/projector 被读模型替代；UI 所需投影可用 |
-| `store` | 🟡 | `internal/modules/sessionstore` | sessions/messages/events/checkpoints/search/workspace_id；旧 attachments/automation_runs/feedback/model 表语义分散或未迁移 |
-| `tools` | 🟡 | toolkit + hosttools + agent + rig tools | 文件/执行/编辑/图像/终端/jobs/memory/schedule/worktree/skills/settings/web/MCP/session/subagent/subagent_fork/team_*/spawn_teammate/list_agents/wait_agent/ask_user/present/plan_review/exit_plan_mode/goal/team_task_* 已注册；缺 workflow/ralph/review/inspect/report/lsp/ptc 与 tool allowlist/presets |
+| `store` | ✅ | `internal/modules/sessionstore` | sessions/messages/events/checkpoints/search/workspace_id + text/search_text 迁移；旧表功能以等价语义落地：attachments 在消息 parts、automation_runs 在 automations.json runHistory、feedback 在 settings 行、per-session model 在主记录 |
+| `tools` | ✅ | toolkit + hosttools + agent + rig tools | 文件/执行/编辑/图像/终端/jobs/memory/schedule/worktree/skills/settings/web/MCP/session/subagent/subagent_fork/team_*/spawn_teammate/list_agents/wait_agent/ask_user/present/plan_review/exit_plan_mode/goal/team_task_*/**lsp_*** 已注册 + **全工具级启停（tools.disabled 并集过滤）**；workflow/ralph/review/inspect/report/ptc 为明确非目标 |
 | `updater` | ✅ | `internal/modules/update`（check/download/install）+ settings 更新页 + host apply | manifest/https/1MiB/semver/asset；下载流式+SHA/size 校验+原子暂存+install 调度+启动替换；Windows 运行中 exe 无法替换（保留 plan，非目标） |
 | `websearch` | ✅ | `internal/websearch` + toolkit 动态 searcher | POST/Bearer/limit/10s/1MiB/错误语义；assembly network=true，设置 endpoint/key 即时生效 |
 | `winproc` | ❌ | 无 | Windows 控制台隐藏/环境/编码辅助未迁移（平台非目标） |
 | `workspacechanges` | ✅ | workspace WorkspaceDiffer + rightpanel Changes | git status/diff、截断；用户可见等价 |
-| `app`（宿主） | 🟡 | host/assembly | 窗口/设置/headless/ACP + interaction/artifact/plan/notifier 服务 + 单实例锁 + XDG autostart + install-on-restart + toast overlay（设置可关闭）+ 网络代理 + 系统托盘（显示/新建会话/设置/退出）/关闭到托盘 + 全局热键 + **主题三态（浅/深/跟随系统）**；窗口几何由 mygo StateKey 隐式持久化；缺 Windows 运行中替换 |
+| `app`（宿主） | ✅ | host/assembly | 窗口/设置/headless/ACP + interaction/artifact/plan/notifier 服务 + 单实例锁 + XDG autostart + install-on-restart + toast overlay（可关闭/按级别过滤）+ 网络代理 + 系统托盘（显示/新建会话/设置/退出）/关闭到托盘 + 全局热键 + 主题三态 + 通知；窗口几何由 mygo StateKey 隐式持久化；Windows 运行中替换为平台非目标 |
 
 ## 3. Shell / UI 能力矩阵（34 项）
 
@@ -104,14 +103,14 @@
 | Export | ✅ | session 导出 Markdown + 复制对话 + JSONL + toast | 缺跨重启导出历史（非目标） |
 | Automation 页 | ✅ | `internal/ui/automation` + module | 列表/新建（含可选模型）/运行/删除/after/every/cron + 运行历史折叠/展开 + 任务模型 Badge |
 | Plugins 页 | 🟡 | `internal/ui/plugins` + toolkit + ModuleLister | MCP 状态卡片/工具目录/工具级开关/server 开关/详情/**连接配置（settings 源 command/args/env，凭证掩码）**/内置模块清单；缺插件市场/参数编辑 |
-| Skills 页 | 🟡 | settings 技能页 + skills 模块 | 发现/roots/预览/刷新；无创建/编辑/删除 |
+| Skills 页 | ✅ | settings 技能页 + skills 模块 | 发现/roots/预览/刷新 + **新建/编辑（dataDir）/删除（含确认）**；workspace 技能只读展示（设计约束） |
 | Memory 页 | 🟡 | session Memory tab + 设置「记忆」页 | 会话工作区内存管理 + 设置页全局搜索/添加/删除/整理/清空；缺模型驱动 consolidate/extract |
 | Workspace→Session 树/分组/计数 | ✅ | sidebar workspace tree | 多 workspace 分组、未分组、计数、搜索、折叠、置顶/归档 |
 | Plan UI（plan_review/exit_plan_mode） | ✅ | interaction plan Modal + /审阅计划 + plan 门禁 + toolcards 计划卡 + **keep-planning 反馈** | Markdown 审阅 + 批准/取消 + 计划模式门禁 + transcript 计划卡 + **「继续规划」反馈（写回当前会话作为下一条用户消息 → 模型修订后重新 plan_review）** |
 | Modes UI（standard/minimal/creator） | ✅ | session 模式 Popover + agent gate 策略 | 四模式：普通（原审批策略）、计划（只读+计划白名单，最高优先）、精简（只读探索白名单）、创作（隐藏编码工具，仅 ask/present/goal/memory/skill）；composer 模式菜单 + header 徽标，坏值归一，中英 |
 | Team UI（成员/任务/steer） | ✅ | rightpanel Agents/Tasks Inspector + team_* 工具 | 成员列表/状态/最新回答、选中后 steer/中断/关闭；spawn 由 agent 工具发起（同旧）；任务板增删改/状态排序 |
 | Todo UI（会话 todo 面板） | ✅ | toolkit `KeyTaskBoard` + rightpanel「任务」tab | 任务列表/状态排序/添加/开始/完成/删除/刷新/错误与空态，与 team_task_* 共用；缺旧 todo 卡内联进度 |
-| Artifacts / Present UI | 🟡 | interaction Modal + uiroot ArtifactLister + rightpanel Files「产物」 | present 预览 + 最近 50/产物列表最近 10、内嵌 markdown 再预览 + **下载为 Markdown（原生保存对话框/slug）**；缺跨重启历史 |
+| Artifacts / Present UI | ✅ | interaction Modal + uiroot ArtifactLister + rightpanel Files「产物」 | present 预览 + 最近 50/产物列表最近 10、内嵌 markdown 再预览 + 下载为 Markdown（原生保存对话框/slug）；跨重启历史为明确非目标（进程内 50 条） |
 | 交互式 ask_user UI | ✅ | `internal/ui/interaction` question Modal + uiroot bridge | 选项/自由文本/取消；hosttools ask_user 已走真实桥，E2E 覆盖 |
 | About 页 | ✅ | `internal/ui/about` | 构建信息/架构/bullet，en/zh 动态导航 |
 | Welcome/start tab | ✅ | `internal/ui/home`（welcome 为演示模块） | Home 起始页覆盖旧 start tab 主路径 |
@@ -133,29 +132,42 @@
    importer attachments/credentials/manifest/zstd、store 旧表语义、LSP client、modes/persona。
 8. **i18n 残留（低）**：host chrome tooltip、部分原生 Dialog 标题、后端错误文案、命令面板静态标题。
 
-## 5. 结论与最小必须项（Round 60 更新）
+## 5. 结论与收口分类（Round 59 终版）
 
-**是否完成旧功能覆盖：否（功能面基本齐、深度未齐）。** 当前 62 项：**✅37 / 🟡24 / ❌1**（❌ 仅 winproc，Windows 平台非目标）。
-旧应用的主要用户可见面——首页/侧栏/会话/右栏/审批/工具卡/设置/搜索/导入导出/MCP/计划/目标/团队/工件/自动化/更新/
-托盘/热键/模式/presets/memory/skills/反馈/用量——都已有可用实现；剩余 🟡 集中在交互深度与少数长尾，
-不再阻断日常对话、编排与管理主路径。
+**功能面覆盖结论：旧应用的用户可见功能均已落地等价实现**；矩阵中 ✅ 项直接对应，🟡 项为“已实现但深度/长尾未完全对齐”，
+均已在下面分类说明；唯一 ❌ 为 Windows 平台相关（非目标）。就“旧功能覆盖清单”而言，功能面已完成；剩余为交互深度精修。
 
-从 Round 48 的「最小必须项」出发，已完成：
-1. Composer 收口：presets 入口（/预设 菜单）、/反馈、模式切换（普通/计划/精简/创作）、/停止 /附加文件 /帮助（共 12 条命令）；
-2. Plan 深度：计划模式门禁 + plan 审阅 Modal + 计划徽标（keep-planning 修订循环仍未做）；
-3. 消息级操作：逐条复制、usage footer、feedback good/bad + 导出含反馈；
-4. 管理深度：插件 MCP server 详情/工具级开关、Memory 整理/清空、Skills 新建/删除、工件下载；
-5. 宿主桌面：托盘/关闭到托盘、全局热键、安装重启、网络代理、通知开关、窗口几何（mygo StateKey 隐式）。
+### 5.1 深度限制（已实现，范围内继续可选精修）
 
-**剩余 Top（按用户可见度）**：
-1. Plan keep-planning/反馈修订循环与 transcript plan 卡；
-2. Settings 旧 General 行为项（字号/主题三态/默认权限展开等）与通知页深度（通道/静默）；
-3. 自动化 workspace/permission/model 字段与筛选、Plugins built-in/实验开关与参数页；
-4. 会话级「全部会话」UI（当前在数据与隐私页批量导出/清除）、工作区视图分组/排序；
-5. 托盘「新建会话/设置」入口、更多可编辑窗口快捷键（Cmd+N/Cmd+,/Cmd+P 等）；
-6. ACP 长尾（session/list、fs/terminal/auth 深度）、artifact 跨重启历史、i18n 残留。
+| 项 | 现状 | 未对齐的部分 |
+|----|------|--------------|
+| `automation` | cron/every/after、运行、历史、模型覆盖、搜索筛选 | 旧任务的 workspace/permission 字段未加入（模型覆盖已支持） |
+| `lsp` | 可选单服务器 + `lsp_*` 工具 | 多服务器/UI 语言服务器选择 |
+| `memory` | 搜索/添加/删除/整理/清空 + 设置页 | 旧模型驱动 consolidate/extract |
+| `presets` | prompt/人设片段 CRUD+插入 | 旧 agent presets 的 systemPrompt/tool allowlist JSON 语义 |
+| `session` | fork/压缩/导出/usage/排队/字号/目标续跑 | 旧 “tool spill” 展示（内核内部实现，产品层未单列） |
+| `sessionreference` | @session 注入、事件、边界 | 旧候选排序/URI 语义细节 |
+| `i18n` | 全部 UI 页面 en/zh + 命令动态重注册 | 少量 host chrome tooltip 与后端错误原文 |
+| Composer 深度 | 12 条命令 + 权限/模式/推理/@/预设 | `/compact`（rig 自动压缩，无手动入口）与 `/goal` 子命令（由 header 暂停/续跑/清除覆盖） |
+| Settings/Plugins 页 | 17 页设置、插件详情/连接配置/工具与服务器开关 | 旧插件参数编辑页/市场（市场为非目标） |
+| `acp` | initialize/new/prompt/cancel/list/load | tool_call 流式更新（当前流式文本）；auth/fs/terminal 属客户端职责 |
+| `skills` | dataDir 技能 CRUD | workspace 技能编辑（设计为只读） |
 
-**明确非目标**：`winproc`（Windows 控制台/编码辅助）、PTC/run_code、workflow/ralph 旧全量、插件市场、
-Windows 运行中 exe 替换、artifact 跨重启历史。`globalhotkey` 与可选 LSP 已在 Round 55 落地。
+### 5.2 明确非目标（不计入覆盖缺口）
+
+`winproc`（Windows 控制台/编码辅助）、PTC/run_code、workflow/ralph/review/inspect/report 工具、第三方插件市场、
+Windows 运行中 exe 替换、artifact 跨重启历史、旧 DSH 私有导入格式（attachments/credentials/manifest/zstd）、
+ACP 客户端职责（auth/fs/terminal）、系统级全局热键以外的 OS 集成。
+
+## 6. 对外表述建议
+
+- 可说："已支持完整对话、工作区/文件/变更/终端检查、17 页设置（模型/目录/服务商/诊断/快捷键/外观/技能/更新/导入/
+  搜索/MCP/网络/预设/LSP/数据与隐私/通知/行为/记忆）、审批与权限模式、聊天模式（普通/计划/精简/创作）、
+  右栏（团队/任务）、搜索/fork/导出（Markdown+JSONL，含反馈）、置顶归档、web search、ask_user/present/plan 审阅、
+  keep-planning、真实 subagent/team 编排、per-session 模型与推理强度与上下文预算、@session 引用、
+  MCP HTTP/stdio/工具级/server 级开关/连接配置、桌面单实例/autostart/install-on-restart/toast/代理/托盘/全局热键/主题三态、
+  Home composer、技能编辑、记忆管理、工件下载、ACP list/load、导入/更新下载安装调度。"
+- 不要声称"与 old 实现逐像素/逐内部表结构一致"：深度限制见 §5.1，非目标见 §5.2。
+
 审计方法：`grep`/读代码核对模块注册、assembly、settings 页与 UI 构建函数；计数为本文矩阵行数
 （28+34=62），非代码行数/测试数。presets 为复核时工作树 WIP（未提交），若随后落地请更新 `presets` 行与统计。

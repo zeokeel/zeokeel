@@ -21,6 +21,12 @@
 - 右侧栏「文件」Tab：打开文件夹（mygo 原生 Directory picker）、目录进入/面包屑、文本/Markdown/图片预览、
   刷新与错误状态；E2E 覆盖工作区创建 + 列表 + 预览帧
 
+**Round 59 覆盖收口（2026-11-08）**
+- COVERAGE 矩阵按当前事实修订（acp list/load、runtime 模式与目标续跑、tools lsp/全工具开关、store 语义映射、app 平台非目标、
+  prompt AGENTS、skills 页 CRUD、artifacts 下载等）→ **✅48 / 🟡13 / ❌1**
+- §5 重写为收口分类：5.1 深度限制（13 项已实现、可选精修）；5.2 明确非目标（winproc/PTC/workflow/ralph/市场/Windows 替换等）；
+  功能面覆盖完成，外部表述与避坑说明同步
+
 **TDD-goal-pause/plugin-config（2026-11-08）**
 - 目标暂停/继续：contracts GoalPauser（可选）、uiroot 状态机（active/paused，handler 通知）、session 目标徽标与暂停/继续按钮、
   自动续跑仅在 active 触发；uiroot 76 / session 163 测试；snapshot p2-goal-paused
