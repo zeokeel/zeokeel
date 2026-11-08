@@ -53,6 +53,10 @@ jobs:
     name: Race detector
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    # The race detector needs cgo; the workflow-wide default is CGO_ENABLED=0
+    # so build/test jobs run without platform C dependencies.
+    env:
+      CGO_ENABLED: "1"
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
