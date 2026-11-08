@@ -30,7 +30,10 @@ func startBehaviorUI(t *testing.T, withSession bool) *behaviorHarness {
 	h := newBareHarness(t)
 	chat := newFakeChat()
 	chat.addSession(contracts.ChatSession{ID: "sess-behave", Title: "Behavior session",
-		Messages: []contracts.ChatMessage{{ID: "m1", Role: contracts.ChatRoleUser, Text: "q"}}}, true)
+		Messages: []contracts.ChatMessage{
+			{ID: "m1", Role: contracts.ChatRoleUser, Text: "q"},
+			{ID: "m2", Role: contracts.ChatRoleAssistant, Text: "Markdown answer"},
+		}}, true)
 	provide(t, h.ctx, contracts.KeyChat, contracts.ChatService(chat))
 	activate(t, h.ctx, settingsui.Module(), settingsui.Config{})
 	if withSession {

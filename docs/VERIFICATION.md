@@ -266,43 +266,43 @@ $ ./scripts/verify.sh
 verify summary: 10 passed, 0 failed, 102s total · verify: PASS
 ```
 
-## 最终验证（Round 58，2026-11-08，HEAD f2dff99）
+## 最终验证（Round 58，2026-11-08，HEAD d27e449）
 
-环境：go1.27.3 linux/amd64 · 离线（GOPROXY=off/GOSUMDB=off/GOFLAGS=-mod=mod）· 2026-11-08 07:14–07:22（Asia/Shanghai）。
-命令：`./scripts/verify.sh`（完整；快速版 `--quick`）。
+环境：go1.27.3 linux/amd64 · 离线（GOPROXY=off/GOSUMDB=off/GOFLAGS=-mod=mod）· 2026-11-08 07:53–07:56（Asia/Shanghai）。
+命令：`./scripts/verify.sh`（完整）。
 
-### 一键验证结果（最终一次，PASS）
+### 一键验证结果（首次即 PASS，无需重跑）
 ```
 $ ./scripts/verify.sh
 ==> gofmt ... PASS (1s)
-==> go build ./... ... PASS (3s)
-==> go vet ./... ... PASS (1s)
+==> go build ./... ... PASS (4s)
+==> go vet ./... ... PASS (0s)
 ==> go test ./... -count=1 ... PASS (14s)
-==> go test ./... -count=1 -race ... PASS (49s)
+==> go test ./... -count=1 -race ... PASS (51s)
 ==> regression (-v) ... (regression: 227 PASS / 0 SKIP / 0 FAIL) PASS (13s)
-==> ui-snapshot ... (snapshot: 64 steps / 62 PNGs) PASS (10s)
+==> ui-snapshot ... (snapshot: 65 steps / 63 PNGs) PASS (8s)
 ==> desktop smoke (xvfb) ... (desktop exit 124, tray ready: 1) PASS (8s)
 ==> headless smoke ... (headless exit 124) PASS (8s)
 ==> ACP smoke ... (ACP exit 0) PASS (0s)
 verify summary: 10 passed, 0 failed, 107s total
 verify: PASS
 ```
-说明：regression 227 为当前工作树计数（含并行未提交的 commands_i18n/plan_keep_planning/window_shortcuts 审计用例；HEAD f2dff99 提交态不含这三个文件）。UI 快照 64 步渲染、62 个唯一 PNG；桌面冒烟预置 `ui.globalHotkey` 且 tray ready。
+regression **227 PASS / 0 SKIP / 0 FAIL**；UI 快照 **65 步渲染 / 63 个唯一 PNG**；三产品冒烟均无 panic：desktop exit 124（tray ready 1）、headless exit 124、ACP exit 0。本轮无与预期不符/失败步骤。
 
 ### 新功能冒烟
-- **ACP session/list / session/load 真实帧**（`go run ./cmd/zeokeel --acp`，同一 data-dir 两次连接）：
+- **ACP session/list + session/load 真实帧**（`go run ./cmd/zeokeel --acp`，同一 data-dir 两次连接）：
 ```
 {"id":1,"jsonrpc":"2.0","result":{"agentCapabilities":{"loadSession":true,...},"protocolVersion":1}}
-{"id":2,"jsonrpc":"2.0","result":{"sessionId":"sess-1794093711160914271"}}          # session/new
-{"id":3,"jsonrpc":"2.0","result":{"sessions":[{"sessionId":"sess-1794093711160914271","title":"","updatedAt":"2026-11-08T07:21:51+08:00"}]}}
-{"id":2,"jsonrpc":"2.0","result":{"messages":[],"model":"gpt-4o-mini","sessionId":"sess-1794093711160914271","title":""}}   # session/load
+{"id":2,"jsonrpc":"2.0","result":{"sessionId":"sess-1794095740740741703"}}          # session/new
+{"id":3,"jsonrpc":"2.0","result":{"sessions":[{"sessionId":"sess-1794095740740741703","title":"","updatedAt":"2026-11-08T07:55:40+08:00"}]}}
+{"id":2,"jsonrpc":"2.0","result":{"messages":[],"model":"gpt-4o-mini","sessionId":"sess-1794095740740741703","title":""}}   # session/load
 ```
-- **plan keep-planning**：`go test ./internal/ui/interaction/ -run TestKeepPlanning -count=1` → 7 PASS（发送反馈/必填/发送/退出失败保留模态/无活动会话/无 chat 隐藏/en 文案）；按任务要求无需触发 UI，已由单测覆盖。
+- **模型连接检查（离线 fake，未做网络请求）**：`go test ./internal/ui/settings/ -run TestModelCheck -count=1` → **8 PASS**（成功、HTTP 失败、网络错误、无 BaseURL、重复点击、en 文案、chat config 回退、状态文案本地化）；测试通过 `ModelListGetter` seam 脚本化 `/models` 响应，不访问网络。
+- **plan keep-planning**：`go test ./internal/ui/interaction/ -run TestKeepPlanning -count=1` → 7 PASS（发送反馈/必填/失败保留模态/无活动会话/无 chat 隐藏/en）；无需触发 UI。
 
-### 与预期不符/失败步骤（偶发，非产品回归）
-- 第 1 次 `./scripts/verify.sh`：`go test ./... -count=1 -race` FAIL（48s）——automation `TestRunHistoryCappedAtTenNewestFirst` 等待运行超时 3s；该测试单独 `-race` 连跑 5 次均 PASS，属全量并行 -race 下的负载时序偶发。
-- 第 2 次：plain test FAIL（13s）——未提交的 regression `TestWindowShortcutNewSessionAndSettings/TestWindowShortcutsWithoutChatAreSafe`（Cmd+,/Cmd+N 帧断言）；该包单独运行与 -run 连跑均 PASS，属并行负载下 UI 帧时序偶发。
-- 第 3 次（上表）**10/10 PASS，107s**；`gofmt/build/vet/test/-race/regression/snapshot/三产品冒烟` 全部通过。
+### 文档核对
+- docs/COVERAGE.md 矩阵（§2 28 项 + §3 34 项 = 62）实际 **✅39 / 🟡22 / ❌1**；摘要与统计表已同步为 39/22/1（62.9% / 35.5% / 1.6%）。
+- README 状态行更新为 Round 58（HEAD d27e449）；构建/验证命令核对仍准确。
 
 ## 最终验证（Round 59：干净环境一键验证）
 
@@ -312,3 +312,10 @@ verify: PASS
 - regression 计数：227 PASS / 0 SKIP；ui-snapshot 64 步渲染 / 62 唯一 PNG。
 - 本轮唯一修复：automation 测试 helper 的等待预算 3s→10s（并行载入下偶发超时，非产品回归）；修复后
   `go test ./internal/modules/automation -count=2` 与完整 verify.sh 均 PASS。
+
+## 最终验证（Round 58 补充：第十一轮反证后）
+
+- `./scripts/verify.sh`：**10/10 PASS，111s**；regression **241 PASS / 0 SKIP**（第十一轮新增 14 例），
+  ui-snapshot **65 步渲染 / 63 唯一 PNG**，desktop/headless/ACP 冒烟同前。
+- regression 第十一轮覆盖：运行中排队发送、MCP server 开关、自动化搜索筛选、消息字号、AGENTS.md 注入、
+  设置记忆页、模型连接检查、上下文预算、反馈导出统计；无新缺陷。

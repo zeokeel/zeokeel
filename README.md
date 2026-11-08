@@ -10,11 +10,11 @@
 > Home 真实 composer、/停止 /附加文件 /帮助、数据与隐私页、通知开关、侧栏添加工作区、插件 MCP server 详情；
 > 反证审计共 227 PASS / 0 SKIP（含最新审计补充），4×P2+4×P3 全部修复。详情：[docs/ADVERSARIAL-AUDIT.md](docs/ADVERSARIAL-AUDIT.md)。
 >
-> **最终验证（2026-11-08，Round 58 · HEAD f2dff99）**：`./scripts/verify.sh` 全量 **10/10 PASS（107s）**；
+> **最终验证（2026-11-08，Round 58 · HEAD d27e449）**：`./scripts/verify.sh` 全量 **10/10 PASS（107s）**；
 > 桌面（xvfb，托盘+全局热键）/headless/ACP 冒烟通过；ACP `session/list`/`session/load` 真实帧已验证，
-> plan keep-planning 7 项单测通过。42 个包中 34 个测试包全绿（含 `-race`，0 DATA RACE）；
-> `internal/regression` 227 PASS / 0 SKIP（含工作树审计补充）；UI 快照 64 步 / 62 张 PNG。
-> 旧功能覆盖矩阵见 [docs/COVERAGE.md](docs/COVERAGE.md)（62 项：✅37 / 🟡24 / ❌1，未 100%）。
+> 模型连接检查离线 fake **8 项单测通过**，plan keep-planning 7 项单测通过。42 个包中 34 个测试包全绿
+> （含 `-race`，0 DATA RACE）；`internal/regression` 227 PASS / 0 SKIP；UI 快照 65 步 / 63 张 PNG。
+> 旧功能覆盖矩阵见 [docs/COVERAGE.md](docs/COVERAGE.md)（62 项：✅39 / 🟡22 / ❌1，未 100%）。
 > 验证证据：[docs/VERIFICATION.md](docs/VERIFICATION.md)。
 
 编译期模块化的 Go 桌面 AI agent：**薄总入口 + 内核装配 + 模块贡献点**。

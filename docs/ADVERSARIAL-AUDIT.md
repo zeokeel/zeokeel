@@ -7,7 +7,7 @@
 
 ## 修复状态（Lead 复核后）
 
-> 首轮 11 个「已知缺陷探针」与第二轮 4 个 P3 均已随 TDD 修复转为 PASS；第三轮 P3-9/10 已修复、P3-11 重开后于 ca2d24c 真正修复；第四轮 P3-12 已修复（ca2d24c）；第五~七轮无新缺陷，第八轮发现 1 个 P3（AUDIT-P3-13）并已修复：诊断报告现在对 apiKey/token/secret/password/authorization 类设置整值隐藏，并对 JSON 结构化设置（mcp.servers）递归掩码 Bearer token 与凭证字段；新增单测断言 web.search.apiKey 与 mcp Bearer 不泄漏。第九轮发现 1 个 P3（AUDIT-P3-14：agent.permission=never 已存储但会话权限 chip 显示「询问」，待修）。第十轮无新缺陷。`go test ./internal/regression -count=1 -race` 当前 **227 PASS / 0 SKIP**（历史：首轮修复后 92，第二轮后 98，第三轮后 133，第四轮后 153，第五轮后 172，第六轮后 180，第七轮后 189，第八轮后 208，第九轮后 220）。
+> 首轮 11 个「已知缺陷探针」与第二轮 4 个 P3 均已随 TDD 修复转为 PASS；第三轮 P3-9/10 已修复、P3-11 重开后于 ca2d24c 真正修复；第四轮 P3-12 已修复（ca2d24c）；第五~七轮无新缺陷，第八轮发现 1 个 P3（AUDIT-P3-13）并已修复：诊断报告现在对 apiKey/token/secret/password/authorization 类设置整值隐藏，并对 JSON 结构化设置（mcp.servers）递归掩码 Bearer token 与凭证字段；新增单测断言 web.search.apiKey 与 mcp Bearer 不泄漏。第九轮发现 1 个 P3（AUDIT-P3-14：agent.permission=never 已存储但会话权限 chip 显示「询问」，待修）。第十轮无新缺陷；第十一轮无新缺陷。`go test ./internal/regression -count=1 -race` 当前 **241 PASS / 0 SKIP**（历史：首轮修复后 92，第二轮后 98，第三轮后 133，第四轮后 153，第五轮后 172，第六轮后 180，第七轮后 189，第八轮后 208，第九轮后 220，第十轮后 227）。
 
 | ID | 优先级 | 状态 | 修复摘要 |
 |----|--------|------|----------|
@@ -31,7 +31,7 @@ $ go test ./internal/regression -count=1                    ok  1.2s
 $ go test ./internal/regression -count=1 -race              ok 12.8s（98 PASS / 0 SKIP）
 ```
 
-测试规模：`internal/regression` 共 227 个顶层 Test（首轮 78 + 第二轮 20 + 第三轮 35 + 第四轮 20 + 第五轮 19 + 第六轮 8 + 第七轮 9 + 第八轮 17 + 特性提交补充 2 + 第九轮 12 + 第十轮 7；含子用例后更多；另有 `internal/ui/uimodtest` 的 E2E 1 个，不计入本包）。第三轮 P3-9/10 已修复，P3-11 重开后已真正修复，第四轮 P3-12 已修复，第五~七轮无新缺陷，第八轮 P3-13 已修复（da654e3），第九轮新增 P3-14（待修），第十轮无新缺陷；当前 **227 PASS / 0 SKIP**。
+测试规模：`internal/regression` 共 241 个顶层 Test（首轮 78 + 第二轮 20 + 第三轮 35 + 第四轮 20 + 第五轮 19 + 第六轮 8 + 第七轮 9 + 第八轮 17 + 特性提交补充 2 + 第九轮 12 + 第十轮 7 + 第十一轮 14；含子用例后更多；另有 `internal/ui/uimodtest` 的 E2E 1 个，不计入本包）。第三轮 P3-9/10 已修复，P3-11 重开后已真正修复，第四轮 P3-12 已修复，第五~七轮无新缺陷，第八轮 P3-13 已修复（da654e3），第九轮新增 P3-14（待修），第十轮、第十一轮无新缺陷；当前 **241 PASS / 0 SKIP**。
 
 ## 用例矩阵
 
@@ -352,6 +352,7 @@ $ go test ./internal/regression -count=1 -race               ok 27.9s（153 PASS
 第八轮扩张到 **206 PASS / 0 SKIP**（Home composer、/停止 /附加文件 /帮助、数据与隐私页、通知开关、侧栏添加工作区），发现 AUDIT-P3-13（已修复）。
 第九轮扩张到 **220 PASS / 0 SKIP**（ACP session/list/load、三态主题、侧栏视图、行为默认权限、通知级别过滤、自动化模型覆盖），发现 AUDIT-P3-14。
 第十轮扩张到 **227 PASS / 0 SKIP**（plan keep-planning、slash 命令 i18n、窗口快捷键），并复跑第九轮关键链路 17 项确认 0 回退。
+第十一轮扩张到 **241 PASS / 0 SKIP**（排队发送、MCP 服务器开关、自动化筛选、消息字号、AGENTS.md/记忆页/连接检查/上下文预算/反馈导出）。
 仍有文档化未落地项（plan keep-planning 反馈循环、会话级 feedback 汇总、旧 `/feedback [good|bad]` 参数式直接打分、自动化 runs 之外的历史查询）。
 
 ## 反证审计第五轮：/feedback 命令 / 自动化运行历史 / 反馈复跑 / 记忆与技能编辑（2026-11-08）
@@ -623,3 +624,48 @@ $ go test ./internal/regression -race -run '第九轮关键链路'      17 PASS 
 - 快捷键测试手工 `SetKernelContext` 绑定 kernel（真实 host 在装配前绑定）；Modal 打开时的按键消费行为与桌面焦点可能不同（见观察）。
 - i18n 断言注册表值 + 帮助 Modal 显示；斜杠菜单/命令面板的渲染顺序由内部测试覆盖，本轮不重复。
 - 第九轮复跑按前缀选择 17 项（全量 227 项 -race 已单独跑绿）。
+
+## 反证审计第十一轮：排队发送 / MCP 服务器开关 / 自动化筛选 / 消息字号 / 管理深度（2026-11-08）
+
+范围：`3cc1495`（queue-during-run、MCP server switches、automation filters）+ `4f57a2b`（transcript font size、feedback in
+exports/reports）+ `217d0dc`（AGENTS.md 注入、settings Memory 页）+ `d27e449`（模型上下文预算、连接检查）。
+只新增 `internal/regression/**` 并改本文件；未改生产代码。新增 **14** 个顶层 Test（227 → 241）。
+
+```
+$ gofmt -l internal/regression/                              （空）
+$ go vet ./internal/regression                               OK
+$ go build ./...                                             OK
+$ go test ./internal/regression -count=1 -race               ok 51.7s（241 PASS / 0 SKIP）
+```
+
+| # | 链路 | 反证点 | 用例 | 结果 |
+|---|------|--------|------|------|
+| 47 | 运行中排队发送（ui.sendWhileRunning） | off/缺失/坏值：运行中仅「停止」、无输入/发送、无队列；on：可输入，提交后「已排队 N 条」且运行中不发；运行结束 FIFO 逐条 flush（会话/内容正确）；flush 失败保留队列+错误行（尝试被记录、队列不清）；切换会话清空队列且切回不重放 | 3 | PASS |
+| 48 | MCP 服务器开关（mcp.disabledServers） | toolkit filter 表：大小写/空白归一、空/null/空数组/空串、坏 JSON 与错类型不误过滤且记日志、未知名、skipped 计数；plugins 页：settings 源被禁行还原 URL+「已停用（重启生效）」、启用写 `[]`、live 服务器禁用写排序合并 JSON、坏配置 status 错误但页面仍渲染 | 2 | PASS |
+| 49 | 自动化搜索/筛选 | 名称/提示词子串、大小写、清空恢复；0 匹配空态与 0 计数；仅启用/仅停用筛选与计数；搜索+筛选组合；恢复全部 | 2 | PASS |
+| 50 | 消息字号（ui.chatFontSize） | 行为页 selector：默认「标准」不写入；大/小/标准写入 settings；坏值显示「标准」且不被 frame 覆写；会话屏在两个帧之间切换字号后 Markdown 重建无错误、正文仍渲染 | 2 | PASS |
+| 51 | AGENTS.md / 记忆页 / 连接检查 / 上下文预算 / 反馈导出 | AGENTS：默认文件注入标题+内容、自定义名 trim、缺失忽略、空设置禁用、>32KiB 截断（尾部不达 provider + 日志）；记忆页：无后端空态、真实后端添加/列表/搜索无匹配/删除与计数；连接检查：seam 200→「连接正常」+3 个模型+URL/key 传参、401→HTTP 错误、传输错误、未配置 URL 禁用且不调 seam；上下文预算：匹配模型 128k/32.8k、未知模型/无 catalogue 无后缀；反馈导出：会话 Markdown 有汇总与逐条引文、诊断报告有全局计数、非法值不导出 | 5 | PASS |
+
+### 第十一轮未证伪的关键不变量
+
+1. **排队发送**：仅字面 "true" 启用；运行中绝不直接 Send；队列归属创建它的会话；FIFO 一次一条；失败保留并可重试；切换会话清空。
+2. **MCP 开关**：filter 对坏配置 fail-open（不误禁用），名字匹配 trim+大小写不敏感；插件页只重建 settings 源的行、写回排序 JSON、失败回滚/报错；assembly/workspace 行不可重建。
+3. **自动化筛选**：纯 UI 会话态（不持久化）；子串匹配 name/prompt 大小写不敏感；筛选与搜索可组合；空态与计数一致。
+4. **消息字号**：三档映射与坏值回退由包内测试锁定；设置落盘与重建路径无错误。
+5. **管理深度**：AGENTS.md 只影响该 run 的 system prompt（缺失/空设置/超限安全）；记忆页真实后端 CRUD；连接检查 seam 的四类结果；上下文预算只对匹配 catalogue 的模型出现；导出/报告含反馈且非法值被忽略。
+
+### 第十一轮发现
+
+- **无新缺陷**（无 P0/P1/P2/P3）。
+- 观察（非缺陷）：排队发送失败后队列保留，而 per-frame fallback（代码注释明确 "next notification (or frame check) retries it"）会在后续重建帧重试 Send；本层用帧 pump 观察到一次以上失败尝试即放宽（≥1 次）。真实桌面帧是事件驱动的，影响是失败期间可能重复尝试；建议未来加冷却/人工重试，不记缺陷。
+- 观察（非缺陷）：消息字号的 px 映射与 Markdown 缓存键属 session 包内部（无导出 seam），本层只验证 selector 写值与重建路径无错误；映射/缓存失效由 internal 测试锁定。
+
+### 第十一轮局限
+
+- 队列 flush 经 `runtime.Post`，测试需多帧 pump；fakeChat 的 Send 不自动启动 run，测试手动翻转 Running。
+- MCP filter 经 test-only `//go:linkname` 访问 toolkit 未导出函数（参数为导出类型 `toolkit.MCPServer`）；plugins 页用 fake `PluginsService` + 真实设置 store。
+- 自动化筛选用真实 automation 后端（TickMs 设大避免调度干扰）与真实 UI 模块。
+- 连接检查替换 `ModelListGetter` seam（不发真实网络），异步结果用帧 pump 等待。
+- AGENTS.md 注入用 fake WorkspaceService（Root 指向临时目录），实际读文件路径已覆盖。
+- 上下文预算用 fake `ModelCatalogService`；真实 catalog 加载/配置由模块测试覆盖。
+- 反馈导出复用 data 页 save seam 捕获内容（不写真实文件）。
