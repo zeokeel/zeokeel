@@ -146,6 +146,19 @@ func buildBehaviorPage(c *ui.Context, runtime contracts.UIRuntime,
 			ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(design.Space2).Children(func() {
 				sectionTitle(c, t, localized(locale, "运行中发送", "Sending while running"))
 				ui.Spacer(c).Grow(1)
+				goalEnabled := goalAutoContinueEnabled(store)
+				goalToggle := ui.Toggle(c, &goalEnabled, localized(locale,
+					"目标自动续跑", "Auto-continue goal"))
+				if goalToggle.Changed() {
+					if err := store.Set(contracts.SettingGoalAutoContinue, strconv.FormatBool(goalEnabled)); err != nil {
+						st.status = localized(locale, "保存失败：", "Save failed: ") + err.Error()
+						st.statusErr = true
+					} else {
+						st.status = localized(locale, "已保存", "Saved")
+						st.statusErr = false
+					}
+					runtime.Invalidate()
+				}
 				if st.status != "" {
 					statusBadge(c, t, st.status, st.statusErr)
 				}
@@ -166,6 +179,10 @@ func buildBehaviorPage(c *ui.Context, runtime contracts.UIRuntime,
 			design.Apply(ui.Text(c, localized(locale,
 				"发送的提示会在当前回合结束后依次发出。",
 				"Queued prompts are sent one by one after the current turn finishes.")),
+				t.TextMuted(design.TypeXXS)).MaxLines(2)
+			design.Apply(ui.Text(c, localized(locale,
+				"回合结束后若目标仍激活，自动发送继续推进提示（每个目标最多 5 次）。",
+				"After a turn ends while the goal is still active, automatically send a continuation prompt (at most 5 times per goal).")),
 				t.TextMuted(design.TypeXXS)).MaxLines(2)
 		})
 		panel(c, t, func() {
@@ -217,18 +234,18 @@ func buildBehaviorPage(c *ui.Context, runtime contracts.UIRuntime,
 				st.agentsFileLoaded = true
 				st.agentsFile = store.Get(contracts.SettingAgentsFile, "AGENTS.md")
 			}
-			ui.TextInput(c, &st.agentsFile).
-				Label(localized(locale, "工作区指令文件", "Workspace instructions file")).
-				Placeholder("AGENTS.md").FillWidth()
-			design.Apply(ui.Text(c, localized(locale,
-				"运行时从当前工作区读取并注入系统提示；重启/下次运行生效。",
-				"Read from the current workspace at run time and appended to the system prompt; takes effect on the next run or restart.")),
-				t.TextMuted(design.TypeXXS)).MaxLines(2)
 			ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(design.Space2).Children(func() {
+				ui.TextInput(c, &st.agentsFile).
+					Label(localized(locale, "工作区指令文件", "Workspace instructions file")).
+					Placeholder("AGENTS.md").Grow(1)
 				if design.Apply(ui.PrimaryButton(c, localized(locale, "保存", "Save")), t.PrimaryButton()).Clicked() {
 					saveAgentsFile(st, store, locale)
 				}
 			})
+			design.Apply(ui.Text(c, localized(locale,
+				"运行时从当前工作区读取并注入系统提示；重启/下次运行生效。",
+				"Read from the current workspace at run time and appended to the system prompt; takes effect on the next run or restart.")),
+				t.TextMuted(design.TypeXXS)).MaxLines(2)
 		})
 	})
 }
@@ -293,4 +310,12 @@ func sendWhileRunningEnabled(store contracts.SettingsService) bool {
 		return false
 	}
 	return strings.EqualFold(strings.TrimSpace(store.Get(contracts.SettingSendWhileRunning, "")), "true")
+}
+
+// goalAutoContinueEnabled normalizes goal.autoContinue: only "true" enables it.
+func goalAutoContinueEnabled(store contracts.SettingsService) bool {
+	if store == nil {
+		return false
+	}
+	return strings.EqualFold(strings.TrimSpace(store.Get(contracts.SettingGoalAutoContinue, "")), "true")
 }

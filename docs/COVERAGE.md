@@ -63,9 +63,9 @@
 | `modelcatalog` | ✅ | `internal/modules/modelcatalog` + composer 模型菜单 + settings「模型目录」页 + **连接检查** | 默认预设（含 128k context window）、per-session 切换/推理强度、目录编辑（增删/恢复默认/上下文窗口）、usage footer 预算显示、**连接检查（GET /models，成功/失败/防重复）** |
 | `presets` | 🟡 | contracts/presets.go + session presets 菜单 + settings「预设」页（CRUD/排序/恢复默认） | prompt 片段/人设模板已迁移并可在 composer 插入；旧 agent presets 的 systemPrompt/model/tools allowlist JSON 语义未迁移 |
 | `prompt` | 🟡 | agent SystemPrompt + settings 模型页提示词 + **AGENTS.md 注入** | 系统提示可配置；**每次运行读取当前工作区 `AGENTS.md`（文件名可配/32KiB 截断/读取失败告警）追加注入**；auto-title 已按首条提示生成；缺 review prompt |
-| `provider` | ✅ | rig `provider/openai` + agent 模块 | OpenAI Chat Completions 兼容 |
+| `provider` | ✅ | rig `provider/openai` + agent 模块 + 模型页预设 | OpenAI Chat Completions 兼容 + **服务商预设快填（DeepSeek/OpenAI/Ollama/自定义，匹配高亮）** |
 | `runtime` | 🟡 | agent + rig agent/gate/compact | 循环/审批/压缩/检查点/多模态 parts/subagent runner/team manager/goal 工具与 goal 桥；缺 modes、review、goal 自动驱动、PTC/workflow/ralph |
-| `session` | 🟡 | agent ChatService + Regenerate/Fork/Archive/Pin/ModelSwitcher + usage + 排队发送 | 发送/取消/历史/恢复/压缩/fork/export/附件/重新生成/会话模型/推理强度/turn usage（含 **context budget 显示**）/运行中排队发送/消息字号；缺 goal 多轮自动执行、tool spill |
+| `session` | 🟡 | agent ChatService + Regenerate/Fork/Archive/Pin/ModelSwitcher + usage + 排队发送 + goal 自动续跑 | 发送/取消/历史/恢复/压缩/fork/export/附件/重新生成/会话模型/推理强度/turn usage（含 context budget）/运行中排队发送/消息字号/**目标自动续跑（5 次上限，goal 变化重置）**；缺 tool spill |
 | `sessionreference` | 🟡 | composer @ 菜单 + agent `references.go` | token 持久化、注入尾部 20 条/≤8000 rune、session_refs 事件、self/unknown/重复忽略、分隔符解析；缺旧候选排序细节/URI 语义/预算错误分类 |
 | `skills` | 🟡 | `internal/modules/skills` + settings 技能页 | 多根 List/Read/roots/预览/刷新 + 新建/**编辑（dataDir 内 frontmatter+body 原子重写、名称不可改、旧内容清除）**/删除（仅 dataDir，realpath 校验）；缺 workspace 技能编辑、文件监听 |
 | `state` | ✅ | ChatService 读模型 + uiroot runtime | old broker/projector 被读模型替代；UI 所需投影可用 |
@@ -95,7 +95,7 @@
 | Trajectory/工具时间线 | ✅ | session Trajectory tab | 轨迹卡片/工具调用时间线 |
 | Tool cards | ✅ | `internal/ui/toolcards` | rig 工具卡 + todo/team_task 卡 + demo/兜底；MCP 动态工具走 session 兜底 |
 | Markdown 渲染 | ✅ | mygo ui/markdown | 消息/技能/更新 notes/artifact/plan 预览 |
-| Reasoning 展示 | 🟡 | session buildAssistantMessage | 折叠 Reasoning 文本；缺旧实时 preview/shimmer |
+| Reasoning 展示 | ✅ | session buildAssistantMessage | 折叠 Reasoning 文本 + **流式「思考中…」预览（尾部 120 rune、最多两行，结束自动消失）** |
 | 消息级操作（复制/重试/反馈/用量） | ✅ | session 行动区 + usage footer + `SessionFeedbacker` + /feedback + 导出 | 「重新生成」+ 逐条复制 + usage footer + feedback good/bad + **/反馈 命令（摘要/三按钮）**，**Markdown/JSONL 导出含反馈** |
 | `@` mentions | ✅ | session buildMentionMenu + agent references | 工作区文件 + 会话分组（@session，排除当前/过滤/上限 8）；agent 侧展开注入 |
 | 会话搜索 | ✅ | sidebar + agent Sessions | 标题/分组过滤；pin/archive 行菜单与 show-archived 视图 |

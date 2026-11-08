@@ -21,6 +21,11 @@
 - 右侧栏「文件」Tab：打开文件夹（mygo 原生 Directory picker）、目录进入/面包屑、文本/Markdown/图片预览、
   刷新与错误状态；E2E 覆盖工作区创建 + 列表 + 预览帧
 
+**TDD-goal-autocontinue/reasoning-preview/provider-presets（2026-11-08）**
+- goal 自动续跑：行为页开关（默认 off，5 次上限，goal 变化重置，Stop/清除抑制，失败计数防循环，队列优先）；session 158 测试
+- 实时 reasoning 预览：「思考中…」+尾部 120 rune 两行预览，结束消失保留折叠；Reasoning 行升 ✅
+- 服务商预设：模型页 DeepSeek/OpenAI/Ollama/自定义 chips（写 baseURL+model、匹配高亮/已匹配、失败提示）；settings 194 测试
+
 **TDD-module-lister（2026-11-08）**
 - host：ModuleLister 在 assembly 加载前提供、加载后填充 27 实例（EntryID/ModuleID/State，保留最后快照）；desktop+headless
 - 诊断页「已加载模块 N 个」+ 模块列表（≤40 条，state badge）；Plugins 页「内置模块」section（折叠、只读、state badge）；

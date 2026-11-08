@@ -164,6 +164,16 @@ type state struct {
 	queueSessionID string
 	queueErr       string
 
+	// Goal auto-continue state: the per-goal send budget, the goal it belongs
+	// to, the last observed run phase and the last delivery error. UI thread
+	// only.
+	autoContinueCount      int
+	lastAutoGoalID         string
+	autoContinueErr        string
+	autoContinueSuppressed bool
+	autoContinueSawRunning bool
+	autoContinueSessionID  string
+
 	// Composer command feedback: the /stop notice (success badge or danger
 	// line) and the /help modal switch.
 	commandNotice string
@@ -245,7 +255,12 @@ func Module() *module.Descriptor[Config] {
 		// and request a frame. The unsubscribe is kernel-effect owned.
 		unsubscribe, err := chat.Subscribe(func(sessionID string) {
 			runtime.Post(func() {
+				// Queue flush runs before goal auto-continue: a queued prompt
+				// starts the next run, so auto-continue waits for its settle.
 				processQueuedPrompts(chat, moduleState, sessionID)
+				if observeRunSettled(chat, moduleState) {
+					handleRunSettled(chat, moduleState, runtime)
+				}
 				runtime.Invalidate()
 			})
 		})
@@ -281,8 +296,14 @@ func Module() *module.Descriptor[Config] {
 					if ok {
 						copied := goal
 						moduleState.goal = &copied
+						if copied.ID != moduleState.lastAutoGoalID {
+							moduleState.lastAutoGoalID = copied.ID
+							moduleState.autoContinueCount = 0
+						}
 					} else {
 						moduleState.goal = nil
+						moduleState.lastAutoGoalID = ""
+						moduleState.autoContinueCount = 0
 					}
 					runtime.Invalidate()
 				})
@@ -295,6 +316,7 @@ func Module() *module.Descriptor[Config] {
 			if id, text, status, ok := tracker.Get(); ok {
 				goal := contracts.Goal{ID: id, Text: text, Status: status}
 				moduleState.goal = &goal
+				moduleState.lastAutoGoalID = id
 			}
 		}
 
@@ -543,6 +565,7 @@ func sessionCommands(runtime contracts.UIRuntime, navigator contracts.Navigator,
 				if !ok {
 					return nil
 				}
+				st.autoContinueSuppressed = true
 				if err := chat.Cancel(session.ID); err != nil {
 					st.commandErr = st.tr("停止失败：", "Stop failed: ") + err.Error()
 					st.commandNotice = ""
@@ -683,4 +706,115 @@ func processQueuedPrompts(chat contracts.ChatService, st *state, sessionID strin
 	if len(st.queuedPrompts) == 0 {
 		st.queueSessionID = ""
 	}
+}
+
+// maxGoalAutoContinues bounds the automatic continuation prompts for one goal.
+const maxGoalAutoContinues = 5
+
+// goalAutoContinueEnabled normalizes goal.autoContinue: only "true" enables it.
+func goalAutoContinueEnabled(settings contracts.SettingsService) bool {
+	if settings == nil {
+		return false
+	}
+	return strings.EqualFold(strings.TrimSpace(settings.Get(contracts.SettingGoalAutoContinue, "")), "true")
+}
+
+// observeRunSettled tracks the active session's run phase and reports the
+// transition running=true -> running=false exactly once. A new run clears the
+// user-cancel suppression flag.
+func observeRunSettled(chat contracts.ChatService, st *state) bool {
+	if chat == nil || st == nil {
+		return false
+	}
+	activeID := strings.TrimSpace(chat.ActiveSession())
+	if activeID != st.autoContinueSessionID {
+		st.autoContinueSessionID = activeID
+		st.autoContinueSawRunning = false
+	}
+	session, ok := chat.Session(activeID)
+	running := ok && session.Running
+	if running {
+		if !st.autoContinueSawRunning {
+			st.autoContinueSuppressed = false
+		}
+		st.autoContinueSawRunning = true
+		return false
+	}
+	if st.autoContinueSawRunning {
+		st.autoContinueSawRunning = false
+		return true
+	}
+	return false
+}
+
+// handleRunSettled flushes queued prompts before considering goal
+// auto-continue. When a queued prompt was sent it starts the next run, so
+// auto-continue waits for that run to end instead of racing it.
+func handleRunSettled(chat contracts.ChatService, st *state, runtime contracts.UIRuntime) {
+	if st == nil {
+		return
+	}
+	if len(st.queuedPrompts) > 0 {
+		before := len(st.queuedPrompts)
+		processQueuedPrompts(chat, st, st.queueSessionID)
+		if len(st.queuedPrompts) < before {
+			runtime.Invalidate()
+			return
+		}
+		if st.queueErr != "" {
+			runtime.Invalidate()
+			return
+		}
+	}
+	maybeAutoContinue(chat, st, runtime)
+}
+
+// maybeAutoContinue sends one bounded continuation prompt for the active goal
+// after a run settles. The count is per goal ID, reset on a goal change and
+// capped at maxGoalAutoContinues; failures count too so a broken backend cannot
+// loop forever.
+func maybeAutoContinue(chat contracts.ChatService, st *state, runtime contracts.UIRuntime) {
+	if chat == nil || st == nil || st.autoContinueSuppressed {
+		return
+	}
+	if !goalAutoContinueEnabled(st.settings) {
+		return
+	}
+	tracker := st.goalTracker
+	if tracker == nil {
+		if fromContext, ok := st.ctx.Get(contracts.KeyGoalTracker); ok {
+			tracker = fromContext
+		}
+	}
+	if tracker == nil {
+		return
+	}
+	id, text, status, ok := tracker.Get()
+	text = strings.TrimSpace(text)
+	if !ok || text == "" {
+		return
+	}
+	if status != "" && !strings.EqualFold(strings.TrimSpace(status), "active") {
+		return
+	}
+	activeID := strings.TrimSpace(chat.ActiveSession())
+	if activeID == "" {
+		return
+	}
+	if id != st.lastAutoGoalID {
+		st.lastAutoGoalID = id
+		st.autoContinueCount = 0
+	}
+	if st.autoContinueCount >= maxGoalAutoContinues {
+		return
+	}
+	st.autoContinueCount++
+	message := "请继续推进目标：" + text + "\n\n完成后请更新或清除目标。"
+	if err := chat.Send(activeID, message); err != nil {
+		st.autoContinueErr = st.tr("自动续跑发送失败：", "Auto-continue send failed: ") + err.Error()
+		runtime.Invalidate()
+		return
+	}
+	st.autoContinueErr = ""
+	runtime.Invalidate()
 }

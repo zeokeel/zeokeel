@@ -20,15 +20,20 @@ import (
 
 // fakeGoalTracker is a scripted contracts.GoalTracker.
 type fakeGoalTracker struct {
-	mu     sync.Mutex
-	id     string
-	text   string
-	setErr error
-	sets   []string
-	clears int
+	mu      sync.Mutex
+	id      string
+	text    string
+	setErr  error
+	sets    []string
+	clears  int
+	handler func(contracts.Goal, bool)
 }
 
-func (f *fakeGoalTracker) SetHandler(func(contracts.Goal, bool)) {}
+func (f *fakeGoalTracker) SetHandler(fn func(contracts.Goal, bool)) {
+	f.mu.Lock()
+	f.handler = fn
+	f.mu.Unlock()
+}
 
 func (f *fakeGoalTracker) Set(_ context.Context, text string) (string, error) {
 	f.mu.Lock()
@@ -39,6 +44,12 @@ func (f *fakeGoalTracker) Set(_ context.Context, text string) (string, error) {
 	}
 	f.id = "goal-1"
 	f.text = text
+	handler := f.handler
+	f.mu.Unlock()
+	if handler != nil {
+		handler(contracts.Goal{ID: f.id, Text: text, Status: "active"}, true)
+	}
+	f.mu.Lock()
 	return f.id, nil
 }
 
@@ -58,6 +69,12 @@ func (f *fakeGoalTracker) Clear() bool {
 	f.id = ""
 	f.text = ""
 	f.clears++
+	handler := f.handler
+	f.mu.Unlock()
+	if existed && handler != nil {
+		handler(contracts.Goal{}, false)
+	}
+	f.mu.Lock()
 	return existed
 }
 

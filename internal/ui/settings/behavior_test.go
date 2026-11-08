@@ -94,3 +94,38 @@ func TestBehaviorPageEnglishCopy(t *testing.T) {
 
 // errBehaviorStoreWrite scripts one settings write failure.
 var errBehaviorStoreWrite = errors.New("behavior store boom")
+
+func TestBehaviorPageGoalAutoContinue(t *testing.T) {
+	store := newFakeSettings(nil)
+	h := newHarness(t, &fakeChat{}, store, settings.Config{})
+	tester := h.tester()
+	tester.Frame()
+	h.click(tester, "行为")
+	h.assertTexts(tester, "目标自动续跑",
+		"回合结束后若目标仍激活，自动发送继续推进提示（每个目标最多 5 次）")
+	if raw := store.get(contracts.SettingGoalAutoContinue); raw != "" {
+		t.Fatalf("defaults wrote the goal-auto-continue row: %q", raw)
+	}
+	h.click(tester, "目标自动续跑")
+	if raw := store.get(contracts.SettingGoalAutoContinue); raw != "true" {
+		t.Fatalf("enabling goal auto-continue wrote %q", raw)
+	}
+	h.click(tester, "目标自动续跑")
+	if raw := store.get(contracts.SettingGoalAutoContinue); raw != "false" {
+		t.Fatalf("disabling goal auto-continue wrote %q", raw)
+	}
+}
+
+func TestBehaviorPageGoalAutoContinueBadValueAndEnglish(t *testing.T) {
+	store := newFakeSettings(map[string]string{contracts.SettingGoalAutoContinue: "garbage"})
+	h := newLocaleHarness(t, &fakeChat{}, store, settings.Config{}, "en")
+	tester := h.tester()
+	tester.Frame()
+	h.click(tester, "Behavior")
+	h.assertTexts(tester, "Auto-continue goal",
+		"After a turn ends while the goal is still active, automatically send a continuation prompt (at most 5 times per goal)")
+	h.click(tester, "Auto-continue goal")
+	if raw := store.get(contracts.SettingGoalAutoContinue); raw != "true" {
+		t.Fatalf("English bad-value toggle wrote %q, want true", raw)
+	}
+}

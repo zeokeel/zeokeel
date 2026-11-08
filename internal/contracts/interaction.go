@@ -106,6 +106,10 @@ const (
 	// queued prompts are sent when the run finishes (default false = Send is
 	// disabled while running).
 	SettingSendWhileRunning = "ui.sendWhileRunning"
+	// SettingGoalAutoContinue makes the session automatically send a
+	// continuation prompt after a run finishes while a goal is active (bounded
+	// by maxGoalAutoContinues per goal; default false).
+	SettingGoalAutoContinue = "goal.autoContinue"
 	// SettingAgentsFile is the workspace instruction file appended to the
 	// system prompt (default "AGENTS.md"; empty disables the injection).
 	SettingAgentsFile = "agent.agentsFile"

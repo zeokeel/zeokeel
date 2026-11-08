@@ -482,7 +482,9 @@ func TestRendersMessagesAndRunningBadges(t *testing.T) {
 		"正在生成回复…",    // running composer hint
 		"停止",         // stop button while running
 	)
-	h.assertNoTexts(tester, "内部推理：先看认证模块") // collapsed by default
+	// While streaming, the live reasoning preview shows the tail; the
+	// collapsed Reasoning block still holds the full text.
+	h.assertTexts(tester, "思考中…", "内部推理：先看认证模块")
 	h.assertNoTexts(tester, "发送")
 
 	// The native Collapsible expands on click.

@@ -978,19 +978,8 @@ func buildPage(c *ui.Context, runtime contracts.UIRuntime, state *moduleState, c
 			"Configure the model, API base URL and system prompt used by the conversation."))
 
 		panel(c, t, func() {
-			ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(design.Space2).Children(func() {
-				sectionTitle(c, t, localized(locale, "快速预设", "Quick presets"))
-				ui.Spacer(c).Grow(1)
-				for _, option := range modelPresets() {
-					option := option
-					if brandButton(c, t, option.icon, option.label).Clicked() {
-						state.model = option.model
-						state.baseURL = option.baseURL
-						state.status = localized(locale, "已填入 ", "Filled the ") + option.label + localized(locale, " 预设，保存后生效", " preset; save to apply")
-						state.statusErr = false
-					}
-				}
-			})
+			sectionTitle(c, t, localized(locale, "快速预设", "Quick presets"))
+			buildProviderPresets(c, t, state, store, locale)
 		})
 
 		panel(c, t, func() {

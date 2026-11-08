@@ -53,10 +53,19 @@ func buildScreen(
 	}
 	activeID := chat.ActiveSession()
 	chatSession, hasSession := chat.Session(activeID)
+	settled := observeRunSettled(chat, st)
+	if settled {
+		runtime.Post(func() {
+			handleRunSettled(chat, st, runtime)
+			runtime.Invalidate()
+		})
+	}
 	syncQueuedSession(st, activeID)
 	// Frame-time fallback for hosts that update the session state without an
-	// extra notification: retry the queue once the run has settled.
-	if len(st.queuedPrompts) > 0 && !chatSession.Running && st.queueSessionID == activeID {
+	// extra notification: retry the queue once the run has settled. When this
+	// frame already detected the settle, handleRunSettled owns the flush, so
+	// posting the fallback too would send two queued prompts in one frame.
+	if !settled && len(st.queuedPrompts) > 0 && !chatSession.Running && st.queueSessionID == activeID {
 		runtime.Post(func() {
 			processQueuedPrompts(chat, st, activeID)
 			runtime.Invalidate()
@@ -65,6 +74,9 @@ func buildScreen(
 
 	ui.Column(c).FillWidth().Grow(1).Children(func() {
 		buildHeader(c, t, runtime, cfg, st, chatSession, hasSession)
+		if st.autoContinueErr != "" {
+			buildErrorLine(c, t, st.autoContinueErr)
+		}
 		switch st.tab {
 		case tabTrajectory:
 			buildTrajectoryPane(c, t, chatSession, hasSession, st)
@@ -418,6 +430,13 @@ func buildAssistantMessage(c *ui.Context, t *design.Tokens, runtime contracts.UI
 	th := t.Theme()
 	ui.Column(c).FillWidth().Gap(design.Space2).Children(func() {
 		if message.Reasoning != "" {
+			if message.Streaming {
+				preview := reasoningTail(message.Reasoning, 120)
+				ui.Row(c).FillWidth().Gap(design.Space2).AlignItems(ui.Start).Children(func() {
+					design.Apply(ui.Text(c, st.tr("思考中…", "Thinking…")), t.TextMuted(design.TypeXS))
+					design.Apply(ui.Text(c, preview), t.TextMuted(design.TypeXS)).MaxLines(2)
+				})
+			}
 			open := st.thinkOpen[message.ID]
 			ui.Collapsible(c, st.tr("思考", "Reasoning"), &open, func() {
 				design.Apply(ui.Text(c, message.Reasoning), t.TextMuted(design.TypeXS))
@@ -1260,6 +1279,20 @@ func (st *state) usageContextWindowSuffix() string {
 	return ""
 }
 
+// reasoningTail returns the last limit runes of the live reasoning stream (the
+// preview is bounded so a long thinking block cannot dominate the transcript).
+func reasoningTail(text string, limit int) string {
+	text = strings.TrimSpace(text)
+	if limit <= 0 {
+		return ""
+	}
+	runes := []rune(text)
+	if len(runes) <= limit {
+		return string(runes)
+	}
+	return string(runes[len(runes)-limit:])
+}
+
 // formatContextWindow renders a token count for the usage footer: exact
 // thousands as "128k", other positive values with one decimal ("32.8k").
 func formatContextWindow(tokens int) string {
@@ -1382,6 +1415,7 @@ func buildStopButton(c *ui.Context, t *design.Tokens, cfg Config, chat contracts
 		ui.Box(c).Size(th.Space(2.5), th.Space(2.5)).Radius(design.RadiusXS).Background(t.Danger)
 	})
 	if button.Clicked() {
+		st.autoContinueSuppressed = true
 		_ = chat.Cancel(activeID)
 	}
 }
