@@ -78,8 +78,20 @@ func TestAutomationTasksEndToEnd(t *testing.T) {
 	if sessionID == "" {
 		t.Fatalf("automation run did not create a session: %+v", chat.Sessions())
 	}
+	// The automation run is asynchronous: on a slow (race-instrumented) runner
+	// the session can exist briefly before Send starts, so wait for the
+	// assistant reply itself instead of only for Running to turn false.
+	deadline = time.Now().Add(15 * time.Second)
+	var session contracts.ChatSession
+	var ok bool
+	for time.Now().Before(deadline) {
+		session, ok = chat.Session(sessionID)
+		if ok && len(session.Messages) >= 2 && hasAssistantText(session, "自动化回答") {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
 	waitIdle(t, chat, sessionID, 10*time.Second)
-	session, ok := chat.Session(sessionID)
 	if !ok || len(session.Messages) < 2 || !hasAssistantText(session, "自动化回答") {
 		t.Fatalf("automation session = %+v (ok=%v)", session, ok)
 	}
