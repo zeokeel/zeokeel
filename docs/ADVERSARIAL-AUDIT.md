@@ -7,7 +7,7 @@
 
 ## 修复状态（Lead 复核后）
 
-> 首轮 11 个「已知缺陷探针」与第二轮 4 个 P3 均已随 TDD 修复转为 PASS；第三轮 P3-9/10 已修复、P3-11 重开后于 ca2d24c 真正修复；第四轮 P3-12 已修复（ca2d24c）；第五~七轮无新缺陷，第八轮发现 1 个 P3（AUDIT-P3-13）并已修复：诊断报告现在对 apiKey/token/secret/password/authorization 类设置整值隐藏，并对 JSON 结构化设置（mcp.servers）递归掩码 Bearer token 与凭证字段；新增单测断言 web.search.apiKey 与 mcp Bearer 不泄漏。第九轮发现 1 个 P3（AUDIT-P3-14：agent.permission=never 已存储但会话权限 chip 显示「询问」，**已修复**）；第十~十二轮无新缺陷；第十三轮发现 1 个 P3（AUDIT-P3-15，服务商预设部分写入无回滚，**已修复**）；第十四轮无新缺陷；第十五轮发现 1 个 P3（AUDIT-P3-16，goal Edit 生命周期仅契约/host 实现、会话 UI 无编辑入口，待修）。`go test ./internal/regression -count=1 -race` 当前 **277 PASS / 0 SKIP**（历史：首轮修复后 92，第二轮后 98，第三轮后 133，第四轮后 153，第五轮后 172，第六轮后 180，第七轮后 189，第八轮后 208，第九轮后 220，第十轮后 227，第十一轮后 241，第十二轮后 251，第十三轮后 258，第十四轮后 263）。
+> 首轮 11 个「已知缺陷探针」与第二轮 4 个 P3 均已随 TDD 修复转为 PASS；第三轮 P3-9/10 已修复、P3-11 重开后于 ca2d24c 真正修复；第四轮 P3-12 已修复（ca2d24c）；第五~七轮无新缺陷，第八轮发现 1 个 P3（AUDIT-P3-13）并已修复：诊断报告现在对 apiKey/token/secret/password/authorization 类设置整值隐藏，并对 JSON 结构化设置（mcp.servers）递归掩码 Bearer token 与凭证字段；新增单测断言 web.search.apiKey 与 mcp Bearer 不泄漏。第九轮发现 1 个 P3（AUDIT-P3-14：agent.permission=never 已存储但会话权限 chip 显示「询问」，**已修复**）；第十~十二轮无新缺陷；第十三轮发现 1 个 P3（AUDIT-P3-15，服务商预设部分写入无回滚，**已修复**）；第十四轮无新缺陷；第十五轮发现 1 个 P3（AUDIT-P3-16，goal Edit 生命周期仅契约/host 实现、会话 UI 无编辑入口，**已修复**：a412a64 起 /goal 对话框编辑已有目标时调用 Edit 保 ID）；第十六轮无新缺陷。`go test ./internal/regression -count=1 -race` 当前 **283 PASS / 0 SKIP**（历史：首轮修复后 92，第二轮后 98，第三轮后 133，第四轮后 153，第五轮后 172，第六轮后 180，第七轮后 189，第八轮后 208，第九轮后 220，第十轮后 227，第十一轮后 241，第十二轮后 251，第十三轮后 258，第十四轮后 263，第十五轮后 277）。
 
 | ID | 优先级 | 状态 | 修复摘要 |
 |----|--------|------|----------|
@@ -31,7 +31,7 @@ $ go test ./internal/regression -count=1                    ok  1.2s
 $ go test ./internal/regression -count=1 -race              ok 12.8s（98 PASS / 0 SKIP）
 ```
 
-测试规模：`internal/regression` 共 277 个顶层 Test（首轮 78 + 第二轮 20 + 第三轮 35 + 第四轮 20 + 第五轮 19 + 第六轮 8 + 第七轮 9 + 第八轮 17 + 特性提交补充 2 + 第九轮 12 + 第十轮 7 + 第十一轮 14 + 第十二轮 10 + 第十三轮 7 + 第十四轮 5 + 第十五轮 14；含子用例后更多；另有 `internal/ui/uimodtest` 的 E2E 1 个，不计入本包）。第三轮 P3-9/10 已修复，P3-11 重开后已真正修复，第四轮 P3-12 已修复，第五~七轮无新缺陷，第八轮 P3-13 已修复（da654e3），第九轮新增 P3-14（已修复），第十~十二轮无新缺陷，第十三轮新增 P3-15（已修复）；第十四轮无新缺陷，两者的修复探针复跑均静默；第十五轮新增 P3-16（待修）；当前 **277 PASS / 0 SKIP**。
+测试规模：`internal/regression` 共 283 个顶层 Test（首轮 78 + 第二轮 20 + 第三轮 35 + 第四轮 20 + 第五轮 19 + 第六轮 8 + 第七轮 9 + 第八轮 17 + 特性提交补充 2 + 第九轮 12 + 第十轮 7 + 第十一轮 14 + 第十二轮 10 + 第十三轮 7 + 第十四轮 5 + 第十五轮 14 + 第十六轮 6；含子用例后更多；另有 `internal/ui/uimodtest` 的 E2E 1 个，不计入本包）。第三轮 P3-9/10 已修复，P3-11 重开后已真正修复，第四轮 P3-12 已修复，第五~七轮无新缺陷，第八轮 P3-13 已修复（da654e3），第九轮新增 P3-14（已修复），第十~十二轮无新缺陷，第十三轮新增 P3-15（已修复）；第十四轮无新缺陷，两者的修复探针复跑均静默；第十五轮新增 P3-16（已修复，a412a64）；第十六轮无新缺陷，P3-16 修复探针（/goal 对话框编辑保 ID）复跑静默；当前 **283 PASS / 0 SKIP**。
 
 ## 用例矩阵
 
@@ -357,6 +357,7 @@ $ go test ./internal/regression -count=1 -race               ok 27.9s（153 PASS
 第十三轮扩张到 **258 PASS / 0 SKIP**（goal 自动续跑、实时 reasoning 预览、服务商预设、第十二轮关键链路复跑），发现 AUDIT-P3-15。
 第十四轮扩张到 **263 PASS / 0 SKIP**（goal 暂停/继续状态机与芯片、插件连接配置掩码、第十三轮关键链路复跑），确认 P3-14/P3-15 修复未回退。
 第十五轮扩张到 **277 PASS / 0 SKIP**（tool spill、sessionreference 候选/URI/预算、手动压缩、goal 生命周期、记忆 consolidation、第十三/十四轮关键链路复跑），发现 AUDIT-P3-16。
+第十六轮扩张到 **283 PASS / 0 SKIP**（记忆提取、代理预设、插件参数页、LSP workspace opt-in、第十五轮关键链路复跑），确认 P3-16 已修复。
 仍有文档化未落地项（plan keep-planning 反馈循环、会话级 feedback 汇总、旧 `/feedback [good|bad]` 参数式直接打分、自动化 runs 之外的历史查询）。
 
 ## 反证审计第五轮：/feedback 命令 / 自动化运行历史 / 反馈复跑 / 记忆与技能编辑（2026-11-08）
@@ -858,3 +859,52 @@ $ go test ./internal/regression -race -run '第十三/十四轮关键链路'  12
 - 局限：压缩“保存失败”路径仅由 agent 内部单测覆盖（外部 store 无法注入失败）；/compact UI 用 fake SessionCompactor；
   sessionreference 排序/URI/预算为契约级测试；goal UI 用真实 uiroot tracker；记忆 store/设置页均用真实模块。
 - 第十五轮复跑按前缀 12 项；全量 277 项 -race 已单独跑绿。
+
+## 反证审计第十六轮（最终）：记忆提取 / 代理预设 / 插件参数与 LSP opt-in（2026-11-08）
+
+范围：`a7fe576`（opt-in 模型驱动记忆提取 + 覆盖率收口）、`a412a64`（agent presets + goal 对话框 Edit）。
+只新增 `internal/regression/**` 并改本文件；未改生产代码。新增 **6** 个顶层 Test（277 → 283）。
+
+```
+$ gofmt -l internal/regression/                              （空）
+$ go vet ./internal/regression                               OK
+$ go build ./...                                             OK
+$ go test ./internal/regression -count=1 -race               ok 67.7s（283 PASS / 0 SKIP）
+$ go test ./internal/regression -race -run '第十五轮关键链路'      14 PASS / 0 SKIP（0 回退）
+```
+
+| # | 链路 | 反证点 | 用例 | 结果 |
+|---|------|--------|------|------|
+| 70 | 记忆提取（opt-in，后端） | 默认拒绝；开启后：围栏 JSON 解析、归一化去重（大小写/空白）、Add 到 global、二次提取 0 条；坏 JSON 稳定 parse error；不足 4 条/未知会话拒绝；7 条候选截断为 5；Add 失败返回错误不静默；并发时第二次 ErrMemoryExtractBusy（单飞） | 2 | PASS |
+| 70 | 记忆提取（设置页） | 面板显示与开关持久化；关闭时按钮禁用且不调用后端；开启后成功 Badge「已添加 N 条记忆」、失败「提取失败：…」；阻塞时「提取中…」且重复点击不产生第二次调用；无 extractor 时显示「未启用记忆提取后端」且隐藏按钮；敏感对话/密钥不进帧 | 同上 | PASS |
+| 71 | 代理预设（后端） | SetSessionPreset：未知会话/未知预设拒绝、选择/清除；run 应用：base→AGENTS→persona→prompt 顺序、工具 allowlist 只暴露允许工具、preset model 为默认、显式 session model 覆盖胜出；清除后 persona/prompt/工具过滤消失且显式模型仍保留；picker UI 选择 Alpha/None 与标签更新 | 2 | PASS |
+| 72 | 插件参数页 + LSP workspace opt-in | 参数区只列已接线键（web.search endpoint/apiKey、mcp.workspaceOptIn、编译期常量），无 plugin.agent_loop/plugin.shell 死键；API Key 只显示已设置/未设置且任何帧不回显；编译期常量只读；编辑端点写 settings 并显示新值；敏感编辑留空保存保留旧值、新值保存也不回显；LSP：契约解析 array/object/坏 JSON，未 opt-in 不读取且不告警，opt-in allow 后读取 workspace `.zeokeel/lsp.json`，坏文件告警忽略，无 workspace 安全，settings 同名优先/独特名合并 | 2 | PASS |
+| 73 | 第十五轮关键链路复跑 + P3-16 探针 | tool spill/sessionreference/compact/goal lifecycle/memory consolidation 按前缀 14 PASS / 0 SKIP，0 回退；/goal 对话框编辑已有目标保 ID 探针静默（P3-16 已修复） | 复跑 | PASS |
+
+### 第十六轮发现
+
+- **无新缺陷**（无 P0/P1/P2/P3）。
+- 复核：AUDIT-P3-16 已修复——a412a64 起 /goal 对话框在已有目标时调用 `GoalLifecycler.Edit`（保 ID、保自动续跑
+  配额），回归探针（设置→/goal 对话框保存后 ID 不变）静默；无 GoalLifecycler 的宿主仍走 Set。
+
+### 第十六轮未证伪的关键不变量
+
+1. **记忆提取**：默认关闭、单飞、至少 4 条消息、最多 5 条、围栏 JSON 容错、归一化去重、Add 失败可见；
+   仅手动触发，后端缺失时 UI 明示且不显示按钮。
+2. **代理预设**：选择仅作用于目标会话、每轮从 settings 重新解析；persona/prompt 顺序与工具 allowlist 生效；
+   preset model 是默认、显式 session model 覆盖；清除后完全回退。
+3. **插件参数页**：只暴露已接线键；敏感值永不回显（仅 set/unset）；空保存不覆盖敏感值；编辑持久化到 settings。
+4. **LSP workspace opt-in**：默认不读仓库文件；仅 "allow" 读取；坏文件只告警；settings 同名优先。
+5. **0 回退**：第十五轮 14 项关键链路复跑全绿。
+
+### 第十六轮观察与局限
+
+- 观察（设计取舍，非缺陷）：`SetSessionModel("")` 被拒绝（旧实现同样拒绝空模型），当前 UI 只列具体模型，
+  没有“恢复默认模型”入口；如需恢复默认需新增清空语义（本轮未记为缺陷）。
+- 观察（设计取舍，非缺陷）：agent presets 的 per-session 选择只存内存（agent.go 注释 never persisted），重启后
+  选择清空；若产品希望跨重启保留，需要持久化设计（旧实现的 preset 语义为注册表+应用，不完全等价）。
+- 观察（设计取舍，非缺陷）：插件参数页的 API Key 编辑留空=保持原值（无法在该页清空）；LSP workspace 配置在 opt-in
+  后仍会执行仓库声明的第三方命令，风险由显式 opt-in 承担（UI 已有说明与默认关）。
+- 局限：记忆提取后端测试用 fake provider、设置页用 fake extractor；代理预设的 run 断言基于 provider 请求体
+  （system/tools/model）；插件参数页用 fake PluginsService + 真实 settings；LSP loader 经 test-only `//go:linkname`
+  直接调用未导出函数；第十五轮复跑按前缀 14 项，全量 283 项 -race 已单独跑绿。

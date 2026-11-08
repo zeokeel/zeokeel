@@ -347,3 +347,63 @@ NO_PANIC
   ui-snapshot **66 步 / 64 唯一 PNG**；desktop（27 module instances、tray ready）/headless/ACP 冒烟通过，无 panic。
 - COVERAGE 终版：62 项 **✅48 / 🟡13（已实现·深度限制，§5.1）/ ❌1（winproc 平台非目标，§5.2）**——功能面覆盖完成。
 - 已知缺陷：历轮 P3（含 P3-9..P3-15）均已修复，回归探针静默；无已知未修复缺陷。
+
+## 最终验证（Round 8，2026-11-08，HEAD a7fe576）
+
+环境：go1.27.3 linux/amd64 · 离线（GOPROXY=off/GOSUMDB=off/GOFLAGS=-mod=mod）· 2026-11-08 11:12–11:23（Asia/Shanghai）。
+命令：`./scripts/verify.sh`（完整）。验证时工作树含第十六轮审计未提交文件（`internal/regression/{agent_presets,memory_extract,plugin_params_lsp}_test.go` 与 goal_lifecycle 调整），计数以该工作树为准。
+
+### 一键验证结果（第 2 次尝试 PASS）
+```
+$ ./scripts/verify.sh
+==> gofmt ... PASS (0s)
+==> go build ./... ... PASS (4s)
+==> go vet ./... ... PASS (0s)
+==> go test ./... -count=1 ... PASS (16s)
+==> go test ./... -count=1 -race ... PASS (66s)
+==> regression (-v) ... (regression: 283 PASS / 0 SKIP / 0 FAIL) PASS (18s)
+==> ui-snapshot ... (snapshot: 66 steps / 64 PNGs) PASS (8s)
+==> desktop smoke (xvfb) ... (desktop exit 124, tray ready: 1) PASS (8s)
+==> headless smoke ... (headless exit 124) PASS (8s)
+==> ACP smoke ... (ACP exit 0) PASS (0s)
+verify summary: 10 passed, 0 failed, 128s total
+verify: PASS
+```
+regression **283 PASS / 0 SKIP / 0 FAIL**（含第十六轮新增审计；HEAD 提交态约 278）；UI 快照 **66 步 / 64 个唯一 PNG**；三产品冒烟无 panic。
+
+### 尝试记录与判定
+1. 第 1 次：前 5 步 PASS，`regression` FAIL（91s）——当时并行写入的未提交 `internal/regression/agent_presets_test.go` 中
+   `TestAgentPresetSelectionAndRunApplication` 报 `clear session model: agent: session model must not be empty`
+   （该文件属第十六轮审计 WIP，且 `TestAgentPresetPickerUI` 同批）。判定：并行审计 WIP 冲突，非产品回归。
+2. 等待该审计 WIP 修复后单独复跑 `go test ./internal/regression -run TestAgentPreset...` → PASS；第 2 次完整 verify 全绿（上表，128s）。
+
+### xvfb 桌面冒烟（模块实例数/无 panic）
+```
+$ xvfb-run -a timeout -s TERM 8 go run ./cmd/zeokeel --data-dir <tmp>
+exit 124（允许）
+11:21:44 ZeoKeel: system tray ready (close to tray: false)
+11:21:44 ZeoKeel: ... product "desktop" loaded: 27 module instances, screens [home automation session plugins]
+11:21:52 ZeoKeel: quit requested
+NO_PANIC
+```
+`grep -c '27 module instances'` = 1；无 panic/runtime error/SIGSEGV。
+
+### 新功能冒烟（单测证据）
+- **memory extract**：backend `TestMemoryExtract*` **7 PASS**（默认关闭、缺会话/短对话拒绝、成功去重、坏 JSON/空、忙、Add 失败、上限）；UI `TestMemoryExtract*` **8 PASS**（默认关、坏值、无 extractor 隐藏、成功添加、失败 Danger、重复点击、无活动会话禁用、en）；regression `TestMemoryExtract*` **2 PASS**。
+- **presets**：agent `TestSetSessionPreset/TestPreset/TestNoPreset` **4 PASS**；regression `TestAgentPreset*` **2 PASS**（应用/覆盖/清除与 picker UI）。
+- **spill（大工具结果落盘）**：agent `TestSpill*/TestPrune*` **8 PASS**；regression `TestToolSpill*` **4 PASS**。
+- **compact**：`TestCompactNow*` **5 PASS**（替换历史/拒绝运行中/不可用/无需压缩/保存失败）。
+- **goal lifecycle**：regression `TestGoalLifecycle*` **2 PASS**（状态机、命令与终态自动续跑）。
+- **i18n 错误**：agent `TestClassifyErrorTable/TestRunFailureSetsErrorKind/TestSuccessfulRunClearsErrorKind` **3 PASS** + UI `TestAssistantErrorKind*` **3 PASS**。
+- **插件参数**：`TestPluginParams*` **8 PASS**；regression `TestPluginParamsSection` **1 PASS**。
+- **ACP session/list + session/load 真实帧**（同一 data-dir 两次 `--acp`）：
+```
+{"id":1,"jsonrpc":"2.0","result":{"agentCapabilities":{"loadSession":true,...},"protocolVersion":1}}
+{"id":2,"jsonrpc":"2.0","result":{"sessionId":"sess-1794108146301265621"}}
+{"id":3,"jsonrpc":"2.0","result":{"sessions":[{"sessionId":"sess-1794108146301265621","title":"","updatedAt":"2026-11-08T11:22:26+08:00"}]}}
+{"id":2,"jsonrpc":"2.0","result":{"messages":[],"model":"gpt-4o-mini","sessionId":"sess-1794108146301265621","title":""}}   # session/load
+```
+
+### 文档核对
+- docs/COVERAGE.md 矩阵重算（§2 28 + §3 34 = 62）：**✅61 / 🟡0 / ❌1**（backend 27✅/0🟡/1❌ winproc，shell 34✅）；摘要与统计表一致（98.4% / 0% / 1.6%），覆盖清单全部关闭。
+- README 状态行更新为 Round 8（HEAD a7fe576）。

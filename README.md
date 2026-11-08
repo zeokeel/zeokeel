@@ -8,14 +8,16 @@
 > 消息用量 footer/逐条复制/反馈 good-bad 与 /反馈 命令（导出含反馈）、计划模式 + keep-planning、自动化运行历史、
 > Memory 整理/清空、技能新建/删除、工件下载、系统托盘/关闭到托盘、全局热键、LSP 工具、聊天模式（普通/计划/精简/创作）、
 > Home 真实 composer、/停止 /附加文件 /帮助、数据与隐私页、通知开关、侧栏添加工作区、插件 MCP server 详情；
-> 反证审计共 263 PASS / 0 SKIP（含最新审计补充），4×P2+4×P3 全部修复。详情：[docs/ADVERSARIAL-AUDIT.md](docs/ADVERSARIAL-AUDIT.md)。
+> 反证审计共 283 PASS / 0 SKIP（含最新审计补充），4×P2+4×P3 全部修复。详情：[docs/ADVERSARIAL-AUDIT.md](docs/ADVERSARIAL-AUDIT.md)。
 >
-> **最终验证（2026-11-08，Round 58 · HEAD 364a988）**：`./scripts/verify.sh` 全量 **10/10 PASS（121s）**；
+> **最终验证（2026-11-08，Round 8 · HEAD a7fe576）**：`./scripts/verify.sh` 全量 **10/10 PASS（128s）**；
 > 桌面（xvfb，托盘+全局热键）/headless/ACP 冒烟通过，xfvb 日志确认 **27 module instances、NO_PANIC**；
-> regression **263 PASS / 0 SKIP**（含工作树第十四轮审计）；UI 快照 66 步 / 64 张 PNG。
-> 新功能单测：目标暂停/恢复 **2+5 项**、插件连接配置 **5 项**；ACP `session/list`/`session/load`
+> regression **283 PASS / 0 SKIP**（含工作树第十六轮审计）；UI 快照 66 步 / 64 张 PNG。
+> 新功能单测：memory extract **7+8 项**、presets **4+2 项**、spill **8+4 项**、compact **5 项**、
+> goal lifecycle **2 项**、i18n 错误 **3+3 项**、插件参数 **8+1 项**；ACP `session/list`/`session/load`
 > 真实帧已验证。旧功能覆盖矩阵见 [docs/COVERAGE.md](docs/COVERAGE.md)
-> （62 项：✅61 / 🟡0 / ❌1（winproc 平台非目标）——旧功能覆盖清单全部关闭）。验证证据：[docs/VERIFICATION.md](docs/VERIFICATION.md)。
+> （62 项：✅61 / 🟡0 / ❌1（winproc 平台非目标）——旧功能覆盖清单全部关闭）。
+> 验证证据：[docs/VERIFICATION.md](docs/VERIFICATION.md)。
 
 编译期模块化的 Go 桌面 AI agent：**薄总入口 + 内核装配 + 模块贡献点**。
 UI 是 mygo 原生控件（无浏览器/webview）；所有模块一起编译进同一二进制，`assembly.json`

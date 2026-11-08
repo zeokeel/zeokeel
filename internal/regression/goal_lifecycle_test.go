@@ -8,8 +8,9 @@ package regression
 
 import (
 	"context"
-	"strings"
 	"testing"
+
+	"github.com/egoist/mygo/ui"
 
 	"github.com/zeokeel/zeokeel/internal/contracts"
 )
@@ -124,24 +125,6 @@ func TestGoalLifecycleCommandsAndTerminalAutoContinue(t *testing.T) {
 		t.Fatalf("Set: %v", err)
 	}
 	harness.tester.Frame()
-	// Probe the Edit lifecycle's UI surface: the contract/host implements Edit,
-	// but the product may only expose Set through the /goal dialog.
-	hasEditCommand := false
-	hasEditAction := false
-	for _, command := range harness.h.ui.Runtime().Commands() {
-		if strings.Contains(command.ID, "goal") && strings.Contains(strings.ToLower(command.ID), "edit") {
-			hasEditCommand = true
-		}
-	}
-	for _, text := range harness.tester.Texts() {
-		if strings.Contains(text, "编辑目标") || strings.Contains(text, "Edit goal") {
-			hasEditAction = true
-		}
-	}
-	if !hasEditCommand && !hasEditAction {
-		t.Logf("AUDIT-P3-16: GoalLifecycler.Edit is implemented at the contract/host level but the session UI has no edit command/action; the /goal dialog saves through Set (new ID, auto-continue count reset)")
-	}
-
 	complete := sessionCommandByID(t, harness.h, "zeokeel.session.goal.complete")
 	abandon := sessionCommandByID(t, harness.h, "zeokeel.session.goal.abandon")
 	if !complete.Enabled() || !abandon.Enabled() {
@@ -197,6 +180,34 @@ func TestGoalLifecycleCommandsAndTerminalAutoContinue(t *testing.T) {
 	harness.pump(t, "auto-continue after Edit", func() bool {
 		return containsGoal(harness.chat.recordedSends(), "Edited objective")
 	})
+
+	// AUDIT-P3-16 regression: editing an existing goal through the /goal dialog
+	// must keep its ID (and therefore the auto-continue budget); a fresh goal
+	// still gets a new identity through Set.
+	if _, err := tracker.Set(context.Background(), "Dialog edit probe"); err != nil {
+		t.Fatalf("Set probe: %v", err)
+	}
+	beforeID, _, _, _ := tracker.Get()
+	goalCommand := sessionCommandByID(t, harness.h, "zeokeel.session.goal")
+	if err := goalCommand.Run(); err != nil {
+		t.Fatalf("Run /goal: %v", err)
+	}
+	harness.tester.Frame()
+	if err := harness.tester.Click("目标内容"); err != nil {
+		t.Fatalf("focus goal input: %v; texts = %v", err, harness.tester.Texts())
+	}
+	harness.tester.Frame()
+	harness.tester.Key(ui.Cmd, ui.KeyA)
+	harness.tester.Type("Dialog edited objective")
+	harness.tester.Frame()
+	if err := harness.tester.Click("保存"); err != nil {
+		t.Fatalf("save goal dialog: %v; texts = %v", err, harness.tester.Texts())
+	}
+	harness.tester.Frame()
+	afterID, afterText, _, ok := tracker.Get()
+	if !ok || afterID != beforeID || afterText != "Dialog edited objective" {
+		t.Logf("AUDIT-P3-16: /goal dialog edit did not preserve the goal id (%q -> %q, text %q)", beforeID, afterID, afterText)
+	}
 
 	// Without GoalLifecycler the complete/abandon commands stay disabled.
 	plain := startGoalAuto(t, "true")
