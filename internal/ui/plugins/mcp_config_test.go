@@ -43,7 +43,9 @@ func TestMCPConfigHTTPShowsURL(t *testing.T) {
 	h.click(tester, "详情")
 
 	h.assertTexts(tester, "连接配置", "https://mcp.example.com/mcp")
-	h.assertNoTexts(tester, "命令", "参数")
+	// The HTTP row has no command/arguments; "参数" is no longer a safe probe
+	// because the new (collapsed) plugin-settings section is titled 插件参数.
+	h.assertNoTexts(tester, "命令", "-y mcp-server", "npx")
 }
 
 func TestMCPConfigHiddenWithoutMatchingSettingsRow(t *testing.T) {

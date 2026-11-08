@@ -63,6 +63,7 @@ func buildScreen(c *ui.Context, runtime contracts.UIRuntime, cfg Config, st *sta
 				buildToolsSection(c, t, toolkit, hasToolkit, st, cfg, runtime, settings, hasSettings)
 				modulesLister, hasModules := st.ctx.Get(contracts.KeyModuleLister)
 				buildModulesSection(c, t, st, modulesLister, hasModules)
+				buildPluginParamsSection(c, t, st, settings, hasSettings)
 			})
 		})
 	})

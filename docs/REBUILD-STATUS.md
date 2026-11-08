@@ -21,6 +21,13 @@
 - 右侧栏「文件」Tab：打开文件夹（mygo 原生 Directory picker）、目录进入/面包屑、文本/Markdown/图片预览、
   刷新与错误状态；E2E 覆盖工作区创建 + 列表 + 预览帧
 
+**Round 63 / P2-A+P3-A：错误本地化 + 插件参数（2026-11-08）**
+- i18n 错误分类：contracts ErrorKind + ClassifyError（auth/rate_limit/network/timeout/context/cancelled），agent 写入读模型，session 显示
+  本地化标题+原因并保留原文；agent 108 / session 179 测试；i18n 行升 ✅
+- 插件参数：Plugins 页「插件参数」section 仅暴露已接线键（web.search.endpoint/apiKey 可编辑、mcp.workspaceOptIn 只读、
+  子代理深度/并发只读编译期常量），编辑 Modal/掩码/失败提示；plugins 44 测试；Settings/Plugins 行升 ✅
+- COVERAGE **✅56 / 🟡5 / ❌1**
+
 **Round 62 / P1-B+P4-A：目标生命周期 + 记忆 consolidation（2026-11-08）**
 - 目标生命周期：contracts GoalLifecycler（complete/abandon/edit，状态机 active/paused/completed/abandoned），uiroot 状态机，session 徽标/操作 +
   第 14/15 条命令（完成/放弃目标），auto-continue 仅 active；uiroot 82 / session 176 测试；Composer 行升 ✅

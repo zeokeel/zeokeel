@@ -29,7 +29,7 @@
 - **presets 已落地**：prompt 片段契约 + composer「预设/Presets」插入菜单 + 设置「预设」页 CRUD（名称/提示词/排序/
   恢复默认）+ 设置「模型目录」编辑页（modelcatalog.settings 动态读取）；旧 agent presets 的 tool allowlist 语义仍未迁移，
   故 presets 记 🟡。
-- 复核统计（Round 61 进行中）：62 项中 **✅53 / 🟡8 / ❌1**。✅ 为有等价实现或剩余差异属明确非目标；🟡 为已实现但存在
+- 复核统计（Round 62 进行中）：62 项中 **✅56 / 🟡5 / ❌1**。✅ 为有等价实现或剩余差异属明确非目标；🟡 为已实现但存在
   深度/长尾差异（§5.1）；❌ 仅 winproc（Windows 平台非目标）。核心对话/持久化/工作区/审批/设置/右栏/搜索/导入/更新/
   编排/composer 控制/MCP 管理/宿主桌面能力均已可用。
 - **功能面覆盖已完成**：旧应用的用户可见功能均有等价实现；剩余工作为 §5.1 的交互深度精修与 §5.2 的明确非目标。
@@ -38,8 +38,8 @@
 
 | 状态 | 数量 | 占比 | 含义 |
 |---|---:|---:|---|
-| ✅ 已迁移/等价 | 53 | 85.5% | 当前代码有对应实现，进入 desktop/headless 装配或剩余差异属明确非目标 |
-| 🟡 已实现（深度限制） | 8 | 12.9% | 功能已可用，存在子功能/交互/执行语义的深度差异（§5.1） |
+| ✅ 已迁移/等价 | 56 | 90.3% | 当前代码有对应实现，进入 desktop/headless 装配或剩余差异属明确非目标 |
+| 🟡 已实现（深度限制） | 5 | 8.1% | 功能已可用，存在子功能/交互/执行语义的深度差异（§5.1） |
 | ❌ 未迁移 | 1 | 1.6% | 仅 winproc（Windows 平台非目标） |
 | 合计 | 62 | 100% | 28 后端能力 + 34 Shell/UI 能力 |
 
@@ -53,7 +53,7 @@
 | `brand` | ✅ | `internal/brand` | palette/theme/logo/wordmark |
 | `design` | ✅ | `internal/design` | tokens/style/motion/font/components 子集 |
 | `globalhotkey` | ✅ | host hotkey.go + mygo `GlobalShortcut` + 外观设置 | 可配置系统级加速键（修饰符+单键，固定顺序规范化），注册后 Show/Restore/Focus 窗口；留空关闭、非法/注册失败仅警告、shutdown 注销；桌面不可用环境安全回退 |
-| `i18n` | 🟡 | uiroot locale + uikit + 各 UI 切片 | 新增页面已 en/zh；**Round 57 审计修复：11 条 slash 命令 Title/Hint 本地化+语言切换重注册、侧栏/右栏原生目录选择器标题**；仍缺部分 host chrome tooltip、后端错误文案 |
+| `i18n` | ✅ | uiroot locale + uikit + 各 UI 切片 | 全部页面 en/zh + 命令动态重注册 + **后端错误分类本地化（auth/rate_limit/network/timeout/context/cancelled 标题+原因，原文保留）**；少量 host chrome tooltip 为长尾 |
 | `icons` | ✅ | `internal/icons` | Lucide SVG |
 | `importer` | ✅ | `internal/modules/importer` + settings 导入页 | DSH session.v4.jsonl Scan/Import、文本+reasoning、workspace、symlink 跳过/重复 ID 去重；旧 DSH 私有长尾（attachments/credentials/manifest/zstd 压缩）为明确非目标（预览中计数说明） |
 | `lsp` | ✅ | toolkit lsp.go + 设置 LSP 页 | **多服务器列表 + 活动服务器选择 + workspace `.zeokeel/lsp.json` opt-in**（默认关、显式 allow、settings 优先合并）；启动活动服务器并注册 `lsp_*` 工具，卸载关闭；错误仅警告 |
@@ -85,7 +85,7 @@
 | Composer 深度（/goal /plan /memory/权限/effort/@session/presets） | ✅ | `sessionCommands` + `command_dialogs.go` + `commands_help.go` + `compact_command.go` | **15 条命令**（/新会话/副本/导出/设置/目标/审阅/记忆/反馈/停止/附加/帮助/**压缩上下文/完成目标/放弃目标**）+ 权限模式、聊天模式、推理强度、@session、预设；目标生命周期（完成/放弃/编辑/暂停/恢复/清除）已全量 |
 | Chrome/Sidebar/折叠 rail/右栏 dock | ✅ | uiroot + sidebar | 280px sidebar、64px rail、Cmd/Ctrl+B、**Cmd/Ctrl+N 新建会话、Cmd/Ctrl+, 设置、Cmd/Ctrl+K 命令面板**、右栏开关、添加工作区、视图选项（排序/分组持久化）、工作区搜索/置顶/归档 |
 | 命令面板/窗口内快捷键 | ✅ | uiroot palette/shortcuts | Cmd/Ctrl+K、可配置两条 chrome 快捷键；非系统全局热键 |
-| Settings 外壳与页面 | 🟡 | `internal/ui/settings`、about | 17 页：…/**行为（默认代理权限、消息字号、运行中排队发送）**/数据与隐私（含反馈统计导出）；缺内置插件参数页/市场 |
+| Settings 外壳与页面 | ✅ | `internal/ui/settings`、about | 17 页：模型/目录/服务商/诊断/快捷键/外观/技能/更新/导入/搜索/MCP/网络/预设/LSP/数据与隐私/通知/行为/记忆；**插件参数已落在 Plugins 页（已接线键）**；插件市场为明确非目标 |
 | Approval 审批 Modal | ✅ | `internal/ui/approval` + approvals 模块 | allow/allow-always/deny、ask/workspace/full/never（settings 覆盖、workspace 只读自动 allow） |
 | 右侧检查栏 | ✅ | rightpanel | 8 tab：概览/工具/日志/文件/变更/终端/**团队**/**任务**，en/zh |
 | Files 检查器 | ✅ | rightpanel files + workspace | 打开文件夹/面包屑/文本/Markdown/图片预览/错误态 |
@@ -102,7 +102,7 @@
 | Fork | ✅ | agent SessionForker + sidebar 行菜单 | 深拷贝消息/附件/tools、持久化历史/事件 |
 | Export | ✅ | session 导出 Markdown + 复制对话 + JSONL + toast | 缺跨重启导出历史（非目标） |
 | Automation 页 | ✅ | `internal/ui/automation` + module | 列表/新建（含可选模型）/运行/删除/after/every/cron + 运行历史折叠/展开 + 任务模型 Badge |
-| Plugins 页 | 🟡 | `internal/ui/plugins` + toolkit + ModuleLister | MCP 状态卡片/工具目录/工具级开关/server 开关/详情/**连接配置（settings 源 command/args/env，凭证掩码）**/内置模块清单；缺插件市场/参数编辑 |
+| Plugins 页 | ✅ | `internal/ui/plugins` + toolkit + ModuleLister | MCP 状态/工具目录/工具级与 server 级开关/详情/连接配置/内置模块清单 + **插件参数 section（仅已接线键：web search endpoint/key、mcp opt-in、子代理编译期常量；避免死配置）**；插件市场为明确非目标 |
 | Skills 页 | ✅ | settings 技能页 + skills 模块 | 发现/roots/预览/刷新 + **新建/编辑（dataDir）/删除（含确认）**；workspace 技能只读展示（设计约束） |
 | Memory 页 | 🟡 | session Memory tab + 设置「记忆」页 | 会话工作区内存管理 + 设置页全局搜索/添加/删除/整理/清空/**上限/保留期策略**；缺模型驱动 extract |
 | Workspace→Session 树/分组/计数 | ✅ | sidebar workspace tree | 多 workspace 分组、未分组、计数、搜索、折叠、置顶/归档 |
@@ -145,8 +145,6 @@
 | `presets` | prompt/人设片段 CRUD+插入 | 旧 agent presets 的 systemPrompt/tool allowlist JSON 语义 |
 | `session` | fork/压缩/导出/usage/排队/字号/目标续跑 | 旧 “tool spill” 展示（内核内部实现，产品层未单列） |
 | `sessionreference` | @session 注入、事件、边界 | 旧候选排序/URI 语义细节 |
-| `i18n` | 全部 UI 页面 en/zh + 命令动态重注册 | 少量 host chrome tooltip 与后端错误原文 |
-| Settings/Plugins 页 | 17 页设置、插件详情/连接配置/工具与服务器开关 | 旧插件参数编辑页/市场（市场为非目标） |
 
 ### 5.2 明确非目标（不计入覆盖缺口）
 

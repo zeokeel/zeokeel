@@ -1416,6 +1416,7 @@ func (s *service) handleEvent(sessionID string, event rig.Event) {
 				errText = event.Err.Error()
 			}
 			message.Error = errText
+			message.ErrorKind = contracts.ClassifyError(event.Err, errText)
 			state.err = errText
 		}
 	}
@@ -1454,8 +1455,19 @@ func (s *service) finish(sessionID string, ctx context.Context, runErr error) {
 	}
 	if message := state.assistantMessage(); message != nil {
 		message.Streaming = false
-		if errText != "" && message.Error == "" {
-			message.Error = errText
+		if errText != "" {
+			if message.Error == "" {
+				message.Error = errText
+			}
+			classifyErr := runErr
+			if ctx != nil && ctx.Err() != nil {
+				classifyErr = ctx.Err()
+			}
+			message.ErrorKind = contracts.ClassifyError(classifyErr, message.Error)
+		} else {
+			// A successful turn never carries stale error details.
+			message.Error = ""
+			message.ErrorKind = ""
 		}
 	}
 	state.running = false

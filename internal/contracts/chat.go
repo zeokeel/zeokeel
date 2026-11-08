@@ -62,6 +62,9 @@ type ChatMessage struct {
 	Feedback string
 	// Error is set when the message (usually an assistant turn) failed.
 	Error string
+	// ErrorKind classifies Error for localized UI copy ("" = unknown/no error,
+	// auth, rate_limit, network, timeout, context, cancelled or other).
+	ErrorKind string `json:"errorKind,omitempty"`
 	// CreatedAt is the message timestamp (local time, display only).
 	CreatedAt time.Time
 }
@@ -155,6 +158,57 @@ type SessionCompactor interface {
 // MessageFeedbackSettingKey stores one message's rating in settings.
 func MessageFeedbackSettingKey(sessionID, messageID string) string {
 	return "feedback." + sessionID + "." + messageID
+}
+
+// MessageErrorKind values classify a failed turn for localized UI copy.
+const (
+	MessageErrorKindUnknown   = ""
+	MessageErrorKindAuth      = "auth"
+	MessageErrorKindRateLimit = "rate_limit"
+	MessageErrorKindNetwork   = "network"
+	MessageErrorKindTimeout   = "timeout"
+	MessageErrorKindContext   = "context"
+	MessageErrorKindCancelled = "cancelled"
+	MessageErrorKindOther     = "other"
+)
+
+// ClassifyError maps one backend error (or its message) to a MessageErrorKind
+// by matching the stable provider/network phrases. Rules are checked in order:
+// cancellation, auth, rate limit, timeout, network, context length, then other.
+func ClassifyError(err error, msg string) string {
+	text := strings.ToLower(strings.TrimSpace(msg))
+	if text == "" && err != nil {
+		text = strings.ToLower(err.Error())
+	}
+	if text == "" {
+		return MessageErrorKindOther
+	}
+	has := func(needles ...string) bool {
+		for _, needle := range needles {
+			if strings.Contains(text, needle) {
+				return true
+			}
+		}
+		return false
+	}
+	switch {
+	case has("context canceled", "context cancelled", "operation was canceled", "operation was cancelled"):
+		return MessageErrorKindCancelled
+	case has("401", "403", "invalid api key", "unauthorized", "authentication failed", "incorrect api key"):
+		return MessageErrorKindAuth
+	case has("429", "rate limit", "rate_limit", "quota", "too many requests"):
+		return MessageErrorKindRateLimit
+	case has("timeout", "timed out", "deadline exceeded"):
+		return MessageErrorKindTimeout
+	case has("connection refused", "no such host", "network unreachable", "network is unreachable",
+		"dns", "connection reset", "tls handshake"):
+		return MessageErrorKindNetwork
+	case has("context length", "context_length", "token limit", "too many tokens",
+		"maximum context", "context window"):
+		return MessageErrorKindContext
+	default:
+		return MessageErrorKindOther
+	}
 }
 
 // MessageUsage is one assistant turn's accounting (rig Usage + wall time).

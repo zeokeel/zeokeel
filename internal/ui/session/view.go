@@ -534,7 +534,7 @@ func buildAssistantMessage(c *ui.Context, t *design.Tokens, runtime contracts.UI
 			})
 		}
 		if message.Error != "" {
-			buildErrorLine(c, t, message.Error)
+			buildMessageError(c, t, st, message)
 		}
 		for _, tool := range message.Tools {
 			call := contracts.ToolCall{ID: tool.ID, Name: tool.Name, Status: tool.Status, Summary: tool.Summary}
@@ -621,6 +621,50 @@ func (st *state) toggleMessageFeedback(chat contracts.ChatService, feedbacker co
 		st.feedbackErr = ""
 	}
 	runtime.Invalidate()
+}
+
+// buildMessageError renders a failed assistant turn: a localized kind heading
+// with actionable guidance, plus the original backend text as muted diagnostic
+// copy so no information is lost. Unknown/other kinds keep the old raw line.
+func buildMessageError(c *ui.Context, t *design.Tokens, st *state, message contracts.ChatMessage) {
+	kind := strings.ToLower(strings.TrimSpace(message.ErrorKind))
+	heading, reason := "", ""
+	switch kind {
+	case contracts.MessageErrorKindAuth:
+		heading, reason = st.tr("鉴权失败", "Authentication failed"), st.tr("请检查 API Key", "check the API key")
+	case contracts.MessageErrorKindRateLimit:
+		heading, reason = st.tr("请求过于频繁", "Rate limited"), st.tr("请稍后重试", "try again later")
+	case contracts.MessageErrorKindNetwork:
+		heading = st.tr("网络连接失败", "Network connection failed")
+	case contracts.MessageErrorKindTimeout:
+		heading = st.tr("请求超时", "Request timed out")
+	case contracts.MessageErrorKindContext:
+		heading, reason = st.tr("上下文超限", "Context limit reached"), st.tr("请压缩或新建会话", "compact or start a new conversation")
+	case contracts.MessageErrorKindCancelled:
+		heading = st.tr("已取消", "Cancelled")
+	}
+	if heading == "" {
+		buildErrorLine(c, t, message.Error)
+		return
+	}
+	th := t.Theme()
+	ui.Column(c).FillWidth().Gap(design.Space1).Children(func() {
+		ui.Row(c).FillWidth().Gap(design.Space2).AlignItems(ui.Start).Children(func() {
+			ui.Icon(c, icons.AlertTriangle()).Size(th.Space(4), th.Space(4)).TextColor(t.Danger)
+			design.Apply(ui.Text(c, heading+st.localizedReasonSuffix(reason)), t.Font(design.TypeXS)).
+				TextColor(t.DangerText)
+		})
+		design.Apply(ui.Text(c, message.Error), t.Font(design.TypeXXS)).
+			TextColor(t.LabelTertiary).MaxLines(3)
+	})
+}
+
+// localizedReasonSuffix joins a guidance reason to the heading separator.
+func (st *state) localizedReasonSuffix(reason string) string {
+	if strings.TrimSpace(reason) == "" {
+		return ""
+	}
+	return st.tr("：", ": ") + reason
 }
 
 // buildErrorLine is the brand danger row (icon + WCAG-AA danger text).

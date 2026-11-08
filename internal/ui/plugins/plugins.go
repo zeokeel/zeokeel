@@ -73,6 +73,16 @@ type state struct {
 	// modulesOpen is the built-in module section's disclosure state.
 	modulesOpen bool
 
+	// Plugin settings section (curated, already-wired keys).
+	paramsOpen   bool
+	paramEditing bool
+	paramKey     string
+	paramTitle   string
+	paramDraft   string
+	paramErrText string
+	paramNotice  string
+	paramErr     bool
+
 	// mcpExpanded remembers the expanded MCP server cards, keyed by server
 	// identity, so a Refresh preserves the open cards.
 	mcpExpanded map[string]bool
