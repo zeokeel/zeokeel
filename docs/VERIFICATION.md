@@ -340,3 +340,10 @@ NO_PANIC
 ### 文档核对
 - docs/COVERAGE.md 矩阵重算（§2 28 + §3 34 = 62）：**✅40 / 🟡21 / ❌1**（Reasoning 展示升 ✅）；摘要与统计表已同步为 40/21/1（64.5% / 33.9% / 1.6%）。
 - README 状态行更新为 Round 57（HEAD 02f6612）。
+
+## 最终验证（Round 60：覆盖收口后）
+
+- `./scripts/verify.sh`：**10/10 PASS，120s**；regression **263 PASS / 0 SKIP / 0 FAIL**；
+  ui-snapshot **66 步 / 64 唯一 PNG**；desktop（27 module instances、tray ready）/headless/ACP 冒烟通过，无 panic。
+- COVERAGE 终版：62 项 **✅48 / 🟡13（已实现·深度限制，§5.1）/ ❌1（winproc 平台非目标，§5.2）**——功能面覆盖完成。
+- 已知缺陷：历轮 P3（含 P3-9..P3-15）均已修复，回归探针静默；无已知未修复缺陷。

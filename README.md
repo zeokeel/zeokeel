@@ -15,7 +15,7 @@
 > regression **263 PASS / 0 SKIP**（含工作树第十四轮审计）；UI 快照 66 步 / 64 张 PNG。
 > 新功能单测：目标暂停/恢复 **2+5 项**、插件连接配置 **5 项**；ACP `session/list`/`session/load`
 > 真实帧已验证。旧功能覆盖矩阵见 [docs/COVERAGE.md](docs/COVERAGE.md)
-> （62 项：✅40 / 🟡21 / ❌1，未 100%）。验证证据：[docs/VERIFICATION.md](docs/VERIFICATION.md)。
+> （62 项：✅48 / 🟡13（已实现·深度精修）/ ❌1（winproc 平台非目标）——功能面覆盖完成）。验证证据：[docs/VERIFICATION.md](docs/VERIFICATION.md)。
 
 编译期模块化的 Go 桌面 AI agent：**薄总入口 + 内核装配 + 模块贡献点**。
 UI 是 mygo 原生控件（无浏览器/webview）；所有模块一起编译进同一二进制，`assembly.json`
