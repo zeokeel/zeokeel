@@ -52,8 +52,8 @@ func TestExtraCommandsRegistered(t *testing.T) {
 			count++
 		}
 	}
-	if count != 13 {
-		t.Fatalf("session commands = %d, want 13", count)
+	if count != 15 {
+		t.Fatalf("session commands = %d, want 15", count)
 	}
 }
 

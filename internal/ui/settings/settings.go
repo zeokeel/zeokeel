@@ -724,7 +724,7 @@ func Module() *module.Descriptor[Config] {
 				zhTitle: "记忆", enTitle: "Memory",
 				Build: func(c *ui.Context) {
 					syncer.sync()
-					buildMemoryPage(c, design.Of(c), ctx, memoryPage, locale)
+					buildMemoryPage(c, design.Of(c), ctx, memoryPage, store, locale)
 				},
 			},
 			{

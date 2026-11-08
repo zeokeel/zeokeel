@@ -41,3 +41,28 @@ type GoalPauser interface {
 
 // KeyGoalTracker is provided by the desktop host.
 var KeyGoalTracker = cordis.NewServiceKey[GoalTracker]("zeokeel/goal")
+
+// Goal lifecycle statuses. Active goals drive auto-continue; paused goals stay
+// visible but are not advanced; completed/abandoned goals are terminal until
+// cleared or edited back to active.
+const (
+	GoalStatusActive    = "active"
+	GoalStatusPaused    = "paused"
+	GoalStatusCompleted = "completed"
+	GoalStatusAbandoned = "abandoned"
+)
+
+// GoalLifecycler is the optional half of the goal bridge that completes,
+// abandons and edits the current goal (hosts that only implement GoalTracker
+// still work).
+type GoalLifecycler interface {
+	// Complete marks the active/paused goal completed and reports whether one
+	// was in a completable state.
+	Complete() bool
+	// Abandon marks the active/paused goal abandoned and reports whether one
+	// was in an abandonable state.
+	Abandon() bool
+	// Edit replaces the goal text (same ID), resets the status to active and
+	// returns the goal ID. Empty text or no goal is an error.
+	Edit(text string) (string, error)
+}

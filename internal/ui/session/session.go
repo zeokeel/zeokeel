@@ -118,8 +118,10 @@ type state struct {
 	// is the optional host bridge used to clear it. Both are UI-thread state.
 	goal        *contracts.Goal
 	goalTracker contracts.GoalTracker
-	// goalActionErr is the last pause/resume failure (DangerText row).
+	// goalActionErr is the last goal-lifecycle failure (DangerText row);
+	// goalNotice is the last lifecycle success badge (e.g. after a command).
 	goalActionErr string
+	goalNotice    string
 
 	// Composer attachment state: files picked and staged for the next message,
 	// the last picker/read error, the chip sequence and the per-chip image
@@ -408,6 +410,36 @@ func (st *state) permissionLabel(mode string) string {
 	}
 }
 
+// goalLifecycle returns the optional goal lifecycle half of the host bridge.
+func goalLifecycle(st *state) (contracts.GoalLifecycler, bool) {
+	if st == nil || st.goalTracker == nil {
+		return nil, false
+	}
+	lifecycle, ok := st.goalTracker.(contracts.GoalLifecycler)
+	if !ok || lifecycle == nil {
+		return nil, false
+	}
+	return lifecycle, true
+}
+
+// goalCompletable reports whether the current goal is in an active/paused state
+// (the only states complete/abandon accept).
+func goalCompletable(st *state) bool {
+	if st == nil || st.goalTracker == nil {
+		return false
+	}
+	_, _, status, ok := st.goalTracker.Get()
+	if !ok {
+		return false
+	}
+	switch strings.ToLower(strings.TrimSpace(status)) {
+	case contracts.GoalStatusActive, contracts.GoalStatusPaused:
+		return true
+	default:
+		return false
+	}
+}
+
 // sessionCommands is the conversation screen's slash-command surface: new
 // session, fork, export, the permission-mode cycle and settings. The command palette reads these from the
 // UIRuntime command registry; Enabled callbacks expose only the actions that
@@ -506,6 +538,56 @@ func sessionCommands(runtime contracts.UIRuntime, navigator contracts.Navigator,
 			Order:   60,
 			Enabled: func() bool { return st.goalTracker != nil && chat.ActiveSession() != "" },
 			Run:     func() error { openGoalDialog(st, runtime); return nil },
+		},
+		{
+			ID:    "zeokeel.session.goal.complete",
+			Title: st.tr("完成目标", "Complete goal"),
+			Hint:  st.tr("将当前目标标记为已完成", "Mark the current goal as completed"),
+			Order: 64,
+			Enabled: func() bool {
+				_, ok := goalLifecycle(st)
+				return ok && goalCompletable(st)
+			},
+			Run: func() error {
+				lifecycle, ok := goalLifecycle(st)
+				if !ok {
+					return nil
+				}
+				if lifecycle.Complete() {
+					st.goalActionErr = ""
+					st.goalNotice = st.tr("目标已完成", "Goal completed")
+				} else {
+					st.goalNotice = ""
+					st.goalActionErr = st.tr("完成目标失败：", "Complete goal failed: ") + st.tr("目标不存在", "no active goal")
+				}
+				runtime.Invalidate()
+				return nil
+			},
+		},
+		{
+			ID:    "zeokeel.session.goal.abandon",
+			Title: st.tr("放弃目标", "Abandon goal"),
+			Hint:  st.tr("放弃当前目标", "Abandon the current goal"),
+			Order: 65,
+			Enabled: func() bool {
+				_, ok := goalLifecycle(st)
+				return ok && goalCompletable(st)
+			},
+			Run: func() error {
+				lifecycle, ok := goalLifecycle(st)
+				if !ok {
+					return nil
+				}
+				if lifecycle.Abandon() {
+					st.goalActionErr = ""
+					st.goalNotice = st.tr("目标已放弃", "Goal abandoned")
+				} else {
+					st.goalNotice = ""
+					st.goalActionErr = st.tr("放弃目标失败：", "Abandon goal failed: ") + st.tr("目标不存在", "no active goal")
+				}
+				runtime.Invalidate()
+				return nil
+			},
 		},
 		{
 			ID:      "zeokeel.session.plan",

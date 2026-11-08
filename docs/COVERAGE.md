@@ -29,7 +29,7 @@
 - **presets 已落地**：prompt 片段契约 + composer「预设/Presets」插入菜单 + 设置「预设」页 CRUD（名称/提示词/排序/
   恢复默认）+ 设置「模型目录」编辑页（modelcatalog.settings 动态读取）；旧 agent presets 的 tool allowlist 语义仍未迁移，
   故 presets 记 🟡。
-- 复核统计（Round 60 进行中）：62 项中 **✅51 / 🟡10 / ❌1**。✅ 为有等价实现或剩余差异属明确非目标；🟡 为已实现但存在
+- 复核统计（Round 61 进行中）：62 项中 **✅53 / 🟡8 / ❌1**。✅ 为有等价实现或剩余差异属明确非目标；🟡 为已实现但存在
   深度/长尾差异（§5.1）；❌ 仅 winproc（Windows 平台非目标）。核心对话/持久化/工作区/审批/设置/右栏/搜索/导入/更新/
   编排/composer 控制/MCP 管理/宿主桌面能力均已可用。
 - **功能面覆盖已完成**：旧应用的用户可见功能均有等价实现；剩余工作为 §5.1 的交互深度精修与 §5.2 的明确非目标。
@@ -58,13 +58,13 @@
 | `importer` | ✅ | `internal/modules/importer` + settings 导入页 | DSH session.v4.jsonl Scan/Import、文本+reasoning、workspace、symlink 跳过/重复 ID 去重；旧 DSH 私有长尾（attachments/credentials/manifest/zstd 压缩）为明确非目标（预览中计数说明） |
 | `lsp` | ✅ | toolkit lsp.go + 设置 LSP 页 | **多服务器列表 + 活动服务器选择 + workspace `.zeokeel/lsp.json` opt-in**（默认关、显式 allow、settings 优先合并）；启动活动服务器并注册 `lsp_*` 工具，卸载关闭；错误仅警告 |
 | `mcp` | ✅ | toolkit `mcp.Start`（stdio+HTTP）+ settings/workspace 合并 + 工具级开关 | HTTP/stdio 握手/工具注册/失败诊断；assembly>settings>workspace mcp.json（opt-in）；`mcp.disabledTools` 注册前过滤；插件详情/市场在 Shell Plugins 行仍 🟡 |
-| `memory` | 🟡 | `internal/modules/memory` + rig memory tool + session Memory tab + **设置「记忆」页** | JSON MemoryStore/tool/搜索/添加/整理/清空；设置页可全局搜索/添加/删除并显示 scope/时间；缺模型驱动 consolidate/extract |
+| `memory` | 🟡 | `internal/modules/memory` + rig memory tool + session Memory tab + 设置「记忆」页 | JSON MemoryStore/tool/搜索/添加/整理/清空 + **确定性 consolidation（最大条目数/保留天数，设置页策略）**；缺模型驱动 extract |
 | `modelcatalog` | ✅ | `internal/modules/modelcatalog` + composer 模型菜单 + settings「模型目录」页 + **连接检查** | 默认预设（含 128k context window）、per-session 切换/推理强度、目录编辑（增删/恢复默认/上下文窗口）、usage footer 预算显示、**连接检查（GET /models，成功/失败/防重复）** |
 | `presets` | 🟡 | contracts/presets.go + session presets 菜单 + settings「预设」页（CRUD/排序/恢复默认） | prompt 片段/人设模板已迁移并可在 composer 插入；旧 agent presets 的 systemPrompt/model/tools allowlist JSON 语义未迁移 |
 | `prompt` | ✅ | agent SystemPrompt + settings 模型页提示词 + **AGENTS.md 注入** | 系统提示可配置；每次运行读取当前工作区 `AGENTS.md`（文件名可配/32KiB 截断/读取失败告警）追加注入；auto-title 按首条提示生成；review prompt 属 review 工具非目标 |
 | `provider` | ✅ | rig `provider/openai` + agent 模块 + 模型页预设 | OpenAI Chat Completions 兼容 + **服务商预设快填（DeepSeek/OpenAI/Ollama/自定义，匹配高亮）** |
 | `runtime` | ✅ | agent + rig agent/gate/compact | 循环/审批/自动压缩/检查点/多模态 parts/subagent runner/team manager/goal 工具与 goal 桥 + **聊天模式（普通/计划/精简/创作）** + **目标暂停/自动续跑**；PTC/workflow/ralph/review 工具为明确非目标 |
-| `session` | 🟡 | agent ChatService + Regenerate/Fork/Archive/Pin/ModelSwitcher + usage + 排队发送 + goal 自动续跑 | 发送/取消/历史/恢复/压缩/fork/export/附件/重新生成/会话模型/推理强度/turn usage（含 context budget）/运行中排队发送/消息字号/**目标自动续跑（5 次上限，goal 变化重置）**；缺 tool spill |
+| `session` | 🟡 | agent ChatService + Regenerate/Fork/Archive/Pin/ModelSwitcher + usage + 排队发送 + goal 续跑/压缩 | 发送/取消/历史/恢复/**手动压缩 /compact**/fork/export/附件/重新生成/会话模型/推理强度/turn usage（含 context budget）/排队发送/消息字号/目标续跑；缺 tool spill |
 | `sessionreference` | 🟡 | composer @ 菜单 + agent `references.go` | token 持久化、注入尾部 20 条/≤8000 rune、session_refs 事件、self/unknown/重复忽略、分隔符解析；缺旧候选排序细节/URI 语义/预算错误分类 |
 | `skills` | ✅ | `internal/modules/skills` + settings 技能页 | 多根 List/Read/roots/预览/刷新 + 新建/编辑（dataDir 内 frontmatter+body 原子重写、名称不可改）/删除（仅 dataDir，realpath 校验）；**已超出旧实现（old 只有只读 API）**；workspace 编辑/文件监听为非目标 |
 | `state` | ✅ | ChatService 读模型 + uiroot runtime | old broker/projector 被读模型替代；UI 所需投影可用 |
@@ -82,7 +82,7 @@
 |---|---|---|---|
 | Home / 起始页 | ✅ | `internal/ui/home` | hero/greeting/setup card/**真实 composer（多行输入、Enter 发送、附件选择、工作区/模型/模式只读 chip、发送后建会话并进入）**/最近会话 |
 | Composer 基础（输入/附件/发送/停止/模型 chip/@//） | ✅ | `internal/ui/session/view.go`、`attachments.go` | 文本、附件/图片/拖放、发送/停止、per-session 模型菜单、工作区 @、/ 菜单 |
-| Composer 深度（/goal /plan /memory/权限/effort/@session/presets） | 🟡 | `sessionCommands` + `command_dialogs.go` + `commands_help.go` + `compact_command.go` | 13 条命令（含 **/compact 手动压缩**、停止/附加/帮助/反馈）、权限模式、聊天模式、推理强度、@session、预设；**缺 /goal complete/abandon/edit 子命令**（pause/resume 已由 header 提供） |
+| Composer 深度（/goal /plan /memory/权限/effort/@session/presets） | ✅ | `sessionCommands` + `command_dialogs.go` + `commands_help.go` + `compact_command.go` | **15 条命令**（/新会话/副本/导出/设置/目标/审阅/记忆/反馈/停止/附加/帮助/**压缩上下文/完成目标/放弃目标**）+ 权限模式、聊天模式、推理强度、@session、预设；目标生命周期（完成/放弃/编辑/暂停/恢复/清除）已全量 |
 | Chrome/Sidebar/折叠 rail/右栏 dock | ✅ | uiroot + sidebar | 280px sidebar、64px rail、Cmd/Ctrl+B、**Cmd/Ctrl+N 新建会话、Cmd/Ctrl+, 设置、Cmd/Ctrl+K 命令面板**、右栏开关、添加工作区、视图选项（排序/分组持久化）、工作区搜索/置顶/归档 |
 | 命令面板/窗口内快捷键 | ✅ | uiroot palette/shortcuts | Cmd/Ctrl+K、可配置两条 chrome 快捷键；非系统全局热键 |
 | Settings 外壳与页面 | 🟡 | `internal/ui/settings`、about | 17 页：…/**行为（默认代理权限、消息字号、运行中排队发送）**/数据与隐私（含反馈统计导出）；缺内置插件参数页/市场 |
@@ -104,7 +104,7 @@
 | Automation 页 | ✅ | `internal/ui/automation` + module | 列表/新建（含可选模型）/运行/删除/after/every/cron + 运行历史折叠/展开 + 任务模型 Badge |
 | Plugins 页 | 🟡 | `internal/ui/plugins` + toolkit + ModuleLister | MCP 状态卡片/工具目录/工具级开关/server 开关/详情/**连接配置（settings 源 command/args/env，凭证掩码）**/内置模块清单；缺插件市场/参数编辑 |
 | Skills 页 | ✅ | settings 技能页 + skills 模块 | 发现/roots/预览/刷新 + **新建/编辑（dataDir）/删除（含确认）**；workspace 技能只读展示（设计约束） |
-| Memory 页 | 🟡 | session Memory tab + 设置「记忆」页 | 会话工作区内存管理 + 设置页全局搜索/添加/删除/整理/清空；缺模型驱动 consolidate/extract |
+| Memory 页 | 🟡 | session Memory tab + 设置「记忆」页 | 会话工作区内存管理 + 设置页全局搜索/添加/删除/整理/清空/**上限/保留期策略**；缺模型驱动 extract |
 | Workspace→Session 树/分组/计数 | ✅ | sidebar workspace tree | 多 workspace 分组、未分组、计数、搜索、折叠、置顶/归档 |
 | Plan UI（plan_review/exit_plan_mode） | ✅ | interaction plan Modal + /审阅计划 + plan 门禁 + toolcards 计划卡 + **keep-planning 反馈** | Markdown 审阅 + 批准/取消 + 计划模式门禁 + transcript 计划卡 + **「继续规划」反馈（写回当前会话作为下一条用户消息 → 模型修订后重新 plan_review）** |
 | Modes UI（standard/minimal/creator） | ✅ | session 模式 Popover + agent gate 策略 | 四模式：普通（原审批策略）、计划（只读+计划白名单，最高优先）、精简（只读探索白名单）、创作（隐藏编码工具，仅 ask/present/goal/memory/skill）；composer 模式菜单 + header 徽标，坏值归一，中英 |
@@ -141,12 +141,11 @@
 
 | 项 | 现状 | 未对齐的部分 |
 |----|------|--------------|
-| `memory` | 搜索/添加/删除/整理/清空 + 设置页 | 旧模型驱动 consolidate/extract |
+| `memory` | 搜索/添加/删除/整理/清空 + 上限/保留期 consolidation | 旧模型驱动 extract（高风险项，另行排期） |
 | `presets` | prompt/人设片段 CRUD+插入 | 旧 agent presets 的 systemPrompt/tool allowlist JSON 语义 |
 | `session` | fork/压缩/导出/usage/排队/字号/目标续跑 | 旧 “tool spill” 展示（内核内部实现，产品层未单列） |
 | `sessionreference` | @session 注入、事件、边界 | 旧候选排序/URI 语义细节 |
 | `i18n` | 全部 UI 页面 en/zh + 命令动态重注册 | 少量 host chrome tooltip 与后端错误原文 |
-| Composer 深度 | 13 条命令（含 /compact）+ 权限/模式/推理/@/预设 | `/goal complete/abandon/edit` 子命令（pause/resume 已由 header 覆盖） |
 | Settings/Plugins 页 | 17 页设置、插件详情/连接配置/工具与服务器开关 | 旧插件参数编辑页/市场（市场为非目标） |
 
 ### 5.2 明确非目标（不计入覆盖缺口）

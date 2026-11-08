@@ -21,6 +21,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -165,6 +166,7 @@ type Store struct {
 }
 
 var _ contracts.MemoryStore = (*Store)(nil)
+var _ contracts.MemoryConsolidator = (*Store)(nil)
 
 // newStore resolves the configured path and loads the existing document. A
 // missing file starts an empty store; an unreadable or malformed file is a
@@ -339,6 +341,69 @@ func (s *Store) Remove(_ context.Context, id string) bool {
 		return false
 	}
 	return true
+}
+
+// Consolidate implements contracts.MemoryConsolidator with the current clock.
+func (s *Store) Consolidate(ctx context.Context, policy contracts.MemoryPolicy) (contracts.MemoryConsolidationReport, error) {
+	return s.consolidate(ctx, policy, time.Now().UTC())
+}
+
+// consolidate runs one deterministic consolidation at now: first the expiry
+// window (entries created strictly before now-MaxAge), then the entry cap
+// (removing the oldest entries until MaxEntries remain). It performs no model
+// calls and returns the counts of the successful removals; a failure to remove
+// an entry is reported as an error together with the partial report.
+func (s *Store) consolidate(ctx context.Context, policy contracts.MemoryPolicy, now time.Time) (contracts.MemoryConsolidationReport, error) {
+	report := contracts.MemoryConsolidationReport{}
+	if err := contextErr(ctx); err != nil {
+		return report, err
+	}
+	entries, err := s.List(ctx)
+	if err != nil {
+		return report, err
+	}
+	failures := 0
+	remaining := entries
+	if policy.MaxAge > 0 {
+		cutoff := now.Add(-policy.MaxAge)
+		kept := make([]contracts.Memory, 0, len(remaining))
+		for _, memory := range remaining {
+			if memory.Created.IsZero() || !memory.Created.Before(cutoff) {
+				kept = append(kept, memory)
+				continue
+			}
+			if s.Remove(ctx, memory.ID) {
+				report.RemovedExpired++
+			} else {
+				failures++
+				kept = append(kept, memory)
+			}
+		}
+		remaining = kept
+	}
+	if policy.MaxEntries > 0 && len(remaining) > policy.MaxEntries {
+		oldest := append([]contracts.Memory(nil), remaining...)
+		sort.SliceStable(oldest, func(left, right int) bool {
+			return oldest[left].Created.Before(oldest[right].Created)
+		})
+		for _, memory := range oldest[:len(remaining)-policy.MaxEntries] {
+			if s.Remove(ctx, memory.ID) {
+				report.RemovedOverCap++
+			} else {
+				failures++
+			}
+		}
+	}
+	after, err := s.List(ctx)
+	if err != nil {
+		return report, err
+	}
+	report.Remaining = len(after)
+	if failures > 0 {
+		return report, fmt.Errorf("%s: consolidate: %d entr(ies) could not be removed (expired %d, over cap %d, remaining %d)",
+			ModuleID, failures, report.RemovedExpired, report.RemovedOverCap, report.Remaining)
+	}
+	return report, nil
 }
 
 // Search implements contracts.MemoryStore: a case-insensitive substring match

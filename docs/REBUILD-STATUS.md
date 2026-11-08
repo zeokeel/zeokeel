@@ -21,6 +21,13 @@
 - 右侧栏「文件」Tab：打开文件夹（mygo 原生 Directory picker）、目录进入/面包屑、文本/Markdown/图片预览、
   刷新与错误状态；E2E 覆盖工作区创建 + 列表 + 预览帧
 
+**Round 62 / P1-B+P4-A：目标生命周期 + 记忆 consolidation（2026-11-08）**
+- 目标生命周期：contracts GoalLifecycler（complete/abandon/edit，状态机 active/paused/completed/abandoned），uiroot 状态机，session 徽标/操作 +
+  第 14/15 条命令（完成/放弃目标），auto-continue 仅 active；uiroot 82 / session 176 测试；Composer 行升 ✅
+- 记忆 consolidation：最大条目数/保留天数确定性整理（过期→超限→报告，Remove 失败计数）+ 设置页策略面板（预填/持久化/非法归一）；
+  memory 17 / settings 209 测试
+- COVERAGE **✅53 / 🟡8 / ❌1**
+
 **Round 61 / P1-P3B：手动压缩 + LSP workspace opt-in（2026-11-08）**
 - /compact：contracts SessionCompactor/CompactResult + 稳定错误；agent CompactNow（running/budget/nothing/save 分类，ReplaceHistory）；
   session 第 13 条命令（压缩中/成功 N→M/本地化错误/防重复）；agent 105 / session 168 测试

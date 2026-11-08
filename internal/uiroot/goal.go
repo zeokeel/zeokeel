@@ -14,11 +14,14 @@ import (
 	"github.com/zeokeel/zeokeel/internal/contracts"
 )
 
-// Goal statuses: active goals drive auto-continue; paused goals stay visible
-// but are not advanced.
+// Goal statuses live in the contract (contracts.GoalStatus*); active goals
+// drive auto-continue, paused goals stay visible but are not advanced, and
+// completed/abandoned goals are terminal.
 const (
-	goalStatusActive = "active"
-	goalStatusPaused = "paused"
+	goalStatusActive    = contracts.GoalStatusActive
+	goalStatusPaused    = contracts.GoalStatusPaused
+	goalStatusCompleted = contracts.GoalStatusCompleted
+	goalStatusAbandoned = contracts.GoalStatusAbandoned
 )
 
 // goalService is the Root's contracts.GoalTracker implementation.
@@ -32,7 +35,10 @@ type goalService struct {
 // newGoalService returns an empty goal tracker.
 func newGoalService() *goalService { return &goalService{} }
 
-var _ contracts.GoalPauser = (*goalService)(nil)
+var (
+	_ contracts.GoalPauser     = (*goalService)(nil)
+	_ contracts.GoalLifecycler = (*goalService)(nil)
+)
 
 // SetHandler installs the change handler (nil clears it).
 func (s *goalService) SetHandler(fn func(contracts.Goal, bool)) {
@@ -87,9 +93,13 @@ func (s *goalService) Pause() bool {
 		s.mu.Unlock()
 		return false
 	}
-	if s.goal.Status != goalStatusActive {
+	if s.goal.Status == goalStatusPaused {
 		s.mu.Unlock()
 		return true
+	}
+	if s.goal.Status != goalStatusActive {
+		s.mu.Unlock()
+		return false
 	}
 	goal := *s.goal
 	goal.Status = goalStatusPaused
@@ -110,9 +120,13 @@ func (s *goalService) Resume() bool {
 		s.mu.Unlock()
 		return false
 	}
-	if s.goal.Status != goalStatusPaused {
+	if s.goal.Status == goalStatusActive {
 		s.mu.Unlock()
 		return true
+	}
+	if s.goal.Status != goalStatusPaused {
+		s.mu.Unlock()
+		return false
 	}
 	goal := *s.goal
 	goal.Status = goalStatusActive
@@ -123,6 +137,59 @@ func (s *goalService) Resume() bool {
 		runHandlerSafely("goal", func() { handler(goal, true) })
 	}
 	return true
+}
+
+// Complete marks the active/paused goal completed and notifies the handler;
+// completed/abandoned goals and an absent goal report false.
+func (s *goalService) Complete() bool {
+	return s.transition(goalStatusCompleted)
+}
+
+// Abandon marks the active/paused goal abandoned and notifies the handler.
+func (s *goalService) Abandon() bool {
+	return s.transition(goalStatusAbandoned)
+}
+
+// transition moves an active/paused goal to target and notifies the handler.
+func (s *goalService) transition(target string) bool {
+	s.mu.Lock()
+	if s.goal == nil || (s.goal.Status != goalStatusActive && s.goal.Status != goalStatusPaused) {
+		s.mu.Unlock()
+		return false
+	}
+	goal := *s.goal
+	goal.Status = target
+	s.goal = &goal
+	handler := s.handler
+	s.mu.Unlock()
+	if handler != nil {
+		runHandlerSafely("goal", func() { handler(goal, true) })
+	}
+	return true
+}
+
+// Edit replaces the goal text (same ID), resets the status to active and
+// notifies the handler; an absent goal or blank text is an error.
+func (s *goalService) Edit(text string) (string, error) {
+	text = strings.TrimSpace(text)
+	if text == "" {
+		return "", fmt.Errorf("goal: text is required")
+	}
+	s.mu.Lock()
+	if s.goal == nil {
+		s.mu.Unlock()
+		return "", fmt.Errorf("goal: no goal to edit")
+	}
+	goal := *s.goal
+	goal.Text = text
+	goal.Status = goalStatusActive
+	s.goal = &goal
+	handler := s.handler
+	s.mu.Unlock()
+	if handler != nil {
+		runHandlerSafely("goal", func() { handler(goal, true) })
+	}
+	return goal.ID, nil
 }
 
 // Clear removes the goal and notifies the handler with ok=false. It reports

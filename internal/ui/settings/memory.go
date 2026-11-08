@@ -8,6 +8,7 @@ import (
 	"context"
 	"fmt"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -34,6 +35,14 @@ type memoryPageState struct {
 	notice       string
 	noticeErr    bool
 	confirmClear bool
+
+	// Consolidation policy row (optional: only with a MemoryConsolidator).
+	policyLoaded bool
+	maxEntries   string
+	maxAgeDays   string
+	policyWarn   string
+	policyNotice string
+	policyErr    bool
 }
 
 // memoryStatsLabel renders the entry count.
@@ -69,7 +78,7 @@ func memoryTimestamp(created time.Time) string {
 
 // buildMemoryPage renders the memory management page.
 func buildMemoryPage(c *ui.Context, t *design.Tokens, kctx cordis.Context,
-	st *memoryPageState, locale contracts.LocaleService) {
+	st *memoryPageState, settingsStore contracts.SettingsService, locale contracts.LocaleService) {
 	ui.Column(c).FillWidth().Gap(design.Space2).Children(func() {
 		pageHeader(c, t, localized(locale, "记忆", "Memory"), localized(locale,
 			"查看、搜索与管理全局记忆。",
@@ -137,6 +146,8 @@ func buildMemoryPage(c *ui.Context, t *design.Tokens, kctx cordis.Context,
 			}
 		})
 
+		buildMemoryConsolidationPanel(c, t, store, settingsStore, st, locale)
+
 		panel(c, t, func() {
 			sectionTitle(c, t, localized(locale, "添加记忆", "Add memory"))
 			ui.TextInput(c, &st.draft).
@@ -185,6 +196,110 @@ func buildMemoryPage(c *ui.Context, t *design.Tokens, kctx cordis.Context,
 			}
 		}
 	})
+}
+
+// parseMemoryPolicyInt parses one policy input: empty means 0 (unlimited),
+// negative or non-numeric input is invalid and normalized to 0.
+func parseMemoryPolicyInt(raw string) (int, bool) {
+	trimmed := strings.TrimSpace(raw)
+	if trimmed == "" {
+		return 0, true
+	}
+	value, err := strconv.Atoi(trimmed)
+	if err != nil || value < 0 {
+		return 0, false
+	}
+	return value, true
+}
+
+// buildMemoryConsolidationPanel renders the deterministic consolidation policy
+// row (caps/retention). It is hidden when the store does not implement
+// contracts.MemoryConsolidator; tidy/clear stay available either way.
+func buildMemoryConsolidationPanel(c *ui.Context, t *design.Tokens, store contracts.MemoryStore,
+	settingsStore contracts.SettingsService, st *memoryPageState, locale contracts.LocaleService) {
+	consolidator, ok := store.(contracts.MemoryConsolidator)
+	if !ok || consolidator == nil {
+		return
+	}
+	if !st.policyLoaded {
+		st.policyLoaded = true
+		if settingsStore != nil {
+			st.maxEntries = strings.TrimSpace(settingsStore.Get(contracts.SettingMemoryMaxEntries, ""))
+			st.maxAgeDays = strings.TrimSpace(settingsStore.Get(contracts.SettingMemoryMaxAgeDays, ""))
+		}
+	}
+	panel(c, t, func() {
+		sectionTitle(c, t, localized(locale, "整理策略", "Consolidation policy"))
+		design.Apply(ui.Text(c, localized(locale,
+			"按策略确定性整理（不调用模型）：过期删除 + 超限保留最新；0 或留空表示不限制。",
+			"Deterministic consolidation (no model call): drop expired entries, then keep the newest up to the cap; 0 or empty means unlimited.")),
+			t.Font(design.TypeXXS)).TextColor(t.LabelTertiary).MaxLines(2)
+		ui.TextInput(c, &st.maxEntries).
+			Label(inputLabel(locale, localized(locale, "最大条目数", "Max entries"))).
+			Placeholder(localized(locale, "0（不限）", "0 (unlimited)")).FillWidth()
+		ui.TextInput(c, &st.maxAgeDays).
+			Label(inputLabel(locale, localized(locale, "保留天数", "Max age (days)"))).
+			Placeholder(localized(locale, "0（不限）", "0 (unlimited)")).FillWidth()
+		ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(design.Space2).Children(func() {
+			if ui.Button(c, localized(locale, "按策略整理", "Consolidate")).Clicked() {
+				applyMemoryPolicy(c, consolidator, settingsStore, st, locale)
+			}
+			ui.Spacer(c).Grow(1)
+			if st.policyNotice != "" && !st.policyErr {
+				statusBadge(c, t, st.policyNotice, false)
+			}
+		})
+		if st.policyWarn != "" {
+			buildMemoryPageError(c, t, st.policyWarn)
+		}
+		if st.policyNotice != "" && st.policyErr {
+			buildMemoryPageError(c, t, st.policyNotice)
+		}
+	})
+}
+
+// applyMemoryPolicy persists the normalized policy and runs one consolidation
+// call, surfacing the report or failure in the panel.
+func applyMemoryPolicy(c *ui.Context, consolidator contracts.MemoryConsolidator,
+	settingsStore contracts.SettingsService, st *memoryPageState, locale contracts.LocaleService) {
+	maxEntries, entriesOK := parseMemoryPolicyInt(st.maxEntries)
+	maxAgeDays, ageOK := parseMemoryPolicyInt(st.maxAgeDays)
+	st.policyWarn = ""
+	if !entriesOK || !ageOK {
+		st.policyWarn = localized(locale,
+			"无效数字，已按 0（不限）处理",
+			"Invalid number; using 0 (unlimited)")
+	}
+	st.maxEntries = strconv.Itoa(maxEntries)
+	st.maxAgeDays = strconv.Itoa(maxAgeDays)
+	var saveErr error
+	if settingsStore != nil {
+		if err := settingsStore.Set(contracts.SettingMemoryMaxEntries, st.maxEntries); err != nil {
+			saveErr = err
+		}
+		if err := settingsStore.Set(contracts.SettingMemoryMaxAgeDays, st.maxAgeDays); err != nil && saveErr == nil {
+			saveErr = err
+		}
+	}
+	report, err := consolidator.Consolidate(context.Background(), contracts.MemoryPolicy{
+		MaxEntries: maxEntries,
+		MaxAge:     time.Duration(maxAgeDays) * 24 * time.Hour,
+	})
+	switch {
+	case err != nil:
+		st.policyNotice = localized(locale, "整理失败：", "Consolidation failed: ") + err.Error()
+		st.policyErr = true
+	case saveErr != nil:
+		st.policyNotice = localized(locale, "保存策略失败：", "Failed to save policy: ") + saveErr.Error()
+		st.policyErr = true
+	default:
+		st.policyNotice = fmt.Sprintf(localized(locale,
+			"已整理：过期 %d / 超限 %d / 剩余 %d",
+			"Consolidated: expired %d / over cap %d / remaining %d"),
+			report.RemovedExpired, report.RemovedOverCap, report.Remaining)
+		st.policyErr = false
+	}
+	c.Invalidate()
 }
 
 // normalizeMemoryKey is the duplicate key of the tidy action: trimmed, inner
