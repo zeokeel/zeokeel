@@ -299,3 +299,66 @@ func TestChatConfigCarriesReasoningEffortDefault(t *testing.T) {
 		t.Fatalf("invalid Config().ReasoningEffort = %q, want empty", got)
 	}
 }
+
+// TestSessionReferenceBudgetEvent pins the typed budget classification written
+// into the session_refs event when a referenced transcript is truncated.
+func TestSessionReferenceBudgetEvent(t *testing.T) {
+	provider := &captureProvider{}
+	svc, store := newAttachmentService(t, provider)
+	current, _ := svc.NewSession("Current")
+	referenced, _ := svc.NewSession("Referenced")
+	messages := make([]contracts.ChatMessage, 0, 30)
+	for index := 0; index < 30; index++ {
+		messages = append(messages, contracts.ChatMessage{
+			ID: fmt.Sprintf("b%d", index), Role: contracts.ChatRoleUser,
+			Text: fmt.Sprintf("short %d", index),
+		})
+	}
+	seedReadModel(t, svc, referenced, messages...)
+	if err := svc.Send(current, "compare @session:"+referenced); err != nil {
+		t.Fatalf("Send: %v", err)
+	}
+	waitIdle(t, svc, current)
+	events, err := store.Events(context.Background(), current, 0, 0)
+	if err != nil {
+		t.Fatalf("events: %v", err)
+	}
+	payload := ""
+	for _, event := range events {
+		if event.Type == "session_refs" {
+			payload = string(event.Payload)
+		}
+	}
+	if !strings.Contains(payload, `"budget"`) || !strings.Contains(payload, `"kind":"messages"`) ||
+		!strings.Contains(payload, `"used":10`) {
+		t.Fatalf("session_refs payload = %q, want a messages budget classification", payload)
+	}
+}
+
+// TestSessionReferenceRuneBudgetEvent covers the rune-cap truncation kind.
+func TestSessionReferenceRuneBudgetEvent(t *testing.T) {
+	provider := &captureProvider{}
+	svc, store := newAttachmentService(t, provider)
+	current, _ := svc.NewSession("Current")
+	referenced, _ := svc.NewSession("Referenced")
+	seedReadModel(t, svc, referenced, contracts.ChatMessage{
+		ID: "r1", Role: contracts.ChatRoleUser, Text: strings.Repeat("x", maxReferenceContextRunes+2000),
+	})
+	if err := svc.Send(current, "long @session:"+referenced); err != nil {
+		t.Fatalf("Send: %v", err)
+	}
+	waitIdle(t, svc, current)
+	events, err := store.Events(context.Background(), current, 0, 0)
+	if err != nil {
+		t.Fatalf("events: %v", err)
+	}
+	payload := ""
+	for _, event := range events {
+		if event.Type == "session_refs" {
+			payload = string(event.Payload)
+		}
+	}
+	if !strings.Contains(payload, `"budget"`) || !strings.Contains(payload, `"kind":"runes"`) {
+		t.Fatalf("session_refs payload = %q, want a runes budget classification", payload)
+	}
+}

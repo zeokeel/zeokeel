@@ -6,6 +6,7 @@ package agent
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 
@@ -26,20 +27,31 @@ const (
 )
 
 // expandSessionReferences returns the model input prompt with referenced
-// session transcripts prepended, plus the IDs that were expanded. Unknown,
-// empty and self references are skipped; duplicate tokens are already collapsed
-// by contracts.ParseSessionReferences. A prompt without valid references is
-// returned unchanged.
-func (s *service) expandSessionReferences(sessionID, prompt string) (string, []string) {
+// session transcripts prepended, the IDs that were expanded, and the typed
+// budget classification when a per-session message or rune cap truncated a
+// block (nil otherwise). Unknown, empty and self references are skipped;
+// duplicate tokens are already collapsed by contracts.ParseSessionReferences.
+// A prompt without valid references is returned unchanged.
+func (s *service) expandSessionReferences(sessionID, prompt string) (string, []string, *contracts.SessionReferenceBudgetError) {
 	refs := contracts.ParseSessionReferences(prompt)
 	if len(refs) == 0 || strings.TrimSpace(prompt) == "" {
-		return prompt, nil
+		return prompt, nil, nil
 	}
 	var (
-		blocks []string
-		ids    []string
-		used   int
+		blocks    []string
+		ids       []string
+		used      int
+		budgetErr *contracts.SessionReferenceBudgetError
 	)
+	recordBudget := func(err error) {
+		if err == nil || budgetErr != nil {
+			return
+		}
+		var typed *contracts.SessionReferenceBudgetError
+		if errors.As(err, &typed) {
+			budgetErr = typed
+		}
+	}
 	for _, ref := range refs {
 		if ref == "" || ref == sessionID {
 			continue
@@ -49,16 +61,24 @@ func (s *service) expandSessionReferences(sessionID, prompt string) (string, []s
 			s.logger.Printf("[agent] session reference %q: unknown session", ref)
 			continue
 		}
+		// The per-session message cap is a budget of its own: exceeding it
+		// classifies the truncation as a "messages" budget error.
+		if len(referenced.Messages) > maxReferenceMessages {
+			recordBudget(contracts.CheckSessionReferenceBudget(
+				maxReferenceMessages-len(referenced.Messages), maxReferenceContextRunes-used))
+		}
 		block := buildReferenceBlock(referenced)
 		if block == "" {
 			continue
 		}
 		remaining := maxReferenceContextRunes - used
 		if remaining <= 0 {
+			recordBudget(contracts.CheckSessionReferenceBudget(0, remaining))
 			break
 		}
 		runes := []rune(block)
 		if len(runes) > remaining {
+			recordBudget(contracts.CheckSessionReferenceBudget(0, remaining-len(runes)))
 			// Keep the block within the global budget, mark the cut and retain
 			// the closing footer so the model can see the block boundary.
 			const footerText = "[引用结束]\n\n"
@@ -77,9 +97,9 @@ func (s *service) expandSessionReferences(sessionID, prompt string) (string, []s
 		}
 	}
 	if len(blocks) == 0 {
-		return prompt, nil
+		return prompt, nil, budgetErr
 	}
-	return strings.Join(blocks, "") + prompt, ids
+	return strings.Join(blocks, "") + prompt, ids, budgetErr
 }
 
 // buildReferenceBlock renders one referenced session's recent transcript as a

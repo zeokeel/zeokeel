@@ -1655,25 +1655,44 @@ func mentionQuery(draft string) (query string, tokenStart int, ok bool) {
 }
 
 // mentionSessionRows lists the other conversations the @ menu offers: the
-// active session is excluded, the query matches the title or id
-// case-insensitively, and the list is capped like the file suggestions.
+// active session is excluded and the candidates are ranked by
+// contracts.RankSessionReferenceCandidates (exact ID, ID prefix, title contains,
+// then recency) and capped like the file suggestions.
 func mentionSessionRows(chat contracts.ChatService, query string) []contracts.ChatSessionInfo {
 	active := chat.ActiveSession()
-	needle := strings.ToLower(strings.TrimSpace(query))
-	rows := make([]contracts.ChatSessionInfo, 0, maxMentionFiles)
+	byID := make(map[string]contracts.ChatSessionInfo)
+	candidates := make([]contracts.SessionReferenceCandidate, 0, maxMentionFiles)
 	for _, info := range chat.Sessions() {
 		if info.ID == active {
 			continue
 		}
-		if needle != "" && !strings.Contains(strings.ToLower(info.Title+"\x00"+info.ID), needle) {
-			continue
-		}
-		rows = append(rows, info)
-		if len(rows) == maxMentionFiles {
-			break
+		byID[info.ID] = info
+		candidates = append(candidates, contracts.SessionReferenceCandidate{
+			SessionID: info.ID,
+			Title:     info.Title,
+			UpdatedAt: info.UpdatedAt,
+		})
+	}
+	ranked := contracts.RankSessionReferenceCandidates(candidates, query, maxMentionFiles)
+	rows := make([]contracts.ChatSessionInfo, 0, len(ranked))
+	for _, candidate := range ranked {
+		if info, ok := byID[candidate.SessionID]; ok {
+			rows = append(rows, info)
 		}
 	}
 	return rows
+}
+
+// sessionReferenceIDPrefix renders the short session-ID hint shown next to a
+// mention candidate (the full ID stays in the inserted token).
+func sessionReferenceIDPrefix(sessionID string) string {
+	id := strings.TrimSpace(sessionID)
+	const limit = 8
+	runes := []rune(id)
+	if len(runes) <= limit {
+		return id
+	}
+	return string(runes[:limit]) + "…"
 }
 
 // buildMentionMenu is the composer's @ suggestion panel: a brand card listing
@@ -1776,7 +1795,7 @@ func buildMentionMenu(c *ui.Context, t *design.Tokens, runtime contracts.UIRunti
 						TextColor(t.LabelSecondary)
 					design.Apply(ui.Text(c, title), t.Font(design.TypeXS)).
 						TextColor(t.LabelPrimary).Grow(1).MaxLines(1).Ellipsis("…")
-					design.Apply(ui.Text(c, info.ID), t.MonoFamily()).FontSize(10).
+					design.Apply(ui.Text(c, sessionReferenceIDPrefix(info.ID)), t.MonoFamily()).FontSize(10).
 						TextColor(t.LabelTertiary).NoWrap()
 				})
 				if row.Clicked() {

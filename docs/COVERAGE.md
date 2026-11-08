@@ -29,7 +29,7 @@
 - **presets 已落地**：prompt 片段契约 + composer「预设/Presets」插入菜单 + 设置「预设」页 CRUD（名称/提示词/排序/
   恢复默认）+ 设置「模型目录」编辑页（modelcatalog.settings 动态读取）；旧 agent presets 的 tool allowlist 语义仍未迁移，
   故 presets 记 🟡。
-- 复核统计（Round 62 进行中）：62 项中 **✅56 / 🟡5 / ❌1**。✅ 为有等价实现或剩余差异属明确非目标；🟡 为已实现但存在
+- 复核统计（Round 63 进行中）：62 项中 **✅58 / 🟡3 / ❌1**。✅ 为有等价实现或剩余差异属明确非目标；🟡 为已实现但存在
   深度/长尾差异（§5.1）；❌ 仅 winproc（Windows 平台非目标）。核心对话/持久化/工作区/审批/设置/右栏/搜索/导入/更新/
   编排/composer 控制/MCP 管理/宿主桌面能力均已可用。
 - **功能面覆盖已完成**：旧应用的用户可见功能均有等价实现；剩余工作为 §5.1 的交互深度精修与 §5.2 的明确非目标。
@@ -38,8 +38,8 @@
 
 | 状态 | 数量 | 占比 | 含义 |
 |---|---:|---:|---|
-| ✅ 已迁移/等价 | 56 | 90.3% | 当前代码有对应实现，进入 desktop/headless 装配或剩余差异属明确非目标 |
-| 🟡 已实现（深度限制） | 5 | 8.1% | 功能已可用，存在子功能/交互/执行语义的深度差异（§5.1） |
+| ✅ 已迁移/等价 | 58 | 93.5% | 当前代码有对应实现，进入 desktop/headless 装配或剩余差异属明确非目标 |
+| 🟡 已实现（深度限制） | 3 | 4.8% | 功能已可用，存在子功能/交互/执行语义的深度差异（§5.1） |
 | ❌ 未迁移 | 1 | 1.6% | 仅 winproc（Windows 平台非目标） |
 | 合计 | 62 | 100% | 28 后端能力 + 34 Shell/UI 能力 |
 
@@ -64,8 +64,8 @@
 | `prompt` | ✅ | agent SystemPrompt + settings 模型页提示词 + **AGENTS.md 注入** | 系统提示可配置；每次运行读取当前工作区 `AGENTS.md`（文件名可配/32KiB 截断/读取失败告警）追加注入；auto-title 按首条提示生成；review prompt 属 review 工具非目标 |
 | `provider` | ✅ | rig `provider/openai` + agent 模块 + 模型页预设 | OpenAI Chat Completions 兼容 + **服务商预设快填（DeepSeek/OpenAI/Ollama/自定义，匹配高亮）** |
 | `runtime` | ✅ | agent + rig agent/gate/compact | 循环/审批/自动压缩/检查点/多模态 parts/subagent runner/team manager/goal 工具与 goal 桥 + **聊天模式（普通/计划/精简/创作）** + **目标暂停/自动续跑**；PTC/workflow/ralph/review 工具为明确非目标 |
-| `session` | 🟡 | agent ChatService + Regenerate/Fork/Archive/Pin/ModelSwitcher + usage + 排队发送 + goal 续跑/压缩 | 发送/取消/历史/恢复/**手动压缩 /compact**/fork/export/附件/重新生成/会话模型/推理强度/turn usage（含 context budget）/排队发送/消息字号/目标续跑；缺 tool spill |
-| `sessionreference` | 🟡 | composer @ 菜单 + agent `references.go` | token 持久化、注入尾部 20 条/≤8000 rune、session_refs 事件、self/unknown/重复忽略、分隔符解析；缺旧候选排序细节/URI 语义/预算错误分类 |
+| `session` | ✅ | agent ChatService + Regenerate/Fork/Archive/Pin/ModelSwitcher + usage + 排队发送 + goal 续跑/压缩 + tool spill | 发送/取消/历史/恢复/手动压缩/fork/export/附件/重新生成/会话模型/推理强度/turn usage/排队发送/消息字号/目标续跑 + **大工具结果落盘（>32KiB→`.zeokeel/tool-results`，持久化头部 2KiB+路径，保留 100，失败回退）** |
+| `sessionreference` | ✅ | composer @ 菜单 + agent `references.go` + contracts/sessionreference.go | token 持久化/注入尾部 20 条/8000 rune/session_refs 事件 + **候选排序（ID 精确→前缀→标题，最近优先，上限 8）** + **sessionref: URI 编解码** + **预算错误分类（messages/runes typed error 与事件 budget 字段）** |
 | `skills` | ✅ | `internal/modules/skills` + settings 技能页 | 多根 List/Read/roots/预览/刷新 + 新建/编辑（dataDir 内 frontmatter+body 原子重写、名称不可改）/删除（仅 dataDir，realpath 校验）；**已超出旧实现（old 只有只读 API）**；workspace 编辑/文件监听为非目标 |
 | `state` | ✅ | ChatService 读模型 + uiroot runtime | old broker/projector 被读模型替代；UI 所需投影可用 |
 | `store` | ✅ | `internal/modules/sessionstore` | sessions/messages/events/checkpoints/search/workspace_id + text/search_text 迁移；旧表功能以等价语义落地：attachments 在消息 parts、automation_runs 在 automations.json runHistory、feedback 在 settings 行、per-session model 在主记录 |
@@ -143,8 +143,6 @@
 |----|------|--------------|
 | `memory` | 搜索/添加/删除/整理/清空 + 上限/保留期 consolidation | 旧模型驱动 extract（高风险项，另行排期） |
 | `presets` | prompt/人设片段 CRUD+插入 | 旧 agent presets 的 systemPrompt/tool allowlist JSON 语义 |
-| `session` | fork/压缩/导出/usage/排队/字号/目标续跑 | 旧 “tool spill” 展示（内核内部实现，产品层未单列） |
-| `sessionreference` | @session 注入、事件、边界 | 旧候选排序/URI 语义细节 |
 
 ### 5.2 明确非目标（不计入覆盖缺口）
 

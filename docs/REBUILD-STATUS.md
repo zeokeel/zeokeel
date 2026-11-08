@@ -21,6 +21,13 @@
 - 右侧栏「文件」Tab：打开文件夹（mygo 原生 Directory picker）、目录进入/面包屑、文本/Markdown/图片预览、
   刷新与错误状态；E2E 覆盖工作区创建 + 列表 + 预览帧
 
+**Round 64 / spill+sessionref：工具结果落盘 + 引用细节（2026-11-08）**
+- tool spill：rig History 包装层，>32KiB tool 结果写 `<workspace>/.zeokeel/tool-results`（原子/0644/sha 文件名/prune 100），持久化
+  头部 2KiB+路径，当前 run 全文不变，无 workspace/失败回退；agent 116 测试
+- sessionreference：contracts 候选排序/sessionref URI/预算 typed error；agent 事件 budget 字段；@ 菜单排序与 ID 前缀显示；
+  contracts 4 / agent 118 / session 182 测试
+- COVERAGE **✅58 / 🟡3 / ❌1**
+
 **Round 63 / P2-A+P3-A：错误本地化 + 插件参数（2026-11-08）**
 - i18n 错误分类：contracts ErrorKind + ClassifyError（auth/rate_limit/network/timeout/context/cancelled），agent 写入读模型，session 显示
   本地化标题+原因并保留原文；agent 108 / session 179 测试；i18n 行升 ✅

@@ -1054,9 +1054,20 @@ func (s *service) send(sessionID, prompt string, attachments []contracts.Attachm
 			"attachments": attachmentNames(attachments),
 		})
 	}
-	expandedPrompt, referenceIDs := s.expandSessionReferences(sessionID, prompt)
+	expandedPrompt, referenceIDs, referenceBudget := s.expandSessionReferences(sessionID, prompt)
+	if referenceBudget != nil {
+		s.logger.Printf("[agent] session reference budget: %v", referenceBudget)
+	}
 	if s.store != nil && len(referenceIDs) > 0 {
-		s.appendEvent(runCtx, sessionID, "session_refs", map[string]any{"ids": referenceIDs})
+		payload := map[string]any{"ids": referenceIDs}
+		if referenceBudget != nil {
+			payload["budget"] = map[string]any{
+				"kind":  referenceBudget.Kind,
+				"limit": referenceBudget.Limit,
+				"used":  referenceBudget.Used,
+			}
+		}
+		s.appendEvent(runCtx, sessionID, "session_refs", payload)
 	}
 	input := buildUserInput(expandedPrompt, attachments)
 	history := s.historyView()
@@ -1281,7 +1292,7 @@ func (s *service) run(ctx context.Context, sessionID string, cfg contracts.ChatC
 		SystemPrompt:    cfg.SystemPrompt,
 		MaxIterations:   cfg.MaxIterations,
 		Tools:           s.registry.Tools(),
-		History:         history,
+		History:         s.spilledHistory(history),
 		Gate:            s.gate(sessionID),
 		ContextBudget:   cfg.ContextBudget,
 		Logger:          s.logger,
