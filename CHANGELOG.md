@@ -37,9 +37,12 @@ controls (no webview, no browser engine).
   behavior and model-catalog pages; searchable navigation, fixed footer
   actions and unsaved-changes guards.
 - **i18n**: Chinese and English UI, localized errors and date formatting.
-- **Packaging**: cross-platform release builds (`linux/amd64`, `linux/arm64`,
-  `darwin/amd64`, `darwin/arm64`) with version/commit/build-time injected at
-  link time; CI on push/PR and a tag-driven release workflow.
+- **Packaging**: cross-platform release builds with explicit OS + architecture
+  asset names — `linux/amd64`, `linux/arm64`, `darwin/amd64`, `darwin/arm64`
+  (`.tar.gz`) and `windows/amd64`, `windows/arm64` (`.zip` with `zeokeel.exe`);
+  version/commit/build-time injected at link time, `SHA256SUMS.txt` and a
+  download table in the release notes; CI on push/PR (including a cross-compile
+  check for every release target) and a tag-driven release workflow.
 
 ### Fixed
 

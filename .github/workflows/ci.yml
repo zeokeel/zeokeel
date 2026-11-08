@@ -49,6 +49,20 @@ jobs:
           ./zeokeel --version
           ./zeokeel --list-products
 
+      - name: Cross-compile release targets
+        run: |
+          # Every release target must at least compile in CI, including the
+          # Windows desktop/headless binaries.
+          for target in linux/arm64 darwin/amd64 darwin/arm64 windows/amd64 windows/arm64; do
+            goos="${target%/*}"
+            goarch="${target#*/}"
+            binary="zeokeel"
+            if [ "$goos" = "windows" ]; then
+              binary="zeokeel.exe"
+            fi
+            GOOS="$goos" GOARCH="$goarch" CGO_ENABLED=0               go build -trimpath -o "/tmp/zeokeel-${goos}-${goarch}-${binary}" ./cmd/zeokeel
+          done
+
   race:
     name: Race detector
     runs-on: ubuntu-latest

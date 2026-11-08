@@ -12,11 +12,19 @@
 
 ## 下载与运行 / Download and run
 
-Prebuilt binaries are attached to the [latest release](https://github.com/zeokeel/zeokeel/releases/latest):
-`linux/amd64`, `linux/arm64`, `darwin/amd64`, `darwin/arm64` (tar.gz + `checksums.txt`).
+Prebuilt binaries are attached to the [latest release](https://github.com/zeokeel/zeokeel/releases/latest).
+Every asset name includes its OS and CPU architecture:
+
+| Platform | Architectures | Archive |
+| --- | --- | --- |
+| Linux | x86-64 (amd64), ARM64 | `zeokeel_<version>_linux_<arch>.tar.gz` |
+| macOS | x86-64 (amd64), Apple Silicon (arm64) | `zeokeel_<version>_darwin_<arch>.tar.gz` |
+| Windows | x86-64 (amd64), ARM64 | `zeokeel_<version>_windows_<arch>.zip` (contains `zeokeel.exe`) |
+
+`SHA256SUMS.txt` lists the checksum of every archive.
 
 ```sh
-# Desktop product (needs a desktop session)
+# Desktop product (needs a desktop session; on Windows use zeokeel.exe)
 ./zeokeel
 
 # Headless product (no window; tools/memory/sessions/automation)
@@ -37,8 +45,10 @@ make ci               # build + vet + test
 ```
 
 CI runs on every push/PR (`.github/workflows/ci.yml`); pushing a `v*` tag runs
-`.github/workflows/release.yml`, which builds the four release archives,
-verifies the Linux binary, and publishes the GitHub release with checksums.
+`.github/workflows/release.yml`, which cross-compiles all six OS/arch archives
+(Linux/macOS tar.gz, Windows zip), verifies checksums and the Linux/Windows
+artifacts, and publishes the GitHub release with a platform/architecture
+download table.
 
 > **继续推进（TDD 并行 + 反证审计）**：新增 subagent 同步委派、permission 权限模式（ask/workspace/full）、
 > team manager 编排与右侧「团队」面板（spawn/steer/interrupt）、@session 引用与推理强度（low/medium/high）、

@@ -52,39 +52,111 @@ jobs:
           commit="${GITHUB_SHA::12}"
           build_time="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
           mkdir -p dist
-          for target in linux/amd64 linux/arm64 darwin/amd64 darwin/arm64; do
+          # Every supported OS/arch pair gets an explicit archive. Windows
+          # binaries are .zip (and carry the .exe suffix); everything else is
+          # .tar.gz. Names always include OS and architecture so the download
+          # list on the release page is unambiguous.
+          for target in linux/amd64 linux/arm64 darwin/amd64 darwin/arm64 windows/amd64 windows/arm64; do
             goos="${target%/*}"
             goarch="${target#*/}"
             name="zeokeel_${VERSION}_${goos}_${goarch}"
             mkdir -p "$name"
+            binary="zeokeel"
+            if [ "$goos" = "windows" ]; then
+              binary="zeokeel.exe"
+            fi
             GOOS="$goos" GOARCH="$goarch" CGO_ENABLED=0 go build -trimpath \
               -ldflags "-s -w \
                 -X github.com/zeokeel/zeokeel/internal/host.Version=v${VERSION} \
                 -X github.com/zeokeel/zeokeel/internal/host.Commit=${commit} \
                 -X github.com/zeokeel/zeokeel/internal/host.BuildTime=${build_time}" \
-              -o "${name}/zeokeel" ./cmd/zeokeel
-            cp README.md LICENSE CHANGELOG.md "$name/"
-            tar -czf "dist/${name}.tar.gz" "$name"
+              -o "${name}/${binary}" ./cmd/zeokeel
+            cp README.md LICENSE CHANGELOG.md VERSION "$name/"
+            if [ "$goos" = "windows" ]; then
+              (cd "$name/.." && zip -qr "dist/${name}.zip" "$name")
+            else
+              tar -czf "dist/${name}.tar.gz" "$name"
+            fi
             rm -rf "$name"
           done
-          (cd dist && sha256sum ./*.tar.gz > checksums.txt)
+          (
+            cd dist
+            sha256sum ./*.tar.gz ./*.zip > SHA256SUMS.txt
+          )
 
-      - name: Verify Linux binary
+      - name: Verify archives and checksums
         env:
           VERSION: ${{ steps.version.outputs.version }}
         run: |
+          set -eu
+          (cd dist && sha256sum -c SHA256SUMS.txt)
           tmp="$(mktemp -d)"
           tar -xzf "dist/zeokeel_${VERSION}_linux_amd64.tar.gz" -C "$tmp"
           "$tmp/zeokeel_${VERSION}_linux_amd64/zeokeel" --version | tee /tmp/version.txt
           grep -q "v${VERSION}" /tmp/version.txt
+          unzip -l "dist/zeokeel_${VERSION}_windows_amd64.zip" | grep -q 'zeokeel.exe'
+
+      - name: Compose release notes
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          {
+            cat CHANGELOG.md
+            echo ""
+            echo "## Downloads — v${VERSION}"
+            echo ""
+            echo "Pick the archive that matches your operating system and CPU architecture."
+            echo ""
+            echo "| Platform | Architecture | Archive |"
+            echo "| --- | --- | --- |"
+            for target in linux/amd64 linux/arm64 darwin/amd64 darwin/arm64 windows/amd64 windows/arm64; do
+              goos="${target%/*}"
+              goarch="${target#*/}"
+              case "$goos" in
+                linux)  platform="Linux" ;;
+                darwin) platform="macOS" ;;
+                windows) platform="Windows" ;;
+              esac
+              case "$goarch" in
+                amd64) arch="x86-64 (amd64)" ;;
+                arm64) arch="ARM64" ;;
+              esac
+              if [ "$goos" = "windows" ]; then
+                archive="zeokeel_${VERSION}_${goos}_${goarch}.zip"
+              else
+                archive="zeokeel_${VERSION}_${goos}_${goarch}.tar.gz"
+              fi
+              echo "| ${platform} | ${arch} | \`${archive}\` |"
+            done
+            echo ""
+            echo "**Checksums:** \`SHA256SUMS.txt\` (sha256 of every archive)."
+            echo ""
+            echo '```sh'
+            echo "# Linux / macOS"
+            echo "tar -xzf zeokeel_${VERSION}_<os>_<arch>.tar.gz"
+            echo "./zeokeel_${VERSION}_<os>_<arch>/zeokeel --version"
+            echo ""
+            echo "# Windows (PowerShell)"
+            echo "Expand-Archive zeokeel_${VERSION}_windows_<arch>.zip ."
+            echo ".\\zeokeel_${VERSION}_windows_<arch>\\zeokeel.exe --version"
+            echo '```'
+          } > release-notes.md
+
+      - name: Remove legacy asset names
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ steps.version.outputs.version }}
+        run: gh release delete-asset "v${VERSION}" checksums.txt --yes
 
       - name: Publish GitHub release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: v${{ steps.version.outputs.version }}
           name: ZeoKeel v${{ steps.version.outputs.version }}
-          body_path: CHANGELOG.md
+          body_path: release-notes.md
           files: |
             dist/*.tar.gz
-            dist/checksums.txt
+            dist/*.zip
+            dist/SHA256SUMS.txt
           fail_on_unmatched_files: true
