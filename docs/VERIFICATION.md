@@ -265,3 +265,59 @@ regression **227 PASS / 0 SKIP / 0 FAIL**；UI 快照 **65 步渲染 / 63 个唯
 - 第十二轮覆盖：技能编辑（UpdateSkill 并发/拒绝/设置页入口）、设置记忆整理/清空（真实后端与故障注入）、
   内置模块清单（host 映射/lister 快照/诊断页截断/plugins 只读段）；第十一轮关键链路复跑 9 PASS 0 回退；无新缺陷。
 - xvfb 桌面日志：`product "desktop" loaded: 27 module instances`、tray ready、quit requested、无 panic。
+
+## 最终验证（Round 57，2026-11-08，HEAD 02f6612）
+
+环境：go1.27.3 linux/amd64 · 离线（GOPROXY=off/GOSUMDB=off/GOFLAGS=-mod=mod）· 2026-11-08 08:40–08:55（Asia/Shanghai）。
+命令：`./scripts/verify.sh`（完整）。验证时工作树含并行进行的第十三轮审计未提交文件（`internal/regression/{goal_autocontinue,reasoning_preview,provider_presets}_test.go` 与 provider_presets 相关改动），regression 计数以该工作树为准。
+
+### 一键验证结果（第 4 次尝试 PASS）
+```
+$ ./scripts/verify.sh
+==> gofmt ... PASS (1s)
+==> go build ./... ... PASS (3s)
+==> go vet ./... ... PASS (1s)
+==> go test ./... -count=1 ... PASS (16s)
+==> go test ./... -count=1 -race ... PASS (60s)
+==> regression (-v) ... (regression: 258 PASS / 0 SKIP / 0 FAIL) PASS (14s)
+==> ui-snapshot ... (snapshot: 65 steps / 63 PNGs) PASS (10s)
+==> desktop smoke (xvfb) ... (desktop exit 124, tray ready: 1) PASS (8s)
+==> headless smoke ... (headless exit 124) PASS (8s)
+==> ACP smoke ... (ACP exit 0) PASS (1s)
+verify summary: 10 passed, 0 failed, 122s total
+verify: PASS
+```
+regression **258 PASS / 0 SKIP / 0 FAIL**（含工作树第十三轮新增审计用例；HEAD 02f6612 提交态约 251）;UI 快照 **65 步 / 63 唯一 PNG**；三产品冒烟无 panic。
+
+### 尝试记录与判定（前 3 次为并行审计写入冲突，非产品回归）
+1. 第 1 次：regression 步骤 FAIL（89s）；包内用例输出全 PASS（失败用例在截断窗口之外），单独复跑 `go test ./internal/regression -count=1 -v` → **254 PASS / 0 SKIP**，判定并行负载/写入下偶发。
+2. 第 2 次：`go vet ./...` FAIL——工作树中并行写入的 `internal/regression/provider_presets_test.go` 编译错误（`harness.h undefined`）；该文件属第十三轮审计 WIP，随后被修复，vet 恢复 PASS。
+3. 第 3 次：`-race` FAIL build——并行写入的 `internal/ui/settings/provider_presets_test.go` 缺少 test helper（`applyProviderPreset` 等未定义）；WIP 补齐后恢复。
+4. 第 4 次（上表）**10/10 PASS，122s**。
+
+### xvfb 桌面冒烟（模块实例数/无 panic）
+```
+$ xvfb-run -a timeout -s TERM 8 go run ./cmd/zeokeel --data-dir <tmp>
+exit 124（允许）
+08:54:00 ZeoKeel: system tray ready (close to tray: false)
+08:54:00 ZeoKeel: ... product "desktop" loaded: 27 module instances, screens [home automation session plugins]
+08:54:08 ZeoKeel: quit requested
+NO_PANIC
+```
+`grep -c '27 module instances'` = 1；无 panic/runtime error/SIGSEGV。
+
+### 新功能冒烟（单测证据 + ACP 真实帧）
+- **goal 自动续跑**：`go test ./internal/ui/settings -run TestBehaviorPageGoalAutoContinue` → **2 PASS**；第十三轮 regression `TestGoalAutoContinue*` → **3 PASS**（默认关闭/坏值、次数上限与重置、抑制清除与失败）。
+- **实时思考预览**：`go test ./internal/ui/session -run TestReasoningPreview` → **3 PASS**（流式中显示、完成消失、空/英文隐藏）；regression `TestReasoningPreview*` → **2 PASS**。COVERAGE 的 `Reasoning 展示` 因此升为 ✅。
+- **服务商预设**：`go test ./internal/ui/settings -run TestProviderPreset` → **8 PASS**（DeepSeek/Ollama/自定义、匹配高亮、写失败、en、model 失败回滚）；regression `TestProviderPreset*` → **2 PASS**。
+- **ACP session/list + session/load 真实帧**（同一 data-dir 两次 `--acp`）：
+```
+{"id":1,"jsonrpc":"2.0","result":{"agentCapabilities":{"loadSession":true,...},"protocolVersion":1}}
+{"id":2,"jsonrpc":"2.0","result":{"sessionId":"sess-1794099265027788239"}}
+{"id":3,"jsonrpc":"2.0","result":{"sessions":[{"sessionId":"sess-1794099265027788239","title":"","updatedAt":"2026-11-08T08:54:25+08:00"}]}}
+{"id":2,"jsonrpc":"2.0","result":{"messages":[],"model":"gpt-4o-mini","sessionId":"sess-1794099265027788239","title":""}}
+```
+
+### 文档核对
+- docs/COVERAGE.md 矩阵重算（§2 28 + §3 34 = 62）：**✅40 / 🟡21 / ❌1**（Reasoning 展示升 ✅）；摘要与统计表已同步为 40/21/1（64.5% / 33.9% / 1.6%）。
+- README 状态行更新为 Round 57（HEAD 02f6612）。

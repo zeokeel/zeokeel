@@ -124,3 +124,21 @@ func TestProviderPresetsEnglishCopy(t *testing.T) {
 
 // errProviderStoreWrite scripts one settings write failure for the presets.
 var errProviderStoreWrite = errors.New("provider store boom")
+
+func TestProviderPresetModelFailureRollsBack(t *testing.T) {
+	store := newFakeSettings(map[string]string{
+		contracts.SettingsChatBaseURL: "https://old.example/v1",
+		contracts.SettingsChatModel:   "old-model",
+	})
+	store.failKey = contracts.SettingsChatModel
+	h := providerHarness(t, store)
+	tester := h.tester()
+	h.click(tester, "DeepSeek")
+	if got := store.get(contracts.SettingsChatBaseURL); got != "https://old.example/v1" {
+		t.Fatalf("baseURL after rollback = %q, want the old URL", got)
+	}
+	if got := store.get(contracts.SettingsChatModel); got != "old-model" {
+		t.Fatalf("model after rollback = %q, want old-model", got)
+	}
+	h.assertTexts(tester, "应用预设失败")
+}

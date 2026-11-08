@@ -7,7 +7,7 @@
 
 ## 修复状态（Lead 复核后）
 
-> 首轮 11 个「已知缺陷探针」与第二轮 4 个 P3 均已随 TDD 修复转为 PASS；第三轮 P3-9/10 已修复、P3-11 重开后于 ca2d24c 真正修复；第四轮 P3-12 已修复（ca2d24c）；第五~七轮无新缺陷，第八轮发现 1 个 P3（AUDIT-P3-13）并已修复：诊断报告现在对 apiKey/token/secret/password/authorization 类设置整值隐藏，并对 JSON 结构化设置（mcp.servers）递归掩码 Bearer token 与凭证字段；新增单测断言 web.search.apiKey 与 mcp Bearer 不泄漏。第九轮发现 1 个 P3（AUDIT-P3-14：agent.permission=never 已存储但会话权限 chip 显示「询问」，待修）。第十~十二轮无新缺陷。`go test ./internal/regression -count=1 -race` 当前 **251 PASS / 0 SKIP**（历史：首轮修复后 92，第二轮后 98，第三轮后 133，第四轮后 153，第五轮后 172，第六轮后 180，第七轮后 189，第八轮后 208，第九轮后 220，第十轮后 227，第十一轮后 241）。
+> 首轮 11 个「已知缺陷探针」与第二轮 4 个 P3 均已随 TDD 修复转为 PASS；第三轮 P3-9/10 已修复、P3-11 重开后于 ca2d24c 真正修复；第四轮 P3-12 已修复（ca2d24c）；第五~七轮无新缺陷，第八轮发现 1 个 P3（AUDIT-P3-13）并已修复：诊断报告现在对 apiKey/token/secret/password/authorization 类设置整值隐藏，并对 JSON 结构化设置（mcp.servers）递归掩码 Bearer token 与凭证字段；新增单测断言 web.search.apiKey 与 mcp Bearer 不泄漏。第九轮发现 1 个 P3（AUDIT-P3-14：agent.permission=never 已存储但会话权限 chip 显示「询问」，**已修复**）；第十~十二轮无新缺陷；第十三轮发现 1 个 P3（AUDIT-P3-15，服务商预设部分写入无回滚，**已修复**）。`go test ./internal/regression -count=1 -race` 当前 **258 PASS / 0 SKIP**（历史：首轮修复后 92，第二轮后 98，第三轮后 133，第四轮后 153，第五轮后 172，第六轮后 180，第七轮后 189，第八轮后 208，第九轮后 220，第十轮后 227，第十一轮后 241，第十二轮后 251）。
 
 | ID | 优先级 | 状态 | 修复摘要 |
 |----|--------|------|----------|
@@ -31,7 +31,7 @@ $ go test ./internal/regression -count=1                    ok  1.2s
 $ go test ./internal/regression -count=1 -race              ok 12.8s（98 PASS / 0 SKIP）
 ```
 
-测试规模：`internal/regression` 共 251 个顶层 Test（首轮 78 + 第二轮 20 + 第三轮 35 + 第四轮 20 + 第五轮 19 + 第六轮 8 + 第七轮 9 + 第八轮 17 + 特性提交补充 2 + 第九轮 12 + 第十轮 7 + 第十一轮 14 + 第十二轮 10；含子用例后更多；另有 `internal/ui/uimodtest` 的 E2E 1 个，不计入本包）。第三轮 P3-9/10 已修复，P3-11 重开后已真正修复，第四轮 P3-12 已修复，第五~七轮无新缺陷，第八轮 P3-13 已修复（da654e3），第九轮新增 P3-14（待修），第十~十二轮无新缺陷；当前 **251 PASS / 0 SKIP**。
+测试规模：`internal/regression` 共 258 个顶层 Test（首轮 78 + 第二轮 20 + 第三轮 35 + 第四轮 20 + 第五轮 19 + 第六轮 8 + 第七轮 9 + 第八轮 17 + 特性提交补充 2 + 第九轮 12 + 第十轮 7 + 第十一轮 14 + 第十二轮 10 + 第十三轮 7；含子用例后更多；另有 `internal/ui/uimodtest` 的 E2E 1 个，不计入本包）。第三轮 P3-9/10 已修复，P3-11 重开后已真正修复，第四轮 P3-12 已修复，第五~七轮无新缺陷，第八轮 P3-13 已修复（da654e3），第九轮新增 P3-14（已修复），第十~十二轮无新缺陷，第十三轮新增 P3-15（已修复）；当前 **258 PASS / 0 SKIP**。
 
 ## 用例矩阵
 
@@ -354,6 +354,7 @@ $ go test ./internal/regression -count=1 -race               ok 27.9s（153 PASS
 第十轮扩张到 **227 PASS / 0 SKIP**（plan keep-planning、slash 命令 i18n、窗口快捷键），并复跑第九轮关键链路 17 项确认 0 回退。
 第十一轮扩张到 **241 PASS / 0 SKIP**（排队发送、MCP 服务器开关、自动化筛选、消息字号、AGENTS.md/记忆页/连接检查/上下文预算/反馈导出）。
 第十二轮扩张到 **251 PASS / 0 SKIP**（技能编辑 UpdateSkill、设置记忆整理/清空、内置模块清单、第十一轮关键链路复跑）。
+第十三轮扩张到 **258 PASS / 0 SKIP**（goal 自动续跑、实时 reasoning 预览、服务商预设、第十二轮关键链路复跑），发现 AUDIT-P3-15。
 仍有文档化未落地项（plan keep-planning 反馈循环、会话级 feedback 汇总、旧 `/feedback [good|bad]` 参数式直接打分、自动化 runs 之外的历史查询）。
 
 ## 反证审计第五轮：/feedback 命令 / 自动化运行历史 / 反馈复跑 / 记忆与技能编辑（2026-11-08）
@@ -708,3 +709,54 @@ $ go test ./internal/regression -race -run '第十一轮关键链路'      9 PAS
 - 记忆整理「最早」按 Created 排序；相同 Created 值时依赖 store 的稳定顺序，未构造相等时间用例。
 - 内置模块 lister 通过 test-only `//go:linkname` 调用未导出方法与映射（接收者用 unsafe.Pointer）；真实 loader 填充快照由 host 单测覆盖。
 - 第十一轮复跑按前缀 9 项；全量 251 项 -race 已单独跑绿。
+
+## 反证审计第十三轮（最终）：goal 自动续跑 / reasoning 预览 / 服务商预设（2026-11-08）
+
+范围：`02f6612`（goal auto-continue、live reasoning preview、provider presets）与 `0eae73d`（第十二轮审计合并）。
+只新增 `internal/regression/**` 并改本文件；未改生产代码。新增 **7** 个顶层 Test（251 → 258）。
+
+```
+$ gofmt -l internal/regression/                              （空）
+$ go vet ./internal/regression                               OK
+$ go build ./...                                             OK
+$ go test ./internal/regression -count=1 -race               ok 58.2s（258 PASS / 0 SKIP）
+$ go test ./internal/regression -race -run '第十二轮关键链路'      10 PASS / 0 SKIP（0 回退）
+```
+
+| # | 链路 | 反证点 | 用例 | 结果 |
+|---|------|--------|------|------|
+| 56 | goal 自动续跑（goal.autoContinue） | 默认/缺失/false/bogus/1/yes 不续跑；`" TRUE "` 启用；每次 settle 恰一发且含「请继续推进目标：<文本>」；同 goal 5 次上限后停止；goal 变化重置计数并可再续；goal 清除抑制；Stop（运行中命令）抑制且下一次新 run 解除；发送失败计入上限（5 次尝试后停）并显示错误行；队列优先：排队 prompt 先 flush，auto-continue 不在同一次 settle 抢跑 | 3 | PASS |
+| 57 | 实时 reasoning 预览 | 流式中显示「思考中…」+ 尾部 120 rune（完整前缀不渲染）；完成后预览消失、正文显示，折叠「思考」保留全文并可展开；空 reasoning 不显示任何预览；英文「Thinking…」 | 2 | PASS |
+| 58 | 服务商预设 | DeepSeek/OpenAI/Ollama 一次写入 baseURL+model 并显示成功提示；custom 清空 baseURL、保留 model；「已匹配」恰一个且随选择移动，尾斜杠 URL 也匹配；失败：baseURL 写失败不落库；model 写失败时 baseURL 已写入（AUDIT-P3-15 探针） | 2 | PASS（发现 AUDIT-P3-15） |
+| 59 | 第十二轮关键链路复跑 | 技能编辑/记忆整理/内置模块 按前缀复跑 10 PASS / 0 SKIP，0 回退 | 复跑 | PASS |
+
+### 第十三轮发现
+
+#### AUDIT-P3-15（P3，部分写入）服务商预设的 baseURL/model 两次写入无回滚
+
+- 位置：`internal/ui/settings/provider_presets.go` 的 `applyProviderPreset`：先 `Set(chat.baseURL)`，再 `Set(chat.model)`；第二步失败时直接返回错误并显示「应用预设失败」，但第一步的 baseURL 已持久化。
+- 复现：`go test ./internal/regression -run TestProviderPresetFailureProbe -v` → 让 settings 包装器只拒绝 `chat.model` 写入；点击 OpenAI 后状态报错、model 保持旧值，但 baseURL 已变成 OpenAI 的 URL（探针 t.Logf 记录 AUDIT-P3-15）。
+- 影响：用户看到“失败”，实际服务地址已改变，可能出现旧 model + 新 baseURL 的错误组合（映射到错误服务商/鉴权失败）；无数据损坏，属可用性/一致性问题，记 P3。
+- 建议：失败时回滚已写入的 baseURL（保存旧值并在第二次 Set 失败时恢复），或先在内存构造两张更新再做批量/事务式写入。
+
+### 第十三轮未证伪的关键不变量
+
+1. **goal 自动续跑**：开关严格（仅 true）；每次结算最多一发、内容带 goal 文本；5 次上限、goal 变化重置；清除/Stop 抑制、新 run 解除；失败也计数（防死循环）；排队消息优先于自动续跑。
+2. **reasoning 预览**：仅流式时显示且有界尾部；完成后消失但全文保留在折叠段；空块不渲染。
+3. **服务商预设**：三个内置预设写入文档化 URL/model；custom 只清 URL；匹配高亮唯一且支持尾斜杠；失败有可读提示（但存在 AUDIT-P3-15 部分写入）。
+4. **0 回退**：第十二轮关键链路 10 项复跑全绿。
+
+### 第十三轮观察与局限
+
+- goal 回归用 fake GoalTracker + fake Chat 的 Running 翻转模拟 run 结算（经 runtime.Post 多帧 pump）；未驱动真实 agent loop 的 goal 工具。
+- reasoning 预览只做帧断言（文本/折叠/语言）；真实流式增量由 session 内部单测覆盖。
+- 服务商预设失败探针使用只拒绝单个 key 的 settings 包装器（人工故障注入），非真实磁盘错误。
+- 第十二轮复跑按前缀 10 项；全量 258 项 -race 已单独跑绿。
+- 本轮为最终反证：除 AUDIT-P3-14/P3-15（待修）外无其他已知缺陷；首轮~第十二轮缺陷修复状态见上方修复表。
+
+## 第十三轮缺陷修复（Lead 复核，2026-11-08）
+
+| ID | 状态 | 修复摘要 |
+|----|------|----------|
+| AUDIT-P3-14 | ✅ 已修复（复核确认） | 会话权限 chip 识别 `never` 并显示「从不允许/Never」（contracts.PermissionNever），单测覆盖 |
+| AUDIT-P3-15 | ✅ 已修复 | `applyProviderPreset` 先快照 chat.baseURL/model，任一步写入失败即回滚两行并报错；新增按 key 注入失败的 rollback 单测（baseURL 恢复旧值、model 不变） |

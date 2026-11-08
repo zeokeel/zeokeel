@@ -74,17 +74,31 @@ func applyProviderPreset(preset providerQuickPreset, state *moduleState,
 		state.statusErr = true
 		return
 	}
-	if err := store.Set(contracts.SettingsChatBaseURL, preset.baseURL); err != nil {
+	// Applying a preset updates two rows; snapshot the old values first so a
+	// partially failed write can roll back instead of leaving a mixed
+	// baseURL/model pair (AUDIT-P3-15).
+	oldBaseURL := store.Get(contracts.SettingsChatBaseURL, "")
+	oldModel := store.Get(contracts.SettingsChatModel, "")
+	rollback := func() {
+		_ = store.Set(contracts.SettingsChatBaseURL, oldBaseURL)
+		if preset.id != "custom" {
+			_ = store.Set(contracts.SettingsChatModel, oldModel)
+		}
+	}
+	fail := func(err error) {
+		rollback()
 		state.status = localized(locale, "应用预设失败：", "Failed to apply preset: ") + err.Error()
 		state.statusErr = true
+	}
+	if err := store.Set(contracts.SettingsChatBaseURL, preset.baseURL); err != nil {
+		fail(err)
 		return
 	}
 	// The custom entry keeps the current model; the named providers set their
 	// documented default model.
 	if preset.id != "custom" {
 		if err := store.Set(contracts.SettingsChatModel, preset.model); err != nil {
-			state.status = localized(locale, "应用预设失败：", "Failed to apply preset: ") + err.Error()
-			state.statusErr = true
+			fail(err)
 			return
 		}
 		state.model = preset.model

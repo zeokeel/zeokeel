@@ -20,10 +20,12 @@ import (
 
 // fakeSettings is a contracts.SettingsService backed by a map.
 type fakeSettings struct {
-	mu      sync.Mutex
-	values  map[string]string
-	sets    []string
-	setErr  error
+	mu     sync.Mutex
+	values map[string]string
+	sets   []string
+	setErr error
+	// failKey makes Set fail for one specific settings row (rollback tests).
+	failKey string
 	getKeys []string
 }
 
@@ -49,6 +51,9 @@ func (s *fakeSettings) Set(key, value string) error {
 	defer s.mu.Unlock()
 	if s.setErr != nil {
 		return s.setErr
+	}
+	if s.failKey != "" && key == s.failKey {
+		return errors.New("row is read-only")
 	}
 	s.sets = append(s.sets, key)
 	s.values[key] = value

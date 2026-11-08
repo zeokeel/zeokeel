@@ -21,6 +21,11 @@
 - 右侧栏「文件」Tab：打开文件夹（mygo 原生 Directory picker）、目录进入/面包屑、文本/Markdown/图片预览、
   刷新与错误状态；E2E 覆盖工作区创建 + 列表 + 预览帧
 
+**Round 57 终验 + P3-15 修复（2026-11-08）**
+- 干净环境 verify.sh **10/10 PASS（122s）**：regression 258 PASS / 0 SKIP、snapshot 65/63、三产品冒烟 27 instances 无 panic
+- 反证第十三轮 7 例（goal 续跑/reasoning 预览/服务商预设）；发现 P3-15（预设部分写入无回滚）→ 已修复（快照两键+失败回滚+单测）
+- COVERAGE 终值 **✅40 / 🟡21 / ❌1**（Reasoning 展示升 ✅）
+
 **TDD-goal-autocontinue/reasoning-preview/provider-presets（2026-11-08）**
 - goal 自动续跑：行为页开关（默认 off，5 次上限，goal 变化重置，Stop/清除抑制，失败计数防循环，队列优先）；session 158 测试
 - 实时 reasoning 预览：「思考中…」+尾部 120 rune 两行预览，结束消失保留折叠；Reasoning 行升 ✅
