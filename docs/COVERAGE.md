@@ -103,7 +103,7 @@
 | Fork | ✅ | agent SessionForker + sidebar 行菜单 | 深拷贝消息/附件/tools、持久化历史/事件 |
 | Export | ✅ | session 导出 Markdown + 复制对话 + JSONL + toast | 缺跨重启导出历史（非目标） |
 | Automation 页 | ✅ | `internal/ui/automation` + module | 列表/新建（含可选模型）/运行/删除/after/every/cron + 运行历史折叠/展开 + 任务模型 Badge |
-| Plugins 页 | 🟡 | `internal/ui/plugins` + toolkit | MCP 状态卡片 + 工具目录 + MCP 工具级开关；缺内置插件开关、插件详情/配置、市场 |
+| Plugins 页 | 🟡 | `internal/ui/plugins` + toolkit + ModuleLister | MCP 状态卡片/工具目录/工具级开关/server 开关/详情/**连接配置（settings 源 command/args/env，凭证掩码）**/内置模块清单；缺插件市场/参数编辑 |
 | Skills 页 | 🟡 | settings 技能页 + skills 模块 | 发现/roots/预览/刷新；无创建/编辑/删除 |
 | Memory 页 | 🟡 | session Memory tab + 设置「记忆」页 | 会话工作区内存管理 + 设置页全局搜索/添加/删除/整理/清空；缺模型驱动 consolidate/extract |
 | Workspace→Session 树/分组/计数 | ✅ | sidebar workspace tree | 多 workspace 分组、未分组、计数、搜索、折叠、置顶/归档 |

@@ -14,8 +14,12 @@ import (
 	"github.com/zeokeel/zeokeel/internal/contracts"
 )
 
-// goalStatusActive is the only status in-memory goals have until cleared.
-const goalStatusActive = "active"
+// Goal statuses: active goals drive auto-continue; paused goals stay visible
+// but are not advanced.
+const (
+	goalStatusActive = "active"
+	goalStatusPaused = "paused"
+)
 
 // goalService is the Root's contracts.GoalTracker implementation.
 type goalService struct {
@@ -27,6 +31,8 @@ type goalService struct {
 
 // newGoalService returns an empty goal tracker.
 func newGoalService() *goalService { return &goalService{} }
+
+var _ contracts.GoalPauser = (*goalService)(nil)
 
 // SetHandler installs the change handler (nil clears it).
 func (s *goalService) SetHandler(fn func(contracts.Goal, bool)) {
@@ -71,6 +77,52 @@ func (s *goalService) Get() (id, text, status string, ok bool) {
 		return "", "", "", false
 	}
 	return s.goal.ID, s.goal.Text, s.goal.Status, true
+}
+
+// Pause marks the active goal paused and notifies the handler. It reports
+// whether a goal existed; pausing an already paused goal is a no-op.
+func (s *goalService) Pause() bool {
+	s.mu.Lock()
+	if s.goal == nil {
+		s.mu.Unlock()
+		return false
+	}
+	if s.goal.Status != goalStatusActive {
+		s.mu.Unlock()
+		return true
+	}
+	goal := *s.goal
+	goal.Status = goalStatusPaused
+	s.goal = &goal
+	handler := s.handler
+	s.mu.Unlock()
+	if handler != nil {
+		runHandlerSafely("goal", func() { handler(goal, true) })
+	}
+	return true
+}
+
+// Resume marks a paused goal active and notifies the handler. It reports
+// whether a goal existed; resuming an active goal is a no-op.
+func (s *goalService) Resume() bool {
+	s.mu.Lock()
+	if s.goal == nil {
+		s.mu.Unlock()
+		return false
+	}
+	if s.goal.Status != goalStatusPaused {
+		s.mu.Unlock()
+		return true
+	}
+	goal := *s.goal
+	goal.Status = goalStatusActive
+	s.goal = &goal
+	handler := s.handler
+	s.mu.Unlock()
+	if handler != nil {
+		runHandlerSafely("goal", func() { handler(goal, true) })
+	}
+	return true
 }
 
 // Clear removes the goal and notifies the handler with ok=false. It reports

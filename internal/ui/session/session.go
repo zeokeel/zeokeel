@@ -118,6 +118,8 @@ type state struct {
 	// is the optional host bridge used to clear it. Both are UI-thread state.
 	goal        *contracts.Goal
 	goalTracker contracts.GoalTracker
+	// goalActionErr is the last pause/resume failure (DangerText row).
+	goalActionErr string
 
 	// Composer attachment state: files picked and staged for the next message,
 	// the last picker/read error, the chip sequence and the per-chip image

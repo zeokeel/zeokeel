@@ -77,6 +77,9 @@ func buildScreen(
 		if st.autoContinueErr != "" {
 			buildErrorLine(c, t, st.autoContinueErr)
 		}
+		if st.goalActionErr != "" {
+			buildErrorLine(c, t, st.goalActionErr)
+		}
 		switch st.tab {
 		case tabTrajectory:
 			buildTrajectoryPane(c, t, chatSession, hasSession, st)
@@ -196,25 +199,53 @@ func exportSessionJSONL(st *state, chatSession contracts.ChatSession, cfg Config
 	}
 }
 
-// buildGoalChip shows the active goal next to the session title: a small
-// "goal" badge, one ellipsized line with the full text in the tooltip, and a
-// native clear action backed by the host GoalTracker. It renders nothing when
-// no goal is active or the backend is absent.
+// buildGoalChip shows the active (or paused) goal next to the session title: a
+// status badge, one ellipsized line with the full text in the tooltip, the
+// optional pause/resume action (only when the tracker implements
+// contracts.GoalPauser) and a native clear action. It renders nothing when no
+// goal is active or the backend is absent.
 func buildGoalChip(c *ui.Context, t *design.Tokens, runtime contracts.UIRuntime, st *state) {
 	if st.goal == nil || strings.TrimSpace(st.goal.Text) == "" {
 		return
 	}
 	goal := st.goal
+	paused := strings.EqualFold(strings.TrimSpace(goal.Status), "paused")
 	ui.Row(c).Gap(design.Space1).AlignItems(ui.Center).Children(func() {
-		design.Apply(ui.Badge(c, st.tr("目标", "Goal")), t.Badge()).TextColor(t.Accent)
+		badgeLabel, badgeColor := st.tr("目标", "Goal"), t.Accent
+		if paused {
+			badgeLabel, badgeColor = st.tr("目标已暂停", "Goal paused"), t.WarningText
+		}
+		design.Apply(ui.Badge(c, badgeLabel), t.Badge()).TextColor(badgeColor)
 		design.Apply(ui.Text(c, goal.Text), t.Font(design.TypeXS)).FontWeight(600).
 			TextColor(t.LabelSecondary).MaxLines(1).Ellipsis("…").MaxWidth(360).Tooltip(goal.Text)
+		if pauser, ok := st.goalTracker.(contracts.GoalPauser); ok && pauser != nil {
+			label, tip := st.tr("暂停目标", "Pause goal"), st.tr("暂停当前目标的自动推进", "Pause automatic progress on the current goal")
+			if paused {
+				label, tip = st.tr("继续目标", "Resume goal"), st.tr("继续推进当前目标", "Resume the current goal")
+			}
+			action := ui.Button(c, label).Tooltip(tip)
+			if action.Clicked() {
+				ok := pauser.Pause()
+				if paused {
+					ok = pauser.Resume()
+				}
+				if ok {
+					st.goalActionErr = ""
+				} else if paused {
+					st.goalActionErr = st.tr("继续目标失败：", "Resume goal failed: ") + st.tr("目标不存在", "no active goal")
+				} else {
+					st.goalActionErr = st.tr("暂停目标失败：", "Pause goal failed: ") + st.tr("目标不存在", "no active goal")
+				}
+				runtime.Invalidate()
+			}
+		}
 		clear := ui.Button(c, st.tr("清除目标", "Clear goal")).
 			Tooltip(st.tr("清除当前目标", "Clear the current goal"))
 		if clear.Clicked() {
 			if st.goalTracker != nil {
 				st.goalTracker.Clear()
 			}
+			st.goalActionErr = ""
 			runtime.Invalidate()
 		}
 	})

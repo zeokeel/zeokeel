@@ -183,6 +183,7 @@ func buildMCPCard(c *ui.Context, t *design.Tokens, runtime contracts.UIRuntime,
 		mcpDetailRow(c, t, st.tr("协议", "Protocol"), mcpDetailValue(server.Protocol))
 		mcpDetailRow(c, t, st.tr("工具数", "Tools"), st.tr(fmt.Sprintf("%d 个工具", server.Tools), fmt.Sprintf("%d tools", server.Tools)))
 		mcpDetailRow(c, t, st.tr("状态", "Status"), mcpDetailValue(server.Status))
+		buildMCPConnectionConfig(c, t, st, server, settings, hasSettings)
 		if hasSettings && settings != nil {
 			if name := firstNonEmpty(server.Name, server.ServerName); name != "" {
 				enabled := !st.serverDisabled(name)

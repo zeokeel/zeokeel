@@ -30,5 +30,14 @@ type GoalTracker interface {
 	Clear() bool
 }
 
+// GoalPauser is the optional half of the goal bridge that can pause and resume
+// the active goal (hosts that only implement GoalTracker still work).
+type GoalPauser interface {
+	// Pause marks the active goal paused and reports whether one existed.
+	Pause() bool
+	// Resume marks a paused goal active and reports whether one existed.
+	Resume() bool
+}
+
 // KeyGoalTracker is provided by the desktop host.
 var KeyGoalTracker = cordis.NewServiceKey[GoalTracker]("zeokeel/goal")

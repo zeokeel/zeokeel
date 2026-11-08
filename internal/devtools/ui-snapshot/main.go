@@ -292,6 +292,12 @@ func main() {
 		})
 		a.tester.Frame()
 		a.render(outDir + "/p2-goal.png")
+		if a.ui.GoalTracker().Pause() {
+			a.tester.Frame()
+			a.render(outDir + "/p2-goal-paused.png")
+			a.ui.GoalTracker().Resume()
+			a.tester.Frame()
+		}
 	}
 
 	// Team orchestration: a real teammate + the Agents inspector.

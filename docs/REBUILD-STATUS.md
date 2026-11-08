@@ -21,6 +21,11 @@
 - 右侧栏「文件」Tab：打开文件夹（mygo 原生 Directory picker）、目录进入/面包屑、文本/Markdown/图片预览、
   刷新与错误状态；E2E 覆盖工作区创建 + 列表 + 预览帧
 
+**TDD-goal-pause/plugin-config（2026-11-08）**
+- 目标暂停/继续：contracts GoalPauser（可选）、uiroot 状态机（active/paused，handler 通知）、session 目标徽标与暂停/继续按钮、
+  自动续跑仅在 active 触发；uiroot 76 / session 163 测试；snapshot p2-goal-paused
+- 插件连接配置：settings 来源 MCP 服务器展开显示 command/args/env（凭证掩码）与解析错误提示；plugins 36 测试
+
 **Round 57 终验 + P3-15 修复（2026-11-08）**
 - 干净环境 verify.sh **10/10 PASS（122s）**：regression 258 PASS / 0 SKIP、snapshot 65/63、三产品冒烟 27 instances 无 panic
 - 反证第十三轮 7 例（goal 续跑/reasoning 预览/服务商预设）；发现 P3-15（预设部分写入无回滚）→ 已修复（快照两键+失败回滚+单测）
