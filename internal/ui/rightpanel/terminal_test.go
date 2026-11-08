@@ -147,6 +147,23 @@ func waitForRun(t *testing.T, terminal *fakeTerminal) {
 	}
 }
 
+// waitForRunCalls polls until the fake terminal recorded at least want Run
+// calls, then returns the calls (the submit runs on the UI task queue, so a
+// fixed frame count is not deterministic).
+func waitForRunCalls(t *testing.T, terminal *fakeTerminal, want int) []string {
+	t.Helper()
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		if calls := terminal.runs(); len(calls) >= want {
+			return calls
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("timed out waiting for %d terminal Run call(s); calls = %v", want, terminal.runs())
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+}
+
 // runTerminalCommand focuses the input, types command and presses Run.
 func runTerminalCommand(t *testing.T, h *harness, tester *ui.Tester, command string) {
 	t.Helper()
@@ -254,9 +271,12 @@ func TestTerminalSubmitRuns(t *testing.T) {
 
 	h.click(tester, "命令")
 	tester.Type("echo ok")
+	// The draft text contains "ok" too, so wait on the actual Run call rather
+	// than waiting for the output text: a fast CI frame can render the draft
+	// before the Enter key's submit task runs.
+	tester.Frame()
 	tester.Key(0, ui.KeyEnter)
-	waitForText(t, tester, "ok")
-	if got := terminal.runs(); len(got) != 1 || got[0] != "echo ok" {
+	if got := waitForRunCalls(t, terminal, 1); len(got) != 1 || got[0] != "echo ok" {
 		t.Fatalf("Run calls = %v, want the Enter-submitted command", got)
 	}
 }
