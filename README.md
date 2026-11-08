@@ -8,14 +8,14 @@
 > 消息用量 footer/逐条复制/反馈 good-bad 与 /反馈 命令（导出含反馈）、计划模式 + keep-planning、自动化运行历史、
 > Memory 整理/清空、技能新建/删除、工件下载、系统托盘/关闭到托盘、全局热键、LSP 工具、聊天模式（普通/计划/精简/创作）、
 > Home 真实 composer、/停止 /附加文件 /帮助、数据与隐私页、通知开关、侧栏添加工作区、插件 MCP server 详情；
-> 反证审计共 227 PASS / 0 SKIP（含最新审计补充），4×P2+4×P3 全部修复。详情：[docs/ADVERSARIAL-AUDIT.md](docs/ADVERSARIAL-AUDIT.md)。
+> 反证审计共 245 PASS / 0 SKIP（含最新审计补充），4×P2+4×P3 全部修复。详情：[docs/ADVERSARIAL-AUDIT.md](docs/ADVERSARIAL-AUDIT.md)。
 >
-> **最终验证（2026-11-08，Round 58 · HEAD d27e449）**：`./scripts/verify.sh` 全量 **10/10 PASS（107s）**；
-> 桌面（xvfb，托盘+全局热键）/headless/ACP 冒烟通过；ACP `session/list`/`session/load` 真实帧已验证，
-> 模型连接检查离线 fake **8 项单测通过**，plan keep-planning 7 项单测通过。42 个包中 34 个测试包全绿
-> （含 `-race`，0 DATA RACE）；`internal/regression` 227 PASS / 0 SKIP；UI 快照 65 步 / 63 张 PNG。
-> 旧功能覆盖矩阵见 [docs/COVERAGE.md](docs/COVERAGE.md)（62 项：✅39 / 🟡22 / ❌1，未 100%）。
-> 验证证据：[docs/VERIFICATION.md](docs/VERIFICATION.md)。
+> **最终验证（2026-11-08，Round 59 · HEAD 51e8e59）**：`./scripts/verify.sh` 全量 **10/10 PASS（110s）**；
+> 桌面（xvfb，托盘+全局热键）/headless/ACP 冒烟通过，xfvb 日志确认 **27 module instances、NO_PANIC**；
+> 内置模块清单已进诊断页/插件页（静态画面验证）；技能编辑 **18 项单测**、记忆整理 **3 项单测**通过。
+> 42 个包中 34 个测试包全绿（含 `-race`，0 DATA RACE）；`internal/regression` 245 PASS / 0 SKIP；
+> UI 快照 65 步 / 63 张 PNG。旧功能覆盖矩阵见 [docs/COVERAGE.md](docs/COVERAGE.md)
+> （62 项：✅39 / 🟡22 / ❌1，未 100%）。验证证据：[docs/VERIFICATION.md](docs/VERIFICATION.md)。
 
 编译期模块化的 Go 桌面 AI agent：**薄总入口 + 内核装配 + 模块贡献点**。
 UI 是 mygo 原生控件（无浏览器/webview）；所有模块一起编译进同一二进制，`assembly.json`

@@ -7,7 +7,7 @@
 
 ## 修复状态（Lead 复核后）
 
-> 首轮 11 个「已知缺陷探针」与第二轮 4 个 P3 均已随 TDD 修复转为 PASS；第三轮 P3-9/10 已修复、P3-11 重开后于 ca2d24c 真正修复；第四轮 P3-12 已修复（ca2d24c）；第五~七轮无新缺陷，第八轮发现 1 个 P3（AUDIT-P3-13）并已修复：诊断报告现在对 apiKey/token/secret/password/authorization 类设置整值隐藏，并对 JSON 结构化设置（mcp.servers）递归掩码 Bearer token 与凭证字段；新增单测断言 web.search.apiKey 与 mcp Bearer 不泄漏。第九轮发现 1 个 P3（AUDIT-P3-14：agent.permission=never 已存储但会话权限 chip 显示「询问」，待修）。第十轮无新缺陷；第十一轮无新缺陷。`go test ./internal/regression -count=1 -race` 当前 **241 PASS / 0 SKIP**（历史：首轮修复后 92，第二轮后 98，第三轮后 133，第四轮后 153，第五轮后 172，第六轮后 180，第七轮后 189，第八轮后 208，第九轮后 220，第十轮后 227）。
+> 首轮 11 个「已知缺陷探针」与第二轮 4 个 P3 均已随 TDD 修复转为 PASS；第三轮 P3-9/10 已修复、P3-11 重开后于 ca2d24c 真正修复；第四轮 P3-12 已修复（ca2d24c）；第五~七轮无新缺陷，第八轮发现 1 个 P3（AUDIT-P3-13）并已修复：诊断报告现在对 apiKey/token/secret/password/authorization 类设置整值隐藏，并对 JSON 结构化设置（mcp.servers）递归掩码 Bearer token 与凭证字段；新增单测断言 web.search.apiKey 与 mcp Bearer 不泄漏。第九轮发现 1 个 P3（AUDIT-P3-14：agent.permission=never 已存储但会话权限 chip 显示「询问」，待修）。第十~十二轮无新缺陷。`go test ./internal/regression -count=1 -race` 当前 **251 PASS / 0 SKIP**（历史：首轮修复后 92，第二轮后 98，第三轮后 133，第四轮后 153，第五轮后 172，第六轮后 180，第七轮后 189，第八轮后 208，第九轮后 220，第十轮后 227，第十一轮后 241）。
 
 | ID | 优先级 | 状态 | 修复摘要 |
 |----|--------|------|----------|
@@ -31,7 +31,7 @@ $ go test ./internal/regression -count=1                    ok  1.2s
 $ go test ./internal/regression -count=1 -race              ok 12.8s（98 PASS / 0 SKIP）
 ```
 
-测试规模：`internal/regression` 共 241 个顶层 Test（首轮 78 + 第二轮 20 + 第三轮 35 + 第四轮 20 + 第五轮 19 + 第六轮 8 + 第七轮 9 + 第八轮 17 + 特性提交补充 2 + 第九轮 12 + 第十轮 7 + 第十一轮 14；含子用例后更多；另有 `internal/ui/uimodtest` 的 E2E 1 个，不计入本包）。第三轮 P3-9/10 已修复，P3-11 重开后已真正修复，第四轮 P3-12 已修复，第五~七轮无新缺陷，第八轮 P3-13 已修复（da654e3），第九轮新增 P3-14（待修），第十轮、第十一轮无新缺陷；当前 **241 PASS / 0 SKIP**。
+测试规模：`internal/regression` 共 251 个顶层 Test（首轮 78 + 第二轮 20 + 第三轮 35 + 第四轮 20 + 第五轮 19 + 第六轮 8 + 第七轮 9 + 第八轮 17 + 特性提交补充 2 + 第九轮 12 + 第十轮 7 + 第十一轮 14 + 第十二轮 10；含子用例后更多；另有 `internal/ui/uimodtest` 的 E2E 1 个，不计入本包）。第三轮 P3-9/10 已修复，P3-11 重开后已真正修复，第四轮 P3-12 已修复，第五~七轮无新缺陷，第八轮 P3-13 已修复（da654e3），第九轮新增 P3-14（待修），第十~十二轮无新缺陷；当前 **251 PASS / 0 SKIP**。
 
 ## 用例矩阵
 
@@ -353,6 +353,7 @@ $ go test ./internal/regression -count=1 -race               ok 27.9s（153 PASS
 第九轮扩张到 **220 PASS / 0 SKIP**（ACP session/list/load、三态主题、侧栏视图、行为默认权限、通知级别过滤、自动化模型覆盖），发现 AUDIT-P3-14。
 第十轮扩张到 **227 PASS / 0 SKIP**（plan keep-planning、slash 命令 i18n、窗口快捷键），并复跑第九轮关键链路 17 项确认 0 回退。
 第十一轮扩张到 **241 PASS / 0 SKIP**（排队发送、MCP 服务器开关、自动化筛选、消息字号、AGENTS.md/记忆页/连接检查/上下文预算/反馈导出）。
+第十二轮扩张到 **251 PASS / 0 SKIP**（技能编辑 UpdateSkill、设置记忆整理/清空、内置模块清单、第十一轮关键链路复跑）。
 仍有文档化未落地项（plan keep-planning 反馈循环、会话级 feedback 汇总、旧 `/feedback [good|bad]` 参数式直接打分、自动化 runs 之外的历史查询）。
 
 ## 反证审计第五轮：/feedback 命令 / 自动化运行历史 / 反馈复跑 / 记忆与技能编辑（2026-11-08）
@@ -669,3 +670,41 @@ $ go test ./internal/regression -count=1 -race               ok 51.7s（241 PASS
 - AGENTS.md 注入用 fake WorkspaceService（Root 指向临时目录），实际读文件路径已覆盖。
 - 上下文预算用 fake `ModelCatalogService`；真实 catalog 加载/配置由模块测试覆盖。
 - 反馈导出复用 data 页 save seam 捕获内容（不写真实文件）。
+
+## 反证审计第十二轮：技能编辑 / 记忆整理与清空 / 内置模块清单（2026-11-08）
+
+范围：`84c53d0`（skills UpdateSkill + 设置记忆页整理/清空）+ `51e8e59`（host/诊断/plugins 的内置模块清单）。
+只新增 `internal/regression/**` 并改本文件；未改生产代码。新增 **10** 个顶层 Test（241 → 251）。
+
+```
+$ gofmt -l internal/regression/                              （空）
+$ go vet ./internal/regression                               OK
+$ go build ./...                                             OK
+$ go test ./internal/regression -count=1 -race               ok 54.4s（251 PASS / 0 SKIP）
+$ go test ./internal/regression -race -run '第十一轮关键链路'      9 PASS / 0 SKIP（0 回退）
+```
+
+| # | 链路 | 反证点 | 用例 | 结果 |
+|---|------|--------|------|------|
+| 52 | 技能编辑（SkillsEditor.UpdateSkill） | 成功重写：Read/文件旧内容消失、描述折叠、名称不变、0644、无临时文件、列表仅一条；拒绝：改名/未知/空 body/配置根/非法名/取消 ctx/符号链接目录（原文件与配置根不变、无临时文件）；并发：8 写 + 4 读 -race、最终为某个完整 body、无临时文件；设置页：编辑入口、预填只读名称、保存后服务/列表可见新 body 且旧内容消失 | 4 | PASS |
+| 53 | 设置记忆整理/清空 | 真实后端：3 条含 2 个归一化重复 → 整理删除恰 1 条（保留最早 ID+唯一）、二次整理提示无重复；清空确认：取消保留、确认清空并回空态；故障 store：list 失败→读取/清空失败、remove 失败→整理失败 N/清空失败 N 且条目未丢 | 2 | PASS |
+| 54 | 内置模块清单 | host：moduleInfos 顺序/state 透传；lister 空初始、set 后顺序保持、输入/输出切片防御性拷贝、替换/清空、清空后不复活；诊断页：42 个→计数 42、默认折叠、展开 entry-00..entry-39+「…」且无 entry-40/41、无 lister 隐藏；plugins 页：内置模块+3 个模块+只读说明、默认折叠、展开显示模组/状态、无 lister 隐藏 | 4 | PASS |
+| 55 | 第十一轮关键链路复跑 | queue/fontsize/AGENTS/连接检查/上下文预算/反馈导出 按前缀复跑 9 PASS / 0 SKIP，0 回退 | 复跑 | PASS |
+
+### 第十二轮未证伪的关键不变量
+
+1. **技能编辑**：UpdateSkill 只重写 dataDir 技能、名称固定、body 必需、描述折行；旧内容不会残留；配置/工作区/符号链接只读；并发写原子（-race）且不会留下临时文件；设置页编辑入口走同一编辑器。
+2. **记忆整理/清空**：去重键与保留策略（最早）确定，删除 id 集合精确；无重复为 no-op；清空有确认且取消无副作用；store 错误以错误行呈现，不会静默假成功。
+3. **内置模块清单**：映射保持装载顺序与状态；lister 快照防御性拷贝且保留最后快照；诊断页计数/折叠/40 行截断；plugins 页只读折叠段；两页在无 lister 时完全隐藏。
+
+### 第十二轮发现
+
+- **无新缺陷**（无 P0/P1/P2/P3）。
+
+### 第十二轮局限
+
+- UpdateSkill 并发测试是单进程 goroutine（rename 原子性覆盖），未模拟跨进程并发；父目录级 symlink 的 EvalSymlinks 场景未单独构造（Create/Delete 已有对应检查）。
+- 设置页编辑的错误保留模态由 settings 包单测覆盖；本轮回归覆盖成功路径与只读/拒绝的模块级路径。
+- 记忆整理「最早」按 Created 排序；相同 Created 值时依赖 store 的稳定顺序，未构造相等时间用例。
+- 内置模块 lister 通过 test-only `//go:linkname` 调用未导出方法与映射（接收者用 unsafe.Pointer）；真实 loader 填充快照由 host 单测覆盖。
+- 第十一轮复跑按前缀 9 项；全量 251 项 -race 已单独跑绿。

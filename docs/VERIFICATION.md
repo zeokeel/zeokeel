@@ -157,114 +157,52 @@ NO_PANIC
 - 构建/vet/测试（含 -race）与反证回归套件全绿；三产品均正常启动/退出，桌面托盘与预置全局热键就绪；
 - 快照渲染 60 步（58 个唯一 PNG，2 个目标名重复）；README 状态行已按本结果同步。
 
-## 最终验证（Round 59，2026-11-08，HEAD 9d1cbac）
+## 最终验证（Round 59，2026-11-08，HEAD 51e8e59）
 
-环境：go1.27.3 linux/amd64 · 离线（GOPROXY=off/GOSUMDB=off/GOFLAGS=-mod=mod）· 2026-11-08 06:05–06:13（Asia/Shanghai）。
+环境：go1.27.3 linux/amd64 · 离线（GOPROXY=off/GOSUMDB=off/GOFLAGS=-mod=mod）· 2026-11-08 08:18–08:23（Asia/Shanghai）。
+命令：`./scripts/verify.sh`（完整）。
 
-### Build / vet / tests
+### 一键验证结果（首次即 PASS，无需重跑）
 ```
-$ go build ./...
-exit 0（4s）
-
-$ go vet ./...
-exit 0（1s）
-
-$ go test ./... -count=1
-exit 0 · 13s · 42 个包中 34 个测试包 ok、8 个 no test files、0 FAIL
-
-$ go test ./... -count=1 -race
-exit 0 · 47s · 34 个测试包 ok、8 个 no test files、0 FAIL / 0 DATA RACE
-
-$ go test ./internal/regression -count=1 -v
-exit 0 · ~10.5s · 206 PASS / 0 SKIP / 0 FAIL
-（HEAD 9d1cbac 提交态回归为 189 PASS；验证期间并行审计新增未提交用例
- data_privacy/home_composer/notifications/session_commands/sidebar_workspace_add
- 加入工作树后为 206 PASS / 0 SKIP，全部通过）
-```
-
-### 三产品冒烟（无 panic）
-```
-$ mkdir -p /tmp/final-desktop-r59
-$ printf '{"ui.globalHotkey":"CmdOrCtrl+Shift+Space"}\n' > /tmp/final-desktop-r59/settings.json
-$ xvfb-run -a timeout -s TERM 8 go run ./cmd/zeokeel --data-dir /tmp/final-desktop-r59
-exit 124
-06:07:25 ZeoKeel: system tray ready (close to tray: false)
-06:07:25 ZeoKeel: global hotkey registered
-06:07:25 ZeoKeel: ... product "desktop" loaded: 27 module instances, screens [home automation session plugins]
-06:07:31 ZeoKeel: quit requested
-NO_PANIC
-
-$ timeout 8 go run ./cmd/zeokeel --headless --data-dir /tmp/final-headless-r59
-exit 124
-06:07:37 ZeoKeel: ... product "headless" loaded（14 module instances）
-ready; waiting for SIGINT or SIGTERM
-stopping
-NO_PANIC
-
-$ printf '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":1}}\n' \
-    | timeout 10 go run ./cmd/zeokeel --acp --data-dir /tmp/final-acp-r59
-exit 0
-{"id":1,"jsonrpc":"2.0","result":{"agentCapabilities":{"promptCapabilities":{"audio":false,"embeddedContext":false,"image":false}},"protocolVersion":1}}
-合法 JSON-RPC 2.0 initialize 响应；NO_PANIC
-```
-
-### UI 快照
-```
-$ mkdir -p /tmp/final-shots-r59
-$ go run ./internal/devtools/ui-snapshot /tmp/final-shots-r59
-exit 0 · 8s
-"wrote ..." 渲染步数: 63
-唯一 PNG 文件: 61
-同名重复写入: p1-chat.png、p2-mentions.png（各 2 次，后写覆盖）
-NO_PANIC
-```
-
-### 文档核对（本轮）
-- docs/COVERAGE.md：矩阵 §2（28 项）+ §3（34 项）= 62 项，实际 ✅37 / 🟡24 / ❌1；原摘要 34/24/4 与统计表 34/23/5 已校正为 **✅37（59.7%）/ 🟡24（38.7%）/ ❌1（1.6%）**。
-- README 顶部状态更新为 Round 59（HEAD 9d1cbac）与最新数字；构建命令 `go build ./...` / `go test ./...` 核对仍准确。
-- 验证期间工作树含并行 agent 未提交改动（如 `internal/regression/*_test.go`、`internal/ui/settings/data.go` 等）；本任务未修改生产代码。HEAD 9d1cbac 提交态回归 189 PASS，当前工作树 206 PASS / 0 SKIP。
-- 观察（未改矩阵行，超出本轮摘要修正范围）：个别矩阵行证据文案滞后，如 Skills 行仍写“缺创建/编辑/删除”（Round 53 已落地创建/删除）、Artifacts 行仍写“缺下载动作”（工件下载已落地）；状态分布仍与目标 37/24/1 一致。
-
-## 一键验证（scripts/verify.sh）
-
-仓库提供可重复的一键验证脚本，按下面的顺序执行并逐项打印 `PASS/FAIL + 耗时`；任一步失败即非零退出（EXIT trap 仍打印摘要）。所有命令默认使用离线环境（`PATH=/usr/local/go/bin:...`、`GOPROXY=off`、`GOSUMDB=off`、`GOFLAGS=-mod=mod`，均可由外部环境覆盖）。
-
-```sh
-./scripts/verify.sh              # 完整：gofmt/build/vet/test/-race/回归/快照/三产品冒烟，约 100s
-./scripts/verify.sh --quick      # 快速循环：跳过 -race 与产品冒烟，约 40s
-./scripts/verify.sh --no-smoke   # 保留 -race，仅跳过三产品冒烟
-make verify                      # 等价于 ./scripts/verify.sh（可 ARGS=--quick）
-```
-
-步骤与预期输出：
-
-1. `gofmt`：模块包内 Go 文件均已格式化（`gofmt -l` 为空）；
-2. `go build ./...` / `go vet ./...`：通过；
-3. `go test ./... -count=1`（`--quick` 跳过下一步的 race）；
-4. `go test ./... -count=1 -race`；
-5. `go test ./internal/regression -count=1 -v`：打印 `(regression: N PASS / 0 SKIP / 0 FAIL)`；
-6. `go run ./internal/devtools/ui-snapshot <临时目录>`：打印 `(snapshot: 63 steps / 61 PNGs)`，目录用完清理（`VERIFY_KEEP_TEMP=1` 可保留）；
-7. desktop xvfb 冒烟：`xvfb-run -a timeout -s TERM 8 go run ./cmd/zeokeel --data-dir <临时目录>`（预置 `ui.globalHotkey=CmdOrCtrl+Shift+Space`），允许 exit 124，检查 tray ready 与无 panic；
-8. headless 冒烟：`timeout 8 go run ./cmd/zeokeel --headless ...`，允许 exit 124，检查 loaded/ready；
-9. ACP 冒烟：initialize JSON-RPC，检查 `"jsonrpc":"2.0"`、`"protocolVersion":1`。
-
-本机实测（2026-11-08，HEAD bd89cf1，go1.27.3 linux/amd64）：
-
-```
-$ ./scripts/verify.sh --quick
-==> gofmt ... PASS (0s)          ==> go build ./... ... PASS (3s)
-==> go vet ./... ... PASS (1s)   ==> go test ./... -count=1 ... PASS (13s)
-==> regression ... (208 PASS / 0 SKIP / 0 FAIL) PASS (12s)
-==> ui-snapshot ... (63 steps / 61 PNGs) PASS (9s)
-verify summary: 6 passed, 0 failed, 38s total · verify: PASS
-
 $ ./scripts/verify.sh
-==> go test ./... -count=1 -race ... PASS (47s)
-==> desktop smoke (xvfb) ... (exit 124, tray ready: 1) PASS (9s)
-==> headless smoke ... (exit 124) PASS (8s)
+==> gofmt ... PASS (0s)
+==> go build ./... ... PASS (4s)
+==> go vet ./... ... PASS (0s)
+==> go test ./... -count=1 ... PASS (15s)
+==> go test ./... -count=1 -race ... PASS (53s)
+==> regression (-v) ... (regression: 245 PASS / 0 SKIP / 0 FAIL) PASS (13s)
+==> ui-snapshot ... (snapshot: 65 steps / 63 PNGs) PASS (9s)
+==> desktop smoke (xvfb) ... (desktop exit 124, tray ready: 1) PASS (8s)
+==> headless smoke ... (headless exit 124) PASS (8s)
 ==> ACP smoke ... (ACP exit 0) PASS (0s)
-verify summary: 10 passed, 0 failed, 102s total · verify: PASS
+verify summary: 10 passed, 0 failed, 110s total
+verify: PASS
 ```
+regression **245 PASS / 0 SKIP / 0 FAIL**；UI 快照 **65 步渲染 / 63 个唯一 PNG**；三产品冒烟无 panic：desktop exit 124、headless exit 124、ACP exit 0。本轮无失败步骤。
+
+### xvfb 桌面冒烟（模块实例数确认）
+```
+$ xvfb-run -a timeout -s TERM 8 go run ./cmd/zeokeel --data-dir <tmp>
+exit 124（允许）
+08:20:47 ZeoKeel: system tray ready (close to tray: false)
+08:20:47 ZeoKeel: ... product "desktop" loaded: 27 module instances, screens [home automation session plugins]
+08:20:54 ZeoKeel: quit requested
+NO_PANIC
+```
+`grep -c '27 module instances'` = 1；日志无 panic/runtime error/SIGSEGV。
+
+### 新功能冒烟
+- **内置模块清单（诊断页 / 插件页，静态画面）**
+  - 诊断页：`已加载模块 N 个` + `展开模块列表`（每行 `entryID  moduleID  state`，active 成功色；40 条上限后「…」）；截图证据 `/tmp/r59-evidence/diagnostics-modules.png`（fake ModuleLister 4 模块）。
+  - Plugins 页：`内置模块` section + `N 个模块` Badge + `编译期装配，只读。` + 默认折叠的 `展开模块列表`（ModuleID mono + State Badge）；截图证据 `/tmp/r59-evidence/plugins-modules.png`。
+  - 说明：截图为单测 harness 注入 fake `KeyModuleLister` 的静态画面；产品运行时该服务由 host 在 assembly 加载前提供，xvfb 日志的 27 module instances 即 host 实际填充来源。ui-snapshot 自建裸 kernel root 不注入 ModuleLister，故 p2-diagnostics/p2-plugins 快照不显示该区（非缺陷）。
+- **技能编辑**：`go test ./internal/ui/settings/ -run TestSkills -count=1` → **18 PASS**（新建/编辑/校验/错误/无 editor 隐藏等）。
+- **记忆整理**：`go test ./internal/ui/settings/ -run TestMemoryPageTidy -count=1` → **3 PASS**（去重保留最早/无重复/错误）；记忆页整体 `TestMemoryPage` **16 PASS**。
+- 宿主模块清单映射/服务：`go test ./internal/host -run 'TestModuleInfo|TestModuleLister|TestProvideModuleLister'` → 3 PASS（加载顺序 EntryID/ModuleID/State、快照副本、provide/require 同实例）。
+
+### 文档核对
+- docs/COVERAGE.md 矩阵（§2 28 项 + §3 34 项 = 62）重算 **✅39 / 🟡22 / ❌1**；摘要与统计表一致（62.9% / 35.5% / 1.6%），本轮无差异。
+- README 状态行更新为 Round 59（HEAD 51e8e59）。
 
 ## 最终验证（Round 58，2026-11-08，HEAD d27e449）
 
@@ -319,3 +257,11 @@ regression **227 PASS / 0 SKIP / 0 FAIL**；UI 快照 **65 步渲染 / 63 个唯
   ui-snapshot **65 步渲染 / 63 唯一 PNG**，desktop/headless/ACP 冒烟同前。
 - regression 第十一轮覆盖：运行中排队发送、MCP server 开关、自动化搜索筛选、消息字号、AGENTS.md 注入、
   设置记忆页、模型连接检查、上下文预算、反馈导出统计；无新缺陷。
+
+## 最终验证（Round 59 收尾：第十二轮反证后）
+
+- `./scripts/verify.sh`：**10/10 PASS，115s**；regression **251 PASS / 0 SKIP**（第十二轮新增 10 例），
+  ui-snapshot **65 步渲染 / 63 唯一 PNG**，desktop / headless / ACP 冒烟通过。
+- 第十二轮覆盖：技能编辑（UpdateSkill 并发/拒绝/设置页入口）、设置记忆整理/清空（真实后端与故障注入）、
+  内置模块清单（host 映射/lister 快照/诊断页截断/plugins 只读段）；第十一轮关键链路复跑 9 PASS 0 回退；无新缺陷。
+- xvfb 桌面日志：`product "desktop" loaded: 27 module instances`、tray ready、quit requested、无 panic。
