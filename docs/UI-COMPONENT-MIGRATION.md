@@ -47,7 +47,7 @@
 
 | 项 | 现状 | 官方目标 | 验收 |
 |---|---|---|---|
-| 代理预设工具 allowlist | 逗号分隔 TextInput | `ui.TokenField`（tools 作为 token，可无建议） | 增删 token/保存测试 |
+| 代理预设工具 allowlist | ✅ 已完成（官方 `ui.TokenField`，Enter/逗号加 token、Backspace 删最后一个；保存后仍为 []string） | — | 预设保存/持久化测试 |
 | 上下文占用条 | 自绘进度条/百分比 | `ui.Meter` + `MeterLevels` | 阈值颜色、a11y 测试 |
 | 内联重命名（工作区/会话） | 对话框改名 | `ui.EditableText`（列表/页内就地编辑） | 双击/F2/Enter/Esc、保存失败回退 |
 | 文件预览里的源码 | 纯 Text | 官方代码展示（`editor.Code`/只读 code-editor，若 v0.8.3 提供只读用法） | 语言/行号/大文件截断测试 |
@@ -78,6 +78,8 @@
   行名、键盘可滚动；新增 RoleList/RoleListItem a11y 断言）。
 - 会话「轨迹」pane：`ui.Scroll` + tool card 循环 → `ui.List`（`Key=tool key`、
   行名=tool name、`Gap/PaddingY/Grow`，切换会话重置 ListState）。
+- 代理预设的「允许工具」字段：逗号分隔 TextInput → 官方 `ui.TokenField`
+  （chips、Enter/逗号添加、Backspace 删除；测试覆盖 token 渲染与持久化）。
 - 自动化任务页：`ui.Scroll` + task card 循环 → `ui.List`（Key=task.ID、行名、
   过滤结果直接作为 rows）。
 - 记忆 pane：`ui.Scroll` + memory 行循环 → 固定 SearchField/管理行/添加行 +

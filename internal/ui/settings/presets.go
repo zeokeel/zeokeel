@@ -42,7 +42,7 @@ type presetsState struct {
 	agentName     string
 	agentPersona  string
 	agentPrompt   string
-	agentTools    string
+	agentTools    []string
 	agentModel    string
 	agentFormOpen bool
 
@@ -150,8 +150,8 @@ func (st *presetsState) addAgentPreset(store contracts.SettingsService, locale c
 		}
 		slug = agentPresetSlug(name) + "-" + strconv.Itoa(index)
 	}
-	var tools []string
-	for _, tool := range strings.Split(st.agentTools, ",") {
+	tools := make([]string, 0, len(st.agentTools))
+	for _, tool := range st.agentTools {
 		if trimmed := strings.TrimSpace(tool); trimmed != "" {
 			tools = append(tools, trimmed)
 		}
@@ -163,7 +163,8 @@ func (st *presetsState) addAgentPreset(store contracts.SettingsService, locale c
 		Model: strings.TrimSpace(st.agentModel), Order: len(st.agentPresets),
 	})
 	if st.persistAgentPresets(store, locale, previous) {
-		st.agentName, st.agentPersona, st.agentPrompt, st.agentTools, st.agentModel = "", "", "", "", ""
+		st.agentName, st.agentPersona, st.agentPrompt, st.agentModel = "", "", "", ""
+		st.agentTools = nil
 	}
 }
 
@@ -438,7 +439,8 @@ func buildPresetsPage(c *ui.Context, store contracts.SettingsService, st *preset
 					Label: localized(locale, "添加代理预设", "Add agent preset"), Primary: true,
 					OnClick: func() {
 						st.agentFormOpen = true
-						st.agentName, st.agentPersona, st.agentPrompt, st.agentTools, st.agentModel = "", "", "", "", ""
+						st.agentName, st.agentPersona, st.agentPrompt, st.agentModel = "", "", "", ""
+						st.agentTools = nil
 						st.status = ""
 						c.Invalidate()
 					},
@@ -577,14 +579,13 @@ func buildAgentPresetDialog(c *ui.Context, t *design.Tokens, store contracts.Set
 					MinHeight(design.Space6 * 2).FillWidth()
 			}).Description(localized(locale, "该人设默认使用的系统提示词。",
 				"The system prompt this persona uses by default."))
-			ui.Field(c, localized(locale, "允许工具（逗号分隔）", "Allowed tools (comma separated)"), func() {
-				tools := ui.TextInput(c, &st.agentTools).
-					Label(inputLabel(locale, localized(locale, "允许工具（逗号分隔）",
-						"Allowed tools (comma separated)"))).
+			ui.Field(c, localized(locale, "允许工具", "Allowed tools"), func() {
+				// Tools are tokens: the official TokenField shows them as chips
+				// (Enter or comma adds one, Backspace removes the last) instead of
+				// asking the user to type a comma-separated string.
+				ui.TokenField(c, &st.agentTools, nil).
+					Label(localized(locale, "允许工具", "Allowed tools")).
 					Placeholder("read_file, bash").FillWidth()
-				if tools.Submitted() {
-					submitted = true
-				}
 			}).Description(localized(locale, "留空表示不过滤工具。", "Empty keeps every tool."))
 			ui.Field(c, localized(locale, "默认模型", "Default model"), func() {
 				model := ui.TextInput(c, &st.agentModel).

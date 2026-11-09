@@ -3,6 +3,7 @@ package settings_test
 // Tests for the Agent presets section of the Presets page.
 
 import (
+	"github.com/egoist/mygo/ui"
 	"testing"
 
 	"github.com/zeokeel/zeokeel/internal/contracts"
@@ -49,7 +50,15 @@ func TestAgentPresetsAddAndPersist(t *testing.T) {
 	clearAndType(t, h, tester, "人设名称 输入", "Reviewer")
 	clearAndType(t, h, tester, "人设 输入", "review carefully")
 	clearAndType(t, h, tester, "人设提示词 输入", "check concurrency")
-	clearAndType(t, h, tester, "允许工具（逗号分隔） 输入", " read_file, bash ,, ")
+	// The tools field is the official TokenField: Enter adds one token.
+	h.click(tester, "允许工具")
+	tester.Type("read_file")
+	tester.Key(0, ui.KeyEnter)
+	tester.Type("bash")
+	tester.Key(0, ui.KeyEnter)
+	tester.Frame()
+	// The tokens render as chips before saving.
+	h.assertTexts(tester, "read_file", "bash")
 	clearAndType(t, h, tester, "默认模型 输入", "review-model")
 	h.click(tester, "保存人设")
 
