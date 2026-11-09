@@ -245,9 +245,7 @@ func TestUpdateRepeatCheckClearsDownload(t *testing.T) {
 	waitForText(t, tester, "已下载")
 
 	h.click(tester, "检查更新")
-	if got := update.checkCount(); got != 2 {
-		t.Fatalf("Check calls = %d, want 2", got)
-	}
+	waitForCheckCount(t, update, 2)
 	tester.Frame()
 	h.assertNoTexts(tester, "已下载", "暂存路径")
 }
@@ -268,4 +266,18 @@ func TestUpdateDownloadEnglishCopy(t *testing.T) {
 	waitForText(t, tester, "Downloaded")
 	h.assertTexts(tester, "Version: 1.2.0", "Size: 2.0 MB", "SHA256 abcdef01", "Staged file",
 		"1.2.0-zeokeel-1.2.0.zip", "Download complete; schedule it for the next launch")
+}
+
+// waitForCheckCount waits for the asynchronous update check to land, so a slow
+// CI machine cannot observe the click before the backend counted it.
+func waitForCheckCount(t *testing.T, update *fakeDownloadUpdate, want int) {
+	t.Helper()
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		if update.checkCount() == want {
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatalf("Check calls = %d, want %d", update.checkCount(), want)
 }
