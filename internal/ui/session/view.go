@@ -2378,14 +2378,6 @@ func formatContextWindow(tokens int) string {
 	return fmt.Sprintf("%.1fk", float64(tokens)/1000)
 }
 
-// usageCachedSuffix renders the cached-token suffix (empty when none).
-func usageCachedSuffix(st *state, usage *contracts.MessageUsage) string {
-	if usage.CachedTokens <= 0 {
-		return ""
-	}
-	return " · " + st.tr("缓存 ", "cached ") + formatTokenCount(usage.CachedTokens)
-}
-
 // formatUsageDuration renders a turn duration: milliseconds under one second,
 // otherwise one decimal of seconds.
 func formatUsageDuration(durationMS int64) string {

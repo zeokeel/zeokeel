@@ -196,11 +196,9 @@ type state struct {
 	goal        *contracts.Goal
 	goalTracker contracts.GoalTracker
 	// goalActionErr is the last goal-lifecycle failure (DangerText row).
-	// Successes go to a transient toast. goalMenuOpen drives the goal chip's
-	// popover; goalConfirm is the destructive action ("abandon"/"clear")
-	// waiting for its AlertDialog confirmation.
+	// Successes go to a transient toast. goalConfirm is the destructive action
+	// ("abandon"/"clear") waiting for its AlertDialog confirmation.
 	goalActionErr string
-	goalMenuOpen  bool
 	goalConfirm   string
 
 	// Composer attachment state: files picked and staged for the next message,
@@ -565,23 +563,6 @@ func (st *state) permissionLabel(mode string) string {
 		return st.tr("从不允许", "Never")
 	default:
 		return st.tr("询问", "Ask")
-	}
-}
-
-// permissionHint explains the current permission mode in plain language (H7):
-// the chip labels are internal terms ("询问/工作区"), the tooltip says what the
-// agent will do.
-func permissionHint(st *state, mode string) string {
-	switch mode {
-	case contracts.PermissionWorkspace:
-		return st.tr("工作区内的文件读写自动允许，其他操作前询问",
-			"file reads and writes inside the workspace are allowed; other actions ask first")
-	case contracts.PermissionFull:
-		return st.tr("全部自动允许，不再询问", "everything is allowed without asking")
-	case contracts.PermissionNever:
-		return st.tr("全部拒绝，不执行任何工具", "everything is denied; no tool runs")
-	default:
-		return st.tr("危险操作前询问", "ask before risky actions")
 	}
 }
 

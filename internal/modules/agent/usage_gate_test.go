@@ -39,15 +39,6 @@ func (p *usageScriptProvider) Stream(_ context.Context, request rig.Request) (ri
 	}}, nil
 }
 
-func (p *usageScriptProvider) lastRequest() rig.Request {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	if len(p.requests) == 0 {
-		return rig.Request{}
-	}
-	return p.requests[len(p.requests)-1]
-}
-
 // newUsageService builds the agent service with a fake durable store and the
 // supplied provider factory.
 func newUsageService(t *testing.T, provider rig.Provider, settings *fakeSettings) (*service, *fakeStore) {

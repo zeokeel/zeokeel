@@ -48,6 +48,19 @@ All notable changes to ZeoKeel are documented here. The format follows
   workflows default to `GOPROXY=https://goproxy.cn,direct` with
   `GOSUMDB=sum.golang.org`; offline builds can override both to `off`.
 
+### Removed
+
+- **Legacy archive**: the 389 MB pre-rewrite `old/` module (836 tracked files)
+  was removed from the repository, together with its `.gitignore` rules and
+  the obsolete rebuild-plan/status docs that pointed at it. Historical design
+  research remains in `docs/research/`.
+- **Dead code**: unused handlers, helpers, test fakes and legacy constants
+  found by `deadcode -test` / `staticcheck U1000` were removed (host tray
+  helpers, old agent-preset picker remnants, toolcard color helpers, session
+  goal-menu state, the unused diagnostic-export seam, run-command helper and
+  stale test harnesses), while keeping the public contracts and behavior
+  intact.
+
 ### Fixed (UI conformance, mygo v0.8.3)
 
 A full UI/UX conformance pass against `mygo v0.8.3/docs/ui` and the

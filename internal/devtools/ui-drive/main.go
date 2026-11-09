@@ -440,15 +440,6 @@ func (c *check) warnf(format string, args ...any) {
 	c.details = append(c.details, "WARN: "+fmt.Sprintf(format, args...))
 }
 
-// skipf marks the step blocked (e.g. a service is unavailable in this
-// environment); it never fails the run by itself.
-func (c *check) skipf(format string, args ...any) {
-	if !c.failed {
-		c.skipped = fmt.Sprintf(format, args...)
-		c.details = append(c.details, "BLOCKED: "+c.skipped)
-	}
-}
-
 // require is a hard assertion: it fails the step when cond is false.
 func (c *check) require(cond bool, format string, args ...any) bool {
 	if !cond {

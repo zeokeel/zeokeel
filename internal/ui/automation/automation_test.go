@@ -130,12 +130,6 @@ func (f *fakeAutomation) notify() {
 	}
 }
 
-func (f *fakeAutomation) snapshot() []contracts.AutomationTask {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	return append([]contracts.AutomationTask(nil), f.tasks...)
-}
-
 func (f *fakeAutomation) addTask(task contracts.AutomationTask) {
 	f.mu.Lock()
 	defer f.mu.Unlock()

@@ -47,12 +47,6 @@ func (s *fakeStore) SearchMessages(_ context.Context, query string, limit int) (
 	return hits, nil
 }
 
-func (s *fakeStore) setHits(hits ...contracts.MessageSearchHit) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.hits = hits
-}
-
 func (s *fakeStore) callCount() int {
 	s.mu.Lock()
 	defer s.mu.Unlock()

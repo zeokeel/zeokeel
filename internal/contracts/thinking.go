@@ -11,7 +11,6 @@ package contracts
 // changed at any time without restarting the app.
 
 import (
-	"encoding/json"
 	"strings"
 )
 
@@ -294,18 +293,6 @@ func CloneRequestParams(params map[string]any) map[string]any {
 // conversation. Empty/absent follows the model's default mode.
 func SessionThinkingSettingKey(sessionID string) string {
 	return "session." + strings.TrimSpace(sessionID) + ".thinking"
-}
-
-// EncodeThinkingModes renders a mode list as the settings/audit JSON form.
-func EncodeThinkingModes(modes []ThinkingMode) (string, error) {
-	if modes == nil {
-		modes = []ThinkingMode{}
-	}
-	encoded, err := json.Marshal(modes)
-	if err != nil {
-		return "", err
-	}
-	return string(encoded), nil
 }
 
 // DefaultModelCatalog returns the built-in model presets shipped with the

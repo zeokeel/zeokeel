@@ -1,10 +1,10 @@
 # ZeoKeel 交互与 UI 人性化审计报告（独立）
 
-> **审计对象**：ZeoKeel 当前工作区（HEAD `e977b12` + 未提交修复，`docs/DESIGN-FIX-STATUS.md` 后的收口状态）
+> **审计对象**：ZeoKeel 当前工作区（HEAD `e977b12` + 未提交修复，`docs/UI-FIX-STATUS-v0.8.3.md` 后的收口状态）
 > **审计日期**：2026-11-08 13:59–14:25（Asia/Shanghai）
 > **审计依据**：`design-guide` 技能（原理 + MyGo/ZeoKeel 适配章节），以及 `mygo-maintenance` 的交互/生命周期约束
 > **审计方式**：重新渲染真实产品帧（`.cache/usability/shots/`，manifest 13:59，78 张含窄窗/暗色）＋ 重跑交互驱动（`.cache/usability/drive/`，66 步 66 PASS）＋ 阅读交互代码路径。
-> **独立性**：本报告只读，不改产品代码；不采信修复者自评；与既有 `docs/DESIGN-REVIEW.md`（问题清单）和 `docs/DESIGN-FIX-STATUS.md`（修复状态）是**不同视角**——这里只回答一个问题：**修完之后，日常使用中还有哪里不够"顺手/好懂/安全"**。
+> **独立性**：本报告只读，不改产品代码；不采信修复者自评；与既有 `docs/DESIGN-REVIEW.md`（问题清单）和 `docs/UI-FIX-STATUS-v0.8.3.md`（修复状态）是**不同视角**——这里只回答一个问题：**修完之后，日常使用中还有哪里不够"顺手/好懂/安全"**。
 
 ---
 
@@ -283,7 +283,7 @@
 - 帧快照：`.cache/usability/shots/`（78 PNG + `manifest.txt`）；窄窗/暗色：`narrow/`。
 - 交互驱动：`.cache/usability/drive/drive-report.md`（66/66 PASS）、`shots/`（菜单/浮层/设置/窄窗）。
 - 关键截图：`p2-appearance.png`、`p2-model-settings.png`、`p2-plan.png`、`p1-approval.png`、`p2-automation.png`、`p2-plugins.png`、`p2-rightpanel.png`、`p2-home.png`、`p1-chat.png`、`p2-shortcuts.png`、`drive/shots/slash-open.png`、`drive/shots/overlay-goal-menu.png`、`narrow/narrow-session-inspector.png`。
-- 关联文档：`docs/DESIGN-REVIEW.md`（问题审计）、`docs/DESIGN-FIX-STATUS.md`（修复状态）。
+- 关联文档：`docs/DESIGN-REVIEW.md`（问题审计）、`docs/UI-FIX-STATUS-v0.8.3.md`（修复状态）。
 
 
 ### 模型思考/生成配置（2026-11-08，配置面补齐）

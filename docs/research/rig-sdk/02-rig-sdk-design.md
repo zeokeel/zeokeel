@@ -49,7 +49,7 @@ UI 拆成两份契约，否则 SDK 会把桌面 UI 框架拖进第三方依赖�
 
 | 维度 | 事实 |
 | --- | --- |
-| 形态 | `old/` 是独立 Go module（`github.com/zeokeel/zeokeel/old`），仅归档参考，不参与新根构建；无 `.git` |
+| 形态 | `old/` 是独立 Go module（`github.com/zeokeel/zeokeel/old`），仅作历史设计参考；归档已从仓库移除 |
 | agent core | `old/internal/runtime`：23 个非测试文件 / **6,434 行**；31 个测试文件 / 8,882 行（共 15,316） |
 | eino | `cloudwego/eino v0.10.0-alpha.35`；**9 个非测试文件** import（agent/modes/mode_deep/model_adapter/stream/multimodal/history/subagent/question_gate），11 个测试文件；用到 8 个 eino 包：`schema`×16、`adk`×7、`compose`×5、`components/model`×5、`components/tool`×4、`tool/utils`×1、`adk/prebuilt/supervisor`×1、`adk/prebuilt/planexecute`×1 |
 | 公开接口 | **eino-free 的已是多数**：`Provider`（provider.go:236）、`Tool`（tool.go:14）、`History`（history.go:22）、`Gate`（approval.go:31）、`Compactor`（compaction.go:21）、`QuestionGate`（question_gate.go:25）；eino 泄漏点集中在 `Agent` 内部（`agent.go:13-15`、`model_adapter.go:11-14`、`modes.go:9-14`、`stream.go:12-13` 等） |

@@ -133,15 +133,6 @@ func newHarnessCore(t *testing.T, dataDir string, withBridges bool) *harness {
 	return newHarnessCoreWith(t, dataDir, withBridges, local, local)
 }
 
-// newHarnessWithSettingsService starts a harness whose kernel-provided settings
-// service is provided (a fault-injection wrapper); h.settings is the writable
-// in-memory store the wrapper delegates to.
-func newHarnessWithSettingsService(t *testing.T, provided contracts.SettingsService) *harness {
-	t.Helper()
-	local := newMemSettings(nil)
-	return newHarnessCoreWith(t, t.TempDir(), true, local, provided)
-}
-
 func newHarnessCoreWith(t *testing.T, dataDir string, withBridges bool, local *memSettings,
 	provided contracts.SettingsService) *harness {
 	t.Helper()
@@ -553,13 +544,6 @@ func (f *fakeChat) setCancelError(err error) {
 	f.mu.Unlock()
 }
 
-// setDeleteError injects a DeleteSession failure.
-func (f *fakeChat) setDeleteError(err error) {
-	f.mu.Lock()
-	f.deleteErr = err
-	f.mu.Unlock()
-}
-
 // recordedSends returns the recorded Send prompts ("session:prompt").
 func (f *fakeChat) recordedSends() []string {
 	f.mu.Lock()
@@ -813,10 +797,8 @@ func (f *fakeGoalTracker) trigger(goal contracts.Goal, ok bool) bool {
 // counter is an atomically maintained test state shared across goroutines.
 type counter struct{ value atomic.Int64 }
 
-func (c *counter) inc()          { c.value.Add(1) }
-func (c *counter) add(n int64)   { c.value.Add(n) }
-func (c *counter) load() int64   { return c.value.Load() }
-func (c *counter) store(n int64) { c.value.Store(n) }
+func (c *counter) inc()        { c.value.Add(1) }
+func (c *counter) load() int64 { return c.value.Load() }
 
 // itoa formats n for marker names.
 func itoa(n int64) string { return strconv.FormatInt(n, 10) }

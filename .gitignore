@@ -6,11 +6,6 @@
 *.test
 
 # Archived pre-restructure project (kept as reference; own Go module)
-# old/ is tracked on purpose; only its build outputs are ignored.
-/old/dist/
-/old/zeokeel
-/old/zeokeel.exe
-/old/*.test
 
 # Local agent tooling (not product code)
 /.agents/

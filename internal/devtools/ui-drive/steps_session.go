@@ -357,15 +357,3 @@ func (d *drive) runSessionSteps() {
 			c.shot("stream-stopped")
 		})
 }
-
-// containsAny reports whether any needle appears in one of the menu labels.
-func containsAny(items []string, needles ...string) bool {
-	for _, item := range items {
-		for _, needle := range needles {
-			if strings.Contains(item, needle) {
-				return true
-			}
-		}
-	}
-	return false
-}

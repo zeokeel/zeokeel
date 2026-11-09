@@ -30,16 +30,6 @@ func (d *drive) texts() []string { return d.tester.Texts() }
 // has reports whether the frame shows text containing s.
 func (d *drive) has(s string) bool { return d.tester.HasText(s) }
 
-// hasAll reports whether every string is shown.
-func (d *drive) hasAll(wanted ...string) bool {
-	for _, want := range wanted {
-		if !d.tester.HasText(want) {
-			return false
-		}
-	}
-	return true
-}
-
 // find returns the first element showing exactly s.
 func (d *drive) find(s string) (ui.Rect, bool) { return d.tester.Find(s) }
 
@@ -47,18 +37,6 @@ func (d *drive) find(s string) (ui.Rect, bool) { return d.tester.Find(s) }
 func (d *drive) findPrefix(prefix string) (string, ui.Rect, bool) {
 	for _, text := range d.tester.Texts() {
 		if strings.HasPrefix(text, prefix) {
-			if rect, ok := d.tester.Find(text); ok {
-				return text, rect, true
-			}
-		}
-	}
-	return "", ui.Rect{}, false
-}
-
-// findContaining returns the first label containing s and its rect.
-func (d *drive) findContaining(s string) (string, ui.Rect, bool) {
-	for _, text := range d.tester.Texts() {
-		if strings.Contains(text, s) {
 			if rect, ok := d.tester.Find(text); ok {
 				return text, rect, true
 			}
@@ -122,19 +100,6 @@ func (d *drive) waitText(text string, timeout time.Duration) bool {
 	for time.Now().Before(deadline) {
 		d.tester.Frame()
 		if d.tester.HasText(text) {
-			return true
-		}
-		time.Sleep(10 * time.Millisecond)
-	}
-	return false
-}
-
-// waitTextGone pumps frames until the frame no longer shows text.
-func (d *drive) waitTextGone(text string, timeout time.Duration) bool {
-	deadline := time.Now().Add(timeout)
-	for time.Now().Before(deadline) {
-		d.tester.Frame()
-		if !d.tester.HasText(text) {
 			return true
 		}
 		time.Sleep(10 * time.Millisecond)
@@ -263,34 +228,10 @@ func (d *drive) settingsPanelRect() ui.Rect {
 	return rect
 }
 
-// rectOrder returns the x positions of the named controls (missing controls are
-// omitted), for the dialogue button-order assertions.
-func (d *drive) rectOrder(labels ...string) ([]string, []float32, []string) {
-	var found, missing []string
-	var xs []float32
-	for _, label := range labels {
-		rect, ok := d.tester.Find(label)
-		if !ok {
-			missing = append(missing, label)
-			continue
-		}
-		found = append(found, label)
-		xs = append(xs, rect.X)
-	}
-	return found, xs, missing
-}
-
 // setSize changes the window size and settles the layout.
 func (d *drive) setSize(width, height int) {
 	d.w, d.h = width, height
 	d.tester.SetSize(width, height)
-	d.tester.Frame()
-	d.tester.Frame()
-}
-
-// scrollAt sends a scroll wheel gesture at the centre of rect.
-func (d *drive) scrollAt(rect ui.Rect, dy float32) {
-	d.tester.Wheel(rect.X+rect.W/2, rect.Y+rect.H/2, 0, dy)
 	d.tester.Frame()
 	d.tester.Frame()
 }
@@ -352,20 +293,6 @@ func (c *check) clickAny(labels ...string) (string, bool) {
 	}
 	c.failf("以下控件都不存在：%v", labels)
 	return "", false
-}
-
-// clickAnyText clicks the first label containing one of the needles.
-func (c *check) clickAnyText(needles ...string) bool {
-	for _, needle := range needles {
-		if label, rect, ok := c.d.findContaining(needle); ok {
-			_ = label
-			c.d.clickRect(rect)
-			c.d.frame()
-			return true
-		}
-	}
-	c.failf("以下文本都不存在：%v", needles)
-	return false
 }
 
 // has reports whether the frame shows text containing s.

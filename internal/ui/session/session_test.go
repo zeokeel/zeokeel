@@ -1027,26 +1027,8 @@ func TestHeaderCopyActions(t *testing.T) {
 
 // --- helpers for the fixed interaction tests --------------------------------
 
-// hoverMessage moves the pointer over a message text so the assistant turn's
-// hover-only action row is built on the next frame.
-func hoverMessage(t *testing.T, tester *ui.Tester, text string) {
-	t.Helper()
-	rect, ok := tester.Find(text)
-	if !ok {
-		t.Fatalf("message text %q missing; texts = %v", text, tester.Texts())
-	}
-	tester.Move(rect.X+rect.W/2, rect.Y+rect.H/2)
-	tester.Frame()
-}
-
 // openGoalActions opens the header goal chip's popover menu.
 func openGoalActions(t *testing.T, h *harness, tester *ui.Tester, chip string) {
 	t.Helper()
 	h.click(tester, chip)
-}
-
-// confirmAlertDialog clicks the confirm button of an open native AlertDialog.
-func confirmAlertDialog(t *testing.T, h *harness, tester *ui.Tester, confirm string) {
-	t.Helper()
-	h.click(tester, confirm)
 }

@@ -10,17 +10,6 @@ import (
 	"github.com/zeokeel/zeokeel/internal/ui/settings"
 )
 
-func openAgentPresetsPage(t *testing.T, h *harness, tester interface {
-	Click(string) error
-	Frame()
-}) {
-	t.Helper()
-	if err := tester.Click("预设"); err != nil {
-		t.Fatalf("click 预设: %v", err)
-	}
-	tester.Frame()
-}
-
 func TestAgentPresetsSectionDefaults(t *testing.T) {
 	store := newFakeSettings(nil)
 	h := newHarness(t, &fakeChat{}, store, settings.Config{})

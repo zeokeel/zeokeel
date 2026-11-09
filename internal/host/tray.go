@@ -169,12 +169,6 @@ func createTrayWithActions(window trayWindow, handler trayHandler, actions trayA
 	return tray, nil
 }
 
-// newTrayMenu builds the legacy show/quit trap menu (kept as the stable shape
-// used by createTray and the regression linkname test).
-func newTrayMenu(handler trayHandler) *mygo.Menu {
-	return newTrayMenuWithActions(handler, trayActions{}, nil)
-}
-
 // newTrayMenuWithActions builds the tray menu: show the main window, the
 // optional new-session/settings actions, a separator, then quit. Items whose
 // action is nil are omitted so a host without the action simply does not show
@@ -235,16 +229,6 @@ func newTrayMenuWithActions(handler trayHandler, actions trayActions, warn func(
 // showTrayWindow restores and focuses the main window (tray activation).
 func showTrayWindow(window trayWindow) {
 	if window == nil {
-		return
-	}
-	window.Show()
-	window.Restore()
-	window.Focus()
-}
-
-// showWindow restores and focuses the main window (other host callers).
-func showWindow(window *mygo.Window) {
-	if window == nil || window.IsDestroyed() {
 		return
 	}
 	window.Show()

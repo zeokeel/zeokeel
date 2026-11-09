@@ -324,67 +324,6 @@ func (d *drive) openSettingsPageID(pageID string) error {
 	return nil
 }
 
-// ensureSettingsPage opens the settings surface (when closed) and selects one
-// page by its navigation title, scrolling the settings navigation when the
-// item is out of its viewport. A group header and a page item may share one
-// title (the About group), so a click that does not switch pages is retried
-// just below the first match (the item sits under its header).
-func (d *drive) ensureSettingsPage(page settingsPageSpec) error {
-	if !d.openSettingsFromNeutralScreen() {
-		return fmt.Errorf("打开设置失败")
-	}
-	panel := d.settingsPanelRect()
-	// Start at the top of the navigation, then walk down until the item is in
-	// the window and inside the panel.
-	d.tester.Scroll(panel.X+100, panel.Y+panel.H/2, 0, -4000)
-	d.frame()
-	for attempt := 0; attempt < 12; attempt++ {
-		if rect, ok := d.find(page.title); ok && rectCenterInWindow(d, rect) && inRect(panel, rect, 1) {
-			d.clickRect(rect)
-			d.frame()
-			d.frame()
-			if d.pageArrived(page) {
-				return nil
-			}
-			// Retry below the first match: a section header with the same
-			// title sits directly above its page item.
-			for _, dy := range []float32{24, 28, 32, 36} {
-				d.tester.ClickAt(rect.X+rect.W/2, rect.Y+rect.H/2+dy)
-				d.frame()
-				d.frame()
-				if d.pageArrived(page) {
-					return nil
-				}
-			}
-			return fmt.Errorf("点击导航「%s」后页面未切换", page.title)
-		}
-		d.tester.Scroll(panel.X+100, panel.Y+panel.H/2, 0, 180)
-		d.frame()
-	}
-	return fmt.Errorf("设置导航中找不到可点击的「%s」", page.title)
-}
-
-// pageArrived reports whether the selected settings page rendered (its title
-// shows as the active navigation item and at least one expected control is
-// present; pages without controls fall back to the title only).
-func (d *drive) pageArrived(page settingsPageSpec) bool {
-	for _, control := range page.controls {
-		if d.has(control) {
-			return true
-		}
-	}
-	if len(page.controls) == 0 {
-		return d.has(page.title)
-	}
-	return false
-}
-
-// rectCenterInWindow reports whether the rect's center is inside the window.
-func rectCenterInWindow(d *drive, rect ui.Rect) bool {
-	centerX, centerY := rect.X+rect.W/2, rect.Y+rect.H/2
-	return centerX >= 0 && centerY >= 0 && centerX < float32(d.w) && centerY < float32(d.h)
-}
-
 // checkPanelText asserts the page heading text is inside the settings panel (a
 // cheap "content is not painted outside the dialog" check).
 func (c *check) checkPanelText(text string) {
@@ -395,36 +334,6 @@ func (c *check) checkPanelText(text string) {
 	if !inRect(c.d.settingsPanelRect(), rect, 1) {
 		c.failf("页面标题「%s」在设置弹窗外：rect=%+v，弹窗=%+v", text, rect, c.d.settingsPanelRect())
 	}
-}
-
-// clickRowRightEdge clicks a settings row's control on the right edge (a native
-// Switch on the right of a Form row, or the right side of a full-width Toggle),
-// so the same step works before and after the Toggle→Switch migration. The page
-// body is scrolled until the row is inside the dialog.
-func (c *check) clickRowRightEdge(label string) bool {
-	if !c.d.ensureSettingsVisible(label) {
-		c.failf("设置行「%s」滚动后仍不可见", label)
-		return false
-	}
-	rect, ok := c.d.find(label)
-	if !ok {
-		c.failf("设置行「%s」不存在", label)
-		return false
-	}
-	panel := c.d.settingsPanelRect()
-	x := rect.X + rect.W - 24
-	if panelRight := panel.X + panel.W - 40; x < panelRight-160 {
-		x = panelRight
-	}
-	y := rect.Y + rect.H/2
-	if x < 0 || y < 0 || float32(c.d.w) <= x || float32(c.d.h) <= y {
-		// Fall back to the label itself for compact rows.
-		c.d.clickRect(rect)
-	} else {
-		c.d.tester.ClickAt(x, y)
-	}
-	c.d.frame()
-	return true
 }
 
 // clickSettingSwitch toggles one boolean setting row: it clicks the visible

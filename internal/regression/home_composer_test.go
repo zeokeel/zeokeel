@@ -43,25 +43,6 @@ func startHomeUI(t *testing.T, chat contracts.ChatService, sessionScreen bool) (
 	return h, tester
 }
 
-// homeAttachCall records one SendWithAttachments invocation.
-type homeAttachCall struct {
-	sessionID   string
-	prompt      string
-	attachments []contracts.Attachment
-}
-
-// homeAttachChat extends the fake chat with the optional AttachmentSender half.
-type homeAttachChat struct {
-	*fakeChat
-	attachCalls []homeAttachCall
-}
-
-func (c *homeAttachChat) SendWithAttachments(sessionID, prompt string, attachments []contracts.Attachment) error {
-	c.attachCalls = append(c.attachCalls, homeAttachCall{sessionID: sessionID, prompt: prompt,
-		attachments: append([]contracts.Attachment(nil), attachments...)})
-	return c.sendErr
-}
-
 // clickHomeText clicks one Home label and repaints.
 func clickHomeText(t *testing.T, tester *ui.Tester, label string) {
 	t.Helper()

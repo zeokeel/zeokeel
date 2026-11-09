@@ -31,12 +31,6 @@ func (l *fakeLogger) Printf(format string, args ...any) {
 	l.lines = append(l.lines, fmt.Sprintf(format, args...))
 }
 
-func (l *fakeLogger) count() int {
-	l.mu.Lock()
-	defer l.mu.Unlock()
-	return len(l.lines)
-}
-
 func (l *fakeLogger) contains(fragment string) bool {
 	l.mu.Lock()
 	defer l.mu.Unlock()

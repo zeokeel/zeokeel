@@ -91,12 +91,6 @@ func (l *fakeLogger) contains(fragment string) bool {
 	return false
 }
 
-func (l *fakeLogger) count() int {
-	l.mu.Lock()
-	defer l.mu.Unlock()
-	return len(l.lines)
-}
-
 // provide registers one host service on ctx.
 func provide[T any](t *testing.T, ctx cordis.Context, key cordis.ServiceKey[T], value T) {
 	t.Helper()

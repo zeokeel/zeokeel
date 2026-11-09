@@ -1,6 +1,6 @@
 # eino 依赖审计与替换规格（ZeoKeel-Rig 调研线 A）
 
-> 对象：`/data/mygo`（HEAD `40368d1`；旧工程在 `old/`，独立 module `github.com/zeokeel/zeokeel/old`，可 `go list`/`go build`；新根工程无 eino）。
+> 对象：`/data/mygo`（HEAD `40368d1`；旧工程归档已移除（历史路径 `old/`，独立 module `github.com/zeokeel/zeokeel/old`）；新根工程无 eino）。
 > 目标：量化旧工程对 `github.com/cloudwego/eino`（v0.10.0-alpha.35）的依赖，给出「抛弃 eino」的替换规格、依赖收益与分阶段成本，作为 ZeoKeel-Rig SDK 的决策证据。
 > 环境：离线，`PATH=/usr/local/go/bin:$PATH GOPROXY=off GOSUMDB=off GOFLAGS=-mod=mod`；只读分析，未改产品代码、未 commit。
 > 证据分级：**[A]** 本报告命令实测（脚本见附录 A，全部可复现）；**[B]** 源码/模块缓存阅读并给 `file:line`；**[C]** 推断与估算（人日、体积预测）。

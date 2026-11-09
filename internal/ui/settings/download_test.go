@@ -79,12 +79,6 @@ func (f *fakeDownloadUpdate) setErr(err error) {
 	f.err = err
 }
 
-func (f *fakeDownloadUpdate) setInfo(info contracts.UpdateInfo) {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	f.info = info
-}
-
 func (f *fakeDownloadUpdate) downloadCount() int {
 	f.mu.Lock()
 	defer f.mu.Unlock()

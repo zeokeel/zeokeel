@@ -2,7 +2,7 @@
 
 > 审查日期：2026-11-08 · HEAD `e977b12` · 依据：`design-guide` + `mygo-maintenance` 两个技能
 > 审查性质：只读审查，未修改任何产品代码；本文件为新增报告。
-> **修复执行结果见 [docs/DESIGN-FIX-STATUS.md](DESIGN-FIX-STATUS.md)**（Round-1 → Round-2 全部修复、验证证据与遗留 backlog）。
+> **修复执行结果见 [docs/UI-FIX-STATUS-v0.8.3.md](UI-FIX-STATUS-v0.8.3.md)**（mygo v0.8.3 官方化修复清单与验证证据）。
 > 证据：最新全量截图（1280×800 浅色 65 张、1024×720 窄窗 67 张、暗色 3 张）见
 > `.cache/design-review/shots/`、`.cache/design-review/narrow/`、`.cache/design-review/crops/`；
 > 四份分模块详细报告见 `.cache/design-review/reports/{settings,shell,session,conformance}-audit.md`。

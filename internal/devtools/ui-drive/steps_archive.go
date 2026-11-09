@@ -6,8 +6,6 @@ package main
 // Archiving itself still happens from the session row's native context menu.
 
 import (
-	"strings"
-
 	"github.com/zeokeel/zeokeel/internal/contracts"
 )
 
@@ -48,17 +46,6 @@ func (d *drive) sessionExists(sessionID string) bool {
 		}
 	}
 	return false
-}
-
-// sessionCount counts the occurrences of text among the frame labels.
-func (d *drive) sessionCount(text string) int {
-	count := 0
-	for _, label := range d.texts() {
-		if strings.TrimSpace(label) == text {
-			count++
-		}
-	}
-	return count
 }
 
 func (d *drive) runArchiveSteps() {

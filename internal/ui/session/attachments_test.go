@@ -36,10 +36,9 @@ var tinyPNG = func() []byte {
 // and records the attachment sends.
 type attachmentChat struct {
 	*fakeChat
-	callMu   sync.Mutex
-	calls    []attachmentSendCall
-	sendErr  error
-	parallel bool
+	callMu  sync.Mutex
+	calls   []attachmentSendCall
+	sendErr error
 }
 
 type attachmentSendCall struct {
@@ -125,18 +124,6 @@ func (h *attachmentHarness) click(tester *ui.Tester, label string) {
 	if err := tester.Click(label); err != nil {
 		h.t.Fatalf("click %q: %v; texts = %v", label, err, tester.Texts())
 	}
-	tester.Frame()
-}
-
-// clickExact clicks the first element whose text or label equals label exactly
-// (Tester.Click matches substrings, which is ambiguous in menu frames).
-func (h *attachmentHarness) clickExact(tester *ui.Tester, label string) {
-	h.t.Helper()
-	rect, ok := tester.Find(label)
-	if !ok {
-		h.t.Fatalf("no element shows exactly %q; texts = %v", label, tester.Texts())
-	}
-	tester.ClickAt(rect.X+rect.W/2, rect.Y+rect.H/2)
 	tester.Frame()
 }
 

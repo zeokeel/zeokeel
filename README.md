@@ -89,7 +89,6 @@ internal/modules/*    后端模块（store/session/tools/...）
 internal/ui/*         UI 模块（home/session/settings/...）
 internal/uikit        共享 UI 库（优先 mygo 原生控件，不手搓）
 internal/design       设计 tokens
-old/                  重构前的 ZeoKeel（归档参考，独立 Go module）
 ```
 
 规则（详见 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)）：
@@ -280,9 +279,8 @@ go test ./...
   剩余集中在编排执行/composer 深度/presets/桌面集成/管理深度）
 - ✅ P5 goal 跟踪：`contracts.GoalTracker` 宿主桥（uiroot goal 服务 + host 提供 + hosttools GoalStore 桥接）+ 会话 header
   「目标」Badge/文本/「清除目标」；E2E goal 工具→header 显示→清除后 tracker 空；截图 `p2-goal.png`
-- ⬜ 后续阶段见 [docs/PRODUCT-REBUILD-PLAN.md](docs/PRODUCT-REBUILD-PLAN.md)：
-  P2 剩余（composer 附件/图片/@ 提及、右侧栏 Files/Terminal/Log 页、会话操作上下文菜单）→
-  P3 memory/skills/automation/插件/workspace diff/搜索/fork/export → P4 ACP/热键/导入/更新/诊断
+- 🔁 后续版本变更见 [CHANGELOG.md](CHANGELOG.md)；当前能力与验证方式见
+  [docs/COVERAGE.md](docs/COVERAGE.md) / [docs/VERIFICATION.md](docs/VERIFICATION.md)
 - ✅ `make ci` 全绿；uiroot 29 个 headless 测试（覆盖率 99.3%）；desktop/headless 装配集成测试；
   Xvfb 真窗口冒烟通过
 - ⬜ 逐模块迁移（后端 20 + UI 16，见 `docs/research/kernel-split/05-ui-module-map.md`）：

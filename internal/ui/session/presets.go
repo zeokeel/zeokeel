@@ -9,21 +9,8 @@ package session
 import (
 	"strings"
 
-	"github.com/egoist/mygo/ui"
-
 	"github.com/zeokeel/zeokeel/internal/contracts"
-	"github.com/zeokeel/zeokeel/internal/design"
 )
-
-// promptSummary truncates a preset prompt for the menu's muted note line.
-func promptSummary(prompt string) string {
-	runes := []rune(strings.TrimSpace(prompt))
-	const limit = 60
-	if len(runes) <= limit {
-		return string(runes)
-	}
-	return string(runes[:limit]) + "…"
-}
 
 // effectivePromptPresets returns the presets the composer menu offers. An empty
 // or malformed settings row (and a missing settings service) falls back to the
@@ -87,49 +74,6 @@ func effectiveAgentPresets(st *state) []contracts.AgentPreset {
 		out = append(out, preset)
 	}
 	return out
-}
-
-// chat backend implements contracts.SessionPresetSetter and presets exist).
-func buildAgentPresetPicker(c *ui.Context, t *design.Tokens, chat contracts.ChatService, st *state, runtime contracts.UIRuntime, activeID string) {
-	setter, ok := chat.(contracts.SessionPresetSetter)
-	if !ok || activeID == "" {
-		return
-	}
-	presets := effectiveAgentPresets(st)
-	if len(presets) == 0 {
-		return
-	}
-	currentID := strings.TrimSpace(setter.SessionPreset(activeID))
-	currentName := ""
-	for _, preset := range presets {
-		if preset.ID == currentID {
-			currentName = preset.Name
-			break
-		}
-	}
-	// The chip stays short (the toolbar has to fit the window): it names the
-	// feature, and the selected preset name when one is applied.
-	label := st.tr("人设", "Persona")
-	if currentName != "" {
-		label = st.tr("人设：", "Persona: ") + currentName
-	}
-	ui.PopoverMenuButton(c, label, func(m *ui.Menu) {
-		m.Item(st.tr("选择代理预设", "Choose an agent preset")).Disabled(true)
-		m.Separator()
-		none := m.Item(st.tr("无", "None"))
-		none.Radio(currentID == "")
-		if none.Chosen() && currentID != "" {
-			applySessionPreset(setter, st, runtime, activeID, "")
-		}
-		for _, preset := range presets {
-			preset := preset
-			item := m.Item(preset.Name)
-			item.Radio(preset.ID == currentID)
-			if item.Chosen() && preset.ID != currentID {
-				applySessionPreset(setter, st, runtime, activeID, preset.ID)
-			}
-		}
-	}).Tooltip(st.tr("为本会话选择代理预设（人设）", "Choose an agent preset (persona) for this session"))
 }
 
 // applySessionPreset selects/clears the active session's preset, surfacing a

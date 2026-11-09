@@ -1,6 +1,6 @@
 # ZeoKeel 架构（v2 · 编译期模块化）
 
-> 产品名：**ZeoKeel**。UI 是 mygo 原生控件（无浏览器/webview）。旧工程整体归档在 `old/`
+> 产品名：**ZeoKeel**。UI 是 mygo 原生控件（无浏览器/webview）。旧工程的重建已完成，归档代码已从仓库移除（历史设计记录保留在 `docs/research/`）
 > （独立 Go module，仅参考，不参与构建），新根工程按本文件重组。
 > 相关调研与决策依据：[docs/research/kernel-split/00-report.md](research/kernel-split/00-report.md)。
 
@@ -28,7 +28,6 @@ internal/modules/*      后端模块（appinfo/store/session/tools/...）
 internal/ui/*           UI 模块（home/session/settings/...）
 internal/uikit/         共享 UI 库：优先封装 mygo 原生控件，不手搓控件
 internal/design/        设计 tokens（颜色/间距，从 mygo Theme 派生）
-old/                    归档旧工程（独立 module）
 ```
 
 ## 3. 三层边界（谁拥有什么）
@@ -169,7 +168,7 @@ if _, err := ctx.Effect(func() cordis.Effect {
 
 ## 8. 当前状态（Stage 0 骨架：已可运行）
 
-- ✅ 新根工程、`old/` 归档（`cd old && go build ./...` 独立可构建）
+- ✅ 新根工程独立构建；旧工程归档已移除，历史调研保留在 `docs/research/`
 - ✅ contracts / uiroot（帧根 + 五注册表 + Post 队列 + 导航 + 设置面 + 槽位渲染；
   `slot` 模型含保留槽位与模块自定义槽位 `RenderSlot`；`RenderTool` 工具卡注入）
 - ✅ assembly（编译期 registry + 内嵌 desktop/headless 装配 + 预检 + 级联卸载）

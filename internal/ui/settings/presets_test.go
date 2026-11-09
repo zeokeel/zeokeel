@@ -3,7 +3,6 @@ package settings_test
 // Tests for the prompt-presets settings page (CRUD + ordering).
 
 import (
-	"encoding/json"
 	"errors"
 	"testing"
 
@@ -158,17 +157,5 @@ func TestPresetsPageEnglish(t *testing.T) {
 	tester.Frame()
 	h.assertTexts(tester, "Prompt presets", "Built-in defaults", "Restore built-in defaults", "Add")
 }
-
-// decodePresetsJSON is a sanity check that the encoder keeps array order.
-func decodePresetsJSON(t *testing.T, raw string) []contracts.PromptPreset {
-	t.Helper()
-	var presets []contracts.PromptPreset
-	if err := json.Unmarshal([]byte(raw), &presets); err != nil {
-		t.Fatalf("decode %q: %v", raw, err)
-	}
-	return presets
-}
-
-var _ = decodePresetsJSON
 
 var errSettingsWrite = errors.New("settings write failed")

@@ -116,12 +116,6 @@ func newRendererState() *rendererState {
 	return &rendererState{open: make(map[string]bool)}
 }
 
-func (s *rendererState) load(key string) bool {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return s.open[key]
-}
-
 // loadSeen reports the stored disclosure state and whether the reader ever
 // touched it, so a fresh card can start from the H15 default (failures and very
 // short results expanded).
@@ -252,30 +246,7 @@ func realBuild(state *rendererState, runtime contracts.UIRuntime) func(c *ui.Con
 }
 
 // toolIcon maps a tool name to its brand glyph: shell/process tools use the
-// terminal, file and web reads the globe, searches the magnifier, task tools// toolStatusColor maps a tool status to the badge's tint/fill color.
-func toolStatusColor(t *design.Tokens, status string) ui.Color {
-	switch normalizeStatus(status) {
-	case "running":
-		return t.Warning
-	case "ok":
-		return t.Success
-	case "error":
-		return t.Danger
-	default:
-		return t.LabelTertiary
-	}
-}
-
-// toolStatusTintAlpha is the badge fill opacity of a status: lighter for
-// success so SuccessText keeps WCAG-AA contrast on the tint.
-func toolStatusTintAlpha(status string) float32 {
-	if normalizeStatus(status) == "ok" {
-		return 0.08
-	}
-	return 0.12
-}
-
-// toolStatusTextColor is the badge's WCAG-AA foreground of a status (the
+// terminal, file and web reads the globe, searches the magnifier, task tools// toolStatusTextColor is the badge's WCAG-AA foreground of a status (the
 // status color itself is a fill/icon color, too light for small text).
 func toolStatusTextColor(t *design.Tokens, status string) ui.Color {
 	switch normalizeStatus(status) {
@@ -316,54 +287,6 @@ func normalizeStatus(status string) string {
 		return "ok"
 	case "error", "failed", "failure", "canceled", "cancelled":
 		return "error"
-	default:
-		return ""
-	}
-}
-
-// toolCategory is the canonical (Chinese) category key of a tool name.
-func toolCategory(name string) string {
-	switch name {
-	case "bash":
-		return "shell"
-	case "read_file", "write_file", "edit_file", "str_replace_editor", "list_dir", "glob", "grep", "read_image":
-		return "文件"
-	case "web_fetch", "web_search":
-		return "网络"
-	case "job_start", "job_output", "terminal_send", "terminal_read":
-		return "进程"
-	case "enter_worktree", "list_worktrees":
-		return "工作树"
-	case "subagent", "workflow", "ralph":
-		return "编排"
-	case "team_task_create", "team_task_update", "todo":
-		return "任务"
-	case "skill":
-		return "技能"
-	default:
-		return ""
-	}
-}
-
-// categoryLabel translates the inline category hint for display.
-func categoryLabel(state *rendererState, name string) string {
-	switch toolCategory(name) {
-	case "shell":
-		return "shell"
-	case "文件":
-		return state.tr("文件", "Files")
-	case "网络":
-		return state.tr("网络", "Web")
-	case "进程":
-		return state.tr("进程", "Processes")
-	case "工作树":
-		return state.tr("工作树", "Worktrees")
-	case "编排":
-		return state.tr("编排", "Orchestration")
-	case "任务":
-		return state.tr("任务", "Tasks")
-	case "技能":
-		return state.tr("技能", "Skills")
 	default:
 		return ""
 	}

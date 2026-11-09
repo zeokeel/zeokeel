@@ -38,8 +38,6 @@ func (f *fakeTrayWindow) OnClose(fn func(*mygo.CloseEvent)) func() {
 type fakeTrayHandle struct {
 	onClick   func()
 	destroyed bool
-	icon      []byte
-	toolTip   string
 }
 
 func (f *fakeTrayHandle) OnClick(fn func()) func() {

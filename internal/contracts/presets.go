@@ -103,10 +103,6 @@ type AgentPreset struct {
 	Order int `json:"order,omitempty"`
 }
 
-// LegacyAgentPresets returns the built-in agent presets. There are none (the
-// legacy product shipped an empty per-user preset set), so this is always nil.
-func LegacyAgentPresets() []AgentPreset { return nil }
-
 // SettingAgentPresets stores the user-edited agent presets as a JSON array.
 const SettingAgentPresets = "presets.agents"
 

@@ -32,12 +32,6 @@ func (l *testLogger) Printf(format string, args ...any) {
 	l.mu.Unlock()
 }
 
-func (l *testLogger) count() int {
-	l.mu.Lock()
-	defer l.mu.Unlock()
-	return len(l.lines)
-}
-
 // loadStoreModule loads the sessionstore module on a fresh kernel root and
 // returns the provided store.
 func loadStoreModule(t *testing.T, dataDir string, config map[string]any) (cordis.Context, *module.Loader, contracts.Store, *testLogger) {

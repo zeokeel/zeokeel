@@ -512,20 +512,3 @@ func (d *drive) resolvePendingApprovals(decision contracts.ApprovalDecision) {
 		_ = approvals.Resolve(pending.ID, decision)
 	}
 }
-
-// waitApprovalsCleared pumps frames until no approval is pending.
-func (d *drive) waitApprovalsCleared(timeout time.Duration) bool {
-	approvals, err := d.root.Require(contracts.KeyApprovals)
-	if err != nil {
-		return false
-	}
-	deadline := time.Now().Add(timeout)
-	for time.Now().Before(deadline) {
-		d.frame()
-		if len(approvals.Pending()) == 0 {
-			return true
-		}
-		time.Sleep(10 * time.Millisecond)
-	}
-	return false
-}

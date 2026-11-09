@@ -108,7 +108,3 @@ func (st *state) setToolEnabled(name string, enabled bool, settings contracts.Se
 }
 
 // setMCPToolEnabled is the legacy MCP-only entry point retained for callers
-// that still use it; it delegates to the generic setting-aware writer.
-func (st *state) setMCPToolEnabled(name string, enabled bool, settings contracts.SettingsService) {
-	st.setToolEnabled(name, enabled, settings, true)
-}

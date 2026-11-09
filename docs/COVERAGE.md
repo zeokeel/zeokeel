@@ -1,6 +1,6 @@
-# 旧功能覆盖审计（old/ → 当前产品，复核版）
+# 功能覆盖审计（旧产品 → 当前产品，复核版）
 
-> 复核：2026-11-08（P7）。范围：`old/internal` + `old/internal/shell` 对照当前
+> 复核：2026-11-08（P7）。范围：旧产品 `internal` + `internal/shell` 对照当前（旧工程归档已移除，路径保留作历史审计记录）
 > `internal/modules/*`、`internal/ui/*`、`internal/assembly/assemblies/*.json`、host/uiroot。
 > 只改本文档；判定以当前代码/装配为准（presets 已随后落地，本文档已同步）。目标：回答"旧功能覆盖是否完成、剩余最小必须项"。
 
@@ -142,7 +142,7 @@ session tool spill、sessionreference URI/预算、i18n 错误分类、/compact 
 
 ### 5.1 深度限制（已全部关闭）
 
-无。原 13 项深度限制均已在本轮开发中落地并有测试/反证覆盖，详见 `docs/REBUILD-STATUS.md` 与 `docs/coverage-gaps-worklist.md`。
+无。原 13 项深度限制均已在本轮开发中落地并有测试/反证覆盖，验证方式见 `docs/VERIFICATION.md`。
 
 ### 5.2 明确非目标（不计入覆盖缺口）
 

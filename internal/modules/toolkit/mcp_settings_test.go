@@ -41,12 +41,6 @@ func (l *captureLogger) contains(fragment string) bool {
 	return false
 }
 
-func (l *captureLogger) count() int {
-	l.mu.Lock()
-	defer l.mu.Unlock()
-	return len(l.lines)
-}
-
 func TestMergeMCPServers(t *testing.T) {
 	assembly := []MCPServer{{Name: "assembly", URL: "http://127.0.0.1:1/asm"}}
 	var warnings []string

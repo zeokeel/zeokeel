@@ -77,15 +77,10 @@ var (
 // handle (tests in both packages can replace the behavior).
 var openPathFunc = func(path string) error { return OpenPathFunc(path) }
 
-// exportSessionsSaver/exportReportSaver are the seam aliases the page invokes.
-var (
-	exportSessionsSaver = func(title, defaultName, content string) (string, error) {
-		return ExportSessionsSaver(title, defaultName, content)
-	}
-	exportReportSaver = func(title, defaultName, content string) (string, error) {
-		return ExportReportSaver(title, defaultName, content)
-	}
-)
+// exportSessionsSaver is the seam alias the archive page invokes.
+var exportSessionsSaver = func(title, defaultName, content string) (string, error) {
+	return ExportSessionsSaver(title, defaultName, content)
+}
 
 // saveWithDialog is the shared native save-dialog implementation behind the two
 // export seams.

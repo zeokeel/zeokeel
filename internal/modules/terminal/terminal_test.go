@@ -34,17 +34,6 @@ func (l *fakeLogger) Printf(format string, args ...any) {
 	l.mu.Unlock()
 }
 
-func (l *fakeLogger) contains(fragment string) bool {
-	l.mu.Lock()
-	defer l.mu.Unlock()
-	for _, line := range l.lines {
-		if strings.Contains(line, fragment) {
-			return true
-		}
-	}
-	return false
-}
-
 // fakeWorkspace is a minimal contracts.WorkspaceService: only Current is used.
 type fakeWorkspace struct {
 	mu         sync.Mutex

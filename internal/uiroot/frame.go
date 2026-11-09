@@ -1087,13 +1087,6 @@ func (r *Root) slot(c *ui.Context, name string) {
 	r.rt.RenderSlot(c, name)
 }
 
-// runCommand runs a module command; commands are UI-thread work.
-func (r *Root) runCommand(cmd contracts.CommandSpec) {
-	if err := runSafelyErr(cmd.Run); err != nil {
-		log.Printf("uiroot: command %q: %v", cmd.ID, err)
-	}
-}
-
 // runHandlerSafely runs one host-bridge handler, containing a panic so a
 // UI-module bug cannot cross the bridge boundary into the caller's goroutine
 // (same convention as safeBuild and the approvals subscriber notify). A
