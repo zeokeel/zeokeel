@@ -202,6 +202,15 @@ func TestSettingsNavGroups(t *testing.T) {
 	if _, ok := tt.Find("记忆页"); !ok {
 		t.Fatalf("advanced deep link did not expand the 高级 navigation group")
 	}
+	// Choosing a daily page folds the 高级 group again: the navigation mirrors
+	// the page on screen instead of keeping the previous visit's expanded layout.
+	if err := tt.Click("行为页"); err != nil {
+		t.Fatalf("click 行为页: %v", err)
+	}
+	tt.Frame()
+	requireHasText(t, tt, "behavior-body")
+	requireNoText(t, tt, "记忆页")
+
 	if err := r.OpenSettingsPage("missing-page"); err == nil {
 		t.Fatalf("OpenSettingsPage(missing-page) succeeded, want an error")
 	}

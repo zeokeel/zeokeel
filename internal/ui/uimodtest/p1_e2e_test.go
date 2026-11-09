@@ -483,9 +483,20 @@ func TestP1ApprovalToolsAndPersistence(t *testing.T) {
 	// link instead of clicking a nav item that may sit below the fold.
 	uiRoot.Navigator().ToggleSettings()
 	tester.Frame()
-	for _, want := range []string{"Settings", "Model", "Appearance", "Shortcuts", "Diagnostics", "Update", "Import"} {
+	for _, want := range []string{"Settings", "Model", "Appearance", "Shortcuts"} {
 		if !tester.HasText(want) {
 			t.Fatalf("english settings missing %q; texts = %v", want, tester.Texts())
+		}
+	}
+	// The low-frequency group is folded while a daily page shows; open it before
+	// looking for its pages (the group follows the selected page's section).
+	if err := tester.Click("Advanced"); err != nil {
+		t.Fatalf("expand Advanced: %v; texts = %v", err, tester.Texts())
+	}
+	tester.Frame()
+	for _, want := range []string{"Diagnostics", "Update", "Import"} {
+		if !tester.HasText(want) {
+			t.Fatalf("english settings advanced pages missing %q; texts = %v", want, tester.Texts())
 		}
 	}
 	if err := uiRoot.OpenSettingsPage("about"); err != nil {

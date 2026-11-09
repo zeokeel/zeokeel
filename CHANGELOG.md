@@ -169,6 +169,11 @@ A full UI/UX conformance pass against `mygo v0.8.3/docs/ui` and the
   scheduled tasks are official `ui.List`s (keyed by ID, named rows, virtualized
   scrolling) with the search/tools/add rows fixed around them, so the last
   hand-drawn scrolling collections are gone.
+- **Settings navigation follows the page**: the low-frequency 高级 group now
+  unfolds for an advanced page and folds again when a daily page is selected,
+  so the settings navigation no longer keeps the previous visit's longer
+  layout (the snapshots showed both widths depending on the order pages were
+  opened). A frame test covers the group folding after a daily page is chosen.
 - **Bounded per-message UI state**: switching conversations drops the fold /
   usage / unfolded-actions / transcript-window entries of the conversation that
   no longer shows (one internal test covers the pruning), and sent attachments'

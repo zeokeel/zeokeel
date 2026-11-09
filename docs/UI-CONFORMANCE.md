@@ -46,6 +46,8 @@
 - 保留自绘清单与理由见 [UI-COMPONENT-MIGRATION.md](UI-COMPONENT-MIGRATION.md) §3：
   仅限无官方对应（无边框图标按钮、富行建议菜单、composer 动作行布局、palette 按钮行、
   hover 动作行、回到最新浮层、测试 seam）或产品语义不适用（Rating/Meter 等）。
+- 设置导航的「高级」分组跟随当前页：选中的页面属于高级组时展开，切回日常页时折叠
+  （避免上次访问留下的长/短两种导航形态；`internal/uiroot/shell_ux_test.go` 钉住）。
 - 新增 UI 时先查 §1 表与官方 docs；出现新的自绘控件必须在本文件与迁移文档记录理由。
 
 ## 2. 写 UI 的固定流程

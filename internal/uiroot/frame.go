@@ -1056,9 +1056,12 @@ func (r *Root) settings(c *ui.Context, open *bool) {
 			r.settingsTab = i
 			if r.settingsSelectedID != page.ID {
 				r.settingsSelectedID = page.ID
-				if page.Section == "高级" {
-					r.settingsAdvancedOpen = true
-				}
+				// The 高级 group follows the page that shows: it unfolds for a
+				// low-frequency page and folds again when a daily page is chosen,
+				// so the navigation does not keep the previous visit's longer
+				// layout (the snapshots showed both widths depending on the order
+				// pages were visited).
+				r.settingsAdvancedOpen = page.Section == "高级"
 			}
 			break
 		}
