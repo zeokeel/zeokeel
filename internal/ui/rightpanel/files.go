@@ -9,6 +9,7 @@ import (
 
 	"github.com/egoist/mygo"
 	"github.com/egoist/mygo/ui"
+	"github.com/egoist/mygo/ui/editor"
 	"github.com/egoist/mygo/ui/markdown"
 
 	"github.com/zeokeel/zeokeel/internal/contracts"
@@ -558,8 +559,11 @@ func buildFilePreview(c *ui.Context, t *design.Tokens, workspace contracts.Works
 		case isMarkdownPath(path):
 			markdown.View(c, string(preview.data), nil)
 		case isTextPath(path):
-			design.Apply(ui.Text(c, string(preview.data)), t.MonoFamily()).
-				FontSize(11).TextColor(t.LabelPrimary).MaxLines(40).Selectable()
+			// A source file is read-only code: the official editor.View draws it
+			// with syntax highlighting, line numbers and virtualization
+			// (editor.md ReadOnly) instead of a plain mono Text block.
+			editor.View(c, st.codeEditorFor(path, preview.data)).
+				Height(design.Space6 * 12).FillWidth()
 		default:
 			uikit.KeyValueRows(c, []uikit.KeyValue{
 				{Key: uikit.T(st.locale, "大小", "Size"), Value: formatFileSize(int64(len(preview.data)))},
@@ -571,6 +575,26 @@ func buildFilePreview(c *ui.Context, t *design.Tokens, workspace contracts.Works
 			design.Apply(ui.Text(c, uikit.T(st.locale, "仅显示前 256 KiB", "Showing the first 256 KiB only")), t.TextMuted(design.TypeXXXS))
 		}
 	})
+}
+
+// codeEditorFor returns the read-only editor for one file preview. The state is
+// rebuilt only when the selected file changes, so scrolling/selection and the
+// parsed highlighting survive frames.
+func (st *state) codeEditorFor(path string, data []byte) *editor.State {
+	if st.fileEditor != nil && st.fileEditorPath == path {
+		return st.fileEditor
+	}
+	buffer := editor.NewBuffer(string(data))
+	buffer.SetLanguage(editor.LanguageFor(path))
+	st.fileEditor = &editor.State{
+		Buffer:      buffer,
+		ReadOnly:    true,
+		LineNumbers: editor.LineNumbersOn,
+		SoftWrap:    true,
+		Label:       uikit.T(st.locale, "文件内容", "File content"),
+	}
+	st.fileEditorPath = path
+	return st.fileEditor
 }
 
 // filePreviewFor loads (once) and caches the selected file's preview.

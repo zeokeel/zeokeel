@@ -148,6 +148,10 @@ A full UI/UX conformance pass against `mygo v0.8.3/docs/ui` and the
   back-to-latest action) instead of a `Scroll` plus a bounded message loop, so
   only the visible rows build and long conversations stay fast. The help
   dialog's command list and the trajectory timeline use `ui.List` as well.
+- **Read-only code preview**: Files' source previews use the official
+  `editor.View` in read-only mode (syntax highlighting by extension, line
+  numbers, soft wrap, virtualization) instead of a plain mono text block; the
+  tests read the content from the editor's accessibility text value.
 - **Agent preset tools are a TokenField**: the comma-separated tools text
   input is the official `ui.TokenField` (tokens as chips, Enter/comma to add,
   Backspace to remove), and the preset still persists `[]string`.

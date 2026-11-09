@@ -183,6 +183,22 @@ func setDirectoryPicker(t *testing.T, fn func(title string) (string, error)) {
 	t.Cleanup(func() { rightpanel.DirectoryPicker = previous })
 }
 
+// assertPreviewContains checks the official code editor's accessibility value:
+// the source text is painted on the editor's canvas (not in Texts), so the a11y
+// text field is the user-visible content's programmatic equivalent.
+func assertPreviewContains(t *testing.T, tester *ui.Tester, want string) {
+	t.Helper()
+	for _, label := range []string{"文件内容", "File content"} {
+		if info, ok := tester.AccessByRole(ui.RoleTextField, label); ok {
+			if !strings.Contains(info.Value, want) {
+				t.Fatalf("file preview does not contain %q; value = %q", want, info.Value)
+			}
+			return
+		}
+	}
+	t.Fatalf("file preview editor is not exposed as a text field; texts = %v", tester.Texts())
+}
+
 func joinedTexts(tester *ui.Tester) string {
 	return strings.Join(tester.Texts(), "\n")
 }
@@ -312,7 +328,7 @@ func TestFilesTextAndMarkdownPreview(t *testing.T) {
 
 	// Plain text file: the preview shows its content as native text.
 	h.click(tester, "main.go")
-	assertContains(t, tester, "package main")
+	assertPreviewContains(t, tester, "package main")
 	h.assertTexts(tester, "关闭预览")
 	if err := tester.Click("关闭预览"); err != nil {
 		t.Fatalf("close preview: %v; texts = %v", err, tester.Texts())

@@ -50,7 +50,7 @@
 | 代理预设工具 allowlist | ✅ 已完成（官方 `ui.TokenField`，Enter/逗号加 token、Backspace 删最后一个；保存后仍为 []string） | — | 预设保存/持久化测试 |
 | 上下文占用条 | 自绘进度条/百分比 | `ui.Meter` + `MeterLevels` | 阈值颜色、a11y 测试 |
 | 内联重命名（工作区/会话） | 对话框改名 | `ui.EditableText`（列表/页内就地编辑） | 双击/F2/Enter/Esc、保存失败回退 |
-| 文件预览里的源码 | 纯 Text | 官方代码展示（`editor.Code`/只读 code-editor，若 v0.8.3 提供只读用法） | 语言/行号/大文件截断测试 |
+| 文件预览里的源码 | ✅ 已完成（`editor.View` + `State.ReadOnly`，语法高亮/行号/虚拟化；a11y 文本值为内容） | — | Files 预览测试改为 `AccessByRole(RoleTextField, "文件内容").Value` 断言 |
 | 设置页顶部提示/状态 | 自绘 Badge/Text 组合 | 官方 `Badge`/`Alert`/`Progress`/`Spinner` 语义化 | 状态测试 |
 
 ### P3 — 自绘但合理保留（记录理由）
@@ -78,6 +78,9 @@
   行名、键盘可滚动；新增 RoleList/RoleListItem a11y 断言）。
 - 会话「轨迹」pane：`ui.Scroll` + tool card 循环 → `ui.List`（`Key=tool key`、
   行名=tool name、`Gap/PaddingY/Grow`，切换会话重置 ListState）。
+- 文件预览的源码文件：纯 mono `ui.Text`（40 行截断）→ 官方只读 `editor.View`
+  （`editor.State{ReadOnly: true, LineNumbers: On, SoftWrap: true}`，按扩展名
+  `editor.LanguageFor` 高亮；超过 256 KiB 仍走缓存截断；测试用 a11y `Value` 断言内容）。
 - 代理预设的「允许工具」字段：逗号分隔 TextInput → 官方 `ui.TokenField`
   （chips、Enter/逗号添加、Backspace 删除；测试覆盖 token 渲染与持久化）。
 - 自动化任务页：`ui.Scroll` + task card 循环 → `ui.List`（Key=task.ID、行名、

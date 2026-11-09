@@ -33,6 +33,7 @@ import (
 	"github.com/zeokeel/zeokeel-rig"
 
 	"github.com/egoist/mygo/ui"
+	"github.com/egoist/mygo/ui/editor"
 	cordis "github.com/zeokeel/zeokeel-kernel"
 	"github.com/zeokeel/zeokeel-kernel/module"
 
@@ -158,6 +159,11 @@ type state struct {
 	filesPreview    map[string]*filePreview
 	filesFilter     string
 	filesShowHidden bool
+	// fileEditor is the read-only official code editor showing the selected
+	// text file's preview (syntax highlighting, line numbers, virtualization);
+	// it is rebuilt only when another file is selected.
+	fileEditor     *editor.State
+	fileEditorPath string
 
 	// Files pane listing cache (P1): the directory entries are read on a
 	// directory/workspace change or an explicit Refresh, never from rendering

@@ -122,28 +122,28 @@ func TestFilesListKeyboardChoosesEntries(t *testing.T) {
 		t.Fatalf("click alpha.txt: %v; texts = %v", err, tester.Texts())
 	}
 	tester.Frame()
-	assertContains(t, tester, "alpha content")
+	assertPreviewContains(t, tester, "alpha content")
 
 	tester.Key(0, ui.KeyDown)
 	tester.Frame()
-	assertContains(t, tester, "bravo content")
+	assertPreviewContains(t, tester, "bravo content")
 
 	tester.Key(0, ui.KeyDown)
 	tester.Frame()
-	assertContains(t, tester, "charlie content")
+	assertPreviewContains(t, tester, "charlie content")
 
 	tester.Key(0, ui.KeyUp)
 	tester.Frame()
-	assertContains(t, tester, "bravo content")
+	assertPreviewContains(t, tester, "bravo content")
 
 	tester.Key(0, ui.KeyHome)
 	tester.Frame()
-	assertContains(t, tester, "alpha content")
+	assertPreviewContains(t, tester, "alpha content")
 
 	// Enter submits the chosen row; a file's submit keeps its preview.
 	tester.Key(0, ui.KeyEnter)
 	tester.Frame()
-	assertContains(t, tester, "alpha content")
+	assertPreviewContains(t, tester, "alpha content")
 
 	// The list exposes the chosen entry to assistive technology.
 	info, ok := tester.AccessByRole(ui.RoleList, "工作区文件")
@@ -196,7 +196,7 @@ func TestFilesRowContextMenu(t *testing.T) {
 		t.Fatalf("choose Open: %v; menu = %v", err, tester.Menu())
 	}
 	tester.Frame()
-	assertContains(t, tester, "alpha content")
+	assertPreviewContains(t, tester, "alpha content")
 }
 
 // menuHasItem reports whether the tester's menu items contain want (items may
