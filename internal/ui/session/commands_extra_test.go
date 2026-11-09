@@ -165,6 +165,15 @@ func TestHelpModalListsCommandsAndShortcuts(t *testing.T) {
 		"快捷键", "Cmd/Ctrl + K", "打开命令面板", "Cmd/Ctrl + B",
 		"Cmd/Ctrl + Alt + I", "切换右侧栏", "Enter", "发送消息")
 
+	// The command list is the official List: named for assistive technology and
+	// with its rows exposed by the command titles.
+	if _, ok := tester.AccessByRole(ui.RoleList, "斜杠命令"); !ok {
+		t.Fatalf("the help command list is not an accessible named list; texts = %v", tester.Texts())
+	}
+	if _, ok := tester.AccessByRole(ui.RoleListItem, "帮助"); !ok {
+		t.Fatalf("the help command list rows are not exposed by name; texts = %v", tester.Texts())
+	}
+
 	tester.Key(0, ui.KeyEscape)
 	tester.Frame()
 	h.assertNoTexts(tester, "斜杠命令")

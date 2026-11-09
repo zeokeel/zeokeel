@@ -113,19 +113,26 @@ func buildHelpDialog(c *ui.Context, t *design.Tokens, runtime contracts.UIRuntim
 
 			design.Apply(ui.Text(c, st.tr("斜杠命令", "Slash commands")), t.Font(design.TypeS)).
 				FontWeight(600).TextColor(t.LabelPrimary)
-			ui.Scroll(c).FillWidth().MaxHeight(design.Space6 * 8).Children(func() {
-				ui.Column(c).FillWidth().Gap(design.Space1).Children(func() {
-					for _, command := range commands {
-						command := command
-						ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(design.Space2).Children(func() {
-							design.Apply(ui.Text(c, command.Title), t.Font(design.TypeXS)).
-								FontWeight(600).TextColor(t.LabelPrimary).Width(120).Shrink(0)
-							design.Apply(ui.Text(c, command.Hint), t.TextMuted(design.TypeXS)).
-								Grow(1).MaxLines(1).Ellipsis("…")
-						})
-					}
+			// The command list is a collection: the official List owns its rows,
+			// scrolling and keyboard, instead of a Scroll plus a loop.
+			st.helpList.Label = func(index int) string {
+				if index < 0 || index >= len(commands) {
+					return ""
+				}
+				return commands[index].Title
+			}
+			ui.List(c, &st.helpList, len(commands)).
+				Label(st.tr("斜杠命令", "Slash commands")).
+				MaxHeight(design.Space6 * 8).
+				Rows(func(row ui.ListRow) {
+					command := commands[row.Index]
+					ui.Row(row.Context).FillWidth().AlignItems(ui.Center).Gap(design.Space2).Children(func() {
+						design.Apply(ui.Text(row.Context, command.Title), t.Font(design.TypeXS)).
+							FontWeight(600).TextColor(t.LabelPrimary).Width(120).Shrink(0)
+						design.Apply(ui.Text(row.Context, command.Hint), t.TextMuted(design.TypeXS)).
+							Grow(1).MaxLines(1).Ellipsis("…")
+					})
 				})
-			})
 
 			design.Apply(ui.Text(c, st.tr("快捷键", "Keyboard shortcuts")), t.Font(design.TypeS)).
 				FontWeight(600).TextColor(t.LabelPrimary)

@@ -85,7 +85,7 @@ func buildScreen(
 		// exception: they are small and keep the user's place).
 		pruneMessageState(st, chatSession.Messages)
 		st.chatScroll.Y = math.MaxFloat32
-		st.trajScroll.Y = 0
+		st.trajList = ui.ListState{}
 		st.memoryScroll.Y = 0
 	}
 	// Frame-time fallback for hosts that update the session state without an
@@ -1245,31 +1245,50 @@ func trajectoryItems(chatSession contracts.ChatSession) []trajectoryItem {
 // the title and a badge.
 func buildTrajectoryPane(c *ui.Context, t *design.Tokens, chatSession contracts.ChatSession, hasSession bool, st *state) {
 	items := trajectoryItems(chatSession)
-	ui.Scroll(c).FillWidth().Grow(1).TrackScroll(&st.trajScroll).Children(func() {
-		ui.Row(c).FillWidth().Justify(ui.Center).AlignItems(ui.Start).Children(func() {
-			design.Apply(ui.Column(c), t.Gap(design.Space3)).
-				Width(design.TranscriptWidth).MaxWidthPercent(92).
-				PaddingY(design.Space5).Children(func() {
-				if len(items) > 0 {
-					design.Apply(ui.Text(c, fmt.Sprintf(st.tr("%d 个工具调用", "%d tool calls"), len(items))),
-						t.TextMuted(design.TypeXXS))
+	ui.Column(c).FillWidth().Grow(1).Children(func() {
+		if len(items) > 0 {
+			design.Apply(ui.Text(c, fmt.Sprintf(st.tr("%d 个工具调用", "%d tool calls"), len(items))),
+				t.TextMuted(design.TypeXXS)).PaddingX(design.Space5)
+		}
+		switch {
+		case !hasSession:
+			uikit.EmptyStateBlock(c,
+				st.tr("还没有会话，暂无可查看的轨迹。", "No session yet; nothing to inspect."),
+				st.tr("开始一段对话后，工具调用会出现在这里。", "Start a conversation and its tool calls show here."), nil)
+		case len(items) == 0:
+			uikit.EmptyStateBlock(c,
+				st.tr("本次会话还没有工具调用。", "No tool calls in this conversation yet."),
+				st.tr("它的调用步骤会按时间顺序列在这里。", "Its steps are listed here in order."), nil)
+		default:
+			// The timeline is a collection: the official List keys, virtualizes
+			// and scrolls its rows instead of a Scroll plus a tool-card loop.
+			st.trajList.Key = func(index int) any {
+				if index < 0 || index >= len(items) {
+					return nil
 				}
-				switch {
-				case !hasSession:
-					uikit.EmptyStateBlock(c,
-						st.tr("还没有会话，暂无可查看的轨迹。", "No session yet; nothing to inspect."),
-						st.tr("开始一段对话后，工具调用会出现在这里。", "Start a conversation and its tool calls show here."), nil)
-				case len(items) == 0:
-					uikit.EmptyStateBlock(c,
-						st.tr("本次会话还没有工具调用。", "No tool calls in this conversation yet."),
-						st.tr("它的调用步骤会按时间顺序列在这里。", "Its steps are listed here in order."), nil)
-				default:
-					for index, item := range items {
-						buildToolCard(c, t, st, item.tool, "session.trajectory."+item.key, index+1)
-					}
+				return items[index].key
+			}
+			st.trajList.Label = func(index int) string {
+				if index < 0 || index >= len(items) {
+					return ""
 				}
-			})
-		})
+				return firstNonEmpty(items[index].tool.Name, st.tr("工具调用", "Tool call"))
+			}
+			ui.List(c, &st.trajList, len(items)).
+				Label(st.tr("工具调用轨迹", "Tool call trajectory")).
+				Gap(design.Space3).
+				PaddingY(design.Space5).
+				Grow(1).
+				Rows(func(row ui.ListRow) {
+					item := items[row.Index]
+					ui.Row(row.Context).FillWidth().Justify(ui.Center).AlignItems(ui.Start).Children(func() {
+						design.Apply(ui.Column(row.Context), t.Gap(design.Space3)).
+							Width(design.TranscriptWidth).MaxWidthPercent(92).Children(func() {
+							buildToolCard(row.Context, t, st, item.tool, "session.trajectory."+item.key, row.Index+1)
+						})
+					})
+				})
+		}
 	})
 }
 

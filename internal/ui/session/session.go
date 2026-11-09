@@ -100,6 +100,9 @@ type state struct {
 
 	thinkOpen map[string]bool
 	toolOpen  map[string]bool
+	// helpList backs the help dialog's command List; its Label names each row
+	// for assistive technology (the list virtualizes rows but they are few).
+	helpList ui.ListState
 
 	// Slash/@ suggestion menu state. slashSel and mentionSel are the
 	// highlighted rows (keys move them, Enter/Tab accept, Esc closes the menu
@@ -124,9 +127,11 @@ type state struct {
 	// and while the user stays at the end the pane follows the streaming
 	// content. scrollSession is the session the offsets belong to; switching
 	// sessions starts the new transcript at its end.
-	chatScroll    ui.ScrollState
-	trajScroll    ui.ScrollState
-	memoryScroll  ui.ScrollState
+	chatScroll   ui.ScrollState
+	memoryScroll ui.ScrollState
+	// trajList backs the trajectory pane's official List: the tool cards are a
+	// collection, so the List virtualizes and keys them by tool ID.
+	trajList      ui.ListState
 	scrollSession string
 
 	// transcriptStart holds, per session, the first message the transcript
