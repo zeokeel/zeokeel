@@ -4,26 +4,22 @@
 [![Release](https://img.shields.io/github/v/release/zeokeel/zeokeel)](https://github.com/zeokeel/zeokeel/releases)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
-> **v0.1.2 — third public release** (2026-11-09). Native, compile-time modular
+> **v0.1.3 — fourth public release** (2026-11-09). Native, compile-time modular
 > AI agent for desktop, headless and ACP (Zed/editor) use; one Go binary, no
-> webview. Final verification: **10/10 PASS** (`./scripts/verify.sh`), regression
-> **287 PASS / 0 SKIP / 0 FAIL**, UI snapshot 83 steps / 81 PNGs, desktop
+> webview. Final verification: **13/13 PASS** (`./scripts/verify.sh`), regression
+> **287 PASS / 0 SKIP / 0 FAIL**, UI snapshot 88 steps / 86 PNGs, desktop
 > (Xvfb, tray) / headless / ACP smokes green.
 > See [CHANGELOG.md](CHANGELOG.md) for the release notes.
 
-> **v0.1.2 主要变化**（详见 CHANGELOG）：工作区直接选目录添加、每个
-> 工作区行内 ⊕ 新建会话、去掉侧栏「视图」改为固定的按工作区/最近活动视图、会话级
-> 「本会话内始终允许」与放宽的默认工作区权限、生成期间输入框常驻（默认排队）、DSH 风格
-> 的按工具系统提示注入（Windows 用 pwsh、文件优先用文件工具）、紧凑 K/M 用量数字 +
-> 底部状态条（轮/步/tok/s/上下文/缓存命中/剩余）、Windows GBK/cp936 命令输出修复、
-> 后台 job 完成通知接线 + 重复调用提醒（DSH loop hygiene）、审批弹窗无默认操作（防误拒）、
-> 工作区切换释放旧后台任务。真实 Windows 会话复盘见 `.cache/session-debug/report.md`。
-> 会话过程的组件官方化（`.cache/transcript-ui/report.md`）：思考/推理 = `ui.CollapsibleBase` +
-> `ui.Spinner` + `ui/markdown`；生成中 = 官方 `ui.Spinner`；工具调用行 = `ui.CollapsibleBase`
-> 整行 disclosure + 本地化友好工具名（原始 id 仅 Tooltip/无障碍描述）。
-> 全仓手搓 UI 审计与官方化（`.cache/ui-audit/report.md`）：设置页 7 个集合 + 右栏产物
-> 历史 + composer 排队层 → `ui.List`；Files 面包屑 → `ui.Breadcrumbs`；重命名对话框补齐
-> `DialogFooter`/Enter；评分 → `ui.Toggle`/`ui.ToggleGroup`；忙碌态 → `ui.Spinner`。
+> **v0.1.3 主要变化**（详见 CHANGELOG）：把 AI 生成 UI 的约束从提示升级为
+> **机器可读设计契约**——新增 `AGENTS.md`、`docs/DESIGN.md`、`DESIGN-LINT.md`、
+> `AGENT-SURFACES.md`；`designlint` 确定性检查（颜色/裸度量/自绘/危险默认）与
+> `scripts/design-check.sh` 接入 verify/CI，baseline 收紧 235→156；9 类 Agent
+> surface 收敛为 uikit 入口组件（IconButton / Status* / ToolCallCard / SessionThread /
+> ReasoningTrace / ApprovalDialog / PlanReviewDialog / AskDialog / ComposerShell /
+> RunStatus / TeamSurface），工具卡 4 路径→2、两处 composer 统一、状态语义与危险确认
+> 统一。同日另有「深度交互轮」：团队可见性/真实运行态、任务板深度、工具过程透明、
+> 权限三档收敛、会话时序回退修复等（详见 CHANGELOG）。
 
 ## 下载与运行 / Download and run
 
@@ -71,7 +67,7 @@ CI runs on every push/PR (`.github/workflows/ci.yml`); pushing a `v*` tag runs
 artifacts, and publishes the GitHub release with a platform/architecture
 download table.
 
-> **继续推进（TDD 并行 + 反证审计）**：新增 subagent 同步委派、permission 权限模式（ask/workspace/full）、
+> **继续推进（TDD 并行 + 反证审计）**：新增 subagent 同步委派、permission 权限模式（只读/工作区可写/所有权限）、
 > team manager 编排与右侧「团队」面板（spawn/steer/interrupt）、@session 引用与推理强度（low/medium/high）、
 > composer /goal /plan /memory 对话框、更新下载+SHA256 暂存、MCP stdio 服务器、右侧「任务」面板、
 > 工件历史（Files「产物」）、单实例 + XDG autostart、install-on-restart、toast 通知、workspace mcp.json opt-in、

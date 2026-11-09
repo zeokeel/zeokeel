@@ -4,6 +4,147 @@ All notable changes to ZeoKeel are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/) and the project adheres to
 [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+（暂无未发布改动）
+
+## [0.1.3] - 2026-11-09
+
+本版本包含两个同日轮次：①**设计契约落地轮**——把 AI 生成 UI 的约束从文档/提示升级为机器可读契约与确定性检查，并把 9 类 Agent surface 收敛为 uikit 入口组件；②**深度交互轮**——五路审计与团队/任务/工具/权限深度修复（见下）。
+
+### 设计契约落地轮（2026-11-09 晚）
+
+#### Added
+
+- **设计契约文档**：新增 `AGENTS.md`（AI 常驻 10 条规则与工作流）与 `docs/DESIGN.md`（组件目录 / Agent 场景→入口映射 / AP-01..18 反模式 / 最短调用示例 / token 表 / 自绘白名单 / registry schema）、`docs/DESIGN-LINT.md`（DS-01..10 规则、baseline、接入点、conformance 规格）、`docs/AGENT-SURFACES.md`（S1–S9 入口组件规格）。
+- **确定性检查**：新增 `internal/design/conform/`（标准库 AST 规则库：颜色字面量、裸数值度量、未登记自绘、无效豁免、图标来源、危险+默认）、`internal/devtools/designlint` CLI（`--diff/--json/--rules/--baseline/--strict/--write-baseline`）、`internal/design/registry.json`、`.design-baseline.json`、`internal/design/conformance_test.go`、`scripts/design-check.sh`（Phase 0 grep + 阈值）；接入 `scripts/verify.sh`、CI、Makefile 与 `go tool mygo vet`（go.mod tool 指令）。
+- **uikit 入口组件（9 类 Agent surface + 基建）**：`IconButton`、`StatusText/StatusBadge`、`ToolCallCard`、`SessionThread`、`ReasoningTrace`、`ApprovalDialog`、`PlanReviewDialog`、`AskDialog`、`ComposerShell`、`RunStatus`、`TeamSurface`，含 60+ 个新增 `ui.NewTester` 帧测试。
+- **design token**：`t.MonoText(role)`、`DialogWidthXS/Compact/XL`、`OverlayWidthS`、`IconSizeS/M/L`。
+
+#### Changed
+
+- **模块收敛**：session/approval/interaction/toolcards/rightpanel/home/uiroot/sidebar 只保留数据与业务，重复 UI 删除（session 容器 -140 行；approval/interaction -390 行；rightpanel 团队/任务/新建三个文件 728/664/158→155/186/86 行）。
+- **工具卡 4 条渲染路径 → 2**（`ToolRow` 紧凑行 + `ToolCallCard` 完整卡）；**两处 composer 共用 `ComposerShell`**（Home 宽度修复为铺满阅读列）；**团队全部徽标统一 `StatusBadge`**。
+- **文档同步**：DESIGN/LINT/SURFACES/AGENTS 更新至实现状态；baseline 235→156（DS-03 146 / DS-06 10），design-check 阈值收紧（裸度量 51、ButtonBase 10、状态函数 0）。
+
+#### Fixed
+
+- cancelled 状态由「失败红」改为中性「已取消」；`active` 不再画成 running；工具卡失败默认展开策略统一。
+- rail 导航补 hover、品牌按钮恢复常驻浅底；图标按钮尺寸/命中区归一（≥24）。
+- Home composer 卡宽 663→720（`FullWidth` 生效），发送控件/键语义与会话页一致。
+- 危险确认统一 `uikit.DialogFooter`（安全取消为 Default、危险动作永不 Default；审批/计划仍无 Default）。
+- 测试/构建说明：`TMPDIR` 必须在仓库外（`/tmp/zeokeel-tmp`），否则 workspace 测试会把临时目录当 git 仓库。
+
+#### Verification
+
+- `./scripts/verify.sh`：**13/13 PASS** — gofmt/build/vet/designlint/design-check/mygo vet，全量测试、`-race`、regression **287 PASS / 0 SKIP / 0 FAIL**、snapshot **88 steps / 86 PNGs**、desktop（Xvfb）/headless/ACP smokes 全绿。
+- `go test ./... -count=1`：42 包 ok / 0 FAIL。首次全量 `-race` 曾出现 automation 异步测试 10s 超时（单测复跑 3/3 PASS，属 96 路并行 race 下的既有环境性 flake）；重跑全量 verify 通过。
+- `designlint --strict --baseline`：238 文件 / 156 violations，**0 error / 0 warn / 0 new / 0 blocking**；`scripts/design-check.sh` **6/6 PASS**。
+- `ui-snapshot` 终态 86 张（79 主图 + 7 窄窗/暗色）；独立验证者逐阶段 PASS + final-audit PASS；before→final 差异全部归因，**非预期差异 0**。
+
+### 深度交互轮（本轮）：五路审计 + 深度修复
+
+针对反馈「智能体基础 UI 不够好、交互细节设计不到位、功能深度不够（例：支持了智能体团队
+却没有地方看团队）」，本轮先做五路只读交互审计（会话核心 / 输入与浮层 / 团队与任务 /
+壳层 / 设置与自动化），每路用真实产品帧 + `ui.NewTester` 探针复现问题；随后按写范围拆成
+互斥的并行工作流落地，最后统一验证。完整结论、逐条证据与剩余深度项见
+[docs/INTERACTION-DEPTH-ROUND.md](docs/INTERACTION-DEPTH-ROUND.md)。
+
+#### Added
+
+- **智能体团队可见性**：会话页头新增「团队 N / 团队 N 运行中」chip（无团队不占位），菜单
+  一步「打开团队面板 / 打开任务板」；命令面板可用「团队/任务」搜到两条稳定命令
+  （`rightpanel.team.open` / `rightpanel.tasks.open`，检查器关闭时先打开再切 pane）。
+- **团队真实运行态**：rig 的 `Member.Status` 只是可用性（active/interrupted），不再被画成
+  「运行中」。后端新增运行态跟踪（running/idle/done/failed/interrupted）、错误、模型、
+  开始/结束时间、token/步数，并记录有界团队活动时间线；团队面板按「主代理 / 队友 /
+  同步子代理（只读）」分节，成员详情显示活动时间线、产出复制、steer/中断/关闭（无默认
+  按钮的确认）。
+- **团队创建与通知**：团队面板空态解释能力并给「新建队友」原生表单（名称/自包含任务/
+  模型）；队友完成/失败时走通知链刷新并弹「已完成 · 查看」toast（按完成时间去重）。
+- **任务板深度**：状态分组标题+计数、负责人显示/认领菜单（未认领/主代理/队友）、依赖
+  「等待 task-X 完成」与「可开始」、写入范围、Enter 展开详情；任务板随 agent 写入自动
+  刷新（此前必须手点刷新才看到新任务）。
+- **工具调用过程透明**：工具卡展开显示输入（bash 命令、文件路径、edit 替换前/后、其余
+  JSON）与输出（摘要上限 200→4000 字符且保留换行，可复制，截断有提示；JSONL 导出补
+  arguments）；spawn_teammate/subagent/team_task_* 卡片提供「在团队中查看 / 打开任务板」。
+- **ask_user 自定义回答**：选项问题新增「其他…」内联输入（Enter 提交、Esc 返回选项）。
+- **消息元数据与用户消息动作**：消息显示时间（Tooltip 完整时间），用户消息可复制/编辑到
+  输入框后重发。
+- **设置搜索/自动化深度**：运行计划字段级校验 + 「下次运行」预览（单一解析器）、自动化
+  模型改为目录选择 + 未知模型警告、「立即运行」进行中反馈与「已投递」语义、MCP 服务器
+  行内编辑/异步测试连接、插件工具目录「仅显示已停用」过滤。
+
+#### Fixed
+
+- **计划审阅死锁（P0）**：反馈改为先投递再退出计划；Send 失败保持 reviewing 可重试，
+  Esc 在错误态可关闭，不再进入只能重启的 `planHold`。
+- **会话核心**：失败回合「重试/重新生成」恢复可用；取消不再显示为红色「失败」+ 英文
+  `context canceled`（中性「已取消」）；生成中隐藏复制/评分动作行；复制 32×32 命中区 +
+  1.8s 回落；短工具结果不再重复渲染；切换会话清空会话级错误；usage 明细文案去重。
+- **输入区**：发送失败不再静默（RoleAlert + 草稿保留）；长草稿最大高度 192 DIP（900×600
+  下发送/停止不再被推出窗口）；运行中 Esc / Cmd+. 中断、Cmd/Ctrl+Enter 发送、鼠标发送后
+  焦点回到输入框；运行中 slash 草稿不再被当消息排队；队列投递失败可重试；@ 菜单跟随光标；
+  斜杠菜单重开高亮首项；宽 composer 内联发送/换行提示。
+- **壳层**：删除会话/工作区确认默认「取消」（此前 Enter 直接不可逆删除）；抽屉 Esc 一次
+  关闭且焦点归还（此前 keyboard tooltip 吃掉第一次 Esc）；输入框聚焦时 Alt+← 不再触发
+  全局返回；关闭态 pane 循环快捷键不再静默改隐藏 pane；检查器只在会话屏可打开；侧栏拖拽
+  实时 clamp 200–420；侧栏折叠/检查器开关持久化。
+- **设置与插件**：诊断页「复制诊断信息」与导出报告同源遮罩（此前明文泄露
+  `web.search.apiKey`/MCP env）；密钥输入统一 `Password()`；更新源未配置时不再承诺
+  下载/安装、不暴露内部键；首启缺 API Key/模型时 Home 提示并深链配置；启用「设置中停用」
+  的 MCP 服务器后卡片不再消失；MCP 刷新/重试连接移出 UI 线程（不再冻结窗口）+ busy 态；
+  MCP env 按换行解析（值可含空格）并逐行校验；插件「待重启」按净变化显示；设置对话框
+  首字段 AutoFocus + Enter 提交；toast 按内容去重（×N）；通知页文案改为「应用内提示气泡」；
+  数据页单一主操作；归档空态说明入口；自动化工作区显示名称、历史显示日期时间。
+- **窄空间信息优先级**：右栏任务行把负责人/依赖移到次行，320 DIP 下任务标题不再被挤成
+  一个字；会话页头在内容列变窄（<720 DIP）时目标/团队 chip 降级为状态、工作区名保持
+  可见（长标题不再把它挤成 0 宽）。
+
+#### Changed
+
+- 团队运行态语义：可用性（active/interrupted）与运行态（running/idle/done/failed）分离，
+  UI 只按运行态画「运行中」。
+- 会话保留 `tool_result` 事件的有界完整摘要（4000 runes、保留换行），审批摘要仍限 200。
+
+### 真实会话反馈轮（上一轮）
+
+本轮针对真实 Windows 会话截图反馈，修复会话时序、右侧检查器布局、同步子代理可见性，
+并把权限模式收敛为 DSH 同款三档预设。
+
+### Fixed
+
+- **会话时序：回复不再跑到工具调用上方**。模型先调工具、再写正文的回合，所有工具调用的
+  `TextOffset` 都是 0，旧渲染器把「offset 全零 + 有正文」当成恢复的历史消息，整段回复被
+  画在所有工具行上面。现在 `ChatMessage.ToolTimelineKnown` 显式记录「本回合的 offset 是
+  真实时序」：live 回合按 offset 交错渲染（全零 = 工具在正文之前），无时序元数据的历史/
+  导入消息保持旧的「先正文后卡片」回退。`tool_call` 持久事件携带 `text_offset`，重启后
+  从事件日志回填 offset 与工具状态/摘要（恢复的会话不再一律显示「完成」且无摘要）。
+  导出 JSONL 的工具行带 `textOffset`。回归测试：`TestAssistantTimelineLiveZeroOffsetsKeepCallsFirst`、
+  `internal/modules/agent/tool_timeline_test.go`。
+- **右侧检查器 docked 时主输入框被推出窗口 / 不能向下滚**。docked 检查器所在的内层
+  `ui.Split` 没有高度约束，会话页按内容固有高度渲染：空会话输入框浮在窗口中部，长会话
+  输入框被推到窗口外，转写列表也没有有界高度可滚动。内层 split 补 `FillHeight()`（官方
+  layout/split 模式：`FillHeight` 取父容器整个内容盒），新增 `uiroot` 与全产品 e2e 回归
+  （1534×1140 / 1280×800 / 侧栏展开与 rail / 开关帧 / 1024×720 drawer / 12 轮长会话跟随）。
+- **同步子代理在「团队」检查器不可见**。`subagent`/`subagent_fork` 的同步委派登记到有界
+  只读活动表（运行中/完成/失败/已取消，结束保留最新 8 条，不裁剪运行中），右栏「团队」
+  tab 把异步队友与同步委派合并进一个原生 List：队友保留 steer/中断/关闭，子代理行只读
+  （状态/模型/方式/耗时/任务/最新输出），二者皆空才显示空态；开始/结束走既有通知链重绘。
+- **权限模式菜单结构**：分组标题「权限模式」移到模式项上方（此前在项下方）。
+
+### Changed
+
+- **权限模式收敛为三档**（对齐 DSH 的 read-only / workspace-write / danger-full-access）：
+  **只读**（只自动允许只读/信息类工具，其余询问）、**工作区可写**（默认；工作区文件读写
+  + 只读/信息类自动允许，shell/网络/MCP/设置写入询问）、**所有权限**（全部自动允许）。
+  移除「询问」「从不允许」两个可选模式；设置页默认权限、composer 会话菜单、自动化任务
+  权限覆盖、slash `/权限模式` 循环、系统提示词与审批后端统一为三档。旧存值迁移：
+  `ask` → 只读、`never` → 只读、`auto` → 所有权限、空/未知 → 工作区可写（`contracts.NormalizePermissionMode`）。
+  审批弹窗的「本会话内始终允许」与「清除自动允许的工具（N）」保持不变；headless assembly
+  仍可配置 approvals 的 ask/never 策略（UI 不再提供）。
+- **会话菜单按钮**始终显示当前权限档位：只读 / 工作区可写 / 所有权限（所有权限为警告色）。
+
 ## [0.1.2] - 2026-11-09 · 交互修复轮
 
 本轮针对真实使用反馈修复工作区 / 审批 / 输入区 / 用量显示 / Windows 编码，并加入
@@ -428,6 +569,7 @@ controls (no webview, no browser engine).
 - Model thinking/generation mapping verified by captured request bodies and
   unit tests; SDK dependency is `github.com/zeokeel/zeokeel-rig v0.13.1`.
 
+[0.1.3]: https://github.com/zeokeel/zeokeel/releases/tag/v0.1.3
 [0.1.2]: https://github.com/zeokeel/zeokeel/releases/tag/v0.1.2
 [0.1.1]: https://github.com/zeokeel/zeokeel/releases/tag/v0.1.1
 [0.1.0]: https://github.com/zeokeel/zeokeel/releases/tag/v0.1.0
