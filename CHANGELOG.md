@@ -148,6 +148,10 @@ A full UI/UX conformance pass against `mygo v0.8.3/docs/ui` and the
   back-to-latest action) instead of a `Scroll` plus a bounded message loop, so
   only the visible rows build and long conversations stay fast. The help
   dialog's command list and the trajectory timeline use `ui.List` as well.
+- **More native Lists**: the Memory tab's entries and the Automation screen's
+  scheduled tasks are official `ui.List`s (keyed by ID, named rows, virtualized
+  scrolling) with the search/tools/add rows fixed around them, so the last
+  hand-drawn scrolling collections are gone.
 - **Bounded per-message UI state**: switching conversations drops the fold /
   usage / unfolded-actions / transcript-window entries of the conversation that
   no longer shows (one internal test covers the pruning), and sent attachments'

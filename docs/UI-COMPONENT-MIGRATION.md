@@ -33,14 +33,15 @@
 | 项 | 现状 | 官方目标 | 验收 |
 |---|---|---|---|
 | 会话 transcript | ✅ **已完成**（官方 `ui.List`） | `ListState{Key: message.ID, Label, FollowEnd, HoldPlace}`；变量行高由 List 测量；流式跟随/滚动回到底部/折叠 `HoldPlace`/首帧不闪 | 250 条会话只构建可见行（`TestTranscriptListVirtualizesLongConversation`）；`scroll_follow_test` 流式跟随/回到最新；全量 session 测试 |
-| 轨迹 pane | `ui.Scroll` + tool call 循环 | `ui.List`（Key=tool.ID）；跟随 end 由 ListState | 键盘/滚动/空态测试 |
-| 记忆 pane | `ui.Scroll` + memory 循环 | `ui.List`（Key=memory.ID） | 同上 |
+| 轨迹 pane | ✅ 已完成（`ui.List`，Key=tool key、行名、ListState 切换会话重置） | — | session 测试 |
+| 记忆 pane | ✅ 已完成（固定搜索/管理/添加行 + `ui.List` 条目虚拟化，Key=memory.ID） | — | 记忆搜索/增删/顶部打开测试 |
 | 斜杠/`@` 建议菜单 | 自绘 popover + ButtonBase 行 + 手写 Up/Down/Enter | 官方 suggestion 模式：`ui.List`（`Rows`/`Selected`/`Submitted`/`RoleOption` 等价 a11y）或 `ui.Autocomplete`（纯文本场景不适用富行）；保留 rich row 但键盘交回 List | 键盘上下/Enter/Tab/Esc、a11y role、鼠标选择；既有 suggestion 测试 |
 | 帮助对话框命令列表 | `ui.Scroll` + Row 循环 | `ui.List`（只读行，Label） | 文本/键盘滚动测试 |
 | 设置技能卡列表 | 页内 Column + 卡片循环 | `ui.List`（Key=skill.Path；卡片为行内容） | 搜索过滤/展开/编辑删除按钮测试 |
 | 归档页会话行 | `ui.ButtonBase` 行 | `ui.List`（Selected/Submitted） | 打开/恢复/删除测试 |
 | 模型目录思考模式编辑器 | `ui.Scroll` + Row 循环 | `ui.List`（Key=mode.ID） | 增删/编辑/保存测试 |
-| 自动化任务卡 / 插件列表 | `ui.Scroll` + 卡片循环 | `ui.List`（Key=task/plugin ID；卡片为行） | 过滤/运行/删除测试 |
+| 自动化任务卡 | ✅ 已完成（`ui.List`，Key=task.ID、行名、过滤后列表） | — | automation 全包测试 |
+| 插件列表 | `ui.Scroll` + 卡片/条目循环 | `ui.List`（分节用 `ListState.Header`；Key=plugin/tool ID） | 过滤/刷新/MCP 状态测试 |
 
 ### P2 — 语义机会点
 
@@ -77,6 +78,10 @@
   行名、键盘可滚动；新增 RoleList/RoleListItem a11y 断言）。
 - 会话「轨迹」pane：`ui.Scroll` + tool card 循环 → `ui.List`（`Key=tool key`、
   行名=tool name、`Gap/PaddingY/Grow`，切换会话重置 ListState）。
+- 自动化任务页：`ui.Scroll` + task card 循环 → `ui.List`（Key=task.ID、行名、
+  过滤结果直接作为 rows）。
+- 记忆 pane：`ui.Scroll` + memory 行循环 → 固定 SearchField/管理行/添加行 +
+  `ui.List` 条目（Key=memory.ID、行名=记忆文本、查询变化重置 ListState）。
 - 会话 transcript：`ui.Scroll` + 消息循环（有界窗口）→ 官方 `ui.List`（`Key=message.ID`、
   `Label=角色+序号`（避免 Markdown 源泄漏进 a11y 树）、`FollowEnd` 流式跟随、
   折叠 `HoldPlace`、`ScrollToEnd` 回到最新、首帧用 `chatListSeen` 防闪烁）；长会话

@@ -81,13 +81,27 @@ func buildScreen(c *ui.Context, runtime contracts.UIRuntime, navigator contracts
 			uikit.EmptyStateBlock(c, st.tr("没有匹配的任务", "No matching tasks"),
 				st.tr("换个关键词或清空筛选试试。", "Try another search term or clear the filter."), nil)
 		default:
-			ui.Scroll(c).FillWidth().Grow(1).Children(func() {
-				ui.Column(c).FillWidth().Gap(design.Space2).Children(func() {
-					for _, task := range filtered {
-						buildTaskCard(c, t, service, runtime, st, task)
-					}
+			// The scheduled tasks are a collection: the official List virtualizes
+			// and keys the cards by task ID instead of a Scroll plus a loop.
+			st.taskList.Key = func(index int) any {
+				if index < 0 || index >= len(filtered) {
+					return nil
+				}
+				return filtered[index].ID
+			}
+			st.taskList.Label = func(index int) string {
+				if index < 0 || index >= len(filtered) {
+					return ""
+				}
+				return firstNonEmpty(filtered[index].Name, filtered[index].ID)
+			}
+			ui.List(c, &st.taskList, len(filtered)).
+				Label(st.tr("自动化任务", "Automation tasks")).
+				Gap(design.Space2).
+				Grow(1).
+				Rows(func(row ui.ListRow) {
+					buildTaskCard(row.Context, t, service, runtime, st, filtered[row.Index])
 				})
-			})
 		}
 	})
 

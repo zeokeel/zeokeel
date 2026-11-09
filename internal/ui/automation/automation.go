@@ -61,6 +61,9 @@ type state struct {
 	runtime  contracts.UIRuntime
 	notifier contracts.Notifier
 
+	// taskList backs the official List of scheduled tasks on the page.
+	taskList ui.ListState
+
 	formOpen          bool
 	formName          string
 	formPrompt        string

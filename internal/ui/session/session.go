@@ -138,9 +138,9 @@ type state struct {
 	// the pointer instead of being pushed by the growing row.
 	chatHoldPlace bool
 
-	// memoryScroll keeps the Memory tab's reading position; the trajectory pane
-	// is an official List too.
-	memoryScroll ui.ScrollState
+	// memoryList backs the Memory tab's official List; the pane opens at its
+	// top and a new search query resets the list.
+	memoryList ui.ListState
 	// trajList backs the trajectory pane's official List: the tool cards are a
 	// collection, so the List virtualizes and keys them by tool ID.
 	trajList      ui.ListState

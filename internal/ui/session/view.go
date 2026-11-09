@@ -89,7 +89,7 @@ func buildScreen(
 		st.chatFollowEnd = true
 		st.chatListSeen = false
 		st.trajList = ui.ListState{}
-		st.memoryScroll.Y = 0
+		st.memoryList = ui.ListState{}
 	}
 	// Frame-time fallback for hosts that update the session state without an
 	// extra notification: retry the queue once the run has settled. When this
@@ -1421,6 +1421,8 @@ func buildMemoryPane(c *ui.Context, t *design.Tokens, runtime contracts.UIRuntim
 		} else {
 			st.memories, st.memoriesErr = store.List(context.Background())
 		}
+		// A new result set starts at its top, not at the previous list offset.
+		st.memoryList = ui.ListState{}
 		st.memoriesQuery = query
 		st.memoriesFresh = true
 		st.memoryRefresh = false
@@ -1428,55 +1430,83 @@ func buildMemoryPane(c *ui.Context, t *design.Tokens, runtime contracts.UIRuntim
 	memories := st.memories
 	listErr := st.memoriesErr
 
-	ui.Scroll(c).FillWidth().Grow(1).TrackScroll(&st.memoryScroll).Children(func() {
-		ui.Row(c).FillWidth().Justify(ui.Center).AlignItems(ui.Start).Children(func() {
-			design.Apply(ui.Column(c), t.Gap(design.Space4)).
-				Width(design.TranscriptWidth).MaxWidthPercent(92).
-				PaddingY(design.Space5).Children(func() {
-				if !hasStore {
-					// The action row must BUILD a button: calling the deep link
-					// from the callback itself opened the settings surface on
-					// every frame the tab was visible.
-					uikit.EmptyStateBlock(c,
-						st.tr("记忆后端未启用", "Memory backend not enabled"),
-						st.tr("在设置中启用记忆后，这里会显示已保存的记忆。",
-							"Enable memory in settings and saved entries show here."), func() {
-							open := design.Apply(ui.Button(c, st.tr("打开设置", "Open settings")),
-								t.SecondaryButton())
-							if open.Clicked() {
-								openSettingsPage(st.navigator, settingsPageMemory)
-							}
-						})
-					return
-				}
-				// The 记忆 tab already names the page: the search field and
-				// the management row follow the tab, with no second page title.
-				ui.SearchField(c.Key("session.memory.search"), &st.memoryQuery).
-					Label(st.tr("搜索记忆", "Search memory")).Placeholder(st.tr("搜索记忆", "Search memory")).FillWidth()
-				buildMemoryTools(c, t, runtime, store, st, len(memories))
-				if listErr != nil {
-					uikit.ErrorLine(c, st.tr("读取记忆失败：", "Failed to read memory: ")+listErr.Error())
-				}
-				switch {
-				case listErr != nil:
-					// The error row above is the whole content.
-				case len(memories) == 0 && query != "":
-					uikit.EmptyStateBlock(c, st.tr("没有匹配的记忆", "No matching memories"),
-						st.tr("换一个关键词试试。", "Try another keyword."), nil)
-				case len(memories) == 0:
-					uikit.EmptyStateBlock(c, st.tr("还没有记忆", "No memories yet"),
-						st.tr("写入一条记忆，后续会话都可以使用。", "Save a memory and later conversations can use it."), nil)
-				default:
-					ui.Column(c).FillWidth().Children(func() {
-						for _, memory := range memories {
-							memoryRow(c, t, runtime, store, st, memory)
-						}
-					})
-				}
-				buildMemoryAdd(c, t, runtime, store, st)
-				buildMemoryEditDialog(c, t, runtime, store, st)
+	ui.Column(c).FillWidth().Grow(1).Children(func() {
+		centered := func(children func(*ui.Context)) {
+			ui.Row(c).FillWidth().Justify(ui.Center).AlignItems(ui.Start).Children(func() {
+				design.Apply(ui.Column(c), t.Gap(design.Space4)).
+					Width(design.TranscriptWidth).MaxWidthPercent(92).Children(func() {
+					children(c)
+				})
 			})
+		}
+		if !hasStore {
+			// The action row must BUILD a button: calling the deep link from the
+			// callback itself opened the settings surface on every frame the tab
+			// was visible.
+			uikit.EmptyStateBlock(c,
+				st.tr("记忆后端未启用", "Memory backend not enabled"),
+				st.tr("在设置中启用记忆后，这里会显示已保存的记忆。",
+					"Enable memory in settings and saved entries show here."), func() {
+					open := design.Apply(ui.Button(c, st.tr("打开设置", "Open settings")),
+						t.SecondaryButton())
+					if open.Clicked() {
+						openSettingsPage(st.navigator, settingsPageMemory)
+					}
+				})
+			return
+		}
+		// Header: the 记忆 tab already names the page, so the search field and
+		// the management row follow the tab, with no second page title.
+		centered(func(c *ui.Context) {
+			ui.SearchField(c.Key("session.memory.search"), &st.memoryQuery).
+				Label(st.tr("搜索记忆", "Search memory")).Placeholder(st.tr("搜索记忆", "Search memory")).FillWidth()
+			buildMemoryTools(c, t, runtime, store, st, len(memories))
+			if listErr != nil {
+				uikit.ErrorLine(c, st.tr("读取记忆失败：", "Failed to read memory: ")+listErr.Error())
+			}
 		})
+		switch {
+		case listErr != nil:
+			// The error row above is the whole content.
+		case len(memories) == 0 && query != "":
+			uikit.EmptyStateBlock(c, st.tr("没有匹配的记忆", "No matching memories"),
+				st.tr("换一个关键词试试。", "Try another keyword."), nil)
+		case len(memories) == 0:
+			uikit.EmptyStateBlock(c, st.tr("还没有记忆", "No memories yet"),
+				st.tr("写入一条记忆，后续会话都可以使用。", "Save a memory and later conversations can use it."), nil)
+		default:
+			// The entries are a collection: the official List virtualizes and
+			// keys them, while the search/tools/add rows stay fixed above/below.
+			st.memoryList.Key = func(index int) any {
+				if index < 0 || index >= len(memories) {
+					return nil
+				}
+				return memories[index].ID
+			}
+			st.memoryList.Label = func(index int) string {
+				if index < 0 || index >= len(memories) {
+					return ""
+				}
+				return memories[index].Text
+			}
+			ui.List(c, &st.memoryList, len(memories)).
+				Label(st.tr("记忆列表", "Memories")).
+				Grow(1).
+				Rows(func(row ui.ListRow) {
+					memory := memories[row.Index]
+					ui.Row(row.Context).FillWidth().Justify(ui.Center).AlignItems(ui.Start).Children(func() {
+						design.Apply(ui.Column(row.Context), t.Gap(design.Space4)).
+							Width(design.TranscriptWidth).MaxWidthPercent(92).Children(func() {
+							memoryRow(row.Context, t, runtime, store, st, memory)
+						})
+					})
+				})
+		}
+		// The add row stays fixed at the bottom; only the entries scroll.
+		centered(func(c *ui.Context) {
+			buildMemoryAdd(c, t, runtime, store, st)
+		})
+		buildMemoryEditDialog(c, t, runtime, store, st)
 	})
 }
 
