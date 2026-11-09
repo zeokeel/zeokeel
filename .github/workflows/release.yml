@@ -107,13 +107,20 @@ jobs:
           VERSION: ${{ steps.version.outputs.version }}
         run: |
           {
-            cat CHANGELOG.md
+            echo "## 这个版本更新了什么"
             echo ""
-            echo "## Downloads — v${VERSION}"
+            # 只截取 CHANGELOG 中当前版本的段落，不要把历史版本都贴到发布页。
+            awk -v ver="$VERSION" '
+              index($0, "## [" ver "]") == 1 { inside = 1; next }
+              inside && index($0, "## [") == 1 { exit }
+              inside { print }
+            ' CHANGELOG.md
             echo ""
-            echo "Pick the archive that matches your operating system and CPU architecture."
+            echo "## 下载"
             echo ""
-            echo "| Platform | Architecture | Archive |"
+            echo "选择适合你电脑系统的安装包："
+            echo ""
+            echo "| 系统 | 架构 | 文件 |"
             echo "| --- | --- | --- |"
             for target in linux/amd64 linux/arm64 darwin/amd64 darwin/arm64 windows/amd64 windows/arm64; do
               goos="${target%/*}"
@@ -135,18 +142,16 @@ jobs:
               echo "| ${platform} | ${arch} | \`${archive}\` |"
             done
             echo ""
-            echo "**Build:** CGO disabled, stripped with \`-s -w\`, archives gzip/zip compressed."
-            echo ""
-            echo "**Checksums:** \`SHA256SUMS.txt\` (sha256 of every archive)."
+            echo "**校验**：`SHA256SUMS.txt` 是每个压缩包的 sha256。"
             echo ""
             echo '```sh'
             echo "# Linux / macOS"
-            echo "tar -xzf zeokeel_${VERSION}_<os>_<arch>.tar.gz"
-            echo "./zeokeel_${VERSION}_<os>_<arch>/zeokeel --version"
+            echo "tar -xzf zeokeel_${VERSION}_<系统>_<架构>.tar.gz"
+            echo "./zeokeel_${VERSION}_<系统>_<架构>/zeokeel --version"
             echo ""
             echo "# Windows (PowerShell)"
-            echo "Expand-Archive zeokeel_${VERSION}_windows_<arch>.zip ."
-            echo ".\\zeokeel_${VERSION}_windows_<arch>\\zeokeel.exe --version"
+            echo "Expand-Archive zeokeel_${VERSION}_windows_<架构>.zip ."
+            echo ".\\zeokeel_${VERSION}_windows_<架构>\\zeokeel.exe --version"
             echo '```'
           } > release-notes.md
 
