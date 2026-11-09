@@ -62,6 +62,9 @@ func TestAgentsFileInjectedIntoSystemPrompt(t *testing.T) {
 	workspace := &fakeWorkspace{}
 	svc, provider := newAgentsFileService(t, newFakeSettings(nil), workspace, nil)
 	system := runAndSystemPrompt(t, svc, provider, workspace, root)
+	if !strings.HasPrefix(system, "You are ZeoKeel") {
+		t.Fatalf("system prompt does not start with the identity/environment block: %q", system)
+	}
 	if !strings.Contains(system, "base system prompt") {
 		t.Fatalf("base prompt missing: %q", system)
 	}
@@ -69,8 +72,10 @@ func TestAgentsFileInjectedIntoSystemPrompt(t *testing.T) {
 		!strings.Contains(system, "Follow the workspace rules.") {
 		t.Fatalf("workspace instructions missing: %q", system)
 	}
-	if !strings.HasPrefix(system, "base system prompt\n\n# 工作区指令（AGENTS.md）\n\n") {
-		t.Fatalf("injection shape = %q", system)
+	baseIndex := strings.Index(system, "base system prompt")
+	headingIndex := strings.Index(system, "# 工作区指令（AGENTS.md）")
+	if baseIndex < 0 || headingIndex < 0 || baseIndex > headingIndex {
+		t.Fatalf("workspace instructions are not appended after the base prompt: %q", system)
 	}
 }
 
@@ -82,8 +87,10 @@ func TestAgentsFileMissingIsIgnored(t *testing.T) {
 	if strings.Contains(system, "# 工作区指令") {
 		t.Fatalf("missing AGENTS.md injected: %q", system)
 	}
-	if system != "base system prompt" {
-		t.Fatalf("system prompt = %q", system)
+	// The environment/identity block is always present now; only the workspace
+	// instruction injection is optional.
+	if !strings.Contains(system, "base system prompt") || !strings.Contains(system, "You are ZeoKeel") {
+		t.Fatalf("base prompt or environment block missing: %q", system)
 	}
 }
 
@@ -127,10 +134,12 @@ func TestAgentsFileTruncatedAt32KiB(t *testing.T) {
 	workspace := &fakeWorkspace{}
 	svc, provider := newAgentsFileService(t, newFakeSettings(nil), workspace, logger)
 	system := runAndSystemPrompt(t, svc, provider, workspace, root)
-	if !strings.Contains(system, "# 工作区指令（AGENTS.md）") {
+	const heading = "# 工作区指令（AGENTS.md）\n\n"
+	headingIndex := strings.Index(system, heading)
+	if headingIndex < 0 {
 		t.Fatalf("heading missing after truncation: %q", system)
 	}
-	content := strings.TrimPrefix(system, "base system prompt\n\n# 工作区指令（AGENTS.md）\n\n")
+	content := system[headingIndex+len(heading):]
 	if len(content) > 32<<10 {
 		t.Fatalf("injected content length = %d, want <= %d", len(content), 32<<10)
 	}

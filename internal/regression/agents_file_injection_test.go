@@ -78,8 +78,11 @@ func TestAgentsFileInjectionVariants(t *testing.T) {
 
 	t.Run("missing file ignored", func(t *testing.T) {
 		harness, model := startAgentsHarness(t, nil, t.TempDir())
-		if system := systemPromptOf(t, harness, model); system != "" {
-			t.Fatalf("missing AGENTS.md injected a system prompt: %q", system)
+		system := systemPromptOf(t, harness, model)
+		// The agent always sends its environment/policy system block now, so
+		// "missing" means no workspace-instruction block, not an empty prompt.
+		if strings.Contains(system, "# 工作区指令") || strings.Contains(system, "AGENTS.md") {
+			t.Fatalf("missing AGENTS.md injected workspace instructions: %q", system)
 		}
 	})
 

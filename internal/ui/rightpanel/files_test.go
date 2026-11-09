@@ -298,25 +298,91 @@ func filesTreeWorkspace() *fakeWorkspace {
 	return workspace
 }
 
+// clickCrumb clicks a breadcrumb link by its accessible role and name: the
+// crumb's text (the workspace name) may also appear in the pane header, so the
+// role/name pair is the unambiguous target.
+func clickCrumb(t *testing.T, tester *ui.Tester, name string) {
+	t.Helper()
+	info, ok := tester.AccessByRole(ui.RoleLink, name)
+	if !ok {
+		t.Fatalf("breadcrumb link %q missing; texts = %v", name, tester.Texts())
+	}
+	tester.ClickAt(info.Bounds.X+info.Bounds.W/2, info.Bounds.Y+info.Bounds.H/2)
+	tester.Frame()
+}
+
 func TestFilesNavigationAndBreadcrumb(t *testing.T) {
 	workspace := filesTreeWorkspace()
 	h := newHarnessWithWorkspace(t, newFakeChat(), rightpanel.Config{}, workspace)
 	tester := h.tester()
 	h.selectPane(tester, "文件")
-	h.assertTexts(tester, "proj", "/work/proj", "/proj", "docs", "main.go", "chart.png")
+	h.assertTexts(tester, "proj", "/work/proj", "docs", "main.go", "chart.png")
+	// The trail is the official Breadcrumbs: a navigation landmark named 路径.
+	if _, ok := tester.AccessByRole(ui.RoleNavigation, "路径"); !ok {
+		t.Fatalf("breadcrumb is not a navigation landmark; texts = %v", tester.Texts())
+	}
 
-	// Enter a directory, then a nested one; the breadcrumb grows.
+	// Enter a directory, then a nested one; the breadcrumb grows and the last
+	// crumb is the current page (the earlier ones are links that navigate).
 	h.click(tester, "docs")
-	h.assertTexts(tester, "api", "readme.md", "/proj", "/docs")
+	h.assertTexts(tester, "api", "readme.md")
+	if _, ok := tester.AccessByRole(ui.RoleLink, "proj"); !ok {
+		t.Fatalf("root crumb is not a link; texts = %v", tester.Texts())
+	}
+	page, ok := tester.AccessByRole(ui.RoleText, "docs")
+	if !ok || page.Current != ui.CurrentPage {
+		t.Fatalf("current crumb = %+v found %v, want the current page", page, ok)
+	}
 	h.click(tester, "api")
-	h.assertTexts(tester, "spec.md", "/docs", "/api")
+	h.assertTexts(tester, "spec.md")
+	if _, ok := tester.AccessByRole(ui.RoleText, "api"); !ok {
+		t.Fatalf("nested current crumb missing; texts = %v", tester.Texts())
+	}
 
 	// Clicking a breadcrumb segment returns to that directory.
-	h.click(tester, "/docs")
+	clickCrumb(t, tester, "docs")
 	h.assertTexts(tester, "readme.md")
 	h.assertNoTexts(tester, "spec.md")
-	h.click(tester, "/proj")
+	clickCrumb(t, tester, "proj")
 	h.assertTexts(tester, "docs", "main.go")
+}
+
+// TestFilesBreadcrumbDeepPathCollapses covers the compact middle-collapse of
+// deep paths: the first segment, an ellipsis crumb that jumps to the parent of
+// the shown tail, then the last two segments.
+func TestFilesBreadcrumbDeepPathCollapses(t *testing.T) {
+	workspace := newFakeWorkspace()
+	workspace.setCurrent(contracts.Workspace{ID: "ws-deep", Name: "deep", Root: "/work/deep"})
+	parent := func(path string) string {
+		if cut := strings.LastIndex(path, "/"); cut >= 0 {
+			return path[:cut]
+		}
+		return ""
+	}
+	for depth, path := range []string{"a", "a/b", "a/b/c", "a/b/c/d", "a/b/c/d/e"} {
+		name := []string{"a", "b", "c", "d", "e"}[depth]
+		workspace.setDir(parent(path), contracts.FileEntry{Name: name, Path: path, Dir: true})
+	}
+	workspace.setDir("a/b/c/d/e", contracts.FileEntry{Name: "leaf.md", Path: "a/b/c/d/e/leaf.md", Size: 4})
+	workspace.setFile("a/b/c/d/e/leaf.md", []byte("leaf"))
+
+	h := newHarnessWithWorkspace(t, newFakeChat(), rightpanel.Config{}, workspace)
+	tester := h.tester()
+	h.selectPane(tester, "文件")
+	for _, name := range []string{"a", "b", "c", "d", "e"} {
+		h.click(tester, name)
+	}
+	h.assertTexts(tester, "leaf.md", "…", "d", "e")
+	if _, ok := tester.AccessByRole(ui.RoleLink, "a"); !ok {
+		t.Fatalf("first segment crumb missing; texts = %v", tester.Texts())
+	}
+	// The ellipsis is a link that jumps up to a/b/c, the parent of the tail.
+	if _, ok := tester.AccessByRole(ui.RoleLink, "…"); !ok {
+		t.Fatalf("ellipsis crumb is not a link; texts = %v", tester.Texts())
+	}
+	clickCrumb(t, tester, "…")
+	h.assertTexts(tester, "d")
+	h.assertNoTexts(tester, "leaf.md")
 }
 
 func TestFilesTextAndMarkdownPreview(t *testing.T) {

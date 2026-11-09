@@ -98,6 +98,12 @@ func (s *service) Run(ctx context.Context, req contracts.SubagentRequest) (contr
 	}
 
 	cfg, active := s.subagentParent()
+	childTools := s.registry.Tools()
+	// Children inherit the same complete prompt as their parent run (identity,
+	// environment, workspace instructions, preset and per-tool guidance). The
+	// runner filters the orchestration tools out of the child's tool set, so the
+	// guidance for exactly that filtered surface is rendered.
+	cfg.SystemPrompt = s.buildRunSystemPrompt(ctx, active, cfg, toolNameSet(childTools, subagentExcludedTools()...))
 	provider, err := s.newProvider(cfg, s.thinkingParamsForSession(active, cfg.Model))
 	if err != nil {
 		return contracts.SubagentResult{}, fmt.Errorf("agent: subagent %q: create provider: %w", name, err)
@@ -107,7 +113,7 @@ func (s *service) Run(ctx context.Context, req contracts.SubagentRequest) (contr
 		Model:         cfg.Model,
 		SystemPrompt:  cfg.SystemPrompt,
 		MaxIterations: cfg.MaxIterations,
-		Tools:         s.registry.Tools(),
+		Tools:         childTools,
 		Gate:          s.gate(active),
 		History:       s.historyView(),
 		Logger:        s.logger,

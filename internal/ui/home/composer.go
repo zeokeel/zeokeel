@@ -574,6 +574,12 @@ func buildHomeComposer(c *ui.Context, t *design.Tokens, runtime contracts.UIRunt
 		// button made the row read as a strip of competing chips.
 		ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(design.Space2).Children(func() {
 			buildHomeAttachmentMenu(c, t, runtime, st, tr)
+			if st.attachBusy {
+				// The picker runs off the UI thread: the official spinner shows
+				// the wait next to the menu whose label also says 选择中….
+				ui.Spinner(c).Label(tr("选择中…", "Choosing…")).
+					Size(design.Space3, design.Space3).TextColor(t.LabelSecondary)
+			}
 			buildHomeModelControl(c, t, runtime, navigator, chat, kctx, settings, tr)
 			buildHomeModeControl(c, t, runtime, settings, tr)
 			ui.Spacer(c).Grow(1)

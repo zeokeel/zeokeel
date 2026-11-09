@@ -563,6 +563,9 @@ func TestHomeComposerAttachmentPickerOffThreadBusy(t *testing.T) {
 	// busy label on the 附件 menu button instead of freezing (a synchronous
 	// picker would hang).
 	h.assertTexts(tester, "选择中…")
+	if info, ok := tester.AccessByRole(ui.RoleProgress, "选择中…"); !ok || info.Role != ui.RoleProgress {
+		t.Fatalf("home picker busy state is not a progress indicator: %+v found %v", info, ok)
+	}
 	h.assertNoTexts(tester, "选择文件…")
 	h.assertNoTexts(tester, "notes.txt") // the result is still pending
 	close(release)

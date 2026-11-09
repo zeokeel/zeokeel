@@ -371,6 +371,12 @@ func TestCancelKeepsPartialContent(t *testing.T) {
 	if assistant.Error != "cancelled" {
 		t.Fatalf("assistant error = %q, want cancelled", assistant.Error)
 	}
+	// A user-initiated stop must render the localized cancelled row, not a
+	// generic error: the literal "cancelled" text alone is not classified by
+	// contracts.ClassifyError ("context canceled" is the provider spelling).
+	if assistant.ErrorKind != contracts.MessageErrorKindCancelled {
+		t.Fatalf("assistant error kind = %q, want %q", assistant.ErrorKind, contracts.MessageErrorKindCancelled)
+	}
 }
 
 // TestEventMappingToolsReasoningAndErrors covers the event mapping without a

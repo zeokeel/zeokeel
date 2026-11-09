@@ -220,8 +220,10 @@ func (d *drive) runSettingsSteps() {
 				c.failf("%v", err)
 				return
 			}
-			// Make one edit: append text to the Base URL draft.
-			if !c.click("Base URL") {
+			// Make one edit: append text to the Base URL draft. The input's
+			// accessible label is "Base URL 输入" (the visible label only names
+			// the field); clicking the visible label is not an input target.
+			if !c.click("Base URL 输入") {
 				return
 			}
 			d.typeText("X")

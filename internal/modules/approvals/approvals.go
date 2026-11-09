@@ -8,8 +8,10 @@
 //
 // # Semantics
 //
-//   - workspace: the workspace file tools (read/write/edit/list/search inside the
-//     workspace) are allowed immediately; every other tool asks.
+//   - workspace: contracts.WorkspaceAutoAllowedTools (the workspace file tools
+//     plus read-only/informational tools that cannot leave or modify the
+//     workspace) are allowed immediately; everything that can leave the
+//     workspace — shell, network, MCP, settings writes — and unknown tools ask.
 //   - ask: every Request registers an "appr-<n>" pending entry, notifies
 //     subscribers and blocks until Resolve answers it or the context ends.
 //     Context cancellation removes the pending entry again.
@@ -216,20 +218,6 @@ func (s *service) effectiveMode() string {
 	}
 }
 
-// workspacePathTools are the workspace permission mode's no-prompt set: the
-// file tools whose work is normal in-workspace editing (reading, listing,
-// searching, writing and editing). Everything that can leave the workspace —
-// shell, network, MCP and unknown tools — still asks.
-var workspacePathTools = map[string]bool{
-	"read_file":          true,
-	"list_dir":           true,
-	"glob":               true,
-	"grep":               true,
-	"write_file":         true,
-	"edit_file":          true,
-	"str_replace_editor": true,
-}
-
 // Request implements contracts.Approvals: auto/never answer immediately, ask
 // queues and blocks until Resolve or the context ends.
 func (s *service) Request(ctx context.Context, request contracts.ApprovalRequest) (contracts.ApprovalDecision, error) {
@@ -242,7 +230,11 @@ func (s *service) Request(ctx context.Context, request contracts.ApprovalRequest
 	case ModeNever:
 		return contracts.ApprovalDeny, nil
 	case ModeWorkspace:
-		if workspacePathTools[strings.TrimSpace(request.Tool)] {
+		// One frozen list is shared with the agent gate
+		// (contracts.WorkspaceAutoAllowedTools): the workspace file tools plus
+		// read-only/informational tools. Shell, network, MCP, settings writes and
+		// unknown tools still queue below.
+		if contracts.WorkspaceAutoAllowed(request.Tool) {
 			return contracts.ApprovalAllow, nil
 		}
 	}

@@ -49,6 +49,15 @@ type presetsState struct {
 	status    string
 	statusErr bool
 
+	// Both collections are the official List: the prompt presets key by their
+	// content (the stored rows carry no id) and the agent presets by their
+	// stable ID, so a reorder keeps the row state and the choice on the item.
+	// The inline move/delete buttons stay the row actions.
+	list      ui.ListState
+	sel       int
+	agentList ui.ListState
+	agentSel  int
+
 	// confirmKind/confirmIndex name the destructive action waiting for the
 	// native confirmation dialog ("", "delete-preset", "delete-agent",
 	// "restore-builtins", "restore-agents").
@@ -56,7 +65,7 @@ type presetsState struct {
 	confirmIndex int
 }
 
-func newPresetsState() *presetsState { return &presetsState{} }
+func newPresetsState() *presetsState { return &presetsState{sel: -1, agentSel: -1} }
 
 // load reads the settings row once. Empty/malformed values keep the built-in
 // defaults visible; malformed JSON also records the parse error for DangerText.
@@ -368,11 +377,37 @@ func buildPresetsPage(c *ui.Context, store contracts.SettingsService, st *preset
 				uikit.EmptyState(c, localized(locale, "还没有预设", "No presets yet"))
 				return
 			}
-			for index, preset := range st.presets {
-				if index > 0 {
-					ui.Divider(c)
+			// The prompt presets are a collection: the official List keys each
+			// row by the preset's own content (the stored shape has no id), so
+			// moving a row keeps its state and the choice on the item.
+			bindSettingsList(&st.list, &st.sel, len(st.presets), func(index int) any {
+				if index < 0 || index >= len(st.presets) {
+					return nil
 				}
-				buildPresetRow(c, t, store, st, locale, index, preset)
+				return promptPresetKeyOf(st.presets[index])
+			}, func(index int) string {
+				if index < 0 || index >= len(st.presets) {
+					return ""
+				}
+				return promptPresetRowLabel(locale, st.presets[index])
+			})
+			// A row button changes the collection being built: only note the
+			// requested move here and apply it after the List is built, so the
+			// rows' keys cannot collide mid-pass (mygo-maintenance: defer actions
+			// that change a collection being built).
+			moveIndex, moveDelta := -1, 0
+			ui.List(c, &st.list, len(st.presets)).
+				Label(localized(locale, "预设列表", "Preset list")).
+				Gap(design.Space1).
+				Rows(func(row ui.ListRow) {
+					buildPresetRow(row.Context, t, store, st, locale, row.Index,
+						st.presets[row.Index], row.Selected(), func(index, delta int) {
+							moveIndex, moveDelta = index, delta
+						})
+				})
+			if moveIndex >= 0 {
+				st.movePreset(store, locale, moveIndex, moveDelta)
+				c.Invalidate()
 			}
 		})
 
@@ -428,11 +463,30 @@ func buildPresetsPage(c *ui.Context, store contracts.SettingsService, st *preset
 			if len(st.agentPresets) == 0 {
 				uikit.EmptyState(c, localized(locale, "还没有代理预设", "No agent presets yet"))
 			}
-			for index, preset := range st.agentPresets {
-				if index > 0 {
-					ui.Divider(c)
+			bindSettingsList(&st.agentList, &st.agentSel, len(st.agentPresets), func(index int) any {
+				if index < 0 || index >= len(st.agentPresets) {
+					return nil
 				}
-				buildAgentPresetRow(c, t, store, st, locale, index, preset)
+				return strings.TrimSpace(st.agentPresets[index].ID)
+			}, func(index int) string {
+				if index < 0 || index >= len(st.agentPresets) {
+					return ""
+				}
+				return agentPresetRowLabel(locale, st.agentPresets[index])
+			})
+			moveIndex, moveDelta := -1, 0
+			ui.List(c, &st.agentList, len(st.agentPresets)).
+				Label(localized(locale, "代理预设列表", "Agent presets list")).
+				Gap(design.Space1).
+				Rows(func(row ui.ListRow) {
+					buildAgentPresetRow(row.Context, t, store, st, locale, row.Index,
+						st.agentPresets[row.Index], row.Selected(), func(index, delta int) {
+							moveIndex, moveDelta = index, delta
+						})
+				})
+			if moveIndex >= 0 {
+				st.moveAgentPreset(store, locale, moveIndex, moveDelta)
+				c.Invalidate()
 			}
 			ui.Row(c).FillWidth().Justify(ui.End).Children(func() {
 				uikit.DialogFooter(c, []uikit.DialogAction{{
@@ -508,32 +562,45 @@ func buildPresetConfirmDialog(c *ui.Context, t *design.Tokens, store contracts.S
 	}
 }
 
+// promptPresetKeyOf is the official List key of one prompt-preset row: the
+// stored preset shape has no ID, so the key is the preset's own content, which
+// follows the item across a reorder.
+func promptPresetKeyOf(preset contracts.PromptPreset) any {
+	return struct{ name, prompt string }{preset.Name, preset.Prompt}
+}
+
+// promptPresetRowLabel is the accessible text of one prompt-preset row.
+func promptPresetRowLabel(locale contracts.LocaleService, preset contracts.PromptPreset) string {
+	return firstNonEmpty(strings.TrimSpace(preset.Name),
+		localized(locale, "(未命名预设)", "(Untitled preset)"))
+}
+
 // buildPresetRow renders one preset with its two-line prompt summary and the
-// native move/delete actions.
+// native move/delete actions. The official List owns the row paint and the
+// choice, so the selected row's copy uses the accent's on-color.
 func buildPresetRow(c *ui.Context, t *design.Tokens, store contracts.SettingsService, st *presetsState,
-	locale contracts.LocaleService, index int, preset contracts.PromptPreset) {
+	locale contracts.LocaleService, index int, preset contracts.PromptPreset, selected bool,
+	requestMove func(index, delta int)) {
+	primary, _, tertiary := listRowTextColors(t, selected)
 	ui.Row(c).FillWidth().Gap(design.Space2).AlignItems(ui.Center).
-		PaddingY(design.Space1).Children(func() {
+		Padding(design.Space1, design.Space2).Children(func() {
 		ui.Column(c).Grow(1).Gap(design.Space1).Children(func() {
-			design.Apply(ui.Text(c, firstNonEmpty(strings.TrimSpace(preset.Name),
-				localized(locale, "(未命名预设)", "(Untitled preset)"))),
-				t.Font(design.TypeS)).FontWeight(600).TextColor(t.LabelPrimary)
+			design.Apply(ui.Text(c, promptPresetRowLabel(locale, preset)),
+				t.Font(design.TypeS)).FontWeight(600).TextColor(primary)
 			summary := strings.TrimSpace(preset.Prompt)
 			if summary == "" {
 				summary = localized(locale, "(空提示词)", "(Empty prompt)")
 			}
 			design.Apply(ui.Text(c, summary), t.Font(design.TypeXXS)).
-				TextColor(t.LabelTertiary).MaxLines(2).Ellipsis("…")
+				TextColor(tertiary).MaxLines(2).Ellipsis("…")
 		})
 		if design.Apply(ui.Button(c, localized(locale, "上移", "Up")),
 			t.SecondaryButton()).Tooltip(localized(locale, "上移一位", "Move up")).Clicked() {
-			st.movePreset(store, locale, index, -1)
-			c.Invalidate()
+			requestMove(index, -1)
 		}
 		if design.Apply(ui.Button(c, localized(locale, "下移", "Down")),
 			t.SecondaryButton()).Tooltip(localized(locale, "下移一位", "Move down")).Clicked() {
-			st.movePreset(store, locale, index, 1)
-			c.Invalidate()
+			requestMove(index, 1)
 		}
 		if design.Apply(ui.Button(c, localized(locale, "删除", "Delete")),
 			t.DangerButton()).Tooltip(localized(locale,
@@ -619,22 +686,31 @@ func buildAgentPresetDialog(c *ui.Context, t *design.Tokens, store contracts.Set
 	})
 }
 
+// agentPresetRowLabel is the accessible text of one agent-preset row.
+func agentPresetRowLabel(locale contracts.LocaleService, preset contracts.AgentPreset) string {
+	return firstNonEmpty(strings.TrimSpace(preset.Name),
+		localized(locale, "(未命名人设)", "(Untitled persona)"))
+}
+
 // buildAgentPresetRow renders one configured agent preset with its summary,
-// tool/model badges and move/delete actions.
+// tool/model metadata and move/delete actions. The official List owns the row
+// paint and the choice, so the selected row's copy uses the accent's on-color.
 func buildAgentPresetRow(c *ui.Context, t *design.Tokens, store contracts.SettingsService, st *presetsState,
-	locale contracts.LocaleService, index int, preset contracts.AgentPreset) {
+	locale contracts.LocaleService, index int, preset contracts.AgentPreset, selected bool,
+	requestMove func(index, delta int)) {
+	primary, secondary, _ := listRowTextColors(t, selected)
 	ui.Row(c).FillWidth().Gap(design.Space2).AlignItems(ui.Center).
-		PaddingY(design.Space1).Children(func() {
+		Padding(design.Space1, design.Space2).Children(func() {
 		ui.Column(c).Grow(1).Gap(design.Space1).Children(func() {
-			design.Apply(ui.Text(c, firstNonEmpty(strings.TrimSpace(preset.Name),
-				localized(locale, "(未命名人设)", "(Untitled persona)"))),
-				t.Font(design.TypeS)).FontWeight(600).TextColor(t.LabelPrimary)
+			design.Apply(ui.Text(c, agentPresetRowLabel(locale, preset)),
+				t.Font(design.TypeS)).FontWeight(600).TextColor(primary)
 			summary := strings.TrimSpace(preset.Persona)
 			if summary == "" {
 				summary = strings.TrimSpace(preset.Prompt)
 			}
 			if summary != "" {
-				design.Apply(ui.Text(c, presetSummary(summary)), t.TextMuted(design.TypeXXS)).MaxLines(1)
+				design.Apply(ui.Text(c, presetSummary(summary)),
+					t.Font(design.TypeXXS)).TextColor(secondary).MaxLines(1)
 			}
 			meta := make([]string, 0, 2)
 			if len(preset.Tools) > 0 {
@@ -645,18 +721,16 @@ func buildAgentPresetRow(c *ui.Context, t *design.Tokens, store contracts.Settin
 			}
 			if len(meta) > 0 {
 				design.Apply(ui.Text(c, strings.Join(meta, " · ")),
-					t.TextMuted(design.TypeXXS)).MaxLines(1)
+					t.Font(design.TypeXXS)).TextColor(secondary).MaxLines(1)
 			}
 		})
 		if design.Apply(ui.Button(c, localized(locale, "上移", "Up")),
 			t.SecondaryButton()).Clicked() {
-			st.moveAgentPreset(store, locale, index, -1)
-			c.Invalidate()
+			requestMove(index, -1)
 		}
 		if design.Apply(ui.Button(c, localized(locale, "下移", "Down")),
 			t.SecondaryButton()).Clicked() {
-			st.moveAgentPreset(store, locale, index, 1)
-			c.Invalidate()
+			requestMove(index, 1)
 		}
 		if design.Apply(ui.Button(c, localized(locale, "删除", "Delete")),
 			t.DangerButton()).Clicked() {

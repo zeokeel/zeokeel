@@ -71,7 +71,9 @@ func (m *fakeMemoryStore) Add(_ context.Context, memory contracts.Memory) (contr
 	if m.addErr != nil {
 		return contracts.Memory{}, m.addErr
 	}
-	memory.ID = "mem-added"
+	// The stored memory carries a unique ID (the official List keys its rows by
+	// it): each added entry gets its own, as the real store does.
+	memory.ID = fmt.Sprintf("mem-added-%d", len(m.items)+1)
 	memory.Created = time.Unix(1700000000, 0)
 	m.items = append(m.items, memory)
 	return memory, nil
@@ -588,6 +590,8 @@ func TestMemoryExtractIgnoresRepeatedClicks(t *testing.T) {
 	h, tester := memoryExtractHarness(t, memoryExtractChat(), memoryExtractSettings("true"), store, extractor)
 	h.click(tester, "从当前会话提取")
 	h.assertTexts(tester, "提取中…")
+	// The busy state is the official spinner, and the action is disabled.
+	requireBusySpinner(t, tester, "提取中…")
 	h.click(tester, "提取中…")
 	tester.Frame()
 	if got := extractor.callCount(); got != 1 {

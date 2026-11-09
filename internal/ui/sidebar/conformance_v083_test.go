@@ -3,9 +3,10 @@ package sidebar_test
 // Conformance frame tests for the v0.8.3 native-widget migration of the
 // sidebar: the session rows are a mygo List (keyboard, Enter, single click), the
 // workspace tree is a mygo Outline (open/close from the keyboard, tree rows),
-// and the workspace add dialog uses the product's one dialog footer with Enter
-// submitting from the fields. These tests sit beside the existing suite: they
-// pin the new behavior without changing the older assertions.
+// the workspace row actions are native ButtonBase controls, and adding a
+// workspace runs the native directory picker directly (no naming dialog). These
+// tests sit beside the existing suite: they pin the native widget behavior
+// without changing the older assertions.
 
 import (
 	"context"
@@ -144,41 +145,44 @@ func TestWorkspaceOutlineKeyboardFolding(t *testing.T) {
 	}
 }
 
-// TestWorkspaceAddDialogFooterAndEnter covers the one dialog footer (cancel on
-// the left, primary Add on the right) and Enter submitting from the fields.
-func TestWorkspaceAddDialogFooterAndEnter(t *testing.T) {
+// TestWorkspaceAddUsesTheNativePickerDirectly covers the v-next add flow: the
+// header's + button runs the native directory picker itself, so there is no
+// naming modal and no dialog footer; the backend derives the name and the new
+// workspace group appears with its row actions (⋯ then ⊕) in place.
+func TestWorkspaceAddUsesTheNativePickerDirectly(t *testing.T) {
 	workspace := &recordingWorkspace{fakeWorkspace: newFakeWorkspace(treeWorkspaces()...)}
 	h := newHarnessWithWorkspace(t, &fakeChat{}, sidebar.Config{}, workspace)
+	pickerCalls := 0
+	overrideSidebarPicker(t, func(string) (string, error) {
+		pickerCalls++
+		return "/work/three", nil
+	})
 	tester := h.tester()
+
 	h.click(tester, "添加工作区")
-	h.assertTexts(tester, "添加工作区", "名称", "目录", "取消", "添加")
 
-	cancel, ok := tester.Find("取消")
-	if !ok {
-		t.Fatalf("cancel action missing; texts = %v", tester.Texts())
+	if pickerCalls != 1 {
+		t.Fatalf("directory picker calls = %d, want one", pickerCalls)
 	}
-	add, ok := tester.Find("添加")
-	if !ok {
-		t.Fatalf("primary Add action missing; texts = %v", tester.Texts())
-	}
-	if !(cancel.X < add.X) {
-		t.Fatalf("dialog footer order cancel=%.1f add=%.1f; want cancel on the left, Add on the right",
-			cancel.X, add.X)
-	}
-
-	// Enter in the fields submits the dialog: the record shows the values.
-	clickLabel(t, tester, "名称 输入")
-	tester.Type("项目三")
-	tester.Frame()
-	clickLabel(t, tester, "目录 输入")
-	tester.Type("/work/three")
-	tester.Frame()
-	tester.Key(0, ui.KeyEnter)
-	tester.Frame()
-	tester.Frame()
-	if workspace.createCalls != 1 || workspace.createName != "项目三" || workspace.createRoot != "/work/three" {
-		t.Fatalf("Enter did not create the workspace: calls=%d name=%q root=%q",
+	// No naming dialog: none of the old dialog controls appear.
+	h.assertNoTexts(tester, "名称", "目录", "选择目录…", "取消")
+	h.assertTexts(tester, "已添加工作区", "three")
+	if workspace.createCalls != 1 || workspace.createName != "" || workspace.createRoot != "/work/three" {
+		t.Fatalf("Create = calls %d name %q root %q, want the empty name and the picked folder",
 			workspace.createCalls, workspace.createName, workspace.createRoot)
+	}
+
+	// The group row's native actions are in the requested order: ⋯ then ⊕.
+	more, ok := tester.Find("工作区操作：three")
+	if !ok {
+		t.Fatalf("workspace row's ⋯ action missing; texts = %v", tester.Texts())
+	}
+	plus, ok := tester.Find("在“three”中新建会话")
+	if !ok {
+		t.Fatalf("workspace row's new-chat action missing; texts = %v", tester.Texts())
+	}
+	if !(more.X < plus.X) {
+		t.Fatalf("row action order: ⋯ x=%.1f ⊕ x=%.1f, want ⋯ then ⊕", more.X, plus.X)
 	}
 }
 

@@ -41,9 +41,29 @@ func TestAssistantUsageFooterRenders(t *testing.T) {
 	h := newHarness(t, chat)
 	tester := h.tester()
 	// The summary line is compact and muted; the breakdown expands on click.
-	h.assertTexts(tester, "用时 3.2s · 1,234 tokens")
-	h.click(tester, "用时 3.2s · 1,234 tokens")
+	h.assertTexts(tester, "用时 3.2s · 1.2K tokens")
+	h.click(tester, "用时 3.2s · 1.2K tokens")
 	h.assertTexts(tester, "缓存 tokens", "200")
+}
+
+// TestAssistantUsageFooterUsesCompactUnits covers the user's report: the footer
+// must show 173.6K (and 8.4M-style units), never comma-grouped 173,635. The
+// expanded token rows use the same units; no comma grouping survives anywhere.
+func TestAssistantUsageFooterUsesCompactUnits(t *testing.T) {
+	chat := usageChat(contracts.ChatMessage{
+		ID: "a1", Role: contracts.ChatRoleAssistant, Text: "长回答",
+		Usage: &contracts.MessageUsage{
+			DurationMS: 358800, PromptTokens: 171737, CompletionTokens: 1898,
+			TotalTokens: 173635, CachedTokens: 92892,
+		},
+	})
+	h := newHarness(t, chat)
+	tester := h.tester()
+	h.assertTexts(tester, "用时 358.8s · 173.6K tokens")
+	h.assertNoTexts(tester, "173,635")
+	h.click(tester, "用时 358.8s · 173.6K tokens")
+	h.assertTexts(tester, "171.7K", "1.9K", "92.9K")
+	h.assertNoTexts(tester, "171,737", "1,898", "92,892")
 }
 
 func TestAssistantUsageDurationFormats(t *testing.T) {
@@ -70,8 +90,8 @@ func TestAssistantUsageEnglishCopy(t *testing.T) {
 	tester := h.tester()
 	h.ui.Locale().SetLanguage("en")
 	tester.Frame()
-	h.assertTexts(tester, "Took 3.2s · 1,234 tokens")
-	h.click(tester, "Took 3.2s · 1,234 tokens")
+	h.assertTexts(tester, "Took 3.2s · 1.2K tokens")
+	h.click(tester, "Took 3.2s · 1.2K tokens")
 	h.assertTexts(tester, "Cached tokens", "200")
 }
 

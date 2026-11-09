@@ -296,6 +296,8 @@ func TestImportBusyStatesDisableActions(t *testing.T) {
 	waitForImporterStart(t, importer.scanStarted)
 	tester.Frame()
 	h.assertTexts(tester, "扫描中…")
+	// The busy state is the official spinner, and the action is disabled.
+	requireBusySpinner(t, tester, "扫描中…")
 
 	// The scan button is disabled in flight: clicking it again starts nothing.
 	if err := tester.Click("扫描中…"); err != nil {
@@ -315,6 +317,8 @@ func TestImportBusyStatesDisableActions(t *testing.T) {
 	waitForImporterStart(t, importer.importStarted)
 	tester.Frame()
 	h.assertTexts(tester, "导入中…")
+	// The busy state is the official spinner, and the action is disabled.
+	requireBusySpinner(t, tester, "导入中…")
 	if err := tester.Click("导入中…"); err != nil {
 		t.Fatalf("click importing button: %v", err)
 	}

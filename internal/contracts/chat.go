@@ -233,6 +233,13 @@ type MessageUsage struct {
 	CachedTokens     int
 	Iterations       int
 	DurationMS       int64
+	// ContextTokens is the prompt-token count of the LAST model request of the
+	// turn: the size of the conversation context the model actually saw. Rig
+	// accumulates PromptTokens over every model call of the turn, so that
+	// number is a billing total and can exceed the context window; ContextTokens
+	// is the right value for "context used / remaining" displays. 0 when the
+	// provider reported no per-call usage.
+	ContextTokens int
 }
 
 // Agent operating modes. Plan mode restricts the tool gate to read-only
@@ -344,6 +351,26 @@ const SettingSessionsShowArchived = "ui.sessions.showArchived"
 type SessionPinner interface {
 	// SetSessionPinned persists the session's pin flag.
 	SetSessionPinned(sessionID string, pinned bool) error
+}
+
+// SessionAllowedToolsSettingKey is the settings row storing the tool names the
+// user chose to always allow in one session (the approval dialog's
+// "always allow in this session"). The value is a JSON array; a missing or
+// empty row means nothing is remembered.
+func SessionAllowedToolsSettingKey(sessionID string) string {
+	return "session." + sessionID + ".allowedTools"
+}
+
+// SessionToolPermissions is the optional half of the chat service that manages
+// the "always allow" tools remembered for one session. The agent backend
+// persists the set across runs; the conversation UI shows the remembered
+// count and can forget it (permission decisions never touch global settings).
+type SessionToolPermissions interface {
+	// AllowedTools returns the remembered tool names, sorted and deduplicated
+	// (never nil).
+	AllowedTools(sessionID string) []string
+	// ClearAllowedTools forgets every remembered tool of the session.
+	ClearAllowedTools(sessionID string) error
 }
 
 // SessionForker is the optional half of the chat service that duplicates a

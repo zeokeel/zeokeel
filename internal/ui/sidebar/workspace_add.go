@@ -1,9 +1,16 @@
 package sidebar
 
-// Sidebar "Add workspace": a native button in the Workspace section header and
-// a native Modal (name + directory picker). Creation goes through the optional
-// contracts.WorkspaceService; on success the list refreshes (it is read per
-// frame), the new workspace is opened and a quiet status badge is shown.
+// Sidebar "Add workspace": the 工作区 header's + button opens the native
+// directory picker directly and registers the chosen folder. The workspace
+// backend derives the name from the folder, so there is no naming dialog: one
+// click, one native folder chooser, and the workspace appears current and
+// unfolded in the tree (its row then carries the per-workspace new-chat
+// action).
+//
+// The result is reported through the host toast bridge when it exists and
+// through the header's quiet status/error rows otherwise. A folder that is
+// already registered is not an error: the backend reuses it and makes it
+// current, which the sidebar reports as a switch rather than a duplicate.
 
 import (
 	"context"
@@ -15,9 +22,6 @@ import (
 	"github.com/egoist/mygo/ui"
 
 	"github.com/zeokeel/zeokeel/internal/contracts"
-	"github.com/zeokeel/zeokeel/internal/design"
-	"github.com/zeokeel/zeokeel/internal/icons"
-	"github.com/zeokeel/zeokeel/internal/uikit"
 )
 
 // DirectoryPicker is the sidebar's workspace directory-picker seam: the default
@@ -38,128 +42,117 @@ var DirectoryPicker = func(title string) (string, error) {
 	return paths[0], nil
 }
 
-// workspaceNameFromDir derives a workspace name from a directory path.
-func workspaceNameFromDir(dir string) string {
-	dir = strings.TrimSpace(dir)
-	cleaned := filepath.Clean(dir)
-	base := strings.TrimSpace(filepath.Base(cleaned))
-	if base == "" || base == "." || base == string(filepath.Separator) {
-		return dir
-	}
-	return base
-}
-
-// openAddWorkspaceDialog resets and opens the add-workspace modal.
-func openAddWorkspaceDialog(state *paneState, runtime contracts.UIRuntime) {
-	state.addWorkspaceOpen = true
-	state.addWorkspaceName = ""
-	state.addWorkspaceDir = ""
-	state.addWorkspaceErr = ""
-	state.addWorkspaceStatus = ""
-	runtime.Invalidate()
-}
-
-// submitAddWorkspace validates and creates the workspace, then closes the modal
-// and selects the new workspace when the backend allows it.
-func submitAddWorkspace(state *paneState, workspace contracts.WorkspaceService, runtime contracts.UIRuntime) {
-	dir := strings.TrimSpace(state.addWorkspaceDir)
-	if dir == "" {
-		state.addWorkspaceErr = state.T("目录不能为空", "The directory is required")
-		runtime.Invalidate()
-		return
-	}
-	name := strings.TrimSpace(state.addWorkspaceName)
-	if name == "" {
-		name = workspaceNameFromDir(dir)
-	}
-	created, err := workspace.Create(context.Background(), name, dir)
+// addWorkspace runs the direct add flow: the native folder picker, then
+// workspace.Create with an empty name (the backend derives it from the
+// folder). A cancelled picker changes nothing; a failure lands in the header's
+// inline error row or the host's error toast.
+func addWorkspace(state *paneState, workspace contracts.WorkspaceService, runtime contracts.UIRuntime) {
+	dir, err := DirectoryPicker(state.T("选择工作区目录", "Choose workspace folder"))
 	if err != nil {
-		state.addWorkspaceErr = state.T("添加工作区失败：", "Could not add the workspace: ") + err.Error()
-		runtime.Invalidate()
+		reportWorkspaceActionError(state, runtime,
+			state.T("无法打开目录选择器：", "Could not open the folder picker: ")+err.Error())
 		return
 	}
-	if strings.TrimSpace(created.ID) != "" {
-		// Best effort: selecting the new workspace makes the tree highlight it
-		// and the Files tab follows it. A backend that cannot open it still
-		// keeps the created workspace in the list.
-		_, _ = workspace.Open(context.Background(), created.ID)
+	// A cancelled picker is a no-op: no error, no status change.
+	dir = strings.TrimSpace(dir)
+	if dir == "" {
+		return
 	}
-	state.addWorkspaceOpen = false
-	state.addWorkspaceName = ""
-	state.addWorkspaceDir = ""
 	state.addWorkspaceErr = ""
-	state.addWorkspaceStatus = state.T("已添加工作区", "Workspace added")
+	// Reporting only: the backend itself reuses an already registered folder.
+	_, reused := registeredWorkspaceRoot(workspace, dir)
+	created, err := workspace.Create(context.Background(), "", dir)
+	if err != nil {
+		reportWorkspaceActionError(state, runtime,
+			state.T("添加工作区失败：", "Could not add the workspace: ")+err.Error())
+		return
+	}
+	state.addWorkspaceErr = ""
+	// The new workspace is current (Create makes it so) and its group may be
+	// folded: open it so its row and new-chat action are visible at once.
+	if id := strings.TrimSpace(created.ID); id != "" {
+		state.tree.Open.Add(workspaceTreeKey(id))
+	}
+	status := state.T("已添加工作区", "Workspace added")
+	if reused {
+		status = state.T("已切换工作区", "Workspace switched")
+	}
+	reportWorkspaceAdded(state, runtime, status)
+}
+
+// registeredWorkspaceRoot reports whether dir is already one of the
+// workspaces, matching the canonical root the backend stores.
+func registeredWorkspaceRoot(workspace contracts.WorkspaceService, dir string) (contracts.Workspace, bool) {
+	listed, err := workspace.List(context.Background())
+	if err != nil {
+		return contracts.Workspace{}, false
+	}
+	for _, ws := range listed {
+		if sameWorkspaceRoot(ws.Root, dir) {
+			return ws, true
+		}
+	}
+	return contracts.Workspace{}, false
+}
+
+// sameWorkspaceRoot compares two workspace roots, tolerating a trailing
+// separator and a symlinked path (workspace.Create stores the canonical root).
+func sameWorkspaceRoot(left, right string) bool {
+	left, right = strings.TrimSpace(left), strings.TrimSpace(right)
+	if left == "" || right == "" {
+		return false
+	}
+	left, right = filepath.Clean(left), filepath.Clean(right)
+	if left == right {
+		return true
+	}
+	absoluteLeft, leftErr := filepath.Abs(left)
+	absoluteRight, rightErr := filepath.Abs(right)
+	if leftErr != nil || rightErr != nil {
+		return false
+	}
+	if absoluteLeft == absoluteRight {
+		return true
+	}
+	resolvedLeft, leftErr := filepath.EvalSymlinks(absoluteLeft)
+	resolvedRight, rightErr := filepath.EvalSymlinks(absoluteRight)
+	return leftErr == nil && rightErr == nil && resolvedLeft == resolvedRight
+}
+
+// reportWorkspaceAdded shows the quiet success feedback: a host toast when the
+// notifier exists, else the header's status badge.
+func reportWorkspaceAdded(state *paneState, runtime contracts.UIRuntime, text string) {
+	if state.notifier != nil {
+		state.notifier.Notify(contracts.NotifySuccess, text)
+		state.addWorkspaceStatus = ""
+	} else {
+		state.addWorkspaceStatus = text
+	}
 	runtime.Invalidate()
 }
 
-// buildAddWorkspaceDialog renders the add-workspace native modal.
-func buildAddWorkspaceDialog(c *ui.Context, t *design.Tokens, workspace contracts.WorkspaceService,
-	runtime contracts.UIRuntime, state *paneState) {
-	// The Modal must be rendered every frame (showing only while the open flag
-	// is true): removing it from the tree on close leaves its overlay behind,
-	// which then swallows pointer events when the dialog is opened again.
-	if workspace == nil {
-		return
+// reportWorkspaceActionError makes a failed add visible: an error toast when
+// the host has a notifier, else the header's persistent inline error row.
+func reportWorkspaceActionError(state *paneState, runtime contracts.UIRuntime, text string) {
+	state.addWorkspaceStatus = ""
+	if state.notifier != nil {
+		state.notifier.Notify(contracts.NotifyError, text)
+		state.addWorkspaceErr = ""
+	} else {
+		state.addWorkspaceErr = text
 	}
-	ui.Modal(c, &state.addWorkspaceOpen, func() {
-		submit := func() { submitAddWorkspace(state, workspace, runtime) }
-		design.Apply(ui.Column(c).Width(design.DialogWidthS).Gap(design.Space2), func(el ui.Element) ui.Element {
-			return el.PaddingX(design.Space5).PaddingY(design.Space2)
-		}).Children(func() {
-			design.Apply(ui.Text(c, state.T("添加工作区", "Add workspace")), t.Font(design.TypeL)).
-				FontWeight(600).TextColor(t.LabelPrimary)
-			design.Apply(ui.Text(c, state.T("选择一个目录作为工作区；名称留空时使用目录名。",
-				"Choose a folder as a workspace; the folder name is used when the name is empty.")),
-				t.TextMuted(design.TypeXS)).MaxLines(2)
-			design.Apply(ui.Text(c, state.T("名称", "Name")), t.TextMuted(design.TypeXS))
-			// Enter submits from either field, as in a desktop form: the
-			// input keeps the keyboard, so the footer's default action alone
-			// would not fire while typing.
-			ui.TextInput(c, &state.addWorkspaceName).
-				Label(state.T("名称 输入", "Name input")).FillWidth().
-				OnTextKey(uikit.EnterTo(submit))
-			design.Apply(ui.Text(c, state.T("目录", "Directory")), t.TextMuted(design.TypeXS))
-			ui.Row(c).FillWidth().Gap(design.Space2).AlignItems(ui.Center).Children(func() {
-				ui.TextInput(c, &state.addWorkspaceDir).
-					Label(state.T("目录 输入", "Directory input")).FillWidth().
-					OnTextKey(uikit.EnterTo(submit))
-				if ui.Button(c, state.T("选择目录…", "Choose folder…")).Clicked() {
-					dir, err := DirectoryPicker(state.T("选择工作区目录", "Choose workspace folder"))
-					if err != nil {
-						state.addWorkspaceErr = state.T("无法打开目录选择器：", "Could not open the folder picker: ") + err.Error()
-					} else if strings.TrimSpace(dir) != "" {
-						state.addWorkspaceDir = dir
-						state.addWorkspaceErr = ""
-					}
-					runtime.Invalidate()
-				}
-			})
-			if state.addWorkspaceErr != "" {
-				th := t.Theme()
-				ui.Row(c).FillWidth().Gap(design.Space2).AlignItems(ui.Start).Children(func() {
-					ui.Icon(c, icons.AlertTriangle()).Size(th.Space(3), th.Space(3)).TextColor(t.Danger)
-					design.Apply(ui.Text(c, state.addWorkspaceErr), t.Font(design.TypeXS)).TextColor(t.DangerText)
-				})
-			}
-			// The product's one dialog action bar: the cancel on the left, the
-			// primary Add on the right, focused so Enter presses it.
-			uikit.DialogFooter(c, []uikit.DialogAction{
-				{Label: state.T("取消", "Cancel"), OnClick: func() {
-					state.addWorkspaceOpen = false
-					state.addWorkspaceErr = ""
-					runtime.Invalidate()
-				}},
-				{Label: state.T("添加", "Add"), Primary: true, Default: true, OnClick: submit},
-			})
-		})
-	})
-	buildWorkspaceDeleteDialog(c, t, workspace, runtime, state)
+	runtime.Invalidate()
 }
 
 // buildWorkspaceDeleteDialog confirms the destructive row-menu action that
 // forgets a workspace: the folder stays on disk, only the registration goes.
-func buildWorkspaceDeleteDialog(c *ui.Context, t *design.Tokens,
-	workspace contracts.WorkspaceService, runtime contracts.UIRuntime, state *paneState) {
+// It is built on the window-level overlay slot every frame (the add dialog no
+// longer exists), so the alert cannot get stuck or disappear.
+func buildWorkspaceDeleteDialog(c *ui.Context, workspace contracts.WorkspaceService,
+	runtime contracts.UIRuntime, state *paneState) {
+	if workspace == nil {
+		return
+	}
 	name := firstNonEmpty(state.workspaceDeleteName, state.T("未命名工作区", "Untitled workspace"))
 	message := fmt.Sprintf(state.T("从列表中移除工作区“%s”？文件夹不会被删除。",
 		"Remove the workspace “%s” from the list? Its folder is not deleted."), name)

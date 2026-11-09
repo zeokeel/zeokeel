@@ -103,8 +103,9 @@ const (
 	// levels are shown (the default).
 	SettingNotificationHiddenLevels = "ui.notifications.hidden"
 	// SettingSendWhileRunning allows queueing prompts while a turn is running;
-	// queued prompts are sent when the run finishes (default false = Send is
-	// disabled while running).
+	// queued prompts are sent when the run finishes. Missing/empty values
+	// default to true (the composer stays usable during a run); "false"
+	// disables queueing and disables Enter-to-send until the turn ends.
 	SettingSendWhileRunning = "ui.sendWhileRunning"
 	// SettingGoalAutoContinue makes the session automatically send a
 	// continuation prompt after a run finishes while a goal is active (bounded
@@ -119,9 +120,6 @@ const (
 	// SettingThemeMode is the appearance source: "light", "dark" or "system"
 	// (the legacy ui.theme.dark boolean is still written for older builds).
 	SettingThemeMode = "ui.theme.mode"
-	// Sidebar view options: session sort and grouping.
-	SettingSidebarSort  = "sidebar.sort"  // "recent" (default) or "name"
-	SettingSidebarGroup = "sidebar.group" // "workspace" (default) or "flat"
 	// SettingGlobalHotkey is a system-wide accelerator (e.g.
 	// "CmdOrCtrl+Shift+Space") that shows and focuses the window; empty disables
 	// it (desktop only).

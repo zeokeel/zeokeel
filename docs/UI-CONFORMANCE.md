@@ -37,12 +37,14 @@
 ## 1.1 官方组件采用与保留自绘（定期复核）
 
 - 集合一律用 `ui.List`（transcript、轨迹、记忆、自动化、右栏各 pane、侧栏会话/搜索、
-  设置归档/技能、插件 MCP/模块/参数/工具、Home 最近、palette）；单文本面/页面容器用
-  `ui.Scroll`。
+  设置归档/技能/记忆/模型目录/MCP/LSP/预设/诊断、右栏产物历史、composer 排队弹层、
+  插件 MCP/模块/参数/工具、Home 最近、palette）；单文本面/页面容器用 `ui.Scroll`。
+  （2026-11-09 第三轮审计后补齐，证据：`.cache/ui-audit/report.md`、`.cache/migrate-*/report.md`。）
 - 控件优先官方：`Sidebar`、`TabsBase`、`Split`、`Toolbar`、`SearchField`、`TokenField`、
-  `NumberInput`、`Select`、`Segmented`、`Switch`、`Collapsible`、`Modal`/`AlertDialog`/
-  `DialogFooter`、`PopoverMenuButton`/`ContextMenu`、`Icon`、`Markdown`、`editor.View`/
-  `editor.DiffView`、`ToastBase`/`ToastViewportBase`。
+  `NumberInput`、`Select`、`Segmented`、`Switch`、`Collapsible`/`CollapsibleBase`、`Spinner`、
+  `Breadcrumbs`、`Toggle`/`ToggleGroup`、`Modal`/`AlertDialog`/`DialogFooter`、
+  `PopoverMenuButton`/`ContextMenu`、`Icon`、`Markdown`、`editor.View`/`editor.DiffView`、
+  `ToastBase`/`ToastViewportBase`。忙碌态用 `Spinner`（有真实进度才用 `Progress`）。
 - 保留自绘清单与理由见 [UI-COMPONENT-MIGRATION.md](UI-COMPONENT-MIGRATION.md) §3：
   仅限无官方对应（无边框图标按钮、富行建议菜单、composer 动作行布局、palette 按钮行、
   hover 动作行、回到最新浮层、测试 seam）或产品语义不适用（Rating/Meter 等）。

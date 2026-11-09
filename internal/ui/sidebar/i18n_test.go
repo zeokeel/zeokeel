@@ -150,9 +150,10 @@ func TestSidebarEnglishWorkspaceBadgesAndEmptyStates(t *testing.T) {
 	tester.Frame()
 	// The archived session (Beta) is owned by the settings archive page now: it
 	// never renders in the sidebar, even with the legacy view setting on.
-	h.assertTexts(tester, "Workspace", "Ungrouped", "Alpha", "Gamma", "Pinned")
+	h.assertTexts(tester, "Workspace", "Ungrouped", "Alpha", "Gamma", "Pinned",
+		"New chat in “ZeoKeel”")
 	h.assertNoTexts(tester, "Beta", "Archived", "Running", "Show archived", "Hide archived",
-		"工作区", "未分组", "置顶", "已归档", "运行中")
+		"工作区", "未分组", "置顶", "已归档", "运行中", "在“ZeoKeel”中新建会话")
 
 	// Empty state for a fresh sidebar.
 	empty := newLocaleHarness(t, &i18nChat{fakeChat: &fakeChat{}}, sidebar.Config{}, "en", nil, nil)
@@ -176,4 +177,21 @@ func TestSidebarConfigLabelOverridesSurviveEnglish(t *testing.T) {
 	tester := h.tester()
 	tester.Frame()
 	h.assertTexts(tester, "Start here", "Preferences", "Conversations")
+}
+
+// TestSidebarEnglishUntitledSearch covers the localized blank-title filter: in
+// English a blank title reads "Untitled session", so searching "Untitled" finds
+// it the way "未命名" does in Chinese.
+func TestSidebarEnglishUntitledSearch(t *testing.T) {
+	h := newLocaleHarness(t, &i18nChat{fakeChat: &fakeChat{
+		sessions: []contracts.ChatSessionInfo{{ID: "s1", Title: ""}},
+	}}, sidebar.Config{}, "en", nil, nil)
+	tester := h.tester()
+	tester.Frame()
+	h.assertTexts(tester, "Untitled session")
+
+	clickLabel(t, tester, "Search chats and messages")
+	tester.Type("Untitled")
+	tester.Frame()
+	h.assertTexts(tester, "Untitled session")
 }

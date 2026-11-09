@@ -819,7 +819,7 @@ func (r *Root) settingsTitleRow(c *ui.Context, t *design.Tokens, open *bool, dir
 		design.Apply(ui.Text(c, r.locale.T("settings.title")), t.Font(design.TypeXS)).
 			TextColor(t.LabelTertiary)
 		if dirty {
-			design.Apply(ui.Text(c, r.tr("未保存", "Unsaved")), t.Font(design.TypeXXXS)).
+			design.Apply(ui.Badge(c, r.tr("未保存", "Unsaved")), t.Badge()).
 				TextColor(t.WarningText)
 		}
 		ui.Spacer(c).Grow(1)

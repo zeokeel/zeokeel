@@ -24,6 +24,7 @@ import (
 	"github.com/zeokeel/zeokeel-kernel/module"
 
 	"github.com/zeokeel/zeokeel/internal/contracts"
+	"github.com/zeokeel/zeokeel/internal/lib/textenc"
 )
 
 const (
@@ -254,7 +255,7 @@ func (s *service) Run(ctx context.Context, command string) (contracts.TerminalOu
 	process := exec.CommandContext(runCtx, shell, "-c", command)
 	process.Dir = directory
 	outputBytes, runErr := process.CombinedOutput()
-	output := truncateUTF8(string(outputBytes), maxOutput)
+	output := decodeCombinedOutput(outputBytes, maxOutput)
 
 	exitCode := 0
 	if runErr != nil {
@@ -282,6 +283,15 @@ func (s *service) Run(ctx context.Context, command string) (contracts.TerminalOu
 		return contracts.TerminalOutput{Output: output, ExitCode: exitCode}, err
 	}
 	return contracts.TerminalOutput{Output: output, ExitCode: 0}, nil
+}
+
+// decodeCombinedOutput turns one command's combined stdout+stderr bytes into
+// bounded, well-formed UTF-8 text. Windows console programs emit console-code-
+// page bytes (GBK/cp936) and PowerShell may emit UTF-16LE, so the raw bytes are
+// repaired before the byte budget is applied: truncating first could split a
+// multi-byte character and leave mojibake in the Terminal pane.
+func decodeCombinedOutput(outputBytes []byte, max int) string {
+	return truncateUTF8(textenc.RepairBytes(outputBytes), max)
 }
 
 // truncateUTF8 bounds text to max bytes without splitting a UTF-8 rune.

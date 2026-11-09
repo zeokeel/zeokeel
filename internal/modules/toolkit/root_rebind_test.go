@@ -3,7 +3,9 @@ package toolkit
 import (
 	"context"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"runtime"
 	"sync"
 	"testing"
 
@@ -99,12 +101,18 @@ func TestToolRootFollowsWorkspace(t *testing.T) {
 		t.Fatalf("require toolkit: %v", err)
 	}
 
-	// The Windows shell stack must be registered (bash alone is unusable there).
+	// The shell surface is platform-correct: bash only where Rig's /bin/sh bash
+	// works, pwsh only where a PowerShell binary exists (always on Windows).
 	names := make(map[string]bool)
 	for _, spec := range tools.Specs() {
 		names[spec.Name] = true
 	}
-	for _, want := range []string{"pwsh", "bash", "write_file", "working_directory"} {
+	wantBash, wantPwsh := shellTools(runtime.GOOS, exec.LookPath)
+	if names["bash"] != wantBash || names["pwsh"] != wantPwsh {
+		t.Fatalf("shell tools = bash:%t pwsh:%t, want bash:%t pwsh:%t (have %v)",
+			names["bash"], names["pwsh"], wantBash, wantPwsh, names)
+	}
+	for _, want := range []string{"read_file", "write_file", "working_directory"} {
 		if !names[want] {
 			t.Fatalf("registry lacks tool %q (have %v)", want, names)
 		}

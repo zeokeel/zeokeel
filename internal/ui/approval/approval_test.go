@@ -259,9 +259,15 @@ func TestPendingShowsOldestRequest(t *testing.T) {
 	tester.Frame()
 
 	// The summary is promoted (a command for shell tools) and the raw
-	// arguments are details, collapsed.
-	h.assertTexts(tester, "需要审批", "工具", "bash", "命令", "运行命令 ls", "参数",
-		"显示原始参数", "允许", "本次运行内始终允许", "拒绝")
+	// arguments are details, collapsed. The tool is named in friendly copy; its
+	// raw ID only lives in the badge tooltip.
+	h.assertTexts(tester, "需要审批", "工具", "运行命令", "命令", "运行命令 ls", "参数",
+		"显示原始参数", "允许", "本会话内始终允许", "拒绝")
+	h.assertNoTexts(tester, "bash")
+	// The middle choice says where it applies and how to take it back.
+	h.assertTexts(tester, "在本会话内不再询问该工具", "会话设置菜单清除")
+	// The second queued request is counted quietly instead of replaced.
+	h.assertTexts(tester, "还有 1 个待审批请求")
 	// Two labels only: the section label and the disclosure — never a third
 	// 「参数详情」 layer (N3).
 	h.assertNoTexts(tester, "参数详情", `{"command":"ls"}`)
@@ -296,7 +302,7 @@ func TestDecisionButtons(t *testing.T) {
 		decision contracts.ApprovalDecision
 	}{
 		{label: "允许", decision: contracts.ApprovalAllow},
-		{label: "本次运行内始终允许", decision: contracts.ApprovalAllowAlways},
+		{label: "本会话内始终允许", decision: contracts.ApprovalAllowAlways},
 		{label: "拒绝", decision: contracts.ApprovalDeny},
 	}
 	for _, test := range cases {
@@ -339,8 +345,8 @@ func TestResolvingOldestShowsNext(t *testing.T) {
 	if got := h.approvals.resolved(); len(got) != 1 || got[0] != contracts.ApprovalAllow {
 		t.Fatalf("decisions after first = %v", got)
 	}
-	h.assertTexts(tester, "需要审批", "第二个", "write_file")
-	h.assertNoTexts(tester, "第一个")
+	h.assertTexts(tester, "需要审批", "第二个", "写入文件")
+	h.assertNoTexts(tester, "第一个", "还有 1 个待审批请求")
 }
 
 // TestEscapeDenies covers the dismissed-by-Escape path: the native Modal
@@ -439,7 +445,7 @@ func TestConfigLabels(t *testing.T) {
 	tester := h.tester()
 	h.approvals.add(pendingRequest("c1", "bash", "run", `{"command":"ls"}`))
 	tester.Frame()
-	h.assertTexts(tester, "Approve tool call", "Tool", "Arguments", "bash",
+	h.assertTexts(tester, "Approve tool call", "Tool", "Arguments", "运行命令",
 		"Allow once", "Always allow", "Reject", "Esc = 拒绝本次调用")
 	h.assertNoTexts(tester, "需要审批")
 	h.assertNoExactTexts(tester, "允许")
@@ -493,10 +499,12 @@ func TestModuleManifest(t *testing.T) {
 	}
 }
 
-// TestFooterOrderAndSafeDefault covers H4: the dangerous deny is the leftmost
-// action, the run-scoped allow is secondary in the middle, the accent allow is
-// rightmost — and the dialog's safe default focus is Deny, so Enter denies
-// instead of allowing a high-risk tool with a stray key.
+// TestFooterOrderAndSafeDefault covers the H4 safe-decision contract (revised
+// after a real session review): the dangerous deny is the leftmost action, the
+// session-scoped allow is secondary in the middle, the accent allow is
+// rightmost — and the dialog has NO default action and does not autofocus a
+// button, so a stray Enter (the user often presses it right after sending a
+// prompt) decides nothing: neither an accidental allow nor an accidental deny.
 func TestFooterOrderAndSafeDefault(t *testing.T) {
 	h := newHarness(t, approval.Config{})
 	tester := h.tester()
@@ -507,9 +515,9 @@ func TestFooterOrderAndSafeDefault(t *testing.T) {
 	if !ok {
 		t.Fatalf("deny button missing; texts = %v", tester.Texts())
 	}
-	always, ok := tester.Find("本次运行内始终允许")
+	always, ok := tester.Find("本会话内始终允许")
 	if !ok {
-		t.Fatalf("run-scoped allow button missing; texts = %v", tester.Texts())
+		t.Fatalf("session-scoped allow button missing; texts = %v", tester.Texts())
 	}
 	allow, ok := tester.Find("允许")
 	if !ok {
@@ -519,20 +527,25 @@ func TestFooterOrderAndSafeDefault(t *testing.T) {
 		t.Fatalf("footer order x = deny %.1f, always %.1f, allow %.1f; want deny < always < allow",
 			deny.X, always.X, allow.X)
 	}
-	if !tester.Focused("拒绝") {
-		t.Fatalf("safe default focus is not on Deny; texts = %v", tester.Texts())
+	if tester.Focused("拒绝") || tester.Focused("允许") || tester.Focused("本会话内始终允许") {
+		t.Fatalf("the approval dialog must not autofocus an action; texts = %v", tester.Texts())
 	}
 
-	// Enter presses the focused button (Deny), never a dialog-wide Allow.
+	// A stray Enter must not resolve the request in either direction.
 	tester.Key(0, ui.KeyEnter)
 	tester.Frame()
-	if got := h.approvals.resolved(); len(got) != 1 || got[0] != contracts.ApprovalDeny {
-		t.Fatalf("decisions after Enter = %v, want [deny]", got)
+	if got := h.approvals.resolved(); len(got) != 0 {
+		t.Fatalf("decisions after a stray Enter = %v, want none", got)
 	}
-	tester.Frame()
-	h.assertNoTexts(tester, "需要审批")
+	h.assertTexts(tester, "需要审批")
 
-	// Allowing is explicit: a click on Allow records allow.
+	// Every decision is explicit: a click on Deny records deny.
+	h.click(tester, "拒绝")
+	if got := h.approvals.resolved(); len(got) != 1 || got[0] != contracts.ApprovalDeny {
+		t.Fatalf("decisions after clicking Deny = %v, want [deny]", got)
+	}
+
+	// Allowing is explicit too: a click on Allow records allow.
 	h2 := newHarness(t, approval.Config{})
 	tester2 := h2.tester()
 	h2.approvals.add(pendingRequest("r2", "bash", "运行命令", `{"command":"ls"}`))

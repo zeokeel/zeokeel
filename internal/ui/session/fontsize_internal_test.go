@@ -151,3 +151,57 @@ func TestFormatTimestampFollowsLocale(t *testing.T) {
 		t.Fatalf("unset timestamp = %q, want the em dash", got)
 	}
 }
+
+// TestReasoningMarkdownOptions is the thinking panel's theme: it is smaller than
+// the reply body (one DIP, never below 11), muted, keeps strong text at the
+// primary color, and its headings never outrank the reply's. It follows the
+// chat font-size setting and is cached separately from the prose options.
+func TestReasoningMarkdownOptions(t *testing.T) {
+	for value, want := range map[string]float32{
+		"":         13,
+		"standard": 13,
+		"small":    11.5,
+		"large":    15,
+	} {
+		settings := &fontSizeSettings{values: map[string]string{}}
+		if value != "" {
+			settings.values[contracts.SettingChatFontSize] = value
+		}
+		tokens := design.Light()
+		st := &state{settings: settings}
+		options := st.reasoningMarkdownOptions(tokens)
+		theme := options.Theme
+		if theme.FontSize != want {
+			t.Fatalf("reasoning font size for %q = %v, want %v", value, theme.FontSize, want)
+		}
+		if theme.Text != tokens.LabelSecondary || theme.Muted != tokens.LabelTertiary {
+			t.Fatalf("%q: reasoning theme is not muted: text %v muted %v", value, theme.Text, theme.Muted)
+		}
+		if theme.Strong != tokens.LabelPrimary {
+			t.Fatalf("%q: reasoning strong text color = %v, want the primary label", value, theme.Strong)
+		}
+		// The panel's H1 must stay below the reply's 17–18 DIP H1.
+		h1 := theme.Headings[0].Size * theme.FontSize
+		proseH1 := st.markdownOptions(tokens).Theme.Headings[0].Size * st.messageFontSize()
+		if h1 >= proseH1 || h1 > 16.5 {
+			t.Fatalf("%q: reasoning H1 = %.2f DIP, want below the reply's %.2f", value, h1, proseH1)
+		}
+		// The prose options keep their own cache entry.
+		if prose := st.markdownOptions(tokens); prose.Theme.FontSize != st.messageFontSize() {
+			t.Fatalf("%q: the reasoning theme overwrote the prose options: %v", value, prose.Theme.FontSize)
+		}
+	}
+}
+
+func TestReasoningLineCount(t *testing.T) {
+	for text, want := range map[string]int{
+		"":                          0,
+		"一行":                        1,
+		"第一行\n\n第二行\n":              2,
+		"  \n line \n \n second \n": 2,
+	} {
+		if got := reasoningLineCount(text); got != want {
+			t.Fatalf("reasoningLineCount(%q) = %d, want %d", text, got, want)
+		}
+	}
+}

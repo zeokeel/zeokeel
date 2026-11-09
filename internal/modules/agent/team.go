@@ -76,6 +76,11 @@ type dynamicTeamRunner struct {
 // Start implements rig.SubagentRunner.
 func (r *dynamicTeamRunner) Start(ctx context.Context, spec rig.SubagentSpec) (rig.Subagent, error) {
 	cfg, active := r.service.subagentParent()
+	childTools := r.service.registry.Tools()
+	// Team members get the same complete prompt as a normal run, with guidance
+	// for exactly the tool surface the runner hands them (orchestration tools
+	// are excluded).
+	cfg.SystemPrompt = r.service.buildRunSystemPrompt(ctx, active, cfg, toolNameSet(childTools, teamExcludedTools()...))
 	provider, err := r.service.newProvider(cfg, r.service.thinkingParamsForSession(active, cfg.Model))
 	if err != nil {
 		return nil, fmt.Errorf("agent: team member %q: create provider: %w", strings.TrimSpace(spec.Name), err)
@@ -85,7 +90,7 @@ func (r *dynamicTeamRunner) Start(ctx context.Context, spec rig.SubagentSpec) (r
 		Model:         cfg.Model,
 		SystemPrompt:  cfg.SystemPrompt,
 		MaxIterations: cfg.MaxIterations,
-		Tools:         r.service.registry.Tools(),
+		Tools:         childTools,
 		Gate:          r.service.gate(active),
 		History:       r.service.historyView(),
 		Logger:        r.service.logger,

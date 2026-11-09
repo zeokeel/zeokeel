@@ -300,7 +300,8 @@ func memoryRow(c *ui.Context, t *design.Tokens, runtime contracts.UIRuntime,
 					Tooltip(st.tr("编辑这条记忆", "Edit this memory")).
 					Size(th.Space(6), th.Space(6)).PaddingX(0).Radius(design.RadiusSM)
 				edit.Children(func() {
-					design.Apply(ui.Text(c, "✎"), t.Font(design.TypeXS)).TextColor(t.LabelTertiary)
+					ui.Icon(c, icons.Pencil()).Size(design.Space3, design.Space3).
+						TextColor(t.LabelTertiary)
 				})
 				if edit.Clicked() {
 					st.memoryEditOpen = true

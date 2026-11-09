@@ -216,6 +216,8 @@ func TestUpdateDownloadingState(t *testing.T) {
 	waitForDownloadStart(t, update)
 	tester.Frame()
 	h.assertTexts(tester, "下载中…")
+	// The busy state is the official spinner, and the action is disabled.
+	requireBusySpinner(t, tester, "下载中…")
 	if err := tester.Click("下载中…"); err != nil {
 		t.Fatalf("click downloading button: %v; texts = %v", err, tester.Texts())
 	}

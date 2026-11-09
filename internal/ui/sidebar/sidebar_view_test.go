@@ -1,6 +1,10 @@
 package sidebar_test
 
-// Tests for the sidebar's sort/group view options.
+// Tests for the sidebar's one fixed view: there is no view menu (the 视图
+// popover and its sort/group settings are gone), workspace grouping is always
+// on when the workspace backend exists, sessions always sort by recent
+// activity with pinned-first inside a group, and the only fallback is the flat
+// list for a host without a workspace backend.
 
 import (
 	"strings"
@@ -10,14 +14,6 @@ import (
 	"github.com/zeokeel/zeokeel/internal/contracts"
 	"github.com/zeokeel/zeokeel/internal/ui/sidebar"
 )
-
-func viewChat(sessions ...contracts.ChatSessionInfo) *fakeChat {
-	return &fakeChat{sessions: sessions}
-}
-
-func sessionAt(id, title string, updated time.Time) contracts.ChatSessionInfo {
-	return contracts.ChatSessionInfo{ID: id, Title: title, UpdatedAt: updated}
-}
 
 // orderOf returns the positions of the wanted labels in the frame texts.
 func orderOf(testerTexts []string, names ...string) []int {
@@ -35,109 +31,88 @@ func orderOf(testerTexts []string, names ...string) []int {
 	return indexes
 }
 
-func TestSidebarDefaultSortRecent(t *testing.T) {
-	base := time.Unix(1700000000, 0)
-	chat := viewChat(
-		sessionAt("old", "Old", base.Add(-2*time.Hour)),
-		sessionAt("new", "Newest", base),
-		sessionAt("mid", "Middle", base.Add(-time.Hour)),
-	)
-	h := newHarnessWithSettings(t, chat, newSidebarSettings(nil), sidebar.Config{})
-	tester := h.tester()
-	order := orderOf(tester.Texts(), "Newest", "Middle", "Old")
-	if order[0] < 0 || order[0] > order[1] || order[1] > order[2] {
-		t.Fatalf("default order = %v; texts = %v", order, tester.Texts())
-	}
+func sessionAt(id, title string, updated time.Time) contracts.ChatSessionInfo {
+	return contracts.ChatSessionInfo{ID: id, Title: title, UpdatedAt: updated}
 }
 
-func TestSidebarNameSortKeepsPinnedFirst(t *testing.T) {
-	settings := newSidebarSettings(map[string]string{contracts.SettingSidebarSort: "name"})
-	chat := viewChat(
-		contracts.ChatSessionInfo{ID: "z", Title: "Zulu", Pinned: true},
-		contracts.ChatSessionInfo{ID: "b", Title: "beta"},
-		contracts.ChatSessionInfo{ID: "a", Title: "Alpha"},
-	)
-	h := newHarnessWithSettings(t, chat, settings, sidebar.Config{})
-	tester := h.tester()
-	order := orderOf(tester.Texts(), "Zulu", "Alpha", "beta")
-	if order[0] < 0 || order[1] < 0 || order[2] < 0 || order[0] > order[1] || order[1] > order[2] {
-		t.Fatalf("name order = %v; texts = %v", order, tester.Texts())
-	}
-}
-
-func TestSidebarFlatGroupHidesWorkspaceTitles(t *testing.T) {
-	workspace := newFakeWorkspace(treeWorkspaces()...).
-		withCurrent(contracts.Workspace{ID: "w1", Name: "项目一", Root: "/work/one"})
-	settings := newSidebarSettings(map[string]string{
-		contracts.SettingSidebarGroup: "flat",
-		contracts.SettingSidebarSort:  "name",
-	})
-	chat := viewChat(
-		contracts.ChatSessionInfo{ID: "s2", Title: "Beta", WorkspaceID: "w1"},
-		contracts.ChatSessionInfo{ID: "s1", Title: "Alpha", WorkspaceID: "w1"},
-		contracts.ChatSessionInfo{ID: "s3", Title: "Gamma", WorkspaceID: ""},
-	)
-	h := newHarnessWithSettingsAndWorkspace(t, chat, settings, workspace, sidebar.Config{})
-	tester := h.tester()
-	h.assertNoTexts(tester, "项目一", "项目二", "未分组")
-	order := orderOf(tester.Texts(), "Alpha", "Beta", "Gamma")
-	if order[0] < 0 || order[1] < 0 || order[2] < 0 || order[0] > order[1] || order[1] > order[2] {
-		t.Fatalf("flat order = %v; texts = %v", order, tester.Texts())
-	}
-}
-
-func TestSidebarViewMenuWritesSettings(t *testing.T) {
+// TestSidebarHasNoViewMenu pins the removal of the 视图 popover and its sort
+// and grouping choices in both languages.
+func TestSidebarHasNoViewMenu(t *testing.T) {
 	settings := newSidebarSettings(nil)
-	h := newHarnessWithSettings(t, viewChat(sessionAt("s1", "A", time.Now())), settings, sidebar.Config{})
-	tester := h.tester()
-	h.assertTexts(tester, "视图")
-	h.click(tester, "视图")
-	h.assertTexts(tester, "排序", "最近活动", "名称", "分组", "按工作区", "平铺")
-	h.click(tester, "名称")
-	if got := settings.get(contracts.SettingSidebarSort); got != "name" {
-		t.Fatalf("sidebar.sort = %q, want name", got)
-	}
-	h.click(tester, "视图")
-	h.click(tester, "平铺")
-	if got := settings.get(contracts.SettingSidebarGroup); got != "flat" {
-		t.Fatalf("sidebar.group = %q, want flat", got)
-	}
-	// Switching back writes the default values too.
-	h.click(tester, "视图")
-	h.click(tester, "最近活动")
-	h.click(tester, "视图")
-	h.click(tester, "按工作区")
-	if got := settings.get(contracts.SettingSidebarSort); got != "recent" {
-		t.Fatalf("sidebar.sort after back = %q", got)
-	}
-	if got := settings.get(contracts.SettingSidebarGroup); got != "workspace" {
-		t.Fatalf("sidebar.group after back = %q", got)
-	}
-}
-
-func TestSidebarViewBadValuesFallBack(t *testing.T) {
 	workspace := newFakeWorkspace(treeWorkspaces()...)
-	settings := newSidebarSettings(map[string]string{
-		contracts.SettingSidebarSort:  "bogus",
-		contracts.SettingSidebarGroup: "bogus",
-	})
-	chat := viewChat(sessionAt("s1", "Alpha", time.Unix(1700000000, 0)))
-	h := newHarnessWithSettingsAndWorkspace(t, chat, settings, workspace, sidebar.Config{})
+	h := newHarnessWithSettingsAndWorkspace(t, treeChat(), settings, workspace, sidebar.Config{})
 	tester := h.tester()
-	h.assertTexts(tester, "项目一", "项目二", "视图")
+
+	// "分组" alone would match the "未分组" group name, so the retired menu's
+	// grouping choices are pinned by their own labels.
+	h.assertNoTexts(tester, "视图", "排序", "最近活动", "名称", "按工作区", "平铺")
+
+	h.uiRoot.Locale().SetLanguage("en")
+	tester.Frame()
+	h.assertNoTexts(tester, "View", "Sort", "Recent activity", "Name", "Group", "By workspace", "Flat")
+	// The fixed product labels survive the language switch.
+	h.assertTexts(tester, "Workspace", "Add workspace")
 }
 
-func TestSidebarViewEnglish(t *testing.T) {
-	settings := newSidebarSettings(nil)
-	h := newHarnessWithSettings(t, viewChat(sessionAt("s1", "A", time.Now())), settings, sidebar.Config{})
-	h.uiRoot.Locale().SetLanguage("en")
+// TestSidebarAlwaysGroupsByWorkspace ignores stale view settings: even a store
+// that still holds retired sort/group keys gets the workspace tree sorted by
+// recent activity, pinned-first inside each group.
+func TestSidebarAlwaysGroupsByWorkspace(t *testing.T) {
+	base := time.Unix(1_700_000_000, 0)
+	settings := newSidebarSettings(map[string]string{
+		"sidebar.sort":  "name",
+		"sidebar.group": "flat",
+	})
+	workspace := newFakeWorkspace(treeWorkspaces()...)
+	chat := &fakeChat{sessions: []contracts.ChatSessionInfo{
+		{ID: "s-old", Title: "Alpha 旧", WorkspaceID: "w1", UpdatedAt: base.Add(-3 * time.Hour)},
+		{ID: "s-pin", Title: "Zulu 置顶", WorkspaceID: "w1", Pinned: true, UpdatedAt: base.Add(-4 * time.Hour)},
+		{ID: "s-new", Title: "Beta 新", WorkspaceID: "w2", UpdatedAt: base},
+	}}
+	h := newHarnessWithSettingsAndWorkspace(t, chat, settings, workspace, sidebar.Config{})
 	tester := h.tester()
-	tester.Frame()
-	h.assertTexts(tester, "View")
-	h.click(tester, "View")
-	h.assertTexts(tester, "Sort", "Recent activity", "Name", "Group", "By workspace", "Flat")
-	h.click(tester, "Name")
-	if got := settings.get(contracts.SettingSidebarSort); got != "name" {
-		t.Fatalf("English sidebar.sort = %q", got)
+
+	// Grouping wins over the stale "flat" value.
+	h.assertTexts(tester, "项目一", "项目二")
+	texts := tester.Texts()
+	// Recent-activity group order: 项目二 (newest session) above 项目一.
+	two, one := textIndex(texts, "项目二"), textIndex(texts, "项目一")
+	if !(two >= 0 && one >= 0 && two < one) {
+		t.Fatalf("group order = 项目二:%d 项目一:%d; want recent activity first; texts = %v", two, one, texts)
+	}
+	// Name sorting does not apply: inside 项目一 the pinned Zulu row comes
+	// before the unpinned Alpha row even though Alpha sorts first by name.
+	pinned, alpha := textIndex(texts, "Zulu 置顶"), textIndex(texts, "Alpha 旧")
+	if !(pinned >= 0 && alpha >= 0 && pinned < alpha) {
+		t.Fatalf("pinned-first order lost: pinned=%d alpha=%d; texts = %v", pinned, alpha, texts)
+	}
+	// Reading frames never rewrites the retired settings rows.
+	if got := settings.get("sidebar.sort"); got != "name" {
+		t.Fatalf("a frame overwrote the stale sidebar.sort to %q", got)
+	}
+	if got := settings.get("sidebar.group"); got != "flat" {
+		t.Fatalf("a frame overwrote the stale sidebar.group to %q", got)
+	}
+}
+
+// TestSidebarFlatFallbackRecentAndPinned covers the only fallback: without a
+// workspace backend the rows are one flat list, still recent-first and
+// pinned-first, with no view menu to change that.
+func TestSidebarFlatFallbackRecentAndPinned(t *testing.T) {
+	base := time.Unix(1_700_000_000, 0)
+	chat := &fakeChat{sessions: []contracts.ChatSessionInfo{
+		sessionAt("s-old", "Old", base.Add(-2*time.Hour)),
+		{ID: "s-pin", Title: "Pinned old", Pinned: true, UpdatedAt: base.Add(-3 * time.Hour)},
+		sessionAt("s-new", "Newest", base),
+	}}
+	h := newHarness(t, chat, sidebar.Config{})
+	tester := h.tester()
+
+	h.assertTexts(tester, "会话", "Old", "Pinned old", "Newest")
+	h.assertNoTexts(tester, "视图", "排序", "分组", "工作区", "未分组")
+	order := orderOf(tester.Texts(), "Pinned old", "Newest", "Old")
+	if order[0] < 0 || order[0] > order[1] || order[1] > order[2] {
+		t.Fatalf("flat fallback order = %v; want pinned first then recent; texts = %v",
+			order, tester.Texts())
 	}
 }

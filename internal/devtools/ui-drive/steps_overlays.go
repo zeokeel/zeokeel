@@ -34,10 +34,10 @@ func (d *drive) runOverlaySteps() {
 				return
 			}
 			c.shot("overlay-approval")
-			c.require(c.has("本次运行内始终允许") || c.has("总是允许"),
-				"审批对话框缺少「本次运行内始终允许」动作")
+			c.require(c.has("本会话内始终允许"),
+				"审批对话框缺少「本会话内始终允许」动作")
 			allow, okAllow := d.find("允许")
-			always, okAlways := d.findAny("本次运行内始终允许", "总是允许")
+			always, okAlways := d.findAny("本会话内始终允许")
 			deny, okDeny := d.find("拒绝")
 			if !okAllow || !okDeny {
 				c.failf("审批对话框按钮缺失（允许=%v 拒绝=%v）", okAllow, okDeny)
@@ -49,16 +49,16 @@ func (d *drive) runOverlaySteps() {
 			if okAlways {
 				alwaysX = always.X
 			}
-			c.note("按钮 x：拒绝=%.0f 本次运行内始终允许=%.0f 允许=%.0f", deny.X, alwaysX, allow.X)
+			c.note("按钮 x：拒绝=%.0f 本会话内始终允许=%.0f 允许=%.0f", deny.X, alwaysX, allow.X)
 			if !(deny.X < allow.X) {
 				c.failf("审批按钮顺序反桌面惯例：拒绝 x=%.0f 在允许 x=%.0f 的右边", deny.X, allow.X)
 			}
 			if okAlways && allow.X < always.X {
-				c.failf("主操作「允许」不在最右：允许 x=%.0f，本次运行内始终允许 x=%.0f", allow.X, always.X)
+				c.failf("主操作「允许」不在最右：允许 x=%.0f，本会话内始终允许 x=%.0f", allow.X, always.X)
 			}
-			// The safe default is visible in the copy.
-			c.require(c.has("默认焦点") || c.has("Enter 执行当前聚焦的按钮") || c.has("Esc = 拒绝"),
-				"审批对话框没有可见的安全默认说明（拒绝/Enter 语义）")
+			// The no-default safe-decision rule is visible in the copy.
+			c.require(c.has("无默认操作") || c.has("Esc = 拒绝"),
+				"审批对话框没有可见的安全说明（Esc=拒绝 / 无默认操作）")
 			// The empty-arguments rendering: {} shows 「无参数」 and no empty box.
 			c.require(c.has("无参数"), "审批对话框对空参数 {} 没有显示「无参数」")
 			// Clean up: approve (through the dialog when possible) and let the
@@ -70,8 +70,8 @@ func (d *drive) runOverlaySteps() {
 			d.drain(2)
 		})
 
-	d.step("approval-safe-default", "session", "审批：安全默认（Enter 不放行）",
-		"审批对话框默认焦点在「拒绝」；Enter 不会放行工具调用（拒绝/无动作），点「允许」才放行", func(c *check) {
+	d.step("approval-safe-default", "session", "审批：无默认操作（Enter 不做任何决定）",
+		"审批对话框不自动聚焦任何操作；单独的 Enter 既不放行也不拒绝（仍等待），点「拒绝/允许」才产生决议", func(c *check) {
 			d.server.SetMode(scriptToolCallThenAnswer)
 			defer d.server.SetMode(scriptAnswer)
 			d.resetToSession()
@@ -99,14 +99,15 @@ func (d *drive) runOverlaySteps() {
 				return
 			}
 			d.drain(2)
-			// The safe default: keyboard focus starts on Deny, never Allow.
+			// No default action: nothing is auto-focused, so a stray Enter (the
+			// user often presses it right after sending) cannot decide.
 			focusedDeny := d.tester.Focused("拒绝")
 			focusedAllow := d.tester.Focused("允许")
 			c.note("焦点：拒绝=%v 允许=%v", focusedDeny, focusedAllow)
-			c.require(!focusedAllow, "审批对话框默认焦点落在「允许」上（不安全）")
-			c.require(focusedDeny, "审批对话框默认焦点不在「拒绝」上（安全默认缺失）")
-			c.require(c.has("Enter 执行当前聚焦的按钮") || c.has("Enter = 拒绝"),
-				"审批对话框缺少默认焦点语义说明")
+			c.require(!focusedAllow, "审批对话框自动聚焦了「允许」（不安全）")
+			c.require(!focusedDeny, "审批对话框自动聚焦了「拒绝」（误触 Enter 会误拒）")
+			c.require(c.has("无默认操作"),
+				"审批对话框缺少「无默认操作」语义说明")
 			// A shell-like tool's summary is shown as a 命令 block first, with
 			// the raw arguments collapsed behind 「显示原始参数」.
 			c.require(c.has("命令") || c.has("摘要"), "审批对话框没有把工具 Summary 作为命令/摘要块显示")

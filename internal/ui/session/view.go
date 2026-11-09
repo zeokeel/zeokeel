@@ -3,6 +3,7 @@ package session
 import (
 	"context"
 	"fmt"
+	"math"
 	"strconv"
 	"strings"
 	"time"
@@ -54,16 +55,26 @@ func buildScreen(
 	activeID := chat.ActiveSession()
 	// The composer draft and staged attachments belong to one conversation:
 	// save/restore them on the conversation switch before anything builds.
+	// Opening or switching a conversation asks for the keyboard once, so the
+	// user can start typing immediately.
+	switchedSession := st.draftSession != activeID
 	st.syncComposerDraft(activeID)
+	if switchedSession && activeID != "" && st.tab == tabChat {
+		st.focusComposer = true
+	}
 	chatSession, hasSession := chat.Session(activeID)
 	settled := observeRunSettled(chat, st)
 	if settled {
+		// The reply is done: hand the keyboard back to the composer (only on the
+		// conversation tab, never while some other input owns it).
+		if st.tab == tabChat {
+			st.focusComposer = true
+		}
 		runtime.Post(func() {
 			handleRunSettled(chat, st, runtime)
 			runtime.Invalidate()
 		})
 	}
-	syncQueuedSession(st, activeID)
 	// Entering the Memory tab re-reads the store once (the cached read model is
 	// what avoids render-time I/O in every other frame).
 	if st.tab != st.lastTab {
@@ -87,6 +98,7 @@ func buildScreen(
 		// state, sticky follow flag and laid-out gate are reset with it.
 		st.chatList = ui.ListState{}
 		st.chatFollowEnd = true
+		st.queueMenuOpen = false
 		st.chatListSeen = false
 		st.trajList = ui.ListState{}
 		st.memoryList = ui.ListState{}
@@ -95,7 +107,7 @@ func buildScreen(
 	// extra notification: retry the queue once the run has settled. When this
 	// frame already detected the settle, handleRunSettled owns the flush, so
 	// posting the fallback too would send two queued prompts in one frame.
-	if !settled && len(st.queuedPrompts) > 0 && !chatSession.Running && st.queueSessionID == activeID {
+	if !settled && len(st.queuedFor(activeID)) > 0 && !chatSession.Running && !st.queuePaused[activeID] {
 		runtime.Post(func() {
 			processQueuedPrompts(chat, st, activeID)
 			runtime.Invalidate()
@@ -815,7 +827,8 @@ func prominentTool(name string) bool {
 
 // buildAssistantToolRow draws one transcript tool call: a registered renderer
 // wins, decision tools keep the prominent card, and every other call uses the
-// shared compact row (a muted line instead of a panel).
+// shared compact disclosure row (a muted line instead of a panel) with the
+// friendly localized tool name; the protocol id stays in the tooltip.
 func buildAssistantToolRow(c *ui.Context, t *design.Tokens, runtime contracts.UIRuntime,
 	st *state, messageID string, tool contracts.ToolCall) {
 	call := contracts.ToolCall{ID: tool.ID, Name: tool.Name, Status: tool.Status, Summary: tool.Summary}
@@ -839,11 +852,12 @@ func buildAssistantToolRow(c *ui.Context, t *design.Tokens, runtime contracts.UI
 	row := uikit.ToolRowOptions{
 		Key:         key,
 		Icon:        uikit.ToolIcon(tool.Name),
-		Name:        tool.Name,
+		Name:        uikit.ToolDisplayName(st.locale, tool.Name),
+		RawName:     tool.Name,
 		Status:      statusLabel(tool.Status, st),
 		StatusColor: statusColor,
+		Running:     normalizeStatus(tool.Status) == "running",
 		Preview:     uikit.ToolPreview(summary, 96),
-		DetailLabel: st.tr("详情", "Details"),
 		Open:        open,
 		Toggle: func(next bool) {
 			toggled = true
@@ -869,33 +883,20 @@ func buildAssistantToolRow(c *ui.Context, t *design.Tokens, runtime contracts.UI
 }
 
 func buildAssistantMessage(c *ui.Context, t *design.Tokens, runtime contracts.UIRuntime, message contracts.ChatMessage, st *state) {
-	th := t.Theme()
 	outer := ui.Column(c.Key("session.message." + message.ID)).FillWidth().Gap(design.Space2)
 
 	outer.Children(func() {
-		if message.Reasoning != "" {
-			if message.Streaming {
-				preview := reasoningTail(message.Reasoning, 120)
-				ui.Row(c).FillWidth().Gap(design.Space2).AlignItems(ui.Start).Children(func() {
-					design.Apply(ui.Text(c, st.tr("思考中…", "Thinking…")), t.TextMuted(design.TypeXS))
-					design.Apply(ui.Text(c, preview), t.TextMuted(design.TypeXS)).MaxLines(2)
-				})
-			}
-			previous := st.thinkOpen[message.ID]
-			open := previous
-			ui.Collapsible(c.Key("session.reasoning."+message.ID), st.tr("思考", "Reasoning"), &open, func() {
-				design.Apply(ui.Text(c, message.Reasoning), t.TextMuted(design.TypeXS))
-			})
-			st.thinkOpen[message.ID] = open
-			if previous != open {
-				st.chatHoldPlace = true
-			}
-		}
+		// The thinking is one official disclosure per reply: open while the
+		// model thinks (its words stream in Markdown), a quiet folded row once
+		// the turn ends. The generating indicator below the reply is the
+		// official spinner, not a badge plus a decorative glyph.
+		buildReasoningDisclosure(c, t, st, message)
 		renderAssistantBody(c, t, runtime, st, message)
 		if message.Streaming {
-			ui.Row(c).Gap(design.Space2).AlignItems(ui.Center).Children(func() {
-				design.Apply(ui.Badge(c, st.tr("生成中", "Generating")), t.Badge()).TextColor(t.Accent)
-				ui.Icon(c, icons.Sparkles()).Size(th.Space(4), th.Space(4)).TextColor(t.Accent)
+			ui.Row(c).AlignItems(ui.Center).Gap(design.Space2).Children(func() {
+				ui.Spinner(c).Label(st.tr("生成中", "Generating"))
+				design.Apply(ui.Text(c, st.tr("生成中", "Generating")),
+					t.TextMuted(design.TypeXS))
 			})
 		}
 		if message.Error != "" {
@@ -907,6 +908,78 @@ func buildAssistantMessage(c *ui.Context, t *design.Tokens, runtime contracts.UI
 		buildMessageActionButtons(c, t, runtime, message, st)
 		buildUsageFooter(c, t, st, message)
 	})
+}
+
+// buildReasoningDisclosure draws the reply's thinking as one official mygo
+// disclosure (ui.CollapsibleBase): the trigger is a spinner and 思考中… while
+// the model is thinking, then a quiet reasoning glyph, 思考 and the reasoning
+// line count; the chevron comes from the disclosure's Progress, so it turns as
+// the panel opens. The panel is the reasoning Markdown rendered by the official
+// Markdown view in a muted, slightly smaller theme than the reply. Open by
+// default while streaming (the thinking stays visible) and collapsed once the
+// turn ends; a manual toggle per message is kept in st.thinkOpen. No duplicate
+// raw-text preview row: the panel is the one place the reasoning text shows.
+func buildReasoningDisclosure(c *ui.Context, t *design.Tokens, st *state, message contracts.ChatMessage) {
+	if message.Reasoning == "" {
+		return
+	}
+	open, chosen := st.thinkOpen[message.ID]
+	if !chosen {
+		open = message.Streaming
+	}
+	label := st.tr("思考", "Reasoning")
+	if message.Streaming {
+		label = st.tr("思考中…", "Thinking…")
+	}
+	key := "session.reasoning." + message.ID
+	parts := ui.CollapsibleBase(c.Key(key), &open)
+	// The trigger names itself for assistive technology: 思考中… while the model
+	// thinks, 思考 once it finished (the line-count hint stays visual only).
+	trigger := parts.Trigger.FillWidth().AlignItems(ui.Center).
+		Gap(design.Space2).PaddingY(design.Space1).Radius(design.RadiusSM).
+		Label(label)
+	if parts.Trigger.Hovered() || parts.Trigger.Focused() {
+		trigger.Background(t.BgHover)
+	}
+	trigger.Children(func() {
+		if message.Streaming {
+			ui.Spinner(c).Label(st.tr("思考中", "Thinking")).
+				Size(design.Space3, design.Space3).TextColor(t.LabelTertiary)
+			design.Apply(ui.Text(c, label), t.Font(design.TypeXXS)).
+				TextColor(t.LabelSecondary)
+		} else {
+			ui.Icon(c, icons.Sparkles()).Size(design.Space3, design.Space3).
+				TextColor(t.LabelTertiary)
+			design.Apply(ui.Text(c, label), t.Font(design.TypeXXS)).
+				TextColor(t.LabelSecondary)
+			if lines := reasoningLineCount(message.Reasoning); lines > 1 {
+				design.Apply(ui.Text(c, fmt.Sprintf(st.tr("%d 行", "%d lines"), lines)),
+					t.Font(design.TypeXXXS)).TextColor(t.LabelTertiary)
+			}
+		}
+		ui.Spacer(c).Grow(1)
+		ui.Icon(c, icons.ChevronRight()).Size(design.Space3, design.Space3).
+			TextColor(t.LabelTertiary).Rotate(90 * parts.Progress())
+	})
+	parts.Panel(func() {
+		// The thinking body sits under the trigger's text (past the glyph), as a
+		// nested block; the muted Markdown theme keeps it subordinate to prose.
+		design.Apply(ui.Column(c), t.Gap(design.Space1)).
+			PaddingStart(design.Space3 + design.Space2).PaddingEnd(design.Space2).
+			PaddingY(design.Space1).Children(func() {
+			if message.Streaming {
+				markdown.Stream(c, message.Reasoning, st.reasoningMarkdownOptions(t))
+				return
+			}
+			markdown.View(c, message.Reasoning, st.reasoningMarkdownOptions(t))
+		})
+	})
+	if parts.Trigger.Changed() {
+		st.thinkOpen[message.ID] = open
+		// The row grew or shrank: keep the transcript where it is for this
+		// layout so the toggled block does not jump (list.md HoldPlace).
+		st.chatHoldPlace = true
+	}
 }
 
 // buildMessageActionButtons closes one assistant turn with its action row,
@@ -925,29 +998,37 @@ func buildMessageActionButtons(c *ui.Context, t *design.Tokens, runtime contract
 		Height(t.Scale(th.Space(6))).Children(func() {
 		ui.Spacer(c).Grow(1)
 		if expanded {
-			goodColor := t.LabelTertiary
-			if message.Feedback == contracts.FeedbackGood {
-				goodColor = t.Accent
+			// The two ratings are the official Toggle: pressed semantics for
+			// assistive technology and Space/Enter, mutually exclusive (the
+			// chosen value is carried across both toggles), and pressing the
+			// pressed one again clears it. The bound bools are derived from the
+			// read model and written back after the framework's input, as
+			// mygo-maintenance asks.
+			feedback := message.Feedback
+			goodOn := feedback == contracts.FeedbackGood
+			good := feedbackToggle(c, t, "session.good."+message.ID, st.tr("有帮助", "Helpful"),
+				st.tr("这条回复有帮助", "This answer was helpful"), icons.Check(),
+				&goodOn, t.Accent)
+			if good.Changed() {
+				if goodOn {
+					feedback = contracts.FeedbackGood
+				} else if feedback == contracts.FeedbackGood {
+					feedback = ""
+				}
 			}
-			good := actionIconButton(c, t, "session.good."+message.ID, st.tr("有帮助", "Helpful"),
-				st.tr("这条回复有帮助", "This answer was helpful"), icons.Check(), goodColor)
-			if message.Feedback == contracts.FeedbackGood {
-				good.Background(t.BgSelected)
+			badOn := feedback == contracts.FeedbackBad
+			bad := feedbackToggle(c, t, "session.bad."+message.ID, st.tr("没帮助", "Not helpful"),
+				st.tr("这条回复没有帮助", "This answer was not helpful"), icons.Close(),
+				&badOn, t.DangerText)
+			if bad.Changed() {
+				if badOn {
+					feedback = contracts.FeedbackBad
+				} else if feedback == contracts.FeedbackBad {
+					feedback = ""
+				}
 			}
-			if good.Clicked() {
-				st.toggleMessageFeedback(chat, feedbacker, runtime, message, contracts.FeedbackGood)
-			}
-			badColor := t.LabelTertiary
-			if message.Feedback == contracts.FeedbackBad {
-				badColor = t.DangerText
-			}
-			bad := actionIconButton(c, t, "session.bad."+message.ID, st.tr("没帮助", "Not helpful"),
-				st.tr("这条回复没有帮助", "This answer was not helpful"), icons.Close(), badColor)
-			if message.Feedback == contracts.FeedbackBad {
-				bad.Background(t.BgSelected)
-			}
-			if bad.Clicked() {
-				st.toggleMessageFeedback(chat, feedbacker, runtime, message, contracts.FeedbackBad)
+			if feedback != message.Feedback {
+				st.toggleMessageFeedback(chat, feedbacker, runtime, message, feedback)
 			}
 			if st.feedbackErr != "" {
 				buildErrorLine(c, t, st.feedbackErr)
@@ -1005,6 +1086,25 @@ func actionIconButton(c *ui.Context, t *design.Tokens, key, label, tooltip strin
 	return button
 }
 
+// feedbackToggle is one message-rating control: the official Toggle with an
+// icon and no visible label, sized like the action row's icon buttons. Its
+// pressed state is the official one (tint plus AT pressed state), not a
+// hand-painted background; the caller writes the derived bool back.
+func feedbackToggle(c *ui.Context, t *design.Tokens, key, label, tooltip string,
+	icon *ui.SVG, on *bool, pressedColor ui.Color) ui.Element {
+	th := t.Theme()
+	toggle := ui.Toggle(c.Key(key), on, "").Label(label).Tooltip(tooltip).
+		Size(th.Space(6), th.Space(6)).PaddingX(0).Radius(design.RadiusSM)
+	color := t.LabelTertiary
+	if *on {
+		color = pressedColor
+	}
+	toggle.Children(func() {
+		ui.Icon(c, icon).Size(design.Space3, design.Space3).TextColor(color)
+	})
+	return toggle
+}
+
 // messageActionTarget resolves the action affordances of one assistant turn:
 // the optional rating half of the chat backend and whether the turn has text to
 // copy.
@@ -1023,32 +1123,41 @@ func messageActionTarget(st *state, message contracts.ChatMessage) (chat contrac
 
 // buildUsageFooter is the muted usage line of an assistant turn: the summary at
 // 11px, expandable to the token breakdown. It is informational, never a
-// competing button row.
+// competing button row. Token counts use the shared compact units ("173.6K",
+// never "173,635"); the expanded detail keeps each exact count in a tooltip.
 func buildUsageFooter(c *ui.Context, t *design.Tokens, st *state, message contracts.ChatMessage) {
 	if message.Usage == nil {
 		return
 	}
 	summary := st.tr("用时 ", "Took ") + formatUsageDuration(message.Usage.DurationMS) +
-		" · " + formatTokenCount(usageTotalTokens(message.Usage)) + " tokens"
+		" · " + uikit.FormatCompactCount(usageTotalTokens(message.Usage)) + " tokens"
 	previous := st.usageOpen[message.ID]
 	open := previous
 	collapsible := ui.Collapsible(c.Key("session.usage."+message.ID), summary, &open, func() {
-		rows := []struct{ label, value string }{
-			{st.tr("时长", "Duration"), formatUsageDuration(message.Usage.DurationMS)},
-			{st.tr("输入 tokens", "Prompt tokens"), formatTokenCount(message.Usage.PromptTokens)},
-			{st.tr("输出 tokens", "Completion tokens"), formatTokenCount(message.Usage.CompletionTokens)},
+		type usageRow struct{ label, value, exact string }
+		exact := func(count int) string { return strconv.Itoa(count) }
+		rows := []usageRow{
+			{st.tr("时长", "Duration"), formatUsageDuration(message.Usage.DurationMS), ""},
+			{st.tr("输入 tokens", "Prompt tokens"), uikit.FormatCompactCount(message.Usage.PromptTokens), exact(message.Usage.PromptTokens)},
+			{st.tr("输出 tokens", "Completion tokens"), uikit.FormatCompactCount(message.Usage.CompletionTokens), exact(message.Usage.CompletionTokens)},
 		}
 		if message.Usage.CachedTokens > 0 {
-			rows = append(rows, struct{ label, value string }{st.tr("缓存 tokens", "Cached tokens"), formatTokenCount(message.Usage.CachedTokens)})
+			rows = append(rows, usageRow{st.tr("缓存 tokens", "Cached tokens"), uikit.FormatCompactCount(message.Usage.CachedTokens), exact(message.Usage.CachedTokens)})
 		}
 		if suffix := st.usageContextWindowSuffix(); suffix != "" {
-			rows = append(rows, struct{ label, value string }{st.tr("上下文预算", "Context budget"), strings.TrimPrefix(suffix, " · ")})
+			rows = append(rows, usageRow{st.tr("上下文预算", "Context budget"), strings.TrimPrefix(suffix, " · "), ""})
 		}
 		ui.Column(c).FillWidth().Gap(design.Space1).Children(func() {
 			for _, row := range rows {
+				row := row
 				ui.Row(c).FillWidth().Gap(design.Space2).AlignItems(ui.Center).Children(func() {
 					design.Apply(ui.Text(c, row.label), t.TextMuted(design.TypeXXS)).Width(120).Shrink(0)
-					design.Apply(ui.Text(c, row.value), t.Font(design.TypeXXS)).TextColor(t.LabelSecondary)
+					value := design.Apply(ui.Text(c, row.value), t.Font(design.TypeXXS)).TextColor(t.LabelSecondary)
+					if row.exact != "" {
+						// The compact display keeps the row readable; the exact
+						// count is one hover away for anyone reconciling numbers.
+						value.Tooltip(st.tr("精确值：", "Exact: ") + row.exact)
+					}
 				})
 			}
 		})
@@ -1178,20 +1287,37 @@ func toolStatusColors(t *design.Tokens, status string) (tint, text ui.Color) {
 	}
 }
 
-// toolIcon maps a tool name to its glyph; it mirrors the toolcards module so a// buildToolCard is the one tool-card anatomy: icon, tool name, status badge,
-// optional step/ID metadata and the native collapsible summary. The transcript
-// fallback, the trajectory timeline and (with a category) the toolcards module
-// all build it, so the same tool call never has two card designs.
+// buildToolCard is the one decision-tool card anatomy: icon, friendly tool
+// name (the protocol id stays in its tooltip), status, optional step metadata
+// and the official collapsible summary. Decision tools (plan review, exit plan,
+// ask user) keep this full card in the transcript and the trajectory timeline
+// shows every call this way; background calls use the compact disclosure row in
+// uikit.ToolRow. A running call shows the official spinner with its WCAG-AA
+// status color instead of the status badge.
 func buildToolCard(c *ui.Context, t *design.Tokens, st *state, call contracts.ToolCall, key string, step int) {
+	friendly := uikit.ToolDisplayName(st.locale, call.Name)
+	running := normalizeStatus(call.Status) == "running"
 	card := design.Apply(ui.Column(c.Key(key)), t.Panel()).FillWidth().
 		Padding(design.Space3).Gap(design.Space2)
 	card.Children(func() {
 		ui.Row(c).FillWidth().Gap(design.Space2).AlignItems(ui.Center).Children(func() {
 			ui.Icon(c, uikit.ToolIcon(call.Name)).Size(design.Space4, design.Space4).
 				TextColor(t.LabelSecondary)
-			design.Apply(ui.Text(c, call.Name), t.Font(design.TypeS)).FontWeight(600).
+			name := design.Apply(ui.Text(c, friendly), t.Font(design.TypeS)).FontWeight(600).
 				TextColor(t.LabelPrimary).MaxLines(1).Ellipsis("…")
-			toolStatusBadge(c, t, st, call.Status)
+			if friendly != call.Name {
+				name.Tooltip(call.Name)
+			}
+			if running {
+				status := statusLabel(call.Status, st)
+				_, textColor := toolStatusColors(t, call.Status)
+				ui.Spinner(c).Label(status).Size(design.Space3, design.Space3).
+					TextColor(textColor)
+				design.Apply(ui.Text(c, status), t.Font(design.TypeXXXS)).
+					TextColor(textColor).NoWrap()
+			} else {
+				toolStatusBadge(c, t, st, call.Status)
+			}
 			ui.Spacer(c).Grow(1)
 			if step > 0 {
 				design.Apply(ui.Text(c, fmt.Sprintf(st.tr("步骤 %d", "Step %d"), step)),
@@ -1269,7 +1395,8 @@ func buildTrajectoryPane(c *ui.Context, t *design.Tokens, chatSession contracts.
 				if index < 0 || index >= len(items) {
 					return ""
 				}
-				return firstNonEmpty(items[index].tool.Name, st.tr("工具调用", "Tool call"))
+				return firstNonEmpty(uikit.ToolDisplayName(st.locale, items[index].tool.Name),
+					st.tr("工具调用", "Tool call"))
 			}
 			ui.List(c, &st.trajList, len(items)).
 				Label(st.tr("工具调用轨迹", "Tool call trajectory")).
@@ -1387,6 +1514,47 @@ func (st *state) markdownOptions(t *design.Tokens) *markdown.Options {
 	st.md.dark = t.Dark
 	st.md.size = size
 	return st.md.options
+}
+
+// reasoningMarkdownOptions returns the muted, slightly smaller Markdown
+// configuration of the thinking panel: the reply's body size minus one DIP, in
+// the secondary text color (strong text stays primary so a bolded conclusion
+// reads), with headings kept subordinate to the reply's own headings. It
+// follows the light/dark theme and the ui.chatFontSize setting like the prose.
+func (st *state) reasoningMarkdownOptions(t *design.Tokens) *markdown.Options {
+	size := st.messageFontSize() - 1
+	if size < 11 {
+		size = 11
+	}
+	if st.mdReasoning.options != nil && st.mdReasoning.dark == t.Dark && st.mdReasoning.size == size {
+		return st.mdReasoning.options
+	}
+	theme := markdown.DefaultTheme(t.Theme())
+	theme.FontSize = size
+	theme.Text = t.LabelSecondary
+	theme.Muted = t.LabelTertiary
+	theme.Strong = t.LabelPrimary
+	theme.Code = t.LabelSecondary
+	theme.QuoteText = t.LabelTertiary
+	theme.BlockSpacing = 0.6
+	// The panel's headings must never outrank the reply's: keep them small
+	// multiples of the thinking size instead of the Markdown defaults, so even
+	// at the large chat font size the panel's H1 stays below the reply's 17 DIP.
+	sizes := [6]float32{1.1, 1.05, 1.0, 0.95, 0.9, 0.85}
+	for index := range theme.Headings {
+		theme.Headings[index].Size = sizes[index]
+		theme.Headings[index].Weight = 600
+		theme.Headings[index].Color = t.LabelSecondary
+	}
+	theme.Headings[5].Color = t.LabelTertiary
+	st.mdReasoning.options = &markdown.Options{
+		Theme:      theme,
+		Extensions: parser.Default,
+		Reveal:     &markdown.Reveal{Unit: markdown.AtOnce, Fade: -1},
+	}
+	st.mdReasoning.dark = t.Dark
+	st.mdReasoning.size = size
+	return st.mdReasoning.options
 }
 
 // messageFontSize is the transcript body size from ui.chatFontSize:
@@ -1597,7 +1765,10 @@ func buildComposer(
 	th := t.Theme()
 	running := chatSession.Running
 	queueAllowed := running && sendWhileRunningEnabled(st.settings)
-	inputShown := !running || queueAllowed
+	// The composer never disappears: even while a turn runs the TextArea stays
+	// visible and editable, so the user can keep composing. The send position
+	// shows 停止 plus 排队 when queueing is on; with queueing explicitly off,
+	// Enter is a newline (not a send) until the reply ends and the draft is kept.
 	var input ui.Element
 
 	ui.Column(c.Key("session.composer")).FillWidth().PaddingY(th.Space(2)).AlignItems(ui.Center).Children(func() {
@@ -1622,28 +1793,43 @@ func buildComposer(
 			card.Children(func() {
 				buildPendingAttachments(c, t, runtime, st)
 				placeholder := st.localized(cfg.ComposerPlaceholder, "输入消息…", "Ask ZeoKeel…")
-				if inputShown {
-					input = ui.TextArea(c.Key("session.composer.input"), &st.draft).
-						Label(placeholder).
-						Placeholder(placeholder).
-						Background(ui.Transparent).Border(0, ui.Transparent).
-						Padding(0, th.Space(1)).
-						MinHeight(th.Space(9)).Grow(1).
-						Bind(&st.composerInput).
-						OnTextKey(composerTextKey(runtime, chat, st, activeID, queueAllowed))
+				input = ui.TextArea(c.Key("session.composer.input"), &st.draft).
+					Label(placeholder).
+					Placeholder(placeholder).
+					Background(ui.Transparent).Border(0, ui.Transparent).
+					Padding(0, th.Space(1)).
+					MinHeight(th.Space(9)).Grow(1).
+					Bind(&st.composerInput).
+					OnTextKey(composerTextKey(runtime, chat, st, activeID, running, queueAllowed))
+				if st.focusComposer {
+					// One-shot: opening/switching a conversation or a finished run
+					// asks for the keyboard here. The @/// suggestion menus are
+					// driven by this same input, so focusing it never fights them.
+					st.focusComposer = false
+					st.composerInput.Focus(c)
 				}
-				if len(st.queuedPrompts) > 0 || st.queueErr != "" {
+				if running && !queueAllowed {
+					// Queueing is off: the composer is editable but Enter does
+					// not send. Say where the text goes instead of leaving the
+					// user wondering why Enter inserted a line break.
+					design.Apply(ui.Text(c, st.tr("回复生成中，Enter 暂不可用；草稿会保留，本轮结束后可发送",
+						"Generating: Enter is unavailable; your draft is kept for when this turn ends")),
+						t.Font(design.TypeXXXS)).TextColor(t.LabelTertiary).MaxLines(1)
+				}
+				queued := st.queuedFor(activeID)
+				queueErr := st.queueErrorFor(activeID)
+				if len(queued) > 0 || queueErr != "" {
 					var queueAnchor ui.Element
 					ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(design.Space2).Children(func() {
-						if len(st.queuedPrompts) > 0 {
-							queueAnchor = buildQueueBadge(c, t, runtime, st)
+						if len(queued) > 0 {
+							queueAnchor = buildQueueBadge(c, t, runtime, st, activeID)
 						}
-						if st.queueErr != "" {
-							buildErrorLine(c, t, st.queueErr)
+						if queueErr != "" {
+							buildErrorLine(c, t, queueErr)
 						}
 					})
 					if queueAnchor.Valid() {
-						buildQueuePopover(c, t, runtime, st, queueAnchor)
+						buildQueuePopover(c, t, runtime, chat, st, activeID, queueAnchor, running)
 					}
 				}
 				if running && queueAllowed && len(st.pendingAttachments) > 0 {
@@ -1666,13 +1852,26 @@ func buildComposer(
 					}
 				})
 			})
+			// The composer's focus/hover ring also applies while a reply runs:
+			// the input is editable then too, so the ring must not disappear.
 			switch {
-			case !running && input.Focused():
+			case input.Focused():
 				card.Border(1, t.Accent)
-			case !running && input.Hovered():
+			case input.Hovered():
 				card.Border(1, t.BorderL3)
 			}
 		})
+		// The DSH-style usage strip sits directly under the composer card: one
+		// muted line of session statistics (rounds, steps, speed, tokens,
+		// cache/context) with the exact numbers in its tooltip.
+		buildSessionStatusStrip(c, t, chat, st, chatSession)
+		// An empty draft forgets an earlier Esc dismissal: typing the same "/"
+		// or "@..." again after clearing the input must reopen the menu instead
+		// of silently staying dismissed for the rest of the session.
+		if strings.TrimSpace(st.draft) == "" {
+			st.slashDismissed = ""
+			st.mentionDismissed = ""
+		}
 		// The suggestion menus are anchored above the composer (H8): they are
 		// an overlay, so they never push the transcript around. The keyboard
 		// handling stays in the composer's OnTextKey (Up/Down/Enter/Tab/Esc).
@@ -1704,10 +1903,11 @@ func buildComposer(
 }
 
 // composerTextKey is the composer's native key hook: the suggestion menus take
-// the arrow keys, Enter/Tab and Esc while they are open; Enter sends (or queues
-// while running) when no menu took the key; a slash draft is never sent as a
-// chat message.
-func composerTextKey(runtime contracts.UIRuntime, chat contracts.ChatService, st *state, activeID string, queueAllowed bool) func(ui.TextKey) bool {
+// the arrow keys, Enter/Tab and Esc while they are open; Enter sends when idle,
+// queues while a turn runs with queueing on, and does nothing (the TextArea
+// inserts a newline) while a turn runs with queueing explicitly off. A slash
+// draft is never sent as a chat message.
+func composerTextKey(runtime contracts.UIRuntime, chat contracts.ChatService, st *state, activeID string, running, queueAllowed bool) func(ui.TextKey) bool {
 	return func(k ui.TextKey) bool {
 		// Esc closes an open suggestion menu and leaves the draft untouched
 		// (the dismissal is remembered until the draft changes again).
@@ -1724,7 +1924,9 @@ func composerTextKey(runtime contracts.UIRuntime, chat contracts.ChatService, st
 			}
 			return false
 		}
-		if query, active := slashQuery(st.draft); active && st.slashDismissed != st.draft {
+		// The slash menu only exists while no turn runs (its popover is not
+		// built while running): never execute an invisible command from Enter.
+		if query, active := slashQuery(st.draft); active && !running && st.slashDismissed != st.draft {
 			if handleSlashMenuKey(k, runtime, st, query) {
 				return true
 			}
@@ -1737,10 +1939,14 @@ func composerTextKey(runtime contracts.UIRuntime, chat contracts.ChatService, st
 		if k.Key != ui.KeyEnter || k.Mods != 0 {
 			return false
 		}
-		if queueAllowed {
-			if st.queueSessionID == "" || st.queueSessionID == activeID {
-				queueDraft(st, activeID)
+		if running {
+			// A running turn never calls chat.Send through Enter: queue the
+			// draft when queueing is on, otherwise let Enter insert a newline
+			// (the draft stays in the composer and is sent once the reply ends).
+			if !queueAllowed {
+				return false
 			}
+			queueDraft(st, activeID)
 			runtime.Invalidate()
 			return true
 		}
@@ -1819,7 +2025,7 @@ func buildSessionMenu(c *ui.Context, t *design.Tokens, runtime contracts.UIRunti
 			}
 			m.Separator()
 		}
-		buildSessionPermissionMenuItems(m, navigator, runtime, st)
+		buildSessionPermissionMenuItems(m, runtime, chat, st, activeID)
 		m.Separator()
 		buildSessionModeMenuItems(m, runtime, st)
 		m.Separator()
@@ -1843,7 +2049,9 @@ func buildSessionMenu(c *ui.Context, t *design.Tokens, runtime contracts.UIRunti
 		if m.Item(st.tr("打开行为设置…", "Open behavior settings…")).Chosen() {
 			openSettingsPage(navigator, settingsPageBehavior)
 		}
-	}).Tooltip(st.tr("权限、对话模式、思考强度与提示词预设", "Permission, mode, thinking and prompt presets"))
+	}).Tooltip(st.tr(
+		"权限、对话模式、思考强度与提示词预设。工作区只自动允许工作区内的文件工具，shell/网络仍会询问；全部允许不再弹窗；弹窗中的「本会话内始终允许」只对本会话生效。",
+		"Permission, mode, thinking and prompt presets. Workspace only auto-allows workspace file tools; shell/network still ask. Allow all stops every prompt; the dialog's Always allow in this session only covers this conversation."))
 	if warn {
 		button.TextColor(t.WarningText)
 	} else {
@@ -1884,26 +2092,53 @@ func (st *state) sessionMenuLabel() (label string, warn bool) {
 	return st.tr("会话设置", "Session settings"), false
 }
 
-// buildSessionPermissionMenuItems adds the permission-mode choices.
-func buildSessionPermissionMenuItems(m *ui.Menu, navigator contracts.Navigator,
-	runtime contracts.UIRuntime, st *state) {
-	if st.settings == nil {
+// buildSessionPermissionMenuItems adds the permission-mode choices, one quiet
+// explanation row so 工作区（默认） is understood, and the session-scoped
+// "clear remembered tools" action once the backend has remembered any tool for
+// this conversation.
+func buildSessionPermissionMenuItems(m *ui.Menu, runtime contracts.UIRuntime,
+	chat contracts.ChatService, st *state, activeID string) {
+	if st.settings != nil {
+		current := permissionMode(st.settings)
+		for _, mode := range []string{contracts.PermissionAsk, contracts.PermissionWorkspace, contracts.PermissionFull, contracts.PermissionNever} {
+			mode := mode
+			item := m.Item(st.permissionLabel(mode))
+			// Radio marks a single-choice item: assistive technology reads it as a
+			// radio item, not a check box (mygo context-menu.md: MenuItem.Radio).
+			item.Radio(mode == current)
+			if item.Chosen() && mode != current {
+				_ = st.settings.Set(contracts.SettingAgentPermission, mode)
+				runtime.Invalidate()
+			}
+		}
+		// The workspace default is the one choice users misread ("I gave it
+		// workspace permission, why does it keep asking?"): the section header
+		// row carries the explanation in its tooltip, so the menu does not grow
+		// another row (a taller menu would overflow the 704x720 window).
+		m.Item(st.tr("权限模式", "Permission mode")).Disabled(true).Tooltip(st.tr(
+			"工作区（默认）：工作区内的文件读写自动允许，shell/网络仍会询问；弹窗中选择「本会话内始终允许」可停止重复询问；全部允许不再弹窗。",
+			"Workspace (default): workspace file reads/writes are auto-allowed; shell/network still ask. Choose \"Always allow in this session\" in the dialog to stop repeats; Allow all stops every prompt."))
+	}
+	// The approval dialog's 本会话内始终允许 remembers tools for one session;
+	// this is the one place to see that it is active and to forget it.
+	permissions, ok := chat.(contracts.SessionToolPermissions)
+	if !ok || activeID == "" {
 		return
 	}
-	current := permissionMode(st.settings)
-	m.Item(st.tr("权限模式", "Permission mode")).Disabled(true)
-	for _, mode := range []string{contracts.PermissionAsk, contracts.PermissionWorkspace, contracts.PermissionFull, contracts.PermissionNever} {
-		mode := mode
-		item := m.Item(st.permissionLabel(mode))
-		// Radio marks a single-choice item: assistive technology reads it as a
-		// radio item, not a check box (mygo context-menu.md: MenuItem.Radio).
-		item.Radio(mode == current)
-		if item.Chosen() && mode != current {
-			_ = st.settings.Set(contracts.SettingAgentPermission, mode)
-			runtime.Invalidate()
-		}
+	allowed := permissions.AllowedTools(activeID)
+	if len(allowed) == 0 {
+		return
 	}
-	_ = navigator
+	label := fmt.Sprintf(st.tr("清除自动允许的工具（%d）", "Clear remembered tools (%d)"), len(allowed))
+	if m.Item(label).Chosen() {
+		if err := permissions.ClearAllowedTools(activeID); err != nil {
+			st.commandErr = st.tr("清除失败：", "Clear failed: ") + err.Error()
+		} else {
+			st.commandErr = ""
+			st.toast(contracts.NotifySuccess, st.tr("已清除自动允许的工具", "Remembered tools cleared"))
+		}
+		runtime.Invalidate()
+	}
 }
 
 // buildSessionModeMenuItems adds the agent/chat mode choices.
@@ -2091,13 +2326,19 @@ func openAttachmentPathDialog(st *state, runtime contracts.UIRuntime) {
 // buildQueueBadge is the running composer's queued-prompt entry: the count is
 // a button (H9) that opens the queue popover, where each queued prompt can be
 // inspected and cancelled, or the queue cleared.
-func buildQueueBadge(c *ui.Context, t *design.Tokens, runtime contracts.UIRuntime, st *state) ui.Element {
+func buildQueueBadge(c *ui.Context, t *design.Tokens, runtime contracts.UIRuntime, st *state, sessionID string) ui.Element {
 	th := t.Theme()
-	label := fmt.Sprintf(st.tr("已排队 %d 条", "%d queued"), len(st.queuedPrompts))
+	count := len(st.queuedFor(sessionID))
+	label := fmt.Sprintf(st.tr("已排队 %d 条", "%d queued"), count)
+	tip := st.tr("查看或取消排队的消息", "View or cancel queued messages")
+	if st.queuePaused[sessionID] {
+		tip = st.tr("已停止：排队消息不会自动发送，展开后可手动发送或取消",
+			"Stopped: queued messages are not sent automatically; open to send or cancel them")
+	}
 	button := ui.Button(c, label).Label(label).
 		Height(th.Space(5)).PaddingX(design.Space2).Radius(design.RadiusMax).
 		Background(t.BgHover).TextColor(t.Accent).
-		Tooltip(st.tr("查看或取消排队的消息", "View or cancel queued messages"))
+		Tooltip(tip)
 	if st.queueMenuOpen {
 		button.Background(t.BgSelected)
 	}
@@ -2108,13 +2349,17 @@ func buildQueueBadge(c *ui.Context, t *design.Tokens, runtime contracts.UIRuntim
 	return button
 }
 
-// buildQueuePopover lists the queued prompts above the composer: each row can
-// be cancelled, and the footer clears the whole queue.
+// buildQueuePopover lists the active session's queued prompts above the
+// composer: each row can be cancelled, the footer clears the whole queue and,
+// after 停止 paused it, offers an explicit 发送排队消息 action instead of
+// starting another run on its own.
 func buildQueuePopover(c *ui.Context, t *design.Tokens, runtime contracts.UIRuntime,
-	st *state, anchor ui.Element) {
-	if !st.queueMenuOpen || len(st.queuedPrompts) == 0 {
+	chat contracts.ChatService, st *state, sessionID string, anchor ui.Element, running bool) {
+	queued := st.queuedFor(sessionID)
+	if !st.queueMenuOpen || len(queued) == 0 {
 		return
 	}
+	paused := st.queuePaused[sessionID]
 	panelWidth := anchor.Bounds().W
 	if panelWidth < 360 {
 		// The anchor is the small count badge: give the prompt rows room to be
@@ -2129,35 +2374,66 @@ func buildQueuePopover(c *ui.Context, t *design.Tokens, runtime contracts.UIRunt
 			Background(t.BgRaised).Border(1, t.BorderL2).Radius(design.RadiusLG).
 			Shadow(0, 8, 24, 0, ui.RGBA(0, 0, 0, 0.12)).
 			Label(st.tr("排队消息", "Queued messages"))
-		for index, prompt := range st.queuedPrompts {
-			index, prompt := index, prompt
-			ui.Row(c.Key(fmt.Sprintf("session.queued.%d", index))).FillWidth().
-				AlignItems(ui.Center).Gap(design.Space2).PaddingY(design.Space1).
-				Children(func() {
-					design.Apply(ui.Text(c, queuedSummary(prompt)), t.Font(design.TypeXS)).
-						TextColor(t.LabelPrimary).Grow(1).MaxLines(1).Ellipsis("…")
-					remove := ui.Button(c.Key(fmt.Sprintf("session.queued.cancel.%d", index)), "").
-						Label(st.tr("取消排队", "Cancel queued")).
-						Tooltip(st.tr("取消这条排队消息", "Cancel this queued message")).
-						Size(t.Theme().Space(5), t.Theme().Space(5)).PaddingX(0).
-						Radius(design.RadiusSM)
-					remove.Children(func() {
-						ui.Icon(c, icons.Close()).Size(design.Space3, design.Space3).
-							TextColor(t.LabelTertiary)
-					})
-					if remove.Clicked() {
-						cancelQueuedPrompt(st, index)
-						runtime.Invalidate()
-					}
-				})
+		if paused && !running {
+			// The stop paused the queue: make the changed behavior explicit.
+			design.Apply(ui.Text(c, st.tr("已停止：排队消息不会自动发送，可手动发送或取消",
+				"Stopped: queued messages are not sent automatically; send or cancel them here")),
+				t.TextMuted(design.TypeXXXS)).MaxLines(2)
 		}
+		// The queued prompts are the official List: list/listitem role and row
+		// names for assistive technology, keyboard scrolling, and stable rows
+		// as the queue grows, capped so a long queue stays a popover.
+		st.queueList.Key = func(row int) any { return row }
+		st.queueList.Label = func(row int) string {
+			if row < 0 || row >= len(queued) {
+				return ""
+			}
+			return queued[row]
+		}
+		ui.List(c, &st.queueList, len(queued)).
+			Label(st.tr("排队消息", "Queued messages")).
+			MaxHeight(design.Space6 * 8).
+			FillWidth().
+			Rows(func(row ui.ListRow) {
+				index := row.Index
+				rowC := row.Context
+				ui.Row(rowC).FillWidth().
+					AlignItems(ui.Center).Gap(design.Space2).PaddingY(design.Space1).
+					Children(func() {
+						design.Apply(ui.Text(rowC, queuedSummary(queued[index])), t.Font(design.TypeXS)).
+							TextColor(t.LabelPrimary).Grow(1).MaxLines(1).Ellipsis("…")
+						remove := ui.Button(rowC, "").
+							Label(st.tr("取消排队", "Cancel queued")).
+							Tooltip(st.tr("取消这条排队消息", "Cancel this queued message")).
+							Size(t.Theme().Space(5), t.Theme().Space(5)).PaddingX(0).
+							Radius(design.RadiusSM)
+						remove.Children(func() {
+							ui.Icon(rowC, icons.Close()).Size(design.Space3, design.Space3).
+								TextColor(t.LabelTertiary)
+						})
+						if remove.Clicked() {
+							cancelQueuedPrompt(st, sessionID, index)
+							runtime.Invalidate()
+						}
+					})
+			})
 		ui.Divider(c)
-		ui.Row(c).FillWidth().Justify(ui.End).Children(func() {
+		ui.Row(c).FillWidth().Justify(ui.End).AlignItems(ui.Center).
+			Gap(design.Space2).Children(func() {
+			if paused && !running {
+				send := design.Apply(ui.Button(c, st.tr("发送排队消息", "Send queued")), t.SecondaryButton()).
+					Label(st.tr("发送排队消息", "Send queued")).
+					Tooltip(st.tr("发送第一条排队消息；其余消息会在这轮结束后继续",
+						"Send the first queued message; the rest follow when that turn ends"))
+				if send.Clicked() {
+					resumeQueue(chat, st, sessionID)
+					runtime.Invalidate()
+				}
+			}
 			clear := design.Apply(ui.Button(c, st.tr("清空全部", "Clear all")), t.SecondaryButton()).
 				Label(st.tr("清空全部", "Clear all"))
 			if clear.Clicked() {
-				st.queuedPrompts = nil
-				st.queueMenuOpen = false
+				clearQueuedPrompts(st, sessionID)
 				runtime.Invalidate()
 			}
 		})
@@ -2165,7 +2441,7 @@ func buildQueuePopover(c *ui.Context, t *design.Tokens, runtime contracts.UIRunt
 	if !open {
 		st.queueMenuOpen = false
 	}
-	if len(st.queuedPrompts) == 0 {
+	if len(st.queuedFor(sessionID)) == 0 {
 		st.queueMenuOpen = false
 	}
 }
@@ -2179,18 +2455,6 @@ func queuedSummary(prompt string) string {
 		return trimmed
 	}
 	return string(runes[:limit]) + "…"
-}
-
-// cancelQueuedPrompt removes one queued prompt; the runtime stops re-sending it.
-func cancelQueuedPrompt(st *state, index int) {
-	if index < 0 || index >= len(st.queuedPrompts) {
-		return
-	}
-	st.queuedPrompts = append(st.queuedPrompts[:index], st.queuedPrompts[index+1:]...)
-	if len(st.queuedPrompts) == 0 {
-		st.queueSessionID = ""
-		st.queueMenuOpen = false
-	}
 }
 
 // buildSendButton is the composer's primary control: a native primary button
@@ -2251,6 +2515,9 @@ func buildStopButton(c *ui.Context, t *design.Tokens, cfg Config, chat contracts
 	})
 	if button.Clicked() {
 		st.autoContinueSuppressed = true
+		// A stop must stop: keep the queued prompts for review instead of
+		// letting the settle handler start another run automatically.
+		pauseQueue(st, activeID)
 		if err := chat.Cancel(activeID); err != nil {
 			st.commandErr = st.tr("停止失败：", "Stop failed: ") + err.Error()
 		} else {
@@ -2352,18 +2619,16 @@ func (st *state) usageContextWindowSuffix() string {
 	return ""
 }
 
-// reasoningTail returns the last limit runes of the live reasoning stream (the
-// preview is bounded so a long thinking block cannot dominate the transcript).
-func reasoningTail(text string, limit int) string {
-	text = strings.TrimSpace(text)
-	if limit <= 0 {
-		return ""
+// reasoningLineCount counts the non-blank lines of a finished reasoning body,
+// the quiet size hint the folded reasoning row shows instead of a raw tail.
+func reasoningLineCount(text string) int {
+	lines := 0
+	for _, line := range strings.Split(text, "\n") {
+		if strings.TrimSpace(line) != "" {
+			lines++
+		}
 	}
-	runes := []rune(text)
-	if len(runes) <= limit {
-		return string(runes)
-	}
-	return string(runes[len(runes)-limit:])
+	return lines
 }
 
 // formatContextWindow renders a token count for the usage footer: exact
@@ -2387,24 +2652,196 @@ func formatUsageDuration(durationMS int64) string {
 	return fmt.Sprintf("%.1fs", float64(durationMS)/1000)
 }
 
-// formatTokenCount groups thousands with commas (1234 → 1,234).
-func formatTokenCount(count int) string {
-	digits := strconv.Itoa(count)
-	if len(digits) <= 3 {
-		return digits
-	}
-	var builder strings.Builder
-	first := len(digits) % 3
-	if first > 0 {
-		builder.WriteString(digits[:first])
-	}
-	for index := first; index < len(digits); index += 3 {
-		if builder.Len() > 0 {
-			builder.WriteByte(',')
+// minStatusSpeedDurationMS is the shortest turn wall time that makes an
+// average output-speed number meaningful; shorter turns omit the item.
+const minStatusSpeedDurationMS = 250
+
+// sessionUsageStats is one frame's read of the conversation's usage read model:
+// rounds, tool steps, output/billing token sums, wall time, the newest request's
+// context size and the cache accounting. Every field except rounds/steps comes
+// from MessageUsage; unknown values stay 0 and are omitted from the strip
+// instead of being rendered as a wrong number.
+type sessionUsageStats struct {
+	rounds     int
+	steps      int
+	completion int
+	prompt     int
+	cached     int
+	durationMS int64
+	// contextTokens is the newest assistant usage's ContextTokens: the prompt
+	// size of the last model request of that turn (the real context usage).
+	// MessageUsage.PromptTokens is a billing total across every model call and
+	// must never be compared with the context window.
+	contextTokens int
+	hasUsage      bool
+}
+
+// collectSessionUsage sums the session read model in one pass. The strip only
+// shows up once the session has real token accounting, so a fresh or
+// non-accounted conversation stays quiet.
+func collectSessionUsage(session contracts.ChatSession) sessionUsageStats {
+	var stats sessionUsageStats
+	for _, message := range session.Messages {
+		switch message.Role {
+		case contracts.ChatRoleUser:
+			stats.rounds++
+		case contracts.ChatRoleAssistant:
+			stats.steps += len(message.Tools)
 		}
-		builder.WriteString(digits[index : index+3])
+		usage := message.Usage
+		if usage == nil {
+			continue
+		}
+		stats.hasUsage = true
+		stats.completion += usage.CompletionTokens
+		stats.prompt += usage.PromptTokens
+		stats.cached += usage.CachedTokens
+		stats.durationMS += usage.DurationMS
+		if message.Role == contracts.ChatRoleAssistant && usage.ContextTokens > 0 {
+			stats.contextTokens = usage.ContextTokens
+		}
 	}
-	return builder.String()
+	return stats
+}
+
+// sessionContextWindow resolves the model context window for the active session
+// from the optional model catalogue (per-session model override first, then the
+// configured model). 0 means unknown: the strip then omits the context and
+// remaining-context items rather than falling back to a config budget that is
+// not a context window (ChatConfig.ContextBudget bounds the compactor).
+func (st *state) sessionContextWindow(chat contracts.ChatService, session contracts.ChatSession) int {
+	if chat == nil {
+		return 0
+	}
+	catalog, ok := st.ctx.Get(contracts.KeyModelCatalog)
+	if !ok || catalog == nil {
+		return 0
+	}
+	model := strings.TrimSpace(session.Model)
+	if model == "" {
+		model = strings.TrimSpace(chat.Config().Model)
+	}
+	if model == "" {
+		return 0
+	}
+	if info, found := contracts.FindModelInfo(catalog.Models(), model); found && info.ContextWindow > 0 {
+		return info.ContextWindow
+	}
+	return 0
+}
+
+// buildSessionStatusStrip renders the DSH-style single muted status line right
+// under the composer: rounds · steps · output speed · context/window · cache hit ·
+// remaining context. It is informational only (no card, icon or badge); the
+// exact uncompacted numbers live in its tooltip, and the whole strip stays
+// hidden until the session has token accounting to report.
+func buildSessionStatusStrip(c *ui.Context, t *design.Tokens, chat contracts.ChatService,
+	st *state, session contracts.ChatSession) {
+	line, exact, ok := sessionStatusLine(st, chat, session)
+	if !ok {
+		return
+	}
+	ui.Row(c).FillWidth().Justify(ui.Center).Margin(design.Space1, 0, 0, 0).Children(func() {
+		design.Apply(ui.Text(c, line), t.Font(design.TypeXXXS)).
+			TextColor(t.LabelTertiary).
+			Width(design.TranscriptWidth).MaxWidthPercent(92).
+			MaxLines(1).Ellipsis("…").Tooltip(exact)
+	})
+}
+
+// sessionStatusLine builds the quiet status line and the exact-number tooltip
+// for one session; ok is false when there is nothing to show (no token usage
+// yet). Items whose data is unknown are left out: the speed needs output tokens
+// and wall time, the context ratio needs both the newest ContextTokens and the
+// catalogue window, and the cache hit needs prompt tokens.
+func sessionStatusLine(st *state, chat contracts.ChatService, session contracts.ChatSession) (line, exact string, ok bool) {
+	stats := collectSessionUsage(session)
+	if !stats.hasUsage {
+		return "", "", false
+	}
+
+	parts := []string{
+		sessionCountLabel(st, stats.rounds, "轮", "round", "rounds"),
+		sessionCountLabel(st, stats.steps, "步", "step", "steps"),
+	}
+	// Average output speed over the run, tool time included: generated
+	// completion tokens divided by the turn's wall time. A turn shorter than
+	// minStatusSpeedDurationMS says nothing about throughput (scripted turns,
+	// cancellations), so the item is omitted instead of printing a silly
+	// five-digit number.
+	speed := 0.0
+	hasSpeed := stats.durationMS >= minStatusSpeedDurationMS && stats.completion > 0
+	if hasSpeed {
+		speed = float64(stats.completion) / (float64(stats.durationMS) / 1000)
+		parts = append(parts, fmt.Sprintf("%d tok/s", int64(math.Round(speed))))
+	}
+	window := st.sessionContextWindow(chat, session)
+	remaining := 0
+	hasContext := stats.contextTokens > 0 && window > 0
+	if hasContext {
+		parts = append(parts, uikit.FormatCompactCount(stats.contextTokens)+"/"+
+			uikit.FormatCompactCount(window)+" tok")
+		remaining = 100 - int(math.Round(float64(stats.contextTokens)*100/float64(window)))
+		if remaining < 0 {
+			remaining = 0
+		}
+		if remaining > 100 {
+			remaining = 100
+		}
+	}
+	cacheHit := 0
+	hasCache := stats.prompt > 0
+	if hasCache {
+		cacheHit = int(math.Round(float64(stats.cached) * 100 / float64(stats.prompt)))
+		if cacheHit < 0 {
+			cacheHit = 0
+		}
+		if cacheHit > 100 {
+			cacheHit = 100
+		}
+		parts = append(parts, fmt.Sprintf(st.tr("缓存命中 %d%%", "Cache hit %d%%"), cacheHit))
+	}
+	if hasContext {
+		parts = append(parts, fmt.Sprintf(st.tr("剩余 %d%%", "%d%% left"), remaining))
+	}
+	return strings.Join(parts, " · "), sessionExactStatusTooltip(st, stats, window, speed, cacheHit, remaining, hasSpeed, hasCache, hasContext), true
+}
+
+// sessionCountLabel renders one count with its unit: the Chinese unit is
+// uninflected, English pluralizes ("1 round"/"2 rounds").
+func sessionCountLabel(st *state, count int, zh, singular, plural string) string {
+	if st.english() && count != 1 {
+		return fmt.Sprintf("%d %s", count, plural)
+	}
+	if st.english() {
+		return fmt.Sprintf("%d %s", count, singular)
+	}
+	return fmt.Sprintf("%d %s", count, zh)
+}
+
+// sessionExactStatusTooltip is the uncompacted version of the status line: the
+// exact token sums, the average-speed arithmetic and the context window
+// accounting. It also documents what the speed means.
+func sessionExactStatusTooltip(st *state, stats sessionUsageStats, window int, speed float64,
+	cacheHit, remaining int, hasSpeed, hasCache, hasContext bool) string {
+	parts := []string{
+		st.tr("轮次 ", "Rounds ") + strconv.Itoa(stats.rounds),
+		st.tr("步骤 ", "Steps ") + strconv.Itoa(stats.steps),
+	}
+	if hasSpeed {
+		parts = append(parts, fmt.Sprintf("%.1f tok/s", speed)+st.tr("（平均输出速度，含工具耗时）",
+			" (average output speed over the run, tool time included)"))
+	}
+	if hasCache {
+		parts = append(parts, st.tr("输出 ", "Completion ")+strconv.Itoa(stats.completion)+
+			st.tr(" · 缓存命中 ", " · cache hit ")+strconv.Itoa(cacheHit)+"%")
+	}
+	if hasContext {
+		parts = append(parts, st.tr("上下文 ", "Context ")+strconv.Itoa(stats.contextTokens)+
+			st.tr(" / 窗口 ", " / window ")+strconv.Itoa(window)+
+			st.tr("，剩余 ", ", ")+strconv.Itoa(remaining)+"%")
+	}
+	return strings.Join(parts, " · ")
 }
 
 // submitDraft sends the trimmed draft and any staged attachments (a message

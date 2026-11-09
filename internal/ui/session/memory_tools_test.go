@@ -4,6 +4,7 @@ package session_test
 // duplicates (keep the earliest) and clear-all with a native confirmation.
 
 import (
+	"context"
 	"errors"
 	"strings"
 	"testing"
@@ -230,4 +231,41 @@ func memoryToastContains(notifier *fakeSessionNotifier, fragment string) bool {
 		}
 	}
 	return false
+}
+
+// updateMemory is the optional contracts.MemoryUpdater half of the fake store:
+// the Memory pane shows its edit action only when the backend can update.
+func (s *fakeMemoryStore) Update(_ context.Context, id, text, _ string) (contracts.Memory, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	text = strings.TrimSpace(text)
+	if text == "" {
+		return contracts.Memory{}, errors.New("empty memory")
+	}
+	for index := range s.items {
+		if s.items[index].ID == id {
+			s.items[index].Text = text
+			return s.items[index], nil
+		}
+	}
+	return contracts.Memory{}, errors.New("unknown memory")
+}
+
+// TestMemoryPaneEditUsesPencilIcon covers the icon migration: the edit action
+// is a real SVG pencil from internal/icons (no Unicode ✎ rendered as text), with
+// its label/tooltip intact, and it opens the native edit dialog.
+func TestMemoryPaneEditUsesPencilIcon(t *testing.T) {
+	store := newFakeMemoryStore(memory("mem-1", "Alpha 项目"))
+	h := newHarnessWithMemory(t, tidyChat(), store)
+	tester := h.tester()
+	openMemoryTab(t, h, tester)
+	h.assertTexts(tester, "Alpha 项目")
+	if got := textsContaining(tester.Texts(), "✎"); got != 0 {
+		t.Fatalf("Unicode pencil glyph still rendered (%d); texts = %v", got, tester.Texts())
+	}
+	if _, ok := tester.AccessByRole(ui.RoleButton, "编辑记忆"); !ok {
+		t.Fatalf("edit action is not a labeled button; texts = %v", tester.Texts())
+	}
+	h.click(tester, "编辑记忆")
+	h.assertTexts(tester, "编辑记忆", "记忆内容", "保存", "取消")
 }

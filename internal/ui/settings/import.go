@@ -100,9 +100,13 @@ func buildImportPage(c *ui.Context, t *design.Tokens, kctx cordis.Context, runti
 					runtime.Invalidate()
 				}
 				scanLabel := localized(locale, "扫描", "Scan")
+				busyLabel := localized(locale, "扫描中…", "Scanning…")
 				if st.scanning {
-					scanLabel = localized(locale, "扫描中…", "Scanning…")
+					scanLabel = busyLabel
 				}
+				// The busy state is the official spinner with an accessible
+				// progress name; the scan button keeps its disabled logic.
+				buildBusySpinner(c, st.scanning, busyLabel)
 				// H24: with a directory chosen, scanning is the obvious next
 				// step, so it becomes the section's accent primary action.
 				dirChosen := strings.TrimSpace(st.dir) != ""
@@ -172,19 +176,17 @@ func buildImportPreview(c *ui.Context, t *design.Tokens, importer contracts.Impo
 			}
 		}
 		importLabel := localized(locale, "导入数据", "Import data")
+		busyLabel := localized(locale, "导入中…", "Importing…")
 		if st.importing {
-			importLabel = localized(locale, "导入中…", "Importing…")
+			importLabel = busyLabel
 		}
-		uikit.DialogFooter(c, []uikit.DialogAction{{
-			Label: importLabel, Primary: true,
-			Disabled: st.importing || st.scanning,
-			OnClick: func() {
+		buildBusyPrimaryAction(c, t, st.importing || st.scanning, importLabel, busyLabel,
+			st.importing || st.scanning, func() {
 				if !st.importing && !st.scanning {
 					startImportData(importer, runtime, st)
 					c.Invalidate()
 				}
-			},
-		}})
+			})
 	})
 }
 

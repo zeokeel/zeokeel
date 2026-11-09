@@ -175,3 +175,38 @@ func TestArtifactsEnglishCopy(t *testing.T) {
 	withHistory.click(tester2, "Preview")
 	withHistory.assertTexts(tester2, "Artifact body", "Hide")
 }
+
+// TestArtifactsAreOfficialList covers the artifact history migration: the
+// newest-first history is a list of rows named by their titles, a row is chosen
+// with the pointer/keys, and Enter (Submitted) toggles its preview while the
+// explicit 预览/收起 button still works.
+func TestArtifactsAreOfficialList(t *testing.T) {
+	base := time.Unix(1700000000, 0)
+	history := []contracts.Artifact{
+		artifactAt("a-old", "旧工件", "旧的正文", base),
+		artifactAt("a-new", "新工件", "# 标题\n\n工件的正文内容", base.Add(time.Minute)),
+	}
+	h := newArtifactsHarness(t, newFakeChat(), rightpanel.Config{}, nil, &fakeArtifactService{history: history}, "zh")
+	tester := h.tester()
+	tester.Frame()
+	h.selectPane(tester, "文件")
+
+	if _, ok := tester.AccessByRole(ui.RoleList, "产物列表"); !ok {
+		t.Fatalf("artifact history is not a list; texts = %v", tester.Texts())
+	}
+	for _, title := range []string{"新工件", "旧工件"} {
+		if _, ok := tester.AccessByRole(ui.RoleListItem, title); !ok {
+			t.Fatalf("artifact row %q missing; texts = %v", title, tester.Texts())
+		}
+	}
+
+	// Choose the newest artifact, then Enter toggles its preview.
+	h.click(tester, "新工件")
+	tester.Key(0, ui.KeyEnter)
+	tester.Frame()
+	h.assertTexts(tester, "工件的正文内容", "收起")
+
+	// The explicit row button collapses it again.
+	h.click(tester, "收起")
+	h.assertNoTexts(tester, "工件的正文内容")
+}

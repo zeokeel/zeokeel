@@ -41,6 +41,12 @@ type catalogState struct {
 	addOpen bool
 	addErr  string
 
+	// The 模型列表 collection is the official List: keyed by model ID, named by
+	// the model name/ID and single-row selectable for the keyboard; the inline
+	// edit/remove buttons stay the row actions.
+	list ui.ListState
+	sel  int
+
 	// editAdvanced expands the editor's advanced group (generation options and
 	// custom thinking modes); it starts collapsed.
 	editAdvanced bool
@@ -161,56 +167,26 @@ func buildModelCatalogSection(c *ui.Context, store contracts.SettingsService, st
 			if len(models) == 0 {
 				uikit.EmptyState(c, localized(locale, "模型列表为空", "The model list is empty"))
 			}
-			for index, model := range models {
-				if index > 0 {
-					ui.Divider(c)
+			// The models are a collection: the official List keys the rows by
+			// model ID, names them and owns the keyboard selection; the inline
+			// edit/remove buttons keep their click semantics.
+			bindSettingsList(&st.list, &st.sel, len(models), func(index int) any {
+				if index < 0 || index >= len(models) {
+					return nil
 				}
-				model := model
-				ui.Row(c).FillWidth().PaddingY(design.Space2).
-					AlignItems(ui.Center).Gap(design.Space2).Children(func() {
-					ui.Column(c).Gap(design.Space1).Grow(1).Children(func() {
-						design.Apply(ui.Text(c, firstNonEmpty(model.Name, model.ID)), t.Text(design.TypeS)).
-							FontWeight(600).TextColor(t.LabelPrimary)
-						ui.Row(c).Gap(design.Space2).Children(func() {
-							design.Apply(ui.Text(c, model.ID), t.Font(design.TypeXS), t.MonoFamily()).
-								TextColor(t.LabelSecondary)
-							if note := strings.TrimSpace(model.Note); note != "" {
-								design.Apply(ui.Text(c, localizedCatalogNote(locale, note)),
-									t.TextMuted(design.TypeXXS))
-							}
-							if model.ContextWindow > 0 {
-								size := formatContextWindow(model.ContextWindow)
-								design.Apply(ui.Text(c, localized(locale, "上下文 "+size, size+" context")),
-									t.TextMuted(design.TypeXXS))
-							}
-						})
-						// Family and thinking configuration: the family picks the
-						// built-in mode list, so show its effective value (an
-						// empty stored family is inferred from the model ID).
-						design.Apply(ui.Text(c, catalogThinkingSummary(locale, model)),
-							t.Font(design.TypeXXS)).TextColor(t.LabelTertiary)
-						if generation := catalogGenerationSummary(locale, model); generation != "" {
-							design.Apply(ui.Text(c, generation),
-								t.Font(design.TypeXXS)).TextColor(t.LabelTertiary)
-						}
-					})
-					if design.Apply(ui.Button(c, localized(locale, "编辑", "Edit")),
-						t.SecondaryButton()).
-						Label(localized(locale, "编辑模型 ", "Edit model ") + model.ID).
-						Tooltip(localized(locale, "编辑系列与思考配置",
-							"Edit the family and thinking configuration")).Clicked() {
-						st.edit = newCatalogEditDraft(model)
-						st.editorOpen = true
-						st.editAdvanced = false
-						c.Invalidate()
-					}
-					if design.Apply(ui.Button(c, localized(locale, "删除", "Remove")),
-						t.DangerButton()).Clicked() {
-						st.confirmRemove = model.ID
-						c.Invalidate()
-					}
+				return models[index].ID
+			}, func(index int) string {
+				if index < 0 || index >= len(models) {
+					return ""
+				}
+				return firstNonEmpty(strings.TrimSpace(models[index].Name), models[index].ID)
+			})
+			ui.List(c, &st.list, len(models)).
+				Label(localized(locale, "模型列表", "Model list")).
+				Gap(design.Space1).
+				Rows(func(row ui.ListRow) {
+					buildModelCatalogRow(row.Context, t, st, models[row.Index], locale, row.Selected())
 				})
-			}
 		})
 
 		// The list is the page: adding a model is one explicit action that opens
@@ -293,6 +269,59 @@ func buildModelCatalogSection(c *ui.Context, store contracts.SettingsService, st
 		}
 		if st.edit != nil {
 			buildCatalogEditDialog(c, t, store, models, st, locale)
+		}
+	})
+}
+
+// buildModelCatalogRow renders one model-list row: the name, the ID with its
+// note and context window, the family/thinking and generation summaries, and
+// the inline edit/remove actions. The official List owns the row paint and the
+// choice, so the selected row's copy uses the accent's on-color.
+func buildModelCatalogRow(c *ui.Context, t *design.Tokens, st *catalogState,
+	model contracts.ModelInfo, locale contracts.LocaleService, selected bool) {
+	primary, secondary, tertiary := listRowTextColors(t, selected)
+	ui.Row(c).FillWidth().Padding(design.Space1, design.Space2).
+		AlignItems(ui.Center).Gap(design.Space2).Children(func() {
+		ui.Column(c).Gap(design.Space1).Grow(1).Children(func() {
+			design.Apply(ui.Text(c, firstNonEmpty(model.Name, model.ID)), t.Text(design.TypeS)).
+				FontWeight(600).TextColor(primary)
+			ui.Row(c).Gap(design.Space2).Children(func() {
+				design.Apply(ui.Text(c, model.ID), t.Font(design.TypeXS), t.MonoFamily()).
+					TextColor(secondary)
+				if note := strings.TrimSpace(model.Note); note != "" {
+					design.Apply(ui.Text(c, localizedCatalogNote(locale, note)),
+						t.Font(design.TypeXXS)).TextColor(secondary)
+				}
+				if model.ContextWindow > 0 {
+					size := formatContextWindow(model.ContextWindow)
+					design.Apply(ui.Text(c, localized(locale, "上下文 "+size, size+" context")),
+						t.Font(design.TypeXXS)).TextColor(secondary)
+				}
+			})
+			// Family and thinking configuration: the family picks the
+			// built-in mode list, so show its effective value (an empty stored
+			// family is inferred from the model ID).
+			design.Apply(ui.Text(c, catalogThinkingSummary(locale, model)),
+				t.Font(design.TypeXXS)).TextColor(tertiary)
+			if generation := catalogGenerationSummary(locale, model); generation != "" {
+				design.Apply(ui.Text(c, generation),
+					t.Font(design.TypeXXS)).TextColor(tertiary)
+			}
+		})
+		if design.Apply(ui.Button(c, localized(locale, "编辑", "Edit")),
+			t.SecondaryButton()).
+			Label(localized(locale, "编辑模型 ", "Edit model ") + model.ID).
+			Tooltip(localized(locale, "编辑系列与思考配置",
+				"Edit the family and thinking configuration")).Clicked() {
+			st.edit = newCatalogEditDraft(model)
+			st.editorOpen = true
+			st.editAdvanced = false
+			c.Invalidate()
+		}
+		if design.Apply(ui.Button(c, localized(locale, "删除", "Remove")),
+			t.DangerButton()).Clicked() {
+			st.confirmRemove = model.ID
+			c.Invalidate()
 		}
 	})
 }

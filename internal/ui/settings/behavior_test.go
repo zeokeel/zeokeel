@@ -167,7 +167,7 @@ func TestBehaviorPageCollapsesLowFrequencySections(t *testing.T) {
 	tester := h.tester()
 	tester.Frame()
 	h.click(tester, "行为")
-	h.assertTexts(tester, "默认代理权限", "更多对话设置", "排队发送：关")
+	h.assertTexts(tester, "默认代理权限", "更多对话设置", "排队发送：开")
 	h.assertNoTexts(tester, "运行中允许排队发送", "目标自动续跑",
 		"工作区指令文件", "选择对话文字大小")
 
@@ -178,9 +178,10 @@ func TestBehaviorPageCollapsesLowFrequencySections(t *testing.T) {
 	h.assertNoTexts(tester, "排队发送：")
 
 	// A representative setting still persists from inside the disclosure.
+	// Queueing defaults on, so the first click turns it off.
 	h.click(tester, "运行中允许排队发送")
-	if raw := store.get(contracts.SettingSendWhileRunning); raw != "true" {
-		t.Fatalf("collapsed-section queue toggle wrote %q, want true", raw)
+	if raw := store.get(contracts.SettingSendWhileRunning); raw != "false" {
+		t.Fatalf("collapsed-section queue toggle wrote %q, want false", raw)
 	}
 }
 
@@ -209,7 +210,7 @@ func TestBehaviorPageMoreSettingsEnglish(t *testing.T) {
 	tester := h.tester()
 	tester.Frame()
 	h.click(tester, "Behavior")
-	h.assertTexts(tester, "More conversation settings", "Queue: Off")
+	h.assertTexts(tester, "More conversation settings", "Queue: On")
 	expandMoreConversationSettings(t, tester, "More conversation settings")
 	h.assertTexts(tester, "Sending while running", "Queue prompts while running",
 		"Auto-continue goal", "Message text size", "Workspace instructions file")

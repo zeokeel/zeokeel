@@ -9,6 +9,8 @@ import (
 
 	cordis "github.com/zeokeel/zeokeel-kernel"
 
+	"github.com/egoist/mygo/ui"
+
 	"github.com/zeokeel/zeokeel/internal/contracts"
 	"github.com/zeokeel/zeokeel/internal/ui/session"
 	"github.com/zeokeel/zeokeel/internal/uiroot"
@@ -162,4 +164,45 @@ func TestFeedbackButtonsEnglish(t *testing.T) {
 	h.assertTexts(tester, "Helpful", "Not helpful")
 	h.click(tester, "Helpful")
 	h.assertNoTexts(tester, "Rated")
+}
+
+// TestFeedbackButtonsUseOfficialToggles covers the migration away from
+// hand-painted selected buttons: the two ratings are official toggle buttons
+// (pressed state reaches assistive technology), mutually exclusive, and pressing
+// the pressed one clears the rating.
+func TestFeedbackButtonsUseOfficialToggles(t *testing.T) {
+	chat := feedbackSessionChat()
+	h := newFeedbackHarness(t, chat)
+	tester := h.tester()
+	h.click(tester, "消息操作")
+
+	good, ok := tester.AccessByRole(ui.RoleToggleButton, "有帮助")
+	if !ok || good.Role != ui.RoleToggleButton || good.Checked {
+		t.Fatalf("good rating toggle: %+v found %v", good, ok)
+	}
+	bad, ok := tester.AccessByRole(ui.RoleToggleButton, "没帮助")
+	if !ok || bad.Checked {
+		t.Fatalf("bad rating toggle: %+v found %v", bad, ok)
+	}
+
+	// Pressing good persists it and the toggle reads pressed.
+	h.click(tester, "有帮助")
+	if call := chat.lastCall(t); call.feedback != contracts.FeedbackGood {
+		t.Fatalf("good feedback call = %+v", call)
+	}
+	if info, ok := tester.AccessByRole(ui.RoleToggleButton, "有帮助"); !ok || !info.Checked {
+		t.Fatalf("good toggle not pressed after saving good: %+v found %v", info, ok)
+	}
+	if info, _ := tester.AccessByRole(ui.RoleToggleButton, "没帮助"); info.Checked {
+		t.Fatalf("bad toggle pressed while good is the rating: %+v", info)
+	}
+
+	// Pressing good again clears it (click-again-clears).
+	h.click(tester, "有帮助")
+	if call := chat.lastCall(t); call.feedback != "" {
+		t.Fatalf("toggle clear call = %+v", call)
+	}
+	if info, _ := tester.AccessByRole(ui.RoleToggleButton, "有帮助"); info.Checked {
+		t.Fatalf("good toggle still pressed after clearing: %+v", info)
+	}
 }

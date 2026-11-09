@@ -162,18 +162,26 @@ func newHarnessWithStore(t *testing.T, chat contracts.ChatService, store contrac
 	return newHarnessFull(t, chat, cfg, nil, store, nil, nil)
 }
 
-// newHarnessWithSettings is newHarness with an optional settings store (the
-// archived-sessions view toggle lives there).
+// newHarnessWithSettings is newHarness with an optional settings store. The
+// sidebar no longer reads any sidebar view setting (there is no view menu), but
+// a host still provides the store and the harness keeps the seam honest.
 func newHarnessWithSettings(t *testing.T, chat contracts.ChatService, settings contracts.SettingsService, cfg sidebar.Config) *harness {
 	t.Helper()
 	return newHarnessFull(t, chat, cfg, nil, nil, settings, nil)
 }
 
 // newHarnessWithSettingsAndWorkspace adds both the workspace and settings
-// backends (the workspace tree's archived group counts need both).
+// backends (a host provides settings even though the sidebar ignores them).
 func newHarnessWithSettingsAndWorkspace(t *testing.T, chat contracts.ChatService, settings contracts.SettingsService, workspace contracts.WorkspaceService, cfg sidebar.Config) *harness {
 	t.Helper()
 	return newHarnessFull(t, chat, cfg, workspace, nil, settings, nil)
+}
+
+// newHarnessWithWorkspaceAndNotifier builds the workspace tree with the host
+// toast bridge, for the add-workspace feedback tests.
+func newHarnessWithWorkspaceAndNotifier(t *testing.T, chat contracts.ChatService, workspace contracts.WorkspaceService, notifier contracts.Notifier, cfg sidebar.Config) *harness {
+	t.Helper()
+	return newHarnessFull(t, chat, cfg, workspace, nil, nil, notifier)
 }
 
 // newHarnessFull builds the sidebar harness with the optional workspace and
@@ -593,6 +601,44 @@ func TestSidebarRenameFlow(t *testing.T) {
 	// The read model refreshed: the list shows the new title.
 	h.assertTexts(tester, "新标题")
 	h.assertNoTexts(tester, "旧标题")
+}
+
+// TestSidebarRenameDialogEnterAndFocus covers the dialog-convention migration:
+// the rename Modal opens with its input focused, Enter saves in place, and Esc
+// cancels without renaming.
+func TestSidebarRenameDialogEnterAndFocus(t *testing.T) {
+	base := &fakeChat{
+		sessions: []contracts.ChatSessionInfo{{ID: "s1", Title: "原标题"}},
+		active:   "s1",
+	}
+	chat := &renamerChat{fakeChat: base}
+	h := newHarness(t, chat, sidebar.Config{})
+	tester := h.tester()
+
+	openRowMenu(t, tester, "原标题")
+	clickLabel(t, tester, "重命名")
+	if !tester.Focused("会话标题") {
+		t.Fatalf("rename dialog did not focus its input; texts = %v", tester.Texts())
+	}
+	tester.Key(ui.Cmd, ui.KeyA)
+	tester.Type("回车保存")
+	tester.Frame()
+	tester.Key(0, ui.KeyEnter)
+	tester.Frame()
+	h.assertNoTexts(tester, "重命名会话")
+	if calls := chat.renameCalls(); len(calls) != 1 || calls[0].ID != "s1" || calls[0].Title != "回车保存" {
+		t.Fatalf("RenameSession calls = %+v, want s1/回车保存", calls)
+	}
+
+	// Esc closes without renaming.
+	openRowMenu(t, tester, "回车保存")
+	clickLabel(t, tester, "重命名")
+	tester.Key(0, ui.KeyEscape)
+	tester.Frame()
+	h.assertNoTexts(tester, "重命名会话")
+	if calls := chat.renameCalls(); len(calls) != 1 {
+		t.Fatalf("Esc renamed: %+v", calls)
+	}
 }
 
 func TestSidebarRenameCancelAndEmptyTitle(t *testing.T) {

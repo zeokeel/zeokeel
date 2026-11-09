@@ -8,6 +8,8 @@ import (
 	"fmt"
 	"testing"
 
+	"github.com/egoist/mygo/ui"
+
 	"github.com/zeokeel/zeokeel/internal/contracts"
 	"github.com/zeokeel/zeokeel/internal/ui/settings"
 )
@@ -32,10 +34,30 @@ func TestDiagnosticsLoadedModules(t *testing.T) {
 	h.click(tester, "诊断")
 
 	h.assertTexts(tester, "已加载模块 3 个")
+	// Nothing of the collection shows until the disclosure opens.
 	h.assertNoTexts(tester, "zeokeel/appinfo", "zeokeel/skills")
 	h.click(tester, "展开模块列表")
 	h.assertTexts(tester, "appinfo", "zeokeel/appinfo", "active",
 		"store", "zeokeel/sessionstore", "skills", "zeokeel/skills", "failed")
+
+	// The rows are the official List: list/listitem roles, keyed and named by
+	// the assembly entry id, single-row selection for the keyboard.
+	requireList(t, tester, "已加载模块列表")
+	first := requireListItem(t, tester, "appinfo")
+	if first.PosInSet != 1 || first.SetSize != 3 {
+		t.Fatalf("first module row position = %d of %d, want 1 of 3", first.PosInSet, first.SetSize)
+	}
+	requireListItem(t, tester, "store")
+	requireListItem(t, tester, "skills")
+	if err := tester.Click("appinfo"); err != nil {
+		t.Fatalf("click module row: %v; texts = %v", err, tester.Texts())
+	}
+	tester.Frame()
+	tester.Key(0, ui.KeyDown)
+	tester.Frame()
+	if !requireListItem(t, tester, "store").Selected {
+		t.Fatalf("Down did not move the loaded-module selection; texts = %v", tester.Texts())
+	}
 }
 
 func TestDiagnosticsLoadedModulesCappedAt40(t *testing.T) {
@@ -54,6 +76,12 @@ func TestDiagnosticsLoadedModulesCappedAt40(t *testing.T) {
 	h.click(tester, "展开模块列表")
 	h.assertTexts(tester, "entry-39", "…")
 	h.assertNoTexts(tester, "entry-40", "entry-41")
+	if rows := requireList(t, tester, "已加载模块列表"); rows.Bounds.H <= 0 {
+		t.Fatalf("loaded-module list has no laid-out area")
+	}
+	if _, ok := tester.AccessByRole(ui.RoleListItem, "entry-40"); ok {
+		t.Fatalf("the loaded-module list renders past the 40-row cap")
+	}
 }
 
 func TestDiagnosticsLoadedModulesHiddenWithoutService(t *testing.T) {

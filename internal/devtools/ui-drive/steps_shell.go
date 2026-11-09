@@ -5,6 +5,10 @@ package main
 // uiroot/shell rather than at a page module.
 
 import (
+	"context"
+	"os"
+	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/egoist/mygo/ui"
@@ -188,6 +192,71 @@ func (d *drive) runSidebarSteps() {
 			d.drain(2)
 			c.require(!d.uiRoot.SidebarCollapsed(), "再次 Cmd+B 后 SidebarCollapsed()=true")
 			c.shot("sidebar-expanded")
+		})
+
+	d.step("sidebar-workspace-new-chat", "uiroot", "侧栏：按工作区分组 + 工作区行新建会话",
+		"侧栏没有「视图」菜单；新添加的空工作区按最近活动排在最上并自动成为当前；其行右侧「在 “X” 中新建会话」点击后在该工作区创建会话并进入会话页", func(c *check) {
+			d.resetToSession()
+			for _, label := range []string{"视图", "按名称排序", "平铺"} {
+				c.require(!d.has(label), "侧栏仍有已移除的视图菜单「%s」", label)
+			}
+			workspaces, err := d.root.Require(contracts.KeyWorkspace)
+			if err != nil {
+				c.failf("require workspace: %v", err)
+				return
+			}
+			// A freshly added, empty workspace (the direct-picker flow): it is
+			// current at once and therefore visible with its own ⊕.
+			// A short, deterministic folder name: the backend derives the
+			// workspace name from it, and a very long random name overflows the
+			// 280 DIP group row and pushes its row actions out of the sidebar (a
+			// separate layout finding reported to the Lead, not asserted here).
+			extraRoot := filepath.Join(d.dataDir, "zk-new")
+			if err := os.MkdirAll(extraRoot, 0o700); err != nil {
+				c.failf("mkdir extra workspace: %v", err)
+				return
+			}
+			created, err := workspaces.Create(context.Background(), "", extraRoot)
+			if err != nil {
+				c.failf("create extra workspace: %v", err)
+				return
+			}
+			d.frame()
+			label := "在“" + created.Name + "”中新建会话"
+			rect, ok := d.find(label)
+			if !ok {
+				c.failf("新工作区行缺少 ⊕「%s」；texts=%v", label, d.texts())
+				return
+			}
+			// Groups are ordered by recent activity: the fresh workspace (no
+			// sessions, CreatedAt newest) sits above the seeded one.
+			if oldRect, ok := d.find("drive-workspace"); ok && rect.Y >= oldRect.Y {
+				c.failf("新工作区没有按最近活动排到顶部：new y=%.0f, old y=%.0f", rect.Y, oldRect.Y)
+			}
+			before := len(d.chat().Sessions())
+			// tester.Click validates that the clicked point really reaches the
+			// labeled control (a raw ClickAt would hit the row and only fold it).
+			if err := d.click(label); err != nil {
+				c.failf("点击工作区行 ⊕ 失败：%v", err)
+				return
+			}
+			d.drain(3)
+			after := d.chat().Sessions()
+			if len(after) != before+1 {
+				c.failf("点击工作区行 ⊕ 后会话数 %d → %d，期望 +1", before, len(after))
+				return
+			}
+			active := d.chat().ActiveSession()
+			bound := false
+			for _, info := range after {
+				if info.ID == active && strings.TrimSpace(info.WorkspaceID) == created.ID {
+					bound = true
+				}
+			}
+			c.require(bound, "新会话没有绑定到点击的工作区（active=%q workspace=%q）", active, created.ID)
+			c.require(d.uiRoot.Navigator().Current() == "session",
+				"点击 ⊕ 后没有进入会话页（Current=%q）", d.uiRoot.Navigator().Current())
+			c.shot("sidebar-workspace-new-chat")
 		})
 
 	d.step("sidebar-footer", "uiroot", "侧栏：底部设置入口",

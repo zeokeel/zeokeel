@@ -50,7 +50,8 @@ type Config struct {
 	ArgumentsLabel string `json:"argumentsLabel"`
 	// AllowLabel permits this one call (default "允许").
 	AllowLabel string `json:"allowLabel"`
-	// AllowAlwaysLabel permits this tool from now on (default "总是允许").
+	// AllowAlwaysLabel permits this tool for the rest of the session (default
+	// "本会话内始终允许"; the choice can be revoked from the session menu).
 	AllowAlwaysLabel string `json:"allowAlwaysLabel"`
 	// DenyLabel rejects the call (default "拒绝").
 	DenyLabel string `json:"denyLabel"`
@@ -63,7 +64,7 @@ func (c Config) resolved() Config {
 		ToolLabel:        firstNonEmpty(c.ToolLabel, "工具"),
 		ArgumentsLabel:   firstNonEmpty(c.ArgumentsLabel, "参数"),
 		AllowLabel:       firstNonEmpty(c.AllowLabel, "允许"),
-		AllowAlwaysLabel: firstNonEmpty(c.AllowAlwaysLabel, "本次运行内始终允许"),
+		AllowAlwaysLabel: firstNonEmpty(c.AllowAlwaysLabel, "本会话内始终允许"),
 		DenyLabel:        firstNonEmpty(c.DenyLabel, "拒绝"),
 	}
 }
@@ -182,7 +183,7 @@ func buildDialog(c *ui.Context, runtime contracts.UIRuntime, approvals contracts
 		st.argsOpen = false
 	}
 	ui.Modal(c, &st.open, func() {
-		requestPanel(c, runtime, approvals, cfg, st, request)
+		requestPanel(c, runtime, approvals, cfg, st, request, len(pending))
 	})
 	if !st.open {
 		// Escape or a backdrop click closed the native Modal. Treat it as
@@ -201,22 +202,32 @@ func buildDialog(c *ui.Context, runtime contracts.UIRuntime, approvals contracts
 // tool, a one-line impact statement, the summary first (a command for shell
 // tools), the argument details collapsed and the decision footer.
 //
-// Safety default (H4): there is no dialog-wide Enter shortcut. The Deny button
-// is focused as the request opens, so Enter presses the focused button — a
-// high-risk tool is never allowed by a stray Enter; allowing needs Tab-to-Allow
-// (or a click). The footer order follows the product convention: danger first,
-// secondary, accent primary last.
-func requestPanel(c *ui.Context, runtime contracts.UIRuntime, approvals contracts.Approvals, cfg Config, st *state, request contracts.ApprovalRequest) {
+// Safety default (H4, revised after reviewing a real session): the dialog has
+// NO default action and does not autofocus a button. Pressing Enter right after
+// sending a prompt used to land on the auto-focused Deny and accidentally
+// reject the call; a real Windows session export shows exactly that. With no
+// default action a stray Enter decides nothing: Esc still denies explicitly,
+// and allow/deny need a click or Tab + Enter on the chosen button. The footer
+// order follows the product convention: danger first, secondary, accent
+// primary last.
+func requestPanel(c *ui.Context, runtime contracts.UIRuntime, approvals contracts.Approvals, cfg Config, st *state,
+	request contracts.ApprovalRequest, pendingCount int) {
 	t := design.Of(c)
 	title := st.localized(cfg.Title, "需要审批", "Approval required")
 	toolLabel := st.localized(cfg.ToolLabel, "工具", "Tool")
 	argumentsLabel := st.localized(cfg.ArgumentsLabel, "参数", "Arguments")
 	allowLabel := st.localized(cfg.AllowLabel, "允许", "Allow")
-	allowAlwaysLabel := st.localized(cfg.AllowAlwaysLabel, "本次运行内始终允许", "Always allow this run")
+	allowAlwaysLabel := st.localized(cfg.AllowAlwaysLabel, "本会话内始终允许", "Always allow in this session")
 	denyLabel := st.localized(cfg.DenyLabel, "拒绝", "Deny")
 	summary := strings.TrimSpace(request.Summary)
 	arguments := strings.TrimSpace(request.Arguments)
 	emptyArguments := arguments == "" || arguments == "{}" || arguments == "[]" || arguments == "null"
+	// The friendly name is what the user reads; the raw tool ID stays in the
+	// badge's tooltip (and is what the backend reports back).
+	toolName := uikit.ToolDisplayName(st.locale, request.Tool)
+	if toolName == "" {
+		toolName = request.Tool
+	}
 
 	// The native Modal sizes its panel around this content; the brand spacing
 	// keeps the dialog on the same 4 DIP grid as the settings pages.
@@ -230,11 +241,20 @@ func requestPanel(c *ui.Context, runtime contracts.UIRuntime, approvals contract
 				TextColor(t.Accent)
 			design.Apply(ui.Text(c, title), t.Font(design.TypeL)).FontWeight(600).
 				TextColor(t.LabelPrimary)
+			if pendingCount > 1 {
+				// A quiet counter, not another dialog: the rest are queued behind
+				// this one and appear as each is resolved.
+				ui.Spacer(c).Grow(1)
+				design.Apply(ui.Text(c, fmt.Sprintf(
+					st.tr("还有 %d 个待审批请求", "%d more approval requests waiting"), pendingCount-1)),
+					t.TextMuted(design.TypeXXS)).NoWrap()
+			}
 		})
 		// The tool is named once: label + badge, with the impact in one line.
+		// The badge shows the friendly localized name; the raw ID is its tooltip.
 		ui.Row(c).AlignItems(ui.Center).Gap(design.Space2).Children(func() {
 			design.Apply(ui.Text(c, toolLabel), t.TextMuted(design.TypeXS))
-			design.Apply(ui.Badge(c, request.Tool), t.Badge())
+			design.Apply(ui.Badge(c, toolName), t.Badge()).Tooltip(request.Tool)
 		})
 		// The approval only lets the call through the gate: the sandbox policy
 		// still runs it and may deny it, so the copy must not promise execution
@@ -283,14 +303,14 @@ func requestPanel(c *ui.Context, runtime contracts.UIRuntime, approvals contract
 		}
 		ui.Divider(c)
 		// The product's one dialog action bar: the destructive Deny first, the
-		// run-scoped allow, the accent Allow last (rightmost). Deny is the
-		// footer's Default action, focused as the request opens, so Enter
-		// denies and allowing needs a deliberate Tab or click. The footer is
-		// keyed by request so a following request builds fresh buttons and its
-		// Default takes the focus again.
+		// session-scoped allow, the accent Allow last (rightmost). No action is
+		// the Default and nothing is auto-focused, so a stray Enter (the user
+		// often presses it right after sending) decides nothing — neither an
+		// accidental allow nor an accidental deny. Esc remains the explicit
+		// deny shortcut; a decision needs a click or Tab + Enter.
 		c.Key("approval.footer/" + request.ID)
 		uikit.DialogFooter(c, []uikit.DialogAction{
-			{Label: denyLabel, Danger: true, Default: true, OnClick: func() {
+			{Label: denyLabel, Danger: true, OnClick: func() {
 				resolve(runtime, approvals, st, contracts.ApprovalDeny)
 			}},
 			{Label: allowAlwaysLabel, OnClick: func() {
@@ -300,10 +320,17 @@ func requestPanel(c *ui.Context, runtime contracts.UIRuntime, approvals contract
 				resolve(runtime, approvals, st, contracts.ApprovalAllow)
 			}},
 		})
-		// The key semantics are visible: Esc denies, and Enter presses whatever
-		// control has the focus (Deny by default) — never a dialog-wide Allow.
-		design.Apply(ui.Text(c, st.tr("Esc = 拒绝本次调用 · Enter 执行当前聚焦的按钮",
-			"Esc = deny this call · Enter presses the focused button")),
+		// The middle choice is session-scoped, not run-scoped: say so once in
+		// quiet copy, including where the user can take it back. Without this
+		// line the label reads as another one-off allow and the user keeps
+		// re-approving the same tool.
+		design.Apply(ui.Text(c, st.tr("「本会话内始终允许」在本会话内不再询问该工具；可在会话设置菜单清除。",
+			"\"Always allow in this session\" stops this tool's prompts for this conversation; clear it from the session settings menu.")),
+			t.TextMuted(design.TypeXXS)).MaxLines(2)
+		// The key semantics are visible: Esc denies explicitly, and there is no
+		// default action, so a stray Enter decides nothing.
+		design.Apply(ui.Text(c, st.tr("Esc = 拒绝本次调用 · 点击或 Tab 选择操作（无默认操作）",
+			"Esc = deny this call · click or Tab to choose an action (no default action)")),
 			t.TextMuted(design.TypeXXS))
 	})
 }

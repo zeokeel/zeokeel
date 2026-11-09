@@ -529,7 +529,13 @@ func (s *Service) Delete(ctx context.Context, id string) error {
 	previousCurrent := s.currentID
 	s.workspaces = append(append([]contracts.Workspace(nil), s.workspaces[:index]...), s.workspaces[index+1:]...)
 	if s.currentID == id {
-		s.currentID = ""
+		// Deleting the open workspace must not leave the product with no root:
+		// an empty current workspace makes every file and shell tool fail
+		// closed on an empty sandbox root. Fall back to the most recently
+		// created remaining workspace ("" only when none remain); the fallback
+		// is persisted by the same atomic write and rolled back with it on
+		// failure.
+		s.currentID = s.fallbackCurrentLocked()
 	}
 	if err := s.persistLocked(); err != nil {
 		s.workspaces = previous
@@ -537,6 +543,26 @@ func (s *Service) Delete(ctx context.Context, id string) error {
 		return err
 	}
 	return nil
+}
+
+// fallbackCurrentLocked picks the current workspace after the current one was
+// deleted: the most recently created remaining workspace. Ties are broken by
+// registry order (later entries are newer), so the choice is deterministic
+// across loads even for equal or legacy zero CreatedAt values. It returns ""
+// when no workspace remains.
+func (s *Service) fallbackCurrentLocked() string {
+	selected := ""
+	var newest time.Time
+	for _, workspace := range s.workspaces {
+		if workspace.ID == "" {
+			continue
+		}
+		if selected == "" || !workspace.CreatedAt.Before(newest) {
+			selected = workspace.ID
+			newest = workspace.CreatedAt
+		}
+	}
+	return selected
 }
 
 // currentWorkspaceRoot returns the current workspace and its canonical root.

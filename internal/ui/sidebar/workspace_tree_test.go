@@ -9,6 +9,7 @@ import (
 	"errors"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/egoist/mygo/ui"
 
@@ -141,16 +142,112 @@ func TestWorkspaceTreeCountsAndCurrentBadge(t *testing.T) {
 	h := newHarnessWithWorkspace(t, treeChat(), sidebar.Config{}, workspace)
 	tester := h.tester()
 
-	// The current workspace name appears as the section badge, the row's
-	// accessible label and the row's text: three labels, one visual row.
-	if got := countText(tester, "项目一"); got != 3 {
-		t.Fatalf("当前工作区 name labels = %d, want 3 (badge + row label + row text); texts = %v", got, tester.Texts())
+	// The current workspace name appears as the row's accessible label and the
+	// row's text: two labels, one visual row. The header no longer repeats it.
+	if got := countText(tester, "项目一"); got != 2 {
+		t.Fatalf("当前工作区 name labels = %d, want 2 (row label + row text); texts = %v", got, tester.Texts())
 	}
 	// Group counts: 项目一=2, 项目二=1, 未分组=2 (empty + unknown workspace id).
 	h.assertTexts(tester, "2", "1")
 	if got := countText(tester, "2"); got != 2 {
 		t.Fatalf("badge 2 count = %d, want 2 (项目一 and 未分组); texts = %v", got, tester.Texts())
 	}
+}
+
+// TestWorkspaceGroupsOrderByRecentActivity pins the one product ordering: groups
+// sort by their newest visible session (UpdatedAt desc), a workspace without
+// visible sessions uses its CreatedAt (so a fresh workspace is on top), and an
+// archived session never lifts a group (it is not visible in the sidebar).
+func TestWorkspaceGroupsOrderByRecentActivity(t *testing.T) {
+	base := time.Unix(1_700_000_000, 0)
+	workspaces := []contracts.Workspace{
+		{ID: "w-old", Name: "旧项目", Root: "/work/old", CreatedAt: base.Add(-10 * time.Hour)},
+		{ID: "w-active", Name: "活跃项目", Root: "/work/active", CreatedAt: base.Add(-9 * time.Hour)},
+		{ID: "w-empty", Name: "新建项目", Root: "/work/empty", CreatedAt: base},
+	}
+	chat := &fakeChat{sessions: []contracts.ChatSessionInfo{
+		{ID: "s-old", Title: "旧会话", WorkspaceID: "w-old", UpdatedAt: base.Add(-5 * time.Hour)},
+		{ID: "s-active", Title: "活跃会话", WorkspaceID: "w-active", UpdatedAt: base.Add(-time.Hour)},
+		{ID: "s-archived", Title: "归档会话", WorkspaceID: "w-old", Archived: true, UpdatedAt: base.Add(time.Hour)},
+	}}
+	h := newHarnessWithWorkspace(t, chat, sidebar.Config{}, newFakeWorkspace(workspaces...))
+	tester := h.tester()
+
+	texts := tester.Texts()
+	empty, active, old := textIndex(texts, "新建项目"), textIndex(texts, "活跃项目"), textIndex(texts, "旧项目")
+	if !(empty >= 0 && empty < active && active < old) {
+		t.Fatalf("group order = 新建项目:%d 活跃项目:%d 旧项目:%d; want the empty workspace's CreatedAt first; texts = %v",
+			empty, active, old, texts)
+	}
+	h.assertNoTexts(tester, "归档会话")
+}
+
+// TestWorkspaceGroupTooltipIsRoot keeps the duplicate-basename case readable:
+// resting the pointer on the group row shows the workspace's full root, so two
+// folders with the same base name stay apart.
+func TestWorkspaceGroupTooltipIsRoot(t *testing.T) {
+	workspace := newFakeWorkspace(contracts.Workspace{ID: "w1", Name: "src", Root: "/projects/one/src"})
+	h := newHarnessWithWorkspace(t, &fakeChat{}, sidebar.Config{}, workspace)
+	tester := h.tester()
+	rect, ok := tester.Find("src")
+	if !ok {
+		t.Fatalf("workspace group row missing; texts = %v", tester.Texts())
+	}
+	tester.Move(rect.X+rect.W/2, rect.Y+rect.H/2)
+	tester.Advance(700 * time.Millisecond)
+	tester.Frame()
+	if !tester.HasText("/projects/one/src") {
+		t.Fatalf("workspace row tooltip does not show its root; texts = %v", tester.Texts())
+	}
+}
+
+// TestWorkspaceTreeRendersWithZeroSessions is the fresh-install / first-added
+// workspace state: with the workspace backend present the tree (and therefore
+// the per-workspace new-chat action) renders even when no conversation exists.
+func TestWorkspaceTreeRendersWithZeroSessions(t *testing.T) {
+	workspace := newFakeWorkspace(treeWorkspaces()...).withCurrent(contracts.Workspace{ID: "w1", Name: "项目一", Root: "/work/one"})
+	h := newHarnessWithWorkspace(t, &fakeChat{}, sidebar.Config{}, workspace)
+	tester := h.tester()
+
+	h.assertTexts(tester, "工作区", "项目一", "项目二", "0")
+	h.assertNoTexts(tester, "还没有会话")
+	// The group row still carries both row actions.
+	if _, ok := tester.Find("工作区操作：项目一"); !ok {
+		t.Fatalf("zero-session workspace row lost its ⋯ action; texts = %v", tester.Texts())
+	}
+	// The current workspace row exposes its new-chat action without a hover:
+	// clicking it is the proof (the tester refuses to click an inert control).
+	if err := tester.Click(plusLabel("项目一")); err != nil {
+		t.Fatalf("per-workspace new-chat button missing or hidden on the current workspace: %v; texts = %v",
+			err, tester.Texts())
+	}
+	tester.Frame()
+	tester.Frame()
+	if current := h.uiRoot.Navigator().Current(); current != "session" {
+		t.Fatalf("clicking the zero-session workspace's new-chat button did not open the session screen: %q", current)
+	}
+}
+
+// TestWorkspaceTreeEmptyBackendCopy covers a workspace backend with no
+// registered workspace: the section keeps the add action and says what to do.
+func TestWorkspaceTreeEmptyBackendCopy(t *testing.T) {
+	h := newHarnessWithWorkspace(t, &fakeChat{}, sidebar.Config{}, newFakeWorkspace())
+	tester := h.tester()
+	h.assertTexts(tester, "工作区", "添加工作区", "还没有工作区", "点击 + 添加工作区")
+	h.assertNoTexts(tester, "还没有会话")
+}
+
+// TestWorkspaceTreeSearchNoMatchCopy keeps the search empty state inside the
+// tree area (the section itself never disappears).
+func TestWorkspaceTreeSearchNoMatchCopy(t *testing.T) {
+	workspace := newFakeWorkspace(treeWorkspaces()...)
+	h := newHarnessWithWorkspace(t, treeChat(), sidebar.Config{}, workspace)
+	tester := h.tester()
+	clickLabel(t, tester, "搜索会话与消息")
+	tester.Type("zzz")
+	tester.Frame()
+	h.assertTexts(tester, "工作区", "没有匹配的会话")
+	h.assertNoTexts(tester, "A 会话", "项目一")
 }
 
 func TestWorkspaceTreeCollapse(t *testing.T) {

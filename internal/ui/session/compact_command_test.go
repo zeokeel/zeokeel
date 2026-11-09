@@ -159,6 +159,9 @@ func TestCompactCommandShowsLoading(t *testing.T) {
 	if !tester.HasText("压缩中…") {
 		t.Fatalf("in-flight compaction has no loading state; texts = %v", tester.Texts())
 	}
+	if info, ok := tester.AccessByRole(ui.RoleProgress, "压缩中…"); !ok || info.Role != ui.RoleProgress {
+		t.Fatalf("compaction busy state is not a progress indicator: %+v found %v", info, ok)
+	}
 	close(chat.release)
 	if !waitCompactToast(t, h, tester, notifier, "已压缩") {
 		t.Fatalf("compaction result toast missing; texts = %v", tester.Texts())

@@ -35,6 +35,12 @@ type lspState struct {
 	active       string
 	activeStored string
 
+	// The language-server collection is the official List: keyed by server
+	// name, named by it and single-row selectable; the inline 设为活动/移除
+	// actions stay the row actions.
+	list ui.ListState
+	sel  int
+
 	name       string
 	command    string
 	args       string
@@ -162,6 +168,42 @@ func removeLSPServer(st *lspState, store contracts.SettingsService,
 	st.refreshActive()
 }
 
+// buildLSPServerRow renders one language server: its name, command summary, the
+// active badge or set-active action, and remove. The official List owns the row
+// paint and the choice, so the selected row's copy uses the accent's on-color.
+func buildLSPServerRow(c *ui.Context, t *design.Tokens, store contracts.SettingsService,
+	st *lspState, index int, locale contracts.LocaleService, selected bool) {
+	server := st.servers[index]
+	primary, _, tertiary := listRowTextColors(t, selected)
+	active := st.active != "" && server.Name == st.active
+	ui.Row(c).FillWidth().Padding(design.Space1, design.Space2).
+		AlignItems(ui.Center).Gap(design.Space2).Children(func() {
+		design.Apply(ui.Text(c, server.Name), t.Font(design.TypeS)).
+			FontWeight(600).TextColor(primary)
+		summary := server.Command
+		if args := strings.Join(server.Args, " "); args != "" {
+			summary += " " + args
+		}
+		design.Apply(ui.Text(c, summary), t.Font(design.TypeXS), t.MonoFamily()).
+			TextColor(tertiary).Grow(1).MaxLines(1).Ellipsis("…")
+		if active {
+			design.Apply(ui.Badge(c, localized(locale, "活动中", "Active")), t.Badge()).
+				TextColor(t.SuccessText)
+		} else {
+			if design.Apply(ui.Button(c, localized(locale, "设为活动", "Set active")),
+				t.SecondaryButton()).Clicked() {
+				setActiveLSPServer(st, store, server.Name, locale)
+				c.Invalidate()
+			}
+		}
+		if design.Apply(ui.Button(c, localized(locale, "移除", "Remove")),
+			t.DangerButton()).Clicked() {
+			st.confirmRemove = server.Name
+			c.Invalidate()
+		}
+	})
+}
+
 // setActiveLSPServer stores the active server choice.
 func setActiveLSPServer(st *lspState, store contracts.SettingsService,
 	name string, locale contracts.LocaleService) {
@@ -211,37 +253,27 @@ func buildLSPPage(c *ui.Context, store contracts.SettingsService, st *lspState, 
 				uikit.EmptyState(c, localized(locale,
 					"还没有配置语言服务器", "No language servers configured"))
 			}
-			for _, server := range st.servers {
-				server := server
-				active := st.active != "" && server.Name == st.active
-				ui.Divider(c)
-				ui.Row(c).FillWidth().PaddingY(design.Space1).
-					AlignItems(ui.Center).Gap(design.Space2).Children(func() {
-					design.Apply(ui.Text(c, server.Name), t.Font(design.TypeS)).
-						FontWeight(600).TextColor(t.LabelPrimary)
-					summary := server.Command
-					if args := strings.Join(server.Args, " "); args != "" {
-						summary += " " + args
-					}
-					design.Apply(ui.Text(c, summary), t.Font(design.TypeXS), t.MonoFamily()).
-						TextColor(t.LabelTertiary).Grow(1).MaxLines(1).Ellipsis("…")
-					if active {
-						design.Apply(ui.Badge(c, localized(locale, "活动中", "Active")), t.Badge()).
-							TextColor(t.SuccessText)
-					} else {
-						if design.Apply(ui.Button(c, localized(locale, "设为活动", "Set active")),
-							t.SecondaryButton()).Clicked() {
-							setActiveLSPServer(st, store, server.Name, locale)
-							c.Invalidate()
-						}
-					}
-					if design.Apply(ui.Button(c, localized(locale, "移除", "Remove")),
-						t.DangerButton()).Clicked() {
-						st.confirmRemove = server.Name
-						c.Invalidate()
-					}
+			// The servers are a collection: the official List keys the rows by
+			// name, names them and owns the keyboard selection; the inline
+			// set-active/remove actions keep their click semantics.
+			bindSettingsList(&st.list, &st.sel, len(st.servers), func(index int) any {
+				if index < 0 || index >= len(st.servers) {
+					return nil
+				}
+				return strings.TrimSpace(st.servers[index].Name)
+			}, func(index int) string {
+				if index < 0 || index >= len(st.servers) {
+					return ""
+				}
+				return firstNonEmpty(strings.TrimSpace(st.servers[index].Name),
+					localized(locale, "(未命名服务器)", "(Untitled server)"))
+			})
+			ui.List(c, &st.list, len(st.servers)).
+				Label(localized(locale, "语言服务器列表", "Language servers list")).
+				Gap(design.Space1).
+				Rows(func(row ui.ListRow) {
+					buildLSPServerRow(row.Context, t, store, st, row.Index, locale, row.Selected())
 				})
-			}
 			design.Apply(ui.Text(c, localized(locale, "重启生效；仅活动服务器在启动时拉起。",
 				"Restart to apply; only the active server starts at launch.")),
 				t.TextMuted(design.TypeXXXS)).MaxLines(2)

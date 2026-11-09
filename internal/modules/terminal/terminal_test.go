@@ -15,6 +15,7 @@ import (
 	"sync"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	cordis "github.com/zeokeel/zeokeel-kernel"
 	"github.com/zeokeel/zeokeel-kernel/module"
@@ -409,5 +410,38 @@ func TestRunConcurrent(t *testing.T) {
 	close(errs)
 	for err := range errs {
 		t.Fatal(err)
+	}
+}
+
+// TestDecodeCombinedOutput pins the Windows console encoding repair used by Run:
+// GBK/cp936 and UTF-16LE command output becomes valid UTF-8, ordinary UTF-8 is
+// untouched, and the byte budget is applied after decoding (never mid-rune).
+func TestDecodeCombinedOutput(t *testing.T) {
+	gbkChinese := []byte{0xD6, 0xD0, 0xCE, 0xC4} // "中文" in GBK/cp936
+	utf16LE := []byte{0xFF, 0xFE, 0x2D, 0x4E, 0x87, 0x65}
+	cases := []struct {
+		name string
+		raw  []byte
+		max  int
+		want string
+	}{
+		{name: "empty", raw: nil, max: 0, want: ""},
+		{name: "ascii untouched", raw: []byte("hello\n"), max: 0, want: "hello\n"},
+		{name: "valid utf8 untouched", raw: []byte("中文输出\n"), max: 0, want: "中文输出\n"},
+		{name: "gbk chinese decoded", raw: gbkChinese, max: 0, want: "中文"},
+		{name: "utf16le bom decoded", raw: utf16LE, max: 0, want: "中文"},
+		{name: "truncation after decoding keeps whole runes", raw: gbkChinese, max: 3, want: "中"},
+		{name: "truncation bounds repaired text", raw: []byte("abcdefghij"), max: 8, want: "abcdefgh"},
+	}
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			got := decodeCombinedOutput(testCase.raw, testCase.max)
+			if got != testCase.want {
+				t.Fatalf("decodeCombinedOutput(%q, %d) = %q, want %q", testCase.raw, testCase.max, got, testCase.want)
+			}
+			if !utf8.ValidString(got) {
+				t.Fatalf("decodeCombinedOutput returned invalid UTF-8 %q", got)
+			}
+		})
 	}
 }

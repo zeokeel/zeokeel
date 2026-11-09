@@ -509,10 +509,13 @@ func (s *pageSyncer) close() {
 type diagnosticRow struct{ Label, Value string }
 
 // diagnosticsState is the diagnostics page's UI state: whether the copy action
-// just ran (so the page can show a short confirmation).
+// just ran (so the page can show a short confirmation), the module disclosure
+// and the official List state of the loaded-module collection.
 type diagnosticsState struct {
 	copied      bool
 	modulesOpen bool
+	list        ui.ListState
+	moduleSel   int
 }
 
 // buildDiagnosticsPage renders the read-only runtime/storage summary (the old
@@ -606,11 +609,11 @@ func Module() *module.Descriptor[Config] {
 		search := newSearchState()
 		mcp := newMCPState()
 		presets := newPresetsState()
-		catalog := &catalogState{}
-		lsp := &lspState{}
+		catalog := &catalogState{sel: -1}
+		lsp := &lspState{sel: -1}
 		notifications := &notificationsState{}
 		behavior := &behaviorState{}
-		memoryPage := &memoryPageState{}
+		memoryPage := &memoryPageState{sel: -1}
 		modelCheck := &modelCheckState{}
 		network := newNetworkState()
 		dataPrivacy := newDataPrivacyState()

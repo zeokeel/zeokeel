@@ -77,6 +77,7 @@ var (
 	Send          = func() *ui.SVG { return get("send") }
 	Stop          = func() *ui.SVG { return get("square") }
 	Trash         = func() *ui.SVG { return get("trash") }
+	Pencil        = func() *ui.SVG { return get("pencil") }
 	File          = func() *ui.SVG { return get("file") }
 	Image         = func() *ui.SVG { return get("image") }
 	PanelRight    = func() *ui.SVG { return get("panel-right") }

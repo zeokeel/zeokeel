@@ -1,23 +1,25 @@
 // Package session contributes the conversation screen: the main chat surface of
 // ZeoKeel. It is a UI module (kernel Descriptor + host UI services) rendered
 // with mygo's native controls and the brand design system (internal/design):
-// TabsBase, Scroll, TextArea, Collapsible, Badge, Box, Row/Column, Text, buttons
-// and icons. It never draws a widget (or Canvas) itself.
+// TabsBase, Scroll, TextArea, Collapsible, CollapsibleBase, Spinner, List,
+// markdown, Badge, Box, Row/Column, Text, buttons and icons. It never draws a
+// widget (or Canvas) itself.
 //
 // The branded layout follows the retired shell: a title header with the
 // Chat/Trajectory/Memory underline tabs, a centered transcript column with
-// right-aligned raised user bubbles and plain assistant body text (reasoning in
-// a collapsible, tool cards through UIRuntime.RenderTool), a raised composer
-// card with a borderless multiline input and a hint/stop-send toolbar, and the
-// tool timeline on the Trajectory tab.
+// right-aligned raised user bubbles and plain assistant body text, one official
+// reasoning disclosure per reply (CollapsibleBase with the official spinner and
+// the Markdown view), tool rows as official disclosures through
+// UIRuntime.RenderTool, a raised composer card with a borderless multiline input
+// and a hint/stop-send toolbar, and the tool timeline on the Trajectory tab.
 //
 // The module reads the chat read model from contracts.ChatService (owned by the
 // agent backend module) and calls its operations on user actions:
 //
 //   - empty session: "new conversation" button -> NewSession + SetActiveSession
 //   - navigator.Push(session);
-//   - chat tab: messages, streaming text, collapsible reasoning, tool cards via
-//     UIRuntime.RenderTool, errors;
+//   - chat tab: messages, streaming text, the reasoning disclosure, tool rows
+//     via UIRuntime.RenderTool, errors;
 //   - trajectory tab: the session's tool-call timeline; memory stays an empty
 //     pane for Phase 1;
 //   - composer: native TextArea + send button (Send) or stop button (Cancel)
@@ -95,9 +97,18 @@ type state struct {
 	// composerInput is the composer TextArea's persistent identity. The
 	// suggestion menu is inserted above the composer, so the native text input
 	// needs a stable identity to keep the focus (and the caret) as the tree
-	// around it changes; it is never focused again from the frame builder.
+	// around it changes.
 	composerInput ui.Handle
+	// focusComposer asks the next composer frame to focus the TextArea: on
+	// opening/switching a conversation and when a run finishes. It is a
+	// one-shot edge flag (the frame builder clears it), never a desired-focus
+	// value, so it cannot steal focus on every frame.
+	focusComposer bool
 
+	// thinkOpen holds the reasoning disclosures the reader toggled themselves,
+	// keyed by message ID: a message with no entry uses the default (open while
+	// the model is still thinking, collapsed once the turn ends). toolOpen is
+	// the same for the transcript tool rows (H15 default when empty).
 	thinkOpen map[string]bool
 	toolOpen  map[string]bool
 	// helpList backs the help dialog's command List; its Label names each row
@@ -220,8 +231,10 @@ type state struct {
 
 	// md caches the Markdown renderer options for the current appearance (the
 	// library keeps its parse state per view root and the options must stay
-	// stable across frames).
-	md markdownCache
+	// stable across frames). mdReasoning is the muted, slightly smaller theme
+	// the thinking panel renders with.
+	md          markdownCache
+	mdReasoning markdownCache
 
 	// ctx is the module's kernel context, used for the optional memory backend
 	// lookup (ctx.Get(contracts.KeyMemory)); it is not a Requires dependency.
@@ -257,14 +270,21 @@ type state struct {
 	// never a resident badge).
 	copiedMessage string
 
-	// queuedPrompts holds prompts submitted while a turn was running (only
-	// when ui.sendWhileRunning is on); queueSessionID is the session they
-	// belong to and queueErr the last delivery failure. UI thread only.
-	queuedPrompts  []string
-	queueSessionID string
-	queueErr       string
-	// queueMenuOpen is the queued-prompts popover (view/cancel/clear).
+	// queuedPrompts holds, per session ID, the prompts submitted while a turn
+	// was running (only when ui.sendWhileRunning is on). The queue belongs to
+	// its session: switching conversations never drops it, and the module-level
+	// chat subscription flushes it when that session's run ends, whichever
+	// screen is visible. queuePaused marks a session's queue paused after the
+	// user chose 停止 (no automatic send; the queue popover can send or clear
+	// it). queueErr is the last delivery failure per session. UI thread only.
+	queuedPrompts map[string][]string
+	queuePaused   map[string]bool
+	queueErr      map[string]string
+	// queueMenuOpen is the active session's queued-prompts popover
+	// (view/cancel/send/clear). queueList backs that popover's official ui.List
+	// of queued prompts.
 	queueMenuOpen bool
+	queueList     ui.ListState
 
 	// Goal auto-continue state: the per-goal send budget, the goal it belongs
 	// to, the last observed run phase and the last delivery error. UI thread
@@ -407,6 +427,9 @@ func Module() *module.Descriptor[Config] {
 			toolOpen:      make(map[string]bool),
 			usageOpen:     make(map[string]bool),
 			thumbnails:    make(map[string]*ui.Bitmap),
+			queuedPrompts: make(map[string][]string),
+			queuePaused:   make(map[string]bool),
+			queueErr:      make(map[string]string),
 			chatFollowEnd: true,
 			ctx:           ctx,
 		}
@@ -419,6 +442,13 @@ func Module() *module.Descriptor[Config] {
 				// starts the next run, so auto-continue waits for its settle.
 				processQueuedPrompts(chat, moduleState, sessionID)
 				if observeRunSettled(chat, moduleState) {
+					// The settle is observed here first (before the next screen
+					// build), so request the composer keyboard handoff now: the
+					// next composer frame consumes the one-shot flag. Outside the
+					// conversation tab the focus stays where the user put it.
+					if moduleState.tab == tabChat && strings.TrimSpace(chat.ActiveSession()) == sessionID {
+						moduleState.focusComposer = true
+					}
 					handleRunSettled(chat, moduleState, runtime)
 				}
 				runtime.Invalidate()
@@ -815,6 +845,9 @@ func sessionCommands(runtime contracts.UIRuntime, navigator contracts.Navigator,
 					return nil
 				}
 				st.autoContinueSuppressed = true
+				// A stop must stop: pause the queued prompts instead of letting
+				// the settle handler start another run automatically.
+				pauseQueue(st, session.ID)
 				if err := chat.Cancel(session.ID); err != nil {
 					st.commandErr = st.tr("停止失败：", "Stop failed: ") + err.Error()
 				} else {
@@ -880,13 +913,15 @@ func firstNonEmpty(values ...string) string {
 	return ""
 }
 
-// sendWhileRunningEnabled normalizes ui.sendWhileRunning: only "true" enables
-// queueing; missing, empty and malformed values are off.
+// sendWhileRunningEnabled normalizes ui.sendWhileRunning: queueing is on unless
+// the row explicitly says "false". Missing, empty and malformed values keep the
+// default (on) so the composer stays usable while a reply streams; only an
+// explicit opt-out turns Enter-to-send off during a run.
 func sendWhileRunningEnabled(settings contracts.SettingsService) bool {
 	if settings == nil {
-		return false
+		return true
 	}
-	return strings.EqualFold(strings.TrimSpace(settings.Get(contracts.SettingSendWhileRunning, "")), "true")
+	return !strings.EqualFold(strings.TrimSpace(settings.Get(contracts.SettingSendWhileRunning, "")), "false")
 }
 
 // composerDraft is one conversation's unsent composer state. Attachments are
@@ -980,20 +1015,38 @@ func (st *state) syncComposerDraft(activeID string) {
 	st.draftSession = activeID
 }
 
-// syncQueuedSession drops the pending queue when the active session changes.
-// Queued prompts intentionally stay with the session they were typed in: they
-// are never replayed into a different conversation on a switch/new session.
-func syncQueuedSession(st *state, activeID string) {
-	if st == nil || st.queueSessionID == "" || st.queueSessionID == activeID {
-		return
+// queuedFor returns one session's queued prompts (nil when none). The caller
+// treats the slice as read-only.
+func (st *state) queuedFor(sessionID string) []string {
+	if st == nil {
+		return nil
 	}
-	st.queuedPrompts = nil
-	st.queueSessionID = ""
-	st.queueErr = ""
+	return st.queuedPrompts[sessionID]
 }
 
-// queueDraft appends the trimmed draft to the prompt queue, clears the draft
-// and returns false for empty text. Attachments are not queued.
+// queueErrorFor returns the last queued-delivery failure of one session ("").
+func (st *state) queueErrorFor(sessionID string) string {
+	if st == nil {
+		return ""
+	}
+	return st.queueErr[sessionID]
+}
+
+// setQueueError records/clears one session's queued-delivery failure.
+func (st *state) setQueueError(sessionID, text string) {
+	if st.queueErr == nil {
+		st.queueErr = make(map[string]string)
+	}
+	if text == "" {
+		delete(st.queueErr, sessionID)
+		return
+	}
+	st.queueErr[sessionID] = text
+}
+
+// queueDraft appends the trimmed draft to the session's queue, clears the draft
+// and returns false for empty text. Attachments are not queued. Queuing again
+// resumes a queue the user paused with 停止.
 func queueDraft(st *state, activeID string) bool {
 	if st == nil || activeID == "" {
 		return false
@@ -1002,41 +1055,105 @@ func queueDraft(st *state, activeID string) bool {
 	if prompt == "" {
 		return false
 	}
-	st.queuedPrompts = append(st.queuedPrompts, prompt)
-	st.queueSessionID = activeID
+	if st.queuedPrompts == nil {
+		st.queuedPrompts = make(map[string][]string)
+	}
+	st.queuedPrompts[activeID] = append(st.queuedPrompts[activeID], prompt)
+	delete(st.queuePaused, activeID)
+	st.setQueueError(activeID, "")
 	st.draft = ""
-	st.queueErr = ""
 	return true
 }
 
-// processQueuedPrompts sends the first queued prompt once the session it
-// belongs to is no longer running. A failed Send keeps the prompt and surfaces
-// the danger line; the next notification (or frame check) retries it.
-func processQueuedPrompts(chat contracts.ChatService, st *state, sessionID string) {
+// pauseQueue marks a session's queued prompts paused after the user chose 停止:
+// a stop must stop, so the queued prompts are kept for review but never start
+// another run automatically. The queue popover offers an explicit send.
+func pauseQueue(st *state, sessionID string) {
+	if st == nil || sessionID == "" || len(st.queuedPrompts[sessionID]) == 0 {
+		return
+	}
+	if st.queuePaused == nil {
+		st.queuePaused = make(map[string]bool)
+	}
+	st.queuePaused[sessionID] = true
+}
+
+// resumeQueue clears the paused flag and delivers the next queued prompt; only
+// the user's explicit "send queued" action calls it.
+func resumeQueue(chat contracts.ChatService, st *state, sessionID string) {
 	if st == nil {
 		return
 	}
-	// A notification from the old session may arrive after the user switched
-	// conversations; the queue belongs to the session it was typed in and must
-	// never replay into (or after leaving) another one.
-	syncQueuedSession(st, strings.TrimSpace(chat.ActiveSession()))
-	if len(st.queuedPrompts) == 0 || st.queueSessionID != sessionID {
+	delete(st.queuePaused, sessionID)
+	processQueuedPrompts(chat, st, sessionID)
+}
+
+// cancelQueuedPrompt removes one queued prompt of sessionID.
+func cancelQueuedPrompt(st *state, sessionID string, index int) {
+	if st == nil {
+		return
+	}
+	queue := st.queuedPrompts[sessionID]
+	if index < 0 || index >= len(queue) {
+		return
+	}
+	queue = append(queue[:index], queue[index+1:]...)
+	if len(queue) == 0 {
+		delete(st.queuedPrompts, sessionID)
+		delete(st.queuePaused, sessionID)
+		st.queueMenuOpen = false
+		return
+	}
+	st.queuedPrompts[sessionID] = queue
+}
+
+// clearQueuedPrompts drops one session's whole queue (the popover's 清空全部).
+func clearQueuedPrompts(st *state, sessionID string) {
+	if st == nil {
+		return
+	}
+	delete(st.queuedPrompts, sessionID)
+	delete(st.queuePaused, sessionID)
+	st.setQueueError(sessionID, "")
+	st.queueMenuOpen = false
+}
+
+// processQueuedPrompts sends the first queued prompt once the session it
+// belongs to is no longer running. It runs from the module-level chat
+// subscription (and the screen's fallback check), so it works whichever screen
+// is visible, and a queue paused by 停止 waits for the user. A failed Send keeps
+// the prompt and surfaces the danger line; the next notification retries it.
+func processQueuedPrompts(chat contracts.ChatService, st *state, sessionID string) {
+	if st == nil || chat == nil {
+		return
+	}
+	sessionID = strings.TrimSpace(sessionID)
+	if sessionID == "" || st.queuePaused[sessionID] {
+		return
+	}
+	queue := st.queuedPrompts[sessionID]
+	if len(queue) == 0 {
 		return
 	}
 	session, ok := chat.Session(sessionID)
 	if !ok || session.Running {
 		return
 	}
-	prompt := st.queuedPrompts[0]
+	prompt := queue[0]
 	if err := chat.Send(sessionID, prompt); err != nil {
-		st.queueErr = st.tr("排队发送失败：", "Queued send failed: ") + err.Error()
+		st.setQueueError(sessionID, st.tr("排队发送失败：", "Queued send failed: ")+err.Error())
 		return
 	}
-	st.queuedPrompts = st.queuedPrompts[1:]
-	st.queueErr = ""
-	if len(st.queuedPrompts) == 0 {
-		st.queueSessionID = ""
+	st.setQueueError(sessionID, "")
+	queue = queue[1:]
+	if len(queue) == 0 {
+		delete(st.queuedPrompts, sessionID)
+		if strings.TrimSpace(chat.ActiveSession()) == sessionID {
+			st.queueMenuOpen = false
+		}
+		return
 	}
+	st.queuedPrompts[sessionID] = queue
 }
 
 // maxGoalAutoContinues bounds the automatic continuation prompts for one goal.
@@ -1085,14 +1202,14 @@ func handleRunSettled(chat contracts.ChatService, st *state, runtime contracts.U
 	if st == nil {
 		return
 	}
-	if len(st.queuedPrompts) > 0 {
-		before := len(st.queuedPrompts)
-		processQueuedPrompts(chat, st, st.queueSessionID)
-		if len(st.queuedPrompts) < before {
+	if activeID := strings.TrimSpace(chat.ActiveSession()); activeID != "" && len(st.queuedFor(activeID)) > 0 {
+		before := len(st.queuedFor(activeID))
+		processQueuedPrompts(chat, st, activeID)
+		if len(st.queuedFor(activeID)) < before {
 			runtime.Invalidate()
 			return
 		}
-		if st.queueErr != "" {
+		if st.queueErrorFor(activeID) != "" {
 			runtime.Invalidate()
 			return
 		}

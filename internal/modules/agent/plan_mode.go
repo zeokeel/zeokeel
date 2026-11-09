@@ -110,19 +110,12 @@ func (s *service) agentModePlan() bool {
 		contracts.AgentModePlan)
 }
 
-// workspacePathTools are the tools a per-session "workspace" permission
-// override auto-allows: the file tools normal in-workspace editing needs
-// (reading, listing, searching, writing and editing). Tools that can leave the
-// workspace fall through to the approvals service.
-var workspacePathTools = map[string]bool{
-	"read_file":          true,
-	"list_dir":           true,
-	"glob":               true,
-	"grep":               true,
-	"write_file":         true,
-	"edit_file":          true,
-	"str_replace_editor": true,
-}
+// The per-session "workspace" override auto-allows the shared
+// contracts.WorkspaceAutoAllowedTools set: the workspace file tools plus
+// read-only/informational tools that cannot leave or modify the workspace.
+// Tools that can leave the workspace (shell, network, MCP, settings writes and
+// unknown tools) fall through to the approvals service, and the same frozen list
+// is read by the approvals service so the two layers cannot drift.
 
 // interactionTools are the host tools that interact with the user directly:
 // ask_user, present and goal render their own question/artifact/goal overlay,
@@ -144,9 +137,9 @@ var interactionTools = map[string]bool{
 // gate builds the tool approval gate for one session. Plan and chat modes are
 // checked on every call (highest priority); then an optional per-session
 // permission override applies (full allows, never denies, workspace allows the
-// workspace file tools); interaction/presentation host tools are then allowed
-// without an approval prompt (their own overlay is the user interaction);
-// otherwise the approvals service's global policy applies.
+// shared contracts.WorkspaceAutoAllowedTools set); interaction/presentation host
+// tools are then allowed without an approval prompt (their own overlay is the
+// user interaction); otherwise the approvals service's global policy applies.
 func (s *service) gate(sessionIDs ...string) rig.Gate {
 	sessionID := ""
 	if len(sessionIDs) > 0 {
@@ -182,7 +175,7 @@ func (s *service) gate(sessionIDs ...string) rig.Gate {
 			case contracts.PermissionNever:
 				return rig.DecisionDeny, nil
 			case contracts.PermissionWorkspace:
-				if workspacePathTools[name] {
+				if contracts.WorkspaceAutoAllowed(name) {
 					return rig.DecisionAllow, nil
 				}
 			}
@@ -191,6 +184,15 @@ func (s *service) gate(sessionIDs ...string) rig.Gate {
 			// A global "never" policy is an explicit deny-all switch: it must
 			// still deny the interaction tools even though the default "ask"
 			// prompt is skipped for them.
+			if s.approvals != nil && strings.EqualFold(strings.TrimSpace(s.approvals.Mode()), contracts.PermissionNever) {
+				return rig.DecisionDeny, nil
+			}
+			return rig.DecisionAllow, nil
+		}
+		// A tool the user already chose to "always allow in this session" no
+		// longer asks. Plan/chat modes and the per-session/global never policies
+		// above keep their veto: the remembered set only skips the prompt.
+		if s.allowedToolForSession(sessionID, name) {
 			if s.approvals != nil && strings.EqualFold(strings.TrimSpace(s.approvals.Mode()), contracts.PermissionNever) {
 				return rig.DecisionDeny, nil
 			}
@@ -213,6 +215,10 @@ func (s *service) gate(sessionIDs ...string) rig.Gate {
 		case contracts.ApprovalAllow:
 			return rig.DecisionAllow, nil
 		case contracts.ApprovalAllowAlways:
+			// The dialog promised to stop asking for this tool in this session:
+			// remember it across runs (persisted per session) and still return
+			// allow-always so the current run also skips repeated identical calls.
+			s.rememberAllowedTool(sessionID, name)
 			return rig.DecisionAllowAlways, nil
 		default:
 			return rig.DecisionDeny, nil

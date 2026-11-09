@@ -2,6 +2,7 @@ package contracts
 
 import (
 	"context"
+	"strings"
 
 	cordis "github.com/zeokeel/zeokeel-kernel"
 )
@@ -54,3 +55,54 @@ const (
 	// PermissionNever denies every tool call (fail-closed).
 	PermissionNever = "never"
 )
+
+// WorkspaceAutoAllowedTools is the set of tools the default "workspace"
+// permission mode runs without an approval prompt: the workspace file tools
+// plus read-only / informational tools that cannot leave or modify the
+// workspace. Everything that can leave the workspace, mutate app settings,
+// reach the network, spawn MCP work or is unknown still asks. The agent gate
+// and the approvals service both read this one list so the two layers cannot
+// drift apart.
+var WorkspaceAutoAllowedTools = map[string]bool{
+	// Workspace file tools.
+	"read_file":          true,
+	"write_file":         true,
+	"edit_file":          true,
+	"str_replace_editor": true,
+	"list_dir":           true,
+	"glob":               true,
+	"grep":               true,
+	// Read-only / informational tools.
+	"read_image":           true,
+	"working_directory":    true,
+	"memory":               true,
+	"skill":                true,
+	"skills":               true,
+	"settings_get":         true,
+	"todo":                 true,
+	"todos":                true,
+	"todo_write":           true,
+	"team_task_list":       true,
+	"team_task_get":        true,
+	"terminal_list":        true,
+	"job_list":             true,
+	"job_output":           true,
+	"job_wait":             true,
+	"session_search":       true,
+	"session_event_search": true,
+	"session_event_read":   true,
+	"session_event_trace":  true,
+	"session_trace":        true,
+	"lsp_definition":       true,
+	"lsp_diagnostics":      true,
+	"lsp_hover":            true,
+	"lsp_implementation":   true,
+	"lsp_references":       true,
+	"lsp_symbols":          true,
+}
+
+// WorkspaceAutoAllowed reports whether the default workspace permission mode
+// runs one tool without asking for approval.
+func WorkspaceAutoAllowed(tool string) bool {
+	return WorkspaceAutoAllowedTools[strings.TrimSpace(tool)]
+}

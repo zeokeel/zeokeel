@@ -6,6 +6,7 @@ package sidebar_test
 import (
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/zeokeel/zeokeel/internal/contracts"
 	"github.com/zeokeel/zeokeel/internal/ui/sidebar"
@@ -170,4 +171,44 @@ func TestPinMenuHiddenWithoutPinner(t *testing.T) {
 	openRowMenu(t, tester, "会话一")
 	h.assertTexts(tester, "删除")
 	h.assertNoTexts(tester, "置顶会话", "取消置顶")
+}
+
+// TestPinnedRightClickInWorkspaceTree is the user's explicit ask: right-clicking
+// a conversation inside the workspace tree opens the shared row menu, and
+// 置顶会话 pins it so the pinned-first order and the 置顶 badge update.
+func TestPinnedRightClickInWorkspaceTree(t *testing.T) {
+	base := time.Unix(1_700_000_000, 0)
+	workspace := newFakeWorkspace(treeWorkspaces()...)
+	chat := newPinChat(
+		contracts.ChatSessionInfo{ID: "s1", Title: "普通会话", WorkspaceID: "w1", UpdatedAt: base.Add(-2 * time.Hour)},
+		contracts.ChatSessionInfo{ID: "s2", Title: "待置顶会话", WorkspaceID: "w1", UpdatedAt: base.Add(-time.Hour)},
+	)
+	h := newHarnessWithWorkspace(t, chat, sidebar.Config{}, workspace)
+	tester := h.tester()
+	h.assertTexts(tester, "项目一", "普通会话", "待置顶会话")
+
+	openRowMenu(t, tester, "待置顶会话")
+	h.assertTexts(tester, "置顶会话")
+	if err := tester.Click("置顶会话"); err != nil {
+		t.Fatalf("click 置顶会话: %v; texts = %v", err, tester.Texts())
+	}
+	tester.Frame()
+	tester.Frame()
+
+	calls := chat.pinCalls()
+	if len(calls) != 1 || calls[0].id != "s2" || !calls[0].pinned {
+		t.Fatalf("SetSessionPinned calls = %+v, want s2/true", calls)
+	}
+	// The row shows the 置顶 badge, the pinned row stays first inside the group,
+	// and the menu now offers the inverse action.
+	if got := countText(tester, "置顶"); got != 1 {
+		t.Fatalf("置顶 badges = %d, want 1; texts = %v", got, tester.Texts())
+	}
+	texts := tester.Texts()
+	pinned, plain := textIndex(texts, "待置顶会话"), textIndex(texts, "普通会话")
+	if !(pinned >= 0 && pinned < plain) {
+		t.Fatalf("pinned-first order in the tree wrong: pinned=%d plain=%d; texts = %v", pinned, plain, texts)
+	}
+	openRowMenu(t, tester, "待置顶会话")
+	h.assertTexts(tester, "取消置顶")
 }

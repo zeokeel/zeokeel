@@ -13,6 +13,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	cordis "github.com/zeokeel/zeokeel-kernel"
 	"github.com/zeokeel/zeokeel-kernel/module"
@@ -612,4 +613,159 @@ func TestModuleRestartPreservesCurrent(t *testing.T) {
 	if err != nil || len(list) != 2 || list[1].ID != workspaceB.ID {
 		t.Fatalf("restored List = %+v/%v", list, err)
 	}
+}
+
+// assertCurrent fails unless the service's current workspace is wantID ("" means
+// "no current workspace").
+func assertCurrent(t *testing.T, service contracts.WorkspaceService, wantID string) {
+	t.Helper()
+	ctx := context.Background()
+	workspace, current, err := service.Current(ctx)
+	if err != nil {
+		t.Fatalf("Current: %v", err)
+	}
+	if wantID == "" {
+		if current {
+			t.Fatalf("current workspace = %+v, want none", workspace)
+		}
+		return
+	}
+	if !current || workspace.ID != wantID {
+		t.Fatalf("current workspace = %+v/%t, want %q", workspace, current, wantID)
+	}
+}
+
+// TestDeleteCurrentFallsBackToMostRecentRemaining pins the fix for deleting the
+// open workspace: clearing currentID silently made every file/shell tool fail
+// closed on an empty sandbox root. The most recently created remaining
+// workspace must become current, and the choice must survive a reload.
+func TestDeleteCurrentFallsBackToMostRecentRemaining(t *testing.T) {
+	base := t.TempDir()
+	dataDir := t.TempDir()
+	service := newDirectService(t, dataDir, Config{})
+	ctx := context.Background()
+
+	first := mustCreate(t, service, "first", makeDir(t, base, "first"))
+	second := mustCreate(t, service, "second", makeDir(t, base, "second"))
+	third := mustCreate(t, service, "third", makeDir(t, base, "third"))
+	assertCurrent(t, service, third.ID)
+
+	// Deleting the current newest workspace picks the newest remaining one.
+	if err := service.Delete(ctx, third.ID); err != nil {
+		t.Fatalf("Delete(current third): %v", err)
+	}
+	assertCurrent(t, service, second.ID)
+	assertCurrent(t, newDirectService(t, dataDir, Config{}), second.ID)
+
+	// Deleting the current oldest workspace also picks the newest remaining.
+	if _, err := service.Open(ctx, first.ID); err != nil {
+		t.Fatalf("Open(first): %v", err)
+	}
+	if err := service.Delete(ctx, first.ID); err != nil {
+		t.Fatalf("Delete(current first): %v", err)
+	}
+	assertCurrent(t, service, second.ID)
+	assertCurrent(t, newDirectService(t, dataDir, Config{}), second.ID)
+
+	// Deleting a non-current workspace leaves the current one alone.
+	fourth := mustCreate(t, service, "fourth", makeDir(t, base, "fourth"))
+	if _, err := service.Open(ctx, second.ID); err != nil {
+		t.Fatalf("Open(second): %v", err)
+	}
+	if err := service.Delete(ctx, fourth.ID); err != nil {
+		t.Fatalf("Delete(non-current fourth): %v", err)
+	}
+	assertCurrent(t, service, second.ID)
+	assertCurrent(t, newDirectService(t, dataDir, Config{}), second.ID)
+}
+
+// TestDeleteOnlyWorkspaceClearsCurrent keeps the terminal state: with no
+// workspace left there is nothing to fall back to and currentID is empty.
+func TestDeleteOnlyWorkspaceClearsCurrent(t *testing.T) {
+	dataDir := t.TempDir()
+	service := newDirectService(t, dataDir, Config{})
+	ctx := context.Background()
+	only := mustCreate(t, service, "only", makeDir(t, t.TempDir(), "only"))
+
+	if err := service.Delete(ctx, only.ID); err != nil {
+		t.Fatalf("Delete(only): %v", err)
+	}
+	assertCurrent(t, service, "")
+
+	reloaded := newDirectService(t, dataDir, Config{})
+	assertCurrent(t, reloaded, "")
+	if list, err := reloaded.List(ctx); err != nil || len(list) != 0 {
+		t.Fatalf("List after deleting the only workspace = %+v/%v", list, err)
+	}
+	raw, err := os.ReadFile(filepath.Join(dataDir, DefaultFileName))
+	if err != nil {
+		t.Fatalf("read registry: %v", err)
+	}
+	var document registryDocument
+	if err := json.Unmarshal(raw, &document); err != nil {
+		t.Fatalf("registry JSON: %v", err)
+	}
+	if document.CurrentID != "" || len(document.Workspaces) != 0 {
+		t.Fatalf("registry after deleting the only workspace = %+v", document)
+	}
+}
+
+// TestDeleteCurrentPrefersCreatedAtOverRegistryOrder proves "most recently
+// created" comes from CreatedAt, not from a possibly edited/legacy list order.
+func TestDeleteCurrentPrefersCreatedAtOverRegistryOrder(t *testing.T) {
+	dataDir := t.TempDir()
+	now := time.Now().UTC()
+	document := registryDocument{
+		Workspaces: []workspaceRecord{
+			{ID: "ws-newest", Name: "newest", Root: filepath.Join(t.TempDir(), "newest"), CreatedAt: now},
+			{ID: "ws-oldest", Name: "oldest", Root: filepath.Join(t.TempDir(), "oldest"), CreatedAt: now.Add(-2 * time.Hour)},
+			{ID: "ws-middle", Name: "middle", Root: filepath.Join(t.TempDir(), "middle"), CreatedAt: now.Add(-time.Hour)},
+		},
+		CurrentID: "ws-middle",
+	}
+	raw, err := json.Marshal(document)
+	if err != nil {
+		t.Fatalf("marshal registry: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dataDir, DefaultFileName), raw, 0o600); err != nil {
+		t.Fatalf("write registry: %v", err)
+	}
+
+	service := newDirectService(t, dataDir, Config{})
+	if err := service.Delete(context.Background(), "ws-middle"); err != nil {
+		t.Fatalf("Delete(current middle): %v", err)
+	}
+	assertCurrent(t, service, "ws-newest")
+	// And it is persisted, so a restart makes the same workspace current.
+	assertCurrent(t, newDirectService(t, dataDir, Config{}), "ws-newest")
+}
+
+// TestDeleteCurrentTieBreakIsDeterministic covers legacy registries whose
+// workspaces share CreatedAt: the later registry entry (newer by insertion)
+// must win, making the fallback stable across reloads.
+func TestDeleteCurrentTieBreakIsDeterministic(t *testing.T) {
+	dataDir := t.TempDir()
+	created := time.Now().UTC()
+	document := registryDocument{
+		Workspaces: []workspaceRecord{
+			{ID: "ws-a", Name: "a", Root: filepath.Join(t.TempDir(), "a"), CreatedAt: created.Add(-time.Hour)},
+			{ID: "ws-b", Name: "b", Root: filepath.Join(t.TempDir(), "b"), CreatedAt: created},
+			{ID: "ws-c", Name: "c", Root: filepath.Join(t.TempDir(), "c"), CreatedAt: created},
+		},
+		CurrentID: "ws-a",
+	}
+	raw, err := json.Marshal(document)
+	if err != nil {
+		t.Fatalf("marshal registry: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dataDir, DefaultFileName), raw, 0o600); err != nil {
+		t.Fatalf("write registry: %v", err)
+	}
+
+	service := newDirectService(t, dataDir, Config{})
+	if err := service.Delete(context.Background(), "ws-a"); err != nil {
+		t.Fatalf("Delete(current ws-a): %v", err)
+	}
+	assertCurrent(t, service, "ws-c")
+	assertCurrent(t, newDirectService(t, dataDir, Config{}), "ws-c")
 }

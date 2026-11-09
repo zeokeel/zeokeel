@@ -159,6 +159,8 @@ func TestModelCheckIgnoresRepeatedClicks(t *testing.T) {
 	h.click(tester, "测试当前输入")
 	tester.Frame()
 	h.assertTexts(tester, "检查中…")
+	// The busy state is the official spinner, and the action is disabled.
+	requireBusySpinner(t, tester, "检查中…")
 	h.click(tester, "检查中…")
 	tester.Frame()
 	if calls.Load() != 1 {

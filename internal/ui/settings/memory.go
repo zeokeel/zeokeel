@@ -38,6 +38,12 @@ type memoryPageState struct {
 	confirmClear  bool
 	confirmDelete string // memory ID waiting for the native confirmation dialog
 
+	// The 全部记忆 collection is the official List: keyed by memory ID, named by
+	// the row text and single-row selectable for the keyboard; the edit/delete
+	// buttons stay the row actions.
+	list ui.ListState
+	sel  int
+
 	// Cached read model: the store is read only when the query changes or a
 	// mutation drops the cache (add/edit/delete/tidy/clear/extract). Building
 	// the page must not hit SQLite every frame (mygo-maintenance: keep slow I/O
@@ -180,11 +186,29 @@ func buildMemoryPage(c *ui.Context, t *design.Tokens, kctx cordis.Context,
 			case len(memories) == 0:
 				uikit.EmptyState(c, localized(locale, "还没有记忆", "No memories yet"))
 			default:
-				for _, memory := range memories {
-					memory := memory
-					ui.Divider(c)
-					buildMemoryPageEntry(c, t, store, updater, st, memory, locale)
-				}
+				// The memories are a collection: the official List keys the rows
+				// by memory ID (so the choice follows the entry when the search
+				// filters the list), names them for assistive technology and
+				// owns the keyboard selection; the inline edit/delete buttons
+				// keep their click semantics.
+				bindSettingsList(&st.list, &st.sel, len(memories), func(index int) any {
+					if index < 0 || index >= len(memories) {
+						return nil
+					}
+					return memories[index].ID
+				}, func(index int) string {
+					if index < 0 || index >= len(memories) {
+						return ""
+					}
+					return memoryRowLabel(locale, memories[index])
+				})
+				ui.List(c, &st.list, len(memories)).
+					Label(localized(locale, "记忆列表", "Memories")).
+					Gap(design.Space1).
+					Rows(func(row ui.ListRow) {
+						buildMemoryPageEntry(row.Context, t, store, updater, st,
+							memories[row.Index], locale, row.Selected())
+					})
 			}
 		})
 
@@ -593,21 +617,19 @@ func buildMemoryExtractionPanel(c *ui.Context, t *design.Tokens, kctx cordis.Con
 			activeID = strings.TrimSpace(chat.ActiveSession())
 		}
 		label := localized(locale, "从当前会话提取", "Extract from current session")
+		busyLabel := localized(locale, "提取中…", "Extracting…")
 		if st.extractRunning {
-			label = localized(locale, "提取中…", "Extracting…")
+			label = busyLabel
 		}
 		disabled := !enabled || activeID == "" || st.extractRunning
-		uikit.DialogFooter(c, []uikit.DialogAction{{
-			Label: label, Primary: true, Disabled: disabled,
-			OnClick: func() {
-				if disabled || st.extractRunning {
-					return
-				}
-				runtime, _ := kctx.Get(contracts.KeyUIRuntime)
-				startMemoryExtraction(runtime, extractor, st, activeID, locale)
-				c.Invalidate()
-			},
-		}})
+		buildBusyPrimaryAction(c, t, st.extractRunning, label, busyLabel, disabled, func() {
+			if disabled || st.extractRunning {
+				return
+			}
+			runtime, _ := kctx.Get(contracts.KeyUIRuntime)
+			startMemoryExtraction(runtime, extractor, st, activeID, locale)
+			c.Invalidate()
+		})
 		switch {
 		case !enabled:
 			design.Apply(ui.Text(c, localized(locale, "先启用模型提取后再提取", "Enable model extraction first")),
@@ -619,16 +641,27 @@ func buildMemoryExtractionPanel(c *ui.Context, t *design.Tokens, kctx cordis.Con
 	})
 }
 
+// memoryRowLabel is the accessible text of one memory row: its full body, with
+// a placeholder for an empty entry so the List never gets a nameless row.
+func memoryRowLabel(locale contracts.LocaleService, memory contracts.Memory) string {
+	if text := strings.TrimSpace(memory.Text); text != "" {
+		return text
+	}
+	return localized(locale, "(空记忆)", "(Empty memory)")
+}
+
 // buildMemoryPageEntry renders one memory row: the body, scope/time metadata and
 // the native actions — 编辑 (only when the store implements
-// contracts.MemoryUpdater) and the confirmed danger delete.
+// contracts.MemoryUpdater) and the confirmed danger delete. The official List
+// owns the row paint; selected is its choice.
 func buildMemoryPageEntry(c *ui.Context, t *design.Tokens, store contracts.MemoryStore,
 	updater contracts.MemoryUpdater, st *memoryPageState, memory contracts.Memory,
-	locale contracts.LocaleService) {
-	ui.Column(c).FillWidth().PaddingY(design.Space2).Children(func() {
+	locale contracts.LocaleService, selected bool) {
+	textColor, metaColor, _ := listRowTextColors(t, selected)
+	ui.Column(c).FillWidth().Padding(design.Space1, design.Space2).Children(func() {
 		ui.Row(c).FillWidth().AlignItems(ui.Start).Gap(design.Space2).Children(func() {
 			design.Apply(ui.Text(c, memory.Text), t.Font(design.TypeXS)).
-				TextColor(t.LabelPrimary).Grow(1).MaxLines(3)
+				TextColor(textColor).Grow(1).MaxLines(3)
 			if updater != nil {
 				if design.Apply(ui.Button(c, localized(locale, "编辑", "Edit")),
 					t.SecondaryButton()).Tooltip(localized(locale,
@@ -652,7 +685,7 @@ func buildMemoryPageEntry(c *ui.Context, t *design.Tokens, store contracts.Memor
 		}
 		if len(meta) > 0 {
 			design.Apply(ui.Text(c, strings.Join(meta, " · ")), t.Font(design.TypeXXS)).
-				TextColor(t.LabelTertiary)
+				TextColor(metaColor)
 		}
 	})
 }

@@ -1,10 +1,12 @@
 package regression
 
 // Adversarial audit: queueing prompts while a turn is running (ui.sendWhileRunning).
-// Negative/boundary cases: the switch defaults off (the composer stays disabled
-// while running), only the literal "true" enables queueing, queued prompts flush
-// FIFO after the run ends, a failed flush keeps the prompt for retry, and
-// switching sessions clears the queue.
+// Queueing defaults on (only the literal "false" disables it), the composer
+// stays visible and editable while a run streams, queued prompts flush FIFO
+// after the run ends, a failed flush keeps the prompt for retry, and a queue
+// belongs to the session it was typed in: switching conversations keeps it and
+// the module-level flush delivers it to its owner even while another session is
+// on screen.
 
 import (
 	"errors"
@@ -65,6 +67,20 @@ func (q *queueHarness) pumpFrames(t *testing.T, what string, condition func() bo
 	})
 }
 
+// emitSessionChange notifies the module's subscribers like the agent backend
+// does after a session state change. The queue flush listens on this path, so a
+// session settling while another one is active still delivers its queue.
+func (f *fakeChat) emitSessionChange(sessionID string) {
+	f.mu.Lock()
+	subs := append([]func(string){}, f.subs...)
+	f.mu.Unlock()
+	for _, sub := range subs {
+		if sub != nil {
+			sub(sessionID)
+		}
+	}
+}
+
 // typeQueuePrompt focuses the composer, types one prompt and queues it with
 // the running composer's 排队 control, then repaints.
 func (q *queueHarness) typeQueuePrompt(t *testing.T, label, prompt string) {
@@ -83,18 +99,70 @@ func (q *queueHarness) typeQueuePrompt(t *testing.T, label, prompt string) {
 	q.tester.Frame()
 }
 
-// TestQueueSwitchOffKeepsComposerDisabled covers the default: with the switch
-// off/missing/bad only Stop is available while running; nothing is queued.
-func TestQueueSwitchOffKeepsComposerDisabled(t *testing.T) {
-	for _, value := range []string{"", "false", "bogus", "0"} {
+// TestQueueSwitchOffKeepsComposerVisible covers the new default and the explicit
+// opt-out:
+//   - missing/empty/malformed values (and any value but the literal "false")
+//     keep queueing on, so the running composer shows the input plus 排队 and
+//     Enter queues instead of sending;
+//   - "false" keeps the input visible and editable but Enter must not call
+//     Send, only Stop sits in the send position and the draft is kept.
+func TestQueueSwitchOffKeepsComposerVisible(t *testing.T) {
+	// Queueing is the default: only "false" disables it.
+	for _, value := range []string{"", "true", "bogus", "0"} {
 		harness := startQueueUI(t, value)
+		requireHasText(t, harness.tester, "输入消息…")
+		requireHasText(t, harness.tester, "排队")
 		requireHasText(t, harness.tester, "停止")
-		requireNoText(t, harness.tester, "输入消息…")
-		requireNoText(t, harness.tester, "排队")
-		requireNoText(t, harness.tester, "已排队")
-		if got := len(harness.chat.recordedSends()); got != 0 {
-			t.Fatalf("switch %q sent %d prompts", value, got)
+		if _, ok := harness.tester.Find("发送"); ok {
+			t.Fatalf("value %q: send button rendered while running; texts = %v", value, harness.tester.Texts())
 		}
+		harness.typeQueuePrompt(t, "排队", "默认排队")
+		requireHasText(t, harness.tester, "已排队 1 条")
+		if sends := harness.chat.recordedSends(); len(sends) != 0 {
+			t.Fatalf("value %q: Enter sent while running instead of queueing: %v", value, sends)
+		}
+	}
+
+	// The explicit opt-out: input visible/editable, Enter inert, Stop only.
+	harness := startQueueUI(t, "false")
+	requireHasText(t, harness.tester, "输入消息…")
+	requireHasText(t, harness.tester, "停止")
+	requireHasText(t, harness.tester, "回复生成中，Enter 暂不可用；草稿会保留，本轮结束后可发送")
+	requireNoText(t, harness.tester, "已排队")
+	if _, ok := harness.tester.Find("发送"); ok {
+		t.Fatalf("queueing off: send button rendered while running; texts = %v", harness.tester.Texts())
+	}
+	if _, ok := harness.tester.Find("排队"); ok {
+		t.Fatalf("queueing off: 排队 rendered; texts = %v", harness.tester.Texts())
+	}
+
+	// Focus the input (directly above the Stop control), type and press Enter:
+	// the draft stays put and chat.Send is never called.
+	stop, ok := harness.tester.Find("停止")
+	if !ok {
+		t.Fatalf("stop control missing; texts = %v", harness.tester.Texts())
+	}
+	harness.tester.ClickAt(stop.X-120, stop.Y-50)
+	harness.tester.Frame()
+	harness.tester.Type("保留的草稿")
+	harness.tester.Frame()
+	harness.tester.Key(0, ui.KeyEnter)
+	harness.tester.Frame()
+	if sends := harness.chat.recordedSends(); len(sends) != 0 {
+		t.Fatalf("Enter sent while queueing is explicitly off: %v", sends)
+	}
+	requireNoText(t, harness.tester, "已排队")
+
+	// The draft survived the run: when it ends, the send position returns and
+	// Enter sends the kept text.
+	harness.flipRunning(t, false)
+	harness.tester.Frame()
+	requireHasText(t, harness.tester, "发送")
+	harness.tester.Key(0, ui.KeyEnter)
+	harness.tester.Frame()
+	sends := harness.chat.recordedSends()
+	if len(sends) != 1 || sends[0] != "sess-run:保留的草稿" {
+		t.Fatalf("kept draft send = %v, want the typed draft", sends)
 	}
 }
 
@@ -141,29 +209,54 @@ func TestQueueFIFOFlushAndFailure(t *testing.T) {
 	}
 }
 
-// TestQueueClearsOnSessionSwitch covers switching sessions: the pending queue
-// belongs to the session it was typed in and is dropped when another session
-// becomes active.
-func TestQueueClearsOnSessionSwitch(t *testing.T) {
+// TestQueuePersistsPerSessionAndFlushesToOwner covers the per-session queue: the
+// badge belongs to the conversation it was typed in, switching away hides it
+// (and never drops it), switching back shows it again, and the module-level
+// flush delivers it into its owning session when that run settles even while
+// another conversation is on screen.
+func TestQueuePersistsPerSessionAndFlushesToOwner(t *testing.T) {
 	harness := startQueueUI(t, "true")
 	harness.chat.addSession(contracts.ChatSession{ID: "sess-other", Title: "Other"}, false)
 	harness.typeQueuePrompt(t, "排队", "给第一个会话")
 	requireHasText(t, harness.tester, "已排队 1 条")
 
-	// Switch to another session: the queue badge disappears (queue cleared).
+	// Switch to another session: no badge there, but the queue is not dropped.
 	if err := harness.chat.SetActiveSession("sess-other"); err != nil {
 		t.Fatalf("SetActiveSession: %v", err)
 	}
-	harness.tester.Frame()
+	for i := 0; i < 2; i++ {
+		harness.tester.Frame()
+	}
 	requireNoText(t, harness.tester, "已排队")
 
-	// Switching back does not resurrect or flush it.
+	// Switching back still shows the preserved queue.
 	if err := harness.chat.SetActiveSession("sess-run"); err != nil {
 		t.Fatalf("SetActiveSession back: %v", err)
 	}
+	for i := 0; i < 2; i++ {
+		harness.tester.Frame()
+	}
+	requireHasText(t, harness.tester, "已排队 1 条")
+
+	// Leave again, then let sess-run settle: the module-level subscription
+	// flushes the prompt into sess-run, not into the visible conversation.
+	if err := harness.chat.SetActiveSession("sess-other"); err != nil {
+		t.Fatalf("SetActiveSession away: %v", err)
+	}
+	harness.flipRunning(t, false)
+	harness.chat.emitSessionChange("sess-run")
+	harness.pumpFrames(t, "queued prompt flush into its session", func() bool {
+		return len(harness.chat.recordedSends()) >= 1
+	})
+	sends := harness.chat.recordedSends()
+	if len(sends) != 1 || sends[0] != "sess-run:给第一个会话" {
+		t.Fatalf("queue flush = %v, want it sent into sess-run only", sends)
+	}
+
+	// The owning session has no leftover badge when reopened.
+	if err := harness.chat.SetActiveSession("sess-run"); err != nil {
+		t.Fatalf("SetActiveSession owner: %v", err)
+	}
 	harness.tester.Frame()
 	requireNoText(t, harness.tester, "已排队")
-	if got := len(harness.chat.recordedSends()); got != 0 {
-		t.Fatalf("queue flushed after a session switch: %v", harness.chat.recordedSends())
-	}
 }

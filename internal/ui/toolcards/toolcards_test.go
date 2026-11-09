@@ -15,6 +15,7 @@ import (
 
 	"github.com/zeokeel/zeokeel/internal/contracts"
 	"github.com/zeokeel/zeokeel/internal/ui/toolcards"
+	"github.com/zeokeel/zeokeel/internal/uikit"
 	"github.com/zeokeel/zeokeel/internal/uiroot"
 )
 
@@ -198,8 +199,11 @@ func TestEveryToolNameHasRenderer(t *testing.T) {
 			}
 			continue
 		}
-		if !tester.HasText(name) {
-			t.Fatalf("frame does not render a card for %q; texts = %v", name, tester.Texts())
+		// The visible copy is the friendly localized tool name; the raw protocol
+		// id survives only as the row's tooltip/AT description.
+		friendly := uikit.ToolDisplayName(h.ui.Locale(), name)
+		if !tester.HasText(friendly) {
+			t.Fatalf("frame does not render %q as %q; texts = %v", name, friendly, tester.Texts())
 		}
 	}
 	if unknownMatch {
@@ -245,17 +249,29 @@ func TestSummaryCollapsible(t *testing.T) {
 		ID: "b1", Name: "bash", Status: "ok", Summary: summary,
 	}}, nil, nil)
 	tester := h.tester()
-	// H15: a short result starts expanded, and the disclosure row says 详情.
-	h.assertTexts(tester, "详情", "bash", "完成", summary)
-	h.assertNoTexts(tester, "b1") // internal call ID is hidden
+	// H15: a short result starts expanded; the row is one official disclosure
+	// named by the friendly tool name (no separate 详情 button).
+	h.assertTexts(tester, "运行命令", "完成", summary)
+	h.assertNoTexts(tester, "b1", "bash", "详情") // call ID and raw name are hidden
+	info, ok := tester.AccessByRole(ui.RoleDisclosure, "运行命令 · 完成")
+	if !ok || !info.Expanded {
+		t.Fatalf("summary disclosure: %+v found %v; texts = %v", info, ok, tester.Texts())
+	}
+	if info.Description != "bash" {
+		t.Fatalf("summary row description = %q, want the raw tool id", info.Description)
+	}
 
-	h.click(tester, "详情")
+	h.click(tester, "运行命令")
 	tester.Advance(300 * time.Millisecond) // the 200 ms close animation
-	h.assertNoTexts(tester, summary)
+	if info, _ := tester.AccessByRole(ui.RoleDisclosure, "运行命令 · 完成"); info.Expanded {
+		t.Fatalf("click did not fold the summary: %+v", info)
+	}
 
-	h.click(tester, "详情")
-	tester.Advance(300 * time.Millisecond)
-	h.assertTexts(tester, summary)
+	tester.Key(0, ui.KeySpace)
+	tester.Frame()
+	if info, _ := tester.AccessByRole(ui.RoleDisclosure, "运行命令 · 完成"); !info.Expanded {
+		t.Fatalf("Space did not unfold the summary: %+v", info)
+	}
 }
 
 func TestDisposeRemovesCards(t *testing.T) {
@@ -265,7 +281,7 @@ func TestDisposeRemovesCards(t *testing.T) {
 	h.showCalls([]contracts.ToolCall{{ID: "b1", Name: "bash", Status: "ok"}}, matched, nil)
 	tester := h.tester()
 	tester.Frame()
-	if !matched["bash"] || !tester.HasText("bash") {
+	if !matched["bash"] || !tester.HasText("运行命令") {
 		t.Fatalf("bash card missing before dispose; texts = %v", tester.Texts())
 	}
 
@@ -276,7 +292,7 @@ func TestDisposeRemovesCards(t *testing.T) {
 	if matched["bash"] {
 		t.Fatal("RenderTool still matched after module disposal")
 	}
-	if tester.HasText("bash") {
+	if tester.HasText("运行命令") {
 		t.Fatalf("card still rendered after disposal; texts = %v", tester.Texts())
 	}
 }

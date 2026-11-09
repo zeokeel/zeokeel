@@ -6,6 +6,7 @@ package main
 import (
 	"context"
 	"encoding/base64"
+	"encoding/json"
 	"fmt"
 	"image/png"
 	"net/http"
@@ -15,6 +16,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -71,10 +73,10 @@ func main() {
 	}
 	defer os.RemoveAll(dataDir)
 
-	server := scriptedServer()
+	server := newScriptedServer()
 	defer server.Close()
 
-	a := boot(server.URL, dataDir)
+	a := boot(server.URL(), dataDir)
 	defer a.cleanup()
 
 	chat, err := a.root.Require(contracts.KeyChat)
@@ -85,7 +87,7 @@ func main() {
 	if err != nil {
 		fail("new session", err)
 	}
-	if err := chat.Send(sessionID, "看看当前工作目录，然后告诉我"); err != nil {
+	if err := chat.Send(sessionID, "帮我建一个发布检查任务，然后继续"); err != nil {
 		fail("send", err)
 	}
 	approvals, err := a.root.Require(contracts.KeyApprovals)
@@ -104,6 +106,40 @@ func main() {
 	if err := a.ui.Navigator().Push("session"); err != nil {
 		fail("push", err)
 	}
+	// The composer must stay visible and editable while a turn streams (user
+	// report #7), and the DSH-style status strip belongs right below it. Park
+	// the scripted reply after its first delta, type a draft while the turn
+	// runs and capture the frame, then let the turn finish and capture the
+	// settled strip.
+	server.SetSlow()
+	if err := chat.Send(sessionID, "慢慢检查当前工作目录，然后告诉我"); err != nil {
+		fail("slow send", err)
+	}
+	for attempts := 0; attempts < 400; attempts++ {
+		a.tester.Frame()
+		if session, ok := chat.Session(sessionID); ok && session.Running {
+			break
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	if rect, ok := a.tester.Find("输入消息…"); ok {
+		a.tester.ClickAt(rect.X+rect.W/2, rect.Y+rect.H/2)
+		a.tester.Frame()
+	}
+	a.tester.Type("运行中继续写的草稿")
+	a.tester.Frame()
+	a.render(outDir + "/p2-running-composer.png")
+	a.tester.Key(ui.Cmd, ui.KeyA)
+	a.tester.Key(0, ui.KeyBackspace)
+	a.tester.Frame()
+	server.ReleaseSlow()
+	waitIdle(chat, sessionID, 10*time.Second)
+	// The finished turn's reasoning disclosure auto-collapses; advance past the
+	// 200 ms animation so the settled frame is captured, not a half-open panel.
+	a.tester.Frame()
+	a.tester.Advance(300 * time.Millisecond)
+	a.render(outDir + "/p2-status-strip.png")
+
 	// Send an image attachment through the optional attachment API so the chat
 	// frame shows the staged-message chips and the provider sees an image part.
 	if sender, ok := chat.(contracts.AttachmentSender); ok {
@@ -459,12 +495,43 @@ func main() {
 		[]byte("# ZeoKeel 工作区\n\n这是右侧 Files 检查器的示例文件。\n\n- 目录浏览\n- 文本与 Markdown 预览\n- 工作区变更 diff\n"), 0o600)
 	_ = os.WriteFile(filepath.Join(workspaceRoot, "notes.txt"), []byte("临时笔记\n"), 0o600)
 	if workspaces, err := a.root.Require(contracts.KeyWorkspace); err == nil {
-		if workspace, createErr := workspaces.Create(context.Background(), "mygo", workspaceRoot); createErr == nil {
-			_ = workspace
-			if _, sessionErr := chat.NewSession("工作区会话"); sessionErr == nil {
-				a.render(outDir + "/p2-workspace-tree.png")
-			}
+		mygo, createErr := workspaces.Create(context.Background(), "mygo", workspaceRoot)
+		if createErr != nil {
+			fail("workspace", createErr)
 		}
+		if _, sessionErr := chat.NewSession("工作区会话"); sessionErr != nil {
+			fail("workspace session", sessionErr)
+		}
+		// A second, freshly added workspace with no sessions: the tree must show
+		// its own per-workspace ⊕ action (revealed for a hovered row) next to
+		// the session-bearing group, and the two groups are ordered by recent
+		// activity (the empty one by its CreatedAt). The backend derives the
+		// name from the folder, like the direct-picker add flow.
+		emptyRoot := filepath.Join(dataDir, "zeokeel-docs")
+		if err := os.MkdirAll(emptyRoot, 0o700); err != nil {
+			fail("empty workspace dir", err)
+		}
+		docs, docsErr := workspaces.Create(context.Background(), "", emptyRoot)
+		if docsErr != nil {
+			fail("empty workspace", docsErr)
+		}
+		// Keep the session-bearing workspace current for the shot (the header
+		// names it and its ⊕ stays visible), then hover the empty group row so
+		// its ⊕ is revealed as it is for a pointer.
+		if _, openErr := workspaces.Open(context.Background(), mygo.ID); openErr != nil {
+			fail("open mygo workspace", openErr)
+		}
+		a.tester.Frame()
+		docsName := strings.TrimSpace(docs.Name)
+		if docsName == "" {
+			docsName = "zeokeel-docs"
+		}
+		if rect, ok := a.tester.Find(docsName); ok {
+			a.tester.Move(rect.X+rect.W/2, rect.Y+rect.H/2)
+		}
+		a.render(outDir + "/p2-workspace-tree.png")
+		a.tester.Move(10, 10)
+		a.tester.Frame()
 	}
 
 	// P2: the window-level right inspector (durable session log pane).
@@ -910,6 +977,13 @@ func boot(baseURL, dataDir string) *app {
 	provide(root, contracts.KeySettings, contracts.SettingsService(&settings{values: map[string]string{
 		contracts.SettingsChatModel:   "snapshot-model",
 		contracts.SettingsChatBaseURL: baseURL,
+		// A catalog entry for the scripted model so the usage strip can show a
+		// context window and the remaining percentage (the built-in catalog does
+		// not know "snapshot-model"); the DeepSeek entries keep the existing
+		// model-menu snapshots meaningful.
+		contracts.SettingModelCatalogModels: `[{"id":"snapshot-model","name":"snapshot-model","note":"快照脚本模型","contextWindow":128000},` +
+			`{"id":"deepseek-chat","name":"DeepSeek Chat","note":"通用对话","contextWindow":128000},` +
+			`{"id":"deepseek-reasoner","name":"DeepSeek Reasoner","note":"深度推理","contextWindow":128000}]`,
 		// A demo MCP server whose connection fails fast, so the plugins page
 		// shows a diagnostic entry whose details can be expanded.
 		contracts.SettingMCPServers: `[{"name":"demo-mcp","url":"http://127.0.0.1:1/mcp"}]`,
@@ -981,22 +1055,145 @@ func (a *app) render(path string) {
 	fmt.Println("wrote", path, img.Bounds().Size())
 }
 
-func scriptedServer() *httptest.Server {
-	var calls atomic.Int64
-	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodPost {
-			w.WriteHeader(http.StatusNoContent)
-			return
+// snapshotUsage is the provider usage every scripted turn reports: realistic
+// sizes so the compact (K/M) formatting and the context-window strip items are
+// visible in the frames (the old 460-token numbers made the compact formatter
+// invisible). Completion is small because the scripted answer is short; the
+// answer delay below makes the derived tok/s land in a believable range.
+const snapshotUsage = `{"prompt_tokens":42000,"completion_tokens":120,"total_tokens":42120,"prompt_cache_hit_tokens":36000}`
+
+// scriptedAnswerDelay makes every scripted turn take a realistic wall time, so
+// the message footer's 用时 and the status strip's tok/s are believable in the
+// screenshots instead of the hundreds-of-thousands a zero-latency server gives.
+const scriptedAnswerDelay = 2500 * time.Millisecond
+
+// snapshotAnswer is the markdown body every scripted turn ends with; it names
+// the gated team-task call the first scripted turn makes, so the approval frame
+// and the transcript read as one coherent story.
+const snapshotAnswer = "## 发布检查清单已创建\n\n- 任务：检查发布清单\n- 可以开始下一步了\n\n```text\n/data/mygo\n```"
+
+// scriptedServer is the snapshot's OpenAI-compatible SSE server. The first
+// model request asks for a shell tool call that the default workspace
+// permission still gates (so p1-approval renders; working_directory is now
+// auto-allowed), every later request answers. SetSlow parks the next reply
+// after one delta so the composer-while-running frame can be captured.
+type scriptedServer struct {
+	srv     *httptest.Server
+	calls   atomic.Int64
+	slow    atomic.Bool
+	mu      sync.Mutex
+	release chan struct{}
+}
+
+func newScriptedServer() *scriptedServer {
+	s := &scriptedServer{}
+	s.srv = httptest.NewServer(http.HandlerFunc(s.handle))
+	return s
+}
+
+func (s *scriptedServer) URL() string { return s.srv.URL }
+func (s *scriptedServer) Close()      { s.srv.Close() }
+
+// SetSlow makes the next (non-approval) scripted reply stream one delta and
+// then wait for ReleaseSlow.
+func (s *scriptedServer) SetSlow() {
+	s.mu.Lock()
+	s.release = make(chan struct{})
+	s.mu.Unlock()
+	s.slow.Store(true)
+}
+
+// ReleaseSlow lets a parked reply finish.
+func (s *scriptedServer) ReleaseSlow() {
+	s.slow.Store(false)
+	s.mu.Lock()
+	if s.release != nil {
+		close(s.release)
+		s.release = nil
+	}
+	s.mu.Unlock()
+}
+
+func (s *scriptedServer) slowRelease() <-chan struct{} {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.release
+}
+
+func (s *scriptedServer) handle(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		w.WriteHeader(http.StatusNoContent)
+		return
+	}
+	w.Header().Set("Content-Type", "text/event-stream")
+	// The approval run is the first model request; a slow run always follows it.
+	if s.slow.Load() && s.calls.Load() > 0 {
+		s.calls.Add(1)
+		// The parked turn shows the streaming thinking block (open, spinner)
+		// before its answer, as a reasoning model streams it.
+		emitScriptedReasoning(w, slowReasoning)
+		fmt.Fprint(w, "data: {\"choices\":[{\"delta\":{\"content\":\"## 正在慢慢检查\\n\\n\"},\"index\":0}]}\n\n")
+		if flusher, ok := w.(http.Flusher); ok {
+			flusher.Flush()
 		}
-		w.Header().Set("Content-Type", "text/event-stream")
-		if calls.Add(1) == 1 {
-			fmt.Fprint(w, "data: {\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"call-1\",\"type\":\"function\",\"function\":{\"name\":\"working_directory\",\"arguments\":\"{}\"}}]},\"index\":0,\"finish_reason\":\"tool_calls\"}]}\n\n")
-		} else {
-			fmt.Fprint(w, "data: {\"choices\":[{\"delta\":{\"content\":\"## 工作目录已确认\\n\\n- 路径：当前工作目录\\n- 可以开始下一步了\\n\\n```text\\n/data/mygo\\n```\"},\"index\":0}]}\n\n")
-			fmt.Fprint(w, "data: {\"choices\":[{\"delta\":{},\"index\":0,\"finish_reason\":\"stop\"}],\"usage\":{\"prompt_tokens\":120,\"completion_tokens\":340,\"total_tokens\":460,\"prompt_cache_hit_tokens\":20}}\n\n")
+		select {
+		case <-s.slowRelease():
+		case <-time.After(30 * time.Second):
 		}
+		emitScriptedAnswer(w)
 		fmt.Fprint(w, "data: [DONE]\n\n")
-	}))
+		return
+	}
+	if s.calls.Add(1) == 1 {
+		emitScriptedReasoning(w, scriptedReasoning)
+		fmt.Fprint(w, approvalToolCallSSE())
+	} else {
+		time.Sleep(scriptedAnswerDelay)
+		emitScriptedReasoning(w, scriptedReasoning)
+		emitScriptedAnswer(w)
+	}
+	fmt.Fprint(w, "data: [DONE]\n\n")
+}
+
+// approvalToolCallSSE is the first scripted model request: a team-task write,
+// which the default workspace permission still gates (read-only/informational
+// tools such as working_directory are auto-allowed now), works without a
+// workspace root and succeeds after approval, so the frames show a normal tool
+// card instead of a sandbox error.
+func approvalToolCallSSE() string {
+	const tool, arguments = "team_task_create", `{"subject":"检查发布清单","description":"确认文档与截图已更新"}`
+	return fmt.Sprintf("data: {\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"call-1\",\"type\":\"function\",\"function\":{\"name\":%s,\"arguments\":%s}}]},\"index\":0,\"finish_reason\":\"tool_calls\"}]}\n\n",
+		jsonString(tool), jsonString(arguments))
+}
+
+// scriptedReasoning is the thinking text every scripted turn streams first: the
+// transcript frames then show the reasoning disclosure (open with the spinner
+// while streaming, folded once the turn ends) instead of an empty thinking area.
+const scriptedReasoning = "先确认发布检查清单需要哪些字段，再创建任务并核对结果。"
+
+// slowReasoning is the thinking of the parked turn, so the running frame shows
+// the open thinking panel and the generation spinner.
+const slowReasoning = "先确认当前工作目录，再检查构建与文档状态，最后给出结论。"
+
+// emitScriptedReasoning streams one reasoning_content delta, as a reasoning
+// model does before its answer.
+func emitScriptedReasoning(w http.ResponseWriter, text string) {
+	fmt.Fprintf(w, "data: {\"choices\":[{\"delta\":{\"reasoning_content\":%s},\"index\":0}]}\n\n", jsonString(text))
+}
+
+// emitScriptedAnswer writes the scripted markdown answer plus provider usage.
+func emitScriptedAnswer(w http.ResponseWriter) {
+	fmt.Fprintf(w, "data: {\"choices\":[{\"delta\":{\"content\":%s},\"index\":0}]}\n\n", jsonString(snapshotAnswer))
+	fmt.Fprintf(w, "data: {\"choices\":[{\"delta\":{},\"index\":0,\"finish_reason\":\"stop\"}],\"usage\":%s}\n\n", snapshotUsage)
+}
+
+// jsonString encodes one Go string as a JSON string literal.
+func jsonString(value string) string {
+	encoded, err := json.Marshal(value)
+	if err != nil {
+		return `""`
+	}
+	return string(encoded)
 }
 
 func waitPending(approvals contracts.Approvals, timeout time.Duration) {

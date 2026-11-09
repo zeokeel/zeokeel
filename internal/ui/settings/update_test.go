@@ -225,6 +225,8 @@ func TestUpdateCheckingStateDisablesButton(t *testing.T) {
 	waitForCall(t, update)
 	tester.Frame()
 	h.assertTexts(tester, "检查中…")
+	// The busy state is the official spinner, and the action is disabled.
+	requireBusySpinner(t, tester, "检查中…")
 
 	// The button is disabled while the check is in flight: clicking it again
 	// starts no second check.

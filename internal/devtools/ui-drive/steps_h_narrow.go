@@ -8,6 +8,8 @@ package main
 
 import (
 	"context"
+	"strings"
+
 	"github.com/egoist/mygo/ui"
 )
 
@@ -55,8 +57,30 @@ func (d *drive) runHNarrowSteps() {
 			}
 			// The chip's accessibility label always carries the full goal text;
 			// its visible Text child must be absent in the compact header.
-			c.require(d.countContaining(goalText) == 1,
-				"窄列 header 仍显示目标正文（应只有无障碍 label 含全文，实际 %d 处）", d.countContaining(goalText))
+			// The chip's accessible name is "目标: <full text>"; mygo also
+			// registers the hidden tooltip body ("<full text>") as a label node.
+			// Both are accessibility-only carriers — the compact header must not
+			// add a third node (the visible text child, which the wide header
+			// renders). Counting the exact carriers keeps the N1 promise without
+			// depending on mygo internals: a visible child would be the same
+			// string as the tooltip node, so the count is the observable signal.
+			goalLabels := []string{}
+			for _, text := range d.texts() {
+				if strings.Contains(text, goalText) {
+					goalLabels = append(goalLabels, text)
+				}
+			}
+			combined, plain := false, false
+			for _, text := range goalLabels {
+				switch text {
+				case "目标: " + goalText, "Goal: " + goalText:
+					combined = true
+				case goalText:
+					plain = true
+				}
+			}
+			c.require(len(goalLabels) <= 2 && combined && plain,
+				"窄列 header 目标正文载体异常（应为 chip 无障碍名 + tooltip 各一，实际 %q）", goalLabels)
 			title := d.currentSessionTitle()
 			c.require(d.has(title), "窄列 header 的会话标题不可见（应保留 ≥120 DIP 可读宽度）")
 			c.shot("session-narrow-header")

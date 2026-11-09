@@ -256,6 +256,10 @@ type service struct {
 	// sessionPresets stores the optional per-session agent-preset selection
 	// (preset ID); cleared on session deletion, never persisted.
 	sessionPresets map[string]string
+	// allowedToolsMu serializes the read-modify-write of the per-session
+	// "always allow" tool set persisted in settings, so parallel tool calls
+	// cannot lose entries.
+	allowedToolsMu sync.Mutex
 	// memoryStore is the optional durable memory backend used by model-driven
 	// extraction; extracting is its single-flight guard.
 	memoryStore contracts.MemoryStore
@@ -291,6 +295,7 @@ var (
 	_ contracts.SessionPermissionSwitcher = (*service)(nil)
 	_ contracts.SessionPresetSetter       = (*service)(nil)
 	_ contracts.SessionFeedbacker         = (*service)(nil)
+	_ contracts.SessionToolPermissions    = (*service)(nil)
 	_ contracts.Subagents                 = (*service)(nil)
 )
 
@@ -1004,6 +1009,10 @@ func (s *service) DeleteSession(sessionID string) error {
 	if cancel != nil {
 		cancel()
 	}
+	// The session's "always allow" tool memory belongs to the session: forget it
+	// with the session. The settings row is best effort (the session is already
+	// gone; a failed cleanup must not fail the delete).
+	s.clearAllowedToolsRow(sessionID)
 	if s.store != nil {
 		if err := s.store.DeleteSession(context.Background(), sessionID); err != nil {
 			s.logger.Printf("[agent] delete session %s: %v", sessionID, err)
@@ -1420,9 +1429,12 @@ func (s *service) nextMessageIDLocked() string {
 // initial input messages.
 func (s *service) run(ctx context.Context, sessionID string, cfg contracts.ChatConfig, input []rig.Message,
 	history rig.History, thinking map[string]any) {
-	cfg = s.withWorkspaceInstructions(ctx, cfg)
-	cfg = s.withPresetInstructions(sessionID, cfg)
 	tools := s.toolsForSession(sessionID)
+	// Rebuild the complete model-facing prompt for this run: identity +
+	// environment first (OS, shell, tool root, approval policy), then the
+	// configured prompt with the workspace instructions and preset, then
+	// per-tool guidance for the tools this run actually receives.
+	cfg.SystemPrompt = s.buildRunSystemPrompt(ctx, sessionID, cfg, toolNameSet(tools))
 	provider, err := s.newProvider(cfg, thinking)
 	if err != nil {
 		s.finish(sessionID, ctx, fmt.Errorf("create provider: %w", err))
@@ -1435,6 +1447,10 @@ func (s *service) run(ctx context.Context, sessionID string, cfg contracts.ChatC
 	// The product's default is unlimited; Rig treats 0 as its built-in 20-round
 	// default, so a 0 limit is passed as an effectively unreachable cap.
 	maxIterations := effectiveMaxIterations(cfg.MaxIterations)
+	// Loop hygiene: one per-run repeat guard appends a DSH-style advisory
+	// reminder after the Nth consecutive identical tool call without blocking
+	// the call (see loop_guard.go). A new run starts a fresh repeat chain.
+	runTools := withRepeatGuard(tools, newRepeatToolGuard())
 	spec := rig.AgentSpec{
 		Provider:        provider,
 		Model:           cfg.Model,
@@ -1443,7 +1459,7 @@ func (s *service) run(ctx context.Context, sessionID string, cfg contracts.ChatC
 		Temperature:     generation.Temperature,
 		TopP:            generation.TopP,
 		MaxTokens:       generation.MaxTokens,
-		Tools:           tools,
+		Tools:           runTools,
 		History:         s.spilledHistory(history),
 		Gate:            s.gate(sessionID),
 		ContextBudget:   cfg.ContextBudget,
@@ -1464,12 +1480,16 @@ func (s *service) run(ctx context.Context, sessionID string, cfg contracts.ChatC
 	}
 	s.appendEvent(ctx, sessionID, "run_start", map[string]any{"model": cfg.Model})
 	startedAt := time.Now()
+	// The usage tracker is run-local: Rig's RunResult.Usage accumulates every
+	// model call, while only the last call's prompt tokens describe the context
+	// the model actually saw (MessageUsage.ContextTokens).
+	usage := &turnUsage{}
 	result, runErr := runner.Run(ctx, rig.RunRequest{
 		SessionID: sessionID,
 		Input:     input,
-		Emit:      func(event rig.Event) { s.handleEvent(sessionID, event) },
+		Emit:      func(event rig.Event) { s.handleEvent(sessionID, event, usage) },
 	})
-	s.recordRunUsage(ctx, sessionID, result, time.Since(startedAt).Milliseconds())
+	s.recordRunUsage(ctx, sessionID, result, time.Since(startedAt).Milliseconds(), usage.lastPromptTokens)
 	s.finish(sessionID, ctx, runErr)
 }
 
@@ -1533,8 +1553,17 @@ func (s *service) appendEvent(ctx context.Context, sessionID, eventType string, 
 }
 
 // handleEvent applies one Rig event to the current assistant message and
-// notifies subscribers. The callback runs on the run goroutine.
-func (s *service) handleEvent(sessionID string, event rig.Event) {
+// notifies subscribers. The callback runs on the run goroutine; turn is the
+// run-local usage tracker (nil is accepted for callers without one).
+func (s *service) handleEvent(sessionID string, event rig.Event, turn *turnUsage) {
+	// Rig reports one usage event per model call and accumulates the run total
+	// itself; remember the prompt tokens of the newest call so the read model can
+	// expose the real context size of the turn (RunResult.Usage is a billing
+	// total). Recorded before the session lookup: a session deleted mid-run still
+	// must not poison the next event's tracking.
+	if turn != nil && event.Type == rig.EventUsage && event.Usage != nil {
+		turn.lastPromptTokens = event.Usage.PromptTokens
+	}
 	s.mu.Lock()
 	state, ok := s.sessions[sessionID]
 	if !ok {
@@ -1628,11 +1657,19 @@ func (s *service) finish(sessionID string, ctx context.Context, runErr error) {
 			if message.Error == "" {
 				message.Error = errText
 			}
-			classifyErr := runErr
-			if ctx != nil && ctx.Err() != nil {
-				classifyErr = ctx.Err()
+			// A user-initiated stop records the literal text "cancelled", which
+			// ClassifyError does not match ("context canceled" is the provider
+			// spelling). Classify the context cancellation explicitly so the UI
+			// renders the localized 已取消/Cancelled row instead of a generic
+			// error (the restored-session path already did this).
+			switch {
+			case ctx != nil && errors.Is(ctx.Err(), context.Canceled):
+				message.ErrorKind = contracts.MessageErrorKindCancelled
+			case ctx != nil && errors.Is(ctx.Err(), context.DeadlineExceeded):
+				message.ErrorKind = contracts.MessageErrorKindTimeout
+			default:
+				message.ErrorKind = contracts.ClassifyError(runErr, message.Error)
 			}
-			message.ErrorKind = contracts.ClassifyError(classifyErr, message.Error)
 		} else {
 			// A successful turn never carries stale error details.
 			message.Error = ""

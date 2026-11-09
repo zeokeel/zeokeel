@@ -223,8 +223,11 @@ type state struct {
 	memberCloseName  string
 
 	// Files pane artifact history: the expanded preview rows (keyed by
-	// artifact id) and the last download status.
+	// artifact id), the official List's state and choice, and the last download
+	// status.
 	artifactsOpen      map[string]bool
+	artifactsList      ui.ListState
+	artifactsSel       int
 	artifactsNotice    string
 	artifactsErr       string
 	artifactsSavedPath string
@@ -270,6 +273,7 @@ func Module() *module.Descriptor[Config] {
 			changesOpen:   make(map[string]bool),
 			diffs:         make(map[string]*diffView),
 			artifactsOpen: make(map[string]bool),
+			artifactsSel:  -1,
 			term:          newTerminalState(),
 		}
 		// The host binds Cmd/Ctrl+Alt+Left/Right to these two window commands and

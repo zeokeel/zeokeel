@@ -109,51 +109,85 @@ func buildArtifactsSection(c *ui.Context, t *design.Tokens, artifacts contracts.
 				t.TextMuted(design.TypeXXS))
 			return
 		}
+		// The history is the official List: rows are keyed by artifact id and
+		// named by their title (list/listitem semantics for AT, keyboard choice,
+		// stable rows as new artifacts arrive). Up/Down choose a row and Enter or
+		// a double click toggles its preview, exactly like the explicit
+		// 预览/收起 row button, which no longer paints a hand-managed selected
+		// background.
+		artifactKeys := make([]string, len(history))
+		artifactTitles := make([]string, len(history))
 		for index, artifact := range history {
-			artifact := artifact
-			key := strings.TrimSpace(artifact.ID)
-			if key == "" {
-				key = fmt.Sprintf("artifact-%d", index)
-			}
-			c.Key("artifact/" + key)
-			open := st.artifactsOpen[key]
-			toggle := func() {
-				st.artifactsOpen[key] = !st.artifactsOpen[key]
-				runtime.Invalidate()
-			}
-			title := firstNonEmpty(artifact.Title, uikit.T(st.locale, "未命名产物", "Untitled artifact"))
-			ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(design.Space2).Children(func() {
-				info := ui.ButtonBase(c).Grow(1).Padding(design.Space1).Radius(design.RadiusSM).Label(title)
-				info = rowTint(t, info, open)
-				info.Children(func() {
-					ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(design.Space2).Children(func() {
-						design.Apply(ui.Text(c, title), t.Font(design.TypeXS)).FontWeight(600).
-							TextColor(t.LabelPrimary).Grow(1).MaxLines(1).Ellipsis("…")
-						design.Apply(ui.Text(c, uikit.FormatClock(st.locale, artifact.CreatedAt)),
-							t.Font(design.TypeXXXS)).TextColor(t.LabelTertiary).NoWrap()
-					})
-				})
-				if info.Clicked() {
-					toggle()
+			artifactKeys[index] = artifactKey(artifact, index)
+			artifactTitles[index] = artifactTitle(st, artifact)
+		}
+		st.artifactsList.Key = func(row int) any { return artifactKeys[row] }
+		st.artifactsList.Label = func(row int) string { return artifactTitles[row] }
+		st.artifactsList.Selected = &st.artifactsSel
+		list := ui.List(c, &st.artifactsList, len(history)).
+			Label(uikit.T(st.locale, "产物列表", "Artifacts")).
+			Gap(design.Space1).
+			Rows(func(row ui.ListRow) {
+				artifact := history[row.Index]
+				key := artifactKeys[row.Index]
+				open := st.artifactsOpen[key]
+				toggle := func() {
+					st.artifactsOpen[key] = !st.artifactsOpen[key]
+					runtime.Invalidate()
 				}
-				previewLabel := uikit.T(st.locale, "预览", "Preview")
-				if open {
-					previewLabel = uikit.T(st.locale, "收起", "Hide")
-				}
-				if ui.Button(c, previewLabel).Clicked() {
-					toggle()
-				}
-				download := ui.Button(c, uikit.T(st.locale, "下载", "Download")).
-					Tooltip(uikit.T(st.locale, "保存为 Markdown", "Save as Markdown"))
-				if download.Clicked() {
-					saveArtifact(st, runtime, artifact)
-				}
+				buildArtifactRow(row, t, st, runtime, artifact, artifactTitles[row.Index], open, toggle)
 			})
+		if list.Submitted() && st.artifactsSel >= 0 && st.artifactsSel < len(artifactKeys) {
+			key := artifactKeys[st.artifactsSel]
+			st.artifactsOpen[key] = !st.artifactsOpen[key]
+			runtime.Invalidate()
+		}
+	})
+}
+
+// artifactKey is one artifact's stable row identity (its id, or its position
+// for an id-less legacy entry).
+func artifactKey(artifact contracts.Artifact, index int) string {
+	if key := strings.TrimSpace(artifact.ID); key != "" {
+		return key
+	}
+	return fmt.Sprintf("artifact-%d", index)
+}
+
+// artifactTitle is the row's display title and accessible name.
+func artifactTitle(st *state, artifact contracts.Artifact) string {
+	return firstNonEmpty(artifact.Title, uikit.T(st.locale, "未命名产物", "Untitled artifact"))
+}
+
+// buildArtifactRow is one artifact history row: title, time, the explicit
+// preview toggle, the download action and, while open, the Markdown preview
+// below them. The List around it owns the row state, choice and keyboard.
+func buildArtifactRow(row ui.ListRow, t *design.Tokens, st *state,
+	runtime contracts.UIRuntime, artifact contracts.Artifact, title string, open bool, toggle func()) {
+	c := row.Context
+	ui.Column(c).FillWidth().Gap(design.Space1).Children(func() {
+		ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(design.Space2).Children(func() {
+			design.Apply(ui.Text(c, title), t.Font(design.TypeXS)).FontWeight(600).
+				TextColor(t.LabelPrimary).Grow(1).MaxLines(1).Ellipsis("…")
+			design.Apply(ui.Text(c, uikit.FormatClock(st.locale, artifact.CreatedAt)),
+				t.Font(design.TypeXXXS)).TextColor(t.LabelTertiary).NoWrap()
+			previewLabel := uikit.T(st.locale, "预览", "Preview")
 			if open {
-				ui.Scroll(c).FillWidth().MaxHeight(design.Space6 * 8).Children(func() {
-					markdown.View(c, artifact.Body, nil)
-				})
+				previewLabel = uikit.T(st.locale, "收起", "Hide")
 			}
+			if ui.Button(c, previewLabel).Clicked() {
+				toggle()
+			}
+			download := ui.Button(c, uikit.T(st.locale, "下载", "Download")).
+				Tooltip(uikit.T(st.locale, "保存为 Markdown", "Save as Markdown"))
+			if download.Clicked() {
+				saveArtifact(st, runtime, artifact)
+			}
+		})
+		if open {
+			ui.Scroll(c).FillWidth().MaxHeight(design.Space6 * 8).Children(func() {
+				markdown.View(c, artifact.Body, nil)
+			})
 		}
 	})
 }
@@ -362,51 +396,40 @@ func buildOpenWorkspace(c *ui.Context, t *design.Tokens, workspace contracts.Wor
 	}
 }
 
-// buildBreadcrumb renders the root/segment path as clickable native buttons.
+// buildBreadcrumb renders the workspace path as the official ui.Breadcrumbs:
+// the workspace root and the current directory's path segments, the last one the
+// current page, the rest links a click or Enter chooses. Deep paths keep the
+// compact middle-collapse look: the first segment, an ellipsis crumb that jumps
+// to the parent of the shown tail, then the last two segments.
 func buildBreadcrumb(c *ui.Context, t *design.Tokens, current contracts.Workspace, runtime contracts.UIRuntime, st *state) {
-	rootLabel := "/" + firstNonEmpty(current.Name, filepath.Base(current.Root))
 	segments := splitRelPath(st.filesDir)
-	fullPath := rootLabel
-	if len(segments) > 0 {
-		fullPath += "/" + strings.Join(segments, "/")
+	rootLabel := firstNonEmpty(current.Name, filepath.Base(current.Root))
+	// items are the visible crumbs; dirs[i] is the directory item i opens
+	// (the last item is where the user is, not a link).
+	items := []string{rootLabel}
+	dirs := []string{""}
+	if len(segments) <= 3 {
+		for index, segment := range segments {
+			items = append(items, segment)
+			dirs = append(dirs, strings.Join(segments[:index+1], "/"))
+		}
+	} else {
+		items = append(items, segments[0])
+		dirs = append(dirs, segments[0])
+		// The ellipsis jumps up to the parent of the two tail segments, which
+		// the old hand-drawn trail could not do at all.
+		items = append(items, "…")
+		dirs = append(dirs, strings.Join(segments[:len(segments)-2], "/"))
+		for index := len(segments) - 2; index < len(segments); index++ {
+			items = append(items, segments[index])
+			dirs = append(dirs, strings.Join(segments[:index+1], "/"))
+		}
 	}
-	ui.Row(c).FillWidth().Gap(design.Space1).AlignItems(ui.Center).Children(func() {
-		root := ui.Button(c, rootLabel).Tooltip(uikit.T(st.locale, "返回工作区根目录", "Back to the workspace root"))
-		if root.Clicked() {
-			navigateFiles(st, "", runtime)
-		}
-		// Deep paths collapse their middle: first segment, an ellipsis, then the
-		// last two segments; every crumb keeps its full path in the tooltip.
-		visible := segments
-		skipped := false
-		if len(segments) > 3 {
-			visible = append([]string{segments[0], "…"}, segments[len(segments)-2:]...)
-			skipped = true
-		}
-		base := 0
-		for index, segment := range visible {
-			design.Apply(ui.Text(c, "/"), t.TextMuted(design.TypeXXXS))
-			if segment == "…" && skipped {
-				design.Apply(ui.Text(c, "…"), t.TextMuted(design.TypeXXXS)).Tooltip(fullPath)
-				base = len(segments) - 2
-				continue
-			}
-			label := "/" + segment
-			index := index
-			crumbIndex := index
-			if skipped {
-				crumbIndex = base + index - 1
-				if index == 0 {
-					crumbIndex = 0
-				}
-			}
-			crumb := ui.Button(c, label).
-				Tooltip(uikit.T(st.locale, "返回 ", "Back to ") + "/" + strings.Join(segments[:crumbIndex+1], "/"))
-			if crumb.Clicked() {
-				navigateFiles(st, strings.Join(segments[:crumbIndex+1], "/"), runtime)
-			}
-		}
-	})
+	chosen := -1
+	trail := ui.Breadcrumbs(c, items, &chosen).Label(uikit.T(st.locale, "路径", "Path"))
+	if trail.Changed() && chosen >= 0 && chosen < len(dirs) {
+		navigateFiles(st, dirs[chosen], runtime)
+	}
 }
 
 // splitRelPath splits a relative directory path at the slash separators.

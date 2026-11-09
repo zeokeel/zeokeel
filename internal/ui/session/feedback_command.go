@@ -115,26 +115,39 @@ func buildFeedbackDialog(c *ui.Context, t *design.Tokens, runtime contracts.UIRu
 				summary = st.tr("（这条回答没有文本）", "(This answer has no text)")
 			}
 			design.Apply(ui.Text(c, summary), t.TextMuted(design.TypeXS)).MaxLines(2).Ellipsis("…")
-			// The two ratings are equal-weight toggle buttons: the current
-			// choice is shown by the selected token, not by a resident badge.
-			ui.Row(c).FillWidth().Gap(design.Space2).Children(func() {
-				good := design.Apply(ui.Button(c, st.tr("有帮助", "Helpful")), t.SecondaryButton())
-				if st.feedbackRating == contracts.FeedbackGood {
-					good.BorderColor(t.Accent).TextColor(t.Accent)
+			// The two ratings are two official Toggles in an official
+			// ToggleGroup: pressed semantics, mutually exclusive, and pressing the
+			// pressed one again clears it — both unpressed is 未评价, which the
+			// dialog's Save/Clear actions write. (A Segmented control cannot say
+			// "nothing chosen": it clamps an out-of-range index to the first
+			// segment, which would preselect 有帮助 and dead-end its Save.)
+			rating := st.feedbackRating
+			goodOn := rating == contracts.FeedbackGood
+			ui.ToggleGroup(c, func() {
+				good := ui.Toggle(c.Key("session.feedback.good"), &goodOn, st.tr("有帮助", "Helpful"))
+				if good.Changed() {
+					switch {
+					case goodOn:
+						rating = contracts.FeedbackGood
+					case rating == contracts.FeedbackGood:
+						rating = ""
+					}
 				}
-				if good.Clicked() {
-					st.feedbackRating = contracts.FeedbackGood
-					runtime.Invalidate()
+				badOn := rating == contracts.FeedbackBad
+				bad := ui.Toggle(c.Key("session.feedback.bad"), &badOn, st.tr("没帮助", "Not helpful"))
+				if bad.Changed() {
+					switch {
+					case badOn:
+						rating = contracts.FeedbackBad
+					case rating == contracts.FeedbackBad:
+						rating = ""
+					}
 				}
-				bad := design.Apply(ui.Button(c, st.tr("没帮助", "Not helpful")), t.SecondaryButton())
-				if st.feedbackRating == contracts.FeedbackBad {
-					bad.BorderColor(t.DangerText).TextColor(t.DangerText)
-				}
-				if bad.Clicked() {
-					st.feedbackRating = contracts.FeedbackBad
-					runtime.Invalidate()
-				}
-			})
+			}).Label(st.tr("评价", "Rating"))
+			if rating != st.feedbackRating {
+				st.feedbackRating = rating
+				runtime.Invalidate()
+			}
 			if st.feedbackDialogErr != "" {
 				uikit.ErrorLine(c, st.feedbackDialogErr)
 			}

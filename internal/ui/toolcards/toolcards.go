@@ -5,17 +5,19 @@
 //
 // The module registers one native renderer per common Rig tool name (bash,
 // read_file, grep, web_search, subagent, ...) plus the original "demo" card the
-// host uses as a capability probe. All real cards share one native composition:
-// a status badge (theme-colored: running=warning, ok=success, error=danger), the
-// tool name and, when the read model carries a summary, a
-// ui.Collapsible("摘要") with a truncated result/argument excerpt. No Canvas or
-// hand-drawn widget is involved.
+// host uses as a capability probe. All real cards share the transcript's compact
+// tool row (internal/uikit.ToolRow): one official mygo disclosure
+// (ui.CollapsibleBase) whose trigger is a muted category icon, the friendly
+// localized tool name (the protocol id stays its tooltip/AT description), the
+// status with the official ui.Spinner while running, a one-line summary preview
+// and the chevron, and whose panel is the truncated result/argument excerpt. No
+// Canvas or hand-drawn widget is involved.
 //
 // MCP tools are named dynamically (mcp__<server>__<tool>) and the host matches
 // renderers by exact tool name, so a wildcard renderer is impossible here: MCP
-// calls keep the session screen's native badge+text fallback. A product that
-// wants a dedicated card for one MCP tool registers a renderer for that exact
-// name itself.
+// calls keep the session screen's compact row fallback. A product that wants a
+// dedicated card for one MCP tool registers a renderer for that exact name
+// itself.
 package toolcards
 
 import (
@@ -204,9 +206,10 @@ func demoBuild(title string) func(c *ui.Context, call contracts.ToolCall) {
 }
 
 // realBuild builds one real tool row. The transcript is mostly prose, so the
-// registered cards use the shared compact row (internal/uikit): a muted category
-// icon, the tool name, a small status label, a one-line summary preview and the
-// small 详情 disclosure. The trajectory pane keeps its detailed card.
+// registered cards use the shared compact disclosure row (internal/uikit): a
+// muted category icon, the friendly localized tool name (the protocol id is the
+// row's tooltip), the status with the official spinner while running, a one-line
+// summary preview and the chevron. The trajectory pane keeps its detailed card.
 func realBuild(state *rendererState, runtime contracts.UIRuntime) func(c *ui.Context, call contracts.ToolCall) {
 	return func(c *ui.Context, call contracts.ToolCall) {
 		t := design.Of(c)
@@ -221,11 +224,12 @@ func realBuild(state *rendererState, runtime contracts.UIRuntime) func(c *ui.Con
 		row := uikit.ToolRowOptions{
 			Key:         "toolcards." + key,
 			Icon:        uikit.ToolIcon(tool),
-			Name:        tool,
+			Name:        uikit.ToolDisplayName(state.locale, tool),
+			RawName:     tool,
 			Status:      statusLabel(state, call.Status),
 			StatusColor: toolStatusTextColor(t, call.Status),
+			Running:     normalizeStatus(call.Status) == "running",
 			Preview:     uikit.ToolPreview(summary, 96),
-			DetailLabel: state.tr("详情", "Details"),
 			Open:        open,
 			Toggle: func(next bool) {
 				toggled = true

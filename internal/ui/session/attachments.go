@@ -304,7 +304,8 @@ func buildPendingAttachments(c *ui.Context, t *design.Tokens, runtime contracts.
 			// The picker blocks its caller, but it runs off the UI thread: the
 			// composer stays live and says what it is waiting for.
 			ui.Row(c).AlignItems(ui.Center).Gap(design.Space2).Children(func() {
-				ui.Icon(c, icons.Reload()).Size(design.Space3, design.Space3).TextColor(t.LabelSecondary)
+				ui.Spinner(c).Label(st.tr("选择中…", "Choosing…")).
+					Size(design.Space3, design.Space3).TextColor(t.LabelSecondary)
 				design.Apply(ui.Text(c, st.tr("选择中…", "Choosing…")), t.TextMuted(design.TypeXXS))
 			})
 		}
@@ -323,7 +324,8 @@ func buildPendingAttachments(c *ui.Context, t *design.Tokens, runtime contracts.
 			// A running compaction is a loading state, not a result: it shows
 			// while it runs and its outcome goes to a transient toast.
 			ui.Row(c).AlignItems(ui.Center).Gap(design.Space2).Children(func() {
-				ui.Icon(c, icons.Reload()).Size(design.Space3, design.Space3).TextColor(t.LabelSecondary)
+				ui.Spinner(c).Label(st.tr("压缩中…", "Compacting…")).
+					Size(design.Space3, design.Space3).TextColor(t.LabelSecondary)
 				design.Apply(ui.Text(c, st.tr("压缩中…", "Compacting…")), t.TextMuted(design.TypeXXS))
 			})
 		}

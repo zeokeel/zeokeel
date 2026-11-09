@@ -258,6 +258,8 @@ func TestUpdateInstallDisabledWhileScheduling(t *testing.T) {
 	waitForInstallStart(t, update)
 	tester.Frame()
 	h.assertTexts(tester, "安装中…")
+	// The busy state is the official spinner, and the action is disabled.
+	requireBusySpinner(t, tester, "安装中…")
 	h.click(tester, "安装中…")
 	if got := update.scheduleCount(); got != 1 {
 		t.Fatalf("ScheduleInstall calls while scheduling = %d, want 1", got)

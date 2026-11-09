@@ -34,6 +34,12 @@ type mcpState struct {
 	servers  []contracts.MCPServerConfig
 	parseErr string
 
+	// The MCP server collection is the official List: keyed by server name,
+	// named by it and single-row selectable; the inline 移除 button stays the
+	// row action.
+	list ui.ListState
+	sel  int
+
 	transport string // mcpTransportHTTP or mcpTransportStdio
 	name      string
 	url       string
@@ -55,7 +61,7 @@ type mcpState struct {
 }
 
 func newMCPState() *mcpState {
-	return &mcpState{transport: mcpTransportHTTP, confirmRemove: -1}
+	return &mcpState{transport: mcpTransportHTTP, confirmRemove: -1, sel: -1}
 }
 
 // mcpRowTransport reports the effective transport of one stored row: rows with
@@ -76,6 +82,55 @@ func mcpRowAddress(row contracts.MCPServerConfig) string {
 		return strings.TrimSpace(strings.TrimSpace(row.Command) + " " + strings.Join(row.Args, " "))
 	}
 	return row.URL
+}
+
+// mcpServerRowKey is the official List key of one MCP server row: the name
+// when it is unique among the rows, else the name plus the address, so two
+// servers with the same name still have stable distinct keys.
+func mcpServerRowKey(servers []contracts.MCPServerConfig, index int) any {
+	if index < 0 || index >= len(servers) {
+		return nil
+	}
+	name := strings.TrimSpace(servers[index].Name)
+	duplicate := false
+	for other := range servers {
+		if other != index && strings.TrimSpace(servers[other].Name) == name {
+			duplicate = true
+			break
+		}
+	}
+	if !duplicate {
+		return name
+	}
+	return name + "\x00" + mcpRowAddress(servers[index])
+}
+
+// buildMCPServerRow renders one stored MCP server: its name, transport badge,
+// address and the inline remove action. The official List owns the row paint
+// and the choice, so the selected row's copy uses the accent's on-color.
+func buildMCPServerRow(c *ui.Context, t *design.Tokens, st *mcpState, index int,
+	locale contracts.LocaleService, selected bool) {
+	server := st.servers[index]
+	primary, _, tertiary := listRowTextColors(t, selected)
+	ui.Row(c).FillWidth().Padding(design.Space1, design.Space2).
+		AlignItems(ui.Center).Gap(design.Space2).Children(func() {
+		design.Apply(ui.Text(c, server.Name), t.Font(design.TypeS)).
+			FontWeight(600).TextColor(primary).MaxLines(1).Ellipsis("…")
+		transport := mcpRowTransport(server)
+		badge := design.Apply(ui.Badge(c, transportBadgeLabel(transport)), t.Badge())
+		if transport == mcpTransportStdio {
+			badge.TextColor(t.Accent)
+		}
+		design.Apply(ui.Text(c, mcpRowAddress(server)),
+			t.Font(design.TypeXS), t.MonoFamily()).
+			TextColor(tertiary).Grow(1).MaxLines(1).Ellipsis("…")
+		if design.Apply(ui.Button(c, localized(locale, "移除", "Remove")),
+			t.DangerButton()).Tooltip(localized(locale,
+			"移除该服务器", "Remove this server")).Clicked() {
+			st.confirmRemove = index
+			c.Invalidate()
+		}
+	})
 }
 
 // mcpWorkspaceOptInEnabled normalizes the stored opt-in value: only an explicit
@@ -130,35 +185,34 @@ func buildMCPPage(c *ui.Context, kctx cordis.Context, st *mcpState, locale contr
 			uikit.ErrorLine(c, st.parseErr)
 		}
 
-		// Stored server rows: rows separated by hairlines, not cards.
+		// Stored server rows: the official List keeps the hairline rows, names
+		// them for assistive technology and owns the keyboard selection; the
+		// inline remove action keeps its confirmation semantics.
 		uikit.Section(c, localized(locale, "MCP 服务器", "MCP servers"), func(*ui.Context) {
 			if len(st.servers) == 0 {
 				uikit.EmptyState(c, localized(locale,
 					"还没有配置 MCP 服务器", "No MCP servers configured yet"))
 				return
 			}
-			for index, server := range st.servers {
-				index, server := index, server
-				ui.Divider(c)
-				ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(design.Space2).Children(func() {
-					design.Apply(ui.Text(c, server.Name), t.Font(design.TypeS)).
-						FontWeight(600).TextColor(t.LabelPrimary).MaxLines(1).Ellipsis("…")
-					transport := mcpRowTransport(server)
-					badge := design.Apply(ui.Badge(c, transportBadgeLabel(transport)), t.Badge())
-					if transport == mcpTransportStdio {
-						badge.TextColor(t.Accent)
-					}
-					design.Apply(ui.Text(c, mcpRowAddress(server)),
-						t.Font(design.TypeXS), t.MonoFamily()).
-						TextColor(t.LabelTertiary).Grow(1).MaxLines(1).Ellipsis("…")
-					if design.Apply(ui.Button(c, localized(locale, "移除", "Remove")),
-						t.DangerButton()).Tooltip(localized(locale,
-						"移除该服务器", "Remove this server")).Clicked() {
-						st.confirmRemove = index
-						c.Invalidate()
-					}
+			bindSettingsList(&st.list, &st.sel, len(st.servers), func(index int) any {
+				if index < 0 || index >= len(st.servers) {
+					return nil
+				}
+				return mcpServerRowKey(st.servers, index)
+			}, func(index int) string {
+				if index < 0 || index >= len(st.servers) {
+					return ""
+				}
+				return firstNonEmpty(strings.TrimSpace(st.servers[index].Name),
+					mcpRowAddress(st.servers[index]),
+					localized(locale, "(未命名服务器)", "(Untitled server)"))
+			})
+			ui.List(c, &st.list, len(st.servers)).
+				Label(localized(locale, "MCP 服务器列表", "MCP servers list")).
+				Gap(design.Space1).
+				Rows(func(row ui.ListRow) {
+					buildMCPServerRow(row.Context, t, st, row.Index, locale, row.Selected())
 				})
-			}
 		})
 
 		// Workspace mcp.json opt-in: applied on the next app start.

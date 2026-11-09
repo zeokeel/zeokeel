@@ -41,8 +41,12 @@ func TestAttachmentPickerRunsOffUIThreadWithBusyState(t *testing.T) {
 	h.attachFiles(tester)
 	// The picker goroutine is still blocked: the composer must render the busy
 	// state instead of freezing the frame (a synchronous picker would never
-	// return here).
+	// return here). The state is the official Spinner (a named progress
+	// indicator), not a static icon.
 	h.assertTexts(tester, "选择中…")
+	if info, ok := tester.AccessByRole(ui.RoleProgress, "选择中…"); !ok || info.Role != ui.RoleProgress {
+		t.Fatalf("attachment picker busy state is not a progress indicator: %+v found %v", info, ok)
+	}
 	// While busy the attach button itself shows 选择中… and the toolbar offers
 	// no second attach entry, so the modal cannot be opened and no second pick
 	// starts.

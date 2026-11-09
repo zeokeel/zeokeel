@@ -35,6 +35,10 @@ func TestP1ApprovalToolsAndPersistence(t *testing.T) {
 	settings := &memSettings{values: map[string]string{
 		contracts.SettingsChatModel:   "test-model",
 		contracts.SettingsChatBaseURL: server.URL,
+		// This scenario covers the tool-approval handshake end to end: ask mode
+		// makes the scripted working_directory call require the dialog even
+		// though the default workspace mode auto-allows read-only tools.
+		contracts.SettingAgentPermission: contracts.PermissionAsk,
 	}}
 
 	// --- first boot: send a prompt that requires tool approval -------------
@@ -84,14 +88,19 @@ func TestP1ApprovalToolsAndPersistence(t *testing.T) {
 		t.Fatalf("Push(session): %v", err)
 	}
 	tester.Frame()
-	if !tester.HasText("working_directory") {
-		t.Fatalf("tool card text missing; texts = %v", tester.Texts())
+	// The transcript shows the friendly localized tool name; the raw protocol id
+	// stays in the row's tooltip/accessible description.
+	if !tester.HasText("查看工作目录") {
+		t.Fatalf("tool row text missing; texts = %v", tester.Texts())
+	}
+	if tester.HasText("working_directory") {
+		t.Fatalf("raw tool id leaked into the transcript; texts = %v", tester.Texts())
 	}
 	if err := tester.Click("轨迹"); err != nil {
 		t.Fatalf("click trajectory tab: %v; texts = %v", err, tester.Texts())
 	}
 	tester.Frame()
-	for _, want := range []string{"步骤 1", "working_directory", "完成"} {
+	for _, want := range []string{"步骤 1", "查看工作目录", "完成"} {
 		if !tester.HasText(want) {
 			t.Fatalf("trajectory frame missing %q; texts = %v", want, tester.Texts())
 		}

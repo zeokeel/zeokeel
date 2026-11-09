@@ -177,8 +177,8 @@ func buildBehaviorPage(c *ui.Context, runtime contracts.UIRuntime,
 						enabled := sendWhileRunningEnabled(store)
 						if switchField(c,
 							localized(locale, "运行中允许排队发送", "Queue prompts while running"),
-							localized(locale, "发送的提示会在当前回合结束后依次发出。",
-								"Queued prompts are sent one by one after the current turn finishes."),
+							localized(locale, "默认开启。运行中发送的提示会排队，在本轮结束后依次发出；关闭后回复生成期间 Enter 不可用，草稿会保留到本轮结束。",
+								"On by default. Prompts sent while running are queued and sent after the current turn; when off, Enter is unavailable while a reply streams and the draft is kept until the turn ends."),
 							&enabled) {
 							applyBool(contracts.SettingSendWhileRunning, enabled)
 						}
@@ -315,13 +315,15 @@ func chatFontSizeLabel(locale contracts.LocaleService, value string) string {
 	return localized(locale, "标准", "Standard")
 }
 
-// sendWhileRunningEnabled normalizes the stored ui.sendWhileRunning row: only
-// "true" enables queueing; missing, empty and malformed values are off.
+// sendWhileRunningEnabled normalizes the stored ui.sendWhileRunning row:
+// queueing is on unless the value is explicitly "false"; missing, empty and
+// malformed values keep the default (on) so the composer stays usable while a
+// reply streams.
 func sendWhileRunningEnabled(store contracts.SettingsService) bool {
 	if store == nil {
-		return false
+		return true
 	}
-	return strings.EqualFold(strings.TrimSpace(store.Get(contracts.SettingSendWhileRunning, "")), "true")
+	return !strings.EqualFold(strings.TrimSpace(store.Get(contracts.SettingSendWhileRunning, "")), "false")
 }
 
 // goalAutoContinueEnabled normalizes goal.autoContinue: only "true" enables it.

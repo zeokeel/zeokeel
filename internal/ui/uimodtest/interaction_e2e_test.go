@@ -431,7 +431,7 @@ func TestDialogSafetyAndButtonOrder(t *testing.T) {
 		t.Fatalf("approval dialog missing; texts = %v", tester.Texts())
 	}
 	deny, okDeny := tester.Find("拒绝")
-	always, okAlways := tester.Find("本次运行内始终允许")
+	always, okAlways := tester.Find("本会话内始终允许")
 	allow, okAllow := tester.Find("允许")
 	if !okDeny || !okAlways || !okAllow {
 		t.Fatalf("approval buttons missing (deny=%v always=%v allow=%v); texts = %v",
@@ -441,14 +441,14 @@ func TestDialogSafetyAndButtonOrder(t *testing.T) {
 		t.Fatalf("approval order is not deny→always→allow: deny=%.1f always=%.1f allow=%.1f",
 			deny.X, always.X, allow.X)
 	}
-	if !tester.Focused("拒绝") {
-		t.Fatalf("approval dialog's default focus is not the safe Deny button; texts = %v", tester.Texts())
+	// No default action: nothing is auto-focused, so a stray Enter (the user
+	// often presses it right after sending a prompt) can neither allow nor
+	// deny the call.
+	if tester.Focused("拒绝") || tester.Focused("允许") || tester.Focused("本会话内始终允许") {
+		t.Fatalf("approval dialog autofocuses an action; texts = %v", tester.Texts())
 	}
-	if tester.Focused("允许") {
-		t.Fatalf("approval dialog focuses Allow by default (unsafe)")
-	}
-	if !tester.HasText("Enter 执行当前聚焦的按钮") {
-		t.Fatalf("approval dialog lacks the visible Enter/focus semantics; texts = %v", tester.Texts())
+	if !tester.HasText("无默认操作") {
+		t.Fatalf("approval dialog lacks the visible no-default-action semantics; texts = %v", tester.Texts())
 	}
 	// The raw arguments are collapsed behind an explicit disclosure.
 	if !tester.HasText("显示原始参数") {

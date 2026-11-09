@@ -78,16 +78,22 @@ func buildUpdatePage(c *ui.Context, t *design.Tokens, kctx cordis.Context, runti
 					return
 				}
 				checkLabel := localized(locale, "检查更新", "Check for updates")
+				busyLabel := localized(locale, "检查中…", "Checking…")
 				if st.checking {
-					checkLabel = localized(locale, "检查中…", "Checking…")
+					checkLabel = busyLabel
 				}
-				if design.Apply(ui.PrimaryButton(c, checkLabel), t.PrimaryButton()).
-					Disabled(st.checking || st.downloading).Clicked() {
-					if !st.checking && !st.downloading {
-						startUpdateCheck(updateService, runtime, st)
-						c.Invalidate()
+				// The busy state is the official spinner with an accessible
+				// progress name beside the disabled action; no fake percentage.
+				ui.Row(c).AlignItems(ui.Center).Gap(design.Space2).Children(func() {
+					buildBusySpinner(c, st.checking, busyLabel)
+					if design.Apply(ui.PrimaryButton(c, checkLabel), t.PrimaryButton()).
+						Disabled(st.checking || st.downloading).Clicked() {
+						if !st.checking && !st.downloading {
+							startUpdateCheck(updateService, runtime, st)
+							c.Invalidate()
+						}
 					}
-				}
+				})
 			})
 
 		uikit.Section(c, localized(locale, "当前版本", "Current version"), func(*ui.Context) {
@@ -155,18 +161,17 @@ func buildUpdatePage(c *ui.Context, t *design.Tokens, kctx cordis.Context, runti
 		if downloader, canDownload := updateService.(contracts.UpdateDownloader); canDownload {
 			if st.download == nil && st.info.Available {
 				downloadLabel := localized(locale, "下载更新", "Download update")
+				busyLabel := localized(locale, "下载中…", "Downloading…")
 				if st.downloading {
-					downloadLabel = localized(locale, "下载中…", "Downloading…")
+					downloadLabel = busyLabel
 				}
-				uikit.DialogFooter(c, []uikit.DialogAction{{
-					Label: downloadLabel, Primary: true, Disabled: st.downloading,
-					OnClick: func() {
+				buildBusyPrimaryAction(c, t, st.downloading, downloadLabel, busyLabel,
+					st.downloading, func() {
 						if !st.downloading {
 							startUpdateDownload(downloader, runtime, st)
 							c.Invalidate()
 						}
-					},
-				}})
+					})
 			}
 			if st.downloadErr != "" {
 				uikit.ErrorLine(c, localized(locale,
@@ -185,18 +190,17 @@ func buildUpdatePage(c *ui.Context, t *design.Tokens, kctx cordis.Context, runti
 		if canInstall {
 			if st.download != nil && st.pending == nil && st.install == nil {
 				installLabel := localized(locale, "安装并在下次启动生效", "Install and apply on next launch")
+				busyLabel := localized(locale, "安装中…", "Scheduling…")
 				if st.installing {
-					installLabel = localized(locale, "安装中…", "Scheduling…")
+					installLabel = busyLabel
 				}
-				uikit.DialogFooter(c, []uikit.DialogAction{{
-					Label: installLabel, Primary: true, Disabled: st.downloading || st.installing,
-					OnClick: func() {
+				buildBusyPrimaryAction(c, t, st.installing, installLabel, busyLabel,
+					st.downloading || st.installing, func() {
 						if !st.downloading && !st.installing {
 							startUpdateInstall(installer, runtime, st, *st.download)
 							c.Invalidate()
 						}
-					},
-				}})
+					})
 			}
 			if st.installErr != "" {
 				uikit.ErrorLine(c, localized(locale,

@@ -48,8 +48,8 @@
 | 项 | 现状 | 官方目标 | 验收 |
 |---|---|---|---|
 | 代理预设工具 allowlist | ✅ 已完成（官方 `ui.TokenField`，Enter/逗号加 token、Backspace 删最后一个；保存后仍为 []string） | — | 预设保存/持久化测试 |
-| 上下文占用条 | 自绘进度条/百分比 | `ui.Meter` + `MeterLevels` | 阈值颜色、a11y 测试 |
-| 内联重命名（工作区/会话） | 对话框改名 | `ui.EditableText`（列表/页内就地编辑） | 双击/F2/Enter/Esc、保存失败回退 |
+| 上下文占用条 | 只有文本 `42K/128K · 剩余 67%`（无自绘条）；`ui.Meter` 属可选新增可视化，非替换手搓 | `ui.Meter` + `MeterLevels`（若产品要做可视化） | 阈值颜色、a11y 测试 |
+| 内联重命名（工作区/会话） | 对话框改名（已补齐 `DialogFooter`/Enter/AutoFocus） | `ui.EditableText`（列表/页内就地编辑）——产品交互变更，列为 MIGRATE LATER | 双击/F2/Enter/Esc、保存失败回退 |
 | 文件预览里的源码 | ✅ 已完成（`editor.View` + `State.ReadOnly`，语法高亮/行号/虚拟化；a11y 文本值为内容） | — | Files 预览测试改为 `AccessByRole(RoleTextField, "文件内容").Value` 断言 |
 | 设置页顶部提示/状态 | 自绘 Badge/Text 组合 | 官方 `Badge`/`Alert`/`Progress`/`Spinner` 语义化 | 状态测试 |
 
@@ -71,7 +71,29 @@
 | `ui.Rating`/`ui.Meter`/`ui.Progress`/`ui.Spinner` | 产品没有星标评分/仪表/进度条/等待动画的自绘实现（反馈是 thumbs 按钮、流式状态是文字 Badge），不新增功能 |
 
 
+## 2.5 第三轮官方化（2026-11-09，全仓手搓 UI 审计后）
+
+独立审计（`.cache/ui-audit/report.md`）逐条核对 mygo v0.8.3 官方文档后，把剩余 21 处
+真正手搓的 UI 全部迁移（详见 `.cache/migrate-shell/report.md`、`.cache/migrate-settings/report.md`）：
+
+| 项 | 现状（旧 → 官方） |
+|---|---|
+| 设置页 7 个集合（记忆/模型目录/MCP/LSP/提示词预设/代理预设/诊断模块） | `for…range`+`Divider` → 官方 `ui.List`（Key/Label/Selected/Rows，自然高度；行内按钮保留，重排 Key 跟随） |
+| 右栏产物历史 | `for` 循环 + 手绘 selected → 官方 `ui.List`（Key=产物 ID，Enter/双击展开） |
+| composer 排队弹层 | `for` 循环行 → 官方 `ui.List`（有界 MaxHeight，行内取消保留） |
+| Files 面包屑 | 手拼 Button/Text → 官方 `ui.Breadcrumbs`（navigation landmark、Link、CurrentPage、点击/Enter 导航；深路径保留 first→…→last two） |
+| 会话重命名对话框 | 手写 footer → `uikit.DialogFooter`+`AutoFocus`+`EnterTo`（全仓对话框一致） |
+| 消息评分 / /feedback | 手绘 selected Button → 官方 `ui.Toggle`；/feedback 用 `ui.ToggleGroup`（`ui.Segmented` 无法表达“未评价”，已记录偏差） |
+| 8 处忙碌态（更新/导入/模型检查/记忆提取/附件选择/压缩） | 文字或静态 Reload 图标 → 官方 `ui.Spinner`（不伪造 Progress） |
+| 记忆 pane 编辑图标 / 设置“未保存” | Unicode `✎` → `internal/icons` 新增 Lucide pencil；裸 Text → 官方 `ui.Badge` |
+| 上下文占用条 / 内联重命名 / 导航历史 | 仍为 KEEP/后续：`ui.Meter` 可选增强；`ui.EditableText` 就地改名（M）；`ui.Router`+`BackButton/ForwardButton`（L，需 screenID→路径映射） |
+
+保留自绘（经文档逐条核对属于合法的官方 headless base 用法或产品 chrome，见审计报告 §5）：
+composer 卡片、slash/@ 富行建议菜单、命令面板按钮行、消息 hover 动作行、无边框图标按钮、
+tabs 下划线、思考/工具行 trigger、toast parts、附件 chip、设置快捷键表等。
+
 ## 3. 迁移顺序与验证
+
 
 1. **P1 列表类**：transcript → 轨迹/记忆 → 建议菜单 → 帮助/技能/归档/模式/自动化/插件。
 2. **P2 语义类**：TokenField → Meter → EditableText → 代码展示。

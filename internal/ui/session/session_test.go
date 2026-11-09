@@ -43,6 +43,11 @@ type fakeChat struct {
 	cancelErr error
 	newCalls  []string
 	nextID    int
+	// allowedTools backs the optional contracts.SessionToolPermissions half:
+	// the approval dialog's "always allow in this session" choices.
+	allowedTools      map[string][]string
+	clearAllowedCalls []string
+	clearAllowedErr   error
 }
 
 func newFakeChat() *fakeChat {
@@ -187,6 +192,44 @@ func (f *fakeChat) Cancel(sessionID string) error {
 	f.mu.Unlock()
 	f.emit(sessionID)
 	return nil
+}
+
+// --- optional SessionToolPermissions half ---------------------------------
+
+// AllowedTools returns the remembered tool names of one session (never nil).
+func (f *fakeChat) AllowedTools(sessionID string) []string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]string{}, f.allowedTools[sessionID]...)
+}
+
+// ClearAllowedTools forgets the remembered tools of one session.
+func (f *fakeChat) ClearAllowedTools(sessionID string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.clearAllowedCalls = append(f.clearAllowedCalls, sessionID)
+	if f.clearAllowedErr != nil {
+		return f.clearAllowedErr
+	}
+	delete(f.allowedTools, sessionID)
+	return nil
+}
+
+// setAllowedTools scripts the tools the approval dialog remembered.
+func (f *fakeChat) setAllowedTools(sessionID string, tools []string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.allowedTools == nil {
+		f.allowedTools = make(map[string][]string)
+	}
+	f.allowedTools[sessionID] = append([]string{}, tools...)
+}
+
+// clearedAllowedSessions reports the sessions ClearAllowedTools forgot.
+func (f *fakeChat) clearedAllowedSessions() []string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]string(nil), f.clearAllowedCalls...)
 }
 
 func (f *fakeChat) Subscribe(fn func(string)) (func(), error) {
@@ -337,6 +380,18 @@ func (h *harness) assertNoTexts(tester *ui.Tester, unwanted ...string) {
 	for _, text := range unwanted {
 		if tester.HasText(text) {
 			h.t.Fatalf("frame still shows %q; texts = %v", text, tester.Texts())
+		}
+	}
+}
+
+// assertNoExactTexts asserts no element shows exactly one of the unwanted
+// labels. Unlike assertNoTexts (substring), it distinguishes a control's label
+// from the same word inside a sentence (e.g. the running hint says 结束后可发送).
+func (h *harness) assertNoExactTexts(tester *ui.Tester, unwanted ...string) {
+	h.t.Helper()
+	for _, text := range unwanted {
+		if _, ok := tester.Find(text); ok {
+			h.t.Fatalf("frame still shows the label %q; texts = %v", text, tester.Texts())
 		}
 	}
 }
@@ -519,27 +574,40 @@ func TestRendersMessagesAndRunningBadges(t *testing.T) {
 		"运行中",        // running badge
 		"帮我修复登录",     // user bubble text
 		"好的，正在检查。",   // assistant text
-		"思考",         // collapsible reasoning label
-		"生成中",        // streaming badge
-		"read_file",  // tool fallback badge
+		"思考中…",       // open reasoning disclosure while streaming
+		"生成中",        // the official generation spinner and its label
+		"读取文件",       // tool fallback row, friendly localized name
 		"上一次运行失败：超时", // session error
 		"停止",         // stop button while running
 	)
-	// The compact tool row shows a one-line preview inline and a 详情 disclosure;
-	// the internal call ID is not shown.
-	h.assertTexts(tester, "详情", "auth.go")
-	h.assertNoTexts(tester, "t1")
-	h.click(tester, "详情")
-	tester.Advance(300 * time.Millisecond) // the disclosure animation
-	h.assertTexts(tester, "详情")
-	// While streaming, the live reasoning preview shows the tail; the
-	// collapsed Reasoning block still holds the full text.
-	h.assertTexts(tester, "思考中…", "内部推理：先看认证模块")
-	h.assertNoTexts(tester, "发送", "排队")
-
-	// The native Collapsible expands on click.
-	h.click(tester, "思考")
+	// The compact tool row shows a one-line preview inline; the raw protocol id
+	// stays in the row's tooltip/description, and the internal call ID is hidden.
+	h.assertTexts(tester, "auth.go", "完成")
+	h.assertNoTexts(tester, "read_file", "t1", "详情")
+	// The reasoning disclosure is open while the model is thinking, so the
+	// thinking text (rendered as Markdown) is visible without a click.
 	h.assertTexts(tester, "内部推理：先看认证模块")
+	if info, ok := tester.AccessByRole(ui.RoleDisclosure, "读取文件 · 完成"); !ok || !info.Expanded {
+		t.Fatalf("H15 tool row should start expanded: %+v found %v", info, ok)
+	}
+	h.click(tester, "读取文件")
+	tester.Advance(300 * time.Millisecond) // the disclosure animation
+	if info, _ := tester.AccessByRole(ui.RoleDisclosure, "读取文件 · 完成"); info.Expanded {
+		t.Fatalf("click did not fold the tool row: %+v", info)
+	}
+	// The composer never disappears while a reply streams: queueing is on by
+	// default, so the input stays visible/editable and the send position shows
+	// 排队 + 停止.
+	h.assertTexts(tester, "输入消息…", "排队", "停止")
+	h.assertNoTexts(tester, "发送")
+
+	// The reasoning disclosure toggles like the official control it is, and its
+	// accessible name switches to 思考 once the turn ends.
+	h.click(tester, "思考中…")
+	tester.Advance(300 * time.Millisecond)
+	if info, _ := tester.AccessByRole(ui.RoleDisclosure, "思考中…"); info.Expanded {
+		t.Fatalf("click did not fold the reasoning panel: %+v", info)
+	}
 
 	// Stopping calls Cancel on the active session.
 	h.click(tester, "停止")
@@ -731,21 +799,26 @@ func TestTrajectoryTimelineShowsToolCalls(t *testing.T) {
 
 	h.click(tester, "轨迹")
 	h.assertTexts(tester,
-		"步骤 1", "bash", "运行中",
-		"步骤 2", "read_file", "失败",
+		"步骤 1", "运行命令", "运行中",
+		"步骤 2", "读取文件", "失败",
 		"详情")
-	// H15: short results start expanded, internal call IDs are hidden.
+	// H15: short results start expanded, internal call IDs are hidden, and the
+	// friendly name replaces the raw protocol id (kept as its tooltip).
 	h.assertTexts(tester, "stdout: all tests passed")
-	h.assertNoTexts(tester, "t1", "t2")
+	h.assertNoTexts(tester, "t1", "t2", "bash", "read_file")
 	h.assertNoTexts(tester, "运行一下")
+	if info, ok := tester.AccessByRole(ui.RoleProgress, "运行中"); !ok || info.Role != ui.RoleProgress {
+		t.Fatalf("running trajectory card spinner: %+v found %v", info, ok)
+	}
 
-	// The chat tab is unchanged: the tool call still renders there (fallback
-	// card in this test because no toolcards module is active). Re-focus the
-	// tab strip (the summary click moved focus) and press Home for tab 0.
+	// The chat tab is unchanged: the tool call still renders there (the compact
+	// disclosure row in this test because no toolcards module is active).
+	// Re-focus the tab strip (the summary click moved focus) and press Home for
+	// tab 0.
 	h.click(tester, "轨迹")
 	tester.Key(0, ui.KeyHome)
 	tester.Frame()
-	h.assertTexts(tester, "运行一下", "bash")
+	h.assertTexts(tester, "运行一下", "运行命令")
 }
 
 func TestBrandedLayoutGeometryAndHints(t *testing.T) {

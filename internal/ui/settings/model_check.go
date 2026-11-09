@@ -229,12 +229,16 @@ func buildModelCheckPanel(c *ui.Context, t *design.Tokens, runtime contracts.UIR
 			uikit.ErrorLine(c, localized(locale, "尚未配置服务地址", "No service URL configured"))
 		}
 		label := localized(locale, "测试当前输入", "Test current input")
+		busyLabel := localized(locale, "检查中…", "Checking…")
 		disabled := baseURL == ""
 		if check.running {
-			label = localized(locale, "检查中…", "Checking…")
+			label = busyLabel
 			disabled = true
 		}
 		ui.Row(c).FillWidth().Justify(ui.End).AlignItems(ui.Center).Gap(design.Space2).Children(func() {
+			// The busy state is the official spinner with an accessible
+			// progress name; the button keeps its disabled logic.
+			buildBusySpinner(c, check.running, busyLabel)
 			button := design.Apply(ui.Button(c, label), t.SecondaryButton())
 			button.Disabled(disabled)
 			if button.Clicked() && !check.running && !disabled {

@@ -8,6 +8,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/egoist/mygo/ui"
+
 	"github.com/zeokeel/zeokeel/internal/contracts"
 )
 
@@ -226,5 +228,71 @@ func TestMarkdownExportIncludesFeedback(t *testing.T) {
 	h.click(tester, "Export Markdown")
 	if !strings.Contains(content, "> User feedback: Helpful") || !strings.Contains(content, "> User feedback: Not helpful") {
 		t.Fatalf("English Markdown feedback lines missing:\n%s", content)
+	}
+}
+
+// TestFeedbackDialogUsesToggleGroup covers the /feedback rating control: two
+// official toggles in an official ToggleGroup (a group named 评价), pressed
+// semantics, mutual exclusion, and pressing the pressed one again clearing the
+// choice (both unpressed = 未评价, which Save writes).
+func TestFeedbackDialogUsesToggleGroup(t *testing.T) {
+	chat := feedbackChatWith(contracts.ChatMessage{ID: "a1", Role: contracts.ChatRoleAssistant, Text: "answer"})
+	h := newFeedbackHarness(t, chat)
+	if err := feedbackCommand(t, h).Run(); err != nil {
+		t.Fatalf("Run feedback command: %v", err)
+	}
+	tester := h.tester()
+	tester.Frame()
+	if _, ok := tester.AccessByRole(ui.RoleGroup, "评价"); !ok {
+		t.Fatalf("rating ToggleGroup missing; texts = %v", tester.Texts())
+	}
+	good, ok := tester.AccessByRole(ui.RoleToggleButton, "有帮助")
+	if !ok || good.Checked {
+		t.Fatalf("unrated dialog opened with good pressed: %+v found %v", good, ok)
+	}
+	if info, ok := tester.AccessByRole(ui.RoleToggleButton, "没帮助"); !ok || info.Checked {
+		t.Fatalf("unrated dialog opened with bad pressed: %+v found %v", info, ok)
+	}
+
+	h.click(tester, "有帮助")
+	if info, _ := tester.AccessByRole(ui.RoleToggleButton, "有帮助"); !info.Checked {
+		t.Fatalf("good toggle not pressed after clicking: %+v", info)
+	}
+	h.click(tester, "没帮助")
+	if info, _ := tester.AccessByRole(ui.RoleToggleButton, "有帮助"); info.Checked {
+		t.Fatalf("good toggle stayed pressed after choosing bad: %+v", info)
+	}
+	if info, _ := tester.AccessByRole(ui.RoleToggleButton, "没帮助"); !info.Checked {
+		t.Fatalf("bad toggle not pressed after clicking: %+v", info)
+	}
+	// Clicking the pressed one clears both: the dialog is back to 未评价, so
+	// Save has nothing to write (unchanged unrated message).
+	h.click(tester, "没帮助")
+	if info, _ := tester.AccessByRole(ui.RoleToggleButton, "没帮助"); info.Checked {
+		t.Fatalf("bad toggle stayed pressed after clicking it again: %+v", info)
+	}
+	h.click(tester, "取消")
+
+	// A rated message opens with its rating pressed; pressing it again clears
+	// the rating and Save writes the clear.
+	rated := feedbackChatWith(contracts.ChatMessage{
+		ID: "a1", Role: contracts.ChatRoleAssistant, Text: "answer", Feedback: contracts.FeedbackGood,
+	})
+	h = newFeedbackHarness(t, rated)
+	if err := feedbackCommand(t, h).Run(); err != nil {
+		t.Fatalf("Run feedback command on a rated message: %v", err)
+	}
+	tester = h.tester()
+	tester.Frame()
+	if info, ok := tester.AccessByRole(ui.RoleToggleButton, "有帮助"); !ok || !info.Checked {
+		t.Fatalf("rated message did not open with good pressed: %+v found %v", info, ok)
+	}
+	h.click(tester, "有帮助")
+	if info, _ := tester.AccessByRole(ui.RoleToggleButton, "有帮助"); info.Checked {
+		t.Fatalf("good toggle stayed pressed after clicking it again: %+v", info)
+	}
+	h.click(tester, "保存")
+	if call := rated.lastCall(t); call.feedback != "" {
+		t.Fatalf("save after clearing = %+v, want a cleared rating", call)
 	}
 }

@@ -110,6 +110,11 @@ func TestRunRecordsUsageOnAssistantMessage(t *testing.T) {
 	if got.Iterations < 1 {
 		t.Fatalf("Iterations = %d, want >= 1", got.Iterations)
 	}
+	// One model call: the accumulated prompt count and the last-call context
+	// count are the same number.
+	if got.ContextTokens != 11 {
+		t.Fatalf("ContextTokens = %d, want the last model call's prompt tokens (11)", got.ContextTokens)
+	}
 
 	events := usageEvents(t, store, id)
 	if len(events) != 1 {
@@ -122,6 +127,9 @@ func TestRunRecordsUsageOnAssistantMessage(t *testing.T) {
 	}
 	if _, ok := event["durationMs"]; !ok {
 		t.Fatalf("usage event has no durationMs: %+v", event)
+	}
+	if got, ok := event["contextTokens"].(float64); !ok || got != 11 {
+		t.Fatalf("usage event contextTokens = %v, want 11: %+v", event["contextTokens"], event)
 	}
 }
 
@@ -162,6 +170,9 @@ func TestRegenerateRecordsUsage(t *testing.T) {
 	assistant := lastAssistantMessage(t, svc, id)
 	if assistant.Usage == nil || assistant.Usage.PromptTokens != 4 || assistant.Usage.TotalTokens != 6 {
 		t.Fatalf("regenerated assistant Usage = %+v", assistant.Usage)
+	}
+	if assistant.Usage.ContextTokens != 4 {
+		t.Fatalf("regenerated ContextTokens = %d, want 4", assistant.Usage.ContextTokens)
 	}
 }
 

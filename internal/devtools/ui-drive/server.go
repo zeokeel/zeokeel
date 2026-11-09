@@ -16,9 +16,11 @@ type scriptMode int
 const (
 	// scriptAnswer replies immediately with one markdown answer (the default).
 	scriptAnswer scriptMode = iota
-	// scriptToolCallThenAnswer replies with a working_directory tool call on
-	// the first request (which parks on the approval gate) and the markdown
-	// answer on the request after the tool result.
+	// scriptToolCallThenAnswer replies with a team_task_create tool call on the
+	// first request (a write the default workspace permission still gates, so it
+	// parks on the approval gate) and the markdown answer on the request after
+	// the tool result. working_directory is auto-allowed now, so it can no
+	// longer exercise the dialog.
 	scriptToolCallThenAnswer
 	// scriptSlowAnswer streams a long answer in small delayed chunks so the
 	// driver can observe the running state and press Stop.
@@ -78,7 +80,7 @@ func (s *scriptServer) handle(w http.ResponseWriter, r *http.Request) {
 	switch mode {
 	case scriptToolCallThenAnswer:
 		if request == 1 {
-			emitSSE(w, `{"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call-1","type":"function","function":{"name":"working_directory","arguments":"{}"}}]},"index":0,"finish_reason":"tool_calls"}]}`)
+			emitSSE(w, `{"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call-1","type":"function","function":{"name":"team_task_create","arguments":"{}"}}]},"index":0,"finish_reason":"tool_calls"}]}`)
 		} else {
 			emitAnswer(w)
 		}
