@@ -34,6 +34,20 @@
 | 测试 | `ui.NewTester`（Click/Key/Advance/Image/AccessByRole/SetWindowActive/SetPreferences） | testing.md | 每个交互改动补帧测试；重复 Key 会 panic |
 | 菜单/弹层顺序 | `OverlayShortcut`（最后构建先吃 Esc） | overlays.md | 不要自己维护 z-order 规则 |
 
+## 1.1 官方组件采用与保留自绘（定期复核）
+
+- 集合一律用 `ui.List`（transcript、轨迹、记忆、自动化、右栏各 pane、侧栏会话/搜索、
+  设置归档/技能、插件 MCP/模块/参数/工具、Home 最近、palette）；单文本面/页面容器用
+  `ui.Scroll`。
+- 控件优先官方：`Sidebar`、`TabsBase`、`Split`、`Toolbar`、`SearchField`、`TokenField`、
+  `NumberInput`、`Select`、`Segmented`、`Switch`、`Collapsible`、`Modal`/`AlertDialog`/
+  `DialogFooter`、`PopoverMenuButton`/`ContextMenu`、`Icon`、`Markdown`、`editor.View`/
+  `editor.DiffView`、`ToastBase`/`ToastViewportBase`。
+- 保留自绘清单与理由见 [UI-COMPONENT-MIGRATION.md](UI-COMPONENT-MIGRATION.md) §3：
+  仅限无官方对应（无边框图标按钮、富行建议菜单、composer 动作行布局、palette 按钮行、
+  hover 动作行、回到最新浮层、测试 seam）或产品语义不适用（Rating/Meter 等）。
+- 新增 UI 时先查 §1 表与官方 docs；出现新的自绘控件必须在本文件与迁移文档记录理由。
+
 ## 2. 写 UI 的固定流程
 
 1. **先查表**：本条功能在官方有没有标准件？有就先用官方组件/API，禁止先手搓。

@@ -53,16 +53,23 @@
 | 文件预览里的源码 | ✅ 已完成（`editor.View` + `State.ReadOnly`，语法高亮/行号/虚拟化；a11y 文本值为内容） | — | Files 预览测试改为 `AccessByRole(RoleTextField, "文件内容").Value` 断言 |
 | 设置页顶部提示/状态 | 自绘 Badge/Text 组合 | 官方 `Badge`/`Alert`/`Progress`/`Spinner` 语义化 | 状态测试 |
 
-### P3 — 自绘但合理保留（记录理由）
+### P3 — 最终自绘清单（逐项理由，已扫完全仓）
 
-| 项 | 保留理由 |
+| 位置 | 保留理由 |
 |---|---|
-| composer 动作行（Plain Row + 3 个 PopoverMenuButton） | `ui.Toolbar` 的溢出菜单会吞掉发送按钮；官方 Toolbar 不适合「左侧可折行按钮 + 右侧发送」组合 |
-| 3 个 `rowTint` 图标按钮（检查器关闭、artifact 标题、任务 ⋯） | `custom-widgets.md` 明确允许 `ButtonBase` 自绘 hover/pressed；这些按钮没有原生外观可套，且已注释 |
-| slash/@ 富行建议面板外观 | 行内含图标/标题/说明/多段文本，官方 Autocomplete 只支持纯文本建议；无障碍已按 `RoleListBox/RoleOption/PositionInSet` 实现 |
-| transcript 消息内 hover 动作行 | 悬停显示是消息级交互，官方列表行不提供；保留但补键盘可达性与 a11y |
-| 会话滚动「回到最新」浮层 | 官方 List `ScrollToEnd` 已用于行为；浮层按钮是 List 之外的必要 affordance |
-| 文件/目录选择器 seam 函数 | 纯测试注入点（无应用状态），官方 API 无对应替换 |
+| `internal/uiroot/frame.go` rail/折叠/展开/设置/关闭设置图标按钮 | 无官方 IconButton；`custom-widgets.md` 允许 `ButtonBase` 自绘无边框图标按钮的 hover/focus/pressed，已注释 |
+| `internal/uiroot/frame.go` 命令面板行按钮 | 单次点击即执行命令，且需要 `RoleButton` a11y 名称（`uiroot/conformance_test.go` 钉住）；List 行角色是 listitem，官方 List 不提供按钮行语义 |
+| `internal/ui/sidebar` 新对话以外的图标/行按钮（添加工作区、工作区组标题、会话 ⋯、设置行） | 官方 Sidebar/Outline 只提供源列表与大纲语义，行内自定义内容与 ⋯ 菜单仍用 `ButtonBase`（custom-widgets）；品牌「新对话」已改官方 `PrimaryButton` |
+| `internal/ui/rightpanel` 检查器关闭、artifact 标题切换、任务 ⋯ | 无原生外观的独立图标按钮；`rowTint` 自绘状态属官方允许的 base 用法 |
+| composer 动作行（Plain Row + 3 个 PopoverMenuButton） | `ui.Toolbar` 溢出菜单会吞掉发送按钮；官方 Toolbar 不适合该组合 |
+| slash/@ 富行建议面板 | 行内含图标/标题/说明多段富文本，官方 Autocomplete 仅纯文本；已按官方 accessibility suggestions 模式实现 RoleListBox/RoleOption/PositionInSet/ActiveDescendant 与完整键盘 |
+| transcript 消息内 hover 动作行 | 消息级悬停交互，官方列表行不提供 |
+| 会话「回到最新」浮层 | 行为用官方 `ScrollToEnd`；浮层是 List 之外的必要 affordance |
+| `ui.Scroll` 保留处（设置页容器、检查器 pane 容器、终端输出、文件/技能 Markdown 预览、release notes、交互 overlay 文本、模型思考模式表单行、插件页 Section 布局） | 都是单文本面/页面滚动容器或表单行，不是「集合」；集合已全部是 `ui.List` |
+| 文件/目录选择器、模型列表等 seam 函数 | 纯测试注入点（无应用状态），官方 API 无对应替换 |
+| `ui.EditableText` | 现有重命名是官方 `Modal + TextInput` 流程；改成列表内联编辑是产品交互变更，不属于「替换手搓组件」 |
+| `ui.Rating`/`ui.Meter`/`ui.Progress`/`ui.Spinner` | 产品没有星标评分/仪表/进度条/等待动画的自绘实现（反馈是 thumbs 按钮、流式状态是文字 Badge），不新增功能 |
+
 
 ## 3. 迁移顺序与验证
 
@@ -78,6 +85,9 @@
   行名、键盘可滚动；新增 RoleList/RoleListItem a11y 断言）。
 - 会话「轨迹」pane：`ui.Scroll` + tool card 循环 → `ui.List`（`Key=tool key`、
   行名=tool name、`Gap/PaddingY/Grow`，切换会话重置 ListState）。
+- 侧栏品牌「新对话」按钮：自绘 `ButtonBase` + 手写 hover/pressed → 官方
+  `PrimaryButton`（主题 accent、原生交互状态；图标+标签作为 button 内容，
+  label 仍是可访问名称）。
 - 侧栏消息搜索命中：`ButtonBase` 行 + Column 分组 → 官方 `ui.List`
   （Key=group/hit 稳定键、行名、Selected/Changed/Submitted 打开会话）。
 - 设置归档页、技能卡列表 → 官方 `ui.List`（Key 稳定、行名；行内按钮保留）。

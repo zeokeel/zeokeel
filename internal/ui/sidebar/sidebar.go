@@ -287,22 +287,17 @@ func Module() *module.Descriptor[Config] {
 		WithName("ZeoKeel sidebar")
 }
 
-// buildPrimary is the brand "new chat" action: a native ButtonBase on the brand
-// accent, 38 DIP tall, with the NewChat glyph and a 500-weight label. Pointer,
-// keyboard and pressed/hover states are the native control's.
+// buildPrimary is the brand "new chat" action: the official PrimaryButton
+// (native accent background, hover/pressed/focus/keyboard states from the
+// theme) at 38 DIP with the NewChat glyph and its label as the button content;
+// the label stays the accessible name.
 func buildPrimary(c *ui.Context, t *design.Tokens, chat contracts.ChatService,
 	nav contracts.Navigator, runtime contracts.UIRuntime, label string) {
 	ui.Row(c).FillWidth().
 		Padding(design.Space2, design.Space3, design.Space2, design.Space3).
 		Children(func() {
-			button := ui.ButtonBase(c).FillWidth().Height(38).Radius(design.RadiusMD).
-				Background(t.Accent).Label(label)
-			switch {
-			case button.Pressed():
-				button = button.Background(t.AccentPressed)
-			case button.Hovered():
-				button = button.Background(t.AccentHover)
-			}
+			button := design.Apply(ui.PrimaryButton(c, ""), t.PrimaryButton()).
+				FillWidth().Height(38).Label(label)
 			button.Children(func() {
 				ui.Row(c).FillWidth().AlignItems(ui.Center).Justify(ui.Center).
 					Gap(design.Space2).Children(func() {

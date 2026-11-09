@@ -148,6 +148,10 @@ A full UI/UX conformance pass against `mygo v0.8.3/docs/ui` and the
   back-to-latest action) instead of a `Scroll` plus a bounded message loop, so
   only the visible rows build and long conversations stay fast. The help
   dialog's command list and the trajectory timeline use `ui.List` as well.
+- **Brand new-chat button**: the sidebar's New chat action is the official
+  `PrimaryButton` (theme accent + native hover/pressed/focus states) instead of
+  a hand-drawn `ButtonBase`; its icon+label stay the button content and the
+  label remains the accessible name.
 - **Remaining collections are Lists**: the sidebar's message-search hits, the
   settings archive rows and skill cards, and the Plugins page's MCP servers,
   built-in modules, curated settings and tool catalogue all use official
