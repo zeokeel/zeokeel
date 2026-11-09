@@ -123,22 +123,28 @@ type state struct {
 	// 1024), the title must keep room and the goal chip drops its text.
 	headerWidth float32
 
-	// Scroll positions of the three panes: every pane keeps its own offset,
-	// and while the user stays at the end the pane follows the streaming
-	// content. scrollSession is the session the offsets belong to; switching
-	// sessions starts the new transcript at its end.
-	chatScroll   ui.ScrollState
+	// The transcript is the official List: rows are messages keyed by ID, so a
+	// streaming reply grows its row in place and re-render/older content keeps
+	// the place; FollowEnd follows the end until the user scrolls away.
+	chatList ui.ListState
+	// chatFollowEnd is the transcript's follow state: true at the end, false
+	// while the user reads earlier rows (shows the floating back-to-latest
+	// action). chatListSeen waits one laid-out frame before reading AtEnd, so
+	// the action does not flash on the first frame.
+	chatFollowEnd bool
+	chatListSeen  bool
+	// chatHoldPlace asks the List to keep its place for the next layout after a
+	// fold opened in a message (list.md HoldPlace): the clicked line stays under
+	// the pointer instead of being pushed by the growing row.
+	chatHoldPlace bool
+
+	// memoryScroll keeps the Memory tab's reading position; the trajectory pane
+	// is an official List too.
 	memoryScroll ui.ScrollState
 	// trajList backs the trajectory pane's official List: the tool cards are a
 	// collection, so the List virtualizes and keys them by tool ID.
 	trajList      ui.ListState
 	scrollSession string
-
-	// transcriptStart holds, per session, the first message the transcript
-	// builds after the user asked for earlier messages; a missing entry keeps
-	// the default tail window (transcriptTailWindow). Long conversations build
-	// only their tail, so a streaming turn does not rebuild thousands of rows.
-	transcriptStart map[string]int
 
 	// Memory tab state: the search query, the add-input draft, the last store
 	// error shown in DangerText and the cached read model. The cache is
@@ -391,19 +397,20 @@ func Module() *module.Descriptor[Config] {
 		memoryStore, _ := ctx.Get(contracts.KeyMemory)
 		notifier, _ := ctx.Get(contracts.KeyNotifier)
 		moduleState := &state{
-			locale:       locale,
-			runtime:      runtime,
-			lastTab:      -1,
-			navigator:    navigator,
-			settings:     settings,
-			planReviewer: planReviewer,
-			memoryStore:  memoryStore,
-			notifier:     notifier,
-			thinkOpen:    make(map[string]bool),
-			toolOpen:     make(map[string]bool),
-			usageOpen:    make(map[string]bool),
-			thumbnails:   make(map[string]*ui.Bitmap),
-			ctx:          ctx,
+			locale:        locale,
+			runtime:       runtime,
+			lastTab:       -1,
+			navigator:     navigator,
+			settings:      settings,
+			planReviewer:  planReviewer,
+			memoryStore:   memoryStore,
+			notifier:      notifier,
+			thinkOpen:     make(map[string]bool),
+			toolOpen:      make(map[string]bool),
+			usageOpen:     make(map[string]bool),
+			thumbnails:    make(map[string]*ui.Bitmap),
+			chatFollowEnd: true,
+			ctx:           ctx,
 		}
 
 		// Session changes arrive on the agent goroutine; hop to the UI thread

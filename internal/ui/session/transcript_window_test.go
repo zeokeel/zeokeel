@@ -4,16 +4,16 @@ import (
 	"fmt"
 	"testing"
 
+	"github.com/egoist/mygo/ui"
+
 	"github.com/zeokeel/zeokeel/internal/contracts"
 )
 
-// TestTranscriptBuildsTailWindowFirst covers the bounded transcript: a very
-// long conversation builds only its newest window of messages (so streaming a
-// reply does not re-layout thousands of rows), and the "load earlier" row loads
-// the hidden range in steps.
-func TestTranscriptBuildsTailWindowFirst(t *testing.T) {
+// longTranscriptChatWith builds one conversation with count user messages, so a
+// test can exercise the transcript List's virtualization and scrolling.
+func longTranscriptChatWith(count int) *fakeChat {
 	chat := newFakeChat()
-	messages := make([]contracts.ChatMessage, 250)
+	messages := make([]contracts.ChatMessage, count)
 	for i := range messages {
 		messages[i] = contracts.ChatMessage{
 			ID:   fmt.Sprintf("m%03d", i),
@@ -22,25 +22,28 @@ func TestTranscriptBuildsTailWindowFirst(t *testing.T) {
 		}
 	}
 	chat.addSession(contracts.ChatSession{ID: "sess-long", Title: "长会话", Messages: messages}, true)
-	h := newHarness(t, chat)
+	return chat
+}
+
+// TestTranscriptListVirtualizesLongConversation covers the official List
+// backing the transcript: a 250-message conversation builds only the rows in
+// view (the first messages are not in the frame), the list is exposed by name
+// for assistive technology, and scrolling up reveals the earlier rows.
+func TestTranscriptListVirtualizesLongConversation(t *testing.T) {
+	h := newHarness(t, longTranscriptChatWith(250))
 	tester := h.tester()
 	tester.Frame()
 
-	// The tail window is built; the first (50) messages are hidden behind the
-	// load-earlier row.
+	// The tail is in view; the beginning is virtualized away (not built).
+	h.assertTexts(tester, "早期消息 249")
 	h.assertNoTexts(tester, "早期消息 000")
-	h.assertTexts(tester, "早期消息 249", "加载更早消息（50 条）")
+	if _, ok := tester.AccessByRole(ui.RoleList, "对话消息"); !ok {
+		t.Fatalf("the transcript is not exposed as a named list; texts = %v", tester.Texts())
+	}
 
-	// The transcript follows the end, so the row above the tail is out of view:
-	// scroll to the top of the transcript first, as a user would.
+	// Scrolling to the top reveals the first messages the List builds on demand.
 	tester.Scroll(600, 400, 0, -100000)
 	tester.Frame()
-	if err := tester.Click("加载更早消息（50 条）"); err != nil {
-		t.Fatalf("click load-earlier: %v; texts = %v", err, tester.Texts())
-	}
-	tester.Frame()
-	h.assertTexts(tester, "早期消息 000", "早期消息 249")
-	if tester.HasText("加载更早消息（50 条）") {
-		t.Fatalf("load-earlier row still shows after loading every message; texts = %v", tester.Texts())
-	}
+	h.assertTexts(tester, "早期消息 000")
+	h.assertNoTexts(tester, "早期消息 249")
 }

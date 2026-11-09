@@ -3,7 +3,6 @@ package session
 import (
 	"context"
 	"fmt"
-	"math"
 	"strconv"
 	"strings"
 	"time"
@@ -84,7 +83,11 @@ func buildScreen(
 		// conversation that shows (per-session transcript windows are the one
 		// exception: they are small and keep the user's place).
 		pruneMessageState(st, chatSession.Messages)
-		st.chatScroll.Y = math.MaxFloat32
+		// The transcript List starts at the new conversation's end; the fold
+		// state, sticky follow flag and laid-out gate are reset with it.
+		st.chatList = ui.ListState{}
+		st.chatFollowEnd = true
+		st.chatListSeen = false
 		st.trajList = ui.ListState{}
 		st.memoryScroll.Y = 0
 	}
@@ -167,13 +170,6 @@ func pruneMessageState(st *state, messages []contracts.ChatMessage) {
 	prune(st.usageOpen)
 	if st.expandedActions != "" && !keep[st.expandedActions] {
 		st.expandedActions = ""
-	}
-	// The transcript window is kept per session for the session that shows; the
-	// older sessions' windows start from the default tail again when reopened.
-	for id := range st.transcriptStart {
-		if id != st.scrollSession {
-			delete(st.transcriptStart, id)
-		}
 	}
 }
 
@@ -557,24 +553,12 @@ func buildTabs(c *ui.Context, t *design.Tokens, cfg Config, st *state) {
 
 // --- chat -------------------------------------------------------------------
 
-// followScroll keeps a pane at its end while the user stays there: while the
-// tracked offset is at the last frame's end the state asks for the end again,
-// so a streaming reply is followed; a user who scrolled up keeps the position
-// and gets the "back to latest" button instead.
-func followScroll(scroll *ui.ScrollState) {
-	if scroll.Y >= scroll.MaxY {
-		scroll.Y = math.MaxFloat32
-	}
-}
-
-// atScrollEnd reports whether the pane shows its end (with a pixel of slack so
-// the floating button does not flicker).
-func atScrollEnd(scroll *ui.ScrollState) bool { return scroll.Y >= scroll.MaxY-2 }
-
-// backToLatest shows the floating "back to latest" action over a pane the user
-// scrolled away from; clicking it resumes the follow.
-func backToLatest(c *ui.Context, t *design.Tokens, scroll *ui.ScrollState, label string) {
-	if atScrollEnd(scroll) {
+// backToLatestList shows the floating "back to latest" action over the
+// transcript List while the user reads earlier rows; clicking it scrolls the
+// official List to its end and follows again (list.md ScrollToEnd/FollowEnd).
+func backToLatestList(c *ui.Context, t *design.Tokens, list *ui.ListState,
+	follow *bool, label string) {
+	if *follow {
 		return
 	}
 	ui.Row(c).Absolute().Right(design.Space4).Bottom(design.Space4).Children(func() {
@@ -583,33 +567,39 @@ func backToLatest(c *ui.Context, t *design.Tokens, scroll *ui.ScrollState, label
 			ui.Icon(c, icons.ChevronDown()).Size(design.Space3, design.Space3).TextColor(t.OnPrimary)
 		})
 		if button.Clicked() {
-			scroll.Y = math.MaxFloat32
+			list.ScrollToEnd()
+			*follow = true
 			c.Invalidate()
 		}
 	})
 }
 
-// buildChatPane is the scrollable transcript on one centered reading column.
-// It follows the streaming end (ScrollState.TrackScroll) and offers the
-// floating "back to latest" action once the user scrolls up.
-//
-// R2-04 (transcript virtualization): the transcript stays a plain ui.Scroll
-// plus a message loop on purpose. ui.List would virtualize the rows, but the
-// conversation surface depends on properties a virtualized list does not give
-// it cheaply: (1) markdown.Stream keeps per-view parse state and heals
-// half-written syntax, so a row leaving and re-entering the build would restart
-// that state mid-stream; (2) the last turn grows every token and must stay
-// measured; (3) the hover-only action row and the action/反馈 group change the
-// message's height; (4) per-session/per-tab ScrollState restoration and the
-// floating "back to latest" action are built on ScrollState.TrackScroll; (5)
-// the transcript is also the a11y/selection surface (copy works on rendered
-// text). A List migration therefore needs a measured-height streaming row, a
-// list-scoped follow-end and focus model, and a rework of the session tests —
-// a multi-round change with real regression risk for a surface whose realistic
-// sessions are hundreds, not millions, of messages. If a bounded render window
-// becomes necessary, cap the built tail (e.g. last 200 messages, with a
-// "load earlier" row feeding the same message slice); that keeps every
-// property above and can be done without touching the reading layout.
+// transcriptRowLabel names one transcript row for assistive technology and the
+// List's type-ahead. It deliberately does not repeat the message's prose: the
+// row's rendered content is the message (its Markdown source must not leak into
+// the accessibility tree), so the name is the author role plus the row ordinal.
+func transcriptRowLabel(st *state, message contracts.ChatMessage, index int) string {
+	role := st.tr("消息", "Message")
+	switch message.Role {
+	case contracts.ChatRoleUser:
+		role = st.tr("用户", "User")
+	case contracts.ChatRoleAssistant:
+		role = st.tr("助手", "Assistant")
+	case contracts.ChatRoleTool:
+		role = st.tr("工具", "Tool")
+	case contracts.ChatRoleSystem:
+		role = st.tr("系统", "System")
+	}
+	return fmt.Sprintf("%s %d", role, index+1)
+}
+
+// buildChatPane is the conversation transcript: the official List of messages
+// on one centered reading column. The List virtualizes rows (only the visible
+// ones build), keys them by message ID (a streaming reply grows its row in
+// place and the user's place survives new content) and FollowEnd keeps the end
+// in view while streaming; a user who scrolls up gets the floating back-to-
+// latest action. Opening a fold in the last message calls HoldPlace, so the row
+// does not jump under the pointer (mygo list.md).
 func buildChatPane(
 	c *ui.Context,
 	t *design.Tokens,
@@ -621,75 +611,70 @@ func buildChatPane(
 	chatSession contracts.ChatSession,
 	hasSession bool,
 ) {
+	messages := chatSession.Messages
 	ui.Column(c).FillWidth().Grow(1).Children(func() {
-		followScroll(&st.chatScroll)
-		ui.Scroll(c).FillWidth().Grow(1).TrackScroll(&st.chatScroll).Children(func() {
-			ui.Row(c).FillWidth().Justify(ui.Center).AlignItems(ui.Start).Children(func() {
-				design.Apply(ui.Column(c), t.Gap(design.Space5)).
-					Width(design.TranscriptWidth).MaxWidthPercent(92).
-					PaddingY(design.Space5).Children(func() {
-					messages := chatSession.Messages
-					if !hasSession || len(messages) == 0 {
-						buildHero(c, t, cfg, navigator, chat, st)
-					} else {
-						start := transcriptWindowStart(st, chatSession.ID, len(messages))
-						if start > 0 {
-							buildLoadEarlierMessages(c, t, st, chatSession.ID, start)
-						}
-						for index := start; index < len(messages); index++ {
-							message := messages[index]
-							buildMessage(c, t, runtime, message, st)
-							if index == len(messages)-1 && message.Role == contracts.ChatRoleAssistant && !chatSession.Running {
-								buildRegenerateAction(c, t, runtime, chat, st, chatSession, message)
-							}
-						}
-					}
-					if hasSession && sessionErrorVisible(chatSession.Messages, chatSession.Error) {
-						buildErrorLine(c, t, chatSession.Error)
+		st.chatList.Key = func(index int) any {
+			if index < 0 || index >= len(messages) {
+				return nil
+			}
+			return messages[index].ID
+		}
+		st.chatList.Label = func(index int) string {
+			if index < 0 || index >= len(messages) {
+				return ""
+			}
+			return transcriptRowLabel(st, messages[index], index)
+		}
+		// Each layout follows the end while the user stays there; scrolling away
+		// stops the follow inside the List, and ScrollToEnd resumes it.
+		st.chatList.FollowEnd = true
+		if st.chatHoldPlace {
+			st.chatList.HoldPlace()
+			st.chatHoldPlace = false
+		}
+		list := ui.List(c, &st.chatList, len(messages)).
+			Label(st.tr("对话消息", "Conversation messages")).
+			Gap(design.Space5).
+			PaddingY(design.Space5).
+			FillWidth().Grow(1)
+		if !hasSession || len(messages) == 0 {
+			// List.Children shows while the list has no rows: the branded
+			// first-run hero is that empty state (list.md "What else you build").
+			list.Children(func() {
+				ui.Row(c).FillWidth().Justify(ui.Center).AlignItems(ui.Start).Children(func() {
+					design.Apply(ui.Column(c), t.Gap(design.Space5)).
+						Width(design.TranscriptWidth).MaxWidthPercent(92).
+						Children(func() {
+							buildHero(c, t, cfg, navigator, chat, st)
+						})
+				})
+			})
+		}
+		list.Rows(func(row ui.ListRow) {
+			message := messages[row.Index]
+			ui.Row(row.Context).FillWidth().Justify(ui.Center).AlignItems(ui.Start).Children(func() {
+				design.Apply(ui.Column(row.Context), t.Gap(design.Space5)).
+					Width(design.TranscriptWidth).MaxWidthPercent(92).Children(func() {
+					buildMessage(row.Context, t, runtime, message, st)
+					if row.Index == len(messages)-1 && message.Role == contracts.ChatRoleAssistant && !chatSession.Running {
+						buildRegenerateAction(row.Context, t, runtime, chat, st, chatSession, message)
 					}
 				})
 			})
 		})
-		backToLatest(c, t, &st.chatScroll, st.tr("回到最新", "Back to latest"))
+		// AtEnd reads the last laid-out frame; wait for one layout so the
+		// floating action never flashes on the first frame.
+		if st.chatListSeen {
+			st.chatFollowEnd = st.chatList.AtEnd()
+		} else {
+			st.chatListSeen = true
+		}
+		if hasSession && sessionErrorVisible(messages, chatSession.Error) {
+			buildErrorLine(c, t, chatSession.Error)
+		}
+		backToLatestList(c, t, &st.chatList, &st.chatFollowEnd,
+			st.tr("回到最新", "Back to latest"))
 	})
-}
-
-// transcriptTailWindow is the number of newest messages the chat builds by
-// default. A conversation of thousands of messages would otherwise rebuild every
-// turn each frame; older messages load in steps with the "load earlier" row.
-const transcriptTailWindow = 200
-
-// transcriptWindowStart returns the first message the chat builds: the tail
-// window, or an earlier index the user already loaded. The user's earlier start
-// is kept as new messages arrive (the window grows at its end, not its start).
-func transcriptWindowStart(st *state, sessionID string, count int) int {
-	start := 0
-	if count > transcriptTailWindow {
-		start = count - transcriptTailWindow
-	}
-	if older, ok := st.transcriptStart[sessionID]; ok && older < start {
-		start = older
-	}
-	return start
-}
-
-// buildLoadEarlierMessages is the row above the tail window: it says how many
-// older messages are hidden and loads one more step of them.
-func buildLoadEarlierMessages(c *ui.Context, t *design.Tokens, st *state, sessionID string, start int) {
-	label := st.tr(fmt.Sprintf("加载更早消息（%d 条）", start),
-		fmt.Sprintf("Load earlier messages (%d)", start))
-	button := design.Apply(ui.Button(c, label), t.SecondaryButton())
-	if button.Clicked() {
-		if st.transcriptStart == nil {
-			st.transcriptStart = make(map[string]int)
-		}
-		next := start - transcriptTailWindow
-		if next < 0 {
-			next = 0
-		}
-		st.transcriptStart[sessionID] = next
-		c.Invalidate()
-	}
 }
 
 // buildHero is the branded first-run empty state: icon badge, title, hint and
@@ -863,6 +848,9 @@ func buildAssistantToolRow(c *ui.Context, t *design.Tokens, runtime contracts.UI
 		Toggle: func(next bool) {
 			toggled = true
 			st.toolOpen[key] = next
+			// The row grows/shrinks: keep the transcript where it is for this
+			// layout so the clicked line does not jump (list.md HoldPlace).
+			st.chatHoldPlace = true
 			runtime.Invalidate()
 		},
 	}
@@ -893,11 +881,15 @@ func buildAssistantMessage(c *ui.Context, t *design.Tokens, runtime contracts.UI
 					design.Apply(ui.Text(c, preview), t.TextMuted(design.TypeXS)).MaxLines(2)
 				})
 			}
-			open := st.thinkOpen[message.ID]
+			previous := st.thinkOpen[message.ID]
+			open := previous
 			ui.Collapsible(c.Key("session.reasoning."+message.ID), st.tr("思考", "Reasoning"), &open, func() {
 				design.Apply(ui.Text(c, message.Reasoning), t.TextMuted(design.TypeXS))
 			})
 			st.thinkOpen[message.ID] = open
+			if previous != open {
+				st.chatHoldPlace = true
+			}
 		}
 		renderAssistantBody(c, t, runtime, st, message)
 		if message.Streaming {
@@ -994,6 +986,7 @@ func buildMessageActionButtons(c *ui.Context, t *design.Tokens, runtime contract
 				} else {
 					st.expandedActions = message.ID
 				}
+				st.chatHoldPlace = true
 				runtime.Invalidate()
 			}
 		}
@@ -1037,7 +1030,8 @@ func buildUsageFooter(c *ui.Context, t *design.Tokens, st *state, message contra
 	}
 	summary := st.tr("用时 ", "Took ") + formatUsageDuration(message.Usage.DurationMS) +
 		" · " + formatTokenCount(usageTotalTokens(message.Usage)) + " tokens"
-	open := st.usageOpen[message.ID]
+	previous := st.usageOpen[message.ID]
+	open := previous
 	collapsible := ui.Collapsible(c.Key("session.usage."+message.ID), summary, &open, func() {
 		rows := []struct{ label, value string }{
 			{st.tr("时长", "Duration"), formatUsageDuration(message.Usage.DurationMS)},
@@ -1061,6 +1055,9 @@ func buildUsageFooter(c *ui.Context, t *design.Tokens, st *state, message contra
 	})
 	design.Apply(collapsible, t.Font(design.TypeXXXS))
 	st.usageOpen[message.ID] = open
+	if previous != open {
+		st.chatHoldPlace = true
+	}
 }
 
 // toggleMessageFeedback writes/toggles one rating through the optional

@@ -142,6 +142,12 @@ A full UI/UX conformance pass against `mygo v0.8.3/docs/ui` and the
   frame's localized title, so two windows in different languages cannot race a
   shared global. Tests capture the title from the seam argument and one
   regression probe now checks both languages instead of skipping a known defect.
+- **Transcript is a native List**: the conversation transcript now uses the
+  official `ui.List` (`ListState.Key` by message ID, `Label`, `FollowEnd` for
+  streaming, `HoldPlace` when a fold opens, `ScrollToEnd` behind the floating
+  back-to-latest action) instead of a `Scroll` plus a bounded message loop, so
+  only the visible rows build and long conversations stay fast. The help
+  dialog's command list and the trajectory timeline use `ui.List` as well.
 - **Bounded per-message UI state**: switching conversations drops the fold /
   usage / unfolded-actions / transcript-window entries of the conversation that
   no longer shows (one internal test covers the pruning), and sent attachments'

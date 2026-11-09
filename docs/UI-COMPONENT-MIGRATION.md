@@ -32,7 +32,7 @@
 
 | 项 | 现状 | 官方目标 | 验收 |
 |---|---|---|---|
-| 会话 transcript | `ui.Scroll` + 消息循环（有界窗口） | `ui.List`：`ListState{Key: message.ID, Label, FollowEnd, HoldPlace}`，变量行高由 List 测量；加载更早保持滚动锚点 | 流式跟随、返回最新、加载更早位置、折叠不跳动、长会话只构建可见行；session 测试与快照 |
+| 会话 transcript | ✅ **已完成**（官方 `ui.List`） | `ListState{Key: message.ID, Label, FollowEnd, HoldPlace}`；变量行高由 List 测量；流式跟随/滚动回到底部/折叠 `HoldPlace`/首帧不闪 | 250 条会话只构建可见行（`TestTranscriptListVirtualizesLongConversation`）；`scroll_follow_test` 流式跟随/回到最新；全量 session 测试 |
 | 轨迹 pane | `ui.Scroll` + tool call 循环 | `ui.List`（Key=tool.ID）；跟随 end 由 ListState | 键盘/滚动/空态测试 |
 | 记忆 pane | `ui.Scroll` + memory 循环 | `ui.List`（Key=memory.ID） | 同上 |
 | 斜杠/`@` 建议菜单 | 自绘 popover + ButtonBase 行 + 手写 Up/Down/Enter | 官方 suggestion 模式：`ui.List`（`Rows`/`Selected`/`Submitted`/`RoleOption` 等价 a11y）或 `ui.Autocomplete`（纯文本场景不适用富行）；保留 rich row 但键盘交回 List | 键盘上下/Enter/Tab/Esc、a11y role、鼠标选择；既有 suggestion 测试 |
@@ -77,3 +77,7 @@
   行名、键盘可滚动；新增 RoleList/RoleListItem a11y 断言）。
 - 会话「轨迹」pane：`ui.Scroll` + tool card 循环 → `ui.List`（`Key=tool key`、
   行名=tool name、`Gap/PaddingY/Grow`，切换会话重置 ListState）。
+- 会话 transcript：`ui.Scroll` + 消息循环（有界窗口）→ 官方 `ui.List`（`Key=message.ID`、
+  `Label=角色+序号`（避免 Markdown 源泄漏进 a11y 树）、`FollowEnd` 流式跟随、
+  折叠 `HoldPlace`、`ScrollToEnd` 回到最新、首帧用 `chatListSeen` 防闪烁）；长会话
+  只构建可见行，旧的「加载更早」有界窗口被 List 虚拟化取代。

@@ -20,7 +20,6 @@ func TestPruneMessageStateKeepsActiveSession(t *testing.T) {
 		},
 		usageOpen:       map[string]bool{"m1": true, "m2": true},
 		expandedActions: "m1",
-		transcriptStart: map[string]int{"s1": 50, "s2": 20},
 	}
 	pruneMessageState(st, []contracts.ChatMessage{{ID: "m2"}})
 
@@ -41,11 +40,5 @@ func TestPruneMessageStateKeepsActiveSession(t *testing.T) {
 	}
 	if st.expandedActions != "" {
 		t.Fatalf("expandedActions = %q, want cleared", st.expandedActions)
-	}
-	if _, ok := st.transcriptStart["s1"]; ok {
-		t.Fatal("transcriptStart kept another session's window")
-	}
-	if st.transcriptStart["s2"] != 20 {
-		t.Fatalf("transcriptStart[s2] = %v, want 20", st.transcriptStart["s2"])
 	}
 }
