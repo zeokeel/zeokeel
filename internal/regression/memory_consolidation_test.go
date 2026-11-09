@@ -150,33 +150,30 @@ func TestMemoryConsolidationSettingsPage(t *testing.T) {
 		t.Fatalf("persisted entries after page consolidation = %d, want 2", got)
 	}
 
-	// Invalid numbers normalize to 0 (unlimited) and are persisted that way.
+	// The fields are official ui.NumberInputs: a typed number outside the
+	// bounds is ignored (the field keeps its last valid value on blur), so the
+	// page has no free-text "invalid draft" state and the saved policy stays
+	// whatever the last valid value was.
 	revealSettings(t, tester, "最大条目数 输入")
-	if err := tester.Click("最大条目数 输入"); err != nil {
-		t.Fatalf("focus max entries: %v; texts = %v", err, tester.Texts())
+	rect, ok := tester.Find("最大条目数 输入")
+	if !ok {
+		t.Fatalf("max-entries number input not found; texts = %v", tester.Texts())
 	}
+	tester.ClickAt(rect.X+16, rect.Y+rect.H/2)
 	tester.Frame()
 	tester.Key(ui.Cmd, ui.KeyA)
-	tester.Type("abc")
-	tester.Frame()
-	revealSettings(t, tester, "保留天数 输入")
-	if err := tester.Click("保留天数 输入"); err != nil {
-		t.Fatalf("focus max age: %v; texts = %v", err, tester.Texts())
-	}
-	tester.Frame()
-	tester.Key(ui.Cmd, ui.KeyA)
-	tester.Type("xyz")
+	tester.Type("9999999") // above the 100000 bound: ignored
 	tester.Frame()
 	revealSettings(t, tester, "按策略整理")
 	if err := tester.Click("按策略整理"); err != nil {
-		t.Fatalf("consolidate invalid: %v; texts = %v", err, tester.Texts())
+		t.Fatalf("consolidate after out-of-range typing: %v; texts = %v", err, tester.Texts())
 	}
 	tester.Frame()
-	requireHasTexts(t, tester, "无效数字，已按 0（不限）处理", "已整理：过期 0 / 超限 0 / 剩余 2")
-	if got := h.settings.Get(contracts.SettingMemoryMaxEntries, ""); got != "0" {
-		t.Fatalf("invalid max entries saved as %q, want 0", got)
+	requireHasTexts(t, tester, "已整理：过期 0 / 超限 0 / 剩余 2")
+	if got := h.settings.Get(contracts.SettingMemoryMaxEntries, ""); got != "2" {
+		t.Fatalf("max entries saved as %q, want the last valid value 2", got)
 	}
 	if got := h.settings.Get(contracts.SettingMemoryMaxAgeDays, ""); got != "0" {
-		t.Fatalf("invalid max age saved as %q, want 0", got)
+		t.Fatalf("max age saved as %q, want 0", got)
 	}
 }

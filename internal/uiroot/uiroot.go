@@ -16,6 +16,7 @@ package uiroot
 
 import (
 	"log"
+	"strconv"
 	"sync"
 	"sync/atomic"
 
@@ -23,6 +24,21 @@ import (
 	cordis "github.com/zeokeel/zeokeel-kernel"
 
 	"github.com/zeokeel/zeokeel/internal/contracts"
+	"github.com/zeokeel/zeokeel/internal/design"
+)
+
+// Settings keys for the chrome widths the user dragged with ui.Split. They are
+// host-owned (the shell geometry), not a module's, so they live here rather
+// than in contracts.
+const (
+	settingsKeySidebarWidth   = "ui.width.sidebar"
+	settingsKeyInspectorWidth = "ui.width.inspector"
+	// Width bounds keep a dragged pane usable; a saved value outside them is
+	// clamped on load.
+	minSidebarWidth   float32 = 200
+	maxSidebarWidth   float32 = 420
+	minInspectorWidth float32 = 240
+	maxInspectorWidth float32 = 560
 )
 
 // Config configures the UI root.
@@ -109,6 +125,19 @@ type Root struct {
 	// 64 DIP icon rail. It is toggled by Cmd/Ctrl+B or the brand-row control.
 	sidebarCollapsed bool
 
+	// sidebarWidth/inspectorWidth are the user's dragged pane widths (ui.Split
+	// dividers); zero until loadChromeWidths reads the saved values on the first
+	// frame. widthsLoaded keeps that read once per process.
+	sidebarWidth   float32
+	inspectorWidth float32
+	widthsLoaded   bool
+
+	// lastAnnouncedScreen/lastRightOpen drive the assistive-technology
+	// announcements of navigation and inspector changes (c.Announce), which a
+	// hand-built navigator does not provide by itself.
+	lastAnnouncedScreen string
+	lastRightOpen       bool
+
 	// paletteOpen is the host-owned command palette state (Cmd/Ctrl+K) and
 	// paletteQuery its filter draft. UI thread only.
 	paletteOpen  bool
@@ -154,6 +183,51 @@ func (r *Root) SetRightPanelOpen(open bool) {
 	}
 	r.rightOpen = open
 	r.requestFrame()
+}
+
+// loadChromeWidths reads the pane widths the user dragged with the ui.Split
+// dividers, once per process, falling back to the brand defaults. Values are
+// clamped so a stale or hand-edited settings entry cannot make a pane unusable.
+func (r *Root) loadChromeWidths() {
+	if r.widthsLoaded {
+		return
+	}
+	r.widthsLoaded = true
+	r.sidebarWidth = design.SidebarWidth
+	r.inspectorWidth = design.InspectorWidth
+	if r.settingsService == nil {
+		return
+	}
+	if v, err := strconv.ParseFloat(r.settingsService.Get(settingsKeySidebarWidth, ""), 32); err == nil {
+		r.sidebarWidth = clampWidth(float32(v), minSidebarWidth, maxSidebarWidth)
+	}
+	if v, err := strconv.ParseFloat(r.settingsService.Get(settingsKeyInspectorWidth, ""), 32); err == nil {
+		r.inspectorWidth = clampWidth(float32(v), minInspectorWidth, maxInspectorWidth)
+	}
+}
+
+// saveChromeWidths persists the dragged pane widths, so the layout opens the
+// way the user left it (docs/ui/split.md: keep the size in the app's state and
+// save it to restore the layout when the app starts again).
+func (r *Root) saveChromeWidths() {
+	if r.settingsService == nil {
+		return
+	}
+	_ = r.settingsService.Set(settingsKeySidebarWidth,
+		strconv.FormatFloat(float64(clampWidth(r.sidebarWidth, minSidebarWidth, maxSidebarWidth)), 'f', 0, 32))
+	_ = r.settingsService.Set(settingsKeyInspectorWidth,
+		strconv.FormatFloat(float64(clampWidth(r.inspectorWidth, minInspectorWidth, maxInspectorWidth)), 'f', 0, 32))
+}
+
+// clampWidth keeps a dragged width within its usable range.
+func clampWidth(v, lo, hi float32) float32 {
+	if v < lo {
+		return lo
+	}
+	if v > hi {
+		return hi
+	}
+	return v
 }
 
 // New creates the UI root. It registers no screens: screen/slot contributions

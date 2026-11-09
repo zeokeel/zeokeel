@@ -82,12 +82,8 @@ type state struct {
 	// Pending for a frame or two while the backend settles, and the dialog
 	// must not reopen for it.
 	resolvedID string
-	// denyButton is the safe default action; a new request focuses it once so
-	// Enter presses Deny, never a one-key Allow. argsOpen keeps the collapsed
-	// argument details across frames.
-	denyButton ui.Handle
-	focusDeny  bool
-	argsOpen   bool
+	// argsOpen keeps the collapsed argument details across frames.
+	argsOpen bool
 }
 
 // Module registers the approval dialog contribution.
@@ -179,10 +175,10 @@ func buildDialog(c *ui.Context, runtime contracts.UIRuntime, approvals contracts
 	if request.ID != st.shownID {
 		st.shownID = request.ID
 		st.open = true
-		// Safe default: focus Deny as the request opens; Enter then presses
-		// the focused button (the native button behaviour), so a high-risk
-		// tool is never allowed with one stray Enter.
-		st.focusDeny = true
+		// Safe default: the footer's Deny action is its Default (focused as
+		// the request opens); Enter then presses it (the native button
+		// behaviour), so a high-risk tool is never allowed with one stray
+		// Enter.
 		st.argsOpen = false
 	}
 	ui.Modal(c, &st.open, func() {
@@ -286,35 +282,23 @@ func requestPanel(c *ui.Context, runtime contracts.UIRuntime, approvals contract
 				})
 		}
 		ui.Divider(c)
-		// The footer mirrors uikit.DialogFooter's order and metrics; approval
-		// alone needs a bound button so the safe default (Deny) can take the
-		// focus as the request opens.
-		ui.Row(c).FillWidth().Justify(ui.End).AlignItems(ui.Center).
-			Gap(design.Space2).Children(func() {
-			deny := design.Apply(ui.Button(c, denyLabel), t.DangerButton()).
-				Label(denyLabel).
-				Tooltip(st.tr("拒绝本次调用（默认焦点）", "Deny this call (default focus)")).
-				Bind(&st.denyButton)
-			if st.focusDeny {
-				st.denyButton.Focus(c)
-				st.focusDeny = false
-			}
-			if deny.Clicked() {
+		// The product's one dialog action bar: the destructive Deny first, the
+		// run-scoped allow, the accent Allow last (rightmost). Deny is the
+		// footer's Default action, focused as the request opens, so Enter
+		// denies and allowing needs a deliberate Tab or click. The footer is
+		// keyed by request so a following request builds fresh buttons and its
+		// Default takes the focus again.
+		c.Key("approval.footer/" + request.ID)
+		uikit.DialogFooter(c, []uikit.DialogAction{
+			{Label: denyLabel, Danger: true, Default: true, OnClick: func() {
 				resolve(runtime, approvals, st, contracts.ApprovalDeny)
-			}
-			allowAlways := design.Apply(ui.Button(c, allowAlwaysLabel), t.SecondaryButton()).
-				Label(allowAlwaysLabel).
-				Tooltip(st.tr("本次运行内对同一工具不再询问；运行结束后恢复询问",
-					"Don't ask again for this tool during this run; asking resumes on the next run"))
-			if allowAlways.Clicked() {
+			}},
+			{Label: allowAlwaysLabel, OnClick: func() {
 				resolve(runtime, approvals, st, contracts.ApprovalAllowAlways)
-			}
-			allow := design.Apply(ui.PrimaryButton(c, allowLabel), t.PrimaryButton()).
-				Label(allowLabel).
-				Tooltip(st.tr("允许这一次调用", "Allow this call"))
-			if allow.Clicked() {
+			}},
+			{Label: allowLabel, Primary: true, OnClick: func() {
 				resolve(runtime, approvals, st, contracts.ApprovalAllow)
-			}
+			}},
 		})
 		// The key semantics are visible: Esc denies, and Enter presses whatever
 		// control has the focus (Deny by default) — never a dialog-wide Allow.

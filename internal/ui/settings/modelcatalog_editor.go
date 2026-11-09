@@ -24,10 +24,21 @@ import (
 // catalogEditDraft is the editor modal's UI-thread draft of one catalog model.
 // The model ID is immutable: it is the row key the conversation menus store.
 type catalogEditDraft struct {
-	id              string
-	name            string
-	note            string
-	contextWindow   string
+	id            string
+	name          string
+	note          string
+	contextWindow string
+	// contextWindowNum mirrors the official ui.NumberInput (0 = unknown).
+	contextWindowNum float64
+	// Numeric mirrors and "use the provider default" switches for the official
+	// ui.NumberInputs: an empty string means "not set" (nil / 0), so the switch,
+	// not an empty field, clears a value.
+	temperatureNum  float64
+	topPNum         float64
+	maxTokensNum    float64
+	tempDefault     bool
+	topPDefault     bool
+	tokensDefault   bool
 	family          string
 	defaultThinking string
 	temperature     string
@@ -175,15 +186,22 @@ func newCatalogEditDraft(model contracts.ModelInfo) *catalogEditDraft {
 	}
 	if model.ContextWindow > 0 {
 		draft.contextWindow = strconv.Itoa(model.ContextWindow)
+		draft.contextWindowNum = float64(model.ContextWindow)
 	}
+	draft.tempDefault = model.Temperature == nil
 	if model.Temperature != nil {
 		draft.temperature = formatCatalogNumber(*model.Temperature)
+		draft.temperatureNum = *model.Temperature
 	}
+	draft.topPDefault = model.TopP == nil
 	if model.TopP != nil {
 		draft.topP = formatCatalogNumber(*model.TopP)
+		draft.topPNum = *model.TopP
 	}
+	draft.tokensDefault = model.MaxTokens <= 0
 	if model.MaxTokens > 0 {
 		draft.maxTokens = strconv.Itoa(model.MaxTokens)
+		draft.maxTokensNum = float64(model.MaxTokens)
 	}
 	for _, mode := range contracts.SanitizeThinkingModes(model.ThinkingModes) {
 		draft.modes = append(draft.modes, &catalogModeDraft{
@@ -466,10 +484,13 @@ func buildCatalogEditDialog(c *ui.Context, t *design.Tokens, store contracts.Set
 				})
 				ui.Column(c).FillWidth().Grow(1).Children(func() {
 					ui.Field(c, localized(locale, "模型上下文窗口", "Model context window"), func() {
-						ui.TextInput(c, &draft.contextWindow).
+						window := ui.NumberInput(c.Key("catalog.edit.contextWindow"),
+							&draft.contextWindowNum, 0, 10000000, 1000).
 							Label(inputLabel(locale, localized(locale,
-								"模型上下文窗口", "Model context window"))).
-							Placeholder("128000 tokens").FillWidth()
+								"模型上下文窗口", "Model context window")))
+						if window.Changed() {
+							draft.contextWindow = strconv.Itoa(int(draft.contextWindowNum))
+						}
 					})
 				})
 			})
@@ -539,25 +560,76 @@ func buildCatalogEditDialog(c *ui.Context, t *design.Tokens, store contracts.Set
 					design.Apply(ui.Text(c, localized(locale, "生成参数", "Generation")),
 						t.Font(design.TypeS)).FontWeight(600).TextColor(t.LabelPrimary)
 					ui.Row(c).FillWidth().Gap(design.Space3).AlignItems(ui.Start).Children(func() {
-						ui.Column(c).FillWidth().Grow(1).Children(func() {
+						ui.Column(c).FillWidth().Grow(1).Gap(design.Space1).Children(func() {
 							ui.Field(c, localized(locale, "温度 0–2", "Temperature 0–2"), func() {
-								ui.TextInput(c, &draft.temperature).
-									Label(inputLabel(locale, localized(locale, "温度", "Temperature"))).
-									Placeholder(localized(locale, "服务商默认", "provider default")).FillWidth()
+								ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(design.Space2).Children(func() {
+									if switchInline(c, localized(locale, "使用默认温度", "Use default temperature"), &draft.tempDefault) {
+										if draft.tempDefault {
+											draft.temperature = ""
+										} else {
+											if draft.temperatureNum == 0 {
+												draft.temperatureNum = 0.7
+											}
+											draft.temperature = formatCatalogNumber(draft.temperatureNum)
+										}
+									}
+								})
+								if !draft.tempDefault {
+									input := ui.NumberInput(c.Key("catalog.edit.temperature"),
+										&draft.temperatureNum, 0, 2, 0.1).
+										Label(inputLabel(locale, localized(locale, "温度", "Temperature")))
+									if input.Changed() {
+										draft.temperature = formatCatalogNumber(draft.temperatureNum)
+									}
+								}
 							})
 						})
-						ui.Column(c).FillWidth().Grow(1).Children(func() {
+						ui.Column(c).FillWidth().Grow(1).Gap(design.Space1).Children(func() {
 							ui.Field(c, "Top P 0–1", func() {
-								ui.TextInput(c, &draft.topP).
-									Label(inputLabel(locale, "Top P")).
-									Placeholder(localized(locale, "服务商默认", "provider default")).FillWidth()
+								ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(design.Space2).Children(func() {
+									if switchInline(c, localized(locale, "使用默认 Top P", "Use default Top P"), &draft.topPDefault) {
+										if draft.topPDefault {
+											draft.topP = ""
+										} else {
+											if draft.topPNum == 0 {
+												draft.topPNum = 0.9
+											}
+											draft.topP = formatCatalogNumber(draft.topPNum)
+										}
+									}
+								})
+								if !draft.topPDefault {
+									input := ui.NumberInput(c.Key("catalog.edit.topP"),
+										&draft.topPNum, 0, 1, 0.05).
+										Label(inputLabel(locale, "Top P"))
+									if input.Changed() {
+										draft.topP = formatCatalogNumber(draft.topPNum)
+									}
+								}
 							})
 						})
-						ui.Column(c).FillWidth().Grow(1).Children(func() {
+						ui.Column(c).FillWidth().Grow(1).Gap(design.Space1).Children(func() {
 							ui.Field(c, localized(locale, "最大输出 tokens", "Max output tokens"), func() {
-								ui.TextInput(c, &draft.maxTokens).
-									Label(inputLabel(locale, localized(locale, "最大输出 tokens", "Max output tokens"))).
-									Placeholder(localized(locale, "服务商默认", "provider default")).FillWidth()
+								ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(design.Space2).Children(func() {
+									if switchInline(c, localized(locale, "使用默认 max tokens", "Use default max tokens"), &draft.tokensDefault) {
+										if draft.tokensDefault {
+											draft.maxTokens = ""
+										} else {
+											if draft.maxTokensNum <= 0 {
+												draft.maxTokensNum = 2048
+											}
+											draft.maxTokens = strconv.Itoa(int(draft.maxTokensNum))
+										}
+									}
+								})
+								if !draft.tokensDefault {
+									input := ui.NumberInput(c.Key("catalog.edit.maxTokens"),
+										&draft.maxTokensNum, 1, 1000000, 1).
+										Label(inputLabel(locale, localized(locale, "最大输出 tokens", "Max output tokens")))
+									if input.Changed() {
+										draft.maxTokens = strconv.Itoa(int(draft.maxTokensNum))
+									}
+								}
 							})
 						})
 					})

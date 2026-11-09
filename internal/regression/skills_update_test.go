@@ -243,8 +243,9 @@ func TestSettingsSkillsEditEntry(t *testing.T) {
 	tester.Frame()
 	requireHasTexts(t, tester, "编辑技能", "alpha", "名称不可修改", "描述", "内容", "保存", "取消")
 
-	// Replace the body text and save.
-	if err := tester.Click("内容"); err != nil {
+	// Replace the body text and save. The interactive target is the accessibly
+	// labeled body input ("内容 输入"), not the field's visible label.
+	if err := tester.Click("内容 输入"); err != nil {
 		t.Fatalf("focus body: %v", err)
 	}
 	tester.Frame()

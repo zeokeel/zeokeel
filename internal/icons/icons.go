@@ -82,11 +82,3 @@ var (
 	PanelRight    = func() *ui.SVG { return get("panel-right") }
 	Copy          = func() *ui.SVG { return get("copy") }
 )
-
-// Semantic aliases keep call sites readable where the DSH name differs from
-// the artwork's file name.
-var (
-	FolderClosed = Folder
-	Ellipsis     = More
-	SessionLog   = Data
-)

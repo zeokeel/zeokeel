@@ -159,12 +159,47 @@ type state struct {
 	filesFilter     string
 	filesShowHidden bool
 
+	// Files pane listing cache (P1): the directory entries are read on a
+	// directory/workspace change or an explicit Refresh, never from rendering
+	// code on every frame. filesCursor is the row the native list has chosen,
+	// by path, so the choice survives a listing reload.
+	filesEntries   []contracts.FileEntry
+	filesLoaded    bool
+	filesLoadErr   error
+	filesLoadedDir string
+	filesWorkspace string
+	filesCursor    string
+	filesList      ui.ListState
+	filesListSel   int
+
+	// Log pane cache (P1): the newest durable events of the active session are
+	// read on a session change or when the chat reports new events, never on
+	// every frame.
+	logEvents  []rig.SessionEvent
+	logLoaded  bool
+	logErr     error
+	logSession string
+	logList    ui.ListState
+
+	// Tools pane: the native list and the row Enter acts on.
+	toolsList ui.ListState
+	toolsSel  int
+
+	// Agents pane: the native member list and the row chosen for the steer pane.
+	agentsList ui.ListState
+	agentsSel  int
+
+	// Tasks pane: the native task list.
+	tasksList ui.ListState
+
 	// Changes pane state: the cached uncommitted changes (re-read on the native
-	// Refresh action), the load error and the per-file diff fold state.
+	// Refresh action), the load error, the per-file diff fold state and the
+	// per-file official diff viewers (editor.DiffState, built once per diff).
 	changesLoaded bool
 	changes       []contracts.FileChange
 	changesErr    error
 	changesOpen   map[string]bool
+	diffs         map[string]*diffView
 
 	// term is the Terminal pane's state (the command runner appends from a
 	// background goroutine, so its output guard lives in terminalState).
@@ -223,7 +258,11 @@ func Module() *module.Descriptor[Config] {
 			cfg:           config,
 			runtime:       runtime,
 			filesPreview:  make(map[string]*filePreview),
+			filesListSel:  -1,
+			toolsSel:      -1,
+			agentsSel:     -1,
 			changesOpen:   make(map[string]bool),
+			diffs:         make(map[string]*diffView),
 			artifactsOpen: make(map[string]bool),
 			term:          newTerminalState(),
 		}
@@ -247,7 +286,13 @@ func Module() *module.Descriptor[Config] {
 		}
 
 		unsubscribe, err := chat.Subscribe(func(string) {
-			runtime.Post(func() { runtime.Invalidate() })
+			// A chat change may add durable events to the active session; drop
+			// the cached log on the UI thread so the next Log frame re-reads it
+			// once instead of every frame reading it (P1).
+			runtime.Post(func() {
+				moduleState.logLoaded = false
+				runtime.Invalidate()
+			})
 		})
 		if err != nil {
 			return fmt.Errorf("rightpanel: subscribe chat: %w", err)

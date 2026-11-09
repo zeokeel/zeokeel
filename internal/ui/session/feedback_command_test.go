@@ -166,7 +166,7 @@ func feedbackExportChat() *fakeChat {
 func TestJSONLExportIncludesFeedback(t *testing.T) {
 	chat := feedbackExportChat()
 	var content string
-	withJSONLSeam(t, func(name, data string) (string, error) {
+	withJSONLSeam(t, func(title, name, data string) (string, error) {
 		content = data
 		return "/tmp/export.jsonl", nil
 	})
@@ -204,7 +204,7 @@ func TestJSONLExportIncludesFeedback(t *testing.T) {
 
 func TestMarkdownExportIncludesFeedback(t *testing.T) {
 	var content string
-	setExportSaver(t, func(name, data string) (string, error) {
+	setExportSaver(t, func(title, name, data string) (string, error) {
 		content = data
 		return "/tmp/export.md", nil
 	})

@@ -176,7 +176,7 @@ func (w *fakeWorkspace) creates() []createCall {
 
 // --- helpers ----------------------------------------------------------------
 
-func setDirectoryPicker(t *testing.T, fn func() (string, error)) {
+func setDirectoryPicker(t *testing.T, fn func(title string) (string, error)) {
 	t.Helper()
 	previous := rightpanel.DirectoryPicker
 	rightpanel.DirectoryPicker = fn
@@ -208,7 +208,7 @@ func TestFilesPaneWithoutBackend(t *testing.T) {
 
 func TestFilesOpenWorkspaceFlow(t *testing.T) {
 	workspace := newFakeWorkspace()
-	setDirectoryPicker(t, func() (string, error) { return "/tmp/proj-alpha", nil })
+	setDirectoryPicker(t, func(string) (string, error) { return "/tmp/proj-alpha", nil })
 	h := newHarnessWithWorkspace(t, newFakeChat(), rightpanel.Config{}, workspace)
 	tester := h.tester()
 	h.selectPane(tester, "文件")
@@ -227,7 +227,7 @@ func TestFilesOpenWorkspaceFlow(t *testing.T) {
 func TestFilesOpenWorkspaceErrors(t *testing.T) {
 	t.Run("picker error", func(t *testing.T) {
 		workspace := newFakeWorkspace()
-		setDirectoryPicker(t, func() (string, error) { return "", errors.New("dialog failed") })
+		setDirectoryPicker(t, func(string) (string, error) { return "", errors.New("dialog failed") })
 		h := newHarnessWithWorkspace(t, newFakeChat(), rightpanel.Config{}, workspace)
 		tester := h.tester()
 		h.selectPane(tester, "文件")
@@ -238,7 +238,7 @@ func TestFilesOpenWorkspaceErrors(t *testing.T) {
 	t.Run("create error", func(t *testing.T) {
 		workspace := newFakeWorkspace()
 		workspace.createErr = errors.New("permission denied")
-		setDirectoryPicker(t, func() (string, error) { return "/root/forbidden", nil })
+		setDirectoryPicker(t, func(string) (string, error) { return "/root/forbidden", nil })
 		h := newHarnessWithWorkspace(t, newFakeChat(), rightpanel.Config{}, workspace)
 		tester := h.tester()
 		h.selectPane(tester, "文件")
@@ -248,7 +248,7 @@ func TestFilesOpenWorkspaceErrors(t *testing.T) {
 
 	t.Run("cancel keeps the empty state", func(t *testing.T) {
 		workspace := newFakeWorkspace()
-		setDirectoryPicker(t, func() (string, error) { return "", nil })
+		setDirectoryPicker(t, func(string) (string, error) { return "", nil })
 		h := newHarnessWithWorkspace(t, newFakeChat(), rightpanel.Config{}, workspace)
 		tester := h.tester()
 		h.selectPane(tester, "文件")
@@ -402,8 +402,8 @@ func TestFilesCustomTabLabel(t *testing.T) {
 func TestFilesDirectoryDialogTitleFollowsLocale(t *testing.T) {
 	workspace := newFakeWorkspace()
 	captured := ""
-	setDirectoryPicker(t, func() (string, error) {
-		captured = rightpanel.DirectoryDialogTitle
+	setDirectoryPicker(t, func(title string) (string, error) {
+		captured = title
 		return "", nil // cancel keeps the empty state for the second invocation
 	})
 	h := newLocaleHarness(t, "en", newFakeChat(), rightpanel.Config{}, workspace, nil)

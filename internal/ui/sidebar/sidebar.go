@@ -6,9 +6,20 @@
 // runtime and the chat read model, registers slot items on activation and hands
 // the unregister functions (and the chat subscription) to kernel effects so
 // disposal unwinds them. The host owns the native Sidebar/SidebarSection shell;
-// this module only injects native controls (SearchField, ButtonBase, Button,
-// Modal, AlertDialog, Icon, Text, Badge) styled through internal/design. It
-// never draws a control by hand.
+// this module only injects native controls (SearchField, List, Outline, Button,
+// ButtonBase, Modal, AlertDialog, Icon, Text, Badge) styled through
+// internal/design. It never draws a control by hand.
+//
+// # Session list and workspace tree
+//
+// The session list is a native ui.List: rows are keyed by session ID, named by
+// their title, the choice follows the active session, Enter opens the chosen
+// row and a single click opens the row (opened from the row content). With a
+// workspace backend the rows become a native ui.Outline instead: workspace
+// groups are the tree's roots (OutlineState.Open replaces the old collapse map)
+// and their sessions the children, so the tree gains the disclosure arrows, the
+// Up/Down and Right/Left keyboard and the tree semantics the host's source list
+// uses. Every row's ⋯ action and its right-click share one menu.
 //
 // # Session operations
 //
@@ -70,10 +81,32 @@ type paneState struct {
 	cfgSettingsLabel string
 	cfgSessionsTitle string
 
-	// ctx resolves the optional workspace backend lazily (no Requires), and
-	// wsCollapsed remembers the per-workspace tree fold state.
-	ctx         cordis.Context
-	wsCollapsed map[string]bool
+	// ctx resolves the optional workspace backend lazily (no Requires).
+	ctx cordis.Context
+
+	// Session list state (flat mode): the native List's place/choice, the row
+	// chosen and the active session last mirrored into it. The choice follows
+	// the active session; the rows themselves are plain content because the
+	// List owns hover, selection, keyboard and accessibility.
+	sessionList   ui.ListState
+	sessionRow    int
+	sessionActive string
+
+	// Workspace tree state (group mode): the native Outline's rows and the
+	// items showing their children (workspace keys), the row chosen and the
+	// active session last mirrored into it. treeKnown remembers the roots
+	// seeded open, so a workspace the user collapsed stays collapsed.
+	tree       ui.OutlineState[string]
+	treeRow    int
+	treeActive string
+	treeKnown  map[string]bool
+
+	// Pending delete confirmation of one workspace opened from its row menu,
+	// and the last failure of one of those menu actions.
+	workspaceDeleteOpen bool
+	workspaceDeleteID   string
+	workspaceDeleteName string
+	workspaceDeleteErr  string
 
 	// screens lists the registered screens so the sidebar can offer a
 	// generic navigation item for every module screen except the two the
@@ -158,7 +191,9 @@ func Module() *module.Descriptor[Config] {
 
 		state := &paneState{
 			ctx:              ctx,
-			wsCollapsed:      make(map[string]bool),
+			sessionRow:       -1,
+			treeRow:          -1,
+			treeKnown:        make(map[string]bool),
 			cfgNewChatLabel:  strings.TrimSpace(cfg.NewChatLabel),
 			cfgSettingsLabel: strings.TrimSpace(cfg.SettingsLabel),
 			cfgSessionsTitle: strings.TrimSpace(cfg.SessionsTitle),
@@ -366,12 +401,9 @@ func buildSessionList(c *ui.Context, t *design.Tokens, chat contracts.ChatServic
 					Padding(design.Space1, design.Space2, 0, design.Space2)
 			case hasWorkspace && groupMode == sidebarGroupTree:
 				buildWorkspaceTree(c, t, chat, nav, runtime, state, workspace,
-					workspaces, allSessions, sessions, chat.ActiveSession(), query)
+					workspaces, allSessions, sessions, query)
 			default:
-				active := chat.ActiveSession()
-				for _, info := range sessions {
-					buildSessionRow(c, t, chat, nav, runtime, state, info, info.ID == active, 0)
-				}
+				buildFlatSessionList(c, t, chat, nav, runtime, state, sessions)
 			}
 			// Full-text message search below the title-filtered list: a query
 			// can match messages of sessions whose title does not match, so this
@@ -568,8 +600,28 @@ func buildSidebarError(c *ui.Context, t *design.Tokens, text string) {
 	})
 }
 
-// ungroupedWorkspaceKey is the fold key of the synthetic "未分组" group.
+// ungroupedWorkspaceKey is the outline item of the synthetic "未分组" group.
 const ungroupedWorkspaceKey = "\x00ungrouped"
+
+// workspaceTreeKeyPrefix distinguishes a workspace group item from a session
+// item in the outline (a session's item is its ID, a group's is its ID behind
+// this prefix).
+const workspaceTreeKeyPrefix = "workspace\x00"
+
+// workspaceTreeKey is the outline item of one workspace group.
+func workspaceTreeKey(id string) string { return workspaceTreeKeyPrefix + id }
+
+// isWorkspaceTreeKey reports whether an outline item is a workspace group
+// (including the synthetic ungrouped group).
+func isWorkspaceTreeKey(key string) bool {
+	return key == ungroupedWorkspaceKey || strings.HasPrefix(key, workspaceTreeKeyPrefix)
+}
+
+// workspaceIDFromTreeKey returns the workspace ID behind a group item ("" for
+// the synthetic ungrouped group).
+func workspaceIDFromTreeKey(key string) string {
+	return strings.TrimPrefix(key, workspaceTreeKeyPrefix)
+}
 
 // buildWorkspaceSectionHeader is the two-line workspace heading above the
 // workspace tree: the localized "Workspace" label with the view menu and the
@@ -623,11 +675,17 @@ func buildWorkspaceSectionHeader(c *ui.Context, t *design.Tokens, workspace cont
 			design.Apply(ui.Badge(c, state.addWorkspaceStatus), t.Badge()).TextColor(t.SuccessText)
 		})
 	}
+	if state.workspaceDeleteErr != "" {
+		buildSidebarError(c, t, state.workspaceDeleteErr)
+	}
 }
 
-// buildWorkspaceTree renders the workspace → session groups. Sessions with an
-// empty or unknown WorkspaceID go to the trailing "未分组" group; a non-empty
-// search query keeps only the groups that still have matching sessions.
+// buildWorkspaceTree renders the workspace → session tree with mygo's native
+// ui.Outline: the workspace groups are the tree's roots, their sessions the
+// children, and the outline owns the disclosure arrows, the indentation, the
+// keyboard (Up/Down move, Right/Left open and close) and the tree semantics
+// assistive technology reads. OutlineState.Open replaces the hand-kept
+// collapse map, so a fold survives frames and follows the row's item.
 func buildWorkspaceTree(
 	c *ui.Context,
 	t *design.Tokens,
@@ -638,8 +696,96 @@ func buildWorkspaceTree(
 	workspace contracts.WorkspaceService,
 	workspaces []contracts.Workspace,
 	allSessions, matched []contracts.ChatSessionInfo,
-	activeID, query string,
+	query string,
 ) {
+	tree := prepareWorkspaceTree(state, workspace, workspaces, allSessions, matched, query)
+	// Roots open by default: seed each root the first time it shows, so a
+	// group the user folded stays folded and a new workspace still opens.
+	present := make(map[string]bool, len(tree.roots))
+	for _, root := range tree.roots {
+		present[root] = true
+		if state.treeKnown[root] {
+			continue
+		}
+		state.treeKnown[root] = true
+		state.tree.Open.Add(root)
+	}
+	for root := range state.treeKnown {
+		if present[root] {
+			continue
+		}
+		delete(state.treeKnown, root)
+		state.tree.Open.Remove(root)
+	}
+
+	active := chat.ActiveSession()
+	rows := workspaceTreeRows(tree, &state.tree.Open)
+	rowOf := make(map[string]int, len(rows))
+	for index, item := range rows {
+		rowOf[item] = index
+	}
+	activeRow := -1
+	if index, ok := rowOf[active]; ok {
+		activeRow = index
+	}
+	if state.treeActive != active {
+		state.treeActive = active
+		state.treeRow = activeRow
+	}
+	if state.treeRow >= len(rows) {
+		state.treeRow = -1
+	}
+
+	// The outline keys its rows by item (workspace item or session ID). Rows
+	// are named by the text inside them (mygo's list semantics): a group row by
+	// its ButtonBase label, a session row by its title, so the row's accessible
+	// name and the pointer click target are the visual text.
+	state.tree.List.Label = nil
+	state.tree.List.Selected = &state.treeRow
+	outline := ui.Outline(c, &state.tree, tree.roots, func(item string) []string {
+		return tree.children[item]
+	}, func(item string) {
+		if isWorkspaceTreeKey(item) {
+			buildWorkspaceGroupRow(c, t, workspace, runtime, state, tree, item)
+			return
+		}
+		session := tree.sessions[item]
+		buildSessionRow(c, t, chat, nav, runtime, state, session,
+			session.ID == active, rowOf[item] == state.treeRow, 28)
+	})
+	if outline.Submitted() && state.treeRow >= 0 && state.treeRow < state.tree.Rows() {
+		if item := state.tree.Item(state.treeRow); !isWorkspaceTreeKey(item) {
+			openSession(chat, nav, runtime, item)
+		}
+	}
+	// While the tree has no focus, keep the choice on the current session: a
+	// keyboard cursor moved away from it is not a selection of another
+	// conversation, and the returned focus starts at the current one.
+	if !state.tree.List.FocusWithin(c) {
+		state.treeRow = activeRow
+	}
+}
+
+// workspaceTreeGroups is the prepared workspace tree: the outline's item graph
+// (root groups → their session items), the labels and counts shown on the group
+// rows, and the session read model by ID, so the row builders stay pure lookups.
+type workspaceTreeGroups struct {
+	roots     []string
+	children  map[string][]string
+	labels    map[string]string
+	counts    map[string]int
+	workspace map[string]contracts.Workspace
+	sessions  map[string]contracts.ChatSessionInfo
+	current   string
+}
+
+// prepareWorkspaceTree folds the sessions into their workspace groups. Sessions
+// with an empty or unknown WorkspaceID go to the trailing "未分组" group; a
+// non-empty search query keeps only the groups that still have matching
+// sessions, and the order of the matched sessions inside a group is kept.
+func prepareWorkspaceTree(state *paneState, workspace contracts.WorkspaceService,
+	workspaces []contracts.Workspace, allSessions, matched []contracts.ChatSessionInfo,
+	query string) *workspaceTreeGroups {
 	known := make(map[string]bool, len(workspaces))
 	for _, ws := range workspaces {
 		known[ws.ID] = true
@@ -657,54 +803,86 @@ func buildWorkspaceTree(
 	}
 	byGroup := make(map[string][]contracts.ChatSessionInfo, len(workspaces)+1)
 	for _, info := range matched {
-		key := groupOf(info)
-		byGroup[key] = append(byGroup[key], info)
+		group := groupOf(info)
+		byGroup[group] = append(byGroup[group], info)
 	}
-	currentID := ""
+	tree := &workspaceTreeGroups{
+		children:  make(map[string][]string, len(workspaces)+1),
+		labels:    make(map[string]string, len(workspaces)+1),
+		counts:    make(map[string]int, len(workspaces)+1),
+		workspace: make(map[string]contracts.Workspace, len(workspaces)),
+		sessions:  make(map[string]contracts.ChatSessionInfo, len(matched)),
+	}
 	if current, ok, err := workspace.Current(context.Background()); err == nil && ok {
-		currentID = current.ID
+		tree.current = current.ID
 	}
-
-	for _, ws := range workspaces {
+	addGroup := func(key string, ws *contracts.Workspace, name string, count int, sessions []contracts.ChatSessionInfo) {
+		tree.roots = append(tree.roots, key)
+		tree.labels[key] = name
+		tree.counts[key] = count
+		if ws != nil {
+			tree.workspace[key] = *ws
+		}
+		for _, info := range sessions {
+			tree.children[key] = append(tree.children[key], info.ID)
+			tree.sessions[info.ID] = info
+		}
+		// A group without sessions still shows its disclosure arrow: an empty,
+		// non-nil children slice marks a branch (nil marks a leaf session).
+		if tree.children[key] == nil {
+			tree.children[key] = []string{}
+		}
+	}
+	for index := range workspaces {
+		ws := &workspaces[index]
 		sessions := byGroup[ws.ID]
 		if query != "" && len(sessions) == 0 {
 			continue
 		}
-		buildWorkspaceGroup(c, t, chat, nav, runtime, state, ws.ID,
-			firstNonEmpty(ws.Name, ws.Root, state.T("未命名工作区", "Untitled workspace")), sessions, totals[ws.ID],
-			ws.ID == currentID, activeID)
+		addGroup(workspaceTreeKey(ws.ID), ws,
+			firstNonEmpty(ws.Name, ws.Root, state.T("未命名工作区", "Untitled workspace")),
+			totals[ws.ID], sessions)
 	}
-
-	sessions := byGroup[""]
-	if len(sessions) == 0 && (query != "" || totals[""] == 0) {
-		return
+	if sessions := byGroup[""]; len(sessions) > 0 || (query == "" && totals[""] > 0) {
+		addGroup(ungroupedWorkspaceKey, nil, state.T("未分组", "Ungrouped"), totals[""], sessions)
 	}
-	buildWorkspaceGroup(c, t, chat, nav, runtime, state, ungroupedWorkspaceKey,
-		state.T("未分组", "Ungrouped"), sessions, totals[""], false, activeID)
+	return tree
 }
 
-// buildWorkspaceGroup renders one collapsible workspace row and, while it is
-// expanded, its indented session rows.
-func buildWorkspaceGroup(
-	c *ui.Context,
-	t *design.Tokens,
-	chat contracts.ChatService,
-	nav contracts.Navigator,
-	runtime contracts.UIRuntime,
-	state *paneState,
-	key, name string,
-	sessions []contracts.ChatSessionInfo,
-	count int,
-	current bool,
-	activeID string,
-) {
-	collapsed := state.wsCollapsed[key]
+// workspaceTreeRows flattens the tree as the outline shows it: every root, and
+// below each open group its sessions. The outline builds the same rows; this
+// copy is only used to place and read the choice before it is built.
+func workspaceTreeRows(tree *workspaceTreeGroups, open *ui.Selection[string]) []string {
+	rows := make([]string, 0, len(tree.roots)+len(tree.sessions))
+	var walk func(items []string)
+	walk = func(items []string) {
+		for _, item := range items {
+			rows = append(rows, item)
+			if kids := tree.children[item]; kids != nil && open.Has(item) {
+				walk(kids)
+			}
+		}
+	}
+	walk(tree.roots)
+	return rows
+}
+
+// buildWorkspaceGroupRow renders one workspace group as the content of an
+// outline row: the folder glyph, the name and the session count the old
+// hand-drawn group row showed, plus the row's ⋯ menu. A click on the row folds
+// or unfolds the group, as it did before the migration; the outline's own arrow
+// does the same and Left/Right do it from the keyboard.
+func buildWorkspaceGroupRow(c *ui.Context, t *design.Tokens, workspace contracts.WorkspaceService,
+	runtime contracts.UIRuntime, state *paneState, tree *workspaceTreeGroups, key string) {
+	name := tree.labels[key]
+	count := tree.counts[key]
+	current := key != ungroupedWorkspaceKey && workspaceIDFromTreeKey(key) == tree.current
 	c.Key("workspace/" + key)
 	row := ui.ButtonBase(c).FillWidth().Height(32).PaddingX(design.Space2).
 		Radius(design.RadiusSM).Label(name)
-	// The current workspace group is a selection, not a hover: BgSelected keeps
-	// it distinguishable from the row under the pointer.
-	row = rowTint(t, row, current)
+	// The ⋯ action stays out of the way until the row is hovered, focused or
+	// the current workspace, as the session rows' action does.
+	revealed := current || row.Hovered() || row.FocusWithin()
 	row.Children(func() {
 		ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(design.Space2).Children(func() {
 			icon := icons.Folder()
@@ -721,22 +899,129 @@ func buildWorkspaceGroup(
 			design.Apply(ui.Text(c, name), t.Text(design.TypeXS)).
 				FontWeight(500).TextColor(textColor).Grow(1).MaxLines(1).Ellipsis("…")
 			design.Apply(ui.Badge(c, strconv.Itoa(count)), t.Badge())
-			chevron := icons.ChevronDown()
-			if collapsed {
-				chevron = icons.ChevronRight()
+			if workspace != nil && key != ungroupedWorkspaceKey {
+				buildWorkspaceRowActions(c, t, workspace, runtime, state, tree, key, name, revealed)
 			}
-			ui.Icon(c, chevron).Size(14, 14).TextColor(t.LabelTertiary)
 		})
 	})
 	row.OnClick(func() {
-		state.wsCollapsed[key] = !state.wsCollapsed[key]
+		if state.tree.Open.Has(key) {
+			state.tree.Open.Remove(key)
+		} else {
+			state.tree.Open.Add(key)
+		}
+		// Move the tree's choice to the row that was clicked, so Right/Left and
+		// Up/Down continue from it.
+		state.treeRow = outlineItemRow(&state.tree, key)
 		runtime.Invalidate()
 	})
-	if collapsed {
-		return
+	if workspace != nil && key != ungroupedWorkspaceKey {
+		row.ContextMenu(workspaceGroupMenu(state, runtime, workspace, tree, key, name))
 	}
-	for _, info := range sessions {
-		buildSessionRow(c, t, chat, nav, runtime, state, info, info.ID == activeID, design.Space3)
+}
+
+// workspaceGroupMenu is the one menu the workspace row's ⋯ button and its
+// right-click share, as mygo recommends for a row action and its context menu.
+func workspaceGroupMenu(state *paneState, runtime contracts.UIRuntime,
+	workspace contracts.WorkspaceService, tree *workspaceTreeGroups, key, name string) func(m *ui.Menu) {
+	ws := tree.workspace[key]
+	return func(m *ui.Menu) {
+		if m.Item(state.T("打开工作区", "Open workspace")).ID("open").Chosen() {
+			if _, err := workspace.Open(context.Background(), ws.ID); err != nil {
+				state.workspaceDeleteErr = state.T("打开工作区失败：", "Could not open the workspace: ") + err.Error()
+			} else {
+				state.workspaceDeleteErr = ""
+			}
+			runtime.Invalidate()
+		}
+		m.Separator()
+		remove := m.Item(state.T("删除工作区", "Delete workspace")).ID("delete").Danger()
+		if root := strings.TrimSpace(ws.Root); root != "" {
+			remove.Subtitle(root)
+		}
+		if remove.Chosen() {
+			state.workspaceDeleteOpen = true
+			state.workspaceDeleteID = ws.ID
+			state.workspaceDeleteName = name
+			state.workspaceDeleteErr = ""
+			runtime.Invalidate()
+		}
+	}
+}
+
+// buildWorkspaceRowActions renders the row-end ⋯ menu button of a workspace
+// row, opened with the menu lined up to the button's end (the menu MyGo draws
+// in the window), so it never overhangs the sidebar.
+func buildWorkspaceRowActions(c *ui.Context, t *design.Tokens, workspace contracts.WorkspaceService,
+	runtime contracts.UIRuntime, state *paneState, tree *workspaceTreeGroups, key, name string,
+	revealed bool) {
+	menuLabel := state.T("工作区操作：", "Workspace actions: ") + name
+	more := ui.ButtonBase(c).Size(20, 20).Center().Radius(design.RadiusSM).
+		Label(menuLabel).Tooltip(menuLabel)
+	if more.Hovered() {
+		more = more.Background(t.BgHover)
+	}
+	if !revealed {
+		more = more.Opacity(0).IgnoreInput(true)
+	}
+	more.Children(func() {
+		ui.Icon(c, icons.More()).Size(14, 14).TextColor(t.LabelTertiary)
+	})
+	more.PopoverMenuButton(workspaceGroupMenu(state, runtime, workspace, tree, key, name),
+		ui.PopoverMenuButtonOptions{At: ui.AnchorBottomEnd, Self: ui.AnchorTopEnd})
+}
+
+// outlineItemRow returns the row an outline item shows in the last built pass,
+// or -1 when it does not show.
+func outlineItemRow(state *ui.OutlineState[string], item string) int {
+	for row := state.Rows() - 1; row >= 0; row-- {
+		if state.Item(row) == item {
+			return row
+		}
+	}
+	return -1
+}
+
+// buildFlatSessionList renders the flat session list with mygo's native List:
+// the rows are keyed by session ID, named by their title (the list's search
+// ahead and assistive technology read it), and the choice follows the active
+// session. Enter and a double click open the chosen session (the List's
+// Submitted); a single pointer click opens through the row content's observer.
+func buildFlatSessionList(c *ui.Context, t *design.Tokens, chat contracts.ChatService,
+	nav contracts.Navigator, runtime contracts.UIRuntime, state *paneState,
+	sessions []contracts.ChatSessionInfo) {
+	active := chat.ActiveSession()
+	activeRow := -1
+	for index := range sessions {
+		if sessions[index].ID == active {
+			activeRow = index
+			break
+		}
+	}
+	// Mirror the current session into the native choice (Selected) whenever it
+	// changes outside the list; a keyboard cursor moved within the list is not
+	// overwritten.
+	if state.sessionActive != active {
+		state.sessionActive = active
+		state.sessionRow = activeRow
+	}
+	if state.sessionRow >= len(sessions) {
+		state.sessionRow = -1
+	}
+	state.sessionList.Key = func(row int) any { return sessions[row].ID }
+	state.sessionList.Label = func(row int) string { return state.sessionTitle(sessions[row]) }
+	state.sessionList.Selected = &state.sessionRow
+	list := ui.List(c, &state.sessionList, len(sessions)).Rows(func(row ui.ListRow) {
+		buildSessionRow(row.Context, t, chat, nav, runtime, state, sessions[row.Index],
+			sessions[row.Index].ID == active, row.Index == state.sessionRow, 36)
+	})
+	if list.Submitted() && state.sessionRow >= 0 && state.sessionRow < len(sessions) {
+		openSession(chat, nav, runtime, sessions[state.sessionRow].ID)
+	}
+	// Without the list's focus, show the current session as the choice again:
+	// a cursor left elsewhere is not a conversation switch.
+	if !state.sessionList.FocusWithin(c) {
+		state.sessionRow = activeRow
 	}
 }
 
@@ -894,14 +1179,16 @@ func visibleMessageHits(hits []contracts.MessageSearchHit, archived map[string]b
 	return visible
 }
 
-// buildSessionRow is one brand session row: a native ButtonBase at the brand row
-// metrics (36 DIP, 8 DIP radius, hover/selected tint) with the accessible label
-// and the native click behavior. The row's overflow menu is one quiet More icon
-// that only shows while the row is hovered, focused or selected, so the title
-// keeps the width the old "⋯ ⌄" pair used to take.
+// buildSessionRow renders one session row's content: the message glyph, the
+// title, the pinned/running badges and one quiet ⋯ menu at the row's end. The
+// row itself is a native List/Outline row: it paints hover and selection, owns
+// the keyboard and names the row for assistive technology. A single pointer
+// click on the title area opens the session (the List's Submitted opens it for
+// Enter and a double click); the same menu serves the ⋯ button and the row's
+// right-click, as mygo recommends.
 func buildSessionRow(c *ui.Context, t *design.Tokens, chat contracts.ChatService,
 	nav contracts.Navigator, runtime contracts.UIRuntime, state *paneState,
-	session contracts.ChatSessionInfo, active bool, indent float32) {
+	session contracts.ChatSessionInfo, active, chosen bool, height float32) {
 	label := state.sessionTitle(session)
 	renamer, _ := chat.(contracts.SessionRenamer)
 	forker, _ := chat.(contracts.SessionForker)
@@ -943,7 +1230,9 @@ func buildSessionRow(c *ui.Context, t *design.Tokens, chat contracts.ChatService
 				}
 			}
 		}
-		if m.Item(state.T("删除", "Delete")).Chosen() {
+		// Deleting a conversation is destructive: the menu item carries the
+		// danger color and the row dialog still confirms it.
+		if m.Item(state.T("删除", "Delete")).Danger().Chosen() {
 			state.deleteOpen = true
 			state.deleteTarget = session.ID
 			state.deleteTitle = state.sessionTitle(session)
@@ -951,69 +1240,102 @@ func buildSessionRow(c *ui.Context, t *design.Tokens, chat contracts.ChatService
 		if !active {
 			m.Separator()
 			if m.Item(state.T("设为当前", "Set as current")).Chosen() {
-				_ = chat.SetActiveSession(session.ID)
-				runtime.Invalidate()
+				openSession(chat, nav, runtime, session.ID)
 			}
 		}
 	}
+
 	c.Key("session/" + session.ID)
-	container := ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(design.Space1).
-		Padding(0, 0, 0, indent)
+	content := ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(design.Space1)
 	// The menu control is built always (so assistive technology describes it)
 	// but stays invisible and out of the pointer's way until the row is
-	// hovered, focused or selected, as mygo's IgnoreInput pattern for a row
+	// hovered, focused or chosen, as mygo's IgnoreInput pattern for a row
 	// action asks.
-	revealed := active || container.Hovered() || container.FocusWithin()
-	container.Children(func() {
-		row := ui.ButtonBase(c).Grow(1).Height(36).PaddingX(design.Space3).
-			Radius(design.RadiusSM).Label(label)
-		row = rowTint(t, row, active)
-		row.Children(func() {
-			ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(design.Space2).Children(func() {
-				icon := icons.Message()
-				iconColor := t.LabelSecondary
-				if active {
-					icon = icons.NewChat()
-					iconColor = t.Accent
-				}
-				ui.Icon(c, icon).Size(16, 16).TextColor(iconColor)
-				design.Apply(ui.Text(c, label), t.Text(design.TypeS)).
-					Grow(1).MaxLines(1).Ellipsis("…")
-				if session.Pinned {
-					design.Apply(ui.Badge(c, state.T("置顶", "Pinned")), t.Badge())
-				}
-				// The active session is already carried by the accent icon and
-				// the selected-row tint; a 当前 badge was redundant and stole
-				// width from the title.
-				if session.Running {
-					design.Apply(ui.Badge(c, state.T("运行中", "Running")), t.Badge())
-				}
-			})
+	revealed := active || chosen || content.Hovered() || content.FocusWithin()
+	content.Children(func() {
+		// The title area is the click target that opens the session. The List
+		// row also selects on a click; observing the pointer here gives the
+		// single click the source-list behavior (open the conversation), while
+		// Enter and a double click stay the native List's Submitted.
+		title := ui.Row(c).FillWidth().Height(height).AlignItems(ui.Center).
+			Gap(design.Space2).PaddingX(design.Space3).Radius(design.RadiusSM)
+		title.ObserveInput(func(ev ui.InputEvent) {
+			if ev.Kind != ui.InputPointerUp || ev.Button != 0 {
+				return
+			}
+			openSession(chat, nav, runtime, session.ID)
 		})
-		row.OnClick(func() {
-			_ = chat.SetActiveSession(session.ID)
-			// Queue the screen switch for the next frame: this frame's host-side
-			// native Sidebar reconciliation would otherwise restore the previously
-			// selected destination.
-			runtime.Post(func() { _ = nav.Push("session") })
-			runtime.Invalidate()
+		title.Children(func() {
+			icon := icons.Message()
+			iconColor := t.LabelSecondary
+			if chosen {
+				iconColor = t.AccentText
+			} else if active {
+				icon = icons.NewChat()
+				iconColor = t.Accent
+			}
+			ui.Icon(c, icon).Size(16, 16).TextColor(iconColor)
+			textColor := t.LabelPrimary
+			if chosen {
+				textColor = t.AccentText
+			}
+			titleText := design.Apply(ui.Text(c, label), t.Text(design.TypeS)).
+				TextColor(textColor).Grow(1).MaxLines(1).Ellipsis("…")
+			if active || chosen {
+				titleText = titleText.FontWeight(500)
+			}
+			if session.Pinned {
+				design.Apply(ui.Badge(c, state.T("置顶", "Pinned")), t.Badge())
+			}
+			// The active session is already carried by the accent icon and the
+			// selected row; a 当前 badge was redundant and stole width from the
+			// title.
+			if session.Running {
+				design.Apply(ui.Badge(c, state.T("运行中", "Running")), t.Badge())
+			}
 		})
-		// The same menu on the row itself, as desktop session lists have: a
-		// right click opens it without hunting for the hover control.
-		row.PopoverMenu(menu)
 		menuLabel := state.T("会话操作：", "Session actions: ") + label
 		c.Key("session/" + session.ID + "/menu")
 		more := ui.ButtonBase(c).Size(24, 24).Center().Radius(design.RadiusSM).
 			Label(menuLabel).Tooltip(menuLabel)
-		more = rowTint(t, more, false)
+		moreColor := t.LabelSecondary
+		if chosen {
+			moreColor = t.AccentText
+			if more.Hovered() {
+				more = more.Background(t.BgStrong)
+			}
+		} else if more.Hovered() {
+			more = more.Background(t.BgHover)
+		}
 		if !revealed {
 			more = more.Opacity(0).IgnoreInput(true)
 		}
 		more.Children(func() {
-			ui.Icon(c, icons.More()).Size(16, 16).TextColor(t.LabelSecondary)
+			ui.Icon(c, icons.More()).Size(16, 16).TextColor(moreColor)
 		})
-		more.PopoverMenuButton(menu)
+		// The menu opens below the button, lined up with its end, so it never
+		// overhangs the sidebar's content.
+		more.PopoverMenuButton(menu, ui.PopoverMenuButtonOptions{
+			At: ui.AnchorBottomEnd, Self: ui.AnchorTopEnd,
+		})
 	})
+	content.ContextMenu(menu)
+}
+
+// openSession activates a session and opens the session screen on the next
+// frame. The screen switch is queued because this frame's host-side native
+// Sidebar reconciliation would otherwise restore the previously selected
+// destination; an already active session is not set again.
+func openSession(chat contracts.ChatService, nav contracts.Navigator,
+	runtime contracts.UIRuntime, sessionID string) {
+	if strings.TrimSpace(sessionID) == "" {
+		return
+	}
+	if chat.ActiveSession() != sessionID {
+		_ = chat.SetActiveSession(sessionID)
+	}
+	runtime.Post(func() { _ = nav.Push("session") })
+	runtime.Invalidate()
 }
 
 // buildFooter is the docked sidebar footer from the old shell: the settings

@@ -411,6 +411,24 @@ func (h *harness) focusInput(tester *ui.Tester, label string) {
 	}
 }
 
+// typeNumberInput replaces the value of an official ui.NumberInput: the text
+// field sits left of the ± buttons, so the click targets its area rather than
+// the row's center (the label box covers the whole number-input row).
+func typeNumberInput(t *testing.T, h *harness, tester *ui.Tester, label, text string) {
+	t.Helper()
+	target := label + " 输入"
+	h.ensureVisible(tester, target)
+	rect, ok := tester.Find(target)
+	if !ok {
+		t.Fatalf("number input labeled %q not found; texts = %v", target, tester.Texts())
+	}
+	tester.ClickAt(rect.X+16, rect.Y+rect.H/2)
+	tester.Frame()
+	tester.Key(ui.Cmd, ui.KeyA)
+	tester.Type(text)
+	tester.Frame()
+}
+
 func provide[T any](t *testing.T, ctx cordis.Context, key cordis.ServiceKey[T], value T) {
 	t.Helper()
 	if _, err := ctx.Provide(key, value); err != nil {

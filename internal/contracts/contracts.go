@@ -68,6 +68,11 @@ type ToolCall struct {
 	// Arguments is the raw JSON arguments of the call (empty when the provider
 	// reported none); ACP tool notifications and diagnostics render it.
 	Arguments string
+	// TextOffset is the assistant text length (in bytes) when the call was
+	// requested. The transcript renders text/tool cards in this order instead
+	// of drawing the whole reply above every call: 0 with text present means
+	// "before the text" (restored history without the metadata).
+	TextOffset int
 }
 
 // ToolRenderer draws one tool call (a tool card). Several renderers may match
@@ -113,9 +118,6 @@ type AppInfo struct {
 // modules without the host knowing about them.
 const (
 	// Window top bar.
-	SlotTopBarBrand   = "topbar.brand"
-	SlotTopBarCenter  = "topbar.center"
-	SlotTopBarActions = "topbar.actions"
 
 	// Main sidebar.
 	SlotSidebarPrimary = "sidebar.primary"
@@ -157,11 +159,9 @@ const (
 	SlotSettingsPageFooter = "settings.page.footer"
 
 	// Global overlays.
-	SlotOverlayPrefix   = "overlay."
-	SlotOverlaySettings = "overlay.settings"
-	SlotOverlayPalette  = "overlay.palette"
-	SlotOverlayDialogs  = "overlay.dialogs"
-	SlotOverlayToasts   = "overlay.toasts"
+	SlotOverlayPrefix  = "overlay."
+	SlotOverlayDialogs = "overlay.dialogs"
+	SlotOverlayToasts  = "overlay.toasts"
 )
 
 // Service keys: the name is the stable contract, the type is checked by the

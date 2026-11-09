@@ -12,19 +12,13 @@ import (
 	"github.com/zeokeel/zeokeel/internal/contracts"
 )
 
-// ExportDialogTitle is the localized title the default ExportSaver shows; the
-// header sets it from the current locale right before invoking the seam (the
-// seam signature stays stable for tests).
-var ExportDialogTitle = "导出会话"
-
-// ExportJSONLDialogTitle is the localized title of the JSONL export dialog.
-var ExportJSONLDialogTitle = "导出会话"
-
 // ExportJSONLSaver is the JSONL export seam (same contract as ExportSaver):
-// the default opens the native save dialog and writes the JSONL transcript.
-var ExportJSONLSaver = func(defaultName, content string) (string, error) {
+// the default opens the native save dialog with the localized title and writes
+// the JSONL transcript. The title is a parameter (not package state) so a frame
+// in another language cannot race the dialog.
+var ExportJSONLSaver = func(title, defaultName, content string) (string, error) {
 	path, err := mygo.Dialog.Save(mygo.SaveDialogOptions{
-		Title:       ExportJSONLDialogTitle,
+		Title:       title,
 		DefaultPath: defaultName,
 		Filters: []mygo.FileFilter{{
 			Name:       "JSONL",
@@ -41,12 +35,12 @@ var ExportJSONLSaver = func(defaultName, content string) (string, error) {
 }
 
 // ExportSaver is the session export seam: the default opens the native mygo
-// save dialog and writes the content there; tests replace it so no desktop
-// backend is needed. It returns the written path, "" when the user canceled,
-// or an error.
-var ExportSaver = func(defaultName, content string) (string, error) {
+// save dialog with the localized title and writes the content there; tests
+// replace it so no desktop backend is needed. It returns the written path, ""
+// when the user canceled, or an error.
+var ExportSaver = func(title, defaultName, content string) (string, error) {
 	path, err := mygo.Dialog.Save(mygo.SaveDialogOptions{
-		Title:       ExportDialogTitle,
+		Title:       title,
 		DefaultPath: defaultName,
 		Filters: []mygo.FileFilter{{
 			Name:       "Markdown",

@@ -82,11 +82,14 @@ cmd (30 行) → host (进程) → assembly (装配) → kernel root
 
 | 区域 | 槽位 | 现状 | 典型贡献 |
 | --- | --- | --- | --- |
-| 顶栏 | `topbar.brand` / `topbar.center` / `topbar.actions` | ✅ 宿主 | logo、全局搜索、账户/通知、状态胶囊 |
 | 主侧栏 | `sidebar.primary` / `sidebar.nav` / `sidebar.tree` / `sidebar.footer` | ✅ 宿主 | 新建会话、屏幕导航、工作区/会话树、账户脚注 |
 | 屏幕 | `screen.header` / `screen.actions` / `screen.footer` | ✅ 宿主 | 屏幕标题/面包屑、右侧动作、底部状态 |
 | overlay | `overlay.palette` / `overlay.dialogs` / `overlay.toasts` / `overlay.settings` | ✅ 宿主（prefix 通用渲染） | 命令面板、确认框、通知/toast |
-| 命令 | `CommandSpec`（非槽位） | ✅ 宿主 topbar | 菜单/快捷键/命令面板统一入口 |
+| 命令 | `CommandSpec`（非槽位） | ✅ 宿主（内容顶部 Toolbar/命令面板） | 菜单/快捷键/命令面板统一入口 |
+
+> 本壳层不提供顶栏区域：屏幕自带头部，全局动作在内容顶部的 Toolbar 与命令面板里；
+> 不要再注册 `topbar.*` 这类宿主不渲染的槽位（宿主只渲染保留清单与拥有者自行
+> `RenderSlot` 的自定义槽位）。
 
 ### 5.2 主界面
 
@@ -228,7 +231,7 @@ if _, err := ctx.Effect(func() cordis.Effect {
   composer 工具栏（模型 chip / 命令入口 / 附件占位）与 Home 初始设置卡对照 old 实现；
   rightpanel 新增「日志」页读取 KeyStore 的 SessionLog 事件（old right_sidebar 的 Log tab）
 - ✅ 示范模块：`appinfo`（服务）、`ui/home`（screen+command+槽位组合）、`ui/about`
-  （settings page + settings.header）、`ui/welcome`（topbar.center + home.hero + command）、
+  （settings page + settings.header）、`ui/welcome`（home.hero + command）、
   `ui/toolcards`（ToolRenderer）、`uikit`（共享控件封装）
 - ✅ 测试：uiroot 29 个 headless 测试（覆盖率 99.3%，含注入点区域/Post/生命周期/多窗串行）、
   assembly/host 装配与宿主测试、ui 模块集成测试（真实 assembly.Load + Root.View）；`-race` 绿

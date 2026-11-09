@@ -22,18 +22,18 @@ func TestToolCardsEnglishCopyAndLanguageSwitch(t *testing.T) {
 	tester := h.tester()
 
 	// Default Chinese copy is unchanged.
-	h.assertTexts(tester, "运行中", "完成", "失败", "shell", "文件", "编排", "详情")
+	h.assertTexts(tester, "运行中", "完成", "失败", "详情")
 
 	h.ui.Locale().SetLanguage("en")
 	tester.Frame()
 	h.assertTexts(tester, "Running", "Completed", "Failed",
-		"shell", "Files", "Orchestration", "Details")
-	h.assertNoTexts(tester, "运行中", "完成", "失败", "文件", "编排", "详情")
+		"Details")
+	h.assertNoTexts(tester, "运行中", "完成", "失败", "详情")
 
 	// Switching back restores the Chinese copy on the next frame.
 	h.ui.Locale().SetLanguage("zh")
 	tester.Frame()
-	h.assertTexts(tester, "运行中", "完成", "失败", "文件", "编排", "详情")
+	h.assertTexts(tester, "运行中", "完成", "失败", "详情")
 	h.assertNoTexts(tester, "Running", "Completed", "Failed", "Files", "Details")
 }
 

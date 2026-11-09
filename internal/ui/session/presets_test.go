@@ -79,11 +79,13 @@ func activePresetChat() *fakeChat {
 	return chat
 }
 
-// openPresetMenu clicks the composer's preset button and returns the visible
-// labels (the Tester renders popover items into the frame text list).
-func openPresetMenu(t *testing.T, h *harness, tester *ui.Tester, label string) []string {
+// openPresetMenu opens the one session menu and its 插入预设 submenu, and
+// returns the visible labels (the Tester renders popover items into the frame
+// text list). The outer button's label depends on the current permission/mode
+// state, so the opener finds it by its contextual label.
+func openPresetMenu(t *testing.T, h *harness, tester *ui.Tester) []string {
 	t.Helper()
-	h.click(tester, label) // the one session menu
+	h.openSessionMenu(tester)
 	// Prompt presets live in an 插入预设 submenu so the outer menu fits a
 	// 704x720 window; clicking the row opens it.
 	if tester.HasText("插入预设") {
@@ -107,8 +109,7 @@ func TestComposerPresetsBuiltInInsert(t *testing.T) {
 	chat := activePresetChat()
 	h := newHarnessWithPresetSettings(t, chat, nil)
 	tester := h.tester()
-	h.assertTexts(tester, "会话设置")
-	labels := openPresetMenu(t, h, tester, "会话设置")
+	labels := openPresetMenu(t, h, tester)
 	for _, want := range []string{"简洁回答", "代码审查", "逐步推理"} {
 		if !menuHas(labels, want) {
 			t.Fatalf("menu labels = %v, want %q", labels, want)
@@ -137,7 +138,7 @@ func TestComposerPresetsCustomOrderAndAppend(t *testing.T) {
 	h.click(tester, "输入消息…")
 	tester.Type("已有草稿")
 	tester.Frame()
-	labels := openPresetMenu(t, h, tester, "会话设置")
+	labels := openPresetMenu(t, h, tester)
 	if !menuHas(labels, "甲") || !menuHas(labels, "乙") {
 		t.Fatalf("custom preset menu labels = %v", labels)
 	}
@@ -157,7 +158,7 @@ func TestComposerPresetsBadJSONAndEmptyFallBack(t *testing.T) {
 			chat := activePresetChat()
 			h := newHarnessWithPresetSettings(t, chat, settings)
 			tester := h.tester()
-			labels := openPresetMenu(t, h, tester, "会话设置")
+			labels := openPresetMenu(t, h, tester)
 			if !menuHas(labels, "简洁回答") || !menuHas(labels, "代码审查") {
 				t.Fatalf("fallback menu labels = %v", labels)
 			}
@@ -177,8 +178,8 @@ func TestComposerPresetsEnglish(t *testing.T) {
 	h := newHarnessWithPresetSettings(t, chat, nil)
 	h.ui.Locale().SetLanguage("en")
 	tester := h.tester()
-	h.assertTexts(tester, "Settings")
-	labels := openPresetMenu(t, h, tester, "Settings")
+	h.assertTexts(tester, "Session settings")
+	labels := openPresetMenu(t, h, tester)
 	if !menuHas(labels, "简洁回答") {
 		t.Fatalf("English preset menu labels = %v", labels)
 	}

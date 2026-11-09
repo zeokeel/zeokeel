@@ -10,11 +10,14 @@ import (
 	"github.com/egoist/mygo/ui"
 
 	"github.com/zeokeel/zeokeel/internal/contracts"
-	"github.com/zeokeel/zeokeel/internal/ui/session"
 )
 
 func TestSessionI18nSwitchToEnglishAndBack(t *testing.T) {
-	setExportSaver(t, func(defaultName, content string) (string, error) { return "/tmp/export.md", nil })
+	exportTitle := ""
+	setExportSaver(t, func(title, defaultName, content string) (string, error) {
+		exportTitle = title
+		return "/tmp/export.md", nil
+	})
 	chat := newFakeChat()
 	chat.addSession(contracts.ChatSession{
 		ID:    "sess-1",
@@ -44,17 +47,13 @@ func TestSessionI18nSwitchToEnglishAndBack(t *testing.T) {
 		t.Fatalf("clipboard = %q, want sess-1", got)
 	}
 
-	// Export dialog title uses English copy (the success feedback is a toast).
+	// Export dialog title uses English copy: the seam receives it as its first
+	// argument (the success feedback is a toast).
 	h.click(tester, "More")
 	h.click(tester, "Export Markdown")
 	h.assertNoTexts(tester, "导出失败", "Export failed")
-	for name, title := range map[string]string{
-		"ExportDialogTitle":      session.ExportDialogTitle,
-		"ExportJSONLDialogTitle": session.ExportJSONLDialogTitle,
-	} {
-		if title != "Export conversation" {
-			t.Fatalf("%s = %q, want Export conversation", name, title)
-		}
+	if exportTitle != "Export conversation" {
+		t.Fatalf("export dialog title = %q, want Export conversation", exportTitle)
 	}
 
 	// The trajectory and memory panes' empty states are translated.

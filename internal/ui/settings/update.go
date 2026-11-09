@@ -66,9 +66,29 @@ func buildUpdatePage(c *ui.Context, t *design.Tokens, kctx cordis.Context, runti
 	current := firstNonEmpty(appInfo.Version, st.info.CurrentVersion, "dev")
 
 	ui.Column(c).FillWidth().Gap(design.Space4).Children(func() {
-		uikit.PageHeader(c, localized(locale, "更新", "Update"), localized(locale,
-			"检查更新并下载安装包；下载后可安排在下次启动安装。",
-			"Check for updates and download the package; schedule the install for the next launch."))
+		// The page's only primary action (check now) sits at the header's right
+		// edge; the page writes nothing, so there is no footer save.
+		uikit.PageHeaderAction(c,
+			localized(locale, "更新", "Update"),
+			localized(locale,
+				"检查更新并下载安装包；下载后可安排在下次启动安装。",
+				"Check for updates and download the package; schedule the install for the next launch."),
+			func(c *ui.Context) {
+				if !hasUpdate {
+					return
+				}
+				checkLabel := localized(locale, "检查更新", "Check for updates")
+				if st.checking {
+					checkLabel = localized(locale, "检查中…", "Checking…")
+				}
+				if design.Apply(ui.PrimaryButton(c, checkLabel), t.PrimaryButton()).
+					Disabled(st.checking || st.downloading).Clicked() {
+					if !st.checking && !st.downloading {
+						startUpdateCheck(updateService, runtime, st)
+						c.Invalidate()
+					}
+				}
+			})
 
 		uikit.Section(c, localized(locale, "当前版本", "Current version"), func(*ui.Context) {
 			uikit.KeyValueRows(c, []uikit.KeyValue{
@@ -99,20 +119,6 @@ func buildUpdatePage(c *ui.Context, t *design.Tokens, kctx cordis.Context, runti
 				buildPendingInstall(c, t, *st.pending, locale)
 			})
 		}
-
-		checkLabel := localized(locale, "检查更新", "Check for updates")
-		if st.checking {
-			checkLabel = localized(locale, "检查中…", "Checking…")
-		}
-		uikit.DialogFooter(c, []uikit.DialogAction{{
-			Label: checkLabel, Primary: true, Disabled: st.checking || st.downloading,
-			OnClick: func() {
-				if !st.checking && !st.downloading {
-					startUpdateCheck(updateService, runtime, st)
-					c.Invalidate()
-				}
-			},
-		}})
 
 		if st.err != "" {
 			uikit.ErrorLine(c, localized(locale, "检查更新失败：", "Update check failed: ")+st.err)

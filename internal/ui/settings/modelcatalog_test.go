@@ -111,7 +111,7 @@ func TestModelCatalogPageContextWindow(t *testing.T) {
 	openCatalogAddModal(t, h, tester)
 	clearAndType(t, h, tester, "名称 输入", "Bad Window")
 	clearAndType(t, h, tester, "模型 ID 输入", "bad-window")
-	clearAndType(t, h, tester, "上下文窗口 输入", "not-a-number")
+	typeNumberInput(t, h, tester, "上下文窗口", "not-a-number")
 	catalogClick(t, h, tester, "添加")
 	models, err := contracts.ParseModelInfoList(store.get(contracts.SettingModelCatalogModels))
 	if err != nil {
@@ -124,7 +124,7 @@ func TestModelCatalogPageContextWindow(t *testing.T) {
 	openCatalogAddModal(t, h, tester)
 	clearAndType(t, h, tester, "名称 输入", "Windowed")
 	clearAndType(t, h, tester, "模型 ID 输入", "windowed")
-	clearAndType(t, h, tester, "上下文窗口 输入", "128000")
+	typeNumberInput(t, h, tester, "上下文窗口", "128000")
 	catalogClick(t, h, tester, "添加")
 	models, _ = contracts.ParseModelInfoList(store.get(contracts.SettingModelCatalogModels))
 	if len(models) != 4 || models[3].ContextWindow != 128000 {
@@ -584,9 +584,12 @@ func TestModelCatalogPageEditGenerationParams(t *testing.T) {
 	expandCatalogAdvanced(t, h, tester)
 	h.assertTexts(tester, "生成参数", "温度 0–2", "Top P 0–1", "最大输出 tokens")
 
-	clearAndType(t, h, tester, "温度 输入", "0.7")
-	clearAndType(t, h, tester, "Top P 输入", "0.9")
-	clearAndType(t, h, tester, "最大输出 tokens 输入", "512")
+	catalogClick(t, h, tester, "使用默认温度")
+	catalogClick(t, h, tester, "使用默认 Top P")
+	catalogClick(t, h, tester, "使用默认 max tokens")
+	typeNumberInput(t, h, tester, "温度", "0.7")
+	typeNumberInput(t, h, tester, "Top P", "0.9")
+	typeNumberInput(t, h, tester, "最大输出 tokens", "512")
 	catalogClick(t, h, tester, "保存模型")
 
 	h.assertNoTexts(tester, "生成参数")
@@ -626,9 +629,12 @@ func TestModelCatalogPageGenerationBoundaries(t *testing.T) {
 	tester := openModelCatalog(t, h)
 	catalogClick(t, h, tester, "编辑模型 m1")
 	expandCatalogAdvanced(t, h, tester)
-	clearAndType(t, h, tester, "温度 输入", "0")
-	clearAndType(t, h, tester, "Top P 输入", "1")
-	clearAndType(t, h, tester, "最大输出 tokens 输入", "1")
+	catalogClick(t, h, tester, "使用默认温度")
+	catalogClick(t, h, tester, "使用默认 Top P")
+	catalogClick(t, h, tester, "使用默认 max tokens")
+	typeNumberInput(t, h, tester, "温度", "0")
+	typeNumberInput(t, h, tester, "Top P", "1")
+	typeNumberInput(t, h, tester, "最大输出 tokens", "1")
 	catalogClick(t, h, tester, "保存模型")
 
 	models := catalogStoredModels(t, store)
@@ -642,7 +648,7 @@ func TestModelCatalogPageGenerationBoundaries(t *testing.T) {
 
 	catalogClick(t, h, tester, "编辑模型 m1")
 	expandCatalogAdvanced(t, h, tester)
-	clearAndType(t, h, tester, "温度 输入", "2")
+	typeNumberInput(t, h, tester, "温度", "2")
 	catalogClick(t, h, tester, "保存模型")
 	models = catalogStoredModels(t, store)
 	if models[0].Temperature == nil || *models[0].Temperature != 2 {
@@ -650,10 +656,12 @@ func TestModelCatalogPageGenerationBoundaries(t *testing.T) {
 	}
 }
 
-// TestModelCatalogPageGenerationValidation covers malformed and out-of-range
-// values: the error is inline, the modal keeps the draft and the store is not
-// written until the values are valid.
-func TestModelCatalogPageGenerationValidation(t *testing.T) {
+// TestModelCatalogPageGenerationOutOfRange covers the official ui.NumberInput
+// rule for the optional generation parameters: a typed value outside its range
+// is ignored (the modal keeps the last valid value), so the old inline
+// "must be a number / in range" errors no longer exist; the "use the provider
+// default" switch is what clears a value.
+func TestModelCatalogPageGenerationOutOfRange(t *testing.T) {
 	store := newFakeSettings(map[string]string{
 		contracts.SettingModelCatalogModels: `[{"id":"m1","name":"M1","family":"qwen"}]`,
 	})
@@ -661,59 +669,32 @@ func TestModelCatalogPageGenerationValidation(t *testing.T) {
 	tester := openModelCatalog(t, h)
 	catalogClick(t, h, tester, "编辑模型 m1")
 	expandCatalogAdvanced(t, h, tester)
-	clearAndType(t, h, tester, "温度 输入", "2.5")
-	clearAndType(t, h, tester, "Top P 输入", "0.9")
-	clearAndType(t, h, tester, "最大输出 tokens 输入", "512")
-	beforeFailures := store.get(contracts.SettingModelCatalogModels)
-	catalogClick(t, h, tester, "保存模型")
-	h.assertTexts(tester, "温度必须在 0–2 之间", "生成参数")
-	if got := store.get(contracts.SettingModelCatalogModels); got != beforeFailures {
-		t.Fatalf("failed save wrote the catalog: %q", got)
-	}
 
-	// Fixing only the temperature keeps the other drafts' values.
-	clearAndType(t, h, tester, "温度 输入", "")
+	catalogClick(t, h, tester, "使用默认温度")
+	catalogClick(t, h, tester, "使用默认 Top P")
+	catalogClick(t, h, tester, "使用默认 max tokens")
+	typeNumberInput(t, h, tester, "温度", "2.5")         // above the 0–2 range: ignored
+	typeNumberInput(t, h, tester, "Top P", "1.2")      // above the 0–1 range: ignored
+	typeNumberInput(t, h, tester, "最大输出 tokens", "-5") // below the 1 minimum: ignored
 	catalogClick(t, h, tester, "保存模型")
+
 	models := catalogStoredModels(t, store)
-	if len(models) != 1 || models[0].Temperature != nil ||
-		models[0].TopP == nil || *models[0].TopP != 0.9 || models[0].MaxTokens != 512 {
-		t.Fatalf("stored catalog = %+v", models)
+	if len(models) != 1 || models[0].Temperature == nil || *models[0].Temperature != 0.7 ||
+		models[0].TopP == nil || *models[0].TopP != 0.9 || models[0].MaxTokens != 2048 {
+		t.Fatalf("stored catalog = %+v, want the last valid 0.7/0.9/2048", models)
 	}
+	h.assertTexts(tester, "生成：温度 0.7 · Top P 0.9 · 2048 tokens")
+	h.assertNoTexts(tester, "必须在 0–2 之间", "必须在 0–1 之间", "必须大于 0", "必须是数字")
 
+	// The provider-default switch clears a value (nil / 0) while the other
+	// values stay.
 	catalogClick(t, h, tester, "编辑模型 m1")
 	expandCatalogAdvanced(t, h, tester)
-	beforeFailures = store.get(contracts.SettingModelCatalogModels)
-	for _, test := range []struct {
-		label string
-		value string
-		want  string
-	}{
-		{"Top P 输入", "-0.1", "Top P 必须在 0–1 之间"},
-		{"Top P 输入", "1.2", "Top P 必须在 0–1 之间"},
-		{"Top P 输入", "abc", "Top P 必须是数字"},
-		{"温度 输入", "abc", "温度必须是数字"},
-		{"最大输出 tokens 输入", "-5", "最大输出 tokens 必须大于 0"},
-		{"最大输出 tokens 输入", "abc", "最大输出 tokens 必须是整数"},
-	} {
-		clearAndType(t, h, tester, test.label, test.value)
-		catalogClick(t, h, tester, "保存模型")
-		h.assertTexts(tester, test.want, "生成参数")
-		if got := store.get(contracts.SettingModelCatalogModels); got != beforeFailures {
-			t.Fatalf("failed save (%s=%s) wrote the catalog: %q", test.label, test.value, got)
-		}
-		clearAndType(t, h, tester, test.label, "")
-	}
-
-	// Every field was cleared while fixing the invalid values; the final save
-	// stores no generation options.
+	catalogClick(t, h, tester, "使用默认温度")
 	catalogClick(t, h, tester, "保存模型")
-	h.assertNoTexts(tester, "生成参数")
 	models = catalogStoredModels(t, store)
-	if len(models) != 1 || models[0].Temperature != nil || models[0].TopP != nil {
-		t.Fatalf("stored catalog = %+v", models)
-	}
-	if models[0].MaxTokens != 0 {
-		t.Fatalf("maxTokens = %d, want 0", models[0].MaxTokens)
+	if models[0].Temperature != nil || models[0].TopP == nil || *models[0].TopP != 0.9 || models[0].MaxTokens != 2048 {
+		t.Fatalf("stored catalog = %+v, want nil temperature and kept Top P/tokens", models)
 	}
 }
 
@@ -729,9 +710,9 @@ func TestModelCatalogPageGenerationCleared(t *testing.T) {
 
 	catalogClick(t, h, tester, "编辑模型 m1")
 	expandCatalogAdvanced(t, h, tester)
-	clearAndType(t, h, tester, "温度 输入", "")
-	clearAndType(t, h, tester, "Top P 输入", "")
-	clearAndType(t, h, tester, "最大输出 tokens 输入", "")
+	catalogClick(t, h, tester, "使用默认温度")
+	catalogClick(t, h, tester, "使用默认 Top P")
+	catalogClick(t, h, tester, "使用默认 max tokens")
 	catalogClick(t, h, tester, "保存模型")
 
 	models := catalogStoredModels(t, store)

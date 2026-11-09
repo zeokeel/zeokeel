@@ -129,6 +129,12 @@ type state struct {
 	memoryScroll  ui.ScrollState
 	scrollSession string
 
+	// transcriptStart holds, per session, the first message the transcript
+	// builds after the user asked for earlier messages; a missing entry keeps
+	// the default tail window (transcriptTailWindow). Long conversations build
+	// only their tail, so a streaming turn does not rebuild thousands of rows.
+	transcriptStart map[string]int
+
 	// Memory tab state: the search query, the add-input draft, the last store
 	// error shown in DangerText and the cached read model. The cache is
 	// refreshed only when the query changes or a mutation asks for it, so the
@@ -495,10 +501,11 @@ func Module() *module.Descriptor[Config] {
 }
 
 // permissionMode reads the effective agent permission mode from the settings
-// store (ask when unset/unknown or without a store).
+// store. The default is workspace (normal in-workspace editing without asking);
+// unset/unknown values and a missing store resolve to it too.
 func permissionMode(settings contracts.SettingsService) string {
 	if settings == nil {
-		return contracts.PermissionAsk
+		return contracts.PermissionWorkspace
 	}
 	switch strings.ToLower(strings.TrimSpace(settings.Get(contracts.SettingAgentPermission, ""))) {
 	case contracts.PermissionWorkspace:
@@ -510,7 +517,7 @@ func permissionMode(settings contracts.SettingsService) string {
 	case contracts.PermissionAsk:
 		return contracts.PermissionAsk
 	default:
-		return contracts.PermissionAsk
+		return contracts.PermissionWorkspace
 	}
 }
 
@@ -555,8 +562,8 @@ func (st *state) permissionLabel(mode string) string {
 func permissionHint(st *state, mode string) string {
 	switch mode {
 	case contracts.PermissionWorkspace:
-		return st.tr("工作区内的只读操作自动允许，其他操作前询问",
-			"read-only actions inside the workspace are allowed; others ask first")
+		return st.tr("工作区内的文件读写自动允许，其他操作前询问",
+			"file reads and writes inside the workspace are allowed; other actions ask first")
 	case contracts.PermissionFull:
 		return st.tr("全部自动允许，不再询问", "everything is allowed without asking")
 	case contracts.PermissionNever:

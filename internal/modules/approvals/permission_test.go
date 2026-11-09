@@ -72,9 +72,37 @@ func snapshotMode(t *testing.T, svc *service) string {
 	return svc.Mode()
 }
 
-// --- ask / default ----------------------------------------------------------
+// --- default / ask ----------------------------------------------------------
 
-func TestPermissionDefaultAskQueues(t *testing.T) {
+// TestPermissionDefaultWorkspace covers the module default: an empty config
+// resolves to workspace, which allows normal in-workspace file edits without a
+// pending approval but still queues shell/network/unknown tools.
+func TestPermissionDefaultWorkspace(t *testing.T) {
+	settings := newFakeSettings(nil)
+	svc, _ := newPermissionService(t, "", settings)
+	if mode := snapshotMode(t, svc); mode != contracts.PermissionWorkspace {
+		t.Fatalf("default Mode = %q, want workspace", mode)
+	}
+	for _, tool := range []string{"read_file", "write_file", "edit_file", "str_replace_editor"} {
+		decision, err := svc.Request(context.Background(), contracts.ApprovalRequest{Tool: tool})
+		if err != nil || decision != contracts.ApprovalAllow {
+			t.Fatalf("%s decision = %q/%v, want allow", tool, decision, err)
+		}
+	}
+	if pending := svc.Pending(); len(pending) != 0 {
+		t.Fatalf("pending = %v, want none for the workspace path tools", pending)
+	}
+	results := startRequest(context.Background(), svc, contracts.ApprovalRequest{Tool: "bash"})
+	waitFor(t, "bash pending in default mode", func() bool { return len(svc.Pending()) == 1 })
+	if err := svc.Resolve(svc.Pending()[0].ID, contracts.ApprovalAllow); err != nil {
+		t.Fatalf("Resolve: %v", err)
+	}
+	if result := waitResult(t, results); result.decision != contracts.ApprovalAllow {
+		t.Fatalf("bash decision = %q, want allow", result.decision)
+	}
+}
+
+func TestPermissionAskQueues(t *testing.T) {
 	settings := newFakeSettings(nil)
 	svc, _ := newPermissionService(t, ModeAsk, settings)
 	notifications := atomic.Int32{}
@@ -123,7 +151,7 @@ func TestPermissionFullAllowsWithoutQueueing(t *testing.T) {
 	}
 }
 
-func TestPermissionWorkspaceAllowsReadOnlyToolsOnly(t *testing.T) {
+func TestPermissionWorkspaceAllowsPathTools(t *testing.T) {
 	settings := newFakeSettings(nil)
 	settings.setPermission(contracts.PermissionWorkspace)
 	svc, _ := newPermissionService(t, ModeAsk, settings)
@@ -132,34 +160,40 @@ func TestPermissionWorkspaceAllowsReadOnlyToolsOnly(t *testing.T) {
 		t.Fatalf("subscribe: %v", err)
 	}
 
-	for _, tool := range []string{"read_file", "list_dir", "glob", "grep"} {
+	for _, tool := range []string{
+		"read_file", "list_dir", "glob", "grep",
+		"write_file", "edit_file", "str_replace_editor",
+	} {
 		decision, err := svc.Request(context.Background(), contracts.ApprovalRequest{Tool: tool})
 		if err != nil || decision != contracts.ApprovalAllow {
 			t.Fatalf("%s decision = %q/%v, want allow", tool, decision, err)
 		}
 	}
 	if pending := svc.Pending(); len(pending) != 0 {
-		t.Fatalf("pending = %v, want none after read-only tools", pending)
+		t.Fatalf("pending = %v, want none after workspace path tools", pending)
 	}
 	if got := notifications.Load(); got != 0 {
-		t.Fatalf("notifications = %d, want 0 for the read-only tools", got)
+		t.Fatalf("notifications = %d, want 0 for the workspace path tools", got)
 	}
 	if mode := snapshotMode(t, svc); mode != contracts.PermissionWorkspace {
 		t.Fatalf("Mode = %q, want workspace", mode)
 	}
 
-	// A mutating tool still queues.
-	results := startRequest(context.Background(), svc, contracts.ApprovalRequest{Tool: "bash"})
-	waitFor(t, "bash pending", func() bool { return len(svc.Pending()) == 1 })
-	if got := notifications.Load(); got != 1 {
-		t.Fatalf("notifications = %d, want 1 after bash", got)
-	}
-	pending := svc.Pending()
-	if err := svc.Resolve(pending[0].ID, contracts.ApprovalAllow); err != nil {
-		t.Fatalf("Resolve: %v", err)
-	}
-	if result := waitResult(t, results); result.decision != contracts.ApprovalAllow {
-		t.Fatalf("bash decision = %q, want allow", result.decision)
+	// Tools that can leave the workspace still queue.
+	for _, tool := range []string{"bash", "terminal", "web_fetch", "web_search",
+		"mcp__server__run", "unknown_tool"} {
+		results := startRequest(context.Background(), svc, contracts.ApprovalRequest{Tool: tool})
+		waitFor(t, tool+" pending", func() bool { return len(svc.Pending()) == 1 })
+		if got := notifications.Load(); got == 0 {
+			t.Fatalf("notifications = 0, want a queued %s", tool)
+		}
+		pending := svc.Pending()
+		if err := svc.Resolve(pending[0].ID, contracts.ApprovalAllow); err != nil {
+			t.Fatalf("Resolve: %v", err)
+		}
+		if result := waitResult(t, results); result.decision != contracts.ApprovalAllow {
+			t.Fatalf("%s decision = %q, want allow", tool, result.decision)
+		}
 	}
 }
 
@@ -188,15 +222,21 @@ func TestPermissionSwitchBackToAsk(t *testing.T) {
 	}
 }
 
-func TestPermissionUnknownSettingFallsBackToAsk(t *testing.T) {
+func TestPermissionUnknownSettingFallsBackToWorkspace(t *testing.T) {
 	settings := newFakeSettings(nil)
 	settings.setPermission("weird-mode")
 	svc, _ := newPermissionService(t, ModeAsk, settings)
 
-	if mode := snapshotMode(t, svc); mode != ModeAsk {
-		t.Fatalf("Mode = %q, want ask for unknown setting", mode)
+	if mode := snapshotMode(t, svc); mode != contracts.PermissionWorkspace {
+		t.Fatalf("Mode = %q, want workspace for unknown setting", mode)
 	}
-	results := startRequest(context.Background(), svc, contracts.ApprovalRequest{Tool: "read_file"})
+	// Workspace file edits are allowed without asking...
+	if decision, err := svc.Request(context.Background(),
+		contracts.ApprovalRequest{Tool: "write_file"}); err != nil || decision != contracts.ApprovalAllow {
+		t.Fatalf("unknown-setting write_file = %q/%v, want allow", decision, err)
+	}
+	// ...but shell still queues.
+	results := startRequest(context.Background(), svc, contracts.ApprovalRequest{Tool: "bash"})
 	waitFor(t, "unknown-mode pending", func() bool { return len(svc.Pending()) == 1 })
 	pending := svc.Pending()
 	if err := svc.Resolve(pending[0].ID, contracts.ApprovalAllow); err != nil {
@@ -250,17 +290,17 @@ func TestPermissionAutoSettingAllows(t *testing.T) {
 
 func TestPermissionModeReflectsSettings(t *testing.T) {
 	settings := newFakeSettings(nil)
-	svc, _ := newPermissionService(t, ModeAsk, settings)
+	svc, _ := newPermissionService(t, ModeWorkspace, settings)
 	cases := []struct {
 		setting string
 		want    string
 	}{
-		{"", ModeAsk},
+		{"", ModeWorkspace},
 		{contracts.PermissionAsk, ModeAsk},
 		{contracts.PermissionWorkspace, contracts.PermissionWorkspace},
 		{contracts.PermissionFull, ModeAuto},
 		{ModeAuto, ModeAuto},
-		{"unknown", ModeAsk},
+		{"unknown", contracts.PermissionWorkspace},
 	}
 	for _, tc := range cases {
 		if tc.setting == "" {

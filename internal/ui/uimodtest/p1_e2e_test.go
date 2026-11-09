@@ -201,6 +201,9 @@ func TestP1ApprovalToolsAndPersistence(t *testing.T) {
 		}
 	}
 	uiRoot.SetRightPanelOpen(false)
+	// The official drawer is a modal overlay: the frame must rebuild after
+	// closing it before the next click can reach the content behind it.
+	tester.Frame()
 	if err := tester.Click("对话"); err != nil {
 		t.Fatalf("click chat tab: %v; texts = %v", err, tester.Texts())
 	}

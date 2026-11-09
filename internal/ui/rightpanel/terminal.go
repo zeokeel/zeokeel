@@ -3,6 +3,7 @@ package rightpanel
 import (
 	"context"
 	"fmt"
+	"math"
 	"strings"
 	"sync"
 	"unicode/utf8"
@@ -11,7 +12,6 @@ import (
 
 	"github.com/zeokeel/zeokeel/internal/contracts"
 	"github.com/zeokeel/zeokeel/internal/design"
-	"github.com/zeokeel/zeokeel/internal/icons"
 	"github.com/zeokeel/zeokeel/internal/uikit"
 )
 
@@ -31,9 +31,14 @@ type terminalState struct {
 	running bool
 	cancel  context.CancelFunc
 
-	input         string
-	shellMenuOpen bool
-	err           string
+	input string
+	// shell is the choice of the official ui.Select picker; SetShell is called
+	// when it changes.
+	shell string
+	// outputScroll follows the retained output's end until the user scrolls
+	// away from it (docs/ui/scroll.md), as a log does.
+	outputScroll ui.ScrollState
+	err          string
 }
 
 func newTerminalState() *terminalState { return &terminalState{} }
@@ -124,11 +129,10 @@ func buildTerminalPane(
 		return
 	}
 	term := st.term
-	th := t.Theme()
 	output, running := term.snapshot()
 
 	ui.Column(c).FillWidth().Grow(1).Children(func() {
-		// Header: working directory + shell picker + clear.
+		// Header: working directory, the shell choice and clear.
 		ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(design.Space2).Children(func() {
 			dir := terminal.WorkingDir(context.Background())
 			if strings.TrimSpace(dir) == "" {
@@ -136,39 +140,25 @@ func buildTerminalPane(
 			}
 			design.Apply(ui.Text(c, dir), t.Font(design.TypeXXXS)).
 				TextColor(t.LabelTertiary).Grow(1).MaxLines(1).Ellipsis("…")
-
-			shellLabel := firstNonEmpty(terminal.Shell(), "shell")
-			shell := ui.ButtonBase(c).Height(th.Space(7)).PaddingX(design.Space2).
-				Radius(design.RadiusSM).Label(uikit.T(st.locale, "选择 shell", "Choose shell"))
-			shell = rowTint(t, shell, false)
-			shell.Children(func() {
-				ui.Icon(c, icons.Terminal()).Size(design.Space3, design.Space3).
-					TextColor(t.LabelSecondary)
-				design.Apply(ui.Text(c, shellLabel), t.Font(design.TypeXXS)).
-					TextColor(t.LabelSecondary).MaxLines(1).Ellipsis("…")
-				ui.Icon(c, icons.ChevronDown()).Size(design.Space3, design.Space3).
-					TextColor(t.LabelTertiary)
-			})
-			shell.Expanded(term.shellMenuOpen)
-			shell.OnClick(func() { term.shellMenuOpen = !term.shellMenuOpen })
-			ui.Popover(c, shell, &term.shellMenuOpen, func() {
-				buildShellPicker(c, t, terminal, runtime, st)
-			})
-
+			buildShellSelect(c, t, terminal, runtime, st)
 		})
 		if term.err != "" {
 			uikit.ErrorLine(c, term.err)
 		}
 
-		// Output: one mono text in a native scroll, with the empty hint.
-		ui.Scroll(c).FillWidth().Grow(1).Children(func() {
+		// Output: one mono text in a native scroll that follows the end as new
+		// output comes, until the user scrolls up (docs/ui/scroll.md).
+		if term.outputScroll.Y >= term.outputScroll.MaxY {
+			term.outputScroll.Y = math.MaxFloat32
+		}
+		ui.Scroll(c).FillWidth().Grow(1).TrackScroll(&term.outputScroll).Children(func() {
 			ui.Column(c).FillWidth().Padding(design.Space2).Children(func() {
 				if strings.TrimSpace(output) == "" {
 					design.Apply(ui.Text(c, uikit.T(st.locale, "在工作区根目录运行命令", "Run commands in the workspace root")), t.TextMuted(design.TypeXXS))
 					return
 				}
 				design.Apply(ui.Text(c, output), t.MonoFamily()).FontSize(11).
-					FixedLineHeight(18).TextColor(t.LabelPrimary)
+					FixedLineHeight(18).TextColor(t.LabelPrimary).Selectable()
 			})
 		})
 
@@ -194,40 +184,33 @@ func buildTerminalPane(
 	})
 }
 
-// buildShellPicker is the native popover menu listing TerminalService.Shells;
-// choosing one calls SetShell and shows failures in DangerText.
-func buildShellPicker(c *ui.Context, t *design.Tokens, terminal contracts.TerminalService, runtime contracts.UIRuntime, st *state) {
+// buildShellSelect is the official ui.Select picker of TerminalService.Shells
+// (docs/ui/select.md): a drop-down whose value is the chosen shell, named for
+// assistive technology, with a muted "current" label beside it. A changed
+// choice calls SetShell and shows failures in DangerText.
+func buildShellSelect(c *ui.Context, t *design.Tokens, terminal contracts.TerminalService, runtime contracts.UIRuntime, st *state) {
 	term := st.term
-	current := terminal.Shell()
-	panel := design.Apply(ui.Column(c), t.Panel()).
-		Padding(design.Space1).Gap(design.Space1)
-	panel.Children(func() {
-		for _, name := range terminal.Shells() {
-			name := name
-			c.Key("shell/" + name)
-			row := ui.ButtonBase(c).FillWidth().Height(28).PaddingX(design.Space2).
-				Radius(design.RadiusSM).Label(name)
-			row = rowTint(t, row, name == current)
-			row.Children(func() {
-				ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(design.Space2).Children(func() {
-					design.Apply(ui.Text(c, name), t.Font(design.TypeXXS)).
-						TextColor(t.LabelPrimary).Grow(1).MaxLines(1).Ellipsis("…")
-					if name == current {
-						design.Apply(ui.Badge(c, uikit.T(st.locale, "当前", "Current")), t.Badge())
-					}
-				})
-			})
-			row.OnClick(func() {
-				if err := terminal.SetShell(name); err != nil {
-					term.err = uikit.T(st.locale, "设置 shell 失败：", "Failed to set the shell: ") + err.Error()
-				} else {
-					term.err = ""
-				}
-				term.shellMenuOpen = false
-				runtime.Invalidate()
-			})
+	if term.shell == "" {
+		term.shell = terminal.Shell()
+	}
+	shells := terminal.Shells()
+	if len(shells) == 0 {
+		// No picker without options: show the shell the service reports.
+		design.Apply(ui.Text(c, firstNonEmpty(terminal.Shell(), "shell")), t.Font(design.TypeXXS)).
+			TextColor(t.LabelSecondary).NoWrap()
+		return
+	}
+	design.Apply(ui.Text(c, uikit.T(st.locale, "当前", "Current")), t.TextMuted(design.TypeXXXS)).NoWrap()
+	selector := ui.Select(c, &term.shell, shells).
+		Label(uikit.T(st.locale, "选择 shell", "Choose shell"))
+	if selector.Changed() {
+		if err := terminal.SetShell(term.shell); err != nil {
+			term.err = uikit.T(st.locale, "设置 shell 失败：", "Failed to set the shell: ") + err.Error()
+		} else {
+			term.err = ""
 		}
-	})
+		runtime.Invalidate()
+	}
 }
 
 // runTerminalCommand starts the trimmed input on a background goroutine and

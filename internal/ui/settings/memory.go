@@ -38,6 +38,15 @@ type memoryPageState struct {
 	confirmClear  bool
 	confirmDelete string // memory ID waiting for the native confirmation dialog
 
+	// Cached read model: the store is read only when the query changes or a
+	// mutation drops the cache (add/edit/delete/tidy/clear/extract). Building
+	// the page must not hit SQLite every frame (mygo-maintenance: keep slow I/O
+	// off the UI thread).
+	memories       []contracts.Memory
+	memoriesQuery  string
+	memoriesLoaded bool
+	memoriesErr    error
+
 	// Per-entry editing (optional: only with a contracts.MemoryUpdater store).
 	// The modal keeps the entry's ID and scope so saving is an update in place.
 	editing   bool
@@ -50,12 +59,24 @@ type memoryPageState struct {
 	policyLoaded bool
 	maxEntries   string
 	maxAgeDays   string
-	policyWarn   string
-	policyNotice string
-	policyErr    bool
+	// Numeric mirrors for the official ui.NumberInput policy fields (0 means
+	// unlimited, which is exactly what the stored "0" means).
+	maxEntriesNum float64
+	maxAgeDaysNum float64
+	policyWarn    string
+	policyNotice  string
+	policyErr     bool
 
 	// Model extraction (opt-in): one manual extraction at a time.
 	extractRunning bool
+}
+
+// invalidateMemories drops the cached read model, so the next frame reads the
+// store again after a mutation.
+func (st *memoryPageState) invalidateMemories() {
+	st.memoriesLoaded = false
+	st.memoriesQuery = ""
+	st.memoriesErr = nil
 }
 
 // memoryStatsLabel renders the entry count.
@@ -110,15 +131,16 @@ func buildMemoryPage(c *ui.Context, t *design.Tokens, kctx cordis.Context,
 		updater, _ := store.(contracts.MemoryUpdater)
 
 		query := strings.TrimSpace(st.query)
-		var (
-			memories []contracts.Memory
-			loadErr  error
-		)
-		if query != "" {
-			memories, loadErr = store.Search(context.Background(), query)
-		} else {
-			memories, loadErr = store.List(context.Background())
+		if !st.memoriesLoaded || st.memoriesQuery != query {
+			st.memoriesLoaded = true
+			st.memoriesQuery = query
+			if query != "" {
+				st.memories, st.memoriesErr = store.Search(context.Background(), query)
+			} else {
+				st.memories, st.memoriesErr = store.List(context.Background())
+			}
 		}
+		memories, loadErr := st.memories, st.memoriesErr
 
 		uikit.Section(c, localized(locale, "全部记忆", "All memories"), func(*ui.Context) {
 			ui.SearchField(c, &st.query).
@@ -137,6 +159,7 @@ func buildMemoryPage(c *ui.Context, t *design.Tokens, kctx cordis.Context,
 					t.SecondaryButton()).Tooltip(localized(locale,
 					"删除重复的记忆，保留最早的一条", "Remove duplicate memories, keeping the earliest")).Clicked() {
 					tidyMemoriesPage(store, st, locale)
+					st.invalidateMemories()
 					c.Invalidate()
 				}
 				if design.Apply(ui.Button(c, localized(locale, "全部清空", "Clear all")),
@@ -170,10 +193,33 @@ func buildMemoryPage(c *ui.Context, t *design.Tokens, kctx cordis.Context,
 		// below two long policy blocks.
 		uikit.Section(c, localized(locale, "添加记忆", "Add memory"), func(*ui.Context) {
 			draft := strings.TrimSpace(st.draft)
+			// One add path for the button and for Enter in the field, so the two
+			// cannot drift (mygo text-input.md: Submitted is Enter in a text
+			// input; a desktop form's single-line field submits on Enter).
+			add := func() {
+				content := strings.TrimSpace(st.draft)
+				if content == "" {
+					return
+				}
+				_, err := store.Add(context.Background(), contracts.Memory{Text: content, Scope: "global"})
+				if err != nil {
+					st.notice = localized(locale, "添加记忆失败：", "Failed to add memory: ") + err.Error()
+					st.noticeErr = true
+				} else {
+					st.draft = ""
+					st.notice = localized(locale, "已添加", "Added")
+					st.noticeErr = false
+					st.invalidateMemories()
+				}
+				c.Invalidate()
+			}
 			ui.Field(c, localized(locale, "记忆内容", "Memory text"), func() {
-				ui.TextInput(c, &st.draft).
+				input := ui.TextInput(c, &st.draft).
 					Label(inputLabel(locale, localized(locale, "记忆内容", "Memory text"))).
 					Placeholder(localized(locale, "记忆内容", "Memory text")).FillWidth()
+				if input.Submitted() {
+					add()
+				}
 			}).Description(localized(locale,
 				"添加一条全局记忆；新记忆会出现在列表顶部。",
 				"Adds one global memory; it appears at the top of the list."))
@@ -183,21 +229,7 @@ func buildMemoryPage(c *ui.Context, t *design.Tokens, kctx cordis.Context,
 			uikit.DialogFooter(c, []uikit.DialogAction{{
 				Label: localized(locale, "添加", "Add"), Primary: true,
 				Disabled: draft == "",
-				OnClick: func() {
-					if draft == "" {
-						return
-					}
-					_, err := store.Add(context.Background(), contracts.Memory{Text: draft, Scope: "global"})
-					if err != nil {
-						st.notice = localized(locale, "添加记忆失败：", "Failed to add memory: ") + err.Error()
-						st.noticeErr = true
-					} else {
-						st.draft = ""
-						st.notice = localized(locale, "已添加", "Added")
-						st.noticeErr = false
-					}
-					c.Invalidate()
-				},
+				OnClick:  add,
 			}})
 			if st.notice != "" && !st.noticeErr {
 				statusBadgesRow(c, t, st.notice, false)
@@ -224,6 +256,7 @@ func buildMemoryPage(c *ui.Context, t *design.Tokens, kctx cordis.Context,
 				localized(locale, "清空", "Clear")) {
 			case 1:
 				clearMemoriesPage(store, st, locale)
+				st.invalidateMemories()
 				c.Invalidate()
 			default:
 				c.Invalidate()
@@ -249,6 +282,7 @@ func buildMemoryPage(c *ui.Context, t *design.Tokens, kctx cordis.Context,
 					st.noticeErr = true
 				}
 				st.confirmDelete = ""
+				st.invalidateMemories()
 				c.Invalidate()
 			}
 			if !open {
@@ -286,6 +320,12 @@ func buildMemoryConsolidationPanel(c *ui.Context, t *design.Tokens, store contra
 		if settingsStore != nil {
 			st.maxEntries = strings.TrimSpace(settingsStore.Get(contracts.SettingMemoryMaxEntries, ""))
 			st.maxAgeDays = strings.TrimSpace(settingsStore.Get(contracts.SettingMemoryMaxAgeDays, ""))
+			if value, ok := parseMemoryPolicyInt(st.maxEntries); ok {
+				st.maxEntriesNum = float64(value)
+			}
+			if value, ok := parseMemoryPolicyInt(st.maxAgeDays); ok {
+				st.maxAgeDaysNum = float64(value)
+			}
 		}
 	}
 	uikit.Section(c, localized(locale, "整理策略", "Consolidation policy"), func(*ui.Context) {
@@ -296,17 +336,26 @@ func buildMemoryConsolidationPanel(c *ui.Context, t *design.Tokens, store contra
 		ui.Row(c).FillWidth().Gap(design.Space3).AlignItems(ui.Start).Children(func() {
 			ui.Column(c).FillWidth().Grow(1).Children(func() {
 				ui.Field(c, localized(locale, "最大条目数", "Max entries"), func() {
-					ui.TextInput(c, &st.maxEntries).
-						Label(inputLabel(locale, localized(locale, "最大条目数", "Max entries"))).
-						Placeholder(localized(locale, "0（不限）", "0 (unlimited)")).FillWidth()
+					// The official number input gives the field stepper buttons,
+					// arrow keys, range clamping and immediate application
+					// (mygo number-input.md); 0 still means unlimited.
+					entries := ui.NumberInput(c.Key("memory.maxEntries"), &st.maxEntriesNum,
+						0, 100000, 10).
+						Label(inputLabel(locale, localized(locale, "最大条目数", "Max entries")))
+					if entries.Changed() {
+						st.maxEntries = strconv.Itoa(int(st.maxEntriesNum))
+					}
 				}).Description(localized(locale, "超过后删除最旧的记忆；0 表示不限。",
 					"Entries beyond the cap are the oldest ones; 0 means unlimited."))
 			})
 			ui.Column(c).FillWidth().Grow(1).Children(func() {
 				ui.Field(c, localized(locale, "保留天数", "Max age (days)"), func() {
-					ui.TextInput(c, &st.maxAgeDays).
-						Label(inputLabel(locale, localized(locale, "保留天数", "Max age (days)"))).
-						Placeholder(localized(locale, "0（不限）", "0 (unlimited)")).FillWidth()
+					days := ui.NumberInput(c.Key("memory.maxAgeDays"), &st.maxAgeDaysNum,
+						0, 3650, 1).
+						Label(inputLabel(locale, localized(locale, "保留天数", "Max age (days)")))
+					if days.Changed() {
+						st.maxAgeDays = strconv.Itoa(int(st.maxAgeDaysNum))
+					}
 				}).Description(localized(locale, "早于该天数的记忆会被删除；0 表示不限。",
 					"Memories older than this many days are dropped; 0 means unlimited."))
 			})
@@ -368,6 +417,8 @@ func applyMemoryPolicy(c *ui.Context, consolidator contracts.MemoryConsolidator,
 			report.RemovedExpired, report.RemovedOverCap, report.Remaining)
 		st.policyErr = false
 	}
+	// A consolidation may have removed entries: the cached list must re-read.
+	st.invalidateMemories()
 	c.Invalidate()
 }
 
@@ -484,6 +535,7 @@ func startMemoryExtraction(runtime contracts.UIRuntime,
 		}
 		st.notice = memoryExtractedLabel(locale, len(memories))
 		st.noticeErr = false
+		st.invalidateMemories()
 	}
 	go func() {
 		memories, err := extractor.ExtractFromSession(context.Background(), sessionID, 5)
@@ -624,7 +676,7 @@ func startMemoryEdit(c *ui.Context, st *memoryPageState, memory contracts.Memory
 func buildMemoryEditDialog(c *ui.Context, t *design.Tokens, updater contracts.MemoryUpdater,
 	st *memoryPageState, locale contracts.LocaleService) {
 	ui.Modal(c, &st.editing, func() {
-		design.Apply(ui.Column(c).Width(560).Gap(design.Space3), func(element ui.Element) ui.Element {
+		design.Apply(ui.Column(c).Width(design.DialogWidthM).Gap(design.Space3), func(element ui.Element) ui.Element {
 			return element.PaddingX(design.Space5).PaddingY(design.Space2)
 		}).Children(func() {
 			design.Apply(ui.Text(c, localized(locale, "编辑记忆", "Edit memory")),
@@ -678,5 +730,6 @@ func saveMemoryEdit(c *ui.Context, updater contracts.MemoryUpdater,
 	st.editText = ""
 	st.editScope = ""
 	setMemoryNotice(st, localized(locale, "已更新", "Updated"), false)
+	st.invalidateMemories()
 	c.Invalidate()
 }

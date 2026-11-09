@@ -180,25 +180,27 @@ func buildMCPCard(c *ui.Context, t *design.Tokens, runtime contracts.UIRuntime, 
 				}
 			}
 			if hasSettings && settings != nil && name != "" {
+				// A bare native switch with its short caption: ui.Field is a
+				// vertical form row and does not belong in this horizontal
+				// header (the card title already names the server).
 				enabled := !st.serverDisabled(name)
-				changed := false
-				ui.Field(c, st.tr("启用", "Enabled"), func() {
-					sw := ui.Switch(c, &enabled)
-					sw.Label(st.tr("启用服务器 ", "Enable server ") + name)
-					changed = sw.Changed()
+				ui.Row(c).AlignItems(ui.Center).Gap(design.Space1).Children(func() {
+					design.Apply(ui.Text(c, st.tr("启用", "Enabled")), t.TextMuted(design.TypeXXS))
+					sw := ui.Switch(c, &enabled).Label(st.tr("启用服务器 ", "Enable server ") + name)
+					if sw.Changed() {
+						st.setServerEnabled(name, enabled, settings)
+						runtime.Invalidate()
+					}
 				})
-				if changed {
-					st.setServerEnabled(name, enabled, settings)
-					runtime.Invalidate()
-				}
 			}
 		})
-		// The failure reason stays visible on the collapsed row: the user should
-		// not have to open the details to know why the connection failed.
+		// The failure reason stays visible on the collapsed row: a short cause,
+		// with the whole raw status in its tooltip and in the folded details.
 		if !st.serverDisabled(name) && pluginStatusFailed(server.Status) {
 			if reason := mcpStatusReason(server.Status); reason != "" {
-				design.Apply(ui.Text(c, reason), t.Font(design.TypeXXS)).
-					TextColor(t.DangerText).MaxLines(2)
+				design.Apply(ui.Text(c, mcpStatusShortReason(reason)), t.Font(design.TypeXXS)).
+					TextColor(t.DangerText).MaxLines(1).Ellipsis("…").
+					Tooltip(strings.TrimSpace(server.Status))
 			}
 		}
 		ui.Collapsible(c, st.tr("详情", "Details"), &expanded, func() {
@@ -221,6 +223,12 @@ func buildMCPCard(c *ui.Context, t *design.Tokens, runtime contracts.UIRuntime, 
 				uikit.KeyValue{Key: st.tr("状态", "Status"), Value: mcpDetailValue(server.Status)},
 			)
 			uikit.KeyValueRows(c, rows)
+			if !st.serverDisabled(name) && pluginStatusFailed(server.Status) {
+				// The complete error text is developer documentation: folded in
+				// the details and selectable for a copy into a bug report.
+				design.Apply(ui.Text(c, strings.TrimSpace(server.Status)), t.Font(design.TypeXXS)).
+					TextColor(t.DangerText).Selectable().MaxLines(4)
+			}
 			buildMCPConnectionConfig(c, t, st, server, settings, hasSettings)
 		})
 		st.mcpExpanded[key] = expanded
@@ -259,6 +267,116 @@ func toolDescriptionSummary(description string) string {
 		return string(runes[:maxRunes]) + "…"
 	}
 	return summary
+}
+
+// containsCJK reports whether text already carries Chinese copy (the tool
+// descriptions of MCP tools configured in Chinese, for example).
+func containsCJK(text string) bool {
+	for _, r := range text {
+		if r >= 0x4E00 && r <= 0x9FFF {
+			return true
+		}
+	}
+	return false
+}
+
+// toolSummaryZH is the one-line Chinese summary of a built-in tool: the
+// catalogue's descriptions are model-facing English documentation, so the
+// Chinese interface shows a short Chinese line and keeps the documentation as
+// the row's second, muted line and its tooltip.
+var toolSummaryZH = map[string]string{
+	"read_file":          "读取工作区文件内容",
+	"write_file":         "写入工作区文件",
+	"edit_file":          "按替换片段编辑文件",
+	"str_replace_editor": "可视化编辑文件",
+	"list_dir":           "列出工作区目录",
+	"glob":               "按通配模式查找文件",
+	"grep":               "按模式搜索文件内容",
+	"bash":               "在工作区执行 shell 命令",
+	"pwsh":               "在工作区执行 PowerShell 命令",
+	"web_search":         "联网搜索",
+	"web_fetch":          "抓取网页内容",
+	"memory":             "记忆读写与搜索",
+	"multi_tool_use":     "并行调用多个工具",
+	"subagent":           "创建子代理完成任务",
+	"subagent_fork":      "创建继承上下文的子代理",
+	"workflow":           "运行多代理工作流",
+	"ralph":              "运行 Ralph 迭代循环",
+	"todo":               "维护待办列表",
+	"spawn_teammate":     "创建团队成员",
+	"ask_user":           "向用户提问",
+	"present":            "展示工件预览",
+	"plan_review":        "请求计划审阅",
+	"exit_plan_mode":     "退出计划模式",
+	"goal":               "管理长期目标",
+	"team":               "创建团队任务",
+	"skill":              "加载技能说明",
+	"inspect":            "检查运行环境",
+	"report":             "生成报告",
+	"code_review":        "代码审查",
+	"auto_review":        "自动审查",
+}
+
+// toolSummaryZHFor resolves a tool's Chinese one-line summary: a known name,
+// else its catalogue family, else the generic built-in line.
+func toolSummaryZHFor(name string) string {
+	trimmed := strings.TrimSpace(name)
+	if summary, ok := toolSummaryZH[trimmed]; ok {
+		return summary
+	}
+	switch {
+	case strings.HasPrefix(trimmed, "mcp_"):
+		return "MCP 连接提供的工具"
+	case strings.HasPrefix(trimmed, "terminal_"):
+		return "终端会话操作"
+	case strings.HasPrefix(trimmed, "job_"):
+		return "后台任务管理"
+	case strings.HasPrefix(trimmed, "web_"):
+		return "联网搜索与网页抓取"
+	case strings.HasPrefix(trimmed, "session_"):
+		return "会话内容操作"
+	case strings.HasPrefix(trimmed, "memory_"):
+		return "记忆读写与搜索"
+	case strings.HasPrefix(trimmed, "team_"):
+		return "团队任务与成员管理"
+	case strings.HasPrefix(trimmed, "lsp_"):
+		return "语言服务器操作"
+	case strings.HasPrefix(trimmed, "image_"):
+		return "图像读写与处理"
+	case strings.HasPrefix(trimmed, "schedule_"):
+		return "定时任务管理"
+	}
+	return "内置工具"
+}
+
+// toolDescriptionLines resolves one catalogue row's description area: the
+// localized one-line summary first, and (for a Chinese interface over English
+// documentation) the documentation's own first phrase as the muted second line.
+// The full original text stays in the row's tooltip either way.
+func toolDescriptionLines(st *state, tool catalogTool) (primary, secondary string) {
+	description := strings.TrimSpace(tool.Description)
+	if description == "" {
+		return "", ""
+	}
+	if containsCJK(description) {
+		return description, ""
+	}
+	if !st.english() {
+		return toolSummaryZHFor(tool.Name), toolDescriptionSummary(description)
+	}
+	return toolDescriptionSummary(description), ""
+}
+
+// mcpStatusShortReason bounds the cause shown on a failed MCP row; the raw
+// status stays in the tooltip and in the folded details.
+func mcpStatusShortReason(reason string) string {
+	trimmed := strings.TrimSpace(reason)
+	const maxRunes = 96
+	runes := []rune(trimmed)
+	if len(runes) <= maxRunes {
+		return trimmed
+	}
+	return string(runes[:maxRunes]) + "…"
 }
 
 // mcpDetailValue renders one detail value, with an em dash when empty.
@@ -368,10 +486,16 @@ func buildToolRow(c *ui.Context, t *design.Tokens, tool catalogTool, showCategor
 				TextColor(t.LabelPrimary).NoWrap()
 			description := strings.TrimSpace(tool.Description)
 			if description != "" {
-				display := toolDescriptionSummary(description)
-				design.Apply(ui.Text(c, display), t.Font(design.TypeXXS)).
-					TextColor(t.LabelTertiary).Grow(1).MaxLines(1).Ellipsis("…").
-					Tooltip(description)
+				primary, secondary := toolDescriptionLines(st, tool)
+				ui.Column(c).Grow(1).MinWidth(0).Gap(0).Children(func() {
+					design.Apply(ui.Text(c, primary), t.Font(design.TypeXXS)).
+						TextColor(t.LabelTertiary).MaxLines(1).Ellipsis("…").
+						Tooltip(description)
+					if secondary != "" && secondary != primary {
+						design.Apply(ui.Text(c, secondary), t.Font(design.TypeXXXS)).
+							TextColor(t.LabelTertiary).Opacity(0.75).MaxLines(1).Ellipsis("…")
+					}
+				})
 			} else {
 				ui.Spacer(c).Grow(1)
 			}

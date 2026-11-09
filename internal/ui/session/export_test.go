@@ -15,7 +15,7 @@ import (
 )
 
 // setExportSaver replaces the package export seam for one test.
-func setExportSaver(t *testing.T, saver func(defaultName, content string) (string, error)) {
+func setExportSaver(t *testing.T, saver func(title, defaultName, content string) (string, error)) {
 	t.Helper()
 	previous := session.ExportSaver
 	session.ExportSaver = saver
@@ -47,7 +47,7 @@ func exportChat() (*fakeChat, *contracts.ChatSession) {
 func TestExportWritesMarkdown(t *testing.T) {
 	chat, _ := exportChat()
 	var gotName, gotContent string
-	setExportSaver(t, func(defaultName, content string) (string, error) {
+	setExportSaver(t, func(title, defaultName, content string) (string, error) {
 		gotName, gotContent = defaultName, content
 		return "/tmp/导出/项目讨论.md", nil
 	})
@@ -82,7 +82,7 @@ func TestExportSanitizesDefaultName(t *testing.T) {
 		Title: `项目/讨论: 2026 *?`,
 	}, true)
 	var gotName string
-	setExportSaver(t, func(defaultName, _ string) (string, error) {
+	setExportSaver(t, func(title, defaultName, _ string) (string, error) {
 		gotName = defaultName
 		return "/tmp/out.md", nil
 	})
@@ -105,7 +105,7 @@ func TestExportSanitizesDefaultName(t *testing.T) {
 func TestExportCancelAndError(t *testing.T) {
 	t.Run("cancel", func(t *testing.T) {
 		chat, _ := exportChat()
-		setExportSaver(t, func(string, string) (string, error) { return "", nil })
+		setExportSaver(t, func(string, string, string) (string, error) { return "", nil })
 		h := newHarness(t, chat)
 		tester := h.tester()
 		h.click(tester, "更多")
@@ -115,7 +115,7 @@ func TestExportCancelAndError(t *testing.T) {
 
 	t.Run("error", func(t *testing.T) {
 		chat, _ := exportChat()
-		setExportSaver(t, func(string, string) (string, error) {
+		setExportSaver(t, func(string, string, string) (string, error) {
 			return "", errors.New("disk full")
 		})
 		h := newHarness(t, chat)
@@ -151,7 +151,7 @@ func TestExportJSONL(t *testing.T) {
 	h := newHarness(t, chat)
 	var savedPath, savedContent string
 	old := session.ExportJSONLSaver
-	session.ExportJSONLSaver = func(name, content string) (string, error) {
+	session.ExportJSONLSaver = func(title, name, content string) (string, error) {
 		savedPath = name
 		savedContent = content
 		return "/tmp/" + name, nil

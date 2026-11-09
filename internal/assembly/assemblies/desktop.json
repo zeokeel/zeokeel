@@ -17,7 +17,7 @@
       "id": "approvals",
       "module": "zeokeel/approvals",
       "config": {
-        "mode": "ask"
+        "mode": "workspace"
       }
     },
     {
@@ -62,7 +62,6 @@
       "module": "zeokeel/agent",
       "config": {
         "model": "gpt-4o-mini",
-        "maxIterations": 20,
         "requireFinishReason": true
       }
     },

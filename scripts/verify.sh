@@ -12,7 +12,7 @@
 #   scripts/verify.sh --no-smoke # keep -race, skip only the product smokes
 #
 # Environment (all overridable):
-#   GO=/usr/local/go/bin/go  GOPROXY=off  GOSUMDB=off  GOFLAGS=-mod=mod
+#   GO=/usr/local/go/bin/go  GOPROXY=https://goproxy.cn,direct  GOSUMDB=sum.golang.org  GOFLAGS=-mod=mod
 # Extra: VERIFY_KEEP_TEMP=1 keeps the temporary snapshot/data directories.
 set -euo pipefail
 
@@ -23,8 +23,8 @@ case ":$PATH:" in
 esac
 export GO="${GO:-go}"
 export GOFMT="${GOFMT:-gofmt}"
-export GOPROXY="${GOPROXY:-off}"
-export GOSUMDB="${GOSUMDB:-off}"
+export GOPROXY="${GOPROXY:-https://goproxy.cn,direct}"
+export GOSUMDB="${GOSUMDB:-sum.golang.org}"
 export GOFLAGS="${GOFLAGS:--mod=mod}"
 
 SMOKE=1

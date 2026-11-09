@@ -71,17 +71,17 @@ func (b *behaviorHarness) storedPermission() string {
 	return b.h.settings.Get(contracts.SettingAgentPermission, "")
 }
 
-// TestBehaviorPermissionPageWrites covers the page: default ask, the four
+// TestBehaviorPermissionPageWrites covers the page: default workspace, the four
 // choices write the shared row with a "已保存" badge, and unknown stored values
-// display as ask without being overwritten by a frame.
+// display as workspace without being overwritten by a frame.
 func TestBehaviorPermissionPageWrites(t *testing.T) {
 	harness := startBehaviorUI(t, false)
 	harness.openSettingsPage(t, "行为")
-	requireHasTexts(t, harness.tester, "行为", "默认代理权限", "当前：询问", "询问",
-		"工作区", "完全访问", "从不")
+	requireHasTexts(t, harness.tester, "行为", "默认代理权限", "当前：工作区", "工作区",
+		"询问", "完全访问", "从不")
 
 	// Select full access through the popover.
-	harness.click(t, "询问")
+	harness.click(t, "工作区")
 	requireHasTexts(t, harness.tester, "工作区", "完全访问", "从不")
 	harness.click(t, "完全访问")
 	if got := harness.storedPermission(); got != contracts.PermissionFull {
@@ -103,12 +103,12 @@ func TestBehaviorPermissionPageWrites(t *testing.T) {
 		t.Fatalf("agent.permission after 询问 = %q, want ask", got)
 	}
 
-	// Unknown stored value: displayed as ask, not overwritten by rendering.
+	// Unknown stored value: displayed as workspace, not overwritten by rendering.
 	if err := harness.h.settings.Set(contracts.SettingAgentPermission, "bogus"); err != nil {
 		t.Fatalf("set bogus permission: %v", err)
 	}
 	harness.tester.Frame()
-	requireHasText(t, harness.tester, "当前：询问")
+	requireHasText(t, harness.tester, "当前：工作区")
 	if got := harness.storedPermission(); got != "bogus" {
 		t.Fatalf("a frame overwrote agent.permission to %q", got)
 	}
@@ -124,7 +124,7 @@ func TestBehaviorPermissionSharedWithSessionChip(t *testing.T) {
 	// unambiguous while it is clicked.
 	harness := startBehaviorUI(t, false)
 	harness.openSettingsPage(t, "行为")
-	harness.click(t, "询问")
+	harness.click(t, "工作区")
 	harness.click(t, "完全访问")
 	requireHasText(t, harness.tester, "已保存")
 	harness.h.ui.Navigator().CloseSettings()

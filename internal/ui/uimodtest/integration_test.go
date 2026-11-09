@@ -58,9 +58,7 @@ func TestHomeRendersInjectionPointRegions(t *testing.T) {
 
 // TestWelcomeExtendsHomeHero is the "new module, no host change" proof:
 // ui/welcome is activated on top of the existing product and its hero
-// contribution replaces home's default; disposing it removes it again. The
-// welcome module also registers a top-bar part, which stays in the host's slot
-// surface (the host only draws it when a window chrome layer uses it).
+// contribution replaces home's default; disposing it removes it again.
 func TestWelcomeExtendsHomeHero(t *testing.T) {
 	h := newHarness(t)
 	activate(t, h.ctx, home.Module(), home.Config{})
@@ -71,10 +69,6 @@ func TestWelcomeExtendsHomeHero(t *testing.T) {
 	tester.Frame()
 	h.assertTexts(tester, "欢迎使用 ZeoKeel",
 		"这是一个独立编译的 UI 模块，通过注入点出现在宿主中。")
-	if slots := h.ui.Runtime().Slots(); !containsString(slots, contracts.SlotTopBarCenter) {
-		t.Fatalf("welcome's top-bar part is not registered: %v", slots)
-	}
-
 	// No host or home edit was needed for any of the above. Disposing the
 	// module unwinds the contributions through its kernel effects.
 	if err := welcomeFiber.Dispose(); err != nil {
@@ -83,15 +77,6 @@ func TestWelcomeExtendsHomeHero(t *testing.T) {
 	tester.Frame()
 	h.assertNoTexts(tester, "欢迎使用 ZeoKeel")
 	h.assertTexts(tester, "编译期模块化的桌面 AI agent。") // home's own hero fallback
-}
-
-func containsString(values []string, want string) bool {
-	for _, value := range values {
-		if value == want {
-			return true
-		}
-	}
-	return false
 }
 
 // TestToolcardsRenderDemoCall proves the tool-card injection point through a

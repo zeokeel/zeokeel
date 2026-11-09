@@ -157,10 +157,12 @@ func setImportPicker(t *testing.T, fn func() (string, error)) {
 	t.Cleanup(func() { settings.ImportDirectoryPicker = previous })
 }
 
-// typeDSHDir focuses the native directory input and types dir.
+// typeDSHDir focuses the native directory input and types dir. The field's
+// accessibly-labeled input carries the "输入"/" input" suffix (inputLabel), which
+// is the interactive target the strict v0.8.3 Tester.Click requires.
 func typeDSHDir(t *testing.T, h *harness, tester *ui.Tester, dir string) {
 	t.Helper()
-	h.click(tester, "DSH 数据目录")
+	h.click(tester, "DSH 数据目录 输入")
 	tester.Type(dir)
 	tester.Frame()
 }

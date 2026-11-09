@@ -11,6 +11,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/zeokeel/zeokeel/internal/contracts"
 	"github.com/zeokeel/zeokeel/internal/ui/rightpanel"
@@ -108,21 +109,41 @@ func TestChangesListStatsAndExpand(t *testing.T) {
 		"变更", "main.go", "added.txt", "gone.go", "renamed.go", "untracked.md",
 		"修改", "新增", "删除", "重命名", "未跟踪",
 		"+1", "-1", "查看 diff", "无文本 diff")
-	h.assertNoTexts(tester, "+new line", "-old line") // collapsed by default
+	h.assertNoTexts(tester, "@@ -1,2 +1,2 @@") // collapsed by default
 
-	// Expanding the first card's native collapsible shows the unified diff.
+	// Expanding the first card's native collapsible shows the unified diff
+	// through the official editor.DiffView. The viewer paints the changed lines
+	// on the canvas, so the text layer carries the hunk headers and the lines
+	// are asserted through the viewer's accessibility value (mygo
+	// docs/ui/diff-viewer.md; Tester.Access), not through Tester.Texts.
 	if err := tester.Click("查看 diff"); err != nil {
 		t.Fatalf("expand diff: %v; texts = %v", err, tester.Texts())
 	}
 	tester.Frame()
-	assertContains(t, tester, "+new line", "-old line", "@@ -1,2 +1,2 @@", "context line")
+	tester.Advance(400 * time.Millisecond)
+	tester.Frame()
+	assertContains(t, tester, "@@ -1,2 +1,2 @@")
+	newSide, ok := tester.Access("New text")
+	if !ok {
+		t.Fatalf("the diff viewer's new side is not exposed to assistive technology; texts = %v", tester.Texts())
+	}
+	for _, want := range []string{"new line", "context line"} {
+		if !strings.Contains(newSide.Value, want) {
+			t.Fatalf("diff viewer's new side value = %q, want %q", newSide.Value, want)
+		}
+	}
+	if strings.Contains(newSide.Value, "old line") {
+		t.Fatalf("diff viewer's new side value unexpectedly holds the deleted line: %q", newSide.Value)
+	}
 
 	// Collapsing hides it again.
 	if err := tester.Click("查看 diff"); err != nil {
 		t.Fatalf("collapse diff: %v", err)
 	}
 	tester.Frame()
-	h.assertNoTexts(tester, "+new line", "-old line")
+	tester.Advance(400 * time.Millisecond)
+	tester.Frame()
+	h.assertNoTexts(tester, "@@ -1,2 +1,2 @@")
 }
 
 func TestChangesEmpty(t *testing.T) {

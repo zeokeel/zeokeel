@@ -88,6 +88,13 @@ func applyPalette(t *ui.Theme, p Palette) {
 	t.AccentHover = p.AccentHover
 	t.AccentPressed = p.AccentPressed
 	t.AccentText = p.AccentText
+	// Keep the brand accent in every window. mygo v0.8 fades the accent of an
+	// inactive window to a gray unless InactiveAccent is set (AppKit's
+	// behavior); the brand's own hand-drawn accent surfaces (selected rows,
+	// hand-tinted rows) do not fade, so leaving the default would make one
+	// window look half gray. Setting it to the accent is the documented way to
+	// keep the accent in every window (mygo ui/theme.go: InactiveAccent).
+	t.InactiveAccent = p.Accent
 	t.Danger = p.Danger
 	t.Warning = p.Warning
 	t.Success = p.Success

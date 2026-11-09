@@ -82,27 +82,27 @@ func buildSkillsPage(c *ui.Context, t *design.Tokens, kctx cordis.Context, st *s
 	editor, dataDir := skillsEditor(kctx)
 
 	ui.Column(c).FillWidth().Gap(design.Space4).Children(func() {
-		// Header block with the page's two actions on the right: the primary
-		// "new skill" and the refresh secondary.
-		ui.Row(c).FillWidth().AlignItems(ui.Start).Gap(design.Space3).Children(func() {
-			ui.Column(c).FillWidth().Grow(1).Children(func() {
-				uikit.PageHeader(c, localized(locale, "技能", "Skills"), localized(locale,
-					"从配置目录、dataDir/skills 与工作区 /skills 中发现的 SKILL.md 技能。",
-					"SKILL.md skills discovered in the configured directories, dataDir/skills and the workspace /skills."))
-			})
-			if editor != nil {
-				if design.Apply(ui.PrimaryButton(c, localized(locale, "新建技能", "New skill")),
-					t.PrimaryButton()).Clicked() {
-					startCreateSkill(c, st)
+		// The page's immediate-effect actions live at the page header's right
+		// edge (uikit.PageHeaderAction); the shell's footer owns explicit saves.
+		uikit.PageHeaderAction(c,
+			localized(locale, "技能", "Skills"),
+			localized(locale,
+				"从配置目录、dataDir/skills 与工作区 /skills 中发现的 SKILL.md 技能。",
+				"SKILL.md skills discovered in the configured directories, dataDir/skills and the workspace /skills."),
+			func(c *ui.Context) {
+				if editor != nil {
+					if design.Apply(ui.PrimaryButton(c, localized(locale, "新建技能", "New skill")),
+						t.PrimaryButton()).Clicked() {
+						startCreateSkill(c, st)
+					}
 				}
-			}
-			if design.Apply(ui.Button(c, localized(locale, "刷新", "Refresh")),
-				t.SecondaryButton()).Tooltip(localized(locale,
-				"重新扫描技能目录", "Rescan the skill directories")).Clicked() {
-				st.refresh()
-				c.Invalidate()
-			}
-		})
+				if design.Apply(ui.Button(c, localized(locale, "刷新", "Refresh")),
+					t.SecondaryButton()).Tooltip(localized(locale,
+					"重新扫描技能目录", "Rescan the skill directories")).Clicked() {
+					st.refresh()
+					c.Invalidate()
+				}
+			})
 
 		buildSkillsEditorDialogs(c, t, st, editor, locale)
 

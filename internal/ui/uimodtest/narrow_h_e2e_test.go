@@ -51,14 +51,17 @@ func TestCompactHeaderKeepsTitleAndGoalStatus(t *testing.T) {
 	}
 	defer tracker.Clear()
 
-	tester.SetSize(1024, 720)
+	// The official modal drawer overlays the content instead of narrowing it
+	// (docs/ui/overlays.md), so a compact header is produced by a narrower
+	// window, not by the drawer reserve of the old shell.
+	tester.SetSize(704, 720)
 	tester.Frame()
 	product.uiRoot.SetRightPanelOpen(true)
 	tester.Frame()
 	tester.Frame()
 	tester.Frame()
 	if !product.uiRoot.RightPanelOpen() {
-		t.Fatalf("right inspector did not open as a drawer at 1024x720")
+		t.Fatalf("right inspector did not open as a drawer at 704x720")
 	}
 	if !tester.HasText("目标") {
 		t.Fatalf("compact header lacks the goal status label; texts = %v", tester.Texts())
@@ -74,9 +77,11 @@ func TestCompactHeaderKeepsTitleAndGoalStatus(t *testing.T) {
 		t.Fatalf("compact header dropped the conversation title; texts = %v", tester.Texts())
 	}
 
-	// Closing the drawer widens the column again: the chip shows the goal body.
-	// The header width comes from the previous frame, so let it re-measure.
+	// Closing the drawer and widening the window gives the header room again:
+	// the chip shows the goal body. The header width comes from the previous
+	// frame, so let it re-measure.
 	product.uiRoot.SetRightPanelOpen(false)
+	tester.SetSize(1280, 800)
 	deadline := time.Now().Add(2 * time.Second)
 	for time.Now().Before(deadline) && containingLabels(tester, goalText) < 2 {
 		tester.Frame()
@@ -104,7 +109,7 @@ func TestVeryNarrowComposerToolsMenu(t *testing.T) {
 	tester.Frame()
 	tester.Frame()
 	tester.Frame()
-	for _, want := range []string{"附件", "会话设置", "发送"} {
+	for _, want := range []string{"附件", "工作区权限", "发送"} {
 		if !tester.HasText(want) {
 			t.Fatalf("very narrow composer lacks %q; texts = %v", want, tester.Texts())
 		}
@@ -119,8 +124,8 @@ func TestVeryNarrowComposerToolsMenu(t *testing.T) {
 	if tester.HasText("test-model") || tester.HasText("未配置") {
 		t.Fatalf("very narrow composer still shows a model chip; texts = %v", tester.Texts())
 	}
-	if err := tester.Click("会话设置"); err != nil {
-		t.Fatalf("open 会话设置 menu: %v; texts = %v", err, tester.Texts())
+	if err := tester.Click("工作区权限"); err != nil {
+		t.Fatalf("open session menu: %v; texts = %v", err, tester.Texts())
 	}
 	tester.Frame()
 	tester.Frame()
@@ -166,11 +171,11 @@ func TestVeryNarrowComposerToolsMenu(t *testing.T) {
 
 	// The wide composer restores the full row (attach + model + session menu + send).
 	deadline := time.Now().Add(2 * time.Second)
-	for time.Now().Before(deadline) && !tester.HasText("会话设置") {
+	for time.Now().Before(deadline) && !tester.HasText("工作区权限") {
 		tester.Frame()
 		time.Sleep(5 * time.Millisecond)
 	}
-	if !tester.HasText("会话设置") {
+	if !tester.HasText("工作区权限") {
 		t.Fatalf("wide composer did not restore its full toolbar; texts = %v", tester.Texts())
 	}
 }

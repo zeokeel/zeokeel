@@ -58,22 +58,18 @@ var (
 		return cmd.Process.Release()
 	}
 
-	// ExportSessionsDialogTitle is the localized title of the sessions save
-	// dialog; buildDataPrivacyPage sets it from the current locale per frame.
-	ExportSessionsDialogTitle = "导出全部会话"
-	// ExportReportDialogTitle is the localized title of the report save dialog.
-	ExportReportDialogTitle = "诊断报告"
-
 	// ExportSessionsSaver is the sessions-export seam: the default opens the
-	// native save dialog and writes the Markdown content. It returns the written
-	// path, "" when the user canceled, or an error.
-	ExportSessionsSaver = func(defaultName, content string) (string, error) {
-		return saveWithDialog(defaultName, content, ExportSessionsDialogTitle, "Markdown", "md")
+	// native save dialog with the localized title and writes the Markdown
+	// content. It returns the written path, "" when the user canceled, or an
+	// error. The title is a parameter (not package state) so frames in another
+	// language cannot race a dialog.
+	ExportSessionsSaver = func(title, defaultName, content string) (string, error) {
+		return saveWithDialog(defaultName, content, title, "Markdown", "md")
 	}
 
 	// ExportReportSaver is the diagnostic-report seam (same contract).
-	ExportReportSaver = func(defaultName, content string) (string, error) {
-		return saveWithDialog(defaultName, content, ExportReportDialogTitle, "Text", "txt")
+	ExportReportSaver = func(title, defaultName, content string) (string, error) {
+		return saveWithDialog(defaultName, content, title, "Text", "txt")
 	}
 )
 
@@ -83,11 +79,11 @@ var openPathFunc = func(path string) error { return OpenPathFunc(path) }
 
 // exportSessionsSaver/exportReportSaver are the seam aliases the page invokes.
 var (
-	exportSessionsSaver = func(defaultName, content string) (string, error) {
-		return ExportSessionsSaver(defaultName, content)
+	exportSessionsSaver = func(title, defaultName, content string) (string, error) {
+		return ExportSessionsSaver(title, defaultName, content)
 	}
-	exportReportSaver = func(defaultName, content string) (string, error) {
-		return ExportReportSaver(defaultName, content)
+	exportReportSaver = func(title, defaultName, content string) (string, error) {
+		return ExportReportSaver(title, defaultName, content)
 	}
 )
 
@@ -173,7 +169,7 @@ func buildDataPrivacyPage(c *ui.Context, t *design.Tokens, kctx cordis.Context,
 				"Settings, sessions and memories are stored in this directory.")),
 				t.TextMuted(design.TypeXXS))
 			uikit.DialogFooter(c, []uikit.DialogAction{{
-				Label: localized(locale, "打开数据目录", "Open data directory"), Primary: true,
+				Label:    localized(locale, "打开数据目录", "Open data directory"),
 				Disabled: dataDir == "",
 				OnClick: func() {
 					if dataDir == "" {
@@ -209,9 +205,9 @@ func buildDataPrivacyPage(c *ui.Context, t *design.Tokens, kctx cordis.Context,
 					"共 %d 个会话", "%d sessions"), len(sessions))),
 					t.Font(design.TypeXS)).TextColor(t.LabelSecondary)
 				ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(design.Space2).Children(func() {
-					if design.Apply(ui.Button(c, localized(locale,
+					if design.Apply(ui.PrimaryButton(c, localized(locale,
 						"导出全部会话", "Export all sessions")),
-						t.SecondaryButton()).Clicked() {
+						t.PrimaryButton()).Clicked() {
 						exportDataSessions(chat, st, locale)
 						c.Invalidate()
 					}
@@ -226,19 +222,18 @@ func buildDataPrivacyPage(c *ui.Context, t *design.Tokens, kctx cordis.Context,
 			}
 		})
 
-		uikit.Section(c, localized(locale, "诊断报告", "Diagnostic report"), func(*ui.Context) {
+		uikit.SectionAction(c, localized(locale, "诊断报告", "Diagnostic report"), func(c *ui.Context) {
+			if design.Apply(ui.Button(c, localized(locale,
+				"导出诊断报告", "Export diagnostic report")),
+				t.SecondaryButton()).Clicked() {
+				exportDiagnosticReport(kctx, store, chat, st, locale)
+				c.Invalidate()
+			}
+		}, func(*ui.Context) {
 			design.Apply(ui.Text(c, localized(locale,
 				"导出应用版本、数据目录、会话数与设置项（API key 不会写入）。",
 				"Export the app version, data directory, session count and settings (the API key is never written).")),
 				t.TextMuted(design.TypeXXS)).MaxLines(2)
-			ui.Row(c).FillWidth().Justify(ui.End).Children(func() {
-				if design.Apply(ui.Button(c, localized(locale,
-					"导出诊断报告", "Export diagnostic report")),
-					t.SecondaryButton()).Clicked() {
-					exportDiagnosticReport(kctx, store, chat, st, locale)
-					c.Invalidate()
-				}
-			})
 		})
 
 		if st.confirmClear && hasSessionList && len(sessions) > 0 {
@@ -275,9 +270,9 @@ func exportDataSessions(chat contracts.ChatService, st *dataPrivacyState, locale
 		return
 	}
 	content, count := sessionsMarkdown(chat, sessions, locale)
-	ExportSessionsDialogTitle = localized(locale, "导出全部会话", "Export all sessions")
 	defaultName := fmt.Sprintf("zeokeel-sessions-%s.md", time.Now().Format("2006-01-02"))
-	path, err := exportSessionsSaver(defaultName, content)
+	path, err := exportSessionsSaver(
+		localized(locale, "导出全部会话", "Export all sessions"), defaultName, content)
 	switch {
 	case err != nil:
 		st.notice = localized(locale, "导出会话失败：", "Failed to export sessions: ") + err.Error()
@@ -410,9 +405,10 @@ func clearDataSessions(chat contracts.ChatService, st *dataPrivacyState, locale 
 
 // exportDiagnosticReport builds the text report and calls the save seam.
 func exportDiagnosticReport(kctx cordis.Context, store contracts.SettingsService, chat contracts.ChatService, st *dataPrivacyState, locale contracts.LocaleService) {
-	ExportReportDialogTitle = localized(locale, "诊断报告", "Diagnostic report")
 	defaultName := fmt.Sprintf("zeokeel-diagnostics-%s.txt", time.Now().Format("2006-01-02"))
-	path, err := ExportReportSaver(defaultName, diagnosticReportText(kctx, store, chat, locale))
+	path, err := ExportReportSaver(
+		localized(locale, "诊断报告", "Diagnostic report"), defaultName,
+		diagnosticReportText(kctx, store, chat, locale))
 	switch {
 	case err != nil:
 		st.notice = localized(locale, "导出诊断报告失败：", "Failed to export diagnostic report: ") + err.Error()

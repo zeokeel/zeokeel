@@ -57,6 +57,14 @@ func (n *navigator) Back() bool {
 	return true
 }
 
+// CanGoBack reports whether Back would change the screen, for the chrome's
+// back affordance and its shortcut.
+func (n *navigator) CanGoBack() bool {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	return len(n.stack) >= 2
+}
+
 // SettingsOpen reports whether the settings surface is shown.
 func (n *navigator) SettingsOpen() bool {
 	n.mu.Lock()

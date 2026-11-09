@@ -7,6 +7,7 @@ package sidebar
 
 import (
 	"context"
+	"fmt"
 	"path/filepath"
 	"strings"
 
@@ -16,19 +17,16 @@ import (
 	"github.com/zeokeel/zeokeel/internal/contracts"
 	"github.com/zeokeel/zeokeel/internal/design"
 	"github.com/zeokeel/zeokeel/internal/icons"
+	"github.com/zeokeel/zeokeel/internal/uikit"
 )
 
-// WorkspaceDirectoryDialogTitle is the localized title of the default
-// directory dialog; the call site sets it from the current locale right before
-// invoking DirectoryPicker (the seam signature stays stable for tests).
-var WorkspaceDirectoryDialogTitle = "选择工作区目录"
-
 // DirectoryPicker is the sidebar's workspace directory-picker seam: the default
-// opens the native mygo directory dialog; tests replace it with a scripted
-// selection so no desktop backend is needed.
-var DirectoryPicker = func() (string, error) {
+// opens the native mygo directory dialog with the localized title; tests replace
+// it with a scripted selection so no desktop backend is needed. The title is a
+// parameter (not package state) so windows in different languages cannot race.
+var DirectoryPicker = func(title string) (string, error) {
 	paths, err := mygo.Dialog.Open(mygo.OpenDialogOptions{
-		Title:     WorkspaceDirectoryDialogTitle,
+		Title:     title,
 		Directory: true,
 	})
 	if err != nil {
@@ -104,7 +102,8 @@ func buildAddWorkspaceDialog(c *ui.Context, t *design.Tokens, workspace contract
 		return
 	}
 	ui.Modal(c, &state.addWorkspaceOpen, func() {
-		design.Apply(ui.Column(c).Width(460).Gap(design.Space2), func(el ui.Element) ui.Element {
+		submit := func() { submitAddWorkspace(state, workspace, runtime) }
+		design.Apply(ui.Column(c).Width(design.DialogWidthS).Gap(design.Space2), func(el ui.Element) ui.Element {
 			return el.PaddingX(design.Space5).PaddingY(design.Space2)
 		}).Children(func() {
 			design.Apply(ui.Text(c, state.T("添加工作区", "Add workspace")), t.Font(design.TypeL)).
@@ -113,15 +112,19 @@ func buildAddWorkspaceDialog(c *ui.Context, t *design.Tokens, workspace contract
 				"Choose a folder as a workspace; the folder name is used when the name is empty.")),
 				t.TextMuted(design.TypeXS)).MaxLines(2)
 			design.Apply(ui.Text(c, state.T("名称", "Name")), t.TextMuted(design.TypeXS))
+			// Enter submits from either field, as in a desktop form: the
+			// input keeps the keyboard, so the footer's default action alone
+			// would not fire while typing.
 			ui.TextInput(c, &state.addWorkspaceName).
-				Label(state.T("名称 输入", "Name input")).FillWidth()
+				Label(state.T("名称 输入", "Name input")).FillWidth().
+				OnTextKey(uikit.EnterTo(submit))
 			design.Apply(ui.Text(c, state.T("目录", "Directory")), t.TextMuted(design.TypeXS))
 			ui.Row(c).FillWidth().Gap(design.Space2).AlignItems(ui.Center).Children(func() {
 				ui.TextInput(c, &state.addWorkspaceDir).
-					Label(state.T("目录 输入", "Directory input")).FillWidth()
+					Label(state.T("目录 输入", "Directory input")).FillWidth().
+					OnTextKey(uikit.EnterTo(submit))
 				if ui.Button(c, state.T("选择目录…", "Choose folder…")).Clicked() {
-					WorkspaceDirectoryDialogTitle = state.T("选择工作区目录", "Choose workspace folder")
-					dir, err := DirectoryPicker()
+					dir, err := DirectoryPicker(state.T("选择工作区目录", "Choose workspace folder"))
 					if err != nil {
 						state.addWorkspaceErr = state.T("无法打开目录选择器：", "Could not open the folder picker: ") + err.Error()
 					} else if strings.TrimSpace(dir) != "" {
@@ -138,18 +141,44 @@ func buildAddWorkspaceDialog(c *ui.Context, t *design.Tokens, workspace contract
 					design.Apply(ui.Text(c, state.addWorkspaceErr), t.Font(design.TypeXS)).TextColor(t.DangerText)
 				})
 			}
-			ui.Row(c).FillWidth().Justify(ui.End).Gap(design.Space2).Children(func() {
-				add := ui.PrimaryButton(c, state.T("添加", "Add"))
-				design.Apply(add, t.PrimaryButton())
-				if add.Clicked() {
-					submitAddWorkspace(state, workspace, runtime)
-				}
-				if ui.Button(c, state.T("取消", "Cancel")).Clicked() {
+			// The product's one dialog action bar: the cancel on the left, the
+			// primary Add on the right, focused so Enter presses it.
+			uikit.DialogFooter(c, []uikit.DialogAction{
+				{Label: state.T("取消", "Cancel"), OnClick: func() {
 					state.addWorkspaceOpen = false
 					state.addWorkspaceErr = ""
 					runtime.Invalidate()
-				}
+				}},
+				{Label: state.T("添加", "Add"), Primary: true, Default: true, OnClick: submit},
 			})
 		})
 	})
+	buildWorkspaceDeleteDialog(c, t, workspace, runtime, state)
+}
+
+// buildWorkspaceDeleteDialog confirms the destructive row-menu action that
+// forgets a workspace: the folder stays on disk, only the registration goes.
+func buildWorkspaceDeleteDialog(c *ui.Context, t *design.Tokens,
+	workspace contracts.WorkspaceService, runtime contracts.UIRuntime, state *paneState) {
+	name := firstNonEmpty(state.workspaceDeleteName, state.T("未命名工作区", "Untitled workspace"))
+	message := fmt.Sprintf(state.T("从列表中移除工作区“%s”？文件夹不会被删除。",
+		"Remove the workspace “%s” from the list? Its folder is not deleted."), name)
+	switch ui.AlertDialog(c, &state.workspaceDeleteOpen,
+		state.T("删除工作区", "Delete workspace"), message,
+		state.T("取消", "Cancel"), state.T("删除", "Delete")) {
+	case 1:
+		if err := workspace.Delete(context.Background(), state.workspaceDeleteID); err != nil {
+			state.workspaceDeleteErr = state.T("删除工作区失败：", "Could not delete the workspace: ") + err.Error()
+		} else {
+			state.workspaceDeleteErr = ""
+			state.addWorkspaceStatus = state.T("已删除工作区", "Workspace deleted")
+		}
+		state.workspaceDeleteID = ""
+		state.workspaceDeleteName = ""
+		runtime.Invalidate()
+	case 0, ui.AlertDismissed:
+		state.workspaceDeleteID = ""
+		state.workspaceDeleteName = ""
+		runtime.Invalidate()
+	}
 }

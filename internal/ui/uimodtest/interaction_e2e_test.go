@@ -281,8 +281,9 @@ func TestSettingsUnsavedGuard(t *testing.T) {
 	if !frameUntil(tester, "关闭设置", 2*time.Second) {
 		t.Fatalf("settings did not open; texts = %v", tester.Texts())
 	}
-	// Make one edit: append text to the Base URL draft.
-	if err := tester.Click("Base URL"); err != nil {
+	// Make one edit: append text to the Base URL draft. Click the accessibly
+	// labeled input target (the visible field label is not interactive).
+	if err := tester.Click("Base URL 输入"); err != nil {
 		t.Fatalf("click Base URL field: %v; texts = %v", err, tester.Texts())
 	}
 	tester.Type("X")

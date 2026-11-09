@@ -91,7 +91,7 @@ func (sh *sessionHarness) installExportSeam(t *testing.T, resultErr error) *stri
 	t.Helper()
 	var captured string
 	original := sessionui.ExportJSONLSaver
-	sessionui.ExportJSONLSaver = func(defaultName, content string) (string, error) {
+	sessionui.ExportJSONLSaver = func(title, defaultName, content string) (string, error) {
 		captured = content
 		if resultErr != nil {
 			return "", resultErr
@@ -233,7 +233,7 @@ func TestSessionExportJSONLCancelAndError(t *testing.T) {
 
 	// Cancelled save: the seam returns ("", nil). No badge, no error.
 	original := sessionui.ExportJSONLSaver
-	sessionui.ExportJSONLSaver = func(string, string) (string, error) { return "", nil }
+	sessionui.ExportJSONLSaver = func(string, string, string) (string, error) { return "", nil }
 	if err := harness.tester.Click("更多"); err != nil {
 		t.Fatalf("open actions: %v", err)
 	}
@@ -249,7 +249,7 @@ func TestSessionExportJSONLCancelAndError(t *testing.T) {
 	// the underlying error. Today exportSessionJSONL stores the message with a
 	// prefix and buildHeader adds another when rendering, so the user sees
 	// "导出失败：导出失败：..." (AUDIT-P3-4; the Markdown path sets it once).
-	sessionui.ExportJSONLSaver = func(string, string) (string, error) {
+	sessionui.ExportJSONLSaver = func(string, string, string) (string, error) {
 		return "", errors.New("disk full")
 	}
 	if err := harness.tester.Click("更多"); err != nil {
@@ -401,28 +401,25 @@ func TestSessionGoalChipEmptyText(t *testing.T) {
 	requireNoText(t, tester, "ship the audit")
 }
 
-// TestSessionExportJSONLDialogTitleFollowsLocale is a known-defect probe for the
-// JSONL export i18n: the default save dialog title is localized only by the
-// Markdown export path, so exporting JSONL directly in English leaves the stale
-// Chinese title. The test passes once the fix lands.
+// TestSessionExportJSONLDialogTitleFollowsLocale pins the JSONL export's
+// localized save-dialog title: the seam receives the frame's localized title as
+// its first argument, so a direct JSONL export in English is localized too (the
+// old package-global title left the stale Chinese string; AUDIT-P3-2).
 func TestSessionExportJSONLDialogTitleFollowsLocale(t *testing.T) {
-	originalJSONL := sessionui.ExportJSONLDialogTitle
-	originalMarkdown := sessionui.ExportDialogTitle
-	t.Cleanup(func() {
-		sessionui.ExportJSONLDialogTitle = originalJSONL
-		sessionui.ExportDialogTitle = originalMarkdown
-	})
-	// Start from the package default (zh) and switch the frame language to en.
-	sessionui.ExportJSONLDialogTitle = "导出会话"
-	sessionui.ExportDialogTitle = "导出会话"
-
 	harness := startSessionUI(t, contracts.ChatSession{
 		ID: "s", Title: "会话", CreatedAt: time.Unix(1_700_000_000, 0),
 		Messages: []contracts.ChatMessage{message("m1", contracts.ChatRoleUser, "hi")},
 	})
+	titles := []string{}
+	original := sessionui.ExportJSONLSaver
+	sessionui.ExportJSONLSaver = func(title, name, content string) (string, error) {
+		titles = append(titles, title)
+		return "/tmp/export.jsonl", nil
+	}
+	t.Cleanup(func() { sessionui.ExportJSONLSaver = original })
+
 	harness.h.ui.Locale().SetLanguage("en")
 	harness.tester.Frame()
-	harness.installExportSeam(t, nil)
 	// In English the overflow menu is "More" and the item "Export JSONL".
 	if err := harness.tester.Click("More"); err != nil {
 		t.Fatalf("open session actions: %v; texts = %v", err, harness.tester.Texts())
@@ -432,9 +429,22 @@ func TestSessionExportJSONLDialogTitleFollowsLocale(t *testing.T) {
 		t.Fatalf("click Export JSONL: %v; texts = %v", err, harness.tester.Texts())
 	}
 	harness.tester.Frame()
+	if len(titles) != 1 || titles[0] != "Export conversation" {
+		t.Fatalf("JSONL dialog titles = %v, want [Export conversation]", titles)
+	}
 
-	if sessionui.ExportJSONLDialogTitle != "Export conversation" {
-		t.Skipf("AUDIT-P3-2 (known defect): exporting JSONL directly in English leaves the stale "+
-			"dialog title %q (only the Markdown path localizes it)", sessionui.ExportJSONLDialogTitle)
+	// A language switch on the next frame localizes the next invocation too.
+	harness.h.ui.Locale().SetLanguage("zh")
+	harness.tester.Frame()
+	if err := harness.tester.Click("更多"); err != nil {
+		t.Fatalf("open session actions: %v", err)
+	}
+	harness.tester.Frame()
+	if err := harness.tester.Click("导出 JSONL"); err != nil {
+		t.Fatalf("click export JSONL: %v", err)
+	}
+	harness.tester.Frame()
+	if len(titles) != 2 || titles[1] != "导出会话" {
+		t.Fatalf("JSONL dialog titles = %v, want the Chinese title second", titles)
 	}
 }

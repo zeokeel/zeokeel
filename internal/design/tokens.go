@@ -109,8 +109,6 @@ type Tokens struct {
 	// white.
 	Warning     ui.Color
 	WarningText ui.Color
-
-	White ui.Color
 }
 
 // Light returns the light appearance's brand tokens.
@@ -148,7 +146,6 @@ func fromPalette(p brand.Palette, dark bool) *Tokens {
 		DangerText:     p.DangerText,
 		Warning:        p.Warning,
 		WarningText:    p.WarningText,
-		White:          ui.Hex(brand.HexWhite),
 	}
 }
 
@@ -159,12 +156,21 @@ func (t *Tokens) Scrim() ui.Color {
 	return brand.PaletteOf(t.Dark).Scrim
 }
 
-// Of picks the tokens for the context's current theme (light or dark).
+// Of picks the tokens for the context's current theme (light or dark) and
+// wires the desktop's text-size preference into the brand type scale. The
+// brand theme is installed with c.SetTheme, so mygo does not scale it for us
+// (a custom theme follows Preferences only if the app reads it); Tokens.Font
+// sets explicit font sizes, so the scale must come from here for the desktop
+// text-size setting to reach the brand type scale.
 func Of(c *ui.Context) *Tokens {
+	t := Light()
 	if c.Theme().Dark {
-		return Dark()
+		t = Dark()
 	}
-	return Light()
+	if p := c.Preferences(); p.TextScale > 0 {
+		t.TextScale = p.TextScale
+	}
+	return t
 }
 
 // Theme returns the brand theme the mygo widgets draw with: brand.LightTheme

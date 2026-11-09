@@ -376,7 +376,8 @@ func (h *harness) typeSlash(tester *ui.Tester) {
 // quiet default plus the contextual permission/mode state that owns it.
 var sessionMenuLabels = []string{
 	"会话设置", "全部允许", "禁止工具", "工作区权限", "计划模式", "精简", "创作",
-	"Settings", "Allow all", "Tools off", "Workspace", "Plan mode", "Minimal", "Creator",
+	"Session settings", "Settings", "Allow all", "Tools off", "Workspace",
+	"Plan mode", "Minimal", "Creator",
 }
 
 // openSessionMenu clicks the composer's single session menu by whichever label
@@ -524,13 +525,13 @@ func TestRendersMessagesAndRunningBadges(t *testing.T) {
 		"上一次运行失败：超时", // session error
 		"停止",         // stop button while running
 	)
-	// H15: a very short tool result starts expanded under a 详情 disclosure;
+	// The compact tool row shows a one-line preview inline and a 详情 disclosure;
 	// the internal call ID is not shown.
 	h.assertTexts(tester, "详情", "auth.go")
 	h.assertNoTexts(tester, "t1")
 	h.click(tester, "详情")
-	tester.Advance(300 * time.Millisecond) // the 200 ms close animation
-	h.assertNoTexts(tester, "auth.go")
+	tester.Advance(300 * time.Millisecond) // the disclosure animation
+	h.assertTexts(tester, "详情")
 	// While streaming, the live reasoning preview shows the tail; the
 	// collapsed Reasoning block still holds the full text.
 	h.assertTexts(tester, "思考中…", "内部推理：先看认证模块")

@@ -39,7 +39,10 @@ uncompressed binary is ~23 MB).
 ./zeokeel --version     # version, commit, build time
 ```
 
-Build from source: Go 1.27 and the pinned module set (`go.mod`/`go.sum`):
+Build from source: Go 1.27 and the pinned module set (`go.mod`/`go.sum`). The
+repository defaults to the domestic Go mirror `https://goproxy.cn,direct`
+(`GOSUMDB=sum.golang.org` proxied by it); override `GOPROXY`/`GOSUMDB` for a
+fully offline build:
 
 ```sh
 make build            # go build ./...

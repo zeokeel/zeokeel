@@ -75,7 +75,7 @@ func buildImportPage(c *ui.Context, t *design.Tokens, kctx cordis.Context, runti
 		uikit.Section(c, localized(locale, "数据来源", "Source"), func(*ui.Context) {
 			ui.Field(c, localized(locale, "DSH 数据目录", "DSH data directory"), func() {
 				ui.TextInput(c, &st.dir).
-					Label(localized(locale, "DSH 数据目录", "DSH data directory")).
+					Label(inputLabel(locale, localized(locale, "DSH 数据目录", "DSH data directory"))).
 					Placeholder("~/.dsh").FillWidth()
 			}).Description(localized(locale,
 				"DSH 桌面版的数据目录；先扫描预览，再导入。",

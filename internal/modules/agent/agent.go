@@ -42,6 +42,20 @@ import (
 	"github.com/zeokeel/zeokeel/internal/contracts"
 )
 
+// effectiveMaxIterations maps the product's "0 means unlimited" setting to the
+// cap passed to Rig (which otherwise falls back to its own 20-round default).
+func effectiveMaxIterations(configured int) int {
+	if configured <= 0 {
+		return agentIterationLimitUnbounded
+	}
+	return configured
+}
+
+// agentIterationLimitUnbounded is passed to Rig when the product's iteration
+// limit is 0 ("unlimited"): Rig treats 0 as its own 20-round default, so the
+// run loop needs a cap it will never reach in practice.
+const agentIterationLimitUnbounded = 1_000_000
+
 const (
 	// ModuleID is the stable module identity used by assembly documents.
 	ModuleID = "zeokeel/agent"
@@ -75,7 +89,8 @@ type Config struct {
 	ApiKeyEnv string `json:"apiKeyEnv"`
 	// SystemPrompt is the default system prompt.
 	SystemPrompt string `json:"systemPrompt"`
-	// MaxIterations bounds the model/tool rounds per run (0 = Rig default 20).
+	// MaxIterations bounds the model/tool rounds per run; 0 (the default)
+	// means no practical limit.
 	MaxIterations int `json:"maxIterations"`
 	// ContextBudget is the estimated prompt token budget (0 = unlimited).
 	ContextBudget int `json:"contextBudget"`
@@ -1417,11 +1432,14 @@ func (s *service) run(ctx context.Context, sessionID string, cfg contracts.ChatC
 		history = s.historyView()
 	}
 	generation := s.modelCatalogInfo(cfg.Model)
+	// The product's default is unlimited; Rig treats 0 as its built-in 20-round
+	// default, so a 0 limit is passed as an effectively unreachable cap.
+	maxIterations := effectiveMaxIterations(cfg.MaxIterations)
 	spec := rig.AgentSpec{
 		Provider:        provider,
 		Model:           cfg.Model,
 		SystemPrompt:    cfg.SystemPrompt,
-		MaxIterations:   cfg.MaxIterations,
+		MaxIterations:   maxIterations,
 		Temperature:     generation.Temperature,
 		TopP:            generation.TopP,
 		MaxTokens:       generation.MaxTokens,
@@ -1532,10 +1550,11 @@ func (s *service) handleEvent(sessionID string, event rig.Event) {
 		case rig.EventToolCall:
 			if event.Call != nil {
 				message.Tools = append(message.Tools, contracts.ToolCall{
-					ID:        event.Call.ID,
-					Name:      event.Call.Name,
-					Status:    "running",
-					Arguments: event.Call.Arguments,
+					ID:         event.Call.ID,
+					Name:       event.Call.Name,
+					Status:     "running",
+					Arguments:  event.Call.Arguments,
+					TextOffset: len(message.Text),
 				})
 				s.appendEvent(context.Background(), sessionID, "tool_call", map[string]any{
 					"id": event.Call.ID, "name": event.Call.Name, "arguments": event.Call.Arguments,

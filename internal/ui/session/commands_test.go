@@ -124,7 +124,7 @@ func TestSessionSlashCommandsRegistered(t *testing.T) {
 }
 
 func TestSessionSlashCommandActions(t *testing.T) {
-	setExportSaver(t, func(defaultName, content string) (string, error) {
+	setExportSaver(t, func(title, defaultName, content string) (string, error) {
 		return "/tmp/" + defaultName, nil
 	})
 	chat := newExtendedChat()
@@ -177,7 +177,7 @@ func TestSessionSlashCommandActions(t *testing.T) {
 
 func TestSessionSlashCommandExportSeam(t *testing.T) {
 	var names []string
-	setExportSaver(t, func(defaultName, content string) (string, error) {
+	setExportSaver(t, func(title, defaultName, content string) (string, error) {
 		names = append(names, defaultName)
 		return "/tmp/out.md", nil
 	})

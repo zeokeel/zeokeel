@@ -39,12 +39,15 @@ var KeySubagents = cordis.NewServiceKey[Subagents]("zeokeel/subagents")
 // Agent permission modes (the old shell's permission setting). The approval
 // gate reads the current mode on every tool call, so switching is immediate.
 const (
-	// SettingAgentPermission stores the current permission mode.
+	// SettingAgentPermission stores the current permission mode. Unset or
+	// unknown values resolve to workspace.
 	SettingAgentPermission = "agent.permission"
-	// PermissionAsk asks for every tool call (the default).
+	// PermissionAsk asks for every tool call.
 	PermissionAsk = "ask"
-	// PermissionWorkspace auto-allows read-only workspace tools and asks for
-	// everything else.
+	// PermissionWorkspace (the default) auto-allows the workspace file tools
+	// (reading, listing, searching, writing and editing inside the workspace)
+	// and asks for everything that can leave it: shell, network, MCP and
+	// unknown tools.
 	PermissionWorkspace = "workspace"
 	// PermissionFull allows every tool call without asking.
 	PermissionFull = "full"

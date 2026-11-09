@@ -17,26 +17,8 @@ func Apply(el ui.Element, styles ...Style) ui.Element {
 }
 
 // Atoms: one property each, the equivalents of CSS utilities.
-func (t *Tokens) Pad(v float32) Style {
-	return func(el ui.Element) ui.Element { return el.Padding(v) }
-}
-func (t *Tokens) PadX(v float32) Style {
-	return func(el ui.Element) ui.Element { return el.PaddingX(v) }
-}
-func (t *Tokens) PadY(v float32) Style {
-	return func(el ui.Element) ui.Element { return el.PaddingY(v) }
-}
 func (t *Tokens) Gap(v float32) Style {
 	return func(el ui.Element) ui.Element { return el.Gap(v) }
-}
-func (t *Tokens) Fill(c ui.Color) Style {
-	return func(el ui.Element) ui.Element { return el.Background(c) }
-}
-func (t *Tokens) Stroke(w float32, c ui.Color) Style {
-	return func(el ui.Element) ui.Element { return el.Border(w, c) }
-}
-func (t *Tokens) Radius(r float32) Style {
-	return func(el ui.Element) ui.Element { return el.Radius(r) }
 }
 
 // textScale is the usable TextScale: an unset or non-positive scale means the

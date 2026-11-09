@@ -28,8 +28,8 @@ func TestFeedbackInExportsAndReport(t *testing.T) {
 
 	var sessionsExport, report string
 	overrideDataSeams(t, nil,
-		func(_, content string) (string, error) { sessionsExport = content; return "/tmp/sessions.md", nil },
-		func(_, content string) (string, error) { report = content; return "/tmp/report.txt", nil })
+		func(_, _, content string) (string, error) { sessionsExport = content; return "/tmp/sessions.md", nil },
+		func(_, _, content string) (string, error) { report = content; return "/tmp/report.txt", nil })
 	harness := startDataPrivacy(t, chat)
 
 	// All-sessions Markdown: summary + per-message quotes, invalid ignored.

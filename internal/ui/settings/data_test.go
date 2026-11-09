@@ -60,7 +60,7 @@ func overrideOpenPath(t *testing.T, fn func(string) error) {
 }
 
 // overrideSavers replaces both export seams for one test.
-func overrideSavers(t *testing.T, sessions func(string, string) (string, error), report func(string, string) (string, error)) {
+func overrideSavers(t *testing.T, sessions func(string, string, string) (string, error), report func(string, string, string) (string, error)) {
 	t.Helper()
 	prevSessions, prevReport := settings.ExportSessionsSaver, settings.ExportReportSaver
 	if sessions != nil {
@@ -115,15 +115,18 @@ func TestDataPrivacyOpenDirectory(t *testing.T) {
 func TestDataPrivacyExportAllSessions(t *testing.T) {
 	chat := &fakeChat{}
 	seedDataPageSessions(chat)
-	var gotName, gotContent string
-	overrideSavers(t, func(defaultName, content string) (string, error) {
-		gotName, gotContent = defaultName, content
+	var gotTitle, gotName, gotContent string
+	overrideSavers(t, func(title, defaultName, content string) (string, error) {
+		gotTitle, gotName, gotContent = title, defaultName, content
 		return "/tmp/exported-sessions.md", nil
 	}, nil)
 	h := dataPageHarness(t, chat, newFakeSettings(nil), "/data/export", contracts.AppInfo{})
 	tester := h.tester()
 
 	h.click(tester, "导出全部会话")
+	if gotTitle != "导出全部会话" {
+		t.Fatalf("export dialog title = %q, want the localized 导出全部会话", gotTitle)
+	}
 	if !strings.HasPrefix(gotName, "zeokeel-sessions-") || !strings.HasSuffix(gotName, ".md") {
 		t.Fatalf("export default name = %q, want zeokeel-sessions-<date>.md", gotName)
 	}
@@ -138,7 +141,7 @@ func TestDataPrivacyExportAllSessions(t *testing.T) {
 func TestDataPrivacyExportCanceled(t *testing.T) {
 	chat := &fakeChat{}
 	seedDataPageSessions(chat)
-	overrideSavers(t, func(string, string) (string, error) { return "", nil }, nil)
+	overrideSavers(t, func(string, string, string) (string, error) { return "", nil }, nil)
 	h := dataPageHarness(t, chat, newFakeSettings(nil), "/data/export", contracts.AppInfo{})
 	tester := h.tester()
 	h.click(tester, "导出全部会话")
@@ -148,7 +151,7 @@ func TestDataPrivacyExportCanceled(t *testing.T) {
 func TestDataPrivacyExportError(t *testing.T) {
 	chat := &fakeChat{}
 	seedDataPageSessions(chat)
-	overrideSavers(t, func(string, string) (string, error) {
+	overrideSavers(t, func(string, string, string) (string, error) {
 		return "", errors.New("disk full")
 	}, nil)
 	h := dataPageHarness(t, chat, newFakeSettings(nil), "/data/export", contracts.AppInfo{})
@@ -215,9 +218,9 @@ func TestDataPrivacyDiagnosticReport(t *testing.T) {
 	})
 	chat := &fakeChat{}
 	seedDataPageSessions(chat)
-	var gotName, gotContent string
-	overrideSavers(t, nil, func(defaultName, content string) (string, error) {
-		gotName, gotContent = defaultName, content
+	var gotTitle, gotName, gotContent string
+	overrideSavers(t, nil, func(title, defaultName, content string) (string, error) {
+		gotTitle, gotName, gotContent = title, defaultName, content
 		return "/tmp/diagnostics.txt", nil
 	})
 	h := dataPageHarness(t, chat, store, "/data/report", contracts.AppInfo{
@@ -226,6 +229,9 @@ func TestDataPrivacyDiagnosticReport(t *testing.T) {
 	tester := h.tester()
 
 	h.click(tester, "导出诊断报告")
+	if gotTitle != "诊断报告" {
+		t.Fatalf("report dialog title = %q, want 诊断报告", gotTitle)
+	}
 	if !strings.HasPrefix(gotName, "zeokeel-diagnostics-") || !strings.HasSuffix(gotName, ".txt") {
 		t.Fatalf("report default name = %q, want zeokeel-diagnostics-<date>.txt", gotName)
 	}
@@ -250,7 +256,7 @@ func TestDataPrivacyDiagnosticReport(t *testing.T) {
 
 func TestDataPrivacyReportError(t *testing.T) {
 	chat := &fakeChat{}
-	overrideSavers(t, nil, func(string, string) (string, error) {
+	overrideSavers(t, nil, func(string, string, string) (string, error) {
 		return "", errors.New("permission denied")
 	})
 	h := dataPageHarness(t, chat, newFakeSettings(nil), "/data/report", contracts.AppInfo{})
@@ -271,7 +277,7 @@ func TestDataPrivacyWithoutSessions(t *testing.T) {
 func TestDataPrivacyEnglish(t *testing.T) {
 	chat := &fakeChat{}
 	seedDataPageSessions(chat)
-	overrideSavers(t, func(string, string) (string, error) { return "/tmp/en.md", nil }, nil)
+	overrideSavers(t, func(string, string, string) (string, error) { return "/tmp/en.md", nil }, nil)
 	h := newLocaleHarness(t, chat, newFakeSettings(nil), settings.Config{}, "en")
 	provide(t, h.ctx, contracts.KeyDataDir, "/data/en")
 	tester := h.tester()

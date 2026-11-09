@@ -1,13 +1,15 @@
 // Package approvals implements ZeoKeel's approval backend module: the
 // contracts.Approvals queue the agent gate and the approval UI share.
 //
-// It owns the approval policy ("ask", "auto", "never"), the queue of pending
-// tool-call approvals and the waiting/resolution handshake. The module is a
-// kernel backend module: it requires the host logger, provides
+// It owns the approval policy ("workspace" (default), "ask", "auto", "never"),
+// the queue of pending tool-call approvals and the waiting/resolution handshake.
+// The module is a kernel backend module: it requires the host logger, provides
 // contracts.KeyApprovals and keeps all state in memory.
 //
 // # Semantics
 //
+//   - workspace: the workspace file tools (read/write/edit/list/search inside the
+//     workspace) are allowed immediately; every other tool asks.
 //   - ask: every Request registers an "appr-<n>" pending entry, notifies
 //     subscribers and blocks until Resolve answers it or the context ends.
 //     Context cancellation removes the pending entry again.
@@ -45,6 +47,9 @@ const (
 	ModuleID = "zeokeel/approvals"
 	// ModeAsk asks the user for every tool call.
 	ModeAsk = "ask"
+	// ModeWorkspace (the default) allows the workspace file tools without
+	// asking and queues everything else.
+	ModeWorkspace = "workspace"
 	// ModeAuto allows every request without asking (headless products).
 	ModeAuto = "auto"
 	// ModeNever denies every request without asking.
@@ -66,7 +71,8 @@ var (
 
 // Config is the module's typed assembly config.
 type Config struct {
-	// Mode is the approval policy: "ask" (default), "auto" or "never".
+	// Mode is the approval policy: "workspace" (default), "ask", "auto" or
+	// "never".
 	Mode string `json:"mode"`
 }
 
@@ -155,16 +161,18 @@ func newServiceWithSettings(mode string, logger contracts.Logger, settings contr
 	}, nil
 }
 
-// normalizeMode canonicalizes one mode string.
+// normalizeMode canonicalizes one mode string; an empty config defaults to the
+// workspace policy, which asks for nothing a normal workspace edit needs.
 func normalizeMode(mode string) (string, error) {
 	normalized := strings.ToLower(strings.TrimSpace(mode))
 	switch normalized {
-	case "":
-		return ModeAsk, nil
+	case "", ModeWorkspace:
+		return ModeWorkspace, nil
 	case ModeAsk, ModeAuto, ModeNever:
 		return normalized, nil
 	default:
-		return "", fmt.Errorf("approvals: invalid mode %q (want %q, %q or %q)", mode, ModeAsk, ModeAuto, ModeNever)
+		return "", fmt.Errorf("approvals: invalid mode %q (want %q, %q, %q or %q)",
+			mode, ModeWorkspace, ModeAsk, ModeAuto, ModeNever)
 	}
 }
 
@@ -181,8 +189,8 @@ func (s *service) Mode() string {
 
 // effectiveMode resolves the configured mode and the optional permissions
 // setting: a non-empty setting wins; ask/workspace/full map onto the policy,
-// unknown values degrade to ask and the legacy "auto" value is an alias of
-// full.
+// unknown values degrade to workspace (the default) and the legacy "auto"
+// value is an alias of full.
 func (s *service) effectiveMode() string {
 	s.mu.Lock()
 	configured := s.mode
@@ -204,17 +212,22 @@ func (s *service) effectiveMode() string {
 	case ModeNever:
 		return ModeNever
 	default:
-		return ModeAsk
+		return ModeWorkspace
 	}
 }
 
-// workspaceReadOnlyTools are the tools the workspace permission mode allows
-// without asking (read-only workspace inspection).
-var workspaceReadOnlyTools = map[string]bool{
-	"read_file": true,
-	"list_dir":  true,
-	"glob":      true,
-	"grep":      true,
+// workspacePathTools are the workspace permission mode's no-prompt set: the
+// file tools whose work is normal in-workspace editing (reading, listing,
+// searching, writing and editing). Everything that can leave the workspace —
+// shell, network, MCP and unknown tools — still asks.
+var workspacePathTools = map[string]bool{
+	"read_file":          true,
+	"list_dir":           true,
+	"glob":               true,
+	"grep":               true,
+	"write_file":         true,
+	"edit_file":          true,
+	"str_replace_editor": true,
 }
 
 // Request implements contracts.Approvals: auto/never answer immediately, ask
@@ -228,8 +241,8 @@ func (s *service) Request(ctx context.Context, request contracts.ApprovalRequest
 		return contracts.ApprovalAllow, nil
 	case ModeNever:
 		return contracts.ApprovalDeny, nil
-	case contracts.PermissionWorkspace:
-		if workspaceReadOnlyTools[strings.TrimSpace(request.Tool)] {
+	case ModeWorkspace:
+		if workspacePathTools[strings.TrimSpace(request.Tool)] {
 			return contracts.ApprovalAllow, nil
 		}
 	}

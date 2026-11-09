@@ -135,12 +135,20 @@ func TestModes(t *testing.T) {
 		t.Fatalf("never Request = %q/%v, want deny", decision, err)
 	}
 
-	empty, err := newService("", nil)
+	defaultMode, err := newService("", nil)
 	if err != nil {
 		t.Fatalf("newService(default): %v", err)
 	}
-	if got := empty.Mode(); got != ModeAsk {
-		t.Fatalf("default Mode = %q, want ask", got)
+	if got := defaultMode.Mode(); got != ModeWorkspace {
+		t.Fatalf("default Mode = %q, want workspace", got)
+	}
+	// The default policy allows normal in-workspace file edits without queueing.
+	if decision, err := defaultMode.Request(context.Background(),
+		contracts.ApprovalRequest{Tool: "write_file"}); err != nil || decision != contracts.ApprovalAllow {
+		t.Fatalf("default write_file = %q/%v, want allow", decision, err)
+	}
+	if pending := defaultMode.Pending(); len(pending) != 0 {
+		t.Fatalf("default write_file pending = %+v, want none", pending)
 	}
 }
 
@@ -150,7 +158,9 @@ func TestModeNormalization(t *testing.T) {
 		mode string
 		want string
 	}{
-		{"", ModeAsk},
+		{"", ModeWorkspace},
+		{"workspace", ModeWorkspace},
+		{" WORKSPACE ", ModeWorkspace},
 		{"ask", ModeAsk},
 		{" ASK ", ModeAsk},
 		{"Auto", ModeAuto},

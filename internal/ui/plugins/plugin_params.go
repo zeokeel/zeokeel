@@ -196,16 +196,23 @@ func pluginParamValue(st *state, settings contracts.SettingsService, spec plugin
 // buildPluginParamModal renders the native edit dialog for one parameter.
 func buildPluginParamModal(c *ui.Context, t *design.Tokens, st *state, settings contracts.SettingsService) {
 	ui.Modal(c, &st.paramEditing, func() {
-		design.Apply(ui.Column(c).Width(560).Gap(design.Space3), func(element ui.Element) ui.Element {
+		save := func() {
+			st.savePluginParam(settings)
+			c.Invalidate()
+		}
+		design.Apply(ui.Column(c).Width(design.DialogWidthM).Gap(design.Space3), func(element ui.Element) ui.Element {
 			return element.PaddingX(design.Space5).PaddingY(design.Space2)
 		}).Children(func() {
 			design.Apply(ui.Text(c, st.tr("编辑参数", "Edit parameter")), t.Font(design.TypeL)).
 				FontWeight(600).TextColor(t.LabelPrimary)
 			design.Apply(ui.Text(c, st.tr("参数：", "Setting: ")+st.paramKey), t.MonoFamily()).
 				FontSize(11).TextColor(t.LabelTertiary)
+			// The dialog's only field takes the focus as it opens and Enter
+			// submits the dialog, as in a desktop form.
 			ui.TextInput(c, &st.paramDraft).
 				Label(st.tr("新值：", "New value: ") + st.paramTitle).
-				Placeholder(st.tr("留空保持不变", "Leave blank to keep the current value")).FillWidth()
+				Placeholder(st.tr("留空保持不变", "Leave blank to keep the current value")).
+				FillWidth().AutoFocus().OnTextKey(uikit.EnterTo(save))
 			if st.paramErrText != "" {
 				uikit.ErrorLine(c, st.paramErrText)
 			}
@@ -215,10 +222,7 @@ func buildPluginParamModal(c *ui.Context, t *design.Tokens, st *state, settings 
 					st.paramErrText = ""
 					c.Invalidate()
 				}},
-				{Label: st.tr("保存", "Save"), Primary: true, OnClick: func() {
-					st.savePluginParam(settings)
-					c.Invalidate()
-				}},
+				{Label: st.tr("保存", "Save"), Primary: true, OnClick: save},
 			})
 		})
 	})

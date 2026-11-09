@@ -45,7 +45,7 @@ func startDataPrivacy(t *testing.T, chat contracts.ChatService) *dataPrivacyHarn
 
 // overrideDataSeams replaces the open-path and both export seams for one test.
 func overrideDataSeams(t *testing.T, open func(string) error,
-	sessions func(string, string) (string, error), report func(string, string) (string, error)) {
+	sessions func(string, string, string) (string, error), report func(string, string, string) (string, error)) {
 	t.Helper()
 	prevOpen, prevSessions, prevReport := settingsui.OpenPathFunc,
 		settingsui.ExportSessionsSaver, settingsui.ExportReportSaver
@@ -86,7 +86,7 @@ func TestDataPrivacyExportSessionsFlow(t *testing.T) {
 	chat := newFakeChat()
 	seedPrivacySessions(chat)
 	var gotName, gotContent string
-	overrideDataSeams(t, nil, func(defaultName, content string) (string, error) {
+	overrideDataSeams(t, nil, func(title, defaultName, content string) (string, error) {
 		gotName, gotContent = defaultName, content
 		return "/tmp/all-sessions.md", nil
 	}, nil)
@@ -109,7 +109,7 @@ func TestDataPrivacyExportSessionsFlow(t *testing.T) {
 	}
 
 	// Cancel: "" means the user closed the dialog, the page stays quiet.
-	overrideDataSeams(t, nil, func(string, string) (string, error) { return "", nil }, nil)
+	overrideDataSeams(t, nil, func(string, string, string) (string, error) { return "", nil }, nil)
 	if err := harness.tester.Click("导出全部会话"); err != nil {
 		t.Fatalf("export all (cancel): %v", err)
 	}
@@ -118,7 +118,7 @@ func TestDataPrivacyExportSessionsFlow(t *testing.T) {
 	requireNoText(t, harness.tester, "导出会话失败")
 
 	// Save error is readable.
-	overrideDataSeams(t, nil, func(string, string) (string, error) {
+	overrideDataSeams(t, nil, func(string, string, string) (string, error) {
 		return "", errors.New("disk full")
 	}, nil)
 	if err := harness.tester.Click("导出全部会话"); err != nil {
@@ -205,7 +205,7 @@ func TestDataPrivacyDiagnosticReportMasking(t *testing.T) {
 	chat := newFakeChat()
 	seedPrivacySessions(chat)
 	var report string
-	overrideDataSeams(t, nil, nil, func(defaultName, content string) (string, error) {
+	overrideDataSeams(t, nil, nil, func(title, defaultName, content string) (string, error) {
 		if !strings.HasPrefix(defaultName, "zeokeel-diagnostics-") || !strings.HasSuffix(defaultName, ".txt") {
 			t.Fatalf("report default name = %q", defaultName)
 		}
@@ -266,7 +266,7 @@ func TestDataPrivacyOpenDirectoryAndReportErrors(t *testing.T) {
 	requireHasText(t, harness.tester, "打开数据目录失败：no file manager")
 
 	// Report cancel keeps the page quiet.
-	overrideDataSeams(t, nil, nil, func(string, string) (string, error) { return "", nil })
+	overrideDataSeams(t, nil, nil, func(string, string, string) (string, error) { return "", nil })
 	if err := harness.tester.Click("导出诊断报告"); err != nil {
 		t.Fatalf("export report (cancel): %v", err)
 	}
@@ -274,7 +274,7 @@ func TestDataPrivacyOpenDirectoryAndReportErrors(t *testing.T) {
 	requireNoText(t, harness.tester, "已导出诊断报告")
 
 	// Report save error is readable.
-	overrideDataSeams(t, nil, nil, func(string, string) (string, error) {
+	overrideDataSeams(t, nil, nil, func(string, string, string) (string, error) {
 		return "", errors.New("report disk full")
 	})
 	if err := harness.tester.Click("导出诊断报告"); err != nil {

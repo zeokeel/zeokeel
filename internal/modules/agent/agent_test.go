@@ -411,6 +411,12 @@ func TestEventMappingToolsReasoningAndErrors(t *testing.T) {
 	if call.ID != "call-1" || call.Name != "echo" || call.Status != "ok" {
 		t.Fatalf("tool call = %+v, want call-1/echo/ok", call)
 	}
+	// The call remembers where in the reply it arrived so the transcript can
+	// interleave text and tool cards chronologically: the delta "before " was
+	// streamed first, so the call sits at that byte offset.
+	if want := len("before "); call.TextOffset != want {
+		t.Fatalf("tool call TextOffset = %d, want %d", call.TextOffset, want)
+	}
 	if !strings.Contains(call.Summary, "echoed") {
 		t.Fatalf("tool summary = %q, want the tool result", call.Summary)
 	}
@@ -781,6 +787,7 @@ func (p *scriptedProvider) Stream(context.Context, rig.Request) (rig.Stream, err
 	if call == 1 {
 		return &scriptedStream{chunks: []rig.Chunk{
 			{Reasoning: "thinking"},
+			{Delta: "before "},
 			{ToolCalls: []rig.ToolCallDelta{{Index: 0, ID: "call-1", Name: "echo", Arguments: `{"text":"hi"}`}}},
 			{FinishReason: "tool_calls"},
 		}}, nil

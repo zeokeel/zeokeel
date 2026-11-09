@@ -30,12 +30,20 @@ func (r *Root) view(c *ui.Context) {
 	r.rt.drain()
 	r.frames.Add(1)
 
+	// Every menu MyGo draws in the window follows the brand look: the product
+	// already draws its buttons' menus with PopoverMenuButton, so the system's
+	// text-input/table menus would be the only ones in another style (mygo
+	// context-menu.md: every menu of a window).
+	c.SetMenuPresentation(ui.PopoverMenus)
+
 	// The old shell's chrome shortcut: Cmd/Ctrl+B collapses or expands the
 	// left sidebar (the 64 DIP icon rail).
 	r.bindChromeShortcuts(c)
 
 	// Host applies the brand theme once; modules build with the frame theme.
-	c.SetTheme(r.theme.currentTheme())
+	// The desktop's text-size preference scales the theme's font size, which
+	// every native control reads (design tokens scale their own type scale).
+	c.SetTheme(themeAtScale(r.theme.currentTheme(), c.Preferences().TextScale))
 	// Host-owned commands and chrome strings are localized for the current
 	// language; the registry has no locale of its own, so re-register them when
 	// the user switches.
@@ -43,37 +51,62 @@ func (r *Root) view(c *ui.Context) {
 		r.registerHostCommands()
 	}
 	tokens := design.Of(c)
+	r.loadChromeWidths()
+	r.announceNavigation(c)
 
 	ui.Row(c).Fill().Background(tokens.BgBase).Children(func() {
-		r.sidebar(c)
-		// A drawer inspector floats over the content column; give the column the
-		// drawer's width as right padding while it is open, so the drawer never
-		// covers the composer's send control (the usability audit's H17).
-		contentInset := float32(0)
-		if r.rightPanelDrawerOpen(c) {
-			contentInset = float32(design.InspectorWidth)
+		if r.sidebarCollapsed {
+			r.sidebarRail(c)
+			r.contentArea(c)
+			return
 		}
-		ui.Column(c).FillHeight().Grow(1).Shrink(1).MinWidth(0).
-			Padding(0, contentInset, 0, 0).Children(func() {
-			r.contentHeader(c)
-			r.screen(c)
-		})
-		r.rightPanel(c)
+		// A native split view instead of fixed columns: the divider drags (or
+		// moves with the arrows when focused) and the width persists in the
+		// host settings (docs/ui/split.md).
+		split := ui.Split(c, &r.sidebarWidth, func() {
+			r.sidebarExpanded(c)
+		}, func() {
+			r.contentArea(c)
+		}).SplitReset(design.SidebarWidth).Grow(1).FillHeight().Shrink(1).MinWidth(0)
+		if split.Changed() {
+			r.saveChromeWidths()
+		}
 	})
 
+	r.inspectorDrawer(c)
 	r.palette(c)
 	r.overlays(c)
 }
 
-// sidebar renders the main sidebar region with the brand geometry: the 280 DIP
-// source column, the 64 DIP brand row (logo + wordmark), the primary action
-// slot, screen navigation with icons, the session tree slot, the footer slot
-// and the host settings entry.
-func (r *Root) sidebar(c *ui.Context) {
-	if r.sidebarCollapsed {
-		r.sidebarRail(c)
-		return
+// announceNavigation reports navigation changes to assistive technology: the
+// hand-built navigator does not announce a new screen's title the way a Router
+// does, and the inspector toggle is otherwise silent (mygo accessibility.md:
+// Announcements). It reads the state before the frame builds.
+func (r *Root) announceNavigation(c *ui.Context) {
+	if current := r.nav.Current(); current != "" && current != r.lastAnnouncedScreen {
+		r.lastAnnouncedScreen = current
+		if spec, ok := r.rt.screen(current); ok {
+			c.Announce(r.screenLabel(spec))
+		}
 	}
+	if r.rightOpen != r.lastRightOpen {
+		r.lastRightOpen = r.rightOpen
+		if r.hasAnySlot(contracts.SlotSessionPanelRight) {
+			if r.rightOpen {
+				c.Announce(r.tr("检查器已打开", "Inspector opened"))
+			} else {
+				c.Announce(r.tr("检查器已关闭", "Inspector closed"))
+			}
+		}
+	}
+}
+
+// sidebarExpanded renders the expanded source column inside the sidebar
+// ui.Split pane: the brand row (logo + wordmark), the primary action slot,
+// screen navigation with icons, the session tree slot, the footer slot and the
+// host settings entry. The split view owns the column's width, so the surface
+// only paints the background and the edge.
+func (r *Root) sidebarExpanded(c *ui.Context) {
 	t := design.Of(c)
 	screens := visibleScreens(r.rt.screenSpecs())
 	selected := r.nav.Current()
@@ -81,8 +114,8 @@ func (r *Root) sidebar(c *ui.Context) {
 	if initial && len(screens) > 0 {
 		selected = screens[0].ID
 	}
-	column := ui.Column(c).FillHeight()
-	design.Apply(column, t.Sidebar())
+	column := ui.Column(c).FillHeight().Background(t.BgSidebar).
+		BorderWidth(0, 1, 0, 0).BorderColor(t.BorderL3)
 	changed := false
 	column.Children(func() {
 		// Brand row: the mark, the wordmark and the collapse control (Cmd+B is
@@ -116,7 +149,7 @@ func (r *Root) sidebar(c *ui.Context) {
 			r.slot(c, contracts.SlotSidebarPrimary)
 			r.slot(c, contracts.SlotSidebarNav)
 			r.slot(c, contracts.SlotSidebarTree)
-		}).Grow(1).Shrink(1).FillWidth()
+		}).Grow(1).Shrink(1).FillWidth().Label(r.tr("主导航", "Main navigation"))
 		sidebar.Background(t.BgSidebar)
 		changed = sidebar.Changed()
 		ui.Column(c).FillWidth().Shrink(0).Children(func() {
@@ -150,7 +183,9 @@ func (r *Root) sidebarRail(c *ui.Context) {
 	t := design.Of(c)
 	column := ui.Column(c).Width(design.SidebarRailWidth).FillHeight().
 		AlignItems(ui.Center).Gap(design.Space1).
-		Padding(design.Space3, 0, design.Space3, 0)
+		Padding(design.Space3, 0, design.Space3, 0).
+		Label(r.tr("主导航", "Main navigation")).
+		FocusGroup(ui.Vertical)
 	design.Apply(column, func(el ui.Element) ui.Element {
 		return el.Background(t.BgSidebar).BorderWidth(0, 1, 0, 0).BorderColor(t.BorderL3)
 	})
@@ -171,9 +206,10 @@ func (r *Root) sidebarRail(c *ui.Context) {
 			spec := spec
 			icon := r.screenIcon(spec.ID)
 			label := r.screenLabel(spec)
+			selected := r.nav.Current() == spec.ID
 			button := ui.ButtonBase(c).Size(40, 40).Radius(design.RadiusSM).
-				Label(label).Tooltip(label)
-			if r.nav.Current() == spec.ID {
+				Label(label).Tooltip(label).AccessSelected(selected)
+			if selected {
 				button = button.Background(t.BgSelected)
 			}
 			button.Children(func() {
@@ -270,13 +306,115 @@ func (r *Root) screen(c *ui.Context) {
 	})
 }
 
-// contentHeader is the old shell's screen header band: the right-panel toggle
-// sits at the top-right of the content column, on every screen.
+// contentArea renders the main column, and the docked inspector beside it in a
+// second native split view when the window is wide enough to dock it. A narrow
+// window shows the inspector as a modal drawer over the content instead.
+func (r *Root) contentArea(c *ui.Context) {
+	main := func() {
+		ui.Column(c).FillHeight().Grow(1).Shrink(1).MinWidth(0).Children(func() {
+			r.contentHeader(c)
+			r.screen(c)
+		})
+	}
+	if !r.inspectorDocked(c) {
+		main()
+		return
+	}
+	// ui.Split sizes its *first* pane, so the split's size is the content
+	// column's width: the inspector keeps its own width on the right and the
+	// content takes the rest (a dragged divider updates the inspector width).
+	contentWidth := r.contentColumnWidth(c)
+	contentPaneWidth := contentWidth - r.inspectorWidth
+	if contentPaneWidth < design.Space6 {
+		contentPaneWidth = design.Space6
+	}
+	split := ui.Split(c, &contentPaneWidth, main, func() {
+		r.inspectorDockedPane(c)
+	}).SplitReset(contentWidth - design.InspectorWidth)
+	if split.Changed() {
+		r.inspectorWidth = clampWidth(contentWidth-contentPaneWidth, minInspectorWidth, maxInspectorWidth)
+		r.saveChromeWidths()
+	}
+}
+
+// contentColumnWidth estimates the room the content column and the docked
+// inspector share: the window less the sidebar (or its rail) and the outer
+// split's divider. The inner split only needs it to keep the inspector's width
+// fixed while the content flexes.
+func (r *Root) contentColumnWidth(c *ui.Context) float32 {
+	width, _ := c.Size()
+	sidebar := design.SidebarWidth
+	if r.widthsLoaded && r.sidebarWidth > 0 {
+		sidebar = r.sidebarWidth
+	}
+	if r.sidebarCollapsed {
+		sidebar = design.SidebarRailWidth
+	}
+	if width <= 0 {
+		return design.ContentMinWidth + r.inspectorWidth
+	}
+	return width - sidebar - design.Space1
+}
+
+// inspectorDocked reports whether the open inspector renders as a docked pane:
+// a module contributes to the slot and the window can afford the inspector
+// without squeezing the content below its minimum width.
+func (r *Root) inspectorDocked(c *ui.Context) bool {
+	if !r.rightOpen || !r.hasAnySlot(contracts.SlotSessionPanelRight) {
+		return false
+	}
+	return !r.rightPanelDrawerOpen(c)
+}
+
+// inspectorDockedPane is the inspector's pane in the content split view. The
+// split view owns its width (dragged by the divider), so the pane only paints
+// its surface and builds the module's contribution.
+func (r *Root) inspectorDockedPane(c *ui.Context) {
+	t := design.Of(c)
+	ui.Column(c).FillHeight().Background(t.BgSidebar).
+		BorderWidth(1, 0, 0, 0).BorderColor(t.BorderL3).
+		Padding(design.Space4).Children(func() {
+		r.slot(c, contracts.SlotSessionPanelRight)
+	})
+}
+
+// contentHeader is the window's top band: a native ui.Toolbar with the visible
+// command-palette entry and the inspector toggle. A toolbar is one Tab stop
+// whose arrows move between its controls, and it reports its role and label to
+// assistive technology (docs/ui/toolbar.md).
 func (r *Root) contentHeader(c *ui.Context) {
 	t := design.Of(c)
-	ui.Row(c).FillWidth().Height(design.Space8).PaddingX(design.Space4).
-		AlignItems(ui.Center).Children(func() {
+	ui.Toolbar(c, func() {
+		// Navigation history: the hand-built navigator keeps a screen stack, so
+		// the window can offer a back affordance with a keyboard path (mygo
+		// navigation.md/history-buttons.md) instead of the stack being invisible.
+		if r.nav.CanGoBack() {
+			backLabel := r.tr("返回上一个页面", "Back")
+			back := ui.Button(c, "").Label(backLabel).Tooltip(backLabel).
+				KeyShortcuts(ui.Alt, ui.KeyLeft)
+			back.Children(func() {
+				ui.Icon(c, icons.ChevronRight()).Size(16, 16).
+					TextColor(t.LabelSecondary).Rotate(180)
+			})
+			if back.Clicked() {
+				r.nav.Back()
+				r.requestFrame()
+			}
+		}
 		ui.Spacer(c).Grow(1)
+		paletteLabel := r.tr("快捷操作", "Quick actions")
+		palette := ui.Button(c, "").Label(paletteLabel).Tooltip(paletteLabel).
+			KeyShortcuts(ui.Cmd, ui.KeyK)
+		palette.Children(func() {
+			ui.Icon(c, icons.Search()).Size(16, 16).TextColor(t.LabelSecondary)
+		})
+		if palette.Clicked() {
+			r.paletteOpen = !r.paletteOpen
+			r.paletteQuery = ""
+			r.paletteFilter = ""
+			r.paletteSelected = 0
+			r.requestFrame()
+		}
 		if !r.hasAnySlot(contracts.SlotSessionPanelRight) {
 			return
 		}
@@ -284,90 +422,56 @@ func (r *Root) contentHeader(c *ui.Context) {
 		if r.rightOpen {
 			label = r.tr("收起右侧栏", "Close inspector")
 		}
-		button := ui.ButtonBase(c).Size(28, 28).Center().
-			Label(label).Tooltip(label).Radius(design.RadiusSM)
-		if button.Hovered() {
-			button = button.Background(t.BgHover)
-		}
-		button.Children(func() {
-			ui.Icon(c, icons.PanelRight()).Size(18, 18).
-				TextColor(t.LabelSecondary)
+		inspector := ui.Button(c, "").Label(label).Tooltip(label).
+			KeyShortcuts(ui.Cmd|ui.Alt, ui.KeyI)
+		inspector.Children(func() {
+			ui.Icon(c, icons.PanelRight()).Size(16, 16).TextColor(t.LabelSecondary)
 		})
-		if button.Clicked() {
+		if inspector.Clicked() {
 			r.rightOpen = !r.rightOpen
 			r.requestFrame()
 		}
-	})
+	}).Label(r.tr("窗口", "Window"))
 }
 
-// rightPanel docks the workspace-wide inspector panel on the right edge when
-// the user opened it and a module contributes to
-// contracts.SlotSessionPanelRight (the old UI's right sidebar). It belongs to
-// the window, not to one screen, so it survives screen switches.
-func (r *Root) rightPanel(c *ui.Context) {
-	if !r.rightOpen || !r.hasAnySlot(contracts.SlotSessionPanelRight) {
+// inspectorDrawer shows the inspector as a modal drawer over the content when
+// the window is too narrow to dock it. It follows mygo's drawer recipe
+// (docs/ui/overlays.md "A drawer on the right"): the backdrop is a modal Row,
+// the panel is a named RoleDialog, a press outside or Escape closes it, and the
+// focus returns to what had it when it goes.
+func (r *Root) inspectorDrawer(c *ui.Context) {
+	if !r.rightOpen || !r.hasAnySlot(contracts.SlotSessionPanelRight) || !r.rightPanelDrawerOpen(c) {
 		return
 	}
 	t := design.Of(c)
-	width, _ := c.Size()
-	base := design.SidebarWidth
-	if r.sidebarCollapsed {
-		base = design.SidebarRailWidth
-	}
-	dockW := design.InspectorWidth
-	if width > 0 {
-		if avail := width - base - design.ContentMinWidth - design.Space6; avail < dockW {
-			dockW = avail
-		}
-	}
-	if dockW < design.InspectorMinWidth {
-		// The window cannot afford a docked inspector without squeezing the
-		// conversation below its minimum: show the same panel as a drawer over
-		// the content instead of compressing both to unusable widths.
-		r.rightPanelDrawer(c, t)
-		return
-	}
-	ui.Column(c).Width(dockW).Shrink(0).FillHeight().Background(t.BgSidebar).
-		BorderWidth(1, 0, 0, 0).BorderColor(t.BorderL3).
-		Padding(design.Space4).Children(func() {
-		r.slot(c, contracts.SlotSessionPanelRight)
-	})
-}
-
-// rightPanelDrawer shows the inspector over the content column, for windows too
-// narrow to dock it. The backdrop and the close control both dismiss it.
-func (r *Root) rightPanelDrawer(c *ui.Context, t *design.Tokens) {
 	ui.Overlay(c, func() {
-		backdropLabel := r.tr("关闭右侧栏", "Close inspector")
-		backdrop := ui.ButtonBase(c).Absolute().Left(0).Top(0).Right(0).Bottom(0).
-			Label(backdropLabel).Background(ui.RGBA(0, 0, 0, 0.25))
-		if backdrop.Clicked() {
-			r.rightOpen = false
-			r.requestFrame()
-		}
-		panel := ui.Column(c).Absolute().Right(0).Top(0).Bottom(0).
-			Width(design.InspectorWidth).Background(t.BgSidebar).
-			BorderWidth(1, 0, 0, 0).BorderColor(t.BorderL3).
-			Padding(design.Space4)
-		panel.Children(func() {
-			ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(design.Space2).Children(func() {
-				design.Apply(ui.Text(c, r.tr("检查器", "Inspector")), t.Font(design.TypeS)).
-					FontWeight(600).TextColor(t.LabelPrimary).Grow(1)
-				closeLabel := r.tr("关闭右侧栏", "Close inspector")
-				close := ui.ButtonBase(c).Size(28, 28).Center().Radius(design.RadiusSM).
-					Label(closeLabel).Tooltip(closeLabel)
-				if close.Hovered() {
-					close = close.Background(t.BgHover)
-				}
-				close.Children(func() {
-					ui.Icon(c, icons.Close()).Size(16, 16).TextColor(t.LabelSecondary)
+		back := ui.Row(c).Absolute().Left(0).Top(0).Right(0).Bottom(0).
+			Justify(ui.End).Background(t.Scrim()).Modal()
+		back.Children(func() {
+			panel := ui.Column(c).Width(design.InspectorWidth).FillHeight().
+				Background(t.BgSidebar).BorderWidth(1, 0, 0, 0).BorderColor(t.BorderL3).
+				Padding(design.Space4).
+				Role(ui.RoleDialog).Label(r.tr("检查器", "Inspector"))
+			panel.Children(func() {
+				ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(design.Space2).Children(func() {
+					design.Apply(ui.Text(c, r.tr("检查器", "Inspector")), t.Font(design.TypeS)).
+						FontWeight(600).TextColor(t.LabelPrimary).Grow(1)
+					closeLabel := r.tr("关闭右侧栏", "Close inspector")
+					close := ui.Button(c, "").Label(closeLabel).Tooltip(closeLabel)
+					close.Children(func() {
+						ui.Icon(c, icons.Close()).Size(16, 16).TextColor(t.LabelSecondary)
+					})
+					if close.Clicked() {
+						r.rightOpen = false
+						r.requestFrame()
+					}
 				})
-				if close.Clicked() {
-					r.rightOpen = false
-					r.requestFrame()
-				}
+				r.slot(c, contracts.SlotSessionPanelRight)
 			})
-			r.slot(c, contracts.SlotSessionPanelRight)
+			if panel.PressedOutside() || back.OverlayShortcut(0, ui.KeyEscape) {
+				r.rightOpen = false
+				r.requestFrame()
+			}
 		})
 	})
 }
@@ -446,7 +550,13 @@ func (r *Root) palette(c *ui.Context) {
 			r.paletteList.Key = func(row int) any { return matches[row].ID }
 			r.paletteList.Label = func(row int) string { return matches[row].Title }
 			r.paletteList.Selected = &r.paletteSelected
-			list := ui.List(c, &r.paletteList, len(matches)).Rows(func(row ui.ListRow) {
+			// The search field keeps the keyboard focus while the list shows the
+			// choice; ActiveDescendant points assistive technology at the row
+			// the arrows are on (mygo accessibility.md: a list box a text field
+			// drives with ActiveDescendant).
+			var activeRow ui.Element
+			list := ui.List(c, &r.paletteList, len(matches)).
+				Label(r.tr("命令", "Commands")).Rows(func(row ui.ListRow) {
 				cmd := matches[row.Index]
 				chosen := row.Selected()
 				// The row is a native button so a single click runs the command,
@@ -461,6 +571,7 @@ func (r *Root) palette(c *ui.Context) {
 				titleColor, hintColor := t.LabelPrimary, t.LabelTertiary
 				if chosen {
 					titleColor, hintColor = t.AccentText, t.AccentText
+					activeRow = item
 				} else if item.Hovered() {
 					item = item.Background(t.BgHover)
 				}
@@ -486,6 +597,9 @@ func (r *Root) palette(c *ui.Context) {
 					r.runPaletteCommand(cmd)
 				}
 			}).MaxHeight(320)
+			if activeRow.Valid() {
+				search.ActiveDescendant(activeRow)
+			}
 			if search.Submitted() || list.Submitted() {
 				r.runPaletteCommand(matches[r.paletteSelected])
 			}
@@ -583,10 +697,17 @@ func (r *Root) rightPanelDrawerOpen(c *ui.Context) bool {
 	}
 	width, _ := c.Size()
 	base := design.SidebarWidth
+	if r.widthsLoaded && r.sidebarWidth > 0 {
+		base = r.sidebarWidth
+	}
 	if r.sidebarCollapsed {
 		base = design.SidebarRailWidth
 	}
-	dockW := design.InspectorWidth
+	inspector := design.InspectorWidth
+	if r.widthsLoaded && r.inspectorWidth > 0 {
+		inspector = r.inspectorWidth
+	}
+	dockW := inspector
 	if width > 0 {
 		if avail := width - base - design.ContentMinWidth - design.Space6; avail < dockW {
 			dockW = avail

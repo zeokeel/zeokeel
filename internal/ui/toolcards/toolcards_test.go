@@ -233,7 +233,7 @@ func TestStatusBadgesUseThemeSemantics(t *testing.T) {
 		{ID: "w1", Name: "write_file", Status: "ok"},
 	}, nil, nil)
 	tester := h.tester()
-	h.assertTexts(tester, "运行中", "失败", "完成", "shell", "文件")
+	h.assertTexts(tester, "运行中", "失败", "完成")
 	h.assertNoTexts(tester, "running", "error") // labels replace raw statuses
 }
 

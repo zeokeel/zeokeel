@@ -2,10 +2,11 @@ package regression
 
 // Adversarial audit: the runtime permission modes over approvals
 // (settings key agent.permission: ask / workspace / full / auto / never).
-// Negative cases: workspace mode auto-allows only the read-only tool set and
-// still queues writes/network; unknown/malicious setting values fall back to
-// ask; mode switches during a pending request never corrupt the queue; and
-// concurrent settings writers + requests stay race free and deadlock free.
+// Negative cases: workspace mode auto-allows the workspace file tools and still
+// queues shell/network/MCP/unknown tools; unknown/malicious setting values fall
+// back to workspace; mode switches during a pending request never corrupt the
+// queue; and concurrent settings writers + requests stay race free and deadlock
+// free.
 
 import (
 	"context"
@@ -53,9 +54,9 @@ func requestAndCancel(t *testing.T, service contracts.Approvals, request contrac
 	return result.err
 }
 
-// TestPermissionWorkspaceModeAllowList is the workspace-mode negative: only the
-// read-only workspace tools are auto-allowed; write, shell, network and unknown
-// tool names still queue for the user.
+// TestPermissionWorkspaceModeAllowList is the workspace-mode negative: the
+// workspace file tools (read and write) are auto-allowed; shell, network, MCP
+// and unknown tool names still queue for the user.
 func TestPermissionWorkspaceModeAllowList(t *testing.T) {
 	h := permissionService(t, approvals.ModeAsk, contracts.PermissionWorkspace)
 	service := requireService(t, h.ctx, contracts.KeyApprovals)
@@ -67,8 +68,13 @@ func TestPermissionWorkspaceModeAllowList(t *testing.T) {
 	if _, err := service.Subscribe(func() { notifications.inc() }); err != nil {
 		t.Fatalf("Subscribe: %v", err)
 	}
-	// The documented read-only tool set returns allow immediately.
-	for _, tool := range []string{"read_file", "list_dir", "glob", "grep", " read_file "} {
+	// The documented workspace file tool set returns allow immediately: normal
+	// in-workspace editing needs no approval.
+	for _, tool := range []string{
+		"read_file", "list_dir", "glob", "grep",
+		"write_file", "edit_file", "str_replace_editor",
+		" write_file ",
+	} {
 		decision, err := service.Request(context.Background(), contracts.ApprovalRequest{Tool: tool})
 		if err != nil || decision != contracts.ApprovalAllow {
 			t.Fatalf("Request(%q) in workspace mode = (%q, %v), want allow", tool, decision, err)
@@ -81,8 +87,8 @@ func TestPermissionWorkspaceModeAllowList(t *testing.T) {
 		t.Fatalf("workspace auto-allow notified subscribers %d times, want 0", got)
 	}
 
-	// Everything that writes, executes or reaches the network still queues.
-	for _, tool := range []string{"write_file", "edit", "bash", "terminal", "web_fetch", "web_search", "mcp__server__run", ""} {
+	// Everything that executes or can leave the workspace still queues.
+	for _, tool := range []string{"edit", "bash", "terminal", "web_fetch", "web_search", "mcp__server__run", "unknown_tool", ""} {
 		decision := requestAndResolve(t, service, contracts.ApprovalRequest{Tool: tool})
 		if decision != contracts.ApprovalAllow {
 			t.Fatalf("Request(%q) in workspace mode = %q, want the user decision (allow)", tool, decision)
@@ -96,7 +102,7 @@ func TestPermissionWorkspaceModeAllowList(t *testing.T) {
 }
 
 // TestPermissionSettingModes covers every accepted value, the legacy auto
-// alias, config fallback and unknown/malicious values degrading to ask.
+// alias, config fallback and unknown/malicious values degrading to workspace.
 func TestPermissionSettingModes(t *testing.T) {
 	cases := []struct {
 		permission string
@@ -130,17 +136,23 @@ func TestPermissionSettingModes(t *testing.T) {
 		t.Fatalf("Mode() with no setting = %q, want the configured auto", got)
 	}
 
-	// Unknown and malicious values degrade to ask and queue the request.
+	// Unknown and malicious values degrade to workspace: file edits are allowed
+	// without a prompt, shell still queues.
 	for _, permission := range []string{
 		"root", "full;drop table", "neverr", "\x00full", strings.Repeat("x", 4096),
 	} {
 		h := permissionService(t, approvals.ModeAuto, permission)
 		service := requireService(t, h.ctx, contracts.KeyApprovals)
-		if got := service.Mode(); got != approvals.ModeAsk {
-			t.Fatalf("setting %q: Mode() = %q, want ask fallback", permission, got)
+		if got := service.Mode(); got != contracts.PermissionWorkspace {
+			t.Fatalf("setting %q: Mode() = %q, want workspace fallback", permission, got)
+		}
+		decision, err := service.Request(context.Background(),
+			contracts.ApprovalRequest{Tool: "write_file"})
+		if err != nil || decision != contracts.ApprovalAllow {
+			t.Fatalf("setting %q: write_file = (%q, %v), want workspace allow", permission, decision, err)
 		}
 		if err := requestAndCancel(t, service, contracts.ApprovalRequest{Tool: "bash"}); err == nil {
-			t.Fatalf("setting %q: Request was auto-decided, want a queued approval", permission)
+			t.Fatalf("setting %q: bash was auto-decided, want a queued approval", permission)
 		}
 	}
 }

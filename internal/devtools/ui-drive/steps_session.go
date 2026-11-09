@@ -214,7 +214,7 @@ func (d *drive) runSessionSteps() {
 	d.step("composer-session-settings-menu", "session", "输入区：会话设置分组菜单",
 		"点击「会话设置」→ 一个菜单同时提供权限模式、对话模式、思考强度与提示词预设（低频项收进一组）→ Esc 关闭", func(c *check) {
 			d.resetToSession()
-			if !c.click("会话设置") {
+			if !c.click("工作区权限") && !c.click("会话设置") {
 				return
 			}
 			d.drain(2)
@@ -244,7 +244,7 @@ func (d *drive) runSessionSteps() {
 			// Always-visible primary controls.
 			c.require(c.has("附件"), "composer 缺少附件菜单")
 			c.require(c.has("drive-model"), "composer 缺少模型 chip")
-			c.require(c.has("会话设置"), "composer 缺少「会话设置」菜单")
+			c.require(c.has("工作区权限") || c.has("会话设置"), "composer 缺少会话设置菜单")
 			// The fixed right group is the send control (never in overflow).
 			rect, ok := d.find("发送")
 			if !ok {
@@ -252,7 +252,7 @@ func (d *drive) runSessionSteps() {
 				return
 			}
 			c.note("发送 rect=(%.0f,%.0f,%.0f,%.0f)", rect.X, rect.Y, rect.W, rect.H)
-			if !c.click("会话设置") {
+			if !c.click("工作区权限") && !c.click("会话设置") {
 				return
 			}
 			d.drain(2)
@@ -267,12 +267,12 @@ func (d *drive) runSessionSteps() {
 			d.resetToSession()
 			d.drain(3)
 			c.require(d.has("附件"), "窄窗 composer 工具栏缺少附件菜单")
-			c.require(d.has("会话设置"), "窄窗 composer 工具栏缺少「会话设置」分组")
+			c.require(d.has("工作区权限") || d.has("会话设置"), "窄窗 composer 工具栏缺少会话设置分组")
 			c.require(d.has("发送"), "窄窗 composer 工具栏缺少发送按钮")
 			if d.has("»") {
 				c.warnf("窄窗 composer 出现了无标签 » 溢出按钮")
 			}
-			if c.click("会话设置") {
+			if c.click("工作区权限") || c.click("会话设置") {
 				d.drain(2)
 				c.require(d.has("权限模式") && d.has("对话模式"),
 					"窄窗「会话设置」菜单没有权限/对话模式分组")

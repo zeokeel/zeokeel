@@ -88,7 +88,7 @@ func TestSidebarAddWorkspaceChoosesDirectoryAndDefaultsName(t *testing.T) {
 	}
 	h := newHarnessWithWorkspace(t, &fakeChat{}, sidebar.Config{}, workspace)
 	oldPicker := sidebar.DirectoryPicker
-	sidebar.DirectoryPicker = func() (string, error) { return "/tmp/myproj", nil }
+	sidebar.DirectoryPicker = func(string) (string, error) { return "/tmp/myproj", nil }
 	t.Cleanup(func() { sidebar.DirectoryPicker = oldPicker })
 	tester := h.tester()
 	h.click(tester, "添加工作区")
@@ -109,7 +109,7 @@ func TestSidebarAddWorkspaceCustomNameAndFailure(t *testing.T) {
 	workspace := &recordingWorkspace{fakeWorkspace: newFakeWorkspace()}
 	h := newHarnessWithWorkspace(t, &fakeChat{}, sidebar.Config{}, workspace)
 	oldPicker := sidebar.DirectoryPicker
-	sidebar.DirectoryPicker = func() (string, error) { return "/tmp/other", nil }
+	sidebar.DirectoryPicker = func(string) (string, error) { return "/tmp/other", nil }
 	t.Cleanup(func() { sidebar.DirectoryPicker = oldPicker })
 	tester := h.tester()
 	h.click(tester, "添加工作区")
@@ -134,7 +134,7 @@ func TestSidebarAddWorkspacePickerErrorKeepsDialog(t *testing.T) {
 	workspace := &recordingWorkspace{fakeWorkspace: newFakeWorkspace()}
 	h := newHarnessWithWorkspace(t, &fakeChat{}, sidebar.Config{}, workspace)
 	oldPicker := sidebar.DirectoryPicker
-	sidebar.DirectoryPicker = func() (string, error) { return "", errors.New("picker failed") }
+	sidebar.DirectoryPicker = func(string) (string, error) { return "", errors.New("picker failed") }
 	t.Cleanup(func() { sidebar.DirectoryPicker = oldPicker })
 	tester := h.tester()
 	h.click(tester, "添加工作区")
@@ -162,8 +162,8 @@ func TestAddWorkspaceDirectoryDialogTitleFollowsLocale(t *testing.T) {
 	h := newLocaleHarness(t, &fakeChat{}, sidebar.Config{}, "en", workspace, nil)
 	captured := ""
 	oldPicker := sidebar.DirectoryPicker
-	sidebar.DirectoryPicker = func() (string, error) {
-		captured = sidebar.WorkspaceDirectoryDialogTitle
+	sidebar.DirectoryPicker = func(title string) (string, error) {
+		captured = title
 		return "", nil // cancel keeps the modal open for the second invocation
 	}
 	t.Cleanup(func() { sidebar.DirectoryPicker = oldPicker })

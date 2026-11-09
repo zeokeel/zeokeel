@@ -299,7 +299,7 @@ func artifactPanel(c *ui.Context, runtime contracts.UIRuntime, st *state, artifa
 	title := firstNonEmpty(artifact.Title, st.tr("工件预览", "Artifact preview"))
 	close := func() { popOverlay(runtime, st) }
 	dialogEnter(c, close)
-	design.Apply(ui.Column(c).Width(620).Gap(design.Space4), func(el ui.Element) ui.Element {
+	design.Apply(ui.Column(c).Width(design.DialogWidthL).Gap(design.Space4), func(el ui.Element) ui.Element {
 		return el.PaddingX(design.Space6).PaddingY(design.Space2)
 	}).Children(func() {
 		ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(design.Space2).Children(func() {
@@ -331,7 +331,7 @@ func planPanel(c *ui.Context, runtime contracts.UIRuntime, st *state) {
 		return
 	}
 	approve := func() { exitPlan(runtime, st, "approve", st.tr("批准失败：", "Approve failed: ")) }
-	design.Apply(ui.Column(c).Width(620).Gap(design.Space4), func(el ui.Element) ui.Element {
+	design.Apply(ui.Column(c).Width(design.DialogWidthL).Gap(design.Space4), func(el ui.Element) ui.Element {
 		return el.PaddingX(design.Space6).PaddingY(design.Space2)
 	}).Children(func() {
 		ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(design.Space2).Children(func() {
@@ -455,7 +455,7 @@ func keepPlanning(runtime contracts.UIRuntime, st *state) {
 // free-text input with Submit, and the Cancel action on the left of the footer.
 func questionPanel(c *ui.Context, runtime contracts.UIRuntime, st *state, question contracts.UserQuestion) {
 	t := design.Of(c)
-	design.Apply(ui.Column(c).Width(520).Gap(design.Space4), func(el ui.Element) ui.Element {
+	design.Apply(ui.Column(c).Width(design.DialogWidthS).Gap(design.Space4), func(el ui.Element) ui.Element {
 		return el.PaddingX(design.Space6).PaddingY(design.Space2)
 	}).Children(func() {
 		ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(design.Space2).Children(func() {
@@ -496,7 +496,7 @@ func questionPanel(c *ui.Context, runtime contracts.UIRuntime, st *state, questi
 		dialogEnter(c, func() { submit(st.draft) })
 		ui.TextInput(c, &st.draft).Label(st.tr("回答", "Answer")).
 			Placeholder(st.tr("输入你的回答", "Type your answer")).FillWidth().
-			OnTextKey(enterTo(func() { submit(st.draft) }))
+			OnTextKey(uikit.EnterTo(func() { submit(st.draft) }))
 		answer := strings.TrimSpace(st.draft)
 		ui.Divider(c)
 		uikit.DialogFooter(c, []uikit.DialogAction{
@@ -515,17 +515,6 @@ func dialogEnter(c *ui.Context, action func()) {
 		return
 	}
 	c.OnShortcut(0, ui.KeyEnter, action)
-}
-
-// enterTo adapts a primary action to a single-line text input's OnTextKey.
-func enterTo(action func()) func(ui.TextKey) bool {
-	return func(k ui.TextKey) bool {
-		if k.Key != ui.KeyEnter || k.Mods != 0 {
-			return false
-		}
-		action()
-		return true
-	}
 }
 
 // markPlanExited mirrors the decision into the local snapshot so the live
@@ -588,15 +577,6 @@ func popOverlay(runtime contracts.UIRuntime, st *state) {
 	st.planFeedback = ""
 	st.planHold = false
 	runtime.Invalidate()
-}
-
-// buildErrorLine is the dialog's danger row.
-func buildErrorLine(c *ui.Context, t *design.Tokens, text string) {
-	th := t.Theme()
-	ui.Row(c).FillWidth().Gap(design.Space2).AlignItems(ui.Start).Children(func() {
-		ui.Icon(c, icons.AlertTriangle()).Size(th.Space(4), th.Space(4)).TextColor(t.Danger)
-		design.Apply(ui.Text(c, text), t.Font(design.TypeXS)).TextColor(t.DangerText)
-	})
 }
 
 // own registers one contribution and ties its unregistration to ctx's effect

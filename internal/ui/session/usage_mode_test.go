@@ -111,7 +111,7 @@ func TestAgentModePlanBadgeAndToggle(t *testing.T) {
 	tester := h.tester()
 	// Normal mode keeps the quiet session-menu label; plan mode owns the label
 	// (and the warning colour) when it is active.
-	h.assertTexts(tester, "会话设置")
+	h.assertTexts(tester, "工作区权限")
 	if got := textsContaining(tester.Texts(), "计划模式"); got != 0 {
 		t.Fatalf("plan state rendered outside the session menu; texts = %v", tester.Texts())
 	}
@@ -129,7 +129,7 @@ func TestAgentModePlanBadgeAndToggle(t *testing.T) {
 	if got := settings.get(contracts.SettingAgentMode); got != contracts.AgentModeNormal {
 		t.Fatalf("stored agent mode = %q, want normal", got)
 	}
-	h.assertTexts(tester, "会话设置")
+	h.assertTexts(tester, "工作区权限")
 	if got := textsContaining(tester.Texts(), "计划模式"); got != 0 {
 		t.Fatalf("plan state still rendered after switching back; texts = %v", tester.Texts())
 	}
@@ -155,7 +155,7 @@ func TestAgentModeEnglishCopy(t *testing.T) {
 	tester := h.tester()
 	h.ui.Locale().SetLanguage("en")
 	tester.Frame()
-	h.assertTexts(tester, "Settings")
+	h.assertTexts(tester, "Workspace")
 
 	h.openSessionMenu(tester)
 	h.assertTexts(tester, "Conversation mode", "Normal mode", "Plan mode")

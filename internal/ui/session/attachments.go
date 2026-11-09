@@ -215,7 +215,7 @@ func buildAttachmentPathDialog(c *ui.Context, t *design.Tokens, runtime contract
 	}
 	ui.Modal(c, &st.attachPathsOpen, func() {
 		dialogEnter(c, add)
-		design.Apply(ui.Column(c).Width(520).Gap(design.Space4), func(el ui.Element) ui.Element {
+		design.Apply(ui.Column(c).Width(design.DialogWidthM).Gap(design.Space4), func(el ui.Element) ui.Element {
 			return el.PaddingX(design.Space6).PaddingY(design.Space2)
 		}).Children(func() {
 			design.Apply(ui.Text(c, st.tr("手动添加附件", "Add attachments by path")), t.Font(design.TypeL)).

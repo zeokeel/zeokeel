@@ -8,6 +8,8 @@ import (
 
 	"github.com/egoist/mygo/ui"
 
+	"github.com/zeokeel/zeokeel-rig"
+
 	"github.com/zeokeel/zeokeel/internal/contracts"
 	"github.com/zeokeel/zeokeel/internal/design"
 	"github.com/zeokeel/zeokeel/internal/icons"
@@ -66,7 +68,7 @@ func buildPanel(c *ui.Context, t *design.Tokens, runtime contracts.UIRuntime, ch
 			case tabTools:
 				buildToolsPane(c, t, chat, st)
 			case tabLog:
-				buildLogPane(c, t, log, chat, st.locale)
+				buildLogPane(c, t, log, chat, st.locale, st)
 			case tabFiles:
 				buildFilesPane(c, t, workspace, artifacts, runtime, st)
 			case tabChanges:
@@ -155,6 +157,7 @@ func buildPaneAction(c *ui.Context, runtime contracts.UIRuntime, terminal contra
 			Tooltip(st.tr("重新读取文件列表", "Reload the file list")).Clicked() {
 			st.filesPreview = make(map[string]*filePreview)
 			st.filesErr = ""
+			st.filesLoaded = false // re-read the listing once, not every frame
 			runtime.Invalidate()
 		}
 	case tabChanges:
@@ -257,17 +260,14 @@ func intLabel(value int) string {
 }
 
 // buildToolsPane aggregates every ToolCall of the session, in message order,
-// each with a status badge and a collapsible summary. Rows and dividers carry
-// the list; a per-row card would turn the 320 DIP inspector into a card wall.
+// in the official native list: one row per call with a status badge, the name
+// and a collapsible summary. Up/Down choose a row and Enter toggles its
+// summary, so the pane is usable without the pointer (docs/ui/list.md).
 func buildToolsPane(c *ui.Context, t *design.Tokens, chat contracts.ChatService, st *state) {
 	chatSession, ok := chat.Session(chat.ActiveSession())
 	if !ok {
 		buildEmptyPane(c, uikit.T(st.locale, "还没有工具调用", "No tool calls yet"))
 		return
-	}
-	type toolItem struct {
-		key  string
-		tool contracts.ToolCall
 	}
 	items := make([]toolItem, 0, 8)
 	for messageIndex, message := range chatSession.Messages {
@@ -287,39 +287,72 @@ func buildToolsPane(c *ui.Context, t *design.Tokens, chat contracts.ChatService,
 		design.Apply(ui.Text(c, uikit.T(st.locale,
 			fmt.Sprintf("%d 个工具调用", len(items)), fmt.Sprintf("%d tool calls", len(items)))),
 			t.Font(design.TypeXXS)).TextColor(t.LabelTertiary)
-		for _, item := range items {
-			tool := item.tool
-			c.Key("tool/" + item.key)
-			status := statusLabel(tool.Status, st.locale)
-			color := statusColor(t, tool.Status)
-			ui.Column(c).FillWidth().Gap(design.Space1).Children(func() {
-				ui.Row(c).FillWidth().Gap(design.Space2).AlignItems(ui.Center).Children(func() {
-					design.Apply(ui.Badge(c, status), t.Badge()).TextColor(color)
-					design.Apply(ui.Text(c, tool.Name), t.Font(design.TypeXS)).
-						FontWeight(600).TextColor(t.LabelPrimary).MaxLines(1).Ellipsis("…")
-					ui.Spacer(c).Grow(1)
-					if tool.ID != "" {
-						design.Apply(ui.Text(c, tool.ID), t.Font(design.TypeXXS)).
-							TextColor(t.LabelTertiary).MaxLines(1).Ellipsis("…")
-					}
-				})
-				if summary := strings.TrimSpace(tool.Summary); summary != "" {
-					open := st.open[item.key]
-					ui.Collapsible(c, uikit.T(st.locale, "摘要", "Summary"), &open, func() {
-						design.Apply(ui.Text(c, truncateSummary(summary)), t.TextMuted(design.TypeXXS))
-					})
-					st.open[item.key] = open
-				}
-				ui.Divider(c)
+		st.toolsList.Key = func(row int) any { return items[row].key }
+		st.toolsList.Label = func(row int) string { return items[row].tool.Name }
+		st.toolsList.Selected = &st.toolsSel
+		list := ui.List(c, &st.toolsList, len(items)).
+			Label(uikit.T(st.locale, "工具调用列表", "Tool calls")).
+			Gap(design.Space1).
+			Rows(func(row ui.ListRow) {
+				buildToolRow(row, t, st, items[row.Index])
 			})
+		// Enter toggles the chosen call's summary; the arrow keys already chose
+		// the row through the list's own Selected handling.
+		if list.Submitted() && st.toolsSel >= 0 && st.toolsSel < len(items) {
+			key := items[st.toolsSel].key
+			st.open[key] = !st.open[key]
+			runtimeInvalidate(st)
 		}
 	})
 }
 
-// rowTint paints a self-drawn ButtonBase row's interaction states: selected and
-// pressed use the stronger selection tint, hover the lighter hover tint. The
-// inspector's dense rows are ButtonBase controls (no native look) and must draw
-// pressed feedback themselves.
+// toolItem is one row of the Tools pane: the tool call and its stable key.
+type toolItem struct {
+	key  string
+	tool contracts.ToolCall
+}
+
+// buildToolRow is one tool call row: status badge, name, id and the foldable
+// summary.
+func buildToolRow(row ui.ListRow, t *design.Tokens, st *state, item toolItem) {
+	c := row.Context
+	tool := item.tool
+	status := statusLabel(tool.Status, st.locale)
+	color := statusColor(t, tool.Status)
+	ui.Column(c).FillWidth().Gap(design.Space1).Children(func() {
+		ui.Row(c).FillWidth().Gap(design.Space2).AlignItems(ui.Center).Children(func() {
+			design.Apply(ui.Badge(c, status), t.Badge()).TextColor(color)
+			design.Apply(ui.Text(c, tool.Name), t.Font(design.TypeXS)).
+				FontWeight(600).TextColor(t.LabelPrimary).MaxLines(1).Ellipsis("…")
+			ui.Spacer(c).Grow(1)
+			if tool.ID != "" {
+				design.Apply(ui.Text(c, tool.ID), t.Font(design.TypeXXS)).
+					TextColor(t.LabelTertiary).MaxLines(1).Ellipsis("…")
+			}
+		})
+		if summary := strings.TrimSpace(tool.Summary); summary != "" {
+			open := st.open[item.key]
+			ui.Collapsible(c, uikit.T(st.locale, "摘要", "Summary"), &open, func() {
+				design.Apply(ui.Text(c, truncateSummary(summary)), t.TextMuted(design.TypeXXS))
+			})
+			st.open[item.key] = open
+		}
+	})
+}
+
+// runtimeInvalidate requests one more frame after a list action changed state.
+func runtimeInvalidate(st *state) {
+	if st.runtime != nil {
+		st.runtime.Invalidate()
+	}
+}
+
+// rowTint paints a self-drawn ButtonBase control's interaction states: selected
+// and pressed use the stronger selection tint, hover the lighter hover tint.
+// The inspector's lists are official ui.List widgets, which paint their own row
+// states; this remains only for the standalone bare buttons (the close control,
+// the artifact title toggle and the task overflow button) that have no native
+// look and must draw their own hover/pressed feedback.
 func rowTint(t *design.Tokens, el ui.Element, selected bool) ui.Element {
 	switch {
 	case el.Pressed():
@@ -403,11 +436,12 @@ func truncateSummary(summary string) string {
 	return summary[:cut] + "…"
 }
 
-// buildLogPane is the inspector's durable session log (the old shell's Log
-// tab): the newest events of the active session, read from the SQLite-backed
-// session log. It degrades to an explanatory empty state without a store.
+// buildLogPane is the inspector's durable session log: the newest events of the
+// active session, read from the SQLite-backed session log once per session (or
+// when the chat reports new events) and shown in the official native list. It
+// degrades to an explanatory empty state without a store.
 func buildLogPane(c *ui.Context, t *design.Tokens, log eventReader, chat contracts.ChatService,
-	locale contracts.LocaleService) {
+	locale contracts.LocaleService, st *state) {
 	active := chat.ActiveSession()
 	if active == "" {
 		buildEmptyPane(c, uikit.T(locale, "还没有活动会话", "No active session"))
@@ -417,37 +451,62 @@ func buildLogPane(c *ui.Context, t *design.Tokens, log eventReader, chat contrac
 		buildEmptyPane(c, uikit.T(locale, "日志需要持久化会话存储", "The log requires a persistent session store"))
 		return
 	}
-	events, err := log.Last(context.Background(), active, logLimit)
-	if err != nil {
-		uikit.ErrorLine(c, uikit.T(locale, "读取会话日志失败：", "Failed to read the session log: ")+err.Error())
+	// The events are cached: only a session change or a chat notification drops
+	// the cache, so rendering never queries the store every frame (P1).
+	st.loadLogOnce(log, active)
+	if st.logErr != nil {
+		uikit.ErrorLine(c, uikit.T(locale, "读取会话日志失败：", "Failed to read the session log: ")+st.logErr.Error())
 		return
 	}
 	ui.Column(c).FillWidth().Gap(design.Space2).Children(func() {
 		design.Apply(ui.Text(c, uikit.T(locale,
-			fmt.Sprintf("%d 条会话事件", len(events)), fmt.Sprintf("%d session events", len(events)))),
+			fmt.Sprintf("%d 条会话事件", len(st.logEvents)), fmt.Sprintf("%d session events", len(st.logEvents)))),
 			t.Font(design.TypeXXS)).TextColor(t.LabelTertiary)
-		if len(events) == 0 {
+		if len(st.logEvents) == 0 {
 			buildEmptyPane(c, uikit.T(locale, "还没有会话事件", "No session events yet"))
 			return
 		}
-		for index := len(events) - 1; index >= 0; index-- {
-			event := events[index]
-			c.Key(fmt.Sprintf("log/%d", event.Seq))
-			ui.Column(c).FillWidth().Gap(design.Space1).Children(func() {
-				ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(design.Space2).Children(func() {
-					design.Apply(ui.Text(c, fmt.Sprintf("#%d", event.Seq)), t.TextMuted(design.TypeXXXS))
-					design.Apply(ui.Text(c, event.Type), t.Font(design.TypeXXS)).FontWeight(600).
-						TextColor(t.LabelPrimary).Grow(1).MaxLines(1).Ellipsis("…")
-					design.Apply(ui.Text(c, uikit.FormatClock(locale, event.Time)), t.TextMuted(design.TypeXXXS))
-				})
-				if payload := strings.TrimSpace(string(event.Payload)); payload != "" {
-					design.Apply(ui.Text(c, truncateRunes(payload, 160)), t.MonoFamily()).
-						FontSize(11).TextColor(t.LabelTertiary).MaxLines(3)
-				}
-				ui.Divider(c)
+		events := st.logEvents
+		st.logList.Key = func(row int) any { return events[len(events)-1-row].Seq }
+		st.logList.Label = func(row int) string { return events[len(events)-1-row].Type }
+		ui.List(c, &st.logList, len(events)).
+			Label(uikit.T(locale, "会话事件", "Session events")).
+			Gap(design.Space1).
+			Rows(func(row ui.ListRow) {
+				buildLogRow(row, t, locale, events[len(events)-1-row.Index])
 			})
+	})
+}
+
+// buildLogRow is one durable event row: sequence, type, clock and a bounded
+// payload preview.
+func buildLogRow(row ui.ListRow, t *design.Tokens, locale contracts.LocaleService, event rig.SessionEvent) {
+	c := row.Context
+	ui.Column(c).FillWidth().Gap(design.Space1).Children(func() {
+		ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(design.Space2).Children(func() {
+			design.Apply(ui.Text(c, fmt.Sprintf("#%d", event.Seq)), t.TextMuted(design.TypeXXXS))
+			design.Apply(ui.Text(c, event.Type), t.Font(design.TypeXXS)).FontWeight(600).
+				TextColor(t.LabelPrimary).Grow(1).MaxLines(1).Ellipsis("…")
+			design.Apply(ui.Text(c, uikit.FormatClock(locale, event.Time)), t.TextMuted(design.TypeXXXS))
+		})
+		if payload := strings.TrimSpace(string(event.Payload)); payload != "" {
+			design.Apply(ui.Text(c, truncateRunes(payload, 160)), t.MonoFamily()).
+				FontSize(11).TextColor(t.LabelTertiary).MaxLines(3)
 		}
 	})
+}
+
+// loadLogOnce fills the Log pane's event cache for one session: the durable
+// store is read only when the session changed or the cache was dropped (the
+// chat subscription drops it when new events may exist), never from plain
+// rendering (P1).
+func (st *state) loadLogOnce(log eventReader, sessionID string) {
+	if st.logLoaded && st.logSession == sessionID {
+		return
+	}
+	st.logEvents, st.logErr = log.Last(context.Background(), sessionID, logLimit)
+	st.logLoaded = true
+	st.logSession = sessionID
 }
 
 // truncateRunes cuts s to limit runes, appending an ellipsis when it was cut.

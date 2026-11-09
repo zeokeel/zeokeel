@@ -348,7 +348,16 @@ func buildPresetsPage(c *ui.Context, store contracts.SettingsService, st *preset
 				"配置解析失败：", "Failed to parse configuration: ")+st.parseErr)
 		}
 
-		uikit.Section(c, localized(locale, "预设列表", "Presets"), func(*ui.Context) {
+		uikit.SectionAction(c, localized(locale, "预设列表", "Presets"), func(c *ui.Context) {
+			if design.Apply(ui.Button(c,
+				localized(locale, "恢复内置默认", "Restore built-in defaults")),
+				t.DangerButton()).Tooltip(localized(locale,
+				"清空自定义列表，重新使用内置默认。",
+				"Clear the custom list and use the built-in defaults again.")).Clicked() {
+				st.confirmKind = "restore-builtins"
+				c.Invalidate()
+			}
+		}, func(*ui.Context) {
 			if st.usingLegacy {
 				design.Apply(ui.Text(c, localized(locale,
 					"内置默认（保存后自定义生效）", "Built-in defaults (save to customize)")),
@@ -368,10 +377,16 @@ func buildPresetsPage(c *ui.Context, store contracts.SettingsService, st *preset
 
 		uikit.Section(c, localized(locale, "新增预设", "Add preset"), func(*ui.Context) {
 			ui.Field(c, localized(locale, "名称", "Name"), func() {
-				ui.TextInput(c, &st.name).
+				name := ui.TextInput(c, &st.name).
 					Label(inputLabel(locale, localized(locale, "预设名称", "Preset name"))).
 					Placeholder(localized(locale, "例如：简洁回答", "e.g. Concise answers")).
 					FillWidth()
+				// Enter in the name adds the preset, as in a desktop form
+				// (mygo text-input.md: Submitted is Enter in a text input).
+				if name.Submitted() {
+					st.addPreset(store, locale)
+					c.Invalidate()
+				}
 			}).Description(localized(locale, "在对话输入框的预设菜单中显示的名称。",
 				"The name shown in the conversation composer's preset menu."))
 			ui.Field(c, localized(locale, "提示词", "Prompt"), func() {
@@ -381,16 +396,7 @@ func buildPresetsPage(c *ui.Context, store contracts.SettingsService, st *preset
 					MinHeight(72).FillWidth()
 			}).Description(localized(locale, "插入到对话输入框的文本。",
 				"The text inserted into the conversation composer."))
-			ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(design.Space2).Children(func() {
-				if design.Apply(ui.Button(c,
-					localized(locale, "恢复内置默认", "Restore built-in defaults")),
-					t.DangerButton()).Tooltip(localized(locale,
-					"清空自定义列表，重新使用内置默认。",
-					"Clear the custom list and use the built-in defaults again.")).Clicked() {
-					st.confirmKind = "restore-builtins"
-					c.Invalidate()
-				}
-				ui.Spacer(c).Grow(1)
+			ui.Row(c).FillWidth().Justify(ui.End).Children(func() {
 				uikit.DialogFooter(c, []uikit.DialogAction{{
 					Label: localized(locale, "添加", "Add"), Primary: true,
 					OnClick: func() {
@@ -404,7 +410,16 @@ func buildPresetsPage(c *ui.Context, store contracts.SettingsService, st *preset
 
 		// Agent presets: a section with a modal add form (the page is already
 		// long; a modal keeps the controls reachable) and inline reorder rows.
-		uikit.Section(c, localized(locale, "代理预设", "Agent presets"), func(*ui.Context) {
+		uikit.SectionAction(c, localized(locale, "代理预设", "Agent presets"), func(c *ui.Context) {
+			if design.Apply(ui.Button(c,
+				localized(locale, "恢复默认人设", "Restore default persona presets")),
+				t.DangerButton()).Tooltip(localized(locale,
+				"覆盖当前人设列表，恢复内置默认。",
+				"Overwrite the current persona list with the built-in defaults.")).Clicked() {
+				st.confirmKind = "restore-agents"
+				c.Invalidate()
+			}
+		}, func(*ui.Context) {
 			design.Apply(ui.Text(c, localized(locale,
 				"人设会追加到系统提示末尾；工具允许列表为空表示不过滤；模型是会话默认值（会话覆盖优先）。",
 				"Persona is appended to the system prompt; an empty tool allowlist keeps every tool; model is the session default (a session override wins).")),
@@ -418,16 +433,7 @@ func buildPresetsPage(c *ui.Context, store contracts.SettingsService, st *preset
 				}
 				buildAgentPresetRow(c, t, store, st, locale, index, preset)
 			}
-			ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(design.Space2).Children(func() {
-				if design.Apply(ui.Button(c,
-					localized(locale, "恢复默认人设", "Restore default persona presets")),
-					t.DangerButton()).Tooltip(localized(locale,
-					"覆盖当前人设列表，恢复内置默认。",
-					"Overwrite the current persona list with the built-in defaults.")).Clicked() {
-					st.confirmKind = "restore-agents"
-					c.Invalidate()
-				}
-				ui.Spacer(c).Grow(1)
+			ui.Row(c).FillWidth().Justify(ui.End).Children(func() {
 				uikit.DialogFooter(c, []uikit.DialogAction{{
 					Label: localized(locale, "添加代理预设", "Add agent preset"), Primary: true,
 					OnClick: func() {
@@ -543,14 +549,18 @@ func buildAgentPresetDialog(c *ui.Context, t *design.Tokens, store contracts.Set
 		return
 	}
 	ui.Modal(c, &st.agentFormOpen, func() {
-		design.Apply(ui.Column(c).Width(620).Gap(design.Space3), func(element ui.Element) ui.Element {
+		design.Apply(ui.Column(c).Width(design.DialogWidthL).Gap(design.Space3), func(element ui.Element) ui.Element {
 			return element.PaddingX(design.Space5).PaddingY(design.Space2)
 		}).Children(func() {
 			design.Apply(ui.Text(c, localized(locale, "新增代理预设", "New agent preset")),
 				t.Font(design.TypeL)).FontWeight(600).TextColor(t.LabelPrimary)
+			submitted := false
 			ui.Field(c, localized(locale, "人设名称", "Persona name"), func() {
-				ui.TextInput(c, &st.agentName).
+				name := ui.TextInput(c, &st.agentName).
 					Label(inputLabel(locale, localized(locale, "人设名称", "Persona name"))).FillWidth()
+				if name.Submitted() {
+					submitted = true
+				}
 			}).Description(localized(locale, "在代理预设列表中显示的名称。",
 				"The name shown in the agent preset list."))
 			ui.Field(c, localized(locale, "人设", "Persona"), func() {
@@ -568,15 +578,28 @@ func buildAgentPresetDialog(c *ui.Context, t *design.Tokens, store contracts.Set
 			}).Description(localized(locale, "该人设默认使用的系统提示词。",
 				"The system prompt this persona uses by default."))
 			ui.Field(c, localized(locale, "允许工具（逗号分隔）", "Allowed tools (comma separated)"), func() {
-				ui.TextInput(c, &st.agentTools).
+				tools := ui.TextInput(c, &st.agentTools).
 					Label(inputLabel(locale, localized(locale, "允许工具（逗号分隔）",
 						"Allowed tools (comma separated)"))).
 					Placeholder("read_file, bash").FillWidth()
+				if tools.Submitted() {
+					submitted = true
+				}
 			}).Description(localized(locale, "留空表示不过滤工具。", "Empty keeps every tool."))
 			ui.Field(c, localized(locale, "默认模型", "Default model"), func() {
-				ui.TextInput(c, &st.agentModel).
+				model := ui.TextInput(c, &st.agentModel).
 					Label(inputLabel(locale, localized(locale, "默认模型", "Default model"))).FillWidth()
+				if model.Submitted() {
+					submitted = true
+				}
 			}).Description(localized(locale, "留空沿用当前模型。", "Empty keeps the current model."))
+			if submitted {
+				st.addAgentPreset(store, locale)
+				if !st.statusErr && st.status != "" {
+					st.agentFormOpen = false
+				}
+				c.Invalidate()
+			}
 			uikit.DialogFooter(c, []uikit.DialogAction{
 				{Label: localized(locale, "取消", "Cancel"), OnClick: func() {
 					st.agentFormOpen = false

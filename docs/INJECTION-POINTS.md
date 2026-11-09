@@ -30,18 +30,18 @@ assembly 内同时要求 `zeokeel/ui` 与 `zeokeel/appinfo` 两个服务，因�
 | 模块 | 贡献 | 身份 | Order | 注入点 / 渲染方 |
 | --- | --- | --- | --- | --- |
 | home | Screen | `home` | 10 | 宿主 screen 区域 |
-| home | Command | `home.settings` | 10 | 宿主命令面（topbar 按钮/菜单） |
+| home | Command | `home.settings` | 10 | 宿主命令面（命令面板/快捷键） |
 | home | 消费槽位 | — | — | `home.hero` / `home.composer` / `home.recent`（自身 `RenderSlot`，空态兜底） |
 | home | 消费 ToolRenderer | — | — | `RenderTool("demo")`（工具卡区域，空态兜底） |
-| welcome | SlotItem | `welcome.topbar` | 10 | `topbar.center` |
 | welcome | SlotItem | `welcome.hero` | 10 | `home.hero`（替换 home 默认 hero） |
 | welcome | Command | `welcome.copy-version` | 20 | 宿主命令面 |
 | toolcards | ToolRenderer | `toolcards.demo-card`（Tool=`demo`） | 10 | home 的 `RenderTool("demo")` |
 | about | SettingsPage | `about`（Section `general`） | 90 | 宿主设置面（sidebar 页导航 + page body） |
 | about | SlotItem | `about.header` | 10 | `settings.header`（设置页头，所有设置页可见） |
 
-`docs/ARCHITECTURE.md` §5 的保留槽位现已由宿主渲染：`topbar.*`、`sidebar.*`、`screen.*`、
-`settings.*`、`overlay.*`；`home.*` 由 home 模块渲染（含默认空态），`session.*` 等后续模块接管。
+`docs/ARCHITECTURE.md` §5 的保留槽位由宿主渲染：`sidebar.*`、`screen.*`、
+`settings.*`、`overlay.*`；本壳层没有顶栏区域（全局动作在内容顶部 Toolbar/命令面板），
+模块不要注册 `topbar.*`；`home.*` 由 home 模块渲染（含默认空态），`session.*` 等后续模块接管。
 
 ## 3. assembly.json 片段（desktop 产品，UI 子组）
 
@@ -71,7 +71,7 @@ headless 产品不挂 UI 子组即可（当前无 UI 模块时 `Root.Validate()`
 
 ## 5. 已验证的扩展语义（headless，无显示环境）
 
-- **新增模块不改宿主/home**：`ui/welcome` 激活后立即出现在 `topbar.center` 与 `home.hero`，
+- **新增模块不改宿主/home**：`ui/welcome` 激活后立即出现在 `home.hero`，
   命令 `welcome.copy-version` 出现在宿主命令面；dispose 后全部消失、home 默认 hero 回退。
 - **工具卡注入**：`ui/toolcards` 激活后 home 的 `RenderTool("demo")` 出现工具卡；dispose 后
   home 回退到"还没有渲染器"空态。

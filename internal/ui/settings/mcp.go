@@ -205,34 +205,39 @@ func buildMCPPage(c *ui.Context, kctx cordis.Context, st *mcpState, locale contr
 				})
 			})
 			if stdio {
-				ui.Row(c).FillWidth().Gap(design.Space3).AlignItems(ui.Start).Children(func() {
-					ui.Column(c).FillWidth().Grow(1).Children(func() {
-						ui.Field(c, localized(locale, "命令", "Command"), func() {
-							ui.TextInput(c, &st.command).
-								Label(inputLabel(locale, localized(locale, "命令", "Command"))).
-								Placeholder(localized(locale, "例如：npx", "For example: npx")).FillWidth()
-						}).Description(localized(locale, "启动子进程的可执行文件。",
-							"The executable that starts the subprocess."))
+				// The subprocess fields form one labelled group: assistive
+				// technology reads the legend with every field inside (mygo
+				// form.md "Fieldsets"), instead of three unrelated rows.
+				ui.Fieldset(c, localized(locale, "STDIO 进程", "STDIO process"), func() {
+					ui.Row(c).FillWidth().Gap(design.Space3).AlignItems(ui.Start).Children(func() {
+						ui.Column(c).FillWidth().Grow(1).Children(func() {
+							ui.Field(c, localized(locale, "命令", "Command"), func() {
+								ui.TextInput(c, &st.command).
+									Label(inputLabel(locale, localized(locale, "命令", "Command"))).
+									Placeholder(localized(locale, "例如：npx", "For example: npx")).FillWidth()
+							}).Description(localized(locale, "启动子进程的可执行文件。",
+								"The executable that starts the subprocess."))
+						})
+						ui.Column(c).FillWidth().Grow(2).Children(func() {
+							ui.Field(c, localized(locale, "参数", "Arguments"), func() {
+								ui.TextInput(c, &st.args).
+									Label(inputLabel(locale, localized(locale, "参数", "Arguments"))).
+									Placeholder(localized(locale,
+										"空格分隔，例如：-y server-github",
+										"Space-separated, e.g. -y server-github")).FillWidth()
+							}).Description(localized(locale, "按空格拆分为参数列表。",
+								"Split on spaces into the argument list."))
+						})
 					})
-					ui.Column(c).FillWidth().Grow(2).Children(func() {
-						ui.Field(c, localized(locale, "参数", "Arguments"), func() {
-							ui.TextInput(c, &st.args).
-								Label(inputLabel(locale, localized(locale, "参数", "Arguments"))).
-								Placeholder(localized(locale,
-									"空格分隔，例如：-y server-github",
-									"Space-separated, e.g. -y server-github")).FillWidth()
-						}).Description(localized(locale, "按空格拆分为参数列表。",
-							"Split on spaces into the argument list."))
-					})
+					ui.Field(c, localized(locale, "环境变量", "Environment"), func() {
+						ui.TextInput(c, &st.env).
+							Label(inputLabel(locale, localized(locale, "环境变量", "Environment"))).
+							Placeholder(localized(locale,
+								"每行 KEY=VALUE，例如：TOKEN=abc",
+								"One KEY=VALUE per line, e.g. TOKEN=abc")).FillWidth()
+					}).Description(localized(locale, "传给子进程的环境变量。",
+						"Environment variables passed to the subprocess."))
 				})
-				ui.Field(c, localized(locale, "环境变量", "Environment"), func() {
-					ui.TextInput(c, &st.env).
-						Label(inputLabel(locale, localized(locale, "环境变量", "Environment"))).
-						Placeholder(localized(locale,
-							"每行 KEY=VALUE，例如：TOKEN=abc",
-							"One KEY=VALUE per line, e.g. TOKEN=abc")).FillWidth()
-				}).Description(localized(locale, "传给子进程的环境变量。",
-					"Environment variables passed to the subprocess."))
 			} else {
 				ui.Field(c, "URL", func() {
 					ui.TextInput(c, &st.url).Label(inputLabel(locale, "URL")).

@@ -42,6 +42,16 @@ const (
 	SettingsMargin float32 = 24
 	// TranscriptWidth is the conversation reading measure.
 	TranscriptWidth float32 = 840
+
+	// DialogWidthS/M/L are the widths of the modal forms, in the order of the
+	// content they hold: a single prompt, a form, a long form or preview. They
+	// replaced the bare 360/460/520/560/620 values scattered over the modules.
+	DialogWidthS float32 = 460
+	DialogWidthM float32 = 560
+	DialogWidthL float32 = 620
+	// DialogBodyMax bounds a scrollable body inside a dialog (a list or a long
+	// preview), so the footer and the title stay on screen.
+	DialogBodyMax float32 = 480
 )
 
 // Brand radii. RadiusMD is the control corner of the theme (brand.Radius);
@@ -56,14 +66,6 @@ const (
 	RadiusXL  float32 = 20
 	RadiusMax float32 = 999
 )
-
-// Sidebar is the source list column.
-func (t *Tokens) Sidebar() Style {
-	return func(el ui.Element) ui.Element {
-		return el.Width(SidebarWidth).Background(t.BgSidebar).
-			BorderWidth(0, 1, 0, 0).BorderColor(t.BorderL3)
-	}
-}
 
 // SectionLabel is a small uppercase sidebar section title.
 func (t *Tokens) SectionLabel() Style {
@@ -135,5 +137,18 @@ func (t *Tokens) Badge() Style {
 	return func(el ui.Element) ui.Element {
 		return el.PaddingX(Space2).PaddingY(Space1).Radius(RadiusMax).
 			Background(t.BgHover).TextColor(t.LabelSecondary)
+	}
+}
+
+// ShadowOverlay is the elevation of floating surfaces above the page: menus,
+// popovers, palettes and toasts (not cards, which are flat in this product).
+// It is stronger in the dark theme, where a soft shadow reads less.
+func (t *Tokens) ShadowOverlay() Style {
+	alpha := float32(0.12)
+	if t.Dark {
+		alpha = 0.32
+	}
+	return func(el ui.Element) ui.Element {
+		return el.Shadow(0, 8, 24, 0, ui.RGBA(0, 0, 0, alpha))
 	}
 }

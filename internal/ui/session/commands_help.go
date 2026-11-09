@@ -101,7 +101,7 @@ func buildHelpDialog(c *ui.Context, t *design.Tokens, runtime contracts.UIRuntim
 	close := func() { st.helpOpen = false }
 	ui.Modal(c, &st.helpOpen, func() {
 		dialogEnter(c, close)
-		design.Apply(ui.Column(c).Width(560).Gap(design.Space4), func(el ui.Element) ui.Element {
+		design.Apply(ui.Column(c).Width(design.DialogWidthM).Gap(design.Space4), func(el ui.Element) ui.Element {
 			return el.PaddingX(design.Space6).PaddingY(design.Space2)
 		}).Children(func() {
 			design.Apply(ui.Text(c, st.tr("帮助", "Help")), t.Font(design.TypeL)).

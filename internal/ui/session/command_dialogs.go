@@ -80,7 +80,7 @@ func buildGoalDialog(c *ui.Context, t *design.Tokens, runtime contracts.UIRuntim
 	}
 	ui.Modal(c, &st.goalOpen, func() {
 		dialogEnter(c, save)
-		design.Apply(ui.Column(c).Width(520).Gap(design.Space4), func(el ui.Element) ui.Element {
+		design.Apply(ui.Column(c).Width(design.DialogWidthM).Gap(design.Space4), func(el ui.Element) ui.Element {
 			return el.PaddingX(design.Space6).PaddingY(design.Space2)
 		}).Children(func() {
 			design.Apply(ui.Text(c, st.tr("设置目标", "Goal")), t.Font(design.TypeL)).
@@ -143,7 +143,7 @@ func buildPlanDialog(c *ui.Context, t *design.Tokens, runtime contracts.UIRuntim
 	}
 	ui.Modal(c, &st.planOpen, func() {
 		dialogEnter(c, submit)
-		design.Apply(ui.Column(c).Width(560).Gap(design.Space4), func(el ui.Element) ui.Element {
+		design.Apply(ui.Column(c).Width(design.DialogWidthM).Gap(design.Space4), func(el ui.Element) ui.Element {
 			return el.PaddingX(design.Space6).PaddingY(design.Space2)
 		}).Children(func() {
 			design.Apply(ui.Text(c, st.tr("提交计划", "Submit plan")), t.Font(design.TypeL)).
@@ -198,7 +198,7 @@ func buildMemoryDialog(c *ui.Context, t *design.Tokens, runtime contracts.UIRunt
 	}
 	ui.Modal(c, &st.memOpen, func() {
 		dialogEnter(c, add)
-		design.Apply(ui.Column(c).Width(520).Gap(design.Space4), func(el ui.Element) ui.Element {
+		design.Apply(ui.Column(c).Width(design.DialogWidthM).Gap(design.Space4), func(el ui.Element) ui.Element {
 			return el.PaddingX(design.Space6).PaddingY(design.Space2)
 		}).Children(func() {
 			design.Apply(ui.Text(c, st.tr("添加记忆", "Add memory")), t.Font(design.TypeL)).

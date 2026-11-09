@@ -45,9 +45,15 @@ func buildTasksPane(c *ui.Context, t *design.Tokens, board contracts.TaskBoard,
 		design.Apply(ui.Text(c, uikit.T(st.locale,
 			fmt.Sprintf("%d 个任务", len(tasks)), fmt.Sprintf("%d tasks", len(tasks)))),
 			t.Font(design.TypeXXS)).TextColor(t.LabelTertiary)
-		for _, task := range tasks {
-			buildTaskRow(c, t, board, task, runtime, st)
+		st.tasksList.Key = func(row int) any { return tasks[row].ID }
+		st.tasksList.Label = func(row int) string {
+			return firstNonEmpty(tasks[row].Subject, tasks[row].ID)
 		}
+		ui.List(c, &st.tasksList, len(tasks)).
+			Label(uikit.T(st.locale, "任务列表", "Tasks")).
+			Rows(func(row ui.ListRow) {
+				buildTaskRow(row, t, board, tasks[row.Index], runtime, st)
+			})
 	})
 	buildTaskDeleteDialog(c, board, runtime, st)
 }
@@ -91,47 +97,52 @@ func buildTaskAddRow(c *ui.Context, t *design.Tokens, board contracts.TaskBoard,
 	})
 }
 
-// buildTaskRow is one task row: subject, status badge, owner and the task's
-// overflow menu with the transitions that make sense plus the (confirmed)
-// delete. The dangerous action lives in the menu, away from the safe ones.
-func buildTaskRow(c *ui.Context, t *design.Tokens, board contracts.TaskBoard,
+// buildTaskRow is one task row of the native list: subject, status badge,
+// owner and the task's overflow menu with the transitions that make sense plus
+// the (confirmed) delete. The dangerous action lives in the menu, away from the
+// safe ones.
+func buildTaskRow(row ui.ListRow, t *design.Tokens, board contracts.TaskBoard,
 	task contracts.BoardTask, runtime contracts.UIRuntime, st *state) {
+	c := row.Context
 	subject := firstNonEmpty(task.Subject, task.ID)
-	c.Key("task/" + task.ID)
-	ui.Column(c).FillWidth().Gap(design.Space1).Children(func() {
+	// The full task menu is shared by the ⋯ button and a right-click on the row
+	// (mygo context-menu.md: one build function fills both menus).
+	taskMenu := func(m *ui.Menu) {
+		status := normalizeTaskStatus(task.Status)
+		if status == contracts.TaskStatusPending {
+			if m.Item(uikit.T(st.locale, "开始", "Start")).Chosen() {
+				updateTaskStatus(board, runtime, st, task.ID, contracts.TaskStatusInProgress)
+			}
+		}
+		if status != contracts.TaskStatusCompleted {
+			if m.Item(uikit.T(st.locale, "完成", "Complete")).Chosen() {
+				updateTaskStatus(board, runtime, st, task.ID, contracts.TaskStatusCompleted)
+			}
+		}
+		m.Separator()
+		if m.Item(uikit.T(st.locale, "删除", "Delete")).Chosen() {
+			st.taskDeleteOpen = true
+			st.taskDeleteID = task.ID
+			st.taskDeleteSubject = subject
+			runtime.Invalidate()
+		}
+	}
+	element := ui.Column(c).FillWidth().Padding(0, design.Space2).Gap(design.Space1)
+	element.ContextMenu(taskMenu)
+	element.Children(func() {
 		ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(design.Space2).Children(func() {
 			design.Apply(ui.Text(c, subject), t.Font(design.TypeS)).FontWeight(600).
 				TextColor(t.LabelPrimary).Grow(1).MaxLines(1).Ellipsis("…")
 			design.Apply(ui.Badge(c, taskStatusLabel(task.Status, st.locale)), t.Badge()).
 				TextColor(taskStatusColor(t, task.Status))
 			menuLabel := uikit.T(st.locale, "任务操作：", "Task actions: ") + subject
-			c.Key("task/" + task.ID + "/menu")
 			more := ui.ButtonBase(c).Size(24, 24).Center().Radius(design.RadiusSM).
 				Label(menuLabel).Tooltip(menuLabel)
 			more = rowTint(t, more, false)
 			more.Children(func() {
 				ui.Icon(c, icons.More()).Size(16, 16).TextColor(t.LabelSecondary)
 			})
-			more.PopoverMenuButton(func(m *ui.Menu) {
-				status := normalizeTaskStatus(task.Status)
-				if status == contracts.TaskStatusPending {
-					if m.Item(uikit.T(st.locale, "开始", "Start")).Chosen() {
-						updateTaskStatus(board, runtime, st, task.ID, contracts.TaskStatusInProgress)
-					}
-				}
-				if status != contracts.TaskStatusCompleted {
-					if m.Item(uikit.T(st.locale, "完成", "Complete")).Chosen() {
-						updateTaskStatus(board, runtime, st, task.ID, contracts.TaskStatusCompleted)
-					}
-				}
-				m.Separator()
-				if m.Item(uikit.T(st.locale, "删除", "Delete")).Chosen() {
-					st.taskDeleteOpen = true
-					st.taskDeleteID = task.ID
-					st.taskDeleteSubject = subject
-					runtime.Invalidate()
-				}
-			})
+			more.PopoverMenuButton(taskMenu)
 		})
 		// The backend stamps a synthetic "taskboard" owner on in-progress tasks
 		// that have no real assignee; do not surface that implementation detail.

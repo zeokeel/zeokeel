@@ -7,7 +7,6 @@ import (
 	"github.com/egoist/mygo/ui"
 
 	"github.com/zeokeel/zeokeel/internal/contracts"
-	"github.com/zeokeel/zeokeel/internal/design"
 )
 
 // TestValidateLifecycle covers Root.Validate: a UI assembly without a screen is
@@ -434,10 +433,15 @@ func TestCommandPaletteShortcut(t *testing.T) {
 		requireHasText(t, tt, "其他命令")
 		requireNoText(t, tt, "打开设置")
 	}
-	// Choosing a command closes the palette and runs it.
-	if err := tt.Click("其他命令"); err != nil {
-		t.Fatalf("click palette command: %v; texts = %v", err, tt.Texts())
+	// Choosing a command closes the palette and runs it. The row is a native
+	// button whose accessible name is the command title; v0.8.3's strict
+	// Tester.Click cannot pick it by text (the title is rendered more than once
+	// inside the row), so query the access tree and click the button's bounds.
+	info, ok := tt.AccessByRole(ui.RoleButton, "其他命令")
+	if !ok {
+		t.Fatalf("palette row is not an accessible button; texts = %v", tt.Texts())
 	}
+	tt.ClickAt(info.Bounds.X+info.Bounds.W/2, info.Bounds.Y+info.Bounds.H/2)
 	tt.Frame()
 	requireNoText(t, tt, "命令面板")
 	requireHasText(t, tt, "body-home")
@@ -566,10 +570,12 @@ func TestSettingsUnsavedCloseGuard(t *testing.T) {
 	}
 }
 
-// TestInspectorDrawerLeavesContentWidth covers H17: when the inspector renders
-// as a drawer over a narrow window, the content column reserves its width, so
-// the drawer does not cover the composer's send control.
-func TestInspectorDrawerLeavesContentWidth(t *testing.T) {
+// TestInspectorDrawerIsModal covers the drawer as mygo's overlay recipe
+// (docs/ui/overlays.md "A drawer on the right"): over a narrow window the
+// inspector floats above the content as a RoleDialog, a press outside or Escape
+// closes it, the focus is trapped while it shows, and the content keeps its own
+// layout (the drawer covers it rather than squeezing it).
+func TestInspectorDrawerIsModal(t *testing.T) {
 	r := newTestRoot(t)
 	mustScreen(t, r, textScreen("home", "首页", "body-home", 10))
 	mustSlot(t, r, textSlotItem(contracts.SlotSessionPanelRight, "pane", "inspector-pane", 10))
@@ -582,13 +588,18 @@ func TestInspectorDrawerLeavesContentWidth(t *testing.T) {
 	tt.Key(ui.Cmd|ui.Alt, ui.KeyI)
 	tt.Frame()
 	requireHasText(t, tt, "inspector-pane")
-	box, ok := tt.Find("body-home")
-	if !ok {
-		t.Fatalf("body-home not found with the drawer open; texts: %v", tt.Texts())
+	if _, ok := tt.AccessByRole(ui.RoleDialog, "检查器"); !ok {
+		t.Fatalf("drawer is not an accessible dialog; texts: %v", tt.Texts())
 	}
-	if box.X+box.W > 1000-float32(design.InspectorWidth-8) {
-		t.Fatalf("content x right = %v overlaps the open drawer", box.X+box.W)
+
+	// Escape closes the modal drawer and the content is usable again.
+	tt.Key(0, ui.KeyEscape)
+	tt.Frame()
+	if r.RightPanelOpen() {
+		t.Fatal("Escape did not close the inspector drawer")
 	}
+	requireNoText(t, tt, "inspector-pane")
+	requireHasText(t, tt, "body-home")
 }
 
 // TestInspectorPaneShortcut covers H26: Cmd/Ctrl+Alt+Left/Right run the

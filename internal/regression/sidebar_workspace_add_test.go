@@ -88,7 +88,7 @@ func (w *auditWorkspace) createRecord() (calls int, name, root string) {
 }
 
 // overrideSidebarPicker replaces the workspace directory-picker seam.
-func overrideSidebarPicker(t *testing.T, fn func() (string, error)) {
+func overrideSidebarPicker(t *testing.T, fn func(title string) (string, error)) {
 	t.Helper()
 	previous := sidebar.DirectoryPicker
 	sidebar.DirectoryPicker = fn
@@ -144,7 +144,7 @@ func TestSidebarAddWorkspaceBasenameAndCreate(t *testing.T) {
 	_, tester := startSidebarUI(t, workspace)
 	requireHasText(t, tester, "添加工作区")
 
-	overrideSidebarPicker(t, func() (string, error) { return "/tmp/myproj/", nil })
+	overrideSidebarPicker(t, func(string) (string, error) { return "/tmp/myproj/", nil })
 	clickSidebar(t, tester, "添加工作区")
 	requireHasTexts(t, tester, "选择目录…", "名称", "目录")
 	clickSidebar(t, tester, "选择目录…")
@@ -165,7 +165,7 @@ func TestSidebarAddWorkspaceBasenameAndCreate(t *testing.T) {
 	// dialog is a single overlay instance).
 	workspace2 := &auditWorkspace{}
 	_, tester2 := startSidebarUI(t, workspace2)
-	overrideSidebarPicker(t, func() (string, error) { return "/tmp/other", nil })
+	overrideSidebarPicker(t, func(string) (string, error) { return "/tmp/other", nil })
 	clickSidebar(t, tester2, "添加工作区")
 	typeSidebar(t, tester2, "名称 输入", "自定义工作区")
 	clickSidebar(t, tester2, "选择目录…")
@@ -192,12 +192,12 @@ func TestSidebarAddWorkspaceFailuresKeepModal(t *testing.T) {
 	}
 
 	// Picker failure keeps the dialog open with the error.
-	overrideSidebarPicker(t, func() (string, error) { return "", errors.New("picker failed") })
+	overrideSidebarPicker(t, func(string) (string, error) { return "", errors.New("picker failed") })
 	clickSidebar(t, tester, "选择目录…")
 	requireHasTexts(t, tester, "无法打开目录选择器：picker failed", "选择目录…")
 
 	// Picker cancel leaves the directory empty; Create is not called.
-	overrideSidebarPicker(t, func() (string, error) { return "", nil })
+	overrideSidebarPicker(t, func(string) (string, error) { return "", nil })
 	clickSidebar(t, tester, "选择目录…")
 	clickSidebar(t, tester, "添加")
 	requireHasText(t, tester, "目录不能为空")
@@ -209,7 +209,7 @@ func TestSidebarAddWorkspaceFailuresKeepModal(t *testing.T) {
 	workspace.mu.Lock()
 	workspace.createErr = errors.New("workspace exists")
 	workspace.mu.Unlock()
-	overrideSidebarPicker(t, func() (string, error) { return "/tmp/dup", nil })
+	overrideSidebarPicker(t, func(string) (string, error) { return "/tmp/dup", nil })
 	clickSidebar(t, tester, "选择目录…")
 	clickSidebar(t, tester, "添加")
 	requireHasTexts(t, tester, "workspace exists", "选择目录…", "添加")
@@ -231,7 +231,7 @@ func TestSidebarAddWorkspaceHiddenWithoutBackend(t *testing.T) {
 func TestSidebarAddWorkspaceReopensAfterCreate(t *testing.T) {
 	workspace := &auditWorkspace{}
 	_, tester := startSidebarUI(t, workspace)
-	overrideSidebarPicker(t, func() (string, error) { return "/tmp/first", nil })
+	overrideSidebarPicker(t, func(string) (string, error) { return "/tmp/first", nil })
 	clickSidebar(t, tester, "添加工作区")
 	clickSidebar(t, tester, "选择目录…")
 	clickSidebar(t, tester, "添加")

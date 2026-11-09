@@ -96,6 +96,9 @@ type state struct {
 // tr returns the localized copy for the current frame's language.
 func (st *state) tr(zh, en string) string { return uikit.T(st.locale, zh, en) }
 
+// english reports whether the current frame renders English copy.
+func (st *state) english() bool { return uikit.Language(st.locale) == "en" }
+
 // localized translates a value that still carries its built-in Chinese default
 // (an assembly-configured custom label is kept verbatim).
 func (st *state) localized(value, zhDefault, enDefault string) string {

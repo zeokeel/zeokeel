@@ -97,17 +97,17 @@ func buildSkillsEditorDialogs(c *ui.Context, t *design.Tokens, st *skillsState,
 					t.TextMuted(design.TypeXS)).MaxLines(2)
 				ui.Field(c, localized(locale, "名称", "Name"), func() {
 					ui.TextInput(c, &st.draftName).
-						Label(localized(locale, "名称", "Name")).FillWidth()
+						Label(inputLabel(locale, localized(locale, "名称", "Name"))).FillWidth()
 				}).Description(localized(locale, "技能目录名，也是技能菜单中的名称。",
 					"The skill's directory and menu name."))
 				ui.Field(c, localized(locale, "描述", "Description"), func() {
 					ui.TextInput(c, &st.draftDescription).
-						Label(localized(locale, "描述", "Description")).FillWidth()
+						Label(inputLabel(locale, localized(locale, "描述", "Description"))).FillWidth()
 				}).Description(localized(locale, "给模型看的一句话说明。",
 					"One sentence the model sees in the skill menu."))
 				ui.Field(c, localized(locale, "内容", "Body"), func() {
 					ui.TextArea(c, &st.draftBody).
-						Label(localized(locale, "内容", "Body")).
+						Label(inputLabel(locale, localized(locale, "内容", "Body"))).
 						FillWidth().MinHeight(design.Space6 * 5)
 				}).Description(localized(locale, "SKILL.md 的 Markdown 正文。",
 					"The Markdown body of SKILL.md."))
@@ -142,12 +142,12 @@ func buildSkillsEditorDialogs(c *ui.Context, t *design.Tokens, st *skillsState,
 					t.TextMuted(design.TypeXXS)).MaxLines(2)
 				ui.Field(c, localized(locale, "描述", "Description"), func() {
 					ui.TextInput(c, &st.editDescription).
-						Label(localized(locale, "描述", "Description")).FillWidth()
+						Label(inputLabel(locale, localized(locale, "描述", "Description"))).FillWidth()
 				}).Description(localized(locale, "给模型看的一句话说明。",
 					"One sentence the model sees in the skill menu."))
 				ui.Field(c, localized(locale, "内容", "Body"), func() {
 					ui.TextArea(c, &st.editBody).
-						Label(localized(locale, "内容", "Body")).
+						Label(inputLabel(locale, localized(locale, "内容", "Body"))).
 						FillWidth().MinHeight(design.Space6 * 5)
 				}).Description(localized(locale, "SKILL.md 的 Markdown 正文。",
 					"The Markdown body of SKILL.md."))

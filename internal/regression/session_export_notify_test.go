@@ -43,7 +43,7 @@ func startSessionUIWithNotifier(t *testing.T, notifier contracts.Notifier) *sess
 }
 
 // installExportSeams replaces both export seams for one test.
-func installExportSeams(t *testing.T, markdown, jsonl func(name, content string) (string, error)) {
+func installExportSeams(t *testing.T, markdown, jsonl func(title, name, content string) (string, error)) {
 	t.Helper()
 	originalMarkdown := sessionui.ExportSaver
 	originalJSONL := sessionui.ExportJSONLSaver
@@ -77,7 +77,7 @@ func clickExport(t *testing.T, harness *sessionToastHarness, item string) {
 // with the documented success level and localized copy (zh and en), for both the
 // Markdown and JSONL exports.
 func TestSessionExportNotifySuccessParameters(t *testing.T) {
-	success := func(name, content string) (string, error) { return "/tmp/" + name, nil }
+	success := func(title, name, content string) (string, error) { return "/tmp/" + name, nil }
 
 	for _, testCase := range []struct {
 		name  string
@@ -116,7 +116,7 @@ func TestSessionExportNotifySuccessParameters(t *testing.T) {
 // TestSessionExportNotifyErrorParameters covers failure: exactly one error toast
 // carrying the localized prefix plus the underlying error, once.
 func TestSessionExportNotifyErrorParameters(t *testing.T) {
-	failure := func(name, content string) (string, error) { return "", errors.New("disk full") }
+	failure := func(title, name, content string) (string, error) { return "", errors.New("disk full") }
 	for _, item := range []string{"导出 Markdown", "导出 JSONL"} {
 		t.Run(item, func(t *testing.T) {
 			notifier := &fakeNotifier{}
@@ -145,7 +145,7 @@ func TestSessionExportNotifyErrorParameters(t *testing.T) {
 // TestSessionExportNotifyCancelAndAbsentNotifier covers the two quiet paths: a
 // cancelled save raises no toast, and an export without any notifier still works.
 func TestSessionExportNotifyCancelAndAbsentNotifier(t *testing.T) {
-	cancel := func(name, content string) (string, error) { return "", nil }
+	cancel := func(title, name, content string) (string, error) { return "", nil }
 	notifier := &fakeNotifier{}
 	cancelHarness := startSessionUIWithNotifier(t, notifier)
 	installExportSeams(t, cancel, cancel)
@@ -158,7 +158,7 @@ func TestSessionExportNotifyCancelAndAbsentNotifier(t *testing.T) {
 	// No notifier: the export still succeeds quietly (no resident badge, no
 	// error line) and nothing panics.
 	noNotifier := startSessionUIWithNotifier(t, nil)
-	installExportSeams(t, func(name, content string) (string, error) { return "/tmp/" + name, nil }, cancel)
+	installExportSeams(t, func(title, name, content string) (string, error) { return "/tmp/" + name, nil }, cancel)
 	clickExport(t, noNotifier, "导出 Markdown")
 	requireNoText(t, noNotifier.tester, "导出失败")
 }

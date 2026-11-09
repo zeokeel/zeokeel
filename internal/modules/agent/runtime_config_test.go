@@ -110,3 +110,15 @@ func TestRuntimeLimitSettingsOverrides(t *testing.T) {
 			cfg.MaxIterations, cfg.ContextBudget)
 	}
 }
+
+func TestEffectiveMaxIterationsUnlimitedDefault(t *testing.T) {
+	if got := effectiveMaxIterations(0); got != agentIterationLimitUnbounded {
+		t.Fatalf("effectiveMaxIterations(0) = %d, want %d (unlimited default)", got, agentIterationLimitUnbounded)
+	}
+	if got := effectiveMaxIterations(-3); got != agentIterationLimitUnbounded {
+		t.Fatalf("effectiveMaxIterations(-3) = %d, want unbounded", got)
+	}
+	if got := effectiveMaxIterations(12); got != 12 {
+		t.Fatalf("effectiveMaxIterations(12) = %d, want 12", got)
+	}
+}

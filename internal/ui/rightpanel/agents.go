@@ -26,12 +26,32 @@ func buildAgentsPane(c *ui.Context, t *design.Tokens, team contracts.TeamService
 		return
 	}
 
-	ui.Column(c).FillWidth().Gap(design.Space1).Children(func() {
-		for _, member := range members {
-			member := member
-			buildAgentRow(c, t, member, runtime, st)
+	// The native list owns the rows' hover, choice and keyboard: Up/Down choose
+	// a teammate, which opens its steer pane (docs/ui/list.md).
+	chosen := -1
+	for index := range members {
+		if members[index].ID == st.selectedMemberID {
+			chosen = index
+			break
 		}
-	})
+	}
+	st.agentsList.Key = func(row int) any { return members[row].ID }
+	st.agentsList.Label = func(row int) string {
+		return firstNonEmpty(members[row].Name, members[row].ID)
+	}
+	st.agentsSel = chosen
+	st.agentsList.Selected = &st.agentsSel
+	list := ui.List(c, &st.agentsList, len(members)).
+		Label(uikit.T(st.locale, "队友列表", "Teammates")).
+		Rows(func(row ui.ListRow) {
+			buildAgentRow(row, t, members[row.Index], st)
+		})
+	if list.Changed() && st.agentsSel >= 0 && st.agentsSel < len(members) {
+		st.selectedMemberID = members[st.agentsSel].ID
+		st.teamStatus = ""
+		st.teamErr = ""
+		runtime.Invalidate()
+	}
 
 	selected := selectedAgent(members, st.selectedMemberID)
 	if selected == nil {
@@ -58,50 +78,39 @@ func selectedAgent(members []contracts.TeamMember, id string) *contracts.TeamMem
 	return nil
 }
 
-// buildAgentRow is one teammate row: selectable, with name, id, status and the
-// latest answer summary, followed by a divider.
-func buildAgentRow(c *ui.Context, t *design.Tokens, member contracts.TeamMember, runtime contracts.UIRuntime, st *state) {
+// buildAgentRow is one teammate row of the native list: name, id, status and
+// the latest answer summary.
+func buildAgentRow(row ui.ListRow, t *design.Tokens, member contracts.TeamMember, st *state) {
+	c := row.Context
 	name := firstNonEmpty(member.Name, member.ID)
-	c.Key("agent/" + member.ID)
-	row := ui.ButtonBase(c).FillWidth().Padding(design.Space2).Radius(design.RadiusSM).Label(name)
-	row = rowTint(t, row, member.ID == st.selectedMemberID)
-	row.Children(func() {
-		ui.Column(c).FillWidth().Gap(design.Space1).Children(func() {
-			ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(design.Space2).Children(func() {
-				design.Apply(ui.Text(c, name), t.Font(design.TypeS)).FontWeight(600).
-					TextColor(t.LabelPrimary).Grow(1).MaxLines(1).Ellipsis("…")
-				label := strings.TrimSpace(member.Status)
-				color := t.LabelSecondary
-				switch strings.ToLower(label) {
-				case "active":
-					label = uikit.T(st.locale, "运行中", "Running")
-					color = t.SuccessText
-				case "interrupted":
-					label = uikit.T(st.locale, "已中断", "Interrupted")
-					color = t.WarningText
-				}
-				if label == "" {
-					label = uikit.T(st.locale, "未知", "Unknown")
-				}
-				design.Apply(ui.Badge(c, label), t.Badge()).TextColor(color)
-			})
-			design.Apply(ui.Text(c, member.ID), t.Font(design.TypeXXXS)).
-				TextColor(t.LabelTertiary)
-			last := strings.TrimSpace(member.Last)
-			if last == "" {
-				last = uikit.T(st.locale, "还没有结果", "No result yet")
+	ui.Column(c).FillWidth().Padding(design.Space2, design.Space2).Gap(design.Space1).Children(func() {
+		ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(design.Space2).Children(func() {
+			design.Apply(ui.Text(c, name), t.Font(design.TypeS)).FontWeight(600).
+				TextColor(t.LabelPrimary).Grow(1).MaxLines(1).Ellipsis("…")
+			label := strings.TrimSpace(member.Status)
+			color := t.LabelSecondary
+			switch strings.ToLower(label) {
+			case "active":
+				label = uikit.T(st.locale, "运行中", "Running")
+				color = t.SuccessText
+			case "interrupted":
+				label = uikit.T(st.locale, "已中断", "Interrupted")
+				color = t.WarningText
 			}
-			design.Apply(ui.Text(c, last), t.Font(design.TypeXXS)).
-				TextColor(t.LabelTertiary).MaxLines(2).Ellipsis("…")
+			if label == "" {
+				label = uikit.T(st.locale, "未知", "Unknown")
+			}
+			design.Apply(ui.Badge(c, label), t.Badge()).TextColor(color)
 		})
+		design.Apply(ui.Text(c, member.ID), t.Font(design.TypeXXXS)).
+			TextColor(t.LabelTertiary)
+		last := strings.TrimSpace(member.Last)
+		if last == "" {
+			last = uikit.T(st.locale, "还没有结果", "No result yet")
+		}
+		design.Apply(ui.Text(c, last), t.Font(design.TypeXXS)).
+			TextColor(t.LabelTertiary).MaxLines(2).Ellipsis("…")
 	})
-	row.OnClick(func() {
-		st.selectedMemberID = member.ID
-		st.teamStatus = ""
-		st.teamErr = ""
-		runtime.Invalidate()
-	})
-	ui.Divider(c)
 }
 
 // buildAgentControls is the steer panel for the selected teammate.

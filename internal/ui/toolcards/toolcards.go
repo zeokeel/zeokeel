@@ -166,7 +166,7 @@ func Module() *module.Descriptor[Config] {
 
 		for _, name := range realToolNames {
 			tool := name
-			build := realBuild(state)
+			build := realBuild(state, runtime)
 			if tool == "plan_review" {
 				build = planReviewBuild(state)
 			}
@@ -209,73 +209,50 @@ func demoBuild(title string) func(c *ui.Context, call contracts.ToolCall) {
 	}
 }
 
-// realBuild builds one real tool card: a brand panel with a category icon, the
-// tool name, a status badge, the category hint and a native
-// collapsible summary. The same builder serves all real tool names.
-func realBuild(state *rendererState) func(c *ui.Context, call contracts.ToolCall) {
+// realBuild builds one real tool row. The transcript is mostly prose, so the
+// registered cards use the shared compact row (internal/uikit): a muted category
+// icon, the tool name, a small status label, a one-line summary preview and the
+// small 详情 disclosure. The trajectory pane keeps its detailed card.
+func realBuild(state *rendererState, runtime contracts.UIRuntime) func(c *ui.Context, call contracts.ToolCall) {
 	return func(c *ui.Context, call contracts.ToolCall) {
 		t := design.Of(c)
-		status := statusLabel(state, call.Status)
-		color := toolStatusColor(t, call.Status)
-		card := ui.Column(c).FillWidth().Gap(design.Space2)
-		design.Apply(card, t.Panel()).Padding(design.Space3).Gap(design.Space2).Children(func() {
-			// The card anatomy shared with the transcript fallback and the
-			// trajectory timeline: category icon, tool name, status badge, then
-			// the muted category at the row end.
-			ui.Row(c).FillWidth().Gap(design.Space2).AlignItems(ui.Center).Children(func() {
-				ui.Icon(c, toolIcon(call.Name)).Size(design.Space4, design.Space4).
-					TextColor(t.LabelSecondary)
-				design.Apply(ui.Text(c, call.Name), t.Font(design.TypeS)).FontWeight(600).
-					TextColor(t.LabelPrimary)
-				design.Apply(ui.Badge(c, status), t.Badge(), func(el ui.Element) ui.Element {
-					return el.Background(color.Alpha(toolStatusTintAlpha(call.Status))).TextColor(toolStatusTextColor(t, call.Status))
-				})
-				ui.Spacer(c).Grow(1)
-				if category := categoryLabel(state, call.Name); category != "" {
-					design.Apply(ui.Text(c, category), t.Font(design.TypeXXXS)).
-						TextColor(t.LabelTertiary)
-				}
-			})
-			if summary := strings.TrimSpace(call.Summary); summary != "" {
-				key := call.ID + "\x00" + call.Name
-				open, seen := state.loadSeen(key)
-				if !seen {
-					open = SummaryDefaultOpen(call.Status, summary)
-				}
-				collapsible := ui.Collapsible(c, state.tr("详情", "Details"), &open, func() {
-					design.Apply(ui.Text(c, truncateSummary(summary)), t.TextMuted(design.TypeXS))
-				})
-				design.Apply(collapsible, t.Font(design.TypeXS))
-				state.store(key, open)
+		tool := strings.TrimSpace(call.Name)
+		key := call.ID + "\x00" + tool
+		summary := strings.TrimSpace(call.Summary)
+		open, seen := state.loadSeen(key)
+		if !seen {
+			open = SummaryDefaultOpen(call.Status, summary)
+		}
+		toggled := false
+		row := uikit.ToolRowOptions{
+			Key:         "toolcards." + key,
+			Icon:        uikit.ToolIcon(tool),
+			Name:        tool,
+			Status:      statusLabel(state, call.Status),
+			StatusColor: toolStatusTextColor(t, call.Status),
+			Preview:     uikit.ToolPreview(summary, 96),
+			DetailLabel: state.tr("详情", "Details"),
+			Open:        open,
+			Toggle: func(next bool) {
+				toggled = true
+				state.store(key, next)
+				runtime.Invalidate()
+			},
+		}
+		if summary != "" {
+			row.Detail = func(cc *ui.Context) {
+				design.Apply(ui.Text(cc, truncateSummary(summary)), t.TextMuted(design.TypeXXS))
 			}
-		})
+		}
+		uikit.ToolRow(c, row)
+		if !seen && !toggled {
+			state.store(key, open)
+		}
 	}
 }
 
 // toolIcon maps a tool name to its brand glyph: shell/process tools use the
-// terminal, file and web reads the globe, searches the magnifier, task tools
-// the data glyph and everything else the message glyph.
-func toolIcon(name string) *ui.SVG {
-	switch name {
-	case "bash", "job_start", "job_output", "terminal_send", "terminal_read":
-		return icons.Terminal()
-	case "read_file", "web_fetch", "web_search", "read_image":
-		return icons.Globe()
-	case "grep", "glob":
-		return icons.Search()
-	case "todo", "team_task_create", "team_task_update":
-		return icons.Data()
-	case "list_dir", "write_file", "edit_file", "str_replace_editor",
-		"enter_worktree", "list_worktrees":
-		return icons.Folder()
-	case "subagent", "workflow", "ralph", "skill", "plan_review":
-		return icons.Sparkles()
-	default:
-		return icons.Message()
-	}
-}
-
-// toolStatusColor maps a tool status to the badge's tint/fill color.
+// terminal, file and web reads the globe, searches the magnifier, task tools// toolStatusColor maps a tool status to the badge's tint/fill color.
 func toolStatusColor(t *design.Tokens, status string) ui.Color {
 	switch normalizeStatus(status) {
 	case "running":

@@ -165,6 +165,17 @@ func (r *Root) shortcutNavigator(kernel cordis.Context) contracts.Navigator {
 // takes effect on the next frame; registrations are frame-scoped by mygo's
 // context shortcut hook, so they never accumulate.
 func (r *Root) bindChromeShortcuts(c *ui.Context) {
+	// Toggles must act on a press, not on the auto-repeat of a key held down;
+	// mygo v0.8 reports the repeat with Context.ShortcutRepeated
+	// (docs/ui/input.md: "Shortcuts").
+	guardRepeat := func(fn func()) func() {
+		return func() {
+			if c.ShortcutRepeated() {
+				return
+			}
+			fn()
+		}
+	}
 	toggleMods, toggleKey := ui.Cmd, ui.KeyB
 	if r.settingsService != nil {
 		if mods, key, ok := parseShortcutChord(r.settingsService.Get(contracts.SettingsUIShortcutToggleSidebar,
@@ -172,7 +183,7 @@ func (r *Root) bindChromeShortcuts(c *ui.Context) {
 			toggleMods, toggleKey = mods, key
 		}
 	}
-	c.OnShortcut(toggleMods, toggleKey, r.ToggleSidebarCollapsed)
+	c.OnShortcut(toggleMods, toggleKey, guardRepeat(r.ToggleSidebarCollapsed))
 
 	paletteMods, paletteKey := ui.Cmd, ui.KeyK
 	if r.settingsService != nil {
@@ -181,29 +192,38 @@ func (r *Root) bindChromeShortcuts(c *ui.Context) {
 			paletteMods, paletteKey = mods, key
 		}
 	}
-	c.OnShortcut(paletteMods, paletteKey, func() {
+	c.OnShortcut(paletteMods, paletteKey, guardRepeat(func() {
 		r.paletteOpen = !r.paletteOpen
 		r.paletteQuery = ""
 		r.paletteFilter = ""
 		r.paletteSelected = 0
 		r.requestFrame()
-	})
+	}))
 
 	// Built-in inspector shortcut: the right panel has a visible toggle, and a
 	// keyboard path so the keyboard-first shell reaches it without a mouse.
-	c.OnShortcut(ui.Cmd|ui.Alt, ui.KeyI, func() {
+	c.OnShortcut(ui.Cmd|ui.Alt, ui.KeyI, guardRepeat(func() {
 		if !r.hasAnySlot(contracts.SlotSessionPanelRight) {
 			return
 		}
 		r.rightOpen = !r.rightOpen
 		r.requestFrame()
-	})
+	}))
 
 	// Inspector pane cycling: the inspector module registers the commands, the
 	// host binds the chord (H26: pane switching should not require opening the
 	// pane menu with the pointer).
-	c.OnShortcut(ui.Cmd|ui.Alt, ui.KeyLeft, func() { r.runCommandByID("rightpanel.pane.prev") })
-	c.OnShortcut(ui.Cmd|ui.Alt, ui.KeyRight, func() { r.runCommandByID("rightpanel.pane.next") })
+	c.OnShortcut(ui.Cmd|ui.Alt, ui.KeyLeft, guardRepeat(func() { r.runCommandByID("rightpanel.pane.prev") }))
+	c.OnShortcut(ui.Cmd|ui.Alt, ui.KeyRight, guardRepeat(func() { r.runCommandByID("rightpanel.pane.next") }))
+
+	// Navigation history: Alt+Left goes back, as the platform's back gesture
+	// would (mygo navigation.md: the router owns history; the hand-built
+	// navigator exposes the same action here).
+	c.OnShortcut(ui.Alt, ui.KeyLeft, guardRepeat(func() {
+		if r.nav.Back() {
+			r.requestFrame()
+		}
+	}))
 
 	// Built-in window shortcuts (not configurable): new session and settings.
 	c.OnShortcut(ui.Cmd, ui.KeyN, r.newSessionShortcut)

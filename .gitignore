@@ -26,3 +26,6 @@
 *.key
 .credentials*
 /credentials*
+
+# Local build output of the snapshot devtool (use go run ./internal/devtools/ui-snapshot).
+/ui-snapshot

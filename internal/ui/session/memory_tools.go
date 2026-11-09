@@ -254,7 +254,7 @@ func buildMemoryEditDialog(c *ui.Context, t *design.Tokens, runtime contracts.UI
 	}
 	ui.Modal(c, &st.memoryEditOpen, func() {
 		dialogEnter(c, save)
-		design.Apply(ui.Column(c).Width(520).Gap(design.Space4), func(el ui.Element) ui.Element {
+		design.Apply(ui.Column(c).Width(design.DialogWidthM).Gap(design.Space4), func(el ui.Element) ui.Element {
 			return el.PaddingX(design.Space6).PaddingY(design.Space2)
 		}).Children(func() {
 			design.Apply(ui.Text(c, st.tr("编辑记忆", "Edit memory")), t.Font(design.TypeL)).

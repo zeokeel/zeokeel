@@ -119,6 +119,36 @@ func TestSessionPermissionOverrideGate(t *testing.T) {
 	}
 }
 
+// TestSessionPermissionWorkspaceAllowsPathTools covers the per-session workspace
+// override: normal in-workspace file editing (write/edit as well as reads) is
+// allowed without approval, while tools that can leave the workspace fall
+// through to the global policy.
+func TestSessionPermissionWorkspaceAllowsPathTools(t *testing.T) {
+	svc, _ := newSwitcherService(t)
+	sessionID, err := svc.NewSession("")
+	if err != nil {
+		t.Fatalf("NewSession: %v", err)
+	}
+	if err := svc.SetSessionPermission(sessionID, contracts.PermissionWorkspace); err != nil {
+		t.Fatalf("workspace: %v", err)
+	}
+	// A deny-everything global policy proves the allowed tools never consult it.
+	svc.approvals = denyApprovals{}
+	for _, tool := range []string{
+		"read_file", "list_dir", "glob", "grep",
+		"write_file", "edit_file", "str_replace_editor",
+	} {
+		if got := gateDecision(t, svc, sessionID, tool); got != rig.DecisionAllow {
+			t.Fatalf("workspace gate %q = %v, want allow", tool, got)
+		}
+	}
+	for _, tool := range []string{"bash", "web_fetch", "mcp__server__run", "unknown_tool"} {
+		if got := gateDecision(t, svc, sessionID, tool); got != rig.DecisionDeny {
+			t.Fatalf("workspace gate %q = %v, want the global deny", tool, got)
+		}
+	}
+}
+
 func TestSessionPermissionPlanModeWins(t *testing.T) {
 	settings := newFakeSettings(map[string]string{contracts.SettingAgentMode: contracts.AgentModePlan})
 	svc := newService(Config{}, rigtools.NewRegistry(), settings, &fakeLogger{}, newFakeStore(), fakeApprovals{})

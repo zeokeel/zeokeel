@@ -65,3 +65,60 @@ func TestSectionWithNilBodyStillRendersTitle(t *testing.T) {
 		t.Fatalf("frame does not show the section title; texts = %v", tester.Texts())
 	}
 }
+
+// TestSectionActionPutsActionOnHeadingRow covers the shared action placement:
+// a section utility action (restore defaults, export a report) shares the
+// heading's row at its right edge, instead of sitting below the body like a
+// form submit.
+func TestSectionActionPutsActionOnHeadingRow(t *testing.T) {
+	tt := ui.NewTester(func(c *ui.Context) {
+		uikit.SectionAction(c, "预设列表", func(c *ui.Context) {
+			ui.Button(c, "恢复内置默认")
+		}, func(*ui.Context) {
+			ui.Text(c, "body")
+		})
+	}, 800, 400)
+	tt.Frame()
+	heading, ok := tt.Find("预设列表")
+	if !ok {
+		t.Fatalf("section heading not found; texts = %v", tt.Texts())
+	}
+	action, ok := tt.Find("恢复内置默认")
+	if !ok {
+		t.Fatalf("section action not found; texts = %v", tt.Texts())
+	}
+	if !rowsOverlap(heading, action) {
+		t.Fatalf("action row = %v, heading row = %v; want the same row", action, heading)
+	}
+	if action.X < heading.X {
+		t.Fatalf("action x = %v, want it right of the heading x = %v", action.X, heading.X)
+	}
+}
+
+// TestPageHeaderActionPutsActionOnHeaderRow covers the page-level placement: a
+// page's immediate-effect actions sit on the header row at its right edge.
+func TestPageHeaderActionPutsActionOnHeaderRow(t *testing.T) {
+	tt := ui.NewTester(func(c *ui.Context) {
+		uikit.PageHeaderAction(c, "技能", "副标题", func(c *ui.Context) {
+			ui.PrimaryButton(c, "新建技能")
+		})
+	}, 800, 400)
+	tt.Frame()
+	heading, ok := tt.Find("技能")
+	if !ok {
+		t.Fatalf("page heading not found; texts = %v", tt.Texts())
+	}
+	action, ok := tt.Find("新建技能")
+	if !ok {
+		t.Fatalf("page action not found; texts = %v", tt.Texts())
+	}
+	if !rowsOverlap(heading, action) {
+		t.Fatalf("action row = %v, heading row = %v; want the same row", action, heading)
+	}
+}
+
+// rowsOverlap reports whether two rects share vertical space: a heading text
+// line and a button on one row have different heights but overlap.
+func rowsOverlap(a, b ui.Rect) bool {
+	return a.Y < b.Y+b.H && b.Y < a.Y+a.H
+}

@@ -2,19 +2,39 @@ package rightpanel
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 
 	"github.com/egoist/mygo/ui"
+	"github.com/egoist/mygo/ui/editor"
 
 	"github.com/zeokeel/zeokeel/internal/contracts"
 	"github.com/zeokeel/zeokeel/internal/design"
 	"github.com/zeokeel/zeokeel/internal/uikit"
 )
 
-// maxDiffLines bounds the unified diff rendered for one file; the rest is
-// summarized as truncated.
-const maxDiffLines = 400
+const (
+	// maxDiffLines bounds the plain-text fallback rendered for a diff the
+	// official parser rejects (a truncated or partial patch); the rest is
+	// summarized as truncated.
+	maxDiffLines = 400
+	// diffFitLines is how many patch lines the official viewer shows at its
+	// natural height. Longer diffs get a bounded height and scroll inside the
+	// viewer instead of stretching the inspector pane.
+	diffFitLines = 20
+)
+
+// errNoDiffPatch marks a diff string the official parser read no file from.
+var errNoDiffPatch = errors.New("rightpanel: the diff has no readable file patch")
+
+// diffView is one changed file's cached official diff viewer: the editor's
+// DiffState kept across frames (its scroll, folds and selections) and how many
+// patch lines it shows, to lay it out at its natural or its bounded height.
+type diffView struct {
+	state *editor.DiffState
+	lines int
+}
 
 // buildChangesPane is the inspector's Changes tab: the current workspace's
 // uncommitted files, one collapsible native card per file with its unified
@@ -65,8 +85,8 @@ func buildChangesPane(c *ui.Context, t *design.Tokens, workspace contracts.Works
 }
 
 // buildChangeRow is one changed file: status badge, path, +/- stats and a
-// native collapsible with the unified diff (collapsed by default). Rows and
-// dividers, not cards: a 320 DIP inspector only holds a card or two.
+// native collapsible with the official diff viewer (collapsed by default).
+// Rows and dividers, not cards: a 320 DIP inspector only holds a card or two.
 func buildChangeRow(c *ui.Context, t *design.Tokens, st *state, change contracts.FileChange) {
 	path := firstNonEmpty(change.Path, uikit.T(st.locale, "(未知路径)", "(unknown path)"))
 	key := path + "\x00" + change.Status
@@ -94,17 +114,82 @@ func buildChangeRow(c *ui.Context, t *design.Tokens, st *state, change contracts
 		}
 		open := st.changesOpen[key]
 		ui.Collapsible(c, uikit.T(st.locale, "查看 diff", "View diff"), &open, func() {
-			buildDiff(c, t, change.Diff, st.locale)
+			buildDiff(c, t, st, change)
 		})
 		st.changesOpen[key] = open
 		ui.Divider(c)
 	})
 }
 
-// buildDiff renders a unified diff line by line with the brand colors: additions
-// success, deletions danger, hunk/file headers tertiary and context secondary.
-// The diff is bounded to maxDiffLines.
-func buildDiff(c *ui.Context, t *design.Tokens, diff string, locale contracts.LocaleService) {
+// buildDiff renders one file's unified diff: the official editor.DiffView of a
+// cached editor.DiffState (docs/ui/diff-viewer.md), with the unchanged lines
+// folded by the viewer itself. A diff the official parser reads no file from
+// (a truncated or headerless patch) falls back to bounded plain-text lines, so
+// a broken patch still explains itself instead of showing an empty box.
+func buildDiff(c *ui.Context, t *design.Tokens, st *state, change contracts.FileChange) {
+	view, err := st.diffViewFor(change)
+	if err == nil && view != nil {
+		viewer := editor.DiffView(c, view.state).FillWidth()
+		if !view.state.FitContent {
+			// A long diff gets a bounded body and scrolls inside the viewer
+			// (the shared long-body bound), rather than stretching the pane.
+			viewer.Height(design.DialogBodyMax)
+		}
+		return
+	}
+	buildDiffFallback(c, t, change.Diff, st.locale)
+}
+
+// diffViewFor returns the cached official diff viewer for one changed file,
+// building it with editor.ParsePatch/SetPatch the first time and keeping it
+// across frames (scroll position, folds and keyboard focus live in it).
+func (st *state) diffViewFor(change contracts.FileChange) (*diffView, error) {
+	if st.diffs == nil {
+		st.diffs = make(map[string]*diffView)
+	}
+	key := change.Path + "\x00" + change.Status
+	if cached, ok := st.diffs[key]; ok {
+		return cached, nil
+	}
+	patches, err := editor.ParsePatch(change.Diff)
+	if len(patches) == 0 {
+		if err != nil {
+			return nil, err
+		}
+		return nil, errNoDiffPatch
+	}
+	// A truncated patch still parses the hunks before the cut: show them.
+	patch := patches[0]
+	lines := patchLineCount(patch)
+	view := &diffView{
+		// Short diffs take their natural height; long ones get a bounded body
+		// and scroll inside the viewer (set in buildDiff).
+		state: &editor.DiffState{Layout: editor.DiffUnified, FitContent: lines <= diffFitLines},
+		lines: lines,
+	}
+	view.state.SetPatch(patch)
+	st.diffs[key] = view
+	return view, nil
+}
+
+// patchLineCount counts the lines a patch shows, for the viewer's layout.
+func patchLineCount(patch editor.FilePatch) int {
+	lines := 0
+	for _, hunk := range patch.Hunks {
+		for _, line := range hunk.Lines {
+			if line == "" || strings.HasPrefix(line, "\\") {
+				continue
+			}
+			lines++
+		}
+	}
+	return lines
+}
+
+// buildDiffFallback renders a diff the official parser rejected line by line
+// with the brand colors: additions success, deletions danger, hunk/file headers
+// tertiary and context secondary. The diff is bounded to maxDiffLines.
+func buildDiffFallback(c *ui.Context, t *design.Tokens, diff string, locale contracts.LocaleService) {
 	lines := strings.Split(strings.TrimRight(diff, "\n"), "\n")
 	truncated := false
 	if len(lines) > maxDiffLines {

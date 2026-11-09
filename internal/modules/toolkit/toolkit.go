@@ -20,21 +20,16 @@ import (
 	cordis "github.com/zeokeel/zeokeel-kernel"
 	"github.com/zeokeel/zeokeel-kernel/module"
 
+	rig "github.com/zeokeel/zeokeel-rig"
 	"github.com/zeokeel/zeokeel-rig/sandbox"
 	rigtool "github.com/zeokeel/zeokeel-rig/tools"
-	"github.com/zeokeel/zeokeel-rig/tools/builtin"
-	"github.com/zeokeel/zeokeel-rig/tools/editor"
-	"github.com/zeokeel/zeokeel-rig/tools/image"
-	"github.com/zeokeel/zeokeel-rig/tools/jobs"
 	"github.com/zeokeel/zeokeel-rig/tools/mcp"
 	"github.com/zeokeel/zeokeel-rig/tools/misc"
 	"github.com/zeokeel/zeokeel-rig/tools/schedule"
 	"github.com/zeokeel/zeokeel-rig/tools/settings"
 	"github.com/zeokeel/zeokeel-rig/tools/skill"
 	"github.com/zeokeel/zeokeel-rig/tools/team"
-	"github.com/zeokeel/zeokeel-rig/tools/terminal"
 	"github.com/zeokeel/zeokeel-rig/tools/web"
-	"github.com/zeokeel/zeokeel-rig/tools/worktree"
 
 	"github.com/zeokeel/zeokeel/internal/contracts"
 	"github.com/zeokeel/zeokeel/internal/memorytools"
@@ -56,7 +51,7 @@ var defaultCommands = []string{
 	"touch", "tee", "date", "seq", "sort", "uniq", "cut", "tr", "xargs",
 	"test", "true", "false", "which", "basename", "dirname", "realpath",
 	"stat", "file", "diff", "patch", "tar", "unzip", "zip", "curl", "wget",
-	"node", "npm", "python3", "pwsh", "powershell",
+	"node", "npm", "python3", "pwsh", "pwsh.exe", "powershell", "powershell.exe",
 }
 
 // MCPServer configures one MCP server: a Streamable HTTP endpoint or a stdio
@@ -82,8 +77,10 @@ type MCPServer struct {
 
 // Config is the module's typed assembly config.
 type Config struct {
-	// Root is the workspace root the file tools are sandboxed to. Empty means
-	// the process working directory.
+	// Root is the workspace root the file tools are sandboxed to. Empty or "."
+	// means "follow the workspace currently open in the UI" (the desktop tool
+	// root then moves with the workspace and stays fail-closed while no
+	// workspace is open). Any other value pins the tools to that directory.
 	Root string `json:"root"`
 	// ShellTimeoutMs bounds shell tool executions (0 = 30s).
 	ShellTimeoutMs int `json:"shellTimeoutMs"`
@@ -119,38 +116,20 @@ func Module() *module.Descriptor[Config] {
 				logger.Printf(format, args...)
 			}
 		}
-		root := strings.TrimSpace(cfg.Root)
-		if root == "" {
-			root = "."
-		}
 		timeout := time.Duration(cfg.ShellTimeoutMs) * time.Millisecond
 		if timeout <= 0 {
 			timeout = 30 * time.Second
 		}
-		policy := newPolicy(cfg, root, timeout)
-
-		tools := builtin.NewWithPolicy(policy)
-		tools = append(tools,
-			editor.New(policy),
-			image.New(policy),
-			misc.NewWorkingDirectory(root),
-			misc.NewTodoTool(misc.NewTodoStore()),
-		)
-
-		terminalOpts := []terminal.Option{terminal.WithPolicy(policy)}
-		switch strings.ToLower(strings.TrimSpace(cfg.TerminalTransport)) {
-		case "pty":
-			terminalOpts = append(terminalOpts, terminal.WithTransport(terminal.TransportPTY))
-		case "pipe":
-			terminalOpts = append(terminalOpts, terminal.WithTransport(terminal.TransportPipe))
-		}
-		terminals := terminal.NewManager(terminalOpts...)
-		tools = append(tools, terminals.ToolsWithList()...)
-
-		background := jobs.NewManager(jobs.WithPolicy(policy))
-		tools = append(tools,
-			background.Tools()...,
-		)
+		// Root-dependent tools (files, shell, editor, image, terminal, jobs,
+		// worktree, working_directory) follow the workspace that is current at
+		// call time; tools without a filesystem root are registered once below.
+		group := newRebindGroup(cfg, timeout, workspaceRootSource(ctx, cfg.Root), logf)
+		rootScoped := group.initial()
+		tools := append([]rig.Tool(nil), group.proxies(rootScoped)...)
+		tools = append(tools, misc.NewTodoTool(misc.NewTodoStore()))
+		// web_fetch is not workspace-rooted; give it a policy with the network
+		// and output limits but no filesystem root.
+		webPolicy := newPolicy(cfg, "", timeout)
 		if memoryStore, ok := ctx.Get(contracts.KeyMemory); ok {
 			// The memory backend provides the durable rig.MemoryStore; without
 			// it the memory tools fall back to their in-memory default. The
@@ -161,7 +140,6 @@ func Module() *module.Descriptor[Config] {
 			tools = append(tools, memorytools.Tools(nil)...)
 		}
 		tools = append(tools, schedule.Tools(nil)...)
-		tools = append(tools, worktree.Tools(policy)...)
 		if skillStore, ok := ctx.Get(contracts.KeySkills); ok {
 			// The skills backend discovers SKILL.md files from the data dir and
 			// the current workspace; the skill tool lists/searches/loads them.
@@ -178,7 +156,7 @@ func Module() *module.Descriptor[Config] {
 		}
 
 		if cfg.Network {
-			tools = append(tools, web.NewFetcher(policy))
+			tools = append(tools, web.NewFetcher(webPolicy))
 			// The search backend is read from settings on every call so an
 			// endpoint/key change applies to the next search without a restart.
 			// Without a settings service there is nowhere to configure it, so
@@ -340,13 +318,11 @@ func Module() *module.Descriptor[Config] {
 		if _, err := ctx.Effect(func() cordis.Effect {
 			return cordis.Effect{cordis.CleanupOf(func() {
 				closeAll(clients)
-				terminals.CloseAll()
-				background.CloseAll()
+				group.close()
 			})}
 		}); err != nil {
 			closeAll(clients)
-			terminals.CloseAll()
-			background.CloseAll()
+			group.close()
 			return err
 		}
 
@@ -358,15 +334,18 @@ func Module() *module.Descriptor[Config] {
 
 		if _, err := ctx.Provide(contracts.KeyToolkit, rigtool.NewRegistry(tools...)); err != nil {
 			closeLSP()
+			group.close()
 			return err
 		}
 		_, err := ctx.Provide(contracts.KeyPlugins, contracts.PluginsService(plugins))
 		if err != nil {
 			closeLSP()
+			group.close()
 			return err
 		}
 		if _, err := ctx.Provide(contracts.KeyTaskBoard, contracts.TaskBoard(taskBoard)); err != nil {
 			closeLSP()
+			group.close()
 			return err
 		}
 		if _, err := ctx.Effect(func() cordis.Effect {

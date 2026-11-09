@@ -56,17 +56,20 @@ const maxPending = 32
 // notifications wait in the module's queue and appear as earlier ones close.
 const toastMaxVisible = 2
 
+// The placement measures are on the design system's 4 DIP grid, written as
+// multiples of its spacing tokens instead of bare numbers, so the stack stays
+// on the same grid as the composer it floats above.
 const (
 	// The composer card with a staged attachment is about 178 DIP tall on a
 	// wide window (the screenshot probe shows its top edge at y≈598 of 800) and
 	// taller when its toolbar wraps on a narrow one; the stack keeps its bottom
 	// above the card so no toast touches the input, the send row or a settings
 	// page footer.
-	toastBottomInset        float32 = 220
-	toastBottomInsetNarrow  float32 = 236
-	toastBottomInsetBreakAt float32 = 1120
-	toastMaxWidth           float32 = 360
-	toastCloseButtonSize    float32 = 20
+	toastBottomInset        float32 = design.Space8*7 - design.Space1  // 220
+	toastBottomInsetNarrow  float32 = design.Space8*7 + design.Space3  // 236
+	toastBottomInsetBreakAt float32 = design.Space8 * 35               // 1120
+	toastMaxWidth           float32 = design.Space8*11 + design.Space2 // 360
+	toastCloseButtonSize    float32 = design.Space5                    // 20
 )
 
 // Config is the module's typed assembly config (all copy comes from the
@@ -376,8 +379,9 @@ func (st *state) toastLevelFor(t *design.Tokens, toastType string) toastLevel {
 }
 
 // buildToast is one branded toast: the level (icon + label), the copy and the
-// close control, on the raised surface with the product's border and a soft
-// floating shadow. Timing, pause and announcements stay with ToastBase.
+// close control, on the raised surface with the product's border and the
+// theme's overlay elevation. Timing, pause and announcements stay with
+// ToastBase.
 func buildToast(c *ui.Context, st *state, toast ui.Toast) {
 	t := design.Of(c)
 	p := ui.ToastBase(c, toast)
@@ -385,8 +389,9 @@ func buildToast(c *ui.Context, st *state, toast ui.Toast) {
 	box := p.Root.Row().AlignItems(ui.Start).Gap(design.Space2).
 		MaxWidth(toastMaxWidth).Padding(design.Space2, design.Space3).
 		Radius(design.RadiusMD).Background(t.BgRaised).Border(1, t.BorderL2)
-	// Floating layer: the shadow is a neutral elevation cue, not a brand color.
-	box.Shadow(0, 6, 16, 0, ui.RGBA(0, 0, 0, 0.18))
+	// The elevation is the shared floating-surface token (stronger in the dark
+	// theme), not a bare shadow value of this module.
+	box = design.Apply(box, t.ShadowOverlay())
 	box.Children(func() {
 		ui.Column(c).Grow(1).Gap(design.Space1).Children(func() {
 			ui.Row(c).AlignItems(ui.Center).Gap(design.Space1).Children(func() {

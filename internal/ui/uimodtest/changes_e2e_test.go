@@ -73,11 +73,16 @@ func TestWorkspaceChangesEndToEnd(t *testing.T) {
 		t.Fatalf("expand diff: %v; texts = %v", err, tester.Texts())
 	}
 	tester.Frame()
-	joined := ""
-	for _, text := range tester.Texts() {
-		joined += text + "\n"
+	// The official editor.DiffView paints the changed lines on the canvas, so
+	// the text layer only carries the hunk headers; the lines are asserted
+	// through the viewer's accessibility value (mygo docs/ui/diff-viewer.md;
+	// Tester.Access), which screen readers read.
+	newSide, ok := tester.Access("New text")
+	if !ok {
+		t.Fatalf("expanded diff's new side is not exposed to assistive technology; texts = %v", tester.Texts())
 	}
-	if !containsText(joined, "brand new line") {
-		t.Fatalf("expanded diff missing the changed line; texts = %v", tester.Texts())
+	if !containsText(newSide.Value, "brand new line") {
+		t.Fatalf("expanded diff missing the changed line; a11y value = %q; texts = %v",
+			newSide.Value, tester.Texts())
 	}
 }

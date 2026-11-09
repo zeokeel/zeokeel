@@ -155,7 +155,7 @@ func buildTaskToolbar(c *ui.Context, t *design.Tokens, runtime contracts.UIRunti
 			}
 			for _, choice := range choices {
 				item := m.Item(st.tr(choice.zh, choice.en))
-				item.Checked(st.taskFilter == choice.value)
+				item.Radio(st.taskFilter == choice.value)
 				if item.Chosen() && st.taskFilter != choice.value {
 					st.taskFilter = choice.value
 					runtime.Invalidate()
@@ -175,12 +175,13 @@ func buildTaskCard(c *ui.Context, t *design.Tokens, service contracts.Automation
 		ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(design.Space3).Children(func() {
 			design.Apply(ui.Text(c, firstNonEmpty(task.Name, st.tr("(未命名任务)", "(Untitled task)"))), t.Font(design.TypeS)).
 				FontWeight(600).TextColor(t.LabelPrimary).Grow(1).MaxLines(1).Ellipsis("…")
-			// A native switch in a labeled field: the visible label says what the
-			// switch does ("启用"), the task name is already the card title.
+			// The enable control is a bare native switch with its short caption:
+			// a ui.Field belongs to a vertical form, not to this horizontal
+			// header (the task name already names the row).
 			enabled := task.Enabled
-			ui.Field(c, st.tr("启用", "Enabled"), func() {
-				sw := ui.Switch(c, &enabled)
-				sw.Label(st.tr("启用任务", "Enable task"))
+			ui.Row(c).AlignItems(ui.Center).Gap(design.Space1).Children(func() {
+				design.Apply(ui.Text(c, st.tr("启用", "Enabled")), t.TextMuted(design.TypeXXS))
+				sw := ui.Switch(c, &enabled).Label(st.tr("启用任务", "Enable task"))
 				if !sw.Changed() {
 					return
 				}
@@ -267,6 +268,27 @@ func runStatusLabel(st *state, status string) string {
 	return st.tr("成功", "Success")
 }
 
+// automationRunSummary renders one run record's summary for the UI. The
+// automation backend's own bookkeeping line ("ran in chat session <id>") is an
+// internal id, so it becomes localized copy without the id; every other summary
+// (an error, a tool result) is shown bounded, with the full text in the row's
+// tooltip.
+func automationRunSummary(st *state, summary string) string {
+	trimmed := strings.TrimSpace(summary)
+	if trimmed == "" {
+		return ""
+	}
+	if strings.HasPrefix(strings.ToLower(trimmed), "ran in chat session ") {
+		return st.tr("已在会话中运行", "Ran in a chat session")
+	}
+	const maxSummaryRunes = 120
+	runes := []rune(trimmed)
+	if len(runes) > maxSummaryRunes {
+		return string(runes[:maxSummaryRunes]) + "…"
+	}
+	return trimmed
+}
+
 // runStatusColor maps one run status to its semantic text color token.
 func runStatusColor(t *design.Tokens, status string) ui.Color {
 	if status == contracts.AutomationRunFailure {
@@ -284,8 +306,10 @@ func buildTaskHistory(c *ui.Context, t *design.Tokens, st *state, task contracts
 			latest := task.RunHistory[0]
 			design.Apply(ui.Badge(c, runStatusLabel(st, latest.Status)), t.Badge()).
 				TextColor(runStatusColor(t, latest.Status))
-			design.Apply(ui.Text(c, firstNonEmpty(latest.Summary, "—")), t.Font(design.TypeXXS)).
-				TextColor(t.LabelTertiary).Grow(1).MaxLines(1).Ellipsis("…")
+			design.Apply(ui.Text(c, firstNonEmpty(automationRunSummary(st, latest.Summary), "—")),
+				t.Font(design.TypeXXS)).
+				TextColor(t.LabelTertiary).Grow(1).MaxLines(1).Ellipsis("…").
+				Tooltip(strings.TrimSpace(latest.Summary))
 		} else {
 			ui.Spacer(c).Grow(1)
 		}
@@ -303,8 +327,10 @@ func buildTaskHistory(c *ui.Context, t *design.Tokens, st *state, task contracts
 					FontSize(11).TextColor(t.LabelTertiary).NoWrap()
 				design.Apply(ui.Badge(c, runStatusLabel(st, record.Status)), t.Badge()).
 					TextColor(runStatusColor(t, record.Status))
-				design.Apply(ui.Text(c, firstNonEmpty(record.Summary, "—")), t.Font(design.TypeXXS)).
-					TextColor(t.LabelSecondary).Grow(1).MaxLines(1).Ellipsis("…")
+				design.Apply(ui.Text(c, firstNonEmpty(automationRunSummary(st, record.Summary), "—")),
+					t.Font(design.TypeXXS)).
+					TextColor(t.LabelSecondary).Grow(1).MaxLines(1).Ellipsis("…").
+					Tooltip(strings.TrimSpace(record.Summary))
 			})
 		}
 	})

@@ -34,14 +34,17 @@ func seedFeedbackSessions(chat *fakeChat) {
 func TestDataPrivacyExportFeedbackMarkers(t *testing.T) {
 	chat := &fakeChat{}
 	seedFeedbackSessions(chat)
-	var content string
-	overrideSavers(t, func(defaultName, body string) (string, error) {
-		content = body
+	var title, content string
+	overrideSavers(t, func(dialogTitle, defaultName, body string) (string, error) {
+		title, content = dialogTitle, body
 		return "/tmp/sessions.md", nil
 	}, nil)
 	h := dataPageHarness(t, chat, newFakeSettings(nil), "/data/sessions", contracts.AppInfo{})
 	tester := h.tester()
 	h.click(tester, "导出全部会话")
+	if title != "导出全部会话" {
+		t.Fatalf("export dialog title = %q, want 导出全部会话", title)
+	}
 
 	for _, want := range []string{
 		"> 用户反馈：有帮助",
@@ -72,9 +75,9 @@ func TestDataPrivacyExportFeedbackMarkers(t *testing.T) {
 func TestDataPrivacyExportFeedbackEnglish(t *testing.T) {
 	chat := &fakeChat{}
 	seedFeedbackSessions(chat)
-	var content string
-	overrideSavers(t, func(defaultName, body string) (string, error) {
-		content = body
+	var title, content string
+	overrideSavers(t, func(dialogTitle, defaultName, body string) (string, error) {
+		title, content = dialogTitle, body
 		return "/tmp/sessions.md", nil
 	}, nil)
 	h := newLocaleHarness(t, chat, newFakeSettings(nil), settings.Config{}, "en")
@@ -83,6 +86,9 @@ func TestDataPrivacyExportFeedbackEnglish(t *testing.T) {
 	tester.Frame()
 	h.click(tester, "Data & privacy")
 	h.click(tester, "Export all sessions")
+	if title != "Export all sessions" {
+		t.Fatalf("export dialog title = %q, want the English Export all sessions", title)
+	}
 
 	for _, want := range []string{
 		"> User feedback: Helpful",
@@ -99,7 +105,7 @@ func TestDataPrivacyExportWithoutFeedbackHasNoLines(t *testing.T) {
 	chat := &fakeChat{}
 	seedDataPageSessions(chat)
 	var content string
-	overrideSavers(t, func(defaultName, body string) (string, error) {
+	overrideSavers(t, func(title, defaultName, body string) (string, error) {
 		content = body
 		return "/tmp/sessions.md", nil
 	}, nil)
@@ -115,7 +121,7 @@ func TestDataPrivacyReportFeedbackStats(t *testing.T) {
 	chat := &fakeChat{}
 	seedFeedbackSessions(chat)
 	var content string
-	overrideSavers(t, nil, func(defaultName, body string) (string, error) {
+	overrideSavers(t, nil, func(title, defaultName, body string) (string, error) {
 		content = body
 		return "/tmp/report.txt", nil
 	})
@@ -131,7 +137,7 @@ func TestDataPrivacyReportFeedbackStats(t *testing.T) {
 	var english string
 	chat2 := &fakeChat{}
 	seedFeedbackSessions(chat2)
-	overrideSavers(t, nil, func(defaultName, body string) (string, error) {
+	overrideSavers(t, nil, func(title, defaultName, body string) (string, error) {
 		english = body
 		return "/tmp/report.txt", nil
 	})
@@ -152,7 +158,7 @@ func TestDataPrivacyReportFeedbackStatsZero(t *testing.T) {
 	chat := &fakeChat{}
 	seedDataPageSessions(chat)
 	var content string
-	overrideSavers(t, nil, func(defaultName, body string) (string, error) {
+	overrideSavers(t, nil, func(title, defaultName, body string) (string, error) {
 		content = body
 		return "/tmp/report.txt", nil
 	})

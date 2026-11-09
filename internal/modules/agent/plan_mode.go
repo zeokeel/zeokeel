@@ -110,13 +110,18 @@ func (s *service) agentModePlan() bool {
 		contracts.AgentModePlan)
 }
 
-// workspaceReadOnlyTools are the tools a per-session "workspace" permission
-// override auto-allows; other tools fall through to the approvals service.
-var workspaceReadOnlyTools = map[string]bool{
-	"read_file": true,
-	"list_dir":  true,
-	"glob":      true,
-	"grep":      true,
+// workspacePathTools are the tools a per-session "workspace" permission
+// override auto-allows: the file tools normal in-workspace editing needs
+// (reading, listing, searching, writing and editing). Tools that can leave the
+// workspace fall through to the approvals service.
+var workspacePathTools = map[string]bool{
+	"read_file":          true,
+	"list_dir":           true,
+	"glob":               true,
+	"grep":               true,
+	"write_file":         true,
+	"edit_file":          true,
+	"str_replace_editor": true,
 }
 
 // interactionTools are the host tools that interact with the user directly:
@@ -139,7 +144,7 @@ var interactionTools = map[string]bool{
 // gate builds the tool approval gate for one session. Plan and chat modes are
 // checked on every call (highest priority); then an optional per-session
 // permission override applies (full allows, never denies, workspace allows the
-// read-only tools); interaction/presentation host tools are then allowed
+// workspace file tools); interaction/presentation host tools are then allowed
 // without an approval prompt (their own overlay is the user interaction);
 // otherwise the approvals service's global policy applies.
 func (s *service) gate(sessionIDs ...string) rig.Gate {
@@ -177,7 +182,7 @@ func (s *service) gate(sessionIDs ...string) rig.Gate {
 			case contracts.PermissionNever:
 				return rig.DecisionDeny, nil
 			case contracts.PermissionWorkspace:
-				if workspaceReadOnlyTools[name] {
+				if workspacePathTools[name] {
 					return rig.DecisionAllow, nil
 				}
 			}

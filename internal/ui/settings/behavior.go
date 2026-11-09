@@ -49,8 +49,8 @@ var behaviorPermissions = []behaviorPermission{
 	},
 	{
 		value: contracts.PermissionWorkspace, zh: "工作区", en: "Workspace",
-		meaningZh: "工作区内的只读工具自动允许，其他操作询问",
-		meaningEn: "Auto-allow read-only workspace tools; ask for the rest",
+		meaningZh: "工作区内的文件读写自动允许，其他操作询问",
+		meaningEn: "Auto-allow workspace file reads and writes; ask for the rest",
 	},
 	{
 		value: contracts.PermissionFull, zh: "完全访问", en: "Full access",
@@ -77,8 +77,9 @@ type behaviorState struct {
 	agentsFileLoaded bool
 }
 
-// agentPermissionMode normalizes the stored agent.permission row: unknown and
-// empty values default to ask.
+// agentPermissionMode normalizes the stored agent.permission row. The default
+// is workspace (normal in-workspace editing without asking); empty and unknown
+// values resolve to it, ask stays an explicit choice.
 func agentPermissionMode(raw string) string {
 	switch strings.ToLower(strings.TrimSpace(raw)) {
 	case contracts.PermissionWorkspace:
@@ -87,8 +88,10 @@ func agentPermissionMode(raw string) string {
 		return contracts.PermissionFull
 	case permissionNever:
 		return permissionNever
-	default:
+	case contracts.PermissionAsk:
 		return contracts.PermissionAsk
+	default:
+		return contracts.PermissionWorkspace
 	}
 }
 
@@ -99,7 +102,7 @@ func behaviorPermissionLabel(locale contracts.LocaleService, mode string) string
 			return localized(locale, choice.zh, choice.en)
 		}
 	}
-	return localized(locale, "询问", "Ask")
+	return localized(locale, "工作区", "Workspace")
 }
 
 // buildBehaviorPage renders the default-permission settings. Every control on

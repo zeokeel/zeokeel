@@ -13,15 +13,16 @@ import (
 	"github.com/zeokeel/zeokeel/internal/ui/settings"
 )
 
-func TestBehaviorPageDefaultsAsk(t *testing.T) {
+func TestBehaviorPageDefaultsWorkspace(t *testing.T) {
 	store := newFakeSettings(nil)
 	h := newHarness(t, &fakeChat{}, store, settings.Config{})
 	tester := h.tester()
 	tester.Frame()
 	h.click(tester, "行为")
-	h.assertTexts(tester, "行为", "默认代理权限", "当前：询问",
+	// The default is workspace: normal in-workspace file edits need no prompt.
+	h.assertTexts(tester, "行为", "默认代理权限", "当前：工作区",
 		"询问", "工作区", "完全访问", "从不",
-		"每次危险操作都会询问", "修改立即生效")
+		"工作区内的文件读写自动允许，其他操作询问", "修改立即生效")
 	if raw := store.get(contracts.SettingAgentPermission); raw != "" {
 		t.Fatalf("defaults wrote the permission row: %q", raw)
 	}
@@ -34,7 +35,7 @@ func TestBehaviorPageSelectsPermission(t *testing.T) {
 	tester.Frame()
 	h.click(tester, "行为")
 
-	h.click(tester, "询问") // open the current-value menu
+	h.click(tester, "工作区") // open the current-value menu
 	h.assertTexts(tester, "完全访问")
 	h.click(tester, "完全访问")
 	if raw := store.get(contracts.SettingAgentPermission); raw != contracts.PermissionFull {
@@ -50,7 +51,7 @@ func TestBehaviorPageSelectsPermission(t *testing.T) {
 	h.assertTexts(tester, "当前：从不")
 }
 
-func TestBehaviorPageBadValueNormalizedAsk(t *testing.T) {
+func TestBehaviorPageBadValueNormalizedWorkspace(t *testing.T) {
 	store := newFakeSettings(map[string]string{
 		contracts.SettingAgentPermission: "bogus-mode",
 	})
@@ -58,12 +59,15 @@ func TestBehaviorPageBadValueNormalizedAsk(t *testing.T) {
 	tester := h.tester()
 	tester.Frame()
 	h.click(tester, "行为")
-	h.assertTexts(tester, "当前：询问")
-	h.click(tester, "询问")
+	h.assertTexts(tester, "当前：工作区")
+	// Ask is still selectable; choosing it writes the explicit value.
 	h.click(tester, "工作区")
-	if raw := store.get(contracts.SettingAgentPermission); raw != contracts.PermissionWorkspace {
-		t.Fatalf("selecting workspace wrote %q", raw)
+	h.click(tester, "询问")
+	if raw := store.get(contracts.SettingAgentPermission); raw != contracts.PermissionAsk {
+		t.Fatalf("selecting ask wrote %q", raw)
 	}
+	tester.Frame()
+	h.assertTexts(tester, "当前：询问")
 }
 
 func TestBehaviorPageWriteFailure(t *testing.T) {
@@ -73,8 +77,8 @@ func TestBehaviorPageWriteFailure(t *testing.T) {
 	tester := h.tester()
 	tester.Frame()
 	h.click(tester, "行为")
-	h.click(tester, "询问")
 	h.click(tester, "工作区")
+	h.click(tester, "询问")
 	h.assertTexts(tester, "保存失败：")
 }
 
@@ -84,10 +88,11 @@ func TestBehaviorPageEnglishCopy(t *testing.T) {
 	tester := h.tester()
 	tester.Frame()
 	h.click(tester, "Behavior")
-	h.assertTexts(tester, "Behavior", "Default agent permission", "Current: Ask",
+	h.assertTexts(tester, "Behavior", "Default agent permission", "Current: Workspace",
 		"Ask", "Workspace", "Full access", "Never",
+		"Auto-allow workspace file reads and writes; ask for the rest",
 		"Changes apply immediately")
-	h.click(tester, "Ask")
+	h.click(tester, "Workspace")
 	h.click(tester, "Full access")
 	if raw := store.get(contracts.SettingAgentPermission); raw != contracts.PermissionFull {
 		t.Fatalf("English selection wrote %q", raw)

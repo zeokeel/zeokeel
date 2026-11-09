@@ -230,6 +230,31 @@ func openTaskMenu(t *testing.T, tester *ui.Tester, subject string) {
 	tester.Frame()
 }
 
+// TestTasksRowContextMenu covers the task row's right-click menu: it is the
+// same menu as the row's ⋯ button (one build function fills both), so choosing
+// Start there moves the task to in progress.
+func TestTasksRowContextMenu(t *testing.T) {
+	board := newFakeTaskBoard(contracts.BoardTask{
+		ID: "t1", Subject: "右键开始", Status: contracts.TaskStatusPending,
+	})
+	h := newTasksHarness(t, "zh", newFakeChat(), rightpanel.Config{}, board)
+	tester := h.tester()
+	openTasks(t, h, tester)
+	h.assertTexts(tester, "右键开始", "待处理")
+
+	if err := tester.RightClick("右键开始"); err != nil {
+		t.Fatalf("right-click task row: %v; texts = %v", err, tester.Texts())
+	}
+	tester.Frame()
+	h.assertTexts(tester, "开始", "完成", "删除")
+	h.click(tester, "开始")
+	calls := board.statuses()
+	if len(calls) != 1 || calls[0].id != "t1" || calls[0].status != contracts.TaskStatusInProgress {
+		t.Fatalf("SetStatus calls = %+v, want t1 -> in_progress", calls)
+	}
+	h.assertTexts(tester, "进行中")
+}
+
 func TestTasksTabEmptyStateWithoutService(t *testing.T) {
 	h := newTasksHarness(t, "zh", newFakeChat(), rightpanel.Config{}, nil)
 	tester := h.tester()

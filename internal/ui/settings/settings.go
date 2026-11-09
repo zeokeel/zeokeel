@@ -371,6 +371,14 @@ type moduleState struct {
 	seenContextBudget string
 	iterationsInput   ui.Handle
 	budgetInput       ui.Handle
+	// The runtime limits are official ui.NumberInputs; the numeric mirrors back
+	// their fields, and the default switches say whether the module config
+	// applies (default = no settings row, which is how "leave it to the module"
+	// is stored).
+	maxIterationsNum  float64
+	contextBudgetNum  float64
+	iterationsDefault bool
+	budgetDefault     bool
 }
 
 // buildLabels is the resolved copy of one page build.
@@ -879,8 +887,8 @@ func diagnosticsRows(info contracts.AppInfo, dataDir string, toolkit *rigtools.R
 	}
 	rows := []diagnosticRow{
 		{localized(locale, "应用", "Application"), name + " v" + version},
-		{"Commit", firstNonEmpty(info.Commit, "unknown")},
-		{localized(locale, "构建时间", "Build time"), firstNonEmpty(info.BuildTime, "unknown")},
+		{"Commit", firstNonEmpty(info.Commit, localized(locale, "未知", "unknown"))},
+		{localized(locale, "构建时间", "Build time"), firstNonEmpty(info.BuildTime, localized(locale, "未知", "unknown"))},
 		{localized(locale, "Go 版本", "Go version"), firstNonEmpty(info.GoVersion, runtime.Version())},
 		{localized(locale, "平台", "Platform"), runtime.GOOS + "/" + runtime.GOARCH},
 		{localized(locale, "数据目录", "Data directory"), firstNonEmpty(dataDir, localized(locale, "未设置", "not set"))},
@@ -920,7 +928,7 @@ func diagnosticsRows(info contracts.AppInfo, dataDir string, toolkit *rigtools.R
 func runtimeSummary(state *moduleState, store contracts.SettingsService, locale contracts.LocaleService) string {
 	iterations := strings.TrimSpace(state.maxIterations)
 	if iterations == "" {
-		iterations = localized(locale, "默认", "default")
+		iterations = localized(locale, "不限制", "unlimited")
 	}
 	budget := strings.TrimSpace(state.contextBudget)
 	if budget == "" {
@@ -1045,6 +1053,14 @@ func (st *moduleState) seedRuntime(chat contracts.ChatService, store contracts.S
 	st.maxIterations, st.contextBudget = runtimeDrafts(chat, store)
 	st.seenMaxIterations, st.seenContextBudget = st.maxIterations, st.contextBudget
 	st.iterationsErr, st.contextBudgetErr = "", ""
+	st.iterationsDefault = strings.TrimSpace(st.maxIterations) == ""
+	st.budgetDefault = strings.TrimSpace(st.contextBudget) == ""
+	if value, err := strconv.Atoi(strings.TrimSpace(st.maxIterations)); err == nil {
+		st.maxIterationsNum = float64(value)
+	}
+	if value, err := strconv.Atoi(strings.TrimSpace(st.contextBudget)); err == nil {
+		st.contextBudgetNum = float64(value)
+	}
 }
 
 // requireFinishReasonEnabled reports the stream-completeness switch state:
@@ -1165,6 +1181,17 @@ func statusBadgesRow(c *ui.Context, t *design.Tokens, status string, failed bool
 // same accessible name, and the description below the control. Its caller puts
 // Fields in one ui.Form so their labels share the macOS-style label column, and
 // handles the Changed result right where the setting lives.
+// switchInline is a compact switch with its visible label for a row inside
+// another field (for example "use the default" above a number input). The
+// switch itself carries the Label, so assistive technology and frame tests
+// target it as the control.
+func switchInline(c *ui.Context, label string, value *bool) bool {
+	sw := ui.Switch(c, value).Label(label)
+	changed := sw.Changed()
+	design.Apply(ui.Text(c, label), design.Of(c).Font(design.TypeXS)).TextColor(design.Of(c).LabelSecondary)
+	return changed
+}
+
 func switchField(c *ui.Context, label, description string, value *bool) bool {
 	var changed bool
 	ui.Field(c, label, func() {
@@ -1301,26 +1328,63 @@ func buildPage(c *ui.Context, runtime contracts.UIRuntime, state *moduleState, c
 				ui.Row(c).FillWidth().Gap(design.Space3).AlignItems(ui.Start).Children(func() {
 					ui.Column(c).FillWidth().Grow(1).Children(func() {
 						ui.Field(c, localized(locale, "最大迭代次数", "Max iterations"), func() {
-							ui.TextInput(c, &state.maxIterations).
-								Label(inputLabel(locale, localized(locale, "最大迭代次数", "Max iterations"))).
-								Bind(&state.iterationsInput).
-								Placeholder(localized(locale, "模块默认值", "Module default")).FillWidth()
+							if switchField(c,
+								localized(locale, "使用默认上限（不限制）", "Use default limit (unlimited)"),
+								localized(locale,
+									"开启时删除该设置行，由模块配置决定；关闭后设置具体轮数上限。",
+									"When on, the settings row is cleared and the module config decides; when off, set a concrete round limit."),
+								&state.iterationsDefault) {
+								if state.iterationsDefault {
+									state.maxIterations = ""
+								} else {
+									if state.maxIterationsNum < 1 {
+										state.maxIterationsNum = 20
+									}
+									state.maxIterations = strconv.Itoa(int(state.maxIterationsNum))
+								}
+							}
+							if !state.iterationsDefault {
+								input := ui.NumberInput(c.Key("settings.runtime.maxIterations"),
+									&state.maxIterationsNum, 1, 100000, 1).
+									Label(inputLabel(locale, localized(locale, "最大迭代次数", "Max iterations"))).
+									Bind(&state.iterationsInput)
+								if input.Changed() {
+									state.maxIterations = strconv.Itoa(int(state.maxIterationsNum))
+								}
+							}
 						}).Description(localized(locale,
-							"模型/工具轮数上限；留空使用模块默认值。",
-							"Model/tool rounds per run; leave blank to use the module default."))
+							"模型/工具轮数上限；默认不限制，由模块配置决定。",
+							"Model/tool rounds per run; unlimited by default, as the module config decides."))
 						if state.iterationsErr != "" {
 							uikit.ErrorLine(c, state.iterationsErr)
 						}
 					})
 					ui.Column(c).FillWidth().Grow(1).Children(func() {
 						ui.Field(c, localized(locale, "上下文预算", "Context budget"), func() {
-							ui.TextInput(c, &state.contextBudget).
-								Label(inputLabel(locale, localized(locale, "上下文预算", "Context budget"))).
-								Bind(&state.budgetInput).
-								Placeholder(localized(locale, "模块默认值", "Module default")).FillWidth()
+							if switchField(c,
+								localized(locale, "使用默认预算", "Use default budget"),
+								localized(locale,
+									"开启时删除该设置行，由模块配置决定；关闭后设置具体的 prompt token 预算，0 = 不自动压缩。",
+									"When on, the settings row is cleared and the module config decides; when off, set a prompt-token budget, 0 = no automatic compaction."),
+								&state.budgetDefault) {
+								if state.budgetDefault {
+									state.contextBudget = ""
+								} else {
+									state.contextBudget = strconv.Itoa(int(state.contextBudgetNum))
+								}
+							}
+							if !state.budgetDefault {
+								input := ui.NumberInput(c.Key("settings.runtime.contextBudget"),
+									&state.contextBudgetNum, 0, 10000000, 1000).
+									Label(inputLabel(locale, localized(locale, "上下文预算", "Context budget"))).
+									Bind(&state.budgetInput)
+								if input.Changed() {
+									state.contextBudget = strconv.Itoa(int(state.contextBudgetNum))
+								}
+							}
 						}).Description(localized(locale,
-							"自动压缩的 prompt token 预算，0 = 不自动压缩；留空使用模块默认值。",
-							"Prompt-token budget for automatic compaction; 0 = no automatic compaction. Leave blank to use the module default."))
+							"自动压缩的 prompt token 预算，0 = 不自动压缩；默认由模块配置决定。",
+							"Prompt-token budget for automatic compaction; 0 = no automatic compaction. Default follows the module config."))
 						if state.contextBudgetErr != "" {
 							uikit.ErrorLine(c, state.contextBudgetErr)
 						}
@@ -1387,7 +1451,7 @@ func buildAppearancePage(c *ui.Context, state *appearanceState, store contracts.
 	ui.Column(c).FillWidth().Gap(design.Space4).Children(func() {
 		uikit.PageHeader(c, labels.title, localized(locale,
 			"主题、界面语言与桌面集成即时生效；全局热键修改后点击「应用」写入。",
-			"Theme, interface language and desktop integration apply immediately; apply the global hotkey to save it."))
+			"Theme, interface language and desktop integration apply immediately; the global hotkey is saved with Apply."))
 
 		uikit.Section(c, localized(locale, "主题", "Theme"), func(*ui.Context) {
 			segmented := ui.Segmented(c, &state.themeMode,

@@ -17,17 +17,14 @@ import (
 	"github.com/zeokeel/zeokeel/internal/uikit"
 )
 
-// DirectoryDialogTitle is the localized title of the default folder dialog; the
-// Files pane sets it from the current locale right before invoking
-// DirectoryPicker (the seam signature stays stable for tests).
-var DirectoryDialogTitle = "选择工作区文件夹"
-
 // DirectoryPicker is the Files pane's "open a folder" seam: the default opens
-// the native mygo directory dialog and returns the first chosen path; tests
-// replace it with a scripted selection so no desktop backend is needed.
-var DirectoryPicker = func() (string, error) {
+// the native mygo directory dialog with the localized title and returns the
+// first chosen path; tests replace it with a scripted selection so no desktop
+// backend is needed. The title is a parameter (not package state) so a language
+// switch cannot race another window's dialog.
+var DirectoryPicker = func(title string) (string, error) {
 	paths, err := mygo.Dialog.Open(mygo.OpenDialogOptions{
-		Title:     DirectoryDialogTitle,
+		Title:     title,
 		Directory: true,
 	})
 	if err != nil {
@@ -42,8 +39,6 @@ var DirectoryPicker = func() (string, error) {
 const (
 	// maxPreviewBytes caps the text/markdown preview (256 KiB).
 	maxPreviewBytes = 256 << 10
-	// fileRowHeight is the native directory-row metric.
-	fileRowHeight float32 = 28
 )
 
 // filePreview is one cached file preview (the Files pane re-reads a file only
@@ -197,7 +192,7 @@ func buildFilesWorkspaceSection(
 		// path in the tooltip.
 		design.Apply(ui.Text(c, compressPath(current.Root)), t.Font(design.TypeXXXS)).
 			TextColor(t.LabelTertiary).MaxLines(1).Ellipsis("…").Tooltip(current.Root)
-		buildBreadcrumb(c, t, workspace, runtime, st)
+		buildBreadcrumb(c, t, current, runtime, st)
 		// Filter and hidden-entry controls sit together right above the list.
 		ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(design.Space2).Children(func() {
 			c.Key("files/filter")
@@ -213,8 +208,9 @@ func buildFilesWorkspaceSection(
 			uikit.ErrorLine(c, st.filesErr)
 		}
 
-		dir := st.filesDir
-		entries, filesErr := workspace.Files(context.Background(), dir)
+		// The listing is cached: read only when the directory, the workspace or
+		// an explicit Refresh changed it (P1: no os.ReadDir in render).
+		entries, filesErr := st.filesEntriesFor(workspace, current)
 		visible := filterFileEntries(entries, st.filesFilter, st.filesShowHidden)
 		switch {
 		case filesErr != nil:
@@ -229,9 +225,7 @@ func buildFilesWorkspaceSection(
 		case len(visible) == 0:
 			design.Apply(ui.Text(c, uikit.T(st.locale, "目录为空", "The directory is empty")), t.TextMuted(design.TypeXS))
 		default:
-			for _, entry := range visible {
-				buildFileRow(c, t, runtime, st, entry)
-			}
+			buildFileList(c, t, runtime, st, visible)
 		}
 
 		if st.filesSelected != "" {
@@ -242,24 +236,104 @@ func buildFilesWorkspaceSection(
 	})
 }
 
-// buildOpenWorkspace is the Files pane without a current workspace: explain the
-// state and offer the native open-folder action.
-func buildOpenWorkspace(c *ui.Context, t *design.Tokens, workspace contracts.WorkspaceService, runtime contracts.UIRuntime, st *state) {
-	th := t.Theme()
-	ui.Column(c).FillWidth().AlignItems(ui.Center).Gap(design.Space2).
-		PaddingY(design.Space6).Children(func() {
-		ui.Row(c).Size(th.Space(9), th.Space(9)).Center().
-			Radius(design.RadiusMax).Background(t.BgHover).Children(func() {
-			ui.Icon(c, icons.Folder()).Size(th.Space(4), th.Space(4)).TextColor(t.LabelSecondary)
+// filesEntriesFor returns the cached listing of the Files pane's current
+// directory, reloading it only when the workspace, the directory or an explicit
+// Refresh invalidated it. Rendering never reads the filesystem itself (P1).
+func (st *state) filesEntriesFor(workspace contracts.WorkspaceService, current contracts.Workspace) ([]contracts.FileEntry, error) {
+	workspaceKey := current.ID + "\x00" + current.Root
+	if st.filesLoaded && st.filesWorkspace == workspaceKey && st.filesLoadedDir == st.filesDir {
+		return st.filesEntries, st.filesLoadErr
+	}
+	st.filesEntries, st.filesLoadErr = workspace.Files(context.Background(), st.filesDir)
+	st.filesLoaded = true
+	st.filesWorkspace = workspaceKey
+	st.filesLoadedDir = st.filesDir
+	return st.filesEntries, st.filesLoadErr
+}
+
+// buildFileList is the native directory listing: a ui.List with one keyboard
+// row per entry (Up/Down choose, Enter opens a directory or previews a file),
+// so the list owns hover, chosen and focus painting (docs/ui/list.md).
+func buildFileList(c *ui.Context, t *design.Tokens, runtime contracts.UIRuntime, st *state, visible []contracts.FileEntry) {
+	st.filesList.Key = func(row int) any {
+		return firstNonEmpty(visible[row].Path, visible[row].Name)
+	}
+	st.filesList.Label = func(row int) string {
+		return firstNonEmpty(visible[row].Name, filepath.Base(visible[row].Path))
+	}
+	// The chosen row is the cached cursor, by path, so a reload keeps it.
+	chosen := -1
+	for index := range visible {
+		if firstNonEmpty(visible[index].Path, visible[index].Name) == st.filesCursor {
+			chosen = index
+			break
+		}
+	}
+	st.filesListSel = chosen
+	st.filesList.Selected = &st.filesListSel
+	list := ui.List(c, &st.filesList, len(visible)).
+		Label(uikit.T(st.locale, "工作区文件", "Workspace files")).
+		Rows(func(row ui.ListRow) {
+			buildFileRow(row, t, visible[row.Index], runtime, st)
 		})
-		design.Apply(ui.Text(c, uikit.T(st.locale, "还没有打开工作区", "No workspace is open")), t.Font(design.TypeXS)).
-			FontWeight(600).TextColor(t.LabelPrimary)
-		design.Apply(ui.Text(c, uikit.T(st.locale, "打开一个文件夹作为工作区，浏览其中的文件。", "Open a folder as a workspace to browse its files.")), t.TextMuted(design.TypeXXS)).
-			MaxLines(2)
-		open := design.Apply(ui.PrimaryButton(c, uikit.T(st.locale, "打开文件夹", "Open folder")), t.PrimaryButton())
-		if open.Clicked() {
-			DirectoryDialogTitle = uikit.T(st.locale, "选择工作区文件夹", "Choose workspace folder")
-			dir, err := DirectoryPicker()
+	if list.Changed() {
+		st.chooseFileRow(visible, runtime)
+	}
+	if list.Submitted() {
+		st.activateFileRow(visible, runtime)
+	}
+}
+
+// chooseFileRow follows the list's choice: a file is previewed at once, a
+// directory is entered on the click that chose it (the old row behaviour, which
+// the frame tests pin); Enter also activates through Submitted.
+func (st *state) chooseFileRow(visible []contracts.FileEntry, runtime contracts.UIRuntime) {
+	if st.filesListSel < 0 || st.filesListSel >= len(visible) {
+		return
+	}
+	entry := visible[st.filesListSel]
+	path := firstNonEmpty(entry.Path, entry.Name)
+	st.filesCursor = path
+	if entry.Dir {
+		navigateFiles(st, path, runtime)
+		return
+	}
+	st.filesSelected = path
+	st.filesErr = ""
+	runtime.Invalidate()
+}
+
+// activateFileRow runs the list's Submitted action (Enter or a double click):
+// a directory is entered, a file's preview is shown.
+func (st *state) activateFileRow(visible []contracts.FileEntry, runtime contracts.UIRuntime) {
+	if st.filesListSel < 0 || st.filesListSel >= len(visible) {
+		return
+	}
+	entry := visible[st.filesListSel]
+	path := firstNonEmpty(entry.Path, entry.Name)
+	if entry.Dir {
+		navigateFiles(st, path, runtime)
+		return
+	}
+	st.filesCursor = path
+	st.filesSelected = path
+	st.filesErr = ""
+	runtime.Invalidate()
+}
+
+// buildOpenWorkspace is the Files pane without a current workspace: the shared
+// empty-state block explains the state (no icon-in-a-colored-circle) and offers
+// the native open-folder action.
+func buildOpenWorkspace(c *ui.Context, t *design.Tokens, workspace contracts.WorkspaceService, runtime contracts.UIRuntime, st *state) {
+	uikit.EmptyStateBlock(c,
+		uikit.T(st.locale, "还没有打开工作区", "No workspace is open"),
+		uikit.T(st.locale, "打开一个文件夹作为工作区，浏览其中的文件。", "Open a folder as a workspace to browse its files."),
+		func() {
+			open := design.Apply(ui.PrimaryButton(c, uikit.T(st.locale, "打开文件夹", "Open folder")), t.PrimaryButton())
+			if !open.Clicked() {
+				return
+			}
+			dir, err := DirectoryPicker(uikit.T(st.locale, "选择工作区文件夹", "Choose workspace folder"))
 			switch {
 			case err != nil:
 				st.filesErr = uikit.T(st.locale, "无法打开文件夹选择器：", "Could not open the folder picker: ") + err.Error()
@@ -272,25 +346,23 @@ func buildOpenWorkspace(c *ui.Context, t *design.Tokens, workspace contracts.Wor
 					st.filesDir = ""
 					st.filesSelected = ""
 					st.filesErr = ""
+					st.filesCursor = ""
 					st.filesPreview = make(map[string]*filePreview)
+					st.filesLoaded = false
 					st.changesLoaded = false
 					st.changes = nil
+					st.diffs = make(map[string]*diffView)
 				}
 			}
 			runtime.Invalidate()
-		}
-		if st.filesErr != "" {
-			uikit.ErrorLine(c, st.filesErr)
-		}
-	})
+		})
+	if st.filesErr != "" {
+		uikit.ErrorLine(c, st.filesErr)
+	}
 }
 
 // buildBreadcrumb renders the root/segment path as clickable native buttons.
-func buildBreadcrumb(c *ui.Context, t *design.Tokens, workspace contracts.WorkspaceService, runtime contracts.UIRuntime, st *state) {
-	current, ok, err := workspace.Current(context.Background())
-	if err != nil || !ok {
-		return
-	}
+func buildBreadcrumb(c *ui.Context, t *design.Tokens, current contracts.Workspace, runtime contracts.UIRuntime, st *state) {
 	rootLabel := "/" + firstNonEmpty(current.Name, filepath.Base(current.Root))
 	segments := splitRelPath(st.filesDir)
 	fullPath := rootLabel
@@ -352,12 +424,16 @@ func splitRelPath(dir string) []string {
 	return kept
 }
 
-// navigateFiles moves the listing to dir and clears the selection/preview.
+// navigateFiles moves the listing to dir and clears the selection/preview; the
+// listing cache is invalidated so the next frame reads the new directory once.
 func navigateFiles(st *state, dir string, runtime contracts.UIRuntime) {
 	st.filesDir = dir
 	st.filesSelected = ""
+	st.filesCursor = ""
+	st.filesListSel = -1
 	st.filesPreview = make(map[string]*filePreview)
 	st.filesErr = ""
+	st.filesLoaded = false
 	runtime.Invalidate()
 }
 
@@ -404,38 +480,52 @@ func filterFileEntries(entries []contracts.FileEntry, filter string, showHidden 
 	return visible
 }
 
-// buildFileRow is one native directory row: folder or file glyph, the name and
-// the click action (enter a directory, select a file for the preview).
-func buildFileRow(c *ui.Context, t *design.Tokens, runtime contracts.UIRuntime, st *state, entry contracts.FileEntry) {
+// buildFileRow is one native directory row: folder/file/image glyph, the name,
+// the size; the List around it owns the row states, choice and keyboard. The
+// same open/copy actions are available from a right-click menu, as the official
+// context-menu pattern asks (the innermost element with a menu gets the click).
+func buildFileRow(row ui.ListRow, t *design.Tokens, entry contracts.FileEntry,
+	runtime contracts.UIRuntime, st *state) {
+	c := row.Context
 	name := firstNonEmpty(entry.Name, filepath.Base(entry.Path))
-	c.Key("file/" + firstNonEmpty(entry.Path, entry.Name))
-	row := ui.ButtonBase(c).FillWidth().Height(fileRowHeight).PaddingX(design.Space2).
-		Radius(design.RadiusSM).Label(name)
-	row = rowTint(t, row, false)
-	row.Children(func() {
-		ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(design.Space2).Children(func() {
-			icon := icons.Folder()
-			if !entry.Dir && isImagePath(entry.Name) {
-				icon = icons.Globe()
+	path := firstNonEmpty(entry.Path, entry.Name)
+	openLabel := uikit.T(st.locale, "打开", "Open")
+	if entry.Dir {
+		openLabel = uikit.T(st.locale, "进入目录", "Open folder")
+	}
+	element := ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(design.Space2).
+		Padding(design.Space1, design.Space2)
+	element.ContextMenu(func(m *ui.Menu) {
+		if m.Item(openLabel).Chosen() {
+			if entry.Dir {
+				navigateFiles(st, path, runtime)
+				return
 			}
-			ui.Icon(c, icon).Size(design.Space4, design.Space4).TextColor(t.LabelSecondary)
-			design.Apply(ui.Text(c, name), t.Font(design.TypeXXS)).
-				TextColor(t.LabelPrimary).Grow(1).MaxLines(1).Ellipsis("…")
-			if !entry.Dir && entry.Size > 0 {
-				design.Apply(ui.Text(c, formatFileSize(entry.Size)), t.Font(design.TypeXXXS)).
-					TextColor(t.LabelTertiary).NoWrap()
-			}
-		})
-	})
-	if row.Clicked() {
-		if entry.Dir {
-			navigateFiles(st, firstNonEmpty(entry.Path, entry.Name), runtime)
-		} else {
-			st.filesSelected = firstNonEmpty(entry.Path, entry.Name)
+			st.filesCursor = path
+			st.filesSelected = path
 			st.filesErr = ""
 			runtime.Invalidate()
 		}
-	}
+		if m.Item(uikit.T(st.locale, "复制路径", "Copy path")).Chosen() {
+			c.Services().WriteClipboard(path)
+		}
+	})
+	element.Children(func() {
+		icon := icons.File()
+		switch {
+		case entry.Dir:
+			icon = icons.Folder()
+		case isImagePath(entry.Name):
+			icon = icons.Image()
+		}
+		ui.Icon(c, icon).Size(design.Space4, design.Space4).TextColor(t.LabelSecondary)
+		design.Apply(ui.Text(c, name), t.Font(design.TypeXXS)).
+			TextColor(t.LabelPrimary).Grow(1).MaxLines(1).Ellipsis("…")
+		if !entry.Dir && entry.Size > 0 {
+			design.Apply(ui.Text(c, formatFileSize(entry.Size)), t.Font(design.TypeXXXS)).
+				TextColor(t.LabelTertiary).NoWrap()
+		}
+	})
 }
 
 // buildFilePreview renders the selected file: Markdown through the official
@@ -446,7 +536,7 @@ func buildFilePreview(c *ui.Context, t *design.Tokens, workspace contracts.Works
 	card := design.Apply(ui.Column(c), t.Panel()).Padding(design.Space2).Gap(design.Space2)
 	card.Children(func() {
 		ui.Row(c).FillWidth().Gap(design.Space2).AlignItems(ui.Center).Children(func() {
-			ui.Icon(c, icons.Folder()).Size(design.Space4, design.Space4).TextColor(t.LabelSecondary)
+			ui.Icon(c, icons.File()).Size(design.Space4, design.Space4).TextColor(t.LabelSecondary)
 			design.Apply(ui.Text(c, filepath.Base(path)), t.Font(design.TypeXXS)).
 				FontWeight(600).TextColor(t.LabelPrimary).Grow(1).MaxLines(1).Ellipsis("…")
 			close := ui.Button(c, uikit.T(st.locale, "关闭预览", "Close preview")).
@@ -469,7 +559,7 @@ func buildFilePreview(c *ui.Context, t *design.Tokens, workspace contracts.Works
 			markdown.View(c, string(preview.data), nil)
 		case isTextPath(path):
 			design.Apply(ui.Text(c, string(preview.data)), t.MonoFamily()).
-				FontSize(11).TextColor(t.LabelPrimary).MaxLines(40)
+				FontSize(11).TextColor(t.LabelPrimary).MaxLines(40).Selectable()
 		default:
 			uikit.KeyValueRows(c, []uikit.KeyValue{
 				{Key: uikit.T(st.locale, "大小", "Size"), Value: formatFileSize(int64(len(preview.data)))},

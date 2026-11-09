@@ -117,14 +117,14 @@ func buildAgentPresetPicker(c *ui.Context, t *design.Tokens, chat contracts.Chat
 		m.Item(st.tr("选择代理预设", "Choose an agent preset")).Disabled(true)
 		m.Separator()
 		none := m.Item(st.tr("无", "None"))
-		none.Checked(currentID == "")
+		none.Radio(currentID == "")
 		if none.Chosen() && currentID != "" {
 			applySessionPreset(setter, st, runtime, activeID, "")
 		}
 		for _, preset := range presets {
 			preset := preset
 			item := m.Item(preset.Name)
-			item.Checked(preset.ID == currentID)
+			item.Radio(preset.ID == currentID)
 			if item.Chosen() && preset.ID != currentID {
 				applySessionPreset(setter, st, runtime, activeID, preset.ID)
 			}

@@ -90,7 +90,7 @@ func exportToastChat() *fakeChat {
 // --- tests ------------------------------------------------------------------
 
 func TestExportSuccessRaisesSuccessToast(t *testing.T) {
-	setExportSaver(t, func(name, content string) (string, error) { return "/tmp/" + name, nil })
+	setExportSaver(t, func(title, name, content string) (string, error) { return "/tmp/" + name, nil })
 	notifier := &fakeSessionNotifier{}
 	h := newToastHarness(t, exportToastChat(), notifier)
 	tester := h.tester()
@@ -108,7 +108,7 @@ func TestExportSuccessRaisesSuccessToast(t *testing.T) {
 }
 
 func TestExportFailureRaisesErrorToast(t *testing.T) {
-	setExportSaver(t, func(name, content string) (string, error) { return "", errors.New("disk full") })
+	setExportSaver(t, func(title, name, content string) (string, error) { return "", errors.New("disk full") })
 	notifier := &fakeSessionNotifier{}
 	h := newToastHarness(t, exportToastChat(), notifier)
 	tester := h.tester()
@@ -126,7 +126,7 @@ func TestExportFailureRaisesErrorToast(t *testing.T) {
 }
 
 func TestExportJSONLSuccessRaisesSuccessToast(t *testing.T) {
-	withJSONLSeam(t, func(name, content string) (string, error) { return "/tmp/" + name, nil })
+	withJSONLSeam(t, func(title, name, content string) (string, error) { return "/tmp/" + name, nil })
 	notifier := &fakeSessionNotifier{}
 	h := newToastHarness(t, exportToastChat(), notifier)
 	tester := h.tester()
@@ -141,7 +141,7 @@ func TestExportJSONLSuccessRaisesSuccessToast(t *testing.T) {
 }
 
 func TestExportWithoutNotifierStillWorks(t *testing.T) {
-	setExportSaver(t, func(name, content string) (string, error) { return "/tmp/" + name, nil })
+	setExportSaver(t, func(title, name, content string) (string, error) { return "/tmp/" + name, nil })
 	h := newToastHarness(t, exportToastChat(), nil)
 	tester := h.tester()
 	h.click(tester, "更多")

@@ -4,9 +4,11 @@
 # resolved from the local module cache. These are the environment variables the
 # README and the release scripts assume:
 #
-#   GOPROXY=off        never reach the network; fail instead of hanging
-#   GOSUMDB=off        no checksum-database lookups (the module cache is trusted)
-#   GOFLAGS=-mod=mod   let the go command maintain go.mod/go.sum offline
+#   GOPROXY=https://goproxy.cn,direct   domestic Go module mirror (China)
+#   GOSUMDB=sum.golang.org             checksum database, proxied by goproxy.cn
+#   GOFLAGS=-mod=mod                   let the go command maintain go.mod/go.sum
+#
+# Fully offline builds: `make GOPROXY=off GOSUMDB=off ...` with a warm cache.
 #
 # Override the toolchain with `make GO=/path/to/go ...`. `make run` starts the
 # desktop product (needs a desktop session); `make run ARGS=--headless` or
@@ -14,8 +16,10 @@
 
 GO ?= go
 export PATH := /usr/local/go/bin:$(PATH)
-export GOPROXY := off
-export GOSUMDB := off
+GOPROXY ?= https://goproxy.cn,direct
+GOSUMDB ?= sum.golang.org
+export GOPROXY
+export GOSUMDB
 export GOFLAGS := -mod=mod
 
 # Extra arguments for `make run` (e.g. ARGS=--headless --data-dir /tmp/zk).

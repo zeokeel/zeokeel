@@ -85,7 +85,7 @@ func (d *drive) runHNarrowSteps() {
 				d.drain(2)
 			}
 			d.drain(3)
-			for _, want := range []string{"附件", "会话设置", "发送"} {
+			for _, want := range []string{"附件", "发送"} {
 				c.require(c.has(want), "极窄 composer 缺少「%s」", want)
 			}
 			c.require(!d.hasExactText("»"), "极窄 composer 出现了无标签 » 溢出按钮")
@@ -94,7 +94,7 @@ func (d *drive) runHNarrowSteps() {
 			}
 			c.shot("composer-very-narrow")
 			// The session menu carries the folded model entry and the low-frequency groups.
-			if !c.click("会话设置") {
+			if !c.click("工作区权限") && !c.click("会话设置") {
 				return
 			}
 			d.drain(2)

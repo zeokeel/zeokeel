@@ -34,20 +34,6 @@ func runtimeHarness(t *testing.T, cfg contracts.ChatConfig) (*harness, *fakeSett
 	return h, store, tester
 }
 
-// setInputText focuses the input and replaces its content with text (empty
-// clears it through the select-all + backspace path).
-func setInputText(t *testing.T, h *harness, tester *ui.Tester, label, text string) {
-	t.Helper()
-	h.focusInput(tester, label)
-	tester.Key(ui.Cmd, ui.KeyA)
-	if text == "" {
-		tester.Key(0, ui.KeyBackspace)
-	} else {
-		tester.Type(text)
-	}
-	tester.Frame()
-}
-
 func runtimeBaseConfig() contracts.ChatConfig {
 	return contracts.ChatConfig{
 		Model:   "deepseek-chat",
@@ -82,8 +68,9 @@ func TestModelRuntimeSaveRoundTrip(t *testing.T) {
 	cfg := runtimeBaseConfig()
 	cfg.MaxIterations = 20
 	h, store, tester := runtimeHarness(t, cfg)
-	setInputText(t, h, tester, "最大迭代次数 输入", "12")
-	setInputText(t, h, tester, "上下文预算 输入", "4096")
+	typeNumberInput(t, h, tester, "最大迭代次数", "12")
+	h.click(tester, "使用默认预算") // the budget has no explicit row yet: turn the default off
+	typeNumberInput(t, h, tester, "上下文预算", "4096")
 	h.assertTexts(tester, "未保存")
 	h.click(tester, "保存")
 	h.assertTexts(tester, "已保存")
@@ -108,8 +95,8 @@ func TestModelRuntimeEmptyClearsRows(t *testing.T) {
 	tester.Frame()
 	h.click(tester, "模型")
 	h.click(tester, "高级选项")
-	setInputText(t, h, tester, "最大迭代次数 输入", "")
-	setInputText(t, h, tester, "上下文预算 输入", "")
+	h.click(tester, "使用默认上限（不限制）")
+	h.click(tester, "使用默认预算")
 	h.click(tester, "保存")
 	if got := store.get(contracts.SettingsChatMaxIterations); got != "" {
 		t.Fatalf("cleared max iterations = %q, want empty", got)
@@ -119,32 +106,25 @@ func TestModelRuntimeEmptyClearsRows(t *testing.T) {
 	}
 }
 
-// TestModelRuntimeInvalidDraftsKeepDraftAndPersistNothing covers validation:
-// malformed numbers show inline errors, keep the drafts (dirty) and write
-// nothing.
-func TestModelRuntimeInvalidDraftsKeepDraftAndPersistNothing(t *testing.T) {
+// TestModelRuntimeNumberInputsIgnoreOutOfRange covers the official
+// ui.NumberInput rule: a typed number outside the bounds is ignored, so the page
+// never holds an invalid draft and a save persists the last valid value (the
+// old free-text inline-error path is gone).
+func TestModelRuntimeNumberInputsIgnoreOutOfRange(t *testing.T) {
 	cfg := runtimeBaseConfig()
 	cfg.MaxIterations = 20
 	h, store, tester := runtimeHarness(t, cfg)
-	setInputText(t, h, tester, "最大迭代次数 输入", "abc")
-	setInputText(t, h, tester, "上下文预算 输入", "-1")
+	typeNumberInput(t, h, tester, "最大迭代次数", "0") // below the bound 1: ignored
+	h.click(tester, "使用默认预算")
+	typeNumberInput(t, h, tester, "上下文预算", "-1") // below 0: ignored
 	h.click(tester, "保存")
-	h.assertTexts(tester, "请输入大于 0 的整数", "请输入大于或等于 0 的整数",
-		"运行参数有误，未保存", "未保存")
-	if keys := store.setKeys(); len(keys) != 0 {
-		t.Fatalf("invalid runtime drafts wrote settings: %v", keys)
+	if got := store.get(contracts.SettingsChatMaxIterations); got != "20" {
+		t.Fatalf("max iterations saved = %q, want last valid value 20", got)
 	}
-	// Fixing both drafts afterwards saves normally (the invalid drafts were kept,
-	// not silently reset).
-	setInputText(t, h, tester, "最大迭代次数 输入", "5")
-	setInputText(t, h, tester, "上下文预算 输入", "100")
-	h.click(tester, "保存")
-	if got := store.get(contracts.SettingsChatMaxIterations); got != "5" {
-		t.Fatalf("fixed max iterations saved = %q, want 5", got)
+	if got := store.get(contracts.SettingsChatContextBudget); got != "0" {
+		t.Fatalf("context budget saved = %q, want 0", got)
 	}
-	if got := store.get(contracts.SettingsChatContextBudget); got != "100" {
-		t.Fatalf("fixed context budget saved = %q, want 100", got)
-	}
+	h.assertNoTexts(tester, "请输入大于 0 的整数", "请输入大于或等于 0 的整数", "运行参数有误")
 }
 
 // TestModelRuntimeZeroBudgetAllowed covers the explicit "0" budget: it is a
@@ -153,7 +133,8 @@ func TestModelRuntimeZeroBudgetAllowed(t *testing.T) {
 	cfg := runtimeBaseConfig()
 	cfg.MaxIterations = 20
 	h, store, tester := runtimeHarness(t, cfg)
-	setInputText(t, h, tester, "上下文预算 输入", "0")
+	h.click(tester, "使用默认预算")
+	typeNumberInput(t, h, tester, "上下文预算", "0")
 	h.click(tester, "保存")
 	h.assertTexts(tester, "已保存")
 	if got := store.get(contracts.SettingsChatContextBudget); got != "0" {

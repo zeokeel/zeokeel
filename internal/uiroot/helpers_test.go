@@ -26,12 +26,16 @@ func newTestRoot(t *testing.T) *Root {
 	return New(testConfig())
 }
 
-// newTestTester starts a headless tester over root.View.
+// newTestTester starts a headless tester over root.View. Reduce Motion is on so
+// animated surfaces (modal/palette/disclosure) settle at once: the host tests
+// drive frames explicitly and assert final states, not motion.
 func newTestTester(t *testing.T, r *Root, width, height int) *ui.Tester {
 	t.Helper()
-	tt := ui.NewTester(r.View, width, height)
+	tt := ui.NewTesterWith(r.View, width, height, ui.TesterOptions{
+		Preferences: ui.Preferences{ReduceMotion: true},
+	})
 	if tt == nil {
-		t.Fatal("ui.NewTester returned nil")
+		t.Fatal("ui.NewTesterWith returned nil")
 	}
 	return tt
 }

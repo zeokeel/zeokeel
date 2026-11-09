@@ -26,8 +26,10 @@ type catalogState struct {
 	name          string
 	note          string
 	contextWindow string
-	status        string
-	err           bool
+	// contextWindowNum mirrors the official ui.NumberInput (0 = unknown).
+	contextWindowNum float64
+	status           string
+	err              bool
 
 	// addFamily is the family the next added model gets. The add form infers it
 	// from the typed model ID until the user picks one explicitly
@@ -331,6 +333,7 @@ func addCatalogModel(st *catalogState, store contracts.SettingsService,
 		return false
 	}
 	st.name, st.id, st.note, st.contextWindow = "", "", "", ""
+	st.contextWindowNum = 0
 	st.addFamily, st.familyTouched = "", false
 	st.addOpen, st.addErr = false, ""
 	st.status, st.err = localized(locale, "已保存", "Saved"), false
@@ -343,7 +346,7 @@ func addCatalogModel(st *catalogState, store contracts.SettingsService,
 func buildCatalogAddDialog(c *ui.Context, t *design.Tokens, store contracts.SettingsService,
 	models []contracts.ModelInfo, st *catalogState, locale contracts.LocaleService) {
 	ui.Modal(c, &st.addOpen, func() {
-		design.Apply(ui.Column(c).Width(640).Gap(design.Space3), func(element ui.Element) ui.Element {
+		design.Apply(ui.Column(c).Width(design.DialogWidthL).Gap(design.Space3), func(element ui.Element) ui.Element {
 			return element.PaddingX(design.Space5).PaddingY(design.Space2)
 		}).Children(func() {
 			design.Apply(ui.Text(c, localized(locale, "新增模型", "Add model")),
@@ -352,35 +355,52 @@ func buildCatalogAddDialog(c *ui.Context, t *design.Tokens, store contracts.Sett
 				"添加后立即出现在模型菜单中。",
 				"The model appears in the composer menu immediately.")),
 				t.TextMuted(design.TypeXS)).MaxLines(1)
+			// Enter in any single-line field adds the model, as in a desktop
+			// dialog (mygo text-input.md: Submitted is Enter in a text input).
+			submitted := false
 			ui.Row(c).FillWidth().Gap(design.Space3).AlignItems(ui.Start).Children(func() {
 				ui.Column(c).FillWidth().Grow(1).Children(func() {
 					ui.Field(c, localized(locale, "名称", "Name"), func() {
-						ui.TextInput(c, &st.name).
+						name := ui.TextInput(c, &st.name).
 							Label(inputLabel(locale, localized(locale, "名称", "Name"))).
 							Placeholder(localized(locale, "例如 DeepSeek Chat", "e.g. DeepSeek Chat")).FillWidth()
+						if name.Submitted() {
+							submitted = true
+						}
 					})
 				})
 				ui.Column(c).FillWidth().Grow(1).Children(func() {
 					ui.Field(c, localized(locale, "模型 ID", "Model ID"), func() {
-						ui.TextInput(c, &st.id).
+						id := ui.TextInput(c, &st.id).
 							Label(inputLabel(locale, localized(locale, "模型 ID", "Model ID"))).
 							Placeholder("deepseek-chat").FillWidth()
+						if id.Submitted() {
+							submitted = true
+						}
 					})
 				})
 			})
 			ui.Row(c).FillWidth().Gap(design.Space3).AlignItems(ui.Start).Children(func() {
 				ui.Column(c).FillWidth().Grow(1).Children(func() {
 					ui.Field(c, localized(locale, "备注", "Note"), func() {
-						ui.TextInput(c, &st.note).
+						note := ui.TextInput(c, &st.note).
 							Label(inputLabel(locale, localized(locale, "备注", "Note"))).
 							Placeholder(localized(locale, "可选", "optional")).FillWidth()
+						if note.Submitted() {
+							submitted = true
+						}
 					})
 				})
 				ui.Column(c).FillWidth().Grow(1).Children(func() {
 					ui.Field(c, localized(locale, "上下文窗口", "Context window"), func() {
-						ui.TextInput(c, &st.contextWindow).
-							Label(inputLabel(locale, localized(locale, "上下文窗口", "Context window"))).
-							Placeholder("128000").FillWidth()
+						// Official number input: 0 means the window is unknown
+						// (mygo number-input.md), typed values apply only in range.
+						window := ui.NumberInput(c.Key("catalog.add.contextWindow"),
+							&st.contextWindowNum, 0, 10000000, 1000).
+							Label(inputLabel(locale, localized(locale, "上下文窗口", "Context window")))
+						if window.Changed() {
+							st.contextWindow = strconv.Itoa(int(st.contextWindowNum))
+						}
 					})
 				})
 			})
@@ -400,6 +420,10 @@ func buildCatalogAddDialog(c *ui.Context, t *design.Tokens, store contracts.Sett
 				"Selects the built-in thinking modes; inferred from the model ID, editable."))
 			if st.addErr != "" {
 				uikit.ErrorLine(c, st.addErr)
+			}
+			if submitted {
+				addCatalogModel(st, store, models, locale)
+				c.Invalidate()
 			}
 			uikit.DialogFooter(c, []uikit.DialogAction{
 				{Label: localized(locale, "取消", "Cancel"), OnClick: func() {

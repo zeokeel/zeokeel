@@ -11,7 +11,7 @@
     覆盖）+ rig team manager 全量工具（team_*、legacy、DSH spawn_teammate/list_agents/wait_agent/
     send_message/interrupt_agent）+ **Agents Inspector**（成员/状态/最新回答、steer/中断/关闭）
     + **共享任务板**（team_task_* 工具 + rightpanel「任务」tab）+ goal 工具/会话 goal chip。
-  - **Composer 高级控制**：/goal /plan /memory 原生对话框、**权限模式**（命令 + composer badge，
+  - **Composer 高级控制**：/goal /plan /memory 原生对话框、**权限模式**（命令 + composer badge，默认工作区：工作区文件读写自动允许，shell/网络仍询问；
     ask/workspace/full，settings `agent.permission`）、**思考强度**（per-session、按模型系列/自定义模式 +
     toolbar 菜单 + provider `reasoning_effort`）、**@session 引用**（@ 菜单会话分组、token 持久化、
     agent 注入尾部 20 条/≤8000 rune、`session_refs` 事件）。
@@ -86,7 +86,7 @@
 | Composer 深度（/goal /plan /memory/权限/thinking/@session/presets） | ✅ | `sessionCommands` + `command_dialogs.go` + `commands_help.go` + `compact_command.go` | **15 条命令**（/新会话/副本/导出/设置/目标/审阅/记忆/反馈/停止/附加/帮助/**压缩上下文/完成目标/放弃目标**）+ 权限模式、聊天模式、**思考强度（每模型系列/自定义模式，可随时切换）**、@session、预设；目标生命周期（完成/放弃/编辑/暂停/恢复/清除）已全量 |
 | Chrome/Sidebar/折叠 rail/右栏 dock | ✅ | uiroot + sidebar | 280px sidebar、64px rail、Cmd/Ctrl+B、**Cmd/Ctrl+N 新建会话、Cmd/Ctrl+, 设置、Cmd/Ctrl+K 命令面板**、右栏开关、添加工作区、视图选项（排序/分组持久化）、工作区搜索/置顶/归档 |
 | 命令面板/窗口内快捷键 | ✅ | uiroot palette/shortcuts | Cmd/Ctrl+K、可配置两条 chrome 快捷键；非系统全局热键 |
-| Settings 外壳与页面 | ✅ | `internal/ui/settings`、about | 17 页（高级分组默认折叠，日常导航 9 项）：常用（模型/行为/预设）、外观（外观/技能/快捷键）、集成（MCP/搜索/网络）、高级（通知/归档/导入/更新/诊断/记忆/LSP/数据与隐私）、关于；**模型页 = 服务商连接 + 模型列表（系列/思考模式/生成参数编辑）+ 运行参数（最大迭代/上下文预算/流完整性）**；**插件参数已落在 Plugins 页（已接线键）**；插件市场为明确非目标 |
+| Settings 外壳与页面 | ✅ | `internal/ui/settings`、about | 17 页（高级分组默认折叠，日常导航 9 项）：常用（模型/行为/预设）、外观（外观/技能/快捷键）、集成（MCP/搜索/网络）、高级（通知/归档/导入/更新/诊断/记忆/LSP/数据与隐私）、关于；**模型页 = 服务商连接 + 模型列表（系列/思考模式/生成参数编辑）+ 运行参数（最大迭代默认不限制/上下文预算/流完整性）**；**插件参数已落在 Plugins 页（已接线键）**；插件市场为明确非目标 |
 | Approval 审批 Modal | ✅ | `internal/ui/approval` + approvals 模块 | allow/allow-always/deny、ask/workspace/full/never（settings 覆盖、workspace 只读自动 allow） |
 | 右侧检查栏 | ✅ | rightpanel | 8 tab：概览/工具/日志/文件/变更/终端/**团队**/**任务**，en/zh |
 | Files 检查器 | ✅ | rightpanel files + workspace | 打开文件夹/面包屑/文本/Markdown/图片预览/错误态 |
@@ -94,7 +94,7 @@
 | Workspace Changes/diff | ✅ | rightpanel changes + WorkspaceDiffer | 未提交变更列表、状态 badge、diff 折叠/截断 |
 | Trajectory/工具时间线 | ✅ | session Trajectory tab | 轨迹卡片/工具调用时间线 |
 | Tool cards | ✅ | `internal/ui/toolcards` | rig 工具卡 + todo/team_task 卡 + demo/兜底；MCP 动态工具走 session 兜底 |
-| Markdown 渲染 | ✅ | mygo ui/markdown | 消息/技能/更新 notes/artifact/plan 预览 |
+| Markdown 渲染 | ✅ | mygo ui/markdown | 消息/技能/更新 notes/artifact/plan 预览；mygo v0.8.3 的 GitHub alerts/mention/reference 与流式解析 |
 | Reasoning 展示 | ✅ | session buildAssistantMessage | 折叠 Reasoning 文本 + **流式「思考中…」预览（尾部 120 rune、最多两行，结束自动消失）** |
 | 消息级操作（复制/重试/反馈/用量） | ✅ | session 行动区 + usage footer + `SessionFeedbacker` + /feedback + 导出 | 「重新生成」+ 逐条复制 + usage footer + feedback good/bad + **/反馈 命令（摘要/三按钮）**，**Markdown/JSONL 导出含反馈** |
 | `@` mentions | ✅ | session buildMentionMenu + agent references | 工作区文件 + 会话分组（@session，排除当前/过滤/上限 8）；agent 侧展开注入 |

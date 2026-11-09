@@ -22,23 +22,17 @@ func exportJSONLTestChat() *fakeChat {
 	return chat
 }
 
-// withJSONLSeam replaces both the JSONL saver and the dialog titles for one
-// test, restoring the package globals afterwards.
-func withJSONLSeam(t *testing.T, saver func(name, content string) (string, error)) {
+// withJSONLSeam replaces the JSONL saver for one test; the saver receives the
+// localized dialog title as its first argument (no package title state).
+func withJSONLSeam(t *testing.T, saver func(title, name, content string) (string, error)) {
 	t.Helper()
 	oldSaver := session.ExportJSONLSaver
-	oldTitle := session.ExportJSONLDialogTitle
-	oldMarkdownTitle := session.ExportDialogTitle
 	session.ExportJSONLSaver = saver
-	t.Cleanup(func() {
-		session.ExportJSONLSaver = oldSaver
-		session.ExportJSONLDialogTitle = oldTitle
-		session.ExportDialogTitle = oldMarkdownTitle
-	})
+	t.Cleanup(func() { session.ExportJSONLSaver = oldSaver })
 }
 
 func TestExportJSONLFailureShowsOnePrefix(t *testing.T) {
-	withJSONLSeam(t, func(string, string) (string, error) { return "", errors.New("disk full") })
+	withJSONLSeam(t, func(string, string, string) (string, error) { return "", errors.New("disk full") })
 	h := newHarness(t, exportJSONLTestChat())
 	tester := h.tester()
 
@@ -62,8 +56,8 @@ func TestExportJSONLFailureShowsOnePrefix(t *testing.T) {
 
 func TestExportJSONLDialogTitleFollowsLocale(t *testing.T) {
 	captured := ""
-	withJSONLSeam(t, func(name, content string) (string, error) {
-		captured = session.ExportJSONLDialogTitle
+	withJSONLSeam(t, func(title, name, content string) (string, error) {
+		captured = title
 		return "/tmp/export.jsonl", nil
 	})
 	chat := exportJSONLTestChat()
@@ -73,7 +67,6 @@ func TestExportJSONLDialogTitleFollowsLocale(t *testing.T) {
 	// Direct JSONL export in English must localize the dialog title first.
 	h.ui.Locale().SetLanguage("en")
 	tester.Frame()
-	session.ExportJSONLDialogTitle = "导出会话"
 	h.click(tester, "More")
 	h.click(tester, "Export JSONL")
 	tester.Frame()
@@ -84,7 +77,6 @@ func TestExportJSONLDialogTitleFollowsLocale(t *testing.T) {
 	// And back to Chinese on the next frame.
 	h.ui.Locale().SetLanguage("zh")
 	tester.Frame()
-	session.ExportJSONLDialogTitle = "Export conversation"
 	h.click(tester, "更多")
 	h.click(tester, "导出 JSONL")
 	tester.Frame()

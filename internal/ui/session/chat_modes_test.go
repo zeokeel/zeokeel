@@ -24,7 +24,7 @@ func TestChatModeSelectorFourOptions(t *testing.T) {
 	tester := h.tester()
 	// The standard mode is the quiet default: the mode lives inside the one
 	// session menu instead of a resident chip.
-	h.assertTexts(tester, "会话设置")
+	h.assertTexts(tester, "工作区权限")
 	if got := textsContaining(tester.Texts(), "模式"); got != 0 {
 		t.Fatalf("mode control rendered outside the session menu; texts = %v", tester.Texts())
 	}
@@ -40,6 +40,10 @@ func TestChatModeSelectorFourOptions(t *testing.T) {
 	if got := settings.get(contracts.SettingChatMode); got != contracts.ChatModeMinimal {
 		t.Fatalf("stored chat mode = %q, want minimal", got)
 	}
+	// The permission default (workspace) owns the contextual label; with the
+	// default permission ask/quiet the chat mode is the label.
+	settings.set(contracts.SettingAgentPermission, contracts.PermissionAsk)
+	tester.Frame()
 	h.assertTexts(tester, "精简")
 
 	// Creator: normal agent mode + chat.mode creator.
@@ -70,6 +74,7 @@ func TestChatModeSelectorFourOptions(t *testing.T) {
 	if got := settings.get(contracts.SettingChatMode); got != contracts.ChatModeStandard {
 		t.Fatalf("normal chat mode = %q", got)
 	}
+	// Normal mode + the ask permission chosen above keeps the quiet label.
 	h.assertTexts(tester, "会话设置")
 	if got := textsContaining(tester.Texts(), "计划模式"); got != 0 {
 		t.Fatalf("plan state still on the composer row; texts = %v", tester.Texts())
@@ -83,7 +88,7 @@ func TestChatModeNormalizesBadValues(t *testing.T) {
 	})
 	h := newPermissionHarness(t, permissionChat(), settings)
 	tester := h.tester()
-	h.assertTexts(tester, "会话设置")
+	h.assertTexts(tester, "工作区权限")
 	if got := textsContaining(tester.Texts(), "模式"); got != 0 {
 		t.Fatalf("bad mode rendered a chip; texts = %v", tester.Texts())
 	}
@@ -127,21 +132,25 @@ func TestChatModeEnglish(t *testing.T) {
 	h := newPermissionHarness(t, permissionChat(), settings)
 	h.ui.Locale().SetLanguage("en")
 	tester := h.tester()
-	h.assertTexts(tester, "Settings")
+	h.assertTexts(tester, "Workspace")
 	h.openSessionMenu(tester)
 	h.assertTexts(tester, "Conversation mode", "Normal mode", "Plan mode", "Minimal mode", "Creator mode")
 	h.clickExact(tester, "Minimal mode")
 	if got := settings.get(contracts.SettingChatMode); got != contracts.ChatModeMinimal {
 		t.Fatalf("English stored chat mode = %q", got)
 	}
+	settings.set(contracts.SettingAgentPermission, contracts.PermissionAsk)
+	tester.Frame()
 	h.assertTexts(tester, "Minimal")
 }
 
 func TestChatModeBadgeAccentDistinct(t *testing.T) {
-	settings := newPermissionSettings(nil)
+	settings := newPermissionSettings(map[string]string{
+		contracts.SettingAgentPermission: contracts.PermissionAsk,
+	})
 	h := newPermissionHarness(t, permissionChat(), settings)
 	tester := h.tester()
-	// The chip label is the active mode; colors are theme values.
+	// The label is the active mode when no permission state owns it.
 	settings.set(contracts.SettingChatMode, contracts.ChatModeMinimal)
 	tester.Frame()
 	h.assertTexts(tester, "精简")

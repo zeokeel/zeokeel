@@ -75,15 +75,17 @@ func buildSidebarViewMenu(c *ui.Context, runtime contracts.UIRuntime, state *pan
 	}
 	sortMode, groupMode := sidebarViewSettings(state.settings)
 	ui.PopoverMenuButton(c, state.T("视图", "View"), func(m *ui.Menu) {
+		// The sort and grouping rows are two mutually exclusive choices each:
+		// menus mark those as radio items, not as independent check boxes.
 		m.Item(state.T("排序", "Sort")).Disabled(true)
 		recent := m.Item(state.T("最近活动", "Recent activity"))
-		recent.Checked(sortMode == sidebarSortRecent)
+		recent.Radio(sortMode == sidebarSortRecent)
 		if recent.Chosen() && sortMode != sidebarSortRecent {
 			_ = state.settings.Set(contracts.SettingSidebarSort, sidebarSortRecent)
 			runtime.Invalidate()
 		}
 		byName := m.Item(state.T("名称", "Name"))
-		byName.Checked(sortMode == sidebarSortName)
+		byName.Radio(sortMode == sidebarSortName)
 		if byName.Chosen() && sortMode != sidebarSortName {
 			_ = state.settings.Set(contracts.SettingSidebarSort, sidebarSortName)
 			runtime.Invalidate()
@@ -91,13 +93,13 @@ func buildSidebarViewMenu(c *ui.Context, runtime contracts.UIRuntime, state *pan
 		m.Separator()
 		m.Item(state.T("分组", "Group")).Disabled(true)
 		byWorkspace := m.Item(state.T("按工作区", "By workspace"))
-		byWorkspace.Checked(groupMode == sidebarGroupTree)
+		byWorkspace.Radio(groupMode == sidebarGroupTree)
 		if byWorkspace.Chosen() && groupMode != sidebarGroupTree {
 			_ = state.settings.Set(contracts.SettingSidebarGroup, sidebarGroupTree)
 			runtime.Invalidate()
 		}
 		flat := m.Item(state.T("平铺", "Flat"))
-		flat.Checked(groupMode == sidebarGroupFlat)
+		flat.Radio(groupMode == sidebarGroupFlat)
 		if flat.Chosen() && groupMode != sidebarGroupFlat {
 			_ = state.settings.Set(contracts.SettingSidebarGroup, sidebarGroupFlat)
 			runtime.Invalidate()

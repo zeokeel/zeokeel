@@ -31,9 +31,6 @@ func TestReservedSlotsAppearInHostRegions(t *testing.T) {
 	mustSlot(t, r, textSlotItem(contracts.SlotSidebarNav, "nav-a", "sidebar-nav-a", 10)) // registered after, sorted first
 	mustSlot(t, r, textSlotItem(contracts.SlotSidebarTree, "tree", "sidebar-tree", 10))
 	mustSlot(t, r, textSlotItem(contracts.SlotSidebarFooter, "footer", "sidebar-footer", 10))
-	mustSlot(t, r, textSlotItem(contracts.SlotTopBarBrand, "brand", "brand-mark", 10))
-	mustSlot(t, r, textSlotItem(contracts.SlotTopBarCenter, "center", "topbar-center", 10))
-	mustSlot(t, r, textSlotItem(contracts.SlotTopBarActions, "actions", "topbar-actions", 10))
 	mustSlot(t, r, textSlotItem(contracts.SlotScreenHeader, "header", "screen-header", 10))
 	mustSlot(t, r, textSlotItem(contracts.SlotScreenActions, "actions", "screen-actions", 10))
 	mustSlot(t, r, textSlotItem(contracts.SlotScreenFooter, "footer", "screen-footer", 10))
@@ -49,10 +46,6 @@ func TestReservedSlotsAppearInHostRegions(t *testing.T) {
 	// destination rows are module contributions now, so the host paints no
 	// screen list ("界面"/"首页") of its own.
 	requireTextBefore(t, tt, "ZeoKeelTest", "sidebar-primary", "sidebar-nav-a", "sidebar-nav-b", "sidebar-tree", "sidebar-footer")
-	// Top-bar slots stay part of the host surface but are only drawn when a
-	// module uses them; with no contribution the frame has no global bar.
-	requireNoText(t, tt, "brand-mark")
-	requireNoText(t, tt, "topbar-center")
 	// Screen region: header, actions, body, the module's trajectory bar, footer.
 	requireTextBefore(t, tt, "screen-header", "screen-actions", "screen-body", "traj-bar", "screen-footer")
 	// Overlay region is painted after the window content.
@@ -93,7 +86,6 @@ func TestReservedSlotsAppearInHostRegions(t *testing.T) {
 		"overlay.toasts", "screen.actions", "screen.footer", "screen.header",
 		"session.trajectory.bar", "sidebar.footer", "sidebar.nav",
 		"sidebar.primary", "sidebar.tree", "test.custom",
-		"topbar.actions", "topbar.brand", "topbar.center",
 	}
 	if got := r.Runtime().Slots(); !equalStrings(got, want) {
 		t.Fatalf("Slots() = %v, want %v", got, want)

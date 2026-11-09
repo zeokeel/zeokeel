@@ -11,8 +11,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/egoist/mygo/ui"
-
 	"github.com/zeokeel/zeokeel/internal/contracts"
 	"github.com/zeokeel/zeokeel/internal/ui/settings"
 )
@@ -66,12 +64,8 @@ func TestMemoryPolicyPrefillAndApply(t *testing.T) {
 	tester := h.tester()
 	h.assertTexts(tester, "整理策略", "最大条目数", "保留天数", "按策略整理")
 
-	h.focusInput(tester, "最大条目数 输入")
-	tester.Key(ui.Cmd, ui.KeyA)
-	tester.Type("12")
-	h.focusInput(tester, "保留天数 输入")
-	tester.Key(ui.Cmd, ui.KeyA)
-	tester.Type("7")
+	typeNumberInput(t, h, tester, "最大条目数", "12")
+	typeNumberInput(t, h, tester, "保留天数", "7")
 	tester.Frame()
 	h.click(tester, "按策略整理")
 
@@ -100,19 +94,21 @@ func TestMemoryPolicyDefaultsEmpty(t *testing.T) {
 	}
 }
 
-func TestMemoryPolicyInvalidNumberNormalizedToZero(t *testing.T) {
+// TestMemoryPolicyOutOfRangeIsIgnored covers the official ui.NumberInput's
+// range rule (mygo number-input.md): a typed number outside the bounds is not
+// applied, the field shows the last valid value on blur, and the page never
+// needs an "invalid draft normalized to 0" warning.
+func TestMemoryPolicyOutOfRangeIsIgnored(t *testing.T) {
 	consolidator := newFakeMemoryConsolidator()
 	consolidator.report = contracts.MemoryConsolidationReport{Remaining: 1}
 	h, store := memoryPolicyHarness(t, consolidator, nil)
 	tester := h.tester()
-	h.focusInput(tester, "最大条目数 输入")
-	tester.Type("banana")
-	tester.Frame()
+	typeNumberInput(t, h, tester, "最大条目数", "9999999")
 	h.click(tester, "按策略整理")
 	if got := store.get(contracts.SettingMemoryMaxEntries); got != "0" {
-		t.Fatalf("%s = %q, want normalized 0", contracts.SettingMemoryMaxEntries, got)
+		t.Fatalf("%s = %q, want 0 (last valid value)", contracts.SettingMemoryMaxEntries, got)
 	}
-	h.assertTexts(tester, "无效数字，已按 0（不限）处理")
+	h.assertNoTexts(tester, "无效数字")
 	policies := consolidator.policies()
 	if len(policies) != 1 || policies[0].MaxEntries != 0 {
 		t.Fatalf("policies = %+v, want MaxEntries 0", policies)

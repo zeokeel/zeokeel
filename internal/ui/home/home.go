@@ -83,6 +83,7 @@ func Module() *module.Descriptor[Config] {
 		greeting := cfg.Greeting
 		composerPlaceholder := cfg.ComposerPlaceholder
 		composerState := &homeComposerState{}
+		recentState := &homeRecentState{row: -1}
 
 		// The home command lives in the host command palette, whose titles are
 		// fixed at registration: keep it registered in the current language and
@@ -159,7 +160,7 @@ func Module() *module.Descriptor[Config] {
 									region(c, runtime, contracts.SlotHomeComposer, func(c *ui.Context) {
 										buildHomeComposer(c, tokens, runtime, nav, chat, ctx, composerState, placeholderText, tr)
 									})
-									buildRecentSessions(c, tokens, runtime, nav, chat, tr)
+									buildRecentSessions(c, tokens, runtime, nav, chat, recentState, locale, tr)
 									buildNextSteps(c, tokens, runtime, nav, chat, ctx, composerState, tr)
 								})
 						})
@@ -226,11 +227,22 @@ func homeVisibleSessions(chat contracts.ChatService) []contracts.ChatSessionInfo
 // homeRecentLimit is how many recent conversations Home lists.
 const homeRecentLimit = 5
 
+// homeRecentState is the recent-session List's state: its place, and the row
+// chosen, kept across frames so the native List owns hover, selection, Up/Down
+// and Enter.
+type homeRecentState struct {
+	list ui.ListState
+	row  int
+}
+
 // buildRecentSessions is Home's recent-conversation list: the newest few
 // conversations (archived excluded) so the user can resume without hunting
-// through the sidebar. Clicking one activates it and opens the conversation.
+// through the sidebar. It is a native mygo List keyed by session ID: a single
+// click on a row opens the conversation (the row content observes the pointer)
+// and Enter opens the chosen row.
 func buildRecentSessions(c *ui.Context, t *design.Tokens, runtime contracts.UIRuntime,
-	nav contracts.Navigator, chat contracts.ChatService, tr func(zh, en string) string) {
+	nav contracts.Navigator, chat contracts.ChatService, st *homeRecentState,
+	locale contracts.LocaleService, tr func(zh, en string) string) {
 	visible := homeVisibleSessions(chat)
 	if len(visible) == 0 {
 		return
@@ -244,39 +256,59 @@ func buildRecentSessions(c *ui.Context, t *design.Tokens, runtime contracts.UIRu
 	if len(visible) > homeRecentLimit {
 		visible = visible[:homeRecentLimit]
 	}
+	open := func(index int) {
+		if index < 0 || index >= len(visible) {
+			return
+		}
+		_ = chat.SetActiveSession(visible[index].ID)
+		runtime.Post(func() { _ = nav.Push("session") })
+		runtime.Invalidate()
+	}
+	title := func(session contracts.ChatSessionInfo) string {
+		title := strings.TrimSpace(session.Title)
+		if title == "" {
+			return tr("未命名会话", "Untitled session")
+		}
+		return title
+	}
 	ui.Column(c).FillWidth().Gap(design.Space1).Children(func() {
 		design.Apply(ui.Text(c, tr("最近会话", "Recent chats")), t.SectionLabel()).NoWrap().MaxLines(1)
-		for _, session := range visible {
-			session := session
-			title := strings.TrimSpace(session.Title)
-			if title == "" {
-				title = tr("未命名会话", "Untitled session")
-			}
-			c.Key("home/recent/" + session.ID)
-			row := ui.ButtonBase(c).FillWidth().Height(36).PaddingX(design.Space2).
-				Radius(design.RadiusSM).Label(title)
-			switch {
-			case row.Pressed():
-				row = row.Background(t.BgSelected)
-			case row.Hovered():
-				row = row.Background(t.BgHover)
-			}
-			row.Children(func() {
-				ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(design.Space2).Children(func() {
-					ui.Icon(c, icons.Message()).Size(16, 16).TextColor(t.LabelSecondary)
-					design.Apply(ui.Text(c, title), t.Text(design.TypeS)).
-						TextColor(t.LabelSecondary).Grow(1).MaxLines(1).Ellipsis("…")
-					if !session.UpdatedAt.IsZero() {
-						design.Apply(ui.Text(c, uikit.FormatDateTime(nil, session.UpdatedAt)),
-							t.TextMuted(design.TypeXXXS)).NoWrap()
-					}
-				})
+		if st.row >= len(visible) {
+			st.row = -1
+		}
+		st.list.Key = func(row int) any { return visible[row].ID }
+		st.list.Label = func(row int) string { return title(visible[row]) }
+		st.list.Selected = &st.row
+		list := ui.List(c, &st.list, len(visible)).Rows(func(row ui.ListRow) {
+			session := visible[row.Index]
+			// Hover and the chosen row's accent are the List's; the date is
+			// formatted in the user's locale (an English UI shows English
+			// dates), not a fixed format.
+			content := ui.Row(row.Context).FillWidth().Height(36).AlignItems(ui.Center).
+				Gap(design.Space2).PaddingX(design.Space2).Radius(design.RadiusSM)
+			content.ObserveInput(func(ev ui.InputEvent) {
+				if ev.Kind != ui.InputPointerUp || ev.Button != 0 {
+					return
+				}
+				open(row.Index)
 			})
-			row.OnClick(func() {
-				_ = chat.SetActiveSession(session.ID)
-				runtime.Post(func() { _ = nav.Push("session") })
-				runtime.Invalidate()
+			content.Children(func() {
+				iconColor := t.LabelSecondary
+				textColor := t.LabelSecondary
+				if row.Selected() {
+					iconColor, textColor = t.AccentText, t.AccentText
+				}
+				ui.Icon(row.Context, icons.Message()).Size(16, 16).TextColor(iconColor)
+				design.Apply(ui.Text(row.Context, title(session)), t.Text(design.TypeS)).
+					TextColor(textColor).Grow(1).MaxLines(1).Ellipsis("…")
+				if !session.UpdatedAt.IsZero() {
+					design.Apply(ui.Text(row.Context, uikit.FormatDateTime(locale, session.UpdatedAt)),
+						t.TextMuted(design.TypeXXXS)).NoWrap()
+				}
 			})
+		})
+		if list.Submitted() {
+			open(st.row)
 		}
 	})
 }

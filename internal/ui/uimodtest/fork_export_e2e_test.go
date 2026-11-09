@@ -75,7 +75,7 @@ func TestSessionForkAndExportEndToEnd(t *testing.T) {
 	// Export the active (forked) conversation with the native-save seam.
 	var exportedPath, exportedContent string
 	originalSaver := sessionscreen.ExportSaver
-	sessionscreen.ExportSaver = func(defaultName, content string) (string, error) {
+	sessionscreen.ExportSaver = func(title, defaultName, content string) (string, error) {
 		exportedPath = filepath.Join(t.TempDir(), defaultName)
 		exportedContent = content
 		return exportedPath, os.WriteFile(exportedPath, []byte(content), 0o600)

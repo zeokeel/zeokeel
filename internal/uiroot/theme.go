@@ -50,6 +50,20 @@ func (t *themeService) currentTheme() *ui.Theme {
 	return brand.ThemeFor(t.Dark())
 }
 
+// themeAtScale applies the desktop text-size preference to a theme installed
+// with Context.SetTheme. A custom theme is not scaled by mygo, but its
+// FontSize drives every native control, while design text scales through
+// Tokens.TextScale: both must follow the same factor for the whole UI to grow
+// together (mygo styling.md: a theme of your own may read Preferences).
+func themeAtScale(theme *ui.Theme, scale float32) *ui.Theme {
+	if scale <= 0 || scale == 1 {
+		return theme
+	}
+	scaled := *theme
+	scaled.FontSize = brand.FontSize * scale
+	return &scaled
+}
+
 // LightTheme returns ZeoKeel's brand light theme (the palette in internal/brand
 // applied to mygo's light defaults).
 func LightTheme() *ui.Theme { return brand.LightTheme() }

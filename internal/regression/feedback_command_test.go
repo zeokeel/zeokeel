@@ -226,7 +226,7 @@ func exportSeams(t *testing.T) *string {
 	var captured string
 	originalMarkdown := sessionui.ExportSaver
 	originalJSONL := sessionui.ExportJSONLSaver
-	saver := func(name, content string) (string, error) {
+	saver := func(title, name, content string) (string, error) {
 		captured = content
 		return "/tmp/" + name, nil
 	}

@@ -29,14 +29,6 @@ func FontStack() string { return brand.SystemFont }
 // other monospaced text.
 func MonoFontStack() string { return brand.MonoFont }
 
-// FontFamily is a style atom that sets the brand content family while
-// leaving size and weight alone. Most call sites should use Tokens.Font(role),
-// which applies the family together with the type scale; this exists for raw
-// ui.Text calls that only need the family.
-func (t *Tokens) FontFamily() Style {
-	return func(el ui.Element) ui.Element { return el.Font(FontStack()) }
-}
-
 // MonoFamily is FontFamily for code and terminal text.
 func (t *Tokens) MonoFamily() Style {
 	return func(el ui.Element) ui.Element { return el.Font(MonoFontStack()) }

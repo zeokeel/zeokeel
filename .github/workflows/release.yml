@@ -15,6 +15,9 @@ permissions:
 
 env:
   CGO_ENABLED: "0"
+  # Domestic module mirror (also used by the Go checksum DB).
+  GOPROXY: https://goproxy.cn,direct
+  GOSUMDB: sum.golang.org
 
 jobs:
   release:
