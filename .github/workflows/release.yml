@@ -113,7 +113,8 @@ jobs:
             awk -v ver="$VERSION" '
               index($0, "## [" ver "]") == 1 { inside = 1; next }
               inside && index($0, "## [") == 1 { exit }
-              inside { print }
+              inside && !started && $0 == "" { next }
+              inside { started = 1; print }
             ' CHANGELOG.md
             echo ""
             echo "## 下载"
@@ -142,7 +143,7 @@ jobs:
               echo "| ${platform} | ${arch} | \`${archive}\` |"
             done
             echo ""
-            echo "**校验**：`SHA256SUMS.txt` 是每个压缩包的 sha256。"
+            echo "**校验**：\`SHA256SUMS.txt\` 是每个压缩包的 sha256。"
             echo ""
             echo '```sh'
             echo "# Linux / macOS"
