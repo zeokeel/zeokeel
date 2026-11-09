@@ -4,7 +4,11 @@ All notable changes to ZeoKeel are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/) and the project adheres to
 [Semantic Versioning](https://semver.org/).
 
-## [Unreleased]
+## [0.1.1] - 2026-11-09
+
+Second public ZeoKeel release: the UI/UX conformance pass against mygo v0.8.3,
+the settings consolidation, denser and virtualized transcript/tool cards, dead
+code and legacy archive removal, and the zeokeel-rig v0.13.2 SDK upgrade.
 
 ### Changed
 
@@ -205,6 +209,15 @@ A full UI/UX conformance pass against `mygo v0.8.3/docs/ui` and the
   `ui.Fieldset` with a legend, so assistive technology reads the group with
   every field inside it.
 
+### Verification
+
+- `./scripts/verify.sh` (2026-11-09): **10/10 PASS** — gofmt, build, vet,
+  full test suite, `-race`, regression **284 PASS / 0 SKIP / 0 FAIL**, UI
+  snapshot (81 steps / 79 PNGs), desktop (Xvfb) / headless / ACP smokes green.
+- All six release archives cross-compile with `CGO_ENABLED=0`
+  (linux/amd64, linux/arm64, darwin/amd64, darwin/arm64, windows/amd64,
+  windows/arm64); SDK dependency is `github.com/zeokeel/zeokeel-rig v0.13.2`.
+
 ## [0.1.0] - 2026-11-08
 
 The first public ZeoKeel release: a compile-time modular AI agent for the
@@ -270,4 +283,5 @@ controls (no webview, no browser engine).
 - Model thinking/generation mapping verified by captured request bodies and
   unit tests; SDK dependency is `github.com/zeokeel/zeokeel-rig v0.13.1`.
 
+[0.1.1]: https://github.com/zeokeel/zeokeel/releases/tag/v0.1.1
 [0.1.0]: https://github.com/zeokeel/zeokeel/releases/tag/v0.1.0

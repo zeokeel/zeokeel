@@ -4,7 +4,7 @@
 [![Release](https://img.shields.io/github/v/release/zeokeel/zeokeel)](https://github.com/zeokeel/zeokeel/releases)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
-> **v0.1.0 — first public release** (2026-11-08). Native, compile-time modular
+> **v0.1.1 — second public release** (2026-11-09). Native, compile-time modular
 > AI agent for desktop, headless and ACP (Zed/editor) use; one Go binary, no
 > webview. Final verification: **10/10 PASS** (`./scripts/verify.sh`), regression
 > **284 PASS / 0 SKIP / 0 FAIL**, desktop (Xvfb) / headless / ACP smokes green.
@@ -129,7 +129,7 @@ go test ./...
   memory/schedule/worktree/skill/team_task/settings 等）、
   `hosttools`（产品侧 host 工具：ask_user/present/plan/goal/team，注册进共享工具注册表）、
   `ui/home`、`ui/about`、`ui/welcome`、`ui/toolcards`、`uikit`
-- ✅ SDK 依赖：`github.com/zeokeel/zeokeel-rig v0.13.0`（纯工具集：agent loop / subagent / provider /
+- ✅ SDK 依赖：`github.com/zeokeel/zeokeel-rig v0.13.2`（纯工具集：agent loop / subagent / provider /
   sandbox / 81 个静态工具 + MCP/LSP / gate / session+compact / checkpoint；零第三方依赖；
   旧 agent 61 个工具名 + 现代工具面 55 个名称 100% 覆盖，`TestToolCatalogCoverage` 与
   `TestModernToolSurface` 双重门禁）
