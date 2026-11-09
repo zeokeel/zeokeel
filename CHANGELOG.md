@@ -4,6 +4,151 @@ All notable changes to ZeoKeel are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/) and the project adheres to
 [Semantic Versioning](https://semver.org/).
 
+## [0.1.2] - 2026-11-09 · 交互修复轮
+
+本轮针对真实使用反馈修复工作区 / 审批 / 输入区 / 用量显示 / Windows 编码，并加入
+DSH 风格的按工具系统提示注入与更宽松的默认权限记忆。
+
+### Added
+
+- **按工作区新建会话（⊕）**：侧栏每个工作区分组行右侧新增「在“X”中新建会话」按钮
+  （当前工作区常显，其余悬停/聚焦/键盘聚焦时出现；焦点在行上时 Space 触发）。点击会
+  打开该工作区、在其中创建新会话、展开分组并进入会话页——新建工作区后可以立刻开始对话。
+  全局「新对话」也会展开当前工作区的分组。
+- **DSH 风格的系统提示注入**：每次运行都会重建系统提示，开头是身份 + 运行环境（真实
+  OS/架构、应使用的 shell、工作目录与文件策略、当前审批策略），结尾按已注册工具逐条注入
+  用法提示（read_file/list_dir/glob/grep/write_file/edit_file、pwsh/bash、terminal、jobs、
+  web、subagent 等）——模型从一开始就知道这是 Windows（用 pwsh，不存在 bash），文件读写
+  优先用专用文件工具而不是 shell 命令。子 agent / 团队成员共用同一份提示。
+- **会话级「本会话内始终允许」**：审批弹窗的中键改为「本会话内始终允许」，选择后该工具在
+  本会话后续运行中不再询问（持久化到 settings，删除会话或从会话菜单「清除自动允许的工具（N）」
+  可清除）。弹窗在多个请求排队时显示「还有 N 个待审批请求」，工具名显示为本地化名称。
+- **默认「工作区」权限放宽**：工作区模式现在自动放行工作区文件工具与只读/信息类工具
+  （working_directory、read_image、memory、skill(s)、settings_get、todo*、team_task_list/get、
+  terminal_list、job_* 读取、session 查询、lsp_* 等）；shell、网络、MCP、settings 写入与未知
+  工具仍会询问。两处权限判断共用 `contracts.WorkspaceAutoAllowedTools` 单一清单。
+- **会话底部状态条（DSH 风格）**：输入区下方新增一条安静的单行状态：`N 轮 · M 步 ·
+  X tok/s · 上下文 U/窗口 · 缓存命中 P% · 剩余 Q%`（数据不准确/未知时省略对应项，Tooltip
+  给出精确值）。上下文用量改用 `MessageUsage.ContextTokens`（最后一次模型调用的 prompt
+  token 数，由新增的 rig.EventUsage 采集），不再拿累计计费 token 或压缩预算当上下文窗口。
+- **Windows 命令行输出编码修复**：新增 `internal/lib/textenc`，在工具代理层与右侧终端
+  统一把 GBK/cp936 / UTF-16LE 输出修复为 UTF-8（合法 UTF-8 原样通过）；中文 Windows 上
+  `python …`、`cmd` 等输出不再乱码。
+- **后台任务完成通知真正送达模型**：toolkit 的 root-scoped 工具代理实现 rig `NoticeSource`
+  并在每个工具轮次后向 agent 排空 `jobs.Manager.PendingNotices()`，agent 侧工具包装器透传该
+  接口；后台 job 结束会以 `Background notifications:` 形式进入下一轮上下文（此前文案承诺
+  “会收到通知”但从未接线，真实会话里 6 个后台 job 全部滞留且模型一直在等通知）。
+- **重复工具调用提醒（DSH loop hygiene 移植）**：agent 每 run 跟踪「工具名 + 规范化参数」
+  连续相同调用，在第 3/5/8 次时在结果尾部附加 DSH 原文建议（只提示不阻断、todo 记账调用透传、
+  新用户消息清空链）。
+- **会话底部状态条（DSH 风格）**：新增 `p2-running-composer.png` / `p2-status-strip.png`
+  截图记录「生成期间输入框常驻」与「轮/步/tok/s/上下文/缓存命中/剩余」状态条。
+
+### Changed
+
+- **新建工作区 = 直接选择目录**：点击「添加工作区」直接打开原生目录选择器，不再需要命名
+  对话框；名称由后端按目录名推导，选中已注册的目录视为切换工作区；成功/失败用 toast 或
+  标题行状态/错误行反馈。
+- **去掉工作区「视图」菜单**：产品固定为「按工作区划分 + 会话最近活动排序（组内置顶优先）」，
+  不再有排序/平铺开关与 `sidebar.sort`/`sidebar.group` 设置行；工作区分组按各自最新活动排序
+  （空工作区按创建时间），新建工作区会出现在顶部；没有工作区后端时才回退到单一平铺列表。
+  侧栏工作区树在零会话时也始终渲染分组行与 ⊕（此前空状态会隐藏整棵树）。
+- **会话输入框在生成期间保持可见**：发送消息后输入框不再消失；排队发送默认开启
+  （`ui.sendWhileRunning` 仅显式 `"false"` 关闭），运行中显示「排队 + 停止」，草稿保留；
+  排队数据按会话保存，切走/切回不丢，由模块订阅在回合结束时发送给所属会话；「停止」会暂停
+  排队发送而不是立刻把队列发出去。
+- **用量数字改为紧凑单位**：`用时 358.8s · 173.6K tokens`（K/M/B，保留一位小数），不再显示
+  `173,635` 这类长数字；展开明细同样使用紧凑单位，精确值在 Tooltip。
+- **审批弹窗不再有默认操作**：此前「拒绝」是默认动作且打开即聚焦，用户刚按 Enter 发送消息、
+  弹窗随即出现时，二次 Enter 会误拒工具调用（真实 Windows 会话导出里出现过一次 pwsh 被误拒）。
+  现在不自动聚焦任何按钮、Enter 不做决定；Esc 仍显式拒绝，允许/拒绝都需要点击或 Tab+Enter。
+- **工具指引增强**（来自真实会话复盘）：pwsh 行补充 Windows `Start-Process` 启动的是分离子进程
+  （服务器型任务用 `run_in_background`、记 PID 并 `Stop-Process`）；jobs 行改为 DSH 原文并
+  提醒服务器型 job 不会自己结束、别留多份。
+- **全仓手搓 UI 审计后的官方组件化（第三轮）**：独立审计逐条核对 mygo v0.8.3
+  文档后，把剩余 21 处真正手搓的 UI 迁移为官方组件（审计/证据：
+  `.cache/ui-audit/report.md`、`.cache/migrate-shell/report.md`、
+  `.cache/migrate-settings/report.md`）：
+  - 设置页 7 个集合（记忆/模型目录/MCP/LSP/提示词预设/代理预设/诊断模块）由
+    `for…range`+`Divider` 改为官方 **`ui.List`**（Key/Label/Selected/Rows，行内按钮保留，
+    重排后 Key 跟随；行名/键盘/type-ahead 由控件提供）；
+  - 右栏**产物历史**与 **composer 排队弹层**改为 `ui.List`（前者 Enter/双击展开，
+    后者有界高度、逐条取消保留）；
+  - Files **面包屑**改为官方 **`ui.Breadcrumbs`**（navigation landmark、Link 角色、
+    CurrentPage、点击/Enter 导航、长路径 ellipsis；深路径保留 first→…→last two）；
+  - **会话重命名对话框**补齐 `uikit.DialogFooter` + `AutoFocus` + `EnterTo`（全仓不再有
+    手写 footer 的对话框）；
+  - 消息评分与 /feedback 改为官方 **`ui.Toggle` / `ui.ToggleGroup`**（pressed 语义；
+    `ui.Segmented` 无法表达“未评价”，偏差与备选方案已记录）；
+  - 8 处文字忙碌态（更新检查/下载/安装、导入扫描/导入、模型连接检查、记忆提取、
+    附件选择/压缩）改为官方 **`ui.Spinner`**（不伪造 Progress 百分比）；
+  - 记忆 pane 的 Unicode `✎` 改为新增的 Lucide **`icons.Pencil()`**；设置「未保存」
+    裸文本改为官方 `ui.Badge`；
+  - 保留自绘项均有 `custom-widgets.md`/headless base 依据并列入审计报告：composer 卡片、
+    slash/@ 富行建议菜单、命令面板按钮行、消息 hover 动作行、无边框图标按钮、tabs
+    下划线、思考/工具行 trigger、toast parts、附件 chip 等；`ui.Rating`/`ui.Table`/
+    `ui.Progress`/`ui.FindBar`/`ui.Accordion` 等经核对语义不适用，明确不“为用而用”。
+- **会话过程展示改用 mygo 官方组件**（推理/思考、工具调用）：
+  - 思考块由「`ui.Collapsible` + 另一行手搓的 `思考中…` + 原始 tail 预览 + 纯文本正文」改为
+    **单个 `ui.CollapsibleBase`**：流式时 trigger 为官方 `ui.Spinner` + 「思考中…」，结束后为
+    思考图标 + 「思考」+ 折叠行数；chevron 由 `parts.Progress()` 驱动；正文用官方
+    `ui/markdown.Stream`/`View` 以更小更淡的 Markdown 主题渲染（不再有「思考中… ile.」这类
+    原始 tail 文本，也不再重复渲染）。
+  - 「生成中」指示器由 `ui.Badge` + 静态 Sparkles 图标改为官方 `ui.Spinner`（带无障碍 label）。
+  - 工具调用行由手搓 chevron `ui.Button` + 原始 snake_case 工具名改为 **`ui.CollapsibleBase`
+    整行 disclosure**：图标 + 本地化友好工具名 + 状态（运行中显示 `ui.Spinner`）+ 单行预览 +
+    `parts.Progress()` chevron；原始工具 id 只出现在 Tooltip/无障碍描述里。H15 默认展开规则、
+    每行折叠状态、`HoldPlace` 保持。
+  - 决策卡与轨迹 Tab 的 `ui.Collapsible`、正文 `markdown`、会话 `ui.List` 本来就是官方用法，
+    保持不变；`ui.Accordion`（设置类多分区）与 `DiffViewer`（读模型没有 diff 数据）经审计后
+    **不使用**，原因记录在 `.cache/transcript-ui/report.md`。
+- **删除当前工作区后的回退**：删除当前工作区时自动选择剩余工作区中最近创建的一个作为当前
+  工作区（原子持久化，失败回滚），避免工具根变空后文件/shell 工具静默失败。
+
+### Removed
+
+- 侧栏工作区视图菜单、名称排序/平铺选项及其 `sidebar.sort` / `sidebar.group` 设置键
+  （旧的遗留设置行会被忽略，不再写入）。
+- 添加工作区命名对话框与「选择目录…/名称/目录」表单字段。
+
+### Fixed
+
+- 新建工作区后无法直接开始对话（重做 ⊕ 动作 + 空会话树渲染）。
+- 中文 Windows 下命令输出乱码（见上）。
+- Windows 上模型误用 bash（平台感知提示 + Windows 不注册 bash；非 Windows 仅在 PATH 中确实
+  存在 pwsh 时才注册）。
+- 会话切换会静默丢弃排队消息；生成结束时若不在会话页排队消息不会发出；停止后队列被立即发送。
+- 审批弹窗工具名显示英文原始 id、多请求无计数提示。
+- 空白标题会话在英文界面无法用 “Untitled” 搜索到。
+- 切换工作区时旧工具构建（及其后台 job / terminal 进程）一直留到进程退出：现在在最后一个
+  in-flight 调用结束后释放（不中断正在运行的调用）。
+- 「停止」被归类成普通错误（`errorKind=other`，UI 显示原始 `cancelled`）；现在映射为本地化的
+  「已取消」。
+- 一个长且不含空格的工作区名会把该行的 ⋯/⊕ 挤出 280 DIP 侧栏：名称文本现在可收缩
+  （`MinWidth(0)`），行内操作仍在栏内且可点击。
+- Esc 关闭斜杠菜单后清空输入再输入同样的 `/`，菜单不会重新打开（提示词挂起状态残留）：
+  输入为空时清除该状态，并提供回归测试。
+- 极短回合（<250ms，如脚本化/取消回合）不再显示五位数 `tok/s` 这种无意义的平均速度。
+
+### Verification (2026-11-09, v0.1.2)
+
+- `./scripts/verify.sh` (full): **10/10 PASS** — gofmt, build, vet, full test
+  suite, `-race` (384s), regression **287 PASS / 0 SKIP / 0 FAIL**, UI
+  snapshot **83 steps / 81 PNGs**, desktop (Xvfb, tray) / headless / ACP
+  smokes green; **535s** total.
+- `go test ./...` 41 packages PASS; `go build ./...` and
+  `GOOS=windows go build ./...` PASS; `go vet ./...` clean.
+- `internal/devtools/ui-drive`: **84/84 PASS** (0 fail / 0 warn) on the final
+  tree, including the new workspace ⊕, transcript reasoning/tool rows and
+  approval no-default steps.
+- Independent audits and evidence:
+  `.cache/ui-audit/report.md` (hand-rolled UI audit),
+  `.cache/migrate-shell/report.md` / `.cache/migrate-settings/report.md`
+  (official-component migrations), `.cache/session-debug/report.md` (real
+  Windows session export replay), `.cache/audit-round2/verification.md`.
+
+---
+
 ## [0.1.1] - 2026-11-09
 
 Second public ZeoKeel release: the UI/UX conformance pass against mygo v0.8.3,
@@ -283,5 +428,6 @@ controls (no webview, no browser engine).
 - Model thinking/generation mapping verified by captured request bodies and
   unit tests; SDK dependency is `github.com/zeokeel/zeokeel-rig v0.13.1`.
 
+[0.1.2]: https://github.com/zeokeel/zeokeel/releases/tag/v0.1.2
 [0.1.1]: https://github.com/zeokeel/zeokeel/releases/tag/v0.1.1
 [0.1.0]: https://github.com/zeokeel/zeokeel/releases/tag/v0.1.0

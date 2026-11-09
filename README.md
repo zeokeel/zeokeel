@@ -4,11 +4,26 @@
 [![Release](https://img.shields.io/github/v/release/zeokeel/zeokeel)](https://github.com/zeokeel/zeokeel/releases)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
-> **v0.1.1 — second public release** (2026-11-09). Native, compile-time modular
+> **v0.1.2 — third public release** (2026-11-09). Native, compile-time modular
 > AI agent for desktop, headless and ACP (Zed/editor) use; one Go binary, no
 > webview. Final verification: **10/10 PASS** (`./scripts/verify.sh`), regression
-> **284 PASS / 0 SKIP / 0 FAIL**, desktop (Xvfb) / headless / ACP smokes green.
+> **287 PASS / 0 SKIP / 0 FAIL**, UI snapshot 83 steps / 81 PNGs, desktop
+> (Xvfb, tray) / headless / ACP smokes green.
 > See [CHANGELOG.md](CHANGELOG.md) for the release notes.
+
+> **v0.1.2 主要变化**（详见 CHANGELOG）：工作区直接选目录添加、每个
+> 工作区行内 ⊕ 新建会话、去掉侧栏「视图」改为固定的按工作区/最近活动视图、会话级
+> 「本会话内始终允许」与放宽的默认工作区权限、生成期间输入框常驻（默认排队）、DSH 风格
+> 的按工具系统提示注入（Windows 用 pwsh、文件优先用文件工具）、紧凑 K/M 用量数字 +
+> 底部状态条（轮/步/tok/s/上下文/缓存命中/剩余）、Windows GBK/cp936 命令输出修复、
+> 后台 job 完成通知接线 + 重复调用提醒（DSH loop hygiene）、审批弹窗无默认操作（防误拒）、
+> 工作区切换释放旧后台任务。真实 Windows 会话复盘见 `.cache/session-debug/report.md`。
+> 会话过程的组件官方化（`.cache/transcript-ui/report.md`）：思考/推理 = `ui.CollapsibleBase` +
+> `ui.Spinner` + `ui/markdown`；生成中 = 官方 `ui.Spinner`；工具调用行 = `ui.CollapsibleBase`
+> 整行 disclosure + 本地化友好工具名（原始 id 仅 Tooltip/无障碍描述）。
+> 全仓手搓 UI 审计与官方化（`.cache/ui-audit/report.md`）：设置页 7 个集合 + 右栏产物
+> 历史 + composer 排队层 → `ui.List`；Files 面包屑 → `ui.Breadcrumbs`；重命名对话框补齐
+> `DialogFooter`/Enter；评分 → `ui.Toggle`/`ui.ToggleGroup`；忙碌态 → `ui.Spinner`。
 
 ## 下载与运行 / Download and run
 
