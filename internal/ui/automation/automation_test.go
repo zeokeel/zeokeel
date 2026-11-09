@@ -337,6 +337,13 @@ func TestCreateTaskFlow(t *testing.T) {
 	}
 	h.assertNoTexts(tester, "新建自动化任务")
 	h.assertTexts(tester, "每日巡检", "每 1 分钟")
+	// The tasks are an official List: named, with rows named by the task name.
+	if _, ok := tester.AccessByRole(ui.RoleList, "自动化任务"); !ok {
+		t.Fatalf("automation tasks are not a named list; texts = %v", tester.Texts())
+	}
+	if _, ok := tester.AccessByRole(ui.RoleListItem, "每日巡检"); !ok {
+		t.Fatalf("automation rows are not exposed by name; texts = %v", tester.Texts())
+	}
 }
 
 func TestCreateValidation(t *testing.T) {

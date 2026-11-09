@@ -31,6 +31,13 @@ func TestToolDescriptionsLocalized(t *testing.T) {
 	h.assertTexts(tester, "读取工作区文件内容",
 		"Read a UTF-8 text file inside the tool root and return numbered lines")
 	h.assertNoTexts(tester, "Use offset and limit to page through large files")
+	// The catalogue is an official List: named, with rows named by tool name.
+	if _, ok := tester.AccessByRole(ui.RoleList, "工具目录列表"); !ok {
+		t.Fatalf("the tool catalogue is not a named list; texts = %v", tester.Texts())
+	}
+	if _, ok := tester.AccessByRole(ui.RoleListItem, "read_file"); !ok {
+		t.Fatalf("tool rows are not exposed by name; texts = %v", tester.Texts())
+	}
 
 	h.uiRoot.Locale().SetLanguage("en")
 	tester.Frame()
@@ -48,6 +55,13 @@ func TestMCPLongErrorShortReasonAndFoldedDetail(t *testing.T) {
 	tester := h.tester()
 
 	h.assertTexts(tester, "broken", "连接失败")
+	// The servers are an official List: named, with rows named by server name.
+	if _, ok := tester.AccessByRole(ui.RoleList, "MCP 服务器列表"); !ok {
+		t.Fatalf("MCP servers are not a named list; texts = %v", tester.Texts())
+	}
+	if _, ok := tester.AccessByRole(ui.RoleListItem, "broken"); !ok {
+		t.Fatalf("MCP rows are not exposed by name; texts = %v", tester.Texts())
+	}
 	// The collapsed row never renders the raw line in full.
 	if tester.HasText(strings.TrimSpace(detail)) {
 		t.Fatalf("collapsed card shows the whole raw error; texts = %v", tester.Texts())

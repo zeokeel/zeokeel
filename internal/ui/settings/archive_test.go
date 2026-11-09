@@ -54,6 +54,13 @@ func TestArchivePageListsOnlyArchived(t *testing.T) {
 	if tester.HasText("进行中的会话") {
 		t.Fatalf("the page listed a non-archived session; texts = %v", tester.Texts())
 	}
+	// The archived sessions are an official List: named, with rows by title.
+	if _, ok := tester.AccessByRole(ui.RoleList, "归档的会话列表"); !ok {
+		t.Fatalf("archived sessions are not a named list; texts = %v", tester.Texts())
+	}
+	if _, ok := tester.AccessByRole(ui.RoleListItem, "归档的计划"); !ok {
+		t.Fatalf("archive rows are not exposed by name; texts = %v", tester.Texts())
+	}
 	h := newHarness(t, chat, newFakeSettings(nil), settings.Config{})
 	tester2 := h.tester()
 	tester2.Frame()

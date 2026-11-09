@@ -153,6 +153,13 @@ func TestMessageSearchRendersHits(t *testing.T) {
 	h.assertTexts(tester, "消息搜索", "项目讨论", "用户", "助手",
 		"如何修复登录问题", "先检查认证模块",
 		now.Local().Format("01-02 15:04"))
+	// The hits are an official List: named, with the hit rows exposed by name.
+	if _, ok := tester.AccessByRole(ui.RoleList, "消息搜索"); !ok {
+		t.Fatalf("message-search hits are not a named list; texts = %v", tester.Texts())
+	}
+	if _, ok := tester.AccessByRole(ui.RoleListItem, "项目讨论 如何修复登录问题"); !ok {
+		t.Fatalf("message-search rows are not exposed by name; texts = %v", tester.Texts())
+	}
 	if calls := store.callCount(); calls != 1 {
 		t.Fatalf("SearchMessages calls = %d, want 1", calls)
 	}

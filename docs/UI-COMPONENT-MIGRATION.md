@@ -93,6 +93,9 @@
 - 设置归档页、技能卡列表 → 官方 `ui.List`（Key 稳定、行名；行内按钮保留）。
 - 插件页：MCP 服务器、内置模块、插件参数、工具目录 → 官方 `ui.List`
   （各自 ListState Key/Label；页面分节仍是 Section 布局）。
+- 新增 List 的 a11y/键盘覆盖：侧栏消息命中、设置归档、技能、记忆、自动化、插件
+  MCP/工具目录的帧测试断言 `RoleList` 名称与 `RoleListItem` 行名（List 的 Label
+  同时供 type-ahead 与屏幕阅读器使用）。
 - 文件预览的源码文件：纯 mono `ui.Text`（40 行截断）→ 官方只读 `editor.View`
   （`editor.State{ReadOnly: true, LineNumbers: On, SoftWrap: true}`，按扩展名
   `editor.LanguageFor` 高亮；超过 256 KiB 仍走缓存截断；测试用 a11y `Value` 断言内容）。

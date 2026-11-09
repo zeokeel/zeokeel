@@ -156,6 +156,13 @@ func TestMemoryListsAndDeletes(t *testing.T) {
 	h.assertTexts(tester, "记忆", "项目 Alpha 使用 Go 1.27", "提交前运行 go test -race",
 		"工作区", "删除记忆", "新建记忆", "添加记忆")
 	h.assertNoTexts(tester, "记忆后端未启用")
+	// The entries are an official List: named, with rows named by their text.
+	if _, ok := tester.AccessByRole(ui.RoleList, "记忆列表"); !ok {
+		t.Fatalf("the memory entries are not a named list; texts = %v", tester.Texts())
+	}
+	if _, ok := tester.AccessByRole(ui.RoleListItem, "项目 Alpha 使用 Go 1.27"); !ok {
+		t.Fatalf("memory rows are not exposed by name; texts = %v", tester.Texts())
+	}
 	// H25: the 记忆 tab is the only page title; the pane starts with the
 	// search field instead of a repeated big heading (tab labels appear twice:
 	// accessible label + visible text, like 对话/轨迹).
