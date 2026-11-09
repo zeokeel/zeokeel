@@ -15,14 +15,6 @@ import (
 	"github.com/zeokeel/zeokeel/internal/uikit"
 )
 
-const (
-	// ModelCatalogPageID is the editable model catalog page.
-	ModelCatalogPageID = "modelcatalog"
-	// ModelCatalogPageSection and order place it in the 模型 group after Model.
-	ModelCatalogPageSection = "常用"
-	ModelCatalogPageOrder   = 15
-)
-
 // defaultCatalogModels mirrors the modelcatalog module's built-in presets; the
 // page shows them when the user has not configured a list yet.
 var defaultCatalogModels = contracts.DefaultModelCatalog()
@@ -141,20 +133,22 @@ func formatContextWindow(tokens int) string {
 	return strconv.FormatFloat(float64(tokens)/1000, 'f', 1, 64) + "k"
 }
 
-// buildModelCatalogPage renders the editable catalog. Changes save at once
-// (the list is the control surface itself); the destructive actions — removing
-// a model and restoring the defaults over a custom list — ask for confirmation
-// with the native alert dialog.
-func buildModelCatalogPage(c *ui.Context, store contracts.SettingsService, st *catalogState, locale contracts.LocaleService) {
+// buildModelCatalogSection renders the model list inside the merged 模型 page.
+// Changes save at once (the list is the control surface itself); the destructive
+// actions — removing a model and restoring the defaults over a custom list — ask
+// for confirmation with the native alert dialog. The page owns the provider
+// connection and the page footer Save; catalog edits apply immediately.
+func buildModelCatalogSection(c *ui.Context, store contracts.SettingsService, st *catalogState, locale contracts.LocaleService) {
 	t := design.Of(c)
 	models, ok := catalogModels(store)
 	ui.Column(c).FillWidth().Gap(design.Space4).Children(func() {
-		uikit.PageHeader(c, localized(locale, "模型目录", "Model catalog"), localized(locale,
-			"对话输入框的模型菜单展示的预设；保存后立即生效。",
-			"Presets shown in the composer model menu; changes apply immediately."))
+		design.Apply(ui.Text(c, localized(locale,
+			"对话输入框的模型菜单展示这些预设；新增/编辑/删除立即生效。",
+			"Presets shown in the composer model menu; add/edit/remove applies immediately.")),
+			t.TextMuted(design.TypeXXS)).MaxLines(2)
 		if !ok {
 			uikit.ErrorLine(c, localized(locale,
-				"配置解析失败：请修复模型目录设置或恢复默认。",
+				"配置解析失败：请修复模型设置或恢复默认。",
 				"Invalid catalog setting; fix it or restore the defaults."))
 		}
 

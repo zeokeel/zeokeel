@@ -27,7 +27,7 @@
   - **既有项复核**：pin/archive（agent + sidebar 行菜单 + show-archived 视图）、i18n 覆盖到新增页面、
     会话搜索/消息全文搜索、JSONL 导出、任务板、MCP 工具开关均已可用。
 - **presets 已落地**：prompt 片段契约 + composer「预设/Presets」插入菜单 + 设置「预设」页 CRUD（名称/提示词/排序/
-  恢复默认）+ 设置「模型目录」编辑页（modelcatalog.settings 动态读取）；旧 agent presets 的 tool allowlist 语义仍未迁移，
+  恢复默认）+ 设置「模型」页的模型列表（modelcatalog.settings 动态读取）；旧 agent presets 的 tool allowlist 语义仍未迁移，
   故 presets 记 🟡。
 - 复核统计（Round 65 终值）：62 项中 **✅61 / 🟡0 / ❌1**（❌ 仅 winproc，Windows 平台非目标）。✅ 为有等价实现或剩余差异属明确非目标；🟡 为已实现但存在
   深度/长尾差异（§5.1）；❌ 仅 winproc（Windows 平台非目标）。核心对话/持久化/工作区/审批/设置/右栏/搜索/导入/更新/
@@ -59,7 +59,7 @@
 | `lsp` | ✅ | toolkit lsp.go + 设置 LSP 页 | **多服务器列表 + 活动服务器选择 + workspace `.zeokeel/lsp.json` opt-in**（默认关、显式 allow、settings 优先合并）；启动活动服务器并注册 `lsp_*` 工具，卸载关闭；错误仅警告 |
 | `mcp` | ✅ | toolkit `mcp.Start`（stdio+HTTP）+ settings/workspace 合并 + 工具级开关 | HTTP/stdio 握手/工具注册/失败诊断；assembly>settings>workspace mcp.json（opt-in）；`mcp.disabledTools` 注册前过滤；插件详情/市场在 Shell Plugins 行仍 🟡 |
 | `memory` | ✅ | `internal/modules/memory` + rig memory tool + session Memory tab + 设置「记忆」页 | JSON MemoryStore/tool/搜索/添加/整理/清空 + 确定性 consolidation（上限/保留期）+ **模型驱动 extract（opt-in 手动触发，最近 20 条→≤5 条，去重/忙碌守卫/坏 JSON 错误）** |
-| `modelcatalog` | ✅ | `internal/modules/modelcatalog` + composer 模型菜单 + settings「模型目录」页 + **连接检查** | 默认预设（含 128k context window）、per-session 模型切换、**思考配置（系列：千问/DeepSeek/其他/自定义；每模型默认模式 + 自定义模式 JSON 参数；composer 会话菜单随时切换）**、**每模型生成参数（temperature/top_p/max_tokens）**、目录编辑（新增/**编辑**/删除/恢复默认/上下文窗口）、usage footer 预算显示、**连接检查（GET /models，成功/失败/防重复）** |
+| `modelcatalog` | ✅ | `internal/modules/modelcatalog` + composer 模型菜单 + settings「模型」页（连接 + 模型列表）+ **连接检查** | 默认预设（含 128k context window）、per-session 模型切换、**思考配置（系列：千问/DeepSeek/其他/自定义；每模型默认模式 + 自定义模式 JSON 参数；composer 会话菜单随时切换）**、**每模型生成参数（temperature/top_p/max_tokens）**、目录编辑（新增/**编辑**/删除/恢复默认/上下文窗口）、usage footer 预算显示、**连接检查（GET /models，成功/失败/防重复）** |
 | `presets` | ✅ | contracts/presets.go + session presets 菜单/人设选择器 + settings「预设」页 | prompt 片段 CRUD/插入 + **AgentPreset（persona/prompt/tools allowlist/model/order）**：settings 代理预设 CRUD、composer「人设」选择器
 （per-session 设置）、agent 每 run 应用（base→AGENTS→persona→prompt，model 默认、tool allowlist 与模式门禁叠加） |
 | `prompt` | ✅ | agent SystemPrompt + settings 模型页提示词 + **AGENTS.md 注入** | 系统提示可配置；每次运行读取当前工作区 `AGENTS.md`（文件名可配/32KiB 截断/读取失败告警）追加注入；auto-title 按首条提示生成；review prompt 属 review 工具非目标 |
@@ -86,7 +86,7 @@
 | Composer 深度（/goal /plan /memory/权限/thinking/@session/presets） | ✅ | `sessionCommands` + `command_dialogs.go` + `commands_help.go` + `compact_command.go` | **15 条命令**（/新会话/副本/导出/设置/目标/审阅/记忆/反馈/停止/附加/帮助/**压缩上下文/完成目标/放弃目标**）+ 权限模式、聊天模式、**思考强度（每模型系列/自定义模式，可随时切换）**、@session、预设；目标生命周期（完成/放弃/编辑/暂停/恢复/清除）已全量 |
 | Chrome/Sidebar/折叠 rail/右栏 dock | ✅ | uiroot + sidebar | 280px sidebar、64px rail、Cmd/Ctrl+B、**Cmd/Ctrl+N 新建会话、Cmd/Ctrl+, 设置、Cmd/Ctrl+K 命令面板**、右栏开关、添加工作区、视图选项（排序/分组持久化）、工作区搜索/置顶/归档 |
 | 命令面板/窗口内快捷键 | ✅ | uiroot palette/shortcuts | Cmd/Ctrl+K、可配置两条 chrome 快捷键；非系统全局热键 |
-| Settings 外壳与页面 | ✅ | `internal/ui/settings`、about | 18 页（高级分组默认折叠，日常导航 10 项）：常用（模型/模型目录/行为/预设）、外观（外观/技能/快捷键）、集成（MCP/搜索/网络）、高级（通知/归档/导入/更新/诊断/记忆/LSP/数据与隐私）、关于；**模型页含运行参数（最大迭代/上下文预算/流完整性）**、**模型目录含系列/思考模式/生成参数编辑**；**插件参数已落在 Plugins 页（已接线键）**；插件市场为明确非目标 |
+| Settings 外壳与页面 | ✅ | `internal/ui/settings`、about | 17 页（高级分组默认折叠，日常导航 9 项）：常用（模型/行为/预设）、外观（外观/技能/快捷键）、集成（MCP/搜索/网络）、高级（通知/归档/导入/更新/诊断/记忆/LSP/数据与隐私）、关于；**模型页 = 服务商连接 + 模型列表（系列/思考模式/生成参数编辑）+ 运行参数（最大迭代/上下文预算/流完整性）**；**插件参数已落在 Plugins 页（已接线键）**；插件市场为明确非目标 |
 | Approval 审批 Modal | ✅ | `internal/ui/approval` + approvals 模块 | allow/allow-always/deny、ask/workspace/full/never（settings 覆盖、workspace 只读自动 allow） |
 | 右侧检查栏 | ✅ | rightpanel | 8 tab：概览/工具/日志/文件/变更/终端/**团队**/**任务**，en/zh |
 | Files 检查器 | ✅ | rightpanel files + workspace | 打开文件夹/面包屑/文本/Markdown/图片预览/错误态 |

@@ -33,7 +33,7 @@ var providerQuickPresets = []providerQuickPreset{
 		baseURL: "https://api.openai.com/v1", model: "gpt-4o-mini"},
 	{id: "ollama", zh: "Ollama（本地）", en: "Ollama (local)",
 		baseURL: "http://127.0.0.1:11434/v1", model: "qwen2.5:7b"},
-	{id: "custom", zh: "自定义", en: "Custom", baseURL: "", model: ""},
+	{id: "custom", zh: "手动配置", en: "Manual setup", baseURL: "", model: ""},
 }
 
 // normalizeProviderURL compares preset URLs without their trailing slash.

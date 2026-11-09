@@ -73,7 +73,7 @@ func clickScrolled(t *testing.T, tester *ui.Tester, label string) {
 // URL): the chips only fill the form, Save persists it.
 func TestProviderPresetsFillDraftsAndSave(t *testing.T) {
 	harness, tester := openModelPage(t, nil)
-	requireHasTexts(t, tester, "服务商预设", "DeepSeek", "OpenAI", "Ollama（本地）", "自定义")
+	requireHasTexts(t, tester, "服务商预设", "DeepSeek", "OpenAI", "Ollama（本地）", "手动配置")
 	if got := countExactText(tester, "已匹配"); got != 0 {
 		t.Fatalf("unconfigured page shows %d matched badges", got)
 	}
@@ -113,12 +113,12 @@ func TestProviderPresetsFillDraftsAndSave(t *testing.T) {
 	}
 
 	// The custom entry clears the base URL and keeps the model.
-	revealSettings(t, tester, "自定义")
-	if err := tester.Click("自定义"); err != nil {
+	revealSettings(t, tester, "手动配置")
+	if err := tester.Click("手动配置"); err != nil {
 		t.Fatalf("click custom: %v", err)
 	}
 	tester.Frame()
-	requireHasText(t, tester, "已填入预设：自定义")
+	requireHasText(t, tester, "已填入预设：手动配置")
 	clickScrolled(t, tester, "保存")
 	if got := harness.settings.Get(contracts.SettingsChatBaseURL, ""); got != "" {
 		t.Fatalf("custom baseURL = %q, want empty", got)

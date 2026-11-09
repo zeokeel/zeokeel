@@ -560,10 +560,6 @@ func main() {
 		fmt.Println("click model settings:", err)
 	}
 	a.render(outDir + "/p2-model-settings.png")
-	if err := a.clickSettingsItem("模型目录"); err != nil {
-		fmt.Println("click model catalog:", err)
-	}
-	a.render(outDir + "/p2-model-catalog-settings.png")
 	if err := a.clickSettingsItem("外观"); err != nil {
 		fmt.Println("click appearance:", err)
 	}
@@ -672,10 +668,6 @@ func main() {
 	a.render(outDir + "/p2-presets-agent-meta.png")
 	a.tester.Scroll(740, 500, 0, -400)
 	a.tester.Frame()
-	if err := a.clickSettingsItem("模型目录"); err != nil {
-		fmt.Println("click model catalog settings:", err)
-	}
-	a.render(outDir + "/p2-modelcatalog-settings.png")
 	if err := a.clickSettingsItem("LSP"); err != nil {
 		fmt.Println("click LSP settings:", err)
 	}
@@ -949,7 +941,6 @@ var settingsPageIDs = map[string]string{
 	"MCP":   "mcp",
 	"网络":    "network",
 	"预设":    "presets",
-	"模型目录":  "modelcatalog",
 	"LSP":   "lsp",
 	"数据与隐私": "data-privacy",
 	"通知":    "notifications",

@@ -18,11 +18,11 @@ func TestModelCatalogPageDefaults(t *testing.T) {
 	h := newHarness(t, &fakeChat{}, store, settings.Config{})
 	tester := h.tester()
 	tester.Frame()
-	if err := tester.Click("模型目录"); err != nil {
-		t.Fatalf("click 模型目录: %v", err)
+	if err := tester.Click("模型"); err != nil {
+		t.Fatalf("click 模型: %v", err)
 	}
 	tester.Frame()
-	h.assertTexts(tester, "模型目录", "DeepSeek Chat", "deepseek-chat",
+	h.assertTexts(tester, "模型", "模型列表", "DeepSeek Chat", "deepseek-chat",
 		"DeepSeek Reasoner", "deepseek-reasoner", "恢复默认", "添加模型")
 	// The add form is not permanently open: the list owns the page.
 	h.assertNoTexts(tester, "名称 输入", "模型 ID 输入")
@@ -86,15 +86,12 @@ func TestModelCatalogPageRestoreDefaults(t *testing.T) {
 	h := newHarness(t, &fakeChat{}, store, settings.Config{})
 	tester := h.tester()
 	tester.Frame()
-	if err := tester.Click("模型目录"); err != nil {
-		t.Fatalf("click 模型目录: %v", err)
+	if err := tester.Click("模型"); err != nil {
+		t.Fatalf("click 模型: %v", err)
 	}
 	tester.Frame()
 	h.assertTexts(tester, "X")
-	if err := tester.Click("恢复默认"); err != nil {
-		t.Fatalf("restore defaults: %v", err)
-	}
-	tester.Frame()
+	h.click(tester, "恢复默认")
 	if err := tester.Click("恢复默认值"); err != nil {
 		t.Fatalf("confirm restore defaults: %v", err)
 	}
@@ -143,8 +140,8 @@ func TestModelCatalogPageContextWindowEnglish(t *testing.T) {
 	h := newLocaleHarness(t, &fakeChat{}, store, settings.Config{}, "en")
 	tester := h.tester()
 	tester.Frame()
-	if err := tester.Click("Model catalog"); err != nil {
-		t.Fatalf("click Model catalog: %v", err)
+	if err := tester.Click("Model"); err != nil {
+		t.Fatalf("click Model: %v", err)
 	}
 	tester.Frame()
 	h.assertTexts(tester, "128k context")
@@ -152,12 +149,13 @@ func TestModelCatalogPageContextWindowEnglish(t *testing.T) {
 
 // --- thinking configuration ------------------------------------------------
 
-// openModelCatalog opens the model catalog page and returns its tester.
+// openModelCatalog opens the merged 模型 page (the catalog section) and
+// returns its tester.
 func openModelCatalog(t *testing.T, h *harness) *ui.Tester {
 	t.Helper()
 	tester := h.tester()
 	tester.Frame()
-	h.click(tester, "模型目录")
+	h.click(tester, "模型")
 	return tester
 }
 
@@ -176,7 +174,7 @@ func openCatalogAddModal(t *testing.T, h *harness, tester *ui.Tester) {
 	h.assertTexts(tester, "新增模型")
 }
 
-// expandCatalogAdvanced opens the editor's 高级选项 disclosure so the
+// expandCatalogAdvanced opens the editor's generation/custom-mode disclosure so the
 // generation and custom-thinking fields become visible.
 func expandCatalogAdvanced(t *testing.T, h *harness, tester *ui.Tester) {
 	t.Helper()
@@ -185,7 +183,7 @@ func expandCatalogAdvanced(t *testing.T, h *harness, tester *ui.Tester) {
 	if catalogExactText(tester, "温度 0–2") {
 		return
 	}
-	catalogClick(t, h, tester, "高级选项")
+	catalogClick(t, h, tester, "生成与自定义模式")
 	h.assertTexts(tester, "生成参数", "温度 0–2", "自定义思考模式")
 }
 
@@ -248,9 +246,9 @@ func TestModelCatalogPageEditThinkingConfig(t *testing.T) {
 	tester := openModelCatalog(t, h)
 
 	catalogClick(t, h, tester, "编辑模型 m1")
-	h.assertTexts(tester, "编辑模型", "模型名称", "思考系列", "默认思考", "取消", "保存")
+	h.assertTexts(tester, "编辑模型", "模型名称", "思考系列", "默认思考", "取消", "保存模型")
 	// Advanced settings start collapsed behind a one-line summary.
-	h.assertTexts(tester, "高级选项", "未配置生成参数或自定义模式")
+	h.assertTexts(tester, "生成与自定义模式", "未配置生成参数或自定义模式")
 	catalogAssertNoExactTexts(t, tester, "生成参数", "自定义思考模式", "添加思考模式")
 
 	// The family picker offers the four families; Qwen switches the effective
@@ -274,7 +272,7 @@ func TestModelCatalogPageEditThinkingConfig(t *testing.T) {
 	clearAndType(t, h, tester, "模式 1 名称", "极速")
 	clearAndType(t, h, tester, "模式 1 参数",
 		`{"enable_thinking": false, "thinking_budget": 1024}`)
-	catalogClick(t, h, tester, "保存")
+	catalogClick(t, h, tester, "保存模型")
 
 	h.assertNoTexts(tester, "自定义思考模式", "添加思考模式")
 	// The row reflects the saved configuration immediately.
@@ -311,7 +309,7 @@ func TestModelCatalogPageEditThinkingConfig(t *testing.T) {
 	expandCatalogAdvanced(t, h, tester)
 	h.assertTexts(tester, "模式 1 ID", "删除思考模式 1")
 	clearAndType(t, h, tester, "模式 1 名称", "极速+")
-	catalogClick(t, h, tester, "保存")
+	catalogClick(t, h, tester, "保存模型")
 	models = catalogStoredModels(t, store)
 	if len(models) != 1 || len(models[0].ThinkingModes) != 1 {
 		t.Fatalf("stored catalog after edit = %+v", models)
@@ -344,7 +342,7 @@ func TestModelCatalogPageFamilyChangeClearsDefault(t *testing.T) {
 	tester.Key(0, ui.KeyEscape)
 	tester.Frame()
 
-	catalogClick(t, h, tester, "保存")
+	catalogClick(t, h, tester, "保存模型")
 	models := catalogStoredModels(t, store)
 	if len(models) != 1 || models[0].Family != contracts.ModelFamilyCustom {
 		t.Fatalf("stored catalog = %+v", models)
@@ -372,7 +370,7 @@ func TestModelCatalogPageFamilyOffersBuiltins(t *testing.T) {
 	catalogAssertNoExactTexts(t, tester, "低强度", "中强度", "高强度")
 	catalogClick(t, h, tester, "深度思考")
 	h.assertTexts(tester, "深度思考")
-	catalogClick(t, h, tester, "保存")
+	catalogClick(t, h, tester, "保存模型")
 
 	models := catalogStoredModels(t, store)
 	if len(models) != 1 || models[0].Family != contracts.ModelFamilyQwen {
@@ -438,25 +436,25 @@ func TestModelCatalogPageEditorValidation(t *testing.T) {
 
 	// Not JSON at all.
 	clearAndType(t, h, tester, "模式 1 参数", "not json")
-	catalogClick(t, h, tester, "保存")
+	catalogClick(t, h, tester, "保存模型")
 	h.assertTexts(tester, "不是有效 JSON", "自定义思考模式")
 
 	// Valid JSON but not an object.
 	clearAndType(t, h, tester, "模式 1 参数", "[1,2]")
-	catalogClick(t, h, tester, "保存")
+	catalogClick(t, h, tester, "保存模型")
 	h.assertTexts(tester, "必须是 JSON 对象")
 
 	// Duplicate IDs (case-insensitive).
 	clearAndType(t, h, tester, "模式 1 参数", "{}")
 	catalogClick(t, h, tester, "添加思考模式")
 	clearAndType(t, h, tester, "模式 2 ID", "BAD")
-	catalogClick(t, h, tester, "保存")
+	catalogClick(t, h, tester, "保存模型")
 	h.assertTexts(tester, "重复")
 
 	// A partially filled row needs an ID.
 	clearAndType(t, h, tester, "模式 2 ID", "")
 	clearAndType(t, h, tester, "模式 2 名称", "verbose")
-	catalogClick(t, h, tester, "保存")
+	catalogClick(t, h, tester, "保存模型")
 	h.assertTexts(tester, "ID 不能为空")
 
 	if got := store.get(contracts.SettingModelCatalogModels); got != original {
@@ -465,7 +463,7 @@ func TestModelCatalogPageEditorValidation(t *testing.T) {
 
 	// Removing the broken row and saving succeeds.
 	catalogClick(t, h, tester, "删除思考模式 2")
-	catalogClick(t, h, tester, "保存")
+	catalogClick(t, h, tester, "保存模型")
 	h.assertNoTexts(tester, "自定义思考模式")
 	models := catalogStoredModels(t, store)
 	if len(models) != 1 || len(models[0].ThinkingModes) != 1 || models[0].ThinkingModes[0].ID != "bad" {
@@ -488,7 +486,7 @@ func TestModelCatalogPageOverrideBuiltinThinkingMode(t *testing.T) {
 	clearAndType(t, h, tester, "模式 1 ID", contracts.ThinkingModeQwenOn)
 	clearAndType(t, h, tester, "模式 1 名称", "开启并限定 top_k")
 	clearAndType(t, h, tester, "模式 1 参数", `{"enable_thinking": true, "top_k": 5}`)
-	catalogClick(t, h, tester, "保存")
+	catalogClick(t, h, tester, "保存模型")
 
 	models := catalogStoredModels(t, store)
 	if len(models) != 1 || len(models[0].ThinkingModes) != 1 ||
@@ -516,7 +514,7 @@ func TestModelCatalogPageRemoveDefaultCustomMode(t *testing.T) {
 
 	catalogClick(t, h, tester, "删除思考模式 1")
 	h.assertTexts(tester, "跟随系列默认", "还没有自定义模式。")
-	catalogClick(t, h, tester, "保存")
+	catalogClick(t, h, tester, "保存模型")
 
 	models := catalogStoredModels(t, store)
 	if len(models) != 1 {
@@ -540,7 +538,7 @@ func TestModelCatalogPageThinkingEnglish(t *testing.T) {
 	h := newLocaleHarness(t, &fakeChat{}, store, settings.Config{}, "en")
 	tester := h.tester()
 	tester.Frame()
-	h.click(tester, "Model catalog")
+	h.click(tester, "Model")
 
 	h.assertTexts(tester,
 		"Family: DeepSeek · Thinking: Medium · 1 custom mode",
@@ -554,11 +552,11 @@ func TestModelCatalogPageThinkingEnglish(t *testing.T) {
 
 	h.click(tester, "Edit model deepseek-chat")
 	h.assertTexts(tester, "Edit model", "Model name", "Thinking family",
-		"Default thinking", "Advanced options",
+		"Default thinking", "Generation & custom modes",
 		"Generation: temperature 0.3 · Top P 0.8 · 512 tokens · 1 custom mode")
 	catalogAssertNoExactTexts(t, tester, "Generation", "Custom thinking modes",
 		"Temperature 0–2", "Add thinking mode")
-	h.click(tester, "Advanced options")
+	h.click(tester, "Generation & custom modes")
 	h.assertTexts(tester, "Generation", "Temperature 0–2", "Top P 0–1",
 		"Max output tokens", "Custom thinking modes", "Add thinking mode",
 		"Remove thinking mode 1")
@@ -589,7 +587,7 @@ func TestModelCatalogPageEditGenerationParams(t *testing.T) {
 	clearAndType(t, h, tester, "温度 输入", "0.7")
 	clearAndType(t, h, tester, "Top P 输入", "0.9")
 	clearAndType(t, h, tester, "最大输出 tokens 输入", "512")
-	catalogClick(t, h, tester, "保存")
+	catalogClick(t, h, tester, "保存模型")
 
 	h.assertNoTexts(tester, "生成参数")
 	h.assertTexts(tester, "生成：温度 0.7 · Top P 0.9 · 512 tokens")
@@ -615,7 +613,7 @@ func TestModelCatalogPageEditGenerationParams(t *testing.T) {
 	// saving again keeps them.
 	catalogClick(t, h, tester, "编辑模型 m1")
 	h.assertTexts(tester, "生成：温度 0.7 · Top P 0.9 · 512 tokens")
-	catalogClick(t, h, tester, "保存")
+	catalogClick(t, h, tester, "保存模型")
 	assertGeneration(catalogStoredModels(t, store))
 }
 
@@ -631,7 +629,7 @@ func TestModelCatalogPageGenerationBoundaries(t *testing.T) {
 	clearAndType(t, h, tester, "温度 输入", "0")
 	clearAndType(t, h, tester, "Top P 输入", "1")
 	clearAndType(t, h, tester, "最大输出 tokens 输入", "1")
-	catalogClick(t, h, tester, "保存")
+	catalogClick(t, h, tester, "保存模型")
 
 	models := catalogStoredModels(t, store)
 	if len(models) != 1 || models[0].Temperature == nil || *models[0].Temperature != 0 {
@@ -645,7 +643,7 @@ func TestModelCatalogPageGenerationBoundaries(t *testing.T) {
 	catalogClick(t, h, tester, "编辑模型 m1")
 	expandCatalogAdvanced(t, h, tester)
 	clearAndType(t, h, tester, "温度 输入", "2")
-	catalogClick(t, h, tester, "保存")
+	catalogClick(t, h, tester, "保存模型")
 	models = catalogStoredModels(t, store)
 	if models[0].Temperature == nil || *models[0].Temperature != 2 {
 		t.Fatalf("temperature = %v, want 2", models[0].Temperature)
@@ -667,7 +665,7 @@ func TestModelCatalogPageGenerationValidation(t *testing.T) {
 	clearAndType(t, h, tester, "Top P 输入", "0.9")
 	clearAndType(t, h, tester, "最大输出 tokens 输入", "512")
 	beforeFailures := store.get(contracts.SettingModelCatalogModels)
-	catalogClick(t, h, tester, "保存")
+	catalogClick(t, h, tester, "保存模型")
 	h.assertTexts(tester, "温度必须在 0–2 之间", "生成参数")
 	if got := store.get(contracts.SettingModelCatalogModels); got != beforeFailures {
 		t.Fatalf("failed save wrote the catalog: %q", got)
@@ -675,7 +673,7 @@ func TestModelCatalogPageGenerationValidation(t *testing.T) {
 
 	// Fixing only the temperature keeps the other drafts' values.
 	clearAndType(t, h, tester, "温度 输入", "")
-	catalogClick(t, h, tester, "保存")
+	catalogClick(t, h, tester, "保存模型")
 	models := catalogStoredModels(t, store)
 	if len(models) != 1 || models[0].Temperature != nil ||
 		models[0].TopP == nil || *models[0].TopP != 0.9 || models[0].MaxTokens != 512 {
@@ -698,7 +696,7 @@ func TestModelCatalogPageGenerationValidation(t *testing.T) {
 		{"最大输出 tokens 输入", "abc", "最大输出 tokens 必须是整数"},
 	} {
 		clearAndType(t, h, tester, test.label, test.value)
-		catalogClick(t, h, tester, "保存")
+		catalogClick(t, h, tester, "保存模型")
 		h.assertTexts(tester, test.want, "生成参数")
 		if got := store.get(contracts.SettingModelCatalogModels); got != beforeFailures {
 			t.Fatalf("failed save (%s=%s) wrote the catalog: %q", test.label, test.value, got)
@@ -708,7 +706,7 @@ func TestModelCatalogPageGenerationValidation(t *testing.T) {
 
 	// Every field was cleared while fixing the invalid values; the final save
 	// stores no generation options.
-	catalogClick(t, h, tester, "保存")
+	catalogClick(t, h, tester, "保存模型")
 	h.assertNoTexts(tester, "生成参数")
 	models = catalogStoredModels(t, store)
 	if len(models) != 1 || models[0].Temperature != nil || models[0].TopP != nil {
@@ -734,7 +732,7 @@ func TestModelCatalogPageGenerationCleared(t *testing.T) {
 	clearAndType(t, h, tester, "温度 输入", "")
 	clearAndType(t, h, tester, "Top P 输入", "")
 	clearAndType(t, h, tester, "最大输出 tokens 输入", "")
-	catalogClick(t, h, tester, "保存")
+	catalogClick(t, h, tester, "保存模型")
 
 	models := catalogStoredModels(t, store)
 	if len(models) != 1 || models[0].Temperature != nil || models[0].TopP != nil {
@@ -790,7 +788,7 @@ func TestModelCatalogPageAdvancedCollapsed(t *testing.T) {
 	catalogClick(t, h, tester, "编辑模型 m1")
 
 	const summary = "生成：温度 0.4 · Top P 0.9 · 2048 tokens · 自定义模式 1"
-	h.assertTexts(tester, "编辑模型", "高级选项", summary)
+	h.assertTexts(tester, "编辑模型", "生成与自定义模式", summary)
 	catalogAssertNoExactTexts(t, tester, "生成参数", "温度 0–2", "自定义思考模式",
 		"添加思考模式", "删除思考模式 1")
 
@@ -799,7 +797,7 @@ func TestModelCatalogPageAdvancedCollapsed(t *testing.T) {
 		"自定义思考模式", "删除思考模式 1")
 	catalogAssertNoExactTexts(t, tester, summary)
 
-	catalogClick(t, h, tester, "保存")
+	catalogClick(t, h, tester, "保存模型")
 	h.assertNoTexts(tester, "生成参数", "自定义思考模式")
 	catalogAssertNoExactTexts(t, tester, "编辑模型")
 	h.assertTexts(tester, "生成：温度 0.4 · Top P 0.9 · 2048 tokens")

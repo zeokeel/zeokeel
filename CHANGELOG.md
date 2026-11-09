@@ -4,6 +4,20 @@ All notable changes to ZeoKeel are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/) and the project adheres to
 [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Changed
+
+- **Settings consolidation**: the separate 模型目录 (Model catalog) page was
+  merged into the 模型 (Model) page — one place now owns the provider
+  connection, the model list, thinking-family/mode editing, custom modes and
+  per-model generation parameters. The page title stays 模型; the standalone
+  catalog page and its navigation entry are gone. The merged page keeps the
+  connection form's footer Save and immediate model-list edits, with the
+  editor's generation/custom-mode groups behind one 生成与自定义模式 disclosure.
+- The provider quick-preset "自定义" chip was renamed to 手动配置 / Manual setup
+  to distinguish it from the thinking-family "自定义" (custom) option.
+
 ## [0.1.0] - 2026-11-08
 
 The first public ZeoKeel release: a compile-time modular AI agent for the

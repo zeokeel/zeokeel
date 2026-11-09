@@ -40,7 +40,6 @@ var settingsPages = []settingsPageSpec{
 	{"settings-page-memory", "memory", "记忆", []string{"整理策略", "添加记忆"}},
 	{"settings-page-lsp", "lsp", "LSP", []string{"语言服务器", "新增服务器"}},
 	{"settings-page-presets", "presets", "预设", []string{"预设列表", "新增预设", "代理预设"}},
-	{"settings-page-modelcatalog", "modelcatalog", "模型目录", []string{"模型列表", "添加模型"}},
 	{"settings-page-network", "network", "网络", []string{"代理配置", "保存"}},
 	{"settings-page-data", "data-privacy", "数据与隐私", []string{"数据目录", "清除全部会话"}},
 	{"settings-page-about", "about", "关于", []string{"关于 ZeoKeel", "构建信息", "架构"}},
@@ -66,7 +65,7 @@ func (d *drive) runSettingsSteps() {
 				return
 			}
 			c.require(c.has("常用"), "设置导航缺少「常用」分组")
-			c.require(c.has("模型目录"), "设置导航缺少「模型目录」")
+			c.require(c.has("行为"), "设置导航缺少「行为」")
 			c.require(c.has("高级"), "设置导航缺少「高级」分组标题")
 			c.require(!c.has("诊断"), "「高级」分组默认展开（应折叠）")
 			if !c.click("高级") {
@@ -196,11 +195,11 @@ func (d *drive) runSettingsSteps() {
 			d.typeText("归档")
 			d.drain(2)
 			c.require(c.has("归档"), "导航搜索「归档」后没有结果")
-			c.require(!c.has("模型目录"), "导航搜索「归档」后仍显示无关页「模型目录」")
+			c.require(!c.has("行为"), "导航搜索「归档」后仍显示无关页「行为」")
 			c.shot("settings-nav-filtered")
 			d.clearDraft()
 			d.drain(2)
-			c.require(c.has("模型目录"), "清空导航搜索后页面列表未恢复")
+			c.require(c.has("模型"), "清空导航搜索后页面列表未恢复")
 			// Closing the settings clears the search query: reopening shows the
 			// full navigation again.
 			d.typeText("归档")
@@ -211,7 +210,7 @@ func (d *drive) runSettingsSteps() {
 				c.failf("关闭后重开设置失败")
 				return
 			}
-			c.require(c.has("模型目录"), "重开设置后导航搜索词未清空（页面列表仍被过滤）")
+			c.require(c.has("模型"), "重开设置后导航搜索词未清空（页面列表仍被过滤）")
 			c.shot("settings-nav-search-cleared")
 		})
 

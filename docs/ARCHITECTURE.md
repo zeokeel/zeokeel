@@ -198,7 +198,7 @@ if _, err := ctx.Effect(func() cordis.Effect {
 - ✅ present/plan review 宿主桥 + interaction overlay（工件预览、计划批准）
 - ✅ ask_user 交互桥：UserInteraction + hosttools Asker + overlay.dialogs 原生 Modal
 - ✅ Web search：internal/websearch + 动态 web_search（设置「搜索」页）
-- ✅ 模型目录 + per-session 模型切换（composer 菜单）
+- ✅ 模型配置（设置「模型」页：服务商连接 + 模型列表/思考/生成参数）+ per-session 模型切换（composer 菜单）
 - ✅ composer slash 命令 + 会话重新生成（SessionRegenerator）
 - ✅ 覆盖矩阵：docs/COVERAGE.md（旧功能面 vs 产品）
 - ✅ i18n：uikit.T；sidebar/session/home/settings/about/rightpanel/automation/plugins/toolcards/approval

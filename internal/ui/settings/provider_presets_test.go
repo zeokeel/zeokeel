@@ -30,7 +30,7 @@ func TestProviderPresetsDefaultNoMatch(t *testing.T) {
 	store := newFakeSettings(nil)
 	h := providerHarness(t, store)
 	tester := h.tester()
-	h.assertTexts(tester, "服务商预设", "DeepSeek", "OpenAI", "Ollama（本地）", "自定义")
+	h.assertTexts(tester, "服务商预设", "DeepSeek", "OpenAI", "Ollama（本地）", "手动配置")
 	if got := strings.Count(strings.Join(tester.Texts(), "\n"), "已匹配"); got != 0 {
 		t.Fatalf("unconfigured page shows a matched-provider badge; texts = %v", tester.Texts())
 	}
@@ -81,8 +81,8 @@ func TestProviderPresetCustomClearsBaseURL(t *testing.T) {
 	})
 	h := providerHarness(t, store)
 	tester := h.tester()
-	h.click(tester, "自定义")
-	h.assertTexts(tester, "已填入预设：自定义")
+	h.click(tester, "手动配置")
+	h.assertTexts(tester, "已填入预设：手动配置")
 	h.click(tester, "保存")
 	if got := store.get(contracts.SettingsChatBaseURL); got != "" {
 		t.Fatalf("custom baseURL = %q, want empty", got)
@@ -122,7 +122,7 @@ func TestProviderPresetsEnglishCopy(t *testing.T) {
 	tester := h.tester()
 	tester.Frame()
 	h.click(tester, "Model")
-	h.assertTexts(tester, "Provider presets", "DeepSeek", "OpenAI", "Ollama (local)", "Custom")
+	h.assertTexts(tester, "Provider presets", "DeepSeek", "OpenAI", "Ollama (local)", "Manual setup")
 	h.click(tester, "DeepSeek")
 	h.assertTexts(tester, "Preset filled: DeepSeek")
 	h.click(tester, "Save")

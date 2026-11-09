@@ -639,7 +639,7 @@ func Module() *module.Descriptor[Config] {
 				zhTitle: "模型", enTitle: "Model", titleOverride: cfg.Title,
 				Build: func(c *ui.Context) {
 					syncer.sync()
-					buildPage(c, runtime, state, chat, modelLabels(), store, locale, modelCheck)
+					buildPage(c, runtime, state, catalog, chat, modelLabels(), store, locale, modelCheck)
 				},
 				Footer: func(c *ui.Context) {
 					uikit.DialogFooter(c, []uikit.DialogAction{{
@@ -798,14 +798,6 @@ func Module() *module.Descriptor[Config] {
 				Build: func(c *ui.Context) {
 					syncer.sync()
 					buildPresetsPage(c, store, presets, locale)
-				},
-			},
-			{
-				ID: ModelCatalogPageID, Section: ModelCatalogPageSection, Order: ModelCatalogPageOrder,
-				zhTitle: "模型目录", enTitle: "Model catalog",
-				Build: func(c *ui.Context) {
-					syncer.sync()
-					buildModelCatalogPage(c, store, catalog, locale)
 				},
 			},
 			{
@@ -1223,9 +1215,9 @@ func modelCatalogHint(check *modelCheckState, store contracts.SettingsService, m
 // buildPage builds the model settings page: one explicit-save form (the page's
 // single primary action) plus the read-only effective context. The provider
 // presets only fill the drafts, so the whole page has one save semantic.
-func buildPage(c *ui.Context, runtime contracts.UIRuntime, state *moduleState, chat contracts.ChatService,
-	labels buildLabels, store contracts.SettingsService, locale contracts.LocaleService,
-	check *modelCheckState) {
+func buildPage(c *ui.Context, runtime contracts.UIRuntime, state *moduleState, catalog *catalogState,
+	chat contracts.ChatService, labels buildLabels, store contracts.SettingsService,
+	locale contracts.LocaleService, check *modelCheckState) {
 	t := design.Of(c)
 	// A write from another settings surface (provider page, another window)
 	// refreshes the drafts before they render, so this page can never save a
@@ -1233,8 +1225,8 @@ func buildPage(c *ui.Context, runtime contracts.UIRuntime, state *moduleState, c
 	state.syncFromConfig(c, chat, store)
 	ui.Column(c).FillWidth().Gap(design.Space4).Children(func() {
 		uikit.PageHeader(c, labels.title, localized(locale,
-			"配置对话使用的模型、API 地址与系统提示词；修改后点击「保存」生效。",
-			"Configure the model, API base URL and system prompt used by the conversation; save to apply."))
+			"配置服务商连接与模型（系列、思考与采样设置）；连接表单点击「保存」，模型列表改动即时生效。",
+			"Configure the provider connection and models (family/thinking/generation). Save the connection form; model-list edits apply immediately."))
 
 		uikit.Section(c, localized(locale, "快速预设", "Quick presets"), func(*ui.Context) {
 			buildProviderPresets(c, t, state, locale)
@@ -1286,6 +1278,11 @@ func buildPage(c *ui.Context, runtime contracts.UIRuntime, state *moduleState, c
 		testAPIKey := firstNonEmpty(strings.TrimSpace(state.apiKey),
 			effectiveChatConfig(chat, store).APIKey)
 		buildModelCheckPanel(c, t, runtime, check, state.model, state.baseURL, testAPIKey, locale)
+
+		// One page owns the model configuration: the provider connection above
+		// and the model list here (the old 模型/模型目录 split duplicated the
+		// mental model and scattered the same settings across two pages).
+		buildModelCatalogSection(c, store, catalog, locale)
 
 		uikit.Section(c, localized(locale, "提示词", "Prompt"), func(*ui.Context) {
 			ui.Field(c, labels.systemPromptLabel, func() {

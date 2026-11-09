@@ -47,7 +47,7 @@ func TestSettingsEnglishPagesAndLanguageSwitch(t *testing.T) {
 	// Shell title and host-rendered page navigation. The advanced pages are
 	// behind the collapsed Advanced group, so the daily navigation is the
 	// visible set (the group header is the discoverable entry point).
-	h.assertTexts(tester, "Settings", "Common", "Model", "Model catalog", "Behavior",
+	h.assertTexts(tester, "Settings", "Common", "Model", "Behavior",
 		"Presets", "Appearance & skills", "Appearance", "Skills", "Shortcuts",
 		"Integrations", "MCP", "Search", "Network", "Advanced")
 	h.assertNoTexts(tester, "模型", "外观", "技能", "快捷键", "诊断", "更新", "导入")
@@ -86,7 +86,7 @@ func TestSettingsEnglishPagesAndLanguageSwitch(t *testing.T) {
 	// Switch back to Chinese: navigation and content follow on the next frame.
 	h.uiRoot.Locale().SetLanguage("zh")
 	tester.Frame()
-	h.assertTexts(tester, "设置", "常用", "模型", "模型目录", "行为", "预设", "外观与技能",
+	h.assertTexts(tester, "设置", "常用", "模型", "行为", "预设", "外观与技能",
 		"外观", "技能", "快捷键", "集成", "MCP", "搜索", "网络", "高级")
 	h.assertNoTexts(tester, "Settings", "Providers", "Appearance", "Shortcuts", "Diagnostics")
 	h.click(tester, "模型")

@@ -533,7 +533,7 @@ func buildCatalogEditDialog(c *ui.Context, t *design.Tokens, store contracts.Set
 			// modes are advanced settings, collapsed by default behind a one-line
 			// summary so the modal's common fields stay short.
 			ui.Collapsible(c.Key("catalog.editAdvanced"),
-				localized(locale, "高级选项", "Advanced options"), &st.editAdvanced, func() {
+				localized(locale, "生成与自定义模式", "Generation & custom modes"), &st.editAdvanced, func() {
 					// Generation options: optional numeric fields; every empty
 					// field means "provider default".
 					design.Apply(ui.Text(c, localized(locale, "生成参数", "Generation")),
@@ -643,7 +643,7 @@ func buildCatalogEditDialog(c *ui.Context, t *design.Tokens, store contracts.Set
 					st.edit = nil
 					c.Invalidate()
 				}},
-				{Label: localized(locale, "保存", "Save"), Primary: true, OnClick: func() {
+				{Label: localized(locale, "保存模型", "Save model"), Primary: true, OnClick: func() {
 					saveCatalogEdit(c, st, store, models, locale)
 				}},
 			})

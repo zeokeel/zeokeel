@@ -43,14 +43,14 @@ func TestSettingsDeepLinksAndNavigationSearch(t *testing.T) {
 	if !tester.HasText("归档") {
 		t.Fatalf("nav search「归档」shows no matching page; texts = %v", tester.Texts())
 	}
-	if tester.HasText("模型目录") {
-		t.Fatalf("nav search「归档」still lists the unrelated page 模型目录; texts = %v", tester.Texts())
+	if tester.HasText("行为") {
+		t.Fatalf("nav search「归档」still lists the unrelated page 行为; texts = %v", tester.Texts())
 	}
 	tester.Key(ui.Cmd, ui.KeyA)
 	tester.Key(0, ui.KeyBackspace)
 	tester.Frame()
 	tester.Frame()
-	if !tester.HasText("模型目录") {
+	if !tester.HasText("模型") {
 		t.Fatalf("clearing the nav search did not restore the page list; texts = %v", tester.Texts())
 	}
 
