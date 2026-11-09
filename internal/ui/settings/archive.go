@@ -36,6 +36,10 @@ type archiveState struct {
 	// pendingDeleteID survives the AlertDialog clearing confirmDelete, so the
 	// confirmed dialog knows which session to delete.
 	pendingDeleteID string
+	// list backs the archived sessions' official List and sel is the row chosen
+	// (a click/Enter opens that conversation; restore/delete keep their buttons).
+	list ui.ListState
+	sel  int
 }
 
 // archivedSessions filters the chat session list to the archived ones, keeping
@@ -100,12 +104,35 @@ func buildArchivePage(c *ui.Context, t *design.Tokens, kctx cordis.Context,
 					nil)
 				return
 			}
-			for index, session := range archived {
-				session := session
-				if index > 0 {
-					ui.Divider(c)
+			// The archived sessions are a collection: the official List keys them
+			// by session ID, names the rows and owns click/keyboard selection;
+			// choosing a row reopens that conversation.
+			if st.sel >= len(archived) {
+				st.sel = -1
+			}
+			st.list.Selected = &st.sel
+			st.list.Key = func(index int) any {
+				if index < 0 || index >= len(archived) {
+					return nil
 				}
-				buildArchiveRow(c, t, chat, archiver, canArchive, navigator, st, session, locale)
+				return archived[index].ID
+			}
+			st.list.Label = func(index int) string {
+				if index < 0 || index >= len(archived) {
+					return ""
+				}
+				return archiveSessionLabel(locale, archived[index])
+			}
+			list := ui.List(c, &st.list, len(archived)).
+				Label(localized(locale, "归档的会话列表", "Archived sessions list")).
+				Gap(design.Space1).
+				Rows(func(row ui.ListRow) {
+					buildArchiveRow(row.Context, t, chat, archiver, canArchive, navigator, st, archived[row.Index], locale)
+				})
+			if list.Changed() || list.Submitted() {
+				if st.sel >= 0 && st.sel < len(archived) {
+					openArchivedSession(c, chat, navigator, archived[st.sel].ID)
+				}
 			}
 		})
 		// Deleting an archived session is irreversible: confirm it with the
@@ -147,26 +174,17 @@ func buildArchiveRow(c *ui.Context, t *design.Tokens, chat contracts.ChatService
 	st *archiveState, session contracts.ChatSessionInfo, locale contracts.LocaleService) {
 	ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(design.Space2).
 		PaddingY(design.Space1).Children(func() {
-		open := ui.ButtonBase(c).FillWidth().Grow(1).Padding(design.Space2).
-			Radius(design.RadiusSM)
-		if open.Hovered() {
-			open = open.Background(t.BgHover)
-		} else if open.Pressed() {
-			open = open.Background(t.BgSelected)
-		}
-		open.Children(func() {
-			ui.Column(c).FillWidth().Gap(design.Space1).Children(func() {
-				design.Apply(ui.Text(c, archiveSessionLabel(locale, session)),
-					t.Font(design.TypeBody)).TextColor(t.LabelPrimary).MaxLines(1).Ellipsis("…")
-				if meta := archiveSessionMeta(locale, session); meta != "" {
-					design.Apply(ui.Text(c, meta), t.Font(design.TypeXXS)).
-						TextColor(t.LabelTertiary).MaxLines(1)
-				}
-			})
+		// The row's title is plain content: the surrounding List paints hover,
+		// selection and handles the click/Enter that opens the conversation.
+		ui.Column(c).FillWidth().Grow(1).Gap(design.Space1).
+			Padding(design.Space2, design.Space2, design.Space2, 0).Children(func() {
+			design.Apply(ui.Text(c, archiveSessionLabel(locale, session)),
+				t.Font(design.TypeBody)).TextColor(t.LabelPrimary).MaxLines(1).Ellipsis("…")
+			if meta := archiveSessionMeta(locale, session); meta != "" {
+				design.Apply(ui.Text(c, meta), t.Font(design.TypeXXS)).
+					TextColor(t.LabelTertiary).MaxLines(1)
+			}
 		})
-		if open.Clicked() {
-			openArchivedSession(c, chat, navigator, session.ID)
-		}
 		if canArchive {
 			if design.Apply(ui.Button(c, localized(locale, "恢复", "Restore")),
 				t.SecondaryButton()).Tooltip(localized(locale,

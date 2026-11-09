@@ -40,18 +40,34 @@ func buildModulesSection(c *ui.Context, t *design.Tokens, st *state,
 		})
 		open := st.modulesOpen
 		ui.Collapsible(c, st.tr("展开模块列表", "Show modules"), &open, func() {
-			for _, module := range modules {
-				ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(design.Space2).Children(func() {
-					design.Apply(ui.Text(c, strings.TrimSpace(module.ModuleID)), t.MonoFamily()).
-						FontSize(11).TextColor(t.LabelPrimary).Grow(1).MaxLines(1).Ellipsis("…")
-					state := strings.TrimSpace(module.State)
-					color := t.LabelTertiary
-					if state == "active" {
-						color = t.SuccessText
-					}
-					design.Apply(ui.Badge(c, state), t.Badge()).TextColor(color)
-				})
+			st.modulesList.Key = func(index int) any {
+				if index < 0 || index >= len(modules) {
+					return nil
+				}
+				return strings.TrimSpace(modules[index].ModuleID)
 			}
+			st.modulesList.Label = func(index int) string {
+				if index < 0 || index >= len(modules) {
+					return ""
+				}
+				return strings.TrimSpace(modules[index].ModuleID)
+			}
+			ui.List(c, &st.modulesList, len(modules)).
+				Label(st.tr("内置模块列表", "Built-in module list")).
+				Gap(design.Space1).
+				Rows(func(row ui.ListRow) {
+					module := modules[row.Index]
+					ui.Row(row.Context).FillWidth().AlignItems(ui.Center).Gap(design.Space2).Children(func() {
+						design.Apply(ui.Text(row.Context, strings.TrimSpace(module.ModuleID)), t.MonoFamily()).
+							FontSize(11).TextColor(t.LabelPrimary).Grow(1).MaxLines(1).Ellipsis("…")
+						state := strings.TrimSpace(module.State)
+						color := t.LabelTertiary
+						if state == "active" {
+							color = t.SuccessText
+						}
+						design.Apply(ui.Badge(row.Context, state), t.Badge()).TextColor(color)
+					})
+				})
 		})
 		st.modulesOpen = open
 	})

@@ -29,6 +29,9 @@ type skillsState struct {
 
 	// query filters the skill list by name, description or path (H20).
 	query string
+	// list backs the skill cards' official List: rows are keyed by a skill's
+	// name+path so filtering and refreshes keep row identity.
+	list ui.ListState
 
 	// Editor half (skills_edit.go): the create/edit modal drafts, the success
 	// badge and the delete confirmation.
@@ -156,9 +159,27 @@ func buildSkillsPage(c *ui.Context, t *design.Tokens, kctx cordis.Context, st *s
 					nil)
 				return
 			}
-			for _, skill := range filtered {
-				buildSkillCard(c, t, skills, st, skill, editor, dataDir, st.roots, locale)
+			// The skill cards are a collection: the official List keys and names
+			// the rows instead of a hand-drawn Column loop.
+			st.list.Key = func(index int) any {
+				if index < 0 || index >= len(filtered) {
+					return nil
+				}
+				return filtered[index].Name + "\x00" + filtered[index].Path
 			}
+			st.list.Label = func(index int) string {
+				if index < 0 || index >= len(filtered) {
+					return ""
+				}
+				return firstNonEmpty(filtered[index].Name,
+					localized(locale, "(未命名技能)", "(Unnamed skill)"))
+			}
+			ui.List(c, &st.list, len(filtered)).
+				Label(localized(locale, "技能列表", "Skills")).
+				Gap(design.Space2).
+				Rows(func(row ui.ListRow) {
+					buildSkillCard(row.Context, t, skills, st, filtered[row.Index], editor, dataDir, st.roots, locale)
+				})
 		})
 	})
 }

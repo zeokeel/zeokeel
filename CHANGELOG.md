@@ -148,6 +148,12 @@ A full UI/UX conformance pass against `mygo v0.8.3/docs/ui` and the
   back-to-latest action) instead of a `Scroll` plus a bounded message loop, so
   only the visible rows build and long conversations stay fast. The help
   dialog's command list and the trajectory timeline use `ui.List` as well.
+- **Remaining collections are Lists**: the sidebar's message-search hits, the
+  settings archive rows and skill cards, and the Plugins page's MCP servers,
+  built-in modules, curated settings and tool catalogue all use official
+  `ui.List` states (stable keys, named rows); the slash/@ suggestion popovers
+  stay custom because their rich rows need the documented listbox/option
+  accessibility model rather than a plain text autocomplete.
 - **Read-only code preview**: Files' source previews use the official
   `editor.View` in read-only mode (syntax highlighting by extension, line
   numbers, soft wrap, virtualization) instead of a plain mono text block; the

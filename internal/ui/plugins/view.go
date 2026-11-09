@@ -115,9 +115,28 @@ func buildMCPsSection(
 				"No MCP servers configured yet (assembly mcpServers)"))
 			return
 		}
-		for index, server := range servers {
-			buildMCPCard(c, t, runtime, service, st, server, index, settings, hasSettings)
+		// The servers are a collection: the official List keys them by their
+		// stable identity and names the rows for assistive technology.
+		st.mcpList.Key = func(index int) any {
+			if index < 0 || index >= len(servers) {
+				return nil
+			}
+			return mcpServerKey(servers[index], index)
 		}
+		st.mcpList.Label = func(index int) string {
+			if index < 0 || index >= len(servers) {
+				return ""
+			}
+			return firstNonEmpty(servers[index].Name, servers[index].ServerName,
+				st.tr("(未命名服务器)", "(Untitled server)"))
+		}
+		ui.List(c, &st.mcpList, len(servers)).
+			Label(st.tr("MCP 服务器列表", "MCP server list")).
+			Gap(design.Space1).
+			Rows(func(row ui.ListRow) {
+				buildMCPCard(row.Context, t, runtime, service, st, servers[row.Index],
+					row.Index, settings, hasSettings)
+			})
 	})
 }
 
@@ -457,8 +476,20 @@ func buildToolsSection(
 				st.tr("换个关键词试试。", "Try another search term."), nil)
 			return
 		}
-		ui.List(c, nil, len(filtered)).
-			ItemKey(func(row int) any { return filtered[row].Name }).
+		st.toolsList.Key = func(index int) any {
+			if index < 0 || index >= len(filtered) {
+				return nil
+			}
+			return filtered[index].Name
+		}
+		st.toolsList.Label = func(index int) string {
+			if index < 0 || index >= len(filtered) {
+				return ""
+			}
+			return filtered[index].Name
+		}
+		ui.List(c, &st.toolsList, len(filtered)).
+			Label(st.tr("工具目录列表", "Tool catalogue list")).
 			MaxHeight(toolListMaxHeight).
 			Rows(func(row ui.ListRow) {
 				tool := filtered[row.Index]

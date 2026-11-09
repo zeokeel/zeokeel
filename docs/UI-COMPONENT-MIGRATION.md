@@ -35,13 +35,13 @@
 | 会话 transcript | ✅ **已完成**（官方 `ui.List`） | `ListState{Key: message.ID, Label, FollowEnd, HoldPlace}`；变量行高由 List 测量；流式跟随/滚动回到底部/折叠 `HoldPlace`/首帧不闪 | 250 条会话只构建可见行（`TestTranscriptListVirtualizesLongConversation`）；`scroll_follow_test` 流式跟随/回到最新；全量 session 测试 |
 | 轨迹 pane | ✅ 已完成（`ui.List`，Key=tool key、行名、ListState 切换会话重置） | — | session 测试 |
 | 记忆 pane | ✅ 已完成（固定搜索/管理/添加行 + `ui.List` 条目虚拟化，Key=memory.ID） | — | 记忆搜索/增删/顶部打开测试 |
-| 斜杠/`@` 建议菜单 | 自绘 popover + ButtonBase 行 + 手写 Up/Down/Enter | 官方 suggestion 模式：`ui.List`（`Rows`/`Selected`/`Submitted`/`RoleOption` 等价 a11y）或 `ui.Autocomplete`（纯文本场景不适用富行）；保留 rich row 但键盘交回 List | 键盘上下/Enter/Tab/Esc、a11y role、鼠标选择；既有 suggestion 测试 |
+| 斜杠/`@` 建议菜单 | **保留自绘（附理由）**：富行（图标/标题/说明）官方 Autocomplete 只支持纯文本；已按官方 accessibility suggestions 模式实现 RoleListBox/RoleOption/PositionInSet/ActiveDescendant 与完整键盘 | — | suggestion 测试已覆盖 |
 | 帮助对话框命令列表 | `ui.Scroll` + Row 循环 | `ui.List`（只读行，Label） | 文本/键盘滚动测试 |
-| 设置技能卡列表 | 页内 Column + 卡片循环 | `ui.List`（Key=skill.Path；卡片为行内容） | 搜索过滤/展开/编辑删除按钮测试 |
-| 归档页会话行 | `ui.ButtonBase` 行 | `ui.List`（Selected/Submitted） | 打开/恢复/删除测试 |
+| 设置技能卡列表 | ✅ 已完成（`ui.List`，Key=name+path、行名；卡片为行内容） | — | 搜索过滤/展开/编辑删除测试 |
+| 归档页会话行 | ✅ 已完成（`ui.List`，Key=session.ID、行名、Changed/Submitted 打开；恢复/删除按钮保留行内） | — | archive 全包测试 |
 | 模型目录思考模式编辑器 | `ui.Scroll` + Row 循环 | `ui.List`（Key=mode.ID） | 增删/编辑/保存测试 |
 | 自动化任务卡 | ✅ 已完成（`ui.List`，Key=task.ID、行名、过滤后列表） | — | automation 全包测试 |
-| 插件列表 | `ui.Scroll` + 卡片/条目循环 | `ui.List`（分节用 `ListState.Header`；Key=plugin/tool ID） | 过滤/刷新/MCP 状态测试 |
+| 插件页集合 | ✅ 已完成（MCP 服务器、内置模块、插件参数、工具目录全部 `ui.List` + ListState Key/Label；页面本身保留 Section/Scroll 布局） | — | plugins 全包测试 |
 
 ### P2 — 语义机会点
 
@@ -78,6 +78,11 @@
   行名、键盘可滚动；新增 RoleList/RoleListItem a11y 断言）。
 - 会话「轨迹」pane：`ui.Scroll` + tool card 循环 → `ui.List`（`Key=tool key`、
   行名=tool name、`Gap/PaddingY/Grow`，切换会话重置 ListState）。
+- 侧栏消息搜索命中：`ButtonBase` 行 + Column 分组 → 官方 `ui.List`
+  （Key=group/hit 稳定键、行名、Selected/Changed/Submitted 打开会话）。
+- 设置归档页、技能卡列表 → 官方 `ui.List`（Key 稳定、行名；行内按钮保留）。
+- 插件页：MCP 服务器、内置模块、插件参数、工具目录 → 官方 `ui.List`
+  （各自 ListState Key/Label；页面分节仍是 Section 布局）。
 - 文件预览的源码文件：纯 mono `ui.Text`（40 行截断）→ 官方只读 `editor.View`
   （`editor.State{ReadOnly: true, LineNumbers: On, SoftWrap: true}`，按扩展名
   `editor.LanguageFor` 高亮；超过 256 KiB 仍走缓存截断；测试用 a11y `Value` 断言内容）。

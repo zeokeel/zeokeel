@@ -599,7 +599,7 @@ func Module() *module.Descriptor[Config] {
 			savedHotkey:    store.Get(contracts.SettingGlobalHotkey, ""),
 		}
 		shortcuts := &shortcutsState{}
-		archive := &archiveState{}
+		archive := &archiveState{sel: -1}
 		skills := newSkillsState()
 		update := newUpdateState()
 		importState := newImportState()

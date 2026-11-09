@@ -70,6 +70,13 @@ type state struct {
 	disabledServers       map[string]bool
 	disabledServersLoaded bool
 
+	// Official Lists for the page's collections: MCP servers, the built-in
+	// module inventory, the curated settings rows and the tool catalogue.
+	mcpList     ui.ListState
+	modulesList ui.ListState
+	paramsList  ui.ListState
+	toolsList   ui.ListState
+
 	// modulesOpen is the built-in module section's disclosure state.
 	modulesOpen bool
 

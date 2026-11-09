@@ -118,6 +118,10 @@ type paneState struct {
 	searchQuery string
 	searchHits  []contracts.MessageSearchHit
 	searchErr   error
+	// searchList backs the message-search hits' official List; searchSel is the
+	// row chosen (hit rows activate their conversation, group headers do not).
+	searchList ui.ListState
+	searchSel  int
 
 	// settings is the optional settings store: the sidebar view options (sort
 	// and grouping) persist there. Archived sessions are no longer a sidebar
@@ -193,6 +197,7 @@ func Module() *module.Descriptor[Config] {
 			ctx:              ctx,
 			sessionRow:       -1,
 			treeRow:          -1,
+			searchSel:        -1,
 			treeKnown:        make(map[string]bool),
 			cfgNewChatLabel:  strings.TrimSpace(cfg.NewChatLabel),
 			cfgSettingsLabel: strings.TrimSpace(cfg.SettingsLabel),
@@ -457,16 +462,59 @@ func buildMessageSearch(c *ui.Context, t *design.Tokens, chat contracts.ChatServ
 			design.Apply(ui.Text(c, state.T(
 				strconv.Itoa(len(visibleHits))+" 条消息", strconv.Itoa(len(visibleHits))+" messages")),
 				t.Font(design.TypeXXXS)).TextColor(t.LabelTertiary)
-			for _, group := range groupMessageHits(visibleHits, state) {
-				ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(design.Space2).
-					Padding(design.Space2, design.Space2, 0, design.Space2).Children(func() {
-					design.Apply(ui.Text(c, group.title), t.Font(design.TypeXXS)).FontWeight(600).
-						TextColor(t.LabelSecondary).Grow(1).MaxLines(1).Ellipsis("…")
-					design.Apply(ui.Badge(c, strconv.Itoa(len(group.hits))), t.Badge())
-				})
-				for hitIndex, hit := range group.hits {
-					buildMessageHitRow(c, t, chat, nav, runtime, state, hit, false, hitIndex)
+			rows := messageSearchRows(groupMessageHits(visibleHits, state))
+			if state.searchSel >= len(rows) {
+				state.searchSel = -1
+			}
+			state.searchList.Selected = &state.searchSel
+			state.searchList.Key = func(index int) any {
+				if index < 0 || index >= len(rows) {
+					return nil
 				}
+				if rows[index].group != nil {
+					return "group/" + strconv.Itoa(index)
+				}
+				return messageHitKey(rows[index].hit)
+			}
+			state.searchList.Label = func(index int) string {
+				if index < 0 || index >= len(rows) {
+					return ""
+				}
+				row := rows[index]
+				if row.group != nil {
+					return row.group.title
+				}
+				return row.groupTitle + " " + firstNonEmpty(row.hit.Snippet, row.hit.Role)
+			}
+			list := ui.List(c, &state.searchList, len(rows)).
+				Label(state.T("消息搜索", "Message search")).
+				Gap(design.Space1).
+				Rows(func(row ui.ListRow) {
+					result := rows[row.Index]
+					if result.group != nil {
+						ui.Row(row.Context).FillWidth().AlignItems(ui.Center).Gap(design.Space2).
+							Padding(design.Space2, design.Space2, 0, design.Space2).Children(func() {
+							design.Apply(ui.Text(row.Context, result.group.title), t.Font(design.TypeXXS)).FontWeight(600).
+								TextColor(t.LabelSecondary).Grow(1).MaxLines(1).Ellipsis("…")
+							design.Apply(ui.Badge(row.Context, strconv.Itoa(len(result.group.hits))), t.Badge())
+						})
+						return
+					}
+					buildMessageHitRowContent(row.Context, t, state, result.hit, false)
+				})
+			activate := func() {
+				if state.searchSel < 0 || state.searchSel >= len(rows) {
+					return
+				}
+				if hit := rows[state.searchSel]; hit.group == nil {
+					activateMessageHit(chat, nav, runtime, hit.hit)
+				}
+			}
+			if list.Changed() {
+				activate()
+			}
+			if list.Submitted() {
+				activate()
 			}
 		})
 }
@@ -524,48 +572,62 @@ func groupMessageHits(hits []contracts.MessageSearchHit, state *paneState) []mes
 	return groups
 }
 
-// buildMessageHitRow is one full-text hit: the session title (unless the group
-// header already names it), role, time and the matching snippet; clicking
-// activates that session and opens it.
-func buildMessageHitRow(c *ui.Context, t *design.Tokens, chat contracts.ChatService,
-	nav contracts.Navigator, runtime contracts.UIRuntime, state *paneState,
-	hit contracts.MessageSearchHit, showTitle bool, ordinal int) {
+// messageSearchRow is one row of the message-search List: a conversation group
+// header (its hit count) or one matching message.
+type messageSearchRow struct {
+	group      *messageHitGroup
+	groupTitle string
+	hit        contracts.MessageSearchHit
+	ordinal    int
+}
+
+// messageSearchRows flattens the grouped hits into List rows: each section opens
+// with its conversation header, then its matching messages.
+func messageSearchRows(groups []messageHitGroup) []messageSearchRow {
+	rows := make([]messageSearchRow, 0, len(groups)*2)
+	for _, group := range groups {
+		group := group
+		rows = append(rows, messageSearchRow{group: &group})
+		for hitIndex, hit := range group.hits {
+			rows = append(rows, messageSearchRow{groupTitle: group.title, hit: hit, ordinal: hitIndex})
+		}
+	}
+	return rows
+}
+
+// buildMessageHitRowContent renders one full-text hit: the role, time and the
+// matching snippet. The search List owns selection, click and keyboard, so the
+// row is content only.
+func buildMessageHitRowContent(c *ui.Context, t *design.Tokens, state *paneState,
+	hit contracts.MessageSearchHit, showTitle bool) {
 	title := firstNonEmpty(hit.SessionTitle, state.T("未命名会话", "Untitled session"))
-	label := title + " " + firstNonEmpty(hit.Snippet, hit.Role)
-	// Two stored messages may carry the same role, time and snippet (a replayed
-	// conversation): the row ordinal keeps every key unique under the parent.
-	c.Key("search-hit/" + strconv.Itoa(ordinal) + "/" + hit.SessionID + "\x00" + hit.Role + "\x00" +
-		hit.CreatedAt.UTC().Format(time.RFC3339Nano) + "\x00" + hit.Snippet)
-	row := ui.ButtonBase(c).FillWidth().Padding(design.Space1, design.Space2).
-		Radius(design.RadiusSM).Label(label)
-	// A hit in the active conversation keeps the selected tint, so the search
-	// results show which conversation is open.
-	row = rowTint(t, row, hit.SessionID == chat.ActiveSession())
-	row.Children(func() {
-		ui.Column(c).FillWidth().Gap(design.Space1).Children(func() {
-			ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(design.Space2).Children(func() {
-				if showTitle {
-					design.Apply(ui.Text(c, title), t.Font(design.TypeXS)).
-						FontWeight(600).TextColor(t.LabelPrimary).Grow(1).MaxLines(1).Ellipsis("…")
-				} else {
-					ui.Spacer(c).Grow(1)
-				}
-				design.Apply(ui.Text(c, messageRoleLabel(hit.Role, state)), t.Font(design.TypeXXXS)).
-					TextColor(t.LabelTertiary)
-				design.Apply(ui.Text(c, formatHitTime(state.locale, hit.CreatedAt)), t.Font(design.TypeXXXS)).
-					TextColor(t.LabelTertiary)
-			})
-			if snippet := strings.TrimSpace(hit.Snippet); snippet != "" {
-				design.Apply(ui.Text(c, snippet), t.Font(design.TypeXXS)).
-					TextColor(t.LabelSecondary).MaxLines(2)
+	ui.Column(c).FillWidth().Gap(design.Space1).
+		Padding(design.Space1, design.Space2).Children(func() {
+		ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(design.Space2).Children(func() {
+			if showTitle {
+				design.Apply(ui.Text(c, title), t.Font(design.TypeXS)).
+					FontWeight(600).TextColor(t.LabelPrimary).Grow(1).MaxLines(1).Ellipsis("…")
+			} else {
+				ui.Spacer(c).Grow(1)
 			}
+			design.Apply(ui.Text(c, messageRoleLabel(hit.Role, state)), t.Font(design.TypeXXXS)).
+				TextColor(t.LabelTertiary)
+			design.Apply(ui.Text(c, formatHitTime(state.locale, hit.CreatedAt)), t.Font(design.TypeXXXS)).
+				TextColor(t.LabelTertiary)
 		})
+		if snippet := strings.TrimSpace(hit.Snippet); snippet != "" {
+			design.Apply(ui.Text(c, snippet), t.Font(design.TypeXXS)).
+				TextColor(t.LabelSecondary).MaxLines(2)
+		}
 	})
-	row.OnClick(func() {
-		_ = chat.SetActiveSession(hit.SessionID)
-		runtime.Post(func() { _ = nav.Push("session") })
-		runtime.Invalidate()
-	})
+}
+
+// activateMessageHit opens the conversation one search hit belongs to.
+func activateMessageHit(chat contracts.ChatService, nav contracts.Navigator,
+	runtime contracts.UIRuntime, hit contracts.MessageSearchHit) {
+	_ = chat.SetActiveSession(hit.SessionID)
+	runtime.Post(func() { _ = nav.Push("session") })
+	runtime.Invalidate()
 }
 
 // messageRoleLabel renders a message role for a search hit.

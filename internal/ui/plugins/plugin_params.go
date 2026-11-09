@@ -106,9 +106,27 @@ func buildPluginParamsSection(c *ui.Context, t *design.Tokens, st *state,
 		}
 		open := st.paramsOpen
 		ui.Collapsible(c, st.tr("显示参数", "Show parameters"), &open, func() {
-			for _, spec := range specs {
-				buildPluginParamRow(c, t, st, settings, spec)
+			st.paramsList.Key = func(index int) any {
+				if index < 0 || index >= len(specs) {
+					return nil
+				}
+				if key := strings.TrimSpace(specs[index].Key); key != "" {
+					return key
+				}
+				return specs[index].TitleZH
 			}
+			st.paramsList.Label = func(index int) string {
+				if index < 0 || index >= len(specs) {
+					return ""
+				}
+				return st.tr(specs[index].TitleZH, specs[index].TitleEN)
+			}
+			ui.List(c, &st.paramsList, len(specs)).
+				Label(st.tr("插件参数列表", "Plugin settings list")).
+				Gap(design.Space1).
+				Rows(func(row ui.ListRow) {
+					buildPluginParamRow(row.Context, t, st, settings, specs[row.Index])
+				})
 		})
 		st.paramsOpen = open
 	})
