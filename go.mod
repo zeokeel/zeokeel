@@ -5,7 +5,7 @@ go 1.27.3
 require (
 	github.com/egoist/mygo v0.8.3
 	github.com/zeokeel/zeokeel-kernel v0.1.1
-	github.com/zeokeel/zeokeel-rig v0.13.1
+	github.com/zeokeel/zeokeel-rig v0.13.2
 	modernc.org/sqlite v1.61.1
 )
 

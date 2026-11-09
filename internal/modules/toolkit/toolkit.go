@@ -44,6 +44,11 @@ import (
 // (pwd, cd, echo, mkdir, ...). The previous list rejected even `pwd`/`echo`
 // with "not in the allowlist", so an already-approved tool call could still
 // not run and real tasks burned iterations on policy errors.
+//
+// Entries are bare command names. Rig compares them with platform semantics
+// (since v0.13.2 Windows ignores case and the ".exe" suffix), so the Windows
+// PowerShell executables are covered by "pwsh" / "powershell" without separate
+// ".exe" spellings.
 var defaultCommands = []string{
 	"bash", "sh", "zsh", "git", "go", "make", "gofmt",
 	"rg", "grep", "sed", "awk", "cat", "ls", "find", "head", "tail", "wc",
@@ -51,7 +56,7 @@ var defaultCommands = []string{
 	"touch", "tee", "date", "seq", "sort", "uniq", "cut", "tr", "xargs",
 	"test", "true", "false", "which", "basename", "dirname", "realpath",
 	"stat", "file", "diff", "patch", "tar", "unzip", "zip", "curl", "wget",
-	"node", "npm", "python3", "pwsh", "pwsh.exe", "powershell", "powershell.exe",
+	"node", "npm", "python3", "pwsh", "powershell",
 }
 
 // MCPServer configures one MCP server: a Streamable HTTP endpoint or a stdio

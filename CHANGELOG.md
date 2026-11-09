@@ -8,6 +8,10 @@ All notable changes to ZeoKeel are documented here. The format follows
 
 ### Changed
 
+- **Rig SDK v0.13.2**: `github.com/zeokeel/zeokeel-rig` v0.13.1 → v0.13.2, whose
+  Windows command-allowlist comparison now ignores the `.exe` suffix and case. The
+  host shell allowlist therefore lists bare `pwsh`/`powershell`; the temporary
+  `.exe` entries added as a v0.13.1 workaround are gone. No other behavior change.
 - **Settings consolidation**: the separate 模型目录 (Model catalog) page was
   merged into the 模型 (Model) page — one place now owns the provider
   connection, the model list, thinking-family/mode editing, custom modes and
