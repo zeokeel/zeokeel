@@ -95,11 +95,22 @@ func exportJSONLTranscript(chatSession contracts.ChatSession) (string, error) {
 		if len(message.Tools) > 0 {
 			tools := make([]map[string]any, 0, len(message.Tools))
 			for _, tool := range message.Tools {
-				tools = append(tools, map[string]any{
+				toolRecord := map[string]any{
 					"name":    tool.Name,
 					"summary": tool.Summary,
 					"status":  tool.Status,
-				})
+					// textOffset keeps the transcript order for a reader of the
+					// flattened file: the assistant text length when the call
+					// arrived (0 without the metadata = legacy card order).
+					"textOffset": tool.TextOffset,
+				}
+				// Arguments are what the tool was asked to do (command, path,
+				// old/new strings): an exported transcript without them cannot
+				// be audited. The read model already bounds them.
+				if strings.TrimSpace(tool.Arguments) != "" {
+					toolRecord["arguments"] = tool.Arguments
+				}
+				tools = append(tools, toolRecord)
 			}
 			record["tools"] = tools
 		}

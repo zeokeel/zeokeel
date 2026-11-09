@@ -194,9 +194,12 @@ func TestSessionSlashCommandExportSeam(t *testing.T) {
 	}
 }
 
-// --- regenerate -------------------------------------------------------------
+// --- regenerate / retry -----------------------------------------------------
 
-func TestRegenerateActionShownAndCallsBackend(t *testing.T) {
+// TestRegenerateInMessageActionRowAndCallsBackend covers the moved control:
+// regenerate is one icon action of the finished reply's action row (not a
+// full-width button under the message) and it calls the backend.
+func TestRegenerateInMessageActionRowAndCallsBackend(t *testing.T) {
 	chat := newExtendedChat()
 	chat.addSession(contracts.ChatSession{ID: "sess-1", Title: "重生成", Messages: []contracts.ChatMessage{
 		{ID: "m1", Role: "user", Text: "你好"},
@@ -204,14 +207,42 @@ func TestRegenerateActionShownAndCallsBackend(t *testing.T) {
 	}}, true)
 	h := newCommandHarness(t, chat)
 	tester := h.tester()
-	h.assertTexts(tester, "重新生成")
-
+	rect, ok := tester.Find("重新生成")
+	if !ok {
+		t.Fatalf("regenerate action missing; texts = %v", tester.Texts())
+	}
+	if rect.W > 48 || rect.H > 48 || rect.W < 28 || rect.H < 28 {
+		t.Fatalf("regenerate target = %.0fx%.0f, want a 32x32 icon action", rect.W, rect.H)
+	}
 	h.click(tester, "重新生成")
 	_, regens := chat.calls()
 	if len(regens) != 1 || regens[0] != "sess-1" {
 		t.Fatalf("Regenerate calls = %v, want [sess-1]", regens)
 	}
 	h.assertNoTexts(tester, "重新生成失败")
+}
+
+// TestFailedTurnRegenerateEnabled covers S-01: a failed turn (no text to copy)
+// keeps one obvious, enabled retry. The old regenerate control was disabled
+// exactly when retrying mattered.
+func TestFailedTurnRegenerateEnabled(t *testing.T) {
+	chat := newExtendedChat()
+	chat.addSession(contracts.ChatSession{ID: "sess-1", Title: "失败", Messages: []contracts.ChatMessage{
+		{ID: "m1", Role: "user", Text: "你好"},
+		{ID: "m2", Role: "assistant", Text: "", Error: "HTTP 401 Unauthorized", ErrorKind: "auth"},
+	}}, true)
+	h := newCommandHarness(t, chat)
+	tester := h.tester()
+	h.assertTexts(tester, "鉴权失败", "重试")
+	info, ok := tester.Access("重试")
+	if !ok || info.Disabled {
+		t.Fatalf("retry action = %+v found %v, want an enabled button", info, ok)
+	}
+	h.click(tester, "重试")
+	_, regens := chat.calls()
+	if len(regens) != 1 || regens[0] != "sess-1" {
+		t.Fatalf("Regenerate calls = %v, want the failed turn retried", regens)
+	}
 }
 
 func TestRegenerateHiddenWithoutRegeneratorOrWhileRunning(t *testing.T) {
@@ -222,20 +253,27 @@ func TestRegenerateHiddenWithoutRegeneratorOrWhileRunning(t *testing.T) {
 		{ID: "m2", Role: "assistant", Text: "你好呀"},
 	}}, true)
 	h := newHarness(t, plain)
-	h.assertNoTexts(h.tester(), "重新生成")
+	if _, ok := h.tester().Find("重新生成"); ok {
+		t.Fatal("regenerate action shown without a SessionRegenerator backend")
+	}
 
 	// Streaming sessions hide the action even with a regenerator backend.
 	running := newExtendedChat()
 	running.addSession(contracts.ChatSession{ID: "sess-1", Title: "运行中", Running: true,
 		Messages: []contracts.ChatMessage{
 			{ID: "m1", Role: "user", Text: "你好"},
-			{ID: "m2", Role: "assistant", Text: "生成中"},
+			{ID: "m2", Role: "assistant", Text: "生成中", Streaming: true},
 		}}, true)
 	h2 := newCommandHarness(t, running)
-	h2.assertNoTexts(h2.tester(), "重新生成")
+	if _, ok := h2.tester().Find("重新生成"); ok {
+		t.Fatal("regenerate action shown while the turn streams")
+	}
 }
 
-func TestRegenerateDisabledForEmptyOrFailedReply(t *testing.T) {
+// TestEmptyReplyCanBeRetried covers a finished turn with no text: the reply is
+// empty but the user message is still retryable (the backend re-runs it), so
+// the action stays enabled instead of dead.
+func TestEmptyReplyCanBeRetried(t *testing.T) {
 	chat := newExtendedChat()
 	chat.addSession(contracts.ChatSession{ID: "sess-1", Title: "空回复", Messages: []contracts.ChatMessage{
 		{ID: "m1", Role: "user", Text: "你好"},
@@ -243,10 +281,12 @@ func TestRegenerateDisabledForEmptyOrFailedReply(t *testing.T) {
 	}}, true)
 	h := newCommandHarness(t, chat)
 	tester := h.tester()
-	h.assertTexts(tester, "重新生成")
+	if _, ok := tester.Find("重新生成"); !ok {
+		t.Fatalf("regenerate action missing for an empty reply; texts = %v", tester.Texts())
+	}
 	h.click(tester, "重新生成")
-	if _, regens := chat.calls(); len(regens) != 0 {
-		t.Fatalf("disabled regenerate called the backend: %v", regens)
+	if _, regens := chat.calls(); len(regens) != 1 {
+		t.Fatalf("Regenerate calls = %v, want the empty reply retried", regens)
 	}
 }
 

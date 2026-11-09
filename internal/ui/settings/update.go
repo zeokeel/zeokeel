@@ -31,9 +31,13 @@ const (
 type updateState struct {
 	checking bool
 	checked  bool
-	info     contracts.UpdateInfo
-	err      string
-	copied   bool
+	// unavailable marks a build whose update backend reports no release feed
+	// configured: the page then explains the state instead of promising a
+	// download/install it cannot perform.
+	unavailable bool
+	info        contracts.UpdateInfo
+	err         string
+	copied      bool
 
 	// downloading is true while the asset download runs off the UI thread.
 	downloading bool
@@ -66,35 +70,43 @@ func buildUpdatePage(c *ui.Context, t *design.Tokens, kctx cordis.Context, runti
 	current := firstNonEmpty(appInfo.Version, st.info.CurrentVersion, "dev")
 
 	ui.Column(c).FillWidth().Gap(design.Space4).Children(func() {
-		// The page's only primary action (check now) sits at the header's right
-		// edge; the page writes nothing, so there is no footer save.
-		uikit.PageHeaderAction(c,
-			localized(locale, "更新", "Update"),
-			localized(locale,
-				"检查更新并下载安装包；下载后可安排在下次启动安装。",
-				"Check for updates and download the package; schedule the install for the next launch."),
-			func(c *ui.Context) {
-				if !hasUpdate {
-					return
-				}
-				checkLabel := localized(locale, "检查更新", "Check for updates")
-				busyLabel := localized(locale, "检查中…", "Checking…")
-				if st.checking {
-					checkLabel = busyLabel
-				}
-				// The busy state is the official spinner with an accessible
-				// progress name beside the disabled action; no fake percentage.
-				ui.Row(c).AlignItems(ui.Center).Gap(design.Space2).Children(func() {
-					buildBusySpinner(c, st.checking, busyLabel)
-					if design.Apply(ui.PrimaryButton(c, checkLabel), t.PrimaryButton()).
-						Disabled(st.checking || st.downloading).Clicked() {
-						if !st.checking && !st.downloading {
-							startUpdateCheck(updateService, runtime, st)
-							c.Invalidate()
-						}
+		if st.unavailable {
+			// A build without a release feed cannot check, download or install:
+			// say so instead of offering an action that always fails.
+			uikit.PageHeader(c, localized(locale, "更新", "Update"), localized(locale,
+				"当前构建未启用更新。",
+				"Updates are not enabled in this build."))
+		} else {
+			// The page's only primary action (check now) sits at the header's
+			// right edge; the page writes nothing, so there is no footer save.
+			uikit.PageHeaderAction(c,
+				localized(locale, "更新", "Update"),
+				localized(locale,
+					"检查更新并查看最新版本。",
+					"Check for updates and view the latest version."),
+				func(c *ui.Context) {
+					if !hasUpdate {
+						return
 					}
+					checkLabel := localized(locale, "检查更新", "Check for updates")
+					busyLabel := localized(locale, "检查中…", "Checking…")
+					if st.checking {
+						checkLabel = busyLabel
+					}
+					// The busy state is the official spinner with an accessible
+					// progress name beside the disabled action; no fake percentage.
+					ui.Row(c).AlignItems(ui.Center).Gap(design.Space2).Children(func() {
+						buildBusySpinner(c, st.checking, busyLabel)
+						if design.Apply(ui.PrimaryButton(c, checkLabel), t.PrimaryButton()).
+							Disabled(st.checking || st.downloading).Clicked() {
+							if !st.checking && !st.downloading {
+								startUpdateCheck(updateService, runtime, st)
+								c.Invalidate()
+							}
+						}
+					})
 				})
-			})
+		}
 
 		uikit.Section(c, localized(locale, "当前版本", "Current version"), func(*ui.Context) {
 			uikit.KeyValueRows(c, []uikit.KeyValue{
@@ -105,6 +117,16 @@ func buildUpdatePage(c *ui.Context, t *design.Tokens, kctx cordis.Context, runti
 		if !hasUpdate {
 			uikit.EmptyState(c, localized(locale,
 				"更新服务未启用", "Update service is not enabled"))
+			return
+		}
+
+		if st.unavailable {
+			uikit.Section(c, localized(locale, "更新未启用", "Updates not enabled"), func(*ui.Context) {
+				design.Apply(ui.Text(c, localized(locale,
+					"当前构建未启用更新：没有配置更新源，因此无法检查、下载或安装新版本。请通过官方发布渠道获取新版本。",
+					"This build does not enable updates: no release feed is configured, so new versions cannot be checked, downloaded or installed. Get new versions from the official release channel.")),
+					t.Font(design.TypeXS)).TextColor(t.LabelSecondary).MaxLines(4)
+			})
 			return
 		}
 
@@ -269,6 +291,13 @@ func startUpdateCheck(service contracts.UpdateService, runtime contracts.UIRunti
 			if err != nil {
 				st.err = err.Error()
 				st.checked = false
+				if updateFeedUnconfigured(err) {
+					// The backend's "no feed configured" error names an internal
+					// assembly key; the page explains the state in product terms
+					// and never echoes that key.
+					st.unavailable = true
+					st.err = ""
+				}
 			} else {
 				st.info = info
 				st.checked = true
@@ -277,6 +306,19 @@ func startUpdateCheck(service contracts.UpdateService, runtime contracts.UIRunti
 			runtime.Invalidate()
 		})
 	}()
+}
+
+// updateFeedUnconfigured reports whether an update check failed because the
+// backend has no release feed configured (the update module's ErrDisabled). The
+// UI module may not import the backend module, so the documented error text is
+// the cross-module marker; matching is deliberately narrow to that state.
+func updateFeedUnconfigured(err error) bool {
+	if err == nil {
+		return false
+	}
+	message := strings.ToLower(err.Error())
+	return strings.Contains(message, "更新源未配置") ||
+		strings.Contains(message, "update.feedurl")
 }
 
 // updateResourceLine describes the matching asset for this platform.

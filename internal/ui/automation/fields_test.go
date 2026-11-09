@@ -65,9 +65,10 @@ func TestCreateFormWorkspaceAndPermissionSelectors(t *testing.T) {
 	h.assertTexts(tester, "项目一")
 
 	h.click(tester, "默认全局")
-	h.assertTexts(tester, "询问", "工作区", "全部", "从不")
-	h.click(tester, "全部")
-	h.assertTexts(tester, "全部")
+	h.assertTexts(tester, "只读", "工作区可写", "所有权限")
+	h.assertNoTexts(tester, "询问", "从不", "全部允许")
+	h.click(tester, "所有权限")
+	h.assertTexts(tester, "所有权限")
 
 	h.click(tester, "任务名称")
 	tester.Type("巡检")
@@ -107,9 +108,23 @@ func TestTaskCardWorkspacePermissionBadges(t *testing.T) {
 		ID: "task-1", Name: "带字段", Prompt: "p", Schedule: "every 60s", Enabled: true,
 		WorkspaceID: "w1", Permission: "never",
 	})
-	h := newHarness(t, service, automation.Config{})
+	h, _ := workspaceAutomationHarness(t, service)
 	tester := h.tester()
-	h.assertTexts(tester, "工作区：w1", "权限：从不")
+	// Retired "never" task overrides display as their normalized preset; the
+	// workspace shows its name, never the raw id.
+	h.assertTexts(tester, "工作区：项目一", "权限：只读")
+	h.assertNoTexts(tester, "权限：从不", "工作区：w1")
+}
+
+func TestTaskCardUnknownWorkspaceDoesNotLeakID(t *testing.T) {
+	service := newFakeAutomation(contracts.AutomationTask{
+		ID: "task-1", Name: "带字段", Prompt: "p", Schedule: "every 60s", Enabled: true,
+		WorkspaceID: "w-vanished",
+	})
+	h, _ := workspaceAutomationHarness(t, service)
+	tester := h.tester()
+	h.assertTexts(tester, "工作区：未知工作区")
+	h.assertNoTexts(tester, "w-vanished")
 }
 
 func TestAutomationFieldsEnglish(t *testing.T) {
@@ -117,13 +132,14 @@ func TestAutomationFieldsEnglish(t *testing.T) {
 		ID: "task-1", Name: "task", Prompt: "p", Schedule: "every 60s",
 		WorkspaceID: "w1", Permission: "full",
 	})
-	h := newHarness(t, service, automation.Config{})
+	h, _ := workspaceAutomationHarness(t, service)
 	h.uiRoot.Locale().SetLanguage("en")
 	tester := h.tester()
 	tester.Frame()
-	h.assertTexts(tester, "Workspace: w1", "Permission: Full access")
+	h.assertTexts(tester, "Workspace: 项目一", "Permission: All permissions")
 	h.click(tester, "New task")
 	h.assertTexts(tester, "Follow the current workspace", "Global default")
 	h.click(tester, "Global default")
-	h.assertTexts(tester, "Ask", "Workspace", "Full access", "Never")
+	h.assertTexts(tester, "Read-only", "Workspace-write", "All permissions")
+	h.assertNoTexts(tester, "Ask", "Full access", "Never")
 }

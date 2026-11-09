@@ -99,8 +99,82 @@ func (st *state) setServerEnabled(name string, enabled bool, settings contracts.
 		st.statusErr = true
 		return
 	}
-	st.status = st.tr("已保存", "Saved")
+	// A server switch only takes effect on the next launch: the card keeps a
+	// positive "enabled, connects after restart" state (see
+	// enabledPendingServerRows) and the status line says what happened.
+	if enabled {
+		st.pendingRestartServers[name] = true
+	} else {
+		st.clearPendingEnabledServer(name)
+		st.status = st.tr("已停用（重启后断开）", "Disabled (disconnects after restart)")
+	}
+	if enabled {
+		st.status = st.tr("已启用（重启后连接）", "Enabled (connects after restart)")
+	}
 	st.statusErr = false
+}
+
+// clearPendingEnabledServer drops one name from pendingRestartServers, matching
+// the stored spelling case-insensitively.
+func (st *state) clearPendingEnabledServer(name string) {
+	name = strings.TrimSpace(name)
+	for pending := range st.pendingRestartServers {
+		if strings.EqualFold(strings.TrimSpace(pending), name) {
+			delete(st.pendingRestartServers, pending)
+		}
+	}
+}
+
+// enabledPendingServerRows restores rows the user enabled on this page but that
+// the toolkit has not started yet (servers start at launch). Without this row
+// the card would vanish the moment its switch is turned back on, which reads as
+// a deletion; the row says the server is configured and connects after restart.
+func (st *state) enabledPendingServerRows(settings contracts.SettingsService,
+	hasSettings bool, live []contracts.MCPPlugin) []contracts.MCPPlugin {
+	if !hasSettings || settings == nil || len(st.pendingRestartServers) == 0 {
+		return nil
+	}
+	rows, err := contracts.ParseMCPServersJSON(settings.Get(contracts.SettingMCPServers, ""))
+	if err != nil {
+		return nil
+	}
+	liveNames := make(map[string]bool, len(live))
+	for _, server := range live {
+		for _, name := range []string{server.Name, server.ServerName} {
+			if trimmed := strings.TrimSpace(name); trimmed != "" {
+				liveNames[strings.ToLower(trimmed)] = true
+			}
+		}
+	}
+	restored := make([]contracts.MCPPlugin, 0, len(rows))
+	for _, row := range rows {
+		name := strings.TrimSpace(row.Name)
+		if name == "" || liveNames[strings.ToLower(name)] || st.serverDisabled(name) ||
+			!st.pendingEnabled(name) {
+			continue
+		}
+		liveNames[strings.ToLower(name)] = true
+		restored = append(restored, contracts.MCPPlugin{
+			Name:   name,
+			URL:    strings.TrimSpace(row.URL),
+			Status: st.tr("已启用（重启后连接）", "Enabled (connects after restart)"),
+		})
+	}
+	sort.SliceStable(restored, func(left, right int) bool {
+		return strings.ToLower(restored[left].Name) < strings.ToLower(restored[right].Name)
+	})
+	return restored
+}
+
+// pendingEnabled reports whether one server was enabled during this visit.
+func (st *state) pendingEnabled(name string) bool {
+	name = strings.TrimSpace(name)
+	for pending := range st.pendingRestartServers {
+		if strings.EqualFold(strings.TrimSpace(pending), name) {
+			return true
+		}
+	}
+	return false
 }
 
 // disabledServerRows restores the disabled rows that settings.mcp.servers can

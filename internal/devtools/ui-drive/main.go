@@ -287,6 +287,7 @@ func (d *drive) run(string) {
 	d.runHNarrowSteps()
 	d.runOverlaySteps()
 	d.runPanelSteps()
+	d.runTeamSteps()
 	d.runThemeLanguageSteps()
 	d.runSidebarSteps()
 	d.runWindowSizeSteps()

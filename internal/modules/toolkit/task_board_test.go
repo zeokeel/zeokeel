@@ -168,3 +168,103 @@ func TestTaskBoardServiceRemovedOnDispose(t *testing.T) {
 		t.Fatal("KeyTaskBoard survived module disposal")
 	}
 }
+
+// createTaskWithTool creates one task through the model-facing team_task_create
+// tool (the board API has no dependency/write-scope parameters).
+func createTaskWithTool(t *testing.T, tools *rigtool.Registry, arguments string) rig.ToolResult {
+	t.Helper()
+	result, err := tools.Invoke(context.Background(), rig.ToolCall{
+		ID: "create-deps", Name: "team_task_create", Arguments: arguments,
+	})
+	if err != nil || result.IsError {
+		t.Fatalf("team_task_create %s = %+v/%v", arguments, result, err)
+	}
+	return result
+}
+
+// TestTaskBoardMapsDependenciesAndWriteScopes pins that the product BoardTask
+// carries the rig board's BlockedBy/WriteScopes (the old conversion dropped
+// them, so the inspector could never show a dependency or a blocker).
+func TestTaskBoardMapsDependenciesAndWriteScopes(t *testing.T) {
+	tools, board, _ := activateTaskBoardToolkit(t)
+	ctx := context.Background()
+	first, err := board.Create(ctx, "first task", "")
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	createTaskWithTool(t, tools, `{"subject":"second task","blocked_by":["`+first.ID+`"],"write_scopes":["docs/a.md","docs/b.md"]}`)
+	tasks, err := board.List(ctx)
+	if err != nil || len(tasks) != 2 {
+		t.Fatalf("List = %+v/%v", tasks, err)
+	}
+	var second contracts.BoardTask
+	for _, task := range tasks {
+		if task.Subject == "second task" {
+			second = task
+		}
+	}
+	if len(second.BlockedBy) != 1 || second.BlockedBy[0] != first.ID {
+		t.Fatalf("BlockedBy = %v, want [%s]", second.BlockedBy, first.ID)
+	}
+	if len(second.WriteScopes) != 2 || second.WriteScopes[0] != "docs/a.md" {
+		t.Fatalf("WriteScopes = %v, want the tool's scopes", second.WriteScopes)
+	}
+	// The lists are copies: mutating the returned task cannot touch the board.
+	second.BlockedBy[0] = "mutated"
+	tasks, _ = board.List(ctx)
+	for _, task := range tasks {
+		if task.Subject == "second task" && task.BlockedBy[0] != first.ID {
+			t.Fatalf("BlockedBy aliased the manager: %v", task.BlockedBy)
+		}
+	}
+}
+
+// TestTaskBoardAssign pins the optional contracts.TaskAssigner: claim,
+// reassign, the pseudo lead owner of an in-progress task without an assignee,
+// and the manager's in-progress-owner rule.
+func TestTaskBoardAssign(t *testing.T) {
+	_, board, _ := activateTaskBoardToolkit(t)
+	ctx := context.Background()
+	assigner, ok := board.(contracts.TaskAssigner)
+	if !ok {
+		t.Fatalf("task board %T does not implement contracts.TaskAssigner", board)
+	}
+	task, err := board.Create(ctx, "claim me", "")
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	assigned, err := assigner.Assign(ctx, task.ID, "研究员")
+	if err != nil || assigned.Owner != "研究员" {
+		t.Fatalf("Assign = %+v/%v, want owner 研究员", assigned, err)
+	}
+	// Starting a task without an owner stamps the board API's pseudo owner, and
+	// the contract names that value so the UI can show it as the lead.
+	unowned, err := board.Create(ctx, "unowned work", "")
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	started, err := board.SetStatus(ctx, unowned.ID, contracts.TaskStatusInProgress)
+	if err != nil || started.Owner != contracts.TaskOwnerUnassigned {
+		t.Fatalf("SetStatus(in_progress) = %+v/%v, want owner %q", started, err, contracts.TaskOwnerUnassigned)
+	}
+	if _, err := board.SetStatus(ctx, task.ID, contracts.TaskStatusInProgress); err != nil {
+		t.Fatalf("SetStatus(owned in_progress): %v", err)
+	}
+	// Clearing the owner of an in-progress task is rejected by the manager.
+	if _, err := assigner.Assign(ctx, task.ID, ""); err == nil || !strings.Contains(err.Error(), "owner") {
+		t.Fatalf("Assign(clear in-progress) = %v, want owner-required error", err)
+	}
+	reassigned, err := assigner.Assign(ctx, task.ID, "审阅者")
+	if err != nil || reassigned.Owner != "审阅者" {
+		t.Fatalf("Assign(in progress) = %+v/%v", reassigned, err)
+	}
+	if _, err := assigner.Assign(ctx, "missing", "研究员"); err == nil {
+		t.Fatal("Assign(unknown task) returned nil error")
+	}
+	if err := board.Delete(ctx, task.ID); err != nil {
+		t.Fatalf("Delete: %v", err)
+	}
+	if _, err := assigner.Assign(ctx, task.ID, "研究员"); err == nil {
+		t.Fatal("Assign(deleted task) returned nil error")
+	}
+}

@@ -39,8 +39,9 @@
 //   - rename is only offered when the chat service also implements
 //     contracts.SessionRenamer; the button opens a native Modal with a
 //     TextInput, save/cancel and an inline error (an empty title is rejected);
-//   - delete opens a native AlertDialog that names the session and warns the
-//     action cannot be undone; only the last button deletes.
+//   - delete opens a native modal confirmation that names the session and
+//     warns the action cannot be undone; Cancel is the default action, so
+//     only an explicit click on Delete deletes.
 //
 // The rename Modal is a second slot item on contracts.SlotOverlayDialogs
 // (id sidebar.rename.dialog), so it can render above the whole window.
@@ -725,17 +726,16 @@ func buildWorkspaceSectionHeader(c *ui.Context, t *design.Tokens, workspace cont
 			NoWrap().MaxLines(1)
 		ui.Spacer(c).Grow(1)
 		addLabel := state.T("添加工作区", "Add workspace")
-		add := ui.ButtonBase(c).Size(24, 24).Center().Radius(design.RadiusSM).
-			Label(addLabel).Tooltip(state.T("打开文件夹并添加为工作区", "Open a folder and add it as a workspace"))
-		add = rowTint(t, add, false)
-		add.Children(func() {
-			ui.Icon(c, icons.Plus()).Size(design.Space4, design.Space4).TextColor(t.LabelSecondary)
-		})
-		if add.Clicked() {
+		uikit.IconButton(c, uikit.IconButtonOptions{
+			Key:     "sidebar.workspace.add",
+			Label:   addLabel,
+			Tooltip: state.T("打开文件夹并添加为工作区", "Open a folder and add it as a workspace"),
+			Icon:    icons.Plus(),
+			Size:    design.IconSizeS,
 			// One click, one native folder chooser: the backend derives the
 			// workspace name from the chosen folder, so there is no dialog.
-			addWorkspace(state, workspace, runtime)
-		}
+			OnClick: func() { addWorkspace(state, workspace, runtime) },
+		})
 	})
 	// The status/error rows live below the header (two badges in the 280px
 	// header would squeeze the add action to zero width).
@@ -1076,37 +1076,36 @@ func buildWorkspaceNewChatAction(c *ui.Context, t *design.Tokens,
 	nav contracts.Navigator, runtime contracts.UIRuntime, state *paneState,
 	key, name string, revealed bool) {
 	label := fmt.Sprintf(state.T("在“%s”中新建会话", "New chat in “%s”"), name)
-	plus := ui.ButtonBase(c).Size(22, 22).Center().Radius(design.RadiusSM).
-		Label(label).Tooltip(label)
-	if plus.Hovered() {
-		plus = plus.Background(t.BgHover)
+	activate := func() {
+		state.workspaceNewChatErr = ""
+		if _, err := workspace.Open(context.Background(), workspaceIDFromTreeKey(key)); err != nil {
+			state.workspaceNewChatErr = state.T("打开工作区失败：", "Could not open the workspace: ") + err.Error()
+			runtime.Invalidate()
+			return
+		}
+		if _, err := chat.NewSession(""); err != nil {
+			state.workspaceNewChatErr = state.T("新建会话失败：", "Could not start a new chat: ") + err.Error()
+			runtime.Invalidate()
+			return
+		}
+		// The session belongs to the now-current workspace: unfold its group so
+		// the new row is visible, then go to the session screen on the next frame
+		// (the host reconciles its native Sidebar selection after this build).
+		state.tree.Open.Add(key)
+		runtime.Post(func() { _ = nav.Push("session") })
+		runtime.Invalidate()
 	}
+	plus := uikit.IconButton(c, uikit.IconButtonOptions{
+		Key:     "sidebar.workspace.new-chat",
+		Label:   label,
+		Tooltip: label,
+		Icon:    icons.Plus(),
+		Size:    design.IconSizeS,
+		OnClick: activate,
+	})
 	if !revealed {
 		plus = plus.Opacity(0).IgnoreInput(true)
 	}
-	plus.Children(func() {
-		ui.Icon(c, icons.Plus()).Size(14, 14).TextColor(t.LabelSecondary)
-	})
-	if !plus.Clicked() {
-		return
-	}
-	state.workspaceNewChatErr = ""
-	if _, err := workspace.Open(context.Background(), workspaceIDFromTreeKey(key)); err != nil {
-		state.workspaceNewChatErr = state.T("打开工作区失败：", "Could not open the workspace: ") + err.Error()
-		runtime.Invalidate()
-		return
-	}
-	if _, err := chat.NewSession(""); err != nil {
-		state.workspaceNewChatErr = state.T("新建会话失败：", "Could not start a new chat: ") + err.Error()
-		runtime.Invalidate()
-		return
-	}
-	// The session belongs to the now-current workspace: unfold its group so the
-	// new row is visible, then go to the session screen on the next frame (the
-	// host reconciles its native Sidebar selection after this build).
-	state.tree.Open.Add(key)
-	runtime.Post(func() { _ = nav.Push("session") })
-	runtime.Invalidate()
 }
 
 // workspaceGroupMenu is the one menu the workspace row's ⋯ button and its
@@ -1555,23 +1554,23 @@ func buildFooter(c *ui.Context, t *design.Tokens, chat contracts.ChatService,
 	state *paneState, label string) {
 	if state.deleteOpen {
 		deleteTitle := firstNonEmpty(state.deleteTitle, state.T("未命名会话", "Untitled session"))
+		target := state.deleteTarget
 		messageTemplate := state.T("“%s”及其全部消息将被删除，此操作无法撤销。",
 			"“%s” and all its messages will be deleted. This cannot be undone.")
 		message := fmt.Sprintf(messageTemplate, deleteTitle)
-		switch ui.AlertDialog(c, &state.deleteOpen,
+		buildDangerConfirm(c, t, &state.deleteOpen,
 			state.T("删除会话", "Delete session"), message,
-			state.T("取消", "Cancel"), state.T("删除", "Delete")) {
-		case 1:
-			if err := chat.DeleteSession(state.deleteTarget); err == nil {
+			state.T("删除", "Delete"), state.T("取消", "Cancel"),
+			func() {
+				if err := chat.DeleteSession(target); err == nil {
+					runtime.Invalidate()
+				}
+			},
+			func() {
+				state.deleteTarget = ""
+				state.deleteTitle = ""
 				runtime.Invalidate()
-			}
-			state.deleteTarget = ""
-			state.deleteTitle = ""
-		case 0, ui.AlertDismissed:
-			state.deleteTarget = ""
-			state.deleteTitle = ""
-			runtime.Invalidate()
-		}
+			})
 		return
 	}
 
@@ -1625,7 +1624,7 @@ func buildRenameDialog(c *ui.Context, t *design.Tokens, renamer contracts.Sessio
 		runtime.Invalidate()
 	}
 	ui.Modal(c, &state.renameOpen, func() {
-		ui.Column(c).Width(360).Gap(design.Space3).Children(func() {
+		ui.Column(c).Width(design.DialogWidthXS).Gap(design.Space3).Children(func() {
 			design.Apply(ui.Text(c, state.T("重命名会话", "Rename session")), t.Text(design.TypeM)).FontWeight(600)
 			// One line of input, focused as the dialog opens; Enter saves in
 			// place while the input keeps the keyboard.

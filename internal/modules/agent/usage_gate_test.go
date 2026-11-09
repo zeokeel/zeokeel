@@ -427,36 +427,33 @@ func TestGateInteractionToolsRespectPermissionOverrides(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewSession: %v", err)
 	}
-	if err := svc.SetSessionPermission(sessionID, contracts.PermissionNever); err != nil {
-		t.Fatalf("SetSessionPermission(never): %v", err)
-	}
-	gate := svc.gate(sessionID)
-	for _, name := range interactionToolNames {
-		decision, err := gate.Approve(context.Background(), &gateTestTool{name: name}, rig.ToolCall{Name: name})
-		if err != nil {
-			t.Fatalf("Approve(%q): %v", name, err)
+	// Interaction/presentation tools are exempt from the prompt under every
+	// permission preset (their own overlay is the interaction).
+	for _, mode := range []string{contracts.PermissionReadOnly, contracts.PermissionWorkspace, contracts.PermissionFull} {
+		if err := svc.SetSessionPermission(sessionID, mode); err != nil {
+			t.Fatalf("SetSessionPermission(%s): %v", mode, err)
 		}
-		if decision != rig.DecisionDeny {
-			t.Fatalf("%q decision = %q, want deny from the never override", name, decision)
+		gate := svc.gate(sessionID)
+		for _, name := range interactionToolNames {
+			decision, err := gate.Approve(context.Background(), &gateTestTool{name: name}, rig.ToolCall{Name: name})
+			if err != nil {
+				t.Fatalf("Approve(%q): %v", name, err)
+			}
+			if decision != rig.DecisionAllow {
+				t.Fatalf("%q decision = %q under %s, want allow", name, decision, mode)
+			}
 		}
-	}
-	if err := svc.SetSessionPermission(sessionID, contracts.PermissionFull); err != nil {
-		t.Fatalf("SetSessionPermission(full): %v", err)
-	}
-	if decision, err := gate.Approve(context.Background(), &gateTestTool{name: "ask_user"}, rig.ToolCall{Name: "ask_user"}); err != nil ||
-		decision != rig.DecisionAllow {
-		t.Fatalf("ask_user with full override = %q/%v, want allow", decision, err)
 	}
 	if asked := approvals.askedTools(); len(asked) != 0 {
 		t.Fatalf("permission overrides requested approval: %v, want none", asked)
 	}
 }
 
-// TestGateInteractionToolsGlobalNeverDenies covers the deny-all backend policy:
-// skipping the generic prompt for interaction tools must not bypass an explicit
-// global "never" mode.
+// TestGateInteractionToolsGlobalNeverDenies covers the headless deny-all backend
+// policy: skipping the generic prompt for interaction tools must not bypass an
+// explicit global "never" mode.
 func TestGateInteractionToolsGlobalNeverDenies(t *testing.T) {
-	approvals := &recordingApprovals{mode: contracts.PermissionNever}
+	approvals := &recordingApprovals{mode: approvalModeNever}
 	svc := newService(Config{}, rigtools.NewRegistry(), contracts.SettingsService(newFakeSettings(nil)),
 		&fakeLogger{}, newFakeStore(), approvals)
 	gate := svc.gate()

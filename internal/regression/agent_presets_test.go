@@ -173,9 +173,9 @@ func TestAgentPresetPickerUI(t *testing.T) {
 	tester.Frame()
 	// The persona picker lives in the single session menu (its default label is
 	// the quiet workspace permission context).
-	requireHasText(t, tester, "工作区权限")
+	requireHasText(t, tester, "工作区可写")
 
-	if err := tester.Click("工作区权限"); err != nil {
+	if err := tester.Click("工作区可写"); err != nil {
 		t.Fatalf("open session menu: %v; texts = %v", err, tester.Texts())
 	}
 	tester.Frame()
@@ -194,7 +194,7 @@ func TestAgentPresetPickerUI(t *testing.T) {
 		t.Fatalf("selected preset = %q, want alpha", got)
 	}
 
-	if err := tester.Click("工作区权限"); err != nil {
+	if err := tester.Click("工作区可写"); err != nil {
 		t.Fatalf("reopen session menu: %v; texts = %v", err, tester.Texts())
 	}
 	tester.Frame()

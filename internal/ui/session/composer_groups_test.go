@@ -30,7 +30,7 @@ func TestComposerToolbarGroupsLowFrequencyControls(t *testing.T) {
 	h := newPermissionHarness(t, groupsChat(), settings)
 	tester := h.tester()
 
-	h.assertTexts(tester, "工作区权限")
+	h.assertTexts(tester, "工作区可写")
 	h.assertNoTexts(tester, "推理：默认", "预设")
 	h.openSessionMenu(tester)
 	h.assertTexts(tester, "思考强度：默认", "默认", "低强度", "中强度", "高强度", "插入预设")
@@ -54,7 +54,7 @@ func TestComposerToolbarCompactsAtNarrowWidths(t *testing.T) {
 		tester.Frame()
 		tester.Frame()
 
-		h.assertTexts(tester, "工作区权限", "附件", "发送")
+		h.assertTexts(tester, "工作区可写", "附件", "发送")
 		h.assertNoTexts(tester, "命令", "更多工具", "路径", "询问", "»")
 		attach, ok := tester.Find("附件")
 		if !ok {
@@ -65,7 +65,8 @@ func TestComposerToolbarCompactsAtNarrowWidths(t *testing.T) {
 		}
 		// The single session menu carries every low-frequency choice.
 		h.openSessionMenu(tester)
-		h.assertTexts(tester, "权限模式", "对话模式", "思考强度：默认", "插入预设", "打开行为设置…")
+		h.assertTexts(tester, "权限模式", "只读", "工作区可写", "所有权限", "对话模式", "思考强度：默认", "插入预设", "打开行为设置…")
+		h.assertNoTexts(tester, "询问", "从不允许")
 	}
 }
 
@@ -188,7 +189,7 @@ func TestNarrowHeaderAndToolbarWithInspectorDrawer(t *testing.T) {
 	// N2: at a very narrow composer the model chip is hidden (the session menu
 	// repeats it), the attach menu and the single session menu stay, and the
 	// removed toolbar's slash entry/overflow no longer exist.
-	h.assertTexts(tester, "附件", "工作区权限", "发送")
+	h.assertTexts(tester, "附件", "工作区可写", "发送")
 	h.assertNoTexts(tester, "更多工具", "命令", "snapshot…", "»")
 	if got := exactTextCount(tester.Texts(), "/"); got != 0 {
 		t.Fatalf("slash entry still rendered on a very narrow composer; texts = %v", tester.Texts())

@@ -37,7 +37,14 @@ func TestAssistantErrorKindHeadings(t *testing.T) {
 		t.Run(test.kind, func(t *testing.T) {
 			h := newHarness(t, errorKindChat(test.kind, test.original))
 			tester := h.tester()
-			h.assertTexts(tester, test.want, test.original)
+			h.assertTexts(tester, test.want)
+			if test.kind == "cancelled" {
+				// A user stop is not an error: the raw English cancellation text
+				// must not be repeated under the neutral 已取消 row.
+				h.assertNoTexts(tester, test.original)
+				return
+			}
+			h.assertTexts(tester, test.original)
 		})
 	}
 }

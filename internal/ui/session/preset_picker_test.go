@@ -90,7 +90,7 @@ func TestPersonaPickerSelectAndClear(t *testing.T) {
 	if got := exactTextCount(tester.Texts(), "人设"); got != 0 {
 		t.Fatalf("standalone persona chip rendered; texts = %v", tester.Texts())
 	}
-	h.assertTexts(tester, "工作区权限")
+	h.assertTexts(tester, "工作区可写")
 	h.openSessionMenu(tester)
 	h.assertTexts(tester, "人设")
 	h.clickExact(tester, "人设")
@@ -102,7 +102,7 @@ func TestPersonaPickerSelectAndClear(t *testing.T) {
 	}
 	// The picker keeps the composer row calm: the choice is reflected inside the
 	// menu (checked row), not by renaming the button.
-	h.assertTexts(tester, "工作区权限")
+	h.assertTexts(tester, "工作区可写")
 
 	h.openSessionMenu(tester)
 	h.clickExact(tester, "人设")

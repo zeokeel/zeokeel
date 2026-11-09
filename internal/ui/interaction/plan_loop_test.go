@@ -190,24 +190,7 @@ func TestKeepPlanningRequiresFeedback(t *testing.T) {
 	}
 }
 
-func TestKeepPlanningSendFailureKeepsModal(t *testing.T) {
-	chat := &loopChat{active: "sess-1", sendErr: errors.New("agent busy")}
-	h := newLoopHarness(t, chat, nil)
-	tester := h.tester()
-	h.triggerPlan(tester)
-	h.focus(tester, "继续规划反馈")
-	tester.Type("改一下")
-	tester.Frame()
-	h.click(tester, "继续规划")
-	if !tester.HasText("agent busy") || !tester.HasText("继续规划") {
-		t.Fatalf("send failure did not keep the modal: %v", tester.Texts())
-	}
-	if exits := h.plan.exitCalls(); len(exits) != 1 {
-		t.Fatalf("Exit calls = %v", exits)
-	}
-}
-
-func TestKeepPlanningExitFailureKeepsModal(t *testing.T) {
+func TestKeepPlanningExitFailureKeepsModalAndNeverResends(t *testing.T) {
 	chat := &loopChat{active: "sess-1"}
 	h := newLoopHarness(t, chat, nil)
 	h.plan.exitErr = errors.New("plan busy")
@@ -220,8 +203,23 @@ func TestKeepPlanningExitFailureKeepsModal(t *testing.T) {
 	if !tester.HasText("plan busy") || !tester.HasText("继续规划") {
 		t.Fatalf("exit failure did not keep the modal: %v", tester.Texts())
 	}
-	if len(chat.sent()) != 0 {
-		t.Fatalf("send after Exit failure = %v", chat.sent())
+	// The feedback was already accepted: a retry only retries the exit.
+	if sends := chat.sent(); len(sends) != 1 {
+		t.Fatalf("feedback sends = %v, want exactly one", sends)
+	}
+	h.click(tester, "继续规划")
+	if sends := chat.sent(); len(sends) != 1 {
+		t.Fatalf("retry re-sent the same feedback: %v", sends)
+	}
+	if exits := h.plan.exitCalls(); len(exits) != 2 {
+		t.Fatalf("Exit retries = %v, want two attempts", exits)
+	}
+	// Escape still closes the dialog after the failed exit.
+	tester.Key(0, ui.KeyEscape)
+	tester.Frame()
+	tester.Frame()
+	if tester.HasText("计划待审阅") {
+		t.Fatalf("dialog trapped after the failed exit: %v", tester.Texts())
 	}
 }
 
@@ -242,6 +240,16 @@ func TestKeepPlanningWithoutActiveSession(t *testing.T) {
 	}
 	if !tester.HasText("继续规划") {
 		t.Fatalf("modal closed on no active session: %v", tester.Texts())
+	}
+	if exits := h.plan.exitCalls(); len(exits) != 0 {
+		t.Fatalf("review exited without delivering the feedback: %v", exits)
+	}
+	// The review is still under review: Escape can close it instead of trapping.
+	tester.Key(0, ui.KeyEscape)
+	tester.Frame()
+	tester.Frame()
+	if tester.HasText("计划待审阅") {
+		t.Fatalf("failed review trapped the window: %v", tester.Texts())
 	}
 }
 
@@ -273,5 +281,29 @@ func TestKeepPlanningEnglishCopy(t *testing.T) {
 	h.click(tester, "Keep planning")
 	if _, text, calls := notifier.snapshot(); calls != 1 || text != "Sent keep-planning feedback" {
 		t.Fatalf("English notifier = %q/%d", text, calls)
+	}
+}
+
+// TestPlanEscapeShowsVisibleHint covers C-16: Escape does not cancel a plan, and
+// the dialog must say so instead of looking dead (the frames differ).
+func TestPlanEscapeShowsVisibleHint(t *testing.T) {
+	chat := &loopChat{active: "sess-1"}
+	h := newLoopHarness(t, chat, nil)
+	tester := h.tester()
+	h.triggerPlan(tester)
+	if tester.HasText("Esc 不能关闭计划审阅") {
+		t.Fatalf("the Escape warning is visible before Escape: %v", tester.Texts())
+	}
+	tester.Key(0, ui.KeyEscape)
+	tester.Frame()
+	tester.Frame()
+	if !tester.HasText("Esc 不能关闭计划审阅") {
+		t.Fatalf("Escape gave no visible feedback: %v", tester.Texts())
+	}
+	if !tester.HasText("计划待审阅") {
+		t.Fatalf("Escape closed the review: %v", tester.Texts())
+	}
+	if exits := h.plan.exitCalls(); len(exits) != 0 {
+		t.Fatalf("Escape called Exit: %v", exits)
 	}
 }

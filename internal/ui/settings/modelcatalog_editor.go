@@ -445,7 +445,7 @@ func buildCatalogEditDialog(c *ui.Context, t *design.Tokens, store contracts.Set
 		return
 	}
 	ui.Modal(c, &st.editorOpen, func() {
-		design.Apply(ui.Column(c).Width(680).Gap(design.Space2), func(element ui.Element) ui.Element {
+		design.Apply(ui.Column(c).Width(design.DialogWidthXL).Gap(design.Space2), func(element ui.Element) ui.Element {
 			return element.PaddingX(design.Space5).PaddingY(design.Space2)
 		}).Children(func() {
 			design.Apply(ui.Text(c, localized(locale, "编辑模型", "Edit model")),
@@ -456,11 +456,13 @@ func buildCatalogEditDialog(c *ui.Context, t *design.Tokens, store contracts.Set
 
 			ui.Row(c).FillWidth().Gap(design.Space3).AlignItems(ui.Start).Children(func() {
 				ui.Column(c).FillWidth().Grow(1).Children(func() {
+					submit := func() { saveCatalogEdit(c, st, store, models, locale) }
 					ui.Field(c, localized(locale, "模型名称", "Model name"), func() {
 						ui.TextInput(c, &draft.name).
 							Label(inputLabel(locale, localized(locale, "模型名称", "Model name"))).
 							Placeholder(localized(locale, "可选；留空时使用模型 ID",
-								"optional; falls back to the model ID")).FillWidth()
+								"optional; falls back to the model ID")).
+							FillWidth().AutoFocus().OnTextKey(uikit.EnterTo(submit))
 					})
 				})
 				ui.Column(c).FillWidth().Grow(1).Children(func() {
@@ -479,7 +481,10 @@ func buildCatalogEditDialog(c *ui.Context, t *design.Tokens, store contracts.Set
 					ui.Field(c, localized(locale, "模型备注", "Model note"), func() {
 						ui.TextInput(c, &draft.note).
 							Label(inputLabel(locale, localized(locale, "模型备注", "Model note"))).
-							Placeholder(localized(locale, "可选", "optional")).FillWidth()
+							Placeholder(localized(locale, "可选", "optional")).
+							FillWidth().OnTextKey(uikit.EnterTo(func() {
+							saveCatalogEdit(c, st, store, models, locale)
+						}))
 					})
 				})
 				ui.Column(c).FillWidth().Grow(1).Children(func() {

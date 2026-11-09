@@ -44,9 +44,17 @@ func paneLabels(cfg Config, locale contracts.LocaleService) []string {
 // selector with the active pane's action, and the selected pane. Eight tabs do
 // not fit a 320 DIP inspector, so the pane strip became one menu button naming
 // the current pane; the host owns the panel width and the module fills it.
-func buildPanel(c *ui.Context, t *design.Tokens, runtime contracts.UIRuntime, chat contracts.ChatService, log eventReader, workspace contracts.WorkspaceService, terminal contracts.TerminalService, team contracts.TeamService, board contracts.TaskBoard, artifacts contracts.ArtifactLister, cfg Config, st *state) {
-	// The pane-switch commands' palette hint names the current pane.
+func buildPanel(c *ui.Context, t *design.Tokens, runtime contracts.UIRuntime, chat contracts.ChatService, log eventReader, workspace contracts.WorkspaceService, terminal contracts.TerminalService, team contracts.TeamService, activities contracts.SubagentActivityLister, board contracts.TaskBoard, artifacts contracts.ArtifactLister, cfg Config, st *state) {
+	// The pane-switch commands' palette hint names the current pane; the
+	// open-pane commands follow the UI language. The last built frame tells the
+	// open-pane commands whether the host currently shows the inspector (the
+	// slot does not build while it is closed).
 	st.syncPaneCommands()
+	st.syncOpenCommands()
+	st.lastBuiltFrame = 0
+	if runtime != nil {
+		st.lastBuiltFrame = runtime.Frame()
+	}
 	ui.Column(c).FillWidth().Gap(design.Space2).Children(func() {
 		// One header line: the pane selector names the current pane and the
 		// pane's action plus the close control sit at its right edge. The
@@ -58,7 +66,7 @@ func buildPanel(c *ui.Context, t *design.Tokens, runtime contracts.UIRuntime, ch
 		header.Children(func() {
 			buildPaneSelector(c, cfg, st, runtime)
 			ui.Spacer(c).Grow(1)
-			buildPaneAction(c, runtime, terminal, st)
+			buildPaneAction(c, runtime, terminal, board, st)
 			buildPaneClose(c, t, runtime, st)
 		})
 		// The inspector can outgrow a short rail (a long tool list); the native
@@ -76,7 +84,7 @@ func buildPanel(c *ui.Context, t *design.Tokens, runtime contracts.UIRuntime, ch
 			case tabTerminal:
 				buildTerminalPane(c, t, terminal, runtime, st)
 			case tabAgents:
-				buildAgentsPane(c, t, team, runtime, st)
+				buildAgentsPane(c, t, chat, team, activities, runtime, st)
 			case tabTasks:
 				buildTasksPane(c, t, board, runtime, st)
 			default:
@@ -96,11 +104,19 @@ func buildPaneSelector(c *ui.Context, cfg Config, st *state, runtime contracts.U
 	}
 	label := uikit.T(st.locale, "切换面板", "Switch pane")
 	selector := ui.PopoverMenuButton(c, labels[st.tab], func(m *ui.Menu) {
-		for index, pane := range labels {
-			index, pane := index, pane
-			if m.Item(pane).Checked(index == st.tab).Chosen() && st.tab != index {
-				st.tab = index
-				runtime.Invalidate()
+		groups := paneMenuGroups()
+		for groupIndex, group := range groups {
+			if groupIndex > 0 {
+				m.Separator()
+			}
+			for _, index := range group {
+				index := index
+				if index < 0 || index >= len(labels) {
+					continue
+				}
+				if m.Item(labels[index]).Checked(index == st.tab).Chosen() && st.tab != index {
+					st.selectPane(index, runtime)
+				}
 			}
 		}
 	})
@@ -136,21 +152,23 @@ func buildPaneClose(c *ui.Context, t *design.Tokens, runtime contracts.UIRuntime
 		return
 	}
 	label := st.tr("关闭检查器", "Close inspector")
-	close := ui.ButtonBase(c).Size(24, 24).Center().Radius(design.RadiusSM).
-		Label(label).Tooltip(label)
-	close = rowTint(t, close, false)
-	close.Children(func() {
-		ui.Icon(c, icons.Close()).Size(14, 14).TextColor(t.LabelSecondary)
+	uikit.IconButton(c, uikit.IconButtonOptions{
+		Key:     "rightpanel.close",
+		Label:   label,
+		Tooltip: label,
+		Icon:    icons.Close(),
+		Size:    design.IconSizeS,
+		OnClick: func() {
+			_ = run()
+			runtime.Invalidate()
+		},
 	})
-	if close.Clicked() {
-		_ = run()
-		runtime.Invalidate()
-	}
 }
 
 // buildPaneAction is the one pane-level action of the active pane, at the
 // pane header's right edge. Panes without a page action keep it empty.
-func buildPaneAction(c *ui.Context, runtime contracts.UIRuntime, terminal contracts.TerminalService, st *state) {
+func buildPaneAction(c *ui.Context, runtime contracts.UIRuntime, terminal contracts.TerminalService,
+	board contracts.TaskBoard, st *state) {
 	switch st.tab {
 	case tabFiles:
 		if ui.Button(c, st.tr("刷新", "Refresh")).
@@ -168,11 +186,12 @@ func buildPaneAction(c *ui.Context, runtime contracts.UIRuntime, terminal contra
 			runtime.Invalidate()
 		}
 	case tabTasks:
+		if st.tasksLoading {
+			ui.Spinner(c)
+		}
 		if ui.Button(c, st.tr("刷新", "Refresh")).
 			Tooltip(st.tr("重新加载任务", "Reload tasks")).Clicked() {
-			st.tasksLoaded = false
-			st.tasksErr = ""
-			runtime.Invalidate()
+			refreshTasks(board, runtime, st)
 		}
 	case tabTerminal:
 		if ui.Button(c, st.tr("清空", "Clear")).Clicked() {
@@ -203,6 +222,20 @@ func buildOverviewPane(c *ui.Context, t *design.Tokens, chat contracts.ChatServi
 	}
 	effective := chat.Config()
 	model := firstNonEmpty(strings.TrimSpace(effective.Model), uikit.T(locale, "未配置", "Not configured"))
+	overviewRows := []uikit.KeyValue{
+		{Key: uikit.T(locale, "消息", "Messages"), Value: fmt.Sprintf("%d", len(chatSession.Messages))},
+	}
+	// The workspace is context the conversation header also names: the overview
+	// used to leave it out, so a user could not tell which project the session
+	// (and its Files/Changes panes) belongs to.
+	if workspace := overviewWorkspaceName(st); workspace != "" {
+		overviewRows = append(overviewRows,
+			uikit.KeyValue{Key: uikit.T(locale, "工作区", "Workspace"), Value: workspace})
+	}
+	overviewRows = append(overviewRows,
+		uikit.KeyValue{Key: uikit.T(locale, "更新时间", "Updated"), Value: formatUpdatedAt(locale, chatSession.UpdatedAt)},
+		uikit.KeyValue{Key: uikit.T(locale, "模型", "Model"), Value: model},
+	)
 	ui.Column(c).FillWidth().Gap(design.Space2).Children(func() {
 		design.Apply(ui.Text(c, title), t.Font(design.TypeM)).
 			FontWeight(600).TextColor(t.LabelPrimary).MaxLines(1).Ellipsis("…")
@@ -216,11 +249,7 @@ func buildOverviewPane(c *ui.Context, t *design.Tokens, chat contracts.ChatServi
 				}
 			})
 		}
-		uikit.KeyValueRows(c, []uikit.KeyValue{
-			{Key: uikit.T(locale, "消息", "Messages"), Value: fmt.Sprintf("%d", len(chatSession.Messages))},
-			{Key: uikit.T(locale, "更新时间", "Updated"), Value: formatUpdatedAt(locale, chatSession.UpdatedAt)},
-			{Key: uikit.T(locale, "模型", "Model"), Value: model},
-		})
+		uikit.KeyValueRows(c, overviewRows)
 		if chatSession.Error != "" {
 			uikit.ErrorLine(c, chatSession.Error)
 		}
@@ -257,6 +286,31 @@ func intLabel(value int) string {
 		return ""
 	}
 	return fmt.Sprintf("%d", value)
+}
+
+// overviewWorkspaceName is the current workspace for the Overview property
+// sheet: its name (or folder path), bounded so a long project name cannot
+// stretch the 320 DIP pane's rows.
+func overviewWorkspaceName(st *state) string {
+	if st == nil {
+		return ""
+	}
+	var workspace contracts.WorkspaceService
+	if raw, ok := st.ctx.Get(contracts.KeyWorkspace); ok {
+		workspace, _ = raw.(contracts.WorkspaceService)
+	}
+	if workspace == nil {
+		return ""
+	}
+	current, ok, err := workspace.Current(context.Background())
+	if err != nil || !ok {
+		return ""
+	}
+	name := firstNonEmpty(strings.TrimSpace(current.Name), strings.TrimSpace(current.Root))
+	if name == "" {
+		return ""
+	}
+	return truncateRunes(name, 40)
 }
 
 // buildToolsPane aggregates every ToolCall of the session, in message order,
@@ -317,11 +371,10 @@ type toolItem struct {
 func buildToolRow(row ui.ListRow, t *design.Tokens, st *state, item toolItem) {
 	c := row.Context
 	tool := item.tool
-	status := statusLabel(tool.Status, st.locale)
-	color := statusColor(t, tool.Status)
+	statusKind := uikit.ParseToolStatus(tool.Status).Kind()
 	ui.Column(c).FillWidth().Gap(design.Space1).Children(func() {
 		ui.Row(c).FillWidth().Gap(design.Space2).AlignItems(ui.Center).Children(func() {
-			design.Apply(ui.Badge(c, status), t.Badge()).TextColor(color)
+			uikit.StatusBadge(c, t, statusKind, uikit.ToolStatusLabel(st.locale, tool.Status))
 			design.Apply(ui.Text(c, tool.Name), t.Font(design.TypeXS)).
 				FontWeight(600).TextColor(t.LabelPrimary).MaxLines(1).Ellipsis("…")
 			ui.Spacer(c).Grow(1)
@@ -347,74 +400,10 @@ func runtimeInvalidate(st *state) {
 	}
 }
 
-// rowTint paints a self-drawn ButtonBase control's interaction states: selected
-// and pressed use the stronger selection tint, hover the lighter hover tint.
-// The inspector's lists are official ui.List widgets, which paint their own row
-// states; this remains only for the standalone bare buttons (the close control,
-// the artifact title toggle and the task overflow button) that have no native
-// look and must draw their own hover/pressed feedback.
-func rowTint(t *design.Tokens, el ui.Element, selected bool) ui.Element {
-	switch {
-	case el.Pressed():
-		return el.Background(t.BgSelected)
-	case selected:
-		return el.Background(t.BgSelected)
-	case el.Hovered():
-		return el.Background(t.BgHover)
-	default:
-		return el
-	}
-}
-
 // buildEmptyPane is the centered empty state of one pane: a title and hint in
 // flow, without the decorative icon-in-a-colored-circle anti-pattern.
 func buildEmptyPane(c *ui.Context, text string) {
 	uikit.EmptyStateBlock(c, text, "", nil)
-}
-
-// statusLabel maps a tool status to its inspector label.
-func statusLabel(status string, locale contracts.LocaleService) string {
-	switch normalizeStatus(status) {
-	case "running":
-		return uikit.T(locale, "运行中", "Running")
-	case "ok":
-		return uikit.T(locale, "完成", "Completed")
-	case "error":
-		return uikit.T(locale, "失败", "Failed")
-	default:
-		if trimmed := strings.TrimSpace(status); trimmed != "" {
-			return trimmed
-		}
-		return uikit.T(locale, "未知", "Unknown")
-	}
-}
-
-// statusColor maps a tool status to its brand text color token.
-func statusColor(t *design.Tokens, status string) ui.Color {
-	switch normalizeStatus(status) {
-	case "running":
-		return t.WarningText
-	case "ok":
-		return t.SuccessText
-	case "error":
-		return t.DangerText
-	default:
-		return t.LabelTertiary
-	}
-}
-
-// normalizeStatus folds the status spellings Rig uses into running/ok/error.
-func normalizeStatus(status string) string {
-	switch strings.ToLower(strings.TrimSpace(status)) {
-	case "running", "in_progress", "in-progress", "active", "started":
-		return "running"
-	case "ok", "success", "succeeded", "done", "complete", "completed":
-		return "ok"
-	case "error", "failed", "failure", "canceled", "cancelled":
-		return "error"
-	default:
-		return ""
-	}
 }
 
 // formatUpdatedAt renders a session update timestamp in the user's date
@@ -440,6 +429,13 @@ func truncateSummary(summary string) string {
 // active session, read from the SQLite-backed session log once per session (or
 // when the chat reports new events) and shown in the official native list. It
 // degrades to an explanatory empty state without a store.
+//
+// Depth added by the shell audit: a filter field (event type or payload), an
+// explicit refresh, an honest count (the pane reads a bounded window of the
+// newest events, it does not know the total), and per-event copy plus a
+// fold-out of the full payload. The developer-log surface is where a user
+// debugs a run, so the raw event must be reachable and copyable, not truncated
+// to a preview with no way back.
 func buildLogPane(c *ui.Context, t *design.Tokens, log eventReader, chat contracts.ChatService,
 	locale contracts.LocaleService, st *state) {
 	active := chat.ActiveSession()
@@ -458,41 +454,139 @@ func buildLogPane(c *ui.Context, t *design.Tokens, log eventReader, chat contrac
 		uikit.ErrorLine(c, uikit.T(locale, "读取会话日志失败：", "Failed to read the session log: ")+st.logErr.Error())
 		return
 	}
+	query := strings.TrimSpace(st.logFilter)
+	events := filterLogEvents(st.logEvents, query)
 	ui.Column(c).FillWidth().Gap(design.Space2).Children(func() {
-		design.Apply(ui.Text(c, uikit.T(locale,
-			fmt.Sprintf("%d 条会话事件", len(st.logEvents)), fmt.Sprintf("%d session events", len(st.logEvents)))),
+		// Filter and refresh together, above the rows: filtering is a view of
+		// the loaded window, refresh re-reads the window from the store.
+		ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(design.Space2).Children(func() {
+			filterLabel := uikit.T(locale, "筛选日志", "Filter log")
+			ui.SearchField(c, &st.logFilter).Label(filterLabel).
+				Placeholder(uikit.T(locale, "按类型或内容筛选…", "Filter by type or content…")).Grow(1)
+			refreshLabel := uikit.T(locale, "刷新", "Refresh")
+			uikit.IconButton(c, uikit.IconButtonOptions{
+				Key:     "rightpanel.log.refresh",
+				Label:   refreshLabel,
+				Tooltip: refreshLabel,
+				Icon:    icons.Reload(),
+				Size:    design.IconSizeS,
+				OnClick: func() {
+					st.logLoaded = false
+					st.runtime.Invalidate()
+				},
+			})
+		})
+		design.Apply(ui.Text(c, logCountLabel(locale, len(st.logEvents), len(events), query != "")),
 			t.Font(design.TypeXXS)).TextColor(t.LabelTertiary)
-		if len(st.logEvents) == 0 {
+		if len(events) == 0 {
+			if query != "" {
+				buildEmptyPane(c, uikit.T(locale, "没有匹配的事件", "No matching events"))
+				return
+			}
 			buildEmptyPane(c, uikit.T(locale, "还没有会话事件", "No session events yet"))
 			return
 		}
-		events := st.logEvents
 		st.logList.Key = func(row int) any { return events[len(events)-1-row].Seq }
 		st.logList.Label = func(row int) string { return events[len(events)-1-row].Type }
 		ui.List(c, &st.logList, len(events)).
 			Label(uikit.T(locale, "会话事件", "Session events")).
 			Gap(design.Space1).
 			Rows(func(row ui.ListRow) {
-				buildLogRow(row, t, locale, events[len(events)-1-row.Index])
+				buildLogRow(row, t, locale, st, events[len(events)-1-row.Index])
 			})
 	})
 }
 
-// buildLogRow is one durable event row: sequence, type, clock and a bounded
-// payload preview.
-func buildLogRow(row ui.ListRow, t *design.Tokens, locale contracts.LocaleService, event rig.SessionEvent) {
+// logCountLabel is the Log pane's honest count: the store is read with a
+// bounded limit, so when the window is full the copy says "latest N" instead of
+// claiming those are all the session's events; with a filter it shows how many
+// of the loaded window match.
+func logCountLabel(locale contracts.LocaleService, loaded, shown int, filtered bool) string {
+	windowed := loaded >= logLimit
+	switch {
+	case filtered && windowed:
+		return uikit.T(locale,
+			fmt.Sprintf("显示 %d / 最近 %d 条会话事件", shown, loaded),
+			fmt.Sprintf("%d of the latest %d session events", shown, loaded))
+	case filtered:
+		return uikit.T(locale,
+			fmt.Sprintf("显示 %d / %d 条会话事件", shown, loaded),
+			fmt.Sprintf("%d of %d session events", shown, loaded))
+	case windowed:
+		return uikit.T(locale,
+			fmt.Sprintf("最近 %d 条会话事件", loaded),
+			fmt.Sprintf("Latest %d session events", loaded))
+	default:
+		return uikit.T(locale,
+			fmt.Sprintf("%d 条会话事件", loaded),
+			fmt.Sprintf("%d session events", loaded))
+	}
+}
+
+// filterLogEvents keeps the events whose type or payload contains query, case
+// insensitively, preserving the store order.
+func filterLogEvents(events []rig.SessionEvent, query string) []rig.SessionEvent {
+	needle := strings.ToLower(strings.TrimSpace(query))
+	if needle == "" {
+		return events
+	}
+	filtered := make([]rig.SessionEvent, 0, len(events))
+	for _, event := range events {
+		haystack := strings.ToLower(event.Type + "\x00" + string(event.Payload))
+		if strings.Contains(haystack, needle) {
+			filtered = append(filtered, event)
+		}
+	}
+	return filtered
+}
+
+// buildLogRow is one durable event row: sequence, type, clock, a bounded
+// payload preview, a copy action for the raw payload and a fold-out with the
+// full event JSON (a long payload stays reachable instead of ending in "…").
+func buildLogRow(row ui.ListRow, t *design.Tokens, locale contracts.LocaleService,
+	st *state, event rig.SessionEvent) {
 	c := row.Context
+	payload := strings.TrimSpace(string(event.Payload))
 	ui.Column(c).FillWidth().Gap(design.Space1).Children(func() {
 		ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(design.Space2).Children(func() {
 			design.Apply(ui.Text(c, fmt.Sprintf("#%d", event.Seq)), t.TextMuted(design.TypeXXXS))
 			design.Apply(ui.Text(c, event.Type), t.Font(design.TypeXXS)).FontWeight(600).
 				TextColor(t.LabelPrimary).Grow(1).MaxLines(1).Ellipsis("…")
 			design.Apply(ui.Text(c, uikit.FormatClock(locale, event.Time)), t.TextMuted(design.TypeXXXS))
+			if payload != "" {
+				copyLabel := uikit.T(locale, "复制事件", "Copy event")
+				uikit.IconButton(c, uikit.IconButtonOptions{
+					Key:     "rightpanel.log.copy",
+					Label:   copyLabel,
+					Tooltip: copyLabel,
+					Icon:    icons.Copy(),
+					Size:    design.IconSizeS,
+					OnClick: func() {
+						c.WriteClipboard(payload)
+						if st.notifier != nil {
+							st.notifier.Notify(contracts.NotifySuccess,
+								uikit.T(locale, "已复制事件 #", "Copied event #")+fmt.Sprintf("%d", event.Seq))
+						}
+					},
+				})
+			}
 		})
-		if payload := strings.TrimSpace(string(event.Payload)); payload != "" {
-			design.Apply(ui.Text(c, truncateRunes(payload, 160)), t.MonoFamily()).
-				FontSize(11).TextColor(t.LabelTertiary).MaxLines(3)
+		if payload == "" {
+			return
 		}
+		preview := truncateRunes(payload, 160)
+		design.Apply(ui.Text(c, preview), t.MonoText(design.TypeXXXS)).
+			TextColor(t.LabelTertiary).MaxLines(3)
+		if preview == payload {
+			return
+		}
+		key := "log/full/" + st.logSession + "#" + fmt.Sprintf("%d", event.Seq)
+		open := st.open[key]
+		ui.Collapsible(c, uikit.T(locale, "查看完整事件", "Show full event"), &open, func() {
+			design.Apply(ui.Text(c, truncateRunes(payload, 4000)), t.MonoText(design.TypeXXXS)).
+				TextColor(t.LabelSecondary).Selectable()
+		})
+		st.open[key] = open
 	})
 }
 

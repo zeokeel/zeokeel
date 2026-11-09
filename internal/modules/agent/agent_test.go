@@ -420,6 +420,37 @@ func TestEventMappingToolsReasoningAndErrors(t *testing.T) {
 	if !strings.Contains(call.Summary, "echoed") {
 		t.Fatalf("tool summary = %q, want the tool result", call.Summary)
 	}
+	// A live turn certifies its tool timeline, even when some (or all) offsets
+	// are zero; the durable tool_call event carries the byte offset so restore
+	// can rebuild the order without guessing.
+	if !assistant.ToolTimelineKnown {
+		t.Fatal("live assistant message does not certify its tool timeline")
+	}
+	store, storeOK := svc.store.(*fakeStore)
+	if !storeOK {
+		t.Fatalf("service store is %T, want *fakeStore", svc.store)
+	}
+	events, eventErr := store.Events(context.Background(), id, 0, 0)
+	if eventErr != nil {
+		t.Fatalf("Events: %v", eventErr)
+	}
+	var durableCall *toolCallEvent
+	for index := range events {
+		if events[index].Type != "tool_call" {
+			continue
+		}
+		var payload toolCallEvent
+		if err := json.Unmarshal(events[index].Payload, &payload); err != nil {
+			t.Fatalf("decode tool_call event %d: %v", index, err)
+		}
+		durableCall = &payload
+	}
+	if durableCall == nil {
+		t.Fatal("no durable tool_call event was recorded")
+	}
+	if want := len("before "); durableCall.TextOffset == nil || *durableCall.TextOffset != want {
+		t.Fatalf("durable tool_call text_offset = %v, want %d", durableCall.TextOffset, want)
+	}
 	if echo.calls.Load() != 1 || provider.calls.Load() != 2 {
 		t.Fatalf("tool calls = %d, provider streams = %d", echo.calls.Load(), provider.calls.Load())
 	}

@@ -16,7 +16,9 @@
 // read-only text/Markdown/image preview; the changes pane lists the current
 // workspace's uncommitted files with native collapsible unified diffs; the
 // terminal pane is a simple command runner (no PTY/persistent shell) with a
-// shell picker, scrollable mono output and Run/Stop.
+// shell picker, scrollable mono output and Run/Stop; the agents pane merges the
+// async team roster (steer/interrupt/close) with the read-only synchronous
+// subagent delegations of the active session.
 //
 // The host owns the panel width and the open/close control: the module only
 // fills the slot. Chat changes arrive on the agent goroutine, so the module
@@ -191,9 +193,12 @@ type state struct {
 	toolsList ui.ListState
 	toolsSel  int
 
-	// Agents pane: the native member list and the row chosen for the steer pane.
-	agentsList ui.ListState
-	agentsSel  int
+	// Agents pane: the native teammate list and the read-only delegation list,
+	// with the row chosen in each.
+	agentsList   ui.ListState
+	agentsSel    int
+	subagentList ui.ListState
+	subagentsSel int
 
 	// Tasks pane: the native task list.
 	tasksList ui.ListState
@@ -213,14 +218,17 @@ type state struct {
 
 	// Agents pane state: the selected teammate, the steer draft, the last
 	// action status/error and the close confirmation (closing a teammate is
-	// destructive, so it goes through a native AlertDialog).
-	selectedMemberID string
-	steerDraft       string
-	teamStatus       string
-	teamErr          string
-	memberCloseOpen  bool
-	memberCloseID    string
-	memberCloseName  string
+	// destructive, so it goes through a native AlertDialog). The synchronous
+	// delegations share the list but keep a separate selection: their detail is
+	// read-only.
+	selectedMemberID   string
+	selectedSubagentID string
+	steerDraft         string
+	teamStatus         string
+	teamErr            string
+	memberCloseOpen    bool
+	memberCloseID      string
+	memberCloseName    string
 
 	// Files pane artifact history: the expanded preview rows (keyed by
 	// artifact id), the official List's state and choice, and the last download
@@ -233,15 +241,60 @@ type state struct {
 	artifactsSavedPath string
 
 	// Tasks pane state: the cached shared task board (loaded lazily and after
-	// every mutation), the new-task draft and the row menu's delete
-	// confirmation.
+	// every mutation), the new-task draft, the delete confirmation (a native
+	// Modal: the destructive action is never the default), the list choice, the
+	// expanded task detail and the explicit-refresh loading flag.
 	tasksLoaded       bool
 	tasks             []contracts.BoardTask
 	tasksErr          string
+	tasksLoading      bool
+	tasksSel          int
+	tasksExpanded     string
+	tasksRemoveOpen   bool
 	taskDraft         string
 	taskDeleteOpen    bool
 	taskDeleteID      string
 	taskDeleteSubject string
+
+	// notifier raises the team completion toasts; nil when the host has no
+	// notification service.
+	notifier contracts.Notifier
+	// teamSeen remembers the last observed run state per member ID, so a run
+	// that finishes while the window is idle raises one toast (deduped by the
+	// finished stamp); team_notify.go owns the transition and pruning.
+	teamSeen map[string]teamSeenState
+	// lastBuiltFrame is the UIRuntime frame number of the last inspector build:
+	// the "open team/tasks panel" commands compare it with the live frame to
+	// tell whether the inspector is currently visible (the slot does not build
+	// while the host keeps it closed).
+	lastBuiltFrame uint64
+
+	// openCommands are the palette commands that open the team/tasks pane; they
+	// are re-registered when the language changes.
+	openCommands    []func()
+	openCommandLang string
+
+	// Team spawn dialog state: the native "new teammate" form. The spawn itself
+	// runs off the UI thread; the dialog shows a labelled spinner while it is in
+	// flight and can be cancelled.
+	teamSpawnOpen   bool
+	teamSpawnName   string
+	teamSpawnPrompt string
+	teamSpawnModel  string
+	teamSpawnErr    string
+	teamSpawnBusy   bool
+	teamSpawnCancel context.CancelFunc
+
+	// --- Phase 2 shell-depth fields (audit-shell) ---------------------------
+	// logFilter is the Log pane's type/payload filter (its query is matched
+	// against the event type and payload, case-insensitively).
+	logFilter string
+	// filesLoading and changesLoading mark a directory listing / workspace
+	// changes read that runs off the UI thread: the pane shows a spinner and
+	// disables the refresh action until the posted result lands, instead of
+	// blocking the frame on disk or git I/O.
+	filesLoading   bool
+	changesLoading bool
 }
 
 // tr localizes the inspector's own copy for the current frame.
@@ -270,6 +323,9 @@ func Module() *module.Descriptor[Config] {
 			filesListSel:  -1,
 			toolsSel:      -1,
 			agentsSel:     -1,
+			subagentsSel:  -1,
+			tasksSel:      -1,
+			teamSeen:      make(map[string]teamSeenState),
 			changesOpen:   make(map[string]bool),
 			diffs:         make(map[string]*diffView),
 			artifactsOpen: make(map[string]bool),
@@ -294,13 +350,34 @@ func Module() *module.Descriptor[Config] {
 		if raw, ok := ctx.Get(contracts.KeyStore); ok {
 			log, _ = raw.(eventReader)
 		}
+		// The team/tasks open commands and the completion toasts are optional
+		// host capabilities: without them the panes still render and just have
+		// no palette entry / toast.
+		if raw, ok := ctx.Get(contracts.KeyNotifier); ok {
+			moduleState.notifier, _ = raw.(contracts.Notifier)
+		}
+		if err := moduleState.registerOpenCommands(); err != nil {
+			return fmt.Errorf("rightpanel: open-pane commands: %w", err)
+		}
+		if _, err := ctx.Effect(func() cordis.Effect {
+			return cordis.Effect{cordis.CleanupOf(moduleState.closeOpenCommands)}
+		}); err != nil {
+			moduleState.closeOpenCommands()
+			return err
+		}
 
 		unsubscribe, err := chat.Subscribe(func(string) {
-			// A chat change may add durable events to the active session; drop
-			// the cached log on the UI thread so the next Log frame re-reads it
-			// once instead of every frame reading it (P1).
+			// A chat change may add durable events to the active session and may
+			// follow a team/task mutation; drop the cached log and the cached
+			// task board on the UI thread so the next frame re-reads them once
+			// instead of every frame reading them (P1), and raise the one-shot
+			// team completion toasts. Without the task invalidation an agent
+			// writing team_task_* left the open Tasks pane showing stale rows
+			// until the user pressed Refresh.
 			runtime.Post(func() {
 				moduleState.logLoaded = false
+				moduleState.tasksLoaded = false
+				moduleState.observeTeamRunChanges()
 				runtime.Invalidate()
 			})
 		})
@@ -332,6 +409,16 @@ func Module() *module.Descriptor[Config] {
 					if service, ok := ctx.Get(contracts.KeyTeam); ok {
 						team = service
 					}
+					// The synchronous delegation read model is the optional
+					// read-only half of the provided subagent service: the
+					// Agents pane merges it with the teammate roster when
+					// present and keeps working when it is not.
+					var activities contracts.SubagentActivityLister
+					if service, ok := ctx.Get(contracts.KeySubagents); ok {
+						if lister, ok := any(service).(contracts.SubagentActivityLister); ok {
+							activities = lister
+						}
+					}
 					var board contracts.TaskBoard
 					if service, ok := ctx.Get(contracts.KeyTaskBoard); ok {
 						board = service
@@ -342,7 +429,7 @@ func Module() *module.Descriptor[Config] {
 					if service, ok := ctx.Get(contracts.KeyArtifactPresenter); ok {
 						artifacts, _ = service.(contracts.ArtifactLister)
 					}
-					buildPanel(c, design.Of(c), runtime, chat, log, workspace, terminal, team, board, artifacts, config, moduleState)
+					buildPanel(c, design.Of(c), runtime, chat, log, workspace, terminal, team, activities, board, artifacts, config, moduleState)
 				},
 			})
 		})
@@ -430,9 +517,47 @@ func (st *state) stepPane(delta int) {
 	if len(labels) == 0 {
 		return
 	}
-	st.tab = (st.tab + delta + len(labels)) % len(labels)
-	if st.runtime != nil {
-		st.runtime.Invalidate()
+	next := (st.tab + delta + len(labels)) % len(labels)
+	st.selectPane(next, st.runtime)
+}
+
+// selectPane sets the active inspector pane and refreshes what the pane shows:
+// entering the Tasks pane re-reads the shared board (the agent may have written
+// tasks while another pane was open), and the Agents pane clears its last action
+// status. It is the one path used by the selector menu, the pane-step commands
+// and the open-pane palette commands.
+func (st *state) selectPane(tab int, runtime contracts.UIRuntime) {
+	labels := paneLabels(st.cfg, st.locale)
+	if len(labels) == 0 {
+		return
+	}
+	if tab < 0 || tab >= len(labels) {
+		tab = 0
+	}
+	st.tab = tab
+	switch tab {
+	case tabTasks:
+		st.tasksLoaded = false
+		st.tasksErr = ""
+		st.tasksExpanded = ""
+	case tabAgents:
+		st.teamErr = ""
+		st.teamStatus = ""
+	}
+	if runtime != nil {
+		runtime.Invalidate()
+	}
+}
+
+// paneMenuGroups is the pane selector's menu order: the orchestration panes
+// first (the team and its shared task board are the daily entry points), then
+// the working panes, then the record panes. The separators make the grouping
+// visible without adding another level of nesting.
+func paneMenuGroups() [][]int {
+	return [][]int{
+		{tabAgents, tabTasks},
+		{tabTools, tabFiles, tabChanges, tabTerminal},
+		{tabOverview, tabLog},
 	}
 }
 
@@ -440,6 +565,21 @@ func (st *state) stepPane(delta int) {
 // reads; contracts.Store (and therefore the SQLite store module) implements it.
 type eventReader interface {
 	Last(ctx context.Context, sessionID string, limit int) ([]rig.SessionEvent, error)
+}
+
+// teamServiceFromState returns the optional live team backend. The inspector
+// reads it lazily (contracts.KeyTeam is optional) so a headless host without the
+// agent module still renders the rest of the panel.
+func teamServiceFromState(st *state) contracts.TeamService {
+	if st == nil {
+		return nil
+	}
+	raw, ok := st.ctx.Get(contracts.KeyTeam)
+	if !ok || raw == nil {
+		return nil
+	}
+	team, _ := raw.(contracts.TeamService)
+	return team
 }
 
 // own registers one contribution and ties its unregistration to ctx's effect

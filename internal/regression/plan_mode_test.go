@@ -353,23 +353,25 @@ func TestPlanModeCombinesWithPermissionSetting(t *testing.T) {
 		t.Fatalf("plan+workspace executed write_file %d times, want 0", got)
 	}
 
-	// Normal + never: the approvals policy denies immediately.
+	// Normal + read-only: informational tools are auto-allowed while a
+	// workspace write still queues for the user and only runs once allowed.
 	setMode(contracts.AgentModeNormal)
-	setPermission(approvals.ModeNever)
-	before = harness.count("write_file")
-	harness.script.set("write_file")
-	if err := harness.chat.Send(sessionID, "call write_file"); err != nil {
-		t.Fatalf("Send: %v", err)
+	setPermission(contracts.PermissionReadOnly)
+	readBefore = harness.count("read_file")
+	harness.runImmediate(t, sessionID, "read_file")
+	if got := harness.count("read_file") - readBefore; got != 1 {
+		t.Fatalf("normal+read-only executed read_file %d times, want 1", got)
 	}
-	harness.waitIdle(t, sessionID)
-	if got := harness.count("write_file") - before; got != 0 {
-		t.Fatalf("normal+never executed write_file %d times, want 0", got)
+	writeBefore = harness.count("write_file")
+	session := harness.runWithApproval(t, sessionID, "write_file", contracts.ApprovalAllow)
+	if got := harness.count("write_file") - writeBefore; got != 1 {
+		t.Fatalf("normal+read-only executed write_file %d times after allow, want 1", got)
 	}
-	if pending := harness.approvals().Pending(); len(pending) != 0 {
-		t.Fatalf("normal+never queued %d approvals, want 0", len(pending))
+	if status, _ := lastToolStatus(t, session); status != "ok" {
+		t.Fatalf("normal+read-only write_file status = %q, want ok", status)
 	}
 
-	// Restore the ask policy for later assertions/hygiene.
-	setPermission(contracts.PermissionAsk)
+	// Restore the default workspace policy for later assertions/hygiene.
+	setPermission(contracts.PermissionWorkspace)
 	setMode(contracts.AgentModeNormal)
 }

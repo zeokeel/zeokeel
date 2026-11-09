@@ -43,12 +43,16 @@ const (
 )
 
 // filePreview is one cached file preview (the Files pane re-reads a file only
-// when the selection or the workspace changes).
+// when the selection or the workspace changes). loading marks a read that runs
+// off the UI thread: the preview card shows a spinner until the posted result
+// lands, so selecting a large file never blocks a frame.
 type filePreview struct {
 	data      []byte
 	truncated bool
 	bitmap    *ui.Bitmap
 	err       string
+	loading   bool
+	workspace string
 }
 
 // buildFilesPane is the Files tab: the artifact history (when the host
@@ -243,13 +247,22 @@ func buildFilesWorkspaceSection(
 			uikit.ErrorLine(c, st.filesErr)
 		}
 
-		// The listing is cached: read only when the directory, the workspace or
-		// an explicit Refresh changed it (P1: no os.ReadDir in render).
-		entries, filesErr := st.filesEntriesFor(workspace, current)
+		// The listing is cached and read off the UI thread: only a directory,
+		// workspace or explicit Refresh change starts a read, and the pane shows
+		// the cached rows plus a spinner while the posted result is in flight
+		// (a large directory on a slow disk must not block the frame).
+		entries, filesErr, loading := st.filesEntriesFor(workspace, current, runtime)
 		visible := filterFileEntries(entries, st.filesFilter, st.filesShowHidden)
 		switch {
 		case filesErr != nil:
 			uikit.ErrorLine(c, uikit.T(st.locale, "列目录失败：", "Failed to list the directory: ")+filesErr.Error())
+		case loading && len(entries) == 0:
+			ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(design.Space2).Children(func() {
+				ui.Spinner(c).Label(uikit.T(st.locale, "正在读取目录…", "Reading the directory…")).
+					Size(design.Space3, design.Space3).TextColor(t.LabelSecondary)
+				design.Apply(ui.Text(c, uikit.T(st.locale, "正在读取目录…", "Reading the directory…")),
+					t.TextMuted(design.TypeXS))
+			})
 		case len(visible) == 0 && strings.TrimSpace(st.filesFilter) != "":
 			design.Apply(ui.Text(c, uikit.T(st.locale, "没有匹配的条目", "No matching entries")), t.TextMuted(design.TypeXS))
 		case len(visible) == 0 && len(entries) > 0:
@@ -272,18 +285,60 @@ func buildFilesWorkspaceSection(
 }
 
 // filesEntriesFor returns the cached listing of the Files pane's current
-// directory, reloading it only when the workspace, the directory or an explicit
-// Refresh invalidated it. Rendering never reads the filesystem itself (P1).
-func (st *state) filesEntriesFor(workspace contracts.WorkspaceService, current contracts.Workspace) ([]contracts.FileEntry, error) {
+// directory and starts the read off the UI thread when the workspace, the
+// directory or an explicit Refresh invalidated it. Rendering never reads the
+// filesystem itself (P1), and the in-flight read never blocks a frame: the
+// pane keeps its cached rows (or shows a spinner on first load) and the posted
+// result lands on a later frame. A result for a directory or workspace the user
+// already left is dropped.
+func (st *state) filesEntriesFor(workspace contracts.WorkspaceService,
+	current contracts.Workspace, runtime contracts.UIRuntime) ([]contracts.FileEntry, error, bool) {
 	workspaceKey := current.ID + "\x00" + current.Root
 	if st.filesLoaded && st.filesWorkspace == workspaceKey && st.filesLoadedDir == st.filesDir {
-		return st.filesEntries, st.filesLoadErr
+		return st.filesEntries, st.filesLoadErr, false
 	}
-	st.filesEntries, st.filesLoadErr = workspace.Files(context.Background(), st.filesDir)
-	st.filesLoaded = true
-	st.filesWorkspace = workspaceKey
-	st.filesLoadedDir = st.filesDir
-	return st.filesEntries, st.filesLoadErr
+	if st.filesLoading {
+		return st.filesEntries, st.filesLoadErr, true
+	}
+	if runtime == nil {
+		// A bare state (unit tests) keeps the old synchronous read.
+		st.filesEntries, st.filesLoadErr = workspace.Files(context.Background(), st.filesDir)
+		st.filesLoaded = true
+		st.filesWorkspace = workspaceKey
+		st.filesLoadedDir = st.filesDir
+		return st.filesEntries, st.filesLoadErr, false
+	}
+	dir := st.filesDir
+	st.filesLoading = true
+	go func() {
+		entries, err := workspace.Files(context.Background(), dir)
+		runtime.Post(func() {
+			st.filesLoading = false
+			// The user may have moved on while the read ran: keep the result
+			// only when the pane still shows the directory and workspace.
+			currentWorkspace, ok := st.currentWorkspaceKey(workspace)
+			if !ok || st.filesDir != dir || currentWorkspace != workspaceKey {
+				runtime.Invalidate()
+				return
+			}
+			st.filesEntries, st.filesLoadErr = entries, err
+			st.filesLoaded = true
+			st.filesWorkspace = workspaceKey
+			st.filesLoadedDir = dir
+			runtime.Invalidate()
+		})
+	}()
+	return st.filesEntries, st.filesLoadErr, true
+}
+
+// currentWorkspaceKey is the cache key of the workspace the Files pane shows
+// now; used by a posted async result to prove it still applies.
+func (st *state) currentWorkspaceKey(workspace contracts.WorkspaceService) (string, bool) {
+	current, ok, err := workspace.Current(context.Background())
+	if err != nil || !ok {
+		return "", false
+	}
+	return current.ID + "\x00" + current.Root, true
 }
 
 // buildFileList is the native directory listing: a ui.List with one keyboard
@@ -572,6 +627,15 @@ func buildFilePreview(c *ui.Context, t *design.Tokens, workspace contracts.Works
 		})
 
 		preview := st.filePreviewFor(workspace, path)
+		if preview.loading {
+			ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(design.Space2).Children(func() {
+				ui.Spinner(c).Label(uikit.T(st.locale, "正在读取文件…", "Reading the file…")).
+					Size(design.Space3, design.Space3).TextColor(t.LabelSecondary)
+				design.Apply(ui.Text(c, uikit.T(st.locale, "正在读取文件…", "Reading the file…")),
+					t.TextMuted(design.TypeXS))
+			})
+			return
+		}
 		if preview.err != "" {
 			uikit.ErrorLine(c, uikit.T(st.locale, "读取文件失败：", "Failed to read the file: ")+preview.err)
 			return
@@ -620,32 +684,84 @@ func (st *state) codeEditorFor(path string, data []byte) *editor.State {
 	return st.fileEditor
 }
 
-// filePreviewFor loads (once) and caches the selected file's preview.
+// filePreviewFor loads (once) and caches the selected file's preview. The read
+// and decode run off the UI thread when the module has a runtime: the returned
+// placeholder is loading until the posted result fills it, so selecting a large
+// file never blocks a frame. A bare state (unit tests) reads synchronously.
 func (st *state) filePreviewFor(workspace contracts.WorkspaceService, path string) *filePreview {
 	if st.filesPreview == nil {
 		st.filesPreview = make(map[string]*filePreview)
 	}
-	if cached, ok := st.filesPreview[path]; ok {
+	workspaceKey, _ := st.currentWorkspaceKey(workspace)
+	if cached, ok := st.filesPreview[path]; ok && cached.workspace == workspaceKey {
 		return cached
 	}
-	preview := &filePreview{}
+	preview := &filePreview{workspace: workspaceKey}
+	st.filesPreview[path] = preview
+	if st.runtime == nil || workspace == nil {
+		applyFilePreview(preview, loadFilePreview(workspace, path))
+		return preview
+	}
+	preview.loading = true
+	go func() {
+		result := loadFilePreview(workspace, path)
+		st.runtime.Post(func() {
+			// A refresh, a workspace switch or a newer selection replaced the
+			// map entry while the read ran: drop the stale result.
+			if st.filesPreview[path] != preview {
+				return
+			}
+			applyFilePreview(preview, result)
+			st.runtime.Invalidate()
+		})
+	}()
+	return preview
+}
+
+// filePreviewResult is one file preview read, carried from the read goroutine
+// to the UI thread before it is applied to the cached preview.
+type filePreviewResult struct {
+	data      []byte
+	truncated bool
+	bitmap    *ui.Bitmap
+	err       string
+}
+
+// loadFilePreview reads one file within the preview bound and decodes images.
+// It does file and image I/O only: no state is touched, so it is safe off the
+// UI thread.
+func loadFilePreview(workspace contracts.WorkspaceService, path string) filePreviewResult {
+	var result filePreviewResult
+	if workspace == nil {
+		result.err = "workspace is not enabled"
+		return result
+	}
 	data, err := workspace.ReadFile(context.Background(), path, maxPreviewBytes+1)
 	switch {
 	case err != nil:
-		preview.err = err.Error()
+		result.err = err.Error()
+		return result
 	case len(data) > maxPreviewBytes:
-		preview.truncated = true
-		preview.data = data[:maxPreviewBytes]
+		result.truncated = true
+		result.data = data[:maxPreviewBytes]
 	default:
-		preview.data = data
+		result.data = data
 	}
-	if len(preview.data) > 0 && isImagePath(path) {
-		if bitmap, decodeErr := ui.DecodeBitmap(preview.data); decodeErr == nil {
-			preview.bitmap = bitmap
+	if len(result.data) > 0 && isImagePath(path) {
+		if bitmap, decodeErr := ui.DecodeBitmap(result.data); decodeErr == nil {
+			result.bitmap = bitmap
 		}
 	}
-	st.filesPreview[path] = preview
-	return preview
+	return result
+}
+
+// applyFilePreview copies one read result into the cached preview.
+func applyFilePreview(preview *filePreview, result filePreviewResult) {
+	preview.data = result.data
+	preview.truncated = result.truncated
+	preview.bitmap = result.bitmap
+	preview.err = result.err
+	preview.loading = false
 }
 
 // Path classification helpers (the preview switches on them).

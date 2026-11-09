@@ -84,6 +84,7 @@ func buildSearchPage(c *ui.Context, kctx cordis.Context, st *searchState, locale
 				"The http(s) endpoint that receives queries and returns results; empty disables it."))
 			ui.Field(c, "API Key", func() {
 				ui.TextInput(c, &st.apiKey).Label(inputLabel(locale, "API Key")).
+					Password().
 					Placeholder(localized(locale,
 						"API Key 以 Authorization: Bearer 发送；留空保持不变",
 						"The API key is sent as Authorization: Bearer; leave blank to keep it")).FillWidth()

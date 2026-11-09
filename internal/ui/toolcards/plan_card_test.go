@@ -8,6 +8,8 @@ import (
 	"context"
 	"testing"
 
+	"github.com/egoist/mygo/ui"
+
 	"github.com/zeokeel/zeokeel/internal/contracts"
 	"github.com/zeokeel/zeokeel/internal/ui/toolcards"
 )
@@ -114,5 +116,60 @@ func TestPlanReviewIsCoveredByName(t *testing.T) {
 	}
 	if !found {
 		t.Fatalf("plan_review missing from real tool names: %v", names)
+	}
+}
+
+// dangerPixels counts the frame's brand danger-red pixels: a neutral status
+// badge must not paint the failure color.
+func dangerPixels(t *testing.T, tester *ui.Tester) int {
+	t.Helper()
+	img := tester.Image()
+	count := 0
+	for y := img.Rect.Min.Y; y < img.Rect.Max.Y; y++ {
+		for x := img.Rect.Min.X; x < img.Rect.Max.X; x++ {
+			pixel := img.RGBAAt(x, y)
+			r, g, b := int(pixel.R), int(pixel.G), int(pixel.B)
+			if r > 120 && r > g+40 && r > b+40 {
+				count++
+			}
+		}
+	}
+	return count
+}
+
+// TestPlanReviewCardCancelledIsNeutral covers DESIGN.md §5.2 / F-2: a cancelled
+// plan review is a user stop, so its badge is neutral — it must not paint the
+// danger red of a failure nor read as 失败. Approved and pending keep their
+// existing success/waiting semantics.
+func TestPlanReviewCardCancelledIsNeutral(t *testing.T) {
+	h := newPlanHarness(t, &fakePlanReviewer{state: "cancelled"})
+	h.showCalls([]contracts.ToolCall{{
+		ID: "plan-4", Name: "plan_review", Status: "ok",
+		Summary: `{"plan":"# Plan"}`,
+	}}, nil, nil)
+	tester := h.tester()
+	tester.Frame()
+	h.assertTexts(tester, "计划审阅", "已取消")
+	h.assertNoTexts(tester, "失败")
+	if got := dangerPixels(t, tester); got != 0 {
+		t.Fatalf("cancelled plan badge paints %d danger-red pixels, want a neutral tint", got)
+	}
+
+	// Approved and pending keep their labels (and the success tint is not the
+	// failure red either).
+	for _, want := range []struct{ state, label string }{
+		{"approved", "已批准"},
+		{"idle", "待审阅"},
+	} {
+		reviewer := h.ctx
+		_ = reviewer
+		other := newPlanHarness(t, &fakePlanReviewer{state: want.state})
+		other.showCalls([]contracts.ToolCall{{
+			ID: "plan-5", Name: "plan_review", Status: "ok",
+			Summary: `{"plan":"# Plan"}`,
+		}}, nil, nil)
+		otherTester := other.tester()
+		otherTester.Frame()
+		other.assertTexts(otherTester, want.label)
 	}
 }

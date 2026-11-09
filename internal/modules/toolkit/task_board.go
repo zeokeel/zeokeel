@@ -28,7 +28,10 @@ type taskBoardAdapter struct {
 	deleted map[string]bool
 }
 
-var _ contracts.TaskBoard = (*taskBoardAdapter)(nil)
+var (
+	_ contracts.TaskBoard    = (*taskBoardAdapter)(nil)
+	_ contracts.TaskAssigner = (*taskBoardAdapter)(nil)
+)
 
 // newTaskBoard wraps the toolkit's shared task manager.
 func newTaskBoard(manager *team.TaskManager) *taskBoardAdapter {
@@ -103,6 +106,36 @@ func (b *taskBoardAdapter) SetStatus(ctx context.Context, id, status string) (co
 	return boardTaskFromRig(updated), nil
 }
 
+// Assign implements contracts.TaskAssigner: it sets (or clears) one task's
+// owner through the shared manager, so the model tools and the inspector see the
+// same assignee. The rig manager rejects an in-progress task without an owner;
+// clearing the owner of an in-progress task is therefore reported as an error
+// rather than silently demoting the task.
+func (b *taskBoardAdapter) Assign(ctx context.Context, id, owner string) (contracts.BoardTask, error) {
+	id = strings.TrimSpace(id)
+	owner = strings.TrimSpace(owner)
+	if id == "" {
+		return contracts.BoardTask{}, errors.New("toolkit: task board: task id is required")
+	}
+	if b.isDeleted(id) {
+		return contracts.BoardTask{}, fmt.Errorf("toolkit: task board: %w: %q", team.ErrTaskNotFound, id)
+	}
+	task, err := b.manager.Get(ctx, id)
+	if err != nil {
+		return contracts.BoardTask{}, fmt.Errorf("toolkit: task board: %w", err)
+	}
+	update := rig.TeamTaskUpdate{Owner: &owner}
+	if owner == "" && task.Status == contracts.TaskStatusInProgress {
+		return contracts.BoardTask{}, fmt.Errorf(
+			"toolkit: task board: in-progress tasks need an owner; complete or reopen the task first")
+	}
+	updated, err := b.manager.Update(ctx, id, update)
+	if err != nil {
+		return contracts.BoardTask{}, fmt.Errorf("toolkit: task board: %w", err)
+	}
+	return boardTaskFromRig(updated), nil
+}
+
 // Delete implements contracts.TaskBoard. rig v0.13 has no Delete, so the task is
 // tombstoned and hidden from the board; the model tools keep their own view.
 func (b *taskBoardAdapter) Delete(ctx context.Context, id string) error {
@@ -138,6 +171,8 @@ func boardTaskFromRig(task rig.TeamTask) contracts.BoardTask {
 		Description: task.Description,
 		Status:      task.Status,
 		Owner:       task.Owner,
+		BlockedBy:   append([]string(nil), task.BlockedBy...),
+		WriteScopes: append([]string(nil), task.WriteScopes...),
 		Created:     task.Created,
 		Updated:     task.Updated,
 	}

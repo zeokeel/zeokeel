@@ -184,6 +184,15 @@ func newHarness(t *testing.T, service contracts.AutomationService, cfg automatio
 // the delete/undo toast tests.
 func newHarnessWithNotifier(t *testing.T, service contracts.AutomationService, notifier contracts.Notifier, cfg automation.Config) *harness {
 	t.Helper()
+	return newHarnessWithSetup(t, service, notifier, cfg, nil)
+}
+
+// newHarnessWithSetup is newHarnessWithNotifier plus one optional provider, for
+// tests that need another host service (the workspace service behind the task
+// cards' workspace-name lookup).
+func newHarnessWithSetup(t *testing.T, service contracts.AutomationService, notifier contracts.Notifier,
+	cfg automation.Config, setup func(cordis.Context)) *harness {
+	t.Helper()
 	uiRoot := uiroot.New(uiroot.Config{AppName: "ZeoKeel"})
 	ctx := cordis.Root()
 	t.Cleanup(func() { _ = ctx.DisposeAll() })
@@ -197,6 +206,9 @@ func newHarnessWithNotifier(t *testing.T, service contracts.AutomationService, n
 	}
 	if notifier != nil {
 		provide[contracts.Notifier](t, ctx, contracts.KeyNotifier, notifier)
+	}
+	if setup != nil {
+		setup(ctx)
 	}
 	fiber := activate(t, ctx, automation.Module(), cfg)
 	return &harness{t: t, ctx: ctx, uiRoot: uiRoot, fiber: fiber}
@@ -298,7 +310,7 @@ func TestTaskListRenders(t *testing.T) {
 	tester := h.tester()
 
 	h.assertTexts(tester, "自动化", "新建任务",
-		"每日依赖巡检", "每 1 分钟", "下次运行：", "上次运行：",
+		"每日依赖巡检", "每 60 秒", "下次运行：", "上次运行：",
 		"立即运行", "编辑", "删除",
 		"停用任务", "每 5 分钟", "上次错误：exit status 1")
 }
@@ -330,7 +342,7 @@ func TestCreateTaskFlow(t *testing.T) {
 		t.Fatalf("Create args = %+v", created[0])
 	}
 	h.assertNoTexts(tester, "新建自动化任务")
-	h.assertTexts(tester, "每日巡检", "每 1 分钟")
+	h.assertTexts(tester, "每日巡检", "每 60 秒")
 	// The tasks are an official List: named, with rows named by the task name.
 	if _, ok := tester.AccessByRole(ui.RoleList, "自动化任务"); !ok {
 		t.Fatalf("automation tasks are not a named list; texts = %v", tester.Texts())
@@ -593,5 +605,7 @@ func TestTaskCardHumanizesSchedules(t *testing.T) {
 	)
 	h := newHarness(t, service, automation.Config{})
 	tester := h.tester()
-	h.assertTexts(tester, "每 15 分钟", "每 4 小时", "每天 09:30", "unsupported schedule")
+	h.assertTexts(tester, "每 15 分钟", "每天 09:30", "unsupported schedule")
+	h.assertNoTexts(tester, "每 4 小时")
+	h.assertTexts(tester, "0 */4 * * *")
 }

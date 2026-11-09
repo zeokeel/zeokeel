@@ -72,7 +72,8 @@ func TestSetSessionPermission(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewSession: %v", err)
 	}
-	for _, mode := range []string{contracts.PermissionAsk, contracts.PermissionWorkspace, contracts.PermissionFull, contracts.PermissionNever} {
+	for _, mode := range []string{contracts.PermissionReadOnly, contracts.PermissionWorkspace, contracts.PermissionFull,
+		contracts.PermissionAsk, contracts.PermissionNever} {
 		if err := svc.SetSessionPermission(sessionID, " "+mode+" "); err != nil {
 			t.Fatalf("SetSessionPermission(%q): %v", mode, err)
 		}
@@ -93,11 +94,18 @@ func TestSessionPermissionOverrideGate(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewSession: %v", err)
 	}
+	// The retired "never" override normalizes to read-only: read-only tools are
+	// allowed without asking and write/shell tools fall through to the global
+	// policy (which denies here).
 	if err := svc.SetSessionPermission(sessionID, contracts.PermissionNever); err != nil {
-		t.Fatalf("never: %v", err)
+		t.Fatalf("legacy never: %v", err)
+	}
+	svc.approvals = denyApprovals{}
+	if got := gateDecision(t, svc, sessionID, "read_file"); got != rig.DecisionAllow {
+		t.Fatalf("read-only override read_file = %v, want allow", got)
 	}
 	if got := gateDecision(t, svc, sessionID, "bash"); got != rig.DecisionDeny {
-		t.Fatalf("never gate = %v, want deny", got)
+		t.Fatalf("read-only override bash = %v, want the global deny", got)
 	}
 	if err := svc.SetSessionPermission(sessionID, contracts.PermissionFull); err != nil {
 		t.Fatalf("full: %v", err)

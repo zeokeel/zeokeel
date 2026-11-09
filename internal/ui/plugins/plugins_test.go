@@ -29,6 +29,10 @@ type fakePlugins struct {
 	mcp          []contracts.MCPPlugin
 	refreshed    []contracts.MCPPlugin
 	refreshCalls int
+	// refreshStart/refreshRelease make Refresh block, so a test can prove the
+	// page runs it off the UI thread and shows a busy state meanwhile.
+	refreshStart   chan struct{}
+	refreshRelease chan struct{}
 }
 
 func (f *fakePlugins) MCP() []contracts.MCPPlugin {
@@ -38,6 +42,15 @@ func (f *fakePlugins) MCP() []contracts.MCPPlugin {
 }
 
 func (f *fakePlugins) Refresh(context.Context) []contracts.MCPPlugin {
+	if f.refreshStart != nil {
+		select {
+		case f.refreshStart <- struct{}{}:
+		default:
+		}
+	}
+	if f.refreshRelease != nil {
+		<-f.refreshRelease
+	}
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.refreshCalls++
@@ -224,7 +237,10 @@ func TestMCPEmptyState(t *testing.T) {
 	service := &fakePlugins{}
 	h := newHarness(t, service, nil, plugins.Config{})
 	tester := h.tester()
-	h.assertTexts(tester, "还没有配置 MCP 服务器（assembly 的 mcpServers）")
+	// The empty state is user-facing: no internal config term (the audit caught
+	// "assembly 的 mcpServers"), and it offers the page that adds servers.
+	h.assertTexts(tester, "还没有配置 MCP 服务器", "打开设置中的 MCP 页")
+	h.assertNoTexts(tester, "assembly", "mcpServers")
 }
 
 func TestMCPRefreshUpdates(t *testing.T) {
@@ -329,14 +345,17 @@ func TestMCPFailedRowOffersInlineRetry(t *testing.T) {
 	h := newHarness(t, service, nil, plugins.Config{})
 	tester := h.tester()
 	h.assertTexts(tester, "broken", "连接失败", "重试连接")
-	// The failure reason is visible without expanding the details.
-	h.assertTexts(tester, "dial tcp 127.0.0.1:9: connection refused")
+	// The failure cause is localized; the raw network error is not in the row.
+	h.assertTexts(tester, "无法连接到服务器")
+	h.assertNoTexts(tester, "dial tcp 127.0.0.1:9: connection refused")
 
 	h.click(tester, "重试连接")
+	// The retry runs off the UI thread: wait for the posted result.
+	waitForPluginText(t, tester, "已连接")
 	if calls := service.calls(); calls != 1 {
 		t.Fatalf("Refresh calls = %d, want the inline retry's one", calls)
 	}
-	h.assertTexts(tester, "已连接", "2 个工具")
+	h.assertTexts(tester, "2 个工具")
 }
 
 func TestToolSwitchShowsPendingRestart(t *testing.T) {
@@ -357,9 +376,32 @@ func TestToolDescriptionIsScannableAndKeepsFullTextInTooltip(t *testing.T) {
 	registry := rigtools.NewRegistry(fakeTool{name: "read_file", desc: long})
 	h := newHarness(t, nil, registry, plugins.Config{})
 	tester := h.tester()
-	// The row shows a short first-phrase summary, not the developer docs blob.
+	// A Chinese UI shows the product summary; the English documentation is the
+	// row tooltip only, never a second line in the list.
+	h.assertTexts(tester, "读取工作区文件内容")
+	h.assertNoTexts(tester, "Read a UTF-8 text file inside the tool root",
+		"This sentence is documentation the row should not show in full")
+
+	h.uiRoot.Locale().SetLanguage("en")
+	tester.Frame()
 	h.assertTexts(tester, "Read a UTF-8 text file inside the tool root and return numbered lines")
 	h.assertNoTexts(tester, "This sentence is documentation the row should not show in full")
+}
+
+// waitForPluginText drives frames until the async refresh result is visible.
+func waitForPluginText(t *testing.T, tester *ui.Tester, want string) {
+	t.Helper()
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		tester.Frame()
+		if tester.HasText(want) {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("timed out waiting for %q; texts = %v", want, tester.Texts())
+		}
+		time.Sleep(2 * time.Millisecond)
+	}
 }
 
 // assertForTextCount checks how many text nodes contain want.
@@ -374,4 +416,78 @@ func (h *harness) assertForTextCount(tester *ui.Tester, want string, count int) 
 	if got != count {
 		h.t.Fatalf("%q shows %d times, want %d; texts = %v", want, got, count, tester.Texts())
 	}
+}
+
+// --- second audit batch: async MCP re-connect, localized causes, filter ------
+
+// TestMCPRefreshRunsOffUIThread pins E-14: Refresh can block on a hung server, so
+// the page shows a busy state and keeps rendering until the posted result lands.
+func TestMCPRefreshRunsOffUIThread(t *testing.T) {
+	service := &fakePlugins{
+		mcp:            []contracts.MCPPlugin{{Name: "old", Status: "已连接", Tools: 1}},
+		refreshed:      []contracts.MCPPlugin{{Name: "new", Status: "已连接", Tools: 2}},
+		refreshStart:   make(chan struct{}, 1),
+		refreshRelease: make(chan struct{}),
+	}
+	h := newHarness(t, service, nil, plugins.Config{})
+	tester := h.tester()
+	h.assertTexts(tester, "刷新")
+
+	h.click(tester, "刷新")
+	select {
+	case <-service.refreshStart:
+	default:
+		t.Fatal("Refresh did not start")
+	}
+	// The frame keeps rendering while the backend call is blocked.
+	h.assertTexts(tester, "正在重连…")
+	h.assertNoTexts(tester, "已刷新")
+
+	close(service.refreshRelease)
+	waitForPluginText(t, tester, "已刷新 1 个 MCP 服务器")
+	h.assertTexts(tester, "刷新", "new", "2 个工具")
+	h.assertNoTexts(tester, "正在重连…", "old")
+}
+
+// TestMCPFailureCausesAreLocalized pins E-15: the collapsed row names the cause
+// in product language for timeout/auth/handshake/connect failures, in both
+// languages, and never echoes the raw English error.
+func TestMCPFailureCausesAreLocalized(t *testing.T) {
+	service := &fakePlugins{mcp: []contracts.MCPPlugin{
+		{Name: "connect", Status: "连接失败: dial tcp 10.0.0.1:1: connect: connection refused"},
+		{Name: "timeout", Status: "连接失败: context deadline exceeded"},
+		{Name: "auth", Status: "连接失败: 401 Unauthorized"},
+		{Name: "protocol", Status: "连接失败: mcp: initialize: unexpected EOF"},
+	}}
+	h := newHarness(t, service, nil, plugins.Config{})
+	tester := h.tester()
+	h.assertTexts(tester, "无法连接到服务器", "连接超时（服务器未及时响应）",
+		"鉴权失败（请检查访问令牌）", "协议握手失败（MCP 初始化未完成）")
+	h.assertNoTexts(tester, "dial tcp", "deadline exceeded", "401 Unauthorized",
+		"unexpected EOF", "mcp: initialize")
+
+	h.uiRoot.Locale().SetLanguage("en")
+	tester.Frame()
+	h.assertTexts(tester, "Could not reach the server",
+		"Connection timed out (the server did not answer in time)",
+		"Authentication failed (check the access token)",
+		"Protocol handshake failed (MCP initialization did not complete)")
+}
+
+// TestToolCatalogDisabledOnlyFilter pins E-29's filter: a 70-row list of switches
+// needs a view of only the tools that are turned off.
+func TestToolCatalogDisabledOnlyFilter(t *testing.T) {
+	store := newFakePluginSettings(map[string]string{
+		contracts.SettingToolsDisabled: `["read_file"]`,
+	})
+	h := newHarnessWithSettings(t, nil, newToolRegistry(), plugins.Config{}, store)
+	tester := h.tester()
+	h.assertTexts(tester, "仅显示已停用", "6 个工具")
+
+	h.click(tester, "仅显示已停用")
+	h.assertTexts(tester, "read_file", "1 个工具")
+	h.assertNoTexts(tester, "bash", "web_fetch", "memory_search")
+
+	h.click(tester, "仅显示已停用")
+	h.assertTexts(tester, "read_file", "bash", "6 个工具")
 }

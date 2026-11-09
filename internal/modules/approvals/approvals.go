@@ -1,22 +1,28 @@
 // Package approvals implements ZeoKeel's approval backend module: the
 // contracts.Approvals queue the agent gate and the approval UI share.
 //
-// It owns the approval policy ("workspace" (default), "ask", "auto", "never"),
-// the queue of pending tool-call approvals and the waiting/resolution handshake.
+// It owns the approval policy ("workspace" (default), "read-only", "auto";
+// "ask" and "never" remain headless-only assembly policies), the queue of
+// pending tool-call approvals and the waiting/resolution handshake.
 // The module is a kernel backend module: it requires the host logger, provides
 // contracts.KeyApprovals and keeps all state in memory.
 //
 // # Semantics
 //
-//   - workspace: contracts.WorkspaceAutoAllowedTools (the workspace file tools
-//     plus read-only/informational tools that cannot leave or modify the
-//     workspace) are allowed immediately; everything that can leave the
-//     workspace — shell, network, MCP, settings writes — and unknown tools ask.
+//   - workspace (the default, mirrors the UI's 工作区可写 preset):
+//     contracts.WorkspaceAutoAllowedTools (the read-only/informational tools
+//     plus the workspace write tools) are allowed immediately; everything that
+//     can leave the workspace — shell, network, MCP, settings writes — and
+//     unknown tools ask.
+//   - read-only (mirrors the UI's 只读 preset):
+//     contracts.ReadOnlyAutoAllowedTools are allowed immediately and everything
+//     else asks (the queue below).
 //   - ask: every Request registers an "appr-<n>" pending entry, notifies
 //     subscribers and blocks until Resolve answers it or the context ends.
-//     Context cancellation removes the pending entry again.
+//     Context cancellation removes the pending entry again. This policy is
+//     headless-only: no UI permission mode maps to it.
 //   - auto: Request returns ApprovalAllow immediately.
-//   - never: Request returns ApprovalDeny immediately.
+//   - never: Request returns ApprovalDeny immediately. Headless-only.
 //
 // Resolve is idempotent after the first answer: resolving an already answered
 // ID again returns nil and does not change the answer. Resolving an ID that was
@@ -47,14 +53,20 @@ import (
 const (
 	// ModuleID is the stable module identity used by assembly documents.
 	ModuleID = "zeokeel/approvals"
-	// ModeAsk asks the user for every tool call.
+	// ModeReadOnly allows the read-only/informational tools without asking and
+	// queues everything else; it is the approvals policy of the UI's 只读 mode.
+	ModeReadOnly = "read-only"
+	// ModeAsk asks the user for every tool call. It is a headless assembly
+	// policy only: no UI permission mode maps to it.
 	ModeAsk = "ask"
 	// ModeWorkspace (the default) allows the workspace file tools without
 	// asking and queues everything else.
 	ModeWorkspace = "workspace"
 	// ModeAuto allows every request without asking (headless products).
 	ModeAuto = "auto"
-	// ModeNever denies every request without asking.
+	// ModeNever denies every request without asking. It is a headless assembly
+	// policy only: legacy stored "never" permission rows normalize to
+	// read-only (see effectiveMode).
 	ModeNever = "never"
 	// requestIDPrefix is the prefix of generated approval IDs.
 	requestIDPrefix = "appr-"
@@ -73,8 +85,8 @@ var (
 
 // Config is the module's typed assembly config.
 type Config struct {
-	// Mode is the approval policy: "workspace" (default), "ask", "auto" or
-	// "never".
+	// Mode is the approval policy: "workspace" (default), "read-only", "ask",
+	// "auto" or "never".
 	Mode string `json:"mode"`
 }
 
@@ -170,11 +182,11 @@ func normalizeMode(mode string) (string, error) {
 	switch normalized {
 	case "", ModeWorkspace:
 		return ModeWorkspace, nil
-	case ModeAsk, ModeAuto, ModeNever:
+	case ModeReadOnly, ModeAsk, ModeAuto, ModeNever:
 		return normalized, nil
 	default:
-		return "", fmt.Errorf("approvals: invalid mode %q (want %q, %q, %q or %q)",
-			mode, ModeWorkspace, ModeAsk, ModeAuto, ModeNever)
+		return "", fmt.Errorf("approvals: invalid mode %q (want %q, %q, %q, %q or %q)",
+			mode, ModeWorkspace, ModeReadOnly, ModeAsk, ModeAuto, ModeNever)
 	}
 }
 
@@ -184,13 +196,15 @@ type discardLogger struct{}
 func (discardLogger) Printf(string, ...any) {}
 
 // Mode implements contracts.Approvals: it reports the effective policy for the
-// current permissions setting ("ask", "workspace", "auto" or "never").
+// current permissions setting ("read-only", "workspace", "auto"; "ask"/"never"
+// only through the headless assembly config).
 func (s *service) Mode() string {
 	return s.effectiveMode()
 }
 
 // effectiveMode resolves the configured mode and the optional permissions
-// setting: a non-empty setting wins; ask/workspace/full map onto the policy,
+// setting: a non-empty setting wins and is normalized through the three UI
+// presets; the retired "ask"/"never" stored values normalize to read-only,
 // unknown values degrade to workspace (the default) and the legacy "auto"
 // value is an alias of full.
 func (s *service) effectiveMode() string {
@@ -205,14 +219,12 @@ func (s *service) effectiveMode() string {
 		return configured
 	}
 	switch raw {
-	case contracts.PermissionAsk:
-		return ModeAsk
+	case contracts.PermissionReadOnly, contracts.PermissionAsk, contracts.PermissionNever:
+		return ModeReadOnly
 	case contracts.PermissionWorkspace:
 		return contracts.PermissionWorkspace
 	case contracts.PermissionFull, ModeAuto:
 		return ModeAuto
-	case ModeNever:
-		return ModeNever
 	default:
 		return ModeWorkspace
 	}
@@ -229,6 +241,13 @@ func (s *service) Request(ctx context.Context, request contracts.ApprovalRequest
 		return contracts.ApprovalAllow, nil
 	case ModeNever:
 		return contracts.ApprovalDeny, nil
+	case ModeReadOnly:
+		// Only the read-only/informational subset of the shared list is
+		// auto-allowed; workspace writes, shell, network, MCP, settings writes
+		// and unknown tools queue below.
+		if contracts.ReadOnlyAutoAllowed(request.Tool) {
+			return contracts.ApprovalAllow, nil
+		}
 	case ModeWorkspace:
 		// One frozen list is shared with the agent gate
 		// (contracts.WorkspaceAutoAllowedTools): the workspace file tools plus

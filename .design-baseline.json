@@ -1,0 +1,1254 @@
+{
+  "version": 1,
+  "generated": "2026-11-09",
+  "ignored": [
+    {
+      "rule": "DS-03",
+      "file": "internal/ui/automation/view.go",
+      "line": 44,
+      "text": "FontWeight(600)",
+      "owner": "automation",
+      "expires": "2027-06-30"
+    },
+    {
+      "rule": "DS-03",
+      "file": "internal/ui/automation/view.go",
+      "line": 214,
+      "text": "FontWeight(600)",
+      "owner": "automation",
+      "expires": "2027-06-30"
+    },
+    {
+      "rule": "DS-03",
+      "file": "internal/ui/automation/view.go",
+      "line": 437,
+      "text": "FontWeight(600)",
+      "owner": "automation",
+      "expires": "2027-06-30"
+    },
+    {
+      "rule": "DS-03",
+      "file": "internal/ui/home/composer.go",
+      "line": 240,
+      "text": "FontWeight(600)",
+      "owner": "home",
+      "expires": "2027-06-30"
+    },
+    {
+      "rule": "DS-03",
+      "file": "internal/ui/home/home.go",
+      "line": 236,
+      "text": "Size(16, 16)",
+      "owner": "home",
+      "expires": "2027-06-30"
+    },
+    {
+      "rule": "DS-03",
+      "file": "internal/ui/home/home.go",
+      "line": 238,
+      "text": "FontWeight(600)",
+      "owner": "home",
+      "expires": "2027-06-30"
+    },
+    {
+      "rule": "DS-03",
+      "file": "internal/ui/home/home.go",
+      "line": 361,
+      "text": "Height(36)",
+      "owner": "home",
+      "expires": "2027-06-30"
+    },
+    {
+      "rule": "DS-03",
+      "file": "internal/ui/home/home.go",
+      "line": 375,
+      "text": "Size(16, 16)",
+      "owner": "home",
+      "expires": "2027-06-30"
+    },
+    {
+      "rule": "DS-03",
+      "file": "internal/ui/home/home.go",
+      "line": 385,
+      "text": "MaxWidth(140)",
+      "owner": "home",
+      "expires": "2027-06-30"
+    },
+    {
+      "rule": "DS-03",
+      "file": "internal/ui/home/home.go",
+      "line": 480,
+      "text": "Size(48, 48)",
+      "owner": "home",
+      "expires": "2027-06-30"
+    },
+    {
+      "rule": "DS-03",
+      "file": "internal/ui/home/home.go",
+      "line": 481,
+      "text": "FontWeight(600)",
+      "owner": "home",
+      "expires": "2027-06-30"
+    },
+    {
+      "rule": "DS-03",
+      "file": "internal/ui/interaction/interaction.go",
+      "line": 363,
+      "text": "FontWeight(600)",
+      "owner": "interaction",
+      "expires": "2027-06-30"
+    },
+    {
+      "rule": "DS-03",
+      "file": "internal/ui/plugins/mcp_config.go",
+      "line": 79,
+      "text": "FontWeight(600)",
+      "owner": "plugins",
+      "expires": "2027-06-30"
+    },
+    {
+      "rule": "DS-03",
+      "file": "internal/ui/plugins/plugin_params.go",
+      "line": 148,
+      "text": "Padding(design.Space2, 0)",
+      "owner": "plugins",
+      "expires": "2027-06-30"
+    },
+    {
+      "rule": "DS-03",
+      "file": "internal/ui/plugins/plugin_params.go",
+      "line": 151,
+      "text": "FontWeight(600)",
+      "owner": "plugins",
+      "expires": "2027-06-30"
+    },
+    {
+      "rule": "DS-03",
+      "file": "internal/ui/plugins/plugin_params.go",
+      "line": 226,
+      "text": "FontWeight(600)",
+      "owner": "plugins",
+      "expires": "2027-06-30"
+    },
+    {
+      "rule": "DS-03",
+      "file": "internal/ui/plugins/view.go",
+      "line": 51,
+      "text": "FontWeight(600)",
+      "owner": "plugins",
+      "expires": "2027-06-30"
+    },
+    {
+      "rule": "DS-03",
+      "file": "internal/ui/plugins/view.go",
+      "line": 198,
+      "text": "Size(16, 16)",
+      "owner": "plugins",
+      "expires": "2027-06-30"
+    },
+    {
+      "rule": "DS-03",
+      "file": "internal/ui/plugins/view.go",
+      "line": 200,
+      "text": "FontWeight(600)",
+      "owner": "plugins",
+      "expires": "2027-06-30"
+    },
+    {
+      "rule": "DS-03",
+      "file": "internal/ui/plugins/view.go",
+      "line": 596,
+      "text": "FontWeight(600)",
+      "owner": "plugins",
+      "expires": "2027-06-30"
+    },
+    {
+      "rule": "DS-03",
+      "file": "internal/ui/plugins/view.go",
+      "line": 596,
+      "text": "Padding(design.Space1, design.Space2, 0, design.Space2)",
+      "owner": "plugins",
+      "expires": "2027-06-30"
+    },
+    {
+      "rule": "DS-03",
+      "file": "internal/ui/plugins/view.go",
+      "line": 608,
+      "text": "MinWidth(0)",
+      "owner": "plugins",
+      "expires": "2027-06-30"
+    },
+    {
+      "rule": "DS-03",
+      "file": "internal/ui/rightpanel/changes.go",
+      "line": 151,
+      "text": "Padding(0, design.Space2)",
+      "owner": "rightpanel",
+      "expires": "2027-06-30"
+    },
+    {
+      "rule": "DS-03",
+      "file": "internal/ui/rightpanel/files.go",
+      "line": 96,
+      "text": "FontWeight(600)",
+      "owner": "rightpanel",
+      "expires": "2027-06-30"
+    },
+    {
+      "rule": "DS-03",
+      "file": "internal/ui/rightpanel/files.go",
+      "line": 174,
+      "text": "FontWeight(600)",
+      "owner": "rightpanel",
+      "expires": "2027-06-30"
+    },
+    {
+      "rule": "DS-03",
+      "file": "internal/ui/rightpanel/files.go",
+      "line": 228,
+      "text": "FontWeight(600)",
+      "owner": "rightpanel",
+      "expires": "2027-06-30"
+    },
+    {
+      "rule": "DS-03",
+      "file": "internal/ui/rightpanel/files.go",
+      "line": 620,
+      "text": "FontWeight(600)",
+      "owner": "rightpanel",
+      "expires": "2027-06-30"
+    },
+    {
+      "rule": "DS-03",
+      "file": "internal/ui/rightpanel/terminal.go",
+      "line": 167,
+      "text": "Size(24, 24)",
+      "owner": "rightpanel",
+      "expires": "2027-06-30"
+    },
+    {
+      "rule": "DS-06",
+      "file": "internal/ui/rightpanel/terminal.go",
+      "line": 167,
+      "text": "ui.ButtonBase(c)",
+      "owner": "rightpanel",
+      "expires": "2027-06-30"
+    },
+    {
+      "rule": "DS-03",
+      "file": "internal/ui/rightpanel/terminal.go",
+      "line": 177,
+      "text": "Size(14, 14)",
+      "owner": "rightpanel",
+      "expires": "2027-06-30"
+    },
+    {
+      "rule": "DS-03",
+      "file": "internal/ui/rightpanel/view.go",
+      "line": 241,
+      "text": "FontWeight(600)",
+      "owner": "rightpanel",
+      "expires": "2027-06-30"
+    },
+    {
+      "rule": "DS-03",
+      "file": "internal/ui/rightpanel/view.go",
+      "line": 379,
+      "text": "FontWeight(600)",
+      "owner": "rightpanel",
+      "expires": "2027-06-30"
+    },
+    {
+      "rule": "DS-03",
+      "file": "internal/ui/rightpanel/view.go",
+      "line": 553,
+      "text": "FontWeight(600)",
+      "owner": "rightpanel",
+      "expires": "2027-06-30"
+    },
+    {
+      "rule": "DS-03",
+      "file": "internal/ui/session/attachments.go",
+      "line": 222,
+      "text": "FontWeight(600)",
+      "owner": "session",
+      "expires": "2027-06-30"
+    },
+    {
+      "rule": "DS-03",
+      "file": "internal/ui/session/attachments.go",
+      "line": 382,
+      "text": "PaddingX(0)",
+      "owner": "session",
+      "expires": "2027-06-30"
+    },
+    {
+      "rule": "DS-03",
+      "file": "internal/ui/session/command_dialogs.go",
+      "line": 87,
+      "text": "FontWeight(600)",
+      "owner": "session",
+      "expires": "2027-06-30"
+    },
+    {
+      "rule": "DS-03",
+      "file": "internal/ui/session/command_dialogs.go",
+      "line": 150,
+      "text": "FontWeight(600)",
+      "owner": "session",
+      "expires": "2027-06-30"
+    },
+    {
+      "rule": "DS-03",
+      "file": "internal/ui/session/command_dialogs.go",
+      "line": 205,
+      "text": "FontWeight(600)",
+      "owner": "session",
+      "expires": "2027-06-30"
+    },
+    {
+      "rule": "DS-03",
+      "file": "internal/ui/session/commands_help.go",
+      "line": 108,
+      "text": "FontWeight(600)",
+      "owner": "session",
+      "expires": "2027-06-30"
+    },
+    {
+      "rule": "DS-03",
+      "file": "internal/ui/session/commands_help.go",
+      "line": 115,
+      "text": "FontWeight(600)",
+      "owner": "session",
+      "expires": "2027-06-30"
+    },
+    {
+      "rule": "DS-03",
+      "file": "internal/ui/session/commands_help.go",
+      "line": 131,
+      "text": "FontWeight(600)",
+      "owner": "session",
+      "expires": "2027-06-30"
+    },
+    {
+      "rule": "DS-03",
+      "file": "internal/ui/session/commands_help.go",
+      "line": 131,
+      "text": "Width(120)",
+      "owner": "session",
+      "expires": "2027-06-30"
+    },
+    {
+      "rule": "DS-03",
+      "file": "internal/ui/session/commands_help.go",
+      "line": 138,
+      "text": "FontWeight(600)",
+      "owner": "session",
+      "expires": "2027-06-30"
+    },
+    {
+      "rule": "DS-03",
+      "file": "internal/ui/session/commands_help.go",
+      "line": 144,
+      "text": "Width(150)",
+      "owner": "session",
+      "expires": "2027-06-30"
+    },
+    {
+      "rule": "DS-03",
+      "file": "internal/ui/session/feedback_command.go",
+      "line": 112,
+      "text": "FontWeight(600)",
+      "owner": "session",
+      "expires": "2027-06-30"
+    },
+    {
+      "rule": "DS-03",
+      "file": "internal/ui/session/memory_tools.go",
+      "line": 261,
+      "text": "FontWeight(600)",
+      "owner": "session",
+      "expires": "2027-06-30"
+    },
+    {
+      "rule": "DS-03",
+      "file": "internal/ui/session/memory_tools.go",
+      "line": 301,
+      "text": "PaddingX(0)",
+      "owner": "session",
+      "expires": "2027-06-30"
+    },
+    {
+      "rule": "DS-03",
+      "file": "internal/ui/session/memory_tools.go",
+      "line": 316,
+      "text": "PaddingX(0)",
+      "owner": "session",
+      "expires": "2027-06-30"
+    },
+    {
+      "rule": "DS-03",
+      "file": "internal/ui/session/view.go",
+      "line": 337,
+      "text": "Padding(th.Space(2), th.Space(4), 0, th.Space(4))",
+      "owner": "session",
+      "expires": "2027-06-30"
+    },
+    {
+      "rule": "DS-03",
+      "file": "internal/ui/session/view.go",
+      "line": 351,
+      "text": "FontWeight(600)",
+      "owner": "session",
+      "expires": "2027-06-30"
+    },
+    {
+      "rule": "DS-03",
+      "file": "internal/ui/session/view.go",
+      "line": 351,
+      "text": "MinWidth(0)",
+      "owner": "session",
+      "expires": "2027-06-30"
+    },
+    {
+      "rule": "DS-03",
+      "file": "internal/ui/session/view.go",
+      "line": 354,
+      "text": "MinWidth(120)",
+      "owner": "session",
+      "expires": "2027-06-30"
+    },
+    {
+      "rule": "DS-03",
+      "file": "internal/ui/session/view.go",
+      "line": 415,
+      "text": "MaxWidth(140)",
+      "owner": "session",
+      "expires": "2027-06-30"
+    },
+    {
+      "rule": "DS-03",
+      "file": "internal/ui/session/view.go",
+      "line": 499,
+      "text": "FontWeight(600)",
+      "owner": "session",
+      "expires": "2027-06-30"
+    },
+    {
+      "rule": "DS-03",
+      "file": "internal/ui/session/view.go",
+      "line": 564,
+      "text": "FontWeight(600)",
+      "owner": "session",
+      "expires": "2027-06-30"
+    },
+    {
+      "rule": "DS-03",
+      "file": "internal/ui/session/view.go",
+      "line": 844,
+      "text": "Padding(0, 0, 0, th.Space(1))",
+      "owner": "session",
+      "expires": "2027-06-30"
+    },
+    {
+      "rule": "DS-03",
+      "file": "internal/ui/session/view.go",
+      "line": 850,
+      "text": "Gap(0)",
+      "owner": "session",
+      "expires": "2027-06-30"
+    },
+    {
+      "rule": "DS-03",
+      "file": "internal/ui/session/view.go",
+      "line": 930,
+      "text": "FontWeight(600)",
+      "owner": "session",
+      "expires": "2027-06-30"
+    },
+    {
+      "rule": "DS-03",
+      "file": "internal/ui/session/view.go",
+      "line": 1261,
+      "text": "PaddingX(0)",
+      "owner": "session",
+      "expires": "2027-06-30"
+    },
+    {
+      "rule": "DS-03",
+      "file": "internal/ui/session/view.go",
+      "line": 1331,
+      "text": "PaddingX(0)",
+      "owner": "session",
+      "expires": "2027-06-30"
+    },
+    {
+      "rule": "DS-03",
+      "file": "internal/ui/session/view.go",
+      "line": 1444,
+      "text": "PaddingX(0)",
+      "owner": "session",
+      "expires": "2027-06-30"
+    },
+    {
+      "rule": "DS-06",
+      "file": "internal/ui/session/view.go",
+      "line": 3251,
+      "text": "ui.ButtonBase(c.Key(\"session.slash.\"+cmd.ID))",
+      "owner": "session",
+      "expires": "2027-06-30"
+    },
+    {
+      "rule": "DS-03",
+      "file": "internal/ui/session/view.go",
+      "line": 3265,
+      "text": "FontWeight(600)",
+      "owner": "session",
+      "expires": "2027-06-30"
+    },
+    {
+      "rule": "DS-06",
+      "file": "internal/ui/session/view.go",
+      "line": 3580,
+      "text": "ui.ButtonBase(c.Key(key))",
+      "owner": "session",
+      "expires": "2027-06-30"
+    },
+    {
+      "rule": "DS-03",
+      "file": "internal/ui/settings/archive.go",
+      "line": 181,
+      "text": "Padding(design.Space2, design.Space2, design.Space2, 0)",
+      "owner": "settings",
+      "expires": "2027-06-30"
+    },
+    {
+      "rule": "DS-03",
+      "file": "internal/ui/settings/diagnostics_modules.go",
+      "line": 41,
+      "text": "FontWeight(600)",
+      "owner": "settings",
+      "expires": "2027-06-30"
+    },
+    {
+      "rule": "DS-03",
+      "file": "internal/ui/settings/diagnostics_modules.go",
+      "line": 84,
+      "text": "Width(160)",
+      "owner": "settings",
+      "expires": "2027-06-30"
+    },
+    {
+      "rule": "DS-03",
+      "file": "internal/ui/settings/lsp_settings.go",
+      "line": 182,
+      "text": "FontWeight(600)",
+      "owner": "settings",
+      "expires": "2027-06-30"
+    },
+    {
+      "rule": "DS-03",
+      "file": "internal/ui/settings/mcp.go",
+      "line": 135,
+      "text": "FontWeight(600)",
+      "owner": "settings",
+      "expires": "2027-06-30"
+    },
+    {
+      "rule": "DS-03",
+      "file": "internal/ui/settings/mcp.go",
+      "line": 319,
+      "text": "Width(150)",
+      "owner": "settings",
+      "expires": "2027-06-30"
+    },
+    {
+      "rule": "DS-03",
+      "file": "internal/ui/settings/memory.go",
+      "line": 716,
+      "text": "FontWeight(600)",
+      "owner": "settings",
+      "expires": "2027-06-30"
+    },
+    {
+      "rule": "DS-03",
+      "file": "internal/ui/settings/modelcatalog.go",
+      "line": 287,
+      "text": "FontWeight(600)",
+      "owner": "settings",
+      "expires": "2027-06-30"
+    },
+    {
+      "rule": "DS-03",
+      "file": "internal/ui/settings/modelcatalog.go",
+      "line": 385,
+      "text": "FontWeight(600)",
+      "owner": "settings",
+      "expires": "2027-06-30"
+    },
+    {
+      "rule": "DS-03",
+      "file": "internal/ui/settings/modelcatalog_editor.go",
+      "line": 452,
+      "text": "FontWeight(600)",
+      "owner": "settings",
+      "expires": "2027-06-30"
+    },
+    {
+      "rule": "DS-03",
+      "file": "internal/ui/settings/modelcatalog_editor.go",
+      "line": 566,
+      "text": "FontWeight(600)",
+      "owner": "settings",
+      "expires": "2027-06-30"
+    },
+    {
+      "rule": "DS-03",
+      "file": "internal/ui/settings/modelcatalog_editor.go",
+      "line": 644,
+      "text": "FontWeight(600)",
+      "owner": "settings",
+      "expires": "2027-06-30"
+    },
+    {
+      "rule": "DS-03",
+      "file": "internal/ui/settings/modelcatalog_editor.go",
+      "line": 672,
+      "text": "Height(130)",
+      "owner": "settings",
+      "expires": "2027-06-30"
+    },
+    {
+      "rule": "DS-03",
+      "file": "internal/ui/settings/modelcatalog_editor.go",
+      "line": 678,
+      "text": "Width(150)",
+      "owner": "settings",
+      "expires": "2027-06-30"
+    },
+    {
+      "rule": "DS-03",
+      "file": "internal/ui/settings/modelcatalog_editor.go",
+      "line": 683,
+      "text": "Width(150)",
+      "owner": "settings",
+      "expires": "2027-06-30"
+    },
+    {
+      "rule": "DS-03",
+      "file": "internal/ui/settings/presets.go",
+      "line": 432,
+      "text": "MinHeight(72)",
+      "owner": "settings",
+      "expires": "2027-06-30"
+    },
+    {
+      "rule": "DS-03",
+      "file": "internal/ui/settings/presets.go",
+      "line": 589,
+      "text": "FontWeight(600)",
+      "owner": "settings",
+      "expires": "2027-06-30"
+    },
+    {
+      "rule": "DS-03",
+      "file": "internal/ui/settings/presets.go",
+      "line": 625,
+      "text": "FontWeight(600)",
+      "owner": "settings",
+      "expires": "2027-06-30"
+    },
+    {
+      "rule": "DS-03",
+      "file": "internal/ui/settings/presets.go",
+      "line": 707,
+      "text": "FontWeight(600)",
+      "owner": "settings",
+      "expires": "2027-06-30"
+    },
+    {
+      "rule": "DS-03",
+      "file": "internal/ui/settings/settings.go",
+      "line": 538,
+      "text": "Width(160)",
+      "owner": "settings",
+      "expires": "2027-06-30"
+    },
+    {
+      "rule": "DS-03",
+      "file": "internal/ui/settings/settings.go",
+      "line": 1321,
+      "text": "Height(56)",
+      "owner": "settings",
+      "expires": "2027-06-30"
+    },
+    {
+      "rule": "DS-03",
+      "file": "internal/ui/settings/skills.go",
+      "line": 197,
+      "text": "FontWeight(600)",
+      "owner": "settings",
+      "expires": "2027-06-30"
+    },
+    {
+      "rule": "DS-03",
+      "file": "internal/ui/settings/skills_edit.go",
+      "line": 93,
+      "text": "FontWeight(600)",
+      "owner": "settings",
+      "expires": "2027-06-30"
+    },
+    {
+      "rule": "DS-03",
+      "file": "internal/ui/settings/skills_edit.go",
+      "line": 144,
+      "text": "FontWeight(600)",
+      "owner": "settings",
+      "expires": "2027-06-30"
+    },
+    {
+      "rule": "DS-03",
+      "file": "internal/ui/settings/skills_edit.go",
+      "line": 146,
+      "text": "FontWeight(600)",
+      "owner": "settings",
+      "expires": "2027-06-30"
+    },
+    {
+      "rule": "DS-03",
+      "file": "internal/ui/sidebar/danger_confirm.go",
+      "line": 47,
+      "text": "FontWeight(600)",
+      "owner": "sidebar",
+      "expires": "2027-06-30"
+    },
+    {
+      "rule": "DS-03",
+      "file": "internal/ui/sidebar/sidebar.go",
+      "line": 308,
+      "text": "Height(38)",
+      "owner": "sidebar",
+      "expires": "2027-06-30"
+    },
+    {
+      "rule": "DS-03",
+      "file": "internal/ui/sidebar/sidebar.go",
+      "line": 312,
+      "text": "Size(16, 16)",
+      "owner": "sidebar",
+      "expires": "2027-06-30"
+    },
+    {
+      "rule": "DS-03",
+      "file": "internal/ui/sidebar/sidebar.go",
+      "line": 314,
+      "text": "FontWeight(500)",
+      "owner": "sidebar",
+      "expires": "2027-06-30"
+    },
+    {
+      "rule": "DS-03",
+      "file": "internal/ui/sidebar/sidebar.go",
+      "line": 358,
+      "text": "Padding(design.Space2, 0, 0, 0)",
+      "owner": "sidebar",
+      "expires": "2027-06-30"
+    },
+    {
+      "rule": "DS-03",
+      "file": "internal/ui/sidebar/sidebar.go",
+      "line": 410,
+      "text": "Padding(0, design.Space1, 0, design.Space1)",
+      "owner": "sidebar",
+      "expires": "2027-06-30"
+    },
+    {
+      "rule": "DS-03",
+      "file": "internal/ui/sidebar/sidebar.go",
+      "line": 438,
+      "text": "Padding(design.Space1, design.Space2, 0, design.Space2)",
+      "owner": "sidebar",
+      "expires": "2027-06-30"
+    },
+    {
+      "rule": "DS-03",
+      "file": "internal/ui/sidebar/sidebar.go",
+      "line": 478,
+      "text": "Padding(design.Space2, 0, 0, 0)",
+      "owner": "sidebar",
+      "expires": "2027-06-30"
+    },
+    {
+      "rule": "DS-03",
+      "file": "internal/ui/sidebar/sidebar.go",
+      "line": 488,
+      "text": "Padding(design.Space1, design.Space2, 0, design.Space2)",
+      "owner": "sidebar",
+      "expires": "2027-06-30"
+    },
+    {
+      "rule": "DS-03",
+      "file": "internal/ui/sidebar/sidebar.go",
+      "line": 525,
+      "text": "Padding(design.Space2, design.Space2, 0, design.Space2)",
+      "owner": "sidebar",
+      "expires": "2027-06-30"
+    },
+    {
+      "rule": "DS-03",
+      "file": "internal/ui/sidebar/sidebar.go",
+      "line": 526,
+      "text": "FontWeight(600)",
+      "owner": "sidebar",
+      "expires": "2027-06-30"
+    },
+    {
+      "rule": "DS-03",
+      "file": "internal/ui/sidebar/sidebar.go",
+      "line": 638,
+      "text": "FontWeight(600)",
+      "owner": "sidebar",
+      "expires": "2027-06-30"
+    },
+    {
+      "rule": "DS-03",
+      "file": "internal/ui/sidebar/sidebar.go",
+      "line": 784,
+      "text": "Padding(design.Space1, design.Space2, 0, design.Space2)",
+      "owner": "sidebar",
+      "expires": "2027-06-30"
+    },
+    {
+      "rule": "DS-03",
+      "file": "internal/ui/sidebar/sidebar.go",
+      "line": 788,
+      "text": "Padding(design.Space2, design.Space2, 0, design.Space2)",
+      "owner": "sidebar",
+      "expires": "2027-06-30"
+    },
+    {
+      "rule": "DS-03",
+      "file": "internal/ui/sidebar/sidebar.go",
+      "line": 1018,
+      "text": "Height(32)",
+      "owner": "sidebar",
+      "expires": "2027-06-30"
+    },
+    {
+      "rule": "DS-06",
+      "file": "internal/ui/sidebar/sidebar.go",
+      "line": 1018,
+      "text": "ui.ButtonBase(c)",
+      "owner": "sidebar",
+      "expires": "2027-06-30"
+    },
+    {
+      "rule": "DS-03",
+      "file": "internal/ui/sidebar/sidebar.go",
+      "line": 1036,
+      "text": "Size(16, 16)",
+      "owner": "sidebar",
+      "expires": "2027-06-30"
+    },
+    {
+      "rule": "DS-03",
+      "file": "internal/ui/sidebar/sidebar.go",
+      "line": 1045,
+      "text": "FontWeight(500)",
+      "owner": "sidebar",
+      "expires": "2027-06-30"
+    },
+    {
+      "rule": "DS-03",
+      "file": "internal/ui/sidebar/sidebar.go",
+      "line": 1045,
+      "text": "MinWidth(0)",
+      "owner": "sidebar",
+      "expires": "2027-06-30"
+    },
+    {
+      "rule": "DS-03",
+      "file": "internal/ui/sidebar/sidebar.go",
+      "line": 1147,
+      "text": "Size(20, 20)",
+      "owner": "sidebar",
+      "expires": "2027-06-30"
+    },
+    {
+      "rule": "DS-06",
+      "file": "internal/ui/sidebar/sidebar.go",
+      "line": 1147,
+      "text": "ui.ButtonBase(c)",
+      "owner": "sidebar",
+      "expires": "2027-06-30"
+    },
+    {
+      "rule": "DS-03",
+      "file": "internal/ui/sidebar/sidebar.go",
+      "line": 1156,
+      "text": "Size(14, 14)",
+      "owner": "sidebar",
+      "expires": "2027-06-30"
+    },
+    {
+      "rule": "DS-03",
+      "file": "internal/ui/sidebar/sidebar.go",
+      "line": 1482,
+      "text": "Size(16, 16)",
+      "owner": "sidebar",
+      "expires": "2027-06-30"
+    },
+    {
+      "rule": "DS-03",
+      "file": "internal/ui/sidebar/sidebar.go",
+      "line": 1488,
+      "text": "MinWidth(0)",
+      "owner": "sidebar",
+      "expires": "2027-06-30"
+    },
+    {
+      "rule": "DS-03",
+      "file": "internal/ui/sidebar/sidebar.go",
+      "line": 1490,
+      "text": "FontWeight(500)",
+      "owner": "sidebar",
+      "expires": "2027-06-30"
+    },
+    {
+      "rule": "DS-03",
+      "file": "internal/ui/sidebar/sidebar.go",
+      "line": 1504,
+      "text": "Size(24, 24)",
+      "owner": "sidebar",
+      "expires": "2027-06-30"
+    },
+    {
+      "rule": "DS-06",
+      "file": "internal/ui/sidebar/sidebar.go",
+      "line": 1504,
+      "text": "ui.ButtonBase(c)",
+      "owner": "sidebar",
+      "expires": "2027-06-30"
+    },
+    {
+      "rule": "DS-03",
+      "file": "internal/ui/sidebar/sidebar.go",
+      "line": 1519,
+      "text": "Size(16, 16)",
+      "owner": "sidebar",
+      "expires": "2027-06-30"
+    },
+    {
+      "rule": "DS-03",
+      "file": "internal/ui/sidebar/sidebar.go",
+      "line": 1581,
+      "text": "Height(36)",
+      "owner": "sidebar",
+      "expires": "2027-06-30"
+    },
+    {
+      "rule": "DS-06",
+      "file": "internal/ui/sidebar/sidebar.go",
+      "line": 1581,
+      "text": "ui.ButtonBase(c)",
+      "owner": "sidebar",
+      "expires": "2027-06-30"
+    },
+    {
+      "rule": "DS-03",
+      "file": "internal/ui/sidebar/sidebar.go",
+      "line": 1586,
+      "text": "Size(16, 16)",
+      "owner": "sidebar",
+      "expires": "2027-06-30"
+    },
+    {
+      "rule": "DS-03",
+      "file": "internal/ui/sidebar/sidebar.go",
+      "line": 1628,
+      "text": "FontWeight(600)",
+      "owner": "sidebar",
+      "expires": "2027-06-30"
+    },
+    {
+      "rule": "DS-03",
+      "file": "internal/ui/toasts/toasts.go",
+      "line": 446,
+      "text": "FontWeight(600)",
+      "owner": "toasts",
+      "expires": "2027-06-30"
+    },
+    {
+      "rule": "DS-03",
+      "file": "internal/ui/toasts/toasts.go",
+      "line": 451,
+      "text": "FontWeight(600)",
+      "owner": "toasts",
+      "expires": "2027-06-30"
+    },
+    {
+      "rule": "DS-03",
+      "file": "internal/ui/toasts/toasts.go",
+      "line": 471,
+      "text": "FontWeight(600)",
+      "owner": "toasts",
+      "expires": "2027-06-30"
+    },
+    {
+      "rule": "DS-03",
+      "file": "internal/ui/toasts/toasts.go",
+      "line": 485,
+      "text": "Size(14, 14)",
+      "owner": "toasts",
+      "expires": "2027-06-30"
+    },
+    {
+      "rule": "DS-06",
+      "file": "internal/uikit/iconbutton.go",
+      "line": 107,
+      "text": "ui.ButtonBase(c.Key(o.Key))",
+      "owner": "uikit",
+      "expires": "2027-06-30"
+    },
+    {
+      "rule": "DS-06",
+      "file": "internal/uikit/iconbutton.go",
+      "line": 109,
+      "text": "ui.ButtonBase(c)",
+      "owner": "uikit",
+      "expires": "2027-06-30"
+    },
+    {
+      "rule": "DS-03",
+      "file": "internal/uikit/toolrow.go",
+      "line": 240,
+      "text": "FontWeight(600)",
+      "owner": "uikit",
+      "expires": "2027-06-30"
+    },
+    {
+      "rule": "DS-03",
+      "file": "internal/uikit/toolrow.go",
+      "line": 248,
+      "text": "PaddingX(0)",
+      "owner": "uikit",
+      "expires": "2027-06-30"
+    },
+    {
+      "rule": "DS-03",
+      "file": "internal/uikit/uikit.go",
+      "line": 25,
+      "text": "FontWeight(600)",
+      "owner": "uikit",
+      "expires": "2027-06-30"
+    },
+    {
+      "rule": "DS-03",
+      "file": "internal/uikit/uikit.go",
+      "line": 40,
+      "text": "FontWeight(600)",
+      "owner": "uikit",
+      "expires": "2027-06-30"
+    },
+    {
+      "rule": "DS-03",
+      "file": "internal/uikit/uikit.go",
+      "line": 72,
+      "text": "FontWeight(600)",
+      "owner": "uikit",
+      "expires": "2027-06-30"
+    },
+    {
+      "rule": "DS-03",
+      "file": "internal/uikit/uikit.go",
+      "line": 131,
+      "text": "FontWeight(600)",
+      "owner": "uikit",
+      "expires": "2027-06-30"
+    },
+    {
+      "rule": "DS-03",
+      "file": "internal/uiroot/frame.go",
+      "line": 86,
+      "text": "MinWidth(0)",
+      "owner": "uiroot",
+      "expires": "2027-06-30"
+    },
+    {
+      "rule": "DS-03",
+      "file": "internal/uiroot/frame.go",
+      "line": 148,
+      "text": "Padding(0, design.Space4, 0, design.Space4)",
+      "owner": "uiroot",
+      "expires": "2027-06-30"
+    },
+    {
+      "rule": "DS-03",
+      "file": "internal/uiroot/frame.go",
+      "line": 148,
+      "text": "Height(64)",
+      "owner": "uiroot",
+      "expires": "2027-06-30"
+    },
+    {
+      "rule": "DS-03",
+      "file": "internal/uiroot/frame.go",
+      "line": 150,
+      "text": "Size(28, 28)",
+      "owner": "uiroot",
+      "expires": "2027-06-30"
+    },
+    {
+      "rule": "DS-03",
+      "file": "internal/uiroot/frame.go",
+      "line": 151,
+      "text": "FontWeight(600)",
+      "owner": "uiroot",
+      "expires": "2027-06-30"
+    },
+    {
+      "rule": "DS-03",
+      "file": "internal/uiroot/frame.go",
+      "line": 207,
+      "text": "Padding(design.Space3, 0, design.Space3, 0)",
+      "owner": "uiroot",
+      "expires": "2027-06-30"
+    },
+    {
+      "rule": "DS-03",
+      "file": "internal/uiroot/frame.go",
+      "line": 313,
+      "text": "Padding(24)",
+      "owner": "uiroot",
+      "expires": "2027-06-30"
+    },
+    {
+      "rule": "DS-03",
+      "file": "internal/uiroot/frame.go",
+      "line": 343,
+      "text": "MinWidth(0)",
+      "owner": "uiroot",
+      "expires": "2027-06-30"
+    },
+    {
+      "rule": "DS-03",
+      "file": "internal/uiroot/frame.go",
+      "line": 449,
+      "text": "Padding(0, 0, design.Space2, 0)",
+      "owner": "uiroot",
+      "expires": "2027-06-30"
+    },
+    {
+      "rule": "DS-03",
+      "file": "internal/uiroot/frame.go",
+      "line": 451,
+      "text": "FontWeight(600)",
+      "owner": "uiroot",
+      "expires": "2027-06-30"
+    },
+    {
+      "rule": "DS-03",
+      "file": "internal/uiroot/frame.go",
+      "line": 480,
+      "text": "Size(16, 16)",
+      "owner": "uiroot",
+      "expires": "2027-06-30"
+    },
+    {
+      "rule": "DS-03",
+      "file": "internal/uiroot/frame.go",
+      "line": 493,
+      "text": "Size(16, 16)",
+      "owner": "uiroot",
+      "expires": "2027-06-30"
+    },
+    {
+      "rule": "DS-03",
+      "file": "internal/uiroot/frame.go",
+      "line": 520,
+      "text": "Size(16, 16)",
+      "owner": "uiroot",
+      "expires": "2027-06-30"
+    },
+    {
+      "rule": "DS-03",
+      "file": "internal/uiroot/frame.go",
+      "line": 550,
+      "text": "FontWeight(600)",
+      "owner": "uiroot",
+      "expires": "2027-06-30"
+    },
+    {
+      "rule": "DS-03",
+      "file": "internal/uiroot/frame.go",
+      "line": 558,
+      "text": "Size(16, 16)",
+      "owner": "uiroot",
+      "expires": "2027-06-30"
+    },
+    {
+      "rule": "DS-03",
+      "file": "internal/uiroot/frame.go",
+      "line": 597,
+      "text": "FontWeight(600)",
+      "owner": "uiroot",
+      "expires": "2027-06-30"
+    },
+    {
+      "rule": "DS-06",
+      "file": "internal/uiroot/frame.go",
+      "line": 659,
+      "text": "ui.ButtonBase(row.Context)",
+      "owner": "uiroot",
+      "expires": "2027-06-30"
+    },
+    {
+      "rule": "DS-03",
+      "file": "internal/uiroot/frame.go",
+      "line": 674,
+      "text": "FontWeight(600)",
+      "owner": "uiroot",
+      "expires": "2027-06-30"
+    },
+    {
+      "rule": "DS-03",
+      "file": "internal/uiroot/frame.go",
+      "line": 678,
+      "text": "MaxWidth(240)",
+      "owner": "uiroot",
+      "expires": "2027-06-30"
+    },
+    {
+      "rule": "DS-03",
+      "file": "internal/uiroot/frame.go",
+      "line": 693,
+      "text": "MaxHeight(320)",
+      "owner": "uiroot",
+      "expires": "2027-06-30"
+    },
+    {
+      "rule": "DS-03",
+      "file": "internal/uiroot/frame.go",
+      "line": 966,
+      "text": "Width(200)",
+      "owner": "uiroot",
+      "expires": "2027-06-30"
+    },
+    {
+      "rule": "DS-03",
+      "file": "internal/uiroot/frame.go",
+      "line": 968,
+      "text": "Padding(design.Space3, design.Space3, 0, design.Space3)",
+      "owner": "uiroot",
+      "expires": "2027-06-30"
+    },
+    {
+      "rule": "DS-03",
+      "file": "internal/uiroot/frame.go",
+      "line": 1130,
+      "text": "Padding(0, design.Space4, design.Space4)",
+      "owner": "uiroot",
+      "expires": "2027-06-30"
+    }
+  ]
+}

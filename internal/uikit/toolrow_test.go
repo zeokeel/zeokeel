@@ -37,9 +37,11 @@ func toolRowView(state *toolRowState) func(*ui.Context) {
 				state.toggles = append(state.toggles, next)
 				state.open = next
 			},
-			Detail: func(c *ui.Context) {
-				design.Apply(ui.Text(c, "完整结果"), t.TextMuted(design.TypeXXS))
-			},
+			Sections: []uikit.ToolPanelSection{{
+				Label: "完整结果标题",
+				Text:  "完整结果",
+				Mono:  true,
+			}},
 		})
 	}
 }
@@ -112,7 +114,7 @@ func TestToolRowRunningShowsLabeledSpinner(t *testing.T) {
 			Status:      "运行中",
 			StatusColor: t.WarningText,
 			Running:     true,
-			Detail:      func(c *ui.Context) { ui.Text(c, "结果") },
+			Sections:    []uikit.ToolPanelSection{{Label: "输出", Text: "结果"}},
 		})
 	}, 800, 200)
 	running := 0

@@ -118,8 +118,10 @@ func TestAssistantCopyHiddenForEmptyText(t *testing.T) {
 	})
 	h := newHarness(t, chat)
 	tester := h.tester()
-	if got := textsContaining(tester.Texts(), "复制"); got != 0 {
-		t.Fatalf("copy action rendered for an empty message; texts = %v", tester.Texts())
+	// The empty assistant turn has no copy action of its own (the user
+	// message's 复制原文 is a different action and stays).
+	if got := textsContaining(tester.Texts(), "复制消息"); got != 0 {
+		t.Fatalf("assistant copy action rendered for an empty message; texts = %v", tester.Texts())
 	}
 }
 
@@ -131,7 +133,7 @@ func TestAgentModePlanBadgeAndToggle(t *testing.T) {
 	tester := h.tester()
 	// Normal mode keeps the quiet session-menu label; plan mode owns the label
 	// (and the warning colour) when it is active.
-	h.assertTexts(tester, "工作区权限")
+	h.assertTexts(tester, "工作区可写")
 	if got := textsContaining(tester.Texts(), "计划模式"); got != 0 {
 		t.Fatalf("plan state rendered outside the session menu; texts = %v", tester.Texts())
 	}
@@ -149,7 +151,7 @@ func TestAgentModePlanBadgeAndToggle(t *testing.T) {
 	if got := settings.get(contracts.SettingAgentMode); got != contracts.AgentModeNormal {
 		t.Fatalf("stored agent mode = %q, want normal", got)
 	}
-	h.assertTexts(tester, "工作区权限")
+	h.assertTexts(tester, "工作区可写")
 	if got := textsContaining(tester.Texts(), "计划模式"); got != 0 {
 		t.Fatalf("plan state still rendered after switching back; texts = %v", tester.Texts())
 	}

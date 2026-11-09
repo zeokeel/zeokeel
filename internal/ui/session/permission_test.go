@@ -8,6 +8,8 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/egoist/mygo/ui"
+
 	cordis "github.com/zeokeel/zeokeel-kernel"
 
 	"github.com/zeokeel/zeokeel/internal/contracts"
@@ -133,7 +135,7 @@ func TestPermissionCommandCyclesMode(t *testing.T) {
 
 	// Workspace is the default: the composer shows the quiet contextual label
 	// and the state lives in the menu, not on a resident chip.
-	h.assertTexts(tester, "工作区权限")
+	h.assertTexts(tester, "工作区可写")
 	h.assertNoTexts(tester, "询问")
 
 	h.typeSlash(tester)
@@ -141,22 +143,22 @@ func TestPermissionCommandCyclesMode(t *testing.T) {
 	if got := settings.get(contracts.SettingAgentPermission); got != contracts.PermissionFull {
 		t.Fatalf("after first cycle = %q, want full", got)
 	}
-	h.assertTexts(tester, "全部允许")
+	h.assertTexts(tester, "所有权限")
 
 	h.typeSlash(tester)
 	h.clickExact(tester, "权限模式")
-	if got := settings.get(contracts.SettingAgentPermission); got != contracts.PermissionAsk {
-		t.Fatalf("after second cycle = %q, want ask", got)
+	if got := settings.get(contracts.SettingAgentPermission); got != contracts.PermissionReadOnly {
+		t.Fatalf("after second cycle = %q, want read-only", got)
 	}
-	h.assertTexts(tester, "会话设置")
+	h.assertTexts(tester, "只读")
 
 	h.typeSlash(tester)
 	h.clickExact(tester, "权限模式")
 	if got := settings.get(contracts.SettingAgentPermission); got != contracts.PermissionWorkspace {
 		t.Fatalf("after third cycle = %q, want workspace", got)
 	}
-	h.assertTexts(tester, "工作区权限")
-	h.assertNoTexts(tester, "全部允许")
+	h.assertTexts(tester, "工作区可写")
+	h.assertNoTexts(tester, "所有权限")
 }
 
 func TestPermissionBadgeReflectsSettings(t *testing.T) {
@@ -164,37 +166,43 @@ func TestPermissionBadgeReflectsSettings(t *testing.T) {
 	h := newPermissionHarness(t, permissionChat(), settings)
 	tester := h.tester()
 	// The workspace default owns the quiet contextual label; no resident chip.
-	h.assertTexts(tester, "工作区权限")
-	h.assertNoTexts(tester, "询问", "全部允许", "禁止工具")
+	h.assertTexts(tester, "工作区可写")
+	h.assertNoTexts(tester, "询问", "所有权限", "禁止工具")
 
+	// The retired "ask" rows normalize to read-only, not to a separate Ask
+	// state; the composer shows the read-only label.
 	settings.set(contracts.SettingAgentPermission, contracts.PermissionAsk)
 	tester.Frame()
-	h.assertTexts(tester, "会话设置")
+	h.assertTexts(tester, "只读")
+	settings.set(contracts.SettingAgentPermission, contracts.PermissionNever)
+	tester.Frame()
+	h.assertTexts(tester, "只读")
 
 	settings.set(contracts.SettingAgentPermission, contracts.PermissionWorkspace)
 	tester.Frame()
-	h.assertTexts(tester, "工作区权限")
+	h.assertTexts(tester, "工作区可写")
 
-	// The one session menu lists every permission mode; the current one is a
-	// radio row and choosing another writes it through.
+	// The one session menu lists exactly the three permission modes; the
+	// current one is a radio row and choosing another writes it through.
 	h.openSessionMenu(tester)
-	h.assertTexts(tester, "权限模式", "询问", "工作区", "全部允许", "从不允许")
-	h.clickExact(tester, "全部允许")
+	h.assertTexts(tester, "权限模式", "只读", "工作区可写", "所有权限")
+	h.assertNoTexts(tester, "询问", "从不允许")
+	h.clickExact(tester, "所有权限")
 	if got := settings.get(contracts.SettingAgentPermission); got != contracts.PermissionFull {
 		t.Fatalf("menu choice stored %q, want full", got)
 	}
-	h.assertTexts(tester, "全部允许")
+	h.assertTexts(tester, "所有权限")
 
 	// Unknown values degrade to the default (workspace) label.
 	settings.set(contracts.SettingAgentPermission, "unexpected")
 	tester.Frame()
-	h.assertTexts(tester, "工作区权限")
+	h.assertTexts(tester, "工作区可写")
 }
 
 func TestPermissionBadgeHiddenWithoutSettings(t *testing.T) {
 	h := newPermissionHarness(t, permissionChat(), nil)
 	tester := h.tester()
-	h.assertNoTexts(tester, "询问", "工作区权限", "全部允许", "禁止工具")
+	h.assertNoTexts(tester, "询问", "工作区可写", "所有权限", "从不允许")
 	// Without a settings store the session menu exists for the built-in
 	// presets, but it offers no permission modes at all.
 	h.openSessionMenu(tester)
@@ -210,18 +218,80 @@ func TestPermissionBadgeEnglishCopy(t *testing.T) {
 	tester := h.tester()
 	h.ui.Locale().SetLanguage("en")
 	tester.Frame()
-	h.assertTexts(tester, "Workspace")
+	h.assertTexts(tester, "Workspace-write")
 
-	// The ask default is the quiet label; it does not expose "Ask" on the row.
+	// Legacy ask/never rows normalize to read-only on the composer label.
 	settings.set(contracts.SettingAgentPermission, contracts.PermissionAsk)
 	tester.Frame()
-	h.assertTexts(tester, "Session settings")
+	h.assertTexts(tester, "Read-only")
 
 	settings.set(contracts.SettingAgentPermission, contracts.PermissionFull)
 	tester.Frame()
-	h.assertTexts(tester, "Allow all")
+	h.assertTexts(tester, "All permissions")
+}
 
-	settings.set(contracts.SettingAgentPermission, contracts.PermissionNever)
+// TestSessionPermissionMenuStructure pins the user-reported menu problem: the
+// disabled 权限模式 header comes FIRST, directly above exactly three Radio items
+// (只读 / 工作区可写 / 所有权限) in that order, with no 询问/从不允许 rows. The
+// current mode is the checked radio and choosing another persists it.
+func TestSessionPermissionMenuStructure(t *testing.T) {
+	settings := newPermissionSettings(nil)
+	h := newPermissionHarness(t, permissionChat(), settings)
+	tester := h.tester()
+	h.openSessionMenu(tester)
+
+	h.assertTexts(tester, "权限模式", "只读", "工作区可写", "所有权限", "对话模式")
+	h.assertNoTexts(tester, "询问", "从不允许", "禁止工具", "全部允许")
+
+	header, ok := tester.AccessByRole(ui.RoleMenuItem, "权限模式")
+	if !ok {
+		t.Fatalf("permission group header has no menu-item role; texts = %v", tester.Texts())
+	}
+	if !header.Disabled {
+		t.Fatal("permission group header is selectable, want disabled")
+	}
+	modes := []string{"只读", "工作区可写", "所有权限"}
+	previousY := header.Bounds.Y
+	rects := make(map[string]ui.Rect, len(modes))
+	for _, mode := range modes {
+		info, ok := tester.AccessByRole(ui.RoleMenuItemRadio, mode)
+		if !ok {
+			t.Fatalf("permission mode %q is not a radio menu item; texts = %v", mode, tester.Texts())
+		}
+		if info.Bounds.Y <= previousY {
+			t.Fatalf("permission mode %q is not below the group header (header Y=%.1f, item Y=%.1f)",
+				mode, header.Bounds.Y, info.Bounds.Y)
+		}
+		previousY = info.Bounds.Y
+		rects[mode] = info.Bounds
+	}
+	if rects["只读"].Y >= rects["工作区可写"].Y || rects["工作区可写"].Y >= rects["所有权限"].Y {
+		t.Fatalf("permission modes out of order: 只读 Y=%.1f, 工作区可写 Y=%.1f, 所有权限 Y=%.1f",
+			rects["只读"].Y, rects["工作区可写"].Y, rects["所有权限"].Y)
+	}
+	// Exactly three permission radios: the retired modes must not be offered.
+	for _, retired := range []string{"询问", "从不允许", "Ask", "Never"} {
+		if _, ok := tester.AccessByRole(ui.RoleMenuItemRadio, retired); ok {
+			t.Fatalf("retired permission mode %q is still a selectable radio row", retired)
+		}
+	}
+	workspace, _ := tester.AccessByRole(ui.RoleMenuItemRadio, "工作区可写")
+	if !workspace.Checked {
+		t.Fatal("workspace-write (the default) is not the checked permission radio")
+	}
+
+	// Choosing 只读 persists the canonical read-only value and moves the check.
+	h.clickExact(tester, "只读")
+	if got := settings.get(contracts.SettingAgentPermission); got != contracts.PermissionReadOnly {
+		t.Fatalf("selecting 只读 stored %q, want %q", got, contracts.PermissionReadOnly)
+	}
+	settings.set(contracts.SettingAgentPermission, contracts.PermissionFull)
 	tester.Frame()
-	h.assertTexts(tester, "Tools off")
+	h.openSessionMenu(tester)
+	readOnly, _ := tester.AccessByRole(ui.RoleMenuItemRadio, "只读")
+	allPermissions, ok := tester.AccessByRole(ui.RoleMenuItemRadio, "所有权限")
+	if !ok || !allPermissions.Checked || readOnly.Checked {
+		t.Fatalf("radio marks after choosing all permissions: read-only=%v all=%v/%v",
+			readOnly.Checked, allPermissions.Checked, ok)
+	}
 }

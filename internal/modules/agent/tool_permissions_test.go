@@ -221,37 +221,50 @@ func TestMalformedAllowedToolsRowIgnored(t *testing.T) {
 	}
 }
 
-// TestGateNeverPoliciesStillDenyRememberedTool covers both the global deny-all
-// switch and a per-session "never" override: the remembered set only skips the
-// prompt, it never overrides a deny policy.
-func TestGateNeverPoliciesStillDenyRememberedTool(t *testing.T) {
+// TestGateDenyAllPolicyStillDeniesRememberedTool covers the headless deny-all
+// backend policy: the remembered "always allow" set only skips the prompt, it
+// never overrides an explicit deny policy.
+func TestGateDenyAllPolicyStillDeniesRememberedTool(t *testing.T) {
 	settings := newFakeSettings(map[string]string{
 		contracts.SessionAllowedToolsSettingKey("sess-a"): `["bash"]`,
 	})
-	t.Run("global never", func(t *testing.T) {
-		approvals := &recordingApprovals{mode: contracts.PermissionNever}
-		svc := newService(Config{}, rigtools.NewRegistry(&gateTestTool{name: "bash"}),
-			contracts.SettingsService(settings), &fakeLogger{}, newFakeStore(), approvals)
-		if decision := approveOne(t, svc.gate("sess-a"), "bash"); decision != rig.DecisionDeny {
-			t.Fatalf("global never decision = %q, want deny", decision)
-		}
-		if asked := approvals.askedTools(); len(asked) != 0 {
-			t.Fatalf("global never requested approval: %v", asked)
-		}
-	})
-	t.Run("session never override", func(t *testing.T) {
-		approvals := &recordingApprovals{}
-		svc, sessionID := newPermissionService(t, settings, approvals)
-		if err := svc.SetSessionPermission(sessionID, contracts.PermissionNever); err != nil {
-			t.Fatalf("SetSessionPermission: %v", err)
-		}
-		if decision := approveOne(t, svc.gate(sessionID), "bash"); decision != rig.DecisionDeny {
-			t.Fatalf("session never decision = %q, want deny", decision)
-		}
-		if asked := approvals.askedTools(); len(asked) != 0 {
-			t.Fatalf("session never requested approval: %v", asked)
-		}
-	})
+	approvals := &recordingApprovals{mode: approvalModeNever}
+	svc := newService(Config{}, rigtools.NewRegistry(&gateTestTool{name: "bash"}),
+		contracts.SettingsService(settings), &fakeLogger{}, newFakeStore(), approvals)
+	if decision := approveOne(t, svc.gate("sess-a"), "bash"); decision != rig.DecisionDeny {
+		t.Fatalf("deny-all decision = %q, want deny", decision)
+	}
+	if asked := approvals.askedTools(); len(asked) != 0 {
+		t.Fatalf("deny-all policy requested approval: %v", asked)
+	}
+}
+
+// TestGateReadOnlyOverrideKeepsRememberedToolAllowed covers the read-only
+// preset: it is not a deny policy, so a tool the user already remembered with
+// "always allow in this session" stays allowed without a new prompt.
+func TestGateReadOnlyOverrideKeepsRememberedToolAllowed(t *testing.T) {
+	settings := newFakeSettings(nil)
+	approvals := &recordingApprovals{decision: contracts.ApprovalDeny}
+	svc, sessionID := newPermissionService(t, settings, approvals)
+	if err := settings.Set(contracts.SessionAllowedToolsSettingKey(sessionID), `["bash"]`); err != nil {
+		t.Fatalf("remember bash: %v", err)
+	}
+	if err := svc.SetSessionPermission(sessionID, contracts.PermissionReadOnly); err != nil {
+		t.Fatalf("SetSessionPermission: %v", err)
+	}
+	if decision := approveOne(t, svc.gate(sessionID), "bash"); decision != rig.DecisionAllow {
+		t.Fatalf("remembered bash under read-only = %q, want allow", decision)
+	}
+	if asked := approvals.askedTools(); len(asked) != 0 {
+		t.Fatalf("remembered bash requested approval: %v", asked)
+	}
+	// A tool that was not remembered still goes through the approval gate.
+	if decision := approveOne(t, svc.gate(sessionID), "write_file"); decision != rig.DecisionDeny {
+		t.Fatalf("unremembered write_file under read-only = %q, want the fake deny", decision)
+	}
+	if asked := approvals.askedTools(); len(asked) != 1 || asked[0] != "write_file" {
+		t.Fatalf("approval requests = %v, want [write_file]", asked)
+	}
 }
 
 // TestGatePlanModeStillDeniesRememberedTool proves plan mode keeps precedence.

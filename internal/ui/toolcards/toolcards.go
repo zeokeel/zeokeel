@@ -5,8 +5,10 @@
 //
 // The module registers one native renderer per common Rig tool name (bash,
 // read_file, grep, web_search, subagent, ...) plus the original "demo" card the
-// host uses as a capability probe. All real cards share the transcript's compact
-// tool row (internal/uikit.ToolRow): one official mygo disclosure
+// host uses as a capability probe. A tool call has exactly two looks: the compact
+// tool row (internal/uikit.ToolRow) for real cards, and the complete card
+// (internal/uikit.ToolCallCard) for the plan card and the demo probe. The
+// compact row is one official mygo disclosure
 // (ui.CollapsibleBase) whose trigger is a muted category icon, the friendly
 // localized tool name (the protocol id stays its tooltip/AT description), the
 // status with the official ui.Spinner while running, a one-line summary preview
@@ -21,6 +23,7 @@
 package toolcards
 
 import (
+	"bytes"
 	"encoding/json"
 	"strings"
 	"sync"
@@ -33,7 +36,6 @@ import (
 
 	"github.com/zeokeel/zeokeel/internal/contracts"
 	"github.com/zeokeel/zeokeel/internal/design"
-	"github.com/zeokeel/zeokeel/internal/icons"
 	"github.com/zeokeel/zeokeel/internal/uikit"
 )
 
@@ -184,23 +186,25 @@ func Module() *module.Descriptor[Config] {
 }
 
 // demoBuild is the demo card used by the host's capability probe. It keeps its
-// historical content (title, raw status badge, summary) but uses the
-// same brand panel as the real tool cards so the Home demo looks native.
+// historical content (title, raw status badge, summary) through the shared
+// complete card: a custom title and raw status label, and the summary as the
+// card's always-visible content, so the Home demo looks native.
 func demoBuild(title string) func(c *ui.Context, call contracts.ToolCall) {
 	return func(c *ui.Context, call contracts.ToolCall) {
-		t := design.Of(c)
-		card := ui.Column(c).FillWidth().Gap(design.Space2)
-		design.Apply(card, t.Panel()).Padding(design.Space3).Children(func() {
-			ui.Row(c).FillWidth().Gap(design.Space2).AlignItems(ui.Center).Children(func() {
-				ui.Icon(c, icons.Message()).Size(design.Space4, design.Space4).
-					TextColor(t.LabelSecondary)
-				design.Apply(ui.Text(c, title+": "+call.Name), t.Font(design.TypeS)).FontWeight(600).
-					TextColor(t.LabelPrimary)
-				design.Apply(ui.Badge(c, call.Status), t.Badge())
-			})
-			if call.Summary != "" {
-				design.Apply(ui.Text(c, call.Summary), t.TextMuted(design.TypeXS))
-			}
+		key := ""
+		if call.ID != "" {
+			key = "toolcards.demo." + call.ID
+		}
+		uikit.ToolCallCard(c, uikit.ToolCallCardOptions{
+			Key:         key,
+			Call:        call,
+			Title:       title + ": " + call.Name,
+			StatusLabel: call.Status,
+			Content: func(cc *ui.Context) {
+				if summary := strings.TrimSpace(call.Summary); summary != "" {
+					design.Apply(ui.Text(cc, summary), design.Of(cc).TextMuted(design.TypeXS))
+				}
+			},
 		})
 	}
 }
@@ -209,7 +213,9 @@ func demoBuild(title string) func(c *ui.Context, call contracts.ToolCall) {
 // registered cards use the shared compact disclosure row (internal/uikit): a
 // muted category icon, the friendly localized tool name (the protocol id is the
 // row's tooltip), the status with the official spinner while running, a one-line
-// summary preview and the chevron. The trajectory pane keeps its detailed card.
+// summary preview and the chevron. Expanded, the panel shows the tool's input
+// (command / path / before-after / JSON) and its output, each copyable, plus the
+// team cross-navigation footer for team-related tools.
 func realBuild(state *rendererState, runtime contracts.UIRuntime) func(c *ui.Context, call contracts.ToolCall) {
 	return func(c *ui.Context, call contracts.ToolCall) {
 		t := design.Of(c)
@@ -218,17 +224,19 @@ func realBuild(state *rendererState, runtime contracts.UIRuntime) func(c *ui.Con
 		summary := strings.TrimSpace(call.Summary)
 		open, seen := state.loadSeen(key)
 		if !seen {
-			open = SummaryDefaultOpen(call.Status, summary)
+			open = uikit.SummaryDefaultOpen(call.Status, summary)
 		}
 		toggled := false
+		sections := PanelSections(state.locale, call)
+		statusKind := uikit.ParseToolStatus(call.Status).Kind()
 		row := uikit.ToolRowOptions{
 			Key:         "toolcards." + key,
 			Icon:        uikit.ToolIcon(tool),
 			Name:        uikit.ToolDisplayName(state.locale, tool),
 			RawName:     tool,
-			Status:      statusLabel(state, call.Status),
-			StatusColor: toolStatusTextColor(t, call.Status),
-			Running:     normalizeStatus(call.Status) == "running",
+			Status:      uikit.ToolStatusLabel(state.locale, call.Status),
+			StatusColor: uikit.StatusColor(t, statusKind),
+			Running:     statusKind == uikit.StatusRunning,
 			Preview:     uikit.ToolPreview(summary, 96),
 			Open:        open,
 			Toggle: func(next bool) {
@@ -236,11 +244,8 @@ func realBuild(state *rendererState, runtime contracts.UIRuntime) func(c *ui.Con
 				state.store(key, next)
 				runtime.Invalidate()
 			},
-		}
-		if summary != "" {
-			row.Detail = func(cc *ui.Context) {
-				design.Apply(ui.Text(cc, truncateSummary(summary)), t.TextMuted(design.TypeXXS))
-			}
+			Sections: sections,
+			Footer:   TeamToolFooter(runtime, state.locale, tool),
 		}
 		uikit.ToolRow(c, row)
 		if !seen && !toggled {
@@ -249,54 +254,280 @@ func realBuild(state *rendererState, runtime contracts.UIRuntime) func(c *ui.Con
 	}
 }
 
-// toolIcon maps a tool name to its brand glyph: shell/process tools use the
-// terminal, file and web reads the globe, searches the magnifier, task tools// toolStatusTextColor is the badge's WCAG-AA foreground of a status (the
-// status color itself is a fill/icon color, too light for small text).
-func toolStatusTextColor(t *design.Tokens, status string) ui.Color {
-	switch normalizeStatus(status) {
-	case "running":
-		return t.WarningText
-	case "error":
-		return t.DangerText
-	case "ok":
-		return t.SuccessText
-	default:
-		return t.LabelTertiary
-	}
-}
+// The inspector pane-opening commands are the stable cross-navigation contract
+// (internal/ui/rightpanel registers them; a host without that module simply has
+// no footer action). They are string literals here because UI modules may not
+// import each other.
+const (
+	teamOpenCommandID  = "rightpanel.team.open"
+	tasksOpenCommandID = "rightpanel.tasks.open"
+)
 
-// statusLabel maps a tool status to the localized card label.
-func statusLabel(state *rendererState, status string) string {
-	switch normalizeStatus(status) {
-	case "running":
-		return state.tr("运行中", "Running")
-	case "ok":
-		return state.tr("完成", "Completed")
-	case "error":
-		return state.tr("失败", "Failed")
-	default:
-		if trimmed := strings.TrimSpace(status); trimmed != "" {
-			return trimmed
+// maxToolInputRunes bounds one rendered input section (JSON, command, content
+// preview). It mirrors the agent's read-model argument bound so the UI never
+// shows less than the read model kept, and keeps a huge write_file content from
+// bloating the panel.
+const maxToolInputRunes = 4000
+
+// maxToolContentPreviewRunes bounds the write_file content preview.
+const maxToolContentPreviewRunes = 2000
+
+// assumedToolSummaryRunes mirrors agent.maxToolSummaryRunes: a read-model
+// summary at this length that ends with the truncation ellipsis was cut by the
+// backend. Keep the two in sync (both have tests asserting the bound).
+const assumedToolSummaryRunes = 4000
+
+// PanelSections builds the expanded panel of one tool call: the tool's input
+// (bash command, write path+content, edit path+before/after, or pretty JSON),
+// then its bounded output. Labels are localized through locale; colors are
+// applied by the shared uikit section renderer from the design tokens.
+func PanelSections(locale contracts.LocaleService, call contracts.ToolCall) []uikit.ToolPanelSection {
+	tr := func(zh, en string) string { return uikit.T(locale, zh, en) }
+	name := strings.ToLower(strings.TrimSpace(call.Name))
+	arguments := strings.TrimSpace(call.Arguments)
+	sections := make([]uikit.ToolPanelSection, 0, 4)
+
+	switch {
+	case name == "bash", name == "pwsh":
+		if command := toolStringArg(arguments, "command"); command != "" {
+			sections = append(sections, uikit.ToolPanelSection{
+				Label:     tr("命令", "Command"),
+				Text:      command,
+				Mono:      true,
+				Bounded:   true,
+				CopyLabel: tr("复制命令", "Copy command"),
+			})
+		} else if generic, ok := genericInputSection(tr, arguments); ok {
+			sections = append(sections, generic)
 		}
-		return state.tr("未知", "Unknown")
+	case name == "write_file":
+		if path := toolStringArg(arguments, "path"); path != "" {
+			sections = append(sections, uikit.ToolPanelSection{
+				Label:     tr("路径", "Path"),
+				Text:      path,
+				Mono:      true,
+				CopyLabel: tr("复制路径", "Copy path"),
+			})
+		}
+		if content := toolStringArg(arguments, "content"); content != "" {
+			text, truncated := boundRunes(content, maxToolContentPreviewRunes)
+			section := uikit.ToolPanelSection{
+				Label:     tr("内容", "Content"),
+				Text:      text,
+				Mono:      true,
+				Bounded:   true,
+				CopyLabel: tr("复制内容", "Copy content"),
+			}
+			if truncated {
+				section.Hint = tr("内容已截断，仅显示前部分", "Content truncated; only the beginning is shown")
+			}
+			sections = append(sections, section)
+		}
+	case name == "edit_file", name == "str_replace_editor":
+		if path := toolStringArg(arguments, "path"); path != "" {
+			sections = append(sections, uikit.ToolPanelSection{
+				Label:     tr("路径", "Path"),
+				Text:      path,
+				Mono:      true,
+				CopyLabel: tr("复制路径", "Copy path"),
+			})
+		}
+		oldText := firstToolStringArg(arguments, "old_string", "old_str")
+		newText := firstToolStringArg(arguments, "new_string", "new_str")
+		if oldText != "" {
+			sections = append(sections, uikit.ToolPanelSection{
+				Label:     tr("替换前", "Before"),
+				Text:      oldText,
+				Mono:      true,
+				Bounded:   true,
+				Tone:      uikit.ToolSectionRemoved,
+				CopyLabel: tr("复制替换前", "Copy before"),
+			})
+		}
+		if newText != "" {
+			sections = append(sections, uikit.ToolPanelSection{
+				Label:     tr("替换后", "After"),
+				Text:      newText,
+				Mono:      true,
+				Bounded:   true,
+				Tone:      uikit.ToolSectionAdded,
+				CopyLabel: tr("复制替换后", "Copy after"),
+			})
+		}
+		// str_replace_editor's create command carries the new file body instead
+		// of an old/new pair.
+		if oldText == "" && newText == "" {
+			if content := firstToolStringArg(arguments, "file_text", "content"); content != "" {
+				text, truncated := boundRunes(content, maxToolContentPreviewRunes)
+				section := uikit.ToolPanelSection{
+					Label:     tr("内容", "Content"),
+					Text:      text,
+					Mono:      true,
+					Bounded:   true,
+					CopyLabel: tr("复制内容", "Copy content"),
+				}
+				if truncated {
+					section.Hint = tr("内容已截断，仅显示前部分", "Content truncated; only the beginning is shown")
+				}
+				sections = append(sections, section)
+			}
+		}
+	default:
+		if generic, ok := genericInputSection(tr, arguments); ok {
+			sections = append(sections, generic)
+		}
+	}
+
+	if summary := strings.TrimSpace(call.Summary); summary != "" {
+		section := uikit.ToolPanelSection{
+			Label:     tr("输出", "Output"),
+			Text:      summary,
+			Mono:      true,
+			Bounded:   true,
+			CopyLabel: tr("复制输出", "Copy output"),
+		}
+		if toolOutputTruncated(summary) {
+			section.Hint = tr("输出已截断，仅显示前部分", "Output truncated; only the beginning is shown")
+		}
+		sections = append(sections, section)
+	}
+	return sections
+}
+
+// genericInputSection renders the tool arguments as indented JSON, bounded and
+// copyable. It reports false when there is nothing readable to show.
+func genericInputSection(tr func(zh, en string) string, arguments string) (uikit.ToolPanelSection, bool) {
+	trimmed := strings.TrimSpace(arguments)
+	if trimmed == "" || trimmed == "{}" || trimmed == "null" {
+		return uikit.ToolPanelSection{}, false
+	}
+	text := trimmed
+	if pretty, ok := prettyJSON(trimmed); ok {
+		text = pretty
+	}
+	bounded, truncated := boundRunes(text, maxToolInputRunes)
+	section := uikit.ToolPanelSection{
+		Label:     tr("输入", "Input"),
+		Text:      bounded,
+		Mono:      true,
+		Bounded:   true,
+		CopyLabel: tr("复制输入", "Copy input"),
+	}
+	if truncated {
+		section.Hint = tr("输入已截断，仅显示前部分", "Input truncated; only the beginning is shown")
+	}
+	return section, true
+}
+
+// TeamToolFooter returns the expanded panel's cross-navigation footer for a
+// team-related tool call: spawn/subagent calls open the inspector's team pane and
+// team_task_* calls open the shared task board. It returns nil for unrelated
+// tools; the returned builder renders nothing when the host does not register
+// the command (so no dangling divider appears).
+func TeamToolFooter(runtime contracts.UIRuntime, locale contracts.LocaleService, toolName string) func(c *ui.Context) {
+	name := strings.ToLower(strings.TrimSpace(toolName))
+	commandID, label := "", ""
+	switch {
+	case name == "spawn_teammate", name == "subagent", name == "subagent_fork", name == "team_spawn":
+		commandID = teamOpenCommandID
+		label = uikit.T(locale, "在团队中查看", "View in team")
+	case strings.HasPrefix(name, "team_task_"):
+		commandID = tasksOpenCommandID
+		label = uikit.T(locale, "打开任务板", "Open task board")
+	default:
+		return nil
+	}
+	if runtime == nil {
+		return nil
+	}
+	return func(c *ui.Context) {
+		command, ok := runtimeCommand(runtime, commandID)
+		if !ok {
+			return
+		}
+		t := design.Of(c)
+		ui.Column(c).FillWidth().Children(func() {
+			ui.Divider(c)
+			ui.Row(c).FillWidth().Justify(ui.End).Children(func() {
+				button := design.Apply(ui.Button(c, label), t.SecondaryButton()).Label(label)
+				if button.Clicked() && (command.Enabled == nil || command.Enabled()) {
+					if command.Run != nil {
+						_ = command.Run()
+					}
+				}
+			})
+		})
 	}
 }
 
-// normalizeStatus folds the status spellings Rig uses into running/ok/error.
-func normalizeStatus(status string) string {
-	switch strings.ToLower(strings.TrimSpace(status)) {
-	case "running", "in_progress", "in-progress", "active", "started":
-		return "running"
-	case "ok", "success", "succeeded", "done", "complete", "completed":
-		return "ok"
-	case "error", "failed", "failure", "canceled", "cancelled":
-		return "error"
-	default:
+// runtimeCommand finds one registered command by its stable ID.
+func runtimeCommand(runtime contracts.UIRuntime, id string) (contracts.CommandSpec, bool) {
+	if runtime == nil {
+		return contracts.CommandSpec{}, false
+	}
+	for _, command := range runtime.Commands() {
+		if command.ID == id {
+			return command, true
+		}
+	}
+	return contracts.CommandSpec{}, false
+}
+
+// toolStringArg reads one string field of the tool's JSON arguments ("" when
+// the arguments are not JSON or the field is absent/non-string).
+func toolStringArg(arguments, key string) string {
+	trimmed := strings.TrimSpace(arguments)
+	if trimmed == "" || !strings.HasPrefix(trimmed, "{") {
 		return ""
 	}
+	var values map[string]any
+	if err := json.Unmarshal([]byte(trimmed), &values); err != nil {
+		return ""
+	}
+	value, _ := values[key].(string)
+	return value
 }
 
-// truncateSummary bounds the expanded excerpt (UTF-8 safe) and marks the cut.
+// firstToolStringArg returns the first present string field among keys.
+func firstToolStringArg(arguments string, keys ...string) string {
+	for _, key := range keys {
+		if value := toolStringArg(arguments, key); value != "" {
+			return value
+		}
+	}
+	return ""
+}
+
+// prettyJSON indents one JSON document for the input section.
+func prettyJSON(raw string) (string, bool) {
+	if !strings.HasPrefix(strings.TrimSpace(raw), "{") && !strings.HasPrefix(strings.TrimSpace(raw), "[") {
+		return "", false
+	}
+	var buffer bytes.Buffer
+	if err := json.Indent(&buffer, []byte(raw), "", "  "); err != nil {
+		return "", false
+	}
+	return buffer.String(), true
+}
+
+// boundRunes cuts text to max runes (UTF-8 safe) and reports whether it cut.
+func boundRunes(text string, max int) (string, bool) {
+	runes := []rune(text)
+	if max <= 0 || len(runes) <= max {
+		return text, false
+	}
+	return string(runes[:max]) + "…", true
+}
+
+// toolOutputTruncated reports whether the backend cut the read-model summary:
+// the agent appends the truncation ellipsis when the output exceeds its bound.
+func toolOutputTruncated(summary string) bool {
+	return strings.HasSuffix(strings.TrimSpace(summary), "…") &&
+		len([]rune(strings.TrimSpace(summary))) >= assumedToolSummaryRunes
+}
+
+// toolIcon maps a tool name to its brand glyph: shell/process tools use the
+// terminal, file and web reads the globe, searches the magnifier, task tools// truncateSummary bounds the expanded excerpt (UTF-8 safe) and marks the cut.
 func truncateSummary(summary string) string {
 	if len(summary) <= maxSummaryChars {
 		return summary
@@ -336,79 +567,83 @@ func planMarkdownFromSummary(summary string) (string, bool) {
 	return "", false
 }
 
-// SummaryDefaultOpen reports whether a card's detail section starts expanded
-// (H15): failures first, and very short results are cheap to show. The session
-// transcript's fallback card uses the same rule, so a tool call never gets two
-// different disclosure defaults.
-func SummaryDefaultOpen(status, summary string) bool {
-	if normalizeStatus(status) == "error" {
-		return true
-	}
-	return len([]rune(strings.TrimSpace(summary))) <= 160
-}
-
-// planReviewBuild renders the transcript plan card: a titled panel with the
-// optional PlanReviewer state badge and the plan Markdown when the arguments
-// can be recovered, otherwise the existing raw summary disclosure.
+// planReviewBuild renders the transcript plan card through the shared complete
+// card: the plan's title, the optional PlanReviewer state as the extra header
+// badge, and either the plan Markdown as rich content or a plain summary in the
+// official detail disclosure. A call with arguments but no readable content
+// shows the explicit "no inline content" copy instead of an empty panel.
 func planReviewBuild(state *rendererState) func(c *ui.Context, call contracts.ToolCall) {
 	return func(c *ui.Context, call contracts.ToolCall) {
-		t := design.Of(c)
-		card := ui.Column(c).FillWidth().Gap(design.Space2)
-		design.Apply(card, t.Panel()).Padding(design.Space3).Children(func() {
-			ui.Row(c).FillWidth().Gap(design.Space2).AlignItems(ui.Center).Children(func() {
-				ui.Icon(c, icons.Sparkles()).Size(design.Space4, design.Space4).
-					TextColor(t.LabelSecondary)
-				design.Apply(ui.Text(c, state.tr("计划审阅", "Plan review")), t.Font(design.TypeS)).FontWeight(600).
-					TextColor(t.LabelPrimary)
-				if label, fill, text, tint, ok := planReviewStateBadge(state, t); ok {
-					design.Apply(ui.Badge(c, label), t.Badge(), func(el ui.Element) ui.Element {
-						return el.Background(fill.Alpha(tint)).TextColor(text)
-					})
+		summary := strings.TrimSpace(call.Summary)
+		options := uikit.ToolCallCardOptions{
+			Key:        "toolcards." + call.ID + "\x00" + call.Name,
+			Call:       call,
+			Locale:     state.locale,
+			Title:      state.tr("计划审阅", "Plan review"),
+			HideStatus: true,
+			Header: func(c *ui.Context) {
+				if label, kind, ok := planReviewStateBadge(state); ok {
+					uikit.StatusBadge(c, design.Of(c), kind, label)
 				}
-				ui.Spacer(c).Grow(1)
-			})
-			summary := strings.TrimSpace(call.Summary)
-			if markdownText, ok := planMarkdownFromSummary(summary); ok {
-				markdown.View(c, markdownText, nil)
-				return
-			}
-			if summary == "" {
+			},
+		}
+		var open bool
+		var seen, toggled bool
+		switch {
+		case summary == "":
+			options.Content = func(c *ui.Context) {
 				design.Apply(ui.Text(c, state.tr("计划没有内联内容。", "The plan has no inline content.")),
-					t.TextMuted(design.TypeXS))
-				return
+					design.Of(c).TextMuted(design.TypeXS))
 			}
+		default:
+			if markdownText, ok := planMarkdownFromSummary(summary); ok {
+				options.Content = func(c *ui.Context) {
+					markdown.View(c, markdownText, nil)
+				}
+				break
+			}
+			// A summary that is not recoverable Markdown stays a plain detail
+			// disclosure, with the same H15 default and per-card fold memory as
+			// the compact row.
 			key := call.ID + "\x00" + call.Name
-			open, seen := state.loadSeen(key)
+			open, seen = state.loadSeen(key)
 			if !seen {
-				open = SummaryDefaultOpen(call.Status, summary)
+				open = uikit.SummaryDefaultOpen(call.Status, summary)
 			}
-			collapsible := ui.Collapsible(c, state.tr("详情", "Details"), &open, func() {
-				design.Apply(ui.Text(c, truncateSummary(summary)), t.TextMuted(design.TypeXS))
-			})
-			design.Apply(collapsible, t.Font(design.TypeXS))
-			state.store(key, open)
-		})
+			options.Sections = []uikit.ToolPanelSection{{Text: truncateSummary(summary)}}
+			options.Open = &open
+			options.OnToggle = func(next bool) {
+				toggled = true
+				state.store(key, next)
+			}
+		}
+		uikit.ToolCallCard(c, options)
+		if options.Open != nil && !seen && !toggled {
+			state.store(call.ID+"\x00"+call.Name, open)
+		}
 	}
 }
 
-// planReviewStateBadge maps the optional PlanReviewer state to a label, the
-// badge's fill tint and its WCAG-AA text variant.
-func planReviewStateBadge(state *rendererState, t *design.Tokens) (string, ui.Color, ui.Color, float32, bool) {
+// planReviewStateBadge maps the optional PlanReviewer state to its label and its
+// place in the shared status vocabulary: a reviewing plan is running (warning),
+// an approved one succeeded, a cancelled one is neutral (a user stop is not a
+// failure, DESIGN.md §5.2) and an idle one waits neutrally.
+func planReviewStateBadge(state *rendererState) (string, uikit.StatusKind, bool) {
 	reviewer, ok := state.ctx.Get(contracts.KeyPlanReviewer)
 	if !ok || reviewer == nil {
-		return "", ui.Transparent, ui.Transparent, 0, false
+		return "", uikit.StatusUnknown, false
 	}
 	switch strings.ToLower(strings.TrimSpace(reviewer.State())) {
 	case "reviewing":
-		return state.tr("审阅中", "Reviewing"), t.Warning, t.WarningText, 0.12, true
+		return state.tr("审阅中", "Reviewing"), uikit.StatusRunning, true
 	case "approved":
-		return state.tr("已批准", "Approved"), t.Success, t.SuccessText, 0.08, true
+		return state.tr("已批准", "Approved"), uikit.StatusSuccess, true
 	case "cancelled", "canceled":
-		return state.tr("已取消", "Cancelled"), t.Danger, t.DangerText, 0.12, true
+		return state.tr("已取消", "Cancelled"), uikit.StatusCancelled, true
 	case "idle":
-		return state.tr("待审阅", "Pending review"), t.LabelTertiary, t.LabelSecondary, 0.12, true
+		return state.tr("待审阅", "Pending review"), uikit.StatusIdle, true
 	default:
-		return "", ui.Transparent, ui.Transparent, 0, false
+		return "", uikit.StatusUnknown, false
 	}
 }
 

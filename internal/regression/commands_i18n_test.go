@@ -23,7 +23,7 @@ var englishSessionCommands = map[string][2]string{
 	"zeokeel.session.plan":       {"Review plan", "Submit a plan for the user to approve"},
 	"zeokeel.session.memory":     {"Add memory", "Save a global memory"},
 	"zeokeel.session.feedback":   {"Feedback", "Rate the latest answer"},
-	"zeokeel.session.permission": {"Permission mode", "Cycle permission: ask → workspace → full"},
+	"zeokeel.session.permission": {"Permission mode", "Cycle permission: read-only → workspace-write → all permissions"},
 	"zeokeel.session.settings":   {"Settings", "Open the settings panel"},
 	"zeokeel.session.stop":       {"Stop", "Stop the current reply"},
 	"zeokeel.session.attach":     {"Attach files", "Add files or images to the input"},

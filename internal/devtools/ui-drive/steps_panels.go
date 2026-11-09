@@ -225,6 +225,15 @@ func (d *drive) runPanelSteps() {
 			if !d.has("团队") && !d.has("研究员") {
 				c.failf("团队页签没有渲染内容")
 			}
+			// Leave the roster empty for the later steps: the session header's
+			// team chip belongs to the team step group, and a leftover member
+			// would otherwise change the header layout under unrelated steps.
+			if teamService, teamErr := d.root.Require(contracts.KeyTeam); teamErr == nil {
+				for _, member := range teamService.Members() {
+					_ = teamService.Close(member.ID)
+				}
+				d.drain(2)
+			}
 		})
 
 	d.step("panel-close", "shell", "右栏：关闭检查器",

@@ -7,6 +7,7 @@ import (
 	"github.com/egoist/mygo/ui"
 
 	"github.com/zeokeel/zeokeel/internal/contracts"
+	"github.com/zeokeel/zeokeel/internal/design"
 )
 
 // TestValidateLifecycle covers Root.Validate: a UI assembly without a screen is
@@ -577,12 +578,12 @@ func TestSettingsUnsavedCloseGuard(t *testing.T) {
 // layout (the drawer covers it rather than squeezing it).
 func TestInspectorDrawerIsModal(t *testing.T) {
 	r := newTestRoot(t)
-	mustScreen(t, r, textScreen("home", "首页", "body-home", 10))
+	mustScreen(t, r, textScreen("session", "会话", "body-session", 10))
 	mustSlot(t, r, textSlotItem(contracts.SlotSessionPanelRight, "pane", "inspector-pane", 10))
 	tt := newTestTester(t, r, 1000, 720)
 	tt.Frame()
-	if _, ok := tt.Find("body-home"); !ok {
-		t.Fatalf("body-home not found; texts: %v", tt.Texts())
+	if _, ok := tt.Find("body-session"); !ok {
+		t.Fatalf("body-session not found; texts: %v", tt.Texts())
 	}
 
 	tt.Key(ui.Cmd|ui.Alt, ui.KeyI)
@@ -599,20 +600,30 @@ func TestInspectorDrawerIsModal(t *testing.T) {
 		t.Fatal("Escape did not close the inspector drawer")
 	}
 	requireNoText(t, tt, "inspector-pane")
-	requireHasText(t, tt, "body-home")
+	requireHasText(t, tt, "body-session")
 }
 
 // TestInspectorPaneShortcut covers H26: Cmd/Ctrl+Alt+Left/Right run the
 // inspector's module-registered pane cycling commands.
 func TestInspectorPaneShortcut(t *testing.T) {
 	r := newTestRoot(t)
-	mustScreen(t, r, textScreen("home", "首页", "body-home", 10))
+	mustScreen(t, r, textScreen("session", "会话", "body-session", 10))
+	mustSlot(t, r, textSlotItem(contracts.SlotSessionPanelRight, "pane", "inspector-pane", 10))
 	next, prev := 0, 0
 	mustCommand(t, r, contracts.CommandSpec{ID: "rightpanel.pane.next", Title: "下一个面板", Order: 10,
 		Run: func() error { next++; return nil }})
 	mustCommand(t, r, contracts.CommandSpec{ID: "rightpanel.pane.prev", Title: "上一个面板", Order: 11,
 		Run: func() error { prev++; return nil }})
 	tt := newTestTester(t, r, 1280, 800)
+	tt.Frame()
+	// While the inspector is closed the chord must not change the hidden pane.
+	tt.Key(ui.Cmd|ui.Alt, ui.KeyRight)
+	tt.Frame()
+	if next != 0 {
+		t.Fatalf("closed inspector: pane command ran next=%d, want 0", next)
+	}
+	// Opened, the chord cycles the pane as before.
+	tt.Key(ui.Cmd|ui.Alt, ui.KeyI)
 	tt.Frame()
 	tt.Key(ui.Cmd|ui.Alt, ui.KeyRight)
 	tt.Frame()
@@ -636,4 +647,170 @@ func TestPaletteShowsCommandShortcut(t *testing.T) {
 	tt.Frame()
 	requireHasText(t, tt, "演示命令")
 	requireHasText(t, tt, "Cmd/Ctrl + Alt + D")
+}
+
+// heightScreen returns a screen shaped like a session: a FillHeight column with
+// a top marker, a transcript taking the free space and a composer pinned to the
+// bottom. A screen built this way only reaches the window's bottom band when
+// the host content column resolves to the window height (the right inspector
+// split used to leave it auto-sized, so the FillHeight column collapsed to its
+// intrinsic height and the composer floated near the top).
+func heightScreen(id, title, top, bottom string) contracts.ScreenSpec {
+	return contracts.ScreenSpec{
+		ID: id, Title: title, Order: 10,
+		Build: func(c *ui.Context) {
+			ui.Column(c).FillWidth().FillHeight().Children(func() {
+				ui.Text(c, top)
+				ui.Spacer(c).Grow(1)
+				ui.Text(c, bottom).FillWidth()
+			})
+		},
+	}
+}
+
+// requireInBottomBand asserts a marker laid out like a composer sits inside the
+// window's bottom band, so the transcript above it can flex instead of pushing
+// the marker offscreen.
+func requireInBottomBand(t *testing.T, tt *ui.Tester, width, height int, text string) ui.Rect {
+	t.Helper()
+	rect, ok := tt.Find(text)
+	if !ok {
+		t.Fatalf("frame does not show %q; texts: %v", text, tt.Texts())
+	}
+	if rect.W <= 0 || rect.H <= 0 {
+		t.Fatalf("%q has no visible area: %+v (window %dx%d)", text, rect, width, height)
+	}
+	if rect.X < 0 || rect.Y < 0 || rect.X+rect.W > float32(width) || rect.Y+rect.H > float32(height) {
+		t.Fatalf("%q is outside the %dx%d window: %+v", text, width, height, rect)
+	}
+	if rect.Y <= float32(height)*0.6 {
+		t.Fatalf("%q is not in the bottom band of the %dx%d window: y=%.1f, want y > %.1f",
+			text, width, height, rect.Y, float32(height)*0.6)
+	}
+	return rect
+}
+
+// TestContentAreaFillsHeightWithDockedInspector covers the reported bug where
+// opening the docked right inspector left the content column auto-sized: the
+// session screen (a FillHeight column with the composer pinned to its bottom)
+// rendered at its intrinsic height, so the composer floated near the top with
+// an empty conversation and was pushed offscreen by a long one. The inner
+// content split must fill the content column's height, as the outer sidebar
+// split does (docs/ui/split.md, docs/ui/layout.md: Fill/FillHeight take the
+// parent's whole content box).
+func TestContentAreaFillsHeightWithDockedInspector(t *testing.T) {
+	r := newTestRoot(t)
+	mustScreen(t, r, heightScreen("session", "会话", "screen-top", "screen-bottom"))
+	mustSlot(t, r, textSlotItem(contracts.SlotSessionPanelRight, "pane", "inspector-pane", 10))
+
+	for _, size := range [][2]int{{1534, 1140}, {1280, 800}} {
+		width, height := size[0], size[1]
+		for _, collapsed := range []bool{false, true} {
+			tt := newTestTester(t, r, width, height)
+			tt.Frame()
+			r.SetSidebarCollapsed(collapsed)
+			tt.Frame()
+			r.SetRightPanelOpen(true)
+			tt.Frame()
+
+			// Docked: the module's pane renders in the split, not in the drawer.
+			requireHasText(t, tt, "inspector-pane")
+			requireNoText(t, tt, "检查器")
+			top, ok := tt.Find("screen-top")
+			if !ok {
+				t.Fatalf("%dx%d collapsed=%v: screen not built; texts: %v", width, height, collapsed, tt.Texts())
+			}
+			bottom := requireInBottomBand(t, tt, width, height, "screen-bottom")
+			if top.Y >= bottom.Y {
+				t.Fatalf("%dx%d collapsed=%v: screen-top y=%v is not above the bottom marker y=%v",
+					width, height, collapsed, top.Y, bottom.Y)
+			}
+			// The docked inspector takes the right slice of the content column:
+			// the main column and its composer end left of the inspector pane.
+			inspector, ok := tt.Find("inspector-pane")
+			if !ok {
+				t.Fatalf("%dx%d collapsed=%v: inspector pane missing", width, height, collapsed)
+			}
+			if bottom.X+bottom.W > inspector.X {
+				t.Fatalf("%dx%d collapsed=%v: content ends at x=%v, past the inspector pane x=%v",
+					width, height, collapsed, bottom.X+bottom.W, inspector.X)
+			}
+			// Closing and reopening the inspector must not leave the content
+			// column auto-sized for a frame.
+			r.SetRightPanelOpen(false)
+			tt.Frame()
+			requireInBottomBand(t, tt, width, height, "screen-bottom")
+			r.SetRightPanelOpen(true)
+			tt.Frame()
+			requireInBottomBand(t, tt, width, height, "screen-bottom")
+		}
+	}
+
+	// The narrow window keeps the drawer path: the content column never lost
+	// its height there, and the drawer overlays it as a modal dialog.
+	r.SetSidebarCollapsed(false)
+	narrow := newTestTester(t, r, 1024, 720)
+	narrow.Frame()
+	requireInBottomBand(t, narrow, 1024, 720, "screen-bottom")
+	requireHasText(t, narrow, "inspector-pane")
+	requireHasText(t, narrow, "检查器")
+	if _, ok := narrow.AccessByRole(ui.RoleDialog, "检查器"); !ok {
+		t.Fatalf("narrow inspector is not an accessible dialog; texts: %v", narrow.Texts())
+	}
+}
+
+// TestDockedInspectorSplitKeepsWidthBehavior covers the width half of the
+// docked-inspector content split: filling the content column's height must not
+// change how the divider resizes the inspector or how SplitReset restores its
+// default width (docs/ui/split.md). The test drives the divider itself, so a
+// future layout change that breaks dragging or the double-click reset shows up
+// here, and the composer-like bottom marker stays at the window bottom through
+// both interactions.
+func TestDockedInspectorSplitKeepsWidthBehavior(t *testing.T) {
+	r := newTestRoot(t)
+	mustScreen(t, r, heightScreen("session", "会话", "screen-top", "screen-bottom"))
+	mustSlot(t, r, textSlotItem(contracts.SlotSessionPanelRight, "pane", "inspector-pane", 10))
+	const width, height = 1534, 1140
+	tt := newTestTester(t, r, width, height)
+	tt.Frame()
+	r.SetRightPanelOpen(true)
+	tt.Frame()
+	if got := r.inspectorWidth; got != design.InspectorWidth {
+		t.Fatalf("default inspector width = %v, want %v", got, design.InspectorWidth)
+	}
+
+	// The divider is one line plus the pane's 1 DIP start border and 16 DIP
+	// padding left of the slot text (frame.go inspectorDockedPane).
+	dividerX := func() float32 {
+		inspector, ok := tt.Find("inspector-pane")
+		if !ok {
+			t.Fatalf("inspector pane missing; texts: %v", tt.Texts())
+		}
+		return inspector.X - design.Space4 - 2
+	}
+	mid := float32(height) / 2
+
+	// Drag the divider 40 DIPs right: the content pane grows, the inspector
+	// shrinks to 280 DIP, and the content column keeps the window height.
+	start := dividerX()
+	tt.Press(start, mid)
+	tt.Move(start+40, mid)
+	tt.Release(start+40, mid)
+	tt.Frame()
+	if got := r.inspectorWidth; got < 279 || got > 281 {
+		t.Fatalf("after dragging the divider 40 DIPs, inspector width = %v, want 280", got)
+	}
+	requireInBottomBand(t, tt, width, height, "screen-bottom")
+
+	// A double click on the moved divider restores SplitReset's default
+	// inspector width.
+	moved := dividerX()
+	tt.ClickAt(moved, mid)
+	tt.ClickAt(moved, mid)
+	tt.Frame()
+	if got := r.inspectorWidth; got != design.InspectorWidth {
+		t.Fatalf("after a double click on the divider, inspector width = %v, want %v",
+			got, design.InspectorWidth)
+	}
+	requireInBottomBand(t, tt, width, height, "screen-bottom")
 }

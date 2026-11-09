@@ -197,7 +197,7 @@ func TestPermissionWorkspaceAllowsPathTools(t *testing.T) {
 	}
 }
 
-func TestPermissionSwitchBackToAsk(t *testing.T) {
+func TestPermissionSwitchBackToReadOnly(t *testing.T) {
 	settings := newFakeSettings(nil)
 	settings.setPermission(contracts.PermissionFull)
 	svc, _ := newPermissionService(t, ModeAsk, settings)
@@ -207,11 +207,11 @@ func TestPermissionSwitchBackToAsk(t *testing.T) {
 		t.Fatalf("full Request = %q/%v, want allow", decision, err)
 	}
 
-	settings.setPermission(contracts.PermissionAsk)
+	settings.setPermission(contracts.PermissionReadOnly)
 	results := startRequest(context.Background(), svc, contracts.ApprovalRequest{Tool: "bash"})
-	waitFor(t, "ask pending after switch", func() bool { return len(svc.Pending()) == 1 })
-	if mode := snapshotMode(t, svc); mode != ModeAsk {
-		t.Fatalf("Mode after switching back = %q, want ask", mode)
+	waitFor(t, "read-only pending after switch", func() bool { return len(svc.Pending()) == 1 })
+	if mode := snapshotMode(t, svc); mode != ModeReadOnly {
+		t.Fatalf("Mode after switching back = %q, want read-only", mode)
 	}
 	pending := svc.Pending()
 	if err := svc.Resolve(pending[0].ID, contracts.ApprovalDeny); err != nil {
@@ -220,6 +220,84 @@ func TestPermissionSwitchBackToAsk(t *testing.T) {
 	if result := waitResult(t, results); result.decision != contracts.ApprovalDeny {
 		t.Fatalf("decision = %q, want deny", result.decision)
 	}
+}
+
+// TestPermissionReadOnlyAllowsInfoToolsQueuesMutations covers the read-only
+// preset: read-only/informational tools are auto-allowed, while workspace
+// writes, shell, network and unknown tools still queue for approval.
+func TestPermissionReadOnlyAllowsInfoToolsQueuesMutations(t *testing.T) {
+	settings := newFakeSettings(nil)
+	settings.setPermission(contracts.PermissionReadOnly)
+	svc, _ := newPermissionService(t, ModeWorkspace, settings)
+	notifications := atomic.Int32{}
+	if _, err := svc.Subscribe(func() { notifications.Add(1) }); err != nil {
+		t.Fatalf("subscribe: %v", err)
+	}
+
+	for _, tool := range []string{
+		"read_file", "list_dir", "glob", "grep", "read_image",
+		"working_directory", "settings_get", "job_list", "lsp_diagnostics",
+	} {
+		decision, err := svc.Request(context.Background(), contracts.ApprovalRequest{Tool: tool})
+		if err != nil || decision != contracts.ApprovalAllow {
+			t.Fatalf("%s decision = %q/%v, want allow under read-only", tool, decision, err)
+		}
+	}
+	if pending := svc.Pending(); len(pending) != 0 {
+		t.Fatalf("pending = %v, want none after read-only tools", pending)
+	}
+	if got := notifications.Load(); got != 0 {
+		t.Fatalf("notifications = %d, want 0 for the read-only tools", got)
+	}
+	if mode := snapshotMode(t, svc); mode != ModeReadOnly {
+		t.Fatalf("Mode = %q, want read-only", mode)
+	}
+
+	for _, tool := range []string{"write_file", "edit_file", "bash", "web_fetch", "unknown_tool"} {
+		results := startRequest(context.Background(), svc, contracts.ApprovalRequest{Tool: tool})
+		waitFor(t, tool+" pending in read-only", func() bool { return len(svc.Pending()) == 1 })
+		pending := svc.Pending()
+		if err := svc.Resolve(pending[0].ID, contracts.ApprovalAllow); err != nil {
+			t.Fatalf("Resolve: %v", err)
+		}
+		if result := waitResult(t, results); result.decision != contracts.ApprovalAllow {
+			t.Fatalf("%s decision = %q, want allow", tool, result.decision)
+		}
+	}
+}
+
+// TestPermissionLegacyRowsNormalizeReadOnly covers the data migration for the
+// retired stored values: "ask" and "never" both read as the read-only preset.
+func TestPermissionLegacyRowsNormalizeReadOnly(t *testing.T) {
+	for _, legacy := range []string{"ask", " ASK ", "never", "NEVER"} {
+		settings := newFakeSettings(nil)
+		settings.setPermission(legacy)
+		svc, _ := newPermissionService(t, ModeWorkspace, settings)
+		if mode := snapshotMode(t, svc); mode != ModeReadOnly {
+			t.Fatalf("legacy %q: Mode = %q, want read-only", legacy, mode)
+		}
+		if decision, err := svc.Request(context.Background(), contracts.ApprovalRequest{Tool: "read_file"}); err != nil ||
+			decision != contracts.ApprovalAllow {
+			t.Fatalf("legacy %q: read_file = %q/%v, want allow", legacy, decision, err)
+		}
+		if err := requestAndCancelPerm(t, svc, "write_file"); err == nil {
+			t.Fatalf("legacy %q: write_file was auto-decided, want a queued approval", legacy)
+		}
+	}
+}
+
+// requestAndCancelPerm starts a Request that must queue, then cancels it.
+func requestAndCancelPerm(t *testing.T, svc *service, tool string) error {
+	t.Helper()
+	ctx, cancel := context.WithCancel(context.Background())
+	results := startRequest(ctx, svc, contracts.ApprovalRequest{Tool: tool})
+	waitFor(t, tool+" pending", func() bool { return len(svc.Pending()) == 1 })
+	cancel()
+	result := waitResult(t, results)
+	if result.err == nil {
+		return nil
+	}
+	return result.err
 }
 
 func TestPermissionUnknownSettingFallsBackToWorkspace(t *testing.T) {
@@ -296,7 +374,9 @@ func TestPermissionModeReflectsSettings(t *testing.T) {
 		want    string
 	}{
 		{"", ModeWorkspace},
-		{contracts.PermissionAsk, ModeAsk},
+		{contracts.PermissionReadOnly, ModeReadOnly},
+		{contracts.PermissionAsk, ModeReadOnly},
+		{contracts.PermissionNever, ModeReadOnly},
 		{contracts.PermissionWorkspace, contracts.PermissionWorkspace},
 		{contracts.PermissionFull, ModeAuto},
 		{ModeAuto, ModeAuto},

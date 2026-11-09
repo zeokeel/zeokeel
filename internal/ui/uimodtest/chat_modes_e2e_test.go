@@ -60,7 +60,7 @@ func TestChatModeSelectorEndToEnd(t *testing.T) {
 	// Initial: standard mode; the composer's single session menu carries the
 	// default workspace permission context, and no mode badge (or stale menu
 	// copy) is left in the header.
-	if !tester.HasText("工作区权限") {
+	if !tester.HasText("工作区可写") {
 		t.Fatalf("default session menu label missing; texts = %v", tester.Texts())
 	}
 	if tester.HasText("精简模式") || tester.HasText("创作模式") || tester.HasText("计划模式") {
@@ -69,7 +69,7 @@ func TestChatModeSelectorEndToEnd(t *testing.T) {
 
 	// Switch to 精简: writes chat.mode=minimal, keeps agent.mode=normal, and the
 	// composer chip becomes the single mode indicator.
-	clickMode(t, tester, "工作区权限", "精简模式")
+	clickMode(t, tester, "工作区可写", "精简模式")
 	if tester.HasText("精简模式") {
 		t.Fatalf("the removed header mode badge is still rendered; texts = %v", tester.Texts())
 	}
@@ -112,7 +112,7 @@ func TestChatModeSelectorEndToEnd(t *testing.T) {
 	if got := settings.Get(contracts.SettingAgentMode, ""); got != contracts.AgentModeNormal {
 		t.Fatalf("agent.mode after choosing 普通 = %q, want normal", got)
 	}
-	if !tester.HasText("工作区权限") {
+	if !tester.HasText("工作区可写") {
 		t.Fatalf("composer selector did not return to the default workspace label; texts = %v", tester.Texts())
 	}
 }

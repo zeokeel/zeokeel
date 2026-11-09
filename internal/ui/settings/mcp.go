@@ -2,9 +2,13 @@ package settings
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"net/http"
+	"os/exec"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/egoist/mygo/ui"
 	cordis "github.com/zeokeel/zeokeel-kernel"
@@ -49,6 +53,9 @@ type mcpState struct {
 
 	status    string
 	statusErr bool
+	// envErr is the field-level error of the environment draft (one
+	// KEY=VALUE per line); it clears when the user edits the field.
+	envErr string
 
 	// Workspace mcp.json opt-in state (loaded once per page visit).
 	workspaceOptIn  bool
@@ -58,10 +65,20 @@ type mcpState struct {
 	// confirmRemove is the index of the server row whose removal waits for the
 	// native confirmation dialog (-1 when none is open).
 	confirmRemove int
+
+	// editIndex is the stored row the form is editing (-1 = add mode). The same
+	// form serves both, so a typo is fixed in place instead of delete+re-add.
+	editIndex int
+
+	// testing is true while the async "test connection" action runs; testStatus
+	// carries its localized result.
+	testing    bool
+	testStatus string
+	testErr    bool
 }
 
 func newMCPState() *mcpState {
-	return &mcpState{transport: mcpTransportHTTP, confirmRemove: -1, sel: -1}
+	return &mcpState{transport: mcpTransportHTTP, confirmRemove: -1, editIndex: -1, sel: -1}
 }
 
 // mcpRowTransport reports the effective transport of one stored row: rows with
@@ -124,6 +141,12 @@ func buildMCPServerRow(c *ui.Context, t *design.Tokens, st *mcpState, index int,
 		design.Apply(ui.Text(c, mcpRowAddress(server)),
 			t.Font(design.TypeXS), t.MonoFamily()).
 			TextColor(tertiary).Grow(1).MaxLines(1).Ellipsis("…")
+		if design.Apply(ui.Button(c, localized(locale, "编辑", "Edit")),
+			t.SecondaryButton()).Tooltip(localized(locale,
+			"编辑该服务器的配置", "Edit this server's configuration")).Clicked() {
+			st.fillMCPForm(index)
+			c.Invalidate()
+		}
 		if design.Apply(ui.Button(c, localized(locale, "移除", "Remove")),
 			t.DangerButton()).Tooltip(localized(locale,
 			"移除该服务器", "Remove this server")).Clicked() {
@@ -233,8 +256,64 @@ func buildMCPPage(c *ui.Context, kctx cordis.Context, st *mcpState, locale contr
 			})
 		})
 
-		// Add form: every input has a visible field label and a description.
-		uikit.Section(c, localized(locale, "添加服务器", "Add server"), func(*ui.Context) {
+		// Server form: one native form serves add and edit. Its submit action sits
+		// in the section header (SectionAction), so it stays visible when the
+		// STDIO fields grow past the fold — the old in-body footer scrolled out
+		// of view exactly when the form was tallest.
+		sectionTitle := localized(locale, "添加服务器", "Add server")
+		if st.editIndex >= 0 {
+			sectionTitle = localized(locale, "编辑服务器", "Edit server")
+		}
+		runtime, hasRuntime := kctx.Get(contracts.KeyUIRuntime)
+		uikit.SectionAction(c, sectionTitle, func(c *ui.Context) {
+			ui.Row(c).AlignItems(ui.Center).Gap(design.Space2).Children(func() {
+				if st.editIndex >= 0 {
+					if design.Apply(ui.Button(c, localized(locale, "取消编辑", "Cancel edit")),
+						t.SecondaryButton()).Clicked() {
+						st.resetMCPForm()
+						c.Invalidate()
+					}
+				}
+				submitLabel := localized(locale, "添加", "Add")
+				if st.editIndex >= 0 {
+					submitLabel = localized(locale, "保存", "Save")
+				}
+				if design.Apply(ui.PrimaryButton(c, submitLabel), t.PrimaryButton()).Clicked() {
+					submitMCPServer(st, store, locale)
+					c.Invalidate()
+				}
+			})
+		}, func(c *ui.Context) {
+			// The connection test checks the current draft without saving it and
+			// runs off the UI thread (a hung endpoint must not freeze the frame).
+			ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(design.Space2).Children(func() {
+				if st.testing {
+					ui.Spinner(c).Label(localized(locale, "正在测试…", "Testing…")).
+						Size(design.Space3, design.Space3).TextColor(t.LabelSecondary)
+				}
+				testLabel := localized(locale, "测试连接", "Test connection")
+				if st.testing {
+					testLabel = localized(locale, "正在测试…", "Testing…")
+				}
+				test := design.Apply(ui.Button(c, testLabel), t.SecondaryButton()).
+					Disabled(st.testing).
+					Tooltip(localized(locale,
+						"用当前填写的内容测试连接，不会保存",
+						"Test the connection with the current draft; nothing is saved"))
+				if test.Clicked() && !st.testing && hasRuntime && runtime != nil {
+					st.startMCPTest(runtime, locale)
+					c.Invalidate()
+				}
+				if st.testStatus != "" {
+					if st.testErr {
+						uikit.ErrorLine(c, st.testStatus)
+					} else {
+						design.Apply(ui.Text(c, st.testStatus), t.Font(design.TypeXS)).
+							TextColor(t.SuccessText).Grow(1).MaxLines(2)
+					}
+				}
+			})
+			statusBadgesRow(c, t, st.status, st.statusErr)
 			stdio := st.transport == mcpTransportStdio
 			ui.Row(c).FillWidth().Gap(design.Space3).AlignItems(ui.Start).Children(func() {
 				ui.Column(c).Width(150).Grow(0).Shrink(0).Children(func() {
@@ -284,13 +363,22 @@ func buildMCPPage(c *ui.Context, kctx cordis.Context, st *mcpState, locale contr
 						})
 					})
 					ui.Field(c, localized(locale, "环境变量", "Environment"), func() {
-						ui.TextInput(c, &st.env).
+						// A text area, not a password input: one KEY=VALUE per line
+						// needs real newlines (and values may contain spaces), and
+						// mygo text areas have no password mode by design. The
+						// Plugins page masks these values in its read-only details.
+						envInput := ui.TextArea(c, &st.env).
 							Label(inputLabel(locale, localized(locale, "环境变量", "Environment"))).
 							Placeholder(localized(locale,
-								"每行 KEY=VALUE，例如：TOKEN=abc",
-								"One KEY=VALUE per line, e.g. TOKEN=abc")).FillWidth()
-					}).Description(localized(locale, "传给子进程的环境变量。",
-						"Environment variables passed to the subprocess."))
+								"每行 KEY=VALUE，例如：GITHUB_TOKEN=abc",
+								"One KEY=VALUE per line, e.g. GITHUB_TOKEN=abc")).
+							MinHeight(design.Space6 * 2).FillWidth()
+						if envInput.Changed() {
+							st.envErr = ""
+						}
+					}).Description(localized(locale, "传给子进程的环境变量；每行一个 KEY=VALUE，值可以包含空格。",
+						"Environment variables passed to the subprocess; one KEY=VALUE per line, values may contain spaces.")).
+						Error(st.envErr)
 				})
 			} else {
 				ui.Field(c, "URL", func() {
@@ -299,14 +387,6 @@ func buildMCPPage(c *ui.Context, kctx cordis.Context, st *mcpState, locale contr
 				}).Description(localized(locale, "Streamable HTTP 端点。",
 					"The Streamable HTTP endpoint."))
 			}
-			statusBadgesRow(c, t, st.status, st.statusErr)
-			uikit.DialogFooter(c, []uikit.DialogAction{{
-				Label: localized(locale, "添加", "Add"), Primary: true,
-				OnClick: func() {
-					addMCPServer(st, store, locale)
-					c.Invalidate()
-				},
-			}})
 		})
 
 		// Removing a server is destructive: confirm it with the native dialog.
@@ -321,6 +401,11 @@ func buildMCPPage(c *ui.Context, kctx cordis.Context, st *mcpState, locale contr
 				localized(locale, "移除服务器", "Remove server")) {
 			case 1:
 				removeMCPServer(st, store, locale, index)
+				if st.editIndex == index {
+					st.resetMCPForm()
+				} else if st.editIndex > index {
+					st.editIndex--
+				}
 				st.confirmRemove = -1
 				c.Invalidate()
 			}
@@ -389,23 +474,49 @@ func splitMCPFields(value string) []string {
 	return strings.Fields(value)
 }
 
-// parseMCPEnv turns the KEY=VALUE draft into the stored env slice.
-func parseMCPEnv(value string) []string {
-	fields := splitMCPFields(value)
-	if len(fields) == 0 {
-		return nil
+// splitMCPEnvLines splits the environment draft on newlines (never on spaces):
+// the hint promises one KEY=VALUE per line, so values such as
+// "TOKEN=a b" stay whole. The old strings.Fields split tore them apart.
+func splitMCPEnvLines(value string) []string {
+	normalized := strings.ReplaceAll(value, "\r\n", "\n")
+	lines := strings.Split(normalized, "\n")
+	out := make([]string, 0, len(lines))
+	for _, line := range lines {
+		if trimmed := strings.TrimSpace(line); trimmed != "" {
+			out = append(out, trimmed)
+		}
 	}
-	return fields
+	return out
 }
 
-// addMCPServer validates the drafts and appends the server, writing the JSON
-// array back to the settings store. Invalid input never touches the store.
-func addMCPServer(st *mcpState, store contracts.SettingsService, locale contracts.LocaleService) {
+// parseMCPEnv turns the KEY=VALUE draft into the stored env slice and reports
+// the first malformed line: every non-empty line needs a non-empty KEY before
+// the "=" so the child process cannot receive a meaningless entry.
+func parseMCPEnv(value string, locale contracts.LocaleService) ([]string, string) {
+	lines := splitMCPEnvLines(value)
+	if len(lines) == 0 {
+		return nil, ""
+	}
+	for index, line := range lines {
+		key, _, found := strings.Cut(line, "=")
+		if !found || strings.TrimSpace(key) == "" {
+			return nil, localized(locale,
+				fmt.Sprintf("环境变量格式无效（第 %d 行）：每行应为 KEY=VALUE", index+1),
+				fmt.Sprintf("Invalid environment row %d: each line must be KEY=VALUE", index+1))
+		}
+	}
+	return lines, ""
+}
+
+// buildMCPDraft validates the drafts and returns the settings row. Problems are
+// reported in st.status/st.statusErr (or the environment field's st.envErr);
+// false means the draft may not be submitted/tested.
+func buildMCPDraft(st *mcpState, locale contracts.LocaleService, checkDuplicates bool) (contracts.MCPServerConfig, bool) {
 	name := strings.TrimSpace(st.name)
 	if name == "" {
 		st.status = localized(locale, "名称不能为空", "The name is required")
 		st.statusErr = true
-		return
+		return contracts.MCPServerConfig{}, false
 	}
 	row := contracts.MCPServerConfig{Name: name}
 	if st.transport == mcpTransportStdio {
@@ -414,62 +525,231 @@ func addMCPServer(st *mcpState, store contracts.SettingsService, locale contract
 		case command == "":
 			st.status = localized(locale, "命令不能为空", "The command is required")
 			st.statusErr = true
-			return
+			return contracts.MCPServerConfig{}, false
 		case strings.ContainsRune(command, '\x00'):
 			st.status = localized(locale, "命令不能包含 NUL", "The command must not contain NUL")
 			st.statusErr = true
-			return
+			return contracts.MCPServerConfig{}, false
 		}
 		args := splitMCPFields(st.args)
-		for _, existing := range st.servers {
-			if mcpRowTransport(existing) == mcpTransportStdio &&
-				strings.TrimSpace(existing.Command) == command &&
-				strings.Join(existing.Args, "\x00") == strings.Join(args, "\x00") {
-				st.status = localized(locale, "该服务器已存在", "That server already exists")
-				st.statusErr = true
-				return
+		if checkDuplicates {
+			for index, existing := range st.servers {
+				if index == st.editIndex {
+					continue
+				}
+				if mcpRowTransport(existing) == mcpTransportStdio &&
+					strings.TrimSpace(existing.Command) == command &&
+					strings.Join(existing.Args, "\x00") == strings.Join(args, "\x00") {
+					st.status = localized(locale, "该服务器已存在", "That server already exists")
+					st.statusErr = true
+					return contracts.MCPServerConfig{}, false
+				}
 			}
 		}
+		env, envErr := parseMCPEnv(st.env, locale)
+		if envErr != "" {
+			st.envErr = envErr
+			st.status = ""
+			st.statusErr = false
+			return contracts.MCPServerConfig{}, false
+		}
+		st.envErr = ""
 		row.Transport = mcpTransportStdio
 		row.Command = command
 		row.Args = args
-		row.Env = parseMCPEnv(st.env)
-	} else {
-		url := strings.TrimSpace(st.url)
-		switch {
-		case url == "":
-			st.status = localized(locale, "URL 不能为空", "The URL is required")
-			st.statusErr = true
-			return
-		case !validSearchEndpoint(url):
-			st.status = localized(locale, "URL 无效：请输入 http(s) URL",
-				"Invalid URL: enter an http(s) URL")
-			st.statusErr = true
-			return
-		}
-		for _, existing := range st.servers {
+		row.Env = env
+		return row, true
+	}
+	url := strings.TrimSpace(st.url)
+	switch {
+	case url == "":
+		st.status = localized(locale, "URL 不能为空", "The URL is required")
+		st.statusErr = true
+		return contracts.MCPServerConfig{}, false
+	case !validSearchEndpoint(url):
+		st.status = localized(locale, "URL 无效：请输入 http(s) URL",
+			"Invalid URL: enter an http(s) URL")
+		st.statusErr = true
+		return contracts.MCPServerConfig{}, false
+	}
+	if checkDuplicates {
+		for index, existing := range st.servers {
+			if index == st.editIndex {
+				continue
+			}
 			if mcpRowTransport(existing) == mcpTransportHTTP &&
 				strings.EqualFold(strings.TrimSpace(existing.URL), url) {
 				st.status = localized(locale, "该 URL 已存在", "That URL already exists")
 				st.statusErr = true
-				return
+				return contracts.MCPServerConfig{}, false
 			}
 		}
-		// HTTP rows keep the legacy {name,url} shape (no transport field).
-		row.URL = url
 	}
+	// HTTP rows keep the legacy {name,url} shape (no transport field).
+	row.URL = url
+	return row, true
+}
 
+// submitMCPServer validates the drafts and writes the add/edit result back to
+// the settings store. Editing replaces the stored row in place, so a typo is
+// fixed without deleting and re-adding the server.
+func submitMCPServer(st *mcpState, store contracts.SettingsService, locale contracts.LocaleService) {
+	row, ok := buildMCPDraft(st, locale, true)
+	if !ok {
+		return
+	}
+	index := st.editIndex
 	previous := append([]contracts.MCPServerConfig(nil), st.servers...)
-	st.servers = append(st.servers, row)
+	if index >= 0 && index < len(st.servers) {
+		st.servers[index] = row
+	} else {
+		st.servers = append(st.servers, row)
+	}
 	if !saveMCPServers(st, store, locale) {
 		st.servers = previous
 		return
 	}
+	st.resetMCPForm()
+}
+
+// fillMCPForm loads one stored row into the form for editing.
+func (st *mcpState) fillMCPForm(index int) {
+	if index < 0 || index >= len(st.servers) {
+		return
+	}
+	server := st.servers[index]
+	st.editIndex = index
+	st.transport = mcpRowTransport(server)
+	st.name = strings.TrimSpace(server.Name)
+	st.url = strings.TrimSpace(server.URL)
+	st.command = strings.TrimSpace(server.Command)
+	st.args = strings.Join(server.Args, " ")
+	st.env = strings.Join(server.Env, "\n")
+	st.envErr = ""
+	st.testStatus = ""
+	st.testErr = false
+}
+
+// resetMCPForm clears the form and returns it to add mode.
+func (st *mcpState) resetMCPForm() {
+	st.editIndex = -1
 	st.name = ""
 	st.url = ""
 	st.command = ""
 	st.args = ""
 	st.env = ""
+	st.envErr = ""
+	st.testStatus = ""
+	st.testErr = false
+}
+
+// MCPConnectionTester is the seam behind the async "test connection" action:
+// the default probes the configured endpoint/executable, tests replace it.
+var MCPConnectionTester = defaultMCPConnectionTest
+
+// defaultMCPConnectionTest probes one draft server: a stdio command must exist
+// on PATH, an HTTP endpoint must answer a JSON-RPC initialize request. Any HTTP
+// answer below 500 counts as reachable (401/403 are reported as auth problems).
+func defaultMCPConnectionTest(ctx context.Context, cfg contracts.MCPServerConfig) error {
+	if mcpRowTransport(cfg) == mcpTransportStdio {
+		command := strings.TrimSpace(cfg.Command)
+		if command == "" {
+			return errors.New("command is required")
+		}
+		if _, err := exec.LookPath(command); err != nil {
+			return fmt.Errorf("executable not found: %w", err)
+		}
+		return nil
+	}
+	url := strings.TrimSpace(cfg.URL)
+	if url == "" {
+		return errors.New("url is required")
+	}
+	body := `{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"ZeoKeel","version":"probe"}}}`
+	request, err := http.NewRequestWithContext(ctx, http.MethodPost, url, strings.NewReader(body))
+	if err != nil {
+		return err
+	}
+	request.Header.Set("Content-Type", "application/json")
+	request.Header.Set("Accept", "application/json, text/event-stream")
+	client := &http.Client{Timeout: 4 * time.Second}
+	response, err := client.Do(request)
+	if err != nil {
+		return err
+	}
+	defer response.Body.Close()
+	if response.StatusCode == http.StatusUnauthorized || response.StatusCode == http.StatusForbidden {
+		return fmt.Errorf("server returned status %d", response.StatusCode)
+	}
+	if response.StatusCode >= 500 {
+		return fmt.Errorf("server returned status %d", response.StatusCode)
+	}
+	return nil
+}
+
+// startMCPTest runs the draft's connection test off the UI thread and publishes
+// the localized result through UIRuntime.Post.
+func (st *mcpState) startMCPTest(runtime contracts.UIRuntime, locale contracts.LocaleService) {
+	if st.testing || runtime == nil {
+		return
+	}
+	st.testStatus = ""
+	st.testErr = false
+	st.status = ""
+	st.statusErr = false
+	row, ok := buildMCPDraft(st, locale, false)
+	if !ok {
+		st.testStatus = firstNonEmpty(st.envErr, st.status, localized(locale, "请先填写完整配置", "Fill in the configuration first"))
+		st.testErr = true
+		st.envErr = ""
+		st.status = ""
+		st.statusErr = false
+		return
+	}
+	st.testing = true
+	go func() {
+		err := MCPConnectionTester(context.Background(), row)
+		runtime.Post(func() {
+			st.testing = false
+			if err != nil {
+				st.testStatus = mcpTestStatusText(locale, err)
+				st.testErr = true
+			} else {
+				st.testStatus = localized(locale, "连接测试通过", "Connection test passed")
+				st.testErr = false
+			}
+			runtime.Invalidate()
+		})
+	}()
+}
+
+// mcpTestStatusText localizes a connection-test failure: a known cause gets
+// product language, anything else keeps the bounded raw detail.
+func mcpTestStatusText(locale contracts.LocaleService, err error) string {
+	message := strings.TrimSpace(err.Error())
+	lower := strings.ToLower(message)
+	switch {
+	case strings.Contains(lower, "executable not found"):
+		return localized(locale, "找不到命令：请确认可执行文件在 PATH 中",
+			"The command was not found: make sure the executable is on PATH")
+	case strings.Contains(lower, "timeout"), strings.Contains(lower, "deadline"),
+		strings.Contains(lower, "timed out"):
+		return localized(locale, "连接超时（服务器未及时响应）",
+			"Connection timed out (the server did not answer in time)")
+	case strings.Contains(lower, "401"), strings.Contains(lower, "403"),
+		strings.Contains(lower, "unauthorized"), strings.Contains(lower, "forbidden"):
+		return localized(locale, "鉴权失败（请检查访问令牌）",
+			"Authentication failed (check the access token)")
+	case strings.Contains(lower, "refused"), strings.Contains(lower, "no such host"),
+		strings.Contains(lower, "dial tcp"), strings.Contains(lower, "connect:"):
+		return localized(locale, "无法连接到服务器", "Could not reach the server")
+	default:
+		bounded := message
+		if runes := []rune(bounded); len(runes) > 160 {
+			bounded = string(runes[:160]) + "…"
+		}
+		return localized(locale, "连接测试失败：", "Connection test failed: ") + bounded
+	}
 }
 
 // removeMCPServer drops one row and writes the remaining servers back.
@@ -502,7 +782,7 @@ func saveMCPServers(st *mcpState, store contracts.SettingsService, locale contra
 		st.statusErr = true
 		return false
 	}
-	st.status = localized(locale, "已保存", "Saved")
+	st.status = localized(locale, "已保存，重启生效", "Saved; applies after a restart")
 	st.statusErr = false
 	return true
 }

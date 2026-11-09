@@ -19,10 +19,13 @@ func TestBehaviorPageDefaultsWorkspace(t *testing.T) {
 	tester := h.tester()
 	tester.Frame()
 	h.click(tester, "行为")
-	// The default is workspace: normal in-workspace file edits need no prompt.
-	h.assertTexts(tester, "行为", "默认代理权限", "当前：工作区",
-		"询问", "工作区", "完全访问", "从不",
+	// The default is workspace-write: normal in-workspace file edits need no
+	// prompt. Exactly the three presets are listed, in preset order.
+	h.assertTexts(tester, "行为", "默认代理权限", "当前：工作区可写",
+		"只读", "工作区可写", "所有权限",
+		"只自动允许只读与信息类工具，其他操作会询问",
 		"工作区内的文件读写自动允许，其他操作询问", "修改立即生效")
+	h.assertNoTexts(tester, "完全访问", "从不")
 	if raw := store.get(contracts.SettingAgentPermission); raw != "" {
 		t.Fatalf("defaults wrote the permission row: %q", raw)
 	}
@@ -35,20 +38,40 @@ func TestBehaviorPageSelectsPermission(t *testing.T) {
 	tester.Frame()
 	h.click(tester, "行为")
 
-	h.click(tester, "工作区") // open the current-value menu
-	h.assertTexts(tester, "完全访问")
-	h.click(tester, "完全访问")
+	h.click(tester, "工作区可写") // open the current-value menu
+	h.assertTexts(tester, "只读", "所有权限")
+	h.click(tester, "所有权限")
 	if raw := store.get(contracts.SettingAgentPermission); raw != contracts.PermissionFull {
 		t.Fatalf("selecting full wrote %q", raw)
 	}
-	h.assertTexts(tester, "已保存", "当前：完全访问")
+	h.assertTexts(tester, "已保存", "当前：所有权限")
 
-	h.click(tester, "完全访问") // reopen with the new current label
-	h.click(tester, "从不")
-	if raw := store.get(contracts.SettingAgentPermission); raw != "never" {
-		t.Fatalf("selecting never wrote %q", raw)
+	h.click(tester, "所有权限") // reopen with the new current label
+	h.click(tester, "只读")
+	if raw := store.get(contracts.SettingAgentPermission); raw != contracts.PermissionReadOnly {
+		t.Fatalf("selecting read-only wrote %q", raw)
 	}
-	h.assertTexts(tester, "当前：从不")
+	h.assertTexts(tester, "当前：只读")
+}
+
+// TestBehaviorPageNormalizesLegacyPermissionRows covers the data migration: the
+// retired stored values "ask" and "never" display (and are treated) as the
+// read-only preset instead of silently falling back to workspace or vanishing.
+func TestBehaviorPageNormalizesLegacyPermissionRows(t *testing.T) {
+	for _, legacy := range []string{"ask", "ask ", "NEVER"} {
+		store := newFakeSettings(map[string]string{
+			contracts.SettingAgentPermission: legacy,
+		})
+		h := newHarness(t, &fakeChat{}, store, settings.Config{})
+		tester := h.tester()
+		tester.Frame()
+		h.click(tester, "行为")
+		h.assertTexts(tester, "当前：只读")
+		// Rendering must not rewrite the stored legacy row by itself.
+		if raw := store.get(contracts.SettingAgentPermission); raw != legacy {
+			t.Fatalf("a frame rewrote legacy permission %q to %q", legacy, raw)
+		}
+	}
 }
 
 func TestBehaviorPageBadValueNormalizedWorkspace(t *testing.T) {
@@ -59,15 +82,15 @@ func TestBehaviorPageBadValueNormalizedWorkspace(t *testing.T) {
 	tester := h.tester()
 	tester.Frame()
 	h.click(tester, "行为")
-	h.assertTexts(tester, "当前：工作区")
-	// Ask is still selectable; choosing it writes the explicit value.
-	h.click(tester, "工作区")
-	h.click(tester, "询问")
-	if raw := store.get(contracts.SettingAgentPermission); raw != contracts.PermissionAsk {
-		t.Fatalf("selecting ask wrote %q", raw)
+	h.assertTexts(tester, "当前：工作区可写")
+	// Read-only is still selectable; choosing it writes the explicit value.
+	h.click(tester, "工作区可写")
+	h.click(tester, "只读")
+	if raw := store.get(contracts.SettingAgentPermission); raw != contracts.PermissionReadOnly {
+		t.Fatalf("selecting read-only wrote %q", raw)
 	}
 	tester.Frame()
-	h.assertTexts(tester, "当前：询问")
+	h.assertTexts(tester, "当前：只读")
 }
 
 func TestBehaviorPageWriteFailure(t *testing.T) {
@@ -77,8 +100,8 @@ func TestBehaviorPageWriteFailure(t *testing.T) {
 	tester := h.tester()
 	tester.Frame()
 	h.click(tester, "行为")
-	h.click(tester, "工作区")
-	h.click(tester, "询问")
+	h.click(tester, "工作区可写")
+	h.click(tester, "只读")
 	h.assertTexts(tester, "保存失败：")
 }
 
@@ -88,16 +111,18 @@ func TestBehaviorPageEnglishCopy(t *testing.T) {
 	tester := h.tester()
 	tester.Frame()
 	h.click(tester, "Behavior")
-	h.assertTexts(tester, "Behavior", "Default agent permission", "Current: Workspace",
-		"Ask", "Workspace", "Full access", "Never",
+	h.assertTexts(tester, "Behavior", "Default agent permission", "Current: Workspace-write",
+		"Read-only", "Workspace-write", "All permissions",
+		"Auto-allow read-only and informational tools; ask for the rest",
 		"Auto-allow workspace file reads and writes; ask for the rest",
 		"Changes apply immediately")
-	h.click(tester, "Workspace")
-	h.click(tester, "Full access")
+	h.assertNoTexts(tester, "Ask", "Full access", "Never")
+	h.click(tester, "Workspace-write")
+	h.click(tester, "All permissions")
 	if raw := store.get(contracts.SettingAgentPermission); raw != contracts.PermissionFull {
 		t.Fatalf("English selection wrote %q", raw)
 	}
-	h.assertTexts(tester, "Saved", "Current: Full access")
+	h.assertTexts(tester, "Saved", "Current: All permissions")
 }
 
 // errBehaviorStoreWrite scripts one settings write failure.

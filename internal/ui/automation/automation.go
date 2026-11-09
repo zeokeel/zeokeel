@@ -14,6 +14,7 @@ package automation
 import (
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/egoist/mygo/ui"
 	cordis "github.com/zeokeel/zeokeel-kernel"
@@ -74,6 +75,14 @@ type state struct {
 	formPermission    string
 	formEnabled       bool
 	formErr           string
+	// formModelCustom keeps the model field in free-text mode (a model outside
+	// the catalog list); the menu otherwise picks a catalog preset.
+	formModelCustom bool
+	// scheduleErr/schedulePreview are recomputed from formSchedule each frame:
+	// the draft is validated with the same parser the backend executes and a
+	// valid draft previews its next run.
+	scheduleErr     string
+	schedulePreview string
 	// formEditID non-empty means the inline form is editing that task instead
 	// of creating one; formEditTask snapshots the row so the update keeps its
 	// id and run bookkeeping.
@@ -96,6 +105,20 @@ type state struct {
 	// reopening the screen restores the unfiltered list.
 	query      string
 	taskFilter string
+
+	// workspaceNames caches the workspace id -> display name lookup used by the
+	// task cards (loaded once per screen visit).
+	workspaceNames       map[string]string
+	workspaceNamesLoaded bool
+
+	// running maps a task id to when "Run now" was pressed: the run happens in
+	// the backend's goroutine, so the card shows an in-flight state until the
+	// backend records the run (or the guard times out).
+	running map[string]time.Time
+
+	// navigator opens the session a run created (the history row's session
+	// link), and is the host navigator the screen was registered with.
+	navigator contracts.Navigator
 }
 
 // Module registers the Automation screen.
@@ -111,7 +134,12 @@ func Module() *module.Descriptor[Config] {
 		}
 		config := cfg.resolved()
 		locale, _ := ctx.Get(contracts.KeyLocale)
-		moduleState := &state{ctx: ctx, locale: locale, runtime: runtime, formEnabled: true, historyOpen: make(map[string]bool)}
+		moduleState := &state{
+			ctx: ctx, locale: locale, runtime: runtime, navigator: navigator,
+			formEnabled: true,
+			historyOpen: make(map[string]bool),
+			running:     make(map[string]time.Time),
+		}
 		if notifier, ok := ctx.Get(contracts.KeyNotifier); ok {
 			moduleState.notifier = notifier
 		}

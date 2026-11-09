@@ -12,7 +12,7 @@
     send_message/interrupt_agent）+ **Agents Inspector**（成员/状态/最新回答、steer/中断/关闭）
     + **共享任务板**（team_task_* 工具 + rightpanel「任务」tab）+ goal 工具/会话 goal chip。
   - **Composer 高级控制**：/goal /plan /memory 原生对话框、**权限模式**（命令 + composer badge，默认工作区：工作区文件读写自动允许，shell/网络仍询问；
-    ask/workspace/full，settings `agent.permission`）、**思考强度**（per-session、按模型系列/自定义模式 +
+    只读/工作区可写/所有权限（DSH 同款预设），settings `agent.permission`）、**思考强度**（per-session、按模型系列/自定义模式 +
     toolbar 菜单 + provider `reasoning_effort`）、**@session 引用**（@ 菜单会话分组、token 持久化、
     agent 注入尾部 20 条/≤8000 rune、`session_refs` 事件）。
   - **MCP 管理深度**：Streamable HTTP + **stdio** 传输、assembly/settings/**workspace mcp.json
@@ -87,8 +87,8 @@
 | Chrome/Sidebar/折叠 rail/右栏 dock | ✅ | uiroot + sidebar | 280px sidebar、64px rail、Cmd/Ctrl+B、**Cmd/Ctrl+N 新建会话、Cmd/Ctrl+, 设置、Cmd/Ctrl+K 命令面板**、右栏开关、添加工作区、视图选项（排序/分组持久化）、工作区搜索/置顶/归档 |
 | 命令面板/窗口内快捷键 | ✅ | uiroot palette/shortcuts | Cmd/Ctrl+K、可配置两条 chrome 快捷键；非系统全局热键 |
 | Settings 外壳与页面 | ✅ | `internal/ui/settings`、about | 17 页（高级分组默认折叠，日常导航 9 项）：常用（模型/行为/预设）、外观（外观/技能/快捷键）、集成（MCP/搜索/网络）、高级（通知/归档/导入/更新/诊断/记忆/LSP/数据与隐私）、关于；**模型页 = 服务商连接 + 模型列表（系列/思考模式/生成参数编辑）+ 运行参数（最大迭代默认不限制/上下文预算/流完整性）**；**插件参数已落在 Plugins 页（已接线键）**；插件市场为明确非目标 |
-| Approval 审批 Modal | ✅ | `internal/ui/approval` + approvals 模块 | allow/allow-always/deny、ask/workspace/full/never（settings 覆盖、workspace 只读自动 allow） |
-| 右侧检查栏 | ✅ | rightpanel | 8 tab：概览/工具/日志/文件/变更/终端/**团队**/**任务**，en/zh |
+| Approval 审批 Modal | ✅ | `internal/ui/approval` + approvals 模块 | allow/allow-always/deny、只读/工作区可写/所有权限三档预设（settings 覆盖；只读档仅只读/信息类工具自动 allow；旧 ask/never 存值归一为只读；headless assembly 仍可配 ask/never 策略） |
+| 右侧检查栏 | ✅ | rightpanel | 8 tab：概览/工具/日志/文件/变更/终端/**团队**（异步队友 + 同步子代理只读行）/**任务**，en/zh |
 | Files 检查器 | ✅ | rightpanel files + workspace | 打开文件夹/面包屑/文本/Markdown/图片预览/错误态 |
 | Terminal 运行器 | ✅ | rightpanel terminal + terminal 模块 | 独立 shell -c、cwd、输出/退出码/停止/超时；无 PTY/持久 shell |
 | Workspace Changes/diff | ✅ | rightpanel changes + WorkspaceDiffer | 未提交变更列表、状态 badge、diff 折叠/截断 |
@@ -109,8 +109,8 @@
 | Workspace→Session 树/分组/计数 | ✅ | sidebar workspace tree | 多 workspace 分组、未分组、计数、搜索、折叠、置顶/归档 |
 | Plan UI（plan_review/exit_plan_mode） | ✅ | interaction plan Modal + /审阅计划 + plan 门禁 + toolcards 计划卡 + **keep-planning 反馈** | Markdown 审阅 + 批准/取消 + 计划模式门禁 + transcript 计划卡 + **「继续规划」反馈（写回当前会话作为下一条用户消息 → 模型修订后重新 plan_review）** |
 | Modes UI（standard/minimal/creator） | ✅ | session 模式 Popover + agent gate 策略 | 四模式：普通（原审批策略）、计划（只读+计划白名单，最高优先）、精简（只读探索白名单）、创作（隐藏编码工具，仅 ask/present/goal/memory/skill）；composer 模式菜单 + header 徽标，坏值归一，中英 |
-| Team UI（成员/任务/steer） | ✅ | rightpanel Agents/Tasks Inspector + team_* 工具 | 成员列表/状态/最新回答、选中后 steer/中断/关闭；spawn 由 agent 工具发起（同旧）；任务板增删改/状态排序 |
-| Todo UI（会话 todo 面板） | ✅ | toolkit `KeyTaskBoard` + rightpanel「任务」tab | 任务列表/状态排序/添加/开始/完成/删除/刷新/错误与空态，与 team_task_* 共用；缺旧 todo 卡内联进度 |
+| Team UI（成员/任务/steer） | ✅ | rightpanel Agents/Tasks Inspector + agent `team_state.go` 运行态跟踪 + team_*/DSH 工具 + 会话页头团队 chip + palette 命令 | 分组（主代理/队友/同步子代理·只读）+ 真运行态 badge（running/idle/done/failed/interrupted；availability 不再画成 running）+ 当前活动/耗时/步数/token + 活动时间线 + 产出复制 + 完成/失败 toast(查看) + 原生「新建队友」表单（Form/Field，TeamService.Spawn）+ steer/中断/关闭（无默认动作确认）+ 页头 chip/two 稳定命令入口；spawn 仍可由模型工具发起。剩余（后续）：团队工作台 overlay（roster/概览/成员/任务板三视图）、后台 jobs 面板、团队归属按会话过滤 |
+| Todo UI（会话 todo 面板） | ✅ | toolkit `KeyTaskBoard` + rightpanel「任务」tab | 状态分组（进行中/待处理/已完成）+ 计数、行内 owner（未认领/主代理/队友；`TaskAssigner` 菜单）、依赖/阻塞行（等待 task-X「subject」完成/可开始，`BoardTask.BlockedBy`）、`ui.List` 选中 + Enter 展开详情（描述/依赖/写入范围/开始/删除面板）、chat 通知自动刷新（T-03）、显式刷新 loading、空/错误态，与 team_task_* 共用；剩余（后续）：任务板持久化（当前 toolkit 内存，重启丢失）、工作台内任务板视图、旧 todo 卡内联进度 |
 | Artifacts / Present UI | ✅ | interaction Modal + uiroot ArtifactLister + rightpanel Files「产物」 | present 预览 + 最近 50/产物列表最近 10、内嵌 markdown 再预览 + 下载为 Markdown（原生保存对话框/slug）；跨重启历史为明确非目标（进程内 50 条） |
 | 交互式 ask_user UI | ✅ | `internal/ui/interaction` question Modal + uiroot bridge | 选项/自由文本/取消；hosttools ask_user 已走真实桥，E2E 覆盖 |
 | About 页 | ✅ | `internal/ui/about` | 构建信息/架构/bullet，en/zh 动态导航 |
@@ -126,7 +126,9 @@
 4. **管理深度（中）**：插件详情/内置插件开关/配置；memory consolidate/extract/自动记忆设置；
    skills 创建/编辑/删除；artifact 下载动作。
 5. **编排执行深度（中）**：goal 自动驱动（多轮自动继续）、review/PTC/workflow/ralph 工具接线；
-   当前 subagent/team/goal 桥可用，但旧 runtime 的高级编排未全接。
+   当前 subagent/team/goal 桥可用，但旧 runtime 的高级编排未全接。团队可见性 M1 已落地
+   （运行态/活动/依赖/通知/命令入口）；剩余：团队工作台 overlay、后台 jobs 面板、任务板持久化，
+   均为后续增量、非阻塞。
 6. **宿主桌面集成（中）**：托盘/关闭到托盘（旧 close-to-hide）、窗口几何显式持久化、
    Windows 运行中替换（非目标）；当前 proxy/autostart/single-instance/install/toast 已落地。
 7. **后端长尾（低）**：ACP session/list/load+auth+fs/terminal、automation runs 历史、

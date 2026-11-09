@@ -908,14 +908,13 @@ func diagnosticsRows(info contracts.AppInfo, dataDir string, toolkit *rigtools.R
 		diagnosticRow{localized(locale, "工具数", "Tools"), fmt.Sprintf("%d", toolCount)},
 		diagnosticRow{localized(locale, "会话数", "Sessions"), fmt.Sprintf("%d", len(chat.Sessions()))},
 	)
+	// Every setting value goes through the shared credential mask, so the page,
+	// its copy action and the exported report can never disagree about which
+	// values are secrets (the old page only masked chat.apiKey).
 	keys := make([]string, 0)
 	if all := store.All(); len(all) > 0 {
-		for key := range all {
-			if key == contracts.SettingsChatAPIKey {
-				keys = append(keys, key+"="+localized(locale, "已设置(隐藏)", "set (hidden)"))
-				continue
-			}
-			keys = append(keys, key+"="+all[key])
+		for key, value := range all {
+			keys = append(keys, key+"="+maskedSettingValue(locale, key, value))
 		}
 		sort.Strings(keys)
 	}
@@ -1295,8 +1294,10 @@ func buildPage(c *ui.Context, runtime contracts.UIRuntime, state *moduleState, c
 					"Configured (leave this blank to keep it).")
 			}
 			ui.Field(c, labels.apiKeyLabel, func() {
+				// A key is a credential: the official Password mode hides it and
+				// keeps it out of the clipboard.
 				ui.TextInput(c, &state.apiKey).Label(inputLabel(locale, labels.apiKeyLabel)).
-					Bind(&state.apiKeyInput).
+					Bind(&state.apiKeyInput).Password().
 					Placeholder(localized(locale, "输入新的 API key；留空保持不变",
 						"Enter a new API key; leave blank to keep")).
 					FillWidth()

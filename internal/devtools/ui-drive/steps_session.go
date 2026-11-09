@@ -214,7 +214,7 @@ func (d *drive) runSessionSteps() {
 	d.step("composer-session-settings-menu", "session", "输入区：会话设置分组菜单",
 		"点击「会话设置」→ 一个菜单同时提供权限模式、对话模式、思考强度与提示词预设（低频项收进一组）→ Esc 关闭", func(c *check) {
 			d.resetToSession()
-			if !c.click("工作区权限") && !c.click("会话设置") {
+			if !c.click("工作区可写") && !c.click("会话设置") {
 				return
 			}
 			d.drain(2)
@@ -244,7 +244,7 @@ func (d *drive) runSessionSteps() {
 			// Always-visible primary controls.
 			c.require(c.has("附件"), "composer 缺少附件菜单")
 			c.require(c.has("drive-model"), "composer 缺少模型 chip")
-			c.require(c.has("工作区权限") || c.has("会话设置"), "composer 缺少会话设置菜单")
+			c.require(c.has("工作区可写") || c.has("会话设置"), "composer 缺少会话设置菜单")
 			// The fixed right group is the send control (never in overflow).
 			rect, ok := d.find("发送")
 			if !ok {
@@ -252,12 +252,24 @@ func (d *drive) runSessionSteps() {
 				return
 			}
 			c.note("发送 rect=(%.0f,%.0f,%.0f,%.0f)", rect.X, rect.Y, rect.W, rect.H)
-			if !c.click("工作区权限") && !c.click("会话设置") {
+			if !c.click("工作区可写") && !c.click("会话设置") {
 				return
 			}
 			d.drain(2)
 			for _, want := range []string{"权限模式", "对话模式", "思考强度", "插入预设"} {
 				c.require(c.has(want), "「会话设置」菜单缺少「%s」分组", want)
+			}
+			// The permission group header comes first, directly above exactly
+			// three selectable presets; the retired ask/never modes are gone.
+			for _, want := range []string{"只读", "工作区可写", "所有权限"} {
+				c.require(c.has(want), "「会话设置」菜单缺少权限模式「%s」", want)
+			}
+			c.require(!c.has("询问") && !c.has("从不允许"),
+				"「会话设置」菜单仍提供已移除的权限模式（询问/从不允许）")
+			if header, ok := d.find("权限模式"); ok {
+				if item, okItem := d.find("只读"); okItem && item.Y <= header.Y {
+					c.failf("权限模式分组标题不在模式项上方：header Y=%.1f item Y=%.1f", header.Y, item.Y)
+				}
 			}
 			d.key(0, ui.KeyEscape)
 			d.drain(2)
@@ -267,12 +279,12 @@ func (d *drive) runSessionSteps() {
 			d.resetToSession()
 			d.drain(3)
 			c.require(d.has("附件"), "窄窗 composer 工具栏缺少附件菜单")
-			c.require(d.has("工作区权限") || d.has("会话设置"), "窄窗 composer 工具栏缺少会话设置分组")
+			c.require(d.has("工作区可写") || d.has("会话设置"), "窄窗 composer 工具栏缺少会话设置分组")
 			c.require(d.has("发送"), "窄窗 composer 工具栏缺少发送按钮")
 			if d.has("»") {
 				c.warnf("窄窗 composer 出现了无标签 » 溢出按钮")
 			}
-			if c.click("工作区权限") || c.click("会话设置") {
+			if c.click("工作区可写") || c.click("会话设置") {
 				d.drain(2)
 				c.require(d.has("权限模式") && d.has("对话模式"),
 					"窄窗「会话设置」菜单没有权限/对话模式分组")

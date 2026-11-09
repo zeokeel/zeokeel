@@ -75,7 +75,7 @@ func TestSessionMenuHidesClearWithoutRememberedTools(t *testing.T) {
 	h := newToolsHarness(t, permissionChat(), newPermissionSettings(nil), nil)
 	tester := h.tester()
 	h.openSessionMenu(tester)
-	h.assertTexts(tester, "权限模式", "工作区", "全部允许")
+	h.assertTexts(tester, "权限模式", "只读", "工作区可写", "所有权限")
 	h.assertNoTexts(tester, "清除自动允许的工具")
 }
 

@@ -61,9 +61,16 @@ type state struct {
 	disabledTools    map[string]bool
 	disabledMCPTools map[string]bool
 	disabledLoaded   bool
-	disabledErr      string
-	status           string
-	statusErr        bool
+	// refreshing is true while an MCP re-connect runs off the UI thread: the
+	// Refresh call pings every client and can block on a hung server, so it
+	// never runs inside the frame's click handler.
+	refreshing bool
+	// toolsDisabledOnly filters the tool catalogue to the currently disabled
+	// tools (a "what did I turn off?" view in a 70-row list).
+	toolsDisabledOnly bool
+	disabledErr       string
+	status            string
+	statusErr         bool
 
 	// MCP server-level switches (mcp.disabledServers): parsed once; matching is
 	// trimmed/case-insensitive.
@@ -86,18 +93,31 @@ type state struct {
 	paramKey     string
 	paramTitle   string
 	paramDraft   string
-	paramErrText string
-	paramNotice  string
-	paramErr     bool
+	// paramSensitive marks the row being edited as a credential, so the modal
+	// uses the official Password input.
+	paramSensitive bool
+	paramErrText   string
+	paramNotice    string
+	paramErr       bool
 
 	// mcpExpanded remembers the expanded MCP server cards, keyed by server
 	// identity, so a Refresh preserves the open cards.
 	mcpExpanded map[string]bool
 
-	// pendingRestartTools remembers tool switches flipped on this page: the
-	// toolkit only re-registers its tools at process start, so each flipped tool
-	// shows "restart needed" until the app restarts.
-	pendingRestartTools map[string]bool
+	// startupDisabledTools is the disabled-tool set read at activation. The
+	// toolkit only re-registers tools at process start, so a row shows "restart
+	// needed" while its current switch state differs from this snapshot; a
+	// switch flipped back to its startup state clears the hint again.
+	startupDisabledTools map[string]bool
+
+	// pendingRestartServers marks MCP servers enabled during this visit. The
+	// toolkit starts servers at launch, so an enabled settings row is not in
+	// the live service yet: the page synthesizes its card instead of letting it
+	// vanish until the next restart.
+	pendingRestartServers map[string]bool
+
+	// navigator is the host navigator (deep links to the settings MCP page).
+	navigator contracts.Navigator
 }
 
 // tr returns the localized copy for the current frame's language.
@@ -123,13 +143,19 @@ func Module() *module.Descriptor[Config] {
 			return err
 		}
 		// The navigator is required so the screen is reachable from the host's
-		// navigation surface; the page itself has no in-page navigation.
-		if _, err := ctx.Require(contracts.KeyNavigator); err != nil {
+		// navigation surface, and so the empty MCP state can deep-link to the
+		// settings page that configures servers.
+		navigator, err := ctx.Require(contracts.KeyNavigator)
+		if err != nil {
 			return err
 		}
 		config := cfg.resolved()
 		locale, _ := ctx.Get(contracts.KeyLocale)
-		moduleState := &state{ctx: ctx, locale: locale, mcpExpanded: make(map[string]bool)}
+		moduleState := &state{
+			ctx: ctx, locale: locale, navigator: navigator,
+			mcpExpanded:           make(map[string]bool),
+			pendingRestartServers: make(map[string]bool),
+		}
 		return own(ctx, func() (func(), error) {
 			return runtime.RegisterScreen(contracts.ScreenSpec{
 				ID:    ScreenID,
@@ -144,6 +170,21 @@ func Module() *module.Descriptor[Config] {
 		AddRequires(module.Requires(contracts.KeyUIRuntime)).
 		AddRequires(module.Requires(contracts.KeyNavigator)).
 		WithName("ZeoKeel plugins screen")
+}
+
+// openSettingsPage opens the settings surface on one page through the host's
+// optional deep-link capability, falling back to toggling the surface when the
+// navigator does not implement it.
+func (st *state) openSettingsPage(pageID string) {
+	if st.navigator == nil {
+		return
+	}
+	if opener, ok := st.navigator.(interface{ OpenSettingsPage(string) error }); ok {
+		if err := opener.OpenSettingsPage(pageID); err == nil {
+			return
+		}
+	}
+	st.navigator.ToggleSettings()
 }
 
 // own registers one contribution and ties its unregistration to ctx's effect

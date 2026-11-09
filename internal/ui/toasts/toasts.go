@@ -101,6 +101,27 @@ type state struct {
 	// showing maps a native toast id to its notification level, so the level
 	// filter can close toasts already on screen.
 	showing map[string]string
+	// merged holds one showing toast's dedupe bookkeeping by native toast id:
+	// how many identical level+text notifications it represents and the ids
+	// the notifier bookkeeping must forget when it closes.
+	merged map[string]*mergedToast
+}
+
+// mergedToast is the bookkeeping of one showing toast that may stand for
+// several identical notifications (same level and text): count is what the
+// toast shows as "×N", notificationIDs every notifier id it merged.
+type mergedToast struct {
+	count           int
+	notificationIDs []string
+}
+
+// dedupeToastID names the native toast of one level+text pair: adding a toast
+// with an id already showing changes that toast (it "shows anew", resetting
+// its time), so identical notifications merge into one row instead of stacking
+// a wall of duplicates. The level is part of the key: a success and an error
+// with the same words stay two toasts.
+func dedupeToastID(level, text string) string {
+	return "notice:" + level + "\x00" + text
 }
 
 // Module registers the toast overlay contribution.
@@ -138,6 +159,8 @@ func Module() *module.Descriptor[Config] {
 				notifier.SetHandler(nil)
 				st.pending = nil
 				st.queue = nil
+				st.showing = nil
+				st.merged = nil
 			}, nil
 		}); err != nil {
 			notifier.SetHandler(nil)
@@ -279,23 +302,40 @@ func buildOverlay(c *ui.Context, st *state) {
 			notification := st.queue[0]
 			st.queue = st.queue[1:]
 			level := notificationLevel(notification.Level)
-			notificationID := notification.ID
+			text := strings.TrimSpace(notification.Text)
+			toastID := dedupeToastID(level, text)
+			// Identical level+text within the toast's life merges: the same
+			// native id means AddToast updates the showing toast (time reset)
+			// and the count says how many notifications it stands for.
+			entry := st.merged[toastID]
+			if entry == nil {
+				entry = &mergedToast{}
+				if st.merged == nil {
+					st.merged = make(map[string]*mergedToast)
+				}
+				st.merged[toastID] = entry
+			}
+			entry.count++
+			if id := strings.TrimSpace(notification.ID); id != "" {
+				entry.notificationIDs = append(entry.notificationIDs, id)
+			}
+			count := entry.count
 			notifier := st.notifier
 			runtime := st.runtime
-			// The closure names the native toast the framework will create: the
-			// id is assigned before AddToast returns, and OnClose only runs later.
-			var toastID string
 			// The action half (contracts.ActionNotifier) rides on the
 			// notification: show its label as the toast's action button and run
 			// the callback (on the UI thread) when pressed. A panicking callback
-			// must not take the window down.
+			// must not take the window down. A merged update carries the latest
+			// action, so its Undo applies to the most recent duplicate.
 			action := notification.Action
-			toastID = c.AddToast(ui.Toast{
-				ID:      strings.TrimSpace(notification.ID),
-				Title:   strings.TrimSpace(notification.Text),
+			actionLabel := strings.TrimSpace(notification.ActionLabel)
+			c.AddToast(ui.Toast{
+				ID:      toastID,
+				Title:   text,
 				Type:    notificationType(level),
 				Timeout: toastTimeout,
-				Action:  strings.TrimSpace(notification.ActionLabel),
+				Action:  actionLabel,
+				Data:    count,
 				OnAction: func() {
 					if action == nil {
 						return
@@ -309,8 +349,12 @@ func buildOverlay(c *ui.Context, st *state) {
 				},
 				OnClose: func() {
 					delete(st.showing, toastID)
-					if notifier != nil {
-						notifier.Dismiss(notificationID)
+					merged := st.merged[toastID]
+					delete(st.merged, toastID)
+					if notifier != nil && merged != nil {
+						for _, notificationID := range merged.notificationIDs {
+							notifier.Dismiss(notificationID)
+						}
 					}
 					// A free slot: the next queued notification takes it on the
 					// next frame.
@@ -400,6 +444,12 @@ func buildToast(c *ui.Context, st *state, toast ui.Toast) {
 				}
 				design.Apply(ui.Text(c, level.label), t.Font(design.TypeXXXS)).
 					FontWeight(600).TextColor(level.color)
+				if count, ok := toast.Data.(int); ok && count > 1 {
+					// One toast standing for N identical notifications: a quiet
+					// count, not another badge row.
+					design.Apply(ui.Text(c, "×"+strconv.Itoa(count)), t.Font(design.TypeXXXS)).
+						FontWeight(600).TextColor(level.color)
+				}
 			})
 			design.Apply(ui.Text(c, toast.Title), t.Font(design.TypeXS)).
 				TextColor(t.LabelPrimary).MaxLines(2)

@@ -79,17 +79,17 @@ func workingDirectoryLine(workspaceRoot string) string {
 	return fmt.Sprintf("Working directory: %s. File policy: workspace-write; the file tools may modify files inside it only.", root)
 }
 
-// normalizeApprovalMode maps every accepted policy spelling to ask, workspace,
-// full or never. Unknown values keep the product default (workspace), and the
-// legacy "auto" policy is "full".
+// normalizeApprovalMode maps every accepted policy spelling onto the three
+// permission presets. Unknown values keep the product default (workspace); the
+// legacy approvals "auto" policy is full, and the retired "ask"/"never" values
+// (still possible from a headless assembly config or an old stored row)
+// normalize to read-only exactly like contracts.NormalizePermissionMode.
 func normalizeApprovalMode(mode string) string {
 	switch strings.ToLower(strings.TrimSpace(mode)) {
 	case contracts.PermissionFull, legacyApprovalsAuto:
 		return contracts.PermissionFull
-	case contracts.PermissionAsk:
-		return contracts.PermissionAsk
-	case contracts.PermissionNever:
-		return contracts.PermissionNever
+	case contracts.PermissionReadOnly, contracts.PermissionAsk, contracts.PermissionNever:
+		return contracts.PermissionReadOnly
 	default:
 		return contracts.PermissionWorkspace
 	}
@@ -104,10 +104,8 @@ func approvalPolicyLine(mode string) string {
 	switch normalizeApprovalMode(mode) {
 	case contracts.PermissionFull:
 		return "Approval policy: full — no approval prompts are shown."
-	case contracts.PermissionNever:
-		return "Approval policy: never — actions that require approval are denied automatically; do not attempt to escalate."
-	case contracts.PermissionAsk:
-		return "Approval policy: ask — every tool call asks for approval."
+	case contracts.PermissionReadOnly:
+		return "Approval policy: read-only — read-only and informational tools run without approval; file writes, shell, network, settings writes and other tools may ask for approval. Do not abandon a needed operation because of this policy; use a tool normally and follow the dialog guidance (the user may choose always-allow-in-this-session)."
 	default:
 		return "Approval policy: workspace — file tools and read-only/informational tools run without approval; shell, network, settings writes and other tools may ask for approval. Do not abandon a needed operation because of this policy; use a tool normally and follow the dialog guidance (the user may choose always-allow-in-this-session)."
 	}
@@ -258,7 +256,7 @@ func (s *service) workspaceRoot(ctx context.Context) string {
 
 // effectiveApprovalMode resolves the approval policy the model should be told
 // about: the per-session override wins, then the approvals service's policy
-// (normalized to ask/workspace/full/never). A service without an approvals
+// (normalized to read-only/workspace/full). A service without an approvals
 // backend never prompts, so it reports "full".
 func (s *service) effectiveApprovalMode(sessionID string) string {
 	if override := strings.TrimSpace(s.sessionPermission(sessionID)); override != "" {

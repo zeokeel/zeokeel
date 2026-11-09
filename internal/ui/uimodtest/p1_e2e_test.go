@@ -35,10 +35,11 @@ func TestP1ApprovalToolsAndPersistence(t *testing.T) {
 	settings := &memSettings{values: map[string]string{
 		contracts.SettingsChatModel:   "test-model",
 		contracts.SettingsChatBaseURL: server.URL,
-		// This scenario covers the tool-approval handshake end to end: ask mode
-		// makes the scripted working_directory call require the dialog even
-		// though the default workspace mode auto-allows read-only tools.
-		contracts.SettingAgentPermission: contracts.PermissionAsk,
+		// This scenario covers the tool-approval handshake end to end: the
+		// read-only preset auto-allows read-only/informational tools but still
+		// sends mutating tools (here a shared task-board write) through the
+		// approval dialog.
+		contracts.SettingAgentPermission: contracts.PermissionReadOnly,
 	}}
 
 	// --- first boot: send a prompt that requires tool approval -------------
@@ -74,7 +75,7 @@ func TestP1ApprovalToolsAndPersistence(t *testing.T) {
 	foundTool := false
 	for _, message := range session.Messages {
 		for _, call := range message.Tools {
-			if call.Name == "working_directory" && call.Status == "ok" {
+			if call.Name == "team_task_create" && call.Status == "ok" {
 				foundTool = true
 			}
 		}
@@ -90,17 +91,17 @@ func TestP1ApprovalToolsAndPersistence(t *testing.T) {
 	tester.Frame()
 	// The transcript shows the friendly localized tool name; the raw protocol id
 	// stays in the row's tooltip/accessible description.
-	if !tester.HasText("查看工作目录") {
+	if !tester.HasText("团队任务") {
 		t.Fatalf("tool row text missing; texts = %v", tester.Texts())
 	}
-	if tester.HasText("working_directory") {
+	if tester.HasText("team_task_create") {
 		t.Fatalf("raw tool id leaked into the transcript; texts = %v", tester.Texts())
 	}
 	if err := tester.Click("轨迹"); err != nil {
 		t.Fatalf("click trajectory tab: %v; texts = %v", err, tester.Texts())
 	}
 	tester.Frame()
-	for _, want := range []string{"步骤 1", "查看工作目录", "完成"} {
+	for _, want := range []string{"步骤 1", "团队任务", "完成"} {
 		if !tester.HasText(want) {
 			t.Fatalf("trajectory frame missing %q; texts = %v", want, tester.Texts())
 		}
@@ -306,16 +307,19 @@ func TestP1ApprovalToolsAndPersistence(t *testing.T) {
 	if err := tester.Click("检查更新"); err != nil {
 		t.Fatalf("click check update: %v; texts = %v", err, tester.Texts())
 	}
+	// The desktop assembly has no release feed: after one check the page turns
+	// into the "updates not enabled in this build" state instead of offering a
+	// download/install it cannot perform (and never echoes update.feedURL).
 	checkDeadline := time.Now().Add(5 * time.Second)
 	for time.Now().Before(checkDeadline) {
 		tester.Frame()
-		if tester.HasText("更新源未配置") {
+		if tester.HasText("当前构建未启用更新") {
 			break
 		}
 		time.Sleep(10 * time.Millisecond)
 	}
-	if !tester.HasText("更新源未配置") {
-		t.Fatalf("update check error missing; texts = %v", tester.Texts())
+	if !tester.HasText("当前构建未启用更新") {
+		t.Fatalf("update unavailable state missing; texts = %v", tester.Texts())
 	}
 	if err := uiRoot.OpenSettingsPage("search"); err != nil {
 		t.Fatalf("open search settings: %v", err)
@@ -703,7 +707,7 @@ func TestP1ApprovalToolsAndPersistence(t *testing.T) {
 	}
 
 	// permission modes: full permission auto-allows tool calls without asking;
-	// restoring ask mode asks again.
+	// restoring read-only mode queues a shell request again.
 	approvalsSvc := requireApprovals(t, root)
 	if err := settings.Set(contracts.SettingAgentPermission, contracts.PermissionFull); err != nil {
 		t.Fatalf("set permission full: %v", err)
@@ -720,8 +724,8 @@ func TestP1ApprovalToolsAndPersistence(t *testing.T) {
 	if pending := approvalsSvc.Pending(); len(pending) != 0 {
 		t.Fatalf("full permission queued approvals: %+v", pending)
 	}
-	if err := settings.Set(contracts.SettingAgentPermission, contracts.PermissionAsk); err != nil {
-		t.Fatalf("restore ask permission: %v", err)
+	if err := settings.Set(contracts.SettingAgentPermission, contracts.PermissionReadOnly); err != nil {
+		t.Fatalf("restore read-only permission: %v", err)
 	}
 
 	// team orchestration: spawn_teammate creates a real in-process teammate and
@@ -759,7 +763,9 @@ func TestP1ApprovalToolsAndPersistence(t *testing.T) {
 	uiRoot.SetRightPanelOpen(true)
 	tester.Frame()
 	selectInspectorPane(t, tester, "团队")
-	for _, want := range []string{"研究员", member.ID, "运行中"} {
+	// The run finished (the wait loop above required a result), so the pane's
+	// truthful run state is 已完成, not the old availability-derived 运行中.
+	for _, want := range []string{"研究员", member.ID, "已完成"} {
 		if !tester.HasText(want) {
 			t.Fatalf("agents pane missing %q; texts = %v", want, tester.Texts())
 		}
@@ -928,8 +934,9 @@ func TestP1ApprovalToolsAndPersistence(t *testing.T) {
 	}
 }
 
-// scriptedToolServer drives two model rounds: a working_directory tool call,
-// then the final text after the tool result.
+// scriptedToolServer drives two model rounds: a team_task_create tool call (the
+// read-only preset still asks for mutations), then the final text after the
+// tool result.
 func scriptedToolServer(t *testing.T) *httptest.Server {
 	t.Helper()
 	var calls atomic.Int64
@@ -940,7 +947,7 @@ func scriptedToolServer(t *testing.T) *httptest.Server {
 		}
 		w.Header().Set("Content-Type", "text/event-stream")
 		if calls.Add(1) == 1 {
-			fmt.Fprint(w, "data: {\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"call-1\",\"type\":\"function\",\"function\":{\"name\":\"working_directory\",\"arguments\":\"{}\"}}]},\"index\":0,\"finish_reason\":\"tool_calls\"}]}\n\n")
+			fmt.Fprint(w, "data: {\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"call-1\",\"type\":\"function\",\"function\":{\"name\":\"team_task_create\",\"arguments\":\"{\\\"subject\\\":\\\"审批握手验证\\\"}\"}}]},\"index\":0,\"finish_reason\":\"tool_calls\"}]}\n\n")
 		} else {
 			fmt.Fprint(w, "data: {\"choices\":[{\"delta\":{\"content\":\"已读取工作目录\"},\"index\":0}]}\n\n")
 			fmt.Fprint(w, "data: {\"choices\":[{\"delta\":{},\"index\":0,\"finish_reason\":\"stop\"}],\"usage\":{\"prompt_tokens\":12,\"completion_tokens\":34,\"total_tokens\":46,\"prompt_cache_hit_tokens\":5}}\n\n")

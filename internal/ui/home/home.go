@@ -146,6 +146,13 @@ func Module() *module.Descriptor[Config] {
 					placeholderText = tr(defaultPlaceholderZH, defaultPlaceholderEN)
 				}
 				tokens := design.Of(c)
+				// The workspace backend is optional: with it the composer shows
+				// the workspace a new chat belongs to and the recent rows name
+				// theirs; without it both stay quiet instead of guessing.
+				var workspace contracts.WorkspaceService
+				if raw, ok := ctx.Get(contracts.KeyWorkspace); ok {
+					workspace, _ = raw.(contracts.WorkspaceService)
+				}
 				ui.Column(c).FillWidth().Grow(1).Gap(design.Space6).Children(func() {
 					// The brand column: centered vertically in the free space,
 					// capped at the readable width.
@@ -160,7 +167,7 @@ func Module() *module.Descriptor[Config] {
 									region(c, runtime, contracts.SlotHomeComposer, func(c *ui.Context) {
 										buildHomeComposer(c, tokens, runtime, nav, chat, ctx, composerState, placeholderText, tr)
 									})
-									buildRecentSessions(c, tokens, runtime, nav, chat, recentState, locale, tr)
+									buildRecentSessions(c, tokens, runtime, nav, chat, workspace, recentState, locale, tr)
 									buildNextSteps(c, tokens, runtime, nav, chat, ctx, composerState, tr)
 								})
 						})
@@ -175,18 +182,51 @@ func Module() *module.Descriptor[Config] {
 		WithName("ZeoKeel Home screen")
 }
 
+// homeConfigGaps reports which first-run prerequisites the effective chat
+// config is missing. A missing model blocks sending; a missing API key is a
+// warning because local model servers (Ollama and friends) need none.
+func homeConfigGaps(chat contracts.ChatService) (missingModel, missingKey bool) {
+	if chat == nil {
+		return false, false
+	}
+	cfg := chat.Config()
+	return strings.TrimSpace(cfg.Model) == "", strings.TrimSpace(cfg.APIKey) == ""
+}
+
+// homeNeedsSetup reports whether first-run guidance should be shown: the product
+// has a default model id from the assembly, so checking only the model used to
+// hide the missing-API-key state until the first send failed.
+func homeNeedsSetup(chat contracts.ChatService) bool {
+	missingModel, missingKey := homeConfigGaps(chat)
+	return missingModel || missingKey
+}
+
+// homeSetupMessage renders the first-run guidance body for the gaps that exist.
+func homeSetupMessage(chat contracts.ChatService, tr func(zh, en string) string) string {
+	missingModel, missingKey := homeConfigGaps(chat)
+	switch {
+	case missingModel:
+		return tr("尚未配置模型。添加服务商与密钥后才能发送消息。",
+			"No model configured yet. Add a provider and API key before sending messages.")
+	case missingKey:
+		return tr("尚未配置 API Key。添加后才能发送消息；使用本地模型服务时可忽略。",
+			"No API key configured yet. Add one before sending; ignore this for local model servers.")
+	default:
+		return ""
+	}
+}
+
 // buildSetupCard is the first-run guidance card from the old shell's
-// homeSetupCard: while no model is configured, Home says what is missing and
-// offers the action that fixes it instead of letting the first send fail. It is
-// the non-empty-state form of the guidance: with no conversations yet,
-// buildNextSteps carries the same "Configure model" action in the empty state.
+// homeSetupCard: while the chat config is incomplete (no model, or a model with
+// no API key), Home says what is missing and offers the action that fixes it
+// instead of letting the first send fail. It is the non-empty-state form of the
+// guidance: with no conversations yet, buildNextSteps carries the same action.
 func buildSetupCard(c *ui.Context, t *design.Tokens, chat contracts.ChatService,
 	nav contracts.Navigator, tr func(zh, en string) string) {
 	if chat == nil {
 		return
 	}
-	cfg := chat.Config()
-	if cfg.Model != "" || len(homeVisibleSessions(chat)) == 0 {
+	if !homeNeedsSetup(chat) || len(homeVisibleSessions(chat)) == 0 {
 		return
 	}
 	panel := ui.Column(c).FillWidth().Gap(design.Space2).Padding(design.Space3)
@@ -198,11 +238,12 @@ func buildSetupCard(c *ui.Context, t *design.Tokens, chat contracts.ChatService,
 				FontWeight(600).TextColor(t.LabelPrimary).Grow(1)
 		})
 		ui.Row(c).Gap(design.Space2).AlignItems(ui.Center).Children(func() {
-			design.Apply(ui.Text(c, tr("尚未配置模型。添加服务商与密钥后才能发送消息。",
-				"No model configured yet. Add a provider and API key before sending messages.")),
+			design.Apply(ui.Text(c, homeSetupMessage(chat, tr)),
 				t.TextMuted(design.TypeXS)).Grow(1).MaxLines(2)
 			if ui.Button(c, tr("配置模型", "Configure model")).Clicked() {
-				nav.ToggleSettings()
+				// Deep link to the page that fixes the state, not to whatever
+				// page the settings surface last showed.
+				openHomeSettingsPage(nav, "model")
 			}
 		})
 	})
@@ -240,14 +281,24 @@ type homeRecentState struct {
 // through the sidebar. It is a native mygo List keyed by session ID: a single
 // click on a row opens the conversation (the row content observes the pointer)
 // and Enter opens the chosen row.
+//
+// The order matches the sidebar's one ordering: pinned conversations first,
+// then by recent activity (the sidebar's pinnedFirst(recentSessions) rule), so
+// the same conversation is "most recent" on both surfaces. Each row names the
+// workspace its conversation belongs to (muted; the sidebar groups by it), as
+// the user otherwise has to hunt the tree to know where a recent chat lives.
 func buildRecentSessions(c *ui.Context, t *design.Tokens, runtime contracts.UIRuntime,
-	nav contracts.Navigator, chat contracts.ChatService, st *homeRecentState,
-	locale contracts.LocaleService, tr func(zh, en string) string) {
+	nav contracts.Navigator, chat contracts.ChatService, workspace contracts.WorkspaceService,
+	st *homeRecentState, locale contracts.LocaleService, tr func(zh, en string) string) {
 	visible := homeVisibleSessions(chat)
 	if len(visible) == 0 {
 		return
 	}
+	// Pinned first, then newest: same rule and tie-break as the sidebar.
 	sort.SliceStable(visible, func(left, right int) bool {
+		if visible[left].Pinned != visible[right].Pinned {
+			return visible[left].Pinned
+		}
 		if !visible[left].UpdatedAt.Equal(visible[right].UpdatedAt) {
 			return visible[left].UpdatedAt.After(visible[right].UpdatedAt)
 		}
@@ -255,6 +306,21 @@ func buildRecentSessions(c *ui.Context, t *design.Tokens, runtime contracts.UIRu
 	})
 	if len(visible) > homeRecentLimit {
 		visible = visible[:homeRecentLimit]
+	}
+	// One workspace listing per frame, so the rows stay plain lookups.
+	workspaceNames := map[string]string{}
+	workspaceRoots := map[string]string{}
+	if workspace != nil {
+		if listed, err := workspace.List(context.Background()); err == nil {
+			for _, ws := range listed {
+				name := strings.TrimSpace(ws.Name)
+				if name == "" {
+					name = ws.Root
+				}
+				workspaceNames[ws.ID] = name
+				workspaceRoots[ws.ID] = ws.Root
+			}
+		}
 	}
 	open := func(index int) {
 		if index < 0 || index >= len(visible) {
@@ -277,7 +343,15 @@ func buildRecentSessions(c *ui.Context, t *design.Tokens, runtime contracts.UIRu
 			st.row = -1
 		}
 		st.list.Key = func(row int) any { return visible[row].ID }
-		st.list.Label = func(row int) string { return title(visible[row]) }
+		st.list.Label = func(row int) string {
+			// The row's accessible name carries the workspace too: a screen
+			// reader hears both where the chat lives and what it is.
+			name := title(visible[row])
+			if ws := workspaceNames[visible[row].WorkspaceID]; ws != "" {
+				return name + " · " + ws
+			}
+			return name
+		}
 		st.list.Selected = &st.row
 		list := ui.List(c, &st.list, len(visible)).Rows(func(row ui.ListRow) {
 			session := visible[row.Index]
@@ -301,6 +375,18 @@ func buildRecentSessions(c *ui.Context, t *design.Tokens, runtime contracts.UIRu
 				ui.Icon(row.Context, icons.Message()).Size(16, 16).TextColor(iconColor)
 				design.Apply(ui.Text(row.Context, title(session)), t.Text(design.TypeS)).
 					TextColor(textColor).Grow(1).MaxLines(1).Ellipsis("…")
+				if len(workspaceNames) > 0 {
+					workspaceName := workspaceNames[session.WorkspaceID]
+					if workspaceName == "" {
+						workspaceName = tr("未分组", "Ungrouped")
+					}
+					wsLabel := design.Apply(ui.Text(row.Context, workspaceName),
+						t.TextMuted(design.TypeXXXS)).NoWrap().MaxLines(1).
+						MaxWidth(140).Ellipsis("…")
+					if root := workspaceRoots[session.WorkspaceID]; root != "" {
+						wsLabel = wsLabel.Tooltip(root)
+					}
+				}
 				if !session.UpdatedAt.IsZero() {
 					design.Apply(ui.Text(row.Context, uikit.FormatDateTime(locale, session.UpdatedAt)),
 						t.TextMuted(design.TypeXXXS)).NoWrap()
@@ -323,7 +409,7 @@ func buildNextSteps(c *ui.Context, t *design.Tokens, runtime contracts.UIRuntime
 	if chat == nil || len(homeVisibleSessions(chat)) > 0 {
 		return
 	}
-	modelConfigured := strings.TrimSpace(chat.Config().Model) != ""
+	missingModel, missingKey := homeConfigGaps(chat)
 	var workspaceService contracts.WorkspaceService
 	if raw, ok := kctx.Get(contracts.KeyWorkspace); ok {
 		workspaceService, _ = raw.(contracts.WorkspaceService)
@@ -340,11 +426,27 @@ func buildNextSteps(c *ui.Context, t *design.Tokens, runtime contracts.UIRuntime
 			"还没有会话。开始第一次对话，或先完成下面的准备：",
 			"No conversations yet. Start the first one, or get these ready first:")),
 			t.TextMuted(design.TypeXXS)).MaxLines(2)
+		// The assembly already supplies a default model id, so a missing API key
+		// used to be invisible here until the first send failed. Surface the
+		// concrete gap instead of only the model.
+		if missingModel || missingKey {
+			gap := tr("还缺少：模型", "Still missing: model")
+			if !missingModel {
+				gap = tr("还缺少：API Key", "Still missing: API key")
+			}
+			design.Apply(ui.Text(c, gap), t.Font(design.TypeXXS)).TextColor(t.WarningText).MaxLines(1)
+		}
 		ui.Row(c).AlignItems(ui.Center).Gap(design.Space2).Children(func() {
-			if !modelConfigured {
-				configure := design.Apply(ui.Button(c, tr("配置模型", "Configure model")), t.SecondaryButton())
+			if missingModel || missingKey {
+				label := tr("配置模型", "Configure model")
+				if !missingModel {
+					label = tr("配置 API Key", "Configure API key")
+				}
+				configure := design.Apply(ui.Button(c, label), t.SecondaryButton())
 				if configure.Clicked() {
-					nav.ToggleSettings()
+					// Deep link to the page that fixes the gap (the settings
+					// surface otherwise reopens on the last page).
+					openHomeSettingsPage(nav, "model")
 				}
 			}
 			if workspaceService != nil && !workspaceOpen {

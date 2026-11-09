@@ -9,6 +9,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/egoist/mygo/ui"
 
@@ -59,11 +60,26 @@ func TestWorkspaceChangesEndToEnd(t *testing.T) {
 		t.Fatalf("create workspace: %v", err)
 	}
 
+	// The inspector belongs to the session screen (it reads the session read
+	// model), so open the session screen before opening it.
+	if err := uiRoot.Navigator().Push("session"); err != nil {
+		t.Fatalf("push session screen: %v", err)
+	}
 	uiRoot.SetRightPanelOpen(true)
 	tester := ui.NewTester(uiRoot.View, 1280, 800)
 	tester.Frame()
 	selectInspectorPane(t, tester, "变更")
-	tester.Frame()
+	// The changes read runs off the UI thread (the pane shows a spinner while
+	// git status/diff land on a later frame), so wait for the rows instead of
+	// asserting the first frame after the pane switch.
+	changesDeadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(changesDeadline) {
+		tester.Frame()
+		if tester.HasText("app.go") {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
 	for _, want := range []string{"app.go", "notes.txt", "修改", "未跟踪"} {
 		if !tester.HasText(want) {
 			t.Fatalf("changes tab missing %q; texts = %v", want, tester.Texts())

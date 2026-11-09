@@ -6,7 +6,6 @@ package settings
 // dialog), so it works headlessly in tests without a desktop backend.
 
 import (
-	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -165,6 +164,7 @@ func buildDataPrivacyPage(c *ui.Context, t *design.Tokens, kctx cordis.Context,
 				t.TextMuted(design.TypeXXS))
 			uikit.DialogFooter(c, []uikit.DialogAction{{
 				Label:    localized(locale, "打开数据目录", "Open data directory"),
+				Primary:  true,
 				Disabled: dataDir == "",
 				OnClick: func() {
 					if dataDir == "" {
@@ -199,14 +199,23 @@ func buildDataPrivacyPage(c *ui.Context, t *design.Tokens, kctx cordis.Context,
 				design.Apply(ui.Text(c, fmt.Sprintf(localized(locale,
 					"共 %d 个会话", "%d sessions"), len(sessions))),
 					t.Font(design.TypeXS)).TextColor(t.LabelSecondary)
+				// One primary action per screen: opening the data directory is the
+				// page's primary; bulk export is secondary and the destructive
+				// clear sits on its own row, away from the safe actions.
 				ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(design.Space2).Children(func() {
-					if design.Apply(ui.PrimaryButton(c, localized(locale,
+					if design.Apply(ui.Button(c, localized(locale,
 						"导出全部会话", "Export all sessions")),
-						t.PrimaryButton()).Clicked() {
+						t.SecondaryButton()).Clicked() {
 						exportDataSessions(chat, st, locale)
 						c.Invalidate()
 					}
-					ui.Spacer(c).Grow(1)
+				})
+				ui.Divider(c)
+				ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(design.Space2).Children(func() {
+					design.Apply(ui.Text(c, localized(locale,
+						"删除全部会话后无法恢复。",
+						"Deleting every session cannot be undone.")),
+						t.TextMuted(design.TypeXXS)).Grow(1).MaxLines(2)
 					if design.Apply(ui.Button(c, localized(locale,
 						"清除全部会话", "Clear all sessions")),
 						t.DangerButton()).Clicked() {
@@ -421,71 +430,8 @@ func exportDiagnosticReport(kctx cordis.Context, store contracts.SettingsService
 }
 
 // diagnosticReportText renders the plain-text report: app identity/runtime/
-// data directory/session count, then every setting key (API key masked).
-// maskedSettingValue hides credentials in the exported diagnostic report:
-// whole values for API-key/token-ish settings, and Bearer tokens inside JSON
-// structured settings (such as mcp.servers headers).
-func maskedSettingValue(locale contracts.LocaleService, key, value string) string {
-	if strings.TrimSpace(value) == "" {
-		return value
-	}
-	hidden := localized(locale, "已设置(隐藏)", "set (hidden)")
-	lower := strings.ToLower(key)
-	for _, marker := range []string{"apikey", "api_key", "token", "secret", "password", "authorization"} {
-		if strings.Contains(lower, marker) {
-			return hidden
-		}
-	}
-	trimmed := strings.TrimSpace(value)
-	if strings.HasPrefix(trimmed, "{") || strings.HasPrefix(trimmed, "[") {
-		var decoded any
-		if err := json.Unmarshal([]byte(trimmed), &decoded); err == nil {
-			encoded, encodeErr := json.Marshal(redactJSONSecrets(decoded))
-			if encodeErr == nil {
-				return string(encoded)
-			}
-		}
-		return hidden
-	}
-	if strings.Contains(trimmed, "Bearer ") {
-		return hidden
-	}
-	return value
-}
-
-// redactJSONSecrets walks decoded JSON and hides Bearer tokens and values of
-// credential-looking object keys.
-func redactJSONSecrets(value any) any {
-	switch typed := value.(type) {
-	case map[string]any:
-		redacted := make(map[string]any, len(typed))
-		for key, item := range typed {
-			lower := strings.ToLower(key)
-			if strings.Contains(lower, "token") || strings.Contains(lower, "authorization") ||
-				strings.Contains(lower, "secret") || strings.Contains(lower, "apikey") ||
-				strings.Contains(lower, "password") {
-				redacted[key] = "***"
-				continue
-			}
-			redacted[key] = redactJSONSecrets(item)
-		}
-		return redacted
-	case []any:
-		redacted := make([]any, len(typed))
-		for index, item := range typed {
-			redacted[index] = redactJSONSecrets(item)
-		}
-		return redacted
-	case string:
-		if strings.Contains(typed, "Bearer ") {
-			return "Bearer ***"
-		}
-		return typed
-	default:
-		return value
-	}
-}
-
+// data directory/session count, then every setting key through the shared
+// credential mask (see redact.go).
 func diagnosticReportText(kctx cordis.Context, store contracts.SettingsService, chat contracts.ChatService, locale contracts.LocaleService) string {
 	info, _ := kctx.Get(contracts.KeyAppInfo)
 	dataDir, _ := kctx.Get(contracts.KeyDataDir)

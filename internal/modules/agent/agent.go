@@ -68,8 +68,21 @@ const (
 	// maxTitleRunes is the length the first prompt is truncated to when a
 	// session has no title yet.
 	maxTitleRunes = 32
-	// maxToolSummaryRunes caps a tool result summary carried in the read model.
-	maxToolSummaryRunes = 200
+	// maxToolSummaryRunes caps a tool result summary carried in the read
+	// model. The transcript's expanded output shows this text whole (bounded
+	// and scrollable in the UI), so it is large enough for a real command
+	// output or diff tail; the persisted tool_result event carries the same
+	// bounded text.
+	maxToolSummaryRunes = 4000
+	// maxToolArgumentsRunes caps the raw tool-call arguments carried in the
+	// read model and the tool_call event: the transcript's input section shows
+	// them (pretty JSON or a command), and an unbounded write_file body must
+	// not bloat the read model or the durable event log.
+	maxToolArgumentsRunes = 4000
+	// maxApprovalSummaryRunes caps the human-readable summary in the approval
+	// dialog (a prompt, not a result): long arguments are the dialog's raw
+	// "parameters" block instead.
+	maxApprovalSummaryRunes = 200
 	// maxWorkspaceInstructionsBytes bounds the injected workspace instruction
 	// file (AGENTS.md by default). Larger files are truncated with a warning.
 	maxWorkspaceInstructionsBytes = 32 << 10
@@ -272,6 +285,10 @@ type service struct {
 	nextSubagentSeq atomic.Uint64
 	// teamManager owns the session's live teammates (created lazily under mu).
 	teamManager *rigteam.Manager
+	// subagentActivities is the bounded read model of the synchronous
+	// delegations (contracts.SubagentActivityLister) shown by the inspector's
+	// Agents pane; its own mutex guards it, never s.mu.
+	subagentActivities subagentActivityRegistry
 
 	// providerFactory builds the provider for one run. It is a field so tests
 	// can script providers; nil uses openai.New with the effective config.
@@ -462,6 +479,12 @@ func (s *service) restore(ctx context.Context) {
 		if history != nil {
 			if messages, err := history.Load(ctx, meta.ID); err == nil {
 				state.messages = chatMessagesFromRig(messages)
+				// Rig history has no text offsets: replay the durable
+				// tool_call/tool_result events onto the read model so a live
+				// turn whose calls all came before any prose keeps rendering
+				// cards-above-text after a restart. Sessions without tool
+				// calls skip the event read entirely.
+				s.hydrateToolTimeline(ctx, meta.ID, state)
 			} else {
 				s.logger.Printf("[agent] restore: load %s: %v", meta.ID, err)
 			}
@@ -965,9 +988,16 @@ func (s *service) SetSessionWorkspace(sessionID, workspaceID string) error {
 // override (overrides never touch the global settings).
 func (s *service) SetSessionPermission(sessionID, mode string) error {
 	sessionID = strings.TrimSpace(sessionID)
-	mode = strings.ToLower(strings.TrimSpace(mode))
-	switch mode {
-	case contracts.PermissionAsk, contracts.PermissionWorkspace, contracts.PermissionFull, contracts.PermissionNever:
+	switch raw := strings.ToLower(strings.TrimSpace(mode)); raw {
+	case contracts.PermissionFull:
+		mode = contracts.PermissionFull
+	case contracts.PermissionWorkspace:
+		mode = contracts.PermissionWorkspace
+	case contracts.PermissionReadOnly, contracts.PermissionAsk, contracts.PermissionNever:
+		// The retired "ask"/"never" spellings can still arrive from old
+		// automation rows and external callers; they normalize to read-only
+		// exactly like the stored setting does.
+		mode = contracts.PermissionReadOnly
 	default:
 		return fmt.Errorf("agent: invalid session permission mode %q", mode)
 	}
@@ -1578,15 +1608,23 @@ func (s *service) handleEvent(sessionID string, event rig.Event, turn *turnUsage
 			message.Reasoning += event.Reasoning
 		case rig.EventToolCall:
 			if event.Call != nil {
+				textOffset := len(message.Text)
+				arguments := boundedToolArguments(event.Call.Arguments)
 				message.Tools = append(message.Tools, contracts.ToolCall{
 					ID:         event.Call.ID,
 					Name:       event.Call.Name,
 					Status:     "running",
-					Arguments:  event.Call.Arguments,
-					TextOffset: len(message.Text),
+					Arguments:  arguments,
+					TextOffset: textOffset,
 				})
+				// The turn records live tool calls, so its offsets are a known
+				// timeline even when they are all zero (the model called tools
+				// before writing any prose): the transcript must interleave by
+				// offset instead of falling back to whole-text-then-cards.
+				message.ToolTimelineKnown = true
 				s.appendEvent(context.Background(), sessionID, "tool_call", map[string]any{
-					"id": event.Call.ID, "name": event.Call.Name, "arguments": event.Call.Arguments,
+					"id": event.Call.ID, "name": event.Call.Name, "arguments": arguments,
+					"text_offset": textOffset,
 				})
 			}
 		case rig.EventToolResult:
@@ -1595,15 +1633,27 @@ func (s *service) handleEvent(sessionID string, event rig.Event, turn *turnUsage
 					if message.Tools[index].ID != event.Call.ID {
 						continue
 					}
+					// A user stop surfaces as an error result carrying the
+					// provider's cancellation text ("context canceled"). That is
+					// not a tool failure: keep it a distinct neutral status so
+					// the UI shows 已取消/Cancelled instead of a red 失败, and do
+					// not carry the raw English cancellation text into the
+					// transcript summary.
 					status := "ok"
+					content := summarizeToolResult(event.Result.Content)
 					if event.Result.IsError {
-						status = "error"
+						if toolResultCancelled(event.Result.Content) {
+							status = "cancelled"
+							content = ""
+						} else {
+							status = "error"
+						}
 					}
 					message.Tools[index].Status = status
-					message.Tools[index].Summary = summarizeToolResult(event.Result.Content)
+					message.Tools[index].Summary = content
 					s.appendEvent(context.Background(), sessionID, "tool_result", map[string]any{
 						"id": event.Call.ID, "name": event.Call.Name,
-						"status": status, "content": summarizeToolResult(event.Result.Content),
+						"status": status, "content": content,
 					})
 					break
 				}
@@ -1669,6 +1719,18 @@ func (s *service) finish(sessionID string, ctx context.Context, runErr error) {
 				message.ErrorKind = contracts.MessageErrorKindTimeout
 			default:
 				message.ErrorKind = contracts.ClassifyError(runErr, message.Error)
+			}
+			// Tool calls still running when the run was stopped are cancelled,
+			// not failed: mark them with the neutral status and drop the raw
+			// backend text so no English "context canceled" shows as a red
+			// failure in the transcript.
+			if ctx != nil && errors.Is(ctx.Err(), context.Canceled) {
+				for index := range message.Tools {
+					if strings.EqualFold(strings.TrimSpace(message.Tools[index].Status), "running") {
+						message.Tools[index].Status = "cancelled"
+						message.Tools[index].Summary = ""
+					}
+				}
 			}
 		} else {
 			// A successful turn never carries stale error details.
@@ -1759,14 +1821,30 @@ func (s *service) persistInterruptedTurn(sessionID, errText string) {
 	}
 }
 
-// summarizeToolArguments bounds the raw tool-call arguments shown to the user.
+// summarizeToolArguments bounds the raw tool-call arguments shown in the
+// approval dialog's summary. It stays short on purpose: the dialog also shows
+// the full raw arguments block, and a 4k-character summary would push the
+// decision buttons off a small window.
 func summarizeToolArguments(arguments string) string {
 	summary := strings.Join(strings.Fields(arguments), " ")
 	runes := []rune(summary)
-	if len(runes) <= maxToolSummaryRunes {
+	if len(runes) <= maxApprovalSummaryRunes {
 		return summary
 	}
-	return string(runes[:maxToolSummaryRunes]) + "…"
+	return string(runes[:maxApprovalSummaryRunes]) + "…"
+}
+
+// boundedToolArguments bounds the raw tool-call arguments carried in the read
+// model and the tool_call event while keeping their line breaks (the UI pretty-
+// prints JSON / shows a command). Only a pathologically large argument (a whole
+// file body) is cut, with the same ellipsis convention as the result summary.
+func boundedToolArguments(arguments string) string {
+	trimmed := strings.TrimSpace(arguments)
+	runes := []rune(trimmed)
+	if len(runes) <= maxToolArgumentsRunes {
+		return trimmed
+	}
+	return string(runes[:maxToolArgumentsRunes]) + "…"
 }
 
 // chatMessagesFromRig converts persisted Rig messages into the UI read model.
@@ -1979,9 +2057,58 @@ func truncateTitle(prompt string) string {
 	return string(runes[:maxTitleRunes]) + "…"
 }
 
-// summarizeToolResult collapses a tool result to one bounded line.
+// toolResultCancelled reports whether a failed tool result is really the user
+// stopping the run: providers and the toolkit spell it "context canceled",
+// "cancelled while waiting ..." and similar, and none of those is a tool bug.
+// The read model keeps them as the neutral "cancelled" status the UI renders
+// as 已取消/Cancelled, instead of a red failure.
+func toolResultCancelled(content string) bool {
+	text := strings.ToLower(strings.TrimSpace(content))
+	if text == "" {
+		return false
+	}
+	for _, needle := range []string{
+		"context canceled",
+		"context cancelled",
+		"operation was canceled",
+		"operation was cancelled",
+		"cancelled while waiting",
+		"canceled while waiting",
+	} {
+		if strings.Contains(text, needle) {
+			return true
+		}
+	}
+	return false
+}
+
+// summarizeToolResult bounds a tool result carried in the read model while
+// keeping its line structure: command output and diffs read line by line, so
+// only runs of spaces within one line collapse (and blank-line runs are capped),
+// never the line breaks themselves. The bound is maxToolSummaryRunes; a cut
+// result ends with the truncation ellipsis the UI turns into its notice.
 func summarizeToolResult(content string) string {
-	summary := strings.Join(strings.Fields(content), " ")
+	if strings.TrimSpace(content) == "" {
+		return ""
+	}
+	normalized := strings.ReplaceAll(content, "\r\n", "\n")
+	normalized = strings.ReplaceAll(normalized, "\r", "\n")
+	lines := strings.Split(normalized, "\n")
+	kept := make([]string, 0, len(lines))
+	blank := 0
+	for _, line := range lines {
+		line = strings.TrimRight(strings.Join(strings.Fields(line), " "), " ")
+		if line == "" {
+			blank++
+			if blank > 1 {
+				continue
+			}
+		} else {
+			blank = 0
+		}
+		kept = append(kept, line)
+	}
+	summary := strings.TrimSpace(strings.Join(kept, "\n"))
 	runes := []rune(summary)
 	if len(runes) <= maxToolSummaryRunes {
 		return summary

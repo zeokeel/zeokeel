@@ -363,7 +363,9 @@ func main() {
 			Arguments: `{"name":"研究员","prompt":"研究一下当前工作目录并给出摘要"}`,
 		})
 		if team, teamErr := a.root.Require(contracts.KeyTeam); teamErr == nil {
-			for attempts := 0; attempts < 80; attempts++ {
+			// The scripted answer takes ~2.5s: wait long enough for the teammate
+			// to finish so the frame shows the truthful 已完成 state and output.
+			for attempts := 0; attempts < 600; attempts++ {
 				ready := false
 				for _, member := range team.Members() {
 					if member.Last != "" {
@@ -375,12 +377,34 @@ func main() {
 				}
 				time.Sleep(10 * time.Millisecond)
 			}
+			// The header team chip is the one-step entry the audit asked for:
+			// it shows the roster size and opens the inspector's team pane.
+			a.render(outDir + "/p2-team-chip.png")
 			a.ui.SetRightPanelOpen(true)
 			a.tester.Frame()
 			if err := a.openPane("团队"); err != nil {
 				fmt.Println("open agents pane:", err)
 			}
 			a.render(outDir + "/p2-team.png")
+			// A teammate row opens the activity timeline (spawn → finished).
+			if members := team.Members(); len(members) > 0 {
+				if err := a.tester.Click(members[0].Name); err != nil {
+					// The 320 DIP pane can clip the secondary line, so fall back to
+					// the row's screen position (header + sections are fixed above
+					// the first teammate row).
+					fmt.Println("select teammate:", err)
+					a.tester.ClickAt(1120, 222)
+				}
+				a.tester.Frame()
+				a.render(outDir + "/p2-team-detail.png")
+				// The pane's own spawn form: name, self-contained task, model.
+				if err := a.tester.Click("新建队友"); err == nil {
+					a.tester.Frame()
+					a.render(outDir + "/p2-team-spawn.png")
+					a.tester.Key(0, ui.KeyEscape)
+					a.tester.Frame()
+				}
+			}
 			a.ui.SetRightPanelOpen(false)
 			a.tester.Frame()
 		}
@@ -430,12 +454,13 @@ func main() {
 		a.tester.Frame()
 	}
 
-	// Permission mode chip (ask → workspace → full, the slash command cycles it).
+	// Permission mode state (read-only → workspace-write → all permissions, the
+	// slash command cycles it).
 	if store, ok := a.root.Get(contracts.KeySettings); ok {
 		_ = store.Set(contracts.SettingAgentPermission, contracts.PermissionFull)
 		a.tester.Frame()
 		a.render(outDir + "/p2-permission.png")
-		_ = store.Set(contracts.SettingAgentPermission, contracts.PermissionAsk)
+		_ = store.Set(contracts.SettingAgentPermission, contracts.PermissionReadOnly)
 		a.tester.Frame()
 	}
 
@@ -547,14 +572,18 @@ func main() {
 	if err := a.openPane("文件"); err != nil {
 		fail("files pane", err)
 	}
+	// The listing (and the preview below it) loads off the UI thread now.
+	a.waitText("README.md", 5*time.Second)
 	a.render(outDir + "/p2-files.png")
 	if err := a.tester.Click("README.md"); err != nil {
 		fail("open README.md", err)
 	}
+	a.waitText("ZeoKeel 工作区", 5*time.Second)
 	a.render(outDir + "/p2-files-preview.png")
 	if err := a.openPane("变更"); err != nil {
 		fail("changes pane", err)
 	}
+	a.waitText("查看 diff", 5*time.Second)
 	a.render(outDir + "/p2-changes.png")
 	if err := a.tester.Click("查看 diff"); err != nil {
 		fail("expand diff", err)
@@ -584,16 +613,60 @@ func main() {
 	}
 	a.render(outDir + "/p2-terminal.png")
 
-	// Shared task board (todo panel): create two tasks and render the Tasks tab.
+	// Shared task board: status groups, owners, dependencies and the expanded
+	// task detail (the board is also the agent's todo list).
 	if board, boardErr := a.root.Require(contracts.KeyTaskBoard); boardErr == nil {
-		_, _ = board.Create(context.Background(), "发布前检查", "确认文档与截图")
+		first, _ := board.Create(context.Background(), "发布前检查", "确认文档与截图")
 		pending, _ := board.Create(context.Background(), "编写发布说明", "")
 		_, _ = board.SetStatus(context.Background(), pending.ID, contracts.TaskStatusInProgress)
+		if toolkit, tkErr := a.root.Require(contracts.KeyToolkit); tkErr == nil && first.ID != "" {
+			_, _ = toolkit.Invoke(context.Background(), rig.ToolCall{
+				ID: "task-snapshot", Name: "team_task_create",
+				Arguments: `{"subject":"更新发布截图","description":"替换三张旧截图并复核","blocked_by":["` + first.ID + `"]}`,
+			})
+		}
+		// Assign the dependent task to the live teammate: the owner menu and the
+		// task ↔ member mapping are part of the team depth.
+		if tasks, listErr := board.List(context.Background()); listErr == nil {
+			if assigner, ok := any(board).(contracts.TaskAssigner); ok {
+				owner := ""
+				if team, teamErr := a.root.Require(contracts.KeyTeam); teamErr == nil {
+					if members := team.Members(); len(members) > 0 {
+						owner = members[0].Name
+					}
+				}
+				for _, task := range tasks {
+					if task.Subject == "更新发布截图" && owner != "" {
+						_, _ = assigner.Assign(context.Background(), task.ID, owner)
+					}
+				}
+			}
+		}
 		if err := a.openPane("任务"); err != nil {
 			fail("tasks pane", err)
 		}
 		a.render(outDir + "/p2-tasks.png")
+		// Enter expands one task's detail: description, dependency state, owner
+		// and write scopes.
+		if rect, ok := a.tester.Find("更新发布截图"); ok {
+			a.tester.ClickAt(rect.X+rect.W/2, rect.Y+rect.H/2)
+			a.tester.Frame()
+			a.tester.Key(0, ui.KeyEnter)
+			a.tester.Frame()
+			a.render(outDir + "/p2-tasks-expanded.png")
+		}
 	}
+
+	// The command palette finds the team entries by their stable command IDs.
+	a.tester.Key(ui.Cmd, ui.KeyK)
+	a.tester.Frame()
+	a.tester.Type("团队")
+	a.tester.Frame()
+	a.render(outDir + "/p2-palette-team.png")
+	a.tester.Key(0, ui.KeyEscape)
+	a.tester.Frame()
+	a.tester.Key(0, ui.KeyEscape)
+	a.tester.Frame()
 
 	// Composer @-mention suggestions over the workspace.
 	if sendRect, ok := a.tester.Find("发送"); ok {
@@ -1053,6 +1126,21 @@ func (a *app) render(path string) {
 	}
 	_ = file.Close()
 	fmt.Println("wrote", path, img.Bounds().Size())
+}
+
+// waitText advances frames (letting off-UI-thread reads land) until the frame
+// shows text; the inspector's Files/Changes panes now load asynchronously, so
+// every step that clicks their content waits for it first.
+func (a *app) waitText(text string, timeout time.Duration) bool {
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		a.tester.Frame()
+		if a.tester.HasText(text) {
+			return true
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	return a.tester.HasText(text)
 }
 
 // snapshotUsage is the provider usage every scripted turn reports: realistic

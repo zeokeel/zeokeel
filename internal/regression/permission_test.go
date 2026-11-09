@@ -1,7 +1,9 @@
 package regression
 
 // Adversarial audit: the runtime permission modes over approvals
-// (settings key agent.permission: ask / workspace / full / auto / never).
+// (settings key agent.permission: read-only / workspace / full, plus the
+// retired ask/never spellings that normalize to read-only and the legacy auto
+// alias of full).
 // Negative cases: workspace mode auto-allows the workspace file tools and still
 // queues shell/network/MCP/unknown tools; unknown/malicious setting values fall
 // back to workspace; mode switches during a pending request never corrupt the
@@ -108,11 +110,16 @@ func TestPermissionSettingModes(t *testing.T) {
 		permission string
 		wantMode   string
 	}{
-		{contracts.PermissionAsk, approvals.ModeAsk},
-		{" ASK ", approvals.ModeAsk},
+		{contracts.PermissionReadOnly, approvals.ModeReadOnly},
+		{" READ-ONLY ", approvals.ModeReadOnly},
 		{contracts.PermissionWorkspace, contracts.PermissionWorkspace},
 		{contracts.PermissionFull, approvals.ModeAuto},
 		{"AUTO", approvals.ModeAuto},
+		// Retired stored values normalize to the read-only preset.
+		{contracts.PermissionAsk, approvals.ModeReadOnly},
+		{" ASK ", approvals.ModeReadOnly},
+		{contracts.PermissionNever, approvals.ModeReadOnly},
+		{"NEVER", approvals.ModeReadOnly},
 	}
 	for _, testCase := range cases {
 		h := permissionService(t, approvals.ModeAsk, testCase.permission)
@@ -121,12 +128,19 @@ func TestPermissionSettingModes(t *testing.T) {
 			t.Fatalf("setting %q: Mode() = %q, want %q", testCase.permission, got, testCase.wantMode)
 		}
 	}
-	// A "never" setting maps onto the deny-everything policy (AUDIT-P3-8).
-	for _, permission := range []string{approvals.ModeNever, "NEVER"} {
+	// Read-only auto-allows the informational tools but still queues mutations.
+	for _, permission := range []string{contracts.PermissionReadOnly, contracts.PermissionAsk, contracts.PermissionNever} {
 		h := permissionService(t, approvals.ModeAsk, permission)
 		service := requireService(t, h.ctx, contracts.KeyApprovals)
-		if got := service.Mode(); got != approvals.ModeNever {
-			t.Fatalf("setting %q: Mode() = %q, want never", permission, got)
+		if got := service.Mode(); got != approvals.ModeReadOnly {
+			t.Fatalf("setting %q: Mode() = %q, want read-only", permission, got)
+		}
+		if decision, err := service.Request(context.Background(),
+			contracts.ApprovalRequest{Tool: "read_file"}); err != nil || decision != contracts.ApprovalAllow {
+			t.Fatalf("setting %q: read_file = (%q, %v), want read-only allow", permission, decision, err)
+		}
+		if err := requestAndCancel(t, service, contracts.ApprovalRequest{Tool: "write_file"}); err == nil {
+			t.Fatalf("setting %q: write_file was auto-decided, want a queued approval", permission)
 		}
 	}
 
@@ -161,7 +175,7 @@ func TestPermissionSettingModes(t *testing.T) {
 // while a request is pending: the waiting request keeps its answer path and the
 // next request follows the new mode.
 func TestPermissionModeSwitchDuringPendingRequest(t *testing.T) {
-	h := permissionService(t, approvals.ModeAsk, contracts.PermissionAsk)
+	h := permissionService(t, approvals.ModeAsk, contracts.PermissionReadOnly)
 	service := requireService(t, h.ctx, contracts.KeyApprovals)
 
 	results := requestAsync(context.Background(), service, contracts.ApprovalRequest{Tool: "bash"})
@@ -187,12 +201,12 @@ func TestPermissionModeSwitchDuringPendingRequest(t *testing.T) {
 		decision != contracts.ApprovalAllow {
 		t.Fatalf("Request after switching to full = (%q, %v), want allow", decision, err)
 	}
-	// And switching back to ask queues again.
-	if err := h.settings.Set(contracts.SettingAgentPermission, contracts.PermissionAsk); err != nil {
-		t.Fatalf("switch back to ask: %v", err)
+	// And switching back to read-only queues shell again.
+	if err := h.settings.Set(contracts.SettingAgentPermission, contracts.PermissionReadOnly); err != nil {
+		t.Fatalf("switch back to read-only: %v", err)
 	}
 	if err := requestAndCancel(t, service, contracts.ApprovalRequest{Tool: "bash"}); err == nil {
-		t.Fatal("Request after switching back to ask was auto-decided, want a queued approval")
+		t.Fatal("Request after switching back to read-only was auto-decided, want a queued approval")
 	}
 }
 
@@ -213,8 +227,8 @@ func TestPermissionSettingsSwitchRace(t *testing.T) {
 	}
 
 	values := []string{
-		contracts.PermissionAsk, contracts.PermissionWorkspace, contracts.PermissionFull,
-		approvals.ModeNever, "bogus", "",
+		contracts.PermissionReadOnly, contracts.PermissionWorkspace, contracts.PermissionFull,
+		contracts.PermissionAsk, approvals.ModeNever, "bogus", "",
 	}
 	var wg sync.WaitGroup
 	wg.Add(3)
@@ -261,11 +275,11 @@ func TestPermissionSettingsSwitchRace(t *testing.T) {
 		t.Fatal("permission settings/request race deadlocked")
 	}
 	waitFor(t, "pending queue to drain", func() bool { return len(service.Pending()) == 0 })
-	if err := h.settings.Set(contracts.SettingAgentPermission, contracts.PermissionAsk); err != nil {
-		t.Fatalf("restore ask: %v", err)
+	if err := h.settings.Set(contracts.SettingAgentPermission, contracts.PermissionReadOnly); err != nil {
+		t.Fatalf("restore read-only: %v", err)
 	}
-	if got := service.Mode(); got != approvals.ModeAsk {
-		t.Fatalf("Mode() = %q after restoring ask, want ask", got)
+	if got := service.Mode(); got != approvals.ModeReadOnly {
+		t.Fatalf("Mode() = %q after restoring read-only, want read-only", got)
 	}
 }
 

@@ -126,6 +126,20 @@ func (s *fakeMemoryStore) removes() []string {
 	return append([]string(nil), s.removeCalls...)
 }
 
+// waitMemory pumps frames until cond holds: memory searches run off the UI
+// thread and publish their result through UIRuntime.Post.
+func waitMemory(t *testing.T, tester *ui.Tester, what string, cond func() bool) {
+	t.Helper()
+	for attempt := 0; attempt < 400; attempt++ {
+		tester.Frame()
+		if cond() {
+			return
+		}
+		time.Sleep(time.Millisecond)
+	}
+	t.Fatalf("timed out waiting for %s; texts = %v", what, tester.Texts())
+}
+
 func memory(id, text string) contracts.Memory {
 	return contracts.Memory{ID: id, Text: text, Scope: "workspace", Created: time.Unix(1700000000, 0)}
 }
@@ -196,27 +210,39 @@ func TestMemorySearchCallsStore(t *testing.T) {
 	h.click(tester, "记忆")
 	h.assertTexts(tester, "项目 Alpha 使用 Go 1.27", "Beta 发布清单")
 
+	// Typing does not read the store inside the frame: the debounced read starts
+	// only after the user stops typing (S-17).
 	h.click(tester, "搜索记忆")
 	tester.Type("alpha")
 	tester.Frame()
-	if calls := store.searches(); len(calls) == 0 || calls[len(calls)-1] != "alpha" {
-		t.Fatalf("Search calls = %v, want the typed query", calls)
+	if calls := store.searches(); len(calls) != 0 {
+		t.Fatalf("search read inside the typing frame, want debounced: %v", calls)
 	}
-	h.assertTexts(tester, "项目 Alpha 使用 Go 1.27")
-	h.assertNoTexts(tester, "Beta 发布清单")
+	tester.Advance(250 * time.Millisecond)
+	waitMemory(t, tester, "alpha search", func() bool {
+		calls := store.searches()
+		return len(calls) == 1 && calls[0] == "alpha" &&
+			tester.HasText("项目 Alpha 使用 Go 1.27") && !tester.HasText("Beta 发布清单")
+	})
 
-	// Clearing the query lists everything again.
+	// Clearing the query lists everything again (also through the debounce).
 	h.click(tester, "搜索记忆")
 	tester.Key(ui.Cmd, ui.KeyA)
 	tester.Key(0, ui.KeyBackspace)
 	tester.Frame()
-	h.assertTexts(tester, "项目 Alpha 使用 Go 1.27", "Beta 发布清单")
+	tester.Advance(250 * time.Millisecond)
+	waitMemory(t, tester, "cleared list", func() bool {
+		return tester.HasText("项目 Alpha 使用 Go 1.27") && tester.HasText("Beta 发布清单")
+	})
 
 	// A query with no match shows the search empty state.
 	h.click(tester, "搜索记忆")
 	tester.Type("zzz")
 	tester.Frame()
-	h.assertTexts(tester, "没有匹配的记忆")
+	tester.Advance(250 * time.Millisecond)
+	waitMemory(t, tester, "empty search state", func() bool {
+		return tester.HasText("没有匹配的记忆")
+	})
 }
 
 func TestMemoryAddRefreshes(t *testing.T) {
@@ -392,4 +418,75 @@ func TestMemoryPaneOpensAtTop(t *testing.T) {
 	h.click(tester, "对话")
 	tester.Frame()
 	h.assertNoTexts(tester, "回到最新")
+}
+
+// TestMemorySearchDebouncesKeystrokes covers S-17's debounce: two quick query
+// edits cost one background read (the last query), not one per keystroke.
+func TestMemorySearchDebouncesKeystrokes(t *testing.T) {
+	store := newFakeMemoryStore(
+		memory("mem-1", "项目 Alpha 使用 Go 1.27"),
+		memory("mem-2", "Beta 发布清单"),
+	)
+	chat := newFakeChat()
+	chat.addSession(contracts.ChatSession{ID: "sess-1", Title: "记忆会话"}, true)
+	h := newHarnessWithMemory(t, chat, store)
+	tester := h.tester()
+	h.click(tester, "记忆")
+	h.click(tester, "搜索记忆")
+	tester.Type("a")
+	tester.Frame()
+	tester.Type("lpha")
+	tester.Frame()
+	if calls := store.searches(); len(calls) != 0 {
+		t.Fatalf("searches before the debounce window = %v, want none", calls)
+	}
+	tester.Advance(250 * time.Millisecond)
+	waitMemory(t, tester, "single debounced search", func() bool {
+		calls := store.searches()
+		return len(calls) == 1 && calls[0] == "alpha"
+	})
+	// Nothing more is read while the result stays valid.
+	tester.Advance(500 * time.Millisecond)
+	for frame := 0; frame < 3; frame++ {
+		tester.Frame()
+	}
+	if calls := store.searches(); len(calls) != 1 {
+		t.Fatalf("extra searches after the debounce = %v, want one", calls)
+	}
+}
+
+// TestMemoryAddEnterSubmits covers S-17's keyboard path: Enter in the add input
+// submits the memory (empty draft keeps the action disabled and Enter a no-op).
+func TestMemoryAddEnterSubmits(t *testing.T) {
+	store := newFakeMemoryStore()
+	chat := newFakeChat()
+	chat.addSession(contracts.ChatSession{ID: "sess-1", Title: "记忆会话"}, true)
+	h := newHarnessWithMemory(t, chat, store)
+	tester := h.tester()
+	h.click(tester, "记忆")
+	if info, ok := tester.Access("添加记忆"); !ok || !info.Disabled {
+		t.Fatalf("add action with an empty draft = %+v found %v, want disabled", info, ok)
+	}
+	tester.Key(0, ui.KeyEnter)
+	tester.Frame()
+	if adds := store.adds(); len(adds) != 0 {
+		t.Fatalf("Enter with an empty draft added %v", adds)
+	}
+
+	h.click(tester, "新建记忆")
+	tester.Type("记住：发布前跑全量测试")
+	tester.Frame()
+	tester.Key(0, ui.KeyEnter)
+	tester.Frame()
+	adds := store.adds()
+	if len(adds) != 1 || adds[0].Text != "记住：发布前跑全量测试" || adds[0].Scope != "workspace" {
+		t.Fatalf("Enter add calls = %+v, want one workspace memory", adds)
+	}
+	if info, ok := tester.Access("新建记忆"); !ok || info.Value != "" {
+		t.Fatalf("add input after Enter = %+v found %v, want an empty draft", info, ok)
+	}
+	// The refresh renders the new entry through the cached read model.
+	waitMemory(t, tester, "added memory row", func() bool {
+		return tester.HasText("记住：发布前跑全量测试")
+	})
 }

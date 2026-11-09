@@ -389,6 +389,118 @@ func TestCancelButtonCancels(t *testing.T) {
 	}
 }
 
+// TestOptionQuestionStrayEnterCancelsInsteadOfAnswering covers C-03's safety
+// contract: Enter right after the dialog opens (the user may still be pressing
+// the key that sent the prompt) must not answer the first option.
+func TestOptionQuestionStrayEnterCancelsInsteadOfAnswering(t *testing.T) {
+	h := newHarness(t)
+	tester := h.tester()
+	h.interaction.trigger(contracts.UserQuestion{
+		ID: "q-stray", Text: "部署到哪个环境？", Options: []string{"生产环境", "测试环境"},
+	})
+	tester.Frame()
+	if !tester.Focused("取消") {
+		t.Fatalf("no neutral initial focus: %v", tester.Texts())
+	}
+	tester.Key(0, ui.KeyEnter)
+	tester.Frame()
+	if answers := h.interaction.answered(); len(answers) != 0 {
+		t.Fatalf("stray Enter answered %+v, want no answer", answers)
+	}
+	if cancels := h.interaction.cancelled(); len(cancels) != 1 || cancels[0] != "q-stray" {
+		t.Fatalf("cancellations = %v, want [q-stray]", cancels)
+	}
+	tester.Frame()
+	h.assertNoTexts(tester, "部署到哪个环境？")
+}
+
+// TestOptionQuestionExplicitTabEnterAnswers covers the explicit keyboard path:
+// Tab reaches an option and Enter chooses it.
+func TestOptionQuestionExplicitTabEnterAnswers(t *testing.T) {
+	h := newHarness(t)
+	tester := h.tester()
+	h.interaction.trigger(contracts.UserQuestion{
+		ID: "q-tab", Text: "部署到哪个环境？", Options: []string{"生产环境", "测试环境"},
+	})
+	tester.Frame()
+	tester.Key(0, ui.KeyTab)
+	tester.Frame()
+	if !tester.Focused("生产环境") {
+		t.Fatalf("Tab did not reach the first option; texts = %v", tester.Texts())
+	}
+	tester.Key(0, ui.KeyEnter)
+	tester.Frame()
+	answers := h.interaction.answered()
+	if len(answers) != 1 || answers[0].id != "q-tab" || answers[0].answer != "生产环境" {
+		t.Fatalf("answers = %+v, want q-tab/生产环境", answers)
+	}
+}
+
+// TestOptionQuestionOtherAnswer covers C-14 (partial): an options question has
+// a fixed trailing "Other…" choice whose inline input becomes the answer.
+func TestOptionQuestionOtherAnswer(t *testing.T) {
+	h := newHarness(t)
+	tester := h.tester()
+	h.interaction.trigger(contracts.UserQuestion{
+		ID: "q-other", Text: "部署到哪个环境？", Options: []string{"staging", "prod"},
+	})
+	tester.Frame()
+	if !tester.HasText("其他…") {
+		t.Fatalf("the Other choice is missing; texts = %v", tester.Texts())
+	}
+	h.click(tester, "其他…")
+	if !tester.HasText("输入自定义回答") && !tester.Focused("其他回答") {
+		t.Fatalf("the inline Other input did not open; texts = %v", tester.Texts())
+	}
+	if !tester.Focused("其他回答") {
+		t.Fatalf("the Other input did not take the keyboard; texts = %v", tester.Texts())
+	}
+	// The option buttons stay visible: entering Other is not a commitment.
+	h.assertTexts(tester, "staging", "prod", "Enter = 提交自定义回答")
+	tester.Type("预发布环境")
+	tester.Frame()
+	tester.Key(0, ui.KeyEnter)
+	tester.Frame()
+	answers := h.interaction.answered()
+	if len(answers) != 1 || answers[0].id != "q-other" || answers[0].answer != "预发布环境" {
+		t.Fatalf("answers = %+v, want q-other/预发布环境", answers)
+	}
+	tester.Frame()
+	h.assertNoTexts(tester, "部署到哪个环境？")
+}
+
+// TestOptionQuestionOtherEscapeCollapses covers the Other input's Escape
+// contract: it returns to the options instead of dismissing the question, and
+// the choice state does not leak into the next question.
+func TestOptionQuestionOtherEscapeCollapses(t *testing.T) {
+	h := newHarness(t)
+	tester := h.tester()
+	h.interaction.trigger(contracts.UserQuestion{
+		ID: "q-esc", Text: "部署到哪个环境？", Options: []string{"staging", "prod"},
+	})
+	tester.Frame()
+	h.click(tester, "其他…")
+	tester.Type("临时")
+	tester.Frame()
+	tester.Key(0, ui.KeyEscape)
+	tester.Frame()
+	if answers, cancels := h.interaction.answered(), h.interaction.cancelled(); len(answers) != 0 || len(cancels) != 0 {
+		t.Fatalf("Escape submitted/cancelled: answers=%+v cancels=%v", answers, cancels)
+	}
+	h.assertTexts(tester, "部署到哪个环境？", "其他…", "Esc = 取消")
+	h.assertNoTexts(tester, "输入自定义回答")
+	// The options still decide; picking one answers the question.
+	h.click(tester, "staging")
+	if answers := h.interaction.answered(); len(answers) != 1 || answers[0].answer != "staging" {
+		t.Fatalf("answers = %+v, want staging", answers)
+	}
+	// A following options question opens on the options, not on a stale input.
+	h.interaction.trigger(contracts.UserQuestion{ID: "q-next", Text: "下一个？", Options: []string{"好"}})
+	tester.Frame()
+	h.assertTexts(tester, "下一个？", "其他…")
+	h.assertNoTexts(tester, "输入自定义回答")
+}
+
 func TestEscapeCancels(t *testing.T) {
 	h := newHarness(t)
 	tester := h.tester()
@@ -587,7 +699,8 @@ func TestPlanReviewCancelAndEscape(t *testing.T) {
 	if exits := h.plan.exitCalls(); len(exits) != 1 {
 		t.Fatalf("Exit calls after Escape = %v, want the earlier explicit cancel only", exits)
 	}
-	h.assertTexts(tester, "计划待审阅")
+	// C-16: Escape is not a silent no-op any more — it shows why it did nothing.
+	h.assertTexts(tester, "计划待审阅", "Esc 不能关闭计划审阅")
 
 	// The explicit cancel is still available and cancels.
 	h.click(tester, "取消计划")
@@ -709,6 +822,14 @@ func TestQuestionOptionsStackedAndCancelInFooter(t *testing.T) {
 	}
 	if second.Y <= first.Y {
 		t.Fatalf("options are not vertical: y = %.1f then %.1f", first.Y, second.Y)
+	}
+	// C-03: the dialog focuses Cancel, not the first option, so a stray Enter
+	// cannot silently answer with an option the user never chose.
+	if !tester.Focused("取消") {
+		t.Fatalf("the cancel action does not hold the initial focus; texts = %v", tester.Texts())
+	}
+	if tester.Focused("staging") {
+		t.Fatal("the first option holds the initial focus")
 	}
 
 	h.click(tester, "staging")

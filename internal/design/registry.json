@@ -1,0 +1,631 @@
+{
+  "version": 1,
+  "source": {
+    "mygo": "v0.8.3",
+    "entries": "internal/uikit",
+    "design_doc": "docs/DESIGN.md",
+    "lint_doc": "docs/DESIGN-LINT.md"
+  },
+  "components": [
+    {
+      "id": "agent.tool-row",
+      "entry": "uikit.ToolRow",
+      "package": "internal/uikit",
+      "states": [
+        "running",
+        "success",
+        "error",
+        "cancelled",
+        "unknown"
+      ],
+      "allowed": [
+        "uikit.ToolRow",
+        "uikit.ToolPanelSectionView",
+        "uikit.ToolPreview"
+      ],
+      "forbidden": [
+        "raw_text_body",
+        "per_message_card",
+        "second_tool_row_variant"
+      ],
+      "rules": [
+        "list-state",
+        "single-render-path"
+      ],
+      "doc": "docs/DESIGN.md §2.1 / §6.3 / 附录 A"
+    },
+    {
+      "id": "agent.approval",
+      "entry": "uikit.ApprovalDialog",
+      "package": "internal/uikit",
+      "states": [
+        "pending",
+        "allowed",
+        "denied",
+        "allowed-always"
+      ],
+      "rules": [
+        "no-default-action",
+        "escape-denies",
+        "danger-first-primary-last"
+      ],
+      "forbidden": [
+        "neutral-verbs",
+        "default-on-approve",
+        "alert-dialog-last-default"
+      ],
+      "status": "implemented as uikit.ApprovalDialog（Phase 3b）；internal/ui/approval 只保留队列",
+      "doc": "docs/DESIGN.md §2.1 / §6.3 / 附录 A"
+    },
+    {
+      "id": "uikit.icon-button",
+      "entry": "uikit.IconButton",
+      "package": "internal/uikit",
+      "allowed": [
+        "uikit.IconButton"
+      ],
+      "forbidden": [
+        "unlabeled_icon",
+        "raw_size_literal",
+        "missing_hover"
+      ],
+      "states": [
+        "rest",
+        "hover",
+        "pressed",
+        "focused",
+        "selected",
+        "disabled"
+      ],
+      "rules": [
+        "label-required",
+        "hit-target-24",
+        "token-colors"
+      ],
+      "doc": "docs/DESIGN.md §6.3 / §7.1"
+    },
+    {
+      "id": "uikit.status",
+      "entry": "uikit.StatusText",
+      "package": "internal/uikit",
+      "allowed": [
+        "uikit.StatusText",
+        "uikit.StatusBadge",
+        "uikit.StatusColor"
+      ],
+      "forbidden": [
+        "raw_status_color",
+        "status_color_only",
+        "active_as_running"
+      ],
+      "states": [
+        "running",
+        "in_progress",
+        "success",
+        "error",
+        "cancelled",
+        "interrupted",
+        "idle",
+        "pending",
+        "unknown"
+      ],
+      "rules": [
+        "text-variants",
+        "semantic-no-downgrade",
+        "active-is-not-running"
+      ],
+      "doc": "docs/DESIGN.md §5.2 / §6.3"
+    },
+    {
+      "id": "uikit.tool-call-card",
+      "entry": "uikit.ToolCallCard",
+      "package": "internal/uikit",
+      "allowed": [
+        "uikit.ToolCallCard",
+        "uikit.ToolRow",
+        "uikit.ToolPanelSectionView",
+        "uikit.ToolPreview"
+      ],
+      "forbidden": [
+        "second_tool_card_anatomy",
+        "raw_text_body"
+      ],
+      "states": [
+        "running",
+        "success",
+        "error",
+        "cancelled",
+        "unknown"
+      ],
+      "rules": [
+        "single_render_path",
+        "h15_default_open",
+        "status_via_uikit"
+      ],
+      "doc": "docs/DESIGN.md §2.1 / §6.3"
+    },
+    {
+      "id": "uikit.approval-dialog",
+      "entry": "uikit.ApprovalDialog",
+      "package": "internal/uikit",
+      "allowed": [
+        "uikit.ApprovalDialog",
+        "uikit.DialogFooter"
+      ],
+      "forbidden": [
+        "default_on_allow",
+        "default_on_deny",
+        "neutral_verbs"
+      ],
+      "states": [
+        "pending",
+        "allowed",
+        "denied",
+        "allowed-always"
+      ],
+      "rules": [
+        "no-default-action",
+        "escape-denies",
+        "danger-first-primary-last"
+      ],
+      "doc": "docs/AGENT-SURFACES.md S4"
+    },
+    {
+      "id": "uikit.plan-review-dialog",
+      "entry": "uikit.PlanReviewDialog",
+      "package": "internal/uikit",
+      "allowed": [
+        "uikit.PlanReviewDialog",
+        "uikit.DialogFooter"
+      ],
+      "forbidden": [
+        "escape_cancels_plan",
+        "empty_feedback_approves",
+        "neutral_verbs"
+      ],
+      "states": [
+        "reviewing",
+        "approved",
+        "cancelled"
+      ],
+      "rules": [
+        "no-default-action",
+        "escape-does-not-cancel",
+        "empty-feedback-never-approves"
+      ],
+      "doc": "docs/AGENT-SURFACES.md S5"
+    },
+    {
+      "id": "uikit.ask-dialog",
+      "entry": "uikit.AskDialog",
+      "package": "internal/uikit",
+      "allowed": [
+        "uikit.AskDialog",
+        "uikit.DialogFooter"
+      ],
+      "forbidden": [
+        "default_on_first_option",
+        "unequal_options"
+      ],
+      "states": [
+        "options",
+        "other-open",
+        "free-text",
+        "cancelled"
+      ],
+      "rules": [
+        "cancel-is-default",
+        "other-escape-collapses",
+        "empty-answer-disabled"
+      ],
+      "doc": "docs/AGENT-SURFACES.md S6"
+    },
+    {
+      "id": "uikit.session-thread",
+      "entry": "uikit.SessionThread",
+      "package": "internal/uikit",
+      "allowed": [
+        "uikit.SessionThread",
+        "ui.List",
+        "markdown.View",
+        "markdown.Stream"
+      ],
+      "forbidden": [
+        "scroll_loop_messages",
+        "raw_text_body",
+        "per_message_card"
+      ],
+      "states": [
+        "empty",
+        "streaming",
+        "scrolled-up",
+        "error"
+      ],
+      "rules": [
+        "follow-end",
+        "hold-place",
+        "single-row-slot"
+      ],
+      "doc": "docs/AGENT-SURFACES.md S1"
+    },
+    {
+      "id": "uikit.reasoning-trace",
+      "entry": "uikit.ReasoningTrace",
+      "package": "internal/uikit",
+      "allowed": [
+        "uikit.ReasoningTrace",
+        "ui.CollapsibleBase",
+        "markdown.View",
+        "markdown.Stream",
+        "ui.Spinner"
+      ],
+      "forbidden": [
+        "card_as_body",
+        "always_expanded"
+      ],
+      "states": [
+        "empty",
+        "streaming",
+        "done"
+      ],
+      "rules": [
+        "default-collapsed",
+        "hold-place",
+        "muted"
+      ],
+      "doc": "docs/AGENT-SURFACES.md S2"
+    },
+    {
+      "id": "uikit.team-surface",
+      "entry": "uikit.TeamSurface",
+      "package": "internal/uikit",
+      "allowed": [
+        "uikit.TeamSurface",
+        "uikit.StatusBadge",
+        "ui.List",
+        "uikit.DialogFooter"
+      ],
+      "forbidden": [
+        "active_as_running",
+        "tab_as_branch",
+        "card_wall"
+      ],
+      "states": [
+        "running",
+        "idle",
+        "done",
+        "failed",
+        "interrupted",
+        "unknown"
+      ],
+      "rules": [
+        "run-state-truthful",
+        "no-default-danger",
+        "details-below-list"
+      ],
+      "doc": "docs/AGENT-SURFACES.md S9"
+    },
+    {
+      "id": "uikit.composer-shell",
+      "entry": "uikit.ComposerShell",
+      "package": "internal/uikit",
+      "allowed": [
+        "uikit.ComposerShell",
+        "uikit.RunStatus",
+        "ui.TextArea",
+        "uikit.ErrorLine"
+      ],
+      "forbidden": [
+        "second_composer_anatomy",
+        "send_in_overflow",
+        "raw_width"
+      ],
+      "states": [
+        "idle",
+        "running",
+        "queueing-off",
+        "queue-error",
+        "attachments",
+        "disabled"
+      ],
+      "rules": [
+        "single-shell",
+        "send-outside-overflow",
+        "enter-cmd-enter-send"
+      ],
+      "doc": "docs/AGENT-SURFACES.md S7"
+    },
+    {
+      "id": "uikit.run-status",
+      "entry": "uikit.RunStatus",
+      "package": "internal/uikit",
+      "allowed": [
+        "uikit.RunStatus",
+        "ui.Spinner",
+        "design.Tokens"
+      ],
+      "forbidden": [
+        "fake_progress",
+        "status_badge_next_to_send"
+      ],
+      "states": [
+        "idle",
+        "streaming",
+        "queued",
+        "stopping",
+        "failed",
+        "completed"
+      ],
+      "rules": [
+        "no-fake-progress",
+        "queue-actions",
+        "usage-collapsed"
+      ],
+      "doc": "docs/AGENT-SURFACES.md S8"
+    }
+  ],
+  "scenarios": [
+    {
+      "id": "agent.reasoning",
+      "entry": "uikit.ReasoningTrace",
+      "forbid": [
+        "Card",
+        "always_expanded",
+        "body_inline"
+      ],
+      "requires": [
+        "ui.CollapsibleBase",
+        "markdown.View",
+        "markdown.Stream",
+        "Spinner"
+      ],
+      "doc": "docs/DESIGN.md §2.1 / 附录 A"
+    },
+    {
+      "id": "agent.streaming",
+      "entry": "uikit.SessionThread",
+      "requires": [
+        "ListState.FollowEnd",
+        "markdown.Stream",
+        "HoldPlace",
+        "ScrollToEnd"
+      ],
+      "forbid": [
+        "Scroll+loop",
+        "manual-stick-to-bottom",
+        "message-card-wall"
+      ],
+      "doc": "docs/DESIGN.md §2.1 / 附录 A"
+    }
+  ],
+  "anti_patterns": [
+    {
+      "id": "AP-01",
+      "rule": "DS-01",
+      "message": "UI 层写颜色字面量（hex / ui.RGBA / ui.Hex）；改用 design.Tokens / c.Theme()，阴影用 t.ShadowOverlay()",
+      "doc": "docs/DESIGN.md §3.1 / DESIGN-LINT §3.1"
+    },
+    {
+      "id": "AP-02",
+      "rule": "DS-02",
+      "message": "覆写官方控件背景/边框/状态色；只设度量，颜色交给主题",
+      "doc": "docs/DESIGN.md §3.1 / DESIGN-LINT §3.2"
+    },
+    {
+      "id": "AP-03",
+      "rule": "DS-03",
+      "message": "裸数值度量（FontSize/FontWeight/Padding/Height/Size/Width/Radius/Shadow 等字面量）；改用 design.Space*/Radius*/DialogWidth*/t.Font(Type*)",
+      "doc": "docs/DESIGN.md §3.1 / DESIGN-LINT §3.3"
+    },
+    {
+      "id": "AP-04",
+      "rule": "DS-06",
+      "message": "手搓官方已有标准交互组件；用官方件或对应 *Base，自绘必须在 registry allowlist 登记",
+      "doc": "docs/DESIGN.md §3.1 / §7 / DESIGN-LINT §3.6"
+    },
+    {
+      "id": "AP-05",
+      "rule": "DS-04",
+      "message": "通用容器/组件模拟专用组件（Card 拼 CoT、Dialog 拼审批）；走 §2 场景入口",
+      "doc": "docs/DESIGN.md §3.1 / DESIGN-LINT §3.4"
+    },
+    {
+      "id": "AP-06",
+      "rule": "DS-04",
+      "message": "纯文本代替结构化 slot（工具结果/选项/推理当正文）；条目化 + 折叠 + 可复制段",
+      "doc": "docs/DESIGN.md §3.1"
+    },
+    {
+      "id": "AP-07",
+      "rule": "DS-05",
+      "message": "给默认组件加多余 options/样式覆写；最短调用，确有需求走预设/入口",
+      "doc": "docs/DESIGN.md §3.1 / DESIGN-LINT §3.5"
+    },
+    {
+      "id": "AP-08",
+      "rule": "DS-09",
+      "message": "状态语义降级（error→warning/普通文本；审批动词中性化；active→running）；用 semantic.error 与真实 RunState",
+      "doc": "docs/DESIGN.md §3.1 / DESIGN-LINT §3.9"
+    },
+    {
+      "id": "AP-09",
+      "rule": "DS-04,DS-09",
+      "message": "用 tab/badge 承担分支/状态机；改用分支/线程原语与状态组件",
+      "doc": "docs/DESIGN.md §3.1"
+    },
+    {
+      "id": "AP-10",
+      "rule": "DS-07",
+      "message": "图标乱用（emoji/Unicode/手写 SVG/尺寸裸值）；用 internal/icons + ui.Icon，尺寸走 token",
+      "doc": "docs/DESIGN.md §3.1 / DESIGN-LINT §3.7"
+    },
+    {
+      "id": "AP-11",
+      "rule": "DS-06",
+      "message": "自绘 base 不处理 Hovered/Pressed/Focused/Selected；官方件优先，自绘补齐全部状态",
+      "doc": "docs/DESIGN.md §3.1 / DESIGN-LINT §3.6"
+    },
+    {
+      "id": "AP-12",
+      "rule": "DS-10",
+      "message": "对话框反惯例（主操作在左、危险动作默认焦点、Esc 语义与提示不一致）；DialogFooter 排序，危险/审批无 Default",
+      "doc": "docs/DESIGN.md §3.1 / DESIGN-LINT §3.10"
+    },
+    {
+      "id": "AP-13",
+      "rule": "DS-03",
+      "message": "流式内容导致几何跳动；用 ListState.FollowEnd + HoldPlace + 固定占位（帧测试为准）",
+      "doc": "docs/DESIGN.md §3.1"
+    },
+    {
+      "id": "AP-14",
+      "rule": "DS-08",
+      "message": "虚构官方 API（ui.DialogFooter/Button.Default/ui.Markdown/ui.DatePicker/ui.CommandPalette 等）；用 §1.2 组合与 uikit 封装",
+      "doc": "docs/DESIGN.md §7.4 / DESIGN-LINT §3.8"
+    },
+    {
+      "id": "AP-15",
+      "rule": "DS-08",
+      "message": "新增组件/自绘不登记（DESIGN.md/registry/白名单/测试不同步）；走 §7.2 流程与 §8.3 同步义务",
+      "doc": "docs/DESIGN.md §7.2 / §8.3"
+    },
+    {
+      "id": "AP-16",
+      "rule": "",
+      "check": "go tool mygo vet + 帧测试",
+      "message": "build 回调做 I/O、每帧构建全量集合、跨线程直接改 UI；缓存 + 显式刷新 + UIRuntime.Post",
+      "doc": "docs/DESIGN.md §3.1"
+    },
+    {
+      "id": "AP-17",
+      "rule": "DS-06,DS-07",
+      "message": "覆盖原生控件尺寸导致焦点环/命中区异常；图标按钮 ≥ 24×24 目标区且必须 Label+Tooltip",
+      "doc": "docs/DESIGN.md §3.1"
+    },
+    {
+      "id": "AP-18",
+      "rule": "DS-02",
+      "message": "用状态色小字当正文（Success/Warning/Danger 直接作正文前景）；用 *Text 变体（WCAG-AA）",
+      "doc": "docs/DESIGN.md §3.1 / DESIGN-LINT §3.2"
+    }
+  ],
+  "allowlist": [
+    {
+      "id": "command-palette.rows",
+      "paths": [
+        "internal/uiroot/frame.go"
+      ],
+      "rules": [
+        "DS-06"
+      ],
+      "what": "命令面板行按钮（富行，单次点击执行，RoleButton）",
+      "owner": "uiroot",
+      "reason": "官方 List 行语义是 listitem，不提供按钮行（DESIGN.md §7.1）",
+      "until": "2027-06-30"
+    },
+    {
+      "id": "sidebar.row-buttons",
+      "paths": [
+        "internal/ui/sidebar/sidebar.go"
+      ],
+      "rules": [
+        "DS-06"
+      ],
+      "what": "侧栏 Outline/List 富行与行内 ⋯（工作区组行、工作区⋯、会话⋯、footer 设置行）",
+      "owner": "sidebar",
+      "reason": "富行/on-accent 行内动作；IconButton 锁定的 anatomy 不适用（DESIGN.md §7.1）",
+      "until": "2027-06-30"
+    },
+    {
+      "id": "session.suggestion-rows",
+      "paths": [
+        "internal/ui/session/view.go"
+      ],
+      "rules": [
+        "DS-06"
+      ],
+      "what": "slash/@ 建议富行（图标+标题+hint，RoleOption）",
+      "owner": "session",
+      "reason": "官方 Autocomplete 仅纯文本；按官方 suggestions a11y 模式实现（DESIGN.md §7.1）",
+      "until": "2027-06-30"
+    },
+    {
+      "id": "session.message-hover-actions",
+      "paths": [
+        "internal/ui/session/view.go"
+      ],
+      "rules": [
+        "DS-06"
+      ],
+      "what": "消息 hover 动作行与「回到最新」浮层（消息级交互）",
+      "owner": "session",
+      "reason": "官方列表行不提供该交互（DESIGN.md §7.1）",
+      "until": "2027-06-30"
+    },
+    {
+      "id": "rightpanel.terminal-copy-success",
+      "paths": [
+        "internal/ui/rightpanel/terminal.go"
+      ],
+      "rules": [
+        "DS-06"
+      ],
+      "what": "终端复制按钮的 success 确认态（Copy→Check + SuccessText）",
+      "owner": "rightpanel",
+      "reason": "IconButton 未建模 success/status variant；状态语义不可降级（DESIGN.md §5.2/§7.1）",
+      "until": "2027-06-30"
+    },
+    {
+      "id": "composer.action-row",
+      "paths": [
+        "internal/ui/session/view.go"
+      ],
+      "rules": [
+        "DS-06"
+      ],
+      "what": "composer 动作行：Plain Row + PopoverMenuButton（发送键不能被溢出菜单吞掉）",
+      "owner": "session",
+      "reason": "ui.Toolbar 溢出菜单会吞掉发送键（已注释）；DESIGN.md §7.1",
+      "until": "2027-06-30"
+    },
+    {
+      "id": "uikit.icon-button",
+      "paths": [
+        "internal/uikit/iconbutton.go"
+      ],
+      "rules": [
+        "DS-06"
+      ],
+      "what": "uikit.IconButton 内核：在 ui.ButtonBase 上实现唯一图标按钮外观与状态",
+      "owner": "uikit",
+      "reason": "mygo v0.8.3 无官方 IconButton；入口组件集中实现（DESIGN.md §6.3/§7.1）",
+      "until": "2027-06-30"
+    },
+    {
+      "id": "toast.brand-chrome",
+      "paths": [
+        "internal/ui/toasts"
+      ],
+      "rules": [
+        "DS-06"
+      ],
+      "what": "toast 品牌外观：ToastViewportBase parts 上设色/圆角/阴影",
+      "owner": "toasts",
+      "reason": "框架 toast 的换肤方式；状态/计时/读屏仍归框架（DESIGN.md §7.1）",
+      "until": "2027-06-30"
+    },
+    {
+      "id": "chrome.file-picker-seam",
+      "paths": [
+        "internal/uiroot"
+      ],
+      "rules": [
+        "DS-06"
+      ],
+      "what": "文件/目录选择器 seam：纯测试注入点",
+      "owner": "uiroot",
+      "reason": "无应用状态，非 UI 自绘（DESIGN.md §7.1）",
+      "until": "2027-06-30"
+    }
+  ]
+}

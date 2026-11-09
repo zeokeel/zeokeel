@@ -27,9 +27,6 @@ const (
 	// the page the settings surface opens on (the host shows the group's lowest
 	// Order as the default; About moved to the last group).
 	BehaviorPageOrder = 20
-	// permissionNever denies every tool call (fail-closed); the approvals gate
-	// owns the enforcement while this page only persists the choice.
-	permissionNever = "never"
 )
 
 // behaviorPermission is one default-permission choice.
@@ -41,24 +38,22 @@ type behaviorPermission struct {
 	meaningEn string
 }
 
-// behaviorPermissions lists the four choices in menu order.
+// behaviorPermissions lists the three choices in menu order: 只读 / 工作区可写 /
+// 所有权限 (DSH's read-only / workspace-write / danger-full-access presets).
 var behaviorPermissions = []behaviorPermission{
 	{
-		value: contracts.PermissionAsk, zh: "询问", en: "Ask",
-		meaningZh: "每次危险操作都会询问", meaningEn: "Ask for every dangerous operation",
+		value: contracts.PermissionReadOnly, zh: "只读", en: "Read-only",
+		meaningZh: "只自动允许只读与信息类工具，其他操作会询问",
+		meaningEn: "Auto-allow read-only and informational tools; ask for the rest",
 	},
 	{
-		value: contracts.PermissionWorkspace, zh: "工作区", en: "Workspace",
+		value: contracts.PermissionWorkspace, zh: "工作区可写", en: "Workspace-write",
 		meaningZh: "工作区内的文件读写自动允许，其他操作询问",
 		meaningEn: "Auto-allow workspace file reads and writes; ask for the rest",
 	},
 	{
-		value: contracts.PermissionFull, zh: "完全访问", en: "Full access",
+		value: contracts.PermissionFull, zh: "所有权限", en: "All permissions",
 		meaningZh: "全部自动允许，不再询问", meaningEn: "Allow everything without asking",
-	},
-	{
-		value: permissionNever, zh: "从不", en: "Never",
-		meaningZh: "全部拒绝，不执行任何工具", meaningEn: "Deny every tool call",
 	},
 }
 
@@ -77,22 +72,12 @@ type behaviorState struct {
 	agentsFileLoaded bool
 }
 
-// agentPermissionMode normalizes the stored agent.permission row. The default
-// is workspace (normal in-workspace editing without asking); empty and unknown
-// values resolve to it, ask stays an explicit choice.
+// agentPermissionMode normalizes the stored agent.permission row to one of the
+// three presets. Empty/unknown values keep the workspace default; the retired
+// "ask"/"never" rows normalize to read-only (see
+// contracts.NormalizePermissionMode) instead of being offered as choices.
 func agentPermissionMode(raw string) string {
-	switch strings.ToLower(strings.TrimSpace(raw)) {
-	case contracts.PermissionWorkspace:
-		return contracts.PermissionWorkspace
-	case contracts.PermissionFull:
-		return contracts.PermissionFull
-	case permissionNever:
-		return permissionNever
-	case contracts.PermissionAsk:
-		return contracts.PermissionAsk
-	default:
-		return contracts.PermissionWorkspace
-	}
+	return contracts.NormalizePermissionMode(raw)
 }
 
 // behaviorPermissionLabel returns the localized short label of one mode.
@@ -102,7 +87,7 @@ func behaviorPermissionLabel(locale contracts.LocaleService, mode string) string
 			return localized(locale, choice.zh, choice.en)
 		}
 	}
-	return localized(locale, "工作区", "Workspace")
+	return localized(locale, "工作区可写", "Workspace-write")
 }
 
 // buildBehaviorPage renders the default-permission settings. Every control on

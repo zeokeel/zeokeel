@@ -210,3 +210,55 @@ func TestMCPTransportEnglishCopy(t *testing.T) {
 	selectStdioTransport(t, h2, tester2)
 	h2.assertTexts(tester2, "Command", "Arguments", "Environment")
 }
+
+// TestMCPEnvRowsKeepSpacesAndSplitOnNewlines pins E-16: the environment draft is
+// one KEY=VALUE per line, so a value with a space stays whole and each line is a
+// separate entry (the old strings.Fields split tore "TOKEN=a b" apart).
+func TestMCPEnvRowsKeepSpacesAndSplitOnNewlines(t *testing.T) {
+	store := newFakeSettings(nil)
+	h := newHarness(t, &fakeChat{}, store, settings.Config{})
+	tester := h.tester()
+	tester.Frame()
+	openMCPPage(t, h, tester)
+	selectStdioTransport(t, h, tester)
+
+	clearAndType(t, h, tester, "名称 输入", "本地服务器")
+	clearAndType(t, h, tester, "命令 输入", "npx")
+	h.focusInput(tester, "环境变量 输入")
+	tester.Type("TOKEN=a b")
+	tester.Key(0, ui.KeyEnter)
+	tester.Type("FOO=bar")
+	tester.Frame()
+	h.click(tester, "添加")
+
+	rows := parseStoredMCPRows(t, store)
+	if len(rows) != 1 {
+		t.Fatalf("stored rows = %+v, want one row", rows)
+	}
+	env := rows[0].Env
+	if len(env) != 2 || env[0] != "TOKEN=a b" || env[1] != "FOO=bar" {
+		t.Fatalf("stored env = %v, want [TOKEN=a b FOO=bar]", env)
+	}
+}
+
+// TestMCPEnvInvalidRowShowsFieldErrorAndSavesNothing pins the per-line
+// KEY=VALUE validation: a malformed row is reported next to the field and the
+// store is left untouched.
+func TestMCPEnvInvalidRowShowsFieldErrorAndSavesNothing(t *testing.T) {
+	store := newFakeSettings(nil)
+	h := newHarness(t, &fakeChat{}, store, settings.Config{})
+	tester := h.tester()
+	tester.Frame()
+	openMCPPage(t, h, tester)
+	selectStdioTransport(t, h, tester)
+
+	clearAndType(t, h, tester, "名称 输入", "坏环境")
+	clearAndType(t, h, tester, "命令 输入", "npx")
+	clearAndType(t, h, tester, "环境变量 输入", "TOKEN")
+	h.click(tester, "添加")
+
+	h.assertTexts(tester, "环境变量格式无效（第 1 行）", "KEY=VALUE")
+	if got := store.get(contracts.SettingMCPServers); got != "" {
+		t.Fatalf("invalid env row wrote the store: %q", got)
+	}
+}

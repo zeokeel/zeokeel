@@ -66,6 +66,9 @@ type homeComposerState struct {
 	notice      string
 	sending     bool
 	attachSeq   int
+	// workspaceErr is the last failed workspace switch/add from the composer's
+	// context row; it shows inline below the actions like the other errors.
+	workspaceErr string
 	// nextStepErr is the empty-state action failure (adding a workspace).
 	nextStepErr string
 	// attachBusy is true while the native picker runs off the UI thread
@@ -230,7 +233,7 @@ func buildHomeAttachmentPathDialog(c *ui.Context, t *design.Tokens, runtime cont
 	}
 	ui.Modal(c, &st.attachPathsOpen, func() {
 		dialogEnter(c, add)
-		design.Apply(ui.Column(c).Width(520).Gap(design.Space4), func(el ui.Element) ui.Element {
+		design.Apply(ui.Column(c).Width(design.DialogWidthCompact).Gap(design.Space4), func(el ui.Element) ui.Element {
 			return el.PaddingX(design.Space6).PaddingY(design.Space2)
 		}).Children(func() {
 			design.Apply(ui.Text(c, tr("手动添加附件", "Add attachments by path")), t.Font(design.TypeL)).
@@ -377,6 +380,95 @@ func buildHomeAttachmentMenu(c *ui.Context, t *design.Tokens, runtime contracts.
 	design.Apply(button, t.TextMuted(design.TypeXS))
 }
 
+// buildHomeWorkspaceControl is Home's workspace chip: it names the workspace a
+// new chat will belong to (the thing the sidebar groups by, but Home otherwise
+// hid) and opens a menu that switches the workspace through the existing
+// WorkspaceService, or adds one through the same native folder picker the
+// empty state uses. One quiet menu button, not a second settings form.
+func buildHomeWorkspaceControl(c *ui.Context, t *design.Tokens, runtime contracts.UIRuntime,
+	kctx cordis.Context, st *homeComposerState, tr func(zh, en string) string) {
+	var workspace contracts.WorkspaceService
+	if raw, ok := kctx.Get(contracts.KeyWorkspace); ok {
+		workspace, _ = raw.(contracts.WorkspaceService)
+	}
+	if workspace == nil {
+		return
+	}
+	current, hasCurrent, err := workspace.Current(context.Background())
+	if err != nil {
+		return
+	}
+	label := tr("选择工作区", "Choose workspace")
+	tip := tr("新会话将属于这个工作区；点击切换", "New chats belong to this workspace; click to switch")
+	if hasCurrent {
+		label = homeChipLabel(homeWorkspaceName(current))
+		if root := strings.TrimSpace(current.Root); root != "" {
+			tip = root
+		}
+	}
+	listed, _ := workspace.List(context.Background())
+	button := ui.PopoverMenuButton(c, label, func(m *ui.Menu) {
+		if len(listed) == 0 {
+			m.Item(tr("还没有工作区", "No workspaces yet")).Disabled(true)
+		}
+		for _, ws := range listed {
+			ws := ws
+			item := m.Item(homeWorkspaceName(ws))
+			item.Checked(hasCurrent && ws.ID == current.ID)
+			if root := strings.TrimSpace(ws.Root); root != "" {
+				item.Subtitle(root)
+			}
+			if !item.Chosen() || (hasCurrent && ws.ID == current.ID) {
+				continue
+			}
+			if _, openErr := workspace.Open(context.Background(), ws.ID); openErr != nil {
+				st.workspaceErr = tr("切换工作区失败：", "Could not switch the workspace: ") + openErr.Error()
+			} else {
+				st.workspaceErr = ""
+			}
+			runtime.Invalidate()
+		}
+		m.Separator()
+		if m.Item(tr("添加工作区…", "Add workspace…")).Chosen() {
+			dir, pickErr := WorkspaceDirectoryPicker()
+			switch {
+			case pickErr != nil:
+				st.workspaceErr = tr("无法打开目录选择器：", "Could not open the folder picker: ") + pickErr.Error()
+			case strings.TrimSpace(dir) == "":
+				// Canceled: nothing changes.
+			default:
+				if _, createErr := workspace.Create(context.Background(), "", dir); createErr != nil {
+					st.workspaceErr = tr("添加工作区失败：", "Could not add the workspace: ") + createErr.Error()
+				} else {
+					st.workspaceErr = ""
+				}
+			}
+			runtime.Invalidate()
+		}
+	}).Tooltip(tip)
+	design.Apply(button, t.TextMuted(design.TypeXXXS))
+}
+
+// homeWorkspaceName is a workspace's display name: its name, or the folder path
+// when the backend derived no name.
+func homeWorkspaceName(workspace contracts.Workspace) string {
+	if name := strings.TrimSpace(workspace.Name); name != "" {
+		return name
+	}
+	return strings.TrimSpace(workspace.Root)
+}
+
+// homeChipLabel bounds one context chip's text so a long workspace name cannot
+// push the send action out of the row; the full name stays in the tooltip.
+func homeChipLabel(label string) string {
+	const maxRunes = 18
+	runes := []rune(strings.TrimSpace(label))
+	if len(runes) <= maxRunes {
+		return string(runes)
+	}
+	return string(runes[:maxRunes-1]) + "…"
+}
+
 func buildHomeModelControl(c *ui.Context, t *design.Tokens, runtime contracts.UIRuntime,
 	nav contracts.Navigator, chat contracts.ChatService, kctx cordis.Context,
 	settings contracts.SettingsService, tr func(zh, en string) string) {
@@ -521,89 +613,92 @@ func submitHomeComposer(chat contracts.ChatService, nav contracts.Navigator, run
 	return true
 }
 
-// buildHomeComposer renders the Home composer card.
+// buildHomeComposer renders the Home composer card through the shared
+// ComposerShell: the same card, input, width policy, send position and key
+// semantics as the conversation composer. Home keeps its own business slots —
+// the staged attachment chips, the workspace/model/conversation-mode toolbar and
+// its error/notice rows — and sends through submitHomeComposer.
 func buildHomeComposer(c *ui.Context, t *design.Tokens, runtime contracts.UIRuntime,
 	navigator contracts.Navigator, chat contracts.ChatService, kctx cordis.Context,
 	st *homeComposerState, placeholder string, tr func(zh, en string) string) {
-	// The same raised card as the conversation composer: one composer look for
-	// both surfaces (the conversation composer and Home are the same control in
-	// two places).
-	panel := design.Apply(ui.Column(c), t.Composer()).
-		FillWidth().Gap(design.Space2).Padding(design.Space4)
-	panel.Children(func() {
-		var settings contracts.SettingsService
-		if raw, ok := kctx.Get(contracts.KeySettings); ok {
-			settings, _ = raw.(contracts.SettingsService)
+	var settings contracts.SettingsService
+	if raw, ok := kctx.Get(contracts.KeySettings); ok {
+		settings, _ = raw.(contracts.SettingsService)
+	}
+	var locale contracts.LocaleService
+	if raw, ok := kctx.Get(contracts.KeyLocale); ok {
+		locale, _ = raw.(contracts.LocaleService)
+	}
+	placeholderText := strings.TrimSpace(placeholder)
+	sendLabel := tr("发送", "Send")
+	if st.sending {
+		sendLabel = tr("发送中…", "Sending…")
+	}
+	errors := make([]string, 0, 3)
+	for _, text := range []string{st.attachErr, st.workspaceErr, st.sendErr} {
+		if strings.TrimSpace(text) != "" {
+			errors = append(errors, text)
 		}
-		placeholderText := strings.TrimSpace(placeholder)
-		ui.TextArea(c, &st.draft).
-			Label(placeholderText).
-			Placeholder(placeholderText).
-			MinHeight(88).FillWidth().
-			OnTextKey(func(k ui.TextKey) bool {
-				if k.Key != ui.KeyEnter || k.Mods != 0 {
-					return false
-				}
-				if submitHomeComposer(chat, navigator, runtime, st, tr) {
-					k.SetText("")
-				}
-				return true
-			})
-
-		if len(st.attachments) > 0 {
-			ui.Row(c).FillWidth().Gap(design.Space2).AlignItems(ui.Center).Children(func() {
+	}
+	uikit.ComposerShell(c, uikit.ComposerShellOptions{
+		Key:         "home.composer",
+		Draft:       &st.draft,
+		Placeholder: placeholderText,
+		CardLabel:   tr("输入框", "Composer"),
+		FullWidth:   true,
+		Locale:      locale,
+		Attachments: func(ic *ui.Context) {
+			if len(st.attachments) == 0 {
+				return
+			}
+			ui.Row(ic).FillWidth().Gap(design.Space2).AlignItems(ui.Center).Children(func() {
 				for _, attachment := range st.attachments {
 					attachment := attachment
-					design.Apply(ui.Row(c).AlignItems(ui.Center).Gap(design.Space1).
+					design.Apply(ui.Row(ic).AlignItems(ui.Center).Gap(design.Space1).
 						Padding(design.Space1, design.Space2).Radius(design.RadiusSM).
 						Border(1, t.BorderL2), func(el ui.Element) ui.Element { return el }).Children(func() {
-						design.Apply(ui.Text(c, attachment.Name+" · "+formatHomeAttachmentSize(len(attachment.Data))),
+						design.Apply(ui.Text(ic, attachment.Name+" · "+formatHomeAttachmentSize(len(attachment.Data))),
 							t.Font(design.TypeXXS)).TextColor(t.LabelSecondary).MaxLines(1).Ellipsis("…")
-						if ui.Button(c, tr("移除", "Remove")).Clicked() {
+						if ui.Button(ic, tr("移除", "Remove")).Clicked() {
 							removeHomeAttachment(st, attachment.ID)
 							runtime.Invalidate()
 						}
 					})
 				}
 			})
-		}
-
-		// One calm action row: attach menu, model, conversation mode and the
-		// primary send action. The model/mode pickers used to sit on a second
-		// context row above the input and the Enter hint plus a standalone 路径
-		// button made the row read as a strip of competing chips.
-		ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(design.Space2).Children(func() {
-			buildHomeAttachmentMenu(c, t, runtime, st, tr)
+		},
+		Notices: func(ic *ui.Context) {
+			// A missing API key is a pre-send warning, not a hard block: local
+			// model servers need no key, so the send path stays available.
+			if _, missingKey := homeConfigGaps(chat); missingKey {
+				design.Apply(ui.Text(ic, tr(
+					"尚未配置 API Key：发送可能失败；本地模型服务可忽略。",
+					"No API key configured: sending may fail; ignore this for local model servers.")),
+					t.Font(design.TypeXXS)).TextColor(t.WarningText).MaxLines(2)
+			}
+		},
+		Toolbar: func(ic *ui.Context) {
+			buildHomeAttachmentMenu(ic, t, runtime, st, tr)
 			if st.attachBusy {
 				// The picker runs off the UI thread: the official spinner shows
 				// the wait next to the menu whose label also says 选择中….
-				ui.Spinner(c).Label(tr("选择中…", "Choosing…")).
+				ui.Spinner(ic).Label(tr("选择中…", "Choosing…")).
 					Size(design.Space3, design.Space3).TextColor(t.LabelSecondary)
 			}
-			buildHomeModelControl(c, t, runtime, navigator, chat, kctx, settings, tr)
-			buildHomeModeControl(c, t, runtime, settings, tr)
-			ui.Spacer(c).Grow(1)
-			sendLabel := tr("发送", "Send")
-			if st.sending {
-				sendLabel = tr("发送中…", "Sending…")
-			}
-			send := design.Apply(ui.PrimaryButton(c, sendLabel), t.PrimaryButton()).
-				Tooltip(tr("发送 (Enter)", "Send (Enter)")).
-				Disabled(chat == nil || st.sending || strings.TrimSpace(st.draft) == "")
-			if send.Clicked() {
-				submitHomeComposer(chat, navigator, runtime, st, tr)
-			}
-		})
-
-		if st.attachErr != "" {
-			uikit.ErrorLine(c, st.attachErr)
-		}
-		if st.sendErr != "" {
-			uikit.ErrorLine(c, st.sendErr)
-		}
-		if st.notice != "" {
-			design.Apply(ui.Text(c, st.notice), t.Font(design.TypeXXS)).TextColor(t.LabelTertiary)
-		}
-		buildHomeAttachmentPathDialog(c, t, runtime, st, tr)
+			buildHomeWorkspaceControl(ic, t, runtime, kctx, st, tr)
+			buildHomeModelControl(ic, t, runtime, navigator, chat, kctx, settings, tr)
+			buildHomeModeControl(ic, t, runtime, settings, tr)
+		},
+		SendEnabled: chat != nil && !st.sending && strings.TrimSpace(st.draft) != "",
+		SendLabel:   sendLabel,
+		SendTooltip: tr("发送 (Enter)", "Send (Enter)"),
+		Send: func() bool {
+			return submitHomeComposer(chat, navigator, runtime, st, tr)
+		},
+		Errors: errors,
+		Notice: st.notice,
 	})
+	// The manual attachment-path fallback is a Modal above the composer, as on
+	// the conversation screen.
+	buildHomeAttachmentPathDialog(c, t, runtime, st, tr)
 }

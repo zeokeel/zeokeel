@@ -155,11 +155,12 @@ func copySession(session contracts.ChatSession) contracts.ChatSession {
 // --- harness ----------------------------------------------------------------
 
 type harness struct {
-	t      *testing.T
-	ctx    cordis.Context
-	uiRoot *uiroot.Root
-	chat   *fakeChat
-	fiber  *cordis.Fiber
+	t        *testing.T
+	ctx      cordis.Context
+	uiRoot   *uiroot.Root
+	chat     *fakeChat
+	fiber    *cordis.Fiber
+	notifier *fakeNotifier
 }
 
 func newHarness(t *testing.T, chat *fakeChat, cfg rightpanel.Config) *harness {

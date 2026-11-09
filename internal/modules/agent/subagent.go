@@ -81,6 +81,11 @@ func (s *service) subagentParent() (contracts.ChatConfig, string) {
 // Run implements contracts.Subagents: it starts one in-process subagent, waits
 // for its final answer and stops it. Fork copies the active session's history
 // into the child; without an active session the fork request is rejected.
+//
+// Every delegation that gets past prompt validation is registered in the
+// bounded activity registry first, so the inspector's Agents pane shows it as
+// running (运行中) and then finished/failed/cancelled: the two notifications
+// request the frames that redraw that pane.
 func (s *service) Run(ctx context.Context, req contracts.SubagentRequest) (contracts.SubagentResult, error) {
 	if ctx == nil {
 		ctx = context.Background()
@@ -98,6 +103,28 @@ func (s *service) Run(ctx context.Context, req contracts.SubagentRequest) (contr
 	}
 
 	cfg, active := s.subagentParent()
+	activity := s.beginSubagentActivity(name, active, subagentModel(cfg.Model, req.Model), prompt, req.Fork)
+	s.notify(active)
+	result, err := s.runSubagent(ctx, prompt, name, req, cfg, active)
+	s.finishSubagentActivity(activity.ID, ctx, err, result)
+	s.notify(active)
+	return result, err
+}
+
+// subagentModel resolves the model a delegation runs with: the request
+// override wins, else the parent session's effective model.
+func subagentModel(parentModel, override string) string {
+	if model := strings.TrimSpace(override); model != "" {
+		return model
+	}
+	return strings.TrimSpace(parentModel)
+}
+
+// runSubagent is the delegation itself: it creates the child provider/runner,
+// starts the subagent, waits for the final answer and stops it. Run owns the
+// activity lifecycle around it.
+func (s *service) runSubagent(ctx context.Context, prompt, name string, req contracts.SubagentRequest,
+	cfg contracts.ChatConfig, active string) (contracts.SubagentResult, error) {
 	childTools := s.registry.Tools()
 	// Children inherit the same complete prompt as their parent run (identity,
 	// environment, workspace instructions, preset and per-tool guidance). The

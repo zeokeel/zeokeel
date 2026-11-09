@@ -547,3 +547,93 @@ func TestToastTotalSwitchBeatsHiddenLevels(t *testing.T) {
 	tester.Frame()
 	h.assertNoTexts(tester, "全部关闭")
 }
+
+// --- dedupe by level+text ---------------------------------------------------
+
+// TestDuplicateNotificationsMergeIntoOneToast covers C-18: the same level+text
+// within the toast's life updates the toast in place (time reset, a quiet ×N)
+// instead of stacking an identical row.
+func TestDuplicateNotificationsMergeIntoOneToast(t *testing.T) {
+	h := newHarness(t, "zh")
+	tester := h.tester()
+	h.notifier.trigger(contracts.Notification{ID: "n1", Level: contracts.NotifySuccess, Text: "对话已导出"})
+	tester.Frame()
+	h.notifier.trigger(contracts.Notification{ID: "n2", Level: contracts.NotifySuccess, Text: "对话已导出"})
+	tester.Frame()
+	if got := countText(tester, "对话已导出"); got != 1 {
+		t.Fatalf("duplicate notification rendered %d toasts, want 1; texts = %v", got, tester.Texts())
+	}
+	h.assertTexts(tester, "×2")
+	// The merged toast's time was reset: after 3+3 seconds it is still up.
+	tester.Advance(3 * time.Second)
+	tester.Frame()
+	h.assertTexts(tester, "对话已导出")
+	h.notifier.trigger(contracts.Notification{ID: "n3", Level: contracts.NotifySuccess, Text: "对话已导出"})
+	tester.Frame()
+	h.assertTexts(tester, "×3")
+	tester.Advance(5 * time.Second)
+	tester.Frame()
+	h.assertNoTexts(tester, "对话已导出")
+	// Closing the merged toast forgets every notifier entry it stood for.
+	if ids := h.notifier.dismissedIDs(); len(ids) != 3 {
+		t.Fatalf("Dismiss calls = %v, want the three merged ids", ids)
+	}
+}
+
+// TestSameTextDifferentLevelsStaySeparate pins the key: a success and an error
+// with the same words are different messages.
+func TestSameTextDifferentLevelsStaySeparate(t *testing.T) {
+	h := newHarness(t, "zh")
+	tester := h.tester()
+	h.notifier.trigger(contracts.Notification{ID: "n1", Level: contracts.NotifySuccess, Text: "完成"})
+	h.notifier.trigger(contracts.Notification{ID: "n2", Level: contracts.NotifyError, Text: "完成"})
+	tester.Frame()
+	if got := countText(tester, "完成"); got != 2 {
+		t.Fatalf("level-distinct notifications rendered %d rows, want 2; texts = %v", got, tester.Texts())
+	}
+	h.assertTexts(tester, "成功", "错误")
+}
+
+// TestDuplicateAfterExpiryStartsANewToast pins the TTL boundary: once the toast
+// is gone, the same message shows as a fresh toast (no stale ×N).
+func TestDuplicateAfterExpiryStartsANewToast(t *testing.T) {
+	h := newHarness(t, "zh")
+	tester := h.tester()
+	h.notifier.trigger(contracts.Notification{ID: "n1", Level: contracts.NotifyInfo, Text: "已复制"})
+	tester.Frame()
+	tester.Advance(5 * time.Second)
+	tester.Frame()
+	h.assertNoTexts(tester, "已复制")
+	h.notifier.trigger(contracts.Notification{ID: "n2", Level: contracts.NotifyInfo, Text: "已复制"})
+	tester.Frame()
+	h.assertTexts(tester, "已复制")
+	h.assertNoTexts(tester, "×2")
+}
+
+// TestMergedDuplicateKeepsTheLatestAction pins the action half: merging keeps a
+// toast's button working and points it at the most recent duplicate.
+func TestMergedDuplicateKeepsTheLatestAction(t *testing.T) {
+	h := newHarness(t, "zh")
+	tester := h.tester()
+	undone := []string{}
+	h.notifier.trigger(contracts.Notification{
+		ID: "n1", Level: contracts.NotifySuccess, Text: "已删除任务",
+		ActionLabel: "撤销", Action: func() { undone = append(undone, "first") },
+	})
+	tester.Frame()
+	h.notifier.trigger(contracts.Notification{
+		ID: "n2", Level: contracts.NotifySuccess, Text: "已删除任务",
+		ActionLabel: "撤销", Action: func() { undone = append(undone, "second") },
+	})
+	tester.Frame()
+	if got := countText(tester, "已删除任务"); got != 1 {
+		t.Fatalf("merged action toast rendered %d times; texts = %v", got, tester.Texts())
+	}
+	if err := tester.Click("撤销"); err != nil {
+		t.Fatalf("click merged action: %v; texts = %v", err, tester.Texts())
+	}
+	tester.Frame()
+	if len(undone) != 1 || undone[0] != "second" {
+		t.Fatalf("merged toast action = %v, want the latest one", undone)
+	}
+}

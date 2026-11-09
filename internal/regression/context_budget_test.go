@@ -58,7 +58,8 @@ func TestContextBudgetSuffix(t *testing.T) {
 		if err := tester.Click("用时 120ms · 1.9K tokens"); err != nil {
 			t.Fatalf("expand usage: %v; texts = %v", err, tester.Texts())
 		}
-		requireHasText(t, tester, "预算 128k")
+		requireHasText(t, tester, "上下文预算")
+		requireHasText(t, tester, "128k")
 	})
 
 	t.Run("non-thousand window", func(t *testing.T) {
@@ -69,7 +70,8 @@ func TestContextBudgetSuffix(t *testing.T) {
 		if err := tester.Click("用时 120ms · 1.9K tokens"); err != nil {
 			t.Fatalf("expand usage: %v; texts = %v", err, tester.Texts())
 		}
-		requireHasText(t, tester, "预算 32.8k")
+		requireHasText(t, tester, "上下文预算")
+		requireHasText(t, tester, "32.8k")
 	})
 
 	t.Run("unknown model", func(t *testing.T) {
@@ -78,12 +80,12 @@ func TestContextBudgetSuffix(t *testing.T) {
 		}}
 		tester := startBudgetSession(t, "audit-model", catalog)
 		requireHasText(t, tester, "1.9K tokens")
-		requireNoText(t, tester, "预算")
+		requireNoText(t, tester, "上下文预算")
 	})
 
 	t.Run("no catalogue", func(t *testing.T) {
 		tester := startBudgetSession(t, "audit-model", nil)
 		requireHasText(t, tester, "1.9K tokens")
-		requireNoText(t, tester, "预算")
+		requireNoText(t, tester, "上下文预算")
 	})
 }

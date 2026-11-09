@@ -8,6 +8,7 @@ import (
 
 	"github.com/zeokeel/zeokeel/internal/contracts"
 	"github.com/zeokeel/zeokeel/internal/ui/automation"
+	"github.com/zeokeel/zeokeel/internal/uikit"
 )
 
 func historyTask(records ...contracts.AutomationRunRecord) contracts.AutomationTask {
@@ -34,7 +35,7 @@ func TestTaskHistoryCollapsedShowsLatestSummary(t *testing.T) {
 	h := newHarness(t, newFakeAutomation(task), automation.Config{})
 	tester := h.tester()
 
-	h.assertTexts(tester, "巡检", "运行历史", "成功", "最新运行摘要")
+	h.assertTexts(tester, "巡检", "运行历史", "已投递", "最新运行摘要", "结果由会话决定")
 	h.assertNoTexts(tester, "旧失败摘要", "还没有运行记录")
 }
 
@@ -48,8 +49,13 @@ func TestTaskHistoryExpandsAndCollapses(t *testing.T) {
 	tester := h.tester()
 
 	h.click(tester, "运行历史")
-	h.assertTexts(tester, "最新运行摘要", "旧失败摘要", "失败",
-		base.Add(time.Minute).Local().Format("15:04:05"))
+	// The run time is a full localized date+time: a clock alone cannot tell
+	// yesterday's run from today's.
+	wantTime := uikit.FormatDateTime(h.uiRoot.Locale(), base.Add(time.Minute))
+	h.assertTexts(tester, "最新运行摘要", "旧失败摘要", "失败", wantTime)
+	if base.Add(time.Minute).Local().Format("15:04:05") == wantTime {
+		t.Fatalf("run time %q is still a bare clock", wantTime)
+	}
 	h.click(tester, "运行历史")
 	h.assertNoTexts(tester, "旧失败摘要")
 }

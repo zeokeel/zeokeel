@@ -66,6 +66,27 @@ func TestBuiltinFilteredEntryRestoredFromSettings(t *testing.T) {
 	}
 }
 
+// TestToolRestartHintClearsWhenSwitchReverts pins E-13: the "restart needed"
+// hint tracks the net difference from the startup state, so flipping a tool off
+// and back on clears it instead of demanding a pointless restart.
+func TestToolRestartHintClearsWhenSwitchReverts(t *testing.T) {
+	store := newFakePluginSettings(nil)
+	h := newGenericHarness(t, store, newGenericToolRegistry())
+	tester := h.tester()
+	h.click(tester, "搜索工具")
+	tester.Type("read_file")
+	tester.Frame()
+	h.assertNoTexts(tester, "待重启")
+
+	h.click(tester, "启用工具 read_file")
+	h.assertTexts(tester, "待重启")
+	h.click(tester, "启用工具 read_file")
+	h.assertNoTexts(tester, "待重启")
+	if got := store.get(contracts.SettingToolsDisabled); got != "[]" {
+		t.Fatalf("tools.disabled after revert = %q, want []", got)
+	}
+}
+
 func TestBuiltinAndMCPTogglesCoexist(t *testing.T) {
 	store := newFakePluginSettings(map[string]string{
 		contracts.SettingToolsDisabled:    `["read_file"]`,

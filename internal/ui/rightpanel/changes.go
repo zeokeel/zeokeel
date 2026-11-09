@@ -57,14 +57,25 @@ func buildChangesPane(c *ui.Context, t *design.Tokens, workspace contracts.Works
 		buildEmptyPane(c, uikit.T(st.locale, "当前工作区不支持变更视图", "The current workspace does not support the changes view"))
 		return
 	}
-	if !st.changesLoaded {
-		st.changes, st.changesErr = differ.Changes(context.Background())
-		st.changesLoaded = true
-	}
+	// The diff read runs git commands: it is cached and runs off the UI thread,
+	// so refreshing a large repository shows a spinner instead of freezing the
+	// frame. The header's Refresh action clears changesLoaded to start a read.
+	loading := st.ensureChangesLoaded(workspace, differ, runtime)
 
 	ui.Column(c).FillWidth().Gap(design.Space2).Children(func() {
 		// The refresh lives in the pane header; the body carries the count and
 		// the changed files as rows.
+		if loading {
+			ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(design.Space2).Children(func() {
+				ui.Spinner(c).Label(uikit.T(st.locale, "正在读取工作区变更…", "Reading workspace changes…")).
+					Size(design.Space3, design.Space3).TextColor(t.LabelSecondary)
+				design.Apply(ui.Text(c, uikit.T(st.locale, "正在读取工作区变更…", "Reading workspace changes…")),
+					t.TextMuted(design.TypeXS))
+			})
+			if len(st.changes) == 0 && st.changesErr == nil {
+				return
+			}
+		}
 		if st.changesErr == nil {
 			design.Apply(ui.Text(c, uikit.T(st.locale,
 				fmt.Sprintf("%d 个变更文件", len(st.changes)), fmt.Sprintf("%d changed files", len(st.changes)))),
@@ -84,6 +95,50 @@ func buildChangesPane(c *ui.Context, t *design.Tokens, workspace contracts.Works
 	})
 }
 
+// ensureChangesLoaded starts the workspace-diff read off the UI thread when the
+// cache was invalidated (first open, a workspace switch or the pane header's
+// Refresh). It reports whether a read is in flight, so the pane can show a
+// spinner while the cached rows (if any) stay on screen. A result for a
+// workspace the user already switched away from is dropped.
+func (st *state) ensureChangesLoaded(workspace contracts.WorkspaceService,
+	differ contracts.WorkspaceDiffer, runtime contracts.UIRuntime) bool {
+	if st.changesLoaded {
+		return false
+	}
+	if st.changesLoading {
+		return true
+	}
+	current, ok, err := workspace.Current(context.Background())
+	if err != nil || !ok {
+		st.changesLoaded = true
+		st.changesErr = err
+		return false
+	}
+	workspaceKey := current.ID + "\x00" + current.Root
+	if runtime == nil {
+		// A bare state (unit tests) keeps the old synchronous read.
+		st.changes, st.changesErr = differ.Changes(context.Background())
+		st.changesLoaded = true
+		return false
+	}
+	st.changesLoading = true
+	go func() {
+		changes, changesErr := differ.Changes(context.Background())
+		runtime.Post(func() {
+			st.changesLoading = false
+			now, ok := st.currentWorkspaceKey(workspace)
+			if !ok || now != workspaceKey {
+				runtime.Invalidate()
+				return
+			}
+			st.changes, st.changesErr = changes, changesErr
+			st.changesLoaded = true
+			runtime.Invalidate()
+		})
+	}()
+	return true
+}
+
 // buildChangeRow is one changed file: status badge, path, +/- stats and a
 // native collapsible with the official diff viewer (collapsed by default).
 // Rows and dividers, not cards: a 320 DIP inspector only holds a card or two.
@@ -97,7 +152,7 @@ func buildChangeRow(c *ui.Context, t *design.Tokens, st *state, change contracts
 		ui.Row(c).FillWidth().Gap(design.Space2).AlignItems(ui.Center).Children(func() {
 			design.Apply(ui.Badge(c, changeStatusLabel(change.Status, st.locale)), t.Badge()).
 				TextColor(changeStatusColor(t, change.Status))
-			design.Apply(ui.Text(c, path), t.MonoFamily()).FontSize(13).
+			design.Apply(ui.Text(c, path), t.MonoText(design.TypeXS)).
 				TextColor(t.LabelPrimary).Grow(1).MaxLines(1).Ellipsis("…")
 			if additions > 0 {
 				design.Apply(ui.Text(c, fmt.Sprintf("+%d", additions)), t.Font(design.TypeXXXS)).
@@ -201,7 +256,7 @@ func buildDiffFallback(c *ui.Context, t *design.Tokens, diff string, locale cont
 			if line == "" {
 				continue
 			}
-			design.Apply(ui.Text(c, line), t.MonoFamily()).FontSize(11).
+			design.Apply(ui.Text(c, line), t.MonoText(design.TypeXXXS)).
 				TextColor(diffLineColor(t, line))
 		}
 		if truncated {

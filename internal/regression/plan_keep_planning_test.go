@@ -1,11 +1,14 @@
 package regression
 
 // Adversarial audit: the plan-review "继续规划" (keep-planning) feedback loop.
-// Negative/boundary cases: feedback is required, a successful keep-planning exits
-// the review once, sends the feedback to the active session once, closes the
-// overlay and toasts; Exit/Send failures keep the modal open without duplicate
-// sends; no active session is visible; a product without a chat service hides
-// the keep-planning controls entirely.
+// Negative/boundary cases: feedback is required, a successful keep-planning
+// delivers the feedback to the active session once and only then exits the
+// review once, closes the overlay and toasts. The send-first order is the C-01
+// contract: a Send failure leaves the review untouched (no Exit yet, retry
+// possible), and an Exit failure after an accepted feedback keeps the modal
+// without ever sending the same feedback twice (a retry only retries the exit).
+// No active session is visible; a product without a chat service hides the
+// keep-planning controls entirely.
 
 import (
 	"context"
@@ -213,7 +216,7 @@ func TestPlanKeepPlanningRequiresAndFailures(t *testing.T) {
 		}
 	})
 
-	t.Run("send failure keeps modal", func(t *testing.T) {
+	t.Run("send failure keeps review retryable", func(t *testing.T) {
 		harness := startPlanLoop(t, true, true, false)
 		harness.chat.setSendError(errors.New("agent busy"))
 		harness.triggerPlan(t)
@@ -222,15 +225,29 @@ func TestPlanKeepPlanningRequiresAndFailures(t *testing.T) {
 		harness.tester.Frame()
 		harness.click(t, "继续规划")
 		requireHasTexts(t, harness.tester, "agent busy", "继续规划")
-		if exits := harness.plan.exitCalls(); len(exits) != 1 {
-			t.Fatalf("send-failure Exit calls = %v, want 1", exits)
+		// C-01: the feedback is delivered before the review closes, so a failed
+		// Send leaves the review under review — no Exit yet and the dialog can
+		// be retried instead of deadlocking on a cancelled review.
+		if exits := harness.plan.exitCalls(); len(exits) != 0 {
+			t.Fatalf("send-failure Exit calls = %v, want none (send-first)", exits)
 		}
 		if sends := harness.chat.recordedSends(); len(sends) != 1 {
 			t.Fatalf("send-failure sends = %v, want exactly one attempt", sends)
 		}
+		// Once the backend accepts, the same action delivers the feedback and
+		// closes the review: one more send attempt and the first Exit.
+		harness.chat.setSendError(nil)
+		harness.click(t, "继续规划")
+		if sends := harness.chat.recordedSends(); len(sends) != 2 {
+			t.Fatalf("retry sends = %v, want two attempts (failed + accepted)", sends)
+		}
+		if exits := harness.plan.exitCalls(); len(exits) != 1 || exits[0] != "cancel" {
+			t.Fatalf("retry Exit calls = %v, want [cancel]", exits)
+		}
+		requireNoText(t, harness.tester, "计划待审阅")
 	})
 
-	t.Run("exit failure keeps modal without send", func(t *testing.T) {
+	t.Run("exit failure keeps modal without re-sending", func(t *testing.T) {
 		harness := startPlanLoop(t, true, true, false)
 		harness.plan.exitErr = errors.New("plan busy")
 		harness.triggerPlan(t)
@@ -239,9 +256,28 @@ func TestPlanKeepPlanningRequiresAndFailures(t *testing.T) {
 		harness.tester.Frame()
 		harness.click(t, "继续规划")
 		requireHasTexts(t, harness.tester, "plan busy", "继续规划")
-		if sends := harness.chat.recordedSends(); len(sends) != 0 {
-			t.Fatalf("send after Exit failure = %v", sends)
+		// Send-first: the feedback was accepted before the exit failed, so the
+		// retry must only retry the exit, never duplicate the feedback.
+		if sends := harness.chat.recordedSends(); len(sends) != 1 {
+			t.Fatalf("sends after Exit failure = %v, want the one accepted feedback", sends)
 		}
+		if exits := harness.plan.exitCalls(); len(exits) != 1 {
+			t.Fatalf("Exit calls after failure = %v, want one attempt", exits)
+		}
+		harness.click(t, "继续规划")
+		if sends := harness.chat.recordedSends(); len(sends) != 1 {
+			t.Fatalf("retry re-sent the feedback: %v", sends)
+		}
+		if exits := harness.plan.exitCalls(); len(exits) != 2 {
+			t.Fatalf("retry Exit calls = %v, want two attempts", exits)
+		}
+		// A successful exit closes the modal; the feedback stayed a single send.
+		harness.plan.exitErr = nil
+		harness.click(t, "继续规划")
+		if sends := harness.chat.recordedSends(); len(sends) != 1 {
+			t.Fatalf("final close re-sent the feedback: %v", sends)
+		}
+		requireNoText(t, harness.tester, "计划待审阅")
 	})
 }
 
@@ -260,6 +296,14 @@ func TestPlanKeepPlanningNoActiveSessionAndNoChat(t *testing.T) {
 		if sends := harness.chat.recordedSends(); len(sends) != 0 {
 			t.Fatalf("no-active-session send = %v", sends)
 		}
+		// The review is untouched (no Exit) and stays closable: Escape exits.
+		if exits := harness.plan.exitCalls(); len(exits) != 0 {
+			t.Fatalf("no-active-session Exit calls = %v, want none", exits)
+		}
+		harness.tester.Key(0, ui.KeyEscape)
+		harness.tester.Frame()
+		harness.tester.Frame()
+		requireNoText(t, harness.tester, "计划待审阅")
 	})
 
 	t.Run("no chat hides controls", func(t *testing.T) {

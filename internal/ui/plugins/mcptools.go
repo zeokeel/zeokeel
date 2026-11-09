@@ -52,6 +52,27 @@ func (st *state) loadDisabledTools(settings contracts.SettingsService, hasSettin
 		}
 	}
 	st.disabledErr = strings.Join(errs, "; ")
+	// Snapshot the startup state: "restart needed" is a net change against it,
+	// so flipping a tool off and back on clears the hint instead of leaving a
+	// stale warning.
+	st.startupDisabledTools = make(map[string]bool, len(st.disabledTools)+len(st.disabledMCPTools))
+	for name := range st.disabledTools {
+		st.startupDisabledTools[name] = true
+	}
+	for name := range st.disabledMCPTools {
+		st.startupDisabledTools[name] = true
+	}
+}
+
+// toolDisabled reports whether one tool is disabled by either setting row.
+func (st *state) toolDisabled(name string) bool {
+	return st.disabledTools[name] || st.disabledMCPTools[name]
+}
+
+// toolRestartPending reports whether one tool's switch differs from its
+// startup state (the toolkit re-registers tools at process start only).
+func (st *state) toolRestartPending(name string) bool {
+	return st.startupDisabledTools[name] != st.toolDisabled(name)
 }
 
 // setToolEnabled adds/removes one tool from its setting (tools.disabled for

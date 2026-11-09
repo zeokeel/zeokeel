@@ -65,7 +65,9 @@ func TestChromeWidthsPersist(t *testing.T) {
 // host-built chrome has no native window/panel announce of its own.
 func TestInspectorDrawerAnnouncements(t *testing.T) {
 	r := newTestRoot(t)
-	mustScreen(t, r, textScreen("home", "首页", "body-home", 10))
+	// The inspector belongs to the session screen: it reads the session read
+	// model, so the host offers it nowhere else.
+	mustScreen(t, r, textScreen("session", "会话", "body-session", 10))
 	mustSlot(t, r, textSlotItem(contracts.SlotSessionPanelRight, "pane", "inspector-pane", 10))
 	tt := newTestTester(t, r, 1000, 720)
 	tt.Frame()

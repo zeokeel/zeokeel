@@ -103,6 +103,7 @@ func TestEnvironmentBlock(t *testing.T) {
 // the workspace default for unknown/missing modes.
 func TestApprovalPolicyLines(t *testing.T) {
 	workspaceSentence := "Approval policy: workspace — file tools and read-only/informational tools run without approval; shell, network, settings writes and other tools may ask for approval. Do not abandon a needed operation because of this policy; use a tool normally and follow the dialog guidance (the user may choose always-allow-in-this-session)."
+	readOnlySentence := "Approval policy: read-only — read-only and informational tools run without approval; file writes, shell, network, settings writes and other tools may ask for approval. Do not abandon a needed operation because of this policy; use a tool normally and follow the dialog guidance (the user may choose always-allow-in-this-session)."
 	cases := []struct {
 		mode string
 		want string
@@ -110,8 +111,11 @@ func TestApprovalPolicyLines(t *testing.T) {
 		{contracts.PermissionWorkspace, workspaceSentence},
 		{contracts.PermissionFull, "Approval policy: full — no approval prompts are shown."},
 		{"auto", "Approval policy: full — no approval prompts are shown."},
-		{contracts.PermissionAsk, "Approval policy: ask — every tool call asks for approval."},
-		{contracts.PermissionNever, "Approval policy: never — actions that require approval are denied automatically; do not attempt to escalate."},
+		{contracts.PermissionReadOnly, readOnlySentence},
+		// Retired ask/never spellings (legacy stored rows and headless assembly
+		// policies) normalize to the read-only preset.
+		{contracts.PermissionAsk, readOnlySentence},
+		{contracts.PermissionNever, readOnlySentence},
 		{"", workspaceSentence},
 		{"bogus", workspaceSentence},
 	}
@@ -230,11 +234,11 @@ func TestSystemPromptForRunStructure(t *testing.T) {
 	}
 
 	// No configured prompt: environment and guidance are still present.
-	bare := systemPromptForRun("windows", "arm64", "", contracts.PermissionNever, "", map[string]bool{"pwsh": true})
+	bare := systemPromptForRun("windows", "arm64", "", contracts.PermissionReadOnly, "", map[string]bool{"pwsh": true})
 	if !strings.Contains(bare, "You are ZeoKeel") || !strings.Contains(bare, "Use the pwsh tool for shell commands.") {
 		t.Fatalf("bare prompt lacks environment: %q", bare)
 	}
-	if !strings.Contains(bare, "Approval policy: never") || !strings.Contains(bare, "pwsh result") {
+	if !strings.Contains(bare, "Approval policy: read-only") || !strings.Contains(bare, "pwsh result") {
 		t.Fatalf("bare prompt lacks policy/guidance: %q", bare)
 	}
 }
@@ -333,6 +337,13 @@ func TestRunSystemPromptReflectsApprovalModeAndSessionOverride(t *testing.T) {
 	prompt = svc.buildRunSystemPrompt(context.Background(), sessionID, contracts.ChatConfig{}, toolNameSet(nil))
 	if !strings.Contains(prompt, "Approval policy: full — no approval prompts are shown.") {
 		t.Fatalf("session full override not reflected: %q", prompt)
+	}
+	if err := svc.SetSessionPermission(sessionID, contracts.PermissionReadOnly); err != nil {
+		t.Fatalf("SetSessionPermission: %v", err)
+	}
+	prompt = svc.buildRunSystemPrompt(context.Background(), sessionID, contracts.ChatConfig{}, toolNameSet(nil))
+	if !strings.Contains(prompt, "Approval policy: read-only —") {
+		t.Fatalf("session read-only override not reflected: %q", prompt)
 	}
 }
 

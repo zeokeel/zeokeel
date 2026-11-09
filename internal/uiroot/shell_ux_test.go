@@ -128,7 +128,7 @@ func TestSettingsCloseButtonAndAdaptiveSize(t *testing.T) {
 // a wide window, a drawer over the content on a narrow one.
 func TestRightPanelDrawerOnNarrowWindow(t *testing.T) {
 	r := newTestRoot(t)
-	mustScreen(t, r, textScreen("home", "首页", "body-home", 10))
+	mustScreen(t, r, textScreen("session", "会话", "body-session", 10))
 	mustSlot(t, r, textSlotItem(contracts.SlotSessionPanelRight, "inspector", "inspector-body", 10))
 
 	wide := newTestTester(t, r, 1280, 800)

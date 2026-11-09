@@ -37,41 +37,65 @@ type Subagents interface {
 // KeySubagents is provided by the agent module (rig agent.NewRunner based).
 var KeySubagents = cordis.NewServiceKey[Subagents]("zeokeel/subagents")
 
-// Agent permission modes (the old shell's permission setting). The approval
-// gate reads the current mode on every tool call, so switching is immediate.
+// Agent permission modes. The three user-facing presets mirror DSH's
+// read-only / workspace-write / danger-full-access permission presets. The
+// approval gate reads the current mode on every tool call, so switching is
+// immediate.
 const (
 	// SettingAgentPermission stores the current permission mode. Unset or
 	// unknown values resolve to workspace.
 	SettingAgentPermission = "agent.permission"
-	// PermissionAsk asks for every tool call.
-	PermissionAsk = "ask"
-	// PermissionWorkspace (the default) auto-allows the workspace file tools
-	// (reading, listing, searching, writing and editing inside the workspace)
-	// and asks for everything that can leave it: shell, network, MCP and
-	// unknown tools.
+	// PermissionReadOnly is the read-only preset: read-only and informational
+	// tools are auto-allowed, everything else goes through the approval gate
+	// (the dialog's "always allow in this session" still stops repeats for a
+	// remembered tool).
+	PermissionReadOnly = "read-only"
+	// PermissionWorkspace is the default (workspace-write) preset: it
+	// auto-allows the workspace file tools (reading, listing, searching,
+	// writing and editing inside the workspace) and asks for everything that
+	// can leave it: shell, network, MCP and unknown tools.
 	PermissionWorkspace = "workspace"
-	// PermissionFull allows every tool call without asking.
+	// PermissionFull is the all-permissions preset: every tool call is allowed
+	// without asking.
 	PermissionFull = "full"
-	// PermissionNever denies every tool call (fail-closed).
+
+	// Deprecated: PermissionAsk and PermissionNever are the retired "ask" and
+	// "never" modes. They are kept only as legacy stored-value spellings for
+	// NormalizePermissionMode; both normalize to PermissionReadOnly. No UI may
+	// offer them and no new code should branch on them.
+	PermissionAsk   = "ask"
 	PermissionNever = "never"
 )
 
-// WorkspaceAutoAllowedTools is the set of tools the default "workspace"
-// permission mode runs without an approval prompt: the workspace file tools
-// plus read-only / informational tools that cannot leave or modify the
-// workspace. Everything that can leave the workspace, mutate app settings,
-// reach the network, spawn MCP work or is unknown still asks. The agent gate
-// and the approvals service both read this one list so the two layers cannot
-// drift apart.
-var WorkspaceAutoAllowedTools = map[string]bool{
-	// Workspace file tools.
-	"read_file":          true,
-	"write_file":         true,
-	"edit_file":          true,
-	"str_replace_editor": true,
-	"list_dir":           true,
-	"glob":               true,
-	"grep":               true,
+// NormalizePermissionMode maps every accepted stored/configured spelling onto
+// the three permission presets. Legacy rows normalize deterministically:
+// "ask" and "never" (the retired modes) become read-only, empty and unknown
+// values become the workspace default, and the approvals service's legacy
+// "auto" alias stays full.
+func NormalizePermissionMode(raw string) string {
+	switch strings.ToLower(strings.TrimSpace(raw)) {
+	case PermissionReadOnly, PermissionAsk, PermissionNever:
+		return PermissionReadOnly
+	case PermissionWorkspace:
+		return PermissionWorkspace
+	case PermissionFull, "auto":
+		return PermissionFull
+	default:
+		return PermissionWorkspace
+	}
+}
+
+// ReadOnlyAutoAllowedTools is the set of tools the read-only preset runs
+// without an approval prompt: read-only file tools plus informational tools
+// that cannot modify the workspace, settings or the outside world. Everything
+// else (workspace writes, shell, network, MCP, settings writes and unknown
+// tools) asks. It is the read-only subset of WorkspaceAutoAllowedTools.
+var ReadOnlyAutoAllowedTools = map[string]bool{
+	// Read-only file tools.
+	"read_file": true,
+	"list_dir":  true,
+	"glob":      true,
+	"grep":      true,
 	// Read-only / informational tools.
 	"read_image":           true,
 	"working_directory":    true,
@@ -101,8 +125,45 @@ var WorkspaceAutoAllowedTools = map[string]bool{
 	"lsp_symbols":          true,
 }
 
-// WorkspaceAutoAllowed reports whether the default workspace permission mode
-// runs one tool without asking for approval.
+// workspaceWriteFileTools are the file tools the workspace preset adds on top
+// of the read-only set: they modify files inside the workspace.
+var workspaceWriteFileTools = map[string]bool{
+	"write_file":         true,
+	"edit_file":          true,
+	"str_replace_editor": true,
+}
+
+// WorkspaceAutoAllowedTools is the set of tools the default workspace
+// (workspace-write) preset runs without an approval prompt: the read-only set
+// plus the workspace write tools. Everything that can leave the workspace,
+// mutate app settings, reach the network, spawn MCP work or is unknown still
+// asks. The agent gate and the approvals service both read this one list so the
+// two layers cannot drift apart; it is composed from ReadOnlyAutoAllowedTools
+// so the read-only subset cannot be duplicated out of sync.
+var WorkspaceAutoAllowedTools = composeAutoAllowedTools(
+	ReadOnlyAutoAllowedTools, workspaceWriteFileTools)
+
+// composeAutoAllowedTools merges the tool-name sets into one read-only map.
+func composeAutoAllowedTools(sets ...map[string]bool) map[string]bool {
+	out := make(map[string]bool)
+	for _, set := range sets {
+		for name, allowed := range set {
+			if allowed {
+				out[name] = true
+			}
+		}
+	}
+	return out
+}
+
+// ReadOnlyAutoAllowed reports whether the read-only preset runs one tool
+// without asking for approval.
+func ReadOnlyAutoAllowed(tool string) bool {
+	return ReadOnlyAutoAllowedTools[strings.TrimSpace(tool)]
+}
+
+// WorkspaceAutoAllowed reports whether the default workspace preset runs one
+// tool without asking for approval.
 func WorkspaceAutoAllowed(tool string) bool {
 	return WorkspaceAutoAllowedTools[strings.TrimSpace(tool)]
 }

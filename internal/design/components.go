@@ -49,9 +49,27 @@ const (
 	DialogWidthS float32 = 460
 	DialogWidthM float32 = 560
 	DialogWidthL float32 = 620
+	// DialogWidthXS is the narrowest modal: a single input row such as the
+	// rename-session prompt. DialogWidthCompact holds one small form and
+	// DialogWidthXL the widest editor, with fields side by side.
+	DialogWidthXS      float32 = 360
+	DialogWidthCompact float32 = 520
+	DialogWidthXL      float32 = 680
+	// OverlayWidthS bounds an overlay's secondary line (a menu's model note and
+	// context window), so a long label cannot stretch the popup.
+	OverlayWidthS float32 = 380
 	// DialogBodyMax bounds a scrollable body inside a dialog (a list or a long
 	// preview), so the footer and the title stay on screen.
 	DialogBodyMax float32 = 480
+)
+
+// Brand icon sizes. A quiet inline glyph, a control glyph and a prominent
+// glyph; as everywhere else the shell and the modules share these instead of
+// writing bare Size values.
+const (
+	IconSizeS float32 = 16
+	IconSizeM float32 = 20
+	IconSizeL float32 = 24
 )
 
 // Brand radii. RadiusMD is the control corner of the theme (brand.Radius);

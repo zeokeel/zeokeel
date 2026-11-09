@@ -8,6 +8,7 @@ import (
 
 	"github.com/zeokeel/zeokeel/internal/contracts"
 	"github.com/zeokeel/zeokeel/internal/design"
+	"github.com/zeokeel/zeokeel/internal/uikit"
 )
 
 type fontSizeSettings struct {
@@ -194,14 +195,16 @@ func TestReasoningMarkdownOptions(t *testing.T) {
 }
 
 func TestReasoningLineCount(t *testing.T) {
+	// The folded reasoning hint counts lines in the shared ReasoningTrace entry,
+	// so the clone that used to live in this package is gone.
 	for text, want := range map[string]int{
 		"":                          0,
 		"一行":                        1,
 		"第一行\n\n第二行\n":              2,
 		"  \n line \n \n second \n": 2,
 	} {
-		if got := reasoningLineCount(text); got != want {
-			t.Fatalf("reasoningLineCount(%q) = %d, want %d", text, got, want)
+		if got := uikit.ReasoningLineCount(text); got != want {
+			t.Fatalf("ReasoningLineCount(%q) = %d, want %d", text, got, want)
 		}
 	}
 }

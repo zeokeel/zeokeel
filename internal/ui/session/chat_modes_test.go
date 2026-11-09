@@ -5,6 +5,8 @@ package session_test
 import (
 	"testing"
 
+	"github.com/egoist/mygo/ui"
+
 	"github.com/zeokeel/zeokeel/internal/contracts"
 )
 
@@ -24,7 +26,7 @@ func TestChatModeSelectorFourOptions(t *testing.T) {
 	tester := h.tester()
 	// The standard mode is the quiet default: the mode lives inside the one
 	// session menu instead of a resident chip.
-	h.assertTexts(tester, "工作区权限")
+	h.assertTexts(tester, "工作区可写")
 	if got := textsContaining(tester.Texts(), "模式"); got != 0 {
 		t.Fatalf("mode control rendered outside the session menu; texts = %v", tester.Texts())
 	}
@@ -74,8 +76,8 @@ func TestChatModeSelectorFourOptions(t *testing.T) {
 	if got := settings.get(contracts.SettingChatMode); got != contracts.ChatModeStandard {
 		t.Fatalf("normal chat mode = %q", got)
 	}
-	// Normal mode + the ask permission chosen above keeps the quiet label.
-	h.assertTexts(tester, "会话设置")
+	// Normal mode + the read-only permission chosen above shows its label.
+	h.assertTexts(tester, "只读")
 	if got := textsContaining(tester.Texts(), "计划模式"); got != 0 {
 		t.Fatalf("plan state still on the composer row; texts = %v", tester.Texts())
 	}
@@ -88,7 +90,7 @@ func TestChatModeNormalizesBadValues(t *testing.T) {
 	})
 	h := newPermissionHarness(t, permissionChat(), settings)
 	tester := h.tester()
-	h.assertTexts(tester, "工作区权限")
+	h.assertTexts(tester, "工作区可写")
 	if got := textsContaining(tester.Texts(), "模式"); got != 0 {
 		t.Fatalf("bad mode rendered a chip; texts = %v", tester.Texts())
 	}
@@ -132,7 +134,7 @@ func TestChatModeEnglish(t *testing.T) {
 	h := newPermissionHarness(t, permissionChat(), settings)
 	h.ui.Locale().SetLanguage("en")
 	tester := h.tester()
-	h.assertTexts(tester, "Workspace")
+	h.assertTexts(tester, "Workspace-write")
 	h.openSessionMenu(tester)
 	h.assertTexts(tester, "Conversation mode", "Normal mode", "Plan mode", "Minimal mode", "Creator mode")
 	h.clickExact(tester, "Minimal mode")
@@ -160,18 +162,21 @@ func TestChatModeBadgeAccentDistinct(t *testing.T) {
 	h.assertNoTexts(tester, "精简")
 }
 
-// TestPermissionChipNever covers AUDIT-P3-14: the settings behavior page can
-// store agent.permission=never (fail-closed); the composer chip must show that
-// mode instead of falling back to "ask".
-func TestPermissionChipNever(t *testing.T) {
+// TestLegacyNeverNormalizesReadOnly covers the retired fail-closed "never"
+// row: it must normalize to the read-only preset (never is not a selectable
+// mode any more) and the composer must never show the old 禁止工具 label.
+func TestLegacyNeverNormalizesReadOnly(t *testing.T) {
 	settings := &permissionSettings{values: map[string]string{contracts.SettingAgentPermission: contracts.PermissionNever}}
 	h := newPermissionHarness(t, permissionChat(), settings)
 	tester := h.tester()
 	tester.Frame()
-	// Fail-closed (never) owns the contextual label; the menu row keeps the
-	// longer "从不允许" wording.
-	h.assertTexts(tester, "禁止工具")
-	h.assertNoTexts(tester, "询问")
+	h.assertTexts(tester, "只读")
+	h.assertNoTexts(tester, "禁止工具", "从不允许", "询问")
 	h.openSessionMenu(tester)
-	h.assertTexts(tester, "权限模式", "从不允许")
+	h.assertTexts(tester, "权限模式", "只读", "工作区可写", "所有权限")
+	h.assertNoTexts(tester, "从不允许")
+	readOnly, ok := tester.AccessByRole(ui.RoleMenuItemRadio, "只读")
+	if !ok || !readOnly.Checked {
+		t.Fatalf("legacy never row does not normalize to the checked read-only radio; texts = %v", tester.Texts())
+	}
 }

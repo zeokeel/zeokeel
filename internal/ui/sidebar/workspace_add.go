@@ -22,6 +22,7 @@ import (
 	"github.com/egoist/mygo/ui"
 
 	"github.com/zeokeel/zeokeel/internal/contracts"
+	"github.com/zeokeel/zeokeel/internal/design"
 )
 
 // DirectoryPicker is the sidebar's workspace directory-picker seam: the default
@@ -154,24 +155,24 @@ func buildWorkspaceDeleteDialog(c *ui.Context, workspace contracts.WorkspaceServ
 		return
 	}
 	name := firstNonEmpty(state.workspaceDeleteName, state.T("未命名工作区", "Untitled workspace"))
+	target := state.workspaceDeleteID
 	message := fmt.Sprintf(state.T("从列表中移除工作区“%s”？文件夹不会被删除。",
 		"Remove the workspace “%s” from the list? Its folder is not deleted."), name)
-	switch ui.AlertDialog(c, &state.workspaceDeleteOpen,
+	buildDangerConfirm(c, design.Of(c), &state.workspaceDeleteOpen,
 		state.T("删除工作区", "Delete workspace"), message,
-		state.T("取消", "Cancel"), state.T("删除", "Delete")) {
-	case 1:
-		if err := workspace.Delete(context.Background(), state.workspaceDeleteID); err != nil {
-			state.workspaceDeleteErr = state.T("删除工作区失败：", "Could not delete the workspace: ") + err.Error()
-		} else {
-			state.workspaceDeleteErr = ""
-			state.addWorkspaceStatus = state.T("已删除工作区", "Workspace deleted")
-		}
-		state.workspaceDeleteID = ""
-		state.workspaceDeleteName = ""
-		runtime.Invalidate()
-	case 0, ui.AlertDismissed:
-		state.workspaceDeleteID = ""
-		state.workspaceDeleteName = ""
-		runtime.Invalidate()
-	}
+		state.T("删除", "Delete"), state.T("取消", "Cancel"),
+		func() {
+			if err := workspace.Delete(context.Background(), target); err != nil {
+				state.workspaceDeleteErr = state.T("删除工作区失败：", "Could not delete the workspace: ") + err.Error()
+			} else {
+				state.workspaceDeleteErr = ""
+				state.addWorkspaceStatus = state.T("已删除工作区", "Workspace deleted")
+			}
+			runtime.Invalidate()
+		},
+		func() {
+			state.workspaceDeleteID = ""
+			state.workspaceDeleteName = ""
+			runtime.Invalidate()
+		})
 }

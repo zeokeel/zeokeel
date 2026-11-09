@@ -424,3 +424,36 @@ func TestSkillsDeleteConfirmEscapeCancels(t *testing.T) {
 	h.assertNoTexts(tester, "确认删除")
 	h.assertTexts(tester, "alpha")
 }
+
+// TestSkillsCreateDialogAutofocusAndEnter pins E-07 for the settings dialogs:
+// the first field takes the keyboard as the dialog opens, and Enter submits
+// from a single-line field (the audit found every settings dialog needed two
+// clicks: one for the field, one for the button).
+func TestSkillsCreateDialogAutofocusAndEnter(t *testing.T) {
+	dataDir := t.TempDir()
+	skills := newFakeSkills()
+	editor := newFakeSkillsEditor(skills)
+	h := skillsEditorHarness(t, skills, editor, dataDir)
+	tester := h.tester()
+
+	h.click(tester, "新建技能")
+	if !tester.Focused("名称 输入") {
+		t.Fatalf("dialog opened without focusing its first field; texts = %v", tester.Texts())
+	}
+	// Typing lands in the auto-focused name field (no click needed).
+	tester.Type("键盘技能")
+	tester.Frame()
+	h.focusInput(tester, "描述")
+	tester.Type("键盘说明")
+	h.focusInput(tester, "内容")
+	tester.Type("# 键盘正文")
+	// Enter from a single-line field submits the dialog.
+	h.focusInput(tester, "名称")
+	tester.Key(0, ui.KeyEnter)
+	tester.Frame()
+
+	creates := editor.created()
+	if len(creates) != 1 || creates[0].Name != "键盘技能" {
+		t.Fatalf("CreateSkill calls = %+v, want the Enter submit", creates)
+	}
+}

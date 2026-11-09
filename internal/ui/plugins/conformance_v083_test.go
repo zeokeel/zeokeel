@@ -28,9 +28,11 @@ func TestToolDescriptionsLocalized(t *testing.T) {
 	h := newHarness(t, nil, registry, plugins.Config{})
 	tester := h.tester()
 
-	h.assertTexts(tester, "读取工作区文件内容",
-		"Read a UTF-8 text file inside the tool root and return numbered lines")
-	h.assertNoTexts(tester, "Use offset and limit to page through large files")
+	// The row shows the one-line Chinese summary; the catalogue's English
+	// documentation stays in the tooltip instead of a second muted line.
+	h.assertTexts(tester, "读取工作区文件内容")
+	h.assertNoTexts(tester, "Read a UTF-8 text file inside the tool root and return numbered lines",
+		"Use offset and limit to page through large files")
 	// The catalogue is an official List: named, with rows named by tool name.
 	if _, ok := tester.AccessByRole(ui.RoleList, "工具目录列表"); !ok {
 		t.Fatalf("the tool catalogue is not a named list; texts = %v", tester.Texts())
@@ -62,9 +64,10 @@ func TestMCPLongErrorShortReasonAndFoldedDetail(t *testing.T) {
 	if _, ok := tester.AccessByRole(ui.RoleListItem, "broken"); !ok {
 		t.Fatalf("MCP rows are not exposed by name; texts = %v", tester.Texts())
 	}
-	// The collapsed row never renders the raw line in full.
-	if tester.HasText(strings.TrimSpace(detail)) {
-		t.Fatalf("collapsed card shows the whole raw error; texts = %v", tester.Texts())
+	// The collapsed row shows a localized cause, never the raw line.
+	h.assertTexts(tester, "无法连接到服务器")
+	if tester.HasText(strings.TrimSpace(detail)) || tester.HasText("connection refused") {
+		t.Fatalf("collapsed card shows the raw error; texts = %v", tester.Texts())
 	}
 	// The folded details keep the complete status text.
 	h.click(tester, "详情")

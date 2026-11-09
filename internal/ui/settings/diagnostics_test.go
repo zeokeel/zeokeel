@@ -31,9 +31,13 @@ func TestDiagnosticsPage(t *testing.T) {
 	ctx := cordis.Root()
 	t.Cleanup(func() { _ = ctx.DisposeAll() })
 	store := newFakeSettings(map[string]string{
-		contracts.SettingsChatModel:   "deepseek-chat",
-		contracts.SettingsChatBaseURL: "https://api.deepseek.com/v1",
-		contracts.SettingsChatAPIKey:  "sk-secret-value",
+		contracts.SettingsChatModel:      "deepseek-chat",
+		contracts.SettingsChatBaseURL:    "https://api.deepseek.com/v1",
+		contracts.SettingsChatAPIKey:     "sk-secret-value",
+		contracts.SettingWebSearchAPIKey: "sk-web-secret-value",
+		// MCP environment rows carry their own credentials; the page must mask
+		// them too (the audit caught only chat.apiKey being hidden).
+		contracts.SettingMCPServers: `[{"name":"srv","transport":"stdio","command":"run","env":["GITHUB_TOKEN=gh-secret-value","FOO=bar"]}]`,
 	})
 	chat := &fakeChat{}
 	provide(t, ctx, contracts.KeyUIRuntime, uiRoot.Runtime())
@@ -67,14 +71,24 @@ func TestDiagnosticsPage(t *testing.T) {
 			t.Fatalf("diagnostics frame missing %q; texts = %v", want, tester.Texts())
 		}
 	}
-	if tester.HasText("sk-secret-value") {
-		t.Fatalf("diagnostics leaked the API key; texts = %v", tester.Texts())
+	for _, secret := range []string{"sk-secret-value", "sk-web-secret-value", "gh-secret-value"} {
+		if tester.HasText(secret) {
+			t.Fatalf("diagnostics page leaked %q; texts = %v", secret, tester.Texts())
+		}
 	}
 	if err := tester.Click("复制诊断信息"); err != nil {
 		t.Fatalf("copy diagnostics: %v; texts = %v", err, tester.Texts())
 	}
 	clipboard := tester.Clipboard()
-	if !strings.Contains(clipboard, "Commit: abc124") || strings.Contains(clipboard, "sk-secret-value") {
+	if !strings.Contains(clipboard, "Commit: abc124") {
 		t.Fatalf("clipboard = %q", clipboard)
+	}
+	for _, secret := range []string{"sk-secret-value", "sk-web-secret-value", "gh-secret-value"} {
+		if strings.Contains(clipboard, secret) {
+			t.Fatalf("diagnostics copy leaked %q; clipboard = %q", secret, clipboard)
+		}
+	}
+	if !strings.Contains(clipboard, "已设置(隐藏)") {
+		t.Fatalf("clipboard = %q, want the masked marker", clipboard)
 	}
 }

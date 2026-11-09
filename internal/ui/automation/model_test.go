@@ -25,7 +25,10 @@ func TestCreateTaskWithModel(t *testing.T) {
 	tester.Type("使用指定模型")
 	h.click(tester, "运行计划")
 	tester.Type("every 60s")
-	h.click(tester, "模型")
+	// Models are chosen from the catalog menu; the custom entry edits an id.
+	h.click(tester, "跟随默认模型")
+	h.click(tester, "自定义模型…")
+	h.click(tester, "自定义模型 ID")
 	tester.Type(" gpt-4o ")
 	tester.Frame()
 	h.click(tester, "保存")
@@ -90,5 +93,6 @@ func TestAutomationEnglishModelField(t *testing.T) {
 	tester.Frame()
 	h.assertTexts(tester, "Model: gpt-en")
 	h.click(tester, "New task")
-	h.assertTexts(tester, "Task name", "Task prompt", "Schedule", "Model", "Save")
+	h.assertTexts(tester, "Task name", "Task prompt", "Schedule", "Model", "Save",
+		"Use the default model")
 }

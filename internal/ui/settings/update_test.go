@@ -134,7 +134,7 @@ func TestUpdatePageWithoutBackend(t *testing.T) {
 	tester := h.tester()
 	tester.Frame()
 	h.click(tester, "更新")
-	h.assertTexts(tester, "更新", "检查更新并下载安装包", "当前版本", "dev", "更新服务未启用")
+	h.assertTexts(tester, "更新", "检查更新并查看最新版本", "当前版本", "dev", "更新服务未启用")
 	// The description mentions 检查更新; the action button itself must be absent.
 	if got := exactTextCount(tester.Texts(), "检查更新"); got != 0 {
 		t.Fatalf("检查更新 button labels = %d, want 0; texts = %v", got, tester.Texts())
@@ -209,6 +209,28 @@ func TestUpdateCheckError(t *testing.T) {
 	h.click(tester, "检查更新")
 	waitForText(t, tester, "检查更新失败：update source not configured")
 	h.assertNoTexts(tester, "已是最新", "可更新")
+}
+
+// TestUpdateFeedUnconfiguredIsExplainedNotPromised pins E-03: a build whose
+// update backend reports no release feed must say so in product terms, must not
+// echo the backend's internal config key, and must not offer a check action or
+// promise a download/install it cannot perform.
+func TestUpdateFeedUnconfiguredIsExplainedNotPromised(t *testing.T) {
+	update := newFakeUpdate(contracts.UpdateInfo{})
+	update.setErr(errors.New("更新源未配置（update.feedURL）"))
+	h := newHarnessWithUpdate(t, &fakeChat{}, newFakeSettings(nil), settings.Config{},
+		update, contracts.AppInfo{Version: "1.0.0"})
+	tester := openUpdatePage(t, h)
+	h.assertNoTexts(tester, "下载安装包", "下次启动安装")
+	h.click(tester, "检查更新")
+	waitForText(t, tester, "当前构建未启用更新")
+	h.assertTexts(tester, "更新未启用", "官方发布渠道")
+	h.assertNoTexts(tester, "update.feedURL", "检查更新失败",
+		"下载更新", "下载安装包", "安装并在下次启动生效", "下次启动安装")
+	// The action disappears once the build is known to be unconfigured.
+	if got := exactTextCount(tester.Texts(), "检查更新"); got != 0 {
+		t.Fatalf("检查更新 labels = %d, want 0; texts = %v", got, tester.Texts())
+	}
 }
 
 func TestUpdateCheckingStateDisablesButton(t *testing.T) {

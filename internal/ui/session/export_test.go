@@ -145,7 +145,11 @@ func TestExportJSONL(t *testing.T) {
 		Messages: []contracts.ChatMessage{
 			{ID: "m1", Role: contracts.ChatRoleUser, Text: "你好"},
 			{ID: "m2", Role: contracts.ChatRoleAssistant, Text: "你好！", Reasoning: "思考",
-				Tools: []contracts.ToolCall{{ID: "c1", Name: "bash", Summary: "ls", Status: "completed"}}},
+				Tools: []contracts.ToolCall{{
+					ID: "c1", Name: "bash", Summary: "ls", Status: "completed",
+					Arguments:  `{"command":"ls"}`,
+					TextOffset: len("你好！"),
+				}}},
 		},
 	}, true)
 	h := newHarness(t, chat)
@@ -185,6 +189,21 @@ func TestExportJSONL(t *testing.T) {
 	}
 	if !strings.Contains(savedContent, "bash") {
 		t.Fatalf("tool call missing from jsonl: %s", savedContent)
+	}
+	// The flattened tool record keeps its transcript offset so a reader can
+	// rebuild the text/card order.
+	tools, ok := second["tools"].([]any)
+	if !ok || len(tools) != 1 {
+		t.Fatalf("tools = %v, want one flattened tool", second["tools"])
+	}
+	tool, _ := tools[0].(map[string]any)
+	if got, _ := tool["textOffset"].(float64); int(got) != len("你好！") {
+		t.Fatalf("tool textOffset = %v, want %d", tool["textOffset"], len("你好！"))
+	}
+	// S-20: the tool's input travels with the export, so a reader can audit
+	// what the call was asked to do.
+	if tool["arguments"] != `{"command":"ls"}` {
+		t.Fatalf("tool arguments = %v, want the raw call arguments", tool["arguments"])
 	}
 	if tester.HasText("导出失败") {
 		t.Fatalf("export failed; texts = %v", tester.Texts())

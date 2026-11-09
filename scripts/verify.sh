@@ -7,7 +7,7 @@
 # local Go module cache.
 #
 # Usage:
-#   scripts/verify.sh            # full: fmt/build/vet/test/-race/regression/snapshot/smokes
+#   scripts/verify.sh            # full: fmt/build/vet/designlint/mygo-vet/test/-race/regression/snapshot/smokes
 #   scripts/verify.sh --quick    # skip -race and the product smokes (fast inner loop)
 #   scripts/verify.sh --no-smoke # keep -race, skip only the product smokes
 #
@@ -158,6 +158,20 @@ check_gofmt() {
 	return 0
 }
 
+check_designlint() {
+	"$GO" run ./internal/devtools/designlint --strict --baseline .design-baseline.json ./...
+}
+
+check_design_grep() {
+	./scripts/design-check.sh
+}
+
+# Framework lifetime checks (elements/parts stored in structs, goroutines
+# capturing the UI context) through the go.mod tool directive.
+check_mygo_vet() {
+	"$GO" tool mygo vet .
+}
+
 check_regression() {
 	local log
 	log=$(mktemp "${TMPDIR:-/tmp}/zeokeel-regression.XXXXXX")
@@ -279,6 +293,9 @@ echo
 run_step "gofmt" check_gofmt
 run_step "go build ./..." "$GO" build ./...
 run_step "go vet ./..." "$GO" vet ./...
+run_step_quiet "designlint (--strict)" check_designlint
+run_step "design-check (phase 0 grep)" check_design_grep
+run_step_quiet "go tool mygo vet" check_mygo_vet
 run_step_quiet "go test ./... -count=1" "$GO" test ./... -count=1
 if [[ $RACE -eq 1 ]]; then
 	run_step_quiet "go test ./... -count=1 -race" "$GO" test ./... -count=1 -race

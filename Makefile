@@ -25,7 +25,7 @@ export GOFLAGS := -mod=mod
 # Extra arguments for `make run` (e.g. ARGS=--headless --data-dir /tmp/zk).
 ARGS ?=
 
-.PHONY: all build vet test ci run run-headless clean verify release
+.PHONY: all build vet test ci run run-headless clean verify release design-check design-baseline
 
 all: build
 
@@ -41,6 +41,21 @@ vet:
 # the embedded assemblies are exercised without a display environment.
 test:
 	$(GO) test ./... -count=1
+
+# Design contract (docs/DESIGN-LINT.md): DS-01/03/06/07/10 AST rules via the
+# designlint command, then the Phase 0 grep probes. Stock violations are
+# grandfathered in .design-baseline.json; new ones fail.
+design-check:
+	$(GO) run ./internal/devtools/designlint --strict --baseline .design-baseline.json ./...
+	./scripts/design-check.sh
+	$(GO) tool mygo vet .
+
+# Refresh the stock ledger after a migration has removed violations. The
+# baseline may only shrink in normal PRs (DESIGN-LINT §4.2); this target exists
+# for the design-system owner's cleanup commits.
+design-baseline:
+	$(GO) run ./internal/devtools/designlint --write-baseline ./...
+	@echo "updated .design-baseline.json (only remove stale entries in normal PRs)"
 
 # What CI runs.
 ci: build vet test

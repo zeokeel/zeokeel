@@ -12,7 +12,21 @@ import (
 	"github.com/zeokeel/zeokeel/internal/contracts"
 	"github.com/zeokeel/zeokeel/internal/design"
 	"github.com/zeokeel/zeokeel/internal/icons"
+	"github.com/zeokeel/zeokeel/internal/uikit"
 )
+
+// sessionScreenID is the product screen that contributes the session inspector
+// (internal/ui/session.ScreenID). The inspector reads the active session's read
+// model, so the host only offers it on that screen.
+const sessionScreenID = "session"
+
+// inspectorPaneHeaderMinWidth is the width below which the inspector module
+// hides its own pane-header close control: buildPaneClose compares the window
+// against the expanded-sidebar worst case. The host draws the docked header
+// and its close control itself there, so the close affordance is truthful at
+// the 900 DIP host minimum with the sidebar collapsed to the rail. (Phase 2
+// hands the module the real docked state, and this copy disappears.)
+var inspectorPaneHeaderMinWidth = design.SidebarWidth + design.ContentMinWidth + design.Space6 + design.InspectorMinWidth
 
 // view builds one frame. It is the product's single UI entry point:
 //
@@ -67,12 +81,22 @@ func (r *Root) view(c *ui.Context) {
 			r.sidebarExpanded(c)
 		}, func() {
 			r.contentArea(c)
-		}).SplitReset(design.SidebarWidth).Grow(1).FillHeight().Shrink(1).MinWidth(0)
+		}).SplitReset(design.SidebarWidth).
+			Label(r.tr("侧栏宽度可调", "Resizable sidebar")).
+			Grow(1).FillHeight().Shrink(1).MinWidth(0)
 		if split.Changed() {
+			// Clamp while dragging, not only when saving: Split itself allows a
+			// 40 DIP pane, and a 40-199 DIP sidebar breaks the navigation and
+			// the search field until a restart snaps it back to the saved min.
+			if clamped := clampWidth(r.sidebarWidth, minSidebarWidth, maxSidebarWidth); clamped != r.sidebarWidth {
+				r.sidebarWidth = clamped
+				c.Invalidate()
+			}
 			r.saveChromeWidths()
 		}
 	})
 
+	r.inspectorDrawerShown = false
 	r.inspectorDrawer(c)
 	r.palette(c)
 	r.overlays(c)
@@ -91,7 +115,7 @@ func (r *Root) announceNavigation(c *ui.Context) {
 	}
 	if r.rightOpen != r.lastRightOpen {
 		r.lastRightOpen = r.rightOpen
-		if r.hasAnySlot(contracts.SlotSessionPanelRight) {
+		if r.inspectorAvailable() {
 			if r.rightOpen {
 				c.Announce(r.tr("检查器已打开", "Inspector opened"))
 			} else {
@@ -127,17 +151,14 @@ func (r *Root) sidebarExpanded(c *ui.Context) {
 			design.Apply(ui.Text(c, r.appName), t.Font(design.TypeM)).FontWeight(600).
 				TextColor(t.LabelPrimary).Grow(1).MaxLines(1).Ellipsis("…")
 			collapseLabel := r.tr("折叠侧边栏", "Collapse sidebar")
-			collapse := ui.ButtonBase(c).Size(28, 28).Center().Radius(design.RadiusSM).
-				Label(collapseLabel).Tooltip(collapseLabel)
-			if collapse.Hovered() {
-				collapse = collapse.Background(t.BgHover)
-			}
-			collapse.Children(func() {
-				ui.Icon(c, icons.PanelLeft()).Size(18, 18).TextColor(t.LabelSecondary)
+			uikit.IconButton(c, uikit.IconButtonOptions{
+				Key:     "chrome.sidebar.collapse",
+				Label:   collapseLabel,
+				Tooltip: collapseLabel,
+				Icon:    icons.PanelLeft(),
+				Size:    design.IconSizeM,
+				OnClick: func() { r.SetSidebarCollapsed(true) },
 			})
-			if collapse.Clicked() {
-				r.SetSidebarCollapsed(true)
-			}
 		})
 
 		// The navigation rows, the session tree and the primary action are
@@ -191,51 +212,59 @@ func (r *Root) sidebarRail(c *ui.Context) {
 	})
 	column.Children(func() {
 		expandLabel := r.tr("展开侧边栏", "Expand sidebar")
-		expand := ui.ButtonBase(c).Size(40, 40).Radius(design.RadiusSM).
-			Label(expandLabel).Tooltip(expandLabel)
-		if expand.Hovered() {
-			expand = expand.Background(t.BgHover)
-		}
-		expand.Children(func() {
-			ui.Image(c, brand.Mark(t.Dark)).Size(24, 24)
+		// The rail's first control is the brand mark, a bitmap logo rather than
+		// an SVG glyph: it expands the sidebar, as the wordmark row does. It is
+		// the one subtle icon button of the chrome: the light plate is always
+		// there, so the brand control reads as the rail's home affordance at rest
+		// instead of appearing only under the pointer.
+		uikit.IconButton(c, uikit.IconButtonOptions{
+			Key:     "chrome.rail.expand",
+			Label:   expandLabel,
+			Tooltip: expandLabel,
+			Size:    design.IconSizeL,
+			Variant: uikit.IconButtonSubtle,
+			Content: func(cc *ui.Context) {
+				ui.Image(cc, brand.Mark(t.Dark)).Size(design.IconSizeL, design.IconSizeL)
+			},
+			OnClick: func() { r.SetSidebarCollapsed(false) },
 		})
-		if expand.Clicked() {
-			r.SetSidebarCollapsed(false)
-		}
 		for _, spec := range visibleScreens(r.rt.screenSpecs()) {
 			spec := spec
 			icon := r.screenIcon(spec.ID)
 			label := r.screenLabel(spec)
-			selected := r.nav.Current() == spec.ID
-			button := ui.ButtonBase(c).Size(40, 40).Radius(design.RadiusSM).
-				Label(label).Tooltip(label).AccessSelected(selected)
-			if selected {
-				button = button.Background(t.BgSelected)
-			}
-			button.Children(func() {
-				ui.Icon(c, icon).Size(18, 18).TextColor(t.LabelSecondary)
+			// The rail destination is a toggle-like destination, not a plain
+			// button: only the toggle role carries Selected's state to assistive
+			// technology as "pressed", so a screen reader can tell which screen
+			// the rail is on.
+			uikit.IconButton(c, uikit.IconButtonOptions{
+				Key:      "chrome.rail." + spec.ID,
+				Label:    label,
+				Tooltip:  label,
+				Icon:     icon,
+				Size:     design.IconSizeM,
+				Toggle:   true,
+				Selected: r.nav.Current() == spec.ID,
+				OnClick: func() {
+					if err := r.nav.Push(spec.ID); err != nil {
+						log.Printf("uiroot: %v", err)
+					}
+					r.requestFrame()
+				},
 			})
-			if button.Clicked() {
-				if err := r.nav.Push(spec.ID); err != nil {
-					log.Printf("uiroot: %v", err)
-				}
-				r.requestFrame()
-			}
 		}
 		ui.Spacer(c).Grow(1)
 		settingsLabel := r.locale.T("nav.settings")
-		settings := ui.ButtonBase(c).Size(40, 40).Radius(design.RadiusSM).
-			Label(settingsLabel).Tooltip(settingsLabel)
-		if settings.Hovered() {
-			settings = settings.Background(t.BgHover)
-		}
-		settings.Children(func() {
-			ui.Icon(c, icons.Sliders()).Size(18, 18).TextColor(t.LabelSecondary)
+		uikit.IconButton(c, uikit.IconButtonOptions{
+			Key:     "chrome.rail.settings",
+			Label:   settingsLabel,
+			Tooltip: settingsLabel,
+			Icon:    icons.Sliders(),
+			Size:    design.IconSizeM,
+			OnClick: func() {
+				r.nav.ToggleSettings()
+				r.requestFrame()
+			},
 		})
-		if settings.Clicked() {
-			r.nav.ToggleSettings()
-			r.requestFrame()
-		}
 	})
 }
 
@@ -328,13 +357,37 @@ func (r *Root) contentArea(c *ui.Context) {
 	if contentPaneWidth < design.Space6 {
 		contentPaneWidth = design.Space6
 	}
+	// The inner split must take the content column's whole height, as the
+	// outer sidebar split does: a split is a row whose height is its content's
+	// unless told otherwise, and the panes' FillHeight columns cannot resolve
+	// against an auto height (docs/ui/layout.md: Fill/FillHeight take the
+	// parent's whole content box; docs/ui/split.md and examples/gallery build
+	// a split with an explicit size and Fill panes). Without it the session
+	// screen renders at its intrinsic height: an empty conversation floats the
+	// composer in the middle of the window, and a long transcript grows the
+	// page past the window so the composer is pushed offscreen and the
+	// transcript List has no bounded height to scroll (the reported bug).
 	split := ui.Split(c, &contentPaneWidth, main, func() {
 		r.inspectorDockedPane(c)
-	}).SplitReset(contentWidth - design.InspectorWidth)
+	}).SplitReset(contentWidth - design.InspectorWidth).
+		Label(r.tr("右侧栏宽度可调", "Resizable right panel")).FillHeight()
 	if split.Changed() {
-		r.inspectorWidth = clampWidth(contentWidth-contentPaneWidth, minInspectorWidth, maxInspectorWidth)
+		width := clampWidth(contentWidth-contentPaneWidth, minInspectorWidth, maxInspectorWidth)
+		if width != r.inspectorWidth {
+			r.inspectorWidth = width
+			c.Invalidate()
+		}
 		r.saveChromeWidths()
 	}
+}
+
+// inspectorAvailable reports whether the window-level inspector belongs to the
+// current screen. Only the session screen contributes the right-panel slot and
+// the session read model the panes show, so the inspector has no meaning on
+// Home, Automation or Plugins; it must not open there or keep its content
+// cross-screen.
+func (r *Root) inspectorAvailable() bool {
+	return r.nav.Current() == sessionScreenID && r.hasAnySlot(contracts.SlotSessionPanelRight)
 }
 
 // contentColumnWidth estimates the room the content column and the docked
@@ -360,7 +413,7 @@ func (r *Root) contentColumnWidth(c *ui.Context) float32 {
 // a module contributes to the slot and the window can afford the inspector
 // without squeezing the content below its minimum width.
 func (r *Root) inspectorDocked(c *ui.Context) bool {
-	if !r.rightOpen || !r.hasAnySlot(contracts.SlotSessionPanelRight) {
+	if !r.rightOpen || !r.inspectorAvailable() {
 		return false
 	}
 	return !r.rightPanelDrawerOpen(c)
@@ -374,7 +427,38 @@ func (r *Root) inspectorDockedPane(c *ui.Context) {
 	ui.Column(c).FillHeight().Background(t.BgSidebar).
 		BorderWidth(1, 0, 0, 0).BorderColor(t.BorderL3).
 		Padding(design.Space4).Children(func() {
+		r.dockedInspectorHeader(c, t)
 		r.slot(c, contracts.SlotSessionPanelRight)
+	})
+}
+
+// dockedInspectorHeader draws the docked inspector's title row with its own
+// close control while the module hides its pane-header close (narrow docked
+// windows; see inspectorPaneHeaderMinWidth). The condition is the host's own
+// docked presentation: the header only shows while the pane really is docked,
+// so a narrow window with the rail gets a truthful close affordance instead of
+// a pane whose X vanished. The close has no Tooltip: a keyboard focus that
+// raised a tooltip would take the first Escape (mygo tooltips are overlays
+// with their own Escape handler), which would then leave the panel open.
+func (r *Root) dockedInspectorHeader(c *ui.Context, t *design.Tokens) {
+	width, _ := c.Size()
+	if width <= 0 || width >= inspectorPaneHeaderMinWidth {
+		return
+	}
+	ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(design.Space2).
+		Padding(0, 0, design.Space2, 0).Children(func() {
+		design.Apply(ui.Text(c, r.tr("检查器", "Inspector")), t.Font(design.TypeS)).
+			FontWeight(600).TextColor(t.LabelPrimary).Grow(1)
+		closeLabel := r.tr("关闭检查器", "Close inspector")
+		uikit.IconButton(c, uikit.IconButtonOptions{
+			Key:   "chrome.inspector.docked.close",
+			Label: closeLabel,
+			// No Tooltip here (see the function comment): a keyboard-raised
+			// tooltip would take the first Escape.
+			Icon:    icons.Close(),
+			Size:    design.IconSizeS,
+			OnClick: func() { r.setRightPanelOpen(false, true) },
+		})
 	})
 }
 
@@ -415,7 +499,7 @@ func (r *Root) contentHeader(c *ui.Context) {
 			r.paletteSelected = 0
 			r.requestFrame()
 		}
-		if !r.hasAnySlot(contracts.SlotSessionPanelRight) {
+		if !r.inspectorAvailable() {
 			return
 		}
 		label := r.tr("打开右侧栏", "Open inspector")
@@ -423,13 +507,20 @@ func (r *Root) contentHeader(c *ui.Context) {
 			label = r.tr("收起右侧栏", "Close inspector")
 		}
 		inspector := ui.Button(c, "").Label(label).Tooltip(label).
-			KeyShortcuts(ui.Cmd|ui.Alt, ui.KeyI)
+			KeyShortcuts(ui.Cmd|ui.Alt, ui.KeyI).
+			Bind(&r.inspectorToggle)
+		if r.inspectorFocusPending {
+			// The close that removed the focused control (drawer, or the
+			// narrow docked header's X) asks for the keyboard back on the
+			// toggle that opens the inspector, as a dialog returns it.
+			r.inspectorFocusPending = false
+			r.inspectorToggle.Focus(c)
+		}
 		inspector.Children(func() {
 			ui.Icon(c, icons.PanelRight()).Size(16, 16).TextColor(t.LabelSecondary)
 		})
 		if inspector.Clicked() {
-			r.rightOpen = !r.rightOpen
-			r.requestFrame()
+			r.setRightPanelOpen(!r.rightOpen, false)
 		}
 	}).Label(r.tr("窗口", "Window"))
 }
@@ -440,9 +531,10 @@ func (r *Root) contentHeader(c *ui.Context) {
 // the panel is a named RoleDialog, a press outside or Escape closes it, and the
 // focus returns to what had it when it goes.
 func (r *Root) inspectorDrawer(c *ui.Context) {
-	if !r.rightOpen || !r.hasAnySlot(contracts.SlotSessionPanelRight) || !r.rightPanelDrawerOpen(c) {
+	if !r.rightOpen || !r.inspectorAvailable() || !r.rightPanelDrawerOpen(c) {
 		return
 	}
+	r.inspectorDrawerShown = true
 	t := design.Of(c)
 	ui.Overlay(c, func() {
 		back := ui.Row(c).Absolute().Left(0).Top(0).Right(0).Bottom(0).
@@ -456,21 +548,23 @@ func (r *Root) inspectorDrawer(c *ui.Context) {
 				ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(design.Space2).Children(func() {
 					design.Apply(ui.Text(c, r.tr("检查器", "Inspector")), t.Font(design.TypeS)).
 						FontWeight(600).TextColor(t.LabelPrimary).Grow(1)
+					// No Tooltip: a keyboard-focused tooltip is an overlay with its
+					// own Escape handler (mygo tooltip.go), and it would take the
+					// first Escape before this drawer's OverlayShortcut could close
+					// it. Label keeps the button named for assistive technology.
 					closeLabel := r.tr("关闭右侧栏", "Close inspector")
-					close := ui.Button(c, "").Label(closeLabel).Tooltip(closeLabel)
+					close := ui.Button(c, "").Label(closeLabel)
 					close.Children(func() {
 						ui.Icon(c, icons.Close()).Size(16, 16).TextColor(t.LabelSecondary)
 					})
 					if close.Clicked() {
-						r.rightOpen = false
-						r.requestFrame()
+						r.setRightPanelOpen(false, true)
 					}
 				})
 				r.slot(c, contracts.SlotSessionPanelRight)
 			})
 			if panel.PressedOutside() || back.OverlayShortcut(0, ui.KeyEscape) {
-				r.rightOpen = false
-				r.requestFrame()
+				r.setRightPanelOpen(false, true)
 			}
 		})
 	})
@@ -499,7 +593,7 @@ func (r *Root) palette(c *ui.Context) {
 	}
 	t := design.Of(c)
 	ui.Modal(c, &r.paletteOpen, func() {
-		ui.Column(c).Width(560).Gap(design.Space2).Padding(design.Space4).Children(func() {
+		ui.Column(c).Width(design.DialogWidthM).Gap(design.Space2).Padding(design.Space4).Children(func() {
 			design.Apply(ui.Text(c, r.tr("命令面板", "Command palette")), t.Font(design.TypeM)).FontWeight(600).
 				TextColor(t.LabelPrimary)
 			search := ui.SearchField(c, &r.paletteQuery).
@@ -620,15 +714,22 @@ func (r *Root) movePaletteSelection(delta int) {
 	r.requestFrame()
 }
 
-// runPaletteCommand closes the palette and runs one command.
+// runPaletteCommand closes the palette and runs one command. The inspector
+// pane commands get the same closed-inspector guard the chord has, so the
+// palette cannot silently change a hidden pane either.
 func (r *Root) runPaletteCommand(cmd contracts.CommandSpec) {
 	r.paletteOpen = false
 	r.paletteQuery = ""
 	r.paletteFilter = ""
 	r.paletteSelected = 0
 	r.paletteCount = 0
-	if cmd.Run != nil {
-		_ = cmd.Run()
+	switch cmd.ID {
+	case "rightpanel.pane.prev", "rightpanel.pane.next":
+		r.runPaneCommand(cmd.ID)
+	default:
+		if cmd.Run != nil {
+			_ = cmd.Run()
+		}
 	}
 	r.requestFrame()
 }
@@ -692,7 +793,7 @@ func (r *Root) discardSettingsDrafts() {
 // window is too narrow to dock it beside the content). Mirror of rightPanel's
 // sizing decision, used to reserve the drawer's width in the content column.
 func (r *Root) rightPanelDrawerOpen(c *ui.Context) bool {
-	if !r.rightOpen || !r.hasAnySlot(contracts.SlotSessionPanelRight) {
+	if !r.rightOpen || !r.inspectorAvailable() {
 		return false
 	}
 	width, _ := c.Size()
@@ -824,17 +925,14 @@ func (r *Root) settingsTitleRow(c *ui.Context, t *design.Tokens, open *bool, dir
 		}
 		ui.Spacer(c).Grow(1)
 		closeLabel := r.tr("关闭设置", "Close settings")
-		close := ui.ButtonBase(c).Size(28, 28).Center().Radius(design.RadiusSM).
-			Label(closeLabel).Tooltip(closeLabel)
-		if close.Hovered() {
-			close = close.Background(t.BgHover)
-		}
-		close.Children(func() {
-			ui.Icon(c, icons.Close()).Size(16, 16).TextColor(t.LabelSecondary)
+		uikit.IconButton(c, uikit.IconButtonOptions{
+			Key:     "chrome.settings.close",
+			Label:   closeLabel,
+			Tooltip: closeLabel,
+			Icon:    icons.Close(),
+			Size:    design.IconSizeS,
+			OnClick: func() { *open = false },
 		})
-		if close.Clicked() {
-			*open = false
-		}
 	})
 }
 

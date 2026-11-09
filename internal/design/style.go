@@ -63,6 +63,18 @@ func (t *Tokens) Font(role TypeRole) Style {
 		return el.Font(FontStack()).FontSize(size).FixedLineHeight(line).FontWeight(weight)
 	}
 }
+
+// MonoText sets a brand type role in the brand's monospaced code face
+// (terminal output, commands, code and raw identifiers), at the Tokens'
+// TextScale. It is the mono counterpart of Text: the role still brings the
+// size, fixed line height and weight, so code text follows the desktop text
+// size like every other string instead of freezing a raw FontSize.
+func (t *Tokens) MonoText(role TypeRole) Style {
+	return func(el ui.Element) ui.Element {
+		return Apply(el, t.Font(role), t.MonoFamily())
+	}
+}
+
 func (t *Tokens) Text(role TypeRole) Style {
 	return func(el ui.Element) ui.Element {
 		return Apply(el, t.Font(role), func(e ui.Element) ui.Element { return e.TextColor(t.LabelPrimary) })

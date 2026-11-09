@@ -3,6 +3,12 @@ package agent
 // Team orchestration backend: the agent service exposes contracts.TeamService
 // over Rig's team.Manager, and Module registers the manager's model-facing tools
 // into the shared toolkit with duplicate names skipped.
+//
+// The rig manager only reports member availability, so this package wraps every
+// spawned rig.Subagent (team_state.go) to track the real run lifecycle, keeps a
+// bounded activity read model (team_activity.go) and asks the chat subscribers
+// for a frame after a team change. The inspector then shows truthful
+// running/idle/done/failed badges instead of drawing "active" as "running".
 
 import (
 	"context"
@@ -68,9 +74,11 @@ func teamExcludedTools() []string {
 // dynamicTeamRunner builds a fresh Rig subagent runner for each spawn using the
 // service's current provider/config. The configuration is deliberately resolved
 // at spawn time so a provider injection, model switch or settings change applies
-// to the next teammate.
+// to the next teammate. Every started subagent is wrapped by the team tracker so
+// its run lifecycle and completion are visible to the product.
 type dynamicTeamRunner struct {
 	service *service
+	tracker *teamTracker
 }
 
 // Start implements rig.SubagentRunner.
@@ -103,14 +111,25 @@ func (r *dynamicTeamRunner) Start(ctx context.Context, spec rig.SubagentSpec) (r
 	if err != nil {
 		return nil, fmt.Errorf("agent: team member %q: create runner: %w", strings.TrimSpace(spec.Name), err)
 	}
-	return runner.Start(ctx, spec)
+	subagent, err := runner.Start(ctx, spec)
+	if err != nil {
+		return nil, err
+	}
+	if r.tracker == nil {
+		return subagent, nil
+	}
+	return r.tracker.track(subagent, spec, cfg.Model), nil
 }
 
 // teamManagerLocked returns the service's team manager, creating it on first
-// use. The caller holds s.mu.
+// use. The caller holds s.mu. The tracker is registered for both the service
+// and the manager: the module factory builds the manager and the adapter in two
+// separate calls, so neither can carry the other's pointer.
 func (s *service) teamManagerLocked() *rigteam.Manager {
 	if s.teamManager == nil {
-		s.teamManager = rigteam.NewManager(&dynamicTeamRunner{service: s})
+		tracker := teamTrackerForService(s)
+		s.teamManager = rigteam.NewManager(&dynamicTeamRunner{service: s, tracker: tracker})
+		teamTrackers.Store(s.teamManager, tracker)
 	}
 	return s.teamManager
 }
@@ -122,42 +141,122 @@ func (s *service) teamManagerService() *rigteam.Manager {
 	return s.teamManagerLocked()
 }
 
+// notifyTeamChange asks the chat subscribers of every session for a frame after
+// a team change: the team is process-wide, so every open inspector may need to
+// repaint even when another session is active. It must not be called while
+// holding s.mu (the subscribers may hop to the UI thread).
+func (s *service) notifyTeamChange() {
+	s.mu.Lock()
+	ids := make([]string, 0, len(s.sessions))
+	for id := range s.sessions {
+		ids = append(ids, id)
+	}
+	s.mu.Unlock()
+	if len(ids) == 0 {
+		s.notify("")
+		return
+	}
+	for _, id := range ids {
+		s.notify(id)
+	}
+}
+
+// teamTrackerForService returns the run/activity tracker shared by the service,
+// its runner and its manager, creating and registering it on first use.
+func teamTrackerForService(s *service) *teamTracker {
+	return teamTrackerFor(s, func() *teamTracker {
+		return newTeamTracker(s.notifyTeamChange)
+	})
+}
+
 // teamService adapts the agent service to contracts.TeamService. The adapter
 // exists because contracts.ChatService already owns Send(sessionID, prompt);
 // TeamService has a different Send(ctx, id, message) signature.
 type teamService struct {
 	service *service
+	tracker *teamTracker
 }
 
-var _ contracts.TeamService = (*teamService)(nil)
+var (
+	_ contracts.TeamService        = (*teamService)(nil)
+	_ contracts.TeamActivityLister = (*teamService)(nil)
+)
 
 // newTeamService returns the kernel-provided team service for svc.
-func newTeamService(svc *service) *teamService { return &teamService{service: svc} }
+func newTeamService(svc *service) *teamService {
+	return &teamService{service: svc, tracker: teamTrackerForService(svc)}
+}
 
 // manager returns the underlying Rig team manager.
 func (t *teamService) manager() *rigteam.Manager { return t.service.teamManagerService() }
 
-// Members implements contracts.TeamService: the live teammates, oldest first.
+// teamTracker returns the service tracker, creating it when the adapter was
+// built before the manager (tests may construct the adapter directly).
+func (t *teamService) teamTracker() *teamTracker {
+	if t.tracker == nil {
+		t.tracker = teamTrackerForService(t.service)
+	}
+	return t.tracker
+}
+
+// Members implements contracts.TeamService: the live teammates, oldest first,
+// enriched with the truthful run state, model, timing, usage and the bounded
+// recent activity of each member.
 func (t *teamService) Members() []contracts.TeamMember {
 	manager := t.manager()
 	if manager == nil {
 		return nil
 	}
 	raw := manager.Members()
+	snapshots := t.teamTracker().reconcile(raw)
 	members := make([]contracts.TeamMember, 0, len(raw))
 	for _, member := range raw {
-		converted := contracts.TeamMember{
-			ID:      member.ID,
-			Name:    member.Name,
-			Status:  member.Status,
-			Created: member.Created,
-		}
-		if member.Last != nil {
-			converted.Last = member.Last.Output
+		converted := teamMemberFromRig(member)
+		if snapshot, ok := snapshots[member.ID]; ok {
+			applyRunSnapshot(&converted, snapshot)
 		}
 		members = append(members, converted)
 	}
 	return members
+}
+
+// teamMemberFromRig converts one manager member snapshot to the contract.
+func teamMemberFromRig(member rigteam.Member) contracts.TeamMember {
+	converted := contracts.TeamMember{
+		ID:      member.ID,
+		Name:    member.Name,
+		Status:  member.Status,
+		Created: member.Created,
+	}
+	if member.Last != nil {
+		converted.Last = member.Last.Output
+	}
+	return converted
+}
+
+// applyRunSnapshot fills the run-state half of one contract member.
+func applyRunSnapshot(member *contracts.TeamMember, snapshot teamRunSnapshot) {
+	if member == nil {
+		return
+	}
+	member.RunState = snapshot.RunState
+	member.Error = snapshot.Error
+	member.Model = snapshot.Model
+	member.Started = snapshot.Started
+	member.Finished = snapshot.Finished
+	member.UsageTokens = snapshot.UsageTokens
+	member.Iterations = snapshot.Iterations
+	if len(snapshot.Activity) > 0 {
+		member.Activity = append([]contracts.TeamActivity(nil), snapshot.Activity...)
+	}
+	if strings.TrimSpace(member.Last) == "" && strings.TrimSpace(snapshot.LastOutput) != "" {
+		// The manager records Last only on Wait/Send; the tracker observed the
+		// initial background run, so its answer fills the hole.
+		member.Last = snapshot.LastOutput
+	}
+	if member.RunState == contracts.TeamRunRunning && strings.TrimSpace(member.Error) == "" {
+		member.Last = ""
+	}
 }
 
 // Spawn implements contracts.TeamService: start a named teammate. Its initial
@@ -178,21 +277,23 @@ func (t *teamService) Spawn(ctx context.Context, name, prompt, model string) (co
 	if err != nil {
 		return contracts.TeamMember{}, err
 	}
-	converted := contracts.TeamMember{
-		ID:      member.ID,
-		Name:    member.Name,
-		Status:  member.Status,
-		Created: member.Created,
+	converted := teamMemberFromRig(member)
+	if snapshot, ok := t.teamTracker().reconcile(t.manager().Members())[member.ID]; ok {
+		applyRunSnapshot(&converted, snapshot)
 	}
-	if member.Last != nil {
-		converted.Last = member.Last.Output
-	}
+	t.teamTracker().notifyChange()
 	return converted, nil
 }
 
 // SendAsync implements contracts.TeamService.
 func (t *teamService) SendAsync(id, message string) error {
-	return t.manager().SendAsync(id, message)
+	err := t.manager().SendAsync(id, message)
+	if err != nil {
+		t.teamTracker().addActivity(nil, "", contracts.TeamActivityError,
+			"发送消息失败："+err.Error(), true)
+	}
+	t.teamTracker().notifyChange()
+	return err
 }
 
 // Send implements contracts.TeamService.
@@ -212,6 +313,11 @@ func (t *teamService) Wait(ctx context.Context, id string) (string, error) {
 	if ctx == nil {
 		ctx = context.Background()
 	}
+	memberID, name := t.resolveMemberRef(id)
+	if run := t.teamTracker().runForRef(id); run != nil || name != "" {
+		t.teamTracker().addActivity(run, memberID, contracts.TeamActivityWait,
+			fmt.Sprintf("等待「%s」的当前运行", teamDisplayName(name, id)), false)
+	}
 	result, err := t.manager().Wait(ctx, id)
 	if err != nil {
 		return "", err
@@ -226,17 +332,66 @@ func (t *teamService) Wait(ctx context.Context, id string) (string, error) {
 
 // Interrupt implements contracts.TeamService.
 func (t *teamService) Interrupt(id string) error {
-	return t.manager().Interrupt(id)
+	err := t.manager().Interrupt(id)
+	if err != nil {
+		t.teamTracker().addActivity(nil, "", contracts.TeamActivityError,
+			"中断失败："+err.Error(), true)
+	}
+	t.teamTracker().reconcile(t.manager().Members())
+	t.teamTracker().notifyChange()
+	return err
 }
 
 // Close implements contracts.TeamService.
 func (t *teamService) Close(id string) error {
-	return t.manager().Close(id)
+	memberID, name := t.resolveMemberRef(id)
+	run := t.teamTracker().runForRef(id)
+	if err := t.manager().Close(id); err != nil {
+		t.teamTracker().addActivity(run, memberID, contracts.TeamActivityError,
+			"关闭失败："+err.Error(), true)
+		t.teamTracker().notifyChange()
+		return err
+	}
+	t.teamTracker().addActivity(run, memberID, contracts.TeamActivityClose,
+		fmt.Sprintf("关闭「%s」", teamDisplayName(name, id)), false)
+	if memberID != "" {
+		t.teamTracker().release(memberID)
+	}
+	t.teamTracker().reconcile(t.manager().Members())
+	t.teamTracker().notifyChange()
+	return nil
+}
+
+// resolveMemberRef resolves a member reference (id, target or unique name) to
+// the manager's member ID and display name; both "" when unknown.
+func (t *teamService) resolveMemberRef(ref string) (id, name string) {
+	manager := t.manager()
+	if manager == nil {
+		return "", ""
+	}
+	ref = strings.TrimSpace(ref)
+	for _, member := range manager.Members() {
+		if member.ID == ref || (ref != "" && member.Name == ref) {
+			return member.ID, member.Name
+		}
+	}
+	return "", ""
+}
+
+// teamDisplayName returns the first non-empty trimmed name.
+func teamDisplayName(values ...string) string {
+	for _, value := range values {
+		if trimmed := strings.TrimSpace(value); trimmed != "" {
+			return trimmed
+		}
+	}
+	return ""
 }
 
 // newTeamTools builds every model-facing team tool group for the manager:
 // native team_* tools, legacy aliases and the DSH-compatible spawn/list/wait
-// set. The caller filters duplicate names before registering them.
+// set. Each tool is wrapped so its invocation lands in the bounded team
+// activity read model (the run lifecycle itself is tracked in team_state.go).
 func newTeamTools(manager *rigteam.Manager) []rig.Tool {
 	if manager == nil {
 		return nil
@@ -244,5 +399,16 @@ func newTeamTools(manager *rigteam.Manager) []rig.Tool {
 	tools := manager.Tools()
 	tools = append(tools, manager.LegacyTools(nil)...)
 	tools = append(tools, rigteam.DSHTools(manager)...)
-	return tools
+	tracker := teamTrackerFor(manager, nil)
+	if tracker == nil {
+		return tools
+	}
+	wrapped := make([]rig.Tool, 0, len(tools))
+	for _, tool := range tools {
+		if tool == nil {
+			continue
+		}
+		wrapped = append(wrapped, &trackedTeamTool{inner: tool, tracker: tracker, manager: manager})
+	}
+	return wrapped
 }

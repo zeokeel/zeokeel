@@ -5,6 +5,7 @@ package toolcards_test
 // native collapsibles and the demo card keeps its historical output.
 
 import (
+	"strings"
 	"time"
 
 	"testing"
@@ -294,5 +295,152 @@ func TestDisposeRemovesCards(t *testing.T) {
 	}
 	if tester.HasText("运行命令") {
 		t.Fatalf("card still rendered after disposal; texts = %v", tester.Texts())
+	}
+}
+
+// TestCancelledStatusIsNeutral covers S-05 for the registered tool cards: a
+// user-cancelled call reads 已取消 in the neutral color and never 失败.
+func TestCancelledStatusIsNeutral(t *testing.T) {
+	h := newHarness(t)
+	activate(t, h.ctx, toolcards.Module(), toolcards.Config{})
+	h.showCalls([]contracts.ToolCall{
+		{ID: "c1", Name: "bash", Status: "cancelled"},
+		{ID: "f1", Name: "bash", Status: "failed"},
+	}, nil, nil)
+	tester := h.tester()
+	h.assertTexts(tester, "已取消", "失败")
+	h.assertNoTexts(tester, "cancelled")
+}
+
+// TestShortSummaryRenderedOnce covers S-12 for the registered cards: a short
+// result starts expanded (H15), so the open panel is the one place its text
+// reads; the trigger must not repeat it as a preview.
+func TestShortSummaryRenderedOnce(t *testing.T) {
+	h := newHarness(t)
+	activate(t, h.ctx, toolcards.Module(), toolcards.Config{})
+	summary := "stdout: 全部测试通过"
+	h.showCalls([]contracts.ToolCall{{ID: "b1", Name: "bash", Status: "ok", Summary: summary}}, nil, nil)
+	tester := h.tester()
+	info, ok := tester.AccessByRole(ui.RoleDisclosure, "运行命令 · 完成")
+	if !ok || !info.Expanded {
+		t.Fatalf("short result disclosure: %+v found %v", info, ok)
+	}
+	count := 0
+	for _, text := range tester.Texts() {
+		if strings.Contains(text, summary) {
+			count++
+		}
+	}
+	if count != 1 {
+		t.Fatalf("short summary rendered %d times, want once; texts = %v", count, tester.Texts())
+	}
+}
+
+// --- Batch B: tool input/output visibility ---------------------------------
+
+// TestBashCardShowsInputOutputAndCopies covers S-02/S-03/S-20: a bash card's
+// expanded panel shows the command it ran and the full bounded output, each
+// copyable.
+func TestBashCardShowsInputOutputAndCopies(t *testing.T) {
+	h := newHarness(t)
+	activate(t, h.ctx, toolcards.Module(), toolcards.Config{})
+	h.showCalls([]contracts.ToolCall{{
+		ID: "b1", Name: "bash", Status: "ok",
+		Arguments: `{"command":"go test ./internal/ui/toolcards -count=1"}`,
+		Summary:   "ok  \nok\nFAIL internal/ui/session",
+	}}, nil, nil)
+	tester := h.tester()
+	h.assertTexts(tester, "运行命令", "命令", "输出",
+		"go test ./internal/ui/toolcards -count=1", "FAIL internal/ui/session")
+	h.click(tester, "复制命令")
+	if got := tester.Clipboard(); got != "go test ./internal/ui/toolcards -count=1" {
+		t.Fatalf("clipboard = %q, want the command", got)
+	}
+	h.click(tester, "复制输出")
+	if got := tester.Clipboard(); got != "ok  \nok\nFAIL internal/ui/session" {
+		t.Fatalf("clipboard = %q, want the tool output", got)
+	}
+}
+
+// TestEditCardShowsBeforeAfter covers S-02 for edits: the panel shows the path
+// and both sides of the replacement.
+func TestEditCardShowsBeforeAfter(t *testing.T) {
+	h := newHarness(t)
+	activate(t, h.ctx, toolcards.Module(), toolcards.Config{})
+	h.showCalls([]contracts.ToolCall{{
+		ID: "e1", Name: "edit_file", Status: "ok",
+		Arguments: `{"path":"internal/app.go","old_string":"return nil","new_string":"return err"}`,
+		Summary:   "edited internal/app.go",
+	}}, nil, nil)
+	tester := h.tester()
+	h.assertTexts(tester, "编辑文件", "路径", "替换前", "替换后",
+		"internal/app.go", "return nil", "return err")
+}
+
+// TestGenericToolInputPrettyJSON covers the fallback input of a tool without a
+// specialized renderer: arguments read as indented JSON.
+func TestGenericToolInputPrettyJSON(t *testing.T) {
+	h := newHarness(t)
+	activate(t, h.ctx, toolcards.Module(), toolcards.Config{})
+	h.showCalls([]contracts.ToolCall{{
+		ID: "g1", Name: "grep", Status: "ok",
+		Arguments: `{"pattern":"func main","path":"cmd"}`,
+		Summary:   "cmd/main.go:3:func main()",
+	}}, nil, nil)
+	tester := h.tester()
+	h.assertTexts(tester, "输入", "pattern", "func main")
+}
+
+// TestTruncatedOutputShowsHint covers S-03's truncation notice: a read-model
+// summary cut at the backend bound says so instead of pretending it is whole.
+func TestTruncatedOutputShowsHint(t *testing.T) {
+	h := newHarness(t)
+	activate(t, h.ctx, toolcards.Module(), toolcards.Config{})
+	summary := strings.Repeat("x", 3999) + "…"
+	h.showCalls([]contracts.ToolCall{{
+		ID: "t1", Name: "bash", Status: "ok",
+		Arguments: `{"command":"seq 1 400"}`,
+		Summary:   summary,
+	}}, nil, nil)
+	tester := h.tester()
+	// The long output starts folded (H15): open the row to read the panel.
+	h.click(tester, "运行命令")
+	h.assertTexts(tester, "输出已截断，仅显示前部分")
+}
+
+// TestTeamToolFooterRunsInspectorCommand covers the cross-navigation footer:
+// a subagent card opens the inspector's team pane through the stable command,
+// and a host without the command shows no footer action at all.
+func TestTeamToolFooterRunsInspectorCommand(t *testing.T) {
+	h := newHarness(t)
+	activate(t, h.ctx, toolcards.Module(), toolcards.Config{})
+	ran := 0
+	if _, err := h.ui.Runtime().RegisterCommand(contracts.CommandSpec{
+		ID:    "rightpanel.team.open",
+		Title: "打开团队面板",
+		Run:   func() error { ran++; return nil },
+	}); err != nil {
+		t.Fatalf("register command: %v", err)
+	}
+	h.showCalls([]contracts.ToolCall{{
+		ID: "s1", Name: "subagent", Status: "ok",
+		Arguments: `{"prompt":"总结当前工作目录"}`,
+		Summary:   "子代理已完成",
+	}}, nil, nil)
+	tester := h.tester()
+	h.assertTexts(tester, "在团队中查看")
+	h.click(tester, "在团队中查看")
+	if ran != 1 {
+		t.Fatalf("team command runs = %d, want 1", ran)
+	}
+
+	// No command registered: the action is not shown (never a dead button).
+	plain := newHarness(t)
+	activate(t, plain.ctx, toolcards.Module(), toolcards.Config{})
+	plain.showCalls([]contracts.ToolCall{{
+		ID: "s2", Name: "subagent", Status: "ok", Summary: "子代理已完成",
+	}}, nil, nil)
+	if plain.tester().HasText("在团队中查看") {
+		t.Fatal("team footer shown without the inspector command")
 	}
 }

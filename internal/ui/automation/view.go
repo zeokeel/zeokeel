@@ -3,7 +3,6 @@ package automation
 import (
 	"context"
 	"fmt"
-	"strconv"
 	"strings"
 	"time"
 
@@ -25,6 +24,17 @@ func buildScreen(c *ui.Context, runtime contracts.UIRuntime, navigator contracts
 		return
 	}
 
+	// Esc cancels the inline form, as every other form/dialog in the product:
+	// without it the only way out of a mistaken "New task" was the Cancel button
+	// far below the fields.
+	c.OnShortcut(0, ui.KeyEscape, func() {
+		if !st.formOpen {
+			return
+		}
+		st.closeForm()
+		runtime.Invalidate()
+	})
+
 	ui.Column(c).FillWidth().Grow(1).Gap(design.Space4).Children(func() {
 		// Page header: title + description on the left, the primary New action
 		// on the right (the one accent action of the page).
@@ -38,8 +48,11 @@ func buildScreen(c *ui.Context, runtime contracts.UIRuntime, navigator contracts
 					t.TextMuted(design.TypeXS)).MaxLines(2)
 			})
 			if create := design.Apply(ui.PrimaryButton(c, st.localized(cfg.NewLabel, "新建任务", "New task")), t.PrimaryButton()); create.Clicked() {
-				st.formOpen = !st.formOpen
-				st.formErr = ""
+				if st.formOpen {
+					st.closeForm()
+				} else {
+					st.openCreateForm()
+				}
 				runtime.Invalidate()
 			}
 		})
@@ -53,7 +66,8 @@ func buildScreen(c *ui.Context, runtime contracts.UIRuntime, navigator contracts
 
 		tasks, err := service.List(context.Background())
 		if err != nil {
-			uikit.ErrorLine(c, st.tr("读取任务失败：", "Failed to read tasks: ")+err.Error())
+			uikit.ErrorLine(c, automationErrorText(st,
+				st.tr("读取任务失败：", "Failed to read tasks: "), err))
 			return
 		}
 		buildTaskToolbar(c, t, runtime, st)
@@ -63,6 +77,13 @@ func buildScreen(c *ui.Context, runtime contracts.UIRuntime, navigator contracts
 				t.Font(design.TypeXXS)).TextColor(t.LabelTertiary)
 		}
 		switch {
+		case len(tasks) == 0 && st.formOpen:
+			// The form above is the way forward: a second "create" call to action
+			// exactly when the user is already filling the form competed with its
+			// Save button.
+			design.Apply(ui.Text(c, st.tr("填写上方表单并保存即可创建任务。",
+				"Fill the form above and save to create the task.")),
+				t.TextMuted(design.TypeXS))
 		case len(tasks) == 0:
 			uikit.EmptyStateBlock(c,
 				st.localized(cfg.EmptyText, "还没有自动化任务", "No automation tasks yet"),
@@ -72,11 +93,13 @@ func buildScreen(c *ui.Context, runtime contracts.UIRuntime, navigator contracts
 					first := design.Apply(ui.PrimaryButton(c, st.tr("创建第一个任务", "Create the first task")),
 						t.PrimaryButton())
 					if first.Clicked() {
-						st.formOpen = true
-						st.formErr = ""
+						st.openCreateForm()
 						runtime.Invalidate()
 					}
 				})
+		case len(filtered) == 0 && st.formOpen:
+			design.Apply(ui.Text(c, st.tr("没有匹配的任务。", "No matching tasks.")),
+				t.TextMuted(design.TypeXS))
 		case len(filtered) == 0:
 			uikit.EmptyStateBlock(c, st.tr("没有匹配的任务", "No matching tasks"),
 				st.tr("换个关键词或清空筛选试试。", "Try another search term or clear the filter."), nil)
@@ -202,7 +225,8 @@ func buildTaskCard(c *ui.Context, t *design.Tokens, service contracts.Automation
 				updated := task
 				updated.Enabled = enabled
 				if _, err := service.Update(context.Background(), updated); err != nil {
-					st.pageErr = st.tr("更新任务失败：", "Failed to update task: ") + err.Error()
+					st.pageErr = automationErrorText(st,
+						st.tr("更新任务失败：", "Failed to update task: "), err)
 				} else {
 					st.pageErr = ""
 				}
@@ -216,7 +240,7 @@ func buildTaskCard(c *ui.Context, t *design.Tokens, service contracts.Automation
 				TextColor(t.LabelSecondary).MaxLines(1).Ellipsis("…").
 				Tooltip(st.tr("原始计划：", "Raw schedule: ") + task.Schedule)
 		} else {
-			design.Apply(ui.Text(c, task.Schedule), t.MonoFamily()).FontSize(11).
+			design.Apply(ui.Text(c, task.Schedule), t.MonoText(design.TypeXXXS)).
 				TextColor(t.LabelTertiary).MaxLines(1).Ellipsis("…")
 		}
 		// Metadata is background information: one muted line, not three badges
@@ -226,7 +250,9 @@ func buildTaskCard(c *ui.Context, t *design.Tokens, service contracts.Automation
 			meta = append(meta, st.tr("模型：", "Model: ")+model)
 		}
 		if workspaceID := strings.TrimSpace(task.WorkspaceID); workspaceID != "" {
-			meta = append(meta, st.tr("工作区：", "Workspace: ")+workspaceID)
+			// The card names the workspace like the form's selector did; the raw
+			// settings id is an implementation detail users cannot read.
+			meta = append(meta, st.tr("工作区：", "Workspace: ")+st.workspaceDisplayName(workspaceID))
 		}
 		if permission := strings.TrimSpace(task.Permission); permission != "" {
 			meta = append(meta, st.tr("权限：", "Permission: ")+automationPermissionLabel(st, permission))
@@ -242,16 +268,30 @@ func buildTaskCard(c *ui.Context, t *design.Tokens, service contracts.Automation
 				TextColor(t.LabelTertiary)
 		})
 		if strings.TrimSpace(task.LastError) != "" {
-			uikit.ErrorLine(c, st.tr("上次错误：", "Last error: ")+task.LastError)
+			uikit.ErrorLine(c, st.tr("上次错误：", "Last error: ")+automationRawErrorText(st, task.LastError))
 		}
 		buildTaskHistory(c, t, st, task)
 		ui.Row(c).FillWidth().Gap(design.Space2).AlignItems(ui.Center).Children(func() {
-			runNow := ui.Button(c, st.tr("立即运行", "Run now")).Tooltip(st.tr("立即执行一次该任务", "Run this task once now"))
-			if runNow.Clicked() {
+			running := st.taskRunning(task)
+			if running {
+				// The backend runs "Run now" in its own goroutine: until it
+				// records the run, the card says it is in flight instead of
+				// leaving the user wondering whether the click worked.
+				ui.Spinner(c).Label(st.tr("运行中…", "Running…")).
+					Size(design.Space3, design.Space3).TextColor(t.LabelSecondary)
+				design.Apply(ui.Text(c, st.tr("运行中…", "Running…")),
+					t.Font(design.TypeXXS)).TextColor(t.WarningText)
+			}
+			runNow := design.Apply(ui.Button(c, st.tr("立即运行", "Run now")),
+				t.SecondaryButton()).Tooltip(st.tr("立即执行一次该任务", "Run this task once now")).
+				Disabled(running)
+			if runNow.Clicked() && !running {
 				if err := service.RunNow(context.Background(), task.ID); err != nil {
-					st.pageErr = st.tr("运行任务失败：", "Failed to run task: ") + err.Error()
+					st.pageErr = automationErrorText(st,
+						st.tr("运行任务失败：", "Failed to run task: "), err)
 				} else {
 					st.pageErr = ""
+					st.markRunning(task.ID)
 				}
 				runtime.Invalidate()
 			}
@@ -275,11 +315,20 @@ func buildTaskCard(c *ui.Context, t *design.Tokens, service contracts.Automation
 }
 
 // runStatusLabel renders one run status label.
+// runStatusLabel names a finished run. The backend's success status means the
+// prompt was delivered to a fresh session, not that the agent's work succeeded:
+// the label says 已投递 (sent) so the UI does not claim an outcome it cannot see.
 func runStatusLabel(st *state, status string) string {
 	if status == contracts.AutomationRunFailure {
 		return st.tr("失败", "Failed")
 	}
-	return st.tr("成功", "Success")
+	return st.tr("已投递", "Sent")
+}
+
+// automationRunOutcomeHint explains that a successful delivery says nothing
+// about the session's result.
+func automationRunOutcomeHint(st *state) string {
+	return st.tr("结果由会话决定", "The result depends on that session")
 }
 
 // automationRunSummary renders one run record's summary for the UI. The
@@ -324,6 +373,13 @@ func buildTaskHistory(c *ui.Context, t *design.Tokens, st *state, task contracts
 				t.Font(design.TypeXXS)).
 				TextColor(t.LabelTertiary).Grow(1).MaxLines(1).Ellipsis("…").
 				Tooltip(strings.TrimSpace(latest.Summary))
+			if latest.Status != contracts.AutomationRunFailure {
+				design.Apply(ui.Text(c, automationRunOutcomeHint(st)), t.Font(design.TypeXXXS)).
+					TextColor(t.LabelTertiary).NoWrap()
+			}
+			if sessionID := automationRunSessionID(latest.Summary); sessionID != "" {
+				st.buildOpenSessionButton(c, t, sessionID)
+			}
 		} else {
 			ui.Spacer(c).Grow(1)
 		}
@@ -337,14 +393,22 @@ func buildTaskHistory(c *ui.Context, t *design.Tokens, st *state, task contracts
 		for _, record := range task.RunHistory {
 			record := record
 			ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(design.Space2).Children(func() {
-				design.Apply(ui.Text(c, formatTaskClock(st, record.StartedAt)), t.MonoFamily()).
-					FontSize(11).TextColor(t.LabelTertiary).NoWrap()
+				started := firstNonEmpty(uikit.FormatDateTime(st.locale, record.StartedAt), "—")
+				design.Apply(ui.Text(c, started), t.MonoText(design.TypeXXXS)).
+					TextColor(t.LabelTertiary).NoWrap()
 				design.Apply(ui.Badge(c, runStatusLabel(st, record.Status)), t.Badge()).
 					TextColor(runStatusColor(t, record.Status))
 				design.Apply(ui.Text(c, firstNonEmpty(automationRunSummary(st, record.Summary), "—")),
 					t.Font(design.TypeXXS)).
 					TextColor(t.LabelSecondary).Grow(1).MaxLines(1).Ellipsis("…").
 					Tooltip(strings.TrimSpace(record.Summary))
+				if record.Status != contracts.AutomationRunFailure {
+					design.Apply(ui.Text(c, automationRunOutcomeHint(st)), t.Font(design.TypeXXXS)).
+						TextColor(t.LabelTertiary).NoWrap()
+				}
+				if sessionID := automationRunSessionID(record.Summary); sessionID != "" {
+					st.buildOpenSessionButton(c, t, sessionID)
+				}
 			})
 		}
 	})
@@ -354,6 +418,10 @@ func buildTaskHistory(c *ui.Context, t *design.Tokens, st *state, task contracts
 // buildCreateForm is the inline task creation card: a native Form with visible
 // field labels (the old form used placeholders as labels).
 func buildCreateForm(c *ui.Context, t *design.Tokens, service contracts.AutomationService, runtime contracts.UIRuntime, st *state) {
+	// Recompute the schedule field's error and its next-run preview from the
+	// draft every frame: typing updates the preview immediately, and the error
+	// clears as soon as the draft becomes valid again.
+	validateScheduleDraft(st)
 	name := strings.TrimSpace(st.formName)
 	prompt := strings.TrimSpace(st.formPrompt)
 	schedule := strings.TrimSpace(st.formSchedule)
@@ -378,11 +446,24 @@ func buildCreateForm(c *ui.Context, t *design.Tokens, service contracts.Automati
 					FillWidth().MinHeight(design.Space6 * 4)
 			})
 			ui.Field(c, st.tr("运行计划", "Schedule"), func() {
-				ui.TextInput(c, &st.formSchedule).Placeholder("*/5 * * * * " + st.tr("或", "or") + " every 60s").FillWidth()
-			})
+				ui.TextInput(c, &st.formSchedule).
+					Placeholder("*/5 * * * * " + st.tr("或", "or") + " every 60s").FillWidth()
+			}).Description(st.tr(
+				"支持 */N * * * *（每 N 分钟）、M H * * *（每天 HH:MM）、@hourly、@daily、every <N>s、after <N>s。",
+				"Supports */N * * * * (every N minutes), M H * * * (daily at HH:MM), @hourly, @daily, every <N>s, after <N>s.")).
+				Error(st.scheduleErr)
+			if st.schedulePreview != "" {
+				design.Apply(ui.Text(c, st.schedulePreview), t.Font(design.TypeXXS)).
+					TextColor(t.LabelSecondary).MaxLines(1).Ellipsis("…")
+			}
 			ui.Field(c, st.tr("模型", "Model"), func() {
-				ui.TextInput(c, &st.formModel).Placeholder(st.tr("默认模型", "Default model")).FillWidth()
-			})
+				buildModelSelector(c, st)
+			}).Description(st.tr("留空跟随默认模型；可从内置目录选择，也可自定义模型 ID。",
+				"Empty follows the default model; pick a built-in preset or type a custom model id."))
+			if hint := automationModelHint(st, st.formModel); hint != "" {
+				design.Apply(ui.Text(c, hint), t.Font(design.TypeXXS)).
+					TextColor(t.WarningText).MaxLines(2)
+			}
 			ui.Field(c, st.tr("工作区", "Workspace"), func() {
 				buildWorkspaceSelector(c, st)
 			})
@@ -393,22 +474,27 @@ func buildCreateForm(c *ui.Context, t *design.Tokens, service contracts.Automati
 				ui.Switch(c, &st.formEnabled).Label(st.tr("启用任务", "Enable task"))
 			})
 		})
-		design.Apply(ui.Text(c, st.tr(
-			"支持 cron 子集（分 时 日 月 周）与 every <duration>（如 every 60s）。",
-			"Supports a cron subset (minute hour day month weekday) and every <duration> (e.g. every 60s).")),
-			t.TextMuted(design.TypeXXXS)).MaxLines(2)
 		ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(design.Space2).Children(func() {
 			ui.Spacer(c).Grow(1)
 			cancel := design.Apply(ui.Button(c, st.tr("取消", "Cancel")), t.SecondaryButton())
 			if cancel.Clicked() {
-				st.formOpen = false
-				st.formErr = ""
-				st.formEditID = ""
-				st.formEditTask = contracts.AutomationTask{}
+				st.closeForm()
 				runtime.Invalidate()
 			}
 			save := design.Apply(ui.PrimaryButton(c, st.tr("保存", "Save")), t.PrimaryButton()).Disabled(!valid)
 			if save.Clicked() && valid {
+				// Validate the schedule with the same parser the backend runs so
+				// an invalid draft is reported at the field, not as an English
+				// backend error after a round trip.
+				if raw := strings.TrimSpace(st.formSchedule); raw != "" {
+					if _, err := contracts.ParseAutomationSchedule(raw); err != nil {
+						st.scheduleErr = st.tr("运行计划无效：请检查格式与取值。",
+							"Invalid schedule: check the format and values.")
+						st.schedulePreview = ""
+						runtime.Invalidate()
+						return
+					}
+				}
 				task := contracts.AutomationTask{
 					Name:        name,
 					Prompt:      prompt,
@@ -437,7 +523,7 @@ func buildCreateForm(c *ui.Context, t *design.Tokens, service contracts.Automati
 					if st.formEditID != "" {
 						action = st.tr("保存任务失败：", "Failed to save task: ")
 					}
-					st.formErr = action + err.Error()
+					st.formErr = automationErrorText(st, action, err)
 				} else {
 					st.resetForm()
 				}
@@ -448,24 +534,6 @@ func buildCreateForm(c *ui.Context, t *design.Tokens, service contracts.Automati
 			uikit.ErrorLine(c, st.formErr)
 		}
 	})
-}
-
-// openEditForm opens the inline form prefilled with one task: the form's save
-// action calls Update instead of Create, so a schedule or prompt can be fixed
-// without deleting and recreating the task.
-func openEditForm(st *state, task contracts.AutomationTask) {
-	st.formOpen = true
-	st.formErr = ""
-	st.formEditID = task.ID
-	st.formEditTask = task
-	st.formName = task.Name
-	st.formPrompt = task.Prompt
-	st.formModel = task.Model
-	st.formSchedule = task.Schedule
-	st.formWorkspaceID = task.WorkspaceID
-	st.formWorkspaceName = ""
-	st.formPermission = task.Permission
-	st.formEnabled = task.Enabled
 }
 
 // resetForm clears the inline form and its edit target after a successful save.
@@ -484,62 +552,288 @@ func (st *state) resetForm() {
 	st.formEditTask = contracts.AutomationTask{}
 }
 
-// humanSchedule renders the human-readable form of the schedule shapes the
-// product documents (cron subset and "every <duration>"); an unrecognized
-// expression returns "" and the card shows the raw text instead.
+// humanSchedule renders the human-readable form of a stored schedule through the
+// shared parser: the card and the form preview show the same wording. An
+// unrecognized expression returns "" and the card shows the raw text instead.
 func humanSchedule(st *state, raw string) string {
-	schedule := strings.TrimSpace(raw)
-	lower := strings.ToLower(schedule)
-	if strings.HasPrefix(lower, "every ") {
-		if d, err := time.ParseDuration(strings.TrimSpace(lower[len("every "):])); err == nil && d > 0 {
-			return st.tr("每 ", "Every ") + humanScheduleDuration(st, d)
-		}
+	schedule, err := contracts.ParseAutomationSchedule(raw)
+	if err != nil {
 		return ""
 	}
-	fields := strings.Fields(schedule)
-	if len(fields) != 5 {
-		return ""
-	}
-	step := func(field string) (int, bool) {
-		if !strings.HasPrefix(field, "*/") {
-			return 0, false
-		}
-		n, err := strconv.Atoi(strings.TrimPrefix(field, "*/"))
-		return n, err == nil && n > 0
-	}
-	if n, ok := step(fields[0]); ok && fields[1] == "*" && fields[2] == "*" && fields[3] == "*" && fields[4] == "*" {
-		return st.tr("每 ", "Every ") + st.tr(fmt.Sprintf("%d 分钟", n), fmt.Sprintf("%d minutes", n))
-	}
-	if fields[0] == "0" {
-		if n, ok := step(fields[1]); ok && fields[2] == "*" && fields[3] == "*" && fields[4] == "*" {
-			return st.tr("每 ", "Every ") + st.tr(fmt.Sprintf("%d 小时", n), fmt.Sprintf("%d hours", n))
-		}
-	}
-	if fields[2] == "*" && fields[3] == "*" && fields[4] == "*" {
-		minute, merr := strconv.Atoi(fields[0])
-		hour, herr := strconv.Atoi(fields[1])
-		if merr == nil && herr == nil && minute >= 0 && minute < 60 && hour >= 0 && hour < 24 {
-			return st.tr(fmt.Sprintf("每天 %02d:%02d", hour, minute),
-				fmt.Sprintf("Daily at %02d:%02d", hour, minute))
-		}
-	}
-	return ""
+	return automationScheduleLabel(st, schedule)
 }
 
-// humanScheduleDuration renders one positive duration as the largest whole
-// unit, e.g. 24h -> "24 小时".
-func humanScheduleDuration(st *state, d time.Duration) string {
-	switch {
-	case d%time.Hour == 0:
-		hours := int(d / time.Hour)
-		return st.tr(fmt.Sprintf("%d 小时", hours), fmt.Sprintf("%d hours", hours))
-	case d%time.Minute == 0:
-		minutes := int(d / time.Minute)
-		return st.tr(fmt.Sprintf("%d 分钟", minutes), fmt.Sprintf("%d minutes", minutes))
+// automationScheduleLabel renders one parsed schedule in the frame's language.
+func automationScheduleLabel(st *state, schedule contracts.AutomationSchedule) string {
+	switch schedule.Kind() {
+	case contracts.AutomationScheduleEveryMinutes:
+		minutes := schedule.EveryMinutes()
+		if minutes == 1 {
+			return st.tr("每分钟", "Every minute")
+		}
+		return st.tr(fmt.Sprintf("每 %d 分钟", minutes), fmt.Sprintf("Every %d minutes", minutes))
+	case contracts.AutomationScheduleHourly:
+		return st.tr("每小时", "Every hour")
+	case contracts.AutomationScheduleDaily:
+		hour, minute, _ := schedule.HourMinute()
+		return st.tr(fmt.Sprintf("每天 %02d:%02d", hour, minute),
+			fmt.Sprintf("Daily at %02d:%02d", hour, minute))
+	case contracts.AutomationScheduleEverySeconds:
+		seconds := schedule.IntervalSeconds()
+		return st.tr(fmt.Sprintf("每 %d 秒", seconds), fmt.Sprintf("Every %d seconds", seconds))
+	case contracts.AutomationScheduleOnceAfter:
+		seconds := schedule.IntervalSeconds()
+		return st.tr(fmt.Sprintf("%d 秒后运行一次", seconds),
+			fmt.Sprintf("Once after %d seconds", seconds))
 	default:
-		seconds := int(d / time.Second)
-		return st.tr(fmt.Sprintf("%d 秒", seconds), fmt.Sprintf("%d seconds", seconds))
+		return schedule.String()
 	}
+}
+
+// automationSchedulePreview composes the valid-draft preview line: the next run
+// instant plus the human-readable shape.
+func automationSchedulePreview(st *state, schedule contracts.AutomationSchedule) string {
+	next := uikit.FormatDateTime(st.locale, schedule.Next(time.Now()))
+	return st.tr("下次运行：", "Next run: ") + next + " · " + automationScheduleLabel(st, schedule)
+}
+
+// validateScheduleDraft recomputes the field error and preview from the draft.
+// It returns false when the draft is non-empty and invalid.
+func validateScheduleDraft(st *state) bool {
+	st.scheduleErr = ""
+	st.schedulePreview = ""
+	raw := strings.TrimSpace(st.formSchedule)
+	if raw == "" {
+		return true
+	}
+	schedule, err := contracts.ParseAutomationSchedule(raw)
+	if err != nil {
+		st.scheduleErr = st.tr("运行计划无效：请检查格式与取值。",
+			"Invalid schedule: check the format and values.")
+		return false
+	}
+	st.schedulePreview = automationSchedulePreview(st, schedule)
+	return true
+}
+
+// automationModelCatalog is the composer's model preset list (the settings row
+// wins, otherwise the built-in catalog) — the same source the Model page edits.
+func automationModelCatalog(st *state) []contracts.ModelInfo {
+	store, ok := st.ctx.Get(contracts.KeySettings)
+	if !ok || store == nil {
+		return contracts.DefaultModelCatalog()
+	}
+	models, err := contracts.ParseModelInfoList(store.Get(contracts.SettingModelCatalogModels, ""))
+	if err != nil || len(models) == 0 {
+		return contracts.DefaultModelCatalog()
+	}
+	return models
+}
+
+// automationModelCatalogMatch resolves one model id to its catalog entry.
+func automationModelCatalogMatch(models []contracts.ModelInfo, id string) (contracts.ModelInfo, bool) {
+	id = strings.TrimSpace(id)
+	if id == "" {
+		return contracts.ModelInfo{}, false
+	}
+	for _, model := range models {
+		if strings.EqualFold(strings.TrimSpace(model.ID), id) {
+			return model, true
+		}
+	}
+	return contracts.ModelInfo{}, false
+}
+
+// automationModelLabel renders the model field's menu label: the follow-default
+// row, a catalog display name, or the custom id.
+func automationModelLabel(st *state, models []contracts.ModelInfo, model string) string {
+	model = strings.TrimSpace(model)
+	if model == "" {
+		return st.tr("跟随默认模型", "Use the default model")
+	}
+	if match, ok := automationModelCatalogMatch(models, model); ok {
+		return firstNonEmpty(strings.TrimSpace(match.Name), match.ID)
+	}
+	return model
+}
+
+// automationModelHint warns about a model that is outside the catalog, with the
+// same rule the Model page uses: the id is kept, but the endpoint may fall back
+// to its own default.
+func automationModelHint(st *state, model string) string {
+	model = strings.TrimSpace(model)
+	if model == "" {
+		return ""
+	}
+	if _, ok := automationModelCatalogMatch(automationModelCatalog(st), model); ok {
+		return ""
+	}
+	return st.tr("该模型不在内置目录中；保存后仍会使用该名称，端点可能回退到默认模型。",
+		"This model is not in the built-in catalog; it is still used as entered and the endpoint may fall back to its default.")
+}
+
+// buildModelSelector renders the task model picker: the follow-default row, the
+// catalog presets and a custom-id mode for models the catalog does not know.
+func buildModelSelector(c *ui.Context, st *state) {
+	models := automationModelCatalog(st)
+	ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(design.Space2).Children(func() {
+		label := automationModelLabel(st, models, st.formModel)
+		ui.PopoverMenuButton(c, label, func(m *ui.Menu) {
+			current := m.Item(st.tr("跟随默认模型", "Use the default model"))
+			current.Radio(strings.TrimSpace(st.formModel) == "" && !st.formModelCustom)
+			if current.Chosen() {
+				st.formModel = ""
+				st.formModelCustom = false
+			}
+			for _, model := range models {
+				model := model
+				display := firstNonEmpty(strings.TrimSpace(model.Name), strings.TrimSpace(model.ID))
+				item := m.Item(display)
+				item.Radio(!st.formModelCustom && strings.EqualFold(strings.TrimSpace(st.formModel), strings.TrimSpace(model.ID)))
+				if item.Chosen() {
+					st.formModel = model.ID
+					st.formModelCustom = false
+				}
+			}
+			custom := m.Item(st.tr("自定义模型…", "Custom model…"))
+			custom.Radio(st.formModelCustom)
+			if custom.Chosen() {
+				st.formModelCustom = true
+				if _, ok := automationModelCatalogMatch(models, st.formModel); ok {
+					st.formModel = ""
+				}
+			}
+		}).Tooltip(st.tr("选择任务运行使用的模型", "Choose the model this task runs with"))
+		if st.formModelCustom {
+			ui.TextInput(c, &st.formModel).
+				Label(st.tr("自定义模型 ID", "Custom model id")).
+				Placeholder(st.tr("例如：deepseek-chat", "e.g. deepseek-chat")).FillWidth()
+		}
+	})
+}
+
+// openCreateForm/Esc-close helpers -----------------------------------------
+
+// openCreateForm opens the inline form in create mode with a clean error state.
+func (st *state) openCreateForm() {
+	st.formOpen = true
+	st.formErr = ""
+	st.scheduleErr = ""
+	st.schedulePreview = ""
+}
+
+// closeForm closes the inline form and clears its transient validation state,
+// keeping the drafts (reopening restores what the user typed).
+func (st *state) closeForm() {
+	st.formOpen = false
+	st.formErr = ""
+	st.scheduleErr = ""
+	st.schedulePreview = ""
+	st.formEditID = ""
+	st.formEditTask = contracts.AutomationTask{}
+}
+
+// openEditForm opens the inline form prefilled with one task: the form's save
+// action calls Update instead of Create, so a schedule or prompt can be fixed
+// without deleting and recreating the task.
+func openEditForm(st *state, task contracts.AutomationTask) {
+	st.openCreateForm()
+	st.formEditID = task.ID
+	st.formEditTask = task
+	st.formName = task.Name
+	st.formPrompt = task.Prompt
+	st.formModel = task.Model
+	st.formSchedule = task.Schedule
+	st.formWorkspaceID = task.WorkspaceID
+	st.formWorkspaceName = ""
+	st.formPermission = normalizeAutomationPermission(task.Permission)
+	st.formEnabled = task.Enabled
+}
+
+// run tracking and session links ------------------------------------------
+
+// runRunningGuard bounds an in-flight "Run now" marker in case the backend never
+// records the run (for example when its goroutine panics before the write).
+const runRunningGuard = 15 * time.Minute
+
+// markRunning records that "Run now" was pressed for one task.
+func (st *state) markRunning(taskID string) {
+	if st.running == nil {
+		st.running = make(map[string]time.Time)
+	}
+	st.running[taskID] = time.Now()
+}
+
+// taskRunning reports whether a task has an in-flight "Run now": the marker is
+// cleared once the backend records the run (LastRun moved) or the task is gone.
+func (st *state) taskRunning(task contracts.AutomationTask) bool {
+	started, ok := st.running[task.ID]
+	if !ok {
+		return false
+	}
+	if !task.LastRun.IsZero() && task.LastRun.After(started) {
+		delete(st.running, task.ID)
+		return false
+	}
+	if time.Since(started) > runRunningGuard {
+		delete(st.running, task.ID)
+		return false
+	}
+	return true
+}
+
+// automationRunSessionID extracts the session id from the backend's run
+// summary ("ran in chat session <id>"); other summaries carry no session.
+func automationRunSessionID(summary string) string {
+	trimmed := strings.TrimSpace(summary)
+	const prefix = "ran in chat session "
+	if len(trimmed) <= len(prefix) || !strings.EqualFold(trimmed[:len(prefix)], prefix) {
+		return ""
+	}
+	return strings.TrimSpace(trimmed[len(prefix):])
+}
+
+// buildOpenSessionButton renders the history row's link into the session the run
+// created, so a failed agent turn can be inspected where it happened.
+func (st *state) buildOpenSessionButton(c *ui.Context, t *design.Tokens, sessionID string) {
+	open := design.Apply(ui.Button(c, st.tr("打开会话", "Open session")), t.SecondaryButton()).
+		Tooltip(st.tr("打开这次运行创建的会话", "Open the session this run created"))
+	if !open.Clicked() {
+		return
+	}
+	if chat, ok := st.ctx.Get(contracts.KeyChat); ok && chat != nil {
+		_ = chat.SetActiveSession(sessionID)
+	}
+	if st.navigator != nil {
+		_ = st.navigator.Push("session")
+	}
+}
+
+// automationErrorText localizes a backend failure: the automation module's
+// errors carry an English "automation:" prefix and parser grammar, which never
+// reach the UI verbatim.
+func automationErrorText(st *state, prefix string, err error) string {
+	if err == nil {
+		return prefix
+	}
+	message := strings.TrimSpace(strings.TrimPrefix(err.Error(), "automation: "))
+	lower := strings.ToLower(message)
+	if strings.Contains(lower, "schedule") || strings.Contains(lower, "cron") ||
+		strings.Contains(lower, "every") || strings.Contains(lower, "after") {
+		return prefix + st.tr("运行计划无效，请检查格式后重试。",
+			"The schedule is invalid; check it and try again.")
+	}
+	return prefix + message
+}
+
+// automationRawErrorText sanitizes a persisted run error for the card: the
+// backend's module prefix is noise, the cause stays visible.
+func automationRawErrorText(st *state, raw string) string {
+	trimmed := strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(raw), "automation: "))
+	if trimmed == "" {
+		return raw
+	}
+	return trimmed
 }
 
 // automationPermissionChoice is one permission option in the task form and
@@ -551,15 +845,30 @@ type automationPermissionChoice struct {
 }
 
 var automationPermissions = []automationPermissionChoice{
-	{value: contracts.PermissionAsk, zh: "询问", en: "Ask"},
-	{value: contracts.PermissionWorkspace, zh: "工作区", en: "Workspace"},
-	{value: contracts.PermissionFull, zh: "全部", en: "Full access"},
-	{value: contracts.PermissionNever, zh: "从不", en: "Never"},
+	{value: contracts.PermissionReadOnly, zh: "只读", en: "Read-only"},
+	{value: contracts.PermissionWorkspace, zh: "工作区可写", en: "Workspace-write"},
+	{value: contracts.PermissionFull, zh: "所有权限", en: "All permissions"},
 }
 
-// automationPermissionLabel renders one permission value (unknown values show
-// their raw value).
+// normalizeAutomationPermission maps one stored task override onto the three
+// current presets: the retired "ask"/"never" values (old picker rows) normalize
+// to read-only and the empty/unknown values keep their raw value so the form can
+// still show an inherit/legacy selection.
+func normalizeAutomationPermission(value string) string {
+	value = strings.TrimSpace(value)
+	switch strings.ToLower(value) {
+	case contracts.PermissionAsk, contracts.PermissionNever:
+		return contracts.PermissionReadOnly
+	default:
+		return value
+	}
+}
+
+// automationPermissionLabel renders one permission value. The retired
+// "ask"/"never" values stored by old tasks display as their normalized default
+// (read-only); any other unknown value shows its raw value.
 func automationPermissionLabel(st *state, value string) string {
+	value = normalizeAutomationPermission(value)
 	for _, choice := range automationPermissions {
 		if choice.value == value {
 			return st.tr(choice.zh, choice.en)
@@ -640,7 +949,8 @@ func buildDeleteDialog(c *ui.Context, t *design.Tokens, service contracts.Automa
 	case 1:
 		deleted := st.deleteTask
 		if err := service.Delete(context.Background(), st.deleteTarget); err != nil {
-			st.pageErr = st.tr("删除任务失败：", "Failed to delete task: ") + err.Error()
+			st.pageErr = automationErrorText(st,
+				st.tr("删除任务失败：", "Failed to delete task: "), err)
 		} else {
 			st.pageErr = ""
 			raiseTaskDeletedToast(st, service, deleted)
@@ -695,8 +1005,30 @@ func formatTaskTime(st *state, value time.Time) string {
 	return firstNonEmpty(uikit.FormatDateTime(st.locale, value), "—")
 }
 
-// formatTaskClock renders a run timestamp's time of day in the current
-// language's clock format, "—" when unset.
-func formatTaskClock(st *state, value time.Time) string {
-	return firstNonEmpty(uikit.FormatClock(st.locale, value), "—")
+// workspaceDisplayName resolves a task's workspace id to its display name. The
+// workspace list is cached for the screen visit (the host service is in-memory)
+// and a vanished workspace reads as such instead of leaking the raw id.
+func (st *state) workspaceDisplayName(id string) string {
+	id = strings.TrimSpace(id)
+	if id == "" {
+		return ""
+	}
+	if !st.workspaceNamesLoaded {
+		st.workspaceNamesLoaded = true
+		st.workspaceNames = make(map[string]string)
+		if service, ok := st.ctx.Get(contracts.KeyWorkspace); ok && service != nil {
+			if workspaces, err := service.List(context.Background()); err == nil {
+				for _, workspace := range workspaces {
+					name := firstNonEmpty(strings.TrimSpace(workspace.Name), strings.TrimSpace(workspace.ID))
+					if trimmed := strings.TrimSpace(workspace.ID); trimmed != "" {
+						st.workspaceNames[trimmed] = name
+					}
+				}
+			}
+		}
+	}
+	if name := st.workspaceNames[id]; name != "" {
+		return name
+	}
+	return st.tr("未知工作区", "Unknown workspace")
 }

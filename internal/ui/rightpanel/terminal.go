@@ -6,12 +6,14 @@ import (
 	"math"
 	"strings"
 	"sync"
+	"time"
 	"unicode/utf8"
 
 	"github.com/egoist/mygo/ui"
 
 	"github.com/zeokeel/zeokeel/internal/contracts"
 	"github.com/zeokeel/zeokeel/internal/design"
+	"github.com/zeokeel/zeokeel/internal/icons"
 	"github.com/zeokeel/zeokeel/internal/uikit"
 )
 
@@ -20,6 +22,9 @@ const (
 	maxTerminalLines = 200
 	// maxTerminalBytes is how many trailing output bytes the pane keeps.
 	maxTerminalBytes = 128 << 10
+	// terminalCopyNoticeDuration is how long the copy-all action shows its
+	// check acknowledgement before returning to the copy glyph.
+	terminalCopyNoticeDuration = 1500 * time.Millisecond
 )
 
 // terminalState is the Terminal pane's state. The Run goroutine appends the
@@ -39,6 +44,9 @@ type terminalState struct {
 	// away from it (docs/ui/scroll.md), as a log does.
 	outputScroll ui.ScrollState
 	err          string
+	// copiedAt stamps the last "copy all output" action: the header shows a
+	// short check acknowledgement, then asks for the frame that clears it.
+	copiedAt time.Time
 }
 
 func newTerminalState() *terminalState { return &terminalState{} }
@@ -95,6 +103,7 @@ func (s *terminalState) clearOutput() {
 	s.mu.Lock()
 	s.output = ""
 	s.mu.Unlock()
+	s.copiedAt = time.Time{}
 }
 
 // truncateTerminalOutput keeps the last maxTerminalBytes bytes and the last
@@ -130,9 +139,22 @@ func buildTerminalPane(
 	}
 	term := st.term
 	output, running := term.snapshot()
+	hasOutput := strings.TrimSpace(output) != ""
+	// The copy-all check is an acknowledgement, not a badge: show it for a
+	// short window and ask for the frame that clears it (same pattern as the
+	// transcript's copy action).
+	copied := !term.copiedAt.IsZero()
+	if copied {
+		if remaining := terminalCopyNoticeDuration - c.Now().Sub(term.copiedAt); remaining > 0 {
+			c.After(remaining)
+		} else {
+			term.copiedAt = time.Time{}
+			copied = false
+		}
+	}
 
 	ui.Column(c).FillWidth().Grow(1).Children(func() {
-		// Header: working directory, the shell choice and clear.
+		// Header: working directory, the copy-all action and the shell choice.
 		ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(design.Space2).Children(func() {
 			dir := terminal.WorkingDir(context.Background())
 			if strings.TrimSpace(dir) == "" {
@@ -140,27 +162,59 @@ func buildTerminalPane(
 			}
 			design.Apply(ui.Text(c, dir), t.Font(design.TypeXXXS)).
 				TextColor(t.LabelTertiary).Grow(1).MaxLines(1).Ellipsis("…")
+			if hasOutput {
+				copyLabel := uikit.T(st.locale, "复制全部输出", "Copy all output")
+				copyButton := ui.ButtonBase(c).Size(24, 24).Center().Radius(design.RadiusSM).
+					Label(copyLabel).Tooltip(copyLabel)
+				if copyButton.Hovered() {
+					copyButton = copyButton.Background(t.BgHover)
+				}
+				copyButton.Children(func() {
+					icon, color := icons.Copy(), t.LabelSecondary
+					if copied {
+						icon, color = icons.Check(), t.SuccessText
+					}
+					ui.Icon(c, icon).Size(14, 14).TextColor(color)
+				})
+				if copyButton.Clicked() {
+					c.WriteClipboard(output)
+					term.copiedAt = c.Now()
+					runtime.Invalidate()
+				}
+			}
 			buildShellSelect(c, t, terminal, runtime, st)
 		})
 		if term.err != "" {
 			uikit.ErrorLine(c, term.err)
 		}
-
 		// Output: one mono text in a native scroll that follows the end as new
 		// output comes, until the user scrolls up (docs/ui/scroll.md).
-		if term.outputScroll.Y >= term.outputScroll.MaxY {
+		following := !terminalFollowPaused(output, term.outputScroll)
+		if following {
 			term.outputScroll.Y = math.MaxFloat32
 		}
 		ui.Scroll(c).FillWidth().Grow(1).TrackScroll(&term.outputScroll).Children(func() {
 			ui.Column(c).FillWidth().Padding(design.Space2).Children(func() {
-				if strings.TrimSpace(output) == "" {
+				if !hasOutput {
 					design.Apply(ui.Text(c, uikit.T(st.locale, "在工作区根目录运行命令", "Run commands in the workspace root")), t.TextMuted(design.TypeXXS))
 					return
 				}
-				design.Apply(ui.Text(c, output), t.MonoFamily()).FontSize(11).
-					FixedLineHeight(18).TextColor(t.LabelPrimary).Selectable()
+				design.Apply(ui.Text(c, output), t.MonoText(design.TypeXXXS)).
+					TextColor(t.LabelPrimary).Selectable()
 			})
 		})
+		if hasOutput && !following {
+			// The scroll no longer follows the end: say so and give the one
+			// action that resumes it, instead of silently showing stale rows.
+			ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(design.Space2).Children(func() {
+				design.Apply(ui.Text(c, uikit.T(st.locale, "已暂停跟随", "Follow paused")),
+					t.TextMuted(design.TypeXXXS)).Grow(1)
+				if ui.Button(c, uikit.T(st.locale, "回到底部", "Jump to end")).Clicked() {
+					term.outputScroll.Y = math.MaxFloat32
+					runtime.Invalidate()
+				}
+			})
+		}
 
 		// Input row: native text input submits, Run/Stop swaps while running.
 		ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(design.Space2).Children(func() {
@@ -182,6 +236,13 @@ func buildTerminalPane(
 		})
 		design.Apply(ui.Text(c, uikit.T(st.locale, "简单命令运行器（无 PTY / 持久 shell）", "Simple command runner (no PTY / persistent shell)")), t.TextMuted(design.TypeXXXS))
 	})
+}
+
+// terminalFollowPaused reports whether the output scroll no longer follows the
+// end: the terminal keeps following while it is at the end (or empty), and the
+// user scrolling up pauses it until the jump-to-end action resumes it.
+func terminalFollowPaused(output string, scroll ui.ScrollState) bool {
+	return strings.TrimSpace(output) != "" && scroll.Y < scroll.MaxY
 }
 
 // buildShellSelect is the official ui.Select picker of TerminalService.Shells
@@ -222,6 +283,7 @@ func runTerminalCommand(terminal contracts.TerminalService, runtime contracts.UI
 	if command == "" || term.isRunning() {
 		return
 	}
+	term.copiedAt = time.Time{}
 	ctx, cancel := context.WithCancel(context.Background())
 	term.beginRun(cancel)
 	term.appendOutput("$ " + command + "\n")

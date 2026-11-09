@@ -26,3 +26,5 @@ require (
 	modernc.org/memory v1.12.1 // indirect
 	mvdan.cc/sh/v3 v3.14.1 // indirect
 )
+
+tool github.com/egoist/mygo/cmd/mygo

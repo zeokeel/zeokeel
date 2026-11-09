@@ -36,7 +36,7 @@ func TestAutomationEnglishCopyAndLanguageSwitch(t *testing.T) {
 	h.click(tester, "New task")
 	h.assertTexts(tester, "New automation task", "Task name", "Task prompt",
 		"Schedule", "Enabled", "Cancel", "Save",
-		"Supports a cron subset")
+		"Supports */N * * * * (every N minutes)")
 	h.assertNoTexts(tester, "新建自动化任务", "任务名称", "任务提示词", "运行计划", "保存")
 
 	// Switching back restores the Chinese copy on the next frame.

@@ -33,6 +33,7 @@ package session
 
 import (
 	"strings"
+	"time"
 
 	"github.com/egoist/mygo/ui"
 	cordis "github.com/zeokeel/zeokeel-kernel"
@@ -99,6 +100,16 @@ type state struct {
 	// needs a stable identity to keep the focus (and the caret) as the tree
 	// around it changes.
 	composerInput ui.Handle
+	// composerCaret is where the composer input's selection ends in runes, read
+	// from the last laid-out frame: the @ suggestion menu follows the caret
+	// (C-15), so an @ typed in the middle of the message opens the suggestions
+	// for the token around it instead of only at the end of the draft.
+	composerCaret int
+	// composerCaretPending asks the next composer frame to move the input's
+	// caret to composerCaret: accepting a suggestion replaces the text through
+	// the key hook, and the editor keeps the old caret offset, so the caret must
+	// be placed after the inserted reference in the following frame.
+	composerCaretPending bool
 	// focusComposer asks the next composer frame to focus the TextArea: on
 	// opening/switching a conversation and when a run finishes. It is a
 	// one-shot edge flag (the frame builder clears it), never a desired-focus
@@ -158,9 +169,11 @@ type state struct {
 	scrollSession string
 
 	// Memory tab state: the search query, the add-input draft, the last store
-	// error shown in DangerText and the cached read model. The cache is
-	// refreshed only when the query changes or a mutation asks for it, so the
-	// frame builder never reads the store while nothing changed.
+	// error shown in DangerText and the cached read model. The frame builder
+	// never reads the store: a query change schedules one debounced background
+	// read (memoryPendingQuery/memorySearchDue), the result is applied through
+	// UIRuntime.Post only while its sequence is still current, and mutations
+	// ask for an immediate re-read (memoryRefresh).
 	memoryQuery    string
 	memoryDraft    string
 	memoryError    string
@@ -173,6 +186,16 @@ type state struct {
 	memoriesQuery  string
 	memoriesFresh  bool
 	memoryRefresh  bool
+	// memoryPendingQuery is the query whose debounced read is scheduled ("" =
+	// none); memorySearchDue is when that read may start (frame clock).
+	memoryPendingQuery string
+	memorySearchDue    time.Time
+	// memoryReading is true while a background read is in flight (the pane
+	// shows a quiet loading line and never starts a duplicate read).
+	memoryReading bool
+	// memorySeq drops stale results: a read applies only when its sequence is
+	// still the newest one asked for.
+	memorySeq int
 
 	// @ suggestion cache: the workspace files the current query resolves to,
 	// refreshed only when the query changes. The frame builder never lists or
@@ -267,8 +290,11 @@ type state struct {
 
 	// copiedMessage is the assistant message whose copy action just ran; the
 	// row shows a check icon while it is the last one copied (transient state,
-	// never a resident badge).
+	// never a resident badge). copiedAt starts the short confirmation window:
+	// the check falls back to the copy glyph after copiedFeedbackDuration and a
+	// session switch clears it (stale feedback never follows the user).
 	copiedMessage string
+	copiedAt      time.Time
 
 	// queuedPrompts holds, per session ID, the prompts submitted while a turn
 	// was running (only when ui.sendWhileRunning is on). The queue belongs to
@@ -541,35 +567,25 @@ func Module() *module.Descriptor[Config] {
 }
 
 // permissionMode reads the effective agent permission mode from the settings
-// store. The default is workspace (normal in-workspace editing without asking);
-// unset/unknown values and a missing store resolve to it too.
+// store: exactly read-only, workspace (the default) or full. Unset, unknown and
+// retired "ask"/"never" values normalize through contracts.NormalizePermissionMode
+// (both retire to read-only); a missing store resolves to the workspace default.
 func permissionMode(settings contracts.SettingsService) string {
 	if settings == nil {
 		return contracts.PermissionWorkspace
 	}
-	switch strings.ToLower(strings.TrimSpace(settings.Get(contracts.SettingAgentPermission, ""))) {
-	case contracts.PermissionWorkspace:
-		return contracts.PermissionWorkspace
-	case contracts.PermissionFull:
-		return contracts.PermissionFull
-	case contracts.PermissionNever:
-		return contracts.PermissionNever
-	case contracts.PermissionAsk:
-		return contracts.PermissionAsk
-	default:
-		return contracts.PermissionWorkspace
-	}
+	return contracts.NormalizePermissionMode(settings.Get(contracts.SettingAgentPermission, ""))
 }
 
-// nextPermissionMode cycles ask → workspace → full → ask.
+// nextPermissionMode cycles 只读 → 工作区可写 → 所有权限 → 只读.
 func nextPermissionMode(mode string) string {
 	switch mode {
-	case contracts.PermissionAsk:
+	case contracts.PermissionReadOnly:
 		return contracts.PermissionWorkspace
 	case contracts.PermissionWorkspace:
 		return contracts.PermissionFull
 	default:
-		return contracts.PermissionAsk
+		return contracts.PermissionReadOnly
 	}
 }
 
@@ -582,17 +598,15 @@ func cyclePermissionMode(st *state) {
 		nextPermissionMode(permissionMode(st.settings)))
 }
 
-// permissionLabel renders one permission mode for the composer badge.
+// permissionLabel renders one permission mode for the composer menu and badge.
 func (st *state) permissionLabel(mode string) string {
 	switch mode {
-	case contracts.PermissionWorkspace:
-		return st.tr("工作区", "Workspace")
+	case contracts.PermissionReadOnly:
+		return st.tr("只读", "Read-only")
 	case contracts.PermissionFull:
-		return st.tr("全部允许", "Allow all")
-	case contracts.PermissionNever:
-		return st.tr("从不允许", "Never")
+		return st.tr("所有权限", "All permissions")
 	default:
-		return st.tr("询问", "Ask")
+		return st.tr("工作区可写", "Workspace-write")
 	}
 }
 
@@ -809,7 +823,7 @@ func sessionCommands(runtime contracts.UIRuntime, navigator contracts.Navigator,
 		{
 			ID:      "zeokeel.session.permission",
 			Title:   st.tr("权限模式", "Permission mode"),
-			Hint:    st.tr("切换权限模式：询问 → 工作区 → 全部允许", "Cycle permission: ask → workspace → full"),
+			Hint:    st.tr("切换权限模式：只读 → 工作区可写 → 所有权限", "Cycle permission: read-only → workspace-write → all permissions"),
 			Order:   45,
 			Enabled: func() bool { return st.settings != nil },
 			Run: func() error {

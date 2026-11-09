@@ -626,7 +626,8 @@ func buildAgentPresetDialog(c *ui.Context, t *design.Tokens, store contracts.Set
 			submitted := false
 			ui.Field(c, localized(locale, "人设名称", "Persona name"), func() {
 				name := ui.TextInput(c, &st.agentName).
-					Label(inputLabel(locale, localized(locale, "人设名称", "Persona name"))).FillWidth()
+					Label(inputLabel(locale, localized(locale, "人设名称", "Persona name"))).
+					FillWidth().AutoFocus()
 				if name.Submitted() {
 					submitted = true
 				}

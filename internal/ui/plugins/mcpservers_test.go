@@ -26,13 +26,14 @@ func TestMCPServerSwitchDisablesAndEnables(t *testing.T) {
 	if got := store.get(contracts.SettingMCPDisabledServers); got != `["srv"]` {
 		t.Fatalf("%s = %q, want [%q]", contracts.SettingMCPDisabledServers, got, "srv")
 	}
-	h.assertTexts(tester, "已停用（重启生效）", "已保存")
+	h.assertTexts(tester, "已停用（重启生效）", "已停用（重启后断开）")
 
 	// Enabling removes it again.
 	h.click(tester, "启用服务器 srv")
 	if got := store.get(contracts.SettingMCPDisabledServers); got != "[]" {
 		t.Fatalf("%s after enable = %q, want []", contracts.SettingMCPDisabledServers, got)
 	}
+	h.assertTexts(tester, "已启用（重启后连接）")
 	h.assertNoTexts(tester, "已停用（重启生效）")
 }
 
@@ -54,6 +55,10 @@ func TestMCPServerRestoredFromSettingsWhenDisabled(t *testing.T) {
 	if got := store.get(contracts.SettingMCPDisabledServers); got != "[]" {
 		t.Fatalf("%s after restore/enable = %q, want []", contracts.SettingMCPDisabledServers, got)
 	}
+	// E-05: the just-enabled row must not vanish; it says it connects after the
+	// next restart (the toolkit starts servers at launch).
+	h.assertTexts(tester, "srv", "已启用（重启后连接）")
+	h.assertNoTexts(tester, "还没有配置 MCP 服务器")
 }
 
 func TestMCPServerSwitchDoesNotRestoreAssemblyRows(t *testing.T) {

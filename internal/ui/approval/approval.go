@@ -6,27 +6,26 @@
 // runtime and the approvals service, subscribes to pending-set changes (the
 // callback hops to the UI thread with Post/Invalidate), and registers one
 // SlotItem whose unregister function is owned by a kernel effect. The dialog
-// itself is built only from mygo's native controls (Modal, Row/Column, Text,
-// Badge, Divider, Scroll, Button/PrimaryButton); the module draws no widget.
+// itself is the uikit.ApprovalDialog entry component (AGENT-SURFACES.md S4):
+// the module keeps the queue/data state, resolves requests and exits; it draws
+// no widget and re-composes no footer.
 //
-// Resolution: the three buttons resolve the request as allow / allow-always /
-// deny. Pressing Escape or clicking the backdrop dismisses the native Modal,
-// which is treated as deny (the agent reports a tool error) so a pending call
-// can never be left waiting on a hidden dialog.
+// Resolution: the uikit component's three buttons resolve the request as
+// allow / allow-always / deny. Pressing Escape or clicking the backdrop
+// dismisses the native Modal, which the component treats as deny (the agent
+// reports a tool error) so a pending call can never be left waiting on a hidden
+// dialog.
 package approval
 
 import (
 	"fmt"
 	"strings"
-	"unicode/utf8"
 
 	"github.com/egoist/mygo/ui"
 	cordis "github.com/zeokeel/zeokeel-kernel"
 	"github.com/zeokeel/zeokeel-kernel/module"
 
 	"github.com/zeokeel/zeokeel/internal/contracts"
-	"github.com/zeokeel/zeokeel/internal/design"
-	"github.com/zeokeel/zeokeel/internal/icons"
 	"github.com/zeokeel/zeokeel/internal/uikit"
 )
 
@@ -35,10 +34,6 @@ const ModuleID = "zeokeel-ui/approval"
 
 // SlotID identifies this module's contribution to overlay.dialogs.
 const SlotID = "approval.dialog"
-
-// maxArgumentsRunes bounds the raw arguments shown in the dialog; the request
-// may belong to a huge tool call and the modal must stay readable.
-const maxArgumentsRunes = 4000
 
 // Config is the module's typed assembly config (all fields have defaults).
 type Config struct {
@@ -69,13 +64,13 @@ func (c Config) resolved() Config {
 	}
 }
 
-// state is the module instance's dialog state. It lives in the activation
+// state is the module instance's dialog queue state. It lives in the activation
 // closure (one per loaded module) and is touched only on the UI thread.
 type state struct {
 	// locale localizes the dialog copy per frame (zh is the default).
 	locale contracts.LocaleService
 	// open is the native Modal's open flag; Escape/backdrop clicks set it to
-	// false and are treated as deny.
+	// false and are treated as deny by the uikit component.
 	open bool
 	// shownID is the request currently displayed ("" when none).
 	shownID string
@@ -83,8 +78,6 @@ type state struct {
 	// Pending for a frame or two while the backend settles, and the dialog
 	// must not reopen for it.
 	resolvedID string
-	// argsOpen keeps the collapsed argument details across frames.
-	argsOpen bool
 }
 
 // Module registers the approval dialog contribution.
@@ -155,10 +148,10 @@ func (st *state) localized(value, zhDefault, enDefault string) string {
 	return value
 }
 
-// buildDialog renders the oldest pending request in a native Modal, or nothing
-// while no request is waiting. It is a frame builder: it only builds controls,
-// except for the click/dismiss handlers that answer the pending request (the
-// same immediate-mode pattern the other UI modules use for button clicks).
+// buildDialog shows the oldest pending request through the uikit approval
+// entry component, or nothing while no request is waiting. The module keeps the
+// FIFO and settle state; the component owns the dialog's anatomy, its footer
+// order and its no-default/Escape-denies safety semantics.
 func buildDialog(c *ui.Context, runtime contracts.UIRuntime, approvals contracts.Approvals, cfg Config, st *state) {
 	pending := approvals.Pending()
 	if len(pending) == 0 {
@@ -176,186 +169,29 @@ func buildDialog(c *ui.Context, runtime contracts.UIRuntime, approvals contracts
 	if request.ID != st.shownID {
 		st.shownID = request.ID
 		st.open = true
-		// Safe default: the footer's Deny action is its Default (focused as
-		// the request opens); Enter then presses it (the native button
-		// behaviour), so a high-risk tool is never allowed with one stray
-		// Enter.
-		st.argsOpen = false
 	}
-	ui.Modal(c, &st.open, func() {
-		requestPanel(c, runtime, approvals, cfg, st, request, len(pending))
-	})
-	if !st.open {
-		// Escape or a backdrop click closed the native Modal. Treat it as
-		// deny so the waiting tool call fails clearly instead of hanging.
-		id := st.shownID
-		st.shownID = ""
-		st.resolvedID = id
-		if id != "" {
-			_ = approvals.Resolve(id, contracts.ApprovalDeny)
-			runtime.Invalidate()
-		}
-	}
-}
-
-// requestPanel is the Modal body: a brand title row with an approval icon, the
-// tool, a one-line impact statement, the summary first (a command for shell
-// tools), the argument details collapsed and the decision footer.
-//
-// Safety default (H4, revised after reviewing a real session): the dialog has
-// NO default action and does not autofocus a button. Pressing Enter right after
-// sending a prompt used to land on the auto-focused Deny and accidentally
-// reject the call; a real Windows session export shows exactly that. With no
-// default action a stray Enter decides nothing: Esc still denies explicitly,
-// and allow/deny need a click or Tab + Enter on the chosen button. The footer
-// order follows the product convention: danger first, secondary, accent
-// primary last.
-func requestPanel(c *ui.Context, runtime contracts.UIRuntime, approvals contracts.Approvals, cfg Config, st *state,
-	request contracts.ApprovalRequest, pendingCount int) {
-	t := design.Of(c)
-	title := st.localized(cfg.Title, "需要审批", "Approval required")
-	toolLabel := st.localized(cfg.ToolLabel, "工具", "Tool")
-	argumentsLabel := st.localized(cfg.ArgumentsLabel, "参数", "Arguments")
-	allowLabel := st.localized(cfg.AllowLabel, "允许", "Allow")
-	allowAlwaysLabel := st.localized(cfg.AllowAlwaysLabel, "本会话内始终允许", "Always allow in this session")
-	denyLabel := st.localized(cfg.DenyLabel, "拒绝", "Deny")
-	summary := strings.TrimSpace(request.Summary)
-	arguments := strings.TrimSpace(request.Arguments)
-	emptyArguments := arguments == "" || arguments == "{}" || arguments == "[]" || arguments == "null"
-	// The friendly name is what the user reads; the raw tool ID stays in the
-	// badge's tooltip (and is what the backend reports back).
-	toolName := uikit.ToolDisplayName(st.locale, request.Tool)
-	if toolName == "" {
-		toolName = request.Tool
-	}
-
-	// The native Modal sizes its panel around this content; the brand spacing
-	// keeps the dialog on the same 4 DIP grid as the settings pages.
-	design.Apply(ui.Column(c).Width(560).Gap(design.Space4), func(el ui.Element) ui.Element {
-		// The dialog body keeps the brand's Space6 side margin inside the
-		// native Modal panel, so the content and its buttons breathe.
-		return el.PaddingX(design.Space6).PaddingY(design.Space2)
-	}).Children(func() {
-		ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(design.Space2).Children(func() {
-			ui.Icon(c, approvalIcon(request.Tool)).Size(design.Space5, design.Space5).
-				TextColor(t.Accent)
-			design.Apply(ui.Text(c, title), t.Font(design.TypeL)).FontWeight(600).
-				TextColor(t.LabelPrimary)
-			if pendingCount > 1 {
-				// A quiet counter, not another dialog: the rest are queued behind
-				// this one and appear as each is resolved.
-				ui.Spacer(c).Grow(1)
-				design.Apply(ui.Text(c, fmt.Sprintf(
-					st.tr("还有 %d 个待审批请求", "%d more approval requests waiting"), pendingCount-1)),
-					t.TextMuted(design.TypeXXS)).NoWrap()
-			}
-		})
-		// The tool is named once: label + badge, with the impact in one line.
-		// The badge shows the friendly localized name; the raw ID is its tooltip.
-		ui.Row(c).AlignItems(ui.Center).Gap(design.Space2).Children(func() {
-			design.Apply(ui.Text(c, toolLabel), t.TextMuted(design.TypeXS))
-			design.Apply(ui.Badge(c, toolName), t.Badge()).Tooltip(request.Tool)
-		})
-		// The approval only lets the call through the gate: the sandbox policy
-		// still runs it and may deny it, so the copy must not promise execution
-		// (ZK-02: "会立即执行" was false when the sandbox rejected the command).
-		design.Apply(ui.Text(c, st.tr("允许后将在沙箱策略限制内执行；策略仍可能拒绝该调用。",
-			"It runs within the sandbox policy after approval; the policy may still reject the call.")),
-			t.Font(design.TypeXS)).
-			TextColor(t.LabelSecondary)
-		// What will run comes first: the summary (a command for shell tools) is
-		// the thing the user is judging.
-		if summary != "" && summary != arguments {
-			summaryLabel := st.tr("摘要", "Summary")
-			if commandLikeTool(request.Tool) {
-				summaryLabel = st.tr("命令", "Command")
-			}
-			design.Apply(ui.Text(c, summaryLabel), t.TextMuted(design.TypeXS))
-			design.Apply(ui.Row(c).FillWidth(), func(el ui.Element) ui.Element {
-				return el.Background(t.BgBase).Border(1, t.BorderL2).
-					Radius(design.RadiusSM).Padding(design.Space2)
-			}).Children(func() {
-				design.Apply(ui.Text(c, truncate(summary, maxArgumentsRunes)),
-					t.Font(design.TypeXS), t.MonoFamily()).TextColor(t.LabelPrimary)
-			})
-		}
-		// The raw arguments are details: collapsed, and "no arguments" instead
-		// of an empty box when the call carries {} / [] / null.
-		ui.Divider(c)
-		design.Apply(ui.Text(c, argumentsLabel), t.TextMuted(design.TypeXS))
-		if emptyArguments {
-			design.Apply(ui.Text(c, st.tr("无参数", "No arguments")),
-				t.TextMuted(design.TypeXS))
-		} else {
-			// Two layers only: the configurable section label (参数/Arguments)
-			// above the disclosure itself.
-			ui.Collapsible(c.Key("approval.arguments."+request.ID),
-				st.tr("显示原始参数", "Show raw arguments"), &st.argsOpen, func() {
-					scroll := ui.Scroll(c).Height(140).FillWidth()
-					design.Apply(scroll, func(el ui.Element) ui.Element {
-						return el.Background(t.BgBase).Border(1, t.BorderL2).
-							Radius(design.RadiusSM).Padding(design.Space2)
-					}).Children(func() {
-						design.Apply(ui.Text(c, truncate(arguments, maxArgumentsRunes)),
-							t.TextMuted(design.TypeXS), t.MonoFamily())
-					})
-				})
-		}
-		ui.Divider(c)
-		// The product's one dialog action bar: the destructive Deny first, the
-		// session-scoped allow, the accent Allow last (rightmost). No action is
-		// the Default and nothing is auto-focused, so a stray Enter (the user
-		// often presses it right after sending) decides nothing — neither an
-		// accidental allow nor an accidental deny. Esc remains the explicit
-		// deny shortcut; a decision needs a click or Tab + Enter.
-		c.Key("approval.footer/" + request.ID)
-		uikit.DialogFooter(c, []uikit.DialogAction{
-			{Label: denyLabel, Danger: true, OnClick: func() {
-				resolve(runtime, approvals, st, contracts.ApprovalDeny)
-			}},
-			{Label: allowAlwaysLabel, OnClick: func() {
-				resolve(runtime, approvals, st, contracts.ApprovalAllowAlways)
-			}},
-			{Label: allowLabel, Primary: true, OnClick: func() {
-				resolve(runtime, approvals, st, contracts.ApprovalAllow)
-			}},
-		})
-		// The middle choice is session-scoped, not run-scoped: say so once in
-		// quiet copy, including where the user can take it back. Without this
-		// line the label reads as another one-off allow and the user keeps
-		// re-approving the same tool.
-		design.Apply(ui.Text(c, st.tr("「本会话内始终允许」在本会话内不再询问该工具；可在会话设置菜单清除。",
-			"\"Always allow in this session\" stops this tool's prompts for this conversation; clear it from the session settings menu.")),
-			t.TextMuted(design.TypeXXS)).MaxLines(2)
-		// The key semantics are visible: Esc denies explicitly, and there is no
-		// default action, so a stray Enter decides nothing.
-		design.Apply(ui.Text(c, st.tr("Esc = 拒绝本次调用 · 点击或 Tab 选择操作（无默认操作）",
-			"Esc = deny this call · click or Tab to choose an action (no default action)")),
-			t.TextMuted(design.TypeXXS))
+	uikit.ApprovalDialog(c, uikit.ApprovalDialogOptions{
+		Request: request,
+		Pending: len(pending),
+		Labels:  st.labels(cfg),
+		Open:    &st.open,
+		Locale:  st.locale,
+		OnResolve: func(decision contracts.ApprovalDecision) {
+			resolve(runtime, approvals, st, decision)
+		},
 	})
 }
 
-// commandLikeTool reports whether a tool's summary is a command line, so the
-// approval dialog can show it monospaced first.
-func commandLikeTool(tool string) bool {
-	switch strings.ToLower(strings.TrimSpace(tool)) {
-	case "bash", "terminal_send", "job_start", "web_fetch", "web_search",
-		"read_file", "write_file", "edit_file", "str_replace_editor":
-		return true
-	default:
-		return false
-	}
-}
-
-// approvalIcon picks the header glyph for the tool being approved: destructive
-// shell/file tools get the alert triangle, everything else the shield.
-func approvalIcon(tool string) *ui.SVG {
-	switch strings.ToLower(strings.TrimSpace(tool)) {
-	case "bash", "write_file", "edit_file", "str_replace_editor",
-		"terminal_send", "job_start", "enter_worktree":
-		return icons.AlertTriangle()
-	default:
-		return icons.Shield()
+// labels builds the localizable copy of the dialog: an assembly-configured
+// custom label is kept verbatim, an untouched default follows the host locale.
+func (st *state) labels(cfg Config) uikit.ApprovalLabels {
+	return uikit.ApprovalLabels{
+		Title:            st.localized(cfg.Title, "需要审批", "Approval required"),
+		ToolLabel:        st.localized(cfg.ToolLabel, "工具", "Tool"),
+		ArgumentsLabel:   st.localized(cfg.ArgumentsLabel, "参数", "Arguments"),
+		AllowLabel:       st.localized(cfg.AllowLabel, "允许", "Allow"),
+		AllowAlwaysLabel: st.localized(cfg.AllowAlwaysLabel, "本会话内始终允许", "Always allow in this session"),
+		DenyLabel:        st.localized(cfg.DenyLabel, "拒绝", "Deny"),
 	}
 }
 
@@ -371,15 +207,6 @@ func resolve(runtime contracts.UIRuntime, approvals contracts.Approvals, st *sta
 		_ = approvals.Resolve(id, decision)
 	}
 	runtime.Invalidate()
-}
-
-// truncate shortens s to at most max runes, marking the cut.
-func truncate(s string, max int) string {
-	if max <= 0 || utf8.RuneCountInString(s) <= max {
-		return s
-	}
-	runes := []rune(s)
-	return string(runes[:max]) + "…"
 }
 
 // firstNonEmpty returns the first non-empty string.

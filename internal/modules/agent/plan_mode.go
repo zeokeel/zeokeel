@@ -117,6 +117,12 @@ func (s *service) agentModePlan() bool {
 // unknown tools) fall through to the approvals service, and the same frozen list
 // is read by the approvals service so the two layers cannot drift.
 
+// approvalModeNever is the approvals service's headless deny-all policy value
+// (approvals.ModeNever). It is not a selectable UI permission mode: stored
+// "never" rows normalize to read-only, so this only guards an assembly config
+// that explicitly installs the deny-all backend.
+const approvalModeNever = "never"
+
 // interactionTools are the host tools that interact with the user directly:
 // ask_user, present and goal render their own question/artifact/goal overlay,
 // and plan_review/exit_plan_mode drive the plan-review overlay. They are exempt
@@ -136,10 +142,11 @@ var interactionTools = map[string]bool{
 
 // gate builds the tool approval gate for one session. Plan and chat modes are
 // checked on every call (highest priority); then an optional per-session
-// permission override applies (full allows, never denies, workspace allows the
-// shared contracts.WorkspaceAutoAllowedTools set); interaction/presentation host
-// tools are then allowed without an approval prompt (their own overlay is the
-// user interaction); otherwise the approvals service's global policy applies.
+// permission override applies (full allows everything, read-only allows the
+// shared contracts.ReadOnlyAutoAllowedTools set, workspace allows the
+// contracts.WorkspaceAutoAllowedTools set); interaction/presentation host tools
+// are then allowed without an approval prompt (their own overlay is the user
+// interaction); otherwise the approvals service's global policy applies.
 func (s *service) gate(sessionIDs ...string) rig.Gate {
 	sessionID := ""
 	if len(sessionIDs) > 0 {
@@ -172,8 +179,10 @@ func (s *service) gate(sessionIDs ...string) rig.Gate {
 			switch override {
 			case contracts.PermissionFull:
 				return rig.DecisionAllow, nil
-			case contracts.PermissionNever:
-				return rig.DecisionDeny, nil
+			case contracts.PermissionReadOnly:
+				if contracts.ReadOnlyAutoAllowed(name) {
+					return rig.DecisionAllow, nil
+				}
 			case contracts.PermissionWorkspace:
 				if contracts.WorkspaceAutoAllowed(name) {
 					return rig.DecisionAllow, nil
@@ -181,19 +190,20 @@ func (s *service) gate(sessionIDs ...string) rig.Gate {
 			}
 		}
 		if interactionTools[name] {
-			// A global "never" policy is an explicit deny-all switch: it must
-			// still deny the interaction tools even though the default "ask"
-			// prompt is skipped for them.
-			if s.approvals != nil && strings.EqualFold(strings.TrimSpace(s.approvals.Mode()), contracts.PermissionNever) {
+			// A headless "never" assembly policy is an explicit deny-all switch:
+			// it must still deny the interaction tools even though the default
+			// approval prompt is skipped for them. It is not a UI permission
+			// mode (no stored row maps to it any more).
+			if s.approvals != nil && strings.EqualFold(strings.TrimSpace(s.approvals.Mode()), approvalModeNever) {
 				return rig.DecisionDeny, nil
 			}
 			return rig.DecisionAllow, nil
 		}
 		// A tool the user already chose to "always allow in this session" no
-		// longer asks. Plan/chat modes and the per-session/global never policies
-		// above keep their veto: the remembered set only skips the prompt.
+		// longer asks. Plan/chat modes and a headless deny-all policy keep
+		// their veto: the remembered set only skips the prompt.
 		if s.allowedToolForSession(sessionID, name) {
-			if s.approvals != nil && strings.EqualFold(strings.TrimSpace(s.approvals.Mode()), contracts.PermissionNever) {
+			if s.approvals != nil && strings.EqualFold(strings.TrimSpace(s.approvals.Mode()), approvalModeNever) {
 				return rig.DecisionDeny, nil
 			}
 			return rig.DecisionAllow, nil

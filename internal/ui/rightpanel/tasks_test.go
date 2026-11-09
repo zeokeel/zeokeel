@@ -9,6 +9,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -32,11 +33,17 @@ type fakeTaskBoard struct {
 	listCalls   int
 	creates     []taskCreate
 	statusCalls []taskStatusCall
+	assignCalls []taskAssignCall
 	deletes     []string
+
+	// listBlock, when non-nil, makes List block until it is closed: the test
+	// pins the inspected loading state of an explicit Refresh.
+	listBlock chan struct{}
 
 	listErr   error
 	createErr error
 	statusErr error
+	assignErr error
 	deleteErr error
 }
 
@@ -50,18 +57,62 @@ type taskStatusCall struct {
 	status string
 }
 
+// taskAssignCall records one contracts.TaskAssigner call.
+type taskAssignCall struct {
+	id    string
+	owner string
+}
+
 func newFakeTaskBoard(tasks ...contracts.BoardTask) *fakeTaskBoard {
 	return &fakeTaskBoard{tasks: append([]contracts.BoardTask(nil), tasks...)}
 }
 
-func (f *fakeTaskBoard) List(context.Context) ([]contracts.BoardTask, error) {
+func (f *fakeTaskBoard) List(ctx context.Context) ([]contracts.BoardTask, error) {
+	f.mu.Lock()
+	f.listCalls++
+	block := f.listBlock
+	f.mu.Unlock()
+	if block != nil {
+		select {
+		case <-block:
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		}
+	}
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	f.listCalls++
 	if f.listErr != nil {
 		return nil, f.listErr
 	}
 	return append([]contracts.BoardTask(nil), f.tasks...), nil
+}
+
+// Assign implements contracts.TaskAssigner: it records the owner change and
+// mirrors the rig manager's in-progress-owner rule.
+func (f *fakeTaskBoard) Assign(_ context.Context, id, owner string) (contracts.BoardTask, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.assignCalls = append(f.assignCalls, taskAssignCall{id: id, owner: owner})
+	if f.assignErr != nil {
+		return contracts.BoardTask{}, f.assignErr
+	}
+	for index := range f.tasks {
+		if f.tasks[index].ID != id {
+			continue
+		}
+		if f.tasks[index].Status == contracts.TaskStatusInProgress && strings.TrimSpace(owner) == "" {
+			return contracts.BoardTask{}, errors.New("in-progress tasks need an owner")
+		}
+		f.tasks[index].Owner = owner
+		return f.tasks[index], nil
+	}
+	return contracts.BoardTask{}, fmt.Errorf("unknown task %q", id)
+}
+
+func (f *fakeTaskBoard) assignments() []taskAssignCall {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]taskAssignCall(nil), f.assignCalls...)
 }
 
 func (f *fakeTaskBoard) Create(_ context.Context, subject, description string) (contracts.BoardTask, error) {
@@ -286,7 +337,7 @@ func TestTasksListSortsAndRendersFields(t *testing.T) {
 	tester.Frame()
 
 	texts := tester.Texts()
-	order := []string{"第一个待办", "第二个待办", "正在做的", "已完成的"}
+	order := []string{"正在做的", "第一个待办", "第二个待办", "已完成的"}
 	previous := -1
 	for _, subject := range order {
 		index := textIndex(texts, subject)
@@ -389,9 +440,17 @@ func TestTasksRefreshReloads(t *testing.T) {
 		Created: time.Now().UTC(),
 	})
 	h.click(tester, "刷新")
+	// The explicit Refresh reloads off the UI thread and posts the result; the
+	// rows stay visible with a labelled spinner until it arrives.
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) && board.listCount() <= before {
+		tester.Frame()
+		time.Sleep(2 * time.Millisecond)
+	}
 	if got := board.listCount(); got <= before {
 		t.Fatalf("List calls = %d after Refresh, want > %d", got, before)
 	}
+	tester.Frame()
 	h.assertTexts(tester, "外部新增的任务")
 }
 

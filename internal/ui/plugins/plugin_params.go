@@ -150,7 +150,7 @@ func buildPluginParamRow(c *ui.Context, t *design.Tokens, st *state,
 			design.Apply(ui.Text(c, st.tr(spec.TitleZH, spec.TitleEN)), t.Font(design.TypeXS)).
 				FontWeight(600).TextColor(t.LabelPrimary).NoWrap()
 			if spec.Key != "" {
-				design.Apply(ui.Text(c, spec.Key), t.MonoFamily()).FontSize(11).
+				design.Apply(ui.Text(c, spec.Key), t.MonoText(design.TypeXXXS)).
 					TextColor(t.LabelTertiary).NoWrap().Shrink(0)
 			}
 			ui.Spacer(c).Grow(1)
@@ -160,6 +160,7 @@ func buildPluginParamRow(c *ui.Context, t *design.Tokens, st *state,
 					st.paramEditing = true
 					st.paramKey = spec.Key
 					st.paramTitle = st.tr(spec.TitleZH, spec.TitleEN)
+					st.paramSensitive = spec.Sensitive
 					st.paramDraft = ""
 					if !spec.Sensitive {
 						st.paramDraft = strings.TrimSpace(settings.Get(spec.Key, ""))
@@ -172,7 +173,7 @@ func buildPluginParamRow(c *ui.Context, t *design.Tokens, st *state,
 			}
 		})
 		ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(design.Space2).Children(func() {
-			design.Apply(ui.Text(c, value), t.MonoFamily()).FontSize(11).
+			design.Apply(ui.Text(c, value), t.MonoText(design.TypeXXXS)).
 				TextColor(t.LabelSecondary).Grow(1).MaxLines(1).Ellipsis("…")
 			design.Apply(ui.Text(c, st.tr(spec.DescZH, spec.DescEN)), t.Font(design.TypeXXS)).
 				TextColor(t.LabelTertiary).MaxLines(2)
@@ -223,14 +224,19 @@ func buildPluginParamModal(c *ui.Context, t *design.Tokens, st *state, settings 
 		}).Children(func() {
 			design.Apply(ui.Text(c, st.tr("编辑参数", "Edit parameter")), t.Font(design.TypeL)).
 				FontWeight(600).TextColor(t.LabelPrimary)
-			design.Apply(ui.Text(c, st.tr("参数：", "Setting: ")+st.paramKey), t.MonoFamily()).
-				FontSize(11).TextColor(t.LabelTertiary)
+			design.Apply(ui.Text(c, st.tr("参数：", "Setting: ")+st.paramKey), t.MonoText(design.TypeXXXS)).
+				TextColor(t.LabelTertiary)
 			// The dialog's only field takes the focus as it opens and Enter
 			// submits the dialog, as in a desktop form.
-			ui.TextInput(c, &st.paramDraft).
+			input := ui.TextInput(c, &st.paramDraft).
 				Label(st.tr("新值：", "New value: ") + st.paramTitle).
 				Placeholder(st.tr("留空保持不变", "Leave blank to keep the current value")).
 				FillWidth().AutoFocus().OnTextKey(uikit.EnterTo(save))
+			if st.paramSensitive {
+				// Credentials use the official Password mode: hidden on screen
+				// and kept out of the input's own clipboard path.
+				input = input.Password()
+			}
 			if st.paramErrText != "" {
 				uikit.ErrorLine(c, st.paramErrText)
 			}

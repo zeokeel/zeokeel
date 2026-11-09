@@ -17,6 +17,7 @@ package uiroot
 import (
 	"log"
 	"strconv"
+	"strings"
 	"sync"
 	"sync/atomic"
 
@@ -33,8 +34,12 @@ import (
 const (
 	settingsKeySidebarWidth   = "ui.width.sidebar"
 	settingsKeyInspectorWidth = "ui.width.inspector"
+	// The chrome's discrete states persist too: the sidebar opens as the rail
+	// the user left it, and the inspector reopens where they left it.
+	settingsKeySidebarCollapsed = "ui.sidebar.collapsed"
+	settingsKeyInspectorOpen    = "ui.inspector.open"
 	// Width bounds keep a dragged pane usable; a saved value outside them is
-	// clamped on load.
+	// clamped on load and the divider is clamped live while dragging.
 	minSidebarWidth   float32 = 200
 	maxSidebarWidth   float32 = 420
 	minInspectorWidth float32 = 240
@@ -125,6 +130,21 @@ type Root struct {
 	// 64 DIP icon rail. It is toggled by Cmd/Ctrl+B or the brand-row control.
 	sidebarCollapsed bool
 
+	// inspectorToggle is the content header's inspector button; a close that
+	// removes the focused control (the drawer, the pane header's X) asks for
+	// the keyboard back on it, as a dialog gives it back to its opener.
+	inspectorToggle ui.Handle
+	// inspectorFocusPending asks the next pass to move the focus back to the
+	// inspector toggle after such a close.
+	inspectorFocusPending bool
+	// inspectorDrawerShown records the presentation the last view built: a
+	// close from the modal drawer must return the focus, while closing a docked
+	// pane with the keyboard chord keeps whatever the user was focused on.
+	inspectorDrawerShown bool
+	// paneHintShown limits the "inspector is closed" toast to once per closed
+	// episode, so a held pane-cycle shortcut does not repeat it.
+	paneHintShown bool
+
 	// sidebarWidth/inspectorWidth are the user's dragged pane widths (ui.Split
 	// dividers); zero until loadChromeWidths reads the saved values on the first
 	// frame. widthsLoaded keeps that read once per process.
@@ -158,12 +178,14 @@ type Root struct {
 func (r *Root) SidebarCollapsed() bool { return r.sidebarCollapsed }
 
 // SetSidebarCollapsed collapses the left sidebar to the 64 DIP icon rail or
-// expands it, requesting a frame when the value changes.
+// expands it, requesting a frame when the value changes. The state is part of
+// the window layout the user left, so it persists in the host settings.
 func (r *Root) SetSidebarCollapsed(collapsed bool) {
 	if r.sidebarCollapsed == collapsed {
 		return
 	}
 	r.sidebarCollapsed = collapsed
+	r.saveSidebarCollapsed()
 	r.requestFrame()
 }
 
@@ -176,12 +198,26 @@ func (r *Root) RightPanelOpen() bool { return r.rightOpen }
 
 // SetRightPanelOpen docks or collapses the window-level right inspector panel
 // and requests a frame when the value changes. The content-column toggle button
-// calls the same state.
+// calls the same state. It persists like the sidebar's collapsed state.
 func (r *Root) SetRightPanelOpen(open bool) {
+	r.setRightPanelOpen(open, false)
+}
+
+// setRightPanelOpen is SetRightPanelOpen with the close focus policy: a close
+// that removes the focused control (the modal drawer, or the pane header's
+// close button) asks the next frame to return the focus to the inspector
+// toggle, as a dialog gives the focus back to the control that opened it.
+func (r *Root) setRightPanelOpen(open bool, restoreFocus bool) {
 	if r.rightOpen == open {
 		return
 	}
 	r.rightOpen = open
+	if open {
+		r.paneHintShown = false
+	} else if restoreFocus {
+		r.inspectorFocusPending = true
+	}
+	r.saveInspectorOpen()
 	r.requestFrame()
 }
 
@@ -204,6 +240,43 @@ func (r *Root) loadChromeWidths() {
 	if v, err := strconv.ParseFloat(r.settingsService.Get(settingsKeyInspectorWidth, ""), 32); err == nil {
 		r.inspectorWidth = clampWidth(float32(v), minInspectorWidth, maxInspectorWidth)
 	}
+	// The sidebar/inspector open states restore with the widths; a missing or
+	// hand-edited value falls back to the closed defaults the shell always had.
+	if v, ok := parseSettingBool(r.settingsService.Get(settingsKeySidebarCollapsed, "")); ok {
+		r.sidebarCollapsed = v
+	}
+	if v, ok := parseSettingBool(r.settingsService.Get(settingsKeyInspectorOpen, "")); ok {
+		r.rightOpen = v
+	}
+}
+
+// parseSettingBool reads a persisted bool setting ("true"/"false", "1"/"0"),
+// reporting whether it held a value the shell understands.
+func parseSettingBool(raw string) (bool, bool) {
+	switch strings.ToLower(strings.TrimSpace(raw)) {
+	case "true", "1":
+		return true, true
+	case "false", "0":
+		return false, true
+	}
+	return false, false
+}
+
+// saveSidebarCollapsed persists the sidebar's rail/expand state.
+func (r *Root) saveSidebarCollapsed() {
+	if r.settingsService == nil {
+		return
+	}
+	_ = r.settingsService.Set(settingsKeySidebarCollapsed, strconv.FormatBool(r.sidebarCollapsed))
+}
+
+// saveInspectorOpen persists whether the inspector reopens on the session
+// screen after a restart.
+func (r *Root) saveInspectorOpen() {
+	if r.settingsService == nil {
+		return
+	}
+	_ = r.settingsService.Set(settingsKeyInspectorOpen, strconv.FormatBool(r.rightOpen))
 }
 
 // saveChromeWidths persists the dragged pane widths, so the layout opens the
@@ -289,11 +362,12 @@ func (r *Root) registerHostCommands() {
 		Order:    900,
 		Shortcut: "Cmd/Ctrl + Alt + I",
 		Run: func() error {
-			if !r.hasAnySlot(contracts.SlotSessionPanelRight) {
+			if !r.inspectorAvailable() {
 				return nil
 			}
-			r.rightOpen = !r.rightOpen
-			r.requestFrame()
+			// The pane header's close control runs this command, so the focus
+			// goes back to the content header toggle like a closed dialog's.
+			r.setRightPanelOpen(!r.rightOpen, true)
 			return nil
 		},
 	})

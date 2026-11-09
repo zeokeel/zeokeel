@@ -43,6 +43,12 @@ jobs:
       - name: Vet
         run: go vet ./...
 
+      - name: Design contract
+        run: |
+          go run ./internal/devtools/designlint --strict --baseline .design-baseline.json ./...
+          bash scripts/design-check.sh
+          go tool mygo vet .
+
       - name: Test
         run: go test ./... -count=1
 

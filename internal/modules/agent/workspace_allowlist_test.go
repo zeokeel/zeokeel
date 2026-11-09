@@ -104,3 +104,61 @@ func TestGateWorkspaceKeepsInteractionToolsAllowed(t *testing.T) {
 		}
 	}
 }
+
+// TestSessionPermissionReadOnlyUsesReadOnlyList covers the per-session
+// read-only override: only contracts.ReadOnlyAutoAllowedTools are allowed
+// without consulting the approvals backend; workspace write tools and
+// leave-the-workspace tools fall through to it.
+func TestSessionPermissionReadOnlyUsesReadOnlyList(t *testing.T) {
+	svc, _ := newSwitcherService(t)
+	sessionID, err := svc.NewSession("")
+	if err != nil {
+		t.Fatalf("NewSession: %v", err)
+	}
+	if err := svc.SetSessionPermission(sessionID, contracts.PermissionReadOnly); err != nil {
+		t.Fatalf("SetSessionPermission: %v", err)
+	}
+	approvals := &recordingApprovals{decision: contracts.ApprovalDeny}
+	svc.approvals = approvals
+
+	for _, tool := range []string{
+		"read_file", "list_dir", "glob", "grep", "read_image", "working_directory",
+		"settings_get", "job_list", "session_search", "lsp_diagnostics",
+	} {
+		if got := gateDecision(t, svc, sessionID, tool); got != rig.DecisionAllow {
+			t.Fatalf("read-only gate %q = %v, want allow without approval", tool, got)
+		}
+	}
+	if asked := approvals.askedTools(); len(asked) != 0 {
+		t.Fatalf("read-only auto-allow tools requested approval: %v", asked)
+	}
+
+	wantAsked := []string{"write_file", "edit_file", "str_replace_editor", "bash", "web_fetch", "unknown_tool"}
+	for _, tool := range wantAsked {
+		if got := gateDecision(t, svc, sessionID, tool); got != rig.DecisionDeny {
+			t.Fatalf("read-only gate %q = %v, want the approvals backend's deny", tool, got)
+		}
+	}
+	if asked := approvals.askedTools(); strings.Join(asked, ",") != strings.Join(wantAsked, ",") {
+		t.Fatalf("approval requests = %v, want %v", asked, wantAsked)
+	}
+}
+
+// TestReadOnlyListIsWorkspaceSubset prevents the read-only set from drifting
+// outside the workspace set: read-only must never allow a tool that the default
+// workspace mode would ask about.
+func TestReadOnlyListIsWorkspaceSubset(t *testing.T) {
+	for tool := range contracts.ReadOnlyAutoAllowedTools {
+		if !contracts.WorkspaceAutoAllowed(tool) {
+			t.Fatalf("read-only allows %q but workspace-write does not", tool)
+		}
+	}
+	for _, tool := range []string{"write_file", "edit_file", "str_replace_editor"} {
+		if contracts.ReadOnlyAutoAllowed(tool) {
+			t.Fatalf("read-only must not auto-allow the workspace write tool %q", tool)
+		}
+		if !contracts.WorkspaceAutoAllowed(tool) {
+			t.Fatalf("workspace-write must auto-allow %q", tool)
+		}
+	}
+}

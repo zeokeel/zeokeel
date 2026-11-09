@@ -76,7 +76,7 @@ func TestArchivePageEmptyState(t *testing.T) {
 	tester := h.tester()
 	tester.Frame()
 	h.click(tester, "归档")
-	h.assertTexts(tester, "没有归档的会话", "归档的会话会出现在这里")
+	h.assertTexts(tester, "没有归档的会话", "在会话的「⋯」菜单里选择「归档」")
 }
 
 // TestArchivePageRestore covers the restore action: it clears the archive flag

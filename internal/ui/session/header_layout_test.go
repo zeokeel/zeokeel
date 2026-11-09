@@ -127,9 +127,10 @@ func TestMessageActionsEntryIsDiscoverable(t *testing.T) {
 	}
 }
 
-// TestRegenerateActionIsCompact covers N3: the regenerate control is a compact
-// secondary button under the message, not a full-width bar.
-func TestRegenerateActionIsCompact(t *testing.T) {
+// TestRegenerateLivesInMessageActionRow covers S-19: regenerate moved from a
+// heavy secondary button under the message into the finished reply's action
+// row, as a 32x32 icon action aligned with copy.
+func TestRegenerateLivesInMessageActionRow(t *testing.T) {
 	chat := newExtendedChat()
 	chat.addSession(contracts.ChatSession{
 		ID: "sess-1", Title: "重生成",
@@ -141,20 +142,27 @@ func TestRegenerateActionIsCompact(t *testing.T) {
 	h := newCommandHarness(t, chat)
 	tester := h.tester()
 	tester.Frame()
-	rect, ok := tester.Find("重新生成")
+	regenerate, ok := tester.Find("重新生成")
 	if !ok {
 		t.Fatalf("regenerate action missing; texts = %v", tester.Texts())
 	}
-	if rect.W > 240 {
-		t.Fatalf("regenerate button width = %.1f, want a compact secondary action", rect.W)
+	copyAction, ok := tester.Find("复制消息")
+	if !ok {
+		t.Fatalf("copy action missing; texts = %v", tester.Texts())
 	}
-	// Right-aligned under the transcript column.
-	if rect.X < 600 {
-		t.Fatalf("regenerate button x = %.1f, want it right-aligned under the message", rect.X)
+	if regenerate.W > 48 || regenerate.H > 48 {
+		t.Fatalf("regenerate target = %.0fx%.0f, want an icon action", regenerate.W, regenerate.H)
+	}
+	// Same action row as copy: same height and vertically overlapping band.
+	if regenerate.Y+regenerate.H < copyAction.Y || regenerate.Y > copyAction.Y+copyAction.H {
+		t.Fatalf("regenerate at %+v is not in the copy action row %+v", regenerate, copyAction)
+	}
+	if regenerate.X < 600 {
+		t.Fatalf("regenerate x = %.1f, want it right-aligned with the message actions", regenerate.X)
 	}
 }
 
-// TestRegenerateActionCallsBackend covers the compact control's action.
+// TestRegenerateActionCallsBackend covers the action-row control's action.
 func TestRegenerateActionCallsBackend(t *testing.T) {
 	chat := newExtendedChat()
 	chat.addSession(contracts.ChatSession{
@@ -172,7 +180,9 @@ func TestRegenerateActionCallsBackend(t *testing.T) {
 	if len(calls) != 1 || calls[0] != "sess-regen" {
 		t.Fatalf("Regenerate calls = %v, want [sess-regen]", calls)
 	}
-	if !tester.HasText("重新生成") {
+	// The action row is rebuilt from the read model after the call; the control
+	// stays discoverable while the turn is idle.
+	if _, ok := tester.Find("重新生成"); !ok {
 		t.Fatalf("regenerate action disappeared; texts = %v", tester.Texts())
 	}
 }

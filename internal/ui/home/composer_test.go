@@ -206,12 +206,18 @@ func assertHomeBottomRow(t *testing.T, tester *ui.Tester) {
 	if row.Y <= input.Y {
 		t.Fatalf("attach menu y=%.1f is not below the input y=%.1f", row.Y, input.Y)
 	}
-	for _, label := range []string{"test-model", "精简", "发送"} {
+	for _, label := range []string{"test-model", "精简", "发送", "proj"} {
 		element, ok := tester.Find(label)
 		if !ok {
 			t.Fatalf("%q missing from the bottom row; texts = %v", label, tester.Texts())
 		}
-		if diff := element.Y - row.Y; diff < -8 || diff > 8 {
+		// The action row is center-aligned: the shared send control (icon plus
+		// label) is taller than the quiet menu chips, so its top edge sits a few
+		// DIP above theirs while the row centers still match. Before the shared
+		// ComposerShell the send control had no glyph and its top lined up within
+		// 8 DIP; the unified control keeps the glyph, so allow the half-height
+		// difference of the two targets instead.
+		if diff := element.Y - row.Y; diff < -12 || diff > 12 {
 			t.Fatalf("%q y=%.1f is not on the action row (y=%.1f); texts = %v",
 				label, element.Y, row.Y, tester.Texts())
 		}
@@ -264,12 +270,12 @@ func TestHomeComposerRendersAndChips(t *testing.T) {
 	tester := ui.NewTester(h.ui.View, 1200, 800)
 	tester.Frame()
 
-	h.assertTexts(tester, "问点什么…", "发送", "附件", "test-model", "精简")
-	// The redesign moved the model/mode pickers into the single bottom action
-	// row and dropped the top context row (workspace label), the Enter hint and
-	// the standalone 路径 button.
+	h.assertTexts(tester, "问点什么…", "发送", "附件", "test-model", "精简", "proj")
+	// The single bottom action row carries the workspace context chip next to
+	// the model/mode pickers; the old top context row, the Enter hint and the
+	// standalone 路径 button stay gone.
 	assertHomeBottomRow(t, tester)
-	h.assertNoTexts(tester, "proj", "Enter 发送", "Shift+Enter", "路径", "开始新对话")
+	h.assertNoTexts(tester, "Enter 发送", "Shift+Enter", "路径", "开始新对话")
 	// The attach menu is a popup: its choices appear only after opening it.
 	h.assertNoTexts(tester, "选择文件…", "手动输入路径…")
 	// With a model configured and no conversations, the empty state offers the

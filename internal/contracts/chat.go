@@ -65,6 +65,13 @@ type ChatMessage struct {
 	Streaming bool
 	// Tools lists the tool calls that belong to this message, in call order.
 	Tools []ToolCall
+	// ToolTimelineKnown reports that the tool calls above carry a live-recorded
+	// timeline: their TextOffset values say where in Text each call arrived.
+	// It is false for messages restored from history without the durable
+	// metadata (old app versions, imported sessions, ACP-backed sessions):
+	// those keep the legacy whole-text-then-cards fallback because an all-zero
+	// offset set is indistinguishable from "no offsets recorded".
+	ToolTimelineKnown bool
 	// Attachments are the files/images sent with a user message (display
 	// read model; the image bytes also travel as rig image content parts).
 	Attachments []Attachment

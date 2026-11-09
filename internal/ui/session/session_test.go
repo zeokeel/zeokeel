@@ -430,8 +430,8 @@ func (h *harness) typeSlash(tester *ui.Tester) {
 // sessionMenuLabels are the labels the single 会话设置 button can show: the
 // quiet default plus the contextual permission/mode state that owns it.
 var sessionMenuLabels = []string{
-	"会话设置", "全部允许", "禁止工具", "工作区权限", "计划模式", "精简", "创作",
-	"Session settings", "Settings", "Allow all", "Tools off", "Workspace",
+	"会话设置", "所有权限", "工作区可写", "只读", "计划模式", "精简", "创作",
+	"Session settings", "Settings", "All permissions", "Workspace-write", "Read-only",
 	"Plan mode", "Minimal", "Creator",
 }
 

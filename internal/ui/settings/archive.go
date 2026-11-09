@@ -99,8 +99,9 @@ func buildArchivePage(c *ui.Context, t *design.Tokens, kctx cordis.Context,
 			if len(archived) == 0 {
 				uikit.EmptyStateBlock(c,
 					localized(locale, "没有归档的会话", "No archived sessions"),
-					localized(locale, "归档的会话会出现在这里。",
-						"Archived sessions will appear here."),
+					localized(locale,
+						"在会话的「⋯」菜单里选择「归档」后，会话会出现在这里。",
+						"Archive a conversation from its more menu and it will appear here."),
 					nil)
 				return
 			}

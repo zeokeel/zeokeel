@@ -7,6 +7,7 @@ package plugins_test
 
 import (
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -97,6 +98,17 @@ func TestPluginParamsSensitiveEditKeepsValuePrivate(t *testing.T) {
 	focusParamInput(t, h, tester, "新值：API Key")
 	tester.Type("sk-new")
 	tester.Frame()
+	// The sensitive editor uses the official Password mode: the draft is not in
+	// the accessibility tree and cannot be copied out of the input.
+	if info, ok := tester.Access("新值：API Key"); ok && strings.Contains(info.Value, "sk-new") {
+		t.Fatalf("API key editor exposed the draft: %q", info.Value)
+	}
+	tester.Key(ui.Cmd, ui.KeyA)
+	tester.Command("copy")
+	tester.Frame()
+	if strings.Contains(tester.Clipboard(), "sk-new") {
+		t.Fatalf("API key editor copied the draft: %q", tester.Clipboard())
+	}
 	h.click(tester, "保存")
 	if got := store.get(contracts.SettingWebSearchAPIKey); got != "sk-new" {
 		t.Fatalf("%s = %q, want sk-new", contracts.SettingWebSearchAPIKey, got)

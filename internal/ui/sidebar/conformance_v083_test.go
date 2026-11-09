@@ -206,6 +206,16 @@ func TestWorkspaceRowMenuOpensAndDeletes(t *testing.T) {
 	openRowMenu(t, tester, "项目二")
 	h.click(tester, "删除工作区")
 	h.assertTexts(tester, "删除工作区", "取消", "删除")
+	// Enter is the safe default: it cancels the workspace deletion.
+	tester.Key(0, ui.KeyEnter)
+	tester.Frame()
+	if len(workspace.deleted) != 0 {
+		t.Fatalf("Enter on the workspace confirmation deleted: %v", workspace.deleted)
+	}
+	h.assertNoTexts(tester, "删除工作区")
+	// Only the explicit danger action deletes.
+	openRowMenu(t, tester, "项目二")
+	h.click(tester, "删除工作区")
 	h.click(tester, "删除")
 	if len(workspace.deleted) != 1 || workspace.deleted[0] != "w2" {
 		t.Fatalf("Delete calls = %v, want [w2]", workspace.deleted)

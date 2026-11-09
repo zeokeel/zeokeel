@@ -109,7 +109,7 @@ func TestVeryNarrowComposerToolsMenu(t *testing.T) {
 	tester.Frame()
 	tester.Frame()
 	tester.Frame()
-	for _, want := range []string{"附件", "工作区权限", "发送"} {
+	for _, want := range []string{"附件", "工作区可写", "发送"} {
 		if !tester.HasText(want) {
 			t.Fatalf("very narrow composer lacks %q; texts = %v", want, tester.Texts())
 		}
@@ -124,7 +124,7 @@ func TestVeryNarrowComposerToolsMenu(t *testing.T) {
 	if tester.HasText("test-model") || tester.HasText("未配置") {
 		t.Fatalf("very narrow composer still shows a model chip; texts = %v", tester.Texts())
 	}
-	if err := tester.Click("工作区权限"); err != nil {
+	if err := tester.Click("工作区可写"); err != nil {
 		t.Fatalf("open session menu: %v; texts = %v", err, tester.Texts())
 	}
 	tester.Frame()
@@ -171,11 +171,11 @@ func TestVeryNarrowComposerToolsMenu(t *testing.T) {
 
 	// The wide composer restores the full row (attach + model + session menu + send).
 	deadline := time.Now().Add(2 * time.Second)
-	for time.Now().Before(deadline) && !tester.HasText("工作区权限") {
+	for time.Now().Before(deadline) && !tester.HasText("工作区可写") {
 		tester.Frame()
 		time.Sleep(5 * time.Millisecond)
 	}
-	if !tester.HasText("工作区权限") {
+	if !tester.HasText("工作区可写") {
 		t.Fatalf("wide composer did not restore its full toolbar; texts = %v", tester.Texts())
 	}
 }

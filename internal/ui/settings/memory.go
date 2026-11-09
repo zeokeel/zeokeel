@@ -721,7 +721,7 @@ func buildMemoryEditDialog(c *ui.Context, t *design.Tokens, updater contracts.Me
 			ui.Field(c, localized(locale, "编辑内容", "Edit text"), func() {
 				ui.TextArea(c, &st.editText).
 					Label(inputLabel(locale, localized(locale, "编辑内容", "Edit text"))).
-					FillWidth().MinHeight(design.Space6 * 4)
+					FillWidth().MinHeight(design.Space6 * 4).AutoFocus()
 			}).Description(localized(locale, "这条记忆的新内容。",
 				"The memory's new text."))
 			if st.editErr != "" {

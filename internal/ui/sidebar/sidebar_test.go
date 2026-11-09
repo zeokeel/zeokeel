@@ -738,7 +738,19 @@ func TestSidebarDeleteConfirmation(t *testing.T) {
 	}
 	h.assertNoTexts(tester, "删除会话")
 
-	// Confirm deletes the session.
+	// Enter takes the default action, which is Cancel for a destructive
+	// confirmation: a stray Enter right after the row menu must not delete.
+	openRowMenu(t, tester, "要删除的会话")
+	h.click(tester, "删除")
+	h.assertTexts(tester, "删除会话", "取消")
+	tester.Key(0, ui.KeyEnter)
+	tester.Frame()
+	if deleted := chat.deletedSessions(); len(deleted) != 0 {
+		t.Fatalf("Enter on the delete confirmation deleted sessions: %v", deleted)
+	}
+	h.assertNoTexts(tester, "删除会话")
+
+	// Confirm deletes the session: only the explicit danger click does.
 	openRowMenu(t, tester, "要删除的会话")
 	h.click(tester, "删除")
 	h.click(tester, "删除")

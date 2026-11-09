@@ -90,11 +90,21 @@ func buildMCPsSection(
 ) {
 	uikit.Section(c, st.localized(cfg.MCPSection, "MCP 插件", "MCP plugins"), func(c *ui.Context) {
 		if hasService {
-			ui.Row(c).FillWidth().Justify(ui.End).Children(func() {
-				refresh := ui.Button(c, st.tr("刷新", "Refresh")).Tooltip(st.tr("重新连接并刷新 MCP 服务器状态", "Reconnect and refresh MCP server status"))
-				if refresh.Clicked() {
-					service.Refresh(context.Background())
-					runtime.Invalidate()
+			ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(design.Space2).Justify(ui.End).Children(func() {
+				if st.refreshing {
+					ui.Spinner(c).Label(st.tr("正在重连…", "Reconnecting…")).
+						Size(design.Space3, design.Space3).TextColor(t.LabelSecondary)
+				}
+				label := st.tr("刷新", "Refresh")
+				if st.refreshing {
+					label = st.tr("正在重连…", "Reconnecting…")
+				}
+				refresh := ui.Button(c, label).
+					Disabled(st.refreshing).
+					Tooltip(st.tr("重新连接并刷新 MCP 服务器状态", "Reconnect and refresh MCP server status"))
+				if refresh.Clicked() && !st.refreshing {
+					st.startMCPRefresh(service, runtime)
+					c.Invalidate()
 				}
 			})
 		}
@@ -103,16 +113,27 @@ func buildMCPsSection(
 		if hasService {
 			servers = service.MCP()
 		}
-		// Disabled servers are not started, so the service omits them; settings
-		// still knows the user-configured rows, which restore their cards.
+		// Servers the toolkit skipped at activation are reconstructed from the
+		// settings rows: disabled ones stay visible as disabled, and servers
+		// enabled during this visit stay visible as "enabled, reconnects after
+		// restart" instead of disappearing until the next launch.
 		servers = append(servers, st.disabledServerRows(settings, hasSettings, servers)...)
+		servers = append(servers, st.enabledPendingServerRows(settings, hasSettings, servers)...)
 		if len(servers) == 0 {
 			if !hasService {
 				uikit.EmptyState(c, st.tr("插件服务未启用", "Plugins service not enabled"))
 				return
 			}
-			uikit.EmptyState(c, st.tr("还没有配置 MCP 服务器（assembly 的 mcpServers）",
-				"No MCP servers configured yet (assembly mcpServers)"))
+			uikit.EmptyStateBlock(c,
+				st.tr("还没有配置 MCP 服务器", "No MCP servers configured yet"),
+				st.tr("在设置的 MCP 页面添加服务器；连接状态会显示在这里。",
+					"Add servers on the settings MCP page; their connection state shows here."),
+				func() {
+					if ui.Button(c, st.tr("打开设置中的 MCP 页", "Open MCP settings")).Clicked() {
+						st.openSettingsPage("mcp")
+						runtime.Invalidate()
+					}
+				})
 			return
 		}
 		// The servers are a collection: the official List keys them by their
@@ -191,11 +212,15 @@ func buildMCPCard(c *ui.Context, t *design.Tokens, runtime contracts.UIRuntime, 
 			// A failed connection offers recovery right where it failed.
 			if !st.serverDisabled(name) && pluginStatusFailed(server.Status) && service != nil {
 				retryLabel := st.tr("重试连接", "Retry")
+				if st.refreshing {
+					retryLabel = st.tr("正在重连…", "Reconnecting…")
+				}
 				retry := ui.Button(c, retryLabel).
+					Disabled(st.refreshing).
 					Tooltip(st.tr("重新连接这个 MCP 服务器", "Reconnect this MCP server"))
-				if retry.Clicked() {
-					service.Refresh(context.Background())
-					runtime.Invalidate()
+				if retry.Clicked() && !st.refreshing {
+					st.startMCPRefresh(service, runtime)
+					c.Invalidate()
 				}
 			}
 			if hasSettings && settings != nil && name != "" {
@@ -216,11 +241,12 @@ func buildMCPCard(c *ui.Context, t *design.Tokens, runtime contracts.UIRuntime, 
 		// The failure reason stays visible on the collapsed row: a short cause,
 		// with the whole raw status in its tooltip and in the folded details.
 		if !st.serverDisabled(name) && pluginStatusFailed(server.Status) {
-			if reason := mcpStatusReason(server.Status); reason != "" {
-				design.Apply(ui.Text(c, mcpStatusShortReason(reason)), t.Font(design.TypeXXS)).
-					TextColor(t.DangerText).MaxLines(1).Ellipsis("…").
-					Tooltip(strings.TrimSpace(server.Status))
-			}
+			// The row shows a product-language cause; the raw handshake/network
+			// error stays in the tooltip and in the folded details, where it can
+			// be selected and copied into a bug report.
+			design.Apply(ui.Text(c, mcpFailureSummary(st, server.Status)), t.Font(design.TypeXXS)).
+				TextColor(t.DangerText).MaxLines(1).Ellipsis("…").
+				Tooltip(strings.TrimSpace(server.Status))
 		}
 		ui.Collapsible(c, st.tr("详情", "Details"), &expanded, func() {
 			transport := st.tr("本地 stdio", "Local stdio")
@@ -260,17 +286,6 @@ func pluginStatusFailed(status string) bool {
 	lower := strings.ToLower(strings.TrimSpace(status))
 	return strings.Contains(lower, "失败") || strings.Contains(lower, "fail") ||
 		strings.Contains(lower, "error") || strings.Contains(lower, "不可用")
-}
-
-// mcpStatusReason exposes the human-readable reason inside an MCP status
-// string: the text after the first colon when the service put the underlying
-// error there, or the whole status otherwise.
-func mcpStatusReason(status string) string {
-	trimmed := strings.TrimSpace(status)
-	if cut := strings.IndexAny(trimmed, ":："); cut >= 0 && cut+1 < len(trimmed) {
-		return strings.TrimSpace(trimmed[cut+1:])
-	}
-	return trimmed
 }
 
 // toolDescriptionSummary shortens the developer-docs description to a scannable
@@ -368,34 +383,88 @@ func toolSummaryZHFor(name string) string {
 	return "内置工具"
 }
 
-// toolDescriptionLines resolves one catalogue row's description area: the
-// localized one-line summary first, and (for a Chinese interface over English
-// documentation) the documentation's own first phrase as the muted second line.
-// The full original text stays in the row's tooltip either way.
-func toolDescriptionLines(st *state, tool catalogTool) (primary, secondary string) {
+// toolDescriptionLine resolves one catalogue row's description: the localized
+// one-line summary first. The catalogue's own documentation (usually English,
+// model-facing) is not shown as a second line; it stays in the row tooltip.
+func toolDescriptionLine(st *state, tool catalogTool) string {
 	description := strings.TrimSpace(tool.Description)
 	if description == "" {
-		return "", ""
+		return ""
 	}
 	if containsCJK(description) {
-		return description, ""
+		return description
 	}
 	if !st.english() {
-		return toolSummaryZHFor(tool.Name), toolDescriptionSummary(description)
+		return toolSummaryZHFor(tool.Name)
 	}
-	return toolDescriptionSummary(description), ""
+	return toolDescriptionSummary(description)
 }
 
-// mcpStatusShortReason bounds the cause shown on a failed MCP row; the raw
-// status stays in the tooltip and in the folded details.
-func mcpStatusShortReason(reason string) string {
-	trimmed := strings.TrimSpace(reason)
-	const maxRunes = 96
-	runes := []rune(trimmed)
-	if len(runes) <= maxRunes {
-		return trimmed
+// mcpFailureSummary classifies a failed MCP status into a product-language
+// cause. The raw handshake/network error stays available as the row tooltip and
+// in the folded details; the collapsed row never shows raw English.
+func mcpFailureSummary(st *state, status string) string {
+	lower := strings.ToLower(strings.TrimSpace(status))
+	switch {
+	case strings.Contains(lower, "timeout"), strings.Contains(lower, "timed out"),
+		strings.Contains(lower, "deadline exceeded"), strings.Contains(lower, "超时"):
+		return st.tr("连接超时（服务器未及时响应）", "Connection timed out (the server did not answer in time)")
+	case strings.Contains(lower, "401"), strings.Contains(lower, "403"),
+		strings.Contains(lower, "unauthorized"), strings.Contains(lower, "forbidden"),
+		strings.Contains(lower, "authentication"), strings.Contains(lower, "鉴权"):
+		return st.tr("鉴权失败（请检查访问令牌）", "Authentication failed (check the access token)")
+	case strings.Contains(lower, "initialize"), strings.Contains(lower, "handshake"),
+		strings.Contains(lower, "json-rpc"), strings.Contains(lower, "unmarshal"),
+		strings.Contains(lower, "protocol"), strings.Contains(lower, "握手"):
+		return st.tr("协议握手失败（MCP 初始化未完成）",
+			"Protocol handshake failed (MCP initialization did not complete)")
+	case strings.Contains(lower, "refused"), strings.Contains(lower, "no such host"),
+		strings.Contains(lower, "dial tcp"), strings.Contains(lower, "connect:"),
+		strings.Contains(lower, "无法连接"):
+		return st.tr("无法连接到服务器", "Could not reach the server")
+	default:
+		return st.tr("连接失败", "Connection failed")
 	}
-	return string(runes[:maxRunes]) + "…"
+}
+
+// startMCPRefresh reconnects the MCP servers off the UI thread: Refresh pings
+// every client and can block on a hung server, so it must never run inside the
+// frame's click handler. The frame shows a spinner until the posted result lands.
+func (st *state) startMCPRefresh(service contracts.PluginsService, runtime contracts.UIRuntime) {
+	if service == nil || st.refreshing {
+		return
+	}
+	st.refreshing = true
+	st.status = ""
+	st.statusErr = false
+	locale := st.locale
+	go func() {
+		servers, err := refreshMCPsafely(service)
+		runtime.Post(func() {
+			st.refreshing = false
+			if err != nil {
+				st.status = uikit.T(locale, "刷新 MCP 服务器失败：", "Failed to refresh MCP servers: ") + err.Error()
+				st.statusErr = true
+			} else {
+				st.status = uikit.T(locale,
+					fmt.Sprintf("已刷新 %d 个 MCP 服务器", len(servers)),
+					fmt.Sprintf("Refreshed %d MCP servers", len(servers)))
+				st.statusErr = false
+			}
+			runtime.Invalidate()
+		})
+	}()
+}
+
+// refreshMCPsafely contains a panic in the backend's Refresh call so a broken
+// MCP client cannot cross the goroutine boundary and take the process down.
+func refreshMCPsafely(service contracts.PluginsService) (servers []contracts.MCPPlugin, err error) {
+	defer func() {
+		if recovered := recover(); recovered != nil {
+			err = fmt.Errorf("%v", recovered)
+		}
+	}()
+	return service.Refresh(context.Background()), nil
 }
 
 // mcpDetailValue renders one detail value, with an em dash when empty.
@@ -454,8 +523,13 @@ func buildToolsSection(
 				catalog = append(catalog, catalogTool{Name: name, MCP: isMCPToolName(name)})
 			}
 		}
-		// The count follows the search filter, so it always names what shows.
-		filtered := sortCatalogByCategory(filterCatalog(catalog, st.query))
+		// The count follows the search and the disabled-only filter, so it always
+		// names what shows.
+		filtered := filterCatalog(catalog, st.query)
+		if st.toolsDisabledOnly {
+			filtered = filterDisabledCatalog(st, filtered)
+		}
+		filtered = sortCatalogByCategory(filtered)
 		if hasToolkit {
 			design.Apply(ui.Text(c, st.tr(fmt.Sprintf("%d 个工具", len(filtered)), fmt.Sprintf("%d tools", len(filtered)))),
 				t.Font(design.TypeXXS)).TextColor(t.LabelTertiary)
@@ -470,10 +544,20 @@ func buildToolsSection(
 			uikit.ErrorLine(c, st.tr("禁用工具配置无效：", "Invalid disabled-tools configuration: ")+st.disabledErr)
 		}
 		searchLabel := st.tr("搜索工具", "Search tools")
-		ui.SearchField(c, &st.query).Label(searchLabel).Placeholder(searchLabel).FillWidth()
+		ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(design.Space2).Children(func() {
+			ui.SearchField(c, &st.query).Label(searchLabel).Placeholder(searchLabel).Grow(1)
+			// A 70-row catalogue of switches needs a way to see just the tools
+			// that are turned off.
+			ui.Checkbox(c, &st.toolsDisabledOnly, st.tr("仅显示已停用", "Show disabled only"))
+		})
 		if len(filtered) == 0 {
-			uikit.EmptyStateBlock(c, st.tr("没有匹配的工具", "No matching tools"),
-				st.tr("换个关键词试试。", "Try another search term."), nil)
+			if st.toolsDisabledOnly {
+				uikit.EmptyStateBlock(c, st.tr("没有已停用的工具", "No disabled tools"),
+					st.tr("当前所有工具都是启用状态。", "Every tool is currently enabled."), nil)
+			} else {
+				uikit.EmptyStateBlock(c, st.tr("没有匹配的工具", "No matching tools"),
+					st.tr("换个关键词试试。", "Try another search term."), nil)
+			}
 			return
 		}
 		st.toolsList.Key = func(index int) any {
@@ -513,20 +597,16 @@ func buildToolRow(c *ui.Context, t *design.Tokens, tool catalogTool, showCategor
 		}
 		ui.Row(c).FillWidth().Gap(design.Space3).
 			AlignItems(ui.Center).Padding(design.Space2, design.Space2).Children(func() {
-			design.Apply(ui.Text(c, tool.Name), t.MonoFamily()).FontSize(12).
+			design.Apply(ui.Text(c, tool.Name), t.MonoText(design.TypeXXS)).
 				TextColor(t.LabelPrimary).NoWrap()
 			description := strings.TrimSpace(tool.Description)
 			if description != "" {
-				primary, secondary := toolDescriptionLines(st, tool)
-				ui.Column(c).Grow(1).MinWidth(0).Gap(0).Children(func() {
-					design.Apply(ui.Text(c, primary), t.Font(design.TypeXXS)).
-						TextColor(t.LabelTertiary).MaxLines(1).Ellipsis("…").
-						Tooltip(description)
-					if secondary != "" && secondary != primary {
-						design.Apply(ui.Text(c, secondary), t.Font(design.TypeXXXS)).
-							TextColor(t.LabelTertiary).Opacity(0.75).MaxLines(1).Ellipsis("…")
-					}
-				})
+				// One scannable line in the frame's language; the catalogue's own
+				// (usually English) documentation is the tooltip, not a second
+				// competing line.
+				design.Apply(ui.Text(c, toolDescriptionLine(st, tool)), t.Font(design.TypeXXS)).
+					TextColor(t.LabelTertiary).Grow(1).MinWidth(0).MaxLines(1).Ellipsis("…").
+					Tooltip(description)
 			} else {
 				ui.Spacer(c).Grow(1)
 			}
@@ -546,15 +626,12 @@ func buildToolRow(c *ui.Context, t *design.Tokens, tool catalogTool, showCategor
 			changed = sw.Changed()
 			if changed {
 				st.setToolEnabled(tool.Name, enabled, settings, tool.MCP)
-				if st.pendingRestartTools == nil {
-					st.pendingRestartTools = make(map[string]bool)
-				}
-				st.pendingRestartTools[tool.Name] = true
 				runtime.Invalidate()
 			}
-			if st.pendingRestartTools[tool.Name] {
+			if st.toolRestartPending(tool.Name) {
 				// The toolkit registers its tools at startup: the change applies
-				// after a restart, and the row says so until then.
+				// after a restart, and the row says so only while the switch has
+				// a net difference from the startup state.
 				design.Apply(ui.Text(c, st.tr("待重启", "Restart needed")),
 					t.Font(design.TypeXXS)).TextColor(t.WarningText).NoWrap()
 			}
@@ -613,6 +690,18 @@ func filterCatalog(catalog []catalogTool, query string) []catalogTool {
 	for _, tool := range catalog {
 		haystack := strings.ToLower(tool.Name + "\x00" + tool.Description)
 		if strings.Contains(haystack, needle) {
+			filtered = append(filtered, tool)
+		}
+	}
+	return filtered
+}
+
+// filterDisabledCatalog keeps only the tools that are currently disabled by
+// either setting row (tools.disabled / mcp.disabledTools).
+func filterDisabledCatalog(st *state, catalog []catalogTool) []catalogTool {
+	filtered := make([]catalogTool, 0, len(catalog))
+	for _, tool := range catalog {
+		if st.toolDisabled(tool.Name) {
 			filtered = append(filtered, tool)
 		}
 	}

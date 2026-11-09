@@ -71,36 +71,50 @@ func (b *behaviorHarness) storedPermission() string {
 	return b.h.settings.Get(contracts.SettingAgentPermission, "")
 }
 
-// TestBehaviorPermissionPageWrites covers the page: default workspace, the four
-// choices write the shared row with a "已保存" badge, and unknown stored values
-// display as workspace without being overwritten by a frame.
+// TestBehaviorPermissionPageWrites covers the page: default workspace-write,
+// the three presets write the shared row with a "已保存" badge, the retired
+// ask/never rows display as read-only, and unknown stored values display as
+// workspace without being overwritten by a frame.
 func TestBehaviorPermissionPageWrites(t *testing.T) {
 	harness := startBehaviorUI(t, false)
 	harness.openSettingsPage(t, "行为")
-	requireHasTexts(t, harness.tester, "行为", "默认代理权限", "当前：工作区", "工作区",
-		"询问", "完全访问", "从不")
+	requireHasTexts(t, harness.tester, "行为", "默认代理权限", "当前：工作区可写",
+		"只读", "工作区可写", "所有权限")
 
-	// Select full access through the popover.
-	harness.click(t, "工作区")
-	requireHasTexts(t, harness.tester, "工作区", "完全访问", "从不")
-	harness.click(t, "完全访问")
+	// Select all permissions through the popover.
+	harness.click(t, "工作区可写")
+	requireHasTexts(t, harness.tester, "只读", "工作区可写", "所有权限")
+	harness.click(t, "所有权限")
 	if got := harness.storedPermission(); got != contracts.PermissionFull {
-		t.Fatalf("agent.permission after 完全访问 = %q, want full", got)
+		t.Fatalf("agent.permission after 所有权限 = %q, want full", got)
 	}
 	requireHasText(t, harness.tester, "已保存")
-	requireHasText(t, harness.tester, "当前：完全访问")
+	requireHasText(t, harness.tester, "当前：所有权限")
 
-	// Select never, then back to ask: both write the same row.
-	harness.click(t, "完全访问")
-	harness.click(t, "从不")
-	if got := harness.storedPermission(); got != "never" {
-		t.Fatalf("agent.permission after 从不 = %q, want never", got)
+	// Select read-only, then back to the default: all three write the same row.
+	harness.click(t, "所有权限")
+	harness.click(t, "只读")
+	if got := harness.storedPermission(); got != contracts.PermissionReadOnly {
+		t.Fatalf("agent.permission after 只读 = %q, want read-only", got)
 	}
-	requireHasText(t, harness.tester, "当前：从不")
-	harness.click(t, "从不")
-	harness.click(t, "询问")
-	if got := harness.storedPermission(); got != contracts.PermissionAsk {
-		t.Fatalf("agent.permission after 询问 = %q, want ask", got)
+	requireHasText(t, harness.tester, "当前：只读")
+	harness.click(t, "只读")
+	harness.click(t, "工作区可写")
+	if got := harness.storedPermission(); got != contracts.PermissionWorkspace {
+		t.Fatalf("agent.permission after 工作区可写 = %q, want workspace", got)
+	}
+
+	// Retired "ask"/"never" rows normalize to the read-only display; a frame
+	// never rewrites the stored legacy value by itself.
+	for _, legacy := range []string{"ask", "never"} {
+		if err := harness.h.settings.Set(contracts.SettingAgentPermission, legacy); err != nil {
+			t.Fatalf("set legacy %q: %v", legacy, err)
+		}
+		harness.tester.Frame()
+		requireHasText(t, harness.tester, "当前：只读")
+		if got := harness.storedPermission(); got != legacy {
+			t.Fatalf("a frame rewrote legacy agent.permission %q to %q", legacy, got)
+		}
 	}
 
 	// Unknown stored value: displayed as workspace, not overwritten by rendering.
@@ -108,25 +122,26 @@ func TestBehaviorPermissionPageWrites(t *testing.T) {
 		t.Fatalf("set bogus permission: %v", err)
 	}
 	harness.tester.Frame()
-	requireHasText(t, harness.tester, "当前：工作区")
+	requireHasText(t, harness.tester, "当前：工作区可写")
 	if got := harness.storedPermission(); got != "bogus" {
 		t.Fatalf("a frame overwrote agent.permission to %q", got)
 	}
 }
 
 // TestBehaviorPermissionSharedWithSessionChip covers the shared row: choosing
-// 完全访问 on the settings page makes the session composer chip show 全部允许;
-// choosing 从不 persists never (the chip's three-step cycle does not include it,
-// so the probe records the display mismatch as AUDIT-P3-14).
+// 只读 on the settings page makes the session composer button show 只读; a full
+// row shows 所有权限 and a retired "never" row is drawn as read-only (never is
+// not a selectable mode any more).
 func TestBehaviorPermissionSharedWithSessionChip(t *testing.T) {
-	// Configure 完全访问 before the session screen exists: the composer chip renders
+	// Choose 只读 before the session screen exists: the composer button renders
 	// the same labels as the settings page, so the behavior button must be
 	// unambiguous while it is clicked.
 	harness := startBehaviorUI(t, false)
 	harness.openSettingsPage(t, "行为")
-	harness.click(t, "工作区")
-	harness.click(t, "完全访问")
+	harness.click(t, "工作区可写")
+	harness.click(t, "只读")
 	requireHasText(t, harness.tester, "已保存")
+	requireHasText(t, harness.tester, "当前：只读")
 	harness.h.ui.Navigator().CloseSettings()
 	harness.tester.Frame()
 
@@ -134,32 +149,33 @@ func TestBehaviorPermissionSharedWithSessionChip(t *testing.T) {
 	activate(t, harness.h.ctx, sessionui.Module(), sessionui.Config{})
 	harness.h.push("session")
 	harness.tester.Frame()
-	requireHasText(t, harness.tester, "全部允许")
-	if got := harness.storedPermission(); got != contracts.PermissionFull {
-		t.Fatalf("agent.permission after 完全访问 = %q, want full", got)
+	requireHasText(t, harness.tester, "只读")
+	if got := harness.storedPermission(); got != contracts.PermissionReadOnly {
+		t.Fatalf("agent.permission after 只读 = %q, want read-only", got)
 	}
 
-	// Back to settings: choose 从不. The composer chip (全部允许) cannot be
-	// confused with the behavior popover button (完全访问) or menu item (从不).
-	harness.openSettingsPage(t, "行为")
-	harness.click(t, "完全访问")
-	harness.click(t, "从不")
-	harness.h.ui.Navigator().CloseSettings()
+	// The all-permissions preset owns the composer button label.
+	if err := harness.h.settings.Set(contracts.SettingAgentPermission, contracts.PermissionFull); err != nil {
+		t.Fatalf("set full permission: %v", err)
+	}
 	harness.tester.Frame()
-	if got := harness.storedPermission(); got != "never" {
-		t.Fatalf("agent.permission after 从不 = %q, want never", got)
+	requireHasText(t, harness.tester, "所有权限")
+
+	// A retired "never" row set externally is drawn as the normalized read-only
+	// mode by the composer instead of the old 禁止工具 label.
+	if err := harness.h.settings.Set(contracts.SettingAgentPermission, "never"); err != nil {
+		t.Fatalf("set legacy never: %v", err)
 	}
-	showsNever := false
-	showsAsk := false
-	for _, text := range harness.tester.Texts() {
-		if text == "从不" {
-			showsNever = true
-		}
-		if text == "询问" {
-			showsAsk = true
-		}
-	}
-	if !showsNever && showsAsk {
-		t.Logf("AUDIT-P3-14: agent.permission=never is stored but the session permission chip shows 询问 (chip cycle ask→workspace→full does not represent never)")
+	harness.tester.Frame()
+	requireHasText(t, harness.tester, "只读")
+	requireHasNoText(t, harness.tester, "询问")
+	requireHasNoText(t, harness.tester, "禁止工具")
+}
+
+// requireHasNoText fails when the frame contains want as a substring.
+func requireHasNoText(t *testing.T, tester *ui.Tester, want string) {
+	t.Helper()
+	if tester.HasText(want) {
+		t.Fatalf("frame unexpectedly shows %q; texts = %v", want, tester.Texts())
 	}
 }

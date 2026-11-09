@@ -1,10 +1,12 @@
 package session_test
 
 // The transcript reads in event order: text before a tool call stays above its
-// card, later text below it (ToolCall.TextOffset). Legacy messages without
-// offsets keep the old whole-text-then-cards fallback.
+// card, later text below it (ToolCall.TextOffset). The explicit
+// ChatMessage.ToolTimelineKnown flag says the offsets were recorded for a live
+// turn; messages that predate it keep the old whole-text-then-cards fallback.
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/egoist/mygo/ui"
@@ -26,9 +28,10 @@ func TestAssistantTimelineInterleavesTextAndToolCards(t *testing.T) {
 	before := "BEFORE-TEXT"
 	after := "AFTER-TEXT"
 	message := contracts.ChatMessage{
-		ID:   "m1",
-		Role: contracts.ChatRoleAssistant,
-		Text: before + after,
+		ID:                "m1",
+		Role:              contracts.ChatRoleAssistant,
+		Text:              before + after,
+		ToolTimelineKnown: true,
 		Tools: []contracts.ToolCall{
 			{ID: "t1", Name: "bash", Status: "ok", Summary: "echo hi", TextOffset: len(before)},
 		},
@@ -61,9 +64,10 @@ func TestAssistantTimelineKeepsConsecutiveToolsTogether(t *testing.T) {
 	before := "START"
 	after := "END"
 	message := contracts.ChatMessage{
-		ID:   "m1",
-		Role: contracts.ChatRoleAssistant,
-		Text: before + after,
+		ID:                "m1",
+		Role:              contracts.ChatRoleAssistant,
+		Text:              before + after,
+		ToolTimelineKnown: true,
 		Tools: []contracts.ToolCall{
 			{ID: "t1", Name: "bash", Status: "ok", TextOffset: len(before)},
 			{ID: "t2", Name: "read_file", Status: "ok", TextOffset: len(before)},
@@ -109,11 +113,71 @@ func TestAssistantTimelineLegacyMessagesKeepTextFirst(t *testing.T) {
 	}
 }
 
-func TestAssistantTimelineTimelineSummaryPreviewIsQuiet(t *testing.T) {
+// TestAssistantTimelineLiveZeroOffsetsKeepCallsFirst is the reported-bug
+// regression: a live turn whose model called tools BEFORE writing any prose has
+// every TextOffset == 0. With the explicit live-timeline flag that is an
+// ordered timeline ("all calls happened before the text"), not a legacy message,
+// so the tool rows must render above the reply.
+func TestAssistantTimelineLiveZeroOffsetsKeepCallsFirst(t *testing.T) {
+	message := contracts.ChatMessage{
+		ID:                "m1",
+		Role:              contracts.ChatRoleAssistant,
+		Text:              "REPLY-AFTER-TOOLS",
+		ToolTimelineKnown: true,
+		Tools: []contracts.ToolCall{
+			{ID: "t1", Name: "bash", Status: "ok", Summary: "go build ./..."},
+			{ID: "t2", Name: "read_file", Status: "ok"},
+		},
+	}
+	h := newHarness(t, timelineChat(message))
+	tester := h.tester()
+	h.assertTexts(tester, "REPLY-AFTER-TOOLS", "运行命令", "读取文件")
+	first, ok1 := tester.Find("运行命令")
+	second, ok2 := tester.Find("读取文件")
+	reply, ok3 := tester.Find("REPLY-AFTER-TOOLS")
+	if !ok1 || !ok2 || !ok3 {
+		t.Fatalf("timeline nodes missing; texts = %v", tester.Texts())
+	}
+	if first.Y+first.H > second.Y+1 {
+		t.Fatalf("tool rows out of call order: 运行命令 %+v 读取文件 %+v", first, second)
+	}
+	if reply.Y < second.Y+second.H {
+		t.Fatalf("reply at %+v is not below the tool rows (last row %+v)", reply, second)
+	}
+}
+
+// TestAssistantTimelineFlagFalseKeepsLegacyOrder locks the gate: an explicit
+// false flag keeps the whole-text-then-cards fallback even when some offsets
+// were recorded, because only live turns certify their timeline.
+func TestAssistantTimelineFlagFalseKeepsLegacyOrder(t *testing.T) {
 	message := contracts.ChatMessage{
 		ID:   "m1",
 		Role: contracts.ChatRoleAssistant,
-		Text: "DONE",
+		Text: "LEGACY-TEXT\n\nTAIL",
+		Tools: []contracts.ToolCall{
+			{ID: "t1", Name: "bash", Status: "ok", TextOffset: len("LEGACY-TEXT")},
+		},
+	}
+	h := newHarness(t, timelineChat(message))
+	tester := h.tester()
+	h.assertTexts(tester, "LEGACY-TEXT", "TAIL", "运行命令")
+	text, ok1 := tester.Find("LEGACY-TEXT")
+	tail, ok2 := tester.Find("TAIL")
+	card, ok3 := tester.Find("运行命令")
+	if !ok1 || !ok2 || !ok3 {
+		t.Fatalf("legacy nodes missing; texts = %v", tester.Texts())
+	}
+	if text.Y+text.H > card.Y || tail.Y+tail.H > card.Y {
+		t.Fatalf("legacy text at %+v/%+v not wholly above the card at %+v", text, tail, card)
+	}
+}
+
+func TestShortToolResultRenderedOnce(t *testing.T) {
+	message := contracts.ChatMessage{
+		ID:                "m1",
+		Role:              contracts.ChatRoleAssistant,
+		Text:              "DONE",
+		ToolTimelineKnown: true,
 		Tools: []contracts.ToolCall{{
 			ID: "t1", Name: "bash", Status: "ok",
 			Summary: "line one\nline two with a fairly long result to preview", TextOffset: len("DONE"),
@@ -121,22 +185,31 @@ func TestAssistantTimelineTimelineSummaryPreviewIsQuiet(t *testing.T) {
 	}
 	h := newHarness(t, timelineChat(message))
 	tester := h.tester()
-	// The row carries the friendly name as its disclosure and a one-line preview
-	// with the line breaks folded to spaces (the short result starts expanded
-	// per H15).
 	h.assertTexts(tester, "运行命令")
-	const folded = "line one line two with a fairly long result to preview"
-	found := false
+	// The short result starts expanded (H15); the open panel is the one place
+	// the result reads, so the trigger must not repeat it as a preview.
+	info, ok := tester.AccessByRole(ui.RoleDisclosure, "运行命令 · 完成")
+	if !ok || !info.Expanded {
+		t.Fatalf("short result disclosure: %+v found %v", info, ok)
+	}
+	openCount := 0
 	for _, text := range tester.Texts() {
-		if text == folded {
-			found = true
-			break
+		if strings.Contains(text, "line one") {
+			openCount++
 		}
 	}
-	if !found {
-		t.Fatalf("one-line preview %q missing; texts = %v", folded, tester.Texts())
+	if openCount != 1 {
+		t.Fatalf("short tool result rendered %d times while open, want once; texts = %v", openCount, tester.Texts())
 	}
-	if info, ok := tester.AccessByRole(ui.RoleDisclosure, "运行命令 · 完成"); !ok || !info.Expanded {
-		t.Fatalf("preview row disclosure: %+v found %v", info, ok)
+	// Folded, the row shows the single-line preview (line breaks collapsed).
+	h.click(tester, "运行命令")
+	folded := ""
+	for _, text := range tester.Texts() {
+		if strings.Contains(text, "line one line two") {
+			folded = text
+		}
+	}
+	if folded != "line one line two with a fairly long result to preview" {
+		t.Fatalf("folded preview = %q, want the one-line summary; texts = %v", folded, tester.Texts())
 	}
 }

@@ -123,8 +123,8 @@ func buildNotificationsPage(c *ui.Context, runtime contracts.UIRuntime,
 	t := design.Of(c)
 	ui.Column(c).FillWidth().Gap(design.Space4).Children(func() {
 		uikit.PageHeader(c, localized(locale, "通知", "Notifications"), localized(locale,
-			"桌面通知与提示气泡；修改立即生效。",
-			"Desktop notifications and toast bubbles; changes apply immediately."))
+			"应用内提示气泡；修改立即生效。提示只在窗口内显示：应用在后台或最小化时不会弹出系统通知。",
+			"In-app toast bubbles; changes apply immediately. Toasts show inside the window only: no system notification appears while the app is in the background or minimized."))
 		uikit.Section(c, localized(locale, "通知气泡", "Notification toasts"), func(*ui.Context) {
 			ui.Form(c, func() {
 				enabled := notificationsSettingEnabled(store.Get(contracts.SettingNotifications, ""))
