@@ -647,34 +647,48 @@ func buildCatalogEditDialog(c *ui.Context, t *design.Tokens, store contracts.Set
 							"No custom thinking modes yet.")), t.TextMuted(design.TypeXS))
 					} else {
 						removed := -1
-						scroll := ui.Scroll(c).Height(130).FillWidth()
-						scroll.Children(func() {
-							for index, mode := range draft.modes {
-								index, mode := index, mode
-								if index > 0 {
-									ui.Divider(c)
-								}
-								ui.Row(c).FillWidth().Gap(design.Space2).
+						// The rows are a native ui.List: only the visible modes are
+						// built, the identity follows the mode ID (or its index while
+						// a new row has no ID yet) and the keyboard scrolls it.
+						st.modeList.Key = func(index int) any {
+							if id := strings.TrimSpace(draft.modes[index].id); id != "" {
+								return id
+							}
+							return index
+						}
+						st.modeList.Label = func(index int) string {
+							if name := strings.TrimSpace(draft.modes[index].name); name != "" {
+								return name
+							}
+							return draft.modes[index].id
+						}
+						ui.List(c, &st.modeList, len(draft.modes)).
+							Label(localized(locale, "自定义思考模式", "Custom thinking modes")).
+							Gap(design.Space1).Height(130).FillWidth().
+							Rows(func(row ui.ListRow) {
+								index := row.Index
+								mode := draft.modes[index]
+								ui.Row(row.Context).FillWidth().Gap(design.Space2).
 									AlignItems(ui.Start).PaddingY(design.Space1).Children(func() {
-									ui.Column(c).Width(150).Grow(0).Shrink(0).Children(func() {
-										ui.TextInput(c.Key("catalog.mode."+strconv.Itoa(index)+".id"), &mode.id).
+									ui.Column(row.Context).Width(150).Grow(0).Shrink(0).Children(func() {
+										ui.TextInput(row.Context, &mode.id).
 											Label(localized(locale, "模式 ", "Mode ") + strconv.Itoa(index+1) + " ID").
 											Placeholder("thinking-low").FillWidth()
 									})
-									ui.Column(c).Width(150).Grow(0).Shrink(0).Children(func() {
-										ui.TextInput(c.Key("catalog.mode."+strconv.Itoa(index)+".name"), &mode.name).
+									ui.Column(row.Context).Width(150).Grow(0).Shrink(0).Children(func() {
+										ui.TextInput(row.Context, &mode.name).
 											Label(localized(locale, "模式 ", "Mode ") + strconv.Itoa(index+1) +
 												localized(locale, " 名称", " name")).
 											Placeholder(localized(locale, "低强度", "Low")).FillWidth()
 									})
-									ui.Column(c).FillWidth().Grow(1).Children(func() {
-										ui.TextArea(c.Key("catalog.mode."+strconv.Itoa(index)+".params"), &mode.params).
+									ui.Column(row.Context).FillWidth().Grow(1).Children(func() {
+										ui.TextArea(row.Context, &mode.params).
 											Label(localized(locale, "模式 ", "Mode ") + strconv.Itoa(index+1) +
 												localized(locale, " 参数", " params")).
 											Placeholder(`{"reasoning_effort": "low"}`).
 											FillWidth().MinHeight(design.Space4 * 2)
 									})
-									if design.Apply(ui.Button(c, localized(locale, "删除", "Remove")),
+									if design.Apply(ui.Button(row.Context, localized(locale, "删除", "Remove")),
 										t.DangerButton()).
 										Label(localized(locale, "删除思考模式 ", "Remove thinking mode ") + strconv.Itoa(index+1)).
 										Tooltip(localized(locale, "删除这个思考模式", "Remove this thinking mode")).
@@ -682,8 +696,7 @@ func buildCatalogEditDialog(c *ui.Context, t *design.Tokens, store contracts.Set
 										removed = index
 									}
 								})
-							}
-						})
+							})
 						if removed >= 0 {
 							removedID := strings.ToLower(strings.TrimSpace(draft.modes[removed].id))
 							draft.modes = append(draft.modes[:removed], draft.modes[removed+1:]...)

@@ -36,10 +36,10 @@
 | 轨迹 pane | ✅ 已完成（`ui.List`，Key=tool key、行名、ListState 切换会话重置） | — | session 测试 |
 | 记忆 pane | ✅ 已完成（固定搜索/管理/添加行 + `ui.List` 条目虚拟化，Key=memory.ID） | — | 记忆搜索/增删/顶部打开测试 |
 | 斜杠/`@` 建议菜单 | **保留自绘（附理由）**：富行（图标/标题/说明）官方 Autocomplete 只支持纯文本；已按官方 accessibility suggestions 模式实现 RoleListBox/RoleOption/PositionInSet/ActiveDescendant 与完整键盘 | — | suggestion 测试已覆盖 |
-| 帮助对话框命令列表 | `ui.Scroll` + Row 循环 | `ui.List`（只读行，Label） | 文本/键盘滚动测试 |
+| 帮助对话框命令列表 | ✅ 已完成（`ui.List`，Key=命令 ID、行名） | — | help dialog 帧测试 |
 | 设置技能卡列表 | ✅ 已完成（`ui.List`，Key=name+path、行名；卡片为行内容） | — | 搜索过滤/展开/编辑删除测试 |
 | 归档页会话行 | ✅ 已完成（`ui.List`，Key=session.ID、行名、Changed/Submitted 打开；恢复/删除按钮保留行内） | — | archive 全包测试 |
-| 模型目录思考模式编辑器 | `ui.Scroll` + Row 循环 | `ui.List`（Key=mode.ID） | 增删/编辑/保存测试 |
+| 模型目录思考模式编辑器 | ✅ 已完成（`ui.List`，Key=模式 ID（空 ID 时用行号）、行名；只构建可见行） | — | 模型目录增删/编辑/保存测试 |
 | 自动化任务卡 | ✅ 已完成（`ui.List`，Key=task.ID、行名、过滤后列表） | — | automation 全包测试 |
 | 插件页集合 | ✅ 已完成（MCP 服务器、内置模块、插件参数、工具目录全部 `ui.List` + ListState Key/Label；页面本身保留 Section/Scroll 布局） | — | plugins 全包测试 |
 
@@ -65,7 +65,7 @@
 | slash/@ 富行建议面板 | 行内含图标/标题/说明多段富文本，官方 Autocomplete 仅纯文本；已按官方 accessibility suggestions 模式实现 RoleListBox/RoleOption/PositionInSet/ActiveDescendant 与完整键盘 |
 | transcript 消息内 hover 动作行 | 消息级悬停交互，官方列表行不提供 |
 | 会话「回到最新」浮层 | 行为用官方 `ScrollToEnd`；浮层是 List 之外的必要 affordance |
-| `ui.Scroll` 保留处（设置页容器、检查器 pane 容器、终端输出、文件/技能 Markdown 预览、release notes、交互 overlay 文本、模型思考模式表单行、插件页 Section 布局） | 都是单文本面/页面滚动容器或表单行，不是「集合」；集合已全部是 `ui.List` |
+| `ui.Scroll` 保留处（设置页容器、检查器 pane 容器、终端输出、文件/技能 Markdown 预览、release notes、交互 overlay 文本、插件页 Section 布局） | 都是单文本面/页面滚动容器或表单行，不是「集合」；集合已全部是 `ui.List` |
 | 文件/目录选择器、模型列表等 seam 函数 | 纯测试注入点（无应用状态），官方 API 无对应替换 |
 | `ui.EditableText` | 现有重命名是官方 `Modal + TextInput` 流程；改成列表内联编辑是产品交互变更，不属于「替换手搓组件」 |
 | `ui.Rating`/`ui.Meter`/`ui.Progress`/`ui.Spinner` | 产品没有星标评分/仪表/进度条/等待动画的自绘实现（反馈是 thumbs 按钮、流式状态是文字 Badge），不新增功能 |

@@ -44,6 +44,9 @@ type catalogState struct {
 	// editAdvanced expands the editor's advanced group (generation options and
 	// custom thinking modes); it starts collapsed.
 	editAdvanced bool
+	// modeList is the official ui.List state of the custom thinking-mode rows
+	// (identity follows the mode ID; empty IDs fall back to their index).
+	modeList ui.ListState
 
 	// Confirmation state of the two destructive actions.
 	confirmRemove  string

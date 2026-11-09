@@ -108,6 +108,11 @@ A full UI/UX conformance pass against `mygo v0.8.3/docs/ui` and the
   default (Enter = deny); toasts use `ShadowOverlay` and grid tokens; icons for
   image/file reads are the correct glyphs, and an icon invariant test locks the
   SVG grid/stroke rules.
+- **Official collections**: every remaining collection is a native `ui.List`;
+  the model catalog editor's custom thinking-mode rows and the help dialog
+  command list were the last two `Scroll`+row loops and now virtualize/scroll
+  with the official list (keys follow the mode ID, falling back to the row
+  while a new mode has no ID).
 - **Bounded transcript**: a conversation builds only its newest 200 messages by
   default (a "load earlier messages (N)" row reveals the hidden range in
   steps), so streaming a reply no longer re-lays out thousands of rows in a
