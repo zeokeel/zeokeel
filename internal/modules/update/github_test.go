@@ -338,11 +338,14 @@ func TestGitHubAssetSelection(t *testing.T) {
 			wantOK: true,
 		},
 		{
-			name:   "darwin never selects a tar.gz archive",
+			// Linux cross-builds ship the .app as a tar.gz (no macOS runner);
+			// it is the fallback when the release has no dmg.
+			name:   "darwin falls back to the cross-built app archive",
 			goos:   "darwin",
 			goarch: "arm64",
 			assets: asset("zeokeel-1.0.0-darwin-arm64.tar.gz"),
-			wantOK: false,
+			want:   "zeokeel-1.0.0-darwin-arm64.tar.gz",
+			wantOK: true,
 		},
 		{
 			name:   "unsupported platform",

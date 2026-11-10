@@ -105,8 +105,8 @@ func updateInstallBehaviorCopy(locale contracts.LocaleService) string {
 			"Windows: runs the downloaded setup to upgrade, then the app quits.")
 	case "darwin":
 		return localized(locale,
-			"macOS：会从 dmg 替换应用；安装位置不可写时会打开 dmg，让你手动拖入。",
-			"macOS: replaces the app from the dmg; when the install location is not writable it opens the dmg for a manual drag.")
+			"macOS：会解压下载的应用包并替换当前 App，然后重启。",
+			"macOS: extracts the downloaded app bundle over the current app and restarts.")
 	case "linux":
 		return localized(locale,
 			"Linux：会安装 AppImage 并重启应用。",

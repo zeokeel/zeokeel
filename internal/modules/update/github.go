@@ -173,6 +173,11 @@ func pickGitHubAsset(assets []githubReleaseAsset, goos, goarch string) (githubRe
 			// A darwin/universal build is published as <slug>-<version>.dmg,
 			// without an architecture token.
 			".dmg",
+			// Releases after the Linux cross-build ship the app bundle as a
+			// tar.gz (no macOS runner/signing); the host extracts it over the
+			// .app and relaunches.
+			"-darwin-" + arch + ".tar.gz",
+			"-darwin-universal.tar.gz",
 		})
 	default:
 		return githubReleaseAsset{}, false
