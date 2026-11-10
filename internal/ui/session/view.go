@@ -386,9 +386,11 @@ func buildConversationTitle(c *ui.Context, t *design.Tokens, st *state, chat con
 	// step keeps it in proportion with the 13 DIP tabs, 12 DIP badges and 16 DIP
 	// band icons; TypeL made the band read top-heavy. It shrinks (and ellipsizes)
 	// before the fixed-width agent entries do.
+	// DSH caps one header crumb at 220 CSS px; the same 7 * 32 DIP cap keeps a
+	// long title from eating the band and squeezing the agent entries.
 	titleElement := design.Apply(ui.Text(c, title), t.Font(design.TypeM)).
 		FontWeight(600).TextColor(t.LabelPrimary).Shrink(1).MinWidth(0).
-		MaxLines(1).Ellipsis("…").Tooltip(title)
+		MaxWidth(design.Space8 * 7).MaxLines(1).Ellipsis("…").Tooltip(title)
 	if st.headerWidth > 0 && st.headerWidth < 560 {
 		titleElement.MinWidth(120)
 	}

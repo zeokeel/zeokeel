@@ -518,10 +518,6 @@ func buildSubagentEntry(c *ui.Context, t *design.Tokens, st *state, activeID str
 		return
 	}
 	agents := children.ChildAgents(activeID)
-	if len(agents) == 0 {
-		st.agents.childOpen = false
-		return
-	}
 	running := 0
 	for _, agent := range agents {
 		if strings.EqualFold(strings.TrimSpace(agent.Status), contracts.ChildAgentRunning) {
@@ -567,6 +563,12 @@ func buildChildSwitcher(c *ui.Context, t *design.Tokens, st *state, agents []con
 	}
 	agentPanelHeader(c, t, icons.Activity(), st.tr("子智能体会话", "Child conversations"),
 		fmt.Sprintf(st.tr("%d 个运行中 · 共 %d 个", "%d running · %d total"), running, len(agents)))
+	if len(agents) == 0 {
+		design.Apply(ui.Text(c, st.tr("还没有子智能体。子代理/队友启动后会出现在这里。",
+			"No child conversations yet. Subagents and teammates appear here once they start.")),
+			t.Font(design.TypeXXS)).TextColor(t.LabelTertiary).MaxLines(3)
+		return
+	}
 	ui.Scroll(c).FillWidth().MaxHeight(design.DialogBodyMax).
 		TrackScroll(&st.agents.childScroll).Children(func() {
 		ui.Column(c).FillWidth().Gap(design.Space2).Children(func() {
@@ -703,10 +705,6 @@ func buildJobsEntry(c *ui.Context, t *design.Tokens, st *state, compact bool) {
 		return
 	}
 	list := jobs.Jobs()
-	if len(list) == 0 {
-		st.agents.jobsOpen = false
-		return
-	}
 	running := 0
 	for _, job := range list {
 		if job.Running {
@@ -746,6 +744,12 @@ func buildJobsPanel(c *ui.Context, t *design.Tokens, st *state, jobs contracts.J
 	list []contracts.BackgroundJob, running int) {
 	agentPanelHeader(c, t, icons.Clock(), st.tr("后台任务", "Background jobs"),
 		fmt.Sprintf(st.tr("%d 个任务 · %d 个运行中", "%d jobs · %d running"), len(list), running))
+	if len(list) == 0 {
+		design.Apply(ui.Text(c, st.tr("暂无后台任务。job_start 启动的后台任务会出现在这里。",
+			"No background jobs yet. Jobs started with job_start appear here.")),
+			t.Font(design.TypeXXS)).TextColor(t.LabelTertiary).MaxLines(3)
+		return
+	}
 	if st.agents.jobErr != "" {
 		uikit.ErrorLine(c, st.agents.jobErr)
 	}

@@ -291,13 +291,28 @@ func TestHeaderAgentEntriesHiddenWithoutBackends(t *testing.T) {
 	h.assertNoTexts(tester, "智能体团队", "子智能体", "个后台任务")
 }
 
-// TestJobsChipHiddenWhenNoJobs covers the jobs chip's zero state: the entry
-// renders nothing (the overlay is unreachable because there is nothing to show).
-func TestJobsChipHiddenWhenNoJobs(t *testing.T) {
+// TestJobsChipShownAtZero covers the jobs chip's zero state: the entry is
+// always present when the backend exists (so the feature stays discoverable),
+// and the overlay explains that no job has started yet.
+func TestJobsChipShownAtZero(t *testing.T) {
 	h := newAgentSurfaceHarness(t, headerChat("无任务"), agentServices{jobs: &fakeJobs{}})
 	tester := h.tester()
 	tester.Frame()
-	h.assertNoTexts(tester, "个后台任务")
+	h.assertTexts(tester, "0 个后台任务")
+	h.click(tester, "0 个后台任务")
+	h.assertTexts(tester, "后台任务", "暂无后台任务。job_start 启动的后台任务会出现在这里。")
+}
+
+// TestSubagentChipShownAtZero covers the subagent chip's zero state: the entry
+// is always present when the backend exists, and the switcher explains the
+// empty state instead of rendering a blank popover.
+func TestSubagentChipShownAtZero(t *testing.T) {
+	h := newAgentSurfaceHarness(t, headerChat("无子代理"), agentServices{children: &fakeChildAgents{}})
+	tester := h.tester()
+	tester.Frame()
+	h.assertTexts(tester, "子智能体 0")
+	h.click(tester, "子智能体 0")
+	h.assertTexts(tester, "子智能体会话", "还没有子智能体。子代理/队友启动后会出现在这里。")
 }
 
 // TestTeamEntryShownWithEmptyTeam covers the team entry's discovery role: the

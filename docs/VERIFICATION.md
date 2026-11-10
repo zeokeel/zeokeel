@@ -720,3 +720,13 @@ design-check 6/6（raw metric 45 ≤ 51）/mygo vet/`go test ./...`（45s）/`-r
 - **验证**：`scripts/verify.sh --no-smoke` **10/10 PASS**：gofmt/build/vet/designlint 0 new/design-check 6/6（raw metric 42 ≤ 51、ButtonBase 9 ≤ 10）/mygo vet/`go test ./...`（48 包，43s）/`-race`（314s）/regression **276 PASS / 0 SKIP / 0 FAIL**/ui-snapshot **98 steps / 96 PNGs**。
 - **快照**：`.cache/m1-devtools/snapshot/`（p2-guide、p2-files、p2-file-preview、p2-file-diff、p2-terminal、p2-team-overlay、p2-team-child、p2-child-switcher、p2-team-tasks、p2-jobs、p2-jobs-stopped、p2-landing、narrow/*）、`.cache/m1c-shots/*`、`.cache/m1-rightpanel/*`。
 - **限制**：P2 在本版是"统一子会话呈现层"（ChildAgent 读模型来自现有 subagent/团队运行记录 + 主栏面包屑导航），尚未持久化真正独立的子会话 `ChatSession` 存储；后续可把 `ChildAgentService` 换成持久子会话实现而不改 UI。
+
+## 0.2.7（2026-11-10：顶栏长标题与三入口补丁）
+
+用户截图反馈：会话标题过长占据顶栏；且顶栏只剩「智能体团队」，另外两个入口（子智能体/后台任务）不见了。
+
+- **标题截断（DSH crumb 规则）**：主会话标题 `MaxWidth(design.Space8*7 = 224 DIP)` + 单行省略，完整标题进 Tooltip；不再挤压 agent 入口与右上角工具。新增帧测试 `TestHeaderLongTitleIsTruncatedLikeDSH`（标题宽度 ≤ 224 且团队入口在其右侧）。
+- **三入口常显**：`buildSubagentEntry` / `buildJobsEntry` 在对应后端存在时始终渲染，计数 0 也显示（「子智能体 0」「0 个后台任务」）；子智能体 switcher 与后台任务浮层新增空态文案（「还没有子智能体…」「暂无后台任务…」）；只有后端缺失时才隐藏。新增 `TestSubagentChipShownAtZero`、`TestJobsChipShownAtZero`；旧 `TestJobsChipHiddenWhenNoJobs` 改为零态可见断言。
+- **退出码**：后台任务被停止/超时后 manager 返回负值哨兵，显示「—」而不是「-1」（`backgroundJobExitLabel`）。
+- **证据更新**：ui-drive `jobs-chip` 步骤改为断言 0 任务 chip + 空态浮层后重新跑通；`go run ./internal/devtools/ui-snapshot .cache/m1-devtools/snapshot-fix` 96 PNG，人工确认 p2-jobs / p2-team-child 顶栏三入口与截断标题。
+- **验证**：`scripts/verify.sh --no-smoke` **10/10 PASS**：gofmt/build/vet/designlint 0 new/design-check 6/6/mygo vet/`go test ./...`（40s，48 包）/`-race`（315s）/regression **276 PASS / 0 SKIP / 0 FAIL**/ui-snapshot **98 steps / 96 PNGs**。
