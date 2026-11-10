@@ -253,9 +253,15 @@ func TestMCPRefreshUpdates(t *testing.T) {
 	h.assertTexts(tester, "old-server")
 
 	h.click(tester, "刷新")
+	deadline := time.Now().Add(2 * time.Second)
+	for service.calls() != 1 && time.Now().Before(deadline) {
+		tester.Frame()
+		time.Sleep(2 * time.Millisecond)
+	}
 	if calls := service.calls(); calls != 1 {
 		t.Fatalf("Refresh calls = %d, want 1", calls)
 	}
+	waitForPluginText(t, tester, "new-server")
 	h.assertTexts(tester, "new-server", "2 个工具")
 	h.assertNoTexts(tester, "old-server")
 }
@@ -436,7 +442,7 @@ func TestMCPRefreshRunsOffUIThread(t *testing.T) {
 	h.click(tester, "刷新")
 	select {
 	case <-service.refreshStart:
-	default:
+	case <-time.After(2 * time.Second):
 		t.Fatal("Refresh did not start")
 	}
 	// The frame keeps rendering while the backend call is blocked.

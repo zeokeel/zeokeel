@@ -669,3 +669,14 @@ design-check 6/6（raw metric 45 ≤ 51）/mygo vet/`go test ./...`（45s）/`-r
   **276 PASS / 0 SKIP / 0 FAIL**/ui-snapshot **97 steps / 95 PNGs**。
 - **快照（人工查看）**：`.cache/ui-conformance-turn/p1-chat.png`（最终回复底部「复制」按钮、meta 顶部）、
   `p2-process-fold.png`、`p2-message-actions.png`。
+
+### 补充（同日）：CI 稳定性修复（不涉及产品二进制）
+
+- GitHub CI 在 v0.2.1/v0.2.2 的 master 推送上报了 3 个异步时序 flake（`internal/ui/plugins` 的
+  `TestMCPRefreshUpdates`/`TestMCPRefreshRunsOffUIThread`，`internal/ui/rightpanel` 的
+  `TestFilesListingIsCachedBetweenFrames`）：断言在后台刷新 goroutine 真正开始/回投之前就读取了计数。
+  修复为按 deadline 轮询（`pumpFrames`/等待 refreshStart、等待 listing count 与「已刷新」文本），
+  `-count=10` 与 `-race -count=3` 本地全绿。
+- 两个 workflow 的 `runs-on` 从 `ubuntu-latest` 固定为 **`ubuntu-24.04`**：GitHub 通告
+  ubuntu-latest 将于 2026-10 迁移到 Ubuntu 26，产品快照/工具链对运行镜像敏感，固定 LTS 避免
+  CI 无声漂移（升级镜像需单独测试后修改）。

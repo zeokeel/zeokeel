@@ -75,11 +75,11 @@ func TestFilesListingIsCachedBetweenFrames(t *testing.T) {
 		t.Fatalf("directory listings = %d after extra frames, want 1 (no render-time I/O)", got)
 	}
 
-	// The native Refresh re-reads exactly once.
+	// The native Refresh re-reads exactly once. It posts from the UI thread's
+	// action, so wait for the result instead of assuming one frame is enough.
 	h.click(tester, "刷新")
-	tester.Frame()
-	if got := workspace.listings(); got != 2 {
-		t.Fatalf("directory listings = %d after Refresh, want 2", got)
+	if !pumpFrames(tester, func() bool { return workspace.listings() == 2 }, 2*time.Second) {
+		t.Fatalf("directory listings = %d after Refresh, want 2", workspace.listings())
 	}
 
 	// Entering a directory reads the new directory exactly once. A click only

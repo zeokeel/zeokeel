@@ -18,7 +18,11 @@ env:
 jobs:
   build-test:
     name: Build, vet, test
-    runs-on: ubuntu-latest
+    # Pin the LTS image: ubuntu-latest migrates to Ubuntu 26 in October
+    # 2026 (GitHub notice), and this product pins its toolchain and
+    # snapshot baselines, so an unannounced runner upgrade would make CI
+    # flaky. Bump this deliberately when the new image has been tested.
+    runs-on: ubuntu-24.04
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v7
