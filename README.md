@@ -4,22 +4,20 @@
 [![Release](https://img.shields.io/github/v/release/zeokeel/zeokeel)](https://github.com/zeokeel/zeokeel/releases)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
-> **v0.1.3 — fourth public release** (2026-11-09). Native, compile-time modular
+> **v0.1.4 — fifth public release** (2026-11-10). Native, compile-time modular
 > AI agent for desktop, headless and ACP (Zed/editor) use; one Go binary, no
-> webview. Final verification: **13/13 PASS** (`./scripts/verify.sh`), regression
-> **287 PASS / 0 SKIP / 0 FAIL**, UI snapshot 88 steps / 86 PNGs, desktop
-> (Xvfb, tray) / headless / ACP smokes green.
+> webview. Final verification: **9/9 PASS** (`./scripts/verify.sh --quick`),
+> full test suite 42 packages green, regression **287 PASS / 0 SKIP / 0 FAIL**,
+> UI snapshot 86 PNGs, ui-drive **90/90 PASS**.
 > See [CHANGELOG.md](CHANGELOG.md) for the release notes.
 
-> **v0.1.3 主要变化**（详见 CHANGELOG）：把 AI 生成 UI 的约束从提示升级为
-> **机器可读设计契约**——新增 `AGENTS.md`、`docs/DESIGN.md`、`DESIGN-LINT.md`、
-> `AGENT-SURFACES.md`；`designlint` 确定性检查（颜色/裸度量/自绘/危险默认）与
-> `scripts/design-check.sh` 接入 verify/CI，baseline 收紧 235→156；9 类 Agent
-> surface 收敛为 uikit 入口组件（IconButton / Status* / ToolCallCard / SessionThread /
-> ReasoningTrace / ApprovalDialog / PlanReviewDialog / AskDialog / ComposerShell /
-> RunStatus / TeamSurface），工具卡 4 路径→2、两处 composer 统一、状态语义与危险确认
-> 统一。同日另有「深度交互轮」：团队可见性/真实运行态、任务板深度、工具过程透明、
-> 权限三档收敛、会话时序回退修复等（详见 CHANGELOG）。
+> **v0.1.4 主要变化**（详见 CHANGELOG）：本版**不加新功能，专门修界面**——修好上一轮
+> 全量检查发现的 37 个问题（另 1 个很小的性能项按现状保留）。最明显的三处：
+> ①排队消息发送失败后窗口不再反复重试/空转；②设置「归档」和右侧文件列表的方向键只做
+> 选择，Enter/双击才打开；③最小窗口（900×600）下首页可以滚动，不再裁掉「最近会话」。
+> 另外：右栏的变更/文件/日志刷新与切换更可靠、插件搜索支持中文、设置有未保存提醒、
+> 暗色选中行文字可读、中文界面系统文案（如「复制」）补齐、Windows 终端自动使用
+> PowerShell/cmd。升级只需下载覆盖，原有设置与会话保留。
 
 ## 下载与运行 / Download and run
 
