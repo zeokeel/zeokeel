@@ -8,6 +8,29 @@ All notable changes to ZeoKeel are documented here. The format follows
 
 （暂无未发布改动）
 
+## [0.2.8] - 2026-11-10
+
+修复应用内更新：以前 Windows 只提示“重启后生效”但实际不升级，macOS 也没有静默安装路径；同时不再发布没用的更新归档。
+
+- **更新改用安装包。** Windows 更新下载 `zeokeel-setup-<version>-<arch>.exe`；应用退出后由一个
+  隐藏的 helper 进程（同一可执行文件，普通 argv，不经 cmd/shell 拼字符串）启动安装器完成覆盖安装。
+  macOS 下载签名 `.dmg`，自动挂载、`ditto` 复制新 `.app`、原子替换当前 bundle 并重启；旧 bundle
+  与安装计划保留到新版本启动后再清理；安装位置不可写或替换失败时恢复旧 bundle 并回退为打开 dmg。
+  Linux 继续用 AppImage 自替换，并通过系统 shell（非临时挂载内的 helper）延迟重启。
+- **立即安装，不再依赖“下次启动”。** 下载完成后按钮为「安装并重启」，host 的
+  `uiroot.install-update` 命令立即执行安装；只有无此命令的嵌入环境才回退为下次启动安装。
+  更新页文案不再承诺“仅重启即可升级”。
+- **发布资产清理。** 不再发布 `darwin-arm64.tar.gz`、`windows-amd64.tar.gz`、`windows-arm64.tar.gz`
+  这三个无用的更新归档；Release 只保留安装包/AppImage 和 `SHA256SUMS.txt`。
+- **旧版本需要手动安装一次。** v0.2.7 及更早版本的更新器只认 tar.gz 归档，无法自动升级到本版；
+  请手动下载安装一次 v0.2.8，之后的版本即可通过安装包自动更新。
+- 顶栏长标题截断、三个 agent 入口常显（0.2.7 已有）包含在本版中。
+- **对抗审计修复（独立审计 3 份报告）。** 折叠侧栏启动时丢失当前屏（标题/入口/右栏全部消失）；
+  子会话里 switcher 双 owner 导致 header 构建 panic；生成文件卡片把失败/取消的 write/edit 也列成
+  交付文件（且大参数截断后不出卡）——现在只收成功调用并用 `ToolCall.Path`；`OpenNative` 越权打开
+  工作区外路径、工作区切换后同名文件显示旧内容、自动化运行会话靠标题前缀隐藏会误伤用户会话——
+  分别改为工作区包含检查、按工作区隔离缓存、显式 `Origin` 元数据。
+
 ## [0.2.7] - 2026-11-10
 
 0.2.6 的小补丁，修顶栏信息密度。
@@ -35,7 +58,7 @@ All notable changes to ZeoKeel are documented here. The format follows
   （仍可在自动化页看运行历史）；侧栏保留 会话 / 自动化任务 / 插件 / 设置。
 - **删除的旧代码**：右栏 8-pane 选择器与概览/工具/日志/变更/团队/任务 pane、`uikit.TeamSurface`、
   团队建人表单、旧团队/任务命令与 pane 切换快捷键、tool-card 团队跳转 footer；新增统一
-  `ChildAgentService` 读模型、`JobService`、`FilePreviewer`（含系统应用打开）。净删约 1.2 万行。
+  `ChildAgentService` 读模型、`JobService`、`FilePreviewer`（含系统应用打开）。diff 为 +9.5k/−12.3k（净减约 2.9k 行，含测试与文档）。
 
 升级方式不变：下载覆盖运行，原有设置与会话保留；终端能力保留（只在右栏按需出现）。
 

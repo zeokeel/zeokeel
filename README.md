@@ -4,17 +4,18 @@
 [![Release](https://img.shields.io/github/v/release/zeokeel/zeokeel)](https://github.com/zeokeel/zeokeel/releases)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
-> **v0.2.7 — twelfth public release** (2026-11-10). Native, compile-time modular
+> **v0.2.8 — thirteenth public release** (2026-11-10). Native, compile-time modular
 > AI agent for desktop, headless and ACP (Zed/editor) use; one Go binary, no
 > webview. Final verification: **10/10 PASS** (`./scripts/verify.sh --no-smoke`),
 > full test suite 48 packages green, regression **276 PASS / 0 SKIP / 0 FAIL**,
 > UI snapshot **98 steps / 96 PNGs**, designlint 0 new.
 > See [CHANGELOG.md](CHANGELOG.md) for the release notes.
 
-> **v0.2.7 主要变化**（详见 CHANGELOG）：0.2.6 的小补丁——顶栏长标题按 DSH 面包屑宽度截断（完整标题在
-> Tooltip），不再挤走其它入口；「智能体团队 / 子智能体 N / N 个后台任务」只要有后端就始终显示（0 也显示），
-> 浮层有空态；后台任务停止后退出码显示「—」。v0.2.6 的主框架重做、右栏多标签、生成文件卡片、团队/子代理
-> 子会话与面包屑返回保持不变。
+> **v0.2.8 主要变化**（详见 CHANGELOG）：修复应用内更新——Windows 现在下载并运行 NSIS 安装器，
+> macOS 自动挂载 dmg 替换 `.app` 并重启（不可写时回退为打开 dmg 手动拖入），Linux 继续 AppImage
+> 自替换；下载完成即可「安装并重启」，不再依赖“下次启动”。同时不再发布 Windows/macOS 的 tar.gz
+> 更新归档。v0.2.7 及更早版本需要手动安装一次本版，之后可自动更新；0.2.7 的顶栏标题截断与三入口
+> 常显已包含在本版。
 
 ## 下载与运行 / Download and run
 
@@ -57,10 +58,9 @@ make ci               # build + vet + test
 ```
 
 CI runs on every push/PR (`.github/workflows/ci.yml`); pushing a `v*` tag runs
-`.github/workflows/release.yml`, which cross-compiles all six OS/arch archives
-(Linux/macOS tar.gz, Windows zip), verifies checksums and the Linux/Windows
-artifacts, and publishes the GitHub release with a platform/architecture
-download table.
+`.github/workflows/release.yml`, which builds the platform installers (Windows
+NSIS setup, macOS signed/notarized dmg, Linux AppImage), verifies them and
+publishes the GitHub release with `SHA256SUMS.txt` and a download table.
 
 > **继续推进（TDD 并行 + 反证审计）**：新增 subagent 同步委派、permission 权限模式（只读/工作区可写/所有权限）、
 > team manager 编排与右侧「团队」面板（spawn/steer/interrupt）、@session 引用与推理强度（low/medium/high）、
