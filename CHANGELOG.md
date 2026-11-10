@@ -8,6 +8,24 @@ All notable changes to ZeoKeel are documented here. The format follows
 
 （暂无未发布改动）
 
+## [0.2.14] - 2026-11-10
+
+发布流水线改用现成 action/预编译工具，不再自己编译 dmg 工具链：
+
+- **签名/公证直接用 GitHub Action**：`indygreg/apple-code-sign-action@v1.2`（rcodesign 作者维护，
+  官方支持 Linux runner），负责签名 `.app`、签名 dmg、提交 Apple 公证并 staple；不再在 workflow
+  里手工调用 rcodesign。
+- **dmg 工具用预编译二进制**：`libdmg-hfsplus` 的 `dmg`/`hfsplus` 直接下载
+  JuliaBinaryWrappers 的 `libdmg_hfsplus.v0.5.0.x86_64-linux-gnu` 预编译包，不再 cmake 编译；
+  `mkfs.hfsplus` 来自 Ubuntu `hfsprogs`，`liblzfse-dev` 补运行库。
+- **Actions 升到最新**：`actions/upload-artifact@v7`、`actions/download-artifact@v8`，
+  checkout/setup-go 保持最新 major；消除 Node 20 弃用告警。
+- **签名修复**：从 p12 用 `openssl pkcs12 -clcerts` 提取叶子证书（Keychain p12 里 CA 可能排在
+  前面，直接交给 rcodesign 会签成 CA 导致公证 “signature invalid”）；应用签名显式加
+  `--code-signature-flags runtime`，公证需要 hardened runtime。
+- 已在本地用真实 Apple 证书/API key 完整跑通：Linux 构建 `.app` → dmg → 签名 → Apple 公证
+  Accepted → staple；CI 真实执行仍待发版验证。
+
 ## [0.2.13] - 2026-11-10
 
 修复全 Linux dmg 流水线的 libdmg-hfsplus 构建：Ubuntu runner 的 OpenSSL 3 头文件与
