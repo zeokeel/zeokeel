@@ -26,7 +26,12 @@ func TestInspectorOnlyOnSessionScreen(t *testing.T) {
 	tt := newTestTester(t, r, 1280, 800)
 	tt.Frame()
 
-	// Home: the shortcut and the toolbar entry do nothing.
+	// The product lands on the conversation surface; Home remains only as an
+	// embeddable screen. There the shortcut and the toolbar entry do nothing.
+	if err := r.Navigator().Push("home"); err != nil {
+		t.Fatalf("Push(home): %v", err)
+	}
+	tt.Frame()
 	if got := r.Navigator().Current(); got != "home" {
 		t.Fatalf("current screen = %q, want home", got)
 	}
@@ -321,17 +326,27 @@ func TestRailAnnouncesCurrentScreen(t *testing.T) {
 	tt.Frame()
 	tt.Frame()
 
-	home, ok := tt.AccessByRole(ui.RoleToggleButton, "首页")
-	if !ok {
-		t.Fatalf("rail Home destination is not a toggle-like button; texts: %v", tt.Texts())
+	// Home and the conversation screen are not rail destinations; the module
+	// screens are, and the current one reports its selected state.
+	if home, ok := tt.AccessByRole(ui.RoleToggleButton, "首页"); ok {
+		t.Fatalf("rail still lists the retired Home destination: %+v", home)
 	}
-	if !home.Checked {
-		t.Fatalf("rail Home does not report the current screen: %+v", home)
-	}
-	// The conversation screen is not a rail destination: only the workspace
-	// tree lists conversations.
 	if session, ok := tt.AccessByRole(ui.RoleToggleButton, "对话"); ok {
 		t.Fatalf("rail lists the conversation screen as a destination: %+v", session)
+	}
+	plugins, ok := tt.AccessByRole(ui.RoleToggleButton, "插件")
+	if !ok {
+		t.Fatalf("rail Plugins destination is not a toggle-like button; texts: %v", tt.Texts())
+	}
+	if plugins.Checked {
+		t.Fatalf("rail Plugins reports selected while the session screen is current: %+v", plugins)
+	}
+	if err := r.Navigator().Push("plugins"); err != nil {
+		t.Fatalf("Push(plugins): %v", err)
+	}
+	tt.Frame()
+	if plugins, ok = tt.AccessByRole(ui.RoleToggleButton, "插件"); !ok || !plugins.Checked {
+		t.Fatalf("rail Plugins does not report the current screen: %+v ok=%v", plugins, ok)
 	}
 	// The primary action survives the collapse as an icon action.
 	if _, ok := tt.AccessByRole(ui.RoleButton, "新对话"); !ok {
@@ -347,11 +362,11 @@ func TestRailAnnouncesCurrentScreen(t *testing.T) {
 	if got := r.Navigator().Current(); got != "plugins" {
 		t.Fatalf("screen after the rail click = %q, want plugins", got)
 	}
-	plugins, ok := tt.AccessByRole(ui.RoleToggleButton, "插件")
+	plugins, ok = tt.AccessByRole(ui.RoleToggleButton, "插件")
 	if !ok || !plugins.Checked {
 		t.Fatalf("rail Plugins after navigation = %+v (present=%v), want checked", plugins, ok)
 	}
-	if home, ok := tt.AccessByRole(ui.RoleToggleButton, "首页"); !ok || home.Checked {
-		t.Fatalf("rail Home after navigation = %+v (present=%v), want unchecked", home, ok)
+	if home, ok := tt.AccessByRole(ui.RoleToggleButton, "首页"); ok {
+		t.Fatalf("rail Home reappeared after navigation: %+v", home)
 	}
 }

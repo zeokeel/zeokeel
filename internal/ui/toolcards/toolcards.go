@@ -306,7 +306,6 @@ func realBuild(state *rendererState, runtime contracts.UIRuntime) func(c *ui.Con
 				runtime.Invalidate()
 			},
 			Sections: sections,
-			Footer:   TeamToolFooter(runtime, state.locale, tool),
 		}
 		uikit.ToolRow(c, row)
 		if !seen && !toggled {
@@ -314,15 +313,6 @@ func realBuild(state *rendererState, runtime contracts.UIRuntime) func(c *ui.Con
 		}
 	}
 }
-
-// The inspector pane-opening commands are the stable cross-navigation contract
-// (internal/ui/rightpanel registers them; a host without that module simply has
-// no footer action). They are string literals here because UI modules may not
-// import each other.
-const (
-	teamOpenCommandID  = "rightpanel.team.open"
-	tasksOpenCommandID = "rightpanel.tasks.open"
-)
 
 // maxToolInputRunes bounds one rendered input section (JSON, command, content
 // preview). It mirrors the agent's read-model argument bound so the UI never
@@ -478,60 +468,6 @@ func genericInputSection(tr func(zh, en string) string, arguments string) (uikit
 		section.Hint = tr("输入已截断，仅显示前部分", "Input truncated; only the beginning is shown")
 	}
 	return section, true
-}
-
-// TeamToolFooter returns the expanded panel's cross-navigation footer for a
-// team-related tool call: spawn/subagent calls open the inspector's team pane and
-// team_task_* calls open the shared task board. It returns nil for unrelated
-// tools; the returned builder renders nothing when the host does not register
-// the command (so no dangling divider appears).
-func TeamToolFooter(runtime contracts.UIRuntime, locale contracts.LocaleService, toolName string) func(c *ui.Context) {
-	name := strings.ToLower(strings.TrimSpace(toolName))
-	commandID, label := "", ""
-	switch {
-	case name == "spawn_teammate", name == "subagent", name == "subagent_fork", name == "team_spawn":
-		commandID = teamOpenCommandID
-		label = uikit.T(locale, "在团队中查看", "View in team")
-	case strings.HasPrefix(name, "team_task_"):
-		commandID = tasksOpenCommandID
-		label = uikit.T(locale, "打开任务板", "Open task board")
-	default:
-		return nil
-	}
-	if runtime == nil {
-		return nil
-	}
-	return func(c *ui.Context) {
-		command, ok := runtimeCommand(runtime, commandID)
-		if !ok {
-			return
-		}
-		t := design.Of(c)
-		ui.Column(c).FillWidth().Children(func() {
-			ui.Divider(c)
-			ui.Row(c).FillWidth().Justify(ui.End).Children(func() {
-				button := design.Apply(ui.Button(c, label), t.SecondaryButton()).Label(label)
-				if button.Clicked() && (command.Enabled == nil || command.Enabled()) {
-					if command.Run != nil {
-						_ = command.Run()
-					}
-				}
-			})
-		})
-	}
-}
-
-// runtimeCommand finds one registered command by its stable ID.
-func runtimeCommand(runtime contracts.UIRuntime, id string) (contracts.CommandSpec, bool) {
-	if runtime == nil {
-		return contracts.CommandSpec{}, false
-	}
-	for _, command := range runtime.Commands() {
-		if command.ID == id {
-			return command, true
-		}
-	}
-	return contracts.CommandSpec{}, false
 }
 
 // toolStringArg reads one string field of the tool's JSON arguments ("" when

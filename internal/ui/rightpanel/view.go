@@ -3,12 +3,12 @@ package rightpanel
 import (
 	"context"
 	"fmt"
+	"path/filepath"
 	"strings"
-	"time"
 
 	"github.com/egoist/mygo/ui"
-
-	"github.com/zeokeel/zeokeel-rig"
+	"github.com/egoist/mygo/ui/editor"
+	"github.com/egoist/mygo/ui/markdown"
 
 	"github.com/zeokeel/zeokeel/internal/contracts"
 	"github.com/zeokeel/zeokeel/internal/design"
@@ -16,691 +16,475 @@ import (
 	"github.com/zeokeel/zeokeel/internal/uikit"
 )
 
-// Inspector pane indexes; they match the module state.
-const (
-	tabOverview = iota
-	tabTools
-	tabLog
-	tabFiles
-	tabChanges
-	tabTerminal
-	tabAgents
-	tabTasks
-)
+// filePreviewHeight bounds the read-only code editor inside a file tab: the
+// editor virtualizes its lines and scrolls itself, and the tab's page scroll
+// keeps the rest of the header reachable.
+const filePreviewHeight = design.Space6 * 10
 
-// logLimit bounds the session event rows the Log pane reads per frame.
-const logLimit = 50
-
-// paneLabels returns the pane names in tab order, localized for the frame.
-func paneLabels(cfg Config, locale contracts.LocaleService) []string {
-	return []string{
-		cfg.overviewLabel(locale), cfg.toolsLabel(locale), cfg.logLabel(locale),
-		cfg.filesLabel(locale), cfg.changesLabel(locale), cfg.terminalLabel(locale),
-		cfg.agentsLabel(locale), cfg.tasksLabel(locale),
-	}
+// buildPanel renders the whole sidebar for one frame: the tab strip and the
+// active page (or opened file) below it. The host paints the docked surface
+// and owns the width; the tab strip sits flush at the top, DSH-style.
+func buildPanel(c *ui.Context, t *design.Tokens, workspace contracts.WorkspaceService,
+	terminal contracts.TerminalService, artifacts contracts.ArtifactLister, cfg Config, st *state) {
+	// The page commands' palette titles follow the host language, and the
+	// active tab is clamped against the file tabs of the last frame.
+	st.syncCommands()
+	root := ui.Column(c).FillWidth().Grow(1)
+	root.Label(cfg.titleLabel(st.locale))
+	root.Children(func() {
+		buildTabStrip(c, t, st)
+		st.clampTab()
+		if fileIndex, ok := st.activeFileIndex(); ok {
+			buildFileTabPage(c, t, workspace, st, fileIndex)
+			return
+		}
+		switch st.tab {
+		case pageFiles:
+			buildFilesPage(c, t, workspace, artifacts, st)
+		case pageTerminal:
+			buildTerminalPage(c, t, terminal, st)
+		default:
+			buildGuidePage(c, t, st)
+		}
+	})
 }
 
-// buildPanel renders the whole inspector for one frame: the compact pane
-// selector with the active pane's action, and the selected pane. Eight tabs do
-// not fit a 320 DIP inspector, so the pane strip became one menu button naming
-// the current pane; the host owns the panel width and the module fills it.
-func buildPanel(c *ui.Context, t *design.Tokens, runtime contracts.UIRuntime, chat contracts.ChatService, log eventReader, workspace contracts.WorkspaceService, terminal contracts.TerminalService, team contracts.TeamService, activities contracts.SubagentActivityLister, board contracts.TaskBoard, artifacts contracts.ArtifactLister, cfg Config, st *state) {
-	// The pane-switch commands' palette hint names the current pane; the
-	// open-pane commands follow the UI language. The last built frame tells the
-	// open-pane commands whether the host currently shows the inspector (the
-	// slot does not build while it is closed).
-	st.syncPaneCommands()
-	st.syncOpenCommands()
-	st.lastBuiltFrame = 0
-	if runtime != nil {
-		st.lastBuiltFrame = runtime.Frame()
-	}
-	ui.Column(c).FillWidth().Gap(design.Space2).Children(func() {
-		// One header line: the pane selector names the current pane and the
-		// pane's action plus the close control sit at its right edge. The
-		// inspector's own title is assistive-only: the host's drawer header
-		// already names it ("Inspector"), so drawing a visible title too would
-		// stack two headings above the pane.
-		header := ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(design.Space2)
-		header.Label(cfg.titleLabel(st.locale))
-		header.Children(func() {
-			buildPaneSelector(c, cfg, st, runtime)
-			ui.Spacer(c).Grow(1)
-			buildPaneAction(c, runtime, terminal, board, st)
-			buildPaneClose(c, t, runtime, st)
-		})
-		// The inspector can outgrow a short rail (a long tool list); the native
-		// scroll keeps the pane usable without the module owning the geometry.
-		ui.Scroll(c).FillWidth().Grow(1).Children(func() {
-			switch st.tab {
-			case tabTools:
-				buildToolsPane(c, t, chat, st)
-			case tabLog:
-				buildLogPane(c, t, log, chat, st.locale, st)
-			case tabFiles:
-				buildFilesPane(c, t, workspace, artifacts, runtime, st)
-			case tabChanges:
-				buildChangesPane(c, t, workspace, runtime, st)
-			case tabTerminal:
-				buildTerminalPane(c, t, terminal, runtime, st)
-			case tabAgents:
-				buildAgentsPane(c, t, chat, team, activities, runtime, st)
-			case tabTasks:
-				buildTasksPane(c, t, board, runtime, st)
-			default:
-				buildOverviewPane(c, t, chat, cfg, st.locale, st)
+// buildTabStrip is the sidebar's only navigation: the fixed pages and one tab
+// per opened file. The native TabsBase owns the tab-list semantics (role, the
+// arrow keys, Home/End, the focus) and the strip scrolls sideways so a long
+// list of open files never overflows the narrow rail.
+func buildTabStrip(c *ui.Context, t *design.Tokens, st *state) {
+	pageCount := st.pageCount()
+	st.clampTab()
+	tabs := ui.TabsBase(c, &st.tab, pageCount)
+	tabs.List.Label(st.tr("右侧栏页面", "Right sidebar pages"))
+	strip := ui.ScrollHorizontal(c).FillWidth().Shrink(0)
+	strip.Padding(design.Space1, design.Space2)
+	strip.Children(func() {
+		tabs.List.Gap(design.Space1).AlignItems(ui.Center).Children(func() {
+			closing := -1
+			for index := 0; index < pageCount; index++ {
+				buildTab(c, t, st, tabs, index, &closing)
+			}
+			if closing >= 0 {
+				st.closeTab(closing)
 			}
 		})
 	})
 }
 
-// buildPaneSelector is the compact pane picker: one menu button naming the
-// pane that shows, with every pane as a checked menu item. It replaces the
-// eight-tab strip, whose ink already overflowed the 320 DIP inspector.
-func buildPaneSelector(c *ui.Context, cfg Config, st *state, runtime contracts.UIRuntime) {
-	labels := paneLabels(cfg, st.locale)
-	if st.tab < 0 || st.tab >= len(labels) {
-		st.tab = 0
+// buildTab builds one tab. Fixed pages are plain tabs; an opened file adds its
+// close control. The guide's shortcut labels live on the fixed page tabs'
+// cards, not on the tabs themselves.
+func buildTab(c *ui.Context, t *design.Tokens, st *state, tabs ui.TabsParts, index int, closing *int) {
+	label := st.tabLabel(index)
+	active := index == st.tab
+	tab := tabs.Tab(index).AlignItems(ui.Center).Height(design.Space8).
+		PaddingX(design.Space2).Radius(design.RadiusSM)
+	// TabsBase is the no-look base: the look is this module's, from tokens
+	// only, with the active tab on the selected tint.
+	if active {
+		tab = tab.Background(t.BgSelected)
 	}
-	label := uikit.T(st.locale, "切换面板", "Switch pane")
-	selector := ui.PopoverMenuButton(c, labels[st.tab], func(m *ui.Menu) {
-		groups := paneMenuGroups()
-		for groupIndex, group := range groups {
-			if groupIndex > 0 {
-				m.Separator()
-			}
-			for _, index := range group {
-				index := index
-				if index < 0 || index >= len(labels) {
-					continue
-				}
-				if m.Item(labels[index]).Checked(index == st.tab).Chosen() && st.tab != index {
-					st.selectPane(index, runtime)
-				}
-			}
+	if active && st.revealTab {
+		tab.ScrollIntoView()
+	}
+	tab.Children(func() {
+		labelElement := design.Apply(ui.Text(c, label), t.Font(design.TypeXXS)).
+			TextColor(inactiveInk(t, active)).MaxLines(1).Ellipsis("…").NoWrap()
+		if active {
+			labelElement.Bold()
 		}
+		if index < pageFixedCount {
+			return
+		}
+		filePath := st.fileTabs[index-pageFixedCount].path
+		closeLabel := st.tr("关闭 ", "Close ") + filepath.Base(filePath)
+		uikit.IconButton(c, uikit.IconButtonOptions{
+			Key:     "rightpanel.tab.close/" + filePath,
+			Label:   closeLabel,
+			Tooltip: closeLabel,
+			Icon:    icons.Close(),
+			Size:    design.IconSizeS,
+			OnClick: func() { *closing = index },
+		})
 	})
-	selector.Label(label).Tooltip(label)
-}
-
-// inspectorToggleCommandID is the host command that opens or closes the docked
-// inspector. The module's own close control runs it, so the header's right edge
-// has the close affordance in both the docked and the drawer presentation.
-const inspectorToggleCommandID = "uiroot.toggle-inspector"
-
-// buildPaneClose is the inspector's close control: it runs the host's
-// toggle-inspector command when the host registered it (the command is the one
-// source for the open state). Hosts without the command simply have no close
-// control here; the window chrome remains the entry.
-func buildPaneClose(c *ui.Context, t *design.Tokens, runtime contracts.UIRuntime, st *state) {
-	// In the drawer presentation the host already draws the panel's header with
-	// its own close control, so a second X in the module's header row would be
-	// redundant. The drawer is used when the window cannot dock the inspector;
-	// the same geometry the host uses tells this module which presentation it is
-	// in (expanded sidebar worst case).
-	if width, _ := c.Size(); width > 0 && width < design.SidebarWidth+design.ContentMinWidth+design.Space6+design.InspectorMinWidth {
-		return
-	}
-	var run func() error
-	for _, command := range runtime.Commands() {
-		if command.ID == inspectorToggleCommandID && command.Run != nil {
-			run = command.Run
-			break
-		}
-	}
-	if run == nil {
-		return
-	}
-	label := st.tr("关闭检查器", "Close inspector")
-	uikit.IconButton(c, uikit.IconButtonOptions{
-		Key:     "rightpanel.close",
-		Label:   label,
-		Tooltip: label,
-		Icon:    icons.Close(),
-		Size:    design.IconSizeS,
-		OnClick: func() {
-			_ = run()
-			runtime.Invalidate()
-		},
-	})
-}
-
-// buildPaneAction is the one pane-level action of the active pane, at the
-// pane header's right edge. Panes without a page action keep it empty.
-func buildPaneAction(c *ui.Context, runtime contracts.UIRuntime, terminal contracts.TerminalService,
-	board contracts.TaskBoard, st *state) {
-	refreshLabel := st.tr("刷新", "Refresh")
-	switch st.tab {
-	case tabFiles:
-		// The listing read runs off the UI thread: a cached listing stays on
-		// screen while the refresh is in flight, so the header must show the
-		// spinner and disable the action (the Tasks pane's contract), or the
-		// refresh looks like a no-op on a large directory.
-		if st.filesLoading {
-			ui.Spinner(c)
-		}
-		refresh := ui.Button(c, refreshLabel).
-			Tooltip(st.tr("重新读取文件列表", "Reload the file list")).
-			Disabled(st.filesLoading)
-		if refresh.Clicked() && !st.filesLoading {
-			st.filesPreview = make(map[string]*filePreview)
-			st.filesErr = ""
-			st.filesLoaded = false // re-read the listing once, not every frame
-			runtime.Invalidate()
-		}
-	case tabChanges:
-		if ui.Button(c, refreshLabel).
-			Tooltip(st.tr("重新读取工作区变更", "Reload the workspace changes")).Clicked() {
-			st.changesLoaded = false
-			st.changesErr = nil
-			// The diff viewers and the fold state cache the previous content:
-			// without dropping them the refreshed rows keep showing the old
-			// diff (the store returns new content, the viewer cache does not).
-			st.changesOpen = make(map[string]bool)
-			st.diffs = make(map[string]*diffView)
-			runtime.Invalidate()
-		}
-	case tabLog:
-		// Every pane's explicit refresh is the same header action; the Log pane
-		// used to hide an icon-only reload inside its filter row (consistency
-		// audit PN-09). Refresh re-reads the store window now (no gate) and
-		// keeps the cached rows while the background read runs.
-		if st.logLoading {
-			ui.Spinner(c)
-		}
-		if ui.Button(c, refreshLabel).
-			Tooltip(st.tr("重新读取会话事件", "Reload the session events")).
-			Disabled(st.logLoading).Clicked() && !st.logLoading {
-			st.logDirty = true
-			st.logLoadedAt = time.Time{}
-			runtime.Invalidate()
-		}
-	case tabTasks:
-		if st.tasksLoading {
-			ui.Spinner(c)
-		}
-		if ui.Button(c, st.tr("刷新", "Refresh")).
-			Tooltip(st.tr("重新加载任务", "Reload tasks")).Clicked() {
-			refreshTasks(board, runtime, st)
-		}
-	case tabTerminal:
-		if ui.Button(c, st.tr("清空", "Clear")).Clicked() {
-			if st.term != nil {
-				st.term.clearOutput()
-			}
-			runtime.Invalidate()
-		}
+	if index == st.tab {
+		st.revealTab = false
 	}
 }
 
-// buildOverviewPane shows the conversation's user-facing overview: title, run
-// state, message count, update time and the model in use. The developer
-// metadata (session ID, endpoint, API-key state, budget, iteration cap) lives in
-// a collapsed "Diagnostics" disclosure so it is one click away without being the
-// first thing the inspector shows.
-func buildOverviewPane(c *ui.Context, t *design.Tokens, chat contracts.ChatService, cfg Config,
-	locale contracts.LocaleService, st *state) {
-	activeID := chat.ActiveSession()
-	chatSession, ok := chat.Session(activeID)
-	if activeID == "" || !ok {
-		buildEmptyPane(c, cfg.emptyLabel(locale))
-		return
+// inactiveInk is the tab's text color: primary on the chosen tab, secondary on
+// the rest, from the brand tokens.
+func inactiveInk(t *design.Tokens, active bool) ui.Color {
+	if active {
+		return t.LabelPrimary
 	}
-	title := strings.TrimSpace(chatSession.Title)
-	if title == "" {
-		title = uikit.T(locale, "未命名会话", "Untitled session")
-	}
-	effective := chat.Config()
-	model := firstNonEmpty(strings.TrimSpace(effective.Model), uikit.T(locale, "未配置", "Not configured"))
-	overviewRows := []uikit.KeyValue{
-		{Key: uikit.T(locale, "消息", "Messages"), Value: fmt.Sprintf("%d", len(chatSession.Messages))},
-	}
-	// The workspace is context the conversation header also names: the overview
-	// used to leave it out, so a user could not tell which project the session
-	// (and its Files/Changes panes) belongs to.
-	if workspace := overviewWorkspaceName(st); workspace != "" {
-		overviewRows = append(overviewRows,
-			uikit.KeyValue{Key: uikit.T(locale, "工作区", "Workspace"), Value: workspace})
-	}
-	overviewRows = append(overviewRows,
-		uikit.KeyValue{Key: uikit.T(locale, "更新时间", "Updated"), Value: formatUpdatedAt(locale, chatSession.UpdatedAt)},
-		uikit.KeyValue{Key: uikit.T(locale, "模型", "Model"), Value: model},
-	)
-	ui.Column(c).FillWidth().Gap(design.Space2).Children(func() {
-		design.Apply(ui.Text(c, title), t.Font(design.TypeM)).
-			FontWeight(600).TextColor(t.LabelPrimary).MaxLines(1).Ellipsis("…")
-		if chatSession.Running || chatSession.Error != "" {
-			ui.Row(c).FillWidth().Gap(design.Space2).AlignItems(ui.Center).Children(func() {
-				if chatSession.Running {
-					design.Apply(ui.Badge(c, uikit.T(locale, "运行中", "Running")), t.Badge()).TextColor(t.WarningText)
-				}
-				if chatSession.Error != "" {
-					design.Apply(ui.Badge(c, uikit.T(locale, "错误", "Error")), t.Badge()).TextColor(t.DangerText)
-				}
+	return t.LabelSecondary
+}
+
+// --- guide page -------------------------------------------------------------
+
+// buildGuidePage is the 开始 landing: with no page open the sidebar offers the
+// only two things it still owns, as two equal cards. Per the user-approved
+// design the cards carry a title and their shortcut only: no explanatory copy
+// lives here. The body is a native scroll so a short window cannot clip it.
+func buildGuidePage(c *ui.Context, t *design.Tokens, st *state) {
+	ui.Scroll(c).FillWidth().Grow(1).Children(func() {
+		ui.Column(c).FillWidth().Padding(design.Space3).Gap(design.Space4).Children(func() {
+			design.Apply(ui.Text(c, st.cfg.guideLabel(st.locale)), t.Font(design.TypeM)).
+				TextColor(t.LabelPrimary).Role(ui.RoleHeading).Level(2).Bold()
+			// Two equal side-by-side cards: the official Grid's two equal
+			// columns keep them the same width regardless of their content.
+			ui.Grid(c).FillWidth().Columns(2).GapX(design.Space2).GapY(design.Space2).Children(func() {
+				buildGuideCard(c, t, st, icons.Folder(), st.tr("工作区文件", "Workspace files"),
+					filesOpenShortcut, pageFiles)
+				buildGuideCard(c, t, st, icons.Terminal(), st.tr("新建终端", "New terminal"),
+					terminalOpenShortcut, pageTerminal)
 			})
-		}
-		uikit.KeyValueRows(c, overviewRows)
-		if chatSession.Error != "" {
-			uikit.ErrorLine(c, chatSession.Error)
-		}
-		// Diagnostics: the technical metadata the overview used to put on the
-		// first screen, collapsed by default.
-		open := st.open["overview/diagnostics"]
-		ui.Collapsible(c, uikit.T(locale, "诊断信息", "Diagnostics"), &open, func() {
-			diag := []uikit.KeyValue{
-				{Key: uikit.T(locale, "会话 ID", "Session ID"), Value: firstNonEmpty(chatSession.ID, "—")},
-			}
-			if baseURL := strings.TrimSpace(effective.BaseURL); baseURL != "" {
-				diag = append(diag, uikit.KeyValue{Key: "Base URL", Value: baseURL})
-			}
-			apiKey := uikit.T(locale, "未设置", "Not set")
-			if strings.TrimSpace(effective.APIKey) != "" {
-				apiKey = uikit.T(locale, "已设置（已隐藏）", "Set (hidden)")
-			}
-			diag = append(diag,
-				uikit.KeyValue{Key: "API Key", Value: apiKey},
-				uikit.KeyValue{Key: uikit.T(locale, "上下文预算", "Context budget"),
-					Value: firstNonEmpty(intLabel(effective.ContextBudget), uikit.T(locale, "默认", "Default"))},
-				uikit.KeyValue{Key: uikit.T(locale, "最大迭代", "Max iterations"),
-					Value: firstNonEmpty(intLabel(effective.MaxIterations), uikit.T(locale, "默认", "Default"))},
-			)
-			uikit.KeyValueRows(c, diag)
 		})
-		st.open["overview/diagnostics"] = open
 	})
 }
 
-// intLabel renders a positive integer or "" for zero.
-func intLabel(value int) string {
-	if value <= 0 {
-		return ""
+// buildGuideCard is one large action card: a native button (the official
+// ButtonBase with the theme's look), equal in width to its neighbour, holding
+// the glyph, the title and the shortcut. No description copy: the card names
+// the action and its chord.
+func buildGuideCard(c *ui.Context, t *design.Tokens, st *state, icon *ui.SVG,
+	title, shortcut string, page int) {
+	card := ui.Button(c, "").Label(title).Tooltip(title).Padding(design.Space3)
+	card.Children(func() {
+		// The card body stacks the glyph, the title and the shortcut: the rail
+		// is 320 DIP wide, so two side-by-side cards cannot hold a horizontal
+		// glyph + title + shortcut row without ellipsizing the title.
+		ui.Column(c).FillWidth().AlignItems(ui.Start).Gap(design.Space2).Children(func() {
+			ui.Icon(c, icon).Size(design.IconSizeM, design.IconSizeM).TextColor(t.LabelSecondary)
+			design.Apply(ui.Text(c, title), t.Font(design.TypeS)).
+				TextColor(t.LabelPrimary).MaxLines(1).Ellipsis("…").Bold()
+			design.Apply(ui.Text(c, shortcut), t.MonoText(design.TypeXXXS)).
+				TextColor(t.LabelTertiary).NoWrap()
+		})
+	})
+	if card.Clicked() {
+		st.showFixedPage(page)
 	}
-	return fmt.Sprintf("%d", value)
 }
 
-// overviewWorkspaceName is the current workspace for the Overview property
-// sheet: its name (or folder path), bounded so a long project name cannot
-// stretch the 320 DIP pane's rows.
-func overviewWorkspaceName(st *state) string {
-	if st == nil {
-		return ""
+// --- file tab page ----------------------------------------------------------
+
+// buildFileTabPage is one opened file's tab: a header naming the file with its
+// copy-path and reload actions, then the folded workspace diff (when the file
+// is changed) and the read-only preview, inside the page's native scroll.
+func buildFileTabPage(c *ui.Context, t *design.Tokens, workspace contracts.WorkspaceService,
+	st *state, index int) {
+	if index < 0 || index >= len(st.fileTabs) {
+		buildGuidePage(c, t, st)
+		return
 	}
-	var workspace contracts.WorkspaceService
-	if raw, ok := st.ctx.Get(contracts.KeyWorkspace); ok {
-		workspace, _ = raw.(contracts.WorkspaceService)
+	path := st.fileTabs[index].path
+	preview := st.filePreviewFor(workspace, path)
+	ui.Column(c).FillWidth().Grow(1).Children(func() {
+		buildFileTabHeader(c, t, st, path)
+		ui.Scroll(c).FillWidth().Grow(1).Children(func() {
+			ui.Column(c).FillWidth().Padding(design.Space3).Gap(design.Space2).Children(func() {
+				buildFileDiffFold(c, t, workspace, st, path)
+				buildFilePreviewBody(c, t, st, path, preview)
+			})
+		})
+	})
+}
+
+// buildFileTabHeader names the opened file (base name emphasized, parent
+// directory muted) and carries the tab's two actions: copy the path and reload
+// the preview from disk.
+func buildFileTabHeader(c *ui.Context, t *design.Tokens, st *state, path string) {
+	ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(design.Space2).
+		Padding(design.Space2, design.Space3).Children(func() {
+		ui.Icon(c, icons.File()).Size(design.IconSizeS, design.IconSizeS).TextColor(t.LabelSecondary)
+		design.Apply(ui.Text(c, filepath.Base(path)), t.Font(design.TypeXS)).
+			TextColor(t.LabelPrimary).MaxLines(1).Ellipsis("…").Tooltip(path).Bold()
+		if dir := filepath.Dir(path); dir != "." && dir != "" {
+			design.Apply(ui.Text(c, dir+"/"), t.Font(design.TypeXXXS)).
+				TextColor(t.LabelTertiary).MaxLines(1).Ellipsis("…")
+		}
+		ui.Spacer(c).Grow(1)
+		copyLabel := st.tr("复制路径", "Copy path")
+		uikit.IconButton(c, uikit.IconButtonOptions{
+			Key:     "rightpanel.file.copy/" + path,
+			Label:   copyLabel,
+			Tooltip: copyLabel,
+			Icon:    icons.Copy(),
+			Size:    design.IconSizeS,
+			OnClick: func() {
+				c.WriteClipboard(path)
+			},
+		})
+		reloadLabel := st.tr("重新读取文件", "Reload the file")
+		uikit.IconButton(c, uikit.IconButtonOptions{
+			Key:     "rightpanel.file.reload/" + path,
+			Label:   reloadLabel,
+			Tooltip: reloadLabel,
+			Icon:    icons.Reload(),
+			Size:    design.IconSizeS,
+			OnClick: func() {
+				st.reloadFile(path)
+			},
+		})
+	})
+}
+
+// reloadFile drops one file's cached preview and editor, so the next frame
+// re-reads it from the workspace (an agent may have edited it).
+func (st *state) reloadFile(path string) {
+	delete(st.previews, path)
+	delete(st.editors, path)
+	st.invalidate()
+}
+
+// buildFilePreviewBody renders one file preview: the official code editor for
+// text, the Markdown view for .md, a native bitmap for images and an honest
+// metadata fallback for everything else.
+func buildFilePreviewBody(c *ui.Context, t *design.Tokens, st *state, path string, preview *filePreview) {
+	switch {
+	case preview == nil || preview.loading:
+		ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(design.Space2).Children(func() {
+			ui.Spinner(c).Label(st.tr("正在读取文件…", "Reading the file…")).
+				Size(design.Space3, design.Space3).TextColor(t.LabelSecondary)
+			design.Apply(ui.Text(c, st.tr("正在读取文件…", "Reading the file…")),
+				t.TextMuted(design.TypeXS))
+		})
+		return
+	case preview.err != "":
+		uikit.ErrorLine(c, st.tr("读取文件失败：", "Failed to read the file: ")+preview.err)
+		return
 	}
+	switch {
+	case preview.bitmap != nil:
+		ui.Image(c, preview.bitmap).MaxWidthPercent(100)
+	case isMarkdownPath(path):
+		markdown.View(c, string(preview.data), nil)
+	case isTextPath(path):
+		editorView(c, t, st, path, preview.data)
+	default:
+		uikit.KeyValueRows(c, []uikit.KeyValue{
+			{Key: st.tr("大小", "Size"), Value: formatFileSize(int64(len(preview.data)))},
+			{Key: st.tr("类型", "Type"), Value: strings.TrimPrefix(filepath.Ext(path), ".")},
+		})
+		design.Apply(ui.Text(c, st.tr("暂不支持预览", "Preview is not supported")),
+			t.TextMuted(design.TypeXXS))
+	}
+	if preview.truncated {
+		design.Apply(ui.Text(c, st.tr("仅显示前 256 KiB", "Showing the first 256 KiB only")),
+			t.TextMuted(design.TypeXXXS))
+	}
+}
+
+// editorView is the read-only official code editor of one text file, at a
+// token-bounded height so its own scroll keeps a long source file inside the
+// page.
+func editorView(c *ui.Context, t *design.Tokens, st *state, path string, data []byte) {
+	state := st.editorFor(path, data)
+	_ = t
+	editor.View(c, state).Height(filePreviewHeight).FillWidth()
+}
+
+// --- files page -------------------------------------------------------------
+
+// buildFilesPage is the 文件 page: the deliverables history and the workspace
+// tree inside one native page scroll, with the workspace header above it.
+func buildFilesPage(c *ui.Context, t *design.Tokens, workspace contracts.WorkspaceService,
+	artifacts contracts.ArtifactLister, st *state) {
 	if workspace == nil {
-		return ""
+		buildScrollableBody(c, func() {
+			buildEmptyPane(c, st.tr("工作区未启用", "Workspace is not enabled"))
+		})
+		return
 	}
 	current, ok, err := workspace.Current(context.Background())
-	if err != nil || !ok {
-		return ""
-	}
-	name := firstNonEmpty(strings.TrimSpace(current.Name), strings.TrimSpace(current.Root))
-	if name == "" {
-		return ""
-	}
-	return truncateRunes(name, 40)
-}
-
-// buildToolsPane aggregates every ToolCall of the session, in message order,
-// in the official native list: one row per call with a status badge, the name
-// and a collapsible summary. Up/Down choose a row and Enter toggles its
-// summary, so the pane is usable without the pointer (docs/ui/list.md).
-func buildToolsPane(c *ui.Context, t *design.Tokens, chat contracts.ChatService, st *state) {
-	chatSession, ok := chat.Session(chat.ActiveSession())
-	if !ok {
-		buildEmptyPane(c, uikit.T(st.locale, "还没有工具调用", "No tool calls yet"))
-		return
-	}
-	items := make([]toolItem, 0, 8)
-	for messageIndex, message := range chatSession.Messages {
-		for toolIndex, tool := range message.Tools {
-			items = append(items, toolItem{
-				key:  fmt.Sprintf("%d-%d-%s", messageIndex, toolIndex, tool.ID),
-				tool: tool,
-			})
-		}
-	}
-	if len(items) == 0 {
-		buildEmptyPane(c, uikit.T(st.locale, "还没有工具调用", "No tool calls yet"))
-		return
-	}
-
-	ui.Column(c).FillWidth().Gap(design.Space2).Children(func() {
-		design.Apply(ui.Text(c, uikit.T(st.locale,
-			fmt.Sprintf("%d 个工具调用", len(items)), fmt.Sprintf("%d tool calls", len(items)))),
-			t.Font(design.TypeXXS)).TextColor(t.LabelTertiary)
-		st.toolsList.Key = func(row int) any { return items[row].key }
-		st.toolsList.Label = func(row int) string { return items[row].tool.Name }
-		st.toolsList.Selected = &st.toolsSel
-		list := ui.List(c, &st.toolsList, len(items)).
-			Label(uikit.T(st.locale, "工具调用列表", "Tool calls")).
-			Gap(design.Space1).
-			Rows(func(row ui.ListRow) {
-				buildToolRow(row, t, st, items[row.Index])
-			})
-		// Enter toggles the chosen call's summary; the arrow keys already chose
-		// the row through the list's own Selected handling.
-		if list.Submitted() && st.toolsSel >= 0 && st.toolsSel < len(items) {
-			key := items[st.toolsSel].key
-			st.open[key] = !st.open[key]
-			runtimeInvalidate(st)
-		}
-	})
-}
-
-// toolItem is one row of the Tools pane: the tool call and its stable key.
-type toolItem struct {
-	key  string
-	tool contracts.ToolCall
-}
-
-// buildToolRow is one tool call row: status badge, name, id and the foldable
-// summary.
-func buildToolRow(row ui.ListRow, t *design.Tokens, st *state, item toolItem) {
-	c := row.Context
-	tool := item.tool
-	statusKind := uikit.ParseToolStatus(tool.Status).Kind()
-	ui.Column(c).FillWidth().Gap(design.Space1).Children(func() {
-		ui.Row(c).FillWidth().Gap(design.Space2).AlignItems(ui.Center).Children(func() {
-			uikit.StatusBadge(c, t, statusKind, uikit.ToolStatusLabel(st.locale, tool.Status))
-			design.Apply(ui.Text(c, tool.Name), t.Font(design.TypeXS)).
-				FontWeight(600).TextColor(t.LabelPrimary).MaxLines(1).Ellipsis("…")
-			ui.Spacer(c).Grow(1)
-			if tool.ID != "" {
-				design.Apply(ui.Text(c, tool.ID), t.Font(design.TypeXXS)).
-					TextColor(t.LabelTertiary).MaxLines(1).Ellipsis("…")
-			}
+	if err != nil {
+		buildScrollableBody(c, func() {
+			uikit.ErrorLine(c, st.tr("读取工作区失败：", "Failed to read the workspace: ")+err.Error())
 		})
-		if summary := strings.TrimSpace(tool.Summary); summary != "" {
-			open := st.open[item.key]
-			ui.Collapsible(c, uikit.T(st.locale, "摘要", "Summary"), &open, func() {
-				design.Apply(ui.Text(c, truncateSummary(summary)), t.TextMuted(design.TypeXXS))
+		return
+	}
+	if !ok {
+		buildScrollableBody(c, func() {
+			buildOpenWorkspace(c, t, workspace, st.runtime, st)
+		})
+		return
+	}
+	// The root listing is cached and read off the UI thread: the first frame
+	// after opening the page shows the loading row, the posted result the tree.
+	entries, loading, listErr := st.syncFilesRoot(workspace, st.runtime)
+	ui.Column(c).FillWidth().Grow(1).Gap(design.Space2).Children(func() {
+		buildWorkspaceHeader(c, t, st, current, loading)
+		ui.Scroll(c).FillWidth().Grow(1).Children(func() {
+			ui.Column(c).FillWidth().Padding(design.Space2, design.Space3).Gap(design.Space3).Children(func() {
+				if artifacts != nil {
+					buildArtifactsSection(c, t, artifacts, st.runtime, st)
+				}
+				switch {
+				case listErr != nil:
+					uikit.ErrorLine(c, st.tr("列目录失败：", "Failed to list the directory: ")+listErr.Error())
+				case loading && entries == nil:
+					ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(design.Space2).Children(func() {
+						ui.Spinner(c).Label(st.tr("正在读取目录…", "Reading the directory…")).
+							Size(design.Space3, design.Space3).TextColor(t.LabelSecondary)
+						design.Apply(ui.Text(c, st.tr("正在读取目录…", "Reading the directory…")),
+							t.TextMuted(design.TypeXS))
+					})
+				case len(entries) == 0:
+					design.Apply(ui.Text(c, st.tr("目录为空", "The directory is empty")),
+						t.TextMuted(design.TypeXS))
+				default:
+					buildWorkspaceTree(c, t, workspace, entries, st)
+				}
 			})
-			st.open[item.key] = open
+		})
+	})
+}
+
+// buildWorkspaceHeader names the current workspace and carries the page's one
+// action: re-read the tree from disk (and drop the cached diffs with it).
+func buildWorkspaceHeader(c *ui.Context, t *design.Tokens, st *state,
+	current contracts.Workspace, loading bool) {
+	ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(design.Space2).
+		Padding(design.Space2, design.Space3).Children(func() {
+		design.Apply(ui.Text(c, st.tr("工作区", "Workspace")), t.TextMuted(design.TypeXXXS)).NoWrap()
+		design.Apply(ui.Text(c, firstNonEmpty(current.Name, filepath.Base(current.Root))),
+			t.Font(design.TypeXS)).TextColor(t.LabelPrimary).
+			Grow(1).MaxLines(1).Ellipsis("…").Tooltip(current.Root).Bold()
+		if loading {
+			ui.Spinner(c).Label(st.tr("正在读取目录…", "Reading the directory…")).
+				Size(design.Space3, design.Space3).TextColor(t.LabelSecondary)
+		}
+		reloadLabel := st.tr("重新读取目录", "Refresh files")
+		uikit.IconButton(c, uikit.IconButtonOptions{
+			Key:      "rightpanel.files.refresh",
+			Label:    reloadLabel,
+			Tooltip:  st.tr("重新读取工作区文件", "Reload the workspace files"),
+			Icon:     icons.Reload(),
+			Size:     design.IconSizeS,
+			Disabled: loading,
+			OnClick: func() {
+				st.refreshFiles()
+			},
+		})
+	})
+}
+
+// buildWorkspaceTree renders the workspace's root entries with the native
+// ui.Tree: directories show their children only while open, and a directory's
+// listing is read the first time the user opens it. A file row's click opens
+// its tab; a directory row's click opens or closes it.
+func buildWorkspaceTree(c *ui.Context, t *design.Tokens, workspace contracts.WorkspaceService,
+	entries []contracts.FileEntry, st *state) {
+	shown, hidden := capTreeEntries(entries)
+	ui.Tree(c, func() {
+		for _, entry := range shown {
+			st.buildTreeNode(c, t, workspace, entry)
+		}
+		if hidden > 0 {
+			design.Apply(ui.Text(c, fmt.Sprintf(st.tr("还有 %d 项未显示", "%d more entries not shown"), hidden)),
+				t.TextMuted(design.TypeXXXS)).Padding(design.Space1, design.Space2)
 		}
 	})
 }
 
-// runtimeInvalidate requests one more frame after a list action changed state.
-func runtimeInvalidate(st *state) {
-	if st.runtime != nil {
-		st.runtime.Invalidate()
+// capTreeEntries bounds one directory's rendered rows (the native tree builds
+// every row it shows). It returns the rows and how many were left out, so the
+// tree can say so honestly instead of silently dropping entries.
+func capTreeEntries(entries []contracts.FileEntry) ([]contracts.FileEntry, int) {
+	if len(entries) <= maxTreeEntries {
+		return entries, 0
+	}
+	return entries[:maxTreeEntries], len(entries) - maxTreeEntries
+}
+
+// buildTreeNode is one row of the workspace tree.
+func (st *state) buildTreeNode(c *ui.Context, t *design.Tokens, workspace contracts.WorkspaceService,
+	entry contracts.FileEntry) {
+	path := firstNonEmpty(entry.Path, entry.Name)
+	if entry.Dir {
+		open := st.directoryOpen(path)
+		item := ui.TreeItem(c, firstNonEmpty(entry.Name, filepath.Base(path)), open, func() {
+			st.buildDirectoryChildren(c, t, workspace, path)
+		})
+		if item.Clicked() {
+			*open = !*open
+			st.invalidate()
+		}
+		return
+	}
+	item := ui.TreeItem(c, firstNonEmpty(entry.Name, filepath.Base(path)), nil, nil)
+	item.ContextMenu(func(menu *ui.Menu) {
+		if menu.Item(st.tr("打开", "Open")).Chosen() {
+			st.openFile(path)
+		}
+		if menu.Item(st.tr("复制路径", "Copy path")).Chosen() {
+			c.WriteClipboard(path)
+		}
+	})
+	if item.Clicked() {
+		st.openFile(path)
+		st.invalidate()
 	}
 }
 
-// buildEmptyPane is the centered empty state of one pane: a title and hint in
-// flow, without the decorative icon-in-a-colored-circle anti-pattern.
+// buildDirectoryChildren renders (and lazily loads) one open directory's
+// entries. It runs while the tree builds the open item's group.
+func (st *state) buildDirectoryChildren(c *ui.Context, t *design.Tokens,
+	workspace contracts.WorkspaceService, path string) {
+	listing := st.syncDir(path, workspace)
+	if listing == nil || (listing.loading && !listing.loaded) {
+		design.Apply(ui.Text(c, st.tr("正在读取…", "Loading…")), t.TextMuted(design.TypeXXXS)).
+			Padding(design.Space1, design.Space2)
+		return
+	}
+	if listing.err != nil {
+		uikit.ErrorLine(c, st.tr("列目录失败：", "Failed to list the directory: ")+listing.err.Error())
+		return
+	}
+	if len(listing.entries) == 0 {
+		design.Apply(ui.Text(c, st.tr("目录为空", "The directory is empty")),
+			t.TextMuted(design.TypeXXXS)).Padding(design.Space1, design.Space2)
+		return
+	}
+	shown, hidden := capTreeEntries(listing.entries)
+	for _, child := range shown {
+		st.buildTreeNode(c, t, workspace, child)
+	}
+	if hidden > 0 {
+		design.Apply(ui.Text(c, fmt.Sprintf(st.tr("还有 %d 项未显示", "%d more entries not shown"), hidden)),
+			t.TextMuted(design.TypeXXXS)).Padding(design.Space1, design.Space2)
+	}
+}
+
+// directoryOpen returns the stable fold state pointer of one directory (the
+// native TreeItem owns the *bool).
+func (st *state) directoryOpen(path string) *bool {
+	if st.filesOpen == nil {
+		st.filesOpen = make(map[string]*bool)
+	}
+	open, ok := st.filesOpen[path]
+	if !ok {
+		open = new(bool)
+		st.filesOpen[path] = open
+	}
+	return open
+}
+
+// buildEmptyPane is the centered empty state of one page: a title in flow,
+// without the decorative icon-in-a-colored-circle anti-pattern.
 func buildEmptyPane(c *ui.Context, text string) {
 	uikit.EmptyStateBlock(c, text, "", nil)
 }
 
-// formatUpdatedAt renders a session update timestamp in the user's date
-// format, "—" when unset. It goes through the shared locale helper.
-func formatUpdatedAt(locale contracts.LocaleService, updated time.Time) string {
-	return firstNonEmpty(uikit.FormatDateTime(locale, updated), "—")
-}
-
-// truncateSummary bounds an expanded tool summary (UTF-8 safe).
-func truncateSummary(summary string) string {
-	const max = 1200
-	if len(summary) <= max {
-		return summary
-	}
-	cut := max
-	for cut > 0 && (summary[cut]&0xC0) == 0x80 {
-		cut--
-	}
-	return summary[:cut] + "…"
-}
-
-// buildLogPane is the inspector's durable session log: the newest events of the
-// active session, read from the SQLite-backed session log once per session (or
-// when the chat reports new events) and shown in the official native list. It
-// degrades to an explanatory empty state without a store.
-//
-// Depth added by the shell audit: a filter field (event type or payload), an
-// explicit refresh, an honest count (the pane reads a bounded window of the
-// newest events, it does not know the total), and per-event copy plus a
-// fold-out of the full payload. The developer-log surface is where a user
-// debugs a run, so the raw event must be reachable and copyable, not truncated
-// to a preview with no way back.
-func buildLogPane(c *ui.Context, t *design.Tokens, log eventReader, chat contracts.ChatService,
-	locale contracts.LocaleService, st *state) {
-	active := chat.ActiveSession()
-	if active == "" {
-		buildEmptyPane(c, uikit.T(locale, "还没有活动会话", "No active session"))
-		return
-	}
-	if log == nil {
-		buildEmptyPane(c, uikit.T(locale, "日志需要持久化会话存储", "The log requires a persistent session store"))
-		return
-	}
-	// The events are cached and read off the UI thread after a throttle gate:
-	// rendering never blocks the frame on the store, and a streaming reply (one
-	// chat notification per text delta) coalesces into at most one read per
-	// window instead of one synchronous SQLite query per delta.
-	st.syncLogCache(c, log, active, c.Now())
-	if st.logErr != nil {
-		uikit.ErrorLine(c, uikit.T(locale, "读取会话日志失败：", "Failed to read the session log: ")+st.logErr.Error())
-		return
-	}
-	query := strings.TrimSpace(st.logFilter)
-	events := filterLogEvents(st.logEvents, query)
-	if st.logLoading && !st.logLoaded {
-		buildEmptyPane(c, uikit.T(locale, "正在读取会话事件…", "Reading session events…"))
-		return
-	}
-	ui.Column(c).FillWidth().Gap(design.Space2).Children(func() {
-		// Filtering is a view of the loaded window; the explicit refresh lives
-		// in the pane header like every other pane's (PN-09).
-		ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(design.Space2).Children(func() {
-			filterLabel := uikit.T(locale, "筛选日志", "Filter log")
-			ui.SearchField(c, &st.logFilter).Label(filterLabel).
-				Placeholder(uikit.T(locale, "按类型或内容筛选…", "Filter by type or content…")).Grow(1)
-			if st.logLoading {
-				ui.Spinner(c).Label(uikit.T(locale, "正在刷新会话事件…", "Refreshing session events…"))
-			}
-		})
-		design.Apply(ui.Text(c, logCountLabel(locale, len(st.logEvents), len(events), query != "")),
-			t.Font(design.TypeXXS)).TextColor(t.LabelTertiary)
-		if len(events) == 0 {
-			if query != "" {
-				buildEmptyPane(c, uikit.T(locale, "没有匹配的事件", "No matching events"))
-				return
-			}
-			buildEmptyPane(c, uikit.T(locale, "还没有会话事件", "No session events yet"))
-			return
-		}
-		st.logList.Key = func(row int) any { return events[len(events)-1-row].Seq }
-		st.logList.Label = func(row int) string { return events[len(events)-1-row].Type }
-		ui.List(c, &st.logList, len(events)).
-			Label(uikit.T(locale, "会话事件", "Session events")).
-			Gap(design.Space1).
-			Rows(func(row ui.ListRow) {
-				buildLogRow(row, t, locale, st, events[len(events)-1-row.Index])
-			})
+// buildScrollableBody wraps a short page state (empty/error/onboarding) in the
+// page's native scroll: page bodies scroll, so even an unexpected amount of
+// content in an otherwise empty state can never clip against the rail.
+func buildScrollableBody(c *ui.Context, body func()) {
+	ui.Scroll(c).FillWidth().Grow(1).Children(func() {
+		ui.Column(c).FillWidth().Padding(design.Space3).Children(body)
 	})
-}
-
-// logCountLabel is the Log pane's honest count: the store is read with a
-// bounded limit, so when the window is full the copy says "latest N" instead of
-// claiming those are all the session's events; with a filter it shows how many
-// of the loaded window match.
-func logCountLabel(locale contracts.LocaleService, loaded, shown int, filtered bool) string {
-	windowed := loaded >= logLimit
-	switch {
-	case filtered && windowed:
-		return uikit.T(locale,
-			fmt.Sprintf("显示 %d / 最近 %d 条会话事件", shown, loaded),
-			fmt.Sprintf("%d of the latest %d session events", shown, loaded))
-	case filtered:
-		return uikit.T(locale,
-			fmt.Sprintf("显示 %d / %d 条会话事件", shown, loaded),
-			fmt.Sprintf("%d of %d session events", shown, loaded))
-	case windowed:
-		return uikit.T(locale,
-			fmt.Sprintf("最近 %d 条会话事件", loaded),
-			fmt.Sprintf("Latest %d session events", loaded))
-	default:
-		return uikit.T(locale,
-			fmt.Sprintf("%d 条会话事件", loaded),
-			fmt.Sprintf("%d session events", loaded))
-	}
-}
-
-// filterLogEvents keeps the events whose type or payload contains query, case
-// insensitively, preserving the store order.
-func filterLogEvents(events []rig.SessionEvent, query string) []rig.SessionEvent {
-	needle := strings.ToLower(strings.TrimSpace(query))
-	if needle == "" {
-		return events
-	}
-	filtered := make([]rig.SessionEvent, 0, len(events))
-	for _, event := range events {
-		haystack := strings.ToLower(event.Type + "\x00" + string(event.Payload))
-		if strings.Contains(haystack, needle) {
-			filtered = append(filtered, event)
-		}
-	}
-	return filtered
-}
-
-// buildLogRow is one durable event row: sequence, type, clock, a bounded
-// payload preview, a copy action for the raw payload and a fold-out with the
-// full event JSON (a long payload stays reachable instead of ending in "…").
-func buildLogRow(row ui.ListRow, t *design.Tokens, locale contracts.LocaleService,
-	st *state, event rig.SessionEvent) {
-	c := row.Context
-	payload := strings.TrimSpace(string(event.Payload))
-	ui.Column(c).FillWidth().Gap(design.Space1).Children(func() {
-		ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(design.Space2).Children(func() {
-			design.Apply(ui.Text(c, fmt.Sprintf("#%d", event.Seq)), t.TextMuted(design.TypeXXXS))
-			design.Apply(ui.Text(c, event.Type), t.Font(design.TypeXXS)).FontWeight(600).
-				TextColor(t.LabelPrimary).Grow(1).MaxLines(1).Ellipsis("…")
-			design.Apply(ui.Text(c, uikit.FormatClock(locale, event.Time)), t.TextMuted(design.TypeXXXS))
-			if payload != "" {
-				copyLabel := uikit.T(locale, "复制事件", "Copy event")
-				uikit.IconButton(c, uikit.IconButtonOptions{
-					Key:     "rightpanel.log.copy",
-					Label:   copyLabel,
-					Tooltip: copyLabel,
-					Icon:    icons.Copy(),
-					Size:    design.IconSizeS,
-					OnClick: func() {
-						c.WriteClipboard(payload)
-						if st.notifier != nil {
-							st.notifier.Notify(contracts.NotifySuccess,
-								uikit.T(locale, "已复制事件 #", "Copied event #")+fmt.Sprintf("%d", event.Seq))
-						}
-					},
-				})
-			}
-		})
-		if payload == "" {
-			return
-		}
-		preview := truncateRunes(payload, 160)
-		design.Apply(ui.Text(c, preview), t.MonoText(design.TypeXXXS)).
-			TextColor(t.LabelTertiary).MaxLines(3)
-		if preview == payload {
-			return
-		}
-		key := "log/full/" + st.logSession + "#" + fmt.Sprintf("%d", event.Seq)
-		open := st.open[key]
-		ui.Collapsible(c, uikit.T(locale, "查看完整事件", "Show full event"), &open, func() {
-			design.Apply(ui.Text(c, truncateRunes(payload, 4000)), t.MonoText(design.TypeXXXS)).
-				TextColor(t.LabelSecondary).Selectable()
-		})
-		st.open[key] = open
-	})
-}
-
-// logReloadInterval is the Log pane's reload gate: a chat notification marks
-// the cache dirty, and the next frame starts at most one background store read
-// per window. Streaming notifies once per text delta, so an ungated reload did
-// one synchronous SQLite read per token from rendering code (P1/AP-16).
-const logReloadInterval = 250 * time.Millisecond
-
-// syncLogCache keeps the Log pane's event cache fresh without blocking a frame:
-// a session change drops the cache at once, a chat notification marks it dirty,
-// and a dirty cache is re-read once the throttle gate opens (c.After schedules
-// the frame that opens it even when the stream stops first). Production frames
-// read the store in the background; a bare state (internal tests) reads
-// synchronously but still through the gate, so the coalescing is testable.
-// A posted result for a session the user already left is dropped.
-func (st *state) syncLogCache(c *ui.Context, log eventReader, sessionID string, now time.Time) {
-	if st.logSession != sessionID {
-		// The pane describes one session: never show the previous session's
-		// events while the new one loads.
-		st.logSession = sessionID
-		st.logEvents = nil
-		st.logErr = nil
-		st.logLoaded = false
-		st.logDirty = false
-		st.logLoading = false
-		st.logLoadedAt = time.Time{}
-	}
-	if st.logLoading || (st.logLoaded && !st.logDirty) {
-		return
-	}
-	due, wait := st.logReloadGate(now)
-	if !due {
-		// The gate is closed: ask for the frame that reopens it. The
-		// notification stream may have stopped, so nothing else would.
-		if c != nil {
-			c.After(wait)
-		}
-		return
-	}
-	st.logDirty = false
-	st.logLoadedAt = now
-	if st.runtime == nil {
-		// A bare state (internal tests) keeps the read on this thread but only
-		// once per gate window.
-		st.logEvents, st.logErr = log.Last(context.Background(), sessionID, logLimit)
-		st.logLoaded = true
-		return
-	}
-	st.logLoading = true
-	runtime := st.runtime
-	go func() {
-		events, err := log.Last(context.Background(), sessionID, logLimit)
-		runtime.Post(func() {
-			st.logLoading = false
-			if st.logSession != sessionID {
-				runtime.Invalidate()
-				return
-			}
-			st.logEvents, st.logErr = events, err
-			st.logLoaded = true
-			runtime.Invalidate()
-		})
-	}()
-	runtime.Invalidate()
-}
-
-// logReloadGate reports whether a dirty log cache may read the store now, and
-// how long the pane must wait when it may not: at most one read per
-// logReloadInterval, so a streaming reply's notification-per-delta cannot turn
-// into a store read (and SQLite query) per frame.
-func (st *state) logReloadGate(now time.Time) (bool, time.Duration) {
-	if st.logLoadedAt.IsZero() {
-		return true, 0
-	}
-	elapsed := now.Sub(st.logLoadedAt)
-	if elapsed >= logReloadInterval {
-		return true, 0
-	}
-	return false, logReloadInterval - elapsed
-}
-
-// truncateRunes cuts s to limit runes, appending an ellipsis when it was cut.
-func truncateRunes(s string, limit int) string {
-	runes := []rune(s)
-	if len(runes) <= limit {
-		return s
-	}
-	return string(runes[:limit]) + "…"
 }

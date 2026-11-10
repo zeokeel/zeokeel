@@ -78,10 +78,12 @@ func TestSessionListSingleClickAndKeyboard(t *testing.T) {
 	}
 }
 
-// TestSessionListCoexistsWithHostSidebarSelection pins the two selection models
-// side by side: the session List chooses the current conversation while the
-// host's native Sidebar keeps choosing the screen destination.
-func TestSessionListCoexistsWithHostSidebarSelection(t *testing.T) {
+// TestSessionListChoiceSurvivesHostScreenNavigation pins the two selection
+// models side by side: the session List chooses the current conversation while
+// the host navigator owns the screen destination. The expanded sidebar no longer
+// draws a Home row, so the host navigates directly (the collapsed rail and the
+// command palette are the remaining destination entry points).
+func TestSessionListChoiceSurvivesHostScreenNavigation(t *testing.T) {
 	chat := &fakeChat{
 		sessions: []contracts.ChatSessionInfo{
 			{ID: "s1", Title: "会话一"},
@@ -96,15 +98,16 @@ func TestSessionListCoexistsWithHostSidebarSelection(t *testing.T) {
 	if current := h.uiRoot.Navigator().Current(); current != "session" {
 		t.Fatalf("current screen = %q, want session", current)
 	}
-	// The host's Sidebar still owns the screen destination: its Home item
-	// navigates back, and the session list keeps the conversation choice.
-	if err := tester.Click("首页"); err != nil {
-		t.Fatalf("click Home: %v; texts = %v", err, tester.Texts())
+	// The removed Home destination leaves no row behind; the host's navigator
+	// still drives the screen, and that navigation never touches the
+	// conversation choice.
+	h.assertNoTexts(tester, "首页")
+	if err := h.uiRoot.Navigator().Push("home"); err != nil {
+		t.Fatalf("Push(home): %v", err)
 	}
 	tester.Frame()
-	tester.Frame()
 	if current := h.uiRoot.Navigator().Current(); current != "home" {
-		t.Fatalf("current screen after Home = %q, want home", current)
+		t.Fatalf("current screen after host navigation = %q, want home", current)
 	}
 	if active := chat.ActiveSession(); active != "s2" {
 		t.Fatalf("active session changed by the host navigation: %q", active)

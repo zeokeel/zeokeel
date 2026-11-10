@@ -1,17 +1,14 @@
 package rightpanel_test
 
-// Tests for the inspector's Files pane: optional workspace backend, the
-// open-folder flow, directory navigation/breadcrumb, read-only previews and the
-// error states.
+// Frame tests for the right sidebar Files page and the opened-file tabs: the
+// workspace tree with lazy directory loading, the artifact history section, and
+// the read-only text/Markdown/image/unsupported previews plus the diff fold.
 
 import (
-	"context"
 	"encoding/base64"
 	"errors"
 	"fmt"
-	"sort"
 	"strings"
-	"sync"
 	"testing"
 	"time"
 
@@ -31,151 +28,7 @@ var tinyPNG = func() []byte {
 	return data
 }()
 
-// --- fake WorkspaceService --------------------------------------------------
-
-type createCall struct {
-	name string
-	root string
-}
-
-type fakeWorkspace struct {
-	mu sync.Mutex
-
-	workspaces []contracts.Workspace
-	current    contracts.Workspace
-	hasCurrent bool
-	dirs       map[string][]contracts.FileEntry
-	files      map[string][]byte
-	readErrs   map[string]error
-	filesErr   error
-	currentErr error
-	createErr  error
-	readErr    error
-
-	createCalls []createCall
-	reads       []string
-}
-
-func newFakeWorkspace() *fakeWorkspace {
-	return &fakeWorkspace{
-		dirs:     make(map[string][]contracts.FileEntry),
-		files:    make(map[string][]byte),
-		readErrs: make(map[string]error),
-	}
-}
-
-func (w *fakeWorkspace) setCurrent(workspace contracts.Workspace) {
-	w.mu.Lock()
-	defer w.mu.Unlock()
-	w.workspaces = append(w.workspaces, workspace)
-	w.current = workspace
-	w.hasCurrent = true
-}
-
-func (w *fakeWorkspace) setDir(dir string, entries ...contracts.FileEntry) {
-	w.mu.Lock()
-	defer w.mu.Unlock()
-	w.dirs[dir] = entries
-}
-
-func (w *fakeWorkspace) setFile(path string, data []byte) {
-	w.mu.Lock()
-	defer w.mu.Unlock()
-	w.files[path] = data
-}
-
-func (w *fakeWorkspace) List(context.Context) ([]contracts.Workspace, error) {
-	w.mu.Lock()
-	defer w.mu.Unlock()
-	return append([]contracts.Workspace(nil), w.workspaces...), nil
-}
-
-func (w *fakeWorkspace) Current(context.Context) (contracts.Workspace, bool, error) {
-	w.mu.Lock()
-	defer w.mu.Unlock()
-	if w.currentErr != nil {
-		return contracts.Workspace{}, false, w.currentErr
-	}
-	return w.current, w.hasCurrent, nil
-}
-
-func (w *fakeWorkspace) Create(_ context.Context, name, root string) (contracts.Workspace, error) {
-	w.mu.Lock()
-	defer w.mu.Unlock()
-	w.createCalls = append(w.createCalls, createCall{name: name, root: root})
-	if w.createErr != nil {
-		return contracts.Workspace{}, w.createErr
-	}
-	workspace := contracts.Workspace{ID: "ws-new", Name: name, Root: root, CreatedAt: time.Unix(1700000000, 0)}
-	w.workspaces = append(w.workspaces, workspace)
-	w.current = workspace
-	w.hasCurrent = true
-	return workspace, nil
-}
-
-func (w *fakeWorkspace) Open(_ context.Context, id string) (contracts.Workspace, error) {
-	w.mu.Lock()
-	defer w.mu.Unlock()
-	for _, workspace := range w.workspaces {
-		if workspace.ID == id {
-			w.current = workspace
-			w.hasCurrent = true
-			return workspace, nil
-		}
-	}
-	return contracts.Workspace{}, fmt.Errorf("unknown workspace %q", id)
-}
-
-func (w *fakeWorkspace) Delete(context.Context, string) error { return nil }
-
-func (w *fakeWorkspace) Files(_ context.Context, dir string) ([]contracts.FileEntry, error) {
-	w.mu.Lock()
-	defer w.mu.Unlock()
-	if w.filesErr != nil {
-		return nil, w.filesErr
-	}
-	entries := append([]contracts.FileEntry(nil), w.dirs[dir]...)
-	sort.SliceStable(entries, func(i, j int) bool {
-		if entries[i].Dir != entries[j].Dir {
-			return entries[i].Dir
-		}
-		return entries[i].Name < entries[j].Name
-	})
-	return entries, nil
-}
-
-func (w *fakeWorkspace) ReadFile(_ context.Context, path string, limit int) ([]byte, error) {
-	w.mu.Lock()
-	defer w.mu.Unlock()
-	w.reads = append(w.reads, path)
-	if w.readErr != nil {
-		return nil, w.readErr
-	}
-	if err := w.readErrs[path]; err != nil {
-		return nil, err
-	}
-	data, ok := w.files[path]
-	if !ok {
-		return nil, fmt.Errorf("no such file %q", path)
-	}
-	if limit > 0 && len(data) > limit {
-		data = data[:limit]
-	}
-	return append([]byte(nil), data...), nil
-}
-
-func (w *fakeWorkspace) Search(context.Context, string, int) ([]contracts.FileEntry, error) {
-	return nil, nil
-}
-
-func (w *fakeWorkspace) creates() []createCall {
-	w.mu.Lock()
-	defer w.mu.Unlock()
-	return append([]createCall(nil), w.createCalls...)
-}
-
-// --- helpers ----------------------------------------------------------------
-
+// setDirectoryPicker replaces the open-folder dialog seam for one test.
 func setDirectoryPicker(t *testing.T, fn func(title string) (string, error)) {
 	t.Helper()
 	previous := rightpanel.DirectoryPicker
@@ -183,9 +36,15 @@ func setDirectoryPicker(t *testing.T, fn func(title string) (string, error)) {
 	t.Cleanup(func() { rightpanel.DirectoryPicker = previous })
 }
 
+// workspaceHarness builds the sidebar with one current workspace.
+func workspaceHarness(t *testing.T, workspace contracts.WorkspaceService) *harness {
+	t.Helper()
+	return newHarness(t, harnessOptions{Workspace: workspace})
+}
+
 // assertPreviewContains checks the official code editor's accessibility value:
-// the source text is painted on the editor's canvas (not in Texts), so the a11y
-// text field is the user-visible content's programmatic equivalent.
+// source text is painted on the editor's canvas, so the a11y text field is the
+// user-visible content's programmatic equivalent.
 func assertPreviewContains(t *testing.T, tester *ui.Tester, want string) {
 	t.Helper()
 	found := false
@@ -207,14 +66,10 @@ func assertPreviewContains(t *testing.T, tester *ui.Tester, want string) {
 	t.Fatalf("file preview does not contain %q; texts = %v", want, tester.Texts())
 }
 
-func joinedTexts(tester *ui.Tester) string {
-	return strings.Join(tester.Texts(), "\n")
-}
-
 func assertContains(t *testing.T, tester *ui.Tester, fragments ...string) {
 	t.Helper()
 	settled := pumpFrames(tester, func() bool {
-		frame := joinedTexts(tester)
+		frame := strings.Join(tester.Texts(), "\n")
 		for _, fragment := range fragments {
 			if !strings.Contains(frame, fragment) {
 				return false
@@ -227,385 +82,305 @@ func assertContains(t *testing.T, tester *ui.Tester, fragments ...string) {
 	}
 }
 
-// --- tests ------------------------------------------------------------------
+// --- workspace tree ---------------------------------------------------------
 
-func TestFilesPaneWithoutBackend(t *testing.T) {
-	h := newHarness(t, newFakeChat(), rightpanel.Config{})
+func TestFilesPageWithoutBackend(t *testing.T) {
+	h := newHarness(t, harnessOptions{})
 	tester := h.tester()
-	h.selectPane(tester, "文件")
+	h.openPage(tester, "文件")
 	h.assertTexts(tester, "工作区未启用")
 }
 
 func TestFilesOpenWorkspaceFlow(t *testing.T) {
+	setDirectoryPicker(t, func(title string) (string, error) {
+		if title != "选择工作区文件夹" {
+			t.Fatalf("dialog title = %q, want 选择工作区文件夹", title)
+		}
+		return "/work/proj", nil
+	})
 	workspace := newFakeWorkspace()
-	setDirectoryPicker(t, func(string) (string, error) { return "/tmp/proj-alpha", nil })
-	h := newHarnessWithWorkspace(t, newFakeChat(), rightpanel.Config{}, workspace)
+	h := workspaceHarness(t, workspace)
 	tester := h.tester()
-	h.selectPane(tester, "文件")
+	h.openPage(tester, "文件")
 	h.assertTexts(tester, "还没有打开工作区", "打开文件夹")
-
 	h.click(tester, "打开文件夹")
-	tester.Frame()
-	creates := workspace.creates()
-	if len(creates) != 1 || creates[0].name != "proj-alpha" || creates[0].root != "/tmp/proj-alpha" {
-		t.Fatalf("Create calls = %+v, want proj-alpha//tmp/proj-alpha", creates)
+	h.assertTexts(tester, "工作区", "proj")
+	if calls := workspace.creates(); len(calls) != 1 || calls[0].root != "/work/proj" {
+		t.Fatalf("Create calls = %+v, want one /work/proj", calls)
 	}
-	h.assertTexts(tester, "工作区", "proj-alpha", "/tmp/proj-alpha", "刷新",
-		"/proj-alpha", "目录为空", "选择文件以预览")
 }
 
 func TestFilesOpenWorkspaceErrors(t *testing.T) {
-	t.Run("picker error", func(t *testing.T) {
-		workspace := newFakeWorkspace()
-		setDirectoryPicker(t, func(string) (string, error) { return "", errors.New("dialog failed") })
-		h := newHarnessWithWorkspace(t, newFakeChat(), rightpanel.Config{}, workspace)
-		tester := h.tester()
-		h.selectPane(tester, "文件")
-		h.click(tester, "打开文件夹")
-		h.assertTexts(tester, "无法打开文件夹选择器：dialog failed")
+	setDirectoryPicker(t, func(string) (string, error) {
+		return "", errors.New("no picker")
 	})
-
-	t.Run("create error", func(t *testing.T) {
-		workspace := newFakeWorkspace()
-		workspace.createErr = errors.New("permission denied")
-		setDirectoryPicker(t, func(string) (string, error) { return "/root/forbidden", nil })
-		h := newHarnessWithWorkspace(t, newFakeChat(), rightpanel.Config{}, workspace)
-		tester := h.tester()
-		h.selectPane(tester, "文件")
-		h.click(tester, "打开文件夹")
-		h.assertTexts(tester, "打开工作区失败：permission denied")
-	})
-
-	t.Run("cancel keeps the empty state", func(t *testing.T) {
-		workspace := newFakeWorkspace()
-		setDirectoryPicker(t, func(string) (string, error) { return "", nil })
-		h := newHarnessWithWorkspace(t, newFakeChat(), rightpanel.Config{}, workspace)
-		tester := h.tester()
-		h.selectPane(tester, "文件")
-		h.click(tester, "打开文件夹")
-		if creates := workspace.creates(); len(creates) != 0 {
-			t.Fatalf("Create calls = %+v, want none on cancel", creates)
-		}
-		h.assertTexts(tester, "还没有打开工作区")
-	})
-}
-
-func filesTreeWorkspace() *fakeWorkspace {
-	workspace := newFakeWorkspace()
-	workspace.setCurrent(contracts.Workspace{ID: "ws-1", Name: "proj", Root: "/work/proj"})
-	workspace.setDir("",
-		contracts.FileEntry{Name: "docs", Path: "docs", Dir: true},
-		contracts.FileEntry{Name: "main.go", Path: "main.go", Size: 13},
-		contracts.FileEntry{Name: "chart.png", Path: "chart.png", Size: int64(len(tinyPNG))},
-	)
-	workspace.setDir("docs",
-		contracts.FileEntry{Name: "api", Path: "docs/api", Dir: true},
-		contracts.FileEntry{Name: "readme.md", Path: "docs/readme.md", Size: 20},
-	)
-	workspace.setDir("docs/api",
-		contracts.FileEntry{Name: "spec.md", Path: "docs/api/spec.md", Size: 9},
-	)
-	workspace.setFile("main.go", []byte("package main\n"))
-	workspace.setFile("docs/readme.md", []byte("# 文档标题\n正文内容"))
-	workspace.setFile("docs/api/spec.md", []byte("# API 规范\n"))
-	workspace.setFile("chart.png", tinyPNG)
-	return workspace
-}
-
-// clickCrumb clicks a breadcrumb link by its accessible role and name: the
-// crumb's text (the workspace name) may also appear in the pane header, so the
-// role/name pair is the unambiguous target.
-func clickCrumb(t *testing.T, tester *ui.Tester, name string) {
-	t.Helper()
-	info, ok := tester.AccessByRole(ui.RoleLink, name)
-	if !ok {
-		t.Fatalf("breadcrumb link %q missing; texts = %v", name, tester.Texts())
-	}
-	tester.ClickAt(info.Bounds.X+info.Bounds.W/2, info.Bounds.Y+info.Bounds.H/2)
-	tester.Frame()
-	waitFilesSettled(t, tester)
-}
-
-// openEntry activates one directory row the way the Files list now opens it:
-// a single click only chooses the row, and the list's Submitted action (Enter,
-// or a double click) opens it. The pointer click picks the row first so the
-// keyboard focus is on the native list.
-func openEntry(t *testing.T, tester *ui.Tester, label string) {
-	t.Helper()
-	settled := pumpFrames(tester, func() bool {
-		for _, loading := range paneLoadingLabels {
-			if tester.HasText(loading) {
-				return false
-			}
-		}
-		return true
-	}, 3*time.Second)
-	if !settled {
-		t.Fatalf("files pane did not settle before opening %q; texts = %v", label, tester.Texts())
-	}
-	if !pumpFrames(tester, func() bool { _, ok := tester.Find(label); return ok }, 3*time.Second) {
-		t.Fatalf("row %q not found; texts = %v", label, tester.Texts())
-	}
-	if err := tester.Click(label); err != nil {
-		t.Fatalf("choose row %q: %v; texts = %v", label, err, tester.Texts())
-	}
-	tester.Frame()
-	tester.Key(0, ui.KeyEnter)
-	tester.Frame()
-	waitFilesSettled(t, tester)
-}
-
-// clickFileRow waits for one Files row to build, then clicks it: the off-thread
-// listing load and the row build are separate frames on a slow runner.
-func clickFileRow(t *testing.T, tester *ui.Tester, label string) {
-	t.Helper()
-	if !pumpFrames(tester, func() bool { _, ok := tester.Find(label); return ok }, 3*time.Second) {
-		t.Fatalf("file row %q not found; texts = %v", label, tester.Texts())
-	}
-	if err := tester.Click(label); err != nil {
-		t.Fatalf("open %q: %v; texts = %v", label, err, tester.Texts())
-	}
-	tester.Frame()
-}
-
-// waitFilesSettled waits until the Files pane's off-thread listing read landed:
-// the pane shows a loading line while the read is in flight.
-func waitFilesSettled(t *testing.T, tester *ui.Tester) {
-	t.Helper()
-	settled := pumpFrames(tester, func() bool {
-		return !tester.HasText("正在读取目录…") && !tester.HasText("Reading the directory…")
-	}, 3*time.Second)
-	if !settled {
-		t.Fatalf("directory listing did not settle; texts = %v", tester.Texts())
-	}
-}
-
-func TestFilesNavigationAndBreadcrumb(t *testing.T) {
-	workspace := filesTreeWorkspace()
-	h := newHarnessWithWorkspace(t, newFakeChat(), rightpanel.Config{}, workspace)
+	h := workspaceHarness(t, newFakeWorkspace())
 	tester := h.tester()
-	h.selectPane(tester, "文件")
-	h.assertTexts(tester, "proj", "/work/proj", "docs", "main.go", "chart.png")
-	// The trail is the official Breadcrumbs: a navigation landmark named 路径.
-	if _, ok := tester.AccessByRole(ui.RoleNavigation, "路径"); !ok {
-		t.Fatalf("breadcrumb is not a navigation landmark; texts = %v", tester.Texts())
-	}
-
-	// Enter a directory, then a nested one; the breadcrumb grows and the last
-	// crumb is the current page (the earlier ones are links that navigate).
-	openEntry(t, tester, "docs")
-	h.assertTexts(tester, "api", "readme.md")
-	if _, ok := tester.AccessByRole(ui.RoleLink, "proj"); !ok {
-		t.Fatalf("root crumb is not a link; texts = %v", tester.Texts())
-	}
-	page, ok := tester.AccessByRole(ui.RoleText, "docs")
-	if !ok || page.Current != ui.CurrentPage {
-		t.Fatalf("current crumb = %+v found %v, want the current page", page, ok)
-	}
-	openEntry(t, tester, "api")
-	h.assertTexts(tester, "spec.md")
-	if _, ok := tester.AccessByRole(ui.RoleText, "api"); !ok {
-		t.Fatalf("nested current crumb missing; texts = %v", tester.Texts())
-	}
-
-	// Clicking a breadcrumb segment returns to that directory.
-	clickCrumb(t, tester, "docs")
-	h.assertTexts(tester, "readme.md")
-	h.assertNoTexts(tester, "spec.md")
-	clickCrumb(t, tester, "proj")
-	h.assertTexts(tester, "docs", "main.go")
-}
-
-// TestFilesBreadcrumbDeepPathCollapses covers the compact middle-collapse of
-// deep paths: the first segment, an ellipsis crumb that jumps to the parent of
-// the shown tail, then the last two segments.
-func TestFilesBreadcrumbDeepPathCollapses(t *testing.T) {
-	workspace := newFakeWorkspace()
-	workspace.setCurrent(contracts.Workspace{ID: "ws-deep", Name: "deep", Root: "/work/deep"})
-	parent := func(path string) string {
-		if cut := strings.LastIndex(path, "/"); cut >= 0 {
-			return path[:cut]
-		}
-		return ""
-	}
-	for depth, path := range []string{"a", "a/b", "a/b/c", "a/b/c/d", "a/b/c/d/e"} {
-		name := []string{"a", "b", "c", "d", "e"}[depth]
-		workspace.setDir(parent(path), contracts.FileEntry{Name: name, Path: path, Dir: true})
-	}
-	workspace.setDir("a/b/c/d/e", contracts.FileEntry{Name: "leaf.md", Path: "a/b/c/d/e/leaf.md", Size: 4})
-	workspace.setFile("a/b/c/d/e/leaf.md", []byte("leaf"))
-
-	h := newHarnessWithWorkspace(t, newFakeChat(), rightpanel.Config{}, workspace)
-	tester := h.tester()
-	h.selectPane(tester, "文件")
-	for _, name := range []string{"a", "b", "c", "d", "e"} {
-		openEntry(t, tester, name)
-	}
-	h.assertTexts(tester, "leaf.md", "…", "d", "e")
-	if _, ok := tester.AccessByRole(ui.RoleLink, "a"); !ok {
-		t.Fatalf("first segment crumb missing; texts = %v", tester.Texts())
-	}
-	// The ellipsis is a link that jumps up to a/b/c, the parent of the tail.
-	if _, ok := tester.AccessByRole(ui.RoleLink, "…"); !ok {
-		t.Fatalf("ellipsis crumb is not a link; texts = %v", tester.Texts())
-	}
-	clickCrumb(t, tester, "…")
-	h.assertTexts(tester, "d")
-	h.assertNoTexts(tester, "leaf.md")
-}
-
-func TestFilesTextAndMarkdownPreview(t *testing.T) {
-	workspace := filesTreeWorkspace()
-	h := newHarnessWithWorkspace(t, newFakeChat(), rightpanel.Config{}, workspace)
-	tester := h.tester()
-	h.selectPane(tester, "文件")
-	h.assertTexts(tester, "选择文件以预览")
-
-	// Plain text file: the preview shows its content as native text.
-	h.click(tester, "main.go")
-	assertPreviewContains(t, tester, "package main")
-	h.assertTexts(tester, "关闭预览")
-	if err := tester.Click("关闭预览"); err != nil {
-		t.Fatalf("close preview: %v; texts = %v", err, tester.Texts())
-	}
-	tester.Frame()
-	h.assertTexts(tester, "选择文件以预览")
-
-	// Markdown file: rendered by the official view (heading/list markers gone).
-	openEntry(t, tester, "docs")
-	clickFileRow(t, tester, "readme.md")
-	tester.Frame()
-	assertContains(t, tester, "文档标题", "正文内容")
-}
-
-func TestFilesImagePreview(t *testing.T) {
-	workspace := filesTreeWorkspace()
-	h := newHarnessWithWorkspace(t, newFakeChat(), rightpanel.Config{}, workspace)
-	tester := h.tester()
-	h.selectPane(tester, "文件")
-	clickFileRow(t, tester, "chart.png")
-	tester.Frame()
-	h.assertTexts(tester, "chart.png", "关闭预览")
-	h.assertNoTexts(tester, "暂不支持预览", "读取文件失败")
-}
-
-func TestFilesUnsupportedPreview(t *testing.T) {
-	workspace := newFakeWorkspace()
-	workspace.setCurrent(contracts.Workspace{ID: "ws-1", Name: "proj", Root: "/work/proj"})
-	workspace.setDir("", contracts.FileEntry{Name: "data.bin", Path: "data.bin", Size: 4})
-	workspace.setFile("data.bin", []byte{0x00, 0x01, 0x02, 0x03})
-	h := newHarnessWithWorkspace(t, newFakeChat(), rightpanel.Config{}, workspace)
-	tester := h.tester()
-	h.selectPane(tester, "文件")
-	clickFileRow(t, tester, "data.bin")
-	tester.Frame()
-	h.assertTexts(tester, "暂不支持预览", "大小", "4 B")
-}
-
-func TestFilesErrors(t *testing.T) {
-	t.Run("current", func(t *testing.T) {
-		workspace := newFakeWorkspace()
-		workspace.currentErr = errors.New("registry unavailable")
-		h := newHarnessWithWorkspace(t, newFakeChat(), rightpanel.Config{}, workspace)
-		tester := h.tester()
-		h.selectPane(tester, "文件")
-		h.assertTexts(tester, "读取工作区失败：registry unavailable")
-	})
-
-	t.Run("list", func(t *testing.T) {
-		workspace := filesTreeWorkspace()
-		workspace.filesErr = errors.New("permission denied")
-		h := newHarnessWithWorkspace(t, newFakeChat(), rightpanel.Config{}, workspace)
-		tester := h.tester()
-		h.selectPane(tester, "文件")
-		h.assertTexts(tester, "列目录失败：permission denied")
-	})
-
-	t.Run("read", func(t *testing.T) {
-		workspace := filesTreeWorkspace()
-		workspace.readErrs["main.go"] = errors.New("file vanished")
-		h := newHarnessWithWorkspace(t, newFakeChat(), rightpanel.Config{}, workspace)
-		tester := h.tester()
-		h.selectPane(tester, "文件")
-		if err := tester.Click("main.go"); err != nil {
-			t.Fatalf("open main.go: %v", err)
-		}
-		tester.Frame()
-		h.assertTexts(tester, "读取文件失败：file vanished")
-	})
-}
-
-func TestFilesCustomTabLabel(t *testing.T) {
-	h := newHarness(t, newFakeChat(), rightpanel.Config{FilesTab: "Files"})
-	tester := h.tester()
-	h.selectPane(tester, "Files")
-	h.assertTexts(tester, "Files", "工作区未启用")
-}
-
-// TestFilesDirectoryDialogTitleFollowsLocale pins that the native folder
-// picker's dialog title is localized before the seam runs.
-func TestFilesDirectoryDialogTitleFollowsLocale(t *testing.T) {
-	workspace := newFakeWorkspace()
-	captured := ""
-	setDirectoryPicker(t, func(title string) (string, error) {
-		captured = title
-		return "", nil // cancel keeps the empty state for the second invocation
-	})
-	h := newLocaleHarness(t, "en", newFakeChat(), rightpanel.Config{}, workspace, nil)
-	tester := h.tester()
-	tester.Frame()
-	h.selectPane(tester, "Files")
-	h.click(tester, "Open folder")
-	if captured != "Choose workspace folder" {
-		t.Fatalf("English directory dialog title = %q, want %q", captured, "Choose workspace folder")
-	}
-
-	h.uiRoot.Locale().SetLanguage("zh")
-	tester.Frame()
+	h.openPage(tester, "文件")
 	h.click(tester, "打开文件夹")
-	if captured != "选择工作区文件夹" {
-		t.Fatalf("Chinese directory dialog title = %q, want %q", captured, "选择工作区文件夹")
+	h.assertTexts(tester, "无法打开文件夹选择器：no picker")
+}
+
+// TestFilesTreeListsRootAndLazilyOpensDirectories: the workspace tree shows the
+// root entries; opening a directory loads its children off the UI thread.
+func TestFilesTreeListsRootAndLazilyOpensDirectories(t *testing.T) {
+	workspace := newFakeWorkspace()
+	workspace.setCurrent()
+	workspace.setDir("", fileEntry("docs", true), fileEntry("README.md", false))
+	workspace.setDir("docs", contracts.FileEntry{Name: "guide.md", Path: "docs/guide.md"})
+	workspace.setFile("README.md", []byte("# 根说明\n"))
+	workspace.setFile("docs/guide.md", []byte("# 指南\n"))
+	h := workspaceHarness(t, workspace)
+	tester := h.tester()
+	h.openPage(tester, "文件")
+	h.assertTexts(tester, "proj", "docs", "README.md")
+
+	// Collapsed: the directory's children are not read yet.
+	if calls := workspace.listed(); calls != 1 {
+		t.Fatalf("Files calls = %d before expanding, want only the root listing", calls)
+	}
+	h.click(tester, "docs")
+	h.assertTexts(tester, "guide.md")
+	h.click(tester, "guide.md")
+	h.assertTexts(tester, "关闭 guide.md", "指南")
+}
+
+func TestFilesTreeErrors(t *testing.T) {
+	workspace := newFakeWorkspace()
+	workspace.setCurrent()
+	workspace.filesErr = errors.New("permission denied")
+	h := workspaceHarness(t, workspace)
+	tester := h.tester()
+	h.openPage(tester, "文件")
+	h.assertTexts(tester, "列目录失败：permission denied")
+
+	workspace2 := newFakeWorkspace()
+	workspace2.currentErr = errors.New("broken registry")
+	h2 := workspaceHarness(t, workspace2)
+	tester2 := h2.tester()
+	h2.openPage(tester2, "文件")
+	h2.assertTexts(tester2, "读取工作区失败：broken registry")
+}
+
+func TestFilesEmptyWorkspace(t *testing.T) {
+	workspace := newFakeWorkspace()
+	workspace.setCurrent()
+	h := workspaceHarness(t, workspace)
+	tester := h.tester()
+	h.openPage(tester, "文件")
+	h.assertTexts(tester, "目录为空")
+}
+
+func TestFilesRefreshReloadsTree(t *testing.T) {
+	workspace := newFakeWorkspace()
+	workspace.setCurrent()
+	workspace.setDir("", fileEntry("first.md", false))
+	h := workspaceHarness(t, workspace)
+	tester := h.tester()
+	h.openPage(tester, "文件")
+	h.assertTexts(tester, "first.md")
+
+	workspace.setDir("", fileEntry("second.md", false))
+	h.click(tester, "重新读取目录")
+	h.assertTexts(tester, "second.md")
+	h.assertNoTexts(tester, "first.md")
+}
+
+func TestFilesTreeScrolls(t *testing.T) {
+	workspace := newFakeWorkspace()
+	workspace.setCurrent()
+	entries := make([]contracts.FileEntry, 0, 40)
+	for index := 0; index < 40; index++ {
+		entries = append(entries, fileEntry(fmt.Sprintf("file-%02d.md", index), false))
+	}
+	workspace.setDir("", entries...)
+	h := workspaceHarness(t, workspace)
+	tester := h.tester()
+	tester.SetSize(1100, 420)
+	h.openPage(tester, "文件")
+	tester.Frame()
+	// The page body is a native scroll: a wheel over the tree must not panic and
+	// the content stays findable.
+	tester.Wheel(1050, 260, 0, 1)
+	tester.Advance(400 * time.Millisecond)
+	tester.Frame()
+	if !tester.HasText("proj") {
+		t.Fatalf("the workspace header disappeared after scrolling; texts = %v", tester.Texts())
 	}
 }
 
-// TestFilesHiddenEntriesAndFilter covers H21: dot entries are folded by default,
-// the "show hidden" switch reveals them, and the name filter narrows the list.
-func TestFilesHiddenEntriesAndFilter(t *testing.T) {
+// --- file tab previews ------------------------------------------------------
+
+func TestFileTabMarkdownPreview(t *testing.T) {
 	workspace := newFakeWorkspace()
-	workspace.setDir("",
-		contracts.FileEntry{Name: ".git", Path: ".git", Dir: true},
-		contracts.FileEntry{Name: ".env", Path: ".env", Size: 5},
-		contracts.FileEntry{Name: "notes.txt", Path: "notes.txt", Size: 3},
-		contracts.FileEntry{Name: "main.go", Path: "main.go", Size: 9},
-	)
-	if _, err := workspace.Create(context.Background(), "proj", "/tmp/proj"); err != nil {
-		t.Fatalf("create workspace: %v", err)
-	}
-	h := newHarnessWithWorkspace(t, newFakeChat(), rightpanel.Config{}, workspace)
+	workspace.setCurrent()
+	workspace.setDir("", fileEntry("README.md", false))
+	workspace.setFile("README.md", []byte("# 标题\n\n正文段落\n"))
+	h := workspaceHarness(t, workspace)
 	tester := h.tester()
-	h.selectPane(tester, "文件")
-	h.assertTexts(tester, "notes.txt", "main.go")
-	h.assertNoTexts(tester, ".git", ".env")
+	h.openPage(tester, "文件")
+	h.click(tester, "README.md")
+	h.assertTexts(tester, "关闭 README.md", "标题", "正文段落")
+}
 
-	// The switch is an accessible control named for the toggle, and reveals the
-	// dot entries.
-	if err := tester.Click("显示隐藏文件"); err != nil {
-		t.Fatalf("toggle hidden files: %v; texts = %v", err, tester.Texts())
+func TestFileTabTextPreview(t *testing.T) {
+	workspace := newFakeWorkspace()
+	workspace.setCurrent()
+	workspace.setDir("", fileEntry("main.go", false))
+	workspace.setFile("main.go", []byte("package main\n\nfunc main() {}\n"))
+	h := workspaceHarness(t, workspace)
+	tester := h.tester()
+	h.openPage(tester, "文件")
+	h.click(tester, "main.go")
+	assertPreviewContains(t, tester, "func main()")
+}
+
+func TestFileTabImagePreview(t *testing.T) {
+	workspace := newFakeWorkspace()
+	workspace.setCurrent()
+	workspace.setDir("", fileEntry("pic.png", false))
+	workspace.setFile("pic.png", tinyPNG)
+	h := workspaceHarness(t, workspace)
+	tester := h.tester()
+	h.openPage(tester, "文件")
+	h.click(tester, "pic.png")
+	tester.Frame()
+	h.assertTexts(tester, "关闭 pic.png")
+	h.assertNoTexts(tester, "读取文件失败", "暂不支持预览")
+}
+
+func TestFileTabUnsupportedPreview(t *testing.T) {
+	workspace := newFakeWorkspace()
+	workspace.setCurrent()
+	workspace.setDir("", fileEntry("data.bin", false))
+	workspace.setFile("data.bin", []byte{0x00, 0x01, 0x02})
+	h := workspaceHarness(t, workspace)
+	tester := h.tester()
+	h.openPage(tester, "文件")
+	h.click(tester, "data.bin")
+	h.assertTexts(tester, "关闭 data.bin", "暂不支持预览", "大小", "类型", "bin")
+}
+
+func TestFileTabReadError(t *testing.T) {
+	workspace := newFakeWorkspace()
+	workspace.setCurrent()
+	workspace.setDir("", fileEntry("hidden.md", false))
+	workspace.readErrs["hidden.md"] = errors.New("permission denied")
+	h := workspaceHarness(t, workspace)
+	tester := h.tester()
+	h.openPage(tester, "文件")
+	h.click(tester, "hidden.md")
+	h.assertTexts(tester, "读取文件失败：permission denied")
+}
+
+// TestFileTabDiffFold: an opened file that the workspace differ reports as
+// changed gets the folded unified diff (the Changes pane folded into the file
+// tab, so the session's "view changes" action lands here).
+func TestFileTabDiffFold(t *testing.T) {
+	mainDiff := strings.Join([]string{
+		"diff --git a/main.go b/main.go",
+		"--- a/main.go",
+		"+++ b/main.go",
+		"@@ -1,2 +1,2 @@",
+		"-old line",
+		"+new line",
+		" context line",
+	}, "\n")
+	workspace := newDifferWorkspace(contracts.FileChange{Path: "main.go", Status: "M", Diff: mainDiff})
+	workspace.setDir("", fileEntry("main.go", false))
+	workspace.setFile("main.go", []byte("package main\n"))
+	h := workspaceHarness(t, workspace)
+	tester := h.tester()
+
+	h.openPage(tester, "文件")
+	h.click(tester, "main.go")
+	h.assertTexts(tester, "关闭 main.go", "查看改动")
+	h.assertNoTexts(tester, "@@ -1,2 +1,2 @@") // folded by default
+
+	if err := tester.Click("查看改动"); err != nil {
+		t.Fatalf("expand diff: %v; texts = %v", err, tester.Texts())
 	}
 	tester.Frame()
-	h.assertTexts(tester, ".git", ".env", "notes.txt")
-
-	// The filter narrows the visible entries by name.
-	if err := tester.Click("筛选文件"); err != nil {
-		t.Fatalf("focus file filter: %v; texts = %v", err, tester.Texts())
+	tester.Advance(400 * time.Millisecond)
+	tester.Frame()
+	assertContains(t, tester, "@@ -1,2 +1,2 @@")
+	newSide, ok := tester.Access("New text")
+	if !ok {
+		t.Fatalf("the diff viewer's new side is not exposed; texts = %v", tester.Texts())
 	}
-	tester.Type("notes")
-	tester.Frame()
-	h.assertTexts(tester, "notes.txt")
-	h.assertNoTexts(tester, "main.go", ".git")
+	if !strings.Contains(newSide.Value, "new line") {
+		t.Fatalf("diff viewer's new side value = %q, want the added line", newSide.Value)
+	}
+}
 
-	tester.Key(ui.Cmd, ui.KeyA)
-	tester.Type("zzz")
+func TestFileTabDiffAbsentForCleanFile(t *testing.T) {
+	workspace := newDifferWorkspace()
+	workspace.setDir("", fileEntry("clean.go", false))
+	workspace.setFile("clean.go", []byte("package clean\n"))
+	h := workspaceHarness(t, workspace)
+	tester := h.tester()
+	h.openPage(tester, "文件")
+	h.click(tester, "clean.go")
 	tester.Frame()
-	h.assertTexts(tester, "没有匹配的条目")
+	h.assertNoTexts(tester, "查看改动")
+}
+
+// TestFileTabRefreshReloads: the tab header reads the file again on demand.
+func TestFileTabRefreshReloads(t *testing.T) {
+	workspace := newFakeWorkspace()
+	workspace.setCurrent()
+	workspace.setDir("", fileEntry("live.md", false))
+	workspace.setFile("live.md", []byte("# 第一版\n"))
+	h := workspaceHarness(t, workspace)
+	tester := h.tester()
+	h.openPage(tester, "文件")
+	h.click(tester, "live.md")
+	h.assertTexts(tester, "第一版")
+
+	workspace.setFile("live.md", []byte("# 第二版\n"))
+	h.click(tester, "重新读取文件")
+	h.assertTexts(tester, "第二版")
+}
+
+func TestFileTabCopyPath(t *testing.T) {
+	workspace := newFakeWorkspace()
+	workspace.setCurrent()
+	workspace.setDir("", fileEntry("copied.md", false))
+	workspace.setFile("copied.md", []byte("# x\n"))
+	h := workspaceHarness(t, workspace)
+	tester := h.tester()
+	h.openPage(tester, "文件")
+	h.click(tester, "copied.md")
+	h.click(tester, "复制路径")
+	if got := tester.Clipboard(); got != "copied.md" {
+		t.Fatalf("clipboard = %q, want copied.md", got)
+	}
+}
+
+// --- nested path normalization ----------------------------------------------
+
+func TestPreviewFileWithAbsoluteWorkspacePath(t *testing.T) {
+	workspace := newFakeWorkspace()
+	workspace.setCurrent()
+	workspace.setFile("docs/guide.md", []byte("# 指南\n"))
+	h := workspaceHarness(t, workspace)
+	tester := h.tester()
+	previewer := h.previewer()
+	if err := previewer.PreviewFile("/work/proj/docs/guide.md"); err != nil {
+		t.Fatalf("PreviewFile: %v", err)
+	}
+	tester.Frame()
+	h.assertTexts(tester, "关闭 guide.md", "指南")
+}
+
+func TestPreviewFileRejectsOutsidePath(t *testing.T) {
+	workspace := newFakeWorkspace()
+	workspace.setCurrent()
+	h := workspaceHarness(t, workspace)
+	if err := h.previewer().PreviewFile("/etc/passwd"); err == nil {
+		t.Fatal("PreviewFile accepted a path outside the workspace root")
+	}
+	if err := h.previewer().PreviewFile(""); err == nil {
+		t.Fatal("PreviewFile accepted an empty path")
+	}
 }

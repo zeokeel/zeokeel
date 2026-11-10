@@ -536,6 +536,11 @@ func TestHomeRecentSessionsExcludeArchivedAndOpen(t *testing.T) {
 		t.Fatalf("register session screen: %v", err)
 	}
 	activate(t, h, home.Module(), home.Config{})
+	// The product now lands on the conversation surface; Home is an explicit
+	// destination for the embeddable screen, so open it before asserting.
+	if err := h.ui.Navigator().Push("home"); err != nil {
+		t.Fatalf("Push(home): %v", err)
+	}
 	tester := ui.NewTester(h.ui.View, 1200, 800)
 	tester.Frame()
 

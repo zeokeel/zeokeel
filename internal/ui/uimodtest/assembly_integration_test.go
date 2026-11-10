@@ -74,11 +74,14 @@ func TestDesktopProductAssemblyShowsAllDemoModules(t *testing.T) {
 	}
 
 	tester := ui.NewTester(uiRoot.View, 1200, 800)
-	// Home screen + the brand sidebar controls.
+	// The product lands on the session screen (the DSH shell): its empty
+	// conversation hero, the brand sidebar's new-chat action and the header's
+	// agent-team entry are the demo modules' visible contributions.
 	for _, want := range []string{
-		"首页",
+		"开始新对话",
+		"还没有消息，开始一段新对话吧。",
 		"新对话",
-		"还没有会话",
+		"智能体团队",
 	} {
 		if !tester.HasText(want) {
 			t.Fatalf("desktop frame does not show %q; texts = %v", want, tester.Texts())
@@ -106,7 +109,7 @@ func TestDesktopProductAssemblyShowsAllDemoModules(t *testing.T) {
 		t.Fatalf("loader.Close: %v", err)
 	}
 	tester.Frame()
-	if tester.HasText("还没有会话") {
+	if tester.HasText("开始新对话") {
 		t.Fatalf("module contributions survived loader.Close; texts = %v", tester.Texts())
 	}
 }

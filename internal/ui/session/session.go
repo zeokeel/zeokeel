@@ -144,8 +144,12 @@ type state struct {
 	processOpen map[string]bool
 	// headerWidth is the header row's width from the last laid-out frame: when
 	// the conversation column gets narrow (e.g. the right inspector docks at
-	// 1024), the title must keep room and the goal chip drops its text.
+	// 1024), the title must keep room and the agent entries drop their words.
 	headerWidth float32
+	// agents is the DSH agent surfaces' state: the header entries' overlays,
+	// the child conversation view, the background-jobs panel and the
+	// generated-file turn-tail cards (see agentsurface.go).
+	agents agentSurface
 
 	// The transcript is the official List: rows are messages keyed by ID, so a
 	// streaming reply grows its row in place and re-render/older content keeps

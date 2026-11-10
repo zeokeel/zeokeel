@@ -89,10 +89,8 @@ func TestDockedInspectorKeepsComposerAtBottom(t *testing.T) {
 				t.Fatalf("%dx%d collapsed=%v: inspector rendered as the drawer, want docked; texts = %v",
 					width, height, collapsed, tester.Texts())
 			}
-			if !tester.HasText("概览") {
-				t.Fatalf("%dx%d collapsed=%v: docked inspector content missing; texts = %v",
-					width, height, collapsed, tester.Texts())
-			}
+			requireRightSidebarGuide(t, tester,
+				fmt.Sprintf("%dx%d collapsed=%v docked inspector", width, height, collapsed))
 			requireComposerAtBottom(t, tester, width, height)
 
 			// Close and reopen: the content column must settle back at the
@@ -190,9 +188,7 @@ func TestDockedInspectorLongTranscriptKeepsComposerAndFollowsEnd(t *testing.T) {
 	}
 	product.uiRoot.SetRightPanelOpen(true)
 	tester.Frame()
-	if !tester.HasText("概览") {
-		t.Fatalf("docked inspector content missing; texts = %v", tester.Texts())
-	}
+	requireRightSidebarGuide(t, tester, "long-transcript docked inspector")
 
 	// A dozen rounds comfortably exceed the transcript's viewport at 1140 DIP.
 	const rounds = 12

@@ -206,14 +206,15 @@ func TestRailNewChatActionAndScreenSet(t *testing.T) {
 	tt.Frame()
 
 	// The rail's icon buttons carry their accessible names; "新对话" is the
-	// action, the three screens are destinations.
+	// action, the remaining module screens are destinations (Home is retired
+	// from product navigation).
 	if _, ok := tt.AccessByRole(ui.RoleButton, "新对话"); !ok {
 		t.Fatalf("rail has no new-chat action; texts = %v", tt.Texts())
 	}
 	if _, ok := tt.AccessByRole(ui.RoleToggleButton, "对话"); ok {
 		t.Fatalf("rail still lists the conversation screen as a destination; texts = %v", tt.Texts())
 	}
-	for _, want := range []string{"首页", "自动化", "插件"} {
+	for _, want := range []string{"自动化", "插件"} {
 		// Destinations are toggle-like so assistive technology hears which
 		// screen the rail is on.
 		if _, ok := tt.AccessByRole(ui.RoleToggleButton, want); !ok {

@@ -298,10 +298,11 @@ func (d *drive) run(string) {
 	d.runOverlaySteps()
 	d.runPanelSteps()
 	d.runTeamSteps()
+	d.runJobsSteps()
 	d.runThemeLanguageSteps()
 	d.runSidebarSteps()
 	d.runWindowSizeSteps()
-	d.runHomeSteps()
+	d.runLandingSteps()
 	d.runToastSteps()
 }
 

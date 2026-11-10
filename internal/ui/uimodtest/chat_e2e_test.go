@@ -66,14 +66,21 @@ func TestDesktopChatPipelineEndToEnd(t *testing.T) {
 		t.Fatalf("assistant text missing; messages = %+v", session.Messages)
 	}
 
-	// Home shows the real recent-session list (and a composer action).
+	// The product lands on the session screen (the DSH shell): the active
+	// conversation's streamed reply is rendered and the session composer is
+	// the input the user gets, above the brand content header.
 	tester := ui.NewTester(uiRoot.View, 1280, 800)
 	tester.Frame()
-	if !tester.HasText("问点什么…") || !tester.HasText("发送") {
-		t.Fatalf("home composer missing; texts = %v", tester.Texts())
+	for _, want := range []string{"ZeoKeel", "智能体团队", "对话", "轨迹", "记忆", "输入消息…", "发送"} {
+		if !tester.HasText(want) {
+			t.Fatalf("session landing frame does not show %q; texts = %v", want, tester.Texts())
+		}
 	}
-	if !tester.HasText("ZeoKeel") {
-		t.Fatalf("home hero missing the brand; texts = %v", tester.Texts())
+	if tester.HasText("问点什么…") {
+		t.Fatalf("the old home composer is still the landing; texts = %v", tester.Texts())
+	}
+	if !frameUntil(tester, "我是 ZeoKeel", 3*time.Second) {
+		t.Fatalf("landing frame does not render the streamed reply; texts = %v", tester.Texts())
 	}
 
 	// The real product frame: side bar + chat screen + settings page.

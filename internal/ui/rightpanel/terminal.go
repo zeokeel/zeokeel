@@ -18,16 +18,16 @@ import (
 )
 
 const (
-	// maxTerminalLines is how many trailing output lines the pane keeps.
+	// maxTerminalLines is how many trailing output lines the page keeps.
 	maxTerminalLines = 200
-	// maxTerminalBytes is how many trailing output bytes the pane keeps.
+	// maxTerminalBytes is how many trailing output bytes the page keeps.
 	maxTerminalBytes = 128 << 10
 	// terminalCopyNoticeDuration is how long the copy-all action shows its
 	// check acknowledgement before returning to the copy glyph.
 	terminalCopyNoticeDuration = 1500 * time.Millisecond
 )
 
-// terminalState is the Terminal pane's state. The Run goroutine appends the
+// terminalState is the Terminal page's state. The Run goroutine appends the
 // output and clears the running flag, so output/running/cancel are guarded by
 // mu; input and the menu/error fields are only touched on the UI thread.
 type terminalState struct {
@@ -123,26 +123,27 @@ func truncateTerminalOutput(output string) string {
 	return output
 }
 
-// buildTerminalPane is the inspector's Terminal tab: working directory, shell
-// picker, clear action, the scrollable mono output and the command input with
-// run/stop. It never owns a PTY: one command per Run through TerminalService.
-func buildTerminalPane(
+// buildTerminalPage is the sidebar's 终端 page: working directory, shell
+// picker, clear/copy actions, the scrollable mono output and the command input
+// with run/stop. It never owns a PTY: one command per Run through
+// TerminalService.
+func buildTerminalPage(
 	c *ui.Context,
 	t *design.Tokens,
 	terminal contracts.TerminalService,
-	runtime contracts.UIRuntime,
 	st *state,
 ) {
 	if terminal == nil {
-		buildEmptyPane(c, uikit.T(st.locale, "终端未启用", "Terminal is not enabled"))
+		buildScrollableBody(c, func() {
+			buildEmptyPane(c, st.tr("终端未启用", "Terminal is not enabled"))
+		})
 		return
 	}
 	term := st.term
 	output, running := term.snapshot()
 	hasOutput := strings.TrimSpace(output) != ""
 	// The copy-all check is an acknowledgement, not a badge: show it for a
-	// short window and ask for the frame that clears it (same pattern as the
-	// transcript's copy action).
+	// short window and ask for the frame that clears it.
 	copied := !term.copiedAt.IsZero()
 	if copied {
 		if remaining := terminalCopyNoticeDuration - c.Now().Sub(term.copiedAt); remaining > 0 {
@@ -154,8 +155,9 @@ func buildTerminalPane(
 	}
 
 	ui.Column(c).FillWidth().Grow(1).Children(func() {
-		// Header: working directory, the copy-all action and the shell choice.
-		ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(design.Space2).Children(func() {
+		// Header: working directory, copy/clear actions and the shell choice.
+		ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(design.Space2).
+			Padding(design.Space2, design.Space3).Children(func() {
 			dir := terminal.WorkingDir(context.Background())
 			if strings.TrimSpace(dir) == "" {
 				dir = "."
@@ -163,26 +165,34 @@ func buildTerminalPane(
 			design.Apply(ui.Text(c, dir), t.Font(design.TypeXXXS)).
 				TextColor(t.LabelTertiary).Grow(1).MaxLines(1).Ellipsis("…")
 			if hasOutput {
-				copyLabel := uikit.T(st.locale, "复制全部输出", "Copy all output")
-				copyButton := ui.ButtonBase(c).Size(24, 24).Center().Radius(design.RadiusSM).
-					Label(copyLabel).Tooltip(copyLabel)
-				if copyButton.Hovered() {
-					copyButton = copyButton.Background(t.BgHover)
-				}
-				copyButton.Children(func() {
-					icon, color := icons.Copy(), t.LabelSecondary
-					if copied {
-						icon, color = icons.Check(), t.SuccessText
-					}
-					ui.Icon(c, icon).Size(14, 14).TextColor(color)
+				copyLabel := st.tr("复制全部输出", "Copy all output")
+				uikit.IconButton(c, uikit.IconButtonOptions{
+					Key:      "rightpanel.terminal.copy",
+					Label:    copyLabel,
+					Tooltip:  copyLabel,
+					Icon:     icons.Copy(),
+					Size:     design.IconSizeS,
+					InkColor: terminalCopyInk(t, copied),
+					OnClick: func() {
+						c.WriteClipboard(output)
+						term.copiedAt = c.Now()
+						st.invalidate()
+					},
 				})
-				if copyButton.Clicked() {
-					c.WriteClipboard(output)
-					term.copiedAt = c.Now()
-					runtime.Invalidate()
-				}
+				clearLabel := st.tr("清空", "Clear")
+				uikit.IconButton(c, uikit.IconButtonOptions{
+					Key:     "rightpanel.terminal.clear",
+					Label:   clearLabel,
+					Tooltip: clearLabel,
+					Icon:    icons.Trash(),
+					Size:    design.IconSizeS,
+					OnClick: func() {
+						term.clearOutput()
+						st.invalidate()
+					},
+				})
 			}
-			buildShellSelect(c, t, terminal, runtime, st)
+			buildShellSelect(c, t, terminal, st)
 		})
 		if term.err != "" {
 			uikit.ErrorLine(c, term.err)
@@ -194,9 +204,10 @@ func buildTerminalPane(
 			term.outputScroll.Y = math.MaxFloat32
 		}
 		ui.Scroll(c).FillWidth().Grow(1).TrackScroll(&term.outputScroll).Children(func() {
-			ui.Column(c).FillWidth().Padding(design.Space2).Children(func() {
+			ui.Column(c).FillWidth().Padding(design.Space2, design.Space3).Children(func() {
 				if !hasOutput {
-					design.Apply(ui.Text(c, uikit.T(st.locale, "在工作区根目录运行命令", "Run commands in the workspace root")), t.TextMuted(design.TypeXXS))
+					design.Apply(ui.Text(c, st.tr("在工作区根目录运行命令", "Run commands in the workspace root")),
+						t.TextMuted(design.TypeXXS))
 					return
 				}
 				design.Apply(ui.Text(c, output), t.MonoText(design.TypeXXXS)).
@@ -206,36 +217,49 @@ func buildTerminalPane(
 		if hasOutput && !following {
 			// The scroll no longer follows the end: say so and give the one
 			// action that resumes it, instead of silently showing stale rows.
-			ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(design.Space2).Children(func() {
-				design.Apply(ui.Text(c, uikit.T(st.locale, "已暂停跟随", "Follow paused")),
+			ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(design.Space2).
+				PaddingX(design.Space3).Children(func() {
+				design.Apply(ui.Text(c, st.tr("已暂停跟随", "Follow paused")),
 					t.TextMuted(design.TypeXXXS)).Grow(1)
-				if ui.Button(c, uikit.T(st.locale, "回到底部", "Jump to end")).Clicked() {
+				if ui.Button(c, st.tr("回到底部", "Jump to end")).Clicked() {
 					term.outputScroll.Y = math.MaxFloat32
-					runtime.Invalidate()
+					st.invalidate()
 				}
 			})
 		}
 
 		// Input row: native text input submits, Run/Stop swaps while running.
-		ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(design.Space2).Children(func() {
-			ui.TextInput(c, &term.input).Label(uikit.T(st.locale, "命令", "Command")).
-				Placeholder(uikit.T(st.locale, "输入命令…", "Enter a command…")).
-				Grow(1).OnSubmit(func() { runTerminalCommand(terminal, runtime, st) })
+		ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(design.Space2).
+			Padding(design.Space1, design.Space3).Children(func() {
+			ui.TextInput(c, &term.input).Label(st.tr("命令", "Command")).
+				Placeholder(st.tr("输入命令…", "Enter a command…")).
+				Grow(1).OnSubmit(func() { runTerminalCommand(terminal, st.runtime, st) })
 			if running {
-				stop := ui.Button(c, uikit.T(st.locale, "停止", "Stop")).TextColor(t.DangerText)
+				stop := ui.Button(c, st.tr("停止", "Stop")).TextColor(t.DangerText)
 				if stop.Clicked() {
 					term.cancelRun()
 				}
 				return
 			}
-			run := design.Apply(ui.PrimaryButton(c, uikit.T(st.locale, "运行", "Run")), t.PrimaryButton()).
+			run := design.Apply(ui.PrimaryButton(c, st.tr("运行", "Run")), t.PrimaryButton()).
 				Disabled(strings.TrimSpace(term.input) == "")
 			if run.Clicked() && strings.TrimSpace(term.input) != "" {
-				runTerminalCommand(terminal, runtime, st)
+				runTerminalCommand(terminal, st.runtime, st)
 			}
 		})
-		design.Apply(ui.Text(c, uikit.T(st.locale, "简单命令运行器（无 PTY / 持久 shell）", "Simple command runner (no PTY / persistent shell)")), t.TextMuted(design.TypeXXXS))
+		design.Apply(ui.Text(c, st.tr("简单命令运行器（无 PTY / 持久 shell）",
+			"Simple command runner (no PTY / persistent shell)")),
+			t.TextMuted(design.TypeXXXS)).PaddingX(design.Space3).PaddingY(design.Space2)
 	})
+}
+
+// terminalCopyInk is the copy glyph's ink: success while the acknowledgement
+// shows, secondary once the notice window closed.
+func terminalCopyInk(t *design.Tokens, copied bool) ui.Color {
+	if copied {
+		return t.SuccessText
+	}
+	return t.LabelSecondary
 }
 
 // terminalFollowPaused reports whether the output scroll no longer follows the
@@ -249,7 +273,8 @@ func terminalFollowPaused(output string, scroll ui.ScrollState) bool {
 // (docs/ui/select.md): a drop-down whose value is the chosen shell, named for
 // assistive technology, with a muted "current" label beside it. A changed
 // choice calls SetShell and shows failures in DangerText.
-func buildShellSelect(c *ui.Context, t *design.Tokens, terminal contracts.TerminalService, runtime contracts.UIRuntime, st *state) {
+func buildShellSelect(c *ui.Context, t *design.Tokens, terminal contracts.TerminalService,
+	st *state) {
 	term := st.term
 	if term.shell == "" {
 		term.shell = terminal.Shell()
@@ -261,16 +286,16 @@ func buildShellSelect(c *ui.Context, t *design.Tokens, terminal contracts.Termin
 			TextColor(t.LabelSecondary).NoWrap()
 		return
 	}
-	design.Apply(ui.Text(c, uikit.T(st.locale, "当前", "Current")), t.TextMuted(design.TypeXXXS)).NoWrap()
+	design.Apply(ui.Text(c, st.tr("当前", "Current")), t.TextMuted(design.TypeXXXS)).NoWrap()
 	selector := ui.Select(c, &term.shell, shells).
-		Label(uikit.T(st.locale, "选择 shell", "Choose shell"))
+		Label(st.tr("选择 shell", "Choose shell"))
 	if selector.Changed() {
 		if err := terminal.SetShell(term.shell); err != nil {
-			term.err = uikit.T(st.locale, "设置 shell 失败：", "Failed to set the shell: ") + err.Error()
+			term.err = st.tr("设置 shell 失败：", "Failed to set the shell: ") + err.Error()
 		} else {
 			term.err = ""
 		}
-		runtime.Invalidate()
+		st.invalidate()
 	}
 }
 
@@ -289,7 +314,9 @@ func runTerminalCommand(terminal contracts.TerminalService, runtime contracts.UI
 	term.appendOutput("$ " + command + "\n")
 	term.input = ""
 	term.err = ""
-	runtime.Invalidate()
+	if runtime != nil {
+		runtime.Invalidate()
+	}
 
 	go func() {
 		result, err := terminal.Run(ctx, command)
@@ -312,6 +339,8 @@ func runTerminalCommand(terminal contracts.TerminalService, runtime contracts.UI
 		}
 		term.finishRun()
 		term.appendOutput(chunk.String())
-		runtime.Post(func() { runtime.Invalidate() })
+		if runtime != nil {
+			runtime.Post(func() { runtime.Invalidate() })
+		}
 	}()
 }

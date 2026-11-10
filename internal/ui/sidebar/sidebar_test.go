@@ -219,8 +219,9 @@ func newHarnessFull(t *testing.T, chat contracts.ChatService, cfg sidebar.Config
 	}
 
 	// The destination screens must exist for nav.Push to succeed. The host no
-	// longer paints a screen list: the sidebar module contributes the Home
-	// destination and the session rows.
+	// longer paints a screen list: the sidebar module renders the session rows.
+	// The home screen stays registered (the product still has that screen) but
+	// the sidebar no longer offers it as a destination.
 	for _, spec := range []contracts.ScreenSpec{
 		{ID: "home", Title: "首页", Order: 5, Build: func(c *ui.Context) { ui.Text(c, "home screen") }},
 		{ID: "session", Title: "会话", Order: 20, Build: func(c *ui.Context) { ui.Text(c, "会话屏幕") }},
@@ -760,7 +761,7 @@ func TestSidebarDeleteConfirmation(t *testing.T) {
 	h.assertNoTexts(tester, "删除会话", "要删除的会话")
 }
 
-// --- old-UI layout: Home destination + section order -----------------------
+// --- old-UI layout: no Home destination + section order --------------------
 
 // textIndex returns the position of an exact text in the frame, or -1.
 func textIndex(texts []string, want string) int {
@@ -772,27 +773,32 @@ func textIndex(texts []string, want string) int {
 	return -1
 }
 
-func TestSidebarHomeNavItem(t *testing.T) {
+// TestSidebarHasNoHomeDestination pins the approved simplification: the Home
+// screen stays registered, but the sidebar no longer draws a 首页/Home row. The
+// session list and the new-chat action are the landing surface instead.
+func TestSidebarHasNoHomeDestination(t *testing.T) {
 	chat := &fakeChat{sessions: []contracts.ChatSessionInfo{{ID: "s1", Title: "会话一"}}}
 	h := newHarness(t, chat, sidebar.Config{})
 	tester := h.tester()
-	h.assertTexts(tester, "首页", "会话", "新对话")
+	h.assertTexts(tester, "会话", "新对话", "会话一")
+	h.assertNoTexts(tester, "首页", "Home")
 
-	// Navigate away from Home, then use the sidebar's Home item to return.
-	if err := h.uiRoot.Navigator().Push("session"); err != nil {
-		t.Fatalf("Push(session): %v", err)
-	}
-	tester.Frame()
+	// The sidebar's own destination still works: opening a session row goes to
+	// the session screen, and no Home row exists to leave it again.
+	h.click(tester, "会话一")
 	if current := h.uiRoot.Navigator().Current(); current != "session" {
 		t.Fatalf("current screen = %q, want session", current)
 	}
-	h.click(tester, "首页")
-	if current := h.uiRoot.Navigator().Current(); current != "home" {
-		t.Fatalf("current screen after clicking 首页 = %q, want home", current)
+	h.assertNoTexts(tester, "首页")
+
+	// The new-chat action remains the visible landing action of the sidebar.
+	h.click(tester, "新对话")
+	if current := h.uiRoot.Navigator().Current(); current != "session" {
+		t.Fatalf("current screen after 新对话 = %q, want session", current)
 	}
 }
 
-func TestSidebarNavOrderMatchesOldUI(t *testing.T) {
+func TestSidebarNavOrderWithoutHome(t *testing.T) {
 	chat := &fakeChat{
 		sessions: []contracts.ChatSessionInfo{
 			{ID: "s1", Title: "Alpha"},
@@ -802,15 +808,14 @@ func TestSidebarNavOrderMatchesOldUI(t *testing.T) {
 	h := newHarness(t, chat, sidebar.Config{})
 	tester := h.tester()
 	texts := tester.Texts()
-	home := textIndex(texts, "首页")
+	if home := textIndex(texts, "首页"); home != -1 {
+		t.Fatalf("removed Home row is still rendered at %d; texts = %v", home, texts)
+	}
 	section := textIndex(texts, "会话")
 	alpha := textIndex(texts, "Alpha")
 	beta := textIndex(texts, "Beta")
-	if home < 0 || section < 0 || alpha < 0 || beta < 0 {
-		t.Fatalf("frame texts missing side bar rows: %v", texts)
-	}
-	if !(home < section) {
-		t.Fatalf("nav order: 首页 at %d should precede 会话 at %d; texts = %v", home, section, texts)
+	if section < 0 || alpha < 0 || beta < 0 {
+		t.Fatalf("frame texts missing sidebar rows: %v", texts)
 	}
 	if !(section < alpha && alpha < beta) {
 		t.Fatalf("session rows should follow the 会话 label in order; indexes 会话=%d Alpha=%d Beta=%d; texts = %v",

@@ -382,12 +382,20 @@ func (t *boundTool) PendingNotices() []string {
 }
 
 func (t *boundTool) Invoke(ctx context.Context, call rig.ToolCall) (rig.ToolResult, error) {
-	scoped := t.group.forRoot()
+	return invokeRootScoped(ctx, t.group.forRoot(), call)
+}
+
+// invokeRootScoped dispatches one call to a specific root-scoped build. It is
+// the single dispatch seam for both the registry proxies and host-facing
+// callers such as the job service: the call is counted in flight so a
+// workspace switch retires the build without aborting running work, and output
+// goes through one repair point.
+func invokeRootScoped(ctx context.Context, scoped *rootScoped, call rig.ToolCall) (rig.ToolResult, error) {
 	// Count the call against the build so a workspace switch retires the old
 	// build without aborting a call that is still running against it.
 	scoped.enter()
 	defer scoped.leave()
-	tool, ok := scoped.byName[t.meta.Name()]
+	tool, ok := scoped.byName[call.Name]
 	if !ok {
 		return rig.ToolResult{}, fmt.Errorf("%w: %q", rig.ErrToolNotFound, call.Name)
 	}
@@ -399,4 +407,12 @@ func (t *boundTool) Invoke(ctx context.Context, call rig.ToolCall) (rig.ToolResu
 	// unchanged; the wrapper keeps the inner tool's error and IsError semantics.
 	result.Content = textenc.RepairOutput(result.Content)
 	return result, err
+}
+
+// invokeJobTool implements jobToolInvoker: background-job read/control calls
+// dispatch to the build of the workspace root that is current now, so the
+// header's job chip follows a workspace rebind to the new manager instead of
+// keeping a retired one.
+func (g *rebindGroup) invokeJobTool(ctx context.Context, name, arguments string) (rig.ToolResult, error) {
+	return invokeRootScoped(ctx, g.forRoot(), rig.ToolCall{Name: name, Arguments: arguments})
 }

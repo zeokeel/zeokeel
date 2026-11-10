@@ -60,32 +60,42 @@ func TestWorkspaceChangesEndToEnd(t *testing.T) {
 		t.Fatalf("create workspace: %v", err)
 	}
 
-	// The inspector belongs to the session screen (it reads the session read
-	// model), so open the session screen before opening it.
+	// The right sidebar belongs to the session screen (it reads the session
+	// read model), so open the session screen and dock it before browsing.
 	if err := uiRoot.Navigator().Push("session"); err != nil {
 		t.Fatalf("push session screen: %v", err)
 	}
 	uiRoot.SetRightPanelOpen(true)
 	tester := ui.NewTester(uiRoot.View, 1280, 800)
 	tester.Frame()
-	selectInspectorPane(t, tester, "变更")
-	// The changes read runs off the UI thread (the pane shows a spinner while
-	// git status/diff land on a later frame), so wait for the rows instead of
-	// asserting the first frame after the pane switch.
-	changesDeadline := time.Now().Add(5 * time.Second)
-	for time.Now().Before(changesDeadline) {
+	// The sidebar's 文件 page is the tree of the current workspace: the
+	// modified tracked file and the untracked file both show up there.
+	clickRightSidebarPage(t, tester, "文件")
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) && !tester.HasText("app.go") {
 		tester.Frame()
-		if tester.HasText("app.go") {
-			break
-		}
 		time.Sleep(10 * time.Millisecond)
 	}
-	for _, want := range []string{"app.go", "notes.txt", "修改", "未跟踪"} {
+	for _, want := range []string{"app.go", "notes.txt"} {
 		if !tester.HasText(want) {
-			t.Fatalf("changes tab missing %q; texts = %v", want, tester.Texts())
+			t.Fatalf("workspace tree missing %q; texts = %v", want, tester.Texts())
 		}
 	}
-	if err := tester.Click("查看 diff"); err != nil {
+
+	// Clicking the changed file opens its preview tab. The uncommitted diff is
+	// folded into that tab (the retired Changes pane): 查看改动 waits for the
+	// workspace differ's off-thread read.
+	if err := tester.Click("app.go"); err != nil {
+		t.Fatalf("open changed file: %v; texts = %v", err, tester.Texts())
+	}
+	tester.Frame()
+	if !frameUntil(tester, "查看改动", 5*time.Second) {
+		t.Fatalf("file tab has no 查看改动 fold; texts = %v", tester.Texts())
+	}
+	if !tester.HasText("关闭 app.go") {
+		t.Fatalf("opened file is not its own tab; texts = %v", tester.Texts())
+	}
+	if err := tester.Click("查看改动"); err != nil {
 		t.Fatalf("expand diff: %v; texts = %v", err, tester.Texts())
 	}
 	tester.Frame()

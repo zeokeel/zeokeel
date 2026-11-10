@@ -25,7 +25,7 @@ type settingsPageSpec struct {
 // settingsPages is the product's settings navigation (19 pages, after the host
 // groups them by Section; the advanced pages live behind a collapsed group).
 var settingsPages = []settingsPageSpec{
-	{"settings-page-model", "model", "模型", []string{"Base URL", "API Key", "保存"}},
+	{"settings-page-model", "model", "模型", []string{"模型列表", "添加模型", "系统提示词"}},
 	{"settings-page-appearance", "appearance", "外观", []string{"外观模式", "界面语言", "应用"}},
 	{"settings-page-skills", "skills", "技能", []string{"新建技能", "刷新"}},
 	{"settings-page-shortcuts", "shortcuts", "快捷键", []string{"快捷键", "Cmd/Ctrl + B"}},
@@ -220,10 +220,11 @@ func (d *drive) runSettingsSteps() {
 				c.failf("%v", err)
 				return
 			}
-			// Make one edit: append text to the Base URL draft. The input's
-			// accessible label is "Base URL 输入" (the visible label only names
-			// the field); clicking the visible label is not an input target.
-			if !c.click("Base URL 输入") {
+			// Make one edit: append text to the system-prompt draft (the model
+			// page now owns the prompt/runtime footer; each model's Base URL
+			// lives in the add/edit model dialog). The input's accessible label
+			// is "系统提示词 输入" (the visible label only names the field).
+			if !c.click("系统提示词 输入") {
 				return
 			}
 			d.typeText("X")

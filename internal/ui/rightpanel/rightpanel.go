@@ -1,39 +1,35 @@
-// Package rightpanel contributes the session inspector: the right sidebar of
-// the conversation screen (contracts.SlotSessionPanelRight). It is a UI module
-// (kernel Descriptor + host UI services) rendered entirely with mygo's native
-// controls and the brand design system (internal/design): a native tab strip
-// over the overview, tools, log, files, changes, terminal, agents and tasks
-// panes inside t.Panel cards. It never draws a control (or a Canvas) itself.
+// Package rightpanel contributes the DSH-aligned right sidebar of the
+// conversation screen (contracts.SlotSessionPanelRight) and the
+// contracts.FilePreviewer service the session surface opens files through.
 //
-// The module reads the chat read model (contracts.ChatService) and never writes
-// it: the overview shows the active session's title, message count, update time
-// and running/error badges; the tools pane aggregates every ToolCall of the
-// session with a status badge and a collapsible summary; the model pane shows
-// the effective model configuration, with the API key reduced to "set/not set"
-// so a secret can never reach the screen; the log pane lists the newest durable
-// session events; the files pane browses the current workspace (contracts.
-// WorkspaceService, looked up optionally) with directory navigation and a
-// read-only text/Markdown/image preview; the changes pane lists the current
-// workspace's uncommitted files with native collapsible unified diffs; the
-// terminal pane is a simple command runner (no PTY/persistent shell) with a
-// shell picker, scrollable mono output and Run/Stop; the agents pane merges the
-// async team roster (steer/interrupt/close) with the read-only synchronous
-// subagent delegations of the active session.
+// The sidebar is one native tab strip with the fixed pages 开始 (the guide),
+// 文件 (the workspace tree plus the 交付区 deliverables history) and 终端
+// (the command runner), plus one tab per opened file: clicking a file in the
+// workspace tree opens its read-only preview (text/Markdown/image, with an
+// honest fallback for everything else), and an opened file that the workspace
+// differ reports as changed carries its unified diff. Tabs switch, file tabs
+// close, and the strip scrolls sideways when it outgrows the rail.
 //
-// The host owns the panel width and the open/close control: the module only
-// fills the slot. Chat changes arrive on the agent goroutine, so the module
-// hops to the UI thread with UIRuntime.Post and requests a frame; the
-// subscription and the slot registration are kernel-effect owned, so disposal
-// unwinds both.
+// The retired 8-pane inspector (overview/tools/log/changes/agents/tasks) is
+// gone: the team and tasks surfaces moved to the session header, and the log
+// and changes surfaces were folded into the file tabs. The host owns the panel
+// width and the open/close control: this module only fills the slot and asks
+// the host to open it through its stable "uiroot.open-inspector" command when
+// a preview request arrives while the sidebar is closed.
+//
+// Everything is built with mygo's native controls and the brand design tokens
+// (internal/design); the module never draws a control itself. UI state lives
+// on the module instance and is only touched on the UI thread; backend reads
+// (directory listings, file previews, workspace diffs) run off the UI thread
+// and land through UIRuntime.Post, so selecting a large file never freezes a
+// frame.
 package rightpanel
 
 import (
 	"context"
-	"fmt"
+	"errors"
+	"path/filepath"
 	"strings"
-	"time"
-
-	"github.com/zeokeel/zeokeel-rig"
 
 	"github.com/egoist/mygo/ui"
 	"github.com/egoist/mygo/ui/editor"
@@ -42,34 +38,57 @@ import (
 
 	"github.com/zeokeel/zeokeel/internal/contracts"
 	"github.com/zeokeel/zeokeel/internal/design"
+	"github.com/zeokeel/zeokeel/internal/lib/openpath"
 	"github.com/zeokeel/zeokeel/internal/uikit"
 )
 
 // ModuleID is the compile-time module identity.
 const ModuleID = "zeokeel-ui/rightpanel"
 
-// SlotItemID is the id of the inspector's contribution to the right panel.
+// SlotItemID is the id of the sidebar's contribution to the right panel.
 const SlotItemID = "rightpanel.inspector"
 
-// slotOrder places the inspector first in the right panel.
+// slotOrder places the sidebar first in the right panel.
 const slotOrder = 10
+
+// The fixed pages precede the opened-file tabs in the tab strip.
+const (
+	pageGuide = iota
+	pageFiles
+	pageTerminal
+	// pageFixedCount is the number of fixed pages; a tab index at or above it
+	// is an opened file (index - pageFixedCount).
+	pageFixedCount
+)
+
+// Cross-navigation ids. The host palette and the module's own guide open the
+// sidebar through commands, and the host opens the panel through its stable
+// command; string literals keep UI modules from importing each other.
+const (
+	filesOpenCommandID    = "rightpanel.files.open"
+	terminalOpenCommandID = "rightpanel.terminal.open"
+	// hostOpenCommandID is the host's idempotent "open the inspector" command
+	// (never toggles): a preview request from a conversation card opens the
+	// sidebar through it.
+	hostOpenCommandID = "uiroot.open-inspector"
+)
+
+// The guide's shortcut labels. They are the command metadata's shortcuts: the
+// guide is the discoverability surface of the same chords, so the two cannot
+// drift.
+const (
+	filesOpenShortcut    = "Ctrl+Alt+P"
+	terminalOpenShortcut = "Ctrl+`"
+)
 
 // Config is the module's typed assembly config (all fields have defaults).
 type Config struct {
-	// Title is the panel heading (default "检查").
+	// Title is the sidebar's assistive name (default 右侧栏).
 	Title string `json:"title"`
-	// OverviewTab/ToolsTab/ModelTab/LogTab/FilesTab are the tab labels.
-	OverviewTab string `json:"overviewTab"`
-	ToolsTab    string `json:"toolsTab"`
-	ModelTab    string `json:"modelTab"`
-	LogTab      string `json:"logTab"`
+	// GuideTab/FilesTab/TerminalTab are the fixed tab labels.
+	GuideTab    string `json:"guideTab"`
 	FilesTab    string `json:"filesTab"`
-	ChangesTab  string `json:"changesTab"`
 	TerminalTab string `json:"terminalTab"`
-	AgentsTab   string `json:"agentsTab"`
-	TasksTab    string `json:"tasksTab"`
-	// EmptyText is the overview copy when there is no active session.
-	EmptyText string `json:"emptyText"`
 }
 
 // resolved trims the configured strings, keeping explicit overrides only; the
@@ -77,177 +96,87 @@ type Config struct {
 func (c Config) resolved() Config {
 	return Config{
 		Title:       strings.TrimSpace(c.Title),
-		OverviewTab: strings.TrimSpace(c.OverviewTab),
-		ToolsTab:    strings.TrimSpace(c.ToolsTab),
-		ModelTab:    strings.TrimSpace(c.ModelTab),
-		LogTab:      strings.TrimSpace(c.LogTab),
+		GuideTab:    strings.TrimSpace(c.GuideTab),
 		FilesTab:    strings.TrimSpace(c.FilesTab),
-		ChangesTab:  strings.TrimSpace(c.ChangesTab),
 		TerminalTab: strings.TrimSpace(c.TerminalTab),
-		AgentsTab:   strings.TrimSpace(c.AgentsTab),
-		TasksTab:    strings.TrimSpace(c.TasksTab),
-		EmptyText:   strings.TrimSpace(c.EmptyText),
 	}
 }
 
 func (c Config) titleLabel(locale contracts.LocaleService) string {
-	return firstNonEmpty(c.Title, uikit.T(locale, "检查", "Inspector"))
+	return firstNonEmpty(c.Title, uikit.T(locale, "右侧栏", "Right sidebar"))
 }
 
-func (c Config) overviewLabel(locale contracts.LocaleService) string {
-	return firstNonEmpty(c.OverviewTab, uikit.T(locale, "概览", "Overview"))
-}
-
-func (c Config) toolsLabel(locale contracts.LocaleService) string {
-	return firstNonEmpty(c.ToolsTab, uikit.T(locale, "工具", "Tools"))
-}
-
-func (c Config) logLabel(locale contracts.LocaleService) string {
-	return firstNonEmpty(c.LogTab, uikit.T(locale, "日志", "Log"))
+func (c Config) guideLabel(locale contracts.LocaleService) string {
+	return firstNonEmpty(c.GuideTab, uikit.T(locale, "开始", "Start"))
 }
 
 func (c Config) filesLabel(locale contracts.LocaleService) string {
 	return firstNonEmpty(c.FilesTab, uikit.T(locale, "文件", "Files"))
 }
 
-func (c Config) changesLabel(locale contracts.LocaleService) string {
-	return firstNonEmpty(c.ChangesTab, uikit.T(locale, "变更", "Changes"))
-}
-
 func (c Config) terminalLabel(locale contracts.LocaleService) string {
 	return firstNonEmpty(c.TerminalTab, uikit.T(locale, "终端", "Terminal"))
 }
 
-func (c Config) agentsLabel(locale contracts.LocaleService) string {
-	return firstNonEmpty(c.AgentsTab, uikit.T(locale, "团队", "Agents"))
+// fileTab is one opened file tab: the workspace-relative path (slash
+// separated) that keys its preview cache and the diff lookup.
+type fileTab struct {
+	path string
 }
 
-func (c Config) tasksLabel(locale contracts.LocaleService) string {
-	return firstNonEmpty(c.TasksTab, uikit.T(locale, "任务", "Tasks"))
-}
-
-func (c Config) emptyLabel(locale contracts.LocaleService) string {
-	return firstNonEmpty(c.EmptyText, uikit.T(locale, "还没有活动会话", "No active session"))
+// dirListing is one lazily loaded directory of the workspace tree.
+type dirListing struct {
+	loaded  bool
+	loading bool
+	entries []contracts.FileEntry
+	err     error
 }
 
 // state is the module's UI state (one instance per loaded module, only touched
-// on the UI thread): the selected pane and the per-tool summary fold state.
+// on the UI thread).
 type state struct {
-	tab  int
+	// ctx is the module's kernel context: the optional backends (workspace,
+	// terminal, artifact presenter) are looked up with ctx.Get, no Requires.
+	ctx cordis.Context
+	// locale localizes the sidebar's own copy on every frame.
+	locale contracts.LocaleService
+	// cfg is the resolved module config.
+	cfg Config
+	// runtime registers the page commands and requests frames.
+	runtime contracts.UIRuntime
+
+	// open holds the fold state of collapsibles keyed by a stable string.
 	open map[string]bool
 
-	// ctx is the module's kernel context: the Files pane looks up the optional
-	// workspace backend with ctx.Get(contracts.KeyWorkspace) (no Requires).
-	ctx cordis.Context
+	// tab is the active tab index: a fixed page (pageGuide/pageFiles/
+	// pageTerminal) or pageFixedCount+fileTab. fileTabs are appended in open
+	// order; revealTab asks the next frame to scroll the active tab into view.
+	tab       int
+	fileTabs  []fileTab
+	revealTab bool
 
-	// locale localizes the inspector's own copy on every frame.
-	locale contracts.LocaleService
-	// cfg is the resolved module config: the pane-switch commands need the
-	// localized pane names for their current-pane hint.
-	cfg Config
-	// runtime registers the pane-switch commands and requests frames.
-	runtime contracts.UIRuntime
-	// paneCommands are the registered command unregisters plus the language and
-	// pane they were built for, so the hint follows a pane/language switch.
-	paneCommands    []func()
-	paneCommandLang string
-	paneCommandTab  int
-
-	// Files pane state: the current relative directory, the selected file, the
-	// last error, the per-path preview cache, the name filter and whether hidden
-	// (dot) entries show.
-	filesDir        string
-	filesSelected   string
-	filesErr        string
-	filesPreview    map[string]*filePreview
-	filesFilter     string
-	filesShowHidden bool
-	// fileEditor is the read-only official code editor showing the selected
-	// text file's preview (syntax highlighting, line numbers, virtualization);
-	// it is rebuilt only when another file is selected.
-	fileEditor     *editor.State
-	fileEditorPath string
-
-	// Files pane listing cache (P1): the directory entries are read on a
-	// directory/workspace change or an explicit Refresh, never from rendering
-	// code on every frame. filesCursor is the row the native list has chosen,
-	// by path, so the choice survives a listing reload.
-	filesEntries   []contracts.FileEntry
-	filesLoaded    bool
-	filesLoadErr   error
-	filesLoadedDir string
+	// filesDirs caches the workspace tree's directory listings by relative
+	// path ("" is the root); filesOpen keeps the native tree's fold state per
+	// directory (the *bool ui.TreeItem owns). filesWorkspace is the key of the
+	// workspace the cache belongs to; a workspace switch drops it.
+	filesDirs      map[string]*dirListing
+	filesOpen      map[string]*bool
 	filesWorkspace string
-	filesCursor    string
-	filesList      ui.ListState
-	filesListSel   int
+	// filesGeneration drops posted directory results an explicit refresh (or
+	// a workspace switch) invalidated while they were in flight.
+	filesGeneration int
+	// filesRootErr is the last open-workspace failure ("open folder" dialog or
+	// workspace creation), shown on the Files page.
+	filesRootErr string
 
-	// Log pane cache (P1): the newest durable events of the active session are
-	// read when the pane opens, on a session change and after a chat
-	// notification (throttled to one background read per gate window), never
-	// synchronously from rendering on every notification.
-	logEvents []rig.SessionEvent
-	logLoaded bool
-	logErr    error
-	// logDirty marks the cache invalid because the chat notified a change; the
-	// pane reloads it once the throttle window opens (logLoadedAt anchors it).
-	logDirty bool
-	// logLoading is true while a background store read is in flight: the pane
-	// keeps its cached rows and does not start a second read.
-	logLoading bool
-	// logLoadedAt is when the last background read was started; the reload gate
-	// (logReloadInterval) is measured from it.
-	logLoadedAt time.Time
-	logSession  string
-	logList     ui.ListState
+	// previews caches one file preview per path (keyed also by workspace), and
+	// editors keeps the official read-only code editor state of a file tab
+	// across frames (its scroll and selection survive tab switches).
+	previews map[string]*filePreview
+	editors  map[string]*editor.State
 
-	// Tools pane: the native list and the row Enter acts on.
-	toolsList ui.ListState
-	toolsSel  int
-
-	// Agents pane: the native teammate list and the read-only delegation list,
-	// with the row chosen in each.
-	agentsList   ui.ListState
-	agentsSel    int
-	subagentList ui.ListState
-	subagentsSel int
-
-	// Tasks pane: the native task list.
-	tasksList ui.ListState
-
-	// Changes pane state: the cached uncommitted changes (re-read on the native
-	// Refresh action), the load error, the per-file diff fold state and the
-	// per-file official diff viewers (editor.DiffState, built once per diff).
-	changesLoaded bool
-	// changesWorkspace is the workspace key (ID + root, as the Files pane
-	// uses) the cached snapshot and the diff viewers belong to; a switch
-	// invalidates both instead of showing another project's changes.
-	changesWorkspace string
-	changes          []contracts.FileChange
-	changesErr       error
-	changesOpen      map[string]bool
-	diffs            map[string]*diffView
-
-	// term is the Terminal pane's state (the command runner appends from a
-	// background goroutine, so its output guard lives in terminalState).
-	term *terminalState
-
-	// Agents pane state: the selected teammate, the steer draft, the last
-	// action status/error and the close confirmation (closing a teammate is
-	// destructive, so it goes through a native AlertDialog). The synchronous
-	// delegations share the list but keep a separate selection: their detail is
-	// read-only.
-	selectedMemberID   string
-	selectedSubagentID string
-	steerDraft         string
-	teamStatus         string
-	teamErr            string
-	memberCloseOpen    bool
-	memberCloseID      string
-	memberCloseName    string
-
-	// Files pane artifact history: the expanded preview rows (keyed by
-	// artifact id), the official List's state and choice, and the last download
-	// status.
+	// Deliverables history: the expanded preview rows (by artifact id), the
+	// official List's state and choice, and the last download status.
 	artifactsOpen      map[string]bool
 	artifactsList      ui.ListState
 	artifactsSel       int
@@ -255,160 +184,220 @@ type state struct {
 	artifactsErr       string
 	artifactsSavedPath string
 
-	// Tasks pane state: the cached shared task board (loaded lazily and after
-	// every mutation), the new-task draft, the delete confirmation (a native
-	// Modal: the destructive action is never the default), the list choice, the
-	// expanded task detail and the explicit-refresh loading flag.
-	tasksLoaded       bool
-	tasks             []contracts.BoardTask
-	tasksErr          string
-	tasksLoading      bool
-	tasksSel          int
-	tasksExpanded     string
-	tasksRemoveOpen   bool
-	taskDraft         string
-	taskDeleteOpen    bool
-	taskDeleteID      string
-	taskDeleteSubject string
+	// Workspace changes: cached uncommitted changes (the file tab's diff fold
+	// and the Files page read them), the per-file official diff viewers and
+	// the fold state.
+	changesLoaded    bool
+	changesWorkspace string
+	changes          []contracts.FileChange
+	changesErr       error
+	changesLoading   bool
+	changesOpen      map[string]bool
+	diffs            map[string]*diffView
 
-	// notifier raises the team completion toasts; nil when the host has no
-	// notification service.
-	notifier contracts.Notifier
-	// teamSeen remembers the last observed run state per member ID, so a run
-	// that finishes while the window is idle raises one toast (deduped by the
-	// finished stamp); team_notify.go owns the transition and pruning.
-	teamSeen map[string]teamSeenState
-	// lastBuiltFrame is the UIRuntime frame number of the last inspector build:
-	// the "open team/tasks panel" commands compare it with the live frame to
-	// tell whether the inspector is currently visible (the slot does not build
-	// while the host keeps it closed).
-	lastBuiltFrame uint64
+	// term is the Terminal page's state (its command runner appends output
+	// from a background goroutine, so its guard lives in terminalState).
+	term *terminalState
 
-	// openCommands are the palette commands that open the team/tasks pane; they
-	// are re-registered when the language changes.
-	openCommands    []func()
-	openCommandLang string
-
-	// Team spawn dialog state: the native "new teammate" form. The spawn itself
-	// runs off the UI thread; the dialog shows a labelled spinner while it is in
-	// flight and can be cancelled.
-	teamSpawnOpen   bool
-	teamSpawnName   string
-	teamSpawnPrompt string
-	teamSpawnModel  string
-	teamSpawnErr    string
-	teamSpawnBusy   bool
-	teamSpawnCancel context.CancelFunc
-
-	// --- Phase 2 shell-depth fields (audit-shell) ---------------------------
-	// logFilter is the Log pane's type/payload filter (its query is matched
-	// against the event type and payload, case-insensitively).
-	logFilter string
-	// filesLoading and changesLoading mark a directory listing / workspace
-	// changes read that runs off the UI thread: the pane shows a spinner and
-	// disables the refresh action until the posted result lands, instead of
-	// blocking the frame on disk or git I/O.
-	filesLoading   bool
-	changesLoading bool
+	// commands are the registered page commands; commandLang re-registers them
+	// with localized titles after a language switch.
+	commands    []func()
+	commandLang string
 }
 
-// tr localizes the inspector's own copy for the current frame.
+// tr localizes the sidebar's own copy for the current frame.
 func (st *state) tr(zh, en string) string { return uikit.T(st.locale, zh, en) }
 
-// Module registers the session inspector slot.
+// pageCount is the number of tabs (fixed pages plus opened files).
+func (st *state) pageCount() int { return pageFixedCount + len(st.fileTabs) }
+
+// clampTab keeps the active tab inside the current tab strip.
+func (st *state) clampTab() int {
+	if st.tab < 0 || st.tab >= st.pageCount() {
+		st.tab = pageGuide
+	}
+	return st.tab
+}
+
+// activeFileIndex reports the opened file the active tab shows.
+func (st *state) activeFileIndex() (int, bool) {
+	index := st.tab - pageFixedCount
+	if index < 0 || index >= len(st.fileTabs) {
+		return 0, false
+	}
+	return index, true
+}
+
+// tabLabel is the visible label of tab i: the localized fixed-page name, or
+// the opened file's base name (with its parent directory when two open files
+// share one).
+func (st *state) tabLabel(index int) string {
+	switch index {
+	case pageGuide:
+		return st.cfg.guideLabel(st.locale)
+	case pageFiles:
+		return st.cfg.filesLabel(st.locale)
+	case pageTerminal:
+		return st.cfg.terminalLabel(st.locale)
+	}
+	fileIndex := index - pageFixedCount
+	if fileIndex < 0 || fileIndex >= len(st.fileTabs) {
+		return ""
+	}
+	path := st.fileTabs[fileIndex].path
+	base := filepath.Base(path)
+	for other := range st.fileTabs {
+		if other == fileIndex {
+			continue
+		}
+		if filepath.Base(st.fileTabs[other].path) != base {
+			continue
+		}
+		if dir := filepath.Dir(path); dir != "." {
+			return base + " · " + dir
+		}
+	}
+	return base
+}
+
+// showFixedPage opens one of the fixed pages, asks the host to open the panel
+// and requests a frame. It is the one path the guide cards, the page commands
+// and the FilePreviewer share.
+func (st *state) showFixedPage(page int) {
+	if page < 0 || page >= pageFixedCount {
+		return
+	}
+	st.tab = page
+	st.revealTab = true
+	st.openHostPanel()
+	st.invalidate()
+}
+
+// openFile focuses (or opens) one workspace file as a tab.
+func (st *state) openFile(path string) {
+	path = strings.TrimSpace(path)
+	if path == "" {
+		return
+	}
+	path = filepath.ToSlash(path)
+	for index := range st.fileTabs {
+		if st.fileTabs[index].path == path {
+			st.tab = pageFixedCount + index
+			st.revealTab = true
+			st.openHostPanel()
+			st.invalidate()
+			return
+		}
+	}
+	st.fileTabs = append(st.fileTabs, fileTab{path: path})
+	st.tab = pageFixedCount + len(st.fileTabs) - 1
+	st.revealTab = true
+	st.openHostPanel()
+	st.invalidate()
+}
+
+// closeTab closes the file tab at index (a fixed page is never closable): it
+// selects the previous tab, drops the caches that belonged to the file and
+// requests a frame.
+func (st *state) closeTab(index int) {
+	fileIndex := index - pageFixedCount
+	if fileIndex < 0 || fileIndex >= len(st.fileTabs) {
+		return
+	}
+	path := st.fileTabs[fileIndex].path
+	st.fileTabs = append(st.fileTabs[:fileIndex], st.fileTabs[fileIndex+1:]...)
+	delete(st.previews, path)
+	delete(st.editors, path)
+	delete(st.changesOpen, path)
+	switch {
+	case st.tab > index:
+		st.tab--
+	case st.tab == index:
+		// Closing the active tab selects the neighbour that took its place:
+		// the next opened file, else the previous one, else the files page.
+		switch {
+		case fileIndex < len(st.fileTabs):
+			st.tab = pageFixedCount + fileIndex
+		case fileIndex > 0:
+			st.tab = pageFixedCount + fileIndex - 1
+		default:
+			st.tab = pageFiles
+		}
+	}
+	if st.tab >= st.pageCount() {
+		st.tab = st.pageCount() - 1
+	}
+	if st.tab < 0 {
+		st.tab = pageGuide
+	}
+	st.revealTab = true
+	st.invalidate()
+}
+
+// openHostPanel runs the host's idempotent open command when the host
+// registered it; a headless/embedded host without it just keeps the local
+// state (the sidebar still shows on the next frame that renders the slot).
+func (st *state) openHostPanel() {
+	if st.runtime == nil {
+		return
+	}
+	for _, command := range st.runtime.Commands() {
+		if command.ID != hostOpenCommandID || command.Run == nil {
+			continue
+		}
+		_ = command.Run()
+		return
+	}
+}
+
+// invalidate requests one more frame.
+func (st *state) invalidate() {
+	if st.runtime != nil {
+		st.runtime.Invalidate()
+	}
+}
+
+// Module registers the right sidebar slot and provides contracts.FilePreviewer.
 func Module() *module.Descriptor[Config] {
 	return module.Define(ModuleID, func(ctx cordis.Context, cfg Config) error {
 		runtime, err := ctx.Require(contracts.KeyUIRuntime)
 		if err != nil {
 			return err
 		}
-		chat, err := ctx.Require(contracts.KeyChat)
-		if err != nil {
-			return err
-		}
 		config := cfg.resolved()
 		locale, _ := ctx.Get(contracts.KeyLocale)
 		moduleState := &state{
-			open:          make(map[string]bool),
 			ctx:           ctx,
 			locale:        locale,
 			cfg:           config,
 			runtime:       runtime,
-			filesPreview:  make(map[string]*filePreview),
-			filesListSel:  -1,
-			toolsSel:      -1,
-			agentsSel:     -1,
-			subagentsSel:  -1,
-			tasksSel:      -1,
-			teamSeen:      make(map[string]teamSeenState),
+			open:          make(map[string]bool),
+			filesDirs:     make(map[string]*dirListing),
+			filesOpen:     make(map[string]*bool),
+			previews:      make(map[string]*filePreview),
+			editors:       make(map[string]*editor.State),
 			changesOpen:   make(map[string]bool),
 			diffs:         make(map[string]*diffView),
 			artifactsOpen: make(map[string]bool),
 			artifactsSel:  -1,
 			term:          newTerminalState(),
 		}
-		// The host binds Cmd/Ctrl+Alt+Left/Right to these two window commands and
-		// shows them in the command palette: they cycle the inspector's pane
-		// without opening the picker first.
-		if err := moduleState.registerPaneCommands(); err != nil {
+		if err := moduleState.registerCommands(); err != nil {
 			return err
 		}
 		if _, err := ctx.Effect(func() cordis.Effect {
-			return cordis.Effect{cordis.CleanupOf(moduleState.closePaneCommands)}
+			return cordis.Effect{cordis.CleanupOf(moduleState.closeCommands)}
 		}); err != nil {
-			moduleState.closePaneCommands()
+			moduleState.closeCommands()
 			return err
 		}
-		// The session log is optional: the inspector still renders without a
-		// durable store (headless tests), it just shows the empty log copy.
-		var log eventReader
-		if raw, ok := ctx.Get(contracts.KeyStore); ok {
-			log, _ = raw.(eventReader)
-		}
-		// The team/tasks open commands and the completion toasts are optional
-		// host capabilities: without them the panes still render and just have
-		// no palette entry / toast.
-		if raw, ok := ctx.Get(contracts.KeyNotifier); ok {
-			moduleState.notifier, _ = raw.(contracts.Notifier)
-		}
-		if err := moduleState.registerOpenCommands(); err != nil {
-			return fmt.Errorf("rightpanel: open-pane commands: %w", err)
-		}
-		if _, err := ctx.Effect(func() cordis.Effect {
-			return cordis.Effect{cordis.CleanupOf(moduleState.closeOpenCommands)}
-		}); err != nil {
-			moduleState.closeOpenCommands()
+		// The FilePreviewer is the session surface's entry point into the
+		// sidebar: conversation cards preview a file, open the files/terminal
+		// page or launch a generated file in the platform's application.
+		previewer := &filePreviewService{state: moduleState}
+		if _, err := ctx.Provide(contracts.KeyFilePreview, contracts.FilePreviewer(previewer)); err != nil {
 			return err
 		}
-
-		unsubscribe, err := chat.Subscribe(func(string) {
-			// A chat change may add durable events to the active session and may
-			// follow a team/task mutation; mark the cached log dirty and drop the
-			// cached task board on the UI thread so the next frame re-reads them
-			// once instead of every frame reading them (P1), and raise the
-			// one-shot team completion toasts. The log's store read itself is
-			// throttled and off-thread in buildLogPane: a streaming reply notifies
-			// subscribers per text delta, and a synchronous SQLite read per delta
-			// froze the frame. Without the task invalidation an agent writing
-			// team_task_* left the open Tasks pane showing stale rows until the
-			// user pressed Refresh.
-			runtime.Post(func() {
-				moduleState.logDirty = true
-				moduleState.tasksLoaded = false
-				moduleState.observeTeamRunChanges()
-				runtime.Invalidate()
-			})
-		})
-		if err != nil {
-			return fmt.Errorf("rightpanel: subscribe chat: %w", err)
-		}
-		if _, err := ctx.Effect(func() cordis.Effect {
-			return cordis.Effect{cordis.CleanupOf(unsubscribe)}
-		}); err != nil {
-			unsubscribe()
-			return err
-		}
-
 		return own(ctx, func() (func(), error) {
 			return runtime.RegisterSlotItem(contracts.SlotItem{
 				Slot:  contracts.SlotSessionPanelRight,
@@ -423,181 +412,176 @@ func Module() *module.Descriptor[Config] {
 					if service, ok := ctx.Get(contracts.KeyTerminal); ok {
 						terminal = service
 					}
-					var team contracts.TeamService
-					if service, ok := ctx.Get(contracts.KeyTeam); ok {
-						team = service
-					}
-					// The synchronous delegation read model is the optional
-					// read-only half of the provided subagent service: the
-					// Agents pane merges it with the teammate roster when
-					// present and keeps working when it is not.
-					var activities contracts.SubagentActivityLister
-					if service, ok := ctx.Get(contracts.KeySubagents); ok {
-						if lister, ok := any(service).(contracts.SubagentActivityLister); ok {
-							activities = lister
-						}
-					}
-					var board contracts.TaskBoard
-					if service, ok := ctx.Get(contracts.KeyTaskBoard); ok {
-						board = service
-					}
-					// The artifact history is the optional lister half of the
-					// host artifact presenter; the Files pane only reads it.
+					// The deliverables history is the optional lister half of
+					// the host artifact presenter; the Files page only reads it.
 					var artifacts contracts.ArtifactLister
 					if service, ok := ctx.Get(contracts.KeyArtifactPresenter); ok {
 						artifacts, _ = service.(contracts.ArtifactLister)
 					}
-					buildPanel(c, design.Of(c), runtime, chat, log, workspace, terminal, team, activities, board, artifacts, config, moduleState)
+					buildPanel(c, design.Of(c), workspace, terminal, artifacts, config, moduleState)
 				},
 			})
 		})
 	}).
 		AddRequires(module.Requires(contracts.KeyUIRuntime)).
-		AddRequires(module.Requires(contracts.KeyChat)).
-		WithName("ZeoKeel session inspector")
+		AddProvides(module.Provides(contracts.KeyFilePreview)).
+		WithName("ZeoKeel right sidebar")
 }
 
-// Pane-switch command metadata. The host binds the shortcuts and the command
-// palette renders CommandSpec.Shortcut verbatim.
-const (
-	panePrevCommandID = "rightpanel.pane.prev"
-	paneNextCommandID = "rightpanel.pane.next"
-	panePrevShortcut  = "Cmd/Ctrl + Alt + ←"
-	paneNextShortcut  = "Cmd/Ctrl + Alt + →"
-)
-
-// registerPaneCommands (re)registers the pane-switch commands with the current
-// pane's name as their hint. The host re-registers nothing: the module keeps its
-// two commands in sync with the pane and the host language.
-func (st *state) registerPaneCommands() error {
+// registerCommands (re)registers the two page-focus commands: the guide's
+// shortcut labels, the host palette and the sidebar's own cards all target the
+// same ids.
+func (st *state) registerCommands() error {
 	if st.runtime == nil {
 		return nil
 	}
-	st.closePaneCommands()
-	labels := paneLabels(st.cfg, st.locale)
-	if len(labels) == 0 {
-		return nil
-	}
-	if st.tab < 0 || st.tab >= len(labels) {
-		st.tab = 0
-	}
-	hint := st.tr("当前：", "Current: ") + labels[st.tab]
-	prev, err := st.runtime.RegisterCommand(contracts.CommandSpec{
-		ID:       panePrevCommandID,
-		Title:    st.tr("上一个检查器面板", "Previous inspector pane"),
-		Hint:     hint,
-		Order:    910,
-		Shortcut: panePrevShortcut,
-		Run:      func() error { st.stepPane(-1); return nil },
+	st.closeCommands()
+	files, err := st.runtime.RegisterCommand(contracts.CommandSpec{
+		ID:       filesOpenCommandID,
+		Title:    st.tr("打开文件页", "Open files page"),
+		Hint:     st.tr("在右侧栏浏览工作区文件", "Browse workspace files in the right sidebar"),
+		Order:    920,
+		Shortcut: filesOpenShortcut,
+		Run:      func() error { st.showFixedPage(pageFiles); return nil },
 	})
 	if err != nil {
 		return err
 	}
-	next, err := st.runtime.RegisterCommand(contracts.CommandSpec{
-		ID:       paneNextCommandID,
-		Title:    st.tr("下一个检查器面板", "Next inspector pane"),
-		Hint:     hint,
-		Order:    911,
-		Shortcut: paneNextShortcut,
-		Run:      func() error { st.stepPane(1); return nil },
+	terminal, err := st.runtime.RegisterCommand(contracts.CommandSpec{
+		ID:       terminalOpenCommandID,
+		Title:    st.tr("打开终端页", "Open terminal page"),
+		Hint:     st.tr("在右侧栏终端运行命令", "Run commands in the right sidebar terminal"),
+		Order:    921,
+		Shortcut: terminalOpenShortcut,
+		Run:      func() error { st.showFixedPage(pageTerminal); return nil },
 	})
 	if err != nil {
-		prev()
+		files()
 		return err
 	}
-	st.paneCommands = []func(){prev, next}
-	st.paneCommandLang = uikit.Language(st.locale)
-	st.paneCommandTab = st.tab
+	st.commands = []func(){files, terminal}
+	st.commandLang = uikit.Language(st.locale)
 	return nil
 }
 
-// closePaneCommands unregisters the pane-switch commands.
-func (st *state) closePaneCommands() {
-	for _, unregister := range st.paneCommands {
+// closeCommands unregisters the page commands.
+func (st *state) closeCommands() {
+	for _, unregister := range st.commands {
 		unregister()
 	}
-	st.paneCommands = nil
+	st.commands = nil
 }
 
-// syncPaneCommands re-registers the commands when the pane or language changed,
-// so the palette hint always names the pane that is showing.
-func (st *state) syncPaneCommands() {
-	if st.paneCommands == nil ||
-		uikit.Language(st.locale) != st.paneCommandLang || st.tab != st.paneCommandTab {
-		_ = st.registerPaneCommands()
-	}
-}
-
-// stepPane moves the inspector's selection by delta, wrapping around the pane
-// ring; the host shortcut and the command palette both run it.
-func (st *state) stepPane(delta int) {
-	labels := paneLabels(st.cfg, st.locale)
-	if len(labels) == 0 {
+// syncCommands re-registers the commands when the host language changed, so
+// the palette titles follow the language like every other module's.
+func (st *state) syncCommands() {
+	if st.commands != nil && uikit.Language(st.locale) == st.commandLang {
 		return
 	}
-	next := (st.tab + delta + len(labels)) % len(labels)
-	st.selectPane(next, st.runtime)
+	_ = st.registerCommands()
 }
 
-// selectPane sets the active inspector pane and refreshes what the pane shows:
-// entering the Tasks pane re-reads the shared board (the agent may have written
-// tasks while another pane was open), and the Agents pane clears its last action
-// status. It is the one path used by the selector menu, the pane-step commands
-// and the open-pane palette commands.
-func (st *state) selectPane(tab int, runtime contracts.UIRuntime) {
-	labels := paneLabels(st.cfg, st.locale)
-	if len(labels) == 0 {
-		return
-	}
-	if tab < 0 || tab >= len(labels) {
-		tab = 0
-	}
-	st.tab = tab
-	switch tab {
-	case tabTasks:
-		st.tasksLoaded = false
-		st.tasksErr = ""
-		st.tasksExpanded = ""
-	case tabAgents:
-		st.teamErr = ""
-		st.teamStatus = ""
-	}
-	if runtime != nil {
-		runtime.Invalidate()
-	}
+// filePreviewService implements contracts.FilePreviewer over the module state.
+type filePreviewService struct {
+	state *state
 }
 
-// paneMenuGroups is the pane selector's menu order: the orchestration panes
-// first (the team and its shared task board are the daily entry points), then
-// the working panes, then the record panes. The separators make the grouping
-// visible without adding another level of nesting.
-func paneMenuGroups() [][]int {
-	return [][]int{
-		{tabAgents, tabTasks},
-		{tabTools, tabFiles, tabChanges, tabTerminal},
-		{tabOverview, tabLog},
+// PreviewFile opens (or focuses) one workspace file as a right-sidebar tab and
+// reveals the sidebar. The path may be workspace-relative or absolute inside
+// the current workspace root; a path outside the root is rejected.
+func (s *filePreviewService) PreviewFile(path string) error {
+	if s == nil || s.state == nil {
+		return errors.New("rightpanel: the right sidebar is not loaded")
 	}
+	normalized, err := s.state.workspaceRelativePath(path)
+	if err != nil {
+		return err
+	}
+	s.state.openFile(normalized)
+	return nil
 }
 
-// eventReader is the narrow slice of the durable session log the Log pane
-// reads; contracts.Store (and therefore the SQLite store module) implements it.
-type eventReader interface {
-	Last(ctx context.Context, sessionID string, limit int) ([]rig.SessionEvent, error)
+// OpenFiles focuses the sidebar's files page.
+func (s *filePreviewService) OpenFiles() error {
+	if s == nil || s.state == nil {
+		return errors.New("rightpanel: the right sidebar is not loaded")
+	}
+	s.state.showFixedPage(pageFiles)
+	return nil
 }
 
-// teamServiceFromState returns the optional live team backend. The inspector
-// reads it lazily (contracts.KeyTeam is optional) so a headless host without the
-// agent module still renders the rest of the panel.
-func teamServiceFromState(st *state) contracts.TeamService {
+// OpenTerminal focuses the sidebar's terminal page.
+func (s *filePreviewService) OpenTerminal() error {
+	if s == nil || s.state == nil {
+		return errors.New("rightpanel: the right sidebar is not loaded")
+	}
+	s.state.showFixedPage(pageTerminal)
+	return nil
+}
+
+// OpenNative opens one path in the platform's file manager or default
+// application: the secondary action on generated-file cards. A relative path
+// resolves against the current workspace root; an absolute path is launched as
+// given (the artifact may live outside the workspace, in a save location).
+func (s *filePreviewService) OpenNative(path string) error {
+	if s == nil || s.state == nil {
+		return errors.New("rightpanel: the right sidebar is not loaded")
+	}
+	trimmed := strings.TrimSpace(path)
+	if trimmed == "" {
+		return errors.New("rightpanel: file path is required")
+	}
+	native := filepath.FromSlash(trimmed)
+	if !filepath.IsAbs(native) {
+		if current, ok, err := s.state.currentWorkspace(); err == nil && ok {
+			native = filepath.Join(filepath.Clean(current.Root), native)
+		}
+	}
+	return openpath.Open(native)
+}
+
+// currentWorkspace returns the active workspace (false when none is open).
+func (st *state) currentWorkspace() (contracts.Workspace, bool, error) {
 	if st == nil {
-		return nil
+		return contracts.Workspace{}, false, nil
 	}
-	raw, ok := st.ctx.Get(contracts.KeyTeam)
+	raw, ok := st.ctx.Get(contracts.KeyWorkspace)
 	if !ok || raw == nil {
-		return nil
+		return contracts.Workspace{}, false, nil
 	}
-	team, _ := raw.(contracts.TeamService)
-	return team
+	workspace, _ := raw.(contracts.WorkspaceService)
+	if workspace == nil {
+		return contracts.Workspace{}, false, nil
+	}
+	return workspace.Current(context.Background())
+}
+
+// workspaceRelativePath normalizes one FilePreviewer path into a
+// workspace-relative slash path. An absolute path must live inside the current
+// workspace root; without a workspace the path is kept as given (the preview
+// tab then reports that no workspace is open).
+func (st *state) workspaceRelativePath(path string) (string, error) {
+	trimmed := strings.TrimSpace(path)
+	if trimmed == "" {
+		return "", errors.New("rightpanel: file path is required")
+	}
+	native := filepath.FromSlash(trimmed)
+	current, ok, err := st.currentWorkspace()
+	if err != nil || !ok {
+		if filepath.IsAbs(native) {
+			return "", errors.New("rightpanel: no workspace is open for an absolute path")
+		}
+		return filepath.ToSlash(filepath.Clean(native)), nil
+	}
+	root := filepath.Clean(current.Root)
+	if filepath.IsAbs(native) {
+		relative, relErr := filepath.Rel(root, filepath.Clean(native))
+		if relErr != nil || relative == ".." || strings.HasPrefix(relative, ".."+string(filepath.Separator)) {
+			return "", errors.New("rightpanel: file is outside the workspace: " + trimmed)
+		}
+		return filepath.ToSlash(relative), nil
+	}
+	return filepath.ToSlash(filepath.Clean(native)), nil
 }
 
 // own registers one contribution and ties its unregistration to ctx's effect

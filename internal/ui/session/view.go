@@ -106,6 +106,12 @@ func buildScreen(
 		// failures) belongs to the conversation that raised it: a switch must
 		// not show another conversation's stale error row.
 		resetSessionErrors(st)
+		// A child conversation belongs to the parent session on screen: a
+		// session switch always returns to the parent conversation (the child
+		// switcher is rebuilt for the new session's children).
+		st.agents.childID = ""
+		st.agents.crumbChosen = -1
+		st.agents.childOpen = false
 	}
 	// Frame-time fallback for hosts that update the session state without an
 	// extra notification: retry the queue once the run has settled. When this
@@ -139,19 +145,26 @@ func buildScreen(
 		if st.goalActionErr != "" {
 			buildErrorLine(c, t, st.goalActionErr)
 		}
-		switch st.tab {
-		case tabTrajectory:
-			buildTrajectoryPane(c, t, chatSession, hasSession, st)
-		case tabMemory:
-			buildMemoryPane(c, t, runtime, st)
-		default:
-			buildChatPane(c, t, runtime, navigator, chat, cfg, st, chatSession, hasSession)
-		}
-		if hasSession {
-			// The goal strip and the approval banner dock right above the
-			// composer, on the transcript's reading measure.
-			buildComposerDock(c, t, runtime, st)
-			buildComposer(c, t, runtime, navigator, chat, cfg, st, activeID, chatSession)
+		if strings.TrimSpace(st.agents.childID) != "" {
+			// A child conversation takes the whole main content area: its own
+			// transcript/activity panes and, for a continuable teammate, its own
+			// send box (the parent composer and dock stay with the parent).
+			buildChildView(c, t, runtime, st, cfg)
+		} else {
+			switch st.tab {
+			case tabTrajectory:
+				buildTrajectoryPane(c, t, chatSession, hasSession, st)
+			case tabMemory:
+				buildMemoryPane(c, t, runtime, st)
+			default:
+				buildChatPane(c, t, runtime, navigator, chat, cfg, st, chatSession, hasSession)
+			}
+			if hasSession {
+				// The goal strip and the approval banner dock right above the
+				// composer, on the transcript's reading measure.
+				buildComposerDock(c, t, runtime, st)
+				buildComposer(c, t, runtime, navigator, chat, cfg, st, activeID, chatSession)
+			}
 		}
 		// Command-family dialogs (/goal, /plan, /memory): native Modals above
 		// the screen; their buttons close them and request the next frame.
@@ -341,39 +354,53 @@ func registerInterruptShortcuts(c *ui.Context, chat contracts.ChatService, st *s
 // --- screen chrome (host B3 top band slots) ---------------------------------
 
 // buildScreenHeaderSlot is the conversation's SlotScreenHeader contribution: the
-// conversation title (the session title, else the configured default) with the
-// workspace name as quiet context when the band is wide enough. The measured row
-// width goes back into st.headerWidth, which the actions slot uses on the next
-// frame to compact the team chip.
+// conversation title (or the parent > child breadcrumb in a child conversation)
+// followed by the DSH agent entries — 智能体团队, 子智能体 N, N 个后台任务 — and
+// a spacer, so the host's utilities stay at the band's end. The workspace name
+// stays beside the title as quiet context when the band is wide enough. The
+// measured row width goes back into st.headerWidth, which the entries use on
+// the next frame to compact their words.
 func buildScreenHeaderSlot(c *ui.Context, t *design.Tokens, st *state, chat contracts.ChatService, cfg Config) {
-	title := st.localized(cfg.Title, "对话", "Chat")
-	activeID := chat.ActiveSession()
-	if session, ok := chat.Session(activeID); ok && strings.TrimSpace(session.Title) != "" {
-		title = session.Title
-	}
-	// The workspace label is quiet context: it stays while the title keeps its
-	// room and drops out on a narrow band (the Overview pane still names it).
-	showWorkspace := st.headerWidth == 0 || st.headerWidth >= 460
 	row := ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(design.Space2)
 	row.Children(func() {
-		// The title sits in window chrome (B3 band), not in a page body: the
-		// TypeM step keeps it in proportion with the 13 DIP tabs, 12 DIP badges
-		// and 16 DIP band icons; TypeL made the band read top-heavy.
-		titleElement := design.Apply(ui.Text(c, title), t.Font(design.TypeM)).
-			FontWeight(600).TextColor(t.LabelPrimary).Grow(1).MinWidth(0).
-			MaxLines(1).Ellipsis("…").Tooltip(title)
-		if st.headerWidth > 0 && st.headerWidth < 560 {
-			titleElement.MinWidth(120)
+		if strings.TrimSpace(st.agents.childID) != "" {
+			buildChildBreadcrumb(c, t, st, chat, cfg)
+		} else {
+			buildConversationTitle(c, t, st, chat, cfg)
 		}
-		if showWorkspace {
-			buildHeaderWorkspace(c, t, st)
-		}
+		buildAgentHeaderEntries(c, t, st, chat)
+		ui.Spacer(c).Grow(1)
 	})
 	st.headerWidth = row.Bounds().W
 }
 
+// buildConversationTitle is the header's title in the parent conversation: the
+// session title (the configured default when it has none), with the workspace
+// name as quiet context while the band is wide enough.
+func buildConversationTitle(c *ui.Context, t *design.Tokens, st *state, chat contracts.ChatService, cfg Config) {
+	title := sessionTitle(st, chat, cfg)
+	// The workspace label is quiet context: it stays while the title keeps its
+	// room and drops out on a narrow band (the Overview pane still names it).
+	showWorkspace := st.headerWidth == 0 || st.headerWidth >= 460
+	// The title sits in window chrome (B3 band), not in a page body: the TypeM
+	// step keeps it in proportion with the 13 DIP tabs, 12 DIP badges and 16 DIP
+	// band icons; TypeL made the band read top-heavy. It shrinks (and ellipsizes)
+	// before the fixed-width agent entries do.
+	titleElement := design.Apply(ui.Text(c, title), t.Font(design.TypeM)).
+		FontWeight(600).TextColor(t.LabelPrimary).Shrink(1).MinWidth(0).
+		MaxLines(1).Ellipsis("…").Tooltip(title)
+	if st.headerWidth > 0 && st.headerWidth < 560 {
+		titleElement.MinWidth(120)
+	}
+	if showWorkspace {
+		buildHeaderWorkspace(c, t, st)
+	}
+}
+
 // buildScreenActionsSlot is the conversation's SlotScreenActions contribution:
-// the running badge, the team entry and the conversation-actions ⋯ menu.
+// the running badge and the conversation-actions ⋯ menu. The agent entries
+// (team, child agents, background jobs) live in the header slot, before the
+// spacer that puts these utilities at the band's end.
 func buildScreenActionsSlot(c *ui.Context, t *design.Tokens, runtime contracts.UIRuntime,
 	st *state, chat contracts.ChatService, cfg Config) {
 	activeID := chat.ActiveSession()
@@ -381,10 +408,6 @@ func buildScreenActionsSlot(c *ui.Context, t *design.Tokens, runtime contracts.U
 	if hasSession && session.Running {
 		design.Apply(ui.Badge(c, st.tr("运行中", "Running")), t.Badge()).TextColor(t.WarningText)
 	}
-	// The team chip drops its running words on a crowded band: the count alone
-	// still answers "is there a team".
-	compactTeam := st.headerWidth > 0 && st.headerWidth < 520
-	buildTeamChip(c, t, runtime, st, compactTeam)
 	if hasSession && activeID != "" {
 		buildConversationActionsButton(c, t, st, runtime, cfg, session)
 	}
@@ -550,114 +573,6 @@ func buildGoalDockMenuButton(c *ui.Context, t *design.Tokens, runtime contracts.
 			TextColor(t.LabelTertiary)
 	})
 	button.PopoverMenuButton(func(m *ui.Menu) { buildGoalMenu(m, t, runtime, st) })
-}
-
-// buildTeamChip is the header's team entry: it shows the live teammate count and
-// (on a wide header) how many are running, and opens the inspector's team pane
-// or shared task board through the stable rightpanel command IDs. It renders
-// nothing when the host has no team backend or the team is empty; a narrow
-// header keeps only the count so the title stays readable. RunState decides the
-// running count (Member.Status is availability, not a run: it must never be
-// painted as 运行中).
-func buildTeamChip(c *ui.Context, t *design.Tokens, runtime contracts.UIRuntime, st *state, compact bool) {
-	if st == nil {
-		return
-	}
-	raw, ok := st.ctx.Get(contracts.KeyTeam)
-	if !ok || raw == nil {
-		return
-	}
-	team, ok := raw.(contracts.TeamService)
-	if !ok || team == nil {
-		return
-	}
-	members := team.Members()
-	if len(members) == 0 {
-		return
-	}
-	running := 0
-	for _, member := range members {
-		if strings.EqualFold(strings.TrimSpace(member.RunState), contracts.TeamRunRunning) {
-			running++
-		}
-	}
-	th := t.Theme()
-	label := fmt.Sprintf(st.tr("团队 %d", "Team %d"), len(members))
-	if running > 0 && !compact {
-		label = fmt.Sprintf(st.tr("团队 %d · %d 运行中", "Team %d · %d running"), len(members), running)
-	}
-	tooltip := fmt.Sprintf(st.tr("智能体团队：%d 名成员，%d 个运行中", "Agent team: %d members, %d running"),
-		len(members), running)
-	chip := ui.Button(c, "").
-		Label(tooltip).
-		Tooltip(tooltip).
-		Height(t.Scale(th.Space(7))).PaddingX(design.Space2).
-		Radius(design.RadiusSM).Shrink(0).Gap(design.Space1)
-	chip.Children(func() {
-		design.Apply(ui.Text(c, label), t.Font(design.TypeXS)).FontWeight(600).
-			TextColor(t.LabelSecondary).NoWrap()
-		if running > 0 && compact {
-			// The compact header has no room for the running words: one quiet
-			// warning dot keeps the state visible without the text.
-			ui.Box(c).Size(design.Space1, design.Space1).Radius(design.Space1).
-				Background(t.Warning).Margin(0, 0, 0, design.Space1)
-		}
-	})
-	chip.PopoverMenuButton(func(m *ui.Menu) {
-		buildTeamChipMenu(m, runtime, st)
-	})
-}
-
-// buildTeamChipMenu fills the team chip's menu with the two inspector entries.
-// The commands are optional (a host without the right inspector registers no
-// such command): a missing command keeps its item visible but disabled, so the
-// entry never lies about an action it cannot run.
-func buildTeamChipMenu(m *ui.Menu, runtime contracts.UIRuntime, st *state) {
-	teamCommand, hasTeam := findRuntimeCommand(runtime, teamOpenCommandID)
-	item := m.Item(st.tr("打开团队面板", "Open team panel"))
-	item.ID(teamOpenCommandID)
-	item.Disabled(!hasTeam)
-	if item.Chosen() && hasTeam {
-		runRuntimeCommand(teamCommand)
-	}
-	m.Separator()
-	tasksCommand, hasTasks := findRuntimeCommand(runtime, tasksOpenCommandID)
-	tasksItem := m.Item(st.tr("打开任务板", "Open task board"))
-	tasksItem.ID(tasksOpenCommandID)
-	tasksItem.Disabled(!hasTasks)
-	if tasksItem.Chosen() && hasTasks {
-		runRuntimeCommand(tasksCommand)
-	}
-}
-
-// Stable inspector pane-opening command IDs (registered by internal/ui/rightpanel;
-// repeated here because UI modules do not import each other).
-const (
-	teamOpenCommandID  = "rightpanel.team.open"
-	tasksOpenCommandID = "rightpanel.tasks.open"
-)
-
-// findRuntimeCommand returns one registered command by its stable ID.
-func findRuntimeCommand(runtime contracts.UIRuntime, id string) (contracts.CommandSpec, bool) {
-	if runtime == nil {
-		return contracts.CommandSpec{}, false
-	}
-	for _, command := range runtime.Commands() {
-		if command.ID == id {
-			return command, true
-		}
-	}
-	return contracts.CommandSpec{}, false
-}
-
-// runRuntimeCommand runs one command, honoring its Enabled guard.
-func runRuntimeCommand(command contracts.CommandSpec) {
-	if command.Enabled != nil && !command.Enabled() {
-		return
-	}
-	if command.Run != nil {
-		_ = command.Run()
-	}
 }
 
 // buildGoalMenu fills the goal chip's menu: pause/resume and complete first,
@@ -936,6 +851,20 @@ func buildChatPane(
 		index, ok := indexByID[messageID]
 		return ok && index > lastUserIndex
 	}
+	// The finished current turn's file output: after the final answer, the
+	// turn-tail cards list the files it delivered and edited. A running or
+	// failed turn has no settled answer yet, so it shows no cards.
+	var turnFiles generatedFiles
+	showTurnFiles := false
+	if !chatSession.Running {
+		if tail := tailTurnMessages(messages); len(tail) > 0 {
+			last := tail[len(tail)-1]
+			if !last.Streaming && strings.TrimSpace(last.Error) == "" {
+				turnFiles = turnGeneratedFiles(tail)
+				showTurnFiles = len(turnFiles.delivered) > 0 || len(turnFiles.edited) > 0
+			}
+		}
+	}
 	// verbose keeps the whole timeline and never bundles steps; the other modes
 	// fold a multi-step turn into one process row.
 	var sameTurn func(prev, next contracts.ChatMessage) bool
@@ -959,6 +888,9 @@ func buildChatPane(
 			canRegenerate := hasRegenerator && !chatSession.Running && last
 			buildMessage(rc, t, runtime, message, st, canRegenerate,
 				last && canCopyReply(message), defaultOpen(message.ID))
+			if last && showTurnFiles {
+				buildGeneratedFileCards(rc, t, st, turnFiles)
+			}
 		},
 		SameTurn: sameTurn,
 		GroupRow: func(rc *ui.Context, group []contracts.ChatMessage) {
@@ -967,6 +899,9 @@ func buildChatPane(
 			buildAssistantTurnGroup(rc, t, runtime, st, group, canRegenerate,
 				last && canCopyReply(group[len(group)-1]),
 				defaultOpen(group[len(group)-1].ID))
+			if last && showTurnFiles {
+				buildGeneratedFileCards(rc, t, st, turnFiles)
+			}
 		},
 	})
 }
@@ -1484,7 +1419,6 @@ func buildAssistantToolRow(c *ui.Context, t *design.Tokens, runtime contracts.UI
 			runtime.Invalidate()
 		},
 		Sections: toolcards.PanelSections(st.locale, call),
-		Footer:   toolcards.TeamToolFooter(runtime, st.locale, tool.Name),
 	}
 	draw := func() { uikit.ToolRow(c, row) }
 	if inBand {
@@ -1864,7 +1798,6 @@ func buildToolCard(c *ui.Context, st *state, call contracts.ToolCall, key string
 		Call:     call,
 		Locale:   st.locale,
 		Sections: toolcards.PanelSections(st.locale, call),
-		Footer:   toolcards.TeamToolFooter(st.runtime, st.locale, call.Name),
 		Open:     &open,
 		OnToggle: func(next bool) {
 			toggled = true

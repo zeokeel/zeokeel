@@ -238,42 +238,15 @@ func (r *Root) bindChromeShortcuts(c *ui.Context) {
 		r.setRightPanelOpen(!r.rightOpen, r.inspectorDrawerShown)
 	}))
 
-	// Inspector pane cycling: the inspector module registers the commands, the
-	// host binds the chord (H26: pane switching should not require opening the
-	// pane menu with the pointer). While the inspector is closed the chord must
-	// not silently mutate the hidden pane: it explains once and does nothing.
-	c.OnShortcut(ui.Cmd|ui.Alt, ui.KeyLeft, guardRepeat(func() { r.runPaneCommand("rightpanel.pane.prev") }))
-	c.OnShortcut(ui.Cmd|ui.Alt, ui.KeyRight, guardRepeat(func() { r.runPaneCommand("rightpanel.pane.next") }))
+	// Right-sidebar page chords: the inspector module registers the commands
+	// (they open the host panel themselves and are idempotent), so the host
+	// only binds the chords the guide advertises.
+	c.OnShortcut(ui.Cmd|ui.Alt, ui.KeyP, guardRepeat(func() { r.runCommandByID("rightpanel.files.open") }))
+	c.OnShortcut(ui.Cmd, ui.KeyBackquote, guardRepeat(func() { r.runCommandByID("rightpanel.terminal.open") }))
 
 	// Built-in window shortcuts (not configurable): new session and settings.
 	c.OnShortcut(ui.Cmd, ui.KeyN, r.newSessionShortcut)
 	c.OnShortcut(ui.Cmd, ui.KeyComma, r.settingsShortcut)
-}
-
-// runPaneCommand runs one of the inspector's pane-cycle commands, but only
-// while the inspector is open on the session screen: pane state is hidden with
-// the inspector, and a chord that silently changes an invisible pane makes the
-// next open show an unexpected pane. The first press while closed explains the
-// no-op once per closed episode.
-func (r *Root) runPaneCommand(id string) {
-	if !r.inspectorAvailable() || !r.rightOpen {
-		r.hintInspectorClosed()
-		return
-	}
-	r.runCommandByID(id)
-}
-
-// hintInspectorClosed tells the user once why the pane chord did nothing. A
-// host without a toast renderer (headless tests) just keeps the state.
-func (r *Root) hintInspectorClosed() {
-	if r.paneHintShown {
-		return
-	}
-	r.paneHintShown = true
-	if r.notifier != nil {
-		r.notifier.Notify(contracts.NotifyInfo,
-			r.tr("检查器已收起：先打开右侧栏再切换面板", "The inspector is closed: open it to switch panes"))
-	}
 }
 
 // runCommandByID runs one registered command by id, if it exists and is

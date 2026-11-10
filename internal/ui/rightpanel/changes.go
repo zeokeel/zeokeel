@@ -3,7 +3,6 @@ package rightpanel
 import (
 	"context"
 	"errors"
-	"fmt"
 	"strings"
 
 	"github.com/egoist/mygo/ui"
@@ -21,7 +20,7 @@ const (
 	maxDiffLines = 400
 	// diffFitLines is how many patch lines the official viewer shows at its
 	// natural height. Longer diffs get a bounded height and scroll inside the
-	// viewer instead of stretching the inspector pane.
+	// viewer instead of stretching the file tab.
 	diffFitLines = 20
 )
 
@@ -35,76 +34,82 @@ type diffView struct {
 	state *editor.DiffState
 	lines int
 	// diff is the patch text the viewer was built from: the cache is only
-	// reused while the workspace reports the same content, so a Refresh (or a
+	// reused while the workspace reports the same content, so a reload (or a
 	// workspace switch) can never show a stale diff even when the file's
 	// path/status key is unchanged.
 	diff string
 }
 
-// buildChangesPane is the inspector's Changes tab: the current workspace's
-// uncommitted files, one collapsible native card per file with its unified
-// diff. It degrades to readable empty states without a backend, without an open
-// workspace and without a differ.
-func buildChangesPane(c *ui.Context, t *design.Tokens, workspace contracts.WorkspaceService, runtime contracts.UIRuntime, st *state) {
-	if workspace == nil {
-		buildEmptyPane(c, uikit.T(st.locale, "工作区未启用", "Workspace is not enabled"))
-		return
-	}
-	if _, ok, err := workspace.Current(context.Background()); err != nil {
-		uikit.ErrorLine(c, uikit.T(st.locale, "读取工作区失败：", "Failed to read the workspace: ")+err.Error())
-		return
-	} else if !ok {
-		buildEmptyPane(c, uikit.T(st.locale, "还没有打开工作区", "No workspace is open"))
-		return
-	}
+// buildFileDiffFold renders the file tab's fold-out unified diff when the
+// current workspace reports the opened file as changed: the retired Changes
+// pane is folded into the file tab, and the session's "view changes" action
+// lands on the same tab. It is absent for a clean file, a workspace without a
+// differ, and while the first changes read is still in flight.
+func buildFileDiffFold(c *ui.Context, t *design.Tokens, workspace contracts.WorkspaceService,
+	st *state, path string) {
 	differ, ok := workspace.(contracts.WorkspaceDiffer)
 	if !ok {
-		buildEmptyPane(c, uikit.T(st.locale, "当前工作区不支持变更视图", "The current workspace does not support the changes view"))
 		return
 	}
-	// The diff read runs git commands: it is cached and runs off the UI thread,
-	// so refreshing a large repository shows a spinner instead of freezing the
-	// frame. The header's Refresh action clears changesLoaded to start a read.
-	loading := st.ensureChangesLoaded(workspace, differ, runtime)
-
-	ui.Column(c).FillWidth().Gap(design.Space2).Children(func() {
-		// The refresh lives in the pane header; the body carries the count and
-		// the changed files as rows.
-		if loading {
-			ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(design.Space2).Children(func() {
-				ui.Spinner(c).Label(uikit.T(st.locale, "正在读取工作区变更…", "Reading workspace changes…")).
-					Size(design.Space3, design.Space3).TextColor(t.LabelSecondary)
-				design.Apply(ui.Text(c, uikit.T(st.locale, "正在读取工作区变更…", "Reading workspace changes…")),
-					t.TextMuted(design.TypeXS))
-			})
-			if len(st.changes) == 0 && st.changesErr == nil {
-				return
-			}
+	loading := st.ensureChangesLoaded(workspace, differ, st.runtime)
+	if st.changesErr != nil {
+		uikit.ErrorLine(c, st.tr("读取变更失败：", "Failed to read changes: ")+st.changesErr.Error())
+		return
+	}
+	if loading && st.changes == nil {
+		return
+	}
+	change, found := findFileChange(st.changes, path)
+	if !found {
+		return
+	}
+	open := st.changesOpen[path]
+	ui.Collapsible(c, st.tr("查看改动", "View changes"), &open, func() {
+		additions, deletions := diffLineStats(change.Diff)
+		if additions > 0 || deletions > 0 {
+			design.Apply(ui.Text(c, "+"+itoa(additions)+" -"+itoa(deletions)),
+				t.Font(design.TypeXXXS)).TextColor(t.LabelTertiary)
 		}
-		if st.changesErr == nil {
-			design.Apply(ui.Text(c, uikit.T(st.locale,
-				fmt.Sprintf("%d 个变更文件", len(st.changes)), fmt.Sprintf("%d changed files", len(st.changes)))),
-				t.Font(design.TypeXXS)).TextColor(t.LabelTertiary)
-		}
-		if st.changesErr != nil {
-			uikit.ErrorLine(c, uikit.T(st.locale, "读取变更失败：", "Failed to read changes: ")+st.changesErr.Error())
+		if strings.TrimSpace(change.Diff) == "" {
+			design.Apply(ui.Text(c, st.tr("无文本 diff", "No text diff")),
+				t.TextMuted(design.TypeXXXS))
 			return
 		}
-		if len(st.changes) == 0 {
-			design.Apply(ui.Text(c, uikit.T(st.locale, "工作区没有未提交的变更", "No uncommitted changes in the workspace")), t.TextMuted(design.TypeXS))
-			return
-		}
-		for _, change := range st.changes {
-			buildChangeRow(c, t, st, change)
-		}
+		buildDiff(c, t, st, change)
 	})
+	st.changesOpen[path] = open
+}
+
+// findFileChange finds the workspace change of one relative path.
+func findFileChange(changes []contracts.FileChange, path string) (contracts.FileChange, bool) {
+	for _, change := range changes {
+		if strings.TrimSuffix(change.Path, "/") == strings.TrimSuffix(path, "/") {
+			return change, true
+		}
+	}
+	return contracts.FileChange{}, false
+}
+
+// itoa is a tiny positive integer renderer for the diff stat suffix.
+func itoa(value int) string {
+	if value <= 0 {
+		return "0"
+	}
+	var digits [20]byte
+	index := len(digits)
+	for value > 0 {
+		index--
+		digits[index] = byte('0' + value%10)
+		value /= 10
+	}
+	return string(digits[index:])
 }
 
 // ensureChangesLoaded starts the workspace-diff read off the UI thread when the
-// cache was invalidated (first open, a workspace switch or the pane header's
-// Refresh). It reports whether a read is in flight, so the pane can show a
-// spinner while the cached rows (if any) stay on screen. A result for a
-// workspace the user already switched away from is dropped.
+// cache was invalidated (first changed-file tab, a workspace switch or the
+// Files page's refresh). It reports whether a read is in flight, so the tab can
+// keep the cached rows while the read lands. A result for a workspace the user
+// already switched away from is dropped.
 func (st *state) ensureChangesLoaded(workspace contracts.WorkspaceService,
 	differ contracts.WorkspaceDiffer, runtime contracts.UIRuntime) bool {
 	current, ok, err := workspace.Current(context.Background())
@@ -116,9 +121,8 @@ func (st *state) ensureChangesLoaded(workspace contracts.WorkspaceService,
 	}
 	workspaceKey := current.ID + "\x00" + current.Root
 	// The cached snapshot and the per-file diff viewers belong to one
-	// workspace: the Files pane keys its listing the same way, so a workspace
-	// switch must invalidate both here instead of showing another project's
-	// uncommitted files until the user presses Refresh.
+	// workspace: a switch invalidates both instead of showing another project's
+	// uncommitted files.
 	if st.changesWorkspace != workspaceKey {
 		st.changesWorkspace = workspaceKey
 		st.changesLoaded = false
@@ -157,47 +161,6 @@ func (st *state) ensureChangesLoaded(workspace contracts.WorkspaceService,
 	return true
 }
 
-// buildChangeRow is one changed file: status badge, path, +/- stats and a
-// native collapsible with the official diff viewer (collapsed by default).
-// Rows and dividers, not cards: a 320 DIP inspector only holds a card or two.
-func buildChangeRow(c *ui.Context, t *design.Tokens, st *state, change contracts.FileChange) {
-	path := firstNonEmpty(change.Path, uikit.T(st.locale, "(未知路径)", "(unknown path)"))
-	key := path + "\x00" + change.Status
-	c.Key("change/" + key)
-	additions, deletions := diffLineStats(change.Diff)
-
-	ui.Column(c).FillWidth().Padding(0, design.Space2).Gap(design.Space1).Children(func() {
-		ui.Row(c).FillWidth().Gap(design.Space2).AlignItems(ui.Center).Children(func() {
-			design.Apply(ui.Badge(c, changeStatusLabel(change.Status, st.locale)), t.Badge()).
-				TextColor(changeStatusColor(t, change.Status))
-			design.Apply(ui.Text(c, path), t.MonoText(design.TypeXS)).
-				TextColor(t.LabelPrimary).Grow(1).MaxLines(1).Ellipsis("…")
-			if additions > 0 {
-				design.Apply(ui.Text(c, fmt.Sprintf("+%d", additions)), t.Font(design.TypeXXXS)).
-					TextColor(t.SuccessText)
-			}
-			if deletions > 0 {
-				design.Apply(ui.Text(c, fmt.Sprintf("-%d", deletions)), t.Font(design.TypeXXXS)).
-					TextColor(t.DangerText)
-			}
-		})
-		if strings.TrimSpace(change.Diff) == "" {
-			// A change without a text diff (untracked/binary/renamed) still
-			// gets its row divider: skipping it merged the row with the next
-			// file's header.
-			design.Apply(ui.Text(c, uikit.T(st.locale, "无文本 diff", "No text diff")), t.TextMuted(design.TypeXXXS))
-			ui.Divider(c)
-			return
-		}
-		open := st.changesOpen[key]
-		ui.Collapsible(c, uikit.T(st.locale, "查看 diff", "View diff"), &open, func() {
-			buildDiff(c, t, st, change)
-		})
-		st.changesOpen[key] = open
-		ui.Divider(c)
-	})
-}
-
 // buildDiff renders one file's unified diff: the official editor.DiffView of a
 // cached editor.DiffState (docs/ui/diff-viewer.md), with the unchanged lines
 // folded by the viewer itself. A diff the official parser reads no file from
@@ -209,7 +172,7 @@ func buildDiff(c *ui.Context, t *design.Tokens, st *state, change contracts.File
 		viewer := editor.DiffView(c, view.state).FillWidth()
 		if !view.state.FitContent {
 			// A long diff gets a bounded body and scrolls inside the viewer
-			// (the shared long-body bound), rather than stretching the pane.
+			// rather than stretching the file tab.
 			viewer.Height(design.DialogBodyMax)
 		}
 		return
@@ -239,8 +202,6 @@ func (st *state) diffViewFor(change contracts.FileChange) (*diffView, error) {
 	patch := patches[0]
 	lines := patchLineCount(patch)
 	view := &diffView{
-		// Short diffs take their natural height; long ones get a bounded body
-		// and scroll inside the viewer (set in buildDiff).
 		state: &editor.DiffState{Layout: editor.DiffUnified, FitContent: lines <= diffFitLines},
 		lines: lines,
 		diff:  change.Diff,
@@ -283,8 +244,8 @@ func buildDiffFallback(c *ui.Context, t *design.Tokens, diff string, locale cont
 				TextColor(diffLineColor(t, line))
 		}
 		if truncated {
-			design.Apply(ui.Text(c, uikit.T(locale, "diff 已截断", "Diff truncated")), t.Font(design.TypeXXXS)).
-				TextColor(t.LabelTertiary)
+			design.Apply(ui.Text(c, uikit.T(locale, "diff 已截断", "Diff truncated")),
+				t.Font(design.TypeXXXS)).TextColor(t.LabelTertiary)
 		}
 	})
 }
@@ -321,42 +282,4 @@ func diffLineStats(diff string) (additions, deletions int) {
 		}
 	}
 	return additions, deletions
-}
-
-// changeStatusLabel renders the short git status as a localized label.
-func changeStatusLabel(status string, locale contracts.LocaleService) string {
-	switch strings.ToUpper(strings.TrimSpace(status)) {
-	case "M":
-		return uikit.T(locale, "修改", "Modified")
-	case "A":
-		return uikit.T(locale, "新增", "Added")
-	case "D":
-		return uikit.T(locale, "删除", "Deleted")
-	case "R":
-		return uikit.T(locale, "重命名", "Renamed")
-	case "??", "U":
-		return uikit.T(locale, "未跟踪", "Untracked")
-	case "":
-		return uikit.T(locale, "未知", "Unknown")
-	default:
-		return strings.TrimSpace(status)
-	}
-}
-
-// changeStatusColor colors the status badge.
-func changeStatusColor(t *design.Tokens, status string) ui.Color {
-	switch strings.ToUpper(strings.TrimSpace(status)) {
-	case "A":
-		return t.SuccessText
-	case "M":
-		return t.WarningText
-	case "D":
-		return t.DangerText
-	case "R":
-		return t.Accent
-	case "??":
-		return t.LabelSecondary
-	default:
-		return t.LabelTertiary
-	}
 }

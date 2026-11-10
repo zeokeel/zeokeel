@@ -285,6 +285,38 @@ func TestMessageSearchLimit(t *testing.T) {
 	}
 }
 
+// TestMessageSearchHidesAutomationRunHits pins the same user-only rule for the
+// durable message search: hits from automation-run conversations never render,
+// whether the run session is still in the read model or only the stored hit
+// remains (the hit carries the run's title prefix).
+func TestMessageSearchHidesAutomationRunHits(t *testing.T) {
+	now := time.Unix(1700000000, 0)
+	chat := &fakeChat{sessions: []contracts.ChatSessionInfo{
+		{ID: "s1", Title: "普通会话"},
+		{ID: "s2", Title: "自动化: 每日摘要"},
+	}}
+	store := &fakeStore{hits: []contracts.MessageSearchHit{
+		hit("s1", "普通会话", "user", "可见命中片段", now),
+		hit("s2", "自动化: 每日摘要", "assistant", "自动化命中片段", now),
+		// The run session is gone from the read model, but the stored hit still
+		// names it: the title prefix keeps it hidden.
+		hit("s-old", "自动化: 历史任务", "user", "历史命中片段", now),
+		// A run hit whose stored title is empty is hidden by the read model's
+		// session-ID set.
+		hit("s2", "", "assistant", "无标题命中片段", now),
+	}}
+	h := newHarnessWithStore(t, chat, store, sidebar.Config{})
+	tester := h.tester()
+	tester.Frame()
+	clickLabel(t, tester, "搜索会话与消息")
+	tester.Type("命中片段")
+	tester.Frame()
+
+	h.assertTexts(tester, "消息搜索", "可见命中片段")
+	h.assertNoTexts(tester, "自动化: 每日摘要", "自动化命中片段",
+		"历史命中片段", "无标题命中片段", "未命名会话")
+}
+
 func TestSearchWithoutSearcherKeepsTitleFilter(t *testing.T) {
 	chat := searchChat()
 	h := newHarness(t, chat, sidebar.Config{}) // no KeyStore provided

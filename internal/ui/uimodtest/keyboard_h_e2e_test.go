@@ -1,7 +1,13 @@
 package uimodtest
 
-// H-series keyboard chrome E2E: the inspector pane shortcuts (Cmd/Ctrl+Alt+←/→)
-// and the command palette's shortcut column.
+// H-series keyboard chrome E2E: the right sidebar's page shortcuts
+// (Cmd/Ctrl+Alt+P opens the 文件 page, Ctrl+` the 终端 page) and the command
+// palette's shortcut column for the same commands.
+//
+// The retired 8-pane inspector picked its panes with a "Switch pane" menu and
+// Cmd/Ctrl+Alt+←/→; the DSH-aligned sidebar keeps only the fixed pages (开始,
+// 文件, 终端) plus opened-file tabs, so the discoverable keyboard paths are the
+// two page commands.
 
 import (
 	"testing"
@@ -10,71 +16,79 @@ import (
 	"github.com/egoist/mygo/ui"
 )
 
-// paneOf reports the inspector pane selector's current label, i.e. the pane
-// whose content is shown.
-func paneOf(tester *ui.Tester) string {
-	for _, pane := range []string{"概览", "工具", "日志", "文件", "变更", "终端", "团队", "任务"} {
-		if tester.HasText(pane) {
-			return pane
-		}
-	}
-	return ""
-}
-
-// TestInspectorPaneShortcuts covers Cmd/Ctrl+Alt+←/→ switching the inspector
-// pane and the pane-switch commands advertised in the command palette.
-func TestInspectorPaneShortcuts(t *testing.T) {
+// TestInspectorPageShortcuts covers the two page shortcuts and their palette
+// entries. With no workspace open the 文件 page shows the open-folder onboarding
+// and the 终端 page shows the command runner.
+func TestInspectorPageShortcuts(t *testing.T) {
 	product := newInteractionProduct(t)
 	tester := product.tester
 
 	if err := uiRootPushSession(product.uiRoot); err != nil {
 		t.Fatalf("push session: %v", err)
 	}
-	product.uiRoot.SetRightPanelOpen(true)
+	product.uiRoot.SetRightPanelOpen(false)
 	tester.Frame()
-	tester.Frame()
-	if !product.uiRoot.RightPanelOpen() {
-		t.Fatalf("right inspector did not open")
-	}
-	if got := paneOf(tester); got != "概览" {
-		t.Fatalf("inspector opens on pane %q, want 概览; texts = %v", got, tester.Texts())
-	}
-	// Next pane: the selector names the new pane (工具).
-	tester.Key(ui.Cmd|ui.Alt, ui.KeyRight)
+
+	// Cmd/Ctrl+Alt+P opens the sidebar on the 文件 page.
+	tester.Key(ui.Cmd|ui.Alt, ui.KeyP)
 	deadline := time.Now().Add(2 * time.Second)
-	for time.Now().Before(deadline) && paneOf(tester) != "工具" {
+	for time.Now().Before(deadline) && !(product.uiRoot.RightPanelOpen() && tester.HasText("打开文件夹")) {
 		tester.Frame()
 		time.Sleep(5 * time.Millisecond)
 	}
-	if got := paneOf(tester); got != "工具" {
-		t.Fatalf("Cmd+Alt+→ did not switch to the next pane (got %q); texts = %v", got, tester.Texts())
+	if !product.uiRoot.RightPanelOpen() {
+		t.Fatalf("Cmd+Alt+P did not open the right sidebar; texts = %v", tester.Texts())
 	}
-	// Previous pane: back to 概览.
-	tester.Key(ui.Cmd|ui.Alt, ui.KeyLeft)
-	deadline = time.Now().Add(2 * time.Second)
-	for time.Now().Before(deadline) && paneOf(tester) != "概览" {
-		tester.Frame()
-		time.Sleep(5 * time.Millisecond)
+	if !tester.HasText("打开文件夹") || !tester.HasText("还没有打开工作区") {
+		t.Fatalf("Cmd+Alt+P did not show the 文件 page; texts = %v", tester.Texts())
 	}
-	if got := paneOf(tester); got != "概览" {
-		t.Fatalf("Cmd+Alt+← did not switch back to the previous pane (got %q)", got)
+	if sidebarGuideVisible(tester) {
+		t.Fatalf("the 开始 guide is still showing after the 文件 page shortcut; texts = %v", tester.Texts())
 	}
 
-	// The command palette advertises the same chords on the pane commands.
+	// Ctrl+` switches the open sidebar to the 终端 page.
+	tester.Key(ui.Cmd, ui.KeyBackquote)
+	deadline = time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) && !tester.HasText("运行") {
+		tester.Frame()
+		time.Sleep(5 * time.Millisecond)
+	}
+	if !tester.HasText("运行") || !tester.HasText("选择 shell") {
+		t.Fatalf("Ctrl+` did not show the 终端 page; texts = %v", tester.Texts())
+	}
+	if tester.HasText("打开文件夹") {
+		t.Fatalf("the 文件 page content is still showing after the 终端 shortcut; texts = %v", tester.Texts())
+	}
+
+	// The command palette advertises the same two chords on the page commands.
 	tester.Key(ui.Cmd, ui.KeyK)
 	if !frameUntil(tester, "命令面板", 2*time.Second) {
-		t.Fatalf("command palette did not open")
+		t.Fatalf("command palette did not open; texts = %v", tester.Texts())
 	}
 	if err := tester.Click("搜索命令"); err != nil {
-		t.Fatalf("click palette search: %v", err)
+		t.Fatalf("click palette search: %v; texts = %v", err, tester.Texts())
 	}
-	tester.Type("检查器面板")
+	tester.Type("文件页")
 	tester.Frame()
 	tester.Frame()
-	for _, want := range []string{"Cmd/Ctrl + Alt + ←", "Cmd/Ctrl + Alt + →"} {
-		if !tester.HasText(want) {
-			t.Fatalf("pane command shortcut %q missing from the palette; texts = %v", want, tester.Texts())
-		}
+	if !tester.HasText("Ctrl+Alt+P") {
+		t.Fatalf("files page command shortcut missing from the palette; texts = %v", tester.Texts())
+	}
+	tester.Key(0, ui.KeyEscape)
+	tester.Frame()
+
+	tester.Key(ui.Cmd, ui.KeyK)
+	if !frameUntil(tester, "命令面板", 2*time.Second) {
+		t.Fatalf("command palette did not reopen; texts = %v", tester.Texts())
+	}
+	if err := tester.Click("搜索命令"); err != nil {
+		t.Fatalf("click palette search: %v; texts = %v", err, tester.Texts())
+	}
+	tester.Type("终端页")
+	tester.Frame()
+	tester.Frame()
+	if !tester.HasText("Ctrl+`") {
+		t.Fatalf("terminal page command shortcut missing from the palette; texts = %v", tester.Texts())
 	}
 	tester.Key(0, ui.KeyEscape)
 	tester.Frame()

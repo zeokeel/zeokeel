@@ -73,6 +73,7 @@ var (
 	Reload        = func() *ui.SVG { return get("reload") }
 	AlertTriangle = func() *ui.SVG { return get("alert-triangle") }
 	Shield        = func() *ui.SVG { return get("shield") }
+	Users         = func() *ui.SVG { return get("users") }
 	Activity      = func() *ui.SVG { return get("activity") }
 	Globe         = func() *ui.SVG { return get("globe") }
 	Close         = func() *ui.SVG { return get("x") }

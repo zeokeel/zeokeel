@@ -125,17 +125,28 @@ func TestP1ApprovalToolsAndPersistence(t *testing.T) {
 		}
 	}
 
-	// The window-level right inspector opens from the content header: the Log
-	// pane reads the durable session events the agent persisted.
+	// The window-level right sidebar opens from the content header: it lands
+	// on the 开始 guide (the retired overview/log panes are gone). The durable
+	// session events the old Log pane read are still persisted; assert them
+	// through the same store the pane read.
 	uiRoot.SetRightPanelOpen(true)
 	tester.Frame()
-	if !tester.HasText("概览") || !tester.HasText("检查") {
-		t.Fatalf("right panel missing the overview pane; texts = %v", tester.Texts())
+	requireRightSidebarGuide(t, tester, "right sidebar")
+	store, err := root.Require(contracts.KeyStore)
+	if err != nil {
+		t.Fatalf("require store: %v", err)
 	}
-	selectInspectorPane(t, tester, "日志")
+	events, err := store.Last(context.Background(), sessionID, 50)
+	if err != nil {
+		t.Fatalf("store.Last(%q): %v", sessionID, err)
+	}
+	eventTypes := make(map[string]bool, len(events))
+	for _, event := range events {
+		eventTypes[event.Type] = true
+	}
 	for _, want := range []string{"user_message", "run_end"} {
-		if !tester.HasText(want) {
-			t.Fatalf("session log missing %q; texts = %v", want, tester.Texts())
+		if !eventTypes[want] {
+			t.Fatalf("durable session log missing %q; events = %+v", want, events)
 		}
 	}
 	uiRoot.SetRightPanelOpen(false)
@@ -193,22 +204,35 @@ func TestP1ApprovalToolsAndPersistence(t *testing.T) {
 	tester.Frame()
 	uiRoot.SetRightPanelOpen(true)
 	tester.Frame()
-	selectInspectorPane(t, tester, "文件")
+	clickRightSidebarPage(t, tester, "文件")
+	// The tree reads the workspace off the UI thread: wait for the listing.
+	filesDeadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(filesDeadline) && !tester.HasText("README.md") {
+		tester.Frame()
+		time.Sleep(10 * time.Millisecond)
+	}
 	for _, want := range []string{"README.md", "src"} {
 		if !tester.HasText(want) {
-			t.Fatalf("files tab missing %q; texts = %v", want, tester.Texts())
+			t.Fatalf("files page missing %q; texts = %v", want, tester.Texts())
 		}
 	}
 	if err := tester.Click("README.md"); err != nil {
 		t.Fatalf("click README: %v; texts = %v", err, tester.Texts())
 	}
 	tester.Frame()
-	if !tester.HasText("示例文件") {
+	// The file preview reads the file off the UI thread.
+	if !frameUntil(tester, "示例文件", 3*time.Second) {
 		t.Fatalf("file preview missing; texts = %v", tester.Texts())
 	}
+	if !tester.HasText("关闭 README.md") {
+		t.Fatalf("opened file is not its own tab; texts = %v", tester.Texts())
+	}
 
-	// The terminal tab runs real commands in the workspace root.
-	selectInspectorPane(t, tester, "终端")
+	// The 终端 page runs real commands in the workspace root.
+	clickRightSidebarPage(t, tester, "终端")
+	if !frameUntil(tester, "运行", 3*time.Second) {
+		t.Fatalf("terminal page missing its run control; texts = %v", tester.Texts())
+	}
 	if runRect, ok := tester.Find("运行"); ok {
 		tester.ClickAt(runRect.X-140, runRect.Y+runRect.H/2)
 		tester.Frame()
@@ -243,8 +267,7 @@ func TestP1ApprovalToolsAndPersistence(t *testing.T) {
 		tester.ClickAt(sendRect.X-120, sendRect.Y-50)
 		tester.Frame()
 		tester.Type("@REA")
-		tester.Frame()
-		if !tester.HasText("/README.md") {
+		if !frameUntil(tester, "/README.md", 2*time.Second) {
 			t.Fatalf("mention menu missing workspace file; texts = %v", tester.Texts())
 		}
 		if err := tester.Click("/README.md"); err != nil {
@@ -744,7 +767,8 @@ func TestP1ApprovalToolsAndPersistence(t *testing.T) {
 	}
 
 	// team orchestration: spawn_teammate creates a real in-process teammate and
-	// the Agents inspector lists it with its latest result.
+	// the session header's 智能体团队 overlay lists it with its truthful run
+	// state (the old docked Agents pane moved into the header overlay).
 	teamSvc, err := root.Require(contracts.KeyTeam)
 	if err != nil {
 		t.Fatalf("require team service: %v", err)
@@ -773,18 +797,23 @@ func TestP1ApprovalToolsAndPersistence(t *testing.T) {
 		t.Fatalf("teammate never produced a result: %+v", teamSvc.Members())
 	}
 	if err := uiRoot.Navigator().Push("session"); err != nil {
-		t.Fatalf("Push(session) before team panel: %v", err)
+		t.Fatalf("Push(session) before team overlay: %v", err)
 	}
-	uiRoot.SetRightPanelOpen(true)
+	uiRoot.SetRightPanelOpen(false)
 	tester.Frame()
-	selectInspectorPane(t, tester, "团队")
-	// The run finished (the wait loop above required a result), so the pane's
-	// truthful run state is 已完成, not the old availability-derived 运行中.
-	for _, want := range []string{"研究员", member.ID, "已完成"} {
+	if err := tester.Click("智能体团队"); err != nil {
+		t.Fatalf("open team overlay: %v; texts = %v", err, tester.Texts())
+	}
+	tester.Frame()
+	// The run finished (the wait loop above required a result), so the member
+	// card's truthful run state is 已完成, not the old availability-derived 运行中.
+	for _, want := range []string{"研究员", "已完成", "成员", "共享任务"} {
 		if !tester.HasText(want) {
-			t.Fatalf("agents pane missing %q; texts = %v", want, tester.Texts())
+			t.Fatalf("team overlay missing %q; texts = %v", want, tester.Texts())
 		}
 	}
+	tester.Key(0, ui.KeyEscape)
+	tester.Frame()
 
 	// @session references + reasoning effort: the reference token persists in
 	// the transcript while the model input expands the referenced transcript.
@@ -823,7 +852,9 @@ func TestP1ApprovalToolsAndPersistence(t *testing.T) {
 	}
 
 	// shared task board: creating a task through the service shows up in the
-	// Tasks inspector and can be completed there.
+	// session header's 智能体团队 overlay (its 共享任务 section); the board
+	// mutation itself goes through the TaskBoard service (the docked task pane
+	// was removed with the 8-pane inspector) and the overlay re-reads it.
 	board, err := root.Require(contracts.KeyTaskBoard)
 	if err != nil {
 		t.Fatalf("require task board: %v", err)
@@ -832,21 +863,30 @@ func TestP1ApprovalToolsAndPersistence(t *testing.T) {
 	if err != nil {
 		t.Fatalf("TaskBoard.Create: %v", err)
 	}
-	uiRoot.SetRightPanelOpen(true)
 	tester.Frame()
-	selectInspectorPane(t, tester, "任务")
-	for _, want := range []string{"发布前检查", "待处理"} {
-		if !tester.HasText(want) {
-			t.Fatalf("tasks pane missing %q; texts = %v", want, tester.Texts())
-		}
-	}
-	if err := tester.Click("任务操作：发布前检查"); err != nil {
-		t.Fatalf("open task menu: %v; texts = %v", err, tester.Texts())
+	if err := tester.Click("智能体团队"); err != nil {
+		t.Fatalf("open team overlay: %v; texts = %v", err, tester.Texts())
 	}
 	tester.Frame()
-	if err := tester.Click("完成"); err != nil {
-		t.Fatalf("complete task: %v; texts = %v", err, tester.Texts())
+	if !frameUntil(tester, "发布前检查", 3*time.Second) {
+		t.Fatalf("shared task missing from the team overlay; texts = %v", tester.Texts())
 	}
+	if !tester.HasText("待处理") {
+		t.Fatalf("shared task status missing from the team overlay; texts = %v", tester.Texts())
+	}
+	tester.Key(0, ui.KeyEscape)
+	tester.Frame()
+	if _, err := board.SetStatus(context.Background(), task.ID, contracts.TaskStatusCompleted); err != nil {
+		t.Fatalf("complete task through the board: %v", err)
+	}
+	if err := tester.Click("智能体团队"); err != nil {
+		t.Fatalf("reopen team overlay: %v; texts = %v", err, tester.Texts())
+	}
+	tester.Frame()
+	if !frameUntil(tester, "已完成", 3*time.Second) {
+		t.Fatalf("completed task status missing from the team overlay; texts = %v", tester.Texts())
+	}
+	tester.Key(0, ui.KeyEscape)
 	tester.Frame()
 	tasks, err := board.List(context.Background())
 	if err != nil {
@@ -862,13 +902,17 @@ func TestP1ApprovalToolsAndPersistence(t *testing.T) {
 		t.Fatalf("task not completed: %+v", tasks)
 	}
 
-	// artifact history: the presented artifact is listed in Files and can be
-	// previewed again from there.
+	// artifact history: the presented artifact is listed in the Files page's
+	// 交付区 section (the old 产物 pane is gone) and can be previewed again
+	// from there.
 	uiRoot.SetRightPanelOpen(true)
 	tester.Frame()
-	selectInspectorPane(t, tester, "文件")
-	if !tester.HasText("产物") || !tester.HasText("检查报告") {
+	clickRightSidebarPage(t, tester, "文件")
+	if !frameUntil(tester, "检查报告", 3*time.Second) {
 		t.Fatalf("artifact history missing; texts = %v", tester.Texts())
+	}
+	if !tester.HasText("交付区") {
+		t.Fatalf("deliverables section heading missing; texts = %v", tester.Texts())
 	}
 	// A top-right notification can overlay the inspector's actions; dismiss it
 	// first (the toast's own close control) so the click reaches the artifact.

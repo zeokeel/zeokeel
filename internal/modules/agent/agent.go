@@ -221,8 +221,15 @@ func Module() *module.Descriptor[Config] {
 		if _, err := ctx.Provide(contracts.KeySubagents, contracts.Subagents(svc)); err != nil {
 			return fmt.Errorf("agent: provide subagents: %w", err)
 		}
-		if _, err := ctx.Provide(contracts.KeyTeam, contracts.TeamService(newTeamService(svc))); err != nil {
+		// KeyTeam and KeyChildAgents share one team adapter: the child-agent
+		// read model shows the same run state and activity timeline the team
+		// inspector sees.
+		teamService := newTeamService(svc)
+		if _, err := ctx.Provide(contracts.KeyTeam, contracts.TeamService(teamService)); err != nil {
 			return fmt.Errorf("agent: provide team service: %w", err)
+		}
+		if _, err := ctx.Provide(contracts.KeyChildAgents, contracts.ChildAgentService(newChildAgentsService(svc, teamService))); err != nil {
+			return fmt.Errorf("agent: provide child agents: %w", err)
 		}
 		_, err = ctx.Provide(contracts.KeyChat, contracts.ChatService(svc))
 		return err
@@ -231,6 +238,7 @@ func Module() *module.Descriptor[Config] {
 			module.Provides(contracts.KeyChat),
 			module.Provides(contracts.KeySubagents),
 			module.Provides(contracts.KeyTeam),
+			module.Provides(contracts.KeyChildAgents),
 			module.Provides(contracts.KeyMemoryExtractor),
 		).
 		AddRequires(module.Requires(contracts.KeyToolkit)).

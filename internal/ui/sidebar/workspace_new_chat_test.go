@@ -187,6 +187,12 @@ func TestWorkspaceRowNewChatErrorsAreInline(t *testing.T) {
 	workspace.openErr = errors.New("open failed")
 	chat := currentWorkspaceSessions()
 	h := newHarnessWithWorkspace(t, chat, sidebar.Config{}, workspace)
+	// The session screen is the product landing now, so park on Home first:
+	// the failure assertion below must distinguish "did not navigate" from the
+	// default screen.
+	if err := h.uiRoot.Navigator().Push("home"); err != nil {
+		t.Fatalf("Push(home): %v", err)
+	}
 	tester := h.tester()
 
 	if err := tester.Click(plusLabel("项目一")); err != nil {
@@ -198,14 +204,17 @@ func TestWorkspaceRowNewChatErrorsAreInline(t *testing.T) {
 	if created := chat.createdSessions(); len(created) != 0 {
 		t.Fatalf("a failed Open still created sessions: %v", created)
 	}
-	if current := h.uiRoot.Navigator().Current(); current == "session" {
-		t.Fatal("a failed Open navigated to the session screen")
+	if current := h.uiRoot.Navigator().Current(); current != "home" {
+		t.Fatalf("a failed Open navigated to %q, want to stay on home", current)
 	}
 
 	// NewSession failure: same inline treatment, no navigation.
 	workspace.openErr = nil
 	failing := &failingNewChat{fakeChat: currentWorkspaceSessions(), newErr: errors.New("new failed")}
 	h2 := newHarnessWithWorkspace(t, failing, sidebar.Config{}, currentWorkspaceChat(t))
+	if err := h2.uiRoot.Navigator().Push("home"); err != nil {
+		t.Fatalf("Push(home): %v", err)
+	}
 	tester2 := h2.tester()
 	if err := tester2.Click(plusLabel("项目一")); err != nil {
 		t.Fatalf("click per-workspace new chat: %v", err)
@@ -213,8 +222,8 @@ func TestWorkspaceRowNewChatErrorsAreInline(t *testing.T) {
 	tester2.Frame()
 	tester2.Frame()
 	h2.assertTexts(tester2, "新建会话失败：new failed")
-	if current := h2.uiRoot.Navigator().Current(); current == "session" {
-		t.Fatal("a failed NewSession navigated to the session screen")
+	if current := h2.uiRoot.Navigator().Current(); current != "home" {
+		t.Fatalf("a failed NewSession navigated to %q, want to stay on home", current)
 	}
 }
 

@@ -541,29 +541,6 @@ func (d *drive) goalChipLabel() string {
 	return ""
 }
 
-// selectPane switches the inspector to one pane through its pane selector. The
-// selector is a menu button naming the current pane; opening it and choosing
-// the target pane is the user path now that eight tabs do not fit the rail.
-func (d *drive) selectPane(label string) bool {
-	for attempt := 0; attempt < 3; attempt++ {
-		if err := d.click("切换面板"); err != nil {
-			return false
-		}
-		d.drain(2)
-		if !d.has(label) {
-			return false
-		}
-		if err := d.click(label); err != nil {
-			continue
-		}
-		d.drain(2)
-		// The selector names the active pane; the target label is now its
-		// visible text (and its menu item is gone).
-		return d.hasExact(label) || d.has(label)
-	}
-	return false
-}
-
 // paletteTailTexts returns the last labels of the frame for failure evidence.
 func paletteTailTexts(d *drive) []string {
 	texts := d.texts()

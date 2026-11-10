@@ -23,6 +23,14 @@
 // workspace group row also carries the per-workspace new-chat action (⊕) that
 // opens the workspace and starts a conversation in it.
 //
+// The list shows user conversations only: archived sessions are owned by the
+// settings surface's archive page, and automation-run sessions (the
+// automation module's "自动化: <task>" chats) are owned by the Automation
+// screen's run history. Neither ever renders as a row, a tree leaf or a
+// search result. The sidebar is also the landing surface: there is no Home
+// navigation row (the home screen stays registered for the host), so the new
+// chat action and the session list are the destinations the sidebar offers.
+//
 // The product has exactly one view: groups are ordered by recent activity and
 // sessions by UpdatedAt (pinned first) inside them; there is no view menu and
 // no persisted sort/group setting. A host without a workspace backend keeps
@@ -120,8 +128,9 @@ type paneState struct {
 	workspaceDeleteErr  string
 
 	// screens lists the registered screens so the sidebar can offer a
-	// generic navigation item for every module screen except the two the
-	// sidebar draws itself (home destination + the session list).
+	// generic navigation item for every module screen it does not own (the
+	// session list is the sidebar's own screen). Home is no longer a sidebar
+	// destination, so it stays out of the generic rows as well.
 	screens contracts.ScreenLister
 
 	// Full-text message search state: the query the cached hits belong to and
@@ -348,25 +357,22 @@ func (state *paneState) currentWorkspace() (contracts.Workspace, bool) {
 	return current, true
 }
 
-// buildSessionList renders the sidebar's navigation column: the Home
-// destination first, then the "工作区" → session tree when a workspace backend
+// buildSessionList renders the sidebar's navigation column: the generic module
+// screen destinations, then the "工作区" → session tree when a workspace backend
 // is available (contracts.KeyWorkspace) or the legacy flat session list
-// otherwise. The search field filters session titles across every group;
+// otherwise. There is no Home destination row (the home screen stays registered
+// for the host, but the new-chat action and the session list are the sidebar's
+// landing surface). The search field filters session titles across every group;
 // clicking a session activates it and opens the session screen.
 func buildSessionList(c *ui.Context, t *design.Tokens, chat contracts.ChatService,
 	nav contracts.Navigator, runtime contracts.UIRuntime, state *paneState, title string) {
 	ui.Column(c).FillWidth().Gap(design.Space1).Padding(design.Space2, 0, 0, 0).
 		Children(func() {
-			home := ui.SidebarItem(c, "home", icons.Home(), state.T("首页", "Home"))
-			home.OnClick(func() {
-				if err := nav.Push("home"); err == nil {
-					runtime.Invalidate()
-				}
-			})
 			// Generic module-screen destinations: every registered screen the
-			// sidebar does not own itself (home destination and the session list
-			// are handled above) gets one native navigation item, so a new screen
-			// module (for example ui/automation) appears without a sidebar edit.
+			// sidebar does not own itself (the session list is its own screen, and
+			// the home screen is intentionally not a destination) gets one native
+			// navigation item, so a new screen module (for example
+			// ui/automation) appears without a sidebar edit.
 			if state.screens != nil {
 				for _, id := range state.screens.Screens() {
 					if id == "home" || id == "session" || strings.TrimSpace(id) == "" {
@@ -470,10 +476,11 @@ func buildMessageSearch(c *ui.Context, t *design.Tokens, chat contracts.ChatServ
 		hits, err := searcher.SearchMessages(context.Background(), query, maxMessageHits)
 		state.searchHits, state.searchErr = dedupeMessageHits(hits), err
 	}
-	// The search results are store-owned and carry no archive flag, so archived
-	// conversations are filtered here on every frame (archiving closes the
-	// session's rows immediately instead of waiting for a new query).
-	visibleHits := visibleMessageHits(state.searchHits, archivedSessionIDs(chat), maxMessageHits)
+	// The search results are store-owned and carry no archive or run flag, so
+	// hidden conversations (archived sessions and automation runs) are filtered
+	// here on every frame: archiving or a finished run closes the conversation's
+	// rows immediately instead of waiting for a new query.
+	visibleHits := visibleMessageHits(state.searchHits, hiddenSessionIDs(chat), maxMessageHits)
 
 	ui.Column(c).FillWidth().Gap(design.Space1).Padding(design.Space2, 0, 0, 0).
 		Children(func() {
@@ -1320,13 +1327,34 @@ func pinnedFirst(sessions []contracts.ChatSessionInfo) []contracts.ChatSessionIn
 	return ordered
 }
 
-// visibleSessions drops archived sessions: they never appear in the sidebar's
-// session list or the workspace tree (the settings surface's archive page owns
-// them). The remaining order is untouched (updated newest first).
+// automationSessionTitlePrefix is the stable title prefix the automation module
+// puts on the chat session it creates for one scheduled run. Those sessions are
+// the run history's property, not user conversations: they never render in the
+// sidebar's session list, workspace tree or search results (the Automation
+// screen owns their history). The prefix is the product convention
+// (internal/modules/automation); the sidebar only reads it.
+const automationSessionTitlePrefix = "自动化: "
+
+// isAutomationSessionTitle reports whether a session title names an
+// automation-run session.
+func isAutomationSessionTitle(title string) bool {
+	return strings.HasPrefix(strings.TrimSpace(title), automationSessionTitlePrefix)
+}
+
+// isAutomationSession reports whether a session is an automation run's chat
+// session.
+func isAutomationSession(info contracts.ChatSessionInfo) bool {
+	return isAutomationSessionTitle(info.Title)
+}
+
+// visibleSessions drops the sessions the sidebar never renders: archived
+// sessions (the settings surface's archive page owns them) and automation-run
+// sessions (the Automation screen's run history owns them). The remaining order
+// is untouched (updated newest first).
 func visibleSessions(sessions []contracts.ChatSessionInfo) []contracts.ChatSessionInfo {
 	visible := make([]contracts.ChatSessionInfo, 0, len(sessions))
 	for _, session := range sessions {
-		if session.Archived {
+		if session.Archived || isAutomationSession(session) {
 			continue
 		}
 		visible = append(visible, session)
@@ -1355,25 +1383,28 @@ func orderSessionList(sessions []contracts.ChatSessionInfo) []contracts.ChatSess
 	return pinnedFirst(recentSessions(sessions))
 }
 
-// archivedSessionIDs is the set of archived conversations, for filtering the
-// full-text search results (which come from the store and carry no archive
-// flag of their own).
-func archivedSessionIDs(chat contracts.ChatService) map[string]bool {
-	archived := make(map[string]bool)
+// hiddenSessionIDs is the set of conversations the sidebar never shows, for
+// filtering the full-text search results (which come from the store and carry
+// no archive or run flag of their own): archived sessions and automation-run
+// sessions.
+func hiddenSessionIDs(chat contracts.ChatService) map[string]bool {
+	hidden := make(map[string]bool)
 	for _, session := range chat.Sessions() {
-		if session.Archived {
-			archived[session.ID] = true
+		if session.Archived || isAutomationSession(session) {
+			hidden[session.ID] = true
 		}
 	}
-	return archived
+	return hidden
 }
 
-// visibleMessageHits drops search hits of archived conversations and applies
-// the row limit after that filter, so archived messages never take a slot.
-func visibleMessageHits(hits []contracts.MessageSearchHit, archived map[string]bool, limit int) []contracts.MessageSearchHit {
+// visibleMessageHits drops search hits of hidden conversations (archived and
+// automation-run sessions) and applies the row limit after that filter, so a
+// hidden conversation's messages never take a slot. A stored hit can outlive
+// its session in the read model, so the hit's own title is checked too.
+func visibleMessageHits(hits []contracts.MessageSearchHit, hidden map[string]bool, limit int) []contracts.MessageSearchHit {
 	visible := make([]contracts.MessageSearchHit, 0, len(hits))
 	for _, hit := range hits {
-		if archived[hit.SessionID] {
+		if hidden[hit.SessionID] || isAutomationSessionTitle(hit.SessionTitle) {
 			continue
 		}
 		visible = append(visible, hit)

@@ -665,10 +665,15 @@ func TestSidebarCollapseAndFooter(t *testing.T) {
 	if !product.uiRoot.SidebarCollapsed() {
 		t.Fatalf("Cmd+B did not collapse the sidebar; texts = %v", tester.Texts())
 	}
-	for _, want := range []string{"首页", "自动化", "插件", "设置"} {
+	// The rail keeps the nav destinations and the footer entry; Home is no
+	// longer a destination (the session screen is the landing).
+	for _, want := range []string{"新对话", "自动化", "插件", "设置"} {
 		if !tester.HasText(want) {
 			t.Fatalf("collapsed rail is missing %q; texts = %v", want, tester.Texts())
 		}
+	}
+	if tester.HasText("首页") {
+		t.Fatalf("the collapsed rail still lists the removed Home destination; texts = %v", tester.Texts())
 	}
 	tester.Key(ui.Cmd, ui.KeyB)
 	tester.Frame()

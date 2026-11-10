@@ -81,6 +81,9 @@ func TestScreenBandScopesNamespacedItems(t *testing.T) {
 	})
 	mustSlot(t, r, textSlotItem(contracts.SlotScreenHeader, "global-header", "global-header-text", 10))
 	mustSlot(t, r, textSlotItem(contracts.SlotScreenHeader, "session.title", "session-title-text", 20))
+	if err := r.Navigator().Push("home"); err != nil {
+		t.Fatalf("Push(home): %v", err)
+	}
 	tt := newTestTester(t, r, 1280, 800)
 	tt.Frame()
 
@@ -118,6 +121,9 @@ func TestScreenBandScopesNamespacedItems(t *testing.T) {
 		Build: func(c *ui.Context) { ui.Text(c, "body-session") },
 	})
 	mustSlot(t, scoped, textSlotItem(contracts.SlotScreenHeader, "session.title", "session-title-text", 20))
+	if err := scoped.Navigator().Push("home"); err != nil {
+		t.Fatalf("Push(home): %v", err)
+	}
 	scopedTT := newTestTester(t, scoped, 1280, 800)
 	scopedTT.Frame()
 	if _, ok := scopedTT.AccessByRole(ui.RoleButton, "快捷操作"); ok {

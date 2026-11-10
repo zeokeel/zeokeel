@@ -409,43 +409,6 @@ func TestTruncatedOutputShowsHint(t *testing.T) {
 	h.assertTexts(tester, "输出已截断，仅显示前部分")
 }
 
-// TestTeamToolFooterRunsInspectorCommand covers the cross-navigation footer:
-// a subagent card opens the inspector's team pane through the stable command,
-// and a host without the command shows no footer action at all.
-func TestTeamToolFooterRunsInspectorCommand(t *testing.T) {
-	h := newHarness(t)
-	activate(t, h.ctx, toolcards.Module(), toolcards.Config{})
-	ran := 0
-	if _, err := h.ui.Runtime().RegisterCommand(contracts.CommandSpec{
-		ID:    "rightpanel.team.open",
-		Title: "打开团队面板",
-		Run:   func() error { ran++; return nil },
-	}); err != nil {
-		t.Fatalf("register command: %v", err)
-	}
-	h.showCalls([]contracts.ToolCall{{
-		ID: "s1", Name: "subagent", Status: "ok",
-		Arguments: `{"prompt":"总结当前工作目录"}`,
-		Summary:   "子代理已完成",
-	}}, nil, nil)
-	tester := h.tester()
-	h.assertTexts(tester, "在团队中查看")
-	h.click(tester, "在团队中查看")
-	if ran != 1 {
-		t.Fatalf("team command runs = %d, want 1", ran)
-	}
-
-	// No command registered: the action is not shown (never a dead button).
-	plain := newHarness(t)
-	activate(t, plain.ctx, toolcards.Module(), toolcards.Config{})
-	plain.showCalls([]contracts.ToolCall{{
-		ID: "s2", Name: "subagent", Status: "ok", Summary: "子代理已完成",
-	}}, nil, nil)
-	if plain.tester().HasText("在团队中查看") {
-		t.Fatal("team footer shown without the inspector command")
-	}
-}
-
 // TestFoldStateMapIsBounded covers S-07: the per-card disclosure state must not
 // grow for the lifetime of the process (one long agent run can render thousands
 // of calls). Past the bound the least recently rendered cards are evicted and

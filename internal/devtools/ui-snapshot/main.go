@@ -55,9 +55,6 @@ type app struct {
 	loader  *module.Loader
 	root    cordis.Context
 	cleanup func()
-	// pane is the inspector pane whose label the pane selector currently
-	// shows, so the snapshot can open the selector and choose another pane.
-	pane string
 	// localeTag is the framework (mygo) locale last pushed into the Tester.
 	// The product mirrors its own language into mygo.App.SetLocale; the
 	// headless snapshot must do the same or framework chrome (markdown Copy,
@@ -372,12 +369,14 @@ func main() {
 		a.tester.Frame()
 	}
 
-	// Artifact history in the Files inspector (preview from the history list).
+	// Artifact history in the right sidebar's 文件 page (the 交付区 deliverables
+	// section above the workspace tree).
 	a.ui.SetRightPanelOpen(true)
 	a.tester.Frame()
-	if err := a.openPane("文件"); err != nil {
-		fail("artifact history pane", err)
+	if err := a.showSidebarPage("文件"); err != nil {
+		fail("artifact history page", err)
 	}
+	a.waitText("README.md", 5*time.Second)
 	a.render(outDir + "/p2-artifact-history.png")
 	a.ui.SetRightPanelOpen(false)
 	a.tester.Frame()
@@ -440,30 +439,40 @@ func main() {
 				}
 				time.Sleep(10 * time.Millisecond)
 			}
-			// The header team chip is the one-step entry the audit asked for:
-			// it shows the roster size and opens the inspector's team pane.
+			// The header 智能体团队 entry is the one-step team surface: it shows
+			// the roster size and opens the native team overlay (member cards +
+			// shared task cards), replacing the retired inspector team pane.
 			a.render(outDir + "/p2-team-chip.png")
-			a.ui.SetRightPanelOpen(true)
-			a.tester.Frame()
-			if err := a.openPane("团队"); err != nil {
-				fmt.Println("open agents pane:", err)
+			if err := a.tester.Click("智能体团队"); err != nil {
+				fmt.Println("open team overlay:", err)
 			}
-			a.render(outDir + "/p2-team.png")
-			// A teammate row opens the activity timeline (spawn → finished).
+			a.tester.Frame()
+			a.render(outDir + "/p2-team-overlay.png")
+			// A member card's 打开 switches the main content area to that child
+			// conversation under the parent > child breadcrumb.
 			if members := team.Members(); len(members) > 0 {
-				if err := a.tester.Click(members[0].Name); err != nil {
-					// The 320 DIP pane can clip the secondary line, so fall back to
-					// the row's screen position (header + sections are fixed above
-					// the first teammate row).
-					fmt.Println("select teammate:", err)
-					a.tester.ClickAt(1120, 222)
-				}
-				a.tester.Frame()
-				a.render(outDir + "/p2-team-detail.png")
-				// The pane's own spawn form: name, self-contained task, model.
-				if err := a.tester.Click("新建队友"); err == nil {
+				if err := a.tester.Click("打开成员 " + members[0].Name); err == nil {
 					a.tester.Frame()
-					a.render(outDir + "/p2-team-spawn.png")
+					a.render(outDir + "/p2-team-child.png")
+					if !a.clickBreadcrumbParent() {
+						fmt.Println("return from child view: parent breadcrumb not found")
+					}
+				} else {
+					fmt.Println("open child view:", err)
+				}
+			}
+			// The header 子智能体 chip opens the child switcher overlay.
+			switcher := ""
+			for _, text := range a.tester.Texts() {
+				if strings.HasPrefix(text, "子智能体 ") {
+					switcher = text
+					break
+				}
+			}
+			if switcher != "" {
+				if err := a.tester.Click(switcher); err == nil {
+					a.tester.Frame()
+					a.render(outDir + "/p2-child-switcher.png")
 					a.tester.Key(0, ui.KeyEscape)
 					a.tester.Frame()
 				}
@@ -644,40 +653,39 @@ func main() {
 		a.tester.Frame()
 	}
 
-	// P2: the window-level right inspector (durable session log pane).
+	// P2: the right sidebar's 开始 guide (工作区文件 / 新建终端 cards). The
+	// retired 8-pane inspector is gone: the sidebar is one tab strip with the
+	// fixed pages plus one tab per opened file.
 	a.ui.SetRightPanelOpen(true)
 	a.tester.Frame()
-	// The pane selection is module state that survived the earlier inspector
-	// steps (the team pane); reset it so the overview screenshot shows the
-	// overview pane.
-	if err := a.openPane("概览"); err != nil {
-		fail("reset inspector pane", err)
+	if err := a.showSidebarPage("开始"); err != nil {
+		fail("sidebar guide", err)
 	}
-	a.render(outDir + "/p2-rightpanel.png")
-	if err := a.openPane("文件"); err != nil {
-		fail("files pane", err)
+	a.render(outDir + "/p2-guide.png")
+	// 文件 page: the deliverables history above the workspace tree.
+	if err := a.showSidebarPage("文件"); err != nil {
+		fail("files page", err)
 	}
-	// The listing (and the preview below it) loads off the UI thread now.
 	a.waitText("README.md", 5*time.Second)
 	a.render(outDir + "/p2-files.png")
-	if err := a.tester.Click("README.md"); err != nil {
-		fail("open README.md", err)
+	if err := a.openFileTab("README.md"); err != nil {
+		fail("open README tab", err)
 	}
 	a.waitText("ZeoKeel 工作区", 5*time.Second)
-	a.render(outDir + "/p2-files-preview.png")
-	if err := a.openPane("变更"); err != nil {
-		fail("changes pane", err)
+	a.render(outDir + "/p2-file-preview.png")
+	// The retired Changes pane is folded into the file tab: a changed file's
+	// tab carries the 查看改动 disclosure with its unified diff.
+	if a.waitText("查看改动", 5*time.Second) {
+		a.render(outDir + "/p2-file-diff-folded.png")
+		if err := a.tester.Click("查看改动"); err == nil {
+			a.tester.Advance(200 * time.Millisecond)
+			a.tester.Frame()
+			a.render(outDir + "/p2-file-diff.png")
+		}
 	}
-	a.waitText("查看 diff", 5*time.Second)
-	a.render(outDir + "/p2-changes.png")
-	if err := a.tester.Click("查看 diff"); err != nil {
-		fail("expand diff", err)
-	}
-	a.tester.Advance(200 * time.Millisecond)
-	a.render(outDir + "/p2-changes-diff.png")
-	// Terminal pane: run a real command in the workspace root.
-	if err := a.openPane("终端"); err != nil {
-		fail("terminal pane", err)
+	// 终端 page: run a real command in the workspace root.
+	if err := a.showSidebarPage("终端"); err != nil {
+		fail("terminal page", err)
 	}
 	a.tester.Frame()
 	if runRect, ok := a.tester.Find("运行"); ok {
@@ -697,6 +705,36 @@ func main() {
 		}
 	}
 	a.render(outDir + "/p2-terminal.png")
+	a.ui.SetRightPanelOpen(false)
+	a.tester.Frame()
+
+	// Background jobs: the header chip appears with a live job and opens the
+	// native jobs overlay (status/command/duration/exit code + the stop action).
+	liveJob := ""
+	if toolkit, tkErr := a.root.Require(contracts.KeyToolkit); tkErr == nil {
+		if result, invokeErr := toolkit.Invoke(context.Background(), rig.ToolCall{
+			ID: "job-snapshot", Name: "job_start",
+			Arguments: `{"command":"bash -c 'sleep 60'","timeout_ms":30000}`,
+		}); invokeErr == nil && !result.IsError {
+			if jobsService, jobsErr := a.root.Require(contracts.KeyJobs); jobsErr == nil {
+				if jobs := jobsService.Jobs(); len(jobs) > 0 {
+					liveJob = jobs[0].ID
+				}
+				a.tester.Frame()
+				if err := a.tester.Click("1 个后台任务"); err == nil {
+					a.tester.Frame()
+					a.render(outDir + "/p2-jobs.png")
+					if a.clickFirstPrefix("停止后台任务 ") {
+						a.waitJobDone(liveJob, 10*time.Second)
+						a.tester.Frame()
+						a.render(outDir + "/p2-jobs-stopped.png")
+					}
+					a.tester.Key(0, ui.KeyEscape)
+					a.tester.Frame()
+				}
+			}
+		}
+	}
 
 	// Shared task board: status groups, owners, dependencies and the expanded
 	// task detail (the board is also the agent's todo list).
@@ -727,27 +765,31 @@ func main() {
 				}
 			}
 		}
-		if err := a.openPane("任务"); err != nil {
-			fail("tasks pane", err)
+		// The shared board is the team overlay's 共享任务 section: subject,
+		// status, owner, blockers and write scopes per card. Open it and scroll
+		// the (bounded) panel body down to the task cards below the roster.
+		if err := a.tester.Click("智能体团队"); err != nil {
+			fmt.Println("open team overlay for tasks:", err)
 		}
-		a.render(outDir + "/p2-tasks.png")
-		// Enter expands one task's detail: description, dependency state, owner
-		// and write scopes.
-		if rect, ok := a.tester.Find("更新发布截图"); ok {
-			a.tester.ClickAt(rect.X+rect.W/2, rect.Y+rect.H/2)
+		a.tester.Frame()
+		a.render(outDir + "/p2-team-tasks.png")
+		if rect, ok := a.tester.Find("共享任务"); ok {
+			a.tester.Wheel(rect.X+rect.W/2, rect.Y+rect.H/2, 0, 640)
+			a.tester.Advance(300 * time.Millisecond)
 			a.tester.Frame()
-			a.tester.Key(0, ui.KeyEnter)
-			a.tester.Frame()
-			a.render(outDir + "/p2-tasks-expanded.png")
+			a.render(outDir + "/p2-team-tasks-scrolled.png")
 		}
+		a.tester.Key(0, ui.KeyEscape)
+		a.tester.Frame()
 	}
 
-	// The command palette finds the team entries by their stable command IDs.
+	// The command palette lists the right sidebar's page commands (the retired
+	// team/task pane commands are gone with the 8-pane inspector).
 	a.tester.Key(ui.Cmd, ui.KeyK)
 	a.tester.Frame()
-	a.tester.Type("团队")
+	a.tester.Type("文件页")
 	a.tester.Frame()
-	a.render(outDir + "/p2-palette-team.png")
+	a.render(outDir + "/p2-palette-right-pages.png")
 	a.tester.Key(0, ui.KeyEscape)
 	a.tester.Frame()
 	a.tester.Key(0, ui.KeyEscape)
@@ -763,22 +805,34 @@ func main() {
 		a.tester.Key(0, ui.KeyBackspace)
 		a.render(outDir + "/p2-mentions.png")
 	}
-	if err := a.openPane("日志"); err != nil {
-		fail("log pane", err)
-	}
-	a.render(outDir + "/p2-log.png")
-	a.ui.SetRightPanelOpen(false)
 
 	// P2: the collapsed 64 DIP sidebar rail (Cmd/Ctrl+B).
 	a.ui.SetSidebarCollapsed(true)
 	a.render(outDir + "/p2-sidebar-collapsed.png")
 	a.ui.SetSidebarCollapsed(false)
+	a.tester.Frame()
+	a.tester.Frame()
 
-	// P2: Home recent sessions and the appearance settings page.
-	if err := a.ui.Navigator().Push("home"); err != nil {
-		fmt.Println("push home:", err)
+	// P2: the new-chat landing (the retired Home destination's replacement):
+	// the sidebar's 新对话 opens the session hero with its composer.
+	for attempt := 0; attempt < 3; attempt++ {
+		if err := a.tester.Click("新对话"); err != nil {
+			fmt.Println("new chat:", err)
+			a.tester.Frame()
+			continue
+		}
+		a.tester.Frame()
+		// The landing hero is the 对话 tab's empty state: an earlier scene can
+		// leave the 轨迹 tab selected.
+		a.clickTab("对话")
+		if a.tester.HasText("开始新对话") {
+			break
+		}
 	}
-	a.render(outDir + "/p2-home.png")
+	if !a.tester.HasText("开始新对话") {
+		fmt.Println("landing: the new-chat hero is not shown")
+	}
+	a.render(outDir + "/p2-landing.png")
 	a.ui.Navigator().ToggleSettings()
 	a.tester.Frame()
 	if err := a.clickSettingsItem("模型"); err != nil {
@@ -1070,8 +1124,22 @@ func main() {
 	a.render(outDir + "/narrow/narrow-session-inspector.png")
 	a.ui.SetRightPanelOpen(false)
 	a.tester.Frame()
-	if err := a.ui.Navigator().Push("home"); err == nil {
-		a.render(outDir + "/narrow/narrow-home.png")
+	if err := a.ui.Navigator().Push("session"); err == nil {
+		a.tester.Frame()
+		a.tester.Frame()
+		for attempt := 0; attempt < 3; attempt++ {
+			if err := a.tester.Click("新对话"); err != nil {
+				fmt.Println("narrow new chat:", err)
+				a.tester.Frame()
+				continue
+			}
+			a.tester.Frame()
+			a.clickTab("对话")
+			if a.tester.HasText("开始新对话") {
+				break
+			}
+		}
+		a.render(outDir + "/narrow/narrow-landing.png")
 	}
 	a.ui.Navigator().ToggleSettings()
 	a.tester.Frame()
@@ -1081,10 +1149,21 @@ func main() {
 	a.tester.Frame()
 	a.ui.Theme().SetDark(true)
 	a.tester.Frame()
-	if err := a.ui.Navigator().Push("home"); err == nil {
-		a.render(outDir + "/narrow/dark-home.png")
-	}
 	if err := a.ui.Navigator().Push("session"); err == nil {
+		a.tester.Frame()
+		for attempt := 0; attempt < 3; attempt++ {
+			if err := a.tester.Click("新对话"); err != nil {
+				fmt.Println("dark new chat:", err)
+				a.tester.Frame()
+				continue
+			}
+			a.tester.Frame()
+			a.clickTab("对话")
+			if a.tester.HasText("开始新对话") {
+				break
+			}
+		}
+		a.render(outDir + "/narrow/dark-landing.png")
 		a.render(outDir + "/narrow/dark-session.png")
 	}
 	a.ui.Navigator().ToggleSettings()
@@ -1096,24 +1175,107 @@ func main() {
 	writeManifest(outDir)
 }
 
-// openPane opens one inspector pane through the pane selector: the module shows
-// the panes as one menu button naming the current pane (eight tabs do not fit a
-// 320 DIP inspector), so a snapshot clicks the selector and then the pane.
-func (a *app) openPane(name string) error {
-	current := a.pane
-	if current == "" {
-		current = "概览"
+// showSidebarPage switches the right sidebar to one of its fixed pages through
+// the native tab strip (开始 | 文件 | 终端 | opened files).
+func (a *app) showSidebarPage(label string) error {
+	if err := a.tester.Click(label); err != nil {
+		return fmt.Errorf("click sidebar page %q: %w", label, err)
 	}
-	if err := a.tester.Click(current); err != nil {
-		return fmt.Errorf("open pane selector %q: %w", current, err)
-	}
-	a.tester.Frame()
-	if err := a.tester.Click(name); err != nil {
-		return fmt.Errorf("choose pane %q: %w", name, err)
-	}
-	a.pane = name
 	a.tester.Frame()
 	return nil
+}
+
+// clickTab selects one conversation tab (对话/轨迹/记忆) through its native tab
+// role: the window header's session title can share the same words, so a text
+// click would be ambiguous.
+func (a *app) clickTab(label string) bool {
+	info, ok := a.tester.AccessByRole(ui.RoleTab, label)
+	if !ok {
+		return false
+	}
+	a.tester.ClickAt(info.Bounds.X+info.Bounds.W/2, info.Bounds.Y+info.Bounds.H/2)
+	a.tester.Frame()
+	return true
+}
+
+// openFileTab opens one workspace file from the 文件 page's tree: the click adds
+// (or focuses) the file's tab and shows its read-only preview.
+func (a *app) openFileTab(path string) error {
+	if err := a.showSidebarPage("文件"); err != nil {
+		return err
+	}
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		if a.tester.HasText(path) {
+			break
+		}
+		a.tester.Frame()
+		time.Sleep(10 * time.Millisecond)
+	}
+	if err := a.tester.Click(path); err != nil {
+		return fmt.Errorf("open file tab %q: %w", path, err)
+	}
+	a.tester.Frame()
+	return nil
+}
+
+// clickBreadcrumbParent returns from a child conversation (the main content
+// area's parent > child breadcrumb) by clicking the parent crumb: the crumb is
+// the only RoleLink named after the running conversation title.
+func (a *app) clickBreadcrumbParent() bool {
+	chat, err := a.root.Require(contracts.KeyChat)
+	if err != nil {
+		return false
+	}
+	title := ""
+	if session, ok := chat.Session(chat.ActiveSession()); ok {
+		title = strings.TrimSpace(session.Title)
+	}
+	if title == "" {
+		return false
+	}
+	info, ok := a.tester.AccessByRole(ui.RoleLink, title)
+	if !ok {
+		return false
+	}
+	a.tester.ClickAt(info.Bounds.X+info.Bounds.W/2, info.Bounds.Y+info.Bounds.H/2)
+	a.tester.Frame()
+	return true
+}
+
+// clickFirstPrefix clicks the first control whose label/text starts with prefix
+// and reports whether it found one (the job stop action names the job id).
+func (a *app) clickFirstPrefix(prefix string) bool {
+	for _, text := range a.tester.Texts() {
+		if !strings.HasPrefix(text, prefix) {
+			continue
+		}
+		if err := a.tester.Click(text); err != nil {
+			continue
+		}
+		a.tester.Frame()
+		return true
+	}
+	return false
+}
+
+// waitJobDone pumps frames until the named background job stops running.
+func (a *app) waitJobDone(jobID string, timeout time.Duration) bool {
+	jobsService, err := a.root.Require(contracts.KeyJobs)
+	if err != nil {
+		return false
+	}
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		a.tester.Frame()
+		for _, job := range jobsService.Jobs() {
+			if job.ID == jobID && !job.Running {
+				return true
+			}
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	return false
 }
 
 // writeManifest records what produced a snapshot run, so a reviewer can tell

@@ -138,8 +138,8 @@ func (r *Root) sidebarExpanded(c *ui.Context) {
 	screens := visibleScreens(r.rt.screenSpecs())
 	selected := r.nav.Current()
 	initial := selected == ""
-	if initial && len(screens) > 0 {
-		selected = screens[0].ID
+	if initial {
+		selected = defaultScreenID(screens)
 	}
 	column := ui.Column(c).FillHeight().Background(t.BgSidebar).
 		BorderWidth(0, 1, 0, 0).BorderColor(t.BorderL3)
@@ -250,7 +250,7 @@ func (r *Root) sidebarRail(c *ui.Context) {
 			// is the workspace tree's destination in the expanded sidebar and
 			// had no navigation row there. Listing it here made the two chrome
 			// forms show different destination sets (fix round SH-05).
-			if spec.ID == sessionScreenID {
+			if spec.ID == sessionScreenID || spec.ID == "home" {
 				continue
 			}
 			icon := r.screenIcon(spec.ID)
@@ -340,7 +340,15 @@ func (r *Root) screen(c *ui.Context) {
 	}
 	spec, ok := r.rt.screen(r.nav.Current())
 	if !ok || !visible(spec) {
-		spec = specs[0]
+		if id := defaultScreenID(specs); id != "" {
+			if fallback, exists := r.rt.screen(id); exists {
+				spec = fallback
+				ok = true
+			}
+		}
+		if !ok {
+			spec = specs[0]
+		}
 	}
 	ui.Column(c).FillWidth().Grow(1).Padding(design.Space6).Gap(design.Space4).Children(func() {
 		// The screen's header/actions/tabs live in the window's B3 top band
@@ -440,9 +448,11 @@ func (r *Root) inspectorDocked(c *ui.Context) bool {
 // its surface and builds the module's contribution.
 func (r *Root) inspectorDockedPane(c *ui.Context) {
 	t := design.Of(c)
+	// The right sidebar owns its own header (tab strip) and page padding: the
+	// host only paints the docked surface and the divider so the tab strip can
+	// sit flush at the top of the column, DSH-style.
 	ui.Column(c).FillHeight().Background(t.BgSidebar).
-		BorderWidth(1, 0, 0, 0).BorderColor(t.BorderL3).
-		Padding(design.Space4).Children(func() {
+		BorderWidth(1, 0, 0, 0).BorderColor(t.BorderL3).Children(func() {
 		r.dockedInspectorHeader(c, t)
 		r.slot(c, contracts.SlotSessionPanelRight)
 	})
@@ -829,22 +839,15 @@ func (r *Root) movePaletteSelection(delta int) {
 	r.requestFrame()
 }
 
-// runPaletteCommand closes the palette and runs one command. The inspector
-// pane commands get the same closed-inspector guard the chord has, so the
-// palette cannot silently change a hidden pane either.
+// runPaletteCommand closes the palette and runs one command.
 func (r *Root) runPaletteCommand(cmd contracts.CommandSpec) {
 	r.paletteOpen = false
 	r.paletteQuery = ""
 	r.paletteFilter = ""
 	r.paletteSelected = 0
 	r.paletteCount = 0
-	switch cmd.ID {
-	case "rightpanel.pane.prev", "rightpanel.pane.next":
-		r.runPaneCommand(cmd.ID)
-	default:
-		if cmd.Run != nil {
-			_ = cmd.Run()
-		}
+	if cmd.Run != nil {
+		_ = cmd.Run()
 	}
 	r.requestFrame()
 }
@@ -1371,6 +1374,24 @@ func visible(spec contracts.ScreenSpec) bool {
 	return spec.Visible == nil || spec.Visible()
 }
 
+// defaultScreenID is the first-run landing: the conversation surface (new
+// chat / empty session hero), not the retired Home destination. Assemblies that
+// do not ship a session screen keep their first visible screen.
+func defaultScreenID(specs []contracts.ScreenSpec) string {
+	for _, spec := range specs {
+		if spec.ID == sessionScreenID {
+			return spec.ID
+		}
+	}
+	if len(specs) == 0 {
+		return ""
+	}
+	return specs[0].ID
+}
+
+// visibleScreens returns the screens a user can navigate to. Home is retained
+// as an embeddable screen but is no longer a product destination: the session
+// surface owns the first-run/new-chat start.
 func visibleScreens(specs []contracts.ScreenSpec) []contracts.ScreenSpec {
 	out := specs[:0]
 	for _, spec := range specs {

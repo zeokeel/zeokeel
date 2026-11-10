@@ -1,307 +1,149 @@
 package rightpanel_test
 
-// Tests for the inspector's Terminal pane: the optional terminal backend, the
-// shell picker, asynchronous command runs (output, exit code, errors, stop),
-// clear and the disabled/empty states.
+// Frame tests for the right sidebar's 终端 page: the reused command runner (no
+// PTY) now rendered inside its tab, with output, stop, clear and the shell
+// picker.
 
 import (
-	"context"
 	"errors"
-	"sync"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/egoist/mygo/ui"
 
 	"github.com/zeokeel/zeokeel/internal/contracts"
-	"github.com/zeokeel/zeokeel/internal/ui/rightpanel"
 )
 
-// fakeTerminal is a scripted contracts.TerminalService. Run can block until a
-// command is released (or the context is canceled) to exercise the async path.
-type fakeTerminal struct {
-	mu sync.Mutex
-
-	dir      string
-	shell    string
-	shells   []string
-	setShell []string
-	setErr   error
-
-	runCalls []string
-	runOut   contracts.TerminalOutput
-	runErr   error
-	runBlock bool
-	started  chan string
-	release  chan struct{}
-}
-
-func newFakeTerminal() *fakeTerminal {
-	return &fakeTerminal{
-		dir:     "/work/proj",
-		shell:   "bash",
-		shells:  []string{"bash", "zsh"},
-		started: make(chan string, 8),
-		release: make(chan struct{}, 8),
-	}
-}
-
-func (f *fakeTerminal) WorkingDir(context.Context) string {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	return f.dir
-}
-
-func (f *fakeTerminal) Shell() string {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	return f.shell
-}
-
-func (f *fakeTerminal) Shells() []string {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	return append([]string(nil), f.shells...)
-}
-
-func (f *fakeTerminal) SetShell(name string) error {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	f.setShell = append(f.setShell, name)
-	if f.setErr != nil {
-		return f.setErr
-	}
-	f.shell = name
-	return nil
-}
-
-func (f *fakeTerminal) Run(ctx context.Context, command string) (contracts.TerminalOutput, error) {
-	f.mu.Lock()
-	f.runCalls = append(f.runCalls, command)
-	block := f.runBlock
-	result, err := f.runOut, f.runErr
-	f.mu.Unlock()
-
-	if block {
-		select {
-		case f.started <- command:
-		default:
-		}
-		select {
-		case <-ctx.Done():
-			return contracts.TerminalOutput{}, ctx.Err()
-		case <-f.release:
-		}
-	}
-	return result, err
-}
-
-func (f *fakeTerminal) runs() []string {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	return append([]string(nil), f.runCalls...)
-}
-
-func (f *fakeTerminal) shellCalls() []string {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	return append([]string(nil), f.setShell...)
-}
-
-func (f *fakeTerminal) setRunOutput(result contracts.TerminalOutput) {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	f.runOut = result
-}
-
-func (f *fakeTerminal) setRunErr(err error) {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	f.runErr = err
-}
-
-// waitForText frames the tester until want shows up (async command completion
-// is delivered through UIRuntime.Post, which a frame drains).
-func waitForText(t *testing.T, tester *ui.Tester, want string) {
+func terminalHarness(t *testing.T, terminal contracts.TerminalService) *harness {
 	t.Helper()
-	deadline := time.Now().Add(2 * time.Second)
-	for {
-		tester.Frame()
-		if tester.HasText(want) {
-			return
-		}
-		if time.Now().After(deadline) {
-			t.Fatalf("timed out waiting for %q; texts = %v", want, tester.Texts())
-		}
-		time.Sleep(5 * time.Millisecond)
-	}
+	return newHarness(t, harnessOptions{Terminal: terminal})
 }
 
-// waitForRun waits until the fake terminal observed a Run call.
-func waitForRun(t *testing.T, terminal *fakeTerminal) {
-	t.Helper()
-	select {
-	case <-terminal.started:
-	case <-time.After(2 * time.Second):
-		t.Fatal("timed out waiting for the terminal Run call")
-	}
-}
-
-// waitForRunCalls polls until the fake terminal recorded at least want Run
-// calls, then returns the calls (the submit runs on the UI task queue, so a
-// fixed frame count is not deterministic).
-func waitForRunCalls(t *testing.T, terminal *fakeTerminal, want int) []string {
-	t.Helper()
-	deadline := time.Now().Add(2 * time.Second)
-	for {
-		if calls := terminal.runs(); len(calls) >= want {
-			return calls
-		}
-		if time.Now().After(deadline) {
-			t.Fatalf("timed out waiting for %d terminal Run call(s); calls = %v", want, terminal.runs())
-		}
-		time.Sleep(5 * time.Millisecond)
-	}
-}
-
-// runTerminalCommand focuses the input, types command and presses Run.
-func runTerminalCommand(t *testing.T, h *harness, tester *ui.Tester, command string) {
-	t.Helper()
-	h.click(tester, "命令")
-	tester.Type(command)
-	tester.Frame()
-	h.click(tester, "运行")
-}
-
-// --- tests ------------------------------------------------------------------
-
-func TestTerminalPaneWithoutBackend(t *testing.T) {
-	h := newHarness(t, newFakeChat(), rightpanel.Config{})
+func TestTerminalPageWithoutBackend(t *testing.T) {
+	h := newHarness(t, harnessOptions{})
 	tester := h.tester()
-	h.selectPane(tester, "终端")
+	h.openPage(tester, "终端")
 	h.assertTexts(tester, "终端未启用")
 }
 
-func TestTerminalPaneHeaderShellAndClear(t *testing.T) {
+func TestTerminalPageRunsCommand(t *testing.T) {
 	terminal := newFakeTerminal()
-	h := newHarnessWithTerminal(t, newFakeChat(), rightpanel.Config{}, terminal)
+	terminal.setRunOutput(contracts.TerminalOutput{Output: "probe terminal output\n", ExitCode: 0})
+	h := terminalHarness(t, terminal)
 	tester := h.tester()
-	h.selectPane(tester, "终端")
+	h.openPage(tester, "终端")
+	h.assertTexts(tester, "运行")
 
-	h.assertTexts(tester,
-		"/work/proj", "bash", "清空", "运行",
-		"在工作区根目录运行命令",
-		"简单命令运行器（无 PTY / 持久 shell）")
+	// Type a command into the native input and press Enter.
+	input, ok := tester.Find("命令")
+	if !ok {
+		t.Fatalf("terminal command input not found; texts = %v", tester.Texts())
+	}
+	tester.ClickAt(input.X+input.W/2, input.Y+input.H/2)
+	tester.Type("echo probe")
+	tester.Key(0, ui.KeyEnter)
+	if !pumpFrames(tester, func() bool { return tester.HasText("probe terminal output") }, 3*time.Second) {
+		t.Fatalf("terminal output did not appear; texts = %v", tester.Texts())
+	}
+	if runs := terminal.runs(); len(runs) != 1 || runs[0] != "echo probe" {
+		t.Fatalf("terminal runs = %v, want [echo probe]", runs)
+	}
 
-	// The native shell picker lists Shells and calls SetShell.
-	h.click(tester, "选择 shell")
-	h.assertTexts(tester, "zsh", "当前")
-	h.click(tester, "zsh")
+	// Copy-all appears with the output and writes it to the clipboard.
+	if !pumpFrames(tester, func() bool { _, ok := tester.Find("复制全部输出"); return ok }, 3*time.Second) {
+		t.Fatalf("terminal page has no copy-all action after output; texts = %v", tester.Texts())
+	}
+	h.click(tester, "复制全部输出")
+	if got := tester.Clipboard(); !strings.Contains(got, "probe terminal output") {
+		t.Fatalf("clipboard after copy-all = %q, want the terminal output", got)
+	}
+}
+
+func TestTerminalPageClear(t *testing.T) {
+	terminal := newFakeTerminal()
+	terminal.setRunOutput(contracts.TerminalOutput{Output: "to be cleared\n"})
+	h := terminalHarness(t, terminal)
+	tester := h.tester()
+	h.openPage(tester, "终端")
+	input, _ := tester.Find("命令")
+	tester.ClickAt(input.X+input.W/2, input.Y+input.H/2)
+	tester.Type("echo clear")
+	tester.Key(0, ui.KeyEnter)
+	if !pumpFrames(tester, func() bool { return tester.HasText("to be cleared") }, 3*time.Second) {
+		t.Fatalf("terminal output did not appear; texts = %v", tester.Texts())
+	}
+	h.click(tester, "清空")
+	h.assertNoTexts(tester, "to be cleared")
+}
+
+func TestTerminalPageStopRunningCommand(t *testing.T) {
+	terminal := newFakeTerminal()
+	terminal.setRunBlock(true)
+	h := terminalHarness(t, terminal)
+	tester := h.tester()
+	h.openPage(tester, "终端")
+	input, _ := tester.Find("命令")
+	tester.ClickAt(input.X+input.W/2, input.Y+input.H/2)
+	tester.Type("sleep 100")
+	tester.Key(0, ui.KeyEnter)
+	if !pumpFrames(tester, func() bool {
+		_, ok := tester.Find("停止")
+		return ok
+	}, 3*time.Second) {
+		t.Fatalf("running terminal has no stop button; texts = %v", tester.Texts())
+	}
+	h.click(tester, "停止")
+	if !pumpFrames(tester, func() bool { return tester.HasText("[已停止]") }, 3*time.Second) {
+		t.Fatalf("stopped command was not reported; texts = %v", tester.Texts())
+	}
+}
+
+func TestTerminalPageShellSelect(t *testing.T) {
+	terminal := newFakeTerminal()
+	h := terminalHarness(t, terminal)
+	tester := h.tester()
+	h.openPage(tester, "终端")
+	selector, ok := tester.Find("bash")
+	if !ok {
+		t.Fatalf("shell select not found; texts = %v", tester.Texts())
+	}
+	tester.ClickAt(selector.X+selector.W/2, selector.Y+selector.H/2)
+	tester.Frame()
+	if !hasTextPrefix(tester.Texts(), "zsh") {
+		t.Fatalf("shell menu does not list zsh; texts = %v", tester.Texts())
+	}
+	if err := tester.Click("zsh"); err != nil {
+		t.Fatalf("choose shell: %v; texts = %v", err, tester.Texts())
+	}
+	tester.Frame()
 	if calls := terminal.shellCalls(); len(calls) != 1 || calls[0] != "zsh" {
 		t.Fatalf("SetShell calls = %v, want [zsh]", calls)
 	}
-	if !tester.HasText("zsh") {
-		t.Fatalf("shell label did not update; texts = %v", tester.Texts())
-	}
-
-	// A failing SetShell is shown in DangerText.
-	terminal.setErr = errors.New("shell not installed")
-	h.click(tester, "选择 shell")
-	h.click(tester, "bash")
-	h.assertTexts(tester, "设置 shell 失败：shell not installed")
 }
 
-func TestTerminalRunAsyncAndClear(t *testing.T) {
+func TestTerminalPageRunErrors(t *testing.T) {
 	terminal := newFakeTerminal()
-	terminal.runBlock = true
-	terminal.setRunOutput(contracts.TerminalOutput{Output: "hello output\n", ExitCode: 0})
-	h := newHarnessWithTerminal(t, newFakeChat(), rightpanel.Config{}, terminal)
+	terminal.setRunErr(errors.New("exec: command not found"))
+	h := terminalHarness(t, terminal)
 	tester := h.tester()
-	h.selectPane(tester, "终端")
-
-	runTerminalCommand(t, h, tester, "echo hi")
-	waitForRun(t, terminal)
-	tester.Frame()
-	h.assertTexts(tester, "$ echo hi", "停止")
-	if got := terminal.runs(); len(got) != 1 || got[0] != "echo hi" {
-		t.Fatalf("Run calls = %v, want [echo hi]", got)
-	}
-
-	// Releasing the command posts its output and returns the panel to Run.
-	terminal.release <- struct{}{}
-	waitForText(t, tester, "hello output")
-	tester.Frame()
-	h.assertTexts(tester, "运行")
-	h.assertNoTexts(tester, "停止")
-
-	// Clear drops the retained output and shows the hint again.
-	h.click(tester, "清空")
-	h.assertTexts(tester, "在工作区根目录运行命令")
-	h.assertNoTexts(tester, "hello output")
-}
-
-func TestTerminalNonZeroExit(t *testing.T) {
-	terminal := newFakeTerminal()
-	terminal.setRunOutput(contracts.TerminalOutput{Output: "boom\n", ExitCode: 3})
-	h := newHarnessWithTerminal(t, newFakeChat(), rightpanel.Config{}, terminal)
-	tester := h.tester()
-	h.selectPane(tester, "终端")
-
-	runTerminalCommand(t, h, tester, "false")
-	waitForText(t, tester, "[退出码 3]")
-}
-
-func TestTerminalRunError(t *testing.T) {
-	terminal := newFakeTerminal()
-	terminal.setRunErr(errors.New("spawn failed"))
-	h := newHarnessWithTerminal(t, newFakeChat(), rightpanel.Config{}, terminal)
-	tester := h.tester()
-	h.selectPane(tester, "终端")
-
-	runTerminalCommand(t, h, tester, "boom")
-	waitForText(t, tester, "错误：spawn failed")
-}
-
-func TestTerminalSubmitRuns(t *testing.T) {
-	terminal := newFakeTerminal()
-	terminal.setRunOutput(contracts.TerminalOutput{Output: "ok\n"})
-	h := newHarnessWithTerminal(t, newFakeChat(), rightpanel.Config{}, terminal)
-	tester := h.tester()
-	h.selectPane(tester, "终端")
-
-	h.click(tester, "命令")
-	tester.Type("echo ok")
-	// The draft text contains "ok" too, so wait on the actual Run call rather
-	// than waiting for the output text: a fast CI frame can render the draft
-	// before the Enter key's submit task runs.
-	tester.Frame()
+	h.openPage(tester, "终端")
+	input, _ := tester.Find("命令")
+	tester.ClickAt(input.X+input.W/2, input.Y+input.H/2)
+	tester.Type("nope")
 	tester.Key(0, ui.KeyEnter)
-	if got := waitForRunCalls(t, terminal, 1); len(got) != 1 || got[0] != "echo ok" {
-		t.Fatalf("Run calls = %v, want the Enter-submitted command", got)
+	if !pumpFrames(tester, func() bool { return tester.HasText("错误：exec: command not found") }, 3*time.Second) {
+		t.Fatalf("terminal run error not reported; texts = %v", tester.Texts())
 	}
 }
 
-func TestTerminalStopCancelsRun(t *testing.T) {
-	terminal := newFakeTerminal()
-	terminal.runBlock = true
-	h := newHarnessWithTerminal(t, newFakeChat(), rightpanel.Config{}, terminal)
-	tester := h.tester()
-	h.selectPane(tester, "终端")
-
-	runTerminalCommand(t, h, tester, "sleep 60")
-	waitForRun(t, terminal)
-	tester.Frame()
-	h.assertTexts(tester, "停止")
-
-	h.click(tester, "停止")
-	waitForText(t, tester, "[已停止]")
-	tester.Frame()
-	h.assertTexts(tester, "运行")
-}
-
-func TestTerminalCustomTabLabel(t *testing.T) {
-	h := newHarness(t, newFakeChat(), rightpanel.Config{TerminalTab: "Terminal"})
-	tester := h.tester()
-	h.selectPane(tester, "Terminal")
-	h.assertTexts(tester, "Terminal", "终端未启用")
+// hasTextPrefix reports whether any painted text starts with prefix (menu
+// items may be painted with their state suffix).
+func hasTextPrefix(texts []string, prefix string) bool {
+	for _, text := range texts {
+		if strings.HasPrefix(text, prefix) {
+			return true
+		}
+	}
+	return false
 }

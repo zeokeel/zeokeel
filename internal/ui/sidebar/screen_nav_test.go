@@ -1,8 +1,10 @@
 package sidebar_test
 
 // Tests for the sidebar's generic module-screen navigation: every registered
-// screen except the sidebar's own destinations gets one native item, so a new
-// screen module (ui/automation) appears without a sidebar edit.
+// screen except the sidebar's own screen (the session list) gets one native
+// item, so a new screen module (ui/automation) appears without a sidebar edit.
+// The Home screen stays registered but is not a navigation destination: the new
+// chat action and the session list are the sidebar's landing surface.
 
 import (
 	"testing"
@@ -29,7 +31,10 @@ func TestSidebarListsModuleScreens(t *testing.T) {
 	}
 	tester := h.tester()
 	tester.Frame()
-	h.assertTexts(tester, "首页", "自动化")
+	// Generic module screens keep their navigation row; the removed Home
+	// destination leaves no label behind (home stays a registered screen only).
+	h.assertTexts(tester, "自动化")
+	h.assertNoTexts(tester, "首页", "Home")
 
 	if err := tester.Click("自动化"); err != nil {
 		t.Fatalf("click automation nav item: %v; texts = %v", err, tester.Texts())
@@ -39,16 +44,14 @@ func TestSidebarListsModuleScreens(t *testing.T) {
 }
 
 func TestSidebarSkipsOwnScreens(t *testing.T) {
-	// home and session are the sidebar's own destinations (Home item + session
-	// list) and must not be duplicated as generic screen items.
+	// The sidebar owns the session list (there is no session destination row),
+	// and the home screen is registered but no longer a navigation destination
+	// at all: the removed Home row must not come back as a generic screen item.
 	h := newHarness(t, &fakeChat{}, sidebar.Config{})
 	tester := h.tester()
 	tester.Frame()
-	// "首页" appears once (the Home destination); the registered session screen
-	// title "会话" is not rendered as a separate nav item.
-	h.assertTexts(tester, "首页")
-	if got := countText(tester, "首页"); got != 1 {
-		t.Fatalf("首页 labels = %d, want 1; texts = %v", got, tester.Texts())
+	if got := countText(tester, "首页"); got != 0 {
+		t.Fatalf("首页 labels = %d, want 0 (no Home destination); texts = %v", got, tester.Texts())
 	}
 	// "会话" appears once as the flat list's section label, not as a generic
 	// screen destination (the session screen is owned by the sidebar list).
@@ -71,7 +74,8 @@ func TestSidebarListsPluginsScreen(t *testing.T) {
 	}
 	tester := h.tester()
 	tester.Frame()
-	h.assertTexts(tester, "首页", "插件")
+	h.assertTexts(tester, "插件")
+	h.assertNoTexts(tester, "首页")
 
 	if err := tester.Click("插件"); err != nil {
 		t.Fatalf("click plugins nav item: %v; texts = %v", err, tester.Texts())
@@ -82,7 +86,9 @@ func TestSidebarListsPluginsScreen(t *testing.T) {
 
 // TestScreenNavSpecIsTheSingleSource pins the shared navigation table: the
 // expanded sidebar rows and the host's collapsed rail both read it, so a screen
-// id keeps one glyph and one localized label everywhere.
+// id keeps one glyph and one localized label everywhere. Home stays in the table
+// because its screen is still registered (the rail may draw it), even though the
+// sidebar no longer renders it as a destination row.
 func TestScreenNavSpecIsTheSingleSource(t *testing.T) {
 	cases := []struct {
 		id       string
@@ -113,10 +119,11 @@ func TestScreenNavSpecIsTheSingleSource(t *testing.T) {
 	}
 }
 
-// TestCollapsedRailMatchesSidebarNavigation proves both navigation paths agree:
-// the rail's labels (the host draws it) equal the labels the expanded sidebar
-// rows use, through the one ScreenNavSpec table.
-func TestCollapsedRailMatchesSidebarNavigation(t *testing.T) {
+// TestExpandedSidebarAndRailAgreeOnModuleScreens proves both navigation paths
+// agree on the module destinations: the expanded sidebar draws no Home row any
+// more, while the host's collapsed rail is chrome whose destination set follows
+// the registered screens, and both use the one ScreenNavSpec table.
+func TestExpandedSidebarAndRailAgreeOnModuleScreens(t *testing.T) {
 	h := newHarness(t, &fakeChat{}, sidebar.Config{})
 	for _, spec := range []contracts.ScreenSpec{
 		{ID: "automation", Title: "自动化", Order: 20, Build: func(c *ui.Context) { ui.Text(c, "automation screen") }},
@@ -129,9 +136,19 @@ func TestCollapsedRailMatchesSidebarNavigation(t *testing.T) {
 	tester := h.tester()
 	tester.Frame()
 
+	// The expanded navigation draws the module destinations; the removed Home
+	// destination is gone for good.
+	for _, id := range []string{"automation", "plugins"} {
+		label := sidebar.ScreenNavLabel(h.uiRoot.Locale(), id)
+		if !tester.HasText(label) {
+			t.Fatalf("expanded navigation missing %q (%s); texts = %v", label, id, tester.Texts())
+		}
+	}
+	h.assertNoTexts(tester, "首页")
+
 	h.uiRoot.SetSidebarCollapsed(true)
 	tester.Frame()
-	for _, id := range []string{"home", "session", "automation", "plugins"} {
+	for _, id := range []string{"automation", "plugins"} {
 		label := sidebar.ScreenNavLabel(h.uiRoot.Locale(), id)
 		if !tester.HasText(label) {
 			t.Fatalf("collapsed rail missing %q (%s); texts = %v", label, id, tester.Texts())
@@ -140,12 +157,10 @@ func TestCollapsedRailMatchesSidebarNavigation(t *testing.T) {
 
 	h.uiRoot.SetSidebarCollapsed(false)
 	tester.Frame()
-	// The expanded navigation draws every destination except the session screen
-	// (the session list is its own destination).
-	for _, id := range []string{"home", "automation", "plugins"} {
+	for _, id := range []string{"automation", "plugins"} {
 		label := sidebar.ScreenNavLabel(h.uiRoot.Locale(), id)
 		if !tester.HasText(label) {
-			t.Fatalf("expanded navigation missing %q (%s); texts = %v", label, id, tester.Texts())
+			t.Fatalf("expanded navigation missing %q (%s) after expanding; texts = %v", label, id, tester.Texts())
 		}
 	}
 }

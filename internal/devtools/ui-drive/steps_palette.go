@@ -54,12 +54,18 @@ func (d *drive) runPaletteSteps() {
 			c.require(c.has("切换右侧栏"), "过滤后没有「切换右侧栏」命令")
 			c.require(c.has("Cmd/Ctrl + Alt + I") || c.has("Cmd/Ctrl + Alt"),
 				"命令面板行尾没有显示快捷键 chord；texts=%v", paletteTailTexts(d))
-			// Pane-switch commands render their chords too.
+			// The right sidebar's page commands render their chords too: the
+			// retired pane-switch commands are gone with the 8-pane inspector.
 			d.clearDraft()
-			d.typeText("检查器面板")
+			d.typeText("打开文件页")
 			d.drain(2)
-			c.require(c.has("Cmd/Ctrl + Alt + ←") && c.has("Cmd/Ctrl + Alt + →"),
-				"命令面板缺少 pane 切换快捷键列；texts=%v", paletteTailTexts(d))
+			c.require(c.has("Ctrl+Alt+P"),
+				"命令面板缺少文件页快捷键 chord；texts=%v", paletteTailTexts(d))
+			d.clearDraft()
+			d.typeText("打开终端页")
+			d.drain(2)
+			c.require(c.has("Ctrl+`"),
+				"命令面板缺少终端页快捷键 chord；texts=%v", paletteTailTexts(d))
 			c.shot("palette-shortcut-column")
 			d.key(0, ui.KeyEscape)
 			d.drain(2)

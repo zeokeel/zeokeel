@@ -93,9 +93,11 @@ func TestSidebarEnglishCopyAndLanguageSwitch(t *testing.T) {
 	tester := h.tester()
 	tester.Frame()
 
+	// The Home row is gone (home stays a registered screen only, not a sidebar
+	// destination); the generic module-screen rows remain.
 	h.assertTexts(tester, "New chat", "Search chats and messages", "Settings", "Project Alpha",
-		"Home", "Automation", "Plugins")
-	h.assertNoTexts(tester, "Show archived", "Hide archived")
+		"Automation", "Plugins")
+	h.assertNoTexts(tester, "Show archived", "Hide archived", "Home")
 	h.assertNoTexts(tester, "新对话", "搜索会话与消息", "设置", "显示已归档", "首页", "自动化", "插件")
 
 	// Row menu: every session action is English.
@@ -126,9 +128,9 @@ func TestSidebarEnglishCopyAndLanguageSwitch(t *testing.T) {
 	h.uiRoot.Locale().SetLanguage("zh")
 	tester.Frame()
 	h.assertTexts(tester, "新对话", "搜索会话与消息", "设置",
-		"首页", "自动化", "插件")
+		"自动化", "插件")
 	h.assertNoTexts(tester, "New chat", "Search chats and messages", "Settings", "Show archived",
-		"Home", "Automation", "Plugins", "显示已归档", "隐藏已归档")
+		"首页", "Home", "Automation", "Plugins", "显示已归档", "隐藏已归档")
 	openRowMenu(t, tester, "Project Alpha")
 	h.assertTexts(tester, "重命名", "删除", "创建副本", "设为当前", "置顶会话", "归档会话")
 }

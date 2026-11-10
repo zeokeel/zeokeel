@@ -95,6 +95,90 @@ func TestSidebarAlwaysGroupsByWorkspace(t *testing.T) {
 	}
 }
 
+// automationSession builds the chat session the automation module creates for
+// one scheduled run: the stable "自动化: <task>" title prefix is the product's
+// convention, and the run history belongs to the Automation screen, not to the
+// user's conversation list.
+func automationSession(id, task string, updated time.Time) contracts.ChatSessionInfo {
+	return contracts.ChatSessionInfo{ID: id, Title: "自动化: " + task, UpdatedAt: updated}
+}
+
+// TestSidebarFlatListHidesAutomationSessions pins the approved simplification:
+// the flat session list shows user conversations only, so an automation run
+// never renders a row (or a pinned badge) even while it is the newest session.
+func TestSidebarFlatListHidesAutomationSessions(t *testing.T) {
+	base := time.Unix(1_700_000_000, 0)
+	run := automationSession("s-run", "每日摘要", base)
+	run.Pinned = true
+	chat := &fakeChat{sessions: []contracts.ChatSessionInfo{
+		run,
+		sessionAt("s-user", "普通会话", base.Add(-time.Hour)),
+	}}
+	h := newHarness(t, chat, sidebar.Config{})
+	tester := h.tester()
+
+	h.assertTexts(tester, "普通会话")
+	h.assertNoTexts(tester, "自动化: 每日摘要", "每日摘要")
+	if got := countText(tester, "置顶"); got != 0 {
+		t.Fatalf("hidden automation run leaked %d 置顶 badges; texts = %v", got, tester.Texts())
+	}
+}
+
+// TestSidebarSearchHidesAutomationSessions: the title filter must not resurface
+// an automation run when the query matches both its title and a user session.
+func TestSidebarSearchHidesAutomationSessions(t *testing.T) {
+	chat := &fakeChat{sessions: []contracts.ChatSessionInfo{
+		{ID: "s-user", Title: "每周报告"},
+		automationSession("s-run", "周报", time.Unix(1_700_000_000, 0)),
+	}}
+	h := newHarness(t, chat, sidebar.Config{})
+	tester := h.tester()
+	clickLabel(t, tester, "搜索会话与消息")
+	tester.Type("周")
+	tester.Frame()
+
+	h.assertTexts(tester, "每周报告")
+	h.assertNoTexts(tester, "自动化: 周报")
+}
+
+// TestSidebarOnlyAutomationSessionsShowsEmptyState: a host with nothing but
+// automation-run sessions shows the sidebar's user-session empty state (the
+// new-chat landing surface), never the hidden run rows.
+func TestSidebarOnlyAutomationSessionsShowsEmptyState(t *testing.T) {
+	chat := &fakeChat{sessions: []contracts.ChatSessionInfo{
+		automationSession("s-run", "每日摘要", time.Unix(1_700_000_000, 0)),
+	}}
+	h := newHarness(t, chat, sidebar.Config{})
+	tester := h.tester()
+
+	h.assertTexts(tester, "还没有会话", "新对话")
+	h.assertNoTexts(tester, "自动化: 每日摘要")
+}
+
+// TestWorkspaceTreeHidesAutomationSessions: the workspace tree follows the same
+// user-only rule for its rows, its per-group counts and the synthetic
+// "未分组" group (an automation run is not a user conversation, so it cannot
+// make an empty ungrouped group appear).
+func TestWorkspaceTreeHidesAutomationSessions(t *testing.T) {
+	base := time.Unix(1_700_000_000, 0)
+	workspace := newFakeWorkspace(treeWorkspaces()...)
+	chat := &fakeChat{sessions: []contracts.ChatSessionInfo{
+		{ID: "s1", Title: "用户会话", WorkspaceID: "w1", UpdatedAt: base},
+		{ID: "s2", Title: "自动化: 每日摘要", WorkspaceID: "w1", UpdatedAt: base},
+		{ID: "s3", Title: "自动化: 未分组任务", UpdatedAt: base},
+	}}
+	h := newHarnessWithWorkspace(t, chat, sidebar.Config{}, workspace)
+	tester := h.tester()
+
+	h.assertTexts(tester, "项目一", "用户会话")
+	h.assertNoTexts(tester, "自动化: 每日摘要", "每日摘要", "自动化: 未分组任务", "未分组任务")
+	h.assertNoTexts(tester, "未分组")
+	// The group count counts user sessions only (项目一 holds one visible row).
+	if got := countText(tester, "1"); got != 1 {
+		t.Fatalf("group count rows showing 1 = %d, want the one user session; texts = %v", got, tester.Texts())
+	}
+}
+
 // TestSidebarFlatFallbackRecentAndPinned covers the only fallback: without a
 // workspace backend the rows are one flat list, still recent-first and
 // pinned-first, with no view menu to change that.

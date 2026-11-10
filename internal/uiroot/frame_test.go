@@ -603,37 +603,6 @@ func TestInspectorDrawerIsModal(t *testing.T) {
 	requireHasText(t, tt, "body-session")
 }
 
-// TestInspectorPaneShortcut covers H26: Cmd/Ctrl+Alt+Left/Right run the
-// inspector's module-registered pane cycling commands.
-func TestInspectorPaneShortcut(t *testing.T) {
-	r := newTestRoot(t)
-	mustScreen(t, r, textScreen("session", "会话", "body-session", 10))
-	mustSlot(t, r, textSlotItem(contracts.SlotSessionPanelRight, "pane", "inspector-pane", 10))
-	next, prev := 0, 0
-	mustCommand(t, r, contracts.CommandSpec{ID: "rightpanel.pane.next", Title: "下一个面板", Order: 10,
-		Run: func() error { next++; return nil }})
-	mustCommand(t, r, contracts.CommandSpec{ID: "rightpanel.pane.prev", Title: "上一个面板", Order: 11,
-		Run: func() error { prev++; return nil }})
-	tt := newTestTester(t, r, 1280, 800)
-	tt.Frame()
-	// While the inspector is closed the chord must not change the hidden pane.
-	tt.Key(ui.Cmd|ui.Alt, ui.KeyRight)
-	tt.Frame()
-	if next != 0 {
-		t.Fatalf("closed inspector: pane command ran next=%d, want 0", next)
-	}
-	// Opened, the chord cycles the pane as before.
-	tt.Key(ui.Cmd|ui.Alt, ui.KeyI)
-	tt.Frame()
-	tt.Key(ui.Cmd|ui.Alt, ui.KeyRight)
-	tt.Frame()
-	tt.Key(ui.Cmd|ui.Alt, ui.KeyLeft)
-	tt.Frame()
-	if next != 1 || prev != 1 {
-		t.Fatalf("pane cycling commands ran next=%d prev=%d, want 1/1", next, prev)
-	}
-}
-
 // TestPaletteShowsCommandShortcut covers H26's palette half: a command that
 // declares a shortcut shows it in the palette row.
 func TestPaletteShowsCommandShortcut(t *testing.T) {
@@ -779,14 +748,14 @@ func TestDockedInspectorSplitKeepsWidthBehavior(t *testing.T) {
 		t.Fatalf("default inspector width = %v, want %v", got, design.InspectorWidth)
 	}
 
-	// The divider is one line plus the pane's 1 DIP start border and 16 DIP
-	// padding left of the slot text (frame.go inspectorDockedPane).
+	// The divider is one line plus the pane's 1 DIP start border; the sidebar
+	// module owns its page padding, so the docked pane itself has none.
 	dividerX := func() float32 {
 		inspector, ok := tt.Find("inspector-pane")
 		if !ok {
 			t.Fatalf("inspector pane missing; texts: %v", tt.Texts())
 		}
-		return inspector.X - design.Space4 - 2
+		return inspector.X - 2
 	}
 	mid := float32(height) / 2
 

@@ -1,157 +1,194 @@
 package main
 
-// Right-inspector steps: open the docked panel, visit every pane with a
-// screenshot and a content assertion, preview a workspace file, expand a diff,
-// run a terminal command and read the task board.
+// Right-sidebar steps: the DSH-aligned sidebar replaced the retired 8-pane
+// inspector. It opens on the 开始 guide (工作区文件 / 新建终端 cards), has one
+// tab strip (开始 | 文件 | 终端 | opened files), opens a workspace file as a
+// preview tab with its folded unified diff, and runs commands in the 终端 page.
+// The old pane selector, 概览/工具/日志/变更/团队/任务 panes and their commands
+// are gone: team/tasks coverage lives in steps_team.go and the log is folded
+// into the file tabs.
 
 import (
-	"context"
-	"strings"
 	"time"
-
-	"github.com/egoist/mygo/ui"
-	rig "github.com/zeokeel/zeokeel-rig"
-
-	"github.com/zeokeel/zeokeel/internal/contracts"
 )
 
-// panelTabs is the inspector's pane order (the pane selector's menu) with the
-// content markers the pane must show (any one of them counts: the pane copy
-// differs across revisions).
-var panelTabs = []struct {
-	label   string
-	markers []string
-}{
-	{"概览", []string{"消息", "更新时间", "诊断信息", "Messages", "Updated"}},
-	{"工具", []string{"working_directory", "工具调用", "Tool calls"}},
-	{"日志", []string{"条会话事件", "会话事件", "session events", "run_end", "user_message"}},
-	{"文件", []string{"README.md", "文件", "Files"}},
-	{"变更", []string{"查看 diff", "变更", "Changes", "README.md"}},
-	{"终端", []string{"命令", "Command", "终端", "Terminal"}},
-	{"团队", []string{"团队", "Team", "队友", "Teammates"}},
-	{"任务", []string{"发布前检查", "任务", "Tasks", "还没有任务"}},
-}
+// sidebarPageTabs are the right sidebar's fixed pages in strip order.
+var sidebarPageTabs = []string{"开始", "文件", "终端"}
 
 func (d *drive) runPanelSteps() {
-	d.step("panel-open", "shell", "右栏：打开检查器",
-		"点击内容区右上「打开右侧栏」→ 检查器出现（标题/切换面板/当前 pane），面板选择器列出 8 个 pane", func(c *check) {
+	d.step("panel-open", "shell", "右栏：打开右侧栏 → 开始 guide",
+		"点击顶栏「打开右侧栏」→ 侧栏出现开始 guide：两个等宽卡片 工作区文件/新建终端 + 标签页 开始|文件|终端；旧的 8-pane 选择器与概览/工具/日志/变更/团队/任务 pane 已移除", func(c *check) {
 			d.resetToSession()
+			d.uiRoot.SetRightPanelOpen(false)
+			d.frame()
 			if !c.click("打开右侧栏") {
 				return
 			}
-			c.require(d.uiRoot.RightPanelOpen(), "点击「打开右侧栏」后检查器未打开")
-			c.mustText("检查", "切换面板")
-			c.shot("panel-open")
-			// The pane selector must offer every pane.
-			if !c.click("切换面板") {
-				return
-			}
-			d.drain(2)
+			c.require(d.uiRoot.RightPanelOpen(), "点击「打开右侧栏」后侧栏未打开")
+			c.mustText("开始", "工作区文件", "新建终端")
 			missing := []string{}
-			for _, tab := range panelTabs {
-				if !c.has(tab.label) {
-					missing = append(missing, tab.label)
+			for _, tab := range sidebarPageTabs {
+				if _, ok := d.find(tab); !ok {
+					missing = append(missing, tab)
 				}
 			}
-			c.require(len(missing) == 0, "面板选择器缺少 pane：%v", missing)
-			c.shot("panel-selector")
-			d.key(0, ui.KeyEscape)
-			d.drain(2)
+			c.require(len(missing) == 0, "右侧栏标签页缺少：%v", missing)
+			for _, retired := range []string{"切换面板", "概览", "工具", "日志", "变更"} {
+				c.require(!d.hasExactText(retired), "右侧栏仍显示已移除的旧 pane「%s」", retired)
+			}
+			c.shot("panel-guide")
 		})
 
-	d.step("panel-tabs", "shell", "右栏：8 个 pane 逐个打开",
-		"通过 pane 选择器依次切换概览/工具/日志/文件/变更/终端/团队/任务，每个 pane 内容渲染且截图", func(c *check) {
-			d.resetToSession()
+	d.step("panel-guide-cards", "shell", "右栏：guide 卡片进入 文件/终端 页",
+		"开始 guide 点「工作区文件」→ 文件页（工作区树 + 产物区）；点「开始」标签回 guide；点「新建终端」→ 终端页（命令输入 + 运行）", func(c *check) {
 			if !d.uiRoot.RightPanelOpen() {
 				d.uiRoot.SetRightPanelOpen(true)
 				d.frame()
 			}
-			c.require(d.uiRoot.RightPanelOpen(), "右侧检查器未打开")
-			for _, tab := range panelTabs {
-				if !d.selectPane(tab.label) {
-					c.failf("pane 选择器里无法选择「%s」", tab.label)
-					continue
-				}
-				markerOK := false
-				deadline := time.Now().Add(3 * time.Second)
-				for time.Now().Before(deadline) && !markerOK {
-					d.frame()
-					for _, marker := range tab.markers {
-						if d.has(marker) {
-							markerOK = true
-							break
-						}
-					}
-					if !markerOK {
-						time.Sleep(10 * time.Millisecond)
-					}
-				}
-				if !markerOK {
-					c.failf("pane「%s」内容缺少标记 %v", tab.label, tab.markers)
-				}
-				c.shot("panel-" + tab.label)
+			if !c.click("开始") {
+				return
 			}
+			d.drain(2)
+			if !c.click("工作区文件") {
+				return
+			}
+			if !d.waitText("README.md", 5*time.Second) {
+				c.failf("文件页没有显示工作区树（README.md）；texts=%v", paletteTailTexts(d))
+				return
+			}
+			c.mustText("交付区")
+			c.shot("panel-files-page")
+			if !c.click("开始") {
+				return
+			}
+			d.drain(2)
+			if !c.click("新建终端") {
+				return
+			}
+			d.drain(2)
+			c.mustText("运行")
+			if _, ok := d.find("输入命令…"); !ok && !c.has("命令") {
+				c.failf("终端页没有命令输入（「命令」/「输入命令…」缺失）")
+				return
+			}
+			c.shot("panel-terminal-page")
+			if !c.click("开始") {
+				return
+			}
+			d.drain(2)
 		})
 
-	d.step("panel-files-preview", "shell", "右栏：文件预览",
-		"文件页签点 README.md → 预览显示文件内容", func(c *check) {
+	d.step("panel-files-preview", "shell", "右栏：文件页打开 README.md → 文件标签预览",
+		"文件页点 README.md → 打开其文件标签页（文件名 + 目录 + 复制路径/重新读取 + Markdown 预览）；预览显示 README 正文", func(c *check) {
 			if !d.uiRoot.RightPanelOpen() {
 				d.uiRoot.SetRightPanelOpen(true)
 				d.frame()
 			}
-			if !d.selectPane("文件") {
-				c.failf("无法通过 pane 选择器切到「文件」")
+			if !c.click("文件") {
 				return
 			}
-			d.drain(2)
-			if !c.click("README.md") {
+			if !d.waitText("README.md", 5*time.Second) {
+				c.failf("文件页没有显示 README.md；texts=%v", paletteTailTexts(d))
 				return
 			}
-			if !d.waitText("驱动工作区", 3*time.Second) {
-				c.failf("README.md 预览没有显示文件内容")
+			if err := d.click("README.md"); err != nil {
+				c.failf("点击 README.md 失败：%v", err)
+				return
 			}
+			if !d.waitText("驱动工作区", 5*time.Second) {
+				c.failf("README.md 预览没有显示文件正文；texts=%v", paletteTailTexts(d))
+				return
+			}
+			c.mustText("README.md", "复制路径")
 			c.shot("panel-file-preview")
 		})
 
-	d.step("panel-changes-diff", "shell", "右栏：变更 diff",
-		"变更页签显示未提交文件 → 点「查看 diff」→ 展开 diff 文本", func(c *check) {
-			if !d.selectPane("变更") {
-				c.failf("无法通过 pane 选择器切到「变更」")
+	d.step("panel-file-tabs", "shell", "右栏：多个文件标签可切换",
+		"文件页再打开 notes.txt → 两个文件标签并存；点 README.md 标签切回其预览（正文可见），再点 notes.txt 标签切回（文件标签头可见）", func(c *check) {
+			if !d.uiRoot.RightPanelOpen() {
+				d.uiRoot.SetRightPanelOpen(true)
+				d.frame()
+			}
+			if !c.click("文件") {
+				return
+			}
+			if !d.waitText("notes.txt", 5*time.Second) {
+				c.failf("文件页没有显示 notes.txt；texts=%v", paletteTailTexts(d))
+				return
+			}
+			if err := d.click("notes.txt"); err != nil {
+				c.failf("点击 notes.txt 失败：%v", err)
 				return
 			}
 			d.drain(2)
-			c.mustText("README.md")
-			if !c.has("查看 diff") {
-				c.failf("变更页签没有「查看 diff」")
+			c.require(d.hasExactText("README.md") && d.hasExactText("notes.txt"),
+				"打开两个文件后标签条没有两个文件标签；texts=%v", paletteTailTexts(d))
+			c.shot("panel-file-tabs")
+			// Switch back to the README tab: its Markdown preview renders the
+			// file body, which proves the page followed the tab choice.
+			if err := d.click("README.md"); err != nil {
+				c.failf("切回 README 标签失败：%v", err)
 				return
 			}
-			if !c.click("查看 diff") {
+			d.drain(2)
+			if !d.waitText("驱动工作区", 5*time.Second) {
+				c.failf("切回 README 标签后没有显示其预览正文；texts=%v", paletteTailTexts(d))
+				return
+			}
+			c.shot("panel-file-tab-switched")
+		})
+
+	d.step("panel-file-diff", "shell", "右栏：文件标签内折叠的改动 diff",
+		"文件页点已修改的 README.md → 文件标签出现「查看改动」折叠段（+N -M）；展开后显示统一 diff", func(c *check) {
+			if !d.uiRoot.RightPanelOpen() {
+				d.uiRoot.SetRightPanelOpen(true)
+				d.frame()
+			}
+			if !c.click("文件") {
+				return
+			}
+			if !d.waitText("README.md", 5*time.Second) {
+				c.failf("文件页没有显示 README.md；texts=%v", paletteTailTexts(d))
+				return
+			}
+			if err := d.click("README.md"); err != nil {
+				c.failf("点击 README.md 失败：%v", err)
+				return
+			}
+			if !d.waitText("查看改动", 5*time.Second) {
+				c.failf("已修改的 README 文件标签没有「查看改动」折叠段；texts=%v", paletteTailTexts(d))
+				return
+			}
+			if !c.has("+") || !c.has("-") {
+				c.note("改动统计行未渲染，直接展开折叠段")
+			}
+			c.shot("panel-file-diff-folded")
+			if err := d.click("查看改动"); err != nil {
+				c.failf("展开「查看改动」失败：%v", err)
 				return
 			}
 			d.tester.Advance(200 * time.Millisecond)
 			d.drain(2)
-			if !d.has("diff") && !d.has("已修改") && !d.has("+1") {
-				c.failf("展开 diff 后没有 diff 内容")
-			}
-			c.shot("panel-changes-diff")
+			c.shot("panel-file-diff")
 		})
 
-	d.step("panel-terminal-run", "shell", "右栏：终端运行 echo",
-		"终端页签输入 echo ui-drive-terminal → 点「运行」→ 输出包含该文本", func(c *check) {
-			if !d.selectPane("终端") {
-				c.failf("无法通过 pane 选择器切到「终端」")
+	d.step("panel-terminal-run", "shell", "右栏：终端页运行 echo 命令",
+		"终端标签页输入 echo ui-drive-terminal → 点「运行」→ 输出包含该文本", func(c *check) {
+			if !d.uiRoot.RightPanelOpen() {
+				d.uiRoot.SetRightPanelOpen(true)
+				d.frame()
+			}
+			if !c.click("终端") {
 				return
 			}
 			d.drain(2)
-			// The pane's input shares the 「命令」label with the composer's
-			// slash button, so focus it from the terminal's Run button instead
-			// of a label lookup: the input sits left of Run on the same row.
-			runRect, ok := d.find("运行")
-			if !ok {
-				c.failf("终端 pane 没有「运行」按钮")
+			// Focus the terminal input by its accessible name; the composer's
+			// slash button shares the visible 「命令」word, but the input's
+			// label is the exact one here (the composer is not the active page).
+			if err := d.click("命令"); err != nil {
+				c.failf("终端页没有可聚焦的命令输入：%v", err)
 				return
 			}
-			d.tester.ClickAt(runRect.X-220, runRect.Y+runRect.H/2)
 			d.frame()
 			d.typeText("echo ui-drive-terminal")
 			d.frame()
@@ -159,85 +196,14 @@ func (d *drive) runPanelSteps() {
 				return
 			}
 			if !d.waitText("ui-drive-terminal", 8*time.Second) {
-				c.failf("终端命令输出未出现")
+				c.failf("终端命令输出未出现；texts=%v", paletteTailTexts(d))
+				return
 			}
 			c.shot("panel-terminal-run")
 		})
 
-	d.step("panel-tasks", "shell", "右栏：任务页签",
-		"任务页签显示任务板条目（发布前检查/编写发布说明）", func(c *check) {
-			if !d.selectPane("任务") {
-				c.failf("无法通过 pane 选择器切到「任务」")
-				return
-			}
-			d.drain(2)
-			c.mustText("发布前检查", "编写发布说明")
-			c.shot("panel-tasks")
-		})
-
-	d.step("panel-team", "shell", "右栏：团队页签",
-		"生成一个队友后团队页签显示成员；页签本身必须可渲染", func(c *check) {
-			d.resetToSession()
-			if !d.uiRoot.RightPanelOpen() {
-				d.uiRoot.SetRightPanelOpen(true)
-				d.frame()
-			}
-			d.server.SetMode(scriptAnswer)
-			team, teamErr := d.root.Require(contracts.KeyTeam)
-			if teamErr != nil {
-				c.warnf("team service 未启用：%v", teamErr)
-			} else {
-				// Spawn through the real tool surface (the same path the agent
-				// uses), so the teammates pane has a durable member.
-				if registry, err := d.root.Require(contracts.KeyToolkit); err == nil {
-					_, invokeErr := registry.Invoke(context.Background(), rig.ToolCall{
-						ID: "drive-spawn-teammate", Name: "spawn_teammate",
-						Arguments: `{"name":"研究员","prompt":"研究一下当前工作目录并给出摘要"}`,
-					})
-					if invokeErr != nil {
-						c.warnf("spawn_teammate 工具调用失败：%v", invokeErr)
-					}
-				}
-				deadline := time.Now().Add(10 * time.Second)
-				ready := false
-				for time.Now().Before(deadline) {
-					d.frame()
-					for _, member := range team.Members() {
-						if member.Last != "" {
-							ready = true
-						}
-					}
-					if ready {
-						break
-					}
-					time.Sleep(20 * time.Millisecond)
-				}
-				if !ready {
-					c.warnf("队友在 10s 内没有完成首个回复，团队页签按空态验证")
-				}
-			}
-			if !d.selectPane("团队") {
-				c.failf("无法通过 pane 选择器切到「团队」")
-				return
-			}
-			d.drain(2)
-			c.shot("panel-team")
-			if !d.has("团队") && !d.has("研究员") {
-				c.failf("团队页签没有渲染内容")
-			}
-			// Leave the roster empty for the later steps: the session header's
-			// team chip belongs to the team step group, and a leftover member
-			// would otherwise change the header layout under unrelated steps.
-			if teamService, teamErr := d.root.Require(contracts.KeyTeam); teamErr == nil {
-				for _, member := range teamService.Members() {
-					_ = teamService.Close(member.ID)
-				}
-				d.drain(2)
-			}
-		})
-
-	d.step("panel-close", "shell", "右栏：关闭检查器",
-		"点击「收起右侧栏」→ 检查器关闭", func(c *check) {
+	d.step("panel-close", "shell", "右栏：关闭侧栏",
+		"点击「收起右侧栏」→ 侧栏关闭", func(c *check) {
 			label := "收起右侧栏"
 			if !d.has(label) {
 				label = "打开右侧栏"
@@ -250,10 +216,7 @@ func (d *drive) runPanelSteps() {
 				}
 				d.drain(2)
 			}
-			c.require(!d.uiRoot.RightPanelOpen(), "点击后右侧检查器仍打开")
+			c.require(!d.uiRoot.RightPanelOpen(), "点击后右侧栏仍打开")
 			c.shot("panel-closed")
 		})
 }
-
-// unused guard for strings (used by shortText in drive.go).
-var _ = strings.TrimSpace

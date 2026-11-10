@@ -227,7 +227,7 @@
 | Composer | `uikit.ComposerShell`（已有，Phase 3c） | `ui.TextArea` + `PopoverMenuButton` + `ui.PrimaryButton` + `uikit.ErrorLine` | 新造输入框；把主操作藏进溢出菜单；宽度写死 |
 | 流式 / 运行态 | `uikit.RunStatus`（已有，Phase 3c） | `Spinner` / `Progress` / 队列 Badge / 停止按钮 / `Toast` | 按 token 重排布局；伪造进度；停止按钮与发送模糊并排 |
 | 错误 / 恢复 | `uikit.ErrorLine`（已有）+ `uikit.RunStatus` 的重试（Phase 3c）；大块 ErrorPanel 暂缓（当前无调用点） | `RoleAlert` + danger token + 恢复动作（重试/去设置） | Warning 色；只报错不给下一步；纯 toast 代替可操作错误 |
-| 多 Agent / 团队 | `uikit.TeamSurface`（已有，Phase 3d） | `ui.List` + `RunState` + `Badge` + `PopoverMenuButton` + 确认 Modal | 把 `active` 画成 running；tab 模拟分支；卡片墙 |
+| 多 Agent / 团队 | 会话 agent surface（`session` 包：header 三入口 + `ui.PopoverBase` 团队浮层 + 主栏子会话视图） | `PopoverBase` + 成员/任务卡 + 面包屑标题 + `ChildAgentService` | 把子代理/团队放进侧边栏或右栏页签；把 `active` 画成 running；卡片墙 |
 | 代码 / 差异审阅 | `ui/editor.DiffView`（已有用法） | `editor.DiffState` + `Split` | 逐行文本 diff；手绘 gutter |
 | 设置 / 表单 | 现有 `uikit` 组合 + 官方输入 | `Form/Field/Fieldset` + `Switch/NumberInput/Select` + `uikit.PageHeader/Section` | 自绘开关；无标签输入；保存按钮放内容底部 |
 
@@ -572,7 +572,7 @@ uikit.ToolRow(c, uikit.ToolRowOptions{
 | `uikit.ApprovalDialog` | **已有**（Phase 3b；Inline 2026-11-10） | `Inline : bool`（产品默认 true）：输入框上方 V3 内联卡（警示横幅/描边）；`false` 保留 Modal 兼容路径；无 Default footer；Esc 由 session 审批优先路径 deny 最早一条；模块只留队列/自动切回会话 |
 | `uikit.PlanReviewDialog` | **已有**（Phase 3b） | Esc 不取消 + 一次性 RoleAlert 提示；空反馈不批准；失败 Esc 可关 |
 | `uikit.AskDialog` | **已有**（Phase 3b） | 等权选项 + 「其他…」+ 取消 Default；自由文本空 Disabled |
-| `uikit.TeamSurface` | **已有**（Phase 3d） | 团队三段式/行内 RunState/任务板分组/详情/危险确认；rightpanel 只留数据 |
+| 会话 agent surface | **已有（2026-11-10）** | 头部「智能体团队 / 子智能体 N / 后台任务 N」三入口；团队与共享任务为 Popover 浮层；子代理/成员在主栏打开并以面包屑返回；一次性只读、可继续可回复；右栏不再有团队/任务 pane |
 | `uikit.ComposerShell` | **已有**（Phase 3c） | 两处 composer 共用卡片/输入/宽度/发送位/键语义；toolbar/提交保留为 slot |
 | `uikit.RunStatus` | **已有**（Phase 3c） | 生成中/不伪造进度、队列、停止、重试、用量折叠 |
 | `uikit.ErrorPanel` | 暂缓（无调用点） | 行内错误用 `uikit.ErrorLine`；会话级错误带在 SessionThread；需要大块错误面板时再建 |

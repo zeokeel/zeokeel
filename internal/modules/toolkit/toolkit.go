@@ -353,6 +353,15 @@ func Module() *module.Descriptor[Config] {
 			group.close()
 			return err
 		}
+		// The session header's background-jobs chip reads the live root-scoped
+		// job manager through this service. The manager is rebuilt on every
+		// workspace switch, so the service resolves the current build per call
+		// instead of being re-provided.
+		if _, err := ctx.Provide(contracts.KeyJobs, contracts.JobService(newJobService(group))); err != nil {
+			closeLSP()
+			group.close()
+			return err
+		}
 		if _, err := ctx.Effect(func() cordis.Effect {
 			return cordis.Effect{cordis.CleanupOf(closeLSP)}
 		}); err != nil {
@@ -364,6 +373,7 @@ func Module() *module.Descriptor[Config] {
 		module.Provides(contracts.KeyToolkit),
 		module.Provides(contracts.KeyPlugins),
 		module.Provides(contracts.KeyTaskBoard),
+		module.Provides(contracts.KeyJobs),
 	).WithName("ZeoKeel Rig toolset")
 }
 

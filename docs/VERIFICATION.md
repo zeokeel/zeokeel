@@ -706,3 +706,17 @@ design-check 6/6（raw metric 45 ≤ 51）/mygo vet/`go test ./...`（45s）/`-r
   不再铺时间线）、`p2-behavior.png`（设置 → 行为 → 工作步骤：标准/回答结束后默认选中）、
   `p2-process-fold.png`（完成后的摘要 + 元信息 + 复制）。
 - **文档同步**：AGENT-SURFACES S1（工作步骤展示）与 S8、COVERAGE 消息级操作、ui-drive 行为页检查。
+
+## 0.2.6（2026-11-10：主框架 DSH 对齐，M1a–M3）
+
+用户要求按 DSH 重做主框架并"一点一点累加"到 M3：顶部三入口、左栏减负、右栏默认收起多标签、团队/子代理进主内容区、生成文件可侧栏预览、删除旧检查器代码、TDD 开发、发布小版本。
+
+- **顶部（M1a/M1c）**：会话标题行顺序 = 标题/面包屑 → 智能体团队 → 子智能体 N → N 个后台任务 → spacer → ⋯（运行中 badge 在 spacer 后）。团队浮层 = 成员卡（状态点/名/模型/最新活动/打开）+ 共享任务卡（status/owner/blockedBy/write scopes），`ui.PopoverBase` 原生浮层、Esc/点外关闭/焦点归还；子代理 switcher 选中后主栏切到子会话，标题变 `父标题 › 子智能体名` 面包屑，点父标题返回；一次性只读、可继续队友有 composer（`SendChildAgent`）；后台任务浮层显示状态/命令/用时/退出码并可停止（stoped 负退出码显示 "—"）。新增 `ChildAgentService` 统一读模型（agent）、`JobService`（toolkit）、`FilePreviewer`（rightpanel）。
+- **右栏（M1a/M1b）**：默认收起；多标签 = 开始 guide（工作区文件 / 新建终端，等宽卡片、无说明文字、Ctrl+Alt+P / Ctrl+`）+ 文件 + 终端 + 每个打开文件一个可关闭标签；文件页含工作区树（懒加载/400 行上限）、交付区、文本/Markdown/图片预览、文件内折叠 diff；终端页复用命令运行器；所有页面滚动安全。删除旧 8 页签与概览/工具/日志/变更/团队/任务 pane、pane 选择器/切换命令/快捷键。
+- **生成文件**：回合尾部「交付文件」（write_file）与「已编辑 N 个文件」（edit_file/str_replace_editor）卡片；每行「在侧边栏预览（PreviewFile）」「查看改动（文件标签内折叠 diff）」「用系统应用打开（OpenNative，internal/lib/openpath）」；正文文件卡打开右栏新标签。
+- **左栏（M1d）**：删除首页导航（启动落在会话/新对话 hero；rail 同步去掉首页）；会话树/搜索/归档均隐藏 `自动化: ` 运行会话（运行历史留在自动化页）；保留 会话/自动化任务/插件/设置。
+- **删除**：`internal/uikit/team.go` + tests（1875+842 行）、rightpanel agents/tasks/changes/team_* pane 与旧测试、旧团队/任务命令、toolcards 团队 footer；净删约 1.2 万行（git diff 统计）。
+- **TDD 证据**：session `agentsurface_test.go`（19 帧测试）、rightpanel 60 帧测试（guide/tabs/files/filepreview/terminal/deliverables/diff）、agent `childagents_test.go`（6）、toolkit `jobs_service_test.go`（11）、sidebar/home/uiroot 更新、uimodtest 8 个 E2E 重写；devtools ui-drive **91/91 PASS（156 shots）**、ui-snapshot **96 PNGs**。
+- **验证**：`scripts/verify.sh --no-smoke` **10/10 PASS**：gofmt/build/vet/designlint 0 new/design-check 6/6（raw metric 42 ≤ 51、ButtonBase 9 ≤ 10）/mygo vet/`go test ./...`（48 包，43s）/`-race`（314s）/regression **276 PASS / 0 SKIP / 0 FAIL**/ui-snapshot **98 steps / 96 PNGs**。
+- **快照**：`.cache/m1-devtools/snapshot/`（p2-guide、p2-files、p2-file-preview、p2-file-diff、p2-terminal、p2-team-overlay、p2-team-child、p2-child-switcher、p2-team-tasks、p2-jobs、p2-jobs-stopped、p2-landing、narrow/*）、`.cache/m1c-shots/*`、`.cache/m1-rightpanel/*`。
+- **限制**：P2 在本版是"统一子会话呈现层"（ChildAgent 读模型来自现有 subagent/团队运行记录 + 主栏面包屑导航），尚未持久化真正独立的子会话 `ChatSession` 存储；后续可把 `ChildAgentService` 换成持久子会话实现而不改 UI。

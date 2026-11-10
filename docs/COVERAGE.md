@@ -88,8 +88,8 @@
 | 命令面板/窗口内快捷键 | ✅ | uiroot palette/shortcuts | Cmd/Ctrl+K、可配置两条 chrome 快捷键；非系统全局热键 |
 | Settings 外壳与页面 | ✅ | `internal/ui/settings`、about | 17 页（高级分组默认折叠，日常导航 9 项）：常用（模型/行为/预设）、外观（外观/技能/快捷键）、集成（MCP/搜索/网络）、高级（通知/归档/导入/更新/诊断/记忆/LSP/数据与隐私）、关于；**模型页 = 模型列表（每模型服务商/Base URL/API Key/系列/思考模式/生成参数编辑；添加模型弹窗含常用服务商预填、密钥继承与测试连接，可设默认模型）+ 提示词 + 运行参数（最大迭代默认不限制/上下文预算/流完整性）**；**插件参数已落在 Plugins 页（已接线键）**；插件市场为明确非目标 |
 | Approval 审批内联卡（V3 强调） | ✅ | `uikit.ApprovalDialog`（Inline）+ `internal/ui/approval` + approvals 模块 | 输入框上方内联卡（警示横幅+警示描边，不遮挡 transcript）；allow/allow-always/deny、无默认焦点、Esc=deny 最早一条且不中断本轮（session 判断审批优先）、多请求计数、非会话屏自动切回会话；旧 Modal 路径保留给 embedder；只读/工作区可写/所有权限三档预设（settings 覆盖；旧 ask/never 存值归一为只读；headless assembly 可配 ask/never 策略） |
-| 右侧检查栏 | ✅ | rightpanel | 8 tab：概览/工具/日志/文件/变更/终端/**团队**（异步队友 + 同步子代理只读行）/**任务**，en/zh |
-| Files 检查器 | ✅ | rightpanel files + workspace | 打开文件夹/面包屑/文本/Markdown/图片预览/错误态 |
+| 右侧栏 | ✅ | rightpanel | 默认收起；多标签：开始引导 / 文件 / 终端 / 每个打开文件一个可关闭标签；文件页含工作区树、交付区、预览/改动；无概览/工具/日志/变更/团队/任务常驻 pane；en/zh |
+| 文件页 / 文件标签 | ✅ | rightpanel files + workspace | 工作区树/面包屑/文本/Markdown/图片预览/错误态/交付区；打开文件新标签，内容可滚动 |
 | Terminal 运行器 | ✅ | rightpanel terminal + terminal 模块 | 独立 shell -c、cwd、输出/退出码/停止/超时；无 PTY/持久 shell |
 | Workspace Changes/diff | ✅ | rightpanel changes + WorkspaceDiffer | 未提交变更列表、状态 badge、diff 折叠/截断 |
 | Trajectory/工具时间线 | ✅ | session Trajectory tab | 轨迹卡片/工具调用时间线 |
@@ -109,7 +109,7 @@
 | Workspace→Session 树/分组/计数 | ✅ | sidebar workspace tree | 多 workspace 分组、未分组、计数、搜索、折叠、置顶/归档 |
 | Plan UI（plan_review/exit_plan_mode） | ✅ | interaction plan Modal + /审阅计划 + plan 门禁 + toolcards 计划卡 + **keep-planning 反馈** | Markdown 审阅 + 批准/取消 + 计划模式门禁 + transcript 计划卡 + **「继续规划」反馈（写回当前会话作为下一条用户消息 → 模型修订后重新 plan_review）** |
 | Modes UI（standard/minimal/creator） | ✅ | session 模式 Popover + agent gate 策略 | 四模式：普通（原审批策略）、计划（只读+计划白名单，最高优先）、精简（只读探索白名单）、创作（隐藏编码工具，仅 ask/present/goal/memory/skill）；composer 模式菜单 + header 徽标，坏值归一，中英 |
-| Team UI（成员/任务/steer） | ✅ | rightpanel Agents/Tasks Inspector + agent `team_state.go` 运行态跟踪 + team_*/DSH 工具 + 会话 B3 顶栏团队 chip + palette 命令 | 分组（主代理/队友/同步子代理·只读）+ 真运行态 badge（running/idle/done/failed/interrupted；availability 不再画成 running）+ 当前活动/耗时/步数/token + 活动时间线 + 产出复制 + 完成/失败 toast(查看) + 原生「新建队友」表单（Form/Field，TeamService.Spawn）+ steer/中断/关闭（无默认动作确认）+ 页头 chip/two 稳定命令入口；spawn 仍可由模型工具发起。剩余（后续）：团队工作台 overlay（roster/概览/成员/任务板三视图）、后台 jobs 面板、团队归属按会话过滤 |
+| 智能体团队 / 子代理 | ✅ | session `agentsurface.go` + agent `childagents.go` + toolkit `jobs_service.go` | 头部三入口「智能体团队 / 子智能体 N / 后台任务 N」（Popover 浮层）；团队浮层=成员卡+共享任务卡；子代理/成员在主栏以 `父标题 › 子名` 面包屑打开，点父标题返回；一次性只读、可继续有输入框；后台任务可查看状态并停止；不占侧边栏/右栏。剩余（后续）：真正持久的子会话存储（当前读模型来自现有 subagent/team 运行记录） |
 | Todo UI（会话 todo 面板） | ✅ | toolkit `KeyTaskBoard` + rightpanel「任务」tab | 状态分组（进行中/待处理/已完成）+ 计数、行内 owner（未认领/主代理/队友；`TaskAssigner` 菜单）、依赖/阻塞行（等待 task-X「subject」完成/可开始，`BoardTask.BlockedBy`）、`ui.List` 选中 + Enter 展开详情（描述/依赖/写入范围/开始/删除面板）、chat 通知自动刷新（T-03）、显式刷新 loading、空/错误态，与 team_task_* 共用；剩余（后续）：任务板持久化（当前 toolkit 内存，重启丢失）、工作台内任务板视图、旧 todo 卡内联进度 |
 | Artifacts / Present UI | ✅ | interaction Modal + uiroot ArtifactLister + rightpanel Files「产物」 | present 预览 + 最近 50/产物列表最近 10、内嵌 markdown 再预览 + 下载为 Markdown（原生保存对话框/slug）；跨重启历史为明确非目标（进程内 50 条） |
 | 交互式 ask_user UI | ✅ | `internal/ui/interaction` question Modal + uiroot bridge | 选项/自由文本/取消；hosttools ask_user 已走真实桥，E2E 覆盖 |

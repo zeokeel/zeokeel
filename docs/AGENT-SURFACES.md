@@ -1,7 +1,7 @@
 # Agent 客户端入口组件规格（AGENT-SURFACES.md）
 
 > 本文是 [DESIGN.md](DESIGN.md) §2「场景 → 组件硬映射」的展开规格：**Agent 客户端 9 个 surface 的入口组件契约**。
-> **当前状态（2026-11-09）：S1–S9 全部已有 uikit 入口组件。** 每节保留目标 API 草案（作为契约）、最终实现位置、迁移步骤与验收（迁移步骤仅作历史记录）。
+> **当前状态（2026-11-10）：S1–S9 全部已有入口实现；S9 从右侧栏 TeamSurface 改为会话内的 agent surface（PopoverBase 团队浮层 + 主栏子会话视图）。** 每节保留目标 API 草案（作为契约）、最终实现位置、迁移步骤与验收（迁移步骤仅作历史记录）。
 > 落地顺序与 lint 规则见 [DESIGN-LINT.md](DESIGN-LINT.md)；token/预设见 [DESIGN.md](DESIGN.md) §5/§6。
 
 ---
@@ -64,7 +64,7 @@ Agent 客户端的 UI 不是 CRUD 页面，而是**推理与行动的外化**：
 | session-switch | 重置 `ListState` / 展开状态 / 用量 / 滚动 |
 | error | 失败轮显示错误行 + 重试；元信息行只保留时间/用量，不提供 ⋯ 动作 |
 
-**会话壳层（B3 顶栏 + composer dock，2026-11-10）**：会话标题/工作区、运行中 chip、团队 chip、⋯「会话操作」菜单由宿主 B3 顶栏渲染（`screen.header` / `screen.actions` / `screen.tabs` 槽位，40px 标题行 + 32px Tabs 行（标题 TypeM 16px，与 13px Tabs / 12px badge / 16px 图标同尺度）、浅色 header 面、仅底边一条 hairline、行间无线、无返回按钮、无 `Alt+←` 历史回退）；屏幕 body 不再自建 header。目标条（Badge + 目标文本 + ⋯「目标操作」）与审批内联卡在 composer 上方 dock（阅读列宽度居中，`session.banner` 槽），不占 transcript 空间、不遮挡输入。通知/ toast 固定在右上角、B3 顶栏下方（最多 2 条，自上而下堆叠），不遮挡标题/Tabs/顶栏动作。
+**会话壳层（B3 顶栏 + composer dock，2026-11-10，DSH 对齐）**：标题行顺序固定为 **标题/面包屑 → 智能体团队 → 子智能体 N → N 个后台任务 → spacer → ⋯**（`screen.header` / `screen.actions` / `screen.tabs` 槽位，40px 标题行 + 32px Tabs 行，浅色 header 面、仅底边一条 hairline、行间无线、无返回按钮、无 `Alt+←` 历史回退）；「运行中」badge 保留在 spacer 之后、⋯ 之前。三个 agent 入口都是 `ui.PopoverBase` 浮层（团队：成员 + 共享任务；子智能体：树/列表切换；后台任务：状态/命令/用时/停止），不占右栏。进入子智能体或团队成员时，主栏切到子会话：标题变成 `主标题 › 子智能体名` 面包屑，点主标题返回父会话；一次性子智能体只读，可继续成员有输入框（`ChildAgentService.SendChildAgent`）。回合尾部新增文件卡：「交付文件」（write_file）与「已编辑 N 个文件」（edit_file/str_replace_editor），每行「在侧边栏预览 / 查看改动 / 用系统应用打开」，预览打开右栏文件标签。目标条（Badge + 目标文本 + ⋯「目标操作」）与审批内联卡在 composer 上方 dock（阅读列宽度居中，`session.banner` 槽），不占 transcript 空间、不遮挡输入。通知/ toast 固定在右上角、B3 顶栏下方（最多 2 条，自上而下堆叠），不遮挡标题/Tabs/顶栏动作。右栏是默认收起的多标签页面：开始引导（工作区文件 / 新建终端两张等宽卡片，无说明文字）+ 文件 + 终端 + 每个打开文件一个可关闭标签；页面内容一律可滚动。
 
 **目标 API 草案**：
 
@@ -185,7 +185,7 @@ func ToolCallCard(c *ui.Context, o ToolCallCardOptions)
 func ToolRow(c *ui.Context, o uikit.ToolRowOptions) // 已有
 ```
 
-**布局**：紧凑行（图标/名/状态/单行预览/chevron）用于普通调用；决策类工具在 transcript 用完整卡（图标+名+状态+步骤+详情）；轨迹 pane 复用同一卡。详情段统一：输入（命令/路径/前后内容/JSON）→ 输出；可复制；mono 8 行上限 + 截断提示。团队类工具加「在团队中查看 / 打开任务板」footer（稳定命令 ID）。
+**布局**：紧凑行（图标/名/状态/单行预览/chevron）用于普通调用；决策类工具在 transcript 用完整卡（图标+名+状态+步骤+详情）；轨迹 pane 复用同一卡。详情段统一：输入（命令/路径/前后内容/JSON）→ 输出；可复制；mono 8 行上限 + 截断提示。团队类工具不再提供跨模块 footer：团队/子代理从会话头部入口进入，工具卡只保留输入/输出与状态。
 
 **交互/键盘**：trigger 可聚焦，Enter/Space 展开；hover/focus 背景 `BgHover`；详情内复制按钮可 Tab 到；状态变化自动更新但**不移动已展开区域**。
 
@@ -437,54 +437,43 @@ func RunStatus(c *ui.Context, o RunStatusOptions)
 
 ---
 
-### S9 TeamSurface（多 Agent / 分支 / 任务板）
+### S9 会话 agent surface（多 Agent / 团队 / 任务）
 
-**职责**：展示多 Agent 运行态、团队任务板、分支/线程切换；运行态必须真实（`RunState`），不得把 `active`（可用性）画成 running。
+**职责**：把子代理与团队成员作为**子会话**呈现：头部入口、团队浮层、主栏子会话视图（面包屑返回）、共享任务；运行态必须真实（`RunState`），不得把 `active`（可用性）画成 running。**团队/子代理不再放进侧边栏或右栏页签。**
 
-**数据模型**：`contracts.TeamMember{RunState, ...}`、`TeamActivity`（有界）、`BoardTask{Status,Owner,BlockedBy,WriteScopes}`、`TaskAssigner`（可选）。
+**数据模型**：`contracts.ChildAgentService`（`ChildAgents(parentSessionID)` / `ChildAgent(id)` / `SendChildAgent`；子代理=one-shot，队友=continuable）、`TeamMember{RunState,...}`、`TeamActivity`（有界）、`BoardTask{Status,Owner,BlockedBy,WriteScopes}`、`TaskAssigner`（可选）。
 
 **状态矩阵**：
 
 | 状态 | 表现 |
 |---|---|
-| running | 运行中 Badge/活动行；可中断 |
-| idle | 空闲；可派发 |
-| done | 完成 + 可查看产出 |
-| failed | 失败 + 错误原因 + 重试/关闭 |
+| running | 运行中 Badge/活动行；团队浮层显示运行点 |
+| idle | 空闲；可向可继续成员发消息 |
+| done/completed | 完成 + 可查看产出 |
+| failed | 失败 + 错误原因 |
 | interrupted | 已中断（非失败） |
-| unknown | 回退为空闲（不是运行中） |
+| one-shot | 只读：无 composer，不显示「发送」 |
 | task blocked | 依赖未完成：显示 blockedBy，状态不可推进 |
 
-**目标 API 草案**：
+**入口结构**：
 
-```go
-type TeamSurfaceOptions struct {
-    Members []contracts.TeamMember
-    Tasks   []contracts.BoardTask
-    Pane    TeamPane // agents/tasks
-    OnOpenTask   func(id string)
-    OnAssign     func(taskID, owner string)
-    OnInterrupt  func(memberID string)
-    OnClose      func(memberID string)
-}
-func TeamSurface(c *ui.Context, o TeamSurfaceOptions)
-```
+- 会话头第一行（`screen.header`/`screen.actions` 槽）：`标题/面包屑 → 智能体团队 → 子智能体 N → N 个后台任务 → spacer → ⋯`；三个入口都是 `ui.PopoverBase` 原生浮层（Esc/点外关闭/焦点归还），不占右栏。
+- 团队浮层：成员卡（状态点/名字/模型/最新活动/「打开」）+ 共享任务卡（subject/状态/owner/依赖/写入范围）；空态说明「暂无共享任务」。
+- 子智能体浮层：子代理/队友列表；选中进入主栏子会话。
+- 后台任务浮层：`JobService.Jobs()` 的行（状态/命令/用时/退出码）+ 停止（`KillJob`）。
 
-**布局**：检查器内 `ui.List`（无卡片墙）；团队 pane 分「主代理 / 队友 / 同步子代理（只读）」段头 + 计数；选中行详情在列表**下方**的独立面板（`design.Panel()`）；任务板用 List `Header` 分组 + 计数；行内 owner 用 `PopoverMenuButton`（→ `TaskAssigner`）；危险确认用 `ui.Modal`+`uikit.DialogFooter`（安全 Cancel 为 Default、危险动作非 Default）。
+**布局与交互**：
 
-**交互**：上下键选集、Enter 展开、⋯ 菜单；中断/关闭有确认；跨模块跳转用稳定命令 ID（`rightpanel.team.open`/`rightpanel.tasks.open`）。
+- 子会话在主栏渲染：标题变为 `父标题 › 子智能体名` 面包屑，点父标题返回父会话；内容区显示任务（prompt）、状态、输出与活动时间线；可继续成员底部有消息输入框（`SendChildAgent`），一次性成员只读。
+- 团队浮层只读，成员/任务数据来自 `TeamService`/`TaskBoard`；任务完成/指派由工具或服务调用完成，浮层按帧重读。
+- 头部窄带（阅读列 < 2/3）退化为图标+计数，可及名保留全称。
+- a11y：入口按钮 Label 为全称；状态文案可读（不只靠颜色）；浮层为 native popover/dialog 语义。
 
-**a11y**：List Label；RunState 文案可读（不只靠颜色）；空态解释团队并给出「新建队友」入口。
+**禁止**：把团队/子代理塞进侧边栏或右栏常驻页签；`active` 当 running；伪造子代理活动时间线；一次性子代理显示可发送输入框。
 
-**禁止**：`active` 当 running；tab 模拟分支；卡片墙；无确认关闭成员/删除任务；把任务详情渲染在选中行内（覆盖不可读）。
+**当前实现**：`internal/ui/session/agentsurface.go`（三入口 + 三个 Popover 浮层 + 子会话视图 + 回合尾文件卡）、`internal/modules/agent/childagents.go`（统一 `ChildAgentService` 读模型）、`internal/modules/toolkit/jobs_service.go`（`JobService`）。旧 `internal/uikit/team.go` / `rightpanel` 团队/任务 pane 已删除。
 
-**当前实现**：`internal/ui/rightpanel/agents.go`（三段式 + RunState + 详情 + 新建队友 Form + 关闭确认）、`tasks.go`（List Header 分组 + owner 菜单 + 依赖行 + 详情 + 删除确认）。测试与快照见 [UI-CONFORMANCE.md](UI-CONFORMANCE.md) §1.2（`TestAgentsRunStateBadgesAreTruthful` 等）。
-
-**迁移步骤**：抽 `TeamSurface` 到 uikit；保留 rightpanel 的 pane 选择器/宿主命令；用现有 agents/tasks 测试作回归；新增快照 `p2-team-*.png`。
-
-**验收**：`TestTeamRunStateIsTruthful`、`TestTeamAssignViaMenu`、`TestTeamTaskDeleteRequiresConfirm` + 快照（现有 `p2-team.png`/`p2-tasks.png`，新增按 `p2-team-*` 命名）。
-
----
+**验收**：`internal/ui/session/agentsurface_test.go`（19 个帧测试：header 顺序、团队浮层、switcher、子会话面包屑/返回、双向不可用、jobs 停止、文件卡预览回调）、`internal/modules/agent/childagents_test.go`、`internal/modules/toolkit/jobs_service_test.go`、uimodtest 新 E2E（团队浮层 / 文件页 / 终端页 / 快捷键）。
 
 ## 2. 跨 surface 规则
 

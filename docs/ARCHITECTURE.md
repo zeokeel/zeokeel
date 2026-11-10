@@ -227,19 +227,19 @@ if _, err := ctx.Effect(func() cordis.Effect {
 - ✅ 自动化：`internal/modules/automation`（cron/every/after + 持久化 + 执行）+ `ui/automation` 页面
 - ✅ 会话 fork/导出：`SessionForker` + 侧栏创建副本 + 头部原生保存对话框导出 Markdown
 - ✅ 技能：`internal/modules/skills`（多根 SKILL.md 发现）+ toolkit skill 工具 + 设置技能页
-- ✅ 终端：`internal/modules/terminal`（命令运行器）+ `ui/rightpanel` 终端页
+- ✅ 终端：`internal/modules/terminal`（命令运行器）+ `ui/rightpanel` 终端标签页（默认收起、按需打开）
 - ✅ 会话↔工作区：sessionstore `workspace_id` 迁移 + agent 记录 + sidebar workspace→session 树
-- ✅ 工作区变更：`WorkspaceDiffer`（git status/diff）→ `ui/rightpanel` 变更页（diff 行着色）
-- ✅ 工作区：`internal/modules/workspace`（注册表 + 沙箱 Files/ReadFile/Search）；`ui/rightpanel` Files 页
+- ✅ 工作区变更：`WorkspaceDiffer`（git status/diff）→ `ui/rightpanel` 文件标签内折叠的 diff
+- ✅ 工作区：`internal/modules/workspace`（注册表 + 沙箱 Files/ReadFile/Search）；`ui/rightpanel` 文件页
   （打开文件夹/目录浏览/预览）
 - ✅ 附件/图片：`contracts.Attachment` + 可选 `AttachmentSender`；agent 转 rig image content part；
   composer 原生 picker/缩略图/chips；用户气泡附件展示
 - ✅ 记忆与 Markdown：`internal/modules/memory`（JSON 持久化 rig.MemoryStore + memory 工具）、
   `ui/session` 记忆 Tab 真实面板、助手正文 mygo `ui/markdown`（原生渲染器）
 - ✅ 老 UI 布局对齐：无全局顶栏，屏幕自带头部；侧栏模块化导航（首页/会话/搜索/重命名/删除）；
-  `ui/rightpanel` 提供窗口级 docked 右侧检查栏（概览/工具/模型），宿主右上角开关；composer slash 命令；
+  `ui/rightpanel` 提供窗口级 docked 右侧栏（默认收起；多标签：开始/文件/终端/打开的文件），宿主右上角开关；composer slash 命令；
   composer 工具栏（模型 chip / 命令入口 / 附件占位）与 Home 初始设置卡对照 old 实现；
-  rightpanel 新增「日志」页读取 KeyStore 的 SessionLog 事件（old right_sidebar 的 Log tab）
+  （日志面已随多标签右栏收敛删除；持久化事件仍由 KeyStore/SessionLog 提供）
 - ✅ 示范模块：`appinfo`（服务）、`ui/home`（screen+command+槽位组合）、`ui/about`
   （settings page + settings.header）、`ui/welcome`（home.hero + command）、
   `ui/toolcards`（ToolRenderer）、`uikit`（共享控件封装）

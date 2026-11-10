@@ -223,7 +223,6 @@ func (r *Root) setRightPanelOpen(open bool, restoreFocus bool) {
 	}
 	r.rightOpen = open
 	if open {
-		r.paneHintShown = false
 	} else if restoreFocus {
 		r.inspectorFocusPending = true
 	}
@@ -387,6 +386,21 @@ func (r *Root) registerHostCommands() {
 				// The pane header's close control runs this command, so the focus
 				// goes back to the content header toggle like a closed dialog's.
 				r.setRightPanelOpen(!r.rightOpen, true)
+				return nil
+			},
+		},
+		{
+			// Idempotent open used by right-sidebar pages and conversation file
+			// cards: unlike the toggle it never closes an already-open panel.
+			ID:    "uiroot.open-inspector",
+			Title: r.tr("打开右侧栏", "Open inspector"),
+			Hint:  r.tr("展开右侧栏并显示页面", "Expand the right sidebar and show its pages"),
+			Order: 905,
+			Run: func() error {
+				if !r.inspectorAvailable() {
+					return nil
+				}
+				r.setRightPanelOpen(true, false)
 				return nil
 			},
 		},
