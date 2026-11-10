@@ -4,16 +4,15 @@
 [![Release](https://img.shields.io/github/v/release/zeokeel/zeokeel)](https://github.com/zeokeel/zeokeel/releases)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
-> **v0.2.14 — nineteenth public release** (2026-11-10). Native, compile-time modular
+> **v0.2.15 — twentieth public release** (2026-11-10). Native, compile-time modular
 > AI agent for desktop, headless and ACP (Zed/editor) use; one Go binary, no
 > webview. Final verification: **10/10 PASS** (`./scripts/verify.sh --no-smoke`),
 > full test suite 48 packages green, regression **276 PASS / 0 SKIP / 0 FAIL**,
 > UI snapshot **98 steps / 96 PNGs**, designlint 0 new.
 > See [CHANGELOG.md](CHANGELOG.md) for the release notes.
 
-> **v0.2.14 主要变化**：macOS dmg 流水线改用现成工具——签名/公证直接用
-> `indygreg/apple-code-sign-action@v1.2`，dmg 工具用预编译 `libdmg-hfsplus`（JuliaBinaryWrappers），
-> 不再在 CI 里 cmake 编译；artifact actions 升到 v7/v8。全 Linux，无 macOS runner。
+> **v0.2.15 主要变化**：修复 `apple-code-sign-action` 的 `sign_args` 传参格式（每行一个参数），
+> 使全 Linux 的 dmg 签名/公证流程可以真正产出资产。其余同 v0.2.14。
 
 ## 下载与运行 / Download and run
 

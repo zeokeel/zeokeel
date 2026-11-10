@@ -8,6 +8,12 @@ All notable changes to ZeoKeel are documented here. The format follows
 
 （暂无未发布改动）
 
+## [0.2.15] - 2026-11-10
+
+修复 apple-code-sign-action 的 `sign_args` 格式：该 action 按“每行一个参数”追加，而不是 shell 命令行；
+`--code-signature-flags runtime` 必须拆成两行，否则 rcodesign 报 `unexpected argument`。其余与 v0.2.14 相同，
+目标是把真实 dmg 发布出来。
+
 ## [0.2.14] - 2026-11-10
 
 发布流水线改用现成 action/预编译工具，不再自己编译 dmg 工具链：
