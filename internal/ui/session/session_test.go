@@ -824,14 +824,17 @@ func TestTrajectoryTimelineShowsToolCalls(t *testing.T) {
 		t.Fatalf("running trajectory card spinner: %+v found %v", info, ok)
 	}
 
-	// The chat tab is unchanged: the tool call still renders there (the compact
-	// disclosure row in this test because no toolcards module is active).
+	// On the chat tab the two finished steps now fold into one process row
+	// (one row per multi-step turn); expanding it brings the timeline back.
 	// Re-focus the tab strip (the summary click moved focus) and press Home for
 	// tab 0.
 	h.click(tester, "轨迹")
 	tester.Key(0, ui.KeyHome)
 	tester.Frame()
-	h.assertTexts(tester, "运行一下", "运行命令")
+	h.assertTexts(tester, "运行一下", "过程 · 2 个工具调用")
+	h.assertNoTexts(tester, "运行命令")
+	h.click(tester, "过程 · 2 个工具调用")
+	h.assertTexts(tester, "运行命令", "读取文件")
 }
 
 func TestBrandedLayoutGeometryAndHints(t *testing.T) {

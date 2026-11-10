@@ -929,9 +929,17 @@ func buildChatPane(
 			buildHero(ec, t, cfg, navigator, chat, st)
 		},
 		Row: func(rc *ui.Context, message contracts.ChatMessage) {
-			canRegenerate := hasRegenerator && !chatSession.Running &&
-				message.ID == lastID && message.Role == contracts.ChatRoleAssistant
-			buildMessage(rc, t, runtime, message, st, canRegenerate)
+			last := message.ID == lastID && message.Role == contracts.ChatRoleAssistant
+			canRegenerate := hasRegenerator && !chatSession.Running && last
+			buildMessage(rc, t, runtime, message, st, canRegenerate,
+				last && canCopyReply(message))
+		},
+		SameTurn: assistantTurnContinues,
+		GroupRow: func(rc *ui.Context, group []contracts.ChatMessage) {
+			last := group[len(group)-1].ID == lastID
+			canRegenerate := hasRegenerator && !chatSession.Running && last
+			buildAssistantTurnGroup(rc, t, runtime, st, group, canRegenerate,
+				last && canCopyReply(group[len(group)-1]))
 		},
 	})
 }
@@ -960,7 +968,7 @@ func buildHero(c *ui.Context, t *design.Tokens, cfg Config, navigator contracts.
 // buildMessage renders one transcript entry. User turns are right-aligned
 // raised bubbles; assistant turns are plain brand body text with optional
 // reasoning, tool cards and errors.
-func buildMessage(c *ui.Context, t *design.Tokens, runtime contracts.UIRuntime, message contracts.ChatMessage, st *state, canRegenerate bool) {
+func buildMessage(c *ui.Context, t *design.Tokens, runtime contracts.UIRuntime, message contracts.ChatMessage, st *state, canRegenerate, canCopy bool) {
 	switch message.Role {
 	case contracts.ChatRoleUser:
 		ui.Column(c.Key("session.message." + message.ID)).FillWidth().AlignItems(ui.End).Gap(design.Space1).Children(func() {
@@ -988,7 +996,7 @@ func buildMessage(c *ui.Context, t *design.Tokens, runtime contracts.UIRuntime, 
 			design.Apply(ui.Text(c, message.Text), t.TextMuted(design.TypeXS))
 		})
 	default:
-		buildAssistantMessage(c, t, runtime, message, st, canRegenerate)
+		buildAssistantMessage(c, t, runtime, message, st, canRegenerate, canCopy)
 	}
 }
 
@@ -997,7 +1005,7 @@ func buildMessage(c *ui.Context, t *design.Tokens, runtime contracts.UIRuntime, 
 // summary row and keeps the reply body below it; expanding the summary brings
 // back the full interleaved timeline. A streaming turn is always expanded and
 // carries no meta row.
-func buildAssistantMessage(c *ui.Context, t *design.Tokens, runtime contracts.UIRuntime, message contracts.ChatMessage, st *state, canRegenerate bool) {
+func buildAssistantMessage(c *ui.Context, t *design.Tokens, runtime contracts.UIRuntime, message contracts.ChatMessage, st *state, canRegenerate, canCopy bool) {
 	outer := ui.Column(c.Key("session.message." + message.ID)).FillWidth().Gap(design.Space2)
 	foldable := assistantProcessFoldable(message)
 	processOpen := foldable && st.processOpen[message.ID]
@@ -1042,6 +1050,9 @@ func buildAssistantMessage(c *ui.Context, t *design.Tokens, runtime contracts.UI
 		if st.regenerateErr != "" && canRegenerate && strings.TrimSpace(message.Error) == "" {
 			buildErrorLine(c, t, st.regenerateErr)
 		}
+		if canCopy {
+			buildReplyCopyButton(c, t, st, message)
+		}
 	})
 }
 
@@ -1066,21 +1077,21 @@ func assistantProcessFoldable(message contracts.ChatMessage) bool {
 // for HoldPlace so the row keeps its place.
 func buildProcessSummary(c *ui.Context, t *design.Tokens, runtime contracts.UIRuntime, st *state,
 	message contracts.ChatMessage, open bool, meta func(c *ui.Context)) bool {
-	parts := []string{st.tr("过程", "Process")}
-	if strings.TrimSpace(message.Reasoning) != "" {
-		parts = append(parts, st.tr("思考", "Reasoning"))
-	}
-	tools := len(message.Tools)
-	if tools == 1 {
-		parts = append(parts, st.tr("1 个工具调用", "1 tool call"))
-	} else {
-		parts = append(parts, fmt.Sprintf(st.tr("%d 个工具调用", "%d tool calls"), tools))
-	}
+	return buildProcessFoldRow(c, t, runtime, st, message.ID, open,
+		processSummaryParts(st, message.Reasoning, len(message.Tools)), meta)
+}
+
+// buildProcessFoldRow is the one disclosure row a folded process renders: the
+// chevron, the summary and the turn's meta (time/usage/⋯) on one row. The fold
+// key is the message ID for a single turn and the first message ID for a grouped
+// multi-step turn, so both remember their state the same way.
+func buildProcessFoldRow(c *ui.Context, t *design.Tokens, runtime contracts.UIRuntime, st *state,
+	key string, open bool, parts []string, meta func(c *ui.Context)) bool {
 	summary := strings.Join(parts, " · ")
 	ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(design.Space2).Children(func() {
 		// The disclosure is created inside the row so its trigger is a row
 		// child; the meta parts drawn after it share the same row.
-		end := ui.CollapsibleBase(c.Key("session.process."+message.ID), &open)
+		end := ui.CollapsibleBase(c.Key("session.process."+key), &open)
 		trigger := end.Trigger.Grow(1).AlignItems(ui.Center).Gap(design.Space2).
 			PaddingY(design.Space1).Radius(design.RadiusSM).Label(summary)
 		if end.Trigger.Hovered() || end.Trigger.Focused() {
@@ -1101,7 +1112,7 @@ func buildProcessSummary(c *ui.Context, t *design.Tokens, runtime contracts.UIRu
 			meta(c)
 		}
 		if end.Trigger.Changed() {
-			st.processOpen[message.ID] = open
+			st.processOpen[key] = open
 			st.chatHoldPlace = true
 			runtime.Invalidate()
 		}
@@ -1109,11 +1120,146 @@ func buildProcessSummary(c *ui.Context, t *design.Tokens, runtime contracts.UIRu
 	return open
 }
 
+// processSummaryParts is the fold summary copy: 过程, 思考 (when the turn
+// reasoned) and the tool count. Duration/tokens live in the meta half of the
+// same row, never twice.
+func processSummaryParts(st *state, reasoning string, tools int) []string {
+	parts := []string{st.tr("过程", "Process")}
+	if strings.TrimSpace(reasoning) != "" {
+		parts = append(parts, st.tr("思考", "Reasoning"))
+	}
+	if tools == 1 {
+		parts = append(parts, st.tr("1 个工具调用", "1 tool call"))
+	} else {
+		parts = append(parts, fmt.Sprintf(st.tr("%d 个工具调用", "%d tool calls"), tools))
+	}
+	return parts
+}
+
+// assistantTurnContinues reports whether next is another step of the same
+// assistant turn: a finished process step (tools and no error) followed by the
+// next finished assistant message. Such runs render as one transcript row: the
+// whole process folds once and only the final result stays visible.
+func assistantTurnContinues(prev, next contracts.ChatMessage) bool {
+	if prev.Role != contracts.ChatRoleAssistant || next.Role != contracts.ChatRoleAssistant {
+		return false
+	}
+	if prev.Streaming || next.Streaming || prev.Error != "" || next.Error != "" {
+		return false
+	}
+	return len(prev.Tools) > 0
+}
+
+// buildAssistantTurnGroup renders a multi-step assistant turn as one folded
+// process row: the steps' tool calls and reasoning are summarized once, the
+// intermediate replies stay behind the fold, and only the final result (plus any
+// decision card that is waiting on the user) is shown under it. Expanding the
+// fold restores every step's full timeline in order.
+func buildAssistantTurnGroup(c *ui.Context, t *design.Tokens, runtime contracts.UIRuntime, st *state,
+	group []contracts.ChatMessage, canRegenerate, canCopy bool) {
+	key := group[0].ID
+	open := st.processOpen[key]
+	tools := 0
+	var reasoning strings.Builder
+	for _, message := range group {
+		tools += len(message.Tools)
+		reasoning.WriteString(message.Reasoning)
+	}
+	// The group's meta reports the whole turn: summed duration/tokens on the
+	// last message's clock and actions (copy/regenerate apply to that result).
+	metaMessage := group[len(group)-1]
+	metaMessage.Usage = groupedMessageUsage(group)
+	ui.Column(c.Key("session.turn." + key)).FillWidth().Gap(design.Space2).Children(func() {
+		open = buildProcessFoldRow(c, t, runtime, st, key, open,
+			processSummaryParts(st, reasoning.String(), tools),
+			func(c *ui.Context) {
+				buildAssistantMetaContent(c, t, runtime, st, metaMessage, canRegenerate)
+			})
+		for index, message := range group {
+			if open {
+				buildAssistantTimeline(c, t, runtime, st, message)
+				continue
+			}
+			if index == len(group)-1 {
+				buildAssistantReply(c, t, runtime, st, message)
+				continue
+			}
+			buildProminentDecisions(c, t, runtime, st, message)
+		}
+		if canCopy {
+			buildReplyCopyButton(c, t, st, group[len(group)-1])
+		}
+	})
+}
+
+// canCopyReply reports whether a finished assistant reply has text worth a
+// bottom copy button: the latest result, not a streaming turn or a failed one.
+func canCopyReply(message contracts.ChatMessage) bool {
+	return !message.Streaming && strings.TrimSpace(message.Error) == "" &&
+		strings.TrimSpace(message.Text) != ""
+}
+
+// buildReplyCopyButton is the latest reply's bottom copy affordance: one quiet
+// labeled button under the answer. It copies the same text as the ⋯ menu's
+// 复制消息，so the two entries never disagree.
+func buildReplyCopyButton(c *ui.Context, t *design.Tokens, st *state, message contracts.ChatMessage) {
+	label := st.tr("复制", "Copy")
+	ui.Row(c).FillWidth().AlignItems(ui.Center).Children(func() {
+		button := design.Apply(ui.Button(c, ""), t.SecondaryButton()).
+			Height(design.Space8).PaddingX(design.Space3).
+			Label(st.tr("复制回复", "Copy reply")).
+			Tooltip(st.tr("复制这条回复", "Copy this reply"))
+		button.Children(func() {
+			ui.Icon(c, icons.Copy()).Size(design.Space3, design.Space3).
+				TextColor(t.LabelSecondary)
+			design.Apply(ui.Text(c, label), t.Font(design.TypeXS)).TextColor(t.LabelSecondary)
+		})
+		if button.Clicked() {
+			c.WriteClipboard(message.Text)
+			st.toast(contracts.NotifySuccess, st.tr("已复制", "Copied"))
+		}
+	})
+}
+
+// groupedMessageUsage sums a multi-step turn's usage: duration, billing tokens
+// and iterations add up, while the context size is the size of the last request
+// (the same rule as one message's ContextTokens).
+func groupedMessageUsage(group []contracts.ChatMessage) *contracts.MessageUsage {
+	var total contracts.MessageUsage
+	any := false
+	for _, message := range group {
+		if message.Usage == nil {
+			continue
+		}
+		any = true
+		total.DurationMS += message.Usage.DurationMS
+		total.PromptTokens += message.Usage.PromptTokens
+		total.CompletionTokens += message.Usage.CompletionTokens
+		total.TotalTokens += message.Usage.TotalTokens
+		total.CachedTokens += message.Usage.CachedTokens
+		total.Iterations += message.Usage.Iterations
+		if message.Usage.ContextTokens > 0 {
+			total.ContextTokens = message.Usage.ContextTokens
+		}
+	}
+	if !any {
+		return nil
+	}
+	return &total
+}
+
 // buildAssistantReply draws the folded turn's visible reply: the Markdown body
 // and the prominent decision cards (ask_user / plan_review / exit_plan_mode) in
 // call order, while the timeline rows stay folded behind the summary.
 func buildAssistantReply(c *ui.Context, t *design.Tokens, runtime contracts.UIRuntime, st *state, message contracts.ChatMessage) {
 	renderAssistantText(c, t, st, message)
+	buildProminentDecisions(c, t, runtime, st, message)
+}
+
+// buildProminentDecisions draws the decision cards (ask_user / plan_review /
+// exit_plan_mode) of one step: a folded process must never hide a decision the
+// turn is waiting on, so these stay visible while the rest of the step folds.
+func buildProminentDecisions(c *ui.Context, t *design.Tokens, runtime contracts.UIRuntime, st *state, message contracts.ChatMessage) {
 	for _, tool := range message.Tools {
 		if prominentTool(tool.Name) {
 			buildAssistantToolRow(c, t, runtime, st, message.ID, tool, false)

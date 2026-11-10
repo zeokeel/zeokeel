@@ -647,3 +647,25 @@ design-check 6/6（raw metric 45 ≤ 51）/mygo vet/`go test ./...`（45s）/`-r
 - **快照（人工查看）**：`.cache/ui-conformance-meta2/p1-chat.png`（meta 在消息顶部）、
   `p2-process-fold.png`（折叠摘要与 meta 同一行）、`p2-message-actions.png`（菜单只剩
   复制消息/重新生成/用量明细）、`p2-message-usage.png`。
+
+## 0.2.2 补丁（2026-11-10：同回合多步过程合并 + 最终回复底部复制）
+
+用户反馈：同一回合连续多个「过程 · 思考 · 1 个工具调用」行内容相同，应合并；并且最终回复底部要有复制按钮。
+
+- **同回合多步过程合并**：`uikit.SessionThread` 新增 `SameTurn` / `GroupRow` 两个可选钩子（未设置时行为
+  不变）：连续且 `SameTurn` 接受的窗口消息共享一个 List 行，行名用步骤范围（「助手 1–3」）。session
+  的 `assistantTurnContinues` 把「已结束、无错误、带工具调用的助手步骤」串成一回合；`buildAssistantTurnGroup`
+  汇总工具数与思考（「过程 · 思考 · 合计工具数」），默认折叠，折叠时只渲染**最终结果**（最后一步回复 +
+  必要的决策卡），中间步骤的正文/工具行收进折叠区；展开恢复每一步的完整时间线。折叠状态按首条消息 ID
+  保存；meta 用量按回合汇总（时长/tokens/迭代求和，上下文取最后一次请求）。
+- **最终回复底部复制**：最后一条已结束回复正文下方新增常显「复制」按钮（Label「复制回复」），点击写剪贴板
+  并 toast「已复制」；与 ⋯ 菜单「复制消息」复制同一文本。流式/失败轮不显示。
+- **测试**：uikit `TestSessionThreadGroupsConsecutiveRuns`（分组行/单行/行名范围）；session
+  `TestAssistantStepsFoldIntoOneTurn`（默认只显示最终结果、合计摘要、展开恢复三步）与
+  `TestLatestReplyHasBottomCopyButton`（按钮可见、点击复制、Label）；原 `TestTrajectoryTimelineShowsToolCalls`
+  改为在聊天页先展开合并摘要再断言工具行。
+- **验证**：`scripts/verify.sh --no-smoke` **10/10 PASS**：gofmt/build/vet/designlint 0 new/design-check 6/6
+  （raw metric 45 ≤ 51）/mygo vet/`go test ./...`（41s，47 包）/`-race`（307s）/regression
+  **276 PASS / 0 SKIP / 0 FAIL**/ui-snapshot **97 steps / 95 PNGs**。
+- **快照（人工查看）**：`.cache/ui-conformance-turn/p1-chat.png`（最终回复底部「复制」按钮、meta 顶部）、
+  `p2-process-fold.png`、`p2-message-actions.png`。

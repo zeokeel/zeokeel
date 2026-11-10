@@ -48,6 +48,16 @@ type SessionThreadOptions struct {
 	// prose, reasoning, tool cards, actions, usage). Nil renders the entry's
 	// default text rows.
 	Row func(c *ui.Context, message contracts.ChatMessage)
+	// SameTurn reports whether next continues the same transcript row as prev.
+	// When set, a run of consecutive messages it accepts shares one List row
+	// (and one accessibility label range) instead of one row per message, so a
+	// multi-step assistant turn folds its process once and shows the final
+	// result under it. Nil keeps one row per message.
+	SameTurn func(prev, next contracts.ChatMessage) bool
+	// GroupRow builds one grouped row (a run with more than one message); Row
+	// still builds single-message runs. Nil falls back to Row for the first
+	// message of a run (no loss on single-message turns).
+	GroupRow func(c *ui.Context, messages []contracts.ChatMessage)
 	// Markdown is the reply Markdown theme of the default rows; nil uses the
 	// library defaults.
 	Markdown *markdown.Options
@@ -85,17 +95,22 @@ func SessionThread(c *ui.Context, o SessionThreadOptions) {
 			state = &ui.ListState{}
 		}
 		messages := o.Messages
+		runs := sessionRowRuns(messages, o.SameTurn)
 		state.Key = func(index int) any {
-			if index < 0 || index >= len(messages) {
+			if index < 0 || index >= len(runs) {
 				return nil
 			}
-			return messages[index].ID
+			return messages[runs[index][0]].ID
 		}
 		state.Label = func(index int) string {
-			if index < 0 || index >= len(messages) {
+			if index < 0 || index >= len(runs) {
 				return ""
 			}
-			return sessionRowLabel(o.Locale, messages[index], index)
+			run := runs[index]
+			if len(run) > 1 {
+				return sessionRunLabel(o.Locale, messages[run[0]], run[0], run[len(run)-1])
+			}
+			return sessionRowLabel(o.Locale, messages[run[0]], run[0])
 		}
 		// Each layout follows the end while the user stays there; scrolling away
 		// stops the follow inside the List, and ScrollToEnd resumes it.
@@ -104,12 +119,12 @@ func SessionThread(c *ui.Context, o SessionThreadOptions) {
 			state.HoldPlace()
 			*o.HoldPlace = false
 		}
-		list := ui.List(c, state, len(messages)).
+		list := ui.List(c, state, len(runs)).
 			Label(T(o.Locale, "对话消息", "Conversation messages")).
 			Gap(design.Space5).
 			PaddingY(design.Space5).
 			FillWidth().Grow(1)
-		if len(messages) == 0 && o.Empty != nil {
+		if len(runs) == 0 && o.Empty != nil {
 			list.Children(func() {
 				ui.Row(c).FillWidth().Justify(ui.Center).AlignItems(ui.Start).Children(func() {
 					design.Apply(ui.Column(c), t.Gap(design.Space5)).
@@ -121,10 +136,19 @@ func SessionThread(c *ui.Context, o SessionThreadOptions) {
 			})
 		}
 		list.Rows(func(row ui.ListRow) {
-			message := messages[row.Index]
+			run := runs[row.Index]
 			ui.Row(row.Context).FillWidth().Justify(ui.Center).AlignItems(ui.Start).Children(func() {
 				design.Apply(ui.Column(row.Context), t.Gap(design.Space5)).
 					Width(design.TranscriptWidth).MaxWidthPercent(92).Children(func() {
+					if len(run) > 1 && o.GroupRow != nil {
+						group := make([]contracts.ChatMessage, 0, len(run))
+						for _, index := range run {
+							group = append(group, messages[index])
+						}
+						o.GroupRow(row.Context, group)
+						return
+					}
+					message := messages[run[0]]
 					if o.Row != nil {
 						o.Row(row.Context, message)
 						return
@@ -182,6 +206,39 @@ func sessionBackToLatest(c *ui.Context, t *design.Tokens, state *ui.ListState,
 			c.Invalidate()
 		}
 	})
+}
+
+// sessionRowRuns groups message indexes into transcript rows: a run starts at
+// every message SameTurn rejects (or at every message when SameTurn is nil), so
+// the List virtualizes rows rather than raw messages.
+func sessionRowRuns(messages []contracts.ChatMessage, sameTurn func(prev, next contracts.ChatMessage) bool) [][]int {
+	runs := make([][]int, 0, len(messages))
+	for index := range messages {
+		if index == 0 || sameTurn == nil || !sameTurn(messages[index-1], messages[index]) {
+			runs = append(runs, []int{index})
+			continue
+		}
+		last := len(runs) - 1
+		runs[last] = append(runs[last], index)
+	}
+	return runs
+}
+
+// sessionRunLabel names a grouped transcript row: the first author role plus
+// the row ordinal range, still never the messages' prose.
+func sessionRunLabel(locale contracts.LocaleService, first contracts.ChatMessage, start, end int) string {
+	role := T(locale, "消息", "Message")
+	switch first.Role {
+	case contracts.ChatRoleUser:
+		role = T(locale, "用户", "User")
+	case contracts.ChatRoleAssistant:
+		role = T(locale, "助手", "Assistant")
+	case contracts.ChatRoleTool:
+		role = T(locale, "工具", "Tool")
+	case contracts.ChatRoleSystem:
+		role = T(locale, "系统", "System")
+	}
+	return fmt.Sprintf("%s %d–%d", role, start+1, end+1)
 }
 
 // sessionRowLabel names one transcript row for assistive technology and the

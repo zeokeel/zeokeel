@@ -249,3 +249,58 @@ func TestSessionThreadDefaultRows(t *testing.T) {
 		}
 	}
 }
+
+// TestSessionThreadGroupsConsecutiveRuns covers the grouping hooks: a run of
+// consecutive messages SameTurn accepts shares one List row (one accessibility
+// label range) and builds through GroupRow, while single-message runs still use
+// Row.
+func TestSessionThreadGroupsConsecutiveRuns(t *testing.T) {
+	messages := []contracts.ChatMessage{
+		{ID: "a1", Role: contracts.ChatRoleAssistant, Text: "一步"},
+		{ID: "a2", Role: contracts.ChatRoleAssistant, Text: "两步"},
+		{ID: "a3", Role: contracts.ChatRoleAssistant, Text: "三步"},
+		{ID: "u4", Role: contracts.ChatRoleUser, Text: "问"},
+		{ID: "a5", Role: contracts.ChatRoleAssistant, Text: "答"},
+	}
+	var groups [][]string
+	seenSingles := map[string]bool{}
+	tt := ui.NewTester(sessionThreadView(uikit.SessionThreadOptions{
+		Messages: messages,
+		State:    &ui.ListState{},
+		SameTurn: func(prev, next contracts.ChatMessage) bool {
+			return prev.Role == contracts.ChatRoleAssistant && next.Role == contracts.ChatRoleAssistant
+		},
+		Row: func(c *ui.Context, message contracts.ChatMessage) {
+			seenSingles[message.ID] = true
+			ui.Text(c, "row:"+message.ID)
+		},
+		GroupRow: func(c *ui.Context, group []contracts.ChatMessage) {
+			ids := make([]string, 0, len(group))
+			for _, message := range group {
+				ids = append(ids, message.ID)
+			}
+			groups = append(groups, ids)
+			ui.Text(c, "group:"+strings.Join(ids, ","))
+		},
+	}), 800, 400)
+	tt.Frame()
+	if len(groups) == 0 || strings.Join(groups[0], ",") != "a1,a2,a3" {
+		t.Fatalf("grouped rows = %v, want an a1,a2,a3 run", groups)
+	}
+	for _, id := range []string{"a1", "a2", "a3"} {
+		if seenSingles[id] {
+			t.Fatalf("message %s built as a single row inside a grouped run", id)
+		}
+	}
+	if !seenSingles["u4"] || !seenSingles["a5"] {
+		t.Fatalf("single rows = %v, want u4 and a5 built by Row", seenSingles)
+	}
+	if !tt.HasText("group:a1,a2,a3") || tt.HasText("row:a1") {
+		t.Fatalf("grouped run not rendered through GroupRow; texts = %v", tt.Texts())
+	}
+	for _, label := range []string{"助手 1–3", "用户 4", "助手 5"} {
+		if _, ok := tt.AccessByRole(ui.RoleListItem, label); !ok {
+			t.Fatalf("list row %q missing; row labels = %v", label, tt.Texts())
+		}
+	}
+}
