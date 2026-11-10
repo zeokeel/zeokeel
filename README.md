@@ -4,18 +4,17 @@
 [![Release](https://img.shields.io/github/v/release/zeokeel/zeokeel)](https://github.com/zeokeel/zeokeel/releases)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
-> **v0.2.0 — sixth public release** (2026-11-10). Native, compile-time modular
+> **v0.2.1 — seventh public release** (2026-11-10). Native, compile-time modular
 > AI agent for desktop, headless and ACP (Zed/editor) use; one Go binary, no
 > webview. Final verification: **10/10 PASS** (`./scripts/verify.sh --no-smoke`),
-> full test suite 47 packages green, regression **289 PASS / 0 SKIP / 0 FAIL**,
+> full test suite 47 packages green, regression **276 PASS / 0 SKIP / 0 FAIL**,
 > UI snapshot **97 steps / 95 PNGs**, designlint 0 new.
 > See [CHANGELOG.md](CHANGELOG.md) for the release notes.
 
-> **v0.2.0 主要变化**（详见 CHANGELOG）：模型管理重做——设置里是「模型列表」，支持多个服务商、
-> 每个模型独立 Base URL/API Key 与默认模型，旧单连接自动迁移；推理等级按模型单独配置、会话内可覆盖
-> （输入框两级菜单）。会话页重排：时间/用量/操作收成一条紧凑信息行，思考与工具调用合成可折叠的
-> 过程带，标题/Tabs 提到顶层（无返回按钮），目标与审批移到输入框上方（审批为醒目内联卡），
-> 通知改右上角；默认窗口 1512×944、正文阅读列 960，两边留白更少。升级只需下载覆盖，原有设置与会话保留。
+> **v0.2.1 主要变化**（详见 CHANGELOG）：消息的时间和操作行移到消息顶部——折叠过程时与
+> 「过程 · 思考 · N 个工具调用」共用一行，取消回复下方单独的一行空白；同时移除了消息评分
+> （有帮助/没帮助）、`/反馈` 命令及导出/诊断里的评分字段。v0.2.0 的模型列表、每模型推理等级、
+> B3 顶栏、输入框上方目标/审批、右上角通知、默认窗口 1512×944 与 960 正文列保持不变。
 
 ## 下载与运行 / Download and run
 
@@ -68,7 +67,7 @@ download table.
 > composer /goal /plan /memory 对话框、更新下载+SHA256 暂存、MCP stdio 服务器、右侧「任务」面板、
 > 工件历史（Files「产物」）、单实例 + XDG autostart、install-on-restart、toast 通知、workspace mcp.json opt-in、
 > 网络代理设置、MCP 工具级开关、提示词预设（设置 CRUD + composer 插入）、可编辑模型列表（每模型独立服务商/Base URL/API Key + 思考强度/生成参数 + 默认模型；旧单连接自动迁移）、
-> 消息用量 footer/逐条复制/反馈 good-bad 与 /反馈 命令（导出含反馈）、计划模式 + keep-planning、自动化运行历史、
+> 消息用量 footer/逐条复制、计划模式 + keep-planning、自动化运行历史、
 > Memory 整理/清空、技能新建/删除、工件下载、系统托盘/关闭到托盘、全局热键、LSP 工具、聊天模式（普通/计划/精简/创作）、
 > Home 真实 composer、/停止 /附加文件 /帮助、数据与隐私页、通知开关、侧栏添加工作区、插件 MCP server 详情；
 > 反证审计共 283 PASS / 0 SKIP（含最新审计补充），4×P2+4×P3 全部修复。详情：[docs/ADVERSARIAL-AUDIT.md](docs/ADVERSARIAL-AUDIT.md)。
