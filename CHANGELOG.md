@@ -12,9 +12,9 @@ All notable changes to ZeoKeel are documented here. The format follows
 
 发布流水线补丁（产品与 v0.2.9 相同）：
 
-- **macOS 只使用最新 arm64 runner（`macos-26`）**：不构建 Intel 版本，不在 Intel 镜像上交叉签名。
-  arm64 托管 runner 近期容量不足会让任务在 15 分钟后报 "not acquired by Runner of type hosted"；
-  遇到该情况重试该 job，而不是切换平台架构。
+- **macOS 只用 GA arm64 runner（`macos-15`）**：不构建 Intel 版本。`macos-26`（新预览镜像）近期
+  连续 15 分钟排队失败（"not acquired by Runner of type hosted"），参考 zeokeel-harness 的
+  macOS job 一直使用 `macos-15` 且从未排队，切回该 GA arm64 镜像；签名/公证仍对 arm64 产物执行。
 - **Linux AppImage 工具链安装加重试**：`go install appimagetool` 偶发代理查询失败，现在最多重试
   3 次并显式走 proxy.golang.org。
 - v0.2.9 的 Windows/Linux 资产已发布；本版补齐 macOS dmg。

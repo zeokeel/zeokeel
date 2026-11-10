@@ -11,9 +11,10 @@
 > UI snapshot **98 steps / 96 PNGs**, designlint 0 new.
 > See [CHANGELOG.md](CHANGELOG.md) for the release notes.
 
-> **v0.2.10 主要变化**：发布流水线补丁——macOS dmg 只使用最新 arm64 runner（`macos-26`），
-> 不再构建/交叉签名 Intel 版本；arm64 runner 容量不足时重试该 job。Linux AppImage 工具链安装
-> 加 3 次重试。产品功能与 v0.2.9 相同（Windows 隐藏控制台修复 cmd 弹窗、job 列表解析等）。
+> **v0.2.10 主要变化**：发布流水线补丁——macOS dmg 使用 GA arm64 runner `macos-15`
+> （`macos-26` 预览镜像容量持续不足；zeokeel-harness 同样用 `macos-15` 从不排队），
+> 不构建 Intel 版本；Linux AppImage 工具链安装加 3 次重试。产品功能与 v0.2.9 相同
+> （Windows 隐藏控制台修复 cmd 弹窗、job 列表解析等）。
 
 ## 下载与运行 / Download and run
 

@@ -68,10 +68,11 @@ jobs:
   build-macos:
     name: macOS arm64 (.app + signed/notarized dmg)
     needs: draft-release
-    # Use the latest macOS arm64 image only (no Intel build): signing and
-    # notarization run natively for the shipped arm64 app. Hosted arm64 capacity
-    # can be slow; a failed acquisition is retried rather than switching arch.
-    runs-on: macos-26
+    # Use the GA macOS arm64 image only (no Intel build): the newest preview
+    # image (macos-26) has long capacity queues, while macos-15 is the standard
+    # arm64 runner used by zeokeel-harness and is reliably available. Signing and
+    # notarization run natively for the shipped arm64 app.
+    runs-on: macos-15
     timeout-minutes: 360
     steps:
       - uses: actions/checkout@v7
