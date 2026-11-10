@@ -102,7 +102,7 @@ func (d *drive) runHNarrowSteps() {
 			}
 			c.shot("composer-very-narrow")
 			// The session menu carries the folded model entry and the low-frequency groups.
-			if !c.click("工作区可写") && !c.click("会话设置") {
+			if !c.click("会话设置") && !c.click("工作区可写") {
 				return
 			}
 			d.drain(2)

@@ -50,12 +50,12 @@ func TestModelRuntimeDefaultsFromModuleConfig(t *testing.T) {
 	cfg.MaxIterations = 7
 	cfg.ContextBudget = 9000
 	h, store, tester := runtimeHarness(t, cfg)
-	h.assertTexts(tester, "运行参数", "最大迭代次数", "上下文预算", "流完整性校验",
+	h.assertTexts(tester, "提示词与运行参数（页脚保存）", "最大迭代次数", "上下文预算", "流完整性校验",
 		"模块默认：7", "模块默认：9000")
 	h.assertNoTexts(tester, "未保存")
 	// The numeric inputs are hidden while their defaults are on.
 	h.assertNoTexts(tester, "最大迭代次数 输入", "上下文预算 输入")
-	h.click(tester, "保存")
+	h.click(tester, "保存提示词与运行参数")
 	if got := store.get(contracts.SettingsChatMaxIterations); got != "" {
 		t.Fatalf("module default max iterations became a settings row: %q", got)
 	}
@@ -66,7 +66,7 @@ func TestModelRuntimeDefaultsFromModuleConfig(t *testing.T) {
 	// Turning the default off and saving a concrete value writes the row.
 	h.click(tester, "使用默认上限（不限制）")
 	typeNumberInput(t, h, tester, "最大迭代次数", "12")
-	h.click(tester, "保存")
+	h.click(tester, "保存提示词与运行参数")
 	if got := store.get(contracts.SettingsChatMaxIterations); got != "12" {
 		t.Fatalf("explicit max iterations = %q, want 12", got)
 	}
@@ -88,7 +88,7 @@ func TestModelRuntimeSaveRoundTrip(t *testing.T) {
 	h.click(tester, "使用默认预算") // the budget has no explicit row yet: turn the default off
 	typeNumberInput(t, h, tester, "上下文预算", "4096")
 	h.assertTexts(tester, "未保存")
-	h.click(tester, "保存")
+	h.click(tester, "保存提示词与运行参数")
 	h.assertTexts(tester, "已保存")
 	h.assertNoTexts(tester, "未保存")
 	if got := store.get(contracts.SettingsChatMaxIterations); got != "12" {
@@ -113,7 +113,7 @@ func TestModelRuntimeEmptyClearsRows(t *testing.T) {
 	h.click(tester, "高级选项")
 	h.click(tester, "使用默认上限（不限制）")
 	h.click(tester, "使用默认预算")
-	h.click(tester, "保存")
+	h.click(tester, "保存提示词与运行参数")
 	if got := store.get(contracts.SettingsChatMaxIterations); got != "" {
 		t.Fatalf("cleared max iterations = %q, want empty", got)
 	}
@@ -134,7 +134,7 @@ func TestModelRuntimeNumberInputsIgnoreOutOfRange(t *testing.T) {
 	typeNumberInput(t, h, tester, "最大迭代次数", "0") // below the bound 1: ignored
 	h.click(tester, "使用默认预算")
 	typeNumberInput(t, h, tester, "上下文预算", "-1") // below 0: ignored
-	h.click(tester, "保存")
+	h.click(tester, "保存提示词与运行参数")
 	if got := store.get(contracts.SettingsChatMaxIterations); got != "20" {
 		t.Fatalf("max iterations saved = %q, want last valid value 20", got)
 	}
@@ -152,7 +152,7 @@ func TestModelRuntimeZeroBudgetAllowed(t *testing.T) {
 	h, store, tester := runtimeHarness(t, cfg)
 	h.click(tester, "使用默认预算")
 	typeNumberInput(t, h, tester, "上下文预算", "0")
-	h.click(tester, "保存")
+	h.click(tester, "保存提示词与运行参数")
 	h.assertTexts(tester, "已保存")
 	if got := store.get(contracts.SettingsChatContextBudget); got != "0" {
 		t.Fatalf("saved context budget = %q, want explicit 0", got)
@@ -185,6 +185,6 @@ func TestModelRuntimeEnglishCopy(t *testing.T) {
 	h, _, tester := runtimeHarness(t, cfg)
 	h.uiRoot.Locale().SetLanguage("en")
 	tester.Frame()
-	h.assertTexts(tester, "Runtime", "Max iterations", "Context budget",
-		"Stream completeness", "Model/tool rounds per run")
+	h.assertTexts(tester, "Prompt & runtime (saved by the footer)", "Max iterations",
+		"Context budget", "Stream completeness", "Model/tool rounds per run")
 }

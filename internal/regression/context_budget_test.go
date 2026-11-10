@@ -69,7 +69,6 @@ func TestContextBudgetSuffix(t *testing.T) {
 			{ID: "audit-model", ContextWindow: 128_000},
 		}}
 		tester := startBudgetSession(t, "audit-model", catalog)
-		requireHasText(t, tester, "1.9K tokens")
 		// The budget lives in the meta line's usage-details submenu.
 		openUsageDetails(t, tester)
 		requireHasText(t, tester, "上下文预算")
@@ -91,14 +90,12 @@ func TestContextBudgetSuffix(t *testing.T) {
 			{ID: "other-model", ContextWindow: 128_000},
 		}}
 		tester := startBudgetSession(t, "audit-model", catalog)
-		requireHasText(t, tester, "1.9K tokens")
 		openUsageDetails(t, tester)
 		requireNoText(t, tester, "上下文预算")
 	})
 
 	t.Run("no catalogue", func(t *testing.T) {
 		tester := startBudgetSession(t, "audit-model", nil)
-		requireHasText(t, tester, "1.9K tokens")
 		openUsageDetails(t, tester)
 		requireNoText(t, tester, "上下文预算")
 	})

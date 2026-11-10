@@ -14,6 +14,7 @@ import (
 
 	"github.com/zeokeel/zeokeel/internal/contracts"
 	"github.com/zeokeel/zeokeel/internal/design"
+	"github.com/zeokeel/zeokeel/internal/uikit"
 )
 
 // maxDiagnosticModules caps the expanded module rows; the rest become "…".
@@ -80,16 +81,16 @@ func buildLoadedModuleRow(c *ui.Context, t *design.Tokens, module contracts.Modu
 	ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(design.Space2).
 		Padding(design.Space1, design.Space2).Children(func() {
 		design.Apply(ui.Text(c, strings.TrimSpace(module.EntryID)),
-			t.Font(design.TypeXXXS), t.MonoFamily()).
+			t.Font(design.TypeXS), t.MonoFamily()).
 			TextColor(entryColor).Width(160).Shrink(0).NoWrap()
 		design.Apply(ui.Text(c, strings.TrimSpace(module.ModuleID)),
-			t.Font(design.TypeXXXS), t.MonoFamily()).
+			t.Font(design.TypeXS), t.MonoFamily()).
 			TextColor(moduleColor).Grow(1).MaxLines(1).Ellipsis("…")
 		state := strings.TrimSpace(module.State)
-		color := t.LabelTertiary
+		kind := uikit.StatusIdle
 		if state == "active" {
-			color = t.SuccessText
+			kind = uikit.StatusSuccess
 		}
-		design.Apply(ui.Badge(c, state), t.Badge()).TextColor(color)
+		uikit.StatusBadge(c, t, kind, state)
 	})
 }

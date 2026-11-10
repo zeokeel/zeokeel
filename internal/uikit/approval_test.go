@@ -67,8 +67,8 @@ func TestApprovalDialogRendersRequest(t *testing.T) {
 		approvalTestRequest("a1", "bash", "运行命令 ls", `{"command":"ls"}`), 2)
 
 	for _, want := range []string{
-		"需要审批", "工具", "运行命令", "命令", "运行命令 ls", "参数",
-		"显示原始参数", "允许", "本会话内始终允许", "拒绝",
+		"需要审批", "工具", "运行命令", "命令", "运行命令 ls", "原始参数",
+		"原始参数", "允许", "本会话内始终允许", "拒绝",
 		"允许后将在沙箱策略限制内执行；策略仍可能拒绝该调用。",
 		"「本会话内始终允许」在本会话内不再询问该工具；可在会话设置菜单清除。",
 		"Esc = 拒绝本次调用 · 点击或 Tab 选择操作（无默认操作）",
@@ -225,7 +225,7 @@ func TestApprovalDialogEmptyArguments(t *testing.T) {
 	if !tester.HasText("无参数") {
 		t.Fatalf("the no-arguments fallback is missing; texts = %v", tester.Texts())
 	}
-	if tester.HasText("显示原始参数") {
+	if tester.HasText("原始参数") {
 		t.Fatalf("an empty argument block still renders a disclosure; texts = %v", tester.Texts())
 	}
 }
@@ -247,7 +247,7 @@ func TestApprovalDialogLongArgumentsAreTruncated(t *testing.T) {
 	if tester.HasText(`{"data":"`) {
 		t.Fatalf("the arguments disclosure starts open; texts = %v", tester.Texts())
 	}
-	if err := tester.Click("显示原始参数"); err != nil {
+	if err := tester.Click("原始参数"); err != nil {
 		t.Fatalf("open the arguments disclosure: %v; texts = %v", err, tester.Texts())
 	}
 	tester.Frame()
@@ -273,7 +273,7 @@ func TestApprovalDialogConfiguredLabels(t *testing.T) {
 		},
 	}), 1200, 800)
 	tester.Frame()
-	for _, want := range []string{"确认执行", "执行", "工具", "参数", "本会话内始终允许", "拒绝"} {
+	for _, want := range []string{"确认执行", "执行", "工具", "原始参数", "本会话内始终允许", "拒绝"} {
 		if !tester.HasText(want) {
 			t.Fatalf("frame does not show %q; texts = %v", want, tester.Texts())
 		}
@@ -294,7 +294,7 @@ func TestApprovalDialogEnglishCopy(t *testing.T) {
 	}), 1200, 800)
 	tester.Frame()
 	for _, want := range []string{
-		"Approval required", "Tool", "Read file", "Arguments",
+		"Approval required", "Tool", "Read file", "Raw arguments",
 		"Allow", "Always allow in this session", "Deny",
 		"1 more approval requests waiting",
 		"Esc = deny this call",
@@ -385,7 +385,7 @@ func TestApprovalInlineCardRendersBannerAndBody(t *testing.T) {
 	for _, want := range []string{
 		"主屏幕", "需要审批", "运行命令", "还有 1 条待审批", "Esc 拒绝",
 		"允许后将在沙箱策略限制内执行；策略仍可能拒绝该调用。",
-		"命令", "运行命令 ls", "参数", "显示原始参数",
+		"命令", "运行命令 ls", "原始参数",
 		"允许", "本会话内始终允许", "拒绝",
 		"「本会话内始终允许」在本会话内不再询问该工具；可在会话设置菜单清除。",
 	} {
@@ -499,7 +499,7 @@ func TestApprovalInlineCardEnglishCopy(t *testing.T) {
 		uikit.ApprovalLabels{}, &entryDialogTestLocale{lang: "en"})
 	for _, want := range []string{
 		"Approval required", "Read file", "1 more pending approvals", "Esc denies",
-		"Arguments", "Allow", "Always allow in this session", "Deny",
+		"Raw arguments", "Allow", "Always allow in this session", "Deny",
 		"It runs within the sandbox policy after approval; the policy may still reject the call.",
 	} {
 		if !tester.HasText(want) {
@@ -521,7 +521,7 @@ func TestApprovalInlineCardArguments(t *testing.T) {
 		if !tester.HasText("无参数") {
 			t.Fatalf("the no-arguments fallback is missing; texts = %v", tester.Texts())
 		}
-		if tester.HasText("显示原始参数") {
+		if tester.HasText("原始参数") {
 			t.Fatalf("an empty argument block still renders a disclosure; texts = %v", tester.Texts())
 		}
 	})
@@ -539,7 +539,7 @@ func TestApprovalInlineCardArguments(t *testing.T) {
 		if tester.HasText(`{"data":"`) {
 			t.Fatalf("the arguments disclosure starts open; texts = %v", tester.Texts())
 		}
-		if err := tester.Click("显示原始参数"); err != nil {
+		if err := tester.Click("原始参数"); err != nil {
 			t.Fatalf("open the arguments disclosure: %v; texts = %v", err, tester.Texts())
 		}
 		tester.Frame()
@@ -562,7 +562,7 @@ func TestApprovalInlineCardConfiguredLabels(t *testing.T) {
 			AllowLabel: "执行",
 			DenyLabel:  "拒绝",
 		}, nil)
-	for _, want := range []string{"确认执行", "执行", "参数", "本会话内始终允许", "拒绝"} {
+	for _, want := range []string{"确认执行", "执行", "原始参数", "本会话内始终允许", "拒绝"} {
 		if !tester.HasText(want) {
 			t.Fatalf("frame does not show %q; texts = %v", want, tester.Texts())
 		}
@@ -593,4 +593,56 @@ func TestApprovalSummaryLabelFollowsToolKindInline(t *testing.T) {
 	if !bash.HasText("命令") {
 		t.Fatalf("bash summary is not labelled 命令; texts = %v", bash.Texts())
 	}
+}
+
+// countApprovalText counts the frame nodes exactly equal to text.
+func countApprovalText(tester *ui.Tester, text string) int {
+	count := 0
+	for _, label := range tester.Texts() {
+		if label == text {
+			count++
+		}
+	}
+	return count
+}
+
+// TestApprovalSummaryFallbackFromArguments covers R5: a request whose tool
+// reported no summary still gets a readable mono preview of its first key/value
+// pairs (task→subject/owner, shell→command), and the raw arguments have exactly
+// one disclosure label.
+func TestApprovalSummaryFallbackFromArguments(t *testing.T) {
+	t.Run("team task", func(t *testing.T) {
+		_, tester := approvalInlineHarness(t,
+			approvalTestRequest("f1", "team_task_create", "",
+				`{"subject":"更新发布说明","owner":"researcher","description":"补充发布检查项"}`),
+			1, uikit.ApprovalLabels{}, nil)
+		for _, want := range []string{"摘要", "subject: 更新发布说明", "owner: researcher"} {
+			if !tester.HasText(want) {
+				t.Fatalf("argument fallback does not show %q; texts = %v", want, tester.Texts())
+			}
+		}
+		if got := countApprovalText(tester, "原始参数"); got != 1 {
+			t.Fatalf("raw arguments disclosures = %d, want exactly one; texts = %v", got, tester.Texts())
+		}
+	})
+
+	t.Run("shell command", func(t *testing.T) {
+		_, tester := approvalInlineHarness(t,
+			approvalTestRequest("f2", "bash", "", `{"command":"git status --short"}`),
+			1, uikit.ApprovalLabels{}, nil)
+		for _, want := range []string{"命令", "command: git status --short"} {
+			if !tester.HasText(want) {
+				t.Fatalf("command fallback does not show %q; texts = %v", want, tester.Texts())
+			}
+		}
+	})
+
+	t.Run("unparseable arguments keep a bounded preview", func(t *testing.T) {
+		_, tester := approvalInlineHarness(t,
+			approvalTestRequest("f3", "mcp__srv__lookup", "", "not-json-arguments"),
+			1, uikit.ApprovalLabels{}, nil)
+		if !tester.HasText("摘要") || !tester.HasText("not-json-arguments") {
+			t.Fatalf("unparseable arguments have no summary preview; texts = %v", tester.Texts())
+		}
+	})
 }

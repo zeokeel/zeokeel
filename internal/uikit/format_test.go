@@ -4,6 +4,7 @@ package uikit_test
 // the session status strip.
 
 import (
+	"runtime"
 	"testing"
 
 	"github.com/zeokeel/zeokeel/internal/uikit"
@@ -89,5 +90,28 @@ func TestToolDisplayName(t *testing.T) {
 	}
 	if got := uikit.ToolDisplayName(zh, "  "); got != "" {
 		t.Errorf("blank tool name = %q, want empty", got)
+	}
+}
+
+func TestFormatShortcutNormalizesEveryNotation(t *testing.T) {
+	primary := "Ctrl"
+	if runtime.GOOS == "darwin" {
+		primary = "Cmd"
+	}
+	cases := []struct {
+		raw, want string
+	}{
+		{"CmdOrCtrl+Shift+Space", primary + " + Shift + Space"},
+		{"Cmd/Ctrl + N", primary + " + N"},
+		{"Ctrl+Alt+P", "Ctrl + Alt + P"},
+		{"cmd+k", primary + " + K"},
+		{" cmd + alt + i ", primary + " + Alt + I"},
+		{"Ctrl+,", "Ctrl + ,"},
+		{"", ""},
+	}
+	for _, tc := range cases {
+		if got := uikit.FormatShortcut(tc.raw); got != tc.want {
+			t.Fatalf("FormatShortcut(%q) = %q, want %q", tc.raw, got, tc.want)
+		}
 	}
 }

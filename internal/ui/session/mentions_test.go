@@ -17,25 +17,44 @@ import (
 	"github.com/zeokeel/zeokeel/internal/uiroot"
 )
 
-// fakeWorkspace is a contracts.WorkspaceService with one file list.
+// fakeWorkspace is a contracts.WorkspaceService with one file list. noCurrent
+// models the normal "no workspace open" state; Open/Create clear it and record
+// the call, so the @ menu's recovery actions are frame-testable.
 type fakeWorkspace struct {
-	files    []contracts.FileEntry
-	search   []contracts.FileEntry
-	listErr  error
-	searchEr error
+	files      []contracts.FileEntry
+	search     []contracts.FileEntry
+	listErr    error
+	searchEr   error
+	noCurrent  bool
+	workspaces []contracts.Workspace
+	opened     []string
+	created    []string
 }
 
 func (f *fakeWorkspace) List(context.Context) ([]contracts.Workspace, error) {
+	if f.listErr != nil {
+		return nil, f.listErr
+	}
+	if f.workspaces != nil {
+		return f.workspaces, nil
+	}
 	return []contracts.Workspace{{ID: "ws-1", Name: "mygo", Root: "/tmp/mygo"}}, nil
 }
 func (f *fakeWorkspace) Current(context.Context) (contracts.Workspace, bool, error) {
+	if f.noCurrent {
+		return contracts.Workspace{}, false, nil
+	}
 	return contracts.Workspace{ID: "ws-1", Name: "mygo", Root: "/tmp/mygo"}, true, nil
 }
-func (f *fakeWorkspace) Create(context.Context, string, string) (contracts.Workspace, error) {
-	return contracts.Workspace{}, nil
+func (f *fakeWorkspace) Create(_ context.Context, name, root string) (contracts.Workspace, error) {
+	f.created = append(f.created, root)
+	f.noCurrent = false
+	return contracts.Workspace{ID: "ws-new", Name: name, Root: root}, nil
 }
-func (f *fakeWorkspace) Open(context.Context, string) (contracts.Workspace, error) {
-	return contracts.Workspace{}, nil
+func (f *fakeWorkspace) Open(_ context.Context, id string) (contracts.Workspace, error) {
+	f.opened = append(f.opened, id)
+	f.noCurrent = false
+	return contracts.Workspace{ID: id, Name: "opened", Root: "/tmp/" + id}, nil
 }
 func (f *fakeWorkspace) Delete(context.Context, string) error { return nil }
 func (f *fakeWorkspace) Files(context.Context, string) ([]contracts.FileEntry, error) {

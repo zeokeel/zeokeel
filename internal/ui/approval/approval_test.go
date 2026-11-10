@@ -367,7 +367,7 @@ func TestPendingRendersInlineBanner(t *testing.T) {
 
 	h.assertTexts(tester,
 		"会话屏", "需要审批", "运行命令", "还有 1 条待审批", "Esc 拒绝",
-		"命令", "运行命令 ls", "参数", "显示原始参数",
+		"命令", "运行命令 ls", "原始参数",
 		"允许", "本会话内始终允许", "拒绝",
 		"允许后将在沙箱策略限制内执行；策略仍可能拒绝该调用。",
 	)
@@ -662,9 +662,9 @@ func TestLongArgumentsAreTruncated(t *testing.T) {
 	long = append(long, `"}`...)
 	h.approvals.add(pendingRequest("l1", "bash", "大参数", string(long)))
 	h.frames(tester, 2)
-	h.assertTexts(tester, "需要审批", "参数", "显示原始参数")
+	h.assertTexts(tester, "需要审批", "原始参数")
 	h.assertNoTexts(tester, `{"data":"`) // collapsed by default
-	h.click(tester, "显示原始参数")
+	h.click(tester, "原始参数")
 	h.assertTexts(tester, `{"data":"`)
 	if tester.HasText(string(long)) {
 		t.Fatal("the full arguments payload was rendered instead of the truncated block")
@@ -679,7 +679,7 @@ func TestEmptyArgumentsFallback(t *testing.T) {
 	h.approvals.add(pendingRequest("e1", "read_file", "读取配置", "{}"))
 	h.frames(tester, 2)
 	h.assertTexts(tester, "需要审批", "无参数")
-	h.assertNoTexts(tester, "显示原始参数")
+	h.assertNoTexts(tester, "原始参数")
 }
 
 // TestSummaryLabelFollowsToolKind covers S-08: only shell/terminal calls label

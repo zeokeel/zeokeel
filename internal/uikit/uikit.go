@@ -22,7 +22,7 @@ import (
 func PageHeader(c *ui.Context, title, subtitle string) {
 	t := design.Of(c)
 	ui.Column(c).FillWidth().Gap(design.Space1).Children(func() {
-		design.Apply(ui.Text(c, title), t.Font(design.TypeL)).FontWeight(600).
+		design.Apply(ui.Text(c, title), t.Font(design.TypeL)).FontWeight(design.WeightSemibold).
 			TextColor(t.LabelPrimary).Role(ui.RoleHeading).Level(1)
 		if subtitle != "" {
 			design.Apply(ui.Text(c, subtitle), t.TextMuted(design.TypeXS)).MaxLines(2)
@@ -37,7 +37,7 @@ func PageHeader(c *ui.Context, title, subtitle string) {
 func Section(c *ui.Context, title string, body func(body *ui.Context)) {
 	t := design.Of(c)
 	ui.Column(c).FillWidth().Gap(design.Space2).Children(func() {
-		design.Apply(ui.Text(c, title), t.Font(design.TypeM)).FontWeight(600).
+		design.Apply(ui.Text(c, title), t.Font(design.TypeM)).FontWeight(design.WeightSemibold).
 			TextColor(t.LabelPrimary).Role(ui.RoleHeading).Level(2)
 		ui.Divider(c)
 		if body != nil {
@@ -69,7 +69,7 @@ func SectionAction(c *ui.Context, title string, action func(*ui.Context), body f
 	t := design.Of(c)
 	ui.Column(c).FillWidth().Gap(design.Space2).Children(func() {
 		ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(design.Space2).Children(func() {
-			design.Apply(ui.Text(c, title), t.Font(design.TypeM)).FontWeight(600).
+			design.Apply(ui.Text(c, title), t.Font(design.TypeM)).FontWeight(design.WeightSemibold).
 				TextColor(t.LabelPrimary).Role(ui.RoleHeading).Level(2).Grow(1)
 			if action != nil {
 				action(c)
@@ -128,7 +128,7 @@ func EmptyStateBlock(c *ui.Context, title, hint string, action func()) {
 	t := design.Of(c)
 	ui.Column(c).FillWidth().AlignItems(ui.Center).Gap(design.Space2).
 		PaddingY(design.Space6).Children(func() {
-		design.Apply(ui.Text(c, title), t.Font(design.TypeBody)).FontWeight(600).
+		design.Apply(ui.Text(c, title), t.Font(design.TypeBody)).FontWeight(design.WeightSemibold).
 			TextColor(t.LabelSecondary)
 		if hint != "" {
 			design.Apply(ui.Text(c, hint), t.TextMuted(design.TypeXS)).MaxLines(2)
@@ -260,4 +260,149 @@ func EnterTo(action func()) func(ui.TextKey) bool {
 		}
 		return true
 	}
+}
+
+// DialogHeader is the one dialog header of the product: an optional icon, the
+// title, an optional subtitle and an optional close control on the right. It
+// keeps dialog titles on the TypeL step and puts the close where the eye
+// expects it; the body and the DialogFooter follow below (DESIGN.md §5.2 F).
+type DialogHeaderOptions struct {
+	// Key namespaces the header's close control so two dialogs never share a
+	// widget identity.
+	Key string
+	// Icon is the quiet glyph before the title; nil draws no icon.
+	Icon *ui.SVG
+	// Title is the dialog's level-1 heading.
+	Title string
+	// Subtitle is one muted line of context; empty draws nothing.
+	Subtitle string
+	// CloseLabel names the close control for assistive technology. When
+	// OnClose is nil no close control is drawn (a blocking decision where
+	// only the footer actions may dismiss the dialog).
+	CloseLabel string
+	// OnClose closes the dialog.
+	OnClose func()
+}
+
+// DialogHeader draws the shared dialog header (see DialogHeaderOptions).
+func DialogHeader(c *ui.Context, o DialogHeaderOptions) {
+	t := design.Of(c)
+	ui.Row(c).FillWidth().AlignItems(ui.Start).Gap(design.Space2).Children(func() {
+		if o.Icon != nil {
+			ui.Icon(c, o.Icon).Size(design.IconSizeM, design.IconSizeM).
+				TextColor(t.Accent).Margin(design.Space1, 0, 0, 0)
+		}
+		ui.Column(c).Grow(1).Shrink(1).MinWidthPercent(0).Gap(design.Space1).Children(func() {
+			design.Apply(ui.Text(c, o.Title), t.Font(design.TypeL)).FontWeight(design.WeightSemibold).
+				TextColor(t.LabelPrimary).Role(ui.RoleHeading).Level(1).MaxLines(2)
+			if o.Subtitle != "" {
+				design.Apply(ui.Text(c, o.Subtitle), t.Font(design.TypeXS)).
+					TextColor(t.LabelTertiary).MaxLines(2)
+			}
+		})
+		if o.OnClose != nil {
+			label := o.CloseLabel
+			if label == "" {
+				label = "Close"
+			}
+			IconButton(c, IconButtonOptions{
+				Key:     o.Key + ".close",
+				Label:   label,
+				Tooltip: label,
+				Icon:    icons.Close(),
+				Size:    design.IconSizeS,
+				OnClick: o.OnClose,
+			})
+		}
+	})
+}
+
+// ConfirmDangerOptions describes an irreversible-action confirmation.
+type ConfirmDangerOptions struct {
+	// Key namespaces the dialog's widgets; required when a page can open more
+	// than one confirmation in the same frame.
+	Key string
+	// Title and Message state what is about to happen and that it cannot be
+	// undone.
+	Title   string
+	Message string
+	// Confirm is the destructive verb ("确认删除"); Cancel is the safe verb.
+	Confirm string
+	Cancel  string
+	// OnConfirm runs after the danger action is chosen.
+	OnConfirm func()
+}
+
+// ConfirmDanger asks before an irreversible action, with the safe outcome as
+// the default: Cancel carries the keyboard focus and Enter, so a stray Enter
+// cancels instead of deleting (DESIGN.md AP-12). The danger action is a danger
+// button without Default. Use ui.AlertDialog only for non-destructive
+// confirmations, where its last-button-is-default semantics is the point.
+func ConfirmDanger(c *ui.Context, open *bool, o ConfirmDangerOptions) {
+	if !*open {
+		return
+	}
+	t := design.Of(c)
+	key := o.Key
+	if key == "" {
+		key = "uikit.confirm-danger"
+	}
+	cancel, confirm := o.Cancel, o.Confirm
+	if cancel == "" {
+		cancel = "取消"
+	}
+	if confirm == "" {
+		confirm = "删除"
+	}
+	ui.Modal(c, open, func() {
+		design.Apply(ui.Column(c.Key(key)), t.Panel()).
+			Width(design.DialogWidthXS).Padding(design.Space4).Gap(design.Space3).
+			Children(func() {
+				DialogHeader(c, DialogHeaderOptions{
+					Key:   key + ".header",
+					Title: o.Title,
+				})
+				design.Apply(ui.Text(c, o.Message), t.Font(design.TypeBody)).
+					TextColor(t.LabelSecondary).MaxLines(4)
+				DialogFooter(c, []DialogAction{
+					{
+						Label: cancel, Default: true,
+						OnClick: func() { *open = false },
+					},
+					{
+						Label: confirm, Danger: true,
+						OnClick: func() {
+							*open = false
+							if o.OnConfirm != nil {
+								o.OnConfirm()
+							}
+						},
+					},
+				})
+			})
+	})
+}
+
+// EmptyStateHero is the landing empty state: one quiet glyph, a title, a hint
+// and the caller's primary action. It is the only empty state that may carry a
+// primary button; inline and block states (EmptyState, EmptyStateBlock) stay
+// quieter (DESIGN.md §5.2 F).
+func EmptyStateHero(c *ui.Context, glyph *ui.SVG, title, hint string, action func()) {
+	t := design.Of(c)
+	ui.Column(c).FillWidth().AlignItems(ui.Center).Gap(design.Space2).
+		PaddingY(design.Space8).Children(func() {
+		if glyph != nil {
+			ui.Icon(c, glyph).Size(design.IconSizeL, design.IconSizeL).
+				TextColor(t.LabelTertiary)
+		}
+		design.Apply(ui.Text(c, title), t.Font(design.TypeM)).FontWeight(design.WeightSemibold).
+			TextColor(t.LabelPrimary)
+		if hint != "" {
+			design.Apply(ui.Text(c, hint), t.Font(design.TypeXS)).
+				TextColor(t.LabelTertiary).MaxLines(2)
+		}
+		if action != nil {
+			ui.Row(c).AlignItems(ui.Center).Gap(design.Space2).Children(action)
+		}
+	})
 }

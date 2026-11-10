@@ -86,34 +86,71 @@ type shortcutRow struct {
 // shortcutReferenceRows builds the read-only keyboard reference. H5: the two
 // configurable shortcuts are edited in the section above and are not repeated
 // here; this table lists the fixed window shortcuts only.
-func shortcutReferenceRows(locale contracts.LocaleService) []shortcutRow {
-	return []shortcutRow{
-		{localized(locale, "新会话", "New session"), "Cmd/Ctrl + N"},
-		{localized(locale, "切换右侧栏", "Toggle right panel"), "Cmd/Ctrl + Alt + I"},
+func shortcutReferenceRows(locale contracts.LocaleService, runtime contracts.UIRuntime) []shortcutRow {
+	// One notation for every chord: uikit.FormatShortcut spells the command
+	// modifier for the platform and joins keys with " + " (V11). Non-chord
+	// entries (Enter, "type /") keep their literal key names.
+	rows := []shortcutRow{
+		{localized(locale, "新会话", "New session"), uikit.FormatShortcut("CmdOrCtrl+N")},
+		{localized(locale, "切换右侧栏", "Toggle right panel"), uikit.FormatShortcut("CmdOrCtrl+Alt+I")},
 		{localized(locale, "发送消息", "Send message"), "Enter"},
-		{localized(locale, "换行", "New line"), "Shift + Enter"},
+		{localized(locale, "换行", "New line"), uikit.FormatShortcut("Shift+Enter")},
 		{localized(locale, "命令菜单", "Command menu"), localized(locale, "输入 /", "Type /")},
-		{localized(locale, "设置", "Settings"), "Cmd/Ctrl + ,"},
+		{localized(locale, "设置", "Settings"), uikit.FormatShortcut("CmdOrCtrl+,")},
 		{localized(locale, "关闭弹窗 / 菜单", "Close dialog / menu"), "Esc"},
 	}
+	// Registered commands carry the host's real chords (the right panel's page
+	// shortcuts, for example); the reference must include them instead of
+	// documenting only a hand-written subset (B11).
+	if runtime != nil {
+		commands := runtime.Commands()
+		sort.SliceStable(commands, func(i, j int) bool {
+			if commands[i].Order != commands[j].Order {
+				return commands[i].Order < commands[j].Order
+			}
+			return commands[i].ID < commands[j].ID
+		})
+		for _, command := range commands {
+			chord := strings.TrimSpace(command.Shortcut)
+			title := strings.TrimSpace(command.Title)
+			if chord == "" || title == "" {
+				continue
+			}
+			rows = append(rows, shortcutRow{Action: title, Keys: uikit.FormatShortcut(chord)})
+		}
+	}
+	return rows
 }
 
 // shortcutChoices maps the editable chrome shortcuts to their native Select
 // options: display label -> canonical chord.
 type shortcutChoice struct{ Label, Chord string }
 
-var toggleSidebarChoices = []shortcutChoice{
-	{"Cmd/Ctrl + B", "cmd+b"},
-	{"Ctrl + B", "ctrl+b"},
-	{"Alt + B", "alt+b"},
-	{"Cmd/Ctrl + Shift + B", "cmd+shift+b"},
+// shortcutChoicesFor builds the editable shortcut options with labels from
+// uikit.FormatShortcut, so they use the same notation as the reference table
+// and the command palette. Chords whose display forms are identical on this
+// platform (Cmd/B and Ctrl/B are the same physical chord off macOS) collapse to
+// one option instead of listing the same label twice.
+func shortcutChoicesFor(chords ...string) []shortcutChoice {
+	choices := make([]shortcutChoice, 0, len(chords))
+	seen := make(map[string]bool, len(chords))
+	for _, chord := range chords {
+		label := uikit.FormatShortcut(chord)
+		if label == "" || seen[label] {
+			continue
+		}
+		seen[label] = true
+		choices = append(choices, shortcutChoice{Label: label, Chord: chord})
+	}
+	return choices
 }
 
-var commandPaletteChoices = []shortcutChoice{
-	{"Cmd/Ctrl + K", "cmd+k"},
-	{"Ctrl + K", "ctrl+k"},
-	{"Alt + K", "alt+k"},
-	{"Cmd/Ctrl + Shift + K", "cmd+shift+k"},
+func toggleSidebarChoices() []shortcutChoice {
+	return shortcutChoicesFor("cmd+b", "ctrl+b", "alt+b", "cmd+shift+b")
+}
+
+func commandPaletteChoices() []shortcutChoice {
+	return shortcutChoicesFor("cmd+k", "ctrl+k", "alt+k", "cmd+shift+k")
 }
 
 // shortcutDisplay returns the display label of a stored chord (falling back to
@@ -124,7 +161,7 @@ func shortcutDisplay(choices []shortcutChoice, chord string) string {
 			return choice.Label
 		}
 	}
-	return choices[0].Label
+	return uikit.FormatShortcut(chord)
 }
 
 // shortcutChord returns the canonical chord of a display label.
@@ -147,7 +184,7 @@ type shortcutsState struct {
 // two editable desktop shortcuts (persisted through the host settings). Every
 // control on the page applies immediately, so there is no save button.
 func buildShortcutsPage(c *ui.Context, t *design.Tokens, title string, store contracts.SettingsService,
-	locale contracts.LocaleService, st *shortcutsState) {
+	runtime contracts.UIRuntime, locale contracts.LocaleService, st *shortcutsState) {
 	ui.Column(c).FillWidth().Gap(design.Space4).Children(func() {
 		uikit.PageHeader(c, title, localized(locale,
 			"键盘快捷键参考；下面两项桌面快捷键可修改并立即生效。",
@@ -156,43 +193,46 @@ func buildShortcutsPage(c *ui.Context, t *design.Tokens, title string, store con
 			// H23: restoring the defaults is a page action, not a form row: it
 			// sits at the section's top right, away from the editable fields.
 			ui.Row(c).FillWidth().Justify(ui.End).Children(func() {
+				// Restoring the defaults is recoverable, so it is not a danger
+				// action (DESIGN.md §5.2); the confirmation still guards the
+				// overwrite of the user's custom chords.
 				if design.Apply(ui.Button(c, localized(locale, "恢复默认", "Restore defaults")),
-					t.DangerButton()).Tooltip(localized(locale,
+					t.SecondaryButton()).Tooltip(localized(locale,
 					"恢复两项快捷键的默认值", "Restore both default shortcuts")).Clicked() {
 					st.confirmRestore = true
 					c.Invalidate()
 				}
 			})
-			toggleDisplay := shortcutDisplay(toggleSidebarChoices,
+			toggleDisplay := shortcutDisplay(toggleSidebarChoices(),
 				store.Get(contracts.SettingsUIShortcutToggleSidebar, contracts.DefaultShortcutToggleSidebar))
 			ui.Row(c).FillWidth().PaddingY(design.Space2).
 				AlignItems(ui.Center).Gap(design.Space3).Children(func() {
 				design.Apply(ui.Text(c, localized(locale, "折叠 / 展开侧边栏", "Collapse / expand sidebar")),
 					t.Text(design.TypeBody)).Grow(1)
 				choice := toggleDisplay
-				selectControl := ui.Select(c, &choice, shortcutChoiceLabels(toggleSidebarChoices)).
+				selectControl := ui.Select(c, &choice, shortcutChoiceLabels(toggleSidebarChoices())).
 					Label(localized(locale, "侧边栏快捷键", "Sidebar shortcut"))
 				if selectControl.Changed() {
-					_ = store.Set(contracts.SettingsUIShortcutToggleSidebar, shortcutChord(toggleSidebarChoices, choice))
+					_ = store.Set(contracts.SettingsUIShortcutToggleSidebar, shortcutChord(toggleSidebarChoices(), choice))
 				}
 			})
 			ui.Divider(c)
-			paletteDisplay := shortcutDisplay(commandPaletteChoices,
+			paletteDisplay := shortcutDisplay(commandPaletteChoices(),
 				store.Get(contracts.SettingsUIShortcutCommandPalette, contracts.DefaultShortcutCommandPalette))
 			ui.Row(c).FillWidth().PaddingY(design.Space2).
 				AlignItems(ui.Center).Gap(design.Space3).Children(func() {
 				design.Apply(ui.Text(c, localized(locale, "打开命令面板", "Open command palette")),
 					t.Text(design.TypeBody)).Grow(1)
 				choice := paletteDisplay
-				selectControl := ui.Select(c, &choice, shortcutChoiceLabels(commandPaletteChoices)).
+				selectControl := ui.Select(c, &choice, shortcutChoiceLabels(commandPaletteChoices())).
 					Label(localized(locale, "命令面板快捷键", "Command palette shortcut"))
 				if selectControl.Changed() {
-					_ = store.Set(contracts.SettingsUIShortcutCommandPalette, shortcutChord(commandPaletteChoices, choice))
+					_ = store.Set(contracts.SettingsUIShortcutCommandPalette, shortcutChord(commandPaletteChoices(), choice))
 				}
 			})
 		})
 		uikit.Section(c, localized(locale, "全部快捷键", "All shortcuts"), func(*ui.Context) {
-			for index, row := range shortcutReferenceRows(locale) {
+			for index, row := range shortcutReferenceRows(locale, runtime) {
 				if index > 0 {
 					ui.Divider(c)
 				}
@@ -207,19 +247,19 @@ func buildShortcutsPage(c *ui.Context, t *design.Tokens, title string, store con
 		// Restoring the defaults overwrites the user's custom chords: confirm it
 		// with the native alert dialog.
 		if st.confirmRestore {
-			switch ui.AlertDialog(c, &st.confirmRestore,
-				localized(locale, "恢复默认快捷键", "Restore default shortcuts"),
-				localized(locale, "恢复默认会覆盖你自定义的两项快捷键。",
+			uikit.ConfirmDanger(c, &st.confirmRestore, uikit.ConfirmDangerOptions{
+				Key:   "shortcuts.restore-defaults",
+				Title: localized(locale, "恢复默认快捷键", "Restore default shortcuts"),
+				Message: localized(locale, "恢复默认会覆盖你自定义的两项快捷键。",
 					"Restoring the defaults overwrites your two custom shortcuts."),
-				localized(locale, "取消", "Cancel"),
-				localized(locale, "恢复默认", "Restore")) {
-			case 1:
-				_ = store.Set(contracts.SettingsUIShortcutToggleSidebar, contracts.DefaultShortcutToggleSidebar)
-				_ = store.Set(contracts.SettingsUIShortcutCommandPalette, contracts.DefaultShortcutCommandPalette)
-				// Only the executed action needs a frame: the dialog's own open
-				// flag already rebuilt the frame when it was dismissed.
-				c.Invalidate()
-			}
+				Confirm: localized(locale, "恢复默认", "Restore"),
+				Cancel:  localized(locale, "取消", "Cancel"),
+				OnConfirm: func() {
+					_ = store.Set(contracts.SettingsUIShortcutToggleSidebar, contracts.DefaultShortcutToggleSidebar)
+					_ = store.Set(contracts.SettingsUIShortcutCommandPalette, contracts.DefaultShortcutCommandPalette)
+					c.Invalidate()
+				},
+			})
 		}
 	})
 }
@@ -512,6 +552,7 @@ type diagnosticRow struct{ Label, Value string }
 type diagnosticsState struct {
 	copied      bool
 	modulesOpen bool
+	keysOpen    bool
 	list        ui.ListState
 	moduleSel   int
 	transient   transientStatus
@@ -520,36 +561,63 @@ type diagnosticsState struct {
 // buildDiagnosticsPage renders the read-only runtime/storage summary (the old
 // shell's diagnostics view) with a native copy action.
 func buildDiagnosticsPage(c *ui.Context, t *design.Tokens, state *diagnosticsState,
-	rows []diagnosticRow, modules []contracts.ModuleInfo, locale contracts.LocaleService) {
+	rows, keys []diagnosticRow, modules []contracts.ModuleInfo, locale contracts.LocaleService) {
 	ui.Column(c).FillWidth().Gap(design.Space4).Children(func() {
 		uikit.PageHeader(c, localized(locale, "诊断", "Diagnostics"), localized(locale,
 			"运行时与存储信息（只读）；可复制后附在问题报告里。",
 			"Read-only runtime and storage details; copy them into a bug report."))
 		uikit.Section(c, localized(locale, "运行时信息", "Runtime information"), func(*ui.Context) {
-			ui.Column(c).FillWidth().Gap(design.Space1).Children(func() {
-				for index, row := range rows {
-					if index > 0 {
-						ui.Divider(c)
+			// The property sheet is one shape everywhere (DESIGN.md §5.2
+			// PropertySheet): a 160 DIP label column, the value left-aligned on
+			// a 32 DIP row, a divider between rows.
+			sheet := make([]uikit.KeyValue, len(rows))
+			for index, row := range rows {
+				sheet[index] = uikit.KeyValue{Key: row.Label, Value: row.Value}
+			}
+			buildPropertySheet(c, t, sheet)
+			// Setting keys are a long, per-key list: a summary row plus one
+			// two-column disclosure instead of a single truncated line (B13/P3).
+			if len(keys) > 0 || len(rows) > 0 {
+				ui.Divider(c)
+				summary := fmt.Sprintf(localized(locale, "设置项 · %d 项", "Setting keys · %d"), len(keys))
+				ui.Collapsible(c, summary, &state.keysOpen, func() {
+					if len(keys) == 0 {
+						design.Apply(ui.Text(c, localized(locale, "（空）", "(empty)")),
+							t.TextMuted(design.TypeXS))
+						return
 					}
-					ui.Row(c).FillWidth().PaddingY(design.Space1).
-						AlignItems(ui.Center).Gap(design.Space3).Children(func() {
-						design.Apply(ui.Text(c, row.Label), t.TextMuted(design.TypeXS)).
-							Width(160).Shrink(0)
-						// H22: long setting-key rows wrap instead of being
-						// truncated to two or three lines with an ellipsis.
-						design.Apply(ui.Text(c, row.Value), t.Font(design.TypeXS), t.MonoFamily()).
-							TextColor(t.LabelPrimary).Grow(1).MaxLines(8)
+					ui.Column(c).FillWidth().Gap(design.Space0).Children(func() {
+						for index, pair := range keys {
+							if index > 0 {
+								ui.Divider(c)
+							}
+							ui.Row(c).FillWidth().Height(design.Space8).
+								AlignItems(ui.Center).Gap(design.Space3).Children(func() {
+								design.Apply(ui.Text(c, pair.Label), t.MonoText(design.TypeXS)).
+									TextColor(t.LabelSecondary).Width(design.Space8 * 7).
+									Shrink(0).MaxLines(1).Ellipsis("…").Tooltip(pair.Label)
+								design.Apply(ui.Text(c, pair.Value), t.MonoText(design.TypeXS)).
+									TextColor(t.LabelPrimary).Grow(1).MaxLines(1).
+									Ellipsis("…").Tooltip(pair.Value).Selectable()
+							})
+						}
 					})
-				}
-			})
+				})
+			}
 		})
 		buildLoadedModulesSection(c, t, state, locale, modules)
 
 		ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(design.Space2).Children(func() {
 			if ui.Button(c, localized(locale, "复制诊断信息", "Copy diagnostics")).Clicked() {
+				// The copy is the whole sheet: the runtime rows and the (already
+				// masked) setting keys, so a bug report carries the same detail
+				// the page shows.
 				var builder strings.Builder
 				for _, row := range rows {
 					fmt.Fprintf(&builder, "%s: %s\n", row.Label, row.Value)
+				}
+				for _, pair := range keys {
+					fmt.Fprintf(&builder, "%s: %s\n", pair.Label, pair.Value)
 				}
 				c.WriteClipboard(strings.TrimRight(builder.String(), "\n"))
 				state.copied = true
@@ -626,7 +694,8 @@ func Module() *module.Descriptor[Config] {
 			return buildLabels{
 				title:             firstNonEmpty(cfg.Title, localized(locale, "模型", "Model")),
 				systemPromptLabel: firstNonEmpty(cfg.SystemPromptLabel, localized(locale, "系统提示词", "System prompt")),
-				saveLabel:         firstNonEmpty(cfg.SaveLabel, localized(locale, "保存", "Save")),
+				saveLabel: firstNonEmpty(cfg.SaveLabel, localized(locale,
+					"保存提示词与运行参数", "Save prompt & runtime")),
 			}
 		}
 		appearanceLabels := func() buildAppearanceLabels {
@@ -671,9 +740,9 @@ func Module() *module.Descriptor[Config] {
 						// page starts a new visit and must not claim a fresh copy.
 						diagnostics.copied = false
 					}
-					rows := diagnosticsRows(info, dataDir, toolkit, chat, store, locale)
+					rows, keys := diagnosticsRows(info, dataDir, toolkit, chat, store, locale)
 					modules := loadedModulesFromContext(ctx)
-					buildDiagnosticsPage(c, design.Of(c), diagnostics, rows, modules, locale)
+					buildDiagnosticsPage(c, design.Of(c), diagnostics, rows, keys, modules, locale)
 				},
 			},
 			{
@@ -681,7 +750,7 @@ func Module() *module.Descriptor[Config] {
 				zhTitle: "快捷键", enTitle: "Shortcuts",
 				Build: func(c *ui.Context) {
 					syncer.sync()
-					buildShortcutsPage(c, design.Of(c), localized(locale, "快捷键", "Shortcuts"), store, locale, shortcuts)
+					buildShortcutsPage(c, design.Of(c), localized(locale, "快捷键", "Shortcuts"), store, runtime, locale, shortcuts)
 				},
 			},
 			{
@@ -911,7 +980,7 @@ func Module() *module.Descriptor[Config] {
 // diagnosticsRows collects the read-only diagnostics values. Optional services
 // degrade to explicit "未启用" values instead of hiding the row.
 func diagnosticsRows(info contracts.AppInfo, dataDir string, toolkit *rigtools.Registry,
-	chat contracts.ChatService, store contracts.SettingsService, locale contracts.LocaleService) []diagnosticRow {
+	chat contracts.ChatService, store contracts.SettingsService, locale contracts.LocaleService) ([]diagnosticRow, []diagnosticRow) {
 	name := info.Name
 	if name == "" {
 		name = "ZeoKeel"
@@ -922,8 +991,8 @@ func diagnosticsRows(info contracts.AppInfo, dataDir string, toolkit *rigtools.R
 	}
 	rows := []diagnosticRow{
 		{localized(locale, "应用", "Application"), name + " v" + version},
-		{"Commit", firstNonEmpty(info.Commit, localized(locale, "未知", "unknown"))},
-		{localized(locale, "构建时间", "Build time"), firstNonEmpty(info.BuildTime, localized(locale, "未知", "unknown"))},
+		{"Commit", diagnosticValue(locale, info.Commit)},
+		{localized(locale, "构建时间", "Build time"), diagnosticValue(locale, info.BuildTime)},
 		{localized(locale, "Go 版本", "Go version"), firstNonEmpty(info.GoVersion, runtime.Version())},
 		{localized(locale, "平台", "Platform"), runtime.GOOS + "/" + runtime.GOARCH},
 		{localized(locale, "数据目录", "Data directory"), firstNonEmpty(dataDir, localized(locale, "未设置", "not set"))},
@@ -942,19 +1011,27 @@ func diagnosticsRows(info contracts.AppInfo, dataDir string, toolkit *rigtools.R
 	)
 	// Every setting value goes through the shared credential mask, so the page,
 	// its copy action and the exported report can never disagree about which
-	// values are secrets (the old page only masked chat.apiKey).
-	keys := make([]string, 0)
+	// values are secrets. The keys come back as their own two-column list: a
+	// single joined line was truncated and could not be copied per value (B13).
+	keys := make([]diagnosticRow, 0)
 	if all := store.All(); len(all) > 0 {
 		for key, value := range all {
-			keys = append(keys, key+"="+maskedSettingValue(locale, key, value))
+			keys = append(keys, diagnosticRow{Label: key, Value: maskedSettingValue(locale, key, value)})
 		}
-		sort.Strings(keys)
+		sort.Slice(keys, func(i, j int) bool { return keys[i].Label < keys[j].Label })
 	}
-	rows = append(rows, diagnosticRow{
-		localized(locale, "设置键", "Setting keys"),
-		firstNonEmpty(strings.Join(keys, " · "), localized(locale, "（空）", "(empty)")),
-	})
-	return rows
+	return rows, keys
+}
+
+// diagnosticValue renders one build value: empty and the assembly's raw
+// "unknown" build metadata read as the friendly placeholder (the About page's
+// rule, kept local because UI modules do not import each other).
+func diagnosticValue(locale contracts.LocaleService, value string) string {
+	trimmed := strings.TrimSpace(value)
+	if trimmed == "" || strings.EqualFold(trimmed, "unknown") {
+		return localized(locale, "未知", "unknown")
+	}
+	return trimmed
 }
 
 // runtimeSummary is the one-line effective runtime state shown under the
@@ -1193,25 +1270,48 @@ func (st *moduleState) dirty() bool {
 		st.contextBudget != st.seenContextBudget
 }
 
-// statusRow renders the page's unsaved hint and its last save status. The
-// action itself stays the page's single primary button below.
+// statusRow renders the page's last save result. The unsaved state has one
+// owner only — the host's title badge (and the close guard) — so the body stays
+// silent while the drafts are dirty; any edit clears the previous result, so a
+// screen can never show "未保存" next to a stale "已保存" (R8).
 func statusRow(c *ui.Context, t *design.Tokens, st *moduleState, locale contracts.LocaleService) {
-	ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(design.Space2).Children(func() {
-		if st.dirty() {
-			design.Apply(ui.Text(c, localized(locale, "未保存", "Unsaved")), t.TextMuted(design.TypeXS))
+	if st.dirty() {
+		if !st.statusErr {
+			// A pending edit owns the "unsaved" state and clears the last success
+			// result; a failure stays visible until the next edit.
+			st.status = ""
 		}
-		if st.status != "" {
-			statusBadge(c, t, st.status, st.statusErr)
-		}
+		return
+	}
+	if st.status == "" {
+		return
+	}
+	ui.Row(c).FillWidth().Children(func() {
+		statusBadge(c, t, st.status, st.statusErr)
 	})
 }
 
-// statusBadge renders one status badge; a failed status uses danger text.
+// clearSavedStatus drops the previous save result as soon as the page's drafts
+// change, so a stale "已保存" never sits under an edited field.
+func clearSavedStatus(st *moduleState) {
+	st.status = ""
+	st.statusErr = false
+}
+
+// clearAppearanceStatus is clearSavedStatus for the appearance page.
+func clearAppearanceStatus(st *appearanceState) {
+	st.status = ""
+	st.statusErr = false
+}
+
+// statusBadge renders one page result in the product's one status anatomy: the
+// failure tint for an error, success for a saved result.
 func statusBadge(c *ui.Context, t *design.Tokens, text string, failed bool) {
-	badge := design.Apply(ui.Badge(c, text), t.Badge())
+	kind := uikit.StatusSuccess
 	if failed {
-		badge.TextColor(t.DangerText)
+		kind = uikit.StatusError
 	}
+	uikit.StatusBadge(c, t, kind, text)
 }
 
 // statusBadgesRow renders one page status line, hiding it while it is empty.
@@ -1272,27 +1372,32 @@ func buildPage(c *ui.Context, runtime contracts.UIRuntime, state *moduleState, c
 	effective := effectiveChatConfig(chat, store)
 	ui.Column(c).FillWidth().Gap(design.Space4).Children(func() {
 		uikit.PageHeader(c, labels.title, localized(locale,
-			"模型列表的改动即时生效，可添加多个服务商的模型；页脚「保存」只保存提示词与运行参数。",
-			"Model-list changes apply immediately and can mix providers; the footer Save only stores the prompt and runtime options."))
+			"模型列表的改动即时生效；下方「提示词与运行参数」由页脚保存。",
+			"Model-list changes apply immediately; the section below is stored by the footer's Save."))
 
 		// One page owns the model configuration: every row carries its own
 		// provider connection and one row is the default model.
 		buildModelCatalogSection(c, runtime, store, catalog, locale, effective.BaseURL, effective.APIKey)
 
-		uikit.Section(c, localized(locale, "提示词", "Prompt"), func(*ui.Context) {
+		// Prompt and runtime knobs are the page's explicit-save section: the
+		// host footer's Save is the page's one primary, and this section says so
+		// in its title; the model list above applies immediately (R12).
+		uikit.Section(c, localized(locale, "提示词与运行参数（页脚保存）",
+			"Prompt & runtime (saved by the footer)"), func(*ui.Context) {
 			ui.Field(c, labels.systemPromptLabel, func() {
-				ui.TextArea(c, &state.systemPrompt).Label(inputLabel(locale, labels.systemPromptLabel)).
+				prompt := ui.TextArea(c, &state.systemPrompt).Label(inputLabel(locale, labels.systemPromptLabel)).
 					Bind(&state.promptInput).FillWidth().Height(56)
+				if prompt.Changed() {
+					clearSavedStatus(state)
+				}
 			}).Description(localized(locale,
 				"追加到每次对话的系统提示前；留空使用服务商默认。",
 				"Prepended to every conversation's system prompt; empty uses the provider default."))
-		})
-
-		// Runtime limits are low-frequency knobs: a native disclosure keeps the
-		// daily model form (model list, prompt) short. The numeric drafts
-		// still save with the page footer; the stream switch applies immediately.
-		ui.Collapsible(c, localized(locale, "高级选项", "Advanced options"), &state.runtimeOpen, func() {
-			uikit.Section(c, localized(locale, "运行参数", "Runtime"), func(*ui.Context) {
+			// Runtime limits are low-frequency knobs: a native disclosure keeps the
+			// section short. The numeric drafts still save with the page footer;
+			// the stream switch applies immediately.
+			ui.Divider(c)
+			ui.Collapsible(c, localized(locale, "高级选项", "Advanced options"), &state.runtimeOpen, func() {
 				ui.Row(c).FillWidth().Gap(design.Space3).AlignItems(ui.Start).Children(func() {
 					ui.Column(c).FillWidth().Grow(1).Children(func() {
 						ui.Field(c, localized(locale, "最大迭代次数", "Max iterations"), func() {
@@ -1302,6 +1407,7 @@ func buildPage(c *ui.Context, runtime contracts.UIRuntime, state *moduleState, c
 									"开启时删除该设置行，由模块配置决定；关闭后设置具体轮数上限。",
 									"When on, the settings row is cleared and the module config decides; when off, set a concrete round limit."),
 								&state.iterationsDefault) {
+								clearSavedStatus(state)
 								if state.iterationsDefault {
 									state.maxIterations = ""
 								} else {
@@ -1318,7 +1424,7 @@ func buildPage(c *ui.Context, runtime contracts.UIRuntime, state *moduleState, c
 							if state.iterationsDefault && state.moduleMaxIterations > 0 {
 								design.Apply(ui.Text(c, fmt.Sprintf(localized(locale,
 									"模块默认：%d", "Module default: %d"), state.moduleMaxIterations)),
-									t.Font(design.TypeXXXS)).TextColor(t.LabelTertiary)
+									t.Font(design.TypeXXS)).TextColor(t.LabelTertiary)
 							}
 							if !state.iterationsDefault {
 								input := ui.NumberInput(c.Key("settings.runtime.maxIterations"),
@@ -1327,6 +1433,7 @@ func buildPage(c *ui.Context, runtime contracts.UIRuntime, state *moduleState, c
 									Bind(&state.iterationsInput)
 								if input.Changed() {
 									state.maxIterations = strconv.Itoa(int(state.maxIterationsNum))
+									clearSavedStatus(state)
 								}
 							}
 						}).Description(localized(locale,
@@ -1344,6 +1451,7 @@ func buildPage(c *ui.Context, runtime contracts.UIRuntime, state *moduleState, c
 									"开启时删除该设置行，由模块配置决定；关闭后设置具体的 prompt token 预算，0 = 不自动压缩。",
 									"When on, the settings row is cleared and the module config decides; when off, set a prompt-token budget, 0 = no automatic compaction."),
 								&state.budgetDefault) {
+								clearSavedStatus(state)
 								if state.budgetDefault {
 									state.contextBudget = ""
 								} else {
@@ -1353,7 +1461,7 @@ func buildPage(c *ui.Context, runtime contracts.UIRuntime, state *moduleState, c
 							if state.budgetDefault && state.moduleContextBudget != 0 {
 								design.Apply(ui.Text(c, fmt.Sprintf(localized(locale,
 									"模块默认：%d", "Module default: %d"), state.moduleContextBudget)),
-									t.Font(design.TypeXXXS)).TextColor(t.LabelTertiary)
+									t.Font(design.TypeXXS)).TextColor(t.LabelTertiary)
 							}
 							if !state.budgetDefault {
 								input := ui.NumberInput(c.Key("settings.runtime.contextBudget"),
@@ -1362,6 +1470,7 @@ func buildPage(c *ui.Context, runtime contracts.UIRuntime, state *moduleState, c
 									Bind(&state.budgetInput)
 								if input.Changed() {
 									state.contextBudget = strconv.Itoa(int(state.contextBudgetNum))
+									clearSavedStatus(state)
 								}
 							}
 						}).Description(localized(locale,
@@ -1380,6 +1489,7 @@ func buildPage(c *ui.Context, runtime contracts.UIRuntime, state *moduleState, c
 							"缺少 finish_reason 的流按截断失败处理；极简兼容服务器可关闭。",
 							"A stream without a finish_reason is treated as truncated; disable it for minimal compatible servers."),
 						&requireComplete) {
+						clearSavedStatus(state)
 						if err := store.Set(contracts.SettingsChatRequireFinishReason,
 							strconv.FormatBool(requireComplete)); err != nil {
 							state.status = localized(locale, "保存失败：", "Save failed: ") + err.Error()
@@ -1392,11 +1502,11 @@ func buildPage(c *ui.Context, runtime contracts.UIRuntime, state *moduleState, c
 					}
 				})
 			})
+			if !state.runtimeOpen {
+				design.Apply(ui.Text(c, runtimeSummary(state, store, locale)),
+					t.Font(design.TypeXXS)).TextColor(t.LabelTertiary)
+			}
 		})
-		if !state.runtimeOpen {
-			design.Apply(ui.Text(c, runtimeSummary(state, store, locale)),
-				t.Font(design.TypeXXXS)).TextColor(t.LabelTertiary)
-		}
 
 		// H1: the page's single primary action (save) lives in the host's
 		// fixed footer; the body keeps the unsaved/saved status line.
@@ -1435,16 +1545,15 @@ func buildAppearancePage(c *ui.Context, state *appearanceState, store contracts.
 	t := design.Of(c)
 	ui.Column(c).FillWidth().Gap(design.Space4).Children(func() {
 		uikit.PageHeader(c, labels.title, localized(locale,
-			"主题、界面语言与桌面集成即时生效；全局热键修改后点击「应用」写入。",
-			"Theme, interface language and desktop integration apply immediately; the global hotkey is saved with Apply."))
+			"主题、语言与桌面集成即时生效；全局热键点页脚「应用」并重启后生效。",
+			"Theme, language and desktop integration apply immediately; the global hotkey applies after Apply and a restart."))
 
 		uikit.Section(c, localized(locale, "主题", "Theme"), func(*ui.Context) {
-			segmented := ui.Segmented(c, &state.themeMode,
+			if buildSegmentedControl(c, t, &state.themeMode, labels.themeLabel,
 				localized(locale, "浅色", "Light"),
 				localized(locale, "深色", "Dark"),
 				localized(locale, "跟随系统", "System"),
-			).Label(labels.themeLabel)
-			if segmented.Changed() {
+			) {
 				applyThemeModeSelection(state, store, theme, locale)
 				c.Invalidate()
 			}
@@ -1502,7 +1611,10 @@ func buildAppearancePage(c *ui.Context, state *appearanceState, store contracts.
 		buildGlobalHotkeySection(c, t, state, store, locale)
 
 		// H1: the apply action lives in the host's fixed footer; the body keeps
-		// the status/unsaved line.
+		// only the last save result (the title badge owns "unsaved", R8).
+		if state.dirty() && !state.statusErr {
+			clearAppearanceStatus(state)
+		}
 		statusBadgesRow(c, t, state.status, state.statusErr)
 	})
 }

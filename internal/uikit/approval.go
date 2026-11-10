@@ -29,7 +29,9 @@ package uikit
 // Collapsible, DialogFooter) styled with internal/design.
 
 import (
+	"encoding/json"
 	"fmt"
+	"sort"
 	"strings"
 	"unicode/utf8"
 
@@ -61,7 +63,9 @@ type ApprovalLabels struct {
 	// ToolLabel labels the tool row of the Modal presentation (default
 	// "工具"/"Tool"); the inline banner names the tool without a label.
 	ToolLabel string
-	// ArgumentsLabel labels the raw arguments block (default "参数"/"Arguments").
+	// ArgumentsLabel labels the raw arguments disclosure (default
+	// "原始参数"/"Raw arguments"). It is the one label of the disclosure: the
+	// summary above already names what the call does.
 	ArgumentsLabel string
 	// AllowLabel permits this one call (default "允许"/"Allow").
 	AllowLabel string
@@ -77,7 +81,7 @@ func (l ApprovalLabels) resolved(locale contracts.LocaleService) ApprovalLabels 
 	return ApprovalLabels{
 		Title:            approvalFirstNonEmpty(l.Title, T(locale, "需要审批", "Approval required")),
 		ToolLabel:        approvalFirstNonEmpty(l.ToolLabel, T(locale, "工具", "Tool")),
-		ArgumentsLabel:   approvalFirstNonEmpty(l.ArgumentsLabel, T(locale, "参数", "Arguments")),
+		ArgumentsLabel:   approvalFirstNonEmpty(l.ArgumentsLabel, T(locale, "原始参数", "Raw arguments")),
 		AllowLabel:       approvalFirstNonEmpty(l.AllowLabel, T(locale, "允许", "Allow")),
 		AllowAlwaysLabel: approvalFirstNonEmpty(l.AllowAlwaysLabel, T(locale, "本会话内始终允许", "Always allow in this session")),
 		DenyLabel:        approvalFirstNonEmpty(l.DenyLabel, T(locale, "拒绝", "Deny")),
@@ -156,7 +160,11 @@ func approvalInlineCard(c *ui.Context, o ApprovalDialogOptions, labels ApprovalL
 
 	root := design.Apply(ui.Column(c.Key("uikit.approval/inline."+request.ID)).FillWidth(),
 		func(el ui.Element) ui.Element {
-			return el.Background(t.BgRaised).Border(1, t.Warning).Radius(design.RadiusLG)
+			// The warning banner carries the emphasis; the card outline is a
+			// quiet warning tint (40%), never a full-saturation warning frame
+			// around the whole card (DESIGN.md §5.2 A: warning colors do not
+			// paint full-strength borders).
+			return el.Background(t.BgRaised).Border(1, t.Warning.Alpha(0.4)).Radius(design.RadiusLG)
 		})
 	root.Role(ui.RoleRegion).Label(labels.Title + " · " + toolName)
 	// The raw-arguments disclosure is the card's own visual state: it keeps its
@@ -252,18 +260,20 @@ func approvalRequestBody(c *ui.Context, o ApprovalDialogOptions, labels Approval
 	// its open flag across frames and starts collapsed for each new request.
 	argsOpen := ui.Local(root, "argsOpen", func() bool { return false })
 	root.Children(func() {
-		ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(design.Space2).Children(func() {
-			ui.Icon(c, approvalToolIcon(request.Tool)).Size(design.Space5, design.Space5).
-				TextColor(t.Accent)
-			design.Apply(ui.Text(c, labels.Title), t.Font(design.TypeL)).TextColor(t.LabelPrimary)
-			if o.Pending > 1 {
-				// A quiet counter, not another dialog: the rest are queued
-				// behind this one and appear as each is resolved.
-				ui.Spacer(c).Grow(1)
-				design.Apply(ui.Text(c, fmt.Sprintf(
-					T(o.Locale, "还有 %d 个待审批请求", "%d more approval requests waiting"), o.Pending-1)),
-					t.TextMuted(design.TypeXXS)).NoWrap()
-			}
+		// The one dialog header: the tool's alert/shield glyph, the decision
+		// title and, when the queue has more requests, their count as the muted
+		// subtitle. There is deliberately no close control: the decision needs
+		// an explicit answer (Escape denies, it never just dismisses).
+		subtitle := ""
+		if o.Pending > 1 {
+			subtitle = fmt.Sprintf(
+				T(o.Locale, "还有 %d 个待审批请求", "%d more approval requests waiting"), o.Pending-1)
+		}
+		DialogHeader(c, DialogHeaderOptions{
+			Key:      "uikit.approval/dialog-header." + request.ID,
+			Icon:     approvalToolIcon(request.Tool),
+			Title:    labels.Title,
+			Subtitle: subtitle,
 		})
 		// The tool is named once: label + badge, with the impact in one line.
 		// The badge shows the friendly localized name; the raw ID is its tooltip.
@@ -329,10 +339,17 @@ func approvalImpactLine(c *ui.Context, t *design.Tokens, locale contracts.Locale
 
 // approvalSummarySection renders the summary block first: what will run is the
 // thing the user is judging, labelled as a command only for shell/terminal
-// tools. It is skipped when the summary is empty or is just the raw arguments.
+// tools. A request whose tool reported no summary still gets a readable
+// preview: the first one to three key/value pairs of its JSON arguments
+// (bash→command, files→path, tasks→subject/owner) instead of a blind "approve"
+// with only a collapsed raw JSON below.
 func approvalSummarySection(c *ui.Context, t *design.Tokens, o ApprovalDialogOptions,
 	summary, arguments string) {
-	if summary == "" || summary == arguments {
+	text := summary
+	if text == "" || text == arguments {
+		text = approvalArgumentsPreview(o.Request.Tool, arguments)
+	}
+	if text == "" {
 		return
 	}
 	design.Apply(ui.Text(c, approvalSummaryLabel(o.Locale, o.Request.Tool)),
@@ -341,26 +358,141 @@ func approvalSummarySection(c *ui.Context, t *design.Tokens, o ApprovalDialogOpt
 		return el.Background(t.BgBase).Border(1, t.BorderL2).
 			Radius(design.RadiusSM).Padding(design.Space2)
 	}).Children(func() {
-		design.Apply(ui.Text(c, approvalTruncate(summary, approvalMaxArgumentsRunes)),
+		design.Apply(ui.Text(c, approvalTruncate(text, approvalMaxArgumentsRunes)),
 			t.Font(design.TypeXS), t.MonoFamily()).TextColor(t.LabelPrimary)
 	})
 }
 
-// approvalArgumentsSection renders the raw arguments as details: a divider, the
-// section label, then either the "no arguments" fallback or the collapsed,
-// bounded disclosure.
+// approvalSummaryKeys is the readable-key priority of one tool family: the
+// fields a reviewer needs to decide are rarely the whole argument object.
+// Anything not listed falls back to the object's own key order.
+var approvalSummaryKeys = map[string][]string{
+	"bash":               {"command"},
+	"pwsh":               {"command"},
+	"terminal_send":      {"command", "input", "text"},
+	"job_start":          {"command"},
+	"read_file":          {"path", "file_path"},
+	"write_file":         {"path", "file_path"},
+	"edit_file":          {"path", "file_path"},
+	"str_replace_editor": {"path", "file_path", "command"},
+	"list_dir":           {"path"},
+	"glob":               {"pattern", "path"},
+	"grep":               {"pattern", "path"},
+	"read_image":         {"path", "file_path"},
+	"web_fetch":          {"url"},
+	"web_search":         {"query"},
+	"team_task_create":   {"subject", "owner", "description"},
+	"team_task_update":   {"id", "subject", "status", "owner"},
+	"todo":               {"items", "subject", "status"},
+	"subagent":           {"prompt", "description"},
+	"workflow":           {"prompt", "description"},
+	"skill":              {"name", "arguments"},
+}
+
+// approvalArgumentsPreview extracts the first one to three readable key/value
+// pairs of a JSON argument object for the summary fallback. Unparseable
+// arguments keep a bounded raw preview, so the summary area always says what
+// will run; empty or null arguments preview nothing.
+func approvalArgumentsPreview(tool, arguments string) string {
+	trimmed := strings.TrimSpace(arguments)
+	if approvalEmptyArguments(trimmed) {
+		return ""
+	}
+	var values map[string]any
+	decoder := json.NewDecoder(strings.NewReader(trimmed))
+	decoder.UseNumber()
+	if err := decoder.Decode(&values); err != nil || len(values) == 0 {
+		return approvalTruncate(trimmed, 240)
+	}
+	keys := approvalPreviewKeys(tool, values)
+	lines := make([]string, 0, len(keys))
+	for _, key := range keys {
+		value := approvalPreviewValue(values[key])
+		if value == "" {
+			continue
+		}
+		lines = append(lines, key+": "+value)
+		if len(lines) == 3 {
+			break
+		}
+	}
+	if len(lines) == 0 {
+		return approvalTruncate(trimmed, 240)
+	}
+	return strings.Join(lines, "\n")
+}
+
+// approvalPreviewKeys orders a tool's arguments for the preview: the tool
+// family's priority keys first, then the remaining keys in a stable order.
+func approvalPreviewKeys(tool string, values map[string]any) []string {
+	seen := make(map[string]bool, len(values))
+	keys := make([]string, 0, len(values))
+	priority := approvalSummaryKeys[strings.ToLower(strings.TrimSpace(tool))]
+	for _, key := range priority {
+		if _, ok := values[key]; !ok || seen[key] {
+			continue
+		}
+		seen[key] = true
+		keys = append(keys, key)
+	}
+	rest := make([]string, 0, len(values))
+	for key := range values {
+		if !seen[key] {
+			rest = append(rest, key)
+		}
+	}
+	sort.Strings(rest)
+	return append(keys, rest...)
+}
+
+// approvalPreviewValue renders one argument value for the mono preview: a
+// string keeps its first line, scalars print directly and composite values
+// stay compact JSON.
+func approvalPreviewValue(value any) string {
+	switch typed := value.(type) {
+	case nil:
+		return ""
+	case string:
+		return approvalTruncate(approvalFirstLine(typed), 200)
+	case json.Number:
+		return typed.String()
+	case bool:
+		if typed {
+			return "true"
+		}
+		return "false"
+	default:
+		encoded, err := json.Marshal(typed)
+		if err != nil {
+			return ""
+		}
+		return approvalTruncate(string(encoded), 200)
+	}
+}
+
+// approvalFirstLine keeps a preview to one line.
+func approvalFirstLine(text string) string {
+	trimmed := strings.TrimSpace(text)
+	if index := strings.IndexAny(trimmed, "\r\n"); index >= 0 {
+		return strings.TrimSpace(trimmed[:index])
+	}
+	return trimmed
+}
+
+// approvalArgumentsSection renders the raw arguments as details: a divider, then
+// either the "no arguments" fallback or the collapsed, bounded disclosure. The
+// disclosure is the section's only label (the summary above already says what
+// the call does), so the card never repeats "参数 / 显示原始参数".
 func approvalArgumentsSection(c *ui.Context, t *design.Tokens, o ApprovalDialogOptions,
 	labels ApprovalLabels, request contracts.ApprovalRequest, arguments string, argsOpen *bool) {
 	ui.Divider(c)
-	design.Apply(ui.Text(c, labels.ArgumentsLabel), t.TextMuted(design.TypeXS))
 	if approvalEmptyArguments(arguments) {
 		design.Apply(ui.Text(c, T(o.Locale, "无参数", "No arguments")),
 			t.TextMuted(design.TypeXS))
 		return
 	}
-	// Two layers only: the configurable section label above the disclosure.
 	ui.Collapsible(c.Key("approval.arguments."+request.ID),
-		T(o.Locale, "显示原始参数", "Show raw arguments"), argsOpen, func() {
+		labels.ArgumentsLabel, argsOpen, func() {
 			scroll := ui.Scroll(c).Height(approvalArgumentsMaxHeight).FillWidth()
 			design.Apply(scroll, func(el ui.Element) ui.Element {
 				return el.Background(t.BgBase).Border(1, t.BorderL2).

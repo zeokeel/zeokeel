@@ -52,59 +52,140 @@ func buildPanel(c *ui.Context, t *design.Tokens, workspace contracts.WorkspaceSe
 	})
 }
 
-// buildTabStrip is the sidebar's only navigation: the fixed pages and one tab
-// per opened file. The native TabsBase owns the tab-list semantics (role, the
-// arrow keys, Home/End, the focus) and the strip scrolls sideways so a long
-// list of open files never overflows the narrow rail.
+// buildTabStrip is the sidebar's navigation: two underline tab rows, the
+// fixed view pages above and the opened file documents below (V10). The rows
+// are separate native tab lists (a document tab and a view tab are different
+// levels of navigation and never share a row); each row owns only its own
+// choice and maps it back to the active tab index.
 func buildTabStrip(c *ui.Context, t *design.Tokens, st *state) {
-	pageCount := st.pageCount()
 	st.clampTab()
-	tabs := ui.TabsBase(c, &st.tab, pageCount)
-	tabs.List.Label(st.tr("右侧栏页面", "Right sidebar pages"))
-	strip := ui.ScrollHorizontal(c).FillWidth().Shrink(0)
-	strip.Padding(design.Space1, design.Space2)
-	strip.Children(func() {
-		tabs.List.Gap(design.Space1).AlignItems(ui.Center).Children(func() {
-			closing := -1
-			for index := 0; index < pageCount; index++ {
-				buildTab(c, t, st, tabs, index, &closing)
-			}
-			if closing >= 0 {
-				st.closeTab(closing)
-			}
+	buildViewTabStrip(c, t, st)
+	buildDocumentTabStrip(c, t, st)
+	st.revealTab = false
+}
+
+// buildViewTabStrip renders the fixed view pages (开始/文件/命令) as the
+// underline tab language: 13 DIP labels, the chosen one semibold with a 2 DIP
+// accent underline, on a strip with one hairline underneath. Visiting a page
+// takes the index from the native tab list (keyboard and pointer alike).
+func buildViewTabStrip(c *ui.Context, t *design.Tokens, st *state) {
+	// TabsBase clamps its bound index into range, so a document tab (an index
+	// past the fixed pages) is mirrored as "no view page chosen"; the row's
+	// own Changed is the only real user choice.
+	st.viewTab = -1
+	if st.tab >= 0 && st.tab < pageFixedCount {
+		st.viewTab = st.tab
+	}
+	viewTabs := ui.TabsBase(c, &st.viewTab, pageFixedCount)
+	viewTabs.List.Label(st.tr("视图页面", "View pages"))
+	ui.Column(c).FillWidth().Shrink(0).BorderWidth(0, 0, 1, 0).BorderColor(t.BorderL2).
+		Children(func() {
+			strip := ui.ScrollHorizontal(c).FillWidth().Shrink(0)
+			strip.Padding(design.Space1, design.Space2)
+			strip.Children(func() {
+				viewTabs.List.Gap(design.Space2).AlignItems(ui.Center).Children(func() {
+					for index := 0; index < pageFixedCount; index++ {
+						buildUnderlineTab(c, t, viewTabs, index, st.tabLabel(index), st.tab == index)
+					}
+				})
+			})
 		})
+	if viewTabs.List.Changed() && st.viewTab >= 0 && st.viewTab < pageFixedCount {
+		st.tab = st.viewTab
+	}
+}
+
+// buildDocumentTabStrip renders the opened files on their own underline row,
+// below the view pages: one tab per file, the active one carrying the accent
+// underline and every tab its close action. The row only exists while a file
+// is open.
+func buildDocumentTabStrip(c *ui.Context, t *design.Tokens, st *state) {
+	docCount := len(st.fileTabs)
+	if docCount == 0 {
+		return
+	}
+	st.docTab = -1
+	if index, ok := st.activeFileIndex(); ok {
+		st.docTab = index
+	}
+	docTabs := ui.TabsBase(c, &st.docTab, docCount)
+	docTabs.List.Label(st.tr("打开的文件", "Open files"))
+	closing := -1
+	ui.Column(c).FillWidth().Shrink(0).BorderWidth(0, 0, 1, 0).BorderColor(t.BorderL2).
+		Children(func() {
+			strip := ui.ScrollHorizontal(c).FillWidth().Shrink(0)
+			strip.Padding(design.Space1, design.Space2)
+			strip.Children(func() {
+				docTabs.List.Gap(design.Space1).AlignItems(ui.Center).Children(func() {
+					for index := range st.fileTabs {
+						buildDocumentTab(c, t, st, docTabs, index, &closing)
+					}
+				})
+			})
+		})
+	if closing >= 0 {
+		st.closeTab(pageFixedCount + closing)
+		return
+	}
+	if docTabs.List.Changed() && st.docTab >= 0 && st.docTab < docCount {
+		st.tab = pageFixedCount + st.docTab
+	}
+}
+
+// buildUnderlineTab builds one view-page tab: the underline vocabulary used by
+// the main screen's tabs (13 DIP, the chosen label semibold in LabelPrimary and
+// a 2 DIP accent underline). The 2 DIP border is reserved on every tab so the
+// row does not jump when the choice moves. The underline is an element border,
+// not a hand-drawn line.
+func buildUnderlineTab(c *ui.Context, t *design.Tokens, tabs ui.TabsParts, index int, label string, active bool) {
+	tab := tabs.Tab(index).AlignItems(ui.Center).Height(design.Space8).
+		PaddingX(design.Space3).
+		BorderWidth(0, 0, 2, 0).BorderColor(ui.Transparent)
+	if active {
+		tab = tab.BorderColor(t.Accent)
+	}
+	tab.Children(func() {
+		ink, weight := t.LabelSecondary, 400
+		if active {
+			ink, weight = t.LabelPrimary, 600
+		}
+		design.Apply(ui.Text(c, label), t.Font(design.TypeXS)).
+			FontWeight(weight).TextColor(ink).MaxLines(1).Ellipsis("…").NoWrap()
 	})
 }
 
-// buildTab builds one tab. Fixed pages are plain tabs; an opened file adds its
-// close control. The guide's shortcut labels live on the fixed page tabs'
-// cards, not on the tabs themselves.
-func buildTab(c *ui.Context, t *design.Tokens, st *state, tabs ui.TabsParts, index int, closing *int) {
-	label := st.tabLabel(index)
-	active := index == st.tab
+// buildDocumentTab builds one opened file's tab in the same underline
+// vocabulary, with the base name, the full path as its tooltip and the close
+// action. The active document tab is scrolled into view when a file opens.
+func buildDocumentTab(c *ui.Context, t *design.Tokens, st *state, tabs ui.TabsParts,
+	index int, closing *int) {
+	path := st.fileTabs[index].path
+	active := st.tab == pageFixedCount+index
+	label := st.tabLabel(pageFixedCount + index)
 	tab := tabs.Tab(index).AlignItems(ui.Center).Height(design.Space8).
-		PaddingX(design.Space2).Radius(design.RadiusSM)
-	// TabsBase is the no-look base: the look is this module's, from tokens
-	// only, with the active tab on the selected tint.
+		PaddingX(design.Space2).Gap(design.Space1).
+		// Name the tab by the file alone: without an explicit Label the
+		// accessible name concatenates the close control's label too, which
+		// made the tab untestable by name and noisy for screen readers.
+		Label(label).
+		BorderWidth(0, 0, 2, 0).BorderColor(ui.Transparent)
 	if active {
-		tab = tab.Background(t.BgSelected)
-	}
-	if active && st.revealTab {
-		tab.ScrollIntoView()
+		tab = tab.BorderColor(t.Accent)
+		if st.revealTab {
+			tab.ScrollIntoView()
+		}
 	}
 	tab.Children(func() {
-		labelElement := design.Apply(ui.Text(c, label), t.Font(design.TypeXXS)).
-			TextColor(inactiveInk(t, active)).MaxLines(1).Ellipsis("…").NoWrap()
+		ink, weight := t.LabelSecondary, 400
 		if active {
-			labelElement.Bold()
+			ink, weight = t.LabelPrimary, 600
 		}
-		if index < pageFixedCount {
-			return
-		}
-		filePath := st.fileTabs[index-pageFixedCount].path
-		closeLabel := st.tr("关闭 ", "Close ") + filepath.Base(filePath)
+		design.Apply(ui.Text(c, label), t.Font(design.TypeXS)).
+			FontWeight(weight).TextColor(ink).MaxLines(1).Ellipsis("…").NoWrap().
+			Tooltip(path)
+		closeLabel := st.tr("关闭 ", "Close ") + filepath.Base(path)
 		uikit.IconButton(c, uikit.IconButtonOptions{
-			Key:     "rightpanel.tab.close/" + filePath,
+			Key:     "rightpanel.tab.close/" + path,
 			Label:   closeLabel,
 			Tooltip: closeLabel,
 			Icon:    icons.Close(),
@@ -112,18 +193,6 @@ func buildTab(c *ui.Context, t *design.Tokens, st *state, tabs ui.TabsParts, ind
 			OnClick: func() { *closing = index },
 		})
 	})
-	if index == st.tab {
-		st.revealTab = false
-	}
-}
-
-// inactiveInk is the tab's text color: primary on the chosen tab, secondary on
-// the rest, from the brand tokens.
-func inactiveInk(t *design.Tokens, active bool) ui.Color {
-	if active {
-		return t.LabelPrimary
-	}
-	return t.LabelSecondary
 }
 
 // --- guide page -------------------------------------------------------------
@@ -134,15 +203,15 @@ func inactiveInk(t *design.Tokens, active bool) ui.Color {
 // lives here. The body is a native scroll so a short window cannot clip it.
 func buildGuidePage(c *ui.Context, t *design.Tokens, st *state) {
 	ui.Scroll(c).FillWidth().Grow(1).Children(func() {
+		// The view tab already names the pane (开始): repeating it as an H2 in
+		// the body was the duplicate-heading finding (B7/P3-8).
 		ui.Column(c).FillWidth().Padding(design.Space3).Gap(design.Space4).Children(func() {
-			design.Apply(ui.Text(c, st.cfg.guideLabel(st.locale)), t.Font(design.TypeM)).
-				TextColor(t.LabelPrimary).Role(ui.RoleHeading).Level(2).Bold()
 			// Two equal side-by-side cards: the official Grid's two equal
 			// columns keep them the same width regardless of their content.
 			ui.Grid(c).FillWidth().Columns(2).GapX(design.Space2).GapY(design.Space2).Children(func() {
 				buildGuideCard(c, t, st, icons.Folder(), st.tr("工作区文件", "Workspace files"),
 					filesOpenShortcut, pageFiles)
-				buildGuideCard(c, t, st, icons.Terminal(), st.tr("新建终端", "New terminal"),
+				buildGuideCard(c, t, st, icons.Terminal(), st.tr("命令运行", "Run command"),
 					terminalOpenShortcut, pageTerminal)
 			})
 		})
@@ -266,7 +335,7 @@ func buildFilePreviewBody(c *ui.Context, t *design.Tokens, st *state, path strin
 		// accessible name instead of reading as a decoration.
 		ui.Image(c, preview.bitmap).Label(filepath.Base(path)).MaxWidthPercent(100)
 	case isMarkdownPath(path):
-		markdown.View(c, string(preview.data), nil)
+		markdown.View(c, string(preview.data), docMarkdown(t))
 	case isTextPath(path):
 		editorView(c, t, st, path, preview.data)
 	default:
@@ -281,6 +350,15 @@ func buildFilePreviewBody(c *ui.Context, t *design.Tokens, st *state, path strin
 		design.Apply(ui.Text(c, st.tr("仅显示前 256 KiB", "Showing the first 256 KiB only")),
 			t.TextMuted(design.TypeXXXS))
 	}
+}
+
+// docMarkdown is the narrow-panel Markdown theme of the inspector's file and
+// artifact previews (uikit.MarkdownDoc): body TypeXS (13 DIP) and headings
+// scaled off it, so a document never outranks the screen title while the panel
+// is only ~320 DIP wide (V16).
+func docMarkdown(t *design.Tokens) *markdown.Options {
+	size, _, _ := t.Metrics(design.TypeXS)
+	return uikit.MarkdownDoc(t, size)
 }
 
 // editorView is the read-only official code editor of one text file, at a

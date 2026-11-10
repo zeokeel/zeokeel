@@ -66,10 +66,19 @@ func TestDiagnosticsPage(t *testing.T) {
 	}
 	tester.Frame()
 	for _, want := range []string{"诊断", "ZeoKeel v1.2.3", "abc124", "go1.27.3",
-		"/tmp/zeokeel-diag", "zeokeel.db", "工具数", "会话数", "deepseek-chat"} {
+		"/tmp/zeokeel-diag", "zeokeel.db", "工具数", "会话数"} {
 		if !tester.HasText(want) {
 			t.Fatalf("diagnostics frame missing %q; texts = %v", want, tester.Texts())
 		}
+	}
+	// The setting keys are a per-key disclosure now (a joined line used to be
+	// truncated and could not be copied per value).
+	if err := tester.Click("设置项 · 5 项"); err != nil {
+		t.Fatalf("expand setting keys: %v; texts = %v", err, tester.Texts())
+	}
+	tester.Frame()
+	if !tester.HasText("deepseek-chat") {
+		t.Fatalf("expanded setting keys missing the model value; texts = %v", tester.Texts())
 	}
 	for _, secret := range []string{"sk-secret-value", "sk-web-secret-value", "gh-secret-value"} {
 		if tester.HasText(secret) {

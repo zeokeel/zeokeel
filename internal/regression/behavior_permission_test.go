@@ -149,7 +149,12 @@ func TestBehaviorPermissionSharedWithSessionChip(t *testing.T) {
 	activate(t, harness.h.ctx, sessionui.Module(), sessionui.Config{})
 	harness.h.push("session")
 	harness.tester.Frame()
+	// The chip is the fixed 会话设置 destination; the current permission is the
+	// menu row's trailing value (R17).
+	requireHasText(t, harness.tester, "会话设置")
+	openSessionMenu(t, harness.tester)
 	requireHasText(t, harness.tester, "只读")
+	harness.tester.CloseMenu()
 	if got := harness.storedPermission(); got != contracts.PermissionReadOnly {
 		t.Fatalf("agent.permission after 只读 = %q, want read-only", got)
 	}
@@ -159,7 +164,9 @@ func TestBehaviorPermissionSharedWithSessionChip(t *testing.T) {
 		t.Fatalf("set full permission: %v", err)
 	}
 	harness.tester.Frame()
+	openSessionMenu(t, harness.tester)
 	requireHasText(t, harness.tester, "所有权限")
+	harness.tester.CloseMenu()
 
 	// A retired "never" row set externally is drawn as the normalized read-only
 	// mode by the composer instead of the old 禁止工具 label.
@@ -167,9 +174,21 @@ func TestBehaviorPermissionSharedWithSessionChip(t *testing.T) {
 		t.Fatalf("set legacy never: %v", err)
 	}
 	harness.tester.Frame()
+	openSessionMenu(t, harness.tester)
 	requireHasText(t, harness.tester, "只读")
+	harness.tester.CloseMenu()
 	requireHasNoText(t, harness.tester, "询问")
 	requireHasNoText(t, harness.tester, "禁止工具")
+}
+
+// openSessionMenu opens the composer's 会话设置 menu so a test can read the
+// current permission/mode values it carries.
+func openSessionMenu(t *testing.T, tester *ui.Tester) {
+	t.Helper()
+	if err := tester.Click("会话设置"); err != nil {
+		t.Fatalf("open session menu: %v; texts = %v", err, tester.Texts())
+	}
+	tester.Frame()
 }
 
 // requireHasNoText fails when the frame contains want as a substring.

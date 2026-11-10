@@ -162,7 +162,7 @@ func (d *drive) runHSessionSteps() {
 			d.tester.Move(4, 4)
 			d.frame()
 			c.require(c.has("消息操作"), "助手消息底部没有常驻「消息操作」⋯ 入口")
-			c.require(c.has("用时"), "助手消息底部没有常驻用时（元信息行）")
+			c.require(!c.has("用时"), "消息元信息行仍常驻「用时」遥测（减法后应只在 ⋯ 用量明细里）")
 			c.shot("message-actions-copy")
 			if !c.click("消息操作") {
 				return

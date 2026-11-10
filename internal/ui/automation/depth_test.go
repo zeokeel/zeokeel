@@ -252,19 +252,19 @@ func TestRunNowShowsPendingThenDeliveredAndSessionLink(t *testing.T) {
 	chat := &fakeChatStub{}
 	h := newDepthHarness(t, service, nil, chat)
 	tester := h.tester()
-	h.assertNoTexts(tester, "运行中…")
+	h.assertNoTexts(tester, "运行中")
 
 	h.click(tester, "立即运行")
 	if got := service.runs(); len(got) != 1 || got[0] != "task-1" {
 		t.Fatalf("RunNow calls = %v, want [task-1]", got)
 	}
-	h.assertTexts(tester, "运行中…")
+	h.assertTexts(tester, "运行中")
 	// The in-flight state is the card's, not a claim that the run finished.
 	h.assertNoTexts(tester, "已投递")
 
 	completeRun(service, "task-1", "sess-9")
 	tester.Frame()
-	h.assertNoTexts(tester, "运行中…")
+	h.assertNoTexts(tester, "运行中")
 	h.assertTexts(tester, "已投递", "结果由会话决定", "打开会话")
 
 	h.click(tester, "打开会话")

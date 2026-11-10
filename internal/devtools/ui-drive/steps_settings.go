@@ -28,7 +28,7 @@ var settingsPages = []settingsPageSpec{
 	{"settings-page-model", "model", "模型", []string{"模型列表", "添加模型", "系统提示词"}},
 	{"settings-page-appearance", "appearance", "外观", []string{"外观模式", "界面语言", "应用"}},
 	{"settings-page-skills", "skills", "技能", []string{"新建技能", "刷新"}},
-	{"settings-page-shortcuts", "shortcuts", "快捷键", []string{"快捷键", "Cmd/Ctrl + B"}},
+	{"settings-page-shortcuts", "shortcuts", "快捷键", []string{"快捷键", "Ctrl + B"}},
 	{"settings-page-diagnostics", "diagnostics", "诊断", []string{"工具数", "会话数"}},
 	{"settings-page-update", "update", "更新", []string{"当前版本", "检查更新"}},
 	{"settings-page-import", "import", "导入", []string{"DSH 数据目录", "扫描"}},
@@ -143,7 +143,7 @@ func (d *drive) runSettingsSteps() {
 				// No body scrolling: the fixed footer must already show the
 				// page's primary action.
 				label := ""
-				for _, candidate := range []string{"保存", "应用", "添加"} {
+				for _, candidate := range []string{"保存", "应用", "添加", "保存提示词与运行参数"} {
 					if _, ok := d.find(candidate); ok {
 						label = candidate
 						break

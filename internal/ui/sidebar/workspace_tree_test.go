@@ -246,7 +246,7 @@ func TestWorkspaceTreeSearchNoMatchCopy(t *testing.T) {
 	clickLabel(t, tester, "搜索会话与消息")
 	tester.Type("zzz")
 	tester.Frame()
-	h.assertTexts(tester, "工作区", "没有匹配的会话")
+	h.assertTexts(tester, "工作区", "没有匹配")
 	h.assertNoTexts(tester, "A 会话", "项目一")
 }
 

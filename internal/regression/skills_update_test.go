@@ -237,8 +237,12 @@ func TestSettingsSkillsEditEntry(t *testing.T) {
 		t.Fatalf("open skills page: %v; texts = %v", err, tester.Texts())
 	}
 	tester.Frame()
-	if err := tester.Click("编辑"); err != nil {
-		t.Fatalf("click 编辑: %v; texts = %v", err, tester.Texts())
+	if err := tester.Click("技能操作"); err != nil {
+		t.Fatalf("open skill row menu: %v; texts = %v", err, tester.Texts())
+	}
+	tester.Frame()
+	if err := tester.Click("编辑技能"); err != nil {
+		t.Fatalf("click 编辑技能: %v; texts = %v", err, tester.Texts())
 	}
 	tester.Frame()
 	requireHasTexts(t, tester, "编辑技能", "alpha", "名称不可修改", "描述", "内容", "保存", "取消")

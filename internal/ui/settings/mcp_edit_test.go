@@ -32,6 +32,7 @@ func TestMCPServerRowEditsInPlace(t *testing.T) {
 	tester.Frame()
 	openMCPPage(t, h, tester)
 
+	h.click(tester, "服务器操作")
 	h.click(tester, "编辑")
 	h.assertTexts(tester, "编辑服务器", "保存", "取消编辑")
 	clearAndType(t, h, tester, "URL 输入", "http://127.0.0.1:10/mcp")

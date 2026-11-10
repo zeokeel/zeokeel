@@ -130,7 +130,10 @@ func (d *drive) runArchiveSteps() {
 				c.failf("归档页没有列出「%s」", title)
 				return
 			}
-			if !c.click("删除") {
+			if !c.click("归档会话操作") {
+				c.failf("归档行尾缺少「归档会话操作」菜单")
+			}
+			if !c.click("删除会话") {
 				return
 			}
 			d.drain(2)

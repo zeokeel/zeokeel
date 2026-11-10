@@ -73,7 +73,7 @@ func TestAboutEnglishAndLanguageSwitch(t *testing.T) {
 	})
 	tester := ui.NewTester(uiRoot.View, 1200, 800)
 	tester.Frame()
-	for _, want := range []string{"Settings", "About", "About ZeoKeel",
+	for _, want := range []string{"About", "About ZeoKeel",
 		"Build information", "Development information", "Architecture notes",
 		"Name", "Version", "Commit", "Build time", "1.2.3", "abc123", "go1.27.3"} {
 		if !tester.HasText(want) {

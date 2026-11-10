@@ -12,6 +12,7 @@ import (
 
 	"github.com/zeokeel/zeokeel/internal/contracts"
 	"github.com/zeokeel/zeokeel/internal/design"
+	"github.com/zeokeel/zeokeel/internal/icons"
 	"github.com/zeokeel/zeokeel/internal/uikit"
 )
 
@@ -63,6 +64,9 @@ type presetsState struct {
 	// "restore-builtins", "restore-agents").
 	confirmKind  string
 	confirmIndex int
+	// confirmOpen is the confirmation dialog's open flag (uikit.ConfirmDanger
+	// takes a persistent pointer).
+	confirmOpen bool
 }
 
 func newPresetsState() *presetsState { return &presetsState{sel: -1, agentSel: -1} }
@@ -374,12 +378,16 @@ func buildPresetsPage(c *ui.Context, store contracts.SettingsService, st *preset
 		}
 
 		uikit.SectionAction(c, localized(locale, "预设列表", "Presets"), func(c *ui.Context) {
+			// Restoring the defaults is recoverable, so it is a secondary action,
+			// not a danger button (DESIGN.md §5.2: danger is for irreversible
+			// actions only).
 			if design.Apply(ui.Button(c,
 				localized(locale, "恢复内置默认", "Restore built-in defaults")),
-				t.DangerButton()).Tooltip(localized(locale,
+				t.SecondaryButton()).Tooltip(localized(locale,
 				"清空自定义列表，重新使用内置默认。",
 				"Clear the custom list and use the built-in defaults again.")).Clicked() {
 				st.confirmKind = "restore-builtins"
+				st.confirmOpen = true
 				c.Invalidate()
 			}
 		}, func(*ui.Context) {
@@ -462,12 +470,24 @@ func buildPresetsPage(c *ui.Context, store contracts.SettingsService, st *preset
 		// Agent presets: a section with a modal add form (the page is already
 		// long; a modal keeps the controls reachable) and inline reorder rows.
 		uikit.SectionAction(c, localized(locale, "代理预设", "Agent presets"), func(c *ui.Context) {
+			// The section's two actions share the heading row: add (the section's
+			// own primary use) and the recoverable restore, both secondary so the
+			// page keeps one filled accent (the prompt-preset Add form).
+			if design.Apply(ui.Button(c, localized(locale, "添加代理预设", "Add agent preset")),
+				t.SecondaryButton()).Clicked() {
+				st.agentFormOpen = true
+				st.agentName, st.agentPersona, st.agentPrompt, st.agentModel = "", "", "", ""
+				st.agentTools = nil
+				st.status = ""
+				c.Invalidate()
+			}
 			if design.Apply(ui.Button(c,
 				localized(locale, "恢复默认人设", "Restore default persona presets")),
-				t.DangerButton()).Tooltip(localized(locale,
+				t.SecondaryButton()).Tooltip(localized(locale,
 				"覆盖当前人设列表，恢复内置默认。",
 				"Overwrite the current persona list with the built-in defaults.")).Clicked() {
 				st.confirmKind = "restore-agents"
+				st.confirmOpen = true
 				c.Invalidate()
 			}
 		}, func(*ui.Context) {
@@ -503,18 +523,14 @@ func buildPresetsPage(c *ui.Context, store contracts.SettingsService, st *preset
 				st.moveAgentPreset(store, locale, moveIndex, moveDelta)
 				c.Invalidate()
 			}
-			ui.Row(c).FillWidth().Justify(ui.End).Children(func() {
-				uikit.DialogFooter(c, []uikit.DialogAction{{
-					Label: localized(locale, "添加代理预设", "Add agent preset"), Primary: true,
-					OnClick: func() {
-						st.agentFormOpen = true
-						st.agentName, st.agentPersona, st.agentPrompt, st.agentModel = "", "", "", ""
-						st.agentTools = nil
-						st.status = ""
-						c.Invalidate()
-					},
-				}})
-			})
+			if design.Apply(ui.Button(c, localized(locale, "添加代理预设", "Add agent preset")),
+				t.SecondaryButton()).Clicked() {
+				st.agentFormOpen = true
+				st.agentName, st.agentPersona, st.agentPrompt, st.agentModel = "", "", "", ""
+				st.agentTools = nil
+				st.status = ""
+				c.Invalidate()
+			}
 		})
 
 		buildAgentPresetDialog(c, t, store, st, locale)
@@ -556,23 +572,28 @@ func buildPresetConfirmDialog(c *ui.Context, t *design.Tokens, store contracts.S
 			"Restoring the default persona presets overwrites the current agent preset list. This cannot be undone.")
 		confirm = localized(locale, "恢复默认", "Restore defaults")
 	}
-	open := true
-	switch ui.AlertDialog(c, &open, title, message, cancel, confirm) {
-	case 1:
-		switch kind {
-		case "delete-preset":
-			st.deletePreset(store, locale, index)
-		case "delete-agent":
-			st.deleteAgentPreset(store, locale, index)
-		case "restore-builtins":
-			st.restoreBuiltIns(store, locale)
-		case "restore-agents":
-			st.restoreAgentPresets(store, locale)
-		}
-		st.confirmKind = ""
-		c.Invalidate()
-	}
-	if !open {
+	uikit.ConfirmDanger(c, &st.confirmOpen, uikit.ConfirmDangerOptions{
+		Key:     "presets.confirm",
+		Title:   title,
+		Message: message,
+		Confirm: confirm,
+		Cancel:  cancel,
+		OnConfirm: func() {
+			switch kind {
+			case "delete-preset":
+				st.deletePreset(store, locale, index)
+			case "delete-agent":
+				st.deleteAgentPreset(store, locale, index)
+			case "restore-builtins":
+				st.restoreBuiltIns(store, locale)
+			case "restore-agents":
+				st.restoreAgentPresets(store, locale)
+			}
+			st.confirmKind = ""
+			c.Invalidate()
+		},
+	})
+	if !st.confirmOpen {
 		st.confirmKind = ""
 	}
 }
@@ -609,18 +630,40 @@ func buildPresetRow(c *ui.Context, t *design.Tokens, store contracts.SettingsSer
 			design.Apply(ui.Text(c, summary), t.Font(design.TypeXXS)).
 				TextColor(tertiary).MaxLines(2).Ellipsis("…")
 		})
-		if design.Apply(ui.Button(c, localized(locale, "上移", "Up")),
-			t.SecondaryButton()).Tooltip(localized(locale, "上移一位", "Move up")).Clicked() {
+		buildPresetRowMenu(c, t, st, locale, index, len(st.presets), requestMove, "delete-preset")
+	})
+}
+
+// buildPresetRowMenu is a preset row's trailing ⋯ menu: the reorder items (the
+// boundary ones disabled, so a silent no-op is impossible) and the destructive
+// delete. One menu per row keeps the danger budget and makes the row's actions
+// discoverable without three buttons.
+func buildPresetRowMenu(c *ui.Context, t *design.Tokens, st *presetsState,
+	locale contracts.LocaleService, index, count int, requestMove func(index, delta int), deleteKind string) {
+	label := localized(locale, "预设操作", "Preset actions")
+	menu := uikit.IconButton(c, uikit.IconButtonOptions{
+		Key:     "preset-actions/" + deleteKind + "/" + strconv.Itoa(index),
+		Label:   label,
+		Tooltip: label,
+		Icon:    icons.More(),
+		Size:    design.IconSizeS,
+	})
+	menu.PopoverMenuButton(func(m *ui.Menu) {
+		up := m.Item(localized(locale, "上移", "Move up"))
+		up.Disabled(index <= 0)
+		if up.Chosen() && index > 0 {
 			requestMove(index, -1)
 		}
-		if design.Apply(ui.Button(c, localized(locale, "下移", "Down")),
-			t.SecondaryButton()).Tooltip(localized(locale, "下移一位", "Move down")).Clicked() {
+		down := m.Item(localized(locale, "下移", "Move down"))
+		down.Disabled(index >= count-1)
+		if down.Chosen() && index < count-1 {
 			requestMove(index, 1)
 		}
-		if design.Apply(ui.Button(c, localized(locale, "删除", "Delete")),
-			t.DangerButton()).Tooltip(localized(locale,
-			"删除该预设", "Delete this preset")).Clicked() {
-			st.confirmKind, st.confirmIndex = "delete-preset", index
+		remove := m.Item(localized(locale, "删除", "Delete"))
+		remove.Danger()
+		if remove.Chosen() {
+			st.confirmKind, st.confirmIndex = deleteKind, index
+			st.confirmOpen = true
 			c.Invalidate()
 		}
 	})
@@ -740,19 +783,7 @@ func buildAgentPresetRow(c *ui.Context, t *design.Tokens, store contracts.Settin
 					t.Font(design.TypeXXS)).TextColor(secondary).MaxLines(1)
 			}
 		})
-		if design.Apply(ui.Button(c, localized(locale, "上移", "Up")),
-			t.SecondaryButton()).Clicked() {
-			requestMove(index, -1)
-		}
-		if design.Apply(ui.Button(c, localized(locale, "下移", "Down")),
-			t.SecondaryButton()).Clicked() {
-			requestMove(index, 1)
-		}
-		if design.Apply(ui.Button(c, localized(locale, "删除", "Delete")),
-			t.DangerButton()).Clicked() {
-			st.confirmKind, st.confirmIndex = "delete-agent", index
-			c.Invalidate()
-		}
+		buildPresetRowMenu(c, t, st, locale, index, len(st.agentPresets), requestMove, "delete-agent")
 	})
 }
 

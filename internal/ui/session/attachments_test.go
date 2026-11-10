@@ -236,6 +236,16 @@ func TestAttachmentStagingAndRemoval(t *testing.T) {
 	h.attachFiles(tester)
 	h.waitFor(tester, "note.txt", "pic.png", "16 B")
 
+	// The remove action is the shared icon button: a ≥24 DIP hit target (AP-17),
+	// not the old 20 DIP close button (P3-10).
+	remove, ok := tester.Access("移除附件 note.txt")
+	if !ok {
+		t.Fatalf("attachment chip has no accessible remove action; texts = %v", tester.Texts())
+	}
+	if remove.Bounds.W < 24 || remove.Bounds.H < 24 {
+		t.Fatalf("remove attachment target = %.0fx%.0f, want >= 24x24", remove.Bounds.W, remove.Bounds.H)
+	}
+
 	// Removing one chip drops only that attachment.
 	if err := tester.Click("移除附件 note.txt"); err != nil {
 		t.Fatalf("click remove: %v; texts = %v", err, tester.Texts())

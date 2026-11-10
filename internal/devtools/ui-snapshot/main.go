@@ -653,7 +653,7 @@ func main() {
 		a.tester.Frame()
 	}
 
-	// P2: the right sidebar's 开始 guide (工作区文件 / 新建终端 cards). The
+	// P2: the right sidebar's 开始 guide (工作区文件 / 命令运行 cards). The
 	// retired 8-pane inspector is gone: the sidebar is one tab strip with the
 	// fixed pages plus one tab per opened file.
 	a.ui.SetRightPanelOpen(true)
@@ -683,8 +683,8 @@ func main() {
 			a.render(outDir + "/p2-file-diff.png")
 		}
 	}
-	// 终端 page: run a real command in the workspace root.
-	if err := a.showSidebarPage("终端"); err != nil {
+	// 命令 page: run a real command in the workspace root.
+	if err := a.showSidebarPage("命令"); err != nil {
 		fail("terminal page", err)
 	}
 	a.tester.Frame()
@@ -795,15 +795,21 @@ func main() {
 	a.tester.Key(0, ui.KeyEscape)
 	a.tester.Frame()
 
-	// Composer @-mention suggestions over the workspace.
+	// Composer @-mention suggestions over the workspace. The suggestion menu
+	// opens on the frame after the typed text, so render the populated state
+	// before clearing the draft; the cleared state goes to its own file
+	// instead of overwriting the evidence (the audit found the menu missing
+	// because this step wrote the cleared composer over the same path).
 	if sendRect, ok := a.tester.Find("发送"); ok {
 		a.tester.ClickAt(sendRect.X-120, sendRect.Y-50)
 		a.tester.Frame()
 		a.tester.Type("@REA")
+		a.tester.Frame()
 		a.render(outDir + "/p2-mentions.png")
 		a.tester.Key(ui.Cmd, ui.KeyA)
 		a.tester.Key(0, ui.KeyBackspace)
-		a.render(outDir + "/p2-mentions.png")
+		a.tester.Frame()
+		a.render(outDir + "/p2-mentions-cleared.png")
 	}
 
 	// P2: the collapsed 64 DIP sidebar rail (Cmd/Ctrl+B).
@@ -1176,7 +1182,7 @@ func main() {
 }
 
 // showSidebarPage switches the right sidebar to one of its fixed pages through
-// the native tab strip (开始 | 文件 | 终端 | opened files).
+// the native tab strip (开始 | 文件 | 命令 | opened files).
 func (a *app) showSidebarPage(label string) error {
 	if err := a.tester.Click(label); err != nil {
 		return fmt.Errorf("click sidebar page %q: %w", label, err)

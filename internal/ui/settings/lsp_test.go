@@ -54,7 +54,7 @@ func TestLSPPageListsServersAndActiveBadge(t *testing.T) {
 		contracts.SettingLSPActive:  "rs",
 	})
 	h, tester := lspPage(t, store)
-	h.assertTexts(tester, "go", "gopls", "rs", "rust-analyzer", "活动中", "设为活动", "移除")
+	h.assertTexts(tester, "go", "gopls", "rs", "rust-analyzer", "活动中", "设为活动", "服务器操作")
 	if got := strings.Count(strings.Join(tester.Texts(), "\n"), "活动中"); got != 1 {
 		t.Fatalf("active badges = %d, want 1; texts = %v", got, tester.Texts())
 	}
@@ -91,7 +91,8 @@ func TestLSPPageRemoveServerClearsLegacy(t *testing.T) {
 		contracts.SettingLSPServer:  `{"command":"legacy"}`,
 	})
 	h, tester := lspPage(t, store)
-	h.click(tester, "移除") // opens the confirmation for the first server (go)
+	h.click(tester, "服务器操作") // opens the first server's (go) row menu
+	h.click(tester, "移除")    // opens the confirmation for go
 	h.click(tester, "移除服务器")
 
 	servers := storedLSPServers(t, store)

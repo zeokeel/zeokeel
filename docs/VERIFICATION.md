@@ -781,3 +781,14 @@ v0.2.12 的 package-macos job 在 GitHub Ubuntu runner 上构建 libdmg-hfsplus 
 - 删除单独的 `build-macos` job 和 upload/download artifact 往返：`package-macos`（`ubuntu-24.04`）现在先执行 `mygo build -platform darwin/arm64`，再在同一 job 内生成 dmg、签名、公证、staple；同一系统版本没必要拆两个 runner。
 - 不再发布 `zeokeel-<version>-darwin-arm64.tar.gz`；macOS 资产只有签名+公证的 `zeokeel-<version>-arm64.dmg`。更新器的 archive 兼容逻辑保留用于旧 release。
 - `publish` 需要 `package-macos`/`build-windows`/`build-linux`；macOS job 仍 optional（失败时 Windows/Linux 正常发布，只是没有 macOS 资产）。
+
+## 0.2.19（2026-11-11：交互与视觉审计全量落地）
+
+- **来源**：[docs/UI-AUDIT-2026-11-11.md](UI-AUDIT-2026-11-11.md)（审计 v0.2.18：P1×3 / P2×15 / P3×16 + 统一设计语言 v2）。用户接受全部建议后，按 P1 → P2 → P3 → v2 顺序实现；审计报告新增 §10 修复状态与验收闭环。
+- **实现要点**：
+  - 安全：`uikit.ConfirmDanger`（取消 Default、危险非 Default）迁移 14 处危险确认；审批 Esc 提升到窗口作用域；审批摘要 fallback。
+  - 交互：设置搜索别名（`settingsPageKeywords`）、窄窗抽屉让宽 + elevation、运行态键位提示、粘贴图片附件（session/Home）、palette 一次 Esc、侧栏折叠展开按钮、搜索命中高亮、导入三态、热键录入首屏、模型页保存语义拆分、固定「会话设置」chip、零值入口隐藏、团队任务短 ID/owner、@ 错误本地化恢复。
+  - 视觉 v2：选择态两级（tint + 2px Accent 条 / 瞬态 accent 填充）、强调色预算、StatusBadge 统一、高度 32/36/40/44（删 38）、圆角语义、暗色 surface ramp（导航下沉）、Segmented 选中、MarkdownDoc、tab 下划线、列表去卡墙、顶带统一（automation/plugins）、属性表、toast 骨架、ControlChip、DisabledPrimary。
+  - 契约：`AGENTS.md`（危险默认/预算/选择态/字号度量/主操作落点）、`docs/DESIGN.md`（§5.1 surface ramp、§5.3 字号规则、§5.4 度量、§5.5 预算、§6 预设/组合、AP-19..AP-25）、`docs/DESIGN-LINT.md`（DS-11..DS-16）、`internal/design/registry.json`（新组件 + AP）。
+- **验证**：`go test ./... -count=1` 全绿（含 regression / uimodtest / design 契约测试）；`gofmt -l internal cmd` 空；`go build ./...`、`go vet ./...`、`go tool mygo vet .` 干净；`designlint --strict --baseline` **0 error / 0 warn / 0 new / 0 blocking**；`scripts/design-check.sh` 6/6 PASS；`ui-snapshot` 96 PNG（`.cache/fix-final/shots/`）；`ui-drive` **91/91 PASS**（`.cache/fix-final/drive/drive-report.md`）。
+- **已知残余**：toast 堆叠时第二条仍可能短暂覆盖 transcript 右上 meta（4s、指针穿透）；会话记忆行与设置记忆行仍两套行尾操作（V22，下一轮抽 `uikit.ListRow`）；全仓 11px 静态审计（DS-15 AST）、设置对话框标题全量统一（V9）、1024+抽屉顶带重排（V27）列为后续增量；640×480 低于产品最小窗，设置 footer 仅记录；暗色会话 transcript/工具卡未逐帧覆盖，依赖 token 测试与浅色对照；Home 粘贴图片钩子已接，真实桌面剪贴板未真机验证。

@@ -5,12 +5,14 @@ package settings_test
 // combination with the page's save action and the English copy.
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/egoist/mygo/ui"
 
 	"github.com/zeokeel/zeokeel/internal/contracts"
 	"github.com/zeokeel/zeokeel/internal/ui/settings"
+	"github.com/zeokeel/zeokeel/internal/uikit"
 )
 
 func TestAppearanceGlobalHotkeyDefaultsEmpty(t *testing.T) {
@@ -20,8 +22,13 @@ func TestAppearanceGlobalHotkeyDefaultsEmpty(t *testing.T) {
 	h.click(tester, "模型")
 	h.click(tester, "外观")
 
-	h.assertTexts(tester, "全局热键", "组合键 输入",
-		"留空关闭", "按「录入」直接按组合键", "修改后重启应用生效")
+	h.assertTexts(tester, "全局热键", "组合键 输入", "录入")
+	joined := strings.Join(tester.Texts(), " ")
+	for _, want := range []string{"留空关闭", "直接按组合键", "点页脚「应用」并重启后生效"} {
+		if !strings.Contains(joined, want) {
+			t.Fatalf("hotkey help does not mention %q; texts = %v", want, tester.Texts())
+		}
+	}
 }
 
 func TestAppearanceGlobalHotkeySavesTrimmedValue(t *testing.T) {
@@ -56,7 +63,10 @@ func TestAppearanceGlobalHotkeyRejectsInvalidValue(t *testing.T) {
 	tester.Frame()
 	h.click(tester, "应用")
 
-	h.assertTexts(tester, "保存失败：", "全局热键格式无效")
+	h.assertTexts(tester, "全局热键格式无效")
+	if !strings.Contains(strings.Join(tester.Texts(), " "), "保存失败：") {
+		t.Fatalf("invalid apply does not report the failure; texts = %v", tester.Texts())
+	}
 	if got := store.get(contracts.SettingGlobalHotkey); got != "" {
 		t.Fatalf("%s = %q after an invalid accelerator, want it unwritten", contracts.SettingGlobalHotkey, got)
 	}
@@ -80,8 +90,13 @@ func TestAppearanceGlobalHotkeyEnglish(t *testing.T) {
 	h.click(tester, "Model")
 	h.click(tester, "Appearance")
 
-	h.assertTexts(tester, "Global hotkey", "Shortcut input",
-		"Leave empty to disable", "press Record and press the keys", "takes effect after restart")
+	h.assertTexts(tester, "Global hotkey", "Shortcut input", "Record")
+	joined := strings.Join(tester.Texts(), " ")
+	for _, want := range []string{"Leave empty to disable", "Press Record and press the combination", "after Apply and a restart"} {
+		if !strings.Contains(joined, want) {
+			t.Fatalf("hotkey help does not mention %q; texts = %v", want, tester.Texts())
+		}
+	}
 	h.focusInput(tester, "Shortcut input")
 	tester.Type("CmdOrCtrl+Shift+Space")
 	tester.Frame()
@@ -106,7 +121,7 @@ func TestHotkeyRecordCapture(t *testing.T) {
 	tester.Key(ui.Cmd|ui.Shift, ui.KeyK)
 	tester.Frame()
 	h.assertNoTexts(tester, "按下组合键，Esc 取消")
-	h.assertTexts(tester, "Cmd/Ctrl + Shift + K", "未应用")
+	h.assertTexts(tester, uikit.FormatShortcut("cmdorctrl+shift+k"), "未应用")
 	h.click(tester, "应用")
 	if got := store.get(contracts.SettingGlobalHotkey); got != "CmdOrCtrl+Shift+K" {
 		t.Fatalf("recorded hotkey = %q, want CmdOrCtrl+Shift+K", got)
@@ -130,7 +145,7 @@ func TestHotkeyPresetChips(t *testing.T) {
 	tester := h.tester()
 	tester.Frame()
 	h.click(tester, "外观")
-	h.click(tester, "Cmd/Ctrl + Alt + Space")
+	h.click(tester, uikit.FormatShortcut("cmdorctrl+alt+space"))
 	h.assertTexts(tester, "未应用")
 	h.click(tester, "应用")
 	if got := store.get(contracts.SettingGlobalHotkey); got != "CmdOrCtrl+Alt+Space" {

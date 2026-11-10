@@ -171,11 +171,11 @@ func TestAgentPresetPickerUI(t *testing.T) {
 	harness.h.push(sessionui.ScreenID)
 	tester := harness.h.tester(1280, 800)
 	tester.Frame()
-	// The persona picker lives in the single session menu (its default label is
-	// the quiet workspace permission context).
-	requireHasText(t, tester, "工作区可写")
+	// The persona picker lives in the single session menu; the chip label is the
+	// stable destination name (会话设置), never the drifting permission state.
+	requireHasText(t, tester, "会话设置")
 
-	if err := tester.Click("工作区可写"); err != nil {
+	if err := tester.Click("会话设置"); err != nil {
 		t.Fatalf("open session menu: %v; texts = %v", err, tester.Texts())
 	}
 	tester.Frame()
@@ -194,7 +194,7 @@ func TestAgentPresetPickerUI(t *testing.T) {
 		t.Fatalf("selected preset = %q, want alpha", got)
 	}
 
-	if err := tester.Click("工作区可写"); err != nil {
+	if err := tester.Click("会话设置"); err != nil {
 		t.Fatalf("reopen session menu: %v; texts = %v", err, tester.Texts())
 	}
 	tester.Frame()

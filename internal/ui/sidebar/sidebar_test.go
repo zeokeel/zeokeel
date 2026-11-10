@@ -545,13 +545,13 @@ func TestSidebarSearchFiltersSessions(t *testing.T) {
 	clearTextField(t, tester, "搜索会话与消息")
 	tester.Type("zzz")
 	tester.Frame()
-	h.assertTexts(tester, "没有匹配的会话")
+	h.assertTexts(tester, "没有匹配")
 	h.assertNoTexts(tester, "Project Alpha", "Beta Notes", "Gamma")
 
 	// Clearing the query restores every session.
 	clearTextField(t, tester, "搜索会话与消息")
 	h.assertTexts(tester, "Project Alpha", "Beta Notes", "Gamma")
-	h.assertNoTexts(tester, "没有匹配的会话")
+	h.assertNoTexts(tester, "没有匹配")
 }
 
 func TestSidebarSearchMatchesUntitledSessions(t *testing.T) {

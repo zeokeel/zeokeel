@@ -210,6 +210,20 @@ type state struct {
 	mentionErr   error
 	mentionQuery string
 	mentionFresh bool
+	// mentionNoWorkspace marks the normal "this conversation has no workspace"
+	// state (as opposed to a read failure): the @ menu explains it and offers
+	// the open/create recovery actions instead of showing a raw English error.
+	mentionNoWorkspace bool
+	// mentionWorkspaces caches the registered workspaces while no workspace is
+	// current, so the menu's 打开工作区 action can list them without a read in
+	// the frame.
+	mentionWorkspaces []contracts.Workspace
+	// mentionActionErr is a failed open/create-workspace action, shown inside
+	// the @ menu's recovery block (never a raw read error).
+	mentionActionErr string
+	// workspaceBusy is true while the native folder picker for 新建工作区 is
+	// open; a second click is ignored.
+	workspaceBusy bool
 
 	// Export state: the last export error shown under the session header.
 	// Successes are transient host toasts, never a permanent header badge.

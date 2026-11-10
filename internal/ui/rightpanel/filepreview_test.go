@@ -94,7 +94,7 @@ func TestOpenFilesAndOpenTerminalFocusPages(t *testing.T) {
 		t.Fatalf("OpenTerminal: %v", err)
 	}
 	tester.Frame()
-	h.assertTexts(tester, "终端未启用")
+	h.assertTexts(tester, "命令未启用")
 }
 
 // TestOpenNativeResolvesWorkspaceRelativePath: the native launch action takes

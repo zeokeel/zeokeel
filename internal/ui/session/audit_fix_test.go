@@ -287,7 +287,10 @@ func TestPopoversCloseOnSessionSwitch(t *testing.T) {
 		Messages: []contracts.ChatMessage{{ID: "u2", Role: contracts.ChatRoleUser, Text: "另一个问题"}},
 	}, false)
 	h := newAgentSurfaceHarness(t, chat, agentServices{
-		team: &fakeTeam{}, children: childAgentsFixture(),
+		team: &fakeTeam{members: []contracts.TeamMember{
+			{ID: "member-1", Name: "评审员", RunState: contracts.TeamRunIdle},
+		}},
+		children: childAgentsFixture(),
 	})
 	tester := h.tester()
 	tester.Frame()

@@ -301,40 +301,36 @@ func TestHeaderAgentEntriesHiddenWithoutBackends(t *testing.T) {
 	h.assertNoTexts(tester, "智能体团队", "子智能体", "个后台任务")
 }
 
-// TestJobsChipShownAtZero covers the jobs chip's zero state: the entry is
-// always present when the backend exists (so the feature stays discoverable),
-// and the overlay explains that no job has started yet.
-func TestJobsChipShownAtZero(t *testing.T) {
+// TestJobsChipHiddenAtZero covers R15: a zero job count renders no header chip
+// (the chip is a notification of real work, not a permanent zero badge), while
+// the team entry stays for discoverability.
+func TestJobsChipHiddenAtZero(t *testing.T) {
 	h := newAgentSurfaceHarness(t, headerChat("无任务"), agentServices{jobs: &fakeJobs{}})
 	tester := h.tester()
 	tester.Frame()
-	h.assertTexts(tester, "0 个后台任务")
-	h.click(tester, "0 个后台任务")
-	h.assertTexts(tester, "后台任务", "暂无后台任务。job_start 启动的后台任务会出现在这里。")
+	h.assertTexts(tester, "无任务")
+	h.assertNoTexts(tester, "个后台任务", "智能体团队")
 }
 
-// TestSubagentChipShownAtZero covers the subagent chip's zero state: the entry
-// is always present when the backend exists, and the switcher explains the
-// empty state instead of rendering a blank popover.
-func TestSubagentChipShownAtZero(t *testing.T) {
+// TestSubagentChipHiddenAtZero covers R15: with no child conversations the
+// 子智能体 chip is gone instead of sitting at zero and squeezing the title.
+func TestSubagentChipHiddenAtZero(t *testing.T) {
 	h := newAgentSurfaceHarness(t, headerChat("无子代理"), agentServices{children: &fakeChildAgents{}})
 	tester := h.tester()
 	tester.Frame()
-	h.assertTexts(tester, "子智能体 0")
-	h.click(tester, "子智能体 0")
-	h.assertTexts(tester, "子智能体会话", "还没有子智能体。子代理/队友启动后会出现在这里。")
+	h.assertTexts(tester, "无子代理")
+	h.assertNoTexts(tester, "子智能体")
 }
 
-// TestTeamEntryShownWithEmptyTeam covers the team entry's discovery role: the
-// host that provides the team backend keeps the entry even while the team is
-// empty (the overlay explains the empty state).
-func TestTeamEntryShownWithEmptyTeam(t *testing.T) {
+// TestTeamEntryHiddenWithEmptyTeam covers the subtraction pass: an empty team
+// no longer leaves a permanent zero entry over every conversation; the feature
+// is reachable from the command palette until a team exists.
+func TestTeamEntryHiddenWithEmptyTeam(t *testing.T) {
 	h := newAgentSurfaceHarness(t, headerChat("空团队"), agentServices{team: &fakeTeam{}})
 	tester := h.tester()
 	tester.Frame()
-	h.assertTexts(tester, "智能体团队")
-	h.click(tester, "智能体团队")
-	h.assertTexts(tester, "成员", "还没有队友", "共享任务")
+	h.assertNoTexts(tester, "智能体团队")
+	h.assertTexts(tester, "空团队")
 }
 
 // TestHeaderChipsCompactAtNarrowWidth covers the narrow band: the entries keep

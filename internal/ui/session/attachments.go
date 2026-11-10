@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/egoist/mygo"
+	"github.com/egoist/mygo/transfer"
 	"github.com/egoist/mygo/ui"
 
 	"github.com/zeokeel/zeokeel/internal/contracts"
@@ -102,6 +103,59 @@ func stageAttachmentFiles(st *state, paths []string) {
 		}
 		st.pendingAttachments = append(st.pendingAttachments, attachment)
 	}
+}
+
+// pasteClipboardImage stages the clipboard image as a composer attachment (R18):
+// mygo's paste hook sees an empty text for an image, so the composer asks here
+// instead of silently doing nothing. A clipboard without an image gets a
+// one-line hint that the attach menu and drag-and-drop are the supported paths,
+// never a fake success.
+func pasteClipboardImage(st *state, runtime contracts.UIRuntime, services ui.Services) bool {
+	if st.attachBusy {
+		return false
+	}
+	data, err := services.ReadClipboardData(transfer.PNG).Read(transfer.PNG)
+	if err != nil || len(data) == 0 {
+		st.toast(contracts.NotifyInfo, st.tr(
+			"剪贴板里没有图片；请用「附件」或拖拽添加图片",
+			"No image on the clipboard; use Attach or drag an image in"))
+		runtime.Invalidate()
+		return true
+	}
+	stageClipboardImage(st, data)
+	runtime.Invalidate()
+	return true
+}
+
+// stageClipboardImage appends one decoded clipboard PNG to the staged
+// attachments through the same rules as a picked file: the size cap, the cached
+// thumbnail (decoded here, never in the frame) and the localized error line.
+func stageClipboardImage(st *state, data []byte) {
+	if len(data) == 0 {
+		return
+	}
+	if len(data) > maxAttachmentBytes {
+		st.attachErr = st.tr("粘贴的图片超过 10 MB 附件上限",
+			"The pasted image exceeds the 10 MB attachment limit")
+		return
+	}
+	st.attachSeq++
+	attachment := contracts.Attachment{
+		ID:   fmt.Sprintf("att-%d", st.attachSeq),
+		Name: fmt.Sprintf("pasted-image-%d.png", st.attachSeq),
+		MIME: "image/png",
+		Data: data,
+	}
+	// Decode the preview now, while the bytes are already in hand: the frame
+	// builder must never decode an image.
+	if bitmap, err := decodeAttachmentThumbnail(attachment); err == nil && bitmap != nil {
+		if st.thumbnails == nil {
+			st.thumbnails = make(map[string]*ui.Bitmap)
+		}
+		st.thumbnails[attachment.ID] = bitmap
+	}
+	st.attachErr = ""
+	st.pendingAttachments = append(st.pendingAttachments, attachment)
 }
 
 // startAttachmentPick opens the native file picker off the UI thread and
@@ -355,8 +409,7 @@ func buildMessageAttachments(c *ui.Context, t *design.Tokens, st *state, attachm
 func buildAttachmentChip(c *ui.Context, t *design.Tokens, st *state, attachment contracts.Attachment, removable bool, onRemove func()) {
 	th := t.Theme()
 	key := "session.attachment." + attachment.ID
-	chip := design.Apply(ui.Row(c.Key(key)), t.Panel()).
-		Padding(design.Space1, design.Space2).Gap(design.Space1).
+	chip := design.Apply(ui.Row(c.Key(key)), t.ControlChip()).
 		AlignItems(ui.Center).Shrink(0).Label(attachment.Name)
 	chip.Children(func() {
 		if bitmap := st.attachmentThumbnail(attachment); bitmap != nil {
@@ -377,15 +430,15 @@ func buildAttachmentChip(c *ui.Context, t *design.Tokens, st *state, attachment 
 				TextColor(t.LabelTertiary).NoWrap()
 		}
 		if removable {
-			remove := ui.Button(c, "").Label(st.tr("移除附件 ", "Remove attachment ")+attachment.Name).
-				Tooltip(st.tr("移除附件", "Remove attachment")).Size(th.Space(5), th.Space(5)).
-				PaddingX(0).Radius(design.RadiusSM).TextColor(t.LabelSecondary)
-			remove.Children(func() {
-				ui.Icon(c, icons.Close()).Size(design.Space3, design.Space3).TextColor(t.LabelSecondary)
+			// The one icon-button entry component keeps the 24 DIP minimum hit
+			// target (AP-17); the old 20 DIP close button was below it (P3-10).
+			uikit.IconButton(c, uikit.IconButtonOptions{
+				Label:   st.tr("移除附件 ", "Remove attachment ") + attachment.Name,
+				Tooltip: st.tr("移除附件", "Remove attachment"),
+				Icon:    icons.Close(),
+				Size:    design.IconSizeS,
+				OnClick: onRemove,
 			})
-			if remove.Clicked() && onRemove != nil {
-				onRemove()
-			}
 		}
 	})
 }

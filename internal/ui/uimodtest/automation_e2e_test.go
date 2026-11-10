@@ -124,12 +124,23 @@ func TestAutomationTasksEndToEnd(t *testing.T) {
 	}
 	tester := ui.NewTester(uiRoot.View, 1280, 800)
 	tester.Frame()
-	// H11: schedules render human-readable, and cards expose Edit.
-	for _, want := range []string{"自动化", "每日摘要", "工具任务", "每 60 秒", "立即运行", "编辑", "删除"} {
+	// H11: schedules render human-readable, and cards expose Edit. Delete is a
+	// danger action behind the row's ⋯ menu now (R1 danger budget), not a
+	// standing red button on every card.
+	for _, want := range []string{"自动化", "每日摘要", "工具任务", "每 60 秒", "立即运行", "编辑"} {
 		if !tester.HasText(want) {
 			t.Fatalf("automation frame missing %q; texts = %v", want, tester.Texts())
 		}
 	}
+	if err := tester.Click("任务操作"); err != nil {
+		t.Fatalf("open task actions menu: %v; texts = %v", err, tester.Texts())
+	}
+	tester.Frame()
+	if !tester.HasText("删除任务") {
+		t.Fatalf("task actions menu missing the danger delete; texts = %v", tester.Texts())
+	}
+	tester.Key(0, ui.KeyEscape)
+	tester.Frame()
 	if tester.HasText("every 60s") {
 		t.Fatalf("automation frame still shows the raw schedule; texts = %v", tester.Texts())
 	}

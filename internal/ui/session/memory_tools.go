@@ -46,13 +46,15 @@ func buildMemoryTools(c *ui.Context, t *design.Tokens, runtime contracts.UIRunti
 			runtime.Invalidate()
 		}
 	})
-	buildMemoryConfirmDialog(c, t, runtime, store, st)
-	buildMemoryClearDialog(c, t, runtime, store, st)
+	buildMemoryConfirmDialog(c, runtime, store, st)
+	buildMemoryClearDialog(c, runtime, store, st)
 }
 
-// buildMemoryConfirmDialog is the native confirmation of the memory
-// management's destructive actions: the duplicate tidy and one entry's delete.
-func buildMemoryConfirmDialog(c *ui.Context, t *design.Tokens, runtime contracts.UIRuntime,
+// buildMemoryConfirmDialog is the confirmation of the memory management's
+// destructive actions: the duplicate tidy and one entry's delete. It uses the
+// shared ConfirmDanger dialog (Cancel is the Default, the destructive action is
+// never) so a stray Enter cancels instead of deleting (DESIGN.md AP-12).
+func buildMemoryConfirmDialog(c *ui.Context, runtime contracts.UIRuntime,
 	store contracts.MemoryStore, st *state) {
 	if st.memoryConfirm == "" {
 		return
@@ -72,12 +74,18 @@ func buildMemoryConfirmDialog(c *ui.Context, t *design.Tokens, runtime contracts
 			"Delete this memory? This cannot be undone.")
 		confirm = st.tr("删除", "Delete")
 	}
-	switch ui.AlertDialog(c, &open, title, message, st.tr("取消", "Cancel"), confirm) {
-	case 1:
-		if action == "tidy" {
-			tidyMemories(store, st)
-			runtime.Invalidate()
-		} else {
+	uikit.ConfirmDanger(c, &open, uikit.ConfirmDangerOptions{
+		Key:     "session.memory.confirm." + action,
+		Title:   title,
+		Message: message,
+		Confirm: confirm,
+		Cancel:  st.tr("取消", "Cancel"),
+		OnConfirm: func() {
+			if action == "tidy" {
+				tidyMemories(store, st)
+				runtime.Invalidate()
+				return
+			}
 			// Keep the full entry so the success toast's Undo can Add it back.
 			var removed contracts.Memory
 			for _, entry := range st.memories {
@@ -88,8 +96,8 @@ func buildMemoryConfirmDialog(c *ui.Context, t *design.Tokens, runtime contracts
 			}
 			removeMemory(store, st, removed, action)
 			runtime.Invalidate()
-		}
-	}
+		},
+	})
 	if !open {
 		st.memoryConfirm = ""
 	}
@@ -206,27 +214,25 @@ func clearMemories(store contracts.MemoryStore, st *state) {
 		})
 }
 
-// buildMemoryClearDialog is the native clear-all confirmation.
-func buildMemoryClearDialog(c *ui.Context, t *design.Tokens, runtime contracts.UIRuntime,
+// buildMemoryClearDialog is the clear-all confirmation, through the shared
+// ConfirmDanger dialog: Cancel is the Default and the destructive clear never
+// is (DESIGN.md AP-12).
+func buildMemoryClearDialog(c *ui.Context, runtime contracts.UIRuntime,
 	store contracts.MemoryStore, st *state) {
 	if !st.memoryClearOpen {
 		return
 	}
-	message := st.tr("确认删除全部记忆吗？此操作无法撤销。",
-		"Delete all memories? This cannot be undone.")
-	// mygo's AlertDialog returns -1 while the alert is still showing; asking for
-	// a frame in that case would redraw on every frame for as long as the
-	// confirmation stays open. A frame is only needed once a button (0/1) or
-	// Escape (ui.AlertDismissed) actually closed it.
-	switch ui.AlertDialog(c, &st.memoryClearOpen,
-		st.tr("清空记忆", "Clear memories"), message,
-		st.tr("取消", "Cancel"), st.tr("清空", "Clear")) {
-	case 1:
-		clearMemories(store, st)
-		runtime.Invalidate()
-	case 0, ui.AlertDismissed:
-		runtime.Invalidate()
-	}
+	uikit.ConfirmDanger(c, &st.memoryClearOpen, uikit.ConfirmDangerOptions{
+		Key:     "session.memory.clear",
+		Title:   st.tr("清空记忆", "Clear memories"),
+		Message: st.tr("确认删除全部记忆吗？此操作无法撤销。", "Delete all memories? This cannot be undone."),
+		Confirm: st.tr("清空", "Clear"),
+		Cancel:  st.tr("取消", "Cancel"),
+		OnConfirm: func() {
+			clearMemories(store, st)
+			runtime.Invalidate()
+		},
+	})
 }
 
 // buildMemoryEditDialog is the native editor for one memory entry: it updates
@@ -308,7 +314,7 @@ func memoryRow(c *ui.Context, t *design.Tokens, runtime contracts.UIRuntime,
 			if _, editable := store.(contracts.MemoryUpdater); editable {
 				edit := ui.Button(c, "").Label(st.tr("编辑记忆", "Edit memory")).
 					Tooltip(st.tr("编辑这条记忆", "Edit this memory")).
-					Size(th.Space(6), th.Space(6)).PaddingX(0).Radius(design.RadiusSM)
+					Size(th.Space(6), th.Space(6)).PaddingX(design.Space0).Radius(design.RadiusSM)
 				edit.Children(func() {
 					ui.Icon(c, icons.Pencil()).Size(design.Space3, design.Space3).
 						TextColor(t.LabelTertiary)
@@ -323,7 +329,7 @@ func memoryRow(c *ui.Context, t *design.Tokens, runtime contracts.UIRuntime,
 			}
 			remove := ui.Button(c, "").Label(st.tr("删除记忆", "Delete memory")).
 				Tooltip(st.tr("删除这条记忆", "Delete this memory")).
-				Size(th.Space(6), th.Space(6)).PaddingX(0).Radius(design.RadiusSM)
+				Size(th.Space(6), th.Space(6)).PaddingX(design.Space0).Radius(design.RadiusSM)
 			remove.Children(func() {
 				ui.Icon(c, icons.Trash()).Size(design.Space3, design.Space3).TextColor(t.LabelTertiary)
 			})

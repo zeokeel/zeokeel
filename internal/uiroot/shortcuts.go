@@ -195,6 +195,67 @@ func (r *Root) togglePalette() {
 	r.requestFrame()
 }
 
+// closePalette dismisses the command palette and forgets its transient query,
+// filter and choice, so the next opening starts clean. It is the one close path
+// shared by the palette button, Escape and the root shortcut.
+func (r *Root) closePalette() {
+	if !r.paletteOpen {
+		return
+	}
+	r.paletteOpen = false
+	r.paletteQuery = ""
+	r.paletteFilter = ""
+	r.paletteSelected = 0
+	r.paletteCount = 0
+	r.requestFrame()
+}
+
+// escapeFallback is the window-level Escape. Screen-level handlers (the
+// composer's stop key, the approval card's deny key, menus, dialogs and the
+// inspector drawer) take Escape first when their scope holds the focus. When
+// the focus sits outside the conversation — the sidebar footer after closing
+// settings, say — those handlers never see the key, so the key that the
+// approval card promises ("Esc 拒绝") would silently do nothing. This fallback
+// keeps the promise: deny the oldest pending approval, else stop the running
+// turn, but only on the conversation screen with no modal surface open (R4).
+func (r *Root) escapeFallback() {
+	if r.nav == nil || r.nav.Current() != sessionScreenID {
+		return
+	}
+	if r.paletteOpen || r.inspectorDrawerShown || r.nav.SettingsOpen() {
+		return
+	}
+	r.mu.Lock()
+	kernel := r.kernelContext
+	chat := r.chatService
+	r.mu.Unlock()
+	if approvals, ok := kernel.Get(contracts.KeyApprovals); ok {
+		if pending := approvals.Pending(); len(pending) > 0 {
+			if err := approvals.Resolve(pending[0].ID, contracts.ApprovalDeny); err == nil {
+				r.requestFrame()
+			}
+			return
+		}
+	}
+	if chat == nil {
+		if fromKernel, ok := kernel.Get(contracts.KeyChat); ok {
+			chat = fromKernel
+		}
+	}
+	if chat == nil {
+		return
+	}
+	id := chat.ActiveSession()
+	if id == "" {
+		return
+	}
+	if session, ok := chat.Session(id); ok && session.Running {
+		if err := chat.Cancel(id); err == nil {
+			r.requestFrame()
+		}
+	}
+}
+
 // bindChromeShortcuts registers the two configurable chrome shortcuts from the
 // host settings (falling back to the documented defaults) plus the built-in
 // Cmd/Ctrl+N and Cmd/Ctrl+, actions. It runs every frame, so a settings change
@@ -247,6 +308,12 @@ func (r *Root) bindChromeShortcuts(c *ui.Context) {
 	// Built-in window shortcuts (not configurable): new session and settings.
 	c.OnShortcut(ui.Cmd, ui.KeyN, r.newSessionShortcut)
 	c.OnShortcut(ui.Cmd, ui.KeyComma, r.settingsShortcut)
+
+	// Escape keeps the conversation's safe-action promise even when the focus
+	// is outside the conversation (the sidebar footer, a tree row): deny the
+	// oldest approval, else stop the running turn. Open modals and overlays
+	// consume Escape in their own scopes first (R4).
+	c.OnShortcut(0, ui.KeyEscape, r.escapeFallback)
 }
 
 // runCommandByID runs one registered command by id, if it exists and is

@@ -1,7 +1,7 @@
 package rightpanel_test
 
 // Frame tests for the right sidebar tab strip: the fixed pages (开始/文件/
-// 终端), one tab per opened file, switching, closing and overflow, plus the
+// 命令), one tab per opened file, switching, closing and overflow, plus the
 // removal of the old 8-pane inspector and its cycle commands.
 
 import (
@@ -12,6 +12,7 @@ import (
 	"github.com/egoist/mygo/ui"
 
 	"github.com/zeokeel/zeokeel/internal/contracts"
+	"github.com/zeokeel/zeokeel/internal/design"
 )
 
 // TestOldInspectorPanesAreGone: the 8-pane inspector (overview/tools/log/
@@ -21,7 +22,7 @@ func TestOldInspectorPanesAreGone(t *testing.T) {
 	workspace.setCurrent()
 	h := newHarness(t, harnessOptions{Workspace: workspace})
 	tester := h.tester()
-	h.assertTexts(tester, "开始", "文件", "终端")
+	h.assertTexts(tester, "开始", "文件", "命令")
 	h.assertNoTexts(tester, "概览", "工具", "日志", "变更", "团队", "任务", "切换面板", "检查器")
 
 	ids := make(map[string]bool)
@@ -50,7 +51,7 @@ func TestFileTabOpensFromWorkspaceTree(t *testing.T) {
 	h.assertTexts(tester, "README.md")
 	h.click(tester, "README.md")
 	h.assertTexts(tester, "关闭 README.md", "项目说明")
-	h.assertTexts(tester, "开始", "文件", "终端")
+	h.assertTexts(tester, "开始", "文件", "命令")
 }
 
 // TestFileTabSwitchAndClose: each opened file is one tab; switching back shows
@@ -81,7 +82,7 @@ func TestFileTabSwitchAndClose(t *testing.T) {
 	h.assertTexts(tester, "乙文件")
 	h.closeFileTab(tester, "b.md")
 	h.assertNoTexts(tester, "关闭 b.md")
-	h.assertTexts(tester, "开始", "文件", "终端")
+	h.assertTexts(tester, "开始", "文件", "命令")
 }
 
 // TestFileTabsFocusExistingTab: opening an already open file focuses its tab
@@ -119,7 +120,7 @@ func TestFileTabsAreClosableButPagesAreNot(t *testing.T) {
 	h.openPage(tester, "文件")
 	h.click(tester, "a.md")
 	tester.Frame()
-	for _, fixed := range []string{"关闭 开始", "关闭 文件", "关闭 终端"} {
+	for _, fixed := range []string{"关闭 开始", "关闭 文件", "关闭 命令"} {
 		if tester.HasText(fixed) {
 			t.Fatalf("fixed page has a close control (%q); texts = %v", fixed, tester.Texts())
 		}
@@ -175,8 +176,8 @@ func TestPageCommands(t *testing.T) {
 	if terminal.Shortcut != "Ctrl+`" {
 		t.Fatalf("terminal command shortcut = %q, want Ctrl+`", terminal.Shortcut)
 	}
-	if !strings.Contains(terminal.Hint, "终端") || !strings.Contains(terminal.Title, "终端") {
-		t.Fatalf("terminal command = %+v, want 终端 in title/hint", terminal)
+	if !strings.Contains(terminal.Hint, "命令") || !strings.Contains(terminal.Title, "命令") {
+		t.Fatalf("terminal command = %+v, want 命令 in title/hint", terminal)
 	}
 	if files.Run == nil || terminal.Run == nil {
 		t.Fatal("page commands have no Run")
@@ -195,7 +196,7 @@ func TestPageCommands(t *testing.T) {
 		t.Fatalf("run terminal command: %v", err)
 	}
 	tester.Frame()
-	h.assertTexts(tester, "终端未启用")
+	h.assertTexts(tester, "命令未启用")
 }
 
 // TestTabStripKeyboard: the native tab list keeps the arrows/Home/End
@@ -211,5 +212,73 @@ func TestTabStripKeyboard(t *testing.T) {
 	h.assertTexts(tester, "工作区未启用")
 	tester.Key(0, ui.KeyLeft)
 	tester.Frame()
-	h.assertTexts(tester, "工作区文件", "新建终端")
+	h.assertTexts(tester, "工作区文件", "命令运行")
+}
+
+// TestViewAndDocumentTabsAreSeparateRows pins the V10 tab model: the fixed
+// view pages (underline strip) and the opened file documents are two separate
+// rows — a document tab never shares the view row.
+func TestViewAndDocumentTabsAreSeparateRows(t *testing.T) {
+	workspace := newFakeWorkspace()
+	workspace.setCurrent()
+	workspace.setDir("", fileEntry("README.md", false))
+	workspace.setFile("README.md", []byte("# 项目说明\n"))
+	h := newHarness(t, harnessOptions{Workspace: workspace})
+	tester := h.tester()
+
+	h.openPage(tester, "文件")
+	h.click(tester, "README.md")
+	tester.Frame()
+
+	view, ok := tester.Find("开始")
+	if !ok {
+		t.Fatalf("view tab row missing; texts = %v", tester.Texts())
+	}
+	doc, ok := tester.Find("关闭 README.md")
+	if !ok {
+		t.Fatalf("document tab row missing; texts = %v", tester.Texts())
+	}
+	if doc.Y <= view.Y {
+		t.Fatalf("document tab Y = %.1f, want it on its own row below the view tabs at %.1f", doc.Y, view.Y)
+	}
+}
+
+// TestTabUnderlineVocabulary pins the underline tab language: the chosen tab
+// carries a 2 DIP Accent underline at the bottom of its 32 DIP row, and the
+// resting tabs reserve that line without painting it.
+func TestTabUnderlineVocabulary(t *testing.T) {
+	h := newHarness(t, harnessOptions{})
+	tester := h.tester()
+	tester.Frame()
+	if err := tester.Click("文件"); err != nil {
+		t.Fatalf("click files tab: %v", err)
+	}
+	tester.Frame()
+
+	active, ok := tester.Find("文件")
+	if !ok {
+		t.Fatalf("active tab label missing; texts = %v", tester.Texts())
+	}
+	resting, ok := tester.Find("开始")
+	if !ok {
+		t.Fatalf("resting tab label missing; texts = %v", tester.Texts())
+	}
+	img := tester.Image()
+	// The label is centered in the 32 DIP tab; the underline is the tab's
+	// bottom 2 DIP border.
+	underlineY := int(active.Y+active.H/2-16) + 31
+	x := int(active.X) + 2
+	r, g, b, _ := img.At(x, underlineY).RGBA()
+	got := [3]uint32{r >> 8, g >> 8, b >> 8}
+	accent := design.Light().Accent
+	if got != [3]uint32{uint32(accent.R), uint32(accent.G), uint32(accent.B)} {
+		t.Fatalf("active tab underline = #%02x%02x%02x at (%d,%d), want the accent",
+			got[0], got[1], got[2], x, underlineY)
+	}
+	rx := int(resting.X) + 2
+	r, g, b, _ = img.At(rx, underlineY).RGBA()
+	restingLine := [3]uint32{r >> 8, g >> 8, b >> 8}
+	if restingLine == got {
+		t.Fatalf("resting tab paints the accent underline at (%d,%d); the line must be reserved, not painted", rx, underlineY)
+	}
 }

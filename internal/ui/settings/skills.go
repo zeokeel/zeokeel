@@ -12,6 +12,7 @@ import (
 
 	"github.com/zeokeel/zeokeel/internal/contracts"
 	"github.com/zeokeel/zeokeel/internal/design"
+	"github.com/zeokeel/zeokeel/internal/icons"
 	"github.com/zeokeel/zeokeel/internal/uikit"
 )
 
@@ -120,9 +121,36 @@ func buildSkillsPage(c *ui.Context, t *design.Tokens, kctx cordis.Context, st *s
 
 		if len(st.roots) > 0 {
 			uikit.Section(c, localized(locale, "扫描目录", "Scanned directories"), func(*ui.Context) {
+				// Each root names its scope and offers to open it in the file
+				// manager; the absolute path stays in the row (mono, ellipsized)
+				// and in its tooltip, so "two bare paths" become actionable rows
+				// (B19).
 				for _, root := range st.roots {
-					design.Apply(ui.Text(c, root), t.Font(design.TypeXXXS), t.MonoFamily()).
-						TextColor(t.LabelTertiary).MaxLines(2)
+					root := root
+					scopeZh, scopeEn := skillRootScope(kctx, root)
+					ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(design.Space2).Children(func() {
+						design.Apply(ui.Text(c, localized(locale, scopeZh, scopeEn)),
+							t.Font(design.TypeXXS)).TextColor(t.LabelTertiary).
+							Width(design.Space8 * 2).Shrink(0)
+						design.Apply(ui.Text(c, root), t.MonoText(design.TypeXS)).
+							TextColor(t.LabelTertiary).Grow(1).Shrink(1).
+							MinWidth(design.Space0).MaxLines(1).Ellipsis("…").Tooltip(root)
+						openLabel := localized(locale, "打开目录", "Open directory")
+						uikit.IconButton(c, uikit.IconButtonOptions{
+							Key:     "skills-root/" + root,
+							Label:   openLabel + ": " + root,
+							Tooltip: openLabel,
+							Icon:    icons.FolderOpen(),
+							Size:    design.IconSizeS,
+							OnClick: func() {
+								if err := openPathFunc(root); err != nil {
+									st.editErr = localized(locale, "打开目录失败：",
+										"Failed to open the directory: ") + err.Error()
+									c.Invalidate()
+								}
+							},
+						})
+					})
 				}
 			})
 		}
@@ -176,7 +204,7 @@ func buildSkillsPage(c *ui.Context, t *design.Tokens, kctx cordis.Context, st *s
 			}
 			ui.List(c, &st.list, len(filtered)).
 				Label(localized(locale, "技能列表", "Skills")).
-				Gap(design.Space2).
+				Gap(design.Space0).
 				Rows(func(row ui.ListRow) {
 					buildSkillCard(row.Context, t, skills, st, filtered[row.Index], editor, dataDir, st.roots, locale)
 				})
@@ -184,53 +212,37 @@ func buildSkillsPage(c *ui.Context, t *design.Tokens, kctx cordis.Context, st *s
 	})
 }
 
-// buildSkillCard is one discovered skill: name, description, path and the
-// native collapsible content preview.
+// buildSkillCard is one discovered skill as a flat management row: name,
+// description, source path and the native collapsible content preview, with the
+// edit and destructive delete behind the row's trailing ⋯ menu.
 func buildSkillCard(c *ui.Context, t *design.Tokens, skills contracts.SkillsService, st *skillsState,
 	skill contracts.Skill, editor contracts.SkillsEditor, dataDir string, roots []string,
 	locale contracts.LocaleService) {
 	name := firstNonEmpty(skill.Name, localized(locale, "(未命名技能)", "(Unnamed skill)"))
 	key := name + "\x00" + skill.Path
-	card := design.Apply(ui.Column(c), t.Panel()).Padding(design.Space3).Gap(design.Space2)
-	card.Children(func() {
-		design.Apply(ui.Text(c, name), t.Font(design.TypeS)).
-			FontWeight(600).TextColor(t.LabelPrimary).MaxLines(1).Ellipsis("…")
+	// A flat management row, not a card: the list's divider carries the
+	// grouping (DESIGN.md §5.2 ListRow), and the row's ⋯ menu owns the edit and
+	// the destructive delete so the list paints no red button per skill.
+	ui.Column(c).FillWidth().Gap(design.Space2).PaddingY(design.Space3).Children(func() {
+		ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(design.Space2).Children(func() {
+			design.Apply(ui.Text(c, name), t.Font(design.TypeS)).
+				FontWeight(design.WeightSemibold).TextColor(t.LabelPrimary).
+				Grow(1).Shrink(1).MinWidth(design.Space0).MaxLines(1).Ellipsis("…")
+			buildSkillRowMenu(c, t, skills, st, skill, editor, dataDir, locale)
+		})
 		if description := strings.TrimSpace(skill.Description); description != "" {
 			design.Apply(ui.Text(c, description), t.TextMuted(design.TypeXS)).MaxLines(3)
 		}
 		if path := strings.TrimSpace(skill.Path); path != "" {
-			// H20: the card shows a short relative path plus its source and
-			// keeps the absolute path in the tooltip instead of dumping it.
+			// H20: the row shows a short relative path plus its source and keeps
+			// the absolute path in the tooltip instead of dumping it.
 			source, relative := skillDisplayPath(path, dataDir, roots)
 			meta := relative
 			if source != "" {
 				meta = source + " · " + relative
 			}
-			design.Apply(ui.Text(c, meta), t.Font(design.TypeXXXS), t.MonoFamily()).
+			design.Apply(ui.Text(c, meta), t.Font(design.TypeXXS), t.MonoFamily()).
 				TextColor(t.LabelTertiary).MaxLines(1).Ellipsis("…").Tooltip(path)
-		}
-		if editor != nil && skillsEditActionsAllowed(skill.Path, dataDir) {
-			ui.Row(c).FillWidth().Justify(ui.End).Gap(design.Space2).Children(func() {
-				if design.Apply(ui.Button(c, localized(locale, "编辑", "Edit")),
-					t.SecondaryButton()).Tooltip(localized(locale,
-					"编辑这个技能", "Edit this skill")).Clicked() {
-					body, bodyErr := skillBody(skills, st, skill)
-					if bodyErr != "" {
-						st.editErr = localized(locale, "读取技能内容失败：",
-							"Failed to read skill content: ") + bodyErr
-						body = ""
-					}
-					startEditSkill(c, st, skill, body)
-				}
-				if design.Apply(ui.Button(c, localized(locale, "删除", "Delete")),
-					t.DangerButton()).Tooltip(localized(locale,
-					"删除这个技能", "Delete this skill")).Clicked() {
-					st.pendingDelete = skill.Name
-					st.confirmDelete = true
-					st.editErr = ""
-					c.Invalidate()
-				}
-			})
 		}
 		open := st.open[key]
 		ui.Collapsible(c, localized(locale, "查看内容", "View content"), &open, func() {
@@ -251,6 +263,63 @@ func buildSkillCard(c *ui.Context, t *design.Tokens, skills contracts.SkillsServ
 		})
 		st.open[key] = open
 	})
+	ui.Divider(c)
+}
+
+// buildSkillRowMenu is one skill row's trailing ⋯ menu: Edit (when the editor
+// allows it) and the destructive Delete as the danger item.
+func buildSkillRowMenu(c *ui.Context, t *design.Tokens, skills contracts.SkillsService, st *skillsState,
+	skill contracts.Skill, editor contracts.SkillsEditor, dataDir string, locale contracts.LocaleService) {
+	editable := editor != nil && skillsEditActionsAllowed(skill.Path, dataDir)
+	if !editable {
+		return
+	}
+	label := localized(locale, "技能操作", "Skill actions")
+	menu := uikit.IconButton(c, uikit.IconButtonOptions{
+		Key:     "skill-actions/" + skill.Name + "\x00" + skill.Path,
+		Label:   label,
+		Tooltip: label,
+		Icon:    icons.More(),
+		Size:    design.IconSizeS,
+	})
+	menu.PopoverMenuButton(func(m *ui.Menu) {
+		if m.Item(localized(locale, "编辑技能", "Edit skill")).Chosen() {
+			body, bodyErr := skillBody(skills, st, skill)
+			if bodyErr != "" {
+				st.editErr = localized(locale, "读取技能内容失败：",
+					"Failed to read skill content: ") + bodyErr
+				body = ""
+			}
+			startEditSkill(c, st, skill, body)
+		}
+		remove := m.Item(localized(locale, "删除技能", "Delete skill"))
+		remove.Danger()
+		if remove.Chosen() {
+			st.pendingDelete = skill.Name
+			st.confirmDelete = true
+			st.editErr = ""
+			c.Invalidate()
+		}
+	})
+}
+
+// skillRootScope classifies one scanned skill directory as 全局 (configured and
+// data-directory roots) or 工作区 (the current workspace's /skills), from the
+// in-memory workspace registry.
+func skillRootScope(kctx cordis.Context, root string) (zh, en string) {
+	clean := filepath.Clean(strings.TrimSpace(root))
+	if clean == "." || clean == "" {
+		return "全局", "global"
+	}
+	if workspaceService, ok := kctx.Get(contracts.KeyWorkspace); ok && workspaceService != nil {
+		if current, open, err := workspaceService.Current(context.Background()); err == nil && open &&
+			strings.TrimSpace(current.Root) != "" {
+			if clean == filepath.Join(filepath.Clean(current.Root), "skills") {
+				return "工作区", "workspace"
+			}
+		}
+	}
+	return "全局", "global"
 }
 
 // filterSkills narrows the list by the page's search query (case-insensitive

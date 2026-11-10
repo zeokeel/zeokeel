@@ -90,7 +90,7 @@ func TestPersonaPickerSelectAndClear(t *testing.T) {
 	if got := exactTextCount(tester.Texts(), "人设"); got != 0 {
 		t.Fatalf("standalone persona chip rendered; texts = %v", tester.Texts())
 	}
-	h.assertTexts(tester, "工作区可写")
+	h.assertTexts(tester, "会话设置")
 	h.openSessionMenu(tester)
 	h.assertTexts(tester, "人设")
 	h.clickExact(tester, "人设")
@@ -102,7 +102,7 @@ func TestPersonaPickerSelectAndClear(t *testing.T) {
 	}
 	// The picker keeps the composer row calm: the choice is reflected inside the
 	// menu (checked row), not by renaming the button.
-	h.assertTexts(tester, "工作区可写")
+	h.assertTexts(tester, "会话设置")
 
 	h.openSessionMenu(tester)
 	h.clickExact(tester, "人设")
@@ -147,7 +147,7 @@ func TestPersonaPickerEnglish(t *testing.T) {
 	h.ui.Locale().SetLanguage("en")
 	tester := h.tester()
 	tester.Frame()
-	h.assertTexts(tester, "Workspace")
+	h.assertTexts(tester, "Session settings")
 	h.openSessionMenu(tester)
 	h.assertTexts(tester, "Persona")
 	h.clickExact(tester, "Persona")
@@ -157,5 +157,5 @@ func TestPersonaPickerEnglish(t *testing.T) {
 	if calls := chat.selectedCalls(); len(calls) != 1 || calls[0] != "sess-1:p1" {
 		t.Fatalf("SetSessionPreset calls = %v", calls)
 	}
-	h.assertTexts(tester, "Workspace")
+	h.assertTexts(tester, "Session settings")
 }

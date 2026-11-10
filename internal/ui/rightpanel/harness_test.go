@@ -274,7 +274,7 @@ func TestDisposeUnwindsContributions(t *testing.T) {
 		t.Fatalf("dispose: %v", err)
 	}
 	tester.Frame()
-	h.assertNoTexts(tester, "工作区文件", "新建终端")
+	h.assertNoTexts(tester, "工作区文件", "命令运行")
 	if service, ok := h.ctx.Get(contracts.KeyFilePreview); ok && service != nil {
 		t.Fatal("the file previewer is still provided after dispose")
 	}

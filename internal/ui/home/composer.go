@@ -14,6 +14,7 @@ import (
 	"strings"
 
 	"github.com/egoist/mygo"
+	"github.com/egoist/mygo/transfer"
 	"github.com/egoist/mygo/ui"
 	cordis "github.com/zeokeel/zeokeel-kernel"
 
@@ -136,6 +137,36 @@ func stageHomeAttachments(st *homeComposerState, paths []string, tr func(zh, en 
 			Data: data,
 		})
 	}
+}
+
+// stageHomePastedImage turns an image on the clipboard into a staged
+// attachment, under the same caps and error lines as a picked file. The paste
+// hook cannot use the frame's Context (it runs between frames), so the caller
+// passes the Services captured while building.
+func stageHomePastedImage(st *homeComposerState, services ui.Services, tr func(zh, en string) string) bool {
+	if len(st.attachments) >= homeAttachmentInputCap {
+		st.attachErr = tr("附件数量已达上限", "Attachment limit reached")
+		return true
+	}
+	data, err := services.ReadClipboardData(transfer.PNG).Read(transfer.PNG)
+	if err != nil || len(data) == 0 {
+		st.attachErr = tr("剪贴板里没有图片；请用「附件」或拖拽添加图片",
+			"No image on the clipboard; use Attach or drag an image in")
+		return true
+	}
+	if len(data) > homeMaxAttachmentBytes {
+		st.attachErr = tr("粘贴的图片超过 10 MB 附件上限", "The pasted image exceeds the 10 MB attachment limit")
+		return true
+	}
+	st.attachSeq++
+	st.attachments = append(st.attachments, contracts.Attachment{
+		ID:   fmt.Sprintf("home-att-%d", st.attachSeq),
+		Name: fmt.Sprintf("pasted-image-%d.png", st.attachSeq),
+		MIME: "image/png",
+		Data: data,
+	})
+	st.attachErr = ""
+	return true
 }
 
 // startHomeAttachmentPick opens the native file picker off the UI thread and
@@ -801,6 +832,7 @@ func buildHomeComposer(c *ui.Context, t *design.Tokens, runtime contracts.UIRunt
 			errors = append(errors, text)
 		}
 	}
+	composerServices := c.Services()
 	uikit.ComposerShell(c, uikit.ComposerShellOptions{
 		Key:         "home.composer",
 		Draft:       &st.draft,
@@ -808,6 +840,11 @@ func buildHomeComposer(c *ui.Context, t *design.Tokens, runtime contracts.UIRunt
 		CardLabel:   tr("输入框", "Composer"),
 		FullWidth:   true,
 		Locale:      locale,
+		OnPasteImage: func() bool {
+			stageHomePastedImage(st, composerServices, tr)
+			runtime.Invalidate()
+			return true
+		},
 		Attachments: func(ic *ui.Context) {
 			if len(st.attachments) == 0 {
 				return

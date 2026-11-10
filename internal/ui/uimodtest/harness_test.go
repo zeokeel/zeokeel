@@ -39,7 +39,7 @@ func clickRightSidebarPage(t *testing.T, tester *ui.Tester, label string) {
 // sidebarGuideVisible reports whether the right sidebar shows its 开始 guide:
 // the landing of the new DSH-aligned sidebar with no page opened.
 func sidebarGuideVisible(tester *ui.Tester) bool {
-	return tester.HasText("工作区文件") && tester.HasText("新建终端")
+	return tester.HasText("工作区文件") && tester.HasText("命令运行")
 }
 
 // requireRightSidebarGuide fails unless the right sidebar's 开始 guide is

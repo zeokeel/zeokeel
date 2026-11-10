@@ -46,15 +46,6 @@ func buildScreen(c *ui.Context, runtime contracts.UIRuntime, cfg Config, st *sta
 	settings, hasSettings := st.ctx.Get(contracts.KeySettings)
 
 	ui.Column(c).FillWidth().Grow(1).Gap(design.Space4).Children(func() {
-		ui.Column(c).FillWidth().Gap(design.Space1).Children(func() {
-			design.Apply(ui.Text(c, st.localized(cfg.Title, "插件", "Plugins")), t.Font(design.TypeL)).
-				FontWeight(600).TextColor(t.LabelPrimary)
-			design.Apply(ui.Text(c, st.localized(cfg.Description,
-				"查看已连接的 MCP 服务器与产品内置的工具目录。",
-				"Connected MCP servers and the product's built-in tool catalogue.")),
-				t.TextMuted(design.TypeXS)).MaxLines(2)
-		})
-
 		if st.status != "" {
 			if st.statusErr {
 				uikit.ErrorLine(c, st.status)
@@ -75,8 +66,44 @@ func buildScreen(c *ui.Context, runtime contracts.UIRuntime, cfg Config, st *sta
 	})
 }
 
-// buildMCPsSection is the MCP plugin connections section: a uikit.Section with
-// the native Refresh action at the section body's top-right.
+// buildScreenHeaderSlot is the screen's SlotScreenHeader contribution: the
+// window-band title on the TypeM step, in proportion with the host's 13 DIP
+// tabs and 28 DIP band controls. The page description stays a tooltip on the
+// title instead of a second in-band line (the band is window chrome).
+func buildScreenHeaderSlot(c *ui.Context, t *design.Tokens, cfg Config, st *state) {
+	title := st.localized(cfg.Title, "插件", "Plugins")
+	description := st.localized(cfg.Description,
+		"查看已连接的 MCP 服务器与产品内置的工具目录。",
+		"Connected MCP servers and the product's built-in tool catalogue.")
+	design.Apply(ui.Text(c, title), t.Font(design.TypeM)).FontWeight(design.WeightSemibold).
+		TextColor(t.LabelPrimary).MaxLines(1).Ellipsis("…").Tooltip(description)
+}
+
+// buildScreenActionsSlot is the screen's SlotScreenActions contribution: the
+// MCP reconnect utility beside the host's palette control. It is the screen's
+// only page action (there is no primary form action on this read-mostly page);
+// the busy label and the disabled state live on the band so the old floating
+// row between the section title and the cards is gone.
+func buildScreenActionsSlot(c *ui.Context, t *design.Tokens, runtime contracts.UIRuntime, st *state) {
+	label := st.tr("刷新", "Refresh")
+	tooltip := st.tr("重新连接并刷新 MCP 服务器状态", "Reconnect and refresh MCP server status")
+	if st.refreshing {
+		label = st.tr("正在重连…", "Reconnecting…")
+	}
+	refresh := design.Apply(ui.Button(c, label), t.SecondaryButton()).
+		Disabled(st.refreshing).Tooltip(tooltip)
+	if refresh.Clicked() && !st.refreshing {
+		pluginsService, hasPlugins := st.ctx.Get(contracts.KeyPlugins)
+		if hasPlugins && pluginsService != nil {
+			st.startMCPRefresh(pluginsService, runtime)
+		}
+		c.Invalidate()
+	}
+}
+
+// buildMCPsSection is the MCP plugin connections section: a uikit.Section whose
+// section title row carries no floating action (the refresh lives in the host
+// top band).
 func buildMCPsSection(
 	c *ui.Context,
 	t *design.Tokens,
@@ -89,23 +116,12 @@ func buildMCPsSection(
 	hasSettings bool,
 ) {
 	uikit.Section(c, st.localized(cfg.MCPSection, "MCP 插件", "MCP plugins"), func(c *ui.Context) {
-		if hasService {
-			ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(design.Space2).Justify(ui.End).Children(func() {
-				if st.refreshing {
-					ui.Spinner(c).Label(st.tr("正在重连…", "Reconnecting…")).
-						Size(design.Space3, design.Space3).TextColor(t.LabelSecondary)
-				}
-				label := st.tr("刷新", "Refresh")
-				if st.refreshing {
-					label = st.tr("正在重连…", "Reconnecting…")
-				}
-				refresh := ui.Button(c, label).
-					Disabled(st.refreshing).
-					Tooltip(st.tr("重新连接并刷新 MCP 服务器状态", "Reconnect and refresh MCP server status"))
-				if refresh.Clicked() && !st.refreshing {
-					st.startMCPRefresh(service, runtime)
-					c.Invalidate()
-				}
+		if st.refreshing {
+			ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(design.Space2).Children(func() {
+				ui.Spinner(c).Label(st.tr("正在重连…", "Reconnecting…")).
+					Size(design.Space3, design.Space3).TextColor(t.LabelSecondary)
+				design.Apply(ui.Text(c, st.tr("正在重连…", "Reconnecting…")), t.Font(design.TypeXXS)).
+					TextColor(t.LabelTertiary)
 			})
 		}
 		st.loadDisabledServers(settings, hasSettings)
@@ -187,8 +203,9 @@ func buildMCPCard(c *ui.Context, t *design.Tokens, runtime contracts.UIRuntime, 
 	title := firstNonEmpty(name, st.tr("(未命名服务器)", "(Untitled server)"))
 
 	c.Key("mcp/" + key)
-	card := design.Apply(ui.Column(c), t.Panel()).Padding(design.Space3).Gap(design.Space2)
-	card.Children(func() {
+	// A flat management row, not a card: the list divider carries the grouping
+	// (DESIGN.md §5.2 ListRow), so a page of servers reads as a list.
+	ui.Column(c).FillWidth().PaddingY(design.Space3).Gap(design.Space2).Children(func() {
 		ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(design.Space2).Children(func() {
 			icon := icons.Plug()
 			iconColor := t.LabelSecondary
@@ -197,15 +214,14 @@ func buildMCPCard(c *ui.Context, t *design.Tokens, runtime contracts.UIRuntime, 
 			}
 			ui.Icon(c, icon).Size(16, 16).TextColor(iconColor)
 			design.Apply(ui.Text(c, title), t.Font(design.TypeS)).
-				FontWeight(600).TextColor(t.LabelPrimary).Grow(1).MaxLines(1).Ellipsis("…")
+				FontWeight(design.WeightSemibold).TextColor(t.LabelPrimary).Grow(1).MaxLines(1).Ellipsis("…")
 			// One state badge: the disabled state takes precedence over the
 			// connection status (the server does not connect while disabled).
 			if st.serverDisabled(name) {
-				design.Apply(ui.Badge(c, st.tr("已停用（重启生效）", "Disabled (restart applies)")), t.Badge()).
-					TextColor(t.LabelTertiary)
+				uikit.StatusBadge(c, t, uikit.StatusIdle, st.tr("已停用（重启生效）", "Disabled (restart applies)"))
 			} else {
-				design.Apply(ui.Badge(c, pluginStatusLabel(st, collapsedMCPStatus(server.Status))), t.Badge()).
-					TextColor(pluginStatusColor(t, server.Status))
+				uikit.StatusBadge(c, t, pluginStatusKind(server.Status),
+					pluginStatusLabel(st, collapsedMCPStatus(server.Status)))
 			}
 			design.Apply(ui.Text(c, st.tr(fmt.Sprintf("%d 个工具", server.Tools), fmt.Sprintf("%d tools", server.Tools))),
 				t.Font(design.TypeXXS)).TextColor(t.LabelTertiary).NoWrap()
@@ -278,6 +294,7 @@ func buildMCPCard(c *ui.Context, t *design.Tokens, runtime contracts.UIRuntime, 
 		})
 		st.mcpExpanded[key] = expanded
 	})
+	ui.Divider(c)
 }
 
 // pluginStatusFailed reports whether an MCP connection state is a failure the
@@ -593,7 +610,7 @@ func buildToolRow(c *ui.Context, t *design.Tokens, tool catalogTool, showCategor
 	ui.Column(c).FillWidth().Gap(design.Space1).Children(func() {
 		if showCategory {
 			design.Apply(ui.Text(c, st.categoryLabel(toolCategory(tool.Name))), t.Font(design.TypeXXS)).
-				FontWeight(600).TextColor(t.LabelTertiary).Padding(design.Space1, design.Space2, 0, design.Space2)
+				FontWeight(design.WeightSemibold).TextColor(t.LabelTertiary).Padding(design.Space1, design.Space2, design.Space0, design.Space2)
 		}
 		ui.Row(c).FillWidth().Gap(design.Space3).
 			AlignItems(ui.Center).Padding(design.Space2, design.Space2).Children(func() {
@@ -605,7 +622,7 @@ func buildToolRow(c *ui.Context, t *design.Tokens, tool catalogTool, showCategor
 				// (usually English) documentation is the tooltip, not a second
 				// competing line.
 				design.Apply(ui.Text(c, toolDescriptionLine(st, tool)), t.Font(design.TypeXXS)).
-					TextColor(t.LabelTertiary).Grow(1).MinWidth(0).MaxLines(1).Ellipsis("…").
+					TextColor(t.LabelTertiary).Grow(1).MinWidth(design.Space0).MaxLines(1).Ellipsis("…").
 					Tooltip(description)
 			} else {
 				ui.Spacer(c).Grow(1)
@@ -774,17 +791,18 @@ func (st *state) categoryLabel(category string) string {
 	}
 }
 
-// pluginStatusColor colors the connection badge.
-func pluginStatusColor(t *design.Tokens, status string) ui.Color {
+// pluginStatusKind maps an MCP connection state onto the shared status
+// vocabulary, so the badge uses the same tint anatomy as every other badge.
+func pluginStatusKind(status string) uikit.StatusKind {
 	lower := strings.ToLower(strings.TrimSpace(status))
 	switch {
 	case strings.Contains(lower, "已连接"), strings.Contains(lower, "connected"),
 		strings.Contains(lower, "ok"), strings.Contains(lower, "成功"):
-		return t.SuccessText
+		return uikit.StatusSuccess
 	case strings.Contains(lower, "失败"), strings.Contains(lower, "fail"),
 		strings.Contains(lower, "error"), strings.Contains(lower, "不可用"):
-		return t.DangerText
+		return uikit.StatusError
 	default:
-		return t.LabelSecondary
+		return uikit.StatusIdle
 	}
 }

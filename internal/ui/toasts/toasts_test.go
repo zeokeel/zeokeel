@@ -695,3 +695,50 @@ func TestToastCloseButtonTargetSize(t *testing.T) {
 		t.Fatalf("toast close target = %.1fx%.1f DIP, want at least 24x24", rect.W, rect.H)
 	}
 }
+
+// TestToastSkeletonUnified pins the V24/R16 toast skeleton in one frame: two
+// notifications of different lengths and levels share the same left edge (the
+// 280 DIP min width plus the fixed status slot), the body starts below the
+// 72 DIP top band + 12 DIP inset, and a long notification is capped at 360 DIP.
+func TestToastSkeletonUnified(t *testing.T) {
+	h := newHarness(t, "zh")
+	tester := h.tester()
+	h.notifier.trigger(contracts.Notification{ID: "n1", Level: contracts.NotifySuccess, Text: "短"})
+	tester.Frame()
+	h.notifier.trigger(contracts.Notification{
+		ID: "n2", Level: contracts.NotifyInfo,
+		Text: "一条较长较长较长较长较长较长较长较长较长较长较长较长的提示正文",
+	})
+	tester.Frame()
+
+	short, ok := tester.Find("短")
+	if !ok {
+		t.Fatalf("short toast body missing; texts = %v", tester.Texts())
+	}
+	long, ok := tester.Find("一条较长较长较长较长较长较长较长较长较长较长较长较长的提示正文")
+	if !ok {
+		t.Fatalf("long toast body missing; texts = %v", tester.Texts())
+	}
+	// The cards are right-aligned and share the fixed status slot and close
+	// action widths, so their body text ends on one right edge; the short card
+	// is the 280 DIP min width, the long one grows toward 360.
+	if right := short.X + short.W; right != long.X+long.W {
+		t.Fatalf("toast bodies end at %.1f and %.1f, want one shared right edge",
+			right, long.X+long.W)
+	}
+	if short.W >= long.W {
+		t.Fatalf("short toast body width = %.1f, long = %.1f, want the long card wider",
+			short.W, long.W)
+	}
+	// The stack starts below the 72 DIP top band plus the 12 DIP inset, then the
+	// card's 8 DIP padding: the title row sits above the body.
+	const toastTop = 72 + 12
+	if short.Y < toastTop+8 {
+		t.Fatalf("toast body Y = %.1f, want it below the %d DIP top band + inset", short.Y, toastTop)
+	}
+	// A long notification wraps inside the 360 DIP max card width: its body is
+	// narrower than the card minus the status slot and the close action.
+	if long.W > 360 {
+		t.Fatalf("toast body width = %.1f, want it inside the 360 DIP max card", long.W)
+	}
+}

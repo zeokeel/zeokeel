@@ -82,12 +82,14 @@ func TestPresetsPageAddDeleteReorderAndRestore(t *testing.T) {
 	}
 
 	// Reorder the first row down and the second row up.
+	h.click(tester, "预设操作")
 	h.click(tester, "下移")
 	stored = decodePresets(t, store.get(contracts.SettingPromptPresets))
 	if len(stored) != 4 || stored[0].Name != "代码审查" || stored[1].Name != "简洁回答" {
 		t.Fatalf("stored presets after move down = %+v", stored)
 	}
 	// Deleting the first row asks for confirmation, then persists the rest.
+	h.click(tester, "预设操作")
 	h.click(tester, "删除")
 	h.click(tester, "确认删除")
 	stored = decodePresets(t, store.get(contracts.SettingPromptPresets))

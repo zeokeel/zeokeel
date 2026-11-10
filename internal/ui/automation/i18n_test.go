@@ -23,12 +23,12 @@ func TestAutomationEnglishCopyAndLanguageSwitch(t *testing.T) {
 	tester := h.tester()
 
 	// Default Chinese copy is unchanged.
-	h.assertTexts(tester, "自动化", "新建任务", "立即运行", "删除",
+	h.assertTexts(tester, "自动化", "新建任务", "立即运行", "任务操作",
 		"上次运行：—", "下次运行：—")
 
 	h.uiRoot.Locale().SetLanguage("en")
 	tester.Frame()
-	h.assertTexts(tester, "Automation", "New task", "Run now", "Delete",
+	h.assertTexts(tester, "Automation", "New task", "Run now", "Task actions",
 		"Last run: —", "Next run: —", "Nightly check", "Enabled")
 	h.assertNoTexts(tester, "自动化", "新建任务", "立即运行", "上次运行：")
 
@@ -42,7 +42,7 @@ func TestAutomationEnglishCopyAndLanguageSwitch(t *testing.T) {
 	// Switching back restores the Chinese copy on the next frame.
 	h.uiRoot.Locale().SetLanguage("zh")
 	tester.Frame()
-	h.assertTexts(tester, "自动化", "新建任务", "立即运行", "新建自动化任务", "保存")
+	h.assertTexts(tester, "自动化", "取消", "立即运行", "新建自动化任务", "保存")
 	h.assertNoTexts(tester, "New task", "New automation task")
 }
 

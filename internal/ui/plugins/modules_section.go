@@ -58,14 +58,14 @@ func buildModulesSection(c *ui.Context, t *design.Tokens, st *state,
 				Rows(func(row ui.ListRow) {
 					module := modules[row.Index]
 					ui.Row(row.Context).FillWidth().AlignItems(ui.Center).Gap(design.Space2).Children(func() {
-						design.Apply(ui.Text(row.Context, strings.TrimSpace(module.ModuleID)), t.MonoText(design.TypeXXXS)).
+						design.Apply(ui.Text(row.Context, strings.TrimSpace(module.ModuleID)), t.MonoText(design.TypeXS)).
 							TextColor(t.LabelPrimary).Grow(1).MaxLines(1).Ellipsis("…")
 						state := strings.TrimSpace(module.State)
-						color := t.LabelTertiary
+						kind := uikit.StatusIdle
 						if state == "active" {
-							color = t.SuccessText
+							kind = uikit.StatusSuccess
 						}
-						design.Apply(ui.Badge(row.Context, state), t.Badge()).TextColor(color)
+						uikit.StatusBadge(row.Context, t, kind, state)
 					})
 				})
 		})

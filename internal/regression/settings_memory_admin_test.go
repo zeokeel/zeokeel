@@ -84,7 +84,7 @@ func TestSettingsMemoryTidyAndClear(t *testing.T) {
 	store := requireService(t, h.ctx, contracts.KeyMemory)
 
 	requireHasTexts(t, tester, "3 条记忆", "Buy milk", "BUY   milk", "Unique note")
-	clickMemoryAdmin(t, tester, "整理记忆")
+	clickMemoryAdmin(t, tester, "去重并合并")
 	requireHasText(t, tester, "已整理 1 条")
 	ids := memoryIDs(t, store)
 	if len(ids) != 2 {
@@ -99,7 +99,7 @@ func TestSettingsMemoryTidyAndClear(t *testing.T) {
 	}
 
 	// A second tidy has nothing to remove.
-	clickMemoryAdmin(t, tester, "整理记忆")
+	clickMemoryAdmin(t, tester, "去重并合并")
 	requireHasText(t, tester, "没有可整理的重复记忆")
 	if got := len(memoryIDs(t, store)); got != 2 {
 		t.Fatalf("memories after no-op tidy = %d, want 2", got)
@@ -127,7 +127,7 @@ func TestSettingsMemoryAdminErrors(t *testing.T) {
 		fault := &faultMemoryStore{listErr: errors.New("memory read denied")}
 		_, tester := openMemoryAdmin(t, nil, fault)
 		requireHasText(t, tester, "读取记忆失败")
-		clickMemoryAdmin(t, tester, "整理记忆")
+		clickMemoryAdmin(t, tester, "去重并合并")
 		requireHasText(t, tester, "读取记忆失败")
 		clickMemoryAdmin(t, tester, "全部清空")
 		clickMemoryAdmin(t, tester, "清空")
@@ -137,8 +137,8 @@ func TestSettingsMemoryAdminErrors(t *testing.T) {
 	t.Run("remove failures counted", func(t *testing.T) {
 		fault := &faultMemoryStore{entries: memoryAdminSeed(), failRemove: true}
 		_, tester := openMemoryAdmin(t, nil, fault)
-		clickMemoryAdmin(t, tester, "整理记忆")
-		requireHasText(t, tester, "整理记忆失败：1")
+		clickMemoryAdmin(t, tester, "去重并合并")
+		requireHasText(t, tester, "去重并合并失败：1")
 		clickMemoryAdmin(t, tester, "全部清空")
 		clickMemoryAdmin(t, tester, "清空")
 		requireHasText(t, tester, "清空失败：3")

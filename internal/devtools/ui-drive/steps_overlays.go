@@ -107,9 +107,9 @@ func (d *drive) runOverlaySteps() {
 			c.require(!focusedDeny, "审批对话框自动聚焦了「拒绝」（误触 Enter 会误拒）")
 			c.require(c.has("Esc 拒绝"), "内联审批卡缺少「Esc 拒绝」语义说明")
 			// A shell-like tool's summary is shown as a 命令 block first, with
-			// the raw arguments collapsed behind 「显示原始参数」.
+			// the raw arguments collapsed behind 「原始参数」.
 			c.require(c.has("命令") || c.has("摘要"), "审批对话框没有把工具 Summary 作为命令/摘要块显示")
-			c.require(c.has("显示原始参数"), "审批对话框没有折叠的「显示原始参数」入口")
+			c.require(c.has("原始参数"), "审批对话框没有折叠的「原始参数」入口")
 			c.shot("approval-safe-default")
 			// Enter must not approve the call.
 			d.key(0, ui.KeyEnter)

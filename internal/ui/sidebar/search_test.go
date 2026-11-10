@@ -194,7 +194,10 @@ func TestMessageSearchEmptyAndError(t *testing.T) {
 		h.click(tester, "搜索会话与消息")
 		tester.Type("不存在")
 		tester.Frame()
-		h.assertTexts(tester, "消息搜索", "没有匹配的消息")
+		// With no title and no message hit the search shows one overall
+		// empty state, not a "message search" section (R11).
+		h.assertTexts(tester, "没有匹配")
+		h.assertNoTexts(tester, "消息搜索", "没有匹配的消息")
 	})
 
 	t.Run("error", func(t *testing.T) {
@@ -220,8 +223,11 @@ func TestMessageSearchShownWhenTitlesDoNotMatch(t *testing.T) {
 	tester.Type("登录")
 	tester.Frame()
 
-	// No session title matches "登录", but the message search still renders.
-	h.assertTexts(tester, "没有匹配的会话", "消息搜索", "登录相关讨论")
+	// No session title matches "登录", but the message search still renders:
+	// the title miss is one quiet line after the hits, not a headline before
+	// them (R11).
+	h.assertTexts(tester, "消息搜索", "登录相关讨论", "标题无匹配")
+	h.assertNoTexts(tester, "没有匹配的会话")
 }
 
 func TestMessageSearchQueryCache(t *testing.T) {
@@ -349,4 +355,35 @@ func TestSearchWithoutSearcherKeepsTitleFilter(t *testing.T) {
 	tester.Frame()
 	h.assertTexts(tester, "另一个会话")
 	h.assertNoTexts(tester, "项目讨论", "消息搜索")
+}
+
+// TestMessageSearchSnippetWindowAroundMatch pins the R11/B9 snippet behavior:
+// a match deep in a long message renders the window around it (with both cuts
+// marked), not the message's start with the query cut off.
+func TestMessageSearchSnippetWindowAroundMatch(t *testing.T) {
+	prefix := strings.Repeat("前置说明", 30)
+	store := &fakeStore{hits: []contracts.MessageSearchHit{
+		hit("s2", "另一个会话", "user", prefix+"工作目录在这里", time.Unix(1700000000, 0)),
+	}}
+	h := newHarnessWithStore(t, searchChat(), store, sidebar.Config{})
+	tester := h.tester()
+	tester.Frame()
+	clickLabel(t, tester, "搜索会话与消息")
+	tester.Type("工作目录")
+	tester.Frame()
+
+	// The row's accessible label names the whole hit; the visible snippet is
+	// the separate text the window builder renders around the match.
+	window := ""
+	for _, text := range tester.Texts() {
+		if strings.HasPrefix(text, "…") && strings.Contains(text, "工作目录") {
+			window = text
+		}
+	}
+	if window == "" {
+		t.Fatalf("no snippet window around the match; texts = %v", tester.Texts())
+	}
+	if strings.HasPrefix(window, "…"+prefix) {
+		t.Fatalf("snippet keeps the message start instead of the window; text = %q", window)
+	}
 }

@@ -10,8 +10,8 @@ import (
 func TestEnglishTabsAndGuide(t *testing.T) {
 	h := newHarness(t, harnessOptions{Language: "en"})
 	tester := h.tester()
-	h.assertTexts(tester, "Start", "Files", "Terminal", "Workspace files", "New terminal")
-	h.assertNoTexts(tester, "开始", "文件", "终端", "工作区文件", "新建终端")
+	h.assertTexts(tester, "Start", "Files", "Commands", "Workspace files", "Run command")
+	h.assertNoTexts(tester, "开始", "文件", "命令", "工作区文件", "命令运行")
 }
 
 func TestLanguageSwitchUpdatesCopy(t *testing.T) {
@@ -21,7 +21,7 @@ func TestLanguageSwitchUpdatesCopy(t *testing.T) {
 
 	h.uiRoot.Locale().SetLanguage("en")
 	tester.Frame()
-	h.assertTexts(tester, "Start", "Workspace files", "New terminal")
+	h.assertTexts(tester, "Start", "Workspace files", "Run command")
 	h.assertNoTexts(tester, "开始", "工作区文件")
 
 	h.uiRoot.Locale().SetLanguage("zh")

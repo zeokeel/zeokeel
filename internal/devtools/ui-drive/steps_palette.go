@@ -62,10 +62,10 @@ func (d *drive) runPaletteSteps() {
 			c.require(c.has("Ctrl+Alt+P"),
 				"命令面板缺少文件页快捷键 chord；texts=%v", paletteTailTexts(d))
 			d.clearDraft()
-			d.typeText("打开终端页")
+			d.typeText("打开命令页")
 			d.drain(2)
 			c.require(c.has("Ctrl+`"),
-				"命令面板缺少终端页快捷键 chord；texts=%v", paletteTailTexts(d))
+				"命令面板缺少命令页快捷键 chord；texts=%v", paletteTailTexts(d))
 			c.shot("palette-shortcut-column")
 			d.key(0, ui.KeyEscape)
 			d.drain(2)

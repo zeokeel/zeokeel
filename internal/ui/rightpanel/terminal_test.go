@@ -1,6 +1,6 @@
 package rightpanel_test
 
-// Frame tests for the right sidebar's 终端 page: the reused command runner (no
+// Frame tests for the right sidebar's 命令 page: the reused command runner (no
 // PTY) now rendered inside its tab, with output, stop, clear and the shell
 // picker.
 
@@ -23,8 +23,8 @@ func terminalHarness(t *testing.T, terminal contracts.TerminalService) *harness 
 func TestTerminalPageWithoutBackend(t *testing.T) {
 	h := newHarness(t, harnessOptions{})
 	tester := h.tester()
-	h.openPage(tester, "终端")
-	h.assertTexts(tester, "终端未启用")
+	h.openPage(tester, "命令")
+	h.assertTexts(tester, "命令未启用")
 }
 
 func TestTerminalPageRunsCommand(t *testing.T) {
@@ -32,11 +32,11 @@ func TestTerminalPageRunsCommand(t *testing.T) {
 	terminal.setRunOutput(contracts.TerminalOutput{Output: "probe terminal output\n", ExitCode: 0})
 	h := terminalHarness(t, terminal)
 	tester := h.tester()
-	h.openPage(tester, "终端")
+	h.openPage(tester, "命令")
 	h.assertTexts(tester, "运行")
 
 	// Type a command into the native input and press Enter.
-	input, ok := tester.Find("命令")
+	input, ok := tester.Find("命令输入")
 	if !ok {
 		t.Fatalf("terminal command input not found; texts = %v", tester.Texts())
 	}
@@ -65,8 +65,8 @@ func TestTerminalPageClear(t *testing.T) {
 	terminal.setRunOutput(contracts.TerminalOutput{Output: "to be cleared\n"})
 	h := terminalHarness(t, terminal)
 	tester := h.tester()
-	h.openPage(tester, "终端")
-	input, _ := tester.Find("命令")
+	h.openPage(tester, "命令")
+	input, _ := tester.Find("命令输入")
 	tester.ClickAt(input.X+input.W/2, input.Y+input.H/2)
 	tester.Type("echo clear")
 	tester.Key(0, ui.KeyEnter)
@@ -82,8 +82,8 @@ func TestTerminalPageStopRunningCommand(t *testing.T) {
 	terminal.setRunBlock(true)
 	h := terminalHarness(t, terminal)
 	tester := h.tester()
-	h.openPage(tester, "终端")
-	input, _ := tester.Find("命令")
+	h.openPage(tester, "命令")
+	input, _ := tester.Find("命令输入")
 	tester.ClickAt(input.X+input.W/2, input.Y+input.H/2)
 	tester.Type("sleep 100")
 	tester.Key(0, ui.KeyEnter)
@@ -103,7 +103,7 @@ func TestTerminalPageShellSelect(t *testing.T) {
 	terminal := newFakeTerminal()
 	h := terminalHarness(t, terminal)
 	tester := h.tester()
-	h.openPage(tester, "终端")
+	h.openPage(tester, "命令")
 	selector, ok := tester.Find("bash")
 	if !ok {
 		t.Fatalf("shell select not found; texts = %v", tester.Texts())
@@ -127,8 +127,8 @@ func TestTerminalPageRunErrors(t *testing.T) {
 	terminal.setRunErr(errors.New("exec: command not found"))
 	h := terminalHarness(t, terminal)
 	tester := h.tester()
-	h.openPage(tester, "终端")
-	input, _ := tester.Find("命令")
+	h.openPage(tester, "命令")
+	input, _ := tester.Find("命令输入")
 	tester.ClickAt(input.X+input.W/2, input.Y+input.H/2)
 	tester.Type("nope")
 	tester.Key(0, ui.KeyEnter)
@@ -146,4 +146,19 @@ func hasTextPrefix(texts []string, prefix string) bool {
 		}
 	}
 	return false
+}
+
+// TestCommandPageCopyIsUserFacing pins B18: the page is named 命令, the working
+// directory is labelled as such (with the full path in its tooltip), the shell
+// picker has a visible Shell label, and the explanation states the user benefit
+// instead of the implementation limits (no PTY / persistent shell).
+func TestCommandPageCopyIsUserFacing(t *testing.T) {
+	terminal := newFakeTerminal()
+	h := terminalHarness(t, terminal)
+	tester := h.tester()
+	h.openPage(tester, "命令")
+
+	h.assertTexts(tester, "工作目录", "/work/proj", "Shell",
+		"一次性命令 · 在工作目录执行 · 输出可复制")
+	h.assertNoTexts(tester, "简单命令运行器（无 PTY / 持久 shell）", "当前")
 }

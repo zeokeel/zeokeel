@@ -2,13 +2,14 @@
 // conversation screen (contracts.SlotSessionPanelRight) and the
 // contracts.FilePreviewer service the session surface opens files through.
 //
-// The sidebar is one native tab strip with the fixed pages 开始 (the guide),
-// 文件 (the workspace tree plus the 交付区 deliverables history) and 终端
-// (the command runner), plus one tab per opened file: clicking a file in the
-// workspace tree opens its read-only preview (text/Markdown/image, with an
-// honest fallback for everything else), and an opened file that the workspace
-// differ reports as changed carries its unified diff. Tabs switch, file tabs
-// close, and the strip scrolls sideways when it outgrows the rail.
+// The sidebar has two native tab rows: the fixed view pages 开始 (the guide),
+// 文件 (the workspace tree plus the 交付区 deliverables history) and 命令 (the
+// one-off command runner) on an underline strip, and, below it, one document
+// tab per opened file: clicking a file in the workspace tree opens its
+// read-only preview (text/Markdown/image, with an honest fallback for
+// everything else), and an opened file that the workspace differ reports as
+// changed carries its unified diff. Tab rows switch, file tabs close, and both
+// strips scroll sideways when they outgrow the rail.
 //
 // The retired 8-pane inspector (overview/tools/log/changes/agents/tasks) is
 // gone: the team and tasks surfaces moved to the session header, and the log
@@ -86,7 +87,9 @@ var (
 type Config struct {
 	// Title is the sidebar's assistive name (default 右侧栏).
 	Title string `json:"title"`
-	// GuideTab/FilesTab/TerminalTab are the fixed tab labels.
+	// GuideTab/FilesTab/TerminalTab are the fixed page tab labels; the terminal
+	// runner's page is "命令" (Commands): it is a one-off command runner, not an
+	// interactive terminal.
 	GuideTab    string `json:"guideTab"`
 	FilesTab    string `json:"filesTab"`
 	TerminalTab string `json:"terminalTab"`
@@ -116,7 +119,7 @@ func (c Config) filesLabel(locale contracts.LocaleService) string {
 }
 
 func (c Config) terminalLabel(locale contracts.LocaleService) string {
-	return firstNonEmpty(c.TerminalTab, uikit.T(locale, "终端", "Terminal"))
+	return firstNonEmpty(c.TerminalTab, uikit.T(locale, "命令", "Commands"))
 }
 
 // fileTab is one opened file tab: the workspace-relative path (slash
@@ -152,6 +155,12 @@ type state struct {
 	tab       int
 	fileTabs  []fileTab
 	revealTab bool
+	// viewTab and docTab are the native TabsBase selections of the two tab
+	// rows (the fixed view pages above, the opened file documents below): the
+	// rows are separate lists, so each needs its own bound index, and the frame
+	// maps a user choice back to tab.
+	viewTab int
+	docTab  int
 
 	// filesDirs caches the workspace tree's directory listings by relative
 	// path ("" is the root); filesOpen keeps the native tree's fold state per
@@ -458,8 +467,8 @@ func (st *state) registerCommands() error {
 	}
 	terminal, err := st.runtime.RegisterCommand(contracts.CommandSpec{
 		ID:       terminalOpenCommandID,
-		Title:    st.tr("打开终端页", "Open terminal page"),
-		Hint:     st.tr("在右侧栏终端运行命令", "Run commands in the right sidebar terminal"),
+		Title:    st.tr("打开命令页", "Open commands page"),
+		Hint:     st.tr("在右侧栏运行一次性命令，输出可复制", "Run one-off commands in the right sidebar; the output is copyable"),
 		Order:    921,
 		Shortcut: terminalOpenShortcut,
 		Run:      func() error { st.showFixedPage(pageTerminal); return nil },

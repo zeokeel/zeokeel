@@ -229,7 +229,7 @@ func TestP1ApprovalToolsAndPersistence(t *testing.T) {
 	}
 
 	// The 终端 page runs real commands in the workspace root.
-	clickRightSidebarPage(t, tester, "终端")
+	clickRightSidebarPage(t, tester, "命令")
 	if !frameUntil(tester, "运行", 3*time.Second) {
 		t.Fatalf("terminal page missing its run control; texts = %v", tester.Texts())
 	}

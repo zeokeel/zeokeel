@@ -219,7 +219,7 @@ func (d *drive) runSessionSteps() {
 	d.step("composer-session-settings-menu", "session", "输入区：会话设置分组菜单",
 		"点击「会话设置」→ 一个菜单同时提供权限模式、对话模式与提示词预设（低频项收进一组；模型/推理等级在模型 chip 的二级菜单里）→ Esc 关闭", func(c *check) {
 			d.resetToSession()
-			if !c.click("工作区可写") && !c.click("会话设置") {
+			if !c.click("会话设置") && !c.click("工作区可写") {
 				return
 			}
 			d.drain(2)
@@ -258,7 +258,7 @@ func (d *drive) runSessionSteps() {
 				return
 			}
 			c.note("发送 rect=(%.0f,%.0f,%.0f,%.0f)", rect.X, rect.Y, rect.W, rect.H)
-			if !c.click("工作区可写") && !c.click("会话设置") {
+			if !c.click("会话设置") && !c.click("工作区可写") {
 				return
 			}
 			d.drain(2)
@@ -291,7 +291,7 @@ func (d *drive) runSessionSteps() {
 			if d.has("»") {
 				c.warnf("窄窗 composer 出现了无标签 » 溢出按钮")
 			}
-			if c.click("工作区可写") || c.click("会话设置") {
+			if c.click("会话设置") || c.click("工作区可写") {
 				d.drain(2)
 				c.require(d.has("权限模式") && d.has("对话模式"),
 					"窄窗「会话设置」菜单没有权限/对话模式分组")

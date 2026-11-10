@@ -19,6 +19,7 @@ import (
 
 	"github.com/zeokeel/zeokeel/internal/contracts"
 	"github.com/zeokeel/zeokeel/internal/design"
+	"github.com/zeokeel/zeokeel/internal/icons"
 	"github.com/zeokeel/zeokeel/internal/uikit"
 )
 
@@ -49,6 +50,9 @@ type catalogState struct {
 	editorOpen bool
 	edit       *catalogEditDraft
 
+	// removeOpen is the removal confirmation's open flag (persistent for
+	// uikit.ConfirmDanger); confirmRemove is the model ID being removed.
+	removeOpen bool
 	// confirmRemove is the model ID whose removal confirmation is open.
 	confirmRemove string
 
@@ -367,57 +371,56 @@ func buildModelCatalogSection(c *ui.Context, runtime contracts.UIRuntime, store 
 	t := design.Of(c)
 	models, ok := catalogModels(store)
 	ui.Column(c).FillWidth().Gap(design.Space3).Children(func() {
-		uikit.Section(c, localized(locale, "模型列表", "Models"), func(*ui.Context) {
-			if !ok {
-				uikit.ErrorLine(c, localized(locale,
-					"模型配置无法解析；添加模型会重写该配置。",
-					"The model-list setting is invalid; adding a model rewrites it."))
-			}
-			if len(models) == 0 {
-				if ok {
-					uikit.EmptyState(c, localized(locale,
-						"还没有模型。添加后，对话输入框的模型菜单会展示它。",
-						"No models yet. Add one and the composer's model menu shows it."))
-				}
-			} else {
-				// The models are a collection: the official List keys the rows
-				// by model ID, names them and owns the keyboard selection; the
-				// inline edit/remove buttons keep their click semantics.
-				bindSettingsList(&st.list, &st.sel, len(models), func(index int) any {
-					if index < 0 || index >= len(models) {
-						return nil
-					}
-					return models[index].ID
-				}, func(index int) string {
-					if index < 0 || index >= len(models) {
-						return ""
-					}
-					return firstNonEmpty(strings.TrimSpace(models[index].Name), models[index].ID)
-				})
-				ui.List(c, &st.list, len(models)).
-					Label(localized(locale, "模型列表", "Model list")).
-					Gap(design.Space1).
-					Rows(func(row ui.ListRow) {
-						buildModelCatalogRow(row.Context, t, store, st, models, models[row.Index], locale, row.Selected())
-					})
-			}
-			// Adding a model is one explicit action that opens the form in a
-			// modal, so the page stays short; the button stays at the list's
-			// bottom as the section's model action.
-			ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(design.Space2).Children(func() {
-				if design.Apply(ui.PrimaryButton(c, localized(locale, "添加模型", "Add model")),
-					t.PrimaryButton()).Clicked() {
+		uikit.SectionAction(c, localized(locale, "模型列表（即时生效）", "Models (apply immediately)"),
+			func(*ui.Context) {
+				// Adding a model is a section action, not a page primary: the page's
+				// one filled accent button is the footer's Save (R12).
+				if design.Apply(ui.Button(c, localized(locale, "添加模型", "Add model")),
+					t.SecondaryButton()).Clicked() {
 					st.openCatalogAdd(models)
 					c.Invalidate()
 				}
+			}, func(*ui.Context) {
+				if !ok {
+					uikit.ErrorLine(c, localized(locale,
+						"模型配置无法解析；添加模型会重写该配置。",
+						"The model-list setting is invalid; adding a model rewrites it."))
+				}
+				if len(models) == 0 {
+					if ok {
+						uikit.EmptyState(c, localized(locale,
+							"还没有模型。添加后，对话输入框的模型菜单会展示它。",
+							"No models yet. Add one and the composer's model menu shows it."))
+					}
+				} else {
+					// The models are a collection: the official List keys the rows
+					// by model ID, names them and owns the keyboard selection; the
+					// inline edit/remove buttons keep their click semantics.
+					bindSettingsList(&st.list, &st.sel, len(models), func(index int) any {
+						if index < 0 || index >= len(models) {
+							return nil
+						}
+						return models[index].ID
+					}, func(index int) string {
+						if index < 0 || index >= len(models) {
+							return ""
+						}
+						return firstNonEmpty(strings.TrimSpace(models[index].Name), models[index].ID)
+					})
+					ui.List(c, &st.list, len(models)).
+						Label(localized(locale, "模型列表", "Model list")).
+						Gap(design.Space1).
+						Rows(func(row ui.ListRow) {
+							buildModelCatalogRow(row.Context, t, store, st, models, models[row.Index], locale, row.Selected())
+						})
+				}
+				if st.status != "" {
+					statusBadgesRow(c, t, st.status, st.err)
+				}
+				if st.confirmRemove != "" {
+					buildCatalogRemoveDialog(c, store, st, models, locale)
+				}
 			})
-			if st.status != "" {
-				statusBadgesRow(c, t, st.status, st.err)
-			}
-			if st.confirmRemove != "" {
-				buildCatalogRemoveDialog(c, store, st, models, locale)
-			}
-		})
 		if st.addOpen {
 			buildCatalogAddDialog(c, t, runtime, store, models, st, locale, fallbackBaseURL, fallbackAPIKey)
 		}
@@ -443,7 +446,7 @@ func buildModelCatalogRow(c *ui.Context, t *design.Tokens, store contracts.Setti
 		ui.Column(c).Gap(design.Space1).Grow(1).Children(func() {
 			ui.Row(c).AlignItems(ui.Center).Gap(design.Space2).Children(func() {
 				design.Apply(ui.Text(c, firstNonEmpty(strings.TrimSpace(model.Name), id)),
-					t.Font(design.TypeS)).FontWeight(600).TextColor(primary)
+					t.Font(design.TypeS)).FontWeight(design.WeightSemibold).TextColor(primary)
 				if catalogIsDefault(store, models, id) {
 					label := localized(locale, "默认", "Default")
 					if selected {
@@ -488,13 +491,26 @@ func buildModelCatalogRow(c *ui.Context, t *design.Tokens, store contracts.Setti
 			st.openCatalogEdit()
 			c.Invalidate()
 		}
-		if design.Apply(ui.Button(c, localized(locale, "删除", "Remove")),
-			t.DangerButton()).
-			Label(localized(locale, "删除模型 ", "Remove model ") + id).
-			Tooltip(localized(locale, "从模型列表删除", "Remove from the model list")).Clicked() {
-			st.confirmRemove = id
-			c.Invalidate()
-		}
+		// The destructive remove lives behind the row's ⋯ menu (danger item), so
+		// a list of models never paints one red button per row (DESIGN.md §5.2
+		// danger budget; the shared ListRow keeps one trailing menu).
+		label := localized(locale, "模型操作", "Model actions")
+		menu := uikit.IconButton(c, uikit.IconButtonOptions{
+			Key:     "model-actions/" + id,
+			Label:   label + " " + id,
+			Tooltip: label,
+			Icon:    icons.More(),
+			Size:    design.IconSizeS,
+		})
+		menu.PopoverMenuButton(func(m *ui.Menu) {
+			remove := m.Item(localized(locale, "删除模型", "Remove model"))
+			remove.Danger()
+			if remove.Chosen() {
+				st.confirmRemove = id
+				st.removeOpen = true
+				c.Invalidate()
+			}
+		})
 	})
 }
 
@@ -585,7 +601,7 @@ func buildCatalogAddDialog(c *ui.Context, t *design.Tokens, runtime contracts.UI
 			return element.PaddingX(design.Space5).PaddingY(design.Space2)
 		}).Children(func() {
 			design.Apply(ui.Text(c, localized(locale, "添加模型", "Add model")),
-				t.Font(design.TypeL)).FontWeight(600).TextColor(t.LabelPrimary)
+				t.Font(design.TypeL)).FontWeight(design.WeightSemibold).TextColor(t.LabelPrimary)
 			design.Apply(ui.Text(c, localized(locale,
 				"添加后会立即加入模型列表并出现在对话的模型菜单中。",
 				"The model joins the list and the composer's model menu immediately.")),
@@ -755,18 +771,18 @@ func addCatalogModel(st *catalogState, store contracts.SettingsService,
 func buildCatalogRemoveDialog(c *ui.Context, store contracts.SettingsService,
 	st *catalogState, models []contracts.ModelInfo, locale contracts.LocaleService) {
 	id := st.confirmRemove
-	open := true
-	switch ui.AlertDialog(c, &open,
-		localized(locale, "删除模型", "Remove model"),
-		localized(locale, "确认从模型列表删除「", "Remove ")+id+
-			localized(locale, "」？", " from the model list?"),
-		localized(locale, "取消", "Cancel"),
-		localized(locale, "确认删除", "Confirm remove")) {
-	case 1:
-		removeCatalogModel(st, store, models, id, locale)
-		c.Invalidate()
-	}
-	if !open {
+	uikit.ConfirmDanger(c, &st.removeOpen, uikit.ConfirmDangerOptions{
+		Key:     "model.remove",
+		Title:   localized(locale, "删除模型", "Remove model"),
+		Message: localized(locale, "确认从模型列表删除「", "Remove ") + id + localized(locale, "」？", " from the model list?"),
+		Confirm: localized(locale, "确认删除", "Confirm remove"),
+		Cancel:  localized(locale, "取消", "Cancel"),
+		OnConfirm: func() {
+			removeCatalogModel(st, store, models, id, locale)
+			c.Invalidate()
+		},
+	})
+	if !st.removeOpen {
 		st.confirmRemove = ""
 	}
 }

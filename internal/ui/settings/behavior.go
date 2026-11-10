@@ -282,9 +282,9 @@ func buildBehaviorPage(c *ui.Context, runtime contracts.UIRuntime,
 			modeIndex := workStepsModeIndex(contracts.NormalizeWorkStepsMode(
 				store.Get(contracts.SettingWorkStepsMode, "")))
 			ui.Field(c, localized(locale, "工作步骤展示", "Work details"), func() {
-				segmented := ui.Segmented(c, &modeIndex, workStepsModeLabels(locale)...).
-					Label(localized(locale, "工作步骤展示", "Work details"))
-				if segmented.Changed() {
+				if buildSegmentedControl(c, t, &modeIndex,
+					localized(locale, "工作步骤展示", "Work details"),
+					workStepsModeLabels(locale)...) {
 					saveBehaviorSetting(st, runtime, store, locale,
 						contracts.SettingWorkStepsMode, workStepsModeValue(modeIndex))
 				}
@@ -299,10 +299,9 @@ func buildBehaviorPage(c *ui.Context, runtime contracts.UIRuntime,
 				store.Get(contracts.SettingWorkStepsCollapse, "")))
 			ui.Field(c, localized(locale, "工作步骤收起时机", "When to collapse work details"),
 				func() {
-					segmented := ui.Segmented(c, &collapseIndex,
-						workStepsCollapseLabels(locale)...).
-						Label(localized(locale, "工作步骤收起时机", "When to collapse work details"))
-					if segmented.Changed() {
+					if buildSegmentedControl(c, t, &collapseIndex,
+						localized(locale, "工作步骤收起时机", "When to collapse work details"),
+						workStepsCollapseLabels(locale)...) {
 						saveBehaviorSetting(st, runtime, store, locale,
 							contracts.SettingWorkStepsCollapse, workStepsCollapseValue(collapseIndex))
 					}

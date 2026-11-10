@@ -201,11 +201,13 @@ func activate[T any](t *testing.T, ctx cordis.Context, descriptor *module.Descri
 func TestSectionsWithoutBackends(t *testing.T) {
 	h := newHarness(t, nil, nil, plugins.Config{})
 	tester := h.tester()
+	// The screen title lives in the host top band; the page description is that
+	// title's tooltip (see TestCustomConfig), not an in-body heading. Without a
+	// plugins service the band still offers the (harmless) refresh control.
 	h.assertTexts(tester,
-		"插件", "查看已连接的 MCP 服务器与产品内置的工具目录。",
+		"插件", "刷新",
 		"MCP 插件", "插件服务未启用",
 		"工具目录", "工具目录未启用")
-	h.assertNoTexts(tester, "刷新")
 }
 
 func TestMCPListRenders(t *testing.T) {
@@ -324,7 +326,18 @@ func TestCustomConfig(t *testing.T) {
 		ToolsSection: "Tools",
 	})
 	tester := h.tester()
-	h.assertTexts(tester, "Plugins", "Custom description", "MCP servers", "Tools")
+	h.assertTexts(tester, "Plugins", "MCP servers", "Tools")
+	// A configured description stays available: it is the band title's tooltip.
+	rect, ok := tester.Find("Plugins")
+	if !ok {
+		t.Fatalf("plugins band title missing; texts = %v", tester.Texts())
+	}
+	tester.Move(rect.X+rect.W/2, rect.Y+rect.H/2)
+	tester.Advance(700 * time.Millisecond)
+	tester.Frame()
+	if !tester.HasText("Custom description") {
+		t.Fatalf("plugins title tooltip does not show the configured description; texts = %v", tester.Texts())
+	}
 }
 
 func TestModuleMetadata(t *testing.T) {

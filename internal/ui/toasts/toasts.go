@@ -53,19 +53,29 @@ const maxPending = 32
 const toastMaxVisible = 2
 
 // Toast placement: a top-right popup under the app's top header, stacking down.
-// The header is the window's first two rows (44 DIP title row + 32 DIP tab row =
-// 76 DIP); the stack starts one Space2 gap below it, so it never covers the
-// title, tabs or the header's right-side actions. The measures are multiples of
-// the design system's 4 DIP spacing tokens instead of bare numbers, keeping the
+// The header is the window's first two rows (40 DIP title row + 32 DIP tab row
+// = 72 DIP); the stack starts one Space3 (12 DIP) gap below it, so it clears the
+// tab row and the header's right-side actions and leaves the transcript's top
+// edge as much room as the toast height allows (R16/V24). The measures are
+// multiples of the design system's tokens instead of bare numbers, keeping the
 // stack on the same grid as the rest of the shell.
 const (
-	// toastTopInset clears the 72 DIP header plus one Space2 (8 DIP) gap.
-	toastTopInset float32 = design.Space8*2 + design.Space4  // 80
+	// toastHeaderHeight is the window top band's two rows: the screen header row
+	// (Space8 + Space2) and the tab row (Space8).
+	toastHeaderHeight float32 = design.Space8 + design.Space2 + design.Space8 // 72
+	// toastTopInset clears the top band plus one Space3 (12 DIP) gap.
+	toastTopInset float32 = toastHeaderHeight + design.Space3 // 84
+	// toastMinWidth is the narrowest toast: the navigation column's measure,
+	// so even a two-word notification keeps the same card width (V24's unified
+	// toast skeleton).
+	toastMinWidth float32 = design.SidebarWidth // 280
+	// toastMaxWidth bounds a long notification so the card stays a toast, not a
+	// panel.
 	toastMaxWidth float32 = design.Space8*11 + design.Space2 // 360
 	// The close control's hit area is a full 24 DIP target (mygo/DESIGN
 	// accessibility AP-17: an icon action's target is at least 24): a 20 DIP
 	// button next to the toast's action button was easy to miss on a desktop
-	// pointer. The glyph stays 16 (design.Space4), quiet.
+	// pointer. The glyph stays 16 (design.IconSizeS), quiet.
 	toastCloseButtonSize float32 = design.Space6 // 24
 )
 
@@ -415,40 +425,51 @@ func (st *state) toastLevelFor(t *design.Tokens, toastType string) toastLevel {
 	}
 }
 
-// buildToast is one branded toast: the level (icon + label), the copy and the
-// close control, on the raised surface with the product's border and the
-// theme's overlay elevation. Timing, pause and announcements stay with
-// ToastBase.
+// buildToast is one branded toast, in the unified skeleton of V24: a fixed
+// 16 DIP status-icon slot (info levels keep the slot empty so every card starts
+// at the same edge), a title line at TypeXS/600 in the level's semantic color,
+// the notification copy as the TypeXXS body, an optional action and the quiet
+// 16 DIP close glyph. All cards share the min/max width, the MD radius, the
+// regular border and the overlay elevation, so a stack reads as one surface.
+// Timing, hover pause and announcements stay with ToastBase.
 func buildToast(c *ui.Context, st *state, toast ui.Toast) {
 	t := design.Of(c)
 	p := ui.ToastBase(c, toast)
 	level := st.toastLevelFor(t, toast.Type)
 	box := p.Root.Row().AlignItems(ui.Start).Gap(design.Space2).
-		MaxWidth(toastMaxWidth).Padding(design.Space2, design.Space3).
+		MinWidth(toastMinWidth).MaxWidth(toastMaxWidth).
+		Padding(design.Space2, design.Space3).
 		Radius(design.RadiusMD).Background(t.BgRaised).Border(1, t.BorderL2)
 	// The elevation is the shared floating-surface token (stronger in the dark
 	// theme), not a bare shadow value of this module.
 	box = design.Apply(box, t.ShadowOverlay())
 	box.Children(func() {
-		ui.Column(c).Grow(1).Gap(design.Space1).Children(func() {
-			ui.Row(c).AlignItems(ui.Center).Gap(design.Space1).Children(func() {
+		// The status slot: one 16 DIP glyph (info reserves the slot without a
+		// glyph; the icon set has no info mark and an invented one is noise).
+		ui.Box(c).Width(design.IconSizeS).Height(design.IconSizeS).Shrink(0).
+			Children(func() {
 				if level.icon != nil {
-					ui.Icon(c, level.icon).Size(design.Space3, design.Space3).TextColor(level.color)
+					ui.Icon(c, level.icon).Size(design.IconSizeS, design.IconSizeS).TextColor(level.color)
 				}
-				design.Apply(ui.Text(c, level.label), t.Font(design.TypeXXXS)).
-					FontWeight(600).TextColor(level.color)
+			})
+		ui.Column(c).Grow(1).Gap(design.Space1).Children(func() {
+			ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(design.Space2).Children(func() {
+				design.Apply(ui.Text(c, level.label), t.Font(design.TypeXS)).
+					FontWeight(600).TextColor(level.color).Grow(1).MaxLines(1).Ellipsis("…")
 				if count, ok := toast.Data.(int); ok && count > 1 {
 					// One toast standing for N identical notifications: a quiet
 					// count, not another badge row.
-					design.Apply(ui.Text(c, "×"+strconv.Itoa(count)), t.Font(design.TypeXXXS)).
-						FontWeight(600).TextColor(level.color)
+					design.Apply(ui.Text(c, "×"+strconv.Itoa(count)), t.Font(design.TypeXXS)).
+						TextColor(t.LabelTertiary)
 				}
 			})
-			design.Apply(ui.Text(c, toast.Title), t.Font(design.TypeXS)).
-				TextColor(t.LabelPrimary).MaxLines(2)
+			// The notification copy is the body at the metadata size: the title
+			// carries the level, the body the content (V24).
+			design.Apply(ui.Text(c, toast.Title), t.Font(design.TypeXXS)).
+				TextColor(t.LabelTertiary).MaxLines(2)
 			if toast.Description != "" {
 				design.Apply(ui.Text(c, toast.Description), t.Font(design.TypeXXS)).
-					TextColor(t.LabelSecondary).MaxLines(2)
+					TextColor(t.LabelTertiary).MaxLines(2)
 			}
 			if toast.Action != "" {
 				action := p.ActionButton().Padding(design.Space1, design.Space2).
@@ -475,7 +496,7 @@ func buildToast(c *ui.Context, st *state, toast ui.Toast) {
 			close = close.Background(t.BgHover)
 		}
 		close.Children(func() {
-			ui.Icon(c, icons.Close()).Size(design.Space4, design.Space4).TextColor(t.LabelTertiary)
+			ui.Icon(c, icons.Close()).Size(design.IconSizeS, design.IconSizeS).TextColor(t.LabelTertiary)
 		})
 	})
 }

@@ -176,7 +176,8 @@ func TestSettingsMemoryPage(t *testing.T) {
 
 		// Delete asks for confirmation, then removes the entry and the count
 		// returns to zero.
-		clickMemorySettings(t, tester, "删除")
+		clickMemorySettings(t, tester, "记忆操作")
+		clickMemorySettings(t, tester, "删除记忆")
 		clickMemorySettings(t, tester, "确认删除")
 		requireHasTexts(t, tester, "0 条记忆", "还没有记忆")
 	})

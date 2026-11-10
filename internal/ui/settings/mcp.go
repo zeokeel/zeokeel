@@ -15,6 +15,7 @@ import (
 
 	"github.com/zeokeel/zeokeel/internal/contracts"
 	"github.com/zeokeel/zeokeel/internal/design"
+	"github.com/zeokeel/zeokeel/internal/icons"
 	"github.com/zeokeel/zeokeel/internal/uikit"
 )
 
@@ -65,6 +66,7 @@ type mcpState struct {
 	// confirmRemove is the index of the server row whose removal waits for the
 	// native confirmation dialog (-1 when none is open).
 	confirmRemove int
+	removeOpen    bool // the removal confirmation's open flag (persistent for ConfirmDanger)
 
 	// editIndex is the stored row the form is editing (-1 = add mode). The same
 	// form serves both, so a typo is fixed in place instead of delete+re-add.
@@ -137,26 +139,36 @@ func buildMCPServerRow(c *ui.Context, t *design.Tokens, st *mcpState, index int,
 		AlignItems(ui.Center).Gap(design.Space2).Children(func() {
 		design.Apply(ui.Text(c, server.Name), t.Font(design.TypeS)).
 			FontWeight(600).TextColor(primary).MaxLines(1).Ellipsis("…")
+		// A transport is a type, not a status: neutral badge, no accent metadata
+		// (DESIGN.md §5.2: metadata never uses the accent).
 		transport := mcpRowTransport(server)
-		badge := design.Apply(ui.Badge(c, transportBadgeLabel(transport)), t.Badge())
-		if transport == mcpTransportStdio {
-			badge.TextColor(t.Accent)
-		}
+		design.Apply(ui.Badge(c, transportBadgeLabel(transport)), t.Badge())
 		design.Apply(ui.Text(c, mcpRowAddress(server)),
 			t.Font(design.TypeXS), t.MonoFamily()).
 			TextColor(tertiary).Grow(1).MaxLines(1).Ellipsis("…")
-		if design.Apply(ui.Button(c, localized(locale, "编辑", "Edit")),
-			t.SecondaryButton()).Tooltip(localized(locale,
-			"编辑该服务器的配置", "Edit this server's configuration")).Clicked() {
-			st.fillMCPForm(index)
-			c.Invalidate()
-		}
-		if design.Apply(ui.Button(c, localized(locale, "移除", "Remove")),
-			t.DangerButton()).Tooltip(localized(locale,
-			"移除该服务器", "Remove this server")).Clicked() {
-			st.confirmRemove = index
-			c.Invalidate()
-		}
+		// The row's trailing ⋯ menu owns edit and the destructive remove, so a
+		// list of servers paints no red button per row.
+		label := localized(locale, "服务器操作", "Server actions")
+		menu := uikit.IconButton(c, uikit.IconButtonOptions{
+			Key:     "mcp-actions/" + server.Name,
+			Label:   label,
+			Tooltip: label,
+			Icon:    icons.More(),
+			Size:    design.IconSizeS,
+		})
+		menu.PopoverMenuButton(func(m *ui.Menu) {
+			if m.Item(localized(locale, "编辑", "Edit")).Chosen() {
+				st.fillMCPForm(index)
+				c.Invalidate()
+			}
+			remove := m.Item(localized(locale, "移除", "Remove"))
+			remove.Danger()
+			if remove.Chosen() {
+				st.confirmRemove = index
+				st.removeOpen = true
+				c.Invalidate()
+			}
+		})
 	})
 }
 
@@ -396,24 +408,26 @@ func buildMCPPage(c *ui.Context, kctx cordis.Context, st *mcpState, locale contr
 		// Removing a server is destructive: confirm it with the native dialog.
 		if st.confirmRemove >= 0 && st.confirmRemove < len(st.servers) {
 			index := st.confirmRemove
-			open := true
-			switch ui.AlertDialog(c, &open,
-				localized(locale, "移除 MCP 服务器", "Remove MCP server"),
-				localized(locale, "确认移除「", "Remove ")+st.servers[index].Name+
+			name := st.servers[index].Name
+			uikit.ConfirmDanger(c, &st.removeOpen, uikit.ConfirmDangerOptions{
+				Key:   "mcp.remove",
+				Title: localized(locale, "移除 MCP 服务器", "Remove MCP server"),
+				Message: localized(locale, "确认移除「", "Remove ") + name +
 					localized(locale, "」？此操作无法撤销。", "? This cannot be undone."),
-				localized(locale, "取消", "Cancel"),
-				localized(locale, "移除服务器", "Remove server")) {
-			case 1:
-				removeMCPServer(st, store, locale, index)
-				if st.editIndex == index {
-					st.resetMCPForm()
-				} else if st.editIndex > index {
-					st.editIndex--
-				}
-				st.confirmRemove = -1
-				c.Invalidate()
-			}
-			if !open {
+				Confirm: localized(locale, "移除服务器", "Remove server"),
+				Cancel:  localized(locale, "取消", "Cancel"),
+				OnConfirm: func() {
+					removeMCPServer(st, store, locale, index)
+					if st.editIndex == index {
+						st.resetMCPForm()
+					} else if st.editIndex > index {
+						st.editIndex--
+					}
+					st.confirmRemove = -1
+					c.Invalidate()
+				},
+			})
+			if !st.removeOpen {
 				st.confirmRemove = -1
 			}
 		}

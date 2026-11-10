@@ -345,7 +345,7 @@ func buildArtifactRow(row ui.ListRow, t *design.Tokens, st *state,
 		})
 		if open {
 			ui.Scroll(c).FillWidth().MaxHeight(design.Space6 * 8).Children(func() {
-				markdown.View(c, artifact.Body, nil)
+				markdown.View(c, artifact.Body, docMarkdown(t))
 			})
 		}
 	})

@@ -455,7 +455,7 @@ func TestDialogSafetyAndButtonOrder(t *testing.T) {
 		t.Fatalf("inline approval lacks the visible no-default-action hint; texts = %v", tester.Texts())
 	}
 	// The raw arguments are collapsed behind an explicit disclosure.
-	if !tester.HasText("显示原始参数") {
+	if !tester.HasText("原始参数") {
 		t.Fatalf("approval dialog lacks the collapsed raw-arguments disclosure; texts = %v", tester.Texts())
 	}
 	// Enter must never allow the call.

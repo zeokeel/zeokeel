@@ -463,6 +463,11 @@ var sessionMenuLabels = []string{
 // it currently shows (a non-default security/mode state owns the label).
 func (h *harness) openSessionMenu(tester *ui.Tester) {
 	h.t.Helper()
+	// A call while the menu is already open would toggle it shut (the native
+	// popover's contract), so an open menu is left alone.
+	if tester.HasText("权限模式") || tester.HasText("Permission mode") {
+		return
+	}
 	for _, label := range sessionMenuLabels {
 		for _, text := range tester.Texts() {
 			if text == label {

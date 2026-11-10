@@ -493,7 +493,8 @@ func TestModelDeletePromotesFirstRemainingAndClearsEmptyList(t *testing.T) {
 	tester := openModelPage(t, h)
 
 	// Removing the default row promotes the first remaining row.
-	h.click(tester, "删除模型 m1")
+	h.click(tester, "模型操作 m1")
+	h.click(tester, "删除模型")
 	tester.Frame()
 	h.assertTexts(tester, "删除模型", "确认删除")
 	h.click(tester, "确认删除")
@@ -513,7 +514,8 @@ func TestModelDeletePromotesFirstRemainingAndClearsEmptyList(t *testing.T) {
 	}
 
 	// Removing the last row clears the list and the default mirror.
-	h.click(tester, "删除模型 m2")
+	h.click(tester, "模型操作 m2")
+	h.click(tester, "删除模型")
 	tester.Frame()
 	h.click(tester, "确认删除")
 	tester.Frame()
@@ -543,7 +545,8 @@ func TestModelDeleteNonDefaultKeepsMirror(t *testing.T) {
 	})
 	h := newHarness(t, &fakeChat{}, store, settings.Config{})
 	tester := openModelPage(t, h)
-	h.click(tester, "删除模型 m2")
+	h.click(tester, "模型操作 m2")
+	h.click(tester, "删除模型")
 	tester.Frame()
 	h.click(tester, "确认删除")
 	tester.Frame()

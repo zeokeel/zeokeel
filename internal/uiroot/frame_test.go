@@ -807,3 +807,82 @@ func TestCollapsedSidebarStartupResolvesDefaultScreen(t *testing.T) {
 	tt.Frame()
 	requireHasText(t, tt, "inspector-pane")
 }
+
+// TestSettingsSearchMatchesSettingNames covers R2: the navigation search must
+// find a setting by the name users know it by ("密钥", "主题"), not only by the
+// page title. The alias table is host-owned and keyed by the stable page IDs.
+func TestSettingsSearchMatchesSettingNames(t *testing.T) {
+	r := newTestRoot(t)
+	mustScreen(t, r, textScreen("home", "首页", "body-home", 10))
+	mustPage(t, r, contracts.SettingsPageSpec{ID: "model", Section: "general", Title: "模型设置", Order: 10,
+		Build: func(c *ui.Context) { ui.Text(c, "settings-model-body") }})
+	mustPage(t, r, contracts.SettingsPageSpec{ID: "appearance", Section: "general", Title: "外观设置", Order: 20,
+		Build: func(c *ui.Context) { ui.Text(c, "settings-appearance-body") }})
+	tt := newTestTester(t, r, 1400, 900)
+	r.Navigator().ToggleSettings()
+	tt.Frame()
+	if err := tt.Click("搜索设置"); err != nil {
+		t.Fatalf("Click(搜索设置): %v", err)
+	}
+	tt.Type("密钥")
+	tt.Frame()
+	requireHasText(t, tt, "模型设置")
+	requireNoText(t, tt, "外观设置")
+
+	tt.Key(ui.Cmd, ui.KeyA)
+	tt.Key(0, ui.KeyBackspace)
+	tt.Type("主题")
+	tt.Frame()
+	requireHasText(t, tt, "外观设置")
+	requireNoText(t, tt, "模型设置")
+}
+
+// TestPaletteEscapeClosesOnFirstPress covers R14: the palette footer promises
+// "Esc 关闭", so one Escape must close it even while the search field holds a
+// query (the native SearchField would only clear its text first).
+func TestPaletteEscapeClosesOnFirstPress(t *testing.T) {
+	r := newTestRoot(t)
+	mustScreen(t, r, textScreen("home", "首页", "body-home", 10))
+	mustSlot(t, r, textSlotItem(contracts.SlotScreenHeader, "hdr", "screen-title", 10))
+	tt := newTestTester(t, r, 1280, 800)
+	tt.Frame()
+	if _, ok := tt.AccessByRole(ui.RoleButton, "快捷操作"); !ok {
+		t.Fatalf("palette entry missing; texts = %v", tt.Texts())
+	}
+	if err := tt.Click("快捷操作"); err != nil {
+		t.Fatalf("open palette: %v", err)
+	}
+	tt.Frame()
+	requireHasText(t, tt, "命令面板")
+	tt.Type("设置")
+	tt.Frame()
+	tt.Key(0, ui.KeyEscape)
+	tt.Frame()
+	requireNoText(t, tt, "命令面板")
+}
+
+// TestInspectorDrawerReservesContentWidth covers R3: on a narrow window the
+// inspector is a modal drawer; the content column must reserve its width so the
+// conversation's composer and its send/stop controls stay to the left of the
+// drawer instead of hanging under it.
+func TestInspectorDrawerReservesContentWidth(t *testing.T) {
+	r := newTestRoot(t)
+	mustScreen(t, r, textScreen("session", "会话", "screen-body", 10))
+	mustSlot(t, r, textSlotItem(contracts.SlotSessionPanelRight, "session.panel", "panel-body", 10))
+	tt := newTestTester(t, r, 1024, 720)
+	tt.Frame()
+	r.SetRightPanelOpen(true)
+	tt.Frame()
+	tt.Frame()
+	if _, ok := tt.AccessByRole(ui.RoleDialog, "检查器"); !ok {
+		t.Fatalf("inspector did not render as the narrow-window drawer; texts = %v", tt.Texts())
+	}
+	body, ok := tt.Find("screen-body")
+	if !ok {
+		t.Fatalf("session body missing; texts = %v", tt.Texts())
+	}
+	drawerLeft := float32(1024 - design.InspectorWidth)
+	if body.X+body.W > drawerLeft+1 {
+		t.Fatalf("content column right edge %.1f runs under the drawer at %.1f", body.X+body.W, drawerLeft)
+	}
+}

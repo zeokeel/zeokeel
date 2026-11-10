@@ -8,6 +8,10 @@ import (
 
 // Brand spacing steps on the 4 DIP grid whose unit is brand.Spacing.
 const (
+	// Space0 is the explicit zero of the spacing scale: a call that must pass
+	// one side of a padding or margin and leave another side alone names the
+	// grid's zero instead of a bare 0 literal (DESIGN-LINT DS-03).
+	Space0 float32 = 0
 	Space1 float32 = brand.Spacing
 	Space2 float32 = Space1 * 2
 	Space3 float32 = Space1 * 3
@@ -15,6 +19,28 @@ const (
 	Space5 float32 = Space1 * 5
 	Space6 float32 = Space1 * 6
 	Space8 float32 = Space1 * 8
+)
+
+// Font weights of the type scale. The scale uses three steps only: regular for
+// body, medium for controls and emphasized rows, semibold for headings. Name
+// them here so a new heading does not have to repeat a raw 600 (DS-03).
+const (
+	WeightRegular  int = 400
+	WeightMedium   int = 500
+	WeightSemibold int = 600
+)
+
+// Control heights stay on the 4 DIP grid. The scale is intentionally small:
+// compact (28) for chips and icon buttons, compact row (32) for trees and
+// menus, standard (36) for list rows, form controls and dialog buttons, page
+// action (40) for a page's single primary action, and double row (44) for a
+// list row that carries metadata. The retired 38 DIP primary sat off the grid.
+const (
+	ControlCompactHeight float32 = 28
+	RowCompactHeight     float32 = 32
+	ControlHeight        float32 = 36
+	PageActionHeight     float32 = 40
+	RowDoubleHeight      float32 = 44
 )
 
 // Brand layout measures. They are the single source of the shell geometry so
@@ -122,14 +148,56 @@ func (t *Tokens) Composer() Style {
 	}
 }
 
-// PrimaryButton is the brand's main action: accent fill, OnPrimary text, 38
+// PrimaryButton is the brand's main action: accent fill, OnPrimary text, 36
 // DIP tall, the theme's control radius. Apply it to a ui.PrimaryButton so
 // mygo keeps the native hover/pressed/disabled state machine; overriding the
 // background here would disable those states (mygo styleButton only tints a
 // button whose background is the theme's base).
 func (t *Tokens) PrimaryButton() Style {
 	return func(el ui.Element) ui.Element {
-		return el.Height(38).PaddingX(Space4).Radius(RadiusMD).FontWeight(500)
+		return el.Height(ControlHeight).PaddingX(Space4).Radius(RadiusMD).FontWeight(WeightMedium)
+	}
+}
+
+// PrimaryButtonLarge is the page's single primary action: a hero or empty-state
+// button that may sit on its own, one step taller than a dialog's control.
+// A page must not show more than one filled accent button (DESIGN.md §5.2).
+func (t *Tokens) PrimaryButtonLarge() Style {
+	return func(el ui.Element) ui.Element {
+		return el.Height(PageActionHeight).PaddingX(Space5).Radius(RadiusMD).FontWeight(WeightMedium)
+	}
+}
+
+// DisabledPrimary is the look of a primary action that cannot run yet: a
+// neutral fill with tertiary text instead of mygo's 50% accent wash, which
+// still read as a clickable brand-blue button (white on it is only 2.47:1).
+// Apply it to a plain ui.Button so the native disabled state stays.
+func (t *Tokens) DisabledPrimary() Style {
+	return func(el ui.Element) ui.Element {
+		return el.Height(ControlHeight).PaddingX(Space4).Radius(RadiusMD).FontWeight(WeightMedium).
+			Background(t.BgStrong).TextColor(t.LabelTertiary)
+	}
+}
+
+// ControlChip is a compact outlined chip for staged attachments and the
+// composer's/band's quiet choices: 28 DIP tall, RadiusSM, a hairline border and
+// 8 DIP horizontal padding. It replaces the r16 Panel chip that was the only
+// chip using a card radius (V17).
+func (t *Tokens) ControlChip() Style {
+	return func(el ui.Element) ui.Element {
+		return el.Height(ControlCompactHeight).PaddingX(Space2).Gap(Space1).
+			Background(t.BgRaised).Border(1, t.BorderL2).Radius(RadiusSM)
+	}
+}
+
+// SelectedRow is a persistent navigation item's chosen state: the quiet 12%
+// selection tint, not an accent fill. Transient choices (a command palette row,
+// a menu item under the keyboard) keep the accent fill; persistent navigation
+// stays quiet so one screen never shows two loud accent blocks (DESIGN.md
+// §5.2 selection model).
+func (t *Tokens) SelectedRow() Style {
+	return func(el ui.Element) ui.Element {
+		return el.Background(t.BgSelected).Radius(RadiusSM)
 	}
 }
 
@@ -138,7 +206,7 @@ func (t *Tokens) PrimaryButton() Style {
 // pressed states, the brand only fixes the control metrics.
 func (t *Tokens) SecondaryButton() Style {
 	return func(el ui.Element) ui.Element {
-		return el.Height(36).PaddingX(Space3).Radius(RadiusMD).FontWeight(500)
+		return el.Height(36).PaddingX(Space3).Radius(RadiusMD).FontWeight(WeightMedium)
 	}
 }
 
@@ -147,7 +215,7 @@ func (t *Tokens) SecondaryButton() Style {
 func (t *Tokens) DangerButton() Style {
 	return func(el ui.Element) ui.Element {
 		return el.Height(36).PaddingX(Space3).Radius(RadiusMD).
-			TextColor(t.DangerText).FontWeight(500)
+			TextColor(t.DangerText).FontWeight(WeightMedium)
 	}
 }
 

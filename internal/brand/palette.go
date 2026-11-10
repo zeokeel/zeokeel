@@ -180,8 +180,13 @@ func LightPalette() Palette {
 // so the night chrome is a brand night rather than neutral black.
 func DarkPalette() Palette {
 	return Palette{
-		Background:     ui.Hex("#0D0D14"), // black lifted ~8% toward brand violet
-		Sidebar:        ui.Hex("#13131C"),
+		// The surface ramp runs the same way in both themes: the navigation
+		// (Sidebar) sits below the page, raised cards and the composer above
+		// it, and overlays above those (DESIGN.md §5.1 surface ramp). The dark
+		// theme used to raise the sidebar above the page, which inverted the
+		// metaphor between appearances.
+		Background:     ui.Hex("#111118"), // black lifted ~8% toward brand violet
+		Sidebar:        ui.Hex("#0B0B10"), // sunken navigation: darker than the page
 		Surface:        ui.Hex("#1B1B26"),
 		SurfaceStrong:  ui.Hex("#272736"),
 		SurfacePressed: ui.RGBA(55, 231, 254, 0.16), // logo cyan at 16%

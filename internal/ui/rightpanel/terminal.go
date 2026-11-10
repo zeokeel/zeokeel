@@ -123,10 +123,11 @@ func truncateTerminalOutput(output string) string {
 	return output
 }
 
-// buildTerminalPage is the sidebar's 终端 page: working directory, shell
-// picker, clear/copy actions, the scrollable mono output and the command input
-// with run/stop. It never owns a PTY: one command per Run through
-// TerminalService.
+// buildTerminalPage is the sidebar's 命令 page: a one-off command runner with
+// its working directory labelled above, the shell picker, the clear/copy
+// actions, the scrollable mono output and the command input with run/stop. It
+// never owns a PTY: one command per Run through TerminalService, and the output
+// stays selectable/copyable.
 func buildTerminalPage(
 	c *ui.Context,
 	t *design.Tokens,
@@ -135,7 +136,7 @@ func buildTerminalPage(
 ) {
 	if terminal == nil {
 		buildScrollableBody(c, func() {
-			buildEmptyPane(c, st.tr("终端未启用", "Terminal is not enabled"))
+			buildEmptyPane(c, st.tr("命令未启用", "Commands are not enabled"))
 		})
 		return
 	}
@@ -155,44 +156,57 @@ func buildTerminalPage(
 	}
 
 	ui.Column(c).FillWidth().Grow(1).Children(func() {
-		// Header: working directory, copy/clear actions and the shell choice.
-		ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(design.Space2).
+		// Header, two rows: the labelled working directory keeps the full width
+		// of the narrow rail (the old single row left the path a bare ellipsis
+		// once the actions and the shell picker took their room), and the
+		// actions + shell picker share the second row.
+		ui.Column(c).FillWidth().Gap(design.Space1).
 			Padding(design.Space2, design.Space3).Children(func() {
 			dir := terminal.WorkingDir(context.Background())
 			if strings.TrimSpace(dir) == "" {
 				dir = "."
 			}
-			design.Apply(ui.Text(c, dir), t.Font(design.TypeXXXS)).
-				TextColor(t.LabelTertiary).Grow(1).MaxLines(1).Ellipsis("…")
-			if hasOutput {
-				copyLabel := st.tr("复制全部输出", "Copy all output")
-				uikit.IconButton(c, uikit.IconButtonOptions{
-					Key:      "rightpanel.terminal.copy",
-					Label:    copyLabel,
-					Tooltip:  copyLabel,
-					Icon:     icons.Copy(),
-					Size:     design.IconSizeS,
-					InkColor: terminalCopyInk(t, copied),
-					OnClick: func() {
-						c.WriteClipboard(output)
-						term.copiedAt = c.Now()
-						st.invalidate()
-					},
-				})
-				clearLabel := st.tr("清空", "Clear")
-				uikit.IconButton(c, uikit.IconButtonOptions{
-					Key:     "rightpanel.terminal.clear",
-					Label:   clearLabel,
-					Tooltip: clearLabel,
-					Icon:    icons.Trash(),
-					Size:    design.IconSizeS,
-					OnClick: func() {
-						term.clearOutput()
-						st.invalidate()
-					},
-				})
-			}
-			buildShellSelect(c, t, terminal, st)
+			// The path row says what the path is (工作目录) and keeps the full
+			// path in its tooltip, so a narrow rail can ellipsize it honestly.
+			ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(design.Space2).Children(func() {
+				design.Apply(ui.Text(c, st.tr("工作目录", "Working dir")),
+					t.Font(design.TypeXXXS)).TextColor(t.LabelTertiary).NoWrap()
+				design.Apply(ui.Text(c, dir), t.Font(design.TypeXXXS)).
+					TextColor(t.LabelSecondary).Grow(1).MinWidth(design.Space0).MaxLines(1).
+					Ellipsis("…").Tooltip(dir)
+			})
+			ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(design.Space2).Children(func() {
+				if hasOutput {
+					copyLabel := st.tr("复制全部输出", "Copy all output")
+					uikit.IconButton(c, uikit.IconButtonOptions{
+						Key:      "rightpanel.terminal.copy",
+						Label:    copyLabel,
+						Tooltip:  copyLabel,
+						Icon:     icons.Copy(),
+						Size:     design.IconSizeS,
+						InkColor: terminalCopyInk(t, copied),
+						OnClick: func() {
+							c.WriteClipboard(output)
+							term.copiedAt = c.Now()
+							st.invalidate()
+						},
+					})
+					clearLabel := st.tr("清空", "Clear")
+					uikit.IconButton(c, uikit.IconButtonOptions{
+						Key:     "rightpanel.terminal.clear",
+						Label:   clearLabel,
+						Tooltip: clearLabel,
+						Icon:    icons.Trash(),
+						Size:    design.IconSizeS,
+						OnClick: func() {
+							term.clearOutput()
+							st.invalidate()
+						},
+					})
+				}
+				ui.Spacer(c).Grow(1)
+				buildShellSelect(c, t, terminal, st)
+			})
 		})
 		if term.err != "" {
 			uikit.ErrorLine(c, term.err)
@@ -206,7 +220,9 @@ func buildTerminalPage(
 		ui.Scroll(c).FillWidth().Grow(1).TrackScroll(&term.outputScroll).Children(func() {
 			ui.Column(c).FillWidth().Padding(design.Space2, design.Space3).Children(func() {
 				if !hasOutput {
-					design.Apply(ui.Text(c, st.tr("在工作区根目录运行命令", "Run commands in the workspace root")),
+					design.Apply(ui.Text(c, st.tr(
+						"一次性命令：在下方工作目录执行，输出可复制",
+						"One-off commands run in the working directory below; the output is copyable")),
 						t.TextMuted(design.TypeXXS))
 					return
 				}
@@ -231,7 +247,7 @@ func buildTerminalPage(
 		// Input row: native text input submits, Run/Stop swaps while running.
 		ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(design.Space2).
 			Padding(design.Space1, design.Space3).Children(func() {
-			ui.TextInput(c, &term.input).Label(st.tr("命令", "Command")).
+			ui.TextInput(c, &term.input).Label(st.tr("命令输入", "Command input")).
 				Placeholder(st.tr("输入命令…", "Enter a command…")).
 				Grow(1).OnSubmit(func() { runTerminalCommand(terminal, st.runtime, st) })
 			if running {
@@ -247,9 +263,13 @@ func buildTerminalPage(
 				runTerminalCommand(terminal, st.runtime, st)
 			}
 		})
-		design.Apply(ui.Text(c, st.tr("简单命令运行器（无 PTY / 持久 shell）",
-			"Simple command runner (no PTY / persistent shell)")),
-			t.TextMuted(design.TypeXXXS)).PaddingX(design.Space3).PaddingY(design.Space2)
+		// The one-line explanation states what the user gets: a one-off command
+		// in the working directory, output copyable. The implementation limits
+		// (no PTY, no persistent shell) are not the user's vocabulary (B18).
+		design.Apply(ui.Text(c, st.tr(
+			"一次性命令 · 在工作目录执行 · 输出可复制",
+			"One-off commands · run in the working directory · output is copyable")),
+			t.TextMuted(design.TypeXXS)).PaddingX(design.Space3).PaddingY(design.Space2)
 	})
 }
 
@@ -286,7 +306,9 @@ func buildShellSelect(c *ui.Context, t *design.Tokens, terminal contracts.Termin
 			TextColor(t.LabelSecondary).NoWrap()
 		return
 	}
-	design.Apply(ui.Text(c, st.tr("当前", "Current")), t.TextMuted(design.TypeXXXS)).NoWrap()
+	// The visible label names the field ("Shell"), not the ambiguous "当前":
+	// the choice is the shell the one-off commands run through (B18).
+	design.Apply(ui.Text(c, st.tr("Shell", "Shell")), t.TextMuted(design.TypeXXXS)).NoWrap()
 	selector := ui.Select(c, &term.shell, shells).
 		Label(st.tr("选择 shell", "Choose shell"))
 	if selector.Changed() {

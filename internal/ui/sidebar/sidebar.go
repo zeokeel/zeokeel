@@ -23,6 +23,12 @@
 // workspace group row also carries the per-workspace new-chat action (⊕) that
 // opens the workspace and starts a conversation in it.
 //
+// The chosen row is the quiet persistent selection of the design system
+// (DESIGN §5.2): the BgSelected tint plus a 2 DIP accent stripe on the left,
+// not mygo's native saturated accent fill. The list keeps the native keyboard,
+// focus, choice and accessibility selection: only the local theme the List is
+// built with maps its chosen-row accent to the selection tint.
+//
 // The list shows user conversations only: archived sessions are owned by the
 // settings surface's archive page, and sessions with a non-user explicit
 // provenance (contracts.ChatSessionInfo.Origin — automation-run sessions and
@@ -43,9 +49,16 @@
 //
 // # Session operations
 //
-// The list filters case-insensitively by session title (an empty title is shown
-// as "未命名会话"). When an active session exists the footer shows the quiet
-// rename/delete actions:
+// The search field filters sessions case-insensitively by title (an empty
+// title is shown as "未命名会话") and searches message bodies below: the two
+// result kinds share one query. A title miss is never reported as "no results"
+// while message hits are about to show — the quiet "标题无匹配" line follows the
+// message results, and the single "没有匹配" state appears only when neither a
+// title nor a message matched. Snippets are windowed around the first match and
+// the matched words are emphasized.
+//
+// When an active session exists the footer shows the quiet rename/delete
+// actions:
 //
 //   - rename is only offered when the chat service also implements
 //     contracts.SessionRenamer; the button opens a native Modal with a
@@ -65,6 +78,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode"
 
 	"github.com/egoist/mygo/ui"
 	cordis "github.com/zeokeel/zeokeel-kernel"
@@ -305,25 +319,40 @@ func Module() *module.Descriptor[Config] {
 		WithName("ZeoKeel sidebar")
 }
 
-// buildPrimary is the brand "new chat" action: the official PrimaryButton
-// (native accent background, hover/pressed/focus/keyboard states from the
-// theme) at 38 DIP with the NewChat glyph and its label as the button content;
-// the label stays the accessible name. Creating a chat in the current
-// workspace also unfolds that workspace's group, so the fresh row is visible.
+// buildPrimary is the brand "new chat" action: the official primary button at
+// the standard 36 DIP control height with the NewChat glyph and its label as
+// the content; the label stays the accessible name. With an active session the
+// action drops to the neutral outlined secondary style: a chosen session row
+// and a filled accent button next to it would be two loud accent blocks on one
+// screen, and the screen's single primary belongs to the composer then (DESIGN
+// §5.2 accent budget). The landing/empty state keeps the filled primary.
+// Creating a chat in the current workspace also unfolds that workspace's group,
+// so the fresh row is visible.
 func buildPrimary(c *ui.Context, t *design.Tokens, chat contracts.ChatService,
 	nav contracts.Navigator, runtime contracts.UIRuntime, state *paneState) {
 	label := state.newChatLabel()
+	hasSelection := strings.TrimSpace(chat.ActiveSession()) != ""
 	ui.Row(c).FillWidth().
 		Padding(design.Space2, design.Space3, design.Space2, design.Space3).
 		Children(func() {
-			button := design.Apply(ui.PrimaryButton(c, ""), t.PrimaryButton()).
-				FillWidth().Height(38).Label(label)
+			var button ui.Element
+			iconColor, textColor := t.AccentText, t.AccentText
+			if hasSelection {
+				// The outlined secondary action: the native button look keeps
+				// hover/pressed/disabled, the brand fixes the control metrics.
+				button = design.Apply(ui.Button(c, ""), t.SecondaryButton()).
+					FillWidth().Label(label)
+				iconColor, textColor = t.Accent, t.LabelPrimary
+			} else {
+				button = design.Apply(ui.PrimaryButton(c, ""), t.PrimaryButton()).
+					FillWidth().Label(label)
+			}
 			button.Children(func() {
 				ui.Row(c).FillWidth().AlignItems(ui.Center).Justify(ui.Center).
 					Gap(design.Space2).Children(func() {
-					ui.Icon(c, icons.NewChat()).Size(16, 16).TextColor(t.AccentText)
+					ui.Icon(c, icons.NewChat()).Size(design.IconSizeS, design.IconSizeS).TextColor(iconColor)
 					design.Apply(ui.Text(c, label), t.Text(design.TypeBody)).
-						FontWeight(500).TextColor(t.AccentText)
+						FontWeight(500).TextColor(textColor)
 				})
 			})
 			if button.Clicked() {
@@ -369,7 +398,7 @@ func (state *paneState) currentWorkspace() (contracts.Workspace, bool) {
 // clicking a session activates it and opens the session screen.
 func buildSessionList(c *ui.Context, t *design.Tokens, chat contracts.ChatService,
 	nav contracts.Navigator, runtime contracts.UIRuntime, state *paneState, title string) {
-	ui.Column(c).FillWidth().Gap(design.Space1).Padding(design.Space2, 0, 0, 0).
+	ui.Column(c).FillWidth().Gap(design.Space1).Padding(design.Space2, design.Space0, design.Space0, design.Space0).
 		Children(func() {
 			// Generic module-screen destinations: every registered screen the
 			// sidebar does not own itself (the session list is its own screen, and
@@ -416,7 +445,7 @@ func buildSessionList(c *ui.Context, t *design.Tokens, chat contracts.ChatServic
 					design.Apply(ui.Text(c, title), t.SectionLabel())
 				})
 			}
-			ui.Row(c).FillWidth().Padding(0, design.Space1, 0, design.Space1).
+			ui.Row(c).FillWidth().Padding(design.Space0, design.Space1, design.Space0, design.Space1).
 				Children(func() {
 					searchLabel := state.T("搜索会话与消息", "Search chats and messages")
 					ui.SearchField(c, &state.query).
@@ -430,29 +459,61 @@ func buildSessionList(c *ui.Context, t *design.Tokens, chat contracts.ChatServic
 			// search result.
 			allSessions := visibleSessions(chat.Sessions())
 			sessions := orderSessionList(filterSessions(allSessions, query, state))
+			// A query has two result kinds: session titles and message bodies.
+			// Both are loaded before either section renders, so a title miss
+			// never reads as "no results" while the message matches below it
+			// are about to show (R11).
+			search := messageSearchFor(state, chat, query)
+			titleHits := len(sessions)
+			messageHits := len(search.hits)
+			// degradedTitle is the title miss under message hits: the session
+			// empty state becomes one quiet line after the message results.
+			degradedTitle := query != "" && titleHits == 0 && messageHits > 0
+			// overallEmpty is the one "no matches" state: neither a title nor
+			// a message matched, or the host has no message searcher at all.
+			overallEmpty := query != "" && titleHits == 0 && messageHits == 0 && search.err == nil
 			switch {
+			case overallEmpty:
+				// One empty state for the whole search, not a session one
+				// followed by a message one (R11).
+				design.Apply(ui.Text(c, state.T("没有匹配", "No matches")), t.TextMuted(design.TypeXXS)).
+					Padding(design.Space1, design.Space2, design.Space0, design.Space2)
 			case hasWorkspace:
 				// Grouping is the product's only mode: the workspace tree (and
 				// its per-workspace row actions) renders even with no sessions,
 				// so a fresh install or a just-added workspace still shows its
 				// group row and new-chat button.
 				buildWorkspaceTree(c, t, chat, nav, runtime, state, workspace,
-					workspaces, allSessions, sessions, query)
+					workspaces, allSessions, sessions, query, degradedTitle)
 			case len(sessions) == 0:
-				empty := state.T("还没有会话", "No sessions yet")
-				if query != "" {
-					empty = state.T("没有匹配的会话", "No matching sessions")
+				// A query with message hits (or a message-search failure) leaves
+				// the session section to the message section below; only the
+				// plain no-query empty state and the unsearched title miss stay
+				// here.
+				if query == "" {
+					design.Apply(ui.Text(c, state.T("还没有会话", "No sessions yet")),
+						t.TextMuted(design.TypeXXS)).
+						Padding(design.Space1, design.Space2, design.Space0, design.Space2)
+				} else if !degradedTitle {
+					design.Apply(ui.Text(c, state.T("没有匹配的会话", "No matching sessions")),
+						t.TextMuted(design.TypeXXS)).
+						Padding(design.Space1, design.Space2, design.Space0, design.Space2)
 				}
-				design.Apply(ui.Text(c, empty), t.TextMuted(design.TypeXXS)).
-					Padding(design.Space1, design.Space2, 0, design.Space2)
 			default:
 				buildFlatSessionList(c, t, chat, nav, runtime, state, sessions)
 			}
 			// Full-text message search below the title-filtered list: a query
 			// can match messages of sessions whose title does not match, so this
 			// section renders even when the list above is empty.
-			if query != "" {
-				buildMessageSearch(c, t, chat, nav, runtime, state, query)
+			if query != "" && search.available && !overallEmpty {
+				buildMessageSearch(c, t, chat, nav, runtime, state, query, search)
+			}
+			// The title miss under message hits: a quiet last line instead of a
+			// "no matching sessions" headline before the results (R11).
+			if degradedTitle {
+				design.Apply(ui.Text(c, state.T("标题无匹配", "No matching titles")),
+					t.TextMuted(design.TypeXXS)).
+					Padding(design.Space2, design.Space2, design.Space0, design.Space2)
 			}
 		})
 }
@@ -460,43 +521,65 @@ func buildSessionList(c *ui.Context, t *design.Tokens, chat contracts.ChatServic
 // maxMessageHits bounds the message-search result rows shown per query.
 const maxMessageHits = 8
 
-// buildMessageSearch renders the durable full-text search results for the
-// current query, grouped by conversation: each session gets one small header
-// with the number of matching messages, and its hits below it (the old list
-// repeated the session title on every row).
-func buildMessageSearch(c *ui.Context, t *design.Tokens, chat contracts.ChatService,
-	nav contracts.Navigator, runtime contracts.UIRuntime, state *paneState, query string) {
+// messageSearchFrame is one frame's full-text search view: whether the host
+// has a message searcher at all, the visible hits for the current query and the
+// last search error. The query's result is cached in the pane state, so a frame
+// searches once per query no matter how many sections read it.
+type messageSearchFrame struct {
+	available bool
+	hits      []contracts.MessageSearchHit
+	err       error
+}
+
+// messageSearchFor resolves the current query's message search: the cached
+// store result, filtered to the conversations the sidebar shows. A host
+// without a store/searcher keeps the title-only behavior (available false).
+func messageSearchFor(state *paneState, chat contracts.ChatService, query string) messageSearchFrame {
+	if query == "" {
+		return messageSearchFrame{}
+	}
 	store, ok := state.ctx.Get(contracts.KeyStore)
 	if !ok || store == nil {
-		return
+		return messageSearchFrame{}
 	}
 	searcher, ok := store.(contracts.MessageSearcher)
 	if !ok {
-		return
+		return messageSearchFrame{}
 	}
 	if state.searchQuery != query {
 		state.searchQuery = query
 		hits, err := searcher.SearchMessages(context.Background(), query, maxMessageHits)
 		state.searchHits, state.searchErr = dedupeMessageHits(hits), err
 	}
-	// The search results are store-owned and carry no archive or provenance
-	// flag, so hidden conversations (archived sessions and non-user origins such
-	// as automation runs) are filtered here on every frame: archiving or a
-	// finished run closes the conversation's rows immediately instead of waiting
-	// for a new query.
-	visibleHits := visibleMessageHits(state.searchHits, hiddenSessionIDs(chat), maxMessageHits)
+	return messageSearchFrame{
+		available: true,
+		hits:      visibleMessageHits(state.searchHits, hiddenSessionIDs(chat), maxMessageHits),
+		err:       state.searchErr,
+	}
+}
 
-	ui.Column(c).FillWidth().Gap(design.Space1).Padding(design.Space2, 0, 0, 0).
+// buildMessageSearch renders the durable full-text search results for the
+// current query, grouped by conversation: each session gets one small header
+// with the number of matching messages, and its hits below it (the old list
+// repeated the session title on every row). The results come from
+// messageSearchFor, which the session section also read, so the loading of the
+// hits and the sections that show them cannot disagree about the match count.
+func buildMessageSearch(c *ui.Context, t *design.Tokens, chat contracts.ChatService,
+	nav contracts.Navigator, runtime contracts.UIRuntime, state *paneState, query string,
+	search messageSearchFrame) {
+	visibleHits := search.hits
+
+	ui.Column(c).FillWidth().Gap(design.Space1).Padding(design.Space2, design.Space0, design.Space0, design.Space0).
 		Children(func() {
 			design.Apply(ui.Text(c, state.T("消息搜索", "Message search")), t.SectionLabel()).
 				NoWrap().MaxLines(1)
-			if state.searchErr != nil {
-				uikit.ErrorLine(c, state.T("搜索消息失败：", "Message search failed: ")+state.searchErr.Error())
+			if search.err != nil {
+				uikit.ErrorLine(c, state.T("搜索消息失败：", "Message search failed: ")+search.err.Error())
 				return
 			}
 			if len(visibleHits) == 0 {
 				design.Apply(ui.Text(c, state.T("没有匹配的消息", "No matching messages")), t.TextMuted(design.TypeXXS)).
-					Padding(design.Space1, design.Space2, 0, design.Space2)
+					Padding(design.Space1, design.Space2, design.Space0, design.Space2)
 				return
 			}
 			design.Apply(ui.Text(c, state.T(
@@ -533,14 +616,14 @@ func buildMessageSearch(c *ui.Context, t *design.Tokens, chat contracts.ChatServ
 					result := rows[row.Index]
 					if result.group != nil {
 						ui.Row(row.Context).FillWidth().AlignItems(ui.Center).Gap(design.Space2).
-							Padding(design.Space2, design.Space2, 0, design.Space2).Children(func() {
+							Padding(design.Space2, design.Space2, design.Space0, design.Space2).Children(func() {
 							design.Apply(ui.Text(row.Context, result.group.title), t.Font(design.TypeXXS)).FontWeight(600).
 								TextColor(t.LabelSecondary).Grow(1).MaxLines(1).Ellipsis("…")
 							design.Apply(ui.Badge(row.Context, strconv.Itoa(len(result.group.hits))), t.Badge())
 						})
 						return
 					}
-					buildMessageHitRowContent(row.Context, t, state, result.hit, false)
+					buildMessageHitRowContent(row.Context, t, state, result.hit, false, query)
 				})
 			activate := func() {
 				if state.searchSel < 0 || state.searchSel >= len(rows) {
@@ -637,9 +720,11 @@ func messageSearchRows(groups []messageHitGroup) []messageSearchRow {
 
 // buildMessageHitRowContent renders one full-text hit: the role, time and the
 // matching snippet. The search List owns selection, click and keyboard, so the
-// row is content only.
+// row is content only. The snippet is centered on the first query match and
+// draws the matches emphasized (R11/B9), so a long message does not show the
+// query cut off at the row edge.
 func buildMessageHitRowContent(c *ui.Context, t *design.Tokens, state *paneState,
-	hit contracts.MessageSearchHit, showTitle bool) {
+	hit contracts.MessageSearchHit, showTitle bool, query string) {
 	title := firstNonEmpty(hit.SessionTitle, state.T("未命名会话", "Untitled session"))
 	ui.Column(c).FillWidth().Gap(design.Space1).
 		Padding(design.Space1, design.Space2).Children(func() {
@@ -656,10 +741,126 @@ func buildMessageHitRowContent(c *ui.Context, t *design.Tokens, state *paneState
 				TextColor(t.LabelTertiary)
 		})
 		if snippet := strings.TrimSpace(hit.Snippet); snippet != "" {
-			design.Apply(ui.Text(c, snippet), t.Font(design.TypeXXS)).
-				TextColor(t.LabelSecondary).MaxLines(2)
+			buildHighlightedSnippet(c, t, query, snippet)
 		}
 	})
+}
+
+// buildHighlightedSnippet renders one message-search snippet with its query
+// matches emphasized: the run before the first match is the quiet secondary
+// text, each match is accent and semibold (B9). A snippet that does not contain
+// the query (the store already excerpts around the match) renders unchanged.
+func buildHighlightedSnippet(c *ui.Context, t *design.Tokens, query, snippet string) {
+	spans := highlightSpans(snippetWindow(snippet, query), query, t)
+	if len(spans) == 0 {
+		spans = []ui.Span{{Text: snippet}}
+	}
+	design.Apply(ui.RichText(c, spans...), t.Font(design.TypeXXS)).
+		TextColor(t.LabelSecondary).MaxLines(2)
+}
+
+// The snippet window measures: keep this many runes before the first match and
+// this many after it, marking either cut with an ellipsis. The old row showed
+// the message's start, so a match deep in the text was cut off.
+const (
+	snippetLead = 20
+	snippetTail = 60
+)
+
+// snippetWindow cuts one snippet around its first query match. A snippet that
+// already contains the match at its start (or does not contain it at all) is
+// returned as-is; only a match that would fall out of the row moves the window.
+func snippetWindow(snippet, query string) string {
+	runes := []rune(snippet)
+	start, _ := matchRunes(runes, query)
+	if start < 0 {
+		return snippet
+	}
+	from, to := start-snippetLead, start+len([]rune(query))+snippetTail
+	if from < 0 {
+		from = 0
+	}
+	if to > len(runes) {
+		to = len(runes)
+	}
+	window := string(runes[from:to])
+	if from > 0 {
+		window = "…" + window
+	}
+	if to < len(runes) {
+		window += "…"
+	}
+	return window
+}
+
+// highlightSpans splits text into the plain runs and its query matches, the
+// matches accented and semibold. It returns nil when the text has no match, so
+// the caller can render it as plain text.
+func highlightSpans(text, query string, t *design.Tokens) []ui.Span {
+	runes := []rune(text)
+	matches := matchRunesAll(runes, query)
+	if len(matches) == 0 {
+		return nil
+	}
+	spans := make([]ui.Span, 0, len(matches)*2+1)
+	last := 0
+	for _, match := range matches {
+		if match[0] > last {
+			spans = append(spans, ui.Span{Text: string(runes[last:match[0]])})
+		}
+		spans = append(spans, ui.Span{
+			Text:   string(runes[match[0]:match[1]]),
+			Weight: 600,
+			Color:  t.Accent,
+		})
+		last = match[1]
+	}
+	if last < len(runes) {
+		spans = append(spans, ui.Span{Text: string(runes[last:])})
+	}
+	return spans
+}
+
+// matchRunes finds the first case-insensitive occurrence of query in runes and
+// returns its rune bounds, or -1 when it does not occur.
+func matchRunes(runes []rune, query string) (int, int) {
+	matches := matchRunesAll(runes, query)
+	if len(matches) == 0 {
+		return -1, 0
+	}
+	return matches[0][0], matches[0][1]
+}
+
+// matchRunesAll returns every non-overlapping case-insensitive occurrence of
+// query in runes, as rune bound pairs.
+func matchRunesAll(runes []rune, query string) [][2]int {
+	needle := []rune(query)
+	if len(needle) == 0 {
+		return nil
+	}
+	var matches [][2]int
+	for at := 0; at+len(needle) <= len(runes); {
+		if runesMatchAt(runes, needle, at) {
+			matches = append(matches, [2]int{at, at + len(needle)})
+			at += len(needle)
+			continue
+		}
+		at++
+	}
+	return matches
+}
+
+// runesMatchAt reports whether needle matches runes at at, case insensitively.
+func runesMatchAt(runes, needle []rune, at int) bool {
+	for index := range needle {
+		if at+index >= len(runes) {
+			return false
+		}
+		if unicode.ToLower(runes[at+index]) != unicode.ToLower(needle[index]) {
+			return false
+		}
+	}
+	return true
 }
 
 // activateMessageHit opens the conversation one search hit belongs to.
@@ -783,20 +984,26 @@ func buildWorkspaceTree(
 	workspaces []contracts.Workspace,
 	allSessions, matched []contracts.ChatSessionInfo,
 	query string,
+	suppressQueryEmpty bool,
 ) {
 	tree := prepareWorkspaceTree(state, workspace, workspaces, allSessions, matched, query)
 	// The tree area owns its empty states: with a workspace backend the tree is
 	// always the section body, so "nothing yet" is said here instead of hiding
 	// the section (which would hide the add and new-chat actions with it).
 	if len(tree.roots) == 0 {
+		// Under message hits the session section stays quiet: the quiet "标题
+		// 无匹配" line after the message results says it once (R11).
+		if suppressQueryEmpty {
+			return
+		}
 		if query != "" {
 			design.Apply(ui.Text(c, state.T("没有匹配的会话", "No matching sessions")),
 				t.TextMuted(design.TypeXXS)).
-				Padding(design.Space1, design.Space2, 0, design.Space2)
+				Padding(design.Space1, design.Space2, design.Space0, design.Space2)
 			return
 		}
 		ui.Column(c).FillWidth().Gap(design.Space1).
-			Padding(design.Space2, design.Space2, 0, design.Space2).Children(func() {
+			Padding(design.Space2, design.Space2, design.Space0, design.Space2).Children(func() {
 			design.Apply(ui.Text(c, state.T("还没有工作区", "No workspaces yet")),
 				t.TextMuted(design.TypeXXS))
 			design.Apply(ui.Text(c, state.T("点击 + 添加工作区", "Click + to add a workspace")),
@@ -847,16 +1054,24 @@ func buildWorkspaceTree(
 	// name and the pointer click target are the visual text.
 	state.tree.List.Label = nil
 	state.tree.List.Selected = &state.treeRow
-	outline := ui.Outline(c, &state.tree, tree.roots, func(item string) []string {
-		return tree.children[item]
-	}, func(item string) {
-		if isWorkspaceTreeKey(item) {
-			buildWorkspaceGroupRow(c, t, chat, nav, workspace, runtime, state, tree, item)
-			return
-		}
-		session := tree.sessions[item]
-		buildSessionRow(c, t, chat, nav, runtime, state, session,
-			session.ID == active, rowOf[item] == state.treeRow, 28)
+	var outline ui.Element
+	// The native chosen-row fill is painted from the theme's accent: build the
+	// tree with a local theme whose accent is the quiet selection tint, so the
+	// chosen row is the persistent navigation selection (BgSelected), not a
+	// saturated accent block (V1). The list keeps its native keyboard, focus
+	// and accessibility selection.
+	ui.Themed(c, sessionSelectionTheme(t)).Background(ui.Transparent).FillWidth().Children(func() {
+		outline = ui.Outline(c, &state.tree, tree.roots, func(item string) []string {
+			return tree.children[item]
+		}, func(item string) {
+			if isWorkspaceTreeKey(item) {
+				buildWorkspaceGroupRow(c, t, chat, nav, workspace, runtime, state, tree, item)
+				return
+			}
+			session := tree.sessions[item]
+			buildSessionRow(c, t, chat, nav, runtime, state, session,
+				session.ID == active, rowOf[item] == state.treeRow, 28)
+		})
 	})
 	if outline.Submitted() && state.treeRow >= 0 && state.treeRow < state.tree.Rows() {
 		if item := state.tree.Item(state.treeRow); !isWorkspaceTreeKey(item) {
@@ -1044,7 +1259,7 @@ func buildWorkspaceGroupRow(c *ui.Context, t *design.Tokens, chat contracts.Chat
 				icon = icons.FolderOpen()
 				iconColor = t.Accent
 			}
-			ui.Icon(c, icon).Size(16, 16).TextColor(iconColor)
+			ui.Icon(c, icon).Size(design.IconSizeS, design.IconSizeS).TextColor(iconColor)
 			textColor := t.LabelSecondary
 			if current {
 				textColor = t.LabelPrimary
@@ -1053,7 +1268,7 @@ func buildWorkspaceGroupRow(c *ui.Context, t *design.Tokens, chat contracts.Chat
 			// so a long single-token workspace name cannot push the row's
 			// count/actions (⋯/⊕) outside the 280-DIP sidebar.
 			design.Apply(ui.Text(c, name), t.Text(design.TypeXS)).
-				FontWeight(500).TextColor(textColor).Grow(1).MinWidth(0).MaxLines(1).Ellipsis("…")
+				FontWeight(500).TextColor(textColor).Grow(1).MinWidth(design.Space0).MaxLines(1).Ellipsis("…")
 			design.Apply(ui.Badge(c, strconv.Itoa(count)), t.Badge())
 			if workspace != nil && key != ungroupedWorkspaceKey {
 				buildWorkspaceRowActions(c, t, workspace, runtime, state, tree, key, name, revealed)
@@ -1210,9 +1425,14 @@ func buildFlatSessionList(c *ui.Context, t *design.Tokens, chat contracts.ChatSe
 	state.sessionList.Key = func(row int) any { return sessions[row].ID }
 	state.sessionList.Label = func(row int) string { return state.sessionTitle(sessions[row]) }
 	state.sessionList.Selected = &state.sessionRow
-	list := ui.List(c, &state.sessionList, len(sessions)).Rows(func(row ui.ListRow) {
-		buildSessionRow(row.Context, t, chat, nav, runtime, state, sessions[row.Index],
-			sessions[row.Index].ID == active, row.Index == state.sessionRow, 36)
+	var list ui.Element
+	// Same local theme as the workspace tree: the native chosen-row fill is the
+	// quiet selection tint, not the accent block (V1).
+	ui.Themed(c, sessionSelectionTheme(t)).Background(ui.Transparent).FillWidth().Children(func() {
+		list = ui.List(c, &state.sessionList, len(sessions)).Rows(func(row ui.ListRow) {
+			buildSessionRow(row.Context, t, chat, nav, runtime, state, sessions[row.Index],
+				sessions[row.Index].ID == active, row.Index == state.sessionRow, 36)
+		})
 	})
 	if list.Submitted() && state.sessionRow >= 0 && state.sessionRow < len(sessions) {
 		openSession(chat, nav, runtime, sessions[state.sessionRow].ID)
@@ -1223,6 +1443,30 @@ func buildFlatSessionList(c *ui.Context, t *design.Tokens, chat contracts.ChatSe
 		state.sessionRow = activeRow
 	}
 }
+
+// sessionSelectionTheme is the local theme the session list/tree builds with:
+// mygo paints a chosen row with Theme.Accent and Theme.AccentText, so a theme
+// whose accent is the 12% selection tint turns the native chosen fill into the
+// quiet persistent selection (BgSelected fill, LabelPrimary text) instead of a
+// saturated accent block, while the list keeps its native keyboard, focus and
+// accessibility selection (DESIGN §5.2 selection model, V1). The focus ring and
+// the hover tint keep the theme's own colors. Only the persistent navigation
+// list uses it; transient lists (the message-search results, menus, the
+// command palette) keep the native accent fill.
+func sessionSelectionTheme(t *design.Tokens) *ui.Theme {
+	theme := *t.Theme()
+	theme.Accent = t.BgSelected
+	theme.AccentHover = t.BgSelected
+	theme.AccentPressed = t.BgSelected
+	theme.InactiveAccent = t.BgSelected
+	theme.AccentText = t.LabelPrimary
+	return &theme
+}
+
+// selectedBarWidth is the 2 DIP accent stripe of the persistent navigation
+// selection (DESIGN §5.2: BgSelected + 2px Accent left bar). It is derived from
+// the spacing unit so the stripe stays on the 4 DIP grid's half step.
+const selectedBarWidth = design.Space1 / 2
 
 // rowTint paints a self-drawn ButtonBase row's interaction states: selected and
 // pressed use the stronger selection tint, hover the lighter hover tint. mygo's
@@ -1487,12 +1731,23 @@ func buildSessionRow(c *ui.Context, t *design.Tokens, chat contracts.ChatService
 	// action asks.
 	revealed := active || chosen || content.Hovered() || content.FocusWithin()
 	content.Children(func() {
+		// The persistent selection's accent stripe, full row height. The slot is
+		// built on every row (transparent when resting) so the chosen row's
+		// title does not shift when the selection moves.
+		bar := ui.Box(c).Width(selectedBarWidth).Height(height).Shrink(0)
+		if chosen {
+			bar = bar.Background(t.Accent)
+		}
 		// The title area is the click target that opens the session. The List
 		// row also selects on a click; observing the pointer here gives the
 		// single click the source-list behavior (open the conversation), while
 		// Enter and a double click stay the native List's Submitted.
 		title := ui.Row(c).FillWidth().Height(height).AlignItems(ui.Center).
-			Gap(design.Space2).PaddingX(design.Space3).Radius(design.RadiusSM)
+			Gap(design.Space2).
+			// The stripe and the row gap are paid for here, so the title's text
+			// keeps the same inset as a resting row's.
+			PaddingStart(design.Space3 - selectedBarWidth - design.Space1).
+			PaddingEnd(design.Space3).Radius(design.RadiusSM)
 		title.ObserveInput(func(ev ui.InputEvent) {
 			if ev.Kind != ui.InputPointerUp || ev.Button != 0 {
 				return
@@ -1503,35 +1758,23 @@ func buildSessionRow(c *ui.Context, t *design.Tokens, chat contracts.ChatService
 			// Every conversation keeps the message glyph, also the current
 			// one: NewChat belongs to the new-session action only (the same
 			// glyph for two meanings was one of the fix-round findings). The
-			// current conversation is carried by the accent color, its bold
-			// title and the chosen row.
+			// current conversation is carried by the accent icon, its bold
+			// title and the chosen row's tint + left stripe.
 			icon := icons.Message()
 			iconColor := t.LabelSecondary
-			if chosen {
-				iconColor = t.AccentText
-			} else if active {
+			if chosen || active {
 				iconColor = t.Accent
 			}
-			ui.Icon(c, icon).Size(16, 16).TextColor(iconColor)
-			textColor := t.LabelPrimary
-			if chosen {
-				textColor = t.AccentText
-			}
+			ui.Icon(c, icon).Size(design.IconSizeS, design.IconSizeS).TextColor(iconColor)
 			titleText := design.Apply(ui.Text(c, label), t.Text(design.TypeS)).
-				TextColor(textColor).Grow(1).MinWidth(0).MaxLines(1).Ellipsis("…")
+				TextColor(t.LabelPrimary).Grow(1).MinWidth(design.Space0).MaxLines(1).Ellipsis("…")
 			if active || chosen {
 				titleText = titleText.FontWeight(500)
 			}
-			// A chosen row is painted in the accent fill, so its badges must
-			// invert with the row: the resting Badge() foreground lands dim on
-			// the accent fill (about 1.2:1 in the dark theme, the fix round's
-			// SH-03). OnAccentBadge keeps the pill shape and the label; a
-			// resting row keeps the semantic badge colors.
+			// The chosen row is the quiet selection tint, not the accent fill,
+			// so its badges keep the resting badge look (SH-03's on-accent fill
+			// was for the old full-blue row).
 			badge := func(label string) {
-				if chosen {
-					uikit.OnAccentBadge(c, label, t)
-					return
-				}
 				design.Apply(ui.Badge(c, label), t.Badge())
 			}
 			if session.Pinned {
@@ -1549,19 +1792,14 @@ func buildSessionRow(c *ui.Context, t *design.Tokens, chat contracts.ChatService
 		more := ui.ButtonBase(c).Size(24, 24).Center().Radius(design.RadiusSM).
 			Label(menuLabel).Tooltip(menuLabel)
 		moreColor := t.LabelSecondary
-		if chosen {
-			moreColor = t.AccentText
-			if more.Hovered() {
-				more = more.Background(t.BgStrong)
-			}
-		} else if more.Hovered() {
+		if more.Hovered() {
 			more = more.Background(t.BgHover)
 		}
 		if !revealed {
 			more = more.Opacity(0).IgnoreInput(true)
 		}
 		more.Children(func() {
-			ui.Icon(c, icons.More()).Size(16, 16).TextColor(moreColor)
+			ui.Icon(c, icons.More()).Size(design.IconSizeS, design.IconSizeS).TextColor(moreColor)
 		})
 		// The menu opens below the button, lined up with its end, so it never
 		// overhangs the sidebar's content.

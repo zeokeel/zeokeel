@@ -12,6 +12,7 @@ import (
 
 	"github.com/zeokeel/zeokeel/internal/contracts"
 	"github.com/zeokeel/zeokeel/internal/design"
+	"github.com/zeokeel/zeokeel/internal/icons"
 	"github.com/zeokeel/zeokeel/internal/uikit"
 )
 
@@ -53,6 +54,7 @@ type lspState struct {
 	// confirmRemove names the server whose removal waits for the native
 	// confirmation dialog ("" when none is open).
 	confirmRemove string
+	removeOpen    bool // the removal confirmation's open flag (persistent for ConfirmDanger)
 }
 
 // loadLSPState reads the stored rows once (multi-server list first, then the
@@ -207,8 +209,7 @@ func buildLSPServerRow(c *ui.Context, t *design.Tokens, store contracts.Settings
 		design.Apply(ui.Text(c, summary), t.Font(design.TypeXS), t.MonoFamily()).
 			TextColor(tertiary).Grow(1).MaxLines(1).Ellipsis("…")
 		if active {
-			design.Apply(ui.Badge(c, localized(locale, "活动中", "Active")), t.Badge()).
-				TextColor(t.SuccessText)
+			uikit.StatusBadge(c, t, uikit.StatusSuccess, localized(locale, "活动中", "Active"))
 		} else {
 			if design.Apply(ui.Button(c, localized(locale, "设为活动", "Set active")),
 				t.SecondaryButton()).Clicked() {
@@ -216,11 +217,24 @@ func buildLSPServerRow(c *ui.Context, t *design.Tokens, store contracts.Settings
 				c.Invalidate()
 			}
 		}
-		if design.Apply(ui.Button(c, localized(locale, "移除", "Remove")),
-			t.DangerButton()).Clicked() {
-			st.confirmRemove = server.Name
-			c.Invalidate()
-		}
+		// The destructive remove is the row's ⋯ danger item.
+		label := localized(locale, "服务器操作", "Server actions")
+		menu := uikit.IconButton(c, uikit.IconButtonOptions{
+			Key:     "lsp-actions/" + server.Name,
+			Label:   label,
+			Tooltip: label,
+			Icon:    icons.More(),
+			Size:    design.IconSizeS,
+		})
+		menu.PopoverMenuButton(func(m *ui.Menu) {
+			remove := m.Item(localized(locale, "移除", "Remove"))
+			remove.Danger()
+			if remove.Chosen() {
+				st.confirmRemove = server.Name
+				st.removeOpen = true
+				c.Invalidate()
+			}
+		})
 	})
 }
 
@@ -296,7 +310,7 @@ func buildLSPPage(c *ui.Context, store contracts.SettingsService, st *lspState, 
 				})
 			design.Apply(ui.Text(c, localized(locale, "重启生效；仅活动服务器在启动时拉起。",
 				"Restart to apply; only the active server starts at launch.")),
-				t.TextMuted(design.TypeXXXS)).MaxLines(2)
+				t.TextMuted(design.TypeXXS)).MaxLines(2)
 		})
 
 		uikit.Section(c, localized(locale, "工作区配置", "Workspace configuration"), func(*ui.Context) {
@@ -385,19 +399,20 @@ func buildLSPPage(c *ui.Context, store contracts.SettingsService, st *lspState, 
 
 		if st.confirmRemove != "" {
 			name := st.confirmRemove
-			open := true
-			switch ui.AlertDialog(c, &open,
-				localized(locale, "移除语言服务器", "Remove language server"),
-				localized(locale, "确认移除「", "Remove ")+name+
+			uikit.ConfirmDanger(c, &st.removeOpen, uikit.ConfirmDangerOptions{
+				Key:   "lsp.remove",
+				Title: localized(locale, "移除语言服务器", "Remove language server"),
+				Message: localized(locale, "确认移除「", "Remove ") + name +
 					localized(locale, "」？此操作无法撤销。", "? This cannot be undone."),
-				localized(locale, "取消", "Cancel"),
-				localized(locale, "移除服务器", "Remove server")) {
-			case 1:
-				removeLSPServer(st, store, name, locale)
-				st.confirmRemove = ""
-				c.Invalidate()
-			}
-			if !open {
+				Confirm: localized(locale, "移除服务器", "Remove server"),
+				Cancel:  localized(locale, "取消", "Cancel"),
+				OnConfirm: func() {
+					removeLSPServer(st, store, name, locale)
+					st.confirmRemove = ""
+					c.Invalidate()
+				},
+			})
+			if !st.removeOpen {
 				st.confirmRemove = ""
 			}
 		}

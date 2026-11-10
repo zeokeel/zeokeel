@@ -8,6 +8,28 @@ All notable changes to ZeoKeel are documented here. The format follows
 
 （暂无未发布改动）
 
+## [0.2.19] - 2026-11-11
+
+交互健壮性与视觉语言审计（`docs/UI-AUDIT-2026-11-11.md`：P1×3 / P2×15 / P3×16）全量落地，并把统一设计语言 v2 写入设计契约。
+
+### 安全与可恢复
+- **危险确认安全默认**：新增 `uikit.ConfirmDanger`（Modal + DialogHeader + DialogFooter，取消为 Default、危险动作非 Default）；设置/自动化 11 处与会话 3 处 `AlertDialog` 迁移，Enter 不再直接删除；行内删除收进行尾 ⋯ danger 菜单。
+- **审批 Esc 承诺**：`Esc 拒绝` 提升到窗口级作用域（焦点在侧栏等位置同样生效），运行中显示「Enter 排队 · Esc 停止」与停止后果。
+- **审批可核对**：摘要为空时从参数提取关键键值（command/path/subject/owner/url）做 mono 预览；折叠标签只保留一个「原始参数」。
+
+### 交互
+- 设置导航搜索支持设置项别名（密钥/主题/字体/代理…），不再只匹配页面标题。
+- 窄窗检查器抽屉让出内容宽度并加 elevation：composer 的发送/停止/排队不再被抽屉遮住。
+- 粘贴图片成为附件（会话与 Home composer）；命令面板一次 Esc 关闭；侧栏折叠后提供常显展开按钮。
+- 侧栏搜索先给出消息命中并高亮命中词（snippet 居中截取），不再先报“没有匹配的会话”。
+- 导入页三态（未选目录/已选未扫描/扫描无结果）；外观热键「录入」与“未应用”上移首屏；模型页拆「即时生效的模型列表」与「页脚保存的提示词与运行参数」；零值团队/任务入口隐藏；团队任务显示短 ID 与 owner 显示名；@ 引用菜单错误本地化并给出恢复动作；会话设置 chip 固定标签、当前权限/模式作为菜单值。
+
+### 视觉（设计语言 v2）
+- 选择态两级：持久导航 = `BgSelected` + 2px Accent 左条；仅浮层瞬态选择用 Accent 填充；强调色预算（≤2 Accent / ≤1 primary / ≤2 danger）。
+- 状态徽章统一 `uikit.StatusBadge`；控件高度 32/36/40/44（删除 38）；圆角语义化（composer 唯一 XL）；暗色 surface ramp 修正（导航永远下沉）；分段控件选中态可见；检查器文档 13px；tab 统一为下划线语汇；管理列表去卡墙；顶级屏统一顶带（自动化/插件接入 `SlotScreenHeader/Actions`）；属性表统一 160/32/Divider；toast 统一骨架；附件 chip 改 `ControlChip`；禁用主按钮中性化。
+- **减法**：页头零值 agent 入口全部隐藏；每条助手消息不再显示「用时/tokens」（进 ⋯ 用量明细）；设置页眉标删除；状态条 6 项降为 3 项；工具卡外独立复制按钮删除；管理列表去卡墙。
+- 契约同步：`docs/DESIGN.md`（surface ramp/type 规则/交互状态/组件骨架）、`AGENTS.md`（危险默认/强调预算/选择态/字号度量/主操作落点）、`docs/DESIGN-LINT.md`（DS-11..DS-16 / AP-19..AP-25）；审计报告新增 §10 修复状态与验收。
+
 ## [0.2.18] - 2026-11-10
 
 精简发布流水线：

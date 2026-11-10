@@ -1,9 +1,10 @@
 package main
 
-// Background-jobs steps: the session header's 「N 个后台任务」chip is always
-// present when the host provides JobService (0 at rest); clicking it opens the native overlay with
-// each job's status, command, duration and exit code plus the stop action, which
-// calls JobService.KillJob.
+// Background-jobs steps: the session header's 「N 个后台任务」chip appears only
+// while the host reports jobs (R15: a zero count keeps the chip hidden instead
+// of squeezing the title); clicking it opens the native overlay with each job's
+// status, command, duration and exit code plus the stop action, which calls
+// JobService.KillJob.
 
 import (
 	"fmt"
@@ -43,22 +44,15 @@ func (d *drive) waitJobDone(jobID string, timeout time.Duration) bool {
 
 func (d *drive) runJobsSteps() {
 	d.step("jobs-chip", "session", "后台任务：页头 chip → 浮层 → 停止",
-		"页头始终显示后台任务 chip（当前 0 个「0 个后台任务」）；job_start 启动一个后台命令后页头变成「1 个后台任务」；点开原生浮层显示 运行中/命令/用时/退出码 与「停止」；点停止后任务不再运行（JobService.KillJob）", func(c *check) {
+		"没有后台任务时页头不显示后台任务 chip（R15 零值隐藏）；job_start 启动一个后台命令后页头出现「1 个后台任务」；点开原生浮层显示 运行中/命令/用时/退出码 与「停止」；点停止后任务不再运行（JobService.KillJob）", func(c *check) {
 			d.resetToSession()
 			d.uiRoot.SetRightPanelOpen(false)
 			d.frame()
-			// The seeded run has no background jobs: the chip must be absent.
-			if !d.has("0 个后台任务") {
-				c.failf("没有后台任务时页头未显示「0 个后台任务」chip")
+			// The seeded run has no background jobs: the chip stays hidden so a
+			// zero value never sits in the header (R15).
+			if d.has("个后台任务") {
+				c.failf("没有后台任务时页头仍显示后台任务 chip；texts=%v", paletteTailTexts(d))
 			}
-			if err := d.click("0 个后台任务"); err != nil {
-				c.failf("点开 0 任务浮层: %v", err)
-			}
-			if !d.waitText("暂无后台任务", 2*time.Second) {
-				c.failf("0 任务浮层缺少空态文案；texts=%v", paletteTailTexts(d))
-			}
-			d.tester.Key(0, ui.KeyEscape)
-			d.tester.Frame()
 			if ok, detail := d.invokeToolResult("job_start", `{"command":"bash -c 'sleep 30'","timeout_ms":20000}`); !ok {
 				c.failf("job_start 工具调用失败，无法验证后台任务 chip：%s", shortText(detail))
 				return

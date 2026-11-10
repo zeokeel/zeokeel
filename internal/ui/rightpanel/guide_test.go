@@ -16,7 +16,7 @@ import (
 func TestGuideIsTheDefaultPage(t *testing.T) {
 	h := newHarness(t, harnessOptions{})
 	tester := h.tester()
-	h.assertTexts(tester, "开始", "文件", "终端", "工作区文件", "新建终端", "Ctrl+Alt+P", "Ctrl+`")
+	h.assertTexts(tester, "开始", "文件", "命令", "工作区文件", "命令运行", "Ctrl+Alt+P", "Ctrl+`")
 }
 
 // TestGuideHasNoDescriptionCopy: the user-approved guide is title + shortcut
@@ -24,7 +24,7 @@ func TestGuideIsTheDefaultPage(t *testing.T) {
 func TestGuideHasNoDescriptionCopy(t *testing.T) {
 	h := newHarness(t, harnessOptions{})
 	tester := h.tester()
-	h.assertTexts(tester, "工作区文件", "新建终端")
+	h.assertTexts(tester, "工作区文件", "命令运行")
 	h.assertNoTexts(tester,
 		"浏览会话工作区的文件", "在会话工作区运行命令",
 		"只保留两个按需页面", "点开才会出现，两个可以并排查看",
@@ -43,9 +43,9 @@ func TestGuideCardsAreEqualSideBySide(t *testing.T) {
 	if !ok {
 		t.Fatalf("工作区文件 is not an accessible button; texts = %v", tester.Texts())
 	}
-	second, ok := tester.AccessByRole(ui.RoleButton, "新建终端")
+	second, ok := tester.AccessByRole(ui.RoleButton, "命令运行")
 	if !ok {
-		t.Fatalf("新建终端 is not an accessible button; texts = %v", tester.Texts())
+		t.Fatalf("命令运行 is not an accessible button; texts = %v", tester.Texts())
 	}
 	if first.Bounds.W <= 0 || second.Bounds.W <= 0 {
 		t.Fatalf("card widths = %v / %v, want visible cards", first.Bounds, second.Bounds)
@@ -75,9 +75,9 @@ func TestGuideCardsOpenTheirPages(t *testing.T) {
 	h.assertTexts(tester, "工作区", "README.md")
 
 	h.click(tester, "开始")
-	h.assertTexts(tester, "工作区文件", "新建终端")
-	h.click(tester, "新建终端")
-	h.assertTexts(tester, "终端未启用")
+	h.assertTexts(tester, "工作区文件", "命令运行")
+	h.click(tester, "命令运行")
+	h.assertTexts(tester, "命令未启用")
 }
 
 // TestGuideBodyScrolls: the guide body is a native scroll, so a short window
@@ -87,10 +87,10 @@ func TestGuideBodyScrolls(t *testing.T) {
 	tester := h.tester()
 	tester.SetSize(1100, 320)
 	tester.Frame()
-	h.assertTexts(tester, "工作区文件", "新建终端")
+	h.assertTexts(tester, "工作区文件", "命令运行")
 	tester.SetSize(1200, 800)
 	tester.Frame()
-	h.assertTexts(tester, "工作区文件", "新建终端")
+	h.assertTexts(tester, "工作区文件", "命令运行")
 }
 
 // TestShortcutLabelsMatchCommands keeps the guide copy and the palette command
@@ -107,5 +107,22 @@ func TestShortcutLabelsMatchCommands(t *testing.T) {
 	}
 	if !strings.Contains(texts, terminal.Shortcut) {
 		t.Fatalf("guide does not show the terminal shortcut %q; texts = %v", terminal.Shortcut, tester.Texts())
+	}
+}
+
+// TestGuideHasNoDuplicatePaneHeading pins B7/P3-8: the pane's name lives on its
+// view tab only — the body no longer repeats it as an H2.
+func TestGuideHasNoDuplicatePaneHeading(t *testing.T) {
+	h := newHarness(t, harnessOptions{})
+	tester := h.tester()
+	tester.Frame()
+	count := 0
+	for _, text := range tester.Texts() {
+		if text == "开始" {
+			count++
+		}
+	}
+	if count != 1 {
+		t.Fatalf("guide pane shows its name %d times, want one (the tab); texts = %v", count, tester.Texts())
 	}
 }

@@ -127,10 +127,10 @@ func planReviewBody(c *ui.Context, o PlanReviewOptions, escHint *bool) {
 	design.Apply(ui.Column(c).Width(design.DialogWidthL).Gap(design.Space4), func(el ui.Element) ui.Element {
 		return el.PaddingX(design.Space6).PaddingY(design.Space2)
 	}).Children(func() {
-		ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(design.Space2).Children(func() {
-			ui.Icon(c, icons.Activity()).Size(design.Space5, design.Space5).TextColor(t.Accent)
-			design.Apply(ui.Text(c, T(o.Locale, "计划待审阅", "Plan review")),
-				t.Font(design.TypeL)).TextColor(t.LabelPrimary)
+		DialogHeader(c, DialogHeaderOptions{
+			Key:   "uikit.planreview/header",
+			Icon:  icons.Activity(),
+			Title: T(o.Locale, "计划待审阅", "Plan review"),
 		})
 		ui.Scroll(c).FillWidth().MaxHeight(planReviewMaxBodyHeight).Children(func() {
 			markdown.View(c, o.Plan.Content, nil)

@@ -424,6 +424,28 @@ func (d *drive) runTeamSteps() {
 	d.step("team-tasks-refresh", "team", "任务板：重新打开浮层刷新共享任务",
 		"浮层关闭期间用 team_task_create 写入新任务 → 重新打开团队浮层时新任务出现（浮层在打开时读取任务板快照）", func(c *check) {
 			d.resetToSession()
+			// The header only shows the team entry once a team exists
+			// (subtraction pass); spawn a short-lived member through the same
+			// tool surface the model uses, so the module wiring runs too.
+			spawnedName := ""
+			if d.teamHeaderLabel() == "" {
+				spawnedName = "刷新验证队友"
+				if !d.spawnTeamMember(spawnedName, "等待共享任务") {
+					c.failf("spawn team member failed")
+					return
+				}
+				d.drain(3)
+			}
+			if spawnedName != "" {
+				defer func() {
+					for _, member := range d.teamService().Members() {
+						if member.Name == spawnedName {
+							_ = d.teamService().Close(member.ID)
+						}
+					}
+					d.drain(2)
+				}()
+			}
 			subject := "刷新验证任务"
 			board := d.taskBoard()
 			tasks, _ := board.List(context.Background())

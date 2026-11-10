@@ -111,7 +111,7 @@ func buildAboutPage(c *ui.Context, info contracts.AppInfo, title string,
 			"版本与构建信息；开发说明在下方折叠。",
 			"Version and build information; the development notes are folded below."))
 		uikit.Section(c, uikit.T(locale, "构建信息", "Build information"), func(c *ui.Context) {
-			uikit.KeyValueRows(c, []uikit.KeyValue{
+			buildPropertySheet(c, []uikit.KeyValue{
 				{Key: uikit.T(locale, "名称", "Name"), Value: aboutValue(locale, info.Name)},
 				{Key: uikit.T(locale, "版本", "Version"), Value: aboutValue(locale, info.Version)},
 				{Key: uikit.T(locale, "提交", "Commit"), Value: aboutValue(locale, info.Commit)},
@@ -199,6 +199,29 @@ func own(ctx cordis.Context, register func() (func(), error)) error {
 		return err
 	}
 	return nil
+}
+
+// buildPropertySheet draws the product's property sheet (DESIGN.md §5.2): a
+// fixed 160 DIP label column, the value left-aligned on a 32 DIP row and a
+// divider between rows; the Diagnostics, Network and About pages share the
+// shape.
+func buildPropertySheet(c *ui.Context, rows []uikit.KeyValue) {
+	t := design.Of(c)
+	ui.Column(c).FillWidth().Gap(design.Space0).Children(func() {
+		for index, row := range rows {
+			if index > 0 {
+				ui.Divider(c)
+			}
+			ui.Row(c).FillWidth().Height(design.Space8).
+				AlignItems(ui.Center).Gap(design.Space3).Children(func() {
+				design.Apply(ui.Text(c, row.Key), t.TextMuted(design.TypeXS)).
+					Width(design.Space8 * 5).Shrink(0)
+				design.Apply(ui.Text(c, row.Value), t.Font(design.TypeXS)).
+					TextColor(t.LabelPrimary).Grow(1).MaxLines(1).Ellipsis("…").
+					Tooltip(row.Value).Selectable()
+			})
+		}
+	})
 }
 
 func firstNonEmpty(values ...string) string {

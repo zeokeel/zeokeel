@@ -98,6 +98,7 @@ type AllowEntry struct {
 var KnownRuleIDs = []string{
 	"DS-01", "DS-02", "DS-03", "DS-04", "DS-05",
 	"DS-06", "DS-06b", "DS-07", "DS-08", "DS-09", "DS-10",
+	"DS-11", "DS-12", "DS-13", "DS-14", "DS-15", "DS-16",
 }
 
 // today returns the reference day for allowlist expiry checks. It is a

@@ -2,6 +2,7 @@ package uikit
 
 import (
 	"math"
+	"runtime"
 	"strconv"
 	"strings"
 )
@@ -48,4 +49,102 @@ func FormatCompactCount(count int) string {
 		text = "-" + text
 	}
 	return text + units[unit]
+}
+
+// FormatShortcut normalizes one of the product's shortcut notations into the
+// single display form the UI shows: modifiers joined with " + ", the command
+// modifier spelled for the platform ("Cmd" on macOS, "Ctrl" elsewhere), and
+// ordinary keys uppercase. It accepts every notation already in the repository
+// — "CmdOrCtrl+Shift+Space", "Cmd/Ctrl + N", "Ctrl+Alt+P", "cmd+k" — so a
+// keyboard reference table, the command palette and the inspector cards can
+// share one formatter instead of three spellings (V11).
+func FormatShortcut(raw string) string {
+	return formatShortcutFor(runtime.GOOS, raw)
+}
+
+// formatShortcutFor is FormatShortcut with the platform named, so tests do not
+// depend on the machine running them.
+func formatShortcutFor(goos, raw string) string {
+	trimmed := strings.TrimSpace(raw)
+	if trimmed == "" {
+		return ""
+	}
+	fields := strings.FieldsFunc(trimmed, func(r rune) bool {
+		return r == '+' || r == ' ' || r == '\t'
+	})
+	if len(fields) == 0 {
+		return ""
+	}
+	primary := "Ctrl"
+	if goos == "darwin" {
+		primary = "Cmd"
+	}
+	parts := make([]string, 0, len(fields))
+	key := fields[len(fields)-1]
+	for _, field := range fields[:len(fields)-1] {
+		switch strings.ToLower(strings.TrimSpace(field)) {
+		case "cmdorctrl", "cmd/ctrl", "cmd", "command", "commandorcontrol":
+			parts = append(parts, primary)
+		case "ctrl", "control":
+			if primary == "Cmd" {
+				parts = append(parts, "Ctrl")
+			} else {
+				parts = append(parts, "Ctrl")
+			}
+		case "shift":
+			parts = append(parts, "Shift")
+		case "alt", "option", "opt":
+			parts = append(parts, "Alt")
+		default:
+			// An unknown modifier token stays visible rather than silently
+			// dropping a key from a shortcut the user must press.
+			if text := strings.TrimSpace(field); text != "" {
+				parts = append(parts, text)
+			}
+		}
+	}
+	parts = append(parts, formatShortcutKey(key))
+	return strings.Join(parts, " + ")
+}
+
+// formatShortcutKey renders the final key of a shortcut: letters uppercase,
+// punctuation as the character itself, and the named keys the desktop uses.
+func formatShortcutKey(key string) string {
+	switch strings.ToLower(strings.TrimSpace(key)) {
+	case "space":
+		return "Space"
+	case "enter", "return":
+		return "Enter"
+	case "escape", "esc":
+		return "Esc"
+	case "tab":
+		return "Tab"
+	case "backspace":
+		return "Backspace"
+	case "delete", "del":
+		return "Delete"
+	case "backquote":
+		return "`"
+	case "comma":
+		return ","
+	case "period":
+		return "."
+	case "slash":
+		return "/"
+	case "backslash":
+		return "\\"
+	case "left":
+		return "Left"
+	case "right":
+		return "Right"
+	case "up":
+		return "Up"
+	case "down":
+		return "Down"
+	}
+	key = strings.TrimSpace(key)
+	if len(key) == 1 {
+		return strings.ToUpper(key)
+	}
+	return key
 }

@@ -173,7 +173,9 @@ func buildUpdatePage(c *ui.Context, t *design.Tokens, kctx cordis.Context, runti
 					// progress name beside the disabled action; no fake percentage.
 					ui.Row(c).AlignItems(ui.Center).Gap(design.Space2).Children(func() {
 						buildBusySpinner(c, st.checking, busyLabel)
-						if design.Apply(ui.PrimaryButton(c, checkLabel), t.PrimaryButton()).
+						// Checking is a utility action; the contextual download/install
+						// action is the page's one primary.
+						if design.Apply(ui.Button(c, checkLabel), t.SecondaryButton()).
 							Disabled(st.checking || st.downloading).Clicked() {
 							if !st.checking && !st.downloading {
 								startUpdateCheck(updateService, runtime, st)
@@ -242,11 +244,13 @@ func buildUpdatePage(c *ui.Context, t *design.Tokens, kctx cordis.Context, runti
 					TextColor(t.LabelPrimary)
 				ui.Spacer(c).Grow(1)
 				if st.info.Available {
-					design.Apply(ui.Badge(c, localized(locale, "可更新", "Update available")),
-						t.Badge()).TextColor(t.SuccessText)
+					// An available update needs attention: the shared status
+					// anatomy's warning tint, with the label carrying the meaning.
+					uikit.StatusBadge(c, t, uikit.StatusInProgress,
+						localized(locale, "可更新", "Update available"))
 				} else {
-					design.Apply(ui.Badge(c, localized(locale, "已是最新", "Up to date")),
-						t.Badge()).TextColor(t.LabelSecondary)
+					uikit.StatusBadge(c, t, uikit.StatusIdle,
+						localized(locale, "已是最新", "Up to date"))
 				}
 			})
 			if resource := updateResourceLine(st.info, locale); resource != "" {
@@ -330,7 +334,7 @@ func buildUpdatePage(c *ui.Context, t *design.Tokens, kctx cordis.Context, runti
 					})
 				if hasInstallCommand {
 					design.Apply(ui.Text(c, updateInstallBehaviorCopy(locale)),
-						t.TextMuted(design.TypeXXXS)).MaxLines(3)
+						t.TextMuted(design.TypeXXS)).MaxLines(3)
 				}
 			}
 			if st.install != nil && !st.installRunning {
@@ -549,11 +553,10 @@ func buildPendingInstall(c *ui.Context, t *design.Tokens, plan contracts.UpdateI
 	installCommand contracts.CommandSpec, hasInstallCommand bool) {
 	ui.Column(c).FillWidth().Gap(design.Space2).Children(func() {
 		ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(design.Space2).Children(func() {
-			design.Apply(ui.Badge(c,
-				localized(locale, "待安装：", "Pending install: v")+strings.TrimSpace(plan.Version)),
-				t.Badge()).TextColor(t.WarningText)
+			uikit.StatusBadge(c, t, uikit.StatusInProgress,
+				localized(locale, "待安装：", "Pending install: v")+strings.TrimSpace(plan.Version))
 			if staged := strings.TrimSpace(plan.Path); staged != "" {
-				design.Apply(ui.Text(c, staged), t.Font(design.TypeXXXS), t.MonoFamily()).
+				design.Apply(ui.Text(c, staged), t.Font(design.TypeXXS), t.MonoFamily()).
 					TextColor(t.LabelTertiary).MaxLines(1).Ellipsis("…")
 			}
 		})
@@ -575,7 +578,7 @@ func buildPendingInstall(c *ui.Context, t *design.Tokens, plan contracts.UpdateI
 			return
 		}
 		design.Apply(ui.Text(c, updateInstallBehaviorCopy(locale)),
-			t.TextMuted(design.TypeXXXS)).MaxLines(3)
+			t.TextMuted(design.TypeXXS)).MaxLines(3)
 		installLabel := localized(locale, "安装并重启", "Install and restart")
 		if st.installRunErr != "" {
 			installLabel = localized(locale, "重试安装并重启", "Retry install and restart")
@@ -597,8 +600,8 @@ func buildScheduledInstall(c *ui.Context, t *design.Tokens, plan contracts.Updat
 	installCommand contracts.CommandSpec, hasInstallCommand bool) {
 	ui.Column(c).FillWidth().Gap(design.Space1).Children(func() {
 		ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(design.Space2).Children(func() {
-			design.Apply(ui.Badge(c, localized(locale, "已计划安装", "Install scheduled")), t.Badge()).
-				TextColor(t.SuccessText)
+			uikit.StatusBadge(c, t, uikit.StatusSuccess,
+				localized(locale, "已计划安装", "Install scheduled"))
 			design.Apply(ui.Text(c, localized(locale, "版本：", "Version: ")+strings.TrimSpace(plan.Version)),
 				t.Font(design.TypeXS)).TextColor(t.LabelPrimary)
 		})
@@ -617,7 +620,7 @@ func buildScheduledInstall(c *ui.Context, t *design.Tokens, plan contracts.Updat
 			design.Apply(ui.Text(c, localized(locale,
 				"安装未完成，可直接重试。",
 				"The install did not finish; retry it here.")),
-				t.TextMuted(design.TypeXXXS)).MaxLines(2)
+				t.TextMuted(design.TypeXXS)).MaxLines(2)
 		}
 		buildBusyPrimaryAction(c, t, false,
 			localized(locale, "重试安装并重启", "Retry install and restart"),
@@ -634,7 +637,7 @@ func buildUpdateDownloadResult(c *ui.Context, t *design.Tokens, download contrac
 	locale contracts.LocaleService, canInstallNow bool) {
 	ui.Column(c).FillWidth().Gap(design.Space2).Children(func() {
 		ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(design.Space2).Children(func() {
-			design.Apply(ui.Badge(c, localized(locale, "已下载", "Downloaded")), t.Badge()).TextColor(t.SuccessText)
+			uikit.StatusBadge(c, t, uikit.StatusSuccess, localized(locale, "已下载", "Downloaded"))
 			downloadCopy := localized(locale,
 				"下载完成，可安排在下次启动安装。",
 				"Download complete; schedule it for the next launch.")

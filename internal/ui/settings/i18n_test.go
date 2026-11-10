@@ -12,6 +12,7 @@ import (
 
 	"github.com/zeokeel/zeokeel/internal/contracts"
 	"github.com/zeokeel/zeokeel/internal/ui/settings"
+	"github.com/zeokeel/zeokeel/internal/uikit"
 	"github.com/zeokeel/zeokeel/internal/uiroot"
 )
 
@@ -47,7 +48,7 @@ func TestSettingsEnglishPagesAndLanguageSwitch(t *testing.T) {
 	// Shell title and host-rendered page navigation. The advanced pages are
 	// behind the collapsed Advanced group, so the daily navigation is the
 	// visible set (the group header is the discoverable entry point).
-	h.assertTexts(tester, "Settings", "Common", "Model", "Behavior",
+	h.assertTexts(tester, "Common", "Model", "Behavior",
 		"Presets", "Appearance & skills", "Appearance", "Skills", "Shortcuts",
 		"Integrations", "MCP", "Search", "Network", "Advanced")
 	h.assertNoTexts(tester, "模型", "外观", "技能", "快捷键", "诊断", "更新", "导入")
@@ -57,9 +58,9 @@ func TestSettingsEnglishPagesAndLanguageSwitch(t *testing.T) {
 	// Model page: the model list is the only model surface; the footer Save
 	// owns only the prompt/runtime drafts.
 	h.click(tester, "Model")
-	h.assertTexts(tester, "Model", "Models", "Add model", "Prompt",
-		"System prompt", "Save", "Default model", "Not configured",
-		"No models yet")
+	h.assertTexts(tester, "Model", "Models (apply immediately)", "Add model",
+		"Prompt & runtime (saved by the footer)", "System prompt",
+		"Save prompt & runtime", "Default model", "Not configured", "No models yet")
 
 	// Appearance page.
 	h.click(tester, "Appearance")
@@ -68,7 +69,7 @@ func TestSettingsEnglishPagesAndLanguageSwitch(t *testing.T) {
 
 	// Shortcuts page.
 	h.click(tester, "Shortcuts")
-	h.assertTexts(tester, "Shortcuts", "Collapse / expand sidebar", "Cmd/Ctrl + B",
+	h.assertTexts(tester, "Shortcuts", "Collapse / expand sidebar", uikit.FormatShortcut("cmd+b"),
 		"Open command palette", "Send message", "New line", "Close dialog / menu",
 		"Restore defaults", "Sidebar shortcut")
 
@@ -92,7 +93,8 @@ func TestSettingsEnglishPagesAndLanguageSwitch(t *testing.T) {
 		"外观", "技能", "快捷键", "集成", "MCP", "搜索", "网络", "高级")
 	h.assertNoTexts(tester, "Settings", "Providers", "Appearance", "Shortcuts", "Diagnostics")
 	h.click(tester, "模型")
-	h.assertTexts(tester, "模型列表", "添加模型", "提示词", "保存", "还没有模型")
+	h.assertTexts(tester, "模型列表（即时生效）", "添加模型",
+		"提示词与运行参数（页脚保存）", "保存提示词与运行参数", "还没有模型")
 }
 
 // TestSettingsEnglishConfigOverrides pins that explicit assembly labels still

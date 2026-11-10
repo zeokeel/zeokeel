@@ -150,7 +150,7 @@ func buildPluginParamRow(c *ui.Context, t *design.Tokens, st *state,
 			design.Apply(ui.Text(c, st.tr(spec.TitleZH, spec.TitleEN)), t.Font(design.TypeXS)).
 				FontWeight(600).TextColor(t.LabelPrimary).NoWrap()
 			if spec.Key != "" {
-				design.Apply(ui.Text(c, spec.Key), t.MonoText(design.TypeXXXS)).
+				design.Apply(ui.Text(c, spec.Key), t.MonoText(design.TypeXS)).
 					TextColor(t.LabelTertiary).NoWrap().Shrink(0)
 			}
 			ui.Spacer(c).Grow(1)
@@ -173,7 +173,7 @@ func buildPluginParamRow(c *ui.Context, t *design.Tokens, st *state,
 			}
 		})
 		ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(design.Space2).Children(func() {
-			design.Apply(ui.Text(c, value), t.MonoText(design.TypeXXXS)).
+			design.Apply(ui.Text(c, value), t.MonoText(design.TypeXS)).
 				TextColor(t.LabelSecondary).Grow(1).MaxLines(1).Ellipsis("…")
 			design.Apply(ui.Text(c, st.tr(spec.DescZH, spec.DescEN)), t.Font(design.TypeXXS)).
 				TextColor(t.LabelTertiary).MaxLines(2)
@@ -224,7 +224,7 @@ func buildPluginParamModal(c *ui.Context, t *design.Tokens, st *state, settings 
 		}).Children(func() {
 			design.Apply(ui.Text(c, st.tr("编辑参数", "Edit parameter")), t.Font(design.TypeL)).
 				FontWeight(600).TextColor(t.LabelPrimary)
-			design.Apply(ui.Text(c, st.tr("参数：", "Setting: ")+st.paramKey), t.MonoText(design.TypeXXXS)).
+			design.Apply(ui.Text(c, st.tr("参数：", "Setting: ")+st.paramKey), t.MonoText(design.TypeXS)).
 				TextColor(t.LabelTertiary)
 			// The dialog's only field takes the focus as it opens and Enter
 			// submits the dialog, as in a desktop form.

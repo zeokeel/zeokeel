@@ -32,7 +32,7 @@ func TestH1ModelFooterPinnedAndGuarded(t *testing.T) {
 
 	// The save action is pinned in the footer: a direct click (no scrolling)
 	// reaches it on the first screen.
-	if err := tester.Click("保存"); err != nil {
+	if err := tester.Click("保存提示词与运行参数"); err != nil {
 		t.Fatalf("footer save is not visible without scrolling: %v; texts = %v", err, tester.Texts())
 	}
 	tester.Frame()
@@ -50,7 +50,7 @@ func TestH1ModelFooterPinnedAndGuarded(t *testing.T) {
 	h.click(tester, "继续编辑")
 	h.assertNoTexts(tester, "有未保存的修改")
 
-	h.click(tester, "保存")
+	h.click(tester, "保存提示词与运行参数")
 	h.assertTexts(tester, "已保存")
 	closeSettings(h, tester)
 	if h.uiRoot.Navigator().SettingsOpen() {
@@ -164,7 +164,7 @@ func TestN1DiscardResetsModelPage(t *testing.T) {
 	if got := inputValue(t, tester, "系统提示词 输入"); got != "saved prompt" {
 		t.Fatalf("reopened prompt = %q, want the saved value", got)
 	}
-	h.click(tester, "保存")
+	h.click(tester, "保存提示词与运行参数")
 	if got := store.get(contracts.SettingsChatSystemPrompt); got != "saved prompt" {
 		t.Fatalf("saving after discard wrote %q, want the saved value", got)
 	}
@@ -273,7 +273,7 @@ func TestN3AnyDirtyPageGuardsClosing(t *testing.T) {
 	tester.Frame()
 	h.click(tester, "模型")
 	h.assertNoTexts(tester, "未保存")
-	h.click(tester, "保存")
+	h.click(tester, "保存提示词与运行参数")
 	if got := store.get(contracts.SettingsChatSystemPrompt); got != "saved prompt" {
 		t.Fatalf("saved prompt after discard = %q, want the saved value", got)
 	}

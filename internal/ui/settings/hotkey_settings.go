@@ -26,74 +26,11 @@ var hotkeyPresets = []string{
 	"CmdOrCtrl+Shift+K",
 }
 
-// hotkeyDisplayToken maps one canonical accelerator token to its display form.
-func hotkeyDisplayToken(token string) string {
-	switch strings.ToLower(strings.TrimSpace(token)) {
-	case "cmdorctrl", "commandorcontrol", "cmd/ctrl":
-		return "Cmd/Ctrl"
-	case "cmd", "command":
-		return "Cmd"
-	case "ctrl", "control":
-		return "Ctrl"
-	case "alt", "option":
-		return "Alt"
-	case "shift":
-		return "Shift"
-	case "super", "meta", "win":
-		return "Super"
-	case "space":
-		return "Space"
-	case "enter", "return":
-		return "Enter"
-	case "escape", "esc":
-		return "Esc"
-	case "tab":
-		return "Tab"
-	case "backspace":
-		return "Backspace"
-	case "delete", "del":
-		return "Delete"
-	case "insert", "ins":
-		return "Insert"
-	case "up":
-		return "Up"
-	case "down":
-		return "Down"
-	case "left":
-		return "Left"
-	case "right":
-		return "Right"
-	case "home":
-		return "Home"
-	case "end":
-		return "End"
-	case "pageup":
-		return "PageUp"
-	case "pagedown":
-		return "PageDown"
-	}
-	upper := strings.ToUpper(strings.TrimSpace(token))
-	if len(upper) == 1 || (strings.HasPrefix(upper, "F") && len(upper) <= 3) {
-		return upper
-	}
-	return strings.TrimSpace(token)
-}
-
-// formatHotkeyDisplay renders an accelerator in the shortcut page's style:
-// "CmdOrCtrl+Shift+Space" becomes "Cmd/Ctrl + Shift + Space".
+// formatHotkeyDisplay renders an accelerator through the product's one
+// shortcut formatter (uikit.FormatShortcut), so the recorder, the preset chips,
+// the current line and the shortcut reference all spell a chord the same way.
 func formatHotkeyDisplay(accelerator string) string {
-	accelerator = strings.TrimSpace(accelerator)
-	if accelerator == "" {
-		return ""
-	}
-	tokens := strings.Split(accelerator, "+")
-	parts := make([]string, 0, len(tokens))
-	for _, token := range tokens {
-		if display := hotkeyDisplayToken(token); display != "" {
-			parts = append(parts, display)
-		}
-	}
-	return strings.Join(parts, " + ")
+	return uikit.FormatShortcut(accelerator)
 }
 
 // parseHotkeyDisplay converts a friendly or canonical accelerator to the stored
@@ -258,72 +195,83 @@ func (st *appearanceState) syncHotkeyDraft(locale contracts.LocaleService) {
 	st.hotkeyError = ""
 }
 
-// buildGlobalHotkeySection renders the hotkey input (with an inline error), the
-// record button and the quick presets.
+// buildGlobalHotkeySection renders the hotkey section: the current/applied
+// state first, then one row holding the draft input and its 录入 (record)
+// button, then the quick presets. The section is the page's one explicit-save
+// field, so it says so in one short line ("点「应用」并重启后生效") instead of
+// burying the action below the fold (R9).
 func buildGlobalHotkeySection(c *ui.Context, t *design.Tokens, state *appearanceState,
 	store contracts.SettingsService, locale contracts.LocaleService) {
 	uikit.Section(c, localized(locale, "全局热键", "Global hotkey"), func(*ui.Context) {
-		// The section is already titled 全局热键; the field names the value itself
-		// so assistive technology does not read the same label twice (L-02).
-		ui.Field(c, localized(locale, "组合键", "Shortcut"), func() {
-			if state.capturing {
-				capture := ui.TextInput(c, &state.captureText).
-					Label(localized(locale, "录制全局热键", "Record global hotkey")).
-					Placeholder(localized(locale, "按下组合键…", "Press a combination…")).
-					FillWidth()
-				capture = capture.Bind(&state.captureInput)
-				capture.OnTextKey(func(k ui.TextKey) bool {
-					return state.captureHotkey(k, locale)
-				})
-				if state.captureFocus {
-					state.captureFocus = false
-					state.captureInput.Focus(c)
-				}
-			} else {
-				input := ui.TextInput(c, &state.hotkeyText).
-					Label(inputLabel(locale, localized(locale, "组合键", "Shortcut"))).
-					Placeholder("Cmd/Ctrl + Shift + Space").FillWidth()
-				if input.Changed() {
-					state.syncHotkeyDraft(locale)
-				}
-			}
-		}).Description(localized(locale,
-			"留空关闭；按「录入」直接按组合键，或输入如 Cmd/Ctrl + Shift + Space；修改后重启应用生效。",
-			"Leave empty to disable; press Record and press the keys, or type e.g. Cmd/Ctrl + Shift + Space; takes effect after restart.")).
-			Error(state.hotkeyError)
-		if current := strings.TrimSpace(store.Get(contracts.SettingGlobalHotkey, "")); current != "" {
-			design.Apply(ui.Text(c, localized(locale, "当前：", "Current: ")+formatHotkeyDisplay(current)),
-				t.Font(design.TypeXS), t.MonoFamily()).TextColor(t.LabelSecondary)
-		}
+		// The current persisted value and the pending state lead: a user
+		// glancing at the section must see what is active and whether the draft
+		// differs, without scrolling past the input.
+		current := strings.TrimSpace(store.Get(contracts.SettingGlobalHotkey, ""))
 		ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(design.Space2).Children(func() {
-			recordLabel := localized(locale, "录入", "Record")
-			if state.capturing {
-				recordLabel = localized(locale, "取消录入", "Cancel recording")
+			value := localized(locale, "未设置", "Not set")
+			if current != "" {
+				value = uikit.FormatShortcut(current)
 			}
-			if design.Apply(ui.Button(c, recordLabel), t.SecondaryButton()).Clicked() {
-				state.capturing = !state.capturing
-				state.captureFocus = state.capturing
-				state.captureText = ""
-				state.hotkeyError = ""
-				c.Invalidate()
-			}
-			if state.capturing {
-				design.Apply(ui.Text(c, localized(locale, "按下组合键，Esc 取消",
-					"Press the combination; Esc cancels")), t.TextMuted(design.TypeXS))
-			}
-			ui.Spacer(c).Grow(1)
-			if state.globalHotkey != state.savedHotkey {
-				design.Apply(ui.Text(c, localized(locale, "未应用", "Not applied")),
-					t.TextMuted(design.TypeXS))
+			design.Apply(ui.Text(c, localized(locale, "当前：", "Current: ")+value),
+				t.Font(design.TypeXS), t.MonoFamily()).TextColor(t.LabelSecondary)
+			if state.dirty() {
+				uikit.StatusBadge(c, t, uikit.StatusPending, localized(locale, "未应用", "Not applied"))
 			}
 		})
+		// The recorder sits on the input's own line, so the button the help text
+		// names is visible next to the field it acts on.
+		ui.Field(c, localized(locale, "组合键", "Shortcut"), func() {
+			ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(design.Space2).Children(func() {
+				if state.capturing {
+					capture := ui.TextInput(c, &state.captureText).
+						Label(localized(locale, "录制全局热键", "Record global hotkey")).
+						Placeholder(localized(locale, "按下组合键…", "Press a combination…")).
+						FillWidth()
+					capture = capture.Bind(&state.captureInput)
+					capture.OnTextKey(func(k ui.TextKey) bool {
+						return state.captureHotkey(k, locale)
+					})
+					if state.captureFocus {
+						state.captureFocus = false
+						state.captureInput.Focus(c)
+					}
+				} else {
+					input := ui.TextInput(c, &state.hotkeyText).
+						Label(inputLabel(locale, localized(locale, "组合键", "Shortcut"))).
+						Placeholder("Ctrl + Shift + Space").FillWidth()
+					if input.Changed() {
+						state.syncHotkeyDraft(locale)
+					}
+				}
+				recordLabel := localized(locale, "录入", "Record")
+				if state.capturing {
+					recordLabel = localized(locale, "取消录入", "Cancel recording")
+				}
+				if design.Apply(ui.Button(c, recordLabel), t.SecondaryButton()).
+					Tooltip(localized(locale, "按键录入组合键", "Record a key combination")).
+					Clicked() {
+					state.capturing = !state.capturing
+					state.captureFocus = state.capturing
+					state.captureText = ""
+					state.hotkeyError = ""
+					c.Invalidate()
+				}
+			})
+		}).Description(localized(locale,
+			"留空关闭。点「录入」后直接按组合键，或输入如 Ctrl + Shift + Space；点页脚「应用」并重启后生效。",
+			"Leave empty to disable. Press Record and press the combination, or type e.g. Ctrl + Shift + Space; it applies after Apply and a restart.")).
+			Error(state.hotkeyError)
+		if state.capturing {
+			design.Apply(ui.Text(c, localized(locale, "按下组合键，Esc 取消",
+				"Press the combination; Esc cancels")), t.TextMuted(design.TypeXXS))
+		}
 		ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(design.Space2).Children(func() {
 			for _, preset := range hotkeyPresets {
 				preset := preset
-				if design.Apply(ui.Button(c, formatHotkeyDisplay(preset)),
+				if design.Apply(ui.Button(c, uikit.FormatShortcut(preset)),
 					t.SecondaryButton()).Clicked() {
 					state.globalHotkey = preset
-					state.hotkeyText = formatHotkeyDisplay(preset)
+					state.hotkeyText = uikit.FormatShortcut(preset)
 					state.hotkeyError = ""
 					state.capturing = false
 					c.Invalidate()

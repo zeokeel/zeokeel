@@ -108,7 +108,7 @@
 
 | 组件/API | 用途 | 本项目规则 |
 |---|---|---|
-| `Button` / `PrimaryButton` / `ButtonBase` | 普通/主操作/无外观按钮 | 主操作 `ui.PrimaryButton` + `t.PrimaryButton()`；次操作 `ui.Button` + `t.SecondaryButton()`；危险用 `t.DangerButton()`；二者都**不许覆写背景色** |
+| `Button` / `PrimaryButton` / `ButtonBase` | 普通/主操作/无外观按钮 | 主操作 `ui.PrimaryButton` + `t.PrimaryButton()`（36 高；页面唯一主操作可用 `t.PrimaryButtonLarge()` 40）；次操作 `ui.Button` + `t.SecondaryButton()`；禁用主操作 `t.DisabledPrimary()`（中性面 + tertiary 文字，**不许 50% accent**）；危险用 `t.DangerButton()`；都**不许覆写背景色** |
 | `Toggle` / `ToggleGroup` | 保持按下的按钮（非开关） | 只用于 press 语义（评分、格式）；**开关必须 `ui.Switch`** |
 | `MenuButton` / `PopoverMenuButton` | 按钮+菜单（系统/窗口内绘制） | 行尾「⋯」与溢出菜单用 `PopoverMenuButton`；`Danger()`/`Radio()`/`ID()` 按语义用 |
 | `Menu` / `MenuItem` / `ContextMenu` / `MenuBase` | 右键/下拉菜单 | 菜单项一律 `MenuItem`；同一菜单供右键与「⋯」复用；编辑项用 `m.EditItems()` |
@@ -144,7 +144,7 @@
 | 组件/API | 用途 | 本项目规则 |
 |---|---|---|
 | `Modal` / `DialogBase` | 遮罩对话框（焦点陷阱/Esc/焦点归还） | 结构化内容与危险确认用 Modal；动作条走 `uikit.DialogFooter`——危险动作**不得为 Default**，安全动作（取消）可 Default 承接 Enter；审批**无 Default** |
-| `AlertDialog` | 重要简单确认（末位按钮=默认，Esc=取消，外部点击不关闭） | **非危险、非不可逆**的简单确认用 AlertDialog；危险确认/审批不用（用 Modal+`uikit.DialogFooter`，危险动作不得 Default） |
+| `AlertDialog` | 重要简单确认（末位按钮=默认，Esc=取消，外部点击不关闭） | **只用于非危险、非不可逆**的简单确认；删除/清空/恢复默认一律用 `uikit.ConfirmDanger`（Modal + DialogHeader + DialogFooter：取消为 Default，危险按钮 danger 非 Default） |
 | `Popover` / `PopoverBase` | 锚点面板 | 筛选/详情/参数浮层用 Popover；不许 Absolute 手搓 |
 | `Tooltip` | 悬停/聚焦提示 | 图标按钮必须 `Label`+`Tooltip`；Description 优先于 tooltip 作为 AT 描述 |
 | `c.Toast` / `c.ToastAction` / `c.AddToast` / `ToastViewportBase` | 通知/撤销 | 所有通知走 toast（框架负责计时/暂停/Esc/读屏）；**不许自绘 toast** |
@@ -183,7 +183,10 @@
 6. **主题与缩放**：颜色/字号只经 `design.Of(c)` → `t.Font/t.Text/t.TextMuted`；`TextScale` 只作用于文字，不作用于间距/控件度量。
 7. **Fluent 默认值不重复设置**：`editor.State`/`markdown.Options`/`richtext.EditorOptions` 零值即默认；不要为了"看起来对"堆配置。
 8. **选择与激活分离**：`ui.List` 的 `Selected`/`Changed` 只表达"选择"（点击或方向键）；"打开/进入/提交"必须走 `Submitted()`（Enter/双击）或行内 `RowDoubleClicked()`。方向键/Home/End 不得触发导航或提交（文件树目录、设置归档列表等入口均按此修）。
-9. **accent 选中行的前景**：List 用 accent 填充选中行；行内文字/图标改用 `t.AccentText`，徽章用 `uikit.OnAccentBadge`（AccentText 填充 + accent 文字，label 语义保留），不得保留 resting 前景色（暗色下实测 ≈1.2:1 不可读）。
+9. **选择态两级**：持久导航/树/列表的当前项 = `BgSelected`(12%) + 左侧 2px `Accent` 竖条 + `LabelPrimary`（行内图标 `Accent`，徽章用普通 `uikit.Badge`）；只有浮层内的瞬态选择（命令面板、菜单、下拉当前项）保留 Accent 填充 + `OnPrimary`。满蓝导航选中行 = AP-19。
+10. **危险确认与 Esc 安全默认**：不可逆动作必须 `uikit.ConfirmDanger`（安全动作 Default）；审批无 Default；「Esc 拒绝」等承诺必须在窗口级成立，不能因焦点在侧栏而失效（AP-24）。
+11. **强调色预算**：每屏 ≤2 Accent 填充、≤1 primary、≤2 红色元素；状态徽章只用 `uikit.StatusBadge`（AP-20/AP-21）。
+12. **字号与度量纪律**：11px 禁成句；控件高度只用 32/36/40/44（禁 38）；圆角语义见 §5.4；表面 ramp 见 §5.1（AP-22/AP-23）。
 
 ### 1.4 选用决策顺序
 
@@ -279,6 +282,13 @@
 | AP-16 | 在 build 回调做 I/O、每帧构建全量集合、跨线程直接改 UI | 卡帧、数据竞争、元素过期 | 缓存 + 显式刷新；`UIRuntime.Post`；`List` 虚拟化 | `go tool mygo vet` + 帧测试 |
 | AP-17 | 覆盖原生控件尺寸导致焦点环/命中区异常（图标按钮过小、无 Label） | 键盘/触屏/读屏不可用 | 图标按钮 ≥ 24×24 目标区、必须 `Label`+`Tooltip` | DS-06/DS-07 |
 | AP-18 | 用状态色小字当正文（Success/Warning/Danger 直接作正文前景） | 对比度不足 | 用 `*Text` 变体（WCAG-AA） | DS-02 |
+| AP-19 | 持久导航/列表当前项用满饱和 Accent 填充 | 与「新对话」等主按钮形成两个重色块，选中语义与设置导航/检查器 tab 不一致 | `BgSelected`(12%) + 2px `Accent` 左条 + `LabelPrimary`；瞬态选择才用 Accent 填充 | 帧测试 + 快照（DS-12） |
+| AP-20 | 一屏 >2 个 Accent 填充块或 >1 个 primary 按钮 | 主次不清，用户不知道下一步点哪 | 强调预算：每屏 ≤2 Accent、≤1 primary；分节动作 `SectionAction` | 帧测试/快照（DS-13） |
+| AP-21 | 状态徽章用中性底 + 状态色文字拼装 | 红字压蓝灰底语义错位；状态没有统一解剖 | 只用 `uikit.StatusBadge`（语义 tint + `*Text` AA + 必填标签） | grep/评审（DS-14） |
+| AP-22 | 11px 用于成句文本/按钮；控件高度 38 或非 4 倍数 | 可读性差、节奏破格 | 微标签才用 11；成句 ≥12，正文 14；高度 32/36/40/44 | 评审 + 快照（DS-15） |
+| AP-23 | 表面 ramp 反转（暗色侧栏比页面浅）或抽屉/浮层无 elevation | 层级隐喻失效；抽屉看起来像布局被裁切 | S0–S4 ramp 两主题同向；抽屉/浮层 `ShadowOverlay` | 像素采样/快照（DS-16） |
+| AP-24 | 危险确认用 `AlertDialog`（危险动作成为 Default/Enter）；「Esc 拒绝/停止」在焦点离开会话时失效 | 一次回车不可逆删除；承诺的快捷键不生效 | `uikit.ConfirmDanger`（取消 Default）；Esc 安全动作提升到 window scope | 帧测试（DS-11） |
+| AP-25 | 页面主操作落点超过两种（页头右/固定页脚右下）；管理列表用 r16 卡墙 | 用户学不到“主操作在哪”；设置页像 dashboard | 两落点规则；管理列表平铺行 + Divider + 行尾 ⋯ | 评审 + 快照 |
 
 ### 3.2 现状违规证据（2026-11-09，Phase 1a/1b 后）
 
@@ -485,6 +495,18 @@ uikit.ToolRow(c, uikit.ToolRowOptions{
 
 **规则**：状态色本身只做 fill/border/icon；小字必须用 `*Text` 变体（WCAG-AA）。硬编码颜色 = AP-01。
 
+**表面 ramp（S0–S4，两个主题同向）**：导航永远下沉，页面最低、浮层最高；暗色不能反转。
+
+| 语义 | token | 浅色 | 暗色 | 用途 | 边框/阴影 |
+|---|---|---|---|---|---|
+| S0 page | `BgBase` | `#FFFFFF` | `#111118` | 主内容、transcript、设置 body | 无 |
+| S1 sunken | `BgSidebar` | `#F9FAFB` | `#0B0B10` | 侧栏、窗口顶带、设置导航 | 右侧 1px `BorderL2` |
+| S2 raised | `BgRaised` | `#FFFFFF` | `#1B1B26` | composer、工具卡、审批卡、对话框 | 1px 边框；composer 额外 `ShadowComposer`；浮层 `ShadowOverlay` |
+| S3 raised-soft | `BgBase`+`BorderL2`+`RadiusMD` | 白 + 10% ink 边 | `#111118` + 12% 白边 | 团队/任务/子代理行、产物/文件条目 | 只描边，无阴影 |
+| S4 overlay | `BgRaised`+`BorderL2`+`RadiusLG` | 白 | `#1B1B26` | modal/palette/菜单/toast/抽屉 | `ShadowOverlay` + scrim |
+
+**规则**：S2 内最多再嵌一层 S3，禁止卡中卡套弹窗；抽屉/浮层必须有 elevation（无阴影的“假浮层”= AP-24）；暗色导航比页面浅 = AP-24。
+
 ### 5.2 状态语义矩阵
 
 | 状态 | 文本色 | 填充/边框/图标 | 语义 |
@@ -508,17 +530,31 @@ uikit.ToolRow(c, uikit.ToolRowOptions{
 | `TypeS` | 14/24/400 | 行内 label |
 | `TypeXS` | 13/20/400 | 说明、列表次文本 |
 | `TypeXXS` | 12/18/400 | 元数据 |
-| `TypeXXXS` | 11/14/400 | 计数、键位提示（**必须配 muted 色**） |
+| `TypeXXXS` | 11/14/400 | **仅**微标签：分组小标签、kbd 提示、终端 gutter；**禁止成句文本** |
 
-**规则**：字号只走 `t.Font(role)`，它会同时设置字体栈、行高、字重并随 `TextScale` 缩放；裸 `FontSize` = AP-03（字面量站点已清零；唯一例外是 chat font-size 偏好的动态值 `st.messageFontSize()`，不是字面量）。Mono 文本用 `t.MonoText(role)`。标题字重可显式 `.FontWeight(600)`，但必须与 role 组合（后续引入 heading role 后收敛）。
+**字号使用规则（v2）**：
+
+| Role | 允许 | 禁止 |
+|---|---|---|
+| `TypeXL 24` | 仅品牌/落地页 hero | chrome、设置、检查器 |
+| `TypeL 20/600` | 设置页/对话框 H1 | 列表行、卡头 |
+| `TypeM 16/600` | 分节标题、窗口顶带屏幕标题 | 正文 |
+| `TypeBody 14` | 会话正文、问题正文、表单成句说明 | 元数据、按钮 |
+| `TypeS 14/24` | 列表行标题、菜单项、按钮标签、工具名 | 长段正文 |
+| `TypeXS 13` | 次要正文、表单标签、属性值、检查器正文 | 时间/计数（用 XXS） |
+| `TypeXXS 12` | 元数据行、hint、状态徽章文字 | 成句活动摘要（≤2 行） |
+| `TypeXXXS 11` | 微标签/kbd/gutter | 成句文本、按钮文字、诊断值 |
+
+**规则**：字号只走 `t.Font(role)`，它会同时设置字体栈、行高、字重并随 `TextScale` 缩放；裸 `FontSize` = AP-03。Mono 文本用 `t.MonoText(role)`。**一屏最多 4 种字号**；权重只用 `design.WeightRegular/Medium/Semibold`（400/500/600），禁止裸 `FontWeight(600)`（DS-03）；元数据永不用 accent。
 
 ### 5.4 间距 / 圆角 / 阴影 / 布局度量
 
 | 类别 | 取值 | 规则 |
 |---|---|---|
-| 间距 | `Space1..8` = 4/8/12/16/20/24/32 | 只用这些；容器间距用 `Gap(design.SpaceN)`，内外边距同理 |
-| 圆角 | `RadiusXS 4` / `SM 8` / `MD 10` / `LG 16` / `XL 20` / `Max 999` | 控件 MD、卡片 LG、composer XL、badge Max；禁止裸数值 |
-| 阴影 | `ShadowComposer`（composer）、`ShadowOverlay`（浮层，深色更重） | 卡片默认无阴影；浮层才用 elevation；禁止手写 `ui.RGBA` |
+| 间距 | `Space0..8` = 0/4/8/12/16/20/24/32 | 只用这些；容器间距用 `Gap(design.SpaceN)`，内外边距同理；显式零用 `Space0`，禁止裸 0（DS-03） |
+| 控件高度 | `RowCompactHeight 32` / `ControlHeight 36` / `PageActionHeight 40` / `RowDoubleHeight 44`；紧凑 chip 用 `ControlCompactHeight 28` | 全部 4 的倍数；**禁止 38**；页面唯一 primary 用 40，其余控件 36，列表行 36/44，树/菜单 32 |
+| 圆角 | `RadiusXS 4` / `SM 8` / `MD 10` / `LG 16` / `XL 20` / `Max 999` | XS 仅内嵌小方块；SM 行/控制 chip/palette；MD 原生控件/S3/菜单；LG S2 卡/对话框/toast/团队浮层；**XL 仅 composer**；Max 状态药丸。子圆角 ≤ 父圆角；同屏最多 3 档；禁止 chip 用 LG |
+| 阴影 | `ShadowComposer`（composer）、`ShadowOverlay`（浮层/抽屉/toast，深色更重） | 卡片默认无阴影；浮层才用 elevation；禁止手写 `ui.RGBA` |
 | 布局 | `SidebarWidth 280` / `SidebarRailWidth 64` / `InspectorWidth 320` / `InspectorMinWidth 260` / `ContentMinWidth 520` / `SettingsWidth 820` / `SettingsHeight 760` / `TranscriptWidth 960` / `DialogWidthXS 360` / `DialogWidthS 460` / `DialogWidthCompact 520` / `DialogWidthM 560` / `DialogWidthL 620` / `DialogWidthXL 680` / `DialogBodyMax 480` / `OverlayWidthS 380` | 壳层/对话框/浮层/阅读列尺寸只能引这些 token（Phase 1b 已补齐并替换存量） |
 | 图标尺寸 | `IconSizeS/M/L = 16/20/24`（已落地） | 图标按钮统一走 `uikit.IconButton`（Phase 2）；其他图标尺寸优先用 token，禁止 12–40 裸值继续新增 |
 
@@ -527,39 +563,46 @@ uikit.ToolRow(c, uikit.ToolRowOptions{
 1. 颜色只从 `internal/brand`（唯一 hex）→ `design.Tokens` → 屏幕。
 2. 所有文字走 `design.Of(c)` 的 `Font/Text/TextMuted`；`TextScale` 必须生效（设计层已有测试，屏幕不许绕过）。
 3. 间距/圆角/尺寸只用上表 token；新增尺寸先加 token 再使用。
-4. 阴影只用两个预设；浮层/菜单用 `ShadowOverlay`。
-5. 对应检查：DS-01/DS-02/DS-03（见 [DESIGN-LINT.md](DESIGN-LINT.md)）。
+4. 阴影只用两个预设；浮层/菜单/抽屉用 `ShadowOverlay`。
+5. **强调色预算**：每屏 ≤2 个 Accent 填充块、≤1 个 primary 按钮、≤2 个红色元素；页面主操作只有两个落点（页头右 / 固定页脚右下），分节动作走 `SectionAction`。
+6. **状态徽章**：只用 `uikit.StatusBadge`（success 8%/warning/danger 12% tint + `*Text` AA 文字 + 必填标签）；禁止 `t.Badge()+TextColor(t.DangerText)` 这类中性底 + 状态字拼法（AP-21）。
+7. 对应检查：DS-01/DS-02/DS-03/DS-11..DS-16（见 [DESIGN-LINT.md](DESIGN-LINT.md)）。
 
 ---
 
 ## 6. 预设与入口组件清单
 
-### 6.1 design 预设（`internal/design/components.go`，9 个）
+### 6.1 design 预设（`internal/design/components.go`）
 
 | 预设 | 外观 | 用法 | 禁止 |
 |---|---|---|---|
 | `SectionLabel()` | TypeXXXS + LabelTertiary | 侧栏/设置导航小节标题 | 当正文 |
 | `Panel()` | BgRaised + BorderL2 + RadiusLG | 独立对象卡（工具卡、Agent 详情、任务详情、composer） | 给每个 section 套卡片 |
 | `ShadowComposer()` / `Composer()` | 卡片 + 软阴影 + RadiusXL | 两个 composer 卡片 | 其他浮层 |
-| `PrimaryButton()` | 只设 h38/PaddingX/Radius/weight，**套 `ui.PrimaryButton`** | 主操作（保存/发送/批准） | 套 `ui.Button` 或覆写背景 |
-| `SecondaryButton()` | h36/PaddingX/Radius/weight，套 `ui.Button` | 次操作/取消/关闭 | 主操作 |
+| `PrimaryButton()` | h36/PaddingX/Radius/weight，**套 `ui.PrimaryButton`** | 主操作（保存/发送/批准/连接） | 套 `ui.Button` 或覆写背景 |
+| `PrimaryButtonLarge()` | h40，套 `ui.PrimaryButton` | 页面唯一主操作 / 空态 hero | 对话框/列表内 |
+| `DisabledPrimary()` | h36 + BgStrong + LabelTertiary，套 `ui.Button` | 禁用态主操作（发送/运行/保存未就绪） | 可用的主操作 |
+| `SecondaryButton()` | h36/PaddingX/Radius/weight，套 `ui.Button` | 次操作/取消/关闭/分节动作 | 主操作 |
 | `DangerButton()` | danger 文字，套 `ui.Button` | 删除/拒绝/停止 | 默认/Enter 焦点 |
-| `Badge()` | 胶囊 + BgHover + LabelSecondary | 状态/类型/计数 | 普通元数据、全宽胶囊 |
-| `ShadowOverlay()` | 浮层阴影（深色 alpha 0.32） | 菜单/浮层/palette/toast | 卡片 |
+| `SelectedRow()` | BgSelected(12%) + RadiusSM | 持久导航当前项（配合 2px Accent 左条） | 瞬态选择/满蓝填充 |
+| `Badge()` | 胶囊 + BgHover + LabelSecondary | 状态/类型/计数（非语义状态） | 普通元数据、全宽胶囊、状态语义 |
+| `ShadowOverlay()` | 浮层阴影（深色 alpha 0.32） | 菜单/浮层/palette/toast/抽屉 | 卡片 |
 
 ### 6.2 uikit 共享组合（`internal/uikit`）
 
 | 分类 | API | 用途 |
 |---|---|---|
 | 页面结构 | `PageHeader` / `Section` / `PageHeaderAction` / `SectionAction` | 页头/小节/动作位置（heading role 已内置） |
-| 空态/错误 | `EmptyState` / `EmptyStateBlock` / `ErrorLine` | 空态文案 / 带下一步动作 / RoleAlert 错误行 |
+| 空态/错误 | `EmptyState` / `EmptyStateBlock` / `uikit.EmptyStateHero` / `ErrorLine` | 行内空态 / 带下一步动作 / hero（图标+标题+primary）/ RoleAlert 错误行 |
 | 只读展示 | `KeyValueRows` / `Bullet` | 属性表（值可选中）/ 项目符号 |
 | 列表行强调 | `OnAccentBadge` | List 选中 accent 行上的可读徽章（AccentText 填充 + accent 文字；status label 语义保留） |
-| 对话框 | `DialogFooter` + `DialogAction` | 唯一动作条：危险→次要→主操作（最右）；`Default` 仅无文本输入时用；危险确认只把 Default 给安全动作（取消），危险动作永不为 Default；审批无 Default |
+| 对话框 | `DialogFooter` + `DialogAction` / `uikit.DialogHeader` / `uikit.ConfirmDanger` | 唯一动作条（危险→次要→主操作最右）；`DialogHeader` 统一图标/标题/副标题/关闭；`ConfirmDanger` 是不可逆动作的唯一入口（取消 Default、危险非 Default）；`Default` 仅无文本输入时用；审批无 Default |
 | 工具行 | `ToolRow` + `ToolRowOptions` / `ToolPanelSectionView` / `ToolPreview` / `ToolDisplayName` / `ToolIcon` | 工具调用统一解剖（图标/名/状态/预览/详情段/团队跳转） |
 | 输入辅助 | `EnterTo` | 单行输入 Enter→动作（有文本输入时替代 Default） |
-| 文案/locale | `T` / `FormatDateTime` / `FormatClock` / `Language` / `FormatCompactCount` | 本地化与格式化 |
+| 文案/locale | `T` / `FormatDateTime` / `FormatClock` / `Language` / `FormatCompactCount` / `FormatShortcut` | 本地化与格式化；`FormatShortcut` 统一键位记法（平台化 `Cmd/Ctrl + N`） |
+| 检查器文档 | `uikit.MarkdownDoc(t, size)` | 320px 检查器内的文件/产物预览（13px 正文，H1≈15，不再用默认 22px H1） |
 | 附件 | `SplitAttachmentPaths` / `InvalidAttachmentPath` / `ResolveAttachmentPaths` | 手输附件路径 |
+| accent 行徽章 | `uikit.OnAccentBadge` | **仅**在 Accent 填充的瞬态行（palette/菜单选中项）使用；持久导航改为 tint + 普通 `uikit.Badge`（AP-19） |
 
 ### 6.3 Agent 入口组件（目标；规格见 [AGENT-SURFACES.md](AGENT-SURFACES.md)）
 
@@ -678,6 +721,12 @@ go run ./internal/devtools/ui-snapshot .cache/ui-conformance   # 生成 PNG 并�
 | DS-08 | 文档/registry 同步 + 虚构 API | 同上 |
 | DS-09 | 状态映射重复/语义降级 | 同上 |
 | DS-10 | 对话框语义/动作顺序/Esc | 同上 |
+| DS-11 | 危险确认安全默认（ConfirmDanger、Enter=取消、非危险才用 AlertDialog） | 帧测试 `uikit.TestConfirmDangerDefaultsToCancel` + 迁移清单 |
+| DS-12 | 选择态两级（持久 tint+2px 条 / 瞬态 accent 填充） | 快照 + 帧测试（`uiroot.TestInspectorDrawerReservesContentWidth` 同类） |
+| DS-13 | 强调色预算（≤2 accent / ≤1 primary / ≤2 danger） | 快照评审 + 帧测试 |
+| DS-14 | 状态徽章只用 `uikit.StatusBadge`（禁中性底+状态字） | grep + 评审 |
+| DS-15 | 字号/高度纪律（11px 禁成句；高度 32/36/40/44，禁 38） | 评审 + designlint 后续规则 |
+| DS-16 | 表面 ramp / 抽屉 elevation（暗色导航下沉） | 像素采样 + 快照 |
 
 ### 8.3 文档同步义务
 
@@ -709,7 +758,12 @@ go run ./internal/devtools/ui-snapshot .cache/ui-conformance   # 生成 PNG 并�
 - [ ] 没有新增颜色字面量/裸数值度量/裸字号（DS-01/02/03）。
 - [ ] 官方件没有被覆写背景/状态色（AP-02）。
 - [ ] 集合用 `List/Table/Outline/GridView`；没有 `Scroll`+循环。
-- [ ] 对话框动作顺序/Default/Esc 符合 §3 AP-12 与 §6.2。
+- [ ] 对话框动作顺序/Default/Esc 符合 §3 AP-12/AP-24 与 §6.2；危险确认走 `uikit.ConfirmDanger`，`AlertDialog` 只用于非危险确认。
+- [ ] 强调色预算（≤2 accent/≤1 primary/≤2 danger）与选择态两级（持久 tint+2px 条）符合 §5.1/§5.5（DS-12/DS-13）。
+- [ ] 状态徽章只用 `uikit.StatusBadge`；没有中性底+状态字（DS-14）。
+- [ ] 字号 ≤4 档/屏，11px 只做微标签；控件高度 32/36/40/44（DS-15）。
+- [ ] 暗色 surface ramp 方向正确（导航比页面深）；抽屉/浮层有 `ShadowOverlay`（DS-16）。
+- [ ] 页面主操作只有两落点，每页唯一 primary；管理列表无 r16 卡墙。
 - [ ] 自绘有理由、已登记白名单与迁移清单（§7）。
 - [ ] a11y：无文字控件有 `Label`；错误 `RoleAlert`；异步 `c.Announce`。
 - [ ] 帧测试覆盖交互；视觉改动有快照并人工看过。

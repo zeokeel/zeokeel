@@ -55,7 +55,7 @@ func buildNetworkPage(c *ui.Context, store contracts.SettingsService, st *networ
 		effectiveNoProxy := strings.TrimSpace(store.Get(contracts.SettingNetNoProxy, ""))
 
 		uikit.Section(c, localized(locale, "当前生效", "Currently applied"), func(*ui.Context) {
-			uikit.KeyValueRows(c, []uikit.KeyValue{
+			buildPropertySheet(c, t, []uikit.KeyValue{
 				{Key: localized(locale, "代理地址", "Proxy URL"),
 					Value: firstNonEmpty(effectiveProxy, localized(locale, "直连", "Direct"))},
 				{Key: "NO_PROXY",

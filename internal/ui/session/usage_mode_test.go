@@ -39,9 +39,10 @@ func TestAssistantMetaRowShowsCompactUsage(t *testing.T) {
 	})
 	h := newHarness(t, chat)
 	tester := h.tester()
-	// The usage summary is part of the compact meta row; the breakdown lives in
-	// the ⋯ menu's 用量明细 submenu.
-	h.assertTexts(tester, "用时 3.2s · 1.2K tokens", "消息操作")
+	// The per-reply telemetry moved off the meta row (subtraction pass); the
+	// breakdown lives in the ⋯ menu's 用量明细 submenu.
+	h.assertTexts(tester, "消息操作")
+	h.assertNoTexts(tester, "用时 3.2s")
 	h.click(tester, "消息操作")
 	h.assertTexts(tester, "用量明细")
 	h.click(tester, "用量明细")
@@ -61,8 +62,7 @@ func TestAssistantMetaRowUsesCompactUnits(t *testing.T) {
 	})
 	h := newHarness(t, chat)
 	tester := h.tester()
-	h.assertTexts(tester, "用时 358.8s · 173.6K tokens")
-	h.assertNoTexts(tester, "173,635")
+	h.assertNoTexts(tester, "用时 358.8s", "173,635")
 	h.click(tester, "消息操作")
 	h.click(tester, "用量明细")
 	h.assertTexts(tester, "171.7K", "1.9K", "92.9K")
@@ -77,11 +77,13 @@ func TestAssistantMetaRowDurationFormats(t *testing.T) {
 	)
 	h := newHarness(t, chat)
 	tester := h.tester()
-	h.assertTexts(tester, "用时 850ms · 12 tokens")
-	// The message without Usage gets no usage summary.
-	if got := textsContaining(tester.Texts(), "用时"); got != 1 {
-		t.Fatalf("usage summaries = %d, want 1; texts = %v", got, tester.Texts())
+	// No turn carries a usage summary on its meta row anymore.
+	if got := textsContaining(tester.Texts(), "用时"); got != 0 {
+		t.Fatalf("usage summaries = %d, want 0; texts = %v", got, tester.Texts())
 	}
+	h.click(tester, "消息操作")
+	h.click(tester, "用量明细")
+	h.assertTexts(tester, "时长", "850ms")
 }
 
 func TestAssistantMetaRowEnglishCopy(t *testing.T) {
@@ -93,7 +95,7 @@ func TestAssistantMetaRowEnglishCopy(t *testing.T) {
 	tester := h.tester()
 	h.ui.Locale().SetLanguage("en")
 	tester.Frame()
-	h.assertTexts(tester, "Took 3.2s · 1.2K tokens")
+	h.assertNoTexts(tester, "Took 3.2s")
 	h.click(tester, "Message actions")
 	h.click(tester, "Usage details")
 	h.assertTexts(tester, "Cached tokens", "200")
@@ -140,9 +142,9 @@ func TestAgentModePlanBadgeAndToggle(t *testing.T) {
 	settings := newPermissionSettings(nil)
 	h := newPermissionHarness(t, permissionChat(), settings)
 	tester := h.tester()
-	// Normal mode keeps the quiet session-menu label; plan mode owns the label
-	// (and the warning colour) when it is active.
-	h.assertTexts(tester, "工作区可写")
+	// The chip label stays stable; the plan state appears as the mode group's
+	// trailing value and a warning-coloured stable label (R17).
+	h.assertTexts(tester, "会话设置")
 	if got := textsContaining(tester.Texts(), "计划模式"); got != 0 {
 		t.Fatalf("plan state rendered outside the session menu; texts = %v", tester.Texts())
 	}
@@ -153,14 +155,15 @@ func TestAgentModePlanBadgeAndToggle(t *testing.T) {
 	if got := settings.get(contracts.SettingAgentMode); got != contracts.AgentModePlan {
 		t.Fatalf("stored agent mode = %q, want plan", got)
 	}
-	h.assertTexts(tester, "计划模式")
-
+	h.assertTexts(tester, "会话设置")
 	h.openSessionMenu(tester)
+	assertMenuTrailingValue(t, tester, "计划模式")
+
 	h.clickExact(tester, "普通模式")
 	if got := settings.get(contracts.SettingAgentMode); got != contracts.AgentModeNormal {
 		t.Fatalf("stored agent mode = %q, want normal", got)
 	}
-	h.assertTexts(tester, "工作区可写")
+	h.assertTexts(tester, "会话设置")
 	if got := textsContaining(tester.Texts(), "计划模式"); got != 0 {
 		t.Fatalf("plan state still rendered after switching back; texts = %v", tester.Texts())
 	}
@@ -186,7 +189,7 @@ func TestAgentModeEnglishCopy(t *testing.T) {
 	tester := h.tester()
 	h.ui.Locale().SetLanguage("en")
 	tester.Frame()
-	h.assertTexts(tester, "Workspace")
+	h.assertTexts(tester, "Session settings")
 
 	h.openSessionMenu(tester)
 	h.assertTexts(tester, "Conversation mode", "Normal mode", "Plan mode")
@@ -194,5 +197,7 @@ func TestAgentModeEnglishCopy(t *testing.T) {
 	if got := settings.get(contracts.SettingAgentMode); got != contracts.AgentModePlan {
 		t.Fatalf("stored agent mode = %q, want plan", got)
 	}
-	h.assertTexts(tester, "Plan mode")
+	h.assertTexts(tester, "Session settings")
+	h.openSessionMenu(tester)
+	assertMenuTrailingValue(t, tester, "Plan mode")
 }

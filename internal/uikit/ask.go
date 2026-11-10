@@ -117,10 +117,10 @@ func askDialogBody(c *ui.Context, o AskDialogOptions, open, otherOpen *bool, ans
 	design.Apply(ui.Column(c).Width(design.DialogWidthS).Gap(design.Space4), func(el ui.Element) ui.Element {
 		return el.PaddingX(design.Space6).PaddingY(design.Space2)
 	}).Children(func() {
-		ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(design.Space2).Children(func() {
-			ui.Icon(c, icons.Sparkles()).Size(design.Space5, design.Space5).TextColor(t.Accent)
-			design.Apply(ui.Text(c, T(o.Locale, "需要你的确认", "Needs your input")),
-				t.Font(design.TypeL)).TextColor(t.LabelPrimary)
+		DialogHeader(c, DialogHeaderOptions{
+			Key:   "uikit.ask/header",
+			Icon:  icons.Sparkles(),
+			Title: T(o.Locale, "需要你的确认", "Needs your input"),
 		})
 		design.Apply(ui.Text(c, o.Question.Text), t.Font(design.TypeBody)).TextColor(t.LabelPrimary)
 

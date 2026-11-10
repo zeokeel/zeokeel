@@ -86,6 +86,14 @@ type ComposerShellOptions struct {
 	// that tracks the caret (the @ menu follows it) or focuses the input itself
 	// reads/writes it there.
 	InputReady func(c *ui.Context, input ui.Element)
+	// OnPasteImage turns an image paste into a staged attachment. mygo's
+	// OnPaste sees a paste before it is inserted and passes the clipboard's text
+	// (empty when it holds none, as with an image); the shell gives text pastes
+	// back to the input untouched and calls this hook only for an empty paste.
+	// True takes the paste so nothing is inserted. nil leaves image pastes inert
+	// (a surface without an attachment path should still pass a hook that tells
+	// the user how to attach the image instead of failing silently).
+	OnPasteImage func() bool
 	// Focus asks the shell to focus the input on this frame (one-shot: the shell
 	// clears it).
 	Focus *bool
@@ -181,6 +189,18 @@ func ComposerShell(c *ui.Context, o ComposerShellOptions) (card, input ui.Elemen
 					MaxHeight(design.Space8 * 6).
 					Grow(1).
 					OnTextKey(composerShellKey(o))
+				// An image paste is an attachment, not text: the shell sees the
+				// empty paste and asks the surface to stage the clipboard image
+				// (the surface owns attachments). A non-empty paste keeps the
+				// native insert path.
+				if o.OnPasteImage != nil {
+					input.OnPaste(func(text string) bool {
+						if text != "" {
+							return false
+						}
+						return o.OnPasteImage()
+					})
+				}
 				if o.InputBind != nil {
 					input.Bind(o.InputBind)
 				}
@@ -221,7 +241,9 @@ func ComposerShell(c *ui.Context, o ComposerShellOptions) (card, input ui.Elemen
 					}
 					if o.Hint != nil {
 						if hint := o.Hint(c); hint != "" {
-							design.Apply(ui.Text(c, hint), t.Font(design.TypeXXXS)).
+							// The hint is a sentence (what Enter/Esc do), so it
+							// uses the metadata step 12, not the 11 micro step.
+							design.Apply(ui.Text(c, hint), t.Font(design.TypeXXS)).
 								TextColor(t.LabelTertiary).MaxLines(1).Ellipsis("…").Tooltip(hint)
 						}
 					}
@@ -350,8 +372,16 @@ func composerShellActions(c *ui.Context, t *design.Tokens, o ComposerShellOption
 	if label == "" {
 		label = T(o.Locale, "发送", "Send")
 	}
-	send := design.Apply(ui.PrimaryButton(c, label), t.PrimaryButton()).
-		Label(label).Shrink(0)
+	// A disabled primary must not keep the accent fill: mygo's 50% accent wash
+	// still read as a clickable brand-blue button. The neutral enabled-shaped
+	// control carries the same size and the native disabled state.
+	var send ui.Element
+	if o.SendEnabled {
+		send = design.Apply(ui.PrimaryButton(c, label), t.PrimaryButton())
+	} else {
+		send = design.Apply(ui.Button(c, label), t.DisabledPrimary())
+	}
+	send = send.Label(label).Shrink(0)
 	if o.SendTooltip != "" {
 		send.Tooltip(o.SendTooltip)
 	}

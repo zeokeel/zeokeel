@@ -1,8 +1,8 @@
 package session_test
 
 // Tests for multi-step assistant turns: consecutive finished tool steps fold
-// into one process summary with only the final result expanded, and the latest
-// reply carries a bottom copy button.
+// into one process summary with only the final result expanded; the reply has
+// exactly one copy entry (the message ⋯ menu), not a duplicate bottom chip.
 
 import (
 	"testing"
@@ -41,16 +41,18 @@ func TestAssistantStepsFoldIntoOneTurn(t *testing.T) {
 	tester := h.tester()
 
 	summary := "过程 · 思考 · 2 个工具调用"
-	h.assertTexts(tester, summary, "最终结果", "用时 3.0s · 3K tokens")
+	h.assertTexts(tester, summary, "最终结果")
+	h.assertNoTexts(tester, "用时 3.0s")
 	h.assertNoTexts(tester, "第一步结果", "第二步结果", "运行命令", "读取文件")
 
 	h.click(tester, summary)
 	h.assertTexts(tester, "第一步结果", "第二步结果", "运行命令", "读取文件", "最终结果")
 }
 
-// TestLatestReplyHasBottomCopyButton covers the latest reply's bottom copy
-// affordance: one labeled 复制 button under the answer, copying the reply text.
-func TestLatestReplyHasBottomCopyButton(t *testing.T) {
+// TestReplyHasOneCopyEntry covers the copy-entry de-duplication: the standalone
+// bottom 复制 chip is gone (the tool card's own copy and the ⋯ 复制消息 remain),
+// so one reply no longer offers three look-alike copy entries.
+func TestReplyHasOneCopyEntry(t *testing.T) {
 	h := newHarness(t, foldChat(
 		contracts.ChatMessage{ID: "u1", Role: contracts.ChatRoleUser, Text: "问题"},
 		contracts.ChatMessage{
@@ -60,14 +62,15 @@ func TestLatestReplyHasBottomCopyButton(t *testing.T) {
 		},
 	))
 	tester := h.tester()
-	if _, ok := tester.AccessByRole(ui.RoleButton, "复制回复"); !ok {
-		t.Fatalf("latest reply has no bottom copy button; texts = %v", tester.Texts())
+	if _, ok := tester.AccessByRole(ui.RoleButton, "复制回复"); ok {
+		t.Fatalf("standalone bottom copy button is still rendered; texts = %v", tester.Texts())
 	}
-	if !tester.HasText("复制") {
-		t.Fatalf("bottom copy button shows no visible label; texts = %v", tester.Texts())
+	// The ⋯ menu keeps the one copy entry for the reply.
+	if err := tester.Click("消息操作"); err != nil {
+		t.Fatalf("open message actions: %v; texts = %v", err, tester.Texts())
 	}
-	if err := tester.Click("复制"); err != nil {
-		t.Fatalf("click bottom copy button: %v; texts = %v", err, tester.Texts())
+	if err := tester.Click("复制消息"); err != nil {
+		t.Fatalf("click 复制消息: %v; texts = %v", err, tester.Texts())
 	}
 	if got := tester.Clipboard(); got != "最终答复" {
 		t.Fatalf("clipboard = %q, want the reply text", got)

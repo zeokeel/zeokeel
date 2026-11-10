@@ -33,11 +33,19 @@ func (d *drive) runShellSteps() {
 		})
 
 	d.step("nav-automation", "uiroot", "导航：自动化",
-		"侧栏点击「自动化」→ automation screen 渲染；任务卡动作 立即运行/编辑/删除；调度显示人类可读", func(c *check) {
+		"侧栏点击「自动化」→ automation screen 渲染；任务行动作 立即运行/编辑/⋯ 菜单；调度显示人类可读", func(c *check) {
 			if !c.click("自动化") {
 				return
 			}
-			c.mustText("自动化", "新建任务", "每日构建检查", "立即运行", "编辑", "删除")
+			c.mustText("自动化", "新建任务", "每日构建检查", "立即运行", "编辑")
+			// Delete is a danger action behind the row's ⋯ menu now (R1).
+			if !c.click("任务操作") {
+				return
+			}
+			d.frame()
+			c.mustText("删除任务")
+			d.tester.Key(0, ui.KeyEscape)
+			d.frame()
 			// The seeded task runs every 30 minutes: the raw cron is humanized
 			// and the raw plan only stays in the tooltip (H11).
 			c.require(c.has("每 30 分钟"), "自动化任务调度没有显示人类可读文案「每 30 分钟」")

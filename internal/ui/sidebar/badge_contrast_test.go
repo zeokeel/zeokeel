@@ -1,11 +1,10 @@
 package sidebar_test
 
-// Fix-round regression test for SH-03: a status badge inside a chosen session
-// row must stay readable. The chosen row is painted in the accent fill, so the
-// resting badge colors land dim on it in the dark theme (measured about 1.2:1);
-// the chosen row now uses uikit.OnAccentBadge, whose fill is the on-accent
-// foreground. This test pins the light theme: the pill behind the Running label
-// must be the on-accent (near white) fill instead of the resting badge tint.
+// Regression test for the unified selection language (V1): the chosen session
+// row is the quiet persistent selection — the BgSelected 12% tint with a 2px
+// Accent left stripe and LabelPrimary text — not mygo's saturated accent fill.
+// The row's content, its badges and the stripe must all stay readable on that
+// tint in both themes.
 
 import (
 	"testing"
@@ -13,20 +12,34 @@ import (
 	"github.com/egoist/mygo/ui"
 
 	"github.com/zeokeel/zeokeel/internal/contracts"
+	"github.com/zeokeel/zeokeel/internal/design"
 	"github.com/zeokeel/zeokeel/internal/ui/sidebar"
 )
 
-// TestSelectedSessionBadgeUsesOnAccentFill covers SH-03 in both themes.
-func TestSelectedSessionBadgeUsesOnAccentFill(t *testing.T) {
+// colorDistance reports whether two sampled colors are within tolerance per
+// channel (the painter composites in 8-bit channels, so a rounding step is
+// expected between the token math and the frame).
+func colorNear(got [3]uint32, want [4]uint8) bool {
+	channels := [3]uint32{uint32(want[0]), uint32(want[1]), uint32(want[2])}
+	for i := range got {
+		if got[i]+2 < channels[i] || got[i] > channels[i]+2 {
+			return false
+		}
+	}
+	return true
+}
+
+// TestSelectedSessionRowUsesQuietSelection covers the V1 selection model in both
+// themes: the chosen row is the selection tint, the left stripe is the accent,
+// and the running badge keeps the resting neutral fill (the old on-accent fill
+// was for the retired full-accent row).
+func TestSelectedSessionRowUsesQuietSelection(t *testing.T) {
 	for _, tc := range []struct {
 		name string
 		dark bool
-		fill [3]uint32
 	}{
-		// Brand light AccentText (white) and dark AccentText (#0F1115 ink on
-		// the sky accent): the on-accent foreground of the chosen row.
-		{name: "light", fill: [3]uint32{255, 255, 255}},
-		{name: "dark", dark: true, fill: [3]uint32{15, 17, 21}},
+		{name: "light"},
+		{name: "dark", dark: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			chat := &fakeChat{
@@ -45,37 +58,58 @@ func TestSelectedSessionBadgeUsesOnAccentFill(t *testing.T) {
 				h.uiRoot.Theme().SetDark(true)
 				tester.Frame()
 			}
+			tokens := design.Light()
+			if tc.dark {
+				tokens = design.Dark()
+			}
 
+			title, ok := tester.Find("运行中的会话")
+			if !ok {
+				t.Fatalf("chosen session title is not in the frame; texts = %v", tester.Texts())
+			}
 			badge, ok := tester.Find("运行中")
 			if !ok {
 				t.Fatalf("running badge is not in the frame; texts = %v", tester.Texts())
 			}
-			// The badge's fill sits just left of its label text (the pill's padding).
-			x := int(badge.X) - 3
-			y := int(badge.Y + badge.H/2)
-			if x < 0 {
-				t.Fatalf("badge %+v is at the frame edge; cannot sample its fill", badge)
-			}
 			img := tester.Image()
-			r, g, b, _ := img.At(x, y).RGBA()
-			got := [3]uint32{r >> 8, g >> 8, b >> 8}
-			want := tc.fill
-			if got != want {
-				t.Fatalf("selected running badge fill = #%02x%02x%02x at (%d,%d), want the on-accent fill #%02x%02x%02x",
-					got[0], got[1], got[2], x, y, want[0], want[1], want[2])
+
+			// The chosen row's content starts at the found label's left edge:
+			// the 2 DIP accent stripe is its first child, then the row gap and
+			// the title's start padding (the message glyph and its text follow).
+			barX := int(title.X) + 1
+			barY := int(title.Y + title.H/2)
+			br, bg, bb, _ := img.At(barX, barY).RGBA()
+			bar := [3]uint32{br >> 8, bg >> 8, bb >> 8}
+			if !colorNear(bar, rgbOf(tokens.Accent)) {
+				t.Fatalf("selection stripe at (%d,%d) = #%02x%02x%02x, want the accent",
+					barX, barY, bar[0], bar[1], bar[2])
 			}
-			// And the chosen row itself is still an accent fill, so the sample above
-			// really is inside a selected row (light: brand blue, dark: sky).
-			rowX, rowY := 20, y
-			rr, gg, bb, _ := img.At(rowX, rowY).RGBA()
-			row := [3]uint32{rr >> 8, gg >> 8, bb >> 8}
-			wantRow := [3]uint32{13, 68, 246}
-			if tc.dark {
-				wantRow = [3]uint32{60, 187, 250}
+
+			// The row fill: the BgSelected tint over the sidebar, not the accent.
+			rowX := int(title.X) + 9
+			rr, rg, rb, _ := img.At(rowX, barY).RGBA()
+			row := [3]uint32{rr >> 8, rg >> 8, rb >> 8}
+			rowTint := tokens.BgSelected.Over(tokens.BgSidebar)
+			if !colorNear(row, rgbOf(rowTint)) {
+				t.Fatalf("chosen row fill at (%d,%d) = #%02x%02x%02x, want the BgSelected tint",
+					rowX, barY, row[0], row[1], row[2])
 			}
-			if row != wantRow {
-				t.Fatalf("row fill at (%d,%d) is #%02x%02x%02x, want the accent selection fill", rowX, rowY, row[0], row[1], row[2])
+
+			// The badge keeps the resting neutral fill over the selected tint.
+			bx := int(badge.X) - 3
+			by := int(badge.Y + badge.H/2)
+			xr, xg, xb, _ := img.At(bx, by).RGBA()
+			fill := [3]uint32{xr >> 8, xg >> 8, xb >> 8}
+			bgFill := tokens.BgHover.Over(rowTint)
+			if !colorNear(fill, rgbOf(bgFill)) {
+				t.Fatalf("chosen running badge fill = #%02x%02x%02x at (%d,%d), want the neutral badge fill",
+					fill[0], fill[1], fill[2], bx, by)
 			}
 		})
 	}
+}
+
+// rgbOf turns a token color into its opaque 8-bit channels.
+func rgbOf(c ui.Color) [4]uint8 {
+	return [4]uint8{c.R, c.G, c.B, c.A}
 }

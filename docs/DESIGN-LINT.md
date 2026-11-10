@@ -136,10 +136,16 @@ internal/ui/home/composer.go:634:7: DS-03 [AP-03] 裸数值度量：MinHeight(88
 | DS-08 | 文档/registry 同步 + 虚构 API | error | `go test`：registry ↔ DESIGN.md 表格 ↔ 白名单一致；源码出现 §7.4 禁用 API 名 | AP-14/AP-15 | 3 |
 | DS-09 | 状态映射重复/语义降级 | warn | AST：新增 `statusLabel/normalizeStatus/toolStatusColors/...` 同义函数；`cancelled` 用 Danger 色 | AP-08/AP-09 | 3 |
 | DS-10 | 对话框语义 | error（结构）/帧测试（行为） | `uikit.DialogAction{Danger:true, Default:true}` 组合；`AlertDialog` 用于结构化内容；动作顺序由入口保证 | AP-12 | 2 |
+| DS-11 | 危险确认安全默认 | 帧测试（行为，error 级契约） | `uikit.TestConfirmDangerDefaultsToCancel`（Enter=取消、显式点击才执行）；设置/会话/自动化的危险确认迁移清单（`AlertDialog` 在 `internal/ui/{settings,session,automation,interaction}` 中出现即人工复核） | AP-24 | 3 |
+| DS-12 | 选择态两级 | 帧测试 + 快照（人工） | 持久导航当前项必须是 `BgSelected` + 2px `Accent` 条；瞬态浮层选择才 Accent 填充 | AP-19 | 3 |
+| DS-13 | 强调色预算 | 快照评审 + 帧测试（人工计数） | 每屏 ≤2 Accent 填充、≤1 primary、≤2 红色元素；页中悬浮 primary 视为违规 | AP-20 | 3 |
+| DS-14 | 状态徽章解剖 | grep（可自动化）+ 评审 | `t.Badge()).TextColor(t.(Danger|Warning|Success)Text)` 出现即违规；状态一律 `uikit.StatusBadge` | AP-21 | 3 |
+| DS-15 | 字号/高度纪律 | 评审 + 后续 AST 规则 | `TypeXXXS` 成句；`Height(38)` 或非 4 倍数控件高度；`FontWeight(600)` 裸值 | AP-22 | 3 |
+| DS-16 | 表面 ramp / elevation | 像素采样 + 快照（人工） | 暗色 `BgSidebar` 必须比 `BgBase` 深；抽屉/浮层必须有 `ShadowOverlay` | AP-23 | 3 |
 
 > **实现状态（2026-11-09，Phase 1a）**：DS-01、DS-03（度量 error；FontWeight 暂为 warn）、DS-06（ButtonBase/DialogBase）、DS-06b、DS-07、DS-10（Danger+Default 结构）已实现；DS-02/04/05/09 未实现（DS-08 由 conformance 测试部分覆盖）。
 
-> 语义类规则（Default 焦点、Esc 行为、流式几何）无法可靠静态判定，**以帧测试为准**（§6）；lint 只报结构性错误与可判定的模式。
+> 语义类规则（Default 焦点、Esc 行为、流式几何、选择态/预算/ramp）无法可靠静态判定，**以帧测试 + 快照人工评审为准**（§6）；DS-11..DS-16 自 v0.2.19 起为评审契约，`designlint` 暂不实现 AST 检查（DS-14 可 grep）。
 
 ---
 

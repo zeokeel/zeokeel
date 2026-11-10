@@ -17,6 +17,7 @@ import (
 	"github.com/zeokeel/zeokeel-kernel/module"
 
 	"github.com/zeokeel/zeokeel/internal/contracts"
+	"github.com/zeokeel/zeokeel/internal/design"
 	"github.com/zeokeel/zeokeel/internal/uikit"
 )
 
@@ -156,7 +157,7 @@ func Module() *module.Descriptor[Config] {
 			mcpExpanded:           make(map[string]bool),
 			pendingRestartServers: make(map[string]bool),
 		}
-		return own(ctx, func() (func(), error) {
+		if err := own(ctx, func() (func(), error) {
 			return runtime.RegisterScreen(contracts.ScreenSpec{
 				ID:    ScreenID,
 				Title: config.Title,
@@ -165,7 +166,32 @@ func Module() *module.Descriptor[Config] {
 					buildScreen(c, runtime, config, moduleState)
 				},
 			})
-		})
+		}); err != nil {
+			return err
+		}
+		// The screen's chrome lives in the host's B3 top band: the title
+		// (SlotScreenHeader) and the MCP refresh utility (SlotScreenActions),
+		// beside the host's palette control. The item IDs carry the screen
+		// namespace so the band stays on this screen only.
+		screenSlots := []contracts.SlotItem{
+			{
+				Slot: contracts.SlotScreenHeader, ID: "plugins.title", Order: 10,
+				Build: func(c *ui.Context) { buildScreenHeaderSlot(c, design.Of(c), config, moduleState) },
+			},
+			{
+				Slot: contracts.SlotScreenActions, ID: "plugins.actions", Order: 10,
+				Build: func(c *ui.Context) { buildScreenActionsSlot(c, design.Of(c), runtime, moduleState) },
+			},
+		}
+		for _, item := range screenSlots {
+			item := item
+			if err := own(ctx, func() (func(), error) {
+				return runtime.RegisterSlotItem(item)
+			}); err != nil {
+				return err
+			}
+		}
+		return nil
 	}).
 		AddRequires(module.Requires(contracts.KeyUIRuntime)).
 		AddRequires(module.Requires(contracts.KeyNavigator)).

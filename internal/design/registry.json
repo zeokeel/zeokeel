@@ -355,6 +355,83 @@
         "token-colors"
       ],
       "doc": "docs/DESIGN.md §6.2 / §5.2"
+    },
+    {
+      "id": "ui.confirm-danger",
+      "entry": "uikit.ConfirmDanger",
+      "package": "internal/uikit",
+      "allowed": [
+        "uikit.ConfirmDanger",
+        "ui.Modal",
+        "uikit.DialogHeader",
+        "uikit.DialogFooter"
+      ],
+      "forbidden": [
+        "ui.AlertDialog-for-irreversible",
+        "danger-default",
+        "enter-deletes"
+      ],
+      "states": [
+        "closed",
+        "open"
+      ],
+      "rules": [
+        "no-default-on-danger",
+        "safe-action-defaults",
+        "explicit-confirm"
+      ],
+      "doc": "docs/DESIGN.md §1.2F / §6.2"
+    },
+    {
+      "id": "ui.dialog-header",
+      "entry": "uikit.DialogHeader",
+      "package": "internal/uikit",
+      "allowed": [
+        "uikit.DialogHeader"
+      ],
+      "forbidden": [
+        "hand-written-title",
+        "missing-close-on-dismissible"
+      ],
+      "rules": [
+        "typeL-title",
+        "optional-close"
+      ],
+      "doc": "docs/DESIGN.md §6.2"
+    },
+    {
+      "id": "ui.empty-state-hero",
+      "entry": "uikit.EmptyStateHero",
+      "package": "internal/uikit",
+      "allowed": [
+        "uikit.EmptyStateHero"
+      ],
+      "forbidden": [
+        "decoration-fill",
+        "multiple-primary"
+      ],
+      "rules": [
+        "one-primary",
+        "with-next-action"
+      ],
+      "doc": "docs/DESIGN.md §6.2"
+    },
+    {
+      "id": "ui.markdown-doc",
+      "entry": "uikit.MarkdownDoc",
+      "package": "internal/uikit",
+      "allowed": [
+        "uikit.MarkdownDoc"
+      ],
+      "forbidden": [
+        "default-markdown-theme-in-inspector",
+        "h1-outranks-page-title"
+      ],
+      "rules": [
+        "typeXS-body",
+        "scaled-headings"
+      ],
+      "doc": "docs/DESIGN.md §6.2"
     }
   ],
   "scenarios": [
@@ -500,6 +577,48 @@
       "rule": "DS-02",
       "message": "用状态色小字当正文（Success/Warning/Danger 直接作正文前景）；用 *Text 变体（WCAG-AA）",
       "doc": "docs/DESIGN.md §3.1 / DESIGN-LINT §3.2"
+    },
+    {
+      "id": "AP-19",
+      "rule": "DS-12",
+      "message": "持久导航/列表当前项用满饱和 Accent 填充；改为 BgSelected 12% + 2px Accent 左条 + LabelPrimary，瞬态浮层选择才用 Accent 填充",
+      "doc": "docs/DESIGN.md §3.1"
+    },
+    {
+      "id": "AP-20",
+      "rule": "DS-13",
+      "message": "一屏 >2 个 Accent 填充块或 >1 个 primary；强调预算每屏 ≤2 Accent、≤1 primary、≤2 danger",
+      "doc": "docs/DESIGN.md §3.1"
+    },
+    {
+      "id": "AP-21",
+      "rule": "DS-14",
+      "message": "状态徽章用中性底 + 状态色文字拼装；只用 uikit.StatusBadge（语义 tint + AA 文字 + 必填标签）",
+      "doc": "docs/DESIGN.md §3.1"
+    },
+    {
+      "id": "AP-22",
+      "rule": "DS-15",
+      "message": "11px 用于成句/按钮，或控件高度 38/非 4 倍数；11px 只做微标签，高度 32/36/40/44",
+      "doc": "docs/DESIGN.md §3.1"
+    },
+    {
+      "id": "AP-23",
+      "rule": "DS-16",
+      "message": "表面 ramp 反转（暗色侧栏比页面浅）或抽屉/浮层无 elevation；S0–S4 两主题同向，浮层用 ShadowOverlay",
+      "doc": "docs/DESIGN.md §3.1"
+    },
+    {
+      "id": "AP-24",
+      "rule": "DS-11",
+      "message": "危险确认用 AlertDialog 使危险动作成为 Default/Enter，或「Esc 拒绝」在焦点离开会话时失效；用 ConfirmDanger 且 Esc 提到 window scope",
+      "doc": "docs/DESIGN.md §3.1"
+    },
+    {
+      "id": "AP-25",
+      "rule": "DS-13",
+      "message": "页面主操作落点超过两种或管理列表用 r16 卡墙；主操作只有页头右/固定页脚右下，管理列表平铺行 + Divider + 行尾 ⋯",
+      "doc": "docs/DESIGN.md §3.1"
     }
   ],
   "allowlist": [

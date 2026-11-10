@@ -133,9 +133,9 @@ func TestPermissionCommandCyclesMode(t *testing.T) {
 	h := newPermissionHarness(t, permissionChat(), settings)
 	tester := h.tester()
 
-	// Workspace is the default: the composer shows the quiet contextual label
-	// and the state lives in the menu, not on a resident chip.
-	h.assertTexts(tester, "工作区可写")
+	// Workspace is the default: the chip keeps the stable destination label and
+	// the permission state lives inside the menu (R17).
+	h.assertTexts(tester, "会话设置")
 	h.assertNoTexts(tester, "询问")
 
 	h.typeSlash(tester)
@@ -143,44 +143,50 @@ func TestPermissionCommandCyclesMode(t *testing.T) {
 	if got := settings.get(contracts.SettingAgentPermission); got != contracts.PermissionFull {
 		t.Fatalf("after first cycle = %q, want full", got)
 	}
-	h.assertTexts(tester, "所有权限")
+	h.assertTexts(tester, "会话设置")
+	h.openSessionMenu(tester)
+	assertMenuTrailingValue(t, tester, "所有权限")
 
 	h.typeSlash(tester)
 	h.clickExact(tester, "权限模式")
 	if got := settings.get(contracts.SettingAgentPermission); got != contracts.PermissionReadOnly {
 		t.Fatalf("after second cycle = %q, want read-only", got)
 	}
-	h.assertTexts(tester, "只读")
+	h.assertTexts(tester, "会话设置")
 
 	h.typeSlash(tester)
 	h.clickExact(tester, "权限模式")
 	if got := settings.get(contracts.SettingAgentPermission); got != contracts.PermissionWorkspace {
 		t.Fatalf("after third cycle = %q, want workspace", got)
 	}
-	h.assertTexts(tester, "工作区可写")
-	h.assertNoTexts(tester, "所有权限")
+	h.assertTexts(tester, "会话设置")
+	if got := textsContaining(tester.Texts(), "所有权限"); got != 0 {
+		t.Fatalf("permission state still on the composer row; texts = %v", tester.Texts())
+	}
 }
 
 func TestPermissionBadgeReflectsSettings(t *testing.T) {
 	settings := newPermissionSettings(nil)
 	h := newPermissionHarness(t, permissionChat(), settings)
 	tester := h.tester()
-	// The workspace default owns the quiet contextual label; no resident chip.
-	h.assertTexts(tester, "工作区可写")
+	// The chip label is stable; the mode is readable inside the menu.
+	h.assertTexts(tester, "会话设置")
 	h.assertNoTexts(tester, "询问", "所有权限", "禁止工具")
 
 	// The retired "ask" rows normalize to read-only, not to a separate Ask
-	// state; the composer shows the read-only label.
+	// state; the menu's permission value shows the normalized state.
 	settings.set(contracts.SettingAgentPermission, contracts.PermissionAsk)
 	tester.Frame()
-	h.assertTexts(tester, "只读")
+	h.assertTexts(tester, "会话设置")
+	h.openSessionMenu(tester)
+	assertMenuTrailingValue(t, tester, "只读")
 	settings.set(contracts.SettingAgentPermission, contracts.PermissionNever)
 	tester.Frame()
-	h.assertTexts(tester, "只读")
+	h.assertNoTexts(tester, "询问", "从不允许")
 
 	settings.set(contracts.SettingAgentPermission, contracts.PermissionWorkspace)
 	tester.Frame()
-	h.assertTexts(tester, "工作区可写")
+	h.assertTexts(tester, "会话设置")
 
 	// The one session menu lists exactly the three permission modes; the
 	// current one is a radio row and choosing another writes it through.
@@ -191,18 +197,20 @@ func TestPermissionBadgeReflectsSettings(t *testing.T) {
 	if got := settings.get(contracts.SettingAgentPermission); got != contracts.PermissionFull {
 		t.Fatalf("menu choice stored %q, want full", got)
 	}
-	h.assertTexts(tester, "所有权限")
+	h.assertTexts(tester, "会话设置")
 
-	// Unknown values degrade to the default (workspace) label.
+	// Unknown values degrade to the default (workspace) value in the menu.
 	settings.set(contracts.SettingAgentPermission, "unexpected")
 	tester.Frame()
-	h.assertTexts(tester, "工作区可写")
+	h.assertTexts(tester, "会话设置")
+	h.openSessionMenu(tester)
+	assertMenuTrailingValue(t, tester, "工作区可写")
 }
 
 func TestPermissionBadgeHiddenWithoutSettings(t *testing.T) {
 	h := newPermissionHarness(t, permissionChat(), nil)
 	tester := h.tester()
-	h.assertNoTexts(tester, "询问", "工作区可写", "所有权限", "从不允许")
+	h.assertNoTexts(tester, "询问", "所有权限", "从不允许")
 	// Without a settings store the session menu exists for the built-in
 	// presets, but it offers no permission modes at all.
 	h.openSessionMenu(tester)
@@ -218,16 +226,20 @@ func TestPermissionBadgeEnglishCopy(t *testing.T) {
 	tester := h.tester()
 	h.ui.Locale().SetLanguage("en")
 	tester.Frame()
-	h.assertTexts(tester, "Workspace-write")
+	h.assertTexts(tester, "Session settings")
 
-	// Legacy ask/never rows normalize to read-only on the composer label.
+	// Legacy ask/never rows normalize to read-only inside the menu.
 	settings.set(contracts.SettingAgentPermission, contracts.PermissionAsk)
 	tester.Frame()
-	h.assertTexts(tester, "Read-only")
+	h.assertTexts(tester, "Session settings")
+	h.openSessionMenu(tester)
+	assertMenuTrailingValue(t, tester, "Read-only")
 
 	settings.set(contracts.SettingAgentPermission, contracts.PermissionFull)
 	tester.Frame()
-	h.assertTexts(tester, "All permissions")
+	h.assertTexts(tester, "Session settings")
+	h.openSessionMenu(tester)
+	assertMenuTrailingValue(t, tester, "All permissions")
 }
 
 // TestSessionPermissionMenuStructure pins the user-reported menu problem: the

@@ -4,11 +4,13 @@ import (
 	"context"
 	"fmt"
 	"math"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
 	"unicode/utf8"
 
+	"github.com/egoist/mygo"
 	"github.com/egoist/mygo/ui"
 	"github.com/egoist/mygo/ui/markdown"
 	"github.com/egoist/mygo/ui/markdown/parser"
@@ -187,7 +189,7 @@ func buildScreen(
 		buildAttachmentPathDialog(c, t, runtime, st)
 		// The goal actions' destructive confirmation is the native AlertDialog:
 		// it lives above the whole screen (the goal menu itself is in the dock).
-		buildGoalMenuActions(c, t, runtime, st)
+		buildGoalMenuActions(c, runtime, st)
 	})
 }
 
@@ -404,11 +406,13 @@ func buildConversationTitle(c *ui.Context, t *design.Tokens, st *state, chat con
 	// step keeps it in proportion with the 13 DIP tabs, 12 DIP badges and 16 DIP
 	// band icons; TypeL made the band read top-heavy. It shrinks (and ellipsizes)
 	// before the fixed-width agent entries do.
-	// DSH caps one header crumb at 220 CSS px; the same 7 * 32 DIP cap keeps a
-	// long title from eating the band and squeezing the agent entries.
+	// A title caps at 14 * 32 DIP: enough for a full sentence on a wide band,
+	// still bounded so a very long title cannot push the utilities off. The old
+	// 7 * 32 cap (220 px) truncated ordinary titles even after the zero-value
+	// agent entries were removed.
 	titleElement := design.Apply(ui.Text(c, title), t.Font(design.TypeM)).
 		FontWeight(600).TextColor(t.LabelPrimary).Shrink(1).MinWidth(0).
-		MaxWidth(design.Space8 * 7).MaxLines(1).Ellipsis("…").Tooltip(title)
+		MaxWidth(design.Space8 * 14).MaxLines(1).Ellipsis("…").Tooltip(title)
 	if st.headerWidth > 0 && st.headerWidth < 560 {
 		titleElement.MinWidth(120)
 	}
@@ -426,7 +430,7 @@ func buildScreenActionsSlot(c *ui.Context, t *design.Tokens, runtime contracts.U
 	activeID := chat.ActiveSession()
 	session, hasSession := chat.Session(activeID)
 	if hasSession && session.Running {
-		design.Apply(ui.Badge(c, st.tr("运行中", "Running")), t.Badge()).TextColor(t.WarningText)
+		uikit.StatusBadge(c, t, uikit.StatusRunning, st.tr("运行中", "Running"))
 	}
 	if hasSession && activeID != "" {
 		buildConversationActionsButton(c, t, st, runtime, cfg, session)
@@ -441,7 +445,7 @@ func buildConversationActionsButton(c *ui.Context, t *design.Tokens, st *state,
 	label := st.tr("会话操作", "Conversation actions")
 	button := ui.Button(c, "").Label(label).Tooltip(label).
 		Size(t.Scale(design.Space6), t.Scale(design.Space6)).
-		PaddingX(0).Radius(design.RadiusSM)
+		PaddingX(design.Space0).Radius(design.RadiusSM)
 	button.Children(func() {
 		ui.Icon(c, icons.More()).Size(t.Scale(design.Space4), t.Scale(design.Space4)).
 			TextColor(t.LabelSecondary)
@@ -576,30 +580,76 @@ func buildChildBannerDock(c *ui.Context, runtime contracts.UIRuntime) {
 }
 
 // buildGoalDock is the active goal's one compact line above the composer: the
-// status badge, the goal text (ellipsized, full text in the tooltip) and the ⋯
-// goal menu (pause/resume, complete, end/delete) carried over from the header.
+// status badge, the goal text (ellipsized, full text in the tooltip), a
+// hover-only clear entry and the ⋯ goal menu (pause/resume, complete,
+// end/delete). The group is an inline, left-aligned cluster capped at 70% of
+// the reading measure: the old full-width row stranded the ⋯ hundreds of
+// pixels from the goal it acts on (V25).
 func buildGoalDock(c *ui.Context, t *design.Tokens, runtime contracts.UIRuntime, st *state) {
 	if st.goal == nil || strings.TrimSpace(st.goal.Text) == "" {
 		return
 	}
 	th := t.Theme()
 	label, color, _, _ := goalStatus(st, t)
-	ui.Row(c).FillWidth().Height(t.Scale(th.Space(7))).AlignItems(ui.Center).
-		Gap(design.Space2).Children(func() {
-		design.Apply(ui.Badge(c, label), t.Badge()).TextColor(color)
-		design.Apply(ui.Text(c, st.goal.Text), t.Font(design.TypeXXS)).
-			TextColor(t.LabelSecondary).Grow(1).Shrink(1).MaxLines(1).
-			Ellipsis("…").Tooltip(st.goal.Text)
-		buildGoalDockMenuButton(c, t, runtime, st)
+	ui.Row(c).FillWidth().Justify(ui.Start).Children(func() {
+		group := ui.Row(c).MaxWidthPercent(70).Height(t.Scale(th.Space(7))).
+			AlignItems(ui.Center).Gap(design.Space2)
+		group.Children(func() {
+			if kind, isStatus := goalStatusKind(st); isStatus {
+				uikit.StatusBadge(c, t, kind, label)
+			} else {
+				design.Apply(ui.Badge(c, label), t.Badge()).TextColor(color)
+			}
+			design.Apply(ui.Text(c, st.goal.Text), t.Font(design.TypeXXS)).
+				TextColor(t.LabelSecondary).Shrink(1).MaxLines(1).
+				Ellipsis("…").Tooltip(st.goal.Text)
+			// The clear entry appears on hover so the resting strip stays one
+			// quiet line; it opens the same destructive confirmation as the
+			// menu's 删除目标记录 instead of clearing on a stray click.
+			if group.Hovered() {
+				clear := ui.Button(c, "").
+					Label(st.tr("清除目标", "Clear goal")).
+					Tooltip(st.tr("清除目标记录（需确认）", "Clear the goal record (asks first)")).
+					Size(t.Scale(design.Space5), t.Scale(design.Space5)).
+					PaddingX(design.Space0).Radius(design.RadiusSM)
+				clear.Children(func() {
+					ui.Icon(c, icons.Close()).Size(design.Space3, design.Space3).
+						TextColor(t.LabelTertiary)
+				})
+				if clear.Clicked() {
+					st.goalConfirm = "clear"
+					runtime.Invalidate()
+				}
+			}
+			buildGoalDockMenuButton(c, t, runtime, st)
+		})
 	})
+}
+
+// goalStatusKind maps a goal state onto the shared status vocabulary for the
+// status badge; an active goal is a plain labeled chip (目标), not a status.
+func goalStatusKind(st *state) (uikit.StatusKind, bool) {
+	if st == nil || st.goal == nil {
+		return uikit.StatusUnknown, false
+	}
+	switch strings.ToLower(strings.TrimSpace(st.goal.Status)) {
+	case contracts.GoalStatusPaused:
+		return uikit.StatusInProgress, true
+	case contracts.GoalStatusCompleted:
+		return uikit.StatusSuccess, true
+	case contracts.GoalStatusAbandoned:
+		return uikit.StatusCancelled, true
+	default:
+		return uikit.StatusUnknown, false
+	}
 }
 
 // buildGoalDockMenuButton is the goal strip's ⋯ entry (24 DIP More icon).
 func buildGoalDockMenuButton(c *ui.Context, t *design.Tokens, runtime contracts.UIRuntime, st *state) {
 	label := st.tr("目标操作", "Goal actions")
-	button := ui.Button(c, "").Label(label).Tooltip(label).
+	button := ui.Button(c.Key("session.goal.menu"), "").Label(label).Tooltip(label).
 		Size(t.Scale(design.Space6), t.Scale(design.Space6)).
-		PaddingX(0).Radius(design.RadiusSM)
+		PaddingX(design.Space0).Radius(design.RadiusSM)
 	button.Children(func() {
 		ui.Icon(c, icons.More()).Size(t.Scale(design.Space4), t.Scale(design.Space4)).
 			TextColor(t.LabelTertiary)
@@ -667,16 +717,18 @@ func buildGoalMenu(m *ui.Menu, t *design.Tokens, runtime contracts.UIRuntime, st
 	}
 }
 
-// buildGoalMenuActions renders the confirmation of a destructive goal action.
-// Abandon and clear are irreversible enough to ask through the native
-// AlertDialog (cancel left, confirm right) instead of running on a menu click.
-func buildGoalMenuActions(c *ui.Context, t *design.Tokens, runtime contracts.UIRuntime, st *state) {
+// buildGoalMenuActions renders the confirmation of a destructive goal action
+// through the shared ConfirmDanger dialog: the safe action (取消) is the
+// Default so a stray Enter cancels, and the dangerous action never is
+// (DESIGN.md AP-12). Abandon keeps the record; delete removes it.
+func buildGoalMenuActions(c *ui.Context, runtime contracts.UIRuntime, st *state) {
 	if st.goalConfirm == "" {
 		return
 	}
 	open := true
+	action := st.goalConfirm
 	title, message, confirm := "", "", ""
-	switch st.goalConfirm {
+	switch action {
 	case "abandon":
 		title = st.tr("结束目标", "End goal")
 		message = st.tr("结束当前目标？目标记录与历史会保留，自动推进停止，之后仍可删除记录。",
@@ -688,26 +740,31 @@ func buildGoalMenuActions(c *ui.Context, t *design.Tokens, runtime contracts.UIR
 			"Delete the current goal and its record? Unlike ending it, the record is removed and this cannot be undone.")
 		confirm = st.tr("确认删除", "Delete")
 	}
-	action := st.goalConfirm
-	switch ui.AlertDialog(c, &open, title, message, st.tr("取消", "Cancel"), confirm) {
-	case 1:
-		if action == "abandon" {
-			lifecycle, ok := goalLifecycle(st)
-			if ok && lifecycle.Abandon() {
+	uikit.ConfirmDanger(c, &open, uikit.ConfirmDangerOptions{
+		Key:     "session.goal.confirm." + action,
+		Title:   title,
+		Message: message,
+		Confirm: confirm,
+		Cancel:  st.tr("取消", "Cancel"),
+		OnConfirm: func() {
+			if action == "abandon" {
+				lifecycle, ok := goalLifecycle(st)
+				if ok && lifecycle.Abandon() {
+					st.goalActionErr = ""
+					st.toast(contracts.NotifySuccess, st.tr("目标已放弃", "Goal abandoned"))
+				} else if ok {
+					st.goalActionErr = st.tr("放弃目标失败：", "Abandon goal failed: ") + st.tr("目标不存在", "no active goal")
+				}
+			} else {
+				if st.goalTracker != nil {
+					st.goalTracker.Clear()
+				}
 				st.goalActionErr = ""
-				st.toast(contracts.NotifySuccess, st.tr("目标已放弃", "Goal abandoned"))
-			} else if ok {
-				st.goalActionErr = st.tr("放弃目标失败：", "Abandon goal failed: ") + st.tr("目标不存在", "no active goal")
+				st.toast(contracts.NotifySuccess, st.tr("目标已清除", "Goal cleared"))
 			}
-		} else {
-			if st.goalTracker != nil {
-				st.goalTracker.Clear()
-			}
-			st.goalActionErr = ""
-			st.toast(contracts.NotifySuccess, st.tr("目标已清除", "Goal cleared"))
-		}
-		runtime.Invalidate()
-	}
+			runtime.Invalidate()
+		},
+	})
 	if !open {
 		st.goalConfirm = ""
 	}
@@ -918,8 +975,7 @@ func buildChatPane(
 		Row: func(rc *ui.Context, message contracts.ChatMessage) {
 			last := message.ID == lastID && message.Role == contracts.ChatRoleAssistant
 			canRegenerate := hasRegenerator && !chatSession.Running && last
-			buildMessage(rc, t, runtime, message, st, canRegenerate,
-				last && canCopyReply(message), defaultOpen(message.ID))
+			buildMessage(rc, t, runtime, message, st, canRegenerate, defaultOpen(message.ID))
 			if last && showTurnFiles {
 				buildGeneratedFileCards(rc, t, st, turnFiles)
 			}
@@ -929,7 +985,6 @@ func buildChatPane(
 			last := group[len(group)-1].ID == lastID
 			canRegenerate := hasRegenerator && !chatSession.Running && last
 			buildAssistantTurnGroup(rc, t, runtime, st, group, canRegenerate,
-				last && canCopyReply(group[len(group)-1]),
 				defaultOpen(group[len(group)-1].ID))
 			if last && showTurnFiles {
 				buildGeneratedFileCards(rc, t, st, turnFiles)
@@ -962,7 +1017,7 @@ func buildHero(c *ui.Context, t *design.Tokens, cfg Config, navigator contracts.
 // buildMessage renders one transcript entry. User turns are right-aligned
 // raised bubbles; assistant turns are plain brand body text with optional
 // reasoning, tool cards and errors.
-func buildMessage(c *ui.Context, t *design.Tokens, runtime contracts.UIRuntime, message contracts.ChatMessage, st *state, canRegenerate, canCopy, defaultOpen bool) {
+func buildMessage(c *ui.Context, t *design.Tokens, runtime contracts.UIRuntime, message contracts.ChatMessage, st *state, canRegenerate, defaultOpen bool) {
 	switch message.Role {
 	case contracts.ChatRoleUser:
 		ui.Column(c.Key("session.message." + message.ID)).FillWidth().AlignItems(ui.End).Gap(design.Space1).Children(func() {
@@ -990,7 +1045,7 @@ func buildMessage(c *ui.Context, t *design.Tokens, runtime contracts.UIRuntime, 
 			design.Apply(ui.Text(c, message.Text), t.TextMuted(design.TypeXS))
 		})
 	default:
-		buildAssistantMessage(c, t, runtime, message, st, canRegenerate, canCopy, defaultOpen)
+		buildAssistantMessage(c, t, runtime, message, st, canRegenerate, defaultOpen)
 	}
 }
 
@@ -1000,7 +1055,7 @@ func buildMessage(c *ui.Context, t *design.Tokens, runtime contracts.UIRuntime, 
 // finished, compact/standard/detailed fold the process into one summary row (open
 // by default only for the latest turn under collapse=next-input), while verbose
 // always shows the full timeline under its meta row. A failed turn never folds.
-func buildAssistantMessage(c *ui.Context, t *design.Tokens, runtime contracts.UIRuntime, message contracts.ChatMessage, st *state, canRegenerate, canCopy, defaultOpen bool) {
+func buildAssistantMessage(c *ui.Context, t *design.Tokens, runtime contracts.UIRuntime, message contracts.ChatMessage, st *state, canRegenerate, defaultOpen bool) {
 	policy := st.workStepsPolicyFor()
 	foldable := assistantProcessFoldable(message, policy.mode)
 	open, explicit := st.processOpen[message.ID]
@@ -1045,9 +1100,6 @@ func buildAssistantMessage(c *ui.Context, t *design.Tokens, runtime contracts.UI
 		}
 		if st.regenerateErr != "" && canRegenerate && strings.TrimSpace(message.Error) == "" {
 			buildErrorLine(c, t, st.regenerateErr)
-		}
-		if canCopy {
-			buildReplyCopyButton(c, t, st, message)
 		}
 	})
 }
@@ -1181,7 +1233,7 @@ func assistantTurnContinues(prev, next contracts.ChatMessage) bool {
 // decision card that is waiting on the user) is shown under it. Expanding the
 // fold restores every step's full timeline in order.
 func buildAssistantTurnGroup(c *ui.Context, t *design.Tokens, runtime contracts.UIRuntime, st *state,
-	group []contracts.ChatMessage, canRegenerate, canCopy, defaultOpen bool) {
+	group []contracts.ChatMessage, canRegenerate, defaultOpen bool) {
 	key := group[0].ID
 	open, explicit := st.processOpen[key]
 	if !explicit {
@@ -1213,38 +1265,6 @@ func buildAssistantTurnGroup(c *ui.Context, t *design.Tokens, runtime contracts.
 				continue
 			}
 			buildProminentDecisions(c, t, runtime, st, message)
-		}
-		if canCopy {
-			buildReplyCopyButton(c, t, st, group[len(group)-1])
-		}
-	})
-}
-
-// canCopyReply reports whether a finished assistant reply has text worth a
-// bottom copy button: the latest result, not a streaming turn or a failed one.
-func canCopyReply(message contracts.ChatMessage) bool {
-	return !message.Streaming && strings.TrimSpace(message.Error) == "" &&
-		strings.TrimSpace(message.Text) != ""
-}
-
-// buildReplyCopyButton is the latest reply's bottom copy affordance: one quiet
-// labeled button under the answer. It copies the same text as the ⋯ menu's
-// 复制消息，so the two entries never disagree.
-func buildReplyCopyButton(c *ui.Context, t *design.Tokens, st *state, message contracts.ChatMessage) {
-	label := st.tr("复制", "Copy")
-	ui.Row(c).FillWidth().AlignItems(ui.Center).Children(func() {
-		button := design.Apply(ui.Button(c, ""), t.SecondaryButton()).
-			Height(design.Space8).PaddingX(design.Space3).
-			Label(st.tr("复制回复", "Copy reply")).
-			Tooltip(st.tr("复制这条回复", "Copy this reply"))
-		button.Children(func() {
-			ui.Icon(c, icons.Copy()).Size(design.Space3, design.Space3).
-				TextColor(t.LabelSecondary)
-			design.Apply(ui.Text(c, label), t.Font(design.TypeXS)).TextColor(t.LabelSecondary)
-		})
-		if button.Clicked() {
-			c.WriteClipboard(message.Text)
-			st.toast(contracts.NotifySuccess, st.tr("已复制", "Copied"))
 		}
 	})
 }
@@ -1513,19 +1533,15 @@ func buildAssistantMetaContent(c *ui.Context, t *design.Tokens, runtime contract
 	if !hasTime && !hasMenu {
 		return false
 	}
-	summary := usageSummaryText(st, message.Usage)
+	// Per-turn duration/tokens used to sit on every meta row: three numbers of
+	// telemetry over every reply made the transcript read like a dashboard.
+	// They live in the ⋯ menu's 用量明细 now; the row keeps the time and the
+	// actions (a subtraction, per the style direction).
 	if hasTime {
 		buildMessageTime(c, t, st.locale, message.CreatedAt)
 	}
-	if summary != "" {
-		if hasTime {
-			metaSeparator(c, t)
-		}
-		design.Apply(ui.Text(c, summary), t.Font(design.TypeXXXS)).
-			TextColor(t.LabelTertiary).NoWrap()
-	}
 	if hasMenu {
-		if hasTime || summary != "" {
+		if hasTime {
 			metaSeparator(c, t)
 		}
 		buildMessageMoreButton(c, t, "session.actions."+message.ID,
@@ -1592,7 +1608,7 @@ func buildAssistantActionsMenu(m *ui.Menu, c *ui.Context, runtime contracts.UIRu
 func buildMessageMoreButton(c *ui.Context, t *design.Tokens, key, label string, build func(m *ui.Menu)) {
 	button := ui.Button(c.Key(key), "").Label(label).Tooltip(label).
 		Size(t.Scale(design.Space6), t.Scale(design.Space6)).
-		PaddingX(0).Radius(design.RadiusSM)
+		PaddingX(design.Space0).Radius(design.RadiusSM)
 	button.Children(func() {
 		ui.Icon(c, icons.More()).Size(t.Scale(design.Space4), t.Scale(design.Space4)).
 			TextColor(t.LabelTertiary)
@@ -1605,16 +1621,6 @@ func buildMessageMoreButton(c *ui.Context, t *design.Tokens, key, label string, 
 func metaSeparator(c *ui.Context, t *design.Tokens) {
 	design.Apply(ui.Text(c, "·"), t.Font(design.TypeXXXS)).
 		TextColor(t.LabelTertiary).NoWrap()
-}
-
-// usageSummaryText is the one-line usage summary of a turn, in the product's
-// compact units: "用时 3.2s · 1.2K tokens".
-func usageSummaryText(st *state, usage *contracts.MessageUsage) string {
-	if usage == nil {
-		return ""
-	}
-	return st.tr("用时 ", "Took ") + formatUsageDuration(usage.DurationMS) +
-		" · " + uikit.FormatCompactCount(usageTotalTokens(usage)) + " tokens"
 }
 
 // buildUserMessageMeta is the compact meta row under a user bubble: the message
@@ -2338,7 +2344,7 @@ func buildComposer(
 	sendHint := st.localized(cfg.ComposerHint, defaultHintZh, "Enter to send · Shift+Enter newline")
 	if trimmed := strings.TrimSpace(cfg.ComposerHint); trimmed == "" || trimmed == defaultHintZh ||
 		trimmed == "Enter to send · Shift+Enter for newline" || trimmed == "Enter to send · Shift+Enter newline" {
-		sendHint = composerHintText(st, running, slashMenuActive)
+		sendHint = composerHintText(st, running, slashMenuActive, queueAllowed)
 	}
 	hasContent := strings.TrimSpace(st.draft) != "" || len(st.pendingAttachments) > 0
 	hasDraft := strings.TrimSpace(st.draft) != ""
@@ -2348,10 +2354,6 @@ func buildComposer(
 		queueTip = st.tr("本轮只发送文字；暂存的附件会保留在输入框",
 			"Queue sends text only; staged attachments stay in the composer")
 	}
-	slashDraft := false
-	if _, ok := slashQuery(st.draft); ok {
-		slashDraft = true
-	}
 	var composerWidth float32
 	compactControls := func() bool { return composerWidth > 0 && composerWidth < 800 }
 	veryCompact := func() bool { return composerWidth > 0 && composerWidth < 480 }
@@ -2359,6 +2361,9 @@ func buildComposer(
 	if queueAllowed {
 		queueSend = func() bool { return queueDraft(st, activeID) }
 	}
+	// The clipboard read runs from the input's paste callback, which outlives
+	// this build pass: capture the services value now instead of the Context.
+	composerServices := c.Services()
 	composerCard, composerInput := uikit.ComposerShell(c, uikit.ComposerShellOptions{
 		Key:         "session.composer",
 		Draft:       &st.draft,
@@ -2369,6 +2374,9 @@ func buildComposer(
 		InputBind:   &st.composerInput,
 		Focus:       &st.focusComposer,
 		OnWidth:     func(width float32) { composerWidth = width },
+		OnPasteImage: func() bool {
+			return pasteClipboardImage(st, runtime, composerServices)
+		},
 		InputReady: func(ic *ui.Context, input ui.Element) {
 			// The @ menu follows the caret (C-15): remember where the selection
 			// ends from this frame's input so mentionQueryAt can find the token
@@ -2435,12 +2443,13 @@ func buildComposer(
 			// A quiet key hint on wide composers only (C-23): Enter sends,
 			// Shift+Enter breaks the line, and a slash draft explains what Enter
 			// will do (C-05/C-22). Narrow composers keep the full copy in the
-			// send button's tooltip. While a turn runs only the command-draft
-			// state gets a hint: the stop/queue controls speak for themselves.
-			if compactControls() || (running && !slashDraft) {
+			// send button's tooltip. While a turn runs the hint names the two
+			// keys that work then (Enter queues, Esc stops) instead of letting
+			// the controls alone carry the semantics (R4).
+			if compactControls() {
 				return ""
 			}
-			return composerVisibleHint(st, running, slashMenuActive)
+			return composerVisibleHint(st, running, slashMenuActive, queueAllowed)
 		},
 		SendEnabled: hasContent,
 		SendLabel:   sendLabel,
@@ -2456,7 +2465,7 @@ func buildComposer(
 			cancelRunningTurn(chat, st, st.runtime, activeID)
 		},
 		StopLabel:   stopLabel,
-		StopTooltip: stopLabel,
+		StopTooltip: st.tr("停止 · 会中断当前回复", "Stop · interrupts the current reply"),
 		OnKey:       composerTextKey(runtime, chat, st, activeID, running, queueAllowed),
 		Usage: func(ic *ui.Context) {
 			// The DSH-style usage strip sits directly under the composer card:
@@ -2597,7 +2606,7 @@ func composerTextKey(runtime contracts.UIRuntime, chat contracts.ChatService, st
 // Shift+Enter, C-23/C-25) plus the explanations of the slash-draft states (a
 // running turn keeps a command draft for later, C-05; an Esc-dismissed or
 // match-less slash draft is sent literally, C-22).
-func composerHintText(st *state, running, slashMenuActive bool) string {
+func composerHintText(st *state, running, slashMenuActive, queueAllowed bool) string {
 	if _, slashDraft := slashQuery(st.draft); slashDraft {
 		switch {
 		case running:
@@ -2611,8 +2620,22 @@ func composerHintText(st *state, running, slashMenuActive bool) string {
 				"Enter sends /… as a normal message; clear it and type / to reopen the suggestions")
 		}
 	}
+	if running {
+		return composerRunningHintText(st, queueAllowed)
+	}
 	return st.tr("Enter 或 Cmd/Ctrl+Enter 发送 · Shift+Enter 换行",
 		"Enter or Cmd/Ctrl+Enter to send · Shift+Enter for a newline")
+}
+
+// composerRunningHintText is the running-turn key line: while a reply streams
+// Enter queues the draft (when queueing is on) and Esc stops the turn, so the
+// hint has to say so instead of leaving the two keys undiscoverable (R4). With
+// queueing off only Esc acts, and the copy says the stop interrupts the reply.
+func composerRunningHintText(st *state, queueAllowed bool) string {
+	if queueAllowed {
+		return st.tr("Enter 排队 · Esc 停止", "Enter to queue · Esc to stop")
+	}
+	return st.tr("Esc 停止 · 会中断当前回复", "Esc stops · interrupts the current reply")
 }
 
 // composerVisibleHint is the short copy the wide composer's single line can
@@ -2620,9 +2643,12 @@ func composerHintText(st *state, running, slashMenuActive bool) string {
 // "Enter 发送 · Shift+Enter 换行" / "Enter to send · Shift+Enter newline" (the
 // full chord list stays in the send tooltip), while the slash-draft states keep
 // their explanatory copy because it explains what Enter will do.
-func composerVisibleHint(st *state, running, slashMenuActive bool) string {
+func composerVisibleHint(st *state, running, slashMenuActive, queueAllowed bool) string {
 	if _, slashDraft := slashQuery(st.draft); slashDraft {
-		return composerHintText(st, running, slashMenuActive)
+		return composerHintText(st, running, slashMenuActive, queueAllowed)
+	}
+	if running {
+		return composerRunningHintText(st, queueAllowed)
 	}
 	return st.tr("Enter 发送 · Shift+Enter 换行", "Enter to send · Shift+Enter newline")
 }
@@ -2736,36 +2762,24 @@ func buildSessionMenu(c *ui.Context, t *design.Tokens, runtime contracts.UIRunti
 	}
 }
 
-// sessionMenuLabel names the session menu button: a non-default security or
-// agent-mode state owns the label (and warns), everything else is the quiet
-// default label. The full state is repeated in the tooltip/menu.
+// sessionMenuLabel names the session menu button. The label is the stable
+// destination name (会话设置), never the current state: a chip whose text drifts
+// between 权限/模式/预设 names cannot tell the user what opening it reveals
+// (R17). A non-default security or mode state still warns on the stable label,
+// and the current permission/mode are the trailing values of the menu's group
+// headers.
 func (st *state) sessionMenuLabel() (label string, warn bool) {
+	label = st.tr("会话设置", "Session settings")
 	if st.settings == nil {
-		return st.tr("会话设置", "Session settings"), false
+		return label, false
 	}
-	if strings.EqualFold(strings.TrimSpace(st.settings.Get(contracts.SettingAgentMode, "")), contracts.AgentModePlan) {
-		return st.tr("计划模式", "Plan mode"), true
+	// Warning-level non-default states: the all-permissions security preset and
+	// the plan/creator chat modes. Read-only and the workspace default stay
+	// quiet (a stricter permission is not a warning).
+	if permissionMode(st.settings) == contracts.PermissionFull {
+		return label, true
 	}
-	// The all-permissions state is the one warning-level security state; it
-	// owns the label first. A non-default chat mode then owns it (so choosing
-	// 精简/创作 stays visible) before the read-only/workspace permission label,
-	// which is always shown so the active permission mode stays inspectable.
-	switch permissionMode(st.settings) {
-	case contracts.PermissionFull:
-		return st.tr("所有权限", "All permissions"), true
-	}
-	switch currentChatModeOption(st.settings).key {
-	case contracts.ChatModeMinimal:
-		return st.tr("精简", "Minimal"), false
-	case contracts.ChatModeCreator:
-		return st.tr("创作", "Creator"), false
-	}
-	switch permissionMode(st.settings) {
-	case contracts.PermissionReadOnly:
-		return st.tr("只读", "Read-only"), false
-	default:
-		return st.tr("工作区可写", "Workspace-write"), false
-	}
+	return label, currentChatModeOption(st.settings).warn
 }
 
 // buildSessionPermissionMenuItems adds the permission group header FIRST and
@@ -2779,7 +2793,8 @@ func buildSessionPermissionMenuItems(m *ui.Menu, runtime contracts.UIRuntime, st
 		return
 	}
 	current := permissionMode(st.settings)
-	m.Item(st.tr("权限模式", "Permission mode")).Disabled(true).Tooltip(st.tr(
+	m.Item(st.tr("权限模式", "Permission mode")).Disabled(true).
+		Trailing(st.permissionLabel(current)).Tooltip(st.tr(
 		"只读：只自动允许只读/信息类工具，其他操作会询问。工作区可写（默认）：工作区内的文件读写自动允许，shell/网络仍会询问。所有权限：全部自动允许，不再弹窗。弹窗中选择「本会话内始终允许」可停止重复询问。",
 		"Read-only: only read-only/informational tools are auto-allowed; other actions ask. Workspace-write (default): workspace file reads/writes are auto-allowed; shell/network still ask. All permissions: everything is auto-allowed without asking. Choose \"Always allow in this session\" in the dialog to stop repeats."))
 	for _, mode := range []string{contracts.PermissionReadOnly, contracts.PermissionWorkspace, contracts.PermissionFull} {
@@ -2829,7 +2844,13 @@ func buildSessionModeMenuItems(m *ui.Menu, runtime contracts.UIRuntime, st *stat
 		return
 	}
 	current := currentChatModeOption(st.settings)
-	m.Item(st.tr("对话模式", "Conversation mode")).Disabled(true)
+	// The group header carries the current mode as a trailing value so the
+	// fixed-label chip still exposes the state one click in (R17).
+	modeValue := st.tr(current.shortZh, current.shortEn)
+	if current.badgeZh != "" {
+		modeValue = st.tr(current.badgeZh, current.badgeEn)
+	}
+	m.Item(st.tr("对话模式", "Conversation mode")).Disabled(true).Trailing(modeValue)
 	for _, option := range chatModeOptions {
 		option := option
 		item := m.Item(st.tr(option.menuZh, option.menuEn))
@@ -3341,10 +3362,12 @@ func (st *state) sessionContextWindow(chat contracts.ChatService, session contra
 }
 
 // buildSessionStatusStrip renders the DSH-style single muted status line right
-// under the composer: rounds · steps · output speed · context/window · cache hit ·
-// remaining context. It is informational only (no card, icon or badge); the
-// exact uncompacted numbers live in its tooltip, and the whole strip stays
-// hidden until the session has token accounting to report.
+// under the composer: rounds · context/window · remaining context. It is
+// informational only (no card, icon or badge); the exact uncompacted numbers
+// (rounds, steps, average speed, cache hit, token sums) live in its tooltip, and
+// the whole strip stays hidden until the session has token accounting to
+// report. Six always-on items shortened the composer's footer to a telemetry
+// bar; the three kept ones are what the user checks while writing (P3-15).
 func buildSessionStatusStrip(c *ui.Context, t *design.Tokens, chat contracts.ChatService,
 	st *state, session contracts.ChatSession) {
 	line, exact, ok := sessionStatusLine(st, chat, session)
@@ -3370,20 +3393,19 @@ func sessionStatusLine(st *state, chat contracts.ChatService, session contracts.
 		return "", "", false
 	}
 
-	parts := []string{
-		sessionCountLabel(st, stats.rounds, "轮", "round", "rounds"),
-		sessionCountLabel(st, stats.steps, "步", "step", "steps"),
-	}
+	// The visible line keeps the three items a writer checks at a glance:
+	// rounds, context over its window and the remaining context. Tool steps,
+	// throughput and cache hit move into the exact tooltip (P3-15).
+	parts := []string{sessionCountLabel(st, stats.rounds, "轮", "round", "rounds")}
 	// Average output speed over the run, tool time included: generated
 	// completion tokens divided by the turn's wall time. A turn shorter than
 	// minStatusSpeedDurationMS says nothing about throughput (scripted turns,
-	// cancellations), so the item is omitted instead of printing a silly
+	// cancellations), so the tooltip omits it instead of printing a silly
 	// five-digit number.
 	speed := 0.0
 	hasSpeed := stats.durationMS >= minStatusSpeedDurationMS && stats.completion > 0
 	if hasSpeed {
 		speed = float64(stats.completion) / (float64(stats.durationMS) / 1000)
-		parts = append(parts, fmt.Sprintf("%d tok/s", int64(math.Round(speed))))
 	}
 	window := st.sessionContextWindow(chat, session)
 	remaining := 0
@@ -3398,6 +3420,7 @@ func sessionStatusLine(st *state, chat contracts.ChatService, session contracts.
 		if remaining > 100 {
 			remaining = 100
 		}
+		parts = append(parts, fmt.Sprintf(st.tr("剩余 %d%%", "%d%% left"), remaining))
 	}
 	cacheHit := 0
 	hasCache := stats.prompt > 0
@@ -3409,10 +3432,6 @@ func sessionStatusLine(st *state, chat contracts.ChatService, session contracts.
 		if cacheHit > 100 {
 			cacheHit = 100
 		}
-		parts = append(parts, fmt.Sprintf(st.tr("缓存命中 %d%%", "Cache hit %d%%"), cacheHit))
-	}
-	if hasContext {
-		parts = append(parts, fmt.Sprintf(st.tr("剩余 %d%%", "%d%% left"), remaining))
 	}
 	return strings.Join(parts, " · "), sessionExactStatusTooltip(st, stats, window, speed, cacheHit, remaining, hasSpeed, hasCache, hasContext), true
 }
@@ -3759,6 +3778,8 @@ func ensureMentionCache(st *state, workspace contracts.WorkspaceService, query s
 	if workspace == nil {
 		st.mentionFiles = nil
 		st.mentionErr = nil
+		st.mentionNoWorkspace = false
+		st.mentionWorkspaces = nil
 		st.mentionQuery = query
 		st.mentionFresh = true
 		return
@@ -3769,6 +3790,20 @@ func ensureMentionCache(st *state, workspace contracts.WorkspaceService, query s
 	st.mentionQuery = query
 	st.mentionFresh = true
 	ctx := context.Background()
+	// No current workspace is a normal, explainable state (R7), not a read
+	// failure: check it first so the menu can show the localized explanation and
+	// the open/create recovery actions instead of the backend's English error.
+	// The registered workspace list is cached here (once per menu open) for the
+	// 打开工作区 action, so the frame never reads it.
+	if _, ok, err := workspace.Current(ctx); err != nil || !ok {
+		st.mentionFiles = nil
+		st.mentionErr = nil
+		st.mentionNoWorkspace = true
+		st.mentionWorkspaces, _ = workspace.List(ctx)
+		return
+	}
+	st.mentionNoWorkspace = false
+	st.mentionWorkspaces = nil
 	var (
 		entries []contracts.FileEntry
 		loadErr error
@@ -3778,10 +3813,27 @@ func ensureMentionCache(st *state, workspace contracts.WorkspaceService, query s
 	} else {
 		entries, loadErr = workspace.Search(ctx, query, maxMentionFiles)
 	}
+	if loadErr != nil && mentionNoWorkspaceError(loadErr) {
+		// The backend can lose the current workspace between Current and the
+		// read: keep the same explainable state instead of surfacing its raw
+		// "workspace: no current workspace" string.
+		st.mentionFiles = nil
+		st.mentionErr = nil
+		st.mentionNoWorkspace = true
+		st.mentionWorkspaces, _ = workspace.List(ctx)
+		return
+	}
 	if len(entries) > maxMentionFiles {
 		entries = entries[:maxMentionFiles]
 	}
 	st.mentionFiles, st.mentionErr = entries, loadErr
+}
+
+// mentionNoWorkspaceError recognizes the workspace backend's "no current
+// workspace" error without importing the backend module (the UI may not import
+// it): the @ menu maps it to the localized, recoverable state (R7).
+func mentionNoWorkspaceError(err error) bool {
+	return err != nil && strings.Contains(strings.ToLower(err.Error()), "no current workspace")
 }
 
 // mentionRows returns the @ menu's rows in visual (and keyboard) order.
@@ -3900,6 +3952,11 @@ func buildMentionPopover(c *ui.Context, t *design.Tokens, runtime contracts.UIRu
 				design.Apply(ui.Text(c, st.tr("@ 引用文件", "@ reference a file")), t.TextMuted(design.TypeXXXS))
 			})
 			switch {
+			case st.mentionNoWorkspace:
+				// An explainable state with a recovery path, separated from the
+				// candidate rows by the divider the session section draws below;
+				// the text is selectable so a user can copy the state.
+				buildMentionNoWorkspaceBlock(c, t, runtime, workspace, st)
 			case st.mentionErr != nil:
 				uikit.ErrorLine(c, st.tr("读取工作区失败：", "Failed to read the workspace: ")+st.mentionErr.Error())
 			case fileRows == 0:
@@ -3933,6 +3990,114 @@ func buildMentionPopover(c *ui.Context, t *design.Tokens, runtime contracts.UIRu
 		runtime.Invalidate()
 	}
 	return highlighted
+}
+
+// WorkspacePicker is the @ menu's 新建工作区 folder-picker seam: the default
+// opens the native mygo directory dialog; tests replace it with a scripted
+// selection so no desktop backend is needed. The title is a parameter so a
+// language switch cannot race another window's dialog.
+var WorkspacePicker = func(title string) (string, error) {
+	paths, err := mygo.Dialog.Open(mygo.OpenDialogOptions{
+		Title:     title,
+		Directory: true,
+	})
+	if err != nil {
+		return "", err
+	}
+	if len(paths) == 0 {
+		return "", nil
+	}
+	return paths[0], nil
+}
+
+// buildMentionNoWorkspaceBlock is the @ menu's no-workspace state: the localized
+// explanation (instead of the backend's English error), a hint and the
+// open/create recovery actions (R7).
+func buildMentionNoWorkspaceBlock(c *ui.Context, t *design.Tokens, runtime contracts.UIRuntime,
+	workspace contracts.WorkspaceService, st *state) {
+	ui.Column(c).FillWidth().Gap(design.Space2).
+		PaddingX(design.Space2).PaddingY(design.Space1).Children(func() {
+		design.Apply(ui.Text(c, st.tr("当前会话没有工作区", "This conversation has no workspace")),
+			t.Font(design.TypeXS)).TextColor(t.LabelSecondary).Selectable()
+		design.Apply(ui.Text(c, st.tr("打开或新建工作区后，可用 @ 引用其中的文件。",
+			"Open or create a workspace to reference its files with @.")),
+			t.Font(design.TypeXXS)).TextColor(t.LabelTertiary).MaxLines(2)
+		if st.mentionActionErr != "" {
+			uikit.ErrorLine(c, st.mentionActionErr)
+		}
+		ui.Row(c).AlignItems(ui.Center).Gap(design.Space2).Children(func() {
+			if len(st.mentionWorkspaces) > 0 {
+				open := ui.PopoverMenuButton(c, st.tr("打开工作区", "Open workspace"), func(m *ui.Menu) {
+					for _, entry := range st.mentionWorkspaces {
+						entry := entry
+						item := m.Item(entry.Name).Trailing(entry.Root)
+						if item.Chosen() {
+							openWorkspaceForMention(runtime, workspace, st, entry.ID)
+						}
+					}
+				})
+				design.Apply(open, t.SecondaryButton()).Height(design.RowCompactHeight)
+			}
+			create := design.Apply(ui.Button(c, st.tr("新建工作区", "New workspace")),
+				t.SecondaryButton()).Height(design.RowCompactHeight)
+			create.Disabled(st.workspaceBusy)
+			if create.Clicked() && !st.workspaceBusy {
+				startWorkspaceCreate(runtime, workspace, st)
+			}
+		})
+	})
+}
+
+// openWorkspaceForMention makes one registered workspace current and refreshes
+// the @ menu's file list; the read model is a bounded in-memory call.
+func openWorkspaceForMention(runtime contracts.UIRuntime, workspace contracts.WorkspaceService,
+	st *state, id string) {
+	if workspace == nil || strings.TrimSpace(id) == "" {
+		return
+	}
+	if _, err := workspace.Open(context.Background(), id); err != nil {
+		st.mentionActionErr = st.tr("打开工作区失败：", "Failed to open the workspace: ") + err.Error()
+	} else {
+		st.mentionActionErr = ""
+		st.mentionNoWorkspace = false
+		st.mentionFresh = false
+		st.toast(contracts.NotifySuccess, st.tr("已打开工作区", "Workspace opened"))
+	}
+	runtime.Invalidate()
+}
+
+// startWorkspaceCreate runs the native directory picker off the UI thread (the
+// dialog blocks its caller) and publishes the created workspace through
+// UIRuntime.Post, so a slow picker never freezes a frame.
+func startWorkspaceCreate(runtime contracts.UIRuntime, workspace contracts.WorkspaceService, st *state) {
+	if workspace == nil || st.workspaceBusy {
+		return
+	}
+	st.workspaceBusy = true
+	title := st.tr("选择工作区文件夹", "Choose workspace folder")
+	runtime.Invalidate()
+	go func() {
+		dir, err := WorkspacePicker(title)
+		runtime.Post(func() {
+			st.workspaceBusy = false
+			switch {
+			case err != nil:
+				st.mentionActionErr = st.tr("无法打开文件夹选择器：", "Could not open the folder picker: ") + err.Error()
+			case strings.TrimSpace(dir) == "":
+				// Canceled: nothing changes.
+			default:
+				if _, createErr := workspace.Create(context.Background(), filepath.Base(dir), dir); createErr != nil {
+					st.mentionActionErr = st.tr("打开工作区失败：", "Failed to open the workspace: ") + createErr.Error()
+				} else {
+					st.mentionActionErr = ""
+					st.mentionNoWorkspace = false
+					st.mentionFresh = false
+					st.toast(contracts.NotifySuccess, st.tr("已打开工作区", "Workspace opened"))
+				}
+			}
+			runtime.Invalidate()
+		})
+	}()
 }
 
 // buildMentionRow is one selectable @ menu option. It reports the option the

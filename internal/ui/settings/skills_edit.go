@@ -179,21 +179,25 @@ func buildSkillsEditorDialogs(c *ui.Context, t *design.Tokens, st *skillsState,
 			})
 		})
 	}
-	// Deleting a skill is destructive: the native alert dialog gives it the
-	// same confirm/cancel order, Esc handling, focus return and default action
-	// as the product's other sixteen confirmations.
+	// Deleting a skill is destructive: the shared danger dialog keeps the safe
+	// outcome as its default (Enter cancels) and the danger action off Default.
 	if st.confirmDelete {
-		switch ui.AlertDialog(c, &st.confirmDelete,
-			localized(locale, "删除技能", "Delete skill"),
-			localized(locale, "确定删除技能「", "Delete skill \"")+
-				st.pendingDelete+localized(locale, "」？此操作不可撤销。", "\"? This cannot be undone."),
-			localized(locale, "取消", "Cancel"),
-			localized(locale, "确认删除", "Confirm delete")) {
-		case 1:
-			deleteSkillByName(c, editor, st, locale)
-		case ui.AlertDismissed:
-			// Esc/backdrop cancel: drop the pending name, keep no error.
-			st.editErr = ""
+		pending := st.pendingDelete
+		uikit.ConfirmDanger(c, &st.confirmDelete, uikit.ConfirmDangerOptions{
+			Key:   "skills.delete",
+			Title: localized(locale, "删除技能", "Delete skill"),
+			Message: localized(locale, "确定删除技能「", "Delete skill \"") +
+				pending + localized(locale, "」？此操作不可撤销。", "\"? This cannot be undone."),
+			Confirm: localized(locale, "确认删除", "Confirm delete"),
+			Cancel:  localized(locale, "取消", "Cancel"),
+			OnConfirm: func() {
+				deleteSkillByName(c, editor, st, locale)
+			},
+		})
+		if !st.confirmDelete && st.pendingDelete != "" {
+			// The dialog closed with the delete still pending: either the user
+			// cancelled (no error) or the delete failed and its error is already
+			// in editErr. Drop the pending name, keep the error visible.
 			st.pendingDelete = ""
 			c.Invalidate()
 		}

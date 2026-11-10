@@ -4,15 +4,16 @@
 [![Release](https://img.shields.io/github/v/release/zeokeel/zeokeel)](https://github.com/zeokeel/zeokeel/releases)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
-> **v0.2.18 — twenty-third public release** (2026-11-10). Native, compile-time modular
+> **v0.2.19 — twenty-fourth public release** (2026-11-11). Native, compile-time modular
 > AI agent for desktop, headless and ACP (Zed/editor) use; one Go binary, no
-> webview. Final verification: **10/10 PASS** (`./scripts/verify.sh --no-smoke`),
-> full test suite 48 packages green, regression **276 PASS / 0 SKIP / 0 FAIL**,
-> UI snapshot **98 steps / 96 PNGs**, designlint 0 new.
-> See [CHANGELOG.md](CHANGELOG.md) for the release notes.
+> webview. Final verification: full test suite green (incl. regression / uimodtest /
+> design-contract tests), `ui-drive` **91/91 PASS**, `ui-snapshot` **96 PNGs**,
+> designlint **0 new / 0 blocking**. See [CHANGELOG.md](CHANGELOG.md) for the release notes.
 
-> **v0.2.18 主要变化**：发布流水线精简——macOS 编译与 dmg/签名/公证合并在同一个 Linux job，
-> 去掉 tar.gz 回退资产，只发布签名+公证的 dmg。其余同 v0.2.17。
+> **v0.2.19 主要变化**：交互健壮性与视觉语言审计全量落地（[审计报告](docs/UI-AUDIT-2026-11-11.md)）：
+> 危险确认安全默认（Enter 不再删除）、窄窗抽屉不再遮 composer、设置搜索支持设置项别名、
+> 运行态键位提示、审批摘要、粘贴图片附件、统一设计语言 v2（选择态/强调预算/状态徽章/字号度量/
+> 暗色 surface ramp/组件骨架），并做减法：零值入口、逐轮遥测、重复复制/眉标/卡片墙移除；契约同步进 DESIGN.md / AGENTS.md / DESIGN-LINT.md。
 
 ## 下载与运行 / Download and run
 

@@ -56,7 +56,7 @@ type Config struct {
 	// ToolLabel labels the tool name row of the Modal presentation (default
 	// "工具"); the inline banner names the tool without a label.
 	ToolLabel string `json:"toolLabel"`
-	// ArgumentsLabel labels the raw arguments block (default "参数").
+	// ArgumentsLabel labels the raw arguments disclosure (default "原始参数").
 	ArgumentsLabel string `json:"argumentsLabel"`
 	// AllowLabel permits this one call (default "允许").
 	AllowLabel string `json:"allowLabel"`
@@ -72,7 +72,7 @@ func (c Config) resolved() Config {
 	return Config{
 		Title:            firstNonEmpty(c.Title, "需要审批"),
 		ToolLabel:        firstNonEmpty(c.ToolLabel, "工具"),
-		ArgumentsLabel:   firstNonEmpty(c.ArgumentsLabel, "参数"),
+		ArgumentsLabel:   firstNonEmpty(c.ArgumentsLabel, "原始参数"),
 		AllowLabel:       firstNonEmpty(c.AllowLabel, "允许"),
 		AllowAlwaysLabel: firstNonEmpty(c.AllowAlwaysLabel, "本会话内始终允许"),
 		DenyLabel:        firstNonEmpty(c.DenyLabel, "拒绝"),
@@ -220,7 +220,7 @@ func (st *state) labels(cfg Config) uikit.ApprovalLabels {
 	return uikit.ApprovalLabels{
 		Title:            st.localized(cfg.Title, "需要审批", "Approval required"),
 		ToolLabel:        st.localized(cfg.ToolLabel, "工具", "Tool"),
-		ArgumentsLabel:   st.localized(cfg.ArgumentsLabel, "参数", "Arguments"),
+		ArgumentsLabel:   st.localized(cfg.ArgumentsLabel, "原始参数", "Raw arguments"),
 		AllowLabel:       st.localized(cfg.AllowLabel, "允许", "Allow"),
 		AllowAlwaysLabel: st.localized(cfg.AllowAlwaysLabel, "本会话内始终允许", "Always allow in this session"),
 		DenyLabel:        st.localized(cfg.DenyLabel, "拒绝", "Deny"),

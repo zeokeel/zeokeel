@@ -119,7 +119,7 @@ func TestMemoryPolicyHiddenWithoutConsolidator(t *testing.T) {
 	store := newFakeMemoryStore()
 	h, _ := memoryPolicyHarness(t, store, nil)
 	tester := h.tester()
-	h.assertTexts(tester, "整理记忆", "全部清空")
+	h.assertTexts(tester, "去重并合并", "全部清空")
 	h.assertNoTexts(tester, "整理策略", "最大条目数", "按策略整理")
 }
 

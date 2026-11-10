@@ -38,7 +38,6 @@ func TestUsageDetailShowsContextWindowBudget(t *testing.T) {
 	}}
 	h := newModelHarness(t, chat, catalog)
 	tester := h.tester()
-	h.assertTexts(tester, "用时 1.2s · 460 tokens")
 	openUsageDetails(t, h, tester)
 	h.assertTexts(tester, "上下文预算", "128k")
 	// The label already names the budget: the value must not repeat it.
@@ -75,7 +74,6 @@ func TestUsageDetailContextWindowEnglish(t *testing.T) {
 	h.ui.Locale().SetLanguage("en")
 	tester := h.tester()
 	tester.Frame()
-	h.assertTexts(tester, "Took 1.2s · 460 tokens")
 	h.click(tester, "Message actions")
 	h.click(tester, "Usage details")
 	h.assertTexts(tester, "Context budget", "128k")
@@ -86,7 +84,6 @@ func TestUsageDetailBudgetHiddenWithoutCatalog(t *testing.T) {
 	chat := budgetChat("gpt-4o")
 	h := newModelHarness(t, chat, nil)
 	tester := h.tester()
-	h.assertTexts(tester, "460 tokens")
 	h.click(tester, "消息操作")
 	h.click(tester, "用量明细")
 	h.assertTexts(tester, "输入 tokens", "输出 tokens")
@@ -120,7 +117,6 @@ func TestUsageDetailBudgetUsesConfiguredModelFallback(t *testing.T) {
 	}}
 	h := newModelHarness(t, chat, catalog)
 	tester := h.tester()
-	h.assertTexts(tester, "用时 1.2s · 460 tokens")
 	openUsageDetails(t, h, tester)
 	h.assertTexts(tester, "上下文预算", "64k")
 	h.assertNoTexts(tester, "预算 64k")

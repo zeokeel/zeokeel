@@ -17,6 +17,7 @@ import (
 
 	"github.com/zeokeel/zeokeel/internal/contracts"
 	"github.com/zeokeel/zeokeel/internal/design"
+	"github.com/zeokeel/zeokeel/internal/icons"
 	"github.com/zeokeel/zeokeel/internal/uikit"
 )
 
@@ -36,7 +37,8 @@ type memoryPageState struct {
 	notice        string
 	noticeErr     bool
 	confirmClear  bool
-	confirmDelete string // memory ID waiting for the native confirmation dialog
+	confirmDelete string // memory ID waiting for the confirmation dialog
+	deleteOpen    bool   // the per-entry confirmation's open flag (persistent for ConfirmDanger)
 
 	// The 全部记忆 collection is the official List: keyed by memory ID, named by
 	// the row text and single-row selectable for the keyboard; the edit/delete
@@ -161,9 +163,13 @@ func buildMemoryPage(c *ui.Context, t *design.Tokens, kctx cordis.Context,
 				} else {
 					ui.Spacer(c).Grow(1)
 				}
-				if design.Apply(ui.Button(c, localized(locale, "整理记忆", "Tidy")),
+				// "整理记忆" was not understandable (B17): the action removes
+				// duplicate entries and keeps the earliest one; the tooltip says
+				// exactly that and that other memories are untouched.
+				if design.Apply(ui.Button(c, localized(locale, "去重并合并", "Merge duplicates")),
 					t.SecondaryButton()).Tooltip(localized(locale,
-					"删除重复的记忆，保留最早的一条", "Remove duplicate memories, keeping the earliest")).Clicked() {
+					"删除重复的记忆，保留最早的一条；不重复的记忆不受影响",
+					"Remove duplicate memories, keeping the earliest; memories without duplicates are untouched")).Clicked() {
 					tidyMemoriesPage(store, st, locale)
 					st.invalidateMemories()
 					c.Invalidate()
@@ -270,46 +276,48 @@ func buildMemoryPage(c *ui.Context, t *design.Tokens, kctx cordis.Context,
 			buildMemoryEditDialog(c, t, updater, st, locale)
 		}
 
-		// Clear-all confirmation: a native AlertDialog above the page content.
+		// Clear-all confirmation: the shared danger dialog with the safe outcome
+		// as its default (Enter never wipes the store).
 		if st.confirmClear {
-			switch ui.AlertDialog(c, &st.confirmClear,
-				localized(locale, "清空全部记忆", "Clear all memories"),
-				localized(locale, "确认删除全部记忆？此操作无法撤销。",
+			uikit.ConfirmDanger(c, &st.confirmClear, uikit.ConfirmDangerOptions{
+				Key:   "memory.clear-all",
+				Title: localized(locale, "清空全部记忆", "Clear all memories"),
+				Message: localized(locale, "确认删除全部记忆？此操作无法撤销。",
 					"Delete all memories? This cannot be undone."),
-				localized(locale, "取消", "Cancel"),
-				localized(locale, "清空", "Clear")) {
-			case 1:
-				clearMemoriesPage(store, st, locale)
-				st.invalidateMemories()
-				// Only the executed action needs a frame: the dialog's own open
-				// flag already rebuilt the frame when it was dismissed.
-				c.Invalidate()
-			}
+				Confirm: localized(locale, "清空", "Clear"),
+				Cancel:  localized(locale, "取消", "Cancel"),
+				OnConfirm: func() {
+					clearMemoriesPage(store, st, locale)
+					st.invalidateMemories()
+					c.Invalidate()
+				},
+			})
 		}
 
-		// One-entry deletion: confirmed with the same native dialog pattern.
+		// One-entry deletion: the same shared danger dialog.
 		if st.confirmDelete != "" {
 			target := st.confirmDelete
-			open := true
-			switch ui.AlertDialog(c, &open,
-				localized(locale, "删除记忆", "Delete memory"),
-				localized(locale, "确认删除这条记忆？此操作无法撤销。",
+			uikit.ConfirmDanger(c, &st.deleteOpen, uikit.ConfirmDangerOptions{
+				Key:   "memory.delete",
+				Title: localized(locale, "删除记忆", "Delete memory"),
+				Message: localized(locale, "确认删除这条记忆？此操作无法撤销。",
 					"Delete this memory? This cannot be undone."),
-				localized(locale, "取消", "Cancel"),
-				localized(locale, "确认删除", "Confirm delete")) {
-			case 1:
-				if store.Remove(context.Background(), target) {
-					st.notice = ""
-					st.noticeErr = false
-				} else {
-					st.notice = localized(locale, "删除记忆失败：", "Failed to delete memory: ") + target
-					st.noticeErr = true
-				}
-				st.confirmDelete = ""
-				st.invalidateMemories()
-				c.Invalidate()
-			}
-			if !open {
+				Confirm: localized(locale, "确认删除", "Confirm delete"),
+				Cancel:  localized(locale, "取消", "Cancel"),
+				OnConfirm: func() {
+					if store.Remove(context.Background(), target) {
+						st.notice = ""
+						st.noticeErr = false
+					} else {
+						st.notice = localized(locale, "删除记忆失败：", "Failed to delete memory: ") + target
+						st.noticeErr = true
+					}
+					st.confirmDelete = ""
+					st.invalidateMemories()
+					c.Invalidate()
+				},
+			})
+			if !st.deleteOpen {
 				st.confirmDelete = ""
 			}
 		}
@@ -486,7 +494,7 @@ func tidyMemoriesPage(store contracts.MemoryStore, st *memoryPageState, locale c
 	}
 	switch {
 	case failed > 0:
-		setMemoryNotice(st, localized(locale, "整理记忆失败：", "Tidy failed: ")+fmt.Sprintf("%d", failed), true)
+		setMemoryNotice(st, localized(locale, "去重并合并失败：", "Merge duplicates failed: ")+fmt.Sprintf("%d", failed), true)
 	case removed > 0:
 		setMemoryNotice(st, memoryTidiedLabel(locale, removed), false)
 	default:
@@ -622,21 +630,24 @@ func buildMemoryExtractionPanel(c *ui.Context, t *design.Tokens, kctx cordis.Con
 			label = busyLabel
 		}
 		disabled := !enabled || activeID == "" || st.extractRunning
-		buildBusyPrimaryAction(c, t, st.extractRunning, label, busyLabel, disabled, func() {
-			if disabled || st.extractRunning {
-				return
+		// The Add form owns the page's one primary; extraction is a secondary
+		// action (one primary per page, DESIGN.md §5.2).
+		ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(design.Space2).Children(func() {
+			buildBusySpinner(c, st.extractRunning, busyLabel)
+			extract := design.Apply(ui.Button(c, label), t.SecondaryButton()).Disabled(disabled)
+			if extract.Clicked() && !disabled && !st.extractRunning {
+				runtime, _ := kctx.Get(contracts.KeyUIRuntime)
+				startMemoryExtraction(runtime, extractor, st, activeID, locale)
+				c.Invalidate()
 			}
-			runtime, _ := kctx.Get(contracts.KeyUIRuntime)
-			startMemoryExtraction(runtime, extractor, st, activeID, locale)
-			c.Invalidate()
 		})
 		switch {
 		case !enabled:
 			design.Apply(ui.Text(c, localized(locale, "先启用模型提取后再提取", "Enable model extraction first")),
-				t.TextMuted(design.TypeXXXS))
+				t.TextMuted(design.TypeXXS))
 		case activeID == "":
 			design.Apply(ui.Text(c, localized(locale, "当前没有活动会话", "No active session")),
-				t.TextMuted(design.TypeXXXS))
+				t.TextMuted(design.TypeXXS))
 		}
 	})
 }
@@ -676,19 +687,31 @@ func buildMemoryPageEntry(c *ui.Context, t *design.Tokens, store contracts.Memor
 		ui.Row(c).FillWidth().AlignItems(ui.Start).Gap(design.Space2).Children(func() {
 			design.Apply(ui.Text(c, memory.Text), t.Font(design.TypeXS)).
 				TextColor(textColor).Grow(1).MaxLines(3)
-			if updater != nil {
-				if design.Apply(ui.Button(c, localized(locale, "编辑", "Edit")),
-					t.SecondaryButton()).Tooltip(localized(locale,
-					"编辑这条记忆", "Edit this memory")).Clicked() {
-					startMemoryEdit(c, st, memory)
+			// One trailing ⋯ menu owns both row actions; the destructive delete is
+			// its danger item, so a page of memories never paints a red button per
+			// row (DESIGN.md §5.2 danger budget).
+			label := localized(locale, "记忆操作", "Memory actions")
+			menu := uikit.IconButton(c, uikit.IconButtonOptions{
+				Key:     "memory-actions/" + memory.ID,
+				Label:   label,
+				Tooltip: label,
+				Icon:    icons.More(),
+				Size:    design.IconSizeS,
+			})
+			menu.PopoverMenuButton(func(m *ui.Menu) {
+				if updater != nil {
+					if m.Item(localized(locale, "编辑记忆", "Edit memory")).Chosen() {
+						startMemoryEdit(c, st, memory)
+					}
 				}
-			}
-			if design.Apply(ui.Button(c, localized(locale, "删除", "Delete")),
-				t.DangerButton()).Tooltip(localized(locale,
-				"删除这条记忆", "Delete this memory")).Clicked() {
-				st.confirmDelete = memory.ID
-				c.Invalidate()
-			}
+				remove := m.Item(localized(locale, "删除记忆", "Delete memory"))
+				remove.Danger()
+				if remove.Chosen() {
+					st.confirmDelete = memory.ID
+					st.deleteOpen = true
+					c.Invalidate()
+				}
+			})
 		})
 		meta := make([]string, 0, 2)
 		if scope := memoryScopeLabel(locale, memory.Scope); scope != "" {

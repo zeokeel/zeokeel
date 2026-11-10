@@ -110,8 +110,9 @@ func TestMemoryListSemanticsAndKeyboard(t *testing.T) {
 	if tester.HasText("编辑记忆") {
 		t.Fatalf("Enter on a memory row opened an action the pre-migration row did not have")
 	}
-	// The inline row actions still work.
-	h.click(tester, "删除")
+	// The row's ⋯ menu still works.
+	h.click(tester, "记忆操作")
+	h.click(tester, "删除记忆")
 	h.assertTexts(tester, "删除记忆")
 	h.click(tester, "取消")
 
@@ -187,7 +188,8 @@ func TestMCPListSemanticsAndKeyboard(t *testing.T) {
 	if !requireListItem(t, tester, "web").Selected {
 		t.Fatalf("Down did not move the MCP selection; texts = %v", tester.Texts())
 	}
-	// The inline remove action keeps its confirmation flow.
+	// The row's ⋯ remove action keeps its confirmation flow.
+	h.click(tester, "服务器操作")
 	h.click(tester, "移除")
 	h.assertTexts(tester, "移除服务器")
 	h.click(tester, "取消")
@@ -245,6 +247,9 @@ func TestPromptPresetListSemanticsKeyboardAndReorderKeys(t *testing.T) {
 	// Choose the first row, move it down: the row state and the choice follow
 	// the item's key, and the inline move action still persists the new order.
 	chooseListItem(t, h, tester, "简洁回答")
+	if err := tester.Click("预设操作"); err != nil {
+		t.Fatalf("open preset row menu: %v; texts = %v", err, tester.Texts())
+	}
 	if err := tester.Click("下移"); err != nil {
 		t.Fatalf("click 下移: %v; texts = %v", err, tester.Texts())
 	}

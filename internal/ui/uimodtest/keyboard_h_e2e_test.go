@@ -84,7 +84,7 @@ func TestInspectorPageShortcuts(t *testing.T) {
 	if err := tester.Click("搜索命令"); err != nil {
 		t.Fatalf("click palette search: %v; texts = %v", err, tester.Texts())
 	}
-	tester.Type("终端页")
+	tester.Type("命令页")
 	tester.Frame()
 	tester.Frame()
 	if !tester.HasText("Ctrl+`") {

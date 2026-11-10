@@ -266,10 +266,11 @@ func TestSkillsDeleteOnlyDataDirSkills(t *testing.T) {
 	h := skillsEditorHarness(t, skills, editor, dataDir)
 	tester := h.tester()
 
-	if got := exactTextCount(tester.Texts(), "删除"); got != 1 {
-		t.Fatalf("delete buttons = %d, want 1 (only the dataDir skill); texts = %v", got, tester.Texts())
+	if got := exactTextCount(tester.Texts(), "技能操作"); got != 1 {
+		t.Fatalf("row menus = %d, want 1 (only the dataDir skill); texts = %v", got, tester.Texts())
 	}
-	h.click(tester, "删除")
+	h.click(tester, "技能操作")
+	h.click(tester, "删除技能")
 	h.assertTexts(tester, "删除技能", "alpha")
 	h.click(tester, "确认删除")
 
@@ -289,7 +290,8 @@ func TestSkillsDeleteError(t *testing.T) {
 	h := skillsEditorHarness(t, skills, editor, dataDir)
 	tester := h.tester()
 
-	h.click(tester, "删除")
+	h.click(tester, "技能操作")
+	h.click(tester, "删除技能")
 	h.click(tester, "确认删除")
 	h.assertTexts(tester, "删除技能失败：locked")
 	h.assertNoTexts(tester, "已删除技能")
@@ -304,7 +306,7 @@ func TestSkillsEditorEnglish(t *testing.T) {
 	tester := h.tester()
 	tester.Frame()
 	h.click(tester, "Skills")
-	h.assertTexts(tester, "New skill", "Delete")
+	h.assertTexts(tester, "New skill", "Skill actions")
 
 	h.click(tester, "New skill")
 	h.assertTexts(tester, "Name", "Description", "Body", "Create", "Cancel")
@@ -317,7 +319,8 @@ func TestSkillsEditorEnglish(t *testing.T) {
 	h.click(tester, "Create")
 	h.assertTexts(tester, "Skill created", "english-skill")
 
-	h.click(tester, "Delete")
+	h.click(tester, "Skill actions")
+	h.click(tester, "Delete skill")
 	h.assertTexts(tester, "Delete skill", "Confirm delete")
 	h.click(tester, "Confirm delete")
 	h.assertTexts(tester, "Skill deleted")
@@ -337,9 +340,10 @@ func TestSkillsEditModalPrefillsAndSaves(t *testing.T) {
 	editor := newFakeSkillsEditor(skills)
 	h := skillsEditorHarness(t, skills, editor, dataDir)
 	tester := h.tester()
-	h.assertTexts(tester, "编辑")
+	h.assertTexts(tester, "技能操作")
 
-	h.click(tester, "编辑")
+	h.click(tester, "技能操作")
+	h.click(tester, "编辑技能")
 	h.assertTexts(tester, "编辑技能", "alpha", "名称不可修改", "描述", "内容", "保存", "取消")
 	h.focusInput(tester, "描述")
 	tester.Key(ui.Cmd, ui.KeyA)
@@ -371,7 +375,8 @@ func TestSkillsEditFailureKeepsModal(t *testing.T) {
 	editor.updateErr = errors.New("read-only filesystem")
 	h := skillsEditorHarness(t, skills, editor, dataDir)
 	tester := h.tester()
-	h.click(tester, "编辑")
+	h.click(tester, "技能操作")
+	h.click(tester, "编辑技能")
 	h.click(tester, "保存")
 	h.assertTexts(tester, "编辑技能失败：read-only filesystem", "编辑技能", "保存")
 }
@@ -382,7 +387,7 @@ func TestSkillsEditHiddenWithoutEditor(t *testing.T) {
 	skills.setList(dataDirSkill(dataDir, "alpha", "desc", "body"))
 	h := skillsEditorHarness(t, skills, nil, dataDir)
 	tester := h.tester()
-	h.assertNoTexts(tester, "编辑", "删除", "新建技能")
+	h.assertNoTexts(tester, "技能操作", "新建技能")
 }
 
 func TestSkillsEditEnglish(t *testing.T) {
@@ -394,8 +399,9 @@ func TestSkillsEditEnglish(t *testing.T) {
 	tester := h.tester()
 	tester.Frame()
 	h.click(tester, "Skills")
-	h.assertTexts(tester, "Edit")
-	h.click(tester, "Edit")
+	h.assertTexts(tester, "Skill actions")
+	h.click(tester, "Skill actions")
+	h.click(tester, "Edit skill")
 	h.assertTexts(tester, "Edit skill", "Name cannot be changed", "Save", "Cancel")
 	h.click(tester, "Save")
 	if got := editor.updated(); len(got) != 1 || got[0].Name != "alpha" {
@@ -414,7 +420,8 @@ func TestSkillsDeleteConfirmEscapeCancels(t *testing.T) {
 	h := skillsEditorHarness(t, skills, editor, dataDir)
 	tester := h.tester()
 
-	h.click(tester, "删除")
+	h.click(tester, "技能操作")
+	h.click(tester, "删除技能")
 	h.assertTexts(tester, "删除技能", "确认删除")
 	tester.Key(0, ui.KeyEscape)
 	tester.Frame()

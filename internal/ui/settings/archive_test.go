@@ -102,7 +102,8 @@ func TestArchivePageDeleteConfirmation(t *testing.T) {
 	h, tester := archiveHarness(t, chat)
 	tester.Frame()
 
-	h.click(tester, "删除")
+	h.click(tester, "归档会话操作")
+	h.click(tester, "删除会话")
 	h.assertTexts(tester, "删除归档会话", "要删除的会话")
 	tester.Key(0, ui.KeyEscape)
 	tester.Frame()
@@ -111,12 +112,34 @@ func TestArchivePageDeleteConfirmation(t *testing.T) {
 	}
 	h.assertTexts(tester, "要删除的会话")
 
-	h.click(tester, "删除")
+	h.click(tester, "归档会话操作")
+	h.click(tester, "删除会话")
 	h.click(tester, "确认删除")
 	if got := chat.deletions(); len(got) != 1 || got[0] != "arch-1" {
 		t.Fatalf("DeleteSession calls = %v, want [arch-1]", got)
 	}
 	h.assertTexts(tester, "没有归档的会话")
+}
+
+// TestArchivePageDeleteConfirmEnterCancels pins the shared danger dialog's safe
+// default: the cancellation is the Default button, so a stray Enter on the
+// open confirmation deletes nothing (R1 / probe D2.6).
+func TestArchivePageDeleteConfirmEnterCancels(t *testing.T) {
+	chat := &fakeChat{}
+	archiveSession(chat, "arch-1", "回车不要删除", 1, time.Now())
+	h, tester := archiveHarness(t, chat)
+	tester.Frame()
+
+	h.click(tester, "归档会话操作")
+	h.click(tester, "删除会话")
+	h.assertTexts(tester, "删除归档会话")
+	tester.Key(0, ui.KeyEnter)
+	tester.Frame()
+	if got := chat.deletions(); len(got) != 0 {
+		t.Fatalf("Enter on the danger confirmation deleted %v", got)
+	}
+	h.assertNoTexts(tester, "删除归档会话")
+	h.assertTexts(tester, "回车不要删除")
 }
 
 // TestArchivePageOpenSession covers the explicit open command: choosing the row
@@ -199,7 +222,7 @@ func TestArchivePageEnglishCopy(t *testing.T) {
 	h.click(tester, "Archived")
 	h.assertTexts(tester, "Archived sessions",
 		"Archived sessions stay out of the sidebar",
-		"Old plan", "2 messages", "Nov 8, 2026 1:30 PM", "Restore", "Delete")
+		"Old plan", "2 messages", "Nov 8, 2026 1:30 PM", "Restore", "Archived session actions")
 }
 
 // TestArchivePageDeepLink covers opening the page by its stable ID.

@@ -145,7 +145,12 @@ func TestArchivedSessionsPageEndToEnd(t *testing.T) {
 	if !tester.HasText("归档测试会话") {
 		t.Fatalf("archive page does not re-list the session; texts = %v", tester.Texts())
 	}
-	if err := tester.Click("删除"); err != nil {
+	// Delete is a danger action behind the row's ⋯ menu (R1 danger budget).
+	if err := tester.Click("归档会话操作"); err != nil {
+		t.Fatalf("open archive row actions: %v; texts = %v", err, tester.Texts())
+	}
+	tester.Frame()
+	if err := tester.Click("删除会话"); err != nil {
 		t.Fatalf("click delete: %v; texts = %v", err, tester.Texts())
 	}
 	tester.Frame()

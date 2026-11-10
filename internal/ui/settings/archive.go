@@ -17,6 +17,7 @@ import (
 
 	"github.com/zeokeel/zeokeel/internal/contracts"
 	"github.com/zeokeel/zeokeel/internal/design"
+	"github.com/zeokeel/zeokeel/internal/icons"
 	"github.com/zeokeel/zeokeel/internal/uikit"
 )
 
@@ -34,9 +35,12 @@ const (
 // delete confirmation ("" when none is open).
 type archiveState struct {
 	confirmDelete string
-	// pendingDeleteID survives the AlertDialog clearing confirmDelete, so the
+	// pendingDeleteID survives the confirmation clearing confirmDelete, so the
 	// confirmed dialog knows which session to delete.
 	pendingDeleteID string
+	// deleteOpen is the confirmation dialog's open flag (uikit.ConfirmDanger
+	// needs a persistent pointer so both its buttons can close it).
+	deleteOpen bool
 	// list backs the archived sessions' official List and sel is the row chosen
 	// (a click or arrow key only chooses; Enter/double click opens that
 	// conversation; restore/delete keep their buttons).
@@ -165,19 +169,22 @@ func buildArchivePage(c *ui.Context, t *design.Tokens, kctx cordis.Context,
 					break
 				}
 			}
-			open := true
-			switch ui.AlertDialog(c, &open, title, message,
-				localized(locale, "取消", "Cancel"),
-				localized(locale, "确认删除", "Confirm delete")) {
-			case 1:
-				if st.pendingDeleteID != "" {
-					_ = chat.DeleteSession(st.pendingDeleteID)
-				}
-			}
-			if !open {
+			uikit.ConfirmDanger(c, &st.deleteOpen, uikit.ConfirmDangerOptions{
+				Key:     "archive.delete",
+				Title:   title,
+				Message: message,
+				Confirm: localized(locale, "确认删除", "Confirm delete"),
+				Cancel:  localized(locale, "取消", "Cancel"),
+				OnConfirm: func() {
+					if st.pendingDeleteID != "" {
+						_ = chat.DeleteSession(st.pendingDeleteID)
+					}
+					c.Invalidate()
+				},
+			})
+			if !st.deleteOpen {
 				st.confirmDelete = ""
 				st.pendingDeleteID = ""
-				c.Invalidate()
 			}
 		}
 	})
@@ -209,13 +216,26 @@ func buildArchiveRow(c *ui.Context, t *design.Tokens, chat contracts.ChatService
 				c.Invalidate()
 			}
 		}
-		if design.Apply(ui.Button(c, localized(locale, "删除", "Delete")),
-			t.DangerButton()).Tooltip(localized(locale,
-			"永久删除该会话", "Delete this session permanently")).Clicked() {
-			st.confirmDelete = session.ID
-			st.pendingDeleteID = session.ID
-			c.Invalidate()
-		}
+		// The destructive delete is the row's ⋯ danger item, so a page of
+		// archived sessions never paints one red button per row.
+		label := localized(locale, "归档会话操作", "Archived session actions")
+		menu := uikit.IconButton(c, uikit.IconButtonOptions{
+			Key:     "archive-actions/" + session.ID,
+			Label:   label,
+			Tooltip: label,
+			Icon:    icons.More(),
+			Size:    design.IconSizeS,
+		})
+		menu.PopoverMenuButton(func(m *ui.Menu) {
+			remove := m.Item(localized(locale, "删除会话", "Delete session"))
+			remove.Danger()
+			if remove.Chosen() {
+				st.confirmDelete = session.ID
+				st.pendingDeleteID = session.ID
+				st.deleteOpen = true
+				c.Invalidate()
+			}
+		})
 	})
 	// A double click on the row (or a double click on the title text inside it)
 	// opens the conversation, like Enter: the click chooses the row, the second

@@ -74,9 +74,18 @@ func buildImportPage(c *ui.Context, t *design.Tokens, kctx cordis.Context, runti
 
 		uikit.Section(c, localized(locale, "数据来源", "Source"), func(*ui.Context) {
 			ui.Field(c, localized(locale, "DSH 数据目录", "DSH data directory"), func() {
-				ui.TextInput(c, &st.dir).
+				dirInput := ui.TextInput(c, &st.dir).
 					Label(inputLabel(locale, localized(locale, "DSH 数据目录", "DSH data directory"))).
 					Placeholder("~/.dsh").FillWidth()
+				if dirInput.Changed() {
+					// Editing the path invalidates the previous scan: never show a
+					// preview (or an import action) for another directory.
+					st.preview = nil
+					st.result = nil
+					st.scanErr = ""
+					st.dirErr = ""
+					st.importErr = ""
+				}
 			}).Description(localized(locale,
 				"DSH 桌面版的数据目录；先扫描预览，再导入。",
 				"The DSH desktop data directory; scan to preview, then import."))
@@ -112,7 +121,9 @@ func buildImportPage(c *ui.Context, t *design.Tokens, kctx cordis.Context, runti
 				dirChosen := strings.TrimSpace(st.dir) != ""
 				var scanButton ui.Element
 				var scanStyle design.Style
-				if dirChosen {
+				// Scan is the accent action only until a preview exists; after that
+				// the section's import button is the page's one primary.
+				if dirChosen && st.preview == nil && st.result == nil {
 					scanButton = ui.PrimaryButton(c, scanLabel)
 					scanStyle = t.PrimaryButton()
 				} else {
@@ -135,12 +146,26 @@ func buildImportPage(c *ui.Context, t *design.Tokens, kctx cordis.Context, runti
 			if st.scanErr != "" {
 				uikit.ErrorLine(c, localized(locale, "扫描失败：", "Scan failed: ")+st.scanErr)
 			}
-			if st.preview == nil && st.result == nil && st.dirErr == "" && st.scanErr == "" &&
-				!st.scanning && !st.importing {
+			// The source section has three distinct states, each naming its own
+			// next step (R13): no directory chosen, a directory chosen but not
+			// scanned, and a finished scan with nothing importable. The old
+			// single "还没有可导入的数据" showed the last one even before a scan,
+			// which read as "this directory is wrong".
+			dirChosen := strings.TrimSpace(st.dir) != ""
+			switch {
+			case st.preview == nil && st.result == nil && st.dirErr == "" && st.scanErr == "" &&
+				!st.scanning && !st.importing && !dirChosen:
 				uikit.EmptyStateBlock(c,
-					localized(locale, "还没有可导入的数据", "Nothing to import yet"),
-					localized(locale, "选择一个 DSH 数据目录，先「扫描」预览，再「导入数据」。",
-						"Choose a DSH data directory, Scan to preview, then Import data."),
+					localized(locale, "选择 DSH 数据目录", "Choose a DSH data directory"),
+					localized(locale, "选择 DSH 桌面版的数据目录后，点「扫描」预览；扫描只读，不改动任何数据。",
+						"Choose the DSH desktop data directory, then Scan to preview; scanning is read-only."),
+					nil)
+			case st.preview == nil && st.result == nil && st.dirErr == "" && st.scanErr == "" &&
+				!st.scanning && !st.importing && dirChosen:
+				uikit.EmptyStateBlock(c,
+					localized(locale, "点「扫描」预览", "Scan to preview"),
+					localized(locale, "「扫描」只读，不会改动数据；确认预览后再点「导入数据」。",
+						"Scan is read-only; review the preview, then Import data."),
 					nil)
 			}
 		})
@@ -163,6 +188,24 @@ func buildImportPreview(c *ui.Context, t *design.Tokens, importer contracts.Impo
 	runtime contracts.UIRuntime, st *importState, locale contracts.LocaleService) {
 	preview := *st.preview
 	uikit.Section(c, localized(locale, "扫描结果", "Scan result"), func(*ui.Context) {
+		if preview.Sessions+preview.Messages+preview.Workspaces == 0 {
+			// A finished scan with no importable rows is its own state: explain it
+			// and keep the import action out of reach (there is nothing to write).
+			uikit.EmptyStateBlock(c,
+				localized(locale, "这个目录没有可导入的数据", "This directory has nothing to import"),
+				localized(locale, "没有发现 DSH 的会话、消息或工作区；确认选择的是 DSH 桌面版的数据目录。",
+					"No DSH sessions, messages or workspaces were found; check that this is the DSH desktop data directory."),
+				nil)
+			for _, note := range preview.Notes {
+				text := design.Apply(ui.Text(c, note), t.Font(design.TypeXXS))
+				if importNoteIsSkip(note) {
+					text.TextColor(t.DangerText)
+				} else {
+					text.TextColor(t.LabelTertiary)
+				}
+			}
+			return
+		}
 		importStatRow(c, t, localized(locale, "会话", "Sessions"), preview.Sessions)
 		importStatRow(c, t, localized(locale, "消息", "Messages"), preview.Messages)
 		importStatRow(c, t, localized(locale, "工作区", "Workspaces"), preview.Workspaces)

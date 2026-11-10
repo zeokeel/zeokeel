@@ -52,8 +52,14 @@ internal/modules/*      后端能力模块
 6. **有官方标准件就不许手搓**：集合用 `ui.List/Table/Outline/GridView`（禁止 `Scroll`+循环）；浮层用 `Modal/Overlay/Popover/AlertDialog`；菜单/搜索/表单/输入同理。
 7. **状态语义不可降级**：error 用 `semantic.error`/`*Text` 变体；审批动词不中性化；`cancelled` 中性；`active` ≠ running。
 8. **图标只从 `internal/icons` + `ui.Icon` 取**：禁 emoji/Unicode/手写 SVG；图标按钮必须 `Label`（Tooltip 按需，与 Esc 冲突时可不加并注释）；纯图标按钮统一用 `uikit.IconButton`，禁止新增 `ButtonBase` 图标按钮。
-9. **新增自绘/组件必须登记**：DESIGN.md §7 + MIGRATION + lint 白名单 + 测试，否则检查失败。
-10. **改完 UI 必须验证**：`go test`（帧测试）+ 快照 + `designlint`/`scripts/design-check.sh`；没有证据不算完成。
+9. **危险确认安全默认**：删除/清空/恢复类确认必须用 `uikit.ConfirmDanger`（`ui.Modal` + `DialogFooter`，取消为 Default、危险动作非 Default 且为 danger 按钮）；`ui.AlertDialog` 只用于**非危险、非不可逆**的简单确认。审批无 Default、Esc=拒绝，且 Esc 必须在窗口级生效（不依赖焦点位置）。
+10. **强调色预算**：一屏 ≤2 个 Accent 填充块、≤1 个 primary 按钮；状态只能用 `uikit.StatusBadge`（语义 tint + AA 文字 + 必填标签），禁止中性底 + 状态字拼徽章；一屏红色元素 ≤2。
+11. **选择态两级**：持久导航/树/列表当前项 = `BgSelected`(12%) + 2px `Accent` 左条 + `LabelPrimary`；只有浮层内的瞬态选择（命令面板/菜单/下拉）用 Accent 填充 + `OnPrimary`。禁止满蓝导航选中行。
+12. **字号纪律**：`TypeXXXS`(11) 只用于微标签/kbd/终端 gutter，**禁止成句文本**；成句元数据最低 `TypeXXS`(12)，正文 `TypeBody`(14)；顶级屏标题 `TypeM/600`（顶带），设置页/对话框 `TypeL/600`。
+13. **度量档位**：控件高度只用 32/36/40/44（`design.RowCompactHeight/ControlHeight/PageActionHeight/RowDoubleHeight`），禁止 38；圆角只用 `RadiusXS/SM/MD/LG/XL/Max`（XL 仅 composer）；表面遵循 S0–S4 ramp（暗色导航必须比页面深）。
+14. **页面主操作两落点**：页面级即时动作放页头右，需要提交的表单放固定页脚右下的唯一 primary；分节动作放 `SectionAction`；禁止页中悬浮 primary。
+15. **新增自绘/组件必须登记**：DESIGN.md §7 + MIGRATION + lint 白名单 + 测试，否则检查失败。
+16. **改完 UI 必须验证**：`go test`（帧测试）+ 快照 + `designlint`/`scripts/design-check.sh`；没有证据不算完成。
 
 ---
 

@@ -265,8 +265,10 @@ func agentStatusFill(t *design.Tokens, kind uikit.StatusKind) ui.Color {
 
 // buildTeamEntry is the header's 智能体团队 entry: a users glyph, the words (the
 // count alone on a narrow band) and the live member count, opening the native
-// team overlay. The entry is present whenever the host provides the team
-// backend, even with no members, so the feature stays discoverable.
+// team overlay. The entry only appears once a team exists: a permanent zero
+// badge over every conversation was noise that squeezed the title, and the
+// feature is reachable from the command palette before a team starts (R15,
+// simplified in v0.2.19's subtraction pass).
 func buildTeamEntry(c *ui.Context, t *design.Tokens, st *state, compact bool) {
 	team := st.teamService()
 	if team == nil {
@@ -278,6 +280,9 @@ func buildTeamEntry(c *ui.Context, t *design.Tokens, st *state, compact bool) {
 		if uikit.ParseRunState(member.RunState) == uikit.RunStateRunning {
 			running++
 		}
+	}
+	if len(members) == 0 {
+		return
 	}
 	label := st.tr("智能体团队", "Agent team")
 	tooltip := fmt.Sprintf(st.tr("%d 名成员 · %d 个运行中", "%d members · %d running"),
@@ -349,9 +354,10 @@ func agentSectionLabel(c *ui.Context, t *design.Tokens, text string) {
 }
 
 // agentHint is the overlays' quiet footer hint (how to leave, what a click
-// does).
+// does). It is a sentence, so it uses the 12 metadata step rather than the 11
+// micro-label step.
 func agentHint(c *ui.Context, t *design.Tokens, text string) {
-	design.Apply(ui.Text(c, text), t.Font(design.TypeXXXS)).TextColor(t.LabelTertiary)
+	design.Apply(ui.Text(c, text), t.Font(design.TypeXXS)).TextColor(t.LabelTertiary)
 }
 
 // agentRowAction is one compact text action inside an overlay card or a file
@@ -396,7 +402,7 @@ func buildTeamPanel(c *ui.Context, t *design.Tokens, st *state, members []contra
 			} else {
 				buildTeamMembersList(c, t, st, members)
 			}
-			agentSectionLabel(c, t, st.tr("共享任务", "Shared tasks"))
+			agentSectionLabel(c, t, st.tr("共享任务", "Shared tasks")+sharedTasksScrollHint(st))
 			buildSharedTasksList(c, t, st)
 		})
 	})
@@ -447,10 +453,10 @@ func buildTeamMemberCard(c *ui.Context, t *design.Tokens, st *state, member cont
 				uikit.StatusText(c, t, design.TypeXXXS, kind,
 					uikit.RunStateLabel(st.locale, member.RunState))
 			})
-			design.Apply(ui.Text(c, agentMemberActivity(st, member)), t.Font(design.TypeXXXS)).
+			design.Apply(ui.Text(c, agentMemberActivity(st, member)), t.Font(design.TypeXXS)).
 				TextColor(t.LabelTertiary).MaxLines(1).Ellipsis("…")
 			if model := strings.TrimSpace(member.Model); model != "" {
-				design.Apply(ui.Text(c, model), t.Font(design.TypeXXXS)).
+				design.Apply(ui.Text(c, model), t.Font(design.TypeXXS)).
 					TextColor(t.LabelTertiary).MaxLines(1).Ellipsis("…")
 			}
 		})
@@ -475,6 +481,17 @@ func agentMemberActivity(st *state, member contracts.TeamMember) string {
 		return st.tr("上一轮：", "Last: ") + truncateRunes(text, 96)
 	}
 	return st.tr("还没有活动", "No activity yet")
+}
+
+// sharedTasksScrollHint appends the task count and the scroll affordance to the
+// 共享任务 section label once the list no longer fits: with more than three
+// tasks the panel scrolls, and without the hint the last card just looked cut
+// off (R6).
+func sharedTasksScrollHint(st *state) string {
+	if st == nil || !st.agents.tasksLoaded || len(st.agents.tasks) <= 3 {
+		return ""
+	}
+	return fmt.Sprintf(st.tr(" · %d 项 · 可滚动", " · %d items · scrollable"), len(st.agents.tasks))
 }
 
 // buildSharedTasksList renders the task board snapshot: an unread board, a
@@ -519,19 +536,27 @@ func buildSharedTasksList(c *ui.Context, t *design.Tokens, st *state) {
 		return tasks[index].Subject
 	}
 	ui.List(c, &st.agents.teamTasks, len(tasks), func(index int) {
-		buildSharedTaskCard(c, t, st, tasks[index])
+		buildSharedTaskCard(c, t, st, tasks[index], index)
 	}).FillWidth().Gap(design.Space2)
 }
 
-// buildSharedTaskCard is one task card: subject and truthfully parsed status,
-// then the owner, the blockers and the expected write scopes.
-func buildSharedTaskCard(c *ui.Context, t *design.Tokens, st *state, task contracts.BoardTask) {
+// buildSharedTaskCard is one task card: the stable short ID and the subject with
+// the truthfully parsed status, then the owner, the blockers and the expected
+// write scopes. Two tasks with the same subject stay distinguishable because
+// every card names its own ID (R6).
+func buildSharedTaskCard(c *ui.Context, t *design.Tokens, st *state, task contracts.BoardTask, index int) {
 	status := uikit.ParseTaskStatus(task.Status)
 	card := ui.Column(c).FillWidth().Gap(design.Space1).
 		Background(t.BgBase).Border(1, t.BorderL2).Radius(design.RadiusMD).
 		Padding(design.Space2, design.Space3)
 	card.Children(func() {
 		ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(design.Space2).Children(func() {
+			// The ID is the card's stable identity: a small mono token before the
+			// subject, never the only way to tell two same-subject cards apart by
+			// their dependency line.
+			design.Apply(ui.Text(c, taskShortID(task, index)), t.MonoText(design.TypeXXXS)).
+				TextColor(t.LabelTertiary).NoWrap().
+				Tooltip(st.tr("任务 ID：", "Task ID: ") + task.ID)
 			design.Apply(ui.Text(c, task.Subject), t.Font(design.TypeXS)).FontWeight(agentHeadingWeight).
 				TextColor(t.LabelPrimary).Grow(1).Shrink(1).MinWidthPercent(0).
 				MaxLines(1).Ellipsis("…")
@@ -539,8 +564,8 @@ func buildSharedTaskCard(c *ui.Context, t *design.Tokens, st *state, task contra
 		})
 		ui.Row(c).FillWidth().AlignItems(ui.Center).Wrap().Gap(design.Space2).Children(func() {
 			owner := st.tr("未指派", "Unassigned")
-			if trimmed := strings.TrimSpace(task.Owner); trimmed != "" {
-				owner = st.tr("负责人 ", "Owner ") + trimmed
+			if name := taskOwnerDisplay(st, task.Owner); name != "" {
+				owner = st.tr("负责人 ", "Owner ") + name
 			}
 			agentTaskMeta(c, t, owner)
 			if len(task.BlockedBy) > 0 {
@@ -553,15 +578,50 @@ func buildSharedTaskCard(c *ui.Context, t *design.Tokens, st *state, task contra
 	})
 }
 
-// agentTaskMeta is one muted metadata item of a task card.
+// taskShortID is the stable short identity printed on a task card: the board's
+// own ID (task-3), or a positional serial only for a record the backend left
+// unidentified.
+func taskShortID(task contracts.BoardTask, index int) string {
+	if id := strings.TrimSpace(task.ID); id != "" {
+		return id
+	}
+	return fmt.Sprintf("#%d", index+1)
+}
+
+// taskOwnerDisplay resolves a task owner to a readable name: the board's
+// pseudo owner "taskboard" is the lead agent, a team member ID becomes that
+// member's display name, and an owner the board already stores as a name stays
+// as-is. The raw ID never reaches the card when a display name exists (R6).
+func taskOwnerDisplay(st *state, owner string) string {
+	trimmed := strings.TrimSpace(owner)
+	if trimmed == "" {
+		return ""
+	}
+	if trimmed == contracts.TaskOwnerUnassigned {
+		return st.tr("主智能体", "Lead agent")
+	}
+	if team := st.teamService(); team != nil {
+		for _, member := range team.Members() {
+			if strings.TrimSpace(member.ID) == trimmed {
+				return agentDisplayName(member.Name, member.ID)
+			}
+		}
+	}
+	return trimmed
+}
+
+// agentTaskMeta is one muted metadata item of a task card. Task metadata is a
+// sentence-like line, so it uses the 12 metadata step, not the 11 micro step
+// (R6/DESIGN.md §5.2 B).
 func agentTaskMeta(c *ui.Context, t *design.Tokens, text string) {
-	design.Apply(ui.Text(c, text), t.Font(design.TypeXXXS)).
+	design.Apply(ui.Text(c, text), t.Font(design.TypeXXS)).
 		TextColor(t.LabelTertiary).NoWrap()
 }
 
 // buildSubagentEntry is the header's 子智能体 N chip: the count of the active
 // session's child agents (subagents plus team members), opening the switcher
-// overlay. It renders nothing while the session has no children.
+// overlay. A zero count renders no chip at all: a permanent "子智能体 0" entry
+// only squeezed the conversation title while offering nothing (R15).
 func buildSubagentEntry(c *ui.Context, t *design.Tokens, st *state, activeID string, compact bool) {
 	// One popover owner per state: while a child conversation is open the
 	// breadcrumb's switcher chip owns the child list. Rendering the header chip
@@ -575,6 +635,9 @@ func buildSubagentEntry(c *ui.Context, t *design.Tokens, st *state, activeID str
 		return
 	}
 	agents := children.ChildAgents(activeID)
+	if len(agents) == 0 {
+		return
+	}
 	running := 0
 	for _, agent := range agents {
 		if strings.EqualFold(strings.TrimSpace(agent.Status), contracts.ChildAgentRunning) {
@@ -671,7 +734,7 @@ func buildChildSwitcherRow(c *ui.Context, t *design.Tokens, st *state, agent con
 				uikit.StatusText(c, t, design.TypeXXXS, kind,
 					uikit.RunStateLabel(st.locale, agent.Status))
 			})
-			design.Apply(ui.Text(c, childAgentActivityLine(st, agent)), t.Font(design.TypeXXXS)).
+			design.Apply(ui.Text(c, childAgentActivityLine(st, agent)), t.Font(design.TypeXXS)).
 				TextColor(t.LabelTertiary).MaxLines(1).Ellipsis("…")
 		})
 		agentRowAction(c, t, st.tr("进入", "Open"),
@@ -766,13 +829,17 @@ func (st *state) exitChildView() {
 
 // buildJobsEntry is the header's background-jobs chip: the retained job count,
 // opening the native jobs overlay. It renders nothing while the manager has no
-// jobs (the chip is a notification of real work, not a permanent badge).
+// jobs: the chip is a notification of real work, not a permanent zero badge
+// that squeezes the title (R15).
 func buildJobsEntry(c *ui.Context, t *design.Tokens, st *state, compact bool) {
 	jobs := st.jobService()
 	if jobs == nil {
 		return
 	}
 	list := jobs.Jobs()
+	if len(list) == 0 {
+		return
+	}
 	running := 0
 	for _, job := range list {
 		if job.Running {
@@ -910,24 +977,26 @@ func buildBackgroundJobRow(c *ui.Context, t *design.Tokens, st *state,
 	row.Children(func() {
 		uikit.StatusBadge(c, t, kind, label)
 		command := backgroundJobCommand(job, st)
-		design.Apply(ui.Text(c, command), t.MonoText(design.TypeXXXS)).
+		design.Apply(ui.Text(c, command), t.MonoText(design.TypeXXS)).
 			TextColor(t.LabelSecondary).Grow(1).Shrink(1).MinWidthPercent(0).
 			MaxLines(1).Ellipsis("…").Tooltip(command)
 		if job.Duration > 0 {
 			design.Apply(ui.Text(c, st.tr("用时 ", "Took ")+formatUsageDuration(job.Duration.Milliseconds())),
-				t.Font(design.TypeXXXS)).TextColor(t.LabelTertiary).NoWrap()
+				t.Font(design.TypeXXS)).TextColor(t.LabelTertiary).NoWrap()
 		}
 		design.Apply(ui.Text(c, st.tr("退出码 ", "Exit ")+backgroundJobExitLabel(job)),
-			t.Font(design.TypeXXXS)).TextColor(t.LabelTertiary).NoWrap()
+			t.Font(design.TypeXXS)).TextColor(t.LabelTertiary).NoWrap()
 		if job.Running {
 			stopText := st.tr("停止", "Stop")
 			if st.agents.jobKilling == job.ID {
 				stopText = st.tr("停止中…", "Stopping…")
 			}
-			stop := ui.Button(c, stopText).Label(st.tr("停止后台任务 ", "Stop background task ") + job.ID)
-			design.Apply(stop, t.Font(design.TypeXXXS))
-			stop.Height(agentRowActionHeight).PaddingX(design.Space2).
-				Radius(design.RadiusSM).Shrink(0)
+			// Stopping a background job terminates its process: the same danger
+			// semantic as the composer's stop, not a neutral secondary (R6/A6).
+			stop := ui.Button(c, stopText).Label(st.tr("停止后台任务 ", "Stop background task ") + job.ID).
+				Tooltip(st.tr("停止会终止该任务的进程，无法撤销", "Stopping ends the job's process and cannot be undone"))
+			design.Apply(stop, t.DangerButton(), t.Font(design.TypeXXS)).
+				Height(agentRowActionHeight).PaddingX(design.Space2).Shrink(0)
 			stop.Disabled(st.agents.jobKilling != "")
 			if stop.Clicked() {
 				st.killBackgroundJob(jobs, job.ID)
@@ -1041,21 +1110,27 @@ func buildChildConversationPane(c *ui.Context, t *design.Tokens, runtime contrac
 // agent family, the model, the usage and the elapsed time.
 func buildChildHeader(c *ui.Context, t *design.Tokens, st *state, child contracts.ChildAgent) {
 	kind := uikit.ParseRunState(child.Status).Kind()
+	// The raw child ID (member-1) is an internal key, not user copy: it moves
+	// into the quiet line's tooltip as the session ID instead of occupying its
+	// own row under the status (R6).
+	sessionID := ""
+	if strings.TrimSpace(child.ID) != "" {
+		sessionID = st.tr("会话 ID：", "Session ID: ") + strings.TrimSpace(child.ID)
+	}
 	ui.Column(c).FillWidth().Gap(design.Space2).Children(func() {
 		ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(design.Space2).Children(func() {
 			uikit.StatusBadge(c, t, kind, uikit.RunStateLabel(st.locale, child.Status))
-			design.Apply(ui.Text(c, childAgentMeta(st, child)), t.Font(design.TypeXXS)).
+			meta := design.Apply(ui.Text(c, childAgentMeta(st, child)), t.Font(design.TypeXXS)).
 				TextColor(t.LabelSecondary)
+			if sessionID != "" {
+				meta.Tooltip(sessionID)
+			}
 			ui.Spacer(c)
-			if meta := childAgentUsageSummary(st, child, c.Now()); meta != "" {
-				design.Apply(ui.Text(c, meta), t.Font(design.TypeXXXS)).
+			if summary := childAgentUsageSummary(st, child, c.Now()); summary != "" {
+				design.Apply(ui.Text(c, summary), t.Font(design.TypeXXXS)).
 					TextColor(t.LabelTertiary).NoWrap()
 			}
 		})
-		if strings.TrimSpace(child.ID) != "" {
-			design.Apply(ui.Text(c, child.ID), t.Font(design.TypeXXXS)).
-				TextColor(t.LabelTertiary).Selectable()
-		}
 	})
 }
 
@@ -1153,18 +1228,27 @@ func buildChildActivitySection(c *ui.Context, t *design.Tokens, st *state, child
 }
 
 // buildChildActivityRow is one timeline row: the kind, the text and the clock.
+// A finish entry's own text already says 已完成, so the separate kind word is
+// dropped instead of reading "完成 「研究员」已完成：…" (R6); the body uses the
+// 12 metadata step because it is a sentence, not a micro label.
 func buildChildActivityRow(c *ui.Context, t *design.Tokens, st *state, entry contracts.ChildAgentActivity) {
 	color := t.LabelSecondary
 	if entry.Error {
 		color = t.DangerText
 	}
+	showKind := true
+	if entry.Kind == contracts.TeamActivityFinish && strings.Contains(entry.Text, "已完成") {
+		showKind = false
+	}
 	ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(design.Space2).
 		PaddingY(design.Space1).Children(func() {
 		design.Apply(ui.Text(c, messageClock(st.locale, entry.Time)),
 			t.Font(design.TypeXXXS)).TextColor(t.LabelTertiary).NoWrap()
-		design.Apply(ui.Text(c, childActivityKindLabel(st, entry.Kind)),
-			t.Font(design.TypeXXXS)).FontWeight(agentHeadingWeight).TextColor(color).NoWrap()
-		design.Apply(ui.Text(c, entry.Text), t.Font(design.TypeXXXS)).
+		if showKind {
+			design.Apply(ui.Text(c, childActivityKindLabel(st, entry.Kind)),
+				t.Font(design.TypeXXS)).FontWeight(agentHeadingWeight).TextColor(color).NoWrap()
+		}
+		design.Apply(ui.Text(c, entry.Text), t.Font(design.TypeXXS)).
 			TextColor(color).Grow(1).Shrink(1).MinWidthPercent(0).MaxLines(2).
 			Tooltip(entry.Text)
 	})

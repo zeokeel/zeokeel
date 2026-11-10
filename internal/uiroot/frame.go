@@ -186,7 +186,7 @@ func (r *Root) sidebarExpanded(c *ui.Context) {
 			r.slot(c, contracts.SlotSidebarPrimary)
 			r.slot(c, contracts.SlotSidebarNav)
 			r.slot(c, contracts.SlotSidebarTree)
-		}).Grow(1).Shrink(1).FillWidth().Label(r.tr("主导航", "Main navigation"))
+		}).Grow(1).Shrink(1).FillWidth().PaddingY(design.Space1).Label(r.tr("主导航", "Main navigation"))
 		sidebar.Background(t.BgSidebar)
 		changed = sidebar.Changed()
 		ui.Column(c).FillWidth().Shrink(0).Children(func() {
@@ -242,6 +242,20 @@ func (r *Root) sidebarRail(c *ui.Context) {
 			Content: func(cc *ui.Context) {
 				ui.Image(cc, brand.Mark(t.Dark)).Size(design.IconSizeL, design.IconSizeL)
 			},
+			OnClick: func() { r.SetSidebarCollapsed(false) },
+		})
+		// The brand mark expands the sidebar, but a logo reads as "home/about"
+		// long before it reads as "expand": the audit's pointer users reported
+		// no visible way back from the rail (R10). A second, explicit panel
+		// toggle sits under the mark, always visible, with the same glyph as
+		// the expanded sidebar's collapse control.
+		uikit.IconButton(c, uikit.IconButtonOptions{
+			Key:     "chrome.rail.toggle",
+			Label:   expandLabel,
+			Tooltip: expandLabel,
+			Icon:    icons.PanelLeft(),
+			Size:    design.IconSizeS,
+			Variant: uikit.IconButtonSubtle,
 			OnClick: func() { r.SetSidebarCollapsed(false) },
 		})
 		// The new-session action is the expanded sidebar's primary action; the
@@ -378,8 +392,22 @@ func (r *Root) screen(c *ui.Context) {
 func (r *Root) contentArea(c *ui.Context) {
 	main := func() {
 		ui.Column(c).FillHeight().Grow(1).Shrink(1).MinWidth(0).Children(func() {
+			// The band keeps the whole window width: the drawer covers its
+			// right-hand utilities while it is open, and narrowing the band
+			// itself would squeeze the screen title and the agent entries into
+			// the space the drawer already covers.
 			r.contentHeader(c)
-			r.screen(c)
+			body := ui.Column(c).FillHeight().Grow(1).Shrink(1).MinWidth(design.Space0)
+			// A drawer covers the right edge of the window instead of docking,
+			// so the screen body reserves its width: the composer and its
+			// send/stop controls stay fully visible to the left of the drawer
+			// instead of hanging half-way under it (report R3). The scrim still
+			// marks the drawer as modal, so the reserved band is visibly not
+			// interactive.
+			if r.rightPanelDrawerOpen(c) {
+				body = body.Padding(design.Space0, design.InspectorWidth, design.Space0, design.Space0)
+			}
+			body.Children(func() { r.screen(c) })
 		})
 	}
 	if !r.inspectorDocked(c) {
@@ -655,8 +683,9 @@ func (r *Root) inspectorDrawer(c *ui.Context) {
 		back := ui.Row(c).Absolute().Left(0).Top(0).Right(0).Bottom(0).
 			Justify(ui.End).Background(t.Scrim()).Modal()
 		back.Children(func() {
-			panel := ui.Column(c).Width(design.InspectorWidth).FillHeight().
-				Background(t.BgSidebar).BorderWidth(1, 0, 0, 0).BorderColor(t.BorderL3).
+			panel := design.Apply(ui.Column(c).Width(design.InspectorWidth).FillHeight(),
+				t.ShadowOverlay()).
+				Background(t.BgRaised).BorderWidth(1, 0, 0, 0).BorderColor(t.BorderL3).
 				Padding(design.Space4).
 				Role(ui.RoleDialog).Label(r.tr("检查器", "Inspector"))
 			panel.Children(func() {
@@ -711,9 +740,29 @@ func (r *Root) palette(c *ui.Context) {
 		ui.Column(c).Width(design.DialogWidthM).Gap(design.Space2).Padding(design.Space4).Children(func() {
 			design.Apply(ui.Text(c, r.tr("命令面板", "Command palette")), t.Font(design.TypeM)).FontWeight(600).
 				TextColor(t.LabelPrimary)
-			search := ui.SearchField(c, &r.paletteQuery).
-				Label(r.tr("搜索命令", "Search commands")).
-				Placeholder(r.tr("搜索命令…", "Search commands…")).FillWidth()
+			// The palette's search row is built from a TextInput rather than
+			// SearchField: one Escape must close the palette, as its footer
+			// promises, and SearchField's own Escape clears the query first
+			// (mygo docs/ui/search-field.md). OnTextKey exists only on the
+			// editable node, so the magnifier and the field are composed here
+			// around the input the palette can intercept (R14).
+			var search ui.Element
+			design.Apply(ui.Row(c), t.Panel()).FillWidth().Height(design.ControlHeight).
+				AlignItems(ui.Center).Gap(design.Space2).
+				Padding(design.Space2, design.Space3).Children(func() {
+				ui.Icon(c, icons.Search()).Size(design.Space4, design.Space4).TextColor(t.LabelTertiary)
+				search = ui.TextInput(c, &r.paletteQuery).
+					Label(r.tr("搜索命令", "Search commands")).
+					Placeholder(r.tr("搜索命令…", "Search commands…")).
+					Background(ui.Transparent).Border(0, ui.Transparent).Grow(1)
+				search.OnTextKey(func(k ui.TextKey) bool {
+					if k.Key != ui.KeyEscape || k.Mods != 0 {
+						return false
+					}
+					r.closePalette()
+					return true
+				})
+			})
 			// Arrow keys move the choice while the search field keeps the
 			// keyboard, as in a desktop command palette; Enter and Escape are
 			// the field's and the modal's.
@@ -992,6 +1041,77 @@ var settingsSectionRank = map[string]int{
 	"关于":      90,
 }
 
+// settingsPageMatches reports whether a settings page matches the navigation
+// search needle. It matches the page title, its section's localized title and
+// the page's keyword aliases: users search for the setting's name ("密钥",
+// "主题", "字体"), which is rarely the page title (report R2).
+func (r *Root) settingsPageMatches(page contracts.SettingsPageSpec, needle string) bool {
+	haystack := []string{
+		strings.ToLower(page.Title),
+		strings.ToLower(r.settingsSectionTitle(page.Section)),
+	}
+	haystack = append(haystack, settingsPageKeywords(page.ID)...)
+	for _, text := range haystack {
+		if text != "" && strings.Contains(text, needle) {
+			return true
+		}
+	}
+	return false
+}
+
+// settingsPageKeywords lists the search aliases of a settings page: the field
+// labels and synonyms users know it by, in Chinese and English. The page IDs
+// are the stable contract with the modules (contracts.SettingsPageSpec.ID), so
+// the alias table stays host-owned and a module cannot drift it.
+func settingsPageKeywords(id string) []string {
+	switch id {
+	case "model":
+		return []string{"密钥", "api key", "apikey", "base url", "地址", "端点", "服务商", "provider",
+			"模型", "model", "上下文", "context", "最大迭代", "iterations", "提示词", "prompt",
+			"温度", "temperature", "top p", "思考", "推理", "reasoning", "测试连接", "目录", "catalog", "生成参数"}
+	case "appearance":
+		return []string{"主题", "theme", "深色", "dark", "浅色", "light", "跟随系统", "语言", "language",
+			"中文", "英文", "字体", "font", "字号", "text size", "缩放", "scale", "热键", "hotkey",
+			"快捷键", "shortcut", "托盘", "tray", "开机", "启动", "autostart", "单实例"}
+	case "behavior":
+		return []string{"行为", "工作步骤", "steps", "详细", "verbose", "精简", "minimal", "创作", "creative",
+			"模式", "mode", "权限", "permission", "沙箱", "sandbox"}
+	case "presets":
+		return []string{"预设", "preset", "人设", "persona", "提示词模板", "template", "agent"}
+	case "skills":
+		return []string{"技能", "skill", "skill.md", "扫描", "scan", "全局", "工作区", "workspace"}
+	case "shortcuts":
+		return []string{"快捷键", "shortcut", "键位", "keybinding", "恢复默认", "restore default"}
+	case "mcp":
+		return []string{"mcp", "插件", "plugin", "服务器", "server", "工具", "tool", "连接", "connection"}
+	case "search":
+		return []string{"搜索", "search", "网络搜索", "web", "引擎", "engine", "api key"}
+	case "network":
+		return []string{"网络", "network", "代理", "proxy", "超时", "timeout", "证书", "certificate", "tls"}
+	case "notifications":
+		return []string{"通知", "notification", "气泡", "toast", "声音", "sound", "桌面"}
+	case "archive":
+		return []string{"归档", "archive", "恢复", "restore", "已归档"}
+	case "import":
+		return []string{"导入", "import", "dsh", "迁移", "migrate", "数据目录", "data dir"}
+	case "update":
+		return []string{"更新", "update", "版本", "version", "检查更新", "自动更新", "changelog"}
+	case "diagnostics":
+		return []string{"诊断", "diagnostic", "日志", "log", "信息", "info", "提交", "commit",
+			"构建", "build", "复制", "copy", "运行时"}
+	case "memory":
+		return []string{"记忆", "memory", "提取", "extract", "去重", "tidy", "全局", "global"}
+	case "lsp":
+		return []string{"lsp", "语言服务", "language server", "补全", "completion", "诊断", "diagnostics"}
+	case "data-privacy":
+		return []string{"数据", "data", "隐私", "privacy", "导出", "export", "清除", "清空",
+			"备份", "backup", "重置", "reset"}
+	case "about":
+		return []string{"关于", "about", "版本", "version", "许可", "license", "架构", "architecture"}
+	}
+	return nil
+}
+
 // settingsSectionTitle localizes a page section name for the navigation.
 func (r *Root) settingsSectionTitle(section string) string {
 	switch section {
@@ -1056,8 +1176,9 @@ func groupSettingsPages(pages []contracts.SettingsPageSpec) []settingsGroup {
 // so the settings surface does not stack two loud titles.
 func (r *Root) settingsTitleRow(c *ui.Context, t *design.Tokens, open *bool, dirty bool) {
 	ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(design.Space2).Children(func() {
-		design.Apply(ui.Text(c, r.locale.T("settings.title")), t.Font(design.TypeXS)).
-			TextColor(t.LabelTertiary)
+		// The surface is already titled by the page's H1 and the selected
+		// navigation item; a muted "settings" kicker repeated the same word a
+		// third time (V26).
 		if dirty {
 			design.Apply(ui.Badge(c, r.tr("未保存", "Unsaved")), t.Badge()).
 				TextColor(t.WarningText)
@@ -1104,7 +1225,7 @@ func (r *Root) settingsDiscardBar(c *ui.Context, t *design.Tokens) {
 func (r *Root) settingsNavColumn(c *ui.Context, t *design.Tokens, selected *string, groups []settingsGroup) {
 	ui.Column(c).Width(200).FillHeight().Children(func() {
 		ui.Row(c).FillWidth().Shrink(0).
-			Padding(design.Space3, design.Space3, 0, design.Space3).Children(func() {
+			Padding(design.Space3, design.Space3, design.Space2, design.Space3).Children(func() {
 			ui.SearchField(c, &r.settingsQuery).
 				Label(r.tr("搜索设置", "Search settings")).
 				Placeholder(r.tr("搜索设置…", "Search settings…")).FillWidth()
@@ -1145,7 +1266,7 @@ func (r *Root) settingsNavColumn(c *ui.Context, t *design.Tokens, selected *stri
 				}
 			}
 			r.slot(c, contracts.SlotSettingsSidebar)
-		}).Grow(1).Shrink(1).FillWidth()
+		}).Grow(1).Shrink(1).FillWidth().PaddingY(design.Space1)
 	})
 }
 
@@ -1205,7 +1326,7 @@ func (r *Root) settings(c *ui.Context, open *bool) {
 	if needle != "" {
 		filtered := make([]contracts.SettingsPageSpec, 0, len(pages))
 		for _, page := range pages {
-			if strings.Contains(strings.ToLower(page.Title), needle) {
+			if r.settingsPageMatches(page, needle) {
 				filtered = append(filtered, page)
 			}
 		}

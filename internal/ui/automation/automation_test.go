@@ -311,7 +311,7 @@ func TestTaskListRenders(t *testing.T) {
 
 	h.assertTexts(tester, "自动化", "新建任务",
 		"每日依赖巡检", "每 60 秒", "下次运行：", "上次运行：",
-		"立即运行", "编辑", "删除",
+		"立即运行", "编辑", "任务操作",
 		"停用任务", "每 5 分钟", "上次错误：exit status 1")
 }
 
@@ -397,7 +397,8 @@ func TestRunNowAndDelete(t *testing.T) {
 		t.Fatalf("RunNow calls = %v, want [task-1]", got)
 	}
 
-	h.click(tester, "删除")
+	h.click(tester, "任务操作")
+	h.click(tester, "删除任务")
 	h.assertTexts(tester, "删除自动化任务")
 	h.click(tester, "确认删除")
 	if got := service.deletes(); len(got) != 1 || got[0] != "task-1" {
@@ -524,7 +525,8 @@ func TestDeleteTaskRaisesUndoToast(t *testing.T) {
 	notifier := &automationNotifier{}
 	h := newHarnessWithNotifier(t, service, notifier, automation.Config{})
 	tester := h.tester()
-	h.click(tester, "删除")
+	h.click(tester, "任务操作")
+	h.click(tester, "删除任务")
 	h.click(tester, "确认删除")
 
 	actions := notifier.actionCalls()

@@ -165,7 +165,7 @@ func TestSidebarEnglishWorkspaceBadgesAndEmptyStates(t *testing.T) {
 	clickLabel(t, emptyTester, "Search chats and messages")
 	emptyTester.Type("zzz")
 	emptyTester.Frame()
-	empty.assertTexts(emptyTester, "No matching sessions")
+	empty.assertTexts(emptyTester, "No matches")
 }
 
 // TestSidebarConfigLabelOverridesSurviveEnglish pins that explicit assembly

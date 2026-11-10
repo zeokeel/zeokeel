@@ -221,3 +221,35 @@ func ReasoningMarkdown(t *design.Tokens, size float32) *markdown.Options {
 		Reveal:     &markdown.Reveal{Unit: markdown.AtOnce, Fade: -1},
 	}
 }
+
+// MarkdownDoc renders a document inside a narrow panel — the inspector's file
+// and artifact previews. The chat's Markdown defaults put an H1 at ~22 DIP,
+// larger than a settings page's 20 DIP title while the column is only 320 DIP
+// wide (V16). This theme keeps the body on the TypeXS step (13 DIP) and scales
+// the headings off it, so the document stays subordinate to the screen title.
+func MarkdownDoc(t *design.Tokens, size float32) *markdown.Options {
+	if size <= 0 {
+		size, _, _ = t.Metrics(design.TypeXS)
+	}
+	theme := markdown.DefaultTheme(t.Theme())
+	theme.FontSize = size
+	theme.Text = t.LabelSecondary
+	theme.Muted = t.LabelTertiary
+	theme.Strong = t.LabelPrimary
+	theme.Code = t.LabelSecondary
+	theme.QuoteText = t.LabelTertiary
+	theme.BlockSpacing = 0.6
+	sizes := [6]float32{1.15, 1.08, 1.0, 0.95, 0.9, 0.85}
+	for index := range theme.Headings {
+		theme.Headings[index].Size = sizes[index]
+		theme.Headings[index].Weight = 600
+		theme.Headings[index].Color = t.LabelSecondary
+	}
+	theme.Headings[0].Color = t.LabelPrimary
+	theme.Headings[5].Color = t.LabelTertiary
+	return &markdown.Options{
+		Theme:      theme,
+		Extensions: parser.Default,
+		Reveal:     &markdown.Reveal{Unit: markdown.AtOnce, Fade: -1},
+	}
+}

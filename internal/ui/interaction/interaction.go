@@ -356,12 +356,12 @@ func artifactPanel(c *ui.Context, runtime contracts.UIRuntime, st *state, artifa
 	design.Apply(ui.Column(c).Width(design.DialogWidthL).Gap(design.Space4), func(el ui.Element) ui.Element {
 		return el.PaddingX(design.Space6).PaddingY(design.Space2)
 	}).Children(func() {
-		ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(design.Space2).Children(func() {
-			ui.Icon(c, icons.Folder()).Size(design.Space5, design.Space5).TextColor(t.Accent)
-			// The artifact preview is not one of the S4/S5/S6 entry components;
-			// keep its existing heading weight (the old baseline entry covers it).
-			design.Apply(ui.Text(c, title), t.Font(design.TypeL)).FontWeight(600).
-				TextColor(t.LabelPrimary)
+		uikit.DialogHeader(c, uikit.DialogHeaderOptions{
+			Key:        "interaction.artifact.header",
+			Icon:       icons.Folder(),
+			Title:      title,
+			CloseLabel: st.tr("关闭", "Close"),
+			OnClose:    close,
 		})
 		body := strings.TrimSpace(artifact.Body)
 		if body == "" {

@@ -57,10 +57,9 @@ func TestChatModeSelectorEndToEnd(t *testing.T) {
 	tester := ui.NewTester(uiRoot.View, 1280, 800)
 	tester.Frame()
 
-	// Initial: standard mode; the composer's single session menu carries the
-	// default workspace permission context, and no mode badge (or stale menu
-	// copy) is left in the header.
-	if !tester.HasText("工作区可写") {
+	// Initial: standard mode; the chip keeps the stable destination label
+	// (会话设置) and no mode word leaks outside the menu (R17).
+	if !tester.HasText("会话设置") {
 		t.Fatalf("default session menu label missing; texts = %v", tester.Texts())
 	}
 	if tester.HasText("精简模式") || tester.HasText("创作模式") || tester.HasText("计划模式") {
@@ -68,13 +67,13 @@ func TestChatModeSelectorEndToEnd(t *testing.T) {
 	}
 
 	// Switch to 精简: writes chat.mode=minimal, keeps agent.mode=normal, and the
-	// composer chip becomes the single mode indicator.
-	clickMode(t, tester, "工作区可写", "精简模式")
+	// menu's 对话模式 trailing value names the mode while the chip stays fixed.
+	clickMode(t, tester, "会话设置", "精简模式")
 	if tester.HasText("精简模式") {
-		t.Fatalf("the removed header mode badge is still rendered; texts = %v", tester.Texts())
+		t.Fatalf("the mode word leaked outside the session menu; texts = %v", tester.Texts())
 	}
-	if !tester.HasText("精简") {
-		t.Fatalf("composer mode chip did not switch to 精简; texts = %v", tester.Texts())
+	if !tester.HasText("会话设置") {
+		t.Fatalf("composer session chip lost its stable label; texts = %v", tester.Texts())
 	}
 	if got := settings.Get(contracts.SettingChatMode, ""); got != contracts.ChatModeMinimal {
 		t.Fatalf("chat.mode after choosing 精简 = %q, want minimal", got)
@@ -82,17 +81,12 @@ func TestChatModeSelectorEndToEnd(t *testing.T) {
 	if got := settings.Get(contracts.SettingAgentMode, ""); got != contracts.AgentModeNormal {
 		t.Fatalf("agent.mode after choosing 精简 = %q, want normal", got)
 	}
-	if !tester.HasText("精简") {
-		t.Fatalf("composer selector label did not switch to 精简; texts = %v", tester.Texts())
-	}
+	assertModeTrailing(t, tester, "会话设置", "精简模式")
 
-	// Switch to 创作: writes chat.mode=creator and the chip follows.
-	clickMode(t, tester, "精简", "创作模式")
+	// Switch to 创作: writes chat.mode=creator and the trailing value follows.
+	clickMode(t, tester, "会话设置", "创作模式")
 	if tester.HasText("创作模式") || tester.HasText("精简模式") {
-		t.Fatalf("a mode badge remains after choosing 创作; texts = %v", tester.Texts())
-	}
-	if !tester.HasText("创作") {
-		t.Fatalf("composer mode chip did not switch to 创作; texts = %v", tester.Texts())
+		t.Fatalf("a mode word remains outside the session menu; texts = %v", tester.Texts())
 	}
 	if got := settings.Get(contracts.SettingChatMode, ""); got != contracts.ChatModeCreator {
 		t.Fatalf("chat.mode after choosing 创作 = %q, want creator", got)
@@ -100,9 +94,10 @@ func TestChatModeSelectorEndToEnd(t *testing.T) {
 	if got := settings.Get(contracts.SettingAgentMode, ""); got != contracts.AgentModeNormal {
 		t.Fatalf("agent.mode after choosing 创作 = %q, want normal", got)
 	}
+	assertModeTrailing(t, tester, "会话设置", "创作模式")
 
-	// Back to 普通: chat.mode returns to standard and the chip returns.
-	clickMode(t, tester, "创作", "普通模式")
+	// Back to 普通: chat.mode returns to standard and no mode trailing remains.
+	clickMode(t, tester, "会话设置", "普通模式")
 	if tester.HasText("精简") || tester.HasText("创作") {
 		t.Fatalf("a mode indicator remains after switching back to 普通; texts = %v", tester.Texts())
 	}
@@ -112,9 +107,33 @@ func TestChatModeSelectorEndToEnd(t *testing.T) {
 	if got := settings.Get(contracts.SettingAgentMode, ""); got != contracts.AgentModeNormal {
 		t.Fatalf("agent.mode after choosing 普通 = %q, want normal", got)
 	}
-	if !tester.HasText("工作区可写") {
-		t.Fatalf("composer selector did not return to the default workspace label; texts = %v", tester.Texts())
+	// The normal mode's trailing value is its short name (普通); the option row
+	// spells 普通模式, so the trailing node appears once.
+	if err := tester.Click("会话设置"); err != nil {
+		t.Fatalf("open session menu: %v; texts = %v", err, tester.Texts())
 	}
+	tester.Frame()
+	if got := exactLabels(tester, "普通"); got != 1 {
+		t.Fatalf("normal mode trailing appears %d times, want 1; texts = %v", got, tester.Texts())
+	}
+	tester.Key(0, ui.KeyEscape)
+	tester.Frame()
+}
+
+// assertModeTrailing opens the session menu and asserts the mode group's
+// trailing value names want (the trailing node once plus the option's label and
+// text nodes, three occurrences; a non-current mode has only its option's two).
+func assertModeTrailing(t *testing.T, tester *ui.Tester, selector, want string) {
+	t.Helper()
+	if err := tester.Click(selector); err != nil {
+		t.Fatalf("open session menu: %v; texts = %v", err, tester.Texts())
+	}
+	tester.Frame()
+	if got := exactLabels(tester, want); got != 3 {
+		t.Fatalf("mode trailing %q appears %d times, want 3; texts = %v", want, got, tester.Texts())
+	}
+	tester.Key(0, ui.KeyEscape)
+	tester.Frame()
 }
 
 // clickMode opens the mode popover from the given selector label and chooses one

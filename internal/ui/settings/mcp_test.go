@@ -53,10 +53,11 @@ func TestMCPPageShowsAndRemovesServers(t *testing.T) {
 	openMCPPage(t, h, tester)
 
 	h.assertTexts(tester, "files", "http://127.0.0.1:9000/mcp",
-		"web", "https://mcp.example.com/mcp", "移除")
+		"web", "https://mcp.example.com/mcp", "服务器操作")
 
 	// Removing the first row asks for confirmation, then writes the remaining
 	// server back as JSON.
+	h.click(tester, "服务器操作")
 	h.click(tester, "移除")
 	h.click(tester, "移除服务器")
 	want := `[{"name":"web","url":"https://mcp.example.com/mcp"}]`
@@ -168,8 +169,8 @@ func TestMCPPageEnglishCopy(t *testing.T) {
 	h.click(tester, "MCP")
 	h.assertTexts(tester,
 		"Connect MCP servers over Streamable HTTP or stdio; changes apply after a restart (stdio subprocesses start on launch).",
-		"MCP servers", "Add server", "Name", "URL", "Add", "Remove")
-	h.assertNoTexts(tester, "添加服务器", "移除")
+		"MCP servers", "Add server", "Name", "URL", "Add", "Server actions")
+	h.assertNoTexts(tester, "添加服务器", "服务器操作")
 }
 
 // --- workspace mcp.json opt-in ---------------------------------------------

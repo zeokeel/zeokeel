@@ -244,16 +244,17 @@ func buildDataPrivacyPage(c *ui.Context, t *design.Tokens, kctx cordis.Context,
 			message := fmt.Sprintf(localized(locale,
 				"将删除全部 %d 个会话，此操作无法撤销。",
 				"This deletes all %d sessions and cannot be undone."), len(sessions))
-			switch ui.AlertDialog(c, &st.confirmClear,
-				localized(locale, "清除全部会话", "Clear all sessions"), message,
-				localized(locale, "取消", "Cancel"),
-				localized(locale, "确认清除", "Confirm clear")) {
-			case 1:
-				clearDataSessions(chat, st, locale)
-				// Only the executed action needs a frame: the dialog's own open
-				// flag already rebuilt the frame when it was dismissed.
-				c.Invalidate()
-			}
+			uikit.ConfirmDanger(c, &st.confirmClear, uikit.ConfirmDangerOptions{
+				Key:     "data.clear-sessions",
+				Title:   localized(locale, "清除全部会话", "Clear all sessions"),
+				Message: message,
+				Confirm: localized(locale, "确认清除", "Confirm clear"),
+				Cancel:  localized(locale, "取消", "Cancel"),
+				OnConfirm: func() {
+					clearDataSessions(chat, st, locale)
+					c.Invalidate()
+				},
+			})
 		}
 	})
 }
