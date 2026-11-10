@@ -35,6 +35,9 @@ func startReasoningScreen(t *testing.T, reasoning string, streaming bool) *reaso
 			{ID: "u1", Role: contracts.ChatRoleUser, Text: "问题"},
 			{ID: "a1", Role: contracts.ChatRoleAssistant, Text: "", Reasoning: reasoning, Streaming: streaming},
 		}}, true)
+	if err := h.settings.Set(contracts.SettingWorkStepsMode, contracts.WorkStepsVerbose); err != nil {
+		t.Fatalf("set work-steps mode: %v", err)
+	}
 	provide(t, h.ctx, contracts.KeyChat, contracts.ChatService(chat))
 	activate(t, h.ctx, sessionui.Module(), sessionui.Config{})
 	h.push(sessionui.ScreenID)

@@ -93,6 +93,8 @@ func SessionThread(c *ui.Context, o SessionThreadOptions)
 
 **禁止**：`Scroll`+循环构建消息；手写"比较 scrollHeight"贴底；每帧重建全部消息；给每条消息套卡片；消息动作常驻三个及以上按钮或独占 32px 动作行（必须收进元信息行的单一 ⋯）；用量以原始长数字展示（必须紧凑单位 K/M/B）。
 
+**工作步骤展示（2026-11-10，DSH 对齐）**：transcript 的过程显示由两个设置控制——`ui.workSteps.mode`（简洁 compact / **标准 standard（默认）** / 详细 detailed / 完全展开 verbose）与 `ui.workSteps.collapse`（**回答结束后 completion（默认）** / 下次有新消息时 next-input）。运行中：标准/简洁只渲染一行原地更新的工作步骤（活动图标 + 状态词 + 标准档的实时细节 + 用时；状态词按工具族：正在分析请求/正在读取文件/正在运行命令/正在搜索网页/正在协调子智能体/等待你的操作…），不把每个工具行铺进 transcript；详细/完全展开保留完整实时时间线。完成后：简洁/标准/详细把可折叠回合收成一条摘要（有工具或有思考才折叠），完全展开永不折叠、不分组并直接显示完整时间线；next-input 时当前最新一轮完成后保持展开，下一条用户消息到来后回落折叠，用户手动展开/折叠的选择优先。设置入口在「设置 → 行为 → 工作步骤」；旧值/空值按标准 + 回答结束后处理。
+
 **同一回合多步过程（2026-11-10）**：连续的、已结束的助手步骤（每一步带工具调用、无错误）合并为**一条**过程摘要行——「过程 · 思考 · 合计工具数」，默认折叠；折叠时只显示**最终结果**（最后一步的回复与决策卡），中间步骤的回复/工具行收进折叠区；展开恢复每一步的完整时间线。窗口行按回合分组（`uikit.SessionThread.SameTurn/GroupRow`），a11y 行名用步骤范围（如「助手 1–3」）。最后一条已结束回复的正文底部有一个「复制」按钮（复制该回复文本，与 ⋯ 的「复制消息」一致）。
 
 **当前实现**：`internal/ui/session/view.go` `buildChatPane`（List + ListState + FollowEnd + HoldPlace）与 `buildAssistantMessage`/`buildMessage`/过程折叠/元信息行。过程带：思考与非决策工具行以 16px 标记列（sparkles/工具分类图标/运行中 Spinner）+ 动作名 + 状态 + `·` 预览 + 内联 chevron 组成的一条缩进行距活动带；完成且过程 ≥2 行时折叠为一行摘要（`过程 · 思考 · N 个工具调用 · 用时`，流式展开），展开恢复完整时间线；决策卡（ask_user/plan_review/exit_plan_mode）不受折叠影响。帧测试：`internal/ui/session/transcript_window_test.go:32`（虚拟化）、`scroll_follow_test.go:35,65`（跟随）、`interaction_batch_a_test.go:123`（streaming 隐藏动作）、`chrome_b3_test.go`（B3 顶栏/⋯ 会话操作/目标 dock/审批 banner 槽/Esc 审批优先）。
@@ -390,7 +392,7 @@ func ComposerShell(c *ui.Context, o ComposerOptions)
 
 ### S8 RunStatus（流式 / 队列 / 停止 / 用量 / 恢复）
 
-**职责**：把 Agent 的运行状态如实、克制地表达出来：正在生成、排队中、可停止、失败可重试、用量可查；不伪造进度、不推动布局。运行中需要审批时，输入框上方的内联审批卡是唯一阻断点（不弹模态、不遮 transcript）；通知类消息走右上角 toast（B3 顶栏下方，最多 2 条），不遮挡输入与顶栏动作。
+**职责**：把 Agent 的运行状态如实、克制地表达出来：正在生成、排队中、可停止、失败可重试、用量可查；不伪造进度、不推动布局。运行中的过程由 S1 的「工作步骤」单行/时间线呈现（默认标准模式一行原地更新，不铺完整时间线）；运行中需要审批时，输入框上方的内联审批卡是唯一阻断点（不弹模态、不遮 transcript）；通知类消息走右上角 toast（B3 顶栏下方，最多 2 条），不遮挡输入与顶栏动作。
 
 **数据模型**：`running`、`queued []string`、`usage`（token 计数）、`lastError`、`retryable`。
 

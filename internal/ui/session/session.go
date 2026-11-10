@@ -578,6 +578,37 @@ func Module() *module.Descriptor[Config] {
 		WithName("ZeoKeel conversation screen")
 }
 
+// workStepsPolicy is the transcript's work-steps presentation for one frame:
+// how much of a turn's steps show while it runs and when a finished turn folds.
+// It is read from the optional settings store every frame, so a settings change
+// applies on the next frame without a restart.
+type workStepsPolicy struct {
+	// mode is one of contracts.WorkStepsCompact/Standard/Detailed/Verbose.
+	mode string
+	// collapse is contracts.WorkStepsCollapseCompletion (fold when the turn
+	// finishes) or contracts.WorkStepsCollapseNextInput (keep the latest turn
+	// open until the next user message).
+	collapse string
+}
+
+// workStepsPolicyFor resolves the current work-steps policy. Empty, unknown or
+// missing settings normalize to the product default: standard mode and folding
+// on completion (contracts.NormalizeWorkSteps*).
+func (st *state) workStepsPolicyFor() workStepsPolicy {
+	policy := workStepsPolicy{
+		mode:     contracts.WorkStepsStandard,
+		collapse: contracts.WorkStepsCollapseCompletion,
+	}
+	if st == nil || st.settings == nil {
+		return policy
+	}
+	policy.mode = contracts.NormalizeWorkStepsMode(
+		st.settings.Get(contracts.SettingWorkStepsMode, ""))
+	policy.collapse = contracts.NormalizeWorkStepsCollapse(
+		st.settings.Get(contracts.SettingWorkStepsCollapse, ""))
+	return policy
+}
+
 // permissionMode reads the effective agent permission mode from the settings
 // store: exactly read-only, workspace (the default) or full. Unset, unknown and
 // retired "ask"/"never" values normalize through contracts.NormalizePermissionMode

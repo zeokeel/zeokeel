@@ -94,6 +94,19 @@ func TestP1ApprovalToolsAndPersistence(t *testing.T) {
 		t.Fatalf("Push(session): %v", err)
 	}
 	tester.Frame()
+	// The default (standard) work-steps mode folds a finished turn's process
+	// into one summary row: expand it to read the tool row.
+	if !tester.HasText("团队任务") {
+		for _, label := range tester.Texts() {
+			if strings.HasPrefix(label, "过程 ·") {
+				if err := tester.Click(label); err != nil {
+					t.Fatalf("expand process summary %q: %v; texts = %v", label, err, tester.Texts())
+				}
+				tester.Frame()
+				break
+			}
+		}
+	}
 	// The transcript shows the friendly localized tool name; the raw protocol id
 	// stays in the row's tooltip/accessible description.
 	if !tester.HasText("团队任务") {

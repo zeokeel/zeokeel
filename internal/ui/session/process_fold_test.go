@@ -103,10 +103,11 @@ func TestAssistantProcessFoldedKeepsDecisionCards(t *testing.T) {
 	}
 }
 
-// TestAssistantProcessStreamingStaysExpanded covers the live turn: it never
-// folds, the reasoning is open and streaming, the tool row reads inline and the
-// meta row is absent.
-func TestAssistantProcessStreamingStaysExpanded(t *testing.T) {
+// TestAssistantProcessStreamingStandardShowsOneLine covers the default live
+// shape: a streaming turn is one activity line (status word + live detail) with
+// the streaming prose under it — no timeline, no reasoning disclosure, no meta
+// row and no generating spinner (the line is the indicator).
+func TestAssistantProcessStreamingStandardShowsOneLine(t *testing.T) {
 	message := contracts.ChatMessage{
 		ID: "m1", Role: contracts.ChatRoleAssistant, Streaming: true,
 		Text:      "正在写",
@@ -116,33 +117,37 @@ func TestAssistantProcessStreamingStaysExpanded(t *testing.T) {
 	h := newHarness(t, foldChat(message))
 	tester := h.tester()
 
-	h.assertTexts(tester, "思考中…", "先想一想", "运行命令", "正在写", "生成中")
-	if tester.HasText("过程 ·") {
-		t.Fatalf("streaming turn folded its process; texts = %v", tester.Texts())
-	}
+	h.assertTexts(tester, "正在运行命令", "go build", "正在写")
+	h.assertNoTexts(tester, "思考中…", "生成中", "过程 ·")
+	h.assertNoExactTexts(tester, "运行命令", "运行中", "先想一想")
 	if rect, ok := tester.Find("消息操作"); ok {
 		t.Fatalf("streaming turn has a meta row at %+v", rect)
 	}
 }
 
-// TestAssistantProcessSingleToolStaysInline covers the non-foldable shape: one
-// tool with no reasoning keeps its row inline instead of a one-item summary.
-func TestAssistantProcessSingleToolStaysInline(t *testing.T) {
+// TestAssistantProcessSingleToolFolds covers the broadened foldable rule: a
+// finished turn with one tool call now folds into its one-item summary instead
+// of leaving the card inline; the row is one click away.
+func TestAssistantProcessSingleToolFolds(t *testing.T) {
 	message := contracts.ChatMessage{
 		ID: "m1", Role: contracts.ChatRoleAssistant, Text: "查到了",
 		Tools: []contracts.ToolCall{{ID: "t1", Name: "read_file", Status: "ok", Summary: "main.go"}},
 	}
 	h := newHarness(t, foldChat(message))
 	tester := h.tester()
+	summary := "过程 · 1 个工具调用"
+	h.assertTexts(tester, summary, "查到了")
+	h.assertNoTexts(tester, "读取文件")
+
+	h.click(tester, summary)
 	h.assertTexts(tester, "读取文件", "查到了")
-	if tester.HasText("过程 ·") {
-		t.Fatalf("single-tool turn folded its process; texts = %v", tester.Texts())
-	}
 }
 
 // TestActivityBandIndentsProcessRows covers the band layout: process rows sit
 // Space4 inside the reading column while the reply prose stays at its left edge,
-// and the English fold summary uses the same parts.
+// and the running tool row spells its status out beside the action name. verbose
+// keeps the streaming timeline visible (the default single-line mode has no
+// band rows to indent).
 func TestActivityBandIndentsProcessRows(t *testing.T) {
 	message := contracts.ChatMessage{
 		ID: "m1", Role: contracts.ChatRoleAssistant, Streaming: true,
@@ -150,7 +155,7 @@ func TestActivityBandIndentsProcessRows(t *testing.T) {
 		Reasoning: "想一下",
 		Tools:     []contracts.ToolCall{{ID: "t1", Name: "bash", Status: "running", Summary: "go build"}},
 	}
-	h := newHarness(t, foldChat(message))
+	h := newVerboseWorkStepsHarness(t, foldChat(message))
 	tester := h.tester()
 
 	body, ok1 := tester.Find("正文段落")

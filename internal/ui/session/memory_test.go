@@ -372,17 +372,19 @@ func TestStreamingAssistantMarkdownRendering(t *testing.T) {
 			Role:      contracts.ChatRoleAssistant,
 			Text:      "正在分析 **认证模块** 的实现",
 			Streaming: true,
-			CreatedAt: time.Unix(1700000001, 0),
 		}},
 	}, true)
 	h := newHarness(t, chat)
 	tester := h.tester()
 	texts := joinedTexts(tester)
-	for _, want := range []string{"正在分析", "认证模块", "生成中"} {
+	// The default standard work-steps mode shows the live activity line, and the
+	// streaming prose under it keeps rendering Markdown.
+	for _, want := range []string{"正在分析请求", "正在分析", "认证模块"} {
 		if !strings.Contains(texts, want) {
 			t.Fatalf("streaming frame does not show %q; texts = %v", want, tester.Texts())
 		}
 	}
+	h.assertNoTexts(tester, "生成中")
 	if strings.Contains(texts, "**认证模块**") {
 		t.Fatalf("streaming markdown markers leaked: %v", tester.Texts())
 	}

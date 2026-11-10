@@ -680,3 +680,29 @@ design-check 6/6（raw metric 45 ≤ 51）/mygo vet/`go test ./...`（45s）/`-r
 - 两个 workflow 的 `runs-on` 从 `ubuntu-latest` 固定为 **`ubuntu-24.04`**：GitHub 通告
   ubuntu-latest 将于 2026-10 迁移到 Ubuntu 26，产品快照/工具链对运行镜像敏感，固定 LTS 避免
   CI 无声漂移（升级镜像需单独测试后修改）。
+
+## 0.2.3（2026-11-10：工作步骤对齐 DSH，默认标准 + 回答结束后折叠）
+
+用户反馈：运行中每个读取文件/执行命令都实时展开，整段内容不断滚动；DSH 的「工作步骤」默认是标准，
+运行中只有一行原地更新，完成后折叠。设计评审通过：方案 A（transcript 内单行）+ 完整四档 + 收起时机。
+
+- **设置（对齐 DSH）**：新增 `ui.workSteps.mode`（compact / **standard（默认）** / detailed / verbose）与
+  `ui.workSteps.collapse`（**completion（默认）** / next-input），设置 → 行为页新增可见「工作步骤」区
+  （工作步骤展示 4 档 Segmented + 每档说明；工作步骤收起时机 2 档），写行立即生效；空/非法值归一为默认。
+- **运行中**：标准/简洁渲染一行实时步骤（活动图标 + 状态词 + 标准档实时细节 + 用时；状态词按工具族：
+  正在分析请求/正在读取文件/正在运行命令/正在搜索网页/正在协调子智能体/等待你的操作…；用时在满 1s 后出现），
+  不再把思考披露和每个工具行铺进 transcript；流式正文与决策卡（ask_user/plan_review/exit_plan_mode）仍显示。
+  详细/完全展开保留完整实时时间线。旧行为 = 完全展开档。
+- **完成后**：简洁/标准/详细把可折叠回合收成一条摘要（有工具或有思考才折叠；纯思考摘要为「过程 · 思考」）；
+  完全展开永不折叠、不分组、直接显示完整时间线；next-input 时最新一轮完成后保持展开，下一条用户消息到来后回落折叠；
+  用户手动展开/折叠始终优先。同一回合多步合并（沿用 `SameTurn/GroupRow`）在非 verbose 档保留。
+- **测试**：session 新增 `worksteps_test.go`（四档流式/完成态、活动词 19 个 tool id、中英、用时省略、next-input、
+  显式优先、分组/不分组、未知值归一、逐帧读设置）；settings 新增 `work_steps_test.go`（默认/写入/非法值/
+  写失败/英文/区块顺序）；uimodtest/regression 的旧流式断言改为展开摘要或 verbose 设置。
+- **验证**：`scripts/verify.sh --no-smoke` **10/10 PASS**：gofmt/build/vet/designlint 0 new/design-check 6/6
+  （raw metric 45 ≤ 51）/mygo vet/`go test ./...`（43s，47 包）/`-race`（316s）/regression
+  **276 PASS / 0 SKIP / 0 FAIL**/ui-snapshot **97 steps / 95 PNGs**。
+- **快照（人工查看）**：`.cache/ui-conformance-worksteps3/p1-approval.png`（运行中单行「正在协调子智能体」，
+  不再铺时间线）、`p2-behavior.png`（设置 → 行为 → 工作步骤：标准/回答结束后默认选中）、
+  `p2-process-fold.png`（完成后的摘要 + 元信息 + 复制）。
+- **文档同步**：AGENT-SURFACES S1（工作步骤展示）与 S8、COVERAGE 消息级操作、ui-drive 行为页检查。

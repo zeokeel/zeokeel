@@ -1,11 +1,12 @@
 package settings
 
-// Behavior page: the default agent permission mode (daily) plus the page's
-// lower-frequency conversation options behind one collapsed disclosure. Every
-// control applies immediately (the page has no save button): the permission menu
-// writes the shared agent.permission row the approvals gate reads dynamically,
-// the switches persist on change and the workspace instruction file saves as it
-// is edited.
+// Behavior page: the default agent permission mode (daily), the transcript's
+// work-details presentation (DSH-aligned), and the page's lower-frequency
+// conversation options behind one collapsed disclosure. Every control applies
+// immediately (the page has no save button): the permission menu writes the
+// shared agent.permission row the approvals gate reads dynamically, the work
+// details segmented controls write ui.workSteps.*, the switches persist on change
+// and the workspace instruction file saves as it is edited.
 
 import (
 	"strconv"
@@ -57,6 +58,113 @@ var behaviorPermissions = []behaviorPermission{
 	},
 }
 
+// workStepsModeChoice is one work-details presentation level (DSH-aligned).
+type workStepsModeChoice struct {
+	value     string
+	zh        string
+	en        string
+	meaningZh string
+	meaningEn string
+}
+
+// workStepsModeChoices lists the four display levels in segmented order:
+// compact / standard (default) / detailed / verbose.
+var workStepsModeChoices = []workStepsModeChoice{
+	{
+		value: contracts.WorkStepsCompact, zh: "简洁", en: "Compact",
+		meaningZh: "一行状态，不带工具细节",
+		meaningEn: "One status line, no tool details",
+	},
+	{
+		value: contracts.WorkStepsStandard, zh: "标准", en: "Standard",
+		meaningZh: "一行状态 + 实时细节，回答结束后折叠",
+		meaningEn: "One status line + live details, folded after the answer",
+	},
+	{
+		value: contracts.WorkStepsDetailed, zh: "详细", en: "Detailed",
+		meaningZh: "运行中逐步显示工具调用",
+		meaningEn: "Tool calls shown step by step while running",
+	},
+	{
+		value: contracts.WorkStepsVerbose, zh: "完全展开", en: "Verbose",
+		meaningZh: "不折叠不分组，全部展开",
+		meaningEn: "Everything expanded, never folded or grouped",
+	},
+}
+
+// workStepsCollapseChoice is one work-details collapse timing.
+type workStepsCollapseChoice struct {
+	value string
+	zh    string
+	en    string
+}
+
+// workStepsCollapseChoices lists the two collapse timings in segmented order:
+// completion (default) / next-input.
+var workStepsCollapseChoices = []workStepsCollapseChoice{
+	{
+		value: contracts.WorkStepsCollapseCompletion, zh: "回答结束后", en: "After the answer",
+	},
+	{
+		value: contracts.WorkStepsCollapseNextInput, zh: "下次有新消息时", en: "On the next message",
+	},
+}
+
+// workStepsModeIndex maps a normalized mode to its segmented index.
+func workStepsModeIndex(mode string) int {
+	for index, choice := range workStepsModeChoices {
+		if choice.value == mode {
+			return index
+		}
+	}
+	return 1 // standard
+}
+
+// workStepsModeValue maps a segmented index back to the stored mode.
+func workStepsModeValue(index int) string {
+	if index < 0 || index >= len(workStepsModeChoices) {
+		return contracts.WorkStepsStandard
+	}
+	return workStepsModeChoices[index].value
+}
+
+// workStepsCollapseIndex maps a normalized collapse timing to its segmented
+// index.
+func workStepsCollapseIndex(value string) int {
+	for index, choice := range workStepsCollapseChoices {
+		if choice.value == value {
+			return index
+		}
+	}
+	return 0 // completion
+}
+
+// workStepsCollapseValue maps a segmented index back to the stored timing.
+func workStepsCollapseValue(index int) string {
+	if index < 0 || index >= len(workStepsCollapseChoices) {
+		return contracts.WorkStepsCollapseCompletion
+	}
+	return workStepsCollapseChoices[index].value
+}
+
+// workStepsModeLabels renders the four segmented labels for the current locale.
+func workStepsModeLabels(locale contracts.LocaleService) []string {
+	labels := make([]string, 0, len(workStepsModeChoices))
+	for _, choice := range workStepsModeChoices {
+		labels = append(labels, localized(locale, choice.zh, choice.en))
+	}
+	return labels
+}
+
+// workStepsCollapseLabels renders the two collapse-timing labels.
+func workStepsCollapseLabels(locale contracts.LocaleService) []string {
+	labels := make([]string, 0, len(workStepsCollapseChoices))
+	for _, choice := range workStepsCollapseChoices {
+		labels = append(labels, localized(locale, choice.zh, choice.en))
+	}
+	return labels
+}
+
 // behaviorState is the page's status line (UI thread only).
 type behaviorState struct {
 	status    string
@@ -90,22 +198,30 @@ func behaviorPermissionLabel(locale contracts.LocaleService, mode string) string
 	return localized(locale, "工作区可写", "Workspace-write")
 }
 
+// saveBehaviorSetting persists one immediate-apply settings row and reports the
+// result in the page's shared status line; the behavior page has no save button.
+func saveBehaviorSetting(st *behaviorState, runtime contracts.UIRuntime,
+	store contracts.SettingsService, locale contracts.LocaleService, key, value string) {
+	if err := store.Set(key, value); err != nil {
+		st.status = localized(locale, "保存失败：", "Save failed: ") + err.Error()
+		st.statusErr = true
+	} else {
+		st.status = localized(locale, "已保存", "Saved")
+		st.statusErr = false
+	}
+	runtime.Invalidate()
+}
+
 // buildBehaviorPage renders the default-permission settings. Every control on
 // the page applies at once (the page has no save button): the permission menu
-// writes the shared agent row, the switches persist on change and the workspace
-// instruction file saves as it is edited.
+// writes the shared agent row, the work-details segmented controls write
+// ui.workSteps.*, the switches persist on change and the workspace instruction
+// file saves as it is edited.
 func buildBehaviorPage(c *ui.Context, runtime contracts.UIRuntime,
 	store contracts.SettingsService, locale contracts.LocaleService, st *behaviorState) {
 	t := design.Of(c)
 	applyBool := func(key string, value bool) {
-		if err := store.Set(key, strconv.FormatBool(value)); err != nil {
-			st.status = localized(locale, "保存失败：", "Save failed: ") + err.Error()
-			st.statusErr = true
-		} else {
-			st.status = localized(locale, "已保存", "Saved")
-			st.statusErr = false
-		}
-		runtime.Invalidate()
+		saveBehaviorSetting(st, runtime, store, locale, key, strconv.FormatBool(value))
 	}
 	ui.Column(c).FillWidth().Gap(design.Space4).Children(func() {
 		uikit.PageHeader(c, localized(locale, "行为", "Behavior"), localized(locale,
@@ -154,11 +270,52 @@ func buildBehaviorPage(c *ui.Context, runtime contracts.UIRuntime,
 				"Changes apply immediately (shared with the session toolbar).")),
 				t.TextMuted(design.TypeXXS)).MaxLines(2)
 		})
+		// Work details: how much of a turn's tool-call steps the transcript shows
+		// and when finished steps fold (DSH-aligned). This stays visible next to
+		// the daily permission choice; it is a display preference, not a
+		// low-frequency knob.
+		uikit.Section(c, localized(locale, "工作步骤", "Work details"), func(*ui.Context) {
+			design.Apply(ui.Text(c, localized(locale,
+				"选择希望看到多少工具调用细节。默认：标准。",
+				"Choose how much tool-call detail to see. Default: standard.")),
+				t.TextMuted(design.TypeXS)).MaxLines(2)
+			modeIndex := workStepsModeIndex(contracts.NormalizeWorkStepsMode(
+				store.Get(contracts.SettingWorkStepsMode, "")))
+			ui.Field(c, localized(locale, "工作步骤展示", "Work details"), func() {
+				segmented := ui.Segmented(c, &modeIndex, workStepsModeLabels(locale)...).
+					Label(localized(locale, "工作步骤展示", "Work details"))
+				if segmented.Changed() {
+					saveBehaviorSetting(st, runtime, store, locale,
+						contracts.SettingWorkStepsMode, workStepsModeValue(modeIndex))
+				}
+			})
+			ui.Column(c).FillWidth().Gap(design.Space1).PaddingY(design.Space1).Children(func() {
+				for _, choice := range workStepsModeChoices {
+					uikit.Bullet(c, localized(locale, choice.zh, choice.en)+
+						localized(locale, "：", ": ")+localized(locale, choice.meaningZh, choice.meaningEn))
+				}
+			})
+			collapseIndex := workStepsCollapseIndex(contracts.NormalizeWorkStepsCollapse(
+				store.Get(contracts.SettingWorkStepsCollapse, "")))
+			ui.Field(c, localized(locale, "工作步骤收起时机", "When to collapse work details"),
+				func() {
+					segmented := ui.Segmented(c, &collapseIndex,
+						workStepsCollapseLabels(locale)...).
+						Label(localized(locale, "工作步骤收起时机", "When to collapse work details"))
+					if segmented.Changed() {
+						saveBehaviorSetting(st, runtime, store, locale,
+							contracts.SettingWorkStepsCollapse, workStepsCollapseValue(collapseIndex))
+					}
+				}).Description(localized(locale,
+				"「回答结束后」在本次回答完成时收起；「下次有新消息时」保留到新消息出现。",
+				"\"After the answer\" folds when this answer completes; \"On the next message\" keeps them open until the next message arrives."))
+		})
 		// Progressive disclosure (settings-complexity audit P4): only the daily
-		// permission choice stays visible; the page's other conversation options
-		// live behind one native disclosure, collapsed by default, so the page
-		// reads as one clear setting. A muted summary keeps the collapsed state
-		// informative without repeating the controls.
+		// permission choice and the work-details preference stay visible; the
+		// page's other conversation options live behind one native disclosure,
+		// collapsed by default, so the page reads as one clear setting. A muted
+		// summary keeps the collapsed state informative without repeating the
+		// controls.
 		ui.Collapsible(c, localized(locale, "更多对话设置", "More conversation settings"), &st.moreOpen, func() {
 			ui.Column(c).FillWidth().Gap(design.Space4).Children(func() {
 				uikit.Section(c, localized(locale, "运行中发送", "Sending while running"), func(*ui.Context) {
@@ -204,7 +361,9 @@ func buildBehaviorPage(c *ui.Context, runtime contracts.UIRuntime,
 								runtime.Invalidate()
 							}
 						}
-					}).Tooltip(localized(locale, "选择对话文字大小", "Choose the conversation text size"))
+					}).Label(localized(locale, "消息字号：", "Text size: ") +
+						chatFontSizeLabel(locale, current)).
+						Tooltip(localized(locale, "选择对话文字大小", "Choose the conversation text size"))
 				})
 				uikit.Section(c, localized(locale, "工作区指令", "Workspace instructions"), func(*ui.Context) {
 					if !st.agentsFileLoaded {

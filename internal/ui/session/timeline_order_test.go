@@ -36,7 +36,7 @@ func TestAssistantTimelineInterleavesTextAndToolCards(t *testing.T) {
 			{ID: "t1", Name: "bash", Status: "ok", Summary: "echo hi", TextOffset: len(before)},
 		},
 	}
-	h := newHarness(t, timelineChat(message))
+	h := newVerboseWorkStepsHarness(t, timelineChat(message))
 	tester := h.tester()
 
 	h.assertTexts(tester, before, after, "运行命令")
@@ -103,7 +103,7 @@ func TestAssistantTimelineLegacyMessagesKeepTextFirst(t *testing.T) {
 			{ID: "t1", Name: "bash", Status: "ok", Summary: "ls"},
 		},
 	}
-	h := newHarness(t, timelineChat(message))
+	h := newVerboseWorkStepsHarness(t, timelineChat(message))
 	tester := h.tester()
 	h.assertTexts(tester, "LEGACY-TEXT", "运行命令")
 	text, ok1 := tester.Find("LEGACY-TEXT")
@@ -163,7 +163,7 @@ func TestAssistantTimelineFlagFalseKeepsLegacyOrder(t *testing.T) {
 			{ID: "t1", Name: "bash", Status: "ok", TextOffset: len("LEGACY-TEXT")},
 		},
 	}
-	h := newHarness(t, timelineChat(message))
+	h := newVerboseWorkStepsHarness(t, timelineChat(message))
 	tester := h.tester()
 	h.assertTexts(tester, "LEGACY-TEXT", "TAIL", "运行命令")
 	text, ok1 := tester.Find("LEGACY-TEXT")
@@ -188,7 +188,7 @@ func TestShortToolResultRenderedOnce(t *testing.T) {
 			Summary: "line one\nline two with a fairly long result to preview", TextOffset: len("DONE"),
 		}},
 	}
-	h := newHarness(t, timelineChat(message))
+	h := newVerboseWorkStepsHarness(t, timelineChat(message))
 	tester := h.tester()
 	h.assertTexts(tester, "运行命令")
 	// The short result starts expanded (H15); the open panel is the one place

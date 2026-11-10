@@ -190,7 +190,7 @@ func TestFallbackToolRowShowsInputAndOutput(t *testing.T) {
 				}}},
 		},
 	}, true)
-	h := newHarness(t, chat)
+	h := newVerboseWorkStepsHarness(t, chat)
 	tester := h.tester()
 	h.assertTexts(tester, "mcp__srv__lookup", "输入", "输出", "query", "found needle in index.go")
 }
@@ -212,7 +212,7 @@ func TestToolCardCrossNavigation(t *testing.T) {
 				}}},
 		},
 	}, true)
-	h := newHarness(t, chat)
+	h := newVerboseWorkStepsHarness(t, chat)
 	teamRuns, _ := registerTeamCommands(t, h)
 	tester := h.tester()
 	h.assertTexts(tester, "在团队中查看")
@@ -257,7 +257,7 @@ func TestTrajectoryCardShowsInputOutput(t *testing.T) {
 				}}},
 		},
 	}, true)
-	h := newHarness(t, chat)
+	h := newVerboseWorkStepsHarness(t, chat)
 	tester := h.tester()
 	h.click(tester, "轨迹")
 	tester.Frame()

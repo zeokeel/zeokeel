@@ -916,6 +916,32 @@ func buildChatPane(
 	// instead). The Row slot knows the row's message ID, so the last-row check
 	// runs here once per frame.
 	_, hasRegenerator := chat.(contracts.SessionRegenerator)
+	// The work-steps policy also decides the completed turn's default fold: with
+	// collapse=next-input the latest turn (every assistant message after the last
+	// user message) opens by default and folds once a newer user message arrives.
+	// A reader's explicit toggle in st.processOpen always wins over this default.
+	policy := st.workStepsPolicyFor()
+	lastUserIndex := -1
+	indexByID := make(map[string]int, len(messages))
+	for index, message := range messages {
+		indexByID[message.ID] = index
+		if message.Role == contracts.ChatRoleUser {
+			lastUserIndex = index
+		}
+	}
+	defaultOpen := func(messageID string) bool {
+		if policy.collapse != contracts.WorkStepsCollapseNextInput {
+			return false
+		}
+		index, ok := indexByID[messageID]
+		return ok && index > lastUserIndex
+	}
+	// verbose keeps the whole timeline and never bundles steps; the other modes
+	// fold a multi-step turn into one process row.
+	var sameTurn func(prev, next contracts.ChatMessage) bool
+	if policy.mode != contracts.WorkStepsVerbose {
+		sameTurn = assistantTurnContinues
+	}
 	uikit.SessionThread(c, uikit.SessionThreadOptions{
 		Messages:  messages,
 		Running:   chatSession.Running,
@@ -932,14 +958,15 @@ func buildChatPane(
 			last := message.ID == lastID && message.Role == contracts.ChatRoleAssistant
 			canRegenerate := hasRegenerator && !chatSession.Running && last
 			buildMessage(rc, t, runtime, message, st, canRegenerate,
-				last && canCopyReply(message))
+				last && canCopyReply(message), defaultOpen(message.ID))
 		},
-		SameTurn: assistantTurnContinues,
+		SameTurn: sameTurn,
 		GroupRow: func(rc *ui.Context, group []contracts.ChatMessage) {
 			last := group[len(group)-1].ID == lastID
 			canRegenerate := hasRegenerator && !chatSession.Running && last
 			buildAssistantTurnGroup(rc, t, runtime, st, group, canRegenerate,
-				last && canCopyReply(group[len(group)-1]))
+				last && canCopyReply(group[len(group)-1]),
+				defaultOpen(group[len(group)-1].ID))
 		},
 	})
 }
@@ -968,7 +995,7 @@ func buildHero(c *ui.Context, t *design.Tokens, cfg Config, navigator contracts.
 // buildMessage renders one transcript entry. User turns are right-aligned
 // raised bubbles; assistant turns are plain brand body text with optional
 // reasoning, tool cards and errors.
-func buildMessage(c *ui.Context, t *design.Tokens, runtime contracts.UIRuntime, message contracts.ChatMessage, st *state, canRegenerate, canCopy bool) {
+func buildMessage(c *ui.Context, t *design.Tokens, runtime contracts.UIRuntime, message contracts.ChatMessage, st *state, canRegenerate, canCopy, defaultOpen bool) {
 	switch message.Role {
 	case contracts.ChatRoleUser:
 		ui.Column(c.Key("session.message." + message.ID)).FillWidth().AlignItems(ui.End).Gap(design.Space1).Children(func() {
@@ -996,48 +1023,50 @@ func buildMessage(c *ui.Context, t *design.Tokens, runtime contracts.UIRuntime, 
 			design.Apply(ui.Text(c, message.Text), t.TextMuted(design.TypeXS))
 		})
 	default:
-		buildAssistantMessage(c, t, runtime, message, st, canRegenerate, canCopy)
+		buildAssistantMessage(c, t, runtime, message, st, canRegenerate, canCopy, defaultOpen)
 	}
 }
 
-// buildAssistantMessage renders one assistant turn: a finished turn with tool
-// calls folds its whole process (reasoning and compact tool rows) into one
-// summary row and keeps the reply body below it; expanding the summary brings
-// back the full interleaved timeline. A streaming turn is always expanded and
-// carries no meta row.
-func buildAssistantMessage(c *ui.Context, t *design.Tokens, runtime contracts.UIRuntime, message contracts.ChatMessage, st *state, canRegenerate, canCopy bool) {
+// buildAssistantMessage renders one assistant turn under the work-steps policy.
+// While it streams, compact/standard show one live activity line plus the reply
+// body and decision cards, while detailed/verbose keep the whole timeline; once
+// finished, compact/standard/detailed fold the process into one summary row (open
+// by default only for the latest turn under collapse=next-input), while verbose
+// always shows the full timeline under its meta row. A failed turn never folds.
+func buildAssistantMessage(c *ui.Context, t *design.Tokens, runtime contracts.UIRuntime, message contracts.ChatMessage, st *state, canRegenerate, canCopy, defaultOpen bool) {
+	policy := st.workStepsPolicyFor()
+	foldable := assistantProcessFoldable(message, policy.mode)
+	open, explicit := st.processOpen[message.ID]
+	if !explicit {
+		open = defaultOpen
+	}
+	open = open && foldable
 	outer := ui.Column(c.Key("session.message." + message.ID)).FillWidth().Gap(design.Space2)
-	foldable := assistantProcessFoldable(message)
-	processOpen := foldable && st.processOpen[message.ID]
 	outer.Children(func() {
 		// The finished turn's meta (time/usage/⋯) is a header: on a folded turn
-		// it shares the 过程 summary row, otherwise it is the row above the
-		// reply. A streaming turn has no meta at all.
+		// it shares the 过程 summary row, otherwise it is the row above the reply.
 		meta := func(c *ui.Context) {
-			if !message.Streaming {
-				buildAssistantMetaContent(c, t, runtime, st, message, canRegenerate)
-			}
+			buildAssistantMetaContent(c, t, runtime, st, message, canRegenerate)
 		}
-		if foldable {
-			processOpen = buildProcessSummary(c, t, runtime, st, message, processOpen, meta)
-		} else if !message.Streaming {
+		switch {
+		case message.Streaming:
+			buildAssistantStreaming(c, t, runtime, st, message, policy)
+		case policy.mode == contracts.WorkStepsVerbose:
+			// verbose: the full timeline, always open, under the meta row, with no
+			// fold summary row.
 			buildAssistantMetaRow(c, t, runtime, st, message, canRegenerate)
-		}
-		if foldable && !processOpen {
-			// Folded: the reply body and the decision cards the turn must not
-			// hide; the full timeline is one click away.
-			buildAssistantReply(c, t, runtime, st, message)
-		} else {
 			buildAssistantTimeline(c, t, runtime, st, message)
-			if message.Streaming {
-				// The generating indicator is the shared run-status row (S8): the
-				// official spinner with its status copy, never a fake progress bar.
-				uikit.RunStatus(c, uikit.RunStatusOptions{
-					Running:     true,
-					StatusLabel: st.tr("生成中", "Generating"),
-					Locale:      st.locale,
-				})
+		case foldable:
+			open = buildProcessSummary(c, t, runtime, st, message, open, meta)
+			if open {
+				buildAssistantTimeline(c, t, runtime, st, message)
+			} else {
+				buildAssistantReply(c, t, runtime, st, message)
 			}
+		default:
+			// A pure-text turn has no process to fold: meta row, then the reply.
+			buildAssistantMetaRow(c, t, runtime, st, message, canRegenerate)
+			buildAssistantTimeline(c, t, runtime, st, message)
 		}
 		if message.Error != "" {
 			buildMessageError(c, t, st, message)
@@ -1056,17 +1085,44 @@ func buildAssistantMessage(c *ui.Context, t *design.Tokens, runtime contracts.UI
 	})
 }
 
-// assistantProcessFoldable reports whether a finished turn folds its process
-// into one summary row: a successful turn with tool calls that carry enough
-// activity to be worth hiding (some reasoning, or more than one call). A
-// streaming or failed turn never folds; neither does a lone tool with no
-// reasoning (the row itself is already the whole story).
-func assistantProcessFoldable(message contracts.ChatMessage) bool {
-	if message.Streaming || strings.TrimSpace(message.Error) != "" {
+// buildAssistantStreaming draws a running turn under the work-steps policy:
+// compact/standard replace the live timeline with one activity line (then the
+// streaming body and any decision card), while detailed/verbose keep the
+// interleaved timeline and the generating indicator.
+func buildAssistantStreaming(c *ui.Context, t *design.Tokens, runtime contracts.UIRuntime,
+	st *state, message contracts.ChatMessage, policy workStepsPolicy) {
+	switch policy.mode {
+	case contracts.WorkStepsCompact:
+		buildLiveWorkSteps(c, t, st, message, false)
+	case contracts.WorkStepsStandard:
+		buildLiveWorkSteps(c, t, st, message, true)
+	default:
+		buildAssistantTimeline(c, t, runtime, st, message)
+		// The generating indicator is the shared run-status row (S8): the
+		// official spinner with its status copy, never a fake progress bar.
+		uikit.RunStatus(c, uikit.RunStatusOptions{
+			Running:     true,
+			StatusLabel: st.tr("生成中", "Generating"),
+			Locale:      st.locale,
+		})
+		return
+	}
+	// The single activity line replaces the timeline, not the answer: the
+	// streaming prose and any decision the turn waits on stay visible.
+	renderAssistantText(c, t, st, message)
+	buildProminentDecisions(c, t, runtime, st, message)
+}
+
+// assistantProcessFoldable reports whether a finished turn folds its process row:
+// any successful turn with a tool call or some reasoning folds under
+// compact/standard/detailed. verbose never folds; streaming and failed turns
+// render inline (their own rows carry the story).
+func assistantProcessFoldable(message contracts.ChatMessage, mode string) bool {
+	if message.Streaming || strings.TrimSpace(message.Error) != "" ||
+		mode == contracts.WorkStepsVerbose {
 		return false
 	}
-	tools := len(message.Tools)
-	return tools >= 1 && (strings.TrimSpace(message.Reasoning) != "" || tools >= 2)
+	return len(message.Tools) > 0 || strings.TrimSpace(message.Reasoning) != ""
 }
 
 // buildProcessSummary draws the folded process line as a bare disclosure (the
@@ -1128,10 +1184,12 @@ func processSummaryParts(st *state, reasoning string, tools int) []string {
 	if strings.TrimSpace(reasoning) != "" {
 		parts = append(parts, st.tr("思考", "Reasoning"))
 	}
-	if tools == 1 {
-		parts = append(parts, st.tr("1 个工具调用", "1 tool call"))
-	} else {
-		parts = append(parts, fmt.Sprintf(st.tr("%d 个工具调用", "%d tool calls"), tools))
+	if tools > 0 {
+		if tools == 1 {
+			parts = append(parts, st.tr("1 个工具调用", "1 tool call"))
+		} else {
+			parts = append(parts, fmt.Sprintf(st.tr("%d 个工具调用", "%d tool calls"), tools))
+		}
 	}
 	return parts
 }
@@ -1156,9 +1214,12 @@ func assistantTurnContinues(prev, next contracts.ChatMessage) bool {
 // decision card that is waiting on the user) is shown under it. Expanding the
 // fold restores every step's full timeline in order.
 func buildAssistantTurnGroup(c *ui.Context, t *design.Tokens, runtime contracts.UIRuntime, st *state,
-	group []contracts.ChatMessage, canRegenerate, canCopy bool) {
+	group []contracts.ChatMessage, canRegenerate, canCopy, defaultOpen bool) {
 	key := group[0].ID
-	open := st.processOpen[key]
+	open, explicit := st.processOpen[key]
+	if !explicit {
+		open = defaultOpen
+	}
 	tools := 0
 	var reasoning strings.Builder
 	for _, message := range group {

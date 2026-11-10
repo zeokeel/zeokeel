@@ -20,7 +20,7 @@ func TestBehaviorPageChatFontSizeDefaultsStandard(t *testing.T) {
 	if raw := store.get(contracts.SettingChatFontSize); raw != "" {
 		t.Fatalf("defaults wrote the chat-font-size row: %q", raw)
 	}
-	h.click(tester, "标准")
+	h.click(tester, "消息字号：标准")
 	h.assertTexts(tester, "小", "大")
 	h.click(tester, "大")
 	if raw := store.get(contracts.SettingChatFontSize); raw != "large" {
@@ -28,7 +28,7 @@ func TestBehaviorPageChatFontSizeDefaultsStandard(t *testing.T) {
 	}
 	h.assertTexts(tester, "已保存", "大")
 
-	h.click(tester, "大")
+	h.click(tester, "消息字号：大")
 	h.click(tester, "小")
 	if raw := store.get(contracts.SettingChatFontSize); raw != "small" {
 		t.Fatalf("selecting small wrote %q", raw)
@@ -45,7 +45,7 @@ func TestBehaviorPageChatFontSizeBadValueNormalized(t *testing.T) {
 	h.click(tester, "行为")
 	expandMoreConversationSettings(t, tester, "更多对话设置")
 	h.assertTexts(tester, "标准")
-	h.click(tester, "标准")
+	h.click(tester, "消息字号：标准")
 	h.click(tester, "小")
 	if raw := store.get(contracts.SettingChatFontSize); raw != "small" {
 		t.Fatalf("selecting small from a malformed value wrote %q", raw)
@@ -60,7 +60,7 @@ func TestBehaviorPageChatFontSizeEnglish(t *testing.T) {
 	h.click(tester, "Behavior")
 	expandMoreConversationSettings(t, tester, "More conversation settings")
 	h.assertTexts(tester, "Message text size", "Standard")
-	h.click(tester, "Standard")
+	h.click(tester, "Text size: Standard")
 	h.click(tester, "Large")
 	if raw := store.get(contracts.SettingChatFontSize); raw != "large" {
 		t.Fatalf("English selection wrote %q, want large", raw)

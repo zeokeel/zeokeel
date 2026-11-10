@@ -44,7 +44,7 @@ func exactText(tester *ui.Tester, text string) bool {
 // reasoning Markdown once, and the generation indicator is the official spinner.
 func TestReasoningStreamingShowsOneOpenDisclosure(t *testing.T) {
 	reasoning := strings.Repeat("前", 200) + "最新思考片段"
-	h := newHarness(t, reasoningChat(reasoning, true))
+	h := newVerboseWorkStepsHarness(t, reasoningChat(reasoning, true))
 	tester := h.tester()
 
 	if !exactText(tester, "思考中") {
@@ -73,7 +73,7 @@ func TestReasoningStreamingShowsOneOpenDisclosure(t *testing.T) {
 // again by click; the header switches from 思考中… to 思考.
 func TestReasoningCollapsesWhenTheTurnEnds(t *testing.T) {
 	chat := reasoningChat("完整思考内容", true)
-	h := newHarness(t, chat)
+	h := newVerboseWorkStepsHarness(t, chat)
 	tester := h.tester()
 	if info, ok := tester.AccessByRole(ui.RoleDisclosure, "思考中…"); !ok || !info.Expanded {
 		t.Fatalf("streaming disclosure: %+v found %v", info, ok)
@@ -107,7 +107,7 @@ func TestReasoningCollapsesWhenTheTurnEnds(t *testing.T) {
 // showing raw markers.
 func TestReasoningPanelRendersMarkdown(t *testing.T) {
 	reasoning := "**重点结论**\n\n- 先看认证模块\n- 再改登录流程"
-	h := newHarness(t, reasoningChat(reasoning, false))
+	h := newVerboseWorkStepsHarness(t, reasoningChat(reasoning, false))
 	tester := h.tester()
 	h.click(tester, "思考")
 	tester.Advance(300 * time.Millisecond)
@@ -118,7 +118,7 @@ func TestReasoningPanelRendersMarkdown(t *testing.T) {
 // TestReasoningEnglishCopy covers the localized reasoning header and spinner
 // names after a live language switch.
 func TestReasoningEnglishCopy(t *testing.T) {
-	h := newHarness(t, reasoningChat("think in english", true))
+	h := newVerboseWorkStepsHarness(t, reasoningChat("think in english", true))
 	tester := h.tester()
 	h.ui.Locale().SetLanguage("en")
 	tester.Frame()
@@ -135,7 +135,7 @@ func TestReasoningEnglishCopy(t *testing.T) {
 // TestReasoningHiddenWithoutText keeps the disclosure off replies that have no
 // thinking text (models that do not stream it).
 func TestReasoningHiddenWithoutText(t *testing.T) {
-	h := newHarness(t, reasoningChat("", true))
+	h := newVerboseWorkStepsHarness(t, reasoningChat("", true))
 	tester := h.tester()
 	if exactText(tester, "思考中") {
 		t.Fatalf("a reply without reasoning showed a thinking spinner; texts = %v", tester.Texts())

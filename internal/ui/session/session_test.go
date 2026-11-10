@@ -352,6 +352,17 @@ func newHarness(t *testing.T, chat *fakeChat) *harness {
 	return newHarnessWithMemory(t, chat, nil)
 }
 
+// newVerboseWorkStepsHarness builds the conversation screen with the work-steps
+// mode verbose: the transcript always shows the full timeline (no fold, no
+// grouping), so the tests that cover message/timeline/tool-row anatomy keep the
+// classic transcript shape while the default mode folds a finished process.
+func newVerboseWorkStepsHarness(t *testing.T, chat *fakeChat) *harness {
+	t.Helper()
+	return newPermissionHarness(t, chat, newPermissionSettings(map[string]string{
+		contracts.SettingWorkStepsMode: contracts.WorkStepsVerbose,
+	}))
+}
+
 // newHarnessWithMemory is newHarness with an optional memory backend provided
 // as contracts.KeyMemory (nil means the session module runs without one).
 func newHarnessWithMemory(t *testing.T, chat *fakeChat, memory contracts.MemoryStore) *harness {
@@ -579,7 +590,7 @@ func TestRendersMessagesAndRunningBadges(t *testing.T) {
 			},
 		},
 	}, true)
-	h := newHarness(t, chat)
+	h := newVerboseWorkStepsHarness(t, chat)
 	tester := h.tester()
 
 	h.assertTexts(tester,
@@ -670,7 +681,7 @@ func TestToolRendererModuleIsUsedWhenPresent(t *testing.T) {
 			},
 		}},
 	}, true)
-	h := newHarness(t, chat)
+	h := newVerboseWorkStepsHarness(t, chat)
 	unregister, err := h.ui.Runtime().RegisterToolRenderer(contracts.ToolRenderer{
 		Tool:  "read_file",
 		ID:    "test.read_file",

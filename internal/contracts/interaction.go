@@ -2,6 +2,7 @@ package contracts
 
 import (
 	"context"
+	"strings"
 	"time"
 
 	cordis "github.com/zeokeel/zeokeel-kernel"
@@ -117,6 +118,13 @@ const (
 	// SettingChatFontSize scales the conversation transcript: "small",
 	// "standard" (default) or "large".
 	SettingChatFontSize = "ui.chatFontSize"
+	// SettingWorkStepsMode controls how much of a running/finished turn's work
+	// steps the transcript shows (DSH-aligned): WorkStepsCompact,
+	// WorkStepsStandard (default), WorkStepsDetailed or WorkStepsVerbose.
+	SettingWorkStepsMode = "ui.workSteps.mode"
+	// SettingWorkStepsCollapse controls when a completed turn's work steps fold:
+	// WorkStepsCollapseCompletion (default) or WorkStepsCollapseNextInput.
+	SettingWorkStepsCollapse = "ui.workSteps.collapse"
 	// SettingThemeMode is the appearance source: "light", "dark" or "system"
 	// (the legacy ui.theme.dark boolean is still written for older builds).
 	SettingThemeMode = "ui.theme.mode"
@@ -125,3 +133,40 @@ const (
 	// it (desktop only).
 	SettingGlobalHotkey = "ui.globalHotkey"
 )
+
+// Work-step presentation values (SettingWorkStepsMode / SettingWorkStepsCollapse).
+const (
+	WorkStepsCompact  = "compact"
+	WorkStepsStandard = "standard"
+	WorkStepsDetailed = "detailed"
+	WorkStepsVerbose  = "verbose"
+
+	WorkStepsCollapseCompletion = "completion"
+	WorkStepsCollapseNextInput  = "next-input"
+)
+
+// NormalizeWorkStepsMode returns one documented work-steps mode, falling back to
+// WorkStepsStandard for empty or unknown stored values.
+func NormalizeWorkStepsMode(value string) string {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case WorkStepsCompact:
+		return WorkStepsCompact
+	case WorkStepsDetailed:
+		return WorkStepsDetailed
+	case WorkStepsVerbose:
+		return WorkStepsVerbose
+	default:
+		return WorkStepsStandard
+	}
+}
+
+// NormalizeWorkStepsCollapse returns one documented collapse timing, falling back
+// to WorkStepsCollapseCompletion for empty or unknown stored values.
+func NormalizeWorkStepsCollapse(value string) string {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case WorkStepsCollapseNextInput:
+		return WorkStepsCollapseNextInput
+	default:
+		return WorkStepsCollapseCompletion
+	}
+}

@@ -32,7 +32,7 @@ func toolChat(tools ...contracts.ToolCall) *fakeChat {
 // tooltip/description is the raw protocol id, and whose untouched H15 default
 // (a short result) starts expanded.
 func TestToolRowUsesFriendlyNameDisclosure(t *testing.T) {
-	h := newHarness(t, toolChat(contracts.ToolCall{
+	h := newVerboseWorkStepsHarness(t, toolChat(contracts.ToolCall{
 		ID: "t1", Name: "read_file", Status: "ok", Summary: "auth.go",
 	}))
 	tester := h.tester()
@@ -54,7 +54,7 @@ func TestToolRowUsesFriendlyNameDisclosure(t *testing.T) {
 // semantics: a click toggles, then Enter and Space toggle it again once the
 // trigger has the keyboard focus.
 func TestToolRowTogglesByClickAndKeyboard(t *testing.T) {
-	h := newHarness(t, toolChat(contracts.ToolCall{
+	h := newVerboseWorkStepsHarness(t, toolChat(contracts.ToolCall{
 		ID: "t1", Name: "bash", Status: "ok", Summary: "stdout: 全部测试通过",
 	}))
 	tester := h.tester()
@@ -87,7 +87,7 @@ func TestToolRowTogglesByClickAndKeyboard(t *testing.T) {
 // because the spinner inside it is not a node of its own for assistive
 // technology.
 func TestToolRowRunningShowsSpinner(t *testing.T) {
-	h := newHarness(t, toolChat(contracts.ToolCall{
+	h := newVerboseWorkStepsHarness(t, toolChat(contracts.ToolCall{
 		ID: "t1", Name: "bash", Status: "running", Summary: "stdout: 测试进行中",
 	}))
 	tester := h.tester()
@@ -116,7 +116,7 @@ func TestToolRowRunningShowsSpinner(t *testing.T) {
 // persists on the following frames.
 func TestToolRowLongResultStaysFoldedAndRemembers(t *testing.T) {
 	summary := strings.Repeat("行结果 ", 80) // over the 160-rune H15 bound
-	h := newHarness(t, toolChat(contracts.ToolCall{
+	h := newVerboseWorkStepsHarness(t, toolChat(contracts.ToolCall{
 		ID: "t1", Name: "bash", Status: "ok", Summary: summary,
 	}))
 	tester := h.tester()
@@ -138,7 +138,7 @@ func TestToolRowLongResultStaysFoldedAndRemembers(t *testing.T) {
 // discoverable: the raw name is the visible fallback when the kit has no
 // friendly translation.
 func TestToolRowUnknownToolKeepsItsProtocolName(t *testing.T) {
-	h := newHarness(t, toolChat(contracts.ToolCall{
+	h := newVerboseWorkStepsHarness(t, toolChat(contracts.ToolCall{
 		ID: "t1", Name: "mystery_tool", Status: "ok",
 	}))
 	tester := h.tester()
