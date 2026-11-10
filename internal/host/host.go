@@ -380,6 +380,10 @@ func RunACP(ctx context.Context, opts Options, in io.Reader, out io.Writer) erro
 
 // runDesktop runs the windowed product.
 func runDesktop(opts Options) error {
+	// Windows GUI builds have no console; give them one hidden console so the
+	// shell/job/terminal tools' child processes inherit it instead of opening
+	// cmd/pwsh windows for every tool call. No-op elsewhere.
+	hideWindowsConsoleForChildren()
 	settings, err := NewSettings(opts.DataDir)
 	if err != nil {
 		return err

@@ -29,6 +29,7 @@ import (
 	"context"
 	"errors"
 	"path/filepath"
+	"runtime"
 	"strings"
 
 	"github.com/egoist/mygo/ui"
@@ -76,9 +77,9 @@ const (
 // The guide's shortcut labels. They are the command metadata's shortcuts: the
 // guide is the discoverability surface of the same chords, so the two cannot
 // drift.
-const (
-	filesOpenShortcut    = "Ctrl+Alt+P"
-	terminalOpenShortcut = "Ctrl+`"
+var (
+	filesOpenShortcut    = platformShortcut("Ctrl+Alt+P", "Cmd+Alt+P")
+	terminalOpenShortcut = platformShortcut("Ctrl+`", "Cmd+`")
 )
 
 // Config is the module's typed assembly config (all fields have defaults).
@@ -487,6 +488,16 @@ func (st *state) syncCommands() {
 		return
 	}
 	_ = st.registerCommands()
+}
+
+// platformShortcut picks the host's actual chord label: mygo's ui.Cmd maps to
+// Command on macOS and Control elsewhere, so the guide and palette must not
+// advertise "Ctrl" on a Mac.
+func platformShortcut(control, command string) string {
+	if runtime.GOOS == "darwin" {
+		return command
+	}
+	return control
 }
 
 // filePreviewService implements contracts.FilePreviewer over the module state.

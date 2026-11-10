@@ -740,3 +740,14 @@ design-check 6/6（raw metric 45 ≤ 51）/mygo vet/`go test ./...`（45s）/`-r
 - **发布资产**：release workflow 不再构建/上传 `darwin-arm64.tar.gz`、`windows-amd64.tar.gz`、`windows-arm64.tar.gz`；只发布 Windows setup、macOS dmg、Linux AppImage 与 `SHA256SUMS.txt`。README/RELEASE/INJECTION-POINTS/AGENT-SURFACES/DESIGN registry 同步；删除旧 TeamSurface registry 条目。
 - **验证**：`scripts/verify.sh --no-smoke` **10/10 PASS**：gofmt/build/vet/designlint 0 new/design-check 6/6/mygo vet/`go test ./...`（48 包，45s）/-race（329s）/regression **276 PASS / 0 SKIP / 0 FAIL**/ui-snapshot **98 steps / 96 PNGs**；新增审计修复测试（session `audit_fix_test.go` 9 个、rightpanel 73 PASS、host 164 PASS/update 47 PASS、agent/sidebar/automation provenance 与 Path、uiroot collapsed 启动）。
 - **审计结论**：3 份报告无遗留 P0；已修 P0/P1（Windows setup 不启动、macOS 静默安装死代码、安装计划/UI 流程、子会话 panic、折叠启动、生成文件真实性、路径越权、缓存串工作区、标题前缀误伤）。**仍有 P2 已知风险**：旧版（≤0.2.7）无 origin 的自动化会话会重新出现（显式-only 的迁移代价）；无宿主命令的嵌入构建对 installer/dmg 的"下次启动自动安装"文案仍不成立；header 每帧读取 team/child/jobs 后端（jobs 会解析 job_list 文本）；立即安装仍在 UI 线程同步执行（macOS 大 dmg 会卡数秒，spinner 可能来不及绘制）；「查看改动」当前等价于打开文件标签（差异在文件标签内折叠显示），文案与实现需再对齐；Windows/macOS 安装路径仅有 seam 单测，发版前需真机 smoke。
+
+## 0.2.9（2026-11-10：P2 继续修 + Windows cmd 弹窗）
+
+用户反馈：Windows 某些工具调用仍弹 cmd 窗口；继续修审计 P2。
+
+- **Windows 隐藏控制台**：桌面版是 GUI 子系统，rig 的 pwsh/bash/后台任务/终端在无控制台父进程中启动时，Windows 会为每个子进程新建控制台窗口。新增 `internal/host/console_windows.go`：启动时若无控制台则 `AllocConsole`+`ShowWindow(SW_HIDE)`，子进程继承隐藏控制台，不再逐个弹 cmd；从终端启动（已有控制台）保持原样。非 Windows 为 no-op；`GOOS=windows` 交叉构建通过。
+- **job 列表解析**：status/command 自由文本包含 ` exit=`/` duration_ms=`/` command=` 时会切错字段；改为右侧锚定正则 ` exit=(-?\d+) duration_ms=(\d+) command=`，新增自由文本测试。
+- **mac 快捷键标签**：右栏文件/终端命令 shortcut 在 darwin 显示 Cmd+Alt+P / Cmd+`（host 实际绑定 Cmd），Linux/Windows 仍 Ctrl。
+- **文档**：COVERAGE/UI-CONFORMANCE/DESIGN registry 清除旧右栏团队/任务 pane 描述；INJECTION-POINTS 记录新命令。
+- **验证**：`scripts/verify.sh --no-smoke` **10/10 PASS**：gofmt/build/vet/designlint 0 new/design-check 6/6/mygo vet/`go test ./...`（48 包，46s）/-race（325s）/regression 276 PASS/ui-snapshot 98 steps / 96 PNGs。
+- **发布说明**：v0.2.8 的 macOS dmg 因 GitHub macOS arm64 runner 容量连续 3 次排队失败未发布；Windows/Linux 安装包已可用。macOS 用户需等待 dmg 补传或源码构建；≤0.2.7 需手动安装一次。

@@ -15,6 +15,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -122,9 +123,16 @@ func parseJobList(text string) []contracts.BackgroundJob {
 	return rows
 }
 
-// parseJobListRow parses one "- id [kind] ..." body. Fields are cut in the
-// order Rig writes them, so free-text values (status detail, command) cannot be
-// mistaken for later keys.
+// jobListTailPattern matches the rig list format's numeric tail:
+// " exit=<n> duration_ms=<n> command=<free text>". The status and command are
+// free text, so the tail is located as the LAST such occurrence (the status
+// can contain " exit=..." and the command everything after the real match).
+var jobListTailPattern = regexp.MustCompile(` exit=(-?\d+) duration_ms=(\d+) command=`)
+
+// parseJobListRow parses one "- id [kind] ..." body:
+// "id [kind] owner=<o>? state=<s> status=<free text> exit=<n> duration_ms=<n>
+// command=<free text>". Because status/command are free text, the numeric tail
+// is found by its anchored pattern rather than by cutting from the left.
 func parseJobListRow(body string) (contracts.BackgroundJob, bool) {
 	var row contracts.BackgroundJob
 	id, rest, found := strings.Cut(body, " ")
@@ -136,50 +144,35 @@ func parseJobListRow(body string) (contracts.BackgroundJob, bool) {
 	if !found || kind == "" {
 		return row, false
 	}
-	// The optional owner segment sits between the kind and state.
-	if afterOwner, owned := strings.CutPrefix(rest, " owner="); owned {
-		if _, afterState, ok := strings.Cut(afterOwner, " state="); ok {
-			rest = afterState
-		} else {
-			return row, false
-		}
-	} else {
-		var ok bool
-		if rest, ok = strings.CutPrefix(rest, " state="); !ok {
-			return row, false
-		}
+	stateAt := strings.Index(rest, " state=")
+	if stateAt < 0 {
+		return row, false
 	}
+	rest = rest[stateAt+len(" state="):]
 	state, rest, ok := strings.Cut(rest, " status=")
 	if !ok || state == "" {
 		return row, false
 	}
-	status, rest, ok := strings.Cut(rest, " exit=")
-	if !ok {
+	matches := jobListTailPattern.FindAllStringSubmatchIndex(rest, -1)
+	if len(matches) == 0 {
 		return row, false
 	}
-	exit, rest, ok := strings.Cut(rest, " duration_ms=")
-	if !ok {
-		return row, false
-	}
-	exitCode, err := strconv.Atoi(exit)
+	tail := matches[len(matches)-1]
+	exitCode, err := strconv.Atoi(rest[tail[2]:tail[3]])
 	if err != nil {
 		return row, false
 	}
-	duration, command, ok := strings.Cut(rest, " command=")
-	if !ok {
-		return row, false
-	}
-	durationMS, err := strconv.ParseInt(duration, 10, 64)
+	durationMS, err := strconv.ParseInt(rest[tail[4]:tail[5]], 10, 64)
 	if err != nil {
 		return row, false
 	}
 	row.ID = id
 	row.Kind = kind
 	row.State = state
-	row.Status = status
+	row.Status = rest[:tail[0]]
 	row.ExitCode = exitCode
 	row.Duration = time.Duration(durationMS) * time.Millisecond
-	row.Command = command
+	row.Command = rest[tail[1]:]
 	row.Running = state == "running"
 	return row, true
 }

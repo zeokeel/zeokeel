@@ -9,8 +9,8 @@
 - 自上一版后落地的关键能力：
   - **编排执行**：agent 真实 subagent runner（depth/并发上限、编排工具排除、fork/model/max-iterations
     覆盖）+ rig team manager 全量工具（team_*、legacy、DSH spawn_teammate/list_agents/wait_agent/
-    send_message/interrupt_agent）+ **Agents Inspector**（成员/状态/最新回答、steer/中断/关闭）
-    + **共享任务板**（team_task_* 工具 + rightpanel「任务」tab）+ goal 工具/会话 goal chip。
+    send_message/interrupt_agent）+ **会话头部智能体团队浮层**（成员/状态/最新回答、打开成员会话）
+    + **共享任务**（team_task_* 工具，团队浮层只读展示）+ goal 工具/会话 goal chip。
   - **Composer 高级控制**：/goal /plan /memory 原生对话框、**权限模式**（命令 + composer badge，默认工作区：工作区文件读写自动允许，shell/网络仍询问；
     只读/工作区可写/所有权限（DSH 同款预设），settings `agent.permission`）、**思考强度**（per-session、按模型系列/自定义模式 +
     toolbar 菜单 + provider `reasoning_effort`）、**@session 引用**（@ 菜单会话分组、token 持久化、
@@ -25,7 +25,7 @@
   - **更新**：下载（流式 + SHA-256/size 校验 + 原子暂存）+ install 调度（`ScheduleInstall`/
     `PendingInstall` + 宿主启动 apply，失败保留 plan 待重试）。
   - **既有项复核**：pin/archive（agent + sidebar 行菜单 + show-archived 视图）、i18n 覆盖到新增页面、
-    会话搜索/消息全文搜索、JSONL 导出、任务板、MCP 工具开关均已可用。
+    会话搜索/消息全文搜索、JSONL 导出、共享任务（团队浮层只读）、MCP 工具开关均已可用。
 - **presets 已落地**：prompt 片段契约 + composer「预设/Presets」插入菜单 + 设置「预设」页 CRUD（名称/提示词/排序/
   恢复默认）+ 设置「模型」页的模型列表（modelcatalog.settings 动态读取）；旧 agent presets 的 tool allowlist 语义仍未迁移，
   故 presets 记 🟡。
@@ -48,7 +48,7 @@
 | old 能力 | 状态 | 当前实现/证据 | 差异说明 |
 |---|---|---|---|
 | `acp` | ✅ | `internal/modules/acp`、host RunACP | initialize（loadSession）/session-new/prompt/cancel/session/list/session/load、流式文本 + **tool_call/tool_call_update 流式更新（in_progress/completed/failed、4KiB 截断）**、错误码；auth/fs/terminal 属 ACP 客户端职责（非服务器范围） |
-| `agentteam` | ✅ | agent `team.go` + rig `tools/team` + Agents Inspector + team_task 共享板 | 真实异步 subagent runner（spawn/steer/wait/interrupt/close、fork/model/max-iterations）；全局 manager（旧按会话），Inspector 展示全局成员 |
+| `agentteam` | ✅ | agent `team.go` + rig `tools/team` + session 团队浮层 + team_task 共享板 | 真实异步 subagent runner（spawn/steer/wait/interrupt/close、fork/model/max-iterations）；全局 manager，团队浮层展示成员与共享任务（只读；成员会话在主栏打开） |
 | `automation` | ✅ | `internal/modules/automation` + `internal/ui/automation` | cron/every/after、持久化、ticker、schedule 工具、列表/新建/运行/删除/运行历史/模型覆盖/**workspace + permission 字段（运行时经 SessionWorkspaceSwitcher/SessionPermissionSwitcher 应用）**/搜索筛选；独立 runs 表为内部存储形态非目标 |
 | `brand` | ✅ | `internal/brand` | palette/theme/logo/wordmark |
 | `design` | ✅ | `internal/design` | tokens/style/motion/font/components 子集 |
@@ -110,7 +110,7 @@
 | Plan UI（plan_review/exit_plan_mode） | ✅ | interaction plan Modal + /审阅计划 + plan 门禁 + toolcards 计划卡 + **keep-planning 反馈** | Markdown 审阅 + 批准/取消 + 计划模式门禁 + transcript 计划卡 + **「继续规划」反馈（写回当前会话作为下一条用户消息 → 模型修订后重新 plan_review）** |
 | Modes UI（standard/minimal/creator） | ✅ | session 模式 Popover + agent gate 策略 | 四模式：普通（原审批策略）、计划（只读+计划白名单，最高优先）、精简（只读探索白名单）、创作（隐藏编码工具，仅 ask/present/goal/memory/skill）；composer 模式菜单 + header 徽标，坏值归一，中英 |
 | 智能体团队 / 子代理 | ✅ | session `agentsurface.go` + agent `childagents.go` + toolkit `jobs_service.go` | 头部三入口「智能体团队 / 子智能体 N / 后台任务 N」（Popover 浮层）；团队浮层=成员卡+共享任务卡；子代理/成员在主栏以 `父标题 › 子名` 面包屑打开，点父标题返回；一次性只读、可继续有输入框；后台任务可查看状态并停止；不占侧边栏/右栏。剩余（后续）：真正持久的子会话存储（当前读模型来自现有 subagent/team 运行记录） |
-| Todo UI（会话 todo 面板） | ✅ | toolkit `KeyTaskBoard` + rightpanel「任务」tab | 状态分组（进行中/待处理/已完成）+ 计数、行内 owner（未认领/主代理/队友；`TaskAssigner` 菜单）、依赖/阻塞行（等待 task-X「subject」完成/可开始，`BoardTask.BlockedBy`）、`ui.List` 选中 + Enter 展开详情（描述/依赖/写入范围/开始/删除面板）、chat 通知自动刷新（T-03）、显式刷新 loading、空/错误态，与 team_task_* 共用；剩余（后续）：任务板持久化（当前 toolkit 内存，重启丢失）、工作台内任务板视图、旧 todo 卡内联进度 |
+| Todo UI（共享任务） | ✅ | toolkit `KeyTaskBoard` + session 团队浮层 | 状态分组（进行中/待处理/已完成）+ 计数、行内 owner（未认领/主代理/队友；`TaskAssigner` 菜单）、依赖/阻塞行（等待 task-X「subject」完成/可开始，`BoardTask.BlockedBy`）、`ui.List` 选中 + Enter 展开详情（描述/依赖/写入范围/开始/删除面板）、chat 通知自动刷新（T-03）、显式刷新 loading、空/错误态，与 team_task_* 共用；剩余（后续）：任务板持久化（当前 toolkit 内存，重启丢失）、工作台内任务板视图、旧 todo 卡内联进度 |
 | Artifacts / Present UI | ✅ | interaction Modal + uiroot ArtifactLister + rightpanel Files「产物」 | present 预览 + 最近 50/产物列表最近 10、内嵌 markdown 再预览 + 下载为 Markdown（原生保存对话框/slug）；跨重启历史为明确非目标（进程内 50 条） |
 | 交互式 ask_user UI | ✅ | `internal/ui/interaction` question Modal + uiroot bridge | 选项/自由文本/取消；hosttools ask_user 已走真实桥，E2E 覆盖 |
 | About 页 | ✅ | `internal/ui/about` | 构建信息/架构/bullet，en/zh 动态导航 |

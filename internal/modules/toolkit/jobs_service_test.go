@@ -422,3 +422,20 @@ func TestJobServiceAgainstRealRigManager(t *testing.T) {
 		t.Fatalf("killed job row = %#v, want state killed and not running", rows[0])
 	}
 }
+
+// TestParseJobListFreeTextFields covers free-text status/command values that
+// contain the later field names: a kill reason like "exit=1 duration_ms=2
+// command=x" must not shift the real exit/duration/command fields.
+func TestParseJobListFreeTextFields(t *testing.T) {
+	text := "jobs: 1\n- job-x [bash] state=killed status=killed (reason: exit=1 duration_ms=2 command=fake) exit=-1 duration_ms=1503 command=echo command=ok\n"
+	rows := parseJobList(text)
+	if len(rows) != 1 {
+		t.Fatalf("parseJobList() = %+v, want one row", rows)
+	}
+	got := rows[0]
+	if got.State != "killed" || got.Status != "killed (reason: exit=1 duration_ms=2 command=fake)" ||
+		got.ExitCode != -1 || got.Duration != 1503*time.Millisecond ||
+		got.Command != "echo command=ok" {
+		t.Fatalf("row = %+v, want the real trailing fields", got)
+	}
+}

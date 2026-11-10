@@ -52,36 +52,12 @@
   （避免上次访问留下的长/短两种导航形态；`internal/uiroot/shell_ux_test.go` 钉住）。
 - 新增 UI 时先查 §1 表与官方 docs；出现新的自绘控件必须在本文件与迁移文档记录理由。
 
-## 1.2 团队可见性 / 任务板约定（本轮 M1）
+## 1.2 团队 / 子代理 / 后台任务约定（2026-11-10 重构）
 
-- **运行态语义**：`contracts.TeamMember.Status` 只是 rig manager 的可用性（`active` /
-  `interrupted`），**不是运行态**；真实运行态在 `RunState`（`running`/`idle`/`done`/
-  `failed`/`interrupted`，agent 的 `team_state.go` 包装每个 spawn 的 `rig.Subagent` 跟踪）。
-  UI 任何位置不得把 `active` 画成「运行中」；未知 RunState（旧后端）回退为「空闲」而不是「运行中」。
-- **通知链**：团队变化（spawn/send/interrupt/close/finish）由 agent 的
-  `notifyTeamChange()` 走既有 `ChatService.Subscribe` 通知所有会话；右栏订阅回调在
-  `Post` 里同时失效 **log 与 tasks 缓存**（`tasksLoaded=false`）——任务板打开时 agent 写入
-  `team_task_*` 不再显示旧数据（T-03 回归由 `tasks-auto-refresh` drive 步骤与帧测试覆盖）。
-- **契约增量（nil-safe）**：`TeamMember` 的 RunState/Error/Model/Started/Finished/
-  UsageTokens/Iterations、`TeamActivity`（有界：总 ≤200、每成员 ≤30）+ 可选
-  `TeamActivityLister`；`BoardTask.BlockedBy/WriteScopes`；可选 `TaskAssigner`（无实现时
-  owner 只读，不画死菜单）。
-- **稳定命令 ID**：`rightpanel.team.open` / `rightpanel.tasks.open`（palette/会话页头团队
-  chip 共用；命令在检查器关闭时先打开检查器再切 pane，一条调用链完成）。命令 Hint 必须
-  包含「团队」/「任务」（en: team/tasks）关键词，palette 搜索才能命中。
-- **原生选型**：团队 pane = 段头（主代理/队友/同步子代理·只读）+ `ui.List`（无卡片墙）；
-  任务板 = `ui.List` 的 `Header` 状态分组+计数、行内 owner 用 `PopoverMenuButton`（→
-  `TaskAssigner`）、`Selected`+`Submitted` 展开到列表下方 `design.Panel()`；会员详情 =
-  `design.Panel()` + `ui.Spinner`/`Badge`/`Selectable` 文本 + 复制产出用 `c.WriteClipboard`；
-  新建队友 = `ui.Form/Field` + `ui.Modal`（无默认动作）；完成/失败通知 = `Notifier` 的
-  可选 `ActionNotifier`（「查看」跳 pane 选中该成员，按 Finished 时间戳去重，首次观察不弹历史；
-  预览必须清洗：去 code fence 及其内容、去 `#`/`>`/列表符号与行内反引号、空白折叠、≤80 rune 截断）。
-- **证据**：帧测试 `TestAgentsRunStateBadgesAreTruthful`、`TestAgentsCompletionToastOnceAndViewAction`、
-  `TestAgentsEmptyStateExplainsTeamAndOpensSpawnForm`、`TestAgentsCloseConfirmationHasNoDefaultAction`、
-  `TestTasksChatNotifyRefreshesOpenPane`、`TestTasksOwnerDisplayAndAssign`、`TestTasksDependencyLine`、
-  `TestTasksEnterExpandsDetail`、`TestTasksDeleteConfirmationHasNoDefault`、
-  `TestOpenPaneCommandsStableIDs`；ui-drive `team-*`/`tasks-*`/`palette-team` 步骤；快照
-  `p2-team-chip/p2-team-detail/p2-team-spawn/p2-tasks-expanded/p2-palette-team`。
+- **团队与子代理不再有右栏 pane**：会话头部三个入口（`智能体团队 / 子智能体 N / N 个后台任务`）打开官方 `PopoverBase` 原生浮层；团队浮层 = 成员卡 + 共享任务卡（只读），子代理浮层打开主栏子会话（面包屑返回），后台任务浮层可停止运行中的任务。
+- **跨模块命令 ID**：`uiroot.install-update`（更新安装，host 注册）、`rightpanel.files.open`（Ctrl/Cmd+Alt+P）、`rightpanel.terminal.open`（Ctrl/Cmd+`）；旧的 `rightpanel.team.open`/`rightpanel.tasks.open`/`rightpanel.pane.*` 已删除。
+- **数据来源**：`contracts.TeamService`/`TaskBoard`（只读展示），子代理与队友用 `contracts.ChildAgentService` 统一读模型（`ChildAgents`/`SendChildAgent`）；后台任务用 `contracts.JobService`。
+- **测试/Snapshot**：`internal/ui/session/agentsurface_test.go`、`internal/modules/agent/childagents_test.go`、`internal/modules/toolkit/jobs_service_test.go`；ui-snapshot 场景 `p2-team-*`/`p2-jobs*`/`p2-child-*`。改动这些语义时同步本文件与 AGENT-SURFACES S9。
 
 ## 1.3 列表选择/激活、on-accent 前景、框架 locale（2026-11-10 修复轮）
 
