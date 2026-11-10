@@ -339,7 +339,6 @@ type fakeChat struct {
 	newSessionErr error
 	cancelErr     error
 	deleteErr     error
-	feedbackErr   error
 }
 
 func newFakeChat() *fakeChat {
@@ -455,72 +454,6 @@ func (f *fakeChat) setSendError(err error) {
 	f.mu.Lock()
 	f.sendErr = err
 	f.mu.Unlock()
-}
-
-// SetMessageFeedback implements contracts.SessionFeedbacker: it mirrors the
-// rating into the session read model (fault injection via setFeedbackError).
-func (f *fakeChat) SetMessageFeedback(sessionID, messageID, feedback string) error {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	if f.feedbackErr != nil {
-		return f.feedbackErr
-	}
-	session, ok := f.sessions[sessionID]
-	if !ok {
-		return fmt.Errorf("fakeChat: unknown session %q", sessionID)
-	}
-	for index := range session.Messages {
-		if session.Messages[index].ID != messageID {
-			continue
-		}
-		session.Messages[index].Feedback = feedback
-		f.sessions[sessionID] = session
-		return nil
-	}
-	return fmt.Errorf("fakeChat: unknown message %q in session %q", messageID, sessionID)
-}
-
-// setFeedbackError injects a feedback write failure.
-func (f *fakeChat) setFeedbackError(err error) {
-	f.mu.Lock()
-	f.feedbackErr = err
-	f.mu.Unlock()
-}
-
-// chatWithoutFeedback hides the optional SessionFeedbacker methods from the
-// wrapped chat service.
-type chatWithoutFeedback struct{ inner contracts.ChatService }
-
-func (c chatWithoutFeedback) Config() contracts.ChatConfig { return c.inner.Config() }
-
-func (c chatWithoutFeedback) Sessions() []contracts.ChatSessionInfo { return c.inner.Sessions() }
-
-func (c chatWithoutFeedback) Session(sessionID string) (contracts.ChatSession, bool) {
-	return c.inner.Session(sessionID)
-}
-
-func (c chatWithoutFeedback) ActiveSession() string { return c.inner.ActiveSession() }
-
-func (c chatWithoutFeedback) SetActiveSession(sessionID string) error {
-	return c.inner.SetActiveSession(sessionID)
-}
-
-func (c chatWithoutFeedback) NewSession(title string) (string, error) {
-	return c.inner.NewSession(title)
-}
-
-func (c chatWithoutFeedback) DeleteSession(sessionID string) error {
-	return c.inner.DeleteSession(sessionID)
-}
-
-func (c chatWithoutFeedback) Send(sessionID, prompt string) error {
-	return c.inner.Send(sessionID, prompt)
-}
-
-func (c chatWithoutFeedback) Cancel(sessionID string) error { return c.inner.Cancel(sessionID) }
-
-func (c chatWithoutFeedback) Subscribe(fn func(string)) (func(), error) {
-	return c.inner.Subscribe(fn)
 }
 
 func (f *fakeChat) Cancel(sessionID string) error {

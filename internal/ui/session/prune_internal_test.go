@@ -12,11 +12,10 @@ import (
 // app does not accumulate state for every session the user opens.
 func TestPruneMessageStateKeepsActiveSession(t *testing.T) {
 	st := &state{
-		scrollSession:    "s2",
-		thinkOpen:        map[string]bool{"m1": true, "m2": true},
-		processOpen:      map[string]bool{"m1": true, "m2": true},
-		toolOpen:         map[string]bool{"session.tool.m1.tool_a": true, "session.tool.m2.tool_b": true},
-		actionErrMessage: "m1",
+		scrollSession: "s2",
+		thinkOpen:     map[string]bool{"m1": true, "m2": true},
+		processOpen:   map[string]bool{"m1": true, "m2": true},
+		toolOpen:      map[string]bool{"session.tool.m1.tool_a": true, "session.tool.m2.tool_b": true},
 	}
 	pruneMessageState(st, []contracts.ChatMessage{{ID: "m2"}})
 
@@ -37,8 +36,5 @@ func TestPruneMessageStateKeepsActiveSession(t *testing.T) {
 	}
 	if !st.toolOpen["session.tool.m2.tool_b"] {
 		t.Fatal("toolOpen dropped the active conversation's row")
-	}
-	if st.actionErrMessage != "" {
-		t.Fatalf("actionErrMessage = %q, want cleared", st.actionErrMessage)
 	}
 }

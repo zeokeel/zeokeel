@@ -54,7 +54,7 @@ docs/screenshots files: 48
 ```
 1. 编排执行：真实 subagent/agentteam runner、Team UI/steer、goal 自动驱动
 2. Composer/plan/modes 高级控制：permission 访问模式、推理强度、plan mode keep-planning/feedback/plan 卡、
-   /plan /goal /compact /feedback /memory 命令
+   /plan /goal /compact /memory 命令
 3. presets/persona + @session 引用（modelcatalog 缺 context/effort/添加编辑/连接检查）
 4. 更新安装 + 桌面宿主：updater download/SHA256/stage/install、autostart/single-instance/窗口几何/通知/代理
 5. MCP/插件/artifact/todo 管理深度：stdio/workspace mcp.json/工具级开关、内置插件开关、artifact 历史、todo 面板
@@ -624,3 +624,26 @@ design-check 6/6（raw metric 45 ≤ 51）/mygo vet/`go test ./...`（45s）/`-r
 `p1-approval.png`（审批卡/composer 同步对齐 960）、`p2-toast.png`；对照上一版 840：
 `.cache/ui-conformance-display/p1-chat.png`。
 文档同步：AGENT-SURFACES S1 布局、DESIGN.md 布局 token 表、host 窗口注释。
+
+## 0.2.1 补丁（2026-11-10：消息元信息上移 + 移除消息评分）
+
+用户反馈两处：① 每条 AI 回复下面的独立「时间 · 用时 · tokens · ⋯」行在只有过程折叠的回复里像一行空白，
+应移到上面更紧凑；② 消息的「有帮助 / 没帮助」评分功能不需要，全部删除。
+
+- **元信息上移**：助手消息的 meta（时间/紧凑用量/⋯）改为**消息顶部**；可折叠过程的消息把 meta
+  放在「过程 · 思考 · N 个工具调用」摘要行右端（同一行，省掉原来的一行）；不可折叠的消息 meta
+  是回复上方一条右对齐紧凑行；流式无 meta；用户消息 meta 保持在气泡下方。实现：`buildAssistantMetaContent`
+  与折叠摘要同行，`buildAssistantMetaRow` 只作顶部包装，折叠触发器在行内创建；`CollapsibleBase`
+  触发器与 meta 为同一 Row 的兄弟，⋯ 点击不会触发折叠。
+- **评分功能整体移除**：删 `contracts` 的 `ChatMessage.Feedback`、`FeedbackGood/Bad`、
+  `SessionFeedbacker`、`MessageFeedbackSettingKey`；agent 的 `SetMessageFeedback`/读模型注入；
+  session 的 `/反馈` 命令、评分对话框、⋯ 菜单评分项与相关状态；导出（Markdown/JSONL）与
+  诊断报告里的评分字段；`ui/settings` 数据与隐私导出/诊断的评分统计；配套测试与文档。
+  旧版本遗留的 `feedback.<session>.<message>` 设置行不再被读取/导出，不影响会话数据。
+- **验证**：`scripts/verify.sh --no-smoke` **10/10 PASS**：gofmt/build/vet/designlint 0 new/
+  design-check 6/6（raw metric 45 ≤ 51）/mygo vet/`go test ./...`（42s，47 包）/`-race`（310s）/
+  regression **276 PASS / 0 SKIP / 0 FAIL**（移除 13 个评分相关回归用例）/ui-snapshot
+  **97 steps / 95 PNGs**。
+- **快照（人工查看）**：`.cache/ui-conformance-meta2/p1-chat.png`（meta 在消息顶部）、
+  `p2-process-fold.png`（折叠摘要与 meta 同一行）、`p2-message-actions.png`（菜单只剩
+  复制消息/重新生成/用量明细）、`p2-message-usage.png`。

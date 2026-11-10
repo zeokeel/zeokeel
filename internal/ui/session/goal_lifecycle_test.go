@@ -197,8 +197,8 @@ func TestGoalLifecycleCommandsRegisteredAndEnabled(t *testing.T) {
 			count++
 		}
 	}
-	if count != 15 {
-		t.Fatalf("session commands = %d, want 15", count)
+	if count != 14 {
+		t.Fatalf("session commands = %d, want 14", count)
 	}
 
 	// Completed goals disable both commands; a tracker without the lifecycle

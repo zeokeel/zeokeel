@@ -102,7 +102,7 @@ func buildScreen(
 		st.chatListSeen = false
 		st.trajList = ui.ListState{}
 		st.memoryList = ui.ListState{}
-		// Session-level feedback (export/regenerate/rating/command/auto-continue
+		// Session-level errors (export/regenerate/command/auto-continue
 		// failures) belongs to the conversation that raised it: a switch must
 		// not show another conversation's stale error row.
 		resetSessionErrors(st)
@@ -158,7 +158,6 @@ func buildScreen(
 		buildGoalDialog(c, t, runtime, st)
 		buildPlanDialog(c, t, runtime, st)
 		buildMemoryDialog(c, t, runtime, st)
-		buildFeedbackDialog(c, t, runtime, st)
 		buildHelpDialog(c, t, runtime, st)
 		// The attachment path fallback modal (ZK-09) is not command-family but
 		// also lives above the screen, next to the composer it stages into.
@@ -203,9 +202,6 @@ func pruneMessageState(st *state, messages []contracts.ChatMessage) {
 	prune(st.thinkOpen)
 	prune(st.toolOpen)
 	prune(st.processOpen)
-	if st.actionErrMessage != "" && !keep[st.actionErrMessage] {
-		st.actionErrMessage = ""
-	}
 }
 
 // --- session-scoped state helpers -------------------------------------------
@@ -219,10 +215,8 @@ func resetSessionErrors(st *state) {
 	}
 	st.exportErr = ""
 	st.regenerateErr = ""
-	st.feedbackErr = ""
 	st.commandErr = ""
 	st.autoContinueErr = ""
-	st.actionErrMessage = ""
 }
 
 // cancelRunningTurn stops the active run the way the 停止 control does: pause
@@ -267,7 +261,7 @@ func sessionDialogOpen(st *state) bool {
 	if st == nil {
 		return false
 	}
-	return st.goalOpen || st.planOpen || st.memOpen || st.feedbackOpen ||
+	return st.goalOpen || st.planOpen || st.memOpen ||
 		st.helpOpen || st.attachPathsOpen || st.memoryEditOpen || st.memoryClearOpen
 }
 
@@ -849,21 +843,6 @@ func transcriptText(chatSession contracts.ChatSession, english bool) string {
 			}
 			fmt.Fprintf(&builder, "[%s] %s (%s)\n", toolLabel, call.Name, call.Status)
 		}
-		if feedback := normalizeSessionFeedback(message.Feedback); feedback != "" {
-			label := "有帮助"
-			if feedback == contracts.FeedbackBad {
-				label = "没帮助"
-			}
-			if english {
-				label = "Helpful"
-				if feedback == contracts.FeedbackBad {
-					label = "Not helpful"
-				}
-				fmt.Fprintf(&builder, "> User feedback: %s\n", label)
-			} else {
-				fmt.Fprintf(&builder, "> 用户反馈：%s\n", label)
-			}
-		}
 	}
 	return strings.TrimRight(builder.String(), "\n")
 }
@@ -1023,8 +1002,18 @@ func buildAssistantMessage(c *ui.Context, t *design.Tokens, runtime contracts.UI
 	foldable := assistantProcessFoldable(message)
 	processOpen := foldable && st.processOpen[message.ID]
 	outer.Children(func() {
+		// The finished turn's meta (time/usage/⋯) is a header: on a folded turn
+		// it shares the 过程 summary row, otherwise it is the row above the
+		// reply. A streaming turn has no meta at all.
+		meta := func(c *ui.Context) {
+			if !message.Streaming {
+				buildAssistantMetaContent(c, t, runtime, st, message, canRegenerate)
+			}
+		}
 		if foldable {
-			processOpen = buildProcessSummary(c, t, runtime, st, message, processOpen)
+			processOpen = buildProcessSummary(c, t, runtime, st, message, processOpen, meta)
+		} else if !message.Streaming {
+			buildAssistantMetaRow(c, t, runtime, st, message, canRegenerate)
 		}
 		if foldable && !processOpen {
 			// Folded: the reply body and the decision cards the turn must not
@@ -1050,8 +1039,8 @@ func buildAssistantMessage(c *ui.Context, t *design.Tokens, runtime contracts.UI
 				buildRetryAction(c, t, runtime, st)
 			}
 		}
-		if !message.Streaming {
-			buildAssistantMetaRow(c, t, runtime, st, message, canRegenerate)
+		if st.regenerateErr != "" && canRegenerate && strings.TrimSpace(message.Error) == "" {
+			buildErrorLine(c, t, st.regenerateErr)
 		}
 	})
 }
@@ -1071,9 +1060,12 @@ func assistantProcessFoldable(message contracts.ChatMessage) bool {
 
 // buildProcessSummary draws the folded process line as a bare disclosure (the
 // product has no public component for it): one muted summary with the chevron
-// right after the text. It returns the resulting fold state; a click stores it in
-// the transcript state and asks for HoldPlace so the row keeps its place.
-func buildProcessSummary(c *ui.Context, t *design.Tokens, runtime contracts.UIRuntime, st *state, message contracts.ChatMessage, open bool) bool {
+// right after the text, and the turn's meta (time/usage/⋯) at the trailing edge
+// of the same row, so a folded turn spends one row instead of two. It returns
+// the resulting fold state; a click stores it in the transcript state and asks
+// for HoldPlace so the row keeps its place.
+func buildProcessSummary(c *ui.Context, t *design.Tokens, runtime contracts.UIRuntime, st *state,
+	message contracts.ChatMessage, open bool, meta func(c *ui.Context)) bool {
 	parts := []string{st.tr("过程", "Process")}
 	if strings.TrimSpace(message.Reasoning) != "" {
 		parts = append(parts, st.tr("思考", "Reasoning"))
@@ -1084,31 +1076,36 @@ func buildProcessSummary(c *ui.Context, t *design.Tokens, runtime contracts.UIRu
 	} else {
 		parts = append(parts, fmt.Sprintf(st.tr("%d 个工具调用", "%d tool calls"), tools))
 	}
-	if message.Usage != nil {
-		parts = append(parts, st.tr("用时 ", "Took ")+formatUsageDuration(message.Usage.DurationMS))
-	}
 	summary := strings.Join(parts, " · ")
-	end := ui.CollapsibleBase(c.Key("session.process."+message.ID), &open)
-	trigger := end.Trigger.FillWidth().AlignItems(ui.Center).Gap(design.Space2).
-		PaddingY(design.Space1).Radius(design.RadiusSM).Label(summary)
-	if end.Trigger.Hovered() || end.Trigger.Focused() {
-		trigger.Background(t.BgHover)
-	}
-	trigger.Children(func() {
-		// The fold header carries the same fixed 16 DIP marker column as the
-		// activity rows, with the disclosure chevron as its marker.
-		ui.Row(c).Width(design.Space4).Shrink(0).Justify(ui.Center).Children(func() {
-			ui.Icon(c, icons.ChevronRight()).Size(design.Space4, design.Space4).
-				TextColor(t.LabelTertiary).Rotate(90 * end.Progress())
+	ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(design.Space2).Children(func() {
+		// The disclosure is created inside the row so its trigger is a row
+		// child; the meta parts drawn after it share the same row.
+		end := ui.CollapsibleBase(c.Key("session.process."+message.ID), &open)
+		trigger := end.Trigger.Grow(1).AlignItems(ui.Center).Gap(design.Space2).
+			PaddingY(design.Space1).Radius(design.RadiusSM).Label(summary)
+		if end.Trigger.Hovered() || end.Trigger.Focused() {
+			trigger = trigger.Background(t.BgHover)
+		}
+		trigger.Children(func() {
+			// The fold header carries the same fixed 16 DIP marker column as the
+			// activity rows, with the disclosure chevron as its marker.
+			ui.Row(c).Width(design.Space4).Shrink(0).Justify(ui.Center).Children(func() {
+				ui.Icon(c, icons.ChevronRight()).Size(design.Space4, design.Space4).
+					TextColor(t.LabelTertiary).Rotate(90 * end.Progress())
+			})
+			design.Apply(ui.Text(c, summary), t.Font(design.TypeXXS)).TextColor(t.LabelSecondary)
 		})
-		design.Apply(ui.Text(c, summary), t.Font(design.TypeXXS)).TextColor(t.LabelSecondary)
-		ui.Spacer(c).Grow(1)
+		// The meta parts are siblings of the trigger, right-aligned by the
+		// growing trigger; the ⋯ click never falls through to the fold toggle.
+		if meta != nil {
+			meta(c)
+		}
+		if end.Trigger.Changed() {
+			st.processOpen[message.ID] = open
+			st.chatHoldPlace = true
+			runtime.Invalidate()
+		}
 	})
-	if end.Trigger.Changed() {
-		st.processOpen[message.ID] = open
-		st.chatHoldPlace = true
-		runtime.Invalidate()
-	}
 	return open
 }
 
@@ -1327,60 +1324,62 @@ func buildReasoningDisclosure(c *ui.Context, t *design.Tokens, st *state, messag
 	})
 }
 
-// buildAssistantMetaRow is the finished turn's one compact right-aligned meta
-// line: time, the usage summary and the ⋯ message-actions menu. It replaces the
-// old 32 DIP icon action row and the separate usage footer; every count is shown
-// in the shared compact units (no raw totals anywhere, including the details).
-func buildAssistantMetaRow(c *ui.Context, t *design.Tokens, runtime contracts.UIRuntime,
-	st *state, message contracts.ChatMessage, canRegenerate bool) {
-	chat, feedbacker, hasText, showFeedback := messageActionTarget(st, message)
+// buildAssistantMetaContent draws the finished turn's compact meta parts:
+// time, the usage summary and the ⋯ message-actions menu. It draws no row of its
+// own so the folded process row can host it at its trailing edge, next to the
+// 过程 summary, instead of spending a separate row under the turn.
+func buildAssistantMetaContent(c *ui.Context, t *design.Tokens, runtime contracts.UIRuntime,
+	st *state, message contracts.ChatMessage, canRegenerate bool) bool {
+	chat, hasText := messageActionTarget(st, message)
 	regenerate := canRegenerate && strings.TrimSpace(message.Error) == ""
 	hasUsage := message.Usage != nil
 	// A failed turn keeps its own error row and the labeled retry; its meta row
 	// only reports time/usage (no actions that would judge an unfinished answer).
-	hasMenu := strings.TrimSpace(message.Error) == "" && (hasText || regenerate || showFeedback || hasUsage)
+	hasMenu := strings.TrimSpace(message.Error) == "" && (hasText || regenerate || hasUsage)
 	hasTime := !message.CreatedAt.IsZero()
 	if !hasTime && !hasMenu {
-		return
+		return false
 	}
 	summary := usageSummaryText(st, message.Usage)
-	ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(design.Space1).Children(func() {
-		ui.Spacer(c).Grow(1)
+	if hasTime {
+		buildMessageTime(c, t, st.locale, message.CreatedAt)
+	}
+	if summary != "" {
 		if hasTime {
-			buildMessageTime(c, t, st.locale, message.CreatedAt)
+			metaSeparator(c, t)
 		}
-		if summary != "" {
-			if hasTime {
-				metaSeparator(c, t)
-			}
-			design.Apply(ui.Text(c, summary), t.Font(design.TypeXXXS)).
-				TextColor(t.LabelTertiary).NoWrap()
-		}
-		if hasMenu {
-			if hasTime || summary != "" {
-				metaSeparator(c, t)
-			}
-			buildMessageMoreButton(c, t, "session.actions."+message.ID,
-				st.tr("消息操作", "Message actions"), func(m *ui.Menu) {
-					buildAssistantActionsMenu(m, c, runtime, st, chat, feedbacker, message,
-						canRegenerate, hasText, showFeedback)
-				})
-		}
-	})
-	if st.feedbackErr != "" && st.actionErrMessage == message.ID {
-		buildErrorLine(c, t, st.feedbackErr)
+		design.Apply(ui.Text(c, summary), t.Font(design.TypeXXXS)).
+			TextColor(t.LabelTertiary).NoWrap()
 	}
-	if st.regenerateErr != "" && canRegenerate && strings.TrimSpace(message.Error) == "" {
-		buildErrorLine(c, t, st.regenerateErr)
+	if hasMenu {
+		if hasTime || summary != "" {
+			metaSeparator(c, t)
+		}
+		buildMessageMoreButton(c, t, "session.actions."+message.ID,
+			st.tr("消息操作", "Message actions"), func(m *ui.Menu) {
+				buildAssistantActionsMenu(m, c, runtime, st, chat, message,
+					canRegenerate, hasText)
+			})
 	}
+	return true
 }
 
-// buildAssistantActionsMenu fills the ⋯ menu of a finished turn: copy, regenerate,
-// the two rating radios (the current value checked; choosing the checked one
-// clears it) and the compact usage-detail submenu.
+// buildAssistantMetaRow wraps the meta content in a right-aligned row. It is the
+// header line of a turn without a folded process summary, so a finished turn
+// never ends with an isolated ⋯ row.
+func buildAssistantMetaRow(c *ui.Context, t *design.Tokens, runtime contracts.UIRuntime,
+	st *state, message contracts.ChatMessage, canRegenerate bool) {
+	ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(design.Space1).Children(func() {
+		ui.Spacer(c).Grow(1)
+		buildAssistantMetaContent(c, t, runtime, st, message, canRegenerate)
+	})
+}
+
+// buildAssistantActionsMenu fills the ⋯ menu of a finished turn: copy, regenerate
+// and the compact usage-detail submenu.
 func buildAssistantActionsMenu(m *ui.Menu, c *ui.Context, runtime contracts.UIRuntime,
-	st *state, chat contracts.ChatService, feedbacker contracts.SessionFeedbacker,
-	message contracts.ChatMessage, canRegenerate, hasText, showFeedback bool) {
+	st *state, chat contracts.ChatService, message contracts.ChatMessage,
+	canRegenerate, hasText bool) {
 	if hasText {
 		if m.Item(st.tr("复制消息", "Copy message")).Chosen() {
 			c.WriteClipboard(message.Text)
@@ -1390,18 +1389,6 @@ func buildAssistantActionsMenu(m *ui.Menu, c *ui.Context, runtime contracts.UIRu
 	if canRegenerate && strings.TrimSpace(message.Error) == "" {
 		if m.Item(st.tr("重新生成", "Regenerate")).Chosen() {
 			runRegenerate(st, runtime)
-		}
-	}
-	if showFeedback {
-		good := m.Item(st.tr("有帮助", "Helpful"))
-		good.Radio(message.Feedback == contracts.FeedbackGood)
-		if good.Chosen() {
-			st.toggleMessageFeedback(chat, feedbacker, runtime, message, contracts.FeedbackGood)
-		}
-		bad := m.Item(st.tr("没帮助", "Not helpful"))
-		bad.Radio(message.Feedback == contracts.FeedbackBad)
-		if bad.Chosen() {
-			st.toggleMessageFeedback(chat, feedbacker, runtime, message, contracts.FeedbackBad)
 		}
 	}
 	if message.Usage != nil {
@@ -1571,42 +1558,12 @@ func buildMessageTime(c *ui.Context, t *design.Tokens, locale contracts.LocaleSe
 }
 
 // messageActionTarget resolves the action affordances of one assistant turn:
-// the optional rating half of the chat backend and whether the turn has text to
-// copy. Ratings only make sense for a finished, successful reply.
-func messageActionTarget(st *state, message contracts.ChatMessage) (chat contracts.ChatService,
-	feedbacker contracts.SessionFeedbacker, hasText, showFeedback bool) {
+// the optional chat backend (for regenerate) and whether the turn has text to
+// copy.
+func messageActionTarget(st *state, message contracts.ChatMessage) (chat contracts.ChatService, hasText bool) {
 	hasText = strings.TrimSpace(message.Text) != ""
 	chat, _ = st.ctx.Get(contracts.KeyChat)
-	feedbacker, canRate := chat.(contracts.SessionFeedbacker)
-	sessionID := ""
-	if chat != nil {
-		sessionID = chat.ActiveSession()
-	}
-	showFeedback = canRate && chat != nil && sessionID != "" && message.ID != "" &&
-		!st.feedbackOpen && !message.Streaming && strings.TrimSpace(message.Error) == ""
-	return chat, feedbacker, hasText, showFeedback
-}
-
-// toggleMessageFeedback writes/untoggles one rating through the optional
-// SessionFeedbacker. Clicking the current value clears it.
-func (st *state) toggleMessageFeedback(chat contracts.ChatService, feedbacker contracts.SessionFeedbacker,
-	runtime contracts.UIRuntime, message contracts.ChatMessage, value string) {
-	sessionID := chat.ActiveSession()
-	if sessionID == "" {
-		return
-	}
-	next := value
-	if message.Feedback == value {
-		next = ""
-	}
-	if err := feedbacker.SetMessageFeedback(sessionID, message.ID, next); err != nil {
-		st.feedbackErr = st.tr("反馈保存失败：", "Failed to save feedback: ") + err.Error()
-		st.actionErrMessage = message.ID
-	} else {
-		st.feedbackErr = ""
-		st.actionErrMessage = ""
-	}
-	runtime.Invalidate()
+	return chat, hasText
 }
 
 // buildMessageError renders a failed assistant turn: a localized kind heading

@@ -294,62 +294,8 @@ func exportDataSessions(chat contracts.ChatService, st *dataPrivacyState, locale
 	}
 }
 
-// Session feedback kinds: the stored ChatMessage.Feedback values normalized for
-// the export/report copy.
-const (
-	feedbackHelpful = iota + 1
-	feedbackUnhelpful
-)
-
-// sessionFeedbackKind normalizes one stored feedback value (unknown/empty means
-// "not rated").
-func sessionFeedbackKind(raw string) int {
-	switch strings.ToLower(strings.TrimSpace(raw)) {
-	case contracts.FeedbackGood:
-		return feedbackHelpful
-	case contracts.FeedbackBad:
-		return feedbackUnhelpful
-	default:
-		return 0
-	}
-}
-
-// feedbackCounts returns the helpful/unhelpful counts of one message list.
-func feedbackCounts(messages []contracts.ChatMessage) (helpful, unhelpful int) {
-	for _, message := range messages {
-		switch sessionFeedbackKind(message.Feedback) {
-		case feedbackHelpful:
-			helpful++
-		case feedbackUnhelpful:
-			unhelpful++
-		}
-	}
-	return helpful, unhelpful
-}
-
-// chatFeedbackTotals counts the feedback ratings across every session the
-// diagnostics report can see.
-func chatFeedbackTotals(chat contracts.ChatService) (helpful, unhelpful int) {
-	sessions, ok := dataSessionList(chat)
-	if !ok {
-		return 0, 0
-	}
-	for _, info := range sessions {
-		session, ok := chat.Session(info.ID)
-		if !ok {
-			continue
-		}
-		good, bad := feedbackCounts(session.Messages)
-		helpful += good
-		unhelpful += bad
-	}
-	return helpful, unhelpful
-}
-
 // sessionsMarkdown renders every session as `# title` followed by one
-// `**role**: text` line per message. Rated messages add a `> 用户反馈` line and a
-// session with ratings starts with a feedback summary. It returns the exported
-// session count.
+// `**role**: text` line per message. It returns the exported session count.
 func sessionsMarkdown(chat contracts.ChatService, sessions []contracts.ChatSessionInfo, locale contracts.LocaleService) (string, int) {
 	var builder strings.Builder
 	count := 0
@@ -361,20 +307,9 @@ func sessionsMarkdown(chat contracts.ChatService, sessions []contracts.ChatSessi
 		count++
 		title := firstNonEmpty(session.Title, info.Title, localized(locale, "未命名会话", "Untitled session"))
 		fmt.Fprintf(&builder, "# %s\n\n", title)
-		if helpful, unhelpful := feedbackCounts(session.Messages); helpful+unhelpful > 0 {
-			fmt.Fprintf(&builder, localized(locale,
-				"反馈：%d 有帮助 / %d 没帮助", "Feedback: %d helpful / %d not helpful")+"\n\n",
-				helpful, unhelpful)
-		}
 		for _, message := range session.Messages {
 			role := firstNonEmpty(strings.TrimSpace(message.Role), "unknown")
 			fmt.Fprintf(&builder, "**%s**: %s\n\n", role, message.Text)
-			switch sessionFeedbackKind(message.Feedback) {
-			case feedbackHelpful:
-				builder.WriteString(localized(locale, "> 用户反馈：有帮助", "> User feedback: Helpful") + "\n\n")
-			case feedbackUnhelpful:
-				builder.WriteString(localized(locale, "> 用户反馈：没帮助", "> User feedback: Not helpful") + "\n\n")
-			}
 		}
 	}
 	return strings.TrimRight(builder.String(), "\n") + "\n", count
@@ -451,9 +386,6 @@ func diagnosticReportText(kctx cordis.Context, store contracts.SettingsService, 
 	fmt.Fprintf(&builder, "%s: %s\n", localized(locale, "数据目录", "Data directory"),
 		firstNonEmpty(strings.TrimSpace(dataDir), localized(locale, "未设置", "not set")))
 	fmt.Fprintf(&builder, "%s: %d\n", localized(locale, "会话数", "Sessions"), sessionCount)
-	helpful, unhelpful := chatFeedbackTotals(chat)
-	fmt.Fprintf(&builder, localized(locale, "反馈：有帮助 %d", "Feedback: helpful %d")+"\n", helpful)
-	fmt.Fprintf(&builder, localized(locale, "反馈：没帮助 %d", "Feedback: not helpful %d")+"\n", unhelpful)
 	fmt.Fprintf(&builder, "\n%s:\n", localized(locale, "设置项", "Settings"))
 	values := store.All()
 	keys := make([]string, 0, len(values))

@@ -89,9 +89,6 @@ func exportJSONLTranscript(chatSession contracts.ChatSession) (string, error) {
 		if message.Error != "" {
 			record["error"] = message.Error
 		}
-		if feedback := normalizeSessionFeedback(message.Feedback); feedback != "" {
-			record["feedback"] = feedback
-		}
 		if len(message.Tools) > 0 {
 			tools := make([]map[string]any, 0, len(message.Tools))
 			for _, tool := range message.Tools {

@@ -215,18 +215,6 @@ type state struct {
 	// the last assistant turn.
 	regenerateErr string
 
-	// feedbackErr is the last good/bad feedback write failure shown under the
-	// assistant action row.
-	feedbackErr string
-
-	// /feedback dialog target and state.
-	feedbackOpen        bool
-	feedbackSessionID   string
-	feedbackMessageID   string
-	feedbackMessageText string
-	feedbackCurrent     string
-	feedbackDialogErr   string
-
 	// goal is the active goal shown in the header (nil when none); goalTracker
 	// is the optional host bridge used to clear it. Both are UI-thread state.
 	goal        *contracts.Goal
@@ -290,11 +278,6 @@ type state struct {
 	// there instead of permanent header badges.
 	notifier contracts.Notifier
 
-	// actionErrMessage is the message whose message-actions write (feedback)
-	// failed, so the error line shows under that message's meta row only and a
-	// conversation switch drops it.
-	actionErrMessage string
-
 	// queuedPrompts holds, per session ID, the prompts submitted while a turn
 	// was running (only when ui.sendWhileRunning is on). The queue belongs to
 	// its session: switching conversations never drops it, and the module-level
@@ -350,10 +333,6 @@ type state struct {
 	memOpen   bool
 	memDraft  string
 	memErr    string
-
-	// /feedback dialog: the message being rated and the rating chosen in the
-	// dialog before it is saved (empty = no rating).
-	feedbackRating string
 }
 
 // tr returns the localized copy for the current frame's language.
@@ -680,7 +659,6 @@ func goalCompletable(st *state) bool {
 func sessionCommands(runtime contracts.UIRuntime, navigator contracts.Navigator,
 	chat contracts.ChatService, config Config, st *state) []contracts.CommandSpec {
 	_, forkerOK := chat.(contracts.SessionForker)
-	_, feedbackerOK := chat.(contracts.SessionFeedbacker)
 	activeSession := func() (contracts.ChatSession, bool) {
 		id := chat.ActiveSession()
 		if id == "" {
@@ -835,23 +813,6 @@ func sessionCommands(runtime contracts.UIRuntime, navigator contracts.Navigator,
 			Order:   62,
 			Enabled: func() bool { return st.memoryStore != nil },
 			Run:     func() error { openMemoryDialog(st, runtime); return nil },
-		},
-		{
-			ID:    "zeokeel.session.feedback",
-			Title: st.tr("反馈", "Feedback"),
-			Hint:  st.tr("评价最近一条回答", "Rate the latest answer"),
-			Order: 63,
-			Enabled: func() bool {
-				if !feedbackerOK {
-					return false
-				}
-				_, message, ok := latestAssistantTarget(chat)
-				return ok && strings.TrimSpace(message.ID) != ""
-			},
-			Run: func() error {
-				openFeedbackDialog(st, runtime, chat)
-				return nil
-			},
 		},
 		{
 			ID:      "zeokeel.session.permission",

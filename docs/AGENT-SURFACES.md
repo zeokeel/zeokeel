@@ -87,7 +87,7 @@ func SessionThread(c *ui.Context, o SessionThreadOptions)
 
 **布局与层级**：阅读列 `design.TranscriptWidth`（960，`MaxWidthPercent(92)`）居中；消息间距 `design.Space5`；正文优先，工具行弱化；页内不叠卡片。
 
-**交互/键盘/焦点**：List 行可选/可聚焦；Enter 展开折叠的推理/工具/过程详情；上下键滚动；动作收敛为消息元信息行上的一个 ⋯ 菜单（复制消息/重新生成/有帮助/没帮助/用量明细），时间与紧凑用量常显；`ui.NewTester` 可断言 `RoleList`/`RoleListItem` 行名与菜单项。
+**交互/键盘/焦点**：List 行可选/可聚焦；Enter 展开折叠的推理/工具/过程详情；上下键滚动；动作收敛为消息元信息行上的一个 ⋯ 菜单（复制消息/重新生成/用量明细）；元信息行（时间 + 紧凑用量）在助手消息顶部，折叠过程摘要与元信息共用一行；`ui.NewTester` 可断言 `RoleList`/`RoleListItem` 行名与菜单项。
 
 **a11y**：List `Label`（"对话消息"）；行 `Label` 只用「角色+序号」（避免 Markdown 源文本进 a11y 树）；流式结束 `c.Announce`；滚动浮层按钮有 Label。
 

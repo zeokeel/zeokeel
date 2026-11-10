@@ -226,7 +226,7 @@ func TestCommandFamilyRegisteredAndEnabled(t *testing.T) {
 	}
 
 	// The session command family now registers thirteen commands (new/fork/
-	// export/permission/settings + goal/plan/memory/feedback + stop/file/help +
+	// export/permission/settings + goal/plan/memory + stop/file/help +
 	// compact).
 	count := 0
 	for _, command := range h.ui.Runtime().Commands() {
@@ -234,8 +234,8 @@ func TestCommandFamilyRegisteredAndEnabled(t *testing.T) {
 			count++
 		}
 	}
-	if count != 15 {
-		t.Fatalf("session commands = %d, want 15", count)
+	if count != 14 {
+		t.Fatalf("session commands = %d, want 14", count)
 	}
 
 	// Without the optional backends the commands stay registered but disabled.

@@ -78,8 +78,6 @@ type ChatMessage struct {
 	// Usage is the token/time accounting of the assistant turn (nil when the
 	// provider reported none).
 	Usage *MessageUsage
-	// Feedback is the user's rating of an assistant turn: "", "good" or "bad".
-	Feedback string
 	// Error is set when the message (usually an assistant turn) failed.
 	Error string
 	// ErrorKind classifies Error for localized UI copy ("" = unknown/no error,
@@ -138,19 +136,6 @@ type ChatConfig struct {
 	ReasoningEffort string
 }
 
-// Message feedback values.
-const (
-	FeedbackGood = "good"
-	FeedbackBad  = "bad"
-)
-
-// SessionFeedbacker is the optional half of the chat service that records a
-// user's rating of one assistant message (persisted, restart-safe).
-type SessionFeedbacker interface {
-	// SetMessageFeedback records/looks the rating of messageID in sessionID.
-	SetMessageFeedback(sessionID, messageID, feedback string) error
-}
-
 // Manual context compaction (the /compact command). The agent backend replaces
 // the session history with the compactor's result; the error values let the UI
 // render a specific message.
@@ -174,11 +159,6 @@ type CompactResult struct {
 // idle session's persisted history on demand.
 type SessionCompactor interface {
 	CompactNow(ctx context.Context, sessionID string) (CompactResult, error)
-}
-
-// MessageFeedbackSettingKey stores one message's rating in settings.
-func MessageFeedbackSettingKey(sessionID, messageID string) string {
-	return "feedback." + sessionID + "." + messageID
 }
 
 // MessageErrorKind values classify a failed turn for localized UI copy.

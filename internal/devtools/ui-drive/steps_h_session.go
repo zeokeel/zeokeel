@@ -122,7 +122,7 @@ func (d *drive) runHSessionSteps() {
 		})
 
 	d.step("message-actions-copy", "session", "消息动作：元信息行 + ⋯ 菜单",
-		"每条助手消息底部常驻一条紧凑元信息行（时间 + 用时/紧凑 tokens）；⋯ 菜单提供复制消息/重新生成/有帮助/没帮助/用量明细", func(c *check) {
+		"每条助手消息的紧凑元信息（时间 + 用时/紧凑 tokens + ⋯）在消息顶部/与过程摘要同一行；⋯ 菜单提供复制消息/重新生成/用量明细", func(c *check) {
 			d.server.SetMode(scriptAnswer)
 			// Use a fresh one-turn conversation: the long driving session is
 			// scrolled, so its message rows are not reliable click targets.
@@ -170,8 +170,9 @@ func (d *drive) runHSessionSteps() {
 			d.drain(2)
 			c.require(c.has("复制消息"), "「消息操作」菜单缺少「复制消息」")
 			c.require(c.has("重新生成"), "「消息操作」菜单缺少「重新生成」")
-			c.require(c.has("有帮助") && c.has("没帮助"),
-				"「消息操作」菜单缺少「有帮助/没帮助」评分")
+			c.require(c.has("复制消息"), "「消息操作」菜单缺少「复制消息」")
+			c.require(!c.has("有帮助") && !c.has("没帮助"),
+				"「消息操作」菜单不应再有评分项")
 			if err := d.tester.ChooseMenuItem("复制消息"); err != nil {
 				c.failf("choose 复制消息: %v", err)
 				return

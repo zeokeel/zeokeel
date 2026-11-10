@@ -44,7 +44,7 @@ func TestAssistantProcessFoldsToSummary(t *testing.T) {
 	h := newHarness(t, foldChat(foldMessage()))
 	tester := h.tester()
 
-	summary := "过程 · 思考 · 2 个工具调用 · 用时 3.2s"
+	summary := "过程 · 思考 · 2 个工具调用"
 	h.assertTexts(tester, summary, "最终答复", "用时 3.2s · 1.2K tokens", "消息操作")
 	// The folded timeline is not rendered: no tool rows, no reasoning panel.
 	h.assertNoTexts(tester, "运行命令", "读取文件", "先想一想，再运行命令。")
@@ -91,7 +91,7 @@ func TestAssistantProcessFoldedKeepsDecisionCards(t *testing.T) {
 	h := newHarness(t, foldChat(message))
 	tester := h.tester()
 
-	h.assertTexts(tester, "过程 · 思考 · 2 个工具调用 · 用时 3.2s", "最终答复", "向用户提问")
+	h.assertTexts(tester, "过程 · 思考 · 2 个工具调用", "最终答复", "向用户提问")
 	if tester.HasText("运行命令") {
 		t.Fatalf("folded turn shows its compact tool row; texts = %v", tester.Texts())
 	}
@@ -236,7 +236,7 @@ func TestAssistantProcessFoldEnglishCopy(t *testing.T) {
 	h.ui.Locale().SetLanguage("en")
 	tester := h.tester()
 	tester.Frame()
-	summary := "Process · Reasoning · 2 tool calls · Took 3.2s"
+	summary := "Process · Reasoning · 2 tool calls"
 	h.assertTexts(tester, summary)
 	if !strings.Contains(summary, "2 tool calls") {
 		t.Fatalf("summary = %q", summary)
@@ -245,7 +245,7 @@ func TestAssistantProcessFoldEnglishCopy(t *testing.T) {
 
 // TestFailedTurnMetaRowHasNoActions covers the failed-turn rule: the error row
 // and the labeled retry stay, while the meta row only reports time/usage and
-// offers no actions (regenerate/feedback must not judge a failed answer).
+// offers no actions (regenerate must not judge a failed answer).
 func TestFailedTurnMetaRowHasNoActions(t *testing.T) {
 	message := contracts.ChatMessage{
 		ID: "m1", Role: contracts.ChatRoleAssistant, Text: "部分回答",

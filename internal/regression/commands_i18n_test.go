@@ -22,7 +22,6 @@ var englishSessionCommands = map[string][2]string{
 	"zeokeel.session.goal":       {"Set goal", "Set or clear a long-term goal for this conversation"},
 	"zeokeel.session.plan":       {"Review plan", "Submit a plan for the user to approve"},
 	"zeokeel.session.memory":     {"Add memory", "Save a global memory"},
-	"zeokeel.session.feedback":   {"Feedback", "Rate the latest answer"},
 	"zeokeel.session.permission": {"Permission mode", "Cycle permission: read-only → workspace-write → all permissions"},
 	"zeokeel.session.settings":   {"Settings", "Open the settings panel"},
 	"zeokeel.session.stop":       {"Stop", "Stop the current reply"},

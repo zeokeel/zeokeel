@@ -105,30 +105,6 @@ func TestMessageMetaRowIsResident(t *testing.T) {
 	if got := tester.Clipboard(); got != "可以复制的回答" {
 		t.Fatalf("clipboard = %q", got)
 	}
-	// No rating backend in this harness: the menu carries no rating radios.
-	h.assertNoTexts(tester, "有帮助", "没帮助")
-}
-
-// TestMessageActionsMenuCarriesRatings covers H15: the ⋯ entry opens the
-// message-actions menu with the rating radios, and choosing one reports through
-// the backend. The menu closes after a choice, so there is no unfolded action
-// strip to collapse.
-func TestMessageActionsMenuCarriesRatings(t *testing.T) {
-	chat := feedbackSessionChat()
-	h := newFeedbackHarness(t, chat)
-	tester := h.tester()
-	tester.Frame()
-
-	h.assertTexts(tester, "消息操作")
-	h.assertNoTexts(tester, "有帮助", "没帮助")
-	h.click(tester, "消息操作")
-	h.assertTexts(tester, "有帮助", "没帮助", "复制消息")
-	h.click(tester, "有帮助")
-	if call := chat.lastCall(t); call.messageID != "msg-assistant" || call.feedback != contracts.FeedbackGood {
-		t.Fatalf("feedback call = %+v, want the good rating", call)
-	}
-	h.assertNoTexts(tester, "有帮助", "没帮助", "已反馈")
-	h.assertNoTexts(tester, "已反馈")
 }
 
 // TestRegenerateLivesInMessageActionsMenu covers S-19 after the density

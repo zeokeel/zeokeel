@@ -311,7 +311,6 @@ var (
 	_ contracts.SessionWorkspaceSwitcher  = (*service)(nil)
 	_ contracts.SessionPermissionSwitcher = (*service)(nil)
 	_ contracts.SessionPresetSetter       = (*service)(nil)
-	_ contracts.SessionFeedbacker         = (*service)(nil)
 	_ contracts.SessionToolPermissions    = (*service)(nil)
 	_ contracts.Subagents                 = (*service)(nil)
 )
@@ -2088,7 +2087,6 @@ func (state *sessionState) snapshot(model string, settings contracts.SettingsSer
 		copied := message
 		copied.Tools = append([]contracts.ToolCall(nil), message.Tools...)
 		copied.Attachments = cloneAttachments(message.Attachments)
-		copied.Feedback = messageFeedbackValue(settings, state.id, copied.ID)
 		out.Messages = append(out.Messages, copied)
 	}
 	return out
