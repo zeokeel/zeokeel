@@ -83,10 +83,11 @@ func TestFilesListingIsCachedBetweenFrames(t *testing.T) {
 	}
 
 	// Entering a directory reads the new directory exactly once. A click only
-	// chooses the row now; the list's Submitted action opens the directory.
+	// chooses the row now; the list's Submitted action opens the directory, and
+	// the listing loads off the UI thread, so wait for it before asserting.
 	openEntry(t, tester, "docs")
-	if got := workspace.listings(); got != 3 {
-		t.Fatalf("directory listings = %d after navigating, want 3", got)
+	if !pumpFrames(tester, func() bool { return workspace.listings() == 3 }, 2*time.Second) {
+		t.Fatalf("directory listings = %d after navigating, want 3", workspace.listings())
 	}
 	h.assertTexts(tester, "readme.md")
 	if got := workspace.listings(); got != 3 {
