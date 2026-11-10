@@ -4,15 +4,15 @@
 [![Release](https://img.shields.io/github/v/release/zeokeel/zeokeel)](https://github.com/zeokeel/zeokeel/releases)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
-> **v0.2.17 — twenty-second public release** (2026-11-10). Native, compile-time modular
+> **v0.2.18 — twenty-third public release** (2026-11-10). Native, compile-time modular
 > AI agent for desktop, headless and ACP (Zed/editor) use; one Go binary, no
 > webview. Final verification: **10/10 PASS** (`./scripts/verify.sh --no-smoke`),
 > full test suite 48 packages green, regression **276 PASS / 0 SKIP / 0 FAIL**,
 > UI snapshot **98 steps / 96 PNGs**, designlint 0 new.
 > See [CHANGELOG.md](CHANGELOG.md) for the release notes.
 
-> **v0.2.17 主要变化**：修复 `apple-code-sign-action` 公证输入（必须传 App Store Connect API key 的 JSON）；
-> v0.2.16 的 dmg 已签名但公证步骤失败，本版补齐公证+staple。其余同 v0.2.16。
+> **v0.2.18 主要变化**：发布流水线精简——macOS 编译与 dmg/签名/公证合并在同一个 Linux job，
+> 去掉 tar.gz 回退资产，只发布签名+公证的 dmg。其余同 v0.2.17。
 
 ## 下载与运行 / Download and run
 
@@ -21,7 +21,7 @@ Prebuilt installers are attached to the [latest release](https://github.com/zeok
 | Platform | Architectures | Installer |
 | --- | --- | --- |
 | Linux | x86-64 (amd64), ARM64 | `zeokeel-<version>-linux-<arch>.AppImage` (chmod +x, run) |
-| macOS | Apple Silicon (arm64) | `zeokeel-<version>-arm64.dmg` (signed + notarized；runner 不可用时回退 `zeokeel-<version>-darwin-arm64.tar.gz`) |
+| macOS | Apple Silicon (arm64) | `zeokeel-<version>-arm64.dmg` (signed + notarized) |
 | Windows | x86-64 (amd64), ARM64 | `zeokeel-setup-<version>-<arch>.exe` (per-user NSIS installer, GUI app) |
 
 `SHA256SUMS.txt` lists the checksum of every asset. The binaries are built

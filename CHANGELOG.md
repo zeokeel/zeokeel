@@ -8,6 +8,17 @@ All notable changes to ZeoKeel are documented here. The format follows
 
 （暂无未发布改动）
 
+## [0.2.18] - 2026-11-10
+
+精简发布流水线：
+
+- **去掉 macOS tar.gz 回退资产**：只发布 `zeokeel-<version>-arm64.dmg`（签名+公证+staple）；
+  不再发布 `-darwin-arm64.tar.gz`。
+- **macOS 编译与打包合并进同一个 Linux job**：`package-macos`（`ubuntu-24.04`）里先
+  `mygo build -platform darwin/arm64`，再生成 dmg、签名、公证；删除单独的 `build-macos` job 和
+  upload/download artifact 往返（同一系统版本没必要拆两个 job）。
+- 其余平台构建不变（Windows/Linux 仍各自并行）。
+
 ## [0.2.17] - 2026-11-10
 
 修复 apple-code-sign-action 的公证输入：该 action 的 `notarize` 分支只接受
