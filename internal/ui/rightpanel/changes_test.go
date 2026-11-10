@@ -167,8 +167,11 @@ func TestChangesRefreshReloads(t *testing.T) {
 	h := newHarnessWithWorkspace(t, newFakeChat(), rightpanel.Config{}, workspace)
 	tester := h.tester()
 	h.selectPane(tester, "变更")
-	if calls := workspace.callCount(); calls != 1 {
-		t.Fatalf("Changes calls = %d, want 1 after opening the pane", calls)
+	// The read runs off the UI thread: wait for the call instead of asserting on
+	// the frame right after the pane switch (CI runners can be slower than the
+	// goroutine's Post).
+	if !pumpFrames(tester, func() bool { return workspace.callCount() == 1 }, 3*time.Second) {
+		t.Fatalf("Changes calls = %d, want 1 after opening the pane", workspace.callCount())
 	}
 	// Frames reuse the cache; only the native Refresh re-reads.
 	tester.Frame()
@@ -178,8 +181,8 @@ func TestChangesRefreshReloads(t *testing.T) {
 
 	workspace.setChanges(contracts.FileChange{Path: "second.go", Status: "A", Diff: ""})
 	h.click(tester, "刷新")
-	if calls := workspace.callCount(); calls != 2 {
-		t.Fatalf("Changes calls = %d after refresh, want 2", calls)
+	if !pumpFrames(tester, func() bool { return workspace.callCount() == 2 }, 3*time.Second) {
+		t.Fatalf("Changes calls = %d after refresh, want 2", workspace.callCount())
 	}
 	h.assertTexts(tester, "second.go")
 	h.assertNoTexts(tester, "first.go")

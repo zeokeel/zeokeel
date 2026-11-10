@@ -227,6 +227,11 @@ func (h *harness) tester() *ui.Tester {
 
 func (h *harness) click(tester *ui.Tester, label string) {
 	h.t.Helper()
+	// A pane that loads off the UI thread may not have built the target yet on a
+	// slow runner: wait for the element instead of asserting on one frame.
+	if !pumpFrames(tester, func() bool { _, ok := tester.Find(label); return ok }, 3*time.Second) {
+		h.t.Fatalf("click target %q not found; texts = %v", label, tester.Texts())
+	}
 	if err := tester.Click(label); err != nil {
 		h.t.Fatalf("click %q: %v; texts = %v", label, err, tester.Texts())
 	}
@@ -251,21 +256,40 @@ func (h *harness) selectPane(tester *ui.Tester, label string) {
 	tester.Frame()
 }
 
+// assertTexts waits for every wanted text: the Files/Changes/Log panes read
+// their backends off the UI thread, so on a slow machine the frame right after a
+// click can still be the loading state. Waiting on the observable text instead
+// of a fixed frame count is what makes the assertion deterministic.
 func (h *harness) assertTexts(tester *ui.Tester, wanted ...string) {
 	h.t.Helper()
-	for _, want := range wanted {
-		if !tester.HasText(want) {
-			h.t.Fatalf("frame does not show %q; texts = %v", want, tester.Texts())
+	settled := pumpFrames(tester, func() bool {
+		for _, want := range wanted {
+			if !tester.HasText(want) {
+				return false
+			}
 		}
+		return true
+	}, 3*time.Second)
+	if !settled {
+		h.t.Fatalf("frame does not show %v; texts = %v", wanted, tester.Texts())
 	}
 }
 
+// assertNoTexts waits until the unwanted texts are gone: after a navigation the
+// previous listing/preview can still be on screen for a frame while the next
+// off-thread read lands.
 func (h *harness) assertNoTexts(tester *ui.Tester, unwanted ...string) {
 	h.t.Helper()
-	for _, text := range unwanted {
-		if tester.HasText(text) {
-			h.t.Fatalf("frame unexpectedly shows %q; texts = %v", text, tester.Texts())
+	settled := pumpFrames(tester, func() bool {
+		for _, text := range unwanted {
+			if tester.HasText(text) {
+				return false
+			}
 		}
+		return true
+	}, 3*time.Second)
+	if !settled {
+		h.t.Fatalf("frame unexpectedly shows %v; texts = %v", unwanted, tester.Texts())
 	}
 }
 

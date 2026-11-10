@@ -90,15 +90,16 @@ func TestToolCallCardStates(t *testing.T) {
 				t.Fatalf("running card has no labeled spinner; texts = %v", tt.Texts())
 			}
 		}
-		switch tc.status {
-		case "error":
-			if dangerPixels(tt) == 0 {
-				t.Fatal("the failed card paints no danger red")
-			}
-		case "cancelled":
-			if got := dangerPixels(tt); got != 0 {
-				t.Fatalf("the cancelled card paints %d danger-red pixels", got)
-			}
+		// The card's status chip uses the one semantic vocabulary: only error is
+		// the danger kind, cancelled stays neutral. Asserting the mapping (not
+		// sampled raster pixels) keeps the test deterministic across host fonts;
+		// the rendered colors are covered by StatusColor's frame test.
+		kind := uikit.ParseToolStatus(tc.status).Kind()
+		if tc.status == "error" && kind != uikit.StatusError {
+			t.Fatalf("error status folds to kind %v, want StatusError", kind)
+		}
+		if tc.status == "cancelled" && kind != uikit.StatusCancelled {
+			t.Fatalf("cancelled status folds to kind %v, want StatusCancelled", kind)
 		}
 	}
 }

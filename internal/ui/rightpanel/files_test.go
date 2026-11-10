@@ -188,15 +188,23 @@ func setDirectoryPicker(t *testing.T, fn func(title string) (string, error)) {
 // text field is the user-visible content's programmatic equivalent.
 func assertPreviewContains(t *testing.T, tester *ui.Tester, want string) {
 	t.Helper()
-	for _, label := range []string{"文件内容", "File content"} {
-		if info, ok := tester.AccessByRole(ui.RoleTextField, label); ok {
-			if !strings.Contains(info.Value, want) {
-				t.Fatalf("file preview does not contain %q; value = %q", want, info.Value)
+	found := false
+	settled := pumpFrames(tester, func() bool {
+		for _, label := range []string{"文件内容", "File content"} {
+			if info, ok := tester.AccessByRole(ui.RoleTextField, label); ok {
+				found = true
+				return strings.Contains(info.Value, want)
 			}
-			return
 		}
+		return false
+	}, 3*time.Second)
+	if settled {
+		return
 	}
-	t.Fatalf("file preview editor is not exposed as a text field; texts = %v", tester.Texts())
+	if !found {
+		t.Fatalf("file preview editor is not exposed as a text field; texts = %v", tester.Texts())
+	}
+	t.Fatalf("file preview does not contain %q; texts = %v", want, tester.Texts())
 }
 
 func joinedTexts(tester *ui.Tester) string {
@@ -205,11 +213,17 @@ func joinedTexts(tester *ui.Tester) string {
 
 func assertContains(t *testing.T, tester *ui.Tester, fragments ...string) {
 	t.Helper()
-	frame := joinedTexts(tester)
-	for _, fragment := range fragments {
-		if !strings.Contains(frame, fragment) {
-			t.Fatalf("frame does not contain %q; texts = %v", fragment, tester.Texts())
+	settled := pumpFrames(tester, func() bool {
+		frame := joinedTexts(tester)
+		for _, fragment := range fragments {
+			if !strings.Contains(frame, fragment) {
+				return false
+			}
 		}
+		return true
+	}, 3*time.Second)
+	if !settled {
+		t.Fatalf("frame does not contain %v; texts = %v", fragments, tester.Texts())
 	}
 }
 
@@ -309,6 +323,7 @@ func clickCrumb(t *testing.T, tester *ui.Tester, name string) {
 	}
 	tester.ClickAt(info.Bounds.X+info.Bounds.W/2, info.Bounds.Y+info.Bounds.H/2)
 	tester.Frame()
+	waitFilesSettled(t, tester)
 }
 
 // openEntry activates one directory row the way the Files list now opens it:
@@ -317,12 +332,28 @@ func clickCrumb(t *testing.T, tester *ui.Tester, name string) {
 // keyboard focus is on the native list.
 func openEntry(t *testing.T, tester *ui.Tester, label string) {
 	t.Helper()
+	if !pumpFrames(tester, func() bool { _, ok := tester.Find(label); return ok }, 3*time.Second) {
+		t.Fatalf("row %q not found; texts = %v", label, tester.Texts())
+	}
 	if err := tester.Click(label); err != nil {
 		t.Fatalf("choose row %q: %v; texts = %v", label, err, tester.Texts())
 	}
 	tester.Frame()
 	tester.Key(0, ui.KeyEnter)
 	tester.Frame()
+	waitFilesSettled(t, tester)
+}
+
+// waitFilesSettled waits until the Files pane's off-thread listing read landed:
+// the pane shows a loading line while the read is in flight.
+func waitFilesSettled(t *testing.T, tester *ui.Tester) {
+	t.Helper()
+	settled := pumpFrames(tester, func() bool {
+		return !tester.HasText("正在读取目录…") && !tester.HasText("Reading the directory…")
+	}, 3*time.Second)
+	if !settled {
+		t.Fatalf("directory listing did not settle; texts = %v", tester.Texts())
+	}
 }
 
 func TestFilesNavigationAndBreadcrumb(t *testing.T) {
