@@ -69,7 +69,7 @@ download table.
 > team manager 编排与右侧「团队」面板（spawn/steer/interrupt）、@session 引用与推理强度（low/medium/high）、
 > composer /goal /plan /memory 对话框、更新下载+SHA256 暂存、MCP stdio 服务器、右侧「任务」面板、
 > 工件历史（Files「产物」）、单实例 + XDG autostart、install-on-restart、toast 通知、workspace mcp.json opt-in、
-> 网络代理设置、MCP 工具级开关、提示词预设（设置 CRUD + composer 插入）、可编辑模型（连接 + 模型列表 + 思考/生成参数）、
+> 网络代理设置、MCP 工具级开关、提示词预设（设置 CRUD + composer 插入）、可编辑模型列表（每模型独立服务商/Base URL/API Key + 思考强度/生成参数 + 默认模型；旧单连接自动迁移）、
 > 消息用量 footer/逐条复制/反馈 good-bad 与 /反馈 命令（导出含反馈）、计划模式 + keep-planning、自动化运行历史、
 > Memory 整理/清空、技能新建/删除、工件下载、系统托盘/关闭到托盘、全局热键、LSP 工具、聊天模式（普通/计划/精简/创作）、
 > Home 真实 composer、/停止 /附加文件 /帮助、数据与隐私页、通知开关、侧栏添加工作区、插件 MCP server 详情；
@@ -147,7 +147,7 @@ go test ./...
     provider/tools/history 全部来自 rig）
   - UI 模块 `zeokeel-ui/session`（对话页：Tabs/Scroll/TextArea/Collapsible/Badge/RenderTool）、
     `zeokeel-ui/sidebar`（新对话/SidebarItem 会话列表/设置入口）、
-    `zeokeel-ui/settings`（模型配置页：TextInput/TextArea，API key 打码）
+    `zeokeel-ui/settings`（模型列表页：添加/编辑弹窗用 TextInput/Select/NumberInput，API key 打码）
   - 端到端验证：真实 desktop assembly + 假 OpenAI SSE 服务 → 流式聊天 → 帧断言；Xvfb 真窗口冒烟
     （12 实例、screens [home session]）；截图见 `docs/screenshots/phase-1-*.png`
 - ✅ P1 会话持久化 + 审批 + 工具卡/轨迹（新增 kernel 模块）：
@@ -162,9 +162,9 @@ go test ./...
     E2E 覆盖「工具调用→审批弹窗→允许→工具执行→工具卡/轨迹展示→重启恢复」
   - 截图：`docs/screenshots/p1-approval.png`、`p1-chat.png`、`p1-trajectory.png`
 - ✅ P2（第一批）：Home 接入真实最近会话 + "开始新对话"；设置新增「外观」页（native Toggle 深色模式 +
-  native Select 界面语言，写 `ui.theme.dark`/`ui.language` 并立即生效）；模型页新增 DeepSeek/OpenAI/
-  Ollama 快速预设（native Button 填 draft，保存生效）。截图：`docs/screenshots/p2-home.png`、
-  `p2-appearance.png`
+  native Select 界面语言，写 `ui.theme.dark`/`ui.language` 并立即生效）；模型页支持添加多个服务商的模型
+  （每个模型独立 Base URL/API Key，内置 DeepSeek/OpenAI/Ollama 等常用服务商预设；模型列表是唯一模型来源）。
+  截图：`docs/screenshots/p2-home.png`、`p2-appearance.png`
 - ✅ P2（第二批，按老 UI 布局/功能对齐）：
   - 宿主布局改为老结构：品牌侧栏 → 新对话 → 首页导航 → 会话区（搜索/会话行/重命名/删除）→ footer；
     去掉自创的全局顶栏，屏幕自己拥有 header；右侧检查栏为**窗口级 docked 面板**（内容列右上角开关，
@@ -266,9 +266,10 @@ go test ./...
 - ✅ P5 Composer 深度（第一切片）：slash 命令「新会话/创建副本/导出对话/打开设置」（UIRuntime.Commands，
   `/` 菜单与 Cmd/Ctrl+K 共用）+ 最后一条 assistant 的「重新生成」（agent SessionRegenerator：截断旧回复、
   复用运行管线、持久化回滚）；截图 `p2-slash.png`
-- ✅ P5 模型切换：`zeokeel/modelcatalog` 预设（DeepSeek Chat/Reasoner）+ agent per-session 模型覆盖
-  （`SessionModelSwitcher`，settings 持久化，Send/Regenerate 使用会话模型）+ composer 模型菜单（打勾/当前/打开模型
-  设置回退）；desktop 25 实例 / registry 27；截图 `p2-modelmenu.png`、`p2-model-switched.png`
+- ✅ P5 模型切换：`zeokeel/modelcatalog` 用户模型列表（无内置默认模型；旧 chat.* 连接一次性迁移为列表行）+
+  agent per-session 模型覆盖（`SessionModelSwitcher`，settings 持久化，Send/Regenerate 使用会话模型）+
+  composer 模型菜单（打勾/当前/每模型思考强度/打开模型设置回退）；desktop 25 实例 / registry 27；
+  截图 `p2-modelmenu.png`、`p2-model-switched.png`
 - ✅ P5 Web search：`internal/websearch`（迁移旧 HTTP 搜索后端：POST/Bearer/limit/超时/1MiB）+ toolkit 动态注册
   `web_search`/`web_fetch`（assembly `toolkit.network=true`，settings 变更下一次调用生效）+ 设置「搜索」页；
   截图 `p2-search-settings.png`

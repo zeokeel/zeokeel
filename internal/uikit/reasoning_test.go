@@ -162,3 +162,83 @@ func TestReasoningMarkdownTheme(t *testing.T) {
 		t.Fatalf("default reasoning size = %v, want the XS metric %v", def.Theme.FontSize, wantSize)
 	}
 }
+
+// TestReasoningTraceInlineChevron covers the activity-band variant: the trace is
+// still the same disclosure (toggle, panel, OnToggle) with the chevron placed
+// right after the trigger's label instead of the row's far end.
+func TestReasoningTraceInlineChevron(t *testing.T) {
+	open := false
+	holdPlace := false
+	toggles := make([]bool, 0, 1)
+	tt := ui.NewTester(reasoningView(uikit.ReasoningTraceOptions{
+		Key:           "test.reasoning.inline",
+		Reasoning:     "先看认证模块。",
+		Open:          &open,
+		InlineChevron: true,
+		OnToggle:      func(next bool) { toggles = append(toggles, next) },
+		HoldPlace:     &holdPlace,
+	}), 480, 240)
+	tt.Frame()
+	info, ok := tt.AccessByRole(ui.RoleDisclosure, "思考")
+	if !ok || info.Expanded {
+		t.Fatalf("inline trace disclosure = %+v found %v, want a closed disclosure", info, ok)
+	}
+	if err := tt.Click("思考"); err != nil {
+		t.Fatalf("click inline trace: %v; texts = %v", err, tt.Texts())
+	}
+	tt.Frame()
+	if len(toggles) != 1 || toggles[0] != true {
+		t.Fatalf("inline toggle calls = %v, want [true]", toggles)
+	}
+	if !holdPlace {
+		t.Fatal("inline toggle did not ask for HoldPlace")
+	}
+	if !tt.HasText("先看认证模块") {
+		t.Fatalf("inline trace panel missing; texts = %v", tt.Texts())
+	}
+}
+
+// TestReasoningTraceMarkerColumn covers the activity band's fixed marker column:
+// the type glyph gets a fixed 16 DIP column, so the label copy starts a little
+// further right than the old inline glyph, and the disclosure still works.
+func TestReasoningTraceMarkerColumn(t *testing.T) {
+	open := false
+	toggles := make([]bool, 0, 1)
+	options := uikit.ReasoningTraceOptions{
+		Key:           "test.reasoning.marker",
+		Reasoning:     "第一行\n第二行",
+		Open:          &open,
+		InlineChevron: true,
+		MarkerColumn:  true,
+		OnToggle:      func(next bool) { toggles = append(toggles, next) },
+	}
+	tt := ui.NewTester(reasoningView(options), 480, 240)
+	tt.Frame()
+	if info, ok := tt.AccessByRole(ui.RoleDisclosure, "思考"); !ok || info.Expanded {
+		t.Fatalf("marker trace disclosure = %+v found %v, want a closed disclosure", info, ok)
+	}
+	markerLines, ok := tt.Find("2 行")
+	if !ok {
+		t.Fatalf("marker trace line count missing; texts = %v", tt.Texts())
+	}
+	plain := options
+	plain.Key = "test.reasoning.plain"
+	plain.MarkerColumn = false
+	plainTT := ui.NewTester(reasoningView(plain), 480, 240)
+	plainTT.Frame()
+	plainLines, ok := plainTT.Find("2 行")
+	if !ok {
+		t.Fatalf("plain trace line count missing; texts = %v", plainTT.Texts())
+	}
+	if markerLines.X <= plainLines.X {
+		t.Fatalf("marker column copy X=%.1f, plain X=%.1f: the fixed marker column should shift the label",
+			markerLines.X, plainLines.X)
+	}
+	if err := tt.Click("思考"); err != nil {
+		t.Fatalf("click marker trace: %v; texts = %v", err, tt.Texts())
+	}
+	tt.Frame()
+	if len(toggles) != 1 || toggles[0] != true {
+		t.Fatalf("marker toggle calls = %v, want [true]", toggles)
+	}
+}

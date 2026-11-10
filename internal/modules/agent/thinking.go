@@ -2,12 +2,14 @@ package agent
 
 // Thinking/reasoning resolution for one run.
 //
-// The composer lets the user pick a thinking mode per conversation (for
-// example "thinking off" for Qwen, "high" for reasoning_effort-based models, or
-// a user-defined mode with arbitrary request fields). The model catalog stores
-// each model's family, default mode and custom modes; this file resolves the
-// effective mode for a session and injects its parameters into every provider
-// request through rig.Request.Extra. The legacy per-session/config
+// The composer lets the user pick a thinking mode per conversation and model
+// (for example "thinking off" for Qwen, "high" for reasoning_effort-based
+// models, or a user-defined mode with arbitrary request fields). The override is
+// stored per (conversation, model), so switching models in one conversation
+// never carries another model's strength over. The model catalog stores each
+// model's family, default mode and custom modes; this file resolves the
+// effective mode for a session+model and injects its parameters into every
+// provider request through rig.Request.Extra. The legacy per-session/config
 // reasoning_effort flow remains supported as a fallback so existing settings and
 // conversations keep working.
 
@@ -57,30 +59,30 @@ func (s *service) sessionLegacyEffort(sessionID string) string {
 	return sanitizeReasoningEffort(s.cfg.ReasoningEffort)
 }
 
-// modelCatalogInfo resolves the configured model entry for modelID. Unknown
-// models get an inferred family so custom model IDs still offer the generic
-// reasoning-effort modes.
+// modelCatalogInfo resolves the configured model entry for modelID from the
+// user-edited model list. The product ships no built-in catalog, so a missing or
+// malformed list resolves to a synthesized entry with an ID-inferred family:
+// custom model IDs still offer the generic reasoning-effort modes, while the
+// legacy DeepSeek defaults no longer appear on their own.
 func (s *service) modelCatalogInfo(modelID string) contracts.ModelInfo {
-	models := contracts.DefaultModelCatalog()
-	if s.settings != nil {
-		if raw := s.settings.Get(contracts.SettingModelCatalogModels, ""); strings.TrimSpace(raw) != "" {
-			if parsed, err := contracts.ParseModelInfoList(raw); err == nil && len(parsed) > 0 {
-				models = parsed
-			}
-		}
+	models, err := contracts.LoadModelCatalog(s.settings)
+	if err != nil {
+		// Malformed JSON means "no configured models" here; the modelcatalog
+		// module owns the one-time warning for the same row.
+		models = nil
 	}
 	return contracts.ResolveModelInfo(models, modelID)
 }
 
 // thinkingParamsForSession resolves the effective thinking parameters for the
-// next request of one conversation. An empty map means "send no thinking
-// fields" (the provider default).
+// next request of one conversation and model. Thinking strength belongs to the
+// model: the per-(conversation, model) override wins, with the legacy
+// session-wide row kept only as a fallback for old conversations, so switching
+// models never carries another model's override over. An empty map means "send no
+// thinking fields" (the provider default).
 func (s *service) thinkingParamsForSession(sessionID, model string) map[string]any {
 	info := s.modelCatalogInfo(model)
-	sessionMode := ""
-	if s.settings != nil && sessionID != "" {
-		sessionMode = strings.TrimSpace(s.settings.Get(contracts.SessionThinkingSettingKey(sessionID), ""))
-	}
+	sessionMode := contracts.SessionThinkingOverride(s.settings, sessionID, model)
 	_, params := contracts.ResolveThinkingMode(info, sessionMode, s.sessionLegacyEffort(sessionID))
 	return params
 }

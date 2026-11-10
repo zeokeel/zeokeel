@@ -1098,12 +1098,12 @@ func TestHeaderCopyActions(t *testing.T) {
 	h := newHarness(t, chat)
 	tester := h.tester()
 
-	h.click(tester, "更多")
+	openConversationActions(t, h, tester)
 	h.click(tester, "复制会话 ID")
 	if got := tester.Clipboard(); got != "sess-1" {
 		t.Fatalf("clipboard = %q, want sess-1", got)
 	}
-	h.click(tester, "更多")
+	openConversationActions(t, h, tester)
 	h.click(tester, "复制对话")
 	got := tester.Clipboard()
 	if !strings.Contains(got, "用户: 你好") || !strings.Contains(got, "助手: 你好呀") {
@@ -1114,9 +1114,34 @@ func TestHeaderCopyActions(t *testing.T) {
 // --- helpers for the fixed interaction tests --------------------------------
 
 // openGoalActions opens the header goal chip's popover menu.
-func openGoalActions(t *testing.T, h *harness, tester *ui.Tester, chip string) {
+// openGoalActions opens the composer dock's goal ⋯ menu (the old header chip
+// label is now the dock's status badge, so the entry point is the ⋯ button).
+func openGoalActions(t *testing.T, h *harness, tester *ui.Tester, _ string) {
 	t.Helper()
-	h.click(tester, chip)
+	if err := tester.Click("目标操作"); err == nil {
+		tester.Frame()
+		return
+	}
+	if err := tester.Click("Goal actions"); err == nil {
+		tester.Frame()
+		return
+	}
+	t.Fatalf("goal actions entry missing; texts = %v", tester.Texts())
+}
+
+// openConversationActions opens the B3 top band's conversation-actions ⋯ menu
+// (the clipboard/export/archive entries; it replaced the old 更多 label).
+func openConversationActions(t *testing.T, h *harness, tester *ui.Tester) {
+	t.Helper()
+	if err := tester.Click("会话操作"); err == nil {
+		tester.Frame()
+		return
+	}
+	if err := tester.Click("Conversation actions"); err == nil {
+		tester.Frame()
+		return
+	}
+	t.Fatalf("conversation actions entry missing; texts = %v", tester.Texts())
 }
 
 // TestComposerEnglishHintFitsWithoutEllipsis is the S-05 regression: the

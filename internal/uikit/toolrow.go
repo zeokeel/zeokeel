@@ -87,6 +87,18 @@ type ToolRowOptions struct {
 	// Footer builds the panel's closing actions (cross-navigation to the team
 	// panel or the task board); nil adds none.
 	Footer func(c *ui.Context)
+	// InlineChevron puts the disclosure chevron right after the preview (one
+	// Space2 gap) instead of the row's far end, and stops the preview from
+	// growing, so a transcript activity band reads as one compact left-aligned
+	// row. The default false keeps the wide row's far-end chevron and growing
+	// preview for other callers.
+	InlineChevron bool
+	// MarkerColumn puts the category glyph (or the official spinner while the
+	// call runs) in a fixed 16 DIP column at the start of the line, so every row
+	// of a transcript activity band starts its copy on the same x and the reader
+	// can tell a reasoning row from a tool row at a glance. The default false
+	// keeps the old leading glyph inside the line.
+	MarkerColumn bool
 }
 
 // toolCallHeadOptions is the head of one tool-call line: the glyph, the friendly
@@ -151,6 +163,10 @@ func toolCallHead(c *ui.Context, t *design.Tokens, o toolCallHeadOptions) {
 func ToolRow(c *ui.Context, o ToolRowOptions) {
 	t := design.Of(c)
 	buildLine := func(c *ui.Context, progress float32, disclosure bool) {
+		if o.MarkerColumn {
+			buildActivityLine(c, t, o, progress, disclosure)
+			return
+		}
 		toolCallHead(c, t, toolCallHeadOptions{
 			Icon:        o.Icon,
 			Name:        o.Name,
@@ -163,14 +179,22 @@ func ToolRow(c *ui.Context, o ToolRowOptions) {
 		// results by default). The trigger keeps only icon, name, status and
 		// chevron, and the panel is the one place the result reads.
 		if o.Preview != "" && !o.Open {
-			design.Apply(ui.Text(c, o.Preview), t.Font(design.TypeXXXS)).
-				TextColor(t.LabelTertiary).Grow(1).MaxLines(1).Ellipsis("…")
-		} else {
+			preview := design.Apply(ui.Text(c, o.Preview), t.Font(design.TypeXXXS)).
+				TextColor(t.LabelTertiary).MaxLines(1).Ellipsis("…")
+			if !o.InlineChevron {
+				preview.Grow(1)
+			}
+		} else if !o.InlineChevron {
 			ui.Spacer(c).Grow(1)
 		}
 		if disclosure {
 			ui.Icon(c, icons.ChevronRight()).Size(design.Space3, design.Space3).
 				TextColor(t.LabelTertiary).Rotate(90 * progress)
+		}
+		if o.InlineChevron {
+			// After the inline chevron the spacer takes the rest of the line, so
+			// a long preview stays one left-aligned string instead of stretching.
+			ui.Spacer(c).Grow(1)
 		}
 	}
 
@@ -225,6 +249,44 @@ func ToolRow(c *ui.Context, o ToolRowOptions) {
 	if parts.Trigger.Changed() && o.Toggle != nil {
 		o.Toggle(open)
 	}
+}
+
+// buildActivityLine draws one tool row in the transcript's activity band: a
+// fixed 16 DIP marker column (the category glyph, or the official spinner while
+// the call runs), the friendly action name, the status, a muted middle dot and
+// the one-line preview, then the inline chevron. The marker column lets a reader
+// tell a reasoning row from a tool row at one x; the muted dot separates the
+// action name from its preview without another label.
+func buildActivityLine(c *ui.Context, t *design.Tokens, o ToolRowOptions, progress float32, disclosure bool) {
+	ui.Row(c).Width(design.Space4).Shrink(0).Justify(ui.Center).Children(func() {
+		if o.Running {
+			ui.Spinner(c).Label(o.Status).Size(design.Space3, design.Space3).
+				TextColor(o.StatusColor)
+			return
+		}
+		icon := o.Icon
+		if icon == nil {
+			icon = icons.Message()
+		}
+		ui.Icon(c, icon).Size(design.Space4, design.Space4).TextColor(t.LabelTertiary)
+	})
+	design.Apply(ui.Text(c, o.Name), t.Font(design.TypeXXS)).
+		TextColor(t.LabelSecondary).MaxLines(1).Ellipsis("…")
+	if o.Status != "" {
+		design.Apply(ui.Text(c, o.Status), t.Font(design.TypeXXXS)).
+			TextColor(o.StatusColor).NoWrap()
+	}
+	if o.Preview != "" && !o.Open {
+		design.Apply(ui.Text(c, "·"), t.Font(design.TypeXXXS)).
+			TextColor(t.LabelTertiary).NoWrap()
+		design.Apply(ui.Text(c, o.Preview), t.Font(design.TypeXXXS)).
+			TextColor(t.LabelTertiary).MaxLines(1).Ellipsis("…")
+	}
+	if disclosure {
+		ui.Icon(c, icons.ChevronRight()).Size(design.Space3, design.Space3).
+			TextColor(t.LabelTertiary).Rotate(90 * progress)
+	}
+	ui.Spacer(c).Grow(1)
 }
 
 // ToolPanelSectionView draws one expanded-panel section: a muted uppercase-ish

@@ -31,16 +31,16 @@ func TestSessionI18nSwitchToEnglishAndBack(t *testing.T) {
 	tester := h.tester()
 
 	// Default: the existing Chinese copy is unchanged.
-	h.assertTexts(tester, "对话", "轨迹", "记忆", "更多", "输入消息…", "发送", "思考")
+	h.assertTexts(tester, "对话", "轨迹", "记忆", "会话操作", "输入消息…", "发送", "思考")
 
 	h.ui.Locale().SetLanguage("en")
 	tester.Frame()
 	h.assertTexts(tester,
-		"Chat", "Trajectory", "Memory", "More",
+		"Chat", "Trajectory", "Memory", "Conversation actions",
 		"Ask ZeoKeel…", "Send", "Reasoning")
 
 	// The header overflow menu is translated too.
-	h.click(tester, "More")
+	openConversationActions(t, h, tester)
 	h.assertTexts(tester, "Copy session ID", "Copy conversation", "Export Markdown")
 	h.click(tester, "Copy session ID")
 	if got := tester.Clipboard(); got != "sess-1" {
@@ -49,7 +49,7 @@ func TestSessionI18nSwitchToEnglishAndBack(t *testing.T) {
 
 	// Export dialog title uses English copy: the seam receives it as its first
 	// argument (the success feedback is a toast).
-	h.click(tester, "More")
+	openConversationActions(t, h, tester)
 	h.click(tester, "Export Markdown")
 	h.assertNoTexts(tester, "导出失败", "Export failed")
 	if exportTitle != "Export conversation" {
@@ -70,7 +70,7 @@ func TestSessionI18nSwitchToEnglishAndBack(t *testing.T) {
 	// Switching back restores the Chinese copy on the next frame.
 	h.ui.Locale().SetLanguage("zh")
 	tester.Frame()
-	h.assertTexts(tester, "对话", "轨迹", "记忆", "更多", "输入消息…", "发送", "思考")
+	h.assertTexts(tester, "对话", "轨迹", "记忆", "会话操作", "输入消息…", "发送", "思考")
 }
 
 func TestSessionI18nEmptyHero(t *testing.T) {

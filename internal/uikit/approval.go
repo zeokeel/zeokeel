@@ -1,22 +1,32 @@
 package uikit
 
-// The approval dialog entry component (AGENT-SURFACES.md S4): the one native
-// mygo Modal the product shows before a tool call runs, with the three-way
-// safety decision. The component owns the anatomy, the footer order and the
-// keyboard contract; the module passes the request, the queue length and the
-// resolved labels, and stores only the queue/data state.
+// The approval entry component (AGENT-SURFACES.md S4): the product shows one
+// pending tool-call request before it runs and asks for the three-way safety
+// decision.
+//
+// Two presentations share one anatomy and one decision contract:
+//   - Inline is the product path: a card in the session's banner slot, directly
+//     above the composer (ApprovalDialogOptions.Inline). It is deliberately not
+//     a dialog: the user keeps reading and typing while a call waits, the card
+//     stays visible in the conversation flow, and its emphasis comes from the V3
+//     treatment — a warning banner, a neutral raised body and a warning border —
+//     so it can never be mistaken for an ordinary tool card.
+//   - The native Modal is kept for compatibility (tests and hosts that still
+//     want a blocking gate); Inline=false renders it exactly as before.
 //
 // Safety contract (locked here, never re-composed by a caller):
-//   - the footer is the product's DialogFooter order: Deny (Danger) first,
-//     the session-scoped allow, Allow (Primary) rightmost;
+//   - the footer is the product's DialogFooter order: Deny first, the
+//     session-scoped allow, Allow (Primary) rightmost;
 //   - NO action is the Default and none is auto-focused, so a stray Enter
 //     (the user often presses it right after sending a prompt) decides
 //     nothing: neither an accidental allow nor an accidental deny;
-//   - Escape or a click outside the Modal is an explicit Deny, so a waiting
-//     tool call can never hang on a dialog the user cannot see.
+//   - the component itself handles no keyboard shortcut. In the Modal path
+//     Escape/backdrop are an explicit Deny; in the Inline path the session screen
+//     owns Escape (Escape resolves the oldest pending request as deny, see
+//     ui/session), so the card is never dismissed without an answer.
 //
-// The dialog draws only native controls (Modal, Row/Column, Text, Badge,
-// Divider, Scroll, Collapsible, DialogFooter) styled with internal/design.
+// The card draws only native controls (Row/Column, Text, Badge, Divider, Scroll,
+// Collapsible, DialogFooter) styled with internal/design.
 
 import (
 	"fmt"
@@ -30,8 +40,8 @@ import (
 	"github.com/zeokeel/zeokeel/internal/icons"
 )
 
-// approvalMaxArgumentsRunes bounds the raw command/argument text one dialog
-// renders: a request may belong to a huge tool call and the modal must stay
+// approvalMaxArgumentsRunes bounds the raw command/argument text one card
+// renders: a request may belong to a huge tool call and the card must stay
 // readable.
 const approvalMaxArgumentsRunes = 4000
 
@@ -40,15 +50,16 @@ const approvalMaxArgumentsRunes = 4000
 // token grid).
 const approvalArgumentsMaxHeight float32 = design.Space8*4 + design.Space3
 
-// ApprovalLabels is the configurable copy of one approval dialog. Empty fields
+// ApprovalLabels is the configurable copy of one approval card. Empty fields
 // fall back to the localized product defaults, so a host that only overrides
 // one label keeps the rest. The caller localizes the fields it passes (the
 // approval module keeps its assembly-config labels verbatim and localizes the
 // untouched defaults); the fallbacks use Locale.
 type ApprovalLabels struct {
-	// Title is the dialog heading (default "需要审批"/"Approval required").
+	// Title is the card heading (default "需要审批"/"Approval required").
 	Title string
-	// ToolLabel labels the tool row (default "工具"/"Tool").
+	// ToolLabel labels the tool row of the Modal presentation (default
+	// "工具"/"Tool"); the inline banner names the tool without a label.
 	ToolLabel string
 	// ArgumentsLabel labels the raw arguments block (default "参数"/"Arguments").
 	ArgumentsLabel string
@@ -74,37 +85,47 @@ func (l ApprovalLabels) resolved(locale contracts.LocaleService) ApprovalLabels 
 }
 
 // ApprovalDialogOptions is one pending approval request, rendered as the
-// product's approval Modal.
+// product's inline approval card (or, with Inline=false, the legacy Modal).
 type ApprovalDialogOptions struct {
 	// Request is the pending request (the oldest one of the queue).
 	Request contracts.ApprovalRequest
 	// Pending is the size of the pending queue; more than one shows the quiet
-	// "还有 N 个待审批请求" counter behind the title.
+	// "还有 N 条待审批" counter in the card's banner.
 	Pending int
 	// Labels is the configurable copy; zero fields use the product defaults.
 	Labels ApprovalLabels
-	// Open is the native Modal's open flag (required). Escape, a backdrop
-	// click or any decision sets it to false; the caller reopens it for the
-	// next queued request.
+	// Inline renders the in-flow card above the composer instead of the
+	// centred Modal. Inline mode ignores Open and never handles Escape or a
+	// backdrop click: the session screen owns the keyboard and the caller owns
+	// the pending queue.
+	Inline bool
+	// Open is the native Modal's open flag (Modal path only, required there).
+	// Escape, a backdrop click or any decision sets it to false; the caller
+	// reopens it for the next queued request.
 	Open *bool
-	// OnResolve receives the decision. Escape and a backdrop click resolve as
-	// Deny; the component never calls it twice for one opening.
+	// OnResolve receives the decision. In the Modal path Escape and a backdrop
+	// click resolve as Deny; the component never calls it twice for one opening.
 	OnResolve func(contracts.ApprovalDecision)
 	// Locale localizes the component's built-in copy (impact statement, hints,
 	// queue counter); nil falls back to the product's Chinese copy.
 	Locale contracts.LocaleService
 }
 
-// ApprovalDialog renders the oldest pending approval request in a native Modal.
-// It is a frame builder: it only builds controls, except for the decision and
-// dismissal handlers (the same immediate-mode pattern the modules use). The
-// component owns the dialog's visual state (the collapsed raw-arguments
-// disclosure), keyed by the request ID so the next request starts collapsed.
+// ApprovalDialog renders the oldest pending approval request: the inline card
+// (Inline) or the legacy native Modal. It is a frame builder: it only builds
+// controls, except for the decision and dismissal handlers (the same
+// immediate-mode pattern the modules use). The component owns the card's visual
+// state (the collapsed raw-arguments disclosure), keyed by the request ID so the
+// next request starts collapsed.
 func ApprovalDialog(c *ui.Context, o ApprovalDialogOptions) {
+	labels := o.Labels.resolved(o.Locale)
+	if o.Inline {
+		approvalInlineCard(c, o, labels)
+		return
+	}
 	if o.Open == nil || !*o.Open {
 		return
 	}
-	labels := o.Labels.resolved(o.Locale)
 	el := ui.Modal(c, o.Open, func() {
 		approvalRequestBody(c, o, labels)
 	})
@@ -117,6 +138,94 @@ func ApprovalDialog(c *ui.Context, o ApprovalDialogOptions) {
 	}
 }
 
+// approvalInlineCard is the product's V3 inline approval card: a warning banner
+// over a neutral raised body, outlined in the warning color so it stands out in
+// the conversation flow. It is built in the session's banner slot, above the
+// composer.
+func approvalInlineCard(c *ui.Context, o ApprovalDialogOptions, labels ApprovalLabels) {
+	t := design.Of(c)
+	request := o.Request
+	summary := strings.TrimSpace(request.Summary)
+	arguments := strings.TrimSpace(request.Arguments)
+	toolName := approvalToolName(o.Locale, request.Tool)
+	resolve := func(decision contracts.ApprovalDecision) {
+		if o.OnResolve != nil {
+			o.OnResolve(decision)
+		}
+	}
+
+	root := design.Apply(ui.Column(c.Key("uikit.approval/inline."+request.ID)).FillWidth(),
+		func(el ui.Element) ui.Element {
+			return el.Background(t.BgRaised).Border(1, t.Warning).Radius(design.RadiusLG)
+		})
+	root.Role(ui.RoleRegion).Label(labels.Title + " · " + toolName)
+	// The raw-arguments disclosure is the card's own visual state: it keeps its
+	// open flag across frames and starts collapsed for each new request.
+	argsOpen := ui.Local(root, "argsOpen", func() bool { return false })
+	root.Children(func() {
+		// The warning banner: the card's one strong emphasis, so it reads as a
+		// decision to make, not as another tool result.
+		design.Apply(ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(design.Space2),
+			func(el ui.Element) ui.Element {
+				return el.Background(t.Warning.Alpha(0.22)).
+					Padding(design.Space2, design.Space3).
+					Radius(design.RadiusLG, design.RadiusLG, design.RadiusXS, design.RadiusXS)
+			}).Children(func() {
+			ui.Icon(c, icons.Shield()).Size(design.Space3, design.Space3).
+				TextColor(t.WarningText)
+			design.Apply(ui.Text(c, labels.Title), t.Font(design.TypeS)).
+				Bold().TextColor(t.WarningText).NoWrap()
+			// The friendly name is what the user reads; the raw tool ID stays in
+			// the tooltip (and is what the backend reports back).
+			design.Apply(ui.Text(c, toolName), t.Font(design.TypeXXXS)).
+				TextColor(t.WarningText).Tooltip(request.Tool).NoWrap()
+			ui.Spacer(c).Grow(1)
+			if o.Pending > 1 {
+				// The rest wait behind this one; the banner counts them instead
+				// of rendering more cards.
+				design.Apply(ui.Text(c, fmt.Sprintf(T(o.Locale,
+					"还有 %d 条待审批", "%d more pending approvals"), o.Pending-1)),
+					t.Font(design.TypeXXXS)).TextColor(t.WarningText).NoWrap()
+			}
+			design.Apply(ui.Text(c, T(o.Locale, "Esc 拒绝", "Esc denies")),
+				t.Font(design.TypeXXXS)).TextColor(t.WarningText).NoWrap()
+		})
+		// The neutral body: what will run, the details and the decision. The
+		// body keeps the raised surface so the warning banner is the only
+		// colored region.
+		design.Apply(ui.Column(c).FillWidth().Gap(design.Space2),
+			func(el ui.Element) ui.Element {
+				return el.Background(t.BgRaised).Padding(design.Space3).
+					Radius(design.RadiusXS, design.RadiusXS, design.RadiusLG, design.RadiusLG)
+			}).Children(func() {
+			approvalImpactLine(c, t, o.Locale)
+			approvalSummarySection(c, t, o, summary, arguments)
+			approvalArgumentsSection(c, t, o, labels, request, arguments, argsOpen)
+			// The middle choice is session-scoped, not run-scoped: say so once
+			// in quiet copy, including where the user can take it back.
+			design.Apply(ui.Text(c, T(o.Locale,
+				"「本会话内始终允许」在本会话内不再询问该工具；可在会话设置菜单清除。",
+				"\"Always allow in this session\" stops this tool's prompts for this conversation; clear it from the session settings menu.")),
+				t.Font(design.TypeXXXS)).TextColor(t.LabelTertiary).MaxLines(2)
+			// The inline footer keeps the decision order (deny, session-scoped
+			// allow, allow) without the Modal's danger emphasis: the warning
+			// border and banner already carry the weight, and the deny stays the
+			// safest-looking leftmost action. No action is the Default.
+			DialogFooter(c, []DialogAction{
+				{Label: labels.DenyLabel, OnClick: func() {
+					resolve(contracts.ApprovalDeny)
+				}},
+				{Label: labels.AllowAlwaysLabel, OnClick: func() {
+					resolve(contracts.ApprovalAllowAlways)
+				}},
+				{Label: labels.AllowLabel, Primary: true, OnClick: func() {
+					resolve(contracts.ApprovalAllow)
+				}},
+			})
+		})
+	})
+}
+
 // approvalRequestBody is the Modal body: a brand title row with an approval
 // icon, the tool, a one-line impact statement, the summary first (a command for
 // shell tools), the argument details collapsed and the decision footer.
@@ -125,13 +234,7 @@ func approvalRequestBody(c *ui.Context, o ApprovalDialogOptions, labels Approval
 	request := o.Request
 	summary := strings.TrimSpace(request.Summary)
 	arguments := strings.TrimSpace(request.Arguments)
-	emptyArguments := arguments == "" || arguments == "{}" || arguments == "[]" || arguments == "null"
-	// The friendly name is what the user reads; the raw tool ID stays in the
-	// badge's tooltip (and is what the backend reports back).
-	toolName := ToolDisplayName(o.Locale, request.Tool)
-	if toolName == "" {
-		toolName = request.Tool
-	}
+	toolName := approvalToolName(o.Locale, request.Tool)
 	resolve := func(decision contracts.ApprovalDecision) {
 		*o.Open = false
 		if o.OnResolve != nil {
@@ -168,47 +271,9 @@ func approvalRequestBody(c *ui.Context, o ApprovalDialogOptions, labels Approval
 			design.Apply(ui.Text(c, labels.ToolLabel), t.TextMuted(design.TypeXS))
 			design.Apply(ui.Badge(c, toolName), t.Badge()).Tooltip(request.Tool)
 		})
-		// The approval only lets the call through the gate: the sandbox policy
-		// still runs it and may deny it, so the copy must not promise execution.
-		design.Apply(ui.Text(c, T(o.Locale,
-			"允许后将在沙箱策略限制内执行；策略仍可能拒绝该调用。",
-			"It runs within the sandbox policy after approval; the policy may still reject the call.")),
-			t.Font(design.TypeXS)).TextColor(t.LabelSecondary)
-		// What will run comes first: the summary is the thing the user is
-		// judging, labelled as a command only for shell/terminal tools.
-		if summary != "" && summary != arguments {
-			summaryLabel := approvalSummaryLabel(o.Locale, request.Tool)
-			design.Apply(ui.Text(c, summaryLabel), t.TextMuted(design.TypeXS))
-			design.Apply(ui.Row(c).FillWidth(), func(el ui.Element) ui.Element {
-				return el.Background(t.BgBase).Border(1, t.BorderL2).
-					Radius(design.RadiusSM).Padding(design.Space2)
-			}).Children(func() {
-				design.Apply(ui.Text(c, approvalTruncate(summary, approvalMaxArgumentsRunes)),
-					t.Font(design.TypeXS), t.MonoFamily()).TextColor(t.LabelPrimary)
-			})
-		}
-		// The raw arguments are details: collapsed, and "no arguments" instead
-		// of an empty box when the call carries {} / [] / null.
-		ui.Divider(c)
-		design.Apply(ui.Text(c, labels.ArgumentsLabel), t.TextMuted(design.TypeXS))
-		if emptyArguments {
-			design.Apply(ui.Text(c, T(o.Locale, "无参数", "No arguments")),
-				t.TextMuted(design.TypeXS))
-		} else {
-			// Two layers only: the configurable section label above the
-			// disclosure itself.
-			ui.Collapsible(c.Key("approval.arguments."+request.ID),
-				T(o.Locale, "显示原始参数", "Show raw arguments"), argsOpen, func() {
-					scroll := ui.Scroll(c).Height(approvalArgumentsMaxHeight).FillWidth()
-					design.Apply(scroll, func(el ui.Element) ui.Element {
-						return el.Background(t.BgBase).Border(1, t.BorderL2).
-							Radius(design.RadiusSM).Padding(design.Space2)
-					}).Children(func() {
-						design.Apply(ui.Text(c, approvalTruncate(arguments, approvalMaxArgumentsRunes)),
-							t.TextMuted(design.TypeXS), t.MonoFamily())
-					})
-				})
-		}
+		approvalImpactLine(c, t, o.Locale)
+		approvalSummarySection(c, t, o, summary, arguments)
+		approvalArgumentsSection(c, t, o, labels, request, arguments, argsOpen)
 		ui.Divider(c)
 		// The product's one dialog action bar: the destructive Deny first, the
 		// session-scoped allow, the accent Allow last (rightmost). No action is
@@ -242,6 +307,77 @@ func approvalRequestBody(c *ui.Context, o ApprovalDialogOptions, labels Approval
 	})
 }
 
+// approvalToolName returns the visible friendly name of one tool; an unknown
+// tool keeps its raw ID (the raw ID is always the tooltip/badge tooltip).
+func approvalToolName(locale contracts.LocaleService, tool string) string {
+	name := ToolDisplayName(locale, tool)
+	if name == "" {
+		return tool
+	}
+	return name
+}
+
+// approvalImpactLine renders the copy that keeps the gate honest: approval only
+// lets the call through the gate; the sandbox policy still runs it and may deny
+// it, so the copy must not promise execution.
+func approvalImpactLine(c *ui.Context, t *design.Tokens, locale contracts.LocaleService) {
+	design.Apply(ui.Text(c, T(locale,
+		"允许后将在沙箱策略限制内执行；策略仍可能拒绝该调用。",
+		"It runs within the sandbox policy after approval; the policy may still reject the call.")),
+		t.Font(design.TypeXS)).TextColor(t.LabelSecondary)
+}
+
+// approvalSummarySection renders the summary block first: what will run is the
+// thing the user is judging, labelled as a command only for shell/terminal
+// tools. It is skipped when the summary is empty or is just the raw arguments.
+func approvalSummarySection(c *ui.Context, t *design.Tokens, o ApprovalDialogOptions,
+	summary, arguments string) {
+	if summary == "" || summary == arguments {
+		return
+	}
+	design.Apply(ui.Text(c, approvalSummaryLabel(o.Locale, o.Request.Tool)),
+		t.TextMuted(design.TypeXS))
+	design.Apply(ui.Row(c).FillWidth(), func(el ui.Element) ui.Element {
+		return el.Background(t.BgBase).Border(1, t.BorderL2).
+			Radius(design.RadiusSM).Padding(design.Space2)
+	}).Children(func() {
+		design.Apply(ui.Text(c, approvalTruncate(summary, approvalMaxArgumentsRunes)),
+			t.Font(design.TypeXS), t.MonoFamily()).TextColor(t.LabelPrimary)
+	})
+}
+
+// approvalArgumentsSection renders the raw arguments as details: a divider, the
+// section label, then either the "no arguments" fallback or the collapsed,
+// bounded disclosure.
+func approvalArgumentsSection(c *ui.Context, t *design.Tokens, o ApprovalDialogOptions,
+	labels ApprovalLabels, request contracts.ApprovalRequest, arguments string, argsOpen *bool) {
+	ui.Divider(c)
+	design.Apply(ui.Text(c, labels.ArgumentsLabel), t.TextMuted(design.TypeXS))
+	if approvalEmptyArguments(arguments) {
+		design.Apply(ui.Text(c, T(o.Locale, "无参数", "No arguments")),
+			t.TextMuted(design.TypeXS))
+		return
+	}
+	// Two layers only: the configurable section label above the disclosure.
+	ui.Collapsible(c.Key("approval.arguments."+request.ID),
+		T(o.Locale, "显示原始参数", "Show raw arguments"), argsOpen, func() {
+			scroll := ui.Scroll(c).Height(approvalArgumentsMaxHeight).FillWidth()
+			design.Apply(scroll, func(el ui.Element) ui.Element {
+				return el.Background(t.BgBase).Border(1, t.BorderL2).
+					Radius(design.RadiusSM).Padding(design.Space2)
+			}).Children(func() {
+				design.Apply(ui.Text(c, approvalTruncate(arguments, approvalMaxArgumentsRunes)),
+					t.TextMuted(design.TypeXS), t.MonoFamily())
+			})
+		})
+}
+
+// approvalEmptyArguments reports whether a request carries no meaningful
+// arguments ({} / [] / null / empty).
+func approvalEmptyArguments(arguments string) bool {
+	return arguments == "" || arguments == "{}" || arguments == "[]" || arguments == "null"
+}
+
 // approvalSummaryLabel names the requested call's summary block. Only the shell
 // and terminal tools ask about a command line; a file read, a web fetch or a
 // team/task call would read as something to execute when labelled 命令, so they
@@ -256,9 +392,9 @@ func approvalSummaryLabel(locale contracts.LocaleService, tool string) string {
 	}
 }
 
-// approvalToolIcon picks the header glyph for the tool being approved:
-// destructive shell/file tools get the alert triangle, everything else the
-// shield.
+// approvalToolIcon picks the header glyph for the tool being approved in the
+// Modal presentation: destructive shell/file tools get the alert triangle,
+// everything else the shield.
 func approvalToolIcon(tool string) *ui.SVG {
 	switch strings.ToLower(strings.TrimSpace(tool)) {
 	case "bash", "write_file", "edit_file", "str_replace_editor",

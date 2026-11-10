@@ -49,7 +49,7 @@ Agent 客户端的 UI 不是 CRUD 页面，而是**推理与行动的外化**：
 
 ### S1 SessionThread（会话线程）
 
-**职责**：把 `[]ChatMessage` 渲染成可滚动、可流式跟随、可键盘/读屏访问的会话线程；承载消息体、推理、工具行、动作行、用量。
+**职责**：把 `[]ChatMessage` 渲染成可滚动、可流式跟随、可键盘/读屏访问的会话线程；承载消息体、推理、工具行、过程活动带与元信息行（时间/紧凑用量/单一 ⋯ 动作）。
 
 **数据模型**：`messages []contracts.ChatMessage`（`ID/Role/Text/Reasoning/Streaming/Error/ToolCalls/Feedback/CreatedAt/Usage`）、`running bool`、会话切换状态。
 
@@ -58,11 +58,13 @@ Agent 客户端的 UI 不是 CRUD 页面，而是**推理与行动的外化**：
 | 状态 | 表现 |
 |---|---|
 | empty | `List.Children` 渲染首屏 hero（不显示空白滚动区） |
-| streaming | 最后一行原地增长；`FollowEnd` 贴底；动作行隐藏；正文用 `markdown.Stream` |
+| streaming | 最后一行原地增长；`FollowEnd` 贴底；元信息行隐藏、过程活动带保持展开；正文用 `markdown.Stream` |
 | scrolled-up | 停止跟随；浮层「回到最新」（`ScrollToEnd`） |
 | fold-toggle | `ListState.HoldPlace()`，折叠行不跳动 |
 | session-switch | 重置 `ListState` / 展开状态 / 用量 / 滚动 |
-| error | 失败轮显示错误行 + 重试，不渲染动作行 |
+| error | 失败轮显示错误行 + 重试；元信息行只保留时间/用量，不提供 ⋯ 动作 |
+
+**会话壳层（B3 顶栏 + composer dock，2026-11-10）**：会话标题/工作区、运行中 chip、团队 chip、⋯「会话操作」菜单由宿主 B3 顶栏渲染（`screen.header` / `screen.actions` / `screen.tabs` 槽位，40px 标题行 + 32px Tabs 行（标题 TypeM 16px，与 13px Tabs / 12px badge / 16px 图标同尺度）、浅色 header 面、仅底边一条 hairline、行间无线、无返回按钮、无 `Alt+←` 历史回退）；屏幕 body 不再自建 header。目标条（Badge + 目标文本 + ⋯「目标操作」）与审批内联卡在 composer 上方 dock（阅读列宽度居中，`session.banner` 槽），不占 transcript 空间、不遮挡输入。通知/ toast 固定在右上角、B3 顶栏下方（最多 2 条，自上而下堆叠），不遮挡标题/Tabs/顶栏动作。
 
 **目标 API 草案**：
 
@@ -81,17 +83,17 @@ type SessionThreadOptions struct {
 func SessionThread(c *ui.Context, o SessionThreadOptions)
 ```
 
-**最终实现（Phase 3a）**：`uikit.SessionThread`（`internal/uikit/session.go`）——`Row`/`Empty` slot，`State`/`FollowEnd`/`LaidOut`/`HoldPlace`/`Error`/`OnRetry`/`Markdown`/`Locale`；动作行仍属消息体 `Row` slot（streaming 隐藏由业务实现，入口不重复渲染动作）。
+**最终实现（Phase 3a）**：`uikit.SessionThread`（`internal/uikit/session.go`）——`Row`/`Empty` slot，`State`/`FollowEnd`/`LaidOut`/`HoldPlace`/`Error`/`OnRetry`/`Markdown`/`Locale`；消息体（含折叠过程带与元信息行）仍属消息体 `Row` slot（streaming/失败态的元信息行隐藏由业务实现，入口不重复渲染动作）。
 
-**布局与层级**：阅读列 `design.TranscriptWidth`（840，`MaxWidthPercent(92)`）居中；消息间距 `design.Space5`；正文优先，工具行弱化；页内不叠卡片。
+**布局与层级**：阅读列 `design.TranscriptWidth`（960，`MaxWidthPercent(92)`）居中；消息间距 `design.Space5`；正文优先，工具行弱化；页内不叠卡片。
 
-**交互/键盘/焦点**：List 行可选/可聚焦；Enter 展开折叠的推理/工具详情；上下键滚动；复制/反馈动作行 hover 或 kebab 出现；`ui.NewTester` 可断言 `RoleList`/`RoleListItem` 行名。
+**交互/键盘/焦点**：List 行可选/可聚焦；Enter 展开折叠的推理/工具/过程详情；上下键滚动；动作收敛为消息元信息行上的一个 ⋯ 菜单（复制消息/重新生成/有帮助/没帮助/用量明细），时间与紧凑用量常显；`ui.NewTester` 可断言 `RoleList`/`RoleListItem` 行名与菜单项。
 
 **a11y**：List `Label`（"对话消息"）；行 `Label` 只用「角色+序号」（避免 Markdown 源文本进 a11y 树）；流式结束 `c.Announce`；滚动浮层按钮有 Label。
 
-**禁止**：`Scroll`+循环构建消息；手写"比较 scrollHeight"贴底；每帧重建全部消息；给每条消息套卡片；消息动作常驻三个等宽按钮。
+**禁止**：`Scroll`+循环构建消息；手写"比较 scrollHeight"贴底；每帧重建全部消息；给每条消息套卡片；消息动作常驻三个及以上按钮或独占 32px 动作行（必须收进元信息行的单一 ⋯）；用量以原始长数字展示（必须紧凑单位 K/M/B）。
 
-**当前实现**：`internal/ui/session/view.go` `buildChatPane`（List + ListState + FollowEnd + HoldPlace）与 `buildAssistantMessage`/`buildMessage`/动作行。帧测试：`internal/ui/session/transcript_window_test.go:32`（虚拟化）、`scroll_follow_test.go:35,65`（跟随）、`interaction_batch_a_test.go:123`（streaming 隐藏动作）。
+**当前实现**：`internal/ui/session/view.go` `buildChatPane`（List + ListState + FollowEnd + HoldPlace）与 `buildAssistantMessage`/`buildMessage`/过程折叠/元信息行。过程带：思考与非决策工具行以 16px 标记列（sparkles/工具分类图标/运行中 Spinner）+ 动作名 + 状态 + `·` 预览 + 内联 chevron 组成的一条缩进行距活动带；完成且过程 ≥2 行时折叠为一行摘要（`过程 · 思考 · N 个工具调用 · 用时`，流式展开），展开恢复完整时间线；决策卡（ask_user/plan_review/exit_plan_mode）不受折叠影响。帧测试：`internal/ui/session/transcript_window_test.go:32`（虚拟化）、`scroll_follow_test.go:35,65`（跟随）、`interaction_batch_a_test.go:123`（streaming 隐藏动作）、`chrome_b3_test.go`（B3 顶栏/⋯ 会话操作/目标 dock/审批 banner 槽/Esc 审批优先）。
 
 **迁移步骤**：① 把 `buildChatPane` 的 List 配置/空态/回到最新抽成 `uikit.SessionThread`；② 消息体渲染保留为可插拔 `func(*ui.Context)`（业务 slot）；③ 用现有 transcript/scroll 测试作回归；④ 新增快照 `uikit-session-thread.png`。
 
@@ -205,11 +207,12 @@ func ToolRow(c *ui.Context, o uikit.ToolRowOptions) // 已有
 
 | 状态 | 表现 |
 |---|---|
-| pending（最旧一条） | Modal 打开；无 Default/自动焦点；队列计数显示「还有 N 个」 |
-| allowed / denied / allow-always | 关闭并 resolve；下一请求出现 |
-| dismissed（Esc/外部点击） | 视为 **deny**（等待中的工具调用不能挂着） |
-| error | 关闭并保持可见错误；不静默重排 |
-| multi-pending | 一次只显示一条，不叠模态 |
+| pending（最旧一条） | 输入框上方（composer dock）出现内联审批卡；无 Default/自动焦点；队列计数显示「还有 N 条待审批」；批准前 agent 轮保持运行态 |
+| allowed / denied / allow-always | 卡片消失并 resolve；下一请求出现 |
+| Esc（无文本焦点/审批优先） | 视为 **deny 最早一条**，不中断本轮（第二次 Esc 才中断生成）；session 拥有该语义 |
+| 非会话屏收到请求 | 自动切回会话屏（`Navigator.Push("session")`），审批卡可见 |
+| error | 保持可见错误；不静默重排 |
+| multi-pending | 一次只显示一条内联卡，不叠层 |
 
 **目标 API 草案**：
 
@@ -224,15 +227,15 @@ type ApprovalDialogOptions struct {
 func ApprovalDialog(c *ui.Context, o ApprovalDialogOptions)
 ```
 
-**布局（固定）**：标题（危险图标 + "需要审批"）→ 工具行（友好名 Badge，raw ID tooltip）→ 一行影响声明 → 摘要优先（shell/终端类工具标「命令」，其余工具标「摘要」；mono 框）→ 「参数」折叠（Scroll 140）→ Divider → `uikit.DialogFooter`：**拒绝(Danger) → 本会话内始终允许 → 允许(Primary 最右)**；无 Default、无 AutoFocus；底部常驻提示「Esc = 拒绝本次调用 · 点击或 Tab 选择操作（无默认操作）」。
+**布局（固定，V3 强调）**：内联卡（`Border(1, Warning)` + `RadiusLG`）→ 顶部警示横幅（Shield + 加粗「需要审批」+ 工具友好名 + 队列计数 + 「Esc 拒绝」，`Warning.Alpha(0.22)` 底、`WarningText` 前景）→ 中性卡体：一行影响声明 → 摘要优先（shell/终端类工具标「命令」，其余工具标「摘要」；mono 框）→ 「参数」折叠（Scroll 140）→ 会话级允许提示 → `uikit.DialogFooter`：**拒绝 → 本会话内始终允许 → 允许(Primary 最右)**；无 Default、无 AutoFocus。卡片整体用警示色描边/横幅，和 transcript 工具卡、composer 明显区分，不允许被看漏或误认。
 
-**交互/键盘**：Tab 循环；Enter 只有在焦点落到某按钮时才触发该按钮；Esc/外部点击 = deny；不设默认焦点。
+**交互/键盘**：Tab 循环；Enter 只有在焦点落到某按钮时才触发该按钮；Esc = deny 最早一条（有文本焦点时也由 session 的审批优先路径处理，且不中断本轮）；内联模式没有 backdrop。不设默认焦点。
 
-**a11y**：Modal 焦点陷阱；危险图标不只靠颜色；影响声明可读；状态词明确。
+**a11y**：卡片是命名 region（「需要审批 · <工具>」）；危险图标不只靠颜色；影响声明可读；状态词明确。
 
 **禁止**：默认焦点落在允许或拒绝（真实事故：发消息后 Enter 误触拒绝）；普通 Button + 中性文案；把审批塞进 `AlertDialog`（末位默认语义）；把队列叠成多层 Modal；审批动作图标化无文字。
 
-**当前实现**：`internal/ui/approval/approval.go`（`buildDialog`: Modal + 队列；`requestPanel`: 内容 + footer；无 Default 注释与安全设计）。测试：`approval/conformance_v083_test.go:21`、`approval_test.go:355/374/508`。
+**当前实现**：`uikit.ApprovalDialog`（`Inline` 模式为产品默认的 V3 内联卡；`Inline=false` 保留旧 Modal 渲染给 embedder/兼容）；`internal/ui/approval/approval.go` 注册 `session.banner` 槽、维护 FIFO/settle 状态并在非会话屏自动切回会话。测试：`internal/ui/approval/*_test.go`（inline 渲染/队列计数/三种决定/自动切屏）、`internal/uikit/approval_test.go`、`internal/ui/session/chrome_b3_test.go`（Esc 审批优先）。
 
 **迁移步骤**：抽 `uikit.ApprovalDialog`（保留当前行为逐字一致：footer 顺序、无 Default、Esc=deny、影响声明、队列计数）；新增帧测试断言"打开后无焦点按钮/Enter 不产生决定"。
 
@@ -334,7 +337,7 @@ func AskDialog(c *ui.Context, o AskDialogOptions)
 
 **职责**：用户与 Agent 交互的主入口。统一两个 composer（会话页 / 首页）的解剖，避免同一动作两种外观；保持"流式期间可继续输入 + 停止/排队"的安全语义。
 
-**数据模型**：`draft string`、`attachments []Attachment`、`running bool`、`queue []string`、模型/权限/模式/推理强度/人设选择、`focusComposer`。
+**数据模型**：`draft string`、`attachments []Attachment`、`running bool`、`queue []string`、模型/权限/模式/人设选择、模型与推理等级（`modelcatalog.models` 的模型列表与 `DefaultThinking`）、会话×模型推理等级覆盖（`session.<id>.thinking.<modelID>`，默认跟随该模型默认值；旧 `session.<id>.thinking`/`session.<id>.effort` 仅作旧会话兼容回落，任何一次显式选择都会清掉旧行）、`focusComposer`。
 
 **状态矩阵**：
 
@@ -367,7 +370,7 @@ type ComposerOptions struct {
 func ComposerShell(c *ui.Context, o ComposerOptions)
 ```
 
-**布局**：卡片 `t.Composer()`；输入 `ui.TextArea`（MinHeight Space9、MaxHeight Space8*6、边框透明、聚焦 accent 边）；工具条一行（附件菜单 + 模型 chip + 会话设置菜单；窄宽度折叠低频 chip 进菜单）；右侧发送/停止固定，**不进溢出菜单**；键位提示在宽 composer 显示、窄 composer 放 tooltip。
+**布局**：composer 上方 dock（阅读列宽度居中、`session.banner` 槽）：目标条（有目标时）→ 审批内联卡（有 pending 时）→ 卡片 `t.Composer()`；输入 `ui.TextArea`（MinHeight Space9、MaxHeight Space8*6、边框透明、聚焦 accent 边）；工具条一行（附件菜单 + 模型 chip + 会话设置菜单；窄宽度折叠低频 chip 进菜单，veryCompact 时模型 chip 折进会话设置菜单并保留「模型：…／推理等级」回退入口）；右侧发送/停止固定，**不进溢出菜单**；键位提示在宽 composer 显示、窄 composer 放 tooltip。模型 chip 打开**两级紧凑菜单**：一级只有「模型」「推理等级」两行（Trailing 当前值）+「打开模型设置…」；「模型」二级按服务商分组（`MatchProviderPreset`，未匹配“自定义服务”）列出模型；「推理等级」二级为「跟随模型默认（…）」+ 该模型模式；模型级 `DefaultThinking` 在 Home composer 的「推理等级」与设置页编辑弹窗配置。
 
 **交互/键盘**：Enter 发送、Shift+Enter 换行、Cmd+Enter 发送；运行中 Esc 中断；slash/@ 菜单优先级最高；Tab 顺序：输入 → 菜单项 → 发送 → 停止。
 
@@ -385,7 +388,7 @@ func ComposerShell(c *ui.Context, o ComposerOptions)
 
 ### S8 RunStatus（流式 / 队列 / 停止 / 用量 / 恢复）
 
-**职责**：把 Agent 的运行状态如实、克制地表达出来：正在生成、排队中、可停止、失败可重试、用量可查；不伪造进度、不推动布局。
+**职责**：把 Agent 的运行状态如实、克制地表达出来：正在生成、排队中、可停止、失败可重试、用量可查；不伪造进度、不推动布局。运行中需要审批时，输入框上方的内联审批卡是唯一阻断点（不弹模态、不遮 transcript）；通知类消息走右上角 toast（B3 顶栏下方，最多 2 条），不遮挡输入与顶栏动作。
 
 **数据模型**：`running`、`queued []string`、`usage`（token 计数）、`lastError`、`retryable`。
 
@@ -418,11 +421,11 @@ type RunStatusOptions struct {
 func RunStatus(c *ui.Context, o RunStatusOptions)
 ```
 
-**布局**：状态行在最后消息之后（消息内）或 composer 上方（运行态）；用量放消息 footer 折叠；错误行贴近失败内容；toast 只做通知，不替代可操作错误。
+**布局**：状态行在最后消息之后（消息内）或 composer 上方（运行态）；消息用量收进消息元信息行（时间 · 用时 · 紧凑 tokens · ⋯ → 用量明细子菜单，不再单独占 footer 行）；错误行贴近失败内容；toast 只做通知，不替代可操作错误。
 
 **禁止**：伪造进度条；把"停止"和"发送"并排同权重；运行中每帧重排布局（几何稳定）；用常驻 badge 代替 toast/错误；用 `ui.Toggle` 表达忙碌状态。
 
-**当前实现**：session 生成中 Spinner/文本、queue Badge/popover、stop 按钮、usage footer（`ui.Collapsible`，紧凑计数）、`buildRetryAction`；toasts 模块（`c.AddToast` + `ToastViewportBase`，2 条上限 + 合并 ×N）。测试：`queue_send_test.go`、`usage_test.go`、`toasts_test.go`。
+**当前实现**：session 生成中 Spinner/文本、queue Badge/popover、stop 按钮、消息元信息行（时间 + `FormatCompactCount` 紧凑用量 + ⋯ 用量明细）、`buildRetryAction`；toasts 模块（`c.AddToast` + `ToastViewportBase`，2 条上限 + 合并 ×N）。测试：`queue_send_test.go`、`usage_test.go`、`toasts_test.go`。
 
 **迁移步骤**：抽 `uikit.RunStatus`（状态行/队列/停止/重试/用量）；保留通知通道不变；帧测试覆盖排队/停止/重试/用量折叠。
 
@@ -480,6 +483,10 @@ func TeamSurface(c *ui.Context, o TeamSurfaceOptions)
 ---
 
 ## 2. 跨 surface 规则
+
+- **顶栏只有一块**：屏幕通过 `screen.header` / `screen.actions` / `screen.tabs` 槽位把标题/动作/Tabs 交给宿主 B3 顶栏（浅色 header 面 + 仅底边 hairline、行间无线），屏幕 body 不再叠第二行 header；无贡献的屏幕没有空工具栏；不提供返回按钮或 `Alt+←` 历史回退（侧栏即导航）。
+- **输入框上方的 dock**：目标条与审批内联卡固定在 composer 上方（阅读列宽度居中），是会话页唯一的阻断/目标区；不把目标放回顶栏、不把审批做成居中 Modal。
+- **通知位置**：toast/通知固定右上角、B3 顶栏下方 8 DIP，右对齐自上而下堆叠（最多 2 条）；不放在右下角、不遮挡标题/Tabs/顶栏动作或输入区。
 
 ### 2.1 焦点与 Esc 分层（从最内到最外）
 

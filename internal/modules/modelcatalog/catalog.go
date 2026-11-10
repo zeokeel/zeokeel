@@ -1,8 +1,11 @@
 // Package modelcatalog is ZeoKeel's model-catalog backend module: it lists the
-// model presets the composer's model switcher offers. The catalog is static
-// product data (assembly config overrides the built-in presets); it deliberately
-// does not talk to any provider or persist the user's selection — the agent
-// module owns per-session model overrides in settings.
+// models the composer's model switcher offers. The product ships no built-in
+// model list: every row is user data (the modelcatalog.models settings row), and
+// each row carries its own OpenAI-compatible base URL and credential so one list
+// can mix providers. The assembly config is only a fallback baseline (a product
+// may pin models for headless deployments). The module deliberately does not
+// talk to any provider or persist the user's selection — the agent module owns
+// per-session model overrides in settings.
 package modelcatalog
 
 import (
@@ -33,6 +36,13 @@ type Model struct {
 	Note string `json:"note"`
 	// ContextWindow is the model's context-window size in tokens (0 = unknown).
 	ContextWindow int `json:"contextWindow,omitempty"`
+	// BaseURL is the model's own OpenAI-compatible endpoint (empty falls back to
+	// chat.baseURL and then the assembly config), so one model list can mix
+	// providers.
+	BaseURL string `json:"baseURL,omitempty"`
+	// APIKey is the credential for BaseURL (empty falls back to chat.apiKey and
+	// then the provider environment variable).
+	APIKey string `json:"apiKey,omitempty"`
 	// Family selects the built-in thinking protocol (qwen/deepseek/other/custom).
 	Family string `json:"family,omitempty"`
 	// DefaultThinking is the model's default thinking-mode ID.
@@ -47,14 +57,11 @@ type Model struct {
 
 // Config is the module's typed assembly config.
 type Config struct {
-	// Models replaces the built-in presets when non-empty.
+	// Models is the assembly-configured baseline list. It replaces nothing: the
+	// product ships no built-in models, so the effective catalog is this
+	// baseline only while the user has never saved the modelcatalog.models row.
 	Models []Model `json:"models"`
 }
-
-// defaultModels are the presets shipped when the assembly config is empty:
-// DeepSeek leads because it is the product's primary provider. The list lives
-// in contracts so the settings editor and the backend cannot drift apart.
-var defaultModels = contracts.DefaultModelCatalog()
 
 // Module is the model-catalog backend descriptor. It provides
 // contracts.KeyModelCatalog.
@@ -65,8 +72,11 @@ func Module() *module.Descriptor[Config] {
 			return fmt.Errorf("%s: require logger: %w", ModuleID, err)
 		}
 		// The settings store is optional: when present the user-edited catalog
-		// overrides the configured/default presets per Models() call.
+		// wins over the configured baseline per Models() call, and the legacy
+		// single-provider connection is migrated into it once (see
+		// migrateLegacyConnection).
 		settings, _ := ctx.Get(contracts.KeySettings)
+		migrateLegacyConnection(settings, logger)
 		service := newServiceWithSettings(cfg, logger, settings)
 		if _, err := ctx.Provide(contracts.KeyModelCatalog, contracts.ModelCatalogService(service)); err != nil {
 			return fmt.Errorf("%s: provide model catalog: %w", ModuleID, err)
@@ -98,7 +108,8 @@ func validateConfig(cfg Config) error {
 
 // service is the contracts.ModelCatalogService implementation.
 type service struct {
-	models   []contracts.ModelInfo
+	// baseline is the sanitized assembly-configured list (possibly empty).
+	baseline []contracts.ModelInfo
 	logger   contracts.Logger
 	settings contracts.SettingsService
 
@@ -111,60 +122,50 @@ func newService(cfg Config, logger contracts.Logger) *service {
 	return newServiceWithSettings(cfg, logger, nil)
 }
 
-// newServiceWithSettings builds the catalog, copying the configured entries so
-// neither the assembly config nor callers can mutate the module's state. The
+// newServiceWithSettings builds the catalog, sanitizing the configured baseline
+// so neither the assembly config nor callers can mutate the module's state. The
 // optional settings store is read on every Models() call.
 func newServiceWithSettings(cfg Config, logger contracts.Logger, settings contracts.SettingsService) *service {
-	models := make([]contracts.ModelInfo, 0, len(cfg.Models))
-	if len(cfg.Models) == 0 {
-		models = append(models, defaultModels...)
-	} else {
-		for _, model := range cfg.Models {
-			id := strings.TrimSpace(model.ID)
-			name := strings.TrimSpace(model.Name)
-			if name == "" {
-				name = id
-			}
-			contextWindow := model.ContextWindow
-			if contextWindow < 0 {
-				contextWindow = 0
-			}
-			temperature, topP, maxTokens := contracts.SanitizeGeneration(model.Temperature, model.TopP, model.MaxTokens)
-			models = append(models, contracts.ModelInfo{
-				ID:              id,
-				Name:            name,
-				Note:            strings.TrimSpace(model.Note),
-				ContextWindow:   contextWindow,
-				Family:          strings.TrimSpace(model.Family),
-				DefaultThinking: strings.TrimSpace(model.DefaultThinking),
-				ThinkingModes:   contracts.SanitizeThinkingModes(model.ThinkingModes),
-				Temperature:     temperature,
-				TopP:            topP,
-				MaxTokens:       maxTokens,
-			})
-		}
+	rows := make([]contracts.ModelInfo, 0, len(cfg.Models))
+	for _, model := range cfg.Models {
+		rows = append(rows, contracts.ModelInfo{
+			ID:              model.ID,
+			Name:            model.Name,
+			Note:            model.Note,
+			ContextWindow:   model.ContextWindow,
+			BaseURL:         model.BaseURL,
+			APIKey:          model.APIKey,
+			Family:          model.Family,
+			DefaultThinking: model.DefaultThinking,
+			ThinkingModes:   model.ThinkingModes,
+			Temperature:     model.Temperature,
+			TopP:            model.TopP,
+			MaxTokens:       model.MaxTokens,
+		})
 	}
-	return &service{models: models, logger: logger, settings: settings}
+	return &service{baseline: contracts.SanitizeModelInfoList(rows), logger: logger, settings: settings}
 }
 
-// Models returns the catalog presets: the user-edited settings list when one is
-// configured, else the assembly-configured/default baseline. The caller gets a
-// copy: changing the returned slice or its elements never affects later calls.
-// A malformed settings row falls back to the baseline and logs once.
+// Models returns the effective catalog. A present modelcatalog.models row is
+// authoritative — including an explicit empty list ("[]"), which means the user
+// has removed every model and the product must not re-add built-in presets. An
+// absent/blank row falls back to the assembly baseline (empty by default), and
+// malformed JSON falls back to it too, logging once.
+//
+// The caller gets a copy: changing the returned slice or its elements never
+// affects later calls.
 func (s *service) Models() []contracts.ModelInfo {
 	if s.settings != nil {
-		raw := s.settings.Get(contracts.SettingModelCatalogModels, "")
-		models, err := contracts.ParseModelInfoList(raw)
-		switch {
-		case err != nil:
-			s.warnMalformedSettings(err)
-		case len(models) > 0:
-			return sanitizeCatalog(models)
+		if raw := strings.TrimSpace(s.settings.Get(contracts.SettingModelCatalogModels, "")); raw != "" {
+			models, err := contracts.ParseModelInfoList(raw)
+			if err != nil {
+				s.warnMalformedSettings(err)
+			} else {
+				return contracts.SanitizeModelInfoList(models)
+			}
 		}
 	}
-	out := make([]contracts.ModelInfo, len(s.models))
-	copy(out, s.models)
-	return out
+	return cloneModelInfoList(s.baseline)
 }
 
 // warnMalformedSettings logs the malformed catalog row once per service, so a
@@ -179,39 +180,39 @@ func (s *service) warnMalformedSettings(err error) {
 	}
 }
 
-// sanitizeCatalog normalizes the stored override rows: fields are trimmed, empty
-// ids are dropped, a missing name falls back to the id and only the first row
-// of a duplicate id is kept.
-func sanitizeCatalog(models []contracts.ModelInfo) []contracts.ModelInfo {
-	out := make([]contracts.ModelInfo, 0, len(models))
-	seen := make(map[string]bool, len(models))
-	for _, model := range models {
-		id := strings.TrimSpace(model.ID)
-		if id == "" || seen[id] {
-			continue
-		}
-		seen[id] = true
-		name := strings.TrimSpace(model.Name)
-		if name == "" {
-			name = id
-		}
-		contextWindow := model.ContextWindow
-		if contextWindow <= 0 {
-			contextWindow = 0
-		}
-		temperature, topP, maxTokens := contracts.SanitizeGeneration(model.Temperature, model.TopP, model.MaxTokens)
-		out = append(out, contracts.ModelInfo{
-			ID:              id,
-			Name:            name,
-			Note:            strings.TrimSpace(model.Note),
-			ContextWindow:   contextWindow,
-			Family:          strings.TrimSpace(model.Family),
-			DefaultThinking: strings.TrimSpace(model.DefaultThinking),
-			ThinkingModes:   contracts.SanitizeThinkingModes(model.ThinkingModes),
-			Temperature:     temperature,
-			TopP:            topP,
-			MaxTokens:       maxTokens,
-		})
-	}
+// cloneModelInfoList copies the catalog rows so callers cannot mutate the
+// service's baseline through the returned slice.
+func cloneModelInfoList(models []contracts.ModelInfo) []contracts.ModelInfo {
+	out := make([]contracts.ModelInfo, len(models))
+	copy(out, models)
 	return out
+}
+
+// migrateLegacyConnection writes the pre-catalog global connection into the
+// model list exactly once: when the user has never saved a modelcatalog.models
+// row, the legacy chat.model/chat.baseURL/chat.apiKey become one model row so an
+// existing single-provider configuration keeps working after the multi-provider
+// model-list upgrade. An existing row — including an explicit empty list — is
+// never overwritten, the legacy chat.* keys stay in place (chat.model remains
+// the default-model mirror the agent falls back to), and a failed write is
+// logged without failing module activation.
+func migrateLegacyConnection(settings contracts.SettingsService, logger contracts.Logger) {
+	if settings == nil {
+		return
+	}
+	if strings.TrimSpace(settings.Get(contracts.SettingModelCatalogModels, "")) != "" {
+		return
+	}
+	model, ok := contracts.LegacyConnectionModelInfo(settings)
+	if !ok {
+		return
+	}
+	encoded, err := contracts.EncodeModelInfoList([]contracts.ModelInfo{model})
+	if err == nil {
+		err = settings.Set(contracts.SettingModelCatalogModels, encoded)
+	}
+	if err != nil && logger != nil {
+		logger.Printf("%s: migrate legacy chat connection into %s: %v",
+			ModuleID, contracts.SettingModelCatalogModels, err)
+	}
 }

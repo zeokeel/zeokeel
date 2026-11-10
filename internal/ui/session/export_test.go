@@ -53,8 +53,8 @@ func TestExportWritesMarkdown(t *testing.T) {
 	})
 	h := newHarness(t, chat)
 	tester := h.tester()
-	h.assertTexts(tester, "更多")
-	h.click(tester, "更多")
+	h.assertTexts(tester, "会话操作")
+	openConversationActions(t, h, tester)
 	h.click(tester, "导出 Markdown")
 
 	if gotName != "项目讨论.md" {
@@ -88,7 +88,7 @@ func TestExportSanitizesDefaultName(t *testing.T) {
 	})
 	h := newHarness(t, chat)
 	tester := h.tester()
-	h.click(tester, "更多")
+	openConversationActions(t, h, tester)
 	h.click(tester, "导出 Markdown")
 
 	if !strings.HasSuffix(gotName, ".md") {
@@ -108,7 +108,7 @@ func TestExportCancelAndError(t *testing.T) {
 		setExportSaver(t, func(string, string, string) (string, error) { return "", nil })
 		h := newHarness(t, chat)
 		tester := h.tester()
-		h.click(tester, "更多")
+		openConversationActions(t, h, tester)
 		h.click(tester, "导出 Markdown")
 		h.assertNoTexts(tester, "已导出", "导出失败")
 	})
@@ -120,7 +120,7 @@ func TestExportCancelAndError(t *testing.T) {
 		})
 		h := newHarness(t, chat)
 		tester := h.tester()
-		h.click(tester, "更多")
+		openConversationActions(t, h, tester)
 		h.click(tester, "导出 Markdown")
 		h.assertTexts(tester, "导出失败：disk full")
 		h.assertNoTexts(tester, "已导出")
@@ -132,7 +132,7 @@ func TestExportHiddenWithoutActiveSession(t *testing.T) {
 	h := newHarness(t, chat)
 	tester := h.tester()
 	h.assertTexts(tester, "开始新对话")
-	h.assertNoTexts(tester, "更多")
+	h.assertNoTexts(tester, "会话操作")
 }
 
 // TestExportJSONL covers the JSONL transcript export: a session header line and
@@ -162,7 +162,7 @@ func TestExportJSONL(t *testing.T) {
 	}
 	t.Cleanup(func() { session.ExportJSONLSaver = old })
 	tester := h.tester()
-	h.click(tester, "更多")
+	openConversationActions(t, h, tester)
 	h.click(tester, "导出 JSONL")
 	tester.Frame()
 	if !strings.HasSuffix(savedPath, ".jsonl") {

@@ -57,11 +57,16 @@ const (
 	settingLanguage = "ui.language"
 
 	// Window geometry of the desktop product (mygo native window options).
-	mainWindowWidth     = 1400
-	mainWindowHeight    = 900
+	// The default window is the reading-first size: at 1512x944 the 960 DIP
+	// transcript keeps comfortable margins and the composer/dock still leave a
+	// useful conversation area. The state key is versioned so this larger
+	// default applies once on an existing install (the framework restores the
+	// saved geometry under the old key), while later user resizes persist.
+	mainWindowWidth     = 1512
+	mainWindowHeight    = 944
 	mainWindowMinWidth  = 900
 	mainWindowMinHeight = 600
-	mainWindowStateKey  = "main"
+	mainWindowStateKey  = "main.v2"
 )
 
 // Build identity of the running binary. Release builds fill these with

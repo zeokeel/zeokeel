@@ -200,19 +200,24 @@ func (d *drive) runSessionSteps() {
 				return
 			}
 			d.drain(2)
-			if !c.has("选择模型") && !c.has("打开模型设置") {
+			if !c.has("打开模型设置") {
 				c.failf("点击模型 chip 后没有出现模型菜单")
 				return
 			}
-			c.note("菜单项可见：选择模型/打开模型设置")
+			// The first level is the compact two-entry menu; the model list and
+			// the reasoning levels live one level down (no stacked long menu).
+			c.require(c.has("模型"), "模型 chip 菜单缺少「模型」二级入口")
+			c.require(c.has("推理等级"), "模型 chip 菜单缺少「推理等级」二级入口")
+			c.require(!c.has("选择模型"), "模型 chip 菜单仍是旧的堆叠式「选择模型」列表")
+			c.note("菜单项可见：模型 / 推理等级 / 打开模型设置")
 			c.shot("composer-model-menu")
 			d.key(0, ui.KeyEscape)
 			d.drain(2)
-			c.require(!c.has("选择模型") && !c.has("打开模型设置"), "Esc 后模型菜单未关闭")
+			c.require(!c.has("打开模型设置"), "Esc 后模型菜单未关闭")
 		})
 
 	d.step("composer-session-settings-menu", "session", "输入区：会话设置分组菜单",
-		"点击「会话设置」→ 一个菜单同时提供权限模式、对话模式、思考强度与提示词预设（低频项收进一组）→ Esc 关闭", func(c *check) {
+		"点击「会话设置」→ 一个菜单同时提供权限模式、对话模式与提示词预设（低频项收进一组；模型/推理等级在模型 chip 的二级菜单里）→ Esc 关闭", func(c *check) {
 			d.resetToSession()
 			if !c.click("工作区可写") && !c.click("会话设置") {
 				return
@@ -220,26 +225,27 @@ func (d *drive) runSessionSteps() {
 			d.drain(2)
 			c.require(c.has("权限模式"), "「会话设置」菜单缺少权限模式分组")
 			c.require(c.has("对话模式"), "「会话设置」菜单缺少对话模式分组")
-			c.require(c.has("思考强度"), "「会话设置」菜单缺少思考强度分组")
+			c.require(!c.has("思考强度") && !c.has("推理等级"),
+				"宽布局「会话设置」菜单仍含思考强度（应只在模型 chip 的「推理等级」二级菜单）")
 			c.require(c.has("插入预设") || c.has("还没有预设"), "「会话设置」菜单缺少提示词预设分组")
 			c.require(c.has("打开行为设置") || c.has("打开行为设置…"),
 				"「会话设置」菜单缺少「打开行为设置…」入口")
 			c.shot("composer-session-settings-menu")
 			d.key(0, ui.KeyEscape)
 			d.drain(2)
-			if c.has("思考强度") {
+			if c.has("权限模式") {
 				// Observed P3 quirk (reported to the fixers): right after a
 				// previous menu was Esc-closed, the first Esc on the next
 				// composer menu is swallowed; a second Esc closes it.
 				d.key(0, ui.KeyEscape)
 				d.drain(2)
-				c.require(!c.has("思考强度"), "两次 Esc 后「会话设置」菜单仍未关闭；texts=%v", paletteTailTexts(d))
+				c.require(!c.has("权限模式"), "两次 Esc 后「会话设置」菜单仍未关闭；texts=%v", paletteTailTexts(d))
 				c.note("P3 观察：前置菜单 Esc 关闭后，新开「会话设置」菜单第一次 Esc 被吞，第二次关闭成功")
 			}
 		})
 
 	d.step("composer-toolbar-groups", "session", "输入区：工具栏分组",
-		"composer 动作行只有一个附件菜单、模型 chip、一个会话设置菜单和固定右侧的发送；权限/模式/推理等低频项都在会话设置菜单里", func(c *check) {
+		"composer 动作行只有一个附件菜单、模型 chip、一个会话设置菜单和固定右侧的发送；权限/模式等低频项在会话设置菜单里，模型/推理等级在模型 chip 的二级菜单里", func(c *check) {
 			d.resetToSession()
 			// Always-visible primary controls.
 			c.require(c.has("附件"), "composer 缺少附件菜单")
@@ -256,9 +262,10 @@ func (d *drive) runSessionSteps() {
 				return
 			}
 			d.drain(2)
-			for _, want := range []string{"权限模式", "对话模式", "思考强度", "插入预设"} {
+			for _, want := range []string{"权限模式", "对话模式", "插入预设"} {
 				c.require(c.has(want), "「会话设置」菜单缺少「%s」分组", want)
 			}
+			c.require(!c.has("推理等级"), "「会话设置」菜单仍含推理等级（应只在模型 chip 菜单）")
 			// The permission group header comes first, directly above exactly
 			// three selectable presets; the retired ask/never modes are gone.
 			for _, want := range []string{"只读", "工作区可写", "所有权限"} {

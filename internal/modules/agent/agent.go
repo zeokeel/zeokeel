@@ -59,8 +59,8 @@ const agentIterationLimitUnbounded = 1_000_000
 const (
 	// ModuleID is the stable module identity used by assembly documents.
 	ModuleID = "zeokeel/agent"
-	// DefaultModel is used when neither the assembly, the settings store nor
-	// the environment configures a model.
+	// DefaultModel is the last-resort model when neither a configured model
+	// list, the assembly config nor the settings store names one.
 	DefaultModel = "gpt-4o-mini"
 	// DefaultAPIKeyEnv is the environment variable read for the API key when
 	// Config.ApiKeyEnv is empty.
@@ -600,28 +600,73 @@ func (discardLogger) Printf(string, ...any) {}
 
 // --- ChatService: configuration -------------------------------------------
 
-// Config returns the effective model configuration. The settings store wins
-// over the assembly config (the settings page is the runtime control surface),
-// and the API key falls back to Config.ApiKeyEnv / OPENAI_API_KEY.
+// Config returns the effective default model configuration. The configured model
+// list decides the default model (see defaultModelLocked) and the model row's
+// own base URL/key win over the global chat.baseURL/chat.apiKey; without a
+// configured list the legacy settings/assembly/environment fallbacks apply.
 func (s *service) Config() contracts.ChatConfig {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.configLocked()
 }
 
-// configLocked resolves the effective config; the caller holds s.mu. A nil
-// settings store falls back to the assembly config (tests and embedders may run
-// without one; the product always provides it).
+// modelCatalogState is the decoded user model list (modelcatalog.models) together
+// with whether the row exists at all. The distinction matters for the default
+// model: an absent row means "never saved a list" (the legacy fallbacks apply),
+// while a present but empty list means the user removed every model — there is no
+// default model then, and the UI must show "not configured" instead of a ghost
+// model. A malformed row resolves as absent here (the modelcatalog module owns
+// the warning for it).
+type modelCatalogState struct {
+	rows    []contracts.ModelInfo
+	present bool
+}
+
+// modelCatalogState decodes the model list state. It only reads the
+// goroutine-safe settings store, so callers may use it with or without s.mu.
+func (s *service) modelCatalogState() modelCatalogState {
+	if s.settings == nil {
+		return modelCatalogState{}
+	}
+	raw := strings.TrimSpace(s.settings.Get(contracts.SettingModelCatalogModels, ""))
+	if raw == "" {
+		return modelCatalogState{}
+	}
+	models, err := contracts.ParseModelInfoList(raw)
+	if err != nil {
+		return modelCatalogState{}
+	}
+	return modelCatalogState{rows: contracts.SanitizeModelInfoList(models), present: true}
+}
+
+// configLocked resolves the effective default config; the caller holds s.mu. A
+// nil settings store falls back to the assembly config (tests and embedders may
+// run without one; the product always provides it).
 func (s *service) configLocked() contracts.ChatConfig {
+	catalog := s.modelCatalogState()
+	return s.configForModelLocked(s.defaultModelLocked(catalog), catalog)
+}
+
+// defaultModelLocked resolves the default model: a non-empty model list decides
+// (chat.model when it is one of the rows, else the first row), and without one
+// the legacy chain chat.model → assembly config → DefaultModel applies. An
+// explicitly saved empty list with no chat.model yields "" (no model configured):
+// it must not resurrect a default the user removed.
+func (s *service) defaultModelLocked(catalog modelCatalogState) string {
 	model := ""
-	baseURL := ""
-	systemPrompt := ""
-	apiKey := ""
 	if s.settings != nil {
 		model = strings.TrimSpace(s.settings.Get(contracts.SettingsChatModel, ""))
-		baseURL = strings.TrimRight(strings.TrimSpace(s.settings.Get(contracts.SettingsChatBaseURL, "")), "/")
-		systemPrompt = strings.TrimSpace(s.settings.Get(contracts.SettingsChatSystemPrompt, ""))
-		apiKey = strings.TrimSpace(s.settings.Get(contracts.SettingsChatAPIKey, ""))
+	}
+	if len(catalog.rows) > 0 {
+		if id := contracts.DefaultModelID(catalog.rows, s.settings); id != "" {
+			model = id
+		}
+	}
+	if model == "" && catalog.present {
+		// The user saved a model list and it resolves to no rows, and chat.model
+		// carries no legacy model: there is nothing to run. Stay empty so
+		// Config().Model is truthful and Send can fail with a readable error.
+		return ""
 	}
 	if model == "" {
 		model = s.cfg.Model
@@ -629,6 +674,24 @@ func (s *service) configLocked() contracts.ChatConfig {
 	if model == "" {
 		model = DefaultModel
 	}
+	return model
+}
+
+// configForModelLocked builds the effective config for one model. The model
+// row's own BaseURL/APIKey win, then chat.baseURL/chat.apiKey, then the assembly
+// config (URL) and the provider environment variable (key); the system prompt has
+// no per-model field, so its fallback (chat.systemPrompt → assembly prompt) is
+// unchanged. The caller holds s.mu.
+func (s *service) configForModelLocked(model string, catalog modelCatalogState) contracts.ChatConfig {
+	baseURL := ""
+	apiKey := ""
+	systemPrompt := ""
+	if s.settings != nil {
+		baseURL = strings.TrimSpace(s.settings.Get(contracts.SettingsChatBaseURL, ""))
+		apiKey = strings.TrimSpace(s.settings.Get(contracts.SettingsChatAPIKey, ""))
+		systemPrompt = strings.TrimSpace(s.settings.Get(contracts.SettingsChatSystemPrompt, ""))
+	}
+	baseURL, apiKey = contracts.ModelConnection(catalog.rows, model, baseURL, apiKey)
 	if baseURL == "" {
 		baseURL = s.cfg.BaseURL
 	}
@@ -653,6 +716,24 @@ func (s *service) configLocked() contracts.ChatConfig {
 	}
 }
 
+// configForModelOverride resolves the provider connection for a subagent/team
+// model override: an override that names a configured model row uses that row's
+// own BaseURL/APIKey, while an unknown override (or no override) keeps the parent
+// config's connection. The system prompt and runtime limits stay the parent's.
+func (s *service) configForModelOverride(parent contracts.ChatConfig, model string) contracts.ChatConfig {
+	model = strings.TrimSpace(model)
+	if model == "" || model == parent.Model {
+		return parent
+	}
+	catalog := s.modelCatalogState()
+	baseURL, apiKey := contracts.ModelConnection(catalog.rows, model, parent.BaseURL, parent.APIKey)
+	cfg := parent
+	cfg.Model = model
+	cfg.BaseURL = baseURL
+	cfg.APIKey = apiKey
+	return cfg
+}
+
 // settingInt resolves an integer settings override: an empty or malformed row
 // keeps the module config, and values below min are ignored (min=0 still accepts
 // an explicit 0, which is meaningful for "unlimited"/"disabled").
@@ -672,10 +753,17 @@ func (s *service) settingInt(key string, fallback, min int) int {
 }
 
 // sessionModelLocked resolves the model a session's next run uses: the
-// per-session settings override when one was chosen, else the effective
-// chat.model from the global settings/config. The caller holds s.mu.
+// per-session settings override when one was chosen, else the agent preset's
+// model, else the default model of the configured model list / legacy chain. The
+// caller holds s.mu.
 func (s *service) sessionModelLocked(sessionID string) string {
-	model := s.configLocked().Model
+	return s.sessionModelForLocked(sessionID, s.modelCatalogState())
+}
+
+// sessionModelForLocked is sessionModelLocked with the already-loaded model list
+// state; the caller holds s.mu.
+func (s *service) sessionModelForLocked(sessionID string, catalog modelCatalogState) string {
+	model := s.defaultModelLocked(catalog)
 	if s.settings == nil {
 		return model
 	}
@@ -688,11 +776,11 @@ func (s *service) sessionModelLocked(sessionID string) string {
 	return model
 }
 
-// configForSessionLocked is configLocked with the session's model override
-// applied; the caller holds s.mu.
+// configForSessionLocked is configForModelLocked with the session's model and its
+// own connection applied; the caller holds s.mu.
 func (s *service) configForSessionLocked(sessionID string) contracts.ChatConfig {
-	cfg := s.configLocked()
-	cfg.Model = s.sessionModelLocked(sessionID)
+	catalog := s.modelCatalogState()
+	cfg := s.configForModelLocked(s.sessionModelForLocked(sessionID, catalog), catalog)
 	cfg.ReasoningEffort = s.sessionEffort(sessionID)
 	return cfg
 }
@@ -1130,6 +1218,12 @@ func (s *service) SetActiveSession(sessionID string) error {
 // ErrEmptyPrompt is returned by Send for a blank prompt.
 var ErrEmptyPrompt = errors.New("agent: prompt is empty")
 
+// ErrNoModelConfigured is returned by Send/SendWithAttachments when the
+// effective config has no model: with an explicitly empty model list (and no
+// legacy chat.model) there is no provider target, so the send fails before the
+// session changes or any provider request is attempted.
+var ErrNoModelConfigured = errors.New("agent: no model configured; add one in Settings → Model")
+
 // ErrSessionRunning is returned by Send/Regenerate when the session already runs.
 var ErrSessionRunning = errors.New("agent: session is already running")
 
@@ -1142,7 +1236,8 @@ var ErrNoUserMessage = errors.New("agent: no user message to regenerate")
 var ErrSettingsUnavailable = errors.New("agent: settings store is not available")
 
 // Send appends the user prompt, creates the streaming assistant placeholder and
-// starts one asynchronous Rig agent run.
+// starts one asynchronous Rig agent run. When the effective config has no model
+// it returns ErrNoModelConfigured without touching the session.
 func (s *service) Send(sessionID, prompt string) error {
 	return s.send(sessionID, prompt, nil)
 }
@@ -1151,7 +1246,9 @@ func (s *service) Send(sessionID, prompt string) error {
 // attachments, then starts one asynchronous Rig agent run (contracts
 // AttachmentSender). Image attachments travel to the provider as rig image
 // content parts (data URLs); other files become bounded text parts. A blank
-// prompt is allowed when at least one attachment is present.
+// prompt is allowed when at least one attachment is present. When the effective
+// config has no model it returns ErrNoModelConfigured without touching the
+// session.
 func (s *service) SendWithAttachments(sessionID, prompt string, attachments []contracts.Attachment) error {
 	return s.send(sessionID, prompt, attachments)
 }
@@ -1175,6 +1272,14 @@ func (s *service) send(sessionID, prompt string, attachments []contracts.Attachm
 	if state.running {
 		s.mu.Unlock()
 		return fmt.Errorf("%w: %q", ErrSessionRunning, sessionID)
+	}
+	// Resolve the effective config before touching the session: with an explicitly
+	// empty model list there is no model to call, so fail before appending the
+	// user message or starting a run (the UI points at Settings → Model).
+	cfg := s.configForSessionLocked(sessionID)
+	if strings.TrimSpace(cfg.Model) == "" {
+		s.mu.Unlock()
+		return ErrNoModelConfigured
 	}
 	titleChanged := false
 	if strings.TrimSpace(state.title) == "" {
@@ -1216,7 +1321,6 @@ func (s *service) send(sessionID, prompt string, attachments []contracts.Attachm
 	runCtx, cancel := context.WithCancel(context.Background())
 	state.cancel = cancel
 	title := state.title
-	cfg := s.configForSessionLocked(sessionID)
 	s.mu.Unlock()
 
 	if s.store != nil {
@@ -1272,7 +1376,8 @@ func (s *service) send(sessionID, prompt string, attachments []contracts.Attachm
 // Like Send it returns after starting the asynchronous run. It intentionally
 // does not append another user_message event: the history replacement rewinds
 // the existing turn and the run's own run_start/run_end events describe the
-// retry.
+// retry. When the effective config has no model it returns ErrNoModelConfigured
+// without rewinding the turn.
 func (s *service) Regenerate(sessionID string) error {
 	s.mu.Lock()
 	state, ok := s.sessions[sessionID]
@@ -1294,6 +1399,13 @@ func (s *service) Regenerate(sessionID string) error {
 	if userIndex < 0 {
 		s.mu.Unlock()
 		return ErrNoUserMessage
+	}
+	// Mirror Send: with no model configured there is nothing to call, so fail
+	// before rewinding the turn (no provider request, no read-model change).
+	cfg := s.configForSessionLocked(sessionID)
+	if strings.TrimSpace(cfg.Model) == "" {
+		s.mu.Unlock()
+		return ErrNoModelConfigured
 	}
 	user := state.messages[userIndex]
 	user.Attachments = cloneAttachments(user.Attachments)
@@ -1321,7 +1433,6 @@ func (s *service) Regenerate(sessionID string) error {
 	state.updatedAt = now
 	runCtx, cancel := context.WithCancel(context.Background())
 	state.cancel = cancel
-	cfg := s.configForSessionLocked(sessionID)
 	s.mu.Unlock()
 
 	// Persist the rewound turn: the history up to the last user message

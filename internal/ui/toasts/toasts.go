@@ -7,12 +7,13 @@
 // handler only queues the notification; the overlay's build drains the queue
 // into native toasts and paints them with a branded look of our own
 // (ui.ToastViewportBase), so the notification never covers the conversation
-// composer or a dialog footer: the stack sits in the bottom-right corner above
-// the composer's reserved height. At most toastMaxVisible toasts show at once
-// (the rest wait in a visible queue count) and an ActionNotification's action
-// label renders as the toast's button. Fading, hover/focus pause, the timeout,
-// Escape and the screen-reader announcements stay the framework's. The module
-// is only loaded by products with the desktop notifier bridge.
+// composer, a dialog footer or the app's top header: the stack is a top-right
+// popup below the header (which holds the window title, tabs and the right-side
+// actions), laid out from the top down. At most toastMaxVisible toasts show at
+// once (the rest wait in a visible queue count) and an ActionNotification's
+// action label renders as the toast's button. Fading, hover/focus pause, the
+// timeout, Escape and the screen-reader announcements stay the framework's. The
+// module is only loaded by products with the desktop notifier bridge.
 package toasts
 
 import (
@@ -47,28 +48,20 @@ const toastTimeout = 4 * time.Second
 // queued notifications are dropped, as the too-old ones would not be useful.
 const maxPending = 32
 
-// Toast placement. The conversation composer is a card pinned to the bottom of
-// the content column (about 116 DIP tall, inside the screen's 24 DIP bottom
-// padding), so the toast stack reserves its height plus a gap instead of
-// floating over the send row. Below the breakpoint the composer's toolbar wraps
-// to a taller card, hence the larger inset.
 // toastMaxVisible bounds how many toasts show at once (H14): further
 // notifications wait in the module's queue and appear as earlier ones close.
 const toastMaxVisible = 2
 
-// The placement measures are on the design system's 4 DIP grid, written as
-// multiples of its spacing tokens instead of bare numbers, so the stack stays
-// on the same grid as the composer it floats above.
+// Toast placement: a top-right popup under the app's top header, stacking down.
+// The header is the window's first two rows (44 DIP title row + 32 DIP tab row =
+// 76 DIP); the stack starts one Space2 gap below it, so it never covers the
+// title, tabs or the header's right-side actions. The measures are multiples of
+// the design system's 4 DIP spacing tokens instead of bare numbers, keeping the
+// stack on the same grid as the rest of the shell.
 const (
-	// The composer card with a staged attachment is about 178 DIP tall on a
-	// wide window (the screenshot probe shows its top edge at y≈598 of 800) and
-	// taller when its toolbar wraps on a narrow one; the stack keeps its bottom
-	// above the card so no toast touches the input, the send row or a settings
-	// page footer.
-	toastBottomInset        float32 = design.Space8*7 - design.Space1  // 220
-	toastBottomInsetNarrow  float32 = design.Space8*7 + design.Space3  // 236
-	toastBottomInsetBreakAt float32 = design.Space8 * 35               // 1120
-	toastMaxWidth           float32 = design.Space8*11 + design.Space2 // 360
+	// toastTopInset clears the 72 DIP header plus one Space2 (8 DIP) gap.
+	toastTopInset float32 = design.Space8*2 + design.Space4  // 80
+	toastMaxWidth float32 = design.Space8*11 + design.Space2 // 360
 	// The close control's hit area is a full 24 DIP target (mygo/DESIGN
 	// accessibility AP-17: an icon action's target is at least 24): a 20 DIP
 	// button next to the toast's action button was easy to miss on a desktop
@@ -378,19 +371,15 @@ func buildOverlay(c *ui.Context, st *state) {
 	})
 }
 
-// buildToastViewport places the toast stack in the bottom-right corner above the
-// conversation composer. The composer is a card pinned to the bottom of the
-// content column, so the stack reserves its height (plus a gap) instead of
-// floating over the send row or a settings page footer; the framework keeps the
-// pointer pass-through, hover pause and screen-reader roles.
+// buildToastViewport places the toast stack in the top-right corner of the
+// window, below the app's top header: toasts start under the header's title row,
+// tab row and right-side actions and stack downward from the top, aligned to the
+// right edge. The framework keeps the pointer pass-through, hover pause and
+// screen-reader roles.
 func buildToastViewport(c *ui.Context, st *state, viewport ui.Element, toasts []ui.Toast) {
-	width, _ := c.Size()
-	bottom := toastBottomInset
-	if width > 0 && width < toastBottomInsetBreakAt {
-		bottom = toastBottomInsetNarrow
-	}
-	viewport.FillWidth().Padding(design.Space3, design.Space4, bottom, design.Space4).
-		AlignItems(ui.End).Justify(ui.End).Gap(design.Space2)
+	viewport.FillWidth().
+		Padding(toastTopInset, design.Space4, design.Space3, design.Space4).
+		AlignItems(ui.End).Justify(ui.Start).Gap(design.Space2)
 	for _, toast := range toasts {
 		buildToast(c, st, toast)
 	}

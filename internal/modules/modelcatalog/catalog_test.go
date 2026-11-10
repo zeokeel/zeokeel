@@ -1,7 +1,8 @@
 package modelcatalog
 
-// Tests for the model-catalog module: descriptor/validation, the built-in and
-// configured presets, copy semantics and kernel activation.
+// Tests for the model-catalog module: descriptor/validation, the empty
+// built-in catalog, the assembly-configured baseline, copy semantics and kernel
+// activation.
 
 import (
 	"fmt"
@@ -59,35 +60,39 @@ func TestModuleDescriptorAndValidation(t *testing.T) {
 	}
 }
 
-func TestDefaultCatalog(t *testing.T) {
+func TestNoBuiltinCatalog(t *testing.T) {
+	// Product decision: the catalog ships no built-in models. An empty assembly
+	// config and an unset settings row mean "no models configured", so the
+	// composer offers an empty state until the user adds one.
 	svc := newService(Config{}, &fakeLogger{})
-	models := svc.Models()
-	if len(models) != 2 {
-		t.Fatalf("default models = %+v, want 2 presets", models)
-	}
-	if models[0].ID != "deepseek-chat" || models[0].Name != "DeepSeek Chat" || models[0].Note != "通用对话" {
-		t.Fatalf("first default = %+v", models[0])
-	}
-	if models[1].ID != "deepseek-reasoner" || models[1].Name != "DeepSeek Reasoner" || models[1].Note != "深度推理" {
-		t.Fatalf("second default = %+v", models[1])
+	if models := svc.Models(); len(models) != 0 {
+		t.Fatalf("catalog = %+v, want no built-in presets", models)
 	}
 }
 
-func TestConfiguredCatalogOverridesDefaults(t *testing.T) {
+func TestConfiguredBaseline(t *testing.T) {
+	// The assembly config is only a fallback baseline while the user has never
+	// saved a model list; it passes the per-model connection fields through.
 	cfg := Config{Models: []Model{
-		{ID: "m1", Name: "Model One", Note: "fast"},
-		{ID: " m2 ", Name: " ", Note: " deep "},
+		{ID: "m1", Name: "Model One", Note: "fast",
+			BaseURL: "https://m1.example/v1/", APIKey: " key-1 "},
+		{ID: " m2 ", Name: " ", Note: " deep ",
+			BaseURL: " https://m2.example/v1 "},
 	}}
 	svc := newService(cfg, &fakeLogger{})
 	models := svc.Models()
 	if len(models) != 2 {
 		t.Fatalf("configured models = %+v, want 2", models)
 	}
-	if !reflect.DeepEqual(models[0], contracts.ModelInfo{ID: "m1", Name: "Model One", Note: "fast"}) {
-		t.Fatalf("configured first = %+v", models[0])
+	wantFirst := contracts.ModelInfo{ID: "m1", Name: "Model One", Note: "fast",
+		BaseURL: "https://m1.example/v1", APIKey: "key-1"}
+	if !reflect.DeepEqual(models[0], wantFirst) {
+		t.Fatalf("configured first = %+v, want %+v", models[0], wantFirst)
 	}
-	if models[1].ID != "m2" || models[1].Name != "m2" || models[1].Note != "deep" {
-		t.Fatalf("configured second normalization = %+v", models[1])
+	wantSecond := contracts.ModelInfo{ID: "m2", Name: "m2", Note: "deep",
+		BaseURL: "https://m2.example/v1"}
+	if !reflect.DeepEqual(models[1], wantSecond) {
+		t.Fatalf("configured second = %+v, want %+v", models[1], wantSecond)
 	}
 }
 
@@ -122,7 +127,8 @@ func TestKernelActivation(t *testing.T) {
 	loader, err := module.Load(root, registry, []module.Entry{{
 		ID: "modelcatalog", Module: ModuleID,
 		Config: map[string]any{"models": []any{
-			map[string]any{"id": "deepseek-chat", "name": "DeepSeek Chat", "note": "对话"},
+			map[string]any{"id": "deepseek-chat", "name": "DeepSeek Chat", "note": "对话",
+				"baseURL": "https://chat.example/v1", "apiKey": "catalog-key"},
 		}},
 	}})
 	if err != nil {
@@ -136,6 +142,9 @@ func TestKernelActivation(t *testing.T) {
 	models := catalog.Models()
 	if len(models) != 1 || models[0].ID != "deepseek-chat" || models[0].Name != "DeepSeek Chat" {
 		t.Fatalf("activated catalog = %+v", models)
+	}
+	if models[0].BaseURL != "https://chat.example/v1" || models[0].APIKey != "catalog-key" {
+		t.Fatalf("activated connection = %q / %q", models[0].BaseURL, models[0].APIKey)
 	}
 }
 

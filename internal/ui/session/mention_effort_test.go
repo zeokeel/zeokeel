@@ -93,26 +93,13 @@ func TestMentionSessionReferenceIsInsertedAndSent(t *testing.T) {
 	}
 }
 
-// --- thinking strength (per-model) -----------------------------------------
+// --- thinking strength (per conversation and model) -------------------------
 
 // thinkingCatalog is a contracts.ModelCatalogService with a fixed list.
 type thinkingCatalog struct{ models []contracts.ModelInfo }
 
 func (c *thinkingCatalog) Models() []contracts.ModelInfo {
 	return append([]contracts.ModelInfo(nil), c.models...)
-}
-
-// newThinkingHarness builds the session harness with the optional model
-// catalogue the thinking section reads; the catalogue is an optional service,
-// so it can be provided after the module is active.
-func newThinkingHarness(t *testing.T, chat *fakeChat, settings *permissionSettings,
-	catalog contracts.ModelCatalogService) *harness {
-	t.Helper()
-	h := newPermissionHarness(t, chat, settings)
-	if catalog != nil {
-		provide(t, h.ctx, contracts.KeyModelCatalog, catalog)
-	}
-	return h
 }
 
 // thinkingChat is a fake chat whose configured default model is model.
@@ -132,24 +119,44 @@ func qwenCatalog() *thinkingCatalog {
 
 func TestThinkingMenuQwenFamilyModes(t *testing.T) {
 	settings := newPermissionSettings(nil)
-	h := newThinkingHarness(t, thinkingChat("qwen3.8-flash-next"), settings, qwenCatalog())
+	h := newModelThinkingHarness(t, modelThinkingChat("qwen3.8-flash-next"), settings, qwenCatalog())
 	tester := h.tester()
 
-	h.openSessionMenu(tester)
-	h.assertTexts(tester, "思考强度：默认", "默认", "关闭思考", "思考开启", "深度思考")
+	// The chip opens a compact two-entry menu; the level lives one level down.
+	openChipMenu(t, h, tester, "qwen3.8-flash-next")
+	assertMenuLabels(t, tester, "模型", "推理等级", "-", "打开模型设置…")
+	h.assertTexts(tester, "Qwen 3.8")
+	openReasoningLevelMenu(t, h, tester)
+	h.assertTexts(tester, "跟随模型默认（系列默认）", "默认", "关闭思考", "思考开启", "深度思考")
+	// With no explicit override for this (conversation, model) the follow row
+	// is checked; the model itself has no configured default, so it names the
+	// family default.
+	if info, ok := tester.AccessByRole(ui.RoleMenuItemRadio, "跟随模型默认（系列默认）"); !ok || !info.Checked {
+		t.Fatalf("follow-model radio = %+v/%v, want the checked radio", info, ok)
+	}
 
-	// Picking a mode stores the new per-conversation key (the agent reads it for
-	// the next run, so no restart is needed).
+	// Picking a mode stores the (conversation, model) row (the agent reads it
+	// for the next run, so no restart is needed).
 	h.clickExact(tester, "深度思考")
-	if got := settings.get(contracts.SessionThinkingSettingKey("sess-1")); got != contracts.ThinkingModeQwenDeep {
+	key := contracts.SessionModelThinkingSettingKey("sess-1", "qwen3.8-flash-next")
+	if got := settings.get(key); got != contracts.ThinkingModeQwenDeep {
 		t.Fatalf("stored thinking mode = %q, want %q", got, contracts.ThinkingModeQwenDeep)
 	}
-	h.openSessionMenu(tester)
-	h.assertTexts(tester, "思考强度：深度思考")
-
-	// The legacy per-session reasoning key is not written by the new menu.
+	// The legacy conversation-wide rows are cleared so they cannot decide
+	// another model's requests.
+	if got := settings.get(contracts.SessionThinkingSettingKey("sess-1")); got != "" {
+		t.Fatalf("legacy thinking key = %q, want cleared", got)
+	}
 	if got := settings.get(contracts.SessionEffortSettingKey("sess-1")); got != "" {
-		t.Fatalf("legacy effort key = %q, want empty", got)
+		t.Fatalf("legacy effort key = %q, want cleared", got)
+	}
+
+	// Reopening shows the new level as the 推理等级 row's trailing value.
+	openChipMenu(t, h, tester, "qwen3.8-flash-next")
+	h.assertTexts(tester, "深度思考")
+	openReasoningLevelMenu(t, h, tester)
+	if info, ok := tester.AccessByRole(ui.RoleMenuItemRadio, "深度思考"); !ok || !info.Checked {
+		t.Fatalf("deep-thinking radio = %+v/%v, want the checked radio", info, ok)
 	}
 }
 
@@ -159,14 +166,16 @@ func TestThinkingMenuCustomModelMode(t *testing.T) {
 		ID: "turbo", NameZH: "极速思考", NameEN: "Turbo", Params: map[string]any{"enable_thinking": true},
 	}}
 	settings := newPermissionSettings(nil)
-	h := newThinkingHarness(t, thinkingChat("qwen3.8-flash-next"), settings, catalog)
+	h := newModelThinkingHarness(t, modelThinkingChat("qwen3.8-flash-next"), settings, catalog)
 	tester := h.tester()
 
-	h.openSessionMenu(tester)
+	openChipMenu(t, h, tester, "qwen3.8-flash-next")
+	openReasoningLevelMenu(t, h, tester)
 	// Built-ins and the user mode are offered together.
 	h.assertTexts(tester, "关闭思考", "极速思考")
 	h.clickExact(tester, "极速思考")
-	if got := settings.get(contracts.SessionThinkingSettingKey("sess-1")); got != "turbo" {
+	key := contracts.SessionModelThinkingSettingKey("sess-1", "qwen3.8-flash-next")
+	if got := settings.get(key); got != "turbo" {
 		t.Fatalf("stored thinking mode = %q, want turbo", got)
 	}
 }
@@ -175,22 +184,43 @@ func TestThinkingMenuModelDefaultAndSessionOverride(t *testing.T) {
 	catalog := qwenCatalog()
 	catalog.models[0].DefaultThinking = contracts.ThinkingModeQwenDeep
 	settings := newPermissionSettings(nil)
-	h := newThinkingHarness(t, thinkingChat("qwen3.8-flash-next"), settings, catalog)
+	h := newModelThinkingHarness(t, modelThinkingChat("qwen3.8-flash-next"), settings, catalog)
 	tester := h.tester()
 
-	// With no session choice the model's configured default is effective.
-	h.openSessionMenu(tester)
-	h.assertTexts(tester, "思考强度：深度思考")
+	// With no explicit override the model's configured default is effective and
+	// the level row's trailing value names it.
+	openChipMenu(t, h, tester, "qwen3.8-flash-next")
+	h.assertTexts(tester, "深度思考")
+	openReasoningLevelMenu(t, h, tester)
+	h.assertTexts(tester, "跟随模型默认（深度思考）")
+	if info, ok := tester.AccessByRole(ui.RoleMenuItemRadio, "跟随模型默认（深度思考）"); !ok || !info.Checked {
+		t.Fatalf("follow-model radio = %+v/%v, want the checked radio", info, ok)
+	}
+	// The mode rows mark the *explicit* override, so the model default itself is
+	// not marked as an explicit choice.
+	if info, ok := tester.AccessByRole(ui.RoleMenuItemRadio, "深度思考"); !ok || info.Checked {
+		t.Fatalf("deep-thinking radio = %+v/%v, want unchecked while not overridden", info, ok)
+	}
 
-	// Close the open menu before changing the stored state from the test.
+	// Close the menus before changing the stored state from the test.
+	tester.Key(0, ui.KeyEscape)
+	tester.Frame()
 	tester.Key(0, ui.KeyEscape)
 	tester.Frame()
 
-	// An explicit per-conversation mode wins over the model default.
-	settings.set(contracts.SessionThinkingSettingKey("sess-1"), contracts.ThinkingModeQwenOff)
+	// An explicit (conversation, model) mode wins over the model default.
+	settings.set(contracts.SessionModelThinkingSettingKey("sess-1", "qwen3.8-flash-next"),
+		contracts.ThinkingModeQwenOff)
 	tester.Frame()
-	h.openSessionMenu(tester)
-	h.assertTexts(tester, "思考强度：关闭思考")
+	openChipMenu(t, h, tester, "qwen3.8-flash-next")
+	h.assertTexts(tester, "关闭思考")
+	openReasoningLevelMenu(t, h, tester)
+	if info, ok := tester.AccessByRole(ui.RoleMenuItemRadio, "跟随模型默认（深度思考）"); !ok || info.Checked {
+		t.Fatalf("follow-model radio = %+v/%v, want unchecked after an override", info, ok)
+	}
+	if info, ok := tester.AccessByRole(ui.RoleMenuItemRadio, "关闭思考"); !ok || !info.Checked {
+		t.Fatalf("thinking-off radio = %+v/%v, want the checked radio", info, ok)
+	}
 }
 
 func TestThinkingMenuLegacyEffortMigration(t *testing.T) {
@@ -199,30 +229,39 @@ func TestThinkingMenuLegacyEffortMigration(t *testing.T) {
 	settings := newPermissionSettings(map[string]string{
 		contracts.SessionEffortSettingKey("sess-1"): contracts.SessionEffortHigh,
 	})
-	h := newThinkingHarness(t, thinkingChat("mystery-model"), settings, nil)
+	h := newModelThinkingHarness(t, modelThinkingChat("mystery-model"), settings, nil)
 	tester := h.tester()
 
-	h.openSessionMenu(tester)
-	h.assertTexts(tester, "思考强度：高强度", "低强度", "中强度")
+	openChipMenu(t, h, tester, "mystery-model")
+	// The effective legacy level is the row's trailing value.
+	h.assertTexts(tester, "高强度")
+	openReasoningLevelMenu(t, h, tester)
+	h.assertTexts(tester, "跟随模型默认（系列默认）", "低强度", "中强度")
 	h.clickExact(tester, "中强度")
-	if got := settings.get(contracts.SessionThinkingSettingKey("sess-1")); got != contracts.ThinkingModeReasoningMedium {
+	key := contracts.SessionModelThinkingSettingKey("sess-1", "mystery-model")
+	if got := settings.get(key); got != contracts.ThinkingModeReasoningMedium {
 		t.Fatalf("stored thinking mode = %q, want %q", got, contracts.ThinkingModeReasoningMedium)
 	}
-	// The legacy value is left in place; the explicit mode wins by contract.
-	if got := settings.get(contracts.SessionEffortSettingKey("sess-1")); got != contracts.SessionEffortHigh {
-		t.Fatalf("legacy effort key = %q, want untouched high", got)
+	// Picking a per-model strength migrates the conversation: both legacy
+	// conversation-wide rows are cleared.
+	if got := settings.get(contracts.SessionEffortSettingKey("sess-1")); got != "" {
+		t.Fatalf("legacy effort key = %q, want cleared", got)
 	}
-	h.openSessionMenu(tester)
-	h.assertTexts(tester, "思考强度：中强度")
+	if got := settings.get(contracts.SessionThinkingSettingKey("sess-1")); got != "" {
+		t.Fatalf("legacy thinking key = %q, want cleared", got)
+	}
+	openChipMenu(t, h, tester, "mystery-model")
+	h.assertTexts(tester, "中强度")
 }
 
 func TestThinkingMenuUnknownModelInfersOtherFamily(t *testing.T) {
 	settings := newPermissionSettings(nil)
-	h := newThinkingHarness(t, thinkingChat("totally-unknown-model"), settings, nil)
+	h := newModelThinkingHarness(t, modelThinkingChat("totally-unknown-model"), settings, nil)
 	tester := h.tester()
 
-	h.openSessionMenu(tester)
-	h.assertTexts(tester, "思考强度：默认", "默认", "低强度", "中强度", "高强度")
+	openChipMenu(t, h, tester, "totally-unknown-model")
+	openReasoningLevelMenu(t, h, tester)
+	h.assertTexts(tester, "跟随模型默认（系列默认）", "默认", "低强度", "中强度", "高强度")
 }
 
 func TestThinkingMenuSessionModelOverrideWins(t *testing.T) {
@@ -230,16 +269,16 @@ func TestThinkingMenuSessionModelOverrideWins(t *testing.T) {
 		{ID: "deepseek-chat", Name: "DeepSeek", Family: contracts.ModelFamilyDeepSeek},
 		{ID: "qwen3.8-flash-next", Name: "Qwen", Family: contracts.ModelFamilyQwen},
 	}}
-	chat := thinkingChat("deepseek-chat")
+	chat := modelThinkingChat("deepseek-chat")
 	// The session model override decides the family, not the configured default.
-	session := chat.sessions["sess-1"]
-	session.Model = "qwen3.8-flash-next"
-	chat.sessions["sess-1"] = session
-	h := newThinkingHarness(t, chat, newPermissionSettings(nil), catalog)
+	switchSessionModel(chat, "sess-1", "qwen3.8-flash-next")
+	h := newModelThinkingHarness(t, chat, newPermissionSettings(nil), catalog)
 	tester := h.tester()
 
-	h.openSessionMenu(tester)
-	h.assertTexts(tester, "思考强度：默认", "关闭思考", "思考开启", "深度思考")
+	openChipMenu(t, h, tester, "qwen3.8-flash-next")
+	h.assertTexts(tester, "Qwen")
+	openReasoningLevelMenu(t, h, tester)
+	h.assertTexts(tester, "跟随模型默认（系列默认）", "关闭思考", "思考开启", "深度思考")
 }
 
 func TestThinkingMenuCustomFamilyWithoutModesHidden(t *testing.T) {
@@ -247,45 +286,40 @@ func TestThinkingMenuCustomFamilyWithoutModesHidden(t *testing.T) {
 		ID: "private-model", Name: "Private", Family: contracts.ModelFamilyCustom,
 	}}}
 	settings := newPermissionSettings(nil)
-	h := newThinkingHarness(t, thinkingChat("private-model"), settings, catalog)
+	h := newModelThinkingHarness(t, modelThinkingChat("private-model"), settings, catalog)
 	tester := h.tester()
 
-	h.openSessionMenu(tester)
-	h.assertTexts(tester, "插入预设", "打开行为设置…")
-	h.assertNoTexts(tester, "思考强度：")
-	if got := exactTextCount(tester.Texts(), "默认"); got != 0 {
-		t.Fatalf("thinking choices rendered for a custom family without modes; texts = %v", tester.Texts())
-	}
+	openChipMenu(t, h, tester, "private-model")
+	// A custom family with no user modes has no thinking field to send: the
+	// 推理等级 entry is hidden (the model entry stays).
+	assertMenuLabels(t, tester, "模型", "-", "打开模型设置…")
 }
 
 func TestThinkingMenuEnglishCopy(t *testing.T) {
 	settings := newPermissionSettings(nil)
-	h := newThinkingHarness(t, thinkingChat("qwen3.8-flash-next"), settings, qwenCatalog())
+	h := newModelThinkingHarness(t, modelThinkingChat("qwen3.8-flash-next"), settings, qwenCatalog())
 	h.ui.Locale().SetLanguage("en")
 	tester := h.tester()
 	tester.Frame()
 
-	h.openSessionMenu(tester)
-	h.assertTexts(tester, "Thinking: Default", "Default", "Thinking off", "Thinking on", "Deep thinking")
+	openChipMenu(t, h, tester, "qwen3.8-flash-next")
+	assertMenuLabels(t, tester, "Model", "Reasoning level", "-", "Open model settings…")
+	h.clickExact(tester, "Reasoning level")
+	h.assertTexts(tester, "Follow the model default (Family default)", "Default", "Thinking off", "Thinking on", "Deep thinking")
 	h.clickExact(tester, "Deep thinking")
-	if got := settings.get(contracts.SessionThinkingSettingKey("sess-1")); got != contracts.ThinkingModeQwenDeep {
+	key := contracts.SessionModelThinkingSettingKey("sess-1", "qwen3.8-flash-next")
+	if got := settings.get(key); got != contracts.ThinkingModeQwenDeep {
 		t.Fatalf("stored thinking mode = %q, want deep", got)
 	}
-	h.openSessionMenu(tester)
-	h.assertTexts(tester, "Thinking: Deep thinking")
+	openChipMenu(t, h, tester, "qwen3.8-flash-next")
+	h.assertTexts(tester, "Deep thinking")
 }
 
 func TestThinkingMenuHiddenWithoutSettings(t *testing.T) {
-	h := newThinkingHarness(t, thinkingChat("qwen3.8-flash-next"), nil, qwenCatalog())
+	h := newModelThinkingHarness(t, modelThinkingChat("qwen3.8-flash-next"), nil, qwenCatalog())
 	tester := h.tester()
-	// Without a settings store there is nowhere to persist a mode, so the
-	// section stays hidden while the preset group remains.
-	if got := exactTextCount(tester.Texts(), "会话设置"); got != 1 {
-		t.Fatalf("session menu = %d, want one; texts = %v", got, tester.Texts())
-	}
-	h.openSessionMenu(tester)
-	h.assertTexts(tester, "插入预设")
-	if tester.HasText("思考强度：") {
-		t.Fatalf("thinking section rendered without a settings store; texts = %v", tester.Texts())
-	}
+	// Without a settings store there is nowhere to persist a level, so the
+	// 推理等级 entry stays hidden while the model entry remains.
+	openChipMenu(t, h, tester, "qwen3.8-flash-next")
+	assertMenuLabels(t, tester, "模型", "-", "打开模型设置…")
 }

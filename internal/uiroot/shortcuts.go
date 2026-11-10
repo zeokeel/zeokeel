@@ -245,20 +245,6 @@ func (r *Root) bindChromeShortcuts(c *ui.Context) {
 	c.OnShortcut(ui.Cmd|ui.Alt, ui.KeyLeft, guardRepeat(func() { r.runPaneCommand("rightpanel.pane.prev") }))
 	c.OnShortcut(ui.Cmd|ui.Alt, ui.KeyRight, guardRepeat(func() { r.runPaneCommand("rightpanel.pane.next") }))
 
-	// Navigation history: Alt+Left goes back, as the platform's back gesture
-	// would (mygo navigation.md: the router owns history; the hand-built
-	// navigator exposes the same action here). A focused text input keeps the
-	// key first: mygo leaves Alt+Left to the window on Linux/Windows, but the
-	// composer's editing context must never page away mid-message.
-	c.OnShortcut(ui.Alt, ui.KeyLeft, guardRepeat(func() {
-		if c.FocusTakesText() {
-			return
-		}
-		if r.nav.Back() {
-			r.requestFrame()
-		}
-	}))
-
 	// Built-in window shortcuts (not configurable): new session and settings.
 	c.OnShortcut(ui.Cmd, ui.KeyN, r.newSessionShortcut)
 	c.OnShortcut(ui.Cmd, ui.KeyComma, r.settingsShortcut)

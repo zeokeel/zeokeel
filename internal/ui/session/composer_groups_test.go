@@ -13,6 +13,9 @@ import (
 
 func groupsChat() *fakeChat {
 	chat := newFakeChat()
+	// A configured model keeps the per-model thinking section of the session
+	// menu visible (it is hidden when no model is configured).
+	chat.config = contracts.ChatConfig{Model: "group-model"}
 	chat.addSession(contracts.ChatSession{
 		ID: "sess-1", Title: "分组测试",
 		Messages: []contracts.ChatMessage{
@@ -23,8 +26,10 @@ func groupsChat() *fakeChat {
 	return chat
 }
 
-// TestComposerToolbarGroupsLowFrequencyControls covers H7: reasoning and prompt
-// presets live in the 会话设置 group instead of separate chips.
+// TestComposerToolbarGroupsLowFrequencyControls covers H7: the prompt presets
+// (and the other low-frequency choices) live in the 会话设置 group instead of
+// separate chips, while the reasoning strength lives one level down in the model
+// chip's 推理等级 entry.
 func TestComposerToolbarGroupsLowFrequencyControls(t *testing.T) {
 	settings := newPermissionSettings(nil)
 	h := newPermissionHarness(t, groupsChat(), settings)
@@ -33,7 +38,9 @@ func TestComposerToolbarGroupsLowFrequencyControls(t *testing.T) {
 	h.assertTexts(tester, "工作区可写")
 	h.assertNoTexts(tester, "推理：默认", "预设")
 	h.openSessionMenu(tester)
-	h.assertTexts(tester, "思考强度：默认", "默认", "低强度", "中强度", "高强度", "插入预设")
+	h.assertTexts(tester, "权限模式", "对话模式", "插入预设", "打开行为设置…")
+	// Reasoning is not repeated in this menu: the model chip owns it.
+	h.assertNoTexts(tester, "推理等级")
 	// The preset list grows with user data: it is one submenu deeper so the
 	// outer menu fits a narrow window.
 	h.click(tester, "插入预设")
@@ -65,8 +72,8 @@ func TestComposerToolbarCompactsAtNarrowWidths(t *testing.T) {
 		}
 		// The single session menu carries every low-frequency choice.
 		h.openSessionMenu(tester)
-		h.assertTexts(tester, "权限模式", "只读", "工作区可写", "所有权限", "对话模式", "思考强度：默认", "插入预设", "打开行为设置…")
-		h.assertNoTexts(tester, "询问", "从不允许")
+		h.assertTexts(tester, "权限模式", "只读", "工作区可写", "所有权限", "对话模式", "插入预设", "打开行为设置…")
+		h.assertNoTexts(tester, "询问", "从不允许", "推理等级")
 	}
 }
 
@@ -202,8 +209,8 @@ func TestNarrowHeaderAndToolbarWithInspectorDrawer(t *testing.T) {
 		t.Fatalf("attach control at %.1f..%.1f escaped the 704 window", attach.X, attach.X+attach.W)
 	}
 	h.openSessionMenu(tester)
-	h.assertTexts(tester, "模型：snapshot-model", "打开模型设置…", "权限模式", "对话模式",
-		"思考强度：默认", "插入预设", "打开行为设置…")
+	h.assertTexts(tester, "模型：snapshot-model", "推理等级", "打开模型设置…", "权限模式", "对话模式",
+		"插入预设", "打开行为设置…")
 }
 
 // TestEscapeClosesAnchoredMenusAndKeepsDraft covers H8's Escape/draft contract

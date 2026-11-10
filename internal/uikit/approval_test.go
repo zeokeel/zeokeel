@@ -345,3 +345,252 @@ func TestApprovalSummaryLabelFollowsToolKind(t *testing.T) {
 		t.Fatalf("bash summary is not labelled 命令; texts = %v", bash.Texts())
 	}
 }
+
+// --- inline card (the product path) ----------------------------------------
+
+// approvalInlineHarness starts one inline approval card over a plain product
+// frame. Open is deliberately nil: the inline path never uses the Modal open
+// flag, and Escape/backdrop are not the component's to handle.
+func approvalInlineHarness(t *testing.T, request contracts.ApprovalRequest, pending int,
+	labels uikit.ApprovalLabels, locale contracts.LocaleService) (*approvalTestState, *ui.Tester) {
+	t.Helper()
+	state := &approvalTestState{}
+	options := uikit.ApprovalDialogOptions{
+		Request: request,
+		Pending: pending,
+		Labels:  labels,
+		Inline:  true,
+		Locale:  locale,
+		OnResolve: func(decision contracts.ApprovalDecision) {
+			state.decisions = append(state.decisions, decision)
+		},
+	}
+	tester := ui.NewTester(func(c *ui.Context) {
+		ui.Text(c, "主屏幕")
+		uikit.ApprovalDialog(c, options)
+	}, 1200, 800)
+	tester.Frame()
+	return state, tester
+}
+
+// TestApprovalInlineCardRendersBannerAndBody pins the V3 anatomy: the warning
+// banner (icon, title, friendly tool, queue counter, Esc hint), the neutral body
+// (impact statement, promoted summary, collapsed arguments) and the three
+// decisions in the desktop order.
+func TestApprovalInlineCardRendersBannerAndBody(t *testing.T) {
+	_, tester := approvalInlineHarness(t,
+		approvalTestRequest("a1", "bash", "运行命令 ls", `{"command":"ls"}`), 2,
+		uikit.ApprovalLabels{}, nil)
+
+	for _, want := range []string{
+		"主屏幕", "需要审批", "运行命令", "还有 1 条待审批", "Esc 拒绝",
+		"允许后将在沙箱策略限制内执行；策略仍可能拒绝该调用。",
+		"命令", "运行命令 ls", "参数", "显示原始参数",
+		"允许", "本会话内始终允许", "拒绝",
+		"「本会话内始终允许」在本会话内不再询问该工具；可在会话设置菜单清除。",
+	} {
+		if !tester.HasText(want) {
+			t.Fatalf("frame does not show %q; texts = %v", want, tester.Texts())
+		}
+	}
+	// The friendly name is the visible copy; the raw tool id is the tooltip, and
+	// the raw arguments stay collapsed details.
+	if tester.HasText("bash") || tester.HasText(`{"command":"ls"}`) || tester.HasText("参数详情") {
+		t.Fatalf("raw tool id/arguments leaked into the frame; texts = %v", tester.Texts())
+	}
+	deny, ok := tester.Find("拒绝")
+	if !ok {
+		t.Fatalf("deny action missing; texts = %v", tester.Texts())
+	}
+	always, ok := tester.Find("本会话内始终允许")
+	if !ok {
+		t.Fatalf("session-scoped allow action missing; texts = %v", tester.Texts())
+	}
+	allow, ok := tester.Find("允许")
+	if !ok {
+		t.Fatalf("allow action missing; texts = %v", tester.Texts())
+	}
+	if !(deny.X < always.X && always.X < allow.X) {
+		t.Fatalf("footer order x = deny %.1f, always %.1f, allow %.1f; want deny < always < allow",
+			deny.X, always.X, allow.X)
+	}
+	if tester.Focused("拒绝") || tester.Focused("允许") || tester.Focused("本会话内始终允许") {
+		t.Fatalf("the inline card must not autofocus an action; texts = %v", tester.Texts())
+	}
+	// The card is one named region for assistive technology.
+	if _, ok := tester.AccessByRole(ui.RoleRegion, "需要审批 · 运行命令"); !ok {
+		t.Fatalf("the card is not a named region; texts = %v", tester.Texts())
+	}
+}
+
+// TestApprovalInlineCardDecisions covers the three explicit decisions: each
+// button reports its decision through OnResolve.
+func TestApprovalInlineCardDecisions(t *testing.T) {
+	cases := []struct {
+		label    string
+		decision contracts.ApprovalDecision
+	}{
+		{label: "允许", decision: contracts.ApprovalAllow},
+		{label: "本会话内始终允许", decision: contracts.ApprovalAllowAlways},
+		{label: "拒绝", decision: contracts.ApprovalDeny},
+	}
+	for _, test := range cases {
+		t.Run(string(test.decision), func(t *testing.T) {
+			state, tester := approvalInlineHarness(t,
+				approvalTestRequest("r1", "bash", "运行命令", `{"command":"ls"}`), 1,
+				uikit.ApprovalLabels{}, nil)
+			if err := tester.Click(test.label); err != nil {
+				t.Fatalf("click %q: %v; texts = %v", test.label, err, tester.Texts())
+			}
+			tester.Frame()
+			if len(state.decisions) != 1 || state.decisions[0] != test.decision {
+				t.Fatalf("decisions = %v, want [%s]", state.decisions, test.decision)
+			}
+		})
+	}
+}
+
+// TestApprovalInlineCardNoKeyboardDismissal covers the contract split: the
+// component handles no keyboard shortcut (Esc does not decide, and there is no
+// backdrop to click — the inline card is not a Modal). The session screen owns
+// Escape.
+func TestApprovalInlineCardNoKeyboardDismissal(t *testing.T) {
+	state, tester := approvalInlineHarness(t,
+		approvalTestRequest("e1", "bash", "运行命令", `{"command":"ls"}`), 1,
+		uikit.ApprovalLabels{}, nil)
+	tester.Key(0, ui.KeyEscape)
+	tester.Frame()
+	tester.ClickAt(2, 2)
+	tester.Frame()
+	if len(state.decisions) != 0 {
+		t.Fatalf("the inline card resolved without an explicit click: %v", state.decisions)
+	}
+	if !tester.HasText("需要审批") {
+		t.Fatalf("the inline card disappeared without a decision; texts = %v", tester.Texts())
+	}
+}
+
+// TestApprovalInlineCardPendingCount covers the banner counter: it appears only
+// when more requests wait behind the shown one.
+func TestApprovalInlineCardPendingCount(t *testing.T) {
+	t.Run("single request", func(t *testing.T) {
+		_, tester := approvalInlineHarness(t,
+			approvalTestRequest("a1", "bash", "运行命令", ""), 1,
+			uikit.ApprovalLabels{}, nil)
+		if tester.HasText("待审批") {
+			t.Fatalf("a single request shows a queue counter; texts = %v", tester.Texts())
+		}
+	})
+	t.Run("queued requests", func(t *testing.T) {
+		_, tester := approvalInlineHarness(t,
+			approvalTestRequest("a1", "bash", "运行命令", ""), 3,
+			uikit.ApprovalLabels{}, nil)
+		if !tester.HasText("还有 2 条待审批") {
+			t.Fatalf("the queue counter is missing; texts = %v", tester.Texts())
+		}
+	})
+}
+
+// TestApprovalInlineCardEnglishCopy covers the localized defaults of the inline
+// banner and body.
+func TestApprovalInlineCardEnglishCopy(t *testing.T) {
+	_, tester := approvalInlineHarness(t,
+		approvalTestRequest("a1", "read_file", "读取配置", `{"path":"x"}`), 2,
+		uikit.ApprovalLabels{}, &entryDialogTestLocale{lang: "en"})
+	for _, want := range []string{
+		"Approval required", "Read file", "1 more pending approvals", "Esc denies",
+		"Arguments", "Allow", "Always allow in this session", "Deny",
+		"It runs within the sandbox policy after approval; the policy may still reject the call.",
+	} {
+		if !tester.HasText(want) {
+			t.Fatalf("frame does not show %q; texts = %v", want, tester.Texts())
+		}
+	}
+	if tester.HasText("read_file") {
+		t.Fatalf("the raw tool id leaked into the visible copy; texts = %v", tester.Texts())
+	}
+}
+
+// TestApprovalInlineCardArguments covers the arguments section: the empty
+// fallback and the bounded disclosure of a huge payload.
+func TestApprovalInlineCardArguments(t *testing.T) {
+	t.Run("no arguments", func(t *testing.T) {
+		_, tester := approvalInlineHarness(t,
+			approvalTestRequest("a1", "read_file", "读取配置", "{}"), 1,
+			uikit.ApprovalLabels{}, nil)
+		if !tester.HasText("无参数") {
+			t.Fatalf("the no-arguments fallback is missing; texts = %v", tester.Texts())
+		}
+		if tester.HasText("显示原始参数") {
+			t.Fatalf("an empty argument block still renders a disclosure; texts = %v", tester.Texts())
+		}
+	})
+	t.Run("long arguments", func(t *testing.T) {
+		var long strings.Builder
+		long.WriteString(`{"data":"`)
+		for long.Len() < 8000 {
+			long.WriteByte('x')
+		}
+		long.WriteString(`"}`)
+		payload := long.String()
+		_, tester := approvalInlineHarness(t,
+			approvalTestRequest("l1", "bash", "大参数", payload), 1,
+			uikit.ApprovalLabels{}, nil)
+		if tester.HasText(`{"data":"`) {
+			t.Fatalf("the arguments disclosure starts open; texts = %v", tester.Texts())
+		}
+		if err := tester.Click("显示原始参数"); err != nil {
+			t.Fatalf("open the arguments disclosure: %v; texts = %v", err, tester.Texts())
+		}
+		tester.Frame()
+		if !tester.HasText(`{"data":"`) {
+			t.Fatalf("the truncated arguments did not render; texts = %v", tester.Texts())
+		}
+		if tester.HasText(payload) {
+			t.Fatal("the full arguments payload was rendered instead of the truncated block")
+		}
+	})
+}
+
+// TestApprovalInlineCardConfiguredLabels covers the configurable copy on the
+// inline banner and footer.
+func TestApprovalInlineCardConfiguredLabels(t *testing.T) {
+	_, tester := approvalInlineHarness(t,
+		approvalTestRequest("c1", "bash", "run", `{"command":"ls"}`), 1,
+		uikit.ApprovalLabels{
+			Title:      "确认执行",
+			AllowLabel: "执行",
+			DenyLabel:  "拒绝",
+		}, nil)
+	for _, want := range []string{"确认执行", "执行", "参数", "本会话内始终允许", "拒绝"} {
+		if !tester.HasText(want) {
+			t.Fatalf("frame does not show %q; texts = %v", want, tester.Texts())
+		}
+	}
+	if tester.HasText("需要审批") {
+		t.Fatalf("the default title leaked with a configured one; texts = %v", tester.Texts())
+	}
+}
+
+// TestApprovalSummaryLabelFollowsToolKindInline covers S-08 for the inline card:
+// only shell/terminal calls label their summary 命令.
+func TestApprovalSummaryLabelFollowsToolKindInline(t *testing.T) {
+	_, read := approvalInlineHarness(t,
+		approvalTestRequest("f1", "read_file", "读取 internal/app.go", `{"path":"internal/app.go"}`), 1,
+		uikit.ApprovalLabels{}, nil)
+	if !read.HasText("摘要") {
+		t.Fatalf("read_file summary is not labelled 摘要; texts = %v", read.Texts())
+	}
+	for _, text := range read.Texts() {
+		if text == "命令" {
+			t.Fatalf("read_file summary is labelled 命令; texts = %v", read.Texts())
+		}
+	}
+
+	_, bash := approvalInlineHarness(t,
+		approvalTestRequest("b1", "bash", "运行命令 ls", `{"command":"ls"}`), 1,
+		uikit.ApprovalLabels{}, nil)
+	if !bash.HasText("命令") {
+		t.Fatalf("bash summary is not labelled 命令; texts = %v", bash.Texts())
+	}
+}

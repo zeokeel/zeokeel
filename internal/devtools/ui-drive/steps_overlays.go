@@ -57,8 +57,7 @@ func (d *drive) runOverlaySteps() {
 				c.failf("主操作「允许」不在最右：允许 x=%.0f，本会话内始终允许 x=%.0f", allow.X, always.X)
 			}
 			// The no-default safe-decision rule is visible in the copy.
-			c.require(c.has("无默认操作") || c.has("Esc = 拒绝"),
-				"审批对话框没有可见的安全说明（Esc=拒绝 / 无默认操作）")
+			c.require(c.has("Esc 拒绝"), "内联审批卡没有可见的安全说明（Esc 拒绝）")
 			// The empty-arguments rendering: {} shows 「无参数」 and no empty box.
 			c.require(c.has("无参数"), "审批对话框对空参数 {} 没有显示「无参数」")
 			// Clean up: approve (through the dialog when possible) and let the
@@ -70,8 +69,8 @@ func (d *drive) runOverlaySteps() {
 			d.drain(2)
 		})
 
-	d.step("approval-safe-default", "session", "审批：无默认操作（Enter 不做任何决定）",
-		"审批对话框不自动聚焦任何操作；单独的 Enter 既不放行也不拒绝（仍等待），点「拒绝/允许」才产生决议", func(c *check) {
+	d.step("approval-safe-default", "session", "审批：内联卡无默认操作（Enter 不做任何决定）",
+		"输入框上方的内联审批卡不自动聚焦任何操作；单独的 Enter 既不放行也不拒绝（仍等待），点「拒绝/允许」才产生决议", func(c *check) {
 			d.server.SetMode(scriptToolCallThenAnswer)
 			defer d.server.SetMode(scriptAnswer)
 			d.resetToSession()
@@ -106,8 +105,7 @@ func (d *drive) runOverlaySteps() {
 			c.note("焦点：拒绝=%v 允许=%v", focusedDeny, focusedAllow)
 			c.require(!focusedAllow, "审批对话框自动聚焦了「允许」（不安全）")
 			c.require(!focusedDeny, "审批对话框自动聚焦了「拒绝」（误触 Enter 会误拒）")
-			c.require(c.has("无默认操作"),
-				"审批对话框缺少「无默认操作」语义说明")
+			c.require(c.has("Esc 拒绝"), "内联审批卡缺少「Esc 拒绝」语义说明")
 			// A shell-like tool's summary is shown as a 命令 block first, with
 			// the raw arguments collapsed behind 「显示原始参数」.
 			c.require(c.has("命令") || c.has("摘要"), "审批对话框没有把工具 Summary 作为命令/摘要块显示")
@@ -405,8 +403,8 @@ func (d *drive) runOverlaySteps() {
 			}
 		})
 
-	d.step("overlay-goal", "session", "浮层：goal 目标（chip 菜单 + 目标对话框）",
-		"GoalTracker.Set → 头部出现目标 chip；点 chip 打开动作菜单（暂停/完成/放弃/清除）；/goal 对话框取消在左/保存在右", func(c *check) {
+	d.step("overlay-goal", "session", "浮层：goal 目标（输入框上方目标条 + 目标对话框）",
+		"GoalTracker.Set → 输入框上方出现目标条；点 ⋯ 目标操作打开动作菜单（暂停/完成/放弃/清除）；/goal 对话框取消在左/保存在右", func(c *check) {
 			d.resetToSession()
 			tracker := d.uiRoot.GoalTracker()
 			if _, err := tracker.Set(context.Background(), "完成 Q4 发布清单并更新文档"); err != nil {
@@ -414,15 +412,15 @@ func (d *drive) runOverlaySteps() {
 				return
 			}
 			d.drain(3)
-			chip := d.goalChipLabel()
-			if chip == "" {
-				c.failf("设置目标后头部没有目标 chip")
+			status := d.goalChipLabel()
+			if status == "" {
+				c.failf("设置目标后输入框上方没有目标状态 badge")
 				return
 			}
-			c.note("目标 chip 标签=%q", chip)
-			c.shot("overlay-goal-header")
-			// The chip opens the goal actions popover.
-			if !c.click(chip) {
+			c.note("目标状态标签=%q", status)
+			c.shot("overlay-goal-dock")
+			// The dock's ⋯ entry opens the goal actions menu.
+			if !c.click("目标操作") {
 				return
 			}
 			d.drain(2)
@@ -447,18 +445,16 @@ func (d *drive) runOverlaySteps() {
 					c.warnf("暂停目标后 chip 没有显示「目标已暂停」（当前 chip=%q）", d.goalChipLabel())
 				}
 				c.shot("overlay-goal-paused")
-				// Resume through the same chip menu (its label changed).
-				if resumed := d.goalChipLabel(); resumed != "" {
-					if !c.click(resumed) {
+				// Resume through the same dock menu.
+				if !c.click("目标操作") {
+					return
+				}
+				d.drain(2)
+				if c.has("继续目标") {
+					if !c.click("继续目标") {
 						return
 					}
 					d.drain(2)
-					if c.has("继续目标") {
-						if !c.click("继续目标") {
-							return
-						}
-						d.drain(2)
-					}
 				}
 			}
 			// The /goal dialog is reachable through the slash command surface.

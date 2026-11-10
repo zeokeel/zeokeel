@@ -451,7 +451,7 @@ func TestHomeContextControlsSwitchModelAndMode(t *testing.T) {
 	tester := ui.NewTester(h.ui.View, 1200, 800)
 	tester.Frame()
 
-	// Without a model catalog the model control deep-links to the provider
+	// Without a model catalog the model control deep-links to the model
 	// settings page.
 	if err := tester.Click("test-model"); err != nil {
 		t.Fatalf("open model menu: %v; texts = %v", err, tester.Texts())
@@ -496,7 +496,9 @@ func TestHomeContextModelMenuFromCatalog(t *testing.T) {
 		t.Fatalf("open model menu: %v; texts = %v", err, tester.Texts())
 	}
 	tester.Frame()
-	h.assertTexts(tester, "DeepSeek Chat", "Qwen Coder")
+	h.assertTexts(tester, "模型")
+	clickHome(t, tester, "模型")
+	h.assertTexts(tester, "自定义服务", "DeepSeek Chat", "Qwen Coder")
 	clickHome(t, tester, "Qwen Coder")
 	if got := settings.Get(contracts.SettingsChatModel, ""); got != "qwen2.5-coder" {
 		t.Fatalf("selected model = %q, want qwen2.5-coder", got)

@@ -1,6 +1,7 @@
 package session_test
 
-// Tests for assistant-message good/bad feedback buttons.
+// Tests for assistant-message good/bad feedback, now the two radio items of the
+// compact meta row's ⋯ message-actions menu.
 
 import (
 	"errors"
@@ -87,41 +88,55 @@ func newFeedbackHarness(t *testing.T, chat *feedbackChat) *harness {
 	return &harness{t: t, ctx: ctx, ui: uiRoot, chat: chat.fakeChat}
 }
 
+// feedbackSessionChat is one answered assistant turn; the meta row's ⋯ menu is
+// the only ratings entry.
 func feedbackSessionChat() *feedbackChat {
 	chat := newFakeChat()
 	chat.addSession(contracts.ChatSession{
 		ID:    "sess-1",
 		Title: "Feedback chat",
 		Messages: []contracts.ChatMessage{
-			{ID: "msg-user", Role: contracts.ChatRoleUser, Text: "rate this"},
 			{ID: "msg-assistant", Role: contracts.ChatRoleAssistant, Text: "an answer"},
 		},
 	}, true)
 	return &feedbackChat{fakeChat: chat}
 }
 
+// openAssistantActions opens the ⋯ message-actions menu of the conversation's
+// (only) assistant meta row.
+func openAssistantActions(t *testing.T, h *harness, tester *ui.Tester) {
+	t.Helper()
+	h.click(tester, "消息操作")
+}
+
 func TestFeedbackButtonsToggle(t *testing.T) {
 	chat := feedbackSessionChat()
 	h := newFeedbackHarness(t, chat)
 	tester := h.tester()
-	// The rating buttons live behind the resident ⋯ message-actions entry.
+	// The ratings live behind the ⋯ message-actions entry, not as resident
+	// buttons.
 	h.assertNoTexts(tester, "有帮助", "没帮助")
-	h.click(tester, "消息操作")
+	openAssistantActions(t, h, tester)
 	h.assertTexts(tester, "有帮助", "没帮助")
 
-	// good: write good; clicking it again clears.
+	// good: write good; choosing it again clears.
 	h.click(tester, "有帮助")
 	call := chat.lastCall(t)
 	if call.sessionID != "sess-1" || call.messageID != "msg-assistant" || call.feedback != contracts.FeedbackGood {
 		t.Fatalf("good feedback call = %+v", call)
 	}
 	h.assertNoTexts(tester, "已反馈")
+	openAssistantActions(t, h, tester)
+	if info, ok := tester.AccessByRole(ui.RoleMenuItemRadio, "有帮助"); !ok || !info.Checked {
+		t.Fatalf("helpful radio = %+v found %v, want checked", info, ok)
+	}
 	h.click(tester, "有帮助")
 	if call := chat.lastCall(t); call.feedback != "" {
 		t.Fatalf("toggle clear call = %+v", call)
 	}
 
 	// bad: write bad.
+	openAssistantActions(t, h, tester)
 	h.click(tester, "没帮助")
 	if call := chat.lastCall(t); call.feedback != contracts.FeedbackBad {
 		t.Fatalf("bad feedback call = %+v", call)
@@ -143,6 +158,9 @@ func TestFeedbackButtonsHiddenWithoutImplementation(t *testing.T) {
 	h := newHarness(t, chat)
 	tester := h.tester()
 	h.assertNoTexts(tester, "有帮助", "没帮助", "已反馈")
+	openAssistantActions(t, h, tester)
+	h.assertNoTexts(tester, "有帮助", "没帮助")
+	h.assertTexts(tester, "复制消息")
 }
 
 func TestFeedbackButtonsShowError(t *testing.T) {
@@ -150,7 +168,7 @@ func TestFeedbackButtonsShowError(t *testing.T) {
 	chat.setErr = errors.New("feedback write failed")
 	h := newFeedbackHarness(t, chat)
 	tester := h.tester()
-	h.click(tester, "消息操作")
+	openAssistantActions(t, h, tester)
 	h.click(tester, "有帮助")
 	h.assertTexts(tester, "feedback write failed")
 }
@@ -166,43 +184,40 @@ func TestFeedbackButtonsEnglish(t *testing.T) {
 	h.assertNoTexts(tester, "Rated")
 }
 
-// TestFeedbackButtonsUseOfficialToggles covers the migration away from
-// hand-painted selected buttons: the two ratings are official toggle buttons
-// (pressed state reaches assistive technology), mutually exclusive, and pressing
-// the pressed one clears the rating.
-func TestFeedbackButtonsUseOfficialToggles(t *testing.T) {
+// TestFeedbackButtonsAreMenuRadios pins the official menu semantics: the two
+// ratings are radio items (single choice, checked state reaches assistive
+// technology), and choosing the checked one clears it.
+func TestFeedbackButtonsAreMenuRadios(t *testing.T) {
 	chat := feedbackSessionChat()
 	h := newFeedbackHarness(t, chat)
 	tester := h.tester()
-	h.click(tester, "消息操作")
+	openAssistantActions(t, h, tester)
 
-	good, ok := tester.AccessByRole(ui.RoleToggleButton, "有帮助")
-	if !ok || good.Role != ui.RoleToggleButton || good.Checked {
-		t.Fatalf("good rating toggle: %+v found %v", good, ok)
+	good, ok := tester.AccessByRole(ui.RoleMenuItemRadio, "有帮助")
+	if !ok || good.Checked {
+		t.Fatalf("helpful radio: %+v found %v, want an unchecked radio", good, ok)
 	}
-	bad, ok := tester.AccessByRole(ui.RoleToggleButton, "没帮助")
+	bad, ok := tester.AccessByRole(ui.RoleMenuItemRadio, "没帮助")
 	if !ok || bad.Checked {
-		t.Fatalf("bad rating toggle: %+v found %v", bad, ok)
+		t.Fatalf("not-helpful radio: %+v found %v, want an unchecked radio", bad, ok)
 	}
 
-	// Pressing good persists it and the toggle reads pressed.
+	// Choosing helpful persists it; reopening marks that radio checked.
 	h.click(tester, "有帮助")
 	if call := chat.lastCall(t); call.feedback != contracts.FeedbackGood {
-		t.Fatalf("good feedback call = %+v", call)
+		t.Fatalf("helpful feedback call = %+v", call)
 	}
-	if info, ok := tester.AccessByRole(ui.RoleToggleButton, "有帮助"); !ok || !info.Checked {
-		t.Fatalf("good toggle not pressed after saving good: %+v found %v", info, ok)
+	openAssistantActions(t, h, tester)
+	if info, ok := tester.AccessByRole(ui.RoleMenuItemRadio, "有帮助"); !ok || !info.Checked {
+		t.Fatalf("helpful radio not checked after saving: %+v found %v", info, ok)
 	}
-	if info, _ := tester.AccessByRole(ui.RoleToggleButton, "没帮助"); info.Checked {
-		t.Fatalf("bad toggle pressed while good is the rating: %+v", info)
+	if info, _ := tester.AccessByRole(ui.RoleMenuItemRadio, "没帮助"); info.Checked {
+		t.Fatalf("not-helpful radio checked while helpful is the rating: %+v", info)
 	}
 
-	// Pressing good again clears it (click-again-clears).
+	// Choosing helpful again clears it.
 	h.click(tester, "有帮助")
 	if call := chat.lastCall(t); call.feedback != "" {
 		t.Fatalf("toggle clear call = %+v", call)
-	}
-	if info, _ := tester.AccessByRole(ui.RoleToggleButton, "有帮助"); info.Checked {
-		t.Fatalf("good toggle still pressed after clearing: %+v", info)
 	}
 }

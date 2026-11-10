@@ -94,7 +94,7 @@ func TestExportSuccessRaisesSuccessToast(t *testing.T) {
 	notifier := &fakeSessionNotifier{}
 	h := newToastHarness(t, exportToastChat(), notifier)
 	tester := h.tester()
-	h.click(tester, "更多")
+	openConversationActions(t, h, tester)
 	h.click(tester, "导出 Markdown")
 	tester.Frame()
 
@@ -112,7 +112,7 @@ func TestExportFailureRaisesErrorToast(t *testing.T) {
 	notifier := &fakeSessionNotifier{}
 	h := newToastHarness(t, exportToastChat(), notifier)
 	tester := h.tester()
-	h.click(tester, "更多")
+	openConversationActions(t, h, tester)
 	h.click(tester, "导出 Markdown")
 	tester.Frame()
 
@@ -130,7 +130,7 @@ func TestExportJSONLSuccessRaisesSuccessToast(t *testing.T) {
 	notifier := &fakeSessionNotifier{}
 	h := newToastHarness(t, exportToastChat(), notifier)
 	tester := h.tester()
-	h.click(tester, "更多")
+	openConversationActions(t, h, tester)
 	h.click(tester, "导出 JSONL")
 	tester.Frame()
 
@@ -144,7 +144,7 @@ func TestExportWithoutNotifierStillWorks(t *testing.T) {
 	setExportSaver(t, func(title, name, content string) (string, error) { return "/tmp/" + name, nil })
 	h := newToastHarness(t, exportToastChat(), nil)
 	tester := h.tester()
-	h.click(tester, "更多")
+	openConversationActions(t, h, tester)
 	h.click(tester, "导出 Markdown")
 	tester.Frame()
 	// Without a notifier the export still succeeds; no resident badge appears.

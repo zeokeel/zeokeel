@@ -343,16 +343,9 @@ func (r *Root) screen(c *ui.Context) {
 		spec = specs[0]
 	}
 	ui.Column(c).FillWidth().Grow(1).Padding(design.Space6).Gap(design.Space4).Children(func() {
-		// Screens own their header (the old UI's session header, home header,
-		// ...); the host only offers the two header slots when a module
-		// contributes to them, so no empty toolbar is reserved.
-		if r.hasAnySlot(contracts.SlotScreenHeader, contracts.SlotScreenActions) {
-			ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(design.Space2).Children(func() {
-				r.slot(c, contracts.SlotScreenHeader)
-				ui.Spacer(c).Grow(1)
-				r.slot(c, contracts.SlotScreenActions)
-			})
-		}
+		// The screen's header/actions/tabs live in the window's B3 top band
+		// (contentHeader); the body only contributes its own content and its
+		// footer status.
 		r.safeBuild(c, spec.Build)
 		r.slot(c, contracts.SlotScreenFooter)
 	})
@@ -485,63 +478,143 @@ func (r *Root) dockedInspectorHeader(c *ui.Context, t *design.Tokens) {
 	})
 }
 
-// contentHeader is the window's top band: a native ui.Toolbar with the visible
-// command-palette entry and the inspector toggle. A toolbar is one Tab stop
-// whose arrows move between its controls, and it reports its role and label to
-// assistive technology (docs/ui/toolbar.md).
+// contentHeader is the window's B3 top band: the current screen's header,
+// action and tab contributions on one quiet surface, with the host's palette and
+// inspector controls at its end. A screen with no contribution gets no top band
+// at all (and with it, no palette/inspector row: those controls belong to the
+// screens that carry chrome). Navigation has no back control and no Alt+Left
+// chord: the sidebar destinations and the command palette are the navigation.
 func (r *Root) contentHeader(c *ui.Context) {
+	if !r.hasScreenBandSlots() {
+		return
+	}
 	t := design.Of(c)
-	ui.Toolbar(c, func() {
-		// Navigation history: the hand-built navigator keeps a screen stack, so
-		// the window can offer a back affordance with a keyboard path (mygo
-		// navigation.md/history-buttons.md) instead of the stack being invisible.
-		if r.nav.CanGoBack() {
-			backLabel := r.tr("返回上一个页面", "Back")
-			back := ui.Button(c, "").Label(backLabel).Tooltip(backLabel).
-				KeyShortcuts(ui.Alt, ui.KeyLeft)
-			back.Children(func() {
-				ui.Icon(c, icons.ChevronRight()).Size(16, 16).
-					TextColor(t.LabelSecondary).Rotate(180)
+	ui.Column(c).FillWidth().Background(t.BgSidebar).
+		BorderWidth(0, 0, 1, 0).BorderColor(t.BorderL2).Children(func() {
+		r.screenHeaderRow(c, t)
+		if r.hasScreenSlot(contracts.SlotScreenTabs) {
+			// The tabs row rides directly under the header row: one surface, one
+			// bottom border, no line between the two rows.
+			ui.Row(c).FillWidth().Height(design.Space8).PaddingX(design.Space5).
+				AlignItems(ui.Stretch).Children(func() {
+				r.renderScreenSlot(c, contracts.SlotScreenTabs)
 			})
-			if back.Clicked() {
-				r.nav.Back()
-				r.requestFrame()
+		}
+	})
+}
+
+// screenHeaderRow draws the band's 40 DIP row: the screen's title area (it takes
+// the remaining width and ellipsizes), its actions, and the host's palette and
+// inspector controls. The row is window chrome, so its title uses the TypeM
+// step (16 DIP) rather than the page-title TypeL the retired in-body header
+// used; that keeps the band in proportion with the 13 DIP tabs, 12 DIP badges
+// and 16 DIP icons next to it.
+func (r *Root) screenHeaderRow(c *ui.Context, t *design.Tokens) {
+	ui.Row(c).FillWidth().Height(design.Space8 + design.Space2).
+		PaddingX(design.Space5).Gap(design.Space2).AlignItems(ui.Center).Children(func() {
+		ui.Column(c).Grow(1).Shrink(1).MinWidthPercent(0).Justify(ui.Center).Children(func() {
+			r.renderScreenSlot(c, contracts.SlotScreenHeader)
+		})
+		r.renderScreenSlot(c, contracts.SlotScreenActions)
+		r.paletteButton(c, t)
+		r.inspectorButton(c, t)
+	})
+}
+
+// paletteButton is the host command-palette entry of the top band.
+func (r *Root) paletteButton(c *ui.Context, t *design.Tokens) {
+	paletteLabel := r.tr("快捷操作", "Quick actions")
+	palette := ui.Button(c, "").Label(paletteLabel).Tooltip(paletteLabel).
+		KeyShortcuts(ui.Cmd, ui.KeyK)
+	palette.Children(func() {
+		ui.Icon(c, icons.Search()).Size(design.Space4, design.Space4).TextColor(t.LabelSecondary)
+	})
+	if palette.Clicked() {
+		r.togglePalette()
+	}
+}
+
+// inspectorButton is the host inspector toggle of the top band, shown only on
+// the screen that contributes the inspector's pane.
+func (r *Root) inspectorButton(c *ui.Context, t *design.Tokens) {
+	if !r.inspectorAvailable() {
+		return
+	}
+	label := r.tr("打开右侧栏", "Open inspector")
+	if r.rightOpen {
+		label = r.tr("收起右侧栏", "Close inspector")
+	}
+	inspector := ui.Button(c, "").Label(label).Tooltip(label).
+		KeyShortcuts(ui.Cmd|ui.Alt, ui.KeyI).
+		Bind(&r.inspectorToggle)
+	if r.inspectorFocusPending {
+		// The close that removed the focused control (drawer, or the narrow
+		// docked header's X) asks for the keyboard back on the toggle that opens
+		// the inspector, as a dialog returns it.
+		r.inspectorFocusPending = false
+		r.inspectorToggle.Focus(c)
+	}
+	inspector.Children(func() {
+		ui.Icon(c, icons.PanelRight()).Size(design.Space4, design.Space4).TextColor(t.LabelSecondary)
+	})
+	if inspector.Clicked() {
+		r.setRightPanelOpen(!r.rightOpen, false)
+	}
+}
+
+// hasScreenBandSlots reports whether the current screen contributes to any slot
+// of the B3 band.
+func (r *Root) hasScreenBandSlots() bool {
+	return r.hasScreenSlot(contracts.SlotScreenHeader, contracts.SlotScreenActions, contracts.SlotScreenTabs)
+}
+
+// hasScreenSlot reports whether at least one of the named slots has a
+// contribution that belongs to the current screen.
+func (r *Root) hasScreenSlot(names ...string) bool {
+	for _, name := range names {
+		for _, item := range r.rt.slotItems(name) {
+			if r.screenSlotApplies(item.ID) {
+				return true
 			}
 		}
-		ui.Spacer(c).Grow(1)
-		paletteLabel := r.tr("快捷操作", "Quick actions")
-		palette := ui.Button(c, "").Label(paletteLabel).Tooltip(paletteLabel).
-			KeyShortcuts(ui.Cmd, ui.KeyK)
-		palette.Children(func() {
-			ui.Icon(c, icons.Search()).Size(16, 16).TextColor(t.LabelSecondary)
-		})
-		if palette.Clicked() {
-			r.togglePalette()
+	}
+	return false
+}
+
+// renderScreenSlot builds the current screen's contributions of one screen-level
+// slot. Contributions are filtered by their ID's screen namespace (see
+// screenSlotApplies), so a module's header does not appear on another screen.
+func (r *Root) renderScreenSlot(c *ui.Context, name string) {
+	for _, item := range r.rt.slotItems(name) {
+		if !r.screenSlotApplies(item.ID) {
+			continue
 		}
-		if !r.inspectorAvailable() {
-			return
+		r.safeBuild(c, item.Build)
+	}
+}
+
+// screenSlotApplies reports whether one screen-level slot contribution belongs
+// to the current screen. A contribution whose item ID starts with a registered
+// screen ID scopes to that screen ("session.title" shows on the "session" screen
+// only); every other ID is a host/global contribution (the shell tests and
+// legacy contributors use those). Screen-level slots are global registrations,
+// so this convention is what keeps the conversation's header/tabs off Home,
+// Automation and Plugins.
+func (r *Root) screenSlotApplies(itemID string) bool {
+	index := strings.IndexByte(itemID, '.')
+	if index <= 0 {
+		return true
+	}
+	prefix := itemID[:index]
+	if prefix == r.nav.Current() {
+		return true
+	}
+	for _, spec := range visibleScreens(r.rt.screenSpecs()) {
+		if spec.ID == prefix {
+			return false
 		}
-		label := r.tr("打开右侧栏", "Open inspector")
-		if r.rightOpen {
-			label = r.tr("收起右侧栏", "Close inspector")
-		}
-		inspector := ui.Button(c, "").Label(label).Tooltip(label).
-			KeyShortcuts(ui.Cmd|ui.Alt, ui.KeyI).
-			Bind(&r.inspectorToggle)
-		if r.inspectorFocusPending {
-			// The close that removed the focused control (drawer, or the
-			// narrow docked header's X) asks for the keyboard back on the
-			// toggle that opens the inspector, as a dialog returns it.
-			r.inspectorFocusPending = false
-			r.inspectorToggle.Focus(c)
-		}
-		inspector.Children(func() {
-			ui.Icon(c, icons.PanelRight()).Size(16, 16).TextColor(t.LabelSecondary)
-		})
-		if inspector.Clicked() {
-			r.setRightPanelOpen(!r.rightOpen, false)
-		}
-	}).Label(r.tr("窗口", "Window"))
+	}
+	return true
 }
 
 // inspectorDrawer shows the inspector as a modal drawer over the content when

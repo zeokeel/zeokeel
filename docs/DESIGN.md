@@ -221,7 +221,7 @@
 | 会话线程 / 消息 | `uikit.SessionThread`（已有，Phase 3a） | `ui.List` + `ListState{Key, FollowEnd, HoldPlace}` + `markdown.Stream/View` | `Scroll` + 循环构建消息；手写 scroll 贴底；消息卡片墙 |
 | 推理 / 思维链 | `uikit.ReasoningTrace`（已有，Phase 3a） | `ui.CollapsibleBase` + `markdown.View/Stream` + `Spinner` | 大 Card 当正文；默认展开；把推理混进正文段落 |
 | 工具调用 | `uikit.ToolRow`（已有）+ `uikit.ToolCallCard`（已有，Phase 2c） | `ui.CollapsibleBase` + `Spinner` + `Badge` + 可复制文本段 | 塞进消息气泡；纯 `ui.Text` 渲染结果；另一套工具卡解剖 |
-| 审批 / 中断 | `uikit.ApprovalDialog`（已有，Phase 3b） | `ui.Modal` + `uikit.DialogFooter`（**无 Default**，Esc=deny，危险在前） | 普通 Button + 中性文案；默认焦点落在允许/拒绝；`AlertDialog` 末位默认语义 |
+| 审批 / 中断 | `uikit.ApprovalDialog`（已有，Phase 3b；**Inline=V3 内联卡**为产品默认） | 内联卡（输入框上方，警示横幅+警示描边+中性卡体）或兼容 Modal + `uikit.DialogFooter`（**无 Default**，Esc=deny，危险在前）；session 负责 Esc 审批优先 | 普通 Button + 中性文案；默认焦点落在允许/拒绝；`AlertDialog` 末位默认语义；把审批做成居中 Modal（产品默认路径） |
 | 计划审阅 | `uikit.PlanReviewDialog`（已有，Phase 3b） | `ui.Modal` + `markdown.View` + `DialogFooter`（无 Default；Esc 不取消；反馈 Enter=继续规划） | Esc 静默取消计划；空反馈 Enter 批准；自拼 footer 顺序 |
 | 用户提问（ask） | `uikit.AskDialog`（已有，Phase 3b） | `ui.Modal` + 等权选项按钮 + `TextInput` + `DialogFooter`（取消 Default） | Enter 误选未选中的选项；选项排主次；空回答可提交 |
 | Composer | `uikit.ComposerShell`（已有，Phase 3c） | `ui.TextArea` + `PopoverMenuButton` + `ui.PrimaryButton` + `uikit.ErrorLine` | 新造输入框；把主操作藏进溢出菜单；宽度写死 |
@@ -519,7 +519,7 @@ uikit.ToolRow(c, uikit.ToolRowOptions{
 | 间距 | `Space1..8` = 4/8/12/16/20/24/32 | 只用这些；容器间距用 `Gap(design.SpaceN)`，内外边距同理 |
 | 圆角 | `RadiusXS 4` / `SM 8` / `MD 10` / `LG 16` / `XL 20` / `Max 999` | 控件 MD、卡片 LG、composer XL、badge Max；禁止裸数值 |
 | 阴影 | `ShadowComposer`（composer）、`ShadowOverlay`（浮层，深色更重） | 卡片默认无阴影；浮层才用 elevation；禁止手写 `ui.RGBA` |
-| 布局 | `SidebarWidth 280` / `SidebarRailWidth 64` / `InspectorWidth 320` / `InspectorMinWidth 260` / `ContentMinWidth 520` / `SettingsWidth 820` / `SettingsHeight 760` / `TranscriptWidth 840` / `DialogWidthXS 360` / `DialogWidthS 460` / `DialogWidthCompact 520` / `DialogWidthM 560` / `DialogWidthL 620` / `DialogWidthXL 680` / `DialogBodyMax 480` / `OverlayWidthS 380` | 壳层/对话框/浮层/阅读列尺寸只能引这些 token（Phase 1b 已补齐并替换存量） |
+| 布局 | `SidebarWidth 280` / `SidebarRailWidth 64` / `InspectorWidth 320` / `InspectorMinWidth 260` / `ContentMinWidth 520` / `SettingsWidth 820` / `SettingsHeight 760` / `TranscriptWidth 960` / `DialogWidthXS 360` / `DialogWidthS 460` / `DialogWidthCompact 520` / `DialogWidthM 560` / `DialogWidthL 620` / `DialogWidthXL 680` / `DialogBodyMax 480` / `OverlayWidthS 380` | 壳层/对话框/浮层/阅读列尺寸只能引这些 token（Phase 1b 已补齐并替换存量） |
 | 图标尺寸 | `IconSizeS/M/L = 16/20/24`（已落地） | 图标按钮统一走 `uikit.IconButton`（Phase 2）；其他图标尺寸优先用 token，禁止 12–40 裸值继续新增 |
 
 ### 5.5 使用规则与检查
@@ -569,7 +569,7 @@ uikit.ToolRow(c, uikit.ToolRowOptions{
 | `uikit.ReasoningTrace` | **已有**（Phase 3a） | 折叠推理、streaming 展开/结束后收起；muted 主题在 uikit |
 | `uikit.ToolRow` | **已有** | 工具调用唯一入口；需收编 session 的 `buildToolCard` 卡头 |
 | `uikit.ToolCallCard` | **已有**（Phase 2c） | 决策/轨迹/plan/demo 统一完整卡；普通工具调用仍走 `uikit.ToolRow`；无 body 时 Normal 退化为单行 |
-| `uikit.ApprovalDialog` | **已有**（Phase 3b） | 审批 Modal + 无 Default footer + Esc/backdrop=deny；模块只留队列 |
+| `uikit.ApprovalDialog` | **已有**（Phase 3b；Inline 2026-11-10） | `Inline : bool`（产品默认 true）：输入框上方 V3 内联卡（警示横幅/描边）；`false` 保留 Modal 兼容路径；无 Default footer；Esc 由 session 审批优先路径 deny 最早一条；模块只留队列/自动切回会话 |
 | `uikit.PlanReviewDialog` | **已有**（Phase 3b） | Esc 不取消 + 一次性 RoleAlert 提示；空反馈不批准；失败 Esc 可关 |
 | `uikit.AskDialog` | **已有**（Phase 3b） | 等权选项 + 「其他…」+ 取消 Default；自由文本空 Disabled |
 | `uikit.TeamSurface` | **已有**（Phase 3d） | 团队三段式/行内 RunState/任务板分组/详情/危险确认；rightpanel 只留数据 |
@@ -600,7 +600,7 @@ uikit.ToolRow(c, uikit.ToolRowOptions{
 | composer 动作行 | Plain Row + 3 个 PopoverMenuButton | `ui.Toolbar` 溢出菜单会吞掉发送键（已注释） |
 | slash/@ 建议菜单 | 富行建议面板（图标/标题/说明） | 官方 Autocomplete 仅纯文本；已按官方 suggestions a11y 模式实现 |
 | 命令面板行按钮 | 单次点击执行 + RoleButton 行 | 官方 List 行语义是 listitem，不提供按钮行 |
-| 消息 hover 动作行 | 消息级悬停动作 | 官方列表行不提供该交互 |
+| 消息元信息行（时间 · 紧凑用量 · ⋯） | 消息级元信息 + 单一动作菜单 | 官方列表行不提供行内元信息区；只用官方 Text/Button/Menu 组合（不新增自绘控件），时间与用量常显、动作收进一个 ⋯ |
 | 会话「回到最新」浮层 | List 之外的 affordance | 行为用官方 `ScrollToEnd`；浮层必要 |
 | toast 品牌外观 | `ToastViewportBase` parts 上设色/圆角/阴影 | 框架 toast 的换肤方式；状态/计时/读屏仍归框架 |
 | `uikit.ComposerShell` 的 `noEdge=0`、`uikit.TeamSurface` 的具名度量常量 | 旧实现度量以包内命名常量承接（非方法实参字面量，designlint 不计），待 token 化 | design 尚无 Space0/部分控件高度 token；后续 token 任务收敛 |
@@ -732,8 +732,8 @@ go run ./internal/devtools/ui-snapshot .cache/ui-conformance   # 生成 PNG 并�
       "allowed": ["uikit.ToolRow", "uikit.ToolPanelSectionView", "uikit.ToolPreview"],
       "forbidden": ["raw_text_body", "per_message_card", "second_tool_row_variant"] },
     { "id": "agent.approval", "entry": "uikit.ApprovalDialog", "package": "internal/uikit",
-      "status": "planned; 当前实现 internal/ui/approval",
-      "rules": ["no-default-action", "escape-denies", "danger-first-primary-last"] }
+      "status": "inline card (V3) by default in the session composer dock; modal variant kept for embedders",
+      "rules": ["no-default-action", "escape-denies", "danger-first-primary-last", "inline-above-composer", "warning-banner-contrast"] }
   ],
   "scenarios": [
     { "id": "agent.reasoning", "entry": "uikit.ReasoningTrace",

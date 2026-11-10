@@ -8,7 +8,6 @@ package main
 
 import (
 	"context"
-	"strings"
 
 	"github.com/egoist/mygo/ui"
 )
@@ -32,8 +31,8 @@ func (d *drive) runHNarrowSteps() {
 			c.shot("session-memory-tab")
 		})
 
-	d.step("session-narrow-header", "session", "窄列 header：标题优先 + goal chip 紧凑（N1）",
-		"1024 窗口 + 右栏 drawer 使主列 <560 DIP：会话标题保持可读，goal chip 只显示状态 label、不显示目标正文", func(c *check) {
+	d.step("session-narrow-header", "session", "窄列 header：B3 顶栏标题 + 输入框上方目标条",
+		"1024 窗口 + 右栏 drawer：标题在宿主 B3 顶栏保持可读；目标状态与正文在 composer 上方目标条（宽窄一致），目标动作在条上的 ⋯ 菜单", func(c *check) {
 			d.resetToSession()
 			goalText := "窄列标题优先与目标紧凑显示的测试目标"
 			tracker := d.uiRoot.GoalTracker()
@@ -51,46 +50,31 @@ func (d *drive) runHNarrowSteps() {
 			d.uiRoot.SetRightPanelOpen(true)
 			d.drain(3)
 			c.require(d.uiRoot.RightPanelOpen(), "1024 窗口下右侧检查器未以 drawer 打开")
+			title := d.currentSessionTitle()
+			c.require(d.has(title), "窄列 B3 顶栏的会话标题不可见")
 			if !c.has("目标") {
-				c.failf("窄列 header 没有 goal chip 状态 label「目标」")
+				c.failf("输入框上方目标条没有状态 badge「目标」")
 				return
 			}
-			// The chip's accessibility label always carries the full goal text;
-			// its visible Text child must be absent in the compact header.
-			// The chip's accessible name is "目标: <full text>"; mygo also
-			// registers the hidden tooltip body ("<full text>") as a label node.
-			// Both are accessibility-only carriers — the compact header must not
-			// add a third node (the visible text child, which the wide header
-			// renders). Counting the exact carriers keeps the N1 promise without
-			// depending on mygo internals: a visible child would be the same
-			// string as the tooltip node, so the count is the observable signal.
-			goalLabels := []string{}
-			for _, text := range d.texts() {
-				if strings.Contains(text, goalText) {
-					goalLabels = append(goalLabels, text)
-				}
+			if d.countContaining(goalText) < 1 {
+				c.failf("目标条没有显示目标正文")
+				return
 			}
-			combined, plain := false, false
-			for _, text := range goalLabels {
-				switch text {
-				case "目标: " + goalText, "Goal: " + goalText:
-					combined = true
-				case goalText:
-					plain = true
-				}
-			}
-			c.require(len(goalLabels) <= 2 && combined && plain,
-				"窄列 header 目标正文载体异常（应为 chip 无障碍名 + tooltip 各一，实际 %q）", goalLabels)
-			title := d.currentSessionTitle()
-			c.require(d.has(title), "窄列 header 的会话标题不可见（应保留 ≥120 DIP 可读宽度）")
 			c.shot("session-narrow-header")
-			// With the drawer closed the column is wide again: the chip shows
-			// the goal text (truncated visually, full label in the frame).
+			// The drawer overlays the dock's right edge at this width: close it
+			// before using the goal ⋯ entry.
 			d.uiRoot.SetRightPanelOpen(false)
 			d.drain(3)
-			if d.countContaining(goalText) < 2 {
-				c.warnf("宽列 header 没有显示目标正文（宽列应显示截断正文 + 无障碍 label）")
+			if !c.click("目标操作") {
+				c.failf("目标条缺少 ⋯ 目标操作入口")
+				return
 			}
+			d.drain(2)
+			c.require(c.has("暂停目标") || c.has("继续目标"), "目标操作菜单没有暂停/继续目标")
+			c.require(c.has("删除目标记录"), "目标操作菜单缺少「删除目标记录」")
+			c.shot("session-narrow-goal-menu")
+			d.key(0, ui.KeyEscape)
+			d.drain(2)
 		})
 
 	d.step("composer-very-narrow", "session", "极窄 composer（<480 DIP）",
@@ -122,7 +106,7 @@ func (d *drive) runHNarrowSteps() {
 				return
 			}
 			d.drain(2)
-			c.mustText("模型：", "打开模型设置…", "权限模式", "对话模式", "思考强度", "插入预设")
+			c.mustText("模型：", "打开模型设置…", "权限模式", "对话模式", "推理等级", "插入预设")
 			if !c.has("打开行为设置") {
 				c.failf("「会话设置」菜单缺少「打开行为设置…」")
 			}

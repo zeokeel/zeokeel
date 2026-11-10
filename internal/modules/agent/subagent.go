@@ -103,7 +103,11 @@ func (s *service) Run(ctx context.Context, req contracts.SubagentRequest) (contr
 	}
 
 	cfg, active := s.subagentParent()
-	activity := s.beginSubagentActivity(name, active, subagentModel(cfg.Model, req.Model), prompt, req.Fork)
+	// A model override runs with that model's own provider connection: the row's
+	// BaseURL/APIKey when the model list has it, else the parent session's
+	// connection. The activity record and the child runner use the same model.
+	cfg = s.configForModelOverride(cfg, req.Model)
+	activity := s.beginSubagentActivity(name, active, cfg.Model, prompt, req.Fork)
 	s.notify(active)
 	result, err := s.runSubagent(ctx, prompt, name, req, cfg, active)
 	s.finishSubagentActivity(activity.ID, ctx, err, result)
@@ -111,18 +115,10 @@ func (s *service) Run(ctx context.Context, req contracts.SubagentRequest) (contr
 	return result, err
 }
 
-// subagentModel resolves the model a delegation runs with: the request
-// override wins, else the parent session's effective model.
-func subagentModel(parentModel, override string) string {
-	if model := strings.TrimSpace(override); model != "" {
-		return model
-	}
-	return strings.TrimSpace(parentModel)
-}
-
 // runSubagent is the delegation itself: it creates the child provider/runner,
 // starts the subagent, waits for the final answer and stops it. Run owns the
-// activity lifecycle around it.
+// activity lifecycle around it; cfg already carries the override model and its
+// resolved connection.
 func (s *service) runSubagent(ctx context.Context, prompt, name string, req contracts.SubagentRequest,
 	cfg contracts.ChatConfig, active string) (contracts.SubagentResult, error) {
 	childTools := s.registry.Tools()
@@ -164,7 +160,7 @@ func (s *service) runSubagent(ctx context.Context, prompt, name string, req cont
 	sub, err := runner.Start(ctx, rig.SubagentSpec{
 		Name:          name,
 		Prompt:        prompt,
-		Model:         strings.TrimSpace(req.Model),
+		Model:         cfg.Model,
 		MaxIterations: req.MaxIterations,
 		Fork:          req.Fork,
 	})

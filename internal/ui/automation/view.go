@@ -458,8 +458,8 @@ func buildCreateForm(c *ui.Context, t *design.Tokens, service contracts.Automati
 			}
 			ui.Field(c, st.tr("模型", "Model"), func() {
 				buildModelSelector(c, st)
-			}).Description(st.tr("留空跟随默认模型；可从内置目录选择，也可自定义模型 ID。",
-				"Empty follows the default model; pick a built-in preset or type a custom model id."))
+			}).Description(st.tr("留空跟随默认模型；可从模型列表选择，也可自定义模型 ID。",
+				"Empty follows the default model; pick a model from the list or type a custom model id."))
 			if hint := automationModelHint(st, st.formModel); hint != "" {
 				design.Apply(ui.Text(c, hint), t.Font(design.TypeXXS)).
 					TextColor(t.WarningText).MaxLines(2)
@@ -617,15 +617,15 @@ func validateScheduleDraft(st *state) bool {
 }
 
 // automationModelCatalog is the composer's model preset list (the settings row
-// wins, otherwise the built-in catalog) — the same source the Model page edits.
+// wins, otherwise an empty list) — the same source the Model page edits.
 func automationModelCatalog(st *state) []contracts.ModelInfo {
 	store, ok := st.ctx.Get(contracts.KeySettings)
 	if !ok || store == nil {
-		return contracts.DefaultModelCatalog()
+		return nil
 	}
-	models, err := contracts.ParseModelInfoList(store.Get(contracts.SettingModelCatalogModels, ""))
+	models, err := contracts.LoadModelCatalog(store)
 	if err != nil || len(models) == 0 {
-		return contracts.DefaultModelCatalog()
+		return nil
 	}
 	return models
 }
@@ -668,8 +668,8 @@ func automationModelHint(st *state, model string) string {
 	if _, ok := automationModelCatalogMatch(automationModelCatalog(st), model); ok {
 		return ""
 	}
-	return st.tr("该模型不在内置目录中；保存后仍会使用该名称，端点可能回退到默认模型。",
-		"This model is not in the built-in catalog; it is still used as entered and the endpoint may fall back to its default.")
+	return st.tr("该模型不在模型列表中；保存后仍会使用该名称，端点可能回退到默认模型。",
+		"This model is not in the model list; it is still used as entered and the endpoint may fall back to its default.")
 }
 
 // buildModelSelector renders the task model picker: the follow-default row, the

@@ -285,7 +285,7 @@ func TestFeedbackExportFields(t *testing.T) {
 
 	// JSONL: good/bad exported, malformed ignored.
 	captured := exportSeams(t)
-	exportViaMenu(t, harness, "更多", "导出 JSONL")
+	exportViaMenu(t, harness, "会话操作", "导出 JSONL")
 	records := jsonlMessageRecords(t, *captured)
 	if len(records) != 4 {
 		t.Fatalf("JSONL message records = %d, want 4", len(records))
@@ -301,7 +301,7 @@ func TestFeedbackExportFields(t *testing.T) {
 	}
 
 	// Markdown (zh): the feedback quote line appears for good/bad only.
-	exportViaMenu(t, harness, "更多", "导出 Markdown")
+	exportViaMenu(t, harness, "会话操作", "导出 Markdown")
 	if !strings.Contains(*captured, "> 用户反馈：有帮助") {
 		t.Fatalf("Markdown lacks the good feedback line: %q", *captured)
 	}
@@ -315,7 +315,7 @@ func TestFeedbackExportFields(t *testing.T) {
 	// English copy: "User feedback: ...".
 	harness.h.ui.Locale().SetLanguage("en")
 	harness.tester.Frame()
-	exportViaMenu(t, harness, "More", "Export Markdown")
+	exportViaMenu(t, harness, "Conversation actions", "Export Markdown")
 	if !strings.Contains(*captured, "User feedback: Helpful") || !strings.Contains(*captured, "User feedback: Not helpful") {
 		t.Fatalf("English Markdown lacks the feedback lines: %q", *captured)
 	}

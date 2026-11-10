@@ -33,8 +33,16 @@ func newGoalHarness(t *testing.T, chat *fakeChat) (*harness, *uiroot.Root) {
 	return &harness{t: t, ctx: ctx, ui: uiRoot, chat: chat}, uiRoot
 }
 
+// goalChat is a fake chat with one active conversation, so the goal dock above
+// the composer has a screen to belong to.
+func goalChat() *fakeChat {
+	chat := newFakeChat()
+	chat.addSession(contracts.ChatSession{ID: "sess-goal", Title: "ship it"}, true)
+	return chat
+}
+
 func TestGoalChipShowsAndClears(t *testing.T) {
-	h, uiRoot := newGoalHarness(t, newFakeChat())
+	h, uiRoot := newGoalHarness(t, goalChat())
 	tester := h.tester()
 	tester.Frame()
 	h.assertNoTexts(tester, "目标", "删除目标记录")
@@ -43,8 +51,8 @@ func TestGoalChipShowsAndClears(t *testing.T) {
 		t.Fatalf("Set goal: %v", err)
 	}
 	tester.Frame()
-	// The header keeps one compact chip: the status label plus the truncated
-	// goal text (the full text is the chip's tooltip).
+	// The goal strip above the composer keeps one compact line: the status
+	// badge plus the truncated goal text (the full text is its tooltip).
 	h.assertTexts(tester, "目标", "Ship release")
 
 	// A replacement goal updates the chip in place.
@@ -76,7 +84,7 @@ func TestGoalChipInitializesFromExistingGoal(t *testing.T) {
 	provide(t, ctx, contracts.KeyTheme, uiRoot.Theme())
 	provide(t, ctx, contracts.KeyLocale, uiRoot.Locale())
 	provide(t, ctx, contracts.KeyScreenLister, uiRoot.ScreenLister())
-	provide[contracts.ChatService](t, ctx, contracts.KeyChat, newFakeChat())
+	provide[contracts.ChatService](t, ctx, contracts.KeyChat, goalChat())
 	provide(t, ctx, contracts.KeyGoalTracker, contracts.GoalTracker(uiRoot.GoalTracker()))
 	if _, err := uiRoot.GoalTracker().Set(context.Background(), "Existing goal"); err != nil {
 		t.Fatalf("Set goal: %v", err)
@@ -86,12 +94,12 @@ func TestGoalChipInitializesFromExistingGoal(t *testing.T) {
 	tester.Frame()
 	h := &harness{t: t, ctx: ctx, ui: uiRoot}
 	h.assertTexts(tester, "目标", "Existing goal")
-	h.click(tester, "目标")
+	openGoalActions(t, h, tester, "目标")
 	h.assertTexts(tester, "暂停目标", "完成目标", "结束目标（保留记录）", "删除目标记录")
 }
 
 func TestGoalChipEnglish(t *testing.T) {
-	h, uiRoot := newGoalHarness(t, newFakeChat())
+	h, uiRoot := newGoalHarness(t, goalChat())
 	uiRoot.Locale().SetLanguage("en")
 	tester := h.tester()
 	tester.Frame()
@@ -101,7 +109,7 @@ func TestGoalChipEnglish(t *testing.T) {
 	tester.Frame()
 	h.assertTexts(tester, "Goal", "Ship release")
 	h.assertNoTexts(tester, "目标")
-	h.click(tester, "Goal")
+	openGoalActions(t, h, tester, "Goal")
 	h.assertTexts(tester, "Delete goal record")
 	h.click(tester, "Delete goal record")
 	h.assertTexts(tester, "Cancel", "Delete")

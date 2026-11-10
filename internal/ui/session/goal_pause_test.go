@@ -206,6 +206,6 @@ func TestGoalPauseEnglish(t *testing.T) {
 	h.ui.Locale().SetLanguage("en")
 	tester.Frame()
 	h.assertTexts(tester, "Goal paused")
-	h.click(tester, "Goal paused")
+	openGoalActions(t, h, tester, "Goal paused")
 	h.assertTexts(tester, "Resume goal", "Delete goal record")
 }

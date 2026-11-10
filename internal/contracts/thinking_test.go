@@ -161,18 +161,69 @@ func TestThinkingFamiliesAndValidators(t *testing.T) {
 	}
 }
 
-func TestDefaultModelCatalogFamilies(t *testing.T) {
-	models := DefaultModelCatalog()
-	chat, ok := FindModelInfo(models, "deepseek-chat")
-	if !ok || chat.Family != ModelFamilyDeepSeek {
-		t.Fatalf("deepseek-chat = %+v", chat)
-	}
-	reasoner, ok := FindModelInfo(models, "deepseek-reasoner")
-	if !ok || reasoner.DefaultThinking != ThinkingModeReasoningHigh {
-		t.Fatalf("deepseek-reasoner = %+v", reasoner)
-	}
-	unknown := ResolveModelInfo(models, "qwen3.8-flash-next")
+func TestResolveModelInfoWithoutCatalog(t *testing.T) {
+	// The product ships no built-in model list: every model is user-configured.
+	// An unknown id still gets an inferred family so custom model names keep the
+	// generic thinking modes.
+	unknown := ResolveModelInfo(nil, "qwen3.8-flash-next")
 	if unknown.Family != ModelFamilyQwen || unknown.ID != "qwen3.8-flash-next" {
 		t.Fatalf("resolved unknown model = %+v", unknown)
+	}
+	if DefaultModelID(nil, nil) != "" {
+		t.Fatalf("empty catalog default = %q", DefaultModelID(nil, nil))
+	}
+}
+
+func TestSessionModelThinkingKeysAndOverride(t *testing.T) {
+	if got := SessionModelThinkingSettingKey("s1", "model-a"); got != "session.s1.thinking.model-a" {
+		t.Fatalf("per-model key = %q", got)
+	}
+	if SessionModelThinkingSettingKey("", "model-a") != "" || SessionModelThinkingSettingKey("s1", " ") != "" {
+		t.Fatal("invalid session/model produced a non-empty key")
+	}
+	settings := mapSettings{}
+	if got := SessionThinkingOverride(nil, "s1", "model-a"); got != "" {
+		t.Fatalf("nil settings override = %q", got)
+	}
+	if got := SessionThinkingOverride(settings, "s1", "model-a"); got != "" {
+		t.Fatalf("unset override = %q", got)
+	}
+	// The legacy session-wide row is a fallback for old conversations.
+	settings[SessionThinkingSettingKey("s1")] = ThinkingModeReasoningHigh
+	if got := SessionThinkingOverride(settings, "s1", "model-a"); got != ThinkingModeReasoningHigh {
+		t.Fatalf("legacy override = %q", got)
+	}
+	// A per-model row wins over the legacy row and only affects that model.
+	settings[SessionModelThinkingSettingKey("s1", "model-a")] = ThinkingModeReasoningLow
+	if got := SessionThinkingOverride(settings, "s1", "model-a"); got != ThinkingModeReasoningLow {
+		t.Fatalf("per-model override = %q", got)
+	}
+	if got := SessionThinkingOverride(settings, "s1", "model-b"); got != ThinkingModeReasoningHigh {
+		t.Fatalf("other model fell back to legacy = %q, want the legacy value", got)
+	}
+	// Unknown models keep their own (empty) per-model row separate too.
+	if got := SessionThinkingOverride(settings, "s1", ""); got != ThinkingModeReasoningHigh {
+		t.Fatalf("empty model override = %q", got)
+	}
+}
+
+func TestSessionThinkingOverrideKeys(t *testing.T) {
+	keys := SessionThinkingOverrideKeys("s1", "model-a")
+	want := []string{
+		SessionModelThinkingSettingKey("s1", "model-a"),
+		SessionThinkingSettingKey("s1"),
+		SessionEffortSettingKey("s1"),
+	}
+	if len(keys) != len(want) {
+		t.Fatalf("keys = %v, want %v", keys, want)
+	}
+	for index := range want {
+		if keys[index] != want[index] {
+			t.Fatalf("keys[%d] = %q, want %q", index, keys[index], want[index])
+		}
+	}
+	// A missing model id still clears the two legacy rows.
+	if got := SessionThinkingOverrideKeys("s1", ""); len(got) != 2 {
+		t.Fatalf("empty-model keys = %v", got)
 	}
 }

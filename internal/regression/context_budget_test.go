@@ -1,9 +1,9 @@
 package regression
 
 // Adversarial audit: the model context-window budget suffix in the assistant
-// usage footer. The optional model catalogue decides the suffix: a matching
+// usage details. The optional model catalogue decides the suffix: a matching
 // model renders the formatted budget, an unknown model or a missing catalogue
-// renders nothing (the footer must never invent a budget).
+// renders nothing (the details must never invent a budget).
 
 import (
 	"testing"
@@ -28,8 +28,10 @@ func startBudgetSession(t *testing.T, sessionModel string, catalog contracts.Mod
 	h := newBareHarness(t)
 	chat := newFakeChat()
 	chat.addSession(contracts.ChatSession{ID: "sess-budget", Title: "Budget session", Model: sessionModel,
+		// Only the assistant turn: its meta line owns the single 「消息操作」⋯
+		// entry this audit opens for the usage details (a user turn's meta line
+		// carries the same accessible name).
 		Messages: []contracts.ChatMessage{
-			{ID: "m1", Role: contracts.ChatRoleUser, Text: "q", CreatedAt: time.Unix(1_700_000_000, 0)},
 			{ID: "m2", Role: contracts.ChatRoleAssistant, Text: "answer",
 				Usage:     &contracts.MessageUsage{DurationMS: 120, TotalTokens: 1900},
 				CreatedAt: time.Unix(1_700_000_100, 0)},
@@ -45,6 +47,20 @@ func startBudgetSession(t *testing.T, sessionModel string, catalog contracts.Mod
 	return tester
 }
 
+// openUsageDetails opens one assistant meta line's ⋯ menu and its 用量明细
+// submenu (the budget lives there, not in a separate footer row).
+func openUsageDetails(t *testing.T, tester *ui.Tester) {
+	t.Helper()
+	if err := tester.Click("消息操作"); err != nil {
+		t.Fatalf("open message actions: %v; texts = %v", err, tester.Texts())
+	}
+	tester.Frame()
+	if err := tester.Click("用量明细"); err != nil {
+		t.Fatalf("open usage details: %v; texts = %v", err, tester.Texts())
+	}
+	tester.Frame()
+}
+
 // TestContextBudgetSuffix covers the budget suffix: exact thousands, one
 // decimal formatting, unknown model and missing catalogue are silent.
 func TestContextBudgetSuffix(t *testing.T) {
@@ -54,10 +70,8 @@ func TestContextBudgetSuffix(t *testing.T) {
 		}}
 		tester := startBudgetSession(t, "audit-model", catalog)
 		requireHasText(t, tester, "1.9K tokens")
-		// The budget lives in the usage line's expanded breakdown.
-		if err := tester.Click("用时 120ms · 1.9K tokens"); err != nil {
-			t.Fatalf("expand usage: %v; texts = %v", err, tester.Texts())
-		}
+		// The budget lives in the meta line's usage-details submenu.
+		openUsageDetails(t, tester)
 		requireHasText(t, tester, "上下文预算")
 		requireHasText(t, tester, "128k")
 	})
@@ -67,9 +81,7 @@ func TestContextBudgetSuffix(t *testing.T) {
 			{ID: "audit-model", ContextWindow: 32_768},
 		}}
 		tester := startBudgetSession(t, "audit-model", catalog)
-		if err := tester.Click("用时 120ms · 1.9K tokens"); err != nil {
-			t.Fatalf("expand usage: %v; texts = %v", err, tester.Texts())
-		}
+		openUsageDetails(t, tester)
 		requireHasText(t, tester, "上下文预算")
 		requireHasText(t, tester, "32.8k")
 	})
@@ -80,12 +92,14 @@ func TestContextBudgetSuffix(t *testing.T) {
 		}}
 		tester := startBudgetSession(t, "audit-model", catalog)
 		requireHasText(t, tester, "1.9K tokens")
+		openUsageDetails(t, tester)
 		requireNoText(t, tester, "上下文预算")
 	})
 
 	t.Run("no catalogue", func(t *testing.T) {
 		tester := startBudgetSession(t, "audit-model", nil)
 		requireHasText(t, tester, "1.9K tokens")
+		openUsageDetails(t, tester)
 		requireNoText(t, tester, "上下文预算")
 	})
 }

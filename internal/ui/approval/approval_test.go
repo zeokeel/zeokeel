@@ -1,11 +1,16 @@
 package approval_test
 
-// Headless tests for the approval dialog module: the real host frame
-// (uiroot.View) is rendered through mygo's in-memory Tester, so assertions are
-// about what the user sees and the clicks/keys go through native controls.
+// Headless tests for the approval banner module: the real host frame
+// (uiroot.View) is rendered through mygo's in-memory Tester. The module
+// contributes the uikit inline approval card to contracts.SlotSessionBanner,
+// which the session screen renders above the composer, so the tests register a
+// session screen that renders the slot (the real ui/session module does the
+// same), and assert what the user sees plus the decisions that reach the
+// approvals service.
 
 import (
 	"context"
+	"errors"
 	"slices"
 	"sync"
 	"testing"
@@ -20,8 +25,9 @@ import (
 )
 
 // fakeApprovals is a minimal contracts.Approvals: Pending is a FIFO queue the
-// test fills, Resolve removes the request and records the decision, and
-// subscribers are notified like the real backend.
+// test fills, Resolve records the decision and notifies subscribers like the
+// real backend. With settle=true the resolved request stays in Pending until
+// settleResolved, emulating the backend's asynchronous settle.
 type fakeApprovals struct {
 	mu                 sync.Mutex
 	mode               string
@@ -29,12 +35,14 @@ type fakeApprovals struct {
 	decisions          []contracts.ApprovalDecision
 	resolvedRequestIDs []string
 	subscribers        []func()
-	unsubcribed        bool
+	unsubscribed       bool
+	settle             bool
+	settled            map[string]bool
 }
 
 func (f *fakeApprovals) Mode() string { return f.mode }
 
-// Request is not used by the dialog (it only reads Pending); keep it simple.
+// Request is not used by the banner (it only reads Pending); keep it simple.
 func (f *fakeApprovals) Request(_ context.Context, request contracts.ApprovalRequest) (contracts.ApprovalDecision, error) {
 	f.add(request)
 	return contracts.ApprovalAllow, nil
@@ -50,19 +58,46 @@ func (f *fakeApprovals) Resolve(id string, decision contracts.ApprovalDecision) 
 	f.mu.Lock()
 	f.decisions = append(f.decisions, decision)
 	f.resolvedRequestIDs = append(f.resolvedRequestIDs, id)
-	remaining := f.pending[:0]
-	for _, request := range f.pending {
-		if request.ID != id {
-			remaining = append(remaining, request)
+	if f.settle {
+		if f.settled == nil {
+			f.settled = map[string]bool{}
 		}
+		f.settled[id] = true
+	} else {
+		f.pending = removeRequest(f.pending, id)
 	}
-	f.pending = remaining
 	subscribers := append([]func(){}, f.subscribers...)
 	f.mu.Unlock()
 	for _, fn := range subscribers {
 		fn()
 	}
 	return nil
+}
+
+// settleResolved removes the requests answered while settle was on, like the
+// backend does once the blocked tool call has been released.
+func (f *fakeApprovals) settleResolved() {
+	f.mu.Lock()
+	for id := range f.settled {
+		f.pending = removeRequest(f.pending, id)
+	}
+	f.settled = nil
+	subscribers := append([]func(){}, f.subscribers...)
+	f.mu.Unlock()
+	for _, fn := range subscribers {
+		fn()
+	}
+}
+
+// removeRequest drops one request from a pending slice.
+func removeRequest(pending []contracts.ApprovalRequest, id string) []contracts.ApprovalRequest {
+	remaining := make([]contracts.ApprovalRequest, 0, len(pending))
+	for _, request := range pending {
+		if request.ID != id {
+			remaining = append(remaining, request)
+		}
+	}
+	return remaining
 }
 
 func (f *fakeApprovals) Subscribe(fn func()) (func(), error) {
@@ -72,7 +107,7 @@ func (f *fakeApprovals) Subscribe(fn func()) (func(), error) {
 	return func() {
 		f.mu.Lock()
 		defer f.mu.Unlock()
-		f.unsubcribed = true
+		f.unsubscribed = true
 	}, nil
 }
 
@@ -100,19 +135,63 @@ func (f *fakeApprovals) resolvedIDs() []string {
 	return append([]string(nil), f.resolvedRequestIDs...)
 }
 
+func (f *fakeApprovals) pendingCount() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return len(f.pending)
+}
+
 func (f *fakeApprovals) isUnsubscribed() bool {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	return f.unsubcribed
+	return f.unsubscribed
+}
+
+// recordingNavigator delegates to the host navigator and records Push calls, so
+// the auto-switch to the session screen is observable without losing the real
+// navigation state the frame renders.
+type recordingNavigator struct {
+	inner  contracts.Navigator
+	mu     sync.Mutex
+	pushes []string
+	// failPush makes Push fail (the session screen not registered yet), so the
+	// ignore-and-stay contract is testable.
+	failPush bool
+}
+
+func (n *recordingNavigator) Current() string { return n.inner.Current() }
+
+func (n *recordingNavigator) Push(screenID string) error {
+	n.mu.Lock()
+	n.pushes = append(n.pushes, screenID)
+	fail := n.failPush
+	n.mu.Unlock()
+	if fail {
+		return errors.New("session screen is not registered")
+	}
+	return n.inner.Push(screenID)
+}
+
+func (n *recordingNavigator) Back() bool         { return n.inner.Back() }
+func (n *recordingNavigator) SettingsOpen() bool { return n.inner.SettingsOpen() }
+func (n *recordingNavigator) ToggleSettings()    { n.inner.ToggleSettings() }
+func (n *recordingNavigator) CloseSettings()     { n.inner.CloseSettings() }
+
+func (n *recordingNavigator) pushCalls() []string {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	return append([]string(nil), n.pushes...)
 }
 
 // harness is one headless product with the host UI services and the approval
-// module active.
+// module active. The session screen renders the banner slot; the home screen is
+// a plain screen used by the auto-navigation tests.
 type harness struct {
 	t         *testing.T
 	ctx       cordis.Context
 	uiRoot    *uiroot.Root
 	approvals *fakeApprovals
+	navigator *recordingNavigator
 	fiber     *cordis.Fiber
 }
 
@@ -123,11 +202,18 @@ func newHarness(t *testing.T, cfg approval.Config) *harness {
 	ctx := cordis.Root()
 	t.Cleanup(func() { _ = ctx.DisposeAll() })
 
-	provide(t, ctx, contracts.KeyUIRuntime, uiRoot.Runtime())
-	provide(t, ctx, contracts.KeyLocale, uiRoot.Locale())
-	provide(t, ctx, contracts.KeyApprovals, contracts.Approvals(approvals))
-
-	// One screen keeps the host frame non-empty ("status.no-screen" otherwise).
+	// The session screen renders the banner slot directly above where the
+	// composer would be; the real ui/session module does the same.
+	if _, err := uiRoot.Runtime().RegisterScreen(contracts.ScreenSpec{
+		ID:    "session",
+		Title: "会话",
+		Build: func(c *ui.Context) {
+			ui.Text(c, "会话屏")
+			uiRoot.Runtime().RenderSlot(c, contracts.SlotSessionBanner)
+		},
+	}); err != nil {
+		t.Fatalf("register session screen: %v", err)
+	}
 	if _, err := uiRoot.Runtime().RegisterScreen(contracts.ScreenSpec{
 		ID:    "home",
 		Title: "首页",
@@ -136,8 +222,18 @@ func newHarness(t *testing.T, cfg approval.Config) *harness {
 		t.Fatalf("register home screen: %v", err)
 	}
 
-	h := &harness{t: t, ctx: ctx, uiRoot: uiRoot, approvals: approvals}
+	provide(t, ctx, contracts.KeyUIRuntime, uiRoot.Runtime())
+	provide(t, ctx, contracts.KeyLocale, uiRoot.Locale())
+	provide(t, ctx, contracts.KeyApprovals, contracts.Approvals(approvals))
+	nav := &recordingNavigator{inner: uiRoot.Navigator()}
+	provide(t, ctx, contracts.KeyNavigator, contracts.Navigator(nav))
+
+	h := &harness{t: t, ctx: ctx, uiRoot: uiRoot, approvals: approvals, navigator: nav}
 	h.fiber = activate(t, ctx, approval.Module(), cfg)
+	// The approval card is read on the session screen.
+	if err := uiRoot.Navigator().Push("session"); err != nil {
+		t.Fatalf("open session screen: %v", err)
+	}
 	return h
 }
 
@@ -153,6 +249,15 @@ func (h *harness) click(tester *ui.Tester, label string) {
 	}
 	// Build the frame after the click handler mutated the approvals service.
 	tester.Frame()
+}
+
+// frames builds n frames (the approvals subscription hops through Post, so a
+// state change may need one frame to drain and one to render).
+func (h *harness) frames(tester *ui.Tester, n int) {
+	h.t.Helper()
+	for range n {
+		tester.Frame()
+	}
 }
 
 func (h *harness) assertTexts(tester *ui.Tester, wanted ...string) {
@@ -236,67 +341,81 @@ func pendingRequest(id, tool, summary, arguments string) contracts.ApprovalReque
 	}
 }
 
-// TestNoPendingRendersNoDialog covers the empty state: without a pending
-// request the slot contributes no controls at all (in particular no empty
-// Modal).
-func TestNoPendingRendersNoDialog(t *testing.T) {
+// --- tests ------------------------------------------------------------------
+
+// TestNoPendingRendersNoBanner covers the empty state: without a pending
+// request the slot contributes no controls (the session screen still renders).
+func TestNoPendingRendersNoBanner(t *testing.T) {
 	h := newHarness(t, approval.Config{})
 	tester := h.tester()
 	tester.Frame()
 
-	h.assertTexts(tester, "主屏幕")
-	h.assertNoTexts(tester, "需要审批", "允许", "拒绝")
+	h.assertTexts(tester, "会话屏")
+	h.assertNoTexts(tester, "需要审批", "允许", "拒绝", "本会话内始终允许")
 }
 
-// TestPendingShowsOldestRequest covers rendering: the oldest pending request is
-// the one shown, with tool, summary, arguments and the three decision buttons.
-func TestPendingShowsOldestRequest(t *testing.T) {
+// TestPendingRendersInlineBanner covers the card anatomy: the oldest pending
+// request, its warning banner (title, friendly tool, queue counter, Esc hint),
+// the impact copy, the promoted summary, the collapsed arguments and the three
+// decisions.
+func TestPendingRendersInlineBanner(t *testing.T) {
 	h := newHarness(t, approval.Config{})
 	tester := h.tester()
-
 	h.approvals.add(pendingRequest("a1", "bash", "运行命令 ls", `{"command":"ls"}`))
 	h.approvals.add(pendingRequest("a2", "write_file", "写入文件", `{"path":"x"}`))
-	tester.Frame()
+	h.frames(tester, 2)
 
-	// The summary is promoted (a command for shell tools) and the raw
-	// arguments are details, collapsed. The tool is named in friendly copy; its
-	// raw ID only lives in the badge tooltip.
-	h.assertTexts(tester, "需要审批", "工具", "运行命令", "命令", "运行命令 ls", "参数",
-		"显示原始参数", "允许", "本会话内始终允许", "拒绝")
-	h.assertNoTexts(tester, "bash")
-	// The middle choice says where it applies and how to take it back.
-	h.assertTexts(tester, "在本会话内不再询问该工具", "会话设置菜单清除")
-	// The second queued request is counted quietly instead of replaced.
-	h.assertTexts(tester, "还有 1 个待审批请求")
-	// Two labels only: the section label and the disclosure — never a third
-	// 「参数详情」 layer (N3).
-	h.assertNoTexts(tester, "参数详情", `{"command":"ls"}`)
-	h.assertNoTexts(tester, "write_file", "写入文件")
+	h.assertTexts(tester,
+		"会话屏", "需要审批", "运行命令", "还有 1 条待审批", "Esc 拒绝",
+		"命令", "运行命令 ls", "参数", "显示原始参数",
+		"允许", "本会话内始终允许", "拒绝",
+		"允许后将在沙箱策略限制内执行；策略仍可能拒绝该调用。",
+	)
+	// The friendly name is the visible copy; the raw tool id only lives in the
+	// tooltip, and the raw arguments are collapsed details.
+	h.assertNoTexts(tester, "bash", `{"command":"ls"}`, "参数详情")
+	// The queued second request waits behind the first instead of replacing it.
+	h.assertNoTexts(tester, "写入文件")
+
+	// The footer keeps the desktop decision order: deny, session-scoped allow,
+	// primary allow.
+	deny, ok := tester.Find("拒绝")
+	if !ok {
+		t.Fatalf("deny action missing; texts = %v", tester.Texts())
+	}
+	always, ok := tester.Find("本会话内始终允许")
+	if !ok {
+		t.Fatalf("session-scoped allow action missing; texts = %v", tester.Texts())
+	}
+	allow, ok := tester.Find("允许")
+	if !ok {
+		t.Fatalf("allow action missing; texts = %v", tester.Texts())
+	}
+	if !(deny.X < always.X && always.X < allow.X) {
+		t.Fatalf("footer order x = deny %.1f, always %.1f, allow %.1f; want deny < always < allow",
+			deny.X, always.X, allow.X)
+	}
+	if tester.Focused("拒绝") || tester.Focused("允许") || tester.Focused("本会话内始终允许") {
+		t.Fatalf("the approval card must not autofocus an action; texts = %v", tester.Texts())
+	}
 }
 
-// TestCopyStatesSandboxLimits covers the ZK-02 copy fix: an approval only lets
-// the call through the gate; the sandbox policy still runs it and may deny it,
-// so the dialog must not promise that the call executes immediately.
-func TestCopyStatesSandboxLimits(t *testing.T) {
+// TestApprovalCardIsRegionExposed covers a11y: the inline card is one named
+// region, so assistive technology can jump to the pending decision.
+func TestApprovalCardIsRegionExposed(t *testing.T) {
 	h := newHarness(t, approval.Config{})
 	tester := h.tester()
-	h.approvals.add(pendingRequest("p1", "bash", "运行命令 ls", `{"command":"ls"}`))
-	tester.Frame()
-
-	const zh = "允许后将在沙箱策略限制内执行；策略仍可能拒绝该调用。"
-	const en = "It runs within the sandbox policy after approval; the policy may still reject the call."
-	h.assertTexts(tester, zh)
-	h.assertNoTexts(tester, "立即执行", "runs right away")
-
-	h.uiRoot.Locale().SetLanguage("en")
-	tester.Frame()
-	h.assertTexts(tester, en)
-	h.assertNoTexts(tester, "立即执行", "runs right away")
+	h.approvals.add(pendingRequest("a1", "bash", "运行命令 ls", `{"command":"ls"}`))
+	h.frames(tester, 2)
+	if _, ok := tester.AccessByRole(ui.RoleRegion, "需要审批 · 运行命令"); !ok {
+		t.Fatalf("the approval card is not exposed as a named region; texts = %v", tester.Texts())
+	}
 }
 
-// TestDecisionButtons covers the three buttons: each resolves the request with
-// its decision and the dialog disappears once the queue is empty.
-func TestDecisionButtons(t *testing.T) {
+// TestDecisionButtonsResolveOnce covers the three explicit decisions: each
+// resolves the displayed request with its decision exactly once and removes the
+// card.
+func TestDecisionButtonsResolveOnce(t *testing.T) {
 	cases := []struct {
 		label    string
 		decision contracts.ApprovalDecision
@@ -310,10 +429,11 @@ func TestDecisionButtons(t *testing.T) {
 			h := newHarness(t, approval.Config{})
 			tester := h.tester()
 			h.approvals.add(pendingRequest("r1", "bash", "运行命令", `{"command":"ls"}`))
-			tester.Frame()
+			h.frames(tester, 2)
 			h.assertTexts(tester, "需要审批")
 
 			h.click(tester, test.label)
+			h.frames(tester, 3)
 
 			got := h.approvals.resolved()
 			if len(got) != 1 || got[0] != test.decision {
@@ -322,76 +442,136 @@ func TestDecisionButtons(t *testing.T) {
 			if ids := h.approvals.resolvedIDs(); len(ids) != 1 || ids[0] != "r1" {
 				t.Fatalf("resolved IDs = %v, want [r1]", ids)
 			}
-			tester.Frame()
 			h.assertNoTexts(tester, "需要审批", "运行命令")
 		})
 	}
 }
 
-// TestResolvingOldestShowsNext covers FIFO order: answering the oldest request
-// opens the next pending one.
-func TestResolvingOldestShowsNext(t *testing.T) {
+// TestResolvedRequestDoesNotReopen covers the settle window: a resolved request
+// that the backend still lists does not bring the card back, and the next queued
+// request appears once it settles.
+func TestResolvedRequestDoesNotReopen(t *testing.T) {
 	h := newHarness(t, approval.Config{})
+	h.approvals.settle = true
 	tester := h.tester()
-	h.approvals.add(pendingRequest("a1", "bash", "第一个", `{"command":"ls"}`))
-	h.approvals.add(pendingRequest("a2", "write_file", "第二个", `{"path":"x"}`))
-	tester.Frame()
+	h.approvals.add(pendingRequest("s1", "bash", "第一个", `{"command":"ls"}`))
+	h.approvals.add(pendingRequest("s2", "write_file", "第二个", `{"path":"x"}`))
+	h.frames(tester, 2)
 	h.assertTexts(tester, "第一个")
-	h.assertNoTexts(tester, "第二个")
 
 	h.click(tester, "允许")
-	tester.Frame()
-
-	if got := h.approvals.resolved(); len(got) != 1 || got[0] != contracts.ApprovalAllow {
-		t.Fatalf("decisions after first = %v", got)
+	// The backend still lists s1; the card must not reopen for it.
+	h.frames(tester, 3)
+	if got := h.approvals.resolved(); len(got) != 1 {
+		t.Fatalf("decisions after one answer = %v, want 1", got)
 	}
+	h.assertNoTexts(tester, "需要审批", "第一个")
+
+	// The settle removes s1 and the next request takes the card.
+	h.approvals.settleResolved()
+	h.frames(tester, 2)
 	h.assertTexts(tester, "需要审批", "第二个", "写入文件")
-	h.assertNoTexts(tester, "第一个", "还有 1 个待审批请求")
 }
 
-// TestEscapeDenies covers the dismissed-by-Escape path: the native Modal
-// closes and the module answers the request as deny, so the tool call fails
-// clearly instead of hanging.
-func TestEscapeDenies(t *testing.T) {
+// TestAutoSwitchesToSessionScreen covers the visibility rule: a request that
+// arrives while another screen shows brings the session screen forward (once),
+// so the inline card cannot be missed.
+func TestAutoSwitchesToSessionScreen(t *testing.T) {
 	h := newHarness(t, approval.Config{})
 	tester := h.tester()
-	h.approvals.add(pendingRequest("e1", "bash", "运行命令", `{"command":"ls"}`))
+	if err := h.uiRoot.Navigator().Push("home"); err != nil {
+		t.Fatalf("open home screen: %v", err)
+	}
 	tester.Frame()
+	h.assertTexts(tester, "主屏幕")
+
+	h.approvals.add(pendingRequest("n1", "bash", "运行命令", `{"command":"ls"}`))
+	h.frames(tester, 3)
+
+	if got := h.uiRoot.Navigator().Current(); got != "session" {
+		t.Fatalf("current screen = %q, want session", got)
+	}
+	if pushes := h.navigator.pushCalls(); len(pushes) != 1 || pushes[0] != "session" {
+		t.Fatalf("auto-navigation pushes = %v, want one session push", pushes)
+	}
+	h.assertTexts(tester, "会话屏", "需要审批")
+
+	// Further frames do not push again while the session screen stays current.
+	h.frames(tester, 2)
+	if pushes := h.navigator.pushCalls(); len(pushes) != 1 {
+		t.Fatalf("auto-navigation repeated while already on session: %v", pushes)
+	}
+}
+
+// TestNoAutoSwitchWhenAlreadyOnSession covers the no-op case: a request on the
+// session screen never navigates.
+func TestNoAutoSwitchWhenAlreadyOnSession(t *testing.T) {
+	h := newHarness(t, approval.Config{})
+	tester := h.tester()
+	h.approvals.add(pendingRequest("n1", "bash", "运行命令", `{"command":"ls"}`))
+	h.frames(tester, 2)
+	h.assertTexts(tester, "需要审批")
+	if pushes := h.navigator.pushCalls(); len(pushes) != 0 {
+		t.Fatalf("navigation pushed %v while already on the session screen", pushes)
+	}
+}
+
+// TestAutoSwitchFailureIsIgnored covers the failure path: when the session
+// screen cannot be pushed (not registered yet), the navigation attempt is
+// ignored, the request stays pending and the module never retries in a loop.
+func TestAutoSwitchFailureIsIgnored(t *testing.T) {
+	h := newHarness(t, approval.Config{})
+	tester := h.tester()
+	if err := h.uiRoot.Navigator().Push("home"); err != nil {
+		t.Fatalf("open home screen: %v", err)
+	}
+	tester.Frame()
+	h.navigator.failPush = true
+
+	h.approvals.add(pendingRequest("n1", "bash", "运行命令", `{"command":"ls"}`))
+	h.frames(tester, 3)
+
+	if got := h.uiRoot.Navigator().Current(); got != "home" {
+		t.Fatalf("current screen = %q, want home after a failed push", got)
+	}
+	if pushes := h.navigator.pushCalls(); len(pushes) != 1 || pushes[0] != "session" {
+		t.Fatalf("push attempts = %v, want one ignored session attempt", pushes)
+	}
+	if got := h.approvals.pendingCount(); got != 1 {
+		t.Fatalf("pending requests = %d, want the request kept", got)
+	}
+	// The card is not rendered on the home screen; it appears once the session
+	// screen is showing again.
+	h.navigator.failPush = false
+	if err := h.uiRoot.Navigator().Push("session"); err != nil {
+		t.Fatalf("open session screen: %v", err)
+	}
+	h.frames(tester, 2)
+	h.assertTexts(tester, "需要审批")
+}
+
+// TestEscDoesNotResolveInTheModule covers the keyboard contract split: the card
+// component and the module handle no keyboard shortcut; the session screen owns
+// Escape (deny the oldest pending request). A stray Escape must never resolve
+// through this module.
+func TestEscDoesNotResolveInTheModule(t *testing.T) {
+	h := newHarness(t, approval.Config{})
+	tester := h.tester()
+	h.approvals.add(pendingRequest("k1", "bash", "运行命令", `{"command":"ls"}`))
+	h.frames(tester, 2)
 	h.assertTexts(tester, "需要审批")
 
 	tester.Key(0, ui.KeyEscape)
 	tester.Frame()
-
-	if got := h.approvals.resolved(); len(got) != 1 || got[0] != contracts.ApprovalDeny {
-		t.Fatalf("decisions after Escape = %v, want [deny]", got)
+	if got := h.approvals.resolved(); len(got) != 0 {
+		t.Fatalf("Escape resolved the request through the approval module: %v", got)
 	}
-	tester.Frame()
-	h.assertNoTexts(tester, "需要审批")
-}
-
-// TestBackdropClickDenies covers the click-outside path: the backdrop of the
-// native Modal dismisses it, which is also a deny.
-func TestBackdropClickDenies(t *testing.T) {
-	h := newHarness(t, approval.Config{})
-	tester := h.tester()
-	h.approvals.add(pendingRequest("b1", "bash", "运行命令", `{"command":"ls"}`))
-	tester.Frame()
 	h.assertTexts(tester, "需要审批")
-
-	// The modal backdrop covers the window; the panel sits in its center.
-	tester.ClickAt(2, 2)
-	tester.Frame()
-
-	if got := h.approvals.resolved(); len(got) != 1 || got[0] != contracts.ApprovalDeny {
-		t.Fatalf("decisions after backdrop click = %v, want [deny]", got)
-	}
-	tester.Frame()
-	h.assertNoTexts(tester, "需要审批")
 }
 
 // TestSubscriptionInvalidatesFrames covers the Subscribe -> Post -> Invalidate
 // bridge: enqueuing a request from any goroutine schedules the frame that shows
-// the dialog.
+// the card.
 func TestSubscriptionInvalidatesFrames(t *testing.T) {
 	h := newHarness(t, approval.Config{})
 	tester := h.tester()
@@ -399,7 +579,7 @@ func TestSubscriptionInvalidatesFrames(t *testing.T) {
 	before := h.uiRoot.Frames()
 
 	h.approvals.add(pendingRequest("s1", "bash", "订阅后出现", `{"command":"ls"}`))
-	tester.Frame()
+	h.frames(tester, 2)
 
 	if after := h.uiRoot.Frames(); after <= before {
 		t.Fatalf("frames did not advance after the approvals change: before=%d after=%d", before, after)
@@ -411,13 +591,16 @@ func TestSubscriptionInvalidatesFrames(t *testing.T) {
 }
 
 // TestDisposeUnregistersContribution covers kernel effect unwinding: with the
-// module disposed the slot item and the subscription are gone.
+// module disposed the session.banner contribution and the subscription are gone.
 func TestDisposeUnregistersContribution(t *testing.T) {
 	h := newHarness(t, approval.Config{})
 	tester := h.tester()
 	h.approvals.add(pendingRequest("d1", "bash", "运行命令", `{"command":"ls"}`))
-	tester.Frame()
+	h.frames(tester, 2)
 	h.assertTexts(tester, "需要审批")
+	if !slices.Contains(h.uiRoot.Runtime().Slots(), contracts.SlotSessionBanner) {
+		t.Fatalf("session.banner is not contributed: %v", h.uiRoot.Runtime().Slots())
+	}
 
 	if err := h.fiber.Dispose(); err != nil {
 		t.Fatalf("dispose approval module: %v", err)
@@ -427,16 +610,31 @@ func TestDisposeUnregistersContribution(t *testing.T) {
 	if !h.approvals.isUnsubscribed() {
 		t.Fatal("approvals subscription was not unwound on disposal")
 	}
-	if slices.Contains(h.uiRoot.Runtime().Slots(), contracts.SlotOverlayDialogs) {
-		t.Fatalf("overlay.dialogs still has contributions after disposal: %v", h.uiRoot.Runtime().Slots())
+	if slices.Contains(h.uiRoot.Runtime().Slots(), contracts.SlotSessionBanner) {
+		t.Fatalf("session.banner still has contributions after disposal: %v",
+			h.uiRoot.Runtime().Slots())
 	}
 }
 
-// TestConfigLabels covers the assembly-config labels.
+// TestBannerSlotRegistration covers the slot contract: the module contributes to
+// session.banner (rendered by the session screen above the composer), not to the
+// overlay.dialogs slot the old Modal lived in.
+func TestBannerSlotRegistration(t *testing.T) {
+	h := newHarness(t, approval.Config{})
+	slots := h.uiRoot.Runtime().Slots()
+	if !slices.Contains(slots, contracts.SlotSessionBanner) {
+		t.Fatalf("session.banner is not registered: %v", slots)
+	}
+	if slices.Contains(slots, contracts.SlotOverlayDialogs) {
+		t.Fatalf("the approval module still contributes to overlay.dialogs: %v", slots)
+	}
+}
+
+// TestConfigLabels covers the assembly-config labels: custom copy is shown
+// verbatim while untouched defaults keep the product copy.
 func TestConfigLabels(t *testing.T) {
 	h := newHarness(t, approval.Config{
 		Title:            "Approve tool call",
-		ToolLabel:        "Tool",
 		ArgumentsLabel:   "Arguments",
 		AllowLabel:       "Allow once",
 		AllowAlwaysLabel: "Always allow",
@@ -444,15 +642,15 @@ func TestConfigLabels(t *testing.T) {
 	})
 	tester := h.tester()
 	h.approvals.add(pendingRequest("c1", "bash", "run", `{"command":"ls"}`))
-	tester.Frame()
-	h.assertTexts(tester, "Approve tool call", "Tool", "Arguments", "运行命令",
-		"Allow once", "Always allow", "Reject", "Esc = 拒绝本次调用")
+	h.frames(tester, 2)
+	h.assertTexts(tester, "Approve tool call", "Arguments", "运行命令",
+		"Allow once", "Always allow", "Reject")
 	h.assertNoTexts(tester, "需要审批")
 	h.assertNoExactTexts(tester, "允许")
 }
 
-// TestLongArgumentsAreTruncated covers the bounded arguments block: a huge
-// tool call stays readable and does not render its full payload.
+// TestLongArgumentsAreTruncated covers the bounded arguments block: a huge tool
+// call stays readable and does not render its full payload.
 func TestLongArgumentsAreTruncated(t *testing.T) {
 	h := newHarness(t, approval.Config{})
 	tester := h.tester()
@@ -463,13 +661,39 @@ func TestLongArgumentsAreTruncated(t *testing.T) {
 	}
 	long = append(long, `"}`...)
 	h.approvals.add(pendingRequest("l1", "bash", "大参数", string(long)))
-	tester.Frame()
+	h.frames(tester, 2)
 	h.assertTexts(tester, "需要审批", "参数", "显示原始参数")
 	h.assertNoTexts(tester, `{"data":"`) // collapsed by default
 	h.click(tester, "显示原始参数")
 	h.assertTexts(tester, `{"data":"`)
 	if tester.HasText(string(long)) {
 		t.Fatal("the full arguments payload was rendered instead of the truncated block")
+	}
+}
+
+// TestEmptyArgumentsFallback covers the "no arguments" fallback instead of an
+// empty box when the call carries {} / [] / null.
+func TestEmptyArgumentsFallback(t *testing.T) {
+	h := newHarness(t, approval.Config{})
+	tester := h.tester()
+	h.approvals.add(pendingRequest("e1", "read_file", "读取配置", "{}"))
+	h.frames(tester, 2)
+	h.assertTexts(tester, "需要审批", "无参数")
+	h.assertNoTexts(tester, "显示原始参数")
+}
+
+// TestSummaryLabelFollowsToolKind covers S-08: only shell/terminal calls label
+// their summary 命令; a file read keeps the neutral 摘要.
+func TestSummaryLabelFollowsToolKind(t *testing.T) {
+	h := newHarness(t, approval.Config{})
+	tester := h.tester()
+	h.approvals.add(pendingRequest("f1", "read_file", "读取 internal/app.go", `{"path":"internal/app.go"}`))
+	h.frames(tester, 2)
+	h.assertTexts(tester, "摘要")
+	for _, text := range tester.Texts() {
+		if text == "命令" {
+			t.Fatalf("read_file summary is labelled 命令; texts = %v", tester.Texts())
+		}
 	}
 }
 
@@ -492,66 +716,10 @@ func TestModuleManifest(t *testing.T) {
 	for _, name := range []string{
 		contracts.KeyUIRuntime.Name(),
 		contracts.KeyApprovals.Name(),
+		contracts.KeyNavigator.Name(),
 	} {
 		if !required[name] {
 			t.Fatalf("module does not require %q; requires = %v", name, descriptor.Requires)
 		}
-	}
-}
-
-// TestFooterOrderAndSafeDefault covers the H4 safe-decision contract (revised
-// after a real session review): the dangerous deny is the leftmost action, the
-// session-scoped allow is secondary in the middle, the accent allow is
-// rightmost — and the dialog has NO default action and does not autofocus a
-// button, so a stray Enter (the user often presses it right after sending a
-// prompt) decides nothing: neither an accidental allow nor an accidental deny.
-func TestFooterOrderAndSafeDefault(t *testing.T) {
-	h := newHarness(t, approval.Config{})
-	tester := h.tester()
-	h.approvals.add(pendingRequest("r1", "bash", "运行命令", `{"command":"ls"}`))
-	tester.Frame()
-
-	deny, ok := tester.Find("拒绝")
-	if !ok {
-		t.Fatalf("deny button missing; texts = %v", tester.Texts())
-	}
-	always, ok := tester.Find("本会话内始终允许")
-	if !ok {
-		t.Fatalf("session-scoped allow button missing; texts = %v", tester.Texts())
-	}
-	allow, ok := tester.Find("允许")
-	if !ok {
-		t.Fatalf("allow button missing; texts = %v", tester.Texts())
-	}
-	if !(deny.X < always.X && always.X < allow.X) {
-		t.Fatalf("footer order x = deny %.1f, always %.1f, allow %.1f; want deny < always < allow",
-			deny.X, always.X, allow.X)
-	}
-	if tester.Focused("拒绝") || tester.Focused("允许") || tester.Focused("本会话内始终允许") {
-		t.Fatalf("the approval dialog must not autofocus an action; texts = %v", tester.Texts())
-	}
-
-	// A stray Enter must not resolve the request in either direction.
-	tester.Key(0, ui.KeyEnter)
-	tester.Frame()
-	if got := h.approvals.resolved(); len(got) != 0 {
-		t.Fatalf("decisions after a stray Enter = %v, want none", got)
-	}
-	h.assertTexts(tester, "需要审批")
-
-	// Every decision is explicit: a click on Deny records deny.
-	h.click(tester, "拒绝")
-	if got := h.approvals.resolved(); len(got) != 1 || got[0] != contracts.ApprovalDeny {
-		t.Fatalf("decisions after clicking Deny = %v, want [deny]", got)
-	}
-
-	// Allowing is explicit too: a click on Allow records allow.
-	h2 := newHarness(t, approval.Config{})
-	tester2 := h2.tester()
-	h2.approvals.add(pendingRequest("r2", "bash", "运行命令", `{"command":"ls"}`))
-	tester2.Frame()
-	h2.click(tester2, "允许")
-	if got := h2.approvals.resolved(); len(got) != 1 || got[0] != contracts.ApprovalAllow {
-		t.Fatalf("decisions after clicking Allow = %v, want [allow]", got)
 	}
 }

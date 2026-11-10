@@ -11,11 +11,10 @@ import (
 )
 
 // usageChat is a fake chat with one active session holding the given assistant
-// messages (plus a user prompt so the composer renders).
+// messages (only those, so the tests' ⋯ entry is unambiguous).
 func usageChat(assistant ...contracts.ChatMessage) *fakeChat {
 	chat := newFakeChat()
-	messages := []contracts.ChatMessage{{ID: "u1", Role: contracts.ChatRoleUser, Text: "你好"}}
-	messages = append(messages, assistant...)
+	messages := append([]contracts.ChatMessage(nil), assistant...)
 	chat.addSession(contracts.ChatSession{ID: "sess-1", Title: "用量测试", Messages: messages}, true)
 	return chat
 }
@@ -31,25 +30,28 @@ func textsContaining(testerTexts []string, fragment string) int {
 	return count
 }
 
-// --- usage footer -----------------------------------------------------------
+// --- compact usage meta row ------------------------------------------------
 
-func TestAssistantUsageFooterRenders(t *testing.T) {
+func TestAssistantMetaRowShowsCompactUsage(t *testing.T) {
 	chat := usageChat(contracts.ChatMessage{
 		ID: "a1", Role: contracts.ChatRoleAssistant, Text: "你好呀",
 		Usage: &contracts.MessageUsage{DurationMS: 3200, TotalTokens: 1234, CachedTokens: 200},
 	})
 	h := newHarness(t, chat)
 	tester := h.tester()
-	// The summary line is compact and muted; the breakdown expands on click.
-	h.assertTexts(tester, "用时 3.2s · 1.2K tokens")
-	h.click(tester, "用时 3.2s · 1.2K tokens")
-	h.assertTexts(tester, "缓存 tokens", "200")
+	// The usage summary is part of the compact meta row; the breakdown lives in
+	// the ⋯ menu's 用量明细 submenu.
+	h.assertTexts(tester, "用时 3.2s · 1.2K tokens", "消息操作")
+	h.click(tester, "消息操作")
+	h.assertTexts(tester, "用量明细")
+	h.click(tester, "用量明细")
+	h.assertTexts(tester, "时长", "3.2s", "输入 tokens", "输出 tokens", "缓存 tokens", "200")
 }
 
-// TestAssistantUsageFooterUsesCompactUnits covers the user's report: the footer
+// TestAssistantMetaRowUsesCompactUnits covers the user's report: the meta row
 // must show 173.6K (and 8.4M-style units), never comma-grouped 173,635. The
-// expanded token rows use the same units; no comma grouping survives anywhere.
-func TestAssistantUsageFooterUsesCompactUnits(t *testing.T) {
+// expanded token rows use the same units; no raw count survives anywhere.
+func TestAssistantMetaRowUsesCompactUnits(t *testing.T) {
 	chat := usageChat(contracts.ChatMessage{
 		ID: "a1", Role: contracts.ChatRoleAssistant, Text: "长回答",
 		Usage: &contracts.MessageUsage{
@@ -61,12 +63,13 @@ func TestAssistantUsageFooterUsesCompactUnits(t *testing.T) {
 	tester := h.tester()
 	h.assertTexts(tester, "用时 358.8s · 173.6K tokens")
 	h.assertNoTexts(tester, "173,635")
-	h.click(tester, "用时 358.8s · 173.6K tokens")
+	h.click(tester, "消息操作")
+	h.click(tester, "用量明细")
 	h.assertTexts(tester, "171.7K", "1.9K", "92.9K")
 	h.assertNoTexts(tester, "171,737", "1,898", "92,892")
 }
 
-func TestAssistantUsageDurationFormats(t *testing.T) {
+func TestAssistantMetaRowDurationFormats(t *testing.T) {
 	chat := usageChat(
 		contracts.ChatMessage{ID: "a1", Role: contracts.ChatRoleAssistant, Text: "一",
 			Usage: &contracts.MessageUsage{DurationMS: 850, TotalTokens: 12}},
@@ -75,13 +78,13 @@ func TestAssistantUsageDurationFormats(t *testing.T) {
 	h := newHarness(t, chat)
 	tester := h.tester()
 	h.assertTexts(tester, "用时 850ms · 12 tokens")
-	// The message without Usage gets no footer.
+	// The message without Usage gets no usage summary.
 	if got := textsContaining(tester.Texts(), "用时"); got != 1 {
-		t.Fatalf("usage footers = %d, want 1; texts = %v", got, tester.Texts())
+		t.Fatalf("usage summaries = %d, want 1; texts = %v", got, tester.Texts())
 	}
 }
 
-func TestAssistantUsageEnglishCopy(t *testing.T) {
+func TestAssistantMetaRowEnglishCopy(t *testing.T) {
 	chat := usageChat(contracts.ChatMessage{
 		ID: "a1", Role: contracts.ChatRoleAssistant, Text: "hi",
 		Usage: &contracts.MessageUsage{DurationMS: 3200, TotalTokens: 1234, CachedTokens: 200},
@@ -91,7 +94,8 @@ func TestAssistantUsageEnglishCopy(t *testing.T) {
 	h.ui.Locale().SetLanguage("en")
 	tester.Frame()
 	h.assertTexts(tester, "Took 3.2s · 1.2K tokens")
-	h.click(tester, "Took 3.2s · 1.2K tokens")
+	h.click(tester, "Message actions")
+	h.click(tester, "Usage details")
 	h.assertTexts(tester, "Cached tokens", "200")
 }
 
@@ -101,13 +105,15 @@ func TestAssistantCopyWritesClipboard(t *testing.T) {
 	chat := usageChat(contracts.ChatMessage{ID: "a1", Role: contracts.ChatRoleAssistant, Text: "可复制的回答"})
 	h := newHarness(t, chat)
 	tester := h.tester()
-	// H15: copy is resident under the turn (no hover or pin needed).
+	// The copy action lives in the ⋯ menu of the compact meta row.
+	h.assertNoTexts(tester, "复制消息")
+	h.click(tester, "消息操作")
 	h.assertTexts(tester, "复制消息")
 	h.click(tester, "复制消息")
 	if got := tester.Clipboard(); got != "可复制的回答" {
 		t.Fatalf("clipboard = %q, want the assistant text", got)
 	}
-	// The copied state is the check glyph plus tooltip, never a resident badge.
+	// The confirmation is the transient toast, never a resident badge.
 	h.assertNoTexts(tester, "已复制")
 }
 
@@ -118,10 +124,13 @@ func TestAssistantCopyHiddenForEmptyText(t *testing.T) {
 	})
 	h := newHarness(t, chat)
 	tester := h.tester()
-	// The empty assistant turn has no copy action of its own (the user
-	// message's 复制原文 is a different action and stays).
+	// The empty assistant turn has no actions of its own (the user message's
+	// actions are a different meta row).
 	if got := textsContaining(tester.Texts(), "复制消息"); got != 0 {
 		t.Fatalf("assistant copy action rendered for an empty message; texts = %v", tester.Texts())
+	}
+	if _, ok := tester.Find("消息操作"); ok {
+		t.Fatalf("assistant actions entry rendered for an empty message; texts = %v", tester.Texts())
 	}
 }
 

@@ -227,7 +227,7 @@ func TestSessionGoalPauseChipAndAutoContinue(t *testing.T) {
 	requireHasTexts(t, harness.tester, "目标", "Pausable goal")
 
 	// The goal actions live in the chip's popover.
-	if err := harness.tester.Click("目标"); err != nil {
+	if err := harness.tester.Click("目标操作"); err != nil {
 		t.Fatalf("open goal menu: %v; texts = %v", err, harness.tester.Texts())
 	}
 	harness.tester.Frame()
@@ -251,7 +251,7 @@ func TestSessionGoalPauseChipAndAutoContinue(t *testing.T) {
 	requireHasText(t, harness.tester, "Pausable goal")
 
 	// Resume: the next settled run continues again.
-	if err := harness.tester.Click("目标已暂停"); err != nil {
+	if err := harness.tester.Click("目标操作"); err != nil {
 		t.Fatalf("reopen goal menu: %v; texts = %v", err, harness.tester.Texts())
 	}
 	harness.tester.Frame()
@@ -278,7 +278,7 @@ func TestSessionGoalPauseChipAndAutoContinue(t *testing.T) {
 	plain.goal.install("goal-plain", "Plain goal")
 	plain.tester.Frame()
 	requireHasTexts(t, plain.tester, "目标", "Plain goal")
-	if err := plain.tester.Click("目标"); err != nil {
+	if err := plain.tester.Click("目标操作"); err != nil {
 		t.Fatalf("open plain goal menu: %v; texts = %v", err, plain.tester.Texts())
 	}
 	plain.tester.Frame()

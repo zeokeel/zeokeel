@@ -9,23 +9,16 @@ import (
 	"github.com/zeokeel/zeokeel/internal/contracts"
 )
 
-func TestDefaultCatalogContextWindows(t *testing.T) {
-	models := newService(Config{}, &fakeLogger{}).Models()
-	if len(models) != 2 {
-		t.Fatalf("default models = %+v", models)
-	}
-	for _, model := range models {
-		if model.ContextWindow != 128000 {
-			t.Fatalf("default %s ContextWindow = %d, want 128000", model.ID, model.ContextWindow)
-		}
-	}
-}
-
+// TestConfiguredCatalogContextWindow covers the assembly baseline: the context
+// window is passed through and invalid values are normalized to "unknown" (0).
 func TestConfiguredCatalogContextWindow(t *testing.T) {
-	svc := newService(Config{Models: []Model{{ID: "m1", ContextWindow: 32000}}}, &fakeLogger{})
+	svc := newService(Config{Models: []Model{
+		{ID: "m1", ContextWindow: 32000},
+		{ID: "m2", ContextWindow: -5},
+	}}, &fakeLogger{})
 	models := svc.Models()
-	if len(models) != 1 || models[0].ContextWindow != 32000 {
-		t.Fatalf("configured context window = %+v", models)
+	if len(models) != 2 || models[0].ContextWindow != 32000 || models[1].ContextWindow != 0 {
+		t.Fatalf("configured context windows = %+v", models)
 	}
 }
 

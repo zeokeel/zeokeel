@@ -131,3 +131,123 @@ func TestToolRowRunningShowsLabeledSpinner(t *testing.T) {
 		t.Fatalf("running disclosure name missing; texts = %v", tester.Texts())
 	}
 }
+
+// toolRowInlineView draws one tool row with InlineChevron, the transcript
+// activity band's compact look (chevron right after the preview).
+func toolRowInlineView(state *toolRowState) func(*ui.Context) {
+	return func(c *ui.Context) {
+		t := design.Of(c)
+		uikit.ToolRow(c, uikit.ToolRowOptions{
+			Key:           "test.tool.inline",
+			Icon:          icons.File(),
+			Name:          "读取文件",
+			Status:        "完成",
+			StatusColor:   t.SuccessText,
+			Preview:       "auth.go",
+			Open:          state.open,
+			InlineChevron: true,
+			Toggle: func(next bool) {
+				state.toggles = append(state.toggles, next)
+				state.open = next
+			},
+			Sections: []uikit.ToolPanelSection{{Label: "完整结果标题", Text: "完整结果"}},
+		})
+	}
+}
+
+// TestToolRowInlineChevron covers the activity-band variant: it is still an
+// official disclosure with the same toggle semantics, and the preview stays a
+// left-aligned string instead of growing to the row's far end.
+func TestToolRowInlineChevron(t *testing.T) {
+	inline := &toolRowState{}
+	tester := ui.NewTester(toolRowInlineView(inline), 800, 200)
+	info, ok := tester.AccessByRole(ui.RoleDisclosure, "读取文件 · 完成")
+	if !ok || info.Expanded {
+		t.Fatalf("inline row disclosure = %+v found %v, want a closed disclosure", info, ok)
+	}
+	inlinePreview, ok := tester.Find("auth.go")
+	if !ok {
+		t.Fatalf("inline preview missing; texts = %v", tester.Texts())
+	}
+	if err := tester.Click("读取文件"); err != nil {
+		t.Fatalf("click inline row: %v; texts = %v", err, tester.Texts())
+	}
+	tester.Frame()
+	if len(inline.toggles) != 1 || inline.toggles[0] != true {
+		t.Fatalf("inline toggle calls = %v, want [true]", inline.toggles)
+	}
+	if !tester.HasText("完整结果") {
+		t.Fatalf("inline row panel missing; texts = %v", tester.Texts())
+	}
+
+	// The default row's growing preview is wider than the inline one, whose
+	// preview keeps its intrinsic measure with the chevron right after it.
+	wide := &toolRowState{}
+	wideTester := ui.NewTester(toolRowView(wide), 800, 200)
+	widePreview, ok := wideTester.Find("auth.go")
+	if !ok {
+		t.Fatalf("default preview missing; texts = %v", wideTester.Texts())
+	}
+	if inlinePreview.W >= widePreview.W {
+		t.Fatalf("inline preview width = %.1f, default = %.1f: the inline preview should not grow",
+			inlinePreview.W, widePreview.W)
+	}
+}
+
+// TestToolRowMarkerColumn covers the activity band's fixed marker column: the
+// category glyph takes a fixed 16 DIP column (or the official spinner while
+// running), so the action name starts further right than the old inline glyph;
+// the status and preview still read on the same line.
+func TestToolRowMarkerColumn(t *testing.T) {
+	state := &toolRowState{}
+	view := func(c *ui.Context) {
+		t := design.Of(c)
+		uikit.ToolRow(c, uikit.ToolRowOptions{
+			Key:           "test.tool.marker",
+			Icon:          icons.File(),
+			Name:          "读取文件",
+			Status:        "完成",
+			StatusColor:   t.SuccessText,
+			Preview:       "auth.go",
+			InlineChevron: true,
+			MarkerColumn:  true,
+			Open:          state.open,
+			Toggle: func(next bool) {
+				state.toggles = append(state.toggles, next)
+				state.open = next
+			},
+			Sections: []uikit.ToolPanelSection{{Label: "完整结果标题", Text: "完整结果"}},
+		})
+	}
+	tester := ui.NewTester(view, 800, 200)
+	info, ok := tester.AccessByRole(ui.RoleDisclosure, "读取文件 · 完成")
+	if !ok || info.Expanded {
+		t.Fatalf("marker row disclosure = %+v found %v, want a closed disclosure", info, ok)
+	}
+	markerName, ok := tester.Find("读取文件")
+	if !ok {
+		t.Fatalf("marker row action name missing; texts = %v", tester.Texts())
+	}
+	if !tester.HasText("完成") || !tester.HasText("auth.go") {
+		t.Fatalf("marker row lacks status/preview; texts = %v", tester.Texts())
+	}
+	// The fixed marker column is wider than the old inline glyph: the name
+	// starts a little further right than in the default row.
+	plainState := &toolRowState{}
+	plainTester := ui.NewTester(toolRowView(plainState), 800, 200)
+	plainName, ok := plainTester.Find("读取文件")
+	if !ok {
+		t.Fatalf("plain row action name missing; texts = %v", plainTester.Texts())
+	}
+	if markerName.X <= plainName.X {
+		t.Fatalf("marker column name X=%.1f, plain X=%.1f: the marker column should shift the name",
+			markerName.X, plainName.X)
+	}
+	if err := tester.Click("读取文件"); err != nil {
+		t.Fatalf("click marker row: %v; texts = %v", err, tester.Texts())
+	}
+	tester.Frame()
+	if len(state.toggles) != 1 || state.toggles[0] != true {
+		t.Fatalf("marker toggle calls = %v, want [true]", state.toggles)
+	}
+}

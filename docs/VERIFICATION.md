@@ -407,3 +407,220 @@ NO_PANIC
 ### 文档核对
 - docs/COVERAGE.md 矩阵重算（§2 28 + §3 34 = 62）：**✅61 / 🟡0 / ❌1**（backend 27✅/0🟡/1❌ winproc，shell 34✅）；摘要与统计表一致（98.4% / 0% / 1.6%），覆盖清单全部关闭。
 - README 状态行更新为 Round 8（HEAD a7fe576）。
+
+## 模型配置重构（2026-11-10，多服务商模型列表 + 每模型思考强度）
+
+HEAD cf0c3d8 + 工作区改动。需求：删除模型页「快速预设」与独立「连接」表单；「添加模型」支持常用服务商；
+所有模型进入模型列表；删除内置默认模型；对话内模型菜单可给每个模型单独设置思考强度（按模型保存，会话可覆盖）。
+
+### 关键行为
+- **模型列表是唯一模型来源**：`modelcatalog.models` 显式存在（含 `"[]"`）即以用户列表为准；产品不再有内置默认模型
+  （`contracts.DefaultModelCatalog` 删除）；模型页无「恢复默认」。
+- **每模型独立连接**：`ModelInfo` 新增 `baseURL`/`apiKey`；agent 解析顺序为 模型行 → `chat.*` → assembly/env，
+  `Config()`/每会话模型/subagent/team 模型覆盖都按行解析各自连接（`contracts.ModelConnection`）。
+- **旧配置迁移**：desktop 启动时 `chat.model/baseURL/apiKey` 在用户从未保存过列表的情况下一次性迁移为一条模型行
+  （`internal/modules/modelcatalog/migration_test.go`；已有行/空列表/malformed 不迁移，写失败不阻塞激活）。
+- **默认模型**：列表中的默认行（`chat.model` 指向行，否则首行）镜像写 `chat.model/baseURL/apiKey`；
+  镜像三步写入失败逐键回滚（AUDIT-P3-15 纪律），删除默认行自动提升剩余首行，删空清空镜像。
+- **添加/编辑弹窗**：服务商预设（DeepSeek/OpenAI/Ollama/通义千问/Kimi/智谱/硅基流动/OpenRouter/Gemini/自定义，
+  `contracts.ModelProviderPresets`）预填 Base URL 与示例模型 ID；API Key 密码输入（新增留空继承同 Base URL 行、
+  编辑留空保留、可清除）；弹窗内「测试连接」沿用 `ModelListGetter` seam；编辑弹窗保留思考系列/默认思考/
+  生成参数/自定义思考模式（有界滚动 + 高级折叠）。
+- **对话框每模型思考强度（按模型单独配置）**：composer 模型菜单在模型切换行下方为**每个模型单独一行**
+  `思考强度：<模型名>`（Subtitle `默认：<该模型默认强度/系列默认>`），子菜单写该模型
+  `modelcatalog.models` 行的 `DefaultThinking`（部分模型无思考模式时不显示该行）；会话菜单
+  `本会话思考强度（<模型名>）：<有效值>` 的覆盖按 **（会话×模型）** 保存
+  （`session.<id>.thinking.<modelID>`），切换模型不会串用其他模型的强度，首项「跟随模型默认」清空按模型键
+  与旧会话级 thinking/effort 行（旧键仅作旧会话兼容回落）；Home 新对话 composer 同样每模型一行；
+  automation 模型选择兜底改为空列表并更新文案。
+- **空列表语义**：显式空列表 + 无 `chat.model` 时 `Config().Model` 为空、UI 显示「未配置」；
+  `Send`/`SendWithAttachments`/`Regenerate` 返回 `ErrNoModelConfigured`（不发 provider 请求、不改会话）。
+
+### 验证命令与结果
+`scripts/verify.sh --no-smoke`（含 -race，410s）：**10/10 PASS**
+```
+gofmt PASS · go build ./... PASS(4s) · go vet ./... PASS(1s)
+designlint --strict: 241 files / 155 violations / 0 error / 0 warn / 0 new（baseline 156）
+design-check（6 项 grep）：6 passed, 0 failed
+go tool mygo vet PASS
+go test ./... -count=1 PASS(41s)
+go test ./... -count=1 -race PASS(321s)
+regression (-v): 289 PASS / 0 SKIP / 0 FAIL
+ui-snapshot: 91 steps / 89 PNGs PASS
+verify: PASS（product smokes 见下轮全量）
+```
+`scripts/verify.sh --quick` 另跑一轮：9/9 PASS（88s，回归 289 PASS）。
+
+### 定向测试（新增/重写）
+- `internal/modules/modelcatalog`：迁移（缺失行迁移、已有行/`"[]"`/malformed 不迁移、写失败不阻塞激活、幂等）、
+  显式空列表、每模型连接透传。
+- `internal/modules/agent`：`model_connection_test.go`（默认/会话/subagent 连接的 providerFactory seam、回落顺序）、
+  `no_model_test.go`（显式空列表不发 provider、Send/Regenerate 守卫）、`subagent_model_test.go`。
+- `internal/ui/settings`：模型列表空态/行/默认徽章、添加（服务商预填/密钥继承/默认模型）、编辑（连接/清除密钥/
+  测试连接/高级折叠）、删除提升默认、镜像写失败回滚、malformed 重写、i18n/en。
+- `internal/ui/session`：`model_thinking_test.go`（模型级默认显示/写入、会话跟随模型清除覆盖、空列表菜单）。
+- `internal/ui/home`：`model_thinking_test.go`（Home 模型菜单同样语义、空目录深链 model 页）。
+- `internal/ui/uimodtest`：desktop E2E 模型页断言、未保存守卫改用系统提示词草稿、P1 场景种子两行模型列表。
+- `internal/regression`：`TestModelConnectionCheckDialog*`（弹窗内连接检查 seam/失败/无地址禁用/存 key 不泄漏）、
+  `TestProviderPresetAddDialog/CustomKeepsTypedEndpoint/TrailingSlashMatch/MirrorWriteFailureRollsBack`。
+- 上述定向包本次合计 **949 PASS / 0 FAIL**（contracts 18 / modelcatalog 26 / agent 231 / settings 292 /
+  session 304 / home 33 / automation 45），另 `internal/ui/uimodtest` desktop E2E 6.8s 全绿。
+
+### 快照（人工查看）
+`go run ./internal/devtools/ui-snapshot .cache/ui-conformance-model`：
+`p2-model-settings.png`（模型列表 + 默认徽章 + 每行服务商/地址/密钥状态）、`p2-model-add.png`（服务商/Base URL/
+API Key/测试连接/设为默认）、`p2-model-edit.png`（只读 ID + 连接 + 思考系列/默认思考 + 高级折叠）、
+`p2-model-empty.png`（无内置默认模型空态 + 默认模型未配置）、`p2-modelmenu.png`（模型菜单含「模型思考强度」子菜单）。
+
+### 已知限制
+- `modelcatalog.models` 行内的 `apiKey` 与旧 `chat.apiKey` 同为本地明文设置（诊断页/导出报告已按 JSON 凭据键掩码）；
+- malformed 列表按「未保存过列表」处理（走旧回落链），模型页同时显示可修复提示；
+- 显式空列表但仍有 `chat.model` 时按旧语义回落（兼容旧安装），模型页显示该回退默认模型。
+
+### 补充（同日）：模型/推理等级改为两级菜单（按模型独立）
+用户两次反馈后的最终形态：① 思考强度按模型独立（不是会话级统一值）；② composer 里只用**二级菜单**选择，
+不把模型列表和强度堆在同一个菜单。
+
+- **数据层**：会话内推理等级覆盖按（会话×模型）保存（`contracts.SessionModelThinkingSettingKey` /
+  `SessionThinkingOverride` / `SessionThinkingOverrideKeys`；旧 `session.<id>.thinking`/`.effort` 仅作旧会话
+  兼容回落）；agent 按（会话×模型）解析，切换模型不会串用其他模型的覆盖；模型级默认 `DefaultThinking` 仍在
+  `modelcatalog.models` 行中。
+- **会话 composer 模型 chip 一级菜单**（紧凑两行，各自 Trailing 当前值）：
+  `模型 → <当前模型>`、`推理等级 → <当前等级>`、分隔线、`打开模型设置…`。
+  - `模型` 二级按服务商分组（`MatchProviderPreset`；未匹配“自定义服务/Custom service”，组头禁用，catalog 顺序），
+    模型项 radio 当前会话模型、Subtitle 备注、Trailing 上下文窗口，Chosen 切换会话模型；
+  - `推理等级` 二级：`跟随模型默认（<该模型默认名/系列默认>）` + 该模型模式（radio 反映显式覆盖；
+    选模式写按（会话×模型）键并清旧 thinking/effort，跟随默认清全部覆盖键）；无模式/无 settings/无模型时隐藏该行；
+  - chip Tooltip 为「切换本会话模型与推理等级：<model> · <level>」。
+- **会话菜单**：宽布局移除思考强度段（避免重复）；veryCompact（模型 chip 折叠）时保留「模型：… / 推理等级」回退入口。
+- **Home composer**：一级同样为 `模型`/`推理等级`；模型二级按服务商分组写默认模型（`chat.model`），
+  推理二级写该模型 `DefaultThinking`（新会话默认）；空目录保留「打开模型设置…」→ model 页。
+
+验证：`scripts/verify.sh --no-smoke` **10/10 PASS（410s）**：gofmt/build/vet/designlint（0 new）/
+design-check 6/6/mygo vet/`go test ./...`/`go test ./... -race`（317s）/regression **289 PASS / 0 SKIP / 0 FAIL**/
+ui-snapshot **93 steps / 91 PNGs**。定向包：session 306 PASS、home 35 PASS、automation 45 PASS、agent 234 PASS、
+contracts 20 PASS。快照（人工查看）：
+`.cache/ui-conformance-model3/p2-modelmenu.png`（一级两行）、`p2-modelmenu-models.png`（按服务商分组的模型二级菜单）、
+`p2-modelmenu-thinking.png`（推理等级二级菜单：跟随模型默认/默认/低/中/高强度）。
+（`go test ./... -race` 曾出现一次与本改动无关的既有 flaky：regression
+`TestFeedbackWriteFailureLeavesReadModelUnchanged` 在满负载下偶发订阅通知计数 1≠0；单独 `-race -count=5` 通过，
+重跑全量通过。）
+
+## 会话线程密度重构（2026-11-10，A+B：元信息行 + 过程带/折叠 + 标记列）
+
+用户反馈截图：transcript 里多轮消息之间大量空行、右侧一列动作按钮；要求“时间和用量要显示、用量用紧凑单位（K/M/B，如 100M）、过程行前面有能区分思考/工具调用的标记”。
+
+- **动作区收敛（A）**：删除 32px 整行动作行与独立 usage footer；每条助手消息末尾改为一条右对齐紧凑元信息行
+  `时间 · 用时 X · N tokens · ⋯`（时间/用量常显；所有数字走 `uikit.FormatCompactCount`，不展示原始计数）。
+  24×24 ⋯ 打开原生菜单：复制消息（写剪贴板 + toast）、重新生成、有帮助/没帮助（radio，按 `SessionFeedbacker`）、
+  用量明细子菜单（时长/输入/输出/缓存/上下文预算，全部紧凑值）。用户消息 meta 同样收敛为 `时间 · ⋯`
+  （复制原文/编辑消息；无障碍名 `用户消息操作` 与助手区分）。流式无元信息行；失败轮只保留时间/用量 + 错误行 + 重试。
+- **过程带与折叠（B）**：思考与非决策工具行缩进 Space4、行距 Space1，组成一条“活动带”；每行左端固定 16px
+  **标记列**（sparkles=思考、`uikit.ToolIcon` 分类图标=运行命令/读取文件/搜索/团队任务…、运行中=官方 Spinner），
+  行内结构 `[标记] 动作名 [状态] · 预览/详情 [内联 chevron]`，chevron 不再贴阅读列右缘；`uikit.ReasoningTrace`
+  与 `uikit.ToolRow` 新增 `MarkerColumn`/`InlineChevron` 选项（默认 false，其他调用方外观不变）。
+  完成且过程 ≥2 行时默认折叠为一行摘要 `过程 · 思考 · N 个工具调用 · 用时`（用 `ui.CollapsibleBase` 自建 trigger，
+  前置 chevron 标记），下方只显示正文与决策卡；点击展开恢复完整时间线（正文不重复）；流式永远展开；
+  状态 `st.processOpen` 与 HoldPlace/prune 同步。
+- **验证**：`scripts/verify.sh --no-smoke` **10/10 PASS（426s）**：gofmt/build/vet/designlint（0 new）/
+  design-check 6/6/mygo vet/`go test ./...`/`go test ./... -race`（327s）/regression **289 PASS / 0 SKIP / 0 FAIL**/
+  ui-snapshot **97 steps / 95 PNGs**。定向包 session/uikit 全绿（新增 process_fold_test 覆盖折叠/展开/持久化/流式/
+  决策卡/标记列对齐/英文/失败无动作；uikit 组件 InlineChevron/MarkerColumn 测试）。
+- **快照（人工查看）**：`.cache/ui-conformance-density/p2-process-fold.png`（折叠摘要 + 元信息行）、
+  `p2-process-expanded.png`（展开时间线：标记列 + 动作名 + 状态 + `·` 预览 + 内联 chevron）、
+  `p2-message-actions.png`（⋯ 菜单：复制/重生成/有帮助/没帮助/用量明细）、
+  `p2-message-usage.png`（用量明细：2.5s / 42K / 120 / 36K / 128k，无原始长数字）。
+- 文档同步：AGENT-SURFACES S1/S8、COVERAGE 消息级操作、DESIGN.md §7.1 自绘白名单条目；
+  ui-drive `message-actions-copy` 步骤与 veryCompact/uimodtest 断言同步；`go build ./...`/全量测试通过。
+
+## 会话壳层视觉重构（2026-11-10，B3 顶栏 + composer dock + 通知右上角 + 审批内联）
+
+用户多轮截图反馈后的最终视觉形态：会话标题/Tabs 上提到宿主顶层，去掉返回与 Alt+←，更多改 ⋯；
+目标与审批从 header/居中 Modal 移到输入框上方；通知改右上角；审批卡改为 V3 强强调内联卡。
+
+- **B3 顶层顶栏**（`internal/uiroot/frame.go`）：当前屏向 `screen.header` / `screen.actions` /
+  `screen.tabs` 有贡献时，宿主渲染一块浅色 band（`BgSidebar` + 仅底边 1px `BorderL2`、行间无线）：
+  40px 标题行（标题/工作区 Grow + 屏幕动作 + palette + inspector）+ 可选 32px Tabs 行；无贡献屏
+  不渲染任何顶部工具栏（Home/Automation/Plugins 不再有空条）。可见返回按钮与 `Alt+←` 历史回退删除
+  （`Navigator.Back` API 保留内部使用）。屏幕级槽位按 item ID 前缀作用域：`session.title` /
+  `session.actions` / `session.tabs` 只在 session 屏渲染。
+- **session**：Module 注册三个屏幕槽；屏幕 body 删除旧 header（标题/Tabs/更多/目标/团队）；「更多」
+  文字按钮 → 24×24 ⋯ 图标（Label「会话操作/Conversation actions」，菜单=复制会话 ID/复制对话/导出
+  Markdown/JSONL/归档）。composer 上方新增 dock（`TranscriptWidth` 居中）：目标条（Badge + 目标文本 +
+  ⋯「目标操作」）→ `RenderSlot(session.banner)` 审批卡 → composer；Esc 在存在 pending 审批时
+  `Resolve(deny)` 最早一条并保持本轮运行，不中断生成。
+- **审批 V3 内联卡**（`internal/uikit/approval.go` `Inline`；`internal/ui/approval`）：外层警示描边 +
+  `Warning.Alpha(0.22)` 顶部横幅（Shield/加粗「需要审批」/工具友好名/待审批计数/「Esc 拒绝」）+
+  中性卡体（影响说明/命令或摘要 mono 块/参数折叠/会话级提示）+ 右对齐「拒绝/本会话内始终允许/允许」；
+  无 Default/autofocus；注册到 `session.banner`，非 session 屏收到 pending 时自动 `Push("session")`。
+  旧 Modal 路径保留（`Inline=false`，embedder/兼容测试）。
+- **通知右上角**（`internal/ui/toasts`）：viewport 改 top-right，`top=design.Space8*2+design.Space5`
+  （80 DIP = 72 顶栏 + 8 gap）、右对齐、从顶部向下堆叠；最多 2 条/FIFO/合并 ×N/级别过滤/关闭/超时/
+  hover 暂停等行为不变；不遮挡 B3 顶栏与 composer。
+
+验证：`scripts/verify.sh --no-smoke` **10/10 PASS（约 415s）**：gofmt/build/vet/designlint（0 new，baseline
+156 条 0 新增）/design-check 6/6（raw metric 45 ≤ 51）/mygo vet/`go test ./...`（42s）/`go test ./... -race`
+（310s）/regression **289 PASS / 0 SKIP / 0 FAIL**/ui-snapshot **97 steps / 95 PNGs**。
+定向包：uiroot、session、uikit、approval、toasts、uimodtest、regression 全绿；新增测试
+`internal/uiroot/b3_header_test.go`（无贡献无顶栏/无返回/命名空间作用域/两行 band 顺序/tabs 位于 body 上方）、
+`internal/ui/session/chrome_b3_test.go`（⋯ 菜单/目标条在输入框上方/session.banner 渲染/Esc 审批优先且不中断）、
+`internal/uikit/approval_test.go` 与 `internal/ui/approval/*_test.go`（Inline 渲染/决定/队列计数/自动切屏）、
+`internal/ui/toasts/toasts_test.go`（右上角定位/向下堆叠）。
+快照（人工查看）：`.cache/ui-conformance-final/p1-chat.png`（B3 顶栏 + 无返回 + ⋯/搜索/右栏 + 单条底边线）、
+`p1-approval.png`（composer 上方 V3 审批内联卡：警示横幅/描边/命令块/三按钮）、`p2-toast.png`（右上角两条
+通知自上而下、位于顶栏下方）、`p2-home.png`（无空工具栏）、`narrow/narrow-session.png`（窄窗标题/Tabs/目标条）、
+`narrow/dark-session.png`（深色主题 header band 与右上角通知）。
+文档同步：AGENT-SURFACES S1/S4/S7/S8 与 §2 跨 surface 规则、ARCHITECTURE §5.1（B3 band + 槽位作用域）、
+INJECTION-POINTS（B3/命名空间/session.banner）、COVERAGE（Approval 内联卡、Chrome、Team chip）、DESIGN.md
+（§2 场景表与 §6.3 registry Inline）、本文档。
+
+### 补充（同日）：视觉尺度归一（用户反馈“整体 DPI 偏大/不协调”）
+
+排查结论：不是渲染缩放或 DPI bug——mygo 以 DIP 绘制、快照就是 1280×800 逻辑像素，正文基准仍是
+14px。真正的原因是 B3 顶栏把原来的**页面标题**（`TypeL` 20px）搬到了窗口 chrome 位置：它紧邻的
+Tabs 是 13px、badge 12px、图标 16px，而标题行 44px 偏高，导致顶栏在整窗里“上重下轻”、像被放大。
+
+归一处理（只改 chrome 尺度，正文/间距体系不动）：
+- 会话标题 `TypeL`(20/28, 600) → `TypeM`(16/24, 600)，与 13px Tabs、12px badge、16px band 图标同一尺度；
+- B3 标题行 44 → 40 DIP（`Space8+Space2`，Tabs 行仍 32），band 76 → 72 DIP；默认不再用页面标题级字号做窗口标题；
+- 右上角 toast 顶部 inset 84 → 80 DIP（72 band + 8 gap），其余通知行为不变；
+- 内容区、composer、消息/元信息/过程带字号保持 14/13/12/11 原层级。
+
+验证（归一后重跑）：`scripts/verify.sh --no-smoke` **10/10 PASS**：gofmt/build/vet/designlint 0 new/
+design-check 6/6（raw metric 45 ≤ 51）/mygo vet/`go test ./...`（45s）/`-race`（321s）/regression
+**289 PASS / 0 SKIP / 0 FAIL**/ui-snapshot **97 steps / 95 PNGs**。
+快照（人工对比）：归一前 `.cache/ui-conformance-final/p1-chat.png`（标题 20px、band 76） vs 归一后
+`.cache/ui-conformance-scale/p1-chat.png`（标题 16px、band 72）；审批卡/通知位置同步复查
+`.cache/ui-conformance-scale/p1-approval.png`、`p2-toast.png`，窄窗/深色同前一致。
+文档同步：AGENT-SURFACES S1、ARCHITECTURE §5.1、INJECTION-POINTS、COVERAGE（band 40+32）。
+
+### 补充（同日）：显示区域扩大（用户反馈“显示区域太小”，明确不动字体）
+
+用户澄清：字号不是问题、不要动字体；问题是窗口内可用的显示区域偏小。处理：
+- 桌面默认窗口 **1400×900 → 1512×944**（最小窗仍 900×600；`internal/host/host.go`
+  `mainWindowWidth/Height`）。
+- `mainWindowStateKey` 由 `"main"` 升为 `"main.v2"`：mygo 会按旧 StateKey 恢复上次几何，
+  旧默认尺寸会“粘住”新安装；升 key 使更大的默认窗口在升级后首次启动生效一次，之后用户
+  自行拖拽的尺寸仍按新 key 持久化。
+- `ui-snapshot` 的 p1/p2 基准帧同步改为 **1512×944**（窄窗 1024×720 / 900×600 档不变），
+  快照证据与新默认窗口一致；字体、token、间距全部未改。
+
+验证：`scripts/verify.sh --no-smoke` **10/10 PASS**（含 `go test ./...` 与 `-race`、regression
+289 PASS、ui-snapshot 97 steps/95 PNGs；快照尺寸变为 1512×944）。证据：新默认尺寸整帧
+`.cache/ui-conformance-display/p1-chat.png`、`p1-approval.png`、`p2-toast.png`。
+
+### 补充（同日）：正文显示宽度加宽（阅读列 840 → 960）
+
+用户反馈“正文显示宽度再宽一点，两边减少一点空白”。处理：`design.TranscriptWidth`
+**840 → 960 DIP**（单一 token，transcript / composer / composer dock / approval 卡同时对齐
+变宽）；窄窗仍按 `MaxWidthPercent(92)` 收缩，不产生横向溢出。默认窗口已在上一条扩到
+1512×944：内容列 1232 时两侧空白由 (1232−840)/2 = **196 DIP** 降到 (1232−960)/2 = **136 DIP**，
+正文列加宽 120 DIP。字号、字重、间距 token 均未改（按用户「不要动字体」）。
+
+验证：`scripts/verify.sh --no-smoke` **10/10 PASS**：gofmt/build/vet/designlint 0 new/design-check
+6/6（raw metric 45 ≤ 51）/mygo vet/`go test ./...`（43s）/`-race`（320s）/regression
+**289 PASS / 0 SKIP / 0 FAIL**/ui-snapshot **97 steps / 95 PNGs**（基准帧 1512×944）。
+快照（人工查看）：`.cache/ui-conformance-wide/p1-chat.png`（正文列 960、两侧空白 136）、
+`p1-approval.png`（审批卡/composer 同步对齐 960）、`p2-toast.png`；对照上一版 840：
+`.cache/ui-conformance-display/p1-chat.png`。
+文档同步：AGENT-SURFACES S1 布局、DESIGN.md 布局 token 表、host 窗口注释。

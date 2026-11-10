@@ -69,6 +69,9 @@ type homeComposerState struct {
 	// workspaceErr is the last failed workspace switch/add from the composer's
 	// context row; it shows inline below the actions like the other errors.
 	workspaceErr string
+	// modelErr is the last failed model-level thinking-default write (the model
+	// menu edits the catalog row); it shows inline below the actions.
+	modelErr string
 	// nextStepErr is the empty-state action failure (adding a workspace).
 	nextStepErr string
 	// attachBusy is true while the native picker runs off the UI thread
@@ -471,7 +474,8 @@ func homeChipLabel(label string) string {
 
 func buildHomeModelControl(c *ui.Context, t *design.Tokens, runtime contracts.UIRuntime,
 	nav contracts.Navigator, chat contracts.ChatService, kctx cordis.Context,
-	settings contracts.SettingsService, tr func(zh, en string) string) {
+	settings contracts.SettingsService, st *homeComposerState, english bool,
+	tr func(zh, en string) string) {
 	label := strings.TrimSpace(effectiveHomeModel(chat))
 	if label == "" {
 		label = tr("选择模型", "Choose model")
@@ -485,22 +489,179 @@ func buildHomeModelControl(c *ui.Context, t *design.Tokens, runtime contracts.UI
 	}
 	selector := ui.PopoverMenuButton(c, label, func(m *ui.Menu) {
 		if len(models) == 0 {
+			// The model list is configured on the model settings page (the old
+			// "providers" page no longer exists).
 			if m.Item(tr("打开模型设置…", "Open model settings…")).Chosen() {
-				openHomeSettingsPage(nav, "providers")
+				openHomeSettingsPage(nav, "model")
 			}
 			return
 		}
+		m.MaxWidth(design.OverlayWidthS)
 		current := strings.TrimSpace(effectiveHomeModel(chat))
-		for _, model := range models {
-			model := model
-			itemLabel := firstNonEmpty(model.Name, model.ID)
-			if settings != nil && m.Item(itemLabel).Checked(model.ID == current).Chosen() {
-				_ = settings.Set(contracts.SettingsChatModel, model.ID)
-				runtime.Invalidate()
+		// Two compact entries open the real choices one level down: the model
+		// list (grouped by provider) and this model's thinking default, instead
+		// of stacking every row in one menu.
+		modelRow := m.Submenu(tr("模型", "Model"), func(sub *ui.Menu) {
+			buildHomeModelChoices(sub, runtime, settings, current, models, english, tr)
+		})
+		modelRow.Trailing(homeDefaultModelLabel(models, current, tr))
+		if info, found := contracts.FindModelInfo(models, current); found {
+			buildHomeThinkingRow(m, runtime, st, settings, info, english, tr)
+		}
+	}).Tooltip(tr("选择新会话使用的模型与推理等级", "Choose the model and reasoning level for new conversations"))
+	design.Apply(selector, t.TextMuted(design.TypeXXXS))
+}
+
+// homeProviderGroup names the provider group of one model row in Home's 模型
+// submenu: the preset matching the row's own BaseURL, or the custom-service
+// label. Rows keep the catalog order; a header is added whenever it changes.
+func homeProviderGroup(english bool, info contracts.ModelInfo, tr func(zh, en string) string) string {
+	if preset, ok := contracts.MatchProviderPreset(info.BaseURL); ok {
+		return preset.DisplayName(english)
+	}
+	return tr("自定义服务", "Custom service")
+}
+
+// homeModelLabel names one catalog row: its display name, or its id.
+func homeModelLabel(info contracts.ModelInfo) string {
+	return firstNonEmpty(strings.TrimSpace(info.Name), strings.TrimSpace(info.ID))
+}
+
+// homeDefaultModelLabel names the default model for the compact menu: the
+// catalog display name when it is configured, else its id, else the
+// not-configured copy.
+func homeDefaultModelLabel(models []contracts.ModelInfo, modelID string,
+	tr func(zh, en string) string) string {
+	if info, ok := contracts.FindModelInfo(models, modelID); ok {
+		return homeModelLabel(info)
+	}
+	if model := strings.TrimSpace(modelID); model != "" {
+		return model
+	}
+	return tr("未配置", "Not set")
+}
+
+// buildHomeModelChoices fills Home's 模型 submenu: the default-model candidates
+// grouped by provider (a disabled header per provider group, in catalog order),
+// each row radio-marking the current default model and writing chat.model when
+// chosen.
+func buildHomeModelChoices(m *ui.Menu, runtime contracts.UIRuntime,
+	settings contracts.SettingsService, current string, models []contracts.ModelInfo,
+	english bool, tr func(zh, en string) string) {
+	group := ""
+	for _, model := range models {
+		model := model
+		if provider := homeProviderGroup(english, model, tr); provider != group {
+			m.Item(provider).Disabled(true)
+			group = provider
+		}
+		item := m.Item(homeModelLabel(model))
+		if note := strings.TrimSpace(model.Note); note != "" {
+			item.Subtitle(note)
+		}
+		if model.ContextWindow > 0 {
+			item.Trailing(homeFormatContextWindow(model.ContextWindow))
+		}
+		item.Radio(strings.EqualFold(strings.TrimSpace(model.ID), strings.TrimSpace(current)))
+		if item.Chosen() && settings != nil {
+			_ = settings.Set(contracts.SettingsChatModel, model.ID)
+			runtime.Invalidate()
+		}
+	}
+}
+
+// homeFormatContextWindow renders a token count for the model submenu's trailing
+// value: exact thousands as "128k", other positive values with one decimal
+// ("32.8k"); 0 (unknown) renders nothing.
+func homeFormatContextWindow(tokens int) string {
+	if tokens <= 0 {
+		return ""
+	}
+	if tokens%1000 == 0 {
+		return fmt.Sprintf("%dk", tokens/1000)
+	}
+	return fmt.Sprintf("%.1fk", float64(tokens)/1000)
+}
+
+// homeModelThinkingLabel names one model's configured default thinking mode: the
+// mode's display label, "系列默认" when the row follows the family default
+// (empty DefaultThinking), or the raw ID for a mode the row no longer defines.
+func homeModelThinkingLabel(info contracts.ModelInfo, english bool, tr func(zh, en string) string) string {
+	id := strings.TrimSpace(info.DefaultThinking)
+	if id == "" {
+		return tr("系列默认", "Family default")
+	}
+	if mode, ok := contracts.ThinkingModeByID(contracts.ThinkingModesForModel(info), id); ok {
+		return mode.DisplayName(english)
+	}
+	return id
+}
+
+// persistHomeModelDefaultThinking rewrites one model row's DefaultThinking in the
+// modelcatalog.models settings row. The whole list is decoded and re-encoded so
+// the row order and every other field of every model survive; a model ID the
+// stored list does not contain is an error (there is no row to edit).
+func persistHomeModelDefaultThinking(settings contracts.SettingsService, modelID, modeID string) error {
+	if settings == nil {
+		return fmt.Errorf("no settings store")
+	}
+	models, err := contracts.LoadModelCatalog(settings)
+	if err != nil {
+		return err
+	}
+	want := strings.TrimSpace(modelID)
+	for index := range models {
+		if !strings.EqualFold(strings.TrimSpace(models[index].ID), want) {
+			continue
+		}
+		models[index].DefaultThinking = strings.TrimSpace(modeID)
+		encoded, encodeErr := contracts.EncodeModelInfoList(models)
+		if encodeErr != nil {
+			return encodeErr
+		}
+		return settings.Set(contracts.SettingModelCatalogModels, encoded)
+	}
+	return fmt.Errorf("model %q is not in the model list", want)
+}
+
+// buildHomeThinkingRow adds Home's compact 推理等级 row: its submenu edits the
+// default model's DefaultThinking (the model-level strength new conversations
+// follow), writing the modelcatalog.models row. Reports whether the row was
+// added: a model without selectable modes or a missing settings store hides it.
+func buildHomeThinkingRow(m *ui.Menu, runtime contracts.UIRuntime, st *homeComposerState,
+	settings contracts.SettingsService, info contracts.ModelInfo, english bool,
+	tr func(zh, en string) string) bool {
+	modelID := strings.TrimSpace(info.ID)
+	modes := contracts.ThinkingModesForModel(info)
+	if settings == nil || modelID == "" || len(modes) == 0 {
+		return false
+	}
+	configured := strings.TrimSpace(info.DefaultThinking)
+	save := func(modeID string) {
+		if err := persistHomeModelDefaultThinking(settings, info.ID, modeID); err != nil {
+			st.modelErr = tr("保存模型思考强度失败：", "Could not save the model thinking default: ") + err.Error()
+		} else {
+			st.modelErr = ""
+		}
+		runtime.Invalidate()
+	}
+	row := m.Submenu(tr("推理等级", "Reasoning level"), func(sub *ui.Menu) {
+		family := sub.Item(tr("系列默认", "Family default"))
+		family.Radio(configured == "")
+		if family.Chosen() {
+			save("")
+		}
+		for _, mode := range modes {
+			mode := mode
+			item := sub.Item(mode.DisplayName(english))
+			item.Radio(strings.EqualFold(configured, mode.ID))
+			if item.Chosen() {
+				save(mode.ID)
 			}
 		}
-	}).Tooltip(tr("选择新会话使用的模型", "Choose the model for new conversations"))
-	design.Apply(selector, t.TextMuted(design.TypeXXXS))
+	})
+	row.Trailing(homeModelThinkingLabel(info, english, tr))
+	return true
 }
 
 // homeModeChoice is one Home context-mode entry; it writes the same agent/chat
@@ -634,8 +795,8 @@ func buildHomeComposer(c *ui.Context, t *design.Tokens, runtime contracts.UIRunt
 	if st.sending {
 		sendLabel = tr("发送中…", "Sending…")
 	}
-	errors := make([]string, 0, 3)
-	for _, text := range []string{st.attachErr, st.workspaceErr, st.sendErr} {
+	errors := make([]string, 0, 4)
+	for _, text := range []string{st.attachErr, st.workspaceErr, st.modelErr, st.sendErr} {
 		if strings.TrimSpace(text) != "" {
 			errors = append(errors, text)
 		}
@@ -686,7 +847,8 @@ func buildHomeComposer(c *ui.Context, t *design.Tokens, runtime contracts.UIRunt
 					Size(design.Space3, design.Space3).TextColor(t.LabelSecondary)
 			}
 			buildHomeWorkspaceControl(ic, t, runtime, kctx, st, tr)
-			buildHomeModelControl(ic, t, runtime, navigator, chat, kctx, settings, tr)
+			buildHomeModelControl(ic, t, runtime, navigator, chat, kctx, settings, st,
+				uikit.Language(locale) == "en", tr)
 			buildHomeModeControl(ic, t, runtime, settings, tr)
 		},
 		SendEnabled: chat != nil && !st.sending && strings.TrimSpace(st.draft) != "",

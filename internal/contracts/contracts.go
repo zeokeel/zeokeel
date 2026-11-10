@@ -126,8 +126,13 @@ const (
 	SlotSidebarFooter  = "sidebar.footer"
 
 	// Screen surface (the screen body itself is registered via RegisterScreen).
+	// Header/Actions/Tabs are contributed by a screen module into the HOST's
+	// top-level header: the host renders them in one tinted band with its own
+	// palette/inspector controls, so a screen never stacks a second header row
+	// under the window chrome.
 	SlotScreenHeader  = "screen.header"
 	SlotScreenActions = "screen.actions"
+	SlotScreenTabs    = "screen.tabs"
 	SlotScreenFooter  = "screen.footer"
 
 	// Home screen (rendered by the ui/home module).

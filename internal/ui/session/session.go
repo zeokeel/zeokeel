@@ -40,6 +40,7 @@ import (
 	"github.com/zeokeel/zeokeel-kernel/module"
 
 	"github.com/zeokeel/zeokeel/internal/contracts"
+	"github.com/zeokeel/zeokeel/internal/design"
 	"github.com/zeokeel/zeokeel/internal/uikit"
 )
 
@@ -136,10 +137,11 @@ type state struct {
 	mentionSel       int
 	mentionDismissed string
 
-	// expandedActions is the message whose rating actions the ⋯ entry unfolded.
-	// usageOpen holds the expanded usage details by message ID.
-	expandedActions string
-	usageOpen       map[string]bool
+	// processOpen holds the activity-band disclosures the reader expanded: a
+	// finished turn with tool calls folds its whole timeline (reasoning and
+	// compact tool rows) into one summary row by default. Prune keeps it bounded
+	// to the conversation on screen, like thinkOpen/toolOpen.
+	processOpen map[string]bool
 	// headerWidth is the header row's width from the last laid-out frame: when
 	// the conversation column gets narrow (e.g. the right inspector docks at
 	// 1024), the title must keep room and the goal chip drops its text.
@@ -288,13 +290,10 @@ type state struct {
 	// there instead of permanent header badges.
 	notifier contracts.Notifier
 
-	// copiedMessage is the assistant message whose copy action just ran; the
-	// row shows a check icon while it is the last one copied (transient state,
-	// never a resident badge). copiedAt starts the short confirmation window:
-	// the check falls back to the copy glyph after copiedFeedbackDuration and a
-	// session switch clears it (stale feedback never follows the user).
-	copiedMessage string
-	copiedAt      time.Time
+	// actionErrMessage is the message whose message-actions write (feedback)
+	// failed, so the error line shows under that message's meta row only and a
+	// conversation switch drops it.
+	actionErrMessage string
 
 	// queuedPrompts holds, per session ID, the prompts submitted while a turn
 	// was running (only when ui.sendWhileRunning is on). The queue belongs to
@@ -451,7 +450,7 @@ func Module() *module.Descriptor[Config] {
 			notifier:      notifier,
 			thinkOpen:     make(map[string]bool),
 			toolOpen:      make(map[string]bool),
-			usageOpen:     make(map[string]bool),
+			processOpen:   make(map[string]bool),
 			thumbnails:    make(map[string]*ui.Bitmap),
 			queuedPrompts: make(map[string][]string),
 			queuePaused:   make(map[string]bool),
@@ -547,6 +546,40 @@ func Module() *module.Descriptor[Config] {
 			})
 		}); err != nil {
 			return err
+		}
+		// The conversation's chrome lives in the host's B3 top band: the title and
+		// workspace (SlotScreenHeader), the running/team/actions entries
+		// (SlotScreenActions) and the Chat/Trajectory/Memory tabs (SlotScreenTabs).
+		// The item IDs are screen-namespaced so the host keeps them off the other
+		// screens. (The goal strip and the approval banner dock above the
+		// composer; the banner slot itself is rendered by buildScreen.)
+		screenSlots := []contracts.SlotItem{
+			{
+				Slot: contracts.SlotScreenHeader, ID: "session.title", Order: 10,
+				Build: func(c *ui.Context) {
+					buildScreenHeaderSlot(c, design.Of(c), moduleState, chat, config)
+				},
+			},
+			{
+				Slot: contracts.SlotScreenActions, ID: "session.actions", Order: 10,
+				Build: func(c *ui.Context) {
+					buildScreenActionsSlot(c, design.Of(c), runtime, moduleState, chat, config)
+				},
+			},
+			{
+				Slot: contracts.SlotScreenTabs, ID: "session.tabs", Order: 10,
+				Build: func(c *ui.Context) {
+					buildScreenTabsSlot(c, design.Of(c), config, moduleState)
+				},
+			},
+		}
+		for _, item := range screenSlots {
+			item := item
+			if err := own(ctx, func() (func(), error) {
+				return runtime.RegisterSlotItem(item)
+			}); err != nil {
+				return err
+			}
 		}
 		commands := newCommandRegistry(runtime, navigator, chat, config, moduleState)
 		if err := commands.start(); err != nil {

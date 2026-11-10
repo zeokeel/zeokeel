@@ -37,10 +37,10 @@ func containingLabels(tester *ui.Tester, text string) int {
 	return count
 }
 
-// TestCompactHeaderKeepsTitleAndGoalStatus covers N1: with the 1024 window and
-// the inspector open as a drawer, the conversation column is narrow, so the
-// title keeps a readable width and the goal chip shows only its status label
-// (the full goal text stays in the accessibility label/tooltip/popover).
+// TestCompactHeaderKeepsTitleAndGoalStatus covers the B3 header at a narrow
+// width: the session title stays in the host's top band and the goal body lives
+// in the strip above the composer on every width (no compact/short goal label
+// anymore; the goal is not part of the header).
 func TestCompactHeaderKeepsTitleAndGoalStatus(t *testing.T) {
 	product := newInteractionProduct(t)
 	tester := product.tester
@@ -51,9 +51,6 @@ func TestCompactHeaderKeepsTitleAndGoalStatus(t *testing.T) {
 	}
 	defer tracker.Clear()
 
-	// The official modal drawer overlays the content instead of narrowing it
-	// (docs/ui/overlays.md), so a compact header is produced by a narrower
-	// window, not by the drawer reserve of the old shell.
 	tester.SetSize(704, 720)
 	tester.Frame()
 	product.uiRoot.SetRightPanelOpen(true)
@@ -63,35 +60,42 @@ func TestCompactHeaderKeepsTitleAndGoalStatus(t *testing.T) {
 	if !product.uiRoot.RightPanelOpen() {
 		t.Fatalf("right inspector did not open as a drawer at 704x720")
 	}
-	if !tester.HasText("目标") {
-		t.Fatalf("compact header lacks the goal status label; texts = %v", tester.Texts())
-	}
-	// The compact chip's visible text is the status only; the full goal text
-	// survives solely in the accessibility label/tooltip.
-	if got := containingLabels(tester, goalText); got != 1 {
-		t.Fatalf("compact header shows the goal body (%d labels contain it, want 1 a11y label); texts = %v",
-			got, tester.Texts())
-	}
-	// The session title keeps a readable width (min 120 DIP) and stays visible.
+	// The title stays visible in the top band (no compact-only header path).
 	if !tester.HasText("键盘测试") {
-		t.Fatalf("compact header dropped the conversation title; texts = %v", tester.Texts())
+		t.Fatalf("narrow header dropped the conversation title; texts = %v", tester.Texts())
 	}
-
-	// Closing the drawer and widening the window gives the header room again:
-	// the chip shows the goal body. The header width comes from the previous
-	// frame, so let it re-measure.
+	// The goal status badge and the goal body live above the composer.
+	if !tester.HasText("目标") {
+		t.Fatalf("goal strip lacks the status badge; texts = %v", tester.Texts())
+	}
+	if got := containingLabels(tester, goalText); got < 1 {
+		t.Fatalf("goal strip does not show the goal body (%d labels); texts = %v", got, tester.Texts())
+	}
+	// No second, header-owned goal copy: the body appears once (the dock).
+	if got := containingLabels(tester, goalText); got > 1 {
+		t.Fatalf("goal body rendered %d times, want once in the composer dock", got)
+	}
+	// Closing the drawer first: at 704 it overlays the composer dock's right
+	// edge, so the ⋯ hit test would land on the drawer backdrop.
 	product.uiRoot.SetRightPanelOpen(false)
-	tester.SetSize(1280, 800)
-	deadline := time.Now().Add(2 * time.Second)
-	for time.Now().Before(deadline) && containingLabels(tester, goalText) < 2 {
-		tester.Frame()
-		time.Sleep(5 * time.Millisecond)
+	tester.Frame()
+	// The goal menu is the dock's ⋯ entry, not a header chip.
+	if err := tester.Click("目标操作"); err != nil {
+		t.Fatalf("open goal actions from the dock: %v; texts = %v", err, tester.Texts())
 	}
-	if got := containingLabels(tester, goalText); got < 2 {
-		t.Fatalf("wide header does not show the goal body again (%d labels); texts = %v", got, tester.Texts())
+	tester.Frame()
+	if !tester.HasText("删除目标记录") {
+		t.Fatalf("goal actions menu lacks the delete entry; texts = %v", tester.Texts())
 	}
+	tester.Key(0, ui.KeyEscape)
+	tester.Frame()
+
 	tester.SetSize(1280, 800)
 	tester.Frame()
+	tester.Frame()
+	if !tester.HasText("键盘测试") || containingLabels(tester, goalText) < 1 {
+		t.Fatalf("wide layout lost the title or the goal strip; texts = %v", tester.Texts())
+	}
 }
 
 // TestVeryNarrowComposerToolsMenu covers N2: at a very narrow composer the
@@ -129,7 +133,7 @@ func TestVeryNarrowComposerToolsMenu(t *testing.T) {
 	}
 	tester.Frame()
 	tester.Frame()
-	for _, want := range []string{"模型：", "打开模型设置…", "权限模式", "对话模式", "思考强度", "插入预设", "打开行为设置…"} {
+	for _, want := range []string{"模型：", "打开模型设置…", "权限模式", "对话模式", "推理等级", "插入预设", "打开行为设置…"} {
 		if !tester.HasText(want) {
 			t.Fatalf("会话设置 menu missing %q; texts = %v", want, tester.Texts())
 		}

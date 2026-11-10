@@ -133,7 +133,13 @@ func TestMemoryListSemanticsAndKeyboard(t *testing.T) {
 // --- model catalog ----------------------------------------------------------
 
 func TestModelCatalogListSemanticsAndKeyboard(t *testing.T) {
-	h := newHarness(t, &fakeChat{}, newFakeSettings(nil), settings.Config{})
+	store := newFakeSettings(map[string]string{
+		contracts.SettingModelCatalogModels: modelCatalogRow(t,
+			contracts.ModelInfo{ID: "deepseek-chat", Name: "DeepSeek Chat", BaseURL: "https://api.deepseek.com/v1"},
+			contracts.ModelInfo{ID: "deepseek-reasoner", Name: "DeepSeek Reasoner", BaseURL: "https://api.deepseek.com/v1"},
+		),
+	})
+	h := newHarness(t, &fakeChat{}, store, settings.Config{})
 	tester := h.tester()
 	tester.Frame()
 	h.click(tester, "模型")

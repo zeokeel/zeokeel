@@ -36,7 +36,7 @@ func TestExportJSONLFailureShowsOnePrefix(t *testing.T) {
 	h := newHarness(t, exportJSONLTestChat())
 	tester := h.tester()
 
-	h.click(tester, "更多")
+	openConversationActions(t, h, tester)
 	h.click(tester, "导出 JSONL")
 	tester.Frame()
 
@@ -67,7 +67,7 @@ func TestExportJSONLDialogTitleFollowsLocale(t *testing.T) {
 	// Direct JSONL export in English must localize the dialog title first.
 	h.ui.Locale().SetLanguage("en")
 	tester.Frame()
-	h.click(tester, "More")
+	openConversationActions(t, h, tester)
 	h.click(tester, "Export JSONL")
 	tester.Frame()
 	if captured != "Export conversation" {
@@ -77,7 +77,7 @@ func TestExportJSONLDialogTitleFollowsLocale(t *testing.T) {
 	// And back to Chinese on the next frame.
 	h.ui.Locale().SetLanguage("zh")
 	tester.Frame()
-	h.click(tester, "更多")
+	openConversationActions(t, h, tester)
 	h.click(tester, "导出 JSONL")
 	tester.Frame()
 	if captured != "导出会话" {

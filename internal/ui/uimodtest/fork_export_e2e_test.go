@@ -87,7 +87,7 @@ func TestSessionForkAndExportEndToEnd(t *testing.T) {
 	}
 	tester := ui.NewTester(uiRoot.View, 1280, 800)
 	tester.Frame()
-	if err := tester.Click("更多"); err != nil {
+	if err := tester.Click("会话操作"); err != nil {
 		t.Fatalf("open session actions: %v; texts = %v", err, tester.Texts())
 	}
 	tester.Frame()

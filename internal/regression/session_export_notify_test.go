@@ -59,9 +59,9 @@ func installExportSeams(t *testing.T, markdown, jsonl func(title, name, content 
 func clickExport(t *testing.T, harness *sessionToastHarness, item string) {
 	t.Helper()
 	// The overflow menu button is localized (更多 / More).
-	menu := "更多"
+	menu := "会话操作"
 	if err := harness.tester.Click(menu); err != nil {
-		menu = "More"
+		menu = "Conversation actions"
 		if err := harness.tester.Click(menu); err != nil {
 			t.Fatalf("open session actions: %v; texts = %v", err, harness.tester.Texts())
 		}

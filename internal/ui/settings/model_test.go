@@ -1,6 +1,9 @@
 package settings_test
 
-// TDD tests (RED first) for the model page's connection-check block.
+// Frame tests for the model dialogs' connection check: the check lives in the
+// add/edit model modal, runs against the draft Base URL/API key shown there
+// (the stored key stands in while its field is blank), never writes the store,
+// and is a seam (ModelListGetter) so the outcome can be scripted.
 
 import (
 	"context"
@@ -17,16 +20,6 @@ import (
 	"github.com/zeokeel/zeokeel/internal/contracts"
 	"github.com/zeokeel/zeokeel/internal/ui/settings"
 )
-
-// modelCheckHarness opens the settings model page with a scripted chat config.
-func modelCheckHarness(t *testing.T, store *fakeSettings, chat *fakeChat) *harness {
-	t.Helper()
-	h := newHarness(t, chat, store, settings.Config{})
-	tester := h.tester()
-	tester.Frame()
-	h.click(tester, "模型")
-	return h
-}
 
 // withModelListGetter replaces the model-list request seam for one test.
 func withModelListGetter(t *testing.T,
@@ -76,8 +69,15 @@ func waitModelCheckText(t *testing.T, h *harness, tester *ui.Tester, want string
 	}
 }
 
-func configuredStore() *fakeSettings {
+// configuredModelStore stores one model and makes it the default.
+func configuredModelStore(t *testing.T) *fakeSettings {
+	t.Helper()
 	return newFakeSettings(map[string]string{
+		contracts.SettingModelCatalogModels: modelCatalogRow(t,
+			contracts.ModelInfo{
+				ID: "deepseek-chat", Name: "DeepSeek Chat",
+				BaseURL: "https://api.example.com/v1", APIKey: "sk-test",
+			}),
 		contracts.SettingsChatModel:   "deepseek-chat",
 		contracts.SettingsChatBaseURL: "https://api.example.com/v1",
 		contracts.SettingsChatAPIKey:  "sk-test",
@@ -86,7 +86,7 @@ func configuredStore() *fakeSettings {
 
 // --- tests ------------------------------------------------------------------
 
-func TestModelCheckSuccess(t *testing.T) {
+func TestModelDialogCheckSuccessUsesStoredKeyAndSavesNothing(t *testing.T) {
 	var mu sync.Mutex
 	var gotURL, gotKey string
 	withModelListGetter(t, func(_ context.Context, baseURL, apiKey string) (int, []byte, error) {
@@ -95,58 +95,102 @@ func TestModelCheckSuccess(t *testing.T) {
 		mu.Unlock()
 		return 200, []byte(`{"data":[{"id":"model-a"},{"id":"model-b"}]}`), nil
 	})
-	h := modelCheckHarness(t, configuredStore(), &fakeChat{})
-	tester := h.tester()
-	h.assertTexts(tester, "连接检查", "测试当前输入", "https://api.example.com/v1", "deepseek-chat")
-	h.click(tester, "测试当前输入")
+	store := configuredModelStore(t)
+	h := newHarness(t, &fakeChat{}, store, settings.Config{})
+	tester := openModelPage(t, h)
+	openEditModal(t, h, tester, "deepseek-chat")
+
+	h.assertTexts(tester, "测试连接", "测试连接使用当前输入，不会保存。")
+	requireCheckButton(t, tester, "测试连接", false)
+	h.click(tester, "测试连接")
 	waitModelCheckText(t, h, tester, "连接正常")
-	// ZK-14: the success line carries the discovered models and the measured
-	// latency, bounded to one line.
+	// The success line carries the discovered models and the measured latency.
 	requireModelCheckDetail(t, tester, "2 个模型：model-a、model-b · ")
-	h.assertTexts(tester, "2 个模型", "model-a", "model-b")
 	mu.Lock()
 	defer mu.Unlock()
 	if gotURL != "https://api.example.com/v1" || gotKey != "sk-test" {
-		t.Fatalf("getter args = %q/%q", gotURL, gotKey)
+		t.Fatalf("getter args = %q/%q, want the stored connection", gotURL, gotKey)
+	}
+	if sets := store.setKeys(); len(sets) != 0 {
+		t.Fatalf("the connection check wrote the store: %v", sets)
 	}
 }
 
-func TestModelCheckHTTPFailure(t *testing.T) {
+func TestModelDialogCheckUsesTypedDraft(t *testing.T) {
+	var mu sync.Mutex
+	var gotURL, gotKey string
+	withModelListGetter(t, func(_ context.Context, baseURL, apiKey string) (int, []byte, error) {
+		mu.Lock()
+		gotURL, gotKey = baseURL, apiKey
+		mu.Unlock()
+		return 200, nil, nil
+	})
+	store := configuredModelStore(t)
+	h := newHarness(t, &fakeChat{}, store, settings.Config{})
+	tester := openModelPage(t, h)
+	openEditModal(t, h, tester, "deepseek-chat")
+	clearAndType(t, h, tester, "Base URL 输入", "https://draft.example/v1")
+	clearAndType(t, h, tester, "API Key 输入", "sk-draft")
+	h.click(tester, "测试连接")
+	waitModelCheckText(t, h, tester, "连接正常")
+	mu.Lock()
+	defer mu.Unlock()
+	if gotURL != "https://draft.example/v1" || gotKey != "sk-draft" {
+		t.Fatalf("getter args = %q/%q, want the typed draft", gotURL, gotKey)
+	}
+	// The check persisted nothing (the draft is still uncommitted).
+	if got := store.get(contracts.SettingsChatBaseURL); got != "https://api.example.com/v1" {
+		t.Fatalf("the check saved the draft: %q", got)
+	}
+}
+
+func TestModelDialogCheckHTTPFailure(t *testing.T) {
 	withModelListGetter(t, func(context.Context, string, string) (int, []byte, error) {
 		return 500, []byte("boom"), nil
 	})
-	h := modelCheckHarness(t, configuredStore(), &fakeChat{})
-	tester := h.tester()
-	h.click(tester, "测试当前输入")
+	h := newHarness(t, &fakeChat{}, configuredModelStore(t), settings.Config{})
+	tester := openModelPage(t, h)
+	openEditModal(t, h, tester, "deepseek-chat")
+	h.click(tester, "测试连接")
 	waitModelCheckText(t, h, tester, "连接失败：HTTP 500")
 }
 
-func TestModelCheckNetworkError(t *testing.T) {
+func TestModelDialogCheckNetworkError(t *testing.T) {
 	withModelListGetter(t, func(context.Context, string, string) (int, []byte, error) {
 		return 0, nil, errors.New("dial tcp: connection refused")
 	})
-	h := modelCheckHarness(t, configuredStore(), &fakeChat{})
-	tester := h.tester()
-	h.click(tester, "测试当前输入")
+	h := newHarness(t, &fakeChat{}, configuredModelStore(t), settings.Config{})
+	tester := openModelPage(t, h)
+	openEditModal(t, h, tester, "deepseek-chat")
+	h.click(tester, "测试连接")
 	waitModelCheckText(t, h, tester, "连接失败：dial tcp: connection refused")
 }
 
-func TestModelCheckWithoutBaseURL(t *testing.T) {
+func TestModelDialogCheckDisabledWithoutBaseURL(t *testing.T) {
 	called := atomic.Int32{}
 	withModelListGetter(t, func(context.Context, string, string) (int, []byte, error) {
 		called.Add(1)
 		return 200, nil, nil
 	})
-	h := modelCheckHarness(t, newFakeSettings(nil), &fakeChat{})
-	tester := h.tester()
-	h.assertTexts(tester, "尚未配置服务地址")
-	h.click(tester, "测试当前输入")
+	h := newHarness(t, &fakeChat{}, newFakeSettings(nil), settings.Config{})
+	tester := openModelPage(t, h)
+	openAddModal(t, h, tester)
+	// A new model's endpoint is empty until the provider selector fills it.
+	requireCheckButton(t, tester, "测试连接", true)
+	h.assertTexts(tester, "填写 Base URL 后可测试连接。")
+	h.click(tester, "测试连接")
+	tester.Frame()
 	if called.Load() != 0 {
 		t.Fatalf("disabled check called the getter %d times", called.Load())
 	}
+	// Choosing a provider fills the endpoint and enables the check.
+	h.click(tester, "服务商菜单")
+	h.click(tester, "DeepSeek")
+	tester.Frame()
+	requireCheckButton(t, tester, "测试连接", false)
 }
 
-func TestModelCheckIgnoresRepeatedClicks(t *testing.T) {
+func TestModelDialogCheckIgnoresRepeatedClicks(t *testing.T) {
 	var calls atomic.Int32
 	release := make(chan struct{})
 	withModelListGetter(t, func(context.Context, string, string) (int, []byte, error) {
@@ -154,14 +198,15 @@ func TestModelCheckIgnoresRepeatedClicks(t *testing.T) {
 		<-release
 		return 200, []byte(`{"data":[{"id":"a"}]}`), nil
 	})
-	h := modelCheckHarness(t, configuredStore(), &fakeChat{})
-	tester := h.tester()
-	h.click(tester, "测试当前输入")
+	h := newHarness(t, &fakeChat{}, configuredModelStore(t), settings.Config{})
+	tester := openModelPage(t, h)
+	openEditModal(t, h, tester, "deepseek-chat")
+	h.click(tester, "测试连接")
 	tester.Frame()
-	h.assertTexts(tester, "检查中…")
 	// The busy state is the official spinner, and the action is disabled.
-	requireBusySpinner(t, tester, "检查中…")
-	h.click(tester, "检查中…")
+	h.assertTexts(tester, "测试中…")
+	requireBusySpinner(t, tester, "测试中…")
+	h.click(tester, "测试中…")
 	tester.Frame()
 	if calls.Load() != 1 {
 		t.Fatalf("getter calls = %d, want 1 while checking", calls.Load())
@@ -170,54 +215,45 @@ func TestModelCheckIgnoresRepeatedClicks(t *testing.T) {
 	waitModelCheckText(t, h, tester, "连接正常")
 }
 
-func TestModelCheckEnglishCopy(t *testing.T) {
+func TestModelDialogCheckEnglishCopy(t *testing.T) {
 	withModelListGetter(t, func(context.Context, string, string) (int, []byte, error) {
 		return 200, []byte(`{"data":[{"id":"a"}]}`), nil
 	})
-	h := modelCheckHarness(t, configuredStore(), &fakeChat{})
+	h := newLocaleHarness(t, &fakeChat{}, newFakeSettings(nil), settings.Config{}, "en")
 	tester := h.tester()
-	h.uiRoot.Locale().SetLanguage("en")
 	tester.Frame()
-	h.assertTexts(tester, "Connection check", "Test current input", "Current",
-		"https://api.example.com/v1", "deepseek-chat")
-	h.click(tester, "Test current input")
+	h.click(tester, "Model")
+	tester.Frame()
+	h.click(tester, "Add model")
+	tester.Frame()
+	h.assertTexts(tester, "Test connection", "The connection test uses the current input and saves nothing.")
+	h.click(tester, "Provider menu")
+	h.click(tester, "DeepSeek")
+	tester.Frame()
+	h.click(tester, "Test connection")
 	waitModelCheckText(t, h, tester, "Connection OK")
 	requireModelCheckDetail(t, tester, "1 model: a · ")
-	h.assertTexts(tester, "1 model")
-
-	// The unconfigured state is translated too.
-	h2 := modelCheckHarness(t, newFakeSettings(nil), &fakeChat{})
-	tester2 := h2.tester()
-	h2.uiRoot.Locale().SetLanguage("en")
-	tester2.Frame()
-	h2.assertTexts(tester2, "No service URL configured")
+	// The Chinese status copy never leaks into the English frame.
+	if strings.Contains(strings.Join(tester.Texts(), "\n"), "连接正常") {
+		t.Fatal("English frame shows the Chinese check result")
+	}
 }
 
-func TestModelCheckUsesChatConfigFallback(t *testing.T) {
-	withModelListGetter(t, func(_ context.Context, baseURL, apiKey string) (int, []byte, error) {
-		if baseURL != "https://fallback.example/v1" || apiKey != "sk-fallback" {
-			return 0, nil, errors.New("unexpected fallback config: " + baseURL + "/" + apiKey)
-		}
-		return 200, nil, nil
-	})
-	chat := &fakeChat{config: contracts.ChatConfig{
-		Model: "fallback-model", BaseURL: "https://fallback.example/v1", APIKey: "sk-fallback",
-	}}
-	h := modelCheckHarness(t, newFakeSettings(nil), chat)
-	tester := h.tester()
-	h.click(tester, "测试当前输入")
-	waitModelCheckText(t, h, tester, "连接正常")
-}
-
-func TestModelCheckStatusTextsAreLocalized(t *testing.T) {
+func TestModelDialogCheckResultStaysInItsDialog(t *testing.T) {
 	withModelListGetter(t, func(context.Context, string, string) (int, []byte, error) {
 		return 200, nil, nil
 	})
-	h := modelCheckHarness(t, configuredStore(), &fakeChat{})
-	tester := h.tester()
-	h.click(tester, "测试当前输入")
+	h := newHarness(t, &fakeChat{}, configuredModelStore(t), settings.Config{})
+	tester := openModelPage(t, h)
+
+	// A completed check in the editor does not leak into the next dialog.
+	openEditModal(t, h, tester, "deepseek-chat")
+	h.click(tester, "测试连接")
 	waitModelCheckText(t, h, tester, "连接正常")
-	if strings.Contains(strings.Join(tester.Texts(), "\n"), "Connection OK") {
-		t.Fatal("Chinese frame shows the English result")
-	}
+	h.click(tester, "取消")
+	tester.Frame()
+	h.assertNoTexts(tester, "连接正常")
+
+	openEditModal(t, h, tester, "deepseek-chat")
+	h.assertNoTexts(tester, "连接正常")
 }

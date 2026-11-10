@@ -174,7 +174,7 @@ func TestJSONLExportIncludesFeedback(t *testing.T) {
 	})
 	h := newHarness(t, chat)
 	tester := h.tester()
-	h.click(tester, "更多")
+	openConversationActions(t, h, tester)
 	h.click(tester, "导出 JSONL")
 	tester.Frame()
 	lines := strings.Split(strings.TrimSpace(content), "\n")
@@ -212,7 +212,7 @@ func TestMarkdownExportIncludesFeedback(t *testing.T) {
 	})
 	h := newHarness(t, feedbackExportChat())
 	tester := h.tester()
-	h.click(tester, "更多")
+	openConversationActions(t, h, tester)
 	h.click(tester, "导出 Markdown")
 	if !strings.Contains(content, "> 用户反馈：有帮助") || !strings.Contains(content, "> 用户反馈：没帮助") {
 		t.Fatalf("Markdown feedback lines missing:\n%s", content)
@@ -224,7 +224,7 @@ func TestMarkdownExportIncludesFeedback(t *testing.T) {
 	// English export uses the English feedback copy.
 	h.ui.Locale().SetLanguage("en")
 	tester.Frame()
-	h.click(tester, "More")
+	openConversationActions(t, h, tester)
 	h.click(tester, "Export Markdown")
 	if !strings.Contains(content, "> User feedback: Helpful") || !strings.Contains(content, "> User feedback: Not helpful") {
 		t.Fatalf("English Markdown feedback lines missing:\n%s", content)

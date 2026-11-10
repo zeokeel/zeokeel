@@ -10,7 +10,6 @@ package session_test
 import (
 	"errors"
 	"testing"
-	"time"
 
 	"github.com/egoist/mygo/ui"
 
@@ -118,69 +117,59 @@ func TestCmdPeriodCancelsRunningTurn(t *testing.T) {
 	}
 }
 
-// TestStreamingMessageHidesActions covers S-11: a streaming reply has no copy or
-// rating actions; they appear once the turn is finished.
+// TestStreamingMessageHidesActions covers S-11: a streaming reply has no meta
+// row at all (no time, no usage summary, no ⋯ actions); they appear once the
+// turn is finished.
 func TestStreamingMessageHidesActions(t *testing.T) {
 	chat := newFakeChat()
 	chat.addSession(contracts.ChatSession{
 		ID: "sess-1", Title: "流式", Running: true,
 		Messages: []contracts.ChatMessage{
-			{ID: "m1", Role: contracts.ChatRoleUser, Text: "写个函数"},
-			{ID: "m2", Role: contracts.ChatRoleAssistant, Text: "正在写", Streaming: true},
+			{ID: "m2", Role: contracts.ChatRoleAssistant, Text: "正在写", Streaming: true,
+				Usage: &contracts.MessageUsage{DurationMS: 1000, TotalTokens: 100}},
 		},
 	}, true)
 	h := newHarness(t, chat)
 	tester := h.tester()
-	if _, ok := tester.Find("复制消息"); ok {
-		t.Fatalf("copy action shown on a streaming reply; texts = %v", tester.Texts())
-	}
 	if _, ok := tester.Find("消息操作"); ok {
-		t.Fatalf("rating entry shown on a streaming reply; texts = %v", tester.Texts())
+		t.Fatalf("message-actions entry shown on a streaming reply; texts = %v", tester.Texts())
 	}
+	h.assertNoTexts(tester, "用时 1.0s", "100 tokens")
 
 	chat.updateSession(contracts.ChatSession{
 		ID: "sess-1", Title: "流式", Running: false,
 		Messages: []contracts.ChatMessage{
-			{ID: "m1", Role: contracts.ChatRoleUser, Text: "写个函数"},
 			{ID: "m2", Role: contracts.ChatRoleAssistant, Text: "写好了"},
 		},
 	})
 	tester.Frame()
+	h.assertTexts(tester, "消息操作")
+	h.click(tester, "消息操作")
 	h.assertTexts(tester, "复制消息")
 }
 
-// TestCopyFeedbackResets covers S-15: the copy confirmation is transient (about
-// two seconds) and the action target is at least 32x32 while the glyph stays
-// small.
-func TestCopyFeedbackResets(t *testing.T) {
+// TestCopyWritesClipboardAndToasts covers the compact meta row's copy action:
+// choosing 复制消息 in the ⋯ menu writes the native clipboard and raises the
+// transient 已复制 toast instead of a resident check state.
+func TestCopyWritesClipboardAndToasts(t *testing.T) {
+	notifier := &fakeSessionNotifier{}
 	chat := newFakeChat()
 	chat.addSession(contracts.ChatSession{
 		ID: "sess-1", Title: "复制",
 		Messages: []contracts.ChatMessage{
-			{ID: "m1", Role: contracts.ChatRoleUser, Text: "问题"},
 			{ID: "m2", Role: contracts.ChatRoleAssistant, Text: "回答"},
 		},
 	}, true)
-	h := newHarness(t, chat)
+	h := newToastHarness(t, chat, notifier)
 	tester := h.tester()
-	rect, ok := tester.Find("复制消息")
-	if !ok {
-		t.Fatalf("copy action missing; texts = %v", tester.Texts())
-	}
-	if rect.W < 32 || rect.H < 32 {
-		t.Fatalf("copy target = %.0fx%.0f, want at least 32x32", rect.W, rect.H)
-	}
+	h.click(tester, "消息操作")
 	h.click(tester, "复制消息")
 	if got := tester.Clipboard(); got != "回答" {
 		t.Fatalf("clipboard = %q, want the assistant text", got)
 	}
-	if info, ok := tester.Access("复制消息"); !ok || info.Description != "已复制" {
-		t.Fatalf("copied confirmation = %+v found %v, want 已复制", info, ok)
-	}
-	tester.Advance(2 * time.Second)
-	tester.Frame()
-	if info, ok := tester.Access("复制消息"); !ok || info.Description == "已复制" {
-		t.Fatalf("copy confirmation did not reset: %+v found %v", info, ok)
+	toasts := notifier.toasts()
+	if len(toasts) != 1 || toasts[0].text != "已复制" {
+		t.Fatalf("copy toasts = %+v, want one 已复制", toasts)
 	}
 }
 
@@ -192,13 +181,13 @@ func TestSessionErrorsClearedOnSwitch(t *testing.T) {
 	chat.addSession(contracts.ChatSession{
 		ID: "sess-1", Title: "A",
 		Messages: []contracts.ChatMessage{
-			{ID: "m1", Role: contracts.ChatRoleUser, Text: "问题"},
 			{ID: "m2", Role: contracts.ChatRoleAssistant, Text: "回答"},
 		},
 	}, true)
 	chat.addSession(contracts.ChatSession{ID: "sess-2", Title: "B"}, false)
 	h := newCommandHarness(t, chat)
 	tester := h.tester()
+	h.click(tester, "消息操作")
 	h.click(tester, "重新生成")
 	h.assertTexts(tester, "重新生成失败：backend unavailable")
 

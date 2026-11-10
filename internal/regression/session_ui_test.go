@@ -105,7 +105,7 @@ func (sh *sessionHarness) installExportSeam(t *testing.T, resultErr error) *stri
 // exportJSONL clicks the header overflow menu and its Export JSONL item.
 func (sh *sessionHarness) exportJSONL(t *testing.T) {
 	t.Helper()
-	if err := sh.tester.Click("更多"); err != nil {
+	if err := sh.tester.Click("会话操作"); err != nil {
 		t.Fatalf("open session actions: %v; texts = %v", err, sh.tester.Texts())
 	}
 	sh.tester.Frame()
@@ -234,7 +234,7 @@ func TestSessionExportJSONLCancelAndError(t *testing.T) {
 	// Cancelled save: the seam returns ("", nil). No badge, no error.
 	original := sessionui.ExportJSONLSaver
 	sessionui.ExportJSONLSaver = func(string, string, string) (string, error) { return "", nil }
-	if err := harness.tester.Click("更多"); err != nil {
+	if err := harness.tester.Click("会话操作"); err != nil {
 		t.Fatalf("open actions: %v", err)
 	}
 	harness.tester.Frame()
@@ -252,7 +252,7 @@ func TestSessionExportJSONLCancelAndError(t *testing.T) {
 	sessionui.ExportJSONLSaver = func(string, string, string) (string, error) {
 		return "", errors.New("disk full")
 	}
-	if err := harness.tester.Click("更多"); err != nil {
+	if err := harness.tester.Click("会话操作"); err != nil {
 		t.Fatalf("open actions: %v", err)
 	}
 	harness.tester.Frame()
@@ -380,9 +380,9 @@ func TestSessionGoalChipEmptyText(t *testing.T) {
 	requireExactText(t, tester, "目标")
 	requireHasText(t, tester, "ship the audit")
 
-	// Clearing through the header calls the host tracker: the chip's popover
+	// Clearing through the goal strip above the composer calls the host tracker:
 	// carries the action, which confirms first.
-	if err := tester.Click("目标"); err != nil {
+	if err := tester.Click("目标操作"); err != nil {
 		t.Fatalf("open goal menu: %v; texts = %v", err, tester.Texts())
 	}
 	tester.Frame()
@@ -420,8 +420,8 @@ func TestSessionExportJSONLDialogTitleFollowsLocale(t *testing.T) {
 
 	harness.h.ui.Locale().SetLanguage("en")
 	harness.tester.Frame()
-	// In English the overflow menu is "More" and the item "Export JSONL".
-	if err := harness.tester.Click("More"); err != nil {
+	// In English the overflow menu is "Conversation actions" and the item "Export JSONL".
+	if err := harness.tester.Click("Conversation actions"); err != nil {
 		t.Fatalf("open session actions: %v; texts = %v", err, harness.tester.Texts())
 	}
 	harness.tester.Frame()
@@ -436,7 +436,7 @@ func TestSessionExportJSONLDialogTitleFollowsLocale(t *testing.T) {
 	// A language switch on the next frame localizes the next invocation too.
 	harness.h.ui.Locale().SetLanguage("zh")
 	harness.tester.Frame()
-	if err := harness.tester.Click("更多"); err != nil {
+	if err := harness.tester.Click("会话操作"); err != nil {
 		t.Fatalf("open session actions: %v", err)
 	}
 	harness.tester.Frame()

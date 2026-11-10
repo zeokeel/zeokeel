@@ -54,10 +54,12 @@ func TestSettingsEnglishPagesAndLanguageSwitch(t *testing.T) {
 	h.click(tester, "Advanced")
 	h.assertTexts(tester, "Diagnostics", "Update", "Import", "Notifications", "Archived")
 
-	// Model page.
+	// Model page: the model list is the only model surface; the footer Save
+	// owns only the prompt/runtime drafts.
 	h.click(tester, "Model")
-	h.assertTexts(tester, "Model", "Quick presets", "Connection", "Prompt",
-		"Base URL", "API Key", "System prompt", "Save", "Not configured")
+	h.assertTexts(tester, "Model", "Models", "Add model", "Prompt",
+		"System prompt", "Save", "Default model", "Not configured",
+		"No models yet")
 
 	// Appearance page.
 	h.click(tester, "Appearance")
@@ -90,7 +92,7 @@ func TestSettingsEnglishPagesAndLanguageSwitch(t *testing.T) {
 		"外观", "技能", "快捷键", "集成", "MCP", "搜索", "网络", "高级")
 	h.assertNoTexts(tester, "Settings", "Providers", "Appearance", "Shortcuts", "Diagnostics")
 	h.click(tester, "模型")
-	h.assertTexts(tester, "快速预设", "连接", "提示词", "保存")
+	h.assertTexts(tester, "模型列表", "添加模型", "提示词", "保存", "还没有模型")
 }
 
 // TestSettingsEnglishConfigOverrides pins that explicit assembly labels still
@@ -98,9 +100,6 @@ func TestSettingsEnglishPagesAndLanguageSwitch(t *testing.T) {
 func TestSettingsEnglishConfigOverrides(t *testing.T) {
 	h := newLocaleHarness(t, &fakeChat{}, newFakeSettings(nil), settings.Config{
 		Title:             "Custom model",
-		ModelLabel:        "Model name",
-		BaseURLLabel:      "Endpoint",
-		APIKeyLabel:       "Secret",
 		SystemPromptLabel: "Instructions",
 		SaveLabel:         "Commit",
 		AppearanceTitle:   "Look",
@@ -108,7 +107,7 @@ func TestSettingsEnglishConfigOverrides(t *testing.T) {
 	tester := h.tester()
 	tester.Frame()
 	h.click(tester, "Custom model")
-	h.assertTexts(tester, "Custom model", "Model name", "Endpoint", "Secret", "Instructions", "Commit")
+	h.assertTexts(tester, "Custom model", "Instructions", "Commit")
 	h.click(tester, "Look")
 	h.assertTexts(tester, "Look", "Theme", "Interface language")
 }

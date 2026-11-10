@@ -50,6 +50,16 @@ type ReasoningTraceOptions struct {
 	// desktop's chat-font-size setting caches one (see ReasoningMarkdown). Nil
 	// builds the entry's muted default from the current tokens.
 	Markdown *markdown.Options
+	// InlineChevron puts the disclosure chevron right after the trigger's label
+	// and line count (one Space2 gap) instead of the line's far end, so a
+	// transcript activity band reads as one compact left-aligned row. The
+	// default false keeps the wide row's far-end chevron for other callers.
+	InlineChevron bool
+	// MarkerColumn puts the type glyph (the spinner while thinking) in a fixed
+	// 16 DIP column at the start of the trigger line, so every row of a
+	// transcript activity band starts its copy on the same x. It is the band's
+	// marker column; the default false keeps the old inline glyph.
+	MarkerColumn bool
 }
 
 // ReasoningTrace draws one reasoning disclosure (ui.CollapsibleBase): the whole
@@ -86,7 +96,29 @@ func ReasoningTrace(c *ui.Context, o ReasoningTraceOptions) {
 		trigger.Background(t.BgHover)
 	}
 	trigger.Children(func() {
-		if o.Streaming {
+		if o.MarkerColumn {
+			// The band's fixed marker column: the type glyph (or the official
+			// spinner while the model thinks) at a constant x, muted so it never
+			// competes with the reply prose.
+			ui.Row(c).Width(design.Space4).Shrink(0).Justify(ui.Center).Children(func() {
+				if o.Streaming {
+					ui.Spinner(c).Label(T(o.Locale, "思考中", "Thinking")).
+						Size(design.Space3, design.Space3).TextColor(t.LabelTertiary)
+					return
+				}
+				ui.Icon(c, icons.Sparkles()).Size(design.Space4, design.Space4).
+					TextColor(t.LabelTertiary)
+			})
+			design.Apply(ui.Text(c, label), t.Font(design.TypeXXS)).
+				TextColor(t.LabelSecondary)
+			if !o.Streaming {
+				if lines := ReasoningLineCount(o.Reasoning); lines > 1 {
+					design.Apply(ui.Text(c, fmt.Sprintf(
+						T(o.Locale, "%d 行", "%d lines"), lines)), t.Font(design.TypeXXXS)).
+						TextColor(t.LabelTertiary)
+				}
+			}
+		} else if o.Streaming {
 			ui.Spinner(c).Label(T(o.Locale, "思考中", "Thinking")).
 				Size(design.Space3, design.Space3).TextColor(t.LabelTertiary)
 			design.Apply(ui.Text(c, label), t.Font(design.TypeXXS)).
@@ -102,9 +134,19 @@ func ReasoningTrace(c *ui.Context, o ReasoningTraceOptions) {
 					TextColor(t.LabelTertiary)
 			}
 		}
+		chevron := func() {
+			ui.Icon(c, icons.ChevronRight()).Size(design.Space3, design.Space3).
+				TextColor(t.LabelTertiary).Rotate(90 * parts.Progress())
+		}
+		if o.InlineChevron {
+			// The chevron sits right after the label/line count (the row gap is
+			// the 8 DIP spacing) and the spacer takes the rest of the line.
+			chevron()
+			ui.Spacer(c).Grow(1)
+			return
+		}
 		ui.Spacer(c).Grow(1)
-		ui.Icon(c, icons.ChevronRight()).Size(design.Space3, design.Space3).
-			TextColor(t.LabelTertiary).Rotate(90 * parts.Progress())
+		chevron()
 	})
 	parts.Panel(func() {
 		// The thinking body sits under the trigger's text (past the glyph), as a

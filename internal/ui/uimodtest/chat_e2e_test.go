@@ -96,10 +96,13 @@ func TestDesktopChatPipelineEndToEnd(t *testing.T) {
 		t.Fatalf("click model settings page: %v; texts = %v", err, tester.Texts())
 	}
 	tester.Frame()
-	for _, want := range []string{"Base URL", "API Key", "系统提示词", "保存"} {
+	for _, want := range []string{"模型列表", "添加模型", "系统提示词", "保存"} {
 		if !tester.HasText(want) {
 			t.Fatalf("model settings page does not show %q; texts = %v", want, tester.Texts())
 		}
+	}
+	if tester.HasText("快速预设") || tester.HasText("连接检查") {
+		t.Fatalf("model settings page still shows the removed preset/connection sections")
 	}
 	if err := tester.Click("外观"); err != nil {
 		t.Fatalf("click appearance page: %v; texts = %v", err, tester.Texts())

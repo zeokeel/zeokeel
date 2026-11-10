@@ -1,10 +1,10 @@
 package approval_test
 
-// Conformance frame tests for the v0.8.3 DialogFooter migration of the approval
-// dialog: the footer is the product's one action bar and it deliberately has NO
-// default action — nothing is auto-focused, so a stray Enter (the user often
-// presses it right after sending a prompt) decides nothing. Esc remains the
-// explicit deny shortcut.
+// Conformance frame tests for the inline approval card footer: the footer is the
+// product's one action bar and it deliberately has NO default action — nothing
+// is auto-focused, so a stray Enter (the user often presses it right after
+// sending a prompt) decides nothing. The session screen owns Escape; the module
+// itself resolves only explicit button clicks.
 
 import (
 	"testing"
@@ -16,14 +16,14 @@ import (
 )
 
 // TestApprovalFooterHasNoDefaultAction pins the safe-decision contract across
-// consecutive requests: the footer is keyed by request, each new dialog renders
-// fresh buttons, no button is auto-focused and Enter alone never resolves.
+// consecutive requests: each new card renders fresh buttons, no button is
+// auto-focused and Enter alone never resolves.
 func TestApprovalFooterHasNoDefaultAction(t *testing.T) {
 	h := newHarness(t, approval.Config{})
 	tester := h.tester()
 
 	h.approvals.add(pendingRequest("r1", "bash", "第一个", `{"command":"ls"}`))
-	tester.Frame()
+	h.frames(tester, 2)
 	if tester.Focused("拒绝") || tester.Focused("允许") || tester.Focused("本会话内始终允许") {
 		t.Fatalf("first request: an action was auto-focused; texts = %v", tester.Texts())
 	}
@@ -40,7 +40,7 @@ func TestApprovalFooterHasNoDefaultAction(t *testing.T) {
 
 	// The next request renders its own footer with the same no-default rule.
 	h.approvals.add(pendingRequest("r2", "write_file", "第二个", `{"path":"x"}`))
-	tester.Frame()
+	h.frames(tester, 2)
 	h.assertTexts(tester, "第二个")
 	if tester.Focused("拒绝") || tester.Focused("允许") {
 		t.Fatalf("second request: an action was auto-focused; texts = %v", tester.Texts())

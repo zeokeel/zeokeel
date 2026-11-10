@@ -289,44 +289,55 @@ func CloneRequestParams(params map[string]any) map[string]any {
 	return out
 }
 
-// SessionThinkingSettingKey stores the selected thinking-mode ID for one
-// conversation. Empty/absent follows the model's default mode.
+// SessionThinkingSettingKey is the LEGACY per-conversation thinking-mode key
+// used before thinking strength became per model. New selections are stored with
+// SessionModelThinkingSettingKey; this row is only read as a fallback for
+// conversations created by an older version, and is cleared as soon as the user
+// picks a strength in that conversation.
 func SessionThinkingSettingKey(sessionID string) string {
 	return "session." + strings.TrimSpace(sessionID) + ".thinking"
 }
 
-// DefaultModelCatalog returns the built-in model presets shipped with the
-// product; both the model catalog module and the settings editor use it so the
-// defaults cannot drift apart.
-func DefaultModelCatalog() []ModelInfo {
-	return []ModelInfo{
-		{ID: "deepseek-chat", Name: "DeepSeek Chat", Note: "通用对话", ContextWindow: 128000,
-			Family: ModelFamilyDeepSeek},
-		{ID: "deepseek-reasoner", Name: "DeepSeek Reasoner", Note: "深度推理", ContextWindow: 128000,
-			Family: ModelFamilyDeepSeek, DefaultThinking: ThinkingModeReasoningHigh},
+// SessionModelThinkingSettingKey stores the selected thinking-mode ID for one
+// conversation and one model. Thinking strength belongs to the model: every
+// model keeps its own conversation override, so switching models never carries
+// another model's override over, and an empty/absent row follows the model's own
+// DefaultThinking.
+func SessionModelThinkingSettingKey(sessionID, modelID string) string {
+	sessionID = strings.TrimSpace(sessionID)
+	modelID = strings.TrimSpace(modelID)
+	if sessionID == "" || modelID == "" {
+		return ""
 	}
+	return "session." + sessionID + ".thinking." + modelID
 }
 
-// FindModelInfo finds one model by ID (trimmed, case-insensitive).
-func FindModelInfo(models []ModelInfo, id string) (ModelInfo, bool) {
-	id = strings.ToLower(strings.TrimSpace(id))
-	if id == "" {
-		return ModelInfo{}, false
+// SessionThinkingOverride resolves the thinking-mode ID explicitly selected for
+// one conversation and model: the per-model row first, then the legacy
+// session-wide row (old conversations). Empty means "follow the model default".
+func SessionThinkingOverride(settings SettingsService, sessionID, modelID string) string {
+	if settings == nil {
+		return ""
 	}
-	for _, model := range models {
-		if strings.ToLower(strings.TrimSpace(model.ID)) == id {
-			return model, true
+	if key := SessionModelThinkingSettingKey(sessionID, modelID); key != "" {
+		if mode := strings.TrimSpace(settings.Get(key, "")); mode != "" {
+			return mode
 		}
 	}
-	return ModelInfo{}, false
+	return strings.TrimSpace(settings.Get(SessionThinkingSettingKey(sessionID), ""))
 }
 
-// ResolveModelInfo finds the configured model entry for modelID; an unknown
-// model gets a synthesized entry with an inferred family so old/custom models
-// still offer the generic reasoning-effort modes.
-func ResolveModelInfo(models []ModelInfo, modelID string) ModelInfo {
-	if model, ok := FindModelInfo(models, modelID); ok {
-		return model
+// SessionThinkingOverrideKeys lists the settings rows that carry a
+// conversation's thinking override for one model, most specific first: the
+// per-model row, the legacy session-wide thinking row and the legacy per-session
+// reasoning-effort row. Writing a selection or "follow the model default" clears
+// every row, so a legacy value can never leak into the per-model state (a
+// conversation-wide strength applying to every model).
+func SessionThinkingOverrideKeys(sessionID, modelID string) []string {
+	keys := make([]string, 0, 3)
+	if key := SessionModelThinkingSettingKey(sessionID, modelID); key != "" {
+		keys = append(keys, key)
 	}
-	return ModelInfo{ID: strings.TrimSpace(modelID), Family: InferThinkingFamily(modelID)}
+	keys = append(keys, SessionThinkingSettingKey(sessionID), SessionEffortSettingKey(sessionID))
+	return keys
 }

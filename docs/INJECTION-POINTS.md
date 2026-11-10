@@ -40,8 +40,15 @@ assembly 内同时要求 `zeokeel/ui` 与 `zeokeel/appinfo` 两个服务，因�
 | about | SlotItem | `about.header` | 10 | `settings.header`（设置页头，所有设置页可见） |
 
 `docs/ARCHITECTURE.md` §5 的保留槽位由宿主渲染：`sidebar.*`、`screen.*`、
-`settings.*`、`overlay.*`；本壳层没有顶栏区域（全局动作在内容顶部 Toolbar/命令面板），
-模块不要注册 `topbar.*`；`home.*` 由 home 模块渲染（含默认空态），`session.*` 等后续模块接管。
+`settings.*`、`overlay.*`。**B3 顶层 header**（2026-11-10）：当前屏向
+`screen.header` / `screen.actions` / `screen.tabs` 贡献时，宿主在内容区顶部渲染一块
+浅色 band（40px 标题行 = 标题/工作区(TypeM 16px) + 屏幕动作 + palette + inspector；可选 32px Tabs 行；
+仅底边一条 hairline、行间无线、无返回按钮/无 `Alt+←`）；没有贡献的屏幕不渲染顶部工具栏。
+屏幕级槽位的 item ID 以已注册 screen ID 为前缀时只在该屏渲染（`session.title` /
+`session.actions` / `session.tabs`），避免会话 chrome 泄漏到其它屏。session 的
+`session.banner` 是模块自有扩展点，由 session 在 composer 上方 `RenderSlot`（审批内联卡/
+目标 dock）。模块不要注册 `topbar.*`；`home.*` 由 home 模块渲染（含默认空态），
+`session.*` 的其余槽位由 session 模块接管。
 
 ## 3. assembly.json 片段（desktop 产品，UI 子组）
 

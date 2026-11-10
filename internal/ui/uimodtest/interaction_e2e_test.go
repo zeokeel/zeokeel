@@ -281,10 +281,12 @@ func TestSettingsUnsavedGuard(t *testing.T) {
 	if !frameUntil(tester, "关闭设置", 2*time.Second) {
 		t.Fatalf("settings did not open; texts = %v", tester.Texts())
 	}
-	// Make one edit: append text to the Base URL draft. Click the accessibly
+	// Make one edit: append text to the system-prompt draft (the page's
+	// connection form was replaced by the immediately-applied model list, so
+	// the prompt is the page's explicit-save field). Click the accessibly
 	// labeled input target (the visible field label is not interactive).
-	if err := tester.Click("Base URL 输入"); err != nil {
-		t.Fatalf("click Base URL field: %v; texts = %v", err, tester.Texts())
+	if err := tester.Click("系统提示词 输入"); err != nil {
+		t.Fatalf("click system prompt field: %v; texts = %v", err, tester.Texts())
 	}
 	tester.Type("X")
 	tester.Frame()
@@ -447,8 +449,10 @@ func TestDialogSafetyAndButtonOrder(t *testing.T) {
 	if tester.Focused("拒绝") || tester.Focused("允许") || tester.Focused("本会话内始终允许") {
 		t.Fatalf("approval dialog autofocuses an action; texts = %v", tester.Texts())
 	}
-	if !tester.HasText("无默认操作") {
-		t.Fatalf("approval dialog lacks the visible no-default-action semantics; texts = %v", tester.Texts())
+	// The inline card carries the no-default semantics as the explicit Esc hint
+	// (there is no dialog-wide default button; Enter alone never allows).
+	if !tester.HasText("Esc 拒绝") {
+		t.Fatalf("inline approval lacks the visible no-default-action hint; texts = %v", tester.Texts())
 	}
 	// The raw arguments are collapsed behind an explicit disclosure.
 	if !tester.HasText("显示原始参数") {

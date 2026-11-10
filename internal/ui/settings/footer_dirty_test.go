@@ -1,12 +1,12 @@
 package settings_test
 
-// Tests for the H1/H2 settings fixes: explicit-save pages put their single
-// primary action in the host's fixed footer (visible without scrolling) and
-// report unsaved edits so closing the surface asks first; the model page's
-// connection check tests the drafts, not the saved store.
+// Tests for the H1 settings fixes: explicit-save pages put their single primary
+// action in the host's fixed footer (visible without scrolling) and report
+// unsaved edits so closing the surface asks first. The model page's explicit-save
+// drafts are the system prompt and the runtime limits; the model list itself
+// applies immediately.
 
 import (
-	"context"
 	"testing"
 
 	"github.com/egoist/mygo/ui"
@@ -37,8 +37,8 @@ func TestH1ModelFooterPinnedAndGuarded(t *testing.T) {
 	}
 	tester.Frame()
 
-	h.focusInput(tester, "Base URL 输入")
-	tester.Type("https://draft.example/v1")
+	h.focusInput(tester, "系统提示词 输入")
+	tester.Type("Be brief.")
 	tester.Frame()
 	h.assertTexts(tester, "未保存")
 
@@ -56,8 +56,8 @@ func TestH1ModelFooterPinnedAndGuarded(t *testing.T) {
 	if h.uiRoot.Navigator().SettingsOpen() {
 		t.Fatal("closing after save kept the settings surface open")
 	}
-	if got := h.settings.get(contracts.SettingsChatBaseURL); got != "https://draft.example/v1" {
-		t.Fatalf("saved base URL = %q", got)
+	if got := h.settings.get(contracts.SettingsChatSystemPrompt); got != "Be brief." {
+		t.Fatalf("saved system prompt = %q", got)
 	}
 }
 
@@ -129,54 +129,22 @@ func TestH1NetworkAndSearchDirty(t *testing.T) {
 	}
 }
 
-// TestH2ModelCheckUsesDrafts covers the H2 fix: the check sends the typed base
-// URL (not the saved one) and does not persist anything.
-func TestH2ModelCheckUsesDrafts(t *testing.T) {
-	var gotURL string
-	withModelListGetter(t, func(_ context.Context, baseURL, _ string) (int, []byte, error) {
-		gotURL = baseURL
-		return 200, nil, nil
-	})
-	store := newFakeSettings(map[string]string{
-		contracts.SettingsChatBaseURL: "https://saved.example/v1",
-		contracts.SettingsChatModel:   "saved-model",
-	})
-	h := newHarness(t, &fakeChat{}, store, settings.Config{})
-	tester := h.tester()
-	tester.Frame()
-	h.click(tester, "模型")
-	h.focusInput(tester, "Base URL 输入")
-	tester.Key(ui.Cmd, ui.KeyA)
-	tester.Key(0, ui.KeyBackspace)
-	tester.Type("https://draft.example/v1")
-	tester.Frame()
-	h.click(tester, "测试当前输入")
-	waitModelCheckText(t, h, tester, "连接正常")
-	if gotURL != "https://draft.example/v1" {
-		t.Fatalf("check used %q, want the typed draft", gotURL)
-	}
-	if got := store.get(contracts.SettingsChatBaseURL); got != "https://saved.example/v1" {
-		t.Fatalf("the check saved the draft: %q", got)
-	}
-}
-
 // TestN1DiscardResetsModelPage covers the host's Discard hook end to end: a
 // dirty model page, "放弃修改", then reopening shows the saved values with no
 // unsaved state and no close guard.
 func TestN1DiscardResetsModelPage(t *testing.T) {
 	store := newFakeSettings(map[string]string{
-		contracts.SettingsChatModel:   "saved-model",
-		contracts.SettingsChatBaseURL: "https://saved.example/v1",
+		contracts.SettingsChatSystemPrompt: "saved prompt",
 	})
 	h := newHarness(t, &fakeChat{}, store, settings.Config{})
 	tester := h.tester()
 	tester.Frame()
 	h.click(tester, "模型")
 
-	h.focusInput(tester, "Base URL 输入")
+	h.focusInput(tester, "系统提示词 输入")
 	tester.Key(ui.Cmd, ui.KeyA)
 	tester.Key(0, ui.KeyBackspace)
-	tester.Type("https://draft.example/v1")
+	tester.Type("discarded prompt")
 	tester.Frame()
 	h.assertTexts(tester, "未保存")
 
@@ -193,8 +161,11 @@ func TestN1DiscardResetsModelPage(t *testing.T) {
 	tester.Frame()
 	h.click(tester, "模型")
 	h.assertNoTexts(tester, "未保存")
+	if got := inputValue(t, tester, "系统提示词 输入"); got != "saved prompt" {
+		t.Fatalf("reopened prompt = %q, want the saved value", got)
+	}
 	h.click(tester, "保存")
-	if got := store.get(contracts.SettingsChatBaseURL); got != "https://saved.example/v1" {
+	if got := store.get(contracts.SettingsChatSystemPrompt); got != "saved prompt" {
 		t.Fatalf("saving after discard wrote %q, want the saved value", got)
 	}
 	closeSettings(h, tester)
@@ -274,14 +245,14 @@ func TestN1DiscardResetsOtherDirtyPages(t *testing.T) {
 // an edit made on the model page still guards closing after switching to a page
 // that applies immediately.
 func TestN3AnyDirtyPageGuardsClosing(t *testing.T) {
-	store := newFakeSettings(map[string]string{contracts.SettingsChatModel: "saved-model"})
+	store := newFakeSettings(map[string]string{contracts.SettingsChatSystemPrompt: "saved prompt"})
 	h := newHarness(t, &fakeChat{}, store, settings.Config{})
 	tester := h.tester()
 	tester.Frame()
 	h.click(tester, "模型")
-	h.focusInput(tester, "模型 输入")
+	h.focusInput(tester, "系统提示词 输入")
 	tester.Key(ui.Cmd, ui.KeyA)
-	tester.Type("dirty-model")
+	tester.Type("dirty prompt")
 	tester.Frame()
 
 	// Switch to a page with no Dirty: the host's header still reports the
@@ -303,7 +274,7 @@ func TestN3AnyDirtyPageGuardsClosing(t *testing.T) {
 	h.click(tester, "模型")
 	h.assertNoTexts(tester, "未保存")
 	h.click(tester, "保存")
-	if got := store.get(contracts.SettingsChatModel); got != "saved-model" {
-		t.Fatalf("saved model after discard = %q, want saved-model", got)
+	if got := store.get(contracts.SettingsChatSystemPrompt); got != "saved prompt" {
+		t.Fatalf("saved prompt after discard = %q, want the saved value", got)
 	}
 }

@@ -84,6 +84,10 @@ type dynamicTeamRunner struct {
 // Start implements rig.SubagentRunner.
 func (r *dynamicTeamRunner) Start(ctx context.Context, spec rig.SubagentSpec) (rig.Subagent, error) {
 	cfg, active := r.service.subagentParent()
+	// A per-member model override runs with that model's own provider connection
+	// (its catalog row's BaseURL/APIKey), falling back to the parent session's
+	// connection when the model list has no such row.
+	cfg = r.service.configForModelOverride(cfg, spec.Model)
 	childTools := r.service.registry.Tools()
 	// Team members get the same complete prompt as a normal run, with guidance
 	// for exactly the tool surface the runner hands them (orchestration tools

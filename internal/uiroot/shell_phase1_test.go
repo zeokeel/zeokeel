@@ -2,7 +2,7 @@ package uiroot
 
 // Frame tests for the shell Phase 1 audit fixes: the inspector's screen scope,
 // the drawer's single-Escape close and focus return, the live sidebar width
-// clamp, the persisted chrome open states, and Alt+Left inside a text field.
+// clamp, the persisted chrome open states, and the removed back chord.
 
 import (
 	"testing"
@@ -20,6 +20,9 @@ func TestInspectorOnlyOnSessionScreen(t *testing.T) {
 	mustScreen(t, r, textScreen("home", "首页", "body-home", 10))
 	mustScreen(t, r, textScreen(sessionScreenID, "会话", "body-session", 20))
 	mustSlot(t, r, textSlotItem(contracts.SlotSessionPanelRight, "pane", "inspector-pane", 10))
+	// The B3 top band (and its inspector toggle) is host chrome for screens that
+	// contribute a header; the session screen does in the product.
+	mustSlot(t, r, textSlotItem(contracts.SlotScreenHeader, "hdr", "screen-title", 10))
 	tt := newTestTester(t, r, 1280, 800)
 	tt.Frame()
 
@@ -77,6 +80,7 @@ func TestInspectorDrawerEscapeOnceAndRestoresFocus(t *testing.T) {
 	r := newTestRoot(t)
 	mustScreen(t, r, textScreen(sessionScreenID, "会话", "body-session", 10))
 	mustSlot(t, r, textSlotItem(contracts.SlotSessionPanelRight, "pane", "inspector-pane", 10))
+	mustSlot(t, r, textSlotItem(contracts.SlotScreenHeader, "hdr", "screen-title", 10))
 	tt := newTestTester(t, r, 1000, 720)
 	tt.Frame()
 
@@ -201,10 +205,10 @@ func TestChromeOpenStatesPersist(t *testing.T) {
 	}
 }
 
-// TestAltLeftInsideTextInputDoesNotNavigate covers D-08: the window's back
-// chord is a navigation shortcut, but a focused text input keeps its editing
-// context; Alt+Left must not page away mid-message.
-func TestAltLeftInsideTextInputDoesNotNavigate(t *testing.T) {
+// TestAltLeftNeverNavigates covers the navigation cleanup: the window has no
+// back control and no Alt+Left history chord (the sidebar destinations and the
+// command palette are the navigation), with or without a focused text field.
+func TestAltLeftNeverNavigates(t *testing.T) {
 	draft := ""
 	r := newTestRoot(t)
 	mustScreen(t, r, textScreen("home", "首页", "body-home", 10))
@@ -232,14 +236,17 @@ func TestAltLeftInsideTextInputDoesNotNavigate(t *testing.T) {
 	if got := r.Navigator().Current(); got != sessionScreenID {
 		t.Fatalf("Alt+Left in a text input navigated to %q, want to stay on the session screen", got)
 	}
-
-	// Without the text focus the same chord goes back.
+	// Outside the text field the same chord still does not navigate: there is no
+	// back chord in the product any more.
 	tt.Key(0, ui.KeyTab)
 	tt.Frame()
 	tt.Key(ui.Alt, ui.KeyLeft)
 	tt.Frame()
-	if got := r.Navigator().Current(); got != "home" {
-		t.Fatalf("Alt+Left outside a text input: screen = %q, want home", got)
+	if got := r.Navigator().Current(); got != sessionScreenID {
+		t.Fatalf("Alt+Left navigated to %q, want no history shortcut", got)
+	}
+	if _, ok := tt.AccessByRole(ui.RoleButton, "返回上一个页面"); ok {
+		t.Fatal("the window still exposes a visible back control")
 	}
 }
 
@@ -252,6 +259,7 @@ func TestDockedInspectorCloseAtMinWindowRail(t *testing.T) {
 	r := newTestRoot(t)
 	mustScreen(t, r, heightScreen(sessionScreenID, "会话", "screen-top", "screen-bottom"))
 	mustSlot(t, r, textSlotItem(contracts.SlotSessionPanelRight, "pane", "inspector-pane", 10))
+	mustSlot(t, r, textSlotItem(contracts.SlotScreenHeader, "hdr", "screen-title", 10))
 	tt := newTestTester(t, r, 900, 600)
 	tt.Frame()
 	r.SetSidebarCollapsed(true)

@@ -1,8 +1,9 @@
 package modelcatalog
 
-// TDD tests (RED first) for the modelcatalog settings override: Models() reads
-// contracts.SettingModelCatalogModels on every call, falling back to the
-// configured/default presets for empty or malformed values.
+// TDD tests (RED first) for the modelcatalog settings list: Models() reads
+// contracts.SettingModelCatalogModels on every call. A present row (including an
+// explicit empty list) is authoritative; only an absent/blank row falls back to
+// the assembly baseline, which is empty unless a headless product pins models.
 
 import (
 	"reflect"
@@ -96,10 +97,11 @@ func TestSettingsOverrideModels(t *testing.T) {
 }
 
 func TestSettingsEmptyFallsBackToConfigured(t *testing.T) {
+	// No model list saved: the assembly baseline applies. The product ships no
+	// built-in models, so an empty config means an empty catalog.
 	svc, _ := modelService(t, Config{}, newSettingsStore(nil))
-	models := svc.Models()
-	if len(models) != 2 || models[0].ID != "deepseek-chat" {
-		t.Fatalf("default fallback = %+v, want the built-in presets", models)
+	if models := svc.Models(); len(models) != 0 {
+		t.Fatalf("empty baseline = %+v, want no models", models)
 	}
 
 	configured := Config{Models: []Model{{ID: "only", Name: "Only"}}}
@@ -109,25 +111,37 @@ func TestSettingsEmptyFallsBackToConfigured(t *testing.T) {
 	}
 }
 
-func TestSettingsEmptyArrayFallsBackToDefaults(t *testing.T) {
-	// Locked semantics: an empty array means "not configured" → defaults.
+func TestSettingsBlankRowFallsBackToConfigured(t *testing.T) {
+	// A blank row is "not configured", not an empty list.
+	store := newSettingsStore(nil)
+	store.setModels("   ")
+	svc, _ := modelService(t, Config{Models: []Model{{ID: "baseline"}}}, store)
+	if got := svc.Models(); len(got) != 1 || got[0].ID != "baseline" {
+		t.Fatalf("blank-row fallback = %+v, want the configured baseline", got)
+	}
+}
+
+func TestSettingsExplicitEmptyListIsAuthoritative(t *testing.T) {
+	// Locked semantics: an explicit "[]" means the user removed every model, so
+	// it wins over the assembly baseline — the product must never re-add models
+	// the user deleted.
 	store := newSettingsStore(nil)
 	store.setModels("[]")
-	svc, _ := modelService(t, Config{}, store)
-	if got := svc.Models(); len(got) != 2 || got[0].ID != "deepseek-chat" {
-		t.Fatalf("empty-array fallback = %+v, want defaults", got)
+	svc, _ := modelService(t, Config{Models: []Model{{ID: "baseline"}}}, store)
+	if got := svc.Models(); len(got) != 0 {
+		t.Fatalf("explicit empty list = %+v, want no models", got)
 	}
 }
 
 func TestSettingsBadJSONFallsBackAndWarnsOnce(t *testing.T) {
 	store := newSettingsStore(nil)
 	store.setModels("{not-json")
-	svc, logger := modelService(t, Config{}, store)
+	svc, logger := modelService(t, Config{Models: []Model{{ID: "baseline"}}}, store)
 
 	for attempt := 0; attempt < 3; attempt++ {
 		models := svc.Models()
-		if len(models) != 2 || models[0].ID != "deepseek-chat" {
-			t.Fatalf("bad-JSON fallback = %+v, want defaults", models)
+		if len(models) != 1 || models[0].ID != "baseline" {
+			t.Fatalf("bad-JSON fallback = %+v, want the configured baseline", models)
 		}
 	}
 	if got := logger.count(); got != 1 {
@@ -157,6 +171,30 @@ func TestSettingsSanitizesOverride(t *testing.T) {
 	}
 	if !reflect.DeepEqual(models[2], contracts.ModelInfo{ID: "c", Name: "c"}) {
 		t.Fatalf("trimmed last = %+v", models[2])
+	}
+}
+
+func TestSettingsRowsCarryPerModelConnections(t *testing.T) {
+	// Each row may name its own OpenAI-compatible endpoint/credential, so one
+	// list can mix providers; an empty field falls back to the global
+	// connection at request time (resolved by the agent backend).
+	store := newSettingsStore(nil)
+	store.setModels(`[
+		{"id":"a","baseURL":" https://a.example/v1/ ","apiKey":" key-a "},
+		{"id":"b"}
+	]`)
+	svc, _ := modelService(t, Config{}, store)
+	models := svc.Models()
+	if len(models) != 2 {
+		t.Fatalf("models = %+v", models)
+	}
+	if models[0].BaseURL != "https://a.example/v1" || models[0].APIKey != "key-a" {
+		t.Fatalf("per-model connection = %q / %q, want trimmed own values",
+			models[0].BaseURL, models[0].APIKey)
+	}
+	if models[1].BaseURL != "" || models[1].APIKey != "" {
+		t.Fatalf("empty-row connection = %q / %q, want the global fallback",
+			models[1].BaseURL, models[1].APIKey)
 	}
 }
 

@@ -10,6 +10,7 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/egoist/mygo/ui"
 	cordis "github.com/zeokeel/zeokeel-kernel"
 
 	"github.com/zeokeel/zeokeel/internal/contracts"
@@ -120,14 +121,18 @@ func TestComposerModelChipShowsSessionModel(t *testing.T) {
 func TestComposerModelMenuSwitchesSessionModel(t *testing.T) {
 	chat := newModelChat()
 	chat.addSession(modelSession("sess-1", "gpt-4o-mini"), true)
-	h := newModelHarness(t, chat, catalogModels())
+	h := newModelThinkingHarness(t, chat, newPermissionSettings(nil), catalogModels())
 	tester := h.tester()
 	h.assertTexts(tester, "gpt-4o-mini")
 
 	// The menu lists the catalogue names, each note as its subtitle; the current
 	// model is checked by the native menu rather than duplicated in the label.
 	h.click(tester, "gpt-4o-mini")
-	h.assertTexts(tester, "选择模型", "GPT-4o mini", "快速", "GPT-4o", "旗舰", "打开模型设置")
+	// The top menu only opens the two real choices one level down.
+	h.assertTexts(tester, "模型", "推理等级", "打开模型设置…")
+	h.assertNoTexts(tester, "选择模型")
+	h.clickExact(tester, "模型")
+	h.assertTexts(tester, "GPT-4o mini", "快速", "GPT-4o", "旗舰")
 	// The note is the row's subtitle only: it must not appear twice per row
 	// (label + subtitle) as it did when the label inlined "name · note".
 	if got := textOccurrences(tester.Texts(), "快速"); got != 1 {
@@ -150,6 +155,7 @@ func TestComposerModelSwitchErrorIsQuiet(t *testing.T) {
 	h := newModelHarness(t, chat, catalogModels())
 	tester := h.tester()
 	h.click(tester, "gpt-4o-mini")
+	h.clickExact(tester, "模型")
 	h.clickExact(tester, "GPT-4o")
 
 	if calls := chat.calls(); len(calls) != 1 {
@@ -163,14 +169,20 @@ func TestComposerModelSwitchErrorIsQuiet(t *testing.T) {
 func TestComposerModelMenuWithoutCatalog(t *testing.T) {
 	chat := newModelChat()
 	chat.addSession(modelSession("sess-1", "gpt-4o-mini"), true)
-	h := newModelHarness(t, chat, nil)
+	h := newModelThinkingHarness(t, chat, newPermissionSettings(nil), nil)
 	tester := h.tester()
 	h.click(tester, "gpt-4o-mini")
 
-	// Without a catalogue the menu shows the current model and the settings
-	// fallback only.
-	h.assertTexts(tester, "选择模型", "gpt-4o-mini", "打开模型设置")
-	h.click(tester, "打开模型设置")
+	// Without a catalogue the menu cannot offer a model row or a per-model
+	// thinking default: it says the list is empty and links to the model
+	// settings page.
+	h.assertTexts(tester, "模型", "推理等级", "打开模型设置…")
+	h.assertNoTexts(tester, "选择模型", "思考强度：")
+	h.clickExact(tester, "模型")
+	h.assertTexts(tester, "还没有模型")
+	tester.Key(0, ui.KeyEscape)
+	tester.Frame()
+	h.clickExact(tester, "打开模型设置…")
 	if !h.ui.Navigator().SettingsOpen() {
 		t.Fatal("model settings fallback did not open the settings surface")
 	}
@@ -195,13 +207,16 @@ func TestComposerModelChipWithoutSwitcherOpensSettings(t *testing.T) {
 func TestComposerModelMenuEnglishCopy(t *testing.T) {
 	chat := newModelChat()
 	chat.addSession(modelSession("sess-1", "gpt-4o-mini"), true)
-	h := newModelHarness(t, chat, catalogModels())
+	h := newModelThinkingHarness(t, chat, newPermissionSettings(nil), catalogModels())
 	tester := h.tester()
 	h.ui.Locale().SetLanguage("en")
 	tester.Frame()
 
 	h.click(tester, "gpt-4o-mini")
-	h.assertTexts(tester, "Choose a model", "GPT-4o mini", "快速", "Open model settings")
+	h.assertTexts(tester, "Model", "Reasoning level", "Open model settings…")
+	h.assertNoTexts(tester, "Choose a model")
+	h.clickExact(tester, "Model")
+	h.assertTexts(tester, "GPT-4o mini", "快速", "GPT-4o")
 }
 
 func TestComposerModelChipFallsBackToConfig(t *testing.T) {

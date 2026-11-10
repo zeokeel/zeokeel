@@ -75,6 +75,9 @@ func TestAssistantTimelineKeepsConsecutiveToolsTogether(t *testing.T) {
 	}
 	h := newHarness(t, timelineChat(message))
 	tester := h.tester()
+	// Two calls with no reasoning fold the process by default; open the summary
+	// to read the timeline order.
+	h.click(tester, "过程 · 2 个工具调用")
 	h.assertTexts(tester, before, after, "运行命令", "读取文件")
 	first, ok1 := tester.Find("运行命令")
 	second, ok2 := tester.Find("读取文件")
@@ -131,6 +134,8 @@ func TestAssistantTimelineLiveZeroOffsetsKeepCallsFirst(t *testing.T) {
 	}
 	h := newHarness(t, timelineChat(message))
 	tester := h.tester()
+	// Two calls fold the process by default; expand it to read the order.
+	h.click(tester, "过程 · 2 个工具调用")
 	h.assertTexts(tester, "REPLY-AFTER-TOOLS", "运行命令", "读取文件")
 	first, ok1 := tester.Find("运行命令")
 	second, ok2 := tester.Find("读取文件")

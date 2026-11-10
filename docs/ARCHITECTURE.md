@@ -83,13 +83,21 @@ cmd (30 行) → host (进程) → assembly (装配) → kernel root
 | 区域 | 槽位 | 现状 | 典型贡献 |
 | --- | --- | --- | --- |
 | 主侧栏 | `sidebar.primary` / `sidebar.nav` / `sidebar.tree` / `sidebar.footer` | ✅ 宿主 | 新建会话、屏幕导航、工作区/会话树、账户脚注 |
-| 屏幕 | `screen.header` / `screen.actions` / `screen.footer` | ✅ 宿主 | 屏幕标题/面包屑、右侧动作、底部状态 |
+| 屏幕 | `screen.header` / `screen.actions` / `screen.tabs` / `screen.footer` | ✅ 宿主（B3 顶栏 band） | 屏幕标题/工作区、右侧动作（运行中/团队/⋯）、Tabs、底部状态 |
 | overlay | `overlay.palette` / `overlay.dialogs` / `overlay.toasts` / `overlay.settings` | ✅ 宿主（prefix 通用渲染） | 命令面板、确认框、通知/toast |
 | 命令 | `CommandSpec`（非槽位） | ✅ 宿主（内容顶部 Toolbar/命令面板） | 菜单/快捷键/命令面板统一入口 |
 
-> 本壳层不提供顶栏区域：屏幕自带头部，全局动作在内容顶部的 Toolbar 与命令面板里；
-> 不要再注册 `topbar.*` 这类宿主不渲染的槽位（宿主只渲染保留清单与拥有者自行
-> `RenderSlot` 的自定义槽位）。
+> 本壳层提供唯一一块**顶层 header band**（B3）：当当前屏向 `screen.header` /
+> `screen.actions` / `screen.tabs` 有贡献时，宿主渲染「40px 标题行 + 可选 32px Tabs 行」
+> 的浅色 band（`BgSidebar` + 仅底边 hairline、行间无线），并在标题行右端带 palette 与
+> inspector 按钮；没有贡献的屏幕不渲染任何顶部工具栏（没有空条、没有返回按钮，侧栏即
+> 导航）。屏幕级槽位是全局注册表：item ID 前缀等于某个已注册 screen ID 时只在该屏渲染
+> （如 `session.title` / `session.actions` / `session.tabs`），其它 ID 视为 host/全局贡献；
+> screen body 不再自建 header。`screen.footer` 仍渲染在 body 之后。
+>
+> 不要注册 `topbar.*` 这类宿主不渲染的槽位（宿主只渲染保留清单与拥有者自行
+> `RenderSlot` 的自定义槽位）。模块自有扩展点用模块前缀 + `UIRuntime.RenderSlot`，
+> 例如 session 的 `session.banner`（composer 上方目标条/审批内联卡的 dock 槽）。
 
 ### 5.2 主界面
 
@@ -188,7 +196,7 @@ if _, err := ctx.Effect(func() cordis.Effect {
   `internal/modules/approvals` + `internal/ui/approval`（审批队列与 native Modal）、
   `internal/ui/toolcards` 真实工具卡、`ui/session` 轨迹时间线；desktop 15 实例 / headless 6 实例
 - ✅ P2 第一批：`ui/home` 真实最近会话 + 新对话；`ui/settings` 外观页（主题/语言，native Toggle/Select，
-  持久化 host 键）与模型快速预设
+  持久化 host 键）与模型列表（每模型独立服务商连接、思考强度与生成参数）
 - ✅ 品牌设计体系：`internal/brand`（palette/theme/mark）、`internal/design`（tokens/字阶/间距/组件样式、
   TypeRole、motion）、`internal/icons`（SVG 图标）；uiroot chrome 使用品牌侧栏/brand row/顶栏，
   `ui/{home,session,sidebar,settings,approval,toolcards}` 全部品牌化（native 控件 + design 样式）
@@ -201,7 +209,9 @@ if _, err := ctx.Effect(func() cordis.Effect {
 - ✅ present/plan review 宿主桥 + interaction overlay（工件预览、计划批准）
 - ✅ ask_user 交互桥：UserInteraction + hosttools Asker + overlay.dialogs 原生 Modal
 - ✅ Web search：internal/websearch + 动态 web_search（设置「搜索」页）
-- ✅ 模型配置（设置「模型」页：服务商连接 + 模型列表/思考/生成参数）+ per-session 模型切换（composer 菜单）
+- ✅ 模型配置（设置「模型」页：模型列表 = 每模型独立服务商/Base URL/API Key/思考强度/生成参数 + 默认模型，
+  无内置默认模型；旧 chat.* 单连接启动时一次性迁移为列表行）+ per-session 模型切换（composer 菜单）+
+  每模型思考强度（composer 模型菜单，会话菜单可覆盖且默认跟随模型）
 - ✅ composer slash 命令 + 会话重新生成（SessionRegenerator）
 - ✅ 覆盖矩阵：docs/COVERAGE.md（旧功能面 vs 产品）
 - ✅ i18n：uikit.T；sidebar/session/home/settings/about/rightpanel/automation/plugins/toolcards/approval

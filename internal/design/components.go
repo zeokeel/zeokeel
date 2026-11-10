@@ -40,8 +40,10 @@ const (
 	// surface grows with the window so a long page list stays visible rather
 	// than scrolling the last pages out of reach.
 	SettingsMargin float32 = 24
-	// TranscriptWidth is the conversation reading measure.
-	TranscriptWidth float32 = 840
+	// TranscriptWidth is the conversation reading measure. It is the width the
+	// transcript, composer and composer dock share, so a change keeps them
+	// aligned; narrower windows still fall back to 92% of the content column.
+	TranscriptWidth float32 = 960
 
 	// DialogWidthS/M/L are the widths of the modal forms, in the order of the
 	// content they hold: a single prompt, a form, a long form or preview. They

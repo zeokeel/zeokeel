@@ -254,21 +254,62 @@ func TestToastCloseButtonDismisses(t *testing.T) {
 	}
 }
 
-func TestToastStackClearsComposerHeight(t *testing.T) {
-	// The stack sits in the bottom-right corner above the conversation
-	// composer: its copy ends at least the composer inset above the window
-	// bottom, so a toast can never cover the send row.
+func TestToastStackSitsTopRightBelowHeader(t *testing.T) {
+	// The stack is a top-right popup under the app's top header: its copy sits
+	// on the right half of the window, below the 72 DIP header (so it never
+	// covers the title, tabs or header actions), and far above the conversation
+	// composer at the window bottom.
 	h := newHarness(t, "zh")
 	tester := h.tester()
-	h.notifier.trigger(contracts.Notification{ID: "n1", Level: contracts.NotifyInfo, Text: "不遮挡输入区"})
+	h.notifier.trigger(contracts.Notification{ID: "n1", Level: contracts.NotifyInfo, Text: "右上角通知"})
 	tester.Frame()
-	rect, ok := tester.Find("不遮挡输入区")
+	rect, ok := tester.Find("右上角通知")
 	if !ok {
 		t.Fatalf("toast text missing; texts = %v", tester.Texts())
 	}
-	const windowHeight = 800
-	if bottom := rect.Y + rect.H; bottom > windowHeight-toastBottomInset+1 {
-		t.Fatalf("toast bottom = %.1f, want it above the composer reserve (%.1f)", bottom, windowHeight-toastBottomInset)
+	const (
+		windowWidth  = 1200
+		windowHeight = 800
+		// The top-level chrome is the 40 DIP title row plus the 32 DIP tab row.
+		headerHeight = 72
+	)
+	if rect.X <= windowWidth*0.6 {
+		t.Fatalf("toast X = %.1f, want it in the top-right (x > %.1f)", rect.X, windowWidth*0.6)
+	}
+	if rect.Y >= 140 {
+		t.Fatalf("toast Y = %.1f, want it just below the header (y < 140)", rect.Y)
+	}
+	if rect.Y < headerHeight {
+		t.Fatalf("toast Y = %.1f, want it below the %d DIP header", rect.Y, headerHeight)
+	}
+	if bottom := rect.Y + rect.H; bottom >= windowHeight/2 {
+		t.Fatalf("toast bottom = %.1f, want it well above the composer (window bottom)", bottom)
+	}
+}
+
+func TestToastStackGrowsDownwardFromTop(t *testing.T) {
+	// The viewport aligns the stack at the top: a newer toast appears below the
+	// older one instead of pushing it upward (the old bottom-anchored layout).
+	h := newHarness(t, "zh")
+	tester := h.tester()
+	h.notifier.trigger(contracts.Notification{ID: "n1", Level: contracts.NotifyInfo, Text: "旧通知"})
+	tester.Frame()
+	h.notifier.trigger(contracts.Notification{ID: "n2", Level: contracts.NotifySuccess, Text: "新通知"})
+	tester.Frame()
+	oldRect, ok := tester.Find("旧通知")
+	if !ok {
+		t.Fatalf("first toast missing; texts = %v", tester.Texts())
+	}
+	newRect, ok := tester.Find("新通知")
+	if !ok {
+		t.Fatalf("second toast missing; texts = %v", tester.Texts())
+	}
+	if oldRect.Y >= 140 {
+		t.Fatalf("first toast Y = %.1f, want the stack anchored at the top", oldRect.Y)
+	}
+	if newRect.Y <= oldRect.Y {
+		t.Fatalf("newer toast Y = %.1f, want it below the older one at %.1f (top-down stack)",
+			newRect.Y, oldRect.Y)
 	}
 }
 

@@ -13,14 +13,15 @@ import (
 	"github.com/zeokeel/zeokeel/internal/contracts"
 )
 
-// stableTranscriptRect returns the rect of the "重新生成" control (regenerate),
-// which sits at the end of the transcript and moves whenever the transcript
-// layout is displaced by an inserted in-flow panel.
+// stableTranscriptRect returns the rect of the "消息操作" control (the ⋯ entry
+// of a finished assistant turn's compact meta line), which sits at the end of the
+// transcript and moves whenever the transcript layout is displaced by an
+// inserted in-flow panel.
 func (d *drive) stableTranscriptRect() (ui.Rect, bool) {
-	if rect, ok := d.find("重新生成"); ok {
+	if rect, ok := d.find("消息操作"); ok {
 		return rect, true
 	}
-	// A conversation without assistant turns has no regenerate control; the
+	// A conversation without finished assistant turns has no meta line; the
 	// composer card's top edge is the next stable anchor.
 	if rect, ok := d.find("会话输入框"); ok {
 		return rect, true
@@ -60,7 +61,7 @@ func (d *drive) runHSessionSteps() {
 			d.resetToSession()
 			before, ok := d.stableTranscriptRect()
 			if !ok {
-				c.failf("找不到 transcript 稳定控件（重新生成/会话输入框）")
+				c.failf("找不到 transcript 稳定控件（消息操作/会话输入框）")
 				return
 			}
 			if err := d.focusComposer(); err != nil {
@@ -120,8 +121,8 @@ func (d *drive) runHSessionSteps() {
 			d.clearDraft()
 		})
 
-	d.step("message-actions-copy", "session", "消息动作：常驻复制（H15）",
-		"每条可复制助手消息的底部行动行常驻「复制消息」（无需 hover/展开）；⋯ 只展开有帮助/没帮助评分", func(c *check) {
+	d.step("message-actions-copy", "session", "消息动作：元信息行 + ⋯ 菜单",
+		"每条助手消息底部常驻一条紧凑元信息行（时间 + 用时/紧凑 tokens）；⋯ 菜单提供复制消息/重新生成/有帮助/没帮助/用量明细", func(c *check) {
 			d.server.SetMode(scriptAnswer)
 			// Use a fresh one-turn conversation: the long driving session is
 			// scrolled, so its message rows are not reliable click targets.
@@ -156,31 +157,29 @@ func (d *drive) runHSessionSteps() {
 				return
 			}
 			d.drain(2)
-			// Pointer away from the transcript: the copy action must be part of
-			// the frame without hover or a pin.
+			// Pointer away from the transcript: the meta line is part of the
+			// frame without hover or a pin (time and compact usage are resident).
 			d.tester.Move(4, 4)
 			d.frame()
-			if !c.has("复制消息") {
-				c.failf("H15：可复制消息底部没有常驻「复制消息」入口（未 hover 时不显示）")
+			c.require(c.has("消息操作"), "助手消息底部没有常驻「消息操作」⋯ 入口")
+			c.require(c.has("用时"), "助手消息底部没有常驻用时（元信息行）")
+			c.shot("message-actions-copy")
+			if !c.click("消息操作") {
 				return
 			}
-			c.shot("message-actions-copy")
-			if !c.click("复制消息") {
+			d.drain(2)
+			c.require(c.has("复制消息"), "「消息操作」菜单缺少「复制消息」")
+			c.require(c.has("重新生成"), "「消息操作」菜单缺少「重新生成」")
+			c.require(c.has("有帮助") && c.has("没帮助"),
+				"「消息操作」菜单缺少「有帮助/没帮助」评分")
+			if err := d.tester.ChooseMenuItem("复制消息"); err != nil {
+				c.failf("choose 复制消息: %v", err)
 				return
 			}
 			d.drain(2)
 			got := strings.TrimSpace(d.tester.Clipboard())
 			c.require(got == strings.TrimSpace(reply),
 				"点击复制后剪贴板内容不匹配（got %q want %q）", shortText(got), shortText(reply))
-			// The ⋯ entry now only unfolds the rating actions.
-			if c.has("消息操作") {
-				if !c.click("消息操作") {
-					return
-				}
-				d.drain(2)
-				c.require(c.has("有帮助") && c.has("没帮助"),
-					"「消息操作」展开后没有「有帮助/没帮助」评分")
-			}
 			c.shot("message-actions-copy-done")
 		})
 

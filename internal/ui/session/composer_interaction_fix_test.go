@@ -90,7 +90,9 @@ func TestSessionMenuSubmenusReachableAndShort(t *testing.T) {
 
 	h.openSessionMenu(tester)
 	// Persona and presets are submenu rows: the outer menu stays short.
-	h.assertTexts(tester, "权限模式", "对话模式", "思考强度：", "人设", "插入预设", "打开行为设置…")
+	h.assertTexts(tester, "权限模式", "对话模式", "人设", "插入预设", "打开行为设置…")
+	// Reasoning is not repeated in the session menu: the model chip owns it.
+	h.assertNoTexts(tester, "推理等级")
 	h.clickExact(tester, "人设")
 	h.assertTexts(tester, "Reviewer", "Writer", "无")
 	h.clickExact(tester, "Reviewer")

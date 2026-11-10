@@ -168,7 +168,7 @@ func TestArchiveConversationReportsSuccessWithUndo(t *testing.T) {
 	tester := h.tester()
 	tester.Frame()
 
-	h.click(tester, "更多")
+	openConversationActions(t, h, tester)
 	tester.Frame()
 	h.assertTexts(tester, "归档会话")
 	h.click(tester, "归档会话")

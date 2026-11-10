@@ -35,6 +35,11 @@ func TestP1ApprovalToolsAndPersistence(t *testing.T) {
 	settings := &memSettings{values: map[string]string{
 		contracts.SettingsChatModel:   "test-model",
 		contracts.SettingsChatBaseURL: server.URL,
+		// The product ships no built-in model list: seed the two models this
+		// scenario switches between (test-model is the default row).
+		contracts.SettingModelCatalogModels: `[` +
+			`{"id":"test-model","name":"test-model","baseURL":"` + server.URL + `"},` +
+			`{"id":"deepseek-chat","name":"DeepSeek Chat","note":"通用对话","baseURL":"` + server.URL + `"}]`,
 		// This scenario covers the tool-approval handshake end to end: the
 		// read-only preset auto-allows read-only/informational tools but still
 		// sends mutating tools (here a shared task-board write) through the
@@ -449,9 +454,14 @@ func TestP1ApprovalToolsAndPersistence(t *testing.T) {
 	uiRoot.Navigator().CloseSettings()
 	tester.Frame()
 
-	// Composer model menu: the catalog presets switch the session model.
+	// Composer model menu: the model list lives in the compact chip menu's
+	// 模型 submenu (the first level only has the 模型/推理等级 entries).
 	if err := tester.Click("test-model"); err != nil {
 		t.Fatalf("open model menu: %v; texts = %v", err, tester.Texts())
+	}
+	tester.Frame()
+	if err := tester.Click("模型"); err != nil {
+		t.Fatalf("open model submenu: %v; texts = %v", err, tester.Texts())
 	}
 	tester.Frame()
 	if !tester.HasText("DeepSeek Chat") || !tester.HasText("通用对话") {
@@ -672,7 +682,7 @@ func TestP1ApprovalToolsAndPersistence(t *testing.T) {
 	if !tester.HasText("目标") {
 		t.Fatalf("goal chip missing; texts = %v", tester.Texts())
 	}
-	if err := tester.Click("目标"); err != nil {
+	if err := tester.Click("目标操作"); err != nil {
 		t.Fatalf("open goal chip menu: %v; texts = %v", err, tester.Texts())
 	}
 	tester.Frame()
@@ -854,6 +864,12 @@ func TestP1ApprovalToolsAndPersistence(t *testing.T) {
 	selectInspectorPane(t, tester, "文件")
 	if !tester.HasText("产物") || !tester.HasText("检查报告") {
 		t.Fatalf("artifact history missing; texts = %v", tester.Texts())
+	}
+	// A top-right notification can overlay the inspector's actions; dismiss it
+	// first (the toast's own close control) so the click reaches the artifact.
+	if tester.HasText("关闭通知") {
+		_ = tester.Click("关闭通知")
+		tester.Frame()
 	}
 	if err := tester.Click("预览"); err != nil {
 		t.Fatalf("preview artifact: %v; texts = %v", err, tester.Texts())

@@ -43,33 +43,25 @@ func TestUserMessageActionsCopyAndEdit(t *testing.T) {
 		ID: "sess-1", Title: "用户动作",
 		Messages: []contracts.ChatMessage{
 			message("u1", contracts.ChatRoleUser, original),
-			message("a1", contracts.ChatRoleAssistant, "回答"),
 		},
 	}, true)
 	h := newHarness(t, chat)
 	tester := h.tester()
+	// The user message's actions are one ⋯ menu, like the assistant meta row.
+	h.assertTexts(tester, "用户消息操作")
+	h.assertNoTexts(tester, "复制原文", "编辑消息")
+	h.click(tester, "用户消息操作")
 	h.assertTexts(tester, "复制原文", "编辑消息")
 
-	// Copy the original text with a 32px target and the transient feedback.
-	rect, ok := tester.Find("复制原文")
-	if !ok || rect.W < 32 || rect.H < 32 {
-		t.Fatalf("copy-original target = %+v found %v, want at least 32x32", rect, ok)
-	}
+	// Copy the original text.
 	h.click(tester, "复制原文")
 	if got := tester.Clipboard(); got != original {
 		t.Fatalf("clipboard = %q, want the original user text", got)
 	}
-	if info, ok := tester.Access("复制原文"); !ok || info.Description != "已复制" {
-		t.Fatalf("copy feedback = %+v found %v, want 已复制", info, ok)
-	}
-	tester.Advance(2 * time.Second)
-	tester.Frame()
-	if info, ok := tester.Access("复制原文"); !ok || info.Description == "已复制" {
-		t.Fatalf("copy feedback did not reset: %+v found %v", info, ok)
-	}
 
 	// Edit puts the original text back in the composer and focuses it, without
 	// sending anything.
+	h.click(tester, "用户消息操作")
 	h.click(tester, "编辑消息")
 	if sends := chat.sends(); len(sends) != 0 {
 		t.Fatalf("edit auto-sent a message: %v", sends)

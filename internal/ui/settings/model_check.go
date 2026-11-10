@@ -1,8 +1,8 @@
 package settings
 
-// Model connection check: a small block on the model settings page that asks an
-// OpenAI-compatible /models endpoint whether the configured base URL and API key
-// work. The request runs off the UI thread and posts its result back.
+// Model connection check: the add/edit model dialogs ask an OpenAI-compatible
+// /models endpoint whether the draft base URL and API key work. The request runs
+// off the UI thread and posts its result back to the dialog.
 
 import (
 	"context"
@@ -204,63 +204,56 @@ func startModelCheck(runtime contracts.UIRuntime, check *modelCheckState,
 	}()
 }
 
-// buildModelCheckPanel renders the "connection check" block of the model page.
-// H2: it tests the drafts currently in the form (base URL/model as typed, with
-// the stored API key kept while its field is blank), not the saved store; the
-// action is a secondary button because the page's primary action is Save in the
-// fixed footer.
-func buildModelCheckPanel(c *ui.Context, t *design.Tokens, runtime contracts.UIRuntime,
-	check *modelCheckState, model, baseURL, apiKey string, locale contracts.LocaleService) {
-	baseURL = strings.TrimSpace(baseURL)
-	uikit.Section(c, localized(locale, "连接检查", "Connection check"), func(*ui.Context) {
-		ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(design.Space2).Children(func() {
-			design.Apply(ui.Text(c, localized(locale, "服务地址：", "Service URL: ")+
-				firstNonEmpty(baseURL, localized(locale, "未填写", "not entered"))),
-				t.Font(design.TypeXXS)).TextColor(t.LabelTertiary).Grow(1)
-			design.Apply(ui.Text(c, localized(locale, "模型：", "Model: ")+
-				firstNonEmpty(strings.TrimSpace(model), localized(locale, "未填写", "not entered"))),
-				t.Font(design.TypeXXS)).TextColor(t.LabelTertiary)
-		})
+// buildCatalogCheckRow renders the connection check inside the add/edit model
+// dialogs: it tests the current draft (the Base URL and API key shown in the
+// dialog, with the stored key as the documented "blank keeps it" value), posts
+// the result back through the UI runtime and shows it inline. The dialog's
+// footer owns the save action, so this is a secondary action.
+func buildCatalogCheckRow(c *ui.Context, t *design.Tokens, runtime contracts.UIRuntime,
+	check *modelCheckState, baseURL, apiKey string, locale contracts.LocaleService) {
+	baseURL = strings.TrimRight(strings.TrimSpace(baseURL), "/")
+	ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(design.Space2).Children(func() {
 		design.Apply(ui.Text(c, localized(locale,
-			"测试会使用当前输入，不会保存配置。",
-			"Tests the input above; nothing is saved.")),
-			t.TextMuted(design.TypeXXS)).MaxLines(2)
-		if baseURL == "" {
-			uikit.ErrorLine(c, localized(locale, "尚未配置服务地址", "No service URL configured"))
-		}
-		label := localized(locale, "测试当前输入", "Test current input")
-		busyLabel := localized(locale, "检查中…", "Checking…")
+			"测试连接使用当前输入，不会保存。",
+			"The connection test uses the current input and saves nothing.")),
+			t.TextMuted(design.TypeXXS)).Grow(1).MaxLines(1)
+		label := localized(locale, "测试连接", "Test connection")
+		busyLabel := localized(locale, "测试中…", "Testing…")
 		disabled := baseURL == ""
 		if check.running {
 			label = busyLabel
 			disabled = true
 		}
-		ui.Row(c).FillWidth().Justify(ui.End).AlignItems(ui.Center).Gap(design.Space2).Children(func() {
-			// The busy state is the official spinner with an accessible
-			// progress name; the button keeps its disabled logic.
-			buildBusySpinner(c, check.running, busyLabel)
-			button := design.Apply(ui.Button(c, label), t.SecondaryButton())
-			button.Disabled(disabled)
-			if button.Clicked() && !check.running && !disabled {
-				startModelCheck(runtime, check, baseURL, apiKey, locale)
-				c.Invalidate()
-			}
-		})
-		if check.result != "" {
-			if check.resultErr {
-				uikit.ErrorLine(c, check.result)
-			} else {
-				// The badge stays the short state; the detail carries the
-				// measured latency and the discovered models (ZK-14) as one
-				// bounded metadata line.
-				ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(design.Space2).Children(func() {
-					statusBadge(c, t, check.result, false)
-					detail := modelCheckDetailLabel(locale, check.modelCount, check.modelNames,
-						check.modelCountKnown, check.elapsed)
-					design.Apply(ui.Text(c, detail), t.Font(design.TypeXXS)).
-						TextColor(t.LabelTertiary).MaxLines(1)
-				})
-			}
+		// The busy state is the official spinner with an accessible progress
+		// name; the button keeps its disabled logic.
+		buildBusySpinner(c, check.running, busyLabel)
+		button := design.Apply(ui.Button(c, label), t.SecondaryButton())
+		button.Disabled(disabled)
+		if button.Clicked() && !check.running && !disabled {
+			startModelCheck(runtime, check, baseURL, apiKey, locale)
+			c.Invalidate()
 		}
+	})
+	if baseURL == "" {
+		design.Apply(ui.Text(c, localized(locale,
+			"填写 Base URL 后可测试连接。",
+			"Enter a Base URL to test the connection.")),
+			t.TextMuted(design.TypeXXS)).MaxLines(2)
+	}
+	if check.result == "" {
+		return
+	}
+	if check.resultErr {
+		uikit.ErrorLine(c, check.result)
+		return
+	}
+	// The badge stays the short state; the detail carries the measured latency
+	// and the discovered models (ZK-14) as one bounded metadata line.
+	ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(design.Space2).Children(func() {
+		statusBadge(c, t, check.result, false)
+		detail := modelCheckDetailLabel(locale, check.modelCount, check.modelNames,
+			check.modelCountKnown, check.elapsed)
+		design.Apply(ui.Text(c, detail), t.Font(design.TypeXXS)).
+			TextColor(t.LabelTertiary).MaxLines(1)
 	})
 }

@@ -196,24 +196,21 @@ func TestSessionSlashCommandExportSeam(t *testing.T) {
 
 // --- regenerate / retry -----------------------------------------------------
 
-// TestRegenerateInMessageActionRowAndCallsBackend covers the moved control:
-// regenerate is one icon action of the finished reply's action row (not a
-// full-width button under the message) and it calls the backend.
-func TestRegenerateInMessageActionRowAndCallsBackend(t *testing.T) {
+// TestRegenerateInMessageActionsMenuAndCallsBackend covers the compact meta row:
+// regenerate is one item of the finished reply's ⋯ menu (not a resident icon
+// action) and it calls the backend.
+func TestRegenerateInMessageActionsMenuAndCallsBackend(t *testing.T) {
 	chat := newExtendedChat()
 	chat.addSession(contracts.ChatSession{ID: "sess-1", Title: "重生成", Messages: []contracts.ChatMessage{
-		{ID: "m1", Role: "user", Text: "你好"},
 		{ID: "m2", Role: "assistant", Text: "你好呀"},
 	}}, true)
 	h := newCommandHarness(t, chat)
 	tester := h.tester()
-	rect, ok := tester.Find("重新生成")
-	if !ok {
-		t.Fatalf("regenerate action missing; texts = %v", tester.Texts())
+	if _, ok := tester.Find("重新生成"); ok {
+		t.Fatalf("regenerate rendered as a resident action; texts = %v", tester.Texts())
 	}
-	if rect.W > 48 || rect.H > 48 || rect.W < 28 || rect.H < 28 {
-		t.Fatalf("regenerate target = %.0fx%.0f, want a 32x32 icon action", rect.W, rect.H)
-	}
+	h.click(tester, "消息操作")
+	h.assertTexts(tester, "重新生成")
 	h.click(tester, "重新生成")
 	_, regens := chat.calls()
 	if len(regens) != 1 || regens[0] != "sess-1" {
@@ -253,20 +250,19 @@ func TestRegenerateHiddenWithoutRegeneratorOrWhileRunning(t *testing.T) {
 		{ID: "m2", Role: "assistant", Text: "你好呀"},
 	}}, true)
 	h := newHarness(t, plain)
-	if _, ok := h.tester().Find("重新生成"); ok {
-		t.Fatal("regenerate action shown without a SessionRegenerator backend")
-	}
+	tester := h.tester()
+	h.click(tester, "消息操作")
+	h.assertNoTexts(tester, "重新生成")
 
-	// Streaming sessions hide the action even with a regenerator backend.
+	// Streaming sessions have no meta row at all, so no actions menu either.
 	running := newExtendedChat()
 	running.addSession(contracts.ChatSession{ID: "sess-1", Title: "运行中", Running: true,
 		Messages: []contracts.ChatMessage{
-			{ID: "m1", Role: "user", Text: "你好"},
 			{ID: "m2", Role: "assistant", Text: "生成中", Streaming: true},
 		}}, true)
 	h2 := newCommandHarness(t, running)
-	if _, ok := h2.tester().Find("重新生成"); ok {
-		t.Fatal("regenerate action shown while the turn streams")
+	if _, ok := h2.tester().Find("消息操作"); ok {
+		t.Fatal("message-actions entry shown while the turn streams")
 	}
 }
 
@@ -276,11 +272,11 @@ func TestRegenerateHiddenWithoutRegeneratorOrWhileRunning(t *testing.T) {
 func TestEmptyReplyCanBeRetried(t *testing.T) {
 	chat := newExtendedChat()
 	chat.addSession(contracts.ChatSession{ID: "sess-1", Title: "空回复", Messages: []contracts.ChatMessage{
-		{ID: "m1", Role: "user", Text: "你好"},
 		{ID: "m2", Role: "assistant", Text: ""},
 	}}, true)
 	h := newCommandHarness(t, chat)
 	tester := h.tester()
+	h.click(tester, "消息操作")
 	if _, ok := tester.Find("重新生成"); !ok {
 		t.Fatalf("regenerate action missing for an empty reply; texts = %v", tester.Texts())
 	}
@@ -294,11 +290,11 @@ func TestRegenerateErrorShown(t *testing.T) {
 	chat := newExtendedChat()
 	chat.regenErr = errors.New("backend unavailable")
 	chat.addSession(contracts.ChatSession{ID: "sess-1", Title: "错误", Messages: []contracts.ChatMessage{
-		{ID: "m1", Role: "user", Text: "你好"},
 		{ID: "m2", Role: "assistant", Text: "你好呀"},
 	}}, true)
 	h := newCommandHarness(t, chat)
 	tester := h.tester()
+	h.click(tester, "消息操作")
 	h.click(tester, "重新生成")
 	h.assertTexts(tester, "重新生成失败：backend unavailable")
 }

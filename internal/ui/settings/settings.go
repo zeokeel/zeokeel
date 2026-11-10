@@ -11,11 +11,11 @@
 // (Panel cards, the brand type scale, brand spacing/radii and the semantic
 // colors). Nothing is hand-drawn.
 //
-// The effective model configuration is read from ChatService.Config first (the
-// agent backend resolves module config, settings, and environment into it) and
-// from the settings store as a fallback. Saving writes the contracts.SettingsChat*
-// keys; the API key is never displayed in clear text and is only written when
-// the user types a new one (an empty API key field keeps the stored key).
+// The 模型 page owns two kinds of state with two different save semantics: the
+// model list (modelcatalog.models) applies immediately — every row carries its
+// own provider connection and one row is the default model, whose connection is
+// mirrored into chat.model/chat.baseURL/chat.apiKey — while the system prompt and
+// the runtime limits are explicit-save drafts persisted by the page footer.
 package settings
 
 import (
@@ -311,12 +311,12 @@ func languageChoice(code string) string {
 type Config struct {
 	// Title is the settings page title (default "模型").
 	Title string `json:"title"`
-	// ModelLabel labels the model input (default "模型").
-	ModelLabel string `json:"modelLabel"`
-	// BaseURLLabel labels the base URL input (default "Base URL").
+	// ModelLabel/BaseURLLabel/APIKeyLabel are kept for existing assembly
+	// configurations: the page no longer has one global connection form (every
+	// model row owns its connection), so they are not rendered.
+	ModelLabel   string `json:"modelLabel"`
 	BaseURLLabel string `json:"baseURLLabel"`
-	// APIKeyLabel labels the API key input (default "API Key").
-	APIKeyLabel string `json:"apiKeyLabel"`
+	APIKeyLabel  string `json:"apiKeyLabel"`
 	// SystemPromptLabel labels the system prompt text area (default "系统提示词").
 	SystemPromptLabel string `json:"systemPromptLabel"`
 	// SaveLabel labels the save button (default "保存").
@@ -331,37 +331,29 @@ type Config struct {
 	SaveAppearanceLabel string `json:"saveAppearanceLabel"`
 }
 
-// moduleState is the page's UI-local state. Drafts live across frames; the API
-// key draft starts empty because the stored key is never rendered.
+// moduleState is the page's UI-local state for its explicit-save fields. The
+// model list is not drafted here: it is the immediate-effect control surface and
+// always renders the persisted modelcatalog.models row.
 type moduleState struct {
-	model        string
-	baseURL      string
-	apiKey       string
 	systemPrompt string
 
-	apiKeySet bool
 	status    string
 	statusErr bool
 
-	// seenModel/seenBaseURL/seenSystemPrompt snapshot the persisted
-	// configuration the drafts were seeded from. The build compares it with the
-	// current effective config so a write from another surface (the provider
-	// page, a provider preset, a second window) refreshes the drafts instead of
-	// the stale draft silently overwriting it on the next save.
-	seenModel        string
-	seenBaseURL      string
+	// seenSystemPrompt snapshots the persisted prompt the draft was seeded from.
+	// The build compares it with the current effective config so a write from
+	// another surface refreshes the draft instead of the stale draft silently
+	// overwriting it on the next save.
 	seenSystemPrompt string
 
 	// runtimeOpen controls the model page's collapsed 高级选项 (runtime limits):
 	// the daily form stays short, the low-frequency knobs unfold on demand.
 	runtimeOpen bool
 
-	// Persistent input identities: the sync never rewrites a draft whose input
-	// holds the focus, so it can not replace text under the caret.
-	modelInput   ui.Handle
-	baseURLInput ui.Handle
-	apiKeyInput  ui.Handle
-	promptInput  ui.Handle
+	// promptInput is the persistent input identity of the system-prompt field:
+	// the sync never rewrites a draft whose input holds the focus, so it cannot
+	// replace text under the caret.
+	promptInput ui.Handle
 
 	// Runtime limit drafts (persisted by the page's footer Save) plus their
 	// per-field inline validation messages. An empty numeric draft means "use
@@ -393,9 +385,6 @@ type moduleState struct {
 // buildLabels is the resolved copy of one page build.
 type buildLabels struct {
 	title             string
-	modelLabel        string
-	baseURLLabel      string
-	apiKeyLabel       string
 	systemPromptLabel string
 	saveLabel         string
 }
@@ -624,7 +613,6 @@ func Module() *module.Descriptor[Config] {
 		notifications := &notificationsState{}
 		behavior := &behaviorState{}
 		memoryPage := &memoryPageState{sel: -1}
-		modelCheck := &modelCheckState{}
 		network := newNetworkState()
 		dataPrivacy := newDataPrivacyState()
 		diagnostics := &diagnosticsState{}
@@ -637,9 +625,6 @@ func Module() *module.Descriptor[Config] {
 		modelLabels := func() buildLabels {
 			return buildLabels{
 				title:             firstNonEmpty(cfg.Title, localized(locale, "模型", "Model")),
-				modelLabel:        firstNonEmpty(cfg.ModelLabel, localized(locale, "模型", "Model")),
-				baseURLLabel:      firstNonEmpty(cfg.BaseURLLabel, "Base URL"),
-				apiKeyLabel:       firstNonEmpty(cfg.APIKeyLabel, "API Key"),
 				systemPromptLabel: firstNonEmpty(cfg.SystemPromptLabel, localized(locale, "系统提示词", "System prompt")),
 				saveLabel:         firstNonEmpty(cfg.SaveLabel, localized(locale, "保存", "Save")),
 			}
@@ -660,7 +645,7 @@ func Module() *module.Descriptor[Config] {
 				zhTitle: "模型", enTitle: "Model", titleOverride: cfg.Title,
 				Build: func(c *ui.Context) {
 					syncer.sync()
-					buildPage(c, runtime, state, catalog, chat, modelLabels(), store, locale, modelCheck)
+					buildPage(c, runtime, state, catalog, chat, modelLabels(), store, locale)
 				},
 				Footer: func(c *ui.Context) {
 					uikit.DialogFooter(c, []uikit.DialogAction{{
@@ -672,12 +657,8 @@ func Module() *module.Descriptor[Config] {
 				},
 				Dirty: state.dirty,
 				Discard: func() {
-					state.discardDrafts(effectiveChatConfig(chat, store), chat, store)
-					modelCheck.running = false
-					modelCheck.result = ""
-					modelCheck.resultErr = false
-					modelCheck.modelCount = 0
-					modelCheck.modelCountKnown = false
+					state.discardDrafts(chat, store)
+					catalog.discardTransient()
 				},
 			},
 			{
@@ -1067,7 +1048,7 @@ func effectiveChatConfig(chat contracts.ChatService, store contracts.SettingsSer
 	return effective
 }
 
-// newState seeds the drafts from the effective chat config.
+// newState seeds the explicit-save drafts from the effective chat config.
 func newState(chat contracts.ChatService, store contracts.SettingsService) *moduleState {
 	state := &moduleState{}
 	state.seed(effectiveChatConfig(chat, store))
@@ -1075,16 +1056,12 @@ func newState(chat contracts.ChatService, store contracts.SettingsService) *modu
 	return state
 }
 
-// seed replaces the drafts with the persisted configuration and records it as
-// the snapshot the build compares against.
+// seed replaces the prompt draft with the persisted configuration and records
+// it as the snapshot the build compares against. The model list has no draft:
+// the page renders the persisted row and its edits apply immediately.
 func (st *moduleState) seed(cfg contracts.ChatConfig) {
-	st.model = cfg.Model
-	st.baseURL = cfg.BaseURL
 	st.systemPrompt = cfg.SystemPrompt
-	st.seenModel = cfg.Model
-	st.seenBaseURL = cfg.BaseURL
 	st.seenSystemPrompt = cfg.SystemPrompt
-	st.apiKeySet = strings.TrimSpace(cfg.APIKey) != ""
 }
 
 // runtimeRows reads the explicit runtime-limit settings rows: an empty value
@@ -1171,11 +1148,12 @@ func validateRuntimeDrafts(st *moduleState, locale contracts.LocaleService) bool
 	return st.iterationsErr == "" && st.contextBudgetErr == ""
 }
 
-// syncFromConfig refreshes the drafts when the persisted configuration changed
-// outside this page (the provider page's "Use", a preset write, another window,
-// the runtime-limit rows). It never overwrites a draft whose input holds the
-// focus, so the caret and the text being typed survive; the next frame after
-// the focus leaves syncs.
+// syncFromConfig refreshes the explicit-save drafts when the persisted
+// configuration changed outside this page (another settings page, a second
+// window, the runtime-limit rows). It never overwrites a draft whose input
+// holds the focus, so the caret and the text being typed survive; the next
+// frame after the focus leaves syncs. The model list is not part of this state:
+// it always renders the persisted row.
 func (st *moduleState) syncFromConfig(c *ui.Context, chat contracts.ChatService, store contracts.SettingsService) {
 	cfg := effectiveChatConfig(chat, store)
 	iterations, contextBudget := runtimeRows(store)
@@ -1183,16 +1161,13 @@ func (st *moduleState) syncFromConfig(c *ui.Context, chat contracts.ChatService,
 	if chat != nil {
 		moduleCfg = chat.Config()
 	}
-	if cfg.Model == st.seenModel && cfg.BaseURL == st.seenBaseURL &&
-		cfg.SystemPrompt == st.seenSystemPrompt &&
+	if cfg.SystemPrompt == st.seenSystemPrompt &&
 		iterations == st.seenMaxIterations && contextBudget == st.seenContextBudget &&
 		moduleCfg.MaxIterations == st.moduleMaxIterations &&
 		moduleCfg.ContextBudget == st.moduleContextBudget {
 		return
 	}
-	if st.modelInput.Focused(c) || st.baseURLInput.Focused(c) ||
-		st.apiKeyInput.Focused(c) || st.promptInput.Focused(c) ||
-		st.iterationsInput.Focused(c) || st.budgetInput.Focused(c) {
+	if st.promptInput.Focused(c) || st.iterationsInput.Focused(c) || st.budgetInput.Focused(c) {
 		return
 	}
 	st.seed(cfg)
@@ -1200,26 +1175,22 @@ func (st *moduleState) syncFromConfig(c *ui.Context, chat contracts.ChatService,
 }
 
 // discardDrafts throws the page's edits away: the drafts are re-seeded from the
-// persisted configuration and the transient status/test state is cleared, so a
+// persisted configuration and the transient status state is cleared, so a
 // reopened settings page shows the saved values and no "unsaved" hint.
-func (st *moduleState) discardDrafts(cfg contracts.ChatConfig, chat contracts.ChatService,
-	store contracts.SettingsService) {
-	st.seed(cfg)
+func (st *moduleState) discardDrafts(chat contracts.ChatService, store contracts.SettingsService) {
+	st.seed(effectiveChatConfig(chat, store))
 	st.seedRuntime(chat, store)
-	st.apiKey = ""
 	st.status = ""
 	st.statusErr = false
 }
 
-// dirty reports whether the drafts differ from the persisted configuration; a
-// typed API key counts as unsaved input. The immediate-write stream switch is
-// persisted on change and therefore never dirties the page.
+// dirty reports whether the explicit-save drafts differ from the persisted
+// configuration. The model list and the stream switch apply immediately and
+// therefore never dirty the page.
 func (st *moduleState) dirty() bool {
-	return st.model != st.seenModel || st.baseURL != st.seenBaseURL ||
-		st.systemPrompt != st.seenSystemPrompt ||
+	return st.systemPrompt != st.seenSystemPrompt ||
 		st.maxIterations != st.seenMaxIterations ||
-		st.contextBudget != st.seenContextBudget ||
-		strings.TrimSpace(st.apiKey) != ""
+		st.contextBudget != st.seenContextBudget
 }
 
 // statusRow renders the page's unsaved hint and its last save status. The
@@ -1286,109 +1257,27 @@ func inputLabel(locale contracts.LocaleService, label string) string {
 	return label + localized(locale, " 输入", " input")
 }
 
-// modelCatalogHint returns a localized, non-blocking warning when the model
-// draft is neither a model-catalog preset nor — once the connection check has
-// discovered a model list — one of the discovered ids. The endpoint accepts
-// unknown ids silently and may fall back to its own default model, so the page
-// says the name is kept while the id may not take effect (ZK-15). An empty
-// string means "show nothing".
-func modelCatalogHint(check *modelCheckState, store contracts.SettingsService, model string,
-	locale contracts.LocaleService) string {
-	model = strings.TrimSpace(model)
-	if model == "" || catalogHasModel(store, model) {
-		return ""
-	}
-	// A list is only known when the last check succeeded and its body parsed as
-	// an OpenAI-style model list; while a check runs it does not count as
-	// discovered evidence.
-	discovered := check != nil && !check.running && !check.resultErr &&
-		check.modelCountKnown && len(check.modelNames) > 0
-	if discovered && hasModelID(check.modelNames, model) {
-		return ""
-	}
-	if discovered {
-		return localized(locale,
-			"该模型不在内置/已发现目录中；保存后仍会使用该名称，端点可能回退到默认模型。",
-			"This model is not in the built-in/discovered catalog; it is still used as entered and the endpoint may fall back to its default.")
-	}
-	return localized(locale,
-		"该模型不在内置目录中；保存后仍会使用该名称，端点可能回退到默认模型。",
-		"This model is not in the built-in catalog; it is still used as entered and the endpoint may fall back to its default.")
-}
-
-// buildPage builds the model settings page: one explicit-save form (the page's
-// single primary action) plus the read-only effective context. The provider
-// presets only fill the drafts, so the whole page has one save semantic.
+// buildPage builds the model settings page. The model list is the page's model
+// control surface (add/edit/remove and the default model apply immediately);
+// the system prompt and the runtime limits are the only explicit-save drafts,
+// persisted by the page footer's Save.
 func buildPage(c *ui.Context, runtime contracts.UIRuntime, state *moduleState, catalog *catalogState,
 	chat contracts.ChatService, labels buildLabels, store contracts.SettingsService,
-	locale contracts.LocaleService, check *modelCheckState) {
+	locale contracts.LocaleService) {
 	t := design.Of(c)
-	// A write from another settings surface (provider page, another window)
+	// A write from another settings surface (another window, the runtime rows)
 	// refreshes the drafts before they render, so this page can never save a
 	// stale configuration over it.
 	state.syncFromConfig(c, chat, store)
+	effective := effectiveChatConfig(chat, store)
 	ui.Column(c).FillWidth().Gap(design.Space4).Children(func() {
 		uikit.PageHeader(c, labels.title, localized(locale,
-			"配置服务商连接与模型（系列、思考与采样设置）；连接表单点击「保存」，模型列表改动即时生效。",
-			"Configure the provider connection and models (family/thinking/generation). Save the connection form; model-list edits apply immediately."))
+			"模型列表的改动即时生效，可添加多个服务商的模型；页脚「保存」只保存提示词与运行参数。",
+			"Model-list changes apply immediately and can mix providers; the footer Save only stores the prompt and runtime options."))
 
-		uikit.Section(c, localized(locale, "快速预设", "Quick presets"), func(*ui.Context) {
-			buildProviderPresets(c, t, state, locale)
-		})
-
-		uikit.Section(c, localized(locale, "连接", "Connection"), func(*ui.Context) {
-			ui.Row(c).FillWidth().Gap(design.Space3).AlignItems(ui.Start).Children(func() {
-				ui.Column(c).FillWidth().Grow(1).Children(func() {
-					ui.Field(c, labels.modelLabel, func() {
-						ui.TextInput(c, &state.model).Label(inputLabel(locale, labels.modelLabel)).
-							Bind(&state.modelInput).FillWidth()
-					}).Description(localized(locale,
-						"服务商提供的模型 ID，例如 deepseek-chat。",
-						"The model ID the provider exposes, for example deepseek-chat."))
-				})
-				ui.Column(c).FillWidth().Grow(1).Children(func() {
-					ui.Field(c, labels.baseURLLabel, func() {
-						ui.TextInput(c, &state.baseURL).Label(inputLabel(locale, labels.baseURLLabel)).
-							Bind(&state.baseURLInput).FillWidth()
-					}).Description(localized(locale,
-						"OpenAI 兼容接口，例如 https://api.deepseek.com/v1。",
-						"OpenAI-compatible endpoint, for example https://api.deepseek.com/v1."))
-				})
-			})
-			// ZK-15: a restrained, non-blocking hint next to the model draft.
-			// Unknown ids are accepted and saved, but the endpoint may silently
-			// fall back to its default model, so the user is told.
-			if hint := modelCatalogHint(check, store, state.model, locale); hint != "" {
-				design.Apply(ui.Text(c, hint), t.Font(design.TypeXXS)).
-					TextColor(t.WarningText).MaxLines(2)
-			}
-			apiKeyDescription := localized(locale, "未设置；密钥只保存在本机。",
-				"Not configured; the key is stored locally only.")
-			if state.apiKeySet {
-				apiKeyDescription = localized(locale, "已设置（留空保持不变）。",
-					"Configured (leave this blank to keep it).")
-			}
-			ui.Field(c, labels.apiKeyLabel, func() {
-				// A key is a credential: the official Password mode hides it and
-				// keeps it out of the clipboard.
-				ui.TextInput(c, &state.apiKey).Label(inputLabel(locale, labels.apiKeyLabel)).
-					Bind(&state.apiKeyInput).Password().
-					Placeholder(localized(locale, "输入新的 API key；留空保持不变",
-						"Enter a new API key; leave blank to keep")).
-					FillWidth()
-			}).Description(apiKeyDescription)
-		})
-
-		// H2: the check tests the drafts shown above (never the saved store),
-		// with the stored key only as the documented "blank keeps it" fallback.
-		testAPIKey := firstNonEmpty(strings.TrimSpace(state.apiKey),
-			effectiveChatConfig(chat, store).APIKey)
-		buildModelCheckPanel(c, t, runtime, check, state.model, state.baseURL, testAPIKey, locale)
-
-		// One page owns the model configuration: the provider connection above
-		// and the model list here (the old 模型/模型目录 split duplicated the
-		// mental model and scattered the same settings across two pages).
-		buildModelCatalogSection(c, store, catalog, locale)
+		// One page owns the model configuration: every row carries its own
+		// provider connection and one row is the default model.
+		buildModelCatalogSection(c, runtime, store, catalog, locale, effective.BaseURL, effective.APIKey)
 
 		uikit.Section(c, localized(locale, "提示词", "Prompt"), func(*ui.Context) {
 			ui.Field(c, labels.systemPromptLabel, func() {
@@ -1400,7 +1289,7 @@ func buildPage(c *ui.Context, runtime contracts.UIRuntime, state *moduleState, c
 		})
 
 		// Runtime limits are low-frequency knobs: a native disclosure keeps the
-		// daily model form (connection, check, prompt) short. The numeric drafts
+		// daily model form (model list, prompt) short. The numeric drafts
 		// still save with the page footer; the stream switch applies immediately.
 		ui.Collapsible(c, localized(locale, "高级选项", "Advanced options"), &state.runtimeOpen, func() {
 			uikit.Section(c, localized(locale, "运行参数", "Runtime"), func(*ui.Context) {
@@ -1513,10 +1402,13 @@ func buildPage(c *ui.Context, runtime contracts.UIRuntime, state *moduleState, c
 		// fixed footer; the body keeps the unsaved/saved status line.
 		statusRow(c, t, state, locale)
 
-		// Read-only effective configuration: reads the store/backend values that
-		// actually apply, never the unsaved drafts (an unsaved model edit must
-		// not report itself as current).
-		effective := effectiveChatConfig(chat, store)
+		// Read-only effective configuration: the default model is the row the
+		// composer and the request path use (the list's default), never a draft.
+		models, _ := catalogModels(store)
+		defaultModel := contracts.DefaultModelID(models, store)
+		if defaultModel == "" {
+			defaultModel = strings.TrimSpace(effective.Model)
+		}
 		active := strings.TrimSpace(chat.ActiveSession())
 		if active == "" {
 			active = localized(locale, "无活动会话", "No active session")
@@ -1524,8 +1416,8 @@ func buildPage(c *ui.Context, runtime contracts.UIRuntime, state *moduleState, c
 		uikit.Section(c, localized(locale, "当前", "Current"), func(*ui.Context) {
 			uikit.KeyValueRows(c, []uikit.KeyValue{
 				{Key: localized(locale, "当前会话", "Current session"), Value: active},
-				{Key: localized(locale, "当前模型", "Current model"),
-					Value: firstNonEmpty(effective.Model,
+				{Key: localized(locale, "默认模型", "Default model"),
+					Value: firstNonEmpty(defaultModel,
 						localized(locale, "未配置", "Not configured"))},
 			})
 		})
@@ -1698,23 +1590,17 @@ func applyDesktopSetting(state *appearanceState, store contracts.SettingsService
 	state.statusErr = false
 }
 
-// save writes the draft to the settings store. The API key is only written when
-// the user typed one, and the plaintext draft is cleared afterwards so it never
-// lingers in UI state. The effective-config snapshot is recorded so the page
-// renders as clean right after a successful save.
+// save writes the page's explicit-save drafts to the settings store: the system
+// prompt and the runtime limits. The model list (including the default model
+// mirror) is persisted by the list's own actions instead, because it applies
+// immediately. The runtime "use default" switches own their rows — an on switch
+// clears the row so the module config applies, an off switch writes the concrete
+// draft (an explicit "0" budget stays meaningful). The effective-config snapshot
+// is recorded so the page renders as clean right after a successful save.
 func save(state *moduleState, store contracts.SettingsService) error {
-	if err := store.Set(contracts.SettingsChatModel, state.model); err != nil {
-		return fmt.Errorf("model: %w", err)
-	}
-	if err := store.Set(contracts.SettingsChatBaseURL, state.baseURL); err != nil {
-		return fmt.Errorf("base URL: %w", err)
-	}
 	if err := store.Set(contracts.SettingsChatSystemPrompt, state.systemPrompt); err != nil {
 		return fmt.Errorf("system prompt: %w", err)
 	}
-	// Runtime limits: the "use default" switches own their rows — an on switch
-	// clears the row so the module config applies, an off switch writes the
-	// concrete draft (an explicit "0" budget stays meaningful).
 	if state.iterationsDefault {
 		state.maxIterations = ""
 	}
@@ -1729,15 +1615,6 @@ func save(state *moduleState, store contracts.SettingsService) error {
 	if err := store.Set(contracts.SettingsChatContextBudget, state.contextBudget); err != nil {
 		return fmt.Errorf("context budget: %w", err)
 	}
-	if key := strings.TrimSpace(state.apiKey); key != "" {
-		if err := store.Set(contracts.SettingsChatAPIKey, key); err != nil {
-			return fmt.Errorf("API key: %w", err)
-		}
-		state.apiKeySet = true
-	}
-	state.apiKey = ""
-	state.seenModel = state.model
-	state.seenBaseURL = state.baseURL
 	state.seenSystemPrompt = state.systemPrompt
 	state.seenMaxIterations = state.maxIterations
 	state.seenContextBudget = state.contextBudget

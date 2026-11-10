@@ -32,8 +32,8 @@ func assertSecretInputMasked(t *testing.T, h *harness, tester *ui.Tester, label,
 func TestModelAPIKeyInputIsPasswordMode(t *testing.T) {
 	store := newFakeSettings(nil)
 	h := newHarness(t, &fakeChat{}, store, settings.Config{})
-	tester := h.tester()
-	tester.Frame()
+	tester := openModelPage(t, h)
+	openAddModal(t, h, tester)
 	assertSecretInputMasked(t, h, tester, "API Key 输入", "sk-model-secret")
 }
 

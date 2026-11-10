@@ -263,6 +263,60 @@ func main() {
 	}
 	a.render(outDir + "/p1-chat.png")
 
+	// Density pass evidence (A+B): a fresh single-turn conversation (so the
+	// frames are deterministic) shows the folded activity band, the message
+	// menu and the compact usage details.
+	if chatSvc, chatErr := a.root.Require(contracts.KeyChat); chatErr == nil {
+		previousSession := chatSvc.ActiveSession()
+		if evidenceID, newErr := chatSvc.NewSession("过程与动作区"); newErr == nil && evidenceID != "" {
+			server.Reset()
+			if sendErr := chatSvc.Send(evidenceID, "帮我建一个发布检查任务，然后继续"); sendErr == nil {
+				if approvalsSvc, approveErr := a.root.Require(contracts.KeyApprovals); approveErr == nil {
+					waitPending(approvalsSvc, 5*time.Second)
+					for _, pending := range approvalsSvc.Pending() {
+						_ = approvalsSvc.Resolve(pending.ID, contracts.ApprovalAllow)
+					}
+				}
+				waitIdle(chatSvc, evidenceID, 10*time.Second)
+				if err := a.ui.Navigator().Push("session"); err == nil {
+					a.tester.Frame()
+					a.render(outDir + "/p2-process-fold.png")
+					// The summary's accessible name carries the live counts, so
+					// click it by its stable prefix.
+					clickProcess := func() bool {
+						for _, text := range a.tester.Texts() {
+							if strings.HasPrefix(text, "过程 ·") {
+								if err := a.tester.Click(text); err == nil {
+									a.tester.Frame()
+									return true
+								}
+							}
+						}
+						return false
+					}
+					if clickProcess() {
+						a.render(outDir + "/p2-process-expanded.png")
+						clickProcess()
+					}
+					if err := a.tester.Click("消息操作"); err == nil {
+						a.tester.Frame()
+						a.render(outDir + "/p2-message-actions.png")
+						if err := a.tester.Click("用量明细"); err == nil {
+							a.tester.Frame()
+							a.render(outDir + "/p2-message-usage.png")
+							a.tester.Key(0, ui.KeyEscape)
+							a.tester.Frame()
+						}
+						a.tester.Key(0, ui.KeyEscape)
+						a.tester.Frame()
+					}
+				}
+				_ = chatSvc.SetActiveSession(previousSession)
+				_ = chatSvc.DeleteSession(evidenceID)
+			}
+		}
+	}
+
 	// Composer slash commands (the old shell's command menu).
 	if sendRect, ok := a.tester.Find("发送"); ok {
 		a.tester.ClickAt(sendRect.X-120, sendRect.Y-50)
@@ -473,13 +527,35 @@ func main() {
 		a.tester.Frame()
 	}
 
-	// Composer model menu (catalog presets + per-session switch).
+	// Composer model menu: the chip opens two compact entries (模型 / 推理等级)
+	// and the real choices live one level down (models grouped by provider,
+	// reasoning levels per model).
 	if err := a.tester.Click("snapshot-model"); err == nil {
 		a.tester.Frame()
 		a.render(outDir + "/p2-modelmenu.png")
-		if err := a.tester.Click("DeepSeek Reasoner"); err == nil {
+		// The first level starts on the 模型 row: Down/Right opens its submenu
+		// without choosing anything yet.
+		a.tester.Key(0, ui.KeyDown)
+		a.tester.Key(0, ui.KeyRight)
+		a.render(outDir + "/p2-modelmenu-models.png")
+		a.tester.Key(0, ui.KeyEscape)
+		a.tester.Frame()
+		// Move to the 推理等级 row and open its submenu.
+		a.tester.Key(0, ui.KeyDown)
+		a.tester.Key(0, ui.KeyRight)
+		a.render(outDir + "/p2-modelmenu-thinking.png")
+		a.tester.Key(0, ui.KeyEscape)
+		a.tester.Key(0, ui.KeyEscape)
+		a.tester.Frame()
+		// Switch the session model through the grouped 模型 submenu.
+		if err := a.tester.Click("snapshot-model"); err == nil {
 			a.tester.Frame()
-			a.render(outDir + "/p2-model-switched.png")
+			if err := a.tester.ChooseMenuItem("模型", "DeepSeek Reasoner"); err == nil {
+				a.tester.Frame()
+				a.render(outDir + "/p2-model-switched.png")
+			} else {
+				fmt.Println("choose model:", err)
+			}
 		}
 	}
 
@@ -709,6 +785,45 @@ func main() {
 		fmt.Println("click model settings:", err)
 	}
 	a.render(outDir + "/p2-model-settings.png")
+	// The model list is the only model source: the add/edit dialogs carry the
+	// per-model provider connection (provider preset, Base URL, API key,
+	// connection test) and the default-model switch.
+	if err := a.tester.Click("添加模型"); err == nil {
+		a.render(outDir + "/p2-model-add.png")
+		a.tester.Key(0, ui.KeyEscape)
+		a.tester.Frame()
+	}
+	if err := a.tester.Click("编辑模型 snapshot-model"); err == nil {
+		a.render(outDir + "/p2-model-edit.png")
+		a.tester.Key(0, ui.KeyEscape)
+		a.tester.Frame()
+	}
+	// Empty list: there are no built-in default models any more, so a cleared
+	// list is a supported first-run state with an explicit add entry. Clearing
+	// the list also clears the default-model mirror, exactly like removing the
+	// last model on the page does.
+	if store, ok := a.root.Get(contracts.KeySettings); ok && store != nil {
+		_ = store.Set(contracts.SettingModelCatalogModels, "[]")
+		for _, key := range []string{
+			contracts.SettingsChatModel,
+			contracts.SettingsChatBaseURL,
+			contracts.SettingsChatAPIKey,
+		} {
+			_ = store.Set(key, "")
+		}
+		a.ui.Runtime().Invalidate()
+		a.render(outDir + "/p2-model-empty.png")
+		_ = store.Set(contracts.SettingModelCatalogModels, snapshotModelCatalog(server.URL()))
+		for key, value := range map[string]string{
+			contracts.SettingsChatModel:   "snapshot-model",
+			contracts.SettingsChatBaseURL: server.URL(),
+			contracts.SettingsChatAPIKey:  "",
+		} {
+			_ = store.Set(key, value)
+		}
+		a.ui.Runtime().Invalidate()
+		a.tester.Frame()
+	}
 	if err := a.clickSettingsItem("外观"); err != nil {
 		fmt.Println("click appearance:", err)
 	}
@@ -943,7 +1058,7 @@ func main() {
 	}
 	// Narrow-window and dark-theme evidence: the responsive shell and the dark
 	// theme are part of the design review, so each snapshot run renders them
-	// too (the desktop default window is 1280x800).
+	// too (the desktop default window is 1512x944).
 	if err := a.ui.Navigator().Push("session"); err != nil {
 		fmt.Println("push session for narrow:", err)
 	}
@@ -962,7 +1077,7 @@ func main() {
 	a.tester.Frame()
 	a.render(outDir + "/narrow/narrow-settings.png")
 	a.ui.Navigator().CloseSettings()
-	a.tester.SetSize(1280, 800)
+	a.tester.SetSize(1512, 944)
 	a.tester.Frame()
 	a.ui.Theme().SetDark(true)
 	a.tester.Frame()
@@ -1041,6 +1156,15 @@ func writeManifest(outDir string) {
 	}
 }
 
+// snapshotModelCatalog is the seeded model list the snapshot app boots with:
+// three rows covering the default model, a shared provider connection and a
+// per-model API key. The first row is the default model (chat.model).
+func snapshotModelCatalog(baseURL string) string {
+	return `[{"id":"snapshot-model","name":"snapshot-model","note":"快照脚本模型","contextWindow":128000,"baseURL":"` + baseURL + `"},` +
+		`{"id":"deepseek-chat","name":"DeepSeek Chat","note":"通用对话","contextWindow":128000,"baseURL":"https://api.deepseek.com/v1","apiKey":"sk-snapshot-demo"},` +
+		`{"id":"deepseek-reasoner","name":"DeepSeek Reasoner","note":"深度推理","contextWindow":128000,"baseURL":"https://api.deepseek.com/v1"}]`
+}
+
 func boot(baseURL, dataDir string) *app {
 	root := cordis.Root()
 	uiRoot := uiroot.New(uiroot.Config{AppName: "ZeoKeel"})
@@ -1057,15 +1181,9 @@ func boot(baseURL, dataDir string) *app {
 	provide(root, contracts.KeyGoalTracker, contracts.GoalTracker(uiRoot.GoalTracker()))
 	provide(root, contracts.KeyNotifier, contracts.Notifier(uiRoot.Notifier()))
 	provide(root, contracts.KeySettings, contracts.SettingsService(&settings{values: map[string]string{
-		contracts.SettingsChatModel:   "snapshot-model",
-		contracts.SettingsChatBaseURL: baseURL,
-		// A catalog entry for the scripted model so the usage strip can show a
-		// context window and the remaining percentage (the built-in catalog does
-		// not know "snapshot-model"); the DeepSeek entries keep the existing
-		// model-menu snapshots meaningful.
-		contracts.SettingModelCatalogModels: `[{"id":"snapshot-model","name":"snapshot-model","note":"快照脚本模型","contextWindow":128000},` +
-			`{"id":"deepseek-chat","name":"DeepSeek Chat","note":"通用对话","contextWindow":128000},` +
-			`{"id":"deepseek-reasoner","name":"DeepSeek Reasoner","note":"深度推理","contextWindow":128000}]`,
+		contracts.SettingsChatModel:         "snapshot-model",
+		contracts.SettingsChatBaseURL:       baseURL,
+		contracts.SettingModelCatalogModels: snapshotModelCatalog(baseURL),
 		// A demo MCP server whose connection fails fast, so the plugins page
 		// shows a diagnostic entry whose details can be expanded.
 		contracts.SettingMCPServers: `[{"name":"demo-mcp","url":"http://127.0.0.1:1/mcp"}]`,
@@ -1075,7 +1193,7 @@ func boot(baseURL, dataDir string) *app {
 	if err != nil {
 		fail("load", err)
 	}
-	a := &app{ui: uiRoot, tester: ui.NewTester(uiRoot.View, 1280, 800), loader: loader, root: root}
+	a := &app{ui: uiRoot, tester: ui.NewTester(uiRoot.View, 1512, 944), loader: loader, root: root}
 	a.cleanup = func() {
 		_ = loader.Close()
 		_ = root.DisposeAll()
@@ -1213,6 +1331,10 @@ func newScriptedServer() *scriptedServer {
 
 func (s *scriptedServer) URL() string { return s.srv.URL }
 func (s *scriptedServer) Close()      { s.srv.Close() }
+
+// Reset makes the next model request the scripted approval turn again, so a
+// snapshot scenario can seed a deterministic tool-call conversation.
+func (s *scriptedServer) Reset() { s.calls.Store(0) }
 
 // SetSlow makes the next (non-approval) scripted reply stream one delta and
 // then wait for ReleaseSlow.
