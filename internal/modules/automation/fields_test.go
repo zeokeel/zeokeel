@@ -117,7 +117,7 @@ func TestRunTaskSwitchFailuresAreWarnings(t *testing.T) {
 	chat.workspaceErr = errors.New("workspace boom")
 	chat.permissionErr = errors.New("permission boom")
 	logger := &fakeLogger{}
-	service, err := newService(t.TempDir(), Config{TickMs: 3600000}, logger, chat)
+	service, err := newService(t.TempDir(), Config{TickMs: 3600000}, logger, chat, nil)
 	if err != nil {
 		t.Fatalf("newService: %v", err)
 	}

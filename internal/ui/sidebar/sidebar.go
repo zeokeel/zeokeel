@@ -24,12 +24,15 @@
 // opens the workspace and starts a conversation in it.
 //
 // The list shows user conversations only: archived sessions are owned by the
-// settings surface's archive page, and automation-run sessions (the
-// automation module's "自动化: <task>" chats) are owned by the Automation
-// screen's run history. Neither ever renders as a row, a tree leaf or a
-// search result. The sidebar is also the landing surface: there is no Home
-// navigation row (the home screen stays registered for the host), so the new
-// chat action and the session list are the destinations the sidebar offers.
+// settings surface's archive page, and sessions with a non-user explicit
+// provenance (contracts.ChatSessionInfo.Origin — automation-run sessions and
+// subagent children) are owned by their own surfaces. Hiding is provenance
+// based, never title based: a user conversation whose title merely starts with
+// the automation module's "自动化: " convention stays visible. Hidden sessions
+// never render as a row, a tree leaf or a search result. The sidebar is also
+// the landing surface: there is no Home navigation row (the home screen stays
+// registered for the host), so the new chat action and the session list are the
+// destinations the sidebar offers.
 //
 // The product has exactly one view: groups are ordered by recent activity and
 // sessions by UpdatedAt (pinned first) inside them; there is no view menu and
@@ -476,10 +479,11 @@ func buildMessageSearch(c *ui.Context, t *design.Tokens, chat contracts.ChatServ
 		hits, err := searcher.SearchMessages(context.Background(), query, maxMessageHits)
 		state.searchHits, state.searchErr = dedupeMessageHits(hits), err
 	}
-	// The search results are store-owned and carry no archive or run flag, so
-	// hidden conversations (archived sessions and automation runs) are filtered
-	// here on every frame: archiving or a finished run closes the conversation's
-	// rows immediately instead of waiting for a new query.
+	// The search results are store-owned and carry no archive or provenance
+	// flag, so hidden conversations (archived sessions and non-user origins such
+	// as automation runs) are filtered here on every frame: archiving or a
+	// finished run closes the conversation's rows immediately instead of waiting
+	// for a new query.
 	visibleHits := visibleMessageHits(state.searchHits, hiddenSessionIDs(chat), maxMessageHits)
 
 	ui.Column(c).FillWidth().Gap(design.Space1).Padding(design.Space2, 0, 0, 0).
@@ -1327,34 +1331,26 @@ func pinnedFirst(sessions []contracts.ChatSessionInfo) []contracts.ChatSessionIn
 	return ordered
 }
 
-// automationSessionTitlePrefix is the stable title prefix the automation module
-// puts on the chat session it creates for one scheduled run. Those sessions are
-// the run history's property, not user conversations: they never render in the
-// sidebar's session list, workspace tree or search results (the Automation
-// screen owns their history). The prefix is the product convention
-// (internal/modules/automation); the sidebar only reads it.
-const automationSessionTitlePrefix = "自动化: "
-
-// isAutomationSessionTitle reports whether a session title names an
-// automation-run session.
-func isAutomationSessionTitle(title string) bool {
-	return strings.HasPrefix(strings.TrimSpace(title), automationSessionTitlePrefix)
-}
-
-// isAutomationSession reports whether a session is an automation run's chat
-// session.
-func isAutomationSession(info contracts.ChatSessionInfo) bool {
-	return isAutomationSessionTitle(info.Title)
+// hasHiddenOrigin reports whether a session's explicit provenance marks it as
+// one the sidebar never shows. contracts.ChatSessionInfo.Origin is "" for a
+// user session and carries the creating surface otherwise (the automation
+// backend records "automation" for scheduled-run sessions, "subagent" for
+// child conversations); every non-user origin is hidden. The title is
+// deliberately not consulted: a user conversation may be titled "自动化: …"
+// without being an automation run (audit F6).
+func hasHiddenOrigin(info contracts.ChatSessionInfo) bool {
+	return strings.TrimSpace(info.Origin) != contracts.SessionOriginUser
 }
 
 // visibleSessions drops the sessions the sidebar never renders: archived
-// sessions (the settings surface's archive page owns them) and automation-run
-// sessions (the Automation screen's run history owns them). The remaining order
-// is untouched (updated newest first).
+// sessions (the settings surface's archive page owns them) and sessions with a
+// non-user origin (the Automation screen owns its run history; subagent
+// children are not user conversations). The remaining order is untouched
+// (updated newest first).
 func visibleSessions(sessions []contracts.ChatSessionInfo) []contracts.ChatSessionInfo {
 	visible := make([]contracts.ChatSessionInfo, 0, len(sessions))
 	for _, session := range sessions {
-		if session.Archived || isAutomationSession(session) {
+		if session.Archived || hasHiddenOrigin(session) {
 			continue
 		}
 		visible = append(visible, session)
@@ -1385,12 +1381,13 @@ func orderSessionList(sessions []contracts.ChatSessionInfo) []contracts.ChatSess
 
 // hiddenSessionIDs is the set of conversations the sidebar never shows, for
 // filtering the full-text search results (which come from the store and carry
-// no archive or run flag of their own): archived sessions and automation-run
-// sessions.
+// no archive or provenance flag of their own): archived sessions and sessions
+// with a non-user origin. The read model is the provenance source, so a user
+// title that merely looks like an automation run stays searchable.
 func hiddenSessionIDs(chat contracts.ChatService) map[string]bool {
 	hidden := make(map[string]bool)
 	for _, session := range chat.Sessions() {
-		if session.Archived || isAutomationSession(session) {
+		if session.Archived || hasHiddenOrigin(session) {
 			hidden[session.ID] = true
 		}
 	}
@@ -1398,13 +1395,14 @@ func hiddenSessionIDs(chat contracts.ChatService) map[string]bool {
 }
 
 // visibleMessageHits drops search hits of hidden conversations (archived and
-// automation-run sessions) and applies the row limit after that filter, so a
-// hidden conversation's messages never take a slot. A stored hit can outlive
-// its session in the read model, so the hit's own title is checked too.
+// non-user-origin sessions) and applies the row limit after that filter, so a
+// hidden conversation's messages never take a slot. The read model is the only
+// provenance source; a stored hit whose session is no longer in the read model
+// carries no provenance and is not guessed to be a run from its title.
 func visibleMessageHits(hits []contracts.MessageSearchHit, hidden map[string]bool, limit int) []contracts.MessageSearchHit {
 	visible := make([]contracts.MessageSearchHit, 0, len(hits))
 	for _, hit := range hits {
-		if hidden[hit.SessionID] || isAutomationSessionTitle(hit.SessionTitle) {
+		if hidden[hit.SessionID] {
 			continue
 		}
 		visible = append(visible, hit)

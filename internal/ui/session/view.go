@@ -45,6 +45,9 @@ func buildScreen(
 	st *state,
 ) {
 	t := design.Of(c)
+	// A new visit of the conversation screen starts with no transient agent
+	// overlay open (the host builds only the current screen each frame).
+	st.noteScreenVisit()
 	// Keep the slash commands' registry titles in the host language (the
 	// command palette reads them directly). Only an actual language change
 	// rebuilds the registry; a stable frame never does.
@@ -111,7 +114,10 @@ func buildScreen(
 		// switcher is rebuilt for the new session's children).
 		st.agents.childID = ""
 		st.agents.crumbChosen = -1
-		st.agents.childOpen = false
+		st.closeAgentPopovers()
+		st.agents.childSending = false
+		st.agents.childSendErr = ""
+		st.agents.childSendSeq++
 	}
 	// Frame-time fallback for hosts that update the session state without an
 	// extra notification: retry the queue once the run has settled. When this
@@ -146,6 +152,10 @@ func buildScreen(
 			buildErrorLine(c, t, st.goalActionErr)
 		}
 		if strings.TrimSpace(st.agents.childID) != "" {
+			// A parent approval stays reachable in a child conversation: the
+			// inline banner is the only approval UI, so its slot renders above
+			// the child body (the parent composer dock is not part of it).
+			buildChildBannerDock(c, runtime)
 			// A child conversation takes the whole main content area: its own
 			// transcript/activity panes and, for a continuable teammate, its own
 			// send box (the parent composer and dock stay with the parent).
@@ -324,6 +334,14 @@ func registerInterruptShortcuts(c *ui.Context, chat contracts.ChatService, st *s
 		return
 	}
 	interruptEsc := func() {
+		// A child conversation is a read-only detour: Esc returns to the parent
+		// conversation instead of blind-denying the parent's approval card (the
+		// banner stays visible in the child view, but the user returns to the
+		// conversation to answer it) or stopping the hidden parent run.
+		if strings.TrimSpace(st.agents.childID) != "" {
+			st.exitChildView()
+			return
+		}
 		// A pending approval owns Esc first: deny the oldest request and keep the
 		// turn running (the user is answering the agent, not stopping it).
 		if denyPendingApproval(st, runtime) {
@@ -540,6 +558,18 @@ func buildComposerDock(c *ui.Context, t *design.Tokens, runtime contracts.UIRunt
 	ui.Row(c).FillWidth().Justify(ui.Center).Children(func() {
 		ui.Column(c).Width(design.TranscriptWidth).MaxWidthPercent(92).Gap(design.Space2).Children(func() {
 			buildGoalDock(c, t, runtime, st)
+			runtime.RenderSlot(c, contracts.SlotSessionBanner)
+		})
+	})
+}
+
+// buildChildBannerDock renders the host's session banner slot (the inline
+// approval card) above a child conversation, on the transcript's reading
+// measure: a pending parent approval must stay visible and reachable while the
+// user reads a child, since the inline card is the product's only approval UI.
+func buildChildBannerDock(c *ui.Context, runtime contracts.UIRuntime) {
+	ui.Row(c).FillWidth().Justify(ui.Center).Children(func() {
+		ui.Column(c).Width(design.TranscriptWidth).MaxWidthPercent(92).Children(func() {
 			runtime.RenderSlot(c, contracts.SlotSessionBanner)
 		})
 	})

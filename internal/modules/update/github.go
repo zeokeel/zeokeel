@@ -145,50 +145,71 @@ func (s *service) githubLatestReleaseURL() (string, error) {
 // pickGitHubAsset selects exactly one release asset for goos/goarch by the
 // release workflow's naming scheme (case-insensitive).
 //
-//	Windows: <...>-windows-<goarch>.tar.gz, then <...>-windows-<goarch>.exe;
-//	         setup installers are never selected.
-//	Linux:   <...>-linux-<goarch>.AppImage, then <...>-linux-<goarch>.tar.gz.
-//	macOS:   <...>-darwin-universal.tar.gz, then <...>-darwin-<goarch>.tar.gz;
-//	         .dmg files are never selected.
+//	Windows: <slug>-setup-<version>-<arch>.exe — the NSIS installer the in-app
+//	         updater runs. A portable <...>-windows-<arch>.exe is only a legacy
+//	         fallback for releases that shipped no installer; a tar.gz archive is
+//	         never selected (it cannot replace a per-user installed app).
+//	Linux:   <...>-linux-<arch>.AppImage, then <...>-linux-<arch>.tar.gz (older
+//	         releases only).
+//	macOS:   <slug>-<version>-<arch>.dmg — the signed disk image the updater
+//	         mounts; a universal <slug>-<version>.dmg is the fallback. tar.gz
+//	         archives are never selected.
 func pickGitHubAsset(assets []githubReleaseAsset, goos, goarch string) (githubReleaseAsset, bool) {
-	suffixes := githubAssetSuffixes(goos, goarch)
-	if len(suffixes) == 0 {
+	arch := strings.ToLower(strings.TrimSpace(goarch))
+	if arch == "" {
 		return githubReleaseAsset{}, false
 	}
-	platform := strings.ToLower(goos)
-	for _, suffix := range suffixes {
-		for _, asset := range assets {
-			name := strings.ToLower(strings.TrimSpace(asset.Name))
-			// Windows setup installers live alongside portable archives and
-			// must never be treated as an in-place update.
-			if platform == "windows" && strings.Contains(name, "setup") {
-				continue
-			}
-			if strings.HasSuffix(name, suffix) {
-				return asset, true
-			}
+	switch strings.ToLower(strings.TrimSpace(goos)) {
+	case "windows":
+		return pickWindowsAsset(assets, arch)
+	case "linux":
+		return pickAssetBySuffixes(assets, []string{
+			"-linux-" + arch + ".appimage",
+			"-linux-" + arch + ".tar.gz",
+		})
+	case "darwin":
+		return pickAssetBySuffixes(assets, []string{
+			"-" + arch + ".dmg",
+			// A darwin/universal build is published as <slug>-<version>.dmg,
+			// without an architecture token.
+			".dmg",
+		})
+	default:
+		return githubReleaseAsset{}, false
+	}
+}
+
+// pickWindowsAsset prefers the release's NSIS setup installer: it is the asset
+// the in-app updater runs, and the only one that updates an installed app.
+// Releases from before the installer existed carry a portable
+// <...>-windows-<arch>.exe, which the binary layout can still replace.
+func pickWindowsAsset(assets []githubReleaseAsset, arch string) (githubReleaseAsset, bool) {
+	for _, asset := range assets {
+		name := strings.ToLower(strings.TrimSpace(asset.Name))
+		if strings.Contains(name, "setup") && strings.HasSuffix(name, "-"+arch+".exe") {
+			return asset, true
+		}
+	}
+	for _, asset := range assets {
+		name := strings.ToLower(strings.TrimSpace(asset.Name))
+		if strings.HasSuffix(name, "-windows-"+arch+".exe") {
+			return asset, true
 		}
 	}
 	return githubReleaseAsset{}, false
 }
 
-// githubAssetSuffixes returns the acceptable asset-name suffixes in preference
-// order for one platform (nil for unsupported platforms).
-func githubAssetSuffixes(goos, goarch string) []string {
-	arch := strings.ToLower(strings.TrimSpace(goarch))
-	if arch == "" {
-		return nil
+// pickAssetBySuffixes returns the first asset matching one suffix, trying the
+// suffixes in preference order.
+func pickAssetBySuffixes(assets []githubReleaseAsset, suffixes []string) (githubReleaseAsset, bool) {
+	for _, suffix := range suffixes {
+		for _, asset := range assets {
+			if strings.HasSuffix(strings.ToLower(strings.TrimSpace(asset.Name)), suffix) {
+				return asset, true
+			}
+		}
 	}
-	switch strings.ToLower(strings.TrimSpace(goos)) {
-	case "windows":
-		return []string{"-windows-" + arch + ".tar.gz", "-windows-" + arch + ".exe"}
-	case "linux":
-		return []string{"-linux-" + arch + ".appimage", "-linux-" + arch + ".tar.gz"}
-	case "darwin":
-		return []string{"-darwin-universal.tar.gz", "-darwin-" + arch + ".tar.gz"}
-	default:
-		return nil
-	}
+	return githubReleaseAsset{}, false
 }
 
 // resolveGitHubSHA256 returns the lowercase hex SHA-256 of the chosen asset.

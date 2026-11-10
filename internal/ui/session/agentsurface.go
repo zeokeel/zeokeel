@@ -43,11 +43,20 @@ const (
 	agentHeaderCompactWidth float32 = design.TranscriptWidth * 2 / 3
 	// agentRowActionHeight is the compact inline action height.
 	agentRowActionHeight float32 = design.Space6
+	// maxGeneratedFileRows bounds the turn-tail cards' manual row list (the
+	// cards are one transcript row, so an unbounded list would make the row
+	// enormous); the header count keeps the full deduplicated total.
+	maxGeneratedFileRows = 8
 	// agentHeadingWeight is the heading weight of the agent surfaces' names and
 	// titles (600): the type roles carry no heading weight yet (DESIGN.md D6),
 	// so the surfaces name it once instead of repeating a raw literal.
 	agentHeadingWeight = 600
 )
+
+// jobsPollInterval is how often a frame with a running background job asks for
+// the next one: fine-grained enough to show a completion promptly, slow enough
+// to stay cheap while the user is idle.
+const jobsPollInterval = 500 * time.Millisecond
 
 // agentSurface is the UI-thread state of the agent surfaces: the overlay open
 // flags and their scroll/list state, the cached task-board snapshot (loaded
@@ -63,14 +72,15 @@ type agentSurface struct {
 	jobsOpen  bool
 
 	// The overlays' scroll offsets and list state (stable row identity).
-	teamScroll   ui.ScrollState
-	childScroll  ui.ScrollState
-	jobsScroll   ui.ScrollState
-	teamMembers  ui.ListState
-	teamTasks    ui.ListState
-	switcherList ui.ListState
-	jobsList     ui.ListState
-	activityList ui.ListState
+	teamScroll     ui.ScrollState
+	childScroll    ui.ScrollState
+	switcherScroll ui.ScrollState
+	jobsScroll     ui.ScrollState
+	teamMembers    ui.ListState
+	teamTasks      ui.ListState
+	switcherList   ui.ListState
+	jobsList       ui.ListState
+	activityList   ui.ListState
 
 	// tasks is the shared task board snapshot cached when the team overlay
 	// opens; tasksLoaded separates "not read yet" from "read, empty".
@@ -90,12 +100,52 @@ type agentSurface struct {
 	childSendErr  string
 	childReply    string
 	childReplyFor string
-	crumbChosen   int
+	// childSendSeq identifies the in-flight send: leaving/switching the child
+	// view bumps it, so a late answer from the abandoned call is dropped instead
+	// of landing on another child's view.
+	childSendSeq int
+	crumbChosen  int
 
 	// Background-job stop feedback: jobKilling is the id of the job whose kill
 	// is in flight (its stop action is disabled), jobErr the last failure.
 	jobKilling string
 	jobErr     string
+
+	// lastVisitFrame/lastVisitSet track the frame of the previous conversation
+	// screen build. The host rebuilds only the current screen, so a gap means
+	// another screen was shown in between; the transient overlays belong to one
+	// visit and are closed on the way back.
+	lastVisitFrame uint64
+	lastVisitSet   bool
+}
+
+// closeAgentPopovers closes every transient agent overlay (team, child switcher,
+// jobs). It is called when the conversation screen is left/returned to, when the
+// conversation switches, and when a child conversation opens or closes.
+func (st *state) closeAgentPopovers() {
+	st.agents.teamOpen = false
+	st.agents.childOpen = false
+	st.agents.jobsOpen = false
+}
+
+// noteScreenVisit closes the transient overlays when the conversation screen
+// was not the one rendered in the previous frame (a screen visit starts clean).
+// The host builds only the current screen every frame, so a frame gap is the
+// screen-navigation signal available to a screen module.
+func (st *state) noteScreenVisit() {
+	if st == nil || st.runtime == nil {
+		return
+	}
+	frame := st.runtime.Frame()
+	if st.agents.lastVisitSet && frame > st.agents.lastVisitFrame+1 {
+		st.closeAgentPopovers()
+		st.agents.childSending = false
+		st.agents.childSendErr = ""
+		st.agents.childSendSeq++
+		st.runtime.Invalidate()
+	}
+	st.agents.lastVisitFrame = frame
+	st.agents.lastVisitSet = true
 }
 
 // --- optional service lookups (nil-tolerant) --------------------------------
@@ -513,6 +563,13 @@ func agentTaskMeta(c *ui.Context, t *design.Tokens, text string) {
 // session's child agents (subagents plus team members), opening the switcher
 // overlay. It renders nothing while the session has no children.
 func buildSubagentEntry(c *ui.Context, t *design.Tokens, st *state, activeID string, compact bool) {
+	// One popover owner per state: while a child conversation is open the
+	// breadcrumb's switcher chip owns the child list. Rendering the header chip
+	// as well would bind the shared switcher ListState to two popovers and
+	// panic the header build ("Handle bound to two controls in one build").
+	if strings.TrimSpace(st.agents.childID) != "" {
+		return
+	}
 	children := st.childAgentService()
 	if children == nil {
 		return
@@ -570,7 +627,7 @@ func buildChildSwitcher(c *ui.Context, t *design.Tokens, st *state, agents []con
 		return
 	}
 	ui.Scroll(c).FillWidth().MaxHeight(design.DialogBodyMax).
-		TrackScroll(&st.agents.childScroll).Children(func() {
+		TrackScroll(&st.agents.switcherScroll).Children(func() {
 		ui.Column(c).FillWidth().Gap(design.Space2).Children(func() {
 			st.agents.switcherList.Key = func(index int) any {
 				if index < 0 || index >= len(agents) {
@@ -678,19 +735,30 @@ func (st *state) openChildView(childID string) {
 	st.agents.crumbChosen = -1
 	st.agents.teamOpen = false
 	st.agents.childOpen = false
+	st.agents.jobsOpen = false
 	st.agents.childReply = ""
 	st.agents.childReplyFor = ""
+	st.agents.childSending = false
 	st.agents.childSendErr = ""
+	st.agents.childSendSeq++
 	st.agents.childDraft = ""
 	st.agents.childFocus = true
 	st.agents.childScroll = ui.ScrollState{}
 	st.runtime.Invalidate()
 }
 
-// exitChildView returns the main content area to the parent conversation.
+// exitChildView returns the main content area to the parent conversation. The
+// transient overlays and the in-flight send belong to the child visit: leaving
+// closes them, so a later re-entry starts clean.
 func (st *state) exitChildView() {
 	st.agents.childID = ""
 	st.agents.crumbChosen = -1
+	st.agents.childOpen = false
+	st.agents.teamOpen = false
+	st.agents.jobsOpen = false
+	st.agents.childSending = false
+	st.agents.childSendErr = ""
+	st.agents.childSendSeq++
 	st.runtime.Invalidate()
 }
 
@@ -710,6 +778,12 @@ func buildJobsEntry(c *ui.Context, t *design.Tokens, st *state, compact bool) {
 		if job.Running {
 			running++
 		}
+	}
+	if running > 0 {
+		// The job service has no change notification: schedule the next frame
+		// while any job runs so the chip/overlay pick a completion up without
+		// another user interaction (each frame schedules the next poll).
+		c.After(jobsPollInterval)
 	}
 	label := fmt.Sprintf(st.tr("%d 个后台任务", "%d background tasks"), len(list))
 	tooltip := fmt.Sprintf(st.tr("%d 个任务 · %d 个运行中", "%d jobs · %d running"),
@@ -1202,10 +1276,17 @@ func (st *state) sendChildMessage(children contracts.ChildAgentService, childID 
 	st.agents.childSending = true
 	st.agents.childSendErr = ""
 	st.agents.childDraft = ""
+	st.agents.childSendSeq++
+	sequence := st.agents.childSendSeq
 	runtime := st.runtime
 	go func() {
 		answer, err := children.SendChildAgent(context.Background(), childID, message)
 		runtime.Post(func() {
+			// A send from a visit the user already left must not touch the
+			// current view (it may be another child or the same one reopened).
+			if sequence != st.agents.childSendSeq {
+				return
+			}
 			st.agents.childSending = false
 			if err != nil {
 				st.agents.childSendErr = st.tr("发送失败：", "Send failed: ") + err.Error()
@@ -1339,6 +1420,12 @@ func turnGeneratedFiles(messages []contracts.ChatMessage) generatedFiles {
 			continue
 		}
 		for _, call := range message.Tools {
+			// Only a successful call produced a file: a failed, cancelled,
+			// denied or still-running write must never be presented as
+			// delivered or edited (the cards offer actions on the path).
+			if uikit.ParseToolStatus(call.Status) != uikit.ToolStatusSuccess {
+				continue
+			}
 			path := generatedFileFromToolCall(call)
 			if path == "" {
 				continue
@@ -1382,10 +1469,14 @@ func generatedFileTool(name string) string {
 	}
 }
 
-// generatedFileFromToolCall reads the file path out of the call's JSON
-// arguments (the rig file tools use "path"; the aliases keep MCP-shaped tools
-// working). A call without a readable path is skipped instead of inventing one.
+// generatedFileFromToolCall reads the file path of one file-producing call: the
+// structured ToolCall.Path first (captured from the full arguments before the
+// transcript bounds them), then the JSON arguments for older records. A call
+// without a readable path is skipped instead of inventing one.
 func generatedFileFromToolCall(call contracts.ToolCall) string {
+	if path := strings.TrimSpace(call.Path); path != "" {
+		return strings.ReplaceAll(path, "\\", "/")
+	}
 	raw := strings.TrimSpace(call.Arguments)
 	if raw == "" || !strings.HasPrefix(raw, "{") {
 		return ""
@@ -1446,8 +1537,16 @@ func buildGeneratedFileCard(c *ui.Context, t *design.Tokens, st *state, icon *ui
 					TextColor(t.LabelTertiary)
 			}
 		})
-		for _, file := range files {
+		shown := files
+		if len(shown) > maxGeneratedFileRows {
+			shown = shown[:maxGeneratedFileRows]
+		}
+		for _, file := range shown {
 			buildGeneratedFileRow(c, t, st, file)
+		}
+		if hidden := len(files) - len(shown); hidden > 0 {
+			design.Apply(ui.Text(c, fmt.Sprintf(st.tr("还有 %d 个文件", "%d more files"), hidden)),
+				t.Font(design.TypeXXXS)).TextColor(t.LabelTertiary)
 		}
 	})
 }

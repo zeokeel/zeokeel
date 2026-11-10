@@ -54,6 +54,12 @@ type updateState struct {
 	installErr    string
 	pendingLoaded bool
 	pending       *contracts.UpdateInstallPlan
+	// installRunning marks that the host's immediate-install command ran and the
+	// app is about to quit; the page shows the honest installing state instead
+	// of a "restart to upgrade" promise it cannot keep by itself.
+	installRunning bool
+	// installRunErr is a failure running the host install command.
+	installRunErr string
 
 	// transient detects a new visit to the page, clearing the one-shot copy
 	// confirmation ("已复制") that belongs to the previous visit.
@@ -61,6 +67,72 @@ type updateState struct {
 }
 
 func newUpdateState() *updateState { return &updateState{} }
+
+// updateInstallCommandID is the host's immediate-install command: the shell
+// registers it when an update is ready to install, and running it launches the
+// platform installer and quits the app. A settings UI module may not import the
+// host, so the stable command ID is the cross-module contract (the same way the
+// settings module consumes other host command IDs).
+const updateInstallCommandID = "uiroot.install-update"
+
+// updateInstallCommand returns the host's immediate-install command when it is
+// registered. Presence is the availability contract: the host keeps the command
+// registered but may report Enabled=false until a pending plan exists (that hook
+// is for the command palette), while this page schedules the plan first and only
+// then runs the command. Every desktop build ships the command; a build without
+// it (headless, an embedder) falls back to the schedule-on-next-launch behavior.
+func updateInstallCommand(runtime contracts.UIRuntime) (contracts.CommandSpec, bool) {
+	if runtime == nil {
+		return contracts.CommandSpec{}, false
+	}
+	for _, command := range runtime.Commands() {
+		if command.ID == updateInstallCommandID {
+			return command, true
+		}
+	}
+	return contracts.CommandSpec{}, false
+}
+
+// updateInstallBehaviorCopy explains what installing actually does on the
+// running platform: the Windows setup runs, macOS replaces the app from the dmg
+// (opening the dmg for a manual drag when the location is not writable), Linux
+// installs the AppImage. The copy never describes another platform's installer.
+func updateInstallBehaviorCopy(locale contracts.LocaleService) string {
+	switch runtime.GOOS {
+	case "windows":
+		return localized(locale,
+			"Windows：会运行已下载的安装程序完成升级，随后应用自动退出。",
+			"Windows: runs the downloaded setup to upgrade, then the app quits.")
+	case "darwin":
+		return localized(locale,
+			"macOS：会从 dmg 替换应用；安装位置不可写时会打开 dmg，让你手动拖入。",
+			"macOS: replaces the app from the dmg; when the install location is not writable it opens the dmg for a manual drag.")
+	case "linux":
+		return localized(locale,
+			"Linux：会安装 AppImage 并重启应用。",
+			"Linux: installs the AppImage and restarts the app.")
+	default:
+		return localized(locale,
+			"会运行平台的安装步骤并重启应用。",
+			"Runs the platform install steps and restarts the app.")
+	}
+}
+
+// updateInstallNextLaunchCopy is the honest fallback when the host offers no
+// immediate-install command: the scheduled update is applied at the next start.
+func updateInstallNextLaunchCopy(locale contracts.LocaleService) string {
+	return localized(locale,
+		"下次启动应用时会自动安装。",
+		"The update installs automatically the next time the app starts.")
+}
+
+// updateInstallingCopy is the in-flight state shown once the host install
+// command ran: the installer is running and the app is exiting.
+func updateInstallingCopy(locale contracts.LocaleService) string {
+	return localized(locale,
+		"正在安装，应用即将退出…",
+		"Installing; the app will quit shortly…")
+}
 
 // buildUpdatePage renders the page: current version, the native check action,
 // the version/status result, the release-notes Markdown preview and the copy
@@ -139,6 +211,7 @@ func buildUpdatePage(c *ui.Context, t *design.Tokens, kctx cordis.Context, runti
 		// pending plan is read once when the page opens, so a plan scheduled in
 		// an earlier run is visible before any check.
 		installer, canInstall := updateService.(contracts.UpdateInstaller)
+		installCommand, hasInstallCommand := updateInstallCommand(runtime)
 		if canInstall && !st.pendingLoaded {
 			st.pendingLoaded = true
 			if plan, ok := installer.PendingInstall(); ok {
@@ -148,7 +221,8 @@ func buildUpdatePage(c *ui.Context, t *design.Tokens, kctx cordis.Context, runti
 		}
 		if st.pending != nil {
 			uikit.Section(c, localized(locale, "待安装", "Pending install"), func(*ui.Context) {
-				buildPendingInstall(c, t, *st.pending, locale)
+				buildPendingInstall(c, t, *st.pending, locale, runtime, st,
+					installCommand, hasInstallCommand)
 			})
 		}
 
@@ -205,36 +279,64 @@ func buildUpdatePage(c *ui.Context, t *design.Tokens, kctx cordis.Context, runti
 			}
 			if st.download != nil {
 				uikit.Section(c, localized(locale, "已下载", "Downloaded"), func(*ui.Context) {
-					buildUpdateDownloadResult(c, t, *st.download, locale)
+					buildUpdateDownloadResult(c, t, *st.download, locale, hasInstallCommand)
 				})
 			}
 		}
 
 		// Install action: only after a verified download, and only while no
-		// install is already pending/scheduled. It runs off the UI thread like
-		// the download; both actions are disabled while either is in flight.
+		// install is already pending/scheduled. Scheduling runs off the UI thread
+		// like the download; when the host registers its immediate-install
+		// command the page also runs it (on the UI thread, as CommandSpec
+		// requires) and shows the installing state while the app exits.
 		if canInstall {
-			if st.download != nil && st.pending == nil && st.install == nil {
-				installLabel := localized(locale, "安装并在下次启动生效", "Install and apply on next launch")
-				busyLabel := localized(locale, "安装中…", "Scheduling…")
-				if st.installing {
-					installLabel = busyLabel
-				}
-				buildBusyPrimaryAction(c, t, st.installing, installLabel, busyLabel,
-					st.downloading || st.installing, func() {
-						if !st.downloading && !st.installing {
-							startUpdateInstall(installer, runtime, st, *st.download)
-							c.Invalidate()
-						}
-					})
-			}
 			if st.installErr != "" {
 				uikit.ErrorLine(c, localized(locale,
 					"安装计划失败：", "Failed to schedule install: ")+st.installErr)
 			}
-			if st.install != nil {
+			if st.installRunErr != "" && st.pending == nil {
+				uikit.ErrorLine(c, localized(locale,
+					"安装失败：", "Install failed: ")+st.installRunErr)
+			}
+			if st.installRunning && st.pending == nil {
+				// The host command launched the installer and asked the app to
+				// quit: say so instead of promising the old restart-to-upgrade
+				// behavior (the bug this page had).
+				buildInstallingState(c, t, locale)
+			}
+			if st.download != nil && st.pending == nil && st.install == nil && !st.installRunning {
+				installLabel := localized(locale,
+					"安装并在下次启动生效", "Install and apply on next launch")
+				busyLabel := localized(locale, "安装中…", "Installing…")
+				if hasInstallCommand {
+					installLabel = localized(locale, "安装并重启", "Install and restart")
+				}
+				if st.installing {
+					installLabel = busyLabel
+				}
+				var command *contracts.CommandSpec
+				if hasInstallCommand {
+					selected := installCommand
+					command = &selected
+				}
+				disabled := st.downloading || st.installing
+				buildBusyPrimaryAction(c, t, st.installing, installLabel, busyLabel,
+					disabled, func() {
+						if st.downloading || st.installing {
+							return
+						}
+						startUpdateInstall(installer, runtime, st, *st.download, command)
+						c.Invalidate()
+					})
+				if hasInstallCommand {
+					design.Apply(ui.Text(c, updateInstallBehaviorCopy(locale)),
+						t.TextMuted(design.TypeXXXS)).MaxLines(3)
+				}
+			}
+			if st.install != nil && !st.installRunning {
 				uikit.Section(c, localized(locale, "安装计划", "Install plan"), func(*ui.Context) {
-					buildScheduledInstall(c, t, *st.install, locale)
+					buildScheduledInstall(c, t, *st.install, locale, runtime, st,
+						installCommand, hasInstallCommand)
 				})
 			}
 		}
@@ -287,6 +389,11 @@ func startUpdateCheck(service contracts.UpdateService, runtime contracts.UIRunti
 	st.download = nil
 	st.downloadErr = ""
 	st.installErr = ""
+	st.installRunErr = ""
+	// A new check discards the failed/scheduled plan state: after checking and
+	// downloading again the main install action must be available (F4).
+	st.install = nil
+	st.installRunning = false
 	runtime.Invalidate()
 	go func() {
 		info, err := service.Check(context.Background())
@@ -377,14 +484,18 @@ func startUpdateDownload(downloader contracts.UpdateDownloader, runtime contract
 	}()
 }
 
-// startUpdateInstall schedules the verified download for install on the next
-// launch, off the UI thread, and publishes the plan/error through UIRuntime.Post.
-func startUpdateInstall(installer contracts.UpdateInstaller, runtime contracts.UIRuntime, st *updateState, download contracts.UpdateDownload) {
+// startUpdateInstall schedules the verified download for install, off the UI
+// thread, and publishes the plan/error through UIRuntime.Post. When the host's
+// immediate-install command is available it runs from the post callback (UI
+// thread), after the plan is recorded, so the installer has a plan to apply.
+func startUpdateInstall(installer contracts.UpdateInstaller, runtime contracts.UIRuntime,
+	st *updateState, download contracts.UpdateDownload, command *contracts.CommandSpec) {
 	if st.installing {
 		return
 	}
 	st.installing = true
 	st.installErr = ""
+	st.installRunErr = ""
 	runtime.Invalidate()
 	go func() {
 		plan, err := installer.ScheduleInstall(download)
@@ -395,29 +506,95 @@ func startUpdateInstall(installer contracts.UpdateInstaller, runtime contracts.U
 			} else {
 				st.install = &plan
 				st.installErr = ""
+				if command != nil {
+					runUpdateInstallCommand(runtime, st, *command)
+				}
 			}
 			runtime.Invalidate()
 		})
 	}()
 }
 
-// buildPendingInstall shows an already scheduled install (from an earlier run)
-// before any check: the host applies it at the next start.
-func buildPendingInstall(c *ui.Context, t *design.Tokens, plan contracts.UpdateInstallPlan, locale contracts.LocaleService) {
+// runUpdateInstallCommand runs the host's immediate-install command on the UI
+// thread (contracts.CommandSpec.Run may be called there only): it launches the
+// platform installer and asks the app to quit. While it runs the page shows the
+// installing state; a failure is reported instead of pretending the update was
+// applied.
+func runUpdateInstallCommand(runtime contracts.UIRuntime, st *updateState, command contracts.CommandSpec) {
+	st.installRunErr = ""
+	st.installRunning = true
+	if err := command.Run(); err != nil {
+		st.installRunning = false
+		st.installRunErr = err.Error()
+	}
+	runtime.Invalidate()
+}
+
+// buildInstallingState renders the in-flight row after the host install command
+// ran: the app is about to exit.
+func buildInstallingState(c *ui.Context, t *design.Tokens, locale contracts.LocaleService) {
+	label := updateInstallingCopy(locale)
 	ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(design.Space2).Children(func() {
-		design.Apply(ui.Badge(c,
-			localized(locale, "待安装：", "Pending install: v")+strings.TrimSpace(plan.Version)),
-			t.Badge()).TextColor(t.WarningText)
-		if staged := strings.TrimSpace(plan.Path); staged != "" {
-			design.Apply(ui.Text(c, staged), t.Font(design.TypeXXXS), t.MonoFamily()).
-				TextColor(t.LabelTertiary).MaxLines(1).Ellipsis("…")
-		}
+		buildBusySpinner(c, true, label)
+		design.Apply(ui.Text(c, label), t.Font(design.TypeS)).TextColor(t.LabelPrimary)
 	})
 }
 
-// buildScheduledInstall renders the install plan scheduled in this session:
-// the badge plus the version and staged path the host will install on restart.
-func buildScheduledInstall(c *ui.Context, t *design.Tokens, plan contracts.UpdateInstallPlan, locale contracts.LocaleService) {
+// buildPendingInstall shows an already scheduled install (from an earlier run)
+// before any check. When the host registers its immediate-install command the
+// plan can be applied now (install and restart); otherwise the page keeps the
+// honest next-launch explanation.
+func buildPendingInstall(c *ui.Context, t *design.Tokens, plan contracts.UpdateInstallPlan,
+	locale contracts.LocaleService, runtime contracts.UIRuntime, st *updateState,
+	installCommand contracts.CommandSpec, hasInstallCommand bool) {
+	ui.Column(c).FillWidth().Gap(design.Space2).Children(func() {
+		ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(design.Space2).Children(func() {
+			design.Apply(ui.Badge(c,
+				localized(locale, "待安装：", "Pending install: v")+strings.TrimSpace(plan.Version)),
+				t.Badge()).TextColor(t.WarningText)
+			if staged := strings.TrimSpace(plan.Path); staged != "" {
+				design.Apply(ui.Text(c, staged), t.Font(design.TypeXXXS), t.MonoFamily()).
+					TextColor(t.LabelTertiary).MaxLines(1).Ellipsis("…")
+			}
+		})
+		if !hasInstallCommand {
+			design.Apply(ui.Text(c, updateInstallNextLaunchCopy(locale)),
+				t.Font(design.TypeXS)).TextColor(t.LabelSecondary).MaxLines(2)
+			return
+		}
+		if st.installRunErr != "" {
+			uikit.ErrorLine(c, localized(locale,
+				"安装失败：", "Install failed: ")+st.installRunErr)
+		}
+		if st.installRunning {
+			label := updateInstallingCopy(locale)
+			ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(design.Space2).Children(func() {
+				buildBusySpinner(c, true, label)
+				design.Apply(ui.Text(c, label), t.Font(design.TypeS)).TextColor(t.LabelPrimary)
+			})
+			return
+		}
+		design.Apply(ui.Text(c, updateInstallBehaviorCopy(locale)),
+			t.TextMuted(design.TypeXXXS)).MaxLines(3)
+		installLabel := localized(locale, "安装并重启", "Install and restart")
+		if st.installRunErr != "" {
+			installLabel = localized(locale, "重试安装并重启", "Retry install and restart")
+		}
+		buildBusyPrimaryAction(c, t, false, installLabel,
+			localized(locale, "安装中…", "Installing…"), false, func() {
+				runUpdateInstallCommand(runtime, st, installCommand)
+			})
+	})
+}
+
+// buildScheduledInstall renders the install plan scheduled in this session: the
+// badge plus the version and staged path. With the host install command it offers
+// an in-page retry that re-runs the command from the existing plan (no
+// re-scheduling), so a failed immediate install is not a dead end (F4); without
+// the command it keeps the honest next-launch explanation.
+func buildScheduledInstall(c *ui.Context, t *design.Tokens, plan contracts.UpdateInstallPlan,
+	locale contracts.LocaleService, runtime contracts.UIRuntime, st *updateState,
+	installCommand contracts.CommandSpec, hasInstallCommand bool) {
 	ui.Column(c).FillWidth().Gap(design.Space1).Children(func() {
 		ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(design.Space2).Children(func() {
 			design.Apply(ui.Badge(c, localized(locale, "已计划安装", "Install scheduled")), t.Badge()).
@@ -431,19 +608,42 @@ func buildScheduledInstall(c *ui.Context, t *design.Tokens, plan contracts.Updat
 			design.Apply(ui.Text(c, staged), t.Font(design.TypeXXS), t.MonoFamily()).
 				TextColor(t.LabelSecondary).MaxLines(1).Ellipsis("…")
 		}
+		if !hasInstallCommand {
+			design.Apply(ui.Text(c, updateInstallNextLaunchCopy(locale)),
+				t.Font(design.TypeXS)).TextColor(t.LabelSecondary).MaxLines(2)
+			return
+		}
+		if st.installRunErr != "" {
+			design.Apply(ui.Text(c, localized(locale,
+				"安装未完成，可直接重试。",
+				"The install did not finish; retry it here.")),
+				t.TextMuted(design.TypeXXXS)).MaxLines(2)
+		}
+		buildBusyPrimaryAction(c, t, false,
+			localized(locale, "重试安装并重启", "Retry install and restart"),
+			localized(locale, "安装中…", "Installing…"), false, func() {
+				runUpdateInstallCommand(runtime, st, installCommand)
+			})
 	})
 }
 
 // buildUpdateDownloadResult renders the staged-file summary of a verified
 // download: version/size/checksum, the staging path and the manual-install
 // note (replacing the running binary is a separate host step).
-func buildUpdateDownloadResult(c *ui.Context, t *design.Tokens, download contracts.UpdateDownload, locale contracts.LocaleService) {
+func buildUpdateDownloadResult(c *ui.Context, t *design.Tokens, download contracts.UpdateDownload,
+	locale contracts.LocaleService, canInstallNow bool) {
 	ui.Column(c).FillWidth().Gap(design.Space2).Children(func() {
 		ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(design.Space2).Children(func() {
 			design.Apply(ui.Badge(c, localized(locale, "已下载", "Downloaded")), t.Badge()).TextColor(t.SuccessText)
-			design.Apply(ui.Text(c, localized(locale,
+			downloadCopy := localized(locale,
 				"下载完成，可安排在下次启动安装。",
-				"Download complete; schedule it for the next launch.")),
+				"Download complete; schedule it for the next launch.")
+			if canInstallNow {
+				downloadCopy = localized(locale,
+					"下载完成，可立即安装并重启。",
+					"Download complete; install and restart now.")
+			}
+			design.Apply(ui.Text(c, downloadCopy),
 				t.Font(design.TypeXS)).TextColor(t.LabelSecondary)
 		})
 		for _, line := range updateDownloadSummary(download, locale) {

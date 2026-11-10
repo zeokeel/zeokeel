@@ -68,6 +68,12 @@ type ToolCall struct {
 	// Arguments is the raw JSON arguments of the call (empty when the provider
 	// reported none); ACP tool notifications and diagnostics render it.
 	Arguments string
+	// Path is the workspace-relative path for file-producing tools (write_file,
+	// edit_file, str_replace_editor, ...), captured from the full arguments
+	// before they are bounded in the transcript. Empty for non-file tools and
+	// restored/malformed calls; the generated-file cards use it as the primary
+	// source and fall back to parsing Arguments for older records.
+	Path string
 	// TextOffset is the assistant text length (in bytes) when the call was
 	// requested. The transcript renders text/tool cards in this order instead
 	// of drawing the whole reply above every call: 0 with text present means

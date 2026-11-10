@@ -39,7 +39,7 @@ Agent 客户端的 UI 不是 CRUD 页面，而是**推理与行动的外化**：
 | S6 | 用户提问 | `uikit.AskDialog` | `internal/uikit/ask.go`；interaction 只留 FIFO（Phase 3b） | 已有 |
 | S7 | Composer | `uikit.ComposerShell` | `internal/uikit/composer.go`；session/home 只留 toolbar/提交 slot（Phase 3c） | 已有 |
 | S8 | 运行态/流式/恢复 | `uikit.RunStatus` | `internal/uikit/runstatus.go`（Phase 3c） | 已有 |
-| S9 | 多 Agent / 团队 | `uikit.TeamSurface` | `internal/uikit/team.go`；rightpanel 只留数据/命令（Phase 3d） | 已有 |
+| S9 | 多 Agent / 团队 | 会话 agent surface（`session` 包） | `internal/ui/session/agentsurface.go`（Popover 团队/子代理/任务 + 主栏子会话视图）；旧 `uikit.TeamSurface` 已删除 | 已有（2026-11-10 重构） |
 
 > 错误展示是横跨所有 surface 的原语：`uikit.ErrorLine` 已有（RoleAlert + 可选中 + DangerText），大块错误用 `uikit.ErrorPanel`（待建，见 §2.6）。
 

@@ -6,7 +6,8 @@ name: Release
 # draft, every platform uploads into it, the central checksums step writes
 # SHA256SUMS.txt and the last step publishes it. In-app updates read this
 # release directly (no update-signing key): the update module picks the
-# update archive the release carries for the running platform.
+# platform installer (Windows setup exe / macOS dmg / Linux AppImage) the
+# release carries, and the host runs it in-app.
 #
 # Required repository secrets (set once by the maintainer):
 #   MACOS_CERT_P12, MACOS_CERT_PASSWORD  Developer ID Application .p12 + password
@@ -122,8 +123,9 @@ jobs:
           test -n "$dmg"
           xcrun stapler validate "$dmg"
           hdiutil verify "$dmg"
-          tar -czf "build/zeokeel-$(cat VERSION)-darwin-arm64.tar.gz" \
-            -C build/darwin-arm64 ZeoKeel.app
+          # The in-app updater mounts this dmg and replaces the app bundle; no
+          # tar.gz archive is published.
+          ls -l "$dmg"
 
       - name: Upload the macOS assets
         env:
@@ -131,8 +133,7 @@ jobs:
         run: |
           set -eu
           gh release upload "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --clobber \
-            build/darwin-arm64/*.dmg \
-            build/zeokeel-*-darwin-arm64.tar.gz
+            build/darwin-arm64/*.dmg
 
       - name: Clean up the signing keychain
         if: always()
@@ -156,36 +157,26 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y nsis librsvg2-bin
 
-      - name: Build the installers and the update archives
+      - name: Build the installers
         run: |
           set -eu
           bash scripts/build-app.sh -platform windows/amd64,windows/arm64
           version="$(cat VERSION)"
           for arch in amd64 arm64; do
             test -f "build/windows-$arch/zeokeel-setup-$version-$arch.exe"
-            # mygo does not emit an update archive without signed updates, so
-            # the release creates the per-platform archive the updater installs.
-            # Its single top-level directory is the layout the host installer
-            # expects; the Windows build dir has no icon.png (mygo embeds the
-            # icon in the exe), so the derived packaging icon is copied in.
-            stage="$(mktemp -d)"
-            mkdir -p "$stage/app"
-            cp "build/windows-$arch/ZeoKeel.exe" "build/windows-$arch/.mygo-files" "$stage/app/"
-            cp assets/icon.png "$stage/app/icon.png"
-            tar -czf "build/windows-$arch/zeokeel-$version-windows-$arch.tar.gz" -C "$stage" app
-            rm -rf "$stage"
           done
+          ls -l build/windows-amd64/zeokeel-setup-*.exe build/windows-arm64/zeokeel-setup-*.exe
 
       - name: Upload the Windows assets
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -eu
+          # The in-app updater runs these setup installers; no portable tar.gz
+          # archive can reliably replace a per-user installed Windows app.
           gh release upload "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --clobber \
             build/windows-amd64/zeokeel-setup-*.exe \
-            build/windows-arm64/zeokeel-setup-*.exe \
-            build/windows-amd64/zeokeel-*-windows-amd64.tar.gz \
-            build/windows-arm64/zeokeel-*-windows-arm64.tar.gz
+            build/windows-arm64/zeokeel-setup-*.exe
 
   build-linux:
     name: Linux AppImages

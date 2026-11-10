@@ -31,6 +31,10 @@ func TestScheduleInstallWritesKind(t *testing.T) {
 		{"1.2.0-zeokeel-1.2.0-darwin-universal.tar.gz", "archive"},
 		{"1.2.0-zeokeel-1.2.0-linux-amd64.tgz", "archive"},
 		{"1.2.0-zeokeel-1.2.0-linux-amd64.zip", "archive"},
+		{"1.2.0-zeokeel-setup-1.2.0-windows-amd64.exe", "installer"},
+		{"1.2.0-ZeoKeel-Setup-1.2.0-Windows-AMD64.EXE", "installer"},
+		{"1.2.0-zeokeel-1.2.0-arm64.dmg", "dmg"},
+		{"1.2.0-ZeoKeel-1.2.0-ARM64.DMG", "dmg"},
 		{"1.2.0-zeokeel-1.2.0-windows-amd64.exe", "binary"},
 		{"1.2.0-zeokeel", "binary"},
 	}
@@ -61,18 +65,62 @@ func TestScheduleInstallWritesKind(t *testing.T) {
 
 func TestPendingInstallKindDefaults(t *testing.T) {
 	cases := map[string]string{
-		"":          "binary",
-		"binary":    "binary",
-		"appimage":  "appimage",
-		"APPIMAGE":  "appimage",
-		"archive":   "archive",
-		"  tar":     "binary",
-		"installer": "binary",
+		"":               "binary",
+		"binary":         "binary",
+		"appimage":       "appimage",
+		"APPIMAGE":       "appimage",
+		"archive":        "archive",
+		"installer":      "installer",
+		"INSTALLER":      "installer",
+		"dmg":            "dmg",
+		"DMG":            "dmg",
+		"  tar":          "binary",
+		"nsis-installer": "binary",
 	}
 	for kind, want := range cases {
 		if got := pendingInstallKind(kind); got != want {
 			t.Fatalf("pendingInstallKind(%q) = %q, want %q", kind, got, want)
 		}
+	}
+}
+
+// TestInstallPlanCarriesKind pins the contracts.UpdateInstallPlan.Kind field: the
+// settings page and the host's immediate-install command need the staged asset
+// layout (installer/dmg/appimage/archive/binary) to know how to apply it.
+func TestInstallPlanCarriesKind(t *testing.T) {
+	cases := []struct {
+		stagedName string
+		wantKind   string
+	}{
+		{"1.2.0-zeokeel-setup-1.2.0-windows-amd64.exe", "installer"},
+		{"1.2.0-zeokeel-1.2.0-arm64.dmg", "dmg"},
+		{"1.2.0-zeokeel-1.2.0-linux-amd64.AppImage", "appimage"},
+		{"1.2.0-zeokeel-1.2.0-windows-amd64.tar.gz", "archive"},
+		{"1.2.0-zeokeel-1.2.0-windows-amd64.exe", "binary"},
+	}
+	for _, testCase := range cases {
+		t.Run(testCase.stagedName, func(t *testing.T) {
+			dataDir := t.TempDir()
+			// Write the staged file at the exact name the pending schema stores.
+			staged, sha := writeStaged(t, dataDir, testCase.stagedName, "staged content")
+			service := installService(t, dataDir)
+			plan, err := service.ScheduleInstall(contracts.UpdateDownload{
+				Version: "1.2.0", Path: staged, SHA256: sha,
+			})
+			if err != nil {
+				t.Fatalf("ScheduleInstall: %v", err)
+			}
+			if plan.Kind != testCase.wantKind {
+				t.Fatalf("ScheduleInstall plan.Kind = %q, want %q", plan.Kind, testCase.wantKind)
+			}
+			pending, ok := service.PendingInstall()
+			if !ok {
+				t.Fatal("PendingInstall rejected a valid plan")
+			}
+			if pending.Kind != testCase.wantKind {
+				t.Fatalf("PendingInstall plan.Kind = %q, want %q", pending.Kind, testCase.wantKind)
+			}
+		})
 	}
 }
 
@@ -98,5 +146,9 @@ func TestPendingInstallBackwardCompatibleWithoutKind(t *testing.T) {
 	}
 	if plan.Version != "1.2.0" || plan.Path != staged || plan.SHA256 != sha {
 		t.Fatalf("PendingInstall = %+v, want the old plan", plan)
+	}
+	// A plan without a kind predates installers: it applies as a binary.
+	if plan.Kind != "binary" {
+		t.Fatalf("old plan kind = %q, want binary", plan.Kind)
 	}
 }

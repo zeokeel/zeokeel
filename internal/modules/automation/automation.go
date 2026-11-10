@@ -75,7 +75,11 @@ func Module() *module.Descriptor[Config] {
 		if err != nil {
 			return fmt.Errorf("%s: require chat service: %w", ModuleID, err)
 		}
-		service, err := newService(dataDir, cfg, logger, chat)
+		// The settings store is optional: it only records the origin of the
+		// sessions the runs create, so a host without it still runs tasks (the
+		// session read model then reports no provenance).
+		settings, _ := ctx.Get(contracts.KeySettings)
+		service, err := newService(dataDir, cfg, logger, chat, settings)
 		if err != nil {
 			return fmt.Errorf("%s: open automation registry: %w", ModuleID, err)
 		}
@@ -152,6 +156,10 @@ type service struct {
 	path   string
 	logger contracts.Logger
 	chat   contracts.ChatService
+	// settings is optional: it records the origin of the sessions the runs
+	// create, so the sidebar can hide automation-run conversations by explicit
+	// provenance instead of guessing from their title (audit F6).
+	settings contracts.SettingsService
 
 	tasks    []contracts.AutomationTask
 	inFlight map[string]bool
@@ -175,8 +183,11 @@ type discardLogger struct{}
 
 func (discardLogger) Printf(string, ...any) {}
 
-// newService loads the registry and starts the scheduler loop.
-func newService(dataDir string, cfg Config, logger contracts.Logger, chat contracts.ChatService) (*service, error) {
+// newService loads the registry and starts the scheduler loop. settings is
+// optional (nil for embedded/headless use): it only carries the run-session
+// provenance.
+func newService(dataDir string, cfg Config, logger contracts.Logger, chat contracts.ChatService,
+	settings contracts.SettingsService) (*service, error) {
 	path, err := resolveRegistryPath(dataDir, cfg.Path)
 	if err != nil {
 		return nil, err
@@ -194,6 +205,7 @@ func newService(dataDir string, cfg Config, logger contracts.Logger, chat contra
 		path:        path,
 		logger:      logger,
 		chat:        chat,
+		settings:    settings,
 		inFlight:    map[string]bool{},
 		subscribers: map[uint64]func(){},
 		interval:    tick,
@@ -679,6 +691,10 @@ func (s *service) runTask(task contracts.AutomationTask) (string, error) {
 		s.logger.Printf("%s: run %s: create chat session: %v", ModuleID, task.ID, err)
 		return "", fmt.Errorf("create chat session: %w", err)
 	}
+	// Record the run session's provenance right after creation, before anything
+	// can fail: the sidebar hides the session by this explicit origin, not by
+	// its title (audit F6). A failed write only costs the filter.
+	s.recordSessionOrigin(task.ID, sessionID)
 	if workspaceID := strings.TrimSpace(task.WorkspaceID); workspaceID != "" {
 		if switcher, ok := s.chat.(contracts.SessionWorkspaceSwitcher); ok {
 			if err := switcher.SetSessionWorkspace(sessionID, workspaceID); err != nil {
@@ -715,6 +731,24 @@ func (s *service) runTask(task contracts.AutomationTask) (string, error) {
 	}
 	s.logger.Printf("%s: ran task %s in chat session %s", ModuleID, task.ID, sessionID)
 	return fmt.Sprintf("ran in chat session %s", sessionID), nil
+}
+
+// recordSessionOrigin persists the origin of one run session (best effort): the
+// settings store is the session-provenance transport shared with the chat read
+// model and the sidebar, so no session-store schema change is needed. A host
+// without a settings service, or a failing write, only costs the sidebar's
+// filter; the run itself must never be blocked by it.
+func (s *service) recordSessionOrigin(taskID, sessionID string) {
+	if s.settings == nil {
+		return
+	}
+	sessionID = strings.TrimSpace(sessionID)
+	if sessionID == "" {
+		return
+	}
+	if err := s.settings.Set(contracts.SessionOriginSettingKey(sessionID), contracts.SessionOriginAutomation); err != nil {
+		s.logger.Printf("%s: run %s: record session origin of %s: %v", ModuleID, taskID, sessionID, err)
+	}
 }
 
 // maxRunHistory bounds the per-task run history.

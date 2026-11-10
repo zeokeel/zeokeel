@@ -26,9 +26,12 @@ const filePreviewHeight = design.Space6 * 10
 // and owns the width; the tab strip sits flush at the top, DSH-style.
 func buildPanel(c *ui.Context, t *design.Tokens, workspace contracts.WorkspaceService,
 	terminal contracts.TerminalService, artifacts contracts.ArtifactLister, cfg Config, st *state) {
-	// The page commands' palette titles follow the host language, and the
-	// active tab is clamped against the file tabs of the last frame.
+	// The page commands' palette titles follow the host language, the live
+	// workspace identity scopes the path-keyed caches (a workspace switch
+	// re-reads the opened tabs instead of showing the old workspace's bytes),
+	// and the active tab is clamped against the file tabs of the last frame.
 	st.syncCommands()
+	st.syncWorkspaceIdentity(workspace)
 	root := ui.Column(c).FillWidth().Grow(1)
 	root.Label(cfg.titleLabel(st.locale))
 	root.Children(func() {
@@ -233,11 +236,10 @@ func buildFileTabHeader(c *ui.Context, t *design.Tokens, st *state, path string)
 	})
 }
 
-// reloadFile drops one file's cached preview and editor, so the next frame
-// re-reads it from the workspace (an agent may have edited it).
+// reloadFile drops one file's cached preview, editor and diff state, so the
+// next frame re-reads it from the workspace (an agent may have edited it).
 func (st *state) reloadFile(path string) {
-	delete(st.previews, path)
-	delete(st.editors, path)
+	st.dropPathCaches(path)
 	st.invalidate()
 }
 
@@ -260,7 +262,9 @@ func buildFilePreviewBody(c *ui.Context, t *design.Tokens, st *state, path strin
 	}
 	switch {
 	case preview.bitmap != nil:
-		ui.Image(c, preview.bitmap).MaxWidthPercent(100)
+		// The image is the tab's content, so it carries the file name as its
+		// accessible name instead of reading as a decoration.
+		ui.Image(c, preview.bitmap).Label(filepath.Base(path)).MaxWidthPercent(100)
 	case isMarkdownPath(path):
 		markdown.View(c, string(preview.data), nil)
 	case isTextPath(path):

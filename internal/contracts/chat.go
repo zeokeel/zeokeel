@@ -118,6 +118,24 @@ type ChatSessionInfo struct {
 	MessageCount int
 	Running      bool
 	UpdatedAt    time.Time
+	// Origin records who created the session: "" (a user session), "automation"
+	// (an automation-run session) or "subagent" (a child conversation once
+	// child sessions become durable). Sidebar surfaces hide non-user origins.
+	Origin string
+}
+
+// Session origin values for ChatSessionInfo.Origin.
+const (
+	SessionOriginUser       = ""
+	SessionOriginAutomation = "automation"
+	SessionOriginSubagent   = "subagent"
+)
+
+// SessionOriginSettingKey is the settings key that records one session's
+// origin. The automation backend writes it when it starts a run; the chat read
+// model and sidebar read it without a session-store schema change.
+func SessionOriginSettingKey(sessionID string) string {
+	return "session." + sessionID + ".origin"
 }
 
 // ChatConfig is the model configuration the agent module uses for new runs.

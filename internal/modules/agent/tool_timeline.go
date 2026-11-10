@@ -28,6 +28,11 @@ type restoredToolRef struct {
 // toolCallEvent is the payload of a durable "tool_call" session event.
 type toolCallEvent struct {
 	ID string `json:"id"`
+	// Path is the workspace-relative file path of a file-producing tool call,
+	// recorded from the unbounded arguments so the generated-file cards keep a
+	// truthful path after a restart (audit F4). Empty for non-file calls and for
+	// events written before the field existed.
+	Path string `json:"path"`
 	// TextOffset is the assistant text length when the call arrived. It is a
 	// pointer: old events have no such field and must not be mistaken for a
 	// recorded offset of 0.
@@ -130,10 +135,19 @@ func (s *service) hydrateToolTimeline(ctx context.Context, sessionID string, sta
 				continue
 			}
 			ref, ok := nextRef(callQueues, callID)
-			if !ok || payload.TextOffset == nil {
+			if !ok {
 				continue
 			}
-			state.messages[ref.message].Tools[ref.tool].TextOffset = *payload.TextOffset
+			tool := &state.messages[ref.message].Tools[ref.tool]
+			// The file path is independent of the transcript order: hydrate it
+			// even when the event carries no offset (path-only/older events).
+			if path := strings.TrimSpace(payload.Path); path != "" {
+				tool.Path = path
+			}
+			if payload.TextOffset == nil {
+				continue
+			}
+			tool.TextOffset = *payload.TextOffset
 			timedTools[ref] = true
 		case "tool_result":
 			var payload toolResultEvent

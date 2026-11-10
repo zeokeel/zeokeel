@@ -41,19 +41,33 @@ type pendingInstallFile struct {
 	Kind    string `json:"kind"`
 }
 
-// Install kinds recorded in pending.json.
+// Install kinds recorded in pending.json. The kind tells the host's install step
+// how to apply the staged asset:
+//   - "installer": the Windows NSIS setup exe, run after the app quits;
+//   - "dmg": the macOS disk image, mounted and swapped into the app bundle;
+//   - "appimage": the staged AppImage replaces $APPIMAGE;
+//   - "archive": a tar.gz/.zip release archive extracted over the app;
+//   - "binary": the staged file replaces the running executable (also the
+//     fallback for plans written before kinds existed).
 const (
-	installKindAppImage = "appimage"
-	installKindArchive  = "archive"
-	installKindBinary   = "binary"
+	installKindInstaller = "installer"
+	installKindDMG       = "dmg"
+	installKindAppImage  = "appimage"
+	installKindArchive   = "archive"
+	installKindBinary    = "binary"
 )
 
 // stagedUpdateKind classifies a staged file name for the host's install step:
+// a NSIS setup exe is run as an installer, a dmg is mounted and swapped in,
 // AppImages are replaced in place, archives are extracted, everything else is
 // treated as a replacement executable.
 func stagedUpdateKind(name string) string {
 	lower := strings.ToLower(strings.TrimSpace(name))
 	switch {
+	case strings.HasSuffix(lower, ".dmg"):
+		return installKindDMG
+	case strings.HasSuffix(lower, ".exe") && strings.Contains(lower, "setup"):
+		return installKindInstaller
 	case strings.HasSuffix(lower, ".appimage"):
 		return installKindAppImage
 	case strings.HasSuffix(lower, ".tar.gz"), strings.HasSuffix(lower, ".tgz"), strings.HasSuffix(lower, ".zip"):
@@ -68,7 +82,7 @@ func stagedUpdateKind(name string) string {
 func pendingInstallKind(kind string) string {
 	normalized := strings.ToLower(strings.TrimSpace(kind))
 	switch normalized {
-	case installKindAppImage, installKindArchive, installKindBinary:
+	case installKindInstaller, installKindDMG, installKindAppImage, installKindArchive, installKindBinary:
 		return normalized
 	default:
 		return installKindBinary
@@ -116,11 +130,12 @@ func (s *service) ScheduleInstall(download contracts.UpdateDownload) (contracts.
 	if err := os.MkdirAll(updatesDir, 0o755); err != nil {
 		return contracts.UpdateInstallPlan{}, fmt.Errorf("%w: create updates dir: %v", ErrInstall, err)
 	}
+	kind := stagedUpdateKind(filepath.Base(staged))
 	body, err := json.Marshal(pendingInstallFile{
 		Version: version,
 		Path:    staged,
 		SHA256:  actual,
-		Kind:    stagedUpdateKind(filepath.Base(staged)),
+		Kind:    kind,
 	})
 	if err != nil {
 		return contracts.UpdateInstallPlan{}, fmt.Errorf("%w: encode pending plan: %v", ErrInstall, err)
@@ -157,7 +172,7 @@ func (s *service) ScheduleInstall(download contracts.UpdateDownload) (contracts.
 	}
 	committed = true
 
-	return contracts.UpdateInstallPlan{Version: version, Path: staged, SHA256: actual}, nil
+	return contracts.UpdateInstallPlan{Version: version, Path: staged, SHA256: actual, Kind: kind}, nil
 }
 
 // PendingInstall reports the scheduled install. A missing, unreadable or
@@ -178,7 +193,7 @@ func (s *service) PendingInstall() (contracts.UpdateInstallPlan, bool) {
 	}
 	// Old plans have no kind; the host defaults it to "binary" too, but
 	// normalizing here keeps the schema's default in one place.
-	pending.Kind = pendingInstallKind(pending.Kind)
+	kind := pendingInstallKind(pending.Kind)
 	version := strings.TrimSpace(pending.Version)
 	sha := strings.TrimSpace(pending.SHA256)
 	if version == "" || sha == "" {
@@ -188,7 +203,7 @@ func (s *service) PendingInstall() (contracts.UpdateInstallPlan, bool) {
 	if err != nil {
 		return contracts.UpdateInstallPlan{}, false
 	}
-	return contracts.UpdateInstallPlan{Version: version, Path: staged, SHA256: sha}, true
+	return contracts.UpdateInstallPlan{Version: version, Path: staged, SHA256: sha, Kind: kind}, true
 }
 
 // stagedPathBelowUpdates resolves path and verifies it lives inside

@@ -53,7 +53,7 @@ type plainChat struct{ contracts.ChatService }
 // newStoredService opens a second service on the same registry file.
 func newStoredService(t *testing.T, dataDir string, chat contracts.ChatService) *service {
 	t.Helper()
-	service, err := newService(dataDir, Config{TickMs: 3600000}, &fakeLogger{}, chat)
+	service, err := newService(dataDir, Config{TickMs: 3600000}, &fakeLogger{}, chat, nil)
 	if err != nil {
 		t.Fatalf("newService(reload): %v", err)
 	}

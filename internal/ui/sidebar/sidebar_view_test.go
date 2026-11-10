@@ -96,11 +96,16 @@ func TestSidebarAlwaysGroupsByWorkspace(t *testing.T) {
 }
 
 // automationSession builds the chat session the automation module creates for
-// one scheduled run: the stable "自动化: <task>" title prefix is the product's
-// convention, and the run history belongs to the Automation screen, not to the
-// user's conversation list.
+// one scheduled run: the run's provenance is carried explicitly by
+// ChatSessionInfo.Origin (the title keeps the product's "自动化: <task>"
+// convention, but the sidebar must never hide a session by its title).
 func automationSession(id, task string, updated time.Time) contracts.ChatSessionInfo {
-	return contracts.ChatSessionInfo{ID: id, Title: "自动化: " + task, UpdatedAt: updated}
+	return contracts.ChatSessionInfo{
+		ID:        id,
+		Title:     "自动化: " + task,
+		Origin:    contracts.SessionOriginAutomation,
+		UpdatedAt: updated,
+	}
 }
 
 // TestSidebarFlatListHidesAutomationSessions pins the approved simplification:
@@ -124,12 +129,67 @@ func TestSidebarFlatListHidesAutomationSessions(t *testing.T) {
 	}
 }
 
+// TestSidebarHidesExplicitOriginSessions is the audit-F6 regression: hiding is
+// driven by the session's provenance, not by its title. An automation run and a
+// subagent child are hidden even with arbitrary titles.
+func TestSidebarHidesExplicitOriginSessions(t *testing.T) {
+	base := time.Unix(1_700_000_000, 0)
+	chat := &fakeChat{sessions: []contracts.ChatSessionInfo{
+		sessionAt("s-user", "普通会话", base),
+		{
+			ID: "s-run", Title: "每日摘要", Origin: contracts.SessionOriginAutomation,
+			UpdatedAt: base,
+		},
+		{
+			ID: "s-child", Title: "文档审查员", Origin: contracts.SessionOriginSubagent,
+			UpdatedAt: base,
+		},
+	}}
+	h := newHarness(t, chat, sidebar.Config{})
+	tester := h.tester()
+
+	h.assertTexts(tester, "普通会话")
+	h.assertNoTexts(tester, "每日摘要", "文档审查员")
+	// Only the one user session remains, so the list is not an empty state.
+	h.assertNoTexts(tester, "还没有会话")
+}
+
+// TestSidebarKeepsUserSessionTitledLikeAnAutomationRun is the other half of
+// audit F6: a normal user conversation whose title starts with the old
+// "自动化: " convention has no automation provenance and must stay visible
+// (and searchable, and pinnable) instead of disappearing from the sidebar.
+func TestSidebarKeepsUserSessionTitledLikeAnAutomationRun(t *testing.T) {
+	base := time.Unix(1_700_000_000, 0)
+	user := contracts.ChatSessionInfo{
+		ID: "s-mine", Title: "自动化: 我的笔记", Pinned: true,
+		UpdatedAt: base, Origin: contracts.SessionOriginUser,
+	}
+	chat := &fakeChat{sessions: []contracts.ChatSessionInfo{
+		user,
+		sessionAt("s-other", "另一个会话", base.Add(-time.Hour)),
+	}}
+	h := newHarness(t, chat, sidebar.Config{})
+	tester := h.tester()
+
+	h.assertTexts(tester, "自动化: 我的笔记", "另一个会话", "置顶")
+	// The title-filtered search finds it like any other user conversation.
+	clickLabel(t, tester, "搜索会话与消息")
+	tester.Type("我的笔记")
+	tester.Frame()
+	h.assertTexts(tester, "自动化: 我的笔记")
+	h.assertNoTexts(tester, "另一个会话")
+}
+
 // TestSidebarSearchHidesAutomationSessions: the title filter must not resurface
-// an automation run when the query matches both its title and a user session.
+// an automation run when the query matches both its title and a user session;
+// hiding follows the explicit provenance, not the title.
 func TestSidebarSearchHidesAutomationSessions(t *testing.T) {
 	chat := &fakeChat{sessions: []contracts.ChatSessionInfo{
-		{ID: "s-user", Title: "每周报告"},
-		automationSession("s-run", "周报", time.Unix(1_700_000_000, 0)),
+		{ID: "s-user", Title: "项目周会"},
+		{
+			ID: "s-run", Title: "周报", Origin: contracts.SessionOriginAutomation,
+			UpdatedAt: time.Unix(1_700_000_000, 0),
+		},
 	}}
 	h := newHarness(t, chat, sidebar.Config{})
 	tester := h.tester()
@@ -137,8 +197,8 @@ func TestSidebarSearchHidesAutomationSessions(t *testing.T) {
 	tester.Type("周")
 	tester.Frame()
 
-	h.assertTexts(tester, "每周报告")
-	h.assertNoTexts(tester, "自动化: 周报")
+	h.assertTexts(tester, "项目周会")
+	h.assertNoTexts(tester, "周报")
 }
 
 // TestSidebarOnlyAutomationSessionsShowsEmptyState: a host with nothing but
@@ -156,26 +216,31 @@ func TestSidebarOnlyAutomationSessionsShowsEmptyState(t *testing.T) {
 }
 
 // TestWorkspaceTreeHidesAutomationSessions: the workspace tree follows the same
-// user-only rule for its rows, its per-group counts and the synthetic
-// "未分组" group (an automation run is not a user conversation, so it cannot
-// make an empty ungrouped group appear).
+// explicit-provenance rule for its rows, its per-group counts and the synthetic
+// "未分组" group (a hidden run is not a user conversation, so it cannot make an
+// empty ungrouped group appear; a user title with the old convention does not
+// hide its session).
 func TestWorkspaceTreeHidesAutomationSessions(t *testing.T) {
 	base := time.Unix(1_700_000_000, 0)
 	workspace := newFakeWorkspace(treeWorkspaces()...)
 	chat := &fakeChat{sessions: []contracts.ChatSessionInfo{
 		{ID: "s1", Title: "用户会话", WorkspaceID: "w1", UpdatedAt: base},
-		{ID: "s2", Title: "自动化: 每日摘要", WorkspaceID: "w1", UpdatedAt: base},
-		{ID: "s3", Title: "自动化: 未分组任务", UpdatedAt: base},
+		// A run hidden by provenance although its title carries no convention.
+		{ID: "s2", Title: "每日摘要", WorkspaceID: "w1", Origin: contracts.SessionOriginAutomation, UpdatedAt: base},
+		// An ungrouped run must not create the "未分组" group.
+		{ID: "s3", Title: "后台整理", Origin: contracts.SessionOriginAutomation, UpdatedAt: base},
+		// A user conversation titled like a run stays visible.
+		{ID: "s4", Title: "自动化: 我的笔记", WorkspaceID: "w1", UpdatedAt: base},
 	}}
 	h := newHarnessWithWorkspace(t, chat, sidebar.Config{}, workspace)
 	tester := h.tester()
 
-	h.assertTexts(tester, "项目一", "用户会话")
-	h.assertNoTexts(tester, "自动化: 每日摘要", "每日摘要", "自动化: 未分组任务", "未分组任务")
+	h.assertTexts(tester, "项目一", "用户会话", "自动化: 我的笔记")
+	h.assertNoTexts(tester, "每日摘要", "后台整理")
 	h.assertNoTexts(tester, "未分组")
-	// The group count counts user sessions only (项目一 holds one visible row).
-	if got := countText(tester, "1"); got != 1 {
-		t.Fatalf("group count rows showing 1 = %d, want the one user session; texts = %v", got, tester.Texts())
+	// The group count counts user sessions only (项目一 holds two visible rows).
+	if got := countText(tester, "2"); got != 1 {
+		t.Fatalf("group count rows showing 2 = %d, want the two user sessions; texts = %v", got, tester.Texts())
 	}
 }
 

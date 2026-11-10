@@ -33,6 +33,9 @@ type fakeChildAgents struct {
 	sends   []childSendCall
 	answer  string
 	sendErr error
+	// sendGate, when set, holds every SendChildAgent call until it is closed:
+	// the child-view tests use it to observe an in-flight send.
+	sendGate <-chan struct{}
 }
 
 func (f *fakeChildAgents) ChildAgents(parentSessionID string) []contracts.ChildAgent {
@@ -53,6 +56,9 @@ func (f *fakeChildAgents) ChildAgent(id string) (contracts.ChildAgent, bool) {
 }
 
 func (f *fakeChildAgents) SendChildAgent(_ context.Context, id, message string) (string, error) {
+	if gate := f.sendGate; gate != nil {
+		<-gate
+	}
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.sends = append(f.sends, childSendCall{id: id, message: message})
@@ -167,11 +173,12 @@ func (f *fakeAgentBoard) Delete(context.Context, string) error { return nil }
 // agentServices are the optional backends the agent surfaces read; a nil entry
 // means the host does not provide that service.
 type agentServices struct {
-	team     contracts.TeamService
-	board    contracts.TaskBoard
-	children contracts.ChildAgentService
-	jobs     contracts.JobService
-	preview  contracts.FilePreviewer
+	team      contracts.TeamService
+	board     contracts.TaskBoard
+	children  contracts.ChildAgentService
+	jobs      contracts.JobService
+	preview   contracts.FilePreviewer
+	approvals contracts.Approvals
 }
 
 // newAgentSurfaceHarness activates the session screen with the optional agent
@@ -202,6 +209,9 @@ func newAgentSurfaceHarness(t *testing.T, chat *fakeChat, services agentServices
 	}
 	if services.preview != nil {
 		provide[contracts.FilePreviewer](t, ctx, contracts.KeyFilePreview, services.preview)
+	}
+	if services.approvals != nil {
+		provide[contracts.Approvals](t, ctx, contracts.KeyApprovals, services.approvals)
 	}
 	activate(t, ctx, session.Module(), session.Config{})
 	return &harness{t: t, ctx: ctx, ui: uiRoot, chat: chat}

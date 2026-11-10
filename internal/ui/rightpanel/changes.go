@@ -122,7 +122,8 @@ func (st *state) ensureChangesLoaded(workspace contracts.WorkspaceService,
 	workspaceKey := current.ID + "\x00" + current.Root
 	// The cached snapshot and the per-file diff viewers belong to one
 	// workspace: a switch invalidates both instead of showing another project's
-	// uncommitted files.
+	// uncommitted files. Bumping the generation drops a read that was already
+	// in flight for the old workspace.
 	if st.changesWorkspace != workspaceKey {
 		st.changesWorkspace = workspaceKey
 		st.changesLoaded = false
@@ -130,6 +131,8 @@ func (st *state) ensureChangesLoaded(workspace contracts.WorkspaceService,
 		st.changesErr = nil
 		st.changesOpen = make(map[string]bool)
 		st.diffs = make(map[string]*diffView)
+		st.changesLoading = false
+		st.changesGeneration++
 	}
 	if st.changesLoaded {
 		return false
@@ -144,9 +147,16 @@ func (st *state) ensureChangesLoaded(workspace contracts.WorkspaceService,
 		return false
 	}
 	st.changesLoading = true
+	generation := st.changesGeneration
 	go func() {
 		changes, changesErr := differ.Changes(context.Background())
 		runtime.Post(func() {
+			// A refresh (or a workspace switch) after the read started
+			// superseded it: never apply the pre-refresh snapshot over the
+			// fresh state.
+			if st.changesGeneration != generation {
+				return
+			}
 			st.changesLoading = false
 			now, ok := st.currentWorkspaceKey(workspace)
 			if !ok || now != workspaceKey {

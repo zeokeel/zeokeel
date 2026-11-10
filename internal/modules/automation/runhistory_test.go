@@ -118,7 +118,7 @@ func TestRunHistoryCappedAtTenNewestFirst(t *testing.T) {
 func TestRunHistoryPersistsAndReloads(t *testing.T) {
 	dir := t.TempDir()
 	chat := newFakeChat()
-	service, err := newService(dir, Config{TickMs: 3600000}, &fakeLogger{}, chat)
+	service, err := newService(dir, Config{TickMs: 3600000}, &fakeLogger{}, chat, nil)
 	if err != nil {
 		t.Fatalf("newService: %v", err)
 	}
@@ -134,7 +134,7 @@ func TestRunHistoryPersistsAndReloads(t *testing.T) {
 	}).RunHistory[0]
 	service.Close()
 
-	reloaded, err := newService(dir, Config{TickMs: 3600000}, &fakeLogger{}, newFakeChat())
+	reloaded, err := newService(dir, Config{TickMs: 3600000}, &fakeLogger{}, newFakeChat(), nil)
 	if err != nil {
 		t.Fatalf("reload service: %v", err)
 	}

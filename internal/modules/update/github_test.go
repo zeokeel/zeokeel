@@ -121,13 +121,13 @@ func githubService(t *testing.T, server *httptest.Server, version string) *servi
 }
 
 // runtimeGitHubAssetName is the release-workflow asset name for this test
-// binary's platform.
+// binary's platform (the assets the release workflow publishes).
 func runtimeGitHubAssetName(version string) string {
 	switch runtime.GOOS {
 	case "windows":
-		return "zeokeel-" + version + "-windows-" + runtime.GOARCH + ".tar.gz"
+		return "zeokeel-setup-" + version + "-" + runtime.GOARCH + ".exe"
 	case "darwin":
-		return "zeokeel-" + version + "-darwin-universal.tar.gz"
+		return "zeokeel-" + version + "-" + runtime.GOARCH + ".dmg"
 	default:
 		return "zeokeel-" + version + "-linux-" + runtime.GOARCH + ".AppImage"
 	}
@@ -267,34 +267,42 @@ func TestGitHubAssetSelection(t *testing.T) {
 		wantOK bool
 	}{
 		{
-			name:   "windows prefers tar.gz over exe and setup",
+			name:   "windows picks the setup installer over tar.gz and portable exe",
 			goos:   "windows",
 			goarch: "amd64",
-			assets: asset("zeokeel-setup-1.0.0-amd64.exe", "zeokeel-1.0.0-windows-amd64.exe", "zeokeel-1.0.0-windows-amd64.tar.gz"),
-			want:   "zeokeel-1.0.0-windows-amd64.tar.gz",
+			assets: asset("zeokeel-1.0.0-windows-amd64.tar.gz", "zeokeel-1.0.0-windows-amd64.exe", "zeokeel-setup-1.0.0-amd64.exe"),
+			want:   "zeokeel-setup-1.0.0-amd64.exe",
 			wantOK: true,
 		},
 		{
-			name:   "windows falls back to portable exe",
+			name:   "windows prefers the setup installer regardless of asset order",
+			goos:   "windows",
+			goarch: "amd64",
+			assets: asset("zeokeel-setup-1.0.0-amd64.exe", "zeokeel-1.0.0-windows-amd64.exe"),
+			want:   "zeokeel-setup-1.0.0-amd64.exe",
+			wantOK: true,
+		},
+		{
+			name:   "windows falls back to a portable exe when no setup installer is published",
 			goos:   "windows",
 			goarch: "arm64",
-			assets: asset("zeokeel-setup-1.0.0-arm64.exe", "zeokeel-1.0.0-windows-arm64.exe"),
+			assets: asset("zeokeel-1.0.0-windows-arm64.exe", "zeokeel-1.0.0-windows-arm64.tar.gz"),
 			want:   "zeokeel-1.0.0-windows-arm64.exe",
 			wantOK: true,
 		},
 		{
-			name:   "windows never selects setup",
+			name:   "windows never selects a tar.gz archive",
 			goos:   "windows",
 			goarch: "amd64",
-			assets: asset("zeokeel-setup-1.0.0-amd64.exe"),
+			assets: asset("zeokeel-1.0.0-windows-amd64.tar.gz"),
 			wantOK: false,
 		},
 		{
 			name:   "windows matching is case-insensitive",
 			goos:   "windows",
 			goarch: "amd64",
-			assets: asset("ZeoKeel-1.0.0-Windows-AMD64.TAR.GZ"),
-			want:   "ZeoKeel-1.0.0-Windows-AMD64.TAR.GZ",
+			assets: asset("ZeoKeel-Setup-1.0.0-AMD64.EXE"),
+			want:   "ZeoKeel-Setup-1.0.0-AMD64.EXE",
 			wantOK: true,
 		},
 		{
@@ -306,7 +314,7 @@ func TestGitHubAssetSelection(t *testing.T) {
 			wantOK: true,
 		},
 		{
-			name:   "linux falls back to tar.gz",
+			name:   "linux falls back to tar.gz for older releases",
 			goos:   "linux",
 			goarch: "amd64",
 			assets: asset("zeokeel-1.0.0-linux-amd64.tar.gz", "zeokeel-1.0.0-linux-arm64.AppImage"),
@@ -314,26 +322,26 @@ func TestGitHubAssetSelection(t *testing.T) {
 			wantOK: true,
 		},
 		{
-			name:   "darwin prefers universal archive",
+			name:   "darwin picks the per-arch dmg over the tar.gz archive",
 			goos:   "darwin",
 			goarch: "arm64",
-			assets: asset("zeokeel-1.0.0-darwin-arm64.tar.gz", "zeokeel-1.0.0-darwin-universal.tar.gz", "zeokeel-1.0.0.dmg"),
-			want:   "zeokeel-1.0.0-darwin-universal.tar.gz",
+			assets: asset("zeokeel-1.0.0-darwin-arm64.tar.gz", "zeokeel-1.0.0-arm64.dmg"),
+			want:   "zeokeel-1.0.0-arm64.dmg",
 			wantOK: true,
 		},
 		{
-			name:   "darwin falls back to per-arch archive",
+			name:   "darwin falls back to a universal dmg",
 			goos:   "darwin",
-			goarch: "amd64",
-			assets: asset("zeokeel-1.0.0-darwin-amd64.tar.gz", "zeokeel-1.0.0.dmg"),
-			want:   "zeokeel-1.0.0-darwin-amd64.tar.gz",
+			goarch: "arm64",
+			assets: asset("zeokeel-1.0.0.dmg", "zeokeel-1.0.0-darwin-arm64.tar.gz"),
+			want:   "zeokeel-1.0.0.dmg",
 			wantOK: true,
 		},
 		{
-			name:   "darwin never selects a dmg",
+			name:   "darwin never selects a tar.gz archive",
 			goos:   "darwin",
 			goarch: "arm64",
-			assets: asset("zeokeel-1.0.0.dmg"),
+			assets: asset("zeokeel-1.0.0-darwin-arm64.tar.gz"),
 			wantOK: false,
 		},
 		{

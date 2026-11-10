@@ -377,10 +377,14 @@ func TestPreviewFileRejectsOutsidePath(t *testing.T) {
 	workspace := newFakeWorkspace()
 	workspace.setCurrent()
 	h := workspaceHarness(t, workspace)
-	if err := h.previewer().PreviewFile("/etc/passwd"); err == nil {
-		t.Fatal("PreviewFile accepted a path outside the workspace root")
-	}
-	if err := h.previewer().PreviewFile(""); err == nil {
-		t.Fatal("PreviewFile accepted an empty path")
+	for _, path := range []string{
+		"/etc/passwd",
+		"../secret.md",
+		"docs/../../secret.md",
+		"",
+	} {
+		if err := h.previewer().PreviewFile(path); err == nil {
+			t.Fatalf("PreviewFile(%q) accepted a path outside the workspace root", path)
+		}
 	}
 }

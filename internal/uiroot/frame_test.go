@@ -783,3 +783,27 @@ func TestDockedInspectorSplitKeepsWidthBehavior(t *testing.T) {
 	}
 	requireInBottomBand(t, tt, width, height, "screen-bottom")
 }
+
+// TestCollapsedSidebarStartupResolvesDefaultScreen covers the audit P0: a
+// persisted collapsed sidebar never drew the screen list, so nav.Current()
+// stayed empty and every screen-scoped slot (title/actions/tabs) plus the
+// inspector toggle was filtered out until the user expanded the sidebar.
+func TestCollapsedSidebarStartupResolvesDefaultScreen(t *testing.T) {
+	r := newTestRoot(t)
+	mustScreen(t, r, textScreen("home", "首页", "body-home", 10))
+	mustScreen(t, r, textScreen("session", "对话", "body-session", 20))
+	mustSlot(t, r, textSlotItem(contracts.SlotScreenHeader, "session.title", "session-title-text", 10))
+	mustSlot(t, r, textSlotItem(contracts.SlotSessionPanelRight, "pane", "inspector-pane", 10))
+	r.SetSidebarCollapsed(true)
+
+	tt := newTestTester(t, r, 1280, 800)
+	tt.Frame()
+	if got := r.Navigator().Current(); got != "session" {
+		t.Fatalf("collapsed startup current screen = %q, want session", got)
+	}
+	requireHasText(t, tt, "session-title-text")
+	requireHasText(t, tt, "body-session")
+	r.SetRightPanelOpen(true)
+	tt.Frame()
+	requireHasText(t, tt, "inspector-pane")
+}

@@ -603,7 +603,7 @@ uikit.ToolRow(c, uikit.ToolRowOptions{
 | 消息元信息行（时间 · 紧凑用量 · ⋯） | 消息级元信息 + 单一动作菜单 | 官方列表行不提供行内元信息区；只用官方 Text/Button/Menu 组合（不新增自绘控件），时间与用量常显、动作收进一个 ⋯ |
 | 会话「回到最新」浮层 | List 之外的 affordance | 行为用官方 `ScrollToEnd`；浮层必要 |
 | toast 品牌外观 | `ToastViewportBase` parts 上设色/圆角/阴影 | 框架 toast 的换肤方式；状态/计时/读屏仍归框架 |
-| `uikit.ComposerShell` 的 `noEdge=0`、`uikit.TeamSurface` 的具名度量常量 | 旧实现度量以包内命名常量承接（非方法实参字面量，designlint 不计），待 token 化 | design 尚无 Space0/部分控件高度 token；后续 token 任务收敛 |
+| `uikit.ComposerShell` 的 `noEdge=0` | 旧实现度量以包内命名常量承接（非方法实参字面量，designlint 不计），待 token 化 | design 尚无 Space0/部分控件高度 token；后续 token 任务收敛 |
 | tabs 下划线、设置页少量 chrome | 产品 chrome | 非标准控件；图标按钮部分已由 IconButton 覆盖（rail hover 已修） |
 | 文件/目录选择器 seam | 纯测试注入点 | 无应用状态，非 UI 自绘 |
 

@@ -37,6 +37,7 @@ import (
 	"strings"
 
 	"github.com/zeokeel/zeokeel/internal/contracts"
+	"github.com/zeokeel/zeokeel/internal/modules/update"
 )
 
 // Host-side half of the pending.json schema (the update module writes it).
@@ -46,9 +47,14 @@ const (
 
 	// pending install kinds. The update module writes one of them; a plan
 	// written by an older version has none and installs as a binary.
-	installKindBinary   = "binary"
-	installKindAppImage = "appimage"
-	installKindArchive  = "archive"
+	// "installer" (Windows NSIS setup) and "dmg" (macOS disk image) need a
+	// user-visible launch: startup keeps them for the in-app install command
+	// (see InstallPendingUpdateNow).
+	installKindInstaller = "installer"
+	installKindDMG       = "dmg"
+	installKindBinary    = "binary"
+	installKindAppImage  = "appimage"
+	installKindArchive   = "archive"
 
 	// installBackupSuffix names the previous executable/bundle kept by the
 	// rename-dance paths until a later start can delete it.
@@ -71,6 +77,10 @@ type pendingInstallFile struct {
 // layouts; anything unrecognized (including "") installs as a binary.
 func normalizeInstallKind(kind string) string {
 	switch strings.ToLower(strings.TrimSpace(kind)) {
+	case installKindInstaller:
+		return installKindInstaller
+	case installKindDMG:
+		return installKindDMG
 	case installKindAppImage:
 		return installKindAppImage
 	case installKindArchive:
@@ -102,7 +112,7 @@ type defaultExecutableReplacer struct{}
 
 // CurrentExecutable implements ExecutableReplacer.
 func (defaultExecutableReplacer) CurrentExecutable() (string, error) {
-	return os.Executable()
+	return updateExecutable()
 }
 
 // Replace implements ExecutableReplacer.
@@ -111,7 +121,7 @@ func (defaultExecutableReplacer) Replace(stagedPath string) error {
 	if err != nil {
 		return err
 	}
-	current, err := os.Executable()
+	current, err := updateExecutable()
 	if err != nil {
 		return fmt.Errorf("locate running executable: %w", err)
 	}
@@ -343,6 +353,27 @@ func singleAppBundle(dir string) (string, error) {
 		return "", errors.New("unsupported archive layout: want exactly one .app bundle at the archive root")
 	}
 	return filepath.Join(dir, entries[0].Name()), nil
+}
+
+// singleAppInDMG returns the single top-level .app bundle of a mounted macOS
+// disk image. A real mygo dmg also contains .DS_Store, .VolumeIcon.icns and the
+// /Applications symlink, so this deliberately ignores non-.app entries; the
+// strict singleAppBundle variant stays for extracted archives.
+func singleAppInDMG(dir string) (string, error) {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return "", fmt.Errorf("read mounted dmg: %w", err)
+	}
+	var apps []string
+	for _, entry := range entries {
+		if entry.IsDir() && strings.HasSuffix(entry.Name(), ".app") {
+			apps = append(apps, filepath.Join(dir, entry.Name()))
+		}
+	}
+	if len(apps) != 1 {
+		return "", fmt.Errorf("unsupported dmg layout: want exactly one .app bundle, found %d", len(apps))
+	}
+	return apps[0], nil
 }
 
 // singleTopLevelDir returns the only top-level directory of an extracted
@@ -614,74 +645,162 @@ func validateStagedFile(stagedPath string) (string, error) {
 	return staged, nil
 }
 
-// applyPendingUpdate applies the scheduled install, if any. It returns
-// applied=true only after the install succeeded and the plan was cleaned up.
-// Every failure keeps pending.json (and the staged file) for a retry.
-func applyPendingUpdate(dataDir string, replacer ExecutableReplacer, logger contracts.Logger) (bool, error) {
+// pendingUpdate is a pending install after the plan metadata was read: the plan's
+// identity plus the resolved staged path below <dataDir>/updates. SHA256 is the
+// expected checksum; the staged bytes are only hashed when the plan is actually
+// applied (see verifyPendingUpdate), so skipping an installer/dmg on startup
+// does not read hundreds of megabytes (F10).
+type pendingUpdate struct {
+	// Version is the staged release version.
+	Version string
+	// Kind is the normalized install layout (installer/dmg/appimage/archive/
+	// binary).
+	Kind string
+	// Staged is the resolved staged asset path (inside the updates directory).
+	Staged string
+	// SHA256 is the scheduled checksum the staged bytes must match.
+	SHA256 string
+}
+
+// stagedFileSHA256 hashes one staged file; tests replace it to count hashes and
+// pin the "hash only when applying" behavior.
+var stagedFileSHA256 = fileSHA256
+
+// readPendingPlan reads <dataDir>/updates/pending.json and validates the plan's
+// structure and staged path containment, without hashing the asset. ok=false
+// means there is no plan; an invalid plan is an error and the caller keeps it for
+// a retry. Startup uses it to decide the kind first (F10).
+func readPendingPlan(dataDir string) (pendingUpdate, bool, error) {
 	if strings.TrimSpace(dataDir) == "" {
-		return false, errors.New("no data directory for pending update")
+		return pendingUpdate{}, false, errors.New("no data directory for pending update")
 	}
 	updatesDir := filepath.Join(dataDir, updatesDirName)
 	pendingPath := filepath.Join(updatesDir, pendingInstallName)
 	body, err := os.ReadFile(pendingPath)
 	if errors.Is(err, os.ErrNotExist) {
-		return false, nil
+		return pendingUpdate{}, false, nil
 	}
 	if err != nil {
-		return false, fmt.Errorf("read pending update: %w", err)
+		return pendingUpdate{}, false, fmt.Errorf("read pending update: %w", err)
 	}
 	var pending pendingInstallFile
 	if err := json.Unmarshal(body, &pending); err != nil {
-		return false, fmt.Errorf("parse pending update: %w", err)
+		return pendingUpdate{}, false, fmt.Errorf("parse pending update: %w", err)
 	}
 	version := strings.TrimSpace(pending.Version)
 	staged := strings.TrimSpace(pending.Path)
 	if version == "" || staged == "" {
-		return false, errors.New("pending update is incomplete (version/path)")
+		return pendingUpdate{}, false, errors.New("pending update is incomplete (version/path)")
 	}
 	staged, err = stagingPathBelowUpdates(updatesDir, staged)
 	if err != nil {
-		return false, err
+		return pendingUpdate{}, false, err
 	}
 	info, err := os.Stat(staged)
 	if err != nil {
-		return false, fmt.Errorf("stat staged update: %w", err)
+		return pendingUpdate{}, false, fmt.Errorf("stat staged update: %w", err)
 	}
 	if !info.Mode().IsRegular() {
-		return false, fmt.Errorf("staged update %q is not a regular file", staged)
+		return pendingUpdate{}, false, fmt.Errorf("staged update %q is not a regular file", staged)
 	}
-	// The schedule phase verified the checksum, but the staged bytes must be
-	// re-checked right before they replace the running executable: anything on
-	// disk between schedule and restart is untrusted.
 	expectedSHA := strings.ToLower(strings.TrimSpace(pending.SHA256))
 	if expectedSHA == "" {
-		return false, errors.New("pending update has no checksum")
+		return pendingUpdate{}, false, errors.New("pending update has no checksum")
 	}
-	actualSHA, err := fileSHA256(staged)
+	return pendingUpdate{
+		Version: version,
+		Kind:    normalizeInstallKind(pending.Kind),
+		Staged:  staged,
+		SHA256:  expectedSHA,
+	}, true, nil
+}
+
+// verifyPendingUpdate hashes the staged asset against the scheduled checksum.
+// The schedule phase verified it, but the bytes on disk between schedule and
+// install are untrusted: anything applied must be re-checked first.
+func verifyPendingUpdate(pending pendingUpdate) (pendingUpdate, error) {
+	actualSHA, err := stagedFileSHA256(pending.Staged)
 	if err != nil {
-		return false, fmt.Errorf("hash staged update: %w", err)
+		return pendingUpdate{}, fmt.Errorf("hash staged update: %w", err)
 	}
-	if actualSHA != expectedSHA {
-		return false, fmt.Errorf("staged update checksum mismatch (want %s, got %s)", expectedSHA, actualSHA)
+	if !strings.EqualFold(actualSHA, pending.SHA256) {
+		return pendingUpdate{}, fmt.Errorf("staged update checksum mismatch (want %s, got %s)", pending.SHA256, actualSHA)
+	}
+	return pending, nil
+}
+
+// readPendingUpdate reads, validates and checksum-verifies the pending install in
+// one step: the immediate-install path must never hand an unverified asset to an
+// installer. It hashes exactly once (F10).
+func readPendingUpdate(dataDir string) (pendingUpdate, bool, error) {
+	pending, ok, err := readPendingPlan(dataDir)
+	if err != nil || !ok {
+		return pendingUpdate{}, ok, err
+	}
+	verified, err := verifyPendingUpdate(pending)
+	if err != nil {
+		return pendingUpdate{}, false, err
+	}
+	return verified, true, nil
+}
+
+// clearPendingInstall removes the staged asset first and the consumed plan
+// second (F9): when the staged delete fails (a running setup, an AV lock, a
+// permission problem) the plan stays, so the next start retries the cleanup
+// instead of leaving an orphan asset forever. It reports whether the plan was
+// consumed; cleanup never fails an install.
+func clearPendingInstall(dataDir, staged string, logger contracts.Logger) bool {
+	if strings.TrimSpace(staged) != "" {
+		if err := os.Remove(staged); err != nil && !errors.Is(err, os.ErrNotExist) {
+			logInstallWarning(logger, "remove installed staged file %q (plan kept for a retry): %v", staged, err)
+			return false
+		}
+	}
+	pendingPath := filepath.Join(dataDir, updatesDirName, pendingInstallName)
+	if err := os.Remove(pendingPath); err != nil && !errors.Is(err, os.ErrNotExist) {
+		logInstallWarning(logger, "remove installed pending plan %q: %v", pendingPath, err)
+		return false
+	}
+	return true
+}
+
+// applyPendingUpdate applies a scheduled install that can run without a user
+// gesture (binary/archive/appimage). Installer/dmg plans need the visible
+// in-app install command and are refused here with the plan kept. It returns
+// applied=true only after the install succeeded and the plan was cleaned up;
+// every failure keeps pending.json (and the staged file) for a retry.
+func applyPendingUpdate(dataDir string, replacer ExecutableReplacer, logger contracts.Logger) (bool, error) {
+	pending, ok, err := readPendingPlan(dataDir)
+	if err != nil || !ok {
+		return false, err
+	}
+	return applyResolvedPendingUpdate(dataDir, pending, replacer, logger)
+}
+
+// applyResolvedPendingUpdate verifies and applies a plan whose metadata was
+// already read (startup uses this to hash an applied plan exactly once, F10).
+func applyResolvedPendingUpdate(dataDir string, pending pendingUpdate,
+	replacer ExecutableReplacer, logger contracts.Logger) (bool, error) {
+	if pending.Kind == installKindInstaller || pending.Kind == installKindDMG {
+		return false, fmt.Errorf("pending update kind %q needs the in-app install command", pending.Kind)
 	}
 	if replacer == nil {
 		return false, errors.New("no executable replacer")
+	}
+	verified, err := verifyPendingUpdate(pending)
+	if err != nil {
+		return false, err
 	}
 	current, err := replacer.CurrentExecutable()
 	if err != nil {
 		return false, fmt.Errorf("locate running executable: %w", err)
 	}
-	if err := applyPendingInstall(normalizeInstallKind(pending.Kind), staged, current, replacer); err != nil {
+	if err := applyPendingInstall(verified.Kind, verified.Staged, current, replacer); err != nil {
 		return false, err
 	}
 	// The install is applied; clean up best effort. A leftover plan would try
 	// to re-apply an already installed file on the next start.
-	if err := os.Remove(pendingPath); err != nil && !errors.Is(err, os.ErrNotExist) {
-		logInstallWarning(logger, "remove installed pending plan %q: %v", pendingPath, err)
-	}
-	if err := os.Remove(staged); err != nil && !errors.Is(err, os.ErrNotExist) {
-		logInstallWarning(logger, "remove installed staged file %q: %v", staged, err)
-	}
+	clearPendingInstall(dataDir, verified.Staged, logger)
 	return true, nil
 }
 
@@ -811,11 +930,65 @@ func cleanupStaleAppBundleBackup(current string, logger contracts.Logger) {
 	}
 }
 
-// applyPendingUpdateOnStartup runs at process start and never blocks startup:
-// the outcome is logged and a failure simply keeps the plan for the next start.
-func applyPendingUpdateOnStartup(dataDir string, logger contracts.Logger) {
+// clearInstalledPendingUpdate removes a plan whose version is already running:
+// the immediate install quit the app into the new version (or the user finished
+// a dmg install manually), so the plan and its staged asset are done. appVersion
+// is the running product version passed by the host options (F17), not the
+// package global: embedders override it and a plain build reports "dev", and an
+// unparsable/older running version keeps the plan conservatively.
+func clearInstalledPendingUpdate(dataDir, appVersion string, pending pendingUpdate, logger contracts.Logger) bool {
+	running := strings.TrimSpace(appVersion)
+	if running == "" || strings.TrimSpace(pending.Version) == "" {
+		return false
+	}
+	comparison, err := update.CompareVersions(running, pending.Version)
+	if err != nil || comparison < 0 {
+		return false
+	}
+	if !clearPendingInstall(dataDir, pending.Staged, logger) {
+		if logger != nil {
+			logger.Printf("%s: downloaded update %s is already running (%s); its leftovers are locked, the plan stays for a cleanup retry",
+				appName, pending.Version, running)
+		}
+		return true
+	}
+	if logger != nil {
+		logger.Printf("%s: downloaded update %s is already running (%s); cleared the install plan",
+			appName, pending.Version, running)
+	}
+	return true
+}
+
+// applyPendingUpdateOnStartup runs at process start and never fails startup: the
+// outcome is logged and a failure simply keeps the plan for the next start. It
+// reads the plan metadata first and hashes the staged asset only when it is
+// actually applied: an installer/dmg is skipped without reading hundreds of
+// megabytes, and an applied plan is verified exactly once (F10).
+func applyPendingUpdateOnStartup(dataDir, appVersion string, logger contracts.Logger) {
 	cleanupStaleExecutableBackups(logger)
-	applied, err := applyPendingUpdate(dataDir, defaultExecutableReplacer{}, logger)
+	pending, ok, err := readPendingPlan(dataDir)
+	if err != nil {
+		if logger != nil {
+			logger.Printf("%s: pending update install failed (plan kept): %v", appName, err)
+		}
+		return
+	}
+	if !ok {
+		return
+	}
+	if clearInstalledPendingUpdate(dataDir, appVersion, pending, logger) {
+		return
+	}
+	// A setup installer cannot run silently (and a dmg install needs the
+	// running app to be swapped and reopened), so both wait for the user-visible
+	// in-app install command: keep the plan instead of applying it on startup.
+	if pending.Kind == installKindInstaller || pending.Kind == installKindDMG {
+		if logger != nil {
+			logger.Printf("%s: pending update %s (%s) waits for the in-app install command", appName, pending.Version, pending.Kind)
+		}
+		return
+	}
+	applied, err := applyResolvedPendingUpdate(dataDir, pending, defaultExecutableReplacer{}, logger)
 	if err != nil {
 		if logger != nil {
 			logger.Printf("%s: pending update install failed (plan kept): %v", appName, err)

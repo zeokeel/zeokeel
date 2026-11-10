@@ -285,25 +285,28 @@ func TestMessageSearchLimit(t *testing.T) {
 	}
 }
 
-// TestMessageSearchHidesAutomationRunHits pins the same user-only rule for the
-// durable message search: hits from automation-run conversations never render,
-// whether the run session is still in the read model or only the stored hit
-// remains (the hit carries the run's title prefix).
-func TestMessageSearchHidesAutomationRunHits(t *testing.T) {
+// TestMessageSearchHidesExplicitOriginHits pins the user-only rule for the
+// durable message search: hits of conversations whose explicit provenance is
+// non-user never render, whether or not their stored title carries the old
+// "自动化: " convention. A user conversation titled like a run stays visible.
+func TestMessageSearchHidesExplicitOriginHits(t *testing.T) {
 	now := time.Unix(1700000000, 0)
 	chat := &fakeChat{sessions: []contracts.ChatSessionInfo{
 		{ID: "s1", Title: "普通会话"},
-		{ID: "s2", Title: "自动化: 每日摘要"},
+		{ID: "s2", Title: "每日摘要", Origin: contracts.SessionOriginAutomation},
+		{ID: "s3", Title: "文档审查员", Origin: contracts.SessionOriginSubagent},
+		// A user conversation whose title starts with the old convention: no
+		// automation provenance, so its hit must stay visible (audit F6).
+		{ID: "s-mine", Title: "自动化: 我的笔记"},
 	}}
 	store := &fakeStore{hits: []contracts.MessageSearchHit{
 		hit("s1", "普通会话", "user", "可见命中片段", now),
-		hit("s2", "自动化: 每日摘要", "assistant", "自动化命中片段", now),
-		// The run session is gone from the read model, but the stored hit still
-		// names it: the title prefix keeps it hidden.
-		hit("s-old", "自动化: 历史任务", "user", "历史命中片段", now),
+		hit("s2", "每日摘要", "assistant", "自动化命中片段", now),
 		// A run hit whose stored title is empty is hidden by the read model's
-		// session-ID set.
+		// provenance-derived session-ID set.
 		hit("s2", "", "assistant", "无标题命中片段", now),
+		hit("s3", "文档审查员", "assistant", "子智能体命中片段", now),
+		hit("s-mine", "自动化: 我的笔记", "user", "用户命中片段", now),
 	}}
 	h := newHarnessWithStore(t, chat, store, sidebar.Config{})
 	tester := h.tester()
@@ -312,9 +315,28 @@ func TestMessageSearchHidesAutomationRunHits(t *testing.T) {
 	tester.Type("命中片段")
 	tester.Frame()
 
-	h.assertTexts(tester, "消息搜索", "可见命中片段")
-	h.assertNoTexts(tester, "自动化: 每日摘要", "自动化命中片段",
-		"历史命中片段", "无标题命中片段", "未命名会话")
+	h.assertTexts(tester, "消息搜索", "可见命中片段", "用户命中片段")
+	h.assertNoTexts(tester, "每日摘要", "自动化命中片段", "无标题命中片段",
+		"文档审查员", "子智能体命中片段")
+}
+
+// TestMessageSearchKeepsStaleHitWithoutProvenance documents the explicit-only
+// policy: a stored hit whose session is gone from the read model carries no
+// provenance, so it is not guessed to be an automation run from its title and
+// renders (deleted conversations are pruned from the store separately).
+func TestMessageSearchKeepsStaleHitWithoutProvenance(t *testing.T) {
+	now := time.Unix(1700000000, 0)
+	store := &fakeStore{hits: []contracts.MessageSearchHit{
+		hit("s-gone", "自动化: 历史任务", "user", "历史命中片段", now),
+	}}
+	h := newHarnessWithStore(t, &fakeChat{}, store, sidebar.Config{})
+	tester := h.tester()
+	tester.Frame()
+	clickLabel(t, tester, "搜索会话与消息")
+	tester.Type("命中片段")
+	tester.Frame()
+
+	h.assertTexts(tester, "消息搜索", "历史命中片段")
 }
 
 func TestSearchWithoutSearcherKeepsTitleFilter(t *testing.T) {

@@ -643,7 +643,7 @@ func TestApplyPendingUpdateOnStartupKeepsBrokenPlanNonFatal(t *testing.T) {
 	}
 
 	logger := &trayRecordingLogger{}
-	applyPendingUpdateOnStartup(dataDir, logger)
+	applyPendingUpdateOnStartup(dataDir, "dev", logger)
 	if _, err := os.Stat(pendingJSONPath(dataDir)); err != nil {
 		t.Fatalf("broken pending plan removed by startup wrapper: %v", err)
 	}

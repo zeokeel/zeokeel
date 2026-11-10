@@ -1,8 +1,10 @@
 package rightpanel
 
 import (
+	"bytes"
 	"context"
 	"fmt"
+	"image"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -40,6 +42,14 @@ var DirectoryPicker = func(title string) (string, error) {
 const (
 	// maxPreviewBytes caps the text/markdown preview (256 KiB).
 	maxPreviewBytes = 256 << 10
+	// maxImageBytes bounds one image read: a screenshot or photo is usually far
+	// over the text cap, so images get their own (much larger) read bound
+	// instead of being truncated into an undecodable fragment.
+	maxImageBytes = 16 << 20
+	// maxImagePixels bounds the decoded dimensions before the decoder allocates
+	// the bitmap, so a small "image bomb" file cannot exhaust memory on the
+	// background read.
+	maxImagePixels = 24_000_000
 	// maxTreeEntries bounds one directory's rendered rows: a directory with
 	// tens of thousands of entries would make the native tree build every row
 	// each frame. The workspace service exposes search for exhaustive lookups,
@@ -58,6 +68,14 @@ type filePreview struct {
 	err       string
 	loading   bool
 	workspace string
+}
+
+// editorKey identifies one cached code-editor state: the workspace identity and
+// the workspace-relative path. The workspace is part of the key so a same-named
+// file in another workspace can never reuse (and paint) the old buffer.
+type editorKey struct {
+	workspace string
+	path      string
 }
 
 // --- workspace tree cache ---------------------------------------------------
@@ -158,16 +176,60 @@ func (st *state) resetFilesState(workspaceKey string) {
 	st.filesGeneration++
 }
 
-// refreshFiles drops the tree and diff caches, so the next frame re-reads the
-// workspace from disk.
+// refreshFiles drops the tree and changes/diff caches, so the next frame
+// re-reads the workspace from disk. Bumping the changes generation also
+// invalidates a workspace-diff read that was in flight when the user pressed
+// refresh: its posted result must not restore the pre-refresh snapshot.
 func (st *state) refreshFiles() {
 	st.filesGeneration++
 	st.filesDirs = make(map[string]*dirListing)
 	st.filesOpen = make(map[string]*bool)
-	st.changesLoaded = false
+	st.changesGeneration++
 	st.changes = nil
 	st.changesErr = nil
+	st.changesLoaded = false
+	st.changesLoading = false
+	st.changesOpen = make(map[string]bool)
+	st.diffs = make(map[string]*diffView)
 	st.invalidate()
+}
+
+// syncWorkspaceIdentity keeps the path-keyed caches scoped to one workspace.
+// When the current workspace identity changes, the preview/editor/changes/diff
+// caches and the files tree belong to the old workspace and are dropped; the
+// opened file tabs stay (the documented UX), so each tab re-reads its relative
+// path in the new workspace on the next frame.
+func (st *state) syncWorkspaceIdentity(workspace contracts.WorkspaceService) {
+	identity, _ := st.currentWorkspaceKey(workspace)
+	if identity == st.activeWorkspace {
+		return
+	}
+	st.activeWorkspace = identity
+	st.previews = make(map[string]*filePreview)
+	st.editors = make(map[editorKey]*editor.State)
+	st.changesOpen = make(map[string]bool)
+	st.diffs = make(map[string]*diffView)
+	st.changes = nil
+	st.changesErr = nil
+	st.changesLoaded = false
+	st.changesLoading = false
+	st.changesGeneration++
+	st.resetFilesState(identity)
+}
+
+// dropPathCaches drops every cache entry that belongs to one workspace-relative
+// path: its preview, its editor buffers (current workspace key), its diff fold
+// state and its diff viewer. A file can appear under several diff keys (one per
+// status), so the diff viewers are matched by the path prefix.
+func (st *state) dropPathCaches(path string) {
+	delete(st.previews, path)
+	delete(st.editors, editorKey{workspace: st.activeWorkspace, path: path})
+	delete(st.changesOpen, path)
+	for key := range st.diffs {
+		if strings.HasPrefix(key, path+"\x00") {
+			delete(st.diffs, key)
+		}
+	}
 }
 
 // buildArtifactsSection is the read-only deliverables history: the newest ten
@@ -383,14 +445,19 @@ type filePreviewResult struct {
 	err       string
 }
 
-// loadFilePreview reads one file within the preview bound and decodes images.
-// It does file and image I/O only: no state is touched, so it is safe off the
-// UI thread.
+// loadFilePreview reads one file and decodes an image. Images use their own
+// read bound and a pre-decode dimension bound; a corrupt or oversized image is
+// reported honestly instead of silently falling through to the unsupported
+// fallback. It does file and image I/O only: no state is touched, so it is safe
+// off the UI thread.
 func loadFilePreview(workspace contracts.WorkspaceService, path string) filePreviewResult {
 	var result filePreviewResult
 	if workspace == nil {
 		result.err = "workspace is not enabled"
 		return result
+	}
+	if isImagePath(path) {
+		return loadImagePreview(workspace, path)
 	}
 	data, err := workspace.ReadFile(context.Background(), path, maxPreviewBytes+1)
 	switch {
@@ -403,11 +470,39 @@ func loadFilePreview(workspace contracts.WorkspaceService, path string) filePrev
 	default:
 		result.data = data
 	}
-	if len(result.data) > 0 && isImagePath(path) {
-		if bitmap, decodeErr := ui.DecodeBitmap(result.data); decodeErr == nil {
-			result.bitmap = bitmap
-		}
+	return result
+}
+
+// loadImagePreview reads and decodes one image within the image bounds: the
+// byte bound keeps a truncated file from reaching the decoder at all, and the
+// dimension bound is checked from the header (image.DecodeConfig) before the
+// decoder allocates the bitmap.
+func loadImagePreview(workspace contracts.WorkspaceService, path string) filePreviewResult {
+	var result filePreviewResult
+	data, err := workspace.ReadFile(context.Background(), path, maxImageBytes+1)
+	if err != nil {
+		result.err = err.Error()
+		return result
 	}
+	if len(data) > maxImageBytes {
+		result.err = fmt.Sprintf("image is too large: over %d MiB", maxImageBytes>>20)
+		return result
+	}
+	config, _, configErr := image.DecodeConfig(bytes.NewReader(data))
+	if configErr != nil {
+		result.err = "image could not be decoded: " + configErr.Error()
+		return result
+	}
+	if int64(config.Width)*int64(config.Height) > maxImagePixels {
+		result.err = fmt.Sprintf("image is too large: %dx%d pixels (max %d)", config.Width, config.Height, maxImagePixels)
+		return result
+	}
+	bitmap, decodeErr := ui.DecodeBitmap(data)
+	if decodeErr != nil {
+		result.err = "image could not be decoded: " + decodeErr.Error()
+		return result
+	}
+	result.bitmap = bitmap
 	return result
 }
 
@@ -421,13 +516,15 @@ func applyFilePreview(preview *filePreview, result filePreviewResult) {
 }
 
 // editorFor returns the read-only official code editor for one file tab. The
-// state is built once per path, so scroll position and selection survive tab
-// switches; closing the tab drops it.
+// state is built once per (workspace, path), so scroll position and selection
+// survive tab switches while a same-named file in another workspace gets a
+// fresh buffer; closing the tab drops it.
 func (st *state) editorFor(path string, data []byte) *editor.State {
 	if st.editors == nil {
-		st.editors = make(map[string]*editor.State)
+		st.editors = make(map[editorKey]*editor.State)
 	}
-	if state, ok := st.editors[path]; ok {
+	key := editorKey{workspace: st.activeWorkspace, path: path}
+	if state, ok := st.editors[key]; ok {
 		return state
 	}
 	buffer := editor.NewBuffer(string(data))
@@ -439,7 +536,7 @@ func (st *state) editorFor(path string, data []byte) *editor.State {
 		SoftWrap:    true,
 		Label:       st.tr("文件内容", "File content"),
 	}
-	st.editors[path] = state
+	st.editors[key] = state
 	return state
 }
 

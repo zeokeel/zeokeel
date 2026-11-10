@@ -278,36 +278,6 @@
       "doc": "docs/AGENT-SURFACES.md S2"
     },
     {
-      "id": "uikit.team-surface",
-      "entry": "uikit.TeamSurface",
-      "package": "internal/uikit",
-      "allowed": [
-        "uikit.TeamSurface",
-        "uikit.StatusBadge",
-        "ui.List",
-        "uikit.DialogFooter"
-      ],
-      "forbidden": [
-        "active_as_running",
-        "tab_as_branch",
-        "card_wall"
-      ],
-      "states": [
-        "running",
-        "idle",
-        "done",
-        "failed",
-        "interrupted",
-        "unknown"
-      ],
-      "rules": [
-        "run-state-truthful",
-        "no-default-danger",
-        "details-below-list"
-      ],
-      "doc": "docs/AGENT-SURFACES.md S9"
-    },
-    {
       "id": "uikit.composer-shell",
       "entry": "uikit.ComposerShell",
       "package": "internal/uikit",

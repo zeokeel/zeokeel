@@ -64,6 +64,10 @@ type UpdateInstallPlan struct {
 	Path string
 	// SHA256 is the verified checksum.
 	SHA256 string
+	// Kind is the staged asset layout: "installer" (Windows NSIS setup),
+	// "dmg" (macOS disk image), "appimage", "archive" or "binary" (the
+	// fallback for a plan written before kinds existed).
+	Kind string
 }
 
 // UpdateInstaller is the optional install half of the update service: it

@@ -157,6 +157,14 @@ func defaultDataDir() string {
 // Main is the process entry point behind cmd/zeokeel. It never returns; it
 // reports the process exit code instead so the thin main can call os.Exit.
 func Main(args []string) int {
+	// Hidden update-helper modes run before flag parsing and before mygo is
+	// initialized: the updater spawns this same executable to wait for the old
+	// process to quit and then start the installer / reopen the new app without
+	// any shell quoting. They never open a window or touch the single-instance
+	// lock.
+	if handled, code := runUpdateHelper(args); handled {
+		return code
+	}
 	return mainWithStreams(args, os.Stdout, os.Stderr)
 }
 
@@ -292,7 +300,7 @@ func runHeadless(ctx context.Context, opts Options, out io.Writer) error {
 	// Install a scheduled update at startup (the headless product serves the
 	// agent backend and should also apply updates); failures are logged, never
 	// fatal, and keep the pending plan.
-	applyPendingUpdateOnStartup(opts.DataDir, logger)
+	applyPendingUpdateOnStartup(opts.DataDir, opts.AppVersion, logger)
 	root := cordis.Root()
 	defer func() {
 		if err := root.DisposeAll(); err != nil {
@@ -405,7 +413,7 @@ func runDesktop(opts Options) error {
 	// page wrote <dataDir>/updates/pending.json, the host replaces its own
 	// executable here (it takes effect on the next start) and never blocks on a
 	// failure (the plan is kept for a retry).
-	applyPendingUpdateOnStartup(opts.DataDir, logger)
+	applyPendingUpdateOnStartup(opts.DataDir, opts.AppVersion, logger)
 
 	// Best-effort XDG autostart entry sync (only the owning instance manages
 	// the entry): the appearance page writes the setting; this keeps
@@ -440,15 +448,25 @@ func runDesktop(opts Options) error {
 	}
 
 	var (
-		loader       *module.Loader
-		window       *mygo.Window
-		tray         trayHandle
-		hotkeyOff    func()
-		themeOff     func()
-		startupErr   error
-		shutdownOnce sync.Once
-		closing      atomic.Bool
+		loader           *module.Loader
+		window           *mygo.Window
+		tray             trayHandle
+		hotkeyOff        func()
+		themeOff         func()
+		updateCommandOff func()
+		updateCommandErr error
+		startupErr       error
+		shutdownOnce     sync.Once
+		closing          atomic.Bool
 	)
+	// The immediate-install command lives with the UI root's command surface:
+	// the update settings page and the palette reach "install update and restart"
+	// through it (the page only schedules the download). Registration is
+	// non-fatal: a command registry the host cannot extend must not block startup.
+	updateCommandOff, updateCommandErr = registerUpdateInstallCommand(uiRoot, opts.DataDir, logger)
+	if updateCommandErr != nil {
+		logger.Printf("%s: register the install-update command: %v", appName, updateCommandErr)
+	}
 	// shutdown is the one teardown path: unload the assembly (UI modules
 	// unregister their contributions in reverse through the kernel), close the
 	// window, persist host-owned UI preferences, dispose the kernel root. It is
@@ -458,6 +476,10 @@ func runDesktop(opts Options) error {
 			closing.Store(true)
 			logger.Printf("%s: shutting down", appName)
 			uiRoot.SetInvalidator(nil)
+			if updateCommandOff != nil {
+				updateCommandOff()
+				updateCommandOff = nil
+			}
 			if loader != nil {
 				if err := loader.Close(); err != nil {
 					logger.Printf("%s: close assembly: %v", appName, err)

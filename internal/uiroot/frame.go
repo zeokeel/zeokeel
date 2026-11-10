@@ -66,6 +66,19 @@ func (r *Root) view(c *ui.Context) {
 	}
 	tokens := design.Of(c)
 	r.loadChromeWidths()
+	// The expanded sidebar resolves the first-run destination while rendering its
+	// selection, but a persisted collapsed sidebar (the icon rail) does not draw
+	// the screen list: without an explicit default here nav.Current() stays "",
+	// every screen-scoped header/action slot is filtered out and the inspector
+	// reports itself unavailable. Resolve the effective default screen before any
+	// chrome reads the current destination.
+	if r.nav.Current() == "" {
+		if id := defaultScreenID(visibleScreens(r.rt.screenSpecs())); id != "" {
+			if err := r.nav.Push(id); err != nil {
+				log.Printf("uiroot: default screen %q: %v", id, err)
+			}
+		}
+	}
 	r.announceNavigation(c)
 
 	ui.Row(c).Fill().Background(tokens.BgBase).Children(func() {
@@ -847,7 +860,15 @@ func (r *Root) runPaletteCommand(cmd contracts.CommandSpec) {
 	r.paletteSelected = 0
 	r.paletteCount = 0
 	if cmd.Run != nil {
-		_ = cmd.Run()
+		// A palette action that fails (for example the update command with no
+		// downloaded plan) must not vanish silently: surface it as an error
+		// toast so the user knows nothing happened and why.
+		if err := runSafelyErr(cmd.Run); err != nil {
+			if r.notifier != nil {
+				r.notifier.Notify(contracts.NotifyError,
+					r.tr("命令执行失败：", "Command failed: ")+err.Error())
+			}
+		}
 	}
 	r.requestFrame()
 }

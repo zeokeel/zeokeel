@@ -390,6 +390,27 @@ func (s *service) currentWorkspaceID(ctx context.Context) string {
 	return strings.TrimSpace(workspace.ID)
 }
 
+// currentWorkspaceRoot reports the current workspace root when the workspace
+// module is wired, ignoring/logging lookup failures (tool-call path provenance
+// is best effort). An empty root means no workspace is open.
+func (s *service) currentWorkspaceRoot(ctx context.Context) string {
+	if s.workspace == nil {
+		return ""
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	workspace, ok, err := s.workspace.Current(ctx)
+	if err != nil {
+		s.logger.Printf("[agent] current workspace root: %v", err)
+		return ""
+	}
+	if !ok {
+		return ""
+	}
+	return strings.TrimSpace(workspace.Root)
+}
+
 // withWorkspaceInstructions appends the configured workspace instruction file
 // (agent.agentsFile, AGENTS.md by default) to this run's system prompt. The
 // file is read from the current workspace at run time; a missing file is
@@ -895,6 +916,17 @@ func sessionArchived(settings contracts.SettingsService, sessionID string) bool 
 	return settings.Get(contracts.SessionArchivedSettingKey(sessionID), "false") == "true"
 }
 
+// sessionOrigin reads one session's persisted provenance ("" for a user
+// session). The automation backend writes the origin setting when it starts a
+// run; the sidebar hides non-user origins explicitly instead of guessing from
+// the conversation title (audit F6).
+func sessionOrigin(settings contracts.SettingsService, sessionID string) string {
+	if settings == nil {
+		return contracts.SessionOriginUser
+	}
+	return strings.TrimSpace(settings.Get(contracts.SessionOriginSettingKey(sessionID), contracts.SessionOriginUser))
+}
+
 // SetSessionModel implements contracts.SessionModelSwitcher: it persists the
 // per-session model override, which the next run and ChatSession.Model read.
 // An empty model or unknown session is rejected; a failed write leaves the
@@ -1189,6 +1221,7 @@ func (s *service) Sessions() []contracts.ChatSessionInfo {
 			MessageCount: len(state.messages),
 			Running:      state.running,
 			UpdatedAt:    state.updatedAt,
+			Origin:       sessionOrigin(s.settings, state.id),
 		})
 	}
 	sort.SliceStable(infos, func(i, j int) bool {
@@ -1627,6 +1660,10 @@ func (s *service) run(ctx context.Context, sessionID string, cfg contracts.ChatC
 		return
 	}
 	s.appendEvent(ctx, sessionID, "run_start", map[string]any{"model": cfg.Model})
+	// The tool root follows the workspace that is current when the run starts;
+	// capture it once so every tool call of this turn records a path relative to
+	// the same workspace (a switch mid-run cannot retroactively change it).
+	workspaceRoot := s.currentWorkspaceRoot(ctx)
 	startedAt := time.Now()
 	// The usage tracker is run-local: Rig's RunResult.Usage accumulates every
 	// model call, while only the last call's prompt tokens describe the context
@@ -1635,7 +1672,7 @@ func (s *service) run(ctx context.Context, sessionID string, cfg contracts.ChatC
 	result, runErr := runner.Run(ctx, rig.RunRequest{
 		SessionID: sessionID,
 		Input:     input,
-		Emit:      func(event rig.Event) { s.handleEvent(sessionID, event, usage) },
+		Emit:      func(event rig.Event) { s.handleEvent(sessionID, workspaceRoot, event, usage) },
 	})
 	s.recordRunUsage(ctx, sessionID, result, time.Since(startedAt).Milliseconds(), usage.lastPromptTokens)
 	s.finish(sessionID, ctx, runErr)
@@ -1701,9 +1738,10 @@ func (s *service) appendEvent(ctx context.Context, sessionID, eventType string, 
 }
 
 // handleEvent applies one Rig event to the current assistant message and
-// notifies subscribers. The callback runs on the run goroutine; turn is the
-// run-local usage tracker (nil is accepted for callers without one).
-func (s *service) handleEvent(sessionID string, event rig.Event, turn *turnUsage) {
+// notifies subscribers. The callback runs on the run goroutine; workspaceRoot
+// is the tool root captured at run start (for the tool-call path provenance);
+// turn is the run-local usage tracker (nil is accepted for callers without one).
+func (s *service) handleEvent(sessionID, workspaceRoot string, event rig.Event, turn *turnUsage) {
 	// Rig reports one usage event per model call and accumulates the run total
 	// itself; remember the prompt tokens of the newest call so the read model can
 	// expose the real context size of the turn (RunResult.Usage is a billing
@@ -1727,12 +1765,17 @@ func (s *service) handleEvent(sessionID string, event rig.Event, turn *turnUsage
 		case rig.EventToolCall:
 			if event.Call != nil {
 				textOffset := len(message.Text)
+				// The path is parsed from the full arguments, before
+				// boundedToolArguments cuts a whole file body out of them; the
+				// generated-file cards need it structurally (audit F4).
+				path := toolCallPath(event.Call.Name, event.Call.Arguments, workspaceRoot)
 				arguments := boundedToolArguments(event.Call.Arguments)
 				message.Tools = append(message.Tools, contracts.ToolCall{
 					ID:         event.Call.ID,
 					Name:       event.Call.Name,
 					Status:     "running",
 					Arguments:  arguments,
+					Path:       path,
 					TextOffset: textOffset,
 				})
 				// The turn records live tool calls, so its offsets are a known
@@ -1740,10 +1783,14 @@ func (s *service) handleEvent(sessionID string, event rig.Event, turn *turnUsage
 				// before writing any prose): the transcript must interleave by
 				// offset instead of falling back to whole-text-then-cards.
 				message.ToolTimelineKnown = true
-				s.appendEvent(context.Background(), sessionID, "tool_call", map[string]any{
+				fields := map[string]any{
 					"id": event.Call.ID, "name": event.Call.Name, "arguments": arguments,
 					"text_offset": textOffset,
-				})
+				}
+				if path != "" {
+					fields["path"] = path
+				}
+				s.appendEvent(context.Background(), sessionID, "tool_call", fields)
 			}
 		case rig.EventToolResult:
 			if event.Call != nil && event.Result != nil {
@@ -1963,6 +2010,74 @@ func boundedToolArguments(arguments string) string {
 		return trimmed
 	}
 	return string(runes[:maxToolArgumentsRunes]) + "…"
+}
+
+// pathBearingTools are the tool names whose arguments carry a workspace file
+// path: the rig file tools, the DSH/ACP editor alias and the read-side file
+// tools. contracts.ToolCall.Path is populated for them from the full arguments,
+// before they are bounded, so the transcript's generated-file cards keep a
+// truthful path for writes whose body exceeds the transcript bound (audit F4).
+var pathBearingTools = map[string]bool{
+	"write_file":         true,
+	"edit_file":          true,
+	"str_replace_editor": true,
+	"read_file":          true,
+	"read_image":         true,
+	"list_dir":           true,
+	"glob":               true,
+	"grep":               true,
+}
+
+// toolCallPath extracts the workspace-relative file path of one tool call from
+// the full (unbounded) argument JSON. It returns "" for non-file tools, empty or
+// malformed arguments, and for paths that do not resolve inside the workspace
+// (an absolute path outside the root, or a relative path escaping it): a path
+// the call cannot have touched inside the workspace must not be presented as a
+// delivered workspace file.
+func toolCallPath(name, arguments, workspaceRoot string) string {
+	if !pathBearingTools[strings.ToLower(strings.TrimSpace(name))] {
+		return ""
+	}
+	raw := strings.TrimSpace(arguments)
+	if raw == "" || !strings.HasPrefix(raw, "{") {
+		return ""
+	}
+	var values map[string]any
+	if err := json.Unmarshal([]byte(raw), &values); err != nil {
+		return ""
+	}
+	named := ""
+	for _, key := range []string{"path", "file_path", "filePath"} {
+		value, ok := values[key].(string)
+		if !ok {
+			continue
+		}
+		if named = strings.TrimSpace(value); named != "" {
+			break
+		}
+	}
+	if named == "" {
+		return ""
+	}
+	named = strings.ReplaceAll(named, "\\", "/")
+	if filepath.IsAbs(named) {
+		root := strings.TrimSpace(filepath.FromSlash(workspaceRoot))
+		if root == "" {
+			// Without a known root an absolute path cannot be expressed
+			// workspace-relative; the tool itself would not have a root either.
+			return ""
+		}
+		relative, err := filepath.Rel(root, filepath.FromSlash(named))
+		if err != nil {
+			return ""
+		}
+		named = relative
+	}
+	cleaned := filepath.ToSlash(filepath.Clean(filepath.FromSlash(named)))
+	if cleaned == "." || cleaned == ".." || strings.HasPrefix(cleaned, "../") {
+		return ""
+	}
+	return cleaned
 }
 
 // chatMessagesFromRig converts persisted Rig messages into the UI read model.

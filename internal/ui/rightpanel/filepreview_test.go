@@ -113,19 +113,51 @@ func TestOpenNativeResolvesWorkspaceRelativePath(t *testing.T) {
 	}
 }
 
-// TestOpenNativeKeepsAbsolutePath: a generated-file card may hold an absolute
-// path already; it is launched as given.
-func TestOpenNativeKeepsAbsolutePath(t *testing.T) {
+// TestOpenNativeAllowsWorkspaceContainedPaths: a workspace-relative path
+// resolves under the live root, and an absolute path inside that root is
+// accepted and launched at its absolute form.
+func TestOpenNativeAllowsWorkspaceContainedPaths(t *testing.T) {
 	workspace := newFakeWorkspace()
 	workspace.setCurrent()
 	h := newHarness(t, harnessOptions{Workspace: workspace})
 	opened := withOpenNative(t, nil)
-	full := filepath.Join("/tmp", "zeokeel-out", "report.pdf")
-	if err := h.previewer().OpenNative(full); err != nil {
-		t.Fatalf("OpenNative: %v", err)
+
+	if err := h.previewer().OpenNative("docs/release.md"); err != nil {
+		t.Fatalf("OpenNative(relative): %v", err)
 	}
-	if len(*opened) != 1 || (*opened)[0] != full {
-		t.Fatalf("launched paths = %v, want [%s]", *opened, full)
+	inside := filepath.Join("/work/proj", "README.md")
+	if err := h.previewer().OpenNative(inside); err != nil {
+		t.Fatalf("OpenNative(absolute inside): %v", err)
+	}
+	if len(*opened) != 2 ||
+		(*opened)[0] != filepath.Join("/work/proj", "docs/release.md") ||
+		(*opened)[1] != inside {
+		t.Fatalf("launched paths = %v, want the workspace-resolved relative path and the absolute path", *opened)
+	}
+}
+
+// TestOpenNativeRejectsEscapesAndOutsidePaths pins the workspace containment of
+// the native-launch action: it is the same policy as PreviewFile, so a card
+// path can never launch a file outside the open workspace.
+func TestOpenNativeRejectsEscapesAndOutsidePaths(t *testing.T) {
+	workspace := newFakeWorkspace()
+	workspace.setCurrent()
+	h := newHarness(t, harnessOptions{Workspace: workspace})
+	opened := withOpenNative(t, nil)
+	service := h.previewer()
+
+	for _, path := range []string{
+		"../secret.txt",
+		"docs/../../secret.txt",
+		"/etc/passwd",
+		"/tmp/zeokeel-out/report.pdf",
+	} {
+		if err := service.OpenNative(path); err == nil {
+			t.Fatalf("OpenNative(%q) launched a path outside the workspace; opened = %v", path, *opened)
+		}
+	}
+	if len(*opened) != 0 {
+		t.Fatalf("escaped paths reached the OS launcher: %v", *opened)
 	}
 }
 
@@ -136,19 +168,33 @@ func TestOpenNativeErrors(t *testing.T) {
 	if err := h.previewer().OpenNative("  "); err == nil {
 		t.Fatal("OpenNative accepted an empty path")
 	}
+	workspace := newFakeWorkspace()
+	workspace.setCurrent()
+	inside := newHarness(t, harnessOptions{Workspace: workspace})
 	withOpenNative(t, func(string) error { return errors.New("no launcher") })
-	if err := h.previewer().OpenNative("/tmp/x.md"); err == nil {
+	if err := inside.previewer().OpenNative("notes/x.md"); err == nil {
 		t.Fatal("OpenNative swallowed the launcher error")
 	}
 }
 
-// TestOpenNativeWithoutWorkspaceFallsBackToGivenPath: a host without a
-// workspace still opens an explicit path.
-func TestOpenNativeWithoutWorkspaceFallsBackToGivenPath(t *testing.T) {
+// TestOpenNativeWithoutWorkspace: without a workspace an absolute path and a
+// parent-directory escape are rejected; a contained relative path still opens
+// (there is no root to resolve it against, so it is launched as given).
+func TestOpenNativeWithoutWorkspace(t *testing.T) {
 	h := newHarness(t, harnessOptions{})
 	opened := withOpenNative(t, nil)
-	if err := h.previewer().OpenNative("relative/note.md"); err != nil {
-		t.Fatalf("OpenNative: %v", err)
+	service := h.previewer()
+
+	for _, path := range []string{"/etc/passwd", "../secret.txt", "./../secret.txt"} {
+		if err := service.OpenNative(path); err == nil {
+			t.Fatalf("OpenNative(%q) launched without a workspace; opened = %v", path, *opened)
+		}
+	}
+	if len(*opened) != 0 {
+		t.Fatalf("rejected paths reached the OS launcher: %v", *opened)
+	}
+	if err := service.OpenNative("relative/note.md"); err != nil {
+		t.Fatalf("OpenNative(contained relative): %v", err)
 	}
 	if len(*opened) != 1 || (*opened)[0] != "relative/note.md" {
 		t.Fatalf("launched paths = %v, want the given path", *opened)

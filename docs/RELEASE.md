@@ -13,7 +13,7 @@ ZeoKeel 的安装包和更新链路全部由仓库自己的 Go 工具链完成�
 | Windows | `zeokeel-setup-<version>-amd64.exe`、`zeokeel-setup-<version>-arm64.exe` | NSIS 安装器：当前用户安装到 `%LOCALAPPDATA%\Programs\ZeoKeel`，无需管理员；开始菜单、卸载项、可选桌面快捷方式；`/S` 静默安装。exe 为 GUI 子系统（无命令行窗口）、带图标和版本信息 |
 | Linux | `zeokeel-<version>-linux-amd64.AppImage`、`zeokeel-<version>-linux-arm64.AppImage` | 唯一的 Linux 安装包；可执行、双击运行 |
 | macOS | `zeokeel-<version>-arm64.dmg` | Apple Silicon（arm64）`.app` 的磁盘镜像；Developer ID 签名 + 公证 + staple；不支持 Intel Mac |
-| 更新用 | `zeokeel-<version>-windows-<arch>.tar.gz`、`zeokeel-<version>-darwin-arm64.tar.gz`、Linux 的 `.AppImage` | 应用内更新下载的归档，不是给用户手动安装的入口 |
+| 更新用 | Windows: `zeokeel-setup-<version>-<arch>.exe`；macOS: `zeokeel-<version>-arm64.dmg`；Linux: `.AppImage` | 应用内更新直接下载安装包并运行/安装；不再发布 Windows/macOS 的 tar.gz 更新归档 |
 | 校验 | `SHA256SUMS.txt` | 发布任务统一生成，更新器用它校验下载 |
 
 `mygo build` 还会在 Linux 输出 `.deb`、`.tar.gz`、`PKGBUILD` 等中间产物，
@@ -37,7 +37,7 @@ git push origin v0.2.3
 2. 创建 draft release；
 3. 三个平台并行构建：macOS arm64（`macos-26`，签名/公证/dmg）、Windows
    （`ubuntu-24.04` + NSIS）、Linux（`ubuntu-24.04` + AppImage 工具链）；
-4. 各平台把安装包和更新归档上传到 draft；
+4. 各平台把安装包（Windows setup、macOS dmg、Linux AppImage）上传到 draft；
 5. 汇总所有资产生成 `SHA256SUMS.txt`；
 6. 自动把 draft 发布为正式 release（`--draft=false`）。
 
@@ -109,23 +109,26 @@ Linux desktop/AppImage 图标全部由 `scripts/gen-icons.sh` 从这两个文件
 - 更新模块配置在 `internal/assembly/assemblies/desktop.json`：
   `{"githubRepo": "zeokeel/zeokeel"}`。
 - 检查：`GET https://api.github.com/repos/zeokeel/zeokeel/releases/latest`，
-  版本取 tag（去掉 `v`），release notes 取 release body，按平台选择更新归档：
+  版本取 tag（去掉 `v`），release notes 取 release body，按平台选择**安装包**：
 
   | 平台 | 优先级 |
   | --- | --- |
-  | Windows | `-windows-<arch>.tar.gz`（排除 setup 安装器） |
-  | Linux | `-linux-<arch>.AppImage` |
-  | macOS | `-darwin-arm64.tar.gz` |
+  | Windows | `zeokeel-setup-<version>-<arch>.exe`（NSIS setup，不再用 tar.gz） |
+  | Linux | `-linux-<arch>.AppImage`（旧 release 的 tar.gz 仅作兼容回退） |
+  | macOS | `zeokeel-<version>-<arch>.dmg`（不再用 tar.gz） |
 
 - 校验：从 `SHA256SUMS.txt` 资产取对应行的 SHA-256（没有时回退 GitHub 资产的
   `digest`）；`Download` 流式下载并校验大小/SHA-256 后暂存到
   `<dataDir>/updates/`。
-- 安装：设置页「更新」页下载后点「安装并在下次启动生效」，把计划写入
-  `updates/pending.json`（带 `kind`）；下次启动由 host 应用：
-  - `appimage`：原子替换 `$APPIMAGE` 指向的文件；
-  - `archive`：解压后替换应用目录（Windows/Linux）或整个 `.app`（macOS）；
-  - `binary`：替换可执行文件（旧计划 / 兼容路径）。
-  替换失败会保留计划并重试，不影响启动。
+- 安装：设置页「更新」页下载后点「安装并重启」，把计划写入
+  `updates/pending.json`（带 `kind`），然后 host 的 `uiroot.install-update`
+  命令立即执行并退出应用：
+  - `installer`（Windows）：启动下载好的 NSIS setup，由安装器完成升级（应用先退出，安装器可正常覆盖文件）；
+  - `dmg`（macOS）：静默安装的最佳努力——`hdiutil attach` 挂载 → `ditto` 复制新 `.app` → 换掉当前 bundle → `open` 重启；安装目录不可写时回退为打开 dmg 让用户拖入；
+  - `appimage`（Linux）：原子替换 `$APPIMAGE` 后重启；
+  - `binary`/`archive`：旧计划与兼容路径，替换后重启。
+  启动阶段不再自动执行 `installer`/`dmg` 计划（留给用户在更新页显式安装）；
+  其它类型仍按旧行为在启动时应用。失败会保留计划并在更新页显示错误。
 - UI 入口：设置 → 更新；命令面板「软件更新」直接打开该页。
 
 限制：
@@ -133,5 +136,5 @@ Linux desktop/AppImage 图标全部由 `scripts/gen-icons.sh` 从这两个文件
 - GitHub API 未认证时限额 60 次/小时/IP，受限时更新页显示检查失败并可稍后重试。
 - 由包管理器（deb/系统包）安装的副本不应自更新；本项目发布只提供 AppImage，
   AppImage 由用户放在可写目录，可自更新。
-- 旧版手工解压 tar.gz/zip 的用户需要先换成安装包/AppImage，之后才会进入更新链路。
-- Windows 自更新依赖归档替换；被杀软/权限拦截时会保留计划并给出错误。
+- 旧版只有 tar.gz 资产；从 v0.2.8 起不再发布 Windows/macOS 的 tar.gz，旧客户端请手动安装一次新版，之后更新走安装包/dmg。
+- Windows/macOS 自更新现在依赖安装包（setup/dmg）；被杀软、Gatekeeper 或目录权限拦截时会在更新页显示错误，macOS 会回退为打开 dmg 让用户手动完成。

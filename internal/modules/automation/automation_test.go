@@ -111,7 +111,7 @@ func (c *fakeChat) Subscribe(func(string)) (func(), error) {
 // newTestService builds a service directly and closes its ticker on cleanup.
 func newTestService(t *testing.T, dataDir string, cfg Config, chat contracts.ChatService) *service {
 	t.Helper()
-	service, err := newService(dataDir, cfg, &fakeLogger{}, chat)
+	service, err := newService(dataDir, cfg, &fakeLogger{}, chat, nil)
 	if err != nil {
 		t.Fatalf("newService: %v", err)
 	}
@@ -275,7 +275,7 @@ func TestCreateListUpdateDeleteAndPersistence(t *testing.T) {
 	if err := os.WriteFile(registryPath, []byte("{corrupt"), 0o600); err != nil {
 		t.Fatalf("write corrupt registry: %v", err)
 	}
-	if _, err := newService(dataDir, Config{}, &fakeLogger{}, chat); err == nil {
+	if _, err := newService(dataDir, Config{}, &fakeLogger{}, chat, nil); err == nil {
 		t.Fatal("newService loaded a corrupt registry")
 	}
 }
@@ -439,7 +439,7 @@ func TestConcurrentCRUD(t *testing.T) {
 
 func TestCloseStopsTicker(t *testing.T) {
 	chat := newFakeChat()
-	service, err := newService(t.TempDir(), Config{TickMs: 10}, &fakeLogger{}, chat)
+	service, err := newService(t.TempDir(), Config{TickMs: 10}, &fakeLogger{}, chat, nil)
 	if err != nil {
 		t.Fatalf("newService: %v", err)
 	}

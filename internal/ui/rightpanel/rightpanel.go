@@ -145,9 +145,6 @@ type state struct {
 	// runtime registers the page commands and requests frames.
 	runtime contracts.UIRuntime
 
-	// open holds the fold state of collapsibles keyed by a stable string.
-	open map[string]bool
-
 	// tab is the active tab index: a fixed page (pageGuide/pageFiles/
 	// pageTerminal) or pageFixedCount+fileTab. fileTabs are appended in open
 	// order; revealTab asks the next frame to scroll the active tab into view.
@@ -169,11 +166,20 @@ type state struct {
 	// workspace creation), shown on the Files page.
 	filesRootErr string
 
-	// previews caches one file preview per path (keyed also by workspace), and
-	// editors keeps the official read-only code editor state of a file tab
-	// across frames (its scroll and selection survive tab switches).
+	// activeWorkspace is the workspace identity (ID + root) the path-keyed
+	// caches (previews, editors, changes, diffs) belong to. It is synced once
+	// per frame; a workspace switch drops those caches while the opened-file
+	// tabs stay, so each tab re-reads its path in the new workspace instead of
+	// showing the previous workspace's bytes.
+	activeWorkspace string
+
+	// previews caches one file preview per path (the cached entry also holds
+	// its workspace identity), and editors keeps the official read-only code
+	// editor state of a file tab across frames (its scroll and selection
+	// survive tab switches). Editor states are keyed by workspace and path: a
+	// same-named file in another workspace must never reuse a buffer.
 	previews map[string]*filePreview
-	editors  map[string]*editor.State
+	editors  map[editorKey]*editor.State
 
 	// Deliverables history: the expanded preview rows (by artifact id), the
 	// official List's state and choice, and the last download status.
@@ -194,6 +200,11 @@ type state struct {
 	changesLoading   bool
 	changesOpen      map[string]bool
 	diffs            map[string]*diffView
+	// changesGeneration invalidates an in-flight workspace-diff read: a user
+	// refresh or a workspace switch bumps it, and a posted result from an
+	// older generation is dropped instead of restoring the pre-refresh
+	// snapshot.
+	changesGeneration int
 
 	// term is the Terminal page's state (its command runner appends output
 	// from a background goroutine, so its guard lives in terminalState).
@@ -306,9 +317,7 @@ func (st *state) closeTab(index int) {
 	}
 	path := st.fileTabs[fileIndex].path
 	st.fileTabs = append(st.fileTabs[:fileIndex], st.fileTabs[fileIndex+1:]...)
-	delete(st.previews, path)
-	delete(st.editors, path)
-	delete(st.changesOpen, path)
+	st.dropPathCaches(path)
 	switch {
 	case st.tab > index:
 		st.tab--
@@ -371,11 +380,10 @@ func Module() *module.Descriptor[Config] {
 			locale:        locale,
 			cfg:           config,
 			runtime:       runtime,
-			open:          make(map[string]bool),
 			filesDirs:     make(map[string]*dirListing),
 			filesOpen:     make(map[string]*bool),
 			previews:      make(map[string]*filePreview),
-			editors:       make(map[string]*editor.State),
+			editors:       make(map[editorKey]*editor.State),
 			changesOpen:   make(map[string]bool),
 			diffs:         make(map[string]*diffView),
 			artifactsOpen: make(map[string]bool),
@@ -488,16 +496,17 @@ type filePreviewService struct {
 
 // PreviewFile opens (or focuses) one workspace file as a right-sidebar tab and
 // reveals the sidebar. The path may be workspace-relative or absolute inside
-// the current workspace root; a path outside the root is rejected.
+// the current workspace root; a path outside the root (including a relative
+// parent-directory escape) is rejected.
 func (s *filePreviewService) PreviewFile(path string) error {
 	if s == nil || s.state == nil {
 		return errors.New("rightpanel: the right sidebar is not loaded")
 	}
-	normalized, err := s.state.workspaceRelativePath(path)
+	relative, _, err := s.state.resolveWorkspacePath(s.state.workspaceService(), path)
 	if err != nil {
 		return err
 	}
-	s.state.openFile(normalized)
+	s.state.openFile(relative)
 	return nil
 }
 
@@ -520,68 +529,137 @@ func (s *filePreviewService) OpenTerminal() error {
 }
 
 // OpenNative opens one path in the platform's file manager or default
-// application: the secondary action on generated-file cards. A relative path
-// resolves against the current workspace root; an absolute path is launched as
-// given (the artifact may live outside the workspace, in a save location).
+// application: the secondary action on generated-file cards. It uses the same
+// workspace containment as PreviewFile, so a card path can never launch a file
+// outside the open workspace: a relative path resolves under the live root, an
+// absolute path must be inside it, and without a workspace absolute paths and
+// parent-directory escapes are rejected. A contained relative path on a
+// workspace-less host is launched as given (there is no root to resolve it
+// against).
 func (s *filePreviewService) OpenNative(path string) error {
 	if s == nil || s.state == nil {
 		return errors.New("rightpanel: the right sidebar is not loaded")
 	}
-	trimmed := strings.TrimSpace(path)
-	if trimmed == "" {
-		return errors.New("rightpanel: file path is required")
-	}
-	native := filepath.FromSlash(trimmed)
-	if !filepath.IsAbs(native) {
-		if current, ok, err := s.state.currentWorkspace(); err == nil && ok {
-			native = filepath.Join(filepath.Clean(current.Root), native)
-		}
+	_, native, err := s.state.resolveWorkspacePath(s.state.workspaceService(), path)
+	if err != nil {
+		return err
 	}
 	return openpath.Open(native)
 }
 
-// currentWorkspace returns the active workspace (false when none is open).
-func (st *state) currentWorkspace() (contracts.Workspace, bool, error) {
+// workspaceService returns the optional workspace backend (nil when the host
+// has none).
+func (st *state) workspaceService() contracts.WorkspaceService {
 	if st == nil {
-		return contracts.Workspace{}, false, nil
+		return nil
 	}
 	raw, ok := st.ctx.Get(contracts.KeyWorkspace)
 	if !ok || raw == nil {
-		return contracts.Workspace{}, false, nil
+		return nil
 	}
 	workspace, _ := raw.(contracts.WorkspaceService)
+	return workspace
+}
+
+// resolveWorkspacePath validates one FilePreviewer path against the live
+// workspace and returns it in both forms: the workspace-relative slash path
+// (the file tab identity) and the native path to hand to the filesystem or the
+// OS launcher. The containment is the same for PreviewFile and OpenNative: an
+// absolute path must be inside the current workspace root, a relative path must
+// stay under it, and without a workspace an absolute path or a
+// parent-directory escape is rejected. Symlinks that resolve outside the root
+// are rejected when the candidate exists.
+func (st *state) resolveWorkspacePath(workspace contracts.WorkspaceService,
+	path string) (relative, native string, err error) {
+	trimmed := strings.TrimSpace(path)
+	if trimmed == "" {
+		return "", "", errors.New("rightpanel: file path is required")
+	}
+	if strings.ContainsRune(trimmed, 0) {
+		return "", "", errors.New("rightpanel: file path contains a NUL byte")
+	}
+	nativeInput := filepath.FromSlash(trimmed)
+	current, hasWorkspace, currentErr := workspaceCurrent(workspace)
+	if currentErr != nil {
+		return "", "", errors.New("rightpanel: cannot read the current workspace: " + currentErr.Error())
+	}
+	if !hasWorkspace {
+		if filepath.IsAbs(nativeInput) {
+			return "", "", errors.New("rightpanel: no workspace is open for an absolute path")
+		}
+		cleaned := filepath.Clean(nativeInput)
+		relative = filepath.ToSlash(cleaned)
+		if escapesWorkspace(relative) || relative == "." {
+			return "", "", errors.New("rightpanel: file is outside the workspace: " + trimmed)
+		}
+		return relative, cleaned, nil
+	}
+	root := filepath.Clean(current.Root)
+	if filepath.IsAbs(nativeInput) {
+		cleaned := filepath.Clean(nativeInput)
+		rel, relErr := filepath.Rel(root, cleaned)
+		if relErr != nil {
+			return "", "", errors.New("rightpanel: file is outside the workspace: " + trimmed)
+		}
+		relative = filepath.ToSlash(rel)
+		if escapesWorkspace(relative) {
+			return "", "", errors.New("rightpanel: file is outside the workspace: " + trimmed)
+		}
+		if relative == "." {
+			return "", "", errors.New("rightpanel: path is the workspace root, not a file")
+		}
+		if !withinWorkspaceRoot(root, cleaned) {
+			return "", "", errors.New("rightpanel: file resolves outside the workspace: " + trimmed)
+		}
+		return relative, cleaned, nil
+	}
+	cleaned := filepath.Clean(nativeInput)
+	relative = filepath.ToSlash(cleaned)
+	if escapesWorkspace(relative) || relative == "." {
+		return "", "", errors.New("rightpanel: file is outside the workspace: " + trimmed)
+	}
+	native = filepath.Join(root, cleaned)
+	if !withinWorkspaceRoot(root, native) {
+		return "", "", errors.New("rightpanel: file resolves outside the workspace: " + trimmed)
+	}
+	return relative, native, nil
+}
+
+// workspaceCurrent reads the current workspace of the optional backend (false
+// when there is no backend or none is open).
+func workspaceCurrent(workspace contracts.WorkspaceService) (contracts.Workspace, bool, error) {
 	if workspace == nil {
 		return contracts.Workspace{}, false, nil
 	}
 	return workspace.Current(context.Background())
 }
 
-// workspaceRelativePath normalizes one FilePreviewer path into a
-// workspace-relative slash path. An absolute path must live inside the current
-// workspace root; without a workspace the path is kept as given (the preview
-// tab then reports that no workspace is open).
-func (st *state) workspaceRelativePath(path string) (string, error) {
-	trimmed := strings.TrimSpace(path)
-	if trimmed == "" {
-		return "", errors.New("rightpanel: file path is required")
+// escapesWorkspace reports whether a cleaned relative path climbs out of its
+// root.
+func escapesWorkspace(relative string) bool {
+	return relative == ".." ||
+		strings.HasPrefix(relative, "../") ||
+		strings.HasPrefix(relative, ".."+string(filepath.Separator))
+}
+
+// withinWorkspaceRoot reports whether candidate (already lexically checked)
+// really lives under root once symlinks resolve. A candidate that does not
+// exist yet keeps the lexical result: the reader/launcher reports the missing
+// file itself.
+func withinWorkspaceRoot(root, candidate string) bool {
+	resolvedRoot := root
+	if resolved, err := filepath.EvalSymlinks(root); err == nil {
+		resolvedRoot = resolved
 	}
-	native := filepath.FromSlash(trimmed)
-	current, ok, err := st.currentWorkspace()
-	if err != nil || !ok {
-		if filepath.IsAbs(native) {
-			return "", errors.New("rightpanel: no workspace is open for an absolute path")
-		}
-		return filepath.ToSlash(filepath.Clean(native)), nil
+	resolved, err := filepath.EvalSymlinks(candidate)
+	if err != nil {
+		return true
 	}
-	root := filepath.Clean(current.Root)
-	if filepath.IsAbs(native) {
-		relative, relErr := filepath.Rel(root, filepath.Clean(native))
-		if relErr != nil || relative == ".." || strings.HasPrefix(relative, ".."+string(filepath.Separator)) {
-			return "", errors.New("rightpanel: file is outside the workspace: " + trimmed)
-		}
-		return filepath.ToSlash(relative), nil
+	rel, err := filepath.Rel(resolvedRoot, resolved)
+	if err != nil {
+		return false
 	}
-	return filepath.ToSlash(filepath.Clean(native)), nil
+	return !escapesWorkspace(filepath.ToSlash(rel))
 }
 
 // own registers one contribution and ties its unregistration to ctx's effect
