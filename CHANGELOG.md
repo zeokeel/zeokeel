@@ -8,6 +8,13 @@ All notable changes to ZeoKeel are documented here. The format follows
 
 （暂无未发布改动）
 
+## [0.2.5] - 2026-11-10
+
+补上 0.2.4 因 macOS 托管 runner 排队而缺失的安装包；功能与 0.2.4 相同。
+
+- **macOS arm64 dmg。** Developer ID 签名、`notarytool` 公证并 staple，仅支持 Apple Silicon。
+- **macOS CI 镜像改为 `macos-26`**（原 `macos-15` 已偏旧、容量紧张），并延长 job 预算。
+
 ## [0.2.4] - 2026-11-10
 
 这个版本把「工作步骤」按 DSH 的方式对齐了——运行时不再把所有读取文件/执行命令过程实时铺开

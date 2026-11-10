@@ -67,8 +67,8 @@ jobs:
   build-macos:
     name: macOS arm64 (.app + signed/notarized dmg)
     needs: draft-release
-    runs-on: macos-15
-    timeout-minutes: 60
+    runs-on: macos-26
+    timeout-minutes: 360
     steps:
       - uses: actions/checkout@v7
 

@@ -35,7 +35,7 @@ git push origin v0.2.3
 
 1. 校验 tag 与 `VERSION` 一致；
 2. 创建 draft release；
-3. 三个平台并行构建：macOS arm64（`macos-15`，签名/公证/dmg）、Windows
+3. 三个平台并行构建：macOS arm64（`macos-26`，签名/公证/dmg）、Windows
    （`ubuntu-24.04` + NSIS）、Linux（`ubuntu-24.04` + AppImage 工具链）；
 4. 各平台把安装包和更新归档上传到 draft；
 5. 汇总所有资产生成 `SHA256SUMS.txt`；
