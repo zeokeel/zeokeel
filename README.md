@@ -4,16 +4,16 @@
 [![Release](https://img.shields.io/github/v/release/zeokeel/zeokeel)](https://github.com/zeokeel/zeokeel/releases)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
-> **v0.2.1 — seventh public release** (2026-11-10). Native, compile-time modular
+> **v0.2.2 — eighth public release** (2026-11-10). Native, compile-time modular
 > AI agent for desktop, headless and ACP (Zed/editor) use; one Go binary, no
 > webview. Final verification: **10/10 PASS** (`./scripts/verify.sh --no-smoke`),
 > full test suite 47 packages green, regression **276 PASS / 0 SKIP / 0 FAIL**,
 > UI snapshot **97 steps / 95 PNGs**, designlint 0 new.
 > See [CHANGELOG.md](CHANGELOG.md) for the release notes.
 
-> **v0.2.1 主要变化**（详见 CHANGELOG）：消息的时间和操作行移到消息顶部——折叠过程时与
-> 「过程 · 思考 · N 个工具调用」共用一行，取消回复下方单独的一行空白；同时移除了消息评分
-> （有帮助/没帮助）、`/反馈` 命令及导出/诊断里的评分字段。v0.2.0 的模型列表、每模型推理等级、
+> **v0.2.2 主要变化**（详见 CHANGELOG）：同一回合的连续多步过程合并成一条摘要（工具数合计，
+> 默认折叠，只展开最终结果，点开可看每步过程）；最新回复正文底部新增常显「复制」按钮（与 ⋯ 的
+> 「复制消息」一致）。v0.2.1 的消息元信息上移、移除消息评分，以及 v0.2.0 的模型列表、每模型推理等级、
 > B3 顶栏、输入框上方目标/审批、右上角通知、默认窗口 1512×944 与 960 正文列保持不变。
 
 ## 下载与运行 / Download and run
