@@ -775,3 +775,9 @@ v0.2.12 的 package-macos job 在 GitHub Ubuntu runner 上构建 libdmg-hfsplus 
 - **Actions 版本**：`actions/upload-artifact@v7`、`actions/download-artifact@v8`、checkout/setup-go 最新 major。
 - **真实凭据本地验证**：使用 `/root/apple_key` 的 Developer ID `.p12` 与 App Store Connect key，在 Linux 上跑通 dmg 生成 → 签名 → Apple 公证 **Accepted** → staple（`.cache/dmg-real/run.log`，未提交私钥）；公证日志显示 app 与 dmg 的 cdhash。签名前用 `openssl pkcs12 -clcerts` 提取叶子证书，避免 Keychain p12 中 CA 在前的错误签名；app 显式 `--code-signature-flags runtime`。
 - 全 Linux release jobs；`package-macos` 仍是 optional，secrets/工具异常时回退 tar.gz。
+
+## 0.2.18（2026-11-10：合并 macOS 编译与打包，去掉 tar.gz 回退）
+
+- 删除单独的 `build-macos` job 和 upload/download artifact 往返：`package-macos`（`ubuntu-24.04`）现在先执行 `mygo build -platform darwin/arm64`，再在同一 job 内生成 dmg、签名、公证、staple；同一系统版本没必要拆两个 runner。
+- 不再发布 `zeokeel-<version>-darwin-arm64.tar.gz`；macOS 资产只有签名+公证的 `zeokeel-<version>-arm64.dmg`。更新器的 archive 兼容逻辑保留用于旧 release。
+- `publish` 需要 `package-macos`/`build-windows`/`build-linux`；macOS job 仍 optional（失败时 Windows/Linux 正常发布，只是没有 macOS 资产）。

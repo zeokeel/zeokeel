@@ -2,8 +2,7 @@ name: Release
 
 # Every vX.Y.Z tag publishes one GitHub release, built by mygo on the runner
 # of each platform: Windows installers (NSIS, GUI subsystem), Linux AppImages
-# and a Linux cross-built macOS arm64 .app that a Linux packaging job signs and
-# packs into a dmg with libdmg-hfsplus + rcodesign (no macOS runner at all).
+# and a macOS arm64 dmg built, signed and notarized entirely on Linux.
 # The release is created as a draft, every platform uploads into it, the central checksums step writes
 # SHA256SUMS.txt and the last step publishes it. In-app updates read this
 # release directly (no update-signing key): the update module picks the
@@ -66,15 +65,14 @@ jobs:
               --draft --verify-tag --title "ZeoKeel $GITHUB_REF_NAME" --generate-notes
           fi
 
-  build-macos:
-    name: macOS arm64 (.app cross-built on Linux)
-    needs: draft-release
-    # No macOS compiler: the product has no cgo, so mygo cross-compiles the
-    # darwin/arm64 .app on Linux. The packaging job (macOS, run only when
-    # signing/dmg is possible) downloads the tar artifact and signs/creates the
-    # dmg without compiling Go.
+  package-macos:
+    name: macOS arm64 (Linux compile + dmg + sign/notarize)
+    # One Linux job: mygo cross-compiles the darwin/arm64 .app, prebuilt
+    # libdmg-hfsplus makes the dmg, and indygreg/apple-code-sign-action signs
+    # and notarizes. No macOS runner and no artifact round-trip.
     runs-on: ubuntu-24.04
-    timeout-minutes: 30
+    timeout-minutes: 45
+    continue-on-error: true
     steps:
       - uses: actions/checkout@v7
 
@@ -88,43 +86,14 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y librsvg2-bin
 
-      - name: Build the macOS app bundle
+      - name: Compile the macOS app bundle (Linux cross-build)
         run: |
           set -eu
           bash scripts/build-app.sh -platform darwin/arm64 -skip-dmg -skip-notarize
-          app="build/darwin-arm64/ZeoKeel.app"
-          test -d "$app"
-          test -f "$app/Contents/MacOS/ZeoKeel"
-          file "$app/Contents/MacOS/ZeoKeel"
-          tar -czf "build/zeokeel-$(cat VERSION)-darwin-arm64.tar.gz"             -C build/darwin-arm64 ZeoKeel.app
-          ls -lh "build/zeokeel-$(cat VERSION)-darwin-arm64.tar.gz"
-
-      - name: Upload the macOS app archive
-        uses: actions/upload-artifact@v7
-        with:
-          name: macos-app
-          path: build/zeokeel-*-darwin-arm64.tar.gz
-          if-no-files-found: error
-
-      - name: Publish the macOS app archive fallback
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          set -eu
-          gh release upload "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --clobber \
-            build/zeokeel-*-darwin-arm64.tar.gz
-
-  package-macos:
-    name: macOS arm64 (Linux dmg + sign/notarize)
-    needs: build-macos
-    # All Linux: libdmg-hfsplus prebuilt tools make the dmg; the official
-    # indygreg/apple-code-sign-action (rcodesign) signs the bundle/dmg and
-    # notarizes with Apple's API. No macOS runner, no compiling of the tools.
-    runs-on: ubuntu-24.04
-    timeout-minutes: 45
-    continue-on-error: true
-    steps:
-      - uses: actions/checkout@v7
+          test -d build/darwin-arm64/ZeoKeel.app
+          test -f build/darwin-arm64/ZeoKeel.app/Contents/MacOS/ZeoKeel
+          mkdir -p dist
+          cp -a build/darwin-arm64/ZeoKeel.app dist/ZeoKeel.app
 
       - name: Install hfsprogs and liblzfse
         run: |
@@ -144,20 +113,6 @@ jobs:
           test -x "$tools/bin/dmg"
           echo "HFSPLUS_TOOL=$tools/bin/hfsplus" >> "$GITHUB_ENV"
           echo "DMG_TOOL=$tools/bin/dmg" >> "$GITHUB_ENV"
-
-      - name: Download the Linux-built app bundle
-        uses: actions/download-artifact@v8
-        with:
-          name: macos-app
-          path: dist
-
-      - name: Unpack the app bundle
-        run: |
-          set -eu
-          tar -xzf dist/zeokeel-*-darwin-arm64.tar.gz -C dist
-          test -d dist/ZeoKeel.app
-          test -f dist/ZeoKeel.app/Contents/MacOS/ZeoKeel
-          chmod +x dist/ZeoKeel.app/Contents/MacOS/ZeoKeel
 
       - name: Materialize the signing identity and notary key
         env:
@@ -271,7 +226,7 @@ jobs:
           shopt -s nullglob
           dmgs=(build/zeokeel-*-arm64.dmg)
           if [ ${#dmgs[@]} -eq 0 ]; then
-            echo "::warning::no dmg was produced; the tar.gz fallback is already published"
+            echo "::warning::no dmg was produced; the macOS asset is missing from this release"
             exit 0
           fi
           gh release upload "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --clobber "${dmgs[@]}"
