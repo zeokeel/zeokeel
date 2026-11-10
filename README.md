@@ -4,18 +4,17 @@
 [![Release](https://img.shields.io/github/v/release/zeokeel/zeokeel)](https://github.com/zeokeel/zeokeel/releases)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
-> **v0.2.6 — eleventh public release** (2026-11-10). Native, compile-time modular
+> **v0.2.7 — twelfth public release** (2026-11-10). Native, compile-time modular
 > AI agent for desktop, headless and ACP (Zed/editor) use; one Go binary, no
 > webview. Final verification: **10/10 PASS** (`./scripts/verify.sh --no-smoke`),
 > full test suite 48 packages green, regression **276 PASS / 0 SKIP / 0 FAIL**,
 > UI snapshot **98 steps / 96 PNGs**, designlint 0 new.
 > See [CHANGELOG.md](CHANGELOG.md) for the release notes.
 
-> **v0.2.6 主要变化**（详见 CHANGELOG）：按 DSH 重做主框架——顶部改为「标题 → 智能体团队 → 子智能体 N →
-> N 个后台任务 → ⋯」，团队/子代理在浮层与主内容区子会话（面包屑返回）里完成，不再占侧边栏；右栏默认收起，
-> 只有「开始（工作区文件/新建终端）」「文件」「终端」和每个打开文件一个标签；回合尾部新增交付文件/已编辑文件
-> 卡片，可一键在右栏预览；左栏去掉首页导航、隐藏自动化运行会话；删除旧 8 页签检查器与团队/任务 pane
-> （净删约 1.2 万行）。v0.2.5 的 macOS dmg、v0.2.4 的工作步骤、v0.2.3 的安装包/更新链路保持不变。
+> **v0.2.7 主要变化**（详见 CHANGELOG）：0.2.6 的小补丁——顶栏长标题按 DSH 面包屑宽度截断（完整标题在
+> Tooltip），不再挤走其它入口；「智能体团队 / 子智能体 N / N 个后台任务」只要有后端就始终显示（0 也显示），
+> 浮层有空态；后台任务停止后退出码显示「—」。v0.2.6 的主框架重做、右栏多标签、生成文件卡片、团队/子代理
+> 子会话与面包屑返回保持不变。
 
 ## 下载与运行 / Download and run
 
