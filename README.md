@@ -4,20 +4,18 @@
 [![Release](https://img.shields.io/github/v/release/zeokeel/zeokeel)](https://github.com/zeokeel/zeokeel/releases)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
-> **v0.2.4 — tenth public release** (2026-11-10). Native, compile-time modular
+> **v0.2.6 — eleventh public release** (2026-11-10). Native, compile-time modular
 > AI agent for desktop, headless and ACP (Zed/editor) use; one Go binary, no
 > webview. Final verification: **10/10 PASS** (`./scripts/verify.sh --no-smoke`),
-> full test suite 47 packages green, regression **276 PASS / 0 SKIP / 0 FAIL**,
-> UI snapshot **97 steps / 95 PNGs**, designlint 0 new.
+> full test suite 48 packages green, regression **276 PASS / 0 SKIP / 0 FAIL**,
+> UI snapshot **98 steps / 96 PNGs**, designlint 0 new.
 > See [CHANGELOG.md](CHANGELOG.md) for the release notes.
 
-> **v0.2.4 主要变化**（详见 CHANGELOG）：工作步骤对齐 DSH——运行中默认只在消息里显示一行原地更新的
-> 工作状态（活动 + 实时细节 + 用时），不再实时铺开每个工具调用；完成后按设置折叠。设置 → 行为新增
-> 「工作步骤展示」四档（简洁/标准/详细/完全展开，默认标准）和「工作步骤收起时机」两档（回答结束后/
-> 下次有新消息，默认回答结束后）。v0.2.3 已接上安装包与无密钥自动更新（Windows 安装器 / Linux AppImage /
-> macOS dmg 签名公证，更新直接读取 GitHub Release）。v0.2.2 的同回合合并、最终回复复制，v0.2.1 的
-> 元信息上移、移除评分，v0.2.0 的模型列表/每模型推理等级、B3 顶栏、输入框上方目标/审批、右上角通知、
-> 默认窗口 1512×944 与 960 正文列保持不变。
+> **v0.2.6 主要变化**（详见 CHANGELOG）：按 DSH 重做主框架——顶部改为「标题 → 智能体团队 → 子智能体 N →
+> N 个后台任务 → ⋯」，团队/子代理在浮层与主内容区子会话（面包屑返回）里完成，不再占侧边栏；右栏默认收起，
+> 只有「开始（工作区文件/新建终端）」「文件」「终端」和每个打开文件一个标签；回合尾部新增交付文件/已编辑文件
+> 卡片，可一键在右栏预览；左栏去掉首页导航、隐藏自动化运行会话；删除旧 8 页签检查器与团队/任务 pane
+> （净删约 1.2 万行）。v0.2.5 的 macOS dmg、v0.2.4 的工作步骤、v0.2.3 的安装包/更新链路保持不变。
 
 ## 下载与运行 / Download and run
 
