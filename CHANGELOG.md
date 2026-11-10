@@ -8,6 +8,12 @@ All notable changes to ZeoKeel are documented here. The format follows
 
 （暂无未发布改动）
 
+## [0.2.17] - 2026-11-10
+
+修复 apple-code-sign-action 的公证输入：该 action 的 `notarize` 分支只接受
+`app_store_connect_api_key_json_file`（即使同时传了 issuer/key 也会报 “API Key not defined”）。
+现在用 rcodesign `encode-app-store-connect-api-key` 从 p8 + issuer + key id 生成 JSON 再传给 action。
+
 ## [0.2.16] - 2026-11-10
 
 修复 notarize step 的条件判断：GitHub 表达式里未定义的 env 会按 null/0 与字符串 `'0'` 松散相等，
