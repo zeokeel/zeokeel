@@ -4,33 +4,36 @@
 [![Release](https://img.shields.io/github/v/release/zeokeel/zeokeel)](https://github.com/zeokeel/zeokeel/releases)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
-> **v0.2.2 — eighth public release** (2026-11-10). Native, compile-time modular
+> **v0.2.4 — tenth public release** (2026-11-10). Native, compile-time modular
 > AI agent for desktop, headless and ACP (Zed/editor) use; one Go binary, no
 > webview. Final verification: **10/10 PASS** (`./scripts/verify.sh --no-smoke`),
 > full test suite 47 packages green, regression **276 PASS / 0 SKIP / 0 FAIL**,
 > UI snapshot **97 steps / 95 PNGs**, designlint 0 new.
 > See [CHANGELOG.md](CHANGELOG.md) for the release notes.
 
-> **v0.2.2 主要变化**（详见 CHANGELOG）：同一回合的连续多步过程合并成一条摘要（工具数合计，
-> 默认折叠，只展开最终结果，点开可看每步过程）；最新回复正文底部新增常显「复制」按钮（与 ⋯ 的
-> 「复制消息」一致）。v0.2.1 的消息元信息上移、移除消息评分，以及 v0.2.0 的模型列表、每模型推理等级、
-> B3 顶栏、输入框上方目标/审批、右上角通知、默认窗口 1512×944 与 960 正文列保持不变。
+> **v0.2.4 主要变化**（详见 CHANGELOG）：工作步骤对齐 DSH——运行中默认只在消息里显示一行原地更新的
+> 工作状态（活动 + 实时细节 + 用时），不再实时铺开每个工具调用；完成后按设置折叠。设置 → 行为新增
+> 「工作步骤展示」四档（简洁/标准/详细/完全展开，默认标准）和「工作步骤收起时机」两档（回答结束后/
+> 下次有新消息，默认回答结束后）。v0.2.3 已接上安装包与无密钥自动更新（Windows 安装器 / Linux AppImage /
+> macOS dmg 签名公证，更新直接读取 GitHub Release）。v0.2.2 的同回合合并、最终回复复制，v0.2.1 的
+> 元信息上移、移除评分，v0.2.0 的模型列表/每模型推理等级、B3 顶栏、输入框上方目标/审批、右上角通知、
+> 默认窗口 1512×944 与 960 正文列保持不变。
 
 ## 下载与运行 / Download and run
 
-Prebuilt binaries are attached to the [latest release](https://github.com/zeokeel/zeokeel/releases/latest).
-Every asset name includes its OS and CPU architecture:
+Prebuilt installers are attached to the [latest release](https://github.com/zeokeel/zeokeel/releases/latest):
 
-| Platform | Architectures | Archive |
+| Platform | Architectures | Installer |
 | --- | --- | --- |
-| Linux | x86-64 (amd64), ARM64 | `zeokeel_<version>_linux_<arch>.tar.gz` |
-| macOS | x86-64 (amd64), Apple Silicon (arm64) | `zeokeel_<version>_darwin_<arch>.tar.gz` |
-| Windows | x86-64 (amd64), ARM64 | `zeokeel_<version>_windows_<arch>.zip` (contains `zeokeel.exe`) |
+| Linux | x86-64 (amd64), ARM64 | `zeokeel-<version>-linux-<arch>.AppImage` (chmod +x, run) |
+| macOS | Apple Silicon (arm64) | `zeokeel-<version>-arm64.dmg` (signed + notarized) |
+| Windows | x86-64 (amd64), ARM64 | `zeokeel-setup-<version>-<arch>.exe` (per-user NSIS installer, GUI app) |
 
-`SHA256SUMS.txt` lists the checksum of every archive. Release binaries are
-built with `CGO_ENABLED=0` (no cgo compilation), stripped with `-s -w -buildid=`,
-and the archives are gzip/zip compressed (about 9–10 MB per archive; the
-uncompressed binary is ~23 MB).
+`SHA256SUMS.txt` lists the checksum of every asset. The binaries are built
+with `CGO_ENABLED=0` (no cgo compilation) and stripped with `-s -w`; the Linux
+AppImage is the only Linux package, and the Windows executable runs without a
+console window. In-app updates read this release directly (see
+[docs/RELEASE.md](docs/RELEASE.md)).
 
 ```sh
 # Desktop product (needs a desktop session; on Windows use zeokeel.exe)

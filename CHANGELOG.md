@@ -8,6 +8,25 @@ All notable changes to ZeoKeel are documented here. The format follows
 
 （暂无未发布改动）
 
+## [0.2.4] - 2026-11-10
+
+这个版本把「工作步骤」按 DSH 的方式对齐了——运行时不再把所有读取文件/执行命令过程实时铺开
+（在 v0.2.3 的安装包与无密钥更新之上发布）。
+
+- **运行中只看一行工作步骤。** 现在默认（标准）模式下，AI 干活时只显示一行原地变化的状态：
+  「正在运行命令 · npm test --watch …… 用时 8s」。不再把每个工具调用都展开到对话里，
+  长任务滚屏明显减少；流式回答和需要你确认的卡片仍然照常显示。想看完整过程可以展开，
+  或在设置里切换档位。
+- **新增两个设置（设置 → 行为 → 工作步骤）。**
+  「工作步骤展示」：简洁 / **标准（默认）** / 详细 / 完全展开；
+  「工作步骤收起时机」：**回答结束后（默认）** / 下次有新消息时。
+  完全展开就是旧版一直展开的行为；下次有新消息时会保留刚完成的过程，直到你发下一条消息才收起。
+- 设置立即生效，原有设置与会话不受影响。
+
+升级方式不变：下载覆盖运行，原有设置与会话保留。
+
+验证：`./scripts/verify.sh --no-smoke` **10/10 PASS**（含全量测试与 `-race`、回归测试与界面快照）。
+
 ## [0.2.3] - 2026-11-10
 
 这个版本把安装包和升级链路接上：
@@ -16,7 +35,7 @@ All notable changes to ZeoKeel are documented here. The format follows
   当前用户目录，带开始菜单、卸载项和图标；exe 内置图标、版本信息和 DPI manifest。
 - **Linux AppImage。** 发布只提供 AppImage；由 `scripts/build-appimage.sh` 从 mygo 的 Linux
   构建产物组装，图标/desktop 与程序同源。
-- **macOS dmg 签名与公证。** universal `.app` + dmg，Developer ID 签名、`notarytool`
+- **macOS dmg 签名与公证（Apple Silicon）。** arm64 `.app` + dmg，Developer ID 签名、`notarytool`
   API Key 公证并 staple；CI 自动完成。
 - **无密钥自动更新。** 应用直接读取 GitHub Release，按平台选择更新归档并校验
   `SHA256SUMS.txt`；设置「更新」页可检查、下载，并在下次启动安装；命令面板新增

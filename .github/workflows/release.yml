@@ -2,7 +2,7 @@ name: Release
 
 # Every vX.Y.Z tag publishes one GitHub release, built by mygo on the runner
 # of each platform: Windows installers (NSIS, GUI subsystem), Linux AppImages
-# and a signed + notarized macOS universal DMG. The release is created as a
+# and a signed + notarized macOS arm64 DMG. The release is created as a
 # draft, every platform uploads into it, the central checksums step writes
 # SHA256SUMS.txt and the last step publishes it. In-app updates read this
 # release directly (no update-signing key): the update module picks the
@@ -65,7 +65,7 @@ jobs:
           fi
 
   build-macos:
-    name: macOS (universal .app + signed/notarized dmg)
+    name: macOS arm64 (.app + signed/notarized dmg)
     needs: draft-release
     runs-on: macos-15
     timeout-minutes: 60
@@ -113,17 +113,17 @@ jobs:
       - name: Build, sign, notarize and verify
         run: |
           set -eu
-          bash scripts/build-app.sh -platform darwin/universal
-          app="build/darwin-universal/ZeoKeel.app"
+          bash scripts/build-app.sh -platform darwin/arm64
+          app="build/darwin-arm64/ZeoKeel.app"
           test -d "$app"
           codesign --verify --deep --strict "$app"
           spctl --assess --type execute -vv "$app"
-          dmg="$(find build/darwin-universal -maxdepth 1 -name '*.dmg' | head -1)"
+          dmg="$(find build/darwin-arm64 -maxdepth 1 -name '*.dmg' | head -1)"
           test -n "$dmg"
           xcrun stapler validate "$dmg"
           hdiutil verify "$dmg"
-          tar -czf "build/zeokeel-$(cat VERSION)-darwin-universal.tar.gz" \
-            -C build/darwin-universal ZeoKeel.app
+          tar -czf "build/zeokeel-$(cat VERSION)-darwin-arm64.tar.gz" \
+            -C build/darwin-arm64 ZeoKeel.app
 
       - name: Upload the macOS assets
         env:
@@ -131,8 +131,8 @@ jobs:
         run: |
           set -eu
           gh release upload "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --clobber \
-            build/darwin-universal/*.dmg \
-            build/zeokeel-*-darwin-universal.tar.gz
+            build/darwin-arm64/*.dmg \
+            build/zeokeel-*-darwin-arm64.tar.gz
 
       - name: Clean up the signing keychain
         if: always()

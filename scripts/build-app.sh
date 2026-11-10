@@ -14,7 +14,7 @@
 #
 # Usage:
 #   scripts/build-app.sh -platform linux/amd64,windows/amd64
-#   scripts/build-app.sh -platform darwin/universal -skip-notarize
+#   scripts/build-app.sh -platform darwin/arm64 -skip-notarize
 #
 # Packaging comes from mygo.json: Windows GUI executable + NSIS installer,
 # Linux executable/desktop/icon/deb/tar.gz/PKGBUILD, macOS .app + .dmg with

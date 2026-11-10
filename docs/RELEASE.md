@@ -12,8 +12,8 @@ ZeoKeel 的安装包和更新链路全部由仓库自己的 Go 工具链完成�
 | --- | --- | --- |
 | Windows | `zeokeel-setup-<version>-amd64.exe`、`zeokeel-setup-<version>-arm64.exe` | NSIS 安装器：当前用户安装到 `%LOCALAPPDATA%\Programs\ZeoKeel`，无需管理员；开始菜单、卸载项、可选桌面快捷方式；`/S` 静默安装。exe 为 GUI 子系统（无命令行窗口）、带图标和版本信息 |
 | Linux | `zeokeel-<version>-linux-amd64.AppImage`、`zeokeel-<version>-linux-arm64.AppImage` | 唯一的 Linux 安装包；可执行、双击运行 |
-| macOS | `zeokeel-<version>.dmg` | universal（arm64 + amd64）`.app` 的磁盘镜像；Developer ID 签名 + 公证 + staple |
-| 更新用 | `zeokeel-<version>-windows-<arch>.tar.gz`、`zeokeel-<version>-darwin-universal.tar.gz`、Linux 的 `.AppImage` | 应用内更新下载的归档，不是给用户手动安装的入口 |
+| macOS | `zeokeel-<version>-arm64.dmg` | Apple Silicon（arm64）`.app` 的磁盘镜像；Developer ID 签名 + 公证 + staple；不支持 Intel Mac |
+| 更新用 | `zeokeel-<version>-windows-<arch>.tar.gz`、`zeokeel-<version>-darwin-arm64.tar.gz`、Linux 的 `.AppImage` | 应用内更新下载的归档，不是给用户手动安装的入口 |
 | 校验 | `SHA256SUMS.txt` | 发布任务统一生成，更新器用它校验下载 |
 
 `mygo build` 还会在 Linux 输出 `.deb`、`.tar.gz`、`PKGBUILD` 等中间产物，
@@ -35,7 +35,7 @@ git push origin v0.2.3
 
 1. 校验 tag 与 `VERSION` 一致；
 2. 创建 draft release；
-3. 三个平台并行构建：macOS（`macos-15`，签名/公证/dmg）、Windows
+3. 三个平台并行构建：macOS arm64（`macos-15`，签名/公证/dmg）、Windows
    （`ubuntu-24.04` + NSIS）、Linux（`ubuntu-24.04` + AppImage 工具链）；
 4. 各平台把安装包和更新归档上传到 draft；
 5. 汇总所有资产生成 `SHA256SUMS.txt`；
@@ -61,10 +61,10 @@ keychain profile，再把 keychain 路径注入本次构建的 `mygo.json`；`my
 执行：
 
 ```sh
-codesign --verify --deep --strict build/darwin-universal/ZeoKeel.app
-spctl --assess --type execute -vv build/darwin-universal/ZeoKeel.app
-xcrun stapler validate build/darwin-universal/*.dmg
-hdiutil verify build/darwin-universal/*.dmg
+codesign --verify --deep --strict build/darwin-arm64/ZeoKeel.app
+spctl --assess --type execute -vv build/darwin-arm64/ZeoKeel.app
+xcrun stapler validate build/darwin-arm64/*.dmg
+hdiutil verify build/darwin-arm64/*.dmg
 ```
 
 Windows 代码签名未启用（没有可用证书），SmartScreen 可能提示未知发布者。
@@ -85,7 +85,7 @@ Windows 代码签名未启用（没有可用证书），SmartScreen 可能提示
 make icons      # 只从 logo/logo.svg、logo/logo-dark.svg 派生全部图标
 make package    # Linux + Windows：GUI exe、NSIS 安装器、Linux 应用目录
 bash scripts/build-appimage.sh build/linux-amd64 "$(cat VERSION)" amd64
-bash scripts/build-app.sh -platform darwin/universal   # 仅 macOS，签名+公证+dmg
+bash scripts/build-app.sh -platform darwin/arm64   # 仅 macOS，签名+公证+dmg
 ```
 
 `scripts/build-appimage.sh` 可用 `APPIMAGE_DRY_RUN=1` 只组装 AppDir 而不调用
@@ -115,7 +115,7 @@ Linux desktop/AppImage 图标全部由 `scripts/gen-icons.sh` 从这两个文件
   | --- | --- |
   | Windows | `-windows-<arch>.tar.gz`（排除 setup 安装器） |
   | Linux | `-linux-<arch>.AppImage` |
-  | macOS | `-darwin-universal.tar.gz` |
+  | macOS | `-darwin-arm64.tar.gz` |
 
 - 校验：从 `SHA256SUMS.txt` 资产取对应行的 SHA-256（没有时回退 GitHub 资产的
   `digest`）；`Download` 流式下载并校验大小/SHA-256 后暂存到
