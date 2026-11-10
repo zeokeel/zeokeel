@@ -18,6 +18,7 @@ import (
 	"path"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/zeokeel/zeokeel/internal/contracts"
 )
@@ -34,6 +35,10 @@ var (
 
 // updatesDirName is the staging directory below the product data directory.
 const updatesDirName = "updates"
+
+// downloadTimeout bounds one asset download; the manifest timeout (5s by
+// default) is far too short for a multi-megabyte installer.
+const downloadTimeout = 30 * time.Minute
 
 // compile-time check: the update service satisfies the optional download half.
 var _ contracts.UpdateDownloader = (*service)(nil)
@@ -90,7 +95,10 @@ func (s *service) Download(ctx context.Context) (contracts.UpdateDownload, error
 	if err != nil {
 		return contracts.UpdateDownload{}, fmt.Errorf("%w: build asset request: %v", ErrDownload, err)
 	}
-	response, err := s.client.Do(request)
+	// The service's client has the manifest timeout (5s by default), which is
+	// right for JSON but would abort a multi-megabyte installer mid-stream.
+	// Downloads are bounded by the caller's context and the transport instead.
+	response, err := (&http.Client{Transport: s.client.Transport, Timeout: downloadTimeout}).Do(request)
 	if err != nil {
 		return contracts.UpdateDownload{}, fmt.Errorf("%w: fetch asset: %v", ErrDownload, err)
 	}

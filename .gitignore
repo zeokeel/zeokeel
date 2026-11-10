@@ -1,6 +1,7 @@
 # ZeoKeel — build outputs & local state
 /dist/
 /build/
+/assets/
 /zeokeel
 /zeokeel.exe
 *.test

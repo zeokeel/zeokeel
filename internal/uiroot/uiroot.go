@@ -357,38 +357,66 @@ func New(cfg Config) *Root {
 // settings on whichever page happened to be last.
 func (r *Root) OpenSettingsPage(pageID string) error { return r.nav.OpenSettingsPage(pageID) }
 
-// registerHostCommands adds the window-level commands the shell owns: the
-// inspector toggle, so the shortcut and the command palette reach it like any
-// other action. It re-registers when the language changes.
+// registerHostCommands adds the window-level commands the shell owns (the
+// inspector toggle and the update page deep link), so the shortcut and the
+// command palette reach them like any other action. It re-registers when the
+// language changes.
 func (r *Root) registerHostCommands() {
 	if r.hostCommands != nil {
 		r.hostCommands()
 		r.hostCommands = nil
 	}
 	r.hostLang = r.locale.Language()
-	unregister, err := r.rt.RegisterCommand(contracts.CommandSpec{
-		ID:       "uiroot.toggle-inspector",
-		Title:    r.tr("切换右侧栏", "Toggle inspector"),
-		Hint:     r.tr("打开或收起检查器", "Open or close the inspector"),
-		Order:    900,
-		Shortcut: "Cmd/Ctrl + Alt + I",
-		Run: func() error {
-			if !r.inspectorAvailable() {
-				return nil
-			}
-			// The pane header's close control runs this command, so the focus
-			// goes back to the content header toggle like a closed dialog's.
-			r.setRightPanelOpen(!r.rightOpen, true)
-			return nil
-		},
-	})
-	if err != nil {
-		// A command registry the host cannot extend is a programming error, not
-		// a runtime condition; log it instead of failing the whole UI root.
-		log.Printf("uiroot: register host command: %v", err)
-		return
+	var unregisters []func()
+	unregisterAll := func() {
+		for index := len(unregisters) - 1; index >= 0; index-- {
+			unregisters[index]()
+		}
 	}
-	r.hostCommands = unregister
+	specs := []contracts.CommandSpec{
+		{
+			ID:       "uiroot.toggle-inspector",
+			Title:    r.tr("切换右侧栏", "Toggle inspector"),
+			Hint:     r.tr("打开或收起检查器", "Open or close the inspector"),
+			Order:    900,
+			Shortcut: "Cmd/Ctrl + Alt + I",
+			Run: func() error {
+				if !r.inspectorAvailable() {
+					return nil
+				}
+				// The pane header's close control runs this command, so the focus
+				// goes back to the content header toggle like a closed dialog's.
+				r.setRightPanelOpen(!r.rightOpen, true)
+				return nil
+			},
+		},
+		{
+			// Deep link to the update settings page: the palette entry is how a
+			// user reaches the check/download/install action without hunting
+			// through the grouped settings navigation. The page itself belongs
+			// to the update module; an unregistered page surfaces as its error.
+			ID:    "uiroot.open-update",
+			Title: r.tr("软件更新", "Software update"),
+			Hint:  r.tr("打开更新页检查新版本", "Open the update page to check for a new version"),
+			Order: 910,
+			Run: func() error {
+				return r.OpenSettingsPage("update")
+			},
+		},
+	}
+	for _, spec := range specs {
+		unregister, err := r.rt.RegisterCommand(spec)
+		if err != nil {
+			// A command registry the host cannot extend is a programming error,
+			// not a runtime condition; log it instead of failing the whole UI
+			// root, and unwind what was already registered.
+			log.Printf("uiroot: register host command %q: %v", spec.ID, err)
+			unregisterAll()
+			return
+		}
+		unregisters = append(unregisters, unregister)
+	}
+	r.hostCommands = unregisterAll
 }
 
 // SetChatService installs the optional chat backend used by Cmd/Ctrl+N. The

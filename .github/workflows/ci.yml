@@ -75,3 +75,16 @@ jobs:
             fi
             GOOS="$goos" GOARCH="$goarch" CGO_ENABLED=0               go build -trimpath -o "/tmp/zeokeel-${goos}-${goarch}-${binary}" ./cmd/zeokeel
           done
+
+      - name: Package the Linux and Windows installers
+        run: |
+          # The release pipeline's inputs must exist: the GUI-subsystem Windows
+          # executable with its NSIS installer, and the Linux application
+          # directory. macOS packaging (dmg, signing, notarization) needs macOS
+          # and is exercised by release.yml.
+          sudo apt-get update
+          sudo apt-get install -y nsis librsvg2-bin
+          bash scripts/build-app.sh -platform "linux/amd64,windows/amd64" -skip-dmg -skip-notarize
+          test -x build/linux-amd64/zeokeel
+          test -n "$(find build/windows-amd64 -maxdepth 1 -name 'zeokeel-setup-*.exe' -print -quit)"
+          file build/windows-amd64/ZeoKeel.exe | grep -q 'GUI'

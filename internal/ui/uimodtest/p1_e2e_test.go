@@ -306,25 +306,17 @@ func TestP1ApprovalToolsAndPersistence(t *testing.T) {
 	}
 	tester.Frame()
 	tester.Frame()
-	if !tester.HasText("检查更新") {
-		t.Fatalf("update page missing the check button; texts = %v", tester.Texts())
-	}
-	if err := tester.Click("检查更新"); err != nil {
-		t.Fatalf("click check update: %v; texts = %v", err, tester.Texts())
-	}
-	// The desktop assembly has no release feed: after one check the page turns
-	// into the "updates not enabled in this build" state instead of offering a
-	// download/install it cannot perform (and never echoes update.feedURL).
-	checkDeadline := time.Now().Add(5 * time.Second)
-	for time.Now().Before(checkDeadline) {
-		tester.Frame()
-		if tester.HasText("当前构建未启用更新") {
-			break
+	for _, want := range []string{"检查更新", "当前版本"} {
+		if !tester.HasText(want) {
+			t.Fatalf("update page missing %q; texts = %v", want, tester.Texts())
 		}
-		time.Sleep(10 * time.Millisecond)
 	}
-	if !tester.HasText("当前构建未启用更新") {
-		t.Fatalf("update unavailable state missing; texts = %v", tester.Texts())
+	// The desktop assembly configures the GitHub Releases feed, so the page
+	// offers the check action and never claims updates are disabled. The
+	// network call itself belongs to the update module's tests; the page smoke
+	// here stays offline and deterministic.
+	if tester.HasText("更新服务未启用") {
+		t.Fatalf("update page reports a disabled service although the assembly configures GitHub Releases; texts = %v", tester.Texts())
 	}
 	if err := uiRoot.OpenSettingsPage("search"); err != nil {
 		t.Fatalf("open search settings: %v", err)

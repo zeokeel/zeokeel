@@ -73,7 +73,9 @@
     {
       "id": "update",
       "module": "zeokeel/update",
-      "config": {}
+      "config": {
+        "githubRepo": "zeokeel/zeokeel"
+      }
     },
     {
       "id": "importer",

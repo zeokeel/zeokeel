@@ -47,11 +47,22 @@ var (
 
 // Config is the module's typed assembly config.
 type Config struct {
-	// FeedURL is the release manifest URL (empty disables update checks).
+	// FeedURL is the release manifest URL (empty disables update checks unless
+	// GitHubRepo is set).
 	FeedURL string `json:"feedURL"`
-	// AllowInsecureHTTP permits http:// feed/asset URLs (tests only).
+	// GitHubRepo enables the keyless GitHub Releases source ("owner/name").
+	// When set it takes precedence over FeedURL: the newest non-draft,
+	// non-prerelease release is read from the GitHub REST API.
+	GitHubRepo string `json:"githubRepo"`
+	// ChecksumsAsset is the release asset holding the SHA-256 lines
+	// (default "SHA256SUMS.txt").
+	ChecksumsAsset string `json:"checksumsAsset"`
+	// APIBaseURL overrides the GitHub REST API base URL (default
+	// "https://api.github.com"); tests point it at an httptest server.
+	APIBaseURL string `json:"apiBaseURL"`
+	// AllowInsecureHTTP permits http:// feed/API/asset URLs (tests only).
 	AllowInsecureHTTP bool `json:"allowInsecureHTTP"`
-	// TimeoutMs bounds one manifest request (0 = 5000ms).
+	// TimeoutMs bounds one manifest/API request (0 = 5000ms).
 	TimeoutMs int `json:"timeoutMs"`
 }
 
@@ -110,12 +121,24 @@ func validateConfig(cfg Config) error {
 	if strings.ContainsRune(cfg.FeedURL, 0) {
 		return fmt.Errorf("%s: feedURL contains a NUL byte", ModuleID)
 	}
+	if strings.ContainsRune(cfg.GitHubRepo, 0) || strings.ContainsRune(cfg.APIBaseURL, 0) {
+		return fmt.Errorf("%s: githubRepo/apiBaseURL contains a NUL byte", ModuleID)
+	}
+	if repo := strings.TrimSpace(cfg.GitHubRepo); repo != "" {
+		owner, name, ok := strings.Cut(repo, "/")
+		if !ok || strings.TrimSpace(owner) == "" || strings.TrimSpace(name) == "" || strings.Contains(name, "/") {
+			return fmt.Errorf("%s: githubRepo must be \"owner/name\", got %q", ModuleID, repo)
+		}
+	}
 	return nil
 }
 
 // service is the contracts.UpdateService implementation.
 type service struct {
 	feedURL           string
+	githubRepo        string
+	checksumsAsset    string
+	apiBaseURL        string
 	allowInsecureHTTP bool
 	appInfo           contracts.AppInfo
 	logger            contracts.Logger
@@ -143,8 +166,19 @@ func newService(cfg Config, appInfo contracts.AppInfo, logger contracts.Logger) 
 	if logger == nil {
 		logger = discardLogger{}
 	}
+	apiBaseURL := strings.TrimRight(strings.TrimSpace(cfg.APIBaseURL), "/")
+	if apiBaseURL == "" {
+		apiBaseURL = defaultGitHubAPIBaseURL
+	}
+	checksumsAsset := strings.TrimSpace(cfg.ChecksumsAsset)
+	if checksumsAsset == "" {
+		checksumsAsset = defaultChecksumsAsset
+	}
 	return &service{
 		feedURL:           strings.TrimSpace(cfg.FeedURL),
+		githubRepo:        strings.TrimSpace(cfg.GitHubRepo),
+		checksumsAsset:    checksumsAsset,
+		apiBaseURL:        apiBaseURL,
 		allowInsecureHTTP: cfg.AllowInsecureHTTP,
 		appInfo:           appInfo,
 		logger:            logger,
@@ -165,6 +199,18 @@ func (s *service) Check(ctx context.Context) (contracts.UpdateInfo, error) {
 	if err := ctx.Err(); err != nil {
 		return contracts.UpdateInfo{}, err
 	}
+	// The GitHub Releases source takes precedence when both are configured:
+	// it needs no token and covers the release workflow's assets directly.
+	if s.githubRepo != "" {
+		return s.checkGitHub(ctx)
+	}
+	return s.checkManifest(ctx)
+}
+
+// checkManifest is the feedURL half of Check (unchanged release-manifest
+// behavior): fetch the manifest, pick this platform's asset and compare
+// versions.
+func (s *service) checkManifest(ctx context.Context) (contracts.UpdateInfo, error) {
 	if s.feedURL == "" {
 		return contracts.UpdateInfo{}, fmt.Errorf("%w", ErrDisabled)
 	}

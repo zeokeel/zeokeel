@@ -29,12 +29,17 @@ func CompareVersions(a, b string) (int, error) {
 	return compareVersion(left, right), nil
 }
 
-// parseVersion parses MAJOR[.MINOR[.PATCH]][-prerelease][+build].
+// parseVersion parses MAJOR[.MINOR[.PATCH]][-prerelease][+build]. A leading
+// "v" (the tag convention of the release pipeline) is accepted and ignored, so
+// the running binary's -ldflags version (v1.2.3) compares like 1.2.3.
 func parseVersion(raw string) (version, error) {
 	var parsed version
 	text := strings.TrimSpace(raw)
 	if text == "" {
 		return parsed, fmt.Errorf("empty version")
+	}
+	if len(text) > 1 && (text[0] == 'v' || text[0] == 'V') {
+		text = text[1:]
 	}
 	if index := strings.IndexByte(text, '+'); index >= 0 {
 		text = text[:index]

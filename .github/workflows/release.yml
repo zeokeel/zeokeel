@@ -1,17 +1,29 @@
 name: Release
 
+# Every vX.Y.Z tag publishes one GitHub release, built by mygo on the runner
+# of each platform: Windows installers (NSIS, GUI subsystem), Linux AppImages
+# and a signed + notarized macOS universal DMG. The release is created as a
+# draft, every platform uploads into it, the central checksums step writes
+# SHA256SUMS.txt and the last step publishes it. In-app updates read this
+# release directly (no update-signing key): the update module picks the
+# update archive the release carries for the running platform.
+#
+# Required repository secrets (set once by the maintainer):
+#   MACOS_CERT_P12, MACOS_CERT_PASSWORD  Developer ID Application .p12 + password
+#   APPLE_API_KEY_P8, APPLE_API_KEY_ID, APPLE_API_ISSUER
+#                                        App Store Connect API key for notarytool
+# No secret value is stored in the repository.
+
 on:
   push:
     tags: ["v*"]
-  workflow_dispatch:
-    inputs:
-      version:
-        description: "Version to publish (for example 0.1.0)"
-        required: true
-        type: string
 
 permissions:
   contents: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
 
 env:
   CGO_ENABLED: "0"
@@ -20,161 +32,228 @@ env:
   GOSUMDB: sum.golang.org
 
 jobs:
-  release:
-    name: Build and publish release
-    # Pin the LTS image: ubuntu-latest migrates to Ubuntu 26 in October
-    # 2026 (GitHub notice), and this product pins its toolchain and
-    # snapshot baselines, so an unannounced runner upgrade would make CI
-    # flaky. Bump this deliberately when the new image has been tested.
+  version-check:
+    name: Check the tag matches VERSION
     runs-on: ubuntu-24.04
-    timeout-minutes: 30
+    timeout-minutes: 5
     steps:
       - uses: actions/checkout@v7
-        with:
-          fetch-depth: 0
+      - name: Check the version
+        run: |
+          set -eu
+          test -n "${GITHUB_REF_NAME:-}"
+          version="$(cat VERSION)"
+          test "$GITHUB_REF_NAME" = "v$version" || {
+            echo "::error::tag $GITHUB_REF_NAME does not match VERSION ($version)"
+            exit 1
+          }
+
+  draft-release:
+    name: Create the draft release
+    needs: version-check
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Create the draft release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -eu
+          if ! gh release view "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release create "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" \
+              --draft --verify-tag --title "ZeoKeel $GITHUB_REF_NAME" --generate-notes
+          fi
+
+  build-macos:
+    name: macOS (universal .app + signed/notarized dmg)
+    needs: draft-release
+    runs-on: macos-15
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v7
 
       - uses: actions/setup-go@v7
         with:
           go-version-file: go.mod
           cache: true
 
-      - name: Resolve version
-        id: version
-        run: |
-          if [ "${GITHUB_REF_TYPE}" = "tag" ]; then
-            version="${GITHUB_REF_NAME#v}"
-          else
-            version="${{ inputs.version }}"
-          fi
-          if ! printf '%s' "$version" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+'; then
-            echo "invalid release version: $version" >&2
-            exit 1
-          fi
-          echo "version=$version" >> "$GITHUB_OUTPUT"
+      - name: Install librsvg (icon derivation)
+        run: command -v rsvg-convert >/dev/null || brew install librsvg
 
-      - name: Build release binaries
+      - name: Import the Developer ID certificate and the notary API key
         env:
-          VERSION: ${{ steps.version.outputs.version }}
+          MACOS_CERT_P12: ${{ secrets.MACOS_CERT_P12 }}
+          MACOS_CERT_PASSWORD: ${{ secrets.MACOS_CERT_PASSWORD }}
+          APPLE_API_KEY_P8: ${{ secrets.APPLE_API_KEY_P8 }}
+          APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
+          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
         run: |
-          commit="${GITHUB_SHA::12}"
-          build_time="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-          mkdir -p dist
-          # Every supported OS/arch pair gets an explicit archive. Windows
-          # binaries are .zip (and carry the .exe suffix); everything else is
-          # .tar.gz. Names always include OS and architecture so the download
-          # list on the release page is unambiguous.
-          for target in linux/amd64 linux/arm64 darwin/amd64 darwin/arm64 windows/amd64 windows/arm64; do
-            goos="${target%/*}"
-            goarch="${target#*/}"
-            name="zeokeel_${VERSION}_${goos}_${goarch}"
-            mkdir -p "$name"
-            binary="zeokeel"
-            if [ "$goos" = "windows" ]; then
-              binary="zeokeel.exe"
-            fi
-            # CGO is disabled for every target (the product is pure Go), the
-            # binary is stripped and VCS/build-id metadata is omitted, and the
-            # archive itself is gzip/zip compressed.
-            GOOS="$goos" GOARCH="$goarch" CGO_ENABLED=0 go build -trimpath -buildvcs=false \
-              -ldflags "-s -w -buildid= \
-                -X github.com/zeokeel/zeokeel/internal/host.Version=v${VERSION} \
-                -X github.com/zeokeel/zeokeel/internal/host.Commit=${commit} \
-                -X github.com/zeokeel/zeokeel/internal/host.BuildTime=${build_time}" \
-              -o "${name}/${binary}" ./cmd/zeokeel
-            cp README.md LICENSE CHANGELOG.md VERSION "$name/"
-            if [ "$goos" = "windows" ]; then
-              (cd "$name/.." && zip -qr "dist/${name}.zip" "$name")
-            else
-              tar -czf "dist/${name}.tar.gz" "$name"
-            fi
-            rm -rf "$name"
-          done
-          (
-            cd dist
-            sha256sum ./*.tar.gz ./*.zip > SHA256SUMS.txt
-          )
+          set -euo pipefail
+          keychain="$RUNNER_TEMP/zeokeel-signing.keychain-db"
+          password="$(openssl rand -base64 24)"
+          security create-keychain -p "$password" "$keychain"
+          security set-keychain-settings -lut 21600 "$keychain"
+          security unlock-keychain -p "$password" "$keychain"
+          printf '%s' "$MACOS_CERT_P12" | base64 -D > "$RUNNER_TEMP/cert.p12"
+          security import "$RUNNER_TEMP/cert.p12" -k "$keychain" \
+            -P "$MACOS_CERT_PASSWORD" -T /usr/bin/codesign
+          rm -f "$RUNNER_TEMP/cert.p12"
+          security set-key-partition-list -S apple-tool:,apple: -s -k "$password" "$keychain"
+          security list-keychains -d user -s "$keychain" login.keychain-db
+          printf '%s' "$APPLE_API_KEY_P8" | base64 -D > "$RUNNER_TEMP/AuthKey.p8"
+          xcrun notarytool store-credentials zeokeel-notary --keychain "$keychain" \
+            --key "$RUNNER_TEMP/AuthKey.p8" --key-id "$APPLE_API_KEY_ID" \
+            --issuer "$APPLE_API_ISSUER"
+          rm -f "$RUNNER_TEMP/AuthKey.p8"
+          # mygo builds its notarize call with the keychain the config names.
+          jq --arg kc "$keychain" '.macos.notarize.keychain = $kc' mygo.json > mygo.tmp
+          mv mygo.tmp mygo.json
+          echo "SIGNING_KEYCHAIN=$keychain" >> "$GITHUB_ENV"
 
-      - name: Verify archives and checksums
-        env:
-          VERSION: ${{ steps.version.outputs.version }}
+      - name: Build, sign, notarize and verify
         run: |
           set -eu
-          (cd dist && sha256sum -c SHA256SUMS.txt)
-          tmp="$(mktemp -d)"
-          tar -xzf "dist/zeokeel_${VERSION}_linux_amd64.tar.gz" -C "$tmp"
-          "$tmp/zeokeel_${VERSION}_linux_amd64/zeokeel" --version | tee /tmp/version.txt
-          grep -q "v${VERSION}" /tmp/version.txt
-          unzip -l "dist/zeokeel_${VERSION}_windows_amd64.zip" | grep -q 'zeokeel.exe'
+          bash scripts/build-app.sh -platform darwin/universal
+          app="build/darwin-universal/ZeoKeel.app"
+          test -d "$app"
+          codesign --verify --deep --strict "$app"
+          spctl --assess --type execute -vv "$app"
+          dmg="$(find build/darwin-universal -maxdepth 1 -name '*.dmg' | head -1)"
+          test -n "$dmg"
+          xcrun stapler validate "$dmg"
+          hdiutil verify "$dmg"
+          tar -czf "build/zeokeel-$(cat VERSION)-darwin-universal.tar.gz" \
+            -C build/darwin-universal ZeoKeel.app
 
-      - name: Compose release notes
-        env:
-          VERSION: ${{ steps.version.outputs.version }}
-        run: |
-          {
-            echo "## 这个版本更新了什么"
-            echo ""
-            # 只截取 CHANGELOG 中当前版本的段落，不要把历史版本都贴到发布页。
-            awk -v ver="$VERSION" '
-              index($0, "## [" ver "]") == 1 { inside = 1; next }
-              inside && index($0, "## [") == 1 { exit }
-              inside && !started && $0 == "" { next }
-              inside { started = 1; print }
-            ' CHANGELOG.md
-            echo ""
-            echo "## 下载"
-            echo ""
-            echo "选择适合你电脑系统的安装包："
-            echo ""
-            echo "| 系统 | 架构 | 文件 |"
-            echo "| --- | --- | --- |"
-            for target in linux/amd64 linux/arm64 darwin/amd64 darwin/arm64 windows/amd64 windows/arm64; do
-              goos="${target%/*}"
-              goarch="${target#*/}"
-              case "$goos" in
-                linux)  platform="Linux" ;;
-                darwin) platform="macOS" ;;
-                windows) platform="Windows" ;;
-              esac
-              case "$goarch" in
-                amd64) arch="x86-64 (amd64)" ;;
-                arm64) arch="ARM64" ;;
-              esac
-              if [ "$goos" = "windows" ]; then
-                archive="zeokeel_${VERSION}_${goos}_${goarch}.zip"
-              else
-                archive="zeokeel_${VERSION}_${goos}_${goarch}.tar.gz"
-              fi
-              echo "| ${platform} | ${arch} | \`${archive}\` |"
-            done
-            echo ""
-            echo "**校验**：\`SHA256SUMS.txt\` 是每个压缩包的 sha256。"
-            echo ""
-            echo '```sh'
-            echo "# Linux / macOS"
-            echo "tar -xzf zeokeel_${VERSION}_<系统>_<架构>.tar.gz"
-            echo "./zeokeel_${VERSION}_<系统>_<架构>/zeokeel --version"
-            echo ""
-            echo "# Windows (PowerShell)"
-            echo "Expand-Archive zeokeel_${VERSION}_windows_<架构>.zip ."
-            echo ".\\zeokeel_${VERSION}_windows_<架构>\\zeokeel.exe --version"
-            echo '```'
-          } > release-notes.md
-
-      - name: Remove legacy asset names
-        continue-on-error: true
+      - name: Upload the macOS assets
         env:
           GH_TOKEN: ${{ github.token }}
-          VERSION: ${{ steps.version.outputs.version }}
-        run: gh release delete-asset "v${VERSION}" checksums.txt --yes || true
+        run: |
+          set -eu
+          gh release upload "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --clobber \
+            build/darwin-universal/*.dmg \
+            build/zeokeel-*-darwin-universal.tar.gz
 
-      - name: Publish GitHub release
-        uses: softprops/action-gh-release@v3
+      - name: Clean up the signing keychain
+        if: always()
+        run: security delete-keychain "$SIGNING_KEYCHAIN" || true
+
+  build-windows:
+    name: Windows installers (NSIS, GUI subsystem)
+    needs: draft-release
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-go@v7
         with:
-          tag_name: v${{ steps.version.outputs.version }}
-          name: ZeoKeel v${{ steps.version.outputs.version }}
-          body_path: release-notes.md
-          files: |
-            dist/*.tar.gz
-            dist/*.zip
-            dist/SHA256SUMS.txt
-          fail_on_unmatched_files: true
+          go-version-file: go.mod
+          cache: true
+
+      - name: Install NSIS and librsvg
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y nsis librsvg2-bin
+
+      - name: Build the installers and the update archives
+        run: |
+          set -eu
+          bash scripts/build-app.sh -platform windows/amd64,windows/arm64
+          version="$(cat VERSION)"
+          for arch in amd64 arm64; do
+            test -f "build/windows-$arch/zeokeel-setup-$version-$arch.exe"
+            # mygo does not emit an update archive without signed updates, so
+            # the release creates the per-platform archive the updater installs.
+            # Its single top-level directory is the layout the host installer
+            # expects; the Windows build dir has no icon.png (mygo embeds the
+            # icon in the exe), so the derived packaging icon is copied in.
+            stage="$(mktemp -d)"
+            mkdir -p "$stage/app"
+            cp "build/windows-$arch/ZeoKeel.exe" "build/windows-$arch/.mygo-files" "$stage/app/"
+            cp assets/icon.png "$stage/app/icon.png"
+            tar -czf "build/windows-$arch/zeokeel-$version-windows-$arch.tar.gz" -C "$stage" app
+            rm -rf "$stage"
+          done
+
+      - name: Upload the Windows assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -eu
+          gh release upload "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --clobber \
+            build/windows-amd64/zeokeel-setup-*.exe \
+            build/windows-arm64/zeokeel-setup-*.exe \
+            build/windows-amd64/zeokeel-*-windows-amd64.tar.gz \
+            build/windows-arm64/zeokeel-*-windows-arm64.tar.gz
+
+  build-linux:
+    name: Linux AppImages
+    needs: draft-release
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Install the AppImage toolchain
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y librsvg2-bin squashfs-tools patchelf desktop-file-utils file
+          bin="$RUNNER_TEMP/appimage-bin"
+          mkdir -p "$bin"
+          GOBIN="$bin" go install github.com/probonopd/go-appimage/src/appimagetool@v0.0.0-20260903171257-b7864b5e53d4
+          printf '#!/bin/sh\nexit 0\n' > "$bin/uploadtool"
+          chmod +x "$bin/uploadtool"
+          for arch in x86_64 aarch64; do
+            curl -fsSL --retry 5 --retry-delay 3 -o "$bin/runtime-$arch" \
+              "https://github.com/AppImage/type2-runtime/releases/download/continuous/runtime-$arch"
+            chmod +x "$bin/runtime-$arch"
+          done
+          echo "APPIMAGE_BIN=$bin" >> "$GITHUB_ENV"
+
+      - name: Build the AppImages
+        run: |
+          set -eu
+          bash scripts/build-app.sh -platform linux/amd64,linux/arm64
+          APPIMAGETOOL="$APPIMAGE_BIN/appimagetool" \
+            APPIMAGE_RUNTIME="$APPIMAGE_BIN/runtime-x86_64" \
+            bash scripts/build-appimage.sh build/linux-amd64 "$(cat VERSION)" amd64
+          APPIMAGETOOL="$APPIMAGE_BIN/appimagetool" \
+            APPIMAGE_RUNTIME="$APPIMAGE_BIN/runtime-aarch64" \
+            bash scripts/build-appimage.sh build/linux-arm64 "$(cat VERSION)" arm64
+          ls -l build/zeokeel-*-linux-*.AppImage
+
+      - name: Upload the Linux assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -eu
+          gh release upload "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --clobber \
+            build/zeokeel-*-linux-amd64.AppImage \
+            build/zeokeel-*-linux-arm64.AppImage
+
+  publish:
+    name: Checksums and publish
+    needs: [build-macos, build-windows, build-linux]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - name: Download the published assets, checksum them, publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -eu
+          rm -rf release-assets
+          mkdir -p release-assets
+          gh release download "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" \
+            --dir release-assets --clobber --pattern '*'
+          rm -f release-assets/SHA256SUMS.txt
+          (cd release-assets && sha256sum ./* > SHA256SUMS.txt)
+          gh release upload "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --clobber \
+            release-assets/SHA256SUMS.txt
+          gh release edit "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --draft=false

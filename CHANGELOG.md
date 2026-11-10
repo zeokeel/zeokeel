@@ -6,7 +6,21 @@ All notable changes to ZeoKeel are documented here. The format follows
 
 ## [Unreleased]
 
-（暂无未发布改动）
+这个版本把安装包和升级链路接上：
+
+- **Windows 安装包。** `mygo build` 产出无命令行窗口的 GUI 程序和 NSIS 安装器，安装到
+  当前用户目录，带开始菜单、卸载项和图标；exe 内置图标、版本信息和 DPI manifest。
+- **Linux AppImage。** 发布只提供 AppImage；由 `scripts/build-appimage.sh` 从 mygo 的 Linux
+  构建产物组装，图标/desktop 与程序同源。
+- **macOS dmg 签名与公证。** universal `.app` + dmg，Developer ID 签名、`notarytool`
+  API Key 公证并 staple；CI 自动完成。
+- **无密钥自动更新。** 应用直接读取 GitHub Release，按平台选择更新归档并校验
+  `SHA256SUMS.txt`；设置「更新」页可检查、下载，并在下次启动安装；命令面板新增
+  「软件更新」入口。更新不需要任何更新签名密钥。
+- **单一 logo 源。** 新增 `logo/logo.svg` / `logo/logo-dark.svg`；所有图标（Windows exe、
+  安装器、macOS icns、Linux desktop/AppImage、UI mark）都由 `scripts/gen-icons.sh` 在构建时派生。
+- **发布自动化。** 打 `vX.Y.Z` 标签后 CI 自动构建三平台、生成 `SHA256SUMS.txt` 并发布
+  GitHub Release（见 `docs/RELEASE.md`）。
 
 ## [0.2.2] - 2026-11-10
 

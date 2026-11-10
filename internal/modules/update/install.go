@@ -32,10 +32,47 @@ var ErrInstall = errors.New("更新安装计划失败")
 var _ contracts.UpdateInstaller = (*service)(nil)
 
 // pendingInstallFile is the on-disk pending.json schema (shared with the host).
+// Kind tells the host's install step how to apply the staged asset; plans
+// written by older builds have no kind and default to "binary".
 type pendingInstallFile struct {
 	Version string `json:"version"`
 	Path    string `json:"path"`
 	SHA256  string `json:"sha256"`
+	Kind    string `json:"kind"`
+}
+
+// Install kinds recorded in pending.json.
+const (
+	installKindAppImage = "appimage"
+	installKindArchive  = "archive"
+	installKindBinary   = "binary"
+)
+
+// stagedUpdateKind classifies a staged file name for the host's install step:
+// AppImages are replaced in place, archives are extracted, everything else is
+// treated as a replacement executable.
+func stagedUpdateKind(name string) string {
+	lower := strings.ToLower(strings.TrimSpace(name))
+	switch {
+	case strings.HasSuffix(lower, ".appimage"):
+		return installKindAppImage
+	case strings.HasSuffix(lower, ".tar.gz"), strings.HasSuffix(lower, ".tgz"), strings.HasSuffix(lower, ".zip"):
+		return installKindArchive
+	default:
+		return installKindBinary
+	}
+}
+
+// pendingInstallKind normalizes the pending.json kind; old plans (no kind) and
+// unknown values default to "binary".
+func pendingInstallKind(kind string) string {
+	normalized := strings.ToLower(strings.TrimSpace(kind))
+	switch normalized {
+	case installKindAppImage, installKindArchive, installKindBinary:
+		return normalized
+	default:
+		return installKindBinary
+	}
 }
 
 // ScheduleInstall validates a verified download and records it as the pending
@@ -79,7 +116,12 @@ func (s *service) ScheduleInstall(download contracts.UpdateDownload) (contracts.
 	if err := os.MkdirAll(updatesDir, 0o755); err != nil {
 		return contracts.UpdateInstallPlan{}, fmt.Errorf("%w: create updates dir: %v", ErrInstall, err)
 	}
-	body, err := json.Marshal(pendingInstallFile{Version: version, Path: staged, SHA256: actual})
+	body, err := json.Marshal(pendingInstallFile{
+		Version: version,
+		Path:    staged,
+		SHA256:  actual,
+		Kind:    stagedUpdateKind(filepath.Base(staged)),
+	})
 	if err != nil {
 		return contracts.UpdateInstallPlan{}, fmt.Errorf("%w: encode pending plan: %v", ErrInstall, err)
 	}
@@ -134,6 +176,9 @@ func (s *service) PendingInstall() (contracts.UpdateInstallPlan, bool) {
 	if err := json.Unmarshal(body, &pending); err != nil {
 		return contracts.UpdateInstallPlan{}, false
 	}
+	// Old plans have no kind; the host defaults it to "binary" too, but
+	// normalizing here keeps the schema's default in one place.
+	pending.Kind = pendingInstallKind(pending.Kind)
 	version := strings.TrimSpace(pending.Version)
 	sha := strings.TrimSpace(pending.SHA256)
 	if version == "" || sha == "" {

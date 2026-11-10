@@ -1,19 +1,36 @@
 package host
 
 // Install-on-restart: the update module schedules a verified download in
-// <dataDir>/updates/pending.json; at the next process start the host replaces
-// the running executable with the staged file. The plan is kept if anything
-// fails, so the next start can retry; a successful replace removes both the plan
-// and the staged file. This runs before the assembly/window exist, so a bad plan
-// can never take the UI down with it (errors are logged, never fatal).
+// <dataDir>/updates/pending.json; at the next process start the host installs
+// the staged asset. The plan is kept if anything fails, so the next start can
+// retry; a successful install removes both the plan and the staged file. This
+// runs before the assembly/window exist, so a bad plan can never take the UI
+// down with it (errors are logged, never fatal).
+//
+// The plan's "kind" selects the release asset layout:
+//   - "binary" (also the fallback for a missing/unknown kind): the staged file
+//     replaces the running executable.
+//   - "appimage": the staged file replaces the AppImage named by $APPIMAGE
+//     (falling back to binary replacement when the app was not started from an
+//     AppImage).
+//   - "archive": a tar.gz/.tgz/.zip containing the app dir (Windows/Linux) or
+//     the .app bundle (macOS) is extracted and installed over the app.
+//
+// Windows cannot overwrite a running .exe, but it can rename it, so the
+// windows paths use a rename-to-<exe>.old dance and the backup is removed
+// best-effort at a later start.
 
 import (
+	"archive/tar"
+	"archive/zip"
+	"compress/gzip"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -26,33 +43,61 @@ import (
 const (
 	updatesDirName     = "updates"
 	pendingInstallName = "pending.json"
+
+	// pending install kinds. The update module writes one of them; a plan
+	// written by an older version has none and installs as a binary.
+	installKindBinary   = "binary"
+	installKindAppImage = "appimage"
+	installKindArchive  = "archive"
+
+	// installBackupSuffix names the previous executable/bundle kept by the
+	// rename-dance paths until a later start can delete it.
+	installBackupSuffix = ".old"
+
+	installExecutableMode = 0o755
 )
 
-// pendingInstallFile mirrors the update module's pending.json.
+// pendingInstallFile mirrors the update module's pending.json. Kind is the
+// release asset layout; a missing or unknown kind installs as a binary (the
+// schema predates kinds, so existing pending plans keep working).
 type pendingInstallFile struct {
 	Version string `json:"version"`
 	Path    string `json:"path"`
 	SHA256  string `json:"sha256"`
+	Kind    string `json:"kind"`
+}
+
+// normalizeInstallKind maps a pending.json kind to one of the known install
+// layouts; anything unrecognized (including "") installs as a binary.
+func normalizeInstallKind(kind string) string {
+	switch strings.ToLower(strings.TrimSpace(kind)) {
+	case installKindAppImage:
+		return installKindAppImage
+	case installKindArchive:
+		return installKindArchive
+	default:
+		return installKindBinary
+	}
 }
 
 // ExecutableReplacer replaces the running executable with the staged update.
 // The process uses defaultExecutableReplacer; tests inject fakes so neither the
 // test binary nor the developer's binary is ever replaced.
 type ExecutableReplacer interface {
-	// CurrentExecutable reports the executable to replace.
+	// CurrentExecutable reports the executable to install over.
 	CurrentExecutable() (string, error)
 	// Replace replaces that executable with the staged file. It returns an
 	// error without touching the current executable when that is not possible.
 	Replace(stagedPath string) error
 }
 
-// defaultExecutableReplacer replaces the executable in place: it copies the
-// staged file to a temporary file next to the current executable and renames it
-// over the target (atomic on the same filesystem). Linux/macOS allow renaming
-// over a running executable; Windows cannot replace a running .exe, so Replace
-// reports a readable error there and the pending plan stays for a future
-// release with an external updater. The staged file was SHA-256 verified when
-// it was scheduled (and re-verified by the download).
+// defaultExecutableReplacer replaces the executable in place: on Linux/macOS it
+// copies the staged file to a temporary file next to the current executable and
+// renames it over the target (atomic on the same filesystem; renaming over a
+// running executable is allowed). Windows cannot replace a running .exe, so it
+// renames the running executable to <exe>.old and copies the new file in. The
+// staged file was SHA-256 verified when it was scheduled (and re-verified by
+// the download).
 type defaultExecutableReplacer struct{}
 
 // CurrentExecutable implements ExecutableReplacer.
@@ -62,79 +107,515 @@ func (defaultExecutableReplacer) CurrentExecutable() (string, error) {
 
 // Replace implements ExecutableReplacer.
 func (defaultExecutableReplacer) Replace(stagedPath string) error {
-	if runtime.GOOS == "windows" {
-		// A running executable cannot be renamed over on Windows; installing on
-		// restart needs a helper that runs before the app locks its binary. Keep
-		// the plan so such a helper can pick it up later.
-		return errors.New("cannot replace a running executable on Windows; install the package manually")
-	}
-	staged := strings.TrimSpace(stagedPath)
-	if staged == "" {
-		return errors.New("staged update path is empty")
-	}
-	info, err := os.Stat(staged)
+	staged, err := validateStagedFile(stagedPath)
 	if err != nil {
-		return fmt.Errorf("stat staged update: %w", err)
-	}
-	if !info.Mode().IsRegular() {
-		return fmt.Errorf("staged update %q is not a regular file", staged)
+		return err
 	}
 	current, err := os.Executable()
 	if err != nil {
 		return fmt.Errorf("locate running executable: %w", err)
 	}
-	// Resolve a symlinked executable so the rename replaces the real binary.
+	// Resolve a symlinked executable so the replacement targets the real binary.
 	if resolved, err := filepath.EvalSymlinks(current); err == nil {
 		current = resolved
 	}
-	targetDir := filepath.Dir(current)
-	tmp, err := os.CreateTemp(targetDir, ".zeokeel-update-*.tmp")
-	if err != nil {
-		return fmt.Errorf("create executable temp file in %q: %w", targetDir, err)
+	return replaceExecutableFile(current, staged)
+}
+
+// replaceExecutableFile installs a staged binary over current. Linux/macOS
+// replace atomically via rename; Windows renames the running .exe aside first
+// (renaming is allowed while it runs) and copies the new file into place.
+func replaceExecutableFile(current, staged string) error {
+	if runtime.GOOS == "windows" {
+		return replaceExecutableWithRenameDance(current, staged)
 	}
-	tmpName := tmp.Name()
+	return copyFileAtomic(staged, current, installExecutableMode)
+}
+
+// replaceExecutableWithRenameDance performs the Windows-safe replacement: move
+// the current executable to <exe>.old, then copy the staged file into place. If
+// the copy fails the old executable is restored, so a failed install keeps a
+// runnable app. The backup is left for the next start to clean up (a running
+// Windows executable cannot always be deleted immediately).
+func replaceExecutableWithRenameDance(current, staged string) error {
+	backup := current + installBackupSuffix
+	if err := os.Remove(backup); err != nil && !errors.Is(err, fs.ErrNotExist) {
+		return fmt.Errorf("remove stale executable backup %q: %w", backup, err)
+	}
+	if err := os.Rename(current, backup); err != nil {
+		return fmt.Errorf("move running executable %q aside: %w", current, err)
+	}
+	if err := copyFileAtomic(staged, current, installExecutableMode); err != nil {
+		if restoreErr := os.Rename(backup, current); restoreErr != nil {
+			return fmt.Errorf("copy new executable: %w (restore old executable: %v)", err, restoreErr)
+		}
+		return fmt.Errorf("copy new executable: %w", err)
+	}
+	return nil
+}
+
+// replaceAppImage atomically replaces the running AppImage with the staged
+// file. Linux/macOS allow renaming a new file over the running AppImage.
+func replaceAppImage(appImagePath, stagedPath string) error {
+	target := strings.TrimSpace(appImagePath)
+	if target == "" {
+		return errors.New("APPIMAGE is empty")
+	}
+	// Resolve a symlinked AppImage so the replacement targets the real file.
+	if resolved, err := filepath.EvalSymlinks(target); err == nil {
+		target = resolved
+	}
+	return copyFileAtomic(stagedPath, target, installExecutableMode)
+}
+
+// installArchive installs a tar.gz/.tgz/.zip release asset. macOS swaps the
+// whole .app bundle (the archive holds <Name>.app); Windows/Linux replace the
+// files of the directory holding the running executable.
+func installArchive(stagedPath, currentExecutable string) error {
+	staged, err := validateStagedFile(stagedPath)
+	if err != nil {
+		return err
+	}
+	current := strings.TrimSpace(currentExecutable)
+	if current == "" {
+		return errors.New("current executable path is empty")
+	}
+	if resolved, err := filepath.EvalSymlinks(current); err == nil {
+		current = resolved
+	}
+	if runtime.GOOS == "darwin" {
+		return installDarwinBundle(staged, current)
+	}
+	return installArchiveTree(staged, current)
+}
+
+// installDarwinBundle replaces <Name>.app (derived from the running executable
+// path) with the single .app bundle inside the staged archive. The old bundle
+// is moved aside first and restored if the new one cannot be moved in.
+func installDarwinBundle(staged, current string) error {
+	bundleRoot, err := darwinAppBundleRoot(current)
+	if err != nil {
+		return err
+	}
+	// The temp extraction dir sits next to the target bundle: the same
+	// filesystem, and the same directory we need write access to for the swap.
+	tempRoot, err := os.MkdirTemp(filepath.Dir(bundleRoot), ".zeokeel-update-*")
+	if err != nil {
+		return fmt.Errorf("create archive temp dir: %w", err)
+	}
+	defer os.RemoveAll(tempRoot)
+	if err := extractArchive(staged, tempRoot); err != nil {
+		return err
+	}
+	extractedApp, err := singleAppBundle(tempRoot)
+	if err != nil {
+		return err
+	}
+	backup := bundleRoot + installBackupSuffix
+	if err := os.RemoveAll(backup); err != nil {
+		return fmt.Errorf("remove stale app bundle backup %q: %w", backup, err)
+	}
+	if err := os.Rename(bundleRoot, backup); err != nil {
+		return fmt.Errorf("move old app bundle aside: %w", err)
+	}
+	if err := os.Rename(extractedApp, bundleRoot); err != nil {
+		if restoreErr := os.Rename(backup, bundleRoot); restoreErr != nil {
+			return fmt.Errorf("move new app bundle into place: %w (restore old bundle: %v)", err, restoreErr)
+		}
+		return fmt.Errorf("move new app bundle into place: %w", err)
+	}
+	// The new bundle is in place. Keep the old bundle as <Name>.app.old until
+	// the next start: the still-running process loads resources from its old
+	// bundle path lazily, so deleting it now could break the current session.
+	return nil
+}
+
+// installArchiveTree replaces the app files in the executable's directory from
+// the archive's single top-level app directory. The running executable is
+// replaced with the rename dance; every other file is written through a
+// temporary file and renamed over the old one.
+func installArchiveTree(staged, current string) error {
+	targetDir := filepath.Dir(current)
+	// The temp dir lives inside the target dir: that directory must be
+	// writable for the install anyway, and it keeps extraction on the same
+	// filesystem as the files being replaced.
+	tempRoot, err := os.MkdirTemp(targetDir, ".zeokeel-update-*")
+	if err != nil {
+		return fmt.Errorf("create archive temp dir: %w", err)
+	}
+	defer os.RemoveAll(tempRoot)
+	if err := extractArchive(staged, tempRoot); err != nil {
+		return err
+	}
+	appRoot, err := singleTopLevelDir(tempRoot)
+	if err != nil {
+		return err
+	}
+	return replaceDirectoryContents(appRoot, targetDir, current)
+}
+
+// replaceDirectoryContents copies the extracted app tree over targetDir,
+// replacing existing files but leaving unrelated files alone. The running
+// executable is moved aside (rename dance) rather than overwritten.
+func replaceDirectoryContents(appRoot, targetDir, current string) error {
+	currentAbs, err := filepath.Abs(current)
+	if err != nil {
+		return fmt.Errorf("resolve current executable: %w", err)
+	}
+	return filepath.WalkDir(appRoot, func(path string, entry fs.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return fmt.Errorf("walk extracted archive: %w", walkErr)
+		}
+		relative, err := filepath.Rel(appRoot, path)
+		if err != nil {
+			return fmt.Errorf("relativize archive entry: %w", err)
+		}
+		if relative == "." {
+			return nil
+		}
+		target := filepath.Join(targetDir, relative)
+		info, err := entry.Info()
+		if err != nil {
+			return fmt.Errorf("stat archive entry %q: %w", relative, err)
+		}
+		switch {
+		case entry.IsDir():
+			if err := os.MkdirAll(target, info.Mode().Perm()|0o700); err != nil {
+				return fmt.Errorf("create app directory %q: %w", relative, err)
+			}
+			return nil
+		case info.Mode()&os.ModeSymlink != 0:
+			return replaceSymlink(path, target)
+		case info.Mode().IsRegular():
+			if targetAbs, absErr := filepath.Abs(target); absErr == nil && targetAbs == currentAbs {
+				return replaceExecutableWithRenameDance(current, path)
+			}
+			if err := copyFileAtomic(path, target, info.Mode().Perm()); err != nil {
+				return fmt.Errorf("replace app file %q: %w", relative, err)
+			}
+			return nil
+		default:
+			return fmt.Errorf("unsupported archive entry %q", relative)
+		}
+	})
+}
+
+// replaceSymlink recreates an extracted symlink at target.
+func replaceSymlink(source, target string) error {
+	linkTarget, err := os.Readlink(source)
+	if err != nil {
+		return fmt.Errorf("read archive symlink %q: %w", filepath.Base(target), err)
+	}
+	if err := os.Remove(target); err != nil && !errors.Is(err, fs.ErrNotExist) {
+		return fmt.Errorf("remove old symlink %q: %w", target, err)
+	}
+	if err := os.Symlink(linkTarget, target); err != nil {
+		return fmt.Errorf("create symlink %q: %w", target, err)
+	}
+	return nil
+}
+
+// darwinAppBundleRoot derives the <Name>.app root from a running bundle
+// executable path (.../<Name>.app/Contents/MacOS/<binary>).
+func darwinAppBundleRoot(executable string) (string, error) {
+	current := strings.TrimSpace(executable)
+	if current == "" {
+		return "", errors.New("current executable path is empty")
+	}
+	macOSDir := filepath.Dir(current)
+	contentsDir := filepath.Dir(macOSDir)
+	bundleRoot := filepath.Dir(contentsDir)
+	if filepath.Base(macOSDir) != "MacOS" || filepath.Base(contentsDir) != "Contents" ||
+		!strings.HasSuffix(filepath.Base(bundleRoot), ".app") {
+		return "", fmt.Errorf("executable %q is not inside a macOS .app bundle (<Name>.app/Contents/MacOS/<binary>)", current)
+	}
+	return bundleRoot, nil
+}
+
+// singleAppBundle returns the only top-level .app directory of an extracted
+// macOS archive; anything else is an unsupported layout.
+func singleAppBundle(dir string) (string, error) {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return "", fmt.Errorf("read extracted archive: %w", err)
+	}
+	if len(entries) != 1 || !entries[0].IsDir() || !strings.HasSuffix(entries[0].Name(), ".app") {
+		return "", errors.New("unsupported archive layout: want exactly one .app bundle at the archive root")
+	}
+	return filepath.Join(dir, entries[0].Name()), nil
+}
+
+// singleTopLevelDir returns the only top-level directory of an extracted
+// archive (the app dir release assets contain); anything else is unsupported.
+func singleTopLevelDir(dir string) (string, error) {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return "", fmt.Errorf("read extracted archive: %w", err)
+	}
+	if len(entries) != 1 || !entries[0].IsDir() {
+		return "", errors.New("unsupported archive layout: want exactly one application directory at the archive root")
+	}
+	return filepath.Join(dir, entries[0].Name()), nil
+}
+
+// extractArchive unpacks a .tar.gz/.tgz/.zip release asset into destDir,
+// rejecting entries that would escape it (path traversal).
+func extractArchive(staged, destDir string) error {
+	lower := strings.ToLower(staged)
+	switch {
+	case strings.HasSuffix(lower, ".tar.gz"), strings.HasSuffix(lower, ".tgz"):
+		return extractTarGz(staged, destDir)
+	case strings.HasSuffix(lower, ".zip"):
+		return extractZip(staged, destDir)
+	default:
+		return fmt.Errorf("unsupported archive format %q (want .tar.gz, .tgz or .zip)", filepath.Base(staged))
+	}
+}
+
+// extractTarGz unpacks a gzip-compressed tar archive.
+func extractTarGz(staged, destDir string) error {
+	file, err := os.Open(staged)
+	if err != nil {
+		return fmt.Errorf("open archive: %w", err)
+	}
+	defer file.Close()
+	uncompressed, err := gzip.NewReader(file)
+	if err != nil {
+		return fmt.Errorf("read gzip archive %q: %w", filepath.Base(staged), err)
+	}
+	defer uncompressed.Close()
+	reader := tar.NewReader(uncompressed)
+	for {
+		header, err := reader.Next()
+		if errors.Is(err, io.EOF) {
+			return nil
+		}
+		if err != nil {
+			return fmt.Errorf("read tar entry: %w", err)
+		}
+		target, err := archiveEntryTarget(destDir, header.Name)
+		if err != nil {
+			return err
+		}
+		mode := header.FileInfo().Mode()
+		switch header.Typeflag {
+		case tar.TypeDir:
+			if err := os.MkdirAll(target, mode.Perm()|0o700); err != nil {
+				return fmt.Errorf("create archive directory %q: %w", header.Name, err)
+			}
+		case tar.TypeReg:
+			if err := writeArchiveFile(reader, target, mode.Perm()); err != nil {
+				return fmt.Errorf("extract archive file %q: %w", header.Name, err)
+			}
+		case tar.TypeSymlink:
+			if err := writeArchiveSymlink(header.Linkname, target, destDir); err != nil {
+				return fmt.Errorf("extract archive symlink %q: %w", header.Name, err)
+			}
+		case tar.TypeXGlobalHeader, tar.TypeXHeader, tar.TypeGNULongName, tar.TypeGNULongLink:
+			// PAX/GNU metadata entries carry no file content of their own.
+			continue
+		default:
+			return fmt.Errorf("unsupported tar entry %q (type %d)", header.Name, header.Typeflag)
+		}
+	}
+}
+
+// extractZip unpacks a zip archive.
+func extractZip(staged, destDir string) error {
+	archive, err := zip.OpenReader(staged)
+	if err != nil {
+		return fmt.Errorf("open zip archive %q: %w", filepath.Base(staged), err)
+	}
+	defer archive.Close()
+	for _, entry := range archive.File {
+		target, err := archiveEntryTarget(destDir, entry.Name)
+		if err != nil {
+			return err
+		}
+		if entry.FileInfo().IsDir() {
+			if err := os.MkdirAll(target, entry.Mode().Perm()|0o700); err != nil {
+				return fmt.Errorf("create archive directory %q: %w", entry.Name, err)
+			}
+			continue
+		}
+		source, err := entry.Open()
+		if err != nil {
+			return fmt.Errorf("open archive entry %q: %w", entry.Name, err)
+		}
+		if entry.Mode()&os.ModeSymlink != 0 {
+			linkTarget, readErr := io.ReadAll(io.LimitReader(source, 4096))
+			closeErr := source.Close()
+			if readErr != nil {
+				return fmt.Errorf("read archive symlink %q: %w", entry.Name, readErr)
+			}
+			if closeErr != nil {
+				return fmt.Errorf("close archive symlink %q: %w", entry.Name, closeErr)
+			}
+			if err := writeArchiveSymlink(string(linkTarget), target, destDir); err != nil {
+				return fmt.Errorf("extract archive symlink %q: %w", entry.Name, err)
+			}
+			continue
+		}
+		writeErr := writeArchiveFile(source, target, entry.Mode().Perm())
+		closeErr := source.Close()
+		if writeErr != nil {
+			return fmt.Errorf("extract archive file %q: %w", entry.Name, writeErr)
+		}
+		if closeErr != nil {
+			return fmt.Errorf("close archive file %q: %w", entry.Name, closeErr)
+		}
+	}
+	return nil
+}
+
+// archiveEntryTarget joins an archive entry name to destDir after rejecting
+// absolute names and path traversal.
+func archiveEntryTarget(destDir, name string) (string, error) {
+	raw := strings.TrimSpace(name)
+	if raw == "" {
+		return "", errors.New("archive entry has an empty name")
+	}
+	clean := filepath.Clean(filepath.FromSlash(raw))
+	if clean == "." {
+		return destDir, nil
+	}
+	if filepath.IsAbs(clean) || filepath.VolumeName(clean) != "" {
+		return "", fmt.Errorf("archive entry %q has an absolute path", name)
+	}
+	target := filepath.Join(destDir, clean)
+	relative, err := filepath.Rel(destDir, target)
+	if err != nil {
+		return "", fmt.Errorf("resolve archive entry %q: %w", name, err)
+	}
+	if relative == ".." || strings.HasPrefix(relative, ".."+string(filepath.Separator)) || filepath.IsAbs(relative) {
+		return "", fmt.Errorf("archive entry %q escapes the extraction directory", name)
+	}
+	return target, nil
+}
+
+// writeArchiveFile writes one extracted regular file (creating its parent
+// directory when the archive did not carry a dir entry for it).
+func writeArchiveFile(source io.Reader, target string, mode os.FileMode) error {
+	if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
+		return fmt.Errorf("create archive directory: %w", err)
+	}
+	file, err := os.OpenFile(target, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, mode.Perm()|0o600)
+	if err != nil {
+		return fmt.Errorf("create archive file: %w", err)
+	}
+	if _, err := io.Copy(file, source); err != nil {
+		_ = file.Close()
+		return fmt.Errorf("write archive file: %w", err)
+	}
+	if err := file.Close(); err != nil {
+		return fmt.Errorf("close archive file: %w", err)
+	}
+	return nil
+}
+
+// writeArchiveSymlink creates an extracted symlink after rejecting a link
+// target that points outside the extraction directory.
+func writeArchiveSymlink(linkName, target, destDir string) error {
+	link := strings.TrimSpace(linkName)
+	if link == "" {
+		return errors.New("symlink has an empty target")
+	}
+	if filepath.IsAbs(link) || filepath.VolumeName(link) != "" {
+		return fmt.Errorf("symlink target %q is absolute", link)
+	}
+	resolved := filepath.Clean(filepath.Join(filepath.Dir(target), filepath.FromSlash(link)))
+	relative, err := filepath.Rel(destDir, resolved)
+	if err != nil {
+		return fmt.Errorf("resolve symlink target %q: %w", link, err)
+	}
+	if relative == ".." || strings.HasPrefix(relative, ".."+string(filepath.Separator)) || filepath.IsAbs(relative) {
+		return fmt.Errorf("symlink target %q escapes the extraction directory", link)
+	}
+	if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
+		return fmt.Errorf("create archive directory: %w", err)
+	}
+	if err := os.Symlink(link, target); err != nil {
+		return fmt.Errorf("create symlink: %w", err)
+	}
+	return nil
+}
+
+// copyFileAtomic copies source over target by writing a temporary file in
+// target's directory and renaming it into place, so target is never a partially
+// written file. The temp file gets mode (the executable's 0755, or the archive
+// entry's permission bits).
+func copyFileAtomic(source, target string, mode os.FileMode) error {
+	info, err := os.Stat(source)
+	if err != nil {
+		return fmt.Errorf("stat staged update: %w", err)
+	}
+	if !info.Mode().IsRegular() {
+		return fmt.Errorf("staged update %q is not a regular file", source)
+	}
+	temp, err := os.CreateTemp(filepath.Dir(target), ".zeokeel-update-*.tmp")
+	if err != nil {
+		return fmt.Errorf("create update temp file in %q: %w", filepath.Dir(target), err)
+	}
+	tempName := temp.Name()
 	committed := false
 	defer func() {
 		if !committed {
-			_ = os.Remove(tmpName)
+			_ = os.Remove(tempName)
 		}
 	}()
 
-	source, err := os.Open(staged)
+	origin, err := os.Open(source)
 	if err != nil {
-		_ = tmp.Close()
+		_ = temp.Close()
 		return fmt.Errorf("open staged update: %w", err)
 	}
-	_, copyErr := io.Copy(tmp, source)
-	closeSourceErr := source.Close()
+	_, copyErr := io.Copy(temp, origin)
+	closeOriginErr := origin.Close()
 	if copyErr != nil {
-		_ = tmp.Close()
+		_ = temp.Close()
 		return fmt.Errorf("copy staged update: %w", copyErr)
 	}
-	if closeSourceErr != nil {
-		_ = tmp.Close()
-		return fmt.Errorf("close staged update: %w", closeSourceErr)
+	if closeOriginErr != nil {
+		_ = temp.Close()
+		return fmt.Errorf("close staged update: %w", closeOriginErr)
 	}
-	if err := tmp.Chmod(0o755); err != nil {
-		_ = tmp.Close()
-		return fmt.Errorf("chmod executable temp file: %w", err)
+	if err := temp.Chmod(mode); err != nil {
+		_ = temp.Close()
+		return fmt.Errorf("chmod update temp file: %w", err)
 	}
-	if err := tmp.Sync(); err != nil {
-		_ = tmp.Close()
-		return fmt.Errorf("sync executable temp file: %w", err)
+	if err := temp.Sync(); err != nil {
+		_ = temp.Close()
+		return fmt.Errorf("sync update temp file: %w", err)
 	}
-	if err := tmp.Close(); err != nil {
-		return fmt.Errorf("close executable temp file: %w", err)
+	if err := temp.Close(); err != nil {
+		return fmt.Errorf("close update temp file: %w", err)
 	}
-	if err := os.Rename(tmpName, current); err != nil {
-		return fmt.Errorf("replace executable %q: %w", current, err)
+	if err := os.Rename(tempName, target); err != nil {
+		return fmt.Errorf("replace %q: %w", target, err)
 	}
 	committed = true
 	return nil
 }
 
+// validateStagedFile trims a staged path and verifies it is an existing regular
+// file.
+func validateStagedFile(stagedPath string) (string, error) {
+	staged := strings.TrimSpace(stagedPath)
+	if staged == "" {
+		return "", errors.New("staged update path is empty")
+	}
+	info, err := os.Stat(staged)
+	if err != nil {
+		return "", fmt.Errorf("stat staged update: %w", err)
+	}
+	if !info.Mode().IsRegular() {
+		return "", fmt.Errorf("staged update %q is not a regular file", staged)
+	}
+	return staged, nil
+}
+
 // applyPendingUpdate applies the scheduled install, if any. It returns
-// applied=true only after the executable was replaced and the plan cleaned up.
+// applied=true only after the install succeeded and the plan was cleaned up.
 // Every failure keeps pending.json (and the staged file) for a retry.
 func applyPendingUpdate(dataDir string, replacer ExecutableReplacer, logger contracts.Logger) (bool, error) {
 	if strings.TrimSpace(dataDir) == "" {
@@ -186,14 +667,15 @@ func applyPendingUpdate(dataDir string, replacer ExecutableReplacer, logger cont
 	if replacer == nil {
 		return false, errors.New("no executable replacer")
 	}
-	if _, err := replacer.CurrentExecutable(); err != nil {
+	current, err := replacer.CurrentExecutable()
+	if err != nil {
 		return false, fmt.Errorf("locate running executable: %w", err)
 	}
-	if err := replacer.Replace(staged); err != nil {
-		return false, fmt.Errorf("replace executable: %w", err)
+	if err := applyPendingInstall(normalizeInstallKind(pending.Kind), staged, current, replacer); err != nil {
+		return false, err
 	}
-	// The executable is replaced; clean up best effort. A leftover plan would
-	// try to re-apply an already installed file on the next start.
+	// The install is applied; clean up best effort. A leftover plan would try
+	// to re-apply an already installed file on the next start.
 	if err := os.Remove(pendingPath); err != nil && !errors.Is(err, os.ErrNotExist) {
 		logInstallWarning(logger, "remove installed pending plan %q: %v", pendingPath, err)
 	}
@@ -201,6 +683,38 @@ func applyPendingUpdate(dataDir string, replacer ExecutableReplacer, logger cont
 		logInstallWarning(logger, "remove installed staged file %q: %v", staged, err)
 	}
 	return true, nil
+}
+
+// applyPendingInstall dispatches the verified staged asset to the install
+// layout selected by pending.json's kind.
+func applyPendingInstall(kind, staged, current string, replacer ExecutableReplacer) error {
+	switch kind {
+	case installKindAppImage:
+		if appImage := strings.TrimSpace(os.Getenv("APPIMAGE")); appImage != "" {
+			// Renaming a new file over the running AppImage is allowed on
+			// Linux/macOS; a staged AppImage is a self-contained executable.
+			if err := replaceAppImage(appImage, staged); err != nil {
+				return fmt.Errorf("replace AppImage: %w", err)
+			}
+			return nil
+		}
+		// Not started from an AppImage (or the variable was stripped): fall
+		// back to replacing the executable.
+		if err := replacer.Replace(staged); err != nil {
+			return fmt.Errorf("replace executable: %w", err)
+		}
+		return nil
+	case installKindArchive:
+		if err := installArchive(staged, current); err != nil {
+			return fmt.Errorf("install archive update: %w", err)
+		}
+		return nil
+	default:
+		if err := replacer.Replace(staged); err != nil {
+			return fmt.Errorf("replace executable: %w", err)
+		}
+		return nil
+	}
 }
 
 // stagingPathBelowUpdates resolves path and verifies it is below updatesDir.
@@ -253,9 +767,54 @@ func fileSHA256(path string) (string, error) {
 	return hex.EncodeToString(hash.Sum(nil)), nil
 }
 
+// cleanupOldExecutableBackup removes the <exe>.old backup owned by the
+// rename-dance install. Only that exact name is touched; failures are logged,
+// never fatal.
+func cleanupOldExecutableBackup(currentExecutable string, logger contracts.Logger) {
+	current := strings.TrimSpace(currentExecutable)
+	if current == "" {
+		return
+	}
+	backup := current + installBackupSuffix
+	if err := os.Remove(backup); err != nil && !errors.Is(err, fs.ErrNotExist) {
+		logInstallWarning(logger, "remove stale executable backup %q: %v", backup, err)
+	}
+}
+
+// cleanupStaleExecutableBackups is the startup half of the .old cleanup: the
+// previous install could not delete the old executable while it was still
+// running, so the next start removes it. The macOS bundle swap has the same
+// shape: <Name>.app.old is kept until the process running from it has exited.
+func cleanupStaleExecutableBackups(logger contracts.Logger) {
+	current, err := os.Executable()
+	if err != nil {
+		return
+	}
+	if resolved, err := filepath.EvalSymlinks(current); err == nil {
+		current = resolved
+	}
+	cleanupOldExecutableBackup(current, logger)
+	cleanupStaleAppBundleBackup(current, logger)
+}
+
+// cleanupStaleAppBundleBackup removes <Name>.app.old left by a macOS archive
+// install, once the process that ran from the old bundle has exited. A path
+// outside a .app bundle (every other platform) is a no-op.
+func cleanupStaleAppBundleBackup(current string, logger contracts.Logger) {
+	bundleRoot, err := darwinAppBundleRoot(current)
+	if err != nil {
+		return
+	}
+	backup := bundleRoot + installBackupSuffix
+	if err := os.RemoveAll(backup); err != nil && !errors.Is(err, fs.ErrNotExist) {
+		logInstallWarning(logger, "remove stale app bundle backup %q: %v", backup, err)
+	}
+}
+
 // applyPendingUpdateOnStartup runs at process start and never blocks startup:
 // the outcome is logged and a failure simply keeps the plan for the next start.
 func applyPendingUpdateOnStartup(dataDir string, logger contracts.Logger) {
+	cleanupStaleExecutableBackups(logger)
 	applied, err := applyPendingUpdate(dataDir, defaultExecutableReplacer{}, logger)
 	if err != nil {
 		if logger != nil {

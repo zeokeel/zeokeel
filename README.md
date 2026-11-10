@@ -288,6 +288,8 @@ go test ./...
   「目标」Badge/文本/「清除目标」；E2E goal 工具→header 显示→清除后 tracker 空；截图 `p2-goal.png`
 - 🔁 后续版本变更见 [CHANGELOG.md](CHANGELOG.md)；当前能力与验证方式见
   [docs/COVERAGE.md](docs/COVERAGE.md) / [docs/VERIFICATION.md](docs/VERIFICATION.md)
+- 📦 安装包（Windows 安装器 / Linux AppImage / macOS 签名公证 dmg）与无密钥
+  自动更新流程见 [docs/RELEASE.md](docs/RELEASE.md)
 - ✅ `make ci` 全绿；uiroot 29 个 headless 测试（覆盖率 99.3%）；desktop/headless 装配集成测试；
   Xvfb 真窗口冒烟通过
 - ⬜ 逐模块迁移（后端 20 + UI 16，见 `docs/research/kernel-split/05-ui-module-map.md`）：

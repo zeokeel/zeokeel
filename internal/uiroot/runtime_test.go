@@ -268,7 +268,7 @@ func TestCommandOrderingFilteringAndRun(t *testing.T) {
 	// The command registry exposes the sorted list to palettes/composer menus.
 	commands := rt.Commands()
 	// The host registers its own window commands too (the inspector toggle).
-	wantOrder := []string{"run", "a", "a2", "always", "hidden", "b", "failing", "uiroot.toggle-inspector"}
+	wantOrder := []string{"run", "a", "a2", "always", "hidden", "b", "failing", "uiroot.toggle-inspector", "uiroot.open-update"}
 	if len(commands) != len(wantOrder) {
 		t.Fatalf("Commands() = %d commands, want %d", len(commands), len(wantOrder))
 	}
