@@ -8,6 +8,12 @@ All notable changes to ZeoKeel are documented here. The format follows
 
 （暂无未发布改动）
 
+## [0.2.13] - 2026-11-10
+
+修复全 Linux dmg 流水线的 libdmg-hfsplus 构建：Ubuntu runner 的 OpenSSL 3 头文件与
+FileVault 的 HMAC/AES 1.x API 不兼容；构建前把 `dmg/CMakeLists.txt` 的 OpenSSL 分支关掉
+（dmg 不需要 FileVault）。本地已用同一补丁构建并跑通 dmg 生成/签名/回读。产品与 v0.2.12 相同。
+
 ## [0.2.12] - 2026-11-10
 
 macOS 的 dmg + 签名/公证改为**全 Linux 工具链**，彻底移除 macOS runner。

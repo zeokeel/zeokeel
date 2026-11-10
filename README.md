@@ -4,17 +4,16 @@
 [![Release](https://img.shields.io/github/v/release/zeokeel/zeokeel)](https://github.com/zeokeel/zeokeel/releases)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
-> **v0.2.12 — seventeenth public release** (2026-11-10). Native, compile-time modular
+> **v0.2.13 — eighteenth public release** (2026-11-10). Native, compile-time modular
 > AI agent for desktop, headless and ACP (Zed/editor) use; one Go binary, no
 > webview. Final verification: **10/10 PASS** (`./scripts/verify.sh --no-smoke`),
 > full test suite 48 packages green, regression **276 PASS / 0 SKIP / 0 FAIL**,
 > UI snapshot **98 steps / 96 PNGs**, designlint 0 new.
 > See [CHANGELOG.md](CHANGELOG.md) for the release notes.
 
-> **v0.2.12 主要变化**：macOS 的 dmg + 签名/公证改为**全 Linux 工具链**——`libdmg-hfsplus`
-> 生成 dmg，`rcodesign`（apple-codesign）签名并提交 Apple 公证；与 Firefox/Mozilla 的
-> Linux 构建链相同。三个平台全部在 `ubuntu-24.04` 并行构建，不再使用任何 macOS runner。
-> dmg 不可用时保留未签名 `darwin-arm64.tar.gz` 回退。产品功能与 v0.2.11 相同。
+> **v0.2.13 主要变化**：发布流水线修复——全 Linux 的 macOS dmg 生成在 Ubuntu runner 上需要关闭
+> libdmg-hfsplus 的 FileVault/OpenSSL 1.x 分支（OpenSSL 3 头文件不兼容）；其余与 v0.2.12 相同：
+> Linux 编译 `.app`，`libdmg-hfsplus` 生成 dmg，`rcodesign` 签名/公证，无任何 macOS runner。
 
 ## 下载与运行 / Download and run
 
