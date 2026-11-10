@@ -68,7 +68,11 @@ jobs:
   build-macos:
     name: macOS arm64 (.app + signed/notarized dmg)
     needs: draft-release
-    runs-on: macos-26
+    # Build on an Intel macOS runner: the arm64 hosted runners are frequently
+    # unavailable for long stretches (jobs fail with "not acquired by Runner of
+    # type hosted" after 15 minutes). Go cross-compiles darwin/arm64 and signing/
+    # notarization work identically on the Intel image.
+    runs-on: macos-15-intel
     timeout-minutes: 360
     steps:
       - uses: actions/checkout@v7
@@ -197,7 +201,14 @@ jobs:
           sudo apt-get install -y librsvg2-bin squashfs-tools patchelf desktop-file-utils file
           bin="$RUNNER_TEMP/appimage-bin"
           mkdir -p "$bin"
-          GOBIN="$bin" go install github.com/probonopd/go-appimage/src/appimagetool@v0.0.0-20260903171257-b7864b5e53d4
+          for attempt in 1 2 3; do
+            if GOBIN="$bin" GOPROXY=https://proxy.golang.org,direct GOSUMDB=sum.golang.org \
+              go install github.com/probonopd/go-appimage/src/appimagetool@v0.0.0-20260903171257-b7864b5e53d4; then
+              break
+            fi
+            echo "appimagetool install attempt $attempt failed; retrying" >&2
+            sleep 10
+          done
           printf '#!/bin/sh\nexit 0\n' > "$bin/uploadtool"
           chmod +x "$bin/uploadtool"
           for arch in x86_64 aarch64; do
