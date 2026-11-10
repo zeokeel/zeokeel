@@ -52,7 +52,28 @@ chmod -R a+rX,a-st,u+w,go-w "$stage"
 sign_args=()
 if [[ -n "${MACOS_P12_FILE:-}" ]]; then
   command -v "$rcodesign" >/dev/null || { echo "missing $rcodesign" >&2; exit 1; }
-  sign_args=(--p12-file "$MACOS_P12_FILE" --p12-password "${MACOS_CERT_PASSWORD:-}")
+  command -v openssl >/dev/null || { echo "missing openssl" >&2; exit 1; }
+  # Keychain .p12 files can carry the intermediate CA before the leaf
+  # certificate; rcodesign pairs the signing key with the first certificate it
+  # sees, so signing straight from that p12 can produce a signature from the
+  # CA (Apple notary then says "signature invalid"). Extract the leaf
+  # (clcerts) and the key explicitly and sign from that PEM identity.
+  identity="$work/identity.pem"
+  # Apple Keychain exports often use the legacy RC2 bag encryption; OpenSSL 3
+  # needs -legacy for those, while newer p12 files work without it.
+  extract_p12() {
+    local out=$1
+    shift
+    if ! openssl pkcs12 -legacy -in "$MACOS_P12_FILE" \
+      -passin "pass:${MACOS_CERT_PASSWORD:-}" "$@" -out "$out" 2>/dev/null; then
+      openssl pkcs12 -in "$MACOS_P12_FILE" \
+        -passin "pass:${MACOS_CERT_PASSWORD:-}" "$@" -out "$out"
+    fi
+  }
+  extract_p12 "$work/key.pem" -nocerts -nodes
+  extract_p12 "$work/leaf.pem" -clcerts -nokeys
+  cat "$work/key.pem" "$work/leaf.pem" > "$identity"
+  sign_args=(--pem-file "$identity" --timestamp-url http://timestamp.apple.com/ts01)
   echo "signing the app bundle with Developer ID"
   "$rcodesign" sign "${sign_args[@]}" --code-signature-flags runtime \
     "$stage/ZeoKeel.app"

@@ -767,3 +767,11 @@ design-check 6/6（raw metric 45 ≤ 51）/mygo vet/`go test ./...`（45s）/`-r
 ## 0.2.13（2026-11-10：修复 Linux dmg 构建）
 
 v0.2.12 的 package-macos job 在 GitHub Ubuntu runner 上构建 libdmg-hfsplus 失败：runner 的 OpenSSL 3 头文件与 libdmg FileVault 的 OpenSSL 1.x HMAC/AES API 不兼容（`HMAC_CTX` 不完整类型）。本地用 `-DOPENSSL_FOUND=OFF` 曾成功，但 CI 的 CMake 仍找到 OpenSSL；改为构建前 sed 关闭 `dmg/CMakeLists.txt` 的 OpenSSL 分支（`IF(OPENSSL_FOUND)` → `IF(FALSE)`），并在本地用同一补丁重新构建 `dmg`/`hfsplus` 成功。其余与 v0.2.12 相同，待 v0.2.13 release 验证真实 dmg 资产。
+
+## 0.2.14（2026-11-10：现成 action + 预编译 dmg 工具）
+
+- **签名/公证**：改用 `indygreg/apple-code-sign-action@v1.2`（rcodesign 作者维护，支持 Linux runner），分别签名 `.app`、签名 dmg、notarize+staple；不再手写 rcodesign 调用。
+- **dmg 工具**：预编译 `JuliaBinaryWrappers/libdmg_hfsplus_jll.jl` 的 `libdmg_hfsplus.v0.5.0.x86_64-linux-gnu`（`dmg`/`hfsplus`），不再 cmake 编译；Ubuntu 依赖 `hfsprogs`（mkfs.hfsplus）与 `liblzfse-dev`。
+- **Actions 版本**：`actions/upload-artifact@v7`、`actions/download-artifact@v8`、checkout/setup-go 最新 major。
+- **真实凭据本地验证**：使用 `/root/apple_key` 的 Developer ID `.p12` 与 App Store Connect key，在 Linux 上跑通 dmg 生成 → 签名 → Apple 公证 **Accepted** → staple（`.cache/dmg-real/run.log`，未提交私钥）；公证日志显示 app 与 dmg 的 cdhash。签名前用 `openssl pkcs12 -clcerts` 提取叶子证书，避免 Keychain p12 中 CA 在前的错误签名；app 显式 `--code-signature-flags runtime`。
+- 全 Linux release jobs；`package-macos` 仍是 optional，secrets/工具异常时回退 tar.gz。
