@@ -6,6 +6,10 @@ All notable changes to ZeoKeel are documented here. The format follows
 
 ## [Unreleased]
 
+（暂无未发布改动）
+
+## [0.2.3] - 2026-11-10
+
 这个版本把安装包和升级链路接上：
 
 - **Windows 安装包。** `mygo build` 产出无命令行窗口的 GUI 程序和 NSIS 安装器，安装到
