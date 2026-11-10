@@ -8,6 +8,12 @@ All notable changes to ZeoKeel are documented here. The format follows
 
 （暂无未发布改动）
 
+## [0.2.16] - 2026-11-10
+
+修复 notarize step 的条件判断：GitHub 表达式里未定义的 env 会按 null/0 与字符串 `'0'` 松散相等，
+原条件 `env.NOTARIZE_AVAILABLE != '0'` 在变量未设置时反而为 false，导致公证被跳过（v0.2.15 的 dmg
+已签名但未公证）。改为显式设置 `NOTARIZE_AVAILABLE=1` 并判断 `== '1'`。
+
 ## [0.2.15] - 2026-11-10
 
 修复 apple-code-sign-action 的 `sign_args` 格式：该 action 按“每行一个参数”追加，而不是 shell 命令行；

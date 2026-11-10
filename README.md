@@ -4,15 +4,15 @@
 [![Release](https://img.shields.io/github/v/release/zeokeel/zeokeel)](https://github.com/zeokeel/zeokeel/releases)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
-> **v0.2.15 — twentieth public release** (2026-11-10). Native, compile-time modular
+> **v0.2.16 — twenty-first public release** (2026-11-10). Native, compile-time modular
 > AI agent for desktop, headless and ACP (Zed/editor) use; one Go binary, no
 > webview. Final verification: **10/10 PASS** (`./scripts/verify.sh --no-smoke`),
 > full test suite 48 packages green, regression **276 PASS / 0 SKIP / 0 FAIL**,
 > UI snapshot **98 steps / 96 PNGs**, designlint 0 new.
 > See [CHANGELOG.md](CHANGELOG.md) for the release notes.
 
-> **v0.2.15 主要变化**：修复 `apple-code-sign-action` 的 `sign_args` 传参格式（每行一个参数），
-> 使全 Linux 的 dmg 签名/公证流程可以真正产出资产。其余同 v0.2.14。
+> **v0.2.16 主要变化**：修复全 Linux dmg 的公证步骤条件（未定义 env 的宽松比较导致跳过 notarize）；
+> v0.2.15 的 dmg 已签名，本版补上公证+staple。其余同 v0.2.15。
 
 ## 下载与运行 / Download and run
 
