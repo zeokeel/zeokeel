@@ -8,6 +8,17 @@ All notable changes to ZeoKeel are documented here. The format follows
 
 （暂无未发布改动）
 
+## [0.2.10] - 2026-11-10
+
+发布流水线补丁（产品与 v0.2.9 相同）：
+
+- **macOS dmg 改用 Intel 托管 runner 构建**：arm64 runner 近期持续容量不足，任务在 15 分钟后报
+  “not acquired by Runner of type hosted”；Go 交叉编译 darwin/arm64，签名/公证在 Intel 镜像上等价，
+  因此切到 `macos-15-intel` 以便稳定产出 dmg。
+- **Linux AppImage 工具链安装加重试**：`go install appimagetool` 偶发代理查询失败，一次重试即可；
+  现在最多重试 3 次并显式走 proxy.golang.org。
+- v0.2.9 的 Windows/Linux 资产已发布；本版目标是把 macOS dmg 补齐。
+
 ## [0.2.9] - 2026-11-10
 
 继续修审计 P2，并修复 Windows 工具调用时弹出的 cmd 窗口。

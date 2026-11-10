@@ -4,17 +4,16 @@
 [![Release](https://img.shields.io/github/v/release/zeokeel/zeokeel)](https://github.com/zeokeel/zeokeel/releases)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
-> **v0.2.9 — fourteenth public release** (2026-11-10). Native, compile-time modular
+> **v0.2.10 — fifteenth public release** (2026-11-10). Native, compile-time modular
 > AI agent for desktop, headless and ACP (Zed/editor) use; one Go binary, no
 > webview. Final verification: **10/10 PASS** (`./scripts/verify.sh --no-smoke`),
 > full test suite 48 packages green, regression **276 PASS / 0 SKIP / 0 FAIL**,
 > UI snapshot **98 steps / 96 PNGs**, designlint 0 new.
 > See [CHANGELOG.md](CHANGELOG.md) for the release notes.
 
-> **v0.2.9 主要变化**（详见 CHANGELOG）：审计 P2 修复——Windows 桌面版为工具子进程分配隐藏控制台，
-> 不再在每次 pwsh/bash/后台任务/终端调用时弹 cmd 窗口；后台任务列表解析支持自由文本 status/command；
-> macOS 快捷键标签改为 Cmd+Alt+P / Cmd+`；清理旧右栏团队/任务面板文档。v0.2.8 的更新器改用 Windows
-> setup / macOS dmg 并支持「安装并重启」，但 0.2.8 的 macOS dmg 受 GitHub runner 容量影响未随包发布。
+> **v0.2.10 主要变化**：发布流水线补丁——macOS dmg 改在 `macos-15-intel` 托管 runner 交叉构建
+> （arm64 runner 持续容量不足导致 15 分钟排队失败），Linux AppImage 工具链安装加 3 次重试。
+> 产品功能与 v0.2.9 相同（Windows 隐藏控制台修复 cmd 弹窗、job 列表解析、快捷键标签等）。
 
 ## 下载与运行 / Download and run
 
