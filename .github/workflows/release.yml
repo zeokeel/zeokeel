@@ -144,6 +144,10 @@ jobs:
           curl -fsSL -o "$tools/libdmg.tar.gz" \
             https://codeload.github.com/planetbeing/libdmg-hfsplus/tar.gz/7ac55ec64c96f7800d9818ce64c79670e7f02b67
           tar -xzf "$tools/libdmg.tar.gz" -C "$tools/src" --strip-components=1
+          # FileVault's crypto code targets the OpenSSL 1.x HMAC/AES API and
+          # does not compile with the OpenSSL 3 headers of the runner; a plain
+          # dmg never needs FileVault, so disable that target's crypto.
+          sed -i 's/IF(OPENSSL_FOUND)/IF(FALSE)/' "$tools/src/dmg/CMakeLists.txt"
           cmake -S "$tools/src" -B "$tools/build" \
             -DCMAKE_BUILD_TYPE=Release -DOPENSSL_FOUND=OFF
           cmake --build "$tools/build" -j "$(nproc)"

@@ -763,3 +763,7 @@ design-check 6/6（raw metric 45 ≤ 51）/mygo vet/`go test ./...`（45s）/`-r
 - **降级**：`package-macos` optional；secrets/工具链失败时 dmg 缺失，Windows/Linux 和未签名 tar.gz 仍发布；updater 优先 dmg，回退 archive。
 - **验证**：`scripts/verify.sh --no-smoke` **10/10 PASS**（gofmt/build/vet/designlint 0 new/design-check 6/6/mygo vet/`go test ./...` 48 包/-race/regression 276 PASS/ui-snapshot 98 steps / 96 PNGs）。
 - **限制**：Linux 生成的 dmg 仍需在真 Mac 上手工验证一次（挂载、安装、Gatekeeper、公证/签名）；dmg 内 `.app` 未 staple ticket 时依赖 dmg 公证；`rcodesign` 属第三方工具，需要信任其处理 `.p12`/API key。
+
+## 0.2.13（2026-11-10：修复 Linux dmg 构建）
+
+v0.2.12 的 package-macos job 在 GitHub Ubuntu runner 上构建 libdmg-hfsplus 失败：runner 的 OpenSSL 3 头文件与 libdmg FileVault 的 OpenSSL 1.x HMAC/AES API 不兼容（`HMAC_CTX` 不完整类型）。本地用 `-DOPENSSL_FOUND=OFF` 曾成功，但 CI 的 CMake 仍找到 OpenSSL；改为构建前 sed 关闭 `dmg/CMakeLists.txt` 的 OpenSSL 分支（`IF(OPENSSL_FOUND)` → `IF(FALSE)`），并在本地用同一补丁重新构建 `dmg`/`hfsplus` 成功。其余与 v0.2.12 相同，待 v0.2.13 release 验证真实 dmg 资产。
