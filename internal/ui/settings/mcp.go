@@ -75,6 +75,10 @@ type mcpState struct {
 	testing    bool
 	testStatus string
 	testErr    bool
+
+	// transient detects a new visit to the page, clearing the previous visit's
+	// result copy (the form draft itself is guarded by Dirty).
+	transient transientStatus
 }
 
 func newMCPState() *mcpState {
@@ -256,64 +260,16 @@ func buildMCPPage(c *ui.Context, kctx cordis.Context, st *mcpState, locale contr
 			})
 		})
 
-		// Server form: one native form serves add and edit. Its submit action sits
-		// in the section header (SectionAction), so it stays visible when the
-		// STDIO fields grow past the fold — the old in-body footer scrolled out
-		// of view exactly when the form was tallest.
+		// Server form: one native form serves add and edit. The fields come
+		// first, then the form's status line, then one action row at the end
+		// (Test connection beside Cancel/Add): the actions follow the input they
+		// operate on instead of preceding it.
 		sectionTitle := localized(locale, "添加服务器", "Add server")
 		if st.editIndex >= 0 {
 			sectionTitle = localized(locale, "编辑服务器", "Edit server")
 		}
 		runtime, hasRuntime := kctx.Get(contracts.KeyUIRuntime)
-		uikit.SectionAction(c, sectionTitle, func(c *ui.Context) {
-			ui.Row(c).AlignItems(ui.Center).Gap(design.Space2).Children(func() {
-				if st.editIndex >= 0 {
-					if design.Apply(ui.Button(c, localized(locale, "取消编辑", "Cancel edit")),
-						t.SecondaryButton()).Clicked() {
-						st.resetMCPForm()
-						c.Invalidate()
-					}
-				}
-				submitLabel := localized(locale, "添加", "Add")
-				if st.editIndex >= 0 {
-					submitLabel = localized(locale, "保存", "Save")
-				}
-				if design.Apply(ui.PrimaryButton(c, submitLabel), t.PrimaryButton()).Clicked() {
-					submitMCPServer(st, store, locale)
-					c.Invalidate()
-				}
-			})
-		}, func(c *ui.Context) {
-			// The connection test checks the current draft without saving it and
-			// runs off the UI thread (a hung endpoint must not freeze the frame).
-			ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(design.Space2).Children(func() {
-				if st.testing {
-					ui.Spinner(c).Label(localized(locale, "正在测试…", "Testing…")).
-						Size(design.Space3, design.Space3).TextColor(t.LabelSecondary)
-				}
-				testLabel := localized(locale, "测试连接", "Test connection")
-				if st.testing {
-					testLabel = localized(locale, "正在测试…", "Testing…")
-				}
-				test := design.Apply(ui.Button(c, testLabel), t.SecondaryButton()).
-					Disabled(st.testing).
-					Tooltip(localized(locale,
-						"用当前填写的内容测试连接，不会保存",
-						"Test the connection with the current draft; nothing is saved"))
-				if test.Clicked() && !st.testing && hasRuntime && runtime != nil {
-					st.startMCPTest(runtime, locale)
-					c.Invalidate()
-				}
-				if st.testStatus != "" {
-					if st.testErr {
-						uikit.ErrorLine(c, st.testStatus)
-					} else {
-						design.Apply(ui.Text(c, st.testStatus), t.Font(design.TypeXS)).
-							TextColor(t.SuccessText).Grow(1).MaxLines(2)
-					}
-				}
-			})
-			statusBadgesRow(c, t, st.status, st.statusErr)
+		uikit.Section(c, sectionTitle, func(*ui.Context) {
 			stdio := st.transport == mcpTransportStdio
 			ui.Row(c).FillWidth().Gap(design.Space3).AlignItems(ui.Start).Children(func() {
 				ui.Column(c).Width(150).Grow(0).Shrink(0).Children(func() {
@@ -387,6 +343,54 @@ func buildMCPPage(c *ui.Context, kctx cordis.Context, st *mcpState, locale contr
 				}).Description(localized(locale, "Streamable HTTP 端点。",
 					"The Streamable HTTP endpoint."))
 			}
+			// The form's own result line sits between the fields and the actions.
+			statusBadgesRow(c, t, st.status, st.statusErr)
+			if st.testStatus != "" {
+				if st.testErr {
+					uikit.ErrorLine(c, st.testStatus)
+				} else {
+					design.Apply(ui.Text(c, st.testStatus), t.Font(design.TypeXS)).
+						TextColor(t.SuccessText).MaxLines(2)
+				}
+			}
+			// One action row at the form's end: the secondary connection test
+			// (it checks the draft without saving) on the left, Cancel/Add on the
+			// right.
+			ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(design.Space2).Children(func() {
+				if st.testing {
+					ui.Spinner(c).Label(localized(locale, "正在测试…", "Testing…")).
+						Size(design.Space3, design.Space3).TextColor(t.LabelSecondary)
+				}
+				testLabel := localized(locale, "测试连接", "Test connection")
+				if st.testing {
+					testLabel = localized(locale, "正在测试…", "Testing…")
+				}
+				test := design.Apply(ui.Button(c, testLabel), t.SecondaryButton()).
+					Disabled(st.testing).
+					Tooltip(localized(locale,
+						"用当前填写的内容测试连接，不会保存",
+						"Test the connection with the current draft; nothing is saved"))
+				if test.Clicked() && !st.testing && hasRuntime && runtime != nil {
+					st.startMCPTest(runtime, locale)
+					c.Invalidate()
+				}
+				ui.Spacer(c).Grow(1)
+				if st.editIndex >= 0 {
+					if design.Apply(ui.Button(c, localized(locale, "取消编辑", "Cancel edit")),
+						t.SecondaryButton()).Clicked() {
+						st.resetMCPForm()
+						c.Invalidate()
+					}
+				}
+				submitLabel := localized(locale, "添加", "Add")
+				if st.editIndex >= 0 {
+					submitLabel = localized(locale, "保存", "Save")
+				}
+				if design.Apply(ui.PrimaryButton(c, submitLabel), t.PrimaryButton()).Clicked() {
+					submitMCPServer(st, store, locale)
+					c.Invalidate()
+				}
+			})
 		})
 
 		// Removing a server is destructive: confirm it with the native dialog.
@@ -626,6 +630,38 @@ func (st *mcpState) fillMCPForm(index int) {
 	st.args = strings.Join(server.Args, " ")
 	st.env = strings.Join(server.Env, "\n")
 	st.envErr = ""
+	st.testStatus = ""
+	st.testErr = false
+}
+
+// mcpDraftDirty reports whether the add/edit form holds an unsaved draft. An
+// edit form that still matches the stored row is not a draft, so only entering
+// edit mode and closing the settings surface does not trigger the guard.
+func mcpDraftDirty(st *mcpState) bool {
+	if st.editIndex >= 0 {
+		if st.editIndex >= len(st.servers) {
+			return false
+		}
+		server := st.servers[st.editIndex]
+		return st.transport != mcpRowTransport(server) ||
+			strings.TrimSpace(st.name) != strings.TrimSpace(server.Name) ||
+			strings.TrimSpace(st.url) != strings.TrimSpace(server.URL) ||
+			strings.TrimSpace(st.command) != strings.TrimSpace(server.Command) ||
+			strings.TrimSpace(st.args) != strings.Join(server.Args, " ") ||
+			strings.TrimSpace(st.env) != strings.Join(server.Env, "\n")
+	}
+	return st.transport != mcpTransportHTTP ||
+		strings.TrimSpace(st.name) != "" || strings.TrimSpace(st.url) != "" ||
+		strings.TrimSpace(st.command) != "" || strings.TrimSpace(st.args) != "" ||
+		strings.TrimSpace(st.env) != ""
+}
+
+// discardMCPDraft throws the form draft and its transient status away, so the
+// host's Discard action reopens a clean MCP page.
+func discardMCPDraft(st *mcpState) {
+	st.resetMCPForm()
+	st.status = ""
+	st.statusErr = false
 	st.testStatus = ""
 	st.testErr = false
 }

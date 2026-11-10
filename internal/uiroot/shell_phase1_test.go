@@ -299,10 +299,14 @@ func TestDockedInspectorCloseAtMinWindowRail(t *testing.T) {
 // TestRailAnnouncesCurrentScreen covers D-22: the collapsed rail's destination
 // buttons carry the current-screen state to assistive technology (a plain
 // button role dropped it, so the rail looked unselected to a screen reader).
+// Fix round SH-05 also pinned the rail's destination set: it mirrors the
+// expanded sidebar's screens (Home, Automation, Plugins, ...) and keeps the
+// new-chat action, while conversations stay the workspace tree's destination.
 func TestRailAnnouncesCurrentScreen(t *testing.T) {
 	r := newTestRoot(t)
 	mustScreen(t, r, textScreen("home", "首页", "body-home", 10))
-	mustScreen(t, r, textScreen(sessionScreenID, "会话", "body-session", 20))
+	mustScreen(t, r, textScreen("session", "对话", "body-session", 20))
+	mustScreen(t, r, textScreen("plugins", "插件", "body-plugins", 30))
 	tt := newTestTester(t, r, 1280, 800)
 	tt.Frame()
 	r.SetSidebarCollapsed(true)
@@ -316,22 +320,28 @@ func TestRailAnnouncesCurrentScreen(t *testing.T) {
 	if !home.Checked {
 		t.Fatalf("rail Home does not report the current screen: %+v", home)
 	}
-	if session, ok := tt.AccessByRole(ui.RoleToggleButton, "对话"); !ok || session.Checked {
-		t.Fatalf("rail Chat destination = %+v (present=%v), want present and not checked", session, ok)
+	// The conversation screen is not a rail destination: only the workspace
+	// tree lists conversations.
+	if session, ok := tt.AccessByRole(ui.RoleToggleButton, "对话"); ok {
+		t.Fatalf("rail lists the conversation screen as a destination: %+v", session)
+	}
+	// The primary action survives the collapse as an icon action.
+	if _, ok := tt.AccessByRole(ui.RoleButton, "新对话"); !ok {
+		t.Fatalf("rail has no new-chat action; texts: %v", tt.Texts())
 	}
 
 	// Navigating from the rail moves the state with the screen.
-	if err := tt.Click("对话"); err != nil {
-		t.Fatalf("click rail Chat: %v; texts: %v", err, tt.Texts())
+	if err := tt.Click("插件"); err != nil {
+		t.Fatalf("click rail Plugins: %v; texts: %v", err, tt.Texts())
 	}
 	tt.Frame()
 	tt.Frame()
-	if got := r.Navigator().Current(); got != sessionScreenID {
-		t.Fatalf("screen after the rail click = %q, want session", got)
+	if got := r.Navigator().Current(); got != "plugins" {
+		t.Fatalf("screen after the rail click = %q, want plugins", got)
 	}
-	session, ok := tt.AccessByRole(ui.RoleToggleButton, "对话")
-	if !ok || !session.Checked {
-		t.Fatalf("rail Chat after navigation = %+v (present=%v), want checked", session, ok)
+	plugins, ok := tt.AccessByRole(ui.RoleToggleButton, "插件")
+	if !ok || !plugins.Checked {
+		t.Fatalf("rail Plugins after navigation = %+v (present=%v), want checked", plugins, ok)
 	}
 	if home, ok := tt.AccessByRole(ui.RoleToggleButton, "首页"); !ok || home.Checked {
 		t.Fatalf("rail Home after navigation = %+v (present=%v), want unchecked", home, ok)

@@ -169,20 +169,50 @@ func buildPaneClose(c *ui.Context, t *design.Tokens, runtime contracts.UIRuntime
 // pane header's right edge. Panes without a page action keep it empty.
 func buildPaneAction(c *ui.Context, runtime contracts.UIRuntime, terminal contracts.TerminalService,
 	board contracts.TaskBoard, st *state) {
+	refreshLabel := st.tr("刷新", "Refresh")
 	switch st.tab {
 	case tabFiles:
-		if ui.Button(c, st.tr("刷新", "Refresh")).
-			Tooltip(st.tr("重新读取文件列表", "Reload the file list")).Clicked() {
+		// The listing read runs off the UI thread: a cached listing stays on
+		// screen while the refresh is in flight, so the header must show the
+		// spinner and disable the action (the Tasks pane's contract), or the
+		// refresh looks like a no-op on a large directory.
+		if st.filesLoading {
+			ui.Spinner(c)
+		}
+		refresh := ui.Button(c, refreshLabel).
+			Tooltip(st.tr("重新读取文件列表", "Reload the file list")).
+			Disabled(st.filesLoading)
+		if refresh.Clicked() && !st.filesLoading {
 			st.filesPreview = make(map[string]*filePreview)
 			st.filesErr = ""
 			st.filesLoaded = false // re-read the listing once, not every frame
 			runtime.Invalidate()
 		}
 	case tabChanges:
-		if ui.Button(c, st.tr("刷新", "Refresh")).
+		if ui.Button(c, refreshLabel).
 			Tooltip(st.tr("重新读取工作区变更", "Reload the workspace changes")).Clicked() {
 			st.changesLoaded = false
 			st.changesErr = nil
+			// The diff viewers and the fold state cache the previous content:
+			// without dropping them the refreshed rows keep showing the old
+			// diff (the store returns new content, the viewer cache does not).
+			st.changesOpen = make(map[string]bool)
+			st.diffs = make(map[string]*diffView)
+			runtime.Invalidate()
+		}
+	case tabLog:
+		// Every pane's explicit refresh is the same header action; the Log pane
+		// used to hide an icon-only reload inside its filter row (consistency
+		// audit PN-09). Refresh re-reads the store window now (no gate) and
+		// keeps the cached rows while the background read runs.
+		if st.logLoading {
+			ui.Spinner(c)
+		}
+		if ui.Button(c, refreshLabel).
+			Tooltip(st.tr("重新读取会话事件", "Reload the session events")).
+			Disabled(st.logLoading).Clicked() && !st.logLoading {
+			st.logDirty = true
+			st.logLoadedAt = time.Time{}
 			runtime.Invalidate()
 		}
 	case tabTasks:
@@ -447,34 +477,31 @@ func buildLogPane(c *ui.Context, t *design.Tokens, log eventReader, chat contrac
 		buildEmptyPane(c, uikit.T(locale, "日志需要持久化会话存储", "The log requires a persistent session store"))
 		return
 	}
-	// The events are cached: only a session change or a chat notification drops
-	// the cache, so rendering never queries the store every frame (P1).
-	st.loadLogOnce(log, active)
+	// The events are cached and read off the UI thread after a throttle gate:
+	// rendering never blocks the frame on the store, and a streaming reply (one
+	// chat notification per text delta) coalesces into at most one read per
+	// window instead of one synchronous SQLite query per delta.
+	st.syncLogCache(c, log, active, c.Now())
 	if st.logErr != nil {
 		uikit.ErrorLine(c, uikit.T(locale, "读取会话日志失败：", "Failed to read the session log: ")+st.logErr.Error())
 		return
 	}
 	query := strings.TrimSpace(st.logFilter)
 	events := filterLogEvents(st.logEvents, query)
+	if st.logLoading && !st.logLoaded {
+		buildEmptyPane(c, uikit.T(locale, "正在读取会话事件…", "Reading session events…"))
+		return
+	}
 	ui.Column(c).FillWidth().Gap(design.Space2).Children(func() {
-		// Filter and refresh together, above the rows: filtering is a view of
-		// the loaded window, refresh re-reads the window from the store.
+		// Filtering is a view of the loaded window; the explicit refresh lives
+		// in the pane header like every other pane's (PN-09).
 		ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(design.Space2).Children(func() {
 			filterLabel := uikit.T(locale, "筛选日志", "Filter log")
 			ui.SearchField(c, &st.logFilter).Label(filterLabel).
 				Placeholder(uikit.T(locale, "按类型或内容筛选…", "Filter by type or content…")).Grow(1)
-			refreshLabel := uikit.T(locale, "刷新", "Refresh")
-			uikit.IconButton(c, uikit.IconButtonOptions{
-				Key:     "rightpanel.log.refresh",
-				Label:   refreshLabel,
-				Tooltip: refreshLabel,
-				Icon:    icons.Reload(),
-				Size:    design.IconSizeS,
-				OnClick: func() {
-					st.logLoaded = false
-					st.runtime.Invalidate()
-				},
-			})
+			if st.logLoading {
+				ui.Spinner(c).Label(uikit.T(locale, "正在刷新会话事件…", "Refreshing session events…"))
+			}
 		})
 		design.Apply(ui.Text(c, logCountLabel(locale, len(st.logEvents), len(events), query != "")),
 			t.Font(design.TypeXXS)).TextColor(t.LabelTertiary)
@@ -590,17 +617,83 @@ func buildLogRow(row ui.ListRow, t *design.Tokens, locale contracts.LocaleServic
 	})
 }
 
-// loadLogOnce fills the Log pane's event cache for one session: the durable
-// store is read only when the session changed or the cache was dropped (the
-// chat subscription drops it when new events may exist), never from plain
-// rendering (P1).
-func (st *state) loadLogOnce(log eventReader, sessionID string) {
-	if st.logLoaded && st.logSession == sessionID {
+// logReloadInterval is the Log pane's reload gate: a chat notification marks
+// the cache dirty, and the next frame starts at most one background store read
+// per window. Streaming notifies once per text delta, so an ungated reload did
+// one synchronous SQLite read per token from rendering code (P1/AP-16).
+const logReloadInterval = 250 * time.Millisecond
+
+// syncLogCache keeps the Log pane's event cache fresh without blocking a frame:
+// a session change drops the cache at once, a chat notification marks it dirty,
+// and a dirty cache is re-read once the throttle gate opens (c.After schedules
+// the frame that opens it even when the stream stops first). Production frames
+// read the store in the background; a bare state (internal tests) reads
+// synchronously but still through the gate, so the coalescing is testable.
+// A posted result for a session the user already left is dropped.
+func (st *state) syncLogCache(c *ui.Context, log eventReader, sessionID string, now time.Time) {
+	if st.logSession != sessionID {
+		// The pane describes one session: never show the previous session's
+		// events while the new one loads.
+		st.logSession = sessionID
+		st.logEvents = nil
+		st.logErr = nil
+		st.logLoaded = false
+		st.logDirty = false
+		st.logLoading = false
+		st.logLoadedAt = time.Time{}
+	}
+	if st.logLoading || (st.logLoaded && !st.logDirty) {
 		return
 	}
-	st.logEvents, st.logErr = log.Last(context.Background(), sessionID, logLimit)
-	st.logLoaded = true
-	st.logSession = sessionID
+	due, wait := st.logReloadGate(now)
+	if !due {
+		// The gate is closed: ask for the frame that reopens it. The
+		// notification stream may have stopped, so nothing else would.
+		if c != nil {
+			c.After(wait)
+		}
+		return
+	}
+	st.logDirty = false
+	st.logLoadedAt = now
+	if st.runtime == nil {
+		// A bare state (internal tests) keeps the read on this thread but only
+		// once per gate window.
+		st.logEvents, st.logErr = log.Last(context.Background(), sessionID, logLimit)
+		st.logLoaded = true
+		return
+	}
+	st.logLoading = true
+	runtime := st.runtime
+	go func() {
+		events, err := log.Last(context.Background(), sessionID, logLimit)
+		runtime.Post(func() {
+			st.logLoading = false
+			if st.logSession != sessionID {
+				runtime.Invalidate()
+				return
+			}
+			st.logEvents, st.logErr = events, err
+			st.logLoaded = true
+			runtime.Invalidate()
+		})
+	}()
+	runtime.Invalidate()
+}
+
+// logReloadGate reports whether a dirty log cache may read the store now, and
+// how long the pane must wait when it may not: at most one read per
+// logReloadInterval, so a streaming reply's notification-per-delta cannot turn
+// into a store read (and SQLite query) per frame.
+func (st *state) logReloadGate(now time.Time) (bool, time.Duration) {
+	if st.logLoadedAt.IsZero() {
+		return true, 0
+	}
+	elapsed := now.Sub(st.logLoadedAt)
+	if elapsed >= logReloadInterval {
+		return true, 0
+	}
+	return false, logReloadInterval - elapsed
 }
 
 // truncateRunes cuts s to limit runes, appending an ellipsis when it was cut.

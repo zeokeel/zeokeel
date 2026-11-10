@@ -216,8 +216,8 @@ func buildShortcutsPage(c *ui.Context, t *design.Tokens, title string, store con
 			case 1:
 				_ = store.Set(contracts.SettingsUIShortcutToggleSidebar, contracts.DefaultShortcutToggleSidebar)
 				_ = store.Set(contracts.SettingsUIShortcutCommandPalette, contracts.DefaultShortcutCommandPalette)
-				c.Invalidate()
-			default:
+				// Only the executed action needs a frame: the dialog's own open
+				// flag already rebuilt the frame when it was dismissed.
 				c.Invalidate()
 			}
 		}
@@ -265,6 +265,10 @@ type appearanceState struct {
 	// savedHotkey is the persisted accelerator the draft was seeded from, so the
 	// page can show an "unapplied" hint and its action a dirty state.
 	savedHotkey string
+
+	// transient detects the page being shown again after another page (or the
+	// closed surface), so status copy and store-backed values can refresh.
+	transient transientStatus
 }
 
 // singleInstanceSwitchEnabled reads the stored single-instance setting with the
@@ -379,6 +383,11 @@ type moduleState struct {
 	contextBudgetNum  float64
 	iterationsDefault bool
 	budgetDefault     bool
+	// The module-config limits are display-only defaults: they seed the numeric
+	// inputs' starting point and the "use default" copy, but never become drafts
+	// or settings rows unless the user turns the default switch off.
+	moduleMaxIterations int
+	moduleContextBudget int
 }
 
 // buildLabels is the resolved copy of one page build.
@@ -516,6 +525,7 @@ type diagnosticsState struct {
 	modulesOpen bool
 	list        ui.ListState
 	moduleSel   int
+	transient   transientStatus
 }
 
 // buildDiagnosticsPage renders the read-only runtime/storage summary (the old
@@ -675,6 +685,11 @@ func Module() *module.Descriptor[Config] {
 				zhTitle: "诊断", enTitle: "Diagnostics",
 				Build: func(c *ui.Context) {
 					syncer.sync()
+					if diagnostics.transient.reentered(runtime) {
+						// The "已复制" badge confirms one action; coming back to the
+						// page starts a new visit and must not claim a fresh copy.
+						diagnostics.copied = false
+					}
 					rows := diagnosticsRows(info, dataDir, toolkit, chat, store, locale)
 					modules := loadedModulesFromContext(ctx)
 					buildDiagnosticsPage(c, design.Of(c), diagnostics, rows, modules, locale)
@@ -693,6 +708,11 @@ func Module() *module.Descriptor[Config] {
 				zhTitle: "外观", enTitle: "Appearance", titleOverride: cfg.AppearanceTitle,
 				Build: func(c *ui.Context) {
 					syncer.sync()
+					if appearance.transient.reentered(runtime) {
+						// Re-read the store-backed values and clear the transient status
+						// line, so a value applied elsewhere is visible on the next visit.
+						appearance.reenter(store, locale)
+					}
 					buildAppearancePage(c, appearance, store, theme, locale, appearanceLabels())
 				},
 				Footer: func(c *ui.Context) {
@@ -721,6 +741,9 @@ func Module() *module.Descriptor[Config] {
 				zhTitle: "更新", enTitle: "Update",
 				Build: func(c *ui.Context) {
 					syncer.sync()
+					if update.transient.reentered(runtime) {
+						update.copied = false
+					}
 					buildUpdatePage(c, design.Of(c), ctx, runtime, update, locale)
 				},
 			},
@@ -760,7 +783,19 @@ func Module() *module.Descriptor[Config] {
 				zhTitle: "MCP", enTitle: "MCP",
 				Build: func(c *ui.Context) {
 					syncer.sync()
+					if mcp.transient.reentered(runtime) {
+						// The form's result copy belongs to one visit; the draft itself
+						// is guarded by Dirty and survives.
+						mcp.status = ""
+						mcp.statusErr = false
+						mcp.testStatus = ""
+						mcp.testErr = false
+					}
 					buildMCPPage(c, ctx, mcp, locale)
+				},
+				Dirty: func() bool { return mcpDraftDirty(mcp) },
+				Discard: func() {
+					discardMCPDraft(mcp)
 				},
 			},
 			{
@@ -786,6 +821,10 @@ func Module() *module.Descriptor[Config] {
 					syncer.sync()
 					buildBehaviorPage(c, runtime, store, locale, behavior)
 				},
+				Dirty: func() bool { return behaviorDraftDirty(behavior, store) },
+				Discard: func() {
+					discardBehaviorDraft(behavior, store)
+				},
 			},
 			{
 				ID: MemoryPageID, Section: MemoryPageSection, Order: MemoryPageOrder,
@@ -793,6 +832,10 @@ func Module() *module.Descriptor[Config] {
 				Build: func(c *ui.Context) {
 					syncer.sync()
 					buildMemoryPage(c, design.Of(c), ctx, memoryPage, store, locale)
+				},
+				Dirty: func() bool { return memoryDraftDirty(memoryPage) },
+				Discard: func() {
+					discardMemoryDraft(memoryPage)
 				},
 			},
 			{
@@ -802,6 +845,10 @@ func Module() *module.Descriptor[Config] {
 					syncer.sync()
 					buildLSPPage(c, store, lsp, locale)
 				},
+				Dirty: func() bool { return lspDraftDirty(lsp) },
+				Discard: func() {
+					discardLSPDraft(lsp)
+				},
 			},
 			{
 				ID: PresetsPageID, Section: PresetsPageSection, Order: PresetsPageOrder,
@@ -809,6 +856,10 @@ func Module() *module.Descriptor[Config] {
 				Build: func(c *ui.Context) {
 					syncer.sync()
 					buildPresetsPage(c, store, presets, locale)
+				},
+				Dirty: func() bool { return presetsDraftDirty(presets) },
+				Discard: func() {
+					discardPresetsDraft(presets)
 				},
 			},
 			{
@@ -930,11 +981,19 @@ func diagnosticsRows(info contracts.AppInfo, dataDir string, toolkit *rigtools.R
 func runtimeSummary(state *moduleState, store contracts.SettingsService, locale contracts.LocaleService) string {
 	iterations := strings.TrimSpace(state.maxIterations)
 	if iterations == "" {
-		iterations = localized(locale, "不限制", "unlimited")
+		if state.moduleMaxIterations > 0 {
+			iterations = fmt.Sprintf(localized(locale, "模块默认 %d", "module default %d"), state.moduleMaxIterations)
+		} else {
+			iterations = localized(locale, "不限制", "unlimited")
+		}
 	}
 	budget := strings.TrimSpace(state.contextBudget)
 	if budget == "" {
-		budget = localized(locale, "默认", "default")
+		if state.moduleContextBudget != 0 {
+			budget = fmt.Sprintf(localized(locale, "模块默认 %d", "module default %d"), state.moduleContextBudget)
+		} else {
+			budget = localized(locale, "默认", "default")
+		}
 	}
 	stream := localized(locale, "开", "on")
 	if !requireFinishReasonEnabled(store) {
@@ -1028,41 +1087,51 @@ func (st *moduleState) seed(cfg contracts.ChatConfig) {
 	st.apiKeySet = strings.TrimSpace(cfg.APIKey) != ""
 }
 
-// runtimeDrafts resolves the numeric runtime-limit drafts. An explicit settings
-// row (including "0") wins over the effective chat config; a non-positive
-// module value renders as an empty draft so the field shows the placeholder and
-// saving it clears the row (fallback to the module config).
-func runtimeDrafts(chat contracts.ChatService, store contracts.SettingsService) (iterations, contextBudget string) {
+// runtimeRows reads the explicit runtime-limit settings rows: an empty value
+// means the row is absent, so the module config applies.
+func runtimeRows(store contracts.SettingsService) (iterations, contextBudget string) {
+	if store == nil {
+		return "", ""
+	}
+	return strings.TrimSpace(store.Get(contracts.SettingsChatMaxIterations, "")),
+		strings.TrimSpace(store.Get(contracts.SettingsChatContextBudget, ""))
+}
+
+// defaultRuntimeNumber resolves one numeric input's starting number: the
+// explicit settings row when present, else the module default (0 when neither
+// exists). It is only a starting point; the draft stays empty while the default
+// switch is on.
+func defaultRuntimeNumber(row string, moduleDefault int) float64 {
+	if value, err := strconv.Atoi(strings.TrimSpace(row)); err == nil {
+		return float64(value)
+	}
+	if moduleDefault > 0 {
+		return float64(moduleDefault)
+	}
+	return 0
+}
+
+// seedRuntime replaces the runtime-limit drafts and their persisted snapshot.
+// Only the explicit settings rows seed the drafts: the module-config limits are
+// the "use default" side, so they seed the numeric mirrors (the value the input
+// starts from when the switch is turned off) and the explanatory copy, but never
+// the drafts. Seeding the drafts from the module config made the default switch
+// read as off and a plain Save pin the module value into a user settings row
+// (ST-07).
+func (st *moduleState) seedRuntime(chat contracts.ChatService, store contracts.SettingsService) {
 	var cfg contracts.ChatConfig
 	if chat != nil {
 		cfg = chat.Config()
 	}
-	if store != nil {
-		iterations = strings.TrimSpace(store.Get(contracts.SettingsChatMaxIterations, ""))
-		contextBudget = strings.TrimSpace(store.Get(contracts.SettingsChatContextBudget, ""))
-	}
-	if iterations == "" && cfg.MaxIterations > 0 {
-		iterations = strconv.Itoa(cfg.MaxIterations)
-	}
-	if contextBudget == "" && cfg.ContextBudget != 0 {
-		contextBudget = strconv.Itoa(cfg.ContextBudget)
-	}
-	return iterations, contextBudget
-}
-
-// seedRuntime replaces the runtime-limit drafts and their persisted snapshot.
-func (st *moduleState) seedRuntime(chat contracts.ChatService, store contracts.SettingsService) {
-	st.maxIterations, st.contextBudget = runtimeDrafts(chat, store)
+	st.moduleMaxIterations = cfg.MaxIterations
+	st.moduleContextBudget = cfg.ContextBudget
+	st.maxIterations, st.contextBudget = runtimeRows(store)
 	st.seenMaxIterations, st.seenContextBudget = st.maxIterations, st.contextBudget
 	st.iterationsErr, st.contextBudgetErr = "", ""
 	st.iterationsDefault = strings.TrimSpace(st.maxIterations) == ""
 	st.budgetDefault = strings.TrimSpace(st.contextBudget) == ""
-	if value, err := strconv.Atoi(strings.TrimSpace(st.maxIterations)); err == nil {
-		st.maxIterationsNum = float64(value)
-	}
-	if value, err := strconv.Atoi(strings.TrimSpace(st.contextBudget)); err == nil {
-		st.contextBudgetNum = float64(value)
-	}
+	st.maxIterationsNum = defaultRuntimeNumber(st.maxIterations, st.moduleMaxIterations)
+	st.contextBudgetNum = defaultRuntimeNumber(st.contextBudget, st.moduleContextBudget)
 }
 
 // requireFinishReasonEnabled reports the stream-completeness switch state:
@@ -1109,10 +1178,16 @@ func validateRuntimeDrafts(st *moduleState, locale contracts.LocaleService) bool
 // the focus leaves syncs.
 func (st *moduleState) syncFromConfig(c *ui.Context, chat contracts.ChatService, store contracts.SettingsService) {
 	cfg := effectiveChatConfig(chat, store)
-	iterations, contextBudget := runtimeDrafts(chat, store)
+	iterations, contextBudget := runtimeRows(store)
+	moduleCfg := contracts.ChatConfig{}
+	if chat != nil {
+		moduleCfg = chat.Config()
+	}
 	if cfg.Model == st.seenModel && cfg.BaseURL == st.seenBaseURL &&
 		cfg.SystemPrompt == st.seenSystemPrompt &&
-		iterations == st.seenMaxIterations && contextBudget == st.seenContextBudget {
+		iterations == st.seenMaxIterations && contextBudget == st.seenContextBudget &&
+		moduleCfg.MaxIterations == st.moduleMaxIterations &&
+		moduleCfg.ContextBudget == st.moduleContextBudget {
 		return
 	}
 	if st.modelInput.Focused(c) || st.baseURLInput.Focused(c) ||
@@ -1342,10 +1417,19 @@ func buildPage(c *ui.Context, runtime contracts.UIRuntime, state *moduleState, c
 									state.maxIterations = ""
 								} else {
 									if state.maxIterationsNum < 1 {
-										state.maxIterationsNum = 20
+										if state.moduleMaxIterations > 0 {
+											state.maxIterationsNum = float64(state.moduleMaxIterations)
+										} else {
+											state.maxIterationsNum = 20
+										}
 									}
 									state.maxIterations = strconv.Itoa(int(state.maxIterationsNum))
 								}
+							}
+							if state.iterationsDefault && state.moduleMaxIterations > 0 {
+								design.Apply(ui.Text(c, fmt.Sprintf(localized(locale,
+									"模块默认：%d", "Module default: %d"), state.moduleMaxIterations)),
+									t.Font(design.TypeXXXS)).TextColor(t.LabelTertiary)
 							}
 							if !state.iterationsDefault {
 								input := ui.NumberInput(c.Key("settings.runtime.maxIterations"),
@@ -1376,6 +1460,11 @@ func buildPage(c *ui.Context, runtime contracts.UIRuntime, state *moduleState, c
 								} else {
 									state.contextBudget = strconv.Itoa(int(state.contextBudgetNum))
 								}
+							}
+							if state.budgetDefault && state.moduleContextBudget != 0 {
+								design.Apply(ui.Text(c, fmt.Sprintf(localized(locale,
+									"模块默认：%d", "Module default: %d"), state.moduleContextBudget)),
+									t.Font(design.TypeXXXS)).TextColor(t.LabelTertiary)
 							}
 							if !state.budgetDefault {
 								input := ui.NumberInput(c.Key("settings.runtime.contextBudget"),
@@ -1623,8 +1712,15 @@ func save(state *moduleState, store contracts.SettingsService) error {
 	if err := store.Set(contracts.SettingsChatSystemPrompt, state.systemPrompt); err != nil {
 		return fmt.Errorf("system prompt: %w", err)
 	}
-	// Runtime limits: an empty draft clears the row so the agent falls back to
-	// the module config (an explicit "0" budget stays meaningful).
+	// Runtime limits: the "use default" switches own their rows — an on switch
+	// clears the row so the module config applies, an off switch writes the
+	// concrete draft (an explicit "0" budget stays meaningful).
+	if state.iterationsDefault {
+		state.maxIterations = ""
+	}
+	if state.budgetDefault {
+		state.contextBudget = ""
+	}
 	state.maxIterations = strings.TrimSpace(state.maxIterations)
 	state.contextBudget = strings.TrimSpace(state.contextBudget)
 	if err := store.Set(contracts.SettingsChatMaxIterations, state.maxIterations); err != nil {

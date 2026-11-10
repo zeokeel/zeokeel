@@ -6,6 +6,7 @@ package session_test
 
 import (
 	"errors"
+	"strings"
 	"sync"
 	"testing"
 
@@ -123,13 +124,16 @@ func TestComposerModelMenuSwitchesSessionModel(t *testing.T) {
 	tester := h.tester()
 	h.assertTexts(tester, "gpt-4o-mini")
 
-	// The menu lists the catalogue names with their notes; the current model is
-	// checked by the native menu rather than duplicated in the label.
+	// The menu lists the catalogue names, each note as its subtitle; the current
+	// model is checked by the native menu rather than duplicated in the label.
 	h.click(tester, "gpt-4o-mini")
-	h.assertTexts(tester, "选择模型", "GPT-4o mini · 快速", "GPT-4o · 旗舰", "打开模型设置")
-	if err := tester.Click("GPT-4o · 旗舰"); err != nil {
-		t.Fatalf("click second model: %v; texts = %v", err, tester.Texts())
+	h.assertTexts(tester, "选择模型", "GPT-4o mini", "快速", "GPT-4o", "旗舰", "打开模型设置")
+	// The note is the row's subtitle only: it must not appear twice per row
+	// (label + subtitle) as it did when the label inlined "name · note".
+	if got := textOccurrences(tester.Texts(), "快速"); got != 1 {
+		t.Fatalf("model note 快速 appears %d times, want once; texts = %v", got, tester.Texts())
 	}
+	h.clickExact(tester, "GPT-4o")
 	tester.Frame()
 
 	calls := chat.calls()
@@ -146,7 +150,7 @@ func TestComposerModelSwitchErrorIsQuiet(t *testing.T) {
 	h := newModelHarness(t, chat, catalogModels())
 	tester := h.tester()
 	h.click(tester, "gpt-4o-mini")
-	h.click(tester, "GPT-4o · 旗舰")
+	h.clickExact(tester, "GPT-4o")
 
 	if calls := chat.calls(); len(calls) != 1 {
 		t.Fatalf("SetSessionModel calls = %v, want one attempt", calls)
@@ -197,7 +201,7 @@ func TestComposerModelMenuEnglishCopy(t *testing.T) {
 	tester.Frame()
 
 	h.click(tester, "gpt-4o-mini")
-	h.assertTexts(tester, "Choose a model", "GPT-4o mini · 快速", "Open model settings")
+	h.assertTexts(tester, "Choose a model", "GPT-4o mini", "快速", "Open model settings")
 }
 
 func TestComposerModelChipFallsBackToConfig(t *testing.T) {
@@ -210,4 +214,17 @@ func TestComposerModelChipFallsBackToConfig(t *testing.T) {
 	h := newModelHarness(t, chat, catalogModels())
 	tester := h.tester()
 	h.assertTexts(tester, "configured-model")
+}
+
+// textOccurrences counts how many rendered texts contain fragment. The model
+// menu regression asserts a catalogue note renders once, not once inlined in
+// the row label and once as its subtitle.
+func textOccurrences(texts []string, fragment string) int {
+	count := 0
+	for _, text := range texts {
+		if strings.Contains(text, fragment) {
+			count++
+		}
+	}
+	return count
 }

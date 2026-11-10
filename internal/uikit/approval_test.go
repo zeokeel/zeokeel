@@ -323,3 +323,25 @@ func TestApprovalDialogClosedRendersNothing(t *testing.T) {
 		t.Fatalf("a closed approval dialog rendered controls; texts = %v", tester.Texts())
 	}
 }
+
+// TestApprovalSummaryLabelFollowsToolKind covers S-08: only shell/terminal
+// calls label their summary 命令; a file read (or other non-command tool) keeps
+// the neutral 摘要 so the dialog never says a read/search is a command to run.
+func TestApprovalSummaryLabelFollowsToolKind(t *testing.T) {
+	_, tester := approvalOpenHarness(t,
+		approvalTestRequest("f1", "read_file", "读取 internal/app.go", `{"path":"internal/app.go"}`), 1)
+	if !tester.HasText("摘要") {
+		t.Fatalf("read_file summary is not labelled 摘要; texts = %v", tester.Texts())
+	}
+	for _, text := range tester.Texts() {
+		if text == "命令" {
+			t.Fatalf("read_file summary is labelled 命令; texts = %v", tester.Texts())
+		}
+	}
+
+	_, bash := approvalOpenHarness(t,
+		approvalTestRequest("b1", "bash", "运行命令 ls", `{"command":"ls"}`), 1)
+	if !bash.HasText("命令") {
+		t.Fatalf("bash summary is not labelled 命令; texts = %v", bash.Texts())
+	}
+}

@@ -343,3 +343,79 @@ func TestIconButtonContentBuildsTheInside(t *testing.T) {
 	}
 	requireButton(t, tt, ui.RoleButton, "展开侧边栏")
 }
+
+// TestIconButtonInkColorOverridesTheGlyph covers the additive InkColor option
+// (audit PN-01): a selected List row paints the accent fill, so an icon action
+// on it passes Tokens.AccentText as its ink. The zero value must keep the
+// variant's existing ink exactly (the option is additive), and a non-zero color
+// must reach the glyph.
+func TestIconButtonInkColorOverridesTheGlyph(t *testing.T) {
+	ghost := ui.NewTester(iconButtonView(uikit.IconButtonOptions{
+		Label: "任务操作",
+		Icon:  icons.More(),
+	}), 240, 160)
+	ghost.Frame()
+	same := ui.NewTester(iconButtonView(uikit.IconButtonOptions{
+		Label:    "任务操作",
+		Icon:     icons.More(),
+		InkColor: ui.Color{}, // the zero color: no override
+	}), 240, 160)
+	same.Frame()
+	ghostImage, sameImage := ghost.Image(), same.Image()
+	for y := 0; y < 160; y++ {
+		for x := 0; x < 240; x++ {
+			if ghostImage.RGBAAt(x, y) != sameImage.RGBAAt(x, y) {
+				t.Fatalf("the zero InkColor changed the glyph at (%d,%d): %v != %v",
+					x, y, sameImage.RGBAAt(x, y), ghostImage.RGBAAt(x, y))
+			}
+		}
+	}
+
+	// The on-accent case: the button sits on the accent fill (a selected List
+	// row), so the page background is the accent color.
+	onAccent := func(o uikit.IconButtonOptions) func(*ui.Context) {
+		return func(c *ui.Context) {
+			t := design.Of(c)
+			ui.Column(c).FillWidth().FillHeight().Background(t.Accent).
+				Padding(design.Space4).Children(func() {
+				uikit.IconButton(c, o)
+			})
+		}
+	}
+	ink := design.Light().AccentText
+	colored := ui.NewTester(onAccent(uikit.IconButtonOptions{
+		Label:    "任务操作",
+		Icon:     icons.More(),
+		InkColor: ink,
+	}), 240, 160)
+	colored.Frame()
+	info := requireButton(t, colored, ui.RoleButton, "任务操作")
+	found := 0
+	for y := int(info.Bounds.Y); y < int(info.Bounds.Y+info.Bounds.H); y++ {
+		for x := int(info.Bounds.X); x < int(info.Bounds.X+info.Bounds.W); x++ {
+			got := colored.Image().RGBAAt(x, y)
+			if got.R == ink.R && got.G == ink.G && got.B == ink.B && got.A == ink.A {
+				found++
+			}
+		}
+	}
+	if found == 0 {
+		t.Fatalf("the non-zero InkColor %v never painted inside the button %+v", ink, info.Bounds)
+	}
+	// The default (ghost) ink cannot paint that exact accent ink on the accent
+	// fill; only the override does.
+	resting := ui.NewTester(onAccent(uikit.IconButtonOptions{
+		Label: "任务操作",
+		Icon:  icons.More(),
+	}), 240, 160)
+	resting.Frame()
+	restingInfo := requireButton(t, resting, ui.RoleButton, "任务操作")
+	for y := int(restingInfo.Bounds.Y); y < int(restingInfo.Bounds.Y+restingInfo.Bounds.H); y++ {
+		for x := int(restingInfo.Bounds.X); x < int(restingInfo.Bounds.X+restingInfo.Bounds.W); x++ {
+			got := resting.Image().RGBAAt(x, y)
+			if got.R == ink.R && got.G == ink.G && got.B == ink.B && got.A == ink.A {
+				t.Fatalf("the resting glyph already paints the accent ink at (%d,%d); the test cannot tell the states apart", x, y)
+			}
+		}
+	}
+}

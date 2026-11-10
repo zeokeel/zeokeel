@@ -38,11 +38,15 @@ type fakeChat struct {
 	sessions  map[string]contracts.ChatSession
 	subs      []func(string)
 	sendCalls []sendCall
-	sendErr   error
-	cancelIDs []string
-	cancelErr error
-	newCalls  []string
-	nextID    int
+	// sendAttempts counts every Send call that reached the backend, including
+	// the scripted failures: the queue-retry tests assert a failed delivery is
+	// not retried on every frame.
+	sendAttempts int
+	sendErr      error
+	cancelIDs    []string
+	cancelErr    error
+	newCalls     []string
+	nextID       int
 	// allowedTools backs the optional contracts.SessionToolPermissions half:
 	// the approval dialog's "always allow in this session" choices.
 	allowedTools      map[string][]string
@@ -146,6 +150,7 @@ func (f *fakeChat) DeleteSession(sessionID string) error {
 
 func (f *fakeChat) Send(sessionID, prompt string) error {
 	f.mu.Lock()
+	f.sendAttempts++
 	session, ok := f.sessions[sessionID]
 	if !ok {
 		f.mu.Unlock()
@@ -289,6 +294,14 @@ func (f *fakeChat) emit(sessionID string) {
 			sub(sessionID)
 		}
 	}
+}
+
+// attempts reports every Send call that reached the fake backend, including
+// failures (sends only records the successful deliveries).
+func (f *fakeChat) attempts() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.sendAttempts
 }
 
 func (f *fakeChat) sends() []sendCall {
@@ -1104,4 +1117,31 @@ func TestHeaderCopyActions(t *testing.T) {
 func openGoalActions(t *testing.T, h *harness, tester *ui.Tester, chip string) {
 	t.Helper()
 	h.click(tester, chip)
+}
+
+// TestComposerEnglishHintFitsWithoutEllipsis is the S-05 regression: the
+// composer's single-line visible hint must show the whole English copy at the
+// default 1280 window (it used to be truncated to "Shift+Enter fo…"), while the
+// complete key set stays in the send button's tooltip.
+func TestComposerEnglishHintFitsWithoutEllipsis(t *testing.T) {
+	chat := newFakeChat()
+	chat.addSession(contracts.ChatSession{ID: "sess-1", Title: "英文提示", Messages: []contracts.ChatMessage{
+		{ID: "m1", Role: contracts.ChatRoleUser, Text: "hi"},
+	}}, true)
+	h := newHarness(t, chat)
+	tester := h.tester()
+	h.ui.Locale().SetLanguage("en")
+	tester.Frame()
+
+	const want = "Enter to send · Shift+Enter newline"
+	if !tester.HasText(want) {
+		t.Fatalf("English composer hint %q missing or truncated; texts = %v", want, tester.Texts())
+	}
+	info, ok := tester.Access("Send")
+	if !ok {
+		t.Fatalf("send button has no accessibility entry; texts = %v", tester.Texts())
+	}
+	if !strings.Contains(info.Description, "Cmd/Ctrl+Enter") {
+		t.Fatalf("send tooltip = %q, want the full key set including Cmd/Ctrl+Enter", info.Description)
+	}
 }

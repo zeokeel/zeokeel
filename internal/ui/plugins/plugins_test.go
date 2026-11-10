@@ -491,3 +491,49 @@ func TestToolCatalogDisabledOnlyFilter(t *testing.T) {
 	h.click(tester, "仅显示已停用")
 	h.assertTexts(tester, "read_file", "bash", "6 个工具")
 }
+
+// newEnglishDocToolRegistry is a catalogue whose model-facing descriptions are
+// English documentation, as the product's real built-in tools are: the page
+// shows a localized one-line summary for each, so the search must match the
+// visible copy, not the hidden documentation.
+func newEnglishDocToolRegistry() *rigtools.Registry {
+	return rigtools.NewRegistry(
+		fakeTool{name: "memory", desc: "Manage the agent's memory entries through a host-provided store."},
+		fakeTool{name: "team", desc: "Manage the session's team members (in-memory manager)."},
+		fakeTool{name: "read_file", desc: "Read a file from the workspace."},
+	)
+}
+
+// TestToolSearchMatchesVisibleLocalizedCopy covers the search haystack: it
+// matches the name, the localized summary the row shows and the category label,
+// and never the hidden English description. "memory" used to hit "team" through
+// "in-memory manager" while the team row showed an unrelated Chinese summary.
+func TestToolSearchMatchesVisibleLocalizedCopy(t *testing.T) {
+	h := newHarness(t, nil, newEnglishDocToolRegistry(), plugins.Config{})
+	tester := h.tester()
+	h.assertTexts(tester, "3 个工具", "记忆读写与搜索", "创建团队任务")
+
+	// A Chinese query matches the visible localized summary.
+	h.click(tester, "搜索工具")
+	tester.Type("记忆")
+	tester.Frame()
+	h.assertTexts(tester, "1 个工具", "记忆读写与搜索")
+	h.assertNoTexts(tester, "创建团队任务", "team")
+
+	// The hidden English documentation is no longer searchable.
+	h.click(tester, "搜索工具")
+	tester.Key(ui.Cmd, ui.KeyA)
+	tester.Key(0, ui.KeyBackspace)
+	tester.Type("memory")
+	tester.Frame()
+	h.assertTexts(tester, "1 个工具", "memory")
+	h.assertNoTexts(tester, "创建团队任务", "team")
+
+	// An English name still matches, as does a category label.
+	h.click(tester, "搜索工具")
+	tester.Key(ui.Cmd, ui.KeyA)
+	tester.Key(0, ui.KeyBackspace)
+	tester.Type("read_file")
+	tester.Frame()
+	h.assertTexts(tester, "1 个工具", "read_file")
+}

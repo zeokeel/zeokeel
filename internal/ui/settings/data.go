@@ -157,19 +157,15 @@ func buildDataPrivacyPage(c *ui.Context, t *design.Tokens, kctx cordis.Context,
 					design.Apply(ui.Badge(c, localized(locale, "已复制", "Copied")), t.Badge()).
 						TextColor(t.SuccessText)
 				}
-			})
-			design.Apply(ui.Text(c, localized(locale,
-				"设置、会话与记忆都保存在这个目录。",
-				"Settings, sessions and memories are stored in this directory.")),
-				t.TextMuted(design.TypeXXS))
-			uikit.DialogFooter(c, []uikit.DialogAction{{
-				Label:    localized(locale, "打开数据目录", "Open data directory"),
-				Primary:  true,
-				Disabled: dataDir == "",
-				OnClick: func() {
-					if dataDir == "" {
-						return
-					}
+				// Opening the directory is a convenience next to the path, not the
+				// page's primary action: a row-level secondary control keeps the
+				// export/clear/report actions as the page's aligned actions.
+				openButton := design.Apply(ui.Button(c, localized(locale,
+					"打开数据目录", "Open data directory")), t.SecondaryButton()).
+					Tooltip(localized(locale, "在文件管理器中打开数据目录",
+						"Open the data directory in the file manager"))
+				openButton.Disabled(dataDir == "")
+				if openButton.Clicked() && dataDir != "" {
 					if err := openPathFunc(dataDir); err != nil {
 						st.notice = localized(locale, "打开数据目录失败：",
 							"Failed to open data directory: ") + err.Error()
@@ -181,8 +177,12 @@ func buildDataPrivacyPage(c *ui.Context, t *design.Tokens, kctx cordis.Context,
 						st.noticeDetail = ""
 					}
 					c.Invalidate()
-				},
-			}})
+				}
+			})
+			design.Apply(ui.Text(c, localized(locale,
+				"设置、会话与记忆都保存在这个目录。",
+				"Settings, sessions and memories are stored in this directory.")),
+				t.TextMuted(design.TypeXXS))
 		})
 
 		uikit.Section(c, localized(locale, "会话数据", "Session data"), func(*ui.Context) {
@@ -199,10 +199,10 @@ func buildDataPrivacyPage(c *ui.Context, t *design.Tokens, kctx cordis.Context,
 				design.Apply(ui.Text(c, fmt.Sprintf(localized(locale,
 					"共 %d 个会话", "%d sessions"), len(sessions))),
 					t.Font(design.TypeXS)).TextColor(t.LabelSecondary)
-				// One primary action per screen: opening the data directory is the
-				// page's primary; bulk export is secondary and the destructive
-				// clear sits on its own row, away from the safe actions.
-				ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(design.Space2).Children(func() {
+				// The page has no accent primary action: each section's action sits
+				// at its right end (bulk export here, the destructive clear on its
+				// own row below), so the three data actions line up.
+				ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(design.Space2).Justify(ui.End).Children(func() {
 					if design.Apply(ui.Button(c, localized(locale,
 						"导出全部会话", "Export all sessions")),
 						t.SecondaryButton()).Clicked() {
@@ -250,8 +250,8 @@ func buildDataPrivacyPage(c *ui.Context, t *design.Tokens, kctx cordis.Context,
 				localized(locale, "确认清除", "Confirm clear")) {
 			case 1:
 				clearDataSessions(chat, st, locale)
-				c.Invalidate()
-			default:
+				// Only the executed action needs a frame: the dialog's own open
+				// flag already rebuilt the frame when it was dismissed.
 				c.Invalidate()
 			}
 		}

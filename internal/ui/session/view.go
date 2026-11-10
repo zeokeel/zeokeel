@@ -125,7 +125,11 @@ func buildScreen(
 	// extra notification: retry the queue once the run has settled. When this
 	// frame already detected the settle, handleRunSettled owns the flush, so
 	// posting the fallback too would send two queued prompts in one frame.
-	if !settled && len(st.queuedFor(activeID)) > 0 && !chatSession.Running && !st.queuePaused[activeID] {
+	// A delivery failure pauses the queue and leaves its error set: the fallback
+	// must then stay quiet instead of re-sending the same prompt every frame
+	// (the explicit 重试 action clears both and retries).
+	if !settled && len(st.queuedFor(activeID)) > 0 && !chatSession.Running &&
+		!st.queuePaused[activeID] && st.queueErrorFor(activeID) == "" {
 		runtime.Post(func() {
 			processQueuedPrompts(chat, st, activeID)
 			runtime.Invalidate()
@@ -2122,13 +2126,16 @@ func buildComposer(
 	placeholder := st.localized(cfg.ComposerPlaceholder, "输入消息…", "Ask ZeoKeel…")
 	sendLabel := st.localized(cfg.SendLabel, "发送", "Send")
 	stopLabel := st.localized(cfg.StopLabel, "停止", "Stop")
-	// The send tooltip carries the key hint on narrow composers (C-23): the wide
-	// composer shows it as text beside the toolbar instead.
+	// The send tooltip carries the full key hint on narrow composers (C-23) and
+	// on wide ones the visible line shows only the short form: the English copy
+	// is long enough that the single-line hint beside the toolbar truncated at
+	// the default 1280 window ("Shift+Enter fo…"). The complete key set
+	// (Cmd/Ctrl+Enter included) stays in the send button's tooltip.
 	const defaultHintZh = "Enter 发送 · Shift+Enter 换行"
-	sendHint := st.localized(cfg.ComposerHint, defaultHintZh, "Enter to send · Shift+Enter for newline")
+	sendHint := st.localized(cfg.ComposerHint, defaultHintZh, "Enter to send · Shift+Enter newline")
 	if trimmed := strings.TrimSpace(cfg.ComposerHint); trimmed == "" || trimmed == defaultHintZh ||
-		trimmed == "Enter to send · Shift+Enter for newline" {
-		sendHint = composerHintText(st, false, false)
+		trimmed == "Enter to send · Shift+Enter for newline" || trimmed == "Enter to send · Shift+Enter newline" {
+		sendHint = composerHintText(st, running, slashMenuActive)
 	}
 	hasContent := strings.TrimSpace(st.draft) != "" || len(st.pendingAttachments) > 0
 	hasDraft := strings.TrimSpace(st.draft) != ""
@@ -2210,7 +2217,10 @@ func buildComposer(
 			runtime.Invalidate()
 		},
 		OnRetryQueue: func() {
+			// The explicit retry is also the resume: clear the failure pause so
+			// processQueuedPrompts runs again (a second failure re-pauses it).
 			st.setQueueError(activeID, "")
+			delete(st.queuePaused, activeID)
 			processQueuedPrompts(chat, st, activeID)
 			runtime.Invalidate()
 		},
@@ -2219,15 +2229,15 @@ func buildComposer(
 				compactControls(), veryCompact())
 		},
 		Hint: func(*ui.Context) string {
-			// A quiet key hint on wide composers only (C-23): Enter / Cmd+Enter
-			// sends, Shift+Enter breaks the line, and a slash draft explains what
-			// Enter will do (C-05/C-22). Narrow composers keep the same copy in
-			// the send button's tooltip. While a turn runs only the command-draft
+			// A quiet key hint on wide composers only (C-23): Enter sends,
+			// Shift+Enter breaks the line, and a slash draft explains what Enter
+			// will do (C-05/C-22). Narrow composers keep the full copy in the
+			// send button's tooltip. While a turn runs only the command-draft
 			// state gets a hint: the stop/queue controls speak for themselves.
 			if compactControls() || (running && !slashDraft) {
 				return ""
 			}
-			return composerHintText(st, running, slashMenuActive)
+			return composerVisibleHint(st, running, slashMenuActive)
 		},
 		SendEnabled: hasContent,
 		SendLabel:   sendLabel,
@@ -2374,12 +2384,11 @@ func composerTextKey(runtime contracts.UIRuntime, chat contracts.ChatService, st
 	}
 }
 
-// composerHintText is the composer's quiet key/state hint: wide composers show
-// it beside the toolbar, narrow ones keep the same copy in the send button's
-// tooltip. It teaches Enter / Cmd+Enter and Shift+Enter (C-23, C-25) and
-// explains the slash-draft states: a running turn keeps a command draft for
-// later (C-05), and an Esc-dismissed or match-less slash draft is sent
-// literally (C-22).
+// composerHintText is the composer's full key/state hint: it lives in the send
+// button's tooltip and carries the complete key set (Enter / Cmd+Enter and
+// Shift+Enter, C-23/C-25) plus the explanations of the slash-draft states (a
+// running turn keeps a command draft for later, C-05; an Esc-dismissed or
+// match-less slash draft is sent literally, C-22).
 func composerHintText(st *state, running, slashMenuActive bool) string {
 	if _, slashDraft := slashQuery(st.draft); slashDraft {
 		switch {
@@ -2396,6 +2405,18 @@ func composerHintText(st *state, running, slashMenuActive bool) string {
 	}
 	return st.tr("Enter 或 Cmd/Ctrl+Enter 发送 · Shift+Enter 换行",
 		"Enter or Cmd/Ctrl+Enter to send · Shift+Enter for a newline")
+}
+
+// composerVisibleHint is the short copy the wide composer's single line can
+// always show in both languages without an ellipsis: the idle state is just
+// "Enter 发送 · Shift+Enter 换行" / "Enter to send · Shift+Enter newline" (the
+// full chord list stays in the send tooltip), while the slash-draft states keep
+// their explanatory copy because it explains what Enter will do.
+func composerVisibleHint(st *state, running, slashMenuActive bool) string {
+	if _, slashDraft := slashQuery(st.draft); slashDraft {
+		return composerHintText(st, running, slashMenuActive)
+	}
+	return st.tr("Enter 发送 · Shift+Enter 换行", "Enter to send · Shift+Enter newline")
 }
 
 // buildComposerToolbar is the composer's action row: one attach menu, the
@@ -2792,15 +2813,14 @@ func buildAgentPresetMenuItems(m *ui.Menu, st *state, runtime contracts.UIRuntim
 	}
 }
 
-// modelMenuLabel is one model menu row: the display name plus its note, when
-// the catalogue provides one.
+// modelMenuLabel is one model menu row's primary label: the display name only.
+// The catalogue note is rendered once, as the item's Subtitle (mygo
+// context-menu.md), never inlined here: appending it to the label rendered the
+// same sentence twice in one row.
 func modelMenuLabel(info contracts.ModelInfo) string {
 	name := strings.TrimSpace(info.Name)
 	if name == "" {
 		name = info.ID
-	}
-	if note := strings.TrimSpace(info.Note); note != "" {
-		return name + " · " + note
 	}
 	return name
 }

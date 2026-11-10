@@ -69,9 +69,16 @@ func (l *localeService) SetLanguage(lang string) {
 	changed := l.lang != lang
 	l.lang = lang
 	l.mu.Unlock()
-	if changed {
-		l.root.requestFrame()
+	if !changed {
+		return
 	}
+	// The framework's own copy (native controls, dialogs and accessibility
+	// text) is localized by mygo, not by this service; the host mirrors the new
+	// language into it through the hook (fix round SH-06).
+	if hook := l.root.onLanguageChange; hook != nil {
+		hook(lang)
+	}
+	l.root.requestFrame()
 }
 
 func (l *localeService) T(key string) string {

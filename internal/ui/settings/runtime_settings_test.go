@@ -41,24 +41,37 @@ func runtimeBaseConfig() contracts.ChatConfig {
 	}
 }
 
-// TestModelRuntimeDefaultsFromConfig covers seeding: the drafts carry the
-// effective chat config's limits (an immediate Save persists them verbatim, so
-// the comparison is against the saved rows rather than the rendered input text,
-// which the headless tester does not expose).
-func TestModelRuntimeDefaultsFromConfig(t *testing.T) {
+// TestModelRuntimeDefaultsFromModuleConfig covers the "use default" semantics
+// with a module-configured limit and an empty settings store: the switches are
+// on (the module values are displayed as defaults, not as drafts), and a plain
+// Save persists no setting rows, so a later module-config change still applies.
+func TestModelRuntimeDefaultsFromModuleConfig(t *testing.T) {
 	cfg := runtimeBaseConfig()
 	cfg.MaxIterations = 7
 	cfg.ContextBudget = 9000
 	h, store, tester := runtimeHarness(t, cfg)
 	h.assertTexts(tester, "运行参数", "最大迭代次数", "上下文预算", "流完整性校验",
-		"模型/工具轮数上限")
+		"模块默认：7", "模块默认：9000")
 	h.assertNoTexts(tester, "未保存")
+	// The numeric inputs are hidden while their defaults are on.
+	h.assertNoTexts(tester, "最大迭代次数 输入", "上下文预算 输入")
 	h.click(tester, "保存")
-	if got := store.get(contracts.SettingsChatMaxIterations); got != "7" {
-		t.Fatalf("seeded max iterations saved = %q, want 7 (module config)", got)
+	if got := store.get(contracts.SettingsChatMaxIterations); got != "" {
+		t.Fatalf("module default max iterations became a settings row: %q", got)
 	}
-	if got := store.get(contracts.SettingsChatContextBudget); got != "9000" {
-		t.Fatalf("seeded context budget saved = %q, want 9000 (module config)", got)
+	if got := store.get(contracts.SettingsChatContextBudget); got != "" {
+		t.Fatalf("module default context budget became a settings row: %q", got)
+	}
+
+	// Turning the default off and saving a concrete value writes the row.
+	h.click(tester, "使用默认上限（不限制）")
+	typeNumberInput(t, h, tester, "最大迭代次数", "12")
+	h.click(tester, "保存")
+	if got := store.get(contracts.SettingsChatMaxIterations); got != "12" {
+		t.Fatalf("explicit max iterations = %q, want 12", got)
+	}
+	if got := store.get(contracts.SettingsChatContextBudget); got != "" {
+		t.Fatalf("the untouched default budget was written: %q", got)
 	}
 }
 
@@ -68,6 +81,9 @@ func TestModelRuntimeSaveRoundTrip(t *testing.T) {
 	cfg := runtimeBaseConfig()
 	cfg.MaxIterations = 20
 	h, store, tester := runtimeHarness(t, cfg)
+	// A module max-iterations limit exists: it is the default, so turn the switch
+	// off before entering an explicit value.
+	h.click(tester, "使用默认上限（不限制）")
 	typeNumberInput(t, h, tester, "最大迭代次数", "12")
 	h.click(tester, "使用默认预算") // the budget has no explicit row yet: turn the default off
 	typeNumberInput(t, h, tester, "上下文预算", "4096")
@@ -114,6 +130,7 @@ func TestModelRuntimeNumberInputsIgnoreOutOfRange(t *testing.T) {
 	cfg := runtimeBaseConfig()
 	cfg.MaxIterations = 20
 	h, store, tester := runtimeHarness(t, cfg)
+	h.click(tester, "使用默认上限（不限制）")               // the module limit is the default: turn it off
 	typeNumberInput(t, h, tester, "最大迭代次数", "0") // below the bound 1: ignored
 	h.click(tester, "使用默认预算")
 	typeNumberInput(t, h, tester, "上下文预算", "-1") // below 0: ignored

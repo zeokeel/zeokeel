@@ -3,9 +3,10 @@ package settings
 // Archived sessions page: the settings-side home of sessions the user archived.
 // It lists the archived sessions with their update time and message count, lets
 // the user restore, delete (after the native confirmation) or reopen them, and
-// explains the whole feature when the list is empty. The sidebar's "show
-// archived" view option is gone; this page is the one place archived sessions
-// live.
+// explains the whole feature when the list is empty. Choosing a row (click or
+// arrow keys) only selects it; Enter or a double click opens the conversation.
+// The sidebar's "show archived" view option is gone; this page is the one place
+// archived sessions live.
 
 import (
 	"fmt"
@@ -37,9 +38,15 @@ type archiveState struct {
 	// confirmed dialog knows which session to delete.
 	pendingDeleteID string
 	// list backs the archived sessions' official List and sel is the row chosen
-	// (a click/Enter opens that conversation; restore/delete keep their buttons).
+	// (a click or arrow key only chooses; Enter/double click opens that
+	// conversation; restore/delete keep their buttons).
 	list ui.ListState
 	sel  int
+
+	// pendingOpen is the session a double click on a row asked to open; the page
+	// consumes it after the list is built instead of navigating from inside a
+	// row builder.
+	pendingOpen string
 }
 
 // archivedSessions filters the chat session list to the archived ones, keeping
@@ -107,7 +114,8 @@ func buildArchivePage(c *ui.Context, t *design.Tokens, kctx cordis.Context,
 			}
 			// The archived sessions are a collection: the official List keys them
 			// by session ID, names the rows and owns click/keyboard selection;
-			// choosing a row reopens that conversation.
+			// Enter or a double click reopens that conversation (a click only
+			// selects the row).
 			if st.sel >= len(archived) {
 				st.sel = -1
 			}
@@ -130,10 +138,17 @@ func buildArchivePage(c *ui.Context, t *design.Tokens, kctx cordis.Context,
 				Rows(func(row ui.ListRow) {
 					buildArchiveRow(row.Context, t, chat, archiver, canArchive, navigator, st, archived[row.Index], locale)
 				})
-			if list.Changed() || list.Submitted() {
-				if st.sel >= 0 && st.sel < len(archived) {
-					openArchivedSession(c, chat, navigator, archived[st.sel].ID)
-				}
+			// Choosing a row (a click or Up/Down/Home/End) is navigation within the
+			// list, not a command: only Enter/double click opens the conversation.
+			// Otherwise keyboard users are thrown out of the settings surface by the
+			// first arrow key they press (ST-09).
+			if list.Submitted() && st.sel >= 0 && st.sel < len(archived) {
+				st.pendingOpen = archived[st.sel].ID
+			}
+			if st.pendingOpen != "" {
+				sessionID := st.pendingOpen
+				st.pendingOpen = ""
+				openArchivedSession(c, chat, navigator, sessionID)
 			}
 		})
 		// Deleting an archived session is irreversible: confirm it with the
@@ -173,10 +188,10 @@ func buildArchivePage(c *ui.Context, t *design.Tokens, kctx cordis.Context,
 func buildArchiveRow(c *ui.Context, t *design.Tokens, chat contracts.ChatService,
 	archiver contracts.SessionArchiver, canArchive bool, navigator contracts.Navigator,
 	st *archiveState, session contracts.ChatSessionInfo, locale contracts.LocaleService) {
-	ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(design.Space2).
+	row := ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(design.Space2).
 		PaddingY(design.Space1).Children(func() {
-		// The row's title is plain content: the surrounding List paints hover,
-		// selection and handles the click/Enter that opens the conversation.
+		// The row's title is plain content: the surrounding List paints hover and
+		// selection, and Enter/double click opens the conversation.
 		ui.Column(c).FillWidth().Grow(1).Gap(design.Space1).
 			Padding(design.Space2, design.Space2, design.Space2, 0).Children(func() {
 			design.Apply(ui.Text(c, archiveSessionLabel(locale, session)),
@@ -202,6 +217,12 @@ func buildArchiveRow(c *ui.Context, t *design.Tokens, chat contracts.ChatService
 			c.Invalidate()
 		}
 	})
+	// A double click on the row (or a double click on the title text inside it)
+	// opens the conversation, like Enter: the click chooses the row, the second
+	// press is the command. RowDoubleClicked reports it while the row builds.
+	if row.RowDoubleClicked() {
+		st.pendingOpen = session.ID
+	}
 }
 
 // openArchivedSession closes the settings surface, makes sessionID active and

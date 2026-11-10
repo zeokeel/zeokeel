@@ -128,7 +128,11 @@ func tidyMemories(store contracts.MemoryStore, st *state) {
 	requestMemoryRefresh(st)
 	switch {
 	case failures > 0:
-		st.memoryError = st.tr("整理记忆失败：", "Tidy failed: ") + fmt.Sprintf("%d", failures)
+		// A bare count ("整理记忆失败：2") told the user nothing: say what failed
+		// and that the action can be retried.
+		st.memoryError = st.tr(
+			fmt.Sprintf("整理记忆失败：%d 条未能删除，请重试", failures),
+			fmt.Sprintf("Tidy failed: %d memories could not be removed; try again", failures))
 	case removed > 0:
 		st.memoryError = ""
 		st.toast(contracts.NotifySuccess, st.tr(fmt.Sprintf("已整理 %d 条", removed), fmt.Sprintf("Tidied %d memories", removed)))
@@ -180,7 +184,9 @@ func clearMemories(store contracts.MemoryStore, st *state) {
 	}
 	requestMemoryRefresh(st)
 	if failures > 0 {
-		st.memoryError = st.tr("清空失败：", "Clear failed: ") + fmt.Sprintf("%d", failures)
+		st.memoryError = st.tr(
+			fmt.Sprintf("清空失败：%d 条记忆未能删除，请重试", failures),
+			fmt.Sprintf("Clear failed: %d memories could not be removed; try again", failures))
 		return
 	}
 	st.memoryError = ""
@@ -208,13 +214,17 @@ func buildMemoryClearDialog(c *ui.Context, t *design.Tokens, runtime contracts.U
 	}
 	message := st.tr("确认删除全部记忆吗？此操作无法撤销。",
 		"Delete all memories? This cannot be undone.")
+	// mygo's AlertDialog returns -1 while the alert is still showing; asking for
+	// a frame in that case would redraw on every frame for as long as the
+	// confirmation stays open. A frame is only needed once a button (0/1) or
+	// Escape (ui.AlertDismissed) actually closed it.
 	switch ui.AlertDialog(c, &st.memoryClearOpen,
 		st.tr("清空记忆", "Clear memories"), message,
 		st.tr("取消", "Cancel"), st.tr("清空", "Clear")) {
 	case 1:
 		clearMemories(store, st)
 		runtime.Invalidate()
-	default:
+	case 0, ui.AlertDismissed:
 		runtime.Invalidate()
 	}
 }

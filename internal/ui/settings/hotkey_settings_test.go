@@ -20,7 +20,7 @@ func TestAppearanceGlobalHotkeyDefaultsEmpty(t *testing.T) {
 	h.click(tester, "模型")
 	h.click(tester, "外观")
 
-	h.assertTexts(tester, "全局热键", "全局热键 输入",
+	h.assertTexts(tester, "全局热键", "组合键 输入",
 		"留空关闭", "按「录入」直接按组合键", "修改后重启应用生效")
 }
 
@@ -32,7 +32,7 @@ func TestAppearanceGlobalHotkeySavesTrimmedValue(t *testing.T) {
 	h.click(tester, "模型")
 	h.click(tester, "外观")
 
-	h.focusInput(tester, "全局热键 输入")
+	h.focusInput(tester, "组合键 输入")
 	tester.Type("  Ctrl+Shift+K  ")
 	tester.Frame()
 	h.click(tester, "应用")
@@ -51,7 +51,7 @@ func TestAppearanceGlobalHotkeyRejectsInvalidValue(t *testing.T) {
 	h.click(tester, "模型")
 	h.click(tester, "外观")
 
-	h.focusInput(tester, "全局热键 输入")
+	h.focusInput(tester, "组合键 输入")
 	tester.Type("not-a-hotkey")
 	tester.Frame()
 	h.click(tester, "应用")
@@ -80,9 +80,9 @@ func TestAppearanceGlobalHotkeyEnglish(t *testing.T) {
 	h.click(tester, "Model")
 	h.click(tester, "Appearance")
 
-	h.assertTexts(tester, "Global hotkey", "Global hotkey input",
+	h.assertTexts(tester, "Global hotkey", "Shortcut input",
 		"Leave empty to disable", "press Record and press the keys", "takes effect after restart")
-	h.focusInput(tester, "Global hotkey input")
+	h.focusInput(tester, "Shortcut input")
 	tester.Type("CmdOrCtrl+Shift+Space")
 	tester.Frame()
 	h.click(tester, "Apply")
@@ -113,7 +113,7 @@ func TestHotkeyRecordCapture(t *testing.T) {
 	}
 
 	// Esc leaves the recorder without changing the draft.
-	h.focusInput(tester, "全局热键 输入")
+	h.focusInput(tester, "组合键 输入")
 	tester.Key(ui.Cmd, ui.KeyA)
 	tester.Key(0, ui.KeyBackspace)
 	tester.Frame()
@@ -144,7 +144,7 @@ func TestHotkeyInvalidDraftShowsInlineError(t *testing.T) {
 	tester := h.tester()
 	tester.Frame()
 	h.click(tester, "外观")
-	h.focusInput(tester, "全局热键 输入")
+	h.focusInput(tester, "组合键 输入")
 	tester.Type("banana")
 	tester.Frame()
 	h.assertTexts(tester, "全局热键格式无效")

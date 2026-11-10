@@ -98,8 +98,11 @@ func (r *Root) view(c *ui.Context) {
 
 	r.inspectorDrawerShown = false
 	r.inspectorDrawer(c)
-	r.palette(c)
+	// The palette is built last: it is the window's top layer, so Cmd+K from
+	// inside the settings modal shows above it instead of behind it (fix round
+	// SH-07), and Escape closes the palette before the surface below it.
 	r.overlays(c)
+	r.palette(c)
 }
 
 // announceNavigation reports navigation changes to assistive technology: the
@@ -228,8 +231,28 @@ func (r *Root) sidebarRail(c *ui.Context) {
 			},
 			OnClick: func() { r.SetSidebarCollapsed(false) },
 		})
+		// The new-session action is the expanded sidebar's primary action; the
+		// rail is the same sidebar in its icon form, so it keeps that action
+		// instead of dropping the shell's only pointer affordance for creating
+		// a conversation (fix round SH-05).
+		newChatLabel := r.tr("新对话", "New chat")
+		uikit.IconButton(c, uikit.IconButtonOptions{
+			Key:     "chrome.rail.new",
+			Label:   newChatLabel,
+			Tooltip: newChatLabel,
+			Icon:    icons.NewChat(),
+			Size:    design.IconSizeM,
+			OnClick: func() { r.newSessionShortcut() },
+		})
 		for _, spec := range visibleScreens(r.rt.screenSpecs()) {
 			spec := spec
+			// The rail navigates screens, not conversations: the session screen
+			// is the workspace tree's destination in the expanded sidebar and
+			// had no navigation row there. Listing it here made the two chrome
+			// forms show different destination sets (fix round SH-05).
+			if spec.ID == sessionScreenID {
+				continue
+			}
 			icon := r.screenIcon(spec.ID)
 			label := r.screenLabel(spec)
 			// The rail destination is a toggle-like destination, not a plain
@@ -274,7 +297,7 @@ func (r *Root) sidebarRail(c *ui.Context) {
 func (r *Root) screenIcon(id string) *ui.SVG {
 	switch id {
 	case "home":
-		return icons.NewChat()
+		return icons.Home()
 	case "session":
 		return icons.Message()
 	case "automation":
@@ -493,11 +516,7 @@ func (r *Root) contentHeader(c *ui.Context) {
 			ui.Icon(c, icons.Search()).Size(16, 16).TextColor(t.LabelSecondary)
 		})
 		if palette.Clicked() {
-			r.paletteOpen = !r.paletteOpen
-			r.paletteQuery = ""
-			r.paletteFilter = ""
-			r.paletteSelected = 0
-			r.requestFrame()
+			r.togglePalette()
 		}
 		if !r.inspectorAvailable() {
 			return
@@ -630,6 +649,10 @@ func (r *Root) palette(c *ui.Context) {
 				matches = append(matches, cmd)
 			}
 			if len(matches) == 0 {
+				// No match: the arrows must not keep moving a choice of the
+				// previous query (the stale count also scheduled frames for
+				// nothing, fix round SH-08).
+				r.paletteCount = 0
 				design.Apply(ui.Text(c, r.tr("没有匹配的命令", "No matching commands")), t.TextMuted(design.TypeXS))
 				design.Apply(ui.Text(c, r.tr("Esc 关闭", "Esc to close")), t.TextMuted(design.TypeXXXS))
 				return
@@ -665,6 +688,12 @@ func (r *Root) palette(c *ui.Context) {
 				titleColor, hintColor := t.LabelPrimary, t.LabelTertiary
 				if chosen {
 					titleColor, hintColor = t.AccentText, t.AccentText
+					// The row's own fill, in addition to the native List's
+					// Selected paint: the real desktop assembly can build the
+					// palette rows during a later layout pass, where the List's
+					// chosen fill did not reach the painted frame (fix round
+					// SH-02: Enter ran a row the user could not see).
+					item = item.Background(t.Accent)
 					activeRow = item
 				} else if item.Hovered() {
 					item = item.Background(t.BgHover)
@@ -691,11 +720,24 @@ func (r *Root) palette(c *ui.Context) {
 					r.runPaletteCommand(cmd)
 				}
 			}).MaxHeight(320)
+			// A List drops a choice whose item left the list and writes -1 back
+			// (mygo list.md: the choice is gone with its item). A command
+			// palette always chooses some row, so fall back to the first match
+			// and repaint once: otherwise the list paints no chosen row while
+			// Enter still runs one, which is exactly the invisible target the
+			// fix round's SH-02 reported (the selected command of a previous
+			// open can be filtered out by its Enabled state).
+			if r.paletteSelected < 0 || r.paletteSelected >= len(matches) {
+				r.paletteSelected = 0
+				c.Invalidate()
+			}
 			if activeRow.Valid() {
 				search.ActiveDescendant(activeRow)
 			}
 			if search.Submitted() || list.Submitted() {
-				r.runPaletteCommand(matches[r.paletteSelected])
+				if r.paletteSelected >= 0 && r.paletteSelected < len(matches) {
+					r.runPaletteCommand(matches[r.paletteSelected])
+				}
 			}
 			design.Apply(ui.Text(c, r.tr("↑↓ 选择 · Enter 运行 · Esc 关闭",
 				"Up/Down to choose · Enter to run · Esc to close")),
@@ -1049,6 +1091,17 @@ func settingsPanelSize(t *design.Tokens, width, height float32) (float32, float3
 // action is visible without scrolling (the usability audit's H1).
 func (r *Root) settings(c *ui.Context, open *bool) {
 	t := design.Of(c)
+	// The window shortcuts belong to the root scope, which an open modal
+	// replaces; the settings surface re-binds the command palette inside its
+	// own scope so Cmd+K keeps working here (the palette then draws above this
+	// modal and Escape dismisses it first, fix round SH-07).
+	paletteMods, paletteKey := r.paletteShortcut()
+	c.OnShortcut(paletteMods, paletteKey, func() {
+		if c.ShortcutRepeated() {
+			return
+		}
+		r.togglePalette()
+	})
 	allPages := visiblePages(r.rt.settingsPages())
 	needle := strings.ToLower(strings.TrimSpace(r.settingsQuery))
 	pages := allPages

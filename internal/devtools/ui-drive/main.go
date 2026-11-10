@@ -34,6 +34,10 @@ import (
 	"time"
 
 	"github.com/egoist/mygo/ui"
+	// The framework's own zh-Hans catalog: the snapshot/driver mirrors
+	// the product's language into mygo (host does the same import), so link
+	// the same translations or framework chrome would stay English.
+	_ "github.com/egoist/mygo/locales/zh-Hans"
 	cordis "github.com/zeokeel/zeokeel-kernel"
 	rig "github.com/zeokeel/zeokeel-rig"
 
@@ -89,6 +93,12 @@ type drive struct {
 	onlyFilter []string
 
 	w, h int
+
+	// localeTag is the mygo framework locale last pushed into the Tester: the
+	// real desktop host mirrors ui.language into mygo.App.SetLocale, so the
+	// headless driver must do the same or the framework's built-in chrome
+	// (markdown Copy, divider names) would not follow the product language.
+	localeTag string
 }
 
 func main() {

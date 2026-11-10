@@ -454,10 +454,10 @@ func TestP1ApprovalToolsAndPersistence(t *testing.T) {
 		t.Fatalf("open model menu: %v; texts = %v", err, tester.Texts())
 	}
 	tester.Frame()
-	if !tester.HasText("DeepSeek Chat · 通用对话") {
+	if !tester.HasText("DeepSeek Chat") || !tester.HasText("通用对话") {
 		t.Fatalf("model catalog missing; texts = %v", tester.Texts())
 	}
-	if err := tester.Click("DeepSeek Chat · 通用对话"); err != nil {
+	if err := tester.Click("DeepSeek Chat"); err != nil {
 		t.Fatalf("choose catalog model: %v; texts = %v", err, tester.Texts())
 	}
 	tester.Frame()

@@ -82,9 +82,9 @@ func TestFilesListingIsCachedBetweenFrames(t *testing.T) {
 		t.Fatalf("directory listings = %d after Refresh, want 2", got)
 	}
 
-	// Entering a directory reads the new directory exactly once.
-	h.click(tester, "docs")
-	tester.Frame()
+	// Entering a directory reads the new directory exactly once. A click only
+	// chooses the row now; the list's Submitted action opens the directory.
+	openEntry(t, tester, "docs")
 	if got := workspace.listings(); got != 3 {
 		t.Fatalf("directory listings = %d after navigating, want 3", got)
 	}

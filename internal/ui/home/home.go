@@ -153,10 +153,15 @@ func Module() *module.Descriptor[Config] {
 				if raw, ok := ctx.Get(contracts.KeyWorkspace); ok {
 					workspace, _ = raw.(contracts.WorkspaceService)
 				}
-				ui.Column(c).FillWidth().Grow(1).Gap(design.Space6).Children(func() {
-					// The brand column: centered vertically in the free space,
-					// capped at the readable width.
-					ui.Column(c).FillWidth().Grow(1).Justify(ui.Center).AlignItems(ui.Center).
+				// The page body scrolls: the product's minimum window is
+				// 900x600, where the hero, setup card, composer and recent list
+				// together are taller than the window. A plain Column clipped
+				// the recent sessions below the window edge with no way to
+				// reach them; the native Scroll keeps them reachable at every
+				// window size and text scale (fix round SH-01).
+				ui.Scroll(c).FillWidth().Grow(1).Shrink(1).Children(func() {
+					ui.Column(c).FillWidth().Gap(design.Space6).
+						PaddingY(design.Space8).AlignItems(ui.Center).
 						Children(func() {
 							ui.Column(c).FillWidth().MaxWidth(homeColumnWidth).Gap(design.Space6).
 								Children(func() {

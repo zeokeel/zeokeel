@@ -65,6 +65,13 @@ type Config struct {
 	Kernel cordis.Context
 	// KernelContext is an alias for Kernel.
 	KernelContext cordis.Context
+	// OnLanguageChange is called on the UI thread after the product language
+	// changes, so the host can mirror it into the framework's own locale: mygo
+	// localizes its native controls, dialogs, menus and assistive-technology
+	// strings separately from the product's copy (for example the splitter is
+	// named by the framework), and without this hook a runtime switch would
+	// leave those strings in the previous language. Nil is a no-op.
+	OnLanguageChange func(lang string)
 }
 
 // Root is the host's UI entry point. It is created by the process host before
@@ -83,11 +90,14 @@ type Root struct {
 	// kernelContext is the optional kernel root for resolving KeyChat.
 	kernelContext cordis.Context
 	fileDrop      *fileDropService
-	interaction   *interactionService
-	artifacts     *artifactService
-	plan          *planService
-	goal          *goalService
-	notifier      *notifierService
+	// onLanguageChange mirrors a product language change into the framework
+	// locale; the host wires it (Config.OnLanguageChange).
+	onLanguageChange func(string)
+	interaction      *interactionService
+	artifacts        *artifactService
+	plan             *planService
+	goal             *goalService
+	notifier         *notifierService
 
 	mu         sync.Mutex
 	invalidate func()
@@ -321,16 +331,17 @@ func New(cfg Config) *Root {
 		kernelContext = cfg.KernelContext
 	}
 	r := &Root{
-		appName:         cfg.AppName,
-		settingsService: cfg.Settings,
-		chatService:     chatService,
-		kernelContext:   kernelContext,
-		fileDrop:        &fileDropService{},
-		interaction:     newInteractionService(),
-		artifacts:       newArtifactService(),
-		plan:            newPlanService(),
-		goal:            newGoalService(),
-		notifier:        newNotifierService(),
+		appName:          cfg.AppName,
+		settingsService:  cfg.Settings,
+		chatService:      chatService,
+		kernelContext:    kernelContext,
+		onLanguageChange: cfg.OnLanguageChange,
+		fileDrop:         &fileDropService{},
+		interaction:      newInteractionService(),
+		artifacts:        newArtifactService(),
+		plan:             newPlanService(),
+		goal:             newGoalService(),
+		notifier:         newNotifierService(),
 	}
 	r.theme = &themeService{root: r, dark: cfg.Dark}
 	r.locale = &localeService{root: r, lang: cfg.Language}

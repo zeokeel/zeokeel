@@ -140,9 +140,11 @@ func TestLogCacheReadsOncePerSession(t *testing.T) {
 		{Seq: 1, Type: "session_started", Time: time.Unix(1700000000, 0)},
 		{Seq: 2, Type: "message_added", Time: time.Unix(1700000001, 0)},
 	}}
+	base := time.Unix(1700000000, 0)
 	st := &state{}
 
-	st.loadLogOnce(reader, "s1")
+	// First frame of a session reads once (the gate is open: no anchor yet).
+	st.syncLogCache(nil, reader, "s1", base)
 	if got := reader.callCount(); got != 1 {
 		t.Fatalf("store reads = %d after the first load, want 1", got)
 	}
@@ -150,23 +152,57 @@ func TestLogCacheReadsOncePerSession(t *testing.T) {
 		t.Fatalf("log cache = %d events, loaded %v, session %q", len(st.logEvents), st.logLoaded, st.logSession)
 	}
 
-	// Extra frames of the same session reuse the cache: no per-frame I/O.
-	st.loadLogOnce(reader, "s1")
-	st.loadLogOnce(reader, "s1")
+	// Extra frames of the same session reuse the cache: no I/O.
+	st.syncLogCache(nil, reader, "s1", base.Add(10*time.Millisecond))
+	st.syncLogCache(nil, reader, "s1", base.Add(20*time.Millisecond))
 	if got := reader.callCount(); got != 1 {
 		t.Fatalf("store reads = %d after extra frames, want 1 (no render-time I/O)", got)
 	}
 
-	// A chat notification drops the cache: the next frame re-reads once.
-	st.logLoaded = false
-	st.loadLogOnce(reader, "s1")
+	// The chat notifies per streamed delta: 20 notifications inside one gate
+	// window coalesce into at most one store read, which happens when the
+	// window opens.
+	for index := 0; index < 20; index++ {
+		st.logDirty = true // what the chat subscription does
+		st.syncLogCache(nil, reader, "s1", base.Add(30*time.Millisecond))
+	}
+	if got := reader.callCount(); got != 1 {
+		t.Fatalf("store reads = %d after 20 notifications inside the window, want 1", got)
+	}
+	st.syncLogCache(nil, reader, "s1", base.Add(logReloadInterval))
 	if got := reader.callCount(); got != 2 {
-		t.Fatalf("store reads = %d after a notification, want 2", got)
+		t.Fatalf("store reads = %d after the window opened, want 2", got)
+	}
+	st.syncLogCache(nil, reader, "s1", base.Add(logReloadInterval))
+	if got := reader.callCount(); got != 2 {
+		t.Fatalf("store reads = %d after a cached frame, want 2", got)
 	}
 
-	// A session switch reads the new session's events.
-	st.loadLogOnce(reader, "s2")
+	// A session switch reads the new session's events (the cache is dropped).
+	st.syncLogCache(nil, reader, "s2", base.Add(logReloadInterval+10*time.Millisecond))
 	if got := reader.callCount(); got != 3 || st.logSession != "s2" {
 		t.Fatalf("store reads = %d, session %q after a session switch; want 3, s2", got, st.logSession)
+	}
+}
+
+// TestLogReloadGate pins the throttle window: a dirty cache waits until the
+// interval elapsed, so the notification-per-delta stream cannot trigger a read
+// per frame.
+func TestLogReloadGate(t *testing.T) {
+	base := time.Unix(1700000000, 0)
+	st := &state{logLoaded: true, logLoadedAt: base}
+	if due, _ := st.logReloadGate(base.Add(100 * time.Millisecond)); due {
+		t.Fatal("the gate opened inside the window")
+	}
+	due, wait := st.logReloadGate(base.Add(100 * time.Millisecond))
+	if due || wait != 150*time.Millisecond {
+		t.Fatalf("gate = %v, %s inside the window; want closed with a 150ms wait", due, wait)
+	}
+	if due, wait := st.logReloadGate(base.Add(logReloadInterval)); !due || wait != 0 {
+		t.Fatalf("gate = %v, %s at the window edge; want open", due, wait)
+	}
+	fresh := &state{}
+	if due, _ := fresh.logReloadGate(base); !due {
+		t.Fatal("a cache that never read must open the gate at once")
 	}
 }

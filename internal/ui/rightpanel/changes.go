@@ -34,6 +34,11 @@ var errNoDiffPatch = errors.New("rightpanel: the diff has no readable file patch
 type diffView struct {
 	state *editor.DiffState
 	lines int
+	// diff is the patch text the viewer was built from: the cache is only
+	// reused while the workspace reports the same content, so a Refresh (or a
+	// workspace switch) can never show a stale diff even when the file's
+	// path/status key is unchanged.
+	diff string
 }
 
 // buildChangesPane is the inspector's Changes tab: the current workspace's
@@ -102,19 +107,32 @@ func buildChangesPane(c *ui.Context, t *design.Tokens, workspace contracts.Works
 // workspace the user already switched away from is dropped.
 func (st *state) ensureChangesLoaded(workspace contracts.WorkspaceService,
 	differ contracts.WorkspaceDiffer, runtime contracts.UIRuntime) bool {
+	current, ok, err := workspace.Current(context.Background())
+	if err != nil || !ok {
+		st.changesLoaded = true
+		st.changesWorkspace = ""
+		st.changesErr = err
+		return false
+	}
+	workspaceKey := current.ID + "\x00" + current.Root
+	// The cached snapshot and the per-file diff viewers belong to one
+	// workspace: the Files pane keys its listing the same way, so a workspace
+	// switch must invalidate both here instead of showing another project's
+	// uncommitted files until the user presses Refresh.
+	if st.changesWorkspace != workspaceKey {
+		st.changesWorkspace = workspaceKey
+		st.changesLoaded = false
+		st.changes = nil
+		st.changesErr = nil
+		st.changesOpen = make(map[string]bool)
+		st.diffs = make(map[string]*diffView)
+	}
 	if st.changesLoaded {
 		return false
 	}
 	if st.changesLoading {
 		return true
 	}
-	current, ok, err := workspace.Current(context.Background())
-	if err != nil || !ok {
-		st.changesLoaded = true
-		st.changesErr = err
-		return false
-	}
-	workspaceKey := current.ID + "\x00" + current.Root
 	if runtime == nil {
 		// A bare state (unit tests) keeps the old synchronous read.
 		st.changes, st.changesErr = differ.Changes(context.Background())
@@ -164,7 +182,11 @@ func buildChangeRow(c *ui.Context, t *design.Tokens, st *state, change contracts
 			}
 		})
 		if strings.TrimSpace(change.Diff) == "" {
+			// A change without a text diff (untracked/binary/renamed) still
+			// gets its row divider: skipping it merged the row with the next
+			// file's header.
 			design.Apply(ui.Text(c, uikit.T(st.locale, "无文本 diff", "No text diff")), t.TextMuted(design.TypeXXXS))
+			ui.Divider(c)
 			return
 		}
 		open := st.changesOpen[key]
@@ -203,7 +225,7 @@ func (st *state) diffViewFor(change contracts.FileChange) (*diffView, error) {
 		st.diffs = make(map[string]*diffView)
 	}
 	key := change.Path + "\x00" + change.Status
-	if cached, ok := st.diffs[key]; ok {
+	if cached, ok := st.diffs[key]; ok && cached.diff == change.Diff {
 		return cached, nil
 	}
 	patches, err := editor.ParsePatch(change.Diff)
@@ -221,6 +243,7 @@ func (st *state) diffViewFor(change contracts.FileChange) (*diffView, error) {
 		// and scroll inside the viewer (set in buildDiff).
 		state: &editor.DiffState{Layout: editor.DiffUnified, FitContent: lines <= diffFitLines},
 		lines: lines,
+		diff:  change.Diff,
 	}
 	view.state.SetPatch(patch)
 	st.diffs[key] = view

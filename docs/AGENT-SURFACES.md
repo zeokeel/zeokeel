@@ -224,7 +224,7 @@ type ApprovalDialogOptions struct {
 func ApprovalDialog(c *ui.Context, o ApprovalDialogOptions)
 ```
 
-**布局（固定）**：标题（危险图标 + "需要审批"）→ 工具行（友好名 Badge，raw ID tooltip）→ 一行影响声明 → 摘要优先（命令 mono 框）→ 「参数」折叠（Scroll 140）→ Divider → `uikit.DialogFooter`：**拒绝(Danger) → 本会话内始终允许 → 允许(Primary 最右)**；无 Default、无 AutoFocus；底部常驻提示「Esc = 拒绝本次调用 · 点击或 Tab 选择操作（无默认操作）」。
+**布局（固定）**：标题（危险图标 + "需要审批"）→ 工具行（友好名 Badge，raw ID tooltip）→ 一行影响声明 → 摘要优先（shell/终端类工具标「命令」，其余工具标「摘要」；mono 框）→ 「参数」折叠（Scroll 140）→ Divider → `uikit.DialogFooter`：**拒绝(Danger) → 本会话内始终允许 → 允许(Primary 最右)**；无 Default、无 AutoFocus；底部常驻提示「Esc = 拒绝本次调用 · 点击或 Tab 选择操作（无默认操作）」。
 
 **交互/键盘**：Tab 循环；Enter 只有在焦点落到某按钮时才触发该按钮；Esc/外部点击 = deny；不设默认焦点。
 
@@ -398,6 +398,7 @@ func ComposerShell(c *ui.Context, o ComposerOptions)
 | queued | 队列 Badge（可展开、可取消/重试）；排队只发文字提示 |
 | stopping | 停止按钮 pressed/disabled；不可重复触发 |
 | failed | 错误行 + 重试（带标签按钮，不是图标） |
+| queue-send-failed | 投递失败：错误行 + 队列暂停，排队浮层里显式「重试」；不得逐帧自动重发或每帧请求重绘 |
 | completed | 完成 toast/Announce；用量折叠显示 |
 | long-run | 不显示假进度；需要时 `Progress` 仅在有真实进度（下载/批量） |
 

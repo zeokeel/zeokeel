@@ -637,3 +637,20 @@ func TestMergedDuplicateKeepsTheLatestAction(t *testing.T) {
 		t.Fatalf("merged toast action = %v, want the latest one", undone)
 	}
 }
+
+// TestToastCloseButtonTargetSize covers S-10: the toast's close control is an
+// icon action, so its target is at least 24 DIP (DESIGN accessibility AP-17)
+// while the glyph stays quiet.
+func TestToastCloseButtonTargetSize(t *testing.T) {
+	h := newHarness(t, "zh")
+	tester := h.tester()
+	h.notifier.trigger(contracts.Notification{ID: "n1", Level: contracts.NotifyInfo, Text: "命中区"})
+	tester.Frame()
+	rect, ok := tester.Find("关闭通知")
+	if !ok {
+		t.Fatalf("toast close button missing; texts = %v", tester.Texts())
+	}
+	if rect.W < 24 || rect.H < 24 {
+		t.Fatalf("toast close target = %.1fx%.1f DIP, want at least 24x24", rect.W, rect.H)
+	}
+}

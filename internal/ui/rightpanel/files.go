@@ -374,9 +374,11 @@ func buildFileList(c *ui.Context, t *design.Tokens, runtime contracts.UIRuntime,
 	}
 }
 
-// chooseFileRow follows the list's choice: a file is previewed at once, a
-// directory is entered on the click that chose it (the old row behaviour, which
-// the frame tests pin); Enter also activates through Submitted.
+// chooseFileRow follows the list's choice: a file is previewed at once and a
+// directory only becomes the chosen row. The choice changes on a click as well
+// as on Up/Down/Home/End (docs/ui/list.md), so entering a directory here made
+// the arrow keys impossible to move past a folder; opening one is the list's
+// Submitted action (Enter or a double click) instead.
 func (st *state) chooseFileRow(visible []contracts.FileEntry, runtime contracts.UIRuntime) {
 	if st.filesListSel < 0 || st.filesListSel >= len(visible) {
 		return
@@ -385,7 +387,7 @@ func (st *state) chooseFileRow(visible []contracts.FileEntry, runtime contracts.
 	path := firstNonEmpty(entry.Path, entry.Name)
 	st.filesCursor = path
 	if entry.Dir {
-		navigateFiles(st, path, runtime)
+		runtime.Invalidate()
 		return
 	}
 	st.filesSelected = path
@@ -393,16 +395,26 @@ func (st *state) chooseFileRow(visible []contracts.FileEntry, runtime contracts.
 	runtime.Invalidate()
 }
 
-// activateFileRow runs the list's Submitted action (Enter or a double click):
-// a directory is entered, a file's preview is shown.
+// activateFileRow runs the list's Submitted action (Enter or a double click)
+// on the chosen row: a directory is entered, a file's preview is shown.
 func (st *state) activateFileRow(visible []contracts.FileEntry, runtime contracts.UIRuntime) {
 	if st.filesListSel < 0 || st.filesListSel >= len(visible) {
 		return
 	}
-	entry := visible[st.filesListSel]
+	st.openFileEntry(visible[st.filesListSel], runtime)
+}
+
+// openFileEntry is the one activation path for a row (Enter, a double click or
+// the row's own double-click report): a directory is entered once, a file's
+// preview is shown. Entering the directory the pane already shows is a no-op,
+// so the Submitted and RowDoubleClicked reports of one double click cannot
+// navigate twice.
+func (st *state) openFileEntry(entry contracts.FileEntry, runtime contracts.UIRuntime) {
 	path := firstNonEmpty(entry.Path, entry.Name)
 	if entry.Dir {
-		navigateFiles(st, path, runtime)
+		if st.filesDir != path {
+			navigateFiles(st, path, runtime)
+		}
 		return
 	}
 	st.filesCursor = path
@@ -574,6 +586,13 @@ func buildFileRow(row ui.ListRow, t *design.Tokens, entry contracts.FileEntry,
 	}
 	element := ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(design.Space2).
 		Padding(design.Space1, design.Space2)
+	// A double click on the row opens the folder/selects the file without
+	// taking the click from the list (docs/ui/list.md RowDoubleClicked); the
+	// list's Submitted report covers Enter and accounts for double clicks too,
+	// so openFileEntry is idempotent.
+	if element.RowDoubleClicked() {
+		st.openFileEntry(entry, runtime)
+	}
 	element.ContextMenu(func(m *ui.Menu) {
 		if m.Item(openLabel).Chosen() {
 			if entry.Dir {

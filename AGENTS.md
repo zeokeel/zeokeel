@@ -18,7 +18,7 @@ internal/ui/*           14 个 UI 模块（session/toolcards/approval/interactio
 internal/uikit          共享组合：页头/小节/空态/错误行/对话框动作条/工具行
 internal/design         设计 token（颜色/字号/间距/圆角/阴影/预设）
 internal/brand          品牌层：唯一 hex 来源、主题、字体栈
-internal/icons          32 个 SVG 图标（16/24 网格不变量测试）
+internal/icons          33 个 SVG 图标（16/24 网格不变量测试）
 internal/contracts      服务契约（chat/approval/plan/team/task/...）
 internal/modules/*      后端能力模块
 ```

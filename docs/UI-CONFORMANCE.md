@@ -83,6 +83,23 @@
   `TestOpenPaneCommandsStableIDs`；ui-drive `team-*`/`tasks-*`/`palette-team` 步骤；快照
   `p2-team-chip/p2-team-detail/p2-team-spawn/p2-tasks-expanded/p2-palette-team`。
 
+## 1.3 列表选择/激活、on-accent 前景、框架 locale（2026-11-10 修复轮）
+
+- **选择 ≠ 激活**：`Selected`/`Changed` 只表示"选择"（点击、Up/Down/Home/End）；打开/进入/提交走
+  `Submitted()`（Enter/双击）或行内元素 `RowDoubleClicked()`。方向键不得触发导航（右栏文件树目录、
+  设置「归档」列表按此修；测试见 `internal/ui/rightpanel/files_test.go`、
+  `internal/ui/settings/archive_test.go`）。
+- **accent 选中行前景**：`ui.List` 以 accent 填充选中行。行内文字/图标用 `t.AccentText`；徽章用
+  `uikit.OnAccentBadge`（AccentText 填充 + accent 文字，status label 语义保留），不得保留 resting
+  前景色（暗色下实测 ≈1.2:1）。像素断言见 `internal/ui/sidebar/badge_contrast_test.go`、
+  `internal/uikit/onaccent_test.go` 与 `internal/ui/rightpanel/panels_fix_test.go`。
+- **框架 locale 与产品 locale 分离**：mygo 自己的控件/菜单/无障碍文案由 `mygo.App.SetLocale` 决定。
+  host blank-import `github.com/egoist/mygo/locales/zh-Hans`，启动时按 `ui.language` 调
+  `App.SetLocale`，运行期经 `uiroot.Config.OnLanguageChange` 同步；模块内不要直接调 `App.SetLocale`。
+  devtools（snapshot/drive）同样 link 该 catalog 并用 `Tester.SetLocale` 镜像，保证帧与产品一致。
+- **全局浮层顺序**：命令面板构建在 overlays（设置面）之后，叠在设置面之上；Esc 由最上层先消费
+  （官方 `OverlayShortcut` 语义）。设置面内 Cmd+K 必须可用，不能静默失效。
+
 ## 2. 写 UI 的固定流程
 
 1. **先查表**：本条功能在官方有没有标准件？有就先用官方组件/API，禁止先手搓。

@@ -69,7 +69,11 @@ const (
 	toastBottomInsetNarrow  float32 = design.Space8*7 + design.Space3  // 236
 	toastBottomInsetBreakAt float32 = design.Space8 * 35               // 1120
 	toastMaxWidth           float32 = design.Space8*11 + design.Space2 // 360
-	toastCloseButtonSize    float32 = design.Space5                    // 20
+	// The close control's hit area is a full 24 DIP target (mygo/DESIGN
+	// accessibility AP-17: an icon action's target is at least 24): a 20 DIP
+	// button next to the toast's action button was easy to miss on a desktop
+	// pointer. The glyph stays 16 (design.Space4), quiet.
+	toastCloseButtonSize float32 = design.Space6 // 24
 )
 
 // Config is the module's typed assembly config (all copy comes from the
@@ -482,7 +486,7 @@ func buildToast(c *ui.Context, st *state, toast ui.Toast) {
 			close = close.Background(t.BgHover)
 		}
 		close.Children(func() {
-			ui.Icon(c, icons.Close()).Size(14, 14).TextColor(t.LabelTertiary)
+			ui.Icon(c, icons.Close()).Size(design.Space4, design.Space4).TextColor(t.LabelTertiary)
 		})
 	})
 }

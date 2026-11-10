@@ -119,19 +119,73 @@ func TestArchivePageDeleteConfirmation(t *testing.T) {
 	h.assertTexts(tester, "没有归档的会话")
 }
 
-// TestArchivePageOpenSession covers clicking the title: the settings surface
-// closes, the session becomes active and the conversation screen is pushed.
+// TestArchivePageOpenSession covers the explicit open command: choosing the row
+// only selects it, Enter opens it (closes the settings surface, makes the
+// session active and pushes the conversation screen).
 func TestArchivePageOpenSession(t *testing.T) {
 	chat := &fakeChat{}
 	archiveSession(chat, "arch-1", "要打开的会话", 4, time.Now())
 	h, tester := archiveHarness(t, chat)
 	tester.Frame()
 	h.click(tester, "要打开的会话")
+	if !h.uiRoot.Navigator().SettingsOpen() {
+		t.Fatal("a single click on an archived row opened it; choosing must only select")
+	}
+	if got := chat.ActiveSession(); got == "arch-1" {
+		t.Fatal("a single click made the archived session active")
+	}
+	tester.Key(0, ui.KeyEnter)
+	tester.Frame()
 	if got := chat.ActiveSession(); got != "arch-1" {
 		t.Fatalf("active session = %q, want arch-1", got)
 	}
 	if h.uiRoot.Navigator().SettingsOpen() {
 		t.Fatal("the settings surface stayed open after opening an archived session")
+	}
+}
+
+// TestArchivePageKeyboardSelectsWithoutOpening covers ST-09: while the archived
+// list has the keyboard focus, Up/Down only move the selection; they must not
+// open a conversation or close the settings surface.
+func TestArchivePageKeyboardSelectsWithoutOpening(t *testing.T) {
+	chat := &fakeChat{}
+	archiveSession(chat, "arch-1", "第一封", 2, time.Now())
+	archiveSession(chat, "arch-2", "第二封", 2, time.Now())
+	h, tester := archiveHarness(t, chat)
+	tester.Frame()
+	// A click chooses the first row and gives the list the keyboard focus.
+	h.click(tester, "第一封")
+	for _, key := range []ui.Key{ui.KeyDown, ui.KeyDown, ui.KeyUp, ui.KeyHome, ui.KeyEnd} {
+		tester.Key(0, key)
+		tester.Frame()
+		if !h.uiRoot.Navigator().SettingsOpen() {
+			t.Fatalf("key %v closed the settings surface", key)
+		}
+		if got := chat.ActiveSession(); got == "arch-1" || got == "arch-2" {
+			t.Fatalf("key %v opened the archived session %q", key, got)
+		}
+	}
+}
+
+// TestArchivePageDoubleClickOpens covers the pointer half of the explicit open:
+// a double click on the row title opens the conversation.
+func TestArchivePageDoubleClickOpens(t *testing.T) {
+	chat := &fakeChat{}
+	archiveSession(chat, "arch-1", "双击的会话", 3, time.Now())
+	h, tester := archiveHarness(t, chat)
+	tester.Frame()
+	if err := tester.Click("双击的会话"); err != nil {
+		t.Fatalf("first click: %v", err)
+	}
+	if err := tester.Click("双击的会话"); err != nil {
+		t.Fatalf("second click: %v", err)
+	}
+	tester.Frame()
+	if got := chat.ActiveSession(); got != "arch-1" {
+		t.Fatalf("active session = %q, want arch-1", got)
+	}
+	if h.uiRoot.Navigator().SettingsOpen() {
+		t.Fatal("the settings surface stayed open after a double click")
 	}
 }
 

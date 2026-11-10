@@ -79,6 +79,13 @@ type IconButtonOptions struct {
 	// Disabled takes neither clicks nor the keyboard focus (mygo dims it to
 	// half opacity).
 	Disabled bool
+	// InkColor overrides the glyph's resting color. The zero value keeps the
+	// variant's ink (LabelSecondary, or DangerText for IconButtonDanger), so
+	// existing callers are unchanged. A non-zero color is used verbatim, for an
+	// icon action that sits on an on-accent surface: on a selected List row the
+	// glyph must take Tokens.AccentText or it disappears into the accent fill
+	// (DESIGN.md §5, AP-18).
+	InkColor ui.Color
 	// OnClick runs when the button is clicked, or pressed with Enter or Space
 	// while it has the keyboard focus.
 	OnClick func()
@@ -145,6 +152,9 @@ func IconButton(c *ui.Context, o IconButtonOptions) ui.Element {
 	color := t.LabelSecondary
 	if o.Variant == IconButtonDanger {
 		color = t.DangerText
+	}
+	if o.InkColor.A != 0 {
+		color = o.InkColor
 	}
 	button.Children(func() {
 		switch {

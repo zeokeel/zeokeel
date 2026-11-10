@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"testing"
@@ -234,14 +235,15 @@ func TestShellsAndSetShell(t *testing.T) {
 	}
 }
 
-// shellRank returns a shell's index in the preference list.
+// shellRank returns a shell's index in the current platform's preference list.
 func shellRank(name string) int {
-	for index, candidate := range shellPreference {
+	candidates := shellCandidates(runtime.GOOS)
+	for index, candidate := range candidates {
 		if candidate == name {
 			return index
 		}
 	}
-	return len(shellPreference)
+	return len(candidates)
 }
 
 func TestRunSuccessAndWorkingDirectory(t *testing.T) {
@@ -443,5 +445,71 @@ func TestDecodeCombinedOutput(t *testing.T) {
 				t.Fatalf("decodeCombinedOutput returned invalid UTF-8 %q", got)
 			}
 		})
+	}
+}
+
+// TestShellCandidates pins each platform's shell preference and the argv each
+// shell needs for one command: the runner used to hard-code "<shell> -c", which
+// is not how PowerShell or cmd runs a command string.
+func TestShellCandidates(t *testing.T) {
+	cases := []struct {
+		goos string
+		want []string
+	}{
+		{"windows", []string{"pwsh", "powershell", "cmd"}},
+		{"linux", []string{"bash", "sh", "zsh"}},
+		{"darwin", []string{"bash", "sh", "zsh"}},
+	}
+	for _, testCase := range cases {
+		got := shellCandidates(testCase.goos)
+		if len(got) != len(testCase.want) {
+			t.Fatalf("shellCandidates(%q) = %v, want %v", testCase.goos, got, testCase.want)
+		}
+		for index := range testCase.want {
+			if got[index] != testCase.want[index] {
+				t.Fatalf("shellCandidates(%q) = %v, want %v", testCase.goos, got, testCase.want)
+			}
+		}
+	}
+	// The discovered shells are a filtered subset of the candidates.
+	candidates := shellCandidates(runtime.GOOS)
+	discovered := discoverShells()
+	seen := make(map[string]bool, len(candidates))
+	for _, name := range candidates {
+		seen[name] = true
+	}
+	for _, name := range discovered {
+		if !seen[name] {
+			t.Fatalf("discoverShells returned %q, which is not in shellCandidates(%q) = %v",
+				name, runtime.GOOS, candidates)
+		}
+	}
+}
+
+func TestShellArgs(t *testing.T) {
+	cases := []struct {
+		goos  string
+		shell string
+		want  []string
+	}{
+		{"windows", "pwsh", []string{"-NoProfile", "-Command"}},
+		{"windows", "pwsh.exe", []string{"-NoProfile", "-Command"}},
+		{"windows", "powershell", []string{"-NoProfile", "-Command"}},
+		{"windows", "cmd", []string{"/C"}},
+		{"windows", "cmd.exe", []string{"/C"}},
+		{"linux", "bash", []string{"-c"}},
+		{"linux", "zsh", []string{"-c"}},
+		{"darwin", "sh", []string{"-c"}},
+	}
+	for _, testCase := range cases {
+		got := shellArgs(testCase.goos, testCase.shell)
+		if len(got) != len(testCase.want) {
+			t.Fatalf("shellArgs(%q, %q) = %v, want %v", testCase.goos, testCase.shell, got, testCase.want)
+		}
+		for index := range testCase.want {
+			if got[index] != testCase.want[index] {
+				t.Fatalf("shellArgs(%q, %q) = %v, want %v", testCase.goos, testCase.shell, got, testCase.want)
+			}
+		}
 	}
 }

@@ -67,6 +67,21 @@ type presetsState struct {
 
 func newPresetsState() *presetsState { return &presetsState{sel: -1, agentSel: -1} }
 
+// presetsDraftDirty reports whether the 新增预设 form holds an unsaved draft.
+// The agent-preset dialog owns its own form and is not page state.
+func presetsDraftDirty(st *presetsState) bool {
+	return strings.TrimSpace(st.name) != "" || strings.TrimSpace(st.prompt) != ""
+}
+
+// discardPresetsDraft clears the 新增预设 draft and the page status, so the
+// host's Discard action reopens a clean presets page.
+func discardPresetsDraft(st *presetsState) {
+	st.name = ""
+	st.prompt = ""
+	st.status = ""
+	st.statusErr = false
+}
+
 // load reads the settings row once. Empty/malformed values keep the built-in
 // defaults visible; malformed JSON also records the parse error for DangerText.
 func (st *presetsState) load(store contracts.SettingsService, locale contracts.LocaleService) {

@@ -5,6 +5,7 @@ package toolcards_test
 // native collapsibles and the demo card keeps its historical output.
 
 import (
+	"fmt"
 	"strings"
 	"time"
 
@@ -442,5 +443,70 @@ func TestTeamToolFooterRunsInspectorCommand(t *testing.T) {
 	}}, nil, nil)
 	if plain.tester().HasText("在团队中查看") {
 		t.Fatal("team footer shown without the inspector command")
+	}
+}
+
+// TestFoldStateMapIsBounded covers S-07: the per-card disclosure state must not
+// grow for the lifetime of the process (one long agent run can render thousands
+// of calls). Past the bound the least recently rendered cards are evicted and
+// fall back to their H15 default; a card that stays on screen keeps its state.
+func TestFoldStateMapIsBounded(t *testing.T) {
+	h := newHarness(t)
+	activate(t, h.ctx, toolcards.Module(), toolcards.Config{})
+
+	var calls []contracts.ToolCall
+	if _, err := h.ui.Runtime().RegisterScreen(contracts.ScreenSpec{
+		ID:    "test.fold-state",
+		Title: "折叠状态",
+		Build: func(c *ui.Context) {
+			for _, call := range calls {
+				h.ui.Runtime().RenderTool(c, call)
+			}
+		},
+	}); err != nil {
+		t.Fatalf("register test screen: %v", err)
+	}
+	tester := h.tester()
+
+	// A long successful result starts folded (H15); the reader expands it, which
+	// is the state that must survive while the card is on screen.
+	longSummary := strings.Repeat("细节", 100) // > 160 runes: the H15 default is folded
+	kept := contracts.ToolCall{ID: "keep-1", Name: "bash", Status: "ok", Summary: longSummary}
+	calls = []contracts.ToolCall{kept}
+	tester.Frame()
+	info, ok := tester.AccessByRole(ui.RoleDisclosure, "运行命令 · 完成")
+	if !ok {
+		t.Fatalf("kept card disclosure missing")
+	}
+	if info.Expanded {
+		t.Fatalf("long successful result should default folded")
+	}
+	tester.ClickAt(info.Bounds.X+info.Bounds.W/2, info.Bounds.Y+info.Bounds.H/2)
+	tester.Frame()
+	info, ok = tester.AccessByRole(ui.RoleDisclosure, "运行命令 · 完成")
+	if !ok || !info.Expanded {
+		t.Fatalf("the reader's expansion was not kept: %+v found %v", info, ok)
+	}
+
+	// Flood the fold map well past its bound while the kept card is off screen:
+	// it becomes the least recently rendered entry and is evicted.
+	calls = make([]contracts.ToolCall, 0, 1024)
+	for index := 0; index < 1024; index++ {
+		calls = append(calls, contracts.ToolCall{
+			ID: fmt.Sprintf("fill-%d", index), Name: "bash", Status: "ok", Summary: longSummary,
+		})
+	}
+	tester.Frame()
+
+	// Back to the kept card alone: the evicted state is gone, so it starts from
+	// the H15 default again instead of the map growing forever.
+	calls = []contracts.ToolCall{kept}
+	tester.Frame()
+	info, ok = tester.AccessByRole(ui.RoleDisclosure, "运行命令 · 完成")
+	if !ok {
+		t.Fatalf("kept card disclosure missing after the flood")
+	}
+	if info.Expanded {
+		t.Fatalf("the fold map kept an evicted entry; the state is not bounded")
 	}
 }

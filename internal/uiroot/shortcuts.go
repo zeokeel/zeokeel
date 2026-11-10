@@ -159,6 +159,42 @@ func (r *Root) shortcutNavigator(kernel cordis.Context) contracts.Navigator {
 	return r.nav
 }
 
+// paletteShortcut resolves the command palette chord from the user's settings,
+// falling back to the documented default. The settings surface re-binds the
+// same chord in its own focus scope (fix round SH-07), so both callers must
+// read it the same way.
+func (r *Root) paletteShortcut() (ui.Modifiers, ui.Key) {
+	mods, key := ui.Cmd, ui.KeyK
+	if r.settingsService != nil {
+		if parsedMods, parsedKey, ok := parseShortcutChord(r.settingsService.Get(contracts.SettingsUIShortcutCommandPalette,
+			contracts.DefaultShortcutCommandPalette)); ok {
+			mods, key = parsedMods, parsedKey
+		}
+	}
+	return mods, key
+}
+
+// togglePalette opens or closes the host command palette, as Cmd/Ctrl+K does.
+// Opening it starts from a fresh query and a fresh choice every time.
+func (r *Root) togglePalette() {
+	r.paletteOpen = !r.paletteOpen
+	r.paletteQuery = ""
+	r.paletteFilter = ""
+	r.paletteSelected = 0
+	r.paletteCount = 0
+	if r.paletteOpen {
+		// The palette is a transient overlay: its list state must not outlive
+		// one opening. A reused ListState follows the previous opening's chosen
+		// item into the new list and writes that old index back into the
+		// selection while the frame builds, which left a reopened palette with
+		// no visible chosen row while Enter still ran one (fix round SH-02).
+		// The reset happens here, at the frame boundary, never while the list
+		// of the closing frame is still building.
+		r.paletteList = ui.ListState{}
+	}
+	r.requestFrame()
+}
+
 // bindChromeShortcuts registers the two configurable chrome shortcuts from the
 // host settings (falling back to the documented defaults) plus the built-in
 // Cmd/Ctrl+N and Cmd/Ctrl+, actions. It runs every frame, so a settings change
@@ -185,20 +221,8 @@ func (r *Root) bindChromeShortcuts(c *ui.Context) {
 	}
 	c.OnShortcut(toggleMods, toggleKey, guardRepeat(r.ToggleSidebarCollapsed))
 
-	paletteMods, paletteKey := ui.Cmd, ui.KeyK
-	if r.settingsService != nil {
-		if mods, key, ok := parseShortcutChord(r.settingsService.Get(contracts.SettingsUIShortcutCommandPalette,
-			contracts.DefaultShortcutCommandPalette)); ok {
-			paletteMods, paletteKey = mods, key
-		}
-	}
-	c.OnShortcut(paletteMods, paletteKey, guardRepeat(func() {
-		r.paletteOpen = !r.paletteOpen
-		r.paletteQuery = ""
-		r.paletteFilter = ""
-		r.paletteSelected = 0
-		r.requestFrame()
-	}))
+	paletteMods, paletteKey := r.paletteShortcut()
+	c.OnShortcut(paletteMods, paletteKey, guardRepeat(r.togglePalette))
 
 	// Built-in inspector shortcut: the right panel has a visible toggle, and a
 	// keyboard path so the keyboard-first shell reaches it without a mouse. The

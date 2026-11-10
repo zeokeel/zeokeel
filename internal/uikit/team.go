@@ -66,8 +66,10 @@ const (
 	teamCompactActionHeight float32 = 26
 	// teamSpawnPromptHeight is the spawn form's task textarea height (92).
 	teamSpawnPromptHeight float32 = 92
-	// teamTimelineClockWidth is the activity timeline's clock column (48).
-	teamTimelineClockWidth float32 = 48
+	// teamTimelineClockWidth is the activity timeline's clock column (64 =
+	// Space8*2): wide enough for the English clock format "3:04:05 PM" so the
+	// column never wraps into two lines.
+	teamTimelineClockWidth float32 = design.Space8 * 2
 	// teamNoMinWidth lets a growing text shrink to an ellipsis inside a row
 	// (0: no minimum besides the layout's own).
 	teamNoMinWidth float32 = 0
@@ -438,20 +440,50 @@ func (o *TeamSurfaceOptions) clearActionFeedback() {
 // current activity and the run meta.
 func teamMemberRow(row ui.ListRow, t *design.Tokens, o TeamSurfaceOptions, member contracts.TeamMember) {
 	c := row.Context
+	chosen := row.Selected()
 	name := teamMemberDisplayName(member)
 	label, kind := teamTeammateRunBadge(&o, member)
 	activity, activityColor := teamTeammateActivityLine(t, &o, member)
+	// The native List paints the chosen row in the accent fill: every piece of
+	// text on it must switch to the on-accent foreground, or the row becomes the
+	// one unreadable row in the pane (DESIGN.md §5, AP-18; uiroot's palette and
+	// the sidebar's session row do the same).
+	nameColor, metaColor := t.LabelPrimary, t.LabelTertiary
+	if chosen {
+		nameColor, metaColor, activityColor = t.AccentText, t.AccentText, t.AccentText
+	}
 	ui.Column(c).FillWidth().Padding(design.Space2, design.Space2).Gap(design.Space1).Children(func() {
 		ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(design.Space2).Children(func() {
 			design.Apply(ui.Text(c, name), t.Font(design.TypeS)).FontWeight(teamHeadingWeight).
-				TextColor(t.LabelPrimary).Grow(1).MaxLines(1).Ellipsis("…")
-			StatusBadge(c, t, kind, label)
+				TextColor(nameColor).Grow(1).MaxLines(1).Ellipsis("…")
+			teamRowBadge(c, t, chosen, kind, label)
 		})
 		design.Apply(ui.Text(c, activity), t.Font(design.TypeXXS)).
 			TextColor(activityColor).MaxLines(2).Ellipsis("…")
 		design.Apply(ui.Text(c, teamTeammateMeta(&o, member)), t.Font(design.TypeXXXS)).
-			TextColor(t.LabelTertiary).MaxLines(1).Ellipsis("…")
+			TextColor(metaColor).MaxLines(1).Ellipsis("…")
 	})
+}
+
+// teamRowBadge paints one status badge of a native List row: on a selected
+// (accent fill) row it inverts through OnAccentBadge so the label stays
+// readable, elsewhere it keeps the semantic tinted StatusBadge.
+func teamRowBadge(c *ui.Context, t *design.Tokens, chosen bool, kind StatusKind, label string) {
+	if chosen {
+		OnAccentBadge(c, label, t)
+		return
+	}
+	StatusBadge(c, t, kind, label)
+}
+
+// teamOnAccentInk returns the IconButton ink for one row action: the on-accent
+// foreground while the row is selected, otherwise the zero color (the button's
+// own resting ink).
+func teamOnAccentInk(t *design.Tokens, chosen bool) ui.Color {
+	if chosen {
+		return t.AccentText
+	}
+	return ui.Color{}
 }
 
 // teamSubagentSection is the read-only "同步子代理" group of the active
@@ -613,8 +645,10 @@ func teamTeammateDetail(c *ui.Context, t *design.Tokens, o TeamSurfaceOptions, m
 					if !entry.Time.IsZero() {
 						clock = FormatClock(o.Locale, entry.Time)
 					}
+					// The clock is one short line: no wrap, and the column is
+					// wide enough for the English "3:04:05 PM" (64 DIP).
 					design.Apply(ui.Text(c, clock), t.Font(design.TypeXXXS)).
-						TextColor(t.LabelTertiary).Width(teamTimelineClockWidth)
+						TextColor(t.LabelTertiary).NoWrap().Width(teamTimelineClockWidth)
 					textColor := t.LabelSecondary
 					if entry.Error {
 						textColor = t.DangerText
@@ -707,22 +741,27 @@ func teamCloseConfirmationState(o *TeamSurfaceOptions) {
 // marker, the status badge, the model/mode line and the task/output summary.
 func teamSubagentRow(row ui.ListRow, t *design.Tokens, o TeamSurfaceOptions, activity contracts.SubagentActivity) {
 	c := row.Context
+	chosen := row.Selected()
 	name := teamSubagentDisplayName(activity)
+	nameColor, metaColor := t.LabelPrimary, t.LabelTertiary
+	if chosen {
+		nameColor, metaColor = t.AccentText, t.AccentText
+	}
 	ui.Column(c).FillWidth().Padding(design.Space2, design.Space2).Gap(design.Space1).Children(func() {
 		ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(design.Space2).Children(func() {
 			design.Apply(ui.Text(c, name), t.Font(design.TypeS)).FontWeight(teamHeadingWeight).
-				TextColor(t.LabelPrimary).Grow(1).MaxLines(1).Ellipsis("…")
+				TextColor(nameColor).Grow(1).MaxLines(1).Ellipsis("…")
 			// The type marker is not a status, but it shares the pane's one
 			// tinted badge anatomy (F-1): a plain BgHover badge here used to be
 			// the odd one out beside the status badges.
-			StatusBadge(c, t, StatusUnknown, o.tr("子代理", "Subagent"))
+			teamRowBadge(c, t, chosen, StatusUnknown, o.tr("子代理", "Subagent"))
 			// A synchronous delegation reports the tool-status vocabulary
 			// (running/done/error/cancelled), so it folds and labels with it.
-			StatusBadge(c, t, ParseToolStatus(activity.Status).Kind(),
+			teamRowBadge(c, t, chosen, ParseToolStatus(activity.Status).Kind(),
 				ToolStatusLabel(o.Locale, activity.Status))
 		})
 		design.Apply(ui.Text(c, teamSubagentRowMeta(o.Locale, activity)), t.Font(design.TypeXXXS)).
-			TextColor(t.LabelTertiary).MaxLines(1).Ellipsis("…")
+			TextColor(metaColor).MaxLines(1).Ellipsis("…")
 		summary := strings.TrimSpace(activity.Detail)
 		if summary == "" {
 			summary = strings.TrimSpace(activity.Prompt)
@@ -731,7 +770,7 @@ func teamSubagentRow(row ui.ListRow, t *design.Tokens, o TeamSurfaceOptions, act
 			summary = o.tr("运行中，等待结果…", "Running — waiting for the result…")
 		}
 		design.Apply(ui.Text(c, summary), t.Font(design.TypeXXS)).
-			TextColor(t.LabelTertiary).MaxLines(2).Ellipsis("…")
+			TextColor(metaColor).MaxLines(2).Ellipsis("…")
 	})
 }
 
@@ -1388,6 +1427,7 @@ func teamTaskGroupHeader(row ui.ListRow, t *design.Tokens, o TeamSurfaceOptions,
 // (while expanded) the task detail with the inline transitions.
 func teamTaskRowView(row ui.ListRow, t *design.Tokens, o TeamSurfaceOptions, task contracts.BoardTask) {
 	c := row.Context
+	chosen := row.Selected()
 	subject := teamFirstNonEmpty(task.Subject, task.ID)
 	// The full task menu is shared by the ⋯ button and a right-click on the row
 	// (mygo context-menu.md: one build function fills both menus).
@@ -1426,28 +1466,35 @@ func teamTaskRowView(row ui.ListRow, t *design.Tokens, o TeamSurfaceOptions, tas
 		// button and the ⋯ control used to squeeze the subject to one visible
 		// character. Status badge + subject + actions, then a secondary line with
 		// the owner and the dependency/readiness state.
+		subjectColor := t.LabelPrimary
+		if chosen {
+			subjectColor = t.AccentText
+		}
 		ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(design.Space2).Children(func() {
-			StatusBadge(c, t, ParseTaskStatus(task.Status).Kind(),
+			teamRowBadge(c, t, chosen, ParseTaskStatus(task.Status).Kind(),
 				TaskStatusLabel(o.Locale, task.Status))
 			design.Apply(ui.Text(c, subject), t.Font(design.TypeS)).FontWeight(teamHeadingWeight).
-				TextColor(t.LabelPrimary).Grow(1).MinWidth(teamNoMinWidth).MaxLines(1).Ellipsis("…")
+				TextColor(subjectColor).Grow(1).MinWidth(teamNoMinWidth).MaxLines(1).Ellipsis("…")
 			menuLabel := o.tr("任务操作：", "Task actions: ") + subject
 			more := IconButton(c, IconButtonOptions{
-				Key:     "uikit.team.task.more",
-				Label:   menuLabel,
-				Tooltip: menuLabel,
-				Icon:    icons.More(),
-				Size:    design.IconSizeS,
+				Key:      "uikit.team.task.more",
+				Label:    menuLabel,
+				Tooltip:  menuLabel,
+				Icon:     icons.More(),
+				Size:     design.IconSizeS,
+				InkColor: teamOnAccentInk(t, chosen),
 			})
 			more.PopoverMenuButton(taskMenu)
 		})
 		ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(design.Space2).Children(func() {
-			teamTaskOwnerControl(c, t, o, task)
+			teamTaskOwnerControl(c, t, o, task, chosen)
 			// The dependency line is suppressed while the detail panel is open
-			// below the list (the panel repeats it readably; on the accent
-			// selection background the warning copy is hard to read).
+			// below the list (the panel repeats it readably).
 			if derefString(o.ExpandedTask) != task.ID {
 				if label, color := teamTaskDependencyStatus(o, t, task); label != "" {
+					if chosen {
+						color = t.AccentText
+					}
 					design.Apply(ui.Text(c, label), t.Font(design.TypeXXXS)).
 						TextColor(color).Grow(1).MinWidth(teamNoMinWidth).MaxLines(1).Ellipsis("…")
 				}
@@ -1460,10 +1507,13 @@ func teamTaskRowView(row ui.ListRow, t *design.Tokens, o TeamSurfaceOptions, tas
 // teamTaskOwnerControl is the row's owner: the optional assigner turns it into
 // a menu (未认领 / 主代理 / each live teammate); without it the owner stays a
 // read-only line.
-func teamTaskOwnerControl(c *ui.Context, t *design.Tokens, o TeamSurfaceOptions, task contracts.BoardTask) {
+func teamTaskOwnerControl(c *ui.Context, t *design.Tokens, o TeamSurfaceOptions, task contracts.BoardTask, chosen bool) {
 	label, color := teamTaskOwnerDisplay(t, &o, task.Owner)
 	if !o.CanAssign || o.OnAssign == nil {
-		design.Apply(ui.Text(c, o.tr("负责人：", "Owner: ")+label), t.TextMuted(design.TypeXXS)).MaxLines(1)
+		ownerText := design.Apply(ui.Text(c, o.tr("负责人：", "Owner: ")+label), t.TextMuted(design.TypeXXS)).MaxLines(1)
+		if chosen {
+			ownerText = ownerText.TextColor(t.AccentText)
+		}
 		return
 	}
 	menu := func(m *ui.Menu) {
@@ -1486,8 +1536,15 @@ func teamTaskOwnerControl(c *ui.Context, t *design.Tokens, o TeamSurfaceOptions,
 		}
 	}
 	button := ui.PopoverMenuButton(c, o.tr("负责人：", "Owner: ")+label, menu)
-	button = design.Apply(button, t.SecondaryButton()).Height(design.Space6)
-	button.TextColor(color)
+	if chosen {
+		// On the selected (accent) row the owner control is a ghost action on
+		// the accent fill: the on-accent foreground keeps it readable, and a
+		// raised pill's own surface no longer fights the selection.
+		button = button.Height(design.Space6).TextColor(t.AccentText)
+	} else {
+		button = design.Apply(button, t.SecondaryButton()).Height(design.Space6)
+		button = button.TextColor(color)
+	}
 	button.Tooltip(o.tr("负责人：", "Owner: ") + label)
 }
 
@@ -1587,19 +1644,31 @@ func teamTaskAddRow(c *ui.Context, t *design.Tokens, o TeamSurfaceOptions) {
 	if o.TaskDraft == nil {
 		return
 	}
+	// One submit path for the button and for Enter in the field (mygo
+	// text-input.md: Submitted is Enter in a text input; the memory add row and
+	// the terminal input submit the same way), so a keyboard user never has to
+	// reach for the add button.
+	submit := func() {
+		subject := strings.TrimSpace(*o.TaskDraft)
+		if subject == "" {
+			return
+		}
+		if o.OnTaskCreate != nil {
+			o.OnTaskCreate(subject)
+		}
+		o.invalidate()
+	}
 	ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(design.Space2).Children(func() {
-		ui.TextInput(c, o.TaskDraft).
+		input := ui.TextInput(c, o.TaskDraft).
 			Label(o.tr("新任务", "New task")).
 			Placeholder(o.tr("输入任务标题", "Task subject")).
 			FillWidth()
+		input.OnSubmit(submit)
 		subject := strings.TrimSpace(*o.TaskDraft)
 		add := design.Apply(ui.PrimaryButton(c, o.tr("添加", "Add")), t.PrimaryButton()).
 			Disabled(subject == "")
 		if add.Clicked() && subject != "" {
-			if o.OnTaskCreate != nil {
-				o.OnTaskCreate(subject)
-			}
-			o.invalidate()
+			submit()
 		}
 	})
 }

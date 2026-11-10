@@ -1136,7 +1136,10 @@ func clearQueuedPrompts(st *state, sessionID string) {
 // belongs to is no longer running. It runs from the module-level chat
 // subscription (and the screen's fallback check), so it works whichever screen
 // is visible, and a queue paused by 停止 waits for the user. A failed Send keeps
-// the prompt and surfaces the danger line; the next notification retries it.
+// the prompt and surfaces the danger line, and it also PAUSES the queue: a
+// delivery failure must never be retried on every frame by the screen's
+// frame-time fallback (that was a self-sustaining redraw + Send loop). The
+// queue popover/error row's explicit 重试 clears the pause and tries again.
 func processQueuedPrompts(chat contracts.ChatService, st *state, sessionID string) {
 	if st == nil || chat == nil {
 		return
@@ -1156,6 +1159,9 @@ func processQueuedPrompts(chat contracts.ChatService, st *state, sessionID strin
 	prompt := queue[0]
 	if err := chat.Send(sessionID, prompt); err != nil {
 		st.setQueueError(sessionID, st.tr("排队发送失败：", "Queued send failed: ")+err.Error())
+		// Pause the queue so the screen's frame-time fallback stops re-sending
+		// the same prompt every frame; the user resumes explicitly (重试).
+		pauseQueue(st, sessionID)
 		return
 	}
 	st.setQueueError(sessionID, "")

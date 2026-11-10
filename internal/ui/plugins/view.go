@@ -525,7 +525,7 @@ func buildToolsSection(
 		}
 		// The count follows the search and the disabled-only filter, so it always
 		// names what shows.
-		filtered := filterCatalog(catalog, st.query)
+		filtered := filterCatalog(st, catalog, st.query)
 		if st.toolsDisabledOnly {
 			filtered = filterDisabledCatalog(st, filtered)
 		}
@@ -679,16 +679,22 @@ func sortCatalogByCategory(catalog []catalogTool) []catalogTool {
 	return ordered
 }
 
-// filterCatalog keeps the tools whose name or description contains the query,
-// case insensitively. An empty query keeps every tool.
-func filterCatalog(catalog []catalogTool, query string) []catalogTool {
+// filterCatalog keeps the tools whose visible text — the name, the one-line
+// summary the row shows in the current language, and the category label —
+// contains the query, case insensitively. An empty query keeps every tool.
+// The raw model-facing description is deliberately not searchable: it is not
+// shown on the page (it lives in the row tooltip), so matching it would list
+// rows whose visible copy does not contain the query (for example "memory"
+// matches the team tool through its "in-memory manager" documentation).
+func filterCatalog(st *state, catalog []catalogTool, query string) []catalogTool {
 	needle := strings.ToLower(strings.TrimSpace(query))
 	if needle == "" {
 		return catalog
 	}
 	filtered := make([]catalogTool, 0, len(catalog))
 	for _, tool := range catalog {
-		haystack := strings.ToLower(tool.Name + "\x00" + tool.Description)
+		haystack := strings.ToLower(tool.Name + "\x00" + toolDescriptionLine(st, tool) +
+			"\x00" + st.categoryLabel(toolCategory(tool.Name)))
 		if strings.Contains(haystack, needle) {
 			filtered = append(filtered, tool)
 		}

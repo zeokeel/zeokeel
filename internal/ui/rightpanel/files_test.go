@@ -311,6 +311,20 @@ func clickCrumb(t *testing.T, tester *ui.Tester, name string) {
 	tester.Frame()
 }
 
+// openEntry activates one directory row the way the Files list now opens it:
+// a single click only chooses the row, and the list's Submitted action (Enter,
+// or a double click) opens it. The pointer click picks the row first so the
+// keyboard focus is on the native list.
+func openEntry(t *testing.T, tester *ui.Tester, label string) {
+	t.Helper()
+	if err := tester.Click(label); err != nil {
+		t.Fatalf("choose row %q: %v; texts = %v", label, err, tester.Texts())
+	}
+	tester.Frame()
+	tester.Key(0, ui.KeyEnter)
+	tester.Frame()
+}
+
 func TestFilesNavigationAndBreadcrumb(t *testing.T) {
 	workspace := filesTreeWorkspace()
 	h := newHarnessWithWorkspace(t, newFakeChat(), rightpanel.Config{}, workspace)
@@ -324,7 +338,7 @@ func TestFilesNavigationAndBreadcrumb(t *testing.T) {
 
 	// Enter a directory, then a nested one; the breadcrumb grows and the last
 	// crumb is the current page (the earlier ones are links that navigate).
-	h.click(tester, "docs")
+	openEntry(t, tester, "docs")
 	h.assertTexts(tester, "api", "readme.md")
 	if _, ok := tester.AccessByRole(ui.RoleLink, "proj"); !ok {
 		t.Fatalf("root crumb is not a link; texts = %v", tester.Texts())
@@ -333,7 +347,7 @@ func TestFilesNavigationAndBreadcrumb(t *testing.T) {
 	if !ok || page.Current != ui.CurrentPage {
 		t.Fatalf("current crumb = %+v found %v, want the current page", page, ok)
 	}
-	h.click(tester, "api")
+	openEntry(t, tester, "api")
 	h.assertTexts(tester, "spec.md")
 	if _, ok := tester.AccessByRole(ui.RoleText, "api"); !ok {
 		t.Fatalf("nested current crumb missing; texts = %v", tester.Texts())
@@ -370,7 +384,7 @@ func TestFilesBreadcrumbDeepPathCollapses(t *testing.T) {
 	tester := h.tester()
 	h.selectPane(tester, "文件")
 	for _, name := range []string{"a", "b", "c", "d", "e"} {
-		h.click(tester, name)
+		openEntry(t, tester, name)
 	}
 	h.assertTexts(tester, "leaf.md", "…", "d", "e")
 	if _, ok := tester.AccessByRole(ui.RoleLink, "a"); !ok {
@@ -403,7 +417,7 @@ func TestFilesTextAndMarkdownPreview(t *testing.T) {
 	h.assertTexts(tester, "选择文件以预览")
 
 	// Markdown file: rendered by the official view (heading/list markers gone).
-	h.click(tester, "docs")
+	openEntry(t, tester, "docs")
 	if err := tester.Click("readme.md"); err != nil {
 		t.Fatalf("open readme: %v; texts = %v", err, tester.Texts())
 	}

@@ -263,7 +263,9 @@ func (st *appearanceState) syncHotkeyDraft(locale contracts.LocaleService) {
 func buildGlobalHotkeySection(c *ui.Context, t *design.Tokens, state *appearanceState,
 	store contracts.SettingsService, locale contracts.LocaleService) {
 	uikit.Section(c, localized(locale, "全局热键", "Global hotkey"), func(*ui.Context) {
-		ui.Field(c, localized(locale, "全局热键", "Global hotkey"), func() {
+		// The section is already titled 全局热键; the field names the value itself
+		// so assistive technology does not read the same label twice (L-02).
+		ui.Field(c, localized(locale, "组合键", "Shortcut"), func() {
 			if state.capturing {
 				capture := ui.TextInput(c, &state.captureText).
 					Label(localized(locale, "录制全局热键", "Record global hotkey")).
@@ -279,7 +281,7 @@ func buildGlobalHotkeySection(c *ui.Context, t *design.Tokens, state *appearance
 				}
 			} else {
 				input := ui.TextInput(c, &state.hotkeyText).
-					Label(inputLabel(locale, localized(locale, "全局热键", "Global hotkey"))).
+					Label(inputLabel(locale, localized(locale, "组合键", "Shortcut"))).
 					Placeholder("Cmd/Ctrl + Shift + Space").FillWidth()
 				if input.Changed() {
 					state.syncHotkeyDraft(locale)

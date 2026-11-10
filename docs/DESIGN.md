@@ -182,6 +182,8 @@
 5. **a11y 默认接上**：无文本控件 `Label`；heading 用 `RoleHeading`+`Level`；错误 `RoleAlert`；异步结果 `c.Announce`；自绘行/面板补 role 与状态。
 6. **主题与缩放**：颜色/字号只经 `design.Of(c)` → `t.Font/t.Text/t.TextMuted`；`TextScale` 只作用于文字，不作用于间距/控件度量。
 7. **Fluent 默认值不重复设置**：`editor.State`/`markdown.Options`/`richtext.EditorOptions` 零值即默认；不要为了"看起来对"堆配置。
+8. **选择与激活分离**：`ui.List` 的 `Selected`/`Changed` 只表达"选择"（点击或方向键）；"打开/进入/提交"必须走 `Submitted()`（Enter/双击）或行内 `RowDoubleClicked()`。方向键/Home/End 不得触发导航或提交（文件树目录、设置归档列表等入口均按此修）。
+9. **accent 选中行的前景**：List 用 accent 填充选中行；行内文字/图标改用 `t.AccentText`，徽章用 `uikit.OnAccentBadge`（AccentText 填充 + accent 文字，label 语义保留），不得保留 resting 前景色（暗色下实测 ≈1.2:1 不可读）。
 
 ### 1.4 选用决策顺序
 
@@ -552,6 +554,7 @@ uikit.ToolRow(c, uikit.ToolRowOptions{
 | 页面结构 | `PageHeader` / `Section` / `PageHeaderAction` / `SectionAction` | 页头/小节/动作位置（heading role 已内置） |
 | 空态/错误 | `EmptyState` / `EmptyStateBlock` / `ErrorLine` | 空态文案 / 带下一步动作 / RoleAlert 错误行 |
 | 只读展示 | `KeyValueRows` / `Bullet` | 属性表（值可选中）/ 项目符号 |
+| 列表行强调 | `OnAccentBadge` | List 选中 accent 行上的可读徽章（AccentText 填充 + accent 文字；status label 语义保留） |
 | 对话框 | `DialogFooter` + `DialogAction` | 唯一动作条：危险→次要→主操作（最右）；`Default` 仅无文本输入时用；危险确认只把 Default 给安全动作（取消），危险动作永不为 Default；审批无 Default |
 | 工具行 | `ToolRow` + `ToolRowOptions` / `ToolPanelSectionView` / `ToolPreview` / `ToolDisplayName` / `ToolIcon` | 工具调用统一解剖（图标/名/状态/预览/详情段/团队跳转） |
 | 输入辅助 | `EnterTo` | 单行输入 Enter→动作（有文本输入时替代 Default） |
@@ -574,7 +577,7 @@ uikit.ToolRow(c, uikit.ToolRowOptions{
 | `uikit.RunStatus` | **已有**（Phase 3c） | 生成中/不伪造进度、队列、停止、重试、用量折叠 |
 | `uikit.ErrorPanel` | 暂缓（无调用点） | 行内错误用 `uikit.ErrorLine`；会话级错误带在 SessionThread；需要大块错误面板时再建 |
 | `uikit.StatusText` / `StatusBadge` | **已有**（Phase 2b） | 13 个重复状态函数已收敛；域词表（Tool/Run/Task）保留，`active` 不再当 running |
-| `uikit.IconButton` | **已有**（Phase 2a） | 12 处纯图标 `ButtonBase` 已迁移；统一 hover/pressed/focus/Label、≥24 命中区、IconSize token |
+| `uikit.IconButton` | **已有**（Phase 2a） | 12 处纯图标 `ButtonBase` 已迁移；统一 hover/pressed/focus/Label、≥24 命中区、IconSize token；`IconButtonOptions.InkColor`（零值=默认前景）供 on-accent 行使用 |
 | `design.TypeMono` / `t.MonoText(role)` | **已有**（Phase 1b） | 7 处裸 mono `FontSize` 已迁移，随 TextScale |
 
 > 新建顺序（按收益/风险）：`IconButton` → `StatusText/StatusBadge` → `ToolRow` 收编 → `TypeMono` → `ShadowOverlay` 替换 → 对话框宽度 token → 其余表面入口。
@@ -762,7 +765,7 @@ go run ./internal/devtools/ui-snapshot .cache/ui-conformance   # 生成 PNG 并�
 | 指标 | 数值 |
 |---|---|
 | UI 模块 / 壳层代码 | 14 个模块（`internal/ui` 非测试 30,698 行）；`internal/uiroot` 3,430 行 |
-| 设计层 | `internal/brand` + `internal/design` + `internal/uikit`（共享组合，见 §6.2）+ `internal/icons`（32 SVG / 31 accessor） |
+| 设计层 | `internal/brand` + `internal/design` + `internal/uikit`（共享组合，见 §6.2）+ `internal/icons`（33 SVG / 33 accessor；2026-11-10 修复轮新增 Home） |
 | 官方件用量 | `ui.List` 31、`ui.Scroll` 13、`ui.Modal` 24、`ui.AlertDialog` 15、`uikit.DialogFooter` 33、`PopoverMenuButton` 21、`Collapsible` 18、`SearchField` 10 |
 | 按钮 | `ui.PrimaryButton` 22 / `ui.Button` 109；`ui.Toggle` 3 / `ui.Switch` 7 |
 | 状态 | `c.Key` 48；重复状态映射函数 0（Phase 2b）；工具卡渲染路径 2（Phase 2c） |

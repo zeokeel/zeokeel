@@ -159,6 +159,48 @@ func TestQueueSendFailureKeepsPromptAndShowsError(t *testing.T) {
 	}
 }
 
+// TestQueueSendFailureDoesNotRetryEveryFrame is the S-01 regression: a failed
+// queued delivery pauses the queue, and the screen's frame-time fallback must
+// not re-send the same prompt every frame (that was a self-sustaining redraw +
+// Send loop). The explicit 重试 action is the only retry path, and it clears
+// the pause and the error.
+func TestQueueSendFailureDoesNotRetryEveryFrame(t *testing.T) {
+	settings := sendWhileRunningSettings(true)
+	h := newPermissionHarness(t, runningChat(), settings)
+	h.chat.sendErr = errors.New("agent busy")
+	tester := h.tester()
+	queueFocusComposer(t, tester, "排队")
+	tester.Type("会失败")
+	tester.Frame()
+	h.click(tester, "排队")
+	h.chat.updateSession(contracts.ChatSession{ID: "sess-1", Title: "排队测试"})
+	tester.Frame()
+	if got := h.chat.attempts(); got != 1 {
+		t.Fatalf("Send attempts after the failed delivery = %d, want 1", got)
+	}
+	h.assertTexts(tester, "排队发送失败：agent busy", "已排队 1 条")
+	// Later frames must not retry: the paused queue and its error keep the
+	// frame fallback quiet.
+	for frame := 0; frame < 4; frame++ {
+		tester.Frame()
+	}
+	if got := h.chat.attempts(); got != 1 {
+		t.Fatalf("Send attempts after 4 more frames = %d, want 1 (no automatic retry)", got)
+	}
+	// 重试 is the explicit recovery: the backend recovers, the retry resumes the
+	// paused queue and delivers the prompt exactly once.
+	h.chat.sendErr = nil
+	h.click(tester, "重试")
+	tester.Frame()
+	if got := h.chat.attempts(); got != 2 {
+		t.Fatalf("Send attempts after 重试 = %d, want 2", got)
+	}
+	if sends := h.chat.sends(); len(sends) != 1 || sends[0].prompt != "会失败" {
+		t.Fatalf("delivered sends after 重试 = %v, want [会失败]", sends)
+	}
+	h.assertNoTexts(tester, "排队发送失败：agent busy", "已排队 1 条")
+}
+
 func TestQueueEmptyDraftNotQueued(t *testing.T) {
 	settings := sendWhileRunningSettings(true)
 	h := newPermissionHarness(t, runningChat(), settings)

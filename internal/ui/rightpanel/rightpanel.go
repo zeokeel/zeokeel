@@ -31,6 +31,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/zeokeel/zeokeel-rig"
 
@@ -181,13 +182,23 @@ type state struct {
 	filesListSel   int
 
 	// Log pane cache (P1): the newest durable events of the active session are
-	// read on a session change or when the chat reports new events, never on
-	// every frame.
-	logEvents  []rig.SessionEvent
-	logLoaded  bool
-	logErr     error
-	logSession string
-	logList    ui.ListState
+	// read when the pane opens, on a session change and after a chat
+	// notification (throttled to one background read per gate window), never
+	// synchronously from rendering on every notification.
+	logEvents []rig.SessionEvent
+	logLoaded bool
+	logErr    error
+	// logDirty marks the cache invalid because the chat notified a change; the
+	// pane reloads it once the throttle window opens (logLoadedAt anchors it).
+	logDirty bool
+	// logLoading is true while a background store read is in flight: the pane
+	// keeps its cached rows and does not start a second read.
+	logLoading bool
+	// logLoadedAt is when the last background read was started; the reload gate
+	// (logReloadInterval) is measured from it.
+	logLoadedAt time.Time
+	logSession  string
+	logList     ui.ListState
 
 	// Tools pane: the native list and the row Enter acts on.
 	toolsList ui.ListState
@@ -207,10 +218,14 @@ type state struct {
 	// Refresh action), the load error, the per-file diff fold state and the
 	// per-file official diff viewers (editor.DiffState, built once per diff).
 	changesLoaded bool
-	changes       []contracts.FileChange
-	changesErr    error
-	changesOpen   map[string]bool
-	diffs         map[string]*diffView
+	// changesWorkspace is the workspace key (ID + root, as the Files pane
+	// uses) the cached snapshot and the diff viewers belong to; a switch
+	// invalidates both instead of showing another project's changes.
+	changesWorkspace string
+	changes          []contracts.FileChange
+	changesErr       error
+	changesOpen      map[string]bool
+	diffs            map[string]*diffView
 
 	// term is the Terminal pane's state (the command runner appends from a
 	// background goroutine, so its output guard lives in terminalState).
@@ -368,14 +383,17 @@ func Module() *module.Descriptor[Config] {
 
 		unsubscribe, err := chat.Subscribe(func(string) {
 			// A chat change may add durable events to the active session and may
-			// follow a team/task mutation; drop the cached log and the cached
-			// task board on the UI thread so the next frame re-reads them once
-			// instead of every frame reading them (P1), and raise the one-shot
-			// team completion toasts. Without the task invalidation an agent
-			// writing team_task_* left the open Tasks pane showing stale rows
-			// until the user pressed Refresh.
+			// follow a team/task mutation; mark the cached log dirty and drop the
+			// cached task board on the UI thread so the next frame re-reads them
+			// once instead of every frame reading them (P1), and raise the
+			// one-shot team completion toasts. The log's store read itself is
+			// throttled and off-thread in buildLogPane: a streaming reply notifies
+			// subscribers per text delta, and a synchronous SQLite read per delta
+			// froze the frame. Without the task invalidation an agent writing
+			// team_task_* left the open Tasks pane showing stale rows until the
+			// user pressed Refresh.
 			runtime.Post(func() {
-				moduleState.logLoaded = false
+				moduleState.logDirty = true
 				moduleState.tasksLoaded = false
 				moduleState.observeTeamRunChanges()
 				runtime.Invalidate()

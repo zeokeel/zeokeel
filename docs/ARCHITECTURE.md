@@ -43,6 +43,7 @@ cmd (30 行) → host (进程) → assembly (装配) → kernel root
 - **owner 原则**：帧循环/窗口/`*ui.Context` 只归 uiroot；模块只贡献 builder
   （`func(c *ui.Context)`）。模块不持帧、不建根 overlay/toast、不改根主题。
 - **状态原则**：UI 状态归模块实例 struct；禁止包级可变状态；跨线程只 `UIRuntime.Post`。
+- **locale 分工**：产品文案归 `contracts.LocaleService`（uiroot）；mygo 框架自己的控件/菜单/无障碍文案归 `mygo.App.SetLocale`。host 在启动时与 `uiroot.Config.OnLanguageChange` 回调里把产品语言镜像给框架（`internal/host/framework_locale.go`）；uiroot/模块不得直接调用 `App.SetLocale`。
 - **生命周期**：模块在装配期（主线程）激活并注册贡献；注销函数交给 `ctx.Effect`，kernel
   dispose 逆序撤销。配置变更 = 重启进程。
 - **依赖方向**：模块只能 import `internal/contracts`、`internal/uikit`、`internal/design`、

@@ -21,8 +21,32 @@ const (
 	settingsPanelPadding    float32 = 40
 )
 
-// frame renders one frame.
-func (d *drive) frame() { d.tester.Frame() }
+// frame renders one frame, first mirroring the product language into mygo's own
+// locale as the desktop host does (host.frameworkLocale).
+func (d *drive) frame() {
+	d.syncFrameworkLocale()
+	d.tester.Frame()
+}
+
+// syncFrameworkLocale pushes the product language into the Tester when it
+// changed, so framework chrome follows a language switch during a run.
+func (d *drive) syncFrameworkLocale() {
+	tag := frameworkLocaleTag(d.uiRoot.Locale().Language())
+	if tag == d.localeTag {
+		return
+	}
+	d.localeTag = tag
+	d.tester.SetLocale(tag)
+}
+
+// frameworkLocaleTag maps the product language to the mygo locale tag the host
+// links (zh-Hans translation catalog; English is the framework's source).
+func frameworkLocaleTag(lang string) string {
+	if strings.HasPrefix(strings.ToLower(lang), "zh") {
+		return "zh-Hans"
+	}
+	return "en"
+}
 
 // texts returns the current frame labels.
 func (d *drive) texts() []string { return d.tester.Texts() }

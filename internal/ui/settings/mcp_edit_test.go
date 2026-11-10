@@ -98,7 +98,7 @@ func TestMCPConnectionTestLocalizesKnownCause(t *testing.T) {
 	waitForText(t, tester, "无法连接到服务器")
 }
 
-func TestMCPSubmitStaysVisibleWithStdioForm(t *testing.T) {
+func TestMCPFormActionsFollowFields(t *testing.T) {
 	store := newFakeSettings(nil)
 	h := newHarness(t, &fakeChat{}, store, settings.Config{})
 	tester := h.tester()
@@ -107,11 +107,26 @@ func TestMCPSubmitStaysVisibleWithStdioForm(t *testing.T) {
 	selectStdioTransport(t, h, tester)
 	h.assertTexts(tester, "测试连接", "添加")
 
-	// The submit action lives in the section header, so the tall STDIO form
-	// cannot push it below the fold (the old in-body footer did exactly that).
-	rect, ok := tester.Find("添加")
-	if !ok || rect.W == 0 || rect.H == 0 {
-		t.Fatalf("添加 action is not visible in the STDIO form: rect=%+v ok=%v texts=%v", rect, ok, tester.Texts())
+	// The form reads fields → status → actions (ST-05): the action row comes
+	// after the STDIO process fields instead of preceding the inputs. The tall
+	// STDIO form can put the row below the fold, so scrolling reaches it, as a
+	// user would.
+	commandRect, ok := tester.Find("命令 输入")
+	if !ok {
+		t.Fatalf("command input missing; texts = %v", tester.Texts())
+	}
+	testRect, ok := tester.Find("测试连接")
+	if !ok {
+		t.Fatalf("test-connection action missing; texts = %v", tester.Texts())
+	}
+	if testRect.Y < commandRect.Y {
+		t.Fatalf("test-connection action sits above the form fields: command.Y=%v test.Y=%v",
+			commandRect.Y, testRect.Y)
+	}
+	h.ensureVisible(tester, "添加")
+	addRect, ok := tester.Find("添加")
+	if !ok || addRect.W == 0 || addRect.H == 0 {
+		t.Fatalf("添加 action is not reachable in the STDIO form: rect=%+v ok=%v texts=%v", addRect, ok, tester.Texts())
 	}
 	clearAndType(t, h, tester, "名称 输入", "本地服务器")
 	clearAndType(t, h, tester, "命令 输入", "npx")

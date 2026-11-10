@@ -281,8 +281,8 @@ func buildMemoryPage(c *ui.Context, t *design.Tokens, kctx cordis.Context,
 			case 1:
 				clearMemoriesPage(store, st, locale)
 				st.invalidateMemories()
-				c.Invalidate()
-			default:
+				// Only the executed action needs a frame: the dialog's own open
+				// flag already rebuilt the frame when it was dismissed.
 				c.Invalidate()
 			}
 		}
@@ -639,6 +639,20 @@ func buildMemoryExtractionPanel(c *ui.Context, t *design.Tokens, kctx cordis.Con
 				t.TextMuted(design.TypeXXXS))
 		}
 	})
+}
+
+// memoryDraftDirty reports whether the 添加记忆 input holds an unsaved draft.
+func memoryDraftDirty(st *memoryPageState) bool { return strings.TrimSpace(st.draft) != "" }
+
+// discardMemoryDraft clears the add-memory draft and the transient notices, so
+// the host's Discard action reopens a clean memory page.
+func discardMemoryDraft(st *memoryPageState) {
+	st.draft = ""
+	st.notice = ""
+	st.noticeErr = false
+	st.policyNotice = ""
+	st.policyErr = false
+	st.policyWarn = ""
 }
 
 // memoryRowLabel is the accessible text of one memory row: its full body, with

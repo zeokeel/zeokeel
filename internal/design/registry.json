@@ -80,7 +80,8 @@
       "rules": [
         "label-required",
         "hit-target-24",
-        "token-colors"
+        "token-colors",
+        "ink-color-option"
       ],
       "doc": "docs/DESIGN.md §6.3 / §7.1"
     },
@@ -91,7 +92,8 @@
       "allowed": [
         "uikit.StatusText",
         "uikit.StatusBadge",
-        "uikit.StatusColor"
+        "uikit.StatusColor",
+        "uikit.OnAccentBadge"
       ],
       "forbidden": [
         "raw_status_color",
@@ -362,6 +364,27 @@
         "usage-collapsed"
       ],
       "doc": "docs/AGENT-SURFACES.md S8"
+    },
+    {
+      "id": "uikit.on-accent-badge",
+      "entry": "uikit.OnAccentBadge",
+      "package": "internal/uikit",
+      "allowed": [
+        "uikit.OnAccentBadge",
+        "ui.Badge"
+      ],
+      "forbidden": [
+        "resting-badge-on-accent",
+        "color-only-status"
+      ],
+      "states": [
+        "selected"
+      ],
+      "rules": [
+        "label-required",
+        "token-colors"
+      ],
+      "doc": "docs/DESIGN.md §6.2 / §5.2"
     }
   ],
   "scenarios": [

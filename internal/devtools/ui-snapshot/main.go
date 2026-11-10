@@ -21,6 +21,10 @@ import (
 	"time"
 
 	"github.com/egoist/mygo/ui"
+	// The framework's own zh-Hans catalog: the snapshot/driver mirrors
+	// the product's language into mygo (host does the same import), so link
+	// the same translations or framework chrome would stay English.
+	_ "github.com/egoist/mygo/locales/zh-Hans"
 	cordis "github.com/zeokeel/zeokeel-kernel"
 	"github.com/zeokeel/zeokeel-kernel/module"
 	rig "github.com/zeokeel/zeokeel-rig"
@@ -54,6 +58,11 @@ type app struct {
 	// pane is the inspector pane whose label the pane selector currently
 	// shows, so the snapshot can open the selector and choose another pane.
 	pane string
+	// localeTag is the framework (mygo) locale last pushed into the Tester.
+	// The product mirrors its own language into mygo.App.SetLocale; the
+	// headless snapshot must do the same or framework chrome (markdown Copy,
+	// divider names, ...) would keep the host language instead of the app's.
+	localeTag string
 }
 
 func main() {
@@ -468,7 +477,7 @@ func main() {
 	if err := a.tester.Click("snapshot-model"); err == nil {
 		a.tester.Frame()
 		a.render(outDir + "/p2-modelmenu.png")
-		if err := a.tester.Click("DeepSeek Reasoner · 深度推理"); err == nil {
+		if err := a.tester.Click("DeepSeek Reasoner"); err == nil {
 			a.tester.Frame()
 			a.render(outDir + "/p2-model-switched.png")
 		}
@@ -1115,6 +1124,7 @@ func (a *app) clickSettingsItem(label string) error {
 }
 
 func (a *app) render(path string) {
+	a.syncFrameworkLocale()
 	a.tester.Frame()
 	img := a.tester.Image()
 	file, err := os.Create(path)
@@ -1126,6 +1136,28 @@ func (a *app) render(path string) {
 	}
 	_ = file.Close()
 	fmt.Println("wrote", path, img.Bounds().Size())
+}
+
+// syncFrameworkLocale mirrors the app language into mygo's own locale, as the
+// process host does for the real window (host.frameworkLocale). It is called
+// before every snapshot render so the framework's built-in chrome (markdown
+// Copy button, accessibility names) follows the language of the product.
+func (a *app) syncFrameworkLocale() {
+	tag := frameworkLocaleTag(a.ui.Locale().Language())
+	if tag == a.localeTag {
+		return
+	}
+	a.localeTag = tag
+	a.tester.SetLocale(tag)
+}
+
+// frameworkLocaleTag maps the product language to the mygo locale tag linked by
+// the host (zh-Hans translation catalog; English is the framework's source).
+func frameworkLocaleTag(lang string) string {
+	if strings.HasPrefix(strings.ToLower(lang), "zh") {
+		return "zh-Hans"
+	}
+	return "en"
 }
 
 // waitText advances frames (letting off-UI-thread reads land) until the frame

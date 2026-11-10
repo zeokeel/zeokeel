@@ -54,6 +54,10 @@ type updateState struct {
 	installErr    string
 	pendingLoaded bool
 	pending       *contracts.UpdateInstallPlan
+
+	// transient detects a new visit to the page, clearing the one-shot copy
+	// confirmation ("已复制") that belongs to the previous visit.
+	transient transientStatus
 }
 
 func newUpdateState() *updateState { return &updateState{} }

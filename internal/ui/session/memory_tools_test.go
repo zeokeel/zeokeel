@@ -107,7 +107,9 @@ func TestMemoryTidyErrors(t *testing.T) {
 	openMemoryTab(t, h2, tester2)
 	h2.click(tester2, "整理记忆")
 	h2.click(tester2, "整理")
-	h2.assertTexts(tester2, "整理记忆失败")
+	// The failure says how many entries could not be removed and that the user
+	// can retry, instead of a bare count ("整理记忆失败：1").
+	h2.assertTexts(tester2, "整理记忆失败", "1 条未能删除，请重试")
 }
 
 // --- clear all --------------------------------------------------------------
@@ -162,7 +164,30 @@ func TestMemoryClearAllError(t *testing.T) {
 
 	h.click(tester, "全部清空")
 	h.click(tester, "清空")
-	h.assertTexts(tester, "清空失败")
+	h.assertTexts(tester, "清空失败", "1 条记忆未能删除，请重试")
+}
+
+// TestMemoryClearDialogDoesNotRequestFrames is the S-02 regression: while the
+// native clear-all AlertDialog is open (mygo returns -1), the frame builder must
+// not request another frame, or the window redraws every frame for as long as
+// the confirmation stays open.
+func TestMemoryClearDialogDoesNotRequestFrames(t *testing.T) {
+	store := newFakeMemoryStore(memory("mem-1", "Alpha"))
+	h := newHarnessWithMemory(t, tidyChat(), store)
+	tester := h.tester()
+	openMemoryTab(t, h, tester)
+
+	h.click(tester, "全部清空")
+	h.assertTexts(tester, "清空记忆", "取消", "清空")
+
+	requests := 0
+	h.ui.SetInvalidator(func() { requests++ })
+	for frame := 0; frame < 3; frame++ {
+		tester.Frame()
+	}
+	if requests != 0 {
+		t.Fatalf("open clear dialog requested %d frames over 3 explicit frames, want 0", requests)
+	}
 }
 
 // --- statistics / hidden / i18n ---------------------------------------------

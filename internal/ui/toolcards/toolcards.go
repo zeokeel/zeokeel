@@ -101,12 +101,26 @@ type Config struct {
 	Title string `json:"title"`
 }
 
+// foldStateLimit bounds the per-card disclosure state. One module instance lives
+// for the whole app process and a long agent run can render thousands of tool
+// calls, so the fold map must not grow without a bound: past the limit the
+// least recently rendered card states are evicted and those cards fall back to
+// their H15 default when they render again (mygo-maintenance: keep app state
+// bounded).
+const foldStateLimit = 512
+
 // rendererState keeps the per-card disclosure state (expanded "摘要" sections)
 // for the lifetime of one module instance. Builders run on the UI thread; the
 // mutex only keeps the map safe if a host renders from more than one place.
 type rendererState struct {
 	mu   sync.Mutex
 	open map[string]bool
+	// seenAt is the runtime frame each card last rendered in: the fold map is
+	// bounded by evicting the least recently rendered entries past
+	// foldStateLimit.
+	seenAt map[string]uint64
+	// runtime is the host UI runtime: its frame number orders the fold states.
+	runtime contracts.UIRuntime
 	// locale localizes the real cards' copy per frame (zh is the default).
 	locale contracts.LocaleService
 	// ctx resolves the optional plan reviewer per frame.
@@ -117,7 +131,15 @@ type rendererState struct {
 func (s *rendererState) tr(zh, en string) string { return uikit.T(s.locale, zh, en) }
 
 func newRendererState() *rendererState {
-	return &rendererState{open: make(map[string]bool)}
+	return &rendererState{open: make(map[string]bool), seenAt: make(map[string]uint64)}
+}
+
+// frame is the runtime's current frame number (0 when the host provides none).
+func (s *rendererState) frame() uint64 {
+	if s.runtime == nil {
+		return 0
+	}
+	return s.runtime.Frame()
 }
 
 // loadSeen reports the stored disclosure state and whether the reader ever
@@ -130,10 +152,45 @@ func (s *rendererState) loadSeen(key string) (open, seen bool) {
 	return open, seen
 }
 
+// touch records that a card rendered in the current frame and keeps the fold
+// map bounded. A rendered card is the most recently used one, so a card that
+// stays on screen never loses its state to cards that are gone.
+func (s *rendererState) touch(key string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.seenAt[key] = s.frame()
+	s.evictLocked()
+}
+
+// store persists one reader-chosen disclosure state.
 func (s *rendererState) store(key string, open bool) {
 	s.mu.Lock()
+	defer s.mu.Unlock()
 	s.open[key] = open
-	s.mu.Unlock()
+	s.seenAt[key] = s.frame()
+	s.evictLocked()
+}
+
+// evictLocked drops the least recently rendered card states while the map
+// exceeds foldStateLimit. Callers hold s.mu.
+func (s *rendererState) evictLocked() {
+	for len(s.open) > foldStateLimit {
+		oldestKey, oldestFrame := "", ^uint64(0)
+		for key := range s.open {
+			frame, ok := s.seenAt[key]
+			if !ok {
+				frame = 0
+			}
+			if frame < oldestFrame {
+				oldestKey, oldestFrame = key, frame
+			}
+		}
+		if oldestKey == "" {
+			return
+		}
+		delete(s.open, oldestKey)
+		delete(s.seenAt, oldestKey)
+	}
 }
 
 // Module registers the demo renderer and the real Rig tool cards.
@@ -146,6 +203,7 @@ func Module() *module.Descriptor[Config] {
 		title := firstNonEmpty(cfg.Title, "工具调用")
 		locale, _ := ctx.Get(contracts.KeyLocale)
 		state := newRendererState()
+		state.runtime = runtime
 		state.locale = locale
 		state.ctx = ctx
 
@@ -222,6 +280,9 @@ func realBuild(state *rendererState, runtime contracts.UIRuntime) func(c *ui.Con
 		tool := strings.TrimSpace(call.Name)
 		key := call.ID + "\x00" + tool
 		summary := strings.TrimSpace(call.Summary)
+		// Record this card as rendered before reading its fold state: the fold
+		// map is bounded and a live card must outrank cards that left screen.
+		state.touch(key)
 		open, seen := state.loadSeen(key)
 		if !seen {
 			open = uikit.SummaryDefaultOpen(call.Status, summary)
@@ -606,6 +667,7 @@ func planReviewBuild(state *rendererState) func(c *ui.Context, call contracts.To
 			// disclosure, with the same H15 default and per-card fold memory as
 			// the compact row.
 			key := call.ID + "\x00" + call.Name
+			state.touch(key)
 			open, seen = state.loadSeen(key)
 			if !seen {
 				open = uikit.SummaryDefaultOpen(call.Status, summary)

@@ -74,7 +74,7 @@ func TestH1AppearanceFooterDirty(t *testing.T) {
 	}
 	tester.Frame()
 
-	h.focusInput(tester, "全局热键 输入")
+	h.focusInput(tester, "组合键 输入")
 	tester.Type("CmdOrCtrl+Alt+K")
 	tester.Frame()
 	h.assertTexts(tester, "未保存")
@@ -215,7 +215,7 @@ func TestN1DiscardResetsOtherDirtyPages(t *testing.T) {
 		{
 			page: "外观",
 			edit: func(t *testing.T, h *harness, tester *ui.Tester) {
-				h.focusInput(tester, "全局热键 输入")
+				h.focusInput(tester, "组合键 输入")
 				tester.Type("CmdOrCtrl+Alt+J")
 				tester.Frame()
 			},

@@ -416,6 +416,12 @@ func runDesktop(opts Options) error {
 		Dark:     settings.Get(settingDark, "false") == "true",
 		Language: settings.Get(settingLanguage, "zh"),
 		Settings: settings,
+		// mygo localizes its own controls, menus and accessibility text
+		// separately; mirror a runtime language switch into the framework so
+		// those strings follow the product language (fix round SH-06).
+		OnLanguageChange: func(lang string) {
+			mygo.App.SetLocale(frameworkLocale(lang))
+		},
 	})
 	root := cordis.Root()
 	if err := provideServices(root, opts.DataDir, settings, logger, uiRoot); err != nil {
@@ -511,6 +517,12 @@ func runDesktop(opts Options) error {
 	// every UI module activates and registers its contributions on the UI
 	// thread, synchronously, before the first frame.
 	mygo.App.WhenReady(func() {
+		// The framework's own strings follow the product language from the
+		// first frame (see framework_locale.go). App.SetLocale persists the tag
+		// in the framework's own file, but the product stays the source of
+		// truth: this line sets it from the stored ui.language setting on every
+		// start, and OnLanguageChange (uiroot.Config) mirrors later switches.
+		mygo.App.SetLocale(frameworkLocale(uiRoot.Locale().Language()))
 		// Appearance mode: mygo is ready here, so Theme.IsDark and the desktop
 		// appearance listener are available. System mode keeps following the
 		// desktop; light/dark force the app theme.

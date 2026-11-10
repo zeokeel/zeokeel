@@ -15,6 +15,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"runtime"
 	"strings"
 	"sync"
 	"time"
@@ -38,8 +39,35 @@ const (
 	DefaultMaxOutputBytes = 256 << 10
 )
 
-// shellPreference is the order shells are discovered in.
-var shellPreference = []string{"bash", "sh", "zsh", "pwsh"}
+// shellCandidates is the ordered shell preference for one GOOS: the Windows
+// console shells first (PowerShell 7, Windows PowerShell, then cmd), the POSIX
+// shells otherwise. It is a pure function so both platforms' orders are unit
+// tested without running on them.
+func shellCandidates(goos string) []string {
+	if goos == "windows" {
+		return []string{"pwsh", "powershell", "cmd"}
+	}
+	return []string{"bash", "sh", "zsh"}
+}
+
+// shellArgs is the argv prefix one shell needs to run a single command string:
+// cmd takes the command after /C, PowerShell 7 / Windows PowerShell after
+// -NoProfile -Command (a profile would print extra output and slow every run),
+// and the POSIX shells after -c. It is a pure function, unit tested per GOOS.
+func shellArgs(goos, shell string) []string {
+	if goos == "windows" {
+		name := strings.ToLower(strings.TrimSuffix(shell, ".exe"))
+		switch name {
+		case "pwsh", "powershell":
+			return []string{"-NoProfile", "-Command"}
+		case "cmd":
+			return []string{"/C"}
+		default:
+			return []string{"/C"}
+		}
+	}
+	return []string{"-c"}
+}
 
 // Errors returned by the terminal service.
 var (
@@ -105,10 +133,11 @@ func validateConfig(cfg Config) error {
 	return nil
 }
 
-// discoverShells filters the preference list through PATH.
+// discoverShells filters the current platform's shell candidates through PATH.
 func discoverShells() []string {
-	shells := make([]string, 0, len(shellPreference))
-	for _, name := range shellPreference {
+	candidates := shellCandidates(runtime.GOOS)
+	shells := make([]string, 0, len(candidates))
+	for _, name := range candidates {
 		if _, err := exec.LookPath(name); err == nil {
 			shells = append(shells, name)
 		}
@@ -252,7 +281,8 @@ func (s *service) Run(ctx context.Context, command string) (contracts.TerminalOu
 		defer cancel()
 	}
 	s.logger.Printf("%s: run shell=%s dir=%s: %s", ModuleID, shell, directory, command)
-	process := exec.CommandContext(runCtx, shell, "-c", command)
+	args := append(shellArgs(runtime.GOOS, shell), command)
+	process := exec.CommandContext(runCtx, shell, args...)
 	process.Dir = directory
 	outputBytes, runErr := process.CombinedOutput()
 	output := decodeCombinedOutput(outputBytes, maxOutput)

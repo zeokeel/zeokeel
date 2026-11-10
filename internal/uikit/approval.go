@@ -174,13 +174,10 @@ func approvalRequestBody(c *ui.Context, o ApprovalDialogOptions, labels Approval
 			"允许后将在沙箱策略限制内执行；策略仍可能拒绝该调用。",
 			"It runs within the sandbox policy after approval; the policy may still reject the call.")),
 			t.Font(design.TypeXS)).TextColor(t.LabelSecondary)
-		// What will run comes first: the summary (a command for shell tools) is
-		// the thing the user is judging.
+		// What will run comes first: the summary is the thing the user is
+		// judging, labelled as a command only for shell/terminal tools.
 		if summary != "" && summary != arguments {
-			summaryLabel := T(o.Locale, "摘要", "Summary")
-			if approvalCommandLike(request.Tool) {
-				summaryLabel = T(o.Locale, "命令", "Command")
-			}
+			summaryLabel := approvalSummaryLabel(o.Locale, request.Tool)
 			design.Apply(ui.Text(c, summaryLabel), t.TextMuted(design.TypeXS))
 			design.Apply(ui.Row(c).FillWidth(), func(el ui.Element) ui.Element {
 				return el.Background(t.BgBase).Border(1, t.BorderL2).
@@ -245,15 +242,17 @@ func approvalRequestBody(c *ui.Context, o ApprovalDialogOptions, labels Approval
 	})
 }
 
-// approvalCommandLike reports whether a tool's summary is a command line, so the
-// approval dialog can show it monospaced first.
-func approvalCommandLike(tool string) bool {
+// approvalSummaryLabel names the requested call's summary block. Only the shell
+// and terminal tools ask about a command line; a file read, a web fetch or a
+// team/task call would read as something to execute when labelled 命令, so they
+// keep the neutral 摘要 (the raw arguments stay in the collapsed disclosure
+// below).
+func approvalSummaryLabel(locale contracts.LocaleService, tool string) string {
 	switch strings.ToLower(strings.TrimSpace(tool)) {
-	case "bash", "terminal_send", "job_start", "web_fetch", "web_search",
-		"read_file", "write_file", "edit_file", "str_replace_editor":
-		return true
+	case "bash", "pwsh", "terminal_send":
+		return T(locale, "命令", "Command")
 	default:
-		return false
+		return T(locale, "摘要", "Summary")
 	}
 }
 

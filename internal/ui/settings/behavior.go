@@ -122,23 +122,27 @@ func buildBehaviorPage(c *ui.Context, runtime contracts.UIRuntime,
 					statusBadge(c, t, st.status, st.statusErr)
 				}
 			})
-			ui.PopoverMenuButton(c, behaviorPermissionLabel(locale, current), func(m *ui.Menu) {
-				for _, choice := range behaviorPermissions {
-					choice := choice
-					item := m.Item(localized(locale, choice.zh, choice.en))
-					item.Checked(choice.value == current)
-					if item.Chosen() && choice.value != current {
-						if err := store.Set(contracts.SettingAgentPermission, choice.value); err != nil {
-							st.status = localized(locale, "保存失败：", "Save failed: ") + err.Error()
-							st.statusErr = true
-						} else {
-							st.status = localized(locale, "已保存", "Saved")
-							st.statusErr = false
+			// A menu is a chip, not a form field: a row keeps it at its natural
+			// width instead of stretching it across the content column.
+			ui.Row(c).FillWidth().AlignItems(ui.Center).Children(func() {
+				ui.PopoverMenuButton(c, behaviorPermissionLabel(locale, current), func(m *ui.Menu) {
+					for _, choice := range behaviorPermissions {
+						choice := choice
+						item := m.Item(localized(locale, choice.zh, choice.en))
+						item.Checked(choice.value == current)
+						if item.Chosen() && choice.value != current {
+							if err := store.Set(contracts.SettingAgentPermission, choice.value); err != nil {
+								st.status = localized(locale, "保存失败：", "Save failed: ") + err.Error()
+								st.statusErr = true
+							} else {
+								st.status = localized(locale, "已保存", "Saved")
+								st.statusErr = false
+							}
+							runtime.Invalidate()
 						}
-						runtime.Invalidate()
 					}
-				}
-			}).Tooltip(localized(locale, "选择默认权限模式", "Choose the default permission mode"))
+				}).Tooltip(localized(locale, "选择默认权限模式", "Choose the default permission mode"))
+			})
 			ui.Column(c).FillWidth().Gap(design.Space1).PaddingY(design.Space1).Children(func() {
 				for _, choice := range behaviorPermissions {
 					uikit.Bullet(c, localized(locale, choice.zh, choice.en)+localized(locale, "：", ": ")+
@@ -224,6 +228,29 @@ func buildBehaviorPage(c *ui.Context, runtime contracts.UIRuntime,
 			design.Apply(ui.Text(c, behaviorMoreSummary(locale, store)), t.TextMuted(design.TypeXXS)).MaxLines(2)
 		}
 	})
+}
+
+// behaviorDraftDirty reports whether the workspace instruction file input holds
+// a value that differs from the stored row. The other controls write at once,
+// so the agents-file field is the page's only possible draft.
+func behaviorDraftDirty(st *behaviorState, store contracts.SettingsService) bool {
+	// Before the page is first shown there is no draft at all: the field is
+	// seeded lazily on its first build.
+	if store == nil || !st.agentsFileLoaded {
+		return false
+	}
+	return strings.TrimSpace(st.agentsFile) != strings.TrimSpace(store.Get(contracts.SettingAgentsFile, "AGENTS.md"))
+}
+
+// discardBehaviorDraft re-reads the stored instruction file and clears the
+// page status, so the host's Discard action reopens a clean behavior page.
+func discardBehaviorDraft(st *behaviorState, store contracts.SettingsService) {
+	if store != nil {
+		st.agentsFile = store.Get(contracts.SettingAgentsFile, "AGENTS.md")
+	}
+	st.agentsFileLoaded = true
+	st.status = ""
+	st.statusErr = false
 }
 
 // behaviorMoreSummary is the one muted line shown while 更多对话设置 is collapsed:

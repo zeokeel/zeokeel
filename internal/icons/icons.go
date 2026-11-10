@@ -48,7 +48,9 @@ func get(name string) *ui.SVG {
 // The sidebar, composer and right-panel icons. Folder is the closed folder
 // (the default file-tree glyph); FolderOpen is the expanded one. Chevron
 // right/down are the disclosure glyphs; NewChat is the composer's new-session
-// bubble; Data is the Session Log's storage glyph.
+// bubble; Home is the home destination (a house, never the new-chat bubble; the
+// fix-round audit found both actions drawn with the same glyph); Data is the
+// Session Log's storage glyph.
 var (
 	Folder        = func() *ui.SVG { return get("folder") }
 	FolderOpen    = func() *ui.SVG { return get("folder-open") }
@@ -66,6 +68,7 @@ var (
 	Sparkles      = func() *ui.SVG { return get("sparkles") }
 	Terminal      = func() *ui.SVG { return get("terminal") }
 	NewChat       = func() *ui.SVG { return get("new-chat") }
+	Home          = func() *ui.SVG { return get("home") }
 	Data          = func() *ui.SVG { return get("data") }
 	Reload        = func() *ui.SVG { return get("reload") }
 	AlertTriangle = func() *ui.SVG { return get("alert-triangle") }

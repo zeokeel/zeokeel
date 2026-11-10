@@ -357,7 +357,7 @@ func buildSessionList(c *ui.Context, t *design.Tokens, chat contracts.ChatServic
 	nav contracts.Navigator, runtime contracts.UIRuntime, state *paneState, title string) {
 	ui.Column(c).FillWidth().Gap(design.Space1).Padding(design.Space2, 0, 0, 0).
 		Children(func() {
-			home := ui.SidebarItem(c, "home", icons.NewChat(), state.T("首页", "Home"))
+			home := ui.SidebarItem(c, "home", icons.Home(), state.T("首页", "Home"))
 			home.OnClick(func() {
 				if err := nav.Push("home"); err == nil {
 					runtime.Invalidate()
@@ -1238,7 +1238,7 @@ func rowTint(t *design.Tokens, el ui.Element, selected bool) ui.Element {
 func ScreenNavSpec(id string) (icon *ui.SVG, zh, en string) {
 	switch id {
 	case "home":
-		return icons.NewChat(), "首页", "Home"
+		return icons.Home(), "首页", "Home"
 	case "session":
 		return icons.Message(), "对话", "Chat"
 	case "automation":
@@ -1471,12 +1471,16 @@ func buildSessionRow(c *ui.Context, t *design.Tokens, chat contracts.ChatService
 			openSession(chat, nav, runtime, session.ID)
 		})
 		title.Children(func() {
+			// Every conversation keeps the message glyph, also the current
+			// one: NewChat belongs to the new-session action only (the same
+			// glyph for two meanings was one of the fix-round findings). The
+			// current conversation is carried by the accent color, its bold
+			// title and the chosen row.
 			icon := icons.Message()
 			iconColor := t.LabelSecondary
 			if chosen {
 				iconColor = t.AccentText
 			} else if active {
-				icon = icons.NewChat()
 				iconColor = t.Accent
 			}
 			ui.Icon(c, icon).Size(16, 16).TextColor(iconColor)
@@ -1489,14 +1493,26 @@ func buildSessionRow(c *ui.Context, t *design.Tokens, chat contracts.ChatService
 			if active || chosen {
 				titleText = titleText.FontWeight(500)
 			}
+			// A chosen row is painted in the accent fill, so its badges must
+			// invert with the row: the resting Badge() foreground lands dim on
+			// the accent fill (about 1.2:1 in the dark theme, the fix round's
+			// SH-03). OnAccentBadge keeps the pill shape and the label; a
+			// resting row keeps the semantic badge colors.
+			badge := func(label string) {
+				if chosen {
+					uikit.OnAccentBadge(c, label, t)
+					return
+				}
+				design.Apply(ui.Badge(c, label), t.Badge())
+			}
 			if session.Pinned {
-				design.Apply(ui.Badge(c, state.T("置顶", "Pinned")), t.Badge())
+				badge(state.T("置顶", "Pinned"))
 			}
 			// The active session is already carried by the accent icon and the
 			// selected row; a 当前 badge was redundant and stole width from the
 			// title.
 			if session.Running {
-				design.Apply(ui.Badge(c, state.T("运行中", "Running")), t.Badge())
+				badge(state.T("运行中", "Running"))
 			}
 		})
 		menuLabel := state.T("会话操作：", "Session actions: ") + label

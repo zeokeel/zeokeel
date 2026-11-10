@@ -76,6 +76,26 @@ func loadLSPState(st *lspState, store contracts.SettingsService) {
 	st.refreshActive()
 }
 
+// lspDraftDirty reports whether the add form holds an unsaved draft.
+func lspDraftDirty(st *lspState) bool {
+	return strings.TrimSpace(st.name) != "" || strings.TrimSpace(st.command) != "" ||
+		strings.TrimSpace(st.args) != "" || strings.TrimSpace(st.dir) != "" ||
+		strings.TrimSpace(st.languageID) != ""
+}
+
+// discardLSPDraft clears the add form and its transient status, so the host's
+// Discard action reopens a clean LSP page.
+func discardLSPDraft(st *lspState) {
+	st.name = ""
+	st.command = ""
+	st.args = ""
+	st.dir = ""
+	st.languageID = ""
+	st.status = ""
+	st.statusErr = false
+	st.confirmRemove = ""
+}
+
 // refreshActive resolves the effective active server name (first when unset or
 // unknown).
 func (st *lspState) refreshActive() {
