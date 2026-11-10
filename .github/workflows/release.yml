@@ -2,8 +2,9 @@ name: Release
 
 # Every vX.Y.Z tag publishes one GitHub release, built by mygo on the runner
 # of each platform: Windows installers (NSIS, GUI subsystem), Linux AppImages
-# and a Linux cross-built macOS arm64 .app archive (no macOS runner, unsigned). The release is created as a
-# draft, every platform uploads into it, the central checksums step writes
+# and a Linux cross-built macOS arm64 .app that a Linux packaging job signs and
+# packs into a dmg with libdmg-hfsplus + rcodesign (no macOS runner at all).
+# The release is created as a draft, every platform uploads into it, the central checksums step writes
 # SHA256SUMS.txt and the last step publishes it. In-app updates read this
 # release directly (no update-signing key): the update module picks the
 # platform installer (Windows setup exe / macOS dmg / Linux AppImage) the
@@ -68,11 +69,10 @@ jobs:
   build-macos:
     name: macOS arm64 (.app cross-built on Linux)
     needs: draft-release
-    # No macOS runner: the product has no cgo, so mygo cross-compiles the
-    # darwin/arm64 .app on Linux (codesign/dmg are skipped). The release ships
-    # that .app as a tar.gz; the in-app updater extracts it over the bundle.
-    # Signing/notarization are intentionally not performed (they need macOS);
-    # the first launch of a manually downloaded bundle may need Open Anyway.
+    # No macOS compiler: the product has no cgo, so mygo cross-compiles the
+    # darwin/arm64 .app on Linux. The packaging job (macOS, run only when
+    # signing/dmg is possible) downloads the tar artifact and signs/creates the
+    # dmg without compiling Go.
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     steps:
@@ -99,13 +99,126 @@ jobs:
           tar -czf "build/zeokeel-$(cat VERSION)-darwin-arm64.tar.gz"             -C build/darwin-arm64 ZeoKeel.app
           ls -lh "build/zeokeel-$(cat VERSION)-darwin-arm64.tar.gz"
 
-      - name: Upload the macOS assets
+      - name: Upload the macOS app archive
+        uses: actions/upload-artifact@v4
+        with:
+          name: macos-app
+          path: build/zeokeel-*-darwin-arm64.tar.gz
+          if-no-files-found: error
+
+      - name: Publish the macOS app archive fallback
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -eu
           gh release upload "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --clobber \
             build/zeokeel-*-darwin-arm64.tar.gz
+
+  package-macos:
+    name: macOS arm64 (Linux dmg + rcodesign)
+    needs: build-macos
+    # No macOS runner and no Xcode: libdmg-hfsplus creates the UDIF image and
+    # rcodesign (apple-codesign) signs the app/dmg and notarizes with Apple's
+    # API from Linux. This is the same tool combination Mozilla uses for
+    # Firefox's Linux-built dmg and notarization.
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    # Optional: if the toolchain or Apple credentials fail, Windows/Linux and
+    # the unsigned tar.gz still publish; the updater falls back to the archive.
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install the DMG toolchain dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y hfsprogs cmake g++ make curl
+          command -v mkfs.hfsplus
+          mkfs.hfsplus -N 2>&1 | head -3 || true
+
+      - name: Build libdmg-hfsplus (dmg + hfsplus)
+        run: |
+          set -eu
+          tools="$RUNNER_TEMP/dmg-tools"
+          mkdir -p "$tools/src"
+          curl -fsSL -o "$tools/libdmg.tar.gz" \
+            https://codeload.github.com/planetbeing/libdmg-hfsplus/tar.gz/7ac55ec64c96f7800d9818ce64c79670e7f02b67
+          tar -xzf "$tools/libdmg.tar.gz" -C "$tools/src" --strip-components=1
+          cmake -S "$tools/src" -B "$tools/build" \
+            -DCMAKE_BUILD_TYPE=Release -DOPENSSL_FOUND=OFF
+          cmake --build "$tools/build" -j "$(nproc)"
+          test -x "$tools/build/hfs/hfsplus"
+          test -x "$tools/build/dmg/dmg"
+          echo "HFSPLUS_TOOL=$tools/build/hfs/hfsplus" >> "$GITHUB_ENV"
+          echo "DMG_TOOL=$tools/build/dmg/dmg" >> "$GITHUB_ENV"
+
+      - name: Install rcodesign (apple-codesign)
+        run: |
+          set -eu
+          tools="$RUNNER_TEMP/rcodesign"
+          mkdir -p "$tools"
+          url="https://github.com/indygreg/apple-platform-rs/releases/download/apple-codesign%2F0.29.0/apple-codesign-0.29.0-x86_64-unknown-linux-musl.tar.gz"
+          curl -fsSL -o "$tools/rcodesign.tar.gz" "$url"
+          curl -fsSL -o "$tools/rcodesign.tar.gz.sha256" "$url.sha256"
+          expected=$(awk '{print $1}' "$tools/rcodesign.tar.gz.sha256")
+          actual=$(sha256sum "$tools/rcodesign.tar.gz" | awk '{print $1}')
+          test "$expected" = "$actual"
+          tar -xzf "$tools/rcodesign.tar.gz" -C "$tools" --strip-components=1
+          test -x "$tools/rcodesign"
+          echo "RCODESIGN=$tools/rcodesign" >> "$GITHUB_ENV"
+
+      - name: Download the Linux-built app bundle
+        uses: actions/download-artifact@v4
+        with:
+          name: macos-app
+          path: dist
+
+      - name: Unpack the app bundle
+        run: |
+          set -eu
+          tar -xzf dist/zeokeel-*-darwin-arm64.tar.gz -C dist
+          test -d dist/ZeoKeel.app
+          test -f dist/ZeoKeel.app/Contents/MacOS/ZeoKeel
+          chmod +x dist/ZeoKeel.app/Contents/MacOS/ZeoKeel
+
+      - name: Decode the signing and notary credentials
+        env:
+          MACOS_CERT_P12: ${{ secrets.MACOS_CERT_P12 }}
+          APPLE_API_KEY_P8: ${{ secrets.APPLE_API_KEY_P8 }}
+        run: |
+          set -eu
+          if [ -n "${MACOS_CERT_P12:-}" ]; then
+            printf '%s' "$MACOS_CERT_P12" | base64 -d > "$RUNNER_TEMP/zeokeel.p12"
+            echo "MACOS_P12_FILE=$RUNNER_TEMP/zeokeel.p12" >> "$GITHUB_ENV"
+          else
+            echo "::warning::MACOS_CERT_P12 is not configured; the dmg will be unsigned"
+          fi
+          if [ -n "${APPLE_API_KEY_P8:-}" ]; then
+            printf '%s' "$APPLE_API_KEY_P8" | base64 -d > "$RUNNER_TEMP/AuthKey.p8"
+            echo "APPLE_API_KEY_P8_FILE=$RUNNER_TEMP/AuthKey.p8" >> "$GITHUB_ENV"
+          else
+            echo "::warning::APPLE_API_KEY_P8 is not configured; notarization is skipped"
+          fi
+
+      - name: Create, sign and notarize the dmg
+        env:
+          MACOS_CERT_PASSWORD: ${{ secrets.MACOS_CERT_PASSWORD }}
+          APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
+          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
+        run: |
+          set -eu
+          dmg="build/zeokeel-$(cat VERSION)-arm64.dmg"
+          bash scripts/package-macos-dmg.sh dist/ZeoKeel.app "$dmg"
+          ls -lh "$dmg"
+          echo "DMG=$dmg" >> "$GITHUB_ENV"
+
+      - name: Upload the macOS dmg
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -eu
+          gh release upload "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --clobber \
+            build/zeokeel-*-arm64.dmg
 
   build-windows:
     name: Windows installers (NSIS, GUI subsystem)
@@ -205,7 +318,9 @@ jobs:
 
   publish:
     name: Checksums and publish
-    needs: [build-macos, build-windows, build-linux]
+    needs: [package-macos, build-windows, build-linux]
+    # package-macos (Linux dmg/sign/notarize) is optional; never block the release on it.
+    if: always() && needs.build-windows.result == 'success' && needs.build-linux.result == 'success'
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:

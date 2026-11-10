@@ -12,8 +12,8 @@ ZeoKeel 的安装包和更新链路全部由仓库自己的 Go 工具链完成�
 | --- | --- | --- |
 | Windows | `zeokeel-setup-<version>-amd64.exe`、`zeokeel-setup-<version>-arm64.exe` | NSIS 安装器：当前用户安装到 `%LOCALAPPDATA%\Programs\ZeoKeel`，无需管理员；开始菜单、卸载项、可选桌面快捷方式；`/S` 静默安装。exe 为 GUI 子系统（无命令行窗口）、带图标和版本信息 |
 | Linux | `zeokeel-<version>-linux-amd64.AppImage`、`zeokeel-<version>-linux-arm64.AppImage` | 唯一的 Linux 安装包；可执行、双击运行 |
-| macOS | `zeokeel-<version>-darwin-arm64.tar.gz` | Linux 交叉编译的 Apple Silicon `.app`（未签名/未公证；首次手动打开可能需要右键「打开」）；不支持 Intel Mac |
-| 更新用 | Windows: `zeokeel-setup-<version>-<arch>.exe`；macOS: `zeokeel-<version>-arm64.dmg`；Linux: `.AppImage` | 应用内更新直接下载安装包并运行/安装；不再发布 Windows/macOS 的 tar.gz 更新归档 |
+| macOS | `zeokeel-<version>-arm64.dmg`（首选，签名+公证）；`zeokeel-<version>-darwin-arm64.tar.gz`（未签名 `.app` 回退） | Linux 编译 `.app`；`libdmg-hfsplus` 在 Linux 生成 dmg，`rcodesign` 在 Linux 签名/公证/stapling；不需要 macOS；不支持 Intel Mac |
+| 更新用 | Windows: `zeokeel-setup-<version>-<arch>.exe`；macOS: `zeokeel-<version>-arm64.dmg`（无 dmg 时回退 `-darwin-arm64.tar.gz`）；Linux: `.AppImage` | 应用内更新直接下载安装包并运行/安装 |
 | 校验 | `SHA256SUMS.txt` | 发布任务统一生成，更新器用它校验下载 |
 
 `mygo build` 还会在 Linux 输出 `.deb`、`.tar.gz`、`PKGBUILD` 等中间产物，
@@ -35,13 +35,16 @@ git push origin v0.2.3
 
 1. 校验 tag 与 `VERSION` 一致；
 2. 创建 draft release；
-3. 三个平台全部在 `ubuntu-24.04` 并行构建：macOS arm64 交叉编译 `.app` + tar.gz、Windows（NSIS）、
-   Linux（AppImage 工具链）；不再使用 macOS runner、不需要签名 secrets；
-4. 各平台把安装包（Windows setup、macOS dmg、Linux AppImage）上传到 draft；
-5. 汇总所有资产生成 `SHA256SUMS.txt`；
-6. 自动把 draft 发布为正式 release（`--draft=false`）。
+3. 三个平台的 Go 代码全部在 `ubuntu-24.04` 并行构建：macOS arm64 交叉编译 `.app` + tar.gz、
+   Windows（NSIS）、Linux（AppImage 工具链）；
+4. 独立的 `package-macos` job（`ubuntu-24.04`，不跑 macOS）下载 Linux 产出的 `.app`：
+   `libdmg-hfsplus` 生成 dmg → `rcodesign` 签名 app/dmg → Apple notary 提交 → staple → 上传 dmg；
+5. 各平台把安装包（Windows setup、macOS dmg、Linux AppImage）上传到 draft；
+6. 汇总所有资产生成 `SHA256SUMS.txt`；
+7. 自动把 draft 发布为正式 release（`--draft=false`）。
 
-缺失任一平台产物则不会发布。
+`package-macos` 是可选 job（`continue-on-error`）：工具链或 Apple secrets 异常时只缺 dmg，
+Windows/Linux 与回退 tar.gz 仍会发布；`publish` 仍要求 Windows/Linux 构建成功。
 
 ### 仓库 Secrets
 

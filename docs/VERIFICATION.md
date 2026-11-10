@@ -751,3 +751,15 @@ design-check 6/6（raw metric 45 ≤ 51）/mygo vet/`go test ./...`（45s）/`-r
 - **文档**：COVERAGE/UI-CONFORMANCE/DESIGN registry 清除旧右栏团队/任务 pane 描述；INJECTION-POINTS 记录新命令。
 - **验证**：`scripts/verify.sh --no-smoke` **10/10 PASS**：gofmt/build/vet/designlint 0 new/design-check 6/6/mygo vet/`go test ./...`（48 包，46s）/-race（325s）/regression 276 PASS/ui-snapshot 98 steps / 96 PNGs。
 - **发布说明**：v0.2.8 的 macOS dmg 因 GitHub macOS arm64 runner 容量连续 3 次排队失败未发布；Windows/Linux 安装包已可用。macOS 用户需等待 dmg 补传或源码构建；≤0.2.7 需手动安装一次。
+
+## 0.2.12（2026-11-10：全 Linux 生成/签名/公证 macOS dmg）
+
+用户要求不用 macOS CI 机器也能出 dmg + 签名。mygo 官方只支持在 macOS 上 `codesign`/`hdiutil`，因此改用 Mozilla/Firefox 同款 Linux 工具链：
+
+- **dmg 生成**：`libdmg-hfsplus`（`mkfs.hfsplus` + `hfsplus` + `dmg`）在 `ubuntu-24.04` 生成 UDIF dmg；Firefox CI 的 `mozpack/dmg.py` 正是这套工具。
+- **签名/公证**：`rcodesign`（apple-codesign 0.29.0）在 Linux 上签 `.app`/dmg、`notary-submit --staple` 提交 Apple 并 staple；Mozilla RelEng 文档与 `signingscript/rcodesign.py` 使用同一工具做 Linux 公证。
+- **流水线**：`package-macos` 改为 `ubuntu-24.04`，与 Windows/Linux 编译 job 并行；`build-macos` 仍负责 Go 交叉编译并上传 `.app` artifact（以及 tar.gz 回退）。所有 release job 均为 `ubuntu-24.04`，无 macOS runner。
+- **本地验证（未提交的测试产物在 `.cache/dmg-*`）**：Linux 构建的 `ZeoKeel.app` → `libdmg-hfsplus` 生成 dmg → `dmg extract` 回读确认 `ZeoKeel.app` + `/Applications` 链接；`rcodesign generate-self-signed-certificate` + `sign`（app 和 dmg）成功，`print-signature-info` 显示 DMG CodeDirectory/CMS；打包脚本 `scripts/package-macos-dmg.sh` 签名/未签名两条路径均跑通。Apple 公证需真实 secrets，未在本地提交（CI 用 `APPLE_API_*`）。
+- **降级**：`package-macos` optional；secrets/工具链失败时 dmg 缺失，Windows/Linux 和未签名 tar.gz 仍发布；updater 优先 dmg，回退 archive。
+- **验证**：`scripts/verify.sh --no-smoke` **10/10 PASS**（gofmt/build/vet/designlint 0 new/design-check 6/6/mygo vet/`go test ./...` 48 包/-race/regression 276 PASS/ui-snapshot 98 steps / 96 PNGs）。
+- **限制**：Linux 生成的 dmg 仍需在真 Mac 上手工验证一次（挂载、安装、Gatekeeper、公证/签名）；dmg 内 `.app` 未 staple ticket 时依赖 dmg 公证；`rcodesign` 属第三方工具，需要信任其处理 `.p12`/API key。
