@@ -312,25 +312,26 @@ func TestJobsChipHiddenAtZero(t *testing.T) {
 	h.assertNoTexts(tester, "个后台任务", "智能体团队")
 }
 
-// TestSubagentChipHiddenAtZero covers R15: with no child conversations the
-// 子智能体 chip is gone instead of sitting at zero and squeezing the title.
-func TestSubagentChipHiddenAtZero(t *testing.T) {
+// TestSubagentEntryShownAtZero pins the v0.2.20 correction: subagents are a
+// key orchestration feature, so the entry stays visible at zero (the overlay
+// explains the empty state) instead of disappearing.
+func TestSubagentEntryShownAtZero(t *testing.T) {
 	h := newAgentSurfaceHarness(t, headerChat("无子代理"), agentServices{children: &fakeChildAgents{}})
 	tester := h.tester()
 	tester.Frame()
-	h.assertTexts(tester, "无子代理")
-	h.assertNoTexts(tester, "子智能体")
+	h.assertTexts(tester, "无子代理", "子智能体 0")
 }
 
-// TestTeamEntryHiddenWithEmptyTeam covers the subtraction pass: an empty team
-// no longer leaves a permanent zero entry over every conversation; the feature
-// is reachable from the command palette until a team exists.
-func TestTeamEntryHiddenWithEmptyTeam(t *testing.T) {
+// TestTeamEntryShownWithEmptyTeam pins the v0.2.20 correction: the team entry
+// stays visible even at zero (team orchestration is a key feature), and its
+// overlay explains the empty state.
+func TestTeamEntryShownWithEmptyTeam(t *testing.T) {
 	h := newAgentSurfaceHarness(t, headerChat("空团队"), agentServices{team: &fakeTeam{}})
 	tester := h.tester()
 	tester.Frame()
-	h.assertNoTexts(tester, "智能体团队")
-	h.assertTexts(tester, "空团队")
+	h.assertTexts(tester, "智能体团队")
+	h.click(tester, "智能体团队")
+	h.assertTexts(tester, "成员", "还没有队友", "共享任务")
 }
 
 // TestHeaderChipsCompactAtNarrowWidth covers the narrow band: the entries keep
@@ -813,3 +814,18 @@ var (
 	_ contracts.FilePreviewer     = (*fakeFilePreview)(nil)
 	_ contracts.TaskBoard         = (*fakeAgentBoard)(nil)
 )
+
+// TestRunBandShowsPendingApproval covers the band's approval counter: pending
+// requests add one warning badge next to the orchestration entries, while the
+// cards themselves stay above the composer.
+func TestRunBandShowsPendingApproval(t *testing.T) {
+	approvals := &fakeApprovals{pending: []contracts.ApprovalRequest{{
+		ID: "ap-1", Tool: "bash", Summary: "rm -rf build",
+	}}}
+	h := newAgentSurfaceHarness(t, headerChat("待审批会话"), agentServices{
+		team: &fakeTeam{}, children: &fakeChildAgents{}, approvals: approvals,
+	})
+	tester := h.tester()
+	tester.Frame()
+	h.assertTexts(tester, "智能体团队", "子智能体 0", "待审批 1")
+}

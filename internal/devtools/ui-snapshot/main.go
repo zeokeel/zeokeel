@@ -31,6 +31,9 @@ import (
 
 	"github.com/zeokeel/zeokeel/internal/assembly"
 	"github.com/zeokeel/zeokeel/internal/contracts"
+	"github.com/zeokeel/zeokeel/internal/design"
+	"github.com/zeokeel/zeokeel/internal/icons"
+	"github.com/zeokeel/zeokeel/internal/uikit"
 	"github.com/zeokeel/zeokeel/internal/uiroot"
 )
 
@@ -135,6 +138,14 @@ func main() {
 	a.tester.Type("运行中继续写的草稿")
 	a.tester.Frame()
 	a.render(outDir + "/p2-running-composer.png")
+	// Expand the running turn's activity band once to show the State-first tool
+	// row (state gutter + mono input summary) while the call is in flight.
+	if a.clickFirstPrefix("过程 · 思考") {
+		a.tester.Advance(300 * time.Millisecond)
+		a.render(outDir + "/p2-tool-row-running.png")
+		a.clickFirstPrefix("过程 · 思考")
+		a.tester.Frame()
+	}
 	a.tester.Key(ui.Cmd, ui.KeyA)
 	a.tester.Key(0, ui.KeyBackspace)
 	a.tester.Frame()
@@ -145,6 +156,14 @@ func main() {
 	a.tester.Frame()
 	a.tester.Advance(300 * time.Millisecond)
 	a.render(outDir + "/p2-status-strip.png")
+	// The finished turn's activity band, expanded: completed tool rows stay
+	// quiet (no gutter) and keep their mono input summary.
+	if a.clickFirstPrefix("过程 · 思考") {
+		a.tester.Advance(300 * time.Millisecond)
+		a.render(outDir + "/p2-tool-row-complete.png")
+		a.clickFirstPrefix("过程 · 思考")
+		a.tester.Frame()
+	}
 
 	// Send an image attachment through the optional attachment API so the chat
 	// frame shows the staged-message chips and the provider sees an image part.
@@ -782,6 +801,18 @@ func main() {
 		a.tester.Key(0, ui.KeyEscape)
 		a.tester.Frame()
 	}
+
+	// The Agent Run Band with all live orchestration counts: team roster,
+	// subagent conversations and the background job from the earlier step.
+	if err := a.tester.Click("对话"); err != nil {
+		fmt.Println("switch to chat for run band:", err)
+	}
+	a.tester.Frame()
+	a.render(outDir + "/p2-run-band.png")
+	// A component specimen for the State-first tool row: the three active
+	// states (running/error/cancelled) draw the 3px gutter, success stays quiet;
+	// the mono input summary is visible in every row.
+	renderToolRowSpecimen(outDir)
 
 	// The command palette lists the right sidebar's page commands (the retired
 	// team/task pane commands are gone with the 8-pane inspector).
@@ -1637,4 +1668,57 @@ func provide[T any](root cordis.Context, key cordis.ServiceKey[T], value T) {
 func fail(step string, err error) {
 	fmt.Fprintf(os.Stderr, "ui-snapshot: %s: %v\n", step, err)
 	os.Exit(1)
+}
+
+// renderToolRowSpecimen renders the State-first tool row component in every
+// status, light and dark, as a visual contract for the gutter and the mono
+// input summary. It is a component specimen, not a product conversation frame.
+func renderToolRowSpecimen(outDir string) {
+	rows := []struct {
+		name, status, preview string
+		kind                  uikit.StatusKind
+		running               bool
+		icon                  *ui.SVG
+	}{
+		{"运行命令", "运行中", "npm test -- --watch", uikit.StatusRunning, true, icons.Terminal()},
+		{"读取文件", "完成", "internal/ui/session/view.go", uikit.StatusSuccess, false, icons.File()},
+		{"运行命令", "失败", "go test ./internal/ui/session", uikit.StatusError, false, icons.Terminal()},
+		{"搜索文件", "已停止", "ConfirmDanger", uikit.StatusCancelled, false, icons.Search()},
+	}
+	render := func(tokens *design.Tokens, path string) {
+		tester := ui.NewTester(func(c *ui.Context) {
+			c.SetTheme(tokens.Theme())
+			ui.Column(c).FillWidth().Padding(design.Space4).Gap(design.Space2).
+				Background(tokens.BgBase).Children(func() {
+				for index, row := range rows {
+					uikit.ToolRow(c, uikit.ToolRowOptions{
+						Key:         fmt.Sprintf("specimen-%d", index),
+						Icon:        row.icon,
+						Name:        row.name,
+						Status:      row.status,
+						StatusColor: uikit.StatusColor(tokens, row.kind),
+						State:       row.kind,
+						Running:     row.running,
+						Preview:     row.preview,
+						Sections: []uikit.ToolPanelSection{{
+							Label: "输入", Text: row.preview, Mono: true, CopyLabel: "复制输入",
+						}},
+					})
+				}
+			})
+		}, 760, 300)
+		tester.Frame()
+		img := tester.Image()
+		file, err := os.Create(path)
+		if err != nil {
+			fail("create "+path, err)
+		}
+		if err := png.Encode(file, img); err != nil {
+			fail("encode "+path, err)
+		}
+		_ = file.Close()
+		fmt.Println("wrote", path, img.Bounds().Size())
+	}
+	render(design.Light(), filepath.Join(outDir, "p2-tool-row-states.png"))
+	render(design.Dark(), filepath.Join(outDir, "p2-tool-row-states-dark.png"))
 }

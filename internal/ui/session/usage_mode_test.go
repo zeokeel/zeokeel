@@ -39,10 +39,9 @@ func TestAssistantMetaRowShowsCompactUsage(t *testing.T) {
 	})
 	h := newHarness(t, chat)
 	tester := h.tester()
-	// The per-reply telemetry moved off the meta row (subtraction pass); the
-	// breakdown lives in the ⋯ menu's 用量明细 submenu.
-	h.assertTexts(tester, "消息操作")
-	h.assertNoTexts(tester, "用时 3.2s")
+	// The usage summary is part of the compact meta row; the breakdown lives in
+	// the ⋯ menu's 用量明细 submenu.
+	h.assertTexts(tester, "用时 3.2s · 1.2K tokens", "消息操作")
 	h.click(tester, "消息操作")
 	h.assertTexts(tester, "用量明细")
 	h.click(tester, "用量明细")
@@ -62,7 +61,8 @@ func TestAssistantMetaRowUsesCompactUnits(t *testing.T) {
 	})
 	h := newHarness(t, chat)
 	tester := h.tester()
-	h.assertNoTexts(tester, "用时 358.8s", "173,635")
+	h.assertTexts(tester, "用时 358.8s · 173.6K tokens")
+	h.assertNoTexts(tester, "173,635")
 	h.click(tester, "消息操作")
 	h.click(tester, "用量明细")
 	h.assertTexts(tester, "171.7K", "1.9K", "92.9K")
@@ -77,13 +77,11 @@ func TestAssistantMetaRowDurationFormats(t *testing.T) {
 	)
 	h := newHarness(t, chat)
 	tester := h.tester()
-	// No turn carries a usage summary on its meta row anymore.
-	if got := textsContaining(tester.Texts(), "用时"); got != 0 {
-		t.Fatalf("usage summaries = %d, want 0; texts = %v", got, tester.Texts())
+	h.assertTexts(tester, "用时 850ms · 12 tokens")
+	// The message without Usage gets no usage summary.
+	if got := textsContaining(tester.Texts(), "用时"); got != 1 {
+		t.Fatalf("usage summaries = %d, want 1; texts = %v", got, tester.Texts())
 	}
-	h.click(tester, "消息操作")
-	h.click(tester, "用量明细")
-	h.assertTexts(tester, "时长", "850ms")
 }
 
 func TestAssistantMetaRowEnglishCopy(t *testing.T) {
@@ -95,7 +93,7 @@ func TestAssistantMetaRowEnglishCopy(t *testing.T) {
 	tester := h.tester()
 	h.ui.Locale().SetLanguage("en")
 	tester.Frame()
-	h.assertNoTexts(tester, "Took 3.2s")
+	h.assertTexts(tester, "Took 3.2s · 1.2K tokens")
 	h.click(tester, "Message actions")
 	h.click(tester, "Usage details")
 	h.assertTexts(tester, "Cached tokens", "200")

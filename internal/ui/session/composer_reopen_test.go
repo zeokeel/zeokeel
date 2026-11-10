@@ -9,7 +9,6 @@ package session_test
 //     so scripted/sub-100ms turns omit it instead of printing a huge tok/s.
 
 import (
-	"strings"
 	"testing"
 
 	"github.com/egoist/mygo/ui"
@@ -56,10 +55,6 @@ func TestSessionStatusStripOmitsSpeedForVeryShortTurn(t *testing.T) {
 	})
 	h := newModelHarness(t, chat, nil)
 	tester := h.tester()
-	h.assertTexts(tester, "1 轮")
-	h.assertNoTexts(tester, "tok/s", "缓存命中")
-	// The cache hit is still recoverable from the exact tooltip.
-	if info, ok := tester.Access("1 轮"); !ok || !strings.Contains(info.Description, "缓存命中 17") {
-		t.Fatalf("status tooltip = %q, want the cache hit", info.Description)
-	}
+	h.assertTexts(tester, "1 轮 · 0 步 · 缓存命中 17%")
+	h.assertNoTexts(tester, "tok/s")
 }

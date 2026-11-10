@@ -75,13 +75,14 @@ func TestDesktopProductAssemblyShowsAllDemoModules(t *testing.T) {
 
 	tester := ui.NewTester(uiRoot.View, 1200, 800)
 	// The product lands on the session screen (the DSH shell): its empty
-	// conversation hero and the brand sidebar's new-chat action are the demo
-	// modules' visible contributions. Zero-value agent entries stay hidden now
-	// (subtraction pass), so the header carries only the title.
+	// conversation hero, the brand sidebar's new-chat action and the key
+	// orchestration entries (team + subagents, visible at zero) are the demo
+	// modules' visible contributions.
 	for _, want := range []string{
 		"开始新对话",
 		"还没有消息，开始一段新对话吧。",
 		"新对话",
+		"智能体团队",
 	} {
 		if !tester.HasText(want) {
 			t.Fatalf("desktop frame does not show %q; texts = %v", want, tester.Texts())

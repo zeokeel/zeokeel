@@ -5,6 +5,7 @@ package uikit_test
 // assistive technology sees its expanded state and description.
 
 import (
+	"image/color"
 	"testing"
 
 	"github.com/egoist/mygo/ui"
@@ -249,5 +250,104 @@ func TestToolRowMarkerColumn(t *testing.T) {
 	tester.Frame()
 	if len(state.toggles) != 1 || state.toggles[0] != true {
 		t.Fatalf("marker toggle calls = %v, want [true]", state.toggles)
+	}
+}
+
+// toolRowGutterVariant selects one ToolRow shape: the plain line (a call with no
+// panel body), the disclosure (a call with input/output sections) and the
+// activity band's marker-column row.
+type toolRowGutterVariant struct {
+	name  string
+	panel bool
+	band  bool
+}
+
+// toolRowGutterView draws one tool row on the page background so the state
+// gutter's fill is readable in the rendered pixels: the tester has no getter for
+// a decorative box's paint, so the frame is the assertion surface (as the icon
+// button's fill/danger tests do).
+func toolRowGutterView(state uikit.StatusKind, running bool, v toolRowGutterVariant) func(*ui.Context) {
+	return func(c *ui.Context) {
+		t := design.Of(c)
+		ui.Column(c).FillWidth().FillHeight().Background(t.BgBase).
+			Padding(design.Space4).Children(func() {
+			o := uikit.ToolRowOptions{
+				Key:           "test.gutter",
+				Icon:          icons.File(),
+				Name:          "读取文件",
+				Status:        "状态",
+				StatusColor:   uikit.StatusColor(t, state),
+				State:         state,
+				Running:       running,
+				Preview:       "auth.go",
+				InlineChevron: v.band,
+				MarkerColumn:  v.band,
+			}
+			if v.panel {
+				o.Sections = []uikit.ToolPanelSection{{Label: "输出", Text: "完成"}}
+			}
+			uikit.ToolRow(c, o)
+		})
+	}
+}
+
+// gutterPixel is a point on the state gutter: the row starts at the page's
+// design.Space4 padding and the gutter is its first child, so the row's first
+// DIP is inside the 3 DIP rule while a quiet row leaves that DIP to the page
+// (the glyph beside it starts a little further in); vertically the name's
+// center is the row's center, where the centered rule lies.
+func gutterPixel(t *testing.T, tt *ui.Tester) (int, int) {
+	t.Helper()
+	name, ok := tt.Find("读取文件")
+	if !ok {
+		t.Fatalf("gutter row name missing; texts = %v", tt.Texts())
+	}
+	return int(design.Space4), int(name.Y + name.H/2)
+}
+
+// TestToolRowStateGutter covers the state-first edge (DESIGN.md §5.2): the
+// leading 3 DIP gutter is painted only while the call is in flight (Warning),
+// failed (Danger) or stopped by the user (neutral LabelTertiary); success, idle
+// and unknown draw nothing, so a settled call stays quiet. The lane is checked
+// in every row variant: the plain line without a panel body, the disclosure and
+// the activity band's marker-column row.
+func TestToolRowStateGutter(t *testing.T) {
+	light := design.Light()
+	variants := []toolRowGutterVariant{
+		{name: "plain"},
+		{name: "disclosure", panel: true},
+		{name: "band", band: true},
+	}
+	cases := []struct {
+		name    string
+		state   uikit.StatusKind
+		running bool
+		want    ui.Color
+	}{
+		{name: "running", state: uikit.StatusRunning, running: true, want: light.Warning},
+		{name: "in-progress", state: uikit.StatusInProgress, want: light.Warning},
+		{name: "error", state: uikit.StatusError, want: light.Danger},
+		{name: "cancelled", state: uikit.StatusCancelled, want: light.LabelTertiary},
+		{name: "success", state: uikit.StatusSuccess, want: light.BgBase},
+		{name: "idle", state: uikit.StatusIdle, want: light.BgBase},
+		{name: "unknown", state: uikit.StatusUnknown, want: light.BgBase},
+		// Running without a state keeps the running edge for callers that have
+		// not adopted State yet (the zero value is additive).
+		{name: "running-without-state", state: uikit.StatusUnknown, running: true, want: light.Warning},
+	}
+	for _, v := range variants {
+		for _, tc := range cases {
+			t.Run(v.name+"/"+tc.name, func(t *testing.T) {
+				tt := ui.NewTester(toolRowGutterView(tc.state, tc.running, v), 400, 120)
+				tt.Frame()
+				x, y := gutterPixel(t, tt)
+				got := tt.Image().RGBAAt(x, y)
+				want := color.RGBA{R: tc.want.R, G: tc.want.G, B: tc.want.B, A: tc.want.A}
+				if got != want {
+					t.Fatalf("state gutter pixel (%d,%d) = %v, want %v; the state's gutter fill is part of the row contract",
+						x, y, got, want)
+				}
+			})
+		}
 	}
 }

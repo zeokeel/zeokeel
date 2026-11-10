@@ -297,9 +297,13 @@ func realBuild(state *rendererState, runtime contracts.UIRuntime) func(c *ui.Con
 			RawName:     tool,
 			Status:      uikit.ToolStatusLabel(state.locale, call.Status),
 			StatusColor: uikit.StatusColor(t, statusKind),
-			Running:     statusKind == uikit.StatusRunning,
-			Preview:     uikit.ToolPreview(summary, 96),
-			Open:        open,
+			// The state draws the row's leading 3 DIP gutter (DESIGN.md §5.2):
+			// running is Warning, a failure Danger, a user stop neutral; a
+			// finished call draws none and stays quiet.
+			State:   statusKind,
+			Running: statusKind == uikit.StatusRunning,
+			Preview: uikit.ToolPreview(summary, 96),
+			Open:    open,
 			Toggle: func(next bool) {
 				toggled = true
 				state.store(key, next)

@@ -45,8 +45,7 @@ func TestAssistantProcessFoldsToSummary(t *testing.T) {
 	tester := h.tester()
 
 	summary := "过程 · 思考 · 2 个工具调用"
-	h.assertTexts(tester, summary, "最终答复", "消息操作")
-	h.assertNoTexts(tester, "用时 3.2s")
+	h.assertTexts(tester, summary, "最终答复", "用时 3.2s · 1.2K tokens", "消息操作")
 	// The folded timeline is not rendered: no tool rows, no reasoning panel.
 	h.assertNoTexts(tester, "运行命令", "读取文件", "先想一想，再运行命令。")
 	if info, ok := tester.AccessByRole(ui.RoleDisclosure, summary); !ok || info.Expanded {
@@ -189,8 +188,7 @@ func TestAssistantMetaRowShowsTimeAndCompactUsage(t *testing.T) {
 	h := newHarness(t, foldChat(message))
 	tester := h.tester()
 
-	h.assertTexts(tester, "18:41", "消息操作")
-	h.assertNoTexts(tester, "用时 358.8s")
+	h.assertTexts(tester, "18:41", "用时 358.8s · 173.6K tokens", "消息操作")
 	h.assertNoTexts(tester, "173,635", "171,737", "1,898", "92,892")
 	// The time keeps the full timestamp in its tooltip.
 	if info, ok := tester.Access("18:41"); !ok || info.Description != "2026-11-09 18:41" {
@@ -266,7 +264,7 @@ func TestFailedTurnMetaRowHasNoActions(t *testing.T) {
 	h := newCommandHarness(t, chat)
 	tester := h.tester()
 	h.assertTexts(tester, "鉴权失败", "重试", "18:41")
-	h.assertNoTexts(tester, "用时 1.2s")
+	h.assertTexts(tester, "用时 1.2s · 460 tokens")
 	if _, ok := tester.Find("消息操作"); ok {
 		t.Fatalf("failed turn rendered a message-actions entry; texts = %v", tester.Texts())
 	}

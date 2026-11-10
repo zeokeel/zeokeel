@@ -41,8 +41,7 @@ func TestAssistantStepsFoldIntoOneTurn(t *testing.T) {
 	tester := h.tester()
 
 	summary := "过程 · 思考 · 2 个工具调用"
-	h.assertTexts(tester, summary, "最终结果")
-	h.assertNoTexts(tester, "用时 3.0s")
+	h.assertTexts(tester, summary, "最终结果", "用时 3.0s · 3K tokens")
 	h.assertNoTexts(tester, "第一步结果", "第二步结果", "运行命令", "读取文件")
 
 	h.click(tester, summary)

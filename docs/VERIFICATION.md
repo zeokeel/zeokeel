@@ -792,3 +792,12 @@ v0.2.12 的 package-macos job 在 GitHub Ubuntu runner 上构建 libdmg-hfsplus 
   - 契约：`AGENTS.md`（危险默认/预算/选择态/字号度量/主操作落点）、`docs/DESIGN.md`（§5.1 surface ramp、§5.3 字号规则、§5.4 度量、§5.5 预算、§6 预设/组合、AP-19..AP-25）、`docs/DESIGN-LINT.md`（DS-11..DS-16）、`internal/design/registry.json`（新组件 + AP）。
 - **验证**：`go test ./... -count=1` 全绿（含 regression / uimodtest / design 契约测试）；`gofmt -l internal cmd` 空；`go build ./...`、`go vet ./...`、`go tool mygo vet .` 干净；`designlint --strict --baseline` **0 error / 0 warn / 0 new / 0 blocking**；`scripts/design-check.sh` 6/6 PASS；`ui-snapshot` 96 PNG（`.cache/fix-final/shots/`）；`ui-drive` **91/91 PASS**（`.cache/fix-final/drive/drive-report.md`）。
 - **已知残余**：toast 堆叠时第二条仍可能短暂覆盖 transcript 右上 meta（4s、指针穿透）；会话记忆行与设置记忆行仍两套行尾操作（V22，下一轮抽 `uikit.ListRow`）；全仓 11px 静态审计（DS-15 AST）、设置对话框标题全量统一（V9）、1024+抽屉顶带重排（V27）列为后续增量；640×480 低于产品最小窗，设置 footer 仅记录；暗色会话 transcript/工具卡未逐帧覆盖，依赖 token 测试与浅色对照；Home 粘贴图片钩子已接，真实桌面剪贴板未真机验证。
+
+## 0.2.20（2026-11-11：签名表面第二阶段 + 过减法修正）
+
+- **Agent Run Band**：`session.buildAgentRunBand` 在 `SlotScreenHeader` 中把运行中/智能体团队/子智能体/后台任务/待审批收进一条 hairline 状态带；团队与子代理零值常显（关键功能可发现），后台任务/待审批只在有内容时出现，全空时不渲染。旧 `buildAgentHeaderEntries` 与 actions slot 的运行中 badge 合并进 band。
+- **State-first Tool Row**：`uikit.ToolRowOptions.State` + 3px 状态 gutter（Running=Warning/Error=Danger/Cancelled=neutral；Success 安静），折叠摘要改等宽输入摘要；toolcards 与 session fallback 都传 `State`；新增 `TestToolRowStateGutter`（24 子测试，像素断言）与组件标本帧。
+- **过减法修正**：恢复团队/子代理零值入口、状态条 6 项（轮/步/tok/s/上下文/缓存/剩余）、逐条消息「用时 · tokens」；保留的减法只限重复/装饰（设置眉标、卡外复制、卡片墙）。
+- **契约**：AGENTS 规则 17；DESIGN §6.3 `session.buildAgentRunBand`；AGENT-SURFACES S9；registry `session.agent-run-band`；DESIGN-LINT DS-17。
+- **验证**：`go test ./... -count=1` 全绿；gofmt/build/vet/mygo vet 干净；designlint **0 new / 0 blocking**；design-check 6/6；`ui-snapshot` **101 次渲染 / 100 唯一 PNG**（`.cache/phase2/shots/`）；`ui-drive` **91/91 PASS**（`.cache/phase2/drive/`）。
+- **残余**：Tool Row 完成态不保留 gutter lane，running→success 有 11px 瞬态左移（为保持完成行与相邻 reasoning 行同一 inset；若要求零 reflow 再改为透明 lane）；窄带 band 只显示图标+计数（Tooltip/可及名保留全称）。

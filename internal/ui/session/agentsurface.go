@@ -217,18 +217,73 @@ func (st *state) taskBoard() contracts.TaskBoard {
 
 // --- header entries ---------------------------------------------------------
 
-// buildAgentHeaderEntries adds the header's agent entries after the title, in
-// the DSH order: 智能体团队, 子智能体 N, N 个后台任务. The host keeps rendering
-// its own utilities (search, inspector toggle) after the actions slot.
-func buildAgentHeaderEntries(c *ui.Context, t *design.Tokens, st *state, chat contracts.ChatService) {
+// buildAgentRunBand is the header's signature run surface: one quiet band
+// after the title that collects the conversation's run state and the
+// orchestration entries — 运行中, 智能体团队, 子智能体, 后台任务 and 待审批 — so the
+// band reads as one instrument instead of five unrelated badges. Team and
+// subagent entries stay visible at zero (key features); the running badge and
+// the approval count only appear while there is something to report. The host
+// keeps rendering its own utilities (search, inspector toggle) after the
+// actions slot.
+func buildAgentRunBand(c *ui.Context, t *design.Tokens, st *state, chat contracts.ChatService) {
 	if st == nil {
 		return
 	}
 	activeID := chat.ActiveSession()
+	session, hasSession := chat.Session(activeID)
+	running := hasSession && session.Running
+	team := st.teamService()
+	children := st.childAgentService()
+	jobs := st.jobService()
+	var jobList []contracts.BackgroundJob
+	if jobs != nil {
+		jobList = jobs.Jobs()
+	}
+	pending := pendingApprovalCount(st)
+	// The band exists only when it has something to say: a team/subagent backend
+	// (their entries stay discoverable at zero), a live job, a running turn or a
+	// pending approval. Otherwise the title keeps the whole band's width.
+	if team == nil && children == nil && len(jobList) == 0 && !running && pending == 0 {
+		return
+	}
 	compact := st.headerWidth > 0 && st.headerWidth < agentHeaderCompactWidth
-	buildTeamEntry(c, t, st, compact)
-	buildSubagentEntry(c, t, st, activeID, compact)
-	buildJobsEntry(c, t, st, compact)
+	// One quiet instrument, not five unrelated chips: a hairline container with
+	// the entries as its segments. It is a status band, not a card — no shadow,
+	// no accent fill, and it never grows with content.
+	ui.Row(c).AlignItems(ui.Center).Height(design.ControlCompactHeight).
+		PaddingX(design.Space1).Radius(design.RadiusSM).
+		Border(1, t.BorderL2).Background(t.BgRaised).Gap(design.Space1).
+		Children(func() {
+			if running {
+				uikit.StatusBadge(c, t, uikit.StatusRunning, st.tr("运行中", "Running"))
+			}
+			buildTeamEntry(c, t, st, compact)
+			buildSubagentEntry(c, t, st, activeID, compact)
+			buildJobsEntry(c, t, st, compact)
+			if pending > 0 {
+				uikit.StatusBadge(c, t, uikit.StatusPending,
+					fmt.Sprintf(st.tr("待审批 %d", "%d awaiting approval"), pending)).
+					Tooltip(st.tr("待审批的请求在上方输入框旁处理",
+						"Pending approvals are handled above the composer"))
+			}
+		})
+}
+
+// pendingApprovalCount reports how many approval requests are waiting, for the
+// run band's 待审批 count (the cards themselves stay above the composer).
+func pendingApprovalCount(st *state) int {
+	if st == nil {
+		return 0
+	}
+	raw, ok := st.ctx.Get(contracts.KeyApprovals)
+	if !ok || raw == nil {
+		return 0
+	}
+	approvals, ok := raw.(contracts.Approvals)
+	if !ok || approvals == nil {
+		return 0
+	}
+	return len(approvals.Pending())
 }
 
 // agentEntryButton is one header entry: an icon, optional words and count, and
@@ -265,10 +320,9 @@ func agentStatusFill(t *design.Tokens, kind uikit.StatusKind) ui.Color {
 
 // buildTeamEntry is the header's 智能体团队 entry: a users glyph, the words (the
 // count alone on a narrow band) and the live member count, opening the native
-// team overlay. The entry only appears once a team exists: a permanent zero
-// badge over every conversation was noise that squeezed the title, and the
-// feature is reachable from the command palette before a team starts (R15,
-// simplified in v0.2.19's subtraction pass).
+// team overlay. The entry stays visible whenever the host provides the team
+// backend, even at zero: team orchestration is a key feature and the entry is
+// its one-step surface (v0.2.20 correction of the v0.2.19 subtraction pass).
 func buildTeamEntry(c *ui.Context, t *design.Tokens, st *state, compact bool) {
 	team := st.teamService()
 	if team == nil {
@@ -281,9 +335,9 @@ func buildTeamEntry(c *ui.Context, t *design.Tokens, st *state, compact bool) {
 			running++
 		}
 	}
-	if len(members) == 0 {
-		return
-	}
+	// Team and subagents are the product's key orchestration features: their
+	// entries stay visible even at zero so the surfaces are discoverable
+	// (user correction to the v0.2.19 subtraction pass).
 	label := st.tr("智能体团队", "Agent team")
 	tooltip := fmt.Sprintf(st.tr("%d 名成员 · %d 个运行中", "%d members · %d running"),
 		len(members), running)
@@ -635,9 +689,8 @@ func buildSubagentEntry(c *ui.Context, t *design.Tokens, st *state, activeID str
 		return
 	}
 	agents := children.ChildAgents(activeID)
-	if len(agents) == 0 {
-		return
-	}
+	// Keep the entry at zero: subagents are a key feature and the entry is the
+	// only one-step way to the child switcher (user correction).
 	running := 0
 	for _, agent := range agents {
 		if strings.EqualFold(strings.TrimSpace(agent.Status), contracts.ChildAgentRunning) {

@@ -55,7 +55,7 @@ var ruleList = []Rule{
 	{ID: "DS-06b", Name: "无效的 design:allow 豁免", AP: "AP-15", Severity: SeverityError, Doc: "docs/DESIGN-LINT.md §4.1"},
 	{ID: "DS-07", Name: "图标来源/尺寸", AP: "AP-10", Severity: SeverityError, Doc: "docs/DESIGN-LINT.md §3.7"},
 	{ID: "DS-10", Name: "对话框语义", AP: "AP-12", Severity: SeverityError, Doc: "docs/DESIGN-LINT.md §3.10"},
-	// DS-11..DS-16 are review contracts (v0.2.19): frame tests and snapshots
+	// DS-11..DS-17 are review contracts (v0.2.19/v0.2.20): frame tests and snapshots
 	// enforce them; they are listed so the registry's anti-pattern map stays
 	// complete and designlint can report them as info statistics later.
 	{ID: "DS-11", Name: "危险确认安全默认", AP: "AP-24", Severity: SeverityInfo, Doc: "docs/DESIGN-LINT.md §2"},
@@ -64,6 +64,7 @@ var ruleList = []Rule{
 	{ID: "DS-14", Name: "状态徽章解剖", AP: "AP-21", Severity: SeverityInfo, Doc: "docs/DESIGN-LINT.md §2"},
 	{ID: "DS-15", Name: "字号/高度纪律", AP: "AP-22", Severity: SeverityInfo, Doc: "docs/DESIGN-LINT.md §2"},
 	{ID: "DS-16", Name: "表面 ramp / elevation", AP: "AP-23", Severity: SeverityInfo, Doc: "docs/DESIGN-LINT.md §2"},
+	{ID: "DS-17", Name: "关键 orchestration 入口常显", Severity: SeverityInfo, Doc: "docs/DESIGN-LINT.md §2"},
 }
 
 // Rules returns the rule catalog.

@@ -60,6 +60,7 @@ internal/modules/*      后端能力模块
 14. **页面主操作两落点**：页面级即时动作放页头右，需要提交的表单放固定页脚右下的唯一 primary；分节动作放 `SectionAction`；禁止页中悬浮 primary。
 15. **新增自绘/组件必须登记**：DESIGN.md §7 + MIGRATION + lint 白名单 + 测试，否则检查失败。
 16. **改完 UI 必须验证**：`go test`（帧测试）+ 快照 + `designlint`/`scripts/design-check.sh`；没有证据不算完成。
+17. **关键功能入口与状态信息不因“减法”隐藏**：团队、子代理等 orchestration 入口零值也常显（保证可发现）；状态条/消息用量等信息默认保留，删除信息项必须有用户明确同意。
 
 ---
 

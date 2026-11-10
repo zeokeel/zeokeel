@@ -375,8 +375,9 @@ func registerInterruptShortcuts(c *ui.Context, chat contracts.ChatService, st *s
 
 // buildScreenHeaderSlot is the conversation's SlotScreenHeader contribution: the
 // conversation title (or the parent > child breadcrumb in a child conversation)
-// followed by the DSH agent entries — 智能体团队, 子智能体 N, N 个后台任务 — and
-// a spacer, so the host's utilities stay at the band's end. The workspace name
+// followed by the signature Agent Run Band — 运行中, 智能体团队, 子智能体 N,
+// 后台任务 and 待审批 — and a spacer, so the host's utilities stay at the band's
+// end. The workspace name
 // stays beside the title as quiet context when the band is wide enough. The
 // measured row width goes back into st.headerWidth, which the entries use on
 // the next frame to compact their words.
@@ -388,7 +389,7 @@ func buildScreenHeaderSlot(c *ui.Context, t *design.Tokens, st *state, chat cont
 		} else {
 			buildConversationTitle(c, t, st, chat, cfg)
 		}
-		buildAgentHeaderEntries(c, t, st, chat)
+		buildAgentRunBand(c, t, st, chat)
 		ui.Spacer(c).Grow(1)
 	})
 	st.headerWidth = row.Bounds().W
@@ -422,16 +423,13 @@ func buildConversationTitle(c *ui.Context, t *design.Tokens, st *state, chat con
 }
 
 // buildScreenActionsSlot is the conversation's SlotScreenActions contribution:
-// the running badge and the conversation-actions ⋯ menu. The agent entries
-// (team, child agents, background jobs) live in the header slot, before the
-// spacer that puts these utilities at the band's end.
+// the conversation-actions ⋯ menu. The run state and agent entries live in the
+// header's Agent Run Band, before the spacer that puts these utilities at the
+// band's end.
 func buildScreenActionsSlot(c *ui.Context, t *design.Tokens, runtime contracts.UIRuntime,
 	st *state, chat contracts.ChatService, cfg Config) {
 	activeID := chat.ActiveSession()
 	session, hasSession := chat.Session(activeID)
-	if hasSession && session.Running {
-		uikit.StatusBadge(c, t, uikit.StatusRunning, st.tr("运行中", "Running"))
-	}
 	if hasSession && activeID != "" {
 		buildConversationActionsButton(c, t, st, runtime, cfg, session)
 	}
@@ -1457,6 +1455,7 @@ func buildAssistantToolRow(c *ui.Context, t *design.Tokens, runtime contracts.UI
 		RawName:       tool.Name,
 		Status:        uikit.ToolStatusLabel(st.locale, tool.Status),
 		StatusColor:   uikit.StatusColor(t, statusKind),
+		State:         statusKind,
 		Running:       statusKind == uikit.StatusRunning,
 		Preview:       uikit.ToolPreview(summary, 96),
 		Open:          open,
@@ -1533,15 +1532,19 @@ func buildAssistantMetaContent(c *ui.Context, t *design.Tokens, runtime contract
 	if !hasTime && !hasMenu {
 		return false
 	}
-	// Per-turn duration/tokens used to sit on every meta row: three numbers of
-	// telemetry over every reply made the transcript read like a dashboard.
-	// They live in the ⋯ menu's 用量明细 now; the row keeps the time and the
-	// actions (a subtraction, per the style direction).
+	summary := usageSummaryText(st, message.Usage)
 	if hasTime {
 		buildMessageTime(c, t, st.locale, message.CreatedAt)
 	}
-	if hasMenu {
+	if summary != "" {
 		if hasTime {
+			metaSeparator(c, t)
+		}
+		design.Apply(ui.Text(c, summary), t.Font(design.TypeXXXS)).
+			TextColor(t.LabelTertiary).NoWrap()
+	}
+	if hasMenu {
+		if hasTime || summary != "" {
 			metaSeparator(c, t)
 		}
 		buildMessageMoreButton(c, t, "session.actions."+message.ID,
@@ -1621,6 +1624,14 @@ func buildMessageMoreButton(c *ui.Context, t *design.Tokens, key, label string, 
 func metaSeparator(c *ui.Context, t *design.Tokens) {
 	design.Apply(ui.Text(c, "·"), t.Font(design.TypeXXXS)).
 		TextColor(t.LabelTertiary).NoWrap()
+}
+
+func usageSummaryText(st *state, usage *contracts.MessageUsage) string {
+	if usage == nil {
+		return ""
+	}
+	return st.tr("用时 ", "Took ") + formatUsageDuration(usage.DurationMS) +
+		" · " + uikit.FormatCompactCount(usageTotalTokens(usage)) + " tokens"
 }
 
 // buildUserMessageMeta is the compact meta row under a user bubble: the message
@@ -3362,12 +3373,10 @@ func (st *state) sessionContextWindow(chat contracts.ChatService, session contra
 }
 
 // buildSessionStatusStrip renders the DSH-style single muted status line right
-// under the composer: rounds · context/window · remaining context. It is
-// informational only (no card, icon or badge); the exact uncompacted numbers
-// (rounds, steps, average speed, cache hit, token sums) live in its tooltip, and
-// the whole strip stays hidden until the session has token accounting to
-// report. Six always-on items shortened the composer's footer to a telemetry
-// bar; the three kept ones are what the user checks while writing (P3-15).
+// under the composer: rounds · steps · output speed · context/window · cache hit ·
+// remaining context. It is informational only (no card, icon or badge); the
+// exact uncompacted numbers live in its tooltip, and the whole strip stays
+// hidden until the session has token accounting to report.
 func buildSessionStatusStrip(c *ui.Context, t *design.Tokens, chat contracts.ChatService,
 	st *state, session contracts.ChatSession) {
 	line, exact, ok := sessionStatusLine(st, chat, session)
@@ -3393,19 +3402,20 @@ func sessionStatusLine(st *state, chat contracts.ChatService, session contracts.
 		return "", "", false
 	}
 
-	// The visible line keeps the three items a writer checks at a glance:
-	// rounds, context over its window and the remaining context. Tool steps,
-	// throughput and cache hit move into the exact tooltip (P3-15).
-	parts := []string{sessionCountLabel(st, stats.rounds, "轮", "round", "rounds")}
+	parts := []string{
+		sessionCountLabel(st, stats.rounds, "轮", "round", "rounds"),
+		sessionCountLabel(st, stats.steps, "步", "step", "steps"),
+	}
 	// Average output speed over the run, tool time included: generated
 	// completion tokens divided by the turn's wall time. A turn shorter than
 	// minStatusSpeedDurationMS says nothing about throughput (scripted turns,
-	// cancellations), so the tooltip omits it instead of printing a silly
+	// cancellations), so the item is omitted instead of printing a silly
 	// five-digit number.
 	speed := 0.0
 	hasSpeed := stats.durationMS >= minStatusSpeedDurationMS && stats.completion > 0
 	if hasSpeed {
 		speed = float64(stats.completion) / (float64(stats.durationMS) / 1000)
+		parts = append(parts, fmt.Sprintf("%d tok/s", int64(math.Round(speed))))
 	}
 	window := st.sessionContextWindow(chat, session)
 	remaining := 0
@@ -3420,7 +3430,6 @@ func sessionStatusLine(st *state, chat contracts.ChatService, session contracts.
 		if remaining > 100 {
 			remaining = 100
 		}
-		parts = append(parts, fmt.Sprintf(st.tr("剩余 %d%%", "%d%% left"), remaining))
 	}
 	cacheHit := 0
 	hasCache := stats.prompt > 0
@@ -3432,6 +3441,10 @@ func sessionStatusLine(st *state, chat contracts.ChatService, session contracts.
 		if cacheHit > 100 {
 			cacheHit = 100
 		}
+		parts = append(parts, fmt.Sprintf(st.tr("缓存命中 %d%%", "Cache hit %d%%"), cacheHit))
+	}
+	if hasContext {
+		parts = append(parts, fmt.Sprintf(st.tr("剩余 %d%%", "%d%% left"), remaining))
 	}
 	return strings.Join(parts, " · "), sessionExactStatusTooltip(st, stats, window, speed, cacheHit, remaining, hasSpeed, hasCache, hasContext), true
 }

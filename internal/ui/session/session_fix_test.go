@@ -117,10 +117,11 @@ func TestChildViewHidesRawIDAndDuplicateCompletion(t *testing.T) {
 
 // --- R15: zero-value header entries ----------------------------------------
 
-// TestZeroAgentEntriesHiddenAtNarrowWidth covers R15's narrow variant: the
-// zero-value 子智能体 / 后台任务 chips stay hidden on a narrow band too, and the
-// conversation title keeps a readable measure.
-func TestZeroAgentEntriesHiddenAtNarrowWidth(t *testing.T) {
+// TestZeroAgentEntriesStayCompactAtNarrowWidth covers the v0.2.20 correction:
+// the team/subagent entries stay visible at zero and compact to icon+count on a
+// narrow band, while the zero job entry (a notification, not a key feature)
+// stays hidden; the conversation title keeps a readable measure.
+func TestZeroAgentEntriesStayCompactAtNarrowWidth(t *testing.T) {
 	h := newAgentSurfaceHarness(t, headerChat("窄窗的会话标题"), agentServices{
 		team: &fakeTeam{}, children: &fakeChildAgents{}, jobs: &fakeJobs{},
 	})
@@ -129,7 +130,8 @@ func TestZeroAgentEntriesHiddenAtNarrowWidth(t *testing.T) {
 	for index := 0; index < 3; index++ {
 		tester.Frame()
 	}
-	h.assertNoTexts(tester, "子智能体", "个后台任务")
+	h.assertTexts(tester, "智能体团队", "子智能体 0")
+	h.assertNoTexts(tester, "个后台任务")
 	title, ok := tester.Find("窄窗的会话标题")
 	if !ok {
 		t.Fatalf("narrow header lost the title; texts = %v", tester.Texts())

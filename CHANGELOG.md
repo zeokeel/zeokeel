@@ -8,6 +8,26 @@ All notable changes to ZeoKeel are documented here. The format follows
 
 （暂无未发布改动）
 
+## [0.2.20] - 2026-11-11
+
+第二阶段「签名表面」+ v0.2.19 过减法修正。
+
+### 新增（签名表面）
+- **Agent Run Band**：标题行收拢为一条安静状态带 —— 运行中 / 智能体团队 / 子智能体 / 后台任务 / 待审批；只有一个 hairline 容器，不是卡片墙。团队与子代理是关键功能入口，**零值也常显**（Popover 空态解释）；后台任务与待审批只在有内容时出现；全部为空时整条不渲染。
+- **State-first Tool Row**：工具行左侧 3px 状态 gutter，只在进行中（Warning）/失败（Danger）/被停止（neutral）时出现，完成态保持安静；折叠摘要改为等宽输入摘要（命令/路径优先，mono），状态文字仍在，不靠颜色单独表达。
+- 101 张快照新增 `p2-run-band`、`p2-tool-row-running/complete`、`p2-tool-row-states[-dark]` 组件标本帧；`ui-drive` 91/91 PASS；`ui-snapshot` **101 次渲染 / 100 唯一 PNG**。
+
+### 修正（v0.2.19 过减法）
+- 恢复团队/子代理入口：有 backend 时零值也渲染（用户反馈：这是重点功能，不能因“减法”隐藏）。
+- 恢复状态条 6 项：轮 · 步 · tok/s · 上下文/上限 · 缓存命中 · 剩余（P3-15 降噪回滚）。
+- 恢复每条助手消息元信息「用时 X · N tokens」（用量明细仍保留在 ⋯）。
+- 保留的减法只限重复/装饰：设置页「设置」眉标、工具卡外重复复制按钮、管理列表卡墙。
+
+### 契约
+- `AGENTS.md` 规则 17：关键 orchestration 入口与状态信息不因“减法”隐藏，删除信息项需用户明确同意。
+- `docs/DESIGN.md` §6.3 新增 `session.buildAgentRunBand`；`docs/AGENT-SURFACES.md` S9 顶带规格更新；`internal/design/registry.json` 新增 `session.agent-run-band`；`docs/DESIGN-LINT.md` 新增 DS-17（关键入口常显，帧测试评审契约）。
+- `docs/UI-AUDIT-2026-11-11.md` §10.3 更正过度减法记录，§11 记录 v0.2.20 签名表面与恢复项；`docs/UI-STYLE-DIRECTION-2026-11-11.md` Phase 2 标记落地。
+
 ## [0.2.19] - 2026-11-11
 
 交互健壮性与视觉语言审计（`docs/UI-AUDIT-2026-11-11.md`：P1×3 / P2×15 / P3×16）全量落地，并把统一设计语言 v2 写入设计契约。

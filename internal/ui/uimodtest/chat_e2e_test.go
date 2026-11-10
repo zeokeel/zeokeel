@@ -71,7 +71,7 @@ func TestDesktopChatPipelineEndToEnd(t *testing.T) {
 	// the input the user gets, above the brand content header.
 	tester := ui.NewTester(uiRoot.View, 1280, 800)
 	tester.Frame()
-	for _, want := range []string{"ZeoKeel", "对话", "轨迹", "记忆", "输入消息…", "发送"} {
+	for _, want := range []string{"ZeoKeel", "智能体团队", "对话", "轨迹", "记忆", "输入消息…", "发送"} {
 		if !tester.HasText(want) {
 			t.Fatalf("session landing frame does not show %q; texts = %v", want, tester.Texts())
 		}

@@ -1,34 +1,15 @@
 package session_test
 
-// Tests for the DSH-style session status strip under the composer. The visible
-// line keeps three items — rounds, context-tokens-over-window and the remaining
-// context — while tool steps, average speed and cache hit live in the exact
-// tooltip (P3-15). The strip renders only accurate values from the session read
-// model and hides whole items (and itself) when the data is unknown.
+// Tests for the DSH-style session status strip under the composer: rounds,
+// tool steps, average output speed, context-tokens-over-window, cache hit and
+// remaining context. The strip renders only accurate values from the session
+// read model and hides whole items (and itself) when the data is unknown.
 
 import (
-	"strings"
 	"testing"
-
-	"github.com/egoist/mygo/ui"
 
 	"github.com/zeokeel/zeokeel/internal/contracts"
 )
-
-// assertStatusTooltip asserts the summary line's exact tooltip contains every
-// wanted fragment.
-func assertStatusTooltip(t *testing.T, tester *ui.Tester, line string, wanted ...string) {
-	t.Helper()
-	info, ok := tester.Access(line)
-	if !ok {
-		t.Fatalf("status line %q not found; texts = %v", line, tester.Texts())
-	}
-	for _, want := range wanted {
-		if !strings.Contains(info.Description, want) {
-			t.Fatalf("status tooltip = %q, missing %q", info.Description, want)
-		}
-	}
-}
 
 // statusChat scripts one session with the given messages after a first user
 // prompt, so the composer renders and the strip has a conversation to sum.
@@ -76,19 +57,16 @@ func statusUsageMessages() []contracts.ChatMessage {
 	}
 }
 
-// TestSessionStatusStripRendersUsage covers the reduced line: rounds, newest
-// ContextTokens over the catalogue window and the remaining context, with the
-// steps/speed/cache figures in the exact tooltip.
+// TestSessionStatusStripRendersUsage covers the full line: rounds, steps,
+// average output speed, newest ContextTokens over the catalogue window, cache
+// hit and remaining context, with the muted single line below the composer.
 func TestSessionStatusStripRendersUsage(t *testing.T) {
 	chat := statusChat(statusUsageMessages()...)
 	h := newModelHarness(t, chat, statusCatalog())
 	tester := h.tester()
 
-	const line = "2 轮 · 120K/128K tok · 剩余 6%"
+	const line = "2 轮 · 3 步 · 82 tok/s · 120K/128K tok · 缓存命中 95% · 剩余 6%"
 	h.assertTexts(tester, line)
-	// The noisy metrics are tooltip-only now.
-	h.assertNoTexts(tester, "tok/s", "缓存命中", "2 轮 · 3 步")
-	assertStatusTooltip(t, tester, line, "步骤 3", "82.2 tok/s", "缓存命中 95")
 	// Cumulative billing prompt tokens never reach the context ratio.
 	h.assertNoTexts(tester, "220K/128K", "100K/128K")
 
@@ -114,10 +92,7 @@ func TestSessionStatusStripEnglishCopy(t *testing.T) {
 	h.ui.Locale().SetLanguage("en")
 	tester.Frame()
 
-	h.assertTexts(tester, "2 rounds · 120K/128K tok · 6% left")
-	h.assertNoTexts(tester, "82 tok/s", "Cache hit 95%")
-	assertStatusTooltip(t, tester, "2 rounds · 120K/128K tok · 6% left",
-		"Steps 3", "82.2 tok/s", "cache hit 95")
+	h.assertTexts(tester, "2 rounds · 3 steps · 82 tok/s · 120K/128K tok · Cache hit 95% · 6% left")
 }
 
 // TestSessionStatusStripHiddenWithoutUsage covers the empty/failed conversations
@@ -142,7 +117,7 @@ func TestSessionStatusStripHiddenWithoutUsage(t *testing.T) {
 
 // TestSessionStatusStripWithoutCatalog covers the unknown-window case: without a
 // model catalogue there is no context window, so the context ratio and the
-// remaining item are hidden entirely; the tooltip keeps speed and cache.
+// remaining item are hidden entirely; speed and cache still show.
 func TestSessionStatusStripWithoutCatalog(t *testing.T) {
 	chat := statusChat(contracts.ChatMessage{
 		ID: "a1", Role: contracts.ChatRoleAssistant, Text: "一",
@@ -153,9 +128,8 @@ func TestSessionStatusStripWithoutCatalog(t *testing.T) {
 	})
 	h := newModelHarness(t, chat, nil)
 	tester := h.tester()
-	h.assertTexts(tester, "1 轮")
-	h.assertNoTexts(tester, "tok/s", "缓存命中", "剩余", "/128K tok", "900/")
-	assertStatusTooltip(t, tester, "1 轮", "333.3 tok/s", "缓存命中 50")
+	h.assertTexts(tester, "1 轮 · 0 步 · 333 tok/s · 缓存命中 50%")
+	h.assertNoTexts(tester, "剩余", "/128K tok", "900/")
 }
 
 // TestSessionStatusStripOmitsContextWithUnknownModel covers the catalogue that
@@ -172,9 +146,8 @@ func TestSessionStatusStripOmitsContextWithUnknownModel(t *testing.T) {
 	chat.config = contracts.ChatConfig{Model: "custom-model", ContextBudget: 64000}
 	h := newModelHarness(t, chat, statusCatalog())
 	tester := h.tester()
-	h.assertTexts(tester, "1 轮")
-	h.assertNoTexts(tester, "tok/s", "缓存命中", "剩余", "/64K tok", "/128K tok")
-	assertStatusTooltip(t, tester, "1 轮", "333.3 tok/s", "缓存命中 50")
+	h.assertTexts(tester, "1 轮 · 0 步 · 333 tok/s · 缓存命中 50%")
+	h.assertNoTexts(tester, "剩余", "/64K tok", "/128K tok")
 }
 
 // TestSessionStatusStripOmitsContextWithoutContextTokens covers a provider that
@@ -190,13 +163,12 @@ func TestSessionStatusStripOmitsContextWithoutContextTokens(t *testing.T) {
 	})
 	h := newModelHarness(t, chat, statusCatalog())
 	tester := h.tester()
-	h.assertTexts(tester, "1 轮")
-	h.assertNoTexts(tester, "tok/s", "缓存命中", "剩余", "/128K tok", "0/128K")
-	assertStatusTooltip(t, tester, "1 轮", "333.3 tok/s", "缓存命中 50")
+	h.assertTexts(tester, "1 轮 · 0 步 · 333 tok/s · 缓存命中 50%")
+	h.assertNoTexts(tester, "剩余", "/128K tok", "0/128K")
 }
 
 // TestSessionStatusStripHidesUnknownSpeed covers a usage row without wall time
-// or output tokens: the tooltip omits tok/s, the context items remain.
+// or output tokens: the tok/s item is hidden, the context/cache items remain.
 func TestSessionStatusStripHidesUnknownSpeed(t *testing.T) {
 	chat := statusChat(contracts.ChatMessage{
 		ID: "a1", Role: contracts.ChatRoleAssistant, Text: "一",
@@ -207,12 +179,7 @@ func TestSessionStatusStripHidesUnknownSpeed(t *testing.T) {
 	})
 	h := newModelHarness(t, chat, statusCatalog())
 	tester := h.tester()
-	const line = "1 轮 · 120K/128K tok · 剩余 6%"
+	const line = "1 轮 · 0 步 · 120K/128K tok · 缓存命中 50% · 剩余 6%"
 	h.assertTexts(tester, line)
-	h.assertNoTexts(tester, "tok/s", "缓存命中")
-	assertStatusTooltip(t, tester, line, "缓存命中 50")
-	info, ok := tester.Access(line)
-	if ok && strings.Contains(info.Description, "tok/s") {
-		t.Fatalf("status tooltip = %q, want no tok/s for an unmeasured turn", info.Description)
-	}
+	h.assertNoTexts(tester, "tok/s")
 }

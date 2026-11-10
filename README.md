@@ -4,16 +4,13 @@
 [![Release](https://img.shields.io/github/v/release/zeokeel/zeokeel)](https://github.com/zeokeel/zeokeel/releases)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
-> **v0.2.19 — twenty-fourth public release** (2026-11-11). Native, compile-time modular
+> **v0.2.20 — twenty-fifth public release** (2026-11-11). Native, compile-time modular
 > AI agent for desktop, headless and ACP (Zed/editor) use; one Go binary, no
 > webview. Final verification: full test suite green (incl. regression / uimodtest /
-> design-contract tests), `ui-drive` **91/91 PASS**, `ui-snapshot` **96 PNGs**,
+> design-contract tests), `ui-drive` **91/91 PASS**, `ui-snapshot` **101 renders / 100 unique PNGs**,
 > designlint **0 new / 0 blocking**. See [CHANGELOG.md](CHANGELOG.md) for the release notes.
 
-> **v0.2.19 主要变化**：交互健壮性与视觉语言审计全量落地（[审计报告](docs/UI-AUDIT-2026-11-11.md)）：
-> 危险确认安全默认（Enter 不再删除）、窄窗抽屉不再遮 composer、设置搜索支持设置项别名、
-> 运行态键位提示、审批摘要、粘贴图片附件、统一设计语言 v2（选择态/强调预算/状态徽章/字号度量/
-> 暗色 surface ramp/组件骨架），并做减法：零值入口、逐轮遥测、重复复制/眉标/卡片墙移除；契约同步进 DESIGN.md / AGENTS.md / DESIGN-LINT.md。
+> **v0.2.20 主要变化**：第二阶段签名表面 —— **Agent Run Band**（运行中/团队/子代理/任务/待审批收进一条状态带，团队与子代理零值常显）与 **State-first Tool Row**（3px 状态 gutter + 等宽输入摘要，仅进行中/失败/停止时出现）。同时修正 v0.2.19 的过度减法：恢复团队/子代理入口、状态条 6 项与逐条消息用量；契约同步进 DESIGN.md / AGENT-SURFACES.md / AGENTS.md / DESIGN-LINT.md（DS-17）。
 
 ## 下载与运行 / Download and run
 

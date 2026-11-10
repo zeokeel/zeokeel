@@ -3,9 +3,16 @@ package uikit
 // The compact transcript tool row: the quiet anatomy shared by the registered
 // tool-card renderers (internal/ui/toolcards) and the session screen's fallback
 // for tools without a renderer. A transcript is mostly prose; a tool call is one
-// muted disclosure row (icon, friendly name, status, one-line preview, chevron),
-// not a panel. Expanded, the panel shows the tool's input and output with a
-// copy action per section and an optional cross-navigation footer.
+// muted disclosure row (state gutter, icon, friendly name, status, one-line
+// preview, chevron), not a panel. Expanded, the panel shows the tool's input and
+// output with a copy action per section and an optional cross-navigation footer.
+//
+// The state gutter is the row's one state-first mark (DESIGN.md §5.2,
+// "状态语义矩阵"): a 3 DIP rule in the state's fill token at the line's start,
+// drawn only while the work is in flight (Warning), failed (Danger) or stopped
+// by the user (neutral LabelTertiary). A finished call draws nothing, so a
+// transcript of completed calls stays quiet; DESIGN.md §6.2 keeps the tool row
+// one muted line, never a badge or a card.
 
 import (
 	"github.com/egoist/mygo/ui"
@@ -56,6 +63,17 @@ const (
 // toolSectionMaxHeight bounds one expandable panel section (about eight lines).
 const toolSectionMaxHeight float32 = design.Space8 * 5
 
+// toolRowGutterWidth is the state gutter's width: 3 DIP derived from the 4 DIP
+// spacing grid (three quarters of design.Space1). It reads as the line's edge,
+// not as a second icon (DESIGN.md §5.2 status semantics; §6.2 one-muted-line
+// tool anatomy).
+const toolRowGutterWidth float32 = design.Space1 * 3 / 4
+
+// toolRowGutterHeight is the state gutter's height: one row-glyph measure from
+// the spacing grid (design.Space4), so the rule reads as tall as the category
+// icon beside it instead of filling the padded row.
+const toolRowGutterHeight float32 = design.Space4
+
 // ToolRowOptions is one compact transcript tool row.
 type ToolRowOptions struct {
 	// Key is the row's stable identity (one per tool call).
@@ -74,6 +92,14 @@ type ToolRowOptions struct {
 	// Running shows the official indeterminate-work spinner before the status
 	// text for a call that is still running.
 	Running bool
+	// State is the call's place in the shared status vocabulary. It draws the
+	// line's leading state gutter (DESIGN.md §5.2): Running/InProgress →
+	// Warning, Error → Danger, Cancelled → the neutral LabelTertiary. Success,
+	// Idle and Unknown draw nothing — a finished call stays quiet — so the
+	// state is also always carried by the status text, never by the gutter
+	// alone. The zero value keeps a caller that has not adopted the field
+	// rendering as before; Running still paints the running gutter then.
+	State StatusKind
 	// Preview is the collapsed one-line summary excerpt (already normalized to
 	// one line); empty keeps the status at the row end.
 	Preview string
@@ -153,6 +179,45 @@ func toolCallHead(c *ui.Context, t *design.Tokens, o toolCallHeadOptions) {
 	}
 }
 
+// toolRowGutterInk is a state's gutter fill: the semantic fill token of
+// DESIGN.md §5.2's state matrix (the same token the state's dot/badge fill
+// uses), never the *Text variant, because the rule is a fill and not small
+// text. Only the three states a reader must notice right now draw a gutter;
+// success, idle, pending, interrupted and unknown stay quiet.
+func toolRowGutterInk(t *design.Tokens, state StatusKind) (ui.Color, bool) {
+	switch state {
+	case StatusRunning, StatusInProgress:
+		return t.Warning, true
+	case StatusError:
+		return t.Danger, true
+	case StatusCancelled:
+		return t.LabelTertiary, true
+	default:
+		return ui.Color{}, false
+	}
+}
+
+// toolRowGutter draws the line's leading state gutter, if the state needs one.
+// It is one plain ui.Box in the row's own flex flow at the token-derived width
+// and height, so every ToolRow variant (plain line, disclosure trigger, activity
+// band) gets it at the line's start with no new component or icon. It adds no
+// background or card: the state still travels in the status text, the gutter
+// only repeats it as the row's edge (DESIGN.md §5.2, §6.2).
+func toolRowGutter(c *ui.Context, t *design.Tokens, o ToolRowOptions) {
+	state := o.State
+	if state == StatusUnknown && o.Running {
+		// A caller that has not adopted State yet still reports a call in
+		// flight through Running: keep the running state visible.
+		state = StatusRunning
+	}
+	ink, ok := toolRowGutterInk(t, state)
+	if !ok {
+		return
+	}
+	ui.Box(c).Width(toolRowGutterWidth).Height(t.Scale(toolRowGutterHeight)).
+		Shrink(0).Background(ink)
+}
+
 // ToolRow draws one compact transcript tool call as one official mygo
 // disclosure (ui.CollapsibleBase): the whole row is the trigger, so assistive
 // technology sees expanded/collapsed, Enter and Space work, and the panel grows
@@ -163,6 +228,7 @@ func toolCallHead(c *ui.Context, t *design.Tokens, o toolCallHeadOptions) {
 func ToolRow(c *ui.Context, o ToolRowOptions) {
 	t := design.Of(c)
 	buildLine := func(c *ui.Context, progress float32, disclosure bool) {
+		toolRowGutter(c, t, o)
 		if o.MarkerColumn {
 			buildActivityLine(c, t, o, progress, disclosure)
 			return
@@ -179,7 +245,11 @@ func ToolRow(c *ui.Context, o ToolRowOptions) {
 		// results by default). The trigger keeps only icon, name, status and
 		// chevron, and the panel is the one place the result reads.
 		if o.Preview != "" && !o.Open {
-			preview := design.Apply(ui.Text(c, o.Preview), t.Font(design.TypeXXXS)).
+			// The collapsed preview is the call's input summary (a command, a
+			// path, a query): the mono face reads it as code rather than prose,
+			// still one ellipsized line (DESIGN.md §5.3: TypeXXXS is for
+			// micro-labels like this, not for sentences).
+			preview := design.Apply(ui.Text(c, o.Preview), t.MonoText(design.TypeXXXS)).
 				TextColor(t.LabelTertiary).MaxLines(1).Ellipsis("…")
 			if !o.InlineChevron {
 				preview.Grow(1)
@@ -279,7 +349,9 @@ func buildActivityLine(c *ui.Context, t *design.Tokens, o ToolRowOptions, progre
 	if o.Preview != "" && !o.Open {
 		design.Apply(ui.Text(c, "·"), t.Font(design.TypeXXXS)).
 			TextColor(t.LabelTertiary).NoWrap()
-		design.Apply(ui.Text(c, o.Preview), t.Font(design.TypeXXXS)).
+		// The band's collapsed preview is the same input summary as the wide
+		// row's: mono face, one ellipsized line.
+		design.Apply(ui.Text(c, o.Preview), t.MonoText(design.TypeXXXS)).
 			TextColor(t.LabelTertiary).MaxLines(1).Ellipsis("…")
 	}
 	if disclosure {

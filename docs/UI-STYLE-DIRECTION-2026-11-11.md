@@ -3,7 +3,7 @@
 > 与 [UI-AUDIT-2026-11-11.md](UI-AUDIT-2026-11-11.md) 配套：那份报告回答“哪里不健壮/不统一”，这份回答“**要不要大改风格、AI Agent 适合什么风格、ZeoKeel 该选哪一种**”。
 > 配图说明：`before-after-a.png`、三张方向图是**用 mygo + 产品 design token 渲染的示意稿**（`.cache/audit-1111/style/`），用来评审风格方向，不是逐像素实现稿；其余为当前产品真实帧。
 >
-> **落地状态（v0.2.19）**：用户已拍板 **A · Quiet Cockpit**；Phase 0/1（安全默认、抽屉让宽、搜索 keywords、选中态两级、强调色预算、状态徽章、字号/度量、暗色 ramp、去 38、组件骨架）已随 v0.2.19 落地（见 [审计报告 §10](UI-AUDIT-2026-11-11.md)）。Phase 2 的完整 **Agent Run Band** 与 **State-first Tool Row** 尚未实现；本轮按用户「做减法」的要求先删掉了零值 agent 入口与逐轮 usage 元信息（用量进 ⋯），并做了运行态键位提示、状态徽章统一与工具卡单一复制入口，剩余部分列为下一轮签名表面。
+> **落地状态（v0.2.19）**：用户已拍板 **A · Quiet Cockpit**；Phase 0/1（安全默认、抽屉让宽、搜索 keywords、选中态两级、强调色预算、状态徽章、字号/度量、暗色 ramp、去 38、组件骨架）已随 v0.2.19 落地，Phase 2（Run Band + State-first Tool Row）随 v0.2.20 落地（见 [审计报告 §10](UI-AUDIT-2026-11-11.md)）。Phase 2 的 **Agent Run Band** 与 **State-first Tool Row** 已在 v0.2.20 落地：Run Band 收拢运行中/团队/子代理/任务/待审批（团队/子代理零值常显，不删关键入口）；Tool Row 增加只在异常/进行中出现 3px 状态 gutter，并把输入摘要等宽化。v0.2.19 曾按「减法」隐藏零值入口、逐轮 usage 与状态条指标，v0.2.20 已按用户反馈全部恢复。
 
 ---
 
@@ -148,7 +148,7 @@
 |---|---|---|---|
 | **Phase 0（先止血，1–2 天）** | 危险确认默认安全（14 处）；窄窗抽屉遮挡 composer；设置搜索 keywords；运行态键位提示 + Esc 作用域 | 小 | 帧测试 + 探针复跑（D2.6/D3.5/D7.x） |
 | **Phase 1（A 主壳，3–5 天）** | 选中态两级；强调色预算；状态徽章统一；字号纪律（11px 禁成句）；暗色 surface ramp；去 38 行高 | 中 | 96 张快照 before/after + `designlint` + 帧测试 |
-| **Phase 2（签名表面，2–3 天）** | Agent Run Band；State-first Tool Row；零值入口收起；运行态键位常显 | 中 | 新快照 + 交互驱动 + 键盘探针 |
+| **Phase 2（签名表面，2–3 天）** | Agent Run Band；State-first Tool Row；运行态/待审批徽章；关键入口常显（不收起） | 中 | 新快照 + 交互驱动 + 键盘探针 |
 | **Phase 3（局部 B/C，按需）** | 检查器 markdown 13px；文件/diff 工作台化；终端 mono 化；命令面板快捷键统一 | 低–中 | 右栏帧 + 窄窗/暗色 |
 
 > 如果只做 Phase 0 + Phase 1，界面就会从“每块还行但拼起来不清”变成“安静、统一、可信”；Phase 2 才决定它像不像一款有性格的 Agent 客户端。

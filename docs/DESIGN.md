@@ -615,7 +615,7 @@ uikit.ToolRow(c, uikit.ToolRowOptions{
 | `uikit.ApprovalDialog` | **已有**（Phase 3b；Inline 2026-11-10） | `Inline : bool`（产品默认 true）：输入框上方 V3 内联卡（警示横幅/描边）；`false` 保留 Modal 兼容路径；无 Default footer；Esc 由 session 审批优先路径 deny 最早一条；模块只留队列/自动切回会话 |
 | `uikit.PlanReviewDialog` | **已有**（Phase 3b） | Esc 不取消 + 一次性 RoleAlert 提示；空反馈不批准；失败 Esc 可关 |
 | `uikit.AskDialog` | **已有**（Phase 3b） | 等权选项 + 「其他…」+ 取消 Default；自由文本空 Disabled |
-| 会话 agent surface | **已有（2026-11-10）** | 头部「智能体团队 / 子智能体 N / 后台任务 N」三入口；团队与共享任务为 Popover 浮层；子代理/成员在主栏打开并以面包屑返回；一次性只读、可继续可回复；右栏不再有团队/任务 pane |
+| 会话 Agent Run Band | **已有（2026-11-11 签名表面）** | `session.buildAgentRunBand`：标题后一条安静状态带，收拢运行中/智能体团队/子智能体/后台任务/待审批；团队与子代理为**关键功能，零值也常显**（可发现），后台任务/审批只在有内容时出现；入口仍是 `ui.PopoverBase` 浮层；子代理/成员在主栏打开并以面包屑返回；右栏不再有团队/任务 pane |
 | `uikit.ComposerShell` | **已有**（Phase 3c） | 两处 composer 共用卡片/输入/宽度/发送位/键语义；toolbar/提交保留为 slot |
 | `uikit.RunStatus` | **已有**（Phase 3c） | 生成中/不伪造进度、队列、停止、重试、用量折叠 |
 | `uikit.ErrorPanel` | 暂缓（无调用点） | 行内错误用 `uikit.ErrorLine`；会话级错误带在 SessionThread；需要大块错误面板时再建 |

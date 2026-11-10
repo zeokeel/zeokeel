@@ -58,6 +58,34 @@
       "doc": "docs/DESIGN.md §2.1 / §6.3 / 附录 A"
     },
     {
+      "id": "session.agent-run-band",
+      "entry": "session.buildAgentRunBand",
+      "package": "internal/ui/session",
+      "states": [
+        "running",
+        "team",
+        "subagents",
+        "jobs",
+        "approvals"
+      ],
+      "allowed": [
+        "uikit.StatusBadge",
+        "session.buildTeamEntry",
+        "session.buildSubagentEntry",
+        "session.buildJobsEntry"
+      ],
+      "forbidden": [
+        "hidden-key-entry",
+        "second-run-band",
+        "badge-wall"
+      ],
+      "rules": [
+        "status-badge-only",
+        "key-entries-always-visible"
+      ],
+      "doc": "docs/DESIGN.md §6.3 / docs/AGENT-SURFACES.md S9"
+    },
+    {
       "id": "uikit.icon-button",
       "entry": "uikit.IconButton",
       "package": "internal/uikit",

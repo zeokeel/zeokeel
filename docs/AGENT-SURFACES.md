@@ -39,7 +39,7 @@ Agent 客户端的 UI 不是 CRUD 页面，而是**推理与行动的外化**：
 | S6 | 用户提问 | `uikit.AskDialog` | `internal/uikit/ask.go`；interaction 只留 FIFO（Phase 3b） | 已有 |
 | S7 | Composer | `uikit.ComposerShell` | `internal/uikit/composer.go`；session/home 只留 toolbar/提交 slot（Phase 3c） | 已有 |
 | S8 | 运行态/流式/恢复 | `uikit.RunStatus` | `internal/uikit/runstatus.go`（Phase 3c） | 已有 |
-| S9 | 多 Agent / 团队 | 会话 agent surface（`session` 包） | `internal/ui/session/agentsurface.go`（Popover 团队/子代理/任务 + 主栏子会话视图）；旧 `uikit.TeamSurface` 已删除 | 已有（2026-11-10 重构） |
+| S9 | 多 Agent / 团队 | 会话 Agent Run Band（`session` 包） | `internal/ui/session/agentsurface.go`（Run Band + Popover 团队/子代理/任务 + 主栏子会话视图）；团队/子代理零值常显；旧 `uikit.TeamSurface` 已删除 | 已有（2026-11-11 Run Band） |
 
 > 错误展示是横跨所有 surface 的原语：`uikit.ErrorLine` 已有（RoleAlert + 可选中 + DangerText），大块错误用 `uikit.ErrorPanel`（待建，见 §2.6）。
 
@@ -64,7 +64,7 @@ Agent 客户端的 UI 不是 CRUD 页面，而是**推理与行动的外化**：
 | session-switch | 重置 `ListState` / 展开状态 / 用量 / 滚动 |
 | error | 失败轮显示错误行 + 重试；元信息行只保留时间/用量，不提供 ⋯ 动作 |
 
-**会话壳层（B3 顶栏 + composer dock，2026-11-10，DSH 对齐）**：标题行顺序固定为 **标题/面包屑 → 智能体团队 → 子智能体 N → N 个后台任务 → spacer → ⋯**（`screen.header` / `screen.actions` / `screen.tabs` 槽位，40px 标题行 + 32px Tabs 行，浅色 header 面、仅底边一条 hairline、行间无线、无返回按钮、无 `Alt+←` 历史回退）；「运行中」badge 保留在 spacer 之后、⋯ 之前。三个 agent 入口都是 `ui.PopoverBase` 浮层（团队：成员 + 共享任务；子智能体：树/列表切换；后台任务：状态/命令/用时/停止），不占右栏。进入子智能体或团队成员时，主栏切到子会话：标题变成 `主标题 › 子智能体名` 面包屑，点主标题返回父会话；一次性子智能体只读，可继续成员有输入框（`ChildAgentService.SendChildAgent`）。回合尾部新增文件卡：「交付文件」（write_file）与「已编辑 N 个文件」（edit_file/str_replace_editor），每行「在侧边栏预览 / 查看改动 / 用系统应用打开」，预览打开右栏文件标签。目标条（Badge + 目标文本 + ⋯「目标操作」）与审批内联卡在 composer 上方 dock（阅读列宽度居中，`session.banner` 槽），不占 transcript 空间、不遮挡输入。通知/ toast 固定在右上角、B3 顶栏下方（最多 2 条，自上而下堆叠），不遮挡标题/Tabs/顶栏动作。右栏是默认收起的多标签页面：开始引导（工作区文件 / 新建终端两张等宽卡片，无说明文字）+ 文件 + 终端 + 每个打开文件一个可关闭标签；页面内容一律可滚动。
+**会话壳层（B3 顶栏 + composer dock，2026-11-10，DSH 对齐；2026-11-11 Agent Run Band）**：标题行顺序固定为 **标题/面包屑 → Agent Run Band（运行中 → 智能体团队 → 子智能体 N → 后台任务 → 待审批）→ spacer → ⋯**（`screen.header` / `screen.actions` / `screen.tabs` 槽位，40px 标题行 + 32px Tabs 行，浅色 header 面、仅底边一条 hairline、行间无线、无返回按钮、无 `Alt+←` 历史回退）。Band 是一条 hairline 容器，不是卡片；团队/子代理是关键功能入口，**零值也常显**，后台任务与待审批只在有内容时出现；全空时不渲染整条。三个 agent 入口都是 `ui.PopoverBase` 浮层（团队：成员 + 共享任务；子智能体：树/列表切换；后台任务：状态/命令/用时/停止），不占右栏。进入子智能体或团队成员时，主栏切到子会话：标题变成 `主标题 › 子智能体名` 面包屑，点主标题返回父会话；一次性子智能体只读，可继续成员有输入框（`ChildAgentService.SendChildAgent`）。回合尾部新增文件卡：「交付文件」（write_file）与「已编辑 N 个文件」（edit_file/str_replace_editor），每行「在侧边栏预览 / 查看改动 / 用系统应用打开」，预览打开右栏文件标签。目标条（Badge + 目标文本 + ⋯「目标操作」）与审批内联卡在 composer 上方 dock（阅读列宽度居中，`session.banner` 槽），不占 transcript 空间、不遮挡输入。通知/ toast 固定在右上角、B3 顶栏下方（最多 2 条，自上而下堆叠），不遮挡标题/Tabs/顶栏动作。右栏是默认收起的多标签页面：开始引导（工作区文件 / 新建终端两张等宽卡片，无说明文字）+ 文件 + 终端 + 每个打开文件一个可关闭标签；页面内容一律可滚动。
 
 **目标 API 草案**：
 
@@ -457,7 +457,7 @@ func RunStatus(c *ui.Context, o RunStatusOptions)
 
 **入口结构**：
 
-- 会话头第一行（`screen.header`/`screen.actions` 槽）：`标题/面包屑 → 智能体团队 → 子智能体 N → N 个后台任务 → spacer → ⋯`；三个入口都是 `ui.PopoverBase` 原生浮层（Esc/点外关闭/焦点归还），不占右栏。
+- 会话头第一行（`screen.header`/`screen.actions` 槽）：`标题/面包屑 → Agent Run Band（运行中 → 智能体团队 → 子智能体 N → 后台任务 → 待审批）→ spacer → ⋯`；团队/子代理零值常显，后台任务/待审批只在有内容时出现；各入口都是 `ui.PopoverBase` 原生浮层（Esc/点外关闭/焦点归还），不占右栏。
 - 团队浮层：成员卡（状态点/名字/模型/最新活动/「打开」）+ 共享任务卡（subject/状态/owner/依赖/写入范围）；空态说明「暂无共享任务」。
 - 子智能体浮层：子代理/队友列表；选中进入主栏子会话。
 - 后台任务浮层：`JobService.Jobs()` 的行（状态/命令/用时/退出码）+ 停止（`KillJob`）。

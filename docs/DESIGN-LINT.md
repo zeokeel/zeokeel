@@ -142,10 +142,11 @@ internal/ui/home/composer.go:634:7: DS-03 [AP-03] 裸数值度量：MinHeight(88
 | DS-14 | 状态徽章解剖 | grep（可自动化）+ 评审 | `t.Badge()).TextColor(t.(Danger|Warning|Success)Text)` 出现即违规；状态一律 `uikit.StatusBadge` | AP-21 | 3 |
 | DS-15 | 字号/高度纪律 | 评审 + 后续 AST 规则 | `TypeXXXS` 成句；`Height(38)` 或非 4 倍数控件高度；`FontWeight(600)` 裸值 | AP-22 | 3 |
 | DS-16 | 表面 ramp / elevation | 像素采样 + 快照（人工） | 暗色 `BgSidebar` 必须比 `BgBase` 深；抽屉/浮层必须有 `ShadowOverlay` | AP-23 | 3 |
+| DS-17 | 关键 orchestration 入口常显 | info | frame test：有 team/child backend 时，零值也渲染「智能体团队 / 子智能体 0」 | — | 3 |
 
 > **实现状态（2026-11-09，Phase 1a）**：DS-01、DS-03（度量 error；FontWeight 暂为 warn）、DS-06（ButtonBase/DialogBase）、DS-06b、DS-07、DS-10（Danger+Default 结构）已实现；DS-02/04/05/09 未实现（DS-08 由 conformance 测试部分覆盖）。
 
-> 语义类规则（Default 焦点、Esc 行为、流式几何、选择态/预算/ramp）无法可靠静态判定，**以帧测试 + 快照人工评审为准**（§6）；DS-11..DS-16 自 v0.2.19 起为评审契约，`designlint` 暂不实现 AST 检查（DS-14 可 grep）。
+> 语义类规则（Default 焦点、Esc 行为、流式几何、选择态/预算/ramp）无法可靠静态判定，**以帧测试 + 快照人工评审为准**（§6）；DS-11..DS-17 自 v0.2.19/v0.2.20 起为评审契约，`designlint` 暂不实现 AST 检查（DS-14 可 grep）。
 
 ---
 
