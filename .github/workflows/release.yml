@@ -205,7 +205,10 @@ jobs:
           input_path: dist/ZeoKeel.app
           output_path: dist/ZeoKeel-signed.app
           sign: true
-          sign_args: --code-signature-flags runtime
+          # sign_args is one argument per line, not a shell command line.
+          sign_args: |
+            --code-signature-flags
+            runtime
           pem_file: |
             ${{ runner.temp }}/key.pem
             ${{ runner.temp }}/leaf.pem
