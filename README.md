@@ -4,18 +4,17 @@
 [![Release](https://img.shields.io/github/v/release/zeokeel/zeokeel)](https://github.com/zeokeel/zeokeel/releases)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
-> **v0.2.8 — thirteenth public release** (2026-11-10). Native, compile-time modular
+> **v0.2.9 — fourteenth public release** (2026-11-10). Native, compile-time modular
 > AI agent for desktop, headless and ACP (Zed/editor) use; one Go binary, no
 > webview. Final verification: **10/10 PASS** (`./scripts/verify.sh --no-smoke`),
 > full test suite 48 packages green, regression **276 PASS / 0 SKIP / 0 FAIL**,
 > UI snapshot **98 steps / 96 PNGs**, designlint 0 new.
 > See [CHANGELOG.md](CHANGELOG.md) for the release notes.
 
-> **v0.2.8 主要变化**（详见 CHANGELOG）：修复应用内更新——Windows 现在下载并运行 NSIS 安装器，
-> macOS 自动挂载 dmg 替换 `.app` 并重启（不可写时回退为打开 dmg 手动拖入），Linux 继续 AppImage
-> 自替换；下载完成即可「安装并重启」，不再依赖“下次启动”。同时不再发布 Windows/macOS 的 tar.gz
-> 更新归档。v0.2.7 及更早版本需要手动安装一次本版，之后可自动更新；0.2.7 的顶栏标题截断与三入口
-> 常显已包含在本版。
+> **v0.2.9 主要变化**（详见 CHANGELOG）：审计 P2 修复——Windows 桌面版为工具子进程分配隐藏控制台，
+> 不再在每次 pwsh/bash/后台任务/终端调用时弹 cmd 窗口；后台任务列表解析支持自由文本 status/command；
+> macOS 快捷键标签改为 Cmd+Alt+P / Cmd+`；清理旧右栏团队/任务面板文档。v0.2.8 的更新器改用 Windows
+> setup / macOS dmg 并支持「安装并重启」，但 0.2.8 的 macOS dmg 受 GitHub runner 容量影响未随包发布。
 
 ## 下载与运行 / Download and run
 

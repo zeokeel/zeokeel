@@ -8,6 +8,23 @@ All notable changes to ZeoKeel are documented here. The format follows
 
 （暂无未发布改动）
 
+## [0.2.9] - 2026-11-10
+
+继续修审计 P2，并修复 Windows 工具调用时弹出的 cmd 窗口。
+
+- **Windows 控制台窗口。** 桌面版是 GUI 子系统、没有控制台；rig 的 pwsh/bash/后台任务/终端
+  从无控制台进程启动时会各自新建 cmd 窗口。现在 GUI 进程启动时分配**一个隐藏控制台**，所有
+  工具子进程继承它，不再逐个弹窗（从终端启动的情况保留用户自己的控制台）。这是对工具调用的
+  全局修复，不需要改 rig 依赖。
+- **后台任务解析更稳。** job_list 的 status/command 是自由文本，之前状态里出现 ` exit=` /
+  ` duration_ms=` / ` command=` 会把后面的数值字段切错；改为从右侧锚定
+  ` exit=<n> duration_ms=<n> command=` 解析，并补了自由文本测试。
+- **快捷键标签随平台。** 右栏「开始」引导/命令面板在 macOS 显示 Cmd+Alt+P / Cmd+`（原来写的是
+  Ctrl，和实际绑定不一致）；Linux/Windows 仍为 Ctrl。
+- 顺手更新 COVERAGE / UI-CONFORMANCE / 设计 registry 中描述旧右栏团队/任务 pane 的过时内容。
+- 说明：**v0.2.8 的 macOS dmg 因 GitHub macOS arm64 runner 容量连续排队失败，未随包发布**；
+  Windows/Linux 安装包可用。macOS 用户可等 dmg 补传或从源码构建；已知旧版需手动安装一次。
+
 ## [0.2.8] - 2026-11-10
 
 修复应用内更新：以前 Windows 只提示“重启后生效”但实际不升级，macOS 也没有静默安装路径；同时不再发布没用的更新归档。
