@@ -165,6 +165,7 @@ jobs:
           MACOS_CERT_PASSWORD: ${{ secrets.MACOS_CERT_PASSWORD }}
           APPLE_API_KEY_P8: ${{ secrets.APPLE_API_KEY_P8 }}
           APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
+          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
         run: |
           set -eu
           echo "SIGNING_AVAILABLE=0" >> "$GITHUB_ENV"
@@ -189,15 +190,24 @@ jobs:
           }
           extract_p12 "$RUNNER_TEMP/key.pem" -nocerts -nodes
           extract_p12 "$RUNNER_TEMP/leaf.pem" -clcerts -nokeys
-          if [ -n "${APPLE_API_KEY_P8:-}" ]; then
-            mkdir -p private_keys
-            printf '%s' "$APPLE_API_KEY_P8" | base64 -d > "private_keys/AuthKey_${APPLE_API_KEY_ID}.p8"
-            echo "SIGNING_AVAILABLE=1" >> "$GITHUB_ENV"
-            echo "NOTARIZE_AVAILABLE=1" >> "$GITHUB_ENV"
-          else
+          echo "SIGNING_AVAILABLE=1" >> "$GITHUB_ENV"
+          if [ -z "${APPLE_API_KEY_P8:-}" ]; then
             echo "::warning::APPLE_API_KEY_P8 is not configured; notarization is skipped"
-            echo "SIGNING_AVAILABLE=1" >> "$GITHUB_ENV"
+            exit 0
           fi
+          printf '%s' "$APPLE_API_KEY_P8" | base64 -d > "$RUNNER_TEMP/AuthKey.p8"
+          # apple-code-sign-action requires the JSON form of the App Store
+          # Connect key; produce it with rcodesign itself.
+          rc="$RUNNER_TEMP/rcodesign"
+          mkdir -p "$rc"
+          curl -fsSL -o "$rc/rcodesign.tar.gz" \
+            https://github.com/indygreg/apple-platform-rs/releases/download/apple-codesign%2F0.29.0/apple-codesign-0.29.0-x86_64-unknown-linux-musl.tar.gz
+          tar -xzf "$rc/rcodesign.tar.gz" -C "$rc" --strip-components=1
+          "$rc/rcodesign" encode-app-store-connect-api-key \
+            "$APPLE_API_ISSUER" "$APPLE_API_KEY_ID" "$RUNNER_TEMP/AuthKey.p8" \
+            --output-path "$RUNNER_TEMP/notary-api-key.json"
+          echo "NOTARY_JSON=$RUNNER_TEMP/notary-api-key.json" >> "$GITHUB_ENV"
+          echo "NOTARIZE_AVAILABLE=1" >> "$GITHUB_ENV"
 
       - name: Sign the app bundle
         if: env.SIGNING_AVAILABLE == '1'
@@ -249,8 +259,7 @@ jobs:
           sign: false
           notarize: true
           staple: true
-          app_store_connect_api_issuer: ${{ secrets.APPLE_API_ISSUER }}
-          app_store_connect_api_key: ${{ secrets.APPLE_API_KEY_ID }}
+          app_store_connect_api_key_json_file: ${{ env.NOTARY_JSON }}
           rcodesign_version: '0.29.0'
 
       - name: Upload the macOS dmg
