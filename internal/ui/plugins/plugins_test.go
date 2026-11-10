@@ -356,8 +356,14 @@ func TestMCPFailedRowOffersInlineRetry(t *testing.T) {
 	h.assertNoTexts(tester, "dial tcp 127.0.0.1:9: connection refused")
 
 	h.click(tester, "重试连接")
-	// The retry runs off the UI thread: wait for the posted result.
+	// The retry runs off the UI thread: wait for the posted result and for the
+	// background call to register before reading the counter.
 	waitForPluginText(t, tester, "已连接")
+	deadline := time.Now().Add(2 * time.Second)
+	for service.calls() != 1 && time.Now().Before(deadline) {
+		tester.Frame()
+		time.Sleep(2 * time.Millisecond)
+	}
 	if calls := service.calls(); calls != 1 {
 		t.Fatalf("Refresh calls = %d, want the inline retry's one", calls)
 	}

@@ -355,6 +355,19 @@ func openEntry(t *testing.T, tester *ui.Tester, label string) {
 	waitFilesSettled(t, tester)
 }
 
+// clickFileRow waits for one Files row to build, then clicks it: the off-thread
+// listing load and the row build are separate frames on a slow runner.
+func clickFileRow(t *testing.T, tester *ui.Tester, label string) {
+	t.Helper()
+	if !pumpFrames(tester, func() bool { _, ok := tester.Find(label); return ok }, 3*time.Second) {
+		t.Fatalf("file row %q not found; texts = %v", label, tester.Texts())
+	}
+	if err := tester.Click(label); err != nil {
+		t.Fatalf("open %q: %v; texts = %v", label, err, tester.Texts())
+	}
+	tester.Frame()
+}
+
 // waitFilesSettled waits until the Files pane's off-thread listing read landed:
 // the pane shows a loading line while the read is in flight.
 func waitFilesSettled(t *testing.T, tester *ui.Tester) {
@@ -460,9 +473,7 @@ func TestFilesTextAndMarkdownPreview(t *testing.T) {
 
 	// Markdown file: rendered by the official view (heading/list markers gone).
 	openEntry(t, tester, "docs")
-	if err := tester.Click("readme.md"); err != nil {
-		t.Fatalf("open readme: %v; texts = %v", err, tester.Texts())
-	}
+	clickFileRow(t, tester, "readme.md")
 	tester.Frame()
 	assertContains(t, tester, "文档标题", "正文内容")
 }
@@ -472,9 +483,7 @@ func TestFilesImagePreview(t *testing.T) {
 	h := newHarnessWithWorkspace(t, newFakeChat(), rightpanel.Config{}, workspace)
 	tester := h.tester()
 	h.selectPane(tester, "文件")
-	if err := tester.Click("chart.png"); err != nil {
-		t.Fatalf("open image: %v; texts = %v", err, tester.Texts())
-	}
+	clickFileRow(t, tester, "chart.png")
 	tester.Frame()
 	h.assertTexts(tester, "chart.png", "关闭预览")
 	h.assertNoTexts(tester, "暂不支持预览", "读取文件失败")
@@ -488,9 +497,7 @@ func TestFilesUnsupportedPreview(t *testing.T) {
 	h := newHarnessWithWorkspace(t, newFakeChat(), rightpanel.Config{}, workspace)
 	tester := h.tester()
 	h.selectPane(tester, "文件")
-	if err := tester.Click("data.bin"); err != nil {
-		t.Fatalf("open bin: %v; texts = %v", err, tester.Texts())
-	}
+	clickFileRow(t, tester, "data.bin")
 	tester.Frame()
 	h.assertTexts(tester, "暂不支持预览", "大小", "4 B")
 }
