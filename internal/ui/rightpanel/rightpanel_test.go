@@ -238,6 +238,32 @@ func (h *harness) click(tester *ui.Tester, label string) {
 	tester.Frame()
 }
 
+// paneLoadingLabels are the rightpanel panes' off-thread loading lines: a pane
+// switch may show one for a frame or two before the result lands, so tests wait
+// for it to disappear instead of reading the first frame (CI runners are slower
+// than local ones).
+var paneLoadingLabels = []string{
+	"正在读取目录…", "Reading the directory…",
+	"正在读取工作区变更…", "Reading workspace changes…",
+	"正在读取文件…", "Reading the file…",
+}
+
+// waitPaneSettled waits until no rightpanel pane is reading off the UI thread.
+func (h *harness) waitPaneSettled(tester *ui.Tester) {
+	h.t.Helper()
+	ok := pumpFrames(tester, func() bool {
+		for _, label := range paneLoadingLabels {
+			if tester.HasText(label) {
+				return false
+			}
+		}
+		return true
+	}, 3*time.Second)
+	if !ok {
+		h.t.Fatalf("pane did not settle; texts = %v", tester.Texts())
+	}
+}
+
 // selectPane switches the inspector to one pane through its compact picker:
 // the menu button names the current pane, and the menu lists every pane.
 func (h *harness) selectPane(tester *ui.Tester, label string) {
@@ -254,6 +280,7 @@ func (h *harness) selectPane(tester *ui.Tester, label string) {
 		h.t.Fatalf("select pane %q: %v; texts = %v", label, err, tester.Texts())
 	}
 	tester.Frame()
+	h.waitPaneSettled(tester)
 }
 
 // assertTexts waits for every wanted text: the Files/Changes/Log panes read

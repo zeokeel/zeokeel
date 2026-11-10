@@ -332,6 +332,17 @@ func clickCrumb(t *testing.T, tester *ui.Tester, name string) {
 // keyboard focus is on the native list.
 func openEntry(t *testing.T, tester *ui.Tester, label string) {
 	t.Helper()
+	settled := pumpFrames(tester, func() bool {
+		for _, loading := range paneLoadingLabels {
+			if tester.HasText(loading) {
+				return false
+			}
+		}
+		return true
+	}, 3*time.Second)
+	if !settled {
+		t.Fatalf("files pane did not settle before opening %q; texts = %v", label, tester.Texts())
+	}
 	if !pumpFrames(tester, func() bool { _, ok := tester.Find(label); return ok }, 3*time.Second) {
 		t.Fatalf("row %q not found; texts = %v", label, tester.Texts())
 	}
