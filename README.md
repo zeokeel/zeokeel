@@ -4,20 +4,18 @@
 [![Release](https://img.shields.io/github/v/release/zeokeel/zeokeel)](https://github.com/zeokeel/zeokeel/releases)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
-> **v0.1.4 — fifth public release** (2026-11-10). Native, compile-time modular
+> **v0.2.0 — sixth public release** (2026-11-10). Native, compile-time modular
 > AI agent for desktop, headless and ACP (Zed/editor) use; one Go binary, no
-> webview. Final verification: **9/9 PASS** (`./scripts/verify.sh --quick`),
-> full test suite 42 packages green, regression **287 PASS / 0 SKIP / 0 FAIL**,
-> UI snapshot 86 PNGs, ui-drive **90/90 PASS**.
+> webview. Final verification: **10/10 PASS** (`./scripts/verify.sh --no-smoke`),
+> full test suite 47 packages green, regression **289 PASS / 0 SKIP / 0 FAIL**,
+> UI snapshot **97 steps / 95 PNGs**, designlint 0 new.
 > See [CHANGELOG.md](CHANGELOG.md) for the release notes.
 
-> **v0.1.4 主要变化**（详见 CHANGELOG）：本版**不加新功能，专门修界面**——修好上一轮
-> 全量检查发现的 37 个问题（另 1 个很小的性能项按现状保留）。最明显的三处：
-> ①排队消息发送失败后窗口不再反复重试/空转；②设置「归档」和右侧文件列表的方向键只做
-> 选择，Enter/双击才打开；③最小窗口（900×600）下首页可以滚动，不再裁掉「最近会话」。
-> 另外：右栏的变更/文件/日志刷新与切换更可靠、插件搜索支持中文、设置有未保存提醒、
-> 暗色选中行文字可读、中文界面系统文案（如「复制」）补齐、Windows 终端自动使用
-> PowerShell/cmd。升级只需下载覆盖，原有设置与会话保留。
+> **v0.2.0 主要变化**（详见 CHANGELOG）：模型管理重做——设置里是「模型列表」，支持多个服务商、
+> 每个模型独立 Base URL/API Key 与默认模型，旧单连接自动迁移；推理等级按模型单独配置、会话内可覆盖
+> （输入框两级菜单）。会话页重排：时间/用量/操作收成一条紧凑信息行，思考与工具调用合成可折叠的
+> 过程带，标题/Tabs 提到顶层（无返回按钮），目标与审批移到输入框上方（审批为醒目内联卡），
+> 通知改右上角；默认窗口 1512×944、正文阅读列 960，两边留白更少。升级只需下载覆盖，原有设置与会话保留。
 
 ## 下载与运行 / Download and run
 
