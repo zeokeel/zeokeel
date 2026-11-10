@@ -68,11 +68,10 @@ jobs:
   build-macos:
     name: macOS arm64 (.app + signed/notarized dmg)
     needs: draft-release
-    # Build on an Intel macOS runner: the arm64 hosted runners are frequently
-    # unavailable for long stretches (jobs fail with "not acquired by Runner of
-    # type hosted" after 15 minutes). Go cross-compiles darwin/arm64 and signing/
-    # notarization work identically on the Intel image.
-    runs-on: macos-15-intel
+    # Use the latest macOS arm64 image only (no Intel build): signing and
+    # notarization run natively for the shipped arm64 app. Hosted arm64 capacity
+    # can be slow; a failed acquisition is retried rather than switching arch.
+    runs-on: macos-26
     timeout-minutes: 360
     steps:
       - uses: actions/checkout@v7
