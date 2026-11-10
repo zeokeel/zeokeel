@@ -168,6 +168,7 @@ jobs:
         run: |
           set -eu
           echo "SIGNING_AVAILABLE=0" >> "$GITHUB_ENV"
+          echo "NOTARIZE_AVAILABLE=0" >> "$GITHUB_ENV"
           if [ -z "${MACOS_CERT_P12:-}" ]; then
             echo "::warning::MACOS_CERT_P12 is not configured; producing an unsigned dmg"
             exit 0
@@ -192,10 +193,10 @@ jobs:
             mkdir -p private_keys
             printf '%s' "$APPLE_API_KEY_P8" | base64 -d > "private_keys/AuthKey_${APPLE_API_KEY_ID}.p8"
             echo "SIGNING_AVAILABLE=1" >> "$GITHUB_ENV"
+            echo "NOTARIZE_AVAILABLE=1" >> "$GITHUB_ENV"
           else
             echo "::warning::APPLE_API_KEY_P8 is not configured; notarization is skipped"
             echo "SIGNING_AVAILABLE=1" >> "$GITHUB_ENV"
-            echo "NOTARIZE_AVAILABLE=0" >> "$GITHUB_ENV"
           fi
 
       - name: Sign the app bundle
@@ -241,7 +242,7 @@ jobs:
           rcodesign_version: '0.29.0'
 
       - name: Notarize and staple the dmg
-        if: env.SIGNING_AVAILABLE == '1' && env.NOTARIZE_AVAILABLE != '0'
+        if: env.SIGNING_AVAILABLE == '1' && env.NOTARIZE_AVAILABLE == '1'
         uses: indygreg/apple-code-sign-action@v1.2
         with:
           input_path: ${{ env.DMG_PATH }}
