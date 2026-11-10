@@ -8,6 +8,21 @@ All notable changes to ZeoKeel are documented here. The format follows
 
 （暂无未发布改动）
 
+## [0.2.12] - 2026-11-10
+
+macOS 的 dmg + 签名/公证改为**全 Linux 工具链**，彻底移除 macOS runner。
+
+- **Go 编译**：`build-macos` 仍在 `ubuntu-24.04` 交叉编译 darwin/arm64 的 `ZeoKeel.app`。
+- **dmg 生成**：`libdmg-hfsplus`（`mkfs.hfsplus` + `hfsplus` + `dmg`）在 Linux 生成 UDIF dmg；
+  与 Firefox CI 在 Linux 上打包 macOS DMG 使用的是同一套工具。
+- **签名/公证**：`rcodesign`（apple-codesign）在 Linux 上签名 `.app` 和 dmg、提交 Apple
+  公证服务并 staple；Mozilla RelEng 也用它在 Linux 上公证 Firefox。需要
+  `MACOS_CERT_P12`/`MACOS_CERT_PASSWORD` 和 `APPLE_API_*` secrets（Apple 账号，不需要 Mac）。
+- **流水线**：`package-macos` 现在是 `ubuntu-24.04` job，不再有 `macos-15`/`macos-26` runner；
+  与 Windows/Linux 三个编译 job 并行，dmg 打包约 2 分钟。
+- **降级路径**：secrets 缺失或工具链失败时，`package-macos` 为 optional；Windows/Linux 与未签名
+  `zeokeel-<version>-darwin-arm64.tar.gz` 仍会发布，应用内更新优先用 dmg，没有 dmg 时回退 tar.gz。
+- 首次使用时需要在一台 Mac 上人工验证 Linux 生成的 dmg：挂载、安装、签名/公证和 Gatekeeper。
 ## [0.2.11] - 2026-11-10
 
 macOS 改为在 Linux 上交叉编译，不再依赖 macOS 托管 runner。
