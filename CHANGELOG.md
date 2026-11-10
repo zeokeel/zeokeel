@@ -8,6 +8,20 @@ All notable changes to ZeoKeel are documented here. The format follows
 
 （暂无未发布改动）
 
+## [0.2.11] - 2026-11-10
+
+macOS 改为在 Linux 上交叉编译，不再依赖 macOS 托管 runner。
+
+- **三个平台全部在 `ubuntu-24.04` 上并行构建。** 产品没有 cgo，`go tool mygo build -platform
+  darwin/arm64` 可以直接在 Linux 产出 `ZeoKeel.app`；发布流水线在 Linux job 里构建该 `.app` 并打成
+  `zeokeel-<version>-darwin-arm64.tar.gz`，与 Windows setup、Linux AppImage 三个 job 并行。
+- **签名/公证说明**：Linux 上没有 `codesign`/`hdiutil`/notarytool，macOS 包为**未签名、未公证**的
+  `.app`（发布说明保留此提示）；手动首次打开可能需要在 Finder 右键「打开」或在系统设置中允许。
+  应用内更新会把 tar.gz 解压覆盖当前 `.app` 并重启，沿用 host 的 archive 安装路径。
+- 更新器 GitHub 资产选择：macOS 优先 dmg（旧 release），没有 dmg 时回退
+  `-darwin-<arch>.tar.gz`；安装 kind 为 archive。
+- 不再使用 macOS runner / 不再需要 `MACOS_CERT_*`、`APPLE_API_*` 签名 secrets 才能出包。
+
 ## [0.2.10] - 2026-11-10
 
 发布流水线补丁（产品与 v0.2.9 相同）：

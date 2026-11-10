@@ -4,17 +4,17 @@
 [![Release](https://img.shields.io/github/v/release/zeokeel/zeokeel)](https://github.com/zeokeel/zeokeel/releases)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
-> **v0.2.10 — fifteenth public release** (2026-11-10). Native, compile-time modular
+> **v0.2.11 — sixteenth public release** (2026-11-10). Native, compile-time modular
 > AI agent for desktop, headless and ACP (Zed/editor) use; one Go binary, no
 > webview. Final verification: **10/10 PASS** (`./scripts/verify.sh --no-smoke`),
 > full test suite 48 packages green, regression **276 PASS / 0 SKIP / 0 FAIL**,
 > UI snapshot **98 steps / 96 PNGs**, designlint 0 new.
 > See [CHANGELOG.md](CHANGELOG.md) for the release notes.
 
-> **v0.2.10 主要变化**：发布流水线补丁——macOS dmg 使用 GA arm64 runner `macos-15`
-> （`macos-26` 预览镜像容量持续不足；zeokeel-harness 同样用 `macos-15` 从不排队），
-> 不构建 Intel 版本；Linux AppImage 工具链安装加 3 次重试。产品功能与 v0.2.9 相同
-> （Windows 隐藏控制台修复 cmd 弹窗、job 列表解析等）。
+> **v0.2.11 主要变化**：三个平台全部改为在 `ubuntu-24.04` 上并行交叉构建——macOS 不再使用
+> macOS runner：mygo 在 Linux 直接产出 `ZeoKeel.app`，发布为未签名/未公证的
+> `zeokeel-<version>-darwin-arm64.tar.gz`；Windows setup 与 Linux AppImage 不变。应用内更新会把
+> macOS tar.gz 解压覆盖 `.app` 并重启。产品功能与 v0.2.10 相同（Windows 隐藏控制台、job 解析等）。
 
 ## 下载与运行 / Download and run
 
@@ -23,7 +23,7 @@ Prebuilt installers are attached to the [latest release](https://github.com/zeok
 | Platform | Architectures | Installer |
 | --- | --- | --- |
 | Linux | x86-64 (amd64), ARM64 | `zeokeel-<version>-linux-<arch>.AppImage` (chmod +x, run) |
-| macOS | Apple Silicon (arm64) | `zeokeel-<version>-arm64.dmg` (signed + notarized) |
+| macOS | Apple Silicon (arm64) | `zeokeel-<version>-darwin-arm64.tar.gz` (unsigned, Linux cross-built `.app`) |
 | Windows | x86-64 (amd64), ARM64 | `zeokeel-setup-<version>-<arch>.exe` (per-user NSIS installer, GUI app) |
 
 `SHA256SUMS.txt` lists the checksum of every asset. The binaries are built
