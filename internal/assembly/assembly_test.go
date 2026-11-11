@@ -7,7 +7,10 @@ package assembly_test
 // state, and the desktop test never creates a mygo window.
 
 import (
+	"os"
+
 	"errors"
+	"github.com/zeokeel/zeokeel-rig/sandbox/osrunner"
 	"slices"
 	"strings"
 	"sync"
@@ -544,4 +547,15 @@ func TestPreflightFailureLeavesRootUsable(t *testing.T) {
 	if err := loader.Close(); err != nil {
 		t.Fatalf("loader.Close: %v", err)
 	}
+}
+
+// TestMain lets the OS-sandbox helper re-exec this test binary: the assembly
+// loads the always-on sandbox module, and on hosts without bwrap its Landlock
+// fallback spawns this executable as a hidden helper (otherwise the whole test
+// suite would recursively re-run inside the helper).
+func TestMain(m *testing.M) {
+	if osrunner.MaybeRunHelper(os.Args) {
+		return
+	}
+	os.Exit(m.Run())
 }

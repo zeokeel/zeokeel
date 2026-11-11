@@ -22,8 +22,10 @@ import (
 	"time"
 
 	"github.com/egoist/mygo/ui"
+
 	cordis "github.com/zeokeel/zeokeel-kernel"
 	"github.com/zeokeel/zeokeel-kernel/module"
+	"github.com/zeokeel/zeokeel-rig/sandbox/osrunner"
 
 	"github.com/zeokeel/zeokeel/internal/contracts"
 	"github.com/zeokeel/zeokeel/internal/uiroot"
@@ -739,6 +741,9 @@ func itoa(n int64) string { return strconv.FormatInt(n, 10) }
 // TestMain keeps expected containment logs (production recover paths log through
 // the standard logger) out of the test output.
 func TestMain(m *testing.M) {
+	if osrunner.MaybeRunHelper(os.Args) {
+		return
+	}
 	log.SetOutput(io.Discard)
 	os.Exit(m.Run())
 }

@@ -11,6 +11,8 @@ import (
 
 	"github.com/egoist/mygo/ui"
 
+	"github.com/zeokeel/zeokeel-rig/sandbox/osrunner"
+
 	"github.com/zeokeel/zeokeel/internal/contracts"
 )
 
@@ -244,6 +246,9 @@ func itoa(n int64) string { return strconv.FormatInt(n, 10) }
 // TestMain keeps expected module panic logs (the host contains them and writes
 // them through the standard logger) out of the test output.
 func TestMain(m *testing.M) {
+	if osrunner.MaybeRunHelper(os.Args) {
+		return
+	}
 	log.SetOutput(io.Discard)
 	os.Exit(m.Run())
 }
