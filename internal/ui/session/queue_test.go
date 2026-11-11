@@ -1,6 +1,7 @@
 package session_test
 
-// Tests for queueing prompts while a turn is running (ui.sendWhileRunning).
+// Tests for queueing prompts while a turn is running: queueing is the fixed
+// behavior (A4), so the ui.sendWhileRunning row is no longer read.
 
 import (
 	"errors"
@@ -28,7 +29,7 @@ func sendWhileRunningSettings(enabled bool) *permissionSettings {
 	if enabled {
 		value = "true"
 	}
-	return newPermissionSettings(map[string]string{contracts.SettingSendWhileRunning: value})
+	return newPermissionSettings(map[string]string{"ui.sendWhileRunning": value})
 }
 
 // focusComposer clicks the text area above the send button.
@@ -42,55 +43,49 @@ func queueFocusComposer(t *testing.T, tester *ui.Tester, label string) {
 	tester.Frame()
 }
 
-// TestQueueDisabledWhileRunningKeepsComposerVisible covers the explicit opt-out:
-// the TextArea stays visible and editable, Enter does not send (it inserts a
-// newline), only Stop is in the send position, and the muted hint says the
-// draft is kept for after the reply.
-func TestQueueDisabledWhileRunningKeepsComposerVisible(t *testing.T) {
+// TestQueueAlwaysOnIgnoresStoredOptOut pins the A4 fixed behavior: queueing is
+// no longer a Settings control, so even a stored ui.sendWhileRunning=false row
+// keeps the running composer in queue mode. The input stays visible and
+// editable, Enter queues instead of sending, the old "Enter 暂不可用" hint is
+// gone, and the queued prompt flushes after the run ends.
+func TestQueueAlwaysOnIgnoresStoredOptOut(t *testing.T) {
 	h := newPermissionHarness(t, runningChat(), sendWhileRunningSettings(false))
 	tester := h.tester()
-	h.assertTexts(tester, "输入消息…", "停止",
-		"回复生成中，Enter 暂不可用；草稿会保留，本轮结束后可发送")
+	h.assertTexts(tester, "输入消息…", "排队", "停止")
 	h.assertNoExactTexts(tester, "发送")
-	if got := exactTextCount(tester.Texts(), "排队"); got != 0 {
-		t.Fatalf("queue control rendered while the setting is off; texts = %v", tester.Texts())
-	}
+	h.assertNoTexts(tester, "回复生成中")
 
-	// The draft is editable and Enter must not call chat.Send.
-	queueFocusComposer(t, tester, "停止")
-	tester.Type("先写好")
+	// The draft is editable and Enter never calls chat.Send while running.
+	queueFocusComposer(t, tester, "排队")
+	tester.Type("仍然排队")
 	tester.Frame()
-	tester.Key(0, ui.KeyEnter)
-	tester.Frame()
+	h.click(tester, "排队")
+	h.assertTexts(tester, "已排队 1 条")
 	if sends := h.chat.sends(); len(sends) != 0 {
-		t.Fatalf("Enter sent while the queue is disabled: %v", sends)
+		t.Fatalf("queued prompt sent while running: %v", sends)
 	}
 
-	// When the reply ends the kept draft is still there: Enter sends it.
+	// When the reply ends the queued prompt is sent.
 	h.chat.updateSession(contracts.ChatSession{
 		ID: "sess-1", Title: "排队测试",
 		Messages: []contracts.ChatMessage{{ID: "m2", Role: contracts.ChatRoleAssistant, Text: "完成"}},
 	})
 	tester.Frame()
-	h.assertTexts(tester, "发送")
-	h.assertNoExactTexts(tester, "排队")
-	h.assertNoTexts(tester, "回复生成中")
-	tester.Key(0, ui.KeyEnter)
-	tester.Frame()
 	sends := h.chat.sends()
-	if len(sends) != 1 || sends[0].prompt != "先写好" {
-		t.Fatalf("kept draft not sent after the run ended: sends = %v", sends)
+	if len(sends) != 1 || sends[0].prompt != "仍然排队" {
+		t.Fatalf("queued prompt not sent after the run ended: sends = %v", sends)
 	}
 }
 
-// TestQueueWhileRunningDefaultOn covers the new default: missing/empty/malformed
-// rows mean queueing is enabled, so the running composer shows 排队 and the hint
-// about Enter being unavailable does not appear.
-func TestQueueWhileRunningDefaultOn(t *testing.T) {
+// TestQueueWhileRunningAlwaysOn covers every stored row value: missing, empty,
+// malformed and even the old explicit opt-out "false" all keep queueing on, so
+// the running composer shows 排队 and the removed opt-out hint never appears.
+func TestQueueWhileRunningAlwaysOn(t *testing.T) {
 	for _, values := range []map[string]string{
 		nil,
-		{contracts.SettingSendWhileRunning: ""},
-		{contracts.SettingSendWhileRunning: "bogus"},
+		{"ui.sendWhileRunning": ""},
+		{"ui.sendWhileRunning": "bogus"},
+		{"ui.sendWhileRunning": "false"},
 	} {
 		h := newPermissionHarness(t, runningChat(), newPermissionSettings(values))
 		tester := h.tester()

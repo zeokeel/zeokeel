@@ -1,10 +1,9 @@
 package settings_test
 
-// Tests for the model page's "运行参数 / Runtime" section: max iterations and
-// context budget numeric drafts saved by the page footer, and the immediate-
-// write stream-completeness switch. The three settings rows are read by the
-// agent backend (chat.maxIterations / chat.contextBudget / chat.requireFinishReason);
-// an empty numeric draft clears the row so the module config applies.
+// Tests for the model page's "运行参数 / Runtime" section: the optional max
+// iterations and context budget drafts saved by the page footer. An empty draft
+// means "use the module config" (no settings row); a value persists that row.
+// Stream completeness is always on, so its switch is deleted from the page.
 
 import (
 	"testing"
@@ -20,18 +19,46 @@ import (
 func runtimeHarness(t *testing.T, cfg contracts.ChatConfig) (*harness, *fakeSettings, *ui.Tester) {
 	t.Helper()
 	store := newFakeSettings(nil)
+	return runtimeHarnessWithStore(t, cfg, store)
+}
+
+// runtimeHarnessWithStore is runtimeHarness over a scripted settings store.
+func runtimeHarnessWithStore(t *testing.T, cfg contracts.ChatConfig, store *fakeSettings) (*harness, *fakeSettings, *ui.Tester) {
+	t.Helper()
 	chat := &fakeChat{config: cfg}
 	h := newHarness(t, chat, store, settings.Config{})
 	tester := h.tester()
 	tester.Frame()
 	h.click(tester, "模型")
+	return h, store, tester
+}
+
+// expandRuntimeAdvanced opens the collapsed 高级选项 disclosure.
+func expandRuntimeAdvanced(t *testing.T, h *harness, tester *ui.Tester) {
+	t.Helper()
 	// Runtime limits live behind the collapsed 高级选项 disclosure; the native
 	// disclosure animates, so let its layout settle before focusing inputs.
 	h.click(tester, "高级选项")
 	for range 4 {
 		tester.Frame()
 	}
-	return h, store, tester
+}
+
+// clearRuntimeInput replaces the text of one optional numeric draft with an
+// empty value (the "use the module config" state).
+func clearRuntimeInput(t *testing.T, h *harness, tester *ui.Tester, label string) {
+	t.Helper()
+	target := label + " 输入"
+	h.ensureVisible(tester, target)
+	rect, ok := tester.Find(target)
+	if !ok {
+		t.Fatalf("input labeled %q not found; texts = %v", target, tester.Texts())
+	}
+	tester.ClickAt(rect.X+16, rect.Y+rect.H/2)
+	tester.Frame()
+	tester.Key(ui.Cmd, ui.KeyA)
+	tester.Key(0, ui.KeyBackspace)
+	tester.Frame()
 }
 
 func runtimeBaseConfig() contracts.ChatConfig {
@@ -41,20 +68,25 @@ func runtimeBaseConfig() contracts.ChatConfig {
 	}
 }
 
-// TestModelRuntimeDefaultsFromModuleConfig covers the "use default" semantics
-// with a module-configured limit and an empty settings store: the switches are
-// on (the module values are displayed as defaults, not as drafts), and a plain
-// Save persists no setting rows, so a later module-config change still applies.
-func TestModelRuntimeDefaultsFromModuleConfig(t *testing.T) {
+// TestModelRuntimeOptionalDraftsRender covers the optional drafts: the numeric
+// inputs are always visible, an empty draft shows the module default, and the
+// fixed-behavior switches (use-default limits, stream completeness) are gone.
+func TestModelRuntimeOptionalDraftsRender(t *testing.T) {
 	cfg := runtimeBaseConfig()
 	cfg.MaxIterations = 7
 	cfg.ContextBudget = 9000
 	h, store, tester := runtimeHarness(t, cfg)
-	h.assertTexts(tester, "提示词与运行参数（页脚保存）", "最大迭代次数", "上下文预算", "流完整性校验",
-		"模块默认：7", "模块默认：9000")
-	h.assertNoTexts(tester, "未保存")
-	// The numeric inputs are hidden while their defaults are on.
-	h.assertNoTexts(tester, "最大迭代次数 输入", "上下文预算 输入")
+	// The collapsed summary names the module defaults and no longer mentions
+	// stream completeness.
+	h.assertTexts(tester, "最大迭代 模块默认 7", "上下文预算 模块默认 9000")
+	h.assertNoTexts(tester, "流完整性校验")
+	expandRuntimeAdvanced(t, h, tester)
+	h.assertTexts(tester, "提示词与运行参数（页脚保存）", "最大迭代次数", "上下文预算",
+		"最大迭代次数 输入", "上下文预算 输入",
+		"模型/工具轮数上限；留空使用模块默认 7",
+		"自动压缩的 prompt token 预算；留空使用模块默认 9000")
+	h.assertNoTexts(tester, "使用默认上限（不限制）", "使用默认预算",
+		"流完整性校验", "Stream completeness")
 	h.click(tester, "保存提示词与运行参数")
 	if got := store.get(contracts.SettingsChatMaxIterations); got != "" {
 		t.Fatalf("module default max iterations became a settings row: %q", got)
@@ -62,30 +94,18 @@ func TestModelRuntimeDefaultsFromModuleConfig(t *testing.T) {
 	if got := store.get(contracts.SettingsChatContextBudget); got != "" {
 		t.Fatalf("module default context budget became a settings row: %q", got)
 	}
-
-	// Turning the default off and saving a concrete value writes the row.
-	h.click(tester, "使用默认上限（不限制）")
-	typeNumberInput(t, h, tester, "最大迭代次数", "12")
-	h.click(tester, "保存提示词与运行参数")
-	if got := store.get(contracts.SettingsChatMaxIterations); got != "12" {
-		t.Fatalf("explicit max iterations = %q, want 12", got)
-	}
-	if got := store.get(contracts.SettingsChatContextBudget); got != "" {
-		t.Fatalf("the untouched default budget was written: %q", got)
-	}
 }
 
-// TestModelRuntimeSaveRoundTrip covers the footer Save persisting both numeric
-// drafts and the page showing the saved state.
-func TestModelRuntimeSaveRoundTrip(t *testing.T) {
+// TestModelRuntimeDraftsSaveAndClear covers the footer Save: typed values
+// persist their rows, and clearing both drafts returns to the module config by
+// persisting empty rows.
+func TestModelRuntimeDraftsSaveAndClear(t *testing.T) {
 	cfg := runtimeBaseConfig()
 	cfg.MaxIterations = 20
+	cfg.ContextBudget = 4000
 	h, store, tester := runtimeHarness(t, cfg)
-	// A module max-iterations limit exists: it is the default, so turn the switch
-	// off before entering an explicit value.
-	h.click(tester, "使用默认上限（不限制）")
+	expandRuntimeAdvanced(t, h, tester)
 	typeNumberInput(t, h, tester, "最大迭代次数", "12")
-	h.click(tester, "使用默认预算") // the budget has no explicit row yet: turn the default off
 	typeNumberInput(t, h, tester, "上下文预算", "4096")
 	h.assertTexts(tester, "未保存")
 	h.click(tester, "保存提示词与运行参数")
@@ -97,22 +117,10 @@ func TestModelRuntimeSaveRoundTrip(t *testing.T) {
 	if got := store.get(contracts.SettingsChatContextBudget); got != "4096" {
 		t.Fatalf("saved context budget = %q, want 4096", got)
 	}
-}
 
-// TestModelRuntimeEmptyClearsRows covers the documented fallback: clearing a
-// numeric draft persists an empty row.
-func TestModelRuntimeEmptyClearsRows(t *testing.T) {
-	store := newFakeSettings(map[string]string{
-		contracts.SettingsChatMaxIterations: "9",
-		contracts.SettingsChatContextBudget: "5000",
-	})
-	h := newHarness(t, &fakeChat{config: runtimeBaseConfig()}, store, settings.Config{})
-	tester := h.tester()
-	tester.Frame()
-	h.click(tester, "模型")
-	h.click(tester, "高级选项")
-	h.click(tester, "使用默认上限（不限制）")
-	h.click(tester, "使用默认预算")
+	clearRuntimeInput(t, h, tester, "最大迭代次数")
+	clearRuntimeInput(t, h, tester, "上下文预算")
+	h.assertTexts(tester, "未保存")
 	h.click(tester, "保存提示词与运行参数")
 	if got := store.get(contracts.SettingsChatMaxIterations); got != "" {
 		t.Fatalf("cleared max iterations = %q, want empty", got)
@@ -120,37 +128,40 @@ func TestModelRuntimeEmptyClearsRows(t *testing.T) {
 	if got := store.get(contracts.SettingsChatContextBudget); got != "" {
 		t.Fatalf("cleared context budget = %q, want empty", got)
 	}
+	h.assertNoTexts(tester, "未保存")
 }
 
-// TestModelRuntimeNumberInputsIgnoreOutOfRange covers the official
-// ui.NumberInput rule: a typed number outside the bounds is ignored, so the page
-// never holds an invalid draft and a save persists the last valid value (the
-// old free-text inline-error path is gone).
-func TestModelRuntimeNumberInputsIgnoreOutOfRange(t *testing.T) {
+// TestModelRuntimeInvalidDraftBlocksSave covers validation: an empty draft is
+// valid, a malformed/out-of-range one keeps the stored row and shows the inline
+// error until it is corrected.
+func TestModelRuntimeInvalidDraftBlocksSave(t *testing.T) {
 	cfg := runtimeBaseConfig()
-	cfg.MaxIterations = 20
-	h, store, tester := runtimeHarness(t, cfg)
-	h.click(tester, "使用默认上限（不限制）")               // the module limit is the default: turn it off
-	typeNumberInput(t, h, tester, "最大迭代次数", "0") // below the bound 1: ignored
-	h.click(tester, "使用默认预算")
-	typeNumberInput(t, h, tester, "上下文预算", "-1") // below 0: ignored
+	store := newFakeSettings(map[string]string{contracts.SettingsChatMaxIterations: "9"})
+	h, store, tester := runtimeHarnessWithStore(t, cfg, store)
+	expandRuntimeAdvanced(t, h, tester)
+	typeNumberInput(t, h, tester, "最大迭代次数", "0")
 	h.click(tester, "保存提示词与运行参数")
-	if got := store.get(contracts.SettingsChatMaxIterations); got != "20" {
-		t.Fatalf("max iterations saved = %q, want last valid value 20", got)
+	// The invalid draft keeps the inline error (and the host's unsaved badge);
+	// nothing is persisted.
+	h.assertTexts(tester, "未保存",
+		"请输入大于 0 的整数；留空使用模块默认值。")
+	h.assertNoTexts(tester, "已保存")
+	if got := store.get(contracts.SettingsChatMaxIterations); got != "9" {
+		t.Fatalf("invalid draft overwrote the stored row: %q", got)
 	}
-	if got := store.get(contracts.SettingsChatContextBudget); got != "0" {
-		t.Fatalf("context budget saved = %q, want 0", got)
+	typeNumberInput(t, h, tester, "最大迭代次数", "15")
+	h.click(tester, "保存提示词与运行参数")
+	h.assertTexts(tester, "已保存")
+	if got := store.get(contracts.SettingsChatMaxIterations); got != "15" {
+		t.Fatalf("corrected max iterations = %q, want 15", got)
 	}
-	h.assertNoTexts(tester, "请输入大于 0 的整数", "请输入大于或等于 0 的整数", "运行参数有误")
 }
 
 // TestModelRuntimeZeroBudgetAllowed covers the explicit "0" budget: it is a
 // valid draft meaning "no automatic compaction".
 func TestModelRuntimeZeroBudgetAllowed(t *testing.T) {
-	cfg := runtimeBaseConfig()
-	cfg.MaxIterations = 20
-	h, store, tester := runtimeHarness(t, cfg)
-	h.click(tester, "使用默认预算")
+	h, store, tester := runtimeHarness(t, runtimeBaseConfig())
+	expandRuntimeAdvanced(t, h, tester)
 	typeNumberInput(t, h, tester, "上下文预算", "0")
 	h.click(tester, "保存提示词与运行参数")
 	h.assertTexts(tester, "已保存")
@@ -159,32 +170,25 @@ func TestModelRuntimeZeroBudgetAllowed(t *testing.T) {
 	}
 }
 
-// TestModelStreamCompletenessToggleImmediateWrite covers the switch: clicking
-// it writes "false"/"true" at once (no footer save) and shows the status.
-func TestModelStreamCompletenessToggleImmediateWrite(t *testing.T) {
-	h, store, tester := runtimeHarness(t, runtimeBaseConfig())
-	if got := store.get(contracts.SettingsChatRequireFinishReason); got != "" {
-		t.Fatalf("stream setting touched before the click: %q", got)
-	}
-	h.click(tester, "流完整性校验")
-	h.assertTexts(tester, "已保存")
-	if got := store.get(contracts.SettingsChatRequireFinishReason); got != "false" {
-		t.Fatalf("stream setting after first click = %q, want false", got)
-	}
-	h.click(tester, "流完整性校验")
-	if got := store.get(contracts.SettingsChatRequireFinishReason); got != "true" {
-		t.Fatalf("stream setting after second click = %q, want true", got)
-	}
-}
-
-// TestModelRuntimeEnglishCopy covers the localized section and descriptions.
+// TestModelRuntimeEnglishCopy covers the localized optional drafts and the
+// absent fixed-behavior switches.
 func TestModelRuntimeEnglishCopy(t *testing.T) {
 	cfg := runtimeBaseConfig()
 	cfg.MaxIterations = 3
 	cfg.ContextBudget = 500
-	h, _, tester := runtimeHarness(t, cfg)
-	h.uiRoot.Locale().SetLanguage("en")
+	store := newFakeSettings(nil)
+	h := newLocaleHarness(t, &fakeChat{config: cfg}, store, settings.Config{}, "en")
+	tester := h.tester()
 	tester.Frame()
+	h.click(tester, "Model")
+	h.click(tester, "Advanced options")
+	for range 4 {
+		tester.Frame()
+	}
 	h.assertTexts(tester, "Prompt & runtime (saved by the footer)", "Max iterations",
-		"Context budget", "Stream completeness", "Model/tool rounds per run")
+		"Context budget",
+		"Model/tool rounds per run; Leave blank for the module default 3.",
+		"Prompt-token budget for automatic compaction; Leave blank for the module default 500.")
+	h.assertNoTexts(tester, "Use default limit (unlimited)", "Use default budget",
+		"Stream completeness")
 }

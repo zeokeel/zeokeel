@@ -1,10 +1,10 @@
 package regression
 
-// Adversarial audit: automatic goal continuation (goal.autoContinue). Negative
-// and boundary cases: only "true" enables it, one continuation is sent per
-// settled run with the goal text, a goal can continue at most five times, a goal
-// change resets the count, clearing the goal or pressing Stop suppresses it, and
-// a queued prompt is flushed before auto-continue.
+// Adversarial audit: automatic goal continuation (A5 fixed behavior; the
+// goal.autoContinue row is no longer read). Boundary cases: one continuation is
+// sent per settled run with the goal text, a goal can continue at most five
+// times, a goal change resets the count, clearing the goal or pressing Stop
+// suppresses it, and a queued prompt is flushed before auto-continue.
 
 import (
 	"context"
@@ -80,7 +80,7 @@ func startGoalAuto(t *testing.T, setting string) *goalHarness {
 	t.Helper()
 	h := newBareHarness(t)
 	if setting != "" {
-		if err := h.settings.Set(contracts.SettingGoalAutoContinue, setting); err != nil {
+		if err := h.settings.Set("goal.autoContinue", setting); err != nil {
 			t.Fatalf("set goal.autoContinue: %v", err)
 		}
 	}
@@ -140,27 +140,21 @@ func containsGoal(sends []string, text string) bool {
 	return false
 }
 
-// TestGoalAutoContinueDefaultOffAndBadValues covers the switch normalization:
-// missing/false/bad values never continue; " TRUE " does.
-func TestGoalAutoContinueDefaultOffAndBadValues(t *testing.T) {
-	for _, value := range []string{"", "false", "bogus", "1", "yes"} {
+// TestGoalAutoContinueAlwaysOn covers A5's fixed behavior: goal.autoContinue is
+// no longer a settings-controlled switch, so a missing row, the old explicit
+// "false", malformed values and truthy values all auto-continue the active goal.
+func TestGoalAutoContinueAlwaysOn(t *testing.T) {
+	for _, value := range []string{"", "false", "bogus", "1", "yes", "  TRUE  "} {
 		harness := startGoalAuto(t, value)
 		harness.goal.install("goal-1", "Ship it")
 		harness.tester.Frame()
 		harness.settle(t)
-		harness.tester.Frame()
-		if sends := harness.chat.recordedSends(); len(sends) != 0 {
-			t.Fatalf("goal.autoContinue=%q sent %v, want none", value, sends)
+		harness.pump(t, "auto continuation for row "+value, func() bool {
+			return len(harness.chat.recordedSends()) >= 1
+		})
+		if sends := harness.chat.recordedSends(); !containsGoal(sends, "Ship it") {
+			t.Fatalf("goal.autoContinue=%q continuation sends = %v, want one", value, sends)
 		}
-	}
-
-	enabled := startGoalAuto(t, "  TRUE  ")
-	enabled.goal.install("goal-1", "Ship it")
-	enabled.tester.Frame()
-	enabled.settle(t)
-	enabled.pump(t, "auto continuation", func() bool { return len(enabled.chat.recordedSends()) >= 1 })
-	if sends := enabled.chat.recordedSends(); !containsGoal(sends, "Ship it") {
-		t.Fatalf("enabled continuation sends = %v", sends)
 	}
 }
 
@@ -248,7 +242,7 @@ func TestGoalAutoContinueSuppressionClearAndFailure(t *testing.T) {
 
 	t.Run("queued prompt flushes before auto-continue", func(t *testing.T) {
 		harness := startGoalAuto(t, "true")
-		if err := harness.h.settings.Set(contracts.SettingSendWhileRunning, "true"); err != nil {
+		if err := harness.h.settings.Set("ui.sendWhileRunning", "true"); err != nil {
 			t.Fatalf("set sendWhileRunning: %v", err)
 		}
 		harness.goal.install("goal-q", "Queue goal")

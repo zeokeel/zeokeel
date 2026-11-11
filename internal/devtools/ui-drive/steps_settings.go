@@ -35,7 +35,7 @@ var settingsPages = []settingsPageSpec{
 	{"settings-page-search", "search", "搜索", []string{"搜索端点", "保存"}},
 	{"settings-page-mcp", "mcp", "MCP", []string{"MCP 服务器", "添加服务器"}},
 	{"settings-page-archive", "archive", "归档", []string{"归档的会话"}},
-	{"settings-page-notifications", "notifications", "通知", []string{"显示通知气泡", "按级别过滤"}},
+	{"settings-page-notifications", "notifications", "通知", []string{"显示通知气泡"}},
 	{"settings-page-behavior", "behavior", "行为", []string{"默认代理权限", "工作步骤", "工作步骤展示"}},
 	{"settings-page-memory", "memory", "记忆", []string{"整理策略", "添加记忆"}},
 	{"settings-page-lsp", "lsp", "LSP", []string{"语言服务器", "新增服务器"}},

@@ -2422,7 +2422,7 @@ func buildComposer(
 	chatSession contracts.ChatSession,
 ) {
 	running := chatSession.Running
-	queueAllowed := running && sendWhileRunningEnabled(st.settings)
+	queueAllowed := running
 	// Whether the slash command popover is the layer owning Enter/Esc right
 	// now. It only exists while no turn runs, and an Esc-dismissed draft keeps
 	// the menu closed until the draft changes. The same condition drives the

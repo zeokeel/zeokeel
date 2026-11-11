@@ -36,7 +36,7 @@ func autoContinueSettings(enabled bool) *permissionSettings {
 	if enabled {
 		value = "true"
 	}
-	return newPermissionSettings(map[string]string{contracts.SettingGoalAutoContinue: value})
+	return newPermissionSettings(map[string]string{"goal.autoContinue": value})
 }
 
 func autoContinueChat() *fakeChat {
@@ -89,15 +89,28 @@ func autoSends(chat *fakeChat) []string {
 	return out
 }
 
-func TestGoalAutoContinueOffDoesNothing(t *testing.T) {
-	chat := autoContinueChat()
-	goal := &fakeGoalTracker{}
-	setFakeGoal(goal, "g1", "ship it")
-	_, tester := newAutoContinueHarness(t, chat, autoContinueSettings(false), goal)
-	tester.Frame()
-	settleRun(t, chat, tester)
-	if sends := autoSends(chat); len(sends) != 0 {
-		t.Fatalf("auto-continue sent while off: %v", sends)
+// TestGoalAutoContinueAlwaysOn pins the A5 fixed behavior: goal.autoContinue is
+// no longer a Settings control, so a missing row or even a stored opt-out still
+// auto-continues the active goal (the one-per-settle and five-run cap rules are
+// covered by the tests below).
+func TestGoalAutoContinueAlwaysOn(t *testing.T) {
+	for name, settings := range map[string]*permissionSettings{
+		"no row":       newPermissionSettings(nil),
+		"stored false": autoContinueSettings(false),
+		"stored bogus": newPermissionSettings(map[string]string{"goal.autoContinue": "bogus"}),
+	} {
+		t.Run(name, func(t *testing.T) {
+			chat := autoContinueChat()
+			goal := &fakeGoalTracker{}
+			setFakeGoal(goal, "g1", "ship it")
+			_, tester := newAutoContinueHarness(t, chat, settings, goal)
+			tester.Frame()
+			settleRun(t, chat, tester)
+			sends := autoSends(chat)
+			if len(sends) != 1 || !strings.Contains(sends[0], "ship it") {
+				t.Fatalf("auto sends = %v, want one continuation for the active goal", sends)
+			}
+		})
 	}
 }
 

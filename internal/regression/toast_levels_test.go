@@ -1,83 +1,67 @@
 package regression
 
-// Adversarial audit: toast level filtering (ui.notifications.hidden). Negative
-// and boundary cases: missing/empty/malformed rows never filter, known levels are
-// filtered case-insensitively, unknown levels always show, and hiding a level is a
-// hot switch that clears the already-visible toasts of that level.
+// Adversarial audit (A7 fixed behavior): toast levels are never filtered. The
+// old ui.notifications.hidden row is no longer read, so a stored filter from an
+// older version — well-formed, case/whitespace variants, unknown names or
+// malformed JSON — cannot hide a toast. Only the master ui.notifications switch
+// still turns the overlay off (covered by notifications_test.go).
 
 import (
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/zeokeel/zeokeel/internal/contracts"
 )
 
-// setHiddenLevels writes the hidden-levels JSON row.
+// setHiddenLevels writes the legacy hidden-levels JSON row. The module no longer
+// reads it; the tests keep writing it to prove it is ignored.
 func setHiddenLevels(t *testing.T, harness *toastsHarness, raw string) {
 	t.Helper()
-	if err := harness.h.settings.Set(contracts.SettingNotificationHiddenLevels, raw); err != nil {
+	if err := harness.h.settings.Set("ui.notifications.hidden", raw); err != nil {
 		t.Fatalf("set hidden levels %q: %v", raw, err)
 	}
 }
 
-// TestToastLevelFiltering covers the filter matrix through the frame.
-func TestToastLevelFiltering(t *testing.T) {
+// TestToastLevelsNeverFiltered covers the legacy filter matrix through the
+// frame: every level is delivered whatever the stored row says.
+func TestToastLevelsNeverFiltered(t *testing.T) {
 	harness := startToastsUI(t)
+	for _, row := range []string{`["info"]`, `[" INFO ", "Warning"]`, `["info"`, `[]`, `["error"]`} {
+		setHiddenLevels(t, harness, row)
+		for _, level := range []string{contracts.NotifyInfo, contracts.NotifySuccess, contracts.NotifyWarning, contracts.NotifyError} {
+			text := "toast-" + level
+			harness.raise(t, "notice-"+level, level, text)
+			harness.tester.Frame()
+			requireHasText(t, harness.tester, text)
+			flushToasts(harness)
+			requireNoText(t, harness.tester, text)
+		}
+	}
 
-	// No hidden row: every level is delivered, but the stack shows at most two
-	// toasts and queues the rest in order.
+	// A row that names every level still filters nothing: the four deliveries
+	// show in order, two at a time (the stack bound is separate from filtering).
+	setHiddenLevels(t, harness, `["info","success","warning","error"]`)
 	for _, level := range []string{contracts.NotifyInfo, contracts.NotifySuccess, contracts.NotifyWarning, contracts.NotifyError} {
-		harness.raise(t, "notice-all-"+level, level, "toast-all-"+level)
+		harness.raise(t, "notice-ordered-"+level, level, "toast-ordered-"+level)
 	}
 	harness.tester.Frame()
-	requireHasText(t, harness.tester, "toast-all-info")
-	requireHasText(t, harness.tester, "toast-all-success")
-	for _, level := range []string{"warning", "error"} {
-		requireNoText(t, harness.tester, "toast-all-"+level)
-	}
-	flushToasts(harness)
+	requireHasText(t, harness.tester, "toast-ordered-info")
+	requireHasText(t, harness.tester, "toast-ordered-success")
+	requireNoText(t, harness.tester, "toast-ordered-warning")
 
-	// Hide info: only info disappears; the other levels keep showing.
-	setHiddenLevels(t, harness, `["info"]`)
-	harness.raise(t, "notice-hidden-info", contracts.NotifyInfo, "toast-hidden-info")
-	harness.raise(t, "notice-shown-success", contracts.NotifySuccess, "toast-shown-success")
+	harness.tester.Advance(5 * time.Second)
 	harness.tester.Frame()
-	requireNoText(t, harness.tester, "toast-hidden-info")
-	requireHasText(t, harness.tester, "toast-shown-success")
-
-	// Case/whitespace variants normalize; unknown levels are never filtered and
-	// unknown names in the row are ignored.
-	setHiddenLevels(t, harness, `[" INFO ", "Warning"]`)
+	harness.tester.Frame()
+	requireHasText(t, harness.tester, "toast-ordered-warning")
+	requireHasText(t, harness.tester, "toast-ordered-error")
 	flushToasts(harness)
-	harness.raise(t, "notice-info-2", contracts.NotifyInfo, "toast-info-2")
-	harness.raise(t, "notice-warning-2", contracts.NotifyWarning, "toast-warning-2")
-	harness.raise(t, "notice-custom", "custom-level", "toast-custom")
-	harness.raise(t, "notice-error-2", contracts.NotifyError, "toast-error-2")
-	harness.tester.Frame()
-	requireNoText(t, harness.tester, "toast-info-2")
-	requireNoText(t, harness.tester, "toast-warning-2")
-	requireHasText(t, harness.tester, "toast-custom")
-	requireHasText(t, harness.tester, "toast-error-2")
-	flushToasts(harness)
-
-	// Malformed JSON is treated as "nothing hidden" (bad values never filter).
-	setHiddenLevels(t, harness, `["info"`)
-	harness.raise(t, "notice-malformed", contracts.NotifyInfo, "toast-malformed")
-	harness.tester.Frame()
-	requireHasText(t, harness.tester, "toast-malformed")
-	flushToasts(harness)
-
-	// An empty array hides nothing.
-	setHiddenLevels(t, harness, `[]`)
-	harness.raise(t, "notice-empty-array", contracts.NotifyWarning, "toast-empty-array")
-	harness.tester.Frame()
-	requireHasText(t, harness.tester, "toast-empty-array")
 }
 
-// TestToastHiddenLevelHotClear covers the hot switch: hiding a level removes the
-// matching toasts already on screen and keeps the other levels; un-hiding shows
-// the next delivery again.
-func TestToastHiddenLevelHotClear(t *testing.T) {
+// TestToastLevelRowChangeNeverClears covers the former hot switch: writing the
+// legacy row while toasts show neither closes them nor suppresses the next
+// delivery, and the row is never rewritten by the module.
+func TestToastLevelRowChangeNeverClears(t *testing.T) {
 	harness := startToastsUI(t)
 	harness.raise(t, "notice-i", contracts.NotifyInfo, "visible-info")
 	harness.raise(t, "notice-e", contracts.NotifyError, "visible-error")
@@ -87,27 +71,28 @@ func TestToastHiddenLevelHotClear(t *testing.T) {
 
 	setHiddenLevels(t, harness, `["info"]`)
 	harness.tester.Frame()
-	requireNoText(t, harness.tester, "visible-info")
+	requireHasText(t, harness.tester, "visible-info")
 	requireHasText(t, harness.tester, "visible-error")
 
-	harness.raise(t, "notice-i2", contracts.NotifyInfo, "info-while-hidden")
+	// The next delivery is shown too; the two old toasts expire normally.
+	harness.raise(t, "notice-i2", contracts.NotifyInfo, "info-after-row")
+	harness.tester.Advance(5 * time.Second)
 	harness.tester.Frame()
-	requireNoText(t, harness.tester, "info-while-hidden")
-
-	// Un-hiding shows the next delivery.
-	setHiddenLevels(t, harness, `[]`)
-	harness.raise(t, "notice-i3", contracts.NotifyInfo, "info-back")
 	harness.tester.Frame()
-	requireHasText(t, harness.tester, "info-back")
-
-	// Hiding error drops the error toast too; the info toast stays.
-	harness.raise(t, "notice-i4", contracts.NotifyInfo, "info-kept")
-	harness.tester.Frame()
-	setHiddenLevels(t, harness, `["error"]`)
-	harness.tester.Frame()
+	requireHasText(t, harness.tester, "info-after-row")
+	requireNoText(t, harness.tester, "visible-info")
 	requireNoText(t, harness.tester, "visible-error")
-	requireHasText(t, harness.tester, "info-kept")
-	if strings.TrimSpace(harness.h.settings.Get(contracts.SettingNotificationHiddenLevels, "")) != `["error"]` {
-		t.Fatalf("hidden levels row was rewritten: %q", harness.h.settings.Get(contracts.SettingNotificationHiddenLevels, ""))
+
+	// Case/whitespace variants and unknown level names in the row are ignored
+	// as well, and the module leaves the stored row untouched.
+	setHiddenLevels(t, harness, `[" SUCCESS ", "custom-level"]`)
+	flushToasts(harness)
+	harness.raise(t, "notice-case", "Success", "toast-case")
+	harness.raise(t, "notice-custom", "custom-level", "toast-custom")
+	harness.tester.Frame()
+	requireHasText(t, harness.tester, "toast-case")
+	requireHasText(t, harness.tester, "toast-custom")
+	if got := strings.TrimSpace(harness.h.settings.Get("ui.notifications.hidden", "")); got != `[" SUCCESS ", "custom-level"]` {
+		t.Fatalf("hidden levels row was rewritten: %q", got)
 	}
 }

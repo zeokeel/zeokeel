@@ -47,7 +47,6 @@ func (st *appearanceState) reenter(store contracts.SettingsService, locale contr
 			store.Get(contracts.SettingsUIThemeDark, ""),
 		)
 		st.autostart = store.Get(contracts.SettingAutostart, "false") == "true"
-		st.singleInstance = singleInstanceSwitchEnabled(store.Get(contracts.SettingSingleInstance, "true"))
 		st.closeToTray = closeToTraySettingEnabled(store.Get(contracts.SettingCloseToTray, "false"))
 		saved := strings.TrimSpace(store.Get(contracts.SettingGlobalHotkey, ""))
 		st.savedHotkey = saved

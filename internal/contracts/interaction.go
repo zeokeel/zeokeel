@@ -91,27 +91,11 @@ const (
 	// SettingAutostart installs/removes the per-user autostart entry (Linux
 	// XDG autostart today).
 	SettingAutostart = "ui.autostart"
-	// SettingSingleInstance keeps one running instance and hands new launches
-	// to it (default true).
-	SettingSingleInstance = "ui.singleInstance"
 	// SettingCloseToTray keeps the app alive in the system tray instead of
 	// quitting when the window is closed (desktop only; default false).
 	SettingCloseToTray = "ui.closeToTray"
 	// SettingNotifications toggles the desktop toast overlay (default true).
 	SettingNotifications = "ui.notifications"
-	// SettingNotificationHiddenLevels is a JSON array of toast levels
-	// ("info","success","warning","error") that should not be shown. Missing
-	// levels are shown (the default).
-	SettingNotificationHiddenLevels = "ui.notifications.hidden"
-	// SettingSendWhileRunning allows queueing prompts while a turn is running;
-	// queued prompts are sent when the run finishes. Missing/empty values
-	// default to true (the composer stays usable during a run); "false"
-	// disables queueing and disables Enter-to-send until the turn ends.
-	SettingSendWhileRunning = "ui.sendWhileRunning"
-	// SettingGoalAutoContinue makes the session automatically send a
-	// continuation prompt after a run finishes while a goal is active (bounded
-	// by maxGoalAutoContinues per goal; default false).
-	SettingGoalAutoContinue = "goal.autoContinue"
 	// SettingAgentsFile is the workspace instruction file appended to the
 	// system prompt (default "AGENTS.md"; empty disables the injection).
 	SettingAgentsFile = "agent.agentsFile"

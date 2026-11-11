@@ -282,11 +282,10 @@ type appearanceState struct {
 	statusErr bool
 
 	// Desktop integration switches (persisted immediately, applied by the
-	// process host: XDG autostart entry and the single-instance lock) plus the
-	// close-to-tray switch (the host hides the window instead of quitting).
-	autostart      bool
-	singleInstance bool
-	closeToTray    bool
+	// process host: the XDG autostart entry and the close-to-tray behavior).
+	// Single instance is always on, so it has no switch here.
+	autostart   bool
+	closeToTray bool
 	// globalHotkey is the canonical accelerator draft. Theme, language and the
 	// desktop switches apply at once; the hotkey is the page's one explicit-save
 	// field (the host registers it at the next start; empty disables it).
@@ -309,17 +308,6 @@ type appearanceState struct {
 	// transient detects the page being shown again after another page (or the
 	// closed surface), so status copy and store-backed values can refresh.
 	transient transientStatus
-}
-
-// singleInstanceSwitchEnabled reads the stored single-instance setting with the
-// host's default (on); only recognizable off values disable it.
-func singleInstanceSwitchEnabled(raw string) bool {
-	switch strings.ToLower(strings.TrimSpace(raw)) {
-	case "false", "0", "no", "off":
-		return false
-	default:
-		return true
-	}
 }
 
 // buildAppearanceLabels is the resolved copy of the appearance page.
@@ -397,8 +385,8 @@ type moduleState struct {
 
 	// Runtime limit drafts (persisted by the page's footer Save) plus their
 	// per-field inline validation messages. An empty numeric draft means "use
-	// the module config", so saving it clears the settings row. The stream
-	// completeness switch is immediate-write and therefore has no draft.
+	// the module config", so saving it clears the settings row; a value persists
+	// the row.
 	maxIterations     string
 	contextBudget     string
 	iterationsErr     string
@@ -407,17 +395,9 @@ type moduleState struct {
 	seenContextBudget string
 	iterationsInput   ui.Handle
 	budgetInput       ui.Handle
-	// The runtime limits are official ui.NumberInputs; the numeric mirrors back
-	// their fields, and the default switches say whether the module config
-	// applies (default = no settings row, which is how "leave it to the module"
-	// is stored).
-	maxIterationsNum  float64
-	contextBudgetNum  float64
-	iterationsDefault bool
-	budgetDefault     bool
-	// The module-config limits are display-only defaults: they seed the numeric
-	// inputs' starting point and the "use default" copy, but never become drafts
-	// or settings rows unless the user turns the default switch off.
+	// The module-config limits are display-only defaults: they name the
+	// fallback in the empty draft's placeholder/description and the page
+	// summary, but never become drafts or settings rows on their own.
 	moduleMaxIterations int
 	moduleContextBudget int
 }
@@ -660,13 +640,12 @@ func Module() *module.Descriptor[Config] {
 				store.Get(contracts.SettingThemeMode, ""),
 				store.Get(contracts.SettingsUIThemeDark, ""),
 			),
-			language:       locale.Language(),
-			autostart:      store.Get(contracts.SettingAutostart, "false") == "true",
-			singleInstance: singleInstanceSwitchEnabled(store.Get(contracts.SettingSingleInstance, "true")),
-			closeToTray:    closeToTraySettingEnabled(store.Get(contracts.SettingCloseToTray, "false")),
-			globalHotkey:   store.Get(contracts.SettingGlobalHotkey, ""),
-			hotkeyText:     formatHotkeyDisplay(store.Get(contracts.SettingGlobalHotkey, "")),
-			savedHotkey:    store.Get(contracts.SettingGlobalHotkey, ""),
+			language:     locale.Language(),
+			autostart:    store.Get(contracts.SettingAutostart, "false") == "true",
+			closeToTray:  closeToTraySettingEnabled(store.Get(contracts.SettingCloseToTray, "false")),
+			globalHotkey: store.Get(contracts.SettingGlobalHotkey, ""),
+			hotkeyText:   formatHotkeyDisplay(store.Get(contracts.SettingGlobalHotkey, "")),
+			savedHotkey:  store.Get(contracts.SettingGlobalHotkey, ""),
 		}
 		shortcuts := &shortcutsState{}
 		archive := &archiveState{sel: -1}
@@ -1038,8 +1017,9 @@ func diagnosticValue(locale contracts.LocaleService, value string) string {
 }
 
 // runtimeSummary is the one-line effective runtime state shown under the
-// collapsed 高级选项 disclosure.
-func runtimeSummary(state *moduleState, store contracts.SettingsService, locale contracts.LocaleService) string {
+// collapsed 高级选项 disclosure. An empty draft names the module-config fallback
+// instead of a concrete value.
+func runtimeSummary(state *moduleState, locale contracts.LocaleService) string {
 	iterations := strings.TrimSpace(state.maxIterations)
 	if iterations == "" {
 		if state.moduleMaxIterations > 0 {
@@ -1056,13 +1036,8 @@ func runtimeSummary(state *moduleState, store contracts.SettingsService, locale 
 			budget = localized(locale, "默认", "default")
 		}
 	}
-	stream := localized(locale, "开", "on")
-	if !requireFinishReasonEnabled(store) {
-		stream = localized(locale, "关", "off")
-	}
 	return localized(locale, "最大迭代 ", "Max iterations ") + iterations +
-		localized(locale, " · 上下文预算 ", " · context budget ") + budget +
-		localized(locale, " · 流完整性校验 ", " · stream completeness ") + stream
+		localized(locale, " · 上下文预算 ", " · context budget ") + budget
 }
 
 // saveModelPage is the model page's pinned footer action: it validates the
@@ -1154,27 +1129,23 @@ func runtimeRows(store contracts.SettingsService) (iterations, contextBudget str
 		strings.TrimSpace(store.Get(contracts.SettingsChatContextBudget, ""))
 }
 
-// defaultRuntimeNumber resolves one numeric input's starting number: the
-// explicit settings row when present, else the module default (0 when neither
-// exists). It is only a starting point; the draft stays empty while the default
-// switch is on.
-func defaultRuntimeNumber(row string, moduleDefault int) float64 {
-	if value, err := strconv.Atoi(strings.TrimSpace(row)); err == nil {
-		return float64(value)
-	}
+// runtimeDefaultHint names the module-config fallback of an empty runtime draft:
+// the concrete module default when it has one, else the field's own
+// "unlimited"/"default" wording. It is shown as the empty input's placeholder
+// and in the field's description.
+func runtimeDefaultHint(locale contracts.LocaleService, moduleDefault int, fallbackZh, fallbackEn string) string {
 	if moduleDefault > 0 {
-		return float64(moduleDefault)
+		return fmt.Sprintf(localized(locale, "留空使用模块默认 %d",
+			"Leave blank for the module default %d"), moduleDefault)
 	}
-	return 0
+	return localized(locale, fallbackZh, fallbackEn)
 }
 
 // seedRuntime replaces the runtime-limit drafts and their persisted snapshot.
 // Only the explicit settings rows seed the drafts: the module-config limits are
-// the "use default" side, so they seed the numeric mirrors (the value the input
-// starts from when the switch is turned off) and the explanatory copy, but never
-// the drafts. Seeding the drafts from the module config made the default switch
-// read as off and a plain Save pin the module value into a user settings row
-// (ST-07).
+// display-only fallbacks named by the empty draft's placeholder/description, so
+// they never seed the drafts. An empty draft therefore keeps the module config
+// applying until the user types a concrete value.
 func (st *moduleState) seedRuntime(chat contracts.ChatService, store contracts.SettingsService) {
 	var cfg contracts.ChatConfig
 	if chat != nil {
@@ -1185,28 +1156,11 @@ func (st *moduleState) seedRuntime(chat contracts.ChatService, store contracts.S
 	st.maxIterations, st.contextBudget = runtimeRows(store)
 	st.seenMaxIterations, st.seenContextBudget = st.maxIterations, st.contextBudget
 	st.iterationsErr, st.contextBudgetErr = "", ""
-	st.iterationsDefault = strings.TrimSpace(st.maxIterations) == ""
-	st.budgetDefault = strings.TrimSpace(st.contextBudget) == ""
-	st.maxIterationsNum = defaultRuntimeNumber(st.maxIterations, st.moduleMaxIterations)
-	st.contextBudgetNum = defaultRuntimeNumber(st.contextBudget, st.moduleContextBudget)
-}
-
-// requireFinishReasonEnabled reports the stream-completeness switch state:
-// explicit "false"/"0"/"off"/"no" disables the check, anything else (including
-// the unset row, which follows the assembly default of on) keeps it enabled.
-func requireFinishReasonEnabled(store contracts.SettingsService) bool {
-	if store == nil {
-		return true
-	}
-	switch strings.ToLower(strings.TrimSpace(store.Get(contracts.SettingsChatRequireFinishReason, ""))) {
-	case "false", "0", "off", "no":
-		return false
-	}
-	return true
 }
 
 // validateRuntimeDrafts parses the numeric drafts and fills their inline
-// errors. It reports whether both drafts are valid and can be saved.
+// errors. It reports whether both drafts are valid and can be saved. An empty
+// draft is valid: it means "use the module config".
 func validateRuntimeDrafts(st *moduleState, locale contracts.LocaleService) bool {
 	st.iterationsErr, st.contextBudgetErr = "", ""
 	if raw := strings.TrimSpace(st.maxIterations); raw != "" {
@@ -1265,8 +1219,8 @@ func (st *moduleState) discardDrafts(chat contracts.ChatService, store contracts
 }
 
 // dirty reports whether the explicit-save drafts differ from the persisted
-// configuration. The model list and the stream switch apply immediately and
-// therefore never dirty the page.
+// configuration. The model list applies immediately and therefore never dirties
+// the page.
 func (st *moduleState) dirty() bool {
 	return st.systemPrompt != st.seenSystemPrompt ||
 		st.maxIterations != st.seenMaxIterations ||
@@ -1397,116 +1351,54 @@ func buildPage(c *ui.Context, runtime contracts.UIRuntime, state *moduleState, c
 				"追加到每次对话的系统提示前；留空使用服务商默认。",
 				"Prepended to every conversation's system prompt; empty uses the provider default."))
 			// Runtime limits are low-frequency knobs: a native disclosure keeps the
-			// section short. The numeric drafts still save with the page footer;
-			// the stream switch applies immediately.
+			// section short. Both drafts save with the page footer, and an empty
+			// draft means "use the module config" (no settings row).
 			ui.Divider(c)
 			ui.Collapsible(c, localized(locale, "高级选项", "Advanced options"), &state.runtimeOpen, func() {
 				ui.Row(c).FillWidth().Gap(design.Space3).AlignItems(ui.Start).Children(func() {
 					ui.Column(c).FillWidth().Grow(1).Children(func() {
-						ui.Field(c, localized(locale, "最大迭代次数", "Max iterations"), func() {
-							if switchField(c,
-								localized(locale, "使用默认上限（不限制）", "Use default limit (unlimited)"),
-								localized(locale,
-									"开启时删除该设置行，由模块配置决定；关闭后设置具体轮数上限。",
-									"When on, the settings row is cleared and the module config decides; when off, set a concrete round limit."),
-								&state.iterationsDefault) {
+						iterationsHint := runtimeDefaultHint(locale, state.moduleMaxIterations,
+							"留空则不限制", "Leave blank for no limit")
+						iterationsLabel := localized(locale, "最大迭代次数", "Max iterations")
+						ui.Field(c, iterationsLabel, func() {
+							input := ui.TextInput(c, &state.maxIterations).
+								Label(inputLabel(locale, iterationsLabel)).
+								Placeholder(iterationsHint).
+								Bind(&state.iterationsInput).FillWidth()
+							if input.Changed() {
 								clearSavedStatus(state)
-								if state.iterationsDefault {
-									state.maxIterations = ""
-								} else {
-									if state.maxIterationsNum < 1 {
-										if state.moduleMaxIterations > 0 {
-											state.maxIterationsNum = float64(state.moduleMaxIterations)
-										} else {
-											state.maxIterationsNum = 20
-										}
-									}
-									state.maxIterations = strconv.Itoa(int(state.maxIterationsNum))
-								}
-							}
-							if state.iterationsDefault && state.moduleMaxIterations > 0 {
-								design.Apply(ui.Text(c, fmt.Sprintf(localized(locale,
-									"模块默认：%d", "Module default: %d"), state.moduleMaxIterations)),
-									t.Font(design.TypeXXS)).TextColor(t.LabelTertiary)
-							}
-							if !state.iterationsDefault {
-								input := ui.NumberInput(c.Key("settings.runtime.maxIterations"),
-									&state.maxIterationsNum, 1, 100000, 1).
-									Label(inputLabel(locale, localized(locale, "最大迭代次数", "Max iterations"))).
-									Bind(&state.iterationsInput)
-								if input.Changed() {
-									state.maxIterations = strconv.Itoa(int(state.maxIterationsNum))
-									clearSavedStatus(state)
-								}
 							}
 						}).Description(localized(locale,
-							"模型/工具轮数上限；默认不限制，由模块配置决定。",
-							"Model/tool rounds per run; unlimited by default, as the module config decides."))
+							"模型/工具轮数上限；", "Model/tool rounds per run; ") +
+							iterationsHint + localized(locale, "。", "."))
 						if state.iterationsErr != "" {
 							uikit.ErrorLine(c, state.iterationsErr)
 						}
 					})
 					ui.Column(c).FillWidth().Grow(1).Children(func() {
-						ui.Field(c, localized(locale, "上下文预算", "Context budget"), func() {
-							if switchField(c,
-								localized(locale, "使用默认预算", "Use default budget"),
-								localized(locale,
-									"开启时删除该设置行，由模块配置决定；关闭后设置具体的 prompt token 预算，0 = 不自动压缩。",
-									"When on, the settings row is cleared and the module config decides; when off, set a prompt-token budget, 0 = no automatic compaction."),
-								&state.budgetDefault) {
+						budgetHint := runtimeDefaultHint(locale, state.moduleContextBudget,
+							"留空使用模块默认（0 = 不自动压缩）",
+							"Leave blank for the module default (0 = no automatic compaction)")
+						budgetLabel := localized(locale, "上下文预算", "Context budget")
+						ui.Field(c, budgetLabel, func() {
+							input := ui.TextInput(c, &state.contextBudget).
+								Label(inputLabel(locale, budgetLabel)).
+								Placeholder(budgetHint).
+								Bind(&state.budgetInput).FillWidth()
+							if input.Changed() {
 								clearSavedStatus(state)
-								if state.budgetDefault {
-									state.contextBudget = ""
-								} else {
-									state.contextBudget = strconv.Itoa(int(state.contextBudgetNum))
-								}
-							}
-							if state.budgetDefault && state.moduleContextBudget != 0 {
-								design.Apply(ui.Text(c, fmt.Sprintf(localized(locale,
-									"模块默认：%d", "Module default: %d"), state.moduleContextBudget)),
-									t.Font(design.TypeXXS)).TextColor(t.LabelTertiary)
-							}
-							if !state.budgetDefault {
-								input := ui.NumberInput(c.Key("settings.runtime.contextBudget"),
-									&state.contextBudgetNum, 0, 10000000, 1000).
-									Label(inputLabel(locale, localized(locale, "上下文预算", "Context budget"))).
-									Bind(&state.budgetInput)
-								if input.Changed() {
-									state.contextBudget = strconv.Itoa(int(state.contextBudgetNum))
-									clearSavedStatus(state)
-								}
 							}
 						}).Description(localized(locale,
-							"自动压缩的 prompt token 预算，0 = 不自动压缩；默认由模块配置决定。",
-							"Prompt-token budget for automatic compaction; 0 = no automatic compaction. Default follows the module config."))
+							"自动压缩的 prompt token 预算；", "Prompt-token budget for automatic compaction; ") +
+							budgetHint + localized(locale, "。", "."))
 						if state.contextBudgetErr != "" {
 							uikit.ErrorLine(c, state.contextBudgetErr)
 						}
 					})
 				})
-				ui.Form(c, func() {
-					requireComplete := requireFinishReasonEnabled(store)
-					if switchField(c,
-						localized(locale, "流完整性校验", "Stream completeness"),
-						localized(locale,
-							"缺少 finish_reason 的流按截断失败处理；极简兼容服务器可关闭。",
-							"A stream without a finish_reason is treated as truncated; disable it for minimal compatible servers."),
-						&requireComplete) {
-						clearSavedStatus(state)
-						if err := store.Set(contracts.SettingsChatRequireFinishReason,
-							strconv.FormatBool(requireComplete)); err != nil {
-							state.status = localized(locale, "保存失败：", "Save failed: ") + err.Error()
-							state.statusErr = true
-						} else {
-							state.status = localized(locale, "已保存", "Saved")
-							state.statusErr = false
-						}
-						c.Invalidate()
-					}
-				})
 			})
 			if !state.runtimeOpen {
-				design.Apply(ui.Text(c, runtimeSummary(state, store, locale)),
+				design.Apply(ui.Text(c, runtimeSummary(state, locale)),
 					t.Font(design.TypeXXS)).TextColor(t.LabelTertiary)
 			}
 		})
@@ -1593,14 +1485,6 @@ func buildAppearancePage(c *ui.Context, state *appearanceState, store contracts.
 						fmt.Sprintf("%t", state.autostart), locale)
 				}
 				if switchField(c,
-					localized(locale, "单实例运行", "Single instance"),
-					localized(locale, "关闭后允许多开；修改需要重启应用生效。",
-						"When off, multiple instances may run; takes effect after restart."),
-					&state.singleInstance) {
-					applyDesktopSetting(state, store, contracts.SettingSingleInstance,
-						fmt.Sprintf("%t", state.singleInstance), locale)
-				}
-				if switchField(c,
 					localized(locale, "关闭时最小化到托盘", "Close to system tray"),
 					localized(locale, "需要系统托盘支持；修改后重启应用生效。",
 						"Requires system tray support; takes effect after restart."),
@@ -1672,9 +1556,6 @@ func applyAppearance(state *appearanceState, store contracts.SettingsService, lo
 	if err := store.Set(contracts.SettingAutostart, fmt.Sprintf("%t", state.autostart)); err != nil {
 		return err
 	}
-	if err := store.Set(contracts.SettingSingleInstance, fmt.Sprintf("%t", state.singleInstance)); err != nil {
-		return err
-	}
 	if err := store.Set(contracts.SettingCloseToTray, fmt.Sprintf("%t", state.closeToTray)); err != nil {
 		return err
 	}
@@ -1695,7 +1576,6 @@ func applyAppearance(state *appearanceState, store contracts.SettingsService, lo
 func applyDesktopSetting(state *appearanceState, store contracts.SettingsService, key, value string, locale contracts.LocaleService) {
 	if err := store.Set(key, value); err != nil {
 		state.autostart = store.Get(contracts.SettingAutostart, "false") == "true"
-		state.singleInstance = singleInstanceSwitchEnabled(store.Get(contracts.SettingSingleInstance, "true"))
 		state.closeToTray = closeToTraySettingEnabled(store.Get(contracts.SettingCloseToTray, "false"))
 		state.status = localized(locale, "保存失败：", "Save failed: ") + err.Error()
 		state.statusErr = true
@@ -1706,21 +1586,15 @@ func applyDesktopSetting(state *appearanceState, store contracts.SettingsService
 }
 
 // save writes the page's explicit-save drafts to the settings store: the system
-// prompt and the runtime limits. The model list (including the default model
-// mirror) is persisted by the list's own actions instead, because it applies
-// immediately. The runtime "use default" switches own their rows — an on switch
-// clears the row so the module config applies, an off switch writes the concrete
-// draft (an explicit "0" budget stays meaningful). The effective-config snapshot
-// is recorded so the page renders as clean right after a successful save.
+// prompt and the optional runtime limits. The model list (including the default
+// model mirror) is persisted by the list's own actions instead, because it
+// applies immediately. An empty runtime draft writes an empty row, which means
+// "use the module config"; a value persists that row (an explicit "0" budget
+// stays meaningful). The effective-config snapshot is recorded so the page
+// renders as clean right after a successful save.
 func save(state *moduleState, store contracts.SettingsService) error {
 	if err := store.Set(contracts.SettingsChatSystemPrompt, state.systemPrompt); err != nil {
 		return fmt.Errorf("system prompt: %w", err)
-	}
-	if state.iterationsDefault {
-		state.maxIterations = ""
-	}
-	if state.budgetDefault {
-		state.contextBudget = ""
 	}
 	state.maxIterations = strings.TrimSpace(state.maxIterations)
 	state.contextBudget = strings.TrimSpace(state.contextBudget)

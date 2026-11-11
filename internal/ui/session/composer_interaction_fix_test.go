@@ -123,7 +123,7 @@ func TestRunningComposerKeepsAttachMenu(t *testing.T) {
 
 	chat := newAttachmentChat()
 	chat.addSession(contracts.ChatSession{ID: "sess-1", Title: "运行中附件", Running: true}, true)
-	settings := newPermissionSettings(map[string]string{contracts.SettingSendWhileRunning: "true"})
+	settings := newPermissionSettings(map[string]string{"ui.sendWhileRunning": "true"})
 	h := newAttachmentHarnessWithSettings(t, chat, settings)
 	tester := h.tester()
 	tester.Frame()

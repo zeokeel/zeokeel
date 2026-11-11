@@ -979,15 +979,13 @@ func firstNonEmpty(values ...string) string {
 	return ""
 }
 
-// sendWhileRunningEnabled normalizes ui.sendWhileRunning: queueing is on unless
-// the row explicitly says "false". Missing, empty and malformed values keep the
-// default (on) so the composer stays usable while a reply streams; only an
-// explicit opt-out turns Enter-to-send off during a run.
-func sendWhileRunningEnabled(settings contracts.SettingsService) bool {
-	if settings == nil {
-		return true
-	}
-	return !strings.EqualFold(strings.TrimSpace(settings.Get(contracts.SettingSendWhileRunning, "")), "false")
+// sendWhileRunningEnabled reports whether Enter queues the prompt while the
+// active turn still runs. Queueing is a fixed behavior (A4): the old
+// ui.sendWhileRunning Settings control was removed, so the stored row is no
+// longer read and the composer always offers the queue action during a run. The
+// settings parameter is kept for the existing call site.
+func sendWhileRunningEnabled(_ contracts.SettingsService) bool {
+	return true
 }
 
 // composerDraft is one conversation's unsent composer state. Attachments are
@@ -1231,12 +1229,13 @@ func processQueuedPrompts(chat contracts.ChatService, st *state, sessionID strin
 // maxGoalAutoContinues bounds the automatic continuation prompts for one goal.
 const maxGoalAutoContinues = 5
 
-// goalAutoContinueEnabled normalizes goal.autoContinue: only "true" enables it.
-func goalAutoContinueEnabled(settings contracts.SettingsService) bool {
-	if settings == nil {
-		return false
-	}
-	return strings.EqualFold(strings.TrimSpace(settings.Get(contracts.SettingGoalAutoContinue, "")), "true")
+// goalAutoContinueEnabled reports whether a settled run auto-continues the
+// active goal. Auto-continue is a fixed behavior (A5): the old goal.autoContinue
+// Settings control was removed, so the stored row is no longer read and every
+// active goal continues (bounded by maxGoalAutoContinues). The settings
+// parameter is kept for the existing call site.
+func goalAutoContinueEnabled(_ contracts.SettingsService) bool {
+	return true
 }
 
 // observeRunSettled tracks the active session's run phase and reports the
@@ -1295,9 +1294,6 @@ func handleRunSettled(chat contracts.ChatService, st *state, runtime contracts.U
 // loop forever.
 func maybeAutoContinue(chat contracts.ChatService, st *state, runtime contracts.UIRuntime) {
 	if chat == nil || st == nil || st.autoContinueSuppressed {
-		return
-	}
-	if !goalAutoContinueEnabled(st.settings) {
 		return
 	}
 	tracker := st.goalTracker

@@ -18,11 +18,6 @@ const (
 	SettingsChatBaseURL      = "chat.baseURL"
 	SettingsChatAPIKey       = "chat.apiKey"
 	SettingsChatSystemPrompt = "chat.systemPrompt"
-	// SettingsChatRequireFinishReason overrides the agent module's
-	// RequireFinishReason config: "true" treats a stream that ends without a
-	// finish reason as a truncated/failed turn, "false" keeps the historical
-	// clean-EOF behavior, empty follows the module config.
-	SettingsChatRequireFinishReason = "chat.requireFinishReason"
 	// SettingsChatMaxIterations overrides the agent module's MaxIterations
 	// (model/tool rounds per run); empty or a non-positive value follows the
 	// module config.

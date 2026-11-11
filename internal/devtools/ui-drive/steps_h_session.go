@@ -9,8 +9,6 @@ import (
 	"time"
 
 	"github.com/egoist/mygo/ui"
-
-	"github.com/zeokeel/zeokeel/internal/contracts"
 )
 
 // stableTranscriptRect returns the rect of the "消息操作" control (the ⋯ entry
@@ -188,14 +186,6 @@ func (d *drive) runHSessionSteps() {
 		"运行中点「排队」→ 队列弹层列出待发提示 → 点「取消」→ 队列清空", func(c *check) {
 			d.server.SetMode(scriptSlowAnswer)
 			defer d.server.SetMode(scriptAnswer)
-			previous := d.settings().Get(contracts.SettingSendWhileRunning, "")
-			if err := d.settings().Set(contracts.SettingSendWhileRunning, "true"); err != nil {
-				c.failf("启用排队设置失败：%v", err)
-				return
-			}
-			defer func() {
-				_ = d.settings().Set(contracts.SettingSendWhileRunning, previous)
-			}()
 			d.resetToSession()
 			if err := d.focusComposer(); err != nil {
 				c.failf("%v", err)

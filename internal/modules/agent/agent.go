@@ -123,10 +123,10 @@ type Config struct {
 	// empty omits the field). A per-session setting overrides it.
 	ReasoningEffort string `json:"reasoningEffort"`
 	// RequireFinishReason treats a stream that ends without a finish reason as a
-	// truncated/failed turn. The provider hides the [DONE] terminator behind a
-	// clean EOF, so this is the product-side guard against silently truncated
-	// answers (SDK ErrIncompleteStream covers the definitive signal once
-	// available). Settings key chat.requireFinishReason overrides it.
+	// truncated/failed turn. The guard is always on (A2 fixed behavior; the
+	// provider's ErrIncompleteStream is the definitive signal), so this field is
+	// kept only because shipped assemblies still set it — it no longer changes
+	// the policy.
 	RequireFinishReason bool `json:"requireFinishReason"`
 }
 
@@ -2137,8 +2137,8 @@ func (s *service) newProvider(cfg contracts.ChatConfig, thinking map[string]any)
 		APIKeyEnv:    env,
 		DefaultModel: cfg.Model,
 		// The SDK detects a stream that ends before a finish_reason or [DONE]
-		// and returns openai.ErrIncompleteStream; the product only decides
-		// whether a clean terminator is required (chat.requireFinishReason).
+		// and returns openai.ErrIncompleteStream; the product always requires a
+		// clean terminator (A2 fixed behavior).
 		RequireCompleteStream: s.requireFinishReason(),
 	})
 	if err != nil {

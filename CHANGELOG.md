@@ -4,6 +4,13 @@ All notable changes to ZeoKeel are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/) and the project adheres to
 [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+- **OS 沙箱始终开启、不可关闭**：命令执行的文件写入/删除由平台 runner 强制（Linux bwrap/Landlock、macOS Seatbelt、Windows 受限令牌 ACL）；本机无可用 runner 时 fail closed，绝不裸跑。设置页只显示状态，不再提供开关。
+- **权限模式联动 OS profile**：只读→read-only、工作区可写→workspace-write、所有权限→不包装；可用时 shell 族工具（bash/pwsh/后台任务/终端）自动放行，计划模式、会话只读 override、headless deny-all 仍优先。
+- **A 系列固定行为，设置里删除对应开关**：流完整性校验始终开启；单实例始终生效；运行中始终排队发送；目标始终自动续跑（每个目标上限 5 次）；通知不再按级别过滤（保留通知总开关）；模型高级选项的最大迭代/上下文预算改为“留空使用模块默认”的可选输入，删除两个“使用默认”开关。
+- 验证：`go build/vet`、全量 `go test ./...`、`-race`、designlint/design-check/mygo vet、ui-snapshot 人工复核。
+
 ## [0.2.25] - 2026-11-11
 
 会话头 Agent Run Band 的视觉修正（v0.2.24 的补丁）。

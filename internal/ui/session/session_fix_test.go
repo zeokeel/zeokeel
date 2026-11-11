@@ -36,12 +36,14 @@ func TestRunningComposerShowsKeyHint(t *testing.T) {
 	}
 }
 
-// TestRunningComposerHintWithoutQueue covers the queueing-off variant: only Esc
-// acts, so the hint says the stop interrupts the reply.
-func TestRunningComposerHintWithoutQueue(t *testing.T) {
+// TestRunningComposerHintWithStoredOptOut covers the A4 fixed behavior: a stored
+// ui.sendWhileRunning=false row no longer turns queueing off, so the running
+// hint keeps naming Enter (queue) and Esc (stop).
+func TestRunningComposerHintWithStoredOptOut(t *testing.T) {
 	h := newPermissionHarness(t, runningChat(), sendWhileRunningSettings(false))
 	tester := h.tester()
-	h.assertTexts(tester, "Esc 停止 · 会中断当前回复")
+	h.assertTexts(tester, "Enter 排队 · Esc 停止")
+	h.assertNoTexts(tester, "Esc 停止 · 会中断当前回复")
 }
 
 // --- R6: team task cards ----------------------------------------------------

@@ -199,7 +199,7 @@ func TestGoalPauseResumeConcurrent(t *testing.T) {
 func startGoalPauseUI(t *testing.T) (*goalHarness, contracts.GoalTracker) {
 	t.Helper()
 	h := newBareHarness(t)
-	if err := h.settings.Set(contracts.SettingGoalAutoContinue, "true"); err != nil {
+	if err := h.settings.Set("goal.autoContinue", "true"); err != nil {
 		t.Fatalf("set goal.autoContinue: %v", err)
 	}
 	chat := newFakeChat()

@@ -1,12 +1,12 @@
 package regression
 
-// Adversarial audit: queueing prompts while a turn is running (ui.sendWhileRunning).
-// Queueing defaults on (only the literal "false" disables it), the composer
-// stays visible and editable while a run streams, queued prompts flush FIFO
-// after the run ends, a failed flush keeps the prompt for retry, and a queue
-// belongs to the session it was typed in: switching conversations keeps it and
-// the module-level flush delivers it to its owner even while another session is
-// on screen.
+// Adversarial audit: queueing prompts while a turn is running (A4 fixed
+// behavior; the ui.sendWhileRunning row is no longer read). Queueing is always
+// on, the composer stays visible and editable while a run streams, queued
+// prompts flush FIFO after the run ends, a failed flush keeps the prompt for
+// retry, and a queue belongs to the session it was typed in: switching
+// conversations keeps it and the module-level flush delivers it to its owner
+// even while another session is on screen.
 
 import (
 	"errors"
@@ -26,13 +26,13 @@ type queueHarness struct {
 }
 
 // startQueueUI activates the session screen with a running active session and
-// the given ui.sendWhileRunning row.
+// the given ui.sendWhileRunning row (kept on disk; the module no longer reads it).
 func startQueueUI(t *testing.T, value string) *queueHarness {
 	t.Helper()
 	h := newBareHarness(t)
 	if value != "" {
-		if err := h.settings.Set(contracts.SettingSendWhileRunning, value); err != nil {
-			t.Fatalf("set %s: %v", contracts.SettingSendWhileRunning, err)
+		if err := h.settings.Set("ui.sendWhileRunning", value); err != nil {
+			t.Fatalf("set %s: %v", "ui.sendWhileRunning", err)
 		}
 	}
 	chat := newFakeChat()
@@ -99,20 +99,19 @@ func (q *queueHarness) typeQueuePrompt(t *testing.T, label, prompt string) {
 	q.tester.Frame()
 }
 
-// TestQueueSwitchOffKeepsComposerVisible covers the new default and the explicit
-// opt-out:
-//   - missing/empty/malformed values (and any value but the literal "false")
-//     keep queueing on, so the running composer shows the input plus 排队 and
-//     Enter queues instead of sending;
-//   - "false" keeps the input visible and editable but Enter must not call
-//     Send, only Stop sits in the send position and the draft is kept.
-func TestQueueSwitchOffKeepsComposerVisible(t *testing.T) {
-	// Queueing is the default: only "false" disables it.
-	for _, value := range []string{"", "true", "bogus", "0"} {
+// TestQueueAlwaysOnKeepsComposerVisible covers A4's fixed behavior: queueing is
+// no longer a settings-controlled opt-out, so every stored row value — missing,
+// empty, malformed, truthy and the old explicit "false" — keeps the running
+// composer in queue mode. The input stays visible and editable, 排队 + 停止 sit in
+// the send position, Enter queues instead of calling Send, and the removed
+// "Enter 暂不可用" hint never appears.
+func TestQueueAlwaysOnKeepsComposerVisible(t *testing.T) {
+	for _, value := range []string{"", "true", "bogus", "0", "false"} {
 		harness := startQueueUI(t, value)
 		requireHasText(t, harness.tester, "输入消息…")
 		requireHasText(t, harness.tester, "排队")
 		requireHasText(t, harness.tester, "停止")
+		requireNoText(t, harness.tester, "回复生成中，Enter 暂不可用；草稿会保留，本轮结束后可发送")
 		if _, ok := harness.tester.Find("发送"); ok {
 			t.Fatalf("value %q: send button rendered while running; texts = %v", value, harness.tester.Texts())
 		}
@@ -121,48 +120,6 @@ func TestQueueSwitchOffKeepsComposerVisible(t *testing.T) {
 		if sends := harness.chat.recordedSends(); len(sends) != 0 {
 			t.Fatalf("value %q: Enter sent while running instead of queueing: %v", value, sends)
 		}
-	}
-
-	// The explicit opt-out: input visible/editable, Enter inert, Stop only.
-	harness := startQueueUI(t, "false")
-	requireHasText(t, harness.tester, "输入消息…")
-	requireHasText(t, harness.tester, "停止")
-	requireHasText(t, harness.tester, "回复生成中，Enter 暂不可用；草稿会保留，本轮结束后可发送")
-	requireNoText(t, harness.tester, "已排队")
-	if _, ok := harness.tester.Find("发送"); ok {
-		t.Fatalf("queueing off: send button rendered while running; texts = %v", harness.tester.Texts())
-	}
-	if _, ok := harness.tester.Find("排队"); ok {
-		t.Fatalf("queueing off: 排队 rendered; texts = %v", harness.tester.Texts())
-	}
-
-	// Focus the input (directly above the Stop control), type and press Enter:
-	// the draft stays put and chat.Send is never called.
-	stop, ok := harness.tester.Find("停止")
-	if !ok {
-		t.Fatalf("stop control missing; texts = %v", harness.tester.Texts())
-	}
-	harness.tester.ClickAt(stop.X-120, stop.Y-50)
-	harness.tester.Frame()
-	harness.tester.Type("保留的草稿")
-	harness.tester.Frame()
-	harness.tester.Key(0, ui.KeyEnter)
-	harness.tester.Frame()
-	if sends := harness.chat.recordedSends(); len(sends) != 0 {
-		t.Fatalf("Enter sent while queueing is explicitly off: %v", sends)
-	}
-	requireNoText(t, harness.tester, "已排队")
-
-	// The draft survived the run: when it ends, the send position returns and
-	// Enter sends the kept text.
-	harness.flipRunning(t, false)
-	harness.tester.Frame()
-	requireHasText(t, harness.tester, "发送")
-	harness.tester.Key(0, ui.KeyEnter)
-	harness.tester.Frame()
-	sends := harness.chat.recordedSends()
-	if len(sends) != 1 || sends[0] != "sess-run:保留的草稿" {
-		t.Fatalf("kept draft send = %v, want the typed draft", sends)
 	}
 }
 

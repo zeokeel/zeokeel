@@ -2,7 +2,8 @@ package session_test
 
 // Tests for the composer staying visible and usable while a turn runs (the
 // user's "发送消息后，输入框就消失了" report): the TextArea never disappears,
-// queueing is the default, and the send position shows 排队 + 停止.
+// queueing is always on (A4 — the stored ui.sendWhileRunning row is no longer
+// read), and the send position shows 排队 + 停止.
 
 import (
 	"testing"
@@ -44,28 +45,27 @@ func TestComposerStaysVisibleWhileRunningWithDefaultQueue(t *testing.T) {
 	}
 }
 
-// TestComposerRunningButQueueDisabledExplainsDraft covers the explicit opt-out:
-// the input stays present/editable, Enter does not send, Stop is the only send
-// action and the muted hint explains that Enter is unavailable and the draft is
-// kept.
-func TestComposerRunningButQueueDisabledExplainsDraft(t *testing.T) {
+// TestComposerStoredOptOutStillQueues pins the A4 fixed behavior: a stored
+// ui.sendWhileRunning=false row (from an older version) no longer disables
+// queueing — the running composer still offers 排队 + 停止, Enter queues and the
+// removed "Enter 暂不可用" hint never appears.
+func TestComposerStoredOptOutStillQueues(t *testing.T) {
 	h := newPermissionHarness(t, runningChat(), sendWhileRunningSettings(false))
 	tester := h.tester()
 
-	h.assertTexts(tester, "输入消息…", "停止",
-		"回复生成中，Enter 暂不可用；草稿会保留，本轮结束后可发送")
-	h.assertNoExactTexts(tester, "发送", "排队")
+	h.assertTexts(tester, "输入消息…", "排队", "停止")
+	h.assertNoTexts(tester, "发送", "回复生成中")
 	if _, ok := tester.Find("输入消息…"); !ok {
-		t.Fatalf("composer input missing with queueing off; texts = %v", tester.Texts())
+		t.Fatalf("composer input missing with the stored opt-out; texts = %v", tester.Texts())
 	}
 
 	h.click(tester, "输入消息…")
-	tester.Type("保留的草稿")
+	tester.Type("仍然排队")
 	tester.Frame()
-	tester.Key(0, ui.KeyEnter)
-	tester.Frame()
+	h.click(tester, "排队")
+	h.assertTexts(tester, "已排队 1 条")
 	if sends := h.chat.sends(); len(sends) != 0 {
-		t.Fatalf("Enter sent while queueing is off: %v", sends)
+		t.Fatalf("Enter/Send ran while running: %v", sends)
 	}
 }
 
@@ -73,7 +73,7 @@ func TestComposerRunningButQueueDisabledExplainsDraft(t *testing.T) {
 // explicit "false" disables queueing.
 func TestComposerQueueDefaultMalformedValueOn(t *testing.T) {
 	chat := runningChat()
-	settings := newPermissionSettings(map[string]string{contracts.SettingSendWhileRunning: "garbage"})
+	settings := newPermissionSettings(map[string]string{"ui.sendWhileRunning": "garbage"})
 	h := newPermissionHarness(t, chat, settings)
 	tester := h.tester()
 	h.assertTexts(tester, "输入消息…", "排队", "停止")

@@ -1,57 +1,48 @@
 package host
 
-// Tests for the single-instance policy: the pure setting-to-bool decision table.
-// RequestSingleInstanceLock/OnSecondInstance themselves need a GUI event loop, so
-// the lock handshake is exercised manually (see runDesktop) and not here.
+// Tests for the single-instance policy (A3 fixed behavior): the desktop process
+// always keeps one instance and hands later launches to it. The
+// ui.singleInstance row is no longer read — it was removed from Settings — so
+// neither a stored opt-out from an older version nor any malformed value can
+// disable the lock. RequestSingleInstanceLock/OnSecondInstance themselves need a
+// GUI event loop, so the lock handshake is exercised manually (see runDesktop)
+// and not here.
 
 import (
 	"testing"
-
-	"github.com/zeokeel/zeokeel/internal/contracts"
 )
 
-func TestSingleInstanceEnabled(t *testing.T) {
-	tests := []struct {
-		name string
-		raw  string
-		want bool
-	}{
-		{name: "default empty", raw: "", want: true},
-		{name: "true", raw: "true", want: true},
-		{name: "upper true", raw: "TRUE", want: true},
-		{name: "one", raw: "1", want: true},
-		{name: "yes", raw: "yes", want: true},
-		{name: "on", raw: "on", want: true},
-		{name: "false", raw: "false", want: false},
-		{name: "upper false", raw: "FALSE", want: false},
-		{name: "zero", raw: "0", want: false},
-		{name: "no", raw: "no", want: false},
-		{name: "off", raw: "off", want: false},
-		{name: "padded false", raw: "  false  ", want: false},
-	}
-	for _, test := range tests {
-		t.Run(test.name, func(t *testing.T) {
-			if got := singleInstanceEnabled(test.raw); got != test.want {
-				t.Fatalf("singleInstanceEnabled(%q) = %v, want %v", test.raw, got, test.want)
-			}
-		})
+// TestSingleInstanceEnabledAlwaysOn pins the fixed decision: every raw row value
+// keeps single-instance mode.
+func TestSingleInstanceEnabledAlwaysOn(t *testing.T) {
+	for _, raw := range []string{
+		"", "true", "TRUE", "1", "yes", "on", "bogus",
+		"false", "FALSE", "0", "no", "off", "  false  ",
+	} {
+		if got := singleInstanceEnabled(raw); !got {
+			t.Fatalf("singleInstanceEnabled(%q) = false, want true (fixed behavior)", raw)
+		}
 	}
 }
 
-// TestSingleInstanceSettingDefault pins the setting key and its default: the
-// process runs single-instance unless the user explicitly opted out.
-func TestSingleInstanceSettingDefault(t *testing.T) {
+// TestSingleInstanceSettingAlwaysOn covers the settings read path: the row is
+// never consulted, so a stored opt-out (or a missing settings store) still keeps
+// one instance.
+func TestSingleInstanceSettingAlwaysOn(t *testing.T) {
+	if !singleInstanceSetting(nil) {
+		t.Fatal("single instance is disabled without a settings store")
+	}
 	settings, err := NewSettings(t.TempDir())
 	if err != nil {
 		t.Fatalf("NewSettings: %v", err)
 	}
-	if !singleInstanceEnabled(settings.Get(contracts.SettingSingleInstance, "true")) {
+	if !singleInstanceSetting(settings) {
 		t.Fatal("single instance is disabled by default")
 	}
-	if err := settings.Set(contracts.SettingSingleInstance, "false"); err != nil {
+	if err := settings.Set("ui.singleInstance", "false"); err != nil {
 		t.Fatalf("Set: %v", err)
 	}
-	if singleInstanceEnabled(settings.Get(contracts.SettingSingleInstance, "true")) {
-		t.Fatal("single instance stayed enabled after the setting was turned off")
+	if !singleInstanceSetting(settings) {
+		t.Fatal("a stored ui.singleInstance=false still disabled the lock")
 	}
 }

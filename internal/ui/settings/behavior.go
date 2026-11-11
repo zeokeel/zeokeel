@@ -5,11 +5,10 @@ package settings
 // conversation options behind one collapsed disclosure. Every control applies
 // immediately (the page has no save button): the permission menu writes the
 // shared agent.permission row the approvals gate reads dynamically, the work
-// details segmented controls write ui.workSteps.*, the switches persist on change
-// and the workspace instruction file saves as it is edited.
+// details segmented controls write ui.workSteps.* and the workspace instruction
+// file saves as it is edited.
 
 import (
-	"strconv"
 	"strings"
 
 	"github.com/egoist/mygo/ui"
@@ -214,17 +213,12 @@ func saveBehaviorSetting(st *behaviorState, runtime contracts.UIRuntime,
 
 // buildBehaviorPage renders the default-permission settings. Every control on
 // the page applies at once (the page has no save button): the permission menu
-// writes the shared agent row, the OS sandbox switch writes the sandbox row the
-// sandbox service reads on the next tool build, the work-details segmented
-// controls write ui.workSteps.*, the switches persist on change and the
-// workspace instruction file saves as it is edited.
+// writes the shared agent row, the work-details segmented controls write
+// ui.workSteps.* and the workspace instruction file saves as it is edited.
 func buildBehaviorPage(c *ui.Context, runtime contracts.UIRuntime,
 	store contracts.SettingsService, locale contracts.LocaleService, st *behaviorState,
 	sandboxService contracts.SandboxService) {
 	t := design.Of(c)
-	applyBool := func(key string, value bool) {
-		saveBehaviorSetting(st, runtime, store, locale, key, strconv.FormatBool(value))
-	}
 	ui.Column(c).FillWidth().Gap(design.Space4).Children(func() {
 		uikit.PageHeader(c, localized(locale, "行为", "Behavior"), localized(locale,
 			"代理的默认权限与工具行为；修改立即生效。",
@@ -324,31 +318,6 @@ func buildBehaviorPage(c *ui.Context, runtime contracts.UIRuntime,
 		// controls.
 		ui.Collapsible(c, localized(locale, "更多对话设置", "More conversation settings"), &st.moreOpen, func() {
 			ui.Column(c).FillWidth().Gap(design.Space4).Children(func() {
-				uikit.Section(c, localized(locale, "运行中发送", "Sending while running"), func(*ui.Context) {
-					ui.Form(c, func() {
-						enabled := sendWhileRunningEnabled(store)
-						if switchField(c,
-							localized(locale, "运行中允许排队发送", "Queue prompts while running"),
-							localized(locale, "默认开启。运行中发送的提示会排队，在本轮结束后依次发出；关闭后回复生成期间 Enter 不可用，草稿会保留到本轮结束。",
-								"On by default. Prompts sent while running are queued and sent after the current turn; when off, Enter is unavailable while a reply streams and the draft is kept until the turn ends."),
-							&enabled) {
-							applyBool(contracts.SettingSendWhileRunning, enabled)
-						}
-					})
-				})
-				uikit.Section(c, localized(locale, "目标", "Goals"), func(*ui.Context) {
-					ui.Form(c, func() {
-						goalEnabled := goalAutoContinueEnabled(store)
-						if switchField(c,
-							localized(locale, "目标自动续跑", "Auto-continue goal"),
-							localized(locale,
-								"回合结束后若目标仍激活，自动发送继续推进提示（每个目标最多 5 次）。",
-								"After a turn ends while the goal is still active, automatically send a continuation prompt (at most 5 times per goal)."),
-							&goalEnabled) {
-							applyBool(contracts.SettingGoalAutoContinue, goalEnabled)
-						}
-					})
-				})
 				uikit.Section(c, localized(locale, "消息字号", "Message text size"), func(*ui.Context) {
 					current := chatFontSizeSetting(store)
 					ui.PopoverMenuButton(c, chatFontSizeLabel(locale, current), func(m *ui.Menu) {
@@ -419,22 +388,13 @@ func discardBehaviorDraft(st *behaviorState, store contracts.SettingsService) {
 }
 
 // behaviorMoreSummary is the one muted line shown while 更多对话设置 is collapsed:
-// a compact digest of the four settings it holds.
+// a compact digest of the two settings it holds.
 func behaviorMoreSummary(locale contracts.LocaleService, store contracts.SettingsService) string {
-	onOff := func(value bool) string {
-		if value {
-			return localized(locale, "开", "On")
-		}
-		return localized(locale, "关", "Off")
-	}
 	agentsFile := strings.TrimSpace(store.Get(contracts.SettingAgentsFile, "AGENTS.md"))
 	if agentsFile == "" {
 		agentsFile = localized(locale, "已关闭", "Off")
 	}
-	return localized(locale, "排队发送：", "Queue: ") + onOff(sendWhileRunningEnabled(store)) +
-		" · " + localized(locale, "目标续跑：", "Goal auto-continue: ") +
-		onOff(goalAutoContinueEnabled(store)) +
-		" · " + localized(locale, "消息字号：", "Text size: ") +
+	return localized(locale, "消息字号：", "Text size: ") +
 		chatFontSizeLabel(locale, chatFontSizeSetting(store)) +
 		" · " + localized(locale, "指令文件：", "Instructions: ") + agentsFile
 }
@@ -490,23 +450,4 @@ func chatFontSizeLabel(locale contracts.LocaleService, value string) string {
 		}
 	}
 	return localized(locale, "标准", "Standard")
-}
-
-// sendWhileRunningEnabled normalizes the stored ui.sendWhileRunning row:
-// queueing is on unless the value is explicitly "false"; missing, empty and
-// malformed values keep the default (on) so the composer stays usable while a
-// reply streams.
-func sendWhileRunningEnabled(store contracts.SettingsService) bool {
-	if store == nil {
-		return true
-	}
-	return !strings.EqualFold(strings.TrimSpace(store.Get(contracts.SettingSendWhileRunning, "")), "false")
-}
-
-// goalAutoContinueEnabled normalizes goal.autoContinue: only "true" enables it.
-func goalAutoContinueEnabled(store contracts.SettingsService) bool {
-	if store == nil {
-		return false
-	}
-	return strings.EqualFold(strings.TrimSpace(store.Get(contracts.SettingGoalAutoContinue, "")), "true")
 }

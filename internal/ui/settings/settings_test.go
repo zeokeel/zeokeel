@@ -442,9 +442,10 @@ func (h *harness) focusInput(tester *ui.Tester, label string) {
 	}
 }
 
-// typeNumberInput replaces the value of an official ui.NumberInput: the text
-// field sits left of the ± buttons, so the click targets its area rather than
-// the row's center (the label box covers the whole number-input row).
+// typeNumberInput replaces the value of a numeric field: an official
+// ui.NumberInput (where the text field sits left of the ± buttons, so the click
+// targets its area rather than the row's center) or an optional numeric text
+// draft (the runtime limits, where empty means "use the module config").
 func typeNumberInput(t *testing.T, h *harness, tester *ui.Tester, label, text string) {
 	t.Helper()
 	target := label + " 输入"

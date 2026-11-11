@@ -17,7 +17,6 @@
 package toasts
 
 import (
-	"encoding/json"
 	"log"
 	"strconv"
 	"strings"
@@ -90,13 +89,11 @@ type state struct {
 	notifier contracts.Notifier
 	// locale localizes the toast chrome (the level label and the close hint).
 	locale contracts.LocaleService
-	// settings is the optional host settings store; ui.notifications and
-	// ui.notifications.hidden are read on every delivery/frame so switches
-	// apply without a restart.
+	// settings is the optional host settings store; the master
+	// ui.notifications switch is read on every delivery/frame so it applies
+	// without a restart. Per-level filters are gone (A7): the old
+	// ui.notifications.hidden row is no longer read and never hides a toast.
 	settings contracts.SettingsService
-	// badHiddenRaw remembers the last malformed hidden-levels row already
-	// logged, so the per-frame read cannot spam the log.
-	badHiddenRaw string
 	// runtime requests the next frame after a toast closes so the queue's head
 	// can take the freed slot.
 	runtime contracts.UIRuntime
@@ -105,8 +102,8 @@ type state struct {
 	// queue holds accepted notifications waiting for a free slot; at most
 	// toastMaxVisible toasts render at once.
 	queue []contracts.Notification
-	// showing maps a native toast id to its notification level, so the level
-	// filter can close toasts already on screen.
+	// showing holds the ids of the native toasts currently on screen, so the
+	// master ui.notifications switch can close them when it turns off.
 	showing map[string]string
 	// merged holds one showing toast's dedupe bookkeeping by native toast id:
 	// how many identical level+text notifications it represents and the ids
@@ -206,21 +203,9 @@ func notificationsEnabled(st *state) bool {
 	}
 }
 
-// notificationLevel normalizes one toast level (trim + lower case); an empty or
-// unknown level is returned as-is and is never filtered.
+// notificationLevel normalizes one toast level (trim + lower case).
 func notificationLevel(level string) string {
 	return strings.ToLower(strings.TrimSpace(level))
-}
-
-// knownNotificationLevel reports whether level is one of the four filterable
-// notification levels.
-func knownNotificationLevel(level string) bool {
-	switch level {
-	case contracts.NotifyInfo, contracts.NotifySuccess, contracts.NotifyWarning, contracts.NotifyError:
-		return true
-	default:
-		return false
-	}
 }
 
 // notificationType maps a notification level to the native toast Type ("error",
@@ -241,51 +226,19 @@ func notificationType(level string) string {
 	}
 }
 
-// hiddenLevels reads ui.notifications.hidden: a JSON array of levels to hide.
-// Missing/empty rows mean nothing is hidden; a malformed row is logged once and
-// treated as "nothing hidden" (bad values never filter toasts).
-func hiddenLevels(st *state) map[string]bool {
-	if st.settings == nil {
-		return nil
-	}
-	raw := strings.TrimSpace(st.settings.Get(contracts.SettingNotificationHiddenLevels, ""))
-	if raw == "" {
-		return nil
-	}
-	var levels []string
-	if err := json.Unmarshal([]byte(raw), &levels); err != nil {
-		if st.badHiddenRaw != raw {
-			st.badHiddenRaw = raw
-			log.Printf("ui/toasts: ignoring malformed %s: %v", contracts.SettingNotificationHiddenLevels, err)
-		}
-		return nil
-	}
-	hidden := make(map[string]bool, len(levels))
-	for _, level := range levels {
-		normalized := notificationLevel(level)
-		if knownNotificationLevel(normalized) {
-			hidden[normalized] = true
-		}
-	}
-	if len(hidden) == 0 {
-		return nil
-	}
-	return hidden
-}
-
 // buildOverlay is the overlay slot's build callback: it drains the queued
-// notifications into mygo's native toasts, closes the ones a switch now hides,
-// and paints the native toast stack with the product's branded look. Draining a
-// queue here is the module's one guarded one-shot side effect, run on the UI
-// thread inside the frame that renders the result.
+// notifications into mygo's native toasts, closes the ones the master switch
+// now hides, and paints the native toast stack with the product's branded look.
+// Draining a queue here is the module's one guarded one-shot side effect, run on
+// the UI thread inside the frame that renders the result.
 func buildOverlay(c *ui.Context, st *state) {
 	enabled := notificationsEnabled(st)
-	hidden := hiddenLevels(st)
-	// Hot switches: hiding a level (or all notifications) also drops the
-	// native toasts already on screen instead of leaving them until they time
-	// out.
-	for id, level := range st.showing {
-		if !enabled || hidden[notificationLevel(level)] {
+	// The master switch is hot: turning notifications off also drops the native
+	// toasts already on screen instead of leaving them until they time out.
+	// Levels are never filtered (A7 fixed behavior): every notification that
+	// reaches the module is shown.
+	if !enabled {
+		for id := range st.showing {
 			delete(st.showing, id)
 			c.CloseToast(id)
 		}
@@ -297,7 +250,7 @@ func buildOverlay(c *ui.Context, st *state) {
 	} else {
 		for _, notification := range pending {
 			text := strings.TrimSpace(notification.Text)
-			if text == "" || hidden[notificationLevel(notification.Level)] {
+			if text == "" {
 				continue
 			}
 			st.queue = append(st.queue, notification)

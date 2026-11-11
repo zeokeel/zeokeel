@@ -149,45 +149,40 @@ func expandMoreConversationSettings(t *testing.T, tester *ui.Tester, label strin
 	tester.Frame()
 }
 
-func TestBehaviorPageGoalAutoContinue(t *testing.T) {
+// TestBehaviorPageRemovedFixedBehaviorControls covers the A-series cleanup: the
+// queue-while-running and goal-auto-continue switches are deleted (their
+// behaviors are unconditional), while the disclosure's remaining settings still
+// render.
+func TestBehaviorPageRemovedFixedBehaviorControls(t *testing.T) {
 	store := newFakeSettings(nil)
 	h := newHarness(t, &fakeChat{}, store, settings.Config{})
 	tester := h.tester()
 	tester.Frame()
 	h.click(tester, "行为")
+	h.assertNoTexts(tester, "排队发送：", "目标续跑：")
 	expandMoreConversationSettings(t, tester, "更多对话设置")
-	h.assertTexts(tester, "目标自动续跑",
-		"回合结束后若目标仍激活，自动发送继续推进提示（每个目标最多 5 次）")
-	if raw := store.get(contracts.SettingGoalAutoContinue); raw != "" {
-		t.Fatalf("defaults wrote the goal-auto-continue row: %q", raw)
-	}
-	h.click(tester, "目标自动续跑")
-	if raw := store.get(contracts.SettingGoalAutoContinue); raw != "true" {
-		t.Fatalf("enabling goal auto-continue wrote %q", raw)
-	}
-	h.click(tester, "目标自动续跑")
-	if raw := store.get(contracts.SettingGoalAutoContinue); raw != "false" {
-		t.Fatalf("disabling goal auto-continue wrote %q", raw)
-	}
+	h.assertTexts(tester, "消息字号", "工作区指令文件")
+	h.assertNoTexts(tester, "运行中发送", "运行中允许排队发送",
+		"目标自动续跑", "排队发送：", "目标续跑：")
 }
 
-func TestBehaviorPageGoalAutoContinueBadValueAndEnglish(t *testing.T) {
-	store := newFakeSettings(map[string]string{contracts.SettingGoalAutoContinue: "garbage"})
+// TestBehaviorPageRemovedFixedBehaviorControlsEnglish is the English half of the
+// A-series cleanup assertions.
+func TestBehaviorPageRemovedFixedBehaviorControlsEnglish(t *testing.T) {
+	store := newFakeSettings(nil)
 	h := newLocaleHarness(t, &fakeChat{}, store, settings.Config{}, "en")
 	tester := h.tester()
 	tester.Frame()
 	h.click(tester, "Behavior")
+	h.assertNoTexts(tester, "Queue: ", "Goal auto-continue: ")
 	expandMoreConversationSettings(t, tester, "More conversation settings")
-	h.assertTexts(tester, "Auto-continue goal",
-		"After a turn ends while the goal is still active, automatically send a continuation prompt (at most 5 times per goal)")
-	h.click(tester, "Auto-continue goal")
-	if raw := store.get(contracts.SettingGoalAutoContinue); raw != "true" {
-		t.Fatalf("English bad-value toggle wrote %q, want true", raw)
-	}
+	h.assertTexts(tester, "Message text size", "Workspace instructions file")
+	h.assertNoTexts(tester, "Sending while running", "Queue prompts while running",
+		"Auto-continue goal")
 }
 
 // TestBehaviorPageCollapsesLowFrequencySections covers the page's progressive
-// disclosure: the daily permission setting stays visible, the four
+// disclosure: the daily permission setting stays visible, the remaining
 // lower-frequency conversation controls are collapsed behind one trigger, and
 // only the muted summary hints at them.
 func TestBehaviorPageCollapsesLowFrequencySections(t *testing.T) {
@@ -196,21 +191,21 @@ func TestBehaviorPageCollapsesLowFrequencySections(t *testing.T) {
 	tester := h.tester()
 	tester.Frame()
 	h.click(tester, "行为")
-	h.assertTexts(tester, "默认代理权限", "更多对话设置", "排队发送：开")
-	h.assertNoTexts(tester, "运行中允许排队发送", "目标自动续跑",
-		"工作区指令文件", "选择对话文字大小")
+	h.assertTexts(tester, "默认代理权限", "更多对话设置",
+		"消息字号：标准", "指令文件：AGENTS.md")
+	h.assertNoTexts(tester, "工作区指令文件", "选择对话文字大小",
+		"排队发送：", "目标续跑：")
 
 	// Expanding reveals every moved control and the summary gives way to them.
 	expandMoreConversationSettings(t, tester, "更多对话设置")
-	h.assertTexts(tester, "运行中发送", "运行中允许排队发送", "目标自动续跑",
-		"消息字号", "工作区指令文件")
-	h.assertNoTexts(tester, "排队发送：")
+	h.assertTexts(tester, "消息字号", "工作区指令文件")
+	h.assertNoTexts(tester, "指令文件：")
 
-	// A representative setting still persists from inside the disclosure.
-	// Queueing defaults on, so the first click turns it off.
-	h.click(tester, "运行中允许排队发送")
-	if raw := store.get(contracts.SettingSendWhileRunning); raw != "false" {
-		t.Fatalf("collapsed-section queue toggle wrote %q, want false", raw)
+	// A remaining setting still persists from inside the disclosure.
+	h.click(tester, "消息字号：标准")
+	h.click(tester, "大")
+	if raw := store.get(contracts.SettingChatFontSize); raw != "large" {
+		t.Fatalf("collapsed-section font-size selection wrote %q, want large", raw)
 	}
 }
 
@@ -218,17 +213,15 @@ func TestBehaviorPageCollapsesLowFrequencySections(t *testing.T) {
 // while the disclosure is closed.
 func TestBehaviorPageCollapsedSummaryReflectsSettings(t *testing.T) {
 	store := newFakeSettings(map[string]string{
-		contracts.SettingSendWhileRunning: "true",
-		contracts.SettingGoalAutoContinue: "true",
-		contracts.SettingChatFontSize:     "large",
-		contracts.SettingAgentsFile:       "RULES.md",
+		contracts.SettingChatFontSize: "large",
+		contracts.SettingAgentsFile:   "RULES.md",
 	})
 	h := newHarness(t, &fakeChat{}, store, settings.Config{})
 	tester := h.tester()
 	tester.Frame()
 	h.click(tester, "行为")
-	h.assertTexts(tester, "排队发送：开", "目标续跑：开", "消息字号：大",
-		"指令文件：RULES.md")
+	h.assertTexts(tester, "消息字号：大", "指令文件：RULES.md")
+	h.assertNoTexts(tester, "排队发送：", "目标续跑：")
 }
 
 // TestBehaviorPageMoreSettingsEnglish covers the English copy of the disclosure
@@ -239,8 +232,11 @@ func TestBehaviorPageMoreSettingsEnglish(t *testing.T) {
 	tester := h.tester()
 	tester.Frame()
 	h.click(tester, "Behavior")
-	h.assertTexts(tester, "More conversation settings", "Queue: On")
+	h.assertTexts(tester, "More conversation settings",
+		"Text size: Standard", "Instructions: AGENTS.md")
+	h.assertNoTexts(tester, "Queue: ", "Goal auto-continue: ")
 	expandMoreConversationSettings(t, tester, "More conversation settings")
-	h.assertTexts(tester, "Sending while running", "Queue prompts while running",
-		"Auto-continue goal", "Message text size", "Workspace instructions file")
+	h.assertTexts(tester, "Message text size", "Workspace instructions file")
+	h.assertNoTexts(tester, "Sending while running", "Queue prompts while running",
+		"Auto-continue goal")
 }
