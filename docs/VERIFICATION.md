@@ -801,3 +801,11 @@ v0.2.12 的 package-macos job 在 GitHub Ubuntu runner 上构建 libdmg-hfsplus 
 - **契约**：AGENTS 规则 17；DESIGN §6.3 `session.buildAgentRunBand`；AGENT-SURFACES S9；registry `session.agent-run-band`；DESIGN-LINT DS-17。
 - **验证**：`go test ./... -count=1` 全绿；gofmt/build/vet/mygo vet 干净；designlint **0 new / 0 blocking**；design-check 6/6；`ui-snapshot` **101 次渲染 / 100 唯一 PNG**（`.cache/phase2/shots/`）；`ui-drive` **91/91 PASS**（`.cache/phase2/drive/`）。
 - **残余**：Tool Row 完成态不保留 gutter lane，running→success 有 11px 瞬态左移（为保持完成行与相邻 reasoning 行同一 inset；若要求零 reflow 再改为透明 lane）；窄带 band 只显示图标+计数（Tooltip/可及名保留全称）。
+
+## 0.2.21（2026-11-11：Markdown 阅读面整体升级）
+
+- **`uikit.ChatMarkdown`**：会话正文 Markdown 主题（14px 正文 + 1.55 比例行高；H1 17–18/H2≤16/H3≤15 且低于屏幕标题；标题上下距收紧；行内代码 `BgStrong`+等宽；引用/分隔线 `BorderL2`；表格头 `BgStrong`、单元格 0.7/0.45；链接 Accent+500；暗色同构）。
+- **`uikit.MarkdownCodeBlock`**：官方 `markdown.DefaultCodeBlock` 产品覆盖（`BgStrong` 填充、无边框、`RadiusSM`；语言只在真实命名时显示；官方 Copy/流式/高亮/横向滚动保留），接入会话、推理、检查器文档。
+- **fixture**：`ui-snapshot`/`ui-drive` 的脚本答案不再输出 `text /data/mygo`，改为 `bash` + `go test ./... -count=1`；新增 `p2-markdown-specimen[-dark]` 覆盖所有 Markdown 块。
+- **验证**：`go test ./...` 全绿；gofmt/build/vet/mygo vet 干净；designlint 0 new/0 blocking；design-check 6/6；`ui-snapshot` **103 次渲染 / 102 唯一 PNG**（`.cache/phase3/shots/`）；`ui-drive` **91/91 PASS**（`.cache/phase3/drive/`）。
+- **残余**：Markdown 表格按内容宽度（未强制铺满阅读列）；代码围栏在短代码时仍占满整行（为横向滚动与对齐保留）。

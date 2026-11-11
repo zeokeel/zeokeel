@@ -56,8 +56,8 @@ func TestMarkdownOptionsFollowChatFontSize(t *testing.T) {
 		if options.Theme.FontSize != want {
 			t.Fatalf("font size for %q = %v, want %v", value, options.Theme.FontSize, want)
 		}
-		if options.Theme.LineHeight != 22.0/14.0 {
-			t.Fatalf("line-height multiplier for %q = %v, want 22/14", value, options.Theme.LineHeight)
+		if options.Theme.LineHeight != 1.55 {
+			t.Fatalf("line-height multiplier for %q = %v, want 1.55", value, options.Theme.LineHeight)
 		}
 	}
 }

@@ -28,7 +28,7 @@ const (
 )
 
 // scriptedAnswer is the final markdown body every scripted turn ends with.
-const scriptedAnswer = "## 脚本回复\n\n- 工作目录已确认\n- 可以继续下一步了\n\n```text\n/data/mygo\n```"
+const scriptedAnswer = "## 脚本回复\n\n- 工作目录已确认\n- 可以继续下一步了\n\n```bash\ngo test ./... -count=1\n```"
 
 // scriptServer is an OpenAI-compatible SSE server whose reply depends on the
 // script mode the driver selects before each send.

@@ -8,6 +8,18 @@ All notable changes to ZeoKeel are documented here. The format follows
 
 （暂无未发布改动）
 
+## [0.2.21] - 2026-11-11
+
+Markdown 阅读面整体升级（主区域观感）。
+
+### 阅读主题
+- 新增 `uikit.ChatMarkdown`：会话正文的 Markdown 主题——14px 正文 + **1.55 比例行高**（替代固定 22，大字号不再挤、小字号不再空）；H1 17–18 / H2≤16 / H3≤15 均在屏幕标题之下，收紧标题上下距；行内代码 `BgStrong` 底 + 等宽；引用/分隔线 `BorderL2`；表格头 `BgStrong`、单元格 0.7/0.45；链接 Accent + 500 字重；暗色同构。
+- 新增 `uikit.MarkdownCodeBlock`：官方 `markdown.DefaultCodeBlock` 的产品覆盖——填充 `BgStrong`、无边框、`RadiusSM`，语言只在真实命名时显示（不再把 `text` 当标题）；保留官方复制反馈、流式、高亮与横向滚动。会话/推理/检查器文档统一接入。
+- 演示 fixture 不再用 `text /data/mygo` 围栏，改为 `bash` + `go test ./... -count=1` 的真实示例；新增 `p2-markdown-specimen[-dark]` 组件标本帧覆盖标题/正文/列表/引用/围栏/表格。
+
+### 契约
+- DESIGN.md §5.3/§6.2 新增 `uikit.ChatMarkdown`、`uikit.MarkdownCodeBlock`；registry 新增 `uikit.chat-markdown`、`uikit.markdown-code-block`；DESIGN-LINT 无新增规则（主题走官方 API）。
+
 ## [0.2.20] - 2026-11-11
 
 第二阶段「签名表面」+ v0.2.19 过减法修正。

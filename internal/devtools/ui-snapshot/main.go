@@ -21,6 +21,7 @@ import (
 	"time"
 
 	"github.com/egoist/mygo/ui"
+	"github.com/egoist/mygo/ui/markdown"
 	// The framework's own zh-Hans catalog: the snapshot/driver mirrors
 	// the product's language into mygo (host does the same import), so link
 	// the same translations or framework chrome would stay English.
@@ -813,6 +814,9 @@ func main() {
 	// states (running/error/cancelled) draw the 3px gutter, success stays quiet;
 	// the mono input summary is visible in every row.
 	renderToolRowSpecimen(outDir)
+	// A component specimen for the reading column's Markdown theme: headings,
+	// prose, nested lists, quote, fence and table in light and dark.
+	renderMarkdownSpecimen(outDir)
 
 	// The command palette lists the right sidebar's page commands (the retired
 	// team/task pane commands are gone with the 8-pane inspector).
@@ -1507,7 +1511,7 @@ const scriptedAnswerDelay = 2500 * time.Millisecond
 // snapshotAnswer is the markdown body every scripted turn ends with; it names
 // the gated team-task call the first scripted turn makes, so the approval frame
 // and the transcript read as one coherent story.
-const snapshotAnswer = "## 发布检查清单已创建\n\n- 任务：检查发布清单\n- 可以开始下一步了\n\n```text\n/data/mygo\n```"
+const snapshotAnswer = "## 发布检查清单已创建\n\n- 任务：检查发布清单\n- 可以开始下一步了\n\n```bash\ngo test ./... -count=1\n```"
 
 // scriptedServer is the snapshot's OpenAI-compatible SSE server. The first
 // model request asks for a shell tool call that the default workspace
@@ -1721,4 +1725,48 @@ func renderToolRowSpecimen(outDir string) {
 	}
 	render(design.Light(), filepath.Join(outDir, "p2-tool-row-states.png"))
 	render(design.Dark(), filepath.Join(outDir, "p2-tool-row-states-dark.png"))
+}
+
+// renderMarkdownSpecimen renders the chat Markdown prose theme over a document
+// that exercises every block kind, in light and dark, as the visual contract
+// for the main reading column (spacing, headings, quote, fence, table).
+func renderMarkdownSpecimen(outDir string) {
+	const source = "# 发布检查清单\n\n" +
+		"检查一下 **发布流程** 和 `Markdown` 排版，确认主区域在长文、列表、代码块和表格下都可读。\n\n" +
+		"## 主要结论\n\n" +
+		"- 标题层级收敛到屏幕标题之下\n" +
+		"- 列表、引用、表格使用同一套浅色分隔线\n" +
+		"  - 嵌套项也保持同样节奏\n" +
+		"1. 先跑 `go test ./...`\n" +
+		"2. 再看快照\n\n" +
+		"> 引用：代码块不是卡片墙的一部分，而是有边界的阅读块。\n\n" +
+		"```bash\ngo test ./... -count=1\n```\n\n" +
+		"| 检查项 | 状态 |\n|---|---|\n| 测试 | 通过 |\n| 快照 | 通过 |\n\n" +
+		"---\n\n结束。\n"
+	render := func(tokens *design.Tokens, path string) {
+		options := uikit.ChatMarkdown(tokens, 14)
+		tester := ui.NewTester(func(c *ui.Context) {
+			c.SetTheme(tokens.Theme())
+			ui.Scroll(c).FillWidth().FillHeight().Background(tokens.BgBase).Children(func() {
+				ui.Column(c).Width(design.TranscriptWidth - design.Space8).Padding(design.Space5).
+					Children(func() {
+						markdown.View(c, source, options)
+					})
+			})
+		}, 1000, 820)
+		tester.SetLocale("zh-Hans")
+		tester.Frame()
+		img := tester.Image()
+		file, err := os.Create(path)
+		if err != nil {
+			fail("create "+path, err)
+		}
+		if err := png.Encode(file, img); err != nil {
+			fail("encode "+path, err)
+		}
+		_ = file.Close()
+		fmt.Println("wrote", path, img.Bounds().Size())
+	}
+	render(design.Light(), filepath.Join(outDir, "p2-markdown-specimen.png"))
+	render(design.Dark(), filepath.Join(outDir, "p2-markdown-specimen-dark.png"))
 }

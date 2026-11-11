@@ -526,7 +526,7 @@ uikit.ToolRow(c, uikit.ToolRowOptions{
 | `TypeXL` | 24/32/400 | 欢迎页/极少用 |
 | `TypeL` | 20/28/500 | 页面标题、对话框标题（配合 600 权重） |
 | `TypeM` | 16/24/400 | 小节标题 |
-| `TypeBody` | 14/22/400 | 正文、消息 |
+| `TypeBody` | 14/22/400 | 正文、消息；Markdown 阅读列行高 1.55 比例（`uikit.ChatMarkdown`，14→21.7） |
 | `TypeS` | 14/24/400 | 行内 label |
 | `TypeXS` | 13/20/400 | 说明、列表次文本 |
 | `TypeXXS` | 12/18/400 | 元数据 |
@@ -601,6 +601,8 @@ uikit.ToolRow(c, uikit.ToolRowOptions{
 | 输入辅助 | `EnterTo` | 单行输入 Enter→动作（有文本输入时替代 Default） |
 | 文案/locale | `T` / `FormatDateTime` / `FormatClock` / `Language` / `FormatCompactCount` / `FormatShortcut` | 本地化与格式化；`FormatShortcut` 统一键位记法（平台化 `Cmd/Ctrl + N`） |
 | 检查器文档 | `uikit.MarkdownDoc(t, size)` | 320px 检查器内的文件/产物预览（13px 正文，H1≈15，不再用默认 22px H1） |
+| 阅读区 Markdown | `uikit.ChatMarkdown` | 主阅读列（会话正文）的 Markdown 主题：14px 正文 + 1.55 比例行高；H1 17–18 / H2≤16 / H3≤15，均在屏幕标题之下；显式收紧标题上下距；行内代码用 `BgStrong` 底 + 等宽；引用/分隔线用 `BorderL2`；表格头 `BgStrong`；链接 Accent + 500 字重；暗色同构 |
+| 代码围栏 | `uikit.MarkdownCodeBlock` | 会话/推理/检查器 Markdown 的统一代码块：填充 `BgStrong`、无边框、`RadiusSM`；只有语言真实命名时才显示语言标签（不再把 `text` 当成标题）；官方 Copy 按钮保留复制反馈；流式/高亮/横向滚动沿用官方 `CodeBlockView` |
 | 附件 | `SplitAttachmentPaths` / `InvalidAttachmentPath` / `ResolveAttachmentPaths` | 手输附件路径 |
 | accent 行徽章 | `uikit.OnAccentBadge` | **仅**在 Accent 填充的瞬态行（palette/菜单选中项）使用；持久导航改为 tint + 普通 `uikit.Badge`（AP-19） |
 

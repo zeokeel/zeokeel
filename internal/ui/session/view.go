@@ -13,7 +13,6 @@ import (
 	"github.com/egoist/mygo"
 	"github.com/egoist/mygo/ui"
 	"github.com/egoist/mygo/ui/markdown"
-	"github.com/egoist/mygo/ui/markdown/parser"
 
 	"github.com/zeokeel/zeokeel/internal/contracts"
 	"github.com/zeokeel/zeokeel/internal/design"
@@ -1955,42 +1954,7 @@ func (st *state) markdownOptions(t *design.Tokens) *markdown.Options {
 	if st.md.options != nil && st.md.dark == t.Dark && st.md.size == size {
 		return st.md.options
 	}
-	theme := markdown.DefaultTheme(t.Theme())
-	theme.FontSize = size
-	theme.LineHeight = 22.0 / 14
-	// The transcript's headings follow the app type scale instead of Markdown's
-	// defaults: H1 17–18, H2 16, H3 15 at weight 600, all below the 20/600 page
-	// title, so message content can never outrank the screen's own hierarchy.
-	// The sizes are multipliers of the body size, so the small/large chat
-	// font settings keep the same relation.
-	heading := func(target float32) float32 {
-		if size <= 0 {
-			return 1
-		}
-		return target / size
-	}
-	h1 := size + 3.5
-	if h1 < 17 {
-		h1 = 17
-	}
-	if h1 > 18 {
-		h1 = 18
-	}
-	theme.Headings[0].Size = heading(h1)
-	theme.Headings[1].Size = heading(min(size+2, 16))
-	theme.Headings[2].Size = heading(min(size+1, 15))
-	theme.Headings[3].Size = 1
-	theme.Headings[4].Size = 0.95
-	theme.Headings[5].Size = 0.9
-	for index := range theme.Headings {
-		theme.Headings[index].Weight = 600
-	}
-	theme.Headings[5].Color = theme.Muted
-	st.md.options = &markdown.Options{
-		Theme:      theme,
-		Extensions: parser.Default,
-		Reveal:     &markdown.Reveal{Unit: markdown.AtOnce, Fade: -1},
-	}
+	st.md.options = uikit.ChatMarkdown(t, size)
 	st.md.dark = t.Dark
 	st.md.size = size
 	return st.md.options

@@ -219,6 +219,7 @@ func ReasoningMarkdown(t *design.Tokens, size float32) *markdown.Options {
 		Theme:      theme,
 		Extensions: parser.Default,
 		Reveal:     &markdown.Reveal{Unit: markdown.AtOnce, Fade: -1},
+		CodeBlock:  MarkdownCodeBlock,
 	}
 }
 
@@ -251,5 +252,6 @@ func MarkdownDoc(t *design.Tokens, size float32) *markdown.Options {
 		Theme:      theme,
 		Extensions: parser.Default,
 		Reveal:     &markdown.Reveal{Unit: markdown.AtOnce, Fade: -1},
+		CodeBlock:  MarkdownCodeBlock,
 	}
 }

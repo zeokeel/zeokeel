@@ -4,13 +4,13 @@
 [![Release](https://img.shields.io/github/v/release/zeokeel/zeokeel)](https://github.com/zeokeel/zeokeel/releases)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
-> **v0.2.20 — twenty-fifth public release** (2026-11-11). Native, compile-time modular
+> **v0.2.21 — twenty-sixth public release** (2026-11-11). Native, compile-time modular
 > AI agent for desktop, headless and ACP (Zed/editor) use; one Go binary, no
 > webview. Final verification: full test suite green (incl. regression / uimodtest /
-> design-contract tests), `ui-drive` **91/91 PASS**, `ui-snapshot` **101 renders / 100 unique PNGs**,
+> design-contract tests), `ui-drive` **91/91 PASS**, `ui-snapshot` **103 renders / 102 unique PNGs**,
 > designlint **0 new / 0 blocking**. See [CHANGELOG.md](CHANGELOG.md) for the release notes.
 
-> **v0.2.20 主要变化**：第二阶段签名表面 —— **Agent Run Band**（运行中/团队/子代理/任务/待审批收进一条状态带，团队与子代理零值常显）与 **State-first Tool Row**（3px 状态 gutter + 等宽输入摘要，仅进行中/失败/停止时出现）。同时修正 v0.2.19 的过度减法：恢复团队/子代理入口、状态条 6 项与逐条消息用量；契约同步进 DESIGN.md / AGENT-SURFACES.md / AGENTS.md / DESIGN-LINT.md（DS-17）。
+> **v0.2.21 主要变化**：Markdown 阅读面整体升级 —— `uikit.ChatMarkdown`（比例行高、标题层级/间距、行内代码、引用/表格/链接的 token 化）与 `uikit.MarkdownCodeBlock`（更安静的代码围栏：填充面、无边框、只有真实语言才显示标签、保留官方复制/流式/高亮）。演示 fixture 去掉 `/data/mygo` 占位，新增 Markdown 组件标本帧。
 
 ## 下载与运行 / Download and run
 

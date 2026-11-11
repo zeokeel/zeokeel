@@ -114,6 +114,57 @@
       "doc": "docs/DESIGN.md §6.3 / §7.1"
     },
     {
+      "id": "uikit.markdown-code-block",
+      "entry": "uikit.MarkdownCodeBlock",
+      "package": "internal/uikit",
+      "states": [
+        "idle",
+        "streaming"
+      ],
+      "allowed": [
+        "uikit.MarkdownCodeBlock",
+        "markdown.CodeBlockView.CopyButton",
+        "markdown.CodeBlockView.Body"
+      ],
+      "forbidden": [
+        "bordered_card_fence",
+        "raw_info_string_label",
+        "second_fence_anatomy"
+      ],
+      "rules": [
+        "token-colors",
+        "language-only-when-named"
+      ],
+      "doc": "docs/DESIGN.md §6.2 / §6.3"
+    },
+    {
+      "id": "uikit.chat-markdown",
+      "entry": "uikit.ChatMarkdown",
+      "package": "internal/uikit",
+      "states": [
+        "light",
+        "dark",
+        "chat-font-small",
+        "chat-font-standard",
+        "chat-font-large"
+      ],
+      "allowed": [
+        "uikit.ChatMarkdown",
+        "uikit.MarkdownCodeBlock"
+      ],
+      "forbidden": [
+        "document_defaults_in_transcript",
+        "second_prose_theme"
+      ],
+      "rules": [
+        "body-14",
+        "heading-below-screen-title",
+        "proportional-line-height",
+        "token-colors"
+      ],
+      "doc": "docs/DESIGN.md §5.3 / §6.2"
+    },
+    {
       "id": "uikit.status",
       "entry": "uikit.StatusText",
       "package": "internal/uikit",
