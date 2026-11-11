@@ -864,3 +864,86 @@ func TestRunningToolRowRendersInProductSession(t *testing.T) {
 		t.Fatalf("running tool row missing (status=%v summary=%v); texts = %v", status, summary, tester.Texts())
 	}
 }
+
+// --- durable child-agent history -------------------------------------------
+
+// TestTeamOverlayGroupsRestoredHistory covers the durable-history UX: the
+// active session's restored rows appear under 已结束 with a 历史 marker, while
+// another session's history stays out of both the counts and the overlay.
+func TestTeamOverlayGroupsRestoredHistory(t *testing.T) {
+	chat := headerChat("历史团队")
+	team := &fakeTeam{members: []contracts.TeamMember{
+		{ID: "member-1", Name: "在线审查员", RunState: contracts.TeamRunRunning, SessionID: "sess-1"},
+		{
+			ID: "history-m-1", Name: "上次的研究员", RunState: contracts.TeamRunDone,
+			SessionID: "sess-1", Historical: true, Last: "上一轮的答案",
+		},
+		{
+			ID: "history-m-2", Name: "别的会话队友", RunState: contracts.TeamRunDone,
+			SessionID: "sess-2", Historical: true,
+		},
+	}}
+	h := newAgentSurfaceHarness(t, chat, agentServices{
+		team: team,
+		children: &fakeChildAgents{agents: []contracts.ChildAgent{
+			{ID: "member-1", Name: "在线审查员", Kind: contracts.ChildAgentTeammate},
+			{
+				ID: "history-m-1", Name: "上次的研究员", Kind: contracts.ChildAgentTeammate,
+				Mode: contracts.ChildAgentContinuable, Status: contracts.ChildAgentCompleted,
+				Historical: true, Output: "上一轮的答案",
+			},
+		}},
+		board: &fakeAgentBoard{},
+	})
+	tester := h.tester()
+	tester.Frame()
+
+	h.click(tester, "智能体团队")
+	h.assertTexts(tester,
+		"2 名成员 · 1 个运行中 · 1 条已结束",
+		"成员", "在线审查员", "已结束", "上次的研究员", "历史", "上一轮的答案",
+	)
+	h.assertNoTexts(tester, "别的会话队友")
+}
+
+// TestHistoricalChildViewIsReadOnly covers a restored child conversation: it
+// opens with its prompt/answer but has no composer and says it is read-only.
+func TestHistoricalChildViewIsReadOnly(t *testing.T) {
+	children := &fakeChildAgents{agents: []contracts.ChildAgent{{
+		ID: "history-m-1", ParentSessionID: "sess-1", Name: "上次的研究员",
+		Kind: contracts.ChildAgentTeammate, Mode: contracts.ChildAgentContinuable,
+		Status: contracts.ChildAgentCompleted, Historical: true,
+		Prompt: "研究发布说明", Output: "上次的答案",
+	}}}
+	h := newAgentSurfaceHarness(t, headerChat("历史会话"), agentServices{children: children})
+	tester := h.tester()
+	tester.Frame()
+
+	h.click(tester, "子智能体 1")
+	h.assertTexts(tester, "子智能体会话", "上次的研究员", "历史")
+	h.click(tester, "进入子智能体会话 上次的研究员")
+	h.assertTexts(tester,
+		"上次的研究员", "队友 · 已结束记录", "研究发布说明", "上次的答案",
+		"已结束的记录（应用重启后仍保留）：只读，不能再继续对话。")
+	h.assertNoTexts(tester, "输入消息…", "发送后等待该队友的回复。")
+}
+
+// TestChildSwitcherMarksRestoredHistory covers the switcher row of a restored
+// one-shot subagent: the history marker and the finished-record meta line, plus
+// the same 进入 action a live row has.
+func TestChildSwitcherMarksRestoredHistory(t *testing.T) {
+	children := &fakeChildAgents{agents: []contracts.ChildAgent{{
+		ID: "history-s-1", ParentSessionID: "sess-1", Name: "上次的子代理",
+		Kind: contracts.ChildAgentSubagent, Mode: contracts.ChildAgentOneShot,
+		Status: contracts.ChildAgentCompleted, Historical: true, Output: "上次的输出",
+	}}}
+	h := newAgentSurfaceHarness(t, headerChat("历史会话"), agentServices{children: children})
+	tester := h.tester()
+	tester.Frame()
+
+	h.click(tester, "子智能体 1")
+	h.assertTexts(tester, "子智能体会话", "上次的子代理", "历史", "子智能体 · 已结束记录")
+	if _, ok := tester.Find("进入子智能体会话 上次的子代理"); !ok {
+		t.Fatalf("restored child has no 进入 action; texts = %v", tester.Texts())
+	}
+}

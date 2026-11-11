@@ -63,6 +63,7 @@ func (c *childAgentsService) ChildAgents(parentSessionID string) []contracts.Chi
 	}
 	agents := c.subagentAgents(scope)
 	agents = append(agents, c.teammateAgents()...)
+	agents = append(agents, c.archivedAgents(scope)...)
 	if len(agents) == 0 {
 		return nil
 	}
@@ -93,10 +94,14 @@ func (c *childAgentsService) ChildAgent(id string) (contracts.ChildAgent, bool) 
 			}
 		}
 	}
-	for _, agent := range c.teammateAgents() {
-		if agent.ID == id {
-			return agent, true
-		}
+	if agent, ok := c.liveTeammateAgent(id); ok {
+		return agent, true
+	}
+	if record, ok := c.archivedMember(id); ok {
+		return childAgentFromArchivedMember(record), true
+	}
+	if record, ok := c.archivedSubagent(id); ok {
+		return childAgentFromArchivedSubagent(record), true
 	}
 	return contracts.ChildAgent{}, false
 }
@@ -110,6 +115,9 @@ func (c *childAgentsService) SendChildAgent(ctx context.Context, id, message str
 	child, ok := c.ChildAgent(id)
 	if !ok {
 		return "", fmt.Errorf("agent: child agent %q not found", strings.TrimSpace(id))
+	}
+	if child.Historical {
+		return "", fmt.Errorf("agent: child agent %q is a finished historical record and cannot be continued", child.ID)
 	}
 	if child.Kind != contracts.ChildAgentTeammate {
 		return "", fmt.Errorf("agent: child agent %q is one-shot and cannot receive follow-up messages", child.ID)
@@ -188,12 +196,133 @@ func (c *childAgentsService) teammateAgents() []contracts.ChildAgent {
 	tracker := c.team.teamTracker()
 	agents := make([]contracts.ChildAgent, 0, len(members))
 	for _, member := range members {
+		if member.Historical {
+			// Restored history rows are not live teammates: they are added by
+			// archivedAgents so the manager-backed ones keep their reference IDs.
+			continue
+		}
 		agent := childAgentFromTeamMember(member)
+		agent.ParentSessionID = member.SessionID
 		agent.Prompt = tracker.memberPrompt(member.ID)
 		agent.Activity = byMember[member.ID]
 		agents = append(agents, agent)
 	}
 	return agents
+}
+
+// ClearChildAgentHistory implements the optional contracts.ChildHistoryMaintainer:
+// the development driver resets the retained history between scripted scenes.
+func (c *childAgentsService) ClearChildAgentHistory() {
+	if history := c.history(); history != nil {
+		history.clear()
+	}
+}
+
+// history returns the service's durable child-agent history (nil when the
+// module runs without a data directory).
+func (c *childAgentsService) history() *childHistoryStore {
+	if c == nil || c.service == nil {
+		return nil
+	}
+	return c.service.childHistory
+}
+
+// liveTeammateAgent returns one live (non-historical) teammate by reference.
+func (c *childAgentsService) liveTeammateAgent(id string) (contracts.ChildAgent, bool) {
+	for _, agent := range c.teammateAgents() {
+		if agent.ID == id {
+			return agent, true
+		}
+	}
+	return contracts.ChildAgent{}, false
+}
+
+// archivedMember returns one restored teammate record by its history key.
+func (c *childAgentsService) archivedMember(id string) (childHistoryMember, bool) {
+	history := c.history()
+	if history == nil {
+		return childHistoryMember{}, false
+	}
+	for _, record := range history.memberRecords() {
+		if record.Key == id {
+			return record, true
+		}
+	}
+	return childHistoryMember{}, false
+}
+
+// archivedSubagent returns one restored delegation record by its history key.
+func (c *childAgentsService) archivedSubagent(id string) (childHistorySubagent, bool) {
+	history := c.history()
+	if history == nil {
+		return childHistorySubagent{}, false
+	}
+	for _, record := range history.subagentRecords() {
+		if record.Key == id {
+			return record, true
+		}
+	}
+	return childHistorySubagent{}, false
+}
+
+// archivedAgents maps the durable history rows of one session scope. Records
+// that a live row still supersedes (the same backend child is listed by the
+// running read model) are skipped so a member that is both finished and live
+// never renders twice.
+func (c *childAgentsService) archivedAgents(scope string) []contracts.ChildAgent {
+	history := c.history()
+	if history == nil {
+		return nil
+	}
+	live := make(map[string]string)
+	if c.service != nil {
+		for _, activity := range c.service.SubagentActivities() {
+			live[activity.ID] = activity.SessionID
+		}
+	}
+	if c.team != nil {
+		for _, member := range c.team.Members() {
+			if member.Historical {
+				continue
+			}
+			live[member.ID] = member.SessionID
+		}
+	}
+	superseded := func(record childHistoryMember) bool {
+		session, ok := live[record.OriginalID]
+		if !ok {
+			return false
+		}
+		return session == "" || record.SessionID == "" || session == record.SessionID
+	}
+	agents := make([]contracts.ChildAgent, 0, len(history.memberRecords())+len(history.subagentRecords()))
+	for _, record := range history.memberRecords() {
+		if !historyScopeMatches(record.SessionID, scope) || superseded(record) {
+			continue
+		}
+		agents = append(agents, childAgentFromArchivedMember(record))
+	}
+	for _, record := range history.subagentRecords() {
+		if !historyScopeMatches(record.SessionID, scope) {
+			continue
+		}
+		if session, ok := live[record.OriginalID]; ok &&
+			(historyScopeMatches(session, record.SessionID) || session == "" || record.SessionID == "") {
+			continue
+		}
+		agents = append(agents, childAgentFromArchivedSubagent(record))
+	}
+	return agents
+}
+
+// historyScopeMatches reports whether a persisted record belongs to scope: an
+// unattributed session or an empty scope matches everything (legacy records and
+// headless callers).
+func historyScopeMatches(sessionID, scope string) bool {
+	if scope == "" || sessionID == "" {
+		return true
+	}
+	return sessionID == scope
 }
 
 // childAgentFromSubagentActivity converts one synchronous delegation snapshot.

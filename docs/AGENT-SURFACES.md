@@ -443,7 +443,9 @@ func RunStatus(c *ui.Context, o RunStatusOptions)
 
 **职责**：把子代理与团队成员作为**子会话**呈现：头部入口、团队浮层、主栏子会话视图（面包屑返回）、共享任务；运行态必须真实（`RunState`），不得把 `active`（可用性）画成 running。**团队/子代理不再放进侧边栏或右栏页签。**
 
-**数据模型**：`contracts.ChildAgentService`（`ChildAgents(parentSessionID)` / `ChildAgent(id)` / `SendChildAgent`；子代理=one-shot，队友=continuable）、`TeamMember{RunState,...}`、`TeamActivity`（有界）、`BoardTask{Status,Owner,BlockedBy,WriteScopes}`、`TaskAssigner`（可选）。
+**数据模型**：`contracts.ChildAgentService`（`ChildAgents(parentSessionID)` / `ChildAgent(id)` / `SendChildAgent`；子代理=one-shot，队友=continuable）、`TeamMember{RunState,SessionID,Historical,...}`、`ChildAgent.Historical`（持久历史的只读行）、`TeamActivity`（有界）、`BoardTask{Status,Owner,BlockedBy,WriteScopes}`、`TaskAssigner`（可选）。
+
+**持久历史（2026-11-11）**：跑完的队友与同步子代理由 agent 模块写入 `<数据目录>/child-agents.json`（有界 + TTL + 原子写 + 损坏隔离），重启后作为 `Historical` 只读行恢复：团队浮层在「成员」下新增「已结束」区（带「历史」标记），子智能体切换器/子会话照常打开，但不再有输入框（`SendChildAgent` 拒绝历史行）。历史按 `SessionID` 归属到当初的会话：页头计数与团队浮层只列当前会话的历史，运行中的队友仍是进程级可见。
 
 **状态矩阵**：
 
@@ -460,22 +462,22 @@ func RunStatus(c *ui.Context, o RunStatusOptions)
 **入口结构**：
 
 - 会话头第一行（`screen.header`/`screen.actions` 槽）：`标题/面包屑 → Agent Run Band（运行中 → 智能体团队 → 子智能体 N → 后台任务 → 待审批）→ spacer → ⋯`；Band 是一行原生入口按钮（无外层容器/双重描边），团队/子代理零值常显但不显示 0 计数，后台任务/待审批只在有内容时出现；各入口都是 `ui.PopoverBase` 原生浮层（Esc/点外关闭/焦点归还），不占右栏。
-- 团队浮层：成员卡（状态点/名字/模型/最新活动/「打开」）+ 共享任务卡（subject/状态/owner/依赖/写入范围）；空态说明「暂无共享任务」。
+- 团队浮层：成员卡（状态点/名字/模型/最新活动/「打开」）+ 共享任务卡（subject/状态/owner/依赖/写入范围）；空态说明「暂无共享任务」；已结束的持久记录按「已结束」分组展示（历史标记，只读）。
 - 子智能体浮层：子代理/队友列表；选中进入主栏子会话。
 - 后台任务浮层：`JobService.Jobs()` 的行（状态/命令/用时/退出码）+ 停止（`KillJob`）。
 
 **布局与交互**：
 
-- 子会话在主栏渲染：标题变为 `父标题 › 子智能体名` 面包屑，点父标题返回父会话；内容区显示任务（prompt）、状态、输出与活动时间线；可继续成员底部有消息输入框（`SendChildAgent`），一次性成员只读。
+- 子会话在主栏渲染：标题变为 `父标题 › 子智能体名` 面包屑，点父标题返回父会话；内容区显示任务（prompt）、状态、输出与活动时间线；可继续成员底部有消息输入框（`SendChildAgent`），一次性成员只读；重启后恢复的历史会话同样只读并明示「已结束的记录（应用重启后仍保留）」。
 - 团队浮层只读，成员/任务数据来自 `TeamService`/`TaskBoard`；任务完成/指派由工具或服务调用完成，浮层按帧重读。
 - 头部窄带（阅读列 < 2/3）退化为图标+计数，可及名保留全称。
 - a11y：入口按钮 Label 为全称；状态文案可读（不只靠颜色）；浮层为 native popover/dialog 语义。
 
 **禁止**：把团队/子代理塞进侧边栏或右栏常驻页签；`active` 当 running；伪造子代理活动时间线；一次性子代理显示可发送输入框。
 
-**当前实现**：`internal/ui/session/agentsurface.go`（三入口 + 三个 Popover 浮层 + 子会话视图 + 回合尾文件卡）、`internal/modules/agent/childagents.go`（统一 `ChildAgentService` 读模型）、`internal/modules/toolkit/jobs_service.go`（`JobService`）。旧 `internal/uikit/team.go` / `rightpanel` 团队/任务 pane 已删除。
+**当前实现**：`internal/ui/session/agentsurface.go`（三入口 + 三个 Popover 浮层 + 子会话视图 + 回合尾文件卡）、`internal/modules/agent/childagents.go`（统一 `ChildAgentService` 读模型）、`internal/modules/agent/child_history.go`（持久历史 `child-agents.json`）、`internal/modules/toolkit/jobs_service.go`（`JobService`）。旧 `internal/uikit/team.go` / `rightpanel` 团队/任务 pane 已删除。
 
-**验收**：`internal/ui/session/agentsurface_test.go`（19 个帧测试：header 顺序、团队浮层、switcher、子会话面包屑/返回、双向不可用、jobs 停止、文件卡预览回调）、`internal/modules/agent/childagents_test.go`、`internal/modules/toolkit/jobs_service_test.go`、uimodtest 新 E2E（团队浮层 / 文件页 / 终端页 / 快捷键）。
+**验收**：`internal/ui/session/agentsurface_test.go`（帧测试：header 顺序、团队浮层、switcher、子会话面包屑/返回、双向不可用、jobs 停止、文件卡预览回调、历史分组/只读历史会话）、`internal/modules/agent/childagents_test.go`、`internal/modules/agent/child_history_test.go`（重启后恢复、文档往返、损坏隔离、保留上限）、`internal/modules/toolkit/jobs_service_test.go`、uimodtest 新 E2E（团队浮层 / 文件页 / 终端页 / 快捷键）、`ui-drive` team 步骤（含 `team-history`）。
 
 ## 2. 跨 surface 规则
 

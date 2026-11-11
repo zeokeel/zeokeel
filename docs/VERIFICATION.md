@@ -858,3 +858,8 @@ v0.2.12 的 package-macos job 在 GitHub Ubuntu runner 上构建 libdmg-hfsplus 
 
 - **变更**：升级 `zeokeel-rig v0.15.0 → v0.15.1`；Windows ACL helper 改用系统自带 temp（`GetTempPath2W`/`GetTempPathW` → 用户 Known Folder `LocalAppData\Temp` → `os.TempDir()`，Win32 过滤 Windows 目录），修复 helper 环境被裁剪时候选列表为空、所有命令退出码 127；`CommandEnv` 放行 Windows 非敏感定位变量；`job_start` 按 shell 裸基名校验允许列表。
 - **验证**（`./scripts/verify.sh` 全量）：gofmt/build/vet/designlint/design-check/mygo vet PASS；`go test ./...` 与 `-race` PASS；regression 276 PASS / 0 FAIL；`ui-snapshot` 101 steps / 100 PNGs；desktop/headless/ACP smoke PASS；**13/13 PASS**（510s）。
+
+## 0.2.30（2026-11-11：已结束团队/子智能体持久历史）
+
+- **变更**：跑完的队友与同步子代理写入 `<数据目录>/child-agents.json`（有界 24/48 条 + 14 天 TTL、原子写、损坏隔离为 `.corrupt-<ts>`；退出时仍在运行的成员记为已中断）。重启后作为 `Historical` 只读行恢复：团队浮层新增「已结束」分区（历史标记/状态/输出/活动），子智能体切换器与主栏子会话可打开但无输入框，`SendChildAgent` 拒绝历史行；历史按父会话归属，页头计数与浮层只列当前会话历史，运行中队友保持进程级可见。`ui-snapshot` 设置桩改为带锁（修复自动化场景并发 map 读写导致的快照偶发崩溃）。
+- **验证**（`./scripts/verify.sh` 全量）：gofmt/build/vet/designlint/design-check/mygo vet PASS；`go test ./...` 与 `-race` PASS；regression **276 PASS / 0 SKIP / 0 FAIL**；`ui-snapshot` **103 steps / 102 PNGs**；desktop/headless/ACP smoke PASS；**13/13 PASS（502s）**。`ui-drive --only team` **7/7 PASS**（新增 `team-turn-persist`、`team-history`）；人工复核 `p2-team-history.png`、`p2-team-history-child.png`（已结束分区/历史标记/只读提示/无输入框）。

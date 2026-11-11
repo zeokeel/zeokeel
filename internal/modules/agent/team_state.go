@@ -107,8 +107,9 @@ func (t *teamTracker) notifyChange() {
 
 // track wraps one started rig.Subagent and starts its bounded watcher. The
 // initial run is already in flight when the runner returns; effectiveModel is
-// the model the runner resolved (the spec override or the parent model).
-func (t *teamTracker) track(inner rig.Subagent, spec rig.SubagentSpec, effectiveModel string) rig.Subagent {
+// the model the runner resolved (the spec override or the parent model) and
+// sessionID is the parent session that spawned the member ("" when unknown).
+func (t *teamTracker) track(inner rig.Subagent, spec rig.SubagentSpec, effectiveModel, sessionID string) rig.Subagent {
 	if t == nil || inner == nil {
 		return inner
 	}
@@ -119,12 +120,13 @@ func (t *teamTracker) track(inner rig.Subagent, spec rig.SubagentSpec, effective
 	t.mu.Lock()
 	t.nextID++
 	run := &trackedSubagent{
-		tracker: t,
-		inner:   inner,
-		id:      fmt.Sprintf("run-%d", t.nextID),
-		name:    strings.TrimSpace(spec.Name),
-		model:   model,
-		prompt:  collapseTeamText(spec.Prompt, 120),
+		tracker:   t,
+		inner:     inner,
+		id:        fmt.Sprintf("run-%d", t.nextID),
+		name:      strings.TrimSpace(spec.Name),
+		model:     model,
+		prompt:    collapseTeamText(spec.Prompt, 120),
+		sessionID: strings.TrimSpace(sessionID),
 	}
 	t.runs = append(t.runs, run)
 	t.mu.Unlock()
@@ -395,10 +397,11 @@ type trackedSubagent struct {
 	tracker *teamTracker
 	inner   rig.Subagent
 
-	id     string
-	name   string
-	model  string
-	prompt string
+	id        string
+	name      string
+	model     string
+	prompt    string
+	sessionID string
 
 	mu         sync.Mutex
 	seq        int
@@ -546,6 +549,7 @@ func (t *trackedSubagent) snapshot() teamRunSnapshot {
 		Finished:    t.finished,
 		UsageTokens: t.usage,
 		Iterations:  t.iterations,
+		SessionID:   t.sessionID,
 	}
 }
 
@@ -559,6 +563,9 @@ type teamRunSnapshot struct {
 	Finished    time.Time
 	UsageTokens int
 	Iterations  int
+	// SessionID is the parent session that spawned the member ("" when the
+	// backend could not attribute it).
+	SessionID string
 	// Activity is the member's bounded recent activity (oldest first), copied
 	// out of the tracker so the contract member owns its slice.
 	Activity []contracts.TeamActivity

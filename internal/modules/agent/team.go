@@ -126,7 +126,7 @@ func (r *dynamicTeamRunner) Start(ctx context.Context, spec rig.SubagentSpec) (r
 	if r.tracker == nil {
 		return subagent, nil
 	}
-	return r.tracker.track(subagent, spec, cfg.Model), nil
+	return r.tracker.track(subagent, spec, cfg.Model, active), nil
 }
 
 // teamManagerLocked returns the service's team manager, creating it on first
@@ -225,7 +225,89 @@ func (t *teamService) Members() []contracts.TeamMember {
 		}
 		members = append(members, converted)
 	}
-	return members
+	// Members() is the UI's per-frame read path, so it must never write the
+	// durable history (no I/O in build): finished members are archived when the
+	// app disposes (Normal quit) and closed members through Close.
+	return t.appendHistoricalMembers(members)
+}
+
+// appendHistoricalMembers appends the restored records that no live member
+// supersedes, so a reopened app still lists the team that ran.
+func (t *teamService) appendHistoricalMembers(live []contracts.TeamMember) []contracts.TeamMember {
+	history := t.service.childHistory
+	if history == nil {
+		return live
+	}
+	records := history.memberRecords()
+	if len(records) == 0 {
+		return live
+	}
+	out := append([]contracts.TeamMember(nil), live...)
+	for _, record := range records {
+		superseded := false
+		for _, member := range live {
+			if sameHistoryOwner(record.OriginalID, record.SessionID, member.ID, member.SessionID) {
+				superseded = true
+				break
+			}
+		}
+		if !superseded {
+			out = append(out, teamMemberFromHistory(record))
+		}
+	}
+	return out
+}
+
+// memberSnapshot returns one live member converted to the contract (including
+// its run state and activity), for archiving.
+func (t *teamService) memberSnapshot(memberID string) (contracts.TeamMember, bool) {
+	if t == nil || memberID == "" {
+		return contracts.TeamMember{}, false
+	}
+	raw := t.manager().Members()
+	snapshots := t.teamTracker().reconcile(raw)
+	for _, member := range raw {
+		if member.ID != memberID {
+			continue
+		}
+		converted := teamMemberFromRig(member)
+		if snapshot, ok := snapshots[member.ID]; ok {
+			applyRunSnapshot(&converted, snapshot)
+		}
+		return converted, true
+	}
+	return contracts.TeamMember{}, false
+}
+
+// archiveTeamMembersOnShutdown persists every live member before the module
+// disposes the manager: a member still running when the app quits is archived
+// as interrupted instead of vanishing.
+func (s *service) archiveTeamMembersOnShutdown() {
+	if s == nil || s.childHistory == nil {
+		return
+	}
+	manager := s.teamManagerService()
+	raw := manager.Members()
+	if len(raw) == 0 {
+		return
+	}
+	tracker := teamTrackerForService(s)
+	snapshots := tracker.reconcile(raw)
+	for _, member := range raw {
+		converted := teamMemberFromRig(member)
+		if snapshot, ok := snapshots[member.ID]; ok {
+			applyRunSnapshot(&converted, snapshot)
+		}
+		switch converted.RunState {
+		case contracts.TeamRunDone, contracts.TeamRunFailed:
+		default:
+			// No completed run, or a run still in flight when the app quit: the
+			// member did not survive, so the history records an interruption.
+			converted.RunState = contracts.TeamRunInterrupted
+		}
+		s.childHistory.upsertMember(childHistoryMemberFromContract(
+			converted, converted.SessionID, tracker.memberPrompt(member.ID)))
+	}
 }
 
 // teamMemberFromRig converts one manager member snapshot to the contract.
@@ -254,6 +336,7 @@ func applyRunSnapshot(member *contracts.TeamMember, snapshot teamRunSnapshot) {
 	member.Finished = snapshot.Finished
 	member.UsageTokens = snapshot.UsageTokens
 	member.Iterations = snapshot.Iterations
+	member.SessionID = snapshot.SessionID
 	if len(snapshot.Activity) > 0 {
 		member.Activity = append([]contracts.TeamActivity(nil), snapshot.Activity...)
 	}
@@ -354,6 +437,9 @@ func (t *teamService) Interrupt(id string) error {
 func (t *teamService) Close(id string) error {
 	memberID, name := t.resolveMemberRef(id)
 	run := t.teamTracker().runForRef(id)
+	// Capture the member before the manager drops it: a closed teammate stays in
+	// the durable history so the overlay can still show what ran.
+	target, hasTarget := t.memberSnapshot(memberID)
 	if err := t.manager().Close(id); err != nil {
 		t.teamTracker().addActivity(run, memberID, contracts.TeamActivityError,
 			"关闭失败："+err.Error(), true)
@@ -366,6 +452,19 @@ func (t *teamService) Close(id string) error {
 		t.teamTracker().release(memberID)
 	}
 	t.teamTracker().reconcile(t.manager().Members())
+	if hasTarget {
+		switch target.RunState {
+		case contracts.TeamRunDone, contracts.TeamRunFailed:
+		default:
+			// A member closed while idle or running keeps a terminal state in
+			// the history instead of the read model's transient one.
+			target.RunState = contracts.TeamRunInterrupted
+		}
+		if t.service.childHistory != nil {
+			t.service.childHistory.upsertMember(childHistoryMemberFromContract(
+				target, target.SessionID, t.teamTracker().memberPrompt(memberID)))
+		}
+	}
 	t.teamTracker().notifyChange()
 	return nil
 }

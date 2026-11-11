@@ -20,6 +20,18 @@ import (
 	"github.com/zeokeel/zeokeel/internal/modules/agent"
 )
 
+// countLiveMembers counts the manager-backed members of a snapshot (the
+// restored durable history rows are Historical and read-only).
+func countLiveMembers(members []contracts.TeamMember) int {
+	live := 0
+	for _, member := range members {
+		if !member.Historical {
+			live++
+		}
+	}
+	return live
+}
+
 // TestTeamUnknownAndInvalidOperations covers hostile arguments: empty/unknown
 // member IDs on every operation and blank spawn fields must return readable
 // errors instead of panicking.
@@ -119,8 +131,10 @@ func TestTeamSpawnWaitSendAndMembers(t *testing.T) {
 	if err := harness.team.Close(member.ID); err != nil {
 		t.Fatalf("Close: %v", err)
 	}
-	if members := harness.team.Members(); len(members) != 0 {
-		t.Fatalf("Members() = %+v after Close, want empty", members)
+	// A closed member is archived as durable history (Historical) instead of
+	// disappearing: "the team is empty" means "no live member".
+	if members := harness.team.Members(); countLiveMembers(members) != 0 {
+		t.Fatalf("Members() = %+v after Close, want no live member", members)
 	}
 }
 
@@ -292,8 +306,8 @@ func TestTeamDisposeClosesAllAndUnregistersTools(t *testing.T) {
 	if err := harness.team.Close("member-1"); err == nil {
 		t.Fatal("Close after manager disposal returned nil error")
 	}
-	if members := harness.team.Members(); len(members) != 0 {
-		t.Fatalf("Members() = %+v after CloseAll, want empty", members)
+	if members := harness.team.Members(); countLiveMembers(members) != 0 {
+		t.Fatalf("Members() = %+v after CloseAll, want no live member", members)
 	}
 	if _, ok := findRegistrySpec(harness.registry, "audit_marker"); !ok {
 		t.Fatal("the caller-provided marker tool was unregistered by agent disposal")

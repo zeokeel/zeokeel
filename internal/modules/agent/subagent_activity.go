@@ -60,6 +60,19 @@ func (r *subagentActivityRegistry) start(activity contracts.SubagentActivity) co
 	return activity
 }
 
+// entry returns a copy of one tracked delegation ("" ID when unknown), for the
+// durable history archive.
+func (r *subagentActivityRegistry) entry(id string) (contracts.SubagentActivity, bool) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for _, entry := range r.entries {
+		if entry.ID == id {
+			return entry, true
+		}
+	}
+	return contracts.SubagentActivity{}, false
+}
+
 // finish records the outcome of one delegation. A running row only: a duplicate
 // finish (defensive) leaves the first recorded outcome, and an unknown ID is
 // ignored. The detail is bounded and only set for the finished row.
@@ -151,6 +164,13 @@ func (s *service) beginSubagentActivity(name, sessionID, model, prompt string, f
 func (s *service) finishSubagentActivity(id string, ctx context.Context, runErr error, result contracts.SubagentResult) {
 	status, detail := subagentActivityOutcome(ctx, runErr, result)
 	s.subagentActivities.finish(id, status, detail)
+	// The finished delegation becomes a durable historical child agent: after a
+	// restart the subagent chip still lists what ran, with its output.
+	if s.childHistory != nil {
+		if entry, ok := s.subagentActivities.entry(id); ok {
+			s.childHistory.upsertSubagent(childHistorySubagentFromContract(entry))
+		}
+	}
 }
 
 // subagentActivityOutcome maps one Run return to the registry status and its

@@ -51,8 +51,9 @@ const (
 	TeamActivityTool = "tool"
 )
 
-// TeamMember is one in-process teammate (a spawned subagent) as shown by the
-// Agents inspector and the team tools.
+// TeamMember is one teammate as shown by the Agents inspector and the team
+// tools: a live in-process member, or (after a restart) a historical row
+// restored from the durable child-agent history.
 type TeamMember struct {
 	// ID is the manager-generated reference ("member-1").
 	ID string
@@ -86,6 +87,14 @@ type TeamMember struct {
 	Iterations int
 	// Activity is the bounded recent activity of this member, oldest first.
 	Activity []TeamActivity
+	// SessionID is the session that spawned the member ("" when the backend
+	// could not attribute it). The durable history uses it to scope a restored
+	// member to the session the user reopens.
+	SessionID string
+	// Historical marks a member restored from the durable child-agent history:
+	// its live run is gone, so it is read-only (open/inspect only), it never
+	// counts as running and its ID is a history key, not a manager reference.
+	Historical bool
 }
 
 // TeamActivity is one event of the team activity read model: a spawn, a
@@ -119,7 +128,9 @@ type TeamActivityLister interface {
 // manager: the inspector lists members, steers them with follow-up messages and
 // interrupts them; the agent module registers the model-facing team tools.
 type TeamService interface {
-	// Members lists the live teammates, oldest first.
+	// Members lists the teammates, oldest first: the live manager members
+	// followed by the restored historical rows (Historical == true, read-only,
+	// no live backend behind their IDs).
 	Members() []TeamMember
 	// Spawn starts a named teammate with an initial prompt.
 	Spawn(ctx context.Context, name, prompt, model string) (TeamMember, error)

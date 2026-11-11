@@ -77,6 +77,7 @@ type agentSurface struct {
 	switcherScroll ui.ScrollState
 	jobsScroll     ui.ScrollState
 	teamMembers    ui.ListState
+	teamHistory    ui.ListState
 	teamTasks      ui.ListState
 	switcherList   ui.ListState
 	jobsList       ui.ListState
@@ -235,6 +236,15 @@ func buildAgentRunBand(c *ui.Context, t *design.Tokens, st *state, chat contract
 	team := st.teamService()
 	children := st.childAgentService()
 	jobs := st.jobService()
+	// The restored history is scoped to the conversation on screen; live
+	// members are process-wide (the rig manager has no session scope) and stay
+	// visible in every conversation, as before.
+	var teamMembers []contracts.TeamMember
+	teamRunning := 0
+	if team != nil {
+		teamMembers = visibleTeamMembers(team.Members(), activeID)
+		teamRunning = teamRunningCount(teamMembers)
+	}
 	var jobList []contracts.BackgroundJob
 	if jobs != nil {
 		jobList = jobs.Jobs()
@@ -258,7 +268,9 @@ func buildAgentRunBand(c *ui.Context, t *design.Tokens, st *state, chat contract
 			if running {
 				uikit.StatusBadge(c, t, uikit.StatusRunning, st.tr("运行中", "Running"))
 			}
-			buildTeamEntry(c, t, st, compact)
+			if team != nil {
+				buildTeamEntry(c, t, st, teamMembers, teamRunning, compact)
+			}
 			buildSubagentEntry(c, t, st, activeID, compact)
 			buildJobsEntry(c, t, st, compact)
 			if pending > 0 {
@@ -324,24 +336,13 @@ func agentStatusFill(t *design.Tokens, kind uikit.StatusKind) ui.Color {
 // team overlay. The entry stays visible whenever the host provides the team
 // backend, even at zero: team orchestration is a key feature and the entry is
 // its one-step surface (v0.2.20 correction of the v0.2.19 subtraction pass).
-func buildTeamEntry(c *ui.Context, t *design.Tokens, st *state, compact bool) {
-	team := st.teamService()
-	if team == nil {
-		return
-	}
-	members := team.Members()
-	running := 0
-	for _, member := range members {
-		if uikit.ParseRunState(member.RunState) == uikit.RunStateRunning {
-			running++
-		}
-	}
+func buildTeamEntry(c *ui.Context, t *design.Tokens, st *state, members []contracts.TeamMember,
+	running int, compact bool) {
 	// Team and subagents are the product's key orchestration features: their
 	// entries stay visible even at zero so the surfaces are discoverable
 	// (user correction to the v0.2.19 subtraction pass).
 	label := st.tr("智能体团队", "Agent team")
-	tooltip := fmt.Sprintf(st.tr("%d 名成员 · %d 个运行中", "%d members · %d running"),
-		len(members), running)
+	tooltip := teamMemberCounts(st, members, running)
 	chip := agentEntryButton(c, t, label, tooltip)
 	chip.Children(func() {
 		ui.Icon(c, icons.Users()).Size(design.Space4, design.Space4).TextColor(t.LabelSecondary)
@@ -376,6 +377,71 @@ func buildTeamEntry(c *ui.Context, t *design.Tokens, st *state, compact bool) {
 		agentPanelStyle(panel, t, design.DialogWidthCompact)
 		buildTeamPanel(c, t, st, members, running)
 	})
+}
+
+// visibleTeamMembers scopes the restored history to the active conversation
+// while keeping every live member: a restored record belongs to the session it
+// ran in, so another conversation must not list it.
+func visibleTeamMembers(members []contracts.TeamMember, activeID string) []contracts.TeamMember {
+	activeID = strings.TrimSpace(activeID)
+	if activeID == "" {
+		return members
+	}
+	out := make([]contracts.TeamMember, 0, len(members))
+	for _, member := range members {
+		if member.Historical {
+			if scope := strings.TrimSpace(member.SessionID); scope != "" && scope != activeID {
+				continue
+			}
+		}
+		out = append(out, member)
+	}
+	return out
+}
+
+// splitTeamMembers separates the live members from the restored history rows.
+func splitTeamMembers(members []contracts.TeamMember) (live, history []contracts.TeamMember) {
+	for _, member := range members {
+		if member.Historical {
+			history = append(history, member)
+		} else {
+			live = append(live, member)
+		}
+	}
+	return live, history
+}
+
+// teamRunningCount counts the members with a run in flight.
+func teamRunningCount(members []contracts.TeamMember) int {
+	running := 0
+	for _, member := range members {
+		if uikit.ParseRunState(member.RunState) == uikit.RunStateRunning {
+			running++
+		}
+	}
+	return running
+}
+
+// teamMemberCounts is the overlay's and the tooltip's member summary; the
+// historical rows are named separately so a reopened team does not read as
+// live.
+func teamMemberCounts(st *state, members []contracts.TeamMember, running int) string {
+	counts := fmt.Sprintf(st.tr("%d 名成员 · %d 个运行中", "%d members · %d running"), len(members), running)
+	if history := countHistory(members); history > 0 {
+		counts += fmt.Sprintf(st.tr(" · %d 条已结束", " · %d finished"), history)
+	}
+	return counts
+}
+
+// countHistory counts the restored (historical) rows of a member snapshot.
+func countHistory(members []contracts.TeamMember) int {
+	count := 0
+	for _, member := range members {
+		if member.Historical {
+			count++
+		}
+	}
+	return count
 }
 
 // loadTeamTasks snapshots the shared task board when the team overlay opens.
@@ -449,18 +515,30 @@ func agentPanelHeader(c *ui.Context, t *design.Tokens, icon *ui.SVG, title, coun
 // buildTeamPanel is the team overlay's body: member cards (state dot, name,
 // model, last activity, 打开) and shared task cards (subject, status, owner,
 // blockers, write scopes), scrolling inside the native panel.
-func buildTeamPanel(c *ui.Context, t *design.Tokens, st *state, members []contracts.TeamMember, running int) {
+func buildTeamPanel(c *ui.Context, t *design.Tokens, st *state, members []contracts.TeamMember,
+	running int) {
 	agentPanelHeader(c, t, icons.Users(), st.tr("智能体团队", "Agent team"),
-		fmt.Sprintf(st.tr("%d 名成员 · %d 个运行中", "%d members · %d running"), len(members), running))
+		teamMemberCounts(st, members, running))
+	live, history := splitTeamMembers(members)
 	ui.Scroll(c).FillWidth().MaxHeight(design.DialogBodyMax).
 		TrackScroll(&st.agents.teamScroll).Children(func() {
 		ui.Column(c).FillWidth().Gap(design.Space2).Children(func() {
 			agentSectionLabel(c, t, st.tr("成员", "Members"))
-			if len(members) == 0 {
+			switch {
+			case len(live) > 0:
+				buildTeamMembersList(c, t, st, &st.agents.teamMembers, live)
+			case len(members) == 0:
 				design.Apply(ui.Text(c, st.tr("还没有队友", "No teammates yet")),
 					t.Font(design.TypeXXXS)).TextColor(t.LabelTertiary)
-			} else {
-				buildTeamMembersList(c, t, st, members)
+			default:
+				design.Apply(ui.Text(c, st.tr("没有正在运行的队友", "No teammate is running")),
+					t.Font(design.TypeXXXS)).TextColor(t.LabelTertiary)
+			}
+			if len(history) > 0 {
+				// The restored records stay after the app restarts: the section
+				// tells the user they are history, not silently mixed live rows.
+				agentSectionLabel(c, t, st.tr("已结束", "Finished"))
+				buildTeamMembersList(c, t, st, &st.agents.teamHistory, history)
 			}
 			agentSectionLabel(c, t, st.tr("共享任务", "Shared tasks")+sharedTasksScrollHint(st))
 			buildSharedTasksList(c, t, st)
@@ -472,20 +550,21 @@ func buildTeamPanel(c *ui.Context, t *design.Tokens, st *state, members []contra
 
 // buildTeamMembersList renders the teammate cards through the official List so
 // the overlay can grow without a per-frame card wall.
-func buildTeamMembersList(c *ui.Context, t *design.Tokens, st *state, members []contracts.TeamMember) {
-	st.agents.teamMembers.Key = func(index int) any {
+func buildTeamMembersList(c *ui.Context, t *design.Tokens, st *state, list *ui.ListState,
+	members []contracts.TeamMember) {
+	list.Key = func(index int) any {
 		if index < 0 || index >= len(members) {
 			return nil
 		}
 		return members[index].ID
 	}
-	st.agents.teamMembers.Label = func(index int) string {
+	list.Label = func(index int) string {
 		if index < 0 || index >= len(members) {
 			return ""
 		}
 		return agentDisplayName(members[index].Name, members[index].ID)
 	}
-	ui.List(c, &st.agents.teamMembers, len(members), func(index int) {
+	ui.List(c, list, len(members), func(index int) {
 		buildTeamMemberCard(c, t, st, members[index])
 	}).FillWidth().Gap(design.Space2)
 }
@@ -506,8 +585,12 @@ func buildTeamMemberCard(c *ui.Context, t *design.Tokens, st *state, member cont
 			ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(design.Space2).Children(func() {
 				design.Apply(ui.Text(c, name), t.Font(design.TypeXS)).FontWeight(agentHeadingWeight).
 					TextColor(t.LabelPrimary).MaxLines(1).Ellipsis("…")
-				if st.agents.childID == member.ID {
+				if !member.Historical && st.agents.childID == member.ID {
 					design.Apply(ui.Badge(c, st.tr("当前", "Current")), t.Badge())
+				}
+				if member.Historical {
+					design.Apply(ui.Text(c, st.tr("历史", "History")), t.Font(design.TypeXXXS)).
+						TextColor(t.LabelTertiary).NoWrap()
 				}
 				ui.Spacer(c)
 				uikit.StatusText(c, t, design.TypeXXXS, kind,
@@ -794,6 +877,10 @@ func buildChildSwitcherRow(c *ui.Context, t *design.Tokens, st *state, agent con
 			ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(design.Space2).Children(func() {
 				design.Apply(ui.Text(c, name), t.Font(design.TypeXS)).FontWeight(agentHeadingWeight).
 					TextColor(t.LabelPrimary).MaxLines(1).Ellipsis("…")
+				if agent.Historical {
+					design.Apply(ui.Text(c, st.tr("历史", "History")), t.Font(design.TypeXXXS)).
+						TextColor(t.LabelTertiary).NoWrap()
+				}
 				design.Apply(ui.Text(c, childAgentMeta(st, agent)), t.Font(design.TypeXXXS)).
 					TextColor(t.LabelTertiary).NoWrap()
 				ui.Spacer(c)
@@ -813,7 +900,14 @@ func buildChildSwitcherRow(c *ui.Context, t *design.Tokens, st *state, agent con
 // childAgentMeta is the switcher's quiet type line: the kind and the follow-up
 // capability, plus the model when the backend names one.
 func childAgentMeta(st *state, agent contracts.ChildAgent) string {
-	parts := []string{childAgentKindLabel(st, agent.Kind), childAgentModeLabel(st, agent.Mode)}
+	parts := []string{childAgentKindLabel(st, agent.Kind)}
+	if agent.Historical {
+		// A restored row has no live backend: naming its old follow-up
+		// capability would promise a message that cannot be delivered.
+		parts = append(parts, st.tr("已结束记录", "Finished record"))
+	} else {
+		parts = append(parts, childAgentModeLabel(st, agent.Mode))
+	}
 	if model := strings.TrimSpace(agent.Model); model != "" {
 		parts = append(parts, model)
 	}
@@ -1159,14 +1253,18 @@ func buildChildConversationPane(c *ui.Context, t *design.Tokens, runtime contrac
 					}
 					buildChildOutput(c, t, st, child)
 					buildChildActivitySection(c, t, st, child)
-					if child.Mode != contracts.ChildAgentContinuable {
+					switch {
+					case child.Historical:
+						agentHint(c, t, st.tr("已结束的记录（应用重启后仍保留）：只读，不能再继续对话。",
+							"Finished record (kept after a restart): read-only, it cannot be continued."))
+					case child.Mode != contracts.ChildAgentContinuable:
 						agentHint(c, t, st.tr("一次性子智能体：只读会话，不能继续对话。",
 							"One-shot subagent: read-only, it cannot be continued."))
 					}
 				})
 			})
 		})
-		if child.Mode == contracts.ChildAgentContinuable {
+		if child.Mode == contracts.ChildAgentContinuable && !child.Historical {
 			buildChildComposer(c, t, runtime, st, child)
 		}
 	})

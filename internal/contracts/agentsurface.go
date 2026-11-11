@@ -71,11 +71,17 @@ type ChildAgent struct {
 	Iterations  int
 	// Activity is the bounded recent timeline, oldest first.
 	Activity []ChildAgentActivity
+	// Historical marks a child restored from the durable child-agent history:
+	// its run is over and the backend no longer owns it, so the view is
+	// read-only and no follow-up message can be delivered.
+	Historical bool
 }
 
 // ChildAgentService is the read/control surface the session header uses for the
 // subagent chip and the child conversation view. ParentSessionID scopes the
-// list; empty means the active session.
+// list; empty means the active session. Finished children restored from the
+// durable history arrive as Historical rows, scoped to the session that ran
+// them and read-only (no follow-up can be delivered).
 type ChildAgentService interface {
 	// ChildAgents lists the child agents of one parent session, oldest first.
 	ChildAgents(parentSessionID string) []ChildAgent
@@ -84,6 +90,16 @@ type ChildAgentService interface {
 	// SendChildAgent delivers a follow-up message to a continuable child and
 	// returns the child's answer. One-shot children return an error.
 	SendChildAgent(ctx context.Context, id, message string) (string, error)
+}
+
+// ChildHistoryMaintainer is the optional maintenance surface over the durable
+// child-agent history. The product UI does not call it; the headless driver
+// resets the retained records between scripted scenes so one scene's finished
+// children do not leak into the next. Backends without a durable history need
+// not implement it.
+type ChildHistoryMaintainer interface {
+	// ClearChildAgentHistory drops every retained child-agent record.
+	ClearChildAgentHistory()
 }
 
 // KeyChildAgents is provided by the agent module for the session UI.

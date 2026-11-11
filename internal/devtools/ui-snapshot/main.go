@@ -38,16 +38,41 @@ import (
 	"github.com/zeokeel/zeokeel/internal/uiroot"
 )
 
-type settings struct{ values map[string]string }
+// settings is the snapshot run's in-memory settings store. The automation
+// scene starts a run on a background goroutine that writes the session-origin
+// setting while the UI thread reads the toast preference, so the map needs the
+// same locking a real store has (an unsynchronized map here crashed the
+// snapshot step with a concurrent map read/write).
+type settings struct {
+	mu     sync.RWMutex
+	values map[string]string
+}
 
 func (s *settings) Get(key, fallback string) string {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
 	if value, ok := s.values[key]; ok {
 		return value
 	}
 	return fallback
 }
-func (s *settings) Set(key, value string) error { s.values[key] = value; return nil }
-func (s *settings) All() map[string]string      { return s.values }
+
+func (s *settings) Set(key, value string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.values[key] = value
+	return nil
+}
+
+func (s *settings) All() map[string]string {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	out := make(map[string]string, len(s.values))
+	for key, value := range s.values {
+		out[key] = value
+	}
+	return out
+}
 
 type logger struct{}
 
@@ -495,6 +520,32 @@ func main() {
 					a.render(outDir + "/p2-child-switcher.png")
 					a.tester.Key(0, ui.KeyEscape)
 					a.tester.Frame()
+				}
+			}
+			// Durable child-agent history: closing the finished teammate moves it
+			// to the overlay's 已结束 section (the same record a reopened app
+			// restores); its child conversation then opens read-only.
+			if members := team.Members(); len(members) > 0 {
+				name := members[0].Name
+				if err := team.Close(members[0].ID); err != nil {
+					fmt.Println("close teammate for history:", err)
+				} else {
+					a.tester.Frame()
+					if err := a.tester.Click("智能体团队"); err != nil {
+						fmt.Println("open team history overlay:", err)
+					} else {
+						a.tester.Frame()
+						a.render(outDir + "/p2-team-history.png")
+						if err := a.tester.Click("打开成员 " + name); err == nil {
+							a.tester.Frame()
+							a.render(outDir + "/p2-team-history-child.png")
+							if !a.clickBreadcrumbParent() {
+								fmt.Println("return from history child view: parent breadcrumb not found")
+							}
+						} else {
+							fmt.Println("open history child view:", err)
+						}
+					}
 				}
 			}
 			a.ui.SetRightPanelOpen(false)

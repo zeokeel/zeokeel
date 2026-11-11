@@ -48,6 +48,19 @@ func newTeamModuleService(t *testing.T) (*service, contracts.TeamService, cordis
 	return svc, teamService, ctx
 }
 
+// liveTeamMembers filters the durable historical rows out of a Members()
+// snapshot: a closed/finished member stays in the read model as history, so
+// "the team is empty" now means "no live member".
+func liveTeamMembers(members []contracts.TeamMember) []contracts.TeamMember {
+	live := make([]contracts.TeamMember, 0, len(members))
+	for _, member := range members {
+		if !member.Historical {
+			live = append(live, member)
+		}
+	}
+	return live
+}
+
 func TestTeamSpawnWaitAndMembers(t *testing.T) {
 	provider := &captureProvider{}
 	svc, teamService, _ := newTeamModuleService(t)
@@ -134,8 +147,8 @@ func TestTeamSendModelOverrideInterruptAndClose(t *testing.T) {
 	if err := teamService.Close(member.ID); err != nil {
 		t.Fatalf("Close: %v", err)
 	}
-	if members := teamService.Members(); len(members) != 0 {
-		t.Fatalf("members after close = %+v", members)
+	if members := liveTeamMembers(teamService.Members()); len(members) != 0 {
+		t.Fatalf("members after close = %+v, want no live member", members)
 	}
 	if err := teamService.Interrupt(member.ID); err == nil {
 		t.Fatal("Interrupt after close returned nil error")
@@ -218,8 +231,8 @@ func TestTeamToolsUnregisterAndCloseAllOnDispose(t *testing.T) {
 			t.Fatalf("team tool %q survived disposal", spec.Name)
 		}
 	}
-	if members := teamService.Members(); len(members) != 0 {
-		t.Fatalf("members after CloseAll = %+v", members)
+	if members := liveTeamMembers(teamService.Members()); len(members) != 0 {
+		t.Fatalf("members after CloseAll = %+v, want no live member", members)
 	}
 	if err := teamService.Close(member.ID); err == nil {
 		t.Fatal("Close after manager disposal returned nil error")

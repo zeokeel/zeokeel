@@ -159,6 +159,7 @@ func Module() *module.Descriptor[Config] {
 		}
 		svc := newService(cfg, registry, settings, logger, store, approvals)
 		svc.dataDir = dataDir
+		svc.childHistory = newChildHistoryStore(dataDir, logger)
 		if workspace, ok := ctx.Get(contracts.KeyWorkspace); ok {
 			svc.workspace = workspace
 		}
@@ -236,6 +237,10 @@ func Module() *module.Descriptor[Config] {
 		}
 		if _, err := ctx.Effect(func() cordis.Effect {
 			return cordis.Effect{cordis.CleanupOf(func() {
+				// Archive the still-listed members before the manager drops
+				// them, so a finished (or still running) teammate survives the
+				// restart as a historical record instead of vanishing.
+				svc.archiveTeamMembersOnShutdown()
 				if closeErr := teamManager.CloseAll(); closeErr != nil {
 					logger.Printf("[agent] close team manager: %v", closeErr)
 				}
@@ -333,6 +338,11 @@ type service struct {
 	// delegations (contracts.SubagentActivityLister) shown by the inspector's
 	// Agents pane; its own mutex guards it, never s.mu.
 	subagentActivities subagentActivityRegistry
+	// childHistory is the durable sidecar of finished teammates and synchronous
+	// subagents: reopening the app restores them as historical, read-only child
+	// agents (the team/subagent entries keep listing what ran). It holds its own
+	// lock; never call it while holding s.mu.
+	childHistory *childHistoryStore
 
 	// deletedMu guards deletedSessions. It is a separate lock because the run
 	// goroutine appends events while holding s.mu, and the deleted-session check

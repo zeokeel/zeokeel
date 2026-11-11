@@ -4,6 +4,26 @@ All notable changes to ZeoKeel are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/) and the project adheres to
 [Semantic Versioning](https://semver.org/).
 
+## [0.2.30] - 2026-11-11
+
+已结束的智能体团队 / 子智能体不再随重启消失：跑完的队友与同步子代理持久化，重开后作为只读历史回看。
+
+### Added
+
+- **`child-agents.json` 持久历史**：agent 模块把跑完的队友（名字/模型/任务/最终回答/运行态/用量/活动时间线）与同步子代理（任务/输出/错误/时间）写入 `<数据目录>/child-agents.json`。文档有界（24 名队友、48 个委派、14 天 TTL）、原子写（临时文件 + fsync + 目录 fsync）、损坏时隔离为 `.corrupt-<ts>` 并以空历史继续（不阻断启动）；应用退出时仍在运行的成员记为「已中断」。
+- **重启后恢复为只读历史行**：团队浮层在「成员」下新增「已结束」分区（每条带「历史」标记、真实状态、输出与活动），子智能体切换器与主栏子会话照常打开；历史会话明示「已结束的记录（应用重启后仍保留）：只读，不能再继续对话」，不渲染输入框，`SendChildAgent` 拒绝历史行。历史按父会话归属：页头计数与浮层只列当前会话的历史，运行中的队友仍按进程级可见（原行为）。
+- **契约**：`TeamMember` 新增 `SessionID`/`Historical`，`ChildAgent` 新增 `Historical`；团队运行追踪在 spawn 时记录父会话 ID；`ChildAgentService` 增加可选的 `ChildHistoryMaintainer`（开发驱动在步骤间清空历史，产品 UI 不调用）。
+
+### Fixed
+
+- **`ui-snapshot` 设置桩并发崩溃（验证稳定性）**：快照工具的内存设置桩改为带锁（自动化场景在后台 goroutine 写会话来源设置，UI 线程同时读 toast 开关，未加锁的 map 会触发 concurrent map read/write 让快照步骤偶发失败）。
+
+### 验证
+
+- `go test ./internal/modules/agent/ ./internal/ui/session/ ./internal/contracts/ ./internal/uikit/ ./internal/uiroot/` 全绿；新增 `child_history_test.go`（重启恢复、文档往返/原子写、损坏隔离、保留上限）与 3 个历史帧测试（历史分组、只读历史会话、切换器历史标记）。
+- `ui-drive --only team` **7/7 PASS**（新增 `team-turn-persist`：真实回合内 spawn_teammate 后回合结束仍可见；`team-history`：关闭已结束队友后浮层仍保留「已结束」记录，历史会话无输入框）。
+- `ui-snapshot` 新增 `p2-team-history.png`、`p2-team-history-child.png`，人工复核亮色：已结束分区/历史标记/只读提示正确。
+
 ## [0.2.29] - 2026-11-11
 
 Windows 沙箱临时目录改用操作系统自带 temp（rig v0.15.1）。

@@ -87,12 +87,29 @@ func (d *drive) waitTeamRunState(name, runState string, timeout time.Duration) b
 	return false
 }
 
+// resetChildAgentHistory drops the durable child-agent history of the drive
+// process: a closed teammate stays in the read model as a historical row, and
+// the scripted steps must not inherit another step's finished children.
+func (d *drive) resetChildAgentHistory() {
+	children, err := d.root.Require(contracts.KeyChildAgents)
+	if err != nil {
+		return
+	}
+	if maintainer, ok := children.(contracts.ChildHistoryMaintainer); ok {
+		maintainer.ClearChildAgentHistory()
+	}
+}
+
 // closeAllTeamMembers stops and removes every live teammate, so steps start from
 // a deterministic roster and a teammate's slow scripted run cannot leak into
 // the next step.
 func (d *drive) closeAllTeamMembers() {
+	defer d.resetChildAgentHistory()
 	team := d.teamService()
 	for _, member := range team.Members() {
+		if member.Historical {
+			continue
+		}
 		_ = team.Close(member.ID)
 	}
 	d.drain(2)
@@ -482,7 +499,7 @@ func (d *drive) runTeamSteps() {
 			d.closeOverlay()
 		})
 
-	d.step("repro-team-turn", "team", "复现：真实回合内 spawn_teammate，回合结束后团队/子智能体入口与浮层",
+	d.step("team-turn-persist", "team", "回合内 spawn_teammate：回合结束后页头仍显示团队/子智能体入口与成员",
 		"模型在真实回合里调用 spawn_teammate → 回合结束、队友完成后，页头仍显示「智能体团队」与「子智能体」入口，浮层里仍列出 研究员（已完成）", func(c *check) {
 			d.resetToSession()
 			d.closeAllTeamMembers()
@@ -539,6 +556,61 @@ func (d *drive) runTeamSteps() {
 			c.mustText("研究员", "已完成")
 			c.shot("repro-team-turn-overlay")
 			d.closeOverlay()
+			d.closeAllTeamMembers()
+		})
+
+	d.step("team-history", "team", "历史：关闭已结束的队友后，团队浮层保留「已结束」历史记录",
+		"队友完成后 Close → 页头团队入口仍显示计数，浮层「已结束」区列出该成员（历史/已完成/输出），点「打开成员」进入只读历史会话（无输入框）", func(c *check) {
+			d.resetToSession()
+			d.closeAllTeamMembers()
+			d.server.SetMode(scriptAnswer)
+			defer d.server.SetMode(scriptAnswer)
+
+			if !d.spawnTeamMember("历史研究员", "研究修订记录") {
+				c.failf("spawn_teammate 调用失败")
+				return
+			}
+			if !d.waitTeamRunState("历史研究员", contracts.TeamRunDone, 15*time.Second) {
+				c.warnf("历史研究员 15s 内没有完成，仍可验证历史记录")
+			}
+			var target contracts.TeamMember
+			for _, member := range d.teamService().Members() {
+				if member.Name == "历史研究员" && !member.Historical {
+					target = member
+					break
+				}
+			}
+			if target.ID == "" {
+				c.failf("团队里没有可关闭的历史研究员")
+				return
+			}
+			if err := d.teamService().Close(target.ID); err != nil {
+				c.failf("Close 失败：%v", err)
+				return
+			}
+			d.drain(3)
+			if !c.mustText("智能体团队") {
+				return
+			}
+			if !d.openTeamOverlay() {
+				c.failf("关闭队友后无法打开团队浮层；texts=%v", paletteTailTexts(d))
+				return
+			}
+			c.mustText("已结束", "历史研究员", "历史", "已完成", "1 条已结束")
+			c.shot("team-history")
+			title := d.currentSessionTitle()
+			if err := d.click("打开成员 历史研究员"); err != nil {
+				c.failf("历史记录缺少「打开成员」：%v", err)
+				return
+			}
+			d.drain(3)
+			c.mustText("历史研究员", "队友 · 已结束记录",
+				"已结束的记录（应用重启后仍保留）：只读，不能再继续对话。")
+			c.require(!d.has("输入消息…"), "历史会话仍渲染输入框")
+			c.shot("team-history-child")
+			if !d.childBridge(title) {
+				c.failf("历史会话无法返回父会话；texts=%v", paletteTailTexts(d))
+			}
 			d.closeAllTeamMembers()
 		})
 

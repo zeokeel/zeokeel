@@ -211,8 +211,8 @@ func TestTeamRunStateTracksInterruptAndClose(t *testing.T) {
 	if err := teamService.Close(member.ID); err != nil {
 		t.Fatalf("Close: %v", err)
 	}
-	if members := teamService.Members(); len(members) != 0 {
-		t.Fatalf("Members after Close = %+v, want none", members)
+	if members := liveTeamMembers(teamService.Members()); len(members) != 0 {
+		t.Fatalf("Members after Close = %+v, want no live member", members)
 	}
 	if !hasActivityKind(t, teamService, contracts.TeamActivityClose, member.ID) {
 		t.Fatalf("activity model = %+v, want a close event for %s",
