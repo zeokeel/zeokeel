@@ -22,12 +22,18 @@ import (
 type taskBoardAdapter struct {
 	manager *team.TaskManager
 	store   *taskBoardStore
+	// loadOK records that the durable document existed and parsed (even if it
+	// was a valid empty board); false means missing/corrupt/unreadable.
+	loadOK bool
 
 	// deleted tracks tasks removed through the board API. rig v0.13's
 	// TaskManager has no Delete operation, so Delete tombstones the id; the
 	// board List hides it and SetStatus/Delete treat it as unknown.
 	mu      sync.Mutex
 	deleted map[string]bool
+	// removed marks a conversation board whose document was deleted: a bound
+	// tool that was resolved before the removal must not recreate the document.
+	removed bool
 }
 
 var (
@@ -52,14 +58,37 @@ func (b *taskBoardAdapter) setDeleted(deleted map[string]bool) {
 	}
 }
 
-// persist snapshots the live board into the durable document (best effort).
-func (b *taskBoardAdapter) persist() {
-	if b == nil || b.store == nil {
+// retire marks the board removed and stops all later persistence. It is used by
+// RemoveTaskBoardForSession: tools bound before the deletion keep this adapter
+// and must not resurrect the document.
+func (b *taskBoardAdapter) retire() {
+	if b == nil {
 		return
 	}
+	b.mu.Lock()
+	b.removed = true
+	b.mu.Unlock()
+	if b.store != nil {
+		b.store.retire()
+	}
+}
+
+// persist snapshots the live board into the durable document and reports the
+// write error (persistence is best effort for ordinary mutations; the migration
+// commit depends on it).
+func (b *taskBoardAdapter) persist() error {
+	if b == nil || b.store == nil {
+		return nil
+	}
+	b.mu.Lock()
+	if b.removed {
+		b.mu.Unlock()
+		return nil
+	}
+	b.mu.Unlock()
 	tasks, err := b.manager.List(context.Background(), rig.TeamTaskFilter{})
 	if err != nil {
-		return
+		return err
 	}
 	b.mu.Lock()
 	deleted := make(map[string]bool, len(b.deleted))
@@ -67,7 +96,7 @@ func (b *taskBoardAdapter) persist() {
 		deleted[id] = true
 	}
 	b.mu.Unlock()
-	b.store.save(tasks, deleted)
+	return b.store.save(tasks, deleted)
 }
 
 // List implements contracts.TaskBoard.
@@ -189,6 +218,20 @@ func (b *taskBoardAdapter) Delete(ctx context.Context, id string) error {
 	b.mu.Unlock()
 	b.persist()
 	return nil
+}
+
+// deletedIDs returns the tombstones of this board (for migration).
+func (b *taskBoardAdapter) deletedIDs() []string {
+	if b == nil {
+		return nil
+	}
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	out := make([]string, 0, len(b.deleted))
+	for id := range b.deleted {
+		out = append(out, id)
+	}
+	return out
 }
 
 // isDeleted reports whether the board API removed id.

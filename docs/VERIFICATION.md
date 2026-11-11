@@ -866,6 +866,12 @@ v0.2.12 的 package-macos job 在 GitHub Ubuntu runner 上构建 libdmg-hfsplus 
 
 ## 0.2.31（2026-11-11：DSH 对齐的子会话架构）
 
-- **变更**：teammate 与同步子代理统一使用稳定 child-session ID（团队 member ID == 子智能体 ID == 历史行 ID，`member-N`/注册表 ID 只在后端解析）；`child-sessions.json` v2 替换 v0.2.30 的 `child-agents.json`（有界 64、14 天 TTL、原子写、损坏隔离、v1 自动迁移），spawn/完成/失败/中断/关闭/退出持续落盘；共享任务板持久化到 `team-tasks.json`（启动回放连续编号/依赖/owner/写入范围/墓碑；模型工具与 UI 操作成功即写；损坏隔离；无 dataDir 时纯内存）。修复 tracker 用过期成员快照释放 claim 导致并发 spawn 丢 claim 的竞态。
+- **变更**：teammate 与同步子代理统一使用稳定 child-session ID（团队 member ID == 子智能体 ID == 历史行 ID，`member-N`/注册表 ID 只在后端解析）；`child-sessions.json` v2 替换 v0.2.30 的 `child-agents.json`（有界 64、14 天 TTL、原子写、损坏隔离、v1 自动迁移），spawn/完成/失败/中断/关闭/退出持续落盘；共享任务板持久化到 `team-tasks.json`（v0.2.32 起按会话；启动回放连续编号/依赖/owner/写入范围/墓碑；模型工具成功后写入；损坏隔离；无 dataDir 时纯内存）。修复 tracker 用过期成员快照释放 claim 导致并发 spawn 丢 claim 的竞态。
 - **验证**（`./scripts/verify.sh` 全量）：gofmt/build/vet/designlint/design-check/mygo vet PASS；`go test ./...` 与 `-race` PASS；regression **276 PASS / 0 SKIP / 0 FAIL**；`ui-snapshot` **103 steps / 102 PNGs**；desktop/headless/ACP smoke PASS；**13/13 PASS（502s）**。`ui-drive --only team` **7/7 PASS**；人工复核 `p2-team-history.png`（历史行稳定 ID、已完成 badge、历史标记）。
-- **已知后续**：完成回执注入 transcript（需要父会话 model-inbox）、任务板按会话归属、writeScopes 仍仅提示（与 DSH 一致）。
+- **已知后续**：完成回执注入 transcript、任务板按会话归属（两项均已在 0.2.32 交付）、writeScopes 仍仅提示（与 DSH 一致）。
+
+## 0.2.32（2026-11-12：rig v0.16.0 + 会话级任务板 + 完成回执）
+
+- **变更**：zeokeel-rig v0.15.1 → v0.16.0（Windows `terminal_*` 真实 ConPTY，不可用时回退 pipe；公共 API 无破坏，`GOOS=windows` 交叉构建通过）。共享任务板按会话归属：`team_task_*` 携带 run-scoped 会话上下文，每会话持久化 `<数据目录>/team-tasks/<session>.json`；启动预载（128 文件/30 天修剪、缓存 192）；v0.2.31 的全局板懒迁移（`.migrating` + target journal，失败阻塞变更类工具并重试，按内容多重集合幂等合并，回滚/旧版文件重新出现不丢不重；旧墓碑不会误隐藏新任务）。UI 任务板缓存优先，miss 只做一次只读加载（不迁移/不写/不隔离），无活动会话不回退全局板；删除会话按路径删文件+墓碑。子代理/队友完成回执：队友完成以 user 消息注入下一轮模型上下文（每队友一次、成功才提交、失败重试、teardown 先等 run 收尾），transcript 新增 `ChatRoleNotice` 只读行（live 按时间合入/流式上方，失败 danger 文本+告警图标且同屏最多 2 条 danger，重启后按 Finished 追加）；同步一次性子代理答案已在工具结果中不重复注入；rig manager 团队通知排空但不注入。委派优先 run-scoped 会话；关闭运行中队友持久化「已中断 + 结束时间」；`WithAgentSession(nil)` 防护；测试 teardown 顺序修复（模块先于临时目录释放）。
+- **验证**（`./scripts/verify.sh` 全量，CGO 开启以支持 `-race`）：gofmt/build/vet/designlint/design-check/mygo vet PASS；`go test ./...` 与 `-race` PASS；regression **276 PASS / 0 SKIP / 0 FAIL**；`ui-snapshot` **104 steps / 103 PNGs**；desktop/headless/ACP smoke PASS；**13/13 PASS（502s）**。`ui-drive --only team` **7/7 PASS**；人工复核 `.cache/r2-snapshot/p2-team-tasks.png`（按会话任务卡）、`.cache/r2-snapshot/p2-team-history.png`（完成回执行）。
+- **独立审计**：4 轮 fresh-context 独立 agent 审计（backend/surface 分组，逐轮「审计→修复→复审计」；覆盖身份/持久化、任务板缓存/迁移/删除、回执一次性、并发/teardown、UI 语义与文档），最终确认 **NO P0/P1/P2 FINDINGS**。保留的 P3 限制：目标会话任务板已满（256）时迁移保持 pending，需删除该会话释放容量；`stores` 注册表与损坏备份的清理为有界近似；`writeScopes` 仍仅提示（与 DSH 一致）。

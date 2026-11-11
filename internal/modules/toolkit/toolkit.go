@@ -25,7 +25,6 @@ import (
 	"github.com/zeokeel/zeokeel-rig/tools/misc"
 	"github.com/zeokeel/zeokeel-rig/tools/schedule"
 	"github.com/zeokeel/zeokeel-rig/tools/skill"
-	"github.com/zeokeel/zeokeel-rig/tools/team"
 	"github.com/zeokeel/zeokeel-rig/tools/web"
 
 	"github.com/zeokeel/zeokeel/internal/contracts"
@@ -168,20 +167,12 @@ func Module() *module.Descriptor[Config] {
 		} else {
 			tools = append(tools, skill.Tools(nil)...)
 		}
-		taskManager := team.NewTaskManager()
-		taskStore := newTaskBoardStore(dataDir, logf)
-		var taskDeleted map[string]bool
-		if taskStore != nil {
-			if tasks, deleted, ok := taskStore.load(); ok {
-				taskDeleted = hydrateTaskBoard(context.Background(), taskManager, tasks, deleted, logf)
-				if len(tasks) > 0 {
-					logf("[toolkit] restored %d shared task(s) from the durable board", len(tasks))
-				}
-			}
-		}
-		taskBoard := newTaskBoard(taskManager, taskStore)
-		taskBoard.setDeleted(taskDeleted)
-		tools = append(tools, wrapPersistingTaskTools(team.TaskTools(taskManager), taskBoard)...)
+		// The shared task board is per session (DSH's Lead-session board): the
+		// task tools dispatch on the run-scoped session ID from their context,
+		// while KeyTaskBoard exposes the aggregate view for host surfaces that
+		// have no session context.
+		taskBoard := newTaskBoardService(dataDir, logf)
+		tools = append(tools, taskBoard.tools()...)
 		if hasSettings {
 			tools = append(tools, maskedSettingsTools(settingsService)...)
 		}

@@ -4,6 +4,24 @@ All notable changes to ZeoKeel are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/) and the project adheres to
 [Semantic Versioning](https://semver.org/).
 
+## [0.2.32] - 2026-11-11
+
+DSH 对齐收尾：rig v0.16.0（Windows ConPTY）、任务板按会话归属、子代理完成回执进入父会话 transcript。
+
+### Changed
+
+- **rig v0.15.1 → v0.16.0**：Windows `terminal_*` 使用真实 ConPTY（原生 PowerShell；ConPTY 不可用时自动回退 pipe），shell 定位在 PATH 缺失时走 Win32 兜底；公共 API 无破坏性变更，ZeoKeel 的 `terminalTransport=auto` 默认直接生效。`GOOS=windows` 交叉构建与全量测试通过。
+- **共享任务板按会话归属**（DSH 的 Lead-session 语义）：agent 模块给每次 run 的工具调用打上 `contracts.WithAgentSession` 上下文；toolkit 的 `team_task_*` 按会话分发到该会话自己的 rig `TaskManager`，每个会话持久化到 `<数据目录>/team-tasks/<session>.json`。启动时预载最近的会话文档（128 个/30 天修剪、内存缓存 192 上限）；v0.2.31 的 `team-tasks.json` 在首个会话任务工具调用时迁移（`.migrating` 日志 + target 记录，崩溃后可恢复且不重复；迁移前旧全局任务不出现在会话浮层——无活动会话时浮层也不回退全局板），迁移成功后写入 `.migrated` 完成标记、删除 `.migrating` 源并退役旧板（全新安装不写标记；写入失败保留 journal 重试）；迁移按内容幂等合并（回滚/旧版文件重新出现、目标会话被删除、崩溃后重试都不会重复或丢任务；旧板已删除任务的墓碑不会误隐藏新板任务）。已知限制：目标会话任务板已满（256）时迁移保持 pending、变更类任务工具保持不可用，需删除该会话释放容量。UI 读取优先命中预载缓存；缓存未命中（新会话/被淘汰）只做一次只读文档加载，不触发迁移、损坏隔离或写入；删除会话按路径删除任务文档并加墓碑，晚到的工具调用不会重建。`KeyTaskBoard` 保留聚合视图（无会话上下文的宿主/驱动仍可用），新增可选 `contracts.SessionTaskBoard`（UI 只列当前会话）与 `contracts.TaskBoardCleaner`。任务 ID 按会话重复，跨会话 `Assign` 不再回退到别的会话 board。
+- **完成回执进 transcript**（DSH `subagent-settled` 语义）：子会话记录新增 `Notified`；父会话**成功** run 的历史加载阶段为每个已完成/失败/中断的**队友**暂存一条 user 消息（同步一次性子代理的答案已内联在工具结果里，不再重复回执），run 成功后持久化 `Notified`（失败/取消不消费，下一轮重试；teardown 先取消并等待 run 收尾再关闭存储，故每子会话只注入一次且不会因请求失败/退出丢失）。同时接管 rig manager 的完成通知（排空但不注入），模型只从一个会话级通道获知完成。会话 UI 从同一批 child-session 记录派生只读通知行（`ChatRoleNotice`，live 按 `CreatedAt` 合入 transcript、运行中放在流式回答上方；重启恢复的消息没有时间戳，回执按 `Finished` 追加在末尾；最多两行，失败态用 danger 文本 + 告警图标，同屏最多两条 danger 回执以守住红色预算），按父会话过滤，重启后仍可见。
+- **子代理/队友归属 run-scoped 会话**：`subagent`/`spawn_teammate` 等委派工具优先使用工具上下文里的会话（`contracts.AgentSessionFromContext`），不再依赖可变的 active session；turn 中切换会话或后台/自动化 run 发起的子代理仍归属发起会话（回执不会串到别的会话）。关闭运行中的队友会持久化「已中断 + 结束时间」，中断回执可以触达模型/transcript。
+- **会话记录在模块 dispose 后停止写入**：避免退出/测试清理后后台 watcher 继续写数据目录的竞态。
+- **其它修复**：`contracts.WithAgentSession(nil, …)` 不再 panic；失败回执不再显示悬空冒号。
+
+### 验证
+
+- `ui-drive --only team` 7/7 PASS；`ui-snapshot` 全量（含 `p2-team-tasks.png` 任务板按会话、`p2-team-history.png` 完成回执行）。
+- `scripts/verify.sh` 全量 **13/13 PASS（502s）**：gofmt/build/vet/designlint/design-check/mygo vet PASS；`go test ./...` 与 `-race` PASS；regression **276 PASS / 0 SKIP / 0 FAIL**；`ui-snapshot` **104 steps / 103 PNGs**；desktop/headless/ACP smoke PASS。独立审计 4 轮（fresh-context agent，逐轮修复复审计）最终 **NO P0/P1/P2 FINDINGS**；详见 `docs/VERIFICATION.md`。
+
 ## [0.2.31] - 2026-11-11
 
 DSH 对齐的子会话架构：teammate 与子代理共用一套稳定身份，团队/子智能体两个视图看到同一个子会话；任务板随进程重启保留。

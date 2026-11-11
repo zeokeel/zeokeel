@@ -160,6 +160,11 @@ func Module() *module.Descriptor[Config] {
 		svc := newService(cfg, registry, settings, logger, store, approvals)
 		svc.dataDir = dataDir
 		svc.childSessions = newChildSessionStore(dataDir, logger)
+		if taskBoard, ok := ctx.Get(contracts.KeyTaskBoard); ok && taskBoard != nil {
+			if board, isBoard := taskBoard.(contracts.TaskBoard); isBoard {
+				svc.taskBoard = board
+			}
+		}
 		if workspace, ok := ctx.Get(contracts.KeyWorkspace); ok {
 			svc.workspace = workspace
 		}
@@ -241,7 +246,12 @@ func Module() *module.Descriptor[Config] {
 				// them, so a finished (or still running) teammate survives the
 				// restart as a historical record instead of vanishing.
 				svc.archiveTeamMembersOnShutdown()
-				if closeErr := teamManager.CloseAll(); closeErr != nil {
+				closeErr := teamManager.CloseAll()
+				// Let in-flight runs settle before closing the durable stores: a
+				// run that just succeeded may still be committing receipts.
+				svc.shutdownRuns(3 * time.Second)
+				svc.childSessions.close()
+				if closeErr != nil {
 					logger.Printf("[agent] close team manager: %v", closeErr)
 				}
 			})}
@@ -284,6 +294,10 @@ func Module() *module.Descriptor[Config] {
 // service is the contracts.ChatService implementation.
 type service struct {
 	mu sync.Mutex
+	// runWG tracks the in-flight run goroutines so module teardown can settle
+	// them before the durable stores are closed (a finishing run still commits
+	// its child-completion receipts).
+	runWG sync.WaitGroup
 
 	cfg       Config
 	registry  *rigtools.Registry
@@ -344,6 +358,9 @@ type service struct {
 	// read-only rows with their IDs intact. It holds its own lock; never call it
 	// while holding s.mu.
 	childSessions *childSessionStore
+	// taskBoard is the optional per-session shared board; DeleteSession uses its
+	// cleaner hook to remove the conversation's document.
+	taskBoard contracts.TaskBoard
 
 	// deletedMu guards deletedSessions. It is a separate lock because the run
 	// goroutine appends events while holding s.mu, and the deleted-session check
@@ -424,6 +441,46 @@ func newService(cfg Config, registry *rigtools.Registry, settings contracts.Sett
 		sessionPermissions: make(map[string]string),
 		sessionPresets:     make(map[string]string),
 		deletedSessions:    make(map[string]struct{}),
+	}
+}
+
+// startRunGoroutine launches one run goroutine tracked by runWG.
+func (s *service) startRunGoroutine(run func()) {
+	s.runWG.Add(1)
+	go func() {
+		defer s.runWG.Done()
+		run()
+	}()
+}
+
+// shutdownRuns cancels every in-flight run and waits (bounded) for the run
+// goroutines to settle. It runs during module teardown, before the durable
+// child-session store closes, so a successful run's receipt commit is not
+// silently dropped (and replayed after the next restart).
+func (s *service) shutdownRuns(timeout time.Duration) {
+	s.mu.Lock()
+	cancels := make([]context.CancelFunc, 0, len(s.sessions))
+	for _, state := range s.sessions {
+		if state.cancel != nil {
+			cancels = append(cancels, state.cancel)
+		}
+	}
+	s.mu.Unlock()
+	if len(cancels) > 0 {
+		for _, cancel := range cancels {
+			cancel()
+		}
+		s.logger.Printf("[agent] shutdown: cancelled %d in-flight run(s)", len(cancels))
+	}
+	done := make(chan struct{})
+	go func() {
+		s.runWG.Wait()
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-time.After(timeout):
+		s.logger.Printf("[agent] shutdown: runs still active after %s", timeout)
 	}
 }
 
@@ -1532,6 +1589,11 @@ func (s *service) DeleteSession(sessionID string) error {
 	// with the session. The settings row is best effort (the session is already
 	// gone; a failed cleanup must not fail the delete).
 	s.clearAllowedToolsRow(sessionID)
+	if cleaner, ok := s.taskBoard.(contracts.TaskBoardCleaner); ok {
+		if err := cleaner.RemoveTaskBoardForSession(sessionID); err != nil {
+			s.logger.Printf("[agent] remove task board for session %s: %v", sessionID, err)
+		}
+	}
 	if s.store != nil {
 		if err := s.store.DeleteSession(context.Background(), sessionID); err != nil {
 			s.logger.Printf("[agent] delete session %s: %v", sessionID, err)
@@ -1778,7 +1840,9 @@ func (s *service) send(sessionID, prompt string, attachments []contracts.Attachm
 		history = newRewritingHistory(history, sessionID, input[0], originalInput[0])
 	}
 	s.notify(sessionID)
-	go s.run(runCtx, sessionID, cfg, input, history, s.thinkingParamsForSession(sessionID, cfg.Model))
+	s.startRunGoroutine(func() {
+		s.run(runCtx, sessionID, cfg, input, history, s.thinkingParamsForSession(sessionID, cfg.Model))
+	})
 	return nil
 }
 
@@ -1921,7 +1985,9 @@ func (s *service) Regenerate(sessionID string) error {
 	}
 
 	s.notify(sessionID)
-	go s.run(runCtx, sessionID, cfg, runInput, runHistory, s.thinkingParamsForSession(sessionID, cfg.Model))
+	s.startRunGoroutine(func() {
+		s.run(runCtx, sessionID, cfg, runInput, runHistory, s.thinkingParamsForSession(sessionID, cfg.Model))
+	})
 	return nil
 }
 
@@ -2071,6 +2137,12 @@ func (s *service) run(ctx context.Context, sessionID string, cfg contracts.ChatC
 	if history == nil {
 		history = s.historyView()
 	}
+	// The parent run's model context receives one completion receipt per child
+	// that finished since the previous run (the transcript derives the same
+	// records for the user). The batch persists the receipt flags only when the
+	// run succeeds, so a failed request retries them instead of losing them.
+	noticeBatch := newChildNoticeBatch(s, sessionID)
+	history = withChildNotices(history, noticeBatch)
 	generation := s.modelCatalogInfo(cfg.Model)
 	// The product's default is unlimited; Rig treats 0 as its built-in 20-round
 	// default, so a 0 limit is passed as an effectively unreachable cap.
@@ -2080,7 +2152,7 @@ func (s *service) run(ctx context.Context, sessionID string, cfg contracts.ChatC
 	// the call (see loop_guard.go). A new run starts a fresh repeat chain.
 	// The workspace-root wrapper is outermost so every tool call sees the
 	// session's root even when another workspace is current.
-	runTools := withWorkspaceRoot(withRepeatGuard(tools, newRepeatToolGuard()), workspaceRoot)
+	runTools := withWorkspaceRoot(withAgentSession(withRepeatGuard(tools, newRepeatToolGuard()), sessionID), workspaceRoot)
 	spec := rig.AgentSpec{
 		Provider:      provider,
 		Model:         cfg.Model,
@@ -2124,6 +2196,9 @@ func (s *service) run(ctx context.Context, sessionID string, cfg contracts.ChatC
 		Input:     input,
 		Emit:      func(event rig.Event) { s.handleEvent(ctx, sessionID, workspaceRoot, event, usage) },
 	})
+	if runErr == nil {
+		noticeBatch.commit()
+	}
 	s.recordRunUsage(ctx, sessionID, result, time.Since(startedAt).Milliseconds(), usage.lastPromptTokens)
 	s.finishWithReason(sessionID, ctx, runErr, result.FinishReason)
 }

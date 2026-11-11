@@ -216,6 +216,22 @@ func (st *state) taskBoard() contracts.TaskBoard {
 	return board
 }
 
+// taskBoardForSession returns the task board scoped to one conversation when the
+// backend implements the per-session view (DSH's Lead-session board), else the
+// process-wide board.
+func (st *state) taskBoardForSession(sessionID string) contracts.TaskBoard {
+	board := st.taskBoard()
+	if board == nil {
+		return nil
+	}
+	if scoped, ok := board.(contracts.SessionTaskBoard); ok {
+		if sessionBoard := scoped.TaskBoardForSession(sessionID); sessionBoard != nil {
+			return sessionBoard
+		}
+	}
+	return board
+}
+
 // --- header entries ---------------------------------------------------------
 
 // buildAgentRunBand is the header's signature run surface: one quiet band
@@ -269,7 +285,7 @@ func buildAgentRunBand(c *ui.Context, t *design.Tokens, st *state, chat contract
 				uikit.StatusBadge(c, t, uikit.StatusRunning, st.tr("运行中", "Running"))
 			}
 			if team != nil {
-				buildTeamEntry(c, t, st, teamMembers, teamRunning, compact)
+				buildTeamEntry(c, t, st, teamMembers, teamRunning, activeID, compact)
 			}
 			buildSubagentEntry(c, t, st, activeID, compact)
 			buildJobsEntry(c, t, st, compact)
@@ -337,7 +353,7 @@ func agentStatusFill(t *design.Tokens, kind uikit.StatusKind) ui.Color {
 // backend, even at zero: team orchestration is a key feature and the entry is
 // its one-step surface (v0.2.20 correction of the v0.2.19 subtraction pass).
 func buildTeamEntry(c *ui.Context, t *design.Tokens, st *state, members []contracts.TeamMember,
-	running int, compact bool) {
+	running int, activeID string, compact bool) {
 	// Team and subagents are the product's key orchestration features: their
 	// entries stay visible even at zero so the surfaces are discoverable
 	// (user correction to the v0.2.19 subtraction pass).
@@ -366,7 +382,7 @@ func buildTeamEntry(c *ui.Context, t *design.Tokens, st *state, members []contra
 	if chip.Clicked() {
 		st.agents.teamOpen = !st.agents.teamOpen
 		if st.agents.teamOpen {
-			st.loadTeamTasks()
+			st.loadTeamTasks(activeID)
 		}
 		st.runtime.Invalidate()
 	}
@@ -444,14 +460,23 @@ func countHistory(members []contracts.TeamMember) int {
 	return count
 }
 
-// loadTeamTasks snapshots the shared task board when the team overlay opens.
-// The board is the in-memory rig task manager (one bounded read), and a read
-// failure stays inside the overlay instead of failing the screen.
-func (st *state) loadTeamTasks() {
+// loadTeamTasks snapshots the active conversation's shared task board when the
+// team overlay opens. The board is the per-session rig task manager (one bounded
+// read), and a read failure stays inside the overlay instead of failing the
+// screen.
+func (st *state) loadTeamTasks(sessionID string) {
 	st.agents.tasks = nil
 	st.agents.tasksErr = ""
 	st.agents.tasksLoaded = false
-	board := st.taskBoard()
+	if strings.TrimSpace(sessionID) == "" {
+		// No conversation: never fall back to the process-wide legacy board, so
+		// a v0.2.31 document cannot surface in an empty session overlay. The
+		// snapshot is complete (empty), not pending, so the empty state renders
+		// instead of a permanent "reading…" row.
+		st.agents.tasksLoaded = true
+		return
+	}
+	board := st.taskBoardForSession(sessionID)
 	if board == nil {
 		return
 	}

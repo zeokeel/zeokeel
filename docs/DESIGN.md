@@ -542,7 +542,7 @@ uikit.ToolRow(c, uikit.ToolRowOptions{
 | `TypeBody 14` | 会话正文、问题正文、表单成句说明 | 元数据、按钮 |
 | `TypeS 14/24` | 列表行标题、菜单项、按钮标签、工具名 | 长段正文 |
 | `TypeXS 13` | 次要正文、表单标签、属性值、检查器正文 | 时间/计数（用 XXS） |
-| `TypeXXS 12` | 元数据行、hint、状态徽章文字 | 成句活动摘要（≤2 行） |
+| `TypeXXS 12` | 元数据行、hint、状态徽章文字、≤2 行的活动/回执摘要 | 长段正文 |
 | `TypeXXXS 11` | 微标签/kbd/gutter | 成句文本、按钮文字、诊断值 |
 
 **规则**：字号只走 `t.Font(role)`，它会同时设置字体栈、行高、字重并随 `TextScale` 缩放；裸 `FontSize` = AP-03。Mono 文本用 `t.MonoText(role)`。**一屏最多 4 种字号**；权重只用 `design.WeightRegular/Medium/Semibold`（400/500/600），禁止裸 `FontWeight(600)`（DS-03）；元数据永不用 accent。

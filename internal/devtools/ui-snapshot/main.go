@@ -373,7 +373,7 @@ func main() {
 	// ask_user: the host bridge + native overlay dialog (the tool parks).
 	if toolkit, tkErr := a.root.Require(contracts.KeyToolkit); tkErr == nil {
 		go func() {
-			_, _ = toolkit.Invoke(context.Background(), rig.ToolCall{
+			_, _ = toolkit.Invoke(a.toolContext(context.Background()), rig.ToolCall{
 				ID: "ask-snapshot", Name: "ask_user",
 				Arguments: `{"question":"要使用哪个数据库？","options":["SQLite（本地文件）","PostgreSQL（服务端）"]}`,
 			})
@@ -395,7 +395,7 @@ func main() {
 	// present: artifact preview overlay (markdown body + 关闭).
 	if toolkit, tkErr := a.root.Require(contracts.KeyToolkit); tkErr == nil {
 		go func() {
-			_, _ = toolkit.Invoke(context.Background(), rig.ToolCall{
+			_, _ = toolkit.Invoke(a.toolContext(context.Background()), rig.ToolCall{
 				ID: "present-snapshot", Name: "present",
 				Arguments: `{"title":"检查报告","content":"# 构建结果\n\n- 30 个测试包通过\n- 0 失败\n\n![badge](https://example.com/badge.svg)"}`,
 			})
@@ -429,7 +429,7 @@ func main() {
 	// plan_review: plan overlay with approve/cancel.
 	if toolkit, tkErr := a.root.Require(contracts.KeyToolkit); tkErr == nil {
 		go func() {
-			_, _ = toolkit.Invoke(context.Background(), rig.ToolCall{
+			_, _ = toolkit.Invoke(a.toolContext(context.Background()), rig.ToolCall{
 				ID: "plan-snapshot", Name: "plan_review",
 				Arguments: `{"plan":"# 发布计划\n\n1. 运行全量测试\n2. 更新文档与截图\n3. 打 tag 并发布"}`,
 			})
@@ -450,7 +450,7 @@ func main() {
 
 	// goal: the agent goal tool shows in the session header.
 	if toolkit, tkErr := a.root.Require(contracts.KeyToolkit); tkErr == nil {
-		_, _ = toolkit.Invoke(context.Background(), rig.ToolCall{
+		_, _ = toolkit.Invoke(a.toolContext(context.Background()), rig.ToolCall{
 			ID: "goal-snapshot", Name: "goal", Arguments: `{"action":"set","text":"完成 Q4 发布清单并更新文档"}`,
 		})
 		a.tester.Frame()
@@ -465,7 +465,7 @@ func main() {
 
 	// Team orchestration: a real teammate + the Agents inspector.
 	if toolkit, tkErr := a.root.Require(contracts.KeyToolkit); tkErr == nil {
-		_, _ = toolkit.Invoke(context.Background(), rig.ToolCall{
+		_, _ = toolkit.Invoke(a.toolContext(context.Background()), rig.ToolCall{
 			ID: "spawn-snapshot", Name: "spawn_teammate",
 			Arguments: `{"name":"研究员","prompt":"研究一下当前工作目录并给出摘要"}`,
 		})
@@ -783,7 +783,7 @@ func main() {
 	// native jobs overlay (status/command/duration/exit code + the stop action).
 	liveJob := ""
 	if toolkit, tkErr := a.root.Require(contracts.KeyToolkit); tkErr == nil {
-		if result, invokeErr := toolkit.Invoke(context.Background(), rig.ToolCall{
+		if result, invokeErr := toolkit.Invoke(a.toolContext(context.Background()), rig.ToolCall{
 			ID: "job-snapshot", Name: "job_start",
 			Arguments: `{"command":"bash -c 'sleep 60'","timeout_ms":30000}`,
 		}); invokeErr == nil && !result.IsError {
@@ -810,18 +810,22 @@ func main() {
 	// Shared task board: status groups, owners, dependencies and the expanded
 	// task detail (the board is also the agent's todo list).
 	if board, boardErr := a.root.Require(contracts.KeyTaskBoard); boardErr == nil {
-		first, _ := board.Create(context.Background(), "发布前检查", "确认文档与截图")
-		pending, _ := board.Create(context.Background(), "编写发布说明", "")
-		_, _ = board.SetStatus(context.Background(), pending.ID, contracts.TaskStatusInProgress)
+		// The shared board belongs to the active conversation (DSH semantics):
+		// every board/tool call below carries that run-scoped session so the
+		// rendered overlay lists exactly these tasks.
+		boardCtx := a.toolContext(context.Background())
+		first, _ := board.Create(boardCtx, "发布前检查", "确认文档与截图")
+		pending, _ := board.Create(boardCtx, "编写发布说明", "")
+		_, _ = board.SetStatus(boardCtx, pending.ID, contracts.TaskStatusInProgress)
 		if toolkit, tkErr := a.root.Require(contracts.KeyToolkit); tkErr == nil && first.ID != "" {
-			_, _ = toolkit.Invoke(context.Background(), rig.ToolCall{
+			_, _ = toolkit.Invoke(boardCtx, rig.ToolCall{
 				ID: "task-snapshot", Name: "team_task_create",
 				Arguments: `{"subject":"更新发布截图","description":"替换三张旧截图并复核","blocked_by":["` + first.ID + `"]}`,
 			})
 		}
 		// Assign the dependent task to the live teammate: the owner menu and the
 		// task ↔ member mapping are part of the team depth.
-		if tasks, listErr := board.List(context.Background()); listErr == nil {
+		if tasks, listErr := board.List(boardCtx); listErr == nil {
 			if assigner, ok := any(board).(contracts.TaskAssigner); ok {
 				owner := ""
 				if team, teamErr := a.root.Require(contracts.KeyTeam); teamErr == nil {
@@ -831,7 +835,7 @@ func main() {
 				}
 				for _, task := range tasks {
 					if task.Subject == "更新发布截图" && owner != "" {
-						_, _ = assigner.Assign(context.Background(), task.ID, owner)
+						_, _ = assigner.Assign(boardCtx, task.ID, owner)
 					}
 				}
 			}
@@ -1493,6 +1497,16 @@ func (a *app) clickSettingsItem(label string) error {
 		return fmt.Errorf("settings page %q did not render", label)
 	}
 	return nil
+}
+
+// toolContext stamps the active conversation onto a direct tool invocation so
+// session-scoped tools (the per-session task board) route to the session whose
+// surface the screenshot renders.
+func (a *app) toolContext(ctx context.Context) context.Context {
+	if chat, err := a.root.Require(contracts.KeyChat); err == nil {
+		return contracts.WithAgentSession(ctx, chat.ActiveSession())
+	}
+	return ctx
 }
 
 func (a *app) render(path string) {

@@ -16,7 +16,10 @@ package toolkit
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -24,6 +27,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 
 	rig "github.com/zeokeel/zeokeel-rig"
@@ -63,27 +67,125 @@ type taskBoardTask struct {
 // taskBoardStore owns the persisted board. It holds its own lock; callers never
 // hold the adapter lock while saving.
 type taskBoardStore struct {
-	mu   sync.Mutex
-	path string
-	logf func(string, ...any)
+	mu      sync.Mutex
+	path    string
+	logf    func(string, ...any)
+	retired bool
 }
 
-// newTaskBoardStore returns the store for dataDir (nil when the host has no
-// data directory: the board then stays in-memory as before).
-func newTaskBoardStore(dataDir string, logf func(string, ...any)) *taskBoardStore {
+// retire makes the store read-only/terminal: later saves are no-ops. The v0.2.31
+// process-wide document is retired after its one-time migration so a stale
+// writer can never recreate it and get re-migrated into duplicate tasks.
+func (s *taskBoardStore) retire() {
+	if s == nil {
+		return
+	}
+	s.mu.Lock()
+	s.retired = true
+	s.mu.Unlock()
+}
+
+// taskBoardFilePath returns the document path for one board scope. The legacy
+// (process-wide) board keeps the v1 path; each session owns one file under
+// team-tasks/ so concurrent sessions never share task ids or state.
+func taskBoardFilePath(dataDir, sessionID string) string {
 	dir := strings.TrimSpace(dataDir)
 	if dir == "" {
+		return ""
+	}
+	sessionID = strings.TrimSpace(sessionID)
+	if sessionID == "" {
+		return filepath.Join(dir, taskBoardFileName)
+	}
+	return filepath.Join(dir, "team-tasks", sanitizeSessionFileName(sessionID)+".json")
+}
+
+// sanitizeSessionFileName makes a session id safe as a file name while keeping
+// it recognisable; ids that need rewriting get a short hash suffix so two
+// distinct sessions can never collide.
+func sanitizeSessionFileName(sessionID string) string {
+	var builder strings.Builder
+	clean := true
+	for _, char := range sessionID {
+		switch {
+		case char >= 'a' && char <= 'z', char >= 'A' && char <= 'Z',
+			char >= '0' && char <= '9', char == '-', char == '_':
+			builder.WriteRune(char)
+		default:
+			builder.WriteByte('_')
+			clean = false
+		}
+	}
+	name := builder.String()
+	if name == "" {
+		name = "session"
+		clean = false
+	}
+	if !clean {
+		name += "-" + shortHash(sessionID)
+	}
+	return name
+}
+
+// shortHash returns the first 8 hex characters of the session id's SHA-256.
+func shortHash(value string) string {
+	sum := sha256.Sum256([]byte(value))
+	return hex.EncodeToString(sum[:])[:8]
+}
+
+// newTaskBoardStoreAt returns the store for one explicit document path.
+func newTaskBoardStoreAt(path string, logf func(string, ...any)) *taskBoardStore {
+	if strings.TrimSpace(path) == "" {
 		return nil
 	}
 	if logf == nil {
 		logf = func(string, ...any) {}
 	}
-	return &taskBoardStore{path: filepath.Join(dir, taskBoardFileName), logf: logf}
+	return &taskBoardStore{path: path, logf: logf}
 }
 
-// load reads the persisted board. It reports ok=false when there is nothing to
-// hydrate (missing/corrupt document); a corrupt document is quarantined.
+// deleteDocument retires the store and removes its document atomically with
+// respect to save: a save already in flight finishes under the lock before the
+// file is removed, and every later save is a no-op.
+func (s *taskBoardStore) deleteDocument() error {
+	if s == nil {
+		return nil
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.retired = true
+	if strings.TrimSpace(s.path) == "" {
+		return nil
+	}
+	if err := os.Remove(s.path); err != nil && !os.IsNotExist(err) && !isNotDirOrMissing(err) {
+		return err
+	}
+	return nil
+}
+
+// isNotDirOrMissing treats ENOTDIR like a missing path (a parent turned into a
+// file during teardown); the document cannot exist in that state.
+func isNotDirOrMissing(err error) bool {
+	return errors.Is(err, syscall.ENOTDIR)
+}
+
+// load reads the persisted board. It reports ok=true when the document exists
+// and parsed (a valid-but-empty board included); a corrupt document is
+// quarantined and reports ok=false.
 func (s *taskBoardStore) load() (tasks []rig.TeamTask, deleted []string, ok bool) {
+	return s.loadDocument(true)
+}
+
+// loadReadOnly is load without the corrupt-document quarantine rename. The
+// session UI uses it on its one bounded cache-miss read so a frame callback can
+// never write to disk; a corrupt document simply reads as an empty board (a
+// later adapter that loads the path may quarantine it).
+func (s *taskBoardStore) loadReadOnly() (tasks []rig.TeamTask, deleted []string, ok bool) {
+	return s.loadDocument(false)
+}
+
+// loadDocument is the shared parser; quarantine controls the corrupt recovery.
+func (s *taskBoardStore) loadDocument(quarantine bool) (tasks []rig.TeamTask, deleted []string, ok bool) {
 	if s == nil {
 		return nil, nil, false
 	}
@@ -99,11 +201,15 @@ func (s *taskBoardStore) load() (tasks []rig.TeamTask, deleted []string, ok bool
 	}
 	var document taskBoardFile
 	if err := json.Unmarshal(data, &document); err != nil {
-		s.quarantine("task board document is not valid JSON: " + err.Error())
+		if quarantine {
+			s.quarantine("task board document is not valid JSON: " + err.Error())
+		}
 		return nil, nil, false
 	}
 	if document.Version != taskBoardVersion {
-		s.quarantine(fmt.Sprintf("task board document has unsupported version %d", document.Version))
+		if quarantine {
+			s.quarantine(fmt.Sprintf("task board document has unsupported version %d", document.Version))
+		}
 		return nil, nil, false
 	}
 	for _, task := range document.Tasks {
@@ -119,13 +225,23 @@ func (s *taskBoardStore) load() (tasks []rig.TeamTask, deleted []string, ok bool
 			Updated:     task.Updated,
 		})
 	}
-	return tasks, document.Deleted, len(tasks) > 0 || len(document.Deleted) > 0
+	return tasks, document.Deleted, true
 }
 
-// save snapshots the live board and writes the document atomically.
-func (s *taskBoardStore) save(tasks []rig.TeamTask, deleted map[string]bool) {
+// save snapshots the live board and writes the document atomically. It returns
+// the write error so callers that must not lose state (the one-time migration)
+// can defer their commit.
+func (s *taskBoardStore) save(tasks []rig.TeamTask, deleted map[string]bool) error {
 	if s == nil {
-		return
+		return nil
+	}
+	// Hold the lock across the retired check AND the write: deleteDocument uses
+	// the same lock, so an in-flight save can never recreate a removed document
+	// after the deletion.
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.retired {
+		return nil
 	}
 	document := taskBoardFile{Version: taskBoardVersion}
 	for _, task := range tasks {
@@ -151,19 +267,17 @@ func (s *taskBoardStore) save(tasks []rig.TeamTask, deleted map[string]bool) {
 	data, err := json.MarshalIndent(document, "", "  ")
 	if err != nil {
 		s.logf("[toolkit] encode task board: %v", err)
-		return
+		return err
 	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
 	directory := filepath.Dir(s.path)
 	if err := os.MkdirAll(directory, 0o755); err != nil {
 		s.logf("[toolkit] create task board directory: %v", err)
-		return
+		return err
 	}
 	temporary, err := os.CreateTemp(directory, ".team-tasks-*.tmp")
 	if err != nil {
 		s.logf("[toolkit] create temporary task board file: %v", err)
-		return
+		return err
 	}
 	temporaryPath := temporary.Name()
 	cleanup := func() {
@@ -173,27 +287,28 @@ func (s *taskBoardStore) save(tasks []rig.TeamTask, deleted map[string]bool) {
 	if _, err := temporary.Write(data); err != nil {
 		cleanup()
 		s.logf("[toolkit] write temporary task board file: %v", err)
-		return
+		return err
 	}
 	if err := temporary.Sync(); err != nil {
 		cleanup()
 		s.logf("[toolkit] sync temporary task board file: %v", err)
-		return
+		return err
 	}
 	if err := temporary.Close(); err != nil {
 		_ = os.Remove(temporaryPath)
 		s.logf("[toolkit] close temporary task board file: %v", err)
-		return
+		return err
 	}
 	if err := os.Rename(temporaryPath, s.path); err != nil {
 		_ = os.Remove(temporaryPath)
 		s.logf("[toolkit] replace task board %q: %v", s.path, err)
-		return
+		return err
 	}
 	if handle, err := os.Open(directory); err == nil {
 		_ = handle.Sync()
 		_ = handle.Close()
 	}
+	return nil
 }
 
 // quarantine moves the unusable document out of the way.
@@ -227,13 +342,25 @@ func (t *persistingTaskTool) Description() string { return t.inner.Description()
 // Schema implements rig.Tool.
 func (t *persistingTaskTool) Schema() map[string]any { return t.inner.Schema() }
 
-// Invoke implements rig.Tool.
+// Invoke implements rig.Tool. Only the mutating task tools persist: a read-only
+// list/get must not rewrite the document (that previously recreated a retired
+// legacy document after migration).
 func (t *persistingTaskTool) Invoke(ctx context.Context, call rig.ToolCall) (rig.ToolResult, error) {
 	result, err := t.inner.Invoke(ctx, call)
-	if err == nil && !result.IsError {
+	if err == nil && !result.IsError && taskToolMutates(t.inner.Name()) {
 		t.board.persist()
 	}
 	return result, err
+}
+
+// taskToolMutates reports whether a task tool changes the board.
+func taskToolMutates(name string) bool {
+	switch name {
+	case "team_task_create", "team_task_update":
+		return true
+	default:
+		return false
+	}
 }
 
 // wrapPersistingTaskTools wraps the task-board tools of one manager.
@@ -249,6 +376,102 @@ func wrapPersistingTaskTools(tools []rig.Tool, board *taskBoardAdapter) []rig.To
 		wrapped = append(wrapped, &persistingTaskTool{inner: tool, board: board})
 	}
 	return wrapped
+}
+
+// fileExists reports whether path names an existing file.
+func fileExists(path string) bool {
+	if strings.TrimSpace(path) == "" {
+		return false
+	}
+	_, err := os.Stat(path)
+	return err == nil
+}
+
+// removeFile removes path, logging (not failing) unexpected errors.
+func removeFile(path string, logf func(string, ...any)) {
+	if strings.TrimSpace(path) == "" {
+		return
+	}
+	if err := os.Remove(path); err != nil && !os.IsNotExist(err) && logf != nil {
+		logf("[toolkit] remove %s: %v", path, err)
+	}
+}
+
+// writeFileAtomic writes one small file through a temp file + rename so a crash
+// never leaves a partial journal/marker.
+func writeFileAtomic(path string, data []byte) error {
+	if strings.TrimSpace(path) == "" {
+		return nil
+	}
+	dir := filepath.Dir(path)
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return err
+	}
+	temp, err := os.CreateTemp(dir, ".tmp-*")
+	if err != nil {
+		return err
+	}
+	tempPath := temp.Name()
+	defer func() { _ = os.Remove(tempPath) }()
+	if _, err := temp.Write(data); err != nil {
+		_ = temp.Close()
+		return err
+	}
+	if err := temp.Sync(); err != nil {
+		_ = temp.Close()
+		return err
+	}
+	if err := temp.Close(); err != nil {
+		return err
+	}
+	return os.Rename(tempPath, path)
+}
+
+// taskBoardDocumentName recognizes a board document and its quarantined
+// backups (`<name>.json`, `<name>.json.corrupt-<ts>`).
+func taskBoardDocumentName(name string) bool {
+	return strings.HasSuffix(name, ".json") || strings.Contains(name, ".json.corrupt-")
+}
+
+// pruneTaskBoardDir bounds the per-session documents: it keeps at most keep
+// files, drops documents older than ttl and returns the retained paths (newest
+// first). It runs at module activation, never on a UI frame.
+func pruneTaskBoardDir(dir string, keep int, ttl time.Duration, logf func(string, ...any)) []string {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return nil
+	}
+	type document struct {
+		path    string
+		modTime time.Time
+	}
+	documents := make([]document, 0, len(entries))
+	for _, entry := range entries {
+		if entry.IsDir() || !taskBoardDocumentName(entry.Name()) {
+			continue
+		}
+		info, infoErr := entry.Info()
+		if infoErr != nil {
+			continue
+		}
+		documents = append(documents, document{
+			path:    filepath.Join(dir, entry.Name()),
+			modTime: info.ModTime(),
+		})
+	}
+	sort.Slice(documents, func(i, j int) bool { return documents[i].modTime.After(documents[j].modTime) })
+	cutoff := time.Now().Add(-ttl)
+	kept := make([]string, 0, len(documents))
+	for index, document := range documents {
+		if index >= keep || document.modTime.Before(cutoff) {
+			if removeErr := os.Remove(document.path); removeErr != nil && !os.IsNotExist(removeErr) {
+				logf("[toolkit] prune task board %s: %v", document.path, removeErr)
+			}
+			continue
+		}
+		kept = append(kept, document.path)
+	}
+	return kept
 }
 
 // taskNumericID returns the numeric suffix of a "task-<n>" id.

@@ -64,13 +64,19 @@ func subagentExcludedTools() []string {
 	return names
 }
 
-// subagentParent resolves the provider config and active session for one
-// delegation. The session's effective model wins (per-session override), so a
-// delegated child follows the same model as its parent conversation.
-func (s *service) subagentParent() (contracts.ChatConfig, string) {
+// subagentParent resolves the provider config and parent session for one
+// delegation. The run-scoped session from the tool context wins over the
+// mutable active session: a delegation spawned by a background run (or after the
+// user switched conversations mid-turn) must belong to the conversation that
+// asked for it. The session's effective model also wins (per-session override),
+// so a delegated child follows the same model as its parent conversation.
+func (s *service) subagentParent(sessionOverride string) (contracts.ChatConfig, string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	active := s.active
+	active := strings.TrimSpace(sessionOverride)
+	if active == "" {
+		active = s.active
+	}
 	cfg := s.configLocked()
 	if active != "" {
 		cfg = s.configForSessionLocked(active)
@@ -102,7 +108,7 @@ func (s *service) Run(ctx context.Context, req contracts.SubagentRequest) (contr
 		name = fmt.Sprintf("sub-%d", s.nextSubagentSeq.Add(1))
 	}
 
-	cfg, active := s.subagentParent()
+	cfg, active := s.subagentParent(contracts.AgentSessionFromContext(ctx))
 	// A model override runs with that model's own provider connection: the row's
 	// BaseURL/APIKey when the model list has it, else the parent session's
 	// connection. The activity record and the child runner use the same model.
@@ -142,7 +148,7 @@ func (s *service) runSubagent(ctx context.Context, prompt, name string, req cont
 		Model:         cfg.Model,
 		SystemPrompt:  cfg.SystemPrompt,
 		MaxIterations: cfg.MaxIterations,
-		Tools:         withWorkspaceRoot(childTools, workspaceRoot),
+		Tools:         withWorkspaceRoot(withAgentSession(childTools, active), workspaceRoot),
 		Gate:          s.gate(active),
 		History:       s.historyView(),
 		Logger:        s.logger,

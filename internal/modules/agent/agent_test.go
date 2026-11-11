@@ -111,7 +111,6 @@ func newTestService(t *testing.T, cfg Config, settings *fakeSettings, logger *fa
 	}
 	registry := rigtools.NewRegistry(tools...)
 	ctx := cordis.Root()
-	t.Cleanup(func() { _ = ctx.DisposeAll() })
 
 	provide(t, ctx, contracts.KeyToolkit, registry)
 	provide(t, ctx, contracts.KeySettings, contracts.SettingsService(settings))
@@ -122,6 +121,9 @@ func newTestService(t *testing.T, cfg Config, settings *fakeSettings, logger *fa
 	if err := Module().Factory(ctx, cfg); err != nil {
 		t.Fatalf("activate agent module: %v", err)
 	}
+	// Registered after the data dir: a LIFO cleanup then disposes the module
+	// (and settles its writers) before the temporary directory is removed.
+	t.Cleanup(func() { _ = ctx.DisposeAll() })
 	chat, err := ctx.Require(contracts.KeyChat)
 	if err != nil {
 		t.Fatalf("require KeyChat: %v", err)
@@ -1496,7 +1498,6 @@ func newWorkspaceBackedService(t *testing.T, workspace contracts.WorkspaceServic
 	store := newFakeStore()
 	registry := rigtools.NewRegistry()
 	ctx := cordis.Root()
-	t.Cleanup(func() { _ = ctx.DisposeAll() })
 	provide(t, ctx, contracts.KeyToolkit, registry)
 	provide(t, ctx, contracts.KeySettings, contracts.SettingsService(settings))
 	provide(t, ctx, contracts.KeyLogger, contracts.Logger(logger))
@@ -1507,6 +1508,7 @@ func newWorkspaceBackedService(t *testing.T, workspace contracts.WorkspaceServic
 	if err := Module().Factory(ctx, Config{}); err != nil {
 		t.Fatalf("activate agent module: %v", err)
 	}
+	t.Cleanup(func() { _ = ctx.DisposeAll() })
 	chat, err := ctx.Require(contracts.KeyChat)
 	if err != nil {
 		t.Fatalf("require KeyChat: %v", err)

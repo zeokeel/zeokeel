@@ -39,7 +39,7 @@ func (d *drive) invokeTool(name, arguments string) bool {
 	if err != nil {
 		return false
 	}
-	result, err := registry.Invoke(context.Background(), rig.ToolCall{
+	result, err := registry.Invoke(d.toolContext(), rig.ToolCall{
 		ID: "drive-" + name, Name: name, Arguments: arguments,
 	})
 	return err == nil && !result.IsError
@@ -52,7 +52,7 @@ func (d *drive) invokeToolResult(name, arguments string) (bool, string) {
 	if err != nil {
 		return false, err.Error()
 	}
-	result, err := registry.Invoke(context.Background(), rig.ToolCall{
+	result, err := registry.Invoke(d.toolContext(), rig.ToolCall{
 		ID: "drive-" + name, Name: name, Arguments: arguments,
 	})
 	if err != nil {
@@ -185,13 +185,25 @@ func (d *drive) taskBoard() contracts.TaskBoard {
 	return board
 }
 
+// scopedTaskBoard is the active conversation's task board (the aggregate board
+// when the backend has no per-session view).
+func (d *drive) scopedTaskBoard() contracts.TaskBoard {
+	board := d.taskBoard()
+	if scoped, ok := board.(contracts.SessionTaskBoard); ok {
+		return scoped.TaskBoardForSession(d.sessionID)
+	}
+	return board
+}
+
 // assignTaskOwner assigns one task through the optional TaskAssigner.
 func (d *drive) assignTaskOwner(taskID, owner string) bool {
 	assigner, ok := any(d.taskBoard()).(contracts.TaskAssigner)
 	if !ok || taskID == "" || owner == "" {
 		return false
 	}
-	_, err := assigner.Assign(context.Background(), taskID, owner)
+	// Stamp the driven session: task ids repeat per conversation, so the
+	// assignment must target the session board, not a process-wide fallback.
+	_, err := assigner.Assign(d.toolContext(), taskID, owner)
 	return err == nil
 }
 
@@ -389,12 +401,12 @@ func (d *drive) runTeamSteps() {
 
 	d.step("team-tasks", "team", "任务板：浮层中的共享任务（状态/owner/依赖/写入范围）",
 		"团队浮层的共享任务区按任务显示 subject、状态 badge（进行中/待处理）、负责人、依赖 task-X、写入范围；任务写入走 team_task_create/assigner", func(c *check) {
-			d.resetToSession()
+			d.restoreOriginalSession()
 			d.closeAllTeamMembers()
 			d.server.SetMode(scriptAnswer)
 			defer d.server.SetMode(scriptAnswer)
 
-			board := d.taskBoard()
+			board := d.scopedTaskBoard()
 			tasks, err := board.List(context.Background())
 			if err != nil {
 				c.failf("读取任务板失败：%v", err)
@@ -432,7 +444,7 @@ func (d *drive) runTeamSteps() {
 			}
 			c.mustText("共享任务", "发布前检查", "进行中", "编写发布说明", "待处理",
 				blockedSubject, "依赖 "+blocker.ID, "写入 docs/screenshots/")
-			c.note("共享任务卡：subject/状态/依赖 task-%s/写入范围", blocker.ID)
+			c.note("共享任务卡：subject/状态/依赖 %s/写入范围", blocker.ID)
 			c.shot("team-tasks")
 			d.closeOverlay()
 			d.closeAllTeamMembers()
@@ -440,7 +452,7 @@ func (d *drive) runTeamSteps() {
 
 	d.step("team-tasks-refresh", "team", "任务板：重新打开浮层刷新共享任务",
 		"浮层关闭期间用 team_task_create 写入新任务 → 重新打开团队浮层时新任务出现（浮层在打开时读取任务板快照）", func(c *check) {
-			d.resetToSession()
+			d.restoreOriginalSession()
 			// The header only shows the team entry once a team exists
 			// (subtraction pass); spawn a short-lived member through the same
 			// tool surface the model uses, so the module wiring runs too.
@@ -464,7 +476,7 @@ func (d *drive) runTeamSteps() {
 				}()
 			}
 			subject := "刷新验证任务"
-			board := d.taskBoard()
+			board := d.scopedTaskBoard()
 			tasks, _ := board.List(context.Background())
 			_, exists := findBoardTask(tasks, subject)
 			if !exists {

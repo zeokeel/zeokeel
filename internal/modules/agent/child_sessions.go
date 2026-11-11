@@ -80,23 +80,26 @@ type childSessionActivity struct {
 // subagent. ID is the unified child-session identity; BackendRef is the
 // manager/registry reference only the backend resolves.
 type childSessionRecord struct {
-	ID              string                 `json:"id"`
-	ParentSessionID string                 `json:"parentSessionId,omitempty"`
-	BackendRef      string                 `json:"backendRef,omitempty"`
-	Kind            string                 `json:"kind,omitempty"`
-	Name            string                 `json:"name,omitempty"`
-	Model           string                 `json:"model,omitempty"`
-	Prompt          string                 `json:"prompt,omitempty"`
-	Status          string                 `json:"status,omitempty"`
-	Output          string                 `json:"output,omitempty"`
-	Error           string                 `json:"error,omitempty"`
-	Fork            bool                   `json:"fork,omitempty"`
-	Started         time.Time              `json:"started,omitempty"`
-	Finished        time.Time              `json:"finished,omitempty"`
-	Updated         time.Time              `json:"updated,omitempty"`
-	UsageTokens     int                    `json:"usageTokens,omitempty"`
-	Iterations      int                    `json:"iterations,omitempty"`
-	Activity        []childSessionActivity `json:"activity,omitempty"`
+	ID              string `json:"id"`
+	ParentSessionID string `json:"parentSessionId,omitempty"`
+	BackendRef      string `json:"backendRef,omitempty"`
+	Kind            string `json:"kind,omitempty"`
+	Name            string `json:"name,omitempty"`
+	Model           string `json:"model,omitempty"`
+	Prompt          string `json:"prompt,omitempty"`
+	Status          string `json:"status,omitempty"`
+	Output          string `json:"output,omitempty"`
+	Error           string `json:"error,omitempty"`
+	Fork            bool   `json:"fork,omitempty"`
+	// Notified marks a finished child whose completion receipt was already
+	// injected into the parent model's context (one receipt per child).
+	Notified    bool                   `json:"notified,omitempty"`
+	Started     time.Time              `json:"started,omitempty"`
+	Finished    time.Time              `json:"finished,omitempty"`
+	Updated     time.Time              `json:"updated,omitempty"`
+	UsageTokens int                    `json:"usageTokens,omitempty"`
+	Iterations  int                    `json:"iterations,omitempty"`
+	Activity    []childSessionActivity `json:"activity,omitempty"`
 }
 
 // childSessionStore owns the durable child-session records and their document.
@@ -106,6 +109,10 @@ type childSessionStore struct {
 	legacy string
 	logger contracts.Logger
 	items  []childSessionRecord
+	// closed stops further writes once the module is disposed: a late watcher
+	// run finishing during teardown must not touch the data directory after the
+	// process has moved on (and tests remove their temporary data directory).
+	closed bool
 }
 
 // newChildSessionStore returns the store for dataDir. An empty dataDir keeps
@@ -329,9 +336,21 @@ func (s *childSessionStore) upsert(record childSessionRecord) bool {
 	s.normalize(&record)
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if s.closed {
+		return false
+	}
 	for index := range s.items {
 		if s.items[index].ID != record.ID {
 			continue
+		}
+		// A later snapshot of the same finished child (Close, the shutdown
+		// archive, a repeat persist) is rebuilt with Notified=false; keep the
+		// already-consumed receipt flag so a restart cannot replay it. A new run
+		// has a different Finished time and starts unnotified again.
+		previous := s.items[index]
+		if previous.Notified && !record.Notified &&
+			record.Status == previous.Status && record.Finished.Equal(previous.Finished) {
+			record.Notified = true
 		}
 		if childSessionRecordEqual(s.items[index], record) {
 			return false
@@ -347,6 +366,32 @@ func (s *childSessionStore) upsert(record childSessionRecord) bool {
 	s.pruneLocked(time.Now())
 	s.persistLocked()
 	return true
+}
+
+// markNotified flips the receipt flag of one finished record under the lock and
+// persists it. It refuses when the record was replaced by a newer run in the
+// meantime, so a receipt staged for the old run can never silence the new one.
+func (s *childSessionStore) markNotified(id string, finished time.Time) bool {
+	if s == nil || strings.TrimSpace(id) == "" {
+		return false
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.closed {
+		return false
+	}
+	for index := range s.items {
+		if s.items[index].ID != id {
+			continue
+		}
+		if s.items[index].Notified || !s.items[index].Finished.Equal(finished) {
+			return false
+		}
+		s.items[index].Notified = true
+		s.persistLocked()
+		return true
+	}
+	return false
 }
 
 // normalize bounds the stored texts and folds run-state spellings onto the
@@ -468,9 +513,20 @@ func (s *childSessionStore) pruneLocked(now time.Time) {
 	s.items = kept
 }
 
+// close stops all further writes (module disposal); the last persisted document
+// is authoritative.
+func (s *childSessionStore) close() {
+	if s == nil {
+		return
+	}
+	s.mu.Lock()
+	s.closed = true
+	s.mu.Unlock()
+}
+
 // persistLocked writes the document atomically (the caller holds s.mu).
 func (s *childSessionStore) persistLocked() {
-	if s.path == "" {
+	if s.path == "" || s.closed {
 		return
 	}
 	directory := filepath.Dir(s.path)
@@ -592,7 +648,8 @@ func childSessionRecordEqual(left, right childSessionRecord) bool {
 		left.Started.Equal(right.Started) &&
 		left.Finished.Equal(right.Finished) &&
 		left.UsageTokens == right.UsageTokens &&
-		left.Iterations == right.Iterations
+		left.Iterations == right.Iterations &&
+		left.Notified == right.Notified
 }
 
 // --- status vocabulary conversions -----------------------------------------

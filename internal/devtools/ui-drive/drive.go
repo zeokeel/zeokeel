@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"strings"
 	"time"
@@ -46,6 +47,16 @@ func frameworkLocaleTag(lang string) string {
 		return "zh-Hans"
 	}
 	return "en"
+}
+
+// toolContext stamps the driven session onto a direct tool invocation so
+// session-scoped tools (the per-session task board) route to the conversation
+// under test instead of the process-wide legacy board.
+func (d *drive) toolContext() context.Context {
+	if d.sessionID == "" {
+		_ = d.syncSession()
+	}
+	return contracts.WithAgentSession(context.Background(), d.sessionID)
 }
 
 // texts returns the current frame labels.

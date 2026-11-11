@@ -24,7 +24,6 @@ import (
 func newSubagentModuleService(t *testing.T) (*service, cordis.Context) {
 	t.Helper()
 	ctx := cordis.Root()
-	t.Cleanup(func() { _ = ctx.DisposeAll() })
 	registry := rigtool.NewRegistry()
 	settings := newFakeSettings(nil)
 	logger := &fakeLogger{}
@@ -38,6 +37,7 @@ func newSubagentModuleService(t *testing.T) (*service, cordis.Context) {
 	if err := Module().Factory(ctx, Config{}); err != nil {
 		t.Fatalf("activate agent module: %v", err)
 	}
+	t.Cleanup(func() { _ = ctx.DisposeAll() })
 	chat, err := ctx.Require(contracts.KeyChat)
 	if err != nil {
 		t.Fatalf("require KeyChat: %v", err)

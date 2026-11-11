@@ -266,11 +266,14 @@ func (d *drive) seed() error {
 		_, _ = memory.Add(context.Background(), rig.Memory{Text: "项目根目录是 /data/mygo", Scope: "workspace"})
 	}
 	if board, err := d.root.Require(contracts.KeyTaskBoard); err == nil {
-		first, _ := board.Create(context.Background(), "发布前检查", "确认文档与截图")
+		// Seed through the driven conversation's board (DSH per-session board):
+		// the UI snapshot and the team-tasks step then exercise the same board.
+		boardCtx := d.toolContext()
+		first, _ := board.Create(boardCtx, "发布前检查", "确认文档与截图")
 		if first.ID != "" {
-			_, _ = board.SetStatus(context.Background(), first.ID, contracts.TaskStatusInProgress)
+			_, _ = board.SetStatus(boardCtx, first.ID, contracts.TaskStatusInProgress)
 		}
-		_, _ = board.Create(context.Background(), "编写发布说明", "")
+		_, _ = board.Create(boardCtx, "编写发布说明", "")
 	}
 	d.tester.Frame()
 	return nil

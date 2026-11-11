@@ -55,5 +55,25 @@ type TaskAssigner interface {
 	Assign(ctx context.Context, id, owner string) (BoardTask, error)
 }
 
+// SessionTaskBoard is the optional per-session view of the shared task board.
+// DSH's team board belongs to the Lead session that created it; a backend that
+// scopes tasks by session implements this so the session UI can show only the
+// active conversation's tasks. Backends that do not implement it keep the
+// process-wide board returned by KeyTaskBoard.
+//
+// The read path is cache-first and may perform at most one bounded document
+// read on a cache miss; it never migrates or writes. Unknown/non-empty session
+// IDs return an empty scoped board when no document exists, while "" keeps the
+// legacy/global board for hosts without a session context.
+type SessionTaskBoard interface {
+	TaskBoardForSession(sessionID string) TaskBoard
+}
+
+// TaskBoardCleaner is the optional cleanup hook of the per-session task board:
+// deleting a conversation removes its board document and cached state.
+type TaskBoardCleaner interface {
+	RemoveTaskBoardForSession(sessionID string) error
+}
+
 // KeyTaskBoard is provided by the toolkit module (rig team.TaskManager).
 var KeyTaskBoard = cordis.NewServiceKey[TaskBoard]("zeokeel/taskboard")

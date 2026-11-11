@@ -43,6 +43,10 @@ const (
 	ChatRoleAssistant = "assistant"
 	ChatRoleTool      = "tool"
 	ChatRoleSystem    = "system"
+	// ChatRoleNotice is a quiet transcript receipt for a delegated child (a
+	// teammate or subagent finished/failed). It is derived from the durable
+	// child-session records, not from model history.
+	ChatRoleNotice = "notice"
 )
 
 // ChatMessage is one message of a session as the UI reads it. The agent module

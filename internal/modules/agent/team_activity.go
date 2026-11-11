@@ -41,12 +41,14 @@ func (t *trackedTeamTool) Description() string { return t.inner.Description() }
 // Schema implements rig.Tool.
 func (t *trackedTeamTool) Schema() map[string]any { return t.inner.Schema() }
 
-// PendingNotices implements rig.NoticeSource by delegating to the inner team
-// tool, so DSH-style completion notices keep reaching the model through the
-// wrapper.
+// PendingNotices implements rig.NoticeSource. The rig manager's completion
+// notices are drained and dropped here: ZeoKeel now delivers teammate
+// completions through the durable child-session receipts (child_notices.go),
+// which are session-scoped and survive between turns. Draining keeps the
+// manager's queue bounded; job/tool notices use other tools and are untouched.
 func (t *trackedTeamTool) PendingNotices() []string {
 	if source, ok := t.inner.(rig.NoticeSource); ok {
-		return source.PendingNotices()
+		_ = source.PendingNotices()
 	}
 	return nil
 }

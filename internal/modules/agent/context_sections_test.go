@@ -264,7 +264,6 @@ func TestModuleWiresSkillsBackendIntoPrompt(t *testing.T) {
 func activateAgentModule(t *testing.T, skills contracts.SkillsService, memoryStore contracts.MemoryStore) *service {
 	t.Helper()
 	ctx := cordis.Root()
-	t.Cleanup(func() { _ = ctx.DisposeAll() })
 	provide(t, ctx, contracts.KeyToolkit, rigtools.NewRegistry())
 	provide(t, ctx, contracts.KeySettings, contracts.SettingsService(newFakeSettings(nil)))
 	provide(t, ctx, contracts.KeyLogger, contracts.Logger(&fakeLogger{}))
@@ -280,6 +279,7 @@ func activateAgentModule(t *testing.T, skills contracts.SkillsService, memorySto
 	if err := Module().Factory(ctx, Config{}); err != nil {
 		t.Fatalf("activate agent module: %v", err)
 	}
+	t.Cleanup(func() { _ = ctx.DisposeAll() })
 	chat, err := ctx.Require(contracts.KeyChat)
 	if err != nil {
 		t.Fatalf("require KeyChat: %v", err)

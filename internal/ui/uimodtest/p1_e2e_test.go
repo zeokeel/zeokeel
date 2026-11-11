@@ -871,7 +871,11 @@ func TestP1ApprovalToolsAndPersistence(t *testing.T) {
 	if err != nil {
 		t.Fatalf("require task board: %v", err)
 	}
-	task, err := board.Create(context.Background(), "发布前检查", "确认文档与截图")
+	// Board operations that stand in for the model tools carry the run-scoped
+	// session (the real team_task_* call is stamped by the agent module), so the
+	// per-session board of the active conversation receives the task.
+	boardCtx := contracts.WithAgentSession(context.Background(), chat.ActiveSession())
+	task, err := board.Create(boardCtx, "发布前检查", "确认文档与截图")
 	if err != nil {
 		t.Fatalf("TaskBoard.Create: %v", err)
 	}
@@ -888,7 +892,7 @@ func TestP1ApprovalToolsAndPersistence(t *testing.T) {
 	}
 	tester.Key(0, ui.KeyEscape)
 	tester.Frame()
-	if _, err := board.SetStatus(context.Background(), task.ID, contracts.TaskStatusCompleted); err != nil {
+	if _, err := board.SetStatus(boardCtx, task.ID, contracts.TaskStatusCompleted); err != nil {
 		t.Fatalf("complete task through the board: %v", err)
 	}
 	if err := tester.Click("智能体团队"); err != nil {

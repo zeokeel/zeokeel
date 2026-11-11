@@ -947,3 +947,163 @@ func TestChildSwitcherMarksRestoredHistory(t *testing.T) {
 		t.Fatalf("restored child has no 进入 action; texts = %v", tester.Texts())
 	}
 }
+
+// --- per-session task board -----------------------------------------------
+
+// fakeSessionBoard is a contracts.SessionTaskBoard with isolated task lists per
+// session (the session UI must read only the active conversation's board).
+type fakeSessionBoard struct {
+	bySession map[string][]contracts.BoardTask
+}
+
+func (f *fakeSessionBoard) List(context.Context) ([]contracts.BoardTask, error) {
+	var all []contracts.BoardTask
+	for _, tasks := range f.bySession {
+		all = append(all, tasks...)
+	}
+	return all, nil
+}
+
+func (f *fakeSessionBoard) Create(context.Context, string, string) (contracts.BoardTask, error) {
+	return contracts.BoardTask{}, nil
+}
+
+func (f *fakeSessionBoard) SetStatus(context.Context, string, string) (contracts.BoardTask, error) {
+	return contracts.BoardTask{}, nil
+}
+
+func (f *fakeSessionBoard) Delete(context.Context, string) error { return nil }
+
+func (f *fakeSessionBoard) TaskBoardForSession(sessionID string) contracts.TaskBoard {
+	return &fakeBoardView{tasks: f.bySession[sessionID]}
+}
+
+// fakeBoardView is one session's read-only slice of the fake board.
+type fakeBoardView struct{ tasks []contracts.BoardTask }
+
+func (f *fakeBoardView) List(context.Context) ([]contracts.BoardTask, error) {
+	return append([]contracts.BoardTask(nil), f.tasks...), nil
+}
+
+func (f *fakeBoardView) Create(context.Context, string, string) (contracts.BoardTask, error) {
+	return contracts.BoardTask{}, nil
+}
+
+func (f *fakeBoardView) SetStatus(context.Context, string, string) (contracts.BoardTask, error) {
+	return contracts.BoardTask{}, nil
+}
+
+func (f *fakeBoardView) Delete(context.Context, string) error { return nil }
+
+// TestTeamOverlayShowsOnlyActiveSessionTasks pins the DSH Lead-session board
+// semantics on the UI side: the overlay lists the active conversation's tasks and
+// never another session's tasks.
+func TestTeamOverlayShowsOnlyActiveSessionTasks(t *testing.T) {
+	chat := headerChat("会话 A")
+	services := agentServices{
+		team: &fakeTeam{members: []contracts.TeamMember{{
+			ID: "child-a", Name: "研究员", RunState: contracts.TeamRunIdle, SessionID: "sess-1",
+		}}},
+		board: &fakeSessionBoard{bySession: map[string][]contracts.BoardTask{
+			"sess-1": {{ID: "task-1", Subject: "只属于会话 A 的任务", Status: contracts.TaskStatusPending}},
+			"sess-2": {{ID: "task-2", Subject: "别的会话的任务", Status: contracts.TaskStatusPending}},
+		}},
+	}
+	h := newAgentSurfaceHarness(t, chat, services)
+	tester := h.tester()
+	tester.Frame()
+	h.click(tester, "智能体团队")
+	h.assertTexts(tester, "共享任务", "只属于会话 A 的任务")
+	h.assertNoTexts(tester, "别的会话的任务")
+}
+
+// --- completion receipts in the transcript ---------------------------------
+
+// TestTranscriptShowsChildCompletionNotice covers the user-visible half of the
+// DSH subagent-settled semantics: a finished delegated child renders one quiet
+// receipt row in its parent conversation, and another session's child never
+// leaks into this transcript.
+func TestTranscriptShowsChildCompletionNotice(t *testing.T) {
+	finishedAt := time.Now()
+	children := &fakeChildAgents{agents: []contracts.ChildAgent{
+		{
+			ID: "child-a", ParentSessionID: "sess-1", Name: "研究员",
+			Kind: contracts.ChildAgentTeammate, Status: contracts.ChildAgentCompleted,
+			Output: "报告已完成", Finished: finishedAt,
+		},
+		{
+			ID: "child-b", ParentSessionID: "sess-2", Name: "别的会话成员",
+			Kind: contracts.ChildAgentTeammate, Status: contracts.ChildAgentCompleted,
+			Output: "别的会话", Finished: finishedAt,
+		},
+	}}
+	h := newAgentSurfaceHarness(t, headerChat("会话"), agentServices{children: children})
+	tester := h.tester()
+	tester.Frame()
+	found := false
+	for _, text := range tester.Texts() {
+		if strings.Contains(text, "研究员") && strings.Contains(text, "已完成") {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("completion receipt missing from the transcript; texts = %v", tester.Texts())
+	}
+	h.assertNoTexts(tester, "别的会话成员")
+}
+
+// TestTranscriptShowsFailedChildNoticeAsError pins the status semantics of a
+// failed child receipt: the row keeps error text (DESIGN §5.2), and a record
+// without error detail does not render a dangling colon.
+func TestTranscriptShowsFailedChildNoticeAsError(t *testing.T) {
+	finishedAt := time.Now()
+	children := &fakeChildAgents{agents: []contracts.ChildAgent{
+		{
+			ID: "child-fail", ParentSessionID: "sess-1", Name: "失败者",
+			Kind: contracts.ChildAgentTeammate, Status: contracts.ChildAgentFailed,
+			Error: "API 429", Finished: finishedAt,
+		},
+		{
+			ID: "child-fail-empty", ParentSessionID: "sess-1", Name: "无详情者",
+			Kind: contracts.ChildAgentTeammate, Status: contracts.ChildAgentFailed,
+			Finished: finishedAt,
+		},
+	}}
+	h := newAgentSurfaceHarness(t, headerChat("会话"), agentServices{children: children})
+	tester := h.tester()
+	tester.Frame()
+	found := false
+	for _, text := range tester.Texts() {
+		if strings.Contains(text, "失败者") && strings.Contains(text, "运行失败：API 429") {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("failed receipt text missing; texts = %v", tester.Texts())
+	}
+	h.assertTexts(tester, "无详情者", "运行失败")
+	h.assertNoTexts(tester, "无详情者」运行失败：")
+}
+
+// TestTeamOverlayWithoutSessionShowsEmptyTasks pins the first-run state: with no
+// active conversation the overlay must show the empty task state, never a
+// permanent "reading the board" row (and never the legacy global board).
+func TestTeamOverlayWithoutSessionShowsEmptyTasks(t *testing.T) {
+	chat := newFakeChat()
+	h := newAgentSurfaceHarness(t, chat, agentServices{
+		team: &fakeTeam{},
+		// Legacy-only board (no SessionTaskBoard): the empty-session overlay must
+		// not read it.
+		board: &fakeAgentBoard{tasks: []contracts.BoardTask{
+			{ID: "task-1", Subject: "旧全局任务", Status: contracts.TaskStatusPending},
+		}},
+	})
+	tester := h.tester()
+	tester.Frame()
+	if err := tester.Click("智能体团队"); err != nil {
+		t.Fatalf("open team overlay: %v; texts = %v", err, tester.Texts())
+	}
+	tester.Frame()
+	h.assertTexts(tester, "共享任务", "还没有共享任务")
+	h.assertNoTexts(tester, "读取任务板…", "旧全局任务")
+}

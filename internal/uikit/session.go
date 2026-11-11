@@ -256,6 +256,8 @@ func sessionRowLabel(locale contracts.LocaleService, message contracts.ChatMessa
 		role = T(locale, "工具", "Tool")
 	case contracts.ChatRoleSystem:
 		role = T(locale, "系统", "System")
+	case contracts.ChatRoleNotice:
+		role = T(locale, "通知", "Notice")
 	}
 	return fmt.Sprintf("%s %d", role, index+1)
 }
@@ -272,6 +274,13 @@ func sessionDefaultRow(c *ui.Context, t *design.Tokens, o SessionThreadOptions,
 			design.Apply(ui.Text(c, message.Text), t.Font(design.TypeBody)).
 				TextColor(t.LabelPrimary)
 		}
+	case contracts.ChatRoleNotice:
+		color := t.LabelTertiary
+		if strings.TrimSpace(message.Error) != "" {
+			color = t.DangerText
+		}
+		design.Apply(ui.Text(c, message.Text), t.Font(design.TypeXXS)).
+			TextColor(color).Selectable().MaxLines(2).Ellipsis("…")
 	case contracts.ChatRoleTool, contracts.ChatRoleSystem:
 		role := T(o.Locale, "工具", "Tool")
 		if message.Role == contracts.ChatRoleSystem {

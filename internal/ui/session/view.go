@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"math"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -887,6 +888,139 @@ func buildTabs(c *ui.Context, t *design.Tokens, cfg Config, st *state) {
 
 // --- chat -------------------------------------------------------------------
 
+// childNoticeMessages derives the transcript receipts of one conversation's
+// finished children from the durable child-session read model. A child that
+// finished in another session is never rendered here.
+func childNoticeMessages(st *state, sessionID string) []contracts.ChatMessage {
+	if st == nil || strings.TrimSpace(sessionID) == "" {
+		return nil
+	}
+	children := st.childAgentService()
+	if children == nil {
+		return nil
+	}
+	agents := children.ChildAgents(sessionID)
+	if len(agents) == 0 {
+		return nil
+	}
+	notices := make([]contracts.ChatMessage, 0, len(agents))
+	for _, agent := range agents {
+		if strings.TrimSpace(agent.ParentSessionID) != sessionID || agent.Finished.IsZero() {
+			continue
+		}
+		text, ok := childNoticeText(st, agent)
+		if !ok {
+			continue
+		}
+		notices = append(notices, contracts.ChatMessage{
+			ID:        "child-notice-" + agent.ID,
+			Role:      contracts.ChatRoleNotice,
+			Text:      text,
+			CreatedAt: agent.Finished,
+			// Renderer-only status marker (fenced out below to keep the screen's
+			// red budget): DESIGN §5.2 error semantics, no raw error string.
+			Error: failedNoticeMarker(agent.Status),
+		})
+	}
+	sort.SliceStable(notices, func(i, j int) bool {
+		return notices[i].CreatedAt.Before(notices[j].CreatedAt)
+	})
+	capFailedNoticeMarkers(notices)
+	return notices
+}
+
+// capFailedNoticeMarkers keeps the danger styling (red budget, DESIGN §5.5
+// rule 5) to the two newest failed receipts; older failed children keep the
+// explicit "运行失败" copy but render muted.
+func capFailedNoticeMarkers(notices []contracts.ChatMessage) {
+	visibleFailed := 0
+	for index := len(notices) - 1; index >= 0; index-- {
+		if notices[index].Error != "failed" {
+			continue
+		}
+		if visibleFailed < 2 {
+			visibleFailed++
+			continue
+		}
+		notices[index].Error = ""
+	}
+}
+
+// failedNoticeMarker is the renderer-only marker of a failed child receipt.
+func failedNoticeMarker(status string) string {
+	if status == contracts.ChildAgentFailed {
+		return "failed"
+	}
+	return ""
+}
+
+// noticeSummary flattens one child answer/error into a short single line,
+// dropping Markdown markers and fences so the receipt reads as a notice.
+func noticeSummary(text string) string {
+	text = strings.ReplaceAll(text, "```", " ")
+	text = strings.Join(strings.Fields(text), " ")
+	text = strings.TrimLeft(text, "#>*- ")
+	return text
+}
+
+// mergeChildNotices places derived receipts chronologically among the settled
+// transcript, so a later turn never appears older than a receipt. While the turn
+// is streaming they go above the trailing live answer: the follow-the-end view
+// stays pinned to the growing reply instead of a static receipt appended below.
+func mergeChildNotices(messages []contracts.ChatMessage, notices []contracts.ChatMessage, running bool) []contracts.ChatMessage {
+	if len(notices) == 0 {
+		return messages
+	}
+	base := messages
+	var tail []contracts.ChatMessage
+	if running && len(messages) > 0 && messages[len(messages)-1].Streaming {
+		base = messages[:len(messages)-1]
+		tail = messages[len(messages)-1:]
+	}
+	merged := make([]contracts.ChatMessage, 0, len(messages)+len(notices))
+	next := 0
+	for _, message := range base {
+		for next < len(notices) && !notices[next].CreatedAt.IsZero() &&
+			!message.CreatedAt.IsZero() && notices[next].CreatedAt.Before(message.CreatedAt) {
+			merged = append(merged, notices[next])
+			next++
+		}
+		merged = append(merged, message)
+	}
+	merged = append(merged, notices[next:]...)
+	merged = append(merged, tail...)
+	return merged
+}
+
+// childNoticeText is the localized one-line receipt of one finished child.
+func childNoticeText(st *state, agent contracts.ChildAgent) (string, bool) {
+	kind := st.tr("子智能体", "Subagent")
+	if agent.Kind == contracts.ChildAgentTeammate {
+		kind = st.tr("队友", "Teammate")
+	}
+	name := agentDisplayName(agent.Name, agent.ID)
+	switch agent.Status {
+	case contracts.ChildAgentCompleted:
+		output := noticeSummary(agent.Output)
+		if output != "" {
+			return fmt.Sprintf(st.tr("%s「%s」已完成：%s", "%s \"%s\" finished: %s"),
+				kind, name, truncateRunes(output, 160)), true
+		}
+		return fmt.Sprintf(st.tr("%s「%s」已完成", "%s \"%s\" finished"), kind, name), true
+	case contracts.ChildAgentFailed:
+		detail := noticeSummary(agent.Error)
+		if detail == "" {
+			return fmt.Sprintf(st.tr("%s「%s」运行失败", "%s \"%s\" failed"), kind, name), true
+		}
+		return fmt.Sprintf(st.tr("%s「%s」运行失败：%s", "%s \"%s\" failed: %s"),
+			kind, name, truncateRunes(detail, 160)), true
+	case contracts.ChildAgentInterrupted:
+		return fmt.Sprintf(st.tr("%s「%s」已中断", "%s \"%s\" was interrupted"), kind, name), true
+	default:
+		return "", false
+	}
+}
+
 // buildChatPane is the conversation transcript: the shared SessionThread entry
 // owns the official List (virtualization, message-ID keys, the streaming
 // follow), the empty hero and the floating "back to latest" action. This module
@@ -951,6 +1085,11 @@ func buildChatPane(
 			}
 		}
 	}
+	// Delegated-child receipts: the durable child-session records of this
+	// conversation render as quiet transcript rows. They are derived (not stored
+	// in model history), so a reload shows the same rows; mergeChildNotices keeps
+	// the live ordering and puts them above the streaming answer.
+	messages = mergeChildNotices(messages, childNoticeMessages(st, chat.ActiveSession()), chatSession.Running)
 	// verbose keeps the whole timeline and never bundles steps; the other modes
 	// fold a multi-step turn into one process row.
 	var sameTurn func(prev, next contracts.ChatMessage) bool
@@ -1118,6 +1257,23 @@ func buildMessage(c *ui.Context, t *design.Tokens, runtime contracts.UIRuntime, 
 			// Quiet metadata/actions under the bubble: time, copy the original
 			// text, and edit it back into the composer (never auto-sent).
 			buildUserMessageMeta(c, t, runtime, st, message)
+		})
+	case contracts.ChatRoleNotice:
+		// A quiet receipt for a delegated child: at most two lines with a small
+		// glyph, never a bubble or a badge (it is not a chat turn). A failed child
+		// keeps error semantics (danger text + alert glyph, DESIGN §5.2/AP-08).
+		failed := strings.TrimSpace(message.Error) != ""
+		glyph := icons.Activity()
+		color := t.LabelTertiary
+		if failed {
+			glyph = icons.AlertTriangle()
+			color = t.DangerText
+		}
+		ui.Row(c.Key("session.message." + message.ID)).FillWidth().
+			AlignItems(ui.Center).Gap(design.Space2).Children(func() {
+			ui.Icon(c, glyph).Size(design.Space4, design.Space4).TextColor(color)
+			design.Apply(ui.Text(c, message.Text), t.Font(design.TypeXXS)).
+				TextColor(color).Selectable().MaxLines(2).Ellipsis("…")
 		})
 	case contracts.ChatRoleTool, contracts.ChatRoleSystem:
 		// The role badge is localized copy, never the raw protocol value

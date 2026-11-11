@@ -311,7 +311,7 @@ func TestSubagentParentUsesSessionConnection(t *testing.T) {
 	if err := svc.SetSessionModel(id, "model-b"); err != nil {
 		t.Fatalf("SetSessionModel: %v", err)
 	}
-	cfg, active := svc.subagentParent()
+	cfg, active := svc.subagentParent("")
 	if active != id {
 		t.Fatalf("active session = %q, want %q", active, id)
 	}

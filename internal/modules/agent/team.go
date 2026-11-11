@@ -83,7 +83,7 @@ type dynamicTeamRunner struct {
 
 // Start implements rig.SubagentRunner.
 func (r *dynamicTeamRunner) Start(ctx context.Context, spec rig.SubagentSpec) (rig.Subagent, error) {
-	cfg, active := r.service.subagentParent()
+	cfg, active := r.service.subagentParent(contracts.AgentSessionFromContext(ctx))
 	// A per-member model override runs with that model's own provider connection
 	// (its catalog row's BaseURL/APIKey), falling back to the parent session's
 	// connection when the model list has no such row.
@@ -106,7 +106,7 @@ func (r *dynamicTeamRunner) Start(ctx context.Context, spec rig.SubagentSpec) (r
 		Model:         cfg.Model,
 		SystemPrompt:  cfg.SystemPrompt,
 		MaxIterations: cfg.MaxIterations,
-		Tools:         withWorkspaceRoot(childTools, workspaceRoot),
+		Tools:         withWorkspaceRoot(withAgentSession(childTools, active), workspaceRoot),
 		Gate:          r.service.gate(active),
 		History:       r.service.historyView(),
 		Logger:        r.service.logger,
@@ -539,7 +539,12 @@ func (t *teamService) Close(id string) error {
 		t.teamTracker().release(memberID)
 	}
 	t.teamTracker().reconcile(t.manager().Members())
-	if hasTarget && t.service.childSessions != nil {
+	if run != nil && t.teamTracker() != nil && t.service.childSessions != nil {
+		// Closing a running teammate marked the tracked run interrupted (with a
+		// finish time) inside manager.Close; persist that state instead of the
+		// stale pre-close snapshot so the interrupted receipt can fire.
+		t.teamTracker().persistRun(run)
+	} else if hasTarget && t.service.childSessions != nil {
 		if childID == "" {
 			childID = t.service.childSessions.newID()
 		}
