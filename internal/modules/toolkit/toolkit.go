@@ -144,11 +144,6 @@ func Module() *module.Descriptor[Config] {
 		rootScoped := group.initial()
 		tools := append([]rig.Tool(nil), group.proxies(rootScoped)...)
 		tools = append(tools, misc.NewTodoTool(misc.NewTodoStore()))
-		// web_fetch is not workspace-rooted; give it a policy with the network
-		// and output limits but no filesystem root. Its mode stays
-		// workspace-write: the OS sandbox only affects command execution,
-		// and network access is still governed by cfg.Network.
-		webPolicy := newPolicy(cfg, "", timeout, sandbox.ModeWorkspaceWrite)
 		if memoryStore, ok := ctx.Get(contracts.KeyMemory); ok {
 			// The memory backend provides the durable rig.MemoryStore; without
 			// it the memory tools fall back to their in-memory default. The
@@ -177,8 +172,8 @@ func Module() *module.Descriptor[Config] {
 			tools = append(tools, maskedSettingsTools(settingsService)...)
 		}
 
-		if cfg.Network {
-			tools = append(tools, web.NewFetcher(webPolicy))
+		if fetcher := webFetcher(cfg); fetcher != nil {
+			tools = append(tools, fetcher)
 			// The search backend is read from settings on every call so an
 			// endpoint/key change applies to the next search without a restart.
 			// Without a settings service there is nowhere to configure it, so
@@ -416,6 +411,19 @@ func policyMode(cfg Config, mode sandbox.Mode) sandbox.Mode {
 	default:
 		return sandbox.ModeWorkspaceWrite
 	}
+}
+
+// webFetcher builds the product's web_fetch tool. It intentionally passes a
+// nil policy: the product allows fetching any http(s) address, including
+// loopback, private and reserved ranges (requested explicitly; no
+// SSRF-style address blocking). The tool still accepts only http/https and
+// keeps its timeout, redirect and response-size caps. Network=false disables
+// the tool entirely.
+func webFetcher(cfg Config) rig.Tool {
+	if !cfg.Network {
+		return nil
+	}
+	return web.NewFetcher(nil)
 }
 
 // newPolicy builds the sandbox policy from the module config. It is a helper so

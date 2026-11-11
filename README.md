@@ -4,14 +4,15 @@
 [![Release](https://img.shields.io/github/v/release/zeokeel/zeokeel)](https://github.com/zeokeel/zeokeel/releases)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
-> **v0.2.27 — thirty-second public release** (2026-11-11). Native, compile-time modular
+> **v0.2.28 — thirty-third public release** (2026-11-11). Native, compile-time modular
 > AI agent for desktop, headless and ACP (Zed/editor) use; one Go binary, no
-> webview. Windows patch on v0.2.26: the OS sandbox's private temp directory no
-> longer falls back to `C:\WINDOWS` when `TEMP/TMP` are unset (which made every
-> command fail with exit 127 before spawning); `write_file`/`glob`/`grep` handle
-> Windows path separators; `terminal_*` defaults to `powershell.exe` and
-> `job_start` works through PowerShell on Windows; `working_directory` now drives
-> the file tools' relative paths. Upgrades to zeokeel-rig **v0.15.0**.
+> webview. This patch makes `web_fetch` intentionally policy-free: loopback,
+> private, link-local and reserved/benchmark addresses (including
+> `198.18.0.0/15`) are no longer blocked. The tool still accepts only
+> `http`/`https` and keeps its timeout, redirect and size caps. **This disables
+> SSRF address protection for the product** — use it only where model traffic is
+> trusted. The rig library's default policy remains unchanged for other
+> consumers.
 > Final verification: `scripts/verify.sh` **13/13 PASS** — full test suite green
 > (incl. `-race`), regression **276 PASS / 0 FAIL**, `ui-snapshot` **101 steps /
 > 100 PNGs**, three-product smokes PASS, designlint **0 new / 0 blocking**,

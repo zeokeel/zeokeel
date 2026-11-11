@@ -4,7 +4,16 @@ All notable changes to ZeoKeel are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/) and the project adheres to
 [Semantic Versioning](https://semver.org/).
 
-## [0.2.27] - 2026-11-11
+## [0.2.28] - 2026-11-11
+
+`web_fetch` 不再拦截任何地址（产品决策）。
+
+### Changed
+
+- **`web_fetch` 关闭地址拦截**：ZeoKeel 注册 `web_fetch` 时不再安装 sandbox URL 策略，回环、私网、链路本地、benchmark/保留段（包括 `198.18.0.0/15`）都可以发起请求。工具仍然只接受 `http`/`https`，保留总超时、重定向上限（5 跳）、响应体上限（2 MiB）与输出字符上限；`network=false` 时不注册该工具。
+- **安全提示**：这等于在 ZeoKeel 产品内关闭 SSRF 地址防护，模型流量可以访问 `localhost`、内网服务与云元数据端点（如 `169.254.169.254`）。请只在信任模型流量的环境中使用。rig 库默认 API 的安全策略未改：其他消费方不传 policy 时仍按原有 SSRF 规则拒绝非公网地址。
+- 验证：`scripts/verify.sh` 全量 **13/13 PASS**（gofmt/build/vet/designlint/design-check/mygo vet；`go test ./...` 与 `-race`；regression **276 PASS / 0 FAIL**；`ui-snapshot` **101 steps / 100 PNGs**；desktop/headless/ACP smoke；506s）。新增 loopback 抓取测试 `TestWebFetchAllowsPrivateAddresses`。
+
 
 Windows 命令执行修复 + rig v0.15.0 升级。
 

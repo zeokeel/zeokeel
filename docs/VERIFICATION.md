@@ -848,3 +848,8 @@ v0.2.12 的 package-macos job 在 GitHub Ubuntu runner 上构建 libdmg-hfsplus 
 
 - **变更**：升级 `zeokeel-rig v0.14.1 → v0.15.0`，修复 Windows ACL runner 私有临时目录回退到 `C:\WINDOWS` 导致所有命令退出码 127 的 P0；修复 `write_file` 父目录、`glob`/`grep` 的 Windows 路径分隔符；`terminal_*` Windows 默认 `powershell.exe`；`job_start` 支持 Windows PowerShell；`working_directory` 与文件工具共享 session cwd。
 - **验证**（`./scripts/verify.sh` 全量）：gofmt/build/vet/designlint/design-check/mygo vet PASS；`go test ./...` 与 `-race` PASS；regression 276 PASS / 0 FAIL；`ui-snapshot` 101 steps / 100 PNGs；desktop/headless/ACP smoke PASS；**13/13 PASS**（519s）。
+
+## 0.2.28（2026-11-11：web_fetch 不再拦截任何地址）
+
+- **变更**：ZeoKeel 的 `web_fetch` 不再安装 sandbox URL 策略，回环、私网、链路本地、benchmark/保留段均可抓取；仍只接受 http/https，并保留超时、重定向、响应体/输出上限。这是产品决策，等于关闭 SSRF 地址防护（rig 库默认策略不变）。
+- **验证**（`./scripts/verify.sh` 全量）：gofmt/build/vet/designlint/design-check/mygo vet PASS；`go test ./...` 与 `-race` PASS；regression 276 PASS / 0 FAIL；`ui-snapshot` 101 steps / 100 PNGs；desktop/headless/ACP smoke PASS；**13/13 PASS**（506s）。新增 `TestWebFetchAllowsPrivateAddresses`（loopback 抓取成功）。
