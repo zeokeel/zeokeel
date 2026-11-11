@@ -54,7 +54,16 @@ jobs:
           go tool mygo vet .
 
       - name: Test
-        run: go test ./... -count=1
+        # The hosted 2-vCPU runner was repeatedly shut down while several UI
+        # test binaries rendered frames in parallel (exit 143 / "runner received
+        # a shutdown signal", not a test assertion). Serialize package tests and
+        # cap the heap so a burst cannot take the runner down; the suite is fast
+        # enough (< 2 min on this runner) that -p=1 stays comfortably inside the
+        # job timeout.
+        env:
+          GOFLAGS: -mod=mod -p=1
+          GOMEMLIMIT: 4GiB
+        run: go test ./... -count=1 -timeout 20m
 
       - name: Product binary smoke
         run: |
