@@ -159,7 +159,7 @@ func Module() *module.Descriptor[Config] {
 		}
 		svc := newService(cfg, registry, settings, logger, store, approvals)
 		svc.dataDir = dataDir
-		svc.childHistory = newChildHistoryStore(dataDir, logger)
+		svc.childSessions = newChildSessionStore(dataDir, logger)
 		if workspace, ok := ctx.Get(contracts.KeyWorkspace); ok {
 			svc.workspace = workspace
 		}
@@ -338,11 +338,12 @@ type service struct {
 	// delegations (contracts.SubagentActivityLister) shown by the inspector's
 	// Agents pane; its own mutex guards it, never s.mu.
 	subagentActivities subagentActivityRegistry
-	// childHistory is the durable sidecar of finished teammates and synchronous
-	// subagents: reopening the app restores them as historical, read-only child
-	// agents (the team/subagent entries keep listing what ran). It holds its own
-	// lock; never call it while holding s.mu.
-	childHistory *childHistoryStore
+	// childSessions is the durable child-session store: one identity and one
+	// record per delegated child (teammate or subagent), owned by the parent
+	// session. Reopening the app restores finished children as historical,
+	// read-only rows with their IDs intact. It holds its own lock; never call it
+	// while holding s.mu.
+	childSessions *childSessionStore
 
 	// deletedMu guards deletedSessions. It is a separate lock because the run
 	// goroutine appends events while holding s.mu, and the deleted-session check

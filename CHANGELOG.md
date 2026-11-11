@@ -4,6 +4,29 @@ All notable changes to ZeoKeel are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/) and the project adheres to
 [Semantic Versioning](https://semver.org/).
 
+## [0.2.31] - 2026-11-11
+
+DSH 对齐的子会话架构：teammate 与子代理共用一套稳定身份，团队/子智能体两个视图看到同一个子会话；任务板随进程重启保留。
+
+### Changed
+
+- **统一子会话身份**：每名队友与每个同步子代理在创建时获得稳定 child-session ID（`child-<8 hex>`，写入磁盘）。`TeamMember.ID`、`ChildAgent.ID` 与团队浮层「已结束」历史行使用同一个 ID；rig manager 的 `member-N` / 子代理注册表 ID 只在后端内部解析。关闭队友后行 ID 不变，重启后同一子会话仍是同一行（不再出现 `history-…` 临时键）。
+- **持久化生命周期**：spawn 时即写 `provisioning/running`，完成/失败/中断/关闭/应用退出时持续更新；团队活动行的 `MemberID` 也统一为 child-session ID。文档 `<数据目录>/child-sessions.json`（v2）：最多 64 条、14 天 TTL、原子写（临时文件 + fsync + 目录 fsync）、损坏隔离为 `.corrupt-<ts>`；首次加载自动迁移 v0.2.30 的 `child-agents.json`（原文件改名 `.migrated`）。
+- **共享任务板持久化**：`<数据目录>/team-tasks.json`。toolkit 模块启动时把任务回放进 rig 任务板（保持 `task-N` 连续编号、依赖、owner、write scopes 与删除墓碑）；模型工具（`team_task_*`）和 UI 操作成功后都落盘；损坏隔离、无数据目录时保持纯内存。
+- **阅读视图**：团队浮层「已结束」分区与子智能体切换器/子会话继续共用同一批记录；历史行只读（无输入框，`SendChildAgent` 拒绝）。
+
+### Known limitations（明确 Deferred）
+
+- **完成回执注入 transcript**：DSH 把 `subagent-settled` / `agent-message` 作为普通 user 消息注入父会话 inbox；ZeoKeel 目前没有父会话 model-inbox，本轮不做，完成状态仍在团队/子智能体浮层展示。
+- **任务板归属**：DSH 的 roster/任务板按 Lead 会话持久化；ZeoKeel 的任务板仍是进程级共享一份（团队 manager 也是进程级），注释/文档标注了这一点。
+- **writeScopes 仅提示**：不阻止写入，也不授予权限（与 DSH 一致）。
+
+### 验证
+
+- 新增 `child_sessions_test.go`（跨重启同一 ID、关闭前后同一 ID、文档往返、v1 迁移、损坏隔离、保留上限、统一身份）、toolkit `task_store_test.go`（重启恢复、依赖/墓碑、连续编号、损坏隔离、无 dataDir 内存路径）。
+- `scripts/verify.sh` 全量 **13/13 PASS（502s）**：gofmt/build/vet/designlint/design-check/mygo vet PASS；`go test ./...` 与 `-race` PASS；regression **276 PASS / 0 FAIL**；`ui-snapshot` **103 steps / 102 PNGs**；desktop/headless/ACP smoke PASS。`ui-drive --only team` **7/7 PASS**；人工复核 `p2-team-history.png`（历史行稳定 ID、已完成 badge、历史标记）。
+- 并发 spawn 竞态修复：tracker 不再用过期成员快照释放 claim（否则并发 spawn 时部分成员丢失 claim，团队/子智能体入口查不到成员）。
+
 ## [0.2.30] - 2026-11-11
 
 已结束的智能体团队 / 子智能体不再随重启消失：跑完的队友与同步子代理持久化，重开后作为只读历史回看。

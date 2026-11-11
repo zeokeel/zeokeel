@@ -17,9 +17,11 @@ import (
 )
 
 // taskBoardAdapter implements contracts.TaskBoard over one team.TaskManager.
-// The manager is shared with the registered team_task_* tools.
+// The manager is shared with the registered team_task_* tools; store keeps the
+// board durable across restarts (nil when the host has no data directory).
 type taskBoardAdapter struct {
 	manager *team.TaskManager
+	store   *taskBoardStore
 
 	// deleted tracks tasks removed through the board API. rig v0.13's
 	// TaskManager has no Delete operation, so Delete tombstones the id; the
@@ -34,8 +36,38 @@ var (
 )
 
 // newTaskBoard wraps the toolkit's shared task manager.
-func newTaskBoard(manager *team.TaskManager) *taskBoardAdapter {
-	return &taskBoardAdapter{manager: manager, deleted: make(map[string]bool)}
+func newTaskBoard(manager *team.TaskManager, store *taskBoardStore) *taskBoardAdapter {
+	return &taskBoardAdapter{manager: manager, store: store, deleted: make(map[string]bool)}
+}
+
+// setDeleted seeds the tombstoned ids restored from the durable board.
+func (b *taskBoardAdapter) setDeleted(deleted map[string]bool) {
+	if b == nil || len(deleted) == 0 {
+		return
+	}
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	for id := range deleted {
+		b.deleted[id] = true
+	}
+}
+
+// persist snapshots the live board into the durable document (best effort).
+func (b *taskBoardAdapter) persist() {
+	if b == nil || b.store == nil {
+		return
+	}
+	tasks, err := b.manager.List(context.Background(), rig.TeamTaskFilter{})
+	if err != nil {
+		return
+	}
+	b.mu.Lock()
+	deleted := make(map[string]bool, len(b.deleted))
+	for id := range b.deleted {
+		deleted[id] = true
+	}
+	b.mu.Unlock()
+	b.store.save(tasks, deleted)
 }
 
 // List implements contracts.TaskBoard.
@@ -74,6 +106,7 @@ func (b *taskBoardAdapter) Create(ctx context.Context, subject, description stri
 	if err != nil {
 		return contracts.BoardTask{}, fmt.Errorf("toolkit: task board: %w", err)
 	}
+	b.persist()
 	return boardTaskFromRig(task), nil
 }
 
@@ -103,6 +136,7 @@ func (b *taskBoardAdapter) SetStatus(ctx context.Context, id, status string) (co
 	if err != nil {
 		return contracts.BoardTask{}, fmt.Errorf("toolkit: task board: %w", err)
 	}
+	b.persist()
 	return boardTaskFromRig(updated), nil
 }
 
@@ -133,6 +167,7 @@ func (b *taskBoardAdapter) Assign(ctx context.Context, id, owner string) (contra
 	if err != nil {
 		return contracts.BoardTask{}, fmt.Errorf("toolkit: task board: %w", err)
 	}
+	b.persist()
 	return boardTaskFromRig(updated), nil
 }
 
@@ -152,6 +187,7 @@ func (b *taskBoardAdapter) Delete(ctx context.Context, id string) error {
 	b.mu.Lock()
 	b.deleted[id] = true
 	b.mu.Unlock()
+	b.persist()
 	return nil
 }
 

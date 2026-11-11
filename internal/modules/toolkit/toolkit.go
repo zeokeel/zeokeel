@@ -118,6 +118,9 @@ func Module() *module.Descriptor[Config] {
 				logger.Printf(format, args...)
 			}
 		}
+		// The data directory is optional: a headless/unit-test composition
+		// without it keeps the task board in memory.
+		dataDir, _ := ctx.Get(contracts.KeyDataDir)
 		timeout := time.Duration(cfg.ShellTimeoutMs) * time.Millisecond
 		if timeout <= 0 {
 			timeout = 30 * time.Second
@@ -166,8 +169,19 @@ func Module() *module.Descriptor[Config] {
 			tools = append(tools, skill.Tools(nil)...)
 		}
 		taskManager := team.NewTaskManager()
-		tools = append(tools, team.TaskTools(taskManager)...)
-		taskBoard := newTaskBoard(taskManager)
+		taskStore := newTaskBoardStore(dataDir, logf)
+		var taskDeleted map[string]bool
+		if taskStore != nil {
+			if tasks, deleted, ok := taskStore.load(); ok {
+				taskDeleted = hydrateTaskBoard(context.Background(), taskManager, tasks, deleted, logf)
+				if len(tasks) > 0 {
+					logf("[toolkit] restored %d shared task(s) from the durable board", len(tasks))
+				}
+			}
+		}
+		taskBoard := newTaskBoard(taskManager, taskStore)
+		taskBoard.setDeleted(taskDeleted)
+		tools = append(tools, wrapPersistingTaskTools(team.TaskTools(taskManager), taskBoard)...)
 		if hasSettings {
 			tools = append(tools, maskedSettingsTools(settingsService)...)
 		}

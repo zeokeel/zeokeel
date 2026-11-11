@@ -221,7 +221,7 @@ func TestTeamRunStateTracksInterruptAndClose(t *testing.T) {
 }
 
 func TestTeamActivityBounds(t *testing.T) {
-	tracker := newTeamTracker(nil)
+	tracker := newTeamTracker(nil, nil)
 	run := &trackedSubagent{tracker: tracker, name: "bounded"}
 	tracker.mu.Lock()
 	tracker.runs = append(tracker.runs, run)

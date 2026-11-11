@@ -863,3 +863,9 @@ v0.2.12 的 package-macos job 在 GitHub Ubuntu runner 上构建 libdmg-hfsplus 
 
 - **变更**：跑完的队友与同步子代理写入 `<数据目录>/child-agents.json`（有界 24/48 条 + 14 天 TTL、原子写、损坏隔离为 `.corrupt-<ts>`；退出时仍在运行的成员记为已中断）。重启后作为 `Historical` 只读行恢复：团队浮层新增「已结束」分区（历史标记/状态/输出/活动），子智能体切换器与主栏子会话可打开但无输入框，`SendChildAgent` 拒绝历史行；历史按父会话归属，页头计数与浮层只列当前会话历史，运行中队友保持进程级可见。`ui-snapshot` 设置桩改为带锁（修复自动化场景并发 map 读写导致的快照偶发崩溃）。
 - **验证**（`./scripts/verify.sh` 全量）：gofmt/build/vet/designlint/design-check/mygo vet PASS；`go test ./...` 与 `-race` PASS；regression **276 PASS / 0 SKIP / 0 FAIL**；`ui-snapshot` **103 steps / 102 PNGs**；desktop/headless/ACP smoke PASS；**13/13 PASS（502s）**。`ui-drive --only team` **7/7 PASS**（新增 `team-turn-persist`、`team-history`）；人工复核 `p2-team-history.png`、`p2-team-history-child.png`（已结束分区/历史标记/只读提示/无输入框）。
+
+## 0.2.31（2026-11-11：DSH 对齐的子会话架构）
+
+- **变更**：teammate 与同步子代理统一使用稳定 child-session ID（团队 member ID == 子智能体 ID == 历史行 ID，`member-N`/注册表 ID 只在后端解析）；`child-sessions.json` v2 替换 v0.2.30 的 `child-agents.json`（有界 64、14 天 TTL、原子写、损坏隔离、v1 自动迁移），spawn/完成/失败/中断/关闭/退出持续落盘；共享任务板持久化到 `team-tasks.json`（启动回放连续编号/依赖/owner/写入范围/墓碑；模型工具与 UI 操作成功即写；损坏隔离；无 dataDir 时纯内存）。修复 tracker 用过期成员快照释放 claim 导致并发 spawn 丢 claim 的竞态。
+- **验证**（`./scripts/verify.sh` 全量）：gofmt/build/vet/designlint/design-check/mygo vet PASS；`go test ./...` 与 `-race` PASS；regression **276 PASS / 0 SKIP / 0 FAIL**；`ui-snapshot` **103 steps / 102 PNGs**；desktop/headless/ACP smoke PASS；**13/13 PASS（502s）**。`ui-drive --only team` **7/7 PASS**；人工复核 `p2-team-history.png`（历史行稳定 ID、已完成 badge、历史标记）。
+- **已知后续**：完成回执注入 transcript（需要父会话 model-inbox）、任务板按会话归属、writeScopes 仍仅提示（与 DSH 一致）。

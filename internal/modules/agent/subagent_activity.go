@@ -150,13 +150,21 @@ func (s *service) SubagentActivities() []contracts.SubagentActivity {
 // returns its activity (ID included). It is the single place the delegation
 // lifecycle is captured, so Run's error paths all show up the same way.
 func (s *service) beginSubagentActivity(name, sessionID, model, prompt string, fork bool) contracts.SubagentActivity {
-	return s.subagentActivities.start(contracts.SubagentActivity{
+	activity := s.subagentActivities.start(contracts.SubagentActivity{
 		Name:      strings.TrimSpace(name),
 		SessionID: strings.TrimSpace(sessionID),
 		Model:     strings.TrimSpace(model),
 		Prompt:    prompt,
 		Fork:      fork,
 	})
+	// The child session exists from the start (running), so a restart mid-run
+	// still shows the interrupted child with its stable identity.
+	if s.childSessions != nil {
+		record := childSessionFromSubagentActivity(activity, s.childSessions.newID())
+		record.Status = contracts.ChildAgentRunning
+		s.childSessions.upsert(record)
+	}
+	return activity
 }
 
 // finishSubagentActivity records the outcome and the bounded detail of one
@@ -164,11 +172,16 @@ func (s *service) beginSubagentActivity(name, sessionID, model, prompt string, f
 func (s *service) finishSubagentActivity(id string, ctx context.Context, runErr error, result contracts.SubagentResult) {
 	status, detail := subagentActivityOutcome(ctx, runErr, result)
 	s.subagentActivities.finish(id, status, detail)
-	// The finished delegation becomes a durable historical child agent: after a
-	// restart the subagent chip still lists what ran, with its output.
-	if s.childHistory != nil {
+	// Update the durable child-session record: the stable ID is already the row
+	// identity the subagent chip will restore after a restart.
+	if s.childSessions != nil {
 		if entry, ok := s.subagentActivities.entry(id); ok {
-			s.childHistory.upsertSubagent(childHistorySubagentFromContract(entry))
+			if record, found := s.childSessions.byBackendRef(entry.ID, entry.SessionID, contracts.ChildAgentSubagent); found {
+				updated := childSessionFromSubagentActivity(entry, record.ID)
+				s.childSessions.upsert(updated)
+			} else {
+				s.childSessions.upsert(childSessionFromSubagentActivity(entry, s.childSessions.newID()))
+			}
 		}
 	}
 }

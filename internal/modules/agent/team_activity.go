@@ -220,7 +220,26 @@ func (t *teamTracker) runForRef(ref string) *trackedSubagent {
 }
 
 // TeamActivities implements contracts.TeamActivityLister: the bounded team
-// activity table, oldest first, with member IDs resolved.
+// activity table, oldest first, with member IDs resolved to the unified
+// child-session identity.
 func (t *teamService) TeamActivities() []contracts.TeamActivity {
-	return t.teamTracker().activities()
+	activities := t.teamTracker().activities()
+	for index := range activities {
+		memberID := activities[index].MemberID
+		if memberID == "" {
+			continue
+		}
+		childID := t.teamTracker().childIDForMember(memberID)
+		if childID == "" && t.service.childSessions != nil {
+			// A closed member no longer has a claim; its persisted child session
+			// still maps the manager reference to the unified identity.
+			if record, ok := t.service.childSessions.byBackendRef(memberID, "", contracts.ChildAgentTeammate); ok {
+				childID = record.ID
+			}
+		}
+		if childID != "" {
+			activities[index].MemberID = childID
+		}
+	}
+	return activities
 }

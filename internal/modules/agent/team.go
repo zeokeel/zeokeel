@@ -173,7 +173,7 @@ func (s *service) notifyTeamChange() {
 // its runner and its manager, creating and registering it on first use.
 func teamTrackerForService(s *service) *teamTracker {
 	return teamTrackerFor(s, func() *teamTracker {
-		return newTeamTracker(s.notifyTeamChange)
+		return newTeamTracker(s.notifyTeamChange, s.childSessions)
 	})
 }
 
@@ -207,9 +207,11 @@ func (t *teamService) teamTracker() *teamTracker {
 	return t.tracker
 }
 
-// Members implements contracts.TeamService: the live teammates, oldest first,
-// enriched with the truthful run state, model, timing, usage and the bounded
-// recent activity of each member.
+// Members implements contracts.TeamService: the live teammates first, enriched
+// with the truthful run state, model, timing, usage and the bounded recent
+// activity of each member. Every live row carries its durable child-session ID
+// (the same identity the child-agent view and the restored history rows use), so
+// the two team/subagent surfaces address one child, not two records.
 func (t *teamService) Members() []contracts.TeamMember {
 	manager := t.manager()
 	if manager == nil {
@@ -223,46 +225,99 @@ func (t *teamService) Members() []contracts.TeamMember {
 		if snapshot, ok := snapshots[member.ID]; ok {
 			applyRunSnapshot(&converted, snapshot)
 		}
+		childID := t.childIDForMember(member)
+		converted.ID = childID
+		// The activity read model carries the same unified identity: a row that
+		// was attributed to the manager reference is re-attributed to the child
+		// session, so the team overlay and the child timeline share one ID.
+		for index := range converted.Activity {
+			if converted.Activity[index].MemberID == member.ID {
+				converted.Activity[index].MemberID = childID
+			}
+		}
 		members = append(members, converted)
 	}
 	// Members() is the UI's per-frame read path, so it must never write the
-	// durable history (no I/O in build): finished members are archived when the
-	// app disposes (Normal quit) and closed members through Close.
+	// durable store (no I/O in build): the tracker persists run snapshots from
+	// the spawn/send/watch goroutines, Close persists the closed state, and the
+	// module disposal persists every live member.
 	return t.appendHistoricalMembers(members)
 }
 
-// appendHistoricalMembers appends the restored records that no live member
-// supersedes, so a reopened app still lists the team that ran.
+// childIDForMember resolves the durable child-session identity of one live
+// manager member. The tracker binds it at spawn; a member the tracker never saw
+// (a manager built directly in focused unit tests) keeps the manager reference.
+func (t *teamService) childIDForMember(member rigteam.Member) string {
+	if childID := t.teamTracker().childIDForMember(member.ID); childID != "" {
+		return childID
+	}
+	if store := t.service.childSessions; store != nil {
+		if record, ok := store.byBackendRef(member.ID, "", contracts.ChildAgentTeammate); ok {
+			return record.ID
+		}
+	}
+	return member.ID
+}
+
+// appendHistoricalMembers appends the restored teammate records that no live
+// member supersedes, so a reopened app still lists the team that ran.
 func (t *teamService) appendHistoricalMembers(live []contracts.TeamMember) []contracts.TeamMember {
-	history := t.service.childHistory
-	if history == nil {
+	if t.service.childSessions == nil {
 		return live
 	}
-	records := history.memberRecords()
+	records := t.service.childSessions.records()
 	if len(records) == 0 {
 		return live
 	}
 	out := append([]contracts.TeamMember(nil), live...)
 	for _, record := range records {
-		superseded := false
-		for _, member := range live {
-			if sameHistoryOwner(record.OriginalID, record.SessionID, member.ID, member.SessionID) {
-				superseded = true
-				break
-			}
+		if record.Kind != contracts.ChildAgentTeammate {
+			continue
 		}
-		if !superseded {
-			out = append(out, teamMemberFromHistory(record))
+		if t.liveMemberSupersedes(record, live) {
+			continue
 		}
+		out = append(out, teamMemberFromChildSession(record))
 	}
 	return out
 }
 
-// memberSnapshot returns one live member converted to the contract (including
-// its run state and activity), for archiving.
-func (t *teamService) memberSnapshot(memberID string) (contracts.TeamMember, bool) {
+// liveMemberSupersedes reports whether a live member already covers record: the
+// same child-session ID, or the same manager reference inside one parent session
+// (a restart reuses manager references, and a claim may be bound after the row
+// was already built, so both identities are checked).
+func (t *teamService) liveMemberSupersedes(record childSessionRecord, live []contracts.TeamMember) bool {
+	if record.ID == "" {
+		return false
+	}
+	sessionMatches := func(member contracts.TeamMember) bool {
+		return record.ParentSessionID == "" || member.SessionID == "" || member.SessionID == record.ParentSessionID
+	}
+	for _, member := range live {
+		if !sessionMatches(member) {
+			continue
+		}
+		if member.ID == record.ID || (record.BackendRef != "" && member.ID == record.BackendRef) {
+			return true
+		}
+	}
+	tracker := t.teamTracker()
+	for _, member := range t.manager().Members() {
+		if record.BackendRef != "" && member.ID != record.BackendRef {
+			continue
+		}
+		if childID := tracker.childIDForMember(member.ID); childID != "" && childID == record.ID {
+			return true
+		}
+	}
+	return false
+}
+
+// memberSnapshot returns one live member converted to the contract, with the
+// child-session ID bound to it (for the close/shutdown archiving path).
+func (t *teamService) memberSnapshot(memberID string) (contracts.TeamMember, string, bool) {
 	if t == nil || memberID == "" {
-		return contracts.TeamMember{}, false
+		return contracts.TeamMember{}, "", false
 	}
 	raw := t.manager().Members()
 	snapshots := t.teamTracker().reconcile(raw)
@@ -274,16 +329,16 @@ func (t *teamService) memberSnapshot(memberID string) (contracts.TeamMember, boo
 		if snapshot, ok := snapshots[member.ID]; ok {
 			applyRunSnapshot(&converted, snapshot)
 		}
-		return converted, true
+		return converted, t.childIDForMember(member), true
 	}
-	return contracts.TeamMember{}, false
+	return contracts.TeamMember{}, "", false
 }
 
 // archiveTeamMembersOnShutdown persists every live member before the module
-// disposes the manager: a member still running when the app quits is archived
-// as interrupted instead of vanishing.
+// disposes the manager: a member still running when the app quits is recorded as
+// interrupted instead of vanishing.
 func (s *service) archiveTeamMembersOnShutdown() {
-	if s == nil || s.childHistory == nil {
+	if s == nil || s.childSessions == nil {
 		return
 	}
 	manager := s.teamManagerService()
@@ -302,12 +357,39 @@ func (s *service) archiveTeamMembersOnShutdown() {
 		case contracts.TeamRunDone, contracts.TeamRunFailed:
 		default:
 			// No completed run, or a run still in flight when the app quit: the
-			// member did not survive, so the history records an interruption.
+			// child did not survive, so the store records an interruption.
 			converted.RunState = contracts.TeamRunInterrupted
 		}
-		s.childHistory.upsertMember(childHistoryMemberFromContract(
-			converted, converted.SessionID, tracker.memberPrompt(member.ID)))
+		childID := tracker.childIDForMember(member.ID)
+		if childID == "" {
+			childID = s.childSessions.newID()
+		}
+		s.childSessions.upsert(childSessionFromTeamMember(
+			converted, converted.SessionID, tracker.memberPrompt(member.ID), childID, member.ID))
 	}
+}
+
+// resolveChildRef resolves a durable child-session ID to its live manager
+// reference ("" when no live member owns it). Manager references and names pass
+// through unchanged so legacy callers keep working.
+func (t *teamService) resolveChildRef(id string) (memberID, name string) {
+	trimmed := strings.TrimSpace(id)
+	if trimmed == "" {
+		return "", ""
+	}
+	if memberID, name := t.resolveMemberRef(trimmed); memberID != "" {
+		return memberID, name
+	}
+	resolved := t.teamTracker().memberForChild(trimmed)
+	if resolved == "" {
+		return "", ""
+	}
+	for _, member := range t.manager().Members() {
+		if member.ID == resolved {
+			return member.ID, member.Name
+		}
+	}
+	return resolved, ""
 }
 
 // teamMemberFromRig converts one manager member snapshot to the contract.
@@ -372,13 +454,15 @@ func (t *teamService) Spawn(ctx context.Context, name, prompt, model string) (co
 	if snapshot, ok := t.teamTracker().reconcile(t.manager().Members())[member.ID]; ok {
 		applyRunSnapshot(&converted, snapshot)
 	}
+	converted.ID = t.childIDForMember(member)
 	t.teamTracker().notifyChange()
 	return converted, nil
 }
 
 // SendAsync implements contracts.TeamService.
 func (t *teamService) SendAsync(id, message string) error {
-	err := t.manager().SendAsync(id, message)
+	ref := t.managerRef(id)
+	err := t.manager().SendAsync(ref, message)
 	if err != nil {
 		t.teamTracker().addActivity(nil, "", contracts.TeamActivityError,
 			"发送消息失败："+err.Error(), true)
@@ -392,7 +476,7 @@ func (t *teamService) Send(ctx context.Context, id, message string) (string, err
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	result, err := t.manager().Send(ctx, id, message)
+	result, err := t.manager().Send(ctx, t.managerRef(id), message)
 	if err != nil {
 		return "", err
 	}
@@ -404,18 +488,19 @@ func (t *teamService) Wait(ctx context.Context, id string) (string, error) {
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	memberID, name := t.resolveMemberRef(id)
-	if run := t.teamTracker().runForRef(id); run != nil || name != "" {
+	memberID, name := t.resolveChildRef(id)
+	if run := t.teamTracker().runForRef(memberID); run != nil || name != "" {
 		t.teamTracker().addActivity(run, memberID, contracts.TeamActivityWait,
 			fmt.Sprintf("等待「%s」的当前运行", teamDisplayName(name, id)), false)
 	}
-	result, err := t.manager().Wait(ctx, id)
+	ref := t.managerRef(id)
+	result, err := t.manager().Wait(ctx, ref)
 	if err != nil {
 		return "", err
 	}
 	// After a follow-up SendAsync the manager's Wait can still report the first
 	// run's result; prefer the latest completed answer when one is recorded.
-	if latest, ok, lastErr := t.manager().Last(id); lastErr == nil && ok && latest.Output != "" {
+	if latest, ok, lastErr := t.manager().Last(ref); lastErr == nil && ok && latest.Output != "" {
 		return latest.Output, nil
 	}
 	return result.Output, nil
@@ -423,7 +508,7 @@ func (t *teamService) Wait(ctx context.Context, id string) (string, error) {
 
 // Interrupt implements contracts.TeamService.
 func (t *teamService) Interrupt(id string) error {
-	err := t.manager().Interrupt(id)
+	err := t.manager().Interrupt(t.managerRef(id))
 	if err != nil {
 		t.teamTracker().addActivity(nil, "", contracts.TeamActivityError,
 			"中断失败："+err.Error(), true)
@@ -435,12 +520,14 @@ func (t *teamService) Interrupt(id string) error {
 
 // Close implements contracts.TeamService.
 func (t *teamService) Close(id string) error {
-	memberID, name := t.resolveMemberRef(id)
-	run := t.teamTracker().runForRef(id)
+	memberID, name := t.resolveChildRef(id)
+	ref := t.managerRef(id)
+	run := t.teamTracker().runForRef(memberID)
 	// Capture the member before the manager drops it: a closed teammate stays in
-	// the durable history so the overlay can still show what ran.
-	target, hasTarget := t.memberSnapshot(memberID)
-	if err := t.manager().Close(id); err != nil {
+	// the durable child-session store (same identity), read-only and visible in
+	// both the team and child-agent surfaces.
+	target, childID, hasTarget := t.memberSnapshot(memberID)
+	if err := t.manager().Close(ref); err != nil {
 		t.teamTracker().addActivity(run, memberID, contracts.TeamActivityError,
 			"关闭失败："+err.Error(), true)
 		t.teamTracker().notifyChange()
@@ -452,21 +539,24 @@ func (t *teamService) Close(id string) error {
 		t.teamTracker().release(memberID)
 	}
 	t.teamTracker().reconcile(t.manager().Members())
-	if hasTarget {
-		switch target.RunState {
-		case contracts.TeamRunDone, contracts.TeamRunFailed:
-		default:
-			// A member closed while idle or running keeps a terminal state in
-			// the history instead of the read model's transient one.
-			target.RunState = contracts.TeamRunInterrupted
+	if hasTarget && t.service.childSessions != nil {
+		if childID == "" {
+			childID = t.service.childSessions.newID()
 		}
-		if t.service.childHistory != nil {
-			t.service.childHistory.upsertMember(childHistoryMemberFromContract(
-				target, target.SessionID, t.teamTracker().memberPrompt(memberID)))
-		}
+		t.service.childSessions.upsert(childSessionFromTeamMember(
+			target, target.SessionID, t.teamTracker().memberPrompt(memberID), childID, memberID))
 	}
 	t.teamTracker().notifyChange()
 	return nil
+}
+
+// managerRef resolves a durable child-session ID to the manager reference used
+// by the rig team manager; manager references and names pass through unchanged.
+func (t *teamService) managerRef(id string) string {
+	if memberID, _ := t.resolveChildRef(id); memberID != "" {
+		return memberID
+	}
+	return id
 }
 
 // resolveMemberRef resolves a member reference (id, target or unique name) to

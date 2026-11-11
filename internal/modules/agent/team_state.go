@@ -69,9 +69,11 @@ func teamTrackerFor(key any, create func() *teamTracker) *teamTracker {
 }
 
 // teamTracker owns the run registry and the activity read model of one agent
-// service (one process-wide team manager).
+// service (one process-wide team manager). sessions is the durable child-session
+// store the tracker writes run snapshots into (nil in focused unit tests).
 type teamTracker struct {
-	notify func()
+	notify   func()
+	sessions *childSessionStore
 
 	mu      sync.Mutex
 	nextID  uint64
@@ -89,10 +91,11 @@ type activityEntry struct {
 	memberID string
 }
 
-func newTeamTracker(notify func()) *teamTracker {
+func newTeamTracker(notify func(), sessions *childSessionStore) *teamTracker {
 	return &teamTracker{
-		notify: notify,
-		claims: make(map[string]*trackedSubagent),
+		notify:   notify,
+		sessions: sessions,
+		claims:   make(map[string]*trackedSubagent),
 	}
 }
 
@@ -128,12 +131,18 @@ func (t *teamTracker) track(inner rig.Subagent, spec rig.SubagentSpec, effective
 		prompt:    collapseTeamText(spec.Prompt, 120),
 		sessionID: strings.TrimSpace(sessionID),
 	}
+	if t.sessions != nil {
+		run.childID = t.sessions.newID()
+	} else {
+		run.childID = fmt.Sprintf("child-%d", t.nextID)
+	}
 	t.runs = append(t.runs, run)
 	t.mu.Unlock()
 
 	run.beginRun()
 	t.addActivity(run, "", contracts.TeamActivitySpawn, fmt.Sprintf("创建队友「%s」：%s", run.name, run.prompt), false)
 	t.notifyChange()
+	t.persistRun(run)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	run.mu.Lock()
@@ -152,18 +161,10 @@ func (t *teamTracker) reconcile(members []rigteam.Member) map[string]teamRunSnap
 		return out
 	}
 	t.mu.Lock()
-	live := make(map[string]bool, len(members))
-	for _, member := range members {
-		live[member.ID] = true
-	}
-	for id, run := range t.claims {
-		if !live[id] && run != nil {
-			run.mu.Lock()
-			run.released = true
-			run.mu.Unlock()
-			delete(t.claims, id)
-		}
-	}
+	// Claims are only released by the explicit Close path: a reconcile can run
+	// with a member snapshot captured just before another concurrent spawn
+	// registered its member, and marking that member's run released from the
+	// stale snapshot would detach a live teammate.
 	for _, member := range members {
 		run, ok := t.claims[member.ID]
 		if !ok || run == nil {
@@ -398,6 +399,7 @@ type trackedSubagent struct {
 	inner   rig.Subagent
 
 	id        string
+	childID   string
 	name      string
 	model     string
 	prompt    string
@@ -430,6 +432,7 @@ func (t *trackedSubagent) Send(ctx context.Context, message string) (rig.Subagen
 	t.tracker.addActivity(t, "", contracts.TeamActivitySend,
 		fmt.Sprintf("发送消息给「%s」：%s", t.name, collapseTeamText(message, 120)), false)
 	t.tracker.notifyChange()
+	t.tracker.persistRun(t)
 	result, err := t.inner.Send(ctx, message)
 	t.finishRun(result, err)
 	return result, err
@@ -466,6 +469,7 @@ func (t *trackedSubagent) Stop() error {
 		t.tracker.addActivity(t, "", contracts.TeamActivityInterrupt,
 			fmt.Sprintf("「%s」的当前运行已停止", t.name), false)
 	}
+	t.tracker.persistRun(t)
 	return t.inner.Stop()
 }
 
@@ -521,6 +525,7 @@ func (t *trackedSubagent) record(seq int, result rig.SubagentResult, err error) 
 			fmt.Sprintf("「%s」已完成：%s", t.name, collapseTeamText(output, 120)), false)
 	}
 	t.tracker.notifyChange()
+	t.tracker.persistRun(t)
 }
 
 // watch waits for the initial background run and records it. It is the single
@@ -534,6 +539,109 @@ func (t *trackedSubagent) watch(ctx context.Context) {
 	seq := t.seq
 	t.mu.Unlock()
 	t.record(seq, result, err)
+}
+
+// childIDForMember returns the durable child-session ID bound to one live
+// manager member ("" when the member has no tracked run yet).
+func (t *teamTracker) childIDForMember(memberID string) string {
+	if t == nil {
+		return ""
+	}
+	run := t.claimRun(strings.TrimSpace(memberID))
+	if run == nil {
+		return ""
+	}
+	run.mu.Lock()
+	defer run.mu.Unlock()
+	return run.childID
+}
+
+// memberIDForChild resolves a durable child-session ID to the live manager
+// member reference that owns it ("" when none does).
+func (t *teamTracker) memberIDForChild(childID string) string {
+	return t.memberForChild(childID)
+}
+
+// memberForChild resolves a durable child-session ID back to its live manager
+// member reference ("" when no live member owns it).
+func (t *teamTracker) memberForChild(childID string) string {
+	if t == nil {
+		return ""
+	}
+	childID = strings.TrimSpace(childID)
+	if childID == "" {
+		return ""
+	}
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	for memberID, run := range t.claims {
+		if run == nil {
+			continue
+		}
+		run.mu.Lock()
+		match := run.childID == childID
+		run.mu.Unlock()
+		if match {
+			return memberID
+		}
+	}
+	return ""
+}
+
+// persistRun writes one teammate run snapshot into the durable child-session
+// store. It is called from the spawn/send/watch goroutines, never from the
+// per-frame UI read path.
+func (t *teamTracker) persistRun(run *trackedSubagent) {
+	if t == nil || run == nil || t.sessions == nil {
+		return
+	}
+	run.mu.Lock()
+	childID := run.childID
+	snapshot := teamRunSnapshot{
+		RunState:    run.state,
+		Error:       run.lastError,
+		LastOutput:  run.lastOutput,
+		Model:       run.model,
+		Started:     run.started,
+		Finished:    run.finished,
+		UsageTokens: run.usage,
+		Iterations:  run.iterations,
+		SessionID:   run.sessionID,
+	}
+	name, prompt := run.name, run.prompt
+	run.mu.Unlock()
+	if childID == "" {
+		return
+	}
+	activity := t.activitiesForRun(run)
+	record := childSessionRecord{
+		ID:              childID,
+		ParentSessionID: snapshot.SessionID,
+		BackendRef:      t.claimMemberID(run),
+		Kind:            contracts.ChildAgentTeammate,
+		Name:            name,
+		Model:           snapshot.Model,
+		Prompt:          prompt,
+		Status:          childStatusFromRunState(snapshot.RunState),
+		Output:          snapshot.LastOutput,
+		Error:           snapshot.Error,
+		Started:         snapshot.Started,
+		Finished:        snapshot.Finished,
+		UsageTokens:     snapshot.UsageTokens,
+		Iterations:      snapshot.Iterations,
+		Activity:        childSessionActivityFromTeam(activity),
+	}
+	t.sessions.upsert(record)
+}
+
+// activitiesForRun returns a copy of one run's bounded activity rows.
+func (t *teamTracker) activitiesForRun(run *trackedSubagent) []contracts.TeamActivity {
+	if t == nil {
+		return nil
+	}
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	return t.activityForRunLocked(run)
 }
 
 // snapshot returns the current run state for the member conversion.

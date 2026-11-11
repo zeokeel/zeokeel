@@ -445,7 +445,7 @@ func RunStatus(c *ui.Context, o RunStatusOptions)
 
 **数据模型**：`contracts.ChildAgentService`（`ChildAgents(parentSessionID)` / `ChildAgent(id)` / `SendChildAgent`；子代理=one-shot，队友=continuable）、`TeamMember{RunState,SessionID,Historical,...}`、`ChildAgent.Historical`（持久历史的只读行）、`TeamActivity`（有界）、`BoardTask{Status,Owner,BlockedBy,WriteScopes}`、`TaskAssigner`（可选）。
 
-**持久历史（2026-11-11）**：跑完的队友与同步子代理由 agent 模块写入 `<数据目录>/child-agents.json`（有界 + TTL + 原子写 + 损坏隔离），重启后作为 `Historical` 只读行恢复：团队浮层在「成员」下新增「已结束」区（带「历史」标记），子智能体切换器/子会话照常打开，但不再有输入框（`SendChildAgent` 拒绝历史行）。历史按 `SessionID` 归属到当初的会话：页头计数与团队浮层只列当前会话的历史，运行中的队友仍是进程级可见。
+**持久子会话（2026-11-11，DSH 对齐）**：teammate 与同步子代理共用一套稳定身份——创建时分配 `child-<8 hex>` 的 child-session ID，团队 member ID、子智能体 ID 与「已结束」历史行是同一个值；rig manager 的 `member-N` / 子代理注册表 ID 只在后端解析。记录写入 `<数据目录>/child-sessions.json`（v2；有界 64 条 + 14 天 TTL + 原子写 + 损坏隔离；自动迁移旧 `child-agents.json`），spawn 时即写、完成/失败/中断/关闭/退出持续更新。重启后恢复为 `Historical` 只读行：团队浮层「已结束」区（带「历史」标记）、子智能体切换器/子会话照常打开，但无输入框（`SendChildAgent` 拒绝）。历史按 `SessionID` 归属到当初的会话：页头计数与团队浮层只列当前会话的历史，运行中队友仍是进程级可见。共享任务板同样持久化到 `<数据目录>/team-tasks.json`（启动回放、模型工具与 UI 操作后落盘）。
 
 **状态矩阵**：
 
