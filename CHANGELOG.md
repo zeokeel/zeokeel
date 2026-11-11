@@ -8,6 +8,14 @@ All notable changes to ZeoKeel are documented here. The format follows
 
 （暂无未发布改动）
 
+## [0.2.22] - 2026-11-11
+
+短代码围栏收缩到内容宽度。
+
+- `uikit.MarkdownCodeBlock` 现在测量最长代码行（品牌 mono 字体、13px 元数据字号），把围栏宽度设为「最长行 + 正文内边距」，因此一行命令的围栏不再铺满整个阅读列；语言/复制头部保留最小宽度（128 DIP），长行用 `MaxWidthPercent(100)` 夹在阅读列内并继续横向滚动。
+- 流式/高亮/复制/暗色全部沿用官方 `CodeBlockView`；只在每帧测量最长行一次（`MeasureText`），不增加第三方依赖。
+- 快照 `p1-chat` / `p2-markdown-specimen[-dark]` 显示短围栏收缩后的效果；`go test ./...`、designlint、design-check、ui-drive 91/91 全部复跑。
+
 ## [0.2.21] - 2026-11-11
 
 Markdown 阅读面整体升级（主区域观感）。

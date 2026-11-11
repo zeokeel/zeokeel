@@ -809,3 +809,8 @@ v0.2.12 的 package-macos job 在 GitHub Ubuntu runner 上构建 libdmg-hfsplus 
 - **fixture**：`ui-snapshot`/`ui-drive` 的脚本答案不再输出 `text /data/mygo`，改为 `bash` + `go test ./... -count=1`；新增 `p2-markdown-specimen[-dark]` 覆盖所有 Markdown 块。
 - **验证**：`go test ./...` 全绿；gofmt/build/vet/mygo vet 干净；designlint 0 new/0 blocking；design-check 6/6；`ui-snapshot` **103 次渲染 / 102 唯一 PNG**（`.cache/phase3/shots/`）；`ui-drive` **91/91 PASS**（`.cache/phase3/drive/`）。
 - **残余**：Markdown 表格按内容宽度（未强制铺满阅读列）；代码围栏在短代码时仍占满整行（为横向滚动与对齐保留）。
+
+## 0.2.22（2026-11-11：短代码围栏收缩）
+
+- `uikit.MarkdownCodeBlock`：测量最长代码行（`design.MonoFontStack` + `TypeXS` 13px），围栏宽度 = 最长行 + `Space3*2`，最小 128 DIP（`Space8*4`）；`MaxWidthPercent(100)` 保证长行不越出阅读列并继续横向滚动。每帧只测量最长一行（按字节长度选取，CJK 偏宽取上界）。
+- 证据：`p1-chat` / `p2-markdown-specimen[-dark]` 短围栏已收缩；`go test ./...` 全绿；designlint 0 new/0 blocking；design-check 6/6；`ui-snapshot` **103 次渲染 / 102 唯一 PNG**；`ui-drive` **91/91 PASS**。

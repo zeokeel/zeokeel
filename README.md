@@ -4,13 +4,13 @@
 [![Release](https://img.shields.io/github/v/release/zeokeel/zeokeel)](https://github.com/zeokeel/zeokeel/releases)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
-> **v0.2.21 — twenty-sixth public release** (2026-11-11). Native, compile-time modular
+> **v0.2.22 — twenty-seventh public release** (2026-11-11). Native, compile-time modular
 > AI agent for desktop, headless and ACP (Zed/editor) use; one Go binary, no
 > webview. Final verification: full test suite green (incl. regression / uimodtest /
 > design-contract tests), `ui-drive` **91/91 PASS**, `ui-snapshot` **103 renders / 102 unique PNGs**,
 > designlint **0 new / 0 blocking**. See [CHANGELOG.md](CHANGELOG.md) for the release notes.
 
-> **v0.2.21 主要变化**：Markdown 阅读面整体升级 —— `uikit.ChatMarkdown`（比例行高、标题层级/间距、行内代码、引用/表格/链接的 token 化）与 `uikit.MarkdownCodeBlock`（更安静的代码围栏：填充面、无边框、只有真实语言才显示标签、保留官方复制/流式/高亮）。演示 fixture 去掉 `/data/mygo` 占位，新增 Markdown 组件标本帧。
+> **v0.2.22 主要变化**：短代码围栏收缩到内容宽度——`uikit.MarkdownCodeBlock` 测量最长代码行并把围栏宽度收到「最长行 + 内边距」，一行命令不再铺满阅读列；长行仍在列内横向滚动。其余同 v0.2.21（`uikit.ChatMarkdown` 阅读主题、安静围栏、演示 fixture 去掉 `/data/mygo`）。
 
 ## 下载与运行 / Download and run
 
