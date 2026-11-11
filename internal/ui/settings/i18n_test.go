@@ -16,8 +16,11 @@ import (
 	"github.com/zeokeel/zeokeel/internal/uiroot"
 )
 
-// newLocaleHarness builds the settings harness with an explicit host language.
-func newLocaleHarness(t *testing.T, chat *fakeChat, store *fakeSettings, cfg settings.Config, language string) *harness {
+// newLocaleHarness builds the settings harness with an explicit host language;
+// a trailing sandbox service is provided as contracts.KeySandbox before the
+// settings module activates.
+func newLocaleHarness(t *testing.T, chat *fakeChat, store *fakeSettings, cfg settings.Config, language string,
+	sandboxes ...contracts.SandboxService) *harness {
 	t.Helper()
 	uiRoot := uiroot.New(uiroot.Config{AppName: "ZeoKeel", Language: language})
 	ctx := cordis.Root()
@@ -31,6 +34,11 @@ func newLocaleHarness(t *testing.T, chat *fakeChat, store *fakeSettings, cfg set
 	provide(t, ctx, contracts.KeySettings, contracts.SettingsService(store))
 	provide(t, ctx, contracts.KeyChat, contracts.ChatService(chat))
 	provide(t, ctx, contracts.KeyAppInfo, contracts.AppInfo{Name: "ZeoKeel", Version: "1.2.3"})
+	for _, sandbox := range sandboxes {
+		if sandbox != nil {
+			provide[contracts.SandboxService](t, ctx, contracts.KeySandbox, sandbox)
+		}
+	}
 
 	h := &harness{t: t, ctx: ctx, uiRoot: uiRoot, settings: store, chat: chat}
 	h.fiber = activate(t, ctx, settings.Module(), cfg)

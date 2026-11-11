@@ -689,6 +689,9 @@ func Module() *module.Descriptor[Config] {
 		info, _ := ctx.Get(contracts.KeyAppInfo)
 		dataDir, _ := ctx.Get(contracts.KeyDataDir)
 		toolkit, _ := ctx.Get(contracts.KeyToolkit)
+		// Optional OS sandbox service: the Behavior page shows its switch and
+		// live status; a stripped assembly without the module still renders.
+		sandboxService, _ := ctx.Get(contracts.KeySandbox)
 
 		modelLabels := func() buildLabels {
 			return buildLabels{
@@ -869,7 +872,7 @@ func Module() *module.Descriptor[Config] {
 				zhTitle: "行为", enTitle: "Behavior",
 				Build: func(c *ui.Context) {
 					syncer.sync()
-					buildBehaviorPage(c, runtime, store, locale, behavior)
+					buildBehaviorPage(c, runtime, store, locale, behavior, sandboxService)
 				},
 				Dirty: func() bool { return behaviorDraftDirty(behavior, store) },
 				Discard: func() {

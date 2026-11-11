@@ -137,6 +137,10 @@ func expandMoreConversationSettings(t *testing.T, tester *ui.Tester, label strin
 	tester.Frame()
 	tester.Advance(350 * time.Millisecond)
 	tester.Frame()
+	// The OS sandbox section sits above the disclosure, so on the 1200x800
+	// test window the trigger starts below the scroll viewport: scroll it into
+	// view first, as a user would.
+	ensureVisibleInFrame(t, tester, label)
 	if err := tester.Click(label); err != nil {
 		t.Fatalf("expand %q: %v; texts = %v", label, err, tester.Texts())
 	}

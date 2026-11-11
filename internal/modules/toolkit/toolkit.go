@@ -122,17 +122,33 @@ func Module() *module.Descriptor[Config] {
 		if timeout <= 0 {
 			timeout = 30 * time.Second
 		}
+		settingsService, hasSettings := ctx.Get(contracts.KeySettings)
+		// The OS sandbox is optional: an assembly without the sandbox module
+		// keeps the pre-sandbox behavior (nil runner, approval-only boundary).
+		sandboxService, hasSandbox := ctx.Get(contracts.KeySandbox)
+		// sandboxOf is read on every root-scoped build, so an agent.permission
+		// preset change or OS-runner availability takes effect on the next tool
+		// call without a restart.
+		sandboxOf := func() (sandbox.Mode, sandbox.Runner) {
+			mode := configuredSandboxMode(cfg, settingsService)
+			if !hasSandbox || sandboxService == nil {
+				return mode, nil
+			}
+			return mode, sandboxService.Runner()
+		}
 		// Root-dependent tools (files, shell, editor, image, terminal, jobs,
 		// worktree, working_directory) follow the workspace that is current at
 		// call time; tools without a filesystem root are registered once below.
 		rootOf := workspaceRootSource(ctx, cfg.Root)
-		group := newRebindGroup(cfg, timeout, rootOf, logf)
+		group := newRebindGroup(cfg, timeout, rootOf, sandboxOf, logf)
 		rootScoped := group.initial()
 		tools := append([]rig.Tool(nil), group.proxies(rootScoped)...)
 		tools = append(tools, misc.NewTodoTool(misc.NewTodoStore()))
 		// web_fetch is not workspace-rooted; give it a policy with the network
-		// and output limits but no filesystem root.
-		webPolicy := newPolicy(cfg, "", timeout)
+		// and output limits but no filesystem root. Its mode stays
+		// workspace-write: the OS sandbox only affects command execution,
+		// and network access is still governed by cfg.Network.
+		webPolicy := newPolicy(cfg, "", timeout, sandbox.ModeWorkspaceWrite)
 		if memoryStore, ok := ctx.Get(contracts.KeyMemory); ok {
 			// The memory backend provides the durable rig.MemoryStore; without
 			// it the memory tools fall back to their in-memory default. The
@@ -157,7 +173,6 @@ func Module() *module.Descriptor[Config] {
 		taskManager := team.NewTaskManager()
 		tools = append(tools, team.TaskTools(taskManager)...)
 		taskBoard := newTaskBoard(taskManager)
-		settingsService, hasSettings := ctx.Get(contracts.KeySettings)
 		if hasSettings {
 			tools = append(tools, maskedSettingsTools(settingsService)...)
 		}
@@ -302,7 +317,7 @@ func Module() *module.Descriptor[Config] {
 
 		// Optional single LSP server: its tools join the same registry and the
 		// server is closed when the module unloads.
-		lspPolicy := newPolicy(cfg, rootScoped.root, timeout)
+		lspPolicy := newPolicy(cfg, rootScoped.root, timeout, rootScoped.mode)
 		lspTools, closeLSP := startLSPTools(context.Background(), ctx, logf, settingsService, hasSettings, tools, lspPolicy)
 		tools = append(tools, lspTools...)
 		tools = filterDisabledTools(tools, disabledTools, logf)
@@ -353,16 +368,68 @@ func Module() *module.Descriptor[Config] {
 	).WithName("ZeoKeel Rig toolset")
 }
 
+// permissionSandboxMode maps a stored/logged agent.permission preset onto the
+// OS sandbox mode the tools are rebuilt with:
+//
+//   - read-only        -> read-only        (file writes and shell are denied)
+//   - workspace        -> workspace-write  (writes only inside the workspace)
+//   - full             -> danger-full-access (file tools unrestricted, runner
+//     passes commands through)
+//
+// Legacy/unknown spellings go through contracts.NormalizePermissionMode, so
+// "ask"/"never" become read-only and empty/unknown values keep the workspace
+// default.
+func permissionSandboxMode(permission string) sandbox.Mode {
+	switch contracts.NormalizePermissionMode(permission) {
+	case contracts.PermissionReadOnly:
+		return sandbox.ModeReadOnly
+	case contracts.PermissionFull:
+		return sandbox.ModeDangerFullAccess
+	default:
+		return sandbox.ModeWorkspaceWrite
+	}
+}
+
+// configuredSandboxMode resolves the live mode for the next root-scoped build:
+// the stored agent.permission preset, with the assembly-level cfg.ReadOnly
+// opt-out forcing read-only. It is read on every rebuild, so a permission
+// change applies without a restart.
+func configuredSandboxMode(cfg Config, settings contracts.SettingsService) sandbox.Mode {
+	if cfg.ReadOnly {
+		return sandbox.ModeReadOnly
+	}
+	if settings == nil {
+		return sandbox.ModeWorkspaceWrite
+	}
+	return permissionSandboxMode(settings.Get(contracts.SettingAgentPermission, ""))
+}
+
+// policyMode returns the effective policy mode of one build: cfg.ReadOnly
+// forces read-only and an empty/unknown mode falls back to workspace-write.
+func policyMode(cfg Config, mode sandbox.Mode) sandbox.Mode {
+	if cfg.ReadOnly {
+		return sandbox.ModeReadOnly
+	}
+	switch mode {
+	case sandbox.ModeReadOnly, sandbox.ModeWorkspaceWrite, sandbox.ModeDangerFullAccess:
+		return mode
+	default:
+		return sandbox.ModeWorkspaceWrite
+	}
+}
+
 // newPolicy builds the sandbox policy from the module config. It is a helper so
 // the shell-policy behavior (allowlist, optional shell grammar) has a direct
-// unit-test seam.
-func newPolicy(cfg Config, root string, timeout time.Duration) *sandbox.Policy {
+// unit-test seam. mode is the linked OS sandbox mode; cfg.ReadOnly keeps forcing
+// read-only.
+func newPolicy(cfg Config, root string, timeout time.Duration, mode sandbox.Mode) *sandbox.Policy {
 	commands := cfg.CommandAllowlist
 	if commands == nil {
 		commands = defaultCommands
 	}
 	options := []sandbox.Option{
 		sandbox.WithRoots(root),
+		sandbox.WithMode(policyMode(cfg, mode)),
 		sandbox.WithReadOnly(cfg.ReadOnly),
 		sandbox.WithNetwork(cfg.Network),
 		sandbox.WithTimeout(timeout),

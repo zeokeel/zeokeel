@@ -27,7 +27,7 @@ func TestBoundToolDispatchesToContextWorkspaceRoot(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(rootB, "note.txt"), []byte("hello-B"), 0o644); err != nil {
 		t.Fatalf("write rootB note: %v", err)
 	}
-	group := newRebindGroup(Config{}, 5*time.Second, func() string { return "" }, nil)
+	group := newRebindGroup(Config{}, 5*time.Second, func() string { return "" }, nil, nil)
 	t.Cleanup(group.close)
 	proxies := group.proxies(group.initial())
 	var readFile rig.Tool

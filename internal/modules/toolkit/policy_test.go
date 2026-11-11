@@ -8,6 +8,8 @@ package toolkit
 import (
 	"testing"
 	"time"
+
+	"github.com/zeokeel/zeokeel-rig/sandbox"
 )
 
 // TestDefaultAllowlistCoversRoutineDevelopmentCommands guards the usability fix:
@@ -28,7 +30,7 @@ func TestDefaultAllowlistCoversRoutineDevelopmentCommands(t *testing.T) {
 			t.Errorf("defaultCommands lacks %q", command)
 		}
 	}
-	policy := newPolicy(Config{}, t.TempDir(), time.Second)
+	policy := newPolicy(Config{}, t.TempDir(), time.Second, sandbox.ModeWorkspaceWrite)
 	for _, command := range want {
 		if err := policy.CheckCommand([]string{command}, "."); err != nil {
 			t.Errorf("CheckCommand(%q) = %v, want nil", command, err)
@@ -39,7 +41,7 @@ func TestDefaultAllowlistCoversRoutineDevelopmentCommands(t *testing.T) {
 // TestPolicyKeepsStrictGrammarByDefault documents the pre-existing default:
 // without the assembly opt-in a shell line with operators is still rejected.
 func TestPolicyKeepsStrictGrammarByDefault(t *testing.T) {
-	policy := newPolicy(Config{}, t.TempDir(), time.Second)
+	policy := newPolicy(Config{}, t.TempDir(), time.Second, sandbox.ModeWorkspaceWrite)
 	if err := policy.CheckShellCommand("echo hi && echo bye"); err == nil {
 		t.Fatal("strict policy accepted a compound command, want denial")
 	}
@@ -52,7 +54,7 @@ func TestPolicyKeepsStrictGrammarByDefault(t *testing.T) {
 // opt-in: pipes, lists and leading environment assignments parse and the
 // allowlist still applies to the first command.
 func TestPolicyAllowsShellOperatorsWhenConfigured(t *testing.T) {
-	policy := newPolicy(Config{AllowShellOperators: true}, t.TempDir(), time.Second)
+	policy := newPolicy(Config{AllowShellOperators: true}, t.TempDir(), time.Second, sandbox.ModeWorkspaceWrite)
 	for _, command := range []string{
 		"echo hi",
 		"echo hi && echo bye",
@@ -80,7 +82,7 @@ func TestPolicyAllowsShellOperatorsWhenConfigured(t *testing.T) {
 // TestExplicitEmptyAllowlistDisablesShell keeps the documented escape hatch:
 // an explicit empty list in assembly.json disables shell execution.
 func TestExplicitEmptyAllowlistDisablesShell(t *testing.T) {
-	policy := newPolicy(Config{CommandAllowlist: []string{}}, t.TempDir(), time.Second)
+	policy := newPolicy(Config{CommandAllowlist: []string{}}, t.TempDir(), time.Second, sandbox.ModeWorkspaceWrite)
 	if err := policy.CheckCommand([]string{"echo"}, "."); err == nil {
 		t.Fatal("empty allowlist accepted a command, want denial")
 	}

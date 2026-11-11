@@ -12,6 +12,7 @@ import (
 	"unicode/utf8"
 
 	rig "github.com/zeokeel/zeokeel-rig"
+	"github.com/zeokeel/zeokeel-rig/sandbox"
 	"golang.org/x/text/encoding/simplifiedchinese"
 )
 
@@ -37,6 +38,7 @@ func boundStub(tool rig.Tool) (*boundTool, *rebindGroup) {
 		rootOf: func() string { return "" },
 		current: &rootScoped{
 			root:   "",
+			mode:   sandbox.ModeWorkspaceWrite,
 			tools:  []rig.Tool{tool},
 			byName: map[string]rig.Tool{tool.Name(): tool},
 		},
@@ -143,7 +145,7 @@ func TestBoundToolPreservesValidOutputAndSemantics(t *testing.T) {
 func TestBoundToolUnknownToolFailsClosed(t *testing.T) {
 	group := &rebindGroup{
 		rootOf:  func() string { return "" },
-		current: &rootScoped{root: "", byName: map[string]rig.Tool{}},
+		current: &rootScoped{root: "", mode: sandbox.ModeWorkspaceWrite, byName: map[string]rig.Tool{}},
 	}
 	proxy := &boundTool{meta: &stubTool{}, group: group}
 	if _, err := proxy.Invoke(context.Background(), rig.ToolCall{Name: "stub_tool"}); !errors.Is(err, rig.ErrToolNotFound) {

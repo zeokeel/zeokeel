@@ -13,6 +13,7 @@ import (
 	"github.com/zeokeel/zeokeel/internal/modules/importer"
 	"github.com/zeokeel/zeokeel/internal/modules/memory"
 	"github.com/zeokeel/zeokeel/internal/modules/modelcatalog"
+	"github.com/zeokeel/zeokeel/internal/modules/sandbox"
 	"github.com/zeokeel/zeokeel/internal/modules/sessionstore"
 	"github.com/zeokeel/zeokeel/internal/modules/skills"
 	"github.com/zeokeel/zeokeel/internal/modules/terminal"
@@ -63,6 +64,7 @@ func Registry() *module.Registry {
 	mustRegister(registry, terminal.Module())
 	mustRegister(registry, skills.Module())
 	mustRegister(registry, memory.Module())
+	mustRegister(registry, sandbox.Module())
 	mustRegister(registry, toolkit.Module())
 	mustRegister(registry, agent.Module())
 	mustRegister(registry, automation.Module())

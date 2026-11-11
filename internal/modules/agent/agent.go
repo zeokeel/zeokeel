@@ -175,6 +175,13 @@ func Module() *module.Descriptor[Config] {
 			// run).
 			svc.skills = skillsService
 		}
+		if sandboxService, ok := ctx.Get(contracts.KeySandbox); ok && sandboxService != nil {
+			// Optional: when the enabled OS sandbox has a usable runner, the gate
+			// auto-allows shell-family tools because the OS profile enforces their
+			// file effects. Without the module the gate keeps asking exactly as
+			// before, so an assembly that omits zeokeel/sandbox still works.
+			svc.sandboxService = sandboxService
+		}
 		svc.restore(context.Background())
 		// The durable store now backs the session-query tools: register them
 		// into the shared toolkit registry (the toolkit module has no store
@@ -286,6 +293,12 @@ type service struct {
 	// workspace is optional: when the workspace module is active the backend
 	// records which workspace each session belongs to.
 	workspace contracts.WorkspaceService
+	// sandboxService is optional: when the assembled OS sandbox reports a
+	// usable platform runner, the gate auto-allows the shell family (the OS
+	// profile enforces the file effects). It is nil when the sandbox module is
+	// not assembled or the switch is off; the gate then keeps the approval
+	// flow exactly as before.
+	sandboxService contracts.SandboxService
 
 	sessions map[string]*sessionState
 	active   string

@@ -9,6 +9,8 @@ import (
 	"errors"
 	"testing"
 	"time"
+
+	"github.com/zeokeel/zeokeel-rig/sandbox"
 )
 
 // lookPathResult builds a fake exec.LookPath: found reports the names that
@@ -65,7 +67,7 @@ func rootScopedToolNames(scoped *rootScoped) map[string]bool {
 // TestBuildRootScopedWindowsDropsBash covers the Windows behavior user report:
 // the unusable bash tool must not be offered, and the file tools must survive.
 func TestBuildRootScopedWindowsDropsBash(t *testing.T) {
-	scoped := buildRootScopedFor(Config{}, t.TempDir(), 5*time.Second, "windows", lookPathResult())
+	scoped := buildRootScopedFor(Config{}, t.TempDir(), 5*time.Second, sandbox.ModeWorkspaceWrite, nil, "windows", lookPathResult())
 	defer scoped.close()
 	names := rootScopedToolNames(scoped)
 	if names["bash"] {
@@ -84,14 +86,14 @@ func TestBuildRootScopedWindowsDropsBash(t *testing.T) {
 // TestBuildRootScopedNonWindowsShellSelection covers the non-Windows behavior:
 // bash always, pwsh only when a PowerShell binary resolves.
 func TestBuildRootScopedNonWindowsShellSelection(t *testing.T) {
-	withoutPwsh := buildRootScopedFor(Config{}, t.TempDir(), 5*time.Second, "linux", lookPathResult())
+	withoutPwsh := buildRootScopedFor(Config{}, t.TempDir(), 5*time.Second, sandbox.ModeWorkspaceWrite, nil, "linux", lookPathResult())
 	defer withoutPwsh.close()
 	names := rootScopedToolNames(withoutPwsh)
 	if !names["bash"] || names["pwsh"] {
 		t.Fatalf("linux build without pwsh = bash:%t pwsh:%t (have %v)", names["bash"], names["pwsh"], names)
 	}
 
-	withPwsh := buildRootScopedFor(Config{}, t.TempDir(), 5*time.Second, "linux", lookPathResult("pwsh"))
+	withPwsh := buildRootScopedFor(Config{}, t.TempDir(), 5*time.Second, sandbox.ModeWorkspaceWrite, nil, "linux", lookPathResult("pwsh"))
 	defer withPwsh.close()
 	names = rootScopedToolNames(withPwsh)
 	if !names["bash"] || !names["pwsh"] {

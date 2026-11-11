@@ -282,6 +282,19 @@ func (s *service) gate(sessionIDs ...string) rig.Gate {
 				}
 			}
 		}
+		// OS sandbox auto-allow: when the enabled platform runner is available
+		// the OS profile already enforces the file effects, so the shell family
+		// runs without an approval prompt (DSH-style). The branch sits after the
+		// plan/chat whitelists and the per-session override so those keep their
+		// veto, and before the interaction/remembered/approval branches so no
+		// dialog is requested. An explicit headless deny-all policy still denies:
+		// skipping the prompt must never bypass it.
+		if s.sandboxShellAutoAllowed(name) {
+			if s.approvals != nil && strings.EqualFold(strings.TrimSpace(s.approvals.Mode()), approvalModeNever) {
+				return rig.DecisionDeny, nil
+			}
+			return rig.DecisionAllow, nil
+		}
 		if interactionTools[name] {
 			// A headless "never" assembly policy is an explicit deny-all switch:
 			// it must still deny the interaction tools even though the default

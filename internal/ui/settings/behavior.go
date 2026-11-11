@@ -214,11 +214,13 @@ func saveBehaviorSetting(st *behaviorState, runtime contracts.UIRuntime,
 
 // buildBehaviorPage renders the default-permission settings. Every control on
 // the page applies at once (the page has no save button): the permission menu
-// writes the shared agent row, the work-details segmented controls write
-// ui.workSteps.*, the switches persist on change and the workspace instruction
-// file saves as it is edited.
+// writes the shared agent row, the OS sandbox switch writes the sandbox row the
+// sandbox service reads on the next tool build, the work-details segmented
+// controls write ui.workSteps.*, the switches persist on change and the
+// workspace instruction file saves as it is edited.
 func buildBehaviorPage(c *ui.Context, runtime contracts.UIRuntime,
-	store contracts.SettingsService, locale contracts.LocaleService, st *behaviorState) {
+	store contracts.SettingsService, locale contracts.LocaleService, st *behaviorState,
+	sandboxService contracts.SandboxService) {
 	t := design.Of(c)
 	applyBool := func(key string, value bool) {
 		saveBehaviorSetting(st, runtime, store, locale, key, strconv.FormatBool(value))
@@ -270,6 +272,11 @@ func buildBehaviorPage(c *ui.Context, runtime contracts.UIRuntime,
 				"Changes apply immediately (shared with the session toolbar).")),
 				t.TextMuted(design.TypeXXS)).MaxLines(2)
 		})
+		// OS sandbox: the always-on kernel-level file-effect enforcement that
+		// lets the agent gate auto-allow shell tools. It sits next to the
+		// permission mode it mirrors, and its live status says whether this
+		// host can enforce it.
+		buildSandboxSection(c, locale, sandboxService)
 		// Work details: how much of a turn's tool-call steps the transcript shows
 		// and when finished steps fold (DSH-aligned). This stays visible next to
 		// the daily permission choice; it is a display preference, not a

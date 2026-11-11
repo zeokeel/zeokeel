@@ -20,7 +20,10 @@ import (
 func TestChatFontSizeSelectorMapping(t *testing.T) {
 	harness := startBehaviorUI(t, false)
 	harness.openSettingsPage(t, "行为")
-	// 消息字号 lives inside the collapsed 更多对话设置 disclosure.
+	// 消息字号 lives inside the collapsed 更多对话设置 disclosure. The OS
+	// sandbox section pushed the disclosure below the fold, so scroll it into
+	// view first.
+	revealSettings(t, harness.tester, "更多对话设置")
 	if err := harness.tester.Click("更多对话设置"); err != nil {
 		t.Fatalf("expand more settings: %v; texts = %v", err, harness.tester.Texts())
 	}

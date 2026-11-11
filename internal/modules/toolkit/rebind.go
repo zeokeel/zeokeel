@@ -12,6 +12,7 @@ import (
 	cordis "github.com/zeokeel/zeokeel-kernel"
 
 	rig "github.com/zeokeel/zeokeel-rig"
+	"github.com/zeokeel/zeokeel-rig/sandbox"
 	"github.com/zeokeel/zeokeel-rig/tools/builtin"
 	"github.com/zeokeel/zeokeel-rig/tools/editor"
 	"github.com/zeokeel/zeokeel-rig/tools/image"
@@ -83,6 +84,11 @@ func workspaceRootSource(ctx cordis.Context, configured string) func() string {
 // on the workspace root. The build owns its terminal and background-job
 // managers; close releases them when the build is retired.
 //
+// A build also records the linked OS sandbox mode and whether a runner was
+// injected: both are part of the rebuild identity, so switching the permission
+// preset or a change in OS-runner availability rebuilds the tools instead of serving a build
+// with a stale policy or a stale runner.
+//
 // A retired build is closed as soon as it has no in-flight tool call: after a
 // workspace switch its background jobs and terminal sessions are no longer
 // reachable from the model (the job_*/terminal_* proxies dispatch to the new
@@ -90,10 +96,14 @@ func workspaceRootSource(ctx cordis.Context, configured string) func() string {
 // enter/leave count in-flight calls so a switch never aborts a call that is
 // still running against the old root.
 type rootScoped struct {
-	root   string
-	tools  []rig.Tool
-	byName map[string]rig.Tool
-	close  func()
+	root string
+	// mode is the effective sandbox mode of this build (cfg.ReadOnly already
+	// folded in), and sandboxOn reports whether an OS runner was injected.
+	mode      sandbox.Mode
+	sandboxOn bool
+	tools     []rig.Tool
+	byName    map[string]rig.Tool
+	close     func()
 	// drainNotices returns the root's pending background-job completion
 	// notices for the agent loop (rig.NoticeSource on the tool proxies).
 	drainNotices func() []string
@@ -185,16 +195,34 @@ func (s *rootScoped) closedChan() <-chan struct{} { return s.done }
 // workspace root. Empty root means "no workspace open": the sandbox policy then
 // exposes no filesystem root and every write/edit/shell call is denied, which
 // is the intended fail-closed behavior until the user opens a workspace.
-func buildRootScoped(cfg Config, root string, timeout time.Duration) *rootScoped {
-	return buildRootScopedFor(cfg, root, timeout, runtime.GOOS, exec.LookPath)
+//
+// mode is the linked OS sandbox mode and runner the optional OS runner to
+// inject; a nil runner keeps the exact pre-sandbox behavior (no wrapping).
+func buildRootScoped(cfg Config, root string, timeout time.Duration, mode sandbox.Mode, runner sandbox.Runner) *rootScoped {
+	return buildRootScopedFor(cfg, root, timeout, mode, runner, runtime.GOOS, exec.LookPath)
 }
 
 // buildRootScopedFor is buildRootScoped with the platform and PATH probe
 // injectable for tests.
-func buildRootScopedFor(cfg Config, root string, timeout time.Duration, goos string, lookPath func(string) (string, error)) *rootScoped {
-	policy := newPolicy(cfg, root, timeout)
-	background := jobs.NewManager(jobs.WithPolicy(policy))
+func buildRootScopedFor(cfg Config, root string, timeout time.Duration, mode sandbox.Mode, runner sandbox.Runner, goos string, lookPath func(string) (string, error)) *rootScoped {
+	policy := newPolicy(cfg, root, timeout, mode)
+	// The runner is injected into every command-executing surface: the built-in
+	// bash/pwsh tools, the background job manager, the terminal manager and the
+	// worktree git calls. A nil runner adds no option at all, so the old
+	// behavior is preserved exactly.
+	jobsOpts := []jobs.Option{jobs.WithPolicy(policy)}
 	terminalOpts := []terminal.Option{terminal.WithPolicy(policy)}
+	var worktreeOpts []worktree.Option
+	if runner != nil {
+		jobsOpts = append(jobsOpts, jobs.WithRunner(runner))
+		terminalOpts = append(terminalOpts, terminal.WithRunner(runner))
+		worktreeOpts = append(worktreeOpts, worktree.WithRunner(runner))
+	}
+	background := jobs.NewManager(jobsOpts...)
+	builtinOpts := []builtin.Option{builtin.WithBackgroundJobs(background)}
+	if runner != nil {
+		builtinOpts = append(builtinOpts, builtin.WithRunner(runner))
+	}
 	switch strings.ToLower(strings.TrimSpace(cfg.TerminalTransport)) {
 	case "pty":
 		terminalOpts = append(terminalOpts, terminal.WithTransport(terminal.TransportPTY))
@@ -208,19 +236,19 @@ func buildRootScopedFor(cfg Config, root string, timeout time.Duration, goos str
 	// The built-in policy set is the six file tools plus the bash tool: keep the
 	// file tools on every platform, drop only the shell tool that cannot work
 	// there.
-	for _, tool := range builtin.NewWithPolicyOptions(policy, builtin.WithBackgroundJobs(background)) {
+	for _, tool := range builtin.NewWithPolicyOptions(policy, builtinOpts...) {
 		if !bash && tool.Name() == builtin.ToolBash {
 			continue
 		}
 		tools = append(tools, tool)
 	}
 	if pwsh {
-		tools = append(tools, builtin.NewPwshWithPolicyOptions(policy, builtin.WithBackgroundJobs(background)))
+		tools = append(tools, builtin.NewPwshWithPolicyOptions(policy, builtinOpts...))
 	}
 	tools = append(tools, editor.New(policy), image.New(policy))
 	tools = append(tools, terminals.ToolsWithList()...)
 	tools = append(tools, background.Tools()...)
-	tools = append(tools, worktree.Tools(policy)...)
+	tools = append(tools, worktree.Tools(policy, worktreeOpts...)...)
 	tools = append(tools, misc.NewWorkingDirectory(root))
 
 	byName := make(map[string]rig.Tool, len(tools))
@@ -228,10 +256,12 @@ func buildRootScopedFor(cfg Config, root string, timeout time.Duration, goos str
 		byName[tool.Name()] = tool
 	}
 	return &rootScoped{
-		root:   root,
-		tools:  tools,
-		byName: byName,
-		done:   make(chan struct{}),
+		root:      root,
+		mode:      policyMode(cfg, mode),
+		sandboxOn: runner != nil,
+		tools:     tools,
+		byName:    byName,
+		done:      make(chan struct{}),
 		close: func() {
 			_ = terminals.CloseAll()
 			_ = background.CloseAll()
@@ -267,15 +297,22 @@ func backgroundJobNotices(manager *jobs.Manager) []string {
 }
 
 // rebindGroup keeps the root-scoped tool build for the current workspace root
-// and rebuilds it when the root changes. A retired build closes as soon as it is
-// idle, so a workspace switch does not abort a tool call that is still running
-// against the previous root but it also does not orphan that build's background
-// jobs and terminals (they are unreachable from the model after the switch).
+// and rebuilds it when the root, the linked OS sandbox mode or the runner-on
+// state changes. A retired build closes as soon as it is idle, so a switch does
+// not abort a tool call that is still running against the previous build but it
+// also does not orphan that build's background jobs and terminals (they are
+// unreachable from the model after the switch).
 type rebindGroup struct {
 	cfg     Config
 	timeout time.Duration
 	rootOf  func() string
-	logf    func(string, ...any)
+	// sandboxOf resolves the (mode, runner) pair the next build must use. The
+	// toolkit reads both from live services on every call, so switching the
+	// permission preset or a change in OS-runner availability rebuilds the tools without a
+	// restart. A nil resolver keeps the historical behavior: workspace-write
+	// mode with no runner injection.
+	sandboxOf func() (sandbox.Mode, sandbox.Runner)
+	logf      func(string, ...any)
 
 	mu      sync.Mutex
 	current *rootScoped
@@ -283,20 +320,55 @@ type rebindGroup struct {
 	// overrides caches the per-run root builds: the agent stamps a run's tool
 	// calls with its session workspace root (contracts.WithWorkspaceRoot), so
 	// concurrent sessions in different projects never share the process-wide
-	// "current" build. A build is created once per root and released on module
-	// unload; unlike the current build it is never retired by a workspace
-	// switch (another session may still be running in that root).
-	overrides map[string]*rootScoped
+	// "current" build. A build is created once per (root, mode, runner-on)
+	// identity and released on module unload; unlike the current build it is
+	// never retired by a workspace switch (another session may still be running
+	// in that root).
+	overrides map[rebindKey]*rootScoped
 }
 
-func newRebindGroup(cfg Config, timeout time.Duration, rootOf func() string, logf func(string, ...any)) *rebindGroup {
-	return &rebindGroup{cfg: cfg, timeout: timeout, rootOf: rootOf, logf: logf, overrides: make(map[string]*rootScoped)}
+// rebindKey is the rebuild identity of a root-scoped build: a change to any
+// field must produce a new build (and, for overrides, a new cache entry).
+type rebindKey struct {
+	root      string
+	mode      sandbox.Mode
+	sandboxOn bool
+}
+
+func newRebindGroup(cfg Config, timeout time.Duration, rootOf func() string, sandboxOf func() (sandbox.Mode, sandbox.Runner), logf func(string, ...any)) *rebindGroup {
+	return &rebindGroup{
+		cfg:       cfg,
+		timeout:   timeout,
+		rootOf:    rootOf,
+		sandboxOf: sandboxOf,
+		logf:      logf,
+		overrides: make(map[rebindKey]*rootScoped),
+	}
+}
+
+// sandboxState resolves the sandbox identity of the next build.
+func (g *rebindGroup) sandboxState() (sandbox.Mode, sandbox.Runner) {
+	if g.sandboxOf == nil {
+		return sandbox.ModeWorkspaceWrite, nil
+	}
+	return g.sandboxOf()
+}
+
+// buildKey folds cfg.ReadOnly and the runner-on state into the rebuild identity.
+func (g *rebindGroup) buildKey(root string, mode sandbox.Mode, runner sandbox.Runner) rebindKey {
+	return rebindKey{root: root, mode: policyMode(g.cfg, mode), sandboxOn: runner != nil}
+}
+
+// matches reports whether a build was made for the given identity.
+func (s *rootScoped) matches(key rebindKey) bool {
+	return s != nil && s.root == key.root && s.mode == key.mode && s.sandboxOn == key.sandboxOn
 }
 
 // initial builds the tool set for the root that is active at activation time.
 // The tools double as the stable metadata templates of the registry proxies.
 func (g *rebindGroup) initial() *rootScoped {
-	scoped := buildRootScoped(g.cfg, strings.TrimSpace(g.rootOf()), g.timeout)
+	mode, runner := g.sandboxState()
+	scoped := buildRootScoped(g.cfg, strings.TrimSpace(g.rootOf()), g.timeout, mode, runner)
 	g.mu.Lock()
 	g.current = scoped
 	g.mu.Unlock()
@@ -304,17 +376,20 @@ func (g *rebindGroup) initial() *rootScoped {
 }
 
 // forRoot returns the build for the workspace root that is current now,
-// rebuilding and retiring the previous build when the root changed. The retired
-// build releases its background jobs and terminals once its in-flight calls end.
+// rebuilding and retiring the previous build when the root, the linked mode or
+// the runner-on state changed. The retired build releases its background jobs
+// and terminals once its in-flight calls end.
 func (g *rebindGroup) forRoot() *rootScoped {
 	root := strings.TrimSpace(g.rootOf())
+	mode, runner := g.sandboxState()
+	key := g.buildKey(root, mode, runner)
 	g.mu.Lock()
 	current := g.current
-	if current != nil && current.root == root {
+	if current.matches(key) {
 		g.mu.Unlock()
 		return current
 	}
-	next := buildRootScoped(g.cfg, root, g.timeout)
+	next := buildRootScoped(g.cfg, root, g.timeout, mode, runner)
 	g.current = next
 	if current != nil {
 		g.retired = append(g.retired, current)
@@ -324,33 +399,35 @@ func (g *rebindGroup) forRoot() *rootScoped {
 		current.retire()
 	}
 	if g.logf != nil {
-		g.logf("[toolkit] tool root follows workspace: %q", root)
+		g.logf("[toolkit] tool root follows workspace: %q (mode %q, os sandbox %t)", root, key.mode, key.sandboxOn)
 	}
 	return next
 }
 
 // forRootValue returns the build for one explicit workspace root: the current
-// build when the roots match, a cached per-run build otherwise. Empty root
+// build when the identities match, a cached per-run build otherwise. Empty root
 // falls back to the current-workspace behavior.
 func (g *rebindGroup) forRootValue(root string) *rootScoped {
 	root = strings.TrimSpace(root)
 	if root == "" {
 		return g.forRoot()
 	}
+	mode, runner := g.sandboxState()
+	key := g.buildKey(root, mode, runner)
 	g.mu.Lock()
-	if current := g.current; current != nil && current.root == root {
+	if current := g.current; current.matches(key) {
 		g.mu.Unlock()
 		return current
 	}
-	if scoped := g.overrides[root]; scoped != nil {
+	if scoped := g.overrides[key]; scoped != nil {
 		g.mu.Unlock()
 		return scoped
 	}
-	scoped := buildRootScoped(g.cfg, root, g.timeout)
-	g.overrides[root] = scoped
+	scoped := buildRootScoped(g.cfg, root, g.timeout, mode, runner)
+	g.overrides[key] = scoped
 	g.mu.Unlock()
 	if g.logf != nil {
-		g.logf("[toolkit] tool root bound to run workspace: %q", root)
+		g.logf("[toolkit] tool root bound to run workspace: %q (mode %q, os sandbox %t)", root, key.mode, key.sandboxOn)
 	}
 	return scoped
 }

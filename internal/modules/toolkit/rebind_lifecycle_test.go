@@ -20,6 +20,7 @@ import (
 	"time"
 
 	rig "github.com/zeokeel/zeokeel-rig"
+	"github.com/zeokeel/zeokeel-rig/sandbox"
 )
 
 // waitBuildClosed waits for the build's release hook to run.
@@ -50,7 +51,7 @@ func findProxy(t *testing.T, proxies []rig.Tool, name string) rig.Tool {
 func TestWorkspaceSwitchClosesRetiredBuild(t *testing.T) {
 	rootA, rootB := t.TempDir(), t.TempDir()
 	current := rootA
-	group := newRebindGroup(Config{}, 5*time.Second, func() string { return current }, nil)
+	group := newRebindGroup(Config{}, 5*time.Second, func() string { return current }, nil, nil)
 	defer group.close()
 
 	scopedA := group.forRoot()
@@ -102,6 +103,7 @@ func TestWorkspaceSwitchDoesNotAbortInFlightCall(t *testing.T) {
 	blocking := &blockingTool{started: make(chan struct{}), release: make(chan struct{})}
 	scopedA := &rootScoped{
 		root:   rootA,
+		mode:   sandbox.ModeWorkspaceWrite,
 		tools:  []rig.Tool{blocking},
 		byName: map[string]rig.Tool{blocking.Name(): blocking},
 		done:   make(chan struct{}),
@@ -148,7 +150,7 @@ func TestJobCompletionNoticesReachAgentLoop(t *testing.T) {
 		t.Skip("background shell jobs need /bin/sh, which is Unix-only in Rig")
 	}
 	root := t.TempDir()
-	group := newRebindGroup(Config{}, 5*time.Second, func() string { return root }, nil)
+	group := newRebindGroup(Config{}, 5*time.Second, func() string { return root }, nil, nil)
 	defer group.close()
 	proxyTools := group.proxies(group.forRoot())
 
@@ -208,7 +210,7 @@ func TestWorkspaceSwitchReleasesOldRootJobs(t *testing.T) {
 	}
 	rootA, rootB := t.TempDir(), t.TempDir()
 	current := rootA
-	group := newRebindGroup(Config{}, 5*time.Second, func() string { return current }, nil)
+	group := newRebindGroup(Config{}, 5*time.Second, func() string { return current }, nil, nil)
 	defer group.close()
 
 	scopedA := group.forRoot()

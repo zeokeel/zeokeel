@@ -20,6 +20,7 @@ import (
 	"github.com/zeokeel/zeokeel-kernel/module"
 
 	rig "github.com/zeokeel/zeokeel-rig"
+	"github.com/zeokeel/zeokeel-rig/sandbox"
 	"github.com/zeokeel/zeokeel-rig/tools/jobs"
 
 	"github.com/zeokeel/zeokeel/internal/contracts"
@@ -53,7 +54,7 @@ func jobServiceScopedBuild(root string, tools ...rig.Tool) *rootScoped {
 	for _, tool := range tools {
 		byName[tool.Name()] = tool
 	}
-	return &rootScoped{root: root, tools: tools, byName: byName, done: make(chan struct{})}
+	return &rootScoped{root: root, mode: sandbox.ModeWorkspaceWrite, tools: tools, byName: byName, done: make(chan struct{})}
 }
 
 // jobServiceListing is one realistic job_list payload with every documented
@@ -302,7 +303,7 @@ func TestJobServiceResolvesTheLiveBuildPerCall(t *testing.T) {
 func TestJobServiceFollowsRealWorkspaceRebind(t *testing.T) {
 	rootA, rootB := t.TempDir(), t.TempDir()
 	current := rootA
-	group := newRebindGroup(Config{}, 5*time.Second, func() string { return current }, nil)
+	group := newRebindGroup(Config{}, 5*time.Second, func() string { return current }, nil, nil)
 	defer group.close()
 
 	service := newJobService(group)
@@ -377,7 +378,7 @@ func TestJobServiceAgainstRealRigManager(t *testing.T) {
 		t.Skip("background shell jobs need /bin/sh, which Rig only has on Unix")
 	}
 	root := t.TempDir()
-	scoped := buildRootScopedFor(Config{}, root, 5*time.Second, "linux",
+	scoped := buildRootScopedFor(Config{}, root, 5*time.Second, sandbox.ModeWorkspaceWrite, nil, "linux",
 		func(string) (string, error) { return "", errors.New("not found") })
 	group := &rebindGroup{rootOf: func() string { return root }, current: scoped}
 	defer group.close()

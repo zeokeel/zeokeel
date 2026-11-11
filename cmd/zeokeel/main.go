@@ -9,9 +9,16 @@ package main
 import (
 	"os"
 
+	"github.com/zeokeel/zeokeel-rig/sandbox/osrunner"
+
 	"github.com/zeokeel/zeokeel/internal/host"
 )
 
 func main() {
+	// The OS sandbox runner re-executes this binary as a hidden helper before
+	// any flag parsing or window creation (Linux Landlock / Windows ACL).
+	if osrunner.MaybeRunHelper(os.Args) {
+		return
+	}
 	os.Exit(host.Main(os.Args[1:]))
 }

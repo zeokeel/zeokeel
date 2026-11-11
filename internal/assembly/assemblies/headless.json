@@ -41,6 +41,11 @@
       "config": {}
     },
     {
+      "id": "sandbox",
+      "module": "zeokeel/sandbox",
+      "config": {}
+    },
+    {
       "id": "toolkit",
       "module": "zeokeel/toolkit",
       "config": {

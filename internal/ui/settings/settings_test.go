@@ -274,9 +274,12 @@ func newHarnessWithImporter(t *testing.T, chat *fakeChat, store *fakeSettings, c
 	return newHarnessFull(t, chat, store, cfg, nil, nil, contracts.AppInfo{}, importer)
 }
 
+// newHarnessFull builds the settings harness with the optional backends; a
+// trailing sandbox service is provided as contracts.KeySandbox before the
+// settings module activates (the Behavior page reads it optionally).
 func newHarnessFull(t *testing.T, chat *fakeChat, store *fakeSettings, cfg settings.Config,
 	skills contracts.SkillsService, update contracts.UpdateService, info contracts.AppInfo,
-	importer contracts.ImporterService) *harness {
+	importer contracts.ImporterService, sandboxes ...contracts.SandboxService) *harness {
 	t.Helper()
 	uiRoot := uiroot.New(uiroot.Config{AppName: "ZeoKeel"})
 	ctx := cordis.Root()
@@ -300,6 +303,11 @@ func newHarnessFull(t *testing.T, chat *fakeChat, store *fakeSettings, cfg setti
 	}
 	if importer != nil {
 		provide[contracts.ImporterService](t, ctx, contracts.KeyImporter, importer)
+	}
+	for _, sandbox := range sandboxes {
+		if sandbox != nil {
+			provide[contracts.SandboxService](t, ctx, contracts.KeySandbox, sandbox)
+		}
 	}
 
 	h := &harness{t: t, ctx: ctx, uiRoot: uiRoot, settings: store, chat: chat}
@@ -350,6 +358,13 @@ func (h *harness) click(tester *ui.Tester, label string) {
 // and dismiss the settings surface.
 func (h *harness) ensureVisible(tester *ui.Tester, label string) {
 	h.t.Helper()
+	ensureVisibleInFrame(h.t, tester, label)
+}
+
+// ensureVisibleInFrame is ensureVisible for test helpers that only hold the
+// tester (the Behavior page's section helpers scroll like a user would).
+func ensureVisibleInFrame(t *testing.T, tester *ui.Tester, label string) {
+	t.Helper()
 	for range 24 {
 		rect, ok := tester.Find(label)
 		if !ok {
