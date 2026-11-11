@@ -833,3 +833,8 @@ v0.2.12 的 package-macos job 在 GitHub Ubuntu runner 上构建 libdmg-hfsplus 
   - 三产品冒烟：desktop（xvfb，exit 124，tray ready）/ headless（exit 124）/ ACP（exit 0）全部 PASS；
   - **verify summary: 13 passed, 0 failed（529s）→ verify: PASS**。
 - **已知限制**：见 CHANGELOG `[0.2.24]`「已知限制」与评审报告 §0.1（goal 会话级、后台通知、LSP 重绑、workspace mcp.json 信任、headless 审批文案、记忆跨进程锁等明确 Deferred）。
+
+## 0.2.25（2026-11-11：会话头 Run Band 视觉补丁）
+
+- **变更**：`session.buildAgentRunBand` 去掉外层 hairline 容器（描边/底色/内边距），只保留一行原生 `ui.Button` 入口 + `Space2` 间距；团队/子智能体零值仍常显，但不再显示 `0`（精确计数保留在 tooltip 与无障碍名）。`ui.PopoverBase` 浮层、入口顺序与点击行为不变。`docs/DESIGN.md` §6.3、`docs/AGENT-SURFACES.md` S9/壳层同步为“一行原生入口按钮、间距分组”。
+- **验证**（`./scripts/verify.sh` 全量）：gofmt/build/vet/designlint/design-check/mygo vet PASS；`go test ./...` 与 `-race` PASS；regression 276 PASS / 0 FAIL；`ui-snapshot` 103 steps / 102 PNGs；desktop/headless/ACP smoke PASS；**13/13 PASS**（530s）。人工复核 `p1-chat` 快照：标题后无双重描边、无 0 计数。

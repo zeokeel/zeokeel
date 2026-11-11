@@ -247,12 +247,13 @@ func buildAgentRunBand(c *ui.Context, t *design.Tokens, st *state, chat contract
 		return
 	}
 	compact := st.headerWidth > 0 && st.headerWidth < agentHeaderCompactWidth
-	// One quiet instrument, not five unrelated chips: a hairline container with
-	// the entries as its segments. It is a status band, not a card — no shadow,
-	// no accent fill, and it never grows with content.
+	// One quiet instrument, not five unrelated chips. The entries are native
+	// buttons (mygo keeps their hover/pressed/focus states, the brand only fixes
+	// their metrics); the row itself carries no extra container, because a
+	// bordered band around already-bordered buttons reads as a control inside a
+	// control ("double chrome"). Spacing is the only grouping.
 	ui.Row(c).AlignItems(ui.Center).Height(design.ControlCompactHeight).
-		PaddingX(design.Space1).Radius(design.RadiusSM).
-		Border(1, t.BorderL2).Background(t.BgRaised).Gap(design.Space1).
+		Gap(design.Space2).
 		Children(func() {
 			if running {
 				uikit.StatusBadge(c, t, uikit.StatusRunning, st.tr("运行中", "Running"))
@@ -348,7 +349,12 @@ func buildTeamEntry(c *ui.Context, t *design.Tokens, st *state, compact bool) {
 			design.Apply(ui.Text(c, label), t.Font(design.TypeXS)).FontWeight(agentHeadingWeight).
 				TextColor(t.LabelSecondary).NoWrap()
 		}
-		agentCountText(c, t, len(members))
+		// A zero count is not information worth a header glyph: it made an idle
+		// band read "0 / 0" even though the entries themselves are the point.
+		// The tooltip and the accessible label still carry the exact count.
+		if len(members) > 0 {
+			agentCountText(c, t, len(members))
+		}
 		if running > 0 {
 			// The quiet warning dot keeps the running state visible when the
 			// compact band has no room for the words.
@@ -700,14 +706,21 @@ func buildSubagentEntry(c *ui.Context, t *design.Tokens, st *state, activeID str
 	label := fmt.Sprintf(st.tr("子智能体 %d", "Subagents %d"), len(agents))
 	tooltip := fmt.Sprintf(st.tr("%d 个会话 · %d 个运行中", "%d conversations · %d running"),
 		len(agents), running)
+	visual := label
+	if len(agents) == 0 {
+		// Zero is not worth a header number; the entry stays for discoverability.
+		visual = st.tr("子智能体", "Subagents")
+	}
 	chip := agentEntryButton(c, t, label, tooltip)
 	chip.Children(func() {
 		ui.Icon(c, icons.Activity()).Size(design.Space4, design.Space4).TextColor(t.LabelSecondary)
 		if compact {
-			design.Apply(ui.Text(c, fmt.Sprintf("%d", len(agents))),
-				t.Font(design.TypeXS)).TextColor(t.LabelSecondary).NoWrap()
+			if len(agents) > 0 {
+				design.Apply(ui.Text(c, fmt.Sprintf("%d", len(agents))),
+					t.Font(design.TypeXS)).TextColor(t.LabelSecondary).NoWrap()
+			}
 		} else {
-			design.Apply(ui.Text(c, label), t.Font(design.TypeXS)).
+			design.Apply(ui.Text(c, visual), t.Font(design.TypeXS)).
 				TextColor(t.LabelSecondary).NoWrap()
 		}
 	})

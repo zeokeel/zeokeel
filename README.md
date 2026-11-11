@@ -4,16 +4,16 @@
 [![Release](https://img.shields.io/github/v/release/zeokeel/zeokeel)](https://github.com/zeokeel/zeokeel/releases)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
-> **v0.2.24 — twenty-ninth public release** (2026-11-11). Native, compile-time modular
+> **v0.2.25 — thirtieth public release** (2026-11-11). Native, compile-time modular
 > AI agent for desktop, headless and ACP (Zed/editor) use; one Go binary, no
-> webview. This release lands the first wave of the product-wide defect review
-> ([docs/PRODUCT-BUG-REVIEW-2026-11-11.md](docs/PRODUCT-BUG-REVIEW-2026-11-11.md)):
-> security/permission, MCP/LSP, agent-loop, prompt-injection, memory/skill,
-> workspace and first-run fixes, each covered by a regression test added before
-> the fix. Final verification: `scripts/verify.sh` **13/13 PASS** — full test suite
-> green (incl. `-race`), regression **276 PASS / 0 FAIL**, `ui-drive` **91/91 PASS**,
+> webview. Patch on v0.2.24: the conversation-header **Agent Run Band** no longer
+> nests native entry buttons inside a second hairline container (which read as a
+> control inside a control / a stray empty toolbar), and the team/subagent entries
+> no longer show a meaningless "0" count while staying discoverable at zero.
+> Final verification: `scripts/verify.sh` **13/13 PASS** — full test suite green
+> (incl. `-race`), regression **276 PASS / 0 FAIL**, `ui-drive` **91/91 PASS**,
 > `ui-snapshot` **103 steps / 102 PNGs**, three-product smokes PASS, designlint
-> **0 new / 0 blocking**, design-check **6/6**. See [CHANGELOG.md](CHANGELOG.md) for the release notes.
+> **0 new / 0 blocking**, design-check **6/6**. See [CHANGELOG.md](CHANGELOG.md).
 
 > **v0.2.24 主要变化**：按 `docs/PRODUCT-BUG-REVIEW-2026-11-11.md` 做 TDD 修复——
 > ① 安全/权限：MCP 多 server 重名 panic、`settings_get` 明文凭据、自动化只读越权、只读预设 destructive memory、LSP 初始化与沙箱路径、损坏数据文件隔离、后端工具开关生效；

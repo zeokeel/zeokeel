@@ -4,6 +4,15 @@ All notable changes to ZeoKeel are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/) and the project adheres to
 [Semantic Versioning](https://semver.org/).
 
+## [0.2.25] - 2026-11-11
+
+会话头 Agent Run Band 的视觉修正（v0.2.24 的补丁）。
+
+- **去掉 Band 外层容器描边/底色**：入口本身是原生 `ui.Button`（mygo 自带描边与 hover/pressed/focus），外层再包一层 hairline 容器会形成“控件套控件”的双重描边，空闲时尤其像一个空工具栏。现在标题后只保留一行原生入口按钮，用 `Space2` 间距分组，不再套第二层容器。
+- **零值不再显示数字 0**：团队/子智能体入口在 0 值时仍然常显（可发现性），但不再渲染「智能体团队 0 / 子智能体 0」两个无信息数字；精确计数仍在 Tooltip 与无障碍名里（点击仍打开对应浮层）。
+- **文档同步**：`docs/DESIGN.md` §6.3 与 `docs/AGENT-SURFACES.md`（S9 + 壳层）从“hairline 容器”改为“一行原生入口按钮、间距分组、零值不显示计数”。
+- 验证：`./scripts/verify.sh` 13/13 PASS（gofmt/build/vet/designlint/design-check/mygo vet/test/-race/regression 276 PASS/ui-snapshot 103-102/desktop+headless+ACP smoke）；`p1-chat` 快照复核无双重描边、无 0 计数。
+
 ## [0.2.24] - 2026-11-11
 
 按产品级缺陷评审 [docs/PRODUCT-BUG-REVIEW-2026-11-11.md](docs/PRODUCT-BUG-REVIEW-2026-11-11.md) 做的一轮 TDD 修复：每项先补会失败的回归测试，再改实现；`go test ./...` 全绿（含 `-race`、regression、uimodtest、design-contract），`ui-drive` 91/91。完整证据与复现今见评审报告与 `.cache/review/fix-*.md`。
