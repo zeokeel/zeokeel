@@ -4,7 +4,22 @@ All notable changes to ZeoKeel are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/) and the project adheres to
 [Semantic Versioning](https://semver.org/).
 
-## [0.2.28] - 2026-11-11
+## [0.2.29] - 2026-11-11
+
+Windows 沙箱临时目录改用操作系统自带 temp（rig v0.15.1）。
+
+### Fixed
+
+- **helper 环境被裁剪 → 候选 temp 列表为空**：`sandbox.Policy.CommandEnv` 只放行 `PATH/HOME/LANG`，Windows helper 看不到 `TEMP/TMP/LOCALAPPDATA/USERPROFILE/SystemRoot`，`os.TempDir()` 又回退到 `C:\WINDOWS`，于是私有临时目录候选为空、所有命令退出码 127。rig v0.15.1 改为使用 Windows 自己的 temp 机制：`RIG_SANDBOX_TEMP` → `GetTempPath2W`/`GetTempPathW` → 用户 Known Folder 的 `LocalAppData\Temp` → `os.TempDir()`，并用 Win32 `GetWindowsDirectoryW` 过滤 Windows 目录；不再把私有 temp 放进工作区。
+- **默认环境允许列表**：`CommandEnv` 现在放行 Windows 非敏感定位变量（`TEMP`/`TMP`/`TMPDIR`/`LOCALAPPDATA`/`APPDATA`/`USERPROFILE`/`SystemRoot`/`SystemDrive`/`WINDIR`/`COMSPEC`/`PATHEXT`/`USERNAME`/`USERDOMAIN`/`OS`），API key/token/凭据仍被丢弃。
+- **`job_start` Windows 允许列表**：按 shell 裸基名（`pwsh.exe`）校验策略，仍用绝对路径启动，修复「命令名不能是路径」。
+
+### 依赖与说明
+
+- `github.com/zeokeel/zeokeel-rig` 从 v0.15.0 升级到 **v0.15.1**。
+- `terminal_*` 在 Windows 仍使用 pipe transport（ConPTY 未实现）；pipe 可用，但复杂交互建议用 `pwsh`。
+- 验证：`scripts/verify.sh` 全量 **13/13 PASS**（gofmt/build/vet/designlint/design-check/mygo vet；`go test ./...` 与 `-race`；regression **276 PASS / 0 FAIL**；`ui-snapshot` **101 steps / 100 PNGs**；desktop/headless/ACP smoke；510s）。
+
 
 `web_fetch` 不再拦截任何地址（产品决策）。
 

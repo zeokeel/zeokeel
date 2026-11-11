@@ -482,6 +482,66 @@ func (d *drive) runTeamSteps() {
 			d.closeOverlay()
 		})
 
+	d.step("repro-team-turn", "team", "复现：真实回合内 spawn_teammate，回合结束后团队/子智能体入口与浮层",
+		"模型在真实回合里调用 spawn_teammate → 回合结束、队友完成后，页头仍显示「智能体团队」与「子智能体」入口，浮层里仍列出 研究员（已完成）", func(c *check) {
+			d.resetToSession()
+			d.closeAllTeamMembers()
+			d.server.SetMode(scriptSpawnTeamThenAnswer)
+			defer d.server.SetMode(scriptAnswer)
+
+			before, err := d.sendFromComposer("用智能体团队研究当前工作目录")
+			if err != nil {
+				c.failf("%v", err)
+				return
+			}
+			chat := d.syncSession()
+			deadline := time.Now().Add(20 * time.Second)
+			for time.Now().Before(deadline) {
+				d.frame()
+				if d.has("需要审批") {
+					d.resolvePendingApprovals(contracts.ApprovalAllow)
+				}
+				session, ok := chat.Session(d.sessionID)
+				if ok && !session.Running && len(session.Messages) > before {
+					break
+				}
+				time.Sleep(10 * time.Millisecond)
+			}
+			session, ok := chat.Session(d.sessionID)
+			if !ok || session.Running {
+				c.failf("回合在 20s 内没有结束")
+				return
+			}
+			if !d.waitTeamRunState("研究员", contracts.TeamRunDone, 15*time.Second) {
+				c.warnf("队友没有在 15s 内完成")
+			}
+			d.tester.Advance(6 * time.Second)
+			d.drain(3)
+
+			header := []string{}
+			subagentLabel := ""
+			for _, text := range d.texts() {
+				if strings.HasPrefix(text, "智能体团队") || strings.HasPrefix(text, "子智能体") {
+					header = append(header, text)
+					if strings.HasPrefix(text, "子智能体") {
+						subagentLabel = text
+					}
+				}
+			}
+			c.note("回合结束后页头入口：%v", header)
+			c.require(d.hasExactText("智能体团队"), "回合结束后页头没有「智能体团队」入口；texts=%v", paletteTailTexts(d))
+			c.require(subagentLabel != "", "回合结束后页头没有「子智能体」入口；texts=%v", paletteTailTexts(d))
+			c.shot("repro-team-turn-header")
+			if !d.openTeamOverlay() {
+				c.failf("无法打开团队浮层；texts=%v", paletteTailTexts(d))
+				return
+			}
+			c.mustText("研究员", "已完成")
+			c.shot("repro-team-turn-overlay")
+			d.closeOverlay()
+			d.closeAllTeamMembers()
+		})
+
 	d.step("palette-right-pages", "team", "命令面板：右侧栏页面命令（旧团队/任务命令已移除）",
 		"Cmd+K 输入「团队」不再命中旧的团队/任务命令；输入「打开文件页」后 Enter → 右侧栏打开并切到文件页（README.md 可见）", func(c *check) {
 			if !d.openPalette() {

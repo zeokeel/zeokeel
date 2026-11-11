@@ -25,6 +25,10 @@ const (
 	// scriptSlowAnswer streams a long answer in small delayed chunks so the
 	// driver can observe the running state and press Stop.
 	scriptSlowAnswer
+	// scriptSpawnTeamThenAnswer replies with a spawn_teammate tool call on the
+	// first request and the markdown answer afterwards, so a driver step can
+	// start a real teammate from inside a chat turn.
+	scriptSpawnTeamThenAnswer
 )
 
 // scriptedAnswer is the final markdown body every scripted turn ends with.
@@ -86,6 +90,12 @@ func (s *scriptServer) handle(w http.ResponseWriter, r *http.Request) {
 		}
 	case scriptSlowAnswer:
 		emitSlowAnswer(w, r, s.slowTotal)
+	case scriptSpawnTeamThenAnswer:
+		if request == 1 {
+			emitSSE(w, `{"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call-team-1","type":"function","function":{"name":"spawn_teammate","arguments":"{\"name\":\"研究员\",\"prompt\":\"研究一下当前工作目录并给出摘要\"}"}}]},"index":0,"finish_reason":"tool_calls"}]}`)
+		} else {
+			emitAnswer(w)
+		}
 	default:
 		emitAnswer(w)
 	}
