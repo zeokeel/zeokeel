@@ -38,6 +38,8 @@ github.com/zeokeel/zeokeel-rig v0.14.0 h1:SyZ/5ubZNob/SUITsny9KlVzHkZTGecJrTNXVR
 github.com/zeokeel/zeokeel-rig v0.14.0/go.mod h1:B00A4YCGjMifwsh4UNphW8ADXyJu/wovwQaNL+B03qI=
 github.com/zeokeel/zeokeel-rig v0.14.1 h1:XAOGrfIkXfMUDjnvKB5nt86u3Aw66F4yUshBcWMWnhg=
 github.com/zeokeel/zeokeel-rig v0.14.1/go.mod h1:B00A4YCGjMifwsh4UNphW8ADXyJu/wovwQaNL+B03qI=
+github.com/zeokeel/zeokeel-rig v0.15.0 h1:1wyiwyythtXaMinmADIvtjonZqVzO0K/0glSKjnSYyk=
+github.com/zeokeel/zeokeel-rig v0.15.0/go.mod h1:B00A4YCGjMifwsh4UNphW8ADXyJu/wovwQaNL+B03qI=
 golang.org/x/image v0.46.0 h1:b1+oYj0Jbp6K5MDT4i4/eZpYlk3V8SJhhDKh6LBHAyQ=
 golang.org/x/image v0.46.0/go.mod h1:3B3W05VGVQyuXucLINLjXKrqISASfi4Xj+iCVkLMwew=
 golang.org/x/mod v0.42.0 h1:ICeL3t2L30ljSPHHxDnR4fqVcBt/zR2zJAb9juavmQg=

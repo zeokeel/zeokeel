@@ -219,7 +219,13 @@ func buildRootScopedFor(cfg Config, root string, timeout time.Duration, mode san
 		worktreeOpts = append(worktreeOpts, worktree.WithRunner(runner))
 	}
 	background := jobs.NewManager(jobsOpts...)
-	builtinOpts := []builtin.Option{builtin.WithBackgroundJobs(background)}
+	// The working-directory tool and the file tools share one session cwd:
+	// after working_directory switches, relative file paths follow it.
+	workingDirectory := misc.NewWorkingDirectoryState(root)
+	builtinOpts := []builtin.Option{
+		builtin.WithBackgroundJobs(background),
+		builtin.WithWorkingDirectory(workingDirectory.Current),
+	}
 	if runner != nil {
 		builtinOpts = append(builtinOpts, builtin.WithRunner(runner))
 	}
@@ -245,11 +251,13 @@ func buildRootScopedFor(cfg Config, root string, timeout time.Duration, mode san
 	if pwsh {
 		tools = append(tools, builtin.NewPwshWithPolicyOptions(policy, builtinOpts...))
 	}
-	tools = append(tools, editor.New(policy), image.New(policy))
+	tools = append(tools,
+		editor.New(policy, editor.WithWorkingDirectory(workingDirectory.Current)),
+		image.New(policy, image.WithWorkingDirectory(workingDirectory.Current)))
 	tools = append(tools, terminals.ToolsWithList()...)
 	tools = append(tools, background.Tools()...)
 	tools = append(tools, worktree.Tools(policy, worktreeOpts...)...)
-	tools = append(tools, misc.NewWorkingDirectory(root))
+	tools = append(tools, workingDirectory)
 
 	byName := make(map[string]rig.Tool, len(tools))
 	for _, tool := range tools {

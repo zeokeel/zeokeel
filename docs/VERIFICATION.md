@@ -843,3 +843,8 @@ v0.2.12 的 package-macos job 在 GitHub Ubuntu runner 上构建 libdmg-hfsplus 
 
 - **变更**：OS 沙箱始终开启、不可关闭（Linux bwrap/Landlock、macOS Seatbelt + 拒绝自检、Windows 受限令牌 ACL；不可用时 fail closed），权限模式联动 OS profile，沙箱可用时 shell 族工具自动放行；A 系列固定行为并从设置删除开关：流完整性校验、单实例运行、运行中排队发送、目标自动续跑（5 次上限）、通知级别过滤；模型高级选项的最大迭代/上下文预算改为“留空 = 模块默认”的可选输入。
 - **验证**（`./scripts/verify.sh` 全量）：gofmt/build/vet/designlint/design-check/mygo vet PASS；`go test ./...` 与 `-race` PASS；regression 276 PASS / 0 FAIL；`ui-snapshot` 101 steps / 100 PNGs；desktop/headless/ACP smoke PASS；**13/13 PASS**（507s）。人工复核截图：行为页展开无排队/目标开关、模型高级选项无流完整性/默认开关、外观页无单实例、通知页无级别过滤。
+
+## 0.2.27（2026-11-11：Windows 沙箱命令执行 + rig v0.15.0）
+
+- **变更**：升级 `zeokeel-rig v0.14.1 → v0.15.0`，修复 Windows ACL runner 私有临时目录回退到 `C:\WINDOWS` 导致所有命令退出码 127 的 P0；修复 `write_file` 父目录、`glob`/`grep` 的 Windows 路径分隔符；`terminal_*` Windows 默认 `powershell.exe`；`job_start` 支持 Windows PowerShell；`working_directory` 与文件工具共享 session cwd。
+- **验证**（`./scripts/verify.sh` 全量）：gofmt/build/vet/designlint/design-check/mygo vet PASS；`go test ./...` 与 `-race` PASS；regression 276 PASS / 0 FAIL；`ui-snapshot` 101 steps / 100 PNGs；desktop/headless/ACP smoke PASS；**13/13 PASS**（519s）。

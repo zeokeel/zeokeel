@@ -4,7 +4,27 @@ All notable changes to ZeoKeel are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/) and the project adheres to
 [Semantic Versioning](https://semver.org/).
 
-## [0.2.26] - 2026-11-11
+## [0.2.27] - 2026-11-11
+
+Windows 命令执行修复 + rig v0.15.0 升级。
+
+### Fixed
+
+- **Windows ACL 沙箱临时目录（P0，所有命令退出码 127）**：OS 沙箱 helper 用 `os.TempDir()` 作为私有临时目录基址；Windows 在 `TEMP/TMP` 未设置时回退到 `C:\WINDOWS`，普通用户不可写，helper 在授权前失败，导致 `pwsh` 等所有命令完全无法执行。升级到 rig v0.15.0 后按 `RIG_SANDBOX_TEMP` → `TEMP`/`TMP` → `%LOCALAPPDATA%\Temp` → `os.UserCacheDir()\Temp` → `%USERPROFILE%\AppData\Local\Temp` → `os.TempDir()` 选择第一个可写且在工作区外的目录，并剔除 SystemRoot/WINDIR；探测与真实执行共用该逻辑。
+- **Windows 路径分隔符**：`write_file` 建父目录改用 `filepath.Dir`（`path.Dir` 不识别 `\`，嵌套路径不建目录）；`glob`/`grep` 传给 `os.Root.FS()` 的路径统一 `filepath.ToSlash`（Windows 的 `fs.FS` 拒绝反斜杠）。
+- **`working_directory` 一致性**：文件工具（read/write/edit/list_dir/glob/grep/str_replace_editor/read_image）现在共享同一个 session cwd；`working_directory` 切换后相对路径跟随它解析，绝对路径仍受 workspace root 约束。
+
+### Added
+
+- **`terminal_*` Windows**：默认 shell 改为 `powershell.exe`（ConPTY 仍不实现，pipe transport 可用）。
+- **`job_start` Windows**：通过 `pwsh`/`powershell`（回退 `cmd.exe`）后台执行，沙箱命令允许列表仍生效。
+
+### 依赖与说明
+
+- `github.com/zeokeel/zeokeel-rig` 从 v0.14.1 升级到 **v0.15.0**（含上述全部修复）。
+- 自检中 `web_search` 无端点、`web_fetch` 被 SSRF 规则拒绝（DNS 解析到 198.18.0.0/15 benchmark 段）和 worktree 需要 git 仓库属于**环境/配置**，不是本版代码缺陷：搜索需配置 `web.search.endpoint`，SSRF 段按安全策略拒绝，worktree 请在 git 仓库内使用。
+- 验证：`scripts/verify.sh` 全量 **13/13 PASS**（gofmt/build/vet/designlint/design-check/mygo vet；`go test ./...` 与 `-race`；regression **276 PASS / 0 FAIL**；`ui-snapshot` **101 steps / 100 PNGs**；desktop/headless/ACP smoke；519s）。
+
 
 - **OS 沙箱始终开启、不可关闭**：命令执行的文件写入/删除由平台 runner 强制（Linux bwrap/Landlock、macOS Seatbelt、Windows 受限令牌 ACL）；本机无可用 runner 时 fail closed，绝不裸跑。设置页只显示状态，不再提供开关。
 - **权限模式联动 OS profile**：只读→read-only、工作区可写→workspace-write、所有权限→不包装；可用时 shell 族工具（bash/pwsh/后台任务/终端）自动放行，计划模式、会话只读 override、headless deny-all 仍优先。
