@@ -8,6 +8,7 @@ package session_test
 
 import (
 	"context"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -828,4 +829,38 @@ func TestRunBandShowsPendingApproval(t *testing.T) {
 	tester := h.tester()
 	tester.Frame()
 	h.assertTexts(tester, "智能体团队", "子智能体 0", "待审批 1")
+}
+
+// TestRunningToolRowRendersInProductSession covers the running tool row in the
+// real session surface (the v0.2.20 residual was that only a component specimen
+// showed the running gutter): the transcript draws the running call with its
+// status, so the state gutter has a product frame too.
+func TestRunningToolRowRendersInProductSession(t *testing.T) {
+	chat := newFakeChat()
+	chat.addSession(contracts.ChatSession{
+		ID: "sess-1", Title: "运行工具",
+		Messages: []contracts.ChatMessage{
+			{ID: "u1", Role: contracts.ChatRoleUser, Text: "跑一下构建检查"},
+			{ID: "a1", Role: contracts.ChatRoleAssistant, Text: "正在检查", Streaming: true,
+				Tools: []contracts.ToolCall{{
+					ID: "tool-1", Name: "bash", Status: "running",
+					Summary: "go test ./... -count=1",
+				}}},
+		},
+	}, true)
+	h := newAgentSurfaceHarness(t, chat, agentServices{})
+	tester := h.tester()
+	tester.Frame()
+	status, summary := false, false
+	for _, text := range tester.Texts() {
+		if strings.Contains(text, "正在运行命令") {
+			status = true
+		}
+		if strings.Contains(text, "go test") {
+			summary = true
+		}
+	}
+	if !status || !summary {
+		t.Fatalf("running tool row missing (status=%v summary=%v); texts = %v", status, summary, tester.Texts())
+	}
 }

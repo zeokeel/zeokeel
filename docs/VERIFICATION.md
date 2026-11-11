@@ -814,3 +814,10 @@ v0.2.12 的 package-macos job 在 GitHub Ubuntu runner 上构建 libdmg-hfsplus 
 
 - `uikit.MarkdownCodeBlock`：测量最长代码行（`design.MonoFontStack` + `TypeXS` 13px），围栏宽度 = 最长行 + `Space3*2`，最小 128 DIP（`Space8*4`）；`MaxWidthPercent(100)` 保证长行不越出阅读列并继续横向滚动。每帧只测量最长一行（按字节长度选取，CJK 偏宽取上界）。
 - 证据：`p1-chat` / `p2-markdown-specimen[-dark]` 短围栏已收缩；`go test ./...` 全绿；designlint 0 new/0 blocking；design-check 6/6；`ui-snapshot` **103 次渲染 / 102 唯一 PNG**；`ui-drive` **91/91 PASS**。
+
+## 0.2.23（2026-11-11：Tool Row 零 reflow + 遗留项）
+
+- **状态 gutter 零 reflow**：`uikit.ToolRow` 的 gutter 改为固定宽度的左边框（active 染 Warning/Danger/LabelTertiary；success/idle/unknown 透明），宽度始终占位；running→success 只换色。`uikit.ReasoningTrace` 在 marker-column band 补同宽透明边，保持工具/推理 glyph 对齐。新增 `TestToolRowStateGutterDoesNotReflow`（running/success 名字矩形一致）。
+- **运行中工具行产品帧**：新增 `TestRunningToolRowRendersInProductSession`（真实 session surface 渲染 `正在运行命令 · go test ...`）。
+- **「回到最新」叠压**：短围栏收缩后复制按钮回到内容宽度内，`p2-tool-row-complete` 复核无叠压；浮动按钮仍为 bottom-right 覆盖层。
+- **验证**：`go test ./...` 全绿；designlint 0 new/0 blocking；design-check 6/6；`ui-snapshot` **103 次渲染 / 102 唯一 PNG**；`ui-drive` **91/91 PASS**。

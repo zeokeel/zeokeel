@@ -4,13 +4,13 @@
 [![Release](https://img.shields.io/github/v/release/zeokeel/zeokeel)](https://github.com/zeokeel/zeokeel/releases)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
-> **v0.2.22 — twenty-seventh public release** (2026-11-11). Native, compile-time modular
+> **v0.2.23 — twenty-eighth public release** (2026-11-11). Native, compile-time modular
 > AI agent for desktop, headless and ACP (Zed/editor) use; one Go binary, no
 > webview. Final verification: full test suite green (incl. regression / uimodtest /
 > design-contract tests), `ui-drive` **91/91 PASS**, `ui-snapshot` **103 renders / 102 unique PNGs**,
 > designlint **0 new / 0 blocking**. See [CHANGELOG.md](CHANGELOG.md) for the release notes.
 
-> **v0.2.22 主要变化**：短代码围栏收缩到内容宽度——`uikit.MarkdownCodeBlock` 测量最长代码行并把围栏宽度收到「最长行 + 内边距」，一行命令不再铺满阅读列；长行仍在列内横向滚动。其余同 v0.2.21（`uikit.ChatMarkdown` 阅读主题、安静围栏、演示 fixture 去掉 `/data/mygo`）。
+> **v0.2.23 主要变化**：处理 v0.2.20 遗留 —— Tool Row 状态 gutter 改为固定宽度左边框（running→success 不再位移，零 reflow）；新增运行中工具行的真实 session 帧测试；短围栏收缩后「回到最新」浮层不再压住复制按钮。其余同 v0.2.22（Markdown 阅读主题、安静/可收缩围栏）。
 
 ## 下载与运行 / Download and run
 

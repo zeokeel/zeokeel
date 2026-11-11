@@ -597,7 +597,7 @@ uikit.ToolRow(c, uikit.ToolRowOptions{
 | 只读展示 | `KeyValueRows` / `Bullet` | 属性表（值可选中）/ 项目符号 |
 | 列表行强调 | `OnAccentBadge` | List 选中 accent 行上的可读徽章（AccentText 填充 + accent 文字；status label 语义保留） |
 | 对话框 | `DialogFooter` + `DialogAction` / `uikit.DialogHeader` / `uikit.ConfirmDanger` | 唯一动作条（危险→次要→主操作最右）；`DialogHeader` 统一图标/标题/副标题/关闭；`ConfirmDanger` 是不可逆动作的唯一入口（取消 Default、危险非 Default）；`Default` 仅无文本输入时用；审批无 Default |
-| 工具行 | `ToolRow` + `ToolRowOptions` / `ToolPanelSectionView` / `ToolPreview` / `ToolDisplayName` / `ToolIcon` | 工具调用统一解剖（图标/名/状态/预览/详情段/团队跳转） |
+| 工具行 | `ToolRow` + `ToolRowOptions` / `ToolPanelSectionView` / `ToolPreview` / `ToolDisplayName` / `ToolIcon` | 工具调用统一解剖（图标/名/状态/预览/详情段/团队跳转）；状态 gutter 是**固定宽度左边框**（active 染色、完成态透明），只换色不 reflow |
 | 输入辅助 | `EnterTo` | 单行输入 Enter→动作（有文本输入时替代 Default） |
 | 文案/locale | `T` / `FormatDateTime` / `FormatClock` / `Language` / `FormatCompactCount` / `FormatShortcut` | 本地化与格式化；`FormatShortcut` 统一键位记法（平台化 `Cmd/Ctrl + N`） |
 | 检查器文档 | `uikit.MarkdownDoc(t, size)` | 320px 检查器内的文件/产物预览（13px 正文，H1≈15，不再用默认 22px H1） |

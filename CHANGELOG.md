@@ -8,6 +8,15 @@ All notable changes to ZeoKeel are documented here. The format follows
 
 （暂无未发布改动）
 
+## [0.2.23] - 2026-11-11
+
+处理 v0.2.20 遗留的三项。
+
+- **Tool Row 状态 gutter 零 reflow**：从「只在运行中/失败/停止时插入 3px Box + 8px 间距」改为**固定宽度的左边框**（active 染 Warning/Danger/LabelTertiary，完成态透明）。宽度始终占位，running→success 只换颜色、不再让内容瞬移 11px；reasoning 行在 activity band 里补同宽透明边，工具行/推理行 glyph 仍对齐。
+- **运行中工具行的产品帧**：新增 session 帧测试 `TestRunningToolRowRendersInProductSession`，在真实会话 surface 渲染 running tool 行（`正在运行命令 · go test ...`），不再只靠组件标本；`TestToolRowStateGutterDoesNotReflow` 断言 running/success 名字矩形完全一致。
+- **「回到最新」叠压**：短围栏收缩后复制按钮回到内容宽度内（不再在浮层按钮下方）；`p2-tool-row-complete` 复核无叠压。浮动按钮仍是标准的 bottom-right 覆盖层，长围栏滚到底部时若恰与其相交，可下轮做滚动留白。
+- 证据：`p2-tool-row-states` / `p2-tool-row-complete` / `p1-chat`；`go test ./...`、designlint、design-check、`ui-drive` 91/91、`ui-snapshot` 103/102 全部复跑。
+
 ## [0.2.22] - 2026-11-11
 
 短代码围栏收缩到内容宽度。

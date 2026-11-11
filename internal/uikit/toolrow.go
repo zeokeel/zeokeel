@@ -69,11 +69,6 @@ const toolSectionMaxHeight float32 = design.Space8 * 5
 // tool anatomy).
 const toolRowGutterWidth float32 = design.Space1 * 3 / 4
 
-// toolRowGutterHeight is the state gutter's height: one row-glyph measure from
-// the spacing grid (design.Space4), so the rule reads as tall as the category
-// icon beside it instead of filling the padded row.
-const toolRowGutterHeight float32 = design.Space4
-
 // ToolRowOptions is one compact transcript tool row.
 type ToolRowOptions struct {
 	// Key is the row's stable identity (one per tool call).
@@ -197,13 +192,12 @@ func toolRowGutterInk(t *design.Tokens, state StatusKind) (ui.Color, bool) {
 	}
 }
 
-// toolRowGutter draws the line's leading state gutter, if the state needs one.
-// It is one plain ui.Box in the row's own flex flow at the token-derived width
-// and height, so every ToolRow variant (plain line, disclosure trigger, activity
-// band) gets it at the line's start with no new component or icon. It adds no
-// background or card: the state still travels in the status text, the gutter
-// only repeats it as the row's edge (DESIGN.md §5.2, §6.2).
-func toolRowGutter(c *ui.Context, t *design.Tokens, o ToolRowOptions) {
+// withToolRowStateBorder applies the state gutter as a left border of a fixed
+// width: the active states tint it, settled states keep it transparent. Because
+// the border width is laid out whether or not the state needs it, a call that
+// goes running -> success only changes color, never geometry (the v0.2.20
+// residual: the old in-flow gutter shifted the line by 3+8 DIP when it left).
+func withToolRowStateBorder(el ui.Element, t *design.Tokens, o ToolRowOptions) ui.Element {
 	state := o.State
 	if state == StatusUnknown && o.Running {
 		// A caller that has not adopted State yet still reports a call in
@@ -212,10 +206,10 @@ func toolRowGutter(c *ui.Context, t *design.Tokens, o ToolRowOptions) {
 	}
 	ink, ok := toolRowGutterInk(t, state)
 	if !ok {
-		return
+		ink = ui.Transparent
 	}
-	ui.Box(c).Width(toolRowGutterWidth).Height(t.Scale(toolRowGutterHeight)).
-		Shrink(0).Background(ink)
+	return el.BorderWidth(design.Space0, design.Space0, design.Space0, toolRowGutterWidth).
+		BorderColor(ink)
 }
 
 // ToolRow draws one compact transcript tool call as one official mygo
@@ -228,7 +222,6 @@ func toolRowGutter(c *ui.Context, t *design.Tokens, o ToolRowOptions) {
 func ToolRow(c *ui.Context, o ToolRowOptions) {
 	t := design.Of(c)
 	buildLine := func(c *ui.Context, progress float32, disclosure bool) {
-		toolRowGutter(c, t, o)
 		if o.MarkerColumn {
 			buildActivityLine(c, t, o, progress, disclosure)
 			return
@@ -272,8 +265,8 @@ func ToolRow(c *ui.Context, o ToolRowOptions) {
 	// instead of a trigger that opens an empty panel.
 	hasPanel := len(o.Sections) > 0 || o.Footer != nil
 	if !hasPanel {
-		ui.Row(c.Key(o.Key)).FillWidth().AlignItems(ui.Center).
-			Gap(design.Space2).PaddingY(design.Space1).Children(func() {
+		withToolRowStateBorder(ui.Row(c.Key(o.Key)).FillWidth().AlignItems(ui.Center).
+			Gap(design.Space2).PaddingY(design.Space1), t, o).Children(func() {
 			buildLine(c, 0, false)
 		})
 		return
@@ -288,8 +281,8 @@ func ToolRow(c *ui.Context, o ToolRowOptions) {
 	if o.Status != "" {
 		label = o.Name + " · " + o.Status
 	}
-	trigger := parts.Trigger.FillWidth().AlignItems(ui.Center).
-		Gap(design.Space2).PaddingY(design.Space1).Radius(design.RadiusSM).
+	trigger := withToolRowStateBorder(parts.Trigger.FillWidth().AlignItems(ui.Center).
+		Gap(design.Space2).PaddingY(design.Space1).Radius(design.RadiusSM), t, o).
 		Label(label)
 	if o.RawName != "" && o.RawName != o.Name {
 		trigger = trigger.Tooltip(o.RawName)

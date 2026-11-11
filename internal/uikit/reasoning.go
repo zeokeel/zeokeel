@@ -92,6 +92,13 @@ func ReasoningTrace(c *ui.Context, o ReasoningTraceOptions) {
 	trigger := parts.Trigger.FillWidth().AlignItems(ui.Center).
 		Gap(design.Space2).PaddingY(design.Space1).Radius(design.RadiusSM).
 		Label(label)
+	if o.MarkerColumn {
+		// The activity band's tool rows reserve the same 3 DIP state lane on
+		// their left edge (toolRowGutterWidth), so reasoning and tool rows keep
+		// their glyphs on one x even though only tool rows ever tint the lane.
+		trigger = trigger.BorderWidth(design.Space0, design.Space0, design.Space0, toolRowGutterWidth).
+			BorderColor(ui.Transparent)
+	}
 	if parts.Trigger.Hovered() || parts.Trigger.Focused() {
 		trigger.Background(t.BgHover)
 	}

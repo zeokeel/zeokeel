@@ -311,6 +311,25 @@ func gutterPixel(t *testing.T, tt *ui.Tester) (int, int) {
 // and unknown draw nothing, so a settled call stays quiet. The lane is checked
 // in every row variant: the plain line without a panel body, the disclosure and
 // the activity band's marker-column row.
+func TestToolRowStateGutterDoesNotReflow(t *testing.T) {
+	running := ui.NewTester(toolRowGutterView(uikit.StatusRunning, true, toolRowGutterVariant{}), 400, 120)
+	running.Frame()
+	settled := ui.NewTester(toolRowGutterView(uikit.StatusSuccess, false, toolRowGutterVariant{}), 400, 120)
+	settled.Frame()
+	runName, ok := running.Find("读取文件")
+	if !ok {
+		t.Fatalf("running row name missing; texts = %v", running.Texts())
+	}
+	doneName, ok := settled.Find("读取文件")
+	if !ok {
+		t.Fatalf("settled row name missing; texts = %v", settled.Texts())
+	}
+	if runName.X != doneName.X || runName.W != doneName.W {
+		t.Fatalf("running name rect = %+v, settled = %+v: the state gutter must only recolor, never reflow",
+			runName, doneName)
+	}
+}
+
 func TestToolRowStateGutter(t *testing.T) {
 	light := design.Light()
 	variants := []toolRowGutterVariant{
