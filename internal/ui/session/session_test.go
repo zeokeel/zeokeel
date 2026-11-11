@@ -55,7 +55,15 @@ type fakeChat struct {
 }
 
 func newFakeChat() *fakeChat {
-	return &fakeChat{sessions: make(map[string]contracts.ChatSession)}
+	// The real desktop assembly always has a default model (and the tests that
+	// exercise the unconfigured state clear it explicitly), so the shared fake
+	// starts with a usable model + key: a missing model disables sending in the
+	// product, and the default keeps ordinary send/queue tests on the intended
+	// path.
+	return &fakeChat{
+		config:   contracts.ChatConfig{Model: "test-model", APIKey: "test-key"},
+		sessions: make(map[string]contracts.ChatSession),
+	}
 }
 
 func (f *fakeChat) Config() contracts.ChatConfig {
@@ -1082,6 +1090,9 @@ func TestSlashCommandQueryFiltering(t *testing.T) {
 // entry of its own.
 func TestComposerToolbar(t *testing.T) {
 	chat := newFakeChat()
+	// This test pins the unconfigured chip, so it clears the fake's default
+	// model on purpose.
+	chat.config = contracts.ChatConfig{}
 	chat.addSession(contracts.ChatSession{ID: "sess-1", Title: "工具栏"}, true)
 	h := newHarness(t, chat)
 	tester := h.tester()

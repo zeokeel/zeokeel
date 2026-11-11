@@ -55,6 +55,10 @@ type MCPServerConfig struct {
 	Command   string   `json:"command,omitempty"`
 	Args      []string `json:"args,omitempty"`
 	Env       []string `json:"env,omitempty"`
+	// TimeoutMs bounds one request/handshake for this server (0 = the toolkit
+	// default). A hung endpoint then fails at this budget instead of the 30s
+	// rig request default, so it cannot stall product startup.
+	TimeoutMs int `json:"timeoutMs,omitempty"`
 }
 
 // ParseMCPServersJSON decodes the settings mcp.servers raw value. An empty

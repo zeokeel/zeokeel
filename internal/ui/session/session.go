@@ -325,8 +325,16 @@ type state struct {
 	// Composer command feedback: the last error line and the /compact loading
 	// state (a success is a transient toast, never a resident badge).
 	commandErr string
-	compacting bool
-	helpOpen   bool
+	// Known backend failures (no model / no workspace roots / unconfigured
+	// web_search) are mapped to a localized heading plus a recovery action
+	// instead of the raw Go text: commandRecovery is the heading,
+	// commandRecoveryKind selects the action (model/workspace/search) and
+	// commandDetail keeps the raw text as selectable technical detail.
+	commandRecovery     string
+	commandRecoveryKind string
+	commandDetail       string
+	compacting          bool
+	helpOpen            bool
 
 	// syncCommandLocale re-registers the slash commands when the host language
 	// changes (nil when the module failed to register them, which cannot happen
@@ -389,6 +397,7 @@ const (
 	settingsPageModel    = "model"
 	settingsPageBehavior = "behavior"
 	settingsPageMemory   = "memory"
+	settingsPageSearch   = "search"
 )
 
 // toast raises one transient host toast (nil-safe). Transient feedback —

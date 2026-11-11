@@ -255,7 +255,7 @@ func TestSessionPermissionMenuStructure(t *testing.T) {
 	h.assertTexts(tester, "权限模式", "只读", "工作区可写", "所有权限", "对话模式")
 	h.assertNoTexts(tester, "询问", "从不允许", "禁止工具", "全部允许")
 
-	header, ok := tester.AccessByRole(ui.RoleMenuItem, "权限模式")
+	header, ok := tester.AccessByRole(ui.RoleMenuItem, "权限模式（所有会话）")
 	if !ok {
 		t.Fatalf("permission group header has no menu-item role; texts = %v", tester.Texts())
 	}

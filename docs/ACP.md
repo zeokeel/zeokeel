@@ -18,9 +18,15 @@ Supported methods (minimal surface):
   advertised `promptCapabilities` are `image:true`, `audio:false`,
   `embeddedContext:false`: the server accepts image prompt blocks and forwards
   them to the product's attachment-capable chat backend.
-- `session/new` → `{"sessionId":"<id>","model":"<effective model>"}` (creates a
-  normal product session; `model` is the configured chat model the new session
-  will run with)
+- `session/new` → `{"sessionId":"<id>","model":"<effective model>","workspaceId":"<id>"}`
+  (creates a normal product session; `model` is the configured chat model the
+  new session will run with). The client's project root travels in
+  `params.cwd`: an existing registered workspace is opened, otherwise one is
+  registered for that directory, and the new session is bound to it, so the
+  agent's file/shell tools run in the editor's project instead of whatever
+  workspace the desktop last opened. A `cwd` that is not an existing directory
+  returns `-32602` (`invalid params`); `params.mcpServers` is accepted by the
+  protocol but not consumed yet (servers come from the shared product settings).
 - `session/prompt` accepts text and image content blocks. Text blocks become the
   prompt; image blocks (`{"type":"image","data":"<base64>","mimeType":"image/png"}`)
   are forwarded to the agent run as image attachments, and a prompt may be

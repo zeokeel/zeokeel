@@ -239,18 +239,23 @@ func resolveRegistryPath(dataDir, requested string) (string, error) {
 	return filepath.Join(dataDir, filepath.FromSlash(requested)), nil
 }
 
-// load reads the registry, treating a missing file as empty.
+// load reads the registry, treating a missing file as empty. An unreadable or
+// malformed registry is quarantined (FR-06): the bad file is renamed to
+// <path>.corrupt-<ts>, a warning is logged and the scheduler starts with no
+// tasks instead of failing activation.
 func (s *service) load() error {
 	data, err := os.ReadFile(s.path)
 	if errors.Is(err, os.ErrNotExist) {
 		return nil
 	}
 	if err != nil {
-		return fmt.Errorf("%s: read %q: %w", ModuleID, s.path, err)
+		s.logRecovery(fmt.Sprintf("automation registry %q could not be read (%v); starting with no tasks", s.path, err))
+		return nil
 	}
 	var document registryDocument
 	if err := json.Unmarshal(data, &document); err != nil {
-		return fmt.Errorf("%s: parse %q: %w", ModuleID, s.path, err)
+		s.quarantine(fmt.Sprintf("automation registry %q is corrupt (%v)", s.path, err))
+		return nil
 	}
 	tasks := make([]contracts.AutomationTask, 0, len(document.Tasks))
 	for _, record := range document.Tasks {
@@ -276,6 +281,26 @@ func (s *service) load() error {
 	}
 	s.tasks = tasks
 	return nil
+}
+
+// quarantine renames the unusable registry out of the way, logs a warning and
+// lets the scheduler start empty.
+func (s *service) quarantine(reason string) {
+	backup := fmt.Sprintf("%s.corrupt-%d", s.path, time.Now().UTC().UnixNano())
+	message := reason + "; starting with no tasks"
+	if err := os.Rename(s.path, backup); err != nil {
+		message += fmt.Sprintf(" (could not quarantine the file: %v)", err)
+	} else {
+		message += fmt.Sprintf(" (quarantined as %s)", backup)
+	}
+	s.logRecovery(message)
+}
+
+// logRecovery records a recovery warning through the host logger.
+func (s *service) logRecovery(message string) {
+	if s.logger != nil {
+		s.logger.Printf("%s: %s", ModuleID, message)
+	}
 }
 
 // persistLocked writes the registry atomically (temporary file + Sync +

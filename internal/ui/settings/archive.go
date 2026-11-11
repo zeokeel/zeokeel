@@ -51,6 +51,9 @@ type archiveState struct {
 	// consumes it after the list is built instead of navigating from inside a
 	// row builder.
 	pendingOpen string
+	// openErr is the last failure to restore a conversation before opening it
+	// (PM-13: opening an archived session first un-archives it).
+	openErr string
 }
 
 // archivedSessions filters the chat session list to the archived ones, keeping
@@ -101,6 +104,9 @@ func buildArchivePage(c *ui.Context, t *design.Tokens, kctx cordis.Context,
 		uikit.PageHeader(c, localized(locale, "归档", "Archived"), localized(locale,
 			"归档的会话不显示在侧栏；可以在这里恢复、删除或重新打开。",
 			"Archived sessions stay out of the sidebar; restore, delete or reopen them here."))
+		if st.openErr != "" {
+			uikit.ErrorLine(c, st.openErr)
+		}
 		if chat == nil {
 			uikit.EmptyState(c, localized(locale, "会话服务未启用", "Session service is not enabled"))
 			return
@@ -152,7 +158,7 @@ func buildArchivePage(c *ui.Context, t *design.Tokens, kctx cordis.Context,
 			if st.pendingOpen != "" {
 				sessionID := st.pendingOpen
 				st.pendingOpen = ""
-				openArchivedSession(c, chat, navigator, sessionID)
+				openArchivedSession(c, chat, archiver, navigator, st, sessionID, locale)
 			}
 		})
 		// Deleting an archived session is irreversible: confirm it with the
@@ -245,9 +251,22 @@ func buildArchiveRow(c *ui.Context, t *design.Tokens, chat contracts.ChatService
 	}
 }
 
-// openArchivedSession closes the settings surface, makes sessionID active and
-// pushes the conversation screen, so clicking an archived title really opens it.
-func openArchivedSession(c *ui.Context, chat contracts.ChatService, navigator contracts.Navigator, sessionID string) {
+// openArchivedSession restores the conversation to the sidebar, closes the
+// settings surface, makes sessionID active and pushes the conversation screen,
+// so clicking an archived title really opens it — and the conversation is still
+// reachable after the user leaves it (PM-13; opening it used to leave the
+// session archived and therefore invisible in the sidebar).
+func openArchivedSession(c *ui.Context, chat contracts.ChatService,
+	archiver contracts.SessionArchiver, navigator contracts.Navigator,
+	st *archiveState, sessionID string, locale contracts.LocaleService) {
+	if archiver != nil {
+		if err := archiver.SetSessionArchived(sessionID, false); err != nil {
+			st.openErr = localized(locale, "恢复归档会话失败：", "Could not restore the archived session: ") + err.Error()
+			c.Invalidate()
+			return
+		}
+	}
+	st.openErr = ""
 	if err := chat.SetActiveSession(sessionID); err != nil {
 		return
 	}

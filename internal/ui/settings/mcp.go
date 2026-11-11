@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -51,6 +52,10 @@ type mcpState struct {
 	command   string
 	args      string
 	env       string
+	// timeoutMs is the optional per-server timeout draft (milliseconds, blank =
+	// the toolkit default 30 s). It is a string so the form can reject a
+	// non-numeric draft instead of silently saving 0.
+	timeoutMs string
 
 	status    string
 	statusErr bool
@@ -107,6 +112,54 @@ func mcpRowAddress(row contracts.MCPServerConfig) string {
 	return row.URL
 }
 
+// mcpPluginState is one MCP server's last known state from the plugins
+// snapshot (the toolkit owns the live clients).
+type mcpPluginState struct {
+	status string
+	tools  int
+}
+
+// loadMCPPluginStates reads the plugins snapshot into a name->state map. A host
+// without the plugins service returns nil and the rows omit status (the
+// configuration page still works).
+func loadMCPPluginStates(kctx cordis.Context) map[string]mcpPluginState {
+	raw, ok := kctx.Get(contracts.KeyPlugins)
+	if !ok || raw == nil {
+		return nil
+	}
+	plugins, ok := raw.(contracts.PluginsService)
+	if !ok || plugins == nil {
+		return nil
+	}
+	states := make(map[string]mcpPluginState)
+	for _, plugin := range plugins.MCP() {
+		name := strings.TrimSpace(plugin.Name)
+		if name == "" {
+			continue
+		}
+		states[name] = mcpPluginState{status: strings.TrimSpace(plugin.Status), tools: plugin.Tools}
+	}
+	return states
+}
+
+// mcpPluginStatusLabel localizes one backend state word: the toolkit reports
+// Chinese status text, so map the stable prefixes instead of echoing backend
+// prose into an English UI.
+func mcpPluginStatusLabel(locale contracts.LocaleService, status string) (string, uikit.StatusKind) {
+	lower := strings.ToLower(status)
+	switch {
+	case status == "":
+		return "", uikit.StatusUnknown
+	case strings.Contains(status, "已连接") || strings.Contains(lower, "connected"):
+		return localized(locale, "已连接", "Connected"), uikit.StatusSuccess
+	case strings.Contains(status, "失败") || strings.Contains(lower, "failed") ||
+		strings.Contains(lower, "error") || strings.Contains(lower, "refused"):
+		return localized(locale, "连接失败", "Connection failed"), uikit.StatusError
+	default:
+		return status, uikit.StatusUnknown
+	}
+}
+
 // mcpServerRowKey is the official List key of one MCP server row: the name
 // when it is unique among the rows, else the name plus the address, so two
 // servers with the same name still have stable distinct keys.
@@ -132,7 +185,7 @@ func mcpServerRowKey(servers []contracts.MCPServerConfig, index int) any {
 // address and the inline remove action. The official List owns the row paint
 // and the choice, so the selected row's copy uses the accent's on-color.
 func buildMCPServerRow(c *ui.Context, t *design.Tokens, st *mcpState, index int,
-	locale contracts.LocaleService, selected bool) {
+	locale contracts.LocaleService, pluginStates map[string]mcpPluginState, selected bool) {
 	server := st.servers[index]
 	primary, _, tertiary := listRowTextColors(t, selected)
 	ui.Row(c).FillWidth().Padding(design.Space1, design.Space2).
@@ -146,6 +199,22 @@ func buildMCPServerRow(c *ui.Context, t *design.Tokens, st *mcpState, index int,
 		design.Apply(ui.Text(c, mcpRowAddress(server)),
 			t.Font(design.TypeXS), t.MonoFamily()).
 			TextColor(tertiary).Grow(1).MaxLines(1).Ellipsis("…")
+		// The live state lives in the plugins snapshot (the toolkit owns the
+		// clients): show the last connection state and tool count next to the
+		// configuration, so a saved row is not silently "unknown" here (PM-11).
+		if state, ok := pluginStates[strings.TrimSpace(server.Name)]; ok {
+			label, kind := mcpPluginStatusLabel(locale, state.status)
+			switch {
+			case label == "":
+			case kind == uikit.StatusUnknown:
+				design.Apply(ui.Text(c, label), t.Font(design.TypeXXS)).
+					TextColor(t.LabelTertiary).MaxLines(1).Ellipsis("…")
+			default:
+				uikit.StatusBadge(c, t, kind, label)
+			}
+			design.Apply(ui.Text(c, fmt.Sprintf(localized(locale, "%d 个工具", "%d tools"), state.tools)),
+				t.Font(design.TypeXXS)).TextColor(t.LabelTertiary).NoWrap()
+		}
 		// The row's trailing ⋯ menu owns edit and the destructive remove, so a
 		// list of servers paints no red button per row.
 		label := localized(locale, "服务器操作", "Server actions")
@@ -201,6 +270,12 @@ func loadMCPWorkspaceState(st *mcpState, store contracts.SettingsService, kctx c
 func buildMCPPage(c *ui.Context, kctx cordis.Context, st *mcpState, locale contracts.LocaleService) {
 	t := design.Of(c)
 	store, hasStore := kctx.Get(contracts.KeySettings)
+	pluginStates := loadMCPPluginStates(kctx)
+	navigator, _ := kctx.Get(contracts.KeyNavigator)
+	var nav contracts.Navigator
+	if navigator != nil {
+		nav, _ = navigator.(contracts.Navigator)
+	}
 
 	ui.Column(c).FillWidth().Gap(design.Space4).Children(func() {
 		uikit.PageHeader(c, MCPPageTitle, localized(locale,
@@ -227,32 +302,41 @@ func buildMCPPage(c *ui.Context, kctx cordis.Context, st *mcpState, locale contr
 		// Stored server rows: the official List keeps the hairline rows, names
 		// them for assistive technology and owns the keyboard selection; the
 		// inline remove action keeps its confirmation semantics.
-		uikit.Section(c, localized(locale, "MCP 服务器", "MCP servers"), func(*ui.Context) {
-			if len(st.servers) == 0 {
-				uikit.EmptyState(c, localized(locale,
-					"还没有配置 MCP 服务器", "No MCP servers configured yet"))
-				return
-			}
-			bindSettingsList(&st.list, &st.sel, len(st.servers), func(index int) any {
-				if index < 0 || index >= len(st.servers) {
-					return nil
+		uikit.SectionAction(c, localized(locale, "MCP 服务器", "MCP servers"),
+			func(*ui.Context) {
+				// The live state/tool counts and the reconnect action live on the
+				// Plugins page; give the configuration page the way there instead
+				// of duplicating the client controls (PM-11).
+				if design.Apply(ui.Button(c, localized(locale, "打开插件页", "Open plugins page")),
+					t.SecondaryButton()).Clicked() && nav != nil {
+					_ = nav.Push("plugins")
 				}
-				return mcpServerRowKey(st.servers, index)
-			}, func(index int) string {
-				if index < 0 || index >= len(st.servers) {
-					return ""
+			}, func(*ui.Context) {
+				if len(st.servers) == 0 {
+					uikit.EmptyState(c, localized(locale,
+						"还没有配置 MCP 服务器", "No MCP servers configured yet"))
+					return
 				}
-				return firstNonEmpty(strings.TrimSpace(st.servers[index].Name),
-					mcpRowAddress(st.servers[index]),
-					localized(locale, "(未命名服务器)", "(Untitled server)"))
-			})
-			ui.List(c, &st.list, len(st.servers)).
-				Label(localized(locale, "MCP 服务器列表", "MCP servers list")).
-				Gap(design.Space1).
-				Rows(func(row ui.ListRow) {
-					buildMCPServerRow(row.Context, t, st, row.Index, locale, row.Selected())
+				bindSettingsList(&st.list, &st.sel, len(st.servers), func(index int) any {
+					if index < 0 || index >= len(st.servers) {
+						return nil
+					}
+					return mcpServerRowKey(st.servers, index)
+				}, func(index int) string {
+					if index < 0 || index >= len(st.servers) {
+						return ""
+					}
+					return firstNonEmpty(strings.TrimSpace(st.servers[index].Name),
+						mcpRowAddress(st.servers[index]),
+						localized(locale, "(未命名服务器)", "(Untitled server)"))
 				})
-		})
+				ui.List(c, &st.list, len(st.servers)).
+					Label(localized(locale, "MCP 服务器列表", "MCP servers list")).
+					Gap(design.Space1).
+					Rows(func(row ui.ListRow) {
+						buildMCPServerRow(row.Context, t, st, row.Index, locale, pluginStates, row.Selected())
+					})
+			})
 
 		// Workspace mcp.json opt-in: applied on the next app start.
 		uikit.Section(c, localized(locale, "工作区 MCP", "Workspace MCP"), func(*ui.Context) {
@@ -355,6 +439,15 @@ func buildMCPPage(c *ui.Context, kctx cordis.Context, st *mcpState, locale contr
 				}).Description(localized(locale, "Streamable HTTP 端点。",
 					"The Streamable HTTP endpoint."))
 			}
+			// The optional per-server timeout applies to both transports: one
+			// request/handshake bound, blank (or 0) keeps the toolkit default.
+			ui.Field(c, localized(locale, "超时 (ms)", "Timeout (ms)"), func() {
+				ui.TextInput(c, &st.timeoutMs).
+					Label(inputLabel(locale, localized(locale, "超时 (ms)", "Timeout (ms)"))).
+					Placeholder(localized(locale, "留空 = 默认 30 秒", "Blank = default 30s")).FillWidth()
+			}).Description(localized(locale,
+				"单次请求/握手的超时时间（毫秒）；0 或留空使用默认 30 秒。",
+				"Timeout for one request/handshake in milliseconds; 0 or blank uses the default 30s."))
 			// The form's own result line sits between the fields and the actions.
 			statusBadgesRow(c, t, st.status, st.statusErr)
 			if st.testStatus != "" {
@@ -526,6 +619,23 @@ func parseMCPEnv(value string, locale contracts.LocaleService) ([]string, string
 	return lines, ""
 }
 
+// parseMCPTimeout validates the optional timeout draft: blank (or 0) keeps the
+// toolkit default, a positive whole number is milliseconds and anything else is
+// a field error.
+func parseMCPTimeout(value string, locale contracts.LocaleService) (int, string) {
+	trimmed := strings.TrimSpace(value)
+	if trimmed == "" {
+		return 0, ""
+	}
+	ms, err := strconv.Atoi(trimmed)
+	if err != nil || ms < 0 {
+		return 0, localized(locale,
+			"超时必须是整数毫秒（0 或留空 = 默认 30 秒）",
+			"The timeout must be a whole number of milliseconds (0 or blank = default 30s)")
+	}
+	return ms, ""
+}
+
 // buildMCPDraft validates the drafts and returns the settings row. Problems are
 // reported in st.status/st.statusErr (or the environment field's st.envErr);
 // false means the draft may not be submitted/tested.
@@ -536,7 +646,13 @@ func buildMCPDraft(st *mcpState, locale contracts.LocaleService, checkDuplicates
 		st.statusErr = true
 		return contracts.MCPServerConfig{}, false
 	}
-	row := contracts.MCPServerConfig{Name: name}
+	timeoutMs, timeoutErr := parseMCPTimeout(st.timeoutMs, locale)
+	if timeoutErr != "" {
+		st.status = timeoutErr
+		st.statusErr = true
+		return contracts.MCPServerConfig{}, false
+	}
+	row := contracts.MCPServerConfig{Name: name, TimeoutMs: timeoutMs}
 	if st.transport == mcpTransportStdio {
 		command := strings.TrimSpace(st.command)
 		switch {
@@ -643,6 +759,10 @@ func (st *mcpState) fillMCPForm(index int) {
 	st.command = strings.TrimSpace(server.Command)
 	st.args = strings.Join(server.Args, " ")
 	st.env = strings.Join(server.Env, "\n")
+	st.timeoutMs = ""
+	if server.TimeoutMs > 0 {
+		st.timeoutMs = strconv.Itoa(server.TimeoutMs)
+	}
 	st.envErr = ""
 	st.testStatus = ""
 	st.testErr = false
@@ -662,12 +782,22 @@ func mcpDraftDirty(st *mcpState) bool {
 			strings.TrimSpace(st.url) != strings.TrimSpace(server.URL) ||
 			strings.TrimSpace(st.command) != strings.TrimSpace(server.Command) ||
 			strings.TrimSpace(st.args) != strings.Join(server.Args, " ") ||
-			strings.TrimSpace(st.env) != strings.Join(server.Env, "\n")
+			strings.TrimSpace(st.env) != strings.Join(server.Env, "\n") ||
+			strings.TrimSpace(st.timeoutMs) != mcpTimeoutDraft(server)
 	}
 	return st.transport != mcpTransportHTTP ||
 		strings.TrimSpace(st.name) != "" || strings.TrimSpace(st.url) != "" ||
 		strings.TrimSpace(st.command) != "" || strings.TrimSpace(st.args) != "" ||
-		strings.TrimSpace(st.env) != ""
+		strings.TrimSpace(st.env) != "" || strings.TrimSpace(st.timeoutMs) != ""
+}
+
+// mcpTimeoutDraft is the edit-form draft of a stored row's timeout ("" for the
+// default), so the dirty check compares like with like.
+func mcpTimeoutDraft(server contracts.MCPServerConfig) string {
+	if server.TimeoutMs > 0 {
+		return strconv.Itoa(server.TimeoutMs)
+	}
+	return ""
 }
 
 // discardMCPDraft throws the form draft and its transient status away, so the
@@ -688,6 +818,7 @@ func (st *mcpState) resetMCPForm() {
 	st.command = ""
 	st.args = ""
 	st.env = ""
+	st.timeoutMs = ""
 	st.envErr = ""
 	st.testStatus = ""
 	st.testErr = false

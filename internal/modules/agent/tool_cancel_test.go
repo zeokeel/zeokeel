@@ -20,7 +20,12 @@ func TestToolResultCancelled(t *testing.T) {
 		{"context cancelled", "context cancelled", true},
 		{"operation was cancelled", "operation was cancelled by user", true},
 		{"cancelled while waiting", "terminal_send: cancelled while waiting for output", true},
+		// Rig's own synthesized cancellation results (a stop before the tool ran).
+		{"approval gate interrupted", "rig: tool call cancelled: the approval gate was interrupted", true},
+		{"stopped before approval", "rig: tool call cancelled: the run stopped before this call was approved", true},
+		{"not completed", "rig: tool call was not completed (the run was cancelled)", true},
 		{"real failure", "sandbox: denied: command \"exit\" is not in the allowlist", false},
+		{"tool error", "rig: tool \"write_file\": permission denied", false},
 		{"timeout", "context deadline exceeded", false},
 		{"empty", "", false},
 	}

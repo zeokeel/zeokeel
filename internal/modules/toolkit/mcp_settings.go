@@ -75,6 +75,7 @@ func mergeMCPServerRows(base []MCPServer, rows []contracts.MCPServerConfig, sour
 			Command:   command,
 			Args:      cleanMCPArgs(row.Args),
 			Env:       cleanMCPArgs(row.Env),
+			TimeoutMs: row.TimeoutMs,
 		}
 		switch {
 		case command != "" || transport == "stdio":

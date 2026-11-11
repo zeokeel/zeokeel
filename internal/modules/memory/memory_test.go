@@ -7,7 +7,9 @@ package memory
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
@@ -262,17 +264,47 @@ func TestModulePersistenceAcrossRestart(t *testing.T) {
 	}
 }
 
-// TestModuleCorruptFileFailsActivation covers a malformed memory file: the
-// module reports an error instead of panicking.
-func TestModuleCorruptFileFailsActivation(t *testing.T) {
+// TestModuleCorruptFileQuarantined covers FR-06: a malformed memory file must
+// never fail module activation. The bad file is renamed to
+// memory.json.corrupt-<ts>, a warning is logged, a recovery notice is exposed to
+// the UI and the module starts with an empty, working store.
+func TestModuleCorruptFileQuarantined(t *testing.T) {
 	dataDir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(dataDir, DefaultFileName), []byte(`{"entries": [not json`), 0o600); err != nil {
+	path := filepath.Join(dataDir, DefaultFileName)
+	if err := os.WriteFile(path, []byte(`{"entries": [not json`), 0o600); err != nil {
 		t.Fatalf("write corrupt file: %v", err)
 	}
-	if _, err := loadMemory(t, dataDir, nil, nil); err == nil {
-		t.Fatal("module loaded with a corrupt memory file")
-	} else if !strings.Contains(err.Error(), "parse") && !strings.Contains(err.Error(), "memory") {
-		t.Fatalf("corrupt file error = %v, want a readable parse error", err)
+	h := mustLoadMemory(t, dataDir, nil, nil)
+
+	entries, err := h.store.List(context.Background())
+	if err != nil || len(entries) != 0 {
+		t.Fatalf("store after quarantine = %+v/%v, want empty", entries, err)
+	}
+	if _, err := os.Stat(path); !errors.Is(err, fs.ErrNotExist) {
+		t.Fatalf("corrupt memory file still at %s (err=%v)", path, err)
+	}
+	backups, err := filepath.Glob(path + ".corrupt-*")
+	if err != nil || len(backups) != 1 {
+		t.Fatalf("quarantine backups = %v/%v, want exactly one", backups, err)
+	}
+	quarantined, err := os.ReadFile(backups[0])
+	if err != nil || string(quarantined) != `{"entries": [not json` {
+		t.Fatalf("quarantine backup = %q/%v, want the original bytes", quarantined, err)
+	}
+	if !h.logger.contains("corrupt") || !h.logger.contains("quarantine") {
+		t.Fatalf("recovery was not logged: %v", h.logger.lines)
+	}
+	reporter, ok := h.store.(contracts.MemoryRecoveryReporter)
+	if !ok || strings.TrimSpace(reporter.RecoveryNotice()) == "" {
+		t.Fatalf("store does not expose a recovery notice: %T", h.store)
+	}
+	// The store keeps working: new entries persist to the canonical path.
+	if _, err := h.store.Add(context.Background(), contracts.Memory{Text: "after recovery"}); err != nil {
+		t.Fatalf("Add after recovery: %v", err)
+	}
+	raw, err := os.ReadFile(path)
+	if err != nil || !strings.Contains(string(raw), "after recovery") {
+		t.Fatalf("memory.json after recovery = %q/%v", raw, err)
 	}
 }
 
@@ -685,15 +717,23 @@ func TestStoreWriteFailureRollsBack(t *testing.T) {
 	}
 }
 
-// TestStoreInvalidDocument covers malformed JSON and unknown scope configs.
+// TestStoreInvalidDocument covers malformed JSON (quarantined, empty store) and
+// unknown scope configs (rejected).
 func TestStoreInvalidDocument(t *testing.T) {
 	directory := t.TempDir()
 	path := filepath.Join(directory, "memory.json")
 	if err := os.WriteFile(path, []byte("{broken"), 0o600); err != nil {
 		t.Fatalf("write invalid document: %v", err)
 	}
-	if _, err := newStore(directory, Config{Path: path}); err == nil {
-		t.Fatal("newStore accepted a malformed document")
+	store, err := newStore(directory, Config{Path: path})
+	if err != nil {
+		t.Fatalf("newStore(malformed) = %v, want a quarantined empty store", err)
+	}
+	if entries, err := store.List(context.Background()); err != nil || len(entries) != 0 {
+		t.Fatalf("store after malformed document = %+v/%v", entries, err)
+	}
+	if store.RecoveryNotice() == "" {
+		t.Fatal("malformed document did not produce a recovery notice")
 	}
 	if _, err := newStore(directory, Config{Scope: "team"}); err == nil {
 		t.Fatal("newStore accepted an invalid scope")

@@ -2,6 +2,7 @@ package contracts
 
 import (
 	"context"
+	"strings"
 	"time"
 
 	cordis "github.com/zeokeel/zeokeel-kernel"
@@ -30,6 +31,66 @@ type MemoryUpdater interface {
 	// invalid scopes are errors; a successful update returns the stored entry
 	// (same ID and creation time).
 	Update(ctx context.Context, id, text, scope string) (Memory, error)
+}
+
+// Memory scope values. An entry added with scope "workspace" is persisted with
+// the identity of the workspace current at write time ("workspace:<id>"), so a
+// "workspace" memory is only listed inside that workspace. "global" entries are
+// visible everywhere. Legacy entries whose scope is the bare "workspace" (written
+// before workspace identity existed) or any other historical scope stay visible
+// so upgrading never hides existing data.
+const (
+	// MemoryScopeGlobal marks an entry visible in every workspace.
+	MemoryScopeGlobal = "global"
+	// MemoryScopeWorkspace is the unbound workspace scope (legacy rows and
+	// callers that ask for "the current workspace" before an id is known).
+	MemoryScopeWorkspace = "workspace"
+	// MemoryScopeWorkspacePrefix prefixes a bound workspace scope.
+	MemoryScopeWorkspacePrefix = "workspace:"
+)
+
+// MemoryWorkspaceScope renders the persisted scope for a bound workspace.
+func MemoryWorkspaceScope(workspaceID string) string {
+	workspaceID = strings.TrimSpace(workspaceID)
+	if workspaceID == "" {
+		return MemoryScopeWorkspace
+	}
+	return MemoryScopeWorkspacePrefix + workspaceID
+}
+
+// MemoryScopeWorkspaceID extracts the workspace identity of a bound scope.
+func MemoryScopeWorkspaceID(scope string) (string, bool) {
+	scope = strings.TrimSpace(scope)
+	if !strings.HasPrefix(strings.ToLower(scope), MemoryScopeWorkspacePrefix) {
+		return "", false
+	}
+	id := strings.TrimSpace(scope[len(MemoryScopeWorkspacePrefix):])
+	if id == "" {
+		return "", false
+	}
+	return id, true
+}
+
+// MemoryAllLister is the optional management half of the memory store: it lists
+// every entry of every workspace so the settings page can manage them, while the
+// model-facing List/Search stay scoped to the current workspace.
+type MemoryAllLister interface {
+	ListAll(ctx context.Context) ([]Memory, error)
+}
+
+// MemoryVersioner is the optional change-counter half of the memory store: it
+// advances on every successful mutation so the UI can notice entries written
+// out of band (the model's memory tool) and refresh its cached read model.
+type MemoryVersioner interface {
+	Version() uint64
+}
+
+// MemoryRecoveryReporter is the optional recovery half of the memory store: it
+// reports a quarantined memory file so the UI can tell the user their previous
+// entries were backed up instead of silently dropped. An empty notice means the
+// store loaded healthy.
+type MemoryRecoveryReporter interface {
+	RecoveryNotice() string
 }
 
 // KeyMemory is provided by the memory backend module and consumed by the

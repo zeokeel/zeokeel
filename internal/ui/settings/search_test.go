@@ -127,3 +127,18 @@ func TestSearchPageEnglishCopy(t *testing.T) {
 	tester.Frame()
 	h.assertTexts(tester, "搜索后端", "已配置", "保存")
 }
+
+// TestSearchPageCopyMatchesActualRegistration covers PM-15: the settings copy
+// must describe what actually happens. Leaving the endpoint empty keeps the
+// web_search tool registered (a call then reports the missing backend), so the
+// page must not promise that an empty endpoint disables the tool.
+func TestSearchPageCopyMatchesActualRegistration(t *testing.T) {
+	store := newFakeSettings(nil)
+	h := newHarness(t, &fakeChat{}, store, settings.Config{})
+	tester := h.tester()
+	tester.Frame()
+	openSearchPage(t, h, tester)
+
+	h.assertTexts(tester, "留空表示未配置")
+	h.assertNoTexts(tester, "留空则禁用 web_search")
+}

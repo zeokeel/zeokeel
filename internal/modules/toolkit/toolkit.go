@@ -22,11 +22,8 @@ import (
 
 	rig "github.com/zeokeel/zeokeel-rig"
 	"github.com/zeokeel/zeokeel-rig/sandbox"
-	rigtool "github.com/zeokeel/zeokeel-rig/tools"
-	"github.com/zeokeel/zeokeel-rig/tools/mcp"
 	"github.com/zeokeel/zeokeel-rig/tools/misc"
 	"github.com/zeokeel/zeokeel-rig/tools/schedule"
-	"github.com/zeokeel/zeokeel-rig/tools/settings"
 	"github.com/zeokeel/zeokeel-rig/tools/skill"
 	"github.com/zeokeel/zeokeel-rig/tools/team"
 	"github.com/zeokeel/zeokeel-rig/tools/web"
@@ -128,7 +125,8 @@ func Module() *module.Descriptor[Config] {
 		// Root-dependent tools (files, shell, editor, image, terminal, jobs,
 		// worktree, working_directory) follow the workspace that is current at
 		// call time; tools without a filesystem root are registered once below.
-		group := newRebindGroup(cfg, timeout, workspaceRootSource(ctx, cfg.Root), logf)
+		rootOf := workspaceRootSource(ctx, cfg.Root)
+		group := newRebindGroup(cfg, timeout, rootOf, logf)
 		rootScoped := group.initial()
 		tools := append([]rig.Tool(nil), group.proxies(rootScoped)...)
 		tools = append(tools, misc.NewTodoTool(misc.NewTodoStore()))
@@ -148,7 +146,11 @@ func Module() *module.Descriptor[Config] {
 		if skillStore, ok := ctx.Get(contracts.KeySkills); ok {
 			// The skills backend discovers SKILL.md files from the data dir and
 			// the current workspace; the skill tool lists/searches/loads them.
-			tools = append(tools, skill.Tools(skillStore)...)
+			// Workspace-origin skills are repository content, so the wrapper
+			// marks their rendered output as untrusted.
+			for _, tool := range skill.Tools(skillStore) {
+				tools = append(tools, newTrustAwareSkillTool(tool, skillStore, rootOf))
+			}
 		} else {
 			tools = append(tools, skill.Tools(nil)...)
 		}
@@ -157,7 +159,7 @@ func Module() *module.Descriptor[Config] {
 		taskBoard := newTaskBoard(taskManager)
 		settingsService, hasSettings := ctx.Get(contracts.KeySettings)
 		if hasSettings {
-			tools = append(tools, settings.Tools(settingsService)...)
+			tools = append(tools, maskedSettingsTools(settingsService)...)
 		}
 
 		if cfg.Network {
@@ -248,108 +250,81 @@ func Module() *module.Descriptor[Config] {
 			}
 		}
 
-		var clients []*mcp.Client
-		pluginEntries := make([]pluginEntry, 0, len(servers))
-		for _, server := range servers {
-			transport := mcpServerTransport(server)
-			entry := pluginEntry{plugin: contracts.MCPPlugin{
-				Name:   pluginDisplayName(server.Name, nil),
-				URL:    strings.TrimSpace(server.URL),
-				Status: statusConnectFailed + "未配置 URL",
-			}}
-			attach := func(client *mcp.Client) {
-				clients = append(clients, client)
-				mcpTools := mcp.Tools(client, "")
-				tools = append(tools, filterDisabledTools(mcpTools, disabledTools, logf)...)
-				tools = append(tools, filterDisabledTools(mcp.ResourceTools(client, ""), disabledTools, logf)...)
-				entry.client = client
-				entry.plugin.Name = pluginDisplayName(server.Name, client)
-				entry.plugin.ServerName = client.ServerName()
-				entry.plugin.Version = client.ServerVersion()
-				entry.plugin.Protocol = client.ProtocolVersion()
-				entry.plugin.Tools = len(mcpTools)
-				entry.plugin.Status = statusConnected
+		// MCP servers start concurrently under one bounded budget; every
+		// connection is managed at runtime so a session expiry or a dead stdio
+		// child process reconnects on the next call and the Plugins read model
+		// follows the live connection.
+		runtime := newMCPRuntime(logf, disabledTools, cfg.MaxOutputBytes)
+		plans := prepareMCPServerPlans(servers, logf)
+		outcomes := runtime.startMCPServers(context.Background(), plans)
+		pluginEntries := make([]pluginEntry, 0, len(plans))
+		mcpSeen := make(map[string]bool)
+		for index, plan := range plans {
+			entry := plan.entry
+			if plan.invalid {
 				pluginEntries = append(pluginEntries, entry)
-				logf("[toolkit] mcp %q connected: %d tool(s), protocol %s",
-					entry.plugin.Name, len(mcpTools), entry.plugin.Protocol)
+				continue
 			}
-			switch transport {
-			case mcp.TransportStdio:
-				entry.plugin.URL = ""
-				if strings.TrimSpace(server.Command) == "" {
-					entry.plugin.Status = statusConnectFailed + "stdio command is required"
-					pluginEntries = append(pluginEntries, entry)
-					logf("[toolkit] mcp %q: stdio command is required", entry.plugin.Name)
-					continue
-				}
-				client, err := mcp.Start(context.Background(), mcpStartConfig(server))
-				if err != nil {
-					entry.plugin.Status = statusConnectFailed + err.Error()
-					pluginEntries = append(pluginEntries, entry)
-					logf("[toolkit] mcp %q: start failed: %v", entry.plugin.Name, err)
-					continue
-				}
-				attach(client)
-			case mcp.TransportHTTP:
-				if entry.plugin.URL == "" {
-					// Keep a failed entry so the Plugins screen can show the
-					// misconfiguration instead of silently dropping the server.
-					pluginEntries = append(pluginEntries, entry)
-					logf("[toolkit] mcp %q: url is required for the http transport", entry.plugin.Name)
-					continue
-				}
-				client, err := startHTTPMCP(server)
-				if err != nil {
-					entry.plugin.Status = statusConnectFailed + err.Error()
-					pluginEntries = append(pluginEntries, entry)
-					logf("[toolkit] mcp %q: connect failed: %v", entry.plugin.Name, err)
-					continue
-				}
-				attach(client)
-			default:
-				// Legacy assembly rows (and unclassified rows) with no URL keep
-				// the original missing-URL diagnostic.
-				if entry.plugin.URL == "" && strings.TrimSpace(server.Command) == "" {
-					entry.plugin.Status = statusConnectFailed + "未配置 URL"
-				} else {
-					entry.plugin.Status = statusConnectFailed + "unsupported transport"
-				}
+			outcome := outcomes[index]
+			if outcome.err != nil {
+				entry.plugin.Status = statusConnectFailed + outcome.err.Error()
 				pluginEntries = append(pluginEntries, entry)
-				logf("[toolkit] mcp %q: unsupported transport %q", entry.plugin.Name, transport)
+				logf("[toolkit] mcp %q: connect failed: %v", entry.plugin.Name, outcome.err)
+				continue
 			}
+			entry.client = outcome.client
+			entry.plugin.Name = pluginDisplayName(plan.server.Name, outcome.client)
+			entry.plugin.ServerName = outcome.serverName
+			entry.plugin.Version = outcome.serverVer
+			entry.plugin.Protocol = outcome.protocolVer
+			entry.plugin.Status = statusConnected
+			pluginIndex := len(pluginEntries)
+			wrapped, regularTools := runtime.attachServer(pluginIndex, plan, outcome, mcpSeen)
+			entry.plugin.Tools = regularTools
+			tools = append(tools, wrapped...)
+			pluginEntries = append(pluginEntries, entry)
+			logf("[toolkit] mcp %q connected: %d tool(s), protocol %s",
+				entry.plugin.Name, regularTools, entry.plugin.Protocol)
 		}
 		plugins := newPluginsService(pluginEntries)
+		runtime.bindPlugins(plugins)
 
 		if _, err := ctx.Effect(func() cordis.Effect {
 			return cordis.Effect{cordis.CleanupOf(func() {
-				closeAll(clients)
+				runtime.close()
 				group.close()
 			})}
 		}); err != nil {
-			closeAll(clients)
+			runtime.close()
 			group.close()
 			return err
 		}
 
 		// Optional single LSP server: its tools join the same registry and the
 		// server is closed when the module unloads.
-		lspTools, closeLSP := startLSPTools(context.Background(), ctx, logf, settingsService, hasSettings, tools)
+		lspPolicy := newPolicy(cfg, rootScoped.root, timeout)
+		lspTools, closeLSP := startLSPTools(context.Background(), ctx, logf, settingsService, hasSettings, tools, lspPolicy)
 		tools = append(tools, lspTools...)
 		tools = filterDisabledTools(tools, disabledTools, logf)
 
-		if _, err := ctx.Provide(contracts.KeyToolkit, rigtool.NewRegistry(tools...)); err != nil {
+		registry := newToolRegistry(tools, logf)
+		runtime.bindRegistry(registry)
+		if _, err := ctx.Provide(contracts.KeyToolkit, registry); err != nil {
 			closeLSP()
+			runtime.close()
 			group.close()
 			return err
 		}
 		_, err := ctx.Provide(contracts.KeyPlugins, contracts.PluginsService(plugins))
 		if err != nil {
 			closeLSP()
+			runtime.close()
 			group.close()
 			return err
 		}
 		if _, err := ctx.Provide(contracts.KeyTaskBoard, contracts.TaskBoard(taskBoard)); err != nil {
 			closeLSP()
+			runtime.close()
 			group.close()
 			return err
 		}
@@ -359,6 +334,7 @@ func Module() *module.Descriptor[Config] {
 		// instead of being re-provided.
 		if _, err := ctx.Provide(contracts.KeyJobs, contracts.JobService(newJobService(group))); err != nil {
 			closeLSP()
+			runtime.close()
 			group.close()
 			return err
 		}
@@ -375,12 +351,6 @@ func Module() *module.Descriptor[Config] {
 		module.Provides(contracts.KeyTaskBoard),
 		module.Provides(contracts.KeyJobs),
 	).WithName("ZeoKeel Rig toolset")
-}
-
-func closeAll(clients []*mcp.Client) {
-	for _, client := range clients {
-		_ = client.Close()
-	}
 }
 
 // newPolicy builds the sandbox policy from the module config. It is a helper so

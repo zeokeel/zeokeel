@@ -236,7 +236,7 @@ func TestPermissionReadOnlyAllowsInfoToolsQueuesMutations(t *testing.T) {
 
 	for _, tool := range []string{
 		"read_file", "list_dir", "glob", "grep", "read_image",
-		"working_directory", "settings_get", "job_list", "lsp_diagnostics",
+		"working_directory", "job_list", "lsp_diagnostics",
 	} {
 		decision, err := svc.Request(context.Background(), contracts.ApprovalRequest{Tool: tool})
 		if err != nil || decision != contracts.ApprovalAllow {
@@ -253,7 +253,7 @@ func TestPermissionReadOnlyAllowsInfoToolsQueuesMutations(t *testing.T) {
 		t.Fatalf("Mode = %q, want read-only", mode)
 	}
 
-	for _, tool := range []string{"write_file", "edit_file", "bash", "web_fetch", "unknown_tool"} {
+	for _, tool := range []string{"write_file", "edit_file", "bash", "web_fetch", "settings_get", "unknown_tool"} {
 		results := startRequest(context.Background(), svc, contracts.ApprovalRequest{Tool: tool})
 		waitFor(t, tool+" pending in read-only", func() bool { return len(svc.Pending()) == 1 })
 		pending := svc.Pending()

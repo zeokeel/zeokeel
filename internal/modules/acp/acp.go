@@ -18,6 +18,8 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"os"
+	"path/filepath"
 	"sort"
 	"strings"
 	"sync"
@@ -87,6 +89,12 @@ func Module() *module.Descriptor[Config] {
 			return fmt.Errorf("%s: require logger: %w", ModuleID, err)
 		}
 		service := newService(cfg, chat, logger)
+		// The editor sends its project root as session/new's cwd; without the
+		// workspace service the agent's file/shell tools would silently use
+		// whatever workspace the desktop last opened (or no root at all).
+		if workspace, ok := ctx.Get(contracts.KeyWorkspace); ok && workspace != nil {
+			service.workspace = workspace
+		}
 		if _, err := ctx.Provide(contracts.KeyACP, contracts.ACPService(service)); err != nil {
 			return fmt.Errorf("%s: provide acp service: %w", ModuleID, err)
 		}
@@ -115,6 +123,11 @@ type service struct {
 	chat    contracts.ChatService
 	logger  contracts.Logger
 	timeout time.Duration
+
+	// workspace is optional: when the product provides it, session/new uses
+	// the client's cwd to register/open the project root so the agent's tools
+	// run in the editor's project.
+	workspace contracts.WorkspaceService
 
 	mu              sync.Mutex
 	cancelRequested map[string]bool
@@ -180,6 +193,14 @@ type promptParams struct {
 // cancelParams is the params of session/cancel.
 type cancelParams struct {
 	SessionID string `json:"sessionId"`
+}
+
+// sessionNewParams is the params of session/new. cwd is the editor's project
+// root; mcpServers is accepted by the protocol but not consumed yet (configured
+// servers come from the shared product settings).
+type sessionNewParams struct {
+	CWD        string            `json:"cwd"`
+	MCPServers []json.RawMessage `json:"mcpServers"`
 }
 
 // frameWriter serializes protocol frames from the read loop and prompt
@@ -321,14 +342,21 @@ readLoop:
 				if !hasID(req) {
 					continue
 				}
+				workspaceID, rpcErr := s.prepareSessionWorkspace(req.Params)
+				if rpcErr != nil {
+					writer.writeError(req.ID, rpcErr)
+					continue
+				}
 				sessionID, err := s.chat.NewSession("")
 				if err != nil {
 					writer.writeError(req.ID, internalError("session/new: "+err.Error()))
 					continue
 				}
+				s.bindSessionWorkspace(sessionID, workspaceID)
 				writer.writeResult(req.ID, map[string]string{
-					"sessionId": sessionID,
-					"model":     strings.TrimSpace(s.chat.Config().Model),
+					"sessionId":   sessionID,
+					"model":       strings.TrimSpace(s.chat.Config().Model),
+					"workspaceId": workspaceID,
 				})
 			case MethodSessionList:
 				if !hasID(req) {
@@ -386,6 +414,95 @@ readLoop:
 		return fmt.Errorf("acp: read protocol stream: %w", scanErr)
 	}
 	return nil
+}
+
+// prepareSessionWorkspace resolves the editor's project root (session/new cwd)
+// into a registered workspace and makes it current, so the agent's file/shell
+// tools operate on the project the user opened. A missing directory is an
+// invalid-params error; a workspace-registry failure only logs (the session can
+// still run conversation/read-only tools).
+func (s *service) prepareSessionWorkspace(raw json.RawMessage) (string, *RPCError) {
+	var params sessionNewParams
+	if len(bytes.TrimSpace(raw)) > 0 {
+		if err := json.Unmarshal(raw, &params); err != nil {
+			return "", &RPCError{Code: CodeInvalidParams, Message: "session/new: " + err.Error()}
+		}
+	}
+	cwd := strings.TrimSpace(params.CWD)
+	if cwd == "" {
+		return "", nil
+	}
+	absolute, err := filepath.Abs(cwd)
+	if err != nil {
+		return "", &RPCError{Code: CodeInvalidParams, Message: "session/new: invalid cwd: " + err.Error()}
+	}
+	info, err := os.Stat(absolute)
+	if err != nil || !info.IsDir() {
+		return "", &RPCError{Code: CodeInvalidParams, Message: fmt.Sprintf("session/new: cwd %q is not an existing directory", cwd)}
+	}
+	if resolved, resolveErr := filepath.EvalSymlinks(absolute); resolveErr == nil {
+		absolute = resolved
+	}
+	if s.workspace == nil {
+		s.logger.Printf("[acp] session/new cwd %q ignored: the product has no workspace service", absolute)
+		return "", nil
+	}
+	ctx := context.Background()
+	existing, err := s.workspace.List(ctx)
+	if err != nil {
+		s.logger.Printf("[acp] session/new cwd %q: list workspaces: %v", absolute, err)
+		return "", nil
+	}
+	for _, workspace := range existing {
+		if !sameDirectory(workspace.Root, absolute) {
+			continue
+		}
+		if _, openErr := s.workspace.Open(ctx, workspace.ID); openErr != nil {
+			s.logger.Printf("[acp] session/new cwd %q: open workspace %q: %v", absolute, workspace.ID, openErr)
+			return "", nil
+		}
+		return workspace.ID, nil
+	}
+	workspace, err := s.workspace.Create(ctx, filepath.Base(absolute), absolute)
+	if err != nil {
+		s.logger.Printf("[acp] session/new cwd %q: register workspace: %v", absolute, err)
+		return "", nil
+	}
+	return workspace.ID, nil
+}
+
+// sameDirectory compares two workspace roots after resolving symlinks.
+func sameDirectory(left, right string) bool {
+	left, right = strings.TrimSpace(left), strings.TrimSpace(right)
+	if left == "" || right == "" {
+		return false
+	}
+	if filepath.Clean(left) == filepath.Clean(right) {
+		return true
+	}
+	resolvedLeft, leftErr := filepath.EvalSymlinks(left)
+	resolvedRight, rightErr := filepath.EvalSymlinks(right)
+	if leftErr != nil || rightErr != nil {
+		return false
+	}
+	return filepath.Clean(resolvedLeft) == filepath.Clean(resolvedRight)
+}
+
+// bindSessionWorkspace associates the new session with its project root so the
+// read model/sidebar knows which project it belongs to (the tools themselves
+// follow the current workspace, which prepareSessionWorkspace made current).
+func (s *service) bindSessionWorkspace(sessionID, workspaceID string) {
+	workspaceID = strings.TrimSpace(workspaceID)
+	if workspaceID == "" || s.chat == nil {
+		return
+	}
+	switcher, ok := s.chat.(contracts.SessionWorkspaceSwitcher)
+	if !ok {
+		return
+	}
+	if err := switcher.SetSessionWorkspace(sessionID, workspaceID); err != nil {
+		s.logger.Printf("[acp] session %s: bind workspace %q: %v", sessionID, workspaceID, err)
+	}
 }
 
 // sessionListItem is one session/list entry. The ACP session/list shape is a

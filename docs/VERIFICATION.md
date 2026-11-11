@@ -821,3 +821,15 @@ v0.2.12 的 package-macos job 在 GitHub Ubuntu runner 上构建 libdmg-hfsplus 
 - **运行中工具行产品帧**：新增 `TestRunningToolRowRendersInProductSession`（真实 session surface 渲染 `正在运行命令 · go test ...`）。
 - **「回到最新」叠压**：短围栏收缩后复制按钮回到内容宽度内，`p2-tool-row-complete` 复核无叠压；浮动按钮仍为 bottom-right 覆盖层。
 - **验证**：`go test ./...` 全绿；designlint 0 new/0 blocking；design-check 6/6；`ui-snapshot` **103 次渲染 / 102 唯一 PNG**；`ui-drive` **91/91 PASS**。
+
+## 0.2.24（2026-11-11：产品级缺陷评审首轮 TDD 修复）
+
+- **范围**：`docs/PRODUCT-BUG-REVIEW-2026-11-11.md` 的 P0/P1 与全部 P2（FR-28 明确 Deferred）+ 高价值 P3；每项先补失败回归测试再实现。覆盖安全/权限（MCP 多 server、settings_get、read-only override、LSP Initialize/PathPolicy、损坏数据隔离、tools.disabled）、loop/压缩/会话删除、prompt 注入（模式/指引/AGENTS/@session/子代理预设/记忆技能注入）、MCP 生命周期、记忆 scope、技能根与 frontmatter、工作区 per-run 根、ACP `cwd`、首启/错误恢复/审批归属等。
+- **验证**（`./scripts/verify.sh` 全量，2026-11-11 13:2x）：
+  - `gofmt` / `go build ./...` / `go vet ./...` / `go tool mygo vet` 全部 PASS；
+  - `designlint --strict` 0 error / 0 warn / 0 new / 0 blocking；`scripts/design-check.sh` **6/6 PASS**；
+  - `go test ./... -count=1` PASS；`go test ./... -race` PASS；
+  - regression **276 PASS / 0 SKIP / 0 FAIL**；`ui-snapshot` **103 steps / 102 PNGs**；
+  - 三产品冒烟：desktop（xvfb，exit 124，tray ready）/ headless（exit 124）/ ACP（exit 0）全部 PASS；
+  - **verify summary: 13 passed, 0 failed（529s）→ verify: PASS**。
+- **已知限制**：见 CHANGELOG `[0.2.24]`「已知限制」与评审报告 §0.1（goal 会话级、后台通知、LSP 重绑、workspace mcp.json 信任、headless 审批文案、记忆跨进程锁等明确 Deferred）。

@@ -250,18 +250,23 @@ func resolveRegistryPath(dataDir, requested string) (string, error) {
 // Path returns the resolved registry file path (diagnostics and tests).
 func (s *Service) Path() string { return s.path }
 
-// load reads the registry, treating a missing file as empty.
+// load reads the registry, treating a missing file as empty. An unreadable or
+// malformed registry is quarantined (FR-06): the bad file is renamed to
+// <path>.corrupt-<ts>, a warning is logged and the service starts with no
+// workspaces instead of failing activation.
 func (s *Service) load() error {
 	data, err := os.ReadFile(s.path)
 	if errors.Is(err, fs.ErrNotExist) {
 		return nil
 	}
 	if err != nil {
-		return fmt.Errorf("%s: read %q: %w", ModuleID, s.path, err)
+		s.logRecovery(fmt.Sprintf("workspace registry %q could not be read (%v); starting with no workspaces", s.path, err))
+		return nil
 	}
 	document, err := decodeRegistry(data)
 	if err != nil {
-		return fmt.Errorf("%s: parse %q: %w", ModuleID, s.path, err)
+		s.quarantine(fmt.Sprintf("workspace registry %q is corrupt (%v)", s.path, err))
+		return nil
 	}
 	workspaces := make([]contracts.Workspace, 0, len(document.Workspaces))
 	for _, record := range document.Workspaces {
@@ -278,6 +283,26 @@ func (s *Service) load() error {
 	s.workspaces = workspaces
 	s.currentID = strings.TrimSpace(document.CurrentID)
 	return nil
+}
+
+// quarantine renames the unusable registry out of the way, logs a warning and
+// lets the service start empty.
+func (s *Service) quarantine(reason string) {
+	backup := fmt.Sprintf("%s.corrupt-%d", s.path, time.Now().UTC().UnixNano())
+	message := reason + "; starting with no workspaces"
+	if err := os.Rename(s.path, backup); err != nil {
+		message += fmt.Sprintf(" (could not quarantine the file: %v)", err)
+	} else {
+		message += fmt.Sprintf(" (quarantined as %s)", backup)
+	}
+	s.logRecovery(message)
+}
+
+// logRecovery records a recovery warning through the host logger.
+func (s *Service) logRecovery(message string) {
+	if s.logger != nil {
+		s.logger.Printf("%s: %s", ModuleID, message)
+	}
 }
 
 // decodeRegistry accepts the canonical object and, for convenience, a bare

@@ -81,6 +81,10 @@ func TestSessionMenuTailReachableInNarrowWindow(t *testing.T) {
 
 func TestSessionMenuSubmenusReachableAndShort(t *testing.T) {
 	chat := presetSessionChat(newPresetChat())
+	// This test pins the menu shape for an unconfigured model; with a model the
+	// very-compact composer intentionally folds the model chip (and its
+	// reasoning row) into this menu instead.
+	chat.config = contracts.ChatConfig{}
 	h := newPresetsHarness(t, chat, presetStore(t))
 	tester := h.tester()
 	tester.SetSize(704, 720)

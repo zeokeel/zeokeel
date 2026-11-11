@@ -320,6 +320,18 @@ func TestP1ApprovalToolsAndPersistence(t *testing.T) {
 			t.Fatalf("skills page missing %q; texts = %v", want, tester.Texts())
 		}
 	}
+	// The skills page grew (discovery roots / extra-directory section), so the
+	// per-skill disclosure can sit below the 800 DIP test window. Scroll the
+	// settings body until it is visible, then click.
+	if rect, ok := tester.Find("查看内容"); !ok || rect.Y+rect.H > 780 {
+		for attempt := 0; attempt < 6; attempt++ {
+			tester.Scroll(700, 500, 0, 220)
+			tester.Frame()
+			if rect, ok = tester.Find("查看内容"); ok && rect.Y+rect.H <= 780 {
+				break
+			}
+		}
+	}
 	if err := tester.Click("查看内容"); err != nil {
 		t.Fatalf("expand skill: %v; texts = %v", err, tester.Texts())
 	}

@@ -240,8 +240,10 @@ func TestGateDenyAllPolicyStillDeniesRememberedTool(t *testing.T) {
 }
 
 // TestGateReadOnlyOverrideKeepsRememberedToolAllowed covers the read-only
-// preset: it is not a deny policy, so a tool the user already remembered with
-// "always allow in this session" stays allowed without a new prompt.
+// preset: it is a hard restriction, but a tool the user already remembered with
+// "always allow in this session" stays allowed without a new prompt. Tools that
+// were not remembered are denied outright — the global policy must not
+// auto-allow workspace writes behind the read-only label.
 func TestGateReadOnlyOverrideKeepsRememberedToolAllowed(t *testing.T) {
 	settings := newFakeSettings(nil)
 	approvals := &recordingApprovals{decision: contracts.ApprovalDeny}
@@ -258,12 +260,13 @@ func TestGateReadOnlyOverrideKeepsRememberedToolAllowed(t *testing.T) {
 	if asked := approvals.askedTools(); len(asked) != 0 {
 		t.Fatalf("remembered bash requested approval: %v", asked)
 	}
-	// A tool that was not remembered still goes through the approval gate.
+	// A tool that was not remembered is denied without consulting the global
+	// policy (whose workspace mode would auto-allow write_file).
 	if decision := approveOne(t, svc.gate(sessionID), "write_file"); decision != rig.DecisionDeny {
-		t.Fatalf("unremembered write_file under read-only = %q, want the fake deny", decision)
+		t.Fatalf("unremembered write_file under read-only = %q, want deny", decision)
 	}
-	if asked := approvals.askedTools(); len(asked) != 1 || asked[0] != "write_file" {
-		t.Fatalf("approval requests = %v, want [write_file]", asked)
+	if asked := approvals.askedTools(); len(asked) != 0 {
+		t.Fatalf("read-only override requested approval: %v", asked)
 	}
 }
 

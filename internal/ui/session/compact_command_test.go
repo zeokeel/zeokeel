@@ -78,7 +78,8 @@ func waitCompactNotice(t *testing.T, h *harness, tester *ui.Tester) {
 		if tester.HasText("已压缩") || tester.HasText("Compacted") ||
 			tester.HasText("压缩失败") || tester.HasText("Compaction failed") ||
 			tester.HasText("会话正在运行") || tester.HasText("没有可压缩") ||
-			tester.HasText("保存压缩结果失败") || tester.HasText("压缩不可用") {
+			tester.HasText("保存压缩结果失败") || tester.HasText("压缩不可用") ||
+			tester.HasText("压缩期间历史被修改") || tester.HasText("会话正在压缩") {
 			return
 		}
 	}

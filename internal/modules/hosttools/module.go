@@ -2,10 +2,13 @@
 //
 // It puts the product-side agent tools into the shared ZeoKeel Rig tool
 // registry (provided by the toolkit module as contracts.KeyToolkit): ask_user,
-// present, plan_review, exit_plan_mode, goal and team. These tools are not part
-// of the pure toolset SDK because they need process capabilities — a UI to ask
-// the user, an artifact presenter, plan-review state, a goal store and a team
-// manager (see internal/hosttools).
+// present, plan_review, exit_plan_mode and goal. These tools are not part of
+// the pure toolset SDK because they need process capabilities — a UI to ask the
+// user, an artifact presenter, plan-review state and a goal store (see
+// internal/hosttools). The legacy in-memory "team" stub was removed: the agent
+// module registers the real rig team tools (team_*, spawn_team, spawn_teammate,
+// ...) against contracts.KeyTeam, so keeping the stub only misled the model
+// into spawning members that never ran.
 //
 // Interactive products (the desktop app) register all six. Non-interactive
 // products (headless/ACP) cannot show a question or get a plan approved by a
@@ -53,8 +56,8 @@ func Module() *module.Descriptor[Config] {
 // ModuleWithHost is Module with injected host capabilities. A nil host means
 // "fresh in-memory capabilities per activation" (the production default);
 // tests and products with real UI/agent integration pass their own Asker,
-// Presenter, PlanController, GoalStore and TeamManager. A nil capability in
-// host disables only the tools that need it.
+// Presenter, PlanController and GoalStore. A nil capability in host disables
+// only the tools that need it.
 func ModuleWithHost(host *hostcaps.Host) *module.Descriptor[Config] {
 	return module.Define(ModuleID, func(ctx cordis.Context, cfg Config) error {
 		registry, err := ctx.Require(contracts.KeyToolkit)

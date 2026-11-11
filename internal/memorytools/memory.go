@@ -70,9 +70,17 @@ func (t *tool) Description() string {
 	const updateBullet = `- update: replace the text of one memory. "id" and "text" are required; optional "scope" changes the entry's scope (omitted keeps the current scope). The memory keeps its ID and creation time. Unknown IDs and stores without edit support are errors.`
 	description := t.inner.Description()
 	if index := strings.Index(description, storeNotesMarker); index >= 0 {
-		return description[:index] + "\n" + updateBullet + description[index:]
+		description = description[:index] + "\n" + updateBullet + description[index:]
+	} else {
+		description += "\n" + updateBullet
 	}
-	return description + "\n" + updateBullet
+	// The Rig tool's trailing note describes its process-local default store;
+	// the product always binds a durable host store (memory.json), so the
+	// model-facing text must not claim memories are lost on restart.
+	if index := strings.Index(description, "Whether the store"); index >= 0 {
+		description = description[:index] + "ZeoKeel persists entries in the host's durable memory store, so they survive restarts and are shared by later conversations."
+	}
+	return description
 }
 
 // Schema is the Rig schema extended with the update action and its id/text
@@ -114,13 +122,37 @@ func (t *tool) Invoke(ctx context.Context, call rig.ToolCall) (rig.ToolResult, e
 	switch strings.ToLower(strings.TrimSpace(arguments.Action)) {
 	case updateAction:
 		return t.update(ctx, arguments), nil
+	case "add":
+		return t.add(ctx, call, arguments)
 	case "":
 		return errorResultf("memory: action is required (%s)", actionList()), nil
-	case "add", "list", "search", "remove", "clear":
+	case "list", "search", "remove", "clear":
 		return t.inner.Invoke(ctx, call)
 	default:
 		return errorResultf("memory: unknown action %q (%s)", arguments.Action, actionList()), nil
 	}
+}
+
+// add handles the Rig add action with one product difference: when the model
+// omits the scope, the scope stays empty so the durable store applies its
+// configured default (Config.Scope, FR-25) instead of the Rig tool's hardcoded
+// "workspace". Everything else (text validation, result wording) mirrors the
+// Rig tool.
+func (t *tool) add(ctx context.Context, call rig.ToolCall, arguments arguments) (rig.ToolResult, error) {
+	if strings.TrimSpace(arguments.Scope) != "" {
+		return t.inner.Invoke(ctx, call)
+	}
+	text := strings.TrimSpace(arguments.Text)
+	if text == "" {
+		// Let the Rig tool render its canonical error and malformed-argument
+		// behaviour.
+		return t.inner.Invoke(ctx, call)
+	}
+	added, err := t.store.Add(ctx, contracts.Memory{Text: text})
+	if err != nil {
+		return errorResultf("memory: add: %v", err), nil
+	}
+	return rig.ToolResult{Content: fmt.Sprintf("added memory %s (scope=%s)", added.ID, displayScope(added.Scope))}, nil
 }
 
 // arguments is the decoded memory tool arguments (the same JSON fields the Rig

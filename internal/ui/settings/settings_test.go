@@ -99,6 +99,10 @@ type fakeChat struct {
 	archived     map[string]bool
 	archiveErr   error
 	archiveCalls []string
+	// archiveMarks records the last requested archive flag per session (the
+	// open-archived test needs to see the session was restored, not only that
+	// SetSessionArchived ran).
+	archiveMarks map[string]bool
 	activeErr    error
 }
 
@@ -146,6 +150,10 @@ func (f *fakeChat) SetSessionArchived(sessionID string, archived bool) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.archiveCalls = append(f.archiveCalls, sessionID)
+	if f.archiveMarks == nil {
+		f.archiveMarks = map[string]bool{}
+	}
+	f.archiveMarks[sessionID] = archived
 	if f.archiveErr != nil {
 		return f.archiveErr
 	}
@@ -175,6 +183,14 @@ func (f *fakeChat) archivedCalls() []string {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	return append([]string(nil), f.archiveCalls...)
+}
+
+// isArchived reports the last archive flag SetSessionArchived was called with
+// for one session (false when it was never called).
+func (f *fakeChat) isArchived(sessionID string) bool {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.archiveMarks[sessionID]
 }
 
 func (f *fakeChat) NewSession(string) (string, error) { return "new-1", nil }

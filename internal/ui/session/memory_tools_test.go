@@ -7,6 +7,7 @@ import (
 	"context"
 	"errors"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -293,4 +294,95 @@ func TestMemoryPaneEditUsesPencilIcon(t *testing.T) {
 	}
 	h.click(tester, "编辑记忆")
 	h.assertTexts(tester, "编辑记忆", "记忆内容", "保存", "取消")
+}
+
+// --- M-11: refresh the open Memory tab when the store changes out of band ----
+
+// versionedMemoryStore is a contracts.MemoryStore with the optional
+// MemoryVersioner half: the product store advances the counter on every
+// successful mutation so the visible tab can notice model-written entries.
+type versionedMemoryStore struct {
+	mu        sync.Mutex
+	items     []contracts.Memory
+	version   uint64
+	listCount int
+}
+
+func (s *versionedMemoryStore) List(context.Context) ([]contracts.Memory, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.listCount++
+	return append([]contracts.Memory(nil), s.items...), nil
+}
+
+func (s *versionedMemoryStore) Search(_ context.Context, query string) ([]contracts.Memory, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	found := make([]contracts.Memory, 0, len(s.items))
+	for _, memory := range s.items {
+		if strings.Contains(strings.ToLower(memory.Text), strings.ToLower(strings.TrimSpace(query))) {
+			found = append(found, memory)
+		}
+	}
+	return found, nil
+}
+
+func (s *versionedMemoryStore) Add(_ context.Context, memory contracts.Memory) (contracts.Memory, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if memory.ID == "" {
+		memory.ID = "mem-external"
+	}
+	s.items = append(s.items, memory)
+	s.version++
+	return memory, nil
+}
+
+func (s *versionedMemoryStore) Remove(_ context.Context, id string) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for index, memory := range s.items {
+		if memory.ID == id {
+			s.items = append(s.items[:index], s.items[index+1:]...)
+			s.version++
+			return true
+		}
+	}
+	return false
+}
+
+func (s *versionedMemoryStore) Version() uint64 {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.version
+}
+
+func TestMemoryTabRefreshesWhenStoreVersionAdvances(t *testing.T) {
+	store := &versionedMemoryStore{items: []contracts.Memory{
+		memoryAt("mem-1", "first memory", time.Unix(1700000000, 0)),
+	}}
+	h := newHarnessWithMemory(t, tidyChat(), store)
+	tester := h.tester()
+	openMemoryTab(t, h, tester)
+	h.assertTexts(tester, "first memory")
+
+	// The model's memory tool (or another surface) writes while the tab is
+	// visible: the next frame must notice the version change and re-read.
+	if _, err := store.Add(context.Background(), contracts.Memory{ID: "mem-2", Text: "added by the agent tool", Scope: "workspace"}); err != nil {
+		t.Fatalf("external Add: %v", err)
+	}
+	tester.Frame()
+	tester.Frame()
+	h.assertTexts(tester, "added by the agent tool")
+	if got := store.listCalls(); got < 2 {
+		t.Fatalf("memory List calls = %d, want a re-read after the version change", got)
+	}
+}
+
+// listCalls is the number of List calls seen by the versioned store (used to
+// prove the refresh actually re-read instead of rendering a cached list).
+func (s *versionedMemoryStore) listCalls() int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.listCount
 }

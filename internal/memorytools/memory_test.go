@@ -290,3 +290,61 @@ func TestUpdateDisplayScopeFallsBackToRigDefault(t *testing.T) {
 		t.Fatalf("update content = %q, want %q", result.Content, want)
 	}
 }
+
+// recordingStore records the scope passed to Add and reports a configured
+// default: the product wrapper must leave the scope empty when the model omits
+// it, so the durable store's configured default (FR-25) applies.
+type recordingStore struct {
+	*rigmemory.MemoryStore
+	mu    sync.Mutex
+	scope []string
+}
+
+func newRecordingStore() *recordingStore {
+	return &recordingStore{MemoryStore: rigmemory.NewMemoryStore()}
+}
+
+func (r *recordingStore) Add(ctx context.Context, memory contracts.Memory) (contracts.Memory, error) {
+	r.mu.Lock()
+	r.scope = append(r.scope, memory.Scope)
+	r.mu.Unlock()
+	if strings.TrimSpace(memory.Scope) == "" {
+		memory.Scope = contracts.MemoryScopeGlobal
+	}
+	return r.MemoryStore.Add(ctx, memory)
+}
+
+func (r *recordingStore) scopes() []string {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return append([]string(nil), r.scope...)
+}
+
+func TestAddWithoutScopeLeavesTheConfiguredDefaultToTheStore(t *testing.T) {
+	store := newRecordingStore()
+	tool := memorytools.Tools(store)[0]
+	result := invoke(t, tool, `{"action":"add","text":"uses the configured default"}`)
+	if result.IsError || !strings.Contains(result.Content, "scope=global") {
+		t.Fatalf("add without scope = %+v, want the store default in the result", result)
+	}
+	if got := store.scopes(); len(got) != 1 || got[0] != "" {
+		t.Fatalf("Add scope = %v, want the empty scope so the store applies Config.Scope", got)
+	}
+	// An explicit scope still reaches the store verbatim.
+	if result := invoke(t, tool, `{"action":"add","text":"explicit","scope":"workspace"}`); result.IsError {
+		t.Fatalf("add with scope = %+v", result)
+	}
+	if got := store.scopes(); len(got) != 2 || got[1] != "workspace" {
+		t.Fatalf("Add scopes = %v, want the explicit workspace scope", got)
+	}
+}
+
+func TestDescriptionIsDurableNotProcessLocal(t *testing.T) {
+	description := memorytools.Tools(rigmemory.NewMemoryStore())[0].Description()
+	if strings.Contains(description, "process-local") {
+		t.Fatalf("model-facing description still claims a process-local store:\n%s", description)
+	}
+	if !strings.Contains(description, "durable") {
+		t.Fatalf("model-facing description does not mention durability:\n%s", description)
+	}
+}

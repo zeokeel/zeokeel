@@ -134,17 +134,24 @@ func TestAgentsFileTruncatedAt32KiB(t *testing.T) {
 	workspace := &fakeWorkspace{}
 	svc, provider := newAgentsFileService(t, newFakeSettings(nil), workspace, logger)
 	system := runAndSystemPrompt(t, svc, provider, workspace, root)
-	const heading = "# 工作区指令（AGENTS.md）\n\n"
-	headingIndex := strings.Index(system, heading)
+	headingIndex := strings.Index(system, workspaceInstructionsHeading)
 	if headingIndex < 0 {
 		t.Fatalf("heading missing after truncation: %q", system)
 	}
-	content := system[headingIndex+len(heading):]
-	if len(content) > 32<<10 {
-		t.Fatalf("injected content length = %d, want <= %d", len(content), 32<<10)
+	fenceStart := strings.Index(system[headingIndex:], workspaceInstructionsOpen)
+	fenceEnd := strings.Index(system[headingIndex:], workspaceInstructionsClose)
+	if fenceStart < 0 || fenceEnd <= fenceStart {
+		t.Fatalf("workspace-instruction fence missing after truncation: %q", system[headingIndex:])
 	}
-	if !strings.HasPrefix(content, strings.Repeat("a", 1024)) {
-		t.Fatalf("content prefix lost: %q", content[:64])
+	injected := system[headingIndex+fenceStart+len(workspaceInstructionsOpen) : headingIndex+fenceEnd]
+	if !strings.Contains(injected, strings.Repeat("a", 1024)) {
+		t.Fatalf("content prefix lost: %q", injected[:64])
+	}
+	if !strings.Contains(injected, workspaceInstructionsTruncatedMarker) {
+		t.Fatalf("truncation marker missing from the injected block: %q", injected[len(injected)-80:])
+	}
+	if len(injected) > 32<<10+len(workspaceInstructionsTruncatedMarker)+8 {
+		t.Fatalf("injected content length = %d, want <= %d", len(injected), 32<<10+len(workspaceInstructionsTruncatedMarker)+8)
 	}
 	if !logger.contains("truncated") {
 		t.Fatalf("missing truncation warning: %v", logger.lines)

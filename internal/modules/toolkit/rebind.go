@@ -280,10 +280,17 @@ type rebindGroup struct {
 	mu      sync.Mutex
 	current *rootScoped
 	retired []*rootScoped
+	// overrides caches the per-run root builds: the agent stamps a run's tool
+	// calls with its session workspace root (contracts.WithWorkspaceRoot), so
+	// concurrent sessions in different projects never share the process-wide
+	// "current" build. A build is created once per root and released on module
+	// unload; unlike the current build it is never retired by a workspace
+	// switch (another session may still be running in that root).
+	overrides map[string]*rootScoped
 }
 
 func newRebindGroup(cfg Config, timeout time.Duration, rootOf func() string, logf func(string, ...any)) *rebindGroup {
-	return &rebindGroup{cfg: cfg, timeout: timeout, rootOf: rootOf, logf: logf}
+	return &rebindGroup{cfg: cfg, timeout: timeout, rootOf: rootOf, logf: logf, overrides: make(map[string]*rootScoped)}
 }
 
 // initial builds the tool set for the root that is active at activation time.
@@ -322,9 +329,32 @@ func (g *rebindGroup) forRoot() *rootScoped {
 	return next
 }
 
-// proxies wraps every root-scoped tool in a registry-visible proxy: the model
-// sees a stable tool name/description/schema, while invoke dispatches to the
-// build belonging to the workspace that is current at call time.
+// forRootValue returns the build for one explicit workspace root: the current
+// build when the roots match, a cached per-run build otherwise. Empty root
+// falls back to the current-workspace behavior.
+func (g *rebindGroup) forRootValue(root string) *rootScoped {
+	root = strings.TrimSpace(root)
+	if root == "" {
+		return g.forRoot()
+	}
+	g.mu.Lock()
+	if current := g.current; current != nil && current.root == root {
+		g.mu.Unlock()
+		return current
+	}
+	if scoped := g.overrides[root]; scoped != nil {
+		g.mu.Unlock()
+		return scoped
+	}
+	scoped := buildRootScoped(g.cfg, root, g.timeout)
+	g.overrides[root] = scoped
+	g.mu.Unlock()
+	if g.logf != nil {
+		g.logf("[toolkit] tool root bound to run workspace: %q", root)
+	}
+	return scoped
+}
+
 func (g *rebindGroup) proxies(scoped *rootScoped) []rig.Tool {
 	proxies := make([]rig.Tool, 0, len(scoped.tools))
 	for _, tool := range scoped.tools {
@@ -339,6 +369,10 @@ func (g *rebindGroup) proxies(scoped *rootScoped) []rig.Tool {
 func (g *rebindGroup) close() {
 	g.mu.Lock()
 	retired := append(g.retired, g.current)
+	for _, scoped := range g.overrides {
+		retired = append(retired, scoped)
+	}
+	g.overrides = nil
 	g.retired = nil
 	g.current = nil
 	g.mu.Unlock()
@@ -382,6 +416,9 @@ func (t *boundTool) PendingNotices() []string {
 }
 
 func (t *boundTool) Invoke(ctx context.Context, call rig.ToolCall) (rig.ToolResult, error) {
+	if root := contracts.WorkspaceRootFromContext(ctx); root != "" {
+		return invokeRootScoped(ctx, t.group.forRootValue(root), call)
+	}
 	return invokeRootScoped(ctx, t.group.forRoot(), call)
 }
 

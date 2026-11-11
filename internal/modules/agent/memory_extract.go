@@ -26,7 +26,23 @@ const (
 	memoryExtractMessageLimit = 20
 	// memoryExtractMessageRunes bounds one message in the prompt.
 	memoryExtractMessageRunes = 2000
+	// memoryExtractCandidateRunes hard-caps one extracted memory (M-07): the
+	// prompt asks for 200 characters, the code enforces it.
+	memoryExtractCandidateRunes = 200
 )
+
+// memorySecretValueMarkers are assignment-shaped credential markers: a value of
+// four or more characters after them is treated as a secret.
+var memorySecretValueMarkers = []string{
+	"password=", "passwd=", "api_key=", "apikey=",
+	"secret=", "token=", "authorization:",
+}
+
+// memorySecretPrefixMarkers are provider key prefixes: a token of eight or more
+// characters after them is treated as a secret.
+var memorySecretPrefixMarkers = []string{
+	"sk-", "akia", "ghp_", "xoxb-", "-----begin", "bearer ",
+}
 
 var _ contracts.MemoryExtractionService = (*service)(nil)
 
@@ -102,7 +118,7 @@ func (s *service) ExtractFromSession(ctx context.Context, sessionID string, max 
 	if err != nil {
 		return nil, err
 	}
-	existing, err := s.memoryStore.List(ctx)
+	existing, err := extractionMemories(ctx, s.memoryStore)
 	if err != nil {
 		return nil, fmt.Errorf("agent: list memories: %w", err)
 	}
@@ -112,7 +128,7 @@ func (s *service) ExtractFromSession(ctx context.Context, sessionID string, max 
 	}
 	added := make([]contracts.Memory, 0, len(candidates))
 	for _, candidate := range candidates {
-		candidate = strings.TrimSpace(candidate)
+		candidate = sanitizeExtractedMemory(candidate)
 		if candidate == "" {
 			continue
 		}
@@ -121,7 +137,9 @@ func (s *service) ExtractFromSession(ctx context.Context, sessionID string, max 
 			continue
 		}
 		seen[key] = true
-		stored, addErr := s.memoryStore.Add(ctx, contracts.Memory{Text: candidate, Scope: "global"})
+		// An empty scope lets the durable store apply Config.Scope (FR-25);
+		// hardcoding "global" here ignored that setting.
+		stored, addErr := s.memoryStore.Add(ctx, contracts.Memory{Text: candidate})
 		if addErr != nil {
 			return added, fmt.Errorf("agent: add memory: %w", addErr)
 		}
@@ -182,6 +200,77 @@ func parseExtractedMemories(raw string) ([]string, error) {
 		return nil, fmt.Errorf("agent: parse extracted memories: %w", err)
 	}
 	return payload.Memories, nil
+}
+
+// extractionMemories lists every known memory for deduplication. The management
+// ListAll half is used when available so a fact stored in another workspace is
+// still recognised as a duplicate instead of being re-added.
+func extractionMemories(ctx context.Context, store contracts.MemoryStore) ([]contracts.Memory, error) {
+	if allLister, ok := store.(contracts.MemoryAllLister); ok {
+		return allLister.ListAll(ctx)
+	}
+	return store.List(ctx)
+}
+
+// sanitizeExtractedMemory enforces the extraction contract on one candidate:
+// single-line text, no credential-looking content, bounded length. A dropped
+// candidate becomes "" (skipped by the caller).
+func sanitizeExtractedMemory(candidate string) string {
+	candidate = strings.Join(strings.Fields(strings.TrimSpace(candidate)), " ")
+	if candidate == "" || looksLikeSecret(candidate) {
+		return ""
+	}
+	return truncateRunes(candidate, memoryExtractCandidateRunes)
+}
+
+// looksLikeSecret reports whether text contains a credential-shaped marker with
+// an actual payload after it (or a long hex run, e.g. an API key without a
+// prefix). Conservative on purpose: a marker alone ("token=") is not enough.
+func looksLikeSecret(text string) bool {
+	lowered := strings.ToLower(text)
+	if containsMarkerPayload(lowered, memorySecretValueMarkers, 4) {
+		return true
+	}
+	if containsMarkerPayload(lowered, memorySecretPrefixMarkers, 8) {
+		return true
+	}
+	return hasLongHexRun(lowered)
+}
+
+// containsMarkerPayload reports whether lowered contains one marker followed by
+// at least minPayload non-space characters (a marker with no value is ignored).
+func containsMarkerPayload(lowered string, markers []string, minPayload int) bool {
+	for _, marker := range markers {
+		offset := 0
+		for {
+			found := strings.Index(lowered[offset:], marker)
+			if found < 0 {
+				break
+			}
+			position := offset + found
+			if len(strings.TrimSpace(lowered[position+len(marker):])) >= minPayload {
+				return true
+			}
+			offset = position + len(marker)
+		}
+	}
+	return false
+}
+
+// hasLongHexRun reports a 32+ characters hexadecimal run (an unprefixed key).
+func hasLongHexRun(text string) bool {
+	run := 0
+	for _, char := range text {
+		if (char >= '0' && char <= '9') || (char >= 'a' && char <= 'f') {
+			run++
+			if run >= 32 {
+				return true
+			}
+			continue
+		}
+		run = 0
+	}
+	return false
 }
 
 // normalizeMemoryText folds text for duplicate detection.

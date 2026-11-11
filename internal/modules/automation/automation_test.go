@@ -35,6 +35,17 @@ func (l *fakeLogger) Printf(format string, args ...any) {
 	l.mu.Unlock()
 }
 
+func (l *fakeLogger) contains(fragment string) bool {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	for _, line := range l.lines {
+		if strings.Contains(line, fragment) {
+			return true
+		}
+	}
+	return false
+}
+
 // chatCall is one recorded chat execution.
 type chatCall struct {
 	Title  string
@@ -271,12 +282,28 @@ func TestCreateListUpdateDeleteAndPersistence(t *testing.T) {
 		t.Fatalf("restored task = %+v", tasks[0])
 	}
 
-	// Corrupt registry is an activation error.
+	// FR-06: a corrupt registry is quarantined and the service starts empty.
 	if err := os.WriteFile(registryPath, []byte("{corrupt"), 0o600); err != nil {
 		t.Fatalf("write corrupt registry: %v", err)
 	}
-	if _, err := newService(dataDir, Config{}, &fakeLogger{}, chat, nil); err == nil {
-		t.Fatal("newService loaded a corrupt registry")
+	logger := &fakeLogger{}
+	recovered, err := newService(dataDir, Config{}, logger, chat, nil)
+	if err != nil {
+		t.Fatalf("newService(corrupt registry) = %v, want quarantine", err)
+	}
+	defer recovered.Close()
+	if tasks, listErr := recovered.List(ctx); listErr != nil || len(tasks) != 0 {
+		t.Fatalf("tasks after quarantine = %+v/%v, want empty", tasks, listErr)
+	}
+	if _, statErr := os.Stat(registryPath); !errors.Is(statErr, os.ErrNotExist) {
+		t.Fatalf("corrupt registry still at %s (err=%v)", registryPath, statErr)
+	}
+	backups, globErr := filepath.Glob(registryPath + ".corrupt-*")
+	if globErr != nil || len(backups) != 1 {
+		t.Fatalf("quarantine backups = %v/%v, want exactly one", backups, globErr)
+	}
+	if !logger.contains("corrupt") || !logger.contains("quarantine") {
+		t.Fatalf("recovery was not logged: %v", logger.lines)
 	}
 }
 

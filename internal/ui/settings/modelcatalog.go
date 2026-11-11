@@ -367,7 +367,7 @@ func buildCatalogSetDefaultField(c *ui.Context, t *design.Tokens, locale contrac
 // The list is the control surface itself: add/edit/remove apply at once. The
 // page footer Save owns only the prompt and runtime drafts.
 func buildModelCatalogSection(c *ui.Context, runtime contracts.UIRuntime, store contracts.SettingsService,
-	st *catalogState, locale contracts.LocaleService, fallbackBaseURL, fallbackAPIKey string) {
+	st *catalogState, locale contracts.LocaleService, fallbackBaseURL, fallbackAPIKey, effectiveModel string) {
 	t := design.Of(c)
 	models, ok := catalogModels(store)
 	ui.Column(c).FillWidth().Gap(design.Space3).Children(func() {
@@ -388,9 +388,18 @@ func buildModelCatalogSection(c *ui.Context, runtime contracts.UIRuntime, store 
 				}
 				if len(models) == 0 {
 					if ok {
-						uikit.EmptyState(c, localized(locale,
+						// The composer can still have an effective model: the
+						// assembly's default. Name it here so the page and the
+						// composer chip tell the same story (FR-26).
+						empty := localized(locale,
 							"还没有模型。添加后，对话输入框的模型菜单会展示它。",
-							"No models yet. Add one and the composer's model menu shows it."))
+							"No models yet. Add one and the composer's model menu shows it.")
+						if model := strings.TrimSpace(effectiveModel); model != "" {
+							empty += " " + localized(locale,
+								"当前默认模型：「"+model+"」来自装配，添加模型行后可覆盖。",
+								"The current default model, \""+model+"\", comes from the assembly; add a model row to override it.")
+						}
+						uikit.EmptyState(c, empty)
 					}
 				} else {
 					// The models are a collection: the official List keys the rows

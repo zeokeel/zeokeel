@@ -90,8 +90,14 @@ func TestChatModesGateTable(t *testing.T) {
 					t.Fatalf("mode %s: denied %q executed %d times, want 0", mode, name, got)
 				}
 				status, summary := lastToolStatus(t, session)
-				if status != "error" || !strings.Contains(summary, "denied") {
-					t.Fatalf("mode %s: denied %q status/summary = %q/%q, want error/denied",
+				// The runtime mode now also filters the model-visible tool schema
+				// (FR-16), so a call to a filtered tool is rejected by the loop as
+				// an unknown tool ("rig: tool not found") before the gate sees it.
+				// The gate itself still denies fail-closed for any surface that
+				// reaches it (covered by the agent package gate tests).
+				if status != "error" ||
+					(!strings.Contains(summary, "denied") && !strings.Contains(summary, "not found")) {
+					t.Fatalf("mode %s: denied %q status/summary = %q/%q, want error/denied-or-not-found",
 						mode, name, status, summary)
 				}
 			}

@@ -19,15 +19,17 @@ import (
 // tools plus the read-only/informational tools the audit found prompting.
 var workspaceAutoAllowedSample = []string{
 	"read_file", "write_file", "edit_file", "str_replace_editor", "list_dir", "glob", "grep",
-	"read_image", "working_directory", "memory", "skill", "skills", "settings_get",
+	"read_image", "working_directory", "memory", "skill", "skills",
 	"todo_write", "team_task_list", "team_task_get", "terminal_list",
 	"job_list", "job_output", "job_wait", "session_search", "session_event_trace",
 	"lsp_diagnostics",
 }
 
 // workspaceMustAskTools are the tools the workspace policy must still ask for.
+// settings_get asks as well: its payload can expose stored credentials, so it
+// goes through the approval flow (the backend then redacts secrets).
 var workspaceMustAskTools = []string{
-	"bash", "pwsh", "web_fetch", "web_search", "settings_set",
+	"bash", "pwsh", "web_fetch", "web_search", "settings_set", "settings_get",
 	"mcp__server__run", "unknown_tool",
 }
 
@@ -106,9 +108,10 @@ func TestGateWorkspaceKeepsInteractionToolsAllowed(t *testing.T) {
 }
 
 // TestSessionPermissionReadOnlyUsesReadOnlyList covers the per-session
-// read-only override: only contracts.ReadOnlyAutoAllowedTools are allowed
-// without consulting the approvals backend; workspace write tools and
-// leave-the-workspace tools fall through to it.
+// read-only override: it is a hard restriction, so only
+// contracts.ReadOnlyAutoAllowedTools run without approval and every other tool
+// is denied without consulting the global approvals policy (which could
+// auto-allow workspace writes).
 func TestSessionPermissionReadOnlyUsesReadOnlyList(t *testing.T) {
 	svc, _ := newSwitcherService(t)
 	sessionID, err := svc.NewSession("")
@@ -123,7 +126,7 @@ func TestSessionPermissionReadOnlyUsesReadOnlyList(t *testing.T) {
 
 	for _, tool := range []string{
 		"read_file", "list_dir", "glob", "grep", "read_image", "working_directory",
-		"settings_get", "job_list", "session_search", "lsp_diagnostics",
+		"job_list", "session_search", "lsp_diagnostics",
 	} {
 		if got := gateDecision(t, svc, sessionID, tool); got != rig.DecisionAllow {
 			t.Fatalf("read-only gate %q = %v, want allow without approval", tool, got)
@@ -133,14 +136,14 @@ func TestSessionPermissionReadOnlyUsesReadOnlyList(t *testing.T) {
 		t.Fatalf("read-only auto-allow tools requested approval: %v", asked)
 	}
 
-	wantAsked := []string{"write_file", "edit_file", "str_replace_editor", "bash", "web_fetch", "unknown_tool"}
-	for _, tool := range wantAsked {
+	wantDenied := []string{"write_file", "edit_file", "str_replace_editor", "bash", "web_fetch", "unknown_tool"}
+	for _, tool := range wantDenied {
 		if got := gateDecision(t, svc, sessionID, tool); got != rig.DecisionDeny {
-			t.Fatalf("read-only gate %q = %v, want the approvals backend's deny", tool, got)
+			t.Fatalf("read-only gate %q = %v, want deny", tool, got)
 		}
 	}
-	if asked := approvals.askedTools(); strings.Join(asked, ",") != strings.Join(wantAsked, ",") {
-		t.Fatalf("approval requests = %v, want %v", asked, wantAsked)
+	if asked := approvals.askedTools(); len(asked) != 0 {
+		t.Fatalf("read-only override consulted the global approvals policy: %v", asked)
 	}
 }
 

@@ -1075,7 +1075,7 @@ func buildWorkspaceTree(
 	})
 	if outline.Submitted() && state.treeRow >= 0 && state.treeRow < state.tree.Rows() {
 		if item := state.tree.Item(state.treeRow); !isWorkspaceTreeKey(item) {
-			openSession(chat, nav, runtime, item)
+			openSession(chat, nav, runtime, state, item)
 		}
 	}
 	// While the tree has no focus, keep the choice on the current session: a
@@ -1435,7 +1435,7 @@ func buildFlatSessionList(c *ui.Context, t *design.Tokens, chat contracts.ChatSe
 		})
 	})
 	if list.Submitted() && state.sessionRow >= 0 && state.sessionRow < len(sessions) {
-		openSession(chat, nav, runtime, sessions[state.sessionRow].ID)
+		openSession(chat, nav, runtime, state, sessions[state.sessionRow].ID)
 	}
 	// Without the list's focus, show the current session as the choice again:
 	// a cursor left elsewhere is not a conversation switch.
@@ -1718,7 +1718,7 @@ func buildSessionRow(c *ui.Context, t *design.Tokens, chat contracts.ChatService
 		if !active {
 			m.Separator()
 			if m.Item(state.T("设为当前", "Set as current")).Chosen() {
-				openSession(chat, nav, runtime, session.ID)
+				openSession(chat, nav, runtime, state, session.ID)
 			}
 		}
 	}
@@ -1752,7 +1752,7 @@ func buildSessionRow(c *ui.Context, t *design.Tokens, chat contracts.ChatService
 			if ev.Kind != ui.InputPointerUp || ev.Button != 0 {
 				return
 			}
-			openSession(chat, nav, runtime, session.ID)
+			openSession(chat, nav, runtime, state, session.ID)
 		})
 		title.Children(func() {
 			// Every conversation keeps the message glyph, also the current
@@ -1810,20 +1810,50 @@ func buildSessionRow(c *ui.Context, t *design.Tokens, chat contracts.ChatService
 	content.ContextMenu(menu)
 }
 
-// openSession activates a session and opens the session screen on the next
-// frame. The screen switch is queued because this frame's host-side native
-// Sidebar reconciliation would otherwise restore the previously selected
-// destination; an already active session is not set again.
+// openSession activates a session, makes its workspace current and opens the
+// session screen on the next frame. The screen switch is queued because this
+// frame's host-side native Sidebar reconciliation would otherwise restore the
+// previously selected destination; an already active session is not set again.
 func openSession(chat contracts.ChatService, nav contracts.Navigator,
-	runtime contracts.UIRuntime, sessionID string) {
+	runtime contracts.UIRuntime, state *paneState, sessionID string) {
 	if strings.TrimSpace(sessionID) == "" {
 		return
 	}
 	if chat.ActiveSession() != sessionID {
 		_ = chat.SetActiveSession(sessionID)
 	}
+	switchSessionWorkspace(chat, state, sessionID)
 	runtime.Post(func() { _ = nav.Push("session") })
 	runtime.Invalidate()
+}
+
+// switchSessionWorkspace makes the workspace a session belongs to current, so
+// the agent's file/shell tools and the Files inspector follow the open
+// conversation instead of whichever workspace the user last selected. It is
+// best effort: a session without a binding, a missing backend or a failing open
+// never blocks the conversation switch.
+func switchSessionWorkspace(chat contracts.ChatService, state *paneState, sessionID string) {
+	if state == nil {
+		return
+	}
+	workspace, ok := state.ctx.Get(contracts.KeyWorkspace)
+	if !ok || workspace == nil {
+		return
+	}
+	target := ""
+	for _, info := range chat.Sessions() {
+		if info.ID == sessionID {
+			target = strings.TrimSpace(info.WorkspaceID)
+			break
+		}
+	}
+	if target == "" {
+		return
+	}
+	if current, has, err := workspace.Current(context.Background()); err == nil && has && current.ID == target {
+		return
+	}
+	_, _ = workspace.Open(context.Background(), target)
 }
 
 // buildFooter is the docked sidebar footer from the old shell: the settings

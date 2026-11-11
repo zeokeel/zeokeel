@@ -88,11 +88,15 @@ func (r *dynamicTeamRunner) Start(ctx context.Context, spec rig.SubagentSpec) (r
 	// (its catalog row's BaseURL/APIKey), falling back to the parent session's
 	// connection when the model list has no such row.
 	cfg = r.service.configForModelOverride(cfg, spec.Model)
-	childTools := r.service.registry.Tools()
+	// Members start from the same model-visible surface as their parent run
+	// (disabled tools, preset allowlist and runtime mode whitelist all apply);
+	// the orchestration tools are then removed so a member cannot recurse.
+	childTools := withoutToolNames(r.service.toolsForSession(active), teamExcludedTools())
 	// Team members get the same complete prompt as a normal run, with guidance
-	// for exactly the tool surface the runner hands them (orchestration tools
-	// are excluded).
-	cfg.SystemPrompt = r.service.buildRunSystemPrompt(ctx, active, cfg, toolNameSet(childTools, teamExcludedTools()...))
+	// and mode line rendered for exactly the surface they receive. Their tools
+	// are scoped to the parent session's workspace root (same as subagents).
+	workspaceRoot := r.service.sessionWorkspaceRoot(active)
+	cfg.SystemPrompt = r.service.buildRunSystemPrompt(ctx, active, cfg, toolNameSet(childTools), workspaceRoot)
 	provider, err := r.service.newProvider(cfg, r.service.thinkingParamsForSession(active, cfg.Model))
 	if err != nil {
 		return nil, fmt.Errorf("agent: team member %q: create provider: %w", strings.TrimSpace(spec.Name), err)
@@ -102,7 +106,7 @@ func (r *dynamicTeamRunner) Start(ctx context.Context, spec rig.SubagentSpec) (r
 		Model:         cfg.Model,
 		SystemPrompt:  cfg.SystemPrompt,
 		MaxIterations: cfg.MaxIterations,
-		Tools:         childTools,
+		Tools:         withWorkspaceRoot(childTools, workspaceRoot),
 		Gate:          r.service.gate(active),
 		History:       r.service.historyView(),
 		Logger:        r.service.logger,

@@ -7,6 +7,7 @@ package toolkit
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"io/fs"
 	"net/url"
@@ -14,27 +15,50 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"time"
 
 	cordis "github.com/zeokeel/zeokeel-kernel"
 	rig "github.com/zeokeel/zeokeel-rig"
+	"github.com/zeokeel/zeokeel-rig/sandbox"
 	"github.com/zeokeel/zeokeel-rig/tools/lsp"
 
 	"github.com/zeokeel/zeokeel/internal/contracts"
 )
 
-// lspSession is the started-server handle the toolkit needs: the rig tool set
-// for its client and the close hook. Tests inject it through lspStartFunc.
+// lspSession is the started-server handle the toolkit needs: the protocol
+// handshake, the rig tool set for its client and the close hook. Tests inject it
+// through lspStartFunc.
 type lspSession interface {
+	// Initialize performs the LSP initialize/initialized handshake. A real rig
+	// client requires it before any document request (rig tools/lsp client.go).
+	Initialize(ctx context.Context) error
 	Tools(filePathToURI func(string) (string, error)) []rig.Tool
 	Close() error
 }
 
-// lspClientSession adapts one rig *lsp.Client to lspSession.
-type lspClientSession struct{ client *lsp.Client }
+// lspClientSession adapts one rig *lsp.Client to lspSession. policy is the
+// sandbox path policy installed on the rig tools as a second defense line (the
+// toolkit also rewrites/validates paths in sandboxedLSPTool).
+type lspClientSession struct {
+	client *lsp.Client
+	policy *sandbox.Policy
+}
+
+// Initialize implements lspSession.
+func (s lspClientSession) Initialize(ctx context.Context) error {
+	return s.client.Initialize(ctx)
+}
 
 // Tools implements lspSession.
 func (s lspClientSession) Tools(filePathToURI func(string) (string, error)) []rig.Tool {
-	return lsp.Tools(s.client, filePathToURI)
+	options := make([]lsp.ToolOption, 0, 1)
+	if s.policy != nil {
+		options = append(options, lsp.WithPathPolicy(func(path string) error {
+			_, err := s.policy.ResolvePath(path)
+			return err
+		}))
+	}
+	return lsp.Tools(s.client, filePathToURI, options...)
 }
 
 // Close implements lspSession.
@@ -42,13 +66,17 @@ func (s lspClientSession) Close() error { return s.client.Close() }
 
 // lspStartFunc starts the language server. It is a package seam so tests can
 // exercise the registration/ownership paths without a real server process.
-var lspStartFunc = func(ctx context.Context, cfg lsp.Config) (lspSession, error) {
+var lspStartFunc = func(ctx context.Context, cfg lsp.Config, policy *sandbox.Policy) (lspSession, error) {
 	client, err := lsp.Start(ctx, cfg)
 	if err != nil {
 		return nil, err
 	}
-	return lspClientSession{client: client}, nil
+	return lspClientSession{client: client, policy: policy}, nil
 }
+
+// lspInitializeTimeout bounds the initialize handshake so a broken language
+// server cannot stall activation.
+const lspInitializeTimeout = 15 * time.Second
 
 // startLSPTools reads the optional multi-server LSP settings rows (lsp.servers +
 // lsp.active, falling back to the legacy lsp.server row), starts the ACTIVE
@@ -61,6 +89,7 @@ func startLSPTools(
 	settings contracts.SettingsService,
 	hasSettings bool,
 	existing []rig.Tool,
+	sandboxPolicy *sandbox.Policy,
 ) ([]rig.Tool, func()) {
 	noop := func() {}
 	if !hasSettings || settings == nil {
@@ -110,9 +139,23 @@ func startLSPTools(
 		Dir:        cfg.Dir,
 		RootURI:    cfg.RootURI,
 		LanguageID: cfg.LanguageID,
-	})
+	}, sandboxPolicy)
 	if err != nil {
 		logf("toolkit: lsp: start %q: %v", cfg.Command, err)
+		return nil, noop
+	}
+	// The rig client only starts the protocol pump: the caller must run the
+	// initialize handshake before any document request can succeed. A server
+	// that never completes it is a degraded optional feature, not an activation
+	// failure: warn, close and register no tools.
+	initCtx, cancelInit := context.WithTimeout(ctx, lspInitializeTimeout)
+	initErr := session.Initialize(initCtx)
+	cancelInit()
+	if initErr != nil {
+		logf("toolkit: lsp: initialize %q: %v", cfg.Command, initErr)
+		if closeErr := session.Close(); closeErr != nil {
+			logf("toolkit: lsp: close after failed initialize: %v", closeErr)
+		}
 		return nil, noop
 	}
 
@@ -134,7 +177,11 @@ func startLSPTools(
 			continue
 		}
 		names[name] = true
-		kept = append(kept, tool)
+		// The rig LSP tools read the model-provided path directly. The wrapper
+		// applies the sandbox policy (roots + deniedGlobs) and resolves a
+		// relative path against the workspace root before the rig tool opens
+		// it, so lsp_* cannot leave the sandbox and relative paths work.
+		kept = append(kept, &sandboxedLSPTool{inner: tool, policy: sandboxPolicy, logf: logf})
 	}
 
 	var once sync.Once
@@ -223,4 +270,70 @@ func filePathToURI(path string) (string, error) {
 		return "", err
 	}
 	return (&url.URL{Scheme: "file", Path: filepath.ToSlash(absolute)}).String(), nil
+}
+
+// sandboxedLSPTool is the product-side registry entry of one rig lsp_* tool. It
+// validates the model-provided "path" argument through the sandbox policy and
+// rewrites it to the resolved absolute path (so relative paths resolve against
+// the workspace root, not the process working directory) before delegating.
+type sandboxedLSPTool struct {
+	inner  rig.Tool
+	policy *sandbox.Policy
+	logf   func(string, ...any)
+}
+
+var _ rig.Tool = (*sandboxedLSPTool)(nil)
+
+// Name implements rig.Tool.
+func (t *sandboxedLSPTool) Name() string { return t.inner.Name() }
+
+// Description implements rig.Tool.
+func (t *sandboxedLSPTool) Description() string { return t.inner.Description() }
+
+// Schema implements rig.Tool.
+func (t *sandboxedLSPTool) Schema() map[string]any { return t.inner.Schema() }
+
+// Invoke implements rig.Tool: the model path is resolved through the sandbox
+// policy first, so an outside-root or denied-glob path is rejected before any
+// file is opened, and the inner rig tool receives an absolute path.
+func (t *sandboxedLSPTool) Invoke(ctx context.Context, call rig.ToolCall) (rig.ToolResult, error) {
+	rewritten, err := t.rewritePath(call.Arguments)
+	if err != nil {
+		return rig.ToolResult{
+			Content: t.inner.Name() + ": path blocked by policy: " + err.Error(),
+			IsError: true,
+		}, nil
+	}
+	call.Arguments = rewritten
+	return t.inner.Invoke(ctx, call)
+}
+
+// rewritePath validates and absolutizes the "path" argument (when present).
+func (t *sandboxedLSPTool) rewritePath(arguments string) (string, error) {
+	trimmed := strings.TrimSpace(arguments)
+	if trimmed == "" || trimmed == "null" || t.policy == nil {
+		return arguments, nil
+	}
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal([]byte(trimmed), &fields); err != nil {
+		return arguments, nil
+	}
+	raw, ok := fields["path"]
+	if !ok {
+		return arguments, nil
+	}
+	var path string
+	if err := json.Unmarshal(raw, &path); err != nil {
+		return arguments, nil
+	}
+	resolved, err := t.policy.ResolvePath(path)
+	if err != nil {
+		return "", err
+	}
+	fields["path"], _ = json.Marshal(resolved)
+	encoded, err := json.Marshal(fields)
+	if err != nil {
+		return arguments, nil
+	}
+	return string(encoded), nil
 }

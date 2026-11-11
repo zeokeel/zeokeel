@@ -113,6 +113,15 @@ type ApprovalDialogOptions struct {
 	// Locale localizes the component's built-in copy (impact statement, hints,
 	// queue counter); nil falls back to the product's Chinese copy.
 	Locale contracts.LocaleService
+	// Origin is the localized provenance line of the requesting conversation
+	// ("来自会话：修复登录 · 自动化"); empty hides the row (backends without
+	// session provenance keep the previous card).
+	Origin string
+	// OpenSessionLabel names the action that opens the requesting conversation;
+	// OpenSession runs it. OpenSession nil hides the action (the request belongs
+	// to the conversation on screen, or the backend cannot switch sessions).
+	OpenSessionLabel string
+	OpenSession      func()
 }
 
 // ApprovalDialog renders the oldest pending approval request: the inline card
@@ -206,6 +215,7 @@ func approvalInlineCard(c *ui.Context, o ApprovalDialogOptions, labels ApprovalL
 				return el.Background(t.BgRaised).Padding(design.Space3).
 					Radius(design.RadiusXS, design.RadiusXS, design.RadiusLG, design.RadiusLG)
 			}).Children(func() {
+			approvalOriginRow(c, t, o)
 			approvalImpactLine(c, t, o.Locale)
 			approvalSummarySection(c, t, o, summary, arguments)
 			approvalArgumentsSection(c, t, o, labels, request, arguments, argsOpen)
@@ -281,6 +291,7 @@ func approvalRequestBody(c *ui.Context, o ApprovalDialogOptions, labels Approval
 			design.Apply(ui.Text(c, labels.ToolLabel), t.TextMuted(design.TypeXS))
 			design.Apply(ui.Badge(c, toolName), t.Badge()).Tooltip(request.Tool)
 		})
+		approvalOriginRow(c, t, o)
 		approvalImpactLine(c, t, o.Locale)
 		approvalSummarySection(c, t, o, summary, arguments)
 		approvalArgumentsSection(c, t, o, labels, request, arguments, argsOpen)
@@ -314,6 +325,35 @@ func approvalRequestBody(c *ui.Context, o ApprovalDialogOptions, labels Approval
 			"Esc = 拒绝本次调用 · 点击或 Tab 选择操作（无默认操作）",
 			"Esc = deny this call · click or Tab to choose an action (no default action)")),
 			t.TextMuted(design.TypeXXS))
+	})
+}
+
+// approvalOriginRow names where the request comes from (FR-29): the requesting
+// conversation's title and its provenance, plus the action that opens that
+// conversation when the request belongs to another one. A request without
+// provenance keeps the previous card (no row).
+func approvalOriginRow(c *ui.Context, t *design.Tokens, o ApprovalDialogOptions) {
+	origin := strings.TrimSpace(o.Origin)
+	if origin == "" {
+		return
+	}
+	ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(design.Space2).Children(func() {
+		ui.Icon(c, icons.Message()).Size(design.Space3, design.Space3).
+			TextColor(t.LabelTertiary)
+		design.Apply(ui.Text(c, origin), t.Font(design.TypeXXS)).
+			TextColor(t.LabelSecondary).Grow(1).MaxLines(1).Ellipsis("…")
+		if o.OpenSession == nil {
+			return
+		}
+		label := strings.TrimSpace(o.OpenSessionLabel)
+		if label == "" {
+			label = T(o.Locale, "打开该会话", "Open conversation")
+		}
+		button := design.Apply(ui.Button(c, label), t.SecondaryButton()).
+			Height(design.RowCompactHeight).Shrink(0)
+		if button.Clicked() {
+			o.OpenSession()
+		}
 	})
 }
 

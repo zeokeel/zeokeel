@@ -16,10 +16,12 @@ import (
 )
 
 type fakeMemoryStore struct {
-	mu       sync.Mutex
-	memories []contracts.Memory
-	addErr   error
-	added    []string
+	mu        sync.Mutex
+	memories  []contracts.Memory
+	addErr    error
+	added     []string
+	scopes    []string
+	failAfter int
 }
 
 func (m *fakeMemoryStore) List(context.Context) ([]contracts.Memory, error) {
@@ -33,7 +35,14 @@ func (m *fakeMemoryStore) Add(_ context.Context, memory contracts.Memory) (contr
 	if m.addErr != nil {
 		return contracts.Memory{}, m.addErr
 	}
+	if m.failAfter > 0 && len(m.added) >= m.failAfter {
+		return contracts.Memory{}, errors.New("disk full")
+	}
 	m.added = append(m.added, memory.Text)
+	m.scopes = append(m.scopes, memory.Scope)
+	if strings.TrimSpace(memory.Scope) == "" {
+		memory.Scope = "global"
+	}
 	memory.ID = "mem-1"
 	m.memories = append(m.memories, memory)
 	return memory, nil
@@ -129,8 +138,11 @@ func TestMemoryExtractSuccessAndDedup(t *testing.T) {
 	if len(store.added) != 2 || store.added[0] != "User likes Go" || store.added[1] != "New fact" {
 		t.Fatalf("store adds = %v", store.added)
 	}
+	if len(store.scopes) != 2 || store.scopes[0] != "" || store.scopes[1] != "" {
+		t.Fatalf("Add scopes = %v, want empty scopes so the durable store applies Config.Scope (FR-25/M-07)", store.scopes)
+	}
 	if added[0].Scope != "global" {
-		t.Fatalf("scope = %q", added[0].Scope)
+		t.Fatalf("scope = %q, want the store's default", added[0].Scope)
 	}
 }
 
@@ -172,5 +184,50 @@ func TestMemoryExtractMaxCap(t *testing.T) {
 	added, err := svc.ExtractFromSession(context.Background(), sessionID, 99)
 	if err != nil || len(added) != 5 {
 		t.Fatalf("capped extraction = %d, %v", len(added), err)
+	}
+}
+
+// TestMemoryExtractDropsSecretsAndTruncatesCandidates covers M-07: candidates
+// are hard-validated (secrets dropped, text bounded) instead of trusting the
+// model to follow the prompt.
+func TestMemoryExtractDropsSecretsAndTruncatesCandidates(t *testing.T) {
+	long := strings.Repeat("长", 300)
+	payload := `{"memories":["password= hunter2","sk-live-abcdefghijklmnop","normal preference",%q]}`
+	store := &fakeMemoryStore{}
+	provider := &extractionProvider{chunks: []string{strings.ReplaceAll(payload, "%q", `"`+long+`"`)}}
+	svc, sessionID := newExtractService(t, enabledExtractSettings(), store, provider)
+	added, err := svc.ExtractFromSession(context.Background(), sessionID, 10)
+	if err != nil {
+		t.Fatalf("ExtractFromSession: %v", err)
+	}
+	if len(added) != 2 {
+		t.Fatalf("added = %d entries (%v), want the normal one and the truncated one", len(added), store.added)
+	}
+	if added[0].Text != "normal preference" {
+		t.Fatalf("first kept candidate = %q", added[0].Text)
+	}
+	if runes := []rune(added[1].Text); len(runes) != 200 {
+		t.Fatalf("long candidate runes = %d, want 200", len(runes))
+	}
+	for _, text := range store.added {
+		if strings.Contains(text, "hunter2") || strings.Contains(text, "sk-live") {
+			t.Fatalf("secret survived extraction: %q", text)
+		}
+	}
+}
+
+// TestMemoryExtractPartialAddFailureKeepsWrittenEntries covers M-06: entries
+// written before the failure are returned together with the error instead of
+// being collapsed into "nothing worked".
+func TestMemoryExtractPartialAddFailureKeepsWrittenEntries(t *testing.T) {
+	store := &fakeMemoryStore{failAfter: 1}
+	provider := &extractionProvider{chunks: []string{`{"memories":["first fact","second fact"]}`}}
+	svc, sessionID := newExtractService(t, enabledExtractSettings(), store, provider)
+	added, err := svc.ExtractFromSession(context.Background(), sessionID, 5)
+	if err == nil {
+		t.Fatal("partial failure returned no error")
+	}
+	if len(added) != 1 || added[0].Text != "first fact" {
+		t.Fatalf("added = %+v, want the one persisted entry returned with the error", added)
 	}
 }

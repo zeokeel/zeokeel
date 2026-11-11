@@ -24,8 +24,10 @@ import (
 	"github.com/zeokeel/zeokeel/internal/modules/toolkit"
 )
 
-// lspSessionAlias mirrors toolkit.lspSession.
+// lspSessionAlias mirrors toolkit.lspSession. The Initialize handshake is part
+// of the contract: the toolkit refuses to register a server's tools before it.
 type lspSessionAlias interface {
+	Initialize(ctx context.Context) error
 	Tools(filePathToURI func(string) (string, error)) []rig.Tool
 	Close() error
 }
@@ -38,9 +40,16 @@ var toolkitLSPStartFunc func(ctx context.Context, cfg lsp.Config) (lspSessionAli
 
 // lspFakeSession is the fake started server.
 type lspFakeSession struct {
-	tools    []rig.Tool
-	closed   atomic.Int32
-	closeErr error
+	tools      []rig.Tool
+	closed     atomic.Int32
+	closeErr   error
+	initErr    error
+	initialize atomic.Int32
+}
+
+func (s *lspFakeSession) Initialize(context.Context) error {
+	s.initialize.Add(1)
+	return s.initErr
 }
 
 func (s *lspFakeSession) Tools(func(string) (string, error)) []rig.Tool { return s.tools }

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"sync"
 
 	"github.com/egoist/mygo/ui"
 
@@ -25,12 +26,39 @@ func normalizeMemoryText(text string) string {
 // never touches the store while nothing changed.
 func requestMemoryRefresh(st *state) { st.memoryRefresh = true }
 
+// memoryVersionSeen remembers the last store version rendered per session state.
+// It lives outside the session state struct because the version bookkeeping is
+// local to this file (and the state struct is owned by another surface batch).
+var memoryVersionSeen sync.Map // *state -> uint64
+
+// refreshMemoryOnStoreChange notices entries written out of band (the model's
+// memory tool, the settings page, another window) while the Memory tab is
+// visible: the durable store advances a version counter on every mutation, so a
+// changed version only costs one re-read on the next frame (M-11).
+func refreshMemoryOnStoreChange(runtime contracts.UIRuntime, store contracts.MemoryStore, st *state) {
+	versioner, ok := store.(contracts.MemoryVersioner)
+	if !ok {
+		return
+	}
+	version := versioner.Version()
+	previous, seen := memoryVersionSeen.Load(st)
+	memoryVersionSeen.Store(st, version)
+	if !seen || previous.(uint64) == version {
+		return
+	}
+	requestMemoryRefresh(st)
+	runtime.Invalidate()
+}
+
 // buildMemoryTools is the memory management row: the entry count, the tidy
 // action and the clear-all action. Both are destructive, so both confirm in a
 // native AlertDialog first (see buildMemoryConfirmDialog) and report their
 // outcome as a transient toast, never a resident badge.
 func buildMemoryTools(c *ui.Context, t *design.Tokens, runtime contracts.UIRuntime,
 	store contracts.MemoryStore, st *state, count int) {
+	// A store mutation that happened outside this tab (model tool, settings page)
+	// is picked up on the next frame instead of waiting for a tab re-entry.
+	refreshMemoryOnStoreChange(runtime, store, st)
 	ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(design.Space2).Children(func() {
 		design.Apply(ui.Text(c, st.tr(fmt.Sprintf("%d 条记忆", count), fmt.Sprintf("%d memories", count))),
 			t.Font(design.TypeXXS)).TextColor(t.LabelTertiary).Grow(1)

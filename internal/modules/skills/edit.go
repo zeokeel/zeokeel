@@ -141,12 +141,51 @@ func (s *service) UpdateSkill(ctx context.Context, name string, draft contracts.
 	} else if fileInfo.Mode()&os.ModeSymlink != 0 {
 		return contracts.Skill{}, fmt.Errorf("skill %q is a symlink; refusing to update it", targetName)
 	}
-	content := fmt.Sprintf("---\nname: %s\ndescription: %s\n---\n\n%s", targetName, description, body)
+	// S-04: keep every unknown frontmatter key (allowed-tools, license, …) when
+	// the product rewrites the file; only name/description/body are managed here.
+	existingContent, err := os.ReadFile(path)
+	if err != nil {
+		return contracts.Skill{}, fmt.Errorf("read %s: %w", path, err)
+	}
+	content := rewriteSkillDocument(string(existingContent), targetName, description, body)
 	if err := writeSkillFileAtomic(path, content); err != nil {
 		return contracts.Skill{}, err
 	}
 	s.logger.Printf("%s: updated skill %q at %s", ModuleID, targetName, path)
 	return contracts.Skill{Name: targetName, Description: description, Path: path, Body: body}, nil
+}
+
+// rewriteSkillDocument rewrites one SKILL.md preserving the frontmatter lines
+// this editor does not manage (S-04): the name/description lines are replaced in
+// place, unknown keys keep their raw text and order, missing name/description
+// lines are added.
+func rewriteSkillDocument(existing, name, description, body string) string {
+	pairs, _ := splitFrontmatter(existing)
+	lines := make([]string, 0, len(pairs)+2)
+	haveName, haveDescription := false, false
+	for _, pair := range pairs {
+		switch pair.key {
+		case "name":
+			lines = append(lines, "name: "+name)
+			haveName = true
+		case "description":
+			if description != "" {
+				lines = append(lines, "description: "+description)
+			} else {
+				lines = append(lines, "description:")
+			}
+			haveDescription = true
+		default:
+			lines = append(lines, pair.raw)
+		}
+	}
+	if !haveName {
+		lines = append([]string{"name: " + name}, lines...)
+	}
+	if !haveDescription {
+		lines = append(lines, "description: "+description)
+	}
+	return "---\n" + strings.Join(lines, "\n") + "\n---\n\n" + body
 }
 
 // writeSkillFileAtomic writes content to a temporary file in the target
@@ -177,7 +216,19 @@ func writeSkillFileAtomic(path, content string) error {
 		cleanup()
 		return fmt.Errorf("replace skill file: %w", err)
 	}
+	syncDir(filepath.Dir(path))
 	return nil
+}
+
+// syncDir fsyncs a directory so a completed rename survives a power loss (best
+// effort: some platforms/filesystems cannot sync directories).
+func syncDir(directory string) {
+	handle, err := os.Open(directory)
+	if err != nil {
+		return
+	}
+	_ = handle.Sync()
+	_ = handle.Close()
 }
 
 // DeleteSkill implements contracts.SkillsEditor: it deletes one skill directory

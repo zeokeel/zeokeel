@@ -321,12 +321,21 @@ func TestRegenerateTruncatesToolMessages(t *testing.T) {
 		t.Fatalf("ReplaceHistory calls = %d, want 1", store.replaceCount())
 	}
 	written := store.lastHistory()
-	if len(written) != 3 || written[0].Role != rig.RoleUser || written[1].Role != rig.RoleAssistant ||
-		written[2].Role != rig.RoleUser {
-		t.Fatalf("ReplaceHistory messages = %+v, want history through the retried user", written)
+	if len(written) != 2 || written[0].Role != rig.RoleUser || written[1].Role != rig.RoleAssistant {
+		t.Fatalf("ReplaceHistory messages = %+v, want the pre-user history", written)
 	}
-	if text := messageText(written[2]); text != "second" {
-		t.Fatalf("ReplaceHistory last user = %q, want second", text)
+	if text := messageText(written[0]); text != "first" {
+		t.Fatalf("ReplaceHistory first user = %q, want first", text)
+	}
+	// The retried user turn is re-appended by the run itself (the same input
+	// path Send uses), so the durable history still ends with the retried
+	// exchange exactly once.
+	final, err := store.History().Load(context.Background(), id)
+	if err != nil {
+		t.Fatalf("load final history: %v", err)
+	}
+	if len(final) != 4 || messageText(final[2]) != "second" || messageText(final[3]) != "answer-1" {
+		t.Fatalf("final durable history = %+v, want first turn + retried exchange", final)
 	}
 }
 

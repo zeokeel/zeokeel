@@ -45,7 +45,7 @@ func TestConsolidateExpiredAndBoundary(t *testing.T) {
 		memoryAt("boundary", "exactly at cutoff", now.Add(-time.Hour)),
 		memoryAt("fresh", "fresh", now.Add(-30*time.Minute)),
 	)
-	report, err := store.consolidate(context.Background(), contracts.MemoryPolicy{MaxAge: time.Hour}, now)
+	report, err := store.consolidate(contracts.MemoryPolicy{MaxAge: time.Hour}, now)
 	if err != nil {
 		t.Fatalf("consolidate: %v", err)
 	}
@@ -75,7 +75,7 @@ func TestConsolidateOverCapKeepsNewest(t *testing.T) {
 		memoryAt("four", "four", now.Add(-2*time.Hour)),
 		memoryAt("five", "five", now.Add(-time.Hour)),
 	)
-	report, err := store.consolidate(context.Background(), contracts.MemoryPolicy{MaxEntries: 2}, now)
+	report, err := store.consolidate(contracts.MemoryPolicy{MaxEntries: 2}, now)
 	if err != nil {
 		t.Fatalf("consolidate: %v", err)
 	}
@@ -97,8 +97,7 @@ func TestConsolidateCombinedExpiryAndCap(t *testing.T) {
 		memoryAt("kept-1", "c", now.Add(-2*time.Hour)),
 		memoryAt("kept-2", "d", now.Add(-time.Hour)),
 	)
-	report, err := store.consolidate(context.Background(),
-		contracts.MemoryPolicy{MaxEntries: 1, MaxAge: 7 * 24 * time.Hour}, now)
+	report, err := store.consolidate(contracts.MemoryPolicy{MaxEntries: 1, MaxAge: 7 * 24 * time.Hour}, now)
 	if err != nil {
 		t.Fatalf("consolidate: %v", err)
 	}
@@ -114,7 +113,7 @@ func TestConsolidateCombinedExpiryAndCap(t *testing.T) {
 func TestConsolidateUnlimitedAndEmpty(t *testing.T) {
 	store := newConsolidationStore(t)
 	now := time.Date(2026, 11, 8, 12, 0, 0, 0, time.UTC)
-	report, err := store.consolidate(context.Background(), contracts.MemoryPolicy{}, now)
+	report, err := store.consolidate(contracts.MemoryPolicy{}, now)
 	if err != nil || report != (contracts.MemoryConsolidationReport{}) {
 		t.Fatalf("empty report = %+v/%v, want zero", report, err)
 	}
@@ -122,7 +121,7 @@ func TestConsolidateUnlimitedAndEmpty(t *testing.T) {
 		memoryAt("old", "old", now.Add(-100*24*time.Hour)),
 		memoryAt("new", "new", now),
 	)
-	report, err = store.consolidate(context.Background(), contracts.MemoryPolicy{}, now)
+	report, err = store.consolidate(contracts.MemoryPolicy{}, now)
 	if err != nil {
 		t.Fatalf("unlimited consolidate: %v", err)
 	}
@@ -130,7 +129,7 @@ func TestConsolidateUnlimitedAndEmpty(t *testing.T) {
 		t.Fatalf("unlimited report = %+v, want remaining 2 only", report)
 	}
 	// A nil context behaves like the background context.
-	if _, err := store.consolidate(nil, contracts.MemoryPolicy{}, now); err != nil {
+	if _, err := store.consolidate(contracts.MemoryPolicy{}, now); err != nil {
 		t.Fatalf("nil ctx consolidate: %v", err)
 	}
 }
@@ -143,9 +142,9 @@ func TestConsolidateRemoveFailureReturnsError(t *testing.T) {
 	// entry cannot be deleted.
 	directory := t.TempDir()
 	store.path = directory
-	report, err := store.consolidate(context.Background(), contracts.MemoryPolicy{MaxAge: time.Hour}, now)
-	if err == nil || !strings.Contains(err.Error(), "could not be removed") {
-		t.Fatalf("consolidate error = %v, want a readable removal failure", err)
+	report, err := store.consolidate(contracts.MemoryPolicy{MaxAge: time.Hour}, now)
+	if err == nil || !strings.Contains(err.Error(), "consolidate") {
+		t.Fatalf("consolidate error = %v, want a readable persistence failure", err)
 	}
 	if report.Remaining != 1 {
 		t.Fatalf("failure report = %+v, want remaining 1", report)

@@ -36,17 +36,21 @@ type searchState struct {
 func newSearchState() *searchState { return &searchState{} }
 
 // buildSearchPage renders the web-search backend settings: endpoint (an
-// http/https URL; empty disables web_search), the Bearer API key and the save
+// http/https URL; empty means unconfigured), the Bearer API key and the save
 // action with its status. The settings store is looked up lazily so the page
 // degrades to an explicit empty state without one.
+//
+// The copy states the actual behavior: the web_search tool stays registered
+// even without an endpoint (a call then reports the missing backend), so the
+// page must not promise that an empty endpoint disables the tool (PM-15).
 func buildSearchPage(c *ui.Context, kctx cordis.Context, st *searchState, locale contracts.LocaleService) {
 	t := design.Of(c)
 	store, hasStore := kctx.Get(contracts.KeySettings)
 
 	ui.Column(c).FillWidth().Gap(design.Space4).Children(func() {
 		uikit.PageHeader(c, localized(locale, SearchPageTitle, "Search"), localized(locale,
-			"web_search 工具调用的搜索后端；留空则禁用 web_search。",
-			"Search backend used by the web_search tool; leave the endpoint blank to disable web_search."))
+			"web_search 工具调用的搜索后端；留空表示未配置，工具调用时会提示缺少搜索后端。",
+			"Search backend used by the web_search tool; leaving it empty means unconfigured — a web_search call then reports the missing backend."))
 		if !hasStore || store == nil {
 			uikit.Section(c, localized(locale, "设置存储未启用", "Settings store not enabled"), func(*ui.Context) {
 				uikit.EmptyState(c, localized(locale,
@@ -80,8 +84,8 @@ func buildSearchPage(c *ui.Context, kctx cordis.Context, st *searchState, locale
 					Label(inputLabel(locale, localized(locale, "搜索端点", "Search endpoint"))).
 					Placeholder("https://search.example.com/search").FillWidth()
 			}).Description(localized(locale,
-				"接收查询并返回结果的 http(s) 端点；留空禁用。",
-				"The http(s) endpoint that receives queries and returns results; empty disables it."))
+				"接收查询并返回结果的 http(s) 端点；留空表示未配置（模型调用 web_search 时会收到未配置错误）。",
+				"The http(s) endpoint that receives queries and returns results; empty means unconfigured (a web_search call then reports the missing backend)."))
 			ui.Field(c, "API Key", func() {
 				ui.TextInput(c, &st.apiKey).Label(inputLabel(locale, "API Key")).
 					Password().

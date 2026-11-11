@@ -97,12 +97,13 @@ var ReadOnlyAutoAllowedTools = map[string]bool{
 	"glob":      true,
 	"grep":      true,
 	// Read-only / informational tools.
-	"read_image":           true,
-	"working_directory":    true,
-	"memory":               true,
+	"read_image":        true,
+	"working_directory": true,
+	// The memory tool is NOT read-only: it can add/update/remove/clear the
+	// persistent memory store, so it lives in the workspace-only state set
+	// below instead (read-only must not mutate durable state).
 	"skill":                true,
 	"skills":               true,
-	"settings_get":         true,
 	"todo":                 true,
 	"todos":                true,
 	"todo_write":           true,
@@ -133,6 +134,14 @@ var workspaceWriteFileTools = map[string]bool{
 	"str_replace_editor": true,
 }
 
+// workspaceStateTools are the state-mutating product tools the default
+// workspace preset keeps auto-allowed (they write app-owned state, not files):
+// the memory tool can add/update/remove/clear persistent memory entries, which
+// the read-only preset must ask for.
+var workspaceStateTools = map[string]bool{
+	"memory": true,
+}
+
 // WorkspaceAutoAllowedTools is the set of tools the default workspace
 // (workspace-write) preset runs without an approval prompt: the read-only set
 // plus the workspace write tools. Everything that can leave the workspace,
@@ -141,7 +150,7 @@ var workspaceWriteFileTools = map[string]bool{
 // two layers cannot drift apart; it is composed from ReadOnlyAutoAllowedTools
 // so the read-only subset cannot be duplicated out of sync.
 var WorkspaceAutoAllowedTools = composeAutoAllowedTools(
-	ReadOnlyAutoAllowedTools, workspaceWriteFileTools)
+	ReadOnlyAutoAllowedTools, workspaceWriteFileTools, workspaceStateTools)
 
 // composeAutoAllowedTools merges the tool-name sets into one read-only map.
 func composeAutoAllowedTools(sets ...map[string]bool) map[string]bool {

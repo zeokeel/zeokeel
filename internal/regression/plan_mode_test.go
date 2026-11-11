@@ -184,7 +184,11 @@ func TestPlanModeWhitelistTable(t *testing.T) {
 		if status != "error" {
 			t.Fatalf("plan-mode tool %q status = %q, want error", name, status)
 		}
-		if !strings.Contains(summary, "denied") {
+		// Plan mode now also filters the model-visible tool schema (FR-16), so a
+		// call to a filtered tool is rejected by the loop as unknown before the
+		// gate sees it; the gate itself still denies fail-closed (covered by the
+		// agent package gate tests).
+		if !strings.Contains(summary, "denied") && !strings.Contains(summary, "not found") {
 			t.Fatalf("plan-mode tool %q summary = %q, want a denial reason", name, summary)
 		}
 	}

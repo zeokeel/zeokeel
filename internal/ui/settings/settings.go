@@ -1377,7 +1377,7 @@ func buildPage(c *ui.Context, runtime contracts.UIRuntime, state *moduleState, c
 
 		// One page owns the model configuration: every row carries its own
 		// provider connection and one row is the default model.
-		buildModelCatalogSection(c, runtime, store, catalog, locale, effective.BaseURL, effective.APIKey)
+		buildModelCatalogSection(c, runtime, store, catalog, locale, effective.BaseURL, effective.APIKey, effective.Model)
 
 		// Prompt and runtime knobs are the page's explicit-save section: the
 		// host footer's Save is the page's one primary, and this section says so

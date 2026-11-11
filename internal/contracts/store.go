@@ -99,6 +99,14 @@ type ApprovalRequest struct {
 	Arguments string
 	// CreatedAt is when the request started waiting.
 	CreatedAt time.Time
+	// SessionID is the chat session whose run asked for the approval. Multiple
+	// sessions (and automation runs) can execute concurrently, so the dialog
+	// must say where a request comes from instead of rendering it in whatever
+	// conversation is currently open.
+	SessionID string
+	// Source is the session provenance ("user", "automation", ...), so the
+	// dialog can label background requests.
+	Source string
 }
 
 // KeyApprovals is provided by the approvals backend module and consumed by the

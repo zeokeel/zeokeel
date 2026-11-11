@@ -113,7 +113,7 @@ func (p *product) callError(t *testing.T, name, arguments string) string {
 func TestModuleRegistersHostTools(t *testing.T) {
 	product := loadProduct(t, nil, true)
 
-	names := make([]string, 0, 6)
+	names := make([]string, 0, 5)
 	for _, spec := range product.registry.Specs() {
 		names = append(names, spec.Name)
 		if strings.TrimSpace(spec.Description) == "" {
@@ -124,7 +124,7 @@ func TestModuleRegistersHostTools(t *testing.T) {
 		}
 	}
 	want := []string{
-		ToolAskUser, ToolExitPlanMode, ToolGoal, ToolPlanReview, ToolPresent, ToolTeam,
+		ToolAskUser, ToolExitPlanMode, ToolGoal, ToolPlanReview, ToolPresent,
 	}
 	if len(names) != len(want) {
 		t.Fatalf("registered tools = %v, want %v", names, want)
@@ -151,11 +151,11 @@ func TestModuleRegistersHostTools(t *testing.T) {
 func TestNonInteractiveProductOmitsPlanTools(t *testing.T) {
 	product := loadProduct(t, nil, false)
 
-	names := make([]string, 0, 4)
+	names := make([]string, 0, 3)
 	for _, spec := range product.registry.Specs() {
 		names = append(names, spec.Name)
 	}
-	want := []string{ToolAskUser, ToolGoal, ToolPresent, ToolTeam}
+	want := []string{ToolAskUser, ToolGoal, ToolPresent}
 	if len(names) != len(want) {
 		t.Fatalf("non-interactive registered tools = %v, want %v", names, want)
 	}
@@ -175,9 +175,6 @@ func TestNonInteractiveProductOmitsPlanTools(t *testing.T) {
 	// The remaining tools keep working in a headless product.
 	if content := product.callOK(t, ToolGoal, `{"action":"get"}`); content != "no goal is set" {
 		t.Fatalf("headless goal get = %q", content)
-	}
-	if content := product.callOK(t, ToolTeam, `{"action":"list"}`); content != "no team members" {
-		t.Fatalf("headless team list = %q", content)
 	}
 	if content := product.callOK(t, ToolPresent, `{"title":"t","content":"c"}`); !strings.Contains(content, "artifact-1") {
 		t.Fatalf("headless present = %q", content)
@@ -314,41 +311,6 @@ func TestGoalTool(t *testing.T) {
 	}
 }
 
-func TestTeamTool(t *testing.T) {
-	product := loadProduct(t, nil, true)
-
-	if content := product.callOK(t, ToolTeam, `{"action":"list"}`); content != "no team members" {
-		t.Fatalf("team list on empty = %q", content)
-	}
-	content := product.callOK(t, ToolTeam, `{"action":"spawn","name":"research"}`)
-	if !strings.Contains(content, "research") || !strings.Contains(content, "member-1") {
-		t.Fatalf("team spawn content = %q", content)
-	}
-	content = product.callOK(t, ToolTeam, `{"action":"list"}`)
-	if !strings.Contains(content, "member-1") || !strings.Contains(content, "active") {
-		t.Fatalf("team list content = %q", content)
-	}
-	if content := product.callOK(t, ToolTeam, `{"action":"interrupt","id":"member-1"}`); !strings.Contains(content, "interrupted") {
-		t.Fatalf("team interrupt content = %q", content)
-	}
-	content = product.callOK(t, ToolTeam, `{"action":"list"}`)
-	if !strings.Contains(content, "interrupted") {
-		t.Fatalf("team list after interrupt = %q", content)
-	}
-	if content := product.callOK(t, ToolTeam, `{"action":"close","id":"member-1"}`); !strings.Contains(content, "closed") {
-		t.Fatalf("team close content = %q", content)
-	}
-	if content := product.callError(t, ToolTeam, `{"action":"close","id":"member-99"}`); !strings.Contains(content, "unknown team member") {
-		t.Fatalf("team close unknown = %q", content)
-	}
-	if content := product.callError(t, ToolTeam, `{"action":"spawn"}`); !strings.Contains(content, "name is required") {
-		t.Fatalf("team spawn without name = %q", content)
-	}
-	if content := product.callError(t, ToolTeam, `{"action":"bogus"}`); !strings.Contains(content, "action must be one of") {
-		t.Fatalf("team bogus action = %q", content)
-	}
-}
-
 func TestMissingCapabilitiesAreToolErrors(t *testing.T) {
 	product := loadProduct(t, &hostcaps.Host{}, true)
 	cases := map[string]string{
@@ -357,7 +319,6 @@ func TestMissingCapabilitiesAreToolErrors(t *testing.T) {
 		ToolPlanReview:   `{"plan":"# p"}`,
 		ToolExitPlanMode: `{"action":"status"}`,
 		ToolGoal:         `{"action":"get"}`,
-		ToolTeam:         `{"action":"list"}`,
 	}
 	for name, arguments := range cases {
 		content := product.callError(t, name, arguments)
@@ -371,8 +332,8 @@ func TestMissingCapabilitiesAreToolErrors(t *testing.T) {
 
 func TestModuleCloseUnregistersTools(t *testing.T) {
 	product := loadProduct(t, nil, false)
-	if got := len(product.registry.Specs()); got != 4 {
-		t.Fatalf("tools after load = %d, want 4 (non-interactive product without plan tools)", got)
+	if got := len(product.registry.Specs()); got != 3 {
+		t.Fatalf("tools after load = %d, want 3 (non-interactive product without plan tools)", got)
 	}
 	if err := product.loader.Close(); err != nil {
 		t.Fatalf("loader.Close: %v", err)
@@ -394,7 +355,7 @@ func TestDuplicateRegistrationRollsBack(t *testing.T) {
 	t.Cleanup(func() { _ = root.DisposeAll() })
 
 	rigRegistry := rigtool.NewRegistry()
-	if err := rigRegistry.Register(dummyTool{name: ToolTeam}); err != nil {
+	if err := rigRegistry.Register(dummyTool{name: ToolGoal}); err != nil {
 		t.Fatalf("pre-register dummy: %v", err)
 	}
 	registry := newKernelRegistry(t, rigRegistry, nil)
@@ -408,10 +369,10 @@ func TestDuplicateRegistrationRollsBack(t *testing.T) {
 	if !strings.Contains(err.Error(), "duplicate tool name") {
 		t.Fatalf("load error = %v, want the duplicate-tool error", err)
 	}
-	// The five tools registered before the duplicate failed must be rolled
-	// back; only the pre-existing dummy remains.
+	// The tools registered before the duplicate failed must be rolled back;
+	// only the pre-existing dummy remains.
 	specs := rigRegistry.Specs()
-	if len(specs) != 1 || specs[0].Name != ToolTeam {
+	if len(specs) != 1 || specs[0].Name != ToolGoal {
 		names := make([]string, 0, len(specs))
 		for _, spec := range specs {
 			names = append(names, spec.Name)

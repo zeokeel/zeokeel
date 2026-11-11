@@ -20,7 +20,6 @@ const (
 	ToolPlanReview   = "plan_review"
 	ToolExitPlanMode = "exit_plan_mode"
 	ToolGoal         = "goal"
-	ToolTeam         = "team"
 )
 
 // newTools builds the full host-tool catalog bound to capabilities. Every tool
@@ -33,7 +32,6 @@ func newTools(capabilities hostcaps.Host) []rig.Tool {
 		&planReviewTool{plan: capabilities.Plan},
 		&exitPlanModeTool{plan: capabilities.Plan},
 		&goalTool{goals: capabilities.Goals},
-		&teamTool{team: capabilities.Team},
 	}
 }
 
@@ -321,92 +319,6 @@ func (t *goalTool) Invoke(ctx context.Context, call rig.ToolCall) (rig.ToolResul
 		return rig.ToolResult{Content: "no goal is set"}, nil
 	default:
 		return errorResult("goal: action must be one of set, get, clear, status"), nil
-	}
-}
-
-// --- team -------------------------------------------------------------------
-
-type teamTool struct {
-	team hostcaps.TeamManager
-}
-
-func (t *teamTool) Name() string { return ToolTeam }
-
-func (t *teamTool) Description() string {
-	return "Manage the session's team members: action=spawn starts a named member, action=list reports them with their status, " +
-		"action=interrupt stops a member's current work, action=close removes it. " +
-		"Spawned members run no real subagent in this product build (in-memory manager); " +
-		"a product that wires a real TeamManager starts them."
-}
-
-func (t *teamTool) Schema() map[string]any {
-	return objectSchema(map[string]any{
-		"action": enumProperty("The team operation.", "spawn", "list", "close", "interrupt"),
-		"name":   stringProperty("Member name (required for action=spawn)."),
-		"id":     stringProperty("Member id (required for action=close or interrupt)."),
-	}, "action")
-}
-
-func (t *teamTool) Invoke(ctx context.Context, call rig.ToolCall) (rig.ToolResult, error) {
-	var args struct {
-		Action string `json:"action"`
-		Name   string `json:"name"`
-		ID     string `json:"id"`
-	}
-	if err := decodeArguments(call, &args); err != nil {
-		return rig.ToolResult{}, err
-	}
-	if err := contextError(ctx); err != nil {
-		return rig.ToolResult{}, err
-	}
-	if t.team == nil {
-		return errorResult("team: no team manager is available in this product"), nil
-	}
-	action := strings.ToLower(strings.TrimSpace(args.Action))
-	switch action {
-	case "spawn":
-		name := strings.TrimSpace(args.Name)
-		if name == "" {
-			return errorResult("team: name is required for action=spawn"), nil
-		}
-		id, err := t.team.Spawn(name)
-		if err != nil {
-			if contextErr := contextError(ctx); contextErr != nil {
-				return rig.ToolResult{}, contextErr
-			}
-			return errorResult("team: %v", err), nil
-		}
-		return rig.ToolResult{Content: fmt.Sprintf("spawned team member %s (%s)", name, id)}, nil
-	case "list":
-		members := t.team.List()
-		if len(members) == 0 {
-			return rig.ToolResult{Content: "no team members"}, nil
-		}
-		lines := make([]string, 0, len(members))
-		for _, member := range members {
-			lines = append(lines, fmt.Sprintf("%s\t%s\t%s", member.ID, member.Name, member.Status))
-		}
-		return rig.ToolResult{Content: strings.Join(lines, "\n")}, nil
-	case "close":
-		id := strings.TrimSpace(args.ID)
-		if id == "" {
-			return errorResult("team: id is required for action=close"), nil
-		}
-		if err := t.team.Close(id); err != nil {
-			return errorResult("team: %v", err), nil
-		}
-		return rig.ToolResult{Content: "closed team member " + id}, nil
-	case "interrupt":
-		id := strings.TrimSpace(args.ID)
-		if id == "" {
-			return errorResult("team: id is required for action=interrupt"), nil
-		}
-		if err := t.team.Interrupt(id); err != nil {
-			return errorResult("team: %v", err), nil
-		}
-		return rig.ToolResult{Content: "interrupted team member " + id}, nil
-	default:
-		return errorResult("team: action must be one of spawn, list, close, interrupt"), nil
 	}
 }
 

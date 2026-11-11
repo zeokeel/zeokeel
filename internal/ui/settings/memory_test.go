@@ -192,8 +192,8 @@ func TestMemoryPageAdd(t *testing.T) {
 	h.click(tester, "添加")
 
 	added := store.added()
-	if len(added) != 1 || added[0].Text != "记住这次结论" || added[0].Scope != "global" {
-		t.Fatalf("Add calls = %+v, want global/记住这次结论", added)
+	if len(added) != 1 || added[0].Text != "记住这次结论" || added[0].Scope != "" {
+		t.Fatalf("Add calls = %+v, want the configured-default scope/记住这次结论", added)
 	}
 	h.assertTexts(tester, "已添加", "1 条记忆", "记住这次结论")
 }
@@ -433,13 +433,10 @@ func (f *fakeMemoryExtractor) ExtractFromSession(ctx context.Context, sessionID 
 			return nil, ctx.Err()
 		}
 	}
-	if err != nil {
-		return nil, err
-	}
 	if publish != nil {
 		publish(result)
 	}
-	return result, nil
+	return result, err
 }
 
 func (f *fakeMemoryExtractor) callCount() int {
@@ -843,4 +840,150 @@ func TestMemoryPageEditEnglishCopy(t *testing.T) {
 	if len(calls) != 1 || calls[0].id != "mem-1" || calls[0].text != "Alpha note" || calls[0].scope != "workspace" {
 		t.Fatalf("Update calls = %+v, want mem-1/Alpha note/workspace", calls)
 	}
+}
+
+// --- FR-25 / FR-06 / M-06 (Wave 1 fix regressions) ---------------------------
+
+// workspaceMemoryStore is a management-capable memory store: List is filtered to
+// the current workspace's view, ListAll returns every workspace's entries and
+// RecoveryNotice reports a quarantined file.
+type workspaceMemoryStore struct {
+	*fakeMemoryStore
+	mu       sync.Mutex
+	all      []contracts.Memory
+	recovery string
+	addScope []string
+}
+
+func newWorkspaceMemoryStore(all ...contracts.Memory) *workspaceMemoryStore {
+	store := &workspaceMemoryStore{all: append([]contracts.Memory(nil), all...)}
+	store.fakeMemoryStore = newFakeMemoryStore()
+	return store
+}
+
+func (s *workspaceMemoryStore) List(ctx context.Context) ([]contracts.Memory, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	visible := make([]contracts.Memory, 0, len(s.all))
+	for _, memory := range s.all {
+		scope := strings.TrimSpace(memory.Scope)
+		if strings.HasPrefix(scope, "workspace:") && scope != "workspace:ws-a" {
+			continue
+		}
+		visible = append(visible, memory)
+	}
+	return visible, nil
+}
+
+func (s *workspaceMemoryStore) Search(_ context.Context, query string) ([]contracts.Memory, error) {
+	visible, _ := s.List(context.Background())
+	found := make([]contracts.Memory, 0, len(visible))
+	for _, memory := range visible {
+		if strings.Contains(strings.ToLower(memory.Text), strings.ToLower(strings.TrimSpace(query))) {
+			found = append(found, memory)
+		}
+	}
+	return found, nil
+}
+
+func (s *workspaceMemoryStore) ListAll(context.Context) ([]contracts.Memory, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return append([]contracts.Memory(nil), s.all...), nil
+}
+
+func (s *workspaceMemoryStore) RecoveryNotice() string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.recovery
+}
+
+func (s *workspaceMemoryStore) Add(_ context.Context, memory contracts.Memory) (contracts.Memory, error) {
+	s.mu.Lock()
+	s.addScope = append(s.addScope, memory.Scope)
+	if strings.TrimSpace(memory.Scope) == "" {
+		memory.Scope = contracts.MemoryScopeGlobal
+	}
+	s.all = append(s.all, memory)
+	s.mu.Unlock()
+	return memory, nil
+}
+
+func (s *workspaceMemoryStore) Remove(_ context.Context, id string) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for index, memory := range s.all {
+		if memory.ID == id {
+			s.all = append(s.all[:index], s.all[index+1:]...)
+			return true
+		}
+	}
+	return false
+}
+
+func (s *workspaceMemoryStore) scopes() []string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return append([]string(nil), s.addScope...)
+}
+
+func TestMemoryPageListsEveryWorkspaceForManagement(t *testing.T) {
+	store := newWorkspaceMemoryStore(
+		memoryAt("mem-global", "global memory", time.Unix(1700000000, 0)),
+		contracts.Memory{ID: "mem-a", Text: "workspace a memory", Scope: "workspace:ws-a", Created: time.Unix(1700000001, 0)},
+		contracts.Memory{ID: "mem-b", Text: "workspace b memory", Scope: "workspace:ws-b", Created: time.Unix(1700000002, 0)},
+	)
+	h := memoryPageHarness(t, store)
+	tester := h.tester()
+	// The model-facing List hides ws-b, the management page must not.
+	h.assertTexts(tester, "global memory", "workspace a memory", "workspace b memory")
+	h.assertTexts(tester, "工作区")
+}
+
+func TestMemoryPageShowsQuarantineNotice(t *testing.T) {
+	store := newWorkspaceMemoryStore()
+	store.recovery = `memory file "/data/memory.json" is corrupt; quarantined as "/data/memory.json.corrupt-1"`
+	h := memoryPageHarness(t, store)
+	tester := h.tester()
+	h.assertTexts(tester, "记忆文件已损坏", "corrupt-")
+}
+
+func TestMemoryPageAddUsesTheConfiguredStoreDefault(t *testing.T) {
+	store := newWorkspaceMemoryStore()
+	h := memoryPageHarness(t, store)
+	tester := h.tester()
+	h.focusInput(tester, "记忆内容 输入")
+	tester.Type("uses the configured default")
+	tester.Frame()
+	h.click(tester, "添加")
+	if scopes := store.scopes(); len(scopes) != 1 || scopes[0] != "" {
+		t.Fatalf("Add scopes = %v, want the empty scope so the store applies Config.Scope", scopes)
+	}
+}
+
+func TestMemoryPageAddCopyMatchesStoreOrder(t *testing.T) {
+	store := newWorkspaceMemoryStore()
+	h := memoryPageHarness(t, store)
+	tester := h.tester()
+	h.assertTexts(tester, "添加一条记忆（作用域使用配置的默认值）；新记忆会追加到列表末尾。")
+	if tester.HasText("列表顶部") {
+		t.Fatalf("stale copy still claims the top of the list: %v", tester.Texts())
+	}
+}
+
+func TestMemoryExtractPartialFailureKeepsWrittenEntriesVisible(t *testing.T) {
+	store := newWorkspaceMemoryStore()
+	extractor := &fakeMemoryExtractor{
+		result: []contracts.Memory{{ID: "partial-1", Text: "partial candidate", Scope: "global"}},
+		err:    errors.New("agent: add memory: disk full"),
+		publish: func(memories []contracts.Memory) {
+			for _, memory := range memories {
+				_, _ = store.Add(context.Background(), memory)
+			}
+		},
+	}
+	h, tester := memoryExtractHarness(t, memoryExtractChat(), memoryExtractSettings("true"), store, extractor)
+	h.click(tester, "从当前会话提取")
+	waitMemoryText(t, tester, "已写入 1 条记忆后失败")
+	waitMemoryText(t, tester, "partial candidate")
 }

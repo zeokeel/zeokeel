@@ -181,6 +181,9 @@ func TestModuleDescriptorAndValidation(t *testing.T) {
 }
 
 func TestRootsOrderDedupAndWorkspaceSwitch(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("ZEOKEEL_SKILLS", "")
 	dataDir := t.TempDir()
 	extraAbs := t.TempDir()
 	makeExtraRelative := filepath.Join(dataDir, "extra-relative")
@@ -200,19 +203,26 @@ func TestRootsOrderDedupAndWorkspaceSwitch(t *testing.T) {
 		filepath.Join(dataDir, DataDirName), // already the implicit data dir
 	}}, workspace)
 
+	// S-02: the workspace roots come first (project skills override global);
+	// configured dirs, data dir, env and home follow.
 	want := []string{
+		filepath.Join(workspaceOne, WorkspaceDirName),
+		filepath.Join(workspaceOne, ".agents", "skills"),
+		filepath.Join(workspaceOne, ".zeokeel", "skills"),
 		extraAbs,
 		filepath.Join(dataDir, "extra-relative"),
 		filepath.Join(dataDir, DataDirName),
-		filepath.Join(workspaceOne, WorkspaceDirName),
+		filepath.Join(home, ".zeokeel", "skills"),
 	}
 	if got := service.Roots(); strings.Join(got, "\n") != strings.Join(want, "\n") {
-		t.Fatalf("Roots = %v, want %v (configured dirs, data dir, workspace; deduplicated)", got, want)
+		t.Fatalf("Roots = %v, want %v (workspace roots, configured dirs, data dir, home; deduplicated)", got, want)
 	}
 
-	// A workspace switch changes the last root immediately (no caching).
+	// A workspace switch changes the workspace roots immediately (no caching).
 	workspace.setRoot(workspaceTwo)
-	want[len(want)-1] = filepath.Join(workspaceTwo, WorkspaceDirName)
+	want[0] = filepath.Join(workspaceTwo, WorkspaceDirName)
+	want[1] = filepath.Join(workspaceTwo, ".agents", "skills")
+	want[2] = filepath.Join(workspaceTwo, ".zeokeel", "skills")
 	if got := service.Roots(); strings.Join(got, "\n") != strings.Join(want, "\n") {
 		t.Fatalf("Roots after workspace switch = %v, want %v", got, want)
 	}
@@ -236,7 +246,7 @@ func TestListAndReadMergePrecedence(t *testing.T) {
 		t.Fatalf("mkdir no-skill: %v", err)
 	}
 	writeFile(t, filepath.Join(dataDir, DataDirName, ".md"), "empty base name\n")
-	// Workspace: lower precedence than data dir for duplicate names.
+	// Workspace: highest precedence (project skills override global ones, S-02).
 	writeTopLevel(t, filepath.Join(workspaceRoot, WorkspaceDirName), "note", "# Workspace note\n")
 	writeSkill(t, filepath.Join(workspaceRoot, WorkspaceDirName), "task", "Task")
 
@@ -245,9 +255,9 @@ func TestListAndReadMergePrecedence(t *testing.T) {
 	if err != nil {
 		t.Fatalf("List: %v", err)
 	}
-	wantNames := []string{"other", "pdf", "note", "task"}
+	wantNames := []string{"note", "task", "other", "pdf"}
 	if got := skillNames(skills); strings.Join(got, ",") != strings.Join(wantNames, ",") {
-		t.Fatalf("List names = %v, want %v (config, data dir, workspace order)", got, wantNames)
+		t.Fatalf("List names = %v, want %v (workspace, config, data dir order)", got, wantNames)
 	}
 	byName := make(map[string]contracts.Skill, len(skills))
 	for _, skill := range skills {
@@ -256,8 +266,8 @@ func TestListAndReadMergePrecedence(t *testing.T) {
 	if got := byName["pdf"].Description; got != "PDF override" {
 		t.Fatalf("pdf description = %q, want the configured dir's override", got)
 	}
-	if got := byName["note"].Description; got != "Note" {
-		t.Fatalf("note description = %q, want the data dir's version", got)
+	if got := byName["note"].Description; got != "Workspace note" {
+		t.Fatalf("note description = %q, want the workspace's version", got)
 	}
 	if got := byName["task"].Description; got != "Task" {
 		t.Fatalf("task description = %q", got)
@@ -284,12 +294,16 @@ func TestListAndReadMergePrecedence(t *testing.T) {
 }
 
 func TestRootsWithoutWorkspaceAndWithErrors(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("ZEOKEEL_SKILLS", "")
 	dataDir := t.TempDir()
 	writeSkill(t, filepath.Join(dataDir, DataDirName), "base", "Base")
 
 	noWorkspace := newTestService(t, dataDir, Config{}, nil)
-	if got := noWorkspace.Roots(); len(got) != 1 || got[0] != filepath.Join(dataDir, DataDirName) {
-		t.Fatalf("Roots without workspace = %v", got)
+	wantRoots := []string{filepath.Join(dataDir, DataDirName), filepath.Join(home, ".zeokeel", "skills")}
+	if got := noWorkspace.Roots(); strings.Join(got, "\n") != strings.Join(wantRoots, "\n") {
+		t.Fatalf("Roots without workspace = %v, want %v", got, wantRoots)
 	}
 	if skills, err := noWorkspace.List(context.Background()); err != nil || len(skills) != 1 || skills[0].Name != "base" {
 		t.Fatalf("List without workspace = %v/%v", skillNames(skills), err)
@@ -298,8 +312,8 @@ func TestRootsWithoutWorkspaceAndWithErrors(t *testing.T) {
 	failing := &fakeWorkspace{}
 	failing.setError(errors.New("workspace exploded"))
 	errorService := newTestService(t, dataDir, Config{}, failing)
-	if got := errorService.Roots(); len(got) != 1 || got[0] != filepath.Join(dataDir, DataDirName) {
-		t.Fatalf("Roots with a failing workspace = %v", got)
+	if got := errorService.Roots(); strings.Join(got, "\n") != strings.Join(wantRoots, "\n") {
+		t.Fatalf("Roots with a failing workspace = %v, want %v", got, wantRoots)
 	}
 	if skills, err := errorService.List(context.Background()); err != nil || len(skills) != 1 {
 		t.Fatalf("List with a failing workspace = %v/%v", skillNames(skills), err)

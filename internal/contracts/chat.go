@@ -81,8 +81,14 @@ type ChatMessage struct {
 	// Error is set when the message (usually an assistant turn) failed.
 	Error string
 	// ErrorKind classifies Error for localized UI copy ("" = unknown/no error,
-	// auth, rate_limit, network, timeout, context, cancelled or other).
+	// auth, rate_limit, network, timeout, context, iterations, cancelled or
+	// other).
 	ErrorKind string `json:"errorKind,omitempty"`
+	// Truncated reports that the provider cut the answer at the output-token
+	// limit (finish_reason "length"): the streamed text is a partial answer, not
+	// a complete reply. The agent records it on the message and in the durable
+	// run_end event so a restart keeps the hint.
+	Truncated bool `json:"truncated,omitempty"`
 	// CreatedAt is the message timestamp (local time, display only).
 	CreatedAt time.Time
 }
@@ -162,6 +168,16 @@ var (
 	ErrCompactUnavailable = errors.New("context compaction is unavailable")
 	ErrCompactNothing     = errors.New("nothing to compact")
 	ErrCompactSave        = errors.New("failed to save compacted history")
+	// ErrCompactConflict reports that the durable history changed between the
+	// compaction snapshot and the write-back (a concurrent writer, e.g. a late
+	// run write): the compaction is aborted instead of erasing that work. The
+	// UI should ask the user to retry.
+	ErrCompactConflict = errors.New("session history changed during compaction")
+	// ErrChatCompacting is returned by Send/Regenerate while the session history
+	// is being compacted (/compact): compaction is a multi-second model call and
+	// appending a turn halfway through would be erased by the history write-back.
+	// The draft should be retried once the compaction settles.
+	ErrChatCompacting = errors.New("session context is being compacted; retry after /compact finishes")
 )
 
 // CompactResult reports one manual compaction: the message counts and the
@@ -187,13 +203,19 @@ const (
 	MessageErrorKindNetwork   = "network"
 	MessageErrorKindTimeout   = "timeout"
 	MessageErrorKindContext   = "context"
-	MessageErrorKindCancelled = "cancelled"
-	MessageErrorKindOther     = "other"
+	// MessageErrorKindIterations marks the model/tool iteration budget
+	// (chat.maxIterations) running out: the turn is not a provider failure and
+	// the localized copy should point at the limit instead of dumping rig's
+	// internal English diagnostic.
+	MessageErrorKindIterations = "iterations"
+	MessageErrorKindCancelled  = "cancelled"
+	MessageErrorKindOther      = "other"
 )
 
 // ClassifyError maps one backend error (or its message) to a MessageErrorKind
 // by matching the stable provider/network phrases. Rules are checked in order:
-// cancellation, auth, rate limit, timeout, network, context length, then other.
+// cancellation, auth, rate limit, timeout, network, context length, iteration
+// budget, then other.
 func ClassifyError(err error, msg string) string {
 	text := strings.ToLower(strings.TrimSpace(msg))
 	if text == "" && err != nil {
@@ -225,6 +247,9 @@ func ClassifyError(err error, msg string) string {
 	case has("context length", "context_length", "token limit", "too many tokens",
 		"maximum context", "context window"):
 		return MessageErrorKindContext
+	case has("max iterations", "iteration limit", "without a final answer",
+		"rounds without"):
+		return MessageErrorKindIterations
 	default:
 		return MessageErrorKindOther
 	}

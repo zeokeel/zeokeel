@@ -1,8 +1,11 @@
 package settings
 
-// Memory page: browse, search and manage the global memory store the agent's
-// memory tools read/write (contracts.KeyMemory, optional). The page resolves
-// the store per frame, so a late-provided backend appears without a restart.
+// Memory page: browse, search and manage every workspace's memory entries the
+// agent's memory tools read/write (contracts.KeyMemory, optional). The
+// management surface reads the optional ListAll half (the model-facing List is
+// workspace-scoped); a quarantined memory file is reported through the optional
+// MemoryRecoveryReporter. The page resolves the store per frame, so a late
+// provided backend appears without a restart.
 
 import (
 	"context"
@@ -100,13 +103,16 @@ func memoryStatsLabel(locale contracts.LocaleService, count int) string {
 
 // memoryScopeLabel localizes one stored memory scope.
 func memoryScopeLabel(locale contracts.LocaleService, scope string) string {
-	switch strings.ToLower(strings.TrimSpace(scope)) {
-	case "global":
+	trimmed := strings.TrimSpace(scope)
+	switch {
+	case strings.EqualFold(trimmed, contracts.MemoryScopeGlobal):
 		return localized(locale, "全局", "Global")
-	case "workspace":
+	case strings.EqualFold(trimmed, contracts.MemoryScopeWorkspace):
+		return localized(locale, "工作区（旧数据）", "Workspace (legacy)")
+	case strings.HasPrefix(strings.ToLower(trimmed), contracts.MemoryScopeWorkspacePrefix):
 		return localized(locale, "工作区", "Workspace")
 	default:
-		return strings.TrimSpace(scope)
+		return trimmed
 	}
 }
 
@@ -125,12 +131,20 @@ func buildMemoryPage(c *ui.Context, t *design.Tokens, kctx cordis.Context,
 	st *memoryPageState, settingsStore contracts.SettingsService, locale contracts.LocaleService) {
 	ui.Column(c).FillWidth().Gap(design.Space4).Children(func() {
 		uikit.PageHeader(c, localized(locale, "记忆", "Memory"), localized(locale,
-			"查看、搜索与管理全局记忆。",
-			"Browse, search and manage global memories."))
+			"查看、搜索与管理所有工作区的记忆；列表会标注每条记忆的作用域。",
+			"Browse, search and manage memories of every workspace; each row shows its scope."))
 		store, hasStore := kctx.Get(contracts.KeyMemory)
 		if !hasStore || store == nil {
 			uikit.EmptyState(c, localized(locale, "未启用记忆后端", "Memory backend not enabled"))
 			return
+		}
+		// FR-06: a quarantined memory file must be visible here, not only in the
+		// log: the user needs to know their previous entries were backed up.
+		if reporter, ok := store.(contracts.MemoryRecoveryReporter); ok {
+			if notice := strings.TrimSpace(reporter.RecoveryNotice()); notice != "" {
+				uikit.ErrorLine(c, localized(locale, "记忆文件已损坏，已隔离备份并暂时从空记忆继续：",
+					"The memory file was corrupt: it was quarantined and the app continues with empty memory: ")+notice)
+			}
 		}
 		// Editing needs the optional update half. Backends that only implement
 		// the rig store keep their row actions unchanged (delete still works);
@@ -142,7 +156,14 @@ func buildMemoryPage(c *ui.Context, t *design.Tokens, kctx cordis.Context,
 		if !st.memoriesLoaded || st.memoriesQuery != query {
 			st.memoriesLoaded = true
 			st.memoriesQuery = query
-			if query != "" {
+			// FR-25: the settings page is the management surface, so it reads
+			// every workspace's entries (the model and the session tab keep the
+			// workspace-filtered view). Search filters the same full set so a
+			// workspace entry never disappears from the management page.
+			if allLister, ok := store.(contracts.MemoryAllLister); ok {
+				all, err := allLister.ListAll(context.Background())
+				st.memories, st.memoriesErr = filterMemoryQuery(all, query), err
+			} else if query != "" {
 				st.memories, st.memoriesErr = store.Search(context.Background(), query)
 			} else {
 				st.memories, st.memoriesErr = store.List(context.Background())
@@ -231,7 +252,9 @@ func buildMemoryPage(c *ui.Context, t *design.Tokens, kctx cordis.Context,
 				if content == "" {
 					return
 				}
-				_, err := store.Add(context.Background(), contracts.Memory{Text: content, Scope: "global"})
+				// The empty scope lets the durable store apply its configured
+				// default (Config.Scope, FR-25) instead of hardcoding global.
+				_, err := store.Add(context.Background(), contracts.Memory{Text: content})
 				if err != nil {
 					st.notice = localized(locale, "添加记忆失败：", "Failed to add memory: ") + err.Error()
 					st.noticeErr = true
@@ -251,8 +274,8 @@ func buildMemoryPage(c *ui.Context, t *design.Tokens, kctx cordis.Context,
 					add()
 				}
 			}).Description(localized(locale,
-				"添加一条全局记忆；新记忆会出现在列表顶部。",
-				"Adds one global memory; it appears at the top of the list."))
+				"添加一条记忆（作用域使用配置的默认值）；新记忆会追加到列表末尾。",
+				"Adds one memory (scope: the configured default); it appears at the end of the list."))
 			if st.notice != "" && st.noticeErr {
 				uikit.ErrorLine(c, st.notice)
 			}
@@ -362,8 +385,8 @@ func buildMemoryConsolidationPanel(c *ui.Context, t *design.Tokens, store contra
 	}
 	uikit.Section(c, localized(locale, "整理策略", "Consolidation policy"), func(*ui.Context) {
 		design.Apply(ui.Text(c, localized(locale,
-			"按策略确定性整理（不调用模型）：过期删除 + 超限保留最新；0 或留空表示不限制。",
-			"Deterministic consolidation (no model call): drop expired entries, then keep the newest up to the cap; 0 or empty means unlimited.")),
+			"按策略确定性整理（不调用模型）：过期删除 + 超限保留最新；0 或留空表示不限制。保存后立即整理，应用启动和每次写入记忆时也会自动按该策略整理。",
+			"Deterministic consolidation (no model call): drop expired entries, then keep the newest up to the cap; 0 or empty means unlimited. Applied on save, on app start and after every memory write.")),
 			t.TextMuted(design.TypeXXS)).MaxLines(2)
 		ui.Row(c).FillWidth().Gap(design.Space3).AlignItems(ui.Start).Children(func() {
 			ui.Column(c).FillWidth().Grow(1).Children(func() {
@@ -470,7 +493,7 @@ func setMemoryNotice(st *memoryPageState, text string, failed bool) {
 // normalized text; failures land in the page's danger line.
 func tidyMemoriesPage(store contracts.MemoryStore, st *memoryPageState, locale contracts.LocaleService) {
 	ctx := context.Background()
-	memories, err := store.List(ctx)
+	memories, err := managementMemories(store, ctx)
 	if err != nil {
 		setMemoryNotice(st, localized(locale, "读取记忆失败：", "Failed to read memory: ")+err.Error(), true)
 		return
@@ -516,7 +539,7 @@ func memoryTidiedLabel(locale contracts.LocaleService, count int) string {
 // clearMemoriesPage removes every memory; failures land in the danger line.
 func clearMemoriesPage(store contracts.MemoryStore, st *memoryPageState, locale contracts.LocaleService) {
 	ctx := context.Background()
-	memories, err := store.List(ctx)
+	memories, err := managementMemories(store, ctx)
 	if err != nil {
 		setMemoryNotice(st, localized(locale, "清空失败：", "Clear failed: ")+err.Error(), true)
 		return
@@ -534,10 +557,43 @@ func clearMemoriesPage(store contracts.MemoryStore, st *memoryPageState, locale 
 	setMemoryNotice(st, localized(locale, "已清空", "Cleared"), false)
 }
 
+// managementMemories reads every workspace's entries for the management
+// actions (tidy/clear), falling back to the workspace view for stores without
+// the optional ListAll half.
+func managementMemories(store contracts.MemoryStore, ctx context.Context) ([]contracts.Memory, error) {
+	if allLister, ok := store.(contracts.MemoryAllLister); ok {
+		return allLister.ListAll(ctx)
+	}
+	return store.List(ctx)
+}
+
+// filterMemoryQuery applies the page's search box to an entry set.
+func filterMemoryQuery(memories []contracts.Memory, query string) []contracts.Memory {
+	query = strings.ToLower(strings.TrimSpace(query))
+	if query == "" {
+		return memories
+	}
+	filtered := make([]contracts.Memory, 0, len(memories))
+	for _, memory := range memories {
+		if strings.Contains(strings.ToLower(memory.Text), query) {
+			filtered = append(filtered, memory)
+		}
+	}
+	return filtered
+}
+
 // memoryExtractEnabled reports whether model extraction is enabled: only the
 // exact "true" value turns it on (default and malformed values are off).
 func memoryExtractEnabled(raw string) bool {
 	return strings.EqualFold(strings.TrimSpace(raw), "true")
+}
+
+// memoryPartialExtractedLabel renders the "N written before the failure" notice.
+func memoryPartialExtractedLabel(locale contracts.LocaleService, count int) string {
+	if localized(locale, "zh", "en") == "en" {
+		return fmt.Sprintf("%d memor(ies) were written before the failure: ", count)
+	}
+	return fmt.Sprintf("已写入 %d 条记忆后失败：", count)
 }
 
 // memoryExtractedLabel renders the extraction success count.
@@ -561,8 +617,16 @@ func startMemoryExtraction(runtime contracts.UIRuntime,
 	finish := func(memories []contracts.Memory, err error) {
 		st.extractRunning = false
 		if err != nil {
-			st.notice = localized(locale, "提取失败：", "Extraction failed: ") + err.Error()
+			// M-06: entries written before the failure are durable; say how
+			// many survived and refresh so they are visible instead of being
+			// silently hidden behind "extraction failed".
+			if len(memories) > 0 {
+				st.notice = memoryPartialExtractedLabel(locale, len(memories)) + err.Error()
+			} else {
+				st.notice = localized(locale, "提取失败：", "Extraction failed: ") + err.Error()
+			}
 			st.noticeErr = true
+			st.invalidateMemories()
 			return
 		}
 		st.notice = memoryExtractedLabel(locale, len(memories))

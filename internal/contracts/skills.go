@@ -19,6 +19,19 @@ type SkillsService interface {
 	Roots() []string
 }
 
+// SkillWarnings is the optional diagnostics half of the skills service: it
+// reports discovery problems (a skill shadowed by an earlier root, a scan cap
+// hit) so the settings page can show them instead of silently hiding a skill.
+type SkillWarnings interface {
+	Warnings() []string
+}
+
+// SettingSkillsDirs is the user-configurable extra skill directory list
+// (os.PathListSeparator separated; relative paths resolve against the product
+// data directory). It is scanned after the workspace roots and before the data
+// directory, so a user-installed skill library overrides the shipped one.
+const SettingSkillsDirs = "skills.dirs"
+
 // KeySkills is provided by the skills backend module and consumed by the
 // toolkit (skill tool) and the settings skills page.
 var KeySkills = cordis.NewServiceKey[SkillsService]("zeokeel/skills")

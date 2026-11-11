@@ -121,12 +121,18 @@ func (s *service) Run(ctx context.Context, req contracts.SubagentRequest) (contr
 // resolved connection.
 func (s *service) runSubagent(ctx context.Context, prompt, name string, req contracts.SubagentRequest,
 	cfg contracts.ChatConfig, active string) (contracts.SubagentResult, error) {
-	childTools := s.registry.Tools()
+	// Children start from the same model-visible surface as their parent run: the
+	// user's disabled-tool settings, the session preset allowlist and the runtime
+	// mode whitelist all apply. The orchestration tools are then removed so a
+	// child can never recurse (the runner also enforces this independently).
+	childTools := withoutToolNames(s.toolsForSession(active), subagentExcludedTools())
 	// Children inherit the same complete prompt as their parent run (identity,
-	// environment, workspace instructions, preset and per-tool guidance). The
-	// runner filters the orchestration tools out of the child's tool set, so the
-	// guidance for exactly that filtered surface is rendered.
-	cfg.SystemPrompt = s.buildRunSystemPrompt(ctx, active, cfg, toolNameSet(childTools, subagentExcludedTools()...))
+	// environment, workspace instructions, preset and per-tool guidance), with
+	// guidance and mode line rendered for exactly the filtered surface. The
+	// workspace root is the parent session's project; the child's tools are
+	// scoped to it so a concurrent workspace switch cannot redirect them.
+	workspaceRoot := s.sessionWorkspaceRoot(active)
+	cfg.SystemPrompt = s.buildRunSystemPrompt(ctx, active, cfg, toolNameSet(childTools), workspaceRoot)
 	provider, err := s.newProvider(cfg, s.thinkingParamsForSession(active, cfg.Model))
 	if err != nil {
 		return contracts.SubagentResult{}, fmt.Errorf("agent: subagent %q: create provider: %w", name, err)
@@ -136,7 +142,7 @@ func (s *service) runSubagent(ctx context.Context, prompt, name string, req cont
 		Model:         cfg.Model,
 		SystemPrompt:  cfg.SystemPrompt,
 		MaxIterations: cfg.MaxIterations,
-		Tools:         childTools,
+		Tools:         withWorkspaceRoot(childTools, workspaceRoot),
 		Gate:          s.gate(active),
 		History:       s.historyView(),
 		Logger:        s.logger,

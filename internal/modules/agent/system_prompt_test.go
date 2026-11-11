@@ -210,7 +210,7 @@ func TestToolGuidanceLines(t *testing.T) {
 // TestSystemPromptForRunStructure pins the required order: environment first,
 // then the configured prompt, then tool guidance last.
 func TestSystemPromptForRunStructure(t *testing.T) {
-	prompt := systemPromptForRun("linux", "amd64", "/work/project", contracts.PermissionWorkspace,
+	prompt := systemPromptForRun("linux", "amd64", "/work/project", contracts.PermissionWorkspace, "",
 		"CONFIGURED-PROMPT", map[string]bool{"read_file": true, "write_file": true})
 	if !strings.HasPrefix(prompt, agentIdentity) {
 		t.Fatalf("prompt does not start with the identity: %q", prompt)
@@ -234,7 +234,7 @@ func TestSystemPromptForRunStructure(t *testing.T) {
 	}
 
 	// No configured prompt: environment and guidance are still present.
-	bare := systemPromptForRun("windows", "arm64", "", contracts.PermissionReadOnly, "", map[string]bool{"pwsh": true})
+	bare := systemPromptForRun("windows", "arm64", "", contracts.PermissionReadOnly, "", "", map[string]bool{"pwsh": true})
 	if !strings.Contains(bare, "You are ZeoKeel") || !strings.Contains(bare, "Use the pwsh tool for shell commands.") {
 		t.Fatalf("bare prompt lacks environment: %q", bare)
 	}
@@ -327,21 +327,21 @@ func TestRunSystemPromptReflectsApprovalModeAndSessionOverride(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewSession: %v", err)
 	}
-	prompt := svc.buildRunSystemPrompt(context.Background(), sessionID, contracts.ChatConfig{}, toolNameSet(nil))
+	prompt := svc.buildRunSystemPrompt(context.Background(), sessionID, contracts.ChatConfig{}, toolNameSet(nil), "")
 	if !strings.Contains(prompt, "Approval policy: workspace —") {
 		t.Fatalf("approval line does not follow the approvals service: %q", prompt)
 	}
 	if err := svc.SetSessionPermission(sessionID, contracts.PermissionFull); err != nil {
 		t.Fatalf("SetSessionPermission: %v", err)
 	}
-	prompt = svc.buildRunSystemPrompt(context.Background(), sessionID, contracts.ChatConfig{}, toolNameSet(nil))
+	prompt = svc.buildRunSystemPrompt(context.Background(), sessionID, contracts.ChatConfig{}, toolNameSet(nil), "")
 	if !strings.Contains(prompt, "Approval policy: full — no approval prompts are shown.") {
 		t.Fatalf("session full override not reflected: %q", prompt)
 	}
 	if err := svc.SetSessionPermission(sessionID, contracts.PermissionReadOnly); err != nil {
 		t.Fatalf("SetSessionPermission: %v", err)
 	}
-	prompt = svc.buildRunSystemPrompt(context.Background(), sessionID, contracts.ChatConfig{}, toolNameSet(nil))
+	prompt = svc.buildRunSystemPrompt(context.Background(), sessionID, contracts.ChatConfig{}, toolNameSet(nil), "")
 	if !strings.Contains(prompt, "Approval policy: read-only —") {
 		t.Fatalf("session read-only override not reflected: %q", prompt)
 	}

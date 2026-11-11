@@ -192,10 +192,19 @@ type harness struct {
 	uiRoot    *uiroot.Root
 	approvals *fakeApprovals
 	navigator *recordingNavigator
+	chat      contracts.ChatService
 	fiber     *cordis.Fiber
 }
 
 func newHarness(t *testing.T, cfg approval.Config) *harness {
+	t.Helper()
+	return newHarnessWithChat(t, cfg, nil)
+}
+
+// newHarnessWithChat activates the approval module with an optional chat
+// service: the card resolves the requesting conversation's title through it and
+// can switch to that conversation (FR-29).
+func newHarnessWithChat(t *testing.T, cfg approval.Config, chat contracts.ChatService) *harness {
 	t.Helper()
 	approvals := &fakeApprovals{mode: "ask"}
 	uiRoot := uiroot.New(uiroot.Config{AppName: "ZeoKeel"})
@@ -227,8 +236,11 @@ func newHarness(t *testing.T, cfg approval.Config) *harness {
 	provide(t, ctx, contracts.KeyApprovals, contracts.Approvals(approvals))
 	nav := &recordingNavigator{inner: uiRoot.Navigator()}
 	provide(t, ctx, contracts.KeyNavigator, contracts.Navigator(nav))
+	if chat != nil {
+		provide[contracts.ChatService](t, ctx, contracts.KeyChat, chat)
+	}
 
-	h := &harness{t: t, ctx: ctx, uiRoot: uiRoot, approvals: approvals, navigator: nav}
+	h := &harness{t: t, ctx: ctx, uiRoot: uiRoot, approvals: approvals, navigator: nav, chat: chat}
 	h.fiber = activate(t, ctx, approval.Module(), cfg)
 	// The approval card is read on the session screen.
 	if err := uiRoot.Navigator().Push("session"); err != nil {

@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
@@ -31,6 +32,17 @@ func (l *testLogger) Printf(format string, args ...any) {
 	l.mu.Lock()
 	l.lines = append(l.lines, fmt.Sprintf(format, args...))
 	l.mu.Unlock()
+}
+
+func (l *testLogger) contains(fragment string) bool {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	for _, line := range l.lines {
+		if strings.Contains(line, fragment) {
+			return true
+		}
+	}
+	return false
 }
 
 // harness is one loaded workspace module.
@@ -478,15 +490,37 @@ func TestSearch(t *testing.T) {
 	}
 }
 
-func TestRegistryCorruptFileFailsActivation(t *testing.T) {
+func TestRegistryCorruptFileQuarantined(t *testing.T) {
 	dataDir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(dataDir, DefaultFileName), []byte("{broken"), 0o600); err != nil {
+	path := filepath.Join(dataDir, DefaultFileName)
+	if err := os.WriteFile(path, []byte("{broken"), 0o600); err != nil {
 		t.Fatalf("write corrupt registry: %v", err)
 	}
-	if _, err := loadWorkspace(t, dataDir, nil); err == nil {
-		t.Fatal("module loaded with a corrupt registry")
-	} else if !strings.Contains(err.Error(), "parse") && !strings.Contains(err.Error(), "workspace") {
-		t.Fatalf("corrupt registry error = %v, want a readable parse error", err)
+	h, err := loadWorkspace(t, dataDir, nil)
+	if err != nil {
+		t.Fatalf("module activation with a corrupt registry = %v, want quarantine", err)
+	}
+	if _, err := os.Stat(path); !errors.Is(err, fs.ErrNotExist) {
+		t.Fatalf("corrupt registry still at %s (err=%v)", path, err)
+	}
+	backups, globErr := filepath.Glob(path + ".corrupt-*")
+	if globErr != nil || len(backups) != 1 {
+		t.Fatalf("quarantine backups = %v/%v, want exactly one", backups, globErr)
+	}
+	if !h.logger.contains("corrupt") || !h.logger.contains("quarantine") {
+		t.Fatalf("recovery was not logged: %v", h.logger.lines)
+	}
+	workspaces, listErr := h.service.List(context.Background())
+	if listErr != nil || len(workspaces) != 0 {
+		t.Fatalf("List after quarantine = %+v/%v, want empty", workspaces, listErr)
+	}
+	// The registry keeps working: a new workspace persists to the canonical path.
+	root := makeDir(t, t.TempDir(), "recovered")
+	if _, createErr := h.service.Create(context.Background(), "recovered", root); createErr != nil {
+		t.Fatalf("Create after recovery: %v", createErr)
+	}
+	if _, statErr := os.Stat(path); statErr != nil {
+		t.Fatalf("registry not rewritten after recovery: %v", statErr)
 	}
 }
 

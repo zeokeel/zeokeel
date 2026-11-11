@@ -29,6 +29,8 @@ type fakeSkills struct {
 
 	listCalls int
 	readCalls []string
+
+	warnings []string
 }
 
 func newFakeSkills() *fakeSkills {
@@ -53,6 +55,12 @@ func (f *fakeSkills) Read(_ context.Context, name string) (contracts.Skill, erro
 		return contracts.Skill{}, f.readErr
 	}
 	return contracts.Skill{Name: name, Body: f.bodies[name]}, nil
+}
+
+func (f *fakeSkills) Warnings() []string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]string(nil), f.warnings...)
 }
 
 func (f *fakeSkills) Roots() []string {
@@ -114,10 +122,10 @@ func TestSkillsPageRendersSkills(t *testing.T) {
 	tester := h.tester()
 
 	h.assertTexts(tester,
-		"技能", "从配置目录、dataDir/skills 与工作区 /skills 中发现的 SKILL.md 技能。",
-		"/data/skills", "/work/proj/skills",
-		"alpha", "Alpha 技能说明", "workspace · alpha/SKILL.md",
-		"beta", "workspace · beta/SKILL.md", "查看内容", "刷新")
+		"技能", "从工作区技能目录（/skills、.agents/skills、.zeokeel/skills）、配置目录与 dataDir/skills 中发现的 SKILL.md 技能；工作区优先。",
+		"/data/skills", "/work/proj/skills", "额外技能目录", "应用",
+		"alpha", "Alpha 技能说明", "global · alpha/SKILL.md",
+		"beta", "global · beta/SKILL.md", "查看内容", "刷新")
 	// H20: the card never dumps the absolute path (it lives in the tooltip).
 	h.assertNoTexts(tester, "/data/skills/alpha/SKILL.md", "/data/skills/beta/SKILL.md")
 	h.assertNoTexts(tester, "还没有发现技能", "技能后端未启用")
@@ -227,7 +235,7 @@ func TestSkillsPageEmptyState(t *testing.T) {
 	tester := h.tester()
 	h.assertTexts(tester,
 		"还没有发现技能",
-		"在工作区 /skills 或 dataDir/skills 放置 <name>/SKILL.md 后点击刷新。",
+		"在工作区技能目录（/skills、.agents/skills）或 dataDir/skills 放置 <name>/SKILL.md 后点击刷新。",
 		"/data/skills")
 }
 
@@ -255,4 +263,61 @@ func TestSkillsPageSearchFilters(t *testing.T) {
 	tester.Frame()
 	h.assertTexts(tester, "没有匹配的技能")
 	h.assertNoTexts(tester, "alpha", "beta")
+}
+
+// --- S-02 / S-03 / S-05 (Wave-1 fix regressions) ----------------------------
+
+func TestSkillsPageShowsDiscoveryWarnings(t *testing.T) {
+	skills := newFakeSkills()
+	skills.setList(contracts.Skill{Name: "alpha", Path: "/data/skills/alpha/SKILL.md"})
+	skills.warnings = []string{`skill "alpha" from /work/proj/skills is shadowed by a higher-precedence root`}
+	h := skillPageHarness(t, skills)
+	tester := h.tester()
+	h.assertTexts(tester, "技能发现警告：", "shadowed by a higher-precedence root")
+}
+
+func TestSkillsPageSavesExtraSkillDirectories(t *testing.T) {
+	skills := newFakeSkills()
+	settingsStore := newFakeSettings(nil)
+	h := newHarnessWithSkills(t, &fakeChat{}, settingsStore, settings.Config{}, skills)
+	tester := h.tester()
+	tester.Frame()
+	h.click(tester, "技能")
+	if calls := skills.listCallCount(); calls != 1 {
+		t.Fatalf("List calls = %d after open, want 1", calls)
+	}
+
+	h.focusInput(tester, "目录列表 输入")
+	tester.Type("/home/me/skills-extra")
+	tester.Frame()
+	h.click(tester, "应用")
+
+	if got := settingsStore.Get(contracts.SettingSkillsDirs, ""); got != "/home/me/skills-extra" {
+		t.Fatalf("skills.dirs = %q, want the typed directory list", got)
+	}
+	if calls := skills.listCallCount(); calls != 2 {
+		t.Fatalf("List calls = %d after applying, want a rescan (2)", calls)
+	}
+}
+
+func TestSkillsPageReadsFullBodyWhenListExcerpted(t *testing.T) {
+	skills := newFakeSkills()
+	skills.setList(contracts.Skill{
+		Name: "big", Path: "/data/skills/big/SKILL.md",
+		Body: "前情提要\n[truncated: skill file is larger than the read limit]\n",
+	})
+	skills.bodies["big"] = "前情提要\n\n## 完整正文\n\nTAIL-MARKER"
+	h := skillPageHarness(t, skills)
+	tester := h.tester()
+	if err := tester.Click("查看内容"); err != nil {
+		t.Fatalf("expand: %v", err)
+	}
+	tester.Frame()
+	frame := strings.Join(tester.Texts(), "\n")
+	if !strings.Contains(frame, "TAIL-MARKER") {
+		t.Fatalf("preview did not read the full file; texts = %v", tester.Texts())
+	}
+	if got := skills.reads(); len(got) != 1 || got[0] != "big" {
+		t.Fatalf("Read calls = %v, want [big]", got)
+	}
 }

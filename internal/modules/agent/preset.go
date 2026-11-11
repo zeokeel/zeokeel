@@ -136,24 +136,103 @@ func (s *service) agentPresetForSession(sessionID string) (contracts.AgentPreset
 	return s.agentPresetByID(id)
 }
 
-// toolsForSession returns the registry tools filtered by the selected preset's
-// allowlist (empty allowlist keeps every tool, preserving registration order).
-// The chat-mode/plan-mode gates still apply on top of this filtered surface.
+// toolsForSession returns the registry tools the model may see in one session:
+// the user's disabled-tool settings are removed, the selected preset's allowlist
+// narrows the surface (empty allowlist keeps every tool, registration order is
+// preserved), and the runtime mode (plan/minimal/creator) keeps only the tools
+// its gate would allow. The gate still denies non-whitelisted calls fail-closed:
+// filtering is prompt hygiene, not the security boundary. Delegated child runs
+// (subagent/team) start from the same surface before excluding orchestration
+// tools, so a preset allowlist applies everywhere.
 func (s *service) toolsForSession(sessionID string) []rig.Tool {
-	tools := s.registry.Tools()
-	preset, ok := s.agentPresetForSession(sessionID)
-	if !ok || len(preset.Tools) == 0 {
-		return tools
+	tools := s.enabledRegistryTools()
+	if preset, ok := s.agentPresetForSession(sessionID); ok && len(preset.Tools) > 0 {
+		tools = filterToolsByAllowlist(tools, preset.Tools)
 	}
-	allowed := make(map[string]bool, len(preset.Tools))
-	for _, name := range preset.Tools {
-		allowed[name] = true
+	return filterToolsForMode(tools, s.runtimeMode())
+}
+
+// filterToolsByAllowlist keeps the named tools in registration order (trimmed
+// exact match). An empty allowlist is handled by the caller (keep every tool).
+func filterToolsByAllowlist(tools []rig.Tool, allow []string) []rig.Tool {
+	allowed := make(map[string]bool, len(allow))
+	for _, name := range allow {
+		allowed[strings.TrimSpace(name)] = true
 	}
 	filtered := make([]rig.Tool, 0, len(tools))
 	for _, tool := range tools {
-		if allowed[strings.TrimSpace(tool.Name())] {
+		if tool != nil && allowed[strings.TrimSpace(tool.Name())] {
 			filtered = append(filtered, tool)
 		}
 	}
 	return filtered
+}
+
+// withoutToolNames drops the named tools from a surface, preserving order. Used
+// by the delegated child runners to remove the orchestration tools after the
+// preset/mode surface has been resolved.
+func withoutToolNames(tools []rig.Tool, names []string) []rig.Tool {
+	excluded := make(map[string]bool, len(names))
+	for _, name := range names {
+		if trimmed := strings.TrimSpace(name); trimmed != "" {
+			excluded[trimmed] = true
+		}
+	}
+	if len(excluded) == 0 {
+		return tools
+	}
+	filtered := make([]rig.Tool, 0, len(tools))
+	for _, tool := range tools {
+		if tool == nil {
+			continue
+		}
+		if excluded[strings.TrimSpace(tool.Name())] {
+			continue
+		}
+		filtered = append(filtered, tool)
+	}
+	return filtered
+}
+
+// enabledRegistryTools returns the registry tools without the user-disabled
+// ones. Every agent surface that hands tools to a model starts from this set —
+// the main run (then narrowed by the preset allowlist) and the delegated child
+// runs (subagent/team members) — so a disabled tool never reaches any model.
+func (s *service) enabledRegistryTools() []rig.Tool {
+	tools := s.registry.Tools()
+	disabled := s.disabledTools()
+	if len(disabled) == 0 {
+		return tools
+	}
+	filtered := make([]rig.Tool, 0, len(tools))
+	for _, tool := range tools {
+		if disabled[strings.TrimSpace(tool.Name())] {
+			continue
+		}
+		filtered = append(filtered, tool)
+	}
+	return filtered
+}
+
+// disabledTools reads the union of tools.disabled and mcp.disabledTools (JSON
+// string arrays). A malformed row is logged and ignored, matching the toolkit's
+// best-effort policy: a bad settings value must never remove every tool.
+func (s *service) disabledTools() map[string]bool {
+	if s.settings == nil {
+		return nil
+	}
+	disabled := make(map[string]bool)
+	for _, key := range []string{contracts.SettingToolsDisabled, contracts.SettingMCPDisabledTools} {
+		names, err := contracts.ParseStringListJSON(s.settings.Get(key, ""))
+		if err != nil {
+			s.logger.Printf("[agent] parse %s: %v", key, err)
+			continue
+		}
+		for _, name := range names {
+			if trimmed := strings.TrimSpace(name); trimmed != "" {
+				disabled[trimmed] = true
+			}
+		}
+	}
+	return disabled
 }

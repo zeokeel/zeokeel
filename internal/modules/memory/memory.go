@@ -9,9 +9,16 @@
 //
 // The store implements rig.MemoryStore (contracts.MemoryStore is its product
 // alias) over a JSON document {"entries": [...]}: every mutation is written
-// atomically (temporary file + rename in the same directory) so a crash cannot
-// leave a half-written memory file. The module's activation owns the file
-// handle-free store; persistence errors are returned to the caller.
+// atomically (temporary file + fsync + rename + directory fsync) so a crash
+// cannot leave a half-written memory file. A malformed or unreadable file is
+// quarantined (<path>.corrupt-<ts>) and the module starts with an empty store
+// instead of failing the whole product assembly (FR-06).
+//
+// Entries are workspace aware (FR-25): an entry added for "the current
+// workspace" is persisted with the workspace identity in its scope
+// ("workspace:<id>"), and List/Search only return global entries plus the
+// entries of the current workspace. ListAll exposes every entry to the settings
+// page. The configured scope is the single default for callers that omit one.
 package memory
 
 import (
@@ -23,6 +30,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -40,11 +48,11 @@ const (
 	// ModuleID is the stable module identity used by assembly documents.
 	ModuleID = "zeokeel/memory"
 	// Version is the module's semantic version.
-	Version = "1.0.0"
+	Version = "1.1.0"
 	// DefaultFileName is the memory file name under the product data directory.
 	DefaultFileName = "memory.json"
 	// DefaultScope is the scope stored for entries that carry none.
-	DefaultScope = "global"
+	DefaultScope = contracts.MemoryScopeGlobal
 	// fileMode is the memory file permission (private to the user).
 	fileMode = 0o600
 	// dirMode is the memory directory permission.
@@ -56,8 +64,9 @@ type Config struct {
 	// Path is the memory file: an absolute path, or a path relative to the
 	// product data directory (default memory.json there).
 	Path string `json:"path"`
-	// Scope is the scope applied to memories added without one (default
-	// "global"). Only "global" and "workspace" are accepted.
+	// Scope is the default scope applied to memories added without one (default
+	// "global"). Only "global" and "workspace" are accepted; "workspace" is
+	// resolved to the workspace current at write time.
 	Scope string `json:"scope"`
 }
 
@@ -73,7 +82,19 @@ func Module() *module.Descriptor[Config] {
 		if err != nil {
 			return fmt.Errorf("%s: require logger: %w", ModuleID, err)
 		}
-		store, err := newStore(dataDir, cfg)
+		// The workspace service is optional: a host without workspaces keeps the
+		// legacy flat memory behaviour.
+		var workspace contracts.WorkspaceService
+		if service, ok := ctx.Get(contracts.KeyWorkspace); ok {
+			workspace = service
+		}
+		// The settings store is optional: it only carries the automatic
+		// consolidation policy (maxEntries/maxAgeDays).
+		var settings contracts.SettingsService
+		if service, ok := ctx.Get(contracts.KeySettings); ok {
+			settings = service
+		}
+		store, err := openStore(dataDir, cfg, logger, workspace, policyFromSettings(settings))
 		if err != nil {
 			return fmt.Errorf("%s: open memory store: %w", ModuleID, err)
 		}
@@ -108,7 +129,7 @@ func validateConfig(cfg Config) error {
 	if strings.ContainsRune(cfg.Path, 0) {
 		return fmt.Errorf("%s: path contains a NUL byte", ModuleID)
 	}
-	if _, err := normalizeScope(cfg.Scope); err != nil {
+	if _, err := normalizeConfiguredScope(cfg.Scope); err != nil {
 		return err
 	}
 	return nil
@@ -136,18 +157,60 @@ func registerMemoryTools(ctx cordis.Context, registry *rigtools.Registry, store 
 	}
 }
 
-// normalizeScope canonicalizes and validates one scope.
-func normalizeScope(scope string) (string, error) {
-	normalized := strings.ToLower(strings.TrimSpace(scope))
-	if normalized == "" {
+// normalizeConfiguredScope canonicalizes the assembly-level default scope.
+func normalizeConfiguredScope(scope string) (string, error) {
+	switch normalized := strings.ToLower(strings.TrimSpace(scope)); normalized {
+	case "":
 		return DefaultScope, nil
-	}
-	switch normalized {
-	case DefaultScope, "workspace":
+	case contracts.MemoryScopeGlobal, contracts.MemoryScopeWorkspace:
 		return normalized, nil
 	default:
-		return "", fmt.Errorf("%s: invalid scope %q (want %q or %q)", ModuleID, scope, DefaultScope, "workspace")
+		return "", fmt.Errorf("%s: invalid scope %q (want %q or %q)", ModuleID, scope, contracts.MemoryScopeGlobal, contracts.MemoryScopeWorkspace)
 	}
+}
+
+// normalizeScope canonicalizes and validates one entry scope against the
+// current workspace. An empty scope becomes the configured default, "workspace"
+// becomes the bound current-workspace scope, an already bound workspace scope
+// keeps its identity, and anything else is rejected (the same rule Add, Update
+// and the model tool share).
+func (s *Store) normalizeScope(ctx context.Context, scope string) (string, error) {
+	raw := strings.TrimSpace(scope)
+	if raw == "" {
+		raw = s.defaultScope
+	}
+	switch strings.ToLower(raw) {
+	case contracts.MemoryScopeGlobal:
+		return contracts.MemoryScopeGlobal, nil
+	case contracts.MemoryScopeWorkspace:
+		return contracts.MemoryWorkspaceScope(s.currentWorkspaceID(ctx)), nil
+	}
+	if workspaceID, ok := contracts.MemoryScopeWorkspaceID(raw); ok {
+		return contracts.MemoryWorkspaceScope(workspaceID), nil
+	}
+	return "", fmt.Errorf("%s: invalid scope %q (want %q, %q or \"workspace:<id>\")", ModuleID, scope, contracts.MemoryScopeGlobal, contracts.MemoryScopeWorkspace)
+}
+
+// policyFromSettings reads the automatic consolidation policy. Missing or
+// malformed rows mean "no policy" (0 = unlimited), matching the settings page.
+func policyFromSettings(settings contracts.SettingsService) contracts.MemoryPolicy {
+	if settings == nil {
+		return contracts.MemoryPolicy{}
+	}
+	return contracts.MemoryPolicy{
+		MaxEntries: parsePolicyInt(settings.Get(contracts.SettingMemoryMaxEntries, "")),
+		MaxAge:     time.Duration(parsePolicyInt(settings.Get(contracts.SettingMemoryMaxAgeDays, ""))) * 24 * time.Hour,
+	}
+}
+
+// parsePolicyInt parses one policy input: empty/invalid/negative means 0
+// (unlimited).
+func parsePolicyInt(raw string) int {
+	value, err := strconv.Atoi(strings.TrimSpace(raw))
+	if err != nil || value < 0 {
+		return 0
+	}
+	return value
 }
 
 // --- store -----------------------------------------------------------------
@@ -160,32 +223,60 @@ type fileDocument struct {
 // Store is a JSON-file backed contracts.MemoryStore. All methods are safe for
 // concurrent use; each mutation persists the whole (small) document atomically.
 type Store struct {
-	mu           sync.Mutex
-	path         string
+	mu        sync.Mutex
+	path      string
+	entries   []contracts.Memory
+	logger    contracts.Logger
+	workspace contracts.WorkspaceService
+
 	defaultScope string
-	entries      []contracts.Memory
+	policy       contracts.MemoryPolicy
+	recovery     string
+	version      uint64
 }
 
-var _ contracts.MemoryStore = (*Store)(nil)
-var _ contracts.MemoryUpdater = (*Store)(nil)
-var _ contracts.MemoryConsolidator = (*Store)(nil)
+var (
+	_ contracts.MemoryStore            = (*Store)(nil)
+	_ contracts.MemoryUpdater          = (*Store)(nil)
+	_ contracts.MemoryConsolidator     = (*Store)(nil)
+	_ contracts.MemoryAllLister        = (*Store)(nil)
+	_ contracts.MemoryRecoveryReporter = (*Store)(nil)
+	_ contracts.MemoryVersioner        = (*Store)(nil)
+)
 
-// newStore resolves the configured path and loads the existing document. A
-// missing file starts an empty store; an unreadable or malformed file is a
-// startup error (wrapped, never a panic).
+// newStore resolves the configured path and opens the store without a host
+// logger (tests and diagnostics). See openStore for the product entry point.
 func newStore(dataDir string, cfg Config) (*Store, error) {
+	return openStore(dataDir, cfg, nil, nil, contracts.MemoryPolicy{})
+}
+
+// openStore resolves the configured path, loads the existing document and
+// applies the automatic consolidation policy once. A missing file starts an
+// empty store; a malformed or unreadable file is quarantined and never fails
+// activation (FR-06).
+func openStore(dataDir string, cfg Config, logger contracts.Logger,
+	workspace contracts.WorkspaceService, policy contracts.MemoryPolicy) (*Store, error) {
 	path, err := resolvePath(dataDir, cfg.Path)
 	if err != nil {
 		return nil, err
 	}
-	scope, err := normalizeScope(cfg.Scope)
+	scope, err := normalizeConfiguredScope(cfg.Scope)
 	if err != nil {
 		return nil, err
 	}
-	store := &Store{path: path, defaultScope: scope}
+	store := &Store{
+		path:         path,
+		defaultScope: scope,
+		logger:       logger,
+		workspace:    workspace,
+		policy:       policy,
+	}
 	if err := store.load(); err != nil {
 		return nil, err
 	}
+	// The policy is enforced on open (M-10): a user who set a cap or a
+	// retention window gets it applied without clicking the settings action.
+	store.enforcePolicy(context.Background())
 	return store, nil
 }
 
@@ -211,18 +302,22 @@ func resolvePath(dataDir, requested string) (string, error) {
 // Path returns the resolved memory file path (diagnostics and tests).
 func (s *Store) Path() string { return s.path }
 
-// load reads the document, treating a missing file as an empty store.
+// load reads the document, treating a missing file as an empty store. An
+// unreadable or malformed file is quarantined and reported through
+// RecoveryNotice instead of failing activation (FR-06).
 func (s *Store) load() error {
 	data, err := os.ReadFile(s.path)
 	if errors.Is(err, fs.ErrNotExist) {
 		return nil
 	}
 	if err != nil {
-		return fmt.Errorf("%s: read %q: %w", ModuleID, s.path, err)
+		s.noteRecovery(fmt.Sprintf("memory file %q could not be read (%v); starting with an empty memory store", s.path, err))
+		return nil
 	}
 	entries, err := decodeEntries(data)
 	if err != nil {
-		return fmt.Errorf("%s: parse %q: %w", ModuleID, s.path, err)
+		s.quarantine(fmt.Sprintf("memory file %q is corrupt (%v)", s.path, err))
+		return nil
 	}
 	s.entries = entries
 	return nil
@@ -249,8 +344,103 @@ func decodeEntries(data []byte) ([]contracts.Memory, error) {
 	return document.Entries, nil
 }
 
-// List implements contracts.MemoryStore in insertion order.
+// RecoveryNotice returns the last recovery warning ("" when the store loaded
+// healthy). It implements contracts.MemoryRecoveryReporter so the memory page
+// can tell the user their previous entries were backed up.
+func (s *Store) RecoveryNotice() string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.recovery
+}
+
+// quarantine renames the unusable memory file out of the way and records the
+// recovery notice; the original error is kept in the notice so the log is
+// actionable. A rename failure only weakens the message: the store still starts
+// empty either way.
+func (s *Store) quarantine(reason string) {
+	backup := fmt.Sprintf("%s.corrupt-%d", s.path, time.Now().UTC().UnixNano())
+	message := reason + "; starting with an empty memory store"
+	if err := os.Rename(s.path, backup); err != nil {
+		message += fmt.Sprintf(" (could not quarantine the file: %v)", err)
+	} else {
+		message += fmt.Sprintf(" (quarantined as %s)", backup)
+	}
+	s.noteRecovery(message)
+}
+
+// noteRecovery records and logs one recovery warning.
+func (s *Store) noteRecovery(message string) {
+	s.recovery = message
+	if s.logger != nil {
+		s.logger.Printf("%s: %s", ModuleID, message)
+	}
+}
+
+// Version returns the successful-mutation counter (contracts.MemoryVersioner):
+// the UI compares it per frame to notice entries written out of band.
+func (s *Store) Version() uint64 {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.version
+}
+
+// currentWorkspaceID returns the id of the workspace current at call time (""
+// when no workspace is open or no workspace service is wired).
+func (s *Store) currentWorkspaceID(ctx context.Context) string {
+	if s.workspace == nil {
+		return ""
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	workspace, ok, err := s.workspace.Current(ctx)
+	if err != nil {
+		if s.logger != nil {
+			s.logger.Printf("%s: current workspace for memory scope: %v", ModuleID, err)
+		}
+		return ""
+	}
+	if !ok {
+		return ""
+	}
+	return strings.TrimSpace(workspace.ID)
+}
+
+// visibleInWorkspace reports whether an entry belongs in the current
+// workspace's view. Global entries and legacy/unbound scopes are always visible
+// so upgrading never hides existing data; a bound workspace entry is only
+// visible in its own workspace.
+func visibleInWorkspace(scope, currentWorkspaceID string) bool {
+	scope = strings.TrimSpace(scope)
+	if workspaceID, ok := contracts.MemoryScopeWorkspaceID(scope); ok {
+		return workspaceID == strings.TrimSpace(currentWorkspaceID)
+	}
+	// Global entries, the legacy bare "workspace" scope and historical custom
+	// scopes cannot be attributed to one workspace, so they stay visible.
+	return true
+}
+
+// List implements contracts.MemoryStore: the current workspace's view in
+// insertion order (global + legacy entries + this workspace's entries).
 func (s *Store) List(ctx context.Context) ([]contracts.Memory, error) {
+	if err := contextErr(ctx); err != nil {
+		return nil, err
+	}
+	currentWorkspaceID := s.currentWorkspaceID(ctx)
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	visible := make([]contracts.Memory, 0, len(s.entries))
+	for _, memory := range s.entries {
+		if visibleInWorkspace(memory.Scope, currentWorkspaceID) {
+			visible = append(visible, memory)
+		}
+	}
+	return visible, nil
+}
+
+// ListAll implements contracts.MemoryAllLister: every entry of every
+// workspace, for the settings management page.
+func (s *Store) ListAll(ctx context.Context) ([]contracts.Memory, error) {
 	if err := contextErr(ctx); err != nil {
 		return nil, err
 	}
@@ -259,27 +449,26 @@ func (s *Store) List(ctx context.Context) ([]contracts.Memory, error) {
 	return cloneEntries(s.entries), nil
 }
 
-// Add implements contracts.MemoryStore. A missing ID becomes
-// "mem-<unixnano>", a missing scope the configured default and a missing
-// Created now (UTC). A persistence failure rolls the in-memory list back and is
-// returned to the caller.
+// Add implements contracts.MemoryStore. A missing ID becomes "mem-<unixnano>",
+// a missing scope the configured default (a "workspace" default is bound to the
+// current workspace), a missing Created now (UTC). An unknown scope is rejected
+// with the same rule Update uses (M-04). A persistence failure rolls the
+// in-memory list back; the automatic policy runs after a successful add.
 func (s *Store) Add(ctx context.Context, memory contracts.Memory) (contracts.Memory, error) {
 	if err := contextErr(ctx); err != nil {
 		return contracts.Memory{}, err
 	}
+	scope, err := s.normalizeScope(ctx, memory.Scope)
+	if err != nil {
+		return contracts.Memory{}, err
+	}
 	s.mu.Lock()
-	defer s.mu.Unlock()
-
 	if id := strings.TrimSpace(memory.ID); id == "" {
 		memory.ID = s.newIDLocked()
 	} else {
 		memory.ID = id
 	}
-	if scope := strings.TrimSpace(memory.Scope); scope == "" {
-		memory.Scope = s.defaultScope
-	} else {
-		memory.Scope = scope
-	}
+	memory.Scope = scope
 	if memory.Created.IsZero() {
 		memory.Created = time.Now().UTC()
 	}
@@ -288,9 +477,40 @@ func (s *Store) Add(ctx context.Context, memory contracts.Memory) (contracts.Mem
 	s.entries = append(previous, memory)
 	if err := s.persistLocked(); err != nil {
 		s.entries = previous
+		s.mu.Unlock()
 		return contracts.Memory{}, err
 	}
+	s.version++
+	s.mu.Unlock()
+	// Enforce the configured cap/retention on write as well as on open. The
+	// new entry is the newest so a cap keeps it; only expired legacy entries
+	// can be removed. Policy failures are logged, never fail the add.
+	s.enforcePolicy(ctx)
 	return memory, nil
+}
+
+// newIDLocked generates a unique "mem-<unixnano>" ID.
+func (s *Store) newIDLocked() string {
+	base := time.Now().UnixNano()
+	for offset := int64(0); ; offset++ {
+		id := fmt.Sprintf("mem-%d", base+offset)
+		if !s.hasIDLocked(id) {
+			return id
+		}
+		if offset > 1024 {
+			return fmt.Sprintf("mem-%d-%d", base, len(s.entries))
+		}
+	}
+}
+
+// hasIDLocked reports whether an entry already uses id.
+func (s *Store) hasIDLocked(id string) bool {
+	for _, memory := range s.entries {
+		if memory.ID == id {
+			return true
+		}
+	}
+	return false
 }
 
 // Update implements contracts.MemoryUpdater: it replaces one entry's text while
@@ -310,10 +530,10 @@ func (s *Store) Update(ctx context.Context, id, text, scope string) (contracts.M
 		return contracts.Memory{}, fmt.Errorf("%s: update: text is required", ModuleID)
 	}
 	// An omitted scope keeps the entry's current scope; a provided one is
-	// validated exactly like a stored scope.
+	// normalized exactly like a stored scope.
 	normalizedScope := ""
 	if strings.TrimSpace(scope) != "" {
-		normalized, err := normalizeScope(scope)
+		normalized, err := s.normalizeScope(ctx, scope)
 		if err != nil {
 			return contracts.Memory{}, err
 		}
@@ -343,31 +563,8 @@ func (s *Store) Update(ctx context.Context, id, text, scope string) (contracts.M
 		s.entries = previous
 		return contracts.Memory{}, err
 	}
+	s.version++
 	return updated, nil
-}
-
-// newIDLocked generates a unique "mem-<unixnano>" ID.
-func (s *Store) newIDLocked() string {
-	base := time.Now().UnixNano()
-	for offset := int64(0); ; offset++ {
-		id := fmt.Sprintf("mem-%d", base+offset)
-		if !s.hasIDLocked(id) {
-			return id
-		}
-		if offset > 1024 {
-			return fmt.Sprintf("mem-%d-%d", base, len(s.entries))
-		}
-	}
-}
-
-// hasIDLocked reports whether an entry already uses id.
-func (s *Store) hasIDLocked(id string) bool {
-	for _, memory := range s.entries {
-		if memory.ID == id {
-			return true
-		}
-	}
-	return false
 }
 
 // Remove implements contracts.MemoryStore. It reports whether the entry existed
@@ -395,87 +592,131 @@ func (s *Store) Remove(_ context.Context, id string) bool {
 		s.entries = previous
 		return false
 	}
+	s.version++
 	return true
 }
 
 // Consolidate implements contracts.MemoryConsolidator with the current clock.
+// It always operates on every entry of every workspace (management semantics).
 func (s *Store) Consolidate(ctx context.Context, policy contracts.MemoryPolicy) (contracts.MemoryConsolidationReport, error) {
-	return s.consolidate(ctx, policy, time.Now().UTC())
+	if err := contextErr(ctx); err != nil {
+		return contracts.MemoryConsolidationReport{}, err
+	}
+	return s.consolidate(policy, time.Now().UTC())
 }
 
 // consolidate runs one deterministic consolidation at now: first the expiry
 // window (entries created strictly before now-MaxAge), then the entry cap
-// (removing the oldest entries until MaxEntries remain). It performs no model
-// calls and returns the counts of the successful removals; a failure to remove
-// an entry is reported as an error together with the partial report.
-func (s *Store) consolidate(ctx context.Context, policy contracts.MemoryPolicy, now time.Time) (contracts.MemoryConsolidationReport, error) {
+// (removing the oldest entries until MaxEntries remain). It persists once (or
+// not at all) and returns the counts; a persistence failure leaves the store
+// untouched and is reported.
+func (s *Store) consolidate(policy contracts.MemoryPolicy, now time.Time) (contracts.MemoryConsolidationReport, error) {
 	report := contracts.MemoryConsolidationReport{}
-	if err := contextErr(ctx); err != nil {
-		return report, err
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if policy.MaxAge <= 0 && policy.MaxEntries <= 0 {
+		report.Remaining = len(s.entries)
+		return report, nil
 	}
-	entries, err := s.List(ctx)
-	if err != nil {
-		return report, err
+	previous := cloneEntries(s.entries)
+	keep := make([]bool, len(s.entries))
+	for index := range keep {
+		keep[index] = true
 	}
-	failures := 0
-	remaining := entries
 	if policy.MaxAge > 0 {
 		cutoff := now.Add(-policy.MaxAge)
-		kept := make([]contracts.Memory, 0, len(remaining))
-		for _, memory := range remaining {
+		for index, memory := range s.entries {
 			if memory.Created.IsZero() || !memory.Created.Before(cutoff) {
-				kept = append(kept, memory)
 				continue
 			}
-			if s.Remove(ctx, memory.ID) {
-				report.RemovedExpired++
-			} else {
-				failures++
-				kept = append(kept, memory)
+			keep[index] = false
+			report.RemovedExpired++
+		}
+	}
+	if policy.MaxEntries > 0 {
+		remaining := 0
+		for index := range s.entries {
+			if keep[index] {
+				remaining++
 			}
 		}
-		remaining = kept
-	}
-	if policy.MaxEntries > 0 && len(remaining) > policy.MaxEntries {
-		oldest := append([]contracts.Memory(nil), remaining...)
-		sort.SliceStable(oldest, func(left, right int) bool {
-			return oldest[left].Created.Before(oldest[right].Created)
-		})
-		for _, memory := range oldest[:len(remaining)-policy.MaxEntries] {
-			if s.Remove(ctx, memory.ID) {
+		if remaining > policy.MaxEntries {
+			order := make([]int, 0, remaining)
+			for index := range s.entries {
+				if keep[index] {
+					order = append(order, index)
+				}
+			}
+			sort.SliceStable(order, func(left, right int) bool {
+				return s.entries[order[left]].Created.Before(s.entries[order[right]].Created)
+			})
+			for _, index := range order[:remaining-policy.MaxEntries] {
+				keep[index] = false
 				report.RemovedOverCap++
-			} else {
-				failures++
 			}
 		}
 	}
-	after, err := s.List(ctx)
-	if err != nil {
-		return report, err
+	if report.RemovedExpired == 0 && report.RemovedOverCap == 0 {
+		report.Remaining = len(s.entries)
+		return report, nil
 	}
-	report.Remaining = len(after)
-	if failures > 0 {
-		return report, fmt.Errorf("%s: consolidate: %d entr(ies) could not be removed (expired %d, over cap %d, remaining %d)",
-			ModuleID, failures, report.RemovedExpired, report.RemovedOverCap, report.Remaining)
+	kept := make([]contracts.Memory, 0, len(s.entries))
+	for index, memory := range s.entries {
+		if keep[index] {
+			kept = append(kept, memory)
+		}
 	}
+	s.entries = kept
+	if err := s.persistLocked(); err != nil {
+		// Nothing was persisted, so report no removals either: the in-memory
+		// store is rolled back and the caller only sees the failure.
+		s.entries = previous
+		report = contracts.MemoryConsolidationReport{Remaining: len(previous)}
+		return report, fmt.Errorf("%s: consolidate: persist: %w", ModuleID, err)
+	}
+	s.version++
+	report.Remaining = len(s.entries)
 	return report, nil
 }
 
+// enforcePolicy applies the configured automatic policy and logs failures.
+// It is a no-op when no policy is configured.
+func (s *Store) enforcePolicy(ctx context.Context) {
+	present := s.policy.MaxAge > 0 || s.policy.MaxEntries > 0
+	if !present {
+		return
+	}
+	report, err := s.Consolidate(ctx, s.policy)
+	if err != nil {
+		if s.logger != nil {
+			s.logger.Printf("%s: automatic memory consolidation: %v", ModuleID, err)
+		}
+		return
+	}
+	if removed := report.RemovedExpired + report.RemovedOverCap; removed > 0 && s.logger != nil {
+		s.logger.Printf("%s: automatic memory consolidation removed %d entr(ies) (expired %d, over cap %d, remaining %d)",
+			ModuleID, removed, report.RemovedExpired, report.RemovedOverCap, report.Remaining)
+	}
+}
+
 // Search implements contracts.MemoryStore: a case-insensitive substring match
-// over the text; an empty query returns every entry.
+// over the text of the current workspace's view; an empty query returns every
+// visible entry.
 func (s *Store) Search(ctx context.Context, query string) ([]contracts.Memory, error) {
 	if err := contextErr(ctx); err != nil {
 		return nil, err
 	}
 	query = strings.ToLower(strings.TrimSpace(query))
+	currentWorkspaceID := s.currentWorkspaceID(ctx)
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if query == "" {
-		return cloneEntries(s.entries), nil
-	}
 	matches := make([]contracts.Memory, 0, len(s.entries))
 	for _, memory := range s.entries {
-		if strings.Contains(strings.ToLower(memory.Text), query) {
+		if !visibleInWorkspace(memory.Scope, currentWorkspaceID) {
+			continue
+		}
+		if query == "" || strings.Contains(strings.ToLower(memory.Text), query) {
 			matches = append(matches, memory)
 		}
 	}
@@ -483,7 +724,8 @@ func (s *Store) Search(ctx context.Context, query string) ([]contracts.Memory, e
 }
 
 // persistLocked writes the document atomically: a temporary file in the same
-// directory is written, synced, closed and renamed over the target.
+// directory is written, synced, closed and renamed over the target, then the
+// directory is synced so the rename itself survives a power loss.
 func (s *Store) persistLocked() error {
 	directory := filepath.Dir(s.path)
 	if err := os.MkdirAll(directory, dirMode); err != nil {
@@ -522,7 +764,19 @@ func (s *Store) persistLocked() error {
 		_ = os.Remove(temporaryPath)
 		return fmt.Errorf("%s: replace memory file %q: %w", ModuleID, s.path, err)
 	}
+	syncDirectory(directory)
 	return nil
+}
+
+// syncDirectory fsyncs a directory so a completed rename survives a power loss
+// (best effort: some platforms/filesystems cannot sync directories).
+func syncDirectory(directory string) {
+	handle, err := os.Open(directory)
+	if err != nil {
+		return
+	}
+	_ = handle.Sync()
+	_ = handle.Close()
 }
 
 // cloneEntries returns a shallow copy of the entry slice (entries contain no

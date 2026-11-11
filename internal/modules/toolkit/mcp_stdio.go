@@ -5,9 +5,11 @@ package toolkit
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"time"
 
+	rig "github.com/zeokeel/zeokeel-rig"
 	"github.com/zeokeel/zeokeel-rig/tools/mcp"
 )
 
@@ -55,13 +57,72 @@ func mcpStartConfig(server MCPServer) mcp.Config {
 	return cfg
 }
 
+// startMCPClient connects one server over its configured transport. ctx bounds
+// the handshake (the MCP startup phase passes one overall deadline).
+func startMCPClient(ctx context.Context, server MCPServer) (*mcp.Client, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	switch mcpServerTransport(server) {
+	case mcp.TransportStdio:
+		return mcp.Start(ctx, mcpStartConfig(server))
+	case mcp.TransportHTTP:
+		return startHTTPMCP(ctx, server)
+	default:
+		return nil, fmt.Errorf("mcp: unsupported transport %q", mcpServerTransport(server))
+	}
+}
+
 // startHTTPMCP is the HTTP half of the startup loop, kept separate so the loop
 // reads as transport dispatch.
-func startHTTPMCP(server MCPServer) (*mcp.Client, error) {
-	return mcp.StartHTTP(context.Background(), mcp.HTTPConfig{
+func startHTTPMCP(ctx context.Context, server MCPServer) (*mcp.Client, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	cfg := mcp.HTTPConfig{
 		URL:        server.URL,
 		Headers:    server.Headers,
 		ServerName: server.Name,
-		Timeout:    time.Duration(server.TimeoutMs) * time.Millisecond,
-	})
+	}
+	if server.TimeoutMs > 0 {
+		cfg.Timeout = time.Duration(server.TimeoutMs) * time.Millisecond
+	}
+	return mcp.StartHTTP(ctx, cfg)
+}
+
+// mcpResourceTools adapts the resource/prompt tool subset of one MCP server.
+// rig names those five tools without any server identity, so a second server
+// would register the same names and panic the tool registry; the toolkit gives
+// every server its own "mcp__<server>__" prefix instead.
+func mcpResourceTools(client *mcp.Client) []rig.Tool {
+	serverName := ""
+	if client != nil {
+		serverName = client.ServerName()
+	}
+	return mcp.ResourceTools(client, "mcp__"+sanitizeMCPName(serverName)+"__")
+}
+
+// sanitizeMCPName maps an MCP server name onto the model-visible tool namespace
+// characters ([A-Za-z0-9_-]). It mirrors rig's tools/mcp sanitizeName so the
+// resource tools share the exact namespace of the tools/list tools
+// ("mcp__<server>__<tool>").
+func sanitizeMCPName(name string) string {
+	var builder strings.Builder
+	builder.Grow(len(name))
+	for _, r := range name {
+		switch {
+		case r >= 'a' && r <= 'z',
+			r >= 'A' && r <= 'Z',
+			r >= '0' && r <= '9',
+			r == '_', r == '-':
+			builder.WriteRune(r)
+		default:
+			builder.WriteByte('_')
+		}
+	}
+	out := strings.Trim(builder.String(), "_")
+	if out == "" {
+		return "tool"
+	}
+	return out
 }

@@ -17,6 +17,7 @@ import (
 	"github.com/zeokeel/zeokeel-kernel/module"
 
 	rig "github.com/zeokeel/zeokeel-rig"
+	"github.com/zeokeel/zeokeel-rig/sandbox"
 	"github.com/zeokeel/zeokeel-rig/tools/lsp"
 
 	"github.com/zeokeel/zeokeel/internal/contracts"
@@ -59,10 +60,23 @@ func (s *lspSettings) All() map[string]string { return nil }
 
 // fakeLSPSession is the lspSession seam for tests.
 type fakeLSPSession struct {
-	tools    []rig.Tool
-	uriFn    func(string) (string, error)
-	closed   atomic.Bool
-	closeErr error
+	tools       []rig.Tool
+	uriFn       func(string) (string, error)
+	closed      atomic.Bool
+	closeErr    error
+	initCalls   atomic.Int32
+	initErr     error
+	initialized atomic.Bool
+}
+
+// Initialize implements lspSession.
+func (s *fakeLSPSession) Initialize(context.Context) error {
+	s.initCalls.Add(1)
+	if s.initErr != nil {
+		return s.initErr
+	}
+	s.initialized.Store(true)
+	return nil
 }
 
 func (s *fakeLSPSession) Tools(fn func(string) (string, error)) []rig.Tool {
@@ -85,7 +99,7 @@ func (t fakeLSPTool) Invoke(context.Context, rig.ToolCall) (rig.ToolResult, erro
 	return rig.ToolResult{Content: "ok"}, nil
 }
 
-func withLSPStart(t *testing.T, start func(context.Context, lsp.Config) (lspSession, error)) {
+func withLSPStart(t *testing.T, start func(context.Context, lsp.Config, *sandbox.Policy) (lspSession, error)) {
 	t.Helper()
 	previous := lspStartFunc
 	lspStartFunc = start
@@ -222,7 +236,7 @@ func TestToolkitStartsLSPAndRegistersTools(t *testing.T) {
 		fakeLSPTool{name: "read_file"}, // conflicts with the builtin tool
 	}}
 	var captured lsp.Config
-	withLSPStart(t, func(_ context.Context, cfg lsp.Config) (lspSession, error) {
+	withLSPStart(t, func(_ context.Context, cfg lsp.Config, _ *sandbox.Policy) (lspSession, error) {
 		captured = cfg
 		return session, nil
 	})
@@ -254,7 +268,7 @@ func TestToolkitStartsLSPAndRegistersTools(t *testing.T) {
 }
 
 func TestToolkitLSPStartFailureDoesNotBreakActivation(t *testing.T) {
-	withLSPStart(t, func(context.Context, lsp.Config) (lspSession, error) {
+	withLSPStart(t, func(context.Context, lsp.Config, *sandbox.Policy) (lspSession, error) {
 		return nil, errFakeLSPStart
 	})
 	settings := newLSPSettings(`{"command":"missing-binary"}`)
@@ -271,7 +285,7 @@ func TestToolkitLSPStartFailureDoesNotBreakActivation(t *testing.T) {
 
 func TestToolkitLSPDisabledWithoutSettings(t *testing.T) {
 	called := atomic.Bool{}
-	withLSPStart(t, func(context.Context, lsp.Config) (lspSession, error) {
+	withLSPStart(t, func(context.Context, lsp.Config, *sandbox.Policy) (lspSession, error) {
 		called.Store(true)
 		return &fakeLSPSession{}, nil
 	})
@@ -287,7 +301,7 @@ func TestToolkitLSPDisabledWithoutSettings(t *testing.T) {
 
 func TestToolkitLSPEmptyOrMalformedSettings(t *testing.T) {
 	called := atomic.Bool{}
-	withLSPStart(t, func(context.Context, lsp.Config) (lspSession, error) {
+	withLSPStart(t, func(context.Context, lsp.Config, *sandbox.Policy) (lspSession, error) {
 		called.Store(true)
 		return &fakeLSPSession{}, nil
 	})
@@ -310,7 +324,7 @@ func TestToolkitLSPEmptyOrMalformedSettings(t *testing.T) {
 
 func TestToolkitLSPClosesOnUnload(t *testing.T) {
 	session := &fakeLSPSession{tools: []rig.Tool{fakeLSPTool{name: "lsp_hover"}}}
-	withLSPStart(t, func(context.Context, lsp.Config) (lspSession, error) { return session, nil })
+	withLSPStart(t, func(context.Context, lsp.Config, *sandbox.Policy) (lspSession, error) { return session, nil })
 	_, loader, _ := loadToolkit(t, newLSPSettings(`{"command":"gopls"}`), true)
 	if err := loader.Close(); err != nil {
 		t.Fatalf("close loader: %v", err)
@@ -413,7 +427,7 @@ func TestActiveLSPServerSelection(t *testing.T) {
 func TestToolkitStartsOnlyActiveServer(t *testing.T) {
 	session := &fakeLSPSession{tools: []rig.Tool{fakeLSPTool{name: "lsp_hover"}}}
 	var captured lsp.Config
-	withLSPStart(t, func(_ context.Context, cfg lsp.Config) (lspSession, error) {
+	withLSPStart(t, func(_ context.Context, cfg lsp.Config, _ *sandbox.Policy) (lspSession, error) {
 		captured = cfg
 		return session, nil
 	})
@@ -437,7 +451,7 @@ func TestToolkitStartsOnlyActiveServer(t *testing.T) {
 
 func TestToolkitLSPActiveMissingUsesFirstServer(t *testing.T) {
 	var captured lsp.Config
-	withLSPStart(t, func(_ context.Context, cfg lsp.Config) (lspSession, error) {
+	withLSPStart(t, func(_ context.Context, cfg lsp.Config, _ *sandbox.Policy) (lspSession, error) {
 		captured = cfg
 		return &fakeLSPSession{tools: []rig.Tool{fakeLSPTool{name: "lsp_hover"}}}, nil
 	})
@@ -454,7 +468,7 @@ func TestToolkitLSPActiveMissingUsesFirstServer(t *testing.T) {
 
 func TestToolkitLSPLegacySingleServerStillStarts(t *testing.T) {
 	var captured lsp.Config
-	withLSPStart(t, func(_ context.Context, cfg lsp.Config) (lspSession, error) {
+	withLSPStart(t, func(_ context.Context, cfg lsp.Config, _ *sandbox.Policy) (lspSession, error) {
 		captured = cfg
 		return &fakeLSPSession{tools: []rig.Tool{fakeLSPTool{name: "lsp_hover"}}}, nil
 	})
@@ -473,7 +487,7 @@ func TestToolkitLSPLegacySingleServerStillStarts(t *testing.T) {
 
 func TestToolkitLSPBadServerListSkips(t *testing.T) {
 	called := atomic.Bool{}
-	withLSPStart(t, func(context.Context, lsp.Config) (lspSession, error) {
+	withLSPStart(t, func(context.Context, lsp.Config, *sandbox.Policy) (lspSession, error) {
 		called.Store(true)
 		return &fakeLSPSession{}, nil
 	})
@@ -549,7 +563,7 @@ func writeWorkspaceLSPConfig(t *testing.T, content string) string {
 
 func TestToolkitLSPWorkspaceNotOptedInDoesNotRead(t *testing.T) {
 	root := writeWorkspaceLSPConfig(t, `{bad-json`)
-	withLSPStart(t, func(context.Context, lsp.Config) (lspSession, error) {
+	withLSPStart(t, func(context.Context, lsp.Config, *sandbox.Policy) (lspSession, error) {
 		return &fakeLSPSession{tools: []rig.Tool{fakeLSPTool{name: "lsp_hover"}}}, nil
 	})
 	settings := newLSPMultiSettings(map[string]string{})
@@ -566,7 +580,7 @@ func TestToolkitLSPWorkspaceOptInUsesWorkspaceServers(t *testing.T) {
 	root := writeWorkspaceLSPConfig(t,
 		`{"servers":[{"name":"ws","command":"ws-lsp","args":["--stdio"]}]}`)
 	var captured lsp.Config
-	withLSPStart(t, func(_ context.Context, cfg lsp.Config) (lspSession, error) {
+	withLSPStart(t, func(_ context.Context, cfg lsp.Config, _ *sandbox.Policy) (lspSession, error) {
 		captured = cfg
 		return &fakeLSPSession{tools: []rig.Tool{fakeLSPTool{name: "lsp_hover"}}}, nil
 	})
@@ -589,7 +603,7 @@ func TestToolkitLSPWorkspaceSettingsOverrideSameName(t *testing.T) {
 	root := writeWorkspaceLSPConfig(t,
 		`[{"name":"GO","command":"workspace-gopls"}]`)
 	var captured lsp.Config
-	withLSPStart(t, func(_ context.Context, cfg lsp.Config) (lspSession, error) {
+	withLSPStart(t, func(_ context.Context, cfg lsp.Config, _ *sandbox.Policy) (lspSession, error) {
 		captured = cfg
 		return &fakeLSPSession{tools: []rig.Tool{fakeLSPTool{name: "lsp_hover"}}}, nil
 	})
@@ -614,7 +628,7 @@ func TestToolkitLSPWorkspaceOnlyServerCanBeActive(t *testing.T) {
 	root := writeWorkspaceLSPConfig(t,
 		`{"servers":[{"name":"ws","command":"ws-lsp"}]}`)
 	var captured lsp.Config
-	withLSPStart(t, func(_ context.Context, cfg lsp.Config) (lspSession, error) {
+	withLSPStart(t, func(_ context.Context, cfg lsp.Config, _ *sandbox.Policy) (lspSession, error) {
 		captured = cfg
 		return &fakeLSPSession{}, nil
 	})
@@ -635,7 +649,7 @@ func TestToolkitLSPWorkspaceOnlyServerCanBeActive(t *testing.T) {
 func TestToolkitLSPWorkspaceBadJSONKeepsSettings(t *testing.T) {
 	root := writeWorkspaceLSPConfig(t, `{bad-json`)
 	var captured lsp.Config
-	withLSPStart(t, func(_ context.Context, cfg lsp.Config) (lspSession, error) {
+	withLSPStart(t, func(_ context.Context, cfg lsp.Config, _ *sandbox.Policy) (lspSession, error) {
 		captured = cfg
 		return &fakeLSPSession{}, nil
 	})
@@ -657,7 +671,7 @@ func TestToolkitLSPWorkspaceBadJSONKeepsSettings(t *testing.T) {
 
 func TestToolkitLSPWorkspaceMissingFileAndService(t *testing.T) {
 	var captured lsp.Config
-	withLSPStart(t, func(_ context.Context, cfg lsp.Config) (lspSession, error) {
+	withLSPStart(t, func(_ context.Context, cfg lsp.Config, _ *sandbox.Policy) (lspSession, error) {
 		captured = cfg
 		return &fakeLSPSession{}, nil
 	})

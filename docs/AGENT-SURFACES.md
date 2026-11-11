@@ -57,12 +57,13 @@ Agent 客户端的 UI 不是 CRUD 页面，而是**推理与行动的外化**：
 
 | 状态 | 表现 |
 |---|---|
-| empty | `List.Children` 渲染首屏 hero（不显示空白滚动区） |
+| empty | `List.Children` 渲染首屏 hero（不显示空白滚动区）；hero 同时给出首启检查清单（缺模型/API Key/未打开工作区 → 各自深链），因为 Home 已不是导航目的地（fix wave 1 / FR-07）。hero 的「新对话」在已是空会话时只聚焦 composer，不重复建会话；真新建时用空标题以保留 auto-title（FR-30） |
 | streaming | 最后一行原地增长；`FollowEnd` 贴底；元信息行隐藏、过程活动带保持展开；正文用 `markdown.Stream` |
 | scrolled-up | 停止跟随；浮层「回到最新」（`ScrollToEnd`） |
 | fold-toggle | `ListState.HoldPlace()`，折叠行不跳动 |
 | session-switch | 重置 `ListState` / 展开状态 / 用量 / 滚动 |
-| error | 失败轮显示错误行 + 重试；元信息行只保留时间/用量，不提供 ⋯ 动作 |
+| error | 失败轮显示错误行 + 重试；元信息行只保留时间/用量，不提供 ⋯ 动作。`ErrorKind=iterations` 显示「已达最大迭代次数」+「打开模型设置」+ 提高上限建议（不再以 rig 英文串为标题）；`ErrChatCompacting`/`ErrCompactConflict` 在发送失败时本地化（`会话正在压缩，请稍后再试` / `压缩期间历史被修改，已取消`） |
+| truncated | 最后一条 assistant 的 `Truncated=true` 时在回复末尾显示可折叠「回答被截断」提示（展开说明输出上限与两种处理方式）；非最后一条不显示 |
 
 **会话壳层（B3 顶栏 + composer dock，2026-11-10，DSH 对齐；2026-11-11 Agent Run Band）**：标题行顺序固定为 **标题/面包屑 → Agent Run Band（运行中 → 智能体团队 → 子智能体 N → 后台任务 → 待审批）→ spacer → ⋯**（`screen.header` / `screen.actions` / `screen.tabs` 槽位，40px 标题行 + 32px Tabs 行，浅色 header 面、仅底边一条 hairline、行间无线、无返回按钮、无 `Alt+←` 历史回退）。Band 是一条 hairline 容器，不是卡片；团队/子代理是关键功能入口，**零值也常显**，后台任务与待审批只在有内容时出现；全空时不渲染整条。三个 agent 入口都是 `ui.PopoverBase` 浮层（团队：成员 + 共享任务；子智能体：树/列表切换；后台任务：状态/命令/用时/停止），不占右栏。进入子智能体或团队成员时，主栏切到子会话：标题变成 `主标题 › 子智能体名` 面包屑，点主标题返回父会话；一次性子智能体只读，可继续成员有输入框（`ChildAgentService.SendChildAgent`）。回合尾部新增文件卡：「交付文件」（write_file）与「已编辑 N 个文件」（edit_file/str_replace_editor），每行「在侧边栏预览 / 查看改动 / 用系统应用打开」，预览打开右栏文件标签。目标条（Badge + 目标文本 + ⋯「目标操作」）与审批内联卡在 composer 上方 dock（阅读列宽度居中，`session.banner` 槽），不占 transcript 空间、不遮挡输入。通知/ toast 固定在右上角、B3 顶栏下方（最多 2 条，自上而下堆叠），不遮挡标题/Tabs/顶栏动作。右栏是默认收起的多标签页面：开始引导（工作区文件 / 新建终端两张等宽卡片，无说明文字）+ 文件 + 终端 + 每个打开文件一个可关闭标签；页面内容一律可滚动。
 
@@ -205,7 +206,7 @@ func ToolRow(c *ui.Context, o uikit.ToolRowOptions) // 已有
 
 **职责**：工具调用前的安全决策。必须让用户看清"要执行什么、影响是什么、三个选择分别意味着什么"，且**不能让一次误触 Enter 就放行/拒绝**。
 
-**数据模型**：`contracts.ApprovalRequest{ID,Tool,Summary,Arguments,...}`、`Approvals.Pending()` 队列、`ApprovalDecision` 三值（deny/allow/allow-always）。
+**数据模型**：`contracts.ApprovalRequest{ID,Tool,Summary,Arguments,SessionID,Source,...}`、`Approvals.Pending()` 队列、`ApprovalDecision` 三值（deny/allow/allow-always）。
 
 **状态矩阵**：
 
@@ -217,6 +218,7 @@ func ToolRow(c *ui.Context, o uikit.ToolRowOptions) // 已有
 | 非会话屏收到请求 | 自动切回会话屏（`Navigator.Push("session")`），审批卡可见 |
 | error | 保持可见错误；不静默重排 |
 | multi-pending | 一次只显示一条内联卡，不叠层 |
+| provenance | 请求带 `SessionID`/`Source` 时，卡体首行显示「来自会话：<标题> · <来源（用户/自动化）>」（标题查 `ChatService.Session`，查不到回退 ID）；请求来自**其他**会话时该行带「打开该会话」动作（切会话 + 进会话屏）。无 `SessionID` 的旧后端保持原卡（FR-29） |
 
 **目标 API 草案**：
 
@@ -231,7 +233,7 @@ type ApprovalDialogOptions struct {
 func ApprovalDialog(c *ui.Context, o ApprovalDialogOptions)
 ```
 
-**布局（固定，V3 强调）**：内联卡（`Border(1, Warning)` + `RadiusLG`）→ 顶部警示横幅（Shield + 加粗「需要审批」+ 工具友好名 + 队列计数 + 「Esc 拒绝」，`Warning.Alpha(0.22)` 底、`WarningText` 前景）→ 中性卡体：一行影响声明 → 摘要优先（shell/终端类工具标「命令」，其余工具标「摘要」；mono 框）→ 「参数」折叠（Scroll 140）→ 会话级允许提示 → `uikit.DialogFooter`：**拒绝 → 本会话内始终允许 → 允许(Primary 最右)**；无 Default、无 AutoFocus。卡片整体用警示色描边/横幅，和 transcript 工具卡、composer 明显区分，不允许被看漏或误认。
+**布局（固定，V3 强调）**：内联卡（`Border(1, Warning)` + `RadiusLG`）→ 顶部警示横幅（Shield + 加粗「需要审批」+ 工具友好名 + 队列计数 + 「Esc 拒绝」，`Warning.Alpha(0.22)` 底、`WarningText` 前景）→ 中性卡体：**来源行（有 `SessionID` 时：会话标题 + 来源 + 跨会话「打开该会话」）** → 一行影响声明 → 摘要优先（shell/终端类工具标「命令」，其余工具标「摘要」；mono 框）→ 「参数」折叠（Scroll 140）→ 会话级允许提示 → `uikit.DialogFooter`：**拒绝 → 本会话内始终允许 → 允许(Primary 最右)**；无 Default、无 AutoFocus。卡片整体用警示色描边/横幅，和 transcript 工具卡、composer 明显区分，不允许被看漏或误认。
 
 **交互/键盘**：Tab 循环；Enter 只有在焦点落到某按钮时才触发该按钮；Esc = deny 最早一条（有文本焦点时也由 session 的审批优先路径处理，且不中断本轮）；内联模式没有 backdrop。不设默认焦点。
 
@@ -347,13 +349,13 @@ func AskDialog(c *ui.Context, o AskDialogOptions)
 
 | 状态 | 表现 |
 |---|---|
-| idle | 输入 + 工具条 + 发送（Primary） |
+| idle | 输入 + 工具条 + 发送（Primary）；未配置模型时发送禁用并在 composer 内显示原因 + 「打开模型设置」（FR-31） |
 | running | 输入仍可编辑；发送位变「排队」+「停止」；Esc 中断（菜单优先）；提示文案说明 Enter 语义 |
 | queueing-off | Enter 换行并提示草稿保留 |
 | queue-error | 显示错误行 + 重试 |
 | attachments | chips + 移除；排队只发文字提示 |
 | slash/@ menu | 建议菜单优先吃 ↑↓/Enter/Tab/Esc；不抢焦点 |
-| disabled（无模型/API key） | 发送禁用 + 明确原因/跳转 |
+| disabled（无模型） | 发送禁用（鼠标与 Enter 均不发） + 「尚未配置模型：发送已禁用」 + 「打开模型设置」深链；无 API Key 仅警告（本地模型可忽略） |
 
 **目标 API 草案**：
 
@@ -374,7 +376,7 @@ type ComposerOptions struct {
 func ComposerShell(c *ui.Context, o ComposerOptions)
 ```
 
-**布局**：composer 上方 dock（阅读列宽度居中、`session.banner` 槽）：目标条（有目标时）→ 审批内联卡（有 pending 时）→ 卡片 `t.Composer()`；输入 `ui.TextArea`（MinHeight Space9、MaxHeight Space8*6、边框透明、聚焦 accent 边）；工具条一行（附件菜单 + 模型 chip + 会话设置菜单；窄宽度折叠低频 chip 进菜单，veryCompact 时模型 chip 折进会话设置菜单并保留「模型：…／推理等级」回退入口）；右侧发送/停止固定，**不进溢出菜单**；键位提示在宽 composer 显示、窄 composer 放 tooltip。模型 chip 打开**两级紧凑菜单**：一级只有「模型」「推理等级」两行（Trailing 当前值）+「打开模型设置…」；「模型」二级按服务商分组（`MatchProviderPreset`，未匹配“自定义服务”）列出模型；「推理等级」二级为「跟随模型默认（…）」+ 该模型模式；模型级 `DefaultThinking` 在 Home composer 的「推理等级」与设置页编辑弹窗配置。
+**布局**：composer 上方 dock（阅读列宽度居中、`session.banner` 槽）：目标条（有目标时）→ 审批内联卡（有 pending 时）→ 卡片 `t.Composer()`；输入 `ui.TextArea`（MinHeight Space9、MaxHeight Space8*6、边框透明、聚焦 accent 边）；工具条一行（附件菜单 + 模型 chip + 会话设置菜单；窄宽度折叠低频 chip 进菜单，veryCompact 时模型 chip 折进会话设置菜单并保留「模型：…／推理等级」回退入口）；右侧发送/停止固定，**不进溢出菜单**；键位提示在宽 composer 显示、窄 composer 放 tooltip。模型 chip 打开**两级紧凑菜单**：一级只有「模型」「推理等级」两行（Trailing 当前值）+「打开模型设置…」；catalog 已注册但列表为空、而 `Config().Model` 非空时（装配默认模型，FR-26），chip 文案为「<model>（默认模型，尚未配置连接）」并在菜单顶部加一行「默认模型来自装配，添加模型行后可覆盖」；「模型」二级按服务商分组（`MatchProviderPreset`，未匹配“自定义服务”）列出模型；「推理等级」二级为「跟随模型默认（…）」+ 该模型模式；模型级 `DefaultThinking` 在 Home composer 的「推理等级」与设置页编辑弹窗配置。
 
 **交互/键盘**：Enter 发送、Shift+Enter 换行、Cmd+Enter 发送；运行中 Esc 中断；slash/@ 菜单优先级最高；Tab 顺序：输入 → 菜单项 → 发送 → 停止。
 
@@ -401,7 +403,7 @@ func ComposerShell(c *ui.Context, o ComposerOptions)
 | 状态 | 表现 |
 |---|---|
 | idle | 不显示运行态 |
-| streaming | 最后消息尾部 Spinner + 状态文本；输入区停止按钮；`RoleStatus`/Busy |
+| streaming | 最后消息尾部 Spinner + 状态文本；输入区停止按钮；`RoleStatus`/Busy；composer 键位提示为「Enter 排队 · Esc 停止」；**有待审批时改为「Esc 拒绝审批（再按停止）」**，与审批卡的「Esc 拒绝」一致（PM-12） |
 | queued | 队列 Badge（可展开、可取消/重试）；排队只发文字提示 |
 | stopping | 停止按钮 pressed/disabled；不可重复触发 |
 | failed | 错误行 + 重试（带标签按钮，不是图标） |
@@ -479,6 +481,8 @@ func RunStatus(c *ui.Context, o RunStatusOptions)
 
 - **顶栏只有一块**：屏幕通过 `screen.header` / `screen.actions` / `screen.tabs` 槽位把标题/动作/Tabs 交给宿主 B3 顶栏（浅色 header 面 + 仅底边 hairline、行间无线），屏幕 body 不再叠第二行 header；无贡献的屏幕没有空工具栏；不提供返回按钮或 `Alt+←` 历史回退（侧栏即导航）。
 - **输入框上方的 dock**：目标条与审批内联卡固定在 composer 上方（阅读列宽度居中），是会话页唯一的阻断/目标区；不把目标放回顶栏、不把审批做成居中 Modal。
+- **会话级 vs 全局设置**：会话设置菜单里「权限模式（所有会话）」「对话模式（所有会话）」的组标题带后缀，明确这两项作用于所有会话；人设与「本会话内始终允许」保持会话级（PM-14）。
+- **记忆 scope**：`workspace:<id>` 绑定作用域的条目在会话「记忆」页签显示「工作区（本会话项目）」，不展示存储原值；设置→记忆是跨工作区管理页，保持「工作区」标签。
 - **通知位置**：toast/通知固定右上角、B3 顶栏下方 8 DIP，右对齐自上而下堆叠（最多 2 条）；不放在右下角、不遮挡标题/Tabs/顶栏动作或输入区。
 
 ### 2.1 焦点与 Esc 分层（从最内到最外）
@@ -486,7 +490,7 @@ func RunStatus(c *ui.Context, o RunStatusOptions)
 | 层 | 谁先拿到键 | 规则 |
 |---|---|---|
 | 建议菜单（slash/@） | 输入框内的菜单 | ↑↓/Enter/Tab/Esc 由菜单消费；Esc 关闭菜单，不中断运行 |
-| 浮层（Modal/Overlay） | 最后构建的 overlay 先吃 Esc | `OverlayShortcut` 约定；审批 Esc=deny；计划审阅 Esc 不取消；ask Esc=取消 |
+| 浮层（Modal/Overlay） | 最后构建的 overlay 先吃 Esc | `OverlayShortcut` 约定；审批 Esc=deny；计划审阅 Esc 不取消；ask Esc=取消。审批 pending 时会话层的第一下 Esc 也按 deny 处理，composer 提示同步（PM-12） |
 | 文本输入 | 输入框 | Enter 语义由所在 surface 定义（发送/提交/继续规划/换行） |
 | 全局快捷键 | 壳层 | 不抢 overlay；运行中 Esc 中断只在无菜单/无 overlay 时生效 |
 
@@ -537,6 +541,15 @@ Agent 客户端的界面不是一次性输出：用户对界面的操作要作�
 - 已有 `uikit.ErrorLine`（图标 + `RoleAlert` + DangerText + 可选中）用于行内错误。
 - 待建 `uikit.ErrorPanel`：错误 + **恢复动作**（重试/去设置/打开日志）+ 可复制详情；用于审批失败、计划失败、会话失败、设置保存失败。
 - 规则：错误必须给下一步；toast 只做通知，不替代可操作错误；错误文本可选中复制。
+
+### 2.7 记忆与技能管理（非 surface，事实约定）
+
+记忆 Tab 与设置「记忆」「技能」页不是上述 9 个 Agent surface，但读写同一批 contracts 服务；改动它们时保持以下事实一致：
+
+- **记忆 scope**：条目保存工作区身份（`workspace:<id>`），`List/Search` 只返回 global + 当前工作区条目；管理页用可选 `MemoryAllLister.ListAll` 看全量。默认 scope 只由 `memory.Config.Scope` 决定（工具/设置页/提取省略 scope 时走它）；会话「记忆」Tab 显式写当前工作区。
+- **记忆恢复**：`memory.json` 损坏时隔离为 `.corrupt-<ts>` 并以空 store 继续；`MemoryRecoveryReporter.RecoveryNotice()` 必须显示在记忆页（不能只写日志）。
+- **技能根**：优先级为工作区（`skills`、`.agents/skills`、`.zeokeel/skills`）→ `skills.dirs` → assembly 目录 → `dataDir/skills` → `$ZEOKEEL_SKILLS` → `~/.zeokeel/skills`；同名遮蔽与扫描上限经 `SkillWarnings.Warnings()` 在技能页可见。
+- **技能内容边界**：`List` 只读每个 `SKILL.md` 的前缀（名称/描述/可搜索摘要），`Read`/`load` 才读全文（≤1MiB）；编辑只重写名称/描述/正文，保留未知 frontmatter 键；写路径仍仅 `<dataDir>/skills`。
 
 ---
 

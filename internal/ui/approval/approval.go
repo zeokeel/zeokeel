@@ -88,6 +88,11 @@ type state struct {
 	// for a frame or two while the backend settles, and the card must not
 	// reappear for it.
 	resolvedID string
+	// chat resolves the requesting conversation's title and switches to it
+	// (FR-29). Optional: a product without the backend keeps the plain card.
+	chat contracts.ChatService
+	// navigator opens the requesting conversation after a switch.
+	navigator contracts.Navigator
 }
 
 // Module registers the approval banner contribution.
@@ -107,7 +112,11 @@ func Module() *module.Descriptor[Config] {
 		}
 		resolved := cfg.resolved()
 		locale, _ := ctx.Get(contracts.KeyLocale)
-		st := &state{locale: locale}
+		chat, _ := ctx.Get(contracts.KeyChat)
+		st := &state{locale: locale, navigator: navigator}
+		if chat != nil {
+			st.chat, _ = chat.(contracts.ChatService)
+		}
 
 		// The approvals service notifies synchronously from whichever
 		// goroutine resolves or enqueues a request. Hop to the UI thread: bring
@@ -202,16 +211,75 @@ func buildBanner(c *ui.Context, runtime contracts.UIRuntime, approvals contracts
 		// while the backend settles, so wait for the next change.
 		return
 	}
-	uikit.ApprovalDialog(c, uikit.ApprovalDialogOptions{
+	options := uikit.ApprovalDialogOptions{
 		Request: request,
 		Pending: len(pending),
 		Labels:  st.labels(cfg),
 		Inline:  true,
 		Locale:  st.locale,
+		Origin:  st.originText(request),
 		OnResolve: func(decision contracts.ApprovalDecision) {
 			resolve(runtime, approvals, st, request.ID, decision)
 		},
-	})
+	}
+	// A request from another conversation gets the explicit way back to it: the
+	// card otherwise renders in whatever conversation the user happens to view.
+	sessionID := strings.TrimSpace(request.SessionID)
+	if sessionID != "" && st.chat != nil && st.navigator != nil &&
+		sessionID != strings.TrimSpace(st.chat.ActiveSession()) {
+		options.OpenSession = func() { st.openSession(sessionID) }
+	}
+	uikit.ApprovalDialog(c, options)
+}
+
+// originText names the requesting conversation and its provenance (FR-29). The
+// title comes from the chat read model; an unknown/deleted session falls back to
+// its ID so the line is never empty once a SessionID is known. Requests from
+// backends without provenance keep the previous card (no line).
+func (st *state) originText(request contracts.ApprovalRequest) string {
+	sessionID := strings.TrimSpace(request.SessionID)
+	if sessionID == "" {
+		return ""
+	}
+	title := sessionID
+	if st.chat != nil {
+		if session, ok := st.chat.Session(sessionID); ok {
+			if trimmed := strings.TrimSpace(session.Title); trimmed != "" {
+				title = trimmed
+			}
+		}
+	}
+	text := st.tr("来自会话：", "From conversation: ") + title
+	if source := strings.TrimSpace(request.Source); source != "" {
+		text += " · " + st.sourceLabel(source)
+	}
+	return text
+}
+
+// sourceLabel localizes the session provenance ("automation", "user", ...).
+func (st *state) sourceLabel(source string) string {
+	switch strings.ToLower(strings.TrimSpace(source)) {
+	case "automation":
+		return st.tr("自动化", "automation")
+	case "user":
+		return st.tr("用户", "user")
+	default:
+		return source
+	}
+}
+
+// openSession switches the conversation and brings the session screen forward,
+// so a background approval can be answered in its own conversation.
+func (st *state) openSession(sessionID string) {
+	if st.chat == nil || strings.TrimSpace(sessionID) == "" {
+		return
+	}
+	if err := st.chat.SetActiveSession(sessionID); err != nil {
+		return
+	}
+	if st.navigator != nil {
+		_ = st.navigator.Push(sessionScreenID)
+	}
 }
 
 // labels builds the localizable copy of the card: an assembly-configured custom

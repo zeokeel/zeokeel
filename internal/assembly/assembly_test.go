@@ -308,7 +308,7 @@ func TestDesktopAssemblyLoadsAndUnwinds(t *testing.T) {
 	if !ok {
 		t.Fatal("KeyToolkit service is not available on the root")
 	}
-	hostToolNames := []string{"ask_user", "exit_plan_mode", "goal", "plan_review", "present", "team"}
+	hostToolNames := []string{"ask_user", "exit_plan_mode", "goal", "plan_review", "present"}
 	for _, name := range hostToolNames {
 		found := false
 		for _, spec := range toolkitRegistry.Specs() {
@@ -359,6 +359,44 @@ func TestDesktopAssemblyLoadsAndUnwinds(t *testing.T) {
 
 // --- headless product: loads without any UI service or display environment ---
 
+// TestDesktopAssemblyHasNoStubTeamTool is the FR-14 regression: the legacy
+// hosttools in-memory "team" stub is gone, while the real rig team tools that
+// the agent module registers (against contracts.KeyTeam) stay available.
+func TestDesktopAssemblyHasNoStubTeamTool(t *testing.T) {
+	root := newRoot(t)
+	_ = provideHostServices(t, root, true)
+	loader, err := assembly.LoadWithBuildInfo(root, assembly.ProductDesktop, assembly.BuildInfo{Version: "test"})
+	if err != nil {
+		t.Fatalf("LoadWithBuildInfo(desktop): %v", err)
+	}
+	t.Cleanup(func() { _ = loader.Close() })
+	registry, ok := root.Get(contracts.KeyToolkit)
+	if !ok || registry == nil {
+		t.Fatal("KeyToolkit service is not available on the root")
+	}
+	names := make(map[string]bool, 128)
+	for _, spec := range registry.Specs() {
+		names[spec.Name] = true
+	}
+	if names["team"] {
+		t.Fatal("the legacy hosttools stub team tool is still registered")
+	}
+	// The real team surface (agent module + rig team manager) is still there.
+	for _, name := range []string{
+		"spawn_teammate", "list_agents", "wait_agent", "send_message", "team_spawn", "team_list",
+	} {
+		if !names[name] {
+			t.Fatalf("real team tool %q missing after removing the stub (have %v)", name, names)
+		}
+	}
+	// The remaining host tools are unchanged.
+	for _, name := range []string{"ask_user", "present", "plan_review", "exit_plan_mode", "goal"} {
+		if !names[name] {
+			t.Fatalf("host tool %q missing", name)
+		}
+	}
+}
+
 func TestHeadlessAssemblyNeedsNoUIServices(t *testing.T) {
 	root := newRoot(t)
 	// Deliberately no uiroot: the headless host provides settings and log only.
@@ -406,7 +444,7 @@ func TestHeadlessAssemblyNeedsNoUIServices(t *testing.T) {
 	for _, spec := range toolkitRegistry.Specs() {
 		registered[spec.Name] = true
 	}
-	for _, name := range []string{"ask_user", "goal", "present", "team"} {
+	for _, name := range []string{"ask_user", "goal", "present"} {
 		if !registered[name] {
 			t.Fatalf("headless toolkit registry lacks host tool %q", name)
 		}

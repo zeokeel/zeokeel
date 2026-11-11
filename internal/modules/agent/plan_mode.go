@@ -7,6 +7,8 @@ package agent
 
 import (
 	"context"
+	"fmt"
+	"sort"
 	"strings"
 	"time"
 
@@ -82,6 +84,85 @@ func toolAllowed(name string, allowedTools []string) bool {
 // planModeToolAllowed reports whether a plan-mode tool call is on the whitelist.
 func planModeToolAllowed(name string) bool {
 	return toolAllowed(name, planModeAllowedTools)
+}
+
+// runtimeMode reports the effective model-facing execution mode: the plan mode
+// wins over the chat modes (exactly like the gate), then minimal/creator, then
+// standard.
+func (s *service) runtimeMode() string {
+	if s.agentModePlan() {
+		return contracts.AgentModePlan
+	}
+	return s.chatMode()
+}
+
+// modeToolWhitelist returns the model-visible tool whitelist of one runtime
+// mode. An empty result means "no filtering" (standard) — the gate still applies
+// its own policy.
+func modeToolWhitelist(mode string) []string {
+	switch strings.ToLower(strings.TrimSpace(mode)) {
+	case contracts.AgentModePlan:
+		return planModeAllowedTools
+	case contracts.ChatModeMinimal:
+		return minimalModeAllowedTools
+	case contracts.ChatModeCreator:
+		return creatorModeAllowedTools
+	default:
+		return nil
+	}
+}
+
+// filterToolsForMode narrows a tool surface to the mode whitelist, in place and
+// preserving registration order. The gate keeps denying non-whitelisted calls
+// (fail-closed) even if a caller accidentally hands it an unfiltered surface;
+// this function only stops the model from being invited to call tools it can
+// never use.
+func filterToolsForMode(tools []rig.Tool, mode string) []rig.Tool {
+	allowed := modeToolWhitelist(mode)
+	if len(allowed) == 0 {
+		return tools
+	}
+	filtered := make([]rig.Tool, 0, len(tools))
+	for _, tool := range tools {
+		if tool == nil {
+			continue
+		}
+		if toolAllowed(tool.Name(), allowed) {
+			filtered = append(filtered, tool)
+		}
+	}
+	return filtered
+}
+
+// modePolicyLine is the model-facing runtime-mode sentence: the current mode,
+// the exact tool set the run receives, and the fail-closed consequence of
+// calling anything else. Standard mode adds no line (the approval policy
+// sentence already describes it).
+func modePolicyLine(mode string, toolNames map[string]bool) string {
+	mode = strings.ToLower(strings.TrimSpace(mode))
+	var label string
+	switch mode {
+	case contracts.AgentModePlan:
+		label = "plan"
+	case contracts.ChatModeMinimal:
+		label = "minimal"
+	case contracts.ChatModeCreator:
+		label = "creator"
+	default:
+		return ""
+	}
+	names := make([]string, 0, len(toolNames))
+	for name := range toolNames {
+		if trimmed := strings.TrimSpace(name); trimmed != "" {
+			names = append(names, trimmed)
+		}
+	}
+	sort.Strings(names)
+	allowed := "no tools"
+	if len(names) > 0 {
+		allowed = strings.Join(names, ", ")
+	}
+	return fmt.Sprintf("Runtime mode: %s — only these tools are available in this run: %s. Calls to any other tool are denied by the runtime (no approval dialog); plan your work with this restriction.", label, allowed)
 }
 
 // chatMode reads chat.mode, normalizing unknown/missing values to standard.
@@ -180,9 +261,21 @@ func (s *service) gate(sessionIDs ...string) rig.Gate {
 			case contracts.PermissionFull:
 				return rig.DecisionAllow, nil
 			case contracts.PermissionReadOnly:
+				// A session-level read-only override is a hard restriction: a
+				// tool outside the read-only set must never fall through to the
+				// global (often workspace-write) policy, which would silently
+				// auto-allow write_file. Interaction host tools and tools the
+				// user explicitly remembered for this session stay allowed.
 				if contracts.ReadOnlyAutoAllowed(name) {
 					return rig.DecisionAllow, nil
 				}
+				if interactionTools[name] || s.allowedToolForSession(sessionID, name) {
+					if s.approvals != nil && strings.EqualFold(strings.TrimSpace(s.approvals.Mode()), approvalModeNever) {
+						return rig.DecisionDeny, nil
+					}
+					return rig.DecisionAllow, nil
+				}
+				return rig.DecisionDeny, nil
 			case contracts.PermissionWorkspace:
 				if contracts.WorkspaceAutoAllowed(name) {
 					return rig.DecisionAllow, nil
@@ -217,6 +310,10 @@ func (s *service) gate(sessionIDs ...string) rig.Gate {
 			Summary:   summary,
 			Arguments: call.Arguments,
 			CreatedAt: time.Now(),
+			SessionID: sessionID,
+			// Provenance is persisted by the automation module; an empty source
+			// means the user's own conversation.
+			Source: sessionOrigin(s.settings, sessionID),
 		})
 		if err != nil {
 			return "", err

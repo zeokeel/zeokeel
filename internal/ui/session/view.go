@@ -239,7 +239,7 @@ func resetSessionErrors(st *state) {
 	}
 	st.exportErr = ""
 	st.regenerateErr = ""
-	st.commandErr = ""
+	st.clearComposerFailure()
 	st.autoContinueErr = ""
 }
 
@@ -257,7 +257,7 @@ func cancelRunningTurn(chat contracts.ChatService, st *state, runtime contracts.
 	if err := chat.Cancel(sessionID); err != nil {
 		st.commandErr = st.tr("停止失败：", "Stop failed: ") + err.Error()
 	} else {
-		st.commandErr = ""
+		st.clearComposerFailure()
 		st.toast(contracts.NotifyInfo, st.tr("已停止", "Stopped"))
 	}
 	runtime.Invalidate()
@@ -314,7 +314,7 @@ func denyPendingApproval(st *state, runtime contracts.UIRuntime) bool {
 	if err := approvals.Resolve(pending[0].ID, contracts.ApprovalDeny); err != nil {
 		st.commandErr = st.tr("拒绝审批失败：", "Could not deny the request: ") + err.Error()
 	} else {
-		st.commandErr = ""
+		st.clearComposerFailure()
 	}
 	runtime.Invalidate()
 	return true
@@ -967,12 +967,12 @@ func buildChatPane(
 		LaidOut:   &st.chatListSeen,
 		Error:     visibleError,
 		Empty: func(ec *ui.Context) {
-			buildHero(ec, t, cfg, navigator, chat, st)
+			buildHero(ec, t, cfg, runtime, navigator, chat, st, hasSession)
 		},
 		Row: func(rc *ui.Context, message contracts.ChatMessage) {
 			last := message.ID == lastID && message.Role == contracts.ChatRoleAssistant
 			canRegenerate := hasRegenerator && !chatSession.Running && last
-			buildMessage(rc, t, runtime, message, st, canRegenerate, defaultOpen(message.ID))
+			buildMessage(rc, t, runtime, message, st, canRegenerate, last, defaultOpen(message.ID))
 			if last && showTurnFiles {
 				buildGeneratedFileCards(rc, t, st, turnFiles)
 			}
@@ -981,7 +981,7 @@ func buildChatPane(
 		GroupRow: func(rc *ui.Context, group []contracts.ChatMessage) {
 			last := group[len(group)-1].ID == lastID
 			canRegenerate := hasRegenerator && !chatSession.Running && last
-			buildAssistantTurnGroup(rc, t, runtime, st, group, canRegenerate,
+			buildAssistantTurnGroup(rc, t, runtime, st, group, canRegenerate, last,
 				defaultOpen(group[len(group)-1].ID))
 			if last && showTurnFiles {
 				buildGeneratedFileCards(rc, t, st, turnFiles)
@@ -990,9 +990,18 @@ func buildChatPane(
 	})
 }
 
-// buildHero is the branded first-run empty state: icon badge, title, hint and
-// the native new-conversation action.
-func buildHero(c *ui.Context, t *design.Tokens, cfg Config, navigator contracts.Navigator, chat contracts.ChatService, st *state) {
+// buildHero is the branded first-run empty state: icon badge, title, hint, the
+// native new-conversation action and — when a prerequisite is missing — the
+// setup checklist that names it and deep-links to the fix (FR-07). It is the
+// product's real landing: Home is not a navigation destination, so the first
+// run must be guided here.
+//
+// hasSession reports whether an (empty) conversation is already open. The
+// 新对话 action then only hands the keyboard to the composer instead of
+// creating a second empty conversation (FR-30); a genuinely new conversation is
+// created untitled so the backend still auto-titles it from the first prompt.
+func buildHero(c *ui.Context, t *design.Tokens, cfg Config, runtime contracts.UIRuntime,
+	navigator contracts.Navigator, chat contracts.ChatService, st *state, hasSession bool) {
 	th := t.Theme()
 	ui.Column(c).FillWidth().AlignItems(ui.Center).Gap(design.Space3).
 		PaddingY(design.Space8).Children(func() {
@@ -1006,7 +1015,87 @@ func buildHero(c *ui.Context, t *design.Tokens, cfg Config, navigator contracts.
 			t.Font(design.TypeXXS)).TextColor(t.LabelTertiary).MaxLines(2)
 		button := design.Apply(ui.PrimaryButton(c, st.tr("新对话", "New conversation")), t.PrimaryButton())
 		if button.Clicked() {
-			startNewSession(st, chat, navigator)
+			if hasSession {
+				// Already on an empty conversation: focus the input the user
+				// is about to type into instead of leaving a duplicate empty
+				// row in the sidebar (the sidebar's 新对话 stays the explicit
+				// "another conversation" path).
+				st.focusComposer = true
+				runtime.Invalidate()
+			} else {
+				startNewSession(st, chat, navigator)
+			}
+		}
+		buildFirstRunChecklist(c, t, runtime, navigator, chat, st)
+	})
+}
+
+// buildFirstRunChecklist renders the missing prerequisites of the first run —
+// no model, no API key, no workspace — with one action each that fixes it
+// (FR-07). Home's setup card is no longer reachable, so this is the guided
+// path; it stays quiet when everything is configured.
+func buildFirstRunChecklist(c *ui.Context, t *design.Tokens, runtime contracts.UIRuntime,
+	navigator contracts.Navigator, chat contracts.ChatService, st *state) {
+	if chat == nil || st == nil {
+		return
+	}
+	cfg := chat.Config()
+	missingModel := strings.TrimSpace(cfg.Model) == ""
+	missingKey := strings.TrimSpace(cfg.APIKey) == ""
+	missingWorkspace := false
+	if raw, ok := st.ctx.Get(contracts.KeyWorkspace); ok && raw != nil {
+		if workspace, ok := raw.(contracts.WorkspaceService); ok && workspace != nil {
+			if current, open, err := workspace.Current(context.Background()); err != nil || !open ||
+				strings.TrimSpace(current.ID) == "" {
+				missingWorkspace = true
+			}
+		}
+	}
+	if !missingModel && !missingKey && !missingWorkspace {
+		return
+	}
+	design.Apply(ui.Column(c).FillWidth().Gap(design.Space2).
+		Padding(design.Space3, design.Space4).
+		Background(t.BgRaised).Border(1, t.BorderL2).Radius(design.RadiusMD)).
+		Children(func() {
+			design.Apply(ui.Text(c, st.tr("开始前还需要：", "Before you start:")),
+				t.Font(design.TypeXXS)).FontWeight(600).TextColor(t.LabelSecondary)
+			if missingModel {
+				buildFirstRunAction(c, t, st.tr("尚未配置模型", "No model configured"),
+					st.tr("配置模型", "Configure model"), func() { openSettingsPage(navigator, settingsPageModel) })
+			}
+			if missingKey {
+				buildFirstRunAction(c, t,
+					st.tr("尚未配置 API Key", "No API key yet")+
+						st.tr("（使用本地模型服务时可忽略）", " (ignore for local model servers)"),
+					st.tr("配置 API Key", "Configure API key"), func() { openSettingsPage(navigator, settingsPageModel) })
+			}
+			if missingWorkspace {
+				buildFirstRunAction(c, t,
+					st.tr("未打开工作区", "No workspace open")+
+						st.tr("（文件与命令工具需要工作区）", " (file and command tools need one)"),
+					st.tr("添加工作区", "Add workspace"), func() {
+						var workspace contracts.WorkspaceService
+						if raw, ok := st.ctx.Get(contracts.KeyWorkspace); ok {
+							workspace, _ = raw.(contracts.WorkspaceService)
+						}
+						startWorkspaceCreate(runtime, workspace, st)
+					})
+			}
+		})
+}
+
+// buildFirstRunAction is one setup-checklist row: the missing prerequisite and
+// the secondary action that fixes it. The action is secondary so the hero's
+// 新对话 stays the page's single primary.
+func buildFirstRunAction(c *ui.Context, t *design.Tokens, label, actionLabel string, run func()) {
+	ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(design.Space2).Children(func() {
+		design.Apply(ui.Text(c, label), t.Font(design.TypeXXS)).
+			TextColor(t.LabelTertiary).Grow(1).MaxLines(2)
+		button := design.Apply(ui.Button(c, actionLabel), t.SecondaryButton()).
+			Height(design.RowCompactHeight).Shrink(0)
+		if button.Clicked() && run != nil {
+			run()
 		}
 	})
 }
@@ -1014,7 +1103,7 @@ func buildHero(c *ui.Context, t *design.Tokens, cfg Config, navigator contracts.
 // buildMessage renders one transcript entry. User turns are right-aligned
 // raised bubbles; assistant turns are plain brand body text with optional
 // reasoning, tool cards and errors.
-func buildMessage(c *ui.Context, t *design.Tokens, runtime contracts.UIRuntime, message contracts.ChatMessage, st *state, canRegenerate, defaultOpen bool) {
+func buildMessage(c *ui.Context, t *design.Tokens, runtime contracts.UIRuntime, message contracts.ChatMessage, st *state, canRegenerate, last, defaultOpen bool) {
 	switch message.Role {
 	case contracts.ChatRoleUser:
 		ui.Column(c.Key("session.message." + message.ID)).FillWidth().AlignItems(ui.End).Gap(design.Space1).Children(func() {
@@ -1042,7 +1131,7 @@ func buildMessage(c *ui.Context, t *design.Tokens, runtime contracts.UIRuntime, 
 			design.Apply(ui.Text(c, message.Text), t.TextMuted(design.TypeXS))
 		})
 	default:
-		buildAssistantMessage(c, t, runtime, message, st, canRegenerate, defaultOpen)
+		buildAssistantMessage(c, t, runtime, message, st, canRegenerate, last, defaultOpen)
 	}
 }
 
@@ -1052,7 +1141,7 @@ func buildMessage(c *ui.Context, t *design.Tokens, runtime contracts.UIRuntime, 
 // finished, compact/standard/detailed fold the process into one summary row (open
 // by default only for the latest turn under collapse=next-input), while verbose
 // always shows the full timeline under its meta row. A failed turn never folds.
-func buildAssistantMessage(c *ui.Context, t *design.Tokens, runtime contracts.UIRuntime, message contracts.ChatMessage, st *state, canRegenerate, defaultOpen bool) {
+func buildAssistantMessage(c *ui.Context, t *design.Tokens, runtime contracts.UIRuntime, message contracts.ChatMessage, st *state, canRegenerate, last, defaultOpen bool) {
 	policy := st.workStepsPolicyFor()
 	foldable := assistantProcessFoldable(message, policy.mode)
 	open, explicit := st.processOpen[message.ID]
@@ -1087,8 +1176,19 @@ func buildAssistantMessage(c *ui.Context, t *design.Tokens, runtime contracts.UI
 			buildAssistantMetaRow(c, t, runtime, st, message, canRegenerate)
 			buildAssistantTimeline(c, t, runtime, st, message)
 		}
+		// A known tool failure gets its localized recovery hint outside the
+		// process fold, so folding the timeline (the default) never hides the
+		// explanation and the one-click fix (FR-31).
+		if heading, kind, ok := st.turnToolRecovery(message); ok {
+			buildRecoveryLine(c, t, st, runtime, heading, kind, "")
+		}
+		// The provider cut the final answer at the output-token limit: say so
+		// where the answer ends (the explanation folds out on demand).
+		if last && message.Truncated && !message.Streaming {
+			buildTruncatedNotice(c, t, st, message.ID)
+		}
 		if message.Error != "" {
-			buildMessageError(c, t, st, message)
+			buildMessageError(c, t, runtime, st, message)
 			// A failed turn keeps one obvious way out: the labeled 重试 action
 			// under the error, enabled even though the turn has no text to copy.
 			if canRegenerate {
@@ -1230,7 +1330,7 @@ func assistantTurnContinues(prev, next contracts.ChatMessage) bool {
 // decision card that is waiting on the user) is shown under it. Expanding the
 // fold restores every step's full timeline in order.
 func buildAssistantTurnGroup(c *ui.Context, t *design.Tokens, runtime contracts.UIRuntime, st *state,
-	group []contracts.ChatMessage, canRegenerate, defaultOpen bool) {
+	group []contracts.ChatMessage, canRegenerate, last, defaultOpen bool) {
 	key := group[0].ID
 	open, explicit := st.processOpen[key]
 	if !explicit {
@@ -1262,6 +1362,14 @@ func buildAssistantTurnGroup(c *ui.Context, t *design.Tokens, runtime contracts.
 				continue
 			}
 			buildProminentDecisions(c, t, runtime, st, message)
+		}
+		// The recovery hint of a known tool failure stays outside the fold, so
+		// the default folded turn still says what went wrong and how to fix it.
+		if heading, kind, ok := st.groupToolRecovery(group); ok {
+			buildRecoveryLine(c, t, st, runtime, heading, kind, "")
+		}
+		if last && metaMessage.Truncated && !metaMessage.Streaming {
+			buildTruncatedNotice(c, t, st, metaMessage.ID)
 		}
 	})
 }
@@ -1758,8 +1866,22 @@ func messageActionTarget(st *state, message contracts.ChatMessage) (chat contrac
 // buildMessageError renders a failed assistant turn: a localized kind heading
 // with actionable guidance, plus the original backend text as muted diagnostic
 // copy so no information is lost. Unknown/other kinds keep the raw line.
-func buildMessageError(c *ui.Context, t *design.Tokens, st *state, message contracts.ChatMessage) {
+func buildMessageError(c *ui.Context, t *design.Tokens, runtime contracts.UIRuntime,
+	st *state, message contracts.ChatMessage) {
 	kind := strings.ToLower(strings.TrimSpace(message.ErrorKind))
+	// The iteration budget running out is not a provider failure: explain the
+	// limit and offer the setting that raises it instead of making rig's English
+	// diagnostic the headline.
+	if kind == contracts.MessageErrorKindIterations {
+		buildRecoveryLine(c, t, st, runtime,
+			st.tr("已达最大迭代次数", "Maximum iterations reached"),
+			recoveryKindModel, strings.TrimSpace(message.Error))
+		design.Apply(ui.Text(c, st.tr(
+			"本轮已达到工具/模型迭代上限。建议新建会话继续，或在设置 → 模型中提高最大迭代次数。",
+			"This turn hit the tool/model iteration limit. Start a new conversation to continue, or raise the iteration limit in Settings → Model.")),
+			t.Font(design.TypeXXS)).TextColor(t.LabelTertiary).MaxLines(3)
+		return
+	}
 	heading, reason := "", ""
 	switch kind {
 	case contracts.MessageErrorKindAuth:
@@ -2262,7 +2384,14 @@ const memoryScopeWorkspace = "workspace"
 
 // memoryScopeLabel renders a memory scope for the metadata line.
 func memoryScopeLabel(st *state, scope string) string {
-	switch strings.ToLower(strings.TrimSpace(scope)) {
+	trimmed := strings.TrimSpace(scope)
+	// A memory bound to one workspace persists as "workspace:<id>": show it as
+	// the current project's workspace scope, never the raw storage value
+	// (Wave 3; the settings page owns the cross-workspace label).
+	if strings.HasPrefix(strings.ToLower(trimmed), contracts.MemoryScopeWorkspacePrefix) {
+		return st.tr("工作区（本会话项目）", "Workspace (this project)")
+	}
+	switch strings.ToLower(trimmed) {
 	case "workspace", "工作区":
 		return st.tr("工作区", "Workspace")
 	case "global", "全局":
@@ -2307,6 +2436,10 @@ func buildComposer(
 		st.slashSel = 0
 	}
 	workspace, _ := st.ctx.Get(contracts.KeyWorkspace)
+	// Without a model there is nothing to call: sending is disabled and the
+	// composer says why with a link to the model page (FR-31). The assembly's
+	// default model keeps this false only in a genuinely unconfigured product.
+	modelReady := strings.TrimSpace(chat.Config().Model) != ""
 	placeholder := st.localized(cfg.ComposerPlaceholder, "输入消息…", "Ask ZeoKeel…")
 	sendLabel := st.localized(cfg.SendLabel, "发送", "Send")
 	stopLabel := st.localized(cfg.StopLabel, "停止", "Stop")
@@ -2319,7 +2452,7 @@ func buildComposer(
 	sendHint := st.localized(cfg.ComposerHint, defaultHintZh, "Enter to send · Shift+Enter newline")
 	if trimmed := strings.TrimSpace(cfg.ComposerHint); trimmed == "" || trimmed == defaultHintZh ||
 		trimmed == "Enter to send · Shift+Enter for newline" || trimmed == "Enter to send · Shift+Enter newline" {
-		sendHint = composerHintText(st, running, slashMenuActive, queueAllowed)
+		sendHint = composerHintText(st, running, slashMenuActive, queueAllowed, modelReady)
 	}
 	hasContent := strings.TrimSpace(st.draft) != "" || len(st.pendingAttachments) > 0
 	hasDraft := strings.TrimSpace(st.draft) != ""
@@ -2369,6 +2502,12 @@ func buildComposer(
 			buildPendingAttachments(ic, t, runtime, st)
 		},
 		Notices: func(ic *ui.Context) {
+			if st.commandRecovery != "" {
+				buildComposerRecovery(ic, t, runtime, st)
+			}
+			if !modelReady && !running {
+				buildNoModelNotice(ic, t, navigator, st)
+			}
 			if running && !queueAllowed {
 				// Queueing is off: the composer is editable but Enter does not
 				// send. Say where the text goes instead of leaving the user
@@ -2424,12 +2563,15 @@ func buildComposer(
 			if compactControls() {
 				return ""
 			}
-			return composerVisibleHint(st, running, slashMenuActive, queueAllowed)
+			return composerVisibleHint(st, running, slashMenuActive, queueAllowed, modelReady)
 		},
-		SendEnabled: hasContent,
+		SendEnabled: hasContent && modelReady,
 		SendLabel:   sendLabel,
 		SendTooltip: sendHint,
 		Send: func() bool {
+			if !modelReady {
+				return false
+			}
 			return submitDraft(chat, activeID, st)
 		},
 		QueueSend:    queueSend,
@@ -2581,7 +2723,7 @@ func composerTextKey(runtime contracts.UIRuntime, chat contracts.ChatService, st
 // Shift+Enter, C-23/C-25) plus the explanations of the slash-draft states (a
 // running turn keeps a command draft for later, C-05; an Esc-dismissed or
 // match-less slash draft is sent literally, C-22).
-func composerHintText(st *state, running, slashMenuActive, queueAllowed bool) string {
+func composerHintText(st *state, running, slashMenuActive, queueAllowed, modelReady bool) string {
 	if _, slashDraft := slashQuery(st.draft); slashDraft {
 		switch {
 		case running:
@@ -2598,15 +2740,46 @@ func composerHintText(st *state, running, slashMenuActive, queueAllowed bool) st
 	if running {
 		return composerRunningHintText(st, queueAllowed)
 	}
+	if !modelReady {
+		return st.tr("尚未配置模型：发送已禁用", "No model configured: sending is disabled")
+	}
 	return st.tr("Enter 或 Cmd/Ctrl+Enter 发送 · Shift+Enter 换行",
 		"Enter or Cmd/Ctrl+Enter to send · Shift+Enter for a newline")
+}
+
+// pendingApprovalCount reports how many tool approvals are waiting. The composer
+// hint reads it so the running key line never promises "Esc 停止" while the
+// first Escape actually denies the pending approval (PM-12).
+func (st *state) pendingApprovalCount() int {
+	if st == nil {
+		return 0
+	}
+	raw, ok := st.ctx.Get(contracts.KeyApprovals)
+	if !ok || raw == nil {
+		return 0
+	}
+	approvals, ok := raw.(contracts.Approvals)
+	if !ok || approvals == nil {
+		return 0
+	}
+	return len(approvals.Pending())
 }
 
 // composerRunningHintText is the running-turn key line: while a reply streams
 // Enter queues the draft (when queueing is on) and Esc stops the turn, so the
 // hint has to say so instead of leaving the two keys undiscoverable (R4). With
 // queueing off only Esc acts, and the copy says the stop interrupts the reply.
+// A pending approval takes the first Escape (the card's own "Esc = 拒绝"), so
+// the hint names that instead of the stop (PM-12).
 func composerRunningHintText(st *state, queueAllowed bool) string {
+	if st.pendingApprovalCount() > 0 {
+		if queueAllowed {
+			return st.tr("Enter 排队 · Esc 拒绝审批（再按停止）",
+				"Enter to queue · Esc denies the approval (again to stop)")
+		}
+		return st.tr("Esc 拒绝审批 · 再按一次会中断回复",
+			"Esc denies the approval · a second press interrupts the reply")
+	}
 	if queueAllowed {
 		return st.tr("Enter 排队 · Esc 停止", "Enter to queue · Esc to stop")
 	}
@@ -2618,12 +2791,15 @@ func composerRunningHintText(st *state, queueAllowed bool) string {
 // "Enter 发送 · Shift+Enter 换行" / "Enter to send · Shift+Enter newline" (the
 // full chord list stays in the send tooltip), while the slash-draft states keep
 // their explanatory copy because it explains what Enter will do.
-func composerVisibleHint(st *state, running, slashMenuActive, queueAllowed bool) string {
+func composerVisibleHint(st *state, running, slashMenuActive, queueAllowed, modelReady bool) string {
 	if _, slashDraft := slashQuery(st.draft); slashDraft {
-		return composerHintText(st, running, slashMenuActive, queueAllowed)
+		return composerHintText(st, running, slashMenuActive, queueAllowed, modelReady)
 	}
 	if running {
 		return composerRunningHintText(st, queueAllowed)
+	}
+	if !modelReady {
+		return st.tr("尚未配置模型：发送已禁用", "No model configured: sending is disabled")
 	}
 	return st.tr("Enter 发送 · Shift+Enter 换行", "Enter to send · Shift+Enter newline")
 }
@@ -2768,7 +2944,7 @@ func buildSessionPermissionMenuItems(m *ui.Menu, runtime contracts.UIRuntime, st
 		return
 	}
 	current := permissionMode(st.settings)
-	m.Item(st.tr("权限模式", "Permission mode")).Disabled(true).
+	m.Item(st.tr("权限模式（所有会话）", "Permission mode (all conversations)")).Disabled(true).
 		Trailing(st.permissionLabel(current)).Tooltip(st.tr(
 		"只读：只自动允许只读/信息类工具，其他操作会询问。工作区可写（默认）：工作区内的文件读写自动允许，shell/网络仍会询问。所有权限：全部自动允许，不再弹窗。弹窗中选择「本会话内始终允许」可停止重复询问。",
 		"Read-only: only read-only/informational tools are auto-allowed; other actions ask. Workspace-write (default): workspace file reads/writes are auto-allowed; shell/network still ask. All permissions: everything is auto-allowed without asking. Choose \"Always allow in this session\" in the dialog to stop repeats."))
@@ -2805,7 +2981,7 @@ func buildSessionClearAllowedToolsItem(m *ui.Menu, runtime contracts.UIRuntime,
 		if err := permissions.ClearAllowedTools(activeID); err != nil {
 			st.commandErr = st.tr("清除失败：", "Clear failed: ") + err.Error()
 		} else {
-			st.commandErr = ""
+			st.clearComposerFailure()
 			st.toast(contracts.NotifySuccess, st.tr("已清除自动允许的工具", "Remembered tools cleared"))
 		}
 		runtime.Invalidate()
@@ -2825,7 +3001,10 @@ func buildSessionModeMenuItems(m *ui.Menu, runtime contracts.UIRuntime, st *stat
 	if current.badgeZh != "" {
 		modeValue = st.tr(current.badgeZh, current.badgeEn)
 	}
-	m.Item(st.tr("对话模式", "Conversation mode")).Disabled(true).Trailing(modeValue)
+	// Permission and chat mode are global settings: say so on their group
+	// headers, since the same menu also holds conversation-scoped entries
+	// (persona, remembered tools) (PM-14).
+	m.Item(st.tr("对话模式（所有会话）", "Conversation mode (all conversations)")).Disabled(true).Trailing(modeValue)
 	for _, option := range chatModeOptions {
 		option := option
 		item := m.Item(st.tr(option.menuZh, option.menuEn))
@@ -3081,9 +3260,21 @@ func buildModelChip(c *ui.Context, t *design.Tokens, runtime contracts.UIRuntime
 	if effectiveModel == "" {
 		effectiveModel = strings.TrimSpace(chat.Config().Model)
 	}
+	// The model list is the only configured source of models; an effective
+	// model without a list row comes from the assembly default. Say that on the
+	// chip so "no models configured" in settings and a model id here do not
+	// contradict each other (FR-26).
+	catalog, hasCatalog := st.ctx.Get(contracts.KeyModelCatalog)
+	var catalogModels []contracts.ModelInfo
+	if hasCatalog && catalog != nil {
+		catalogModels = catalog.Models()
+	}
+	unconfiguredDefault := effectiveModel != "" && hasCatalog && catalog != nil && len(catalogModels) == 0
 	model := effectiveModel
 	if model == "" {
 		model = st.tr("未配置", "Not set")
+	} else if unconfiguredDefault {
+		model += st.tr("（默认模型，尚未配置连接）", " (default model, no connection configured)")
 	}
 	// A narrow composer gives the model chip a bounded measure so the
 	// low-frequency controls (or the labeled 更多工具 menu) always fit beside
@@ -3095,7 +3286,6 @@ func buildModelChip(c *ui.Context, t *design.Tokens, runtime contracts.UIRuntime
 		model = truncateRunes(model, 14)
 	}
 	switcher, canSwitch := chat.(contracts.SessionModelSwitcher)
-	catalog, hasCatalog := st.ctx.Get(contracts.KeyModelCatalog)
 	if canSwitch && hasSession && activeID != "" {
 		// The thinking state is resolved once for the 推理等级 row's trailing
 		// value and the chip tooltip.
@@ -3120,6 +3310,10 @@ func buildModelChip(c *ui.Context, t *design.Tokens, runtime contracts.UIRuntime
 			// avoids one long stacked menu (mygo v0.8.3 draws a submenu's
 			// Trailing value before its disclosure chevron).
 			m.MaxWidth(design.OverlayWidthS)
+			if unconfiguredDefault {
+				m.Item(st.tr("默认模型来自装配，添加模型行后可覆盖",
+					"The default model comes from the assembly; add a model row to override")).Disabled(true)
+			}
 			modelRow := m.Submenu(st.tr("模型", "Model"), func(sub *ui.Menu) {
 				buildSessionModelChoices(sub, runtime, st, switcher, activeID, effectiveModel, models)
 			})
@@ -3450,6 +3644,215 @@ func sessionExactStatusTooltip(st *state, stats sessionUsageStats, window int, s
 	return strings.Join(parts, " · ")
 }
 
+// recoveryKinds are the known backend failure classes the conversation can
+// explain with a localized heading and a one-click fixing action (FR-31).
+const (
+	recoveryKindModel     = "model"
+	recoveryKindWorkspace = "workspace"
+	recoveryKindSearch    = "search"
+)
+
+// recoveryFor maps one backend failure message to a localized heading and the
+// action that fixes it. The mapping is deliberately narrow — only the classes
+// the product can repair from one place — and everything else keeps the raw
+// backend text so no diagnostic information is lost.
+func (st *state) recoveryFor(text string) (heading, kind string, ok bool) {
+	lower := strings.ToLower(text)
+	switch {
+	case strings.Contains(lower, "no model configured"):
+		return st.tr("未配置模型：请先在设置 → 模型中添加模型",
+			"No model configured: add one in Settings → Model"), recoveryKindModel, true
+	case strings.Contains(lower, "no roots configured"):
+		return st.tr("未打开工作区：文件与命令工具需要一个工作区",
+			"No workspace open: file and command tools need one"), recoveryKindWorkspace, true
+	case strings.Contains(lower, "web search endpoint"), strings.Contains(lower, "websearch.endpoint"):
+		return st.tr("未配置搜索后端：在设置 → 搜索中填写端点",
+			"Search backend not configured: add an endpoint in Settings → Search"), recoveryKindSearch, true
+	case strings.Contains(lower, "being compacted"):
+		return st.tr("会话正在压缩，请稍后再试",
+			"Session is being compacted; try again shortly"), "", true
+	case strings.Contains(lower, "history changed during compaction"):
+		return st.tr("压缩期间历史被修改，已取消",
+			"History changed during compaction; cancelled"), "", true
+	}
+	return "", "", false
+}
+
+// turnToolRecovery reports the localized fix for one message's most recent
+// failed tool call, when that failure is a class the UI can explain (no
+// workspace / unconfigured search backend). Only the latest failing call is
+// considered: a retry repeats the same failure and identical hints would stack.
+func (st *state) turnToolRecovery(message contracts.ChatMessage) (heading, kind string, ok bool) {
+	return st.groupToolRecovery([]contracts.ChatMessage{message})
+}
+
+// groupToolRecovery is turnToolRecovery for a grouped multi-step turn: the
+// latest failing tool call across the group's messages in reverse order.
+func (st *state) groupToolRecovery(group []contracts.ChatMessage) (heading, kind string, ok bool) {
+	for messageIndex := len(group) - 1; messageIndex >= 0; messageIndex-- {
+		tools := group[messageIndex].Tools
+		for index := len(tools) - 1; index >= 0; index-- {
+			tool := tools[index]
+			if uikit.ParseToolStatus(tool.Status).Kind() != uikit.StatusError {
+				continue
+			}
+			return st.recoveryFor(strings.TrimSpace(tool.Summary))
+		}
+	}
+	return "", "", false
+}
+
+// recoveryActionLabel names the button of one recovery class.
+func (st *state) recoveryActionLabel(kind string) string {
+	switch kind {
+	case recoveryKindModel:
+		return st.tr("打开模型设置", "Open model settings")
+	case recoveryKindWorkspace:
+		return st.tr("打开工作区", "Open workspace")
+	case recoveryKindSearch:
+		return st.tr("打开搜索设置", "Open search settings")
+	default:
+		return ""
+	}
+}
+
+// runRecovery performs the one-click fix of a known failure: the model/search
+// pages open the settings surface on that page; the workspace action runs the
+// native folder picker (the workspace seam the @ menu uses).
+func (st *state) runRecovery(runtime contracts.UIRuntime, kind string) {
+	switch kind {
+	case recoveryKindModel:
+		openSettingsPage(st.navigator, settingsPageModel)
+	case recoveryKindSearch:
+		openSettingsPage(st.navigator, settingsPageSearch)
+	case recoveryKindWorkspace:
+		var workspace contracts.WorkspaceService
+		if raw, ok := st.ctx.Get(contracts.KeyWorkspace); ok {
+			workspace, _ = raw.(contracts.WorkspaceService)
+		}
+		startWorkspaceCreate(runtime, workspace, st)
+	}
+}
+
+// reportComposerFailure records one composer-level send failure. Known classes
+// become a localized heading plus action with the raw text kept as selectable
+// detail; unknown failures keep the previous prefix+raw line.
+func (st *state) reportComposerFailure(err error) {
+	if st == nil || err == nil {
+		return
+	}
+	if heading, kind, ok := st.recoveryFor(err.Error()); ok {
+		st.commandErr = ""
+		st.commandRecovery = heading
+		st.commandRecoveryKind = kind
+		st.commandDetail = err.Error()
+		return
+	}
+	st.commandErr = st.tr("发送失败：", "Send failed: ") + err.Error()
+	st.clearComposerRecovery()
+}
+
+// clearComposerFailure clears every composer failure line (after a delivered
+// message or when the conversation changes).
+func (st *state) clearComposerFailure() {
+	if st == nil {
+		return
+	}
+	st.commandErr = ""
+	st.clearComposerRecovery()
+}
+
+// clearComposerRecovery clears only the mapped-failure fields.
+func (st *state) clearComposerRecovery() {
+	st.commandRecovery = ""
+	st.commandRecoveryKind = ""
+	st.commandDetail = ""
+}
+
+// buildTruncatedNotice is the truncated-answer hint under the final reply: the
+// provider stopped at the output-token limit (finish_reason "length"), so the
+// answer is partial. The explanation folds out on demand and says how to
+// continue or raise the limit.
+func buildTruncatedNotice(c *ui.Context, t *design.Tokens, st *state, messageID string) {
+	root := ui.Column(c.Key("session.truncated." + messageID)).FillWidth()
+	open := ui.Local(root, "open", func() bool { return false })
+	root.Children(func() {
+		parts := ui.CollapsibleBase(c.Key("session.truncated.trigger."+messageID), open)
+		trigger := parts.Trigger.Grow(1).AlignItems(ui.Center).Gap(design.Space2).
+			PaddingY(design.Space1).Radius(design.RadiusSM).
+			Label(st.tr("回答被截断", "Answer truncated"))
+		if parts.Trigger.Hovered() || parts.Trigger.Focused() {
+			trigger = trigger.Background(t.BgHover)
+		}
+		trigger.Children(func() {
+			ui.Icon(c, icons.AlertTriangle()).Size(design.Space4, design.Space4).
+				TextColor(t.WarningText)
+			design.Apply(ui.Text(c, st.tr("回答被截断", "Answer truncated")),
+				t.Font(design.TypeXXS)).TextColor(t.WarningText)
+			ui.Icon(c, icons.ChevronRight()).Size(design.Space3, design.Space3).
+				TextColor(t.LabelTertiary).Rotate(90 * parts.Progress())
+		})
+		parts.Panel(func() {
+			design.Apply(ui.Text(c, st.tr(
+				"模型在输出上限处停止，这条回答可能不完整。可以要求它继续，或在设置 → 模型中提高最大输出 tokens。",
+				"The model stopped at its output limit, so this answer may be incomplete. Ask it to continue, or raise the max output tokens in Settings → Model.")),
+				t.Font(design.TypeXXS)).TextColor(t.LabelTertiary).MaxLines(3)
+		})
+	})
+}
+
+// buildRecoveryLine is the shared localized-failure row: the localized heading,
+// the fixing action and, when the caller has one, the raw backend text as
+// selectable technical detail. Nothing is hidden: the raw text stays copyable.
+func buildRecoveryLine(c *ui.Context, t *design.Tokens, st *state, runtime contracts.UIRuntime,
+	heading, kind, detail string) {
+	ui.Column(c).FillWidth().Gap(design.Space1).Children(func() {
+		ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(design.Space2).Children(func() {
+			design.Apply(ui.Text(c, heading), t.Font(design.TypeXS)).
+				TextColor(t.DangerText).Grow(1).MaxLines(2).Selectable()
+			if kind != "" {
+				if label := st.recoveryActionLabel(kind); label != "" {
+					button := design.Apply(ui.Button(c, label), t.SecondaryButton()).
+						Height(design.RowCompactHeight).Shrink(0)
+					if button.Clicked() {
+						st.runRecovery(runtime, kind)
+					}
+				}
+			}
+		})
+		if detail != "" {
+			design.Apply(ui.Text(c, st.tr("技术细节：", "Technical details: ")+detail),
+				t.MonoFamily(), t.Font(design.TypeXXXS)).
+				TextColor(t.LabelTertiary).MaxLines(3).Selectable()
+		}
+	})
+}
+
+// buildComposerRecovery renders one mapped send failure under the composer
+// input (the attachment row owns the generic raw error line).
+func buildComposerRecovery(c *ui.Context, t *design.Tokens, runtime contracts.UIRuntime, st *state) {
+	if st.commandRecovery == "" {
+		return
+	}
+	buildRecoveryLine(c, t, st, runtime, st.commandRecovery, st.commandRecoveryKind, st.commandDetail)
+}
+
+// buildNoModelNotice is the composer's unconfigured-model state: sending is
+// disabled, so the composer says why and offers the one action that fixes it
+// (FR-31).
+func buildNoModelNotice(c *ui.Context, t *design.Tokens, navigator contracts.Navigator, st *state) {
+	ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(design.Space2).Children(func() {
+		ui.Icon(c, icons.AlertTriangle()).Size(design.Space3, design.Space3).TextColor(t.WarningText)
+		design.Apply(ui.Text(c, st.tr("尚未配置模型：发送已禁用", "No model configured: sending is disabled")),
+			t.Font(design.TypeXXS)).TextColor(t.WarningText).Grow(1).MaxLines(2)
+		button := design.Apply(ui.Button(c, st.tr("打开模型设置", "Open model settings")),
+			t.SecondaryButton()).Height(design.RowCompactHeight).Shrink(0)
+		if button.Clicked() {
+			openSettingsPage(navigator, settingsPageModel)
+		}
+	})
+}
+
 // submitDraft sends the trimmed draft and any staged attachments (a message
 // may consist of attachments only) and clears both on success. A backend
 // without contracts.AttachmentSender reports the readable unsupported error
@@ -3458,6 +3861,12 @@ func submitDraft(chat contracts.ChatService, activeID string, st *state) bool {
 	prompt := strings.TrimSpace(st.draft)
 	attachments := append([]contracts.Attachment(nil), st.pendingAttachments...)
 	if (prompt == "" && len(attachments) == 0) || activeID == "" {
+		return false
+	}
+	// Without a model the composer disables sending and explains why (FR-31);
+	// the keyboard path must respect the same gate instead of firing a request
+	// that can only fail.
+	if strings.TrimSpace(chat.Config().Model) == "" {
 		return false
 	}
 	if len(attachments) > 0 {
@@ -3471,14 +3880,15 @@ func submitDraft(chat contracts.ChatService, activeID string, st *state) bool {
 			return false
 		}
 	} else if err := chat.Send(activeID, prompt); err != nil {
-		// C-04: a failed send must not be silent. The composer's error line
-		// already renders commandErr as an alert, and the draft is kept so the
-		// user can retry.
-		st.commandErr = st.tr("发送失败：", "Send failed: ") + err.Error()
+		// C-04: a failed send must not be silent. Known backend classes get a
+		// localized heading with a recovery action and keep the raw text as
+		// selectable detail; unknown failures keep the prefix+raw line. The
+		// draft is kept so the user can retry either way.
+		st.reportComposerFailure(err)
 		return false
 	}
 	// A delivered message clears an older composer error (e.g. a stop failure).
-	st.commandErr = ""
+	st.clearComposerFailure()
 	// The attachments are in the conversation now; their decoded previews are
 	// no longer needed and would otherwise stay in memory for the session's
 	// lifetime (the map only grows as images are staged).
@@ -4157,7 +4567,10 @@ func truncateTrajectorySummary(summary string) string {
 
 // startNewSession creates a session, makes it active and navigates to it.
 func startNewSession(st *state, chat contracts.ChatService, navigator contracts.Navigator) {
-	id, err := chat.NewSession(st.tr("新对话", "New conversation"))
+	// Untitled on purpose: the backend names a conversation from its first
+	// prompt, and a pre-filled placeholder ("新对话") would pin that title
+	// forever (FR-30).
+	id, err := chat.NewSession("")
 	if err != nil {
 		return
 	}

@@ -4,13 +4,23 @@
 [![Release](https://img.shields.io/github/v/release/zeokeel/zeokeel)](https://github.com/zeokeel/zeokeel/releases)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
-> **v0.2.23 — twenty-eighth public release** (2026-11-11). Native, compile-time modular
+> **v0.2.24 — twenty-ninth public release** (2026-11-11). Native, compile-time modular
 > AI agent for desktop, headless and ACP (Zed/editor) use; one Go binary, no
-> webview. Final verification: full test suite green (incl. regression / uimodtest /
-> design-contract tests), `ui-drive` **91/91 PASS**, `ui-snapshot` **103 renders / 102 unique PNGs**,
-> designlint **0 new / 0 blocking**. See [CHANGELOG.md](CHANGELOG.md) for the release notes.
+> webview. This release lands the first wave of the product-wide defect review
+> ([docs/PRODUCT-BUG-REVIEW-2026-11-11.md](docs/PRODUCT-BUG-REVIEW-2026-11-11.md)):
+> security/permission, MCP/LSP, agent-loop, prompt-injection, memory/skill,
+> workspace and first-run fixes, each covered by a regression test added before
+> the fix. Final verification: `scripts/verify.sh` **13/13 PASS** — full test suite
+> green (incl. `-race`), regression **276 PASS / 0 FAIL**, `ui-drive` **91/91 PASS**,
+> `ui-snapshot` **103 steps / 102 PNGs**, three-product smokes PASS, designlint
+> **0 new / 0 blocking**, design-check **6/6**. See [CHANGELOG.md](CHANGELOG.md) for the release notes.
 
-> **v0.2.23 主要变化**：处理 v0.2.20 遗留 —— Tool Row 状态 gutter 改为固定宽度左边框（running→success 不再位移，零 reflow）；新增运行中工具行的真实 session 帧测试；短围栏收缩后「回到最新」浮层不再压住复制按钮。其余同 v0.2.22（Markdown 阅读主题、安静/可收缩围栏）。
+> **v0.2.24 主要变化**：按 `docs/PRODUCT-BUG-REVIEW-2026-11-11.md` 做 TDD 修复——
+> ① 安全/权限：MCP 多 server 重名 panic、`settings_get` 明文凭据、自动化只读越权、只读预设 destructive memory、LSP 初始化与沙箱路径、损坏数据文件隔离、后端工具开关生效；
+> ② Loop/上下文：/compact 竞态与读模型不一致、删除运行中会话复活、停止误判失败、Regenerate 丢 @session、截断/迭代错误可识别、AGENTS.md 信任边界与 UTF-8 截断、模式/预设进入提示词与工具面、@session 引用转义、记忆/技能有界注入；
+> ③ MCP/记忆/技能：MCP 重连/启动超时/结果上限、记忆 scope 绑定工作区、提取校验、技能根优先级与 frontmatter 保真、工作区技能信任标记；
+> ④ 产品面：首启检查清单、无模型发送禁用与错误恢复、默认模型文案对齐、审批卡会话归属、会话/自动化/ACP 工具根跟随会话、记忆/技能/MCP 设置页状态与文案。
+> 已在 v0.2.24 明确 Deferred 的项见 CHANGELOG「已知限制」。
 
 ## 下载与运行 / Download and run
 
@@ -116,6 +126,11 @@ go test ./...
 
 ## 状态（2026-11-07 · P1 持久化/审批/工具卡已可运行）
 
+> **当前实现说明（v0.2.24，覆盖下方历史阶段描述）**
+> - **Home 屏不是导航目的地**（自 v0.2.6 起）：Home 模块保留用于兼容，但真实落地页是会话空态——空会话显示「开始前还需要：」检查清单（缺模型 / 缺 API Key / 未打开工作区）与修复深链。下文历史阶段里“首页导航/Home hero”的描述仅记录当时的迭代。
+> - **模型来源**：用户模型列表优先；列表为空时装配默认模型（`gpt-4o-mini`）仍然是实际运行模型，UI 会标注「默认模型，尚未配置连接」并引导添加模型行。不要理解为“无内置默认模型”或“列表是唯一来源”。
+> - **工作区**：会话绑定到工作区时，该会话的每次 run（含自动化/ACP）在 session 自己的工具根里执行，不再跟随窗口级“当前工作区”；打开会话会切换当前工作区以保持 Files/侧栏一致。
+
 - ✅ **品牌设计体系已从 old 移植**：`internal/brand`（品牌色板/主题/logo 资源）、`internal/design`
   （Design Tokens、字阶、间距、组件样式）、`internal/icons`（Lucide SVG 图标集）；宿主 chrome 使用 280px
   品牌侧栏 + 64px brand row（logo+wordmark）+ 52px 顶栏；全部 UI 模块（对话/Home/侧栏/设置/审批/工具卡）
@@ -155,7 +170,7 @@ go test ./...
   - 截图：`docs/screenshots/p1-approval.png`、`p1-chat.png`、`p1-trajectory.png`
 - ✅ P2（第一批）：Home 接入真实最近会话 + "开始新对话"；设置新增「外观」页（native Toggle 深色模式 +
   native Select 界面语言，写 `ui.theme.dark`/`ui.language` 并立即生效）；模型页支持添加多个服务商的模型
-  （每个模型独立 Base URL/API Key，内置 DeepSeek/OpenAI/Ollama 等常用服务商预设；模型列表是唯一模型来源）。
+  （每个模型独立 Base URL/API Key，内置 DeepSeek/OpenAI/Ollama 等常用服务商预设；模型列表是可编辑的模型来源，列表为空时装配默认模型生效并在 UI 标注）。
   截图：`docs/screenshots/p2-home.png`、`p2-appearance.png`
 - ✅ P2（第二批，按老 UI 布局/功能对齐）：
   - 宿主布局改为老结构：品牌侧栏 → 新对话 → 首页导航 → 会话区（搜索/会话行/重命名/删除）→ footer；
@@ -180,7 +195,10 @@ go test ./...
   - 右侧检查栏新增 **日志** 页（对照 old right_sidebar.go 的 Log tab）：读取 SQLite 持久化的
     session events（seq/type/time/payload 折叠），真实事件流经 E2E 验证；截图 `p2-log.png`
 - ✅ P3（首批）：**记忆**功能 —— `zeokeel/memory`（JSON 原子持久化 rig.MemoryStore，注册 memory 工具进
-  toolkit）；对话页「记忆」Tab 真实面板（列表/搜索/添加/删除/scope/时间，native 控件）；助手正文改用
+  toolkit；scope 带工作区身份并按当前工作区过滤、默认 scope 由 Config 统一、损坏文件隔离备份后以空记忆继续；
+  上限/保留期策略在启动与写入时自动执行）；对话页「记忆」Tab 真实面板（列表/搜索/添加/删除/编辑/scope/时间，
+  native 控件）；设置「记忆」页（全工作区管理、去重/清空/策略/模型提取——提取候选强制长度与密钥校验、
+  部分失败显示「已写入 N 条记忆后失败」并刷新）；助手正文改用
   mygo 官方 `ui/markdown`（标题/列表/表格/代码块+复制/流式增量）；截图 `p2-memory.png`、`p1-chat.png`
 - ✅ P2 附件/图片：contracts.Attachment + 可选 AttachmentSender；agent 把图片转为 rig image content part
   （data URL），非图片附件文本化（文本内容 ≤32KiB）；composer 原生文件选择（mygo.Dialog.Open）+ 缩略图/
@@ -200,9 +218,12 @@ go test ./...
 - ✅ P3 终端：`zeokeel/terminal`（workspace root 为 cwd 的简单命令运行器，shell 探测/选择、timeout、
   输出截断、ctx 取消；无 PTY/持久 shell，与 old terminalPanel 一致）；右侧栏「终端」Tab：cwd/shell/清空、
   mono 输出、输入 + 运行/停止、退出码；截图 `p2-terminal.png`；desktop 18 / headless 9 实例
-- ✅ P3 技能：`zeokeel/skills`（rig `skill.FileStore` 多根发现：config dirs → dataDir/skills →
-  workspace/skills，动态 roots、frontmatter 解析、body 去 frontmatter）；toolkit 的 skill 工具改用该持久
-  store；设置「技能」页：roots、名称/描述/路径、Collapsible + markdown 预览、刷新/错误；截图
+- ✅ P3 技能：`zeokeel/skills`（多根发现，优先级**工作区** `<root>/skills`、`.agents/skills`、
+  `.zeokeel/skills` → 用户配置目录（`skills.dirs`）→ assembly 配置目录 → `dataDir/skills` →
+  `$ZEOKEEL_SKILLS` → `~/.zeokeel/skills`；动态 roots、frontmatter 解析、body 去 frontmatter、同名技能
+  遮蔽时给出可见警告；List 只读每个 SKILL.md 的前缀（数量/字节有上限），load 才读全文；编辑保留未知
+  frontmatter 键）；toolkit 的 skill 工具改用该持久 store；设置「技能」页：roots、额外目录配置、
+  名称/描述/路径、Collapsible + markdown 预览、刷新/错误/发现警告；截图
   `p2-skills.png`、`p2-skills-content.png`；desktop 19 / headless 10 实例
 - ✅ P3 会话 fork / 导出：`SessionForker.ForkSession`（深拷贝消息/附件/Tools，标题「副本 - …」，持久化历史+事件，
   重启恢复）；会话行「⋯」菜单「创建副本」；会话头部「导出」→ mygo 原生保存对话框写 Markdown（标题/时间/
@@ -258,7 +279,7 @@ go test ./...
 - ✅ P5 Composer 深度（第一切片）：slash 命令「新会话/创建副本/导出对话/打开设置」（UIRuntime.Commands，
   `/` 菜单与 Cmd/Ctrl+K 共用）+ 最后一条 assistant 的「重新生成」（agent SessionRegenerator：截断旧回复、
   复用运行管线、持久化回滚）；截图 `p2-slash.png`
-- ✅ P5 模型切换：`zeokeel/modelcatalog` 用户模型列表（无内置默认模型；旧 chat.* 连接一次性迁移为列表行）+
+- ✅ P5 模型切换：`zeokeel/modelcatalog` 用户模型列表（列表为空时装配默认模型仍生效并在 UI 标注；旧 chat.* 连接一次性迁移为列表行）+
   agent per-session 模型覆盖（`SessionModelSwitcher`，settings 持久化，Send/Regenerate 使用会话模型）+
   composer 模型菜单（打勾/当前/每模型思考强度/打开模型设置回退）；desktop 25 实例 / registry 27；
   截图 `p2-modelmenu.png`、`p2-model-switched.png`

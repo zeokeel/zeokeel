@@ -238,3 +238,26 @@ func TestArchivePageDeepLink(t *testing.T) {
 	tester.Frame()
 	h.assertTexts(tester, "归档", "深链会话")
 }
+
+// TestArchivePageOpenRestoresSession covers PM-13: opening an archived
+// conversation from the archive page un-archives it, so after the settings
+// surface closes the conversation is still reachable from the sidebar instead
+// of silently living in the archive again.
+func TestArchivePageOpenRestoresSession(t *testing.T) {
+	chat := &fakeChat{}
+	archiveSession(chat, "arch-1", "打开即恢复", 2, time.Now())
+	h, tester := archiveHarness(t, chat)
+	tester.Frame()
+	h.click(tester, "打开即恢复")
+	tester.Key(0, ui.KeyEnter)
+	tester.Frame()
+	if got := chat.ActiveSession(); got != "arch-1" {
+		t.Fatalf("active session = %q, want arch-1", got)
+	}
+	if calls := chat.archivedCalls(); len(calls) != 1 || calls[0] != "arch-1" {
+		t.Fatalf("SetSessionArchived calls while opening = %v, want one restore of arch-1", calls)
+	}
+	if chat.isArchived("arch-1") {
+		t.Fatal("opening an archived session left it archived (it disappears from the sidebar again)")
+	}
+}

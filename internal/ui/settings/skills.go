@@ -34,6 +34,13 @@ type skillsState struct {
 	// name+path so filtering and refreshes keep row identity.
 	list ui.ListState
 
+	// User-configured extra skill directories (settings key skills.dirs) and
+	// the discovery warnings of the last scan (S-02/S-03).
+	extraDirs       string
+	extraDirsLoaded bool
+	extraNotice     string
+	extraErr        bool
+
 	// Editor half (skills_edit.go): the create/edit modal drafts, the success
 	// badge and the delete confirmation.
 	creating         bool
@@ -91,8 +98,8 @@ func buildSkillsPage(c *ui.Context, t *design.Tokens, kctx cordis.Context, st *s
 		uikit.PageHeaderAction(c,
 			localized(locale, "技能", "Skills"),
 			localized(locale,
-				"从配置目录、dataDir/skills 与工作区 /skills 中发现的 SKILL.md 技能。",
-				"SKILL.md skills discovered in the configured directories, dataDir/skills and the workspace /skills."),
+				"从工作区技能目录（/skills、.agents/skills、.zeokeel/skills）、配置目录与 dataDir/skills 中发现的 SKILL.md 技能；工作区优先。",
+				"SKILL.md skills discovered in the workspace skill directories (/skills, .agents/skills, .zeokeel/skills), the configured directories and dataDir/skills; the workspace wins."),
 			func(c *ui.Context) {
 				if editor != nil {
 					if design.Apply(ui.PrimaryButton(c, localized(locale, "新建技能", "New skill")),
@@ -155,6 +162,14 @@ func buildSkillsPage(c *ui.Context, t *design.Tokens, kctx cordis.Context, st *s
 			})
 		}
 
+		if warner, ok := skills.(contracts.SkillWarnings); ok {
+			if warnings := warner.Warnings(); len(warnings) > 0 {
+				uikit.ErrorLine(c, localized(locale, "技能发现警告：", "Skill discovery warnings: ")+
+					strings.Join(warnings, "；"))
+			}
+		}
+		buildSkillsExtraDirsSection(c, t, kctx, st, locale)
+
 		if st.listErr != nil {
 			uikit.ErrorLine(c, localized(locale, "读取技能失败：",
 				"Failed to read skills: ")+st.listErr.Error())
@@ -176,8 +191,8 @@ func buildSkillsPage(c *ui.Context, t *design.Tokens, kctx cordis.Context, st *s
 				uikit.EmptyStateBlock(c,
 					localized(locale, "还没有发现技能", "No skills discovered yet"),
 					localized(locale,
-						"在工作区 /skills 或 dataDir/skills 放置 <name>/SKILL.md 后点击刷新。",
-						"Place <name>/SKILL.md in the workspace /skills or dataDir/skills, then refresh."),
+						"在工作区技能目录（/skills、.agents/skills）或 dataDir/skills 放置 <name>/SKILL.md 后点击刷新。",
+						"Place <name>/SKILL.md in the workspace skill directories (/skills, .agents/skills) or dataDir/skills, then refresh."),
 					nil)
 				return
 			case len(filtered) == 0:
@@ -206,7 +221,7 @@ func buildSkillsPage(c *ui.Context, t *design.Tokens, kctx cordis.Context, st *s
 				Label(localized(locale, "技能列表", "Skills")).
 				Gap(design.Space0).
 				Rows(func(row ui.ListRow) {
-					buildSkillCard(row.Context, t, skills, st, filtered[row.Index], editor, dataDir, st.roots, locale)
+					buildSkillCard(row.Context, t, skills, st, filtered[row.Index], editor, dataDir, currentWorkspaceRoot(kctx), st.roots, locale)
 				})
 		})
 	})
@@ -216,7 +231,7 @@ func buildSkillsPage(c *ui.Context, t *design.Tokens, kctx cordis.Context, st *s
 // description, source path and the native collapsible content preview, with the
 // edit and destructive delete behind the row's trailing ⋯ menu.
 func buildSkillCard(c *ui.Context, t *design.Tokens, skills contracts.SkillsService, st *skillsState,
-	skill contracts.Skill, editor contracts.SkillsEditor, dataDir string, roots []string,
+	skill contracts.Skill, editor contracts.SkillsEditor, dataDir, workspaceRoot string, roots []string,
 	locale contracts.LocaleService) {
 	name := firstNonEmpty(skill.Name, localized(locale, "(未命名技能)", "(Unnamed skill)"))
 	key := name + "\x00" + skill.Path
@@ -236,7 +251,7 @@ func buildSkillCard(c *ui.Context, t *design.Tokens, skills contracts.SkillsServ
 		if path := strings.TrimSpace(skill.Path); path != "" {
 			// H20: the row shows a short relative path plus its source and keeps
 			// the absolute path in the tooltip instead of dumping it.
-			source, relative := skillDisplayPath(path, dataDir, roots)
+			source, relative := skillDisplayPath(path, dataDir, workspaceRoot, roots)
 			meta := relative
 			if source != "" {
 				meta = source + " · " + relative
@@ -311,15 +326,71 @@ func skillRootScope(kctx cordis.Context, root string) (zh, en string) {
 	if clean == "." || clean == "" {
 		return "全局", "global"
 	}
-	if workspaceService, ok := kctx.Get(contracts.KeyWorkspace); ok && workspaceService != nil {
-		if current, open, err := workspaceService.Current(context.Background()); err == nil && open &&
-			strings.TrimSpace(current.Root) != "" {
-			if clean == filepath.Join(filepath.Clean(current.Root), "skills") {
-				return "工作区", "workspace"
-			}
+	if workspaceRoot := currentWorkspaceRoot(kctx); workspaceRoot != "" {
+		if clean == workspaceRoot || strings.HasPrefix(clean, workspaceRoot+string(filepath.Separator)) {
+			return "工作区", "workspace"
 		}
 	}
 	return "全局", "global"
+}
+
+// currentWorkspaceRoot returns the open workspace root ("" when none).
+func currentWorkspaceRoot(kctx cordis.Context) string {
+	workspaceService, ok := kctx.Get(contracts.KeyWorkspace)
+	if !ok || workspaceService == nil {
+		return ""
+	}
+	current, open, err := workspaceService.Current(context.Background())
+	if err != nil || !open {
+		return ""
+	}
+	root := strings.TrimSpace(current.Root)
+	if root == "" {
+		return ""
+	}
+	return filepath.Clean(root)
+}
+
+// buildSkillsExtraDirsSection renders the user-configurable extra skill
+// directories (S-03): the value is stored in skills.dirs and a refresh rescans
+// immediately.
+func buildSkillsExtraDirsSection(c *ui.Context, t *design.Tokens, kctx cordis.Context,
+	st *skillsState, locale contracts.LocaleService) {
+	settingsStore, ok := kctx.Get(contracts.KeySettings)
+	if !ok || settingsStore == nil {
+		return
+	}
+	if !st.extraDirsLoaded {
+		st.extraDirsLoaded = true
+		st.extraDirs = settingsStore.Get(contracts.SettingSkillsDirs, "")
+	}
+	uikit.Section(c, localized(locale, "额外技能目录", "Extra skill directories"), func(*ui.Context) {
+		ui.Field(c, localized(locale, "目录列表", "Directory list"), func() {
+			ui.TextInput(c, &st.extraDirs).
+				Label(inputLabel(locale, localized(locale, "目录列表", "Directory list"))).
+				Placeholder(localized(locale, "例如 ~/.zeokeel/skills", "e.g. ~/.zeokeel/skills")).
+				FillWidth()
+		}).Description(localized(locale,
+			"用路径分隔符（Windows 为 ;，其它为 :）或换行分隔；相对路径按数据目录解析。留空表示不额外扫描。",
+			"Separate entries with the OS path separator (; on Windows, : elsewhere) or newlines; relative paths resolve against the data directory. Empty means no extra directories."))
+		uikit.DialogFooter(c, []uikit.DialogAction{{
+			Label: localized(locale, "应用", "Apply"),
+			// Not primary: the page's one primary is "新建技能".
+			OnClick: func() {
+				value := strings.TrimSpace(st.extraDirs)
+				if err := settingsStore.Set(contracts.SettingSkillsDirs, value); err != nil {
+					st.extraNotice = localized(locale, "保存失败：", "Save failed: ") + err.Error()
+					st.extraErr = true
+				} else {
+					st.extraNotice = localized(locale, "已保存", "Saved")
+					st.extraErr = false
+					st.refresh()
+				}
+				c.Invalidate()
+			},
+		}})
+		statusBadgesRow(c, t, st.extraNotice, st.extraErr)
+	})
 }
 
 // filterSkills narrows the list by the page's search query (case-insensitive
@@ -343,7 +414,7 @@ func filterSkills(skills []contracts.Skill, query string) []contracts.Skill {
 // localized source label plus a path relative to that root: dataDir skills are
 // global, workspace roots are the project's. The absolute path stays available
 // as the card's tooltip.
-func skillDisplayPath(path, dataDir string, roots []string) (source, relative string) {
+func skillDisplayPath(path, dataDir, workspaceRoot string, roots []string) (source, relative string) {
 	clean := filepath.Clean(path)
 	if dataDir != "" {
 		globalRoot := filepath.Join(dataDir, "skills")
@@ -351,9 +422,14 @@ func skillDisplayPath(path, dataDir string, roots []string) (source, relative st
 			return "global", rel
 		}
 	}
+	if workspaceRoot != "" {
+		if rel, ok := relativeTo(clean, workspaceRoot); ok {
+			return "workspace", rel
+		}
+	}
 	for _, root := range roots {
 		if rel, ok := relativeTo(clean, root); ok {
-			return "workspace", rel
+			return "global", rel
 		}
 	}
 	// Unknown root: never print the absolute path; the tooltip still has it.
@@ -374,7 +450,9 @@ func relativeTo(path, root string) (string, bool) {
 // skillBody returns a skill's Markdown body: the List read model first, then a
 // cached lazy Read for stores that only return bodies on demand.
 func skillBody(skills contracts.SkillsService, st *skillsState, skill contracts.Skill) (string, string) {
-	if body := strings.TrimSpace(skill.Body); body != "" {
+	// List returns a bounded excerpt (S-05); read the full file for the preview
+	// when the excerpt was truncated.
+	if body := strings.TrimSpace(skill.Body); body != "" && !strings.Contains(body, "skill file is larger than the read limit") {
 		return skill.Body, ""
 	}
 	key := skill.Name + "\x00" + skill.Path

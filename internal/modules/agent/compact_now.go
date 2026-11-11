@@ -4,12 +4,20 @@ package agent
 // by the session screen's /compact command. It reads the session history from
 // the durable store, compacts it with the same LLM compactor the run loop uses
 // (or a test seam), replaces the stored history and reports the size delta. It
-// never changes the active session and never runs while a turn is running.
+// never changes the active session or the transcript read model, and never runs
+// while a turn is running.
+//
+// Compaction is a multi-second model call, so it marks the session "compacting":
+// Send and Regenerate are rejected for that window (a turn appended halfway
+// through would be erased by the write-back). The history is re-validated right
+// before the replacement so a writer that bypasses the chat service (a run that
+// was already in flight) is preserved instead of erased by the stale snapshot.
 
 import (
 	"context"
 	"errors"
 	"fmt"
+	"time"
 
 	rig "github.com/zeokeel/zeokeel-rig"
 	"github.com/zeokeel/zeokeel-rig/session/compact"
@@ -29,16 +37,21 @@ func (s *service) CompactNow(ctx context.Context, sessionID string) (contracts.C
 	}
 	s.mu.Lock()
 	state, ok := s.sessions[sessionID]
-	running := ok && state.running
+	if !ok {
+		s.mu.Unlock()
+		return contracts.CompactResult{}, fmt.Errorf("agent: unknown chat session %q", sessionID)
+	}
+	if state.running || state.compacting {
+		s.mu.Unlock()
+		return contracts.CompactResult{}, contracts.ErrCompactRunning
+	}
+	state.compacting = true
+	state.updatedAt = time.Now()
 	cfg := s.configForSessionLocked(sessionID)
 	factory := s.compactorFactory
 	s.mu.Unlock()
-	if !ok {
-		return contracts.CompactResult{}, fmt.Errorf("agent: unknown chat session %q", sessionID)
-	}
-	if running {
-		return contracts.CompactResult{}, contracts.ErrCompactRunning
-	}
+	defer s.endCompaction(sessionID)
+
 	if cfg.ContextBudget <= 0 {
 		return contracts.CompactResult{}, contracts.ErrCompactUnavailable
 	}
@@ -71,8 +84,24 @@ func (s *service) CompactNow(ctx context.Context, sessionID string) (contracts.C
 	if err != nil {
 		return contracts.CompactResult{}, fmt.Errorf("agent: compact session %q: %w", sessionID, err)
 	}
+
+	// Re-validate against the live history before replacing it. Send/Regenerate
+	// are rejected while compacting, so this catches only writers that bypass
+	// the chat service; their messages must be preserved, never erased by the
+	// stale snapshot.
+	current, relErr := history.Load(ctx, sessionID)
+	if relErr != nil {
+		return contracts.CompactResult{}, fmt.Errorf("agent: reload session %q for compaction: %w", sessionID, relErr)
+	}
+	if !sameHistoryPrefix(messages, current) {
+		return contracts.CompactResult{}, fmt.Errorf("%w: session %q", contracts.ErrCompactConflict, sessionID)
+	}
+	if len(current) > len(messages) {
+		compacted = append(append([]rig.Message(nil), compacted...), current[len(messages):]...)
+	}
+
 	afterTokens := rig.EstimateTokens(compacted)
-	if len(compacted) == 0 || (len(compacted) >= len(messages) && afterTokens >= beforeTokens) {
+	if len(compacted) == 0 || (len(compacted) >= len(current) && afterTokens >= beforeTokens) {
 		return contracts.CompactResult{}, contracts.ErrCompactNothing
 	}
 	if err := s.replaceCompactedHistory(ctx, sessionID, compacted); err != nil {
@@ -89,12 +118,40 @@ func (s *service) CompactNow(ctx context.Context, sessionID string) (contracts.C
 	}, nil
 }
 
+// endCompaction clears the in-flight compaction flag of a session.
+func (s *service) endCompaction(sessionID string) {
+	s.mu.Lock()
+	if state, ok := s.sessions[sessionID]; ok {
+		state.compacting = false
+		state.updatedAt = time.Now()
+	}
+	s.mu.Unlock()
+}
+
+// sameHistoryPrefix reports whether current starts with the same messages as
+// prefix: the compaction snapshot must still be the history's head before the
+// replacement drops it.
+func sameHistoryPrefix(prefix, current []rig.Message) bool {
+	if len(current) < len(prefix) {
+		return false
+	}
+	for index := range prefix {
+		before, after := prefix[index], current[index]
+		if before.Role != after.Role || before.Text() != after.Text() ||
+			before.Reasoning != after.Reasoning || before.ToolCallID != after.ToolCallID ||
+			len(before.ToolCalls) != len(after.ToolCalls) {
+			return false
+		}
+	}
+	return true
+}
+
 // replaceCompactedHistory persists the compacted window: the durable store is
 // preferred; the in-memory history fallback is only replaceable when it
 // implements rig.HistoryReplacer.
 func (s *service) replaceCompactedHistory(ctx context.Context, sessionID string, messages []rig.Message) error {
 	if s.store != nil {
-		return s.store.ReplaceHistory(ctx, sessionID, messages)
+		return s.replaceSessionHistory(ctx, sessionID, messages)
 	}
 	history := s.historyView()
 	if replacer, ok := history.(rig.HistoryReplacer); ok {
