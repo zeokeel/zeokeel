@@ -4,6 +4,32 @@ All notable changes to ZeoKeel are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/) and the project adheres to
 [Semantic Versioning](https://semver.org/).
 
+## [0.2.33] - 2026-11-12
+
+Windows 沙箱 ACL 探测崩溃的修复（升级 rig v0.16.1）：Windows 上所有命令工具与终端恢复可用。
+
+### Fixed
+
+- **rig v0.16.0 → v0.16.1**：修复 Windows ACL 探测的 `0xC0000005` 崩溃。rig 的
+  `winWindowsDirectory` 把 `GetWindowsDirectoryW(lpBuffer, uSize)` 的参数传反（照抄了
+  `GetTempPath2W(BufferLength, Buffer)` 的顺序），Win32 把容量 260（0x104）当成输出缓冲区
+  指针并写入，probe helper 以 `exit status 2` 崩溃；沙箱 runner 因此 fail closed，Windows 上
+  `pwsh`/`job_start`/`terminal_*` 全部返回 `sandbox runner cannot confine the command: os
+  sandbox unavailable`。该回归由 rig v0.15.1 引入，影响 ZeoKeel v0.2.29–v0.2.32 的 Windows
+  构建；本次仅随 rig 升级恢复，ZeoKeel 侧无代码改动。
+- **同一 rig 版本内的两个 Windows 修复**：`terminal_*` 的遗留 `GOOS == "windows"` 早退
+  （v0.16.0 的 ConPTY 实现因此不可达）已删除，Windows 走 ConPTY、旧系统回退 pipe；
+  `GetTempPath2W` 在调用前先 `Find`，Windows 10 / Server 2019 不再因缺失导出 panic。
+- 公共 API 无破坏性变更；工具数量与配置格式不变。
+
+### 验证
+
+- 本仓库（CGO_ENABLED=0）：`gofmt`、`go build ./...`、`go vet ./...`、`go test ./...` PASS；
+  `GOOS=windows/amd64` 与 `GOOS=windows/arm64` 交叉构建 PASS。本次无 UI/行为改动，未跑
+  `scripts/verify.sh` 全量（含 `-race`/regression/snapshot/smokes）。
+- rig v0.16.1：tag 工作流全量 CI（含 clean-room `go get` + `go mod verify`）与签名 tag 校验
+  通过；Windows 运行时回归测试 `TestWindowsRuntimeKnownFolders` 覆盖本次崩溃点。
+
 ## [0.2.32] - 2026-11-11
 
 DSH 对齐收尾：rig v0.16.0（Windows ConPTY）、任务板按会话归属、子代理完成回执进入父会话 transcript。
