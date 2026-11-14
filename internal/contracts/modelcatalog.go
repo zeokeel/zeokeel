@@ -42,6 +42,54 @@ type ModelInfo struct {
 	TopP *float64 `json:"topP,omitempty"`
 	// MaxTokens bounds one completion in tokens (0 = provider default).
 	MaxTokens int `json:"maxTokens,omitempty"`
+	// InputPricePerMillion is the optional price of one million uncached input
+	// tokens (in the user's currency; 0 = not configured).
+	InputPricePerMillion float64 `json:"inputPricePerMillion,omitempty"`
+	// CachedInputPricePerMillion is the optional price of one million cached
+	// input tokens (0 = fall back to InputPricePerMillion).
+	CachedInputPricePerMillion float64 `json:"cachedInputPricePerMillion,omitempty"`
+	// OutputPricePerMillion is the optional price of one million output tokens
+	// (0 = not configured).
+	OutputPricePerMillion float64 `json:"outputPricePerMillion,omitempty"`
+}
+
+// HasPricing reports whether the model has any price configured. A row without
+// pricing never reports a cost (an unknown price must not be rendered as free).
+func (m ModelInfo) HasPricing() bool {
+	return m.InputPricePerMillion > 0 || m.CachedInputPricePerMillion > 0 || m.OutputPricePerMillion > 0
+}
+
+// Cost estimates the price of one provider call from the catalog row's per-
+// million prices. promptTokens includes cachedTokens (the provider convention);
+// the uncached remainder and the cached part are priced separately, with the
+// cached price falling back to the input price when only the latter is set.
+// ok=false means no pricing is configured for this model.
+func (m ModelInfo) Cost(promptTokens, cachedTokens, completionTokens int) (cost float64, ok bool) {
+	if !m.HasPricing() {
+		return 0, false
+	}
+	if promptTokens < 0 {
+		promptTokens = 0
+	}
+	if completionTokens < 0 {
+		completionTokens = 0
+	}
+	cached := cachedTokens
+	if cached < 0 {
+		cached = 0
+	}
+	if cached > promptTokens {
+		cached = promptTokens
+	}
+	uncached := promptTokens - cached
+	cachedPrice := m.CachedInputPricePerMillion
+	if cachedPrice <= 0 {
+		cachedPrice = m.InputPricePerMillion
+	}
+	cost = float64(uncached)/1_000_000*m.InputPricePerMillion +
+		float64(cached)/1_000_000*cachedPrice +
+		float64(completionTokens)/1_000_000*m.OutputPricePerMillion
+	return cost, true
 }
 
 // SanitizeGeneration normalizes per-model sampling options: a temperature
@@ -73,6 +121,21 @@ func SanitizeGeneration(temperature, topP *float64, maxTokens int) (*float64, *f
 		maxTokens = 0
 	}
 	return temperature, topP, maxTokens
+}
+
+// SanitizePrices normalizes optional per-million model prices: a negative or
+// non-finite value becomes "not configured" (0). Zero stays "not configured".
+func SanitizePrices(input, cached, output float64) (inputPrice, cachedPrice, outputPrice float64) {
+	sanitize := func(value float64) float64 {
+		if value <= 0 || value != value { // NaN is not representable in JSON but guard anyway
+			return 0
+		}
+		if value > 1e9 {
+			return 1e9
+		}
+		return value
+	}
+	return sanitize(input), sanitize(cached), sanitize(output)
 }
 
 // ModelCatalogService lists the model presets offered by the product.
@@ -115,19 +178,24 @@ func SanitizeModelInfoList(models []ModelInfo) []ModelInfo {
 			contextWindow = 0
 		}
 		temperature, topP, maxTokens := SanitizeGeneration(model.Temperature, model.TopP, model.MaxTokens)
+		inputPrice, cachedPrice, outputPrice := SanitizePrices(model.InputPricePerMillion,
+			model.CachedInputPricePerMillion, model.OutputPricePerMillion)
 		out = append(out, ModelInfo{
-			ID:              id,
-			Name:            name,
-			Note:            strings.TrimSpace(model.Note),
-			ContextWindow:   contextWindow,
-			BaseURL:         strings.TrimRight(strings.TrimSpace(model.BaseURL), "/"),
-			APIKey:          strings.TrimSpace(model.APIKey),
-			Family:          strings.TrimSpace(model.Family),
-			DefaultThinking: strings.TrimSpace(model.DefaultThinking),
-			ThinkingModes:   SanitizeThinkingModes(model.ThinkingModes),
-			Temperature:     temperature,
-			TopP:            topP,
-			MaxTokens:       maxTokens,
+			InputPricePerMillion:       inputPrice,
+			CachedInputPricePerMillion: cachedPrice,
+			OutputPricePerMillion:      outputPrice,
+			ID:                         id,
+			Name:                       name,
+			Note:                       strings.TrimSpace(model.Note),
+			ContextWindow:              contextWindow,
+			BaseURL:                    strings.TrimRight(strings.TrimSpace(model.BaseURL), "/"),
+			APIKey:                     strings.TrimSpace(model.APIKey),
+			Family:                     strings.TrimSpace(model.Family),
+			DefaultThinking:            strings.TrimSpace(model.DefaultThinking),
+			ThinkingModes:              SanitizeThinkingModes(model.ThinkingModes),
+			Temperature:                temperature,
+			TopP:                       topP,
+			MaxTokens:                  maxTokens,
 		})
 	}
 	return out

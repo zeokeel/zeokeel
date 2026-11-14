@@ -32,6 +32,8 @@
 package session
 
 import (
+	"context"
+	"errors"
 	"strings"
 	"time"
 
@@ -60,6 +62,7 @@ type Config struct {
 	TabChat             string `json:"tabChat"`
 	TabTrajectory       string `json:"tabTrajectory"`
 	TabMemory           string `json:"tabMemory"`
+	TabContext          string `json:"tabContext"`
 	// ComposerHint is the muted toolbar hint at the bottom-left of the composer
 	// card ("Enter sends, Shift+Enter breaks the line" by default).
 	ComposerHint string `json:"composerHint"`
@@ -76,6 +79,7 @@ func (c Config) resolved() Config {
 		TabChat:             firstNonEmpty(c.TabChat, "对话"),
 		TabTrajectory:       firstNonEmpty(c.TabTrajectory, "轨迹"),
 		TabMemory:           firstNonEmpty(c.TabMemory, "记忆"),
+		TabContext:          firstNonEmpty(c.TabContext, "上下文"),
 		ComposerHint:        firstNonEmpty(c.ComposerHint, "Enter 发送 · Shift+Enter 换行"),
 	}
 }
@@ -233,13 +237,16 @@ type state struct {
 	// the last assistant turn.
 	regenerateErr string
 
-	// goal is the active goal shown in the header (nil when none); goalTracker
-	// is the optional host bridge used to clear it. Both are UI-thread state.
-	goal        *contracts.Goal
-	goalTracker contracts.GoalTracker
+	// goalService is the optional per-session durable goal backend
+	// (contracts.KeyGoal). The UI caches only the ACTIVE conversation's goal
+	// snapshot (goalSessionID + goal): switching conversations re-reads it, so
+	// one session's goal is never shown in another.
+	goalService   contracts.GoalService
+	goalSessionID string
+	goal          *contracts.Goal
 	// goalActionErr is the last goal-lifecycle failure (DangerText row).
 	// Successes go to a transient toast. goalConfirm is the destructive action
-	// ("abandon"/"clear") waiting for its AlertDialog confirmation.
+	// ("clear") waiting for its ConfirmDanger dialog.
 	goalActionErr string
 	goalConfirm   string
 
@@ -296,31 +303,48 @@ type state struct {
 	// there instead of permanent header badges.
 	notifier contracts.Notifier
 
-	// queuedPrompts holds, per session ID, the prompts submitted while a turn
-	// was running (only when ui.sendWhileRunning is on). The queue belongs to
-	// its session: switching conversations never drops it, and the module-level
-	// chat subscription flushes it when that session's run ends, whichever
-	// screen is visible. queuePaused marks a session's queue paused after the
-	// user chose 停止 (no automatic send; the queue popover can send or clear
-	// it). queueErr is the last delivery failure per session. UI thread only.
-	queuedPrompts map[string][]string
-	queuePaused   map[string]bool
-	queueErr      map[string]string
+	// promptQueue is the optional backend inbox half of ChatService (DSH
+	// inbox): the queued prompts live in the agent backend, one inbox per
+	// session, and the UI only reads/removes them. nil keeps a host without the
+	// backend on the old conflict behavior (no queue control).
+	promptQueue contracts.PromptQueue
 	// queueMenuOpen is the active session's queued-prompts popover
-	// (view/cancel/send/clear). queueList backs that popover's official ui.List
-	// of queued prompts.
-	queueMenuOpen bool
-	queueList     ui.ListState
+	// (view/remove). queueList backs that popover's official ui.List of queued
+	// prompts. queueActionErr is a failed inbox removal (cleared on a session
+	// switch); UI thread only.
+	queueMenuOpen  bool
+	queueList      ui.ListState
+	queueActionErr string
 
-	// Goal auto-continue state: the per-goal send budget, the goal it belongs
-	// to, the last observed run phase and the last delivery error. UI thread
+	// contextService is the optional context inspector (contracts.KeyContext):
+	// the Context tab only exists when the backend provides it. The folded view
+	// is cached per active session and refreshed on tab entry, session switch or
+	// a chat change (the inspector has no Subscribe), deduplicated by Revision.
+	contextService   contracts.ContextInspector
+	contextSessionID string
+	contextRevision  uint64
+	contextData      contracts.SessionContext
+	contextOK        bool
+	contextLoaded    bool
+	contextDirty     bool
+	// contextRequests/contextSections/contextEvents back the official
+	// Table/List widgets of the pane.
+	contextRequests ui.ListState
+	contextSections ui.ListState
+	contextEvents   ui.ListState
+
+	// interruptedDismissed records the restored-run notices the user dismissed
+	// in this app run (ChatSession.Interrupted itself is not durable and clears
+	// when the next run starts, so the entries are naturally meaningless after
+	// a restart). UI thread only.
+	interruptedDismissed map[string]bool
+
+	// Run-settle observation for the composer keyboard handoff. Goal
+	// continuation itself lives in the agent backend now; the UI only hands
+	// the keyboard back when the visible conversation stops running. UI thread
 	// only.
-	autoContinueCount      int
-	lastAutoGoalID         string
-	autoContinueErr        string
-	autoContinueSuppressed bool
-	autoContinueSawRunning bool
-	autoContinueSessionID  string
+	runSawRunning      bool
+	runObservedSession string
 
 	// Composer command feedback: the last error line and the /compact loading
 	// state (a success is a transient toast, never a resident badge).
@@ -350,15 +374,18 @@ type state struct {
 	memoryConfirm   string
 
 	// Command-dialog state (native Modals rendered by the session screen).
-	goalOpen  bool
-	goalText  string
-	goalErr   string
-	planOpen  bool
-	planDraft string
-	planErr   string
-	memOpen   bool
-	memDraft  string
-	memErr    string
+	// goalCapText is the edit dialog's round-cap field (empty = keep the
+	// current cap), not used when creating a goal.
+	goalOpen    bool
+	goalText    string
+	goalCapText string
+	goalErr     string
+	planOpen    bool
+	planDraft   string
+	planErr     string
+	memOpen     bool
+	memDraft    string
+	memErr      string
 }
 
 // tr returns the localized copy for the current frame's language.
@@ -446,33 +473,48 @@ func Module() *module.Descriptor[Config] {
 		memoryStore, _ := ctx.Get(contracts.KeyMemory)
 		notifier, _ := ctx.Get(contracts.KeyNotifier)
 		moduleState := &state{
-			locale:        locale,
-			runtime:       runtime,
-			lastTab:       -1,
-			navigator:     navigator,
-			settings:      settings,
-			planReviewer:  planReviewer,
-			memoryStore:   memoryStore,
-			notifier:      notifier,
-			thinkOpen:     make(map[string]bool),
-			toolOpen:      make(map[string]bool),
-			processOpen:   make(map[string]bool),
-			thumbnails:    make(map[string]*ui.Bitmap),
-			queuedPrompts: make(map[string][]string),
-			queuePaused:   make(map[string]bool),
-			queueErr:      make(map[string]string),
-			chatFollowEnd: true,
-			ctx:           ctx,
+			locale:               locale,
+			runtime:              runtime,
+			lastTab:              -1,
+			navigator:            navigator,
+			settings:             settings,
+			planReviewer:         planReviewer,
+			memoryStore:          memoryStore,
+			notifier:             notifier,
+			thinkOpen:            make(map[string]bool),
+			toolOpen:             make(map[string]bool),
+			processOpen:          make(map[string]bool),
+			thumbnails:           make(map[string]*ui.Bitmap),
+			interruptedDismissed: make(map[string]bool),
+			chatFollowEnd:        true,
+			ctx:                  ctx,
+		}
+
+		// The context inspector is optional: without it the Context tab is not
+		// registered at all (a host that records no context data stays exactly as
+		// it was). The folded view itself is read lazily on the tab/session.
+		if inspector, ok := ctx.Get(contracts.KeyContext); ok && inspector != nil {
+			moduleState.contextService = inspector
+		}
+
+		// The backend-owned prompt inbox is optional: the composer reads the
+		// active session's queue through it, and a host without it keeps the
+		// old running-conflict behavior (the composer hides the queue control).
+		if queue, ok := chat.(contracts.PromptQueue); ok && queue != nil {
+			moduleState.promptQueue = queue
 		}
 
 		// Session changes arrive on the agent goroutine; hop to the UI thread
-		// and request a frame. The unsubscribe is kernel-effect owned.
+		// and request a frame. The unsubscribe is kernel-effect owned. Draining
+		// the queued prompts is the agent backend's job (one prompt per settle,
+		// before any automatic goal round); the UI only repaints.
 		unsubscribe, err := chat.Subscribe(func(sessionID string) {
 			runtime.Post(func() {
-				// Queue flush runs before goal auto-continue: a queued prompt
-				// starts the next run, so auto-continue waits for its settle.
-				processQueuedPrompts(chat, moduleState, sessionID)
-				if observeRunSettled(chat, moduleState) {
+				// The context inspector has no change subscription: any chat
+				// change (a model call, a settle) can move the folded view, so a
+				// visible Context tab re-reads it on the next frame.
+				moduleState.contextDirty = true
+				if observeRunSettledForFocus(chat, moduleState) {
 					// The settle is observed here first (before the next screen
 					// build), so request the composer keyboard handoff now: the
 					// next composer frame consumes the one-shot flag. Outside the
@@ -480,7 +522,6 @@ func Module() *module.Descriptor[Config] {
 					if moduleState.tab == tabChat && strings.TrimSpace(chat.ActiveSession()) == sessionID {
 						moduleState.focusComposer = true
 					}
-					handleRunSettled(chat, moduleState, runtime)
 				}
 				runtime.Invalidate()
 			})
@@ -508,36 +549,29 @@ func Module() *module.Descriptor[Config] {
 			}
 		}
 
-		// The host goal tracker is optional: the session header shows the
-		// active goal and backs its clear action through this bridge.
-		if tracker, ok := ctx.Get(contracts.KeyGoalTracker); ok && tracker != nil {
-			moduleState.goalTracker = tracker
-			tracker.SetHandler(func(goal contracts.Goal, ok bool) {
+		// The per-session durable goal backend is optional: the composer dock
+		// shows the ACTIVE conversation's goal, and every lifecycle action is a
+		// direct human GoalService call. A change for the visible conversation
+		// refreshes the cached snapshot; changes to other sessions only request
+		// a frame (switching conversations re-reads the goal, so no other
+		// session's goal is ever cached or displayed).
+		if goalService, ok := ctx.Get(contracts.KeyGoal); ok && goalService != nil {
+			moduleState.goalService = goalService
+			unsubscribeGoals, err := goalService.Subscribe(func(sessionID string) {
 				runtime.Post(func() {
-					if ok {
-						copied := goal
-						moduleState.goal = &copied
-						if copied.ID != moduleState.lastAutoGoalID {
-							moduleState.lastAutoGoalID = copied.ID
-							moduleState.autoContinueCount = 0
-						}
-					} else {
-						moduleState.goal = nil
-						moduleState.lastAutoGoalID = ""
-						moduleState.autoContinueCount = 0
+					if moduleState.goalService != nil && sessionID == moduleState.goalSessionID {
+						moduleState.refreshGoalSnapshot()
 					}
 					runtime.Invalidate()
 				})
 			})
-			if err := own(ctx, func() (func(), error) {
-				return func() { tracker.SetHandler(nil) }, nil
-			}); err != nil {
+			if err != nil {
 				return err
 			}
-			if id, text, status, ok := tracker.Get(); ok {
-				goal := contracts.Goal{ID: id, Text: text, Status: status}
-				moduleState.goal = &goal
-				moduleState.lastAutoGoalID = id
+			if err := own(ctx, func() (func(), error) {
+				return unsubscribeGoals, nil
+			}); err != nil {
+				return err
 			}
 		}
 
@@ -680,36 +714,6 @@ func (st *state) permissionLabel(mode string) string {
 	}
 }
 
-// goalLifecycle returns the optional goal lifecycle half of the host bridge.
-func goalLifecycle(st *state) (contracts.GoalLifecycler, bool) {
-	if st == nil || st.goalTracker == nil {
-		return nil, false
-	}
-	lifecycle, ok := st.goalTracker.(contracts.GoalLifecycler)
-	if !ok || lifecycle == nil {
-		return nil, false
-	}
-	return lifecycle, true
-}
-
-// goalCompletable reports whether the current goal is in an active/paused state
-// (the only states complete/abandon accept).
-func goalCompletable(st *state) bool {
-	if st == nil || st.goalTracker == nil {
-		return false
-	}
-	_, _, status, ok := st.goalTracker.Get()
-	if !ok {
-		return false
-	}
-	switch strings.ToLower(strings.TrimSpace(status)) {
-	case contracts.GoalStatusActive, contracts.GoalStatusPaused:
-		return true
-	default:
-		return false
-	}
-}
-
 // sessionCommands is the conversation screen's slash-command surface: new
 // session, fork, export, the permission-mode cycle and settings. The command palette reads these from the
 // UIRuntime command registry; Enabled callbacks expose only the actions that
@@ -803,9 +807,9 @@ func sessionCommands(runtime contracts.UIRuntime, navigator contracts.Navigator,
 		{
 			ID:      "zeokeel.session.goal",
 			Title:   st.tr("设置目标", "Set goal"),
-			Hint:    st.tr("为当前会话设置/清除长期目标", "Set or clear a long-term goal for this conversation"),
+			Hint:    st.tr("为当前会话创建或编辑长期目标", "Create or edit a long-term goal for this conversation"),
 			Order:   60,
-			Enabled: func() bool { return st.goalTracker != nil && chat.ActiveSession() != "" },
+			Enabled: func() bool { return st.goalService != nil && chat.ActiveSession() != "" },
 			Run:     func() error { openGoalDialog(st, runtime); return nil },
 		},
 		{
@@ -814,44 +818,23 @@ func sessionCommands(runtime contracts.UIRuntime, navigator contracts.Navigator,
 			Hint:  st.tr("将当前目标标记为已完成", "Mark the current goal as completed"),
 			Order: 64,
 			Enabled: func() bool {
-				_, ok := goalLifecycle(st)
-				return ok && goalCompletable(st)
+				return st.goalService != nil && goalNonTerminal(st)
 			},
 			Run: func() error {
-				lifecycle, ok := goalLifecycle(st)
-				if !ok {
-					return nil
-				}
-				if lifecycle.Complete() {
-					st.goalActionErr = ""
-					st.toast(contracts.NotifySuccess, st.tr("目标已完成", "Goal completed"))
-				} else {
-					st.goalActionErr = st.tr("完成目标失败：", "Complete goal failed: ") + st.tr("目标不存在", "no active goal")
-				}
-				runtime.Invalidate()
+				completeGoalAction(st, runtime)
 				return nil
 			},
 		},
 		{
-			ID:    "zeokeel.session.goal.abandon",
-			Title: st.tr("放弃目标", "Abandon goal"),
-			Hint:  st.tr("放弃当前目标", "Abandon the current goal"),
+			ID:    "zeokeel.session.goal.clear",
+			Title: st.tr("清除目标", "Clear goal"),
+			Hint:  st.tr("删除当前目标及其记录（需确认）", "Delete the current goal and its record (asks first)"),
 			Order: 65,
 			Enabled: func() bool {
-				_, ok := goalLifecycle(st)
-				return ok && goalCompletable(st)
+				return st.goalService != nil && st.goal != nil
 			},
 			Run: func() error {
-				lifecycle, ok := goalLifecycle(st)
-				if !ok {
-					return nil
-				}
-				if lifecycle.Abandon() {
-					st.goalActionErr = ""
-					st.toast(contracts.NotifySuccess, st.tr("目标已放弃", "Goal abandoned"))
-				} else {
-					st.goalActionErr = st.tr("放弃目标失败：", "Abandon goal failed: ") + st.tr("目标不存在", "no active goal")
-				}
+				st.goalConfirm = "clear"
 				runtime.Invalidate()
 				return nil
 			},
@@ -910,10 +893,10 @@ func sessionCommands(runtime contracts.UIRuntime, navigator contracts.Navigator,
 				if !ok {
 					return nil
 				}
-				st.autoContinueSuppressed = true
-				// A stop must stop: pause the queued prompts instead of letting
-				// the settle handler start another run automatically.
-				pauseQueue(st, session.ID)
+				// A stop must stop: the agent backend disarms the goal when the
+				// human stops (the dock then offers 继续目标) and owns the prompt
+				// inbox, so a stop never clears the queued prompts; their drain
+				// is the backend's decision.
 				if err := chat.Cancel(session.ID); err != nil {
 					st.commandErr = st.tr("停止失败：", "Stop failed: ") + err.Error()
 				} else {
@@ -1079,260 +1062,147 @@ func (st *state) syncComposerDraft(activeID string) {
 	st.draftSession = activeID
 }
 
-// queuedFor returns one session's queued prompts (nil when none). The caller
-// treats the slice as read-only.
-func (st *state) queuedFor(sessionID string) []string {
-	if st == nil {
+// queuedPromptEntries returns one session's backend inbox in send order (nil
+// without a PromptQueue backend or for another session). The UI never caches
+// it: every frame reads the backend so a drain (the agent sends the next prompt
+// when a run settles) or a removal is visible immediately.
+func (st *state) queuedPromptEntries(sessionID string) []contracts.QueuedPrompt {
+	if st == nil || st.promptQueue == nil || sessionID == "" {
 		return nil
 	}
-	return st.queuedPrompts[sessionID]
+	return st.promptQueue.QueuedPrompts(sessionID)
 }
 
-// queueErrorFor returns the last queued-delivery failure of one session ("").
-func (st *state) queueErrorFor(sessionID string) string {
-	if st == nil {
-		return ""
+// queuedPromptTexts renders the inbox for the shared queue popover: the prompt
+// body plus its local send time, kept in backend order (oldest first).
+func (st *state) queuedPromptTexts(sessionID string) []string {
+	prompts := st.queuedPromptEntries(sessionID)
+	texts := make([]string, 0, len(prompts))
+	for _, prompt := range prompts {
+		text := strings.TrimSpace(prompt.Text)
+		if clock := messageClock(st.locale, prompt.CreatedAt); clock != "" {
+			text += " · " + clock
+		}
+		texts = append(texts, text)
 	}
-	return st.queueErr[sessionID]
+	return texts
 }
 
-// setQueueError records/clears one session's queued-delivery failure.
-func (st *state) setQueueError(sessionID, text string) {
-	if st.queueErr == nil {
-		st.queueErr = make(map[string]string)
+// sessionRunning reports whether a session currently streams a run (the read
+// model the composer uses to decide between sending and enqueueing).
+func sessionRunning(chat contracts.ChatService, sessionID string) bool {
+	if chat == nil || sessionID == "" {
+		return false
 	}
-	if text == "" {
-		delete(st.queueErr, sessionID)
-		return
-	}
-	st.queueErr[sessionID] = text
+	session, ok := chat.Session(sessionID)
+	return ok && session.Running
 }
 
-// queueDraft appends the trimmed draft to the session's queue, clears the draft
-// and returns false for empty text. Attachments are not queued. Queuing again
-// resumes a queue the user paused with 停止.
-func queueDraft(st *state, activeID string) bool {
-	if st == nil || activeID == "" {
+// enqueueDraft hands the trimmed composer text to the backend inbox, clears the
+// draft (staged attachments stay), and returns false for an empty queue or a
+// failed enqueue (the failure stays on the composer). The backend owns the
+// queue, so this only requests the append; the badge/popover update on the next
+// frame from QueuedPrompts.
+func enqueueDraft(st *state, sessionID string) bool {
+	if st == nil || st.promptQueue == nil || sessionID == "" {
 		return false
 	}
 	prompt := strings.TrimSpace(st.draft)
 	if prompt == "" {
 		return false
 	}
-	if st.queuedPrompts == nil {
-		st.queuedPrompts = make(map[string][]string)
+	if _, err := st.promptQueue.EnqueuePrompt(context.Background(), sessionID, prompt); err != nil {
+		st.reportComposerFailure(err)
+		return false
 	}
-	st.queuedPrompts[activeID] = append(st.queuedPrompts[activeID], prompt)
-	delete(st.queuePaused, activeID)
-	st.setQueueError(activeID, "")
+	st.clearComposerFailure()
+	st.queueActionErr = ""
 	st.draft = ""
+	st.composerCaret = 0
+	st.toast(contracts.NotifySuccess, st.tr("已加入排队", "Added to the queue"))
 	return true
 }
 
-// pauseQueue marks a session's queued prompts paused after the user chose 停止:
-// a stop must stop, so the queued prompts are kept for review but never start
-// another run automatically. The queue popover offers an explicit send.
-func pauseQueue(st *state, sessionID string) {
-	if st == nil || sessionID == "" || len(st.queuedPrompts[sessionID]) == 0 {
+// removeQueuedPrompt removes one backend inbox entry by index (the popover's
+// per-row remove). The index addresses the current backend order; a failure is
+// shown in the popover.
+func removeQueuedPrompt(st *state, sessionID string, index int) {
+	if st == nil || st.promptQueue == nil {
 		return
 	}
-	if st.queuePaused == nil {
-		st.queuePaused = make(map[string]bool)
+	prompts := st.queuedPromptEntries(sessionID)
+	if index < 0 || index >= len(prompts) {
+		return
 	}
-	st.queuePaused[sessionID] = true
+	if err := st.promptQueue.RemoveQueuedPrompt(context.Background(), sessionID, prompts[index].ID); err != nil {
+		st.queueActionErr = st.tr("移除排队消息失败：", "Could not remove the queued message: ") + err.Error()
+		return
+	}
+	st.queueActionErr = ""
 }
 
-// resumeQueue clears the paused flag and delivers the next queued prompt; only
-// the user's explicit "send queued" action calls it.
-func resumeQueue(chat contracts.ChatService, st *state, sessionID string) {
-	if st == nil {
-		return
-	}
-	delete(st.queuePaused, sessionID)
-	processQueuedPrompts(chat, st, sessionID)
-}
-
-// cancelQueuedPrompt removes one queued prompt of sessionID.
-func cancelQueuedPrompt(st *state, sessionID string, index int) {
-	if st == nil {
-		return
-	}
-	queue := st.queuedPrompts[sessionID]
-	if index < 0 || index >= len(queue) {
-		return
-	}
-	queue = append(queue[:index], queue[index+1:]...)
-	if len(queue) == 0 {
-		delete(st.queuedPrompts, sessionID)
-		delete(st.queuePaused, sessionID)
-		st.queueMenuOpen = false
-		return
-	}
-	st.queuedPrompts[sessionID] = queue
-}
-
-// clearQueuedPrompts drops one session's whole queue (the popover's 清空全部).
+// clearQueuedPrompts removes every entry of one session's backend inbox (the
+// popover's clear-all); the backend stays the source of truth.
 func clearQueuedPrompts(st *state, sessionID string) {
-	if st == nil {
+	if st == nil || st.promptQueue == nil {
 		return
 	}
-	delete(st.queuedPrompts, sessionID)
-	delete(st.queuePaused, sessionID)
-	st.setQueueError(sessionID, "")
+	prompts := st.queuedPromptEntries(sessionID)
+	for _, prompt := range prompts {
+		if err := st.promptQueue.RemoveQueuedPrompt(context.Background(), sessionID, prompt.ID); err != nil {
+			st.queueActionErr = st.tr("清空排队消息失败：", "Could not clear the queued messages: ") + err.Error()
+			return
+		}
+	}
+	st.queueActionErr = ""
 	st.queueMenuOpen = false
 }
 
-// processQueuedPrompts sends the first queued prompt once the session it
-// belongs to is no longer running. It runs from the module-level chat
-// subscription (and the screen's fallback check), so it works whichever screen
-// is visible, and a queue paused by 停止 waits for the user. A failed Send keeps
-// the prompt and surfaces the danger line, and it also PAUSES the queue: a
-// delivery failure must never be retried on every frame by the screen's
-// frame-time fallback (that was a self-sustaining redraw + Send loop). The
-// queue popover/error row's explicit 重试 clears the pause and tries again.
-func processQueuedPrompts(chat contracts.ChatService, st *state, sessionID string) {
-	if st == nil || chat == nil {
-		return
+// deliverPrompt sends one text prompt, falling to the backend inbox when the
+// session already runs. A host without contracts.PromptQueue keeps the old
+// behavior (Send reports the running conflict to the composer).
+func deliverPrompt(chat contracts.ChatService, st *state, sessionID, prompt string) error {
+	if st != nil && st.promptQueue != nil && sessionRunning(chat, sessionID) {
+		_, err := st.promptQueue.EnqueuePrompt(context.Background(), sessionID, prompt)
+		return err
 	}
-	sessionID = strings.TrimSpace(sessionID)
-	if sessionID == "" || st.queuePaused[sessionID] {
-		return
-	}
-	queue := st.queuedPrompts[sessionID]
-	if len(queue) == 0 {
-		return
-	}
-	session, ok := chat.Session(sessionID)
-	if !ok || session.Running {
-		return
-	}
-	prompt := queue[0]
 	if err := chat.Send(sessionID, prompt); err != nil {
-		st.setQueueError(sessionID, st.tr("排队发送失败：", "Queued send failed: ")+err.Error())
-		// Pause the queue so the screen's frame-time fallback stops re-sending
-		// the same prompt every frame; the user resumes explicitly (重试).
-		pauseQueue(st, sessionID)
-		return
-	}
-	st.setQueueError(sessionID, "")
-	queue = queue[1:]
-	if len(queue) == 0 {
-		delete(st.queuedPrompts, sessionID)
-		if strings.TrimSpace(chat.ActiveSession()) == sessionID {
-			st.queueMenuOpen = false
+		// The run may have started between the read-model check and Send (the
+		// frame can lag a settle): the backend's running conflict then belongs
+		// in its inbox instead of surfacing as a spurious send failure.
+		if st != nil && st.promptQueue != nil && errors.Is(err, contracts.ErrSessionRunning) {
+			if _, enqueueErr := st.promptQueue.EnqueuePrompt(context.Background(), sessionID, prompt); enqueueErr == nil {
+				return nil
+			}
 		}
-		return
+		return err
 	}
-	st.queuedPrompts[sessionID] = queue
+	return nil
 }
 
-// maxGoalAutoContinues bounds the automatic continuation prompts for one goal.
-const maxGoalAutoContinues = 5
-
-// goalAutoContinueEnabled reports whether a settled run auto-continues the
-// active goal. Auto-continue is a fixed behavior (A5): the old goal.autoContinue
-// Settings control was removed, so the stored row is no longer read and every
-// active goal continues (bounded by maxGoalAutoContinues). The settings
-// parameter is kept for the existing call site.
-func goalAutoContinueEnabled(_ contracts.SettingsService) bool {
-	return true
-}
-
-// observeRunSettled tracks the active session's run phase and reports the
-// transition running=true -> running=false exactly once. A new run clears the
-// user-cancel suppression flag.
-func observeRunSettled(chat contracts.ChatService, st *state) bool {
+// observeRunSettledForFocus tracks the active conversation's run phase and
+// reports the transition running=true -> running=false exactly once, so the
+// composer can take the keyboard back when the reply is done. Goal
+// continuation itself runs in the agent backend (DSH goal rounds): the UI no
+// longer sends continuation prompts.
+func observeRunSettledForFocus(chat contracts.ChatService, st *state) bool {
 	if chat == nil || st == nil {
 		return false
 	}
 	activeID := strings.TrimSpace(chat.ActiveSession())
-	if activeID != st.autoContinueSessionID {
-		st.autoContinueSessionID = activeID
-		st.autoContinueSawRunning = false
+	if activeID != st.runObservedSession {
+		st.runObservedSession = activeID
+		st.runSawRunning = false
 	}
 	session, ok := chat.Session(activeID)
 	running := ok && session.Running
 	if running {
-		if !st.autoContinueSawRunning {
-			st.autoContinueSuppressed = false
-		}
-		st.autoContinueSawRunning = true
+		st.runSawRunning = true
 		return false
 	}
-	if st.autoContinueSawRunning {
-		st.autoContinueSawRunning = false
+	if st.runSawRunning {
+		st.runSawRunning = false
 		return true
 	}
 	return false
-}
-
-// handleRunSettled flushes queued prompts before considering goal
-// auto-continue. When a queued prompt was sent it starts the next run, so
-// auto-continue waits for that run to end instead of racing it.
-func handleRunSettled(chat contracts.ChatService, st *state, runtime contracts.UIRuntime) {
-	if st == nil {
-		return
-	}
-	if activeID := strings.TrimSpace(chat.ActiveSession()); activeID != "" && len(st.queuedFor(activeID)) > 0 {
-		before := len(st.queuedFor(activeID))
-		processQueuedPrompts(chat, st, activeID)
-		if len(st.queuedFor(activeID)) < before {
-			runtime.Invalidate()
-			return
-		}
-		if st.queueErrorFor(activeID) != "" {
-			runtime.Invalidate()
-			return
-		}
-	}
-	maybeAutoContinue(chat, st, runtime)
-}
-
-// maybeAutoContinue sends one bounded continuation prompt for the active goal
-// after a run settles. The count is per goal ID, reset on a goal change and
-// capped at maxGoalAutoContinues; failures count too so a broken backend cannot
-// loop forever.
-func maybeAutoContinue(chat contracts.ChatService, st *state, runtime contracts.UIRuntime) {
-	if chat == nil || st == nil || st.autoContinueSuppressed {
-		return
-	}
-	tracker := st.goalTracker
-	if tracker == nil {
-		if fromContext, ok := st.ctx.Get(contracts.KeyGoalTracker); ok {
-			tracker = fromContext
-		}
-	}
-	if tracker == nil {
-		return
-	}
-	id, text, status, ok := tracker.Get()
-	text = strings.TrimSpace(text)
-	if !ok || text == "" {
-		return
-	}
-	if status != "" && !strings.EqualFold(strings.TrimSpace(status), "active") {
-		return
-	}
-	activeID := strings.TrimSpace(chat.ActiveSession())
-	if activeID == "" {
-		return
-	}
-	if id != st.lastAutoGoalID {
-		st.lastAutoGoalID = id
-		st.autoContinueCount = 0
-	}
-	if st.autoContinueCount >= maxGoalAutoContinues {
-		return
-	}
-	st.autoContinueCount++
-	message := st.tr(
-		"请继续推进目标："+text+"\n\n完成后请更新或清除目标。",
-		"Continue working toward the goal: "+text+"\n\nUpdate or clear the goal when it is done.")
-	if err := chat.Send(activeID, message); err != nil {
-		st.autoContinueErr = st.tr("自动续跑发送失败：", "Auto-continue send failed: ") + err.Error()
-		runtime.Invalidate()
-		return
-	}
-	st.autoContinueErr = ""
-	runtime.Invalidate()
 }

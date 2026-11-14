@@ -29,6 +29,9 @@ var planModeAllowedTools = []string{
 	"plan_review",
 	"exit_plan_mode",
 	"goal",
+	"get_goal",
+	"create_goal",
+	"update_goal",
 	"team_task_list",
 	"team_task_get",
 	"memory",
@@ -51,6 +54,9 @@ var minimalModeAllowedTools = []string{
 	"ask_user",
 	"present",
 	"goal",
+	"get_goal",
+	"create_goal",
+	"update_goal",
 	"plan_review",
 	"exit_plan_mode",
 	"team_task_list",
@@ -63,6 +69,9 @@ var creatorModeAllowedTools = []string{
 	"ask_user",
 	"present",
 	"goal",
+	"get_goal",
+	"create_goal",
+	"update_goal",
 	"plan_review",
 	"exit_plan_mode",
 	"memory",
@@ -219,6 +228,11 @@ var interactionTools = map[string]bool{
 	"plan_review":    true,
 	"exit_plan_mode": true,
 	"goal":           true,
+	// The DSH goal trio renders no approval dialog of its own: the goal tools
+	// prompt nothing, and approval would only add a second meaningless modal.
+	"get_goal":    true,
+	"create_goal": true,
+	"update_goal": true,
 }
 
 // gate builds the tool approval gate for one session. Plan and chat modes are
@@ -315,7 +329,12 @@ func (s *service) gate(sessionIDs ...string) rig.Gate {
 			return rig.DecisionAllow, nil
 		}
 		if s.approvals == nil {
-			return rig.DecisionAllow, nil
+			// Fail-closed: this product has no approvals service, so a tool that
+			// needs an approval prompt cannot be authorized. Silently allowing it
+			// would bypass the user's approval policy entirely; the readable error
+			// aborts the run instead of executing the call.
+			return rig.DecisionDeny, fmt.Errorf(
+				"tool approval requires an approvals service; this product has none")
 		}
 		summary := summarizeToolArguments(call.Arguments)
 		decision, err := s.approvals.Request(ctx, contracts.ApprovalRequest{

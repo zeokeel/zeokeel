@@ -6,7 +6,6 @@ package session_test
 // R15 zero-value header entries, and R18 pasting an image as an attachment.
 
 import (
-	"context"
 	"strings"
 	"testing"
 	"time"
@@ -237,31 +236,29 @@ func TestPasteImageStagesAttachment(t *testing.T) {
 // the resting strip is one quiet inline line, hovering reveals the clear control
 // and it opens the shared destructive confirmation instead of clearing at once.
 func TestGoalStripClearEntryOnHover(t *testing.T) {
-	h, uiRoot := newGoalHarness(t, goalChat())
+	h, goals := newGoalHarness(t, goalChat())
 	tester := h.tester()
 	tester.Frame()
-	if _, err := uiRoot.GoalTracker().Set(context.Background(), "发布清单"); err != nil {
-		t.Fatalf("Set goal: %v", err)
-	}
+	goals.seed("sess-goal", "发布清单")
 	tester.Frame()
 	if tester.HasText("清除目标") {
 		t.Fatalf("the goal strip shows its clear entry at rest; texts = %v", tester.Texts())
 	}
 
 	// Move the pointer over the goal text: the clear entry appears.
-	goals, ok := tester.Find("发布清单")
+	goalRect, ok := tester.Find("发布清单")
 	if !ok {
 		t.Fatalf("goal text missing; texts = %v", tester.Texts())
 	}
-	tester.ClickAt(goals.X+goals.W/2, goals.Y+goals.H/2)
+	tester.ClickAt(goalRect.X+goalRect.W/2, goalRect.Y+goalRect.H/2)
 	tester.Frame()
 	if !tester.HasText("清除目标") {
 		t.Fatalf("hovered goal strip has no clear entry; texts = %v", tester.Texts())
 	}
 	h.click(tester, "清除目标")
-	h.assertTexts(tester, "删除目标记录", "取消", "确认删除")
+	h.assertTexts(tester, "清除目标", "取消", "确认清除")
 	h.click(tester, "取消")
-	if _, _, _, ok := uiRoot.GoalTracker().Get(); !ok {
+	if _, ok := goals.Goal("sess-goal"); !ok {
 		t.Fatal("cancelling the clear confirmation removed the goal")
 	}
 }

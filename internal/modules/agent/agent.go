@@ -35,7 +35,6 @@ import (
 	rigagent "github.com/zeokeel/zeokeel-rig/agent"
 	"github.com/zeokeel/zeokeel-rig/provider/openai"
 	"github.com/zeokeel/zeokeel-rig/session"
-	"github.com/zeokeel/zeokeel-rig/session/compact"
 	rigtools "github.com/zeokeel/zeokeel-rig/tools"
 	rigsession "github.com/zeokeel/zeokeel-rig/tools/session"
 	rigteam "github.com/zeokeel/zeokeel-rig/tools/team"
@@ -168,6 +167,14 @@ func Module() *module.Descriptor[Config] {
 		if workspace, ok := ctx.Get(contracts.KeyWorkspace); ok {
 			svc.workspace = workspace
 		}
+		if notifier, ok := ctx.Get(contracts.KeyNotifier); ok && notifier != nil {
+			svc.notifier = notifier
+		}
+		if goalService, ok := ctx.Get(contracts.KeyGoal); ok && goalService != nil {
+			// Optional: without the goal backend there is no engine-side
+			// continuation, and the DSH goal tools report an unavailable backend.
+			svc.goalService = goalService
+		}
 		if memoryStore, ok := ctx.Get(contracts.KeyMemory); ok && memoryStore != nil {
 			svc.memoryStore = memoryStore
 			if _, err := ctx.Provide(contracts.KeyMemoryExtractor, contracts.MemoryExtractionService(svc)); err != nil {
@@ -213,6 +220,12 @@ func Module() *module.Descriptor[Config] {
 				return err
 			}
 		}
+		// The orchestration tools (workflow, ralph) need the live child runner too;
+		// they register into the shared toolkit next to the synchronous subagent
+		// tools and unregister through kernel effects.
+		if err := registerOrchestrationTools(ctx, registry, svc); err != nil {
+			return err
+		}
 		// The team manager tool set overlaps the synchronous subagent names, so
 		// register only names the shared toolkit does not already have.
 		teamManager := svc.teamManagerService()
@@ -220,7 +233,7 @@ func Module() *module.Descriptor[Config] {
 		for _, spec := range registry.Specs() {
 			known[spec.Name] = true
 		}
-		for _, tool := range newTeamTools(teamManager) {
+		for _, tool := range newTeamTools(svc, teamManager) {
 			name := strings.TrimSpace(tool.Name())
 			if name == "" {
 				continue
@@ -272,11 +285,15 @@ func Module() *module.Descriptor[Config] {
 		if _, err := ctx.Provide(contracts.KeyChildAgents, contracts.ChildAgentService(newChildAgentsService(svc, teamService))); err != nil {
 			return fmt.Errorf("agent: provide child agents: %w", err)
 		}
+		if _, err := ctx.Provide(contracts.KeyContext, contracts.ContextInspector(svc)); err != nil {
+			return fmt.Errorf("agent: provide context inspector: %w", err)
+		}
 		_, err = ctx.Provide(contracts.KeyChat, contracts.ChatService(svc))
 		return err
 	}).
 		AddProvides(
 			module.Provides(contracts.KeyChat),
+			module.Provides(contracts.KeyContext),
 			module.Provides(contracts.KeySubagents),
 			module.Provides(contracts.KeyTeam),
 			module.Provides(contracts.KeyChildAgents),
@@ -379,6 +396,38 @@ type service struct {
 	// config. It is a field so tests can script compaction; nil builds the LLM
 	// compactor over a fresh provider.
 	compactorFactory func(contracts.ChatConfig) (rig.Compactor, error)
+	// goalService is optional: when the goal backend module is assembled, the
+	// engine-side continuation driver advances an armed active session goal
+	// after a successful run (DSH goal rounds). nil disables continuation.
+	goalService contracts.GoalService
+	// queueMu guards the durable per-session prompt inbox (queues) and its
+	// queue/change snapshot writes. It is never held while a run is started, and
+	// no other code takes s.mu before it.
+	queueMu sync.Mutex
+	// queues is the in-memory prompt inbox per session (durable through
+	// queue/change events; replayed by restore).
+	queues map[string][]contracts.QueuedPrompt
+	// pendingIdleDrain marks a session whose cancelled run left prompts in the
+	// inbox: the oldest prompt is drained on the next human gesture (switching to
+	// the session, a new Send or a new EnqueuePrompt), never by a background
+	// timer, so Stop stays an explicit stop.
+	pendingIdleDrain map[string]bool
+	// nextQueuedSeq names durable inbox entries.
+	nextQueuedSeq atomic.Uint64
+	// notifier is the optional host toast/OS-notification bridge used for
+	// background run completion (nil in headless products).
+	notifier contracts.Notifier
+	// coldMu guards coldResumes, the live overlay of cold-resumed historical
+	// child sessions (see cold_resume.go).
+	coldMu sync.Mutex
+	// coldResumes maps a child-session ID to its in-flight cold-resume run.
+	coldResumes map[string]*coldResumeState
+	// contextMu guards the folded context timelines (contracts.ContextInspector);
+	// it is never held while the agent run lock s.mu is taken.
+	contextMu sync.Mutex
+	// contextTimelines is the folded context view per session, rebuilt from the
+	// durable observability events at restore.
+	contextTimelines map[string]*contextTimeline
 }
 
 var (
@@ -421,6 +470,10 @@ type sessionState struct {
 	// takes seconds and a turn appended halfway through would be erased by the
 	// history write-back.
 	compacting bool
+	// interrupted marks a session restored after a run that never finished (the
+	// durable checkpoint is still requested/tool_pending). Read-model only: the
+	// UI shows a hint, and the next run start clears it.
+	interrupted bool
 }
 
 // subscription is one Subscribe callback.
@@ -447,6 +500,10 @@ func newService(cfg Config, registry *rigtools.Registry, settings contracts.Sett
 		sessionPermissions: make(map[string]string),
 		sessionPresets:     make(map[string]string),
 		deletedSessions:    make(map[string]struct{}),
+		queues:             make(map[string][]contracts.QueuedPrompt),
+		pendingIdleDrain:   make(map[string]bool),
+		contextTimelines:   make(map[string]*contextTimeline),
+		coldResumes:        make(map[string]*coldResumeState),
 	}
 }
 
@@ -464,6 +521,15 @@ func (s *service) startRunGoroutine(run func()) {
 // child-session store closes, so a successful run's receipt commit is not
 // silently dropped (and replayed after the next restart).
 func (s *service) shutdownRuns(timeout time.Duration) {
+	// Cold-resumed children are runs too: cancel them so a module teardown does
+	// not leave a child agent writing into a closed store.
+	s.coldMu.Lock()
+	for _, state := range s.coldResumes {
+		if state != nil && state.cancel != nil {
+			state.cancel()
+		}
+	}
+	s.coldMu.Unlock()
 	s.mu.Lock()
 	cancels := make([]context.CancelFunc, 0, len(s.sessions))
 	for _, state := range s.sessions {
@@ -685,35 +751,40 @@ func (s *service) sessionWorkspaceRoot(sessionID string) string {
 // untrusted-data boundary. Only the in-memory run config is changed: nothing is
 // persisted.
 func (s *service) withWorkspaceInstructions(cfg contracts.ChatConfig, workspaceRoot string) contracts.ChatConfig {
+	cfg.SystemPrompt = appendPromptSection(cfg.SystemPrompt, s.workspaceInstructionsBlock(cfg, workspaceRoot))
+	return cfg
+}
+
+// workspaceInstructionsBlock renders the configured workspace instruction file
+// (agent.agentsFile, AGENTS.md by default) as one prompt block, or "" when the
+// injection is disabled/unavailable. It is the section source of the
+// AGENTS.md prompt section and keeps the same validation/containment rules as
+// before: only a plain file name inside the workspace is accepted, and the
+// content is fenced with an explicit untrusted-data boundary.
+func (s *service) workspaceInstructionsBlock(cfg contracts.ChatConfig, workspaceRoot string) string {
 	if s.settings == nil {
-		return cfg
+		return ""
 	}
 	name := strings.TrimSpace(s.settings.Get(contracts.SettingAgentsFile, "AGENTS.md"))
 	if name == "" {
-		return cfg
+		return ""
 	}
 	if !validWorkspaceInstructionName(name) {
 		s.logger.Printf("[agent] workspace instructions: refusing file name %q (want a plain file name inside the workspace)", name)
-		return cfg
+		return ""
 	}
 	workspaceRoot = strings.TrimSpace(workspaceRoot)
 	if workspaceRoot == "" {
-		return cfg
+		return ""
 	}
 	content, truncated, ok := s.readWorkspaceInstructions(workspaceRoot, name)
 	if !ok {
-		return cfg
+		return ""
 	}
 	if content == "" && !truncated {
-		return cfg
+		return ""
 	}
-	block := workspaceInstructionsBlock(content, truncated)
-	if strings.TrimSpace(cfg.SystemPrompt) == "" {
-		cfg.SystemPrompt = block
-	} else {
-		cfg.SystemPrompt = strings.TrimRight(cfg.SystemPrompt, "\n") + "\n\n" + block
-	}
-	return cfg
+	return workspaceInstructionsBlock(content, truncated)
 }
 
 // validWorkspaceInstructionName accepts only a plain base file name: no
@@ -880,12 +951,19 @@ func (s *service) restore(ctx context.Context) {
 	}
 	history := s.store.History()
 	type restoredSession struct {
-		state  *sessionState
-		runEnd runEndSummary
-		hasRun bool
+		state       *sessionState
+		runEnd      runEndSummary
+		hasRun      bool
+		interrupted bool
 	}
 	restored := make([]restoredSession, 0, len(metas))
 	for _, meta := range metas {
+		// Child sessions (teammates / delegated subagents) persist their own
+		// conversation history under their child-session ID for cold resume; they
+		// are not chat sessions and must never appear in the sidebar/read model.
+		if strings.HasPrefix(meta.ID, childSessionIDPrefix) {
+			continue
+		}
 		state := &sessionState{
 			id:          meta.ID,
 			title:       meta.Title,
@@ -907,11 +985,17 @@ func (s *service) restore(ctx context.Context) {
 				s.logger.Printf("[agent] restore: load %s: %v", meta.ID, err)
 			}
 		}
+		// Durable inbox + goal-round markers + interrupted-run hint.
+		s.restoreSessionMetadata(ctx, meta.ID, state)
 		runEnd, hasRun := s.lastRunEnd(ctx, meta.ID)
-		restored = append(restored, restoredSession{state: state, runEnd: runEnd, hasRun: hasRun})
+		restored = append(restored, restoredSession{
+			state:       state,
+			runEnd:      runEnd,
+			hasRun:      hasRun,
+			interrupted: s.restoredInterrupted(ctx, meta.ID),
+		})
 	}
 	s.mu.Lock()
-	defer s.mu.Unlock()
 	for _, restored := range restored {
 		state := restored.state
 		// Rig history carries no message ids; assign deterministic ids so the
@@ -922,6 +1006,9 @@ func (s *service) restore(ctx context.Context) {
 				state.messages[index].ID = s.nextMessageIDLocked()
 			}
 		}
+		// A run that never finished (crash/kill) leaves an interrupted
+		// checkpoint; surface it so the UI can offer a retry hint.
+		state.interrupted = restored.interrupted
 		// A failed or cancelled last turn keeps its durable run_end event; put
 		// the error back on the read model so the failure (and its retry
 		// affordance) does not vanish when the app restarts.
@@ -940,6 +1027,19 @@ func (s *service) restore(ctx context.Context) {
 	}
 	if len(restored) > 0 {
 		s.active = restored[0].state.id
+	}
+	sessionIDs := make([]string, 0, len(s.sessions))
+	for sessionID := range s.sessions {
+		sessionIDs = append(sessionIDs, sessionID)
+	}
+	s.mu.Unlock()
+
+	// DSH inbox: an idle restored session with queued prompts starts its first
+	// prompt immediately (it was waiting for the run that the restart killed).
+	for _, sessionID := range sessionIDs {
+		if s.queuedPromptCount(sessionID) > 0 {
+			s.drainQueuedPrompt(sessionID)
+		}
 	}
 }
 
@@ -1479,7 +1579,12 @@ func (s *service) ForkSession(sessionID string) (string, error) {
 		if err := s.store.RenameSession(ctx, newID, title); err != nil {
 			s.logger.Printf("[agent] fork: rename session %s: %v", newID, err)
 		}
-		history := forkHistoryMessages(messages)
+		// DSH parity: the fork starts from the source's COMPLETE durable history
+		// (tool calls and tool results included), not a re-rendered text-only
+		// transcript. A running source is only snapshotted: the durable history
+		// is whatever has been committed so far, and the read model keeps the
+		// in-flight text.
+		history := s.forkDurableHistory(ctx, sessionID, messages)
 		if err := s.store.ReplaceHistory(ctx, newID, history); err != nil {
 			s.logger.Printf("[agent] fork: replace history %s: %v", newID, err)
 		}
@@ -1488,13 +1593,57 @@ func (s *service) ForkSession(sessionID string) (string, error) {
 	if state.workspaceID != "" {
 		s.persistSessionWorkspace(newID, state.workspaceID)
 	}
+	// DSH parity: a forked session gets a copy of the source goal, disarmed so
+	// the copy never continues automatically without a human resume.
+	s.copyGoalToFork(context.Background(), sessionID, newID)
 	s.notify(newID)
 	return newID, nil
 }
 
+// forkDurableHistory returns the full durable history of the source session for
+// a fork. The durable log is authoritative (it carries the tool call/result
+// messages Rig recorded); when no store is wired, or the source has no durable
+// messages yet (a brand-new or manually seeded session), the read-model
+// projection is used so the fork is never empty.
+func (s *service) forkDurableHistory(ctx context.Context, sourceID string, readModel []contracts.ChatMessage) []rig.Message {
+	if s.store != nil {
+		if loaded, err := s.store.History().Load(ctx, sourceID); err != nil {
+			s.logger.Printf("[agent] fork: load durable history of %s: %v", sourceID, err)
+		} else if len(loaded) > 0 {
+			return loaded
+		}
+	}
+	s.logger.Printf("[agent] fork: session %s has no durable history; projecting the read model", sourceID)
+	return forkHistoryMessages(readModel)
+}
+
+// copyGoalToFork copies the source session's goal into the forked session
+// through the goal backend's optional CopyGoal hook. Failures are logged: a
+// fork must never fail because its goal could not be copied (the conversation
+// itself is the primary artifact).
+func (s *service) copyGoalToFork(ctx context.Context, fromSessionID, toSessionID string) {
+	if s.goalService == nil {
+		return
+	}
+	copier, ok := s.goalService.(interface {
+		CopyGoal(context.Context, string, string) (contracts.Goal, bool, error)
+	})
+	if !ok || copier == nil {
+		return
+	}
+	goal, copied, err := copier.CopyGoal(ctx, fromSessionID, toSessionID)
+	if err != nil {
+		s.logger.Printf("[agent] fork: copy goal %s -> %s: %v", fromSessionID, toSessionID, err)
+		return
+	}
+	if copied {
+		s.logger.Printf("[agent] fork: copied goal %s (phase %s) to %s, disarmed", goal.ID, goal.Phase, toSessionID)
+	}
+}
+
 // forkHistoryMessages rebuilds a Rig history from a forked read model: user and
 // assistant messages only (tool calls are not replayed), with assistant
-// reasoning preserved.
+// reasoning preserved. It is the fallback when the source has no durable history.
 func forkHistoryMessages(messages []contracts.ChatMessage) []rig.Message {
 	out := make([]rig.Message, 0, len(messages))
 	for _, message := range messages {
@@ -1622,6 +1771,12 @@ func (s *service) DeleteSession(sessionID string) error {
 	// with the session. The settings row is best effort (the session is already
 	// gone; a failed cleanup must not fail the delete).
 	s.clearAllowedToolsRow(sessionID)
+	// The prompt inbox belongs to the session: drop it (the durable events were
+	// deleted with the row, so no queue event is appended — that would recreate
+	// the session).
+	s.clearQueuedPrompts(sessionID)
+	// The folded context timeline of the deleted session must not survive either.
+	s.clearContextTimeline(sessionID)
 	// The unread row cannot be removed (SettingsService has no delete API), so
 	// clear it to "false" exactly like the pin/archive setters do; the deleted
 	// session never lists again either way.
@@ -1635,6 +1790,12 @@ func (s *service) DeleteSession(sessionID string) error {
 		if err := s.store.DeleteSession(context.Background(), sessionID); err != nil {
 			s.logger.Printf("[agent] delete session %s: %v", sessionID, err)
 		}
+	}
+	// Drop the goal backend's cached goal/activation for the deleted session so
+	// a late UI/driver read cannot see (or revive) it. The optional interface
+	// keeps GoalService free of a delete-only method.
+	if forgetter, ok := s.goalService.(interface{ Forget(string) }); ok && forgetter != nil {
+		forgetter.Forget(sessionID)
 	}
 	s.notify(sessionID)
 	if active != sessionID {
@@ -1724,6 +1885,12 @@ func (s *service) SetActiveSession(sessionID string) error {
 	// mark it unread after this clear.
 	s.setSessionUnread(sessionID, false)
 	s.notify(sessionID)
+	// A session stopped while prompts were waiting resumes its inbox on the next
+	// human gesture: switching back to it drains the oldest queued prompt
+	// (origin=user). Goal continuation stays disarmed (Cancel disarmed it).
+	if s.resumePendingIdleDrain(sessionID) {
+		s.notify(sessionID)
+	}
 	return nil
 }
 
@@ -1738,8 +1905,10 @@ var ErrEmptyPrompt = errors.New("agent: prompt is empty")
 // session changes or any provider request is attempted.
 var ErrNoModelConfigured = errors.New("agent: no model configured; add one in Settings → Model")
 
-// ErrSessionRunning is returned by Send/Regenerate when the session already runs.
-var ErrSessionRunning = errors.New("agent: session is already running")
+// ErrSessionRunning is returned by Send/Regenerate when the session already
+// runs. It aliases contracts.ErrSessionRunning so hosts can classify it without
+// importing the agent module; the inbox fallback is contracts.PromptQueue.
+var ErrSessionRunning = contracts.ErrSessionRunning
 
 // ErrNoUserMessage is returned by Regenerate when the session has no user
 // message to retry.
@@ -1770,6 +1939,25 @@ func (s *service) SendWithAttachments(sessionID, prompt string, attachments []co
 // send is the shared prompt/attachment send path. The run uses the effective
 // config and the shared history; a per-session context makes Cancel possible.
 func (s *service) send(sessionID, prompt string, attachments []contracts.Attachment) error {
+	// A stopped session may hold prompts that were queued before the Stop. The
+	// oldest queued prompt drains first; this new human message joins the tail
+	// (it never jumps the queue). Attachments cannot be queued through the text
+	// inbox, so that rare case falls through to a normal send.
+	if len(attachments) == 0 && s.hasPendingIdleDrain(sessionID) &&
+		s.sessionIdle(sessionID) && s.queuedPromptCount(sessionID) > 0 {
+		s.resumePendingIdleDrain(sessionID)
+		if _, err := s.EnqueuePrompt(context.Background(), sessionID, prompt); err != nil {
+			return err
+		}
+		return nil
+	}
+	return s.sendWithOptions(sessionID, prompt, attachments, runOptions{})
+}
+
+// sendWithOptions is send plus the engine-side run options: an explicit run
+// origin (goal continuation) and the GoalRound marker that tells the UI the
+// user message was injected by the goal driver rather than typed by a human.
+func (s *service) sendWithOptions(sessionID, prompt string, attachments []contracts.Attachment, options runOptions) error {
 	prompt = strings.TrimSpace(prompt)
 	attachments = cloneAttachments(attachments)
 	if prompt == "" && len(attachments) == 0 {
@@ -1816,6 +2004,7 @@ func (s *service) send(sessionID, prompt string, attachments []contracts.Attachm
 			Role:        contracts.ChatRoleUser,
 			Text:        prompt,
 			Attachments: cloneAttachments(attachments),
+			GoalRound:   cloneGoalRound(options.goalRound),
 			CreatedAt:   now,
 		},
 		contracts.ChatMessage{
@@ -1827,6 +2016,9 @@ func (s *service) send(sessionID, prompt string, attachments []contracts.Attachm
 	)
 	state.assistant = len(state.messages) - 1
 	state.running = true
+	// The session is producing output again: an interrupted-run banner from the
+	// previous launch no longer applies.
+	state.interrupted = false
 	// The request is in flight but the model has not produced anything yet:
 	// the sidebar shows 等待回复 until the first output event arrives.
 	state.waiting = true
@@ -1860,6 +2052,10 @@ func (s *service) send(sessionID, prompt string, attachments []contracts.Attachm
 	// active).
 	s.setSessionUnread(sessionID, false)
 
+	// Who started this run: an explicit engine-side origin (goal continuation)
+	// wins, otherwise the session's persisted provenance decides (automation
+	// sessions, delegated children, everything else the user).
+	origin := s.runOrigin(sessionID, options.origin)
 	if s.store != nil {
 		if err := s.store.CreateSession(runCtx, sessionID, title); err != nil {
 			s.logger.Printf("[agent] persist session %s: %v", sessionID, err)
@@ -1872,10 +2068,7 @@ func (s *service) send(sessionID, prompt string, attachments []contracts.Attachm
 				s.logger.Printf("[agent] rename session %s: %v", sessionID, err)
 			}
 		}
-		s.appendEvent(runCtx, sessionID, "user_message", map[string]any{
-			"text":        prompt,
-			"attachments": attachmentNames(attachments),
-		})
+		s.appendEvent(runCtx, sessionID, "user_message", userMessageEventPayload(prompt, attachments, origin, options.goalRound))
 	}
 	expandedPrompt, referenceIDs, referenceBudget := s.expandSessionReferences(sessionID, prompt)
 	if referenceBudget != nil {
@@ -1900,7 +2093,7 @@ func (s *service) send(sessionID, prompt string, attachments []contracts.Attachm
 	}
 	s.notify(sessionID)
 	s.startRunGoroutine(func() {
-		s.run(runCtx, sessionID, cfg, input, history, s.thinkingParamsForSession(sessionID, cfg.Model))
+		s.run(runCtx, sessionID, cfg, input, history, s.thinkingParamsForSession(sessionID, cfg.Model), origin)
 	})
 	return nil
 }
@@ -1980,6 +2173,7 @@ func (s *service) Regenerate(sessionID string) error {
 	state.messages = truncated
 	state.assistant = len(state.messages) - 1
 	state.running = true
+	state.interrupted = false
 	// Same waiting window as Send: nothing has streamed yet.
 	state.waiting = true
 	state.err = ""
@@ -2053,7 +2247,7 @@ func (s *service) Regenerate(sessionID string) error {
 
 	s.notify(sessionID)
 	s.startRunGoroutine(func() {
-		s.run(runCtx, sessionID, cfg, runInput, runHistory, s.thinkingParamsForSession(sessionID, cfg.Model))
+		s.run(runCtx, sessionID, cfg, runInput, runHistory, s.thinkingParamsForSession(sessionID, cfg.Model), s.runOrigin(sessionID, ""))
 	})
 	return nil
 }
@@ -2184,7 +2378,7 @@ func (s *service) nextMessageIDLocked() string {
 // run executes one Rig agent run in the background with the already-built
 // initial input messages.
 func (s *service) run(ctx context.Context, sessionID string, cfg contracts.ChatConfig, input []rig.Message,
-	history rig.History, thinking map[string]any) {
+	history rig.History, thinking map[string]any, origin string) {
 	tools := s.toolsForSession(sessionID)
 	// The run's tool root is the session's project, not whichever workspace is
 	// current: concurrent sessions (and automation runs) may belong to different
@@ -2195,7 +2389,8 @@ func (s *service) run(ctx context.Context, sessionID string, cfg contracts.ChatC
 	// environment first (OS, shell, tool root, approval policy), then the
 	// configured prompt with the workspace instructions and preset, then
 	// per-tool guidance for the tools this run actually receives.
-	cfg.SystemPrompt = s.buildRunSystemPrompt(ctx, sessionID, cfg, toolNameSet(tools), workspaceRoot)
+	promptSections := []contracts.PromptSection(nil)
+	cfg.SystemPrompt, promptSections = s.buildRunSystemPromptSections(ctx, sessionID, cfg, toolNameSet(tools), workspaceRoot)
 	provider, err := s.newProvider(cfg, thinking)
 	if err != nil {
 		s.finish(sessionID, ctx, fmt.Errorf("create provider: %w", err))
@@ -2204,6 +2399,11 @@ func (s *service) run(ctx context.Context, sessionID string, cfg contracts.ChatC
 	if history == nil {
 		history = s.historyView()
 	}
+	// Product-side automatic compaction runs before Rig sees this turn: when the
+	// system prompt + durable history already exceed the effective context
+	// budget, archive+compact once so the first model call starts inside the
+	// window (the new user message is appended by Rig afterwards, exactly once).
+	s.preRunCompact(ctx, sessionID, cfg, history, provider)
 	// The parent run's model context receives one completion receipt per child
 	// that finished since the previous run (the transcript derives the same
 	// records for the user). The batch persists the receipt flags only when the
@@ -2219,7 +2419,7 @@ func (s *service) run(ctx context.Context, sessionID string, cfg contracts.ChatC
 	// the call (see loop_guard.go). A new run starts a fresh repeat chain.
 	// The workspace-root wrapper is outermost so every tool call sees the
 	// session's root even when another workspace is current.
-	runTools := withWorkspaceRoot(withAgentSession(withRepeatGuard(tools, newRepeatToolGuard()), sessionID), workspaceRoot)
+	runTools := withWorkspaceRoot(withAgentScope(withRepeatGuard(tools, newRepeatToolGuard()), sessionID, origin), workspaceRoot)
 	spec := rig.AgentSpec{
 		Provider:      provider,
 		Model:         cfg.Model,
@@ -2231,27 +2431,27 @@ func (s *service) run(ctx context.Context, sessionID string, cfg contracts.ChatC
 		Tools:         runTools,
 		// The tombstone guard is outermost: a session deleted mid-run must drop
 		// its late history write before it reaches the store.
-		History:       s.guardedHistory(history),
-		Gate:          s.gate(sessionID),
-		ContextBudget: cfg.ContextBudget,
+		History: s.guardedHistory(history),
+		Gate:    s.gate(sessionID),
 		// Oversized tool results are spilled by Rig before the tool message is
 		// recorded (rig.SpillPolicy); the product only resolves the directory.
 		Spill:           s.spillPolicy(ctx),
 		Logger:          s.logger,
 		CheckpointStore: s.guardedCheckpointStore(s.checkpointStore()),
 	}
-	if cfg.ContextBudget > 0 {
-		spec.Compactor = compact.LLMCompactor{
-			Provider: provider,
-			Model:    cfg.Model,
-			Fallback: compact.WindowCompactor{},
-		}
-	}
+	// Context safety default: the explicit chat.contextBudget when set, else a
+	// budget derived from the model's context window; a known budget also
+	// installs the automatic compactor.
+	s.withContextBudget(&spec, cfg, provider)
 	runner, err := rigagent.New(spec)
 	if err != nil {
 		s.finish(sessionID, ctx, fmt.Errorf("create agent: %w", err))
 		return
 	}
+	// Context observability: the request-level snapshot of this run (model,
+	// window, rendered system-prompt size, exact tool catalog, history counts and
+	// injected prompt sources).
+	s.recordContextSnapshot(context.Background(), sessionID, s.contextSnapshotForRun(sessionID, cfg, runTools, promptSections))
 	s.appendEvent(ctx, sessionID, "run_start", map[string]any{"model": cfg.Model})
 	// workspaceRoot was resolved before the run (the session's project); every
 	// tool call of this turn records paths relative to that same root, so a
@@ -2260,17 +2460,32 @@ func (s *service) run(ctx context.Context, sessionID string, cfg contracts.ChatC
 	// The usage tracker is run-local: Rig's RunResult.Usage accumulates every
 	// model call, while only the last call's prompt tokens describe the context
 	// the model actually saw (MessageUsage.ContextTokens).
-	usage := &turnUsage{}
+	usage := &turnUsage{model: cfg.Model}
+	emit := func(event rig.Event) { s.handleEvent(ctx, sessionID, workspaceRoot, event, usage) }
 	result, runErr := runner.Run(ctx, rig.RunRequest{
 		SessionID: sessionID,
 		Input:     input,
-		Emit:      func(event rig.Event) { s.handleEvent(ctx, sessionID, workspaceRoot, event, usage) },
+		Emit:      emit,
 	})
+	// Context overflow recovery (DSH): compact once and retry the same turn
+	// once. The user message is already durable, so no new input is appended
+	// and executed tools are not replayed.
+	if runErr != nil && ctx.Err() == nil && isContextOverflowError(runErr) {
+		if retryResult, retryErr, retried := s.retryContextOverflow(ctx, sessionID, cfg, spec, provider, emit, usage, result); retried {
+			result, runErr = retryResult, retryErr
+		}
+	}
 	if runErr == nil {
 		noticeBatch.commit()
 	}
 	s.recordRunUsage(ctx, sessionID, result, time.Since(startedAt).Milliseconds(), usage.lastPromptTokens)
 	s.finishWithReason(sessionID, ctx, runErr, result.FinishReason)
+	// A background session that finished (or failed) raises one OS/toast
+	// notification; a user Stop and the session the user is watching stay quiet.
+	s.notifyBackgroundRunFinished(sessionID, runErr, ctx)
+	// DSH settle order: the human inbox drains first; a goal round may only run
+	// when no queued prompt is waiting.
+	s.settleRun(sessionID, origin, runErr, ctx)
 }
 
 // newProvider constructs the run provider, honouring the test seam. thinking
@@ -2346,7 +2561,21 @@ func (s *service) handleEvent(ctx context.Context, sessionID, workspaceRoot stri
 	// total). Recorded before the session lookup: a session deleted mid-run still
 	// must not poison the next event's tracking.
 	if turn != nil && event.Type == rig.EventUsage && event.Usage != nil {
+		previousPrompt := turn.lastPromptTokens
 		turn.lastPromptTokens = event.Usage.PromptTokens
+		// One durable model_call event per provider call (not only the last one):
+		// the context timeline and cost ledger are built from these.
+		requestModel := ""
+		if turn != nil {
+			requestModel = turn.model
+		}
+		s.recordModelCall(context.Background(), sessionID, contextRequestFromUsage(event.Iteration, requestModel, event.Usage))
+		// Rig compacts automatically inside the run loop with no event of its
+		// own; a sharp prompt-token drop between two calls is reported as an
+		// inferred compaction (never as an exact result).
+		if autoCompactDropThreshold(previousPrompt, event.Usage.PromptTokens) {
+			s.recordCompactEvent(context.Background(), sessionID, "auto", previousPrompt, event.Usage.PromptTokens, 0, 0, true, "")
+		}
 	}
 	s.mu.Lock()
 	state, ok := s.sessions[sessionID]
@@ -2433,6 +2662,13 @@ func (s *service) handleEvent(ctx context.Context, sessionID, workspaceRoot stri
 						"id": event.Call.ID, "name": event.Call.Name,
 						"status": status, "content": content,
 					})
+					// A spilled tool result is a context-management event: record
+					// its structured path/bytes/preview from Rig's stable summary.
+					if spill, ok := parseSpillSummary(event.Result.Content); ok {
+						spill.CallID = event.Call.ID
+						spill.Tool = event.Call.Name
+						s.recordSpillEvent(context.Background(), sessionID, spill)
+					}
 					break
 				}
 			}
@@ -2863,14 +3099,15 @@ func messageTime(rig.Message) time.Time { return time.Time{} }
 // snapshot returns a deep copy of the session read model.
 func (state *sessionState) snapshot(model string, settings contracts.SettingsService) contracts.ChatSession {
 	out := contracts.ChatSession{
-		ID:        state.id,
-		Title:     state.title,
-		Model:     model,
-		Running:   state.running,
-		Error:     state.err,
-		CreatedAt: state.createdAt,
-		UpdatedAt: state.updatedAt,
-		Messages:  make([]contracts.ChatMessage, 0, len(state.messages)),
+		ID:          state.id,
+		Title:       state.title,
+		Model:       model,
+		Running:     state.running,
+		Error:       state.err,
+		Interrupted: state.interrupted,
+		CreatedAt:   state.createdAt,
+		UpdatedAt:   state.updatedAt,
+		Messages:    make([]contracts.ChatMessage, 0, len(state.messages)),
 	}
 	for _, message := range state.messages {
 		copied := message
@@ -2895,6 +3132,14 @@ func (s *service) Cancel(sessionID string) error {
 	s.mu.Unlock()
 	if cancel != nil {
 		cancel()
+	}
+	// A user Stop disarms the goal: the engine-side driver must not restart the
+	// run after the cancellation settles. The persisted phase is untouched, so
+	// the UI can offer "continue goal" (a human resume re-arms it).
+	if s.goalService != nil {
+		if _, ok := s.goalService.Disarm(sessionID); ok {
+			s.notify(sessionID)
+		}
 	}
 	return nil
 }

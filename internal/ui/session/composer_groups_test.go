@@ -150,9 +150,9 @@ func TestNarrowHeaderAndToolbarWithInspectorDrawer(t *testing.T) {
 	}, true)
 	chat.config = contracts.ChatConfig{Model: "snapshot-model"}
 	settings := newPermissionSettings(nil)
-	goal := &pauseTracker{}
-	h, tester := newGoalPauseHarness(t, chat, settings, goal)
-	goal.setGoal("g1", "完成 Q4 发布清单并更新文档", contracts.GoalStatusActive)
+	h, goals := newGoalHarnessWithSettings(t, chat, settings)
+	goals.seed("sess-1", "完成 Q4 发布清单并更新文档")
+	tester := h.tester()
 	// A right-panel contribution makes uiroot dock/draw the inspector.
 	if _, err := h.ui.Runtime().RegisterSlotItem(contracts.SlotItem{
 		Slot: contracts.SlotSessionPanelRight, ID: "test.inspector", Order: 1,
@@ -175,7 +175,7 @@ func TestNarrowHeaderAndToolbarWithInspectorDrawer(t *testing.T) {
 	if title.W < 100 {
 		t.Fatalf("title width %.1f at 1024+inspector, want ≥100 (N1)", title.W)
 	}
-	goalChip, ok := tester.Find("目标")
+	goalChip, ok := tester.Find("目标进行中")
 	if !ok {
 		t.Fatalf("goal chip missing; texts = %v", tester.Texts())
 	}

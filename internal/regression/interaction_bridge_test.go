@@ -1,7 +1,7 @@
 package regression
 
 // Adversarial audit: the uiroot host interaction bridges (UserInteraction,
-// ArtifactPresenter, PlanReviewer, GoalTracker) are transport-only services
+// ArtifactPresenter, PlanReviewer) are transport-only services
 // called from agent goroutines and the UI thread. Negative cases: nil handlers,
 // unknown/repeated answers, Answer/Cancel races, invalid plan actions, empty
 // payloads, panicking handlers and concurrent access.
@@ -417,81 +417,5 @@ func TestPlanReviewerHandlerPanic(t *testing.T) {
 	}()
 	if recovered != nil {
 		t.Skipf("AUDIT-P2-4 (known defect): a panicking PlanReviewer handler propagates to Review (%v)", recovered)
-	}
-}
-
-// TestGoalTrackerNegatives covers empty goals, repeated clear, nil contexts and
-// concurrent access.
-func TestGoalTrackerNegatives(t *testing.T) {
-	root := uiroot.New(uiroot.Config{})
-	tracker := root.GoalTracker()
-	ctx := context.Background()
-
-	if _, err := tracker.Set(ctx, ""); err == nil || !strings.Contains(err.Error(), "text is required") {
-		t.Fatalf("Set(empty) error = %v, want text required", err)
-	}
-	if _, err := tracker.Set(ctx, "   "); err == nil {
-		t.Fatalf("Set(whitespace) succeeded, want an error")
-	}
-	if _, _, _, ok := tracker.Get(); ok {
-		t.Fatal("Get() reports a goal after rejected sets")
-	}
-	if tracker.Clear() {
-		t.Fatal("Clear() = true with no goal")
-	}
-
-	// nil context falls back to Background, like the other bridges.
-	goalID, err := tracker.Set(nil, "  ship the audit  ")
-	if err != nil {
-		t.Fatalf("Set(nil ctx): %v", err)
-	}
-	id, text, status, ok := tracker.Get()
-	if !ok || id != goalID || text != "ship the audit" || status != "active" {
-		t.Fatalf("Get() = (%q, %q, %q, %v), want the trimmed active goal", id, text, status, ok)
-	}
-
-	// Concurrent Set/Clear/Get from several goroutines: -race must stay clean
-	// and the bridge must never deadlock.
-	tracker.SetHandler(nil)
-	var wg sync.WaitGroup
-	for worker := 0; worker < 4; worker++ {
-		worker := worker
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			for index := 0; index < 50; index++ {
-				switch worker % 3 {
-				case 0:
-					_, _ = tracker.Set(ctx, fmt.Sprintf("goal-%d-%d", worker, index))
-				case 1:
-					tracker.Clear()
-				default:
-					tracker.Get()
-				}
-			}
-		}()
-	}
-	wg.Wait()
-
-	canceled, cancel := context.WithCancel(ctx)
-	cancel()
-	if _, err := tracker.Set(canceled, "late"); !errors.Is(err, context.Canceled) {
-		t.Fatalf("Set(cancelled ctx) error = %v, want context.Canceled", err)
-	}
-}
-
-// TestGoalTrackerHandlerPanic is the known-defect probe for a panicking goal
-// handler (same containment class as the interaction handler).
-func TestGoalTrackerHandlerPanic(t *testing.T) {
-	root := uiroot.New(uiroot.Config{})
-	tracker := root.GoalTracker()
-	tracker.SetHandler(func(contracts.Goal, bool) { panic("goal handler boom") })
-	var recovered any
-	func() {
-		defer func() { recovered = recover() }()
-		_, _ = tracker.Set(context.Background(), "second")
-	}()
-	if recovered != nil {
-		t.Skipf("AUDIT-P2-4 (known defect): a panicking GoalTracker handler propagates to Set (%v)", recovered)
 	}
 }

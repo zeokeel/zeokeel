@@ -720,6 +720,16 @@ func subagentStatusFromChildStatus(status string) string {
 	}
 }
 
+// childRecordResumable reports whether a historical record has enough durable
+// material for a cold resume: an identity plus the original prompt or answer to
+// seed the child session with. Live rows never report Resumable.
+func childRecordResumable(record childSessionRecord) bool {
+	if strings.TrimSpace(record.ID) == "" {
+		return false
+	}
+	return strings.TrimSpace(record.Prompt) != "" || strings.TrimSpace(record.Output) != ""
+}
+
 // --- conversions between the store records and the UI contracts -----------
 
 // childSessionFromTeamMember builds one teammate record from a live contract
@@ -814,6 +824,7 @@ func teamMemberFromChildSession(record childSessionRecord) contracts.TeamMember 
 		Activity:    activity,
 		SessionID:   record.ParentSessionID,
 		Historical:  true,
+		Resumable:   childRecordResumable(record),
 	}
 }
 
@@ -834,6 +845,7 @@ func childAgentFromChildSession(record childSessionRecord) contracts.ChildAgent 
 		UsageTokens:     record.UsageTokens,
 		Iterations:      record.Iterations,
 		Historical:      true,
+		Resumable:       childRecordResumable(record),
 	}
 	if record.Kind == contracts.ChildAgentTeammate {
 		agent.Mode = contracts.ChildAgentContinuable

@@ -67,6 +67,13 @@ func (c *childAgentsService) ChildAgents(parentSessionID string) []contracts.Chi
 	if len(agents) == 0 {
 		return nil
 	}
+	// A cold-resumed child shows as a live running row while its resume run is
+	// in flight; the durable historical row returns when it finishes.
+	if c.service != nil {
+		for index := range agents {
+			agents[index] = c.service.applyColdResumeOverlay(agents[index])
+		}
+	}
 	sort.SliceStable(agents, func(i, j int) bool {
 		if !agents[i].Started.Equal(agents[j].Started) {
 			return agents[i].Started.Before(agents[j].Started)
@@ -92,7 +99,7 @@ func (c *childAgentsService) ChildAgent(id string) (contracts.ChildAgent, bool) 
 	}
 	if store := c.sessions(); store != nil {
 		if record, ok := store.record(id); ok {
-			return childAgentFromChildSession(record), true
+			return c.service.applyColdResumeOverlay(childAgentFromChildSession(record)), true
 		}
 	}
 	return contracts.ChildAgent{}, false
@@ -109,6 +116,11 @@ func (c *childAgentsService) SendChildAgent(ctx context.Context, id, message str
 		return "", fmt.Errorf("agent: child agent %q not found", strings.TrimSpace(id))
 	}
 	if child.Historical {
+		// DSH cold resume: a historical child continues from its durable session
+		// history instead of being a dead read-only record.
+		if child.Resumable {
+			return c.service.ColdResumeChild(ctx, child.ID, message)
+		}
 		return "", fmt.Errorf("agent: child agent %q is a finished historical record and cannot be continued", child.ID)
 	}
 	if child.Kind != contracts.ChildAgentTeammate {
@@ -211,9 +223,22 @@ func (c *childAgentsService) teammateAgents() []contracts.ChildAgent {
 // the development driver resets the retained child sessions between scripted
 // scenes.
 func (c *childAgentsService) ClearChildAgentHistory() {
-	if store := c.sessions(); store != nil {
-		store.clear()
+	store := c.sessions()
+	if store == nil {
+		return
 	}
+	// Cold-resumed children keep their conversation in the durable store under
+	// the child-session ID; clearing the records must not leave those session
+	// rows (and their messages/events) behind.
+	for _, record := range store.records() {
+		if c.service == nil || c.service.store == nil || strings.TrimSpace(record.ID) == "" {
+			continue
+		}
+		if err := c.service.store.DeleteSession(context.Background(), record.ID); err != nil {
+			c.service.logger.Printf("[agent] clear child session %s: %v", record.ID, err)
+		}
+	}
+	store.clear()
 }
 
 // sessions returns the service's durable child-session store (nil when the

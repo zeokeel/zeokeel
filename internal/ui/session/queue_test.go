@@ -1,15 +1,22 @@
 package session_test
 
-// Tests for queueing prompts while a turn is running: queueing is the fixed
-// behavior (A4), so the ui.sendWhileRunning row is no longer read.
+// Tests for the backend prompt inbox (DSH inbox parity): a prompt sent while a
+// session runs lives in the agent backend's per-session PromptQueue, the UI only
+// reads it (badge/popover), removes entries and never sends or drains them
+// itself; a stop keeps the queue (the backend owns the drain decision) and a
+// conversation switch never shows another session's inbox.
 
 import (
 	"errors"
+	"strings"
 	"testing"
 
 	"github.com/egoist/mygo/ui"
+	cordis "github.com/zeokeel/zeokeel-kernel"
 
 	"github.com/zeokeel/zeokeel/internal/contracts"
+	"github.com/zeokeel/zeokeel/internal/ui/session"
+	"github.com/zeokeel/zeokeel/internal/uiroot"
 )
 
 func runningChat() *fakeChat {
@@ -32,7 +39,8 @@ func sendWhileRunningSettings(enabled bool) *permissionSettings {
 	return newPermissionSettings(map[string]string{"ui.sendWhileRunning": value})
 }
 
-// focusComposer clicks the text area above the send button.
+// focusComposerInput clicks above the send/queue control to put the keyboard
+// into the composer input.
 func queueFocusComposer(t *testing.T, tester *ui.Tester, label string) {
 	t.Helper()
 	rect, ok := tester.Find(label)
@@ -43,235 +51,212 @@ func queueFocusComposer(t *testing.T, tester *ui.Tester, label string) {
 	tester.Frame()
 }
 
-// TestQueueAlwaysOnIgnoresStoredOptOut pins the A4 fixed behavior: queueing is
-// no longer a Settings control, so even a stored ui.sendWhileRunning=false row
-// keeps the running composer in queue mode. The input stays visible and
-// editable, Enter queues instead of sending, the old "Enter 暂不可用" hint is
-// gone, and the queued prompt flushes after the run ends.
-func TestQueueAlwaysOnIgnoresStoredOptOut(t *testing.T) {
-	h := newPermissionHarness(t, runningChat(), sendWhileRunningSettings(false))
-	tester := h.tester()
-	h.assertTexts(tester, "输入消息…", "排队", "停止")
-	h.assertNoExactTexts(tester, "发送")
-	h.assertNoTexts(tester, "回复生成中")
-
-	// The draft is editable and Enter never calls chat.Send while running.
+// queuePrompt types one prompt and queues it through the running composer's
+// 排队 control.
+func queuePrompt(t *testing.T, h *harness, tester *ui.Tester, prompt string) {
+	t.Helper()
 	queueFocusComposer(t, tester, "排队")
-	tester.Type("仍然排队")
+	tester.Type(prompt)
 	tester.Frame()
 	h.click(tester, "排队")
+}
+
+// hasQueueRow reports a popover row for prompt (the row appends its local send
+// time, so this checks containment rather than an exact label).
+func hasQueueRow(t *testing.T, tester *ui.Tester, prompt string) bool {
+	t.Helper()
+	for _, text := range tester.Texts() {
+		if strings.Contains(text, prompt) && strings.Contains(text, " · ") {
+			return true
+		}
+	}
+	return false
+}
+
+// --- inbox flow -------------------------------------------------------------
+
+// TestQueueWhileRunningEnqueuesInBackend covers the core move: Enter/排队 while
+// a turn runs calls PromptQueue.EnqueuePrompt (never chat.Send), the draft moves
+// to the backend inbox, and the composer shows the badge.
+func TestQueueWhileRunningEnqueuesInBackend(t *testing.T) {
+	chat := runningChat()
+	h := newPermissionHarness(t, chat, sendWhileRunningSettings(true))
+	tester := h.tester()
+	h.assertTexts(tester, "输入消息…", "排队", "停止")
+	h.assertNoTexts(tester, "已排队")
+
+	queuePrompt(t, h, tester, "第一条排队")
 	h.assertTexts(tester, "已排队 1 条")
-	if sends := h.chat.sends(); len(sends) != 0 {
+	h.assertNoTexts(tester, "第一条排队") // the draft moved to the queue
+	if sends := chat.sends(); len(sends) != 0 {
 		t.Fatalf("queued prompt sent while running: %v", sends)
 	}
+	queued := chat.queueFor("sess-1")
+	if len(queued) != 1 || queued[0].Text != "第一条排队" || queued[0].ID == "" {
+		t.Fatalf("backend inbox = %+v, want one durable entry", queued)
+	}
+}
 
-	// When the reply ends the queued prompt is sent.
-	h.chat.updateSession(contracts.ChatSession{
+// TestQueueEnterKeyEnqueues: Enter while running queues instead of sending.
+func TestQueueEnterKeyEnqueues(t *testing.T) {
+	chat := runningChat()
+	h := newPermissionHarness(t, chat, sendWhileRunningSettings(true))
+	tester := h.tester()
+	queueFocusComposer(t, tester, "排队")
+	tester.Type("键盘排队")
+	tester.Frame()
+	tester.Key(0, ui.KeyEnter)
+	tester.Frame()
+	h.assertTexts(tester, "已排队 1 条")
+	if queued := chat.queueFor("sess-1"); len(queued) != 1 || queued[0].Text != "键盘排队" {
+		t.Fatalf("Enter inbox = %+v", queued)
+	}
+	if sends := chat.sends(); len(sends) != 0 {
+		t.Fatalf("Enter sent while running: %v", sends)
+	}
+}
+
+// TestQueueSettleDrainShowsNextTurn covers the backend drain: when a run settles
+// the agent backend sends the first inbox entry itself. The UI only reflects the
+// new state (badge gone, queued prompt now a transcript turn).
+func TestQueueSettleDrainShowsNextTurn(t *testing.T) {
+	chat := runningChat()
+	h := newPermissionHarness(t, chat, sendWhileRunningSettings(true))
+	tester := h.tester()
+	queuePrompt(t, h, tester, "后台会自动发出")
+	h.assertTexts(tester, "已排队 1 条")
+
+	// The run settles; the backend (simulated) starts the next queued prompt.
+	chat.updateSession(contracts.ChatSession{
 		ID: "sess-1", Title: "排队测试",
 		Messages: []contracts.ChatMessage{{ID: "m2", Role: contracts.ChatRoleAssistant, Text: "完成"}},
 	})
+	if !chat.drainQueuedPrompt("sess-1") {
+		t.Fatal("fake backend did not drain the inbox")
+	}
 	tester.Frame()
-	sends := h.chat.sends()
-	if len(sends) != 1 || sends[0].prompt != "仍然排队" {
-		t.Fatalf("queued prompt not sent after the run ended: sends = %v", sends)
+	tester.Frame()
+
+	sends := chat.sends()
+	if len(sends) != 1 || sends[0].prompt != "后台会自动发出" || sends[0].sessionID != "sess-1" {
+		t.Fatalf("backend drain sends = %v", sends)
 	}
+	if queued := chat.queueFor("sess-1"); len(queued) != 0 {
+		t.Fatalf("inbox not empty after drain: %+v", queued)
+	}
+	h.assertNoTexts(tester, "已排队")
+	h.assertTexts(tester, "后台会自动发出")
 }
 
-// TestQueueWhileRunningAlwaysOn covers every stored row value: missing, empty,
-// malformed and even the old explicit opt-out "false" all keep queueing on, so
-// the running composer shows 排队 and the removed opt-out hint never appears.
-func TestQueueWhileRunningAlwaysOn(t *testing.T) {
-	for _, values := range []map[string]string{
-		nil,
-		{"ui.sendWhileRunning": ""},
-		{"ui.sendWhileRunning": "bogus"},
-		{"ui.sendWhileRunning": "false"},
-	} {
-		h := newPermissionHarness(t, runningChat(), newPermissionSettings(values))
-		tester := h.tester()
-		h.assertTexts(tester, "输入消息…", "排队", "停止")
-		h.assertNoTexts(tester, "回复生成中")
-	}
-}
-
-func TestQueueWhileRunningEnqueuesAndSendsAfterRun(t *testing.T) {
-	settings := sendWhileRunningSettings(true)
-	h := newPermissionHarness(t, runningChat(), settings)
+// TestQueueStopKeepsBackendInbox covers the stop semantics: the UI calls Cancel
+// and never clears (or sends) the queued prompts; the inbox stays visible and
+// the backend decides what happens to it.
+func TestQueueStopKeepsBackendInbox(t *testing.T) {
+	chat := runningChat()
+	h := newPermissionHarness(t, chat, sendWhileRunningSettings(true))
 	tester := h.tester()
-	h.assertTexts(tester, "输入消息…", "排队", "停止")
-
-	queueFocusComposer(t, tester, "排队")
-	tester.Type("第一条")
-	tester.Frame()
-	h.click(tester, "排队")
-	h.assertTexts(tester, "已排队 1 条")
-	if sends := h.chat.sends(); len(sends) != 0 {
-		t.Fatalf("queued prompt sent while running: %v", sends)
-	}
-
-	// Finish the run: the first queued prompt is sent.
-	h.chat.updateSession(contracts.ChatSession{
-		ID: "sess-1", Title: "排队测试",
-		Messages: []contracts.ChatMessage{{ID: "m2", Role: contracts.ChatRoleAssistant, Text: "完成"}},
-	})
-	tester.Frame()
-	sends := h.chat.sends()
-	if len(sends) != 1 || sends[0].prompt != "第一条" || sends[0].sessionID != "sess-1" {
-		t.Fatalf("sends after first run = %v", sends)
-	}
-
-	// The queued send starts another run; queue the second prompt and finish it.
-	queueFocusComposer(t, tester, "停止")
-	tester.Type("第二条")
-	tester.Frame()
-	h.click(tester, "排队")
-	h.assertTexts(tester, "已排队 1 条")
-	h.chat.updateSession(contracts.ChatSession{
-		ID: "sess-1", Title: "排队测试",
-		Messages: []contracts.ChatMessage{{ID: "m3", Role: contracts.ChatRoleAssistant, Text: "完成"}},
-	})
-	tester.Frame()
-	sends = h.chat.sends()
-	if len(sends) != 2 || sends[0].prompt != "第一条" || sends[1].prompt != "第二条" {
-		t.Fatalf("sends after second run = %v", sends)
-	}
-}
-
-func TestQueueSendFailureKeepsPromptAndShowsError(t *testing.T) {
-	settings := sendWhileRunningSettings(true)
-	h := newPermissionHarness(t, runningChat(), settings)
-	h.chat.sendErr = errors.New("agent busy")
-	tester := h.tester()
-	queueFocusComposer(t, tester, "排队")
-	tester.Type("会失败")
-	tester.Frame()
-	h.click(tester, "排队")
-	h.chat.updateSession(contracts.ChatSession{ID: "sess-1", Title: "排队测试"})
-	tester.Frame()
-	h.assertTexts(tester, "排队发送失败：agent busy", "已排队 1 条")
-	if sends := h.chat.sends(); len(sends) != 0 {
-		t.Fatalf("failed queued send recorded: %v", sends)
-	}
-}
-
-// TestQueueSendFailureDoesNotRetryEveryFrame is the S-01 regression: a failed
-// queued delivery pauses the queue, and the screen's frame-time fallback must
-// not re-send the same prompt every frame (that was a self-sustaining redraw +
-// Send loop). The explicit 重试 action is the only retry path, and it clears
-// the pause and the error.
-func TestQueueSendFailureDoesNotRetryEveryFrame(t *testing.T) {
-	settings := sendWhileRunningSettings(true)
-	h := newPermissionHarness(t, runningChat(), settings)
-	h.chat.sendErr = errors.New("agent busy")
-	tester := h.tester()
-	queueFocusComposer(t, tester, "排队")
-	tester.Type("会失败")
-	tester.Frame()
-	h.click(tester, "排队")
-	h.chat.updateSession(contracts.ChatSession{ID: "sess-1", Title: "排队测试"})
-	tester.Frame()
-	if got := h.chat.attempts(); got != 1 {
-		t.Fatalf("Send attempts after the failed delivery = %d, want 1", got)
-	}
-	h.assertTexts(tester, "排队发送失败：agent busy", "已排队 1 条")
-	// Later frames must not retry: the paused queue and its error keep the
-	// frame fallback quiet.
-	for frame := 0; frame < 4; frame++ {
-		tester.Frame()
-	}
-	if got := h.chat.attempts(); got != 1 {
-		t.Fatalf("Send attempts after 4 more frames = %d, want 1 (no automatic retry)", got)
-	}
-	// 重试 is the explicit recovery: the backend recovers, the retry resumes the
-	// paused queue and delivers the prompt exactly once.
-	h.chat.sendErr = nil
-	h.click(tester, "重试")
-	tester.Frame()
-	if got := h.chat.attempts(); got != 2 {
-		t.Fatalf("Send attempts after 重试 = %d, want 2", got)
-	}
-	if sends := h.chat.sends(); len(sends) != 1 || sends[0].prompt != "会失败" {
-		t.Fatalf("delivered sends after 重试 = %v, want [会失败]", sends)
-	}
-	h.assertNoTexts(tester, "排队发送失败：agent busy", "已排队 1 条")
-}
-
-func TestQueueEmptyDraftNotQueued(t *testing.T) {
-	settings := sendWhileRunningSettings(true)
-	h := newPermissionHarness(t, runningChat(), settings)
-	tester := h.tester()
-	queueFocusComposer(t, tester, "排队")
-	tester.Type("   ")
-	tester.Frame()
-	h.click(tester, "排队")
-	h.assertNoTexts(tester, "已排队 1 条", "已排队 2 条")
-}
-
-// TestStopPausesQueuedPrompts covers the stop semantics fix: pressing 停止 must
-// stop the run, not immediately start the next queued prompt. The queue is kept
-// for review and the popover offers an explicit 发送排队消息 action.
-func TestStopPausesQueuedPrompts(t *testing.T) {
-	h := newPermissionHarness(t, runningChat(), sendWhileRunningSettings(true))
-	tester := h.tester()
-	queueFocusComposer(t, tester, "排队")
-	tester.Type("停后再说")
-	tester.Frame()
-	h.click(tester, "排队")
-	h.assertTexts(tester, "已排队 1 条")
+	queuePrompt(t, h, tester, "停后保留")
 
 	h.click(tester, "停止")
-	if cancels := h.chat.cancels(); len(cancels) != 1 || cancels[0] != "sess-1" {
+	if cancels := chat.cancels(); len(cancels) != 1 || cancels[0] != "sess-1" {
 		t.Fatalf("Cancel calls = %v, want [sess-1]", cancels)
 	}
-	if sends := h.chat.sends(); len(sends) != 0 {
-		t.Fatalf("stopping started the queued prompt automatically: %v", sends)
+	if sends := chat.sends(); len(sends) != 0 {
+		t.Fatalf("stopping sent the queued prompt: %v", sends)
 	}
+	if queued := chat.queueFor("sess-1"); len(queued) != 1 {
+		t.Fatalf("stopping cleared the backend inbox: %+v", queued)
+	}
+	tester.Frame()
 	h.assertTexts(tester, "已排队 1 条")
 
-	// The queue popover says it is paused and offers the explicit send.
+	// The popover no longer claims a paused/resume UI state: it lists the
+	// backend inbox and offers remove/clear only.
 	h.click(tester, "已排队 1 条")
-	h.assertTexts(tester, "排队消息", "已停止：排队消息不会自动发送，可手动发送或取消", "发送排队消息")
-	h.click(tester, "发送排队消息")
-	sends := h.chat.sends()
-	if len(sends) != 1 || sends[0].prompt != "停后再说" {
-		t.Fatalf("explicit queued send = %v, want the queued prompt", sends)
-	}
-	h.assertNoTexts(tester, "已排队 1 条")
+	h.assertTexts(tester, "排队消息", "停后保留", "取消排队", "清空全部")
+	h.assertNoTexts(tester, "已停止：排队消息不会自动发送", "发送排队消息")
 }
 
-// TestQueueStaysWithItsSession covers the data-loss fix: switching conversations
-// keeps the queued prompts of the session they were typed in, and the module
-// subscription flushes them when that session's run ends even while the user is
-// looking at another conversation.
-func TestQueueStaysWithItsSession(t *testing.T) {
-	settings := sendWhileRunningSettings(true)
-	h := newPermissionHarness(t, runningChat(), settings)
+// TestQueueRemoveOneAndClearAll covers the popover actions: a row removal calls
+// RemoveQueuedPrompt (the entry is really gone from the backend) and clear-all
+// removes the rest.
+func TestQueueRemoveOneAndClearAll(t *testing.T) {
+	chat := runningChat()
+	h := newPermissionHarness(t, chat, sendWhileRunningSettings(true))
 	tester := h.tester()
-	queueFocusComposer(t, tester, "排队")
-	tester.Type("给旧会话")
-	tester.Frame()
-	h.click(tester, "排队")
+	queuePrompt(t, h, tester, "第一条")
+	queuePrompt(t, h, tester, "第二条")
+	h.assertTexts(tester, "已排队 2 条")
+
+	h.click(tester, "已排队 2 条")
+	if _, ok := tester.AccessByRole(ui.RoleList, "排队消息"); !ok {
+		t.Fatalf("queued prompts are not a list; texts = %v", tester.Texts())
+	}
+	if !hasQueueRow(t, tester, "第一条") || !hasQueueRow(t, tester, "第二条") {
+		t.Fatalf("popover rows missing (order/time); texts = %v", tester.Texts())
+	}
+	h.click(tester, "取消排队")
 	h.assertTexts(tester, "已排队 1 条")
-
-	h.chat.addSession(contracts.ChatSession{
-		ID: "sess-2", Title: "另一个会话", Messages: []contracts.ChatMessage{{ID: "m1", Role: contracts.ChatRoleUser, Text: "你好"}},
-	}, true)
-	tester.Frame()
-	// The queue belongs to sess-1: no badge on another conversation's composer.
-	h.assertNoTexts(tester, "已排队 1 条")
-
-	// The old session settles while sess-2 is on screen: the module-level
-	// subscription sends the queued prompt into *its* session, not the visible
-	// one and not nowhere.
-	h.chat.updateSession(contracts.ChatSession{ID: "sess-1", Title: "排队测试"})
-	tester.Frame()
-	sends := h.chat.sends()
-	if len(sends) != 1 || sends[0].sessionID != "sess-1" || sends[0].prompt != "给旧会话" {
-		t.Fatalf("queued prompt after switching sessions = %v, want it sent into sess-1", sends)
+	queued := chat.queueFor("sess-1")
+	if len(queued) != 1 || queued[0].Text != "第二条" {
+		t.Fatalf("inbox after removing the first row = %+v", queued)
 	}
 
-	// Returning to sess-1 shows its user message and no leftover queue badge.
-	if err := h.chat.SetActiveSession("sess-1"); err != nil {
+	// The popover stays open after a row removal; reopen it only if it closed.
+	if !tester.HasText("排队消息") {
+		h.click(tester, "已排队 1 条")
+	}
+	h.assertTexts(tester, "清空全部")
+	h.click(tester, "清空全部")
+	h.assertNoTexts(tester, "已排队")
+	if queued := chat.queueFor("sess-1"); len(queued) != 0 {
+		t.Fatalf("clear-all left entries: %+v", queued)
+	}
+	// A cleared inbox stays cleared when the backend later settles the run.
+	chat.updateSession(contracts.ChatSession{ID: "sess-1", Title: "排队测试"})
+	tester.Frame()
+	if sends := chat.sends(); len(sends) != 0 {
+		t.Fatalf("cleared inbox still sent: %v", sends)
+	}
+}
+
+// TestQueueEmptyState hides the badge (and popover) while the inbox is empty,
+// and the queueing control remains available for new text.
+func TestQueueEmptyState(t *testing.T) {
+	h := newPermissionHarness(t, runningChat(), sendWhileRunningSettings(true))
+	tester := h.tester()
+	h.assertTexts(tester, "排队")
+	h.assertNoTexts(tester, "已排队", "排队消息")
+	if queued := h.chat.queueFor("sess-1"); len(queued) != 0 {
+		t.Fatalf("inbox seeded unexpectedly: %+v", queued)
+	}
+}
+
+// TestQueuePerSession: the inbox is read per session; the active conversation
+// never shows another session's queue, and the backend drain targets its owner.
+func TestQueuePerSession(t *testing.T) {
+	chat := runningChat()
+	h := newPermissionHarness(t, chat, sendWhileRunningSettings(true))
+	tester := h.tester()
+	queuePrompt(t, h, tester, "给旧会话")
+	h.assertTexts(tester, "已排队 1 条")
+
+	chat.addSession(contracts.ChatSession{
+		ID: "sess-2", Title: "另一个会话",
+		Messages: []contracts.ChatMessage{{ID: "m1", Role: contracts.ChatRoleUser, Text: "你好"}},
+	}, true)
+	tester.Frame()
+	h.assertNoTexts(tester, "已排队 1 条")
+
+	chat.updateSession(contracts.ChatSession{ID: "sess-1", Title: "排队测试"})
+	chat.drainQueuedPrompt("sess-1")
+	tester.Frame()
+	sends := chat.sends()
+	if len(sends) != 1 || sends[0].sessionID != "sess-1" || sends[0].prompt != "给旧会话" {
+		t.Fatalf("backend drain after switching = %v, want it sent into sess-1", sends)
+	}
+
+	if err := chat.SetActiveSession("sess-1"); err != nil {
 		t.Fatalf("activate sess-1: %v", err)
 	}
 	tester.Frame()
@@ -279,109 +264,147 @@ func TestQueueStaysWithItsSession(t *testing.T) {
 	h.assertNoTexts(tester, "已排队 1 条")
 }
 
-func TestQueueEnglishCopy(t *testing.T) {
-	settings := sendWhileRunningSettings(true)
-	h := newPermissionHarness(t, runningChat(), settings)
+// TestQueueBackendErrors covers the two backend failures the UI can face:
+// enqueue keeps the draft and reports through the composer; remove reports in
+// the popover without dropping other rows.
+func TestQueueBackendErrors(t *testing.T) {
+	chat := runningChat()
+	h := newPermissionHarness(t, chat, sendWhileRunningSettings(true))
 	tester := h.tester()
+
+	chat.setEnqueueError(errors.New("inbox full"))
+	queuePrompt(t, h, tester, "会失败")
+	h.assertTexts(tester, "发送失败：inbox full")
+	if queued := chat.queueFor("sess-1"); len(queued) != 0 {
+		t.Fatalf("failed enqueue left an entry: %+v", queued)
+	}
+	// The draft is kept for a retry: once the run is over Enter delivers it.
+	chat.setEnqueueError(nil)
+	chat.updateSession(contracts.ChatSession{ID: "sess-1", Title: "排队测试"})
+	tester.Frame()
+	tester.Key(0, ui.KeyEnter)
+	tester.Frame()
+	if sends := chat.sends(); len(sends) != 1 || sends[0].prompt != "会失败" {
+		t.Fatalf("kept draft after a failed enqueue = %v", sends)
+	}
+
+	chat.setEnqueueError(nil)
+	queuePrompt(t, h, tester, "会被移除失败保护")
+	h.assertTexts(tester, "已排队 1 条")
+	chat.setRemoveError(errors.New("inbox locked"))
+	h.click(tester, "已排队 1 条")
+	h.click(tester, "取消排队")
+	h.assertTexts(tester, "移除排队消息失败：inbox locked")
+	if queued := chat.queueFor("sess-1"); len(queued) != 1 {
+		t.Fatalf("failed remove dropped the entry: %+v", queued)
+	}
+}
+
+// TestQueueTOCTOUFallsBackToEnqueue: the run starts between the frame's read
+// model and Send; the running conflict is absorbed by the backend inbox instead
+// of showing a spurious send failure.
+func TestQueueTOCTOUFallsBackToEnqueue(t *testing.T) {
+	chat := newFakeChat()
+	chat.addSession(contracts.ChatSession{
+		ID: "sess-idle", Title: "空闲会话",
+		Messages: []contracts.ChatMessage{{ID: "m1", Role: contracts.ChatRoleAssistant, Text: "完成"}},
+	}, true)
+	h := newHarness(t, chat)
+	tester := h.tester()
+	tester.Frame()
+
+	chat.setRaceToRunning()
+	queueFocusComposer(t, tester, "发送")
+	tester.Type("竞态发送")
+	tester.Frame()
+	h.click(tester, "发送")
+	tester.Frame()
+
+	if queued := chat.queueFor("sess-idle"); len(queued) != 1 || queued[0].Text != "竞态发送" {
+		t.Fatalf("TOCTOU prompt was not enqueued: %+v", queued)
+	}
+	if sends := chat.sends(); len(sends) != 0 {
+		t.Fatalf("TOCTOU prompt was recorded as sent: %v", sends)
+	}
+	h.assertNoTexts(tester, "发送失败")
+}
+
+// TestQueueStoredOptOutIgnored pins the fixed behavior behind the move: the
+// retired ui.sendWhileRunning row never disables the backend inbox.
+func TestQueueStoredOptOutIgnored(t *testing.T) {
+	chat := runningChat()
+	h := newPermissionHarness(t, chat, sendWhileRunningSettings(false))
+	tester := h.tester()
+	h.assertTexts(tester, "输入消息…", "排队", "停止")
+	queuePrompt(t, h, tester, "仍然排队")
+	h.assertTexts(tester, "已排队 1 条")
+	if queued := chat.queueFor("sess-1"); len(queued) != 1 {
+		t.Fatalf("inbox = %+v, want the queued prompt", queued)
+	}
+}
+
+// chatWithoutQueue exposes only contracts.ChatService, hiding the fake's
+// PromptQueue half to model a host/backend without the inbox.
+type chatWithoutQueue struct{ contracts.ChatService }
+
+// TestQueueWithoutBackendKeepsConflictBehavior: a ChatService without
+// PromptQueue shows no queue control while running and never sends through
+// Enter; the draft is kept for the next idle moment.
+func TestQueueWithoutBackendKeepsConflictBehavior(t *testing.T) {
+	chat := runningChat()
+	uiRoot := uiroot.New(uiroot.Config{AppName: "ZeoKeel"})
+	ctx := cordis.Root()
+	t.Cleanup(func() { _ = ctx.DisposeAll() })
+	provide(t, ctx, contracts.KeyUIRuntime, uiRoot.Runtime())
+	provide(t, ctx, contracts.KeyNavigator, uiRoot.Navigator())
+	provide(t, ctx, contracts.KeyTheme, uiRoot.Theme())
+	provide(t, ctx, contracts.KeyLocale, uiRoot.Locale())
+	provide(t, ctx, contracts.KeyScreenLister, uiRoot.ScreenLister())
+	provide[contracts.ChatService](t, ctx, contracts.KeyChat, chatWithoutQueue{ChatService: chat})
+	activate(t, ctx, session.Module(), session.Config{})
+	h := &harness{t: t, ctx: ctx, ui: uiRoot, chat: chat}
+	tester := h.tester()
+	tester.Frame()
+
+	h.assertTexts(tester, "输入消息…", "停止", "回复生成中，Enter 暂不可用；草稿会保留，本轮结束后可发送")
+	h.assertNoExactTexts(tester, "排队")
+	queueFocusComposer(t, tester, "停止")
+	tester.Type("没有队列后端")
+	tester.Frame()
+	tester.Key(0, ui.KeyEnter)
+	tester.Frame()
+	if sends := chat.sends(); len(sends) != 0 {
+		t.Fatalf("Enter sent while running without a queue backend: %v", sends)
+	}
+	// The composer keeps the draft: once the run ends Enter delivers it.
+	chat.updateSession(contracts.ChatSession{
+		ID: "sess-1", Title: "排队测试",
+		Messages: []contracts.ChatMessage{{ID: "m3", Role: contracts.ChatRoleAssistant, Text: "完成"}},
+	})
+	tester.Frame()
+	tester.Key(0, ui.KeyEnter)
+	tester.Frame()
+	if sends := chat.sends(); len(sends) != 1 || sends[0].prompt != "没有队列后端" {
+		t.Fatalf("draft after a run without a queue backend = %v", sends)
+	}
+}
+
+// TestQueueEnglishCopy covers the localized badge/popover copy.
+func TestQueueEnglishCopy(t *testing.T) {
+	chat := runningChat()
+	h := newPermissionHarness(t, chat, sendWhileRunningSettings(true))
 	h.ui.Locale().SetLanguage("en")
+	tester := h.tester()
 	tester.Frame()
 	queueFocusComposer(t, tester, "Queue")
 	tester.Type("queued")
 	tester.Frame()
 	h.click(tester, "Queue")
 	h.assertTexts(tester, "1 queued")
-}
-
-// TestQueuedPromptsCanBeCancelled covers H9: the queued-count badge opens a
-// list of the queued prompts, each can be cancelled (it is not sent when the
-// run ends) and the whole queue can be cleared.
-func TestQueuedPromptsCanBeCancelled(t *testing.T) {
-	settings := sendWhileRunningSettings(true)
-	h := newPermissionHarness(t, runningChat(), settings)
-	tester := h.tester()
-	queueFocusComposer(t, tester, "排队")
-	tester.Type("第一条")
-	tester.Frame()
-	h.click(tester, "排队")
-	queueFocusComposer(t, tester, "停止")
-	tester.Type("第二条")
-	tester.Frame()
-	h.click(tester, "排队")
-	h.assertTexts(tester, "已排队 2 条")
-
-	// The badge opens the queue popover: both prompts are visible, each row has
-	// a cancel action and there is a clear-all footer.
-	h.click(tester, "已排队 2 条")
-	h.assertTexts(tester, "第一条", "第二条", "取消排队", "清空全部")
-	h.click(tester, "取消排队")
-	h.assertTexts(tester, "已排队 1 条")
-	h.assertNoTexts(tester, "第一条")
-
-	// The cancelled prompt is really dropped: only the second is sent.
-	h.chat.updateSession(contracts.ChatSession{
-		ID: "sess-1", Title: "排队测试",
-		Messages: []contracts.ChatMessage{{ID: "m2", Role: contracts.ChatRoleAssistant, Text: "完成"}},
-	})
-	tester.Frame()
-	sends := h.chat.sends()
-	if len(sends) != 1 || sends[0].prompt != "第二条" {
-		t.Fatalf("sends after cancelling one = %v, want only the second prompt", sends)
+	if queued := chat.queueFor("sess-1"); len(queued) != 1 {
+		t.Fatalf("English inbox = %+v", queued)
 	}
-}
-
-// TestQueuedPromptsClearAll covers the queue popover's clear-all footer.
-func TestQueuedPromptsClearAll(t *testing.T) {
-	settings := sendWhileRunningSettings(true)
-	h := newPermissionHarness(t, runningChat(), settings)
-	tester := h.tester()
-	queueFocusComposer(t, tester, "排队")
-	tester.Type("甲")
-	tester.Frame()
-	h.click(tester, "排队")
-	queueFocusComposer(t, tester, "停止")
-	tester.Type("乙")
-	tester.Frame()
-	h.click(tester, "排队")
-	h.click(tester, "已排队 2 条")
-	h.click(tester, "清空全部")
-	h.assertNoTexts(tester, "已排队")
-	h.chat.updateSession(contracts.ChatSession{
-		ID: "sess-1", Title: "排队测试",
-		Messages: []contracts.ChatMessage{{ID: "m2", Role: contracts.ChatRoleAssistant, Text: "完成"}},
-	})
-	tester.Frame()
-	if sends := h.chat.sends(); len(sends) != 0 {
-		t.Fatalf("cleared queue still sent: %v", sends)
-	}
-}
-
-// TestQueuePopoverUsesOfficialList covers the queue popover's migration to the
-// official ui.List: the queued prompts are list rows named by their prompt
-// (list/listitem semantics for assistive technology), and the per-row cancel
-// action still empties the queue.
-func TestQueuePopoverUsesOfficialList(t *testing.T) {
-	h := newPermissionHarness(t, runningChat(), sendWhileRunningSettings(true))
-	tester := h.tester()
-	for _, prompt := range []string{"第一条排队", "第二条排队"} {
-		queueFocusComposer(t, tester, "排队")
-		tester.Type(prompt)
-		tester.Frame()
-		h.click(tester, "排队")
-	}
-	h.assertTexts(tester, "已排队 2 条")
-
-	h.click(tester, "已排队 2 条")
-	if _, ok := tester.AccessByRole(ui.RoleList, "排队消息"); !ok {
-		t.Fatalf("queued prompts are not a list; texts = %v", tester.Texts())
-	}
-	for _, prompt := range []string{"第一条排队", "第二条排队"} {
-		if _, ok := tester.AccessByRole(ui.RoleListItem, prompt); !ok {
-			t.Fatalf("queued prompt %q is not a list row; texts = %v", prompt, tester.Texts())
-		}
-	}
-	h.click(tester, "取消排队")
-	h.assertTexts(tester, "已排队 1 条")
-	if _, ok := tester.AccessByRole(ui.RoleListItem, "第一条排队"); ok {
-		t.Fatalf("cancelled prompt still a row; texts = %v", tester.Texts())
-	}
+	// The popover title and row action are localized too.
+	h.click(tester, "1 queued")
+	h.assertTexts(tester, "Queued messages", "Cancel queued")
 }

@@ -839,7 +839,8 @@ func Module() *module.Descriptor[Config] {
 				zhTitle: "通知", enTitle: "Notifications",
 				Build: func(c *ui.Context) {
 					syncer.sync()
-					buildNotificationsPage(c, runtime, store, locale, notifications)
+					buildNotificationsPage(c, runtime, store, locale, notifications,
+						systemNotificationsSupported(ctx))
 				},
 			},
 			{
@@ -1469,8 +1470,8 @@ func buildAppearancePage(c *ui.Context, state *appearanceState, store contracts.
 				}
 				if switchField(c,
 					localized(locale, "关闭时最小化到托盘", "Close to system tray"),
-					localized(locale, "修改后重启应用生效。",
-						"Takes effect after a restart."),
+					localized(locale, "关闭窗口后应用继续在托盘运行，任务不中断。修改后重启应用生效。",
+						"Keep running in the system tray after closing the window, so tasks continue. Takes effect after a restart."),
 					&state.closeToTray) {
 					applyDesktopSetting(state, store, contracts.SettingCloseToTray,
 						fmt.Sprintf("%t", state.closeToTray), locale)

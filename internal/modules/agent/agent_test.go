@@ -1840,8 +1840,8 @@ func TestForkTitleFallbacks(t *testing.T) {
 }
 
 // TestForkPersistsHistoryAndEvent covers the durable store writes: session row,
-// title, rebuilt rig history (user/assistant text + reasoning, no tools) and
-// the optional fork event.
+// title, the copied durable rig history (user/assistant text + reasoning; the
+// source here has no tools) and the optional fork event.
 func TestForkPersistsHistoryAndEvent(t *testing.T) {
 	provider := &captureProvider{}
 	svc, store := newAttachmentService(t, provider)
@@ -1853,9 +1853,16 @@ func TestForkPersistsHistoryAndEvent(t *testing.T) {
 		t.Fatalf("Send: %v", err)
 	}
 	waitIdle(t, svc, sourceID)
-	svc.mu.Lock()
-	svc.sessions[sourceID].messages[1].Reasoning = "因为所以"
-	svc.mu.Unlock()
+	// The durable history is authoritative for a fork: set the reasoning there
+	// (the read model is only a projection).
+	sourceHistory, err := store.History().Load(context.Background(), sourceID)
+	if err != nil {
+		t.Fatalf("history.Load(source): %v", err)
+	}
+	sourceHistory[len(sourceHistory)-1].Reasoning = "因为所以"
+	if err := store.ReplaceHistory(context.Background(), sourceID, sourceHistory); err != nil {
+		t.Fatalf("ReplaceHistory(source): %v", err)
+	}
 
 	newID, err := svc.ForkSession(sourceID)
 	if err != nil {

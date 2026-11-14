@@ -18,7 +18,7 @@ import (
 // bookkeeping line never reaches the row, and the id inside it is not shown.
 func TestRunSummaryHidesInternalSessionID(t *testing.T) {
 	base := time.Unix(1700000000, 0)
-	task := historyTask(runRecord(contracts.AutomationRunSuccess,
+	task := historyTask(completedRecord(contracts.AutomationRunSuccess,
 		"ran in chat session sess-abc123", base))
 	h := newHarness(t, newFakeAutomation(task), automation.Config{})
 	tester := h.tester()
@@ -30,7 +30,7 @@ func TestRunSummaryHidesInternalSessionID(t *testing.T) {
 // TestRunSummaryEnglish pins the same line in the English interface.
 func TestRunSummaryEnglish(t *testing.T) {
 	base := time.Unix(1700000000, 0)
-	task := historyTask(runRecord(contracts.AutomationRunSuccess,
+	task := historyTask(completedRecord(contracts.AutomationRunSuccess,
 		"ran in chat session sess-abc123", base))
 	h := newHarness(t, newFakeAutomation(task), automation.Config{})
 	h.uiRoot.Locale().SetLanguage("en")
@@ -46,7 +46,7 @@ func TestRunSummaryEnglish(t *testing.T) {
 func TestRunSummaryTruncatedWithTooltip(t *testing.T) {
 	base := time.Unix(1700000000, 0)
 	long := strings.Repeat("x", 300)
-	task := historyTask(runRecord(contracts.AutomationRunFailure, long, base))
+	task := historyTask(completedRecord(contracts.AutomationRunFailure, long, base))
 	h := newHarness(t, newFakeAutomation(task), automation.Config{})
 	tester := h.tester()
 

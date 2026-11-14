@@ -1,16 +1,22 @@
 package hosttools
 
-// The model-facing host tools. Most of the catalog is the official Rig host-tool
-// set (github.com/zeokeel/zeokeel-rig/tools/hosttools): ask_user, plan_review,
-// exit_plan_mode and goal. present stays product-owned because ZeoKeel's present
-// is a content artifact (title + body -> contracts.ArtifactPresenter), while
-// Rig's present declares existing files for a FilePresenter; the two must not
-// share a name.
+// The model-facing host tools. The Rig host-tool set
+// (github.com/zeokeel/zeokeel-rig/tools/hosttools) contributes ask_user,
+// plan_review and exit_plan_mode. The DSH goal trio
+// get_goal/create_goal/update_goal is product-owned (hostcaps.GoalTools): Rig
+// v0.16.2 only exposes it through a context-less option the product cannot use,
+// so internal/hosttools implements the same model-visible contract on top of the
+// per-session durable contracts.GoalService adapter. present stays product-owned
+// because ZeoKeel's present is a content artifact (title + body ->
+// contracts.ArtifactPresenter), while Rig's present declares existing files for
+// a FilePresenter; the two must not share a name.
 //
-// The product exposes exactly five host tools. The catalog below is a
-// name-filtered view of the Rig catalog: Rig's DSH goal trio (get_goal,
-// create_goal, update_goal), present_artifact and Rig's file present are
-// deliberately not advertised. Tool names are hard-coded elsewhere (the agent
+// The product exposes exactly these tools. The catalog below is a name-filtered
+// view of the Rig catalog: the legacy Rig `goal` tool, present_artifact and
+// Rig's file present are deliberately not advertised. Goal v1 (the process-wide
+// in-memory singleton) is retired from the model surface; goals are now
+// per-session and durable through contracts.GoalService (see
+// hostcaps.GoalRevisionStore). Tool names are hard-coded elsewhere (the agent
 // system prompt, the plan-mode whitelist, UI tool cards and snapshot seeds), so
 // they are stable identifiers, not an implementation detail.
 
@@ -28,18 +34,25 @@ import (
 
 // Model-facing host tool names. They are stable identifiers shared with the
 // rest of the agent tool catalog; the Rig-provided names come from the Rig
-// constants so the two can never drift.
+// constants so the two can never drift, and the product-owned goal trio exposes
+// the same names through internal/hosttools.
 const (
 	ToolAskUser      = righosttools.ToolAskUser
 	ToolPresent      = "present"
 	ToolPlanReview   = righosttools.ToolPlanReview
 	ToolExitPlanMode = righosttools.ToolExitPlanMode
-	ToolGoal         = righosttools.ToolGoal
+	ToolGetGoal      = hostcaps.ToolGetGoal
+	ToolCreateGoal   = hostcaps.ToolCreateGoal
+	ToolUpdateGoal   = hostcaps.ToolUpdateGoal
+	// ToolGoal is the retired Goal v1 host tool name. It is no longer
+	// registered; the constant stays so name filters/tests can refer to it.
+	ToolGoal = "goal"
 )
 
 // rigHostToolNames are the Rig host tools this product registers, in Rig
-// catalog order. Anything else Rig returns is filtered out.
-var rigHostToolNames = []string{ToolAskUser, ToolPlanReview, ToolExitPlanMode, ToolGoal}
+// catalog order. Anything else Rig returns is filtered out: the legacy Goal v1
+// `goal` tool and present_artifact are intentionally absent.
+var rigHostToolNames = []string{ToolAskUser, ToolPlanReview, ToolExitPlanMode}
 
 // planReviewToolNames are the tools whose state machine needs a live user
 // decision; non-interactive products omit them.
@@ -52,7 +65,7 @@ var planReviewToolNames = []string{ToolPlanReview, ToolExitPlanMode}
 // model submit a plan and stall with the task silently unfinished. ask_user and
 // the remaining tools keep their behavior; a missing capability becomes a
 // readable model-facing tool error instead of failing activation.
-func newTools(capabilities hostcaps.Host, interactive bool) []rig.Tool {
+func newTools(capabilities hostcaps.Host, interactive bool, goalStore hostcaps.RevisionGoalStore) []rig.Tool {
 	wanted := make(map[string]bool, len(rigHostToolNames))
 	for _, name := range rigHostToolNames {
 		wanted[name] = true
@@ -62,14 +75,18 @@ func newTools(capabilities hostcaps.Host, interactive bool) []rig.Tool {
 			delete(wanted, name)
 		}
 	}
-	tools := make([]rig.Tool, 0, len(rigHostToolNames))
+	tools := make([]rig.Tool, 0, len(rigHostToolNames)+4)
 	for _, tool := range righosttools.Tools(rigHostOptions(capabilities, interactive)) {
 		if !wanted[tool.Name()] {
 			continue
 		}
 		tools = append(tools, tool)
 	}
-	return append(tools, &presentTool{presenter: capabilities.Presenter})
+	tools = append(tools, &presentTool{presenter: capabilities.Presenter})
+	// DSH goal trio: product-owned tools over the ctx-carrying durable goal
+	// service adapter (Rig v0.16.2 has no ctx-aware GoalRevision option).
+	tools = append(tools, hostcaps.GoalTools(goalStore)...)
+	return tools
 }
 
 // rigHostOptions maps the product's host capability seam onto the Rig host-tool
@@ -82,7 +99,6 @@ func newTools(capabilities hostcaps.Host, interactive bool) []rig.Tool {
 func rigHostOptions(capabilities hostcaps.Host, interactive bool) righosttools.Options {
 	options := righosttools.Options{
 		Asker:       capabilities.Asker,
-		Goal:        capabilities.Goals,
 		Interactive: interactive,
 	}
 	if capabilities.Plan != nil {

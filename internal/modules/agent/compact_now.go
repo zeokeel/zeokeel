@@ -52,7 +52,11 @@ func (s *service) CompactNow(ctx context.Context, sessionID string) (contracts.C
 	s.mu.Unlock()
 	defer s.endCompaction(sessionID)
 
-	if cfg.ContextBudget <= 0 {
+	// The manual path uses the same effective budget as the automatic path: an
+	// explicit setting wins, otherwise it is derived from the model window, so
+	// /compact works for a user who never set a budget by hand.
+	budget := s.effectiveContextBudget(cfg)
+	if budget <= 0 {
 		return contracts.CompactResult{}, contracts.ErrCompactUnavailable
 	}
 	history := s.historyView()
@@ -91,8 +95,7 @@ func (s *service) CompactNow(ctx context.Context, sessionID string) (contracts.C
 	// path uses (rig/agent/agent.go prepareContext: budget-systemPromptTokens).
 	// The manual path does not rebuild the full run prompt, so this deducts the
 	// configured system prompt only.
-	budget := cfg.ContextBudget - rig.EstimateTextTokens(cfg.SystemPrompt)
-	compacted, err := compactor.Compact(ctx, sessionID, messages, budget)
+	compacted, err := compactor.Compact(ctx, sessionID, messages, budget-rig.EstimateTextTokens(cfg.SystemPrompt))
 	if err != nil {
 		return contracts.CompactResult{}, fmt.Errorf("agent: compact session %q: %w", sessionID, err)
 	}
@@ -116,9 +119,20 @@ func (s *service) CompactNow(ctx context.Context, sessionID string) (contracts.C
 	if len(compacted) == 0 || (len(compacted) >= len(current) && afterTokens >= beforeTokens) {
 		return contracts.CompactResult{}, contracts.ErrCompactNothing
 	}
+	// Fail-closed archive: the raw history being replaced is preserved as a
+	// bounded durable event FIRST. If that write fails the compaction is aborted
+	// and the original history stays intact.
+	if err := s.archiveReplacedHistory(ctx, sessionID, "manual", current,
+		beforeTokens, afterTokens, len(current), len(compacted)); err != nil {
+		return contracts.CompactResult{}, fmt.Errorf("%w: %v", contracts.ErrCompactArchive, err)
+	}
 	if err := s.replaceCompactedHistory(ctx, sessionID, compacted); err != nil {
 		return contracts.CompactResult{}, fmt.Errorf("%w: %v", contracts.ErrCompactSave, err)
 	}
+	// Context observability: the exact manual compaction result (before/after
+	// tokens and message counts). Automatic compaction has no Rig event and is
+	// only ever recorded as inferred.
+	s.recordCompactEvent(context.Background(), sessionID, "manual", beforeTokens, afterTokens, len(messages), len(compacted), false, "")
 	s.notify(sessionID)
 	// Replaced/Saved carry the before/after message counts (the UI renders
 	// "N → M messages"); Before/AfterTokens carry the estimated token counts.

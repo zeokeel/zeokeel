@@ -65,6 +65,12 @@ func toolDisplayNamePair(key string) (zh, en string) {
 		return "记忆", "Memory"
 	case key == "todo":
 		return "更新待办", "Update todo list"
+	case key == "get_goal":
+		return "读取目标", "Read goal"
+	case key == "create_goal":
+		return "创建目标", "Create goal"
+	case key == "update_goal":
+		return "更新目标", "Update goal"
 	case key == "subagent":
 		return "启动子代理", "Start subagent"
 	case key == "workflow":

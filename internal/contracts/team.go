@@ -92,9 +92,13 @@ type TeamMember struct {
 	// member to the session the user reopens.
 	SessionID string
 	// Historical marks a member restored from the durable child-agent history:
-	// its live run is gone, so it is read-only (open/inspect only), it never
-	// counts as running and its ID is a history key, not a manager reference.
+	// its live run is gone and its ID is a history key, not a manager reference.
 	Historical bool
+	// Resumable reports that a historical member can be continued: send_message/
+	// TeamService.Send cold-resumes it from its durable child session. While the
+	// resumed run is in flight the member is reported as a live (Historical
+	// false) row; it becomes Historical+Resumable again when the run finishes.
+	Resumable bool
 }
 
 // TeamActivity is one event of the team activity read model: a spawn, a

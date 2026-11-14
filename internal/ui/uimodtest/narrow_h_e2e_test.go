@@ -37,19 +37,24 @@ func containingLabels(tester *ui.Tester, text string) int {
 	return count
 }
 
-// TestCompactHeaderKeepsTitleAndGoalStatus covers the B3 header at a narrow
+// TestCompactHeaderKeepsTitleAndGoalDock covers the B3 header at a narrow
 // width: the session title stays in the host's top band and the goal body lives
 // in the strip above the composer on every width (no compact/short goal label
 // anymore; the goal is not part of the header).
-func TestCompactHeaderKeepsTitleAndGoalStatus(t *testing.T) {
+func TestCompactHeaderKeepsTitleAndGoalDock(t *testing.T) {
 	product := newInteractionProduct(t)
 	tester := product.tester
-	tracker := requireService(t, product.root, contracts.KeyGoalTracker)
+	goals := requireService(t, product.root, contracts.KeyGoal)
+	sessionID := product.chat.ActiveSession()
 	goalText := "窄列标题优先与目标紧凑显示的测试目标"
-	if _, err := tracker.Set(t.Context(), goalText); err != nil {
-		t.Fatalf("GoalTracker.Set: %v", err)
+	if _, err := goals.CreateGoal(t.Context(), sessionID, goalText, 0); err != nil {
+		t.Fatalf("CreateGoal: %v", err)
 	}
-	defer tracker.Clear()
+	defer func() {
+		if goal, ok := goals.Goal(sessionID); ok {
+			_, _ = goals.ClearGoal(t.Context(), sessionID, contracts.GoalRef{ID: goal.ID, Revision: goal.Revision})
+		}
+	}()
 
 	tester.SetSize(704, 720)
 	tester.Frame()
@@ -65,7 +70,7 @@ func TestCompactHeaderKeepsTitleAndGoalStatus(t *testing.T) {
 		t.Fatalf("narrow header dropped the conversation title; texts = %v", tester.Texts())
 	}
 	// The goal status badge and the goal body live above the composer.
-	if !tester.HasText("目标") {
+	if !tester.HasText("目标进行中") {
 		t.Fatalf("goal strip lacks the status badge; texts = %v", tester.Texts())
 	}
 	if got := containingLabels(tester, goalText); got < 1 {
@@ -84,8 +89,8 @@ func TestCompactHeaderKeepsTitleAndGoalStatus(t *testing.T) {
 		t.Fatalf("open goal actions from the dock: %v; texts = %v", err, tester.Texts())
 	}
 	tester.Frame()
-	if !tester.HasText("删除目标记录") {
-		t.Fatalf("goal actions menu lacks the delete entry; texts = %v", tester.Texts())
+	if !tester.HasText("清除目标记录") {
+		t.Fatalf("goal actions menu lacks the clear entry; texts = %v", tester.Texts())
 	}
 	tester.Key(0, ui.KeyEscape)
 	tester.Frame()

@@ -80,8 +80,12 @@ type state struct {
 	formWorkspaceID   string
 	formWorkspaceName string
 	formPermission    string
-	formEnabled       bool
-	formErr           string
+	// formNewSessionPerRun is the "每次新建会话" option: the legacy behavior of
+	// starting every run in a fresh conversation instead of reusing the task's
+	// bound one.
+	formNewSessionPerRun bool
+	formEnabled          bool
+	formErr              string
 	// formModelCustom keeps the model field in free-text mode (a model outside
 	// the catalog list); the menu otherwise picks a catalog preset.
 	formModelCustom bool

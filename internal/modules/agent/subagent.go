@@ -143,16 +143,11 @@ func (s *service) runSubagent(ctx context.Context, prompt, name string, req cont
 	if err != nil {
 		return contracts.SubagentResult{}, fmt.Errorf("agent: subagent %q: create provider: %w", name, err)
 	}
-	parent := rig.AgentSpec{
-		Provider:      provider,
-		Model:         cfg.Model,
-		SystemPrompt:  cfg.SystemPrompt,
-		MaxIterations: cfg.MaxIterations,
-		Tools:         withWorkspaceRoot(withAgentSession(childTools, active), workspaceRoot),
-		Gate:          s.gate(active),
-		History:       s.historyView(),
-		Logger:        s.logger,
-	}
+	// The shared delegated-child spec: explicit round budget, workspace-scoped
+	// tools with the run origin, gate, history and context budget.
+	parent := s.delegatedParentSpec(active, workspaceRoot, childTools, cfg, provider, contracts.AgentRunOriginSubagent)
+	// Delegated children get the same context protection as a full run.
+	s.withContextBudget(&parent, cfg, provider)
 	options := rigagent.RunnerOptions{
 		MaxDepth:      subagentMaxDepth,
 		MaxConcurrent: subagentMaxConcurrent,

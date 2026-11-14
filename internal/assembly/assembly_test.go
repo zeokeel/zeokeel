@@ -7,6 +7,7 @@ package assembly_test
 // state, and the desktop test never creates a mygo window.
 
 import (
+	"context"
 	"os"
 
 	"errors"
@@ -18,6 +19,7 @@ import (
 
 	cordis "github.com/zeokeel/zeokeel-kernel"
 	"github.com/zeokeel/zeokeel-kernel/module"
+	rig "github.com/zeokeel/zeokeel-rig"
 
 	"github.com/zeokeel/zeokeel/internal/assembly"
 	"github.com/zeokeel/zeokeel/internal/contracts"
@@ -135,31 +137,31 @@ func TestProductsAndEntries(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Entries(desktop): %v", err)
 	}
-	if len(desktop) != 16 {
-		t.Fatalf("desktop roots = %d, want 16 entries", len(desktop))
+	if len(desktop) != 18 {
+		t.Fatalf("desktop roots = %d, want 18 entries", len(desktop))
 	}
 	_ = desktop
 	wantRoots := []string{
-		"zeokeel/appinfo", "zeokeel/sessionstore", "zeokeel/approvals", "zeokeel/workspace",
+		"zeokeel/appinfo", "zeokeel/sessionstore", "zeokeel/goal", "zeokeel/approvals", "zeokeel/workspace",
 		"zeokeel/terminal", "zeokeel/skills", "zeokeel/memory", "zeokeel/sandbox", "zeokeel/toolkit", "zeokeel/hosttools",
 		"zeokeel/agent", "zeokeel/automation", "zeokeel/update", "zeokeel/importer",
-		"zeokeel/modelcatalog", assembly.GroupModuleID,
+		"zeokeel/modelcatalog", "zeokeel/insights", assembly.GroupModuleID,
 	}
 	for index, root := range desktop {
 		if root.Module != wantRoots[index] {
 			t.Fatalf("desktop root %d = %q, want %q", index, root.Module, wantRoots[index])
 		}
 	}
-	if len(desktop[15].Children) != 12 {
-		t.Fatalf("UI group children = %d, want 12 UI modules", len(desktop[15].Children))
+	if len(desktop[17].Children) != 13 {
+		t.Fatalf("UI group children = %d, want 13 UI modules", len(desktop[17].Children))
 	}
 	wantChildren := []string{
 		"zeokeel-ui/home", "zeokeel-ui/toolcards", "zeokeel-ui/about",
 		"zeokeel-ui/sidebar", "zeokeel-ui/session", "zeokeel-ui/settings", "zeokeel-ui/approval",
-		"zeokeel-ui/rightpanel", "zeokeel-ui/automation", "zeokeel-ui/plugins",
-		"zeokeel-ui/interaction", "zeokeel-ui/toasts",
+		"zeokeel-ui/rightpanel", "zeokeel-ui/automation", "zeokeel-ui/insights",
+		"zeokeel-ui/plugins", "zeokeel-ui/interaction", "zeokeel-ui/toasts",
 	}
-	for index, child := range desktop[15].Children {
+	for index, child := range desktop[17].Children {
 		if child.Module != wantChildren[index] {
 			t.Fatalf("UI group child %d = %q, want %q", index, child.Module, wantChildren[index])
 		}
@@ -170,7 +172,7 @@ func TestProductsAndEntries(t *testing.T) {
 		t.Fatalf("Entries(headless): %v", err)
 	}
 	wantHeadless := []string{
-		"zeokeel/appinfo", "zeokeel/sessionstore", "zeokeel/approvals", "zeokeel/workspace",
+		"zeokeel/appinfo", "zeokeel/sessionstore", "zeokeel/goal", "zeokeel/approvals", "zeokeel/workspace",
 		"zeokeel/terminal", "zeokeel/skills", "zeokeel/memory", "zeokeel/sandbox", "zeokeel/toolkit", "zeokeel/hosttools",
 		"zeokeel/agent", "zeokeel/automation", "zeokeel/update", "zeokeel/importer", "zeokeel/acp",
 	}
@@ -200,8 +202,10 @@ func TestRegistryIsExplicit(t *testing.T) {
 		"zeokeel/importer",
 		"zeokeel/acp",
 		"zeokeel/modelcatalog",
+		"zeokeel/insights",
 		"zeokeel-ui/interaction",
 		"zeokeel/sessionstore",
+		"zeokeel/goal",
 		"zeokeel/workspace",
 		"zeokeel/terminal",
 		"zeokeel/skills",
@@ -214,6 +218,7 @@ func TestRegistryIsExplicit(t *testing.T) {
 		"zeokeel-ui/approval",
 		"zeokeel-ui/rightpanel",
 		"zeokeel-ui/automation",
+		"zeokeel-ui/insights",
 		"zeokeel-ui/plugins",
 		assembly.GroupModuleID,
 	} {
@@ -221,8 +226,8 @@ func TestRegistryIsExplicit(t *testing.T) {
 			t.Fatalf("Registry() lacks module %q", id)
 		}
 	}
-	if got := len(registry.Modules()); got != 30 {
-		t.Fatalf("Registry() modules = %d, want 30", got)
+	if got := len(registry.Modules()); got != 33 {
+		t.Fatalf("Registry() modules = %d, want 33", got)
 	}
 }
 
@@ -254,14 +259,14 @@ func TestDesktopAssemblyLoadsAndUnwinds(t *testing.T) {
 	// approvals provider, the agent consumer and the UI modules settle in
 	// dependency order.
 	instances := loader.Instances()
-	if len(instances) != 28 {
-		t.Fatalf("desktop instances = %d, want 28", len(instances))
+	if len(instances) != 31 {
+		t.Fatalf("desktop instances = %d, want 31", len(instances))
 	}
 	wantIDs := []string{
-		"appinfo", "store", "approvals", "workspace", "terminal", "skills", "memory", "sandbox", "toolkit", "hosttools",
-		"agent", "automation", "update", "importer", "modelcatalog", "ui",
+		"appinfo", "store", "goal", "approvals", "workspace", "terminal", "skills", "memory", "sandbox", "toolkit", "hosttools",
+		"agent", "automation", "update", "importer", "modelcatalog", "insights", "ui",
 		"home", "toolcards", "about", "sidebar", "session", "settings", "approval", "rightpanel",
-		"automation-ui", "plugins-ui", "interaction", "toasts",
+		"automation-ui", "insights-ui", "plugins-ui", "interaction", "toasts",
 	}
 	gotIDs := make([]string, len(instances))
 	for index, instance := range instances {
@@ -286,8 +291,8 @@ func TestDesktopAssemblyLoadsAndUnwinds(t *testing.T) {
 	if err := uiRoot.Validate(); err != nil {
 		t.Fatalf("uiroot Validate after load: %v", err)
 	}
-	if screens := uiRoot.ScreenLister().Screens(); !slices.Equal(screens, []string{"home", "automation", "session", "plugins"}) {
-		t.Fatalf("screens after load = %v, want [home automation session plugins]", screens)
+	if screens := uiRoot.ScreenLister().Screens(); !slices.Equal(screens, []string{"home", "automation", "session", "insights", "plugins"}) {
+		t.Fatalf("screens after load = %v, want [home automation session insights plugins]", screens)
 	}
 	// The modules contributed to the host's reserved slots (ui/welcome, the
 	// right inspector, the overlay dialogs) without the host knowing about them.
@@ -312,7 +317,7 @@ func TestDesktopAssemblyLoadsAndUnwinds(t *testing.T) {
 	if !ok {
 		t.Fatal("KeyToolkit service is not available on the root")
 	}
-	hostToolNames := []string{"ask_user", "exit_plan_mode", "goal", "plan_review", "present"}
+	hostToolNames := []string{"ask_user", "create_goal", "exit_plan_mode", "get_goal", "plan_review", "present", "update_goal"}
 	for _, name := range hostToolNames {
 		found := false
 		for _, spec := range toolkitRegistry.Specs() {
@@ -324,6 +329,62 @@ func TestDesktopAssemblyLoadsAndUnwinds(t *testing.T) {
 		if !found {
 			t.Fatalf("toolkit registry lacks host tool %q", name)
 		}
+	}
+
+	// Goal v2: the durable per-session goal backend is assembled and the DSH
+	// goal trio reaches it through the toolkit registry (desktop product).
+	goalService, ok := root.Get(contracts.KeyGoal)
+	if !ok || goalService == nil {
+		t.Fatal("KeyGoal service is not available on the desktop root")
+	}
+	// A goal only exists for a durable session: the goal backend refuses to
+	// append a goal event for a session row that does not exist (it would
+	// resurrect a deleted conversation).
+	store, ok := root.Get(contracts.KeyStore)
+	if !ok || store == nil {
+		t.Fatal("KeyStore service is not available on the desktop root")
+	}
+	if err := store.CreateSession(context.Background(), "sess-goal-assembly", "goal test"); err != nil {
+		t.Fatalf("CreateSession: %v", err)
+	}
+	created, err := goalService.CreateGoal(context.Background(), "sess-goal-assembly", "ship the release", 0)
+	if err != nil {
+		t.Fatalf("CreateGoal on the assembled backend: %v", err)
+	}
+	if created.Revision != 1 || created.MaxGoalRounds != contracts.DefaultMaxGoalRounds ||
+		created.Activation != contracts.GoalActivationArmed {
+		t.Fatalf("assembled CreateGoal = %+v, want revision 1 / 256 rounds / armed", created)
+	}
+	goalCtx := contracts.WithAgentSession(context.Background(), "sess-goal-assembly")
+	result, err := toolkitRegistry.Invoke(goalCtx, rig.ToolCall{ID: "goal-call", Name: "get_goal", Arguments: "{}"})
+	if err != nil || result.IsError {
+		t.Fatalf("get_goal through the assembled registry = %q / %v", result.Content, err)
+	}
+	if !strings.Contains(result.Content, created.ID) {
+		t.Fatalf("get_goal content = %q, want the created goal %q", result.Content, created.ID)
+	}
+	// Deleting the session must not let a later goal round resurrect it: the
+	// goal backend verifies the durable session row before appending an event.
+	if err := store.DeleteSession(context.Background(), "sess-goal-assembly"); err != nil {
+		t.Fatalf("DeleteSession: %v", err)
+	}
+	if _, err := goalService.AdmitRound(context.Background(), "sess-goal-assembly"); !errors.Is(err, contracts.ErrGoalNotFound) {
+		t.Fatalf("AdmitRound on a deleted session = %v, want ErrGoalNotFound", err)
+	}
+	sessions, err := store.Sessions(context.Background())
+	if err != nil {
+		t.Fatalf("Sessions: %v", err)
+	}
+	for _, session := range sessions {
+		if session.ID == "sess-goal-assembly" {
+			t.Fatal("a goal event resurrected the deleted session row")
+		}
+	}
+
+	// The agent also provides the context inspector used by the Context tab: it
+	// is durable-event backed and therefore present in every product.
+	if inspector, ok := root.Get(contracts.KeyContext); !ok || inspector == nil {
+		t.Fatal("KeyContext service is not available on the desktop root")
 	}
 
 	// Build identity from the host was overlaid onto the appinfo module config.
@@ -394,7 +455,7 @@ func TestDesktopAssemblyHasNoStubTeamTool(t *testing.T) {
 		}
 	}
 	// The remaining host tools are unchanged.
-	for _, name := range []string{"ask_user", "present", "plan_review", "exit_plan_mode", "goal"} {
+	for _, name := range []string{"ask_user", "present", "plan_review", "exit_plan_mode", "get_goal", "create_goal", "update_goal"} {
 		if !names[name] {
 			t.Fatalf("host tool %q missing", name)
 		}
@@ -417,8 +478,8 @@ func TestHeadlessAssemblyNeedsNoUIServices(t *testing.T) {
 	}()
 
 	instances := loader.Instances()
-	if len(instances) != 15 {
-		t.Fatalf("headless instances = %d, want 15", len(instances))
+	if len(instances) != 16 {
+		t.Fatalf("headless instances = %d, want 16", len(instances))
 	}
 	instance := instances[0]
 	if instance.ID() != "appinfo" || instance.ModuleID() != "zeokeel/appinfo" {
@@ -427,9 +488,9 @@ func TestHeadlessAssemblyNeedsNoUIServices(t *testing.T) {
 	if state := instance.State(); state != cordis.Active {
 		t.Fatalf("appinfo state = %s, want Active", state)
 	}
-	hostInstance := instances[9]
+	hostInstance := instances[10]
 	if hostInstance.ID() != "hosttools" || hostInstance.ModuleID() != "zeokeel/hosttools" {
-		t.Fatalf("headless instance[9] = %s/%s, want hosttools/zeokeel/hosttools",
+		t.Fatalf("headless instance[10] = %s/%s, want hosttools/zeokeel/hosttools",
 			hostInstance.ID(), hostInstance.ModuleID())
 	}
 	if state := hostInstance.State(); state != cordis.Active {
@@ -448,10 +509,13 @@ func TestHeadlessAssemblyNeedsNoUIServices(t *testing.T) {
 	for _, spec := range toolkitRegistry.Specs() {
 		registered[spec.Name] = true
 	}
-	for _, name := range []string{"ask_user", "goal", "present"} {
+	for _, name := range []string{"ask_user", "get_goal", "create_goal", "update_goal", "present"} {
 		if !registered[name] {
 			t.Fatalf("headless toolkit registry lacks host tool %q", name)
 		}
+	}
+	if registered["goal"] {
+		t.Fatal("headless toolkit registry still exposes the retired Goal v1 `goal` tool")
 	}
 	for _, name := range []string{"plan_review", "exit_plan_mode"} {
 		if registered[name] {

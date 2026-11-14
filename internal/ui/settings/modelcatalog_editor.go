@@ -13,6 +13,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math"
 	"strconv"
 	"strings"
 
@@ -58,7 +59,12 @@ type catalogEditDraft struct {
 	temperature     string
 	topP            string
 	maxTokens       string
-	modes           []*catalogModeDraft
+	// priceInput/priceCached/priceOutput are the optional per-million USD
+	// prices as typed; an empty field or 0 means "not configured".
+	priceInput  string
+	priceCached string
+	priceOutput string
+	modes       []*catalogModeDraft
 	// setDefault mirrors the "set as default model" check box; wasDefault marks
 	// the row that already is the default, whose box stays checked and disabled.
 	setDefault bool
@@ -163,6 +169,122 @@ func formatCatalogNumber(value float64) string {
 	return strconv.FormatFloat(value, 'f', -1, 64)
 }
 
+// formatCatalogPrice is the editor's optional price field: 0 prints as an
+// empty field (not configured), valid prices keep their natural precision.
+func formatCatalogPrice(value float64) string {
+	if value <= 0 || math.IsNaN(value) || math.IsInf(value, 0) {
+		return ""
+	}
+	return formatCatalogNumber(value)
+}
+
+// catalogPricingSummary renders a row's configured prices for the model list;
+// empty when none are configured (an unknown price is never shown as $0).
+func catalogPricingSummary(locale contracts.LocaleService, model contracts.ModelInfo) string {
+	if !model.HasPricing() {
+		return ""
+	}
+	parts := make([]string, 0, 3)
+	if model.InputPricePerMillion > 0 {
+		parts = append(parts, localized(locale, "输入 ", "input ")+"$"+formatCatalogNumber(model.InputPricePerMillion)+"/M")
+	}
+	if model.CachedInputPricePerMillion > 0 {
+		parts = append(parts, localized(locale, "缓存 ", "cached ")+"$"+formatCatalogNumber(model.CachedInputPricePerMillion)+"/M")
+	}
+	if model.OutputPricePerMillion > 0 {
+		parts = append(parts, localized(locale, "输出 ", "output ")+"$"+formatCatalogNumber(model.OutputPricePerMillion)+"/M")
+	}
+	return localized(locale, "价格：", "Pricing: ") + strings.Join(parts, " · ")
+}
+
+// validateCatalogPrices parses the optional price fields. Empty/0 means "not
+// configured"; a malformed, non-finite, negative or absurdly large value is an
+// inline error (the draft is kept so the user can fix it). Valid values go
+// through contracts.SanitizePrices, the same normalization the catalog module
+// applies when it reads the row.
+func validateCatalogPrices(draft *catalogEditDraft,
+	locale contracts.LocaleService) (input, cached, output float64, errText string) {
+	parse := func(raw, zhLabel, enLabel string) (float64, string) {
+		raw = strings.TrimSpace(raw)
+		if raw == "" {
+			return 0, ""
+		}
+		value, err := strconv.ParseFloat(raw, 64)
+		if err != nil || math.IsNaN(value) || math.IsInf(value, 0) {
+			return 0, localized(locale,
+				zhLabel+"必须是数字", enLabel+" must be a number")
+		}
+		if value < 0 {
+			return 0, localized(locale,
+				zhLabel+"不能为负数", enLabel+" must not be negative")
+		}
+		if value > 1e9 {
+			return 0, localized(locale,
+				zhLabel+"过大（上限 1,000,000,000）",
+				enLabel+" is too large (max 1,000,000,000)")
+		}
+		return value, ""
+	}
+	if value, errText := parse(draft.priceInput,
+		localized(locale, "输入价格", "Input price"),
+		localized(locale, "Input price", "Input price")); errText != "" {
+		return 0, 0, 0, errText
+	} else {
+		input = value
+	}
+	if value, errText := parse(draft.priceCached,
+		localized(locale, "缓存输入价格", "Cached input price"),
+		localized(locale, "Cached input price", "Cached input price")); errText != "" {
+		return 0, 0, 0, errText
+	} else {
+		cached = value
+	}
+	if value, errText := parse(draft.priceOutput,
+		localized(locale, "输出价格", "Output price"),
+		localized(locale, "Output price", "Output price")); errText != "" {
+		return 0, 0, 0, errText
+	} else {
+		output = value
+	}
+	input, cached, output = contracts.SanitizePrices(input, cached, output)
+	return input, cached, output, ""
+}
+
+// buildCatalogPricingFields renders the three optional per-million prices with
+// the "estimate only, recomputed at current prices" explanation.
+func buildCatalogPricingFields(c *ui.Context, t *design.Tokens, locale contracts.LocaleService,
+	input, cached, output *string) {
+	design.Apply(ui.Text(c, localized(locale, "价格（可选）", "Pricing (optional)")),
+		t.Font(design.TypeS)).FontWeight(design.WeightSemibold).TextColor(t.LabelPrimary)
+	design.Apply(ui.Text(c, localized(locale,
+		"每 1M tokens 的美元价格；留空或 0 表示未配置。价格只用于成本估算，按当前价格重算。",
+		"USD per 1M tokens; blank or 0 means not configured. Prices are used for cost estimates only and are applied at current prices.")),
+		t.TextMuted(design.TypeXS)).MaxLines(2)
+	ui.Row(c).FillWidth().Gap(design.Space3).AlignItems(ui.Start).Children(func() {
+		ui.Column(c).FillWidth().Grow(1).Children(func() {
+			ui.Field(c, localized(locale, "输入价格 / 1M", "Input price / 1M"), func() {
+				ui.TextInput(c.Key("catalog.edit.priceInput"), input).
+					Label(inputLabel(locale, localized(locale, "输入价格 / 1M", "Input price / 1M"))).
+					Placeholder("2.00").FillWidth()
+			})
+		})
+		ui.Column(c).FillWidth().Grow(1).Children(func() {
+			ui.Field(c, localized(locale, "缓存输入 / 1M", "Cached input / 1M"), func() {
+				ui.TextInput(c.Key("catalog.edit.priceCached"), cached).
+					Label(inputLabel(locale, localized(locale, "缓存输入 / 1M", "Cached input / 1M"))).
+					Placeholder(localized(locale, "留空回退输入价", "blank falls back to input")).FillWidth()
+			})
+		})
+		ui.Column(c).FillWidth().Grow(1).Children(func() {
+			ui.Field(c, localized(locale, "输出价格 / 1M", "Output price / 1M"), func() {
+				ui.TextInput(c.Key("catalog.edit.priceOutput"), output).
+					Label(inputLabel(locale, localized(locale, "输出价格 / 1M", "Output price / 1M"))).
+					Placeholder("8.00").FillWidth()
+			})
+		})
+	})
+}
+
 // catalogGenerationSummary renders a row's configured generation options,
 // clamped to the valid ranges for display; empty when none are configured.
 func catalogGenerationSummary(locale contracts.LocaleService, model contracts.ModelInfo) string {
@@ -218,6 +340,9 @@ func newCatalogEditDraft(model contracts.ModelInfo, isDefault bool) *catalogEdit
 		draft.maxTokens = strconv.Itoa(model.MaxTokens)
 		draft.maxTokensNum = float64(model.MaxTokens)
 	}
+	draft.priceInput = formatCatalogPrice(model.InputPricePerMillion)
+	draft.priceCached = formatCatalogPrice(model.CachedInputPricePerMillion)
+	draft.priceOutput = formatCatalogPrice(model.OutputPricePerMillion)
 	for _, mode := range contracts.SanitizeThinkingModes(model.ThinkingModes) {
 		draft.modes = append(draft.modes, &catalogModeDraft{
 			id:     mode.ID,
@@ -421,6 +546,16 @@ func catalogAdvancedSummary(locale contracts.LocaleService, draft *catalogEditDr
 			generation = append(generation, fmt.Sprintf("%d tokens", value))
 		}
 	}
+	pricing := make([]string, 0, 3)
+	if value, ok := catalogDraftFloat(draft.priceInput, 0, 1e9); ok && value > 0 {
+		pricing = append(pricing, localized(locale, "输入 ", "input ")+"$"+formatCatalogNumber(value)+"/M")
+	}
+	if value, ok := catalogDraftFloat(draft.priceCached, 0, 1e9); ok && value > 0 {
+		pricing = append(pricing, localized(locale, "缓存 ", "cached ")+"$"+formatCatalogNumber(value)+"/M")
+	}
+	if value, ok := catalogDraftFloat(draft.priceOutput, 0, 1e9); ok && value > 0 {
+		pricing = append(pricing, localized(locale, "输出 ", "output ")+"$"+formatCatalogNumber(value)+"/M")
+	}
 	custom := 0
 	for _, mode := range draft.modes {
 		if strings.TrimSpace(mode.id) != "" {
@@ -430,6 +565,12 @@ func catalogAdvancedSummary(locale contracts.LocaleService, draft *catalogEditDr
 	line := ""
 	if len(generation) > 0 {
 		line = localized(locale, "生成：", "Generation: ") + strings.Join(generation, " · ")
+	}
+	if len(pricing) > 0 {
+		if line != "" {
+			line += " · "
+		}
+		line += localized(locale, "价格：", "Pricing: ") + strings.Join(pricing, " · ")
 	}
 	if custom == 1 {
 		if line != "" {
@@ -444,8 +585,8 @@ func catalogAdvancedSummary(locale contracts.LocaleService, draft *catalogEditDr
 			fmt.Sprintf("自定义模式 %d", custom), fmt.Sprintf("%d custom modes", custom))
 	}
 	if line == "" {
-		return localized(locale, "未配置生成参数或自定义模式",
-			"No generation options or custom modes")
+		return localized(locale, "未配置生成参数、价格或自定义模式",
+			"No generation options, pricing or custom modes")
 	}
 	return line
 }
@@ -601,7 +742,7 @@ func buildCatalogEditDialog(c *ui.Context, t *design.Tokens, runtime contracts.U
 					// modes are advanced settings, collapsed by default behind a one-line
 					// summary so the modal's common fields stay short.
 					ui.Collapsible(c.Key("catalog.editAdvanced"),
-						localized(locale, "生成与自定义模式", "Generation & custom modes"), &st.editAdvanced, func() {
+						localized(locale, "生成、价格与自定义模式", "Generation, pricing & custom modes"), &st.editAdvanced, func() {
 							// Generation options: optional numeric fields; every empty
 							// field means "provider default".
 							design.Apply(ui.Text(c, localized(locale, "生成参数", "Generation")),
@@ -680,6 +821,10 @@ func buildCatalogEditDialog(c *ui.Context, t *design.Tokens, runtime contracts.U
 									})
 								})
 							})
+
+							ui.Divider(c)
+							buildCatalogPricingFields(c, t, locale,
+								&draft.priceInput, &draft.priceCached, &draft.priceOutput)
 
 							ui.Divider(c)
 							design.Apply(ui.Text(c, localized(locale, "自定义思考模式", "Custom thinking modes")),
@@ -836,6 +981,12 @@ func saveCatalogEdit(c *ui.Context, st *catalogState, store contracts.SettingsSe
 		c.Invalidate()
 		return
 	}
+	inputPrice, cachedPrice, outputPrice, priceErr := validateCatalogPrices(draft, locale)
+	if priceErr != "" {
+		draft.err = priceErr
+		c.Invalidate()
+		return
+	}
 	// The API key input starts empty; blank keeps the stored key unless the
 	// user explicitly clears it.
 	apiKey := strings.TrimSpace(draft.apiKey)
@@ -858,6 +1009,10 @@ func saveCatalogEdit(c *ui.Context, st *catalogState, store contracts.SettingsSe
 		Temperature:     temperature,
 		TopP:            topP,
 		MaxTokens:       maxTokens,
+
+		InputPricePerMillion:       inputPrice,
+		CachedInputPricePerMillion: cachedPrice,
+		OutputPricePerMillion:      outputPrice,
 	}
 	if updated.DefaultThinking != "" {
 		if _, ok := contracts.ThinkingModeByID(

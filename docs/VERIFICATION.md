@@ -901,3 +901,12 @@ v0.2.12 的 package-macos job 在 GitHub Ubuntu runner 上构建 libdmg-hfsplus 
 - **侧栏视觉**：新对话改左对齐列表首行；树行改用 `OutlineState.Prefix` 的 DSH 式行解剖（`[选中 2px 左条][depth*12px][16px leading slot（folder↔chevron / 会话状态图标）][gap]`），嵌套只缩进 12 DIP，保留原生树语义/键盘/a11y；分组计数改静默数字、折叠组汇总；当前行 ⋯ 改 hover/focus 显示；页脚加 hairline。修复 Prefix 下 `FillWidth` 挤扁行尾 `⋯/+` 的回归（改 `Grow/Shrink`），会话行前置图标可点击打开。
 - **设置降噪**：20 个设置页删除页头副标题与复述控件名的 Description，删/压行为、OS 沙箱、通知、数据、MCP、更新、记忆、关于等页的解释性散文与 bullets；保留格式/单位/留空/重启/安全与不可逆警告；搜索框下加 hairline 滚动边界。同步修正 `internal/regression` 旧断言。
 - **验证**：`gofmt`、`go build ./...`（含 `CGO_ENABLED=0`）、`go vet ./...`、`go tool mygo vet .`、`go test ./... -count=1` 全绿；`designlint --strict --baseline`（266 files，0 new）、`scripts/design-check.sh` 6/6 PASS；`ui-snapshot` 106 steps / 105 PNGs 全量重生成，人工复核亮/暗/窄窗侧栏与设置页；截图见 `.cache/ui-conformance/`。
+
+## 0.2.36（2026-11-15：长时任务严格对齐 DSH + Windows 沙盒并发修复 + 执行域持久化）
+
+- **Goal v2 / 上下文 / 自动化 / 审批 / 通知**：会话级 durable goal（三件套 + revision CAS + blocked + 256 轮 + 引擎续跑 + UI/headless/ACP）；按模型窗口推导预算、默认压缩、run 前 exact 压缩 + archive + Outcome、溢出单次压缩重试；自动化同会话/delivered+completed/weekly+cron+durable 补跑；无人值守审批 fail-closed、通知点击直达会话。详见 [CHANGELOG](../CHANGELOG.md) 与 [04-implementation-status](research/long-task/04-implementation-status.md)。
+- **可观测性**：Context tab（逐调用/事件/成本/系统提示分段/recovery/archive）、跨会话 Insights 洞察页、模型价格编辑 UI；独立审计见 [05-final-parity-audit](research/long-task/05-final-parity-audit.md)（六条 5 PASS + ⑥ 可接受 PARTIAL）。
+- **执行域持久化**：job/terminal 不再因工作区/权限/沙盒重建被 CloseAll；按 ID 跨 build 路由，job_list/terminal_list 合并同 root，完成通知跨 build drain；durable `execution/*` 生命周期事件。
+- **Windows 沙盒并发写修复（rig v0.16.3）**：跨进程命名 mutex + per-grant marker + per-workspace 状态文件协调 ACL grant/restore；并发 helper 只加/撤自己的 capability ACE，最后一个恢复原始 descriptor，崩溃 grant 自愈；read-only 不改 workspace ACL。产品以 `third_party/zeokeel-rig` 内树 fork + replace 消费，保持干净 checkout 构建；rig tag `v0.16.3` 已推送 GitHub，goproxy.cn 尚未索引。
+- **验证**：`gofmt` 空；`go build ./...`、`go vet ./...`、`go tool mygo vet .`、`go mod verify` 通过；`go test ./... -count=1` 46 包全绿；`GOOS=windows GOARCH=amd64 go build/vet ./...` 通过；干净目录（无 sibling）`-mod=readonly` 构建通过；`designlint --strict --baseline` 480 files 0 new；`scripts/design-check.sh` 6/6；`ui-drive` 93/93 PASS；`ui-snapshot` 120 PNG 人工复核。
+- **已知边界**：Win32 ACL 运行时行为需 Windows 实机验证（rig `RIG_WINDOWS_SANDBOX_TEST=1`）；自动压缩 run 中兜底仍 inferred；执行域跨 app 重启不重连；cold resume 为一问一答；rig v0.17.0 候选改动未发布、产品不消费。详见 CHANGELOG Known limitations。

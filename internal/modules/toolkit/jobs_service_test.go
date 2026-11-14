@@ -305,6 +305,9 @@ func TestJobServiceFollowsRealWorkspaceRebind(t *testing.T) {
 	current := rootA
 	group := newRebindGroup(Config{}, 5*time.Second, func() string { return current }, nil, nil)
 	defer group.close()
+	// Module activation builds the initial root-scoped tools; the service then
+	// lists that build's retained jobs.
+	group.initial()
 
 	service := newJobService(group)
 	if rows := service.Jobs(); len(rows) != 0 {
@@ -318,6 +321,9 @@ func TestJobServiceFollowsRealWorkspaceRebind(t *testing.T) {
 	}
 
 	current = rootB
+	// A tool call under the new root creates its build; listing then reflects
+	// that root only.
+	group.forRoot()
 	if rows := service.Jobs(); len(rows) != 0 {
 		t.Fatalf("Jobs() after workspace switch = %#v, want no rows", rows)
 	}
@@ -327,7 +333,15 @@ func TestJobServiceFollowsRealWorkspaceRebind(t *testing.T) {
 	if scopedB == scopedA {
 		t.Fatal("workspace switch reused the previous build's jobs manager")
 	}
-	waitBuildClosed(t, scopedA)
+	// The previous build is retained: its jobs stay controllable by id after the
+	// switch, and only module unload releases its manager.
+	if scopedA.isClosed() {
+		t.Fatal("workspace switch closed the previous build; its jobs would be orphaned")
+	}
+	group.close()
+	if !scopedA.waitClosed(5 * time.Second) {
+		t.Fatal("group.close did not release the retained build")
+	}
 }
 
 // TestModuleProvidesJobService pins the toolkit wiring: the module provides

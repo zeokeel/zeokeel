@@ -7,6 +7,7 @@ package regression
 // through the host FileDrop bridge.
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -350,55 +351,41 @@ func TestSessionAttachmentInvalidPaths(t *testing.T) {
 	requireNoText(t, harness.tester, "不是可读的普通文件")
 }
 
-// TestSessionGoalChipEmptyText is the goal negative in the UI: an empty or
-// whitespace-only goal payload renders no chip and cannot panic the header.
-func TestSessionGoalChipEmptyText(t *testing.T) {
-	h := newBareHarness(t)
-	chat := newFakeChat()
-	chat.addSession(contracts.ChatSession{
+// TestSessionGoalDockDrivesTheDurableGoal covers the goal dock's empty and
+// populated states through the per-session GoalService: no goal renders no dock,
+// a created goal shows its phase/objective, and the destructive clear confirms
+// first and removes the record.
+func TestSessionGoalDockDrivesTheDurableGoal(t *testing.T) {
+	goals := newRegressionGoalService()
+	ui := startGoalUI(t, goals, contracts.ChatSession{
 		ID: "session-goal", Title: "审计会话", CreatedAt: time.Unix(1_700_000_000, 0),
-	}, true)
-	tracker := &fakeGoalTracker{}
-	provide(t, h.ctx, contracts.KeyChat, contracts.ChatService(chat))
-	provide(t, h.ctx, contracts.KeyGoalTracker, contracts.GoalTracker(tracker))
-	activate(t, h.ctx, sessionui.Module(), sessionui.Config{})
-	h.push(sessionui.ScreenID)
-	tester := h.tester(1280, 800)
-	tester.Frame()
-	requireNoExactText(t, tester, "目标")
+	})
+	requireNoExactText(t, ui.tester, "目标操作")
 
-	// A whitespace-only goal is ignored by the header.
-	if !tracker.trigger(contracts.Goal{ID: "goal-empty", Text: "   ", Status: "active"}, true) {
-		t.Fatal("the session module did not install a goal handler")
+	if _, err := goals.CreateGoal(context.Background(), "session-goal", "ship the audit", 0); err != nil {
+		t.Fatalf("CreateGoal: %v", err)
 	}
-	tester.Frame()
-	requireNoExactText(t, tester, "目标")
+	ui.tester.Frame()
+	requireHasText(t, ui.tester, "目标进行中")
+	requireHasText(t, ui.tester, "ship the audit")
 
-	// A real goal renders the status label and the (truncated) goal text.
-	tracker.trigger(contracts.Goal{ID: "goal-1", Text: "ship the audit", Status: "active"}, true)
-	tester.Frame()
-	requireExactText(t, tester, "目标")
-	requireHasText(t, tester, "ship the audit")
-
-	// Clearing through the goal strip above the composer calls the host tracker:
-	// carries the action, which confirms first.
-	if err := tester.Click("目标操作"); err != nil {
-		t.Fatalf("open goal menu: %v; texts = %v", err, tester.Texts())
+	if err := ui.tester.Click("目标操作"); err != nil {
+		t.Fatalf("open goal menu: %v; texts = %v", err, ui.tester.Texts())
 	}
-	tester.Frame()
-	if err := tester.Click("删除目标记录"); err != nil {
-		t.Fatalf("click delete goal: %v; texts = %v", err, tester.Texts())
+	ui.tester.Frame()
+	if err := ui.tester.Click("清除目标记录"); err != nil {
+		t.Fatalf("click clear goal: %v; texts = %v", err, ui.tester.Texts())
 	}
-	tester.Frame()
-	requireHasText(t, tester, "确认删除")
-	if err := tester.Click("确认删除"); err != nil {
-		t.Fatalf("confirm delete goal: %v; texts = %v", err, tester.Texts())
+	ui.tester.Frame()
+	requireHasText(t, ui.tester, "确认清除")
+	if err := ui.tester.Click("确认清除"); err != nil {
+		t.Fatalf("confirm clear goal: %v", err)
 	}
-	tester.Frame()
-	if tracker.clears == 0 {
-		t.Fatal("the header clear action did not call GoalTracker.Clear")
+	ui.tester.Frame()
+	if _, ok := goals.goal("session-goal"); ok {
+		t.Fatal("the goal survived the confirmed clear")
 	}
-	requireNoText(t, tester, "ship the audit")
+	requireNoText(t, ui.tester, "ship the audit")
 }
 
 // TestSessionExportJSONLDialogTitleFollowsLocale pins the JSONL export's

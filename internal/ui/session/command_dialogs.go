@@ -2,6 +2,7 @@ package session
 
 import (
 	"context"
+	"strconv"
 	"strings"
 
 	"github.com/egoist/mygo/ui"
@@ -11,14 +12,20 @@ import (
 	"github.com/zeokeel/zeokeel/internal/uikit"
 )
 
-// openGoalDialog opens the /goal modal, prefilled with the active goal.
+// openGoalDialog opens the /goal modal, prefilled with the active session's
+// current goal. Editing keeps the goal id/revision (the compare-and-set pair)
+// and exposes its round cap; creating is always scoped to the active session.
 func openGoalDialog(st *state, runtime contracts.UIRuntime) {
-	if st.goalTracker == nil {
+	if st == nil || st.goalService == nil || st.goalSessionID == "" {
 		return
 	}
 	st.goalText = ""
-	if _, text, _, ok := st.goalTracker.Get(); ok {
-		st.goalText = text
+	st.goalCapText = ""
+	if st.goal != nil {
+		st.goalText = st.goal.Objective
+		if st.goal.MaxGoalRounds > 0 {
+			st.goalCapText = strconv.Itoa(st.goal.MaxGoalRounds)
+		}
 	}
 	st.goalOpen = true
 	st.goalErr = ""
@@ -47,35 +54,58 @@ func openMemoryDialog(st *state, runtime contracts.UIRuntime) {
 	runtime.Invalidate()
 }
 
-// buildGoalDialog renders the /goal modal: the goal input and the footer
-// actions. Saving is the primary action (rightmost, Enter); clearing is the
-// dangerous one and goes through the header's AlertDialog confirmation instead
-// of clearing at once.
+// buildGoalDialog renders the /goal modal: the objective input, the round-cap
+// editor while editing an existing goal, and the footer actions. Saving is the
+// primary action (rightmost, Enter); clearing is destructive and goes through
+// ConfirmDanger instead of deleting at once.
 func buildGoalDialog(c *ui.Context, t *design.Tokens, runtime contracts.UIRuntime, st *state) {
-	if !st.goalOpen || st.goalTracker == nil {
+	if !st.goalOpen || st.goalService == nil {
 		return
 	}
+	// A complete goal is terminal for editing-by-update: saving the dialog
+	// creates the next goal instance instead (the service replaces a complete
+	// goal with a new armed one).
+	editing := st.goal != nil && st.goal.Phase != contracts.GoalPhaseComplete
 	save := func() {
-		if strings.TrimSpace(st.goalText) == "" {
+		objective := strings.TrimSpace(st.goalText)
+		sessionID := st.goalSessionID
+		if objective == "" || sessionID == "" {
 			return
 		}
-		// Editing an existing goal keeps its ID (and therefore the
-		// auto-continue budget); only a fresh goal gets a new identity through
-		// Set.
-		_, _, _, hasGoal := st.goalTracker.Get()
-		var err error
-		if lifecycler, ok := st.goalTracker.(contracts.GoalLifecycler); ok && hasGoal {
-			_, err = lifecycler.Edit(strings.TrimSpace(st.goalText))
+		cap := 0
+		if editing {
+			if text := strings.TrimSpace(st.goalCapText); text != "" {
+				parsed, err := strconv.Atoi(text)
+				if err != nil || parsed <= 0 {
+					st.goalErr = st.tr("自动续跑上限必须是正整数。",
+						"The automatic continuation cap must be a positive integer.")
+					runtime.Invalidate()
+					return
+				}
+				cap = parsed
+			}
+		}
+		var (
+			next contracts.Goal
+			err  error
+		)
+		if editing {
+			next, err = st.goalService.UpdateGoal(context.Background(), sessionID,
+				contracts.GoalRef{ID: st.goal.ID, Revision: st.goal.Revision},
+				contracts.GoalUpdate{Action: contracts.GoalActionEdit, Objective: objective, MaxGoalRounds: cap})
 		} else {
-			_, err = st.goalTracker.Set(context.Background(), strings.TrimSpace(st.goalText))
+			next, err = st.goalService.CreateGoal(context.Background(), sessionID, objective, cap)
 		}
 		if err != nil {
-			st.goalErr = st.tr("保存目标失败：", "Save goal failed: ") + err.Error()
-		} else {
-			st.goalOpen = false
-			st.goalErr = ""
-			st.toast(contracts.NotifySuccess, st.tr("目标已保存", "Goal saved"))
+			st.goalErr = st.tr("保存目标失败：", "Save goal failed: ") + st.goalErrorText(err)
+			st.refreshGoalSnapshot()
+			runtime.Invalidate()
+			return
 		}
+		st.setGoalSnapshot(next)
+		st.goalOpen = false
+		st.goalErr = ""
+		st.toast(contracts.NotifySuccess, st.tr("目标已保存", "Goal saved"))
 		runtime.Invalidate()
 	}
 	ui.Modal(c, &st.goalOpen, func() {
@@ -86,11 +116,24 @@ func buildGoalDialog(c *ui.Context, t *design.Tokens, runtime contracts.UIRuntim
 			design.Apply(ui.Text(c, st.tr("设置目标", "Goal")), t.Font(design.TypeL)).
 				FontWeight(600).TextColor(t.LabelPrimary)
 			design.Apply(ui.Text(c, st.tr(
-				"为当前会话设置长期目标；工具运行时会持续参考它。",
-				"Set a long-term goal for this conversation; tool runs keep referring to it.")),
-				t.TextMuted(design.TypeXS)).MaxLines(2)
+				"为当前会话设置长期目标；引擎会按轮次自动推进，直到完成、受阻或你暂停。",
+				"Set a long-term goal for this conversation; the engine advances it round by round until it is done, blocked, or you pause it.")),
+				t.TextMuted(design.TypeXS)).MaxLines(3)
 			ui.TextInput(c, &st.goalText).Label(st.tr("目标内容", "Goal text")).FillWidth().
 				OnTextKey(enterTo(save))
+			if editing {
+				design.Apply(ui.Text(c, st.tr(
+					"自动续跑上限（轮）：留空保持当前上限。",
+					"Round cap: leave empty to keep the current cap.")),
+					t.TextMuted(design.TypeXS)).MaxLines(2)
+				ui.TextInput(c, &st.goalCapText).Label(st.tr("自动续跑上限（轮）", "Round cap")).
+					Placeholder(st.tr("留空保持当前上限", "Leave empty to keep the current cap")).
+					FillWidth().OnTextKey(enterTo(save))
+				design.Apply(ui.Text(c, st.tr(
+					"轮次用尽时目标会进入「受阻」；调高上限后再继续即可。",
+					"An exhausted budget blocks the goal; raise the cap and continue it.")),
+					t.TextMuted(design.TypeXS)).MaxLines(2)
+			}
 			if st.goalErr != "" {
 				buildDialogError(c, t, st.goalErr)
 			}
@@ -101,7 +144,7 @@ func buildGoalDialog(c *ui.Context, t *design.Tokens, runtime contracts.UIRuntim
 					runtime.Invalidate()
 				}},
 			}
-			if _, _, _, hasGoal := st.goalTracker.Get(); hasGoal {
+			if st.goal != nil {
 				actions = append(actions, uikit.DialogAction{
 					Label: st.tr("删除目标记录", "Delete goal record"), Danger: true,
 					OnClick: func() {

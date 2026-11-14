@@ -6,8 +6,13 @@ import (
 	"time"
 )
 
-// TestParseSchedule covers the supported cron subset plus every/after.
+// TestParseSchedule covers the legacy cron subset plus every/after and the DSH
+// wall-clock selectors (daily/weekly/at/cron).
 func TestParseSchedule(t *testing.T) {
+	shanghai, err := time.LoadLocation("Asia/Shanghai")
+	if err != nil {
+		t.Skipf("time zone data unavailable: %v", err)
+	}
 	valid := []struct {
 		spec       string
 		kind       Kind
@@ -31,15 +36,40 @@ func TestParseSchedule(t *testing.T) {
 		},
 		{
 			spec: "30 9 * * *", kind: KindDaily, canonical: "30 9 * * *",
-			from:       time.Date(2026, 1, 1, 8, 0, 0, 0, time.UTC),
-			wantNext:   time.Date(2026, 1, 1, 9, 30, 0, 0, time.UTC),
+			from:       time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC),
+			wantNext:   time.Date(2026, 1, 1, 9, 30, 0, 0, shanghai),
 			hourMinute: [2]int{9, 30},
 		},
 		{
 			// Exactly on the instant: next is tomorrow.
 			spec: "30 9 * * *", kind: KindDaily, canonical: "30 9 * * *",
-			from:     time.Date(2026, 1, 1, 9, 30, 0, 0, time.UTC),
-			wantNext: time.Date(2026, 1, 2, 9, 30, 0, 0, time.UTC),
+			from:     time.Date(2026, 1, 1, 1, 30, 0, 0, time.UTC),
+			wantNext: time.Date(2026, 1, 2, 9, 30, 0, 0, shanghai),
+		},
+		{
+			spec: "daily 23:00:00 Asia/Shanghai", kind: KindDaily,
+			canonical:  "daily 23:00:00.000 Asia/Shanghai",
+			from:       time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC),
+			wantNext:   time.Date(2026, 1, 1, 23, 0, 0, 0, shanghai),
+			hourMinute: [2]int{23, 0},
+		},
+		{
+			spec: "weekly 09:00:00 Asia/Shanghai 1,3", kind: KindWeekly,
+			canonical: "weekly 09:00:00.000 Asia/Shanghai 1,3",
+			from:      time.Date(2026, 1, 7, 10, 0, 0, 0, shanghai),
+			wantNext:  time.Date(2026, 1, 12, 9, 0, 0, 0, shanghai),
+		},
+		{
+			spec: "cron 0 9 * * 1-5 Asia/Shanghai", kind: KindCron,
+			canonical: "cron 0 9 * * 1-5 Asia/Shanghai",
+			from:      time.Date(2026, 1, 9, 9, 30, 0, 0, shanghai),
+			wantNext:  time.Date(2026, 1, 12, 9, 0, 0, 0, shanghai),
+		},
+		{
+			spec: "at 2026-12-01T09:30:00Z", kind: KindAt,
+			canonical: "at 2026-12-01T09:30:00.000Z",
+			from:      time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC),
+			wantNext:  time.Date(2026, 12, 1, 9, 30, 0, 0, time.UTC),
 		},
 		{
 			spec: "@hourly", kind: KindHourly, canonical: "@hourly",
@@ -49,12 +79,12 @@ func TestParseSchedule(t *testing.T) {
 		{
 			spec: "@daily", kind: KindDaily, canonical: "@daily",
 			from:     time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC),
-			wantNext: time.Date(2026, 1, 2, 0, 0, 0, 0, time.UTC),
+			wantNext: time.Date(2026, 1, 1, 16, 0, 0, 0, time.UTC),
 		},
 		{
 			spec: "@midnight", kind: KindDaily, canonical: "@daily",
 			from:     time.Date(2026, 1, 1, 12, 0, 0, 0, time.UTC),
-			wantNext: time.Date(2026, 1, 2, 0, 0, 0, 0, time.UTC),
+			wantNext: time.Date(2026, 1, 1, 16, 0, 0, 0, time.UTC),
 		},
 		{
 			spec: "every 30s", kind: KindEvery, canonical: "every 30s",
@@ -107,10 +137,13 @@ func TestParseSchedule(t *testing.T) {
 func TestParseScheduleRejectsInvalid(t *testing.T) {
 	invalid := []string{
 		"", "   ",
-		"* * * * *", "0 * * * *", "*/0 * * * *", "*/60 * * * *", "*/5 1 * * *",
-		"1 2 3 * *", "1 2 * 3 *", "1 2 * * 3", "60 1 * * *", "1 24 * * *",
+		"*/0 * * * *", "*/60 * * * *",
+		"60 1 * * *", "1 24 * * *", "1 2 3 4", "1 2 3 4 5 6",
 		"every 0s", "every -5s", "every 5m", "every", "after 0s", "after x",
-		"foo", "@weekly", "1 2 3 4", "1 2 3 4 5 6",
+		"foo", "@weekly", "@yearly",
+		"daily 24:00:00 UTC", "daily 10:00 UTC", "weekly 09:00:00 UTC 0",
+		"cron 60 * * * * UTC", "cron 10-5 * * * * UTC", "cron 0 9 * * MON UTC",
+		"at tomorrow",
 	}
 	for _, spec := range invalid {
 		if _, err := Parse(spec); err == nil {
@@ -124,14 +157,20 @@ func TestParseScheduleRejectsInvalid(t *testing.T) {
 
 func TestDescribeSchedule(t *testing.T) {
 	cases := map[string]string{
-		"*/1 * * * *":  "Every minute",
-		"*/15 * * * *": "Every 15 minutes",
-		"@hourly":      "Every hour",
-		"0 9 * * *":    "Daily at 09:00",
-		"every 1s":     "Every second",
-		"every 30s":    "Every 30 seconds",
-		"after 90s":    "Once after 90 seconds",
-		"nonsense":     "nonsense",
+		"*/1 * * * *":                          "Every minute",
+		"*/15 * * * *":                         "Every 15 minutes",
+		"@hourly":                              "Every hour",
+		"0 9 * * *":                            "Daily at 09:00",
+		"daily 09:05:07 UTC":                   "Daily at 09:05:07 (UTC)",
+		"weekly 09:00:00 Asia/Shanghai 1,3":    "Weekly on Mon, Wed at 09:00",
+		"weekly 17:00:00 UTC 2,7":              "Weekly on Tue, Sun at 17:00 (UTC)",
+		"cron */15 9-17 * * 1-5 Asia/Shanghai": "Cron */15 9-17 * * 1-5",
+		"cron 0 9 * * 1-5 UTC":                 "Cron 0 9 * * 1-5 (UTC)",
+		"at 2026-12-01T09:30:00.000Z":          "Once at 2026-12-01 09:30:00 UTC",
+		"every 1s":                             "Every second",
+		"every 30s":                            "Every 30 seconds",
+		"after 90s":                            "Once after 90 seconds",
+		"nonsense":                             "nonsense",
 	}
 	for spec, want := range cases {
 		if got := Describe(spec); got != want {
@@ -140,7 +179,8 @@ func TestDescribeSchedule(t *testing.T) {
 	}
 }
 
-// TestNextRunKeepsLocation pins that Next is computed in the reference location.
+// TestNextRunKeepsLocation pins that wall-clock schedules are computed in their
+// named zone (and the default Asia/Shanghai one).
 func TestNextRunKeepsLocation(t *testing.T) {
 	location, err := time.LoadLocation("Asia/Shanghai")
 	if err != nil {
@@ -151,10 +191,18 @@ func TestNextRunKeepsLocation(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NextRun: %v", err)
 	}
-	if next.Location() != location || next.Hour() != 9 || next.Minute() != 0 {
+	if next.Location().String() != location.String() || next.Hour() != 9 || next.Minute() != 0 {
 		t.Fatalf("NextRun = %s, want 09:00 in %s", next, location)
 	}
 	if !strings.HasPrefix(Describe("0 9 * * *"), "Daily at") {
 		t.Fatalf("Describe = %q", Describe("0 9 * * *"))
+	}
+	// A zone-named schedule uses that zone instead of the reference location.
+	utcNext, err := NextRun("daily 09:00:00.000 UTC", from)
+	if err != nil {
+		t.Fatalf("NextRun(UTC): %v", err)
+	}
+	if want := time.Date(2026, 1, 1, 9, 0, 0, 0, time.UTC); !utcNext.Equal(want) {
+		t.Fatalf("NextRun(UTC) = %s, want %s", utcNext, want)
 	}
 }

@@ -101,16 +101,9 @@ func (r *dynamicTeamRunner) Start(ctx context.Context, spec rig.SubagentSpec) (r
 	if err != nil {
 		return nil, fmt.Errorf("agent: team member %q: create provider: %w", strings.TrimSpace(spec.Name), err)
 	}
-	parent := rig.AgentSpec{
-		Provider:      provider,
-		Model:         cfg.Model,
-		SystemPrompt:  cfg.SystemPrompt,
-		MaxIterations: cfg.MaxIterations,
-		Tools:         withWorkspaceRoot(withAgentSession(childTools, active), workspaceRoot),
-		Gate:          r.service.gate(active),
-		History:       r.service.historyView(),
-		Logger:        r.service.logger,
-	}
+	// The shared delegated-child spec: explicit round budget, workspace-scoped
+	// tools with the run origin, gate, history and context budget.
+	parent := r.service.delegatedParentSpec(active, workspaceRoot, childTools, cfg, provider, contracts.AgentRunOriginSubagent)
 	runner, err := rigagent.NewRunner(parent, rigagent.RunnerOptions{
 		MaxDepth:      teamMaxDepth,
 		MaxConcurrent: teamMaxConcurrent,
@@ -277,7 +270,23 @@ func (t *teamService) appendHistoricalMembers(live []contracts.TeamMember) []con
 		if t.liveMemberSupersedes(record, live) {
 			continue
 		}
-		out = append(out, teamMemberFromChildSession(record))
+		converted := teamMemberFromChildSession(record)
+		if state := t.service.coldResumeSnapshot(record.ID); state != nil {
+			// A cold-resumed historical teammate is running again: show it as a
+			// live (not read-only) row while the run is in flight.
+			converted.Historical = false
+			converted.Resumable = false
+			converted.RunState = runStateFromChildStatus(state.status)
+			converted.Started = state.started
+			converted.Finished = state.finished
+			converted.Error = state.errText
+			converted.UsageTokens += state.usage.TotalTokens
+			converted.Iterations += state.iterations
+			if strings.TrimSpace(state.output) != "" {
+				converted.Last = state.output
+			}
+		}
+		out = append(out, converted)
 	}
 	return out
 }
@@ -461,6 +470,13 @@ func (t *teamService) Spawn(ctx context.Context, name, prompt, model string) (co
 
 // SendAsync implements contracts.TeamService.
 func (t *teamService) SendAsync(id, message string) error {
+	// DSH send_message semantics: a historical teammate resumes in the
+	// background and the answer arrives as a completion receipt.
+	if record, ok := t.service.historicalTeamRecord(strings.TrimSpace(id)); ok {
+		_, err := t.service.ColdResumeChildAsync(record.ID, message)
+		t.teamTracker().notifyChange()
+		return err
+	}
 	ref := t.managerRef(id)
 	err := t.manager().SendAsync(ref, message)
 	if err != nil {
@@ -475,6 +491,11 @@ func (t *teamService) SendAsync(id, message string) error {
 func (t *teamService) Send(ctx context.Context, id, message string) (string, error) {
 	if ctx == nil {
 		ctx = context.Background()
+	}
+	// A historical teammate (no live manager member after a restart) resumes
+	// from its durable child session instead of failing as an unknown member.
+	if record, ok := t.service.historicalTeamRecord(strings.TrimSpace(id)); ok {
+		return t.service.ColdResumeChild(ctx, record.ID, message)
 	}
 	result, err := t.manager().Send(ctx, t.managerRef(id), message)
 	if err != nil {
@@ -594,7 +615,7 @@ func teamDisplayName(values ...string) string {
 // native team_* tools, legacy aliases and the DSH-compatible spawn/list/wait
 // set. Each tool is wrapped so its invocation lands in the bounded team
 // activity read model (the run lifecycle itself is tracked in team_state.go).
-func newTeamTools(manager *rigteam.Manager) []rig.Tool {
+func newTeamTools(svc *service, manager *rigteam.Manager) []rig.Tool {
 	if manager == nil {
 		return nil
 	}
@@ -610,7 +631,81 @@ func newTeamTools(manager *rigteam.Manager) []rig.Tool {
 		if tool == nil {
 			continue
 		}
-		wrapped = append(wrapped, &trackedTeamTool{inner: tool, tracker: tracker, manager: manager})
+		wrapper := &trackedTeamTool{inner: tool, tracker: tracker, manager: manager}
+		if svc != nil {
+			wrapper.resumeSend = svc.coldResumeHistoricalSend
+		}
+		wrapped = append(wrapped, wrapper)
 	}
 	return wrapped
+}
+
+// historicalTeamRecord resolves a reference (child-session ID or unique name) to
+// a historical teammate record when no live manager member owns it.
+func (s *service) historicalTeamRecord(ref string) (childSessionRecord, bool) {
+	ref = strings.TrimSpace(ref)
+	if s == nil || s.childSessions == nil || ref == "" {
+		return childSessionRecord{}, false
+	}
+	if record, ok := s.childSessions.record(ref); ok && record.Kind == contracts.ChildAgentTeammate {
+		if s.liveTeamMemberOwns(record.ID, ref) {
+			return childSessionRecord{}, false
+		}
+		return record, true
+	}
+	if record, ok := s.childRecordByName(ref); ok && record.Kind == contracts.ChildAgentTeammate {
+		if s.liveTeamMemberOwns(record.ID, ref) {
+			return childSessionRecord{}, false
+		}
+		return record, true
+	}
+	return childSessionRecord{}, false
+}
+
+// liveTeamMemberOwns reports whether a live manager member already owns the
+// reference or the child-session identity: such a child must go through the
+// normal live send path, never through cold resume.
+func (s *service) liveTeamMemberOwns(childID, ref string) bool {
+	manager := s.teamManagerService()
+	if manager == nil {
+		return false
+	}
+	tracker := teamTrackerForService(s)
+	for _, member := range manager.Members() {
+		if member.ID == ref || member.Name == ref {
+			return true
+		}
+		if childID != "" && tracker != nil && tracker.childIDForMember(member.ID) == childID {
+			return true
+		}
+	}
+	return false
+}
+
+// coldResumeHistoricalSend is the model-facing send_message hook: when the
+// target is a historical teammate (no live member), it resumes the child
+// session in the background and reports the message as delivered. It returns
+// handled=false when a live member (or a non-teammate) owns the reference so the
+// normal Rig tool runs unchanged.
+func (s *service) coldResumeHistoricalSend(ctx context.Context, ref, message string) (bool, error) {
+	ref = strings.TrimSpace(ref)
+	message = strings.TrimSpace(message)
+	if ref == "" || message == "" || s == nil {
+		return false, nil
+	}
+	// A live manager member always wins (normal send path).
+	manager := s.teamManagerService()
+	if manager != nil {
+		for _, member := range manager.Members() {
+			if member.ID == ref || member.Name == ref {
+				return false, nil
+			}
+		}
+	}
+	record, ok := s.historicalTeamRecord(ref)
+	if !ok {
+		return false, nil
+	}
+	_, err := s.ColdResumeChildAsync(record.ID, message)
+	return true, err
 }

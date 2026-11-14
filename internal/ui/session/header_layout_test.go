@@ -42,9 +42,9 @@ func TestHeaderKeepsTitleAtNarrowWidth(t *testing.T) {
 		ID: "sess-1", Title: "一个很长很长的会话标题用于窄窗测试", Running: true,
 		Messages: []contracts.ChatMessage{{ID: "m1", Role: contracts.ChatRoleUser, Text: "你好"}},
 	}, true)
-	goal := &pauseTracker{}
-	h, tester := newGoalPauseHarness(t, chat, nil, goal)
-	goal.setGoal("g1", "一个非常长的目标描述，用来验证窄窗下标题仍然可读", contracts.GoalStatusActive)
+	h, goals := newGoalHarness(t, chat)
+	goals.seed("sess-1", "一个非常长的目标描述，用来验证窄窗下标题仍然可读")
+	tester := h.tester()
 	tester.SetSize(1024, 720)
 	tester.Frame()
 
@@ -55,7 +55,7 @@ func TestHeaderKeepsTitleAtNarrowWidth(t *testing.T) {
 		t.Fatalf("header title width = %.1f, want the title to keep its room", titleRect.W)
 	}
 	h.assertTexts(tester, "目标", "会话操作", "运行中")
-	h.assertNoTexts(tester, "暂停目标", "完成目标", "结束目标（保留记录）", "删除目标记录")
+	h.assertNoTexts(tester, "暂停目标", "完成目标", "编辑目标", "清除目标记录")
 
 	// The goal now lives in the strip above the composer, not in the title row:
 	// its text stays visible there (ellipsized, full text in the tooltip) and the
@@ -75,7 +75,7 @@ func TestHeaderKeepsTitleAtNarrowWidth(t *testing.T) {
 	tester.SetSize(1280, 800)
 	tester.Frame()
 	h.assertTexts(tester, "目标", "会话操作")
-	h.assertNoTexts(tester, "暂停目标", "完成目标", "结束目标（保留记录）", "删除目标记录")
+	h.assertNoTexts(tester, "暂停目标", "完成目标", "编辑目标", "清除目标记录")
 }
 
 // TestMessageMetaRowIsResident covers H15 after the density refactor: every

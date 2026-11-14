@@ -239,7 +239,8 @@ func ToolIcon(name string) *ui.SVG {
 	case "list_dir", "write_file", "edit_file", "str_replace_editor",
 		"enter_worktree", "list_worktrees":
 		return icons.Folder()
-	case "subagent", "workflow", "ralph", "skill", "plan_review":
+	case "subagent", "workflow", "ralph", "skill", "plan_review",
+		"get_goal", "create_goal", "update_goal":
 		return icons.Sparkles()
 	default:
 		return icons.Message()

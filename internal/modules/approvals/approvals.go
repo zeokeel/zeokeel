@@ -48,6 +48,7 @@ import (
 	"github.com/zeokeel/zeokeel-kernel/module"
 
 	"github.com/zeokeel/zeokeel/internal/contracts"
+	"github.com/zeokeel/zeokeel/internal/uikit"
 )
 
 const (
@@ -88,6 +89,12 @@ type Config struct {
 	// Mode is the approval policy: "workspace" (default), "read-only", "ask",
 	// "auto" or "never".
 	Mode string `json:"mode"`
+	// IgnorePermissionSetting makes the assembly mode authoritative: a stored
+	// agent.permission row written by another product sharing the data
+	// directory (for example the desktop app) cannot silently turn a headless
+	// auto policy into one that waits forever for an approval nobody can give.
+	// Desktop keeps the default (false): the user's runtime preset wins.
+	IgnorePermissionSetting bool `json:"ignorePermissionSetting"`
 }
 
 // Module is the approvals backend descriptor. It provides
@@ -102,6 +109,16 @@ func Module() *module.Descriptor[Config] {
 		service, err := newServiceWithSettings(cfg.Mode, logger, settings)
 		if err != nil {
 			return err
+		}
+		service.ignorePermissionSetting = cfg.IgnorePermissionSetting
+		// The notification copy follows the product language; a headless product
+		// has no locale (and no notifier), so the zero value is harmless.
+		service.locale, _ = ctx.Get(contracts.KeyLocale)
+		// The optional notifier lets a parked run reach the user outside the
+		// app (OS notification + in-app toast); a headless product without the
+		// bridge keeps waiting silently exactly as before.
+		if notifier, ok := ctx.Get(contracts.KeyNotifier); ok && notifier != nil {
+			service.notifier = notifier
 		}
 		_, err = ctx.Provide(contracts.KeyApprovals, contracts.Approvals(service))
 		return err
@@ -138,6 +155,18 @@ type service struct {
 	// contracts.SettingAgentPermission overrides the assembly mode on every
 	// call, so a runtime switch applies to the next tool call.
 	settings contracts.SettingsService
+	// ignorePermissionSetting pins the assembly mode for unattended products
+	// (headless/ACP): a stored desktop preset cannot make them block on an
+	// approval that has no answerer.
+	ignorePermissionSetting bool
+
+	// notifier is the optional host bridge used to notify the user that a run
+	// parked on an approval (nil keeps the no-notification behavior).
+	notifier contracts.Notifier
+
+	// locale localizes the visible approval-waiting notification copy (nil
+	// defaults to Chinese, matching the product's default language).
+	locale contracts.LocaleService
 
 	nextSeq uint64
 	pending map[string]*pendingRequest
@@ -211,7 +240,7 @@ func (s *service) effectiveMode() string {
 	s.mu.Lock()
 	configured := s.mode
 	s.mu.Unlock()
-	if s.settings == nil {
+	if s.settings == nil || s.ignorePermissionSetting {
 		return configured
 	}
 	raw := strings.ToLower(strings.TrimSpace(s.settings.Get(contracts.SettingAgentPermission, "")))
@@ -269,6 +298,22 @@ func (s *service) Request(ctx context.Context, request contracts.ApprovalRequest
 	s.pending[id] = entry
 	s.mu.Unlock()
 	s.notify()
+	if s.notifier != nil {
+		// The owning session travels as the notification's session tag when the
+		// host keeps one (contracts.SessionNotifier), so a click on the OS
+		// notification opens the conversation that is waiting. Plain notifiers
+		// still get the toast.
+		text := s.approvalWaitingText(request)
+		if sessionID := strings.TrimSpace(request.SessionID); sessionID != "" {
+			if sessionNotifier, ok := s.notifier.(contracts.SessionNotifier); ok && sessionNotifier != nil {
+				sessionNotifier.NotifySystemFor(contracts.NotifyWarning, text, sessionID)
+			} else {
+				contracts.NotifyApprovalWaiting(s.notifier, text)
+			}
+		} else {
+			contracts.NotifyApprovalWaiting(s.notifier, text)
+		}
+	}
 
 	select {
 	case resolved := <-entry.result:
@@ -284,6 +329,61 @@ func (s *service) Request(ctx context.Context, request contracts.ApprovalRequest
 			s.mu.Unlock()
 		}
 		return "", ctx.Err()
+	}
+}
+
+// approvalWaitingText is the visible copy of the approval-waiting notification.
+// It names the tool by its friendly, localized display name and never by the raw
+// protocol id (the raw id stays in the approval dialog's badge tooltip and the
+// trajectory, where the tool row owns it); a request from a background run
+// carries its localized origin so the user knows why it appeared.
+func (s *service) approvalWaitingText(request contracts.ApprovalRequest) string {
+	english := uikit.Language(s.locale) == "en"
+	text := "审批等待："
+	if english {
+		text = "Approval waiting: "
+	}
+	name := uikit.ToolDisplayName(s.locale, request.Tool)
+	// A tool the kit does not know has no friendly name; its raw protocol id
+	// must not reach visible copy, so the notification falls back to a generic
+	// label (the approval dialog still shows the request's details).
+	if name == "" || name == strings.TrimSpace(request.Tool) {
+		name = "工具调用"
+		if english {
+			name = "a tool call"
+		}
+	}
+	text += name
+	if source := approvalSourceLabel(s.locale, request.Source); source != "" {
+		if english {
+			text += " (" + source + ")"
+		} else {
+			text += "（" + source + "）"
+		}
+	}
+	return text
+}
+
+// approvalSourceLabel localizes a non-user run origin ("automation",
+// "subagent"). The active human turn needs no label, and an unknown origin is
+// omitted rather than leaking a raw origin id into visible copy.
+func approvalSourceLabel(locale contracts.LocaleService, source string) string {
+	english := uikit.Language(locale) == "en"
+	switch strings.ToLower(strings.TrimSpace(source)) {
+	case "", "user":
+		return ""
+	case contracts.SessionOriginAutomation:
+		if english {
+			return "Automation"
+		}
+		return "自动化"
+	case contracts.SessionOriginSubagent:
+		if english {
+			return "Subagent"
+		}
+		return "子代理"
+	default:
+		return ""
 	}
 }
 

@@ -79,7 +79,8 @@ func waitCompactNotice(t *testing.T, h *harness, tester *ui.Tester) {
 			tester.HasText("压缩失败") || tester.HasText("Compaction failed") ||
 			tester.HasText("会话正在运行") || tester.HasText("没有可压缩") ||
 			tester.HasText("保存压缩结果失败") || tester.HasText("压缩不可用") ||
-			tester.HasText("压缩期间历史被修改") || tester.HasText("会话正在压缩") {
+			tester.HasText("压缩期间历史被修改") || tester.HasText("会话正在压缩") ||
+			tester.HasText("归档压缩前的原文失败") || tester.HasText("Failed to archive the raw history") {
 			return
 		}
 	}
@@ -179,6 +180,7 @@ func TestCompactCommandErrorMessages(t *testing.T) {
 		{"unavailable", contracts.ErrCompactUnavailable, "压缩不可用"},
 		{"nothing", contracts.ErrCompactNothing, "没有可压缩的内容"},
 		{"save", contracts.ErrCompactSave, "保存压缩结果失败"},
+		{"archive", contracts.ErrCompactArchive, "归档压缩前的原文失败，历史未被修改；请重试"},
 		{"other", errors.New("boom"), "压缩失败：boom"},
 	}
 	for _, test := range tests {
@@ -229,6 +231,21 @@ func TestCompactCommandEnglish(t *testing.T) {
 	if !waitCompactToast(t, h, tester, notifier, "Compacted: 4 → 2 messages") {
 		t.Fatalf("English compaction toast missing; texts = %v", tester.Texts())
 	}
+
+	// The archive failure aborts before compacting: the error names the real
+	// cause (the history is untouched) instead of showing a success toast.
+	archiveChat := compactSessionChat()
+	archiveChat.compactErr = contracts.ErrCompactArchive
+	archiveHarness := newModelHarness(t, archiveChat, nil)
+	archiveHarness.ui.Locale().SetLanguage("en")
+	archiveTester := archiveHarness.tester()
+	if err := findCompactCommand(t, archiveHarness).Run(); err != nil {
+		t.Fatalf("compact Run: %v", err)
+	}
+	waitCompactNotice(t, archiveHarness, archiveTester)
+	archiveHarness.assertTexts(archiveTester,
+		"Failed to archive the raw history; nothing was compacted, try again")
+	archiveHarness.assertNoTexts(archiveTester, "Compacted:")
 }
 
 // newCompactNotifierHarness is newModelHarness plus the optional host notifier:

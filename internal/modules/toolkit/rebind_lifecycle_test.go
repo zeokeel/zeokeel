@@ -45,10 +45,10 @@ func findProxy(t *testing.T, proxies []rig.Tool, name string) rig.Tool {
 	return nil
 }
 
-// TestWorkspaceSwitchClosesRetiredBuild covers the leak: after the current
-// workspace root changes, the previous build must be released, while the new
-// build stays open.
-func TestWorkspaceSwitchClosesRetiredBuild(t *testing.T) {
+// TestWorkspaceSwitchRetainsOldBuild covers the execution-domain rule: after
+// the current workspace root changes, the previous build stays alive (its jobs
+// and terminals must remain controllable); module unload releases every build.
+func TestWorkspaceSwitchRetainsOldBuild(t *testing.T) {
 	rootA, rootB := t.TempDir(), t.TempDir()
 	current := rootA
 	group := newRebindGroup(Config{}, 5*time.Second, func() string { return current }, nil, nil)
@@ -66,14 +66,18 @@ func TestWorkspaceSwitchClosesRetiredBuild(t *testing.T) {
 	if scopedB.root != rootB {
 		t.Fatalf("second build root = %q, want %q", scopedB.root, rootB)
 	}
-	waitBuildClosed(t, scopedA)
-	if !scopedA.isClosed() {
-		t.Fatal("retired build reports not closed after release")
+	if scopedA.isClosed() {
+		t.Fatal("workspace switch released the previous build; its jobs/terminals would be lost")
 	}
 	select {
 	case <-scopedB.closedChan():
-		t.Fatal("active build was closed by the root change")
+		t.Fatal("new build was closed by the root change")
 	default:
+	}
+
+	group.close()
+	if !scopedA.waitClosed(5*time.Second) || !scopedB.waitClosed(5*time.Second) {
+		t.Fatal("module unload did not release every retained build")
 	}
 }
 
@@ -93,13 +97,14 @@ func (t *blockingTool) Invoke(context.Context, rig.ToolCall) (rig.ToolResult, er
 	return rig.ToolResult{Content: "released"}, nil
 }
 
-// TestWorkspaceSwitchDoesNotAbortInFlightCall covers the lifetime rule: a build
-// retired while a tool call is still running against it must close only after
-// that call finishes, so switching the workspace cannot abort in-flight work.
-func TestWorkspaceSwitchDoesNotAbortInFlightCall(t *testing.T) {
+// TestRetainedBuildKeepsInFlightCall covers the lifetime rule: a call already
+// running against a build completes normally while a new build is installed for
+// the new root; the old build is not released by the switch.
+func TestRetainedBuildKeepsInFlightCall(t *testing.T) {
 	rootA, rootB := t.TempDir(), t.TempDir()
 	current := rootA
-	group := &rebindGroup{cfg: Config{}, timeout: 5 * time.Second, rootOf: func() string { return current }}
+	group := newRebindGroup(Config{}, 5*time.Second, func() string { return current }, nil, nil)
+	defer group.close()
 	blocking := &blockingTool{started: make(chan struct{}), release: make(chan struct{})}
 	scopedA := &rootScoped{
 		root:   rootA,
@@ -108,7 +113,10 @@ func TestWorkspaceSwitchDoesNotAbortInFlightCall(t *testing.T) {
 		byName: map[string]rig.Tool{blocking.Name(): blocking},
 		done:   make(chan struct{}),
 	}
+	group.mu.Lock()
 	group.current = scopedA
+	group.addBuildLocked(group.buildKey(rootA, sandbox.ModeWorkspaceWrite, nil), scopedA)
+	group.mu.Unlock()
 	proxy := &boundTool{meta: blocking, group: group}
 
 	result := make(chan rig.ToolResult, 1)
@@ -126,19 +134,18 @@ func TestWorkspaceSwitchDoesNotAbortInFlightCall(t *testing.T) {
 	if scopedB == scopedA {
 		t.Fatal("root change reused the previous build")
 	}
-	defer group.close()
-
-	select {
-	case <-scopedA.closedChan():
-		t.Fatal("retired build closed while a tool call was still in flight")
-	case <-time.After(100 * time.Millisecond):
+	if scopedA.isClosed() {
+		t.Fatal("workspace switch released the build an in-flight call was using")
 	}
 
 	close(blocking.release)
 	if invoked := <-result; invoked.Content != "released" {
 		t.Fatalf("in-flight result = %+v", invoked)
 	}
-	waitBuildClosed(t, scopedA)
+	group.close()
+	if !scopedA.waitClosed(5 * time.Second) {
+		t.Fatal("module unload did not release the retained build")
+	}
 }
 
 // TestJobCompletionNoticesReachAgentLoop covers Rig's documented notification
@@ -200,11 +207,11 @@ func TestJobCompletionNoticesReachAgentLoop(t *testing.T) {
 // jobIDPattern extracts the id from a job_start/job_output result.
 var jobIDPattern = regexp.MustCompile(`job_id:\s*(\S+)`)
 
-// TestWorkspaceSwitchReleasesOldRootJobs covers the process leak the real
-// Windows session showed (six background jobs left behind): after a workspace
-// switch the old root's job table must be gone, so those processes are killed
-// instead of running invisibly until app exit.
-func TestWorkspaceSwitchReleasesOldRootJobs(t *testing.T) {
+// TestWorkspaceSwitchKeepsOldRootJobs covers the execution-domain persistence:
+// a job started under root A stays controllable by id after switching to root B
+// (job_output/job_kill route to the owner build), while job_list only merges the
+// caller root's builds. Module unload releases the job's process.
+func TestWorkspaceSwitchKeepsOldRootJobs(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("background shell jobs need /bin/sh, which is Unix-only in Rig")
 	}
@@ -212,37 +219,57 @@ func TestWorkspaceSwitchReleasesOldRootJobs(t *testing.T) {
 	current := rootA
 	group := newRebindGroup(Config{}, 5*time.Second, func() string { return current }, nil, nil)
 	defer group.close()
+	proxyTools := group.proxies(group.forRoot())
 
-	scopedA := group.forRoot()
-	start := scopedA.byName["job_start"]
+	start := findProxy(t, proxyTools, "job_start")
 	started, err := start.Invoke(context.Background(), rig.ToolCall{
 		Name:      "job_start",
 		Arguments: `{"command":"tail -f /dev/null"}`,
 	})
-	if err != nil {
-		t.Fatalf("job_start: %v", err)
+	if err != nil || started.IsError {
+		t.Fatalf("job_start = %q (err %v)", started.Content, err)
 	}
 	match := jobIDPattern.FindStringSubmatch(started.Content)
 	if match == nil {
 		t.Fatalf("job_start result = %q, want a job id", started.Content)
 	}
 	jobID := match[1]
-	if listed, listErr := scopedA.byName["job_list"].Invoke(context.Background(), rig.ToolCall{Name: "job_list"}); listErr != nil ||
+	if listed, listErr := findProxy(t, proxyTools, "job_list").Invoke(context.Background(), rig.ToolCall{Name: "job_list"}); listErr != nil ||
 		!strings.Contains(listed.Content, jobID) {
 		t.Fatalf("job_list after start = %q (err %v), want job %s", listed.Content, listErr, jobID)
 	}
 
 	current = rootB
-	group.forRoot()
-	waitBuildClosed(t, scopedA)
+	// A follow-up by id reaches the retained build (the old job is still running).
+	output, err := findProxy(t, proxyTools, "job_output").Invoke(context.Background(), rig.ToolCall{
+		Name: "job_output", Arguments: `{"job_id":"` + jobID + `"}`,
+	})
+	if err != nil || output.IsError || !strings.Contains(output.Content, "job_id: "+jobID) {
+		t.Fatalf("job_output(%s) after switch = %q (err %v), want the running job", jobID, output.Content, err)
+	}
+	// job_list only merges the caller root's builds: root B has no jobs.
+	if listed, listErr := findProxy(t, proxyTools, "job_list").Invoke(context.Background(), rig.ToolCall{Name: "job_list"}); listErr != nil ||
+		strings.Contains(listed.Content, jobID) {
+		t.Fatalf("job_list on root B = %q (err %v), want no jobs from another root", listed.Content, listErr)
+	}
+	// The old job is still killable by id from the current root.
+	kill, err := findProxy(t, proxyTools, "job_kill").Invoke(context.Background(), rig.ToolCall{
+		Name: "job_kill", Arguments: `{"job_id":"` + jobID + `"}`,
+	})
+	if err != nil || kill.IsError {
+		t.Fatalf("job_kill(%s) after switch = %q (err %v)", jobID, kill.Content, err)
+	}
 
-	// The retired manager's table is cleared, so the model can never reach the
-	// orphaned job again and the process was terminated by CloseAll.
-	listed, err := scopedA.byName["job_list"].Invoke(context.Background(), rig.ToolCall{Name: "job_list"})
-	if err != nil {
-		t.Fatalf("job_list after close: %v", err)
+	// Module unload releases every build (which kills/owns its processes).
+	group.close()
+	if !group.buildsSnapshotIsEmpty() {
+		t.Fatal("group.close left retained builds registered")
 	}
-	if !strings.Contains(listed.Content, "no jobs") {
-		t.Fatalf("retired build still lists jobs: %q", listed.Content)
-	}
+}
+
+// buildsSnapshotIsEmpty reports whether the group released every build (tests).
+func (g *rebindGroup) buildsSnapshotIsEmpty() bool {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	return len(g.builds) == 0 && len(g.order) == 0 && g.current == nil
 }

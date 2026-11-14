@@ -72,9 +72,12 @@ type ChildAgent struct {
 	// Activity is the bounded recent timeline, oldest first.
 	Activity []ChildAgentActivity
 	// Historical marks a child restored from the durable child-agent history:
-	// its run is over and the backend no longer owns it, so the view is
-	// read-only and no follow-up message can be delivered.
+	// its run is over and the backend no longer owns a live subagent for it.
 	Historical bool
+	// Resumable reports that a historical child can still be continued: a
+	// follow-up message cold-resumes it from its durable child session (the
+	// backend rebuilds the run from the stored history). Live rows report false.
+	Resumable bool
 }
 
 // ChildAgentService is the read/control surface the session header uses for the

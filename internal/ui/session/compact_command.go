@@ -94,6 +94,11 @@ func compactErrorText(st *state, err error) string {
 	case errors.Is(err, contracts.ErrCompactConflict):
 		return st.tr("压缩期间历史被修改，已取消；请重试",
 			"History changed during compaction; cancelled, try again")
+	case errors.Is(err, contracts.ErrCompactArchive):
+		// The raw history could not be archived, so the compaction was aborted
+		// before touching it: report the failure instead of a false "compacted".
+		return st.tr("归档压缩前的原文失败，历史未被修改；请重试",
+			"Failed to archive the raw history; nothing was compacted, try again")
 	case errors.Is(err, contracts.ErrChatCompacting):
 		return st.tr("会话正在压缩，请稍后再试",
 			"Session is being compacted; try again shortly")

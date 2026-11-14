@@ -7,8 +7,6 @@ package main
 // send (the model chip folds into that menu) instead of an unlabeled » overflow.
 
 import (
-	"context"
-
 	"github.com/egoist/mygo/ui"
 )
 
@@ -35,13 +33,12 @@ func (d *drive) runHNarrowSteps() {
 		"1024 窗口 + 右栏 drawer：标题在宿主 B3 顶栏保持可读；目标状态与正文在 composer 上方目标条（宽窄一致），目标动作在条上的 ⋯ 菜单", func(c *check) {
 			d.resetToSession()
 			goalText := "窄列标题优先与目标紧凑显示的测试目标"
-			tracker := d.uiRoot.GoalTracker()
-			if _, err := tracker.Set(context.Background(), goalText); err != nil {
-				c.failf("GoalTracker.Set 失败：%v", err)
+			if err := d.seedGoal(goalText); err != nil {
+				c.failf("创建目标失败：%v", err)
 				return
 			}
 			defer func() {
-				tracker.Clear()
+				d.clearGoal()
 				d.uiRoot.SetRightPanelOpen(false)
 				d.setSize(1280, 800)
 				d.frame()
@@ -71,7 +68,7 @@ func (d *drive) runHNarrowSteps() {
 			}
 			d.drain(2)
 			c.require(c.has("暂停目标") || c.has("继续目标"), "目标操作菜单没有暂停/继续目标")
-			c.require(c.has("删除目标记录"), "目标操作菜单缺少「删除目标记录」")
+			c.require(c.has("清除目标记录"), "目标操作菜单缺少「清除目标记录」")
 			c.shot("session-narrow-goal-menu")
 			d.key(0, ui.KeyEscape)
 			d.drain(2)

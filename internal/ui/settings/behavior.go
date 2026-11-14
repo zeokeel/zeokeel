@@ -53,7 +53,8 @@ var behaviorPermissions = []behaviorPermission{
 	},
 	{
 		value: contracts.PermissionFull, zh: "所有权限", en: "All permissions",
-		meaningZh: "全部自动允许，不再询问", meaningEn: "Allow everything without asking",
+		meaningZh: "全部自动允许，不再询问（无人值守）",
+		meaningEn: "Allow everything without asking (unattended)",
 	},
 }
 

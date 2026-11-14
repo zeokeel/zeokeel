@@ -1,7 +1,9 @@
 // Package automation implements ZeoKeel's automation backend module: the
-// persisted scheduled-task registry, the scheduler loop that fires due tasks
-// through the chat service, and the optional rig schedule_* tools bound to this
-// durable scheduler.
+// persisted scheduled-task registry, the scheduler loop that delivers due tasks
+// through the chat service into the task's bound conversation, and the optional
+// rig schedule_* tools bound to this durable scheduler. Every run is recorded as
+// delivered (the chat service accepted the prompt) and later settles to
+// success/failed/interrupted by subscribing to the chat session state.
 //
 // It is a kernel backend module: it requires the product data directory, the
 // host logger and the chat service, and optionally consumes the Rig toolkit
@@ -83,6 +85,11 @@ func Module() *module.Descriptor[Config] {
 		if err != nil {
 			return fmt.Errorf("%s: open automation registry: %w", ModuleID, err)
 		}
+		// The notifier is optional: a host without it (headless/embedded) still
+		// settles runs, it only cannot reach the user outside the app.
+		if notifier, ok := ctx.Get(contracts.KeyNotifier); ok && notifier != nil {
+			service.notifier = notifier
+		}
 		if _, err := ctx.Provide(contracts.KeyAutomation, contracts.AutomationService(service)); err != nil {
 			service.Close()
 			return fmt.Errorf("%s: provide automation service: %w", ModuleID, err)
@@ -124,19 +131,24 @@ func validateConfig(cfg Config) error {
 
 // taskRecord is one task in the JSON registry.
 type taskRecord struct {
-	ID          string    `json:"id"`
-	Name        string    `json:"name"`
-	Prompt      string    `json:"prompt"`
-	Schedule    string    `json:"schedule"`
-	Model       string    `json:"model,omitempty"`
-	WorkspaceID string    `json:"workspaceId,omitempty"`
-	Permission  string    `json:"permission,omitempty"`
-	Enabled     bool      `json:"enabled"`
-	CreatedAt   time.Time `json:"createdAt"`
-	UpdatedAt   time.Time `json:"updatedAt"`
-	LastRun     time.Time `json:"lastRun"`
-	NextRun     time.Time `json:"nextRun"`
-	LastError   string    `json:"lastError"`
+	ID          string `json:"id"`
+	Name        string `json:"name"`
+	Prompt      string `json:"prompt"`
+	Schedule    string `json:"schedule"`
+	Model       string `json:"model,omitempty"`
+	WorkspaceID string `json:"workspaceId,omitempty"`
+	Permission  string `json:"permission,omitempty"`
+	// SessionID is the conversation subsequent runs are delivered to; the
+	// first run creates it and the service persists it here.
+	SessionID string `json:"sessionId,omitempty"`
+	// NewSessionPerRun starts every run in a fresh conversation.
+	NewSessionPerRun bool      `json:"newSessionPerRun,omitempty"`
+	Enabled          bool      `json:"enabled"`
+	CreatedAt        time.Time `json:"createdAt"`
+	UpdatedAt        time.Time `json:"updatedAt"`
+	LastRun          time.Time `json:"lastRun"`
+	NextRun          time.Time `json:"nextRun"`
+	LastError        string    `json:"lastError"`
 
 	// RunHistory is the persisted recent-run list (newest first).
 	RunHistory []contracts.AutomationRunRecord `json:"runHistory,omitempty"`
@@ -160,10 +172,24 @@ type service struct {
 	// create, so the sidebar can hide automation-run conversations by explicit
 	// provenance instead of guessing from their title (audit F6).
 	settings contracts.SettingsService
+	// notifier is optional: the host bridge that mirrors a settled automation
+	// run outside the app (OS notification + in-app toast).
+	notifier contracts.Notifier
 
 	tasks    []contracts.AutomationTask
 	inFlight map[string]bool
 	nameSeq  int
+	runSeq   uint64
+
+	// pending tracks delivered runs whose chat session has not settled yet,
+	// keyed by run-record ID. Settlement writes the terminal status back into
+	// the task's RunHistory.
+	pending map[string]*pendingRun
+
+	// chatUnsub releases the chat-session subscription on Close.
+	chatUnsub func()
+	// closed stops new settlement goroutines after Close begins.
+	closed bool
 
 	subscribers    map[uint64]func()
 	nextSubscriber uint64
@@ -182,6 +208,22 @@ var _ contracts.AutomationService = (*service)(nil)
 type discardLogger struct{}
 
 func (discardLogger) Printf(string, ...any) {}
+
+// pendingRun is one delivered run awaiting its chat session's terminal state.
+type pendingRun struct {
+	taskID      string
+	sessionID   string
+	startedAt   time.Time
+	deliveredAt time.Time
+}
+
+// runDelivery is one successful chat delivery of a task prompt.
+type runDelivery struct {
+	SessionID   string
+	Created     bool
+	Summary     string
+	DeliveredAt time.Time
+}
 
 // newService loads the registry and starts the scheduler loop. settings is
 // optional (nil for embedded/headless use): it only carries the run-session
@@ -207,6 +249,7 @@ func newService(dataDir string, cfg Config, logger contracts.Logger, chat contra
 		chat:        chat,
 		settings:    settings,
 		inFlight:    map[string]bool{},
+		pending:     map[string]*pendingRun{},
 		subscribers: map[uint64]func(){},
 		interval:    tick,
 		stop:        make(chan struct{}),
@@ -215,6 +258,15 @@ func newService(dataDir string, cfg Config, logger contracts.Logger, chat contra
 	if err := service.load(); err != nil {
 		return nil, err
 	}
+	// The automation module subscribes to chat-session changes to settle its
+	// delivered runs. A host whose chat service cannot subscribe still runs
+	// tasks; their records then stay "delivered" (unknown outcome).
+	if unsubscribe, err := chat.Subscribe(service.onChatChange); err != nil {
+		service.logger.Printf("%s: subscribe chat session states: %v", ModuleID, err)
+	} else {
+		service.chatUnsub = unsubscribe
+	}
+	service.reconcileLoadedRuns()
 	go service.loop()
 	service.logger.Printf("%s: initialized with %d tasks (tick %s)", ModuleID, len(service.tasks), tick)
 	return service, nil
@@ -263,20 +315,22 @@ func (s *service) load() error {
 			continue
 		}
 		tasks = append(tasks, contracts.AutomationTask{
-			ID:          record.ID,
-			Name:        record.Name,
-			Prompt:      record.Prompt,
-			Schedule:    record.Schedule,
-			Enabled:     record.Enabled,
-			Model:       strings.TrimSpace(record.Model),
-			WorkspaceID: strings.TrimSpace(record.WorkspaceID),
-			Permission:  strings.TrimSpace(record.Permission),
-			CreatedAt:   record.CreatedAt.UTC(),
-			UpdatedAt:   record.UpdatedAt.UTC(),
-			LastRun:     record.LastRun.UTC(),
-			NextRun:     record.NextRun.UTC(),
-			LastError:   record.LastError,
-			RunHistory:  append([]contracts.AutomationRunRecord(nil), record.RunHistory...),
+			ID:               record.ID,
+			Name:             record.Name,
+			Prompt:           record.Prompt,
+			Schedule:         record.Schedule,
+			Enabled:          record.Enabled,
+			Model:            strings.TrimSpace(record.Model),
+			WorkspaceID:      strings.TrimSpace(record.WorkspaceID),
+			Permission:       strings.TrimSpace(record.Permission),
+			SessionID:        strings.TrimSpace(record.SessionID),
+			NewSessionPerRun: record.NewSessionPerRun,
+			CreatedAt:        record.CreatedAt.UTC(),
+			UpdatedAt:        record.UpdatedAt.UTC(),
+			LastRun:          record.LastRun.UTC(),
+			NextRun:          record.NextRun.UTC(),
+			LastError:        record.LastError,
+			RunHistory:       append([]contracts.AutomationRunRecord(nil), record.RunHistory...),
 		})
 	}
 	s.tasks = tasks
@@ -313,20 +367,22 @@ func (s *service) persistLocked() error {
 	document := registryDocument{Tasks: make([]taskRecord, 0, len(s.tasks))}
 	for _, task := range s.tasks {
 		document.Tasks = append(document.Tasks, taskRecord{
-			ID:          task.ID,
-			Name:        task.Name,
-			Prompt:      task.Prompt,
-			Schedule:    task.Schedule,
-			Enabled:     task.Enabled,
-			Model:       task.Model,
-			WorkspaceID: task.WorkspaceID,
-			Permission:  task.Permission,
-			CreatedAt:   task.CreatedAt.UTC(),
-			UpdatedAt:   task.UpdatedAt.UTC(),
-			LastRun:     task.LastRun.UTC(),
-			NextRun:     task.NextRun.UTC(),
-			LastError:   task.LastError,
-			RunHistory:  append([]contracts.AutomationRunRecord(nil), task.RunHistory...),
+			ID:               task.ID,
+			Name:             task.Name,
+			Prompt:           task.Prompt,
+			Schedule:         task.Schedule,
+			Enabled:          task.Enabled,
+			Model:            task.Model,
+			WorkspaceID:      task.WorkspaceID,
+			Permission:       task.Permission,
+			SessionID:        task.SessionID,
+			NewSessionPerRun: task.NewSessionPerRun,
+			CreatedAt:        task.CreatedAt.UTC(),
+			UpdatedAt:        task.UpdatedAt.UTC(),
+			LastRun:          task.LastRun.UTC(),
+			NextRun:          task.NextRun.UTC(),
+			LastError:        task.LastError,
+			RunHistory:       append([]contracts.AutomationRunRecord(nil), task.RunHistory...),
 		})
 	}
 	data, err := json.MarshalIndent(document, "", "  ")
@@ -365,10 +421,19 @@ func (s *service) persistLocked() error {
 	return nil
 }
 
-// Close stops the scheduler loop, waits for it to exit and then waits for any
-// in-flight executions to finish their registry writes. It is idempotent.
+// Close stops the scheduler loop, releases the chat subscription, waits for the
+// loop to exit and then waits for any in-flight executions and run settlements
+// to finish their registry writes. It is idempotent.
 func (s *service) Close() {
 	s.closeOnce.Do(func() {
+		s.mu.Lock()
+		s.closed = true
+		unsubscribe := s.chatUnsub
+		s.chatUnsub = nil
+		s.mu.Unlock()
+		if unsubscribe != nil {
+			unsubscribe()
+		}
 		close(s.stop)
 		<-s.done
 		s.runs.Wait()
@@ -393,7 +458,10 @@ func (s *service) loop() {
 
 // tick launches every enabled task whose NextRun is due. Execution happens on
 // goroutines; the in-flight guard prevents overlapping copies of one task.
+// Delivered runs whose session ended are settled first (outside the lock and on
+// a tracked goroutine: the ticker never waits for a run).
 func (s *service) tick(now time.Time) {
+	s.reconcilePending()
 	s.mu.Lock()
 	due := make([]string, 0, len(s.tasks))
 	for _, task := range s.tasks {
@@ -406,6 +474,41 @@ func (s *service) tick(now time.Time) {
 	for _, id := range due {
 		s.startRun(id, false)
 	}
+}
+
+// prepareSchedule canonicalizes a draft schedule and computes its next firing.
+//
+// Disabled tasks keep an unparseable draft as typed (the UI shows the raw value
+// with a Fix action); enabled tasks must parse and have an upcoming occurrence.
+// A once-at schedule must also be in the future (DSH rejects past absolute
+// targets at creation).
+func prepareSchedule(spec string, enabled bool, now time.Time) (string, time.Time, error) {
+	canonical := strings.TrimSpace(spec)
+	if canonical == "" {
+		if !enabled {
+			return "", time.Time{}, nil
+		}
+		return "", time.Time{}, fmt.Errorf("%s: schedule is required for an enabled task", ModuleID)
+	}
+	parsed, err := Parse(canonical)
+	if err != nil {
+		if !enabled {
+			return canonical, time.Time{}, nil
+		}
+		return "", time.Time{}, err
+	}
+	canonical = parsed.String()
+	if !enabled {
+		return canonical, time.Time{}, nil
+	}
+	next := parsed.Next(now)
+	if next.IsZero() {
+		return "", time.Time{}, fmt.Errorf("%s: schedule %q has no upcoming occurrence", ModuleID, canonical)
+	}
+	if parsed.Kind() == KindAt && !next.After(now) {
+		return "", time.Time{}, fmt.Errorf("%s: schedule %q is in the past", ModuleID, canonical)
+	}
+	return canonical, next, nil
 }
 
 // --- CRUD ------------------------------------------------------------------
@@ -447,28 +550,25 @@ func (s *service) Create(ctx context.Context, task contracts.AutomationTask) (co
 		s.nameSeq++
 		name = fmt.Sprintf("自动化 %d", s.nameSeq)
 	}
-	schedule := strings.TrimSpace(task.Schedule)
-	nextRun := time.Time{}
-	if task.Enabled {
-		next, err := NextRun(schedule, now)
-		if err != nil {
-			s.mu.Unlock()
-			return contracts.AutomationTask{}, err
-		}
-		nextRun = next
+	schedule, nextRun, err := prepareSchedule(task.Schedule, task.Enabled, now)
+	if err != nil {
+		s.mu.Unlock()
+		return contracts.AutomationTask{}, err
 	}
 	created := contracts.AutomationTask{
-		ID:          id,
-		Name:        name,
-		Prompt:      task.Prompt,
-		Schedule:    schedule,
-		Enabled:     task.Enabled,
-		Model:       strings.TrimSpace(task.Model),
-		WorkspaceID: strings.TrimSpace(task.WorkspaceID),
-		Permission:  strings.TrimSpace(task.Permission),
-		CreatedAt:   now,
-		UpdatedAt:   now,
-		NextRun:     nextRun,
+		ID:               id,
+		Name:             name,
+		Prompt:           task.Prompt,
+		Schedule:         schedule,
+		Enabled:          task.Enabled,
+		Model:            strings.TrimSpace(task.Model),
+		WorkspaceID:      strings.TrimSpace(task.WorkspaceID),
+		Permission:       strings.TrimSpace(task.Permission),
+		SessionID:        strings.TrimSpace(task.SessionID),
+		NewSessionPerRun: task.NewSessionPerRun,
+		CreatedAt:        now,
+		UpdatedAt:        now,
+		NextRun:          nextRun,
 	}
 	previous := append([]contracts.AutomationTask(nil), s.tasks...)
 	s.tasks = append(s.tasks, created)
@@ -503,15 +603,10 @@ func (s *service) Update(ctx context.Context, task contracts.AutomationTask) (co
 	if name == "" {
 		name = existing.Name
 	}
-	schedule := strings.TrimSpace(task.Schedule)
-	nextRun := time.Time{}
-	if task.Enabled {
-		next, err := NextRun(schedule, now)
-		if err != nil {
-			s.mu.Unlock()
-			return contracts.AutomationTask{}, err
-		}
-		nextRun = next
+	schedule, nextRun, err := prepareSchedule(task.Schedule, task.Enabled, now)
+	if err != nil {
+		s.mu.Unlock()
+		return contracts.AutomationTask{}, err
 	}
 	updated := existing
 	updated.Name = name
@@ -520,6 +615,12 @@ func (s *service) Update(ctx context.Context, task contracts.AutomationTask) (co
 	updated.Model = strings.TrimSpace(task.Model)
 	updated.WorkspaceID = strings.TrimSpace(task.WorkspaceID)
 	updated.Permission = strings.TrimSpace(task.Permission)
+	if sessionID := strings.TrimSpace(task.SessionID); sessionID != "" {
+		// Callers that do not manage the binding (the Rig tools) leave it
+		// empty; keep whatever conversation the task is already bound to.
+		updated.SessionID = sessionID
+	}
+	updated.NewSessionPerRun = task.NewSessionPerRun
 	updated.Enabled = task.Enabled
 	updated.NextRun = nextRun
 	updated.UpdatedAt = now
@@ -653,44 +754,81 @@ func (s *service) newTaskIDLocked() string {
 
 // --- execution -------------------------------------------------------------
 
-// execute runs one task through the chat service and updates its scheduling
-// state. force marks a RunNow execution (it runs even for disabled tasks).
+// execute delivers one task run through the chat service and updates its
+// scheduling state. force marks a RunNow execution (it runs even for disabled
+// tasks). Delivery happens on the caller's goroutine; completion is settled
+// later from the chat subscription (never from the ticker).
 func (s *service) execute(taskID string, force bool) {
-	s.mu.Lock()
-	index := s.indexLocked(taskID)
-	if index < 0 || s.inFlight[taskID] {
-		s.mu.Unlock()
+	task, ok := s.claimRun(taskID, force)
+	if !ok {
 		return
 	}
-	task := s.tasks[index]
-	if !force && !task.Enabled {
-		s.mu.Unlock()
-		return
+	defer s.releaseRun(taskID)
+
+	// A trigger while the previous delivered run of this task is still running
+	// is folded (existing in-flight behavior). When that run already ended but
+	// its notification was missed, settle it first and deliver this trigger.
+	if s.hasPendingTask(taskID) {
+		s.settleTask(taskID)
+		if s.hasPendingTask(taskID) {
+			s.logger.Printf("%s: task %s still has a run in flight; folding this trigger", ModuleID, taskID)
+			return
+		}
 	}
-	s.inFlight[taskID] = true
-	s.mu.Unlock()
 
 	startedAt := time.Now().UTC()
-	summary, runErr := s.runTask(task)
+	delivery, deliveryErr := s.runTask(task)
+	recordStatus, recordError, settled := "", "", false
+	if deliveryErr == nil {
+		recordStatus, recordError, settled = s.runOutcome(delivery.SessionID)
+	}
 	now := time.Now().UTC()
+	notifySettled := false
 
 	s.mu.Lock()
+	recordID := s.newRunRecordIDLocked()
 	if index := s.indexLocked(taskID); index >= 0 {
 		current := s.tasks[index]
 		current.LastRun = now
 		current.UpdatedAt = now
-		record := contracts.AutomationRunRecord{
-			StartedAt:  startedAt,
-			FinishedAt: now,
-			Status:     contracts.AutomationRunSuccess,
+		if delivery.Created && !task.NewSessionPerRun {
+			// The first run remembers the conversation subsequent runs use.
+			current.SessionID = delivery.SessionID
 		}
-		if runErr != nil {
-			current.LastError = runErr.Error()
+		record := contracts.AutomationRunRecord{
+			ID:        recordID,
+			StartedAt: startedAt,
+			SessionID: delivery.SessionID,
+			Summary:   truncateRunSummary(delivery.Summary),
+		}
+		switch {
+		case deliveryErr != nil:
 			record.Status = contracts.AutomationRunFailure
-			record.Summary = truncateRunSummary(runErr.Error())
-		} else {
+			record.CompletedAt = now
+			record.Error = truncateRunSummary(deliveryErr.Error())
+			record.Summary = record.Error
+			record.DurationMS = now.Sub(startedAt).Milliseconds()
+			current.LastError = record.Error
+		case settled:
+			record.DeliveredAt = delivery.DeliveredAt
+			record.Status = recordStatus
+			record.Error = truncateRunSummary(recordError)
+			record.CompletedAt = now
+			record.DurationMS = runDuration(now, delivery.DeliveredAt, startedAt)
+			notifySettled = true
+			if recordStatus == contracts.AutomationRunFailure {
+				current.LastError = record.Error
+			} else {
+				current.LastError = ""
+			}
+		default:
+			record.DeliveredAt = delivery.DeliveredAt
+			record.Status = contracts.AutomationRunDelivered
 			current.LastError = ""
-			record.Summary = truncateRunSummary(summary)
+			s.pending[recordID] = &pendingRun{
+				taskID: taskID, sessionID: delivery.SessionID,
+				startedAt: startedAt, deliveredAt: delivery.DeliveredAt,
+			}
 		}
 		current.RunHistory = append([]contracts.AutomationRunRecord{record}, current.RunHistory...)
 		if len(current.RunHistory) > maxRunHistory {
@@ -699,27 +837,83 @@ func (s *service) execute(taskID string, force bool) {
 		current.NextRun, current.Enabled = s.rescheduleLocked(current, now)
 		s.tasks[index] = current
 	}
-	delete(s.inFlight, taskID)
 	if err := s.persistLocked(); err != nil {
 		s.logger.Printf("%s: persist run of %s: %v", ModuleID, taskID, err)
 	}
 	s.mu.Unlock()
 	s.notify()
+	if notifySettled {
+		s.notifyRunSettled(task.Name, delivery.SessionID, recordStatus, recordError)
+	}
+	if deliveryErr == nil && !settled {
+		// The session may have settled between the read above and the pending
+		// registration; its notification then found nothing to settle.
+		s.settleRecord(recordID)
+	}
 }
 
-// runTask creates the automation chat session and sends the prompt, returning
-// the run summary for the history (the session reference on success).
-func (s *service) runTask(task contracts.AutomationTask) (string, error) {
-	title := "自动化: " + task.Name
-	sessionID, err := s.chat.NewSession(title)
-	if err != nil {
-		s.logger.Printf("%s: run %s: create chat session: %v", ModuleID, task.ID, err)
-		return "", fmt.Errorf("create chat session: %w", err)
+// claimRun takes the in-flight guard for one execution and snapshots the task.
+func (s *service) claimRun(taskID string, force bool) (contracts.AutomationTask, bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	index := s.indexLocked(taskID)
+	if index < 0 || s.inFlight[taskID] {
+		return contracts.AutomationTask{}, false
 	}
-	// Record the run session's provenance right after creation, before anything
-	// can fail: the sidebar hides the session by this explicit origin, not by
-	// its title (audit F6). A failed write only costs the filter.
-	s.recordSessionOrigin(task.ID, sessionID)
+	task := s.tasks[index]
+	if !force && !task.Enabled {
+		return contracts.AutomationTask{}, false
+	}
+	s.inFlight[taskID] = true
+	return task, true
+}
+
+// releaseRun clears the in-flight guard of one execution.
+func (s *service) releaseRun(taskID string) {
+	s.mu.Lock()
+	delete(s.inFlight, taskID)
+	s.mu.Unlock()
+}
+
+// newRunRecordIDLocked allocates a stable record id for in-flight settlement.
+func (s *service) newRunRecordIDLocked() string {
+	s.runSeq++
+	return fmt.Sprintf("run-%d-%d", time.Now().UTC().UnixNano(), s.runSeq)
+}
+
+// runDuration returns the delivery-to-completion duration in milliseconds, or
+// the attempt duration when no delivery instant was recorded.
+func runDuration(completedAt, deliveredAt, startedAt time.Time) int64 {
+	if !deliveredAt.IsZero() {
+		return completedAt.Sub(deliveredAt).Milliseconds()
+	}
+	if !startedAt.IsZero() {
+		return completedAt.Sub(startedAt).Milliseconds()
+	}
+	return 0
+}
+
+// runTask delivers one run: it reuses the task's bound conversation (creating
+// and remembering one on the first run) or starts a fresh conversation when the
+// task asks for it, applies the task's workspace/permission/model overrides, and
+// sends the prompt. Persisting a remembered session id is the caller's job.
+func (s *service) runTask(task contracts.AutomationTask) (runDelivery, error) {
+	sessionID := strings.TrimSpace(task.SessionID)
+	created := false
+	if task.NewSessionPerRun || sessionID == "" || !s.chatSessionExists(sessionID) {
+		newSessionID, err := s.chat.NewSession("自动化: " + task.Name)
+		if err != nil {
+			s.logger.Printf("%s: run %s: create chat session: %v", ModuleID, task.ID, err)
+			return runDelivery{}, fmt.Errorf("create chat session: %w", err)
+		}
+		sessionID = newSessionID
+		created = true
+		// Record the run session's provenance right after creation, before
+		// anything can fail: the sidebar hides the session by this explicit
+		// origin, not by its title (audit F6). A failed write only costs the
+		// filter.
+		s.recordSessionOrigin(task.ID, sessionID)
+	}
 	if workspaceID := strings.TrimSpace(task.WorkspaceID); workspaceID != "" {
 		if switcher, ok := s.chat.(contracts.SessionWorkspaceSwitcher); ok {
 			if err := switcher.SetSessionWorkspace(sessionID, workspaceID); err != nil {
@@ -752,10 +946,310 @@ func (s *service) runTask(task contracts.AutomationTask) (string, error) {
 	}
 	if err := s.chat.Send(sessionID, task.Prompt); err != nil {
 		s.logger.Printf("%s: run %s: send prompt: %v", ModuleID, task.ID, err)
-		return "", fmt.Errorf("send prompt: %w", err)
+		return runDelivery{SessionID: sessionID, Created: created}, fmt.Errorf("send prompt: %w", err)
 	}
 	s.logger.Printf("%s: ran task %s in chat session %s", ModuleID, task.ID, sessionID)
-	return fmt.Sprintf("ran in chat session %s", sessionID), nil
+	return runDelivery{
+		SessionID:   sessionID,
+		Created:     created,
+		Summary:     fmt.Sprintf("ran in chat session %s", sessionID),
+		DeliveredAt: time.Now().UTC(),
+	}, nil
+}
+
+// chatSessionExists reports whether the chat service still knows a session.
+func (s *service) chatSessionExists(sessionID string) bool {
+	if strings.TrimSpace(sessionID) == "" {
+		return false
+	}
+	_, ok := s.chat.Session(sessionID)
+	return ok
+}
+
+// --- run settlement --------------------------------------------------------
+
+// onChatChange is the ChatService subscription callback: when a session changed,
+// settle any automation run delivered to it. It only dispatches a tracked
+// goroutine, so the agent's notification goroutine is never blocked by a
+// registry write.
+func (s *service) onChatChange(sessionID string) {
+	sessionID = strings.TrimSpace(sessionID)
+	if sessionID == "" {
+		return
+	}
+	s.mu.Lock()
+	if s.closed {
+		s.mu.Unlock()
+		return
+	}
+	recordIDs := make([]string, 0, 1)
+	for recordID, run := range s.pending {
+		if run.sessionID == sessionID {
+			recordIDs = append(recordIDs, recordID)
+		}
+	}
+	s.mu.Unlock()
+	if len(recordIDs) == 0 {
+		return
+	}
+	// The agent notifies on every streaming event; the cheap session list probe
+	// keeps a long run from copying the whole read model on each one.
+	if running, exists := s.chatSessionRunning(sessionID); exists && running {
+		return
+	}
+	s.mu.Lock()
+	if s.closed {
+		s.mu.Unlock()
+		return
+	}
+	s.runs.Add(1)
+	s.mu.Unlock()
+	go func() {
+		defer s.runs.Done()
+		for _, recordID := range recordIDs {
+			s.settleRecord(recordID)
+		}
+	}()
+}
+
+// chatSessionRunning probes the chat read model for one session's run state
+// without materializing its message list.
+func (s *service) chatSessionRunning(sessionID string) (running, exists bool) {
+	for _, info := range s.chat.Sessions() {
+		if info.ID == sessionID {
+			return info.Running, true
+		}
+	}
+	return false, false
+}
+
+// reconcilePending settles every delivered run that can be settled now. The
+// ticker calls it so a missed terminal notification can never stall a task; the
+// work runs on a tracked goroutine so the ticker never waits for a run.
+func (s *service) reconcilePending() {
+	s.mu.Lock()
+	if s.closed || len(s.pending) == 0 {
+		s.mu.Unlock()
+		return
+	}
+	candidates := make([]string, 0, len(s.pending))
+	for recordID := range s.pending {
+		candidates = append(candidates, recordID)
+	}
+	s.mu.Unlock()
+	recordIDs := make([]string, 0, len(candidates))
+	for _, recordID := range candidates {
+		s.mu.Lock()
+		run := s.pending[recordID]
+		s.mu.Unlock()
+		if run == nil {
+			continue
+		}
+		if running, exists := s.chatSessionRunning(run.sessionID); exists && running {
+			continue
+		}
+		recordIDs = append(recordIDs, recordID)
+	}
+	if len(recordIDs) == 0 {
+		return
+	}
+	s.mu.Lock()
+	if s.closed {
+		s.mu.Unlock()
+		return
+	}
+	s.runs.Add(1)
+	s.mu.Unlock()
+	go func() {
+		defer s.runs.Done()
+		for _, recordID := range recordIDs {
+			s.settleRecord(recordID)
+		}
+	}()
+}
+
+// reconcileLoadedRuns settles runs that were delivered but never completed
+// before the previous shutdown: the in-memory pending set is gone after a
+// restart, so the persisted "delivered" records are the only trace. Records
+// whose session is still running (or unknown) stay delivered (outcome unknown).
+func (s *service) reconcileLoadedRuns() {
+	s.mu.Lock()
+	recordIDs := make([]string, 0)
+	for _, task := range s.tasks {
+		for _, record := range task.RunHistory {
+			if record.Status != contracts.AutomationRunDelivered || record.ID == "" {
+				continue
+			}
+			sessionID := strings.TrimSpace(record.SessionID)
+			if sessionID == "" {
+				sessionID = contracts.AutomationRunSessionID(record.Summary)
+			}
+			if sessionID == "" {
+				continue
+			}
+			s.pending[record.ID] = &pendingRun{
+				taskID: task.ID, sessionID: sessionID,
+				startedAt: record.StartedAt, deliveredAt: record.DeliveredAt,
+			}
+			recordIDs = append(recordIDs, record.ID)
+		}
+	}
+	s.mu.Unlock()
+	for _, recordID := range recordIDs {
+		s.settleRecord(recordID)
+	}
+}
+
+// hasPendingTask reports whether the task has a delivered run awaiting its
+// session's terminal state.
+func (s *service) hasPendingTask(taskID string) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, run := range s.pending {
+		if run.taskID == taskID {
+			return true
+		}
+	}
+	return false
+}
+
+// settleTask attempts to settle every pending run of one task.
+func (s *service) settleTask(taskID string) {
+	s.mu.Lock()
+	recordIDs := make([]string, 0, 1)
+	for recordID, run := range s.pending {
+		if run.taskID == taskID {
+			recordIDs = append(recordIDs, recordID)
+		}
+	}
+	s.mu.Unlock()
+	for _, recordID := range recordIDs {
+		s.settleRecord(recordID)
+	}
+}
+
+// runOutcome maps a chat session's read model onto a terminal run status,
+// reporting settled=false while the session is still running.
+func (s *service) runOutcome(sessionID string) (status, errText string, settled bool) {
+	state, exists := s.chat.Session(sessionID)
+	if !exists {
+		return contracts.AutomationRunInterrupted, "the chat session is no longer available", true
+	}
+	if state.Running {
+		return "", "", false
+	}
+	var lastAssistant *contracts.ChatMessage
+	for index := len(state.Messages) - 1; index >= 0; index-- {
+		if state.Messages[index].Role == contracts.ChatRoleAssistant {
+			lastAssistant = &state.Messages[index]
+			break
+		}
+	}
+	if lastAssistant != nil {
+		if lastAssistant.Streaming {
+			return contracts.AutomationRunInterrupted, "the run was interrupted", true
+		}
+		if messageError := strings.TrimSpace(lastAssistant.Error); messageError != "" {
+			if lastAssistant.ErrorKind == contracts.MessageErrorKindCancelled {
+				return contracts.AutomationRunInterrupted, messageError, true
+			}
+			return contracts.AutomationRunFailure, messageError, true
+		}
+	}
+	if sessionError := strings.TrimSpace(state.Error); sessionError != "" {
+		return contracts.AutomationRunFailure, sessionError, true
+	}
+	return contracts.AutomationRunSuccess, "", true
+}
+
+// settleRecord writes one delivered run's terminal state back into its task's
+// run history. It is idempotent: an already-settled record is left alone.
+func (s *service) settleRecord(recordID string) {
+	if recordID == "" {
+		return
+	}
+	s.mu.Lock()
+	run := s.pending[recordID]
+	s.mu.Unlock()
+	if run == nil {
+		return
+	}
+	status, errText, settled := s.runOutcome(run.sessionID)
+	if !settled {
+		return
+	}
+	now := time.Now().UTC()
+	s.mu.Lock()
+	if s.pending[recordID] == nil {
+		s.mu.Unlock()
+		return
+	}
+	delete(s.pending, recordID)
+	taskName := run.taskID
+	settledNow := false
+	if index := s.indexLocked(run.taskID); index >= 0 {
+		task := &s.tasks[index]
+		taskName = task.Name
+		for historyIndex := range task.RunHistory {
+			record := &task.RunHistory[historyIndex]
+			if record.ID != recordID || record.Status != contracts.AutomationRunDelivered {
+				continue
+			}
+			record.Status = status
+			record.Error = truncateRunSummary(errText)
+			record.CompletedAt = now
+			record.DurationMS = runDuration(now, record.DeliveredAt, record.StartedAt)
+			settledNow = true
+			if historyIndex == 0 {
+				if status == contracts.AutomationRunFailure {
+					task.LastError = record.Error
+				} else {
+					task.LastError = ""
+				}
+			}
+			task.UpdatedAt = now
+			break
+		}
+	}
+	if err := s.persistLocked(); err != nil {
+		s.logger.Printf("%s: persist settled run %s: %v", ModuleID, recordID, err)
+	}
+	s.mu.Unlock()
+	s.notify()
+	if settledNow {
+		s.notifyRunSettled(taskName, run.sessionID, status, errText)
+	}
+}
+
+// notifyRunSettled reports one settled automation run to the optional host
+// notifier (a no-op without one). A delivered run never notifies: the prompt was
+// accepted but nothing finished. Interrupted runs stay silent too: the user
+// stopped them and the shared copy is success/failure only, so a neutral
+// interruption must not be reported as either.
+//
+// The run's conversation travels as the notification's session tag (not as
+// visible copy): a click on the OS notification opens that session, and the raw
+// session id never leaks into the toast/notification text.
+func (s *service) notifyRunSettled(taskName, sessionID, status, errText string) {
+	if s.notifier == nil {
+		return
+	}
+	if status != contracts.AutomationRunSuccess && status != contracts.AutomationRunFailure {
+		return
+	}
+	name := strings.TrimSpace(taskName)
+	if name == "" {
+		name = "自动化任务"
+	}
+	failed := status == contracts.AutomationRunFailure
+	text := "自动化「" + name + "」已完成"
+	if failed {
+		text = "自动化「" + name + "」失败"
+		if cause := truncateRunSummary(strings.TrimSpace(errText)); cause != "" {
+			text += "：" + cause
+		}
+	}
+	contracts.NotifyRunFinishedForSession(s.notifier, text, failed, strings.TrimSpace(sessionID))
 }
 
 // recordSessionOrigin persists the origin of one run session (best effort): the
@@ -800,10 +1294,16 @@ func (s *service) rescheduleLocked(task contracts.AutomationTask, from time.Time
 		s.logger.Printf("%s: task %s has an invalid schedule %q: %v", ModuleID, task.ID, task.Schedule, err)
 		return time.Time{}, false
 	}
-	if schedule.Kind() == KindAfter {
+	if schedule.Kind() == KindAfter || schedule.Kind() == KindAt {
 		return time.Time{}, false
 	}
-	return schedule.Next(from), true
+	next := schedule.Next(from)
+	if next.IsZero() {
+		// A repeating rule with no future occurrence (an impossible calendar
+		// combination) ends the task instead of leaving it enabled forever.
+		return time.Time{}, false
+	}
+	return next, true
 }
 
 // --- optional Rig schedule tools -------------------------------------------

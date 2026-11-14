@@ -16,17 +16,19 @@ import (
 
 // englishSessionCommands is the expected English copy of the session commands.
 var englishSessionCommands = map[string][2]string{
-	"zeokeel.session.new":        {"New conversation", "Start and open a new conversation"},
-	"zeokeel.session.fork":       {"Duplicate conversation", "Copy the current conversation"},
-	"zeokeel.session.export":     {"Export conversation", "Export the current conversation as Markdown"},
-	"zeokeel.session.goal":       {"Set goal", "Set or clear a long-term goal for this conversation"},
-	"zeokeel.session.plan":       {"Review plan", "Submit a plan for the user to approve"},
-	"zeokeel.session.memory":     {"Add memory", "Save a global memory"},
-	"zeokeel.session.permission": {"Permission mode", "Cycle permission: read-only → workspace-write → all permissions"},
-	"zeokeel.session.settings":   {"Settings", "Open the settings panel"},
-	"zeokeel.session.stop":       {"Stop", "Stop the current reply"},
-	"zeokeel.session.attach":     {"Attach files", "Add files or images to the input"},
-	"zeokeel.session.help":       {"Help", "Show the available commands and shortcuts"},
+	"zeokeel.session.new":           {"New conversation", "Start and open a new conversation"},
+	"zeokeel.session.fork":          {"Duplicate conversation", "Copy the current conversation"},
+	"zeokeel.session.export":        {"Export conversation", "Export the current conversation as Markdown"},
+	"zeokeel.session.goal":          {"Set goal", "Create or edit a long-term goal for this conversation"},
+	"zeokeel.session.goal.complete": {"Complete goal", "Mark the current goal as completed"},
+	"zeokeel.session.goal.clear":    {"Clear goal", "Delete the current goal and its record (asks first)"},
+	"zeokeel.session.plan":          {"Review plan", "Submit a plan for the user to approve"},
+	"zeokeel.session.memory":        {"Add memory", "Save a global memory"},
+	"zeokeel.session.permission":    {"Permission mode", "Cycle permission: read-only → workspace-write → all permissions"},
+	"zeokeel.session.settings":      {"Settings", "Open the settings panel"},
+	"zeokeel.session.stop":          {"Stop", "Stop the current reply"},
+	"zeokeel.session.attach":        {"Attach files", "Add files or images to the input"},
+	"zeokeel.session.help":          {"Help", "Show the available commands and shortcuts"},
 }
 
 // sessionCommandByID finds one registered command.

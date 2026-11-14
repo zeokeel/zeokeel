@@ -93,7 +93,7 @@ func expandCatalogAdvanced(t *testing.T, h *harness, tester *ui.Tester) {
 	if catalogExactText(tester, "温度 0–2") {
 		return
 	}
-	h.click(tester, "生成与自定义模式")
+	h.click(tester, "生成、价格与自定义模式")
 	tester.Frame()
 	h.assertTexts(tester, "生成参数", "温度 0–2", "自定义思考模式")
 }
@@ -632,7 +632,7 @@ func TestModelThinkingSummaryAndEditConfig(t *testing.T) {
 	// The editor saves family/default mode/custom mode together and the row
 	// reflects the result immediately.
 	openEditModal(t, h, tester, "deepseek-reasoner")
-	h.assertTexts(tester, "生成与自定义模式", "未配置生成参数或自定义模式")
+	h.assertTexts(tester, "生成、价格与自定义模式", "未配置生成参数、价格或自定义模式")
 	h.click(tester, "思考系列菜单")
 	h.click(tester, "千问")
 	tester.Frame()
@@ -791,7 +791,7 @@ func TestModelPageEnglishCopy(t *testing.T) {
 	tester.Frame()
 	h.assertTexts(tester, "Edit model", "Model name", "Provider", "Base URL",
 		"API Key", "Clear the saved key", "Context window", "Thinking family",
-		"Default thinking", "Generation & custom modes", "Set as default model",
+		"Default thinking", "Generation, pricing & custom modes", "Set as default model",
 		"Save model")
 	h.click(tester, "Cancel")
 }

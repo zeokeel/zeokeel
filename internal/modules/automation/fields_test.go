@@ -94,12 +94,12 @@ func TestAutomationRegistryLegacyJSONWithoutFields(t *testing.T) {
 func TestRunTaskAppliesWorkspaceAndPermission(t *testing.T) {
 	chat := newSwitchChat()
 	service := newTestService(t, t.TempDir(), Config{TickMs: 3600000}, chat)
-	summary, err := service.runTask(contracts.AutomationTask{
+	delivery, err := service.runTask(contracts.AutomationTask{
 		ID: "task-1", Name: "run", Prompt: "hello",
 		WorkspaceID: "ws-1", Permission: "full", Model: "m1",
 	})
-	if err != nil || summary == "" {
-		t.Fatalf("runTask = %q, %v", summary, err)
+	if err != nil || delivery.Summary == "" || delivery.SessionID != "sess-1" {
+		t.Fatalf("runTask = %+v, %v", delivery, err)
 	}
 	if got := chat.calls(); strings.Join(got, ",") != "workspace,permission,model" {
 		t.Fatalf("switch order = %v", got)

@@ -322,20 +322,66 @@ func TestGateIntegrationPlanModeBlocksWriteTool(t *testing.T) {
 	}
 }
 
-func TestGateNilApprovalsNormalModeAllows(t *testing.T) {
+func TestGateNilApprovalsFailsClosed(t *testing.T) {
 	settings := newFakeSettings(nil)
 	svc := newService(Config{}, rigtools.NewRegistry(), contracts.SettingsService(settings),
 		&fakeLogger{}, newFakeStore(), nil)
-	decision, err := svc.gate().Approve(context.Background(), &gateTestTool{name: "bash"}, rig.ToolCall{Name: "bash"})
-	if err != nil || decision != rig.DecisionAllow {
-		t.Fatalf("nil approvals normal bash = %q/%v, want allow-all", decision, err)
+	sessionID, err := svc.NewSession("nil approvals")
+	if err != nil {
+		t.Fatalf("NewSession: %v", err)
 	}
+	approve := func(name string) (rig.Decision, error) {
+		return svc.gate(sessionID).Approve(context.Background(), &gateTestTool{name: name}, rig.ToolCall{Name: name})
+	}
+	// A tool that needs an approval prompt cannot be authorized without an
+	// approvals service: fail closed with a readable error.
+	decision, err := approve("bash")
+	// gate.Func collapses an error to an empty decision; the error is the
+	// fail-closed signal and carries the readable explanation.
+	if decision != "" || err == nil ||
+		!strings.Contains(err.Error(), "requires an approvals service") {
+		t.Fatalf("nil approvals bash = %q/%v, want the readable approval-service error", decision, err)
+	}
+	// Plan mode keeps its own whitelist veto (before the approvals branch).
 	if err := settings.Set(contracts.SettingAgentMode, strings.ToUpper(contracts.AgentModePlan)); err != nil {
 		t.Fatalf("Set plan: %v", err)
 	}
-	decision, err = svc.gate().Approve(context.Background(), &gateTestTool{name: "bash"}, rig.ToolCall{Name: "bash"})
-	if err != nil || decision != rig.DecisionDeny {
-		t.Fatalf("nil approvals plan bash = %q/%v, want deny", decision, err)
+	if decision, err := approve("bash"); decision != rig.DecisionDeny || err != nil {
+		t.Fatalf("nil approvals plan bash = %q/%v, want a plain plan-mode deny", decision, err)
+	}
+	if err := settings.Set(contracts.SettingAgentMode, contracts.AgentModeNormal); err != nil {
+		t.Fatalf("Set normal: %v", err)
+	}
+	// Interaction host tools keep their no-prompt exemption.
+	if decision, err := approve("ask_user"); decision != rig.DecisionAllow || err != nil {
+		t.Fatalf("nil approvals ask_user = %q/%v, want allow", decision, err)
+	}
+	// The per-session read-only whitelist still auto-allows read tools and
+	// fails closed (readably) for the rest.
+	if err := svc.SetSessionPermission(sessionID, contracts.PermissionReadOnly); err != nil {
+		t.Fatalf("SetSessionPermission(read-only): %v", err)
+	}
+	if decision, err := approve("read_file"); decision != rig.DecisionAllow || err != nil {
+		t.Fatalf("nil approvals read-only read_file = %q/%v, want allow", decision, err)
+	}
+	if decision, err := approve("bash"); decision != rig.DecisionDeny || err != nil {
+		t.Fatalf("nil approvals read-only bash = %q/%v, want the hard read-only deny", decision, err)
+	}
+	// An OS-sandboxed shell stays auto-allowed without an approvals service.
+	svc.sandboxService = fakeSandbox{available: true}
+	if err := svc.SetSessionPermission(sessionID, contracts.PermissionWorkspace); err != nil {
+		t.Fatalf("SetSessionPermission(workspace): %v", err)
+	}
+	if decision, err := approve("bash"); decision != rig.DecisionAllow || err != nil {
+		t.Fatalf("nil approvals sandboxed bash = %q/%v, want the sandbox auto-allow", decision, err)
+	}
+	svc.sandboxService = nil
+	// A full per-session override is an explicit allow-all and needs no prompt.
+	if err := svc.SetSessionPermission(sessionID, contracts.PermissionFull); err != nil {
+		t.Fatalf("SetSessionPermission(full): %v", err)
+	}
+	if decision, err := approve("bash"); decision != rig.DecisionAllow || err != nil {
+		t.Fatalf("nil approvals full bash = %q/%v, want allow", decision, err)
 	}
 }
 

@@ -2,7 +2,7 @@ package uiroot
 
 // Regression tests (TDD RED first) for handler-panic containment in the host
 // bridges: a panicking UI-module handler must not propagate across the bridge
-// boundary nor corrupt the bridge state (pending questions, plan/goal state).
+// boundary nor corrupt the bridge state (pending questions, plan state).
 
 import (
 	"context"
@@ -110,53 +110,12 @@ func TestPlanExitContainsHandlerPanic(t *testing.T) {
 	}
 }
 
-func TestGoalSetContainsHandlerPanic(t *testing.T) {
-	root := New(Config{})
-	tracker := root.GoalTracker()
-	tracker.SetHandler(func(contracts.Goal, bool) { panic("goal handler boom") })
-
-	var id string
-	var err error
-	recovered := callContained(func() { id, err = tracker.Set(context.Background(), "ship it") })
-	if recovered != nil {
-		t.Fatalf("Set propagated the handler panic: %v", recovered)
-	}
-	if err != nil || id == "" {
-		t.Fatalf("Set = (%q, %v), want a goal id", id, err)
-	}
-	if gotID, text, status, ok := tracker.Get(); !ok || gotID != id || text != "ship it" || status != "active" {
-		t.Fatalf("Get() = (%q, %q, %q, %v), want the recorded goal", gotID, text, status, ok)
-	}
-}
-
-func TestGoalClearContainsHandlerPanic(t *testing.T) {
-	root := New(Config{})
-	tracker := root.GoalTracker()
-	if _, err := tracker.Set(context.Background(), "goal"); err != nil {
-		t.Fatalf("Set: %v", err)
-	}
-	tracker.SetHandler(func(contracts.Goal, bool) { panic("goal handler boom") })
-
-	existed := false
-	recovered := callContained(func() { existed = tracker.Clear() })
-	if recovered != nil {
-		t.Fatalf("Clear propagated the handler panic: %v", recovered)
-	}
-	if !existed {
-		t.Fatal("Clear reported no goal after a contained handler panic")
-	}
-	if _, _, _, ok := tracker.Get(); ok {
-		t.Fatal("the goal was not cleared after a contained handler panic")
-	}
-}
-
 func TestBridgesContainPanicsConcurrently(t *testing.T) {
 	root := New(Config{})
 	interaction := root.UserInteraction()
 	interaction.SetHandler(func(contracts.UserQuestion) { panic("boom") })
 	root.ArtifactPresenter().SetArtifactHandler(func(contracts.Artifact) { panic("boom") })
 	root.PlanReviewer().SetPlanHandler(func(contracts.PlanReview) { panic("boom") })
-	root.GoalTracker().SetHandler(func(contracts.Goal, bool) { panic("boom") })
 
 	var wg sync.WaitGroup
 	for worker := 0; worker < 8; worker++ {
@@ -165,17 +124,14 @@ func TestBridgesContainPanicsConcurrently(t *testing.T) {
 		go func() {
 			defer wg.Done()
 			for index := 0; index < 10; index++ {
-				switch worker % 4 {
+				switch worker % 3 {
 				case 0:
 					_, _ = interaction.Ask(context.Background(), "q", nil)
 				case 1:
 					_, _ = root.ArtifactPresenter().Present(context.Background(), "t", "b")
-				case 2:
+				default:
 					_, _ = root.PlanReviewer().Review(context.Background(), "plan")
 					_, _ = root.PlanReviewer().Exit("cancel")
-				default:
-					_, _ = root.GoalTracker().Set(context.Background(), "goal")
-					root.GoalTracker().Clear()
 				}
 			}
 		}()

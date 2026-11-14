@@ -26,6 +26,9 @@ type turnUsage struct {
 	// lastPromptTokens is the prompt-token count of the most recent model call
 	// that reported usage; 0 until an EventUsage arrives.
 	lastPromptTokens int
+	// model is the run's model, carried so the per-call observability event does
+	// not need a session read model lookup inside the event hot path.
+	model string
 }
 
 // recordRunUsage copies the run's cumulative provider usage to the current

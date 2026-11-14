@@ -113,7 +113,7 @@ func (p *product) callError(t *testing.T, name, arguments string) string {
 func TestModuleRegistersHostTools(t *testing.T) {
 	product := loadProduct(t, nil, true)
 
-	names := make([]string, 0, 5)
+	names := make([]string, 0, 7)
 	for _, spec := range product.registry.Specs() {
 		names = append(names, spec.Name)
 		if strings.TrimSpace(spec.Description) == "" {
@@ -124,7 +124,7 @@ func TestModuleRegistersHostTools(t *testing.T) {
 		}
 	}
 	want := []string{
-		ToolAskUser, ToolExitPlanMode, ToolGoal, ToolPlanReview, ToolPresent,
+		ToolAskUser, ToolCreateGoal, ToolExitPlanMode, ToolGetGoal, ToolPlanReview, ToolPresent, ToolUpdateGoal,
 	}
 	if len(names) != len(want) {
 		t.Fatalf("registered tools = %v, want %v", names, want)
@@ -151,11 +151,11 @@ func TestModuleRegistersHostTools(t *testing.T) {
 func TestNonInteractiveProductOmitsPlanTools(t *testing.T) {
 	product := loadProduct(t, nil, false)
 
-	names := make([]string, 0, 3)
+	names := make([]string, 0, 5)
 	for _, spec := range product.registry.Specs() {
 		names = append(names, spec.Name)
 	}
-	want := []string{ToolAskUser, ToolGoal, ToolPresent}
+	want := []string{ToolAskUser, ToolCreateGoal, ToolGetGoal, ToolPresent, ToolUpdateGoal}
 	if len(names) != len(want) {
 		t.Fatalf("non-interactive registered tools = %v, want %v", names, want)
 	}
@@ -172,9 +172,14 @@ func TestNonInteractiveProductOmitsPlanTools(t *testing.T) {
 			t.Fatalf("%s in a non-interactive product = %v, want rig.ErrToolNotFound", name, err)
 		}
 	}
-	// The remaining tools keep working in a headless product.
-	if content := product.callOK(t, ToolGoal, `{"action":"get"}`); content != "no goal set" {
-		t.Fatalf("headless goal get = %q", content)
+	// The DSH goal trio stays registered in a headless product; without a goal
+	// backend (this unit-test product) get_goal reports no current goal and the
+	// mutating tools return a readable tool error.
+	if content := product.callOK(t, ToolGetGoal, `{}`); content != `{"goal":null}` {
+		t.Fatalf("headless get_goal = %q, want {\"goal\":null}", content)
+	}
+	if content := product.callError(t, ToolCreateGoal, `{"objective":"ship"}`); !strings.Contains(content, "no goal backend") {
+		t.Fatalf("headless create_goal = %q, want the no-backend message", content)
 	}
 	if content := product.callOK(t, ToolPresent, `{"title":"t","content":"c"}`); !strings.Contains(content, "artifact-1") {
 		t.Fatalf("headless present = %q", content)
@@ -284,44 +289,6 @@ func TestPlanReviewAndExitPlanMode(t *testing.T) {
 	}
 }
 
-func TestGoalTool(t *testing.T) {
-	product := loadProduct(t, nil, true)
-
-	if content := product.callOK(t, ToolGoal, `{"action":"get"}`); content != "no goal set" {
-		t.Fatalf("goal get on empty = %q", content)
-	}
-	// Rig's goal set returns the goal id only; get renders the full record.
-	content := product.callOK(t, ToolGoal, `{"action":"set","text":"Ship v0.4"}`)
-	if content != "goal-1" {
-		t.Fatalf("goal set content = %q, want the goal id", content)
-	}
-	// State persists between tool calls (the same in-memory store).
-	content = product.callOK(t, ToolGoal, `{"action":"get"}`)
-	if content != "id: goal-1\ntext: Ship v0.4\nstatus: active" {
-		t.Fatalf("goal get content = %q", content)
-	}
-	if content := product.callError(t, ToolGoal, `{"action":"set"}`); !strings.Contains(content, "text is required") {
-		t.Fatalf("goal set without text = %q", content)
-	}
-	// The product does not implement rig.GoalUpdater yet, so Rig's "update"
-	// action degrades to a readable error instead of touching the lifecycle.
-	if content := product.callError(t, ToolGoal, `{"action":"update","update":"complete"}`); !strings.Contains(content, "does not support lifecycle updates") {
-		t.Fatalf("goal update without GoalUpdater = %q", content)
-	}
-	if content := product.callOK(t, ToolGoal, `{"action":"clear"}`); content != "goal cleared" {
-		t.Fatalf("goal clear = %q", content)
-	}
-	if content := product.callOK(t, ToolGoal, `{"action":"get"}`); content != "no goal set" {
-		t.Fatalf("goal get after clear = %q", content)
-	}
-	if content := product.callOK(t, ToolGoal, `{"action":"clear"}`); content != "no goal to clear" {
-		t.Fatalf("goal clear when no goal is set = %q", content)
-	}
-	if content := product.callError(t, ToolGoal, `{"action":"bogus"}`); !strings.Contains(content, "unknown action") {
-		t.Fatalf("goal bogus action = %q", content)
-	}
-}
-
 func TestMissingCapabilitiesAreToolErrors(t *testing.T) {
 	product := loadProduct(t, &hostcaps.Host{}, true)
 	cases := map[string]struct {
@@ -332,7 +299,10 @@ func TestMissingCapabilitiesAreToolErrors(t *testing.T) {
 		ToolPresent:      {`{"title":"t","content":"c"}`, "no artifact presenter"},
 		ToolPlanReview:   {`{"content":"# p"}`, "did not provide a rig.PlanController"},
 		ToolExitPlanMode: {`{"action":"status"}`, "did not provide a rig.PlanController"},
-		ToolGoal:         {`{"action":"get"}`, "did not provide a rig.GoalStore"},
+		// The DSH goal trio is registered even without a goal backend; the
+		// mutating tools report that readably instead of failing activation.
+		ToolCreateGoal: {`{"objective":"ship"}`, "no goal backend"},
+		ToolUpdateGoal: {`{"goal_id":"g","revision":1,"action":"pause"}`, "no goal backend"},
 	}
 	for name, test := range cases {
 		if content := product.callError(t, name, test.arguments); !strings.Contains(content, test.want) {
@@ -345,8 +315,8 @@ func TestMissingCapabilitiesAreToolErrors(t *testing.T) {
 
 func TestModuleCloseUnregistersTools(t *testing.T) {
 	product := loadProduct(t, nil, false)
-	if got := len(product.registry.Specs()); got != 3 {
-		t.Fatalf("tools after load = %d, want 3 (non-interactive product without plan tools)", got)
+	if got := len(product.registry.Specs()); got != 5 {
+		t.Fatalf("tools after load = %d, want 5 (non-interactive product without plan tools)", got)
 	}
 	if err := product.loader.Close(); err != nil {
 		t.Fatalf("loader.Close: %v", err)
@@ -368,7 +338,7 @@ func TestDuplicateRegistrationRollsBack(t *testing.T) {
 	t.Cleanup(func() { _ = root.DisposeAll() })
 
 	rigRegistry := rigtool.NewRegistry()
-	if err := rigRegistry.Register(dummyTool{name: ToolGoal}); err != nil {
+	if err := rigRegistry.Register(dummyTool{name: ToolGetGoal}); err != nil {
 		t.Fatalf("pre-register dummy: %v", err)
 	}
 	registry := newKernelRegistry(t, rigRegistry, nil)
@@ -385,7 +355,7 @@ func TestDuplicateRegistrationRollsBack(t *testing.T) {
 	// The tools registered before the duplicate failed must be rolled back;
 	// only the pre-existing dummy remains.
 	specs := rigRegistry.Specs()
-	if len(specs) != 1 || specs[0].Name != ToolGoal {
+	if len(specs) != 1 || specs[0].Name != ToolGetGoal {
 		names := make([]string, 0, len(specs))
 		for _, spec := range specs {
 			names = append(names, spec.Name)
@@ -398,8 +368,8 @@ func TestToolContextCancellation(t *testing.T) {
 	product := loadProduct(t, nil, true)
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	tool := findTool(t, product.registry, ToolGoal)
-	if _, err := tool.Invoke(ctx, rig.ToolCall{Name: ToolGoal, Arguments: `{"action":"get"}`}); !errors.Is(err, context.Canceled) {
+	tool := findTool(t, product.registry, ToolGetGoal)
+	if _, err := tool.Invoke(ctx, rig.ToolCall{Name: ToolGetGoal, Arguments: `{}`}); !errors.Is(err, context.Canceled) {
 		t.Fatalf("Invoke(cancelled ctx) = %v, want context.Canceled", err)
 	}
 }

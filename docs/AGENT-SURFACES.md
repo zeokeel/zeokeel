@@ -40,6 +40,8 @@ Agent 客户端的 UI 不是 CRUD 页面，而是**推理与行动的外化**：
 | S7 | Composer | `uikit.ComposerShell` | `internal/uikit/composer.go`；session/home 只留 toolbar/提交 slot（Phase 3c） | 已有 |
 | S8 | 运行态/流式/恢复 | `uikit.RunStatus` | `internal/uikit/runstatus.go`（Phase 3c） | 已有 |
 | S9 | 多 Agent / 团队 | 会话 Agent Run Band（`session` 包） | `internal/ui/session/agentsurface.go`（Run Band + Popover 团队/子代理/任务 + 主栏子会话视图）；团队/子代理零值常显；旧 `uikit.TeamSurface` 已删除 | 已有（2026-11-11 Run Band） |
+| S10 | 会话上下文账本 | 会话「上下文 / Context」页签（`session` 包） | `internal/ui/session/context_pane.go` + `internal/contracts/contextinspect.go`（agent 折叠 `ContextInspector`） | 已有（2026-11-14） |
+| S11 | 跨会话洞察 | 一级侧栏「洞察 / Insights」screen | `internal/ui/insights/` + `internal/modules/insights/` + `internal/contracts/insights.go` | 已有（2026-11-15） |
 
 > 错误展示是横跨所有 surface 的原语：`uikit.ErrorLine` 已有（RoleAlert + 可选中 + DangerText），大块错误用 `uikit.ErrorPanel`（待建，见 §2.6）。
 
@@ -65,7 +67,7 @@ Agent 客户端的 UI 不是 CRUD 页面，而是**推理与行动的外化**：
 | error | 失败轮显示错误行 + 重试；元信息行只保留时间/用量，不提供 ⋯ 动作。`ErrorKind=iterations` 显示「已达最大迭代次数」+「打开模型设置」+ 提高上限建议（不再以 rig 英文串为标题）；`ErrChatCompacting`/`ErrCompactConflict` 在发送失败时本地化（`会话正在压缩，请稍后再试` / `压缩期间历史被修改，已取消`） |
 | truncated | 最后一条 assistant 的 `Truncated=true` 时在回复末尾显示可折叠「回答被截断」提示（展开说明输出上限与两种处理方式）；非最后一条不显示 |
 
-**会话壳层（B3 顶栏 + composer dock，2026-11-10，DSH 对齐；2026-11-11 Agent Run Band）**：标题行顺序固定为 **标题/面包屑 → Agent Run Band（运行中 → 智能体团队 → 子智能体 N → 后台任务 → 待审批）→ spacer → ⋯**（`screen.header` / `screen.actions` / `screen.tabs` 槽位，40px 标题行 + 32px Tabs 行，浅色 header 面、仅底边一条 hairline、行间无线、无返回按钮、无 `Alt+←` 历史回退）。Band 是标题后的**一行原生入口按钮**（不再外套第二层容器：官方按钮自带描边，外套容器会形成"控件套控件"的双重描边；只用间距分组），不是卡片；团队/子代理是关键功能入口，**零值也常显**但**零值不显示数字 0**（tooltip/无障碍名仍带精确计数），后台任务与待审批只在有内容时出现；只有团队/子代理后端都不存在且无运行/任务/审批时整条不渲染。三个 agent 入口都是 `ui.PopoverBase` 浮层（团队：成员 + 共享任务；子智能体：树/列表切换；后台任务：状态/命令/用时/停止），不占右栏。进入子智能体或团队成员时，主栏切到子会话：标题变成 `主标题 › 子智能体名` 面包屑，点主标题返回父会话；一次性子智能体只读，可继续成员有输入框（`ChildAgentService.SendChildAgent`）。回合尾部新增文件卡：「交付文件」（write_file）与「已编辑 N 个文件」（edit_file/str_replace_editor），每行「在侧边栏预览 / 查看改动 / 用系统应用打开」，预览打开右栏文件标签。目标条（Badge + 目标文本 + ⋯「目标操作」）与审批内联卡在 composer 上方 dock（阅读列宽度居中，`session.banner` 槽），不占 transcript 空间、不遮挡输入。通知/ toast 固定在右上角、B3 顶栏下方（最多 2 条，自上而下堆叠），不遮挡标题/Tabs/顶栏动作。右栏是默认收起的多标签页面：开始引导（工作区文件 / 新建终端两张等宽卡片，无说明文字）+ 文件 + 终端 + 每个打开文件一个可关闭标签；页面内容一律可滚动。
+**会话壳层（B3 顶栏 + composer dock，2026-11-10，DSH 对齐；2026-11-11 Agent Run Band）**：标题行顺序固定为 **标题/面包屑 → Agent Run Band（运行中 → 智能体团队 → 子智能体 N → 后台任务 → 待审批）→ spacer → ⋯**（`screen.header` / `screen.actions` / `screen.tabs` 槽位，40px 标题行 + 32px Tabs 行，浅色 header 面、仅底边一条 hairline、行间无线、无返回按钮、无 `Alt+←` 历史回退）。Band 是标题后的**一行原生入口按钮**（不再外套第二层容器：官方按钮自带描边，外套容器会形成"控件套控件"的双重描边；只用间距分组），不是卡片；团队/子代理是关键功能入口，**零值也常显**但**零值不显示数字 0**（tooltip/无障碍名仍带精确计数），后台任务与待审批只在有内容时出现；只有团队/子代理后端都不存在且无运行/任务/审批时整条不渲染。三个 agent 入口都是 `ui.PopoverBase` 浮层（团队：成员 + 共享任务；子智能体：树/列表切换；后台任务：状态/命令/用时/停止），不占右栏。进入子智能体或团队成员时，主栏切到子会话：标题变成 `主标题 › 子智能体名` 面包屑，点主标题返回父会话；一次性子智能体只读，可继续成员有输入框（`ChildAgentService.SendChildAgent`）。回合尾部新增文件卡：「交付文件」（write_file）与「已编辑 N 个文件」（edit_file/str_replace_editor），每行「在侧边栏预览 / 查看改动 / 用系统应用打开」，预览打开右栏文件标签。目标条（`uikit.StatusBadge` 阶段徽标——目标进行中 / 等待继续 / 目标已暂停 / 目标受阻 / 目标已完成 + 目标正文 + 自动续跑轮次 `n/cap` + 需要人类继续时的「继续目标」按钮 + ⋯「目标操作」菜单：暂停/继续/完成/编辑/清除；blocked 时第二行显示人类可读原因、tooltip 保留稳定 code）与审批内联卡在 composer 上方 dock（阅读列宽度居中，`session.banner` 槽），不占 transcript 空间、不遮挡输入。目标读取 `contracts.KeyGoal` 的 per-session durable GoalService，切会话只显示该会话目标；续跑由 agent 后端驱动，引擎注入的 goal round 在 transcript 以「目标续跑 · 第 n/cap 轮」回执行呈现，不伪装成用户气泡。通知/ toast 固定在右上角、B3 顶栏下方（最多 2 条，自上而下堆叠），不遮挡标题/Tabs/顶栏动作。右栏是默认收起的多标签页面：开始引导（工作区文件 / 新建终端两张等宽卡片，无说明文字）+ 文件 + 终端 + 每个打开文件一个可关闭标签；页面内容一律可滚动。
 
 **目标 API 草案**：
 
@@ -350,7 +352,7 @@ func AskDialog(c *ui.Context, o AskDialogOptions)
 | 状态 | 表现 |
 |---|---|
 | idle | 输入 + 工具条 + 发送（Primary）；未配置模型时发送禁用并在 composer 内显示原因 + 「打开模型设置」（FR-31） |
-| running | 输入仍可编辑；发送位变「排队」+「停止」；Esc 中断（菜单优先）；提示文案说明 Enter 语义 |
+| running | 输入仍可编辑；发送位变「排队」+「停止」（仅后端实现 `contracts.PromptQueue` 时；发送先 `Send`，running 冲突/预读 running 时 `EnqueuePrompt`）；Esc 中断（菜单优先）；提示文案说明 Enter 语义 |
 | queueing-off | Enter 换行并提示草稿保留 |
 | queue-error | 显示错误行 + 重试 |
 | attachments | chips + 移除；排队只发文字提示 |
@@ -403,11 +405,12 @@ func ComposerShell(c *ui.Context, o ComposerOptions)
 | 状态 | 表现 |
 |---|---|
 | idle | 不显示运行态 |
+| restored-interrupted | 恢复后 `ChatSession.Interrupted`（上次 run 未完成、未重放）：transcript 顶部一条中性提示——`uikit.StatusBadge`「上次运行被中断」+「未重放；请检查工作区状态后继续。」+「继续」+ 忽略图标。继续只聚焦 composer（不自动重放），忽略仅本次隐藏；后端下一次 run 清零后提示自然消失；sidebar 不加徽章（非持久提示不进入导航） |
 | streaming | 最后消息尾部 Spinner + 状态文本；输入区停止按钮；`RoleStatus`/Busy；composer 键位提示为「Enter 排队 · Esc 停止」；**有待审批时改为「Esc 拒绝审批（再按停止）」**，与审批卡的「Esc 拒绝」一致（PM-12） |
-| queued | 队列 Badge（可展开、可取消/重试）；排队只发文字提示 |
+| queued | 队列 Badge（可展开）：排队项来自后端 `contracts.PromptQueue`（按发送顺序 + 本地时间显示），可移除单条/清空；排队只发文字提示。UI 不持有队列、不发送、不 drain |
 | stopping | 停止按钮 pressed/disabled；不可重复触发 |
 | failed | 错误行 + 重试（带标签按钮，不是图标） |
-| queue-send-failed | 投递失败：错误行 + 队列暂停，排队浮层里显式「重试」；不得逐帧自动重发或每帧请求重绘 |
+| queue-send-failed | 投递失败由后端把该条放回队首（并保留），UI 只渲染 `QueuedPrompts` 供用户移除；无「暂停/恢复/重试」内存语义，不得逐帧自动重发或每帧请求重绘 |
 | completed | 完成 toast/Announce；用量折叠显示 |
 | long-run | 不显示假进度；需要时 `Progress` 仅在有真实进度（下载/批量） |
 
@@ -443,9 +446,9 @@ func RunStatus(c *ui.Context, o RunStatusOptions)
 
 **职责**：把子代理与团队成员作为**子会话**呈现：头部入口、团队浮层、主栏子会话视图（面包屑返回）、共享任务；运行态必须真实（`RunState`），不得把 `active`（可用性）画成 running。**团队/子代理不再放进侧边栏或右栏页签。**
 
-**数据模型**：`contracts.ChildAgentService`（`ChildAgents(parentSessionID)` / `ChildAgent(id)` / `SendChildAgent`；子代理=one-shot，队友=continuable）、`TeamMember{RunState,SessionID,Historical,...}`、`ChildAgent.Historical`（持久历史的只读行）、`TeamActivity`（有界）、`BoardTask{Status,Owner,BlockedBy,WriteScopes}`、`TaskAssigner`（可选）。
+**数据模型**：`contracts.ChildAgentService`（`ChildAgents(parentSessionID)` / `ChildAgent(id)` / `SendChildAgent`；子代理=one-shot，队友=continuable）、`TeamMember{RunState,SessionID,Historical,Resumable,...}`、`ChildAgent.Historical`（持久历史行）/`ChildAgent.Resumable`（该历史行可冷恢复继续）、`TeamActivity`（有界）、`BoardTask{Status,Owner,BlockedBy,WriteScopes}`、`TaskAssigner`（可选）。
 
-**持久子会话（2026-11-11，DSH 对齐）**：teammate 与同步子代理共用一套稳定身份——创建时分配 `child-<8 hex>` 的 child-session ID，团队 member ID、子智能体 ID 与「已结束」历史行是同一个值；rig manager 的 `member-N` / 子代理注册表 ID 只在后端解析。记录写入 `<数据目录>/child-sessions.json`（v2；有界 64 条 + 14 天 TTL + 原子写 + 损坏隔离；自动迁移旧 `child-agents.json`），spawn 时即写、完成/失败/中断/关闭/退出持续更新。重启后恢复为 `Historical` 只读行：团队浮层「已结束」区（带「历史」标记）、子智能体切换器/子会话照常打开，但无输入框（`SendChildAgent` 拒绝）。历史按 `SessionID` 归属到当初的会话：页头计数与团队浮层只列当前会话的历史，运行中队友仍是进程级可见。会话浮层的共享任务按会话归属、缓存优先读取（缓存未命中只做一次只读文档加载，不迁移/不写；无活动会话时不回退全局板）。共享任务板按会话归属（DSH 的 Lead-session 语义）：`team_task_*` 携带 run-scoped 会话上下文，每个会话持久化到 `<数据目录>/team-tasks/<session>.json`，旧 `team-tasks.json` 首次使用自动迁移；会话 UI 只列当前会话的任务，`KeyTaskBoard` 聚合视图留给无会话上下文的宿主。子代理/队友完成时，父会话的 transcript 显示一行只读完成回执（`ChatRoleNotice`，由 child-session 记录派生）；队友完成还会以 user 消息注入下一轮父会话模型上下文（每个队友一次，`Notified` 持久化；同步一次性子代理的答案已在工具结果里，不重复注入）。
+**持久子会话（2026-11-11，DSH 对齐）**：teammate 与同步子代理共用一套稳定身份——创建时分配 `child-<8 hex>` 的 child-session ID，团队 member ID、子智能体 ID 与「已结束」历史行是同一个值；rig manager 的 `member-N` / 子代理注册表 ID 只在后端解析。记录写入 `<数据目录>/child-sessions.json`（v2；有界 64 条 + 14 天 TTL + 原子写 + 损坏隔离；自动迁移旧 `child-agents.json`），spawn 时即写、完成/失败/中断/关闭/退出持续更新。重启后恢复为 `Historical` 行：其中 `Resumable` 的历史记录可继续（后端从持久 child session 冷恢复），团队浮层「已结束」区显示「历史 · 可继续」并提供「继续此队友」、子智能体切换器提供「继续此子代理」、子会话显示冷恢复输入框（仍调用 `SendChildAgent`）；不可恢复的历史行显示「历史 · 只读」并明示原因，无输入框。历史按 `SessionID` 归属到当初的会话：页头计数与团队浮层只列当前会话的历史，运行中队友仍是进程级可见。会话浮层的共享任务按会话归属、缓存优先读取（缓存未命中只做一次只读文档加载，不迁移/不写；无活动会话时不回退全局板）。共享任务板按会话归属（DSH 的 Lead-session 语义）：`team_task_*` 携带 run-scoped 会话上下文，每个会话持久化到 `<数据目录>/team-tasks/<session>.json`，旧 `team-tasks.json` 首次使用自动迁移；会话 UI 只列当前会话的任务，`KeyTaskBoard` 聚合视图留给无会话上下文的宿主。子代理/队友完成时，父会话的 transcript 显示一行只读完成回执（`ChatRoleNotice`，由 child-session 记录派生）；队友完成还会以 user 消息注入下一轮父会话模型上下文（每个队友一次，`Notified` 持久化；同步一次性子代理的答案已在工具结果里，不重复注入）。
 
 **状态矩阵**：
 
@@ -457,18 +460,20 @@ func RunStatus(c *ui.Context, o RunStatusOptions)
 | failed | 失败 + 错误原因 |
 | interrupted | 已中断（非失败） |
 | one-shot | 只读：无 composer，不显示「发送」 |
+| historical-resumable | 已结束记录（`Historical=true, Resumable=true`）：浮层/切换器给「继续此队友/此子代理」，子会话有冷恢复输入框；发送后显示「已发送，等待回复」，回答回来后显示最新回复；不伪造进度 |
+| historical-read-only | 已结束且不可恢复：只读并说明「已结束的记录（应用重启后仍保留）：只读，不能再继续对话。」 |
 | task blocked | 依赖未完成：显示 blockedBy，状态不可推进 |
 
 **入口结构**：
 
 - 会话头第一行（`screen.header`/`screen.actions` 槽）：`标题/面包屑 → Agent Run Band（运行中 → 智能体团队 → 子智能体 N → 后台任务 → 待审批）→ spacer → ⋯`；Band 是一行原生入口按钮（无外层容器/双重描边），团队/子代理零值常显但不显示 0 计数，后台任务/待审批只在有内容时出现；各入口都是 `ui.PopoverBase` 原生浮层（Esc/点外关闭/焦点归还），不占右栏。
-- 团队浮层：成员卡（状态点/名字/模型/最新活动/「打开」）+ 共享任务卡（subject/状态/owner/依赖/写入范围）；空态说明「暂无共享任务」；已结束的持久记录按「已结束」分组展示（历史标记，只读）。
+- 团队浮层：成员卡（状态点/名字/模型/最新活动/「打开」）+ 共享任务卡（subject/状态/owner/依赖/写入范围）；空态说明「暂无共享任务」；已结束的持久记录按「已结束」分组展示：`Resumable` 行带「历史 · 可继续」与「继续此队友」动作，不可恢复行带「历史 · 只读」（打开仍只读）。
 - 子智能体浮层：子代理/队友列表；选中进入主栏子会话。
 - 后台任务浮层：`JobService.Jobs()` 的行（状态/命令/用时/退出码）+ 停止（`KillJob`）。
 
 **布局与交互**：
 
-- 子会话在主栏渲染：标题变为 `父标题 › 子智能体名` 面包屑，点父标题返回父会话；内容区显示任务（prompt）、状态、输出与活动时间线；可继续成员底部有消息输入框（`SendChildAgent`），一次性成员只读；重启后恢复的历史会话同样只读并明示「已结束的记录（应用重启后仍保留）」。
+- 子会话在主栏渲染：标题变为 `父标题 › 子智能体名` 面包屑，点父标题返回父会话；内容区显示任务（prompt）、状态、输出与活动时间线；可继续成员底部有消息输入框（`SendChildAgent`），一次性成员只读；重启后可冷恢复的历史记录同样有输入框（placeholder「继续该队友/子代理…」，发送后 hint 说明冷恢复），不可恢复历史明示只读原因。
 - 团队浮层只读，成员/任务数据来自 `TeamService`/`TaskBoard`；任务完成/指派由工具或服务调用完成，浮层在打开时读取一次任务快照（关闭重开刷新）。
 - 头部窄带（阅读列 < 2/3）退化为图标+计数，可及名保留全称。
 - a11y：入口按钮 Label 为全称；状态文案可读（不只靠颜色）；浮层为 native popover/dialog 语义。
@@ -477,14 +482,65 @@ func RunStatus(c *ui.Context, o RunStatusOptions)
 
 **当前实现**：`internal/ui/session/agentsurface.go`（三入口 + 三个 Popover 浮层 + 子会话视图 + 回合尾文件卡）、`internal/modules/agent/childagents.go`（统一 `ChildAgentService` 读模型）、`internal/modules/agent/child_sessions.go`（持久子会话 `child-sessions.json`）、`internal/modules/agent/child_notices.go`（完成回执：下一轮模型上下文，仅队友）、`internal/ui/session/view.go`（transcript 的 `ChatRoleNotice` 回执行：live 按时间合入、运行中放在流式回答上方；重启恢复的消息无时间戳时按 `Finished` 追加）、`internal/modules/toolkit/jobs_service.go`（`JobService`）。旧 `internal/uikit/team.go` / `rightpanel` 团队/任务 pane 已删除。
 
-**验收**：`internal/ui/session/agentsurface_test.go`（帧测试：header 顺序、团队浮层、switcher、子会话面包屑/返回、双向不可用、jobs 停止、文件卡预览回调、历史分组/只读历史会话）、`internal/modules/agent/childagents_test.go`、`internal/modules/agent/child_sessions_test.go`（重启后同一身份、文档往返、v1 迁移、损坏隔离、保留上限）、`internal/modules/agent/child_notices_test.go`（回执只注入一次、失败重试、跨重启/Close 重写、跨会话归属）、`internal/modules/toolkit/jobs_service_test.go`、uimodtest 新 E2E（团队浮层 / 文件页 / 终端页 / 快捷键）、`ui-drive` team 步骤（含 `team-history`）。
+**验收**：`internal/ui/session/agentsurface_test.go`（帧测试：header 顺序、团队浮层、switcher、子会话面包屑/返回、双向不可用、jobs 停止、文件卡预览回调、历史分组/只读历史会话/冷恢复历史继续发送）、`internal/modules/agent/childagents_test.go`、`internal/modules/agent/child_sessions_test.go`（重启后同一身份、文档往返、v1 迁移、损坏隔离、保留上限）、`internal/modules/agent/child_notices_test.go`（回执只注入一次、失败重试、跨重启/Close 重写、跨会话归属）、`internal/modules/toolkit/jobs_service_test.go`、uimodtest 新 E2E（团队浮层 / 文件页 / 终端页 / 快捷键 / 冷恢复发送）、`ui-drive` team 步骤（含 `team-history`）。
+
+### S10 ContextInspector（会话 Context 页签）
+
+**职责**：把后端 `contracts.ContextInspector`（`contracts.KeyContext`）折叠出的会话上下文事实如实呈现：当前 used/window、最近一次请求快照、逐模型调用 token/成本、压缩/溢出事件。仅在会话页签内展示，不做跨会话洞察。
+
+**入口**：会话页签条在「对话 / 轨迹 / 记忆」后追加「上下文 / Context」；**仅当 `ctx.Get(contracts.KeyContext)` 存在时注册**（无后端不显示，保持三页签兼容）。子会话视图不显示该页签（无独立会话上下文，进入子会话时回到对话页签）。
+
+**布局**：阅读列（`design.TranscriptWidth`，MaxWidthPercent 92）内三段 `uikit.Section`（概览 / 模型调用 / 上下文事件），页面用 `ui.Scroll`；集合一律官方组件——模型调用用 `ui.Table`（列：轮次/模型/Prompt/完成/缓存/上下文/时间[/成本]，虚拟化、`MaxHeight` 有界、窄窗横向滚动不换行），事件用 `ui.List`（`MaxHeight` 有界）。
+
+- 概览（价格在「设置 → 模型」编辑，按当前价格重算）：`uikit.KeyValueRows` 展示「上下文用量」（`used / window tokens (n%)`；window 未知时只显示 used，不伪造百分比）与仅在 `CostKnown` 时出现的「累计成本」；最近一次快照另起小节展示时间/模型/窗口/系统提示（bytes · tokens）/估算输入/历史消息（用户/助手/工具）以及工具目录（数量 + 名称摘要，tooltip 全量）与注入来源 chips（AGENTS.md/预设/记忆/技能，只显示实际存在的）。
+- 系统提示分段（`Snapshot.Sections` 非空才出现，旧快照整段隐藏，不伪造）：`ui.Table` 按 section 显示本地化名称（identity/environment/…/tool-guidance 映射，未知 ID 回退记录 label/ID，工具 tips 带 ID+Hash）、来源、字节与估算 tokens；表下 `KeyValueRows` 给「分段合计」以及（window 已知时）「估算输入占比 xK / yK (n%)」，并说明「正文不进入事件，仅元数据」。
+- 模型调用：最新在前；每行 iteration/model/prompt/completion/cached/context tokens/时间；成本列仅在会话 `CostKnown` 时存在，行级未知成本显示「—」而不是 0。
+- 上下文事件：最新在前；compact 分四类展示：`Inferred=true` →「压缩（推断）」；`Inferred=false` 且 `Detail=manual` →「压缩」；`Inferred=false` 且 `Outcome==""` →「自动压缩」（运行前 exact，显示 before→after tokens 与消息数 `Replaced → Saved`）；`Outcome!=""` →「自动压缩跳过/失败：failed|no-reduction|archive-failed|replace-failed」+ 本地化原因（历史未修改），**只显示 before→after tokens，不显示会误导的消息 delta，绝不显示「已压缩」**；未知 Outcome 回退原文。spill 显示路径 + 磁盘字节；`recovery` kind 标注「自动压缩重试（成功/失败/压缩失败）」+ 本地化说明 + before→after tokens（其 Saved 是重试次数，不显示成消息数）；`archive` kind 标注「归档/归档（截断）」，说明归档 N 条、超上限省略 M 条（截断）与原始正文不在事件中，meta 显示归档字节 + before→after tokens；archive 与 compact 各自独立成行，不合并/不重复计数。手动 `/compact` 的 `ErrCompactArchive`（归档失败、历史未修改）走本地化失败提示，绝不显示「已压缩」。
+- 系统提示分段：仅 `Snapshot.Sections` 非空时显示「系统提示分段」表（本地化名称/来源/字节/估算 Tokens），下方显示分段合计与（window 已知时）估算输入占比；空快照整段隐藏，正文不进入事件；未知 section ID 回退 Label/ID，hash 仅 tooltip。
+
+**状态**：`has=false`（或折叠数据全空）显示空态「本会话还没有上下文数据」+ 说明运行一轮后出现，绝不渲染 0 值概览；无会话显示「还没有会话」空态；无后端不注册页签（防御分支有空态文案）。
+
+**刷新**：inspector 无 Subscribe；页签进入、会话切换、ChatService 通知（含 run settle）时标记 dirty 并读取一次，按 `SessionContext.Revision` 去重；稳定帧/render 不重复读取；每次切会话重置两个集合的滚动位置。
+
+**a11y/i18n**：Table `Label`「模型调用列表」、List `Label`「上下文事件列表」、每行有可读名称；全部文案中英；times 用 `uikit.FormatDateTime`/本地时钟。
+
+**禁止**：`Scroll` + 手写循环画调用/事件；伪造 0/假成本；window 未知时编造百分比；侧边栏加 Context 徽章；跨会话合并数据；在每帧无条件读 inspector。
+
+### S11 Insights（跨会话洞察页）
+
+**职责**：把 `contracts.InsightsService`（`contracts.KeyInsights`）按 7/30 天窗口聚合出的跨会话用量如实呈现：totals（轮次/步数/输入/输出/缓存 tokens、成本、工具调用、活跃会话数）、按天序列、按模型、按工作区、会话排行。这是**只读诊断页**：它不改变会话、不写设置、不做图表。
+
+**数据模型**（`internal/contracts/insights.go`，UI 不 import rig）：`InsightsService.Insights(ctx, InsightsQuery{Days, SessionLimit, ForceRefresh}) (Insights, error)`；`Insights{From,To,GeneratedAt,Totals,Daily,Models,Workspaces,Sessions,Truncated,TruncatedSessions}`。后端 `internal/modules/insights` 只做有界读取（`Store.Sessions()` + 每个窗口内会话一次 `Store.Last()`，默认上限 4000 事件/会话），折叠规则：`model_call`（逐调用）为 token 主源，缺 `model_call` 的旧会话回退 `usage`（逐回合，`iterations` 计步），两者并存时不重复计 token；`turns` 数 `usage`，`steps` 数 `model_call`（回退用 usage.iterations），`tool_calls` 数 `tool_call`，`compactions/spills` 数 `compact/spill`。成本按**当前**模型目录每 1M token 单价现算（与「设置 → 模型」同源）；无单价的模型只计 `UnpricedCalls`，绝不产生 0 成本。日桶按后端配置时区（默认本地，产品为 Asia/Shanghai）的本地日零点切分，窗口含今天；结果按 `(days, sessionLimit)` 缓存 15s（`ForceRefresh` 绕过），刷新在后台 goroutine，不占帧。
+
+**入口**：一级侧栏入口——`RegisterScreen(ScreenSpec{ID:"insights", Order:25})` + `sidebar.ScreenNavSpec("insights") = (icons.Activity, "洞察", "Insights")`；位于「自动化」与「插件」之间。顶栏贡献 `insights.title`（`screen.header`，TypeM/600）与 `insights.actions`（`screen.actions`，唯一的即时动作「刷新」图标按钮，加载中 disabled）。不新增右栏常驻页、不在会话页签内重复。
+
+**布局**（`internal/ui/insights/view.go`，页面用 `ui.Scroll`，正文不叠第二行 header）：
+- 工具栏：`ui.SegmentedBase` 主题化分段控件「7 天 / 30 天」（radio 组语义、方向键、`Label`「时间范围」；选中段用 `BgRaised`+border，不用 accent 填充）；右侧为弱化的范围/更新时间（`11-09 – 11-15 · 更新于 HH:MM`）。
+- KPI 行：四个扁平指标列（label TypeXXS 弱化 / value TypeL·600 / 一行 TypeXXS 细节），无卡片、无底色：`tokens`（输入·输出）、`成本`（仅 `PricedCalls>0` 时出现；部分未定价标「部分模型未定价」）、`会话`（轮次·步数）、`工具调用`（压缩·溢出）。强调色预算：本页 0 个 accent 填充、0 个 primary 按钮。
+- 按天：`ui.Table`（日期/tokens/成本/会话/工具；成本列仅当某天有价时出现；空日整行「—」而不是假 0；最新在前；`MaxHeight` 有界）。
+- 按模型：`ui.Table`（模型/调用/tokens/缓存/成本；未知模型显示「未知模型」，无价行成本「—」）。
+- 按工作区：`ui.Table`（工作区/会话/tokens/成本），仅当存在已关联工作区时显示；未关联组显示「未关联工作区」，名称由后端按工作区服务解析。
+- 会话排行：`ui.List`（标题 + 模型/工作区/更新时间元信息 + tokens + 可选成本），行内单点（`ObserveInput`）打开会话，Enter/双击走 List `Submitted`；打开 = `ChatService.SetActiveSession` + `Navigator.Push("session")`，失败留在本页并以 `ErrorLine` 显示。
+
+**状态**：加载态 = `Spinner` + 「正在汇总用量…」（不渲染骨架 0 值）；空态 = 「还没有可统计的用量」/「这个时间范围内还没有用量」+ 说明；错误态 = `uikit.ErrorLine` + 重试（首次失败只显示错误与重试，已有数据时错误行下方保留旧数据）；无后端 = 「洞察后端未启用」空块（screen 仍注册）。
+
+**刷新/性能**：进入页面即后台读取一次；打开期间数据超过 60s 自动后台刷新一次；「刷新」动作 `ForceRefresh`。聚合从不在 build 回调里做 I/O，结果经 `UIRuntime.Post` 回 UI 线程；乱序/过期结果按 requestID 丢弃；每帧只读模块状态，不读 store。会话级读取达到上限时页面显示「统计达到单会话读取上限，较早的事件可能未计入（n 个会话）」并标记 `Truncated`，不静默少算。
+
+**a11y/i18n**：Table/List 均有 `Label`（按天用量/按模型用量/按工作区用量/会话排行列表），每行有可读名称；刷新按钮 `Label`+Tooltip；全部文案中英；日期 `formatDay` 随语言（zh `01-02` / en `Jan 2`），时间用 `uikit.FormatDateTime`/`FormatClock`；会话行可达名含标题/模型/tokens/成本。
+
+**禁止**：自绘图表/canvas/`ui/chart` 装饰；`Scroll` + 手写循环画集合；卡片墙/KPI 卡片；伪造 0 或假成本（无价 → 隐藏或「—」）；未知价格行渲染 `$0`；每帧全表扫/每帧重算；在 build 内读 store 或同步聚合；把洞察做成会话内重复数据；改会话页/右栏语义。
+
+**当前实现**：`internal/contracts/insights.go`、`internal/modules/insights/`（`insights.go` 模块/缓存、`aggregate.go` 折叠）、`internal/ui/insights/`（`insights.go` 注册/加载、`view.go` 页面）、`internal/assembly/registry.go` + `assemblies/desktop.json`（`zeokeel/insights` + `zeokeel-ui/insights`，headless 不加载）、`internal/ui/sidebar/sidebar.go`（`ScreenNavSpec`）。
+
+**验收**：`go test ./internal/modules/insights`（聚合/日界时区/无价/空/缓存/截断）、`go test ./internal/ui/insights`（入口/数据/空/无价/切范围/点击跳转/错误重试/加载/窄窗/英文/无后端）、`internal/ui/uimodtest/insights_e2e_test.go`（真实后端 2 轮 → 3M tokens/$4.00/排行点击；无价 → 隐藏成本）、`ui-snapshot` 场景 `p2-insights.png` / `p2-insights-dark.png`。
 
 ## 2. 跨 surface 规则
 
 - **顶栏只有一块**：屏幕通过 `screen.header` / `screen.actions` / `screen.tabs` 槽位把标题/动作/Tabs 交给宿主 B3 顶栏（浅色 header 面 + 仅底边 hairline、行间无线），屏幕 body 不再叠第二行 header；无贡献的屏幕没有空工具栏；不提供返回按钮或 `Alt+←` 历史回退（侧栏即导航）。
-- **输入框上方的 dock**：目标条与审批内联卡固定在 composer 上方（阅读列宽度居中），是会话页唯一的阻断/目标区；不把目标放回顶栏、不把审批做成居中 Modal。
+- **输入框上方的 dock**：目标条与审批内联卡固定在 composer 上方（阅读列宽度居中），是会话页唯一的阻断/目标区；不把目标放回顶栏、不把审批做成居中 Modal。目标条只展示当前会话的 durable goal（phase/轮次/activation/blocked reason），UI 不缓存其他会话目标、不发送续跑；清除目标走 `ClearGoal` + `uikit.ConfirmDanger`。
 - **会话级 vs 全局设置**：会话设置菜单里「权限模式（所有会话）」「对话模式（所有会话）」的组标题带后缀，明确这两项作用于所有会话；人设与「本会话内始终允许」保持会话级（PM-14）。
 - **记忆 scope**：`workspace:<id>` 绑定作用域的条目在会话「记忆」页签显示「工作区（本会话项目）」，不展示存储原值；设置→记忆是跨工作区管理页，保持「工作区」标签。
+- **模型价格与成本**：价格在「设置 → 模型」的编辑表单里配置（输入 / 缓存输入 / 输出，每 1M token 的美元价；留空或 0 = 未配置），只写 `modelcatalog.models`，不复制进默认模型 mirror；非法值（非数字/负数/NaN/超大）就地报错且不保存。价格只用于成本估算，按当前价格重算（重启回放也用当前价格），无价格时 Context 页签不显示累计成本/成本列、行级未知成本显示「—」，绝不渲染 0/假成本。
 - **通知位置**：toast/通知固定右上角、B3 顶栏下方 8 DIP，右对齐自上而下堆叠（最多 2 条）；不放在右下角、不遮挡标题/Tabs/顶栏动作或输入区。
 
 ### 2.1 焦点与 Esc 分层（从最内到最外）

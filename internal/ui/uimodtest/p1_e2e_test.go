@@ -699,49 +699,54 @@ func TestP1ApprovalToolsAndPersistence(t *testing.T) {
 		t.Fatalf("plan state = %q, want approved", state)
 	}
 
-	// goal: the agent goal tool surfaces as one chip in the session header
-	// (the old flat row of four actions is gone); the destructive clear runs
-	// through the chip's popover and a native confirmation dialog.
+	// goal: the DSH create_goal tool writes the durable per-session goal; the
+	// composer dock shows its phase/objective and the destructive clear runs
+	// through the dock menu and a native confirmation dialog.
 	if err := uiRoot.Navigator().Push("session"); err != nil {
 		t.Fatalf("Push(session) before goal: %v", err)
 	}
 	tester.Frame()
-	if _, err := toolkit.Invoke(context.Background(), rig.ToolCall{
-		ID: "goal-1", Name: "goal", Arguments: `{"action":"set","text":"完成 Q4 发布清单"}`,
-	}); err != nil {
-		t.Fatalf("set goal: %v", err)
+	goalCtx := contracts.WithAgentSession(context.Background(), sessionID)
+	if result, err := toolkit.Invoke(goalCtx, rig.ToolCall{
+		ID: "goal-1", Name: "create_goal", Arguments: `{"objective":"完成 Q4 发布清单"}`,
+	}); err != nil || result.IsError {
+		t.Fatalf("create_goal = %+v (err %v)", result, err)
 	}
 	tester.Frame()
-	goalTracker, err := root.Require(contracts.KeyGoalTracker)
+	goalService, err := root.Require(contracts.KeyGoal)
 	if err != nil {
-		t.Fatalf("require goal tracker: %v", err)
+		t.Fatalf("require goal service: %v", err)
 	}
-	if _, text, _, ok := goalTracker.Get(); !ok || text != "完成 Q4 发布清单" {
-		t.Fatalf("goal tracker = %q (ok %v), want the set goal", text, ok)
+	goal, ok := goalService.Goal(sessionID)
+	if !ok || goal.Objective != "完成 Q4 发布清单" {
+		t.Fatalf("goal = %+v (ok %v), want the created goal", goal, ok)
 	}
-	if !tester.HasText("目标") {
-		t.Fatalf("goal chip missing; texts = %v", tester.Texts())
+	if !tester.HasText("目标进行中") || !tester.HasText("完成 Q4 发布清单") {
+		t.Fatalf("goal dock missing; texts = %v", tester.Texts())
 	}
 	if err := tester.Click("目标操作"); err != nil {
-		t.Fatalf("open goal chip menu: %v; texts = %v", err, tester.Texts())
+		t.Fatalf("open goal dock menu: %v; texts = %v", err, tester.Texts())
 	}
 	tester.Frame()
-	if !tester.HasText("删除目标记录") {
-		t.Fatalf("goal chip menu lacks the delete-record action; texts = %v", tester.Texts())
+	if !tester.HasText("清除目标记录") {
+		t.Fatalf("goal dock menu lacks the clear-record action; texts = %v", tester.Texts())
 	}
-	if err := tester.Click("删除目标记录"); err != nil {
-		t.Fatalf("choose delete goal record: %v; texts = %v", err, tester.Texts())
-	}
-	tester.Frame()
-	if !tester.HasText("确认删除") {
-		t.Fatalf("delete-goal-record confirmation missing; texts = %v", tester.Texts())
-	}
-	if err := tester.Click("确认删除"); err != nil {
-		t.Fatalf("confirm delete goal record: %v; texts = %v", err, tester.Texts())
+	if err := tester.Click("清除目标记录"); err != nil {
+		t.Fatalf("choose clear goal record: %v; texts = %v", err, tester.Texts())
 	}
 	tester.Frame()
-	if _, _, _, ok := goalTracker.Get(); ok {
-		t.Fatalf("goal tracker still set after clear")
+	if !tester.HasText("确认清除") {
+		t.Fatalf("clear-goal-record confirmation missing; texts = %v", tester.Texts())
+	}
+	if err := tester.Click("确认清除"); err != nil {
+		t.Fatalf("confirm clear goal record: %v; texts = %v", err, tester.Texts())
+	}
+	tester.Frame()
+	if _, ok := goalService.Goal(sessionID); ok {
+		t.Fatalf("goal still set after clear")
+	}
+	if tester.HasText("完成 Q4 发布清单") {
+		t.Fatalf("cleared goal's objective still rendered; texts = %v", tester.Texts())
 	}
 
 	// subagent: the agent module registers the synchronous delegation tools and
@@ -1051,7 +1056,6 @@ func bootDesktop(t *testing.T, dataDir string, settings *memSettings) (cordis.Co
 	provide(t, root, contracts.KeyUserInteraction, contracts.UserInteraction(uiRoot.UserInteraction()))
 	provide(t, root, contracts.KeyArtifactPresenter, contracts.ArtifactPresenter(uiRoot.ArtifactPresenter()))
 	provide(t, root, contracts.KeyPlanReviewer, contracts.PlanReviewer(uiRoot.PlanReviewer()))
-	provide(t, root, contracts.KeyGoalTracker, contracts.GoalTracker(uiRoot.GoalTracker()))
 	provide(t, root, contracts.KeyNotifier, contracts.Notifier(uiRoot.Notifier()))
 	provide(t, root, contracts.KeySettings, contracts.SettingsService(settings))
 	provide(t, root, contracts.KeyLogger, contracts.Logger(discardLogger{}))

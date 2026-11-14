@@ -572,7 +572,7 @@ func (d *drive) runTeamSteps() {
 		})
 
 	d.step("team-history", "team", "历史：关闭已结束的队友后，团队浮层保留「已结束」历史记录",
-		"队友完成后 Close → 页头团队入口仍显示计数，浮层「已结束」区列出该成员（历史/已完成/输出），点「打开成员」进入只读历史会话（无输入框）", func(c *check) {
+		"队友完成后 Close → 页头团队入口仍显示计数，浮层「已结束」区列出该成员（历史·可继续/已完成/输出），点「继续」进入冷恢复会话（有输入框，发送会恢复它）", func(c *check) {
 			d.resetToSession()
 			d.closeAllTeamMembers()
 			d.server.SetMode(scriptAnswer)
@@ -608,17 +608,18 @@ func (d *drive) runTeamSteps() {
 				c.failf("关闭队友后无法打开团队浮层；texts=%v", paletteTailTexts(d))
 				return
 			}
-			c.mustText("已结束", "历史研究员", "历史", "已完成", "1 条已结束")
+			c.mustText("已结束", "历史研究员", "历史 · 可继续", "已完成", "1 条已结束")
 			c.shot("team-history")
 			title := d.currentSessionTitle()
-			if err := d.click("打开成员 历史研究员"); err != nil {
-				c.failf("历史记录缺少「打开成员」：%v", err)
+			if err := d.click("继续此队友 历史研究员"); err != nil {
+				c.failf("历史记录缺少「继续」：%v", err)
 				return
 			}
 			d.drain(3)
-			c.mustText("历史研究员", "队友 · 已结束记录",
-				"已结束的记录（应用重启后仍保留）：只读，不能再继续对话。")
-			c.require(!d.has("输入消息…"), "历史会话仍渲染输入框")
+			c.mustText("历史研究员", "历史", "可继续",
+				"发送后冷恢复这条历史记录，并等待它的回答。")
+			c.require(d.has("继续该队友…") || d.has("发送后冷恢复这条历史记录，并等待它的回答。"),
+				"冷恢复会话缺少继续输入提示")
 			c.shot("team-history-child")
 			if !d.childBridge(title) {
 				c.failf("历史会话无法返回父会话；texts=%v", paletteTailTexts(d))

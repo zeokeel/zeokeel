@@ -260,6 +260,10 @@ func guidanceMarker(name string) (string, bool) {
 		return "todo_write", true
 	case "subagent", "subagent_fork":
 		return "subagent", true
+	case "workflow":
+		return "workflow tool", true
+	case "ralph":
+		return "ralph tool", true
 	case "spawn_teammate", "spawn_team", "list_agents", "wait_agent", "send_message", "list_teams", "close_team", "interrupt_agent", "wait_team", "list_subagent_models":
 		return "spawn_teammate", true
 	case "team_task_create", "team_task_update", "team_task_list", "team_task_get":
@@ -298,7 +302,7 @@ func TestToolGuidanceCoversRegisteredFamilies(t *testing.T) {
 		"exit_worktree", "glob", "goal", "grep", "interrupt_agent", "job_kill", "job_list",
 		"job_output", "job_start", "job_wait", "list_agents", "list_dir", "list_subagent_models",
 		"list_teams", "list_worktrees", "memory", "plan_review", "present", "read_file",
-		"read_image", "schedule_create", "schedule_delete", "schedule_list", "schedule_update",
+		"ralph", "read_image", "schedule_create", "schedule_delete", "schedule_list", "schedule_update",
 		"send_message", "session_event_read", "session_event_search", "session_event_trace",
 		"session_search", "session_trace", "settings_get", "settings_set", "skill",
 		"spawn_team", "spawn_teammate", "str_replace_editor", "subagent", "subagent_fork",
@@ -306,7 +310,7 @@ func TestToolGuidanceCoversRegisteredFamilies(t *testing.T) {
 		"team_status", "team_task_create", "team_task_get", "team_task_list", "team_task_update",
 		"team_wait", "terminal_close", "terminal_list", "terminal_open", "terminal_read",
 		"terminal_send", "terminal_signal", "todo_write", "wait_agent", "wait_team", "web_fetch",
-		"web_search", "working_directory", "write_file",
+		"web_search", "workflow", "working_directory", "write_file",
 	}
 	names := make(map[string]bool, len(catalog))
 	for _, name := range catalog {

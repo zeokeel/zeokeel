@@ -96,6 +96,12 @@ const (
 	SettingCloseToTray = "ui.closeToTray"
 	// SettingNotifications toggles the desktop toast overlay (default true).
 	SettingNotifications = "ui.notifications"
+	// SettingSystemNotifications toggles mirroring notifications to the
+	// operating system's notification center (default true). It is separate
+	// from SettingNotifications: in-app toasts and OS notifications can be
+	// turned off independently. Platforms without OS notification support show
+	// the setting disabled.
+	SettingSystemNotifications = "ui.notifications.system"
 	// SettingAgentsFile is the workspace instruction file appended to the
 	// system prompt (default "AGENTS.md"; empty disables the injection).
 	SettingAgentsFile = "agent.agentsFile"

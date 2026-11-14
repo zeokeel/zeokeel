@@ -525,6 +525,18 @@ func agentRowAction(c *ui.Context, t *design.Tokens, text, accessibleName string
 	}
 }
 
+// agentRowActionTooltip is agentRowAction with the row action's explanation.
+func agentRowActionTooltip(c *ui.Context, t *design.Tokens, text, accessibleName, tooltip string,
+	onClick func()) {
+	button := ui.Button(c, text).Label(accessibleName).Tooltip(tooltip)
+	design.Apply(button, t.Font(design.TypeXXXS))
+	button.Height(agentRowActionHeight).PaddingX(design.Space2).
+		Radius(design.RadiusSM).Shrink(0)
+	if button.Clicked() && onClick != nil {
+		onClick()
+	}
+}
+
 // agentPanelHeader is the overlays' title row: glyph, title and the counts.
 func agentPanelHeader(c *ui.Context, t *design.Tokens, icon *ui.SVG, title, counts string) {
 	ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(design.Space2).Children(func() {
@@ -614,7 +626,13 @@ func buildTeamMemberCard(c *ui.Context, t *design.Tokens, st *state, member cont
 					design.Apply(ui.Badge(c, st.tr("当前", "Current")), t.Badge())
 				}
 				if member.Historical {
-					design.Apply(ui.Text(c, st.tr("历史", "History")), t.Font(design.TypeXXXS)).
+					history := st.tr("历史", "History")
+					if member.Resumable {
+						history += st.tr(" · 可继续", " · continuable")
+					} else {
+						history += st.tr(" · 只读", " · read-only")
+					}
+					design.Apply(ui.Text(c, history), t.Font(design.TypeXXXS)).
 						TextColor(t.LabelTertiary).NoWrap()
 				}
 				ui.Spacer(c)
@@ -629,10 +647,20 @@ func buildTeamMemberCard(c *ui.Context, t *design.Tokens, st *state, member cont
 			}
 		})
 		if st.childAgentService() != nil {
-			agentRowAction(c, t, st.tr("打开", "Open"),
-				st.tr("打开成员 ", "Open member ")+name, func() {
-					st.openChildView(member.ID)
-				})
+			action, actionLabel := st.tr("打开", "Open"), st.tr("打开成员 ", "Open member ")+name
+			tooltip := st.tr("打开成员会话", "Open the member conversation")
+			if member.Historical && member.Resumable {
+				// A restored teammate that the backend can cold-resume gets the
+				// interaction that is actually available: open its conversation
+				// with the follow-up composer focused.
+				action = st.tr("继续", "Continue")
+				actionLabel = st.tr("继续此队友 ", "Continue teammate ") + name
+				tooltip = st.tr("继续此队友（发送消息会冷恢复它）",
+					"Continue this teammate (a message cold-resumes it)")
+			}
+			agentRowActionTooltip(c, t, action, actionLabel, tooltip, func() {
+				st.openChildView(member.ID)
+			})
 		}
 	})
 }
@@ -915,10 +943,21 @@ func buildChildSwitcherRow(c *ui.Context, t *design.Tokens, st *state, agent con
 			design.Apply(ui.Text(c, childAgentActivityLine(st, agent)), t.Font(design.TypeXXS)).
 				TextColor(t.LabelTertiary).MaxLines(1).Ellipsis("…")
 		})
-		agentRowAction(c, t, st.tr("进入", "Open"),
-			st.tr("进入子智能体会话 ", "Open child conversation ")+name, func() {
-				st.openChildView(agent.ID)
-			})
+		action, actionLabel := st.tr("进入", "Open"), st.tr("进入子智能体会话 ", "Open child conversation ")+name
+		tooltip := st.tr("打开这个子智能体的会话", "Open this child conversation")
+		if agent.Historical && agent.Resumable {
+			action = st.tr("继续", "Continue")
+			if agent.Kind == contracts.ChildAgentTeammate {
+				actionLabel = st.tr("继续此队友 ", "Continue teammate ") + name
+			} else {
+				actionLabel = st.tr("继续此子代理 ", "Continue subagent ") + name
+			}
+			tooltip = st.tr("继续它（发送消息会冷恢复历史会话）",
+				"Continue it (a message cold-resumes the finished conversation)")
+		}
+		agentRowActionTooltip(c, t, action, actionLabel, tooltip, func() {
+			st.openChildView(agent.ID)
+		})
 	})
 }
 
@@ -927,9 +966,15 @@ func buildChildSwitcherRow(c *ui.Context, t *design.Tokens, st *state, agent con
 func childAgentMeta(st *state, agent contracts.ChildAgent) string {
 	parts := []string{childAgentKindLabel(st, agent.Kind)}
 	if agent.Historical {
-		// A restored row has no live backend: naming its old follow-up
-		// capability would promise a message that cannot be delivered.
+		// A restored row has no live backend; only a resumable record can still
+		// take a follow-up (cold resume from the durable child session), so the
+		// capability line never promises more than the backend offers.
 		parts = append(parts, st.tr("已结束记录", "Finished record"))
+		if agent.Resumable {
+			parts = append(parts, childAgentModeLabel(st, contracts.ChildAgentContinuable))
+		} else {
+			parts = append(parts, st.tr("只读", "read-only"))
+		}
 	} else {
 		parts = append(parts, childAgentModeLabel(st, agent.Mode))
 	}
@@ -1279,6 +1324,9 @@ func buildChildConversationPane(c *ui.Context, t *design.Tokens, runtime contrac
 					buildChildOutput(c, t, st, child)
 					buildChildActivitySection(c, t, st, child)
 					switch {
+					case child.Historical && child.Resumable:
+						agentHint(c, t, st.tr("历史记录（应用重启后仍保留）：可继续；发送后会基于已保存的会话冷恢复。",
+							"Finished record (kept after a restart): continuable; sending cold-resumes the saved session."))
 					case child.Historical:
 						agentHint(c, t, st.tr("已结束的记录（应用重启后仍保留）：只读，不能再继续对话。",
 							"Finished record (kept after a restart): read-only, it cannot be continued."))
@@ -1289,7 +1337,10 @@ func buildChildConversationPane(c *ui.Context, t *design.Tokens, runtime contrac
 				})
 			})
 		})
-		if child.Mode == contracts.ChildAgentContinuable && !child.Historical {
+		// A live continuable teammate and a resumable historical record both take
+		// a follow-up message through the same ChildAgentService call.
+		if (child.Mode == contracts.ChildAgentContinuable && !child.Historical) ||
+			(child.Historical && child.Resumable) {
 			buildChildComposer(c, t, runtime, st, child)
 		}
 	})
@@ -1401,7 +1452,13 @@ func buildChildActivitySection(c *ui.Context, t *design.Tokens, st *state, child
 			if index < 0 || index >= len(child.Activity) {
 				return nil
 			}
-			return child.Activity[index].ID
+			entry := child.Activity[index]
+			// Restored activity rows carry no ID: fall back to the row position
+			// and its clock so two entries never share one element state.
+			if id := strings.TrimSpace(entry.ID); id != "" {
+				return id
+			}
+			return fmt.Sprintf("%d-%d", index, entry.Time.UnixNano())
 		}
 		st.agents.activityList.Label = func(index int) string {
 			if index < 0 || index >= len(child.Activity) {
@@ -1505,6 +1562,14 @@ func buildChildComposer(c *ui.Context, t *design.Tokens, runtime contracts.UIRun
 		return
 	}
 	name := agentDisplayName(child.Name, child.ID)
+	placeholder := st.tr("发消息给该队友…", "Message this teammate…")
+	if child.Historical {
+		if child.Kind == contracts.ChildAgentTeammate {
+			placeholder = st.tr("继续该队友…", "Continue this teammate…")
+		} else {
+			placeholder = st.tr("继续该子代理…", "Continue this subagent…")
+		}
+	}
 	ui.Row(c).FillWidth().Justify(ui.Center).PaddingY(design.Space3).Children(func() {
 		ui.Column(c).Width(design.TranscriptWidth).MaxWidthPercent(92).
 			Gap(design.Space2).Children(func() {
@@ -1514,7 +1579,7 @@ func buildChildComposer(c *ui.Context, t *design.Tokens, runtime contracts.UIRun
 			ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(design.Space2).Children(func() {
 				input := ui.TextInput(c, &st.agents.childDraft).
 					Label(st.tr("发送给 ", "Send to ") + name).
-					Placeholder(st.tr("发消息给该队友…", "Message this teammate…")).
+					Placeholder(placeholder).
 					Bind(&st.agents.childInput).FillWidth().Grow(1)
 				if st.agents.childFocus {
 					st.agents.childFocus = false
@@ -1533,7 +1598,17 @@ func buildChildComposer(c *ui.Context, t *design.Tokens, runtime contracts.UIRun
 					st.sendChildMessage(children, child.ID)
 				}
 			})
-			agentHint(c, t, st.tr("发送后等待该队友的回复。", "The teammate answers when its next run finishes."))
+			if st.agents.childSending {
+				agentHint(c, t, st.tr("已发送，等待该队友的回复。",
+					"Sent; waiting for the teammate's reply."))
+				return
+			}
+			hint := st.tr("发送后等待该队友的回复。", "The teammate answers when its next run finishes.")
+			if child.Historical {
+				hint = st.tr("发送后冷恢复这条历史记录，并等待它的回答。",
+					"Sending cold-resumes this finished record and waits for its answer.")
+			}
+			agentHint(c, t, hint)
 		})
 	})
 }
@@ -1562,7 +1637,7 @@ func (st *state) sendChildMessage(children contracts.ChildAgentService, childID 
 			}
 			st.agents.childSending = false
 			if err != nil {
-				st.agents.childSendErr = st.tr("发送失败：", "Send failed: ") + err.Error()
+				st.agents.childSendErr = st.tr("发送失败：", "Send failed: ") + st.childSendErrorText(err)
 			} else {
 				st.agents.childReply = strings.TrimSpace(answer)
 				st.agents.childReplyFor = childID
@@ -1571,6 +1646,29 @@ func (st *state) sendChildMessage(children contracts.ChildAgentService, childID 
 			runtime.Invalidate()
 		})
 	}()
+}
+
+// childSendErrorText localizes the backend's cold-resume failures; unknown
+// errors keep their message (the caller adds the localized prefix).
+func (st *state) childSendErrorText(err error) string {
+	if err == nil {
+		return ""
+	}
+	raw := strings.TrimSpace(err.Error())
+	lower := strings.ToLower(raw)
+	switch {
+	case strings.Contains(lower, "already running"):
+		return st.tr("该队友正在运行，请等本次运行结束后再发送。",
+			"This teammate is already running; wait for the current run to finish.")
+	case strings.Contains(lower, "cannot be resumed"), strings.Contains(lower, "no durable session id"):
+		return st.tr("这条历史记录无法继续：缺少可恢复的会话数据。",
+			"This finished record cannot be continued: no resumable session data.")
+	case strings.Contains(lower, "empty answer"):
+		return st.tr("该队友本轮没有返回答案，请重试。",
+			"This teammate returned no answer this time; try again.")
+	default:
+		return raw
+	}
 }
 
 // --- child breadcrumb -------------------------------------------------------

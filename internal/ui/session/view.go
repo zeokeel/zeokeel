@@ -33,6 +33,9 @@ const (
 	tabChat = iota
 	tabTrajectory
 	tabMemory
+	// tabContext is the session context inspector; it only exists when the
+	// backend provides contracts.KeyContext (buildTabs hides it otherwise).
+	tabContext
 )
 
 // buildScreen renders one frame of the branded conversation screen. All look
@@ -58,6 +61,10 @@ func buildScreen(
 		st.syncCommandLocale()
 	}
 	activeID := chat.ActiveSession()
+	// The goal dock shows only the active conversation's goal: a switch
+	// re-reads the per-session service, so no other session's goal is ever
+	// cached or displayed.
+	st.syncActiveGoal(activeID)
 	// The composer draft and staged attachments belong to one conversation:
 	// save/restore them on the conversation switch before anything builds.
 	// Opening or switching a conversation asks for the keyboard once, so the
@@ -68,25 +75,35 @@ func buildScreen(
 		st.focusComposer = true
 	}
 	chatSession, hasSession := chat.Session(activeID)
-	settled := observeRunSettled(chat, st)
-	if settled {
-		// The reply is done: hand the keyboard back to the composer (only on the
-		// conversation tab, never while some other input owns it).
-		if st.tab == tabChat {
-			st.focusComposer = true
-		}
-		runtime.Post(func() {
-			handleRunSettled(chat, st, runtime)
-			runtime.Invalidate()
-		})
+	// The reply is done: hand the keyboard back to the composer (only on the
+	// conversation tab, never while some other input owns it). The goal
+	// continuation itself is the agent backend's job; the UI only observes the
+	// settle for this keyboard handoff.
+	if observeRunSettledForFocus(chat, st) && st.tab == tabChat {
+		st.focusComposer = true
+	}
+	// A child conversation has no context inspector of its own: return to the
+	// conversation tab instead of showing an empty parent-context pane.
+	if strings.TrimSpace(st.agents.childID) != "" && st.tab == tabContext {
+		st.tab = tabChat
 	}
 	// Entering the Memory tab re-reads the store once (the cached read model is
-	// what avoids render-time I/O in every other frame).
+	// what avoids render-time I/O in every other frame); entering the Context
+	// tab (or switching conversations) re-reads the backend's folded view once.
+	if st.contextService != nil && st.contextSessionID != activeID {
+		st.contextDirty = true
+	}
 	if st.tab != st.lastTab {
-		if st.tab == tabMemory {
+		switch st.tab {
+		case tabMemory:
 			requestMemoryRefresh(st)
+		case tabContext:
+			st.contextDirty = true
 		}
 		st.lastTab = st.tab
+	}
+	if st.contextService != nil && st.tab == tabContext && st.contextDirty {
+		st.refreshSessionContext(activeID)
 	}
 	// Switching conversations starts the new transcript at its end: the offset
 	// of the previous conversation is meaningless in the new one (each tab
@@ -121,20 +138,6 @@ func buildScreen(
 		st.agents.childSendErr = ""
 		st.agents.childSendSeq++
 	}
-	// Frame-time fallback for hosts that update the session state without an
-	// extra notification: retry the queue once the run has settled. When this
-	// frame already detected the settle, handleRunSettled owns the flush, so
-	// posting the fallback too would send two queued prompts in one frame.
-	// A delivery failure pauses the queue and leaves its error set: the fallback
-	// must then stay quiet instead of re-sending the same prompt every frame
-	// (the explicit 重试 action clears both and retries).
-	if !settled && len(st.queuedFor(activeID)) > 0 && !chatSession.Running &&
-		!st.queuePaused[activeID] && st.queueErrorFor(activeID) == "" {
-		runtime.Post(func() {
-			processQueuedPrompts(chat, st, activeID)
-			runtime.Invalidate()
-		})
-	}
 	// Keyboard interrupt of the running turn: Esc / Cmd+. stop generation the
 	// way the 停止 control does. The composer's suggestion menus consume Esc
 	// first (composerTextKey), and this scope refuses to interrupt while one is
@@ -146,9 +149,6 @@ func buildScreen(
 		// screen slots); the body keeps only its status/error lines.
 		if st.exportErr != "" {
 			buildErrorLine(c, t, st.tr("导出失败：", "Export failed: ")+st.exportErr)
-		}
-		if st.autoContinueErr != "" {
-			buildErrorLine(c, t, st.autoContinueErr)
 		}
 		if st.goalActionErr != "" {
 			buildErrorLine(c, t, st.goalActionErr)
@@ -168,6 +168,8 @@ func buildScreen(
 				buildTrajectoryPane(c, t, chatSession, hasSession, st)
 			case tabMemory:
 				buildMemoryPane(c, t, runtime, st)
+			case tabContext:
+				buildContextPane(c, t, st, chatSession, hasSession)
 			default:
 				buildChatPane(c, t, runtime, navigator, chat, cfg, st, chatSession, hasSession)
 			}
@@ -241,20 +243,19 @@ func resetSessionErrors(st *state) {
 	st.exportErr = ""
 	st.regenerateErr = ""
 	st.clearComposerFailure()
-	st.autoContinueErr = ""
+	st.queueActionErr = ""
 }
 
-// cancelRunningTurn stops the active run the way the 停止 control does: pause
-// the queued prompts (a stop must not start another run automatically),
-// suppress goal auto-continue, toast the outcome and report a failure inline.
-// It is shared by the stop button, Esc/Cmd+. and the screen shortcut so every
-// interrupt path has identical semantics.
+// cancelRunningTurn stops the active run the way the 停止 control does: the
+// agent backend disarms the goal and owns the prompt inbox (a stop never clears
+// the queued prompts; their drain is the backend's decision), the outcome is
+// toasted and a failure is reported inline. It is shared by the stop button,
+// Esc/Cmd+. and the screen shortcut so every interrupt path has identical
+// semantics.
 func cancelRunningTurn(chat contracts.ChatService, st *state, runtime contracts.UIRuntime, sessionID string) {
 	if chat == nil || st == nil || sessionID == "" {
 		return
 	}
-	st.autoContinueSuppressed = true
-	pauseQueue(st, sessionID)
 	if err := chat.Cancel(sessionID); err != nil {
 		st.commandErr = st.tr("停止失败：", "Stop failed: ") + err.Error()
 	} else {
@@ -537,22 +538,6 @@ func buildHeaderWorkspace(c *ui.Context, t *design.Tokens, st *state) {
 	})
 }
 
-// goalStatus resolves the localized chip label, the muted/danger color and the
-// terminal state of the active goal.
-func goalStatus(st *state, t *design.Tokens) (label string, color ui.Color, paused, terminal bool) {
-	status := strings.ToLower(strings.TrimSpace(st.goal.Status))
-	switch status {
-	case contracts.GoalStatusPaused:
-		return st.tr("目标已暂停", "Goal paused"), t.WarningText, true, false
-	case contracts.GoalStatusCompleted:
-		return st.tr("目标已完成", "Goal completed"), t.LabelTertiary, false, true
-	case contracts.GoalStatusAbandoned:
-		return st.tr("目标已放弃", "Goal abandoned"), t.LabelTertiary, false, true
-	default:
-		return st.tr("目标", "Goal"), t.Accent, false, false
-	}
-}
-
 // buildComposerDock is the strip above the composer on the transcript's reading
 // measure: the active goal (badge, text, ⋯ menu) first, then the host slot the
 // approval module draws its inline card into. The transcript itself stays above.
@@ -575,197 +560,6 @@ func buildChildBannerDock(c *ui.Context, runtime contracts.UIRuntime) {
 			runtime.RenderSlot(c, contracts.SlotSessionBanner)
 		})
 	})
-}
-
-// buildGoalDock is the active goal's one compact line above the composer: the
-// status badge, the goal text (ellipsized, full text in the tooltip), a
-// hover-only clear entry and the ⋯ goal menu (pause/resume, complete,
-// end/delete). The group is an inline, left-aligned cluster capped at 70% of
-// the reading measure: the old full-width row stranded the ⋯ hundreds of
-// pixels from the goal it acts on (V25).
-func buildGoalDock(c *ui.Context, t *design.Tokens, runtime contracts.UIRuntime, st *state) {
-	if st.goal == nil || strings.TrimSpace(st.goal.Text) == "" {
-		return
-	}
-	th := t.Theme()
-	label, color, _, _ := goalStatus(st, t)
-	ui.Row(c).FillWidth().Justify(ui.Start).Children(func() {
-		group := ui.Row(c).MaxWidthPercent(70).Height(t.Scale(th.Space(7))).
-			AlignItems(ui.Center).Gap(design.Space2)
-		group.Children(func() {
-			if kind, isStatus := goalStatusKind(st); isStatus {
-				uikit.StatusBadge(c, t, kind, label)
-			} else {
-				design.Apply(ui.Badge(c, label), t.Badge()).TextColor(color)
-			}
-			design.Apply(ui.Text(c, st.goal.Text), t.Font(design.TypeXXS)).
-				TextColor(t.LabelSecondary).Shrink(1).MaxLines(1).
-				Ellipsis("…").Tooltip(st.goal.Text)
-			// The clear entry appears on hover so the resting strip stays one
-			// quiet line; it opens the same destructive confirmation as the
-			// menu's 删除目标记录 instead of clearing on a stray click.
-			if group.Hovered() {
-				clear := ui.Button(c, "").
-					Label(st.tr("清除目标", "Clear goal")).
-					Tooltip(st.tr("清除目标记录（需确认）", "Clear the goal record (asks first)")).
-					Size(t.Scale(design.Space5), t.Scale(design.Space5)).
-					PaddingX(design.Space0).Radius(design.RadiusSM)
-				clear.Children(func() {
-					ui.Icon(c, icons.Close()).Size(design.Space3, design.Space3).
-						TextColor(t.LabelTertiary)
-				})
-				if clear.Clicked() {
-					st.goalConfirm = "clear"
-					runtime.Invalidate()
-				}
-			}
-			buildGoalDockMenuButton(c, t, runtime, st)
-		})
-	})
-}
-
-// goalStatusKind maps a goal state onto the shared status vocabulary for the
-// status badge; an active goal is a plain labeled chip (目标), not a status.
-func goalStatusKind(st *state) (uikit.StatusKind, bool) {
-	if st == nil || st.goal == nil {
-		return uikit.StatusUnknown, false
-	}
-	switch strings.ToLower(strings.TrimSpace(st.goal.Status)) {
-	case contracts.GoalStatusPaused:
-		return uikit.StatusInProgress, true
-	case contracts.GoalStatusCompleted:
-		return uikit.StatusSuccess, true
-	case contracts.GoalStatusAbandoned:
-		return uikit.StatusCancelled, true
-	default:
-		return uikit.StatusUnknown, false
-	}
-}
-
-// buildGoalDockMenuButton is the goal strip's ⋯ entry (24 DIP More icon).
-func buildGoalDockMenuButton(c *ui.Context, t *design.Tokens, runtime contracts.UIRuntime, st *state) {
-	label := st.tr("目标操作", "Goal actions")
-	button := ui.Button(c.Key("session.goal.menu"), "").Label(label).Tooltip(label).
-		Size(t.Scale(design.Space6), t.Scale(design.Space6)).
-		PaddingX(design.Space0).Radius(design.RadiusSM)
-	button.Children(func() {
-		ui.Icon(c, icons.More()).Size(t.Scale(design.Space4), t.Scale(design.Space4)).
-			TextColor(t.LabelTertiary)
-	})
-	button.PopoverMenuButton(func(m *ui.Menu) { buildGoalMenu(m, t, runtime, st) })
-}
-
-// buildGoalMenu fills the goal chip's menu: pause/resume and complete first,
-// then the destructive end/delete actions in the danger color, separated.
-func buildGoalMenu(m *ui.Menu, t *design.Tokens, runtime contracts.UIRuntime, st *state) {
-	if st.goal == nil {
-		return
-	}
-	_, _, paused, terminal := goalStatus(st, t)
-	if !terminal {
-		if pauser, ok := st.goalTracker.(contracts.GoalPauser); ok && pauser != nil {
-			label := st.tr("暂停目标", "Pause goal")
-			if paused {
-				label = st.tr("继续目标", "Resume goal")
-			}
-			if m.Item(label).ID("goal.pause").Chosen() {
-				ok := pauser.Pause()
-				if paused {
-					ok = pauser.Resume()
-				}
-				st.goalActionErr = ""
-				if !ok {
-					if paused {
-						st.goalActionErr = st.tr("继续目标失败：", "Resume goal failed: ") + st.tr("目标不存在", "no active goal")
-					} else {
-						st.goalActionErr = st.tr("暂停目标失败：", "Pause goal failed: ") + st.tr("目标不存在", "no active goal")
-					}
-				}
-				runtime.Invalidate()
-			}
-		}
-		if _, ok := goalLifecycle(st); ok {
-			if m.Item(st.tr("完成目标", "Complete goal")).ID("goal.complete").Chosen() {
-				lifecycle, ok := goalLifecycle(st)
-				if !ok {
-					return
-				}
-				if lifecycle.Complete() {
-					st.goalActionErr = ""
-					st.toast(contracts.NotifySuccess, st.tr("目标已完成", "Goal completed"))
-				} else {
-					st.goalActionErr = st.tr("完成目标失败：", "Complete goal failed: ") + st.tr("目标不存在", "no active goal")
-				}
-				runtime.Invalidate()
-			}
-			m.Separator()
-			// "End" keeps the record; only "Delete" removes it — the two danger
-			// actions are no longer adjacent siblings with unclear semantics.
-			if m.Item(st.tr("结束目标（保留记录）", "End goal (keep record)")).ID("goal.end").Chosen() {
-				st.goalConfirm = "abandon"
-				runtime.Invalidate()
-			}
-		} else if _, ok := st.goalTracker.(contracts.GoalPauser); ok {
-			m.Separator()
-		}
-	}
-	if m.Item(st.tr("删除目标记录", "Delete goal record")).ID("goal.delete").Danger().Chosen() {
-		st.goalConfirm = "clear"
-		runtime.Invalidate()
-	}
-}
-
-// buildGoalMenuActions renders the confirmation of a destructive goal action
-// through the shared ConfirmDanger dialog: the safe action (取消) is the
-// Default so a stray Enter cancels, and the dangerous action never is
-// (DESIGN.md AP-12). Abandon keeps the record; delete removes it.
-func buildGoalMenuActions(c *ui.Context, runtime contracts.UIRuntime, st *state) {
-	if st.goalConfirm == "" {
-		return
-	}
-	open := true
-	action := st.goalConfirm
-	title, message, confirm := "", "", ""
-	switch action {
-	case "abandon":
-		title = st.tr("结束目标", "End goal")
-		message = st.tr("结束当前目标？目标记录与历史会保留，自动推进停止，之后仍可删除记录。",
-			"End the current goal? Its record and history stay, automatic progress stops, and you can delete the record later.")
-		confirm = st.tr("确认结束", "End")
-	default:
-		title = st.tr("删除目标记录", "Delete goal record")
-		message = st.tr("删除当前目标及其记录？与「结束目标」不同，历史记录也会被移除，无法撤销。",
-			"Delete the current goal and its record? Unlike ending it, the record is removed and this cannot be undone.")
-		confirm = st.tr("确认删除", "Delete")
-	}
-	uikit.ConfirmDanger(c, &open, uikit.ConfirmDangerOptions{
-		Key:     "session.goal.confirm." + action,
-		Title:   title,
-		Message: message,
-		Confirm: confirm,
-		Cancel:  st.tr("取消", "Cancel"),
-		OnConfirm: func() {
-			if action == "abandon" {
-				lifecycle, ok := goalLifecycle(st)
-				if ok && lifecycle.Abandon() {
-					st.goalActionErr = ""
-					st.toast(contracts.NotifySuccess, st.tr("目标已放弃", "Goal abandoned"))
-				} else if ok {
-					st.goalActionErr = st.tr("放弃目标失败：", "Abandon goal failed: ") + st.tr("目标不存在", "no active goal")
-				}
-			} else {
-				if st.goalTracker != nil {
-					st.goalTracker.Clear()
-				}
-				st.goalActionErr = ""
-				st.toast(contracts.NotifySuccess, st.tr("目标已清除", "Goal cleared"))
-			}
-			runtime.Invalidate()
-		},
-	})
-	if !open {
-		st.goalConfirm = ""
-	}
 }
 
 // exportSessionJSONL writes the conversation as JSON Lines through its seam.
@@ -858,6 +652,14 @@ func buildTabs(c *ui.Context, t *design.Tokens, cfg Config, st *state) {
 		st.localized(cfg.TabChat, "对话", "Chat"),
 		st.localized(cfg.TabTrajectory, "轨迹", "Trajectory"),
 		st.localized(cfg.TabMemory, "记忆", "Memory"),
+	}
+	// The Context tab is contributed only when the backend inspector exists;
+	// without it the conversation keeps its three tabs exactly as before.
+	if st.contextService != nil && strings.TrimSpace(st.agents.childID) == "" {
+		labels = append(labels, st.localized(cfg.TabContext, "上下文", "Context"))
+	}
+	if st.tab >= len(labels) {
+		st.tab = tabChat
 	}
 	tabs := ui.TabsBase(c, &st.tab, len(labels))
 	tabs.List.FillWidth().Height(design.Space8).Margin(0).
@@ -1090,6 +892,10 @@ func buildChatPane(
 	// in model history), so a reload shows the same rows; mergeChildNotices keeps
 	// the live ordering and puts them above the streaming answer.
 	messages = mergeChildNotices(messages, childNoticeMessages(st, chat.ActiveSession()), chatSession.Running)
+	// A restored run that never finished is not replayed by the backend: say so
+	// above the transcript (and only there — the sidebar stays free of a
+	// transient badge) with a continue/dismiss pair.
+	buildInterruptedNotice(c, t, runtime, st, chatSession)
 	// verbose keeps the whole timeline and never bundles steps; the other modes
 	// fold a multi-step turn into one process row.
 	var sameTurn func(prev, next contracts.ChatMessage) bool
@@ -1245,6 +1051,12 @@ func buildFirstRunAction(c *ui.Context, t *design.Tokens, label, actionLabel str
 func buildMessage(c *ui.Context, t *design.Tokens, runtime contracts.UIRuntime, message contracts.ChatMessage, st *state, canRegenerate, last, defaultOpen bool) {
 	switch message.Role {
 	case contracts.ChatRoleUser:
+		if message.GoalRound != nil {
+			// An engine-injected continuation round is not a human prompt: it
+			// renders as a goal-round receipt instead of a user bubble.
+			buildGoalRoundNotice(c, t, st, message)
+			return
+		}
 		ui.Column(c.Key("session.message." + message.ID)).FillWidth().AlignItems(ui.End).Gap(design.Space1).Children(func() {
 			if strings.TrimSpace(message.Text) != "" {
 				design.Apply(ui.Column(c), t.Panel()).
@@ -2578,7 +2390,9 @@ func buildComposer(
 	chatSession contracts.ChatSession,
 ) {
 	running := chatSession.Running
-	queueAllowed := running
+	// Queueing is the backend inbox: only a host that implements
+	// contracts.PromptQueue can accept a prompt while the turn runs.
+	queueAllowed := running && st.promptQueue != nil
 	// Whether the slash command popover is the layer owning Enter/Esc right
 	// now. It only exists while no turn runs, and an Esc-dismissed draft keeps
 	// the menu closed until the draft changes. The same condition drives the
@@ -2623,7 +2437,7 @@ func buildComposer(
 	veryCompact := func() bool { return composerWidth > 0 && composerWidth < 480 }
 	var queueSend func() bool
 	if queueAllowed {
-		queueSend = func() bool { return queueDraft(st, activeID) }
+		queueSend = func() bool { return enqueueDraft(st, activeID) }
 	}
 	// The clipboard read runs from the input's paste callback, which outlives
 	// this build pass: capture the services value now instead of the Context.
@@ -2680,29 +2494,16 @@ func buildComposer(
 					t.Font(design.TypeXXXS)).TextColor(t.LabelTertiary).MaxLines(1)
 			}
 		},
-		Queue:       st.queuedFor(activeID),
-		QueueOpen:   &st.queueMenuOpen,
-		QueueList:   &st.queueList,
-		QueuePaused: st.queuePaused[activeID],
-		QueueError:  st.queueErrorFor(activeID),
+		Queue:      st.queuedPromptTexts(activeID),
+		QueueOpen:  &st.queueMenuOpen,
+		QueueList:  &st.queueList,
+		QueueError: st.queueActionErr,
 		OnQueueCancel: func(index int) {
-			cancelQueuedPrompt(st, activeID, index)
+			removeQueuedPrompt(st, activeID, index)
 			runtime.Invalidate()
 		},
 		OnQueueClear: func() {
 			clearQueuedPrompts(st, activeID)
-			runtime.Invalidate()
-		},
-		OnQueueResume: func() {
-			resumeQueue(chat, st, activeID)
-			runtime.Invalidate()
-		},
-		OnRetryQueue: func() {
-			// The explicit retry is also the resume: clear the failure pause so
-			// processQueuedPrompts runs again (a second failure re-pauses it).
-			st.setQueueError(activeID, "")
-			delete(st.queuePaused, activeID)
-			processQueuedPrompts(chat, st, activeID)
 			runtime.Invalidate()
 		},
 		Toolbar: func(ic *ui.Context) {
@@ -2863,7 +2664,7 @@ func composerTextKey(runtime contracts.UIRuntime, chat contracts.ChatService, st
 				runtime.Invalidate()
 				return true
 			}
-			queueDraft(st, activeID)
+			enqueueDraft(st, activeID)
 			runtime.Invalidate()
 			return true
 		}
@@ -4035,7 +3836,7 @@ func submitDraft(chat contracts.ChatService, activeID string, st *state) bool {
 			st.attachErr = st.tr("发送附件失败：", "Failed to send attachments: ") + err.Error()
 			return false
 		}
-	} else if err := chat.Send(activeID, prompt); err != nil {
+	} else if err := deliverPrompt(chat, st, activeID, prompt); err != nil {
 		// C-04: a failed send must not be silent. Known backend classes get a
 		// localized heading with a recovery action and keep the raw text as
 		// selectable detail; unknown failures keep the prefix+raw line. The

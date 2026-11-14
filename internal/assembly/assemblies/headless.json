@@ -14,10 +14,16 @@
       "config": {}
     },
     {
+      "id": "goal",
+      "module": "zeokeel/goal",
+      "config": {}
+    },
+    {
       "id": "approvals",
       "module": "zeokeel/approvals",
       "config": {
-        "mode": "auto"
+        "mode": "auto",
+        "ignorePermissionSetting": true
       }
     },
     {

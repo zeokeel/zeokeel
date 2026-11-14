@@ -475,6 +475,12 @@ func buildModelCatalogRow(c *ui.Context, t *design.Tokens, store contracts.Setti
 				design.Apply(ui.Text(c, generation),
 					t.Font(design.TypeXXS)).TextColor(tertiary).MaxLines(1)
 			}
+			// Configured prices are shown on the row so a saved edit reads back
+			// immediately; an unpriced model keeps the row quiet (no fake $0).
+			if pricing := catalogPricingSummary(locale, model); pricing != "" {
+				design.Apply(ui.Text(c, pricing),
+					t.Font(design.TypeXXS)).TextColor(tertiary).MaxLines(1)
+			}
 		})
 		if design.Apply(ui.Button(c, localized(locale, "编辑", "Edit")),
 			t.SecondaryButton()).

@@ -56,24 +56,9 @@ func TestProvideServicesHeadlessSkipsInteraction(t *testing.T) {
 	if _, ok := root.Get(contracts.KeyPlanReviewer); ok {
 		t.Fatal("headless host provided KeyPlanReviewer")
 	}
-	if _, ok := root.Get(contracts.KeyGoalTracker); ok {
-		t.Fatal("headless host provided KeyGoalTracker")
-	}
-}
-
-func TestProvideServicesDesktopProvidesGoalTracker(t *testing.T) {
-	root := cordis.Root()
-	t.Cleanup(func() { _ = root.DisposeAll() })
-	settings, err := NewSettings(t.TempDir())
-	if err != nil {
-		t.Fatalf("NewSettings: %v", err)
-	}
-	uiRoot := uiroot.New(uiroot.Config{AppName: appName})
-	if err := provideServices(root, t.TempDir(), settings, NewLogger(""), uiRoot); err != nil {
-		t.Fatalf("provideServices: %v", err)
-	}
-	tracker, ok := root.Get(contracts.KeyGoalTracker)
-	if !ok || tracker == nil {
-		t.Fatal("desktop host did not provide KeyGoalTracker")
+	// The Goal v2 service is provided by the goal backend module during
+	// assembly, never by the process host (which runs before any assembly).
+	if _, ok := root.Get(contracts.KeyGoal); ok {
+		t.Fatal("headless host provided KeyGoal")
 	}
 }

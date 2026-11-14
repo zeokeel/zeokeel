@@ -4,6 +4,70 @@ All notable changes to ZeoKeel are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/) and the project adheres to
 [Semantic Versioning](https://semver.org/).
 
+## [0.2.36] - 2026-11-15
+
+长时任务严格对齐 DSH（设计见 [docs/plans/long-task-dsh-alignment.md](docs/plans/long-task-dsh-alignment.md)，差距分析见 [docs/research/long-task/](docs/research/long-task/)）。
+
+### Added
+
+- **Goal v2：会话级 durable 目标 + DSH 三件套**。新模块 `internal/modules/goal` 以 sessionstore `goal/change` 事件为事实源：每个会话一个目标，revision 单调 CAS，四相 active/paused/blocked/complete，默认 256 轮自动续跑，`clear` 写 revisioned tombstone；启动后 `disarmed`，仅人类 create/resume 重新 arm。模型工具由旧 `goal` 换成 DSH 同名 `get_goal`/`create_goal`/`update_goal`（create/edit/pause/resume 仅直接人类 turn；goal-round 的 `blocked` 需 ≥3 轮且带原因；目标不可跨会话串味，重启/切会话不再丢失或错投）。
+- **引擎侧目标续跑**：run 正常结束后由 agent 后端（不再由桌面 UI）读取该会话目标，`AdmitRound` 持久计数后注入下一条 goal-round（prompt 含 objective 与 `Round n/cap`）；失败/取消/暂停/阻塞/达到上限即停，上限落 blocked(code=round-limit)；headless/ACP 同样生效。`ChatMessage.GoalRound` 与 durable `user_message.goalRound` 让 transcript 显示「目标续跑 · 第 n/cap 轮」回执。
+- **上下文安全默认**：未手工设置 `chat.contextBudget` 时按模型目录 `ContextWindow` 推导 `min(0.8W, W-MaxTokens-65536)`，预算 >0 时 run/subagent/team 默认安装 LLMCompactor；`/compact` 不再依赖手工预算。显式保存 `0` 仍表示关闭自动压缩。
+- **自动化/schedule 对齐 DSH**：任务新增 `SessionID`，后续 run 默认投递到同一会话（可切「每次新建会话」）；运行历史拆成 `delivered` 与 `completed/failed/interrupted` 两态（时长/错误/会话链接），启动时从会话读模型补结算上次遗留的 delivered；schedule 解析器新增 `daily/weekly/cron（5 字段 Vixie）/at` 与显式时区（默认 Asia/Shanghai），保留旧表达式；模块完成/失败经 `NotifyRunFinished` 通知。
+- **系统通知与常驻体验**：桌面通知现在可在应用内 toast 之外镜像到 OS 通知中心（mygo `NotificationsSupported`/`NewNotification`），新增「系统通知」设置（默认开，平台不支持时禁用并说明）；后台 run 完成/失败、审批等待、自动化结算会触发系统通知，点击回到应用。关窗/Cmd+Q/托盘退出/更新重启前若存在运行中 run、后台 job 或 active goal，先原生确认；配合 close-to-tray 可「关闭窗口继续运行」。
+- **后端 PromptQueue（DSH inbox）**：新增 `contracts.PromptQueue` 与 agent 实现——运行中发送的 prompt 进入会话 durable inbox（`queue/change` 快照事件），run 结算后**先 drain 用户消息、再考虑目标续跑**；Stop 保留队列，重启恢复队列并对 idle 会话自动 drain；UI 排队 popover 改读后端（顺序/时间/移除/清空），不再有待重启即丢的 UI 内存队列。由此删除 goal 续跑的 200ms 宽限抢占。
+- **GoalRound / 中断恢复**：restore 从 durable `user_message.goalRound` 回填 `ChatMessage.GoalRound`（重启后仍显示「目标续跑」回执）；checkpoint 未完成相位恢复为 `ChatSession.Interrupted`（下一次 run 清零）。
+- **无人值守审批 fail-closed**：headless/ACP 装配 pin `ignorePermissionSetting`，同一 data dir 下桌面保存的权限预设不能把无人值守 auto 变成永久等待审批；自动化/设置页文案明确「所有权限 = 无人值守」。
+- **编排对齐 DSH**：注册 rig `workflow`（显式请求的多子代理步骤/并行 fan-out）与 `ralph`（实验性 fresh-agent 迭代；guidance 标注仅显式请求，可经 preset/tools.disabled 关闭）；新增动态 orchestration runner（depth 1、并发 8、子工具面排除全部编排工具防递归）；子代理/团队成员不再落 rig 默认 20 轮，改用与主 run 一致的委派预算；同步 guidance 建议长任务优先异步 team。
+- **「上次运行被中断」提示**：restore 检测非终态 checkpoint 时，会话页显示中性提示徽标与「继续（聚焦 composer）/忽略（仅本次）」入口；不自动重发、不改 read model，下一次 run 自动消失。
+- **会话「上下文 / Context」标签页**：后端新增 `contracts.ContextInspector`（`KeyContext`）与每会话折叠数据，UI 仅在服务存在时增加第 4 个 tab：概览（used/window、最近请求快照、系统提示/工具目录/历史/注入来源）、模型调用表（逐调用 tokens 与可选成本）、上下文事件（手动/推断 compact、spill）。无数据/无价格时诚实空态，不伪造 0。
+- **观测性数据基座**：每次 provider 调用写 durable `model_call`；手动 compact 写 `compact` 事件，自动压缩不可观测时只写显式 `inferred:true` 近似；spill 写结构化事件；每 run 首次调用前写 `context_snapshot`（sections 预留）；模型目录新增可选输入/缓存/输出价格与成本计算。
+- **Fork 严格对齐 DSH**：fork 复制完整 durable history（含 tool call/result）而非只复制文本；源会话有 goal 时复制一份新 ID、revision 1、disarmed 的 goal（phase/rounds/blocked 保留，源不变）。
+- **Team/子会话 cold resume**：历史 teammate/子代理现在可在重启后继续发消息（显式发送触发，绝不自动恢复）：child session 作为 history 直接跑一次 agent，tool call/result 写回 durable child session，再次重启仍可继续；`ChildAgent`/`TeamMember` 新增 `Resumable`，历史行可恢复时 UI 可继续交互；记录状态/答案/用量/活动持久化。
+- **通知点击直达会话 + 后台 run 通知**：`contracts.SessionNotifier` 让通知携带 sessionID（编码进通知 ID，跨重启可解析）；点击通知置前并打开对应会话（已删/未知会话回退仅置前）；非 active 会话的 run 完成/失败现在发通知（成功/失败文案含标题），Cancel 不发；automation/审批等待通知同样带 session。
+- **上下文溢出自动恢复**：run 因 context 超限失败时自动压缩一次并重试同一 turn 一次（user 消息不重复、工具副作用不重放），写 durable `context_recovery` 事件并折叠进 Context timeline；失败即正常报 context 错误。
+- **system prompt 分段**：`PromptSection{ID,Source,Text,Bytes,Tokens}` + 12 个稳定 section，最终提示词字节级不变；`context_snapshot.Sections` 已填充（含 source/hash），Context tab 可渲染分段来源。
+- **模型价格编辑 UI**：设置→模型编辑新增输入/缓存/输出价格（每 1M tokens，USD，可选），就地校验/清除；模型行回显价格；Context tab 与调用表按 `CostKnown` 显示成本（未知隐藏/—），无价格不伪造。
+- **跨会话洞察页（Insights）**：新 `zeokeel/insights` 后端模块 + `zeokeel-ui/insights` 侧栏一级入口；按 7/30 天聚合各会话的 tokens/成本/会话/工具/模型/工作区（`model_call` 主源、旧 `usage` 回退且不重复计；按当前价格现算，未知价只计 UnpricedCalls）；`internal/modules/insights` 有界读取 + 15s 缓存，超限标 `Truncated` 不静默少算；页面用 `ui.Table`/`ui.List`/KPI 行，无自绘图表/卡片墙，点击会话排行打开会话。
+- **冷恢复 UI**：历史 teammate/子代理 `Resumable` 行显示「历史 · 可继续」与「继续」，子会话视图内提供冷恢复输入框（发送走现有 `SendChildAgent`，显示「已发送，等待回复」/最新回复/本地化错误）；不可恢复历史保持只读。
+- **Context tab 系统提示分段/事件审计**：概览新增「系统提示分段」表（本地化分段名/来源/字节/Tokens、合计与估算占比；空快照隐藏，正文不展示）；事件区渲染 `recovery`（自动压缩重试成功/失败）与 `archive`（归档 N 条/M 条截断、字节、前后 tokens），archive 原文不进 read model；`/compact` 归档失败显示本地化错误且绝不显示「已压缩」。
+- **压缩原始历史 archive（fail-closed）**：手动 `/compact` 在替换历史前，先把原始 rig messages（含 tool call/result）写 durable `compact_archive` 事件（单事件 2 MiB/200 条上限，超限记 `truncated`/`omittedMessages` 不静默丢）；archive 失败则中止压缩、历史原样保留；上下文溢出自动恢复路径同样归档（kind=recovery）；ContextInspector 只暴露归档元数据（正文不注入 UI），重启后仍可审计。
+- **主自动压缩转为 exact 可审计**：run 前若 system prompt+history 超有效预算，产品先 archive（kind=auto）→ LLMCompactor 压缩 → ReplaceHistory → 写 durable `compact`（kind=auto、`inferred:false`、精确 before/after/replaced/saved）→ ContextInspector 折叠；archive/压缩/replace 失败不阻塞 run，事件记 `Outcome`（failed/no-reduction/archive-failed/replace-failed）；mid-run rig 内压缩仅在增长时保留 inferred 兜底。
+- **Gate 无 approvals 服务时 fail-closed**：需要审批的工具不再静默放行（deny + 可读错误）；白名单/plan/chat/只读/工作区/sandbox shell/interaction/remembered 分支保持；无 approvals 时模型提示的审批策略改为 workspace（不再宣称 full/no prompt）。
+- **Windows 沙盒并发写修复（rig v0.16.3）**：每个 sandbox helper 不再用整份 DACL 快照互相覆盖，改为跨进程命名 mutex + 每 grant marker mutex + per-workspace 状态文件协调：首个 grant 保存原始 descriptor/加 deny 与 Low label，并发 grant 各自只加自己的 capability ACE，中间退出只 REVOKE 自己的 ACE，最后一个退出恢复原始 descriptor；崩溃的 grant 由后续 helper 通过 marker 句柄消失自愈。read-only 不改 workspace ACL；状态损坏 fail closed。
+- **执行域稳定持有（job / terminal）**：后台 job 与模型 terminal 会话不再因工作区切换、权限/沙盒 runner 重建被 `CloseAll`；所有 `(root, mode, sandbox)` build 保留到模块 unload，`job_*`/`terminal_*` 按 ID 路由到 owner build（新任务仍用当前策略），`job_list`/`terminal_list` 合并同 root 的保留 build，完成通知从所有 build drain。新增 durable `execution/job_started|job_finished|terminal_opened|terminal_closed` 事件（仅审计元数据、不含输出；无 store 时 no-op），应用退出后未 finish 的记录视为 interrupted。
+- **Context 自动压缩 Outcome 可读**：事件区区分「自动压缩」成功 /「自动压缩跳过/失败：failed|no-reduction|archive-failed|replace-failed」/「压缩（推断）」/manual；失败/跳过只显示前后 tokens，不显示会误导的消息 delta，绝不显示「已压缩」。
+- **Stop 后 inbox**：Stop 不清队列且不自动重启；用户切回/下一次 Send/Enqueue 时按序 drain 旧队首（新消息排队尾），goal 保持 disarmed。
+
+### Changed
+
+- **Goal 语义/工具面变化（breaking）**：旧进程级内存单例 `goal` 工具与 `contracts.GoalTracker/GoalPauser/GoalLifecycler/KeyGoalTracker` 删除；会话目标现在只属于当前会话，跨会话/重启保留 phase/轮次/blocked，但自动续跑默认 disarmed，需要人类 resume。旧 `/goal` 命令与 dock 已迁移到 GoalService，dock 显示 phase、`n/cap 轮`、blocked 原因与「继续目标」。
+- **自动化默认同会话续跑**：旧任务升级后，后续 run 不复用新会话而是复用首次创建的会话（隐私/上下文累积需注意；可开「每次新建会话」恢复旧行为）。旧 `M H * * *`/`@daily` 由实际按 UTC 求值改为按 Asia/Shanghai 墙钟求值，需要 UTC 的用显式时区 selector。
+- **rig 依赖：v0.16.3（Windows sandbox 并发修复）内树 fork**：产品不依赖未发布的 rig v0.17.0；DSH goal 三件套由产品 `internal/hosttools/goaltools.go` 自实现。Windows sandbox 并发写修复在 rig `v0.16.3`（commit `0515026`，tag 已推送 GitHub；`goproxy.cn` 尚未索引该版本），产品以 `third_party/zeokeel-rig` 源码快照 + `replace ./third_party/zeokeel-rig` 消费，干净 checkout 无需 sibling rig；代理索引后删除 fork/replace 并直接 require v0.16.3 即可。`/data/zeokeel-rig` 的 v0.17.0 候选改动保留在本地 tag，未发布、产品不消费。
+
+### Known limitations
+
+- 自动压缩：run 前主压缩为 exact（inferred=false + archive）；run 中随消息增长触发的 rig 内压缩仍只能是 `inferred:true` 近似；溢出恢复只重试一次。
+- 无 approvals 服务时 gate fail-closed 会使需要审批的整个 run 中止（rig v0.16.2 gate error 语义，非单工具拒绝）；该路径仅自定义 embedder 可达。
+- `compact_archive` 正文只在 durable 事件里，UI 只展示归档元数据；「查看压缩前原文」需后续只读分页 API（避免 2 MiB 正文进帧循环）。
+- cold resume 是「问一次答一次」：历史 teammate 无 live Wait/Interrupt/Close；父会话回执经下一次 run 的 completion receipt；pre-feature 记录首次只 seed prompt+最后答案；TTL prune 暂不清理 durable child 行；运行中 overlay 无停止按钮。
+- Insights 每会话只读最近 4000 事件（截断会明示）；首次加载在后台，无跨进程预聚合投影表；冷恢复 UI 在子会话 composer 内发送（浮层行只做入口）。
+- 队列/GoalRound/Context timeline 回填读每会话最近 4000 条事件；极旧且未被后续快照覆盖的数据不回填（可接受）。
+- Stop 之后保留的队列不会自动重新 drain：下一次用户 Send/Enqueue 或切回会话时才继续（无后台定时器）。
+- `ChatSession.Interrupted` 的「继续」只聚焦 composer，不自动「重发上一条」；sync `subagent` 仍阻塞当前 run（guidance 建议长任务用异步 team）；ralph 为实验性工具，建议仅显式请求时使用。
+- run 中 rig 内兜底压缩只能推断（run 前主压缩为 exact + archive + Outcome）；成本按当前模型价格重算（改价后需重启回放）；prompt sections 提供元数据（UI 已可渲染），正文不进事件。
+- job 完成通知不带 exit code（rig v0.16.2 无公开 accessor；读 job_output 会消费模型输出游标），因此 `execution/job_finished` 只记 DSH 状态/kind。
+- 执行域：job/terminal 在**同一应用进程内**跨工作区/权限/沙盒重建保持存活并可继续操作；进程退出/崩溃后无法重连（OS 子进程随应用结束；DSH jobs 同样不跨重启），durable execution 事件只供审计/回看且无完整输出，缺 finish/close = 结束未知。未做 systemd/launchd 常驻服务，托盘不可用时关窗仍「确认后退出」。
+- OS 通知平台受限：macOS 需打包应用；纯 Xvfb/无 dbus 环境自动降级为应用内 toast；无会话的通知只把窗口带到前台。
+- rig 使用 **v0.16.3 内树 fork**（`third_party/zeokeel-rig` + replace；Windows 并发修复；tag `v0.16.3` 已推送 GitHub，但 goproxy.cn 尚未索引，故暂用 fork 保干净构建）；`/data/zeokeel-rig` 的 v0.17.0 候选改动保留本地 tag、未发布、产品不消费（DSH goal 三件套由产品 hosttools 自实现，模型面兼容）。
+- Windows 并发 ACL 修复的 Win32 运行时行为（命名 mutex/SetFileSecurityW/OpenMutex、真实并发 helper）尚未在 Windows 实机验证；需用 rig `RIG_WINDOWS_SANDBOX_TEST=1` 跑并发回归。
+
+### Verification
+
+- `gofmt -l internal cmd` 空；`go build ./...`、`go vet ./...`、`go tool mygo vet .` 通过；`go test ./... -count=1` 全绿；关键包 `-race`（goal/agent/toolkit）通过；`GOOS=windows GOARCH=amd64 go build ./...` 通过（Windows 产物包含 rig v0.16.3 ACL helper）。
+- `designlint --strict --baseline` 0 error/0 warn/0 new；`scripts/design-check.sh` 6/6 PASS。
+- `ui-snapshot` 120 PNG（含 goal/inbox/context/context-sections/insights/interrupted/cold-resume 等证据帧）人工复核；`ui-drive` 全量 93/93 PASS；自动化/英文快照人工复核。
+
 ## [0.2.35] - 2026-11-14
 
 ### Added

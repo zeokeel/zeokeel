@@ -20,6 +20,13 @@ import (
 // loadBridgeProduct loads hosttools with the host bridge services provided.
 func loadBridgeProduct(t *testing.T, uiRoot *uiroot.Root, interactive bool) *product {
 	t.Helper()
+	return loadBridgeProductWithGoals(t, uiRoot, interactive, nil)
+}
+
+// loadBridgeProductWithGoals is loadBridgeProduct with an optional per-session
+// goal service (the DSH goal trio backend) provided on the root.
+func loadBridgeProductWithGoals(t *testing.T, uiRoot *uiroot.Root, interactive bool, goals contracts.GoalService) *product {
+	t.Helper()
 	root := cordis.Root()
 	t.Cleanup(func() { _ = root.DisposeAll() })
 	if _, err := root.Provide(contracts.KeyUserInteraction, contracts.UserInteraction(uiRoot.UserInteraction())); err != nil {
@@ -31,8 +38,10 @@ func loadBridgeProduct(t *testing.T, uiRoot *uiroot.Root, interactive bool) *pro
 	if _, err := root.Provide(contracts.KeyPlanReviewer, contracts.PlanReviewer(uiRoot.PlanReviewer())); err != nil {
 		t.Fatalf("provide plan reviewer: %v", err)
 	}
-	if _, err := root.Provide(contracts.KeyGoalTracker, contracts.GoalTracker(uiRoot.GoalTracker())); err != nil {
-		t.Fatalf("provide goal tracker: %v", err)
+	if goals != nil {
+		if _, err := root.Provide(contracts.KeyGoal, goals); err != nil {
+			t.Fatalf("provide goal service: %v", err)
+		}
 	}
 	rigRegistry := rigtool.NewRegistry()
 	registry := newKernelRegistry(t, rigRegistry, nil)
@@ -126,50 +135,5 @@ func TestInteractiveFalseKeepsArtifactBridgeHidesPlanTools(t *testing.T) {
 		if _, err := product.call(t, name, `{}`); !errors.Is(err, rig.ErrToolNotFound) {
 			t.Fatalf("%s with interactive=false = %v, want rig.ErrToolNotFound", name, err)
 		}
-	}
-}
-
-func TestGoalToolUsesGoalTrackerBridge(t *testing.T) {
-	uiRoot := uiroot.New(uiroot.Config{AppName: "test"})
-	events := make(chan struct {
-		goal contracts.Goal
-		ok   bool
-	}, 8)
-	uiRoot.GoalTracker().SetHandler(func(goal contracts.Goal, ok bool) {
-		events <- struct {
-			goal contracts.Goal
-			ok   bool
-		}{goal: goal, ok: ok}
-	})
-	product := loadBridgeProduct(t, uiRoot, true)
-
-	content := product.callOK(t, ToolGoal, `{"action":"set","text":"Ship v0.5"}`)
-	if content != "goal-1" {
-		t.Fatalf("goal set content = %q, want the goal id", content)
-	}
-	id, text, status, ok := uiRoot.GoalTracker().Get()
-	if !ok || id != "goal-1" || text != "Ship v0.5" || status != "active" {
-		t.Fatalf("goal tracker after set = %q/%q/%q/%v", id, text, status, ok)
-	}
-	event := <-events
-	if !event.ok || event.goal.Text != "Ship v0.5" {
-		t.Fatalf("goal set event = %+v", event)
-	}
-
-	if content := product.callOK(t, ToolGoal, `{"action":"get"}`); content != "id: goal-1\ntext: Ship v0.5\nstatus: active" {
-		t.Fatalf("goal get content = %q", content)
-	}
-	if content := product.callOK(t, ToolGoal, `{"action":"clear"}`); content != "goal cleared" {
-		t.Fatalf("goal clear content = %q", content)
-	}
-	if _, _, _, ok := uiRoot.GoalTracker().Get(); ok {
-		t.Fatal("goal survived clear")
-	}
-	event = <-events
-	if event.ok {
-		t.Fatalf("goal clear event = %+v, want ok=false", event)
-	}
-	if content := product.callOK(t, ToolGoal, `{"action":"get"}`); content != "no goal set" {
-		t.Fatalf("goal get after clear = %q", content)
 	}
 }

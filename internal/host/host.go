@@ -445,6 +445,9 @@ func runDesktop(opts Options) error {
 		_ = root.DisposeAll()
 		return err
 	}
+	// The UI root resolves backend services from the kernel context (the close
+	// guard's running-work probe, Cmd/Ctrl+N). Bind it before the assembly loads.
+	uiRoot.SetKernelContext(root)
 	moduleLister, err := provideModuleLister(root)
 	if err != nil {
 		_ = root.DisposeAll()
@@ -452,17 +455,32 @@ func runDesktop(opts Options) error {
 	}
 
 	var (
-		loader           *module.Loader
-		window           *mygo.Window
-		tray             trayHandle
-		hotkeyOff        func()
-		themeOff         func()
-		updateCommandOff func()
-		updateCommandErr error
-		startupErr       error
-		shutdownOnce     sync.Once
-		closing          atomic.Bool
+		loader               *module.Loader
+		window               *mygo.Window
+		tray                 trayHandle
+		hotkeyOff            func()
+		themeOff             func()
+		updateCommandOff     func()
+		updateCommandErr     error
+		notificationClickOff func()
+		startupErr           error
+		shutdownOnce         sync.Once
+		closing              atomic.Bool
 	)
+	// Close/quit guard: closing the window, Cmd+Q, the tray's 退出 or an update
+	// restart while backend work is in flight asks first instead of silently
+	// dropping a run/job/goal. The probe is the UI root's live view of the
+	// backend services; the confirmation is mygo's native dialog in the
+	// product language. With close-to-tray on, closing hides the window (the
+	// tray's listener) and the guard stays quiet.
+	quitGuard := newCloseGuard(closeGuardDeps{
+		runningWork: uiRoot.RunningWork,
+		confirm: func() bool {
+			return confirmQuitWithRunningWork(window, uiRoot.Locale().Language() == "en")
+		},
+		closeToTray: closeToTrayEnabled(settings),
+		keepAlive:   func() bool { return !closing.Load() },
+	})
 	// The immediate-install command lives with the UI root's command surface:
 	// the update settings page and the palette reach "install update and restart"
 	// through it (the page only schedules the download). Registration is
@@ -483,6 +501,10 @@ func runDesktop(opts Options) error {
 			if updateCommandOff != nil {
 				updateCommandOff()
 				updateCommandOff = nil
+			}
+			if notificationClickOff != nil {
+				notificationClickOff()
+				notificationClickOff = nil
 			}
 			if loader != nil {
 				if err := loader.Close(); err != nil {
@@ -526,6 +548,23 @@ func runDesktop(opts Options) error {
 		})
 	}
 
+	// A click on one of the app's OS notifications brings the window to the
+	// front and, when the notification carries a conversation, opens that
+	// session (contracts.SessionNotifier ids). Registering before Run also
+	// receives the click of a notification from an earlier run that launched
+	// this instance; the window and the assembly may still be missing then, so
+	// the clicker keeps the target until startup finishes (markReady below).
+	notificationClicks := newNotificationClicker(notificationClickDeps{
+		window:    func() *mygo.Window { return window },
+		chat:      func() contracts.ChatService { chat, _ := root.Require(contracts.KeyChat); return chat },
+		navigator: func() contracts.Navigator { return uiRoot.Navigator() },
+		session: func(notificationID string) (string, bool) {
+			return uiRoot.NotificationSession(notificationID)
+		},
+		logger: logger,
+	})
+	notificationClickOff = mygo.App.OnNotificationClick(notificationClicks.handle)
+
 	// A quit (Cmd+Q, tray/OS quit, SIGINT/SIGTERM) runs the teardown before
 	// mygo closes the windows, so the assembly is unloaded while the UI thread
 	// and the window still exist.
@@ -534,7 +573,15 @@ func runDesktop(opts Options) error {
 	// the event: the quit cannot be canceled and the process may end as soon as
 	// this listener returns, so the teardown has to finish synchronously and the
 	// log file is flushed before returning.
+	//
+	// The quit guard asks first when backend work is still running (unless the
+	// user already confirmed the window close that led here, or the OS is ending
+	// the session and the quit cannot be canceled).
 	mygo.App.OnBeforeQuit(func(e *mygo.QuitEvent) {
+		if !quitGuard.allowQuitEvent(e) {
+			logger.Printf("%s: quit canceled: backend work is still running", appName)
+			return
+		}
 		if e.SessionEnding {
 			logger.Printf("%s: OS session ending; tearing down synchronously", appName)
 		} else {
@@ -568,6 +615,18 @@ func runDesktop(opts Options) error {
 		// truth: this line sets it from the stored ui.language setting on every
 		// start, and OnLanguageChange (uiroot.Config) mirrors later switches.
 		mygo.App.SetLocale(frameworkLocale(uiRoot.Locale().Language()))
+		// OS notifications: mygo can show them now, before the assembly loads,
+		// so even a notification posted during startup mirrors. The UI root
+		// mirrors the notifications that ask for the OS (contracts.SystemNotifier:
+		// background run completions/failures, approval waits) through this sink;
+		// a platform without support keeps the in-app toast and the settings page
+		// shows its 系统通知 switch disabled.
+		if mygo.NotificationsSupported() {
+			uiRoot.SetOSNotifier(mygoOSNotifier())
+			logger.Printf("%s: system notifications ready", appName)
+		} else {
+			logger.Printf("%s: system notifications unavailable on this platform", appName)
+		}
 		// Appearance mode: mygo is ready here, so Theme.IsDark and the desktop
 		// appearance listener are available. System mode keeps following the
 		// desktop; light/dark force the app theme.
@@ -638,6 +697,15 @@ func runDesktop(opts Options) error {
 			tray = created
 			logger.Printf("%s: system tray ready (close to tray: %t)", appName, closeToTrayEnabled(settings))
 		}
+		// Close-to-tray only hides the window when the tray exists to bring it
+		// back; without a tray the quit-on-close path (with its running-work
+		// confirmation) stays, instead of hiding an app the user cannot reach.
+		quitGuard.deps.closeToTray = quitGuard.deps.closeToTray && tray != nil
+		// Close guard: with close-to-tray off, closing the window quits; with
+		// backend work in flight it asks first. With close-to-tray on, the tray's
+		// own listener hides the window and the guard stays quiet (the quit path
+		// still checks before an explicit quit).
+		window.OnClose(quitGuard.handleClose)
 		// Global hotkey (best effort): the appearance page stores the
 		// accelerator; an invalid value or a shortcut owned by the desktop is
 		// logged and skipped. Unregistered again on shutdown.
@@ -650,6 +718,10 @@ func runDesktop(opts Options) error {
 		logger.Printf("%s: %s product %q loaded: %d module instances, screens %v",
 			appName, opts.versionString(), opts.Product, len(loader.Instances()),
 			uiRoot.ScreenLister().Screens())
+		// Startup finished: apply a notification click that arrived while the
+		// assembly/window were still loading (a notification from an earlier run
+		// can launch the instance and immediately report the click).
+		notificationClicks.markReady()
 	})
 
 	runErr := mygo.App.Run()
@@ -707,9 +779,6 @@ func provideServices(root cordis.Context, dataDir string, settings *Settings, lo
 	}
 	if _, err := root.Provide(contracts.KeyPlanReviewer, contracts.PlanReviewer(uiRoot.PlanReviewer())); err != nil {
 		return fmt.Errorf("%s: provide plan reviewer: %w", appName, err)
-	}
-	if _, err := root.Provide(contracts.KeyGoalTracker, contracts.GoalTracker(uiRoot.GoalTracker())); err != nil {
-		return fmt.Errorf("%s: provide goal tracker: %w", appName, err)
 	}
 	if _, err := root.Provide(contracts.KeyNotifier, contracts.Notifier(uiRoot.Notifier())); err != nil {
 		return fmt.Errorf("%s: provide notifier: %w", appName, err)

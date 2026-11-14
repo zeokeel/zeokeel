@@ -368,7 +368,11 @@ func TestRebindGroupRebuildsOnModeChange(t *testing.T) {
 	if got := second.byName["write_file"]; got == nil {
 		t.Fatal("danger-full-access build lost the file tools")
 	}
-	waitBuildClosed(t, first)
+	// The previous build is retained (its jobs/terminals stay controllable), so
+	// the rebuild must not release it.
+	if first.isClosed() {
+		t.Fatal("permission rebuild released the previous build")
+	}
 
 	settings.Set(contracts.SettingAgentPermission, contracts.PermissionReadOnly)
 	third := group.forRoot()
@@ -378,7 +382,9 @@ func TestRebindGroupRebuildsOnModeChange(t *testing.T) {
 	if third.mode != rigsandbox.ModeReadOnly {
 		t.Fatalf("read-only build mode = %q, want read-only", third.mode)
 	}
-	waitBuildClosed(t, second)
+	if second.isClosed() {
+		t.Fatal("permission rebuild released the previous build")
+	}
 }
 
 // TestRebindGroupRebuildsOnRunnerOnChange covers runner availability: when the
@@ -411,7 +417,9 @@ func TestRebindGroupRebuildsOnRunnerOnChange(t *testing.T) {
 	if second.sandboxOn {
 		t.Fatal("build without a runner reports sandboxOn = true")
 	}
-	waitBuildClosed(t, first)
+	if first.isClosed() {
+		t.Fatal("runner availability change released the previous build")
+	}
 
 	mu.Lock()
 	runner = &fakeSandboxRunner{}
@@ -423,7 +431,9 @@ func TestRebindGroupRebuildsOnRunnerOnChange(t *testing.T) {
 	if !third.sandboxOn {
 		t.Fatal("build with a re-attached runner reports sandboxOn = false")
 	}
-	waitBuildClosed(t, second)
+	if second.isClosed() {
+		t.Fatal("runner availability change released the previous build")
+	}
 }
 
 // TestRebindGroupOverrideCacheIncludesMode covers the per-run root cache: a

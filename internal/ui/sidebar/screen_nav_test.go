@@ -98,6 +98,7 @@ func TestScreenNavSpecIsTheSingleSource(t *testing.T) {
 		{"home", "首页", "Home", true},
 		{"session", "对话", "Chat", true},
 		{"automation", "自动化", "Automation", true},
+		{"insights", "洞察", "Insights", true},
 		{"plugins", "插件", "Plugins", true},
 		{"settings", "设置", "Settings", true},
 	}

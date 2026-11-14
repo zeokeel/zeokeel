@@ -125,8 +125,8 @@ func TestAutomationRunNowRecordsPersistedHistory(t *testing.T) {
 	if record.Status != contracts.AutomationRunSuccess {
 		t.Fatalf("record status = %q, want success", record.Status)
 	}
-	if record.StartedAt.IsZero() || record.FinishedAt.Before(record.StartedAt) {
-		t.Fatalf("record timestamps = %s -> %s", record.StartedAt, record.FinishedAt)
+	if record.StartedAt.IsZero() || record.CompletedAt.Before(record.StartedAt) {
+		t.Fatalf("record timestamps = %s -> %s", record.StartedAt, record.CompletedAt)
 	}
 	if strings.TrimSpace(record.Summary) == "" {
 		t.Fatal("success record has no summary")

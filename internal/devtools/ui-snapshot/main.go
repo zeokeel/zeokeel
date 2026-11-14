@@ -112,7 +112,9 @@ func main() {
 	defer server.Close()
 
 	a := boot(server.URL(), dataDir)
-	defer a.cleanup()
+	// The restored-run snapshot at the end restarts the product on the same data
+	// dir, so the deferred teardown must close whichever app is current then.
+	defer func() { a.cleanup() }()
 
 	chat, err := a.root.Require(contracts.KeyChat)
 	if err != nil {
@@ -164,6 +166,29 @@ func main() {
 	a.tester.Type("运行中继续写的草稿")
 	a.tester.Frame()
 	a.render(outDir + "/p2-running-composer.png")
+	// DSH inbox: prompts queued while the turn streams live in the backend
+	// PromptQueue; the composer shows the badge and its popover lists them in
+	// send order with their local send time. The entries are removed again so
+	// the scripted flow below is unchanged.
+	if queue, ok := chat.(contracts.PromptQueue); ok {
+		if _, err := queue.EnqueuePrompt(context.Background(), sessionID, "运行中排队：先检查编译错误"); err == nil {
+			if _, err := queue.EnqueuePrompt(context.Background(), sessionID, "运行中排队：再补一版发布说明"); err == nil {
+				a.tester.Frame()
+				a.render(outDir + "/p2-inbox.png")
+				if rect, ok := a.tester.Find("已排队 2 条"); ok {
+					a.tester.ClickAt(rect.X+rect.W/2, rect.Y+rect.H/2)
+					a.tester.Frame()
+					a.render(outDir + "/p2-inbox-popover.png")
+					a.tester.ClickAt(rect.X+rect.W/2, rect.Y+rect.H/2)
+					a.tester.Frame()
+				}
+				for _, entry := range queue.QueuedPrompts(sessionID) {
+					_ = queue.RemoveQueuedPrompt(context.Background(), sessionID, entry.ID)
+				}
+				a.tester.Frame()
+			}
+		}
+	}
 	// Expand the running turn's activity band once to show the State-first tool
 	// row (state gutter + mono input summary) while the call is in flight.
 	if a.clickFirstPrefix("过程 · 思考") {
@@ -188,6 +213,28 @@ func main() {
 		a.tester.Advance(300 * time.Millisecond)
 		a.render(outDir + "/p2-tool-row-complete.png")
 		a.clickFirstPrefix("过程 · 思考")
+		a.tester.Frame()
+	}
+
+	// The Context tab: the session's folded context inspector (snapshot, model
+	// calls, compaction/spill events, optional cost), light and dark.
+	if !a.clickTab("上下文") {
+		fmt.Println("context tab missing")
+	} else {
+		a.tester.Frame()
+		a.render(outDir + "/p2-context.png")
+		// The system-prompt section breakdown sits under the overview: scroll the
+		// pane to it for dedicated evidence, then return to the top.
+		a.tester.Scroll(756, 500, 0, 240)
+		a.tester.Frame()
+		a.render(outDir + "/p2-context-sections.png")
+		a.tester.Scroll(756, 500, 0, -240)
+		a.tester.Frame()
+		a.ui.Theme().SetDark(true)
+		a.tester.Frame()
+		a.render(outDir + "/p2-context-dark.png")
+		a.ui.Theme().SetDark(false)
+		a.clickTab("对话")
 		a.tester.Frame()
 	}
 
@@ -448,23 +495,56 @@ func main() {
 		a.tester.Frame()
 	}
 
-	// goal: the agent goal tool shows in the session header.
-	if toolkit, tkErr := a.root.Require(contracts.KeyToolkit); tkErr == nil {
-		_, _ = toolkit.Invoke(a.toolContext(context.Background()), rig.ToolCall{
-			ID: "goal-snapshot", Name: "goal", Arguments: `{"action":"set","text":"完成 Q4 发布清单并更新文档"}`,
-		})
-		a.tester.Frame()
-		a.render(outDir + "/p2-goal.png")
-		if a.ui.GoalTracker().Pause() {
-			a.tester.Frame()
-			a.render(outDir + "/p2-goal-paused.png")
-			a.ui.GoalTracker().Resume()
-			a.tester.Frame()
+	// goal: the durable per-session goal dock (phase, round budget, blocked
+	// reason, activation) above the composer. The goal is created through the
+	// same GoalService the UI and the host tools use.
+	if goals := a.goalService(); goals != nil {
+		sessionID := a.activeSessionID()
+		if sessionID != "" {
+			goal, err := goals.CreateGoal(context.Background(), sessionID, "完成 Q4 发布清单并更新文档", 0)
+			if err != nil {
+				fmt.Println("create goal:", err)
+			} else {
+				a.tester.Frame()
+				a.render(outDir + "/p2-goal.png")
+				goal, _ = goals.UpdateGoal(context.Background(), sessionID,
+					contracts.GoalRef{ID: goal.ID, Revision: goal.Revision},
+					contracts.GoalUpdate{Action: contracts.GoalActionPause})
+				a.tester.Frame()
+				a.render(outDir + "/p2-goal-paused.png")
+				goal, _ = goals.UpdateGoal(context.Background(), sessionID,
+					contracts.GoalRef{ID: goal.ID, Revision: goal.Revision},
+					contracts.GoalUpdate{Action: contracts.GoalActionResume})
+				goal, _ = goals.UpdateGoal(context.Background(), sessionID,
+					contracts.GoalRef{ID: goal.ID, Revision: goal.Revision},
+					contracts.GoalUpdate{Action: contracts.GoalActionBlocked,
+						BlockedReason: "需要用户提供发布凭据后才能继续"})
+				a.tester.Frame()
+				a.render(outDir + "/p2-goal-blocked.png")
+				_, _ = goals.UpdateGoal(context.Background(), sessionID,
+					contracts.GoalRef{ID: goal.ID, Revision: goal.Revision},
+					contracts.GoalUpdate{Action: contracts.GoalActionResume})
+				a.tester.Frame()
+				// Dark-theme and narrow-width evidence for the same dock.
+				a.ui.Theme().SetDark(true)
+				a.tester.Frame()
+				a.render(outDir + "/p2-goal-dark.png")
+				a.ui.Theme().SetDark(false)
+				a.tester.SetSize(1024, 720)
+				a.tester.Frame()
+				a.render(outDir + "/p2-goal-narrow.png")
+				a.tester.SetSize(1512, 944)
+				a.tester.Frame()
+			}
 		}
 	}
 
-	// Team orchestration: a real teammate + the Agents inspector.
+	// Team orchestration: a real teammate + the Agents inspector. The session
+	// that spawns it is remembered so the cold-resume evidence after the restart
+	// can reopen its durable teammate history.
+	var coldTeamSessionID string
 	if toolkit, tkErr := a.root.Require(contracts.KeyToolkit); tkErr == nil {
+		coldTeamSessionID = a.activeSessionID()
 		_, _ = toolkit.Invoke(a.toolContext(context.Background()), rig.ToolCall{
 			ID: "spawn-snapshot", Name: "spawn_teammate",
 			Arguments: `{"name":"研究员","prompt":"研究一下当前工作目录并给出摘要"}`,
@@ -948,6 +1028,35 @@ func main() {
 		a.tester.Key(0, ui.KeyEscape)
 		a.tester.Frame()
 	}
+	// Pricing: the editor's optional per-million USD fields (input/cached
+	// input/output), light and dark. The seeded model row carries prices so the
+	// fields show the saved values.
+	if err := a.tester.Click("编辑模型 snapshot-model"); err == nil {
+		a.tester.Frame()
+		a.tester.Frame()
+		if err := a.tester.Click("生成、价格与自定义模式"); err != nil {
+			fmt.Println("expand pricing group:", err)
+		}
+		// The native disclosure animates open: advance past it before rendering,
+		// then scroll its bounded body to the pricing block.
+		a.tester.Frame()
+		a.tester.Advance(300 * time.Millisecond)
+		a.tester.Frame()
+		for attempt := 0; attempt < 8; attempt++ {
+			if rect, ok := a.tester.Find("输入价格 / 1M 输入"); ok && rect.H > 0 {
+				break
+			}
+			a.tester.Scroll(756, 500, 0, 120)
+			a.tester.Frame()
+		}
+		a.render(outDir + "/p2-model-prices.png")
+		a.ui.Theme().SetDark(true)
+		a.tester.Frame()
+		a.render(outDir + "/p2-model-prices-dark.png")
+		a.ui.Theme().SetDark(false)
+		a.tester.Key(0, ui.KeyEscape)
+		a.tester.Frame()
+	}
 	// Empty list: there are no built-in default models any more, so a cleared
 	// list is a supported first-run state with an explicit add entry. Clearing
 	// the list also clears the default-model mirror, exactly like removing the
@@ -1353,7 +1462,151 @@ func main() {
 	a.ui.Navigator().CloseSettings()
 	a.ui.Theme().SetDark(false)
 	a.tester.Frame()
+
+	// Cross-session insights (P1 observability): the real aggregate of every
+	// conversation this scripted flow created — KPI row, the 7-day table, the
+	// model table and the conversation leaderboard. The aggregation runs on a
+	// background goroutine, so spin frames until the data replaces the loading
+	// state. The seeded model catalog prices snapshot-model, so the cost KPI and
+	// the cost columns are visible.
+	server.ReleaseHang()
+	server.ReleaseSlow()
+	// Let every released background session settle, then let its completion
+	// toast expire: the top-right stack would cover the last KPI and the
+	// range/update line of this full-page data screen.
+	if backgroundChat, chatErr := a.root.Require(contracts.KeyChat); chatErr == nil {
+		settleDeadline := time.Now().Add(15 * time.Second)
+		for time.Now().Before(settleDeadline) {
+			running := false
+			for _, session := range backgroundChat.Sessions() {
+				if session.Running {
+					running = true
+					break
+				}
+			}
+			if !running {
+				break
+			}
+			a.tester.Frame()
+			time.Sleep(10 * time.Millisecond)
+		}
+	}
+	// This full-page data screen must not be covered by the run-completion
+	// toasts the earlier scenes raised: the notifications master switch is hot
+	// (it drops the toast stack on the next frame), so the snapshot turns it off
+	// for its last scenes. No other snapshot depends on a toast after this point
+	// (p2-toast was captured much earlier).
+	if settings, settingsErr := a.root.Require(contracts.KeySettings); settingsErr == nil {
+		_ = settings.Set(contracts.SettingNotifications, "false")
+	}
+	a.tester.Frame()
+	if err := a.ui.Navigator().Push("insights"); err != nil {
+		fmt.Println("push insights:", err)
+	}
+	if !a.waitText("tokens", 10*time.Second) {
+		fmt.Println("insights aggregate did not render")
+	}
+	a.render(outDir + "/p2-insights.png")
+	a.ui.Theme().SetDark(true)
+	a.tester.Frame()
+	a.render(outDir + "/p2-insights-dark.png")
+	a.ui.Theme().SetDark(false)
+	a.tester.Frame()
+
+	// Restored-run evidence: a crash left a non-terminal checkpoint behind. Seed
+	// one for a fresh conversation, restart on the same data dir (the agent
+	// restore marks the session Interrupted) and render the notice in light and
+	// dark. This runs last because it swaps the running product instance.
+	a = renderInterruptedSnapshot(a, server.URL(), dataDir, outDir, coldTeamSessionID)
 	writeManifest(outDir)
+}
+
+// renderInterruptedSnapshot seeds a non-terminal checkpoint for a fresh
+// conversation, restarts the product on the same data dir (the agent restore
+// surfaces the unfinished run as ChatSession.Interrupted) and renders the
+// session screen's notice in both themes. It returns the restarted app.
+func renderInterruptedSnapshot(product *app, baseURL, dataDir, outDir, historySessionID string) *app {
+	chat, err := product.root.Require(contracts.KeyChat)
+	if err != nil {
+		fmt.Println("interrupted: chat:", err)
+		return product
+	}
+	sessionID, err := chat.NewSession("恢复后待继续的会话")
+	if err != nil {
+		fmt.Println("interrupted: new session:", err)
+		return product
+	}
+	if err := chat.Send(sessionID, "帮我检查一下发布清单"); err != nil {
+		fmt.Println("interrupted: send:", err)
+		return product
+	}
+	waitIdle(chat, sessionID, 10*time.Second)
+	store, err := product.root.Require(contracts.KeyStore)
+	if err != nil {
+		fmt.Println("interrupted: store:", err)
+		return product
+	}
+	if err := store.CheckpointStore().Save(context.Background(), sessionID, &rig.Checkpoint{
+		SessionID: sessionID,
+		TurnID:    "turn-interrupted-snapshot",
+		Phase:     rig.CheckpointPhaseRequested,
+	}); err != nil {
+		fmt.Println("interrupted: save checkpoint:", err)
+		return product
+	}
+
+	product.cleanup()
+	next := boot(baseURL, dataDir)
+	if liveChat, err := next.root.Require(contracts.KeyChat); err == nil {
+		_ = liveChat.SetActiveSession(sessionID)
+	}
+	if err := next.ui.Navigator().Push("session"); err != nil {
+		fmt.Println("interrupted: push session:", err)
+	}
+	next.tester.Frame()
+	next.tester.Frame()
+	next.render(outDir + "/p2-interrupted.png")
+	next.ui.Theme().SetDark(true)
+	next.tester.Frame()
+	next.render(outDir + "/p2-interrupted-dark.png")
+	next.ui.Theme().SetDark(false)
+	next.tester.Frame()
+
+	// Cold resume: the restarted product restores the durable teammate history.
+	// Open the spawning conversation's team overlay; the finished row offers
+	// 继续此队友, and its child view carries the cold-resume composer.
+	if strings.TrimSpace(historySessionID) != "" {
+		if liveChat, err := next.root.Require(contracts.KeyChat); err == nil {
+			_ = liveChat.SetActiveSession(historySessionID)
+		}
+		if err := next.ui.Navigator().Push("session"); err != nil {
+			fmt.Println("cold resume: push session:", err)
+		}
+		next.tester.Frame()
+		next.tester.Frame()
+		if err := next.tester.Click("智能体团队"); err != nil {
+			fmt.Println("cold resume: open team overlay:", err)
+		} else {
+			next.tester.Frame()
+			opened := false
+			for _, text := range next.tester.Texts() {
+				if !strings.HasPrefix(text, "继续此队友 ") {
+					continue
+				}
+				next.render(outDir + "/p2-cold-resume.png")
+				if err := next.tester.Click(text); err == nil {
+					next.tester.Frame()
+					next.render(outDir + "/p2-cold-resume-child.png")
+					opened = true
+				}
+				break
+			}
+			if !opened {
+				fmt.Println("cold resume: restored teammate offered no continue action")
+			}
+		}
+	}
+	return next
 }
 
 // showSidebarPage switches the right sidebar to one of its fixed pages through
@@ -1503,8 +1756,9 @@ func writeManifest(outDir string) {
 // three rows covering the default model, a shared provider connection and a
 // per-model API key. The first row is the default model (chat.model).
 func snapshotModelCatalog(baseURL string) string {
-	return `[{"id":"snapshot-model","name":"snapshot-model","note":"快照脚本模型","contextWindow":128000,"baseURL":"` + baseURL + `"},` +
-		`{"id":"deepseek-chat","name":"DeepSeek Chat","note":"通用对话","contextWindow":128000,"baseURL":"https://api.deepseek.com/v1","apiKey":"sk-snapshot-demo"},` +
+	return `[{"id":"snapshot-model","name":"snapshot-model","note":"快照脚本模型","contextWindow":128000,"baseURL":"` + baseURL + `",` +
+		`"inputPricePerMillion":2,"cachedInputPricePerMillion":0.5,"outputPricePerMillion":8},` +
+		`{"id":"deepseek-chat","name":"DeepSeek Chat","note":"通用对话","contextWindow":128000,"baseURL":"https://api.deepseek.com/v1","apiKey":"sk-snapshot-demo","inputPricePerMillion":0.27,"cachedInputPricePerMillion":0.07,"outputPricePerMillion":1.1},` +
 		`{"id":"deepseek-reasoner","name":"DeepSeek Reasoner","note":"深度推理","contextWindow":128000,"baseURL":"https://api.deepseek.com/v1"}]`
 }
 
@@ -1521,7 +1775,6 @@ func boot(baseURL, dataDir string) *app {
 	provide(root, contracts.KeyUserInteraction, contracts.UserInteraction(uiRoot.UserInteraction()))
 	provide(root, contracts.KeyArtifactPresenter, contracts.ArtifactPresenter(uiRoot.ArtifactPresenter()))
 	provide(root, contracts.KeyPlanReviewer, contracts.PlanReviewer(uiRoot.PlanReviewer()))
-	provide(root, contracts.KeyGoalTracker, contracts.GoalTracker(uiRoot.GoalTracker()))
 	provide(root, contracts.KeyNotifier, contracts.Notifier(uiRoot.Notifier()))
 	provide(root, contracts.KeySettings, contracts.SettingsService(&settings{values: map[string]string{
 		contracts.SettingsChatModel:         "snapshot-model",
@@ -1587,6 +1840,20 @@ func (a *app) clickSettingsItem(label string) error {
 // toolContext stamps the active conversation onto a direct tool invocation so
 // session-scoped tools (the per-session task board) route to the session whose
 // surface the screenshot renders.
+// goalService returns the assembled durable per-session goal backend.
+func (a *app) goalService() contracts.GoalService {
+	goals, _ := a.root.Get(contracts.KeyGoal)
+	return goals
+}
+
+// activeSessionID is the conversation the frame shows.
+func (a *app) activeSessionID() string {
+	if chat, err := a.root.Require(contracts.KeyChat); err == nil {
+		return chat.ActiveSession()
+	}
+	return ""
+}
+
 func (a *app) toolContext(ctx context.Context) context.Context {
 	if chat, err := a.root.Require(contracts.KeyChat); err == nil {
 		return contracts.WithAgentSession(ctx, chat.ActiveSession())

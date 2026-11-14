@@ -253,6 +253,7 @@
 | 查找 | 过滤用 `SearchField`；页内查找用 `FindBar` |
 | 危险确认 | 危险/不可逆 → `ui.Modal` + `uikit.DialogFooter`（危险动作**不得 Default**；安全取消可 Default 承接 Enter）；非危险简单确认 → `ui.AlertDialog` |
 | 通知 | `c.AddToast` / `c.ToastAction` |
+| 洞察 / 用量统计页 | `ui.Table`（按天/模型/工作区）+ `ui.List`（会话排行）+ KPI 行用既有排印（无新卡片）；7/30 天切换用 `Segmented`；禁止自绘图表/canvas、Scroll+循环、卡片墙 |
 | 空态 | `uikit.EmptyState`（纯文本）/ `EmptyStateBlock`（带下一步动作） |
 | 错误行 | `uikit.ErrorLine`（RoleAlert，可选中） |
 

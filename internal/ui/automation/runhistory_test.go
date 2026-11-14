@@ -1,6 +1,7 @@
 package automation_test
 
-// TDD tests (RED first) for the task card's run-history disclosure.
+// Frame tests for the task card's run-history disclosure and the two run states
+// (delivered vs completed/failed/interrupted).
 
 import (
 	"testing"
@@ -18,32 +19,58 @@ func historyTask(records ...contracts.AutomationRunRecord) contracts.AutomationT
 	}
 }
 
-func runRecord(status, summary string, at time.Time) contracts.AutomationRunRecord {
+// deliveredRecord builds a run whose prompt was accepted but whose session has
+// not settled yet (the two-state record's first state).
+func deliveredRecord(summary string, at time.Time, sessionID string) contracts.AutomationRunRecord {
 	return contracts.AutomationRunRecord{
-		StartedAt: at, FinishedAt: at.Add(2 * time.Second), Status: status, Summary: summary,
+		ID: "run-delivered", StartedAt: at, DeliveredAt: at.Add(time.Second),
+		Status: contracts.AutomationRunDelivered, Summary: summary, SessionID: sessionID,
+	}
+}
+
+// completedRecord builds a settled run with a delivery and completion instant.
+func completedRecord(status, summary string, at time.Time) contracts.AutomationRunRecord {
+	return contracts.AutomationRunRecord{
+		ID: "run-settled", StartedAt: at, DeliveredAt: at.Add(time.Second),
+		CompletedAt: at.Add(3 * time.Second), Status: status, Summary: summary,
+		DurationMS: 2000,
 	}
 }
 
 // --- tests ------------------------------------------------------------------
 
-func TestTaskHistoryCollapsedShowsLatestSummary(t *testing.T) {
+func TestTaskHistoryCollapsedDeliveredState(t *testing.T) {
 	base := time.Unix(1700000000, 0)
 	task := historyTask(
-		runRecord(contracts.AutomationRunSuccess, "最新运行摘要", base.Add(time.Minute)),
-		runRecord(contracts.AutomationRunFailure, "旧失败摘要", base),
+		deliveredRecord("最新运行摘要", base.Add(time.Minute), "sess-9"),
+		completedRecord(contracts.AutomationRunFailure, "旧失败摘要", base),
 	)
 	h := newHarness(t, newFakeAutomation(task), automation.Config{})
 	tester := h.tester()
 
-	h.assertTexts(tester, "巡检", "运行历史", "已投递", "最新运行摘要", "结果由会话决定")
+	// The collapsed row shows the delivered state and never claims a result.
+	h.assertTexts(tester, "巡检", "运行历史", "已投递", "最新运行摘要", "结果由会话决定", "打开会话")
 	h.assertNoTexts(tester, "旧失败摘要", "还没有运行记录")
+}
+
+func TestTaskHistoryCollapsedCompletedState(t *testing.T) {
+	base := time.Unix(1700000000, 0)
+	task := historyTask(
+		completedRecord(contracts.AutomationRunSuccess, "最新运行摘要", base.Add(time.Minute)),
+	)
+	h := newHarness(t, newFakeAutomation(task), automation.Config{})
+	tester := h.tester()
+
+	// A settled success is 已完成, not a bare delivery.
+	h.assertTexts(tester, "已完成", "最新运行摘要")
+	h.assertNoTexts(tester, "已投递", "结果由会话决定")
 }
 
 func TestTaskHistoryExpandsAndCollapses(t *testing.T) {
 	base := time.Unix(1700000000, 0)
 	task := historyTask(
-		runRecord(contracts.AutomationRunSuccess, "最新运行摘要", base.Add(time.Minute)),
-		runRecord(contracts.AutomationRunFailure, "旧失败摘要", base),
+		completedRecord(contracts.AutomationRunSuccess, "最新运行摘要", base.Add(time.Minute)),
+		completedRecord(contracts.AutomationRunFailure, "旧失败摘要", base),
 	)
 	h := newHarness(t, newFakeAutomation(task), automation.Config{})
 	tester := h.tester()
@@ -53,11 +80,30 @@ func TestTaskHistoryExpandsAndCollapses(t *testing.T) {
 	// yesterday's run from today's.
 	wantTime := uikit.FormatDateTime(h.uiRoot.Locale(), base.Add(time.Minute))
 	h.assertTexts(tester, "最新运行摘要", "旧失败摘要", "失败", wantTime)
+	// Delivery and completion are separate facts in the row.
+	h.assertTexts(tester, "完成：", "耗时：")
 	if base.Add(time.Minute).Local().Format("15:04:05") == wantTime {
 		t.Fatalf("run time %q is still a bare clock", wantTime)
 	}
 	h.click(tester, "运行历史")
 	h.assertNoTexts(tester, "旧失败摘要")
+}
+
+func TestTaskHistoryInterruptedAndErrorDetail(t *testing.T) {
+	base := time.Unix(1700000000, 0)
+	interrupted := completedRecord(contracts.AutomationRunInterrupted, "ran in chat session sess-1", base)
+	interrupted.Error = "cancelled"
+	errorRecord := completedRecord(contracts.AutomationRunFailure, "", base.Add(time.Minute))
+	errorRecord.Error = "provider exploded"
+	h := newHarness(t, newFakeAutomation(historyTask(errorRecord, interrupted)), automation.Config{})
+	tester := h.tester()
+
+	// The newest failed run carries its cause; the cancellation stays silent.
+	h.assertTexts(tester, "失败", "provider exploded")
+	h.assertNoTexts(tester, "cancelled", "已中断")
+	h.click(tester, "运行历史")
+	h.assertTexts(tester, "已中断")
+	h.assertNoTexts(tester, "cancelled")
 }
 
 func TestTaskHistoryEmptyState(t *testing.T) {
@@ -70,7 +116,7 @@ func TestTaskHistoryEmptyState(t *testing.T) {
 func TestTaskHistoryEnglishCopy(t *testing.T) {
 	base := time.Unix(1700000000, 0)
 	task := historyTask(
-		runRecord(contracts.AutomationRunFailure, "boom", base),
+		completedRecord(contracts.AutomationRunFailure, "boom", base),
 	)
 	h := newHarness(t, newFakeAutomation(task), automation.Config{})
 	tester := h.tester()
@@ -79,5 +125,14 @@ func TestTaskHistoryEnglishCopy(t *testing.T) {
 
 	h.assertTexts(tester, "Run history", "Failed")
 	h.click(tester, "Run history")
-	h.assertTexts(tester, "boom")
+	h.assertTexts(tester, "boom", "Completed:", "Duration:")
+}
+
+func TestTaskHistoryDeliveredEnglishCopy(t *testing.T) {
+	base := time.Unix(1700000000, 0)
+	h := newHarness(t, newFakeAutomation(historyTask(deliveredRecord("summary", base, "sess-1"))), automation.Config{})
+	tester := h.tester()
+	h.uiRoot.Locale().SetLanguage("en")
+	tester.Frame()
+	h.assertTexts(tester, "Delivered", "The result depends on that session")
 }

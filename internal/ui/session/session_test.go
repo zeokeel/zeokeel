@@ -6,6 +6,7 @@ package session_test
 // service call rather than internal bookkeeping.
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"sort"
@@ -52,6 +53,17 @@ type fakeChat struct {
 	allowedTools      map[string][]string
 	clearAllowedCalls []string
 	clearAllowedErr   error
+	// queued backs the optional contracts.PromptQueue half: one durable-ish
+	// inbox per session, oldest first. drainQueuedPrompt simulates the agent
+	// backend sending the next inbox entry when a run settles.
+	queued      map[string][]contracts.QueuedPrompt
+	nextQueueID int
+	enqueueErr  error
+	removeErr   error
+	// raceToRunning makes the next Send start the run and then report the
+	// running conflict, so the UI's TOCTOU fallback (enqueue instead of a
+	// spurious send error) can be exercised.
+	raceToRunning bool
 }
 
 func newFakeChat() *fakeChat {
@@ -63,6 +75,7 @@ func newFakeChat() *fakeChat {
 	return &fakeChat{
 		config:   contracts.ChatConfig{Model: "test-model", APIKey: "test-key"},
 		sessions: make(map[string]contracts.ChatSession),
+		queued:   make(map[string][]contracts.QueuedPrompt),
 	}
 }
 
@@ -166,7 +179,15 @@ func (f *fakeChat) Send(sessionID, prompt string) error {
 	}
 	if session.Running {
 		f.mu.Unlock()
-		return errors.New("fake: session is already running")
+		return fmt.Errorf("fake: %w", contracts.ErrSessionRunning)
+	}
+	if f.raceToRunning {
+		f.raceToRunning = false
+		session.Running = true
+		f.sessions[sessionID] = session
+		f.mu.Unlock()
+		f.emit(sessionID)
+		return fmt.Errorf("fake: %w", contracts.ErrSessionRunning)
 	}
 	if f.sendErr != nil {
 		err := f.sendErr
@@ -302,6 +323,144 @@ func (f *fakeChat) emit(sessionID string) {
 			sub(sessionID)
 		}
 	}
+}
+
+// --- optional contracts.PromptQueue half ------------------------------------
+
+// EnqueuePrompt appends one prompt to a session inbox and notifies listeners
+// like the agent backend does.
+func (f *fakeChat) EnqueuePrompt(_ context.Context, sessionID, prompt string) (contracts.QueuedPrompt, error) {
+	f.mu.Lock()
+	if strings.TrimSpace(prompt) == "" {
+		f.mu.Unlock()
+		return contracts.QueuedPrompt{}, errors.New("fake: prompt is empty")
+	}
+	if _, ok := f.sessions[sessionID]; !ok {
+		f.mu.Unlock()
+		return contracts.QueuedPrompt{}, fmt.Errorf("fake: unknown session %q", sessionID)
+	}
+	if f.enqueueErr != nil {
+		err := f.enqueueErr
+		f.mu.Unlock()
+		return contracts.QueuedPrompt{}, err
+	}
+	f.nextQueueID++
+	entry := contracts.QueuedPrompt{
+		ID:        fmt.Sprintf("q-%d", f.nextQueueID),
+		SessionID: sessionID,
+		Text:      prompt,
+		CreatedAt: time.Unix(1700000200+int64(f.nextQueueID), 0),
+	}
+	f.queued[sessionID] = append(f.queued[sessionID], entry)
+	f.mu.Unlock()
+	f.emit(sessionID)
+	return entry, nil
+}
+
+// QueuedPrompts returns one session's inbox in send order.
+func (f *fakeChat) QueuedPrompts(sessionID string) []contracts.QueuedPrompt {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]contracts.QueuedPrompt(nil), f.queued[sessionID]...)
+}
+
+// RemoveQueuedPrompt removes one inbox entry by ID (idempotent).
+func (f *fakeChat) RemoveQueuedPrompt(_ context.Context, sessionID, id string) error {
+	f.mu.Lock()
+	if f.removeErr != nil {
+		err := f.removeErr
+		f.mu.Unlock()
+		return err
+	}
+	queue := f.queued[sessionID]
+	for index, entry := range queue {
+		if entry.ID != id {
+			continue
+		}
+		queue = append(queue[:index], queue[index+1:]...)
+		if len(queue) == 0 {
+			delete(f.queued, sessionID)
+		} else {
+			f.queued[sessionID] = queue
+		}
+		f.mu.Unlock()
+		f.emit(sessionID)
+		return nil
+	}
+	f.mu.Unlock()
+	return nil
+}
+
+// drainQueuedPrompt simulates the backend draining one inbox entry after a run
+// settles: the first queued prompt starts its own run.
+func (f *fakeChat) drainQueuedPrompt(sessionID string) bool {
+	f.mu.Lock()
+	session, ok := f.sessions[sessionID]
+	queue := f.queued[sessionID]
+	if !ok || session.Running || len(queue) == 0 {
+		f.mu.Unlock()
+		return false
+	}
+	entry := queue[0]
+	if len(queue) == 1 {
+		delete(f.queued, sessionID)
+	} else {
+		f.queued[sessionID] = queue[1:]
+	}
+	f.sendAttempts++
+	f.sendCalls = append(f.sendCalls, sendCall{sessionID: sessionID, prompt: entry.Text})
+	session.Running = true
+	session.Messages = append(session.Messages, contracts.ChatMessage{
+		ID: fmt.Sprintf("m-%d", len(session.Messages)+1), Role: contracts.ChatRoleUser,
+		Text: entry.Text, CreatedAt: entry.CreatedAt,
+	})
+	f.sessions[sessionID] = session
+	f.mu.Unlock()
+	f.emit(sessionID)
+	return true
+}
+
+// queueFor returns the session inbox for assertions.
+func (f *fakeChat) queueFor(sessionID string) []contracts.QueuedPrompt {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]contracts.QueuedPrompt(nil), f.queued[sessionID]...)
+}
+
+// setEnqueueError makes the next and following inbox appends fail.
+func (f *fakeChat) setEnqueueError(err error) {
+	f.mu.Lock()
+	f.enqueueErr = err
+	f.mu.Unlock()
+}
+
+// setRemoveError makes the next and following inbox removals fail.
+func (f *fakeChat) setRemoveError(err error) {
+	f.mu.Lock()
+	f.removeErr = err
+	f.mu.Unlock()
+}
+
+// setQueued seeds one session's inbox entries directly (no notification).
+func (f *fakeChat) setQueued(sessionID string, texts ...string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.queued[sessionID] = nil
+	for _, text := range texts {
+		f.nextQueueID++
+		f.queued[sessionID] = append(f.queued[sessionID], contracts.QueuedPrompt{
+			ID: fmt.Sprintf("q-%d", f.nextQueueID), SessionID: sessionID, Text: text,
+			CreatedAt: time.Unix(1700000200+int64(f.nextQueueID), 0),
+		})
+	}
+}
+
+// setRaceToRunning scripts one Send that starts the run and reports the
+// running conflict (the window between the frame's read model and Send).
+func (f *fakeChat) setRaceToRunning() {
+	f.mu.Lock()
+	f.raceToRunning = true
+	f.mu.Unlock()
 }
 
 // attempts reports every Send call that reached the fake backend, including

@@ -143,6 +143,11 @@ func Module() *module.Descriptor[Config] {
 		// call time; tools without a filesystem root are registered once below.
 		rootOf := workspaceRootSource(ctx, cfg.Root)
 		group := newRebindGroup(cfg, timeout, rootOf, sandboxOf, logf)
+		// Optional durable store: execution lifecycle events (job/terminal
+		// start/finish/close) are recorded for the agent session that invoked the
+		// tool. A product without a store keeps the tools working, event-free.
+		executionStore, _ := ctx.Get(contracts.KeyStore)
+		group.events = &executionEvents{store: executionStore, logf: logf}
 		rootScoped := group.initial()
 		tools := append([]rig.Tool(nil), group.proxies(rootScoped)...)
 		tools = append(tools, misc.NewTodoTool(misc.NewTodoStore()))
@@ -344,9 +349,9 @@ func Module() *module.Descriptor[Config] {
 			return err
 		}
 		// The session header's background-jobs chip reads the live root-scoped
-		// job manager through this service. The manager is rebuilt on every
-		// workspace switch, so the service resolves the current build per call
-		// instead of being re-provided.
+		// job manager through this service. Builds are retained for the module
+		// lifetime and job ids route to the build that created them, so the
+		// service can list/kill jobs across a workspace or permission rebuild.
 		if _, err := ctx.Provide(contracts.KeyJobs, contracts.JobService(newJobService(group))); err != nil {
 			closeLSP()
 			runtime.close()

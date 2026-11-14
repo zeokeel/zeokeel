@@ -18,78 +18,6 @@ import (
 	"github.com/zeokeel/zeokeel/internal/uiroot"
 )
 
-// fakeGoalTracker is a scripted contracts.GoalTracker.
-type fakeGoalTracker struct {
-	mu      sync.Mutex
-	id      string
-	text    string
-	setErr  error
-	sets    []string
-	clears  int
-	handler func(contracts.Goal, bool)
-}
-
-func (f *fakeGoalTracker) SetHandler(fn func(contracts.Goal, bool)) {
-	f.mu.Lock()
-	f.handler = fn
-	f.mu.Unlock()
-}
-
-func (f *fakeGoalTracker) Set(_ context.Context, text string) (string, error) {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	f.sets = append(f.sets, text)
-	if f.setErr != nil {
-		return "", f.setErr
-	}
-	f.id = "goal-1"
-	f.text = text
-	handler := f.handler
-	f.mu.Unlock()
-	if handler != nil {
-		handler(contracts.Goal{ID: f.id, Text: text, Status: "active"}, true)
-	}
-	f.mu.Lock()
-	return f.id, nil
-}
-
-func (f *fakeGoalTracker) Get() (string, string, string, bool) {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	if f.id == "" {
-		return "", "", "", false
-	}
-	return f.id, f.text, "active", true
-}
-
-func (f *fakeGoalTracker) Clear() bool {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	existed := f.id != ""
-	f.id = ""
-	f.text = ""
-	f.clears++
-	handler := f.handler
-	f.mu.Unlock()
-	if existed && handler != nil {
-		handler(contracts.Goal{}, false)
-	}
-	f.mu.Lock()
-	return existed
-}
-
-func (f *fakeGoalTracker) setCalls() []string {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	return append([]string(nil), f.sets...)
-}
-
-func (f *fakeGoalTracker) clearCalls() int {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	return f.clears
-}
-
 // fakePlanBridger is a scripted contracts.PlanReviewer.
 type fakePlanBridger struct {
 	mu        sync.Mutex
@@ -159,7 +87,7 @@ func (f *fakeMemory) addCalls() []contracts.Memory {
 // newCommandDialogHarness builds the session screen with any combination of the
 // optional goal/plan/memory backends (nil providers stay absent).
 func newCommandDialogHarness(t *testing.T, chat *fakeChat, language string,
-	goal contracts.GoalTracker, plan contracts.PlanReviewer, memory contracts.MemoryStore) *harness {
+	goal contracts.GoalService, plan contracts.PlanReviewer, memory contracts.MemoryStore) *harness {
 	t.Helper()
 	uiRoot := uiroot.New(uiroot.Config{AppName: "ZeoKeel", Language: language})
 	ctx := cordis.Root()
@@ -171,7 +99,7 @@ func newCommandDialogHarness(t *testing.T, chat *fakeChat, language string,
 	provide(t, ctx, contracts.KeyScreenLister, uiRoot.ScreenLister())
 	provide[contracts.ChatService](t, ctx, contracts.KeyChat, chat)
 	if goal != nil {
-		provide[contracts.GoalTracker](t, ctx, contracts.KeyGoalTracker, goal)
+		provide[contracts.GoalService](t, ctx, contracts.KeyGoal, goal)
 	}
 	if plan != nil {
 		provide[contracts.PlanReviewer](t, ctx, contracts.KeyPlanReviewer, plan)
@@ -208,10 +136,11 @@ func focusDialogInput(t *testing.T, tester *ui.Tester, label string) {
 
 func TestCommandFamilyRegisteredAndEnabled(t *testing.T) {
 	chat := permissionChat()
-	goal := &fakeGoalTracker{id: "g0", text: "旧目标"}
+	goal := newFakeGoalService()
+	goal.seed("sess-1", "旧目标")
 	h := newCommandDialogHarness(t, chat, "zh", goal, &fakePlanBridger{}, &fakeMemory{})
 	wanted := []struct{ id, title, hint string }{
-		{"zeokeel.session.goal", "设置目标", "为当前会话设置/清除长期目标"},
+		{"zeokeel.session.goal", "设置目标", "为当前会话创建或编辑长期目标"},
 		{"zeokeel.session.plan", "审阅计划", "提交一份计划给用户批准"},
 		{"zeokeel.session.memory", "添加记忆", "保存一条全局记忆"},
 	}
@@ -246,89 +175,6 @@ func TestCommandFamilyRegisteredAndEnabled(t *testing.T) {
 			t.Fatalf("%s is enabled without its backend", want.id)
 		}
 	}
-}
-
-// --- /goal ------------------------------------------------------------------
-
-func TestGoalDialogPrefillsSavesAndCloses(t *testing.T) {
-	goal := &fakeGoalTracker{id: "g0", text: "旧目标"}
-	h := newCommandDialogHarness(t, permissionChat(), "zh", goal, nil, nil)
-	tester := h.tester()
-
-	h.typeSlash(tester)
-	h.click(tester, "设置目标")
-	h.assertTexts(tester, "设置目标", "保存", "删除目标记录", "取消")
-
-	// The input is prefilled with the active goal: saving it unchanged writes
-	// the same text back.
-	h.click(tester, "保存")
-	if got := goal.setCalls(); len(got) != 1 || got[0] != "旧目标" {
-		t.Fatalf("GoalTracker.Set calls = %v, want [旧目标]", got)
-	}
-	h.assertNoTexts(tester, "设置目标")
-
-	// A fresh harness edits the prefilled goal and saves the new text.
-	goal2 := &fakeGoalTracker{id: "g0", text: "旧目标"}
-	h2 := newCommandDialogHarness(t, permissionChat(), "zh", goal2, nil, nil)
-	tester2 := h2.tester()
-	h2.typeSlash(tester2)
-	h2.click(tester2, "设置目标")
-	focusDialogInput(t, tester2, "目标内容")
-	tester2.Key(ui.Cmd, ui.KeyA)
-	tester2.Key(0, ui.KeyBackspace)
-	tester2.Type("新目标")
-	tester2.Frame()
-	h2.click(tester2, "保存")
-	if got := goal2.setCalls(); len(got) != 1 || got[0] != "新目标" {
-		t.Fatalf("GoalTracker.Set calls = %v, want [新目标]", got)
-	}
-}
-
-func TestGoalDialogClearAndCancel(t *testing.T) {
-	// An existing goal makes the dialog offer its destructive clear action,
-	// which asks through the native AlertDialog before clearing.
-	goal := &fakeGoalTracker{id: "g0", text: "旧目标"}
-	h := newCommandDialogHarness(t, permissionChat(), "zh", goal, nil, nil)
-	tester := h.tester()
-
-	h.typeSlash(tester)
-	h.click(tester, "设置目标")
-	h.click(tester, "删除目标记录")
-	h.assertNoTexts(tester, "设置目标")
-	h.assertTexts(tester, "删除目标记录", "取消", "确认删除")
-	h.click(tester, "确认删除")
-	if got := goal.clearCalls(); got != 1 {
-		t.Fatalf("GoalTracker.Clear calls = %d, want 1", got)
-	}
-
-	h.typeSlash(tester)
-	h.click(tester, "设置目标")
-	h.click(tester, "取消")
-	h.assertNoTexts(tester, "设置目标")
-}
-
-func TestGoalDialogEmptySaveDisabled(t *testing.T) {
-	goal := &fakeGoalTracker{}
-	h := newCommandDialogHarness(t, permissionChat(), "zh", goal, nil, nil)
-	tester := h.tester()
-	h.typeSlash(tester)
-	h.click(tester, "设置目标")
-	h.click(tester, "保存")
-	if got := goal.setCalls(); len(got) != 0 {
-		t.Fatalf("empty goal was saved: %v", got)
-	}
-	// The dialog stays open after the disabled save.
-	h.assertTexts(tester, "保存", "取消")
-}
-
-func TestGoalDialogErrorShown(t *testing.T) {
-	goal := &fakeGoalTracker{id: "g0", text: "旧目标", setErr: errors.New("goal store down")}
-	h := newCommandDialogHarness(t, permissionChat(), "zh", goal, nil, nil)
-	tester := h.tester()
-	h.typeSlash(tester)
-	h.click(tester, "设置目标")
-	h.click(tester, "保存")
-	h.assertTexts(tester, "保存目标失败：goal store down")
 }
 
 // --- /plan ------------------------------------------------------------------
@@ -430,8 +276,9 @@ func TestMemoryDialogEmptyAddDisabled(t *testing.T) {
 // --- i18n -------------------------------------------------------------------
 
 func TestCommandDialogsEnglishCopy(t *testing.T) {
-	h := newCommandDialogHarness(t, permissionChat(), "en",
-		&fakeGoalTracker{id: "g0", text: "old goal"}, &fakePlanBridger{}, &fakeMemory{})
+	goal := newFakeGoalService()
+	goal.seed("sess-1", "old goal")
+	h := newCommandDialogHarness(t, permissionChat(), "en", goal, &fakePlanBridger{}, &fakeMemory{})
 	tester := h.tester()
 	tester.Frame()
 

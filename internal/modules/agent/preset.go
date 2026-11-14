@@ -107,22 +107,27 @@ func (s *service) agentPresetForSessionLocked(sessionID string) (contracts.Agent
 // system prompt (persona first, prompt second). Missing/empty fragments are
 // skipped; the base prompt and workspace instructions stay first.
 func (s *service) withPresetInstructions(sessionID string, cfg contracts.ChatConfig) contracts.ChatConfig {
-	preset, ok := s.agentPresetForSession(sessionID)
-	if !ok {
-		return cfg
-	}
-	for _, fragment := range []string{preset.Persona, preset.Prompt} {
-		fragment = strings.TrimSpace(fragment)
-		if fragment == "" {
-			continue
-		}
-		if strings.TrimSpace(cfg.SystemPrompt) == "" {
-			cfg.SystemPrompt = fragment
-			continue
-		}
-		cfg.SystemPrompt = strings.TrimRight(cfg.SystemPrompt, "\n") + "\n\n" + fragment
+	for _, fragment := range s.presetInstructionFragments(sessionID) {
+		cfg.SystemPrompt = appendPromptSection(cfg.SystemPrompt, fragment)
 	}
 	return cfg
+}
+
+// presetInstructionFragments returns the selected preset's instruction
+// fragments in prompt order (persona first, then the extra prompt). It is the
+// section source of the preset prompt sections.
+func (s *service) presetInstructionFragments(sessionID string) []string {
+	preset, ok := s.agentPresetForSession(sessionID)
+	if !ok {
+		return nil
+	}
+	fragments := make([]string, 0, 2)
+	for _, fragment := range []string{preset.Persona, preset.Prompt} {
+		if fragment = strings.TrimSpace(fragment); fragment != "" {
+			fragments = append(fragments, fragment)
+		}
+	}
+	return fragments
 }
 
 // agentPresetForSession reads the selected preset without the service lock.

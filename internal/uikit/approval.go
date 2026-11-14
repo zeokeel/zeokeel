@@ -425,7 +425,8 @@ var approvalSummaryKeys = map[string][]string{
 	"team_task_update":   {"id", "subject", "status", "owner"},
 	"todo":               {"items", "subject", "status"},
 	"subagent":           {"prompt", "description"},
-	"workflow":           {"prompt", "description"},
+	"workflow":           {"steps", "tasks", "max_parallel"},
+	"ralph":              {"prompt", "max_rounds", "name"},
 	"skill":              {"name", "arguments"},
 }
 

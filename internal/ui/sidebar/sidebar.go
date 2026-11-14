@@ -1719,6 +1719,8 @@ func ScreenNavSpec(id string) (icon *ui.SVG, zh, en string) {
 		return icons.Message(), "对话", "Chat"
 	case "automation":
 		return icons.Clock(), "自动化", "Automation"
+	case "insights":
+		return icons.Activity(), "洞察", "Insights"
 	case "plugins":
 		return icons.Plugin(), "插件", "Plugins"
 	case "settings":

@@ -166,7 +166,6 @@ func (d *drive) boot() error {
 	provide(root, contracts.KeyUserInteraction, contracts.UserInteraction(uiRoot.UserInteraction()))
 	provide(root, contracts.KeyArtifactPresenter, contracts.ArtifactPresenter(uiRoot.ArtifactPresenter()))
 	provide(root, contracts.KeyPlanReviewer, contracts.PlanReviewer(uiRoot.PlanReviewer()))
-	provide(root, contracts.KeyGoalTracker, contracts.GoalTracker(uiRoot.GoalTracker()))
 	provide(root, contracts.KeyNotifier, contracts.Notifier(uiRoot.Notifier()))
 	provide(root, contracts.KeySettings, contracts.SettingsService(settings))
 	provide(root, contracts.KeyLogger, contracts.Logger(discardLogger{}))

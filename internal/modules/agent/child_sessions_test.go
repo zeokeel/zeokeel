@@ -129,7 +129,7 @@ func TestChildSessionsUnifiedIdentityAcrossRestart(t *testing.T) {
 	}
 
 	// Reopen: same data directory, fresh process state, same child-session IDs.
-	_, team2, children2, ctx2 := bootAgentModuleAt(t, dataDir)
+	svc2, team2, children2, ctx2 := bootAgentModuleAt(t, dataDir)
 	defer func() { _ = ctx2.DisposeAll() }()
 	members := team2.Members()
 	restored, ok := findMemberByName(members, "历史研究员")
@@ -155,9 +155,27 @@ func TestChildSessionsUnifiedIdentityAcrossRestart(t *testing.T) {
 	if !ok || found.ID != member.ID {
 		t.Fatalf("ChildAgent(%q) = %+v, %v", teammate2.ID, found, ok)
 	}
-	if _, err := children2.SendChildAgent(context.Background(), teammate2.ID, "继续"); err == nil ||
-		!strings.Contains(err.Error(), "historical") {
-		t.Fatalf("SendChildAgent(historical) error = %v, want a read-only refusal", err)
+	// DSH cold resume: the historical teammate is no longer read-only, it
+	// continues from its durable child session (the second boot needs a scripted
+	// provider because it is a fresh process).
+	svc2.providerFactory = func(contracts.ChatConfig) (rig.Provider, error) { return &captureProvider{}, nil }
+	answer, err := children2.SendChildAgent(context.Background(), teammate2.ID, "继续")
+	if err != nil {
+		t.Fatalf("SendChildAgent(historical) = %v, want a cold resume", err)
+	}
+	if answer != "ok" {
+		t.Fatalf("SendChildAgent(historical) answer = %q, want the resumed answer", answer)
+	}
+	childHistory, err := svc2.store.History().Load(context.Background(), teammate2.ID)
+	if err != nil {
+		t.Fatalf("load resumed child history: %v", err)
+	}
+	if len(childHistory) < 4 {
+		t.Fatalf("resumed child history = %d messages, want the seeded original + resumed turn", len(childHistory))
+	}
+	resumedRecord, ok := svc2.childSessions.record(teammate2.ID)
+	if !ok || resumedRecord.Status != contracts.ChildAgentCompleted {
+		t.Fatalf("resumed child record = %+v (ok=%v), want completed", resumedRecord, ok)
 	}
 }
 

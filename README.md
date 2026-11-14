@@ -146,7 +146,8 @@ go test ./...
 - ✅ 示范模块：`appinfo`、`toolkit`（把 ZeoKeel Rig 工具集 + 沙盒策略组装成产品服务：
   fs/shell/pwsh、editor、image、PTY terminal、jobs、web、远程 MCP over HTTP、
   memory/schedule/worktree/skill/team_task/settings 等）、
-  `hosttools`（产品侧 host 工具：ask_user/present/plan/goal/team，注册进共享工具注册表）、
+  `hosttools`（产品侧 host 工具：ask_user/present/plan_review/exit_plan_mode + DSH goal 三件套
+  get_goal/create_goal/update_goal，注册进共享工具注册表）、
   `ui/home`、`ui/about`、`ui/welcome`、`ui/toolcards`、`uikit`
 - ✅ SDK 依赖：`github.com/zeokeel/zeokeel-rig v0.13.2`（纯工具集：agent loop / subagent / provider /
   sandbox / 81 个静态工具 + MCP/LSP / gate / session+compact / checkpoint；零第三方依赖；
@@ -231,9 +232,11 @@ go test ./...
 - ✅ P3 会话 fork / 导出：`SessionForker.ForkSession`（深拷贝消息/附件/Tools，标题「副本 - …」，持久化历史+事件，
   重启恢复）；会话行「⋯」菜单「创建副本」；会话头部「导出」→ mygo 原生保存对话框写 Markdown（标题/时间/
   transcript，测试 seam 可替换）；截图 `p2-fork.png`
-- ✅ P3 自动化：`zeokeel/automation`（cron 子集 + every/after，JSON 持久化，ticker 到点执行 → 新会话 +
-  Prompt，RunNow/启停/删除/NextRun/LastError，Subscribe；toolkit schedule_* 工具改绑持久 scheduler）；
-  `zeokeel-ui/automation` 自动化页（列表/新建/启停/立即运行/删除，native 控件）+ 侧栏通用屏幕导航；
+- ✅ P3 自动化（v0.2.36 起对齐 DSH）：`zeokeel/automation`（daily/weekly/cron/at/every/after + 时区，
+  JSON 持久化，ticker 到点执行；任务绑定 `SessionID`，后续 run 默认投递到同一会话（可切每次新建）；
+  run 记录拆 delivered 与 completed/failed/interrupted 两态，启动补结算；完成/失败系统通知；
+  RunNow/启停/删除/NextRun/LastError，Subscribe；toolkit schedule_* 工具改绑持久 scheduler）；
+  `zeokeel-ui/automation` 自动化页（列表/新建/启停/立即运行/删除/运行会话选择，native 控件）+ 侧栏导航；
   截图 `p2-automation.png`；desktop 21 / headless 11 实例
 - ✅ P3 插件页：toolkit 暴露 `KeyPlugins`（MCP 服务器快照/Ping 刷新/工具数）；`zeokeel-ui/plugins` 插件页
   （MCP 插件状态卡 + 48 工具目录按分类分组 + 搜索过滤）+ 侧栏「插件」导航；截图 `p2-plugins.png`、
@@ -303,8 +306,23 @@ go test ./...
   扁平化），独立 native Save 对话框 seam；单测覆盖内容/行数/状态
 - 📊 覆盖审计（最新）：[docs/COVERAGE.md](docs/COVERAGE.md)（✅26 / 🟡27 / ❌9；核心+多数高级 UI 可用，
   剩余集中在编排执行/composer 深度/presets/桌面集成/管理深度）
-- ✅ P5 goal 跟踪：`contracts.GoalTracker` 宿主桥（uiroot goal 服务 + host 提供 + hosttools GoalStore 桥接）+ 会话 header
-  「目标」Badge/文本/「清除目标」；E2E goal 工具→header 显示→清除后 tracker 空；截图 `p2-goal.png`
+- ✅ P5 goal v2（v0.2.36 起严格对齐 DSH）：`zeokeel/goal` 会话级 durable 目标（`goal/change` 事件源、
+  revision CAS、active/paused/blocked/complete、默认 256 轮、clear tombstone、重启 disarmed）；
+  模型面 `get_goal/create_goal/update_goal`；引擎侧 run settle 后自动续跑（用户消息优先、cap 落
+  blocked(round-limit)）；会话 goal dock（阶段/轮次/blocked/继续目标）+ `/goal` 编辑轮次；
+  E2E/帧测试覆盖；截图 `p2-goal.png`、`p2-goal-blocked.png`、`p2-goal-paused.png`
+- ✅ 长时任务执行域（v0.2.36 起）：系统通知（OS + 应用内双通道，设置可关）、关窗/退出前运行中工作确认、
+  close-to-tray 继续运行；自动化/schedule DSH 语义；上下文预算按模型窗口推导并默认压缩。
+  设计与差距见 [docs/plans/long-task-dsh-alignment.md](docs/plans/long-task-dsh-alignment.md)、
+  [docs/research/long-task/](docs/research/long-task/)
+- ✅ 长时任务收口（v0.2.36 起，续）：后端 PromptQueue/DSH inbox（运行中发送入 durable 队列，用户消息先于
+  goal round，重启恢复）；fork 复制完整 durable history 与 goal 副本（disarmed）；「上次运行被中断」提示；
+  workflow/ralph 编排工具与统一委派预算；观测性数据基座（逐调用 model_call、context_snapshot、compact/spill
+  事件、模型价格/成本）+ 会话 Context tab + 跨会话 Insights 洞察页；team/子会话 cold resume（历史
+  Historical+Resumable 可继续）；上下文溢出自动压缩重试；通知点击直达会话；goal 三件套由产品
+  hosttools 自实现，rig 使用 v0.16.3 内树 fork（`third_party/zeokeel-rig`，Windows sandbox 并发修复；
+干净 checkout 可构建）；执行域 job/terminal
+  跨工作区/权限重建稳定存活（按 ID 路由 + durable 生命周期事件，跨应用重启不重连）。
 - 🔁 后续版本变更见 [CHANGELOG.md](CHANGELOG.md)；当前能力与验证方式见
   [docs/COVERAGE.md](docs/COVERAGE.md) / [docs/VERIFICATION.md](docs/VERIFICATION.md)
 - 📦 安装包（Windows 安装器 / Linux AppImage / macOS 签名公证 dmg）与无密钥

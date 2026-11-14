@@ -96,7 +96,6 @@ type Root struct {
 	interaction      *interactionService
 	artifacts        *artifactService
 	plan             *planService
-	goal             *goalService
 	notifier         *notifierService
 
 	mu         sync.Mutex
@@ -339,8 +338,7 @@ func New(cfg Config) *Root {
 		interaction:      newInteractionService(),
 		artifacts:        newArtifactService(),
 		plan:             newPlanService(),
-		goal:             newGoalService(),
-		notifier:         newNotifierService(),
+		notifier:         newNotifierService(cfg.Settings, cfg.AppName),
 	}
 	r.theme = &themeService{root: r, dark: cfg.Dark}
 	r.locale = &localeService{root: r, lang: cfg.Language}

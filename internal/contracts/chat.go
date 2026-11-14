@@ -88,6 +88,11 @@ type ChatMessage struct {
 	// a complete reply. The agent records it on the message and in the durable
 	// run_end event so a restart keeps the hint.
 	Truncated bool `json:"truncated,omitempty"`
+	// GoalRound marks a user message the engine-side goal driver injected as an
+	// automatic continuation round (nil for messages the human sent). The UI
+	// renders it as a goal round instead of a human prompt; the durable
+	// user_message event carries the same marker.
+	GoalRound *GoalRoundInfo `json:"goalRound,omitempty"`
 	// CreatedAt is the message timestamp (local time, display only).
 	CreatedAt time.Time
 }
@@ -98,12 +103,17 @@ type ChatSession struct {
 	Title string
 	// Model is the effective model for this session: the session override when
 	// one was chosen in the composer, else the configured chat.model.
-	Model     string
-	Messages  []ChatMessage
-	Running   bool
-	Error     string
-	CreatedAt time.Time
-	UpdatedAt time.Time
+	Model    string
+	Messages []ChatMessage
+	Running  bool
+	Error    string
+	// Interrupted marks a session restored after a run that never finished (the
+	// durable checkpoint is still in requested/tool_pending phase, e.g. the app
+	// crashed or was killed). It is a read-model hint, not persisted: the UI can
+	// show "上次运行被中断" and offer a retry. The next run start clears it.
+	Interrupted bool
+	CreatedAt   time.Time
+	UpdatedAt   time.Time
 }
 
 // ChatSessionInfo is the list-item view of a session for the sidebar.
@@ -190,6 +200,15 @@ var (
 	// appending a turn halfway through would be erased by the history write-back.
 	// The draft should be retried once the compaction settles.
 	ErrChatCompacting = errors.New("session context is being compacted; retry after /compact finishes")
+	// ErrCompactArchive reports that the raw history could not be archived
+	// durably, so the compaction was aborted instead of losing messages. The
+	// history is unchanged and the command can be retried.
+	ErrCompactArchive = errors.New("failed to archive the history being compacted")
+	// ErrSessionRunning is returned by ChatService.Send/Regenerate while the
+	// session already has a run in flight. It is exposed here (not only in the
+	// agent module) so a host can classify it and route the prompt to the
+	// session's PromptQueue inbox instead of surfacing a dead end.
+	ErrSessionRunning = errors.New("session is already running")
 )
 
 // CompactResult reports one manual compaction: the message counts and the

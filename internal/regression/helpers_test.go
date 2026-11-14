@@ -157,7 +157,6 @@ func newHarnessCoreWith(t *testing.T, dataDir string, withBridges bool, local *m
 		provide(t, ctx, contracts.KeyUserInteraction, contracts.UserInteraction(uiRoot.UserInteraction()))
 		provide(t, ctx, contracts.KeyArtifactPresenter, contracts.ArtifactPresenter(uiRoot.ArtifactPresenter()))
 		provide(t, ctx, contracts.KeyPlanReviewer, contracts.PlanReviewer(uiRoot.PlanReviewer()))
-		provide(t, ctx, contracts.KeyGoalTracker, contracts.GoalTracker(uiRoot.GoalTracker()))
 	}
 	return h
 }
@@ -341,10 +340,20 @@ type fakeChat struct {
 	newSessionErr error
 	cancelErr     error
 	deleteErr     error
+	// queued backs the optional contracts.PromptQueue half (one inbox per
+	// session, oldest first); drainQueuedPrompt simulates the backend sending
+	// the next entry when a run settles.
+	queued      map[string][]contracts.QueuedPrompt
+	nextQueueID int
+	enqueueErr  error
+	removeErr   error
+	// raceToRunning makes the next Send start the run and then report the
+	// running conflict (the frame/read-model race the UI must absorb).
+	raceToRunning bool
 }
 
 func newFakeChat() *fakeChat {
-	return &fakeChat{sessions: make(map[string]contracts.ChatSession)}
+	return &fakeChat{sessions: make(map[string]contracts.ChatSession), queued: make(map[string][]contracts.QueuedPrompt)}
 }
 
 func (f *fakeChat) Config() contracts.ChatConfig {
@@ -440,14 +449,26 @@ func (f *fakeChat) DeleteSession(sessionID string) error {
 
 func (f *fakeChat) Send(sessionID, prompt string) error {
 	f.mu.Lock()
-	defer f.mu.Unlock()
 	if _, ok := f.sessions[sessionID]; !ok {
+		f.mu.Unlock()
 		return fmt.Errorf("fakeChat: unknown session %q", sessionID)
+	}
+	if f.raceToRunning {
+		f.raceToRunning = false
+		session := f.sessions[sessionID]
+		session.Running = true
+		f.sessions[sessionID] = session
+		f.mu.Unlock()
+		f.emitSessionChange(sessionID)
+		return fmt.Errorf("fakeChat: %w", contracts.ErrSessionRunning)
 	}
 	f.sends = append(f.sends, sessionID+":"+prompt)
 	if f.sendErr != nil {
-		return f.sendErr
+		err := f.sendErr
+		f.mu.Unlock()
+		return err
 	}
+	f.mu.Unlock()
 	return nil
 }
 
@@ -479,11 +500,148 @@ func (f *fakeChat) setCancelError(err error) {
 	f.mu.Unlock()
 }
 
+// emitSessionChange notifies the module's subscribers like the agent backend
+// does after a session change.
+func (f *fakeChat) emitSessionChange(sessionID string) {
+	f.mu.Lock()
+	subs := make([]func(string), len(f.subs))
+	copy(subs, f.subs)
+	f.mu.Unlock()
+	for _, sub := range subs {
+		if sub != nil {
+			sub(sessionID)
+		}
+	}
+}
+
+// updateSession replaces one session read model and notifies the subscribers,
+// like the agent backend does when a run settles.
+func (f *fakeChat) updateSession(chatSession contracts.ChatSession) {
+	f.mu.Lock()
+	f.sessions[chatSession.ID] = chatSession
+	f.mu.Unlock()
+	f.emitSessionChange(chatSession.ID)
+}
+
 // recordedSends returns the recorded Send prompts ("session:prompt").
 func (f *fakeChat) recordedSends() []string {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	return append([]string(nil), f.sends...)
+}
+
+// --- optional contracts.PromptQueue half ------------------------------------
+
+// EnqueuePrompt appends one prompt to a session inbox and notifies listeners.
+func (f *fakeChat) EnqueuePrompt(_ context.Context, sessionID, prompt string) (contracts.QueuedPrompt, error) {
+	f.mu.Lock()
+	if strings.TrimSpace(prompt) == "" {
+		f.mu.Unlock()
+		return contracts.QueuedPrompt{}, fmt.Errorf("fakeChat: prompt is empty")
+	}
+	if _, ok := f.sessions[sessionID]; !ok {
+		f.mu.Unlock()
+		return contracts.QueuedPrompt{}, fmt.Errorf("fakeChat: unknown session %q", sessionID)
+	}
+	if f.enqueueErr != nil {
+		err := f.enqueueErr
+		f.mu.Unlock()
+		return contracts.QueuedPrompt{}, err
+	}
+	f.nextQueueID++
+	entry := contracts.QueuedPrompt{
+		ID: fmt.Sprintf("q-%d", f.nextQueueID), SessionID: sessionID, Text: prompt,
+		CreatedAt: time.Unix(1_700_000_200+int64(f.nextQueueID), 0),
+	}
+	f.queued[sessionID] = append(f.queued[sessionID], entry)
+	f.mu.Unlock()
+	f.emitSessionChange(sessionID)
+	return entry, nil
+}
+
+// QueuedPrompts returns one session's inbox in send order.
+func (f *fakeChat) QueuedPrompts(sessionID string) []contracts.QueuedPrompt {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]contracts.QueuedPrompt(nil), f.queued[sessionID]...)
+}
+
+// RemoveQueuedPrompt removes one inbox entry by ID (idempotent).
+func (f *fakeChat) RemoveQueuedPrompt(_ context.Context, sessionID, id string) error {
+	f.mu.Lock()
+	if f.removeErr != nil {
+		err := f.removeErr
+		f.mu.Unlock()
+		return err
+	}
+	queue := f.queued[sessionID]
+	for index, entry := range queue {
+		if entry.ID != id {
+			continue
+		}
+		queue = append(queue[:index], queue[index+1:]...)
+		if len(queue) == 0 {
+			delete(f.queued, sessionID)
+		} else {
+			f.queued[sessionID] = queue
+		}
+		f.mu.Unlock()
+		f.emitSessionChange(sessionID)
+		return nil
+	}
+	f.mu.Unlock()
+	return nil
+}
+
+// drainQueuedPrompt simulates the backend draining one inbox entry after a run
+// settles: the first queued prompt starts its own run.
+func (f *fakeChat) drainQueuedPrompt(sessionID string) bool {
+	f.mu.Lock()
+	session := f.sessions[sessionID]
+	queue := f.queued[sessionID]
+	if session.Running || len(queue) == 0 {
+		f.mu.Unlock()
+		return false
+	}
+	entry := queue[0]
+	if len(queue) == 1 {
+		delete(f.queued, sessionID)
+	} else {
+		f.queued[sessionID] = queue[1:]
+	}
+	f.sends = append(f.sends, sessionID+":"+entry.Text)
+	session.Running = true
+	f.sessions[sessionID] = session
+	f.mu.Unlock()
+	f.emitSessionChange(sessionID)
+	return true
+}
+
+// queueFor returns one session's inbox for assertions.
+func (f *fakeChat) queueFor(sessionID string) []contracts.QueuedPrompt {
+	return f.QueuedPrompts(sessionID)
+}
+
+// setEnqueueError scripts the next and following inbox appends to fail.
+func (f *fakeChat) setEnqueueError(err error) {
+	f.mu.Lock()
+	f.enqueueErr = err
+	f.mu.Unlock()
+}
+
+// setRemoveError scripts the next and following inbox removals to fail.
+func (f *fakeChat) setRemoveError(err error) {
+	f.mu.Lock()
+	f.removeErr = err
+	f.mu.Unlock()
+}
+
+// setRaceToRunning scripts one Send that starts the run and reports the
+// running conflict (the window between the frame's read model and Send).
+func (f *fakeChat) setRaceToRunning() {
+	f.mu.Lock()
+	f.raceToRunning = true
+	f.mu.Unlock()
 }
 
 // cancelCalls returns the recorded Cancel session ids.
@@ -671,62 +829,6 @@ func (f *fakeReviewer) exits() []string {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	return append([]string(nil), f.exitCall...)
-}
-
-// fakeGoalTracker is a contracts.GoalTracker the test drives.
-type fakeGoalTracker struct {
-	mu      sync.Mutex
-	handler func(contracts.Goal, bool)
-	goal    *contracts.Goal
-	clears  int
-}
-
-func (f *fakeGoalTracker) SetHandler(fn func(contracts.Goal, bool)) {
-	f.mu.Lock()
-	f.handler = fn
-	f.mu.Unlock()
-}
-
-func (f *fakeGoalTracker) Set(_ context.Context, text string) (string, error) {
-	return "", fmt.Errorf("fakeGoalTracker: Set is not scripted")
-}
-
-func (f *fakeGoalTracker) Get() (string, string, string, bool) {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	if f.goal == nil {
-		return "", "", "", false
-	}
-	return f.goal.ID, f.goal.Text, f.goal.Status, true
-}
-
-func (f *fakeGoalTracker) Clear() bool {
-	f.mu.Lock()
-	existed := f.goal != nil
-	f.goal = nil
-	f.clears++
-	handler := f.handler
-	f.mu.Unlock()
-	// The host tracker notifies the change handler, like the uiroot service.
-	if existed && handler != nil {
-		handler(contracts.Goal{}, false)
-	}
-	return existed
-}
-
-func (f *fakeGoalTracker) trigger(goal contracts.Goal, ok bool) bool {
-	f.mu.Lock()
-	f.goal = &goal
-	if !ok {
-		f.goal = nil
-	}
-	handler := f.handler
-	f.mu.Unlock()
-	if handler == nil {
-		return false
-	}
-	handler(goal, ok)
-	return true
 }
 
 // counter is an atomically maintained test state shared across goroutines.

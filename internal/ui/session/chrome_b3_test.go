@@ -52,9 +52,9 @@ func TestGoalStripAboveComposer(t *testing.T) {
 		ID: "sess-1", Title: "ship it",
 		Messages: []contracts.ChatMessage{{ID: "m1", Role: contracts.ChatRoleUser, Text: "你好"}},
 	}, true)
-	goal := newLifecycleTracker()
-	h, tester := newGoalPauseHarness(t, chat, nil, goal)
-	goal.setGoal("g1", "发布清单", contracts.GoalStatusActive)
+	h, goals := newGoalHarness(t, chat)
+	goals.seed("sess-1", "发布清单")
+	tester := h.tester()
 	tester.Frame()
 
 	h.assertTexts(tester, "目标", "发布清单", "目标操作")
@@ -70,9 +70,9 @@ func TestGoalStripAboveComposer(t *testing.T) {
 		t.Fatalf("goal strip at Y=%.1f is not above the composer at Y=%.1f", goalRect.Y, composer.Y)
 	}
 
-	// The ⋯ menu keeps the old goal actions.
-	openGoalActions(t, h, tester, "目标")
-	h.assertTexts(tester, "完成目标", "结束目标（保留记录）", "删除目标记录")
+	// The ⋯ menu keeps the goal lifecycle actions.
+	openGoalActions(t, h, tester, "目标进行中")
+	h.assertTexts(tester, "暂停目标", "完成目标", "编辑目标", "清除目标记录")
 }
 
 // TestSessionBannerSlotAboveComposer covers the approval banner extension point:

@@ -1,0 +1,760 @@
+package worktree
+
+import (
+	"bytes"
+	"context"
+	"errors"
+	"fmt"
+	"io/fs"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"regexp"
+	"runtime"
+	"strconv"
+	"strings"
+	"text/tabwriter"
+	"time"
+
+	"github.com/zeokeel/zeokeel-rig"
+	"github.com/zeokeel/zeokeel-rig/internal/procattr"
+	"github.com/zeokeel/zeokeel-rig/sandbox"
+	"github.com/zeokeel/zeokeel-rig/tools/internal/toolutil"
+)
+
+const (
+	// ToolEnter 是创建工具名。
+	ToolEnter = "enter_worktree"
+	// ToolExit 是移除工具名。
+	ToolExit = "exit_worktree"
+	// ToolList 是列表工具名。
+	ToolList = "list_worktrees"
+	// DefaultGitTimeout 在 policy 没有超时时，限制单次 git 调用。
+	DefaultGitTimeout = 30 * time.Second
+	// maxGitTimeout 限制从 policy 推导出的 git 超时。
+	maxGitTimeout = 2 * time.Minute
+	// maxGitOutputBytes 限制单个被捕获的 git 输出流。
+	maxGitOutputBytes = 64 << 10
+	// maxGitErrorBytes 限制错误中引用的 git stderr。
+	maxGitErrorBytes = 4 << 10
+	// maxOutputBytes 限制单次工具响应。
+	maxOutputBytes = 32 << 10
+	// managedDir 是默认 worktree 使用的仓库相对目录。
+	managedDir = ".rig/worktrees"
+)
+
+// branchPattern 把分支名限制为单个安全的 Git 分支组成部分（不含路径分隔符、不以 '-' 开头、
+// 无目录穿越、无空白）。
+var branchPattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$`)
+
+// Tools 返回受 policy 约束的 enter_worktree、exit_worktree 与 list_worktrees。nil policy
+// 为失败关闭（sandbox.New 拒绝所有路径）。opts 可选（目前只有 WithRunner）；
+// 不传任何选项时行为与旧版本完全一致。
+func Tools(policy *sandbox.Policy, opts ...Option) []rig.Tool {
+	if policy == nil {
+		policy = sandbox.New()
+	}
+	ops := &operations{policy: policy, timeout: clampTimeout(policy.Timeout())}
+	for _, opt := range opts {
+		if opt != nil {
+			opt(ops)
+		}
+	}
+	return []rig.Tool{
+		&enterTool{ops: ops},
+		&exitTool{ops: ops},
+		&listTool{ops: ops},
+	}
+}
+
+// Option 配置 worktree 工具集的可选行为。
+type Option func(*operations)
+
+// WithRunner 为每次 git 调用挂接 OS 级受限执行器（例如 sandbox/osrunner
+// 提供的 Runner）。nil（默认）表示保持现有行为；非 nil 时 git argv 会在
+// exec.CommandContext 之前调用 Confine，只 spawn 它返回的 argv，Confine 失败
+// 则命令直接失败（fail closed），绝不退化为未受限执行。
+func WithRunner(runner sandbox.Runner) Option {
+	return func(ops *operations) { ops.runner = runner }
+}
+
+// operations 保存三个工具共享的不可变配置。
+type operations struct {
+	policy  *sandbox.Policy
+	timeout time.Duration
+	// runner 是可选的 OS 级受限执行器；nil 表示不做额外包装。
+	runner sandbox.Runner
+}
+
+// clampTimeout 限制用于 git 调用的 policy 超时。
+func clampTimeout(timeout time.Duration) time.Duration {
+	if timeout <= 0 {
+		return DefaultGitTimeout
+	}
+	return min(timeout, maxGitTimeout)
+}
+
+// workspaceRoot 返回主沙箱根目录，它必须是 Git 仓库根目录。
+func (o *operations) workspaceRoot() (string, error) {
+	roots := o.policy.Roots()
+	if len(roots) == 0 {
+		return "", errors.New("sandbox policy has no roots; set the repository root as the primary root")
+	}
+	root := roots[0]
+	if err := o.policy.CheckPath(root); err != nil {
+		return "", err
+	}
+	info, err := os.Stat(root)
+	if err != nil {
+		return "", fmt.Errorf("inspect workspace root: %w", err)
+	}
+	if !info.IsDir() {
+		return "", fmt.Errorf("workspace root %q is not a directory", root)
+	}
+	return root, nil
+}
+
+// repository 是一个校验过的仓库视图。workspace 是 policy 的主根目录；top 是 Git 的
+// toplevel（配置正确时是同一个目录）。
+type repository struct {
+	workspace string
+	top       string
+}
+
+// repository 解析并校验包含主根目录的 Git 仓库。仓库根必须位于沙箱内（通常就是主根目录
+// 本身）。
+func (o *operations) repository(ctx context.Context) (repository, error) {
+	workspace, err := o.workspaceRoot()
+	if err != nil {
+		return repository{}, err
+	}
+	if _, err := exec.LookPath("git"); err != nil {
+		return repository{}, fmt.Errorf("git executable not found: %w", err)
+	}
+	top, err := o.gitOutput(ctx, workspace, "rev-parse", "--show-toplevel")
+	if err != nil {
+		return repository{}, fmt.Errorf("workspace is not inside a git repository: %w", err)
+	}
+	top = strings.TrimSpace(top)
+	if top == "" {
+		return repository{}, errors.New("workspace is not inside a git repository: git returned no toplevel")
+	}
+	if real, err := filepath.EvalSymlinks(top); err == nil {
+		top = filepath.Clean(real)
+	}
+	if err := o.policy.CheckPath(top); err != nil {
+		return repository{}, fmt.Errorf("git repository root %q is outside the sandbox roots; make the repository root the primary sandbox root: %w", top, err)
+	}
+	return repository{workspace: workspace, top: top}, nil
+}
+
+// gitResult 是一次 git 调用的捕获输出。非零退出在此不算错误；由调用方判断状态是否有意义。
+type gitResult struct {
+	stdout   string
+	stderr   string
+	exitCode int
+}
+
+// runGit 在 dir 中以有界超时和清理过的环境运行 git。
+func (o *operations) runGit(ctx context.Context, dir string, args ...string) (gitResult, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	runCtx, cancel := context.WithTimeout(ctx, o.timeout)
+	defer cancel()
+
+	// 挂接了 OS runner 时，spawn 的必须是它返回的受限 argv；Confine 失败即
+	// 返回错误（fail closed），不执行未受限的 git。
+	argv := make([]string, 0, len(args)+1)
+	argv = append(argv, "git")
+	argv = append(argv, args...)
+	if o.runner != nil && o.policy != nil {
+		confined, err := o.runner.Confine(argv, o.policy)
+		if err != nil {
+			return gitResult{}, fmt.Errorf("git %s: %w", strings.Join(args, " "), err)
+		}
+		if len(confined.Argv) == 0 {
+			return gitResult{}, fmt.Errorf("git %s: sandbox runner returned an empty argv", strings.Join(args, " "))
+		}
+		argv = confined.Argv
+	}
+
+	cmd := exec.CommandContext(runCtx, argv[0], argv[1:]...)
+	procattr.HideWindow(cmd)
+	cmd.Dir = dir
+	cmd.Env = gitEnv()
+	stdout := &limitedBuffer{max: maxGitOutputBytes}
+	stderr := &limitedBuffer{max: maxGitOutputBytes}
+	cmd.Stdout = stdout
+	cmd.Stderr = stderr
+
+	runErr := cmd.Run()
+	result := gitResult{stdout: stdout.String(), stderr: stderr.String()}
+	if err := runCtx.Err(); err != nil {
+		command := "git " + strings.Join(args, " ")
+		if errors.Is(err, context.DeadlineExceeded) {
+			return result, fmt.Errorf("%s timed out after %s", command, o.timeout)
+		}
+		return result, fmt.Errorf("%s canceled: %w", command, err)
+	}
+	if runErr != nil {
+		if exitErr, ok := errors.AsType[*exec.ExitError](runErr); ok {
+			result.exitCode = exitErr.ExitCode()
+			return result, nil
+		}
+		return result, fmt.Errorf("run git: %w", runErr)
+	}
+	return result, nil
+}
+
+// gitOutput 运行 git 并返回 trim 后的 stdout，把非零退出转换为带说明的错误。
+func (o *operations) gitOutput(ctx context.Context, dir string, args ...string) (string, error) {
+	result, err := o.runGit(ctx, dir, args...)
+	if err != nil {
+		return "", err
+	}
+	if result.exitCode != 0 {
+		return "", gitError(result, args)
+	}
+	return strings.TrimSpace(result.stdout), nil
+}
+
+// gitError 渲染失败的 git 调用，并附上有界 stderr 摘录。
+func gitError(result gitResult, args []string) error {
+	detail := strings.TrimSpace(result.stderr)
+	if detail == "" {
+		detail = strings.TrimSpace(result.stdout)
+	}
+	detail = toolutil.TruncateBytes(detail, maxGitErrorBytes, "…")
+	command := "git " + strings.Join(args, " ")
+	if detail == "" {
+		return fmt.Errorf("%s failed with exit status %d", command, result.exitCode)
+	}
+	return fmt.Errorf("%s failed with exit status %d: %s", command, result.exitCode, detail)
+}
+
+// gitRefExists 报告 ref 是否存在（退出 0）或不存在（退出 1）；其他退出码是操作错误。
+func (o *operations) gitRefExists(ctx context.Context, dir, ref string) (bool, error) {
+	result, err := o.runGit(ctx, dir, "show-ref", "--verify", "--quiet", ref)
+	if err != nil {
+		return false, err
+	}
+	switch result.exitCode {
+	case 0:
+		return true, nil
+	case 1:
+		return false, nil
+	default:
+		return false, gitError(result, []string{"show-ref", "--verify", "--quiet", ref})
+	}
+}
+
+// gitEnv 返回移除了 Git 目录覆盖变量的环境，使 git 始终操作命令目录选定的检出。
+func gitEnv() []string {
+	env := make([]string, 0, len(os.Environ())+2)
+	for _, entry := range os.Environ() {
+		key, _, ok := strings.Cut(entry, "=")
+		if !ok {
+			continue
+		}
+		switch strings.ToUpper(key) {
+		case "GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE", "GIT_OBJECT_DIRECTORY",
+			"GIT_COMMON_DIR", "GIT_NAMESPACE", "GIT_PREFIX":
+			continue
+		}
+		env = append(env, entry)
+	}
+	env = append(env, "GIT_TERMINAL_PROMPT=0", "LC_ALL=C")
+	return env
+}
+
+// limitedBuffer 至多保留 max 字节，并报告被丢弃的字节数。
+type limitedBuffer struct {
+	max       int
+	buf       bytes.Buffer
+	truncated bool
+}
+
+// Write 实现 io.Writer。
+func (b *limitedBuffer) Write(data []byte) (int, error) {
+	remaining := b.max - b.buf.Len()
+	if remaining > 0 {
+		if len(data) > remaining {
+			_, _ = b.buf.Write(data[:remaining])
+			b.truncated = true
+		} else {
+			_, _ = b.buf.Write(data)
+		}
+	} else if len(data) > 0 {
+		b.truncated = true
+	}
+	return len(data), nil
+}
+
+// String 返回保留的输出，必要时附带截断提示。
+func (b *limitedBuffer) String() string {
+	out := b.buf.String()
+	if b.truncated {
+		out += "\n[truncated: git output exceeded the capture limit]"
+	}
+	return out
+}
+
+// validateBranch 拒绝作为路径元素或 Git 选项参数不安全的 branch 名。
+func validateBranch(branch string) error {
+	if branch == "" {
+		return errors.New("branch is empty")
+	}
+	if !branchPattern.MatchString(branch) {
+		return fmt.Errorf("invalid branch name %q: use 1-64 letters, digits, '.', '_' or '-' (must start with a letter or digit; no spaces, slashes or leading '-')", branch)
+	}
+	return nil
+}
+
+// generatedBranch 返回唯一的安全分支名（"rig-wt-<random>"）。
+func generatedBranch() string {
+	return "rig-wt-" + strconv.FormatInt(time.Now().UnixNano(), 36)
+}
+
+// branchFromPath 从 worktree 路径的基名推导安全分支名。
+func branchFromPath(target string) string {
+	base := filepath.Base(filepath.Clean(target))
+	var builder strings.Builder
+	for _, char := range base {
+		switch {
+		case char >= 'a' && char <= 'z',
+			char >= 'A' && char <= 'Z',
+			char >= '0' && char <= '9',
+			char == '.', char == '_', char == '-':
+			builder.WriteRune(char)
+		default:
+			if builder.Len() > 0 {
+				builder.WriteByte('-')
+			}
+		}
+	}
+	candidate := strings.Trim(builder.String(), "._-")
+	if !branchPattern.MatchString(candidate) {
+		return generatedBranch()
+	}
+	return candidate
+}
+
+// enterTool 实现 enter_worktree。
+type enterTool struct{ ops *operations }
+
+var _ rig.Tool = (*enterTool)(nil)
+
+// Name 实现 rig.Tool。
+func (t *enterTool) Name() string { return ToolEnter }
+
+// Description 实现 rig.Tool。
+func (t *enterTool) Description() string {
+	return `Create a Git worktree on a new branch off the current HEAD.
+
+Optional "path" selects the checkout directory (an absolute or root-relative
+path inside the sandbox; it must not exist yet). Optional "branch" names the new
+branch; when omitted it is derived from the path's base name, or generated when
+no path is given. Without "path" the worktree is created at
+<repository>/.rig/worktrees/<branch>.
+
+The primary sandbox root must be the Git repository root, and the repository
+must have at least one commit. Uncommitted files stay in the main checkout. The
+result reports the created path, branch and base commit. Use exit_worktree to
+remove it.`
+}
+
+// Schema 实现 rig.Tool。
+func (t *enterTool) Schema() map[string]any {
+	return toolutil.ObjectSchema(map[string]any{
+		"path":   toolutil.StringProp("Worktree checkout directory inside the sandbox (default .rig/worktrees/<branch>)."),
+		"branch": toolutil.StringProp("New branch name (default derived from the path or generated)."),
+	})
+}
+
+// enterArgs 是解码后的 enter_worktree 参数对象。
+type enterArgs struct {
+	Path   string `json:"path"`
+	Branch string `json:"branch"`
+}
+
+// Invoke 实现 rig.Tool。
+func (t *enterTool) Invoke(ctx context.Context, call rig.ToolCall) (rig.ToolResult, error) {
+	if err := ctx.Err(); err != nil {
+		return rig.ToolResult{}, err
+	}
+	var a enterArgs
+	if err := toolutil.DecodeArgs(call, &a); err != nil {
+		return rig.ToolResult{}, err
+	}
+	if t.ops.policy.ReadOnly() {
+		return toolutil.ErrorResultf("%s: sandbox policy is read-only", ToolEnter), nil
+	}
+	repo, err := t.ops.repository(ctx)
+	if err != nil {
+		return toolutil.ErrorResultf("%s: %v", ToolEnter, err), nil
+	}
+
+	branch := strings.TrimSpace(a.Branch)
+	pathArg := strings.TrimSpace(a.Path)
+	var target string
+	if pathArg != "" {
+		target, err = t.ops.policy.ResolvePath(pathArg)
+		if err != nil {
+			return toolutil.ErrorResultf("%s: path %q: %v", ToolEnter, pathArg, err), nil
+		}
+		if branch == "" {
+			branch = branchFromPath(target)
+		}
+	} else {
+		if branch == "" {
+			branch = generatedBranch()
+		}
+		if err := validateBranch(branch); err != nil {
+			return toolutil.ErrorResultf("%s: %v", ToolEnter, err), nil
+		}
+		target = filepath.Join(repo.top, filepath.FromSlash(managedDir), branch)
+		target, err = t.ops.policy.ResolvePath(target)
+		if err != nil {
+			return toolutil.ErrorResultf("%s: default worktree path %q: %v", ToolEnter, target, err), nil
+		}
+	}
+	if err := validateBranch(branch); err != nil {
+		return toolutil.ErrorResultf("%s: %v", ToolEnter, err), nil
+	}
+	if samePath(target, repo.top) || samePath(target, repo.workspace) {
+		return toolutil.ErrorResultf("%s: worktree path must differ from the repository root", ToolEnter), nil
+	}
+	if _, err := os.Lstat(target); err == nil {
+		return toolutil.ErrorResultf("%s: worktree path %q already exists", ToolEnter, target), nil
+	} else if !errors.Is(err, fs.ErrNotExist) {
+		return toolutil.ErrorResultf("%s: inspect %q: %v", ToolEnter, target, err), nil
+	}
+	exists, err := t.ops.gitRefExists(ctx, repo.workspace, "refs/heads/"+branch)
+	if err != nil {
+		return toolutil.ErrorResultf("%s: check branch %q: %v", ToolEnter, branch, err), nil
+	}
+	if exists {
+		return toolutil.ErrorResultf("%s: branch %q already exists", ToolEnter, branch), nil
+	}
+	baseCommit, err := t.ops.gitOutput(ctx, repo.workspace, "rev-parse", "--verify", "HEAD")
+	if err != nil {
+		return toolutil.ErrorResultf("%s: repository has no usable HEAD commit: %v", ToolEnter, err), nil
+	}
+
+	// 通过沙箱根创建父目录，使检出位置与路径本身接受同一 policy 校验。
+	root, relative, _, _, err := t.ops.policy.OpenPath(target)
+	if err != nil {
+		return toolutil.ErrorResultf("%s: %v", ToolEnter, err), nil
+	}
+	parent := filepath.Dir(relative)
+	if parent != "." && parent != "" {
+		if err := root.MkdirAll(parent, 0o755); err != nil {
+			_ = root.Close()
+			return toolutil.ErrorResultf("%s: create worktree parent directory: %v", ToolEnter, err), nil
+		}
+	}
+	_ = root.Close()
+
+	if _, err := t.ops.gitOutput(ctx, repo.workspace, "worktree", "add", "-b", branch, target, "HEAD"); err != nil {
+		// 目标在此次调用前不存在；清理部分检出，避免重试被半创建的目录阻塞。
+		_ = os.RemoveAll(target)
+		return toolutil.ErrorResultf("%s: %v", ToolEnter, err), nil
+	}
+	return toolutil.TextResult(toolutil.TruncateBytes(fmt.Sprintf("created worktree %s on branch %s (base %s)",
+		target, branch, shortCommit(baseCommit)), maxOutputBytes, "\n[truncated: output exceeded the worktree tool limit]")), nil
+}
+
+// exitTool 实现 exit_worktree。
+type exitTool struct{ ops *operations }
+
+var _ rig.Tool = (*exitTool)(nil)
+
+// Name 实现 rig.Tool。
+func (t *exitTool) Name() string { return ToolExit }
+
+// Description 实现 rig.Tool。
+func (t *exitTool) Description() string {
+	return `Remove a Git worktree created by enter_worktree.
+
+"path" is required (the checkout path returned by enter_worktree; absolute or
+root-relative inside the sandbox). The path must be a registered worktree of
+the repository; the main checkout cannot be removed. The branch is kept by
+default; set "keep_branch" to false to delete it as well (a branch that cannot
+be deleted is reported as a warning after the checkout is removed).
+
+Runs "git worktree remove --force"; uncommitted changes in the worktree are
+discarded.`
+}
+
+// Schema 实现 rig.Tool。
+func (t *exitTool) Schema() map[string]any {
+	return toolutil.ObjectSchema(map[string]any{
+		"path":        toolutil.StringProp("Worktree path returned by enter_worktree (required)."),
+		"keep_branch": toolutil.BooleanProp("Keep the branch after removing the worktree (default true)."),
+	}, "path")
+}
+
+// exitArgs 是解码后的 exit_worktree 参数对象。
+type exitArgs struct {
+	Path       string `json:"path"`
+	KeepBranch *bool  `json:"keep_branch"`
+}
+
+// Invoke 实现 rig.Tool。
+func (t *exitTool) Invoke(ctx context.Context, call rig.ToolCall) (rig.ToolResult, error) {
+	if err := ctx.Err(); err != nil {
+		return rig.ToolResult{}, err
+	}
+	var a exitArgs
+	if err := toolutil.DecodeArgs(call, &a); err != nil {
+		return rig.ToolResult{}, err
+	}
+	pathArg := strings.TrimSpace(a.Path)
+	if pathArg == "" {
+		return toolutil.ErrorResultf("%s: path is required", ToolExit), nil
+	}
+	if t.ops.policy.ReadOnly() {
+		return toolutil.ErrorResultf("%s: sandbox policy is read-only", ToolExit), nil
+	}
+	repo, err := t.ops.repository(ctx)
+	if err != nil {
+		return toolutil.ErrorResultf("%s: %v", ToolExit, err), nil
+	}
+	target, err := t.ops.policy.ResolvePath(pathArg)
+	if err != nil {
+		return toolutil.ErrorResultf("%s: path %q: %v", ToolExit, pathArg, err), nil
+	}
+	worktrees, err := t.ops.listWorktrees(ctx, repo.workspace)
+	if err != nil {
+		return toolutil.ErrorResultf("%s: %v", ToolExit, err), nil
+	}
+	entry, found := findWorktree(worktrees, target)
+	if !found {
+		return toolutil.ErrorResultf("%s: %q is not a registered worktree of %s", ToolExit, target, repo.top), nil
+	}
+	if samePath(entry.path, repo.top) || samePath(entry.path, repo.workspace) {
+		return toolutil.ErrorResultf("%s: refusing to remove the main working tree", ToolExit), nil
+	}
+	if _, err := t.ops.gitOutput(ctx, repo.workspace, "worktree", "remove", "--force", entry.path); err != nil {
+		return toolutil.ErrorResultf("%s: %v", ToolExit, err), nil
+	}
+
+	keepBranch := true
+	if a.KeepBranch != nil {
+		keepBranch = *a.KeepBranch
+	}
+	result := fmt.Sprintf("removed worktree %s", entry.path)
+	switch {
+	case entry.branch == "":
+		// 分离头（detached）worktree：没有分支可删除。
+	case keepBranch:
+		result += fmt.Sprintf(" (branch %s kept)", entry.branch)
+	default:
+		if _, err := t.ops.gitOutput(ctx, repo.workspace, "branch", "-D", entry.branch); err != nil {
+			result += fmt.Sprintf(" (warning: branch %s was not deleted: %v)", entry.branch, err)
+		} else {
+			result += fmt.Sprintf(" (branch %s deleted)", entry.branch)
+		}
+	}
+	return toolutil.TextResult(toolutil.TruncateBytes(result, maxOutputBytes, "\n[truncated: output exceeded the worktree tool limit]")), nil
+}
+
+// listTool 实现 list_worktrees。
+type listTool struct{ ops *operations }
+
+var _ rig.Tool = (*listTool)(nil)
+
+// Name 实现 rig.Tool。
+func (t *listTool) Name() string { return ToolList }
+
+// Description 实现 rig.Tool。
+func (t *listTool) Description() string {
+	return `List the repository's Git worktrees as a table with columns PATH, BRANCH, HEAD and STATE.
+
+Reads "git worktree list --porcelain"; the main checkout is marked "main" and
+linked worktrees "managed" when they live under .rig/worktrees. Detached, bare,
+locked and prunable checkouts are marked accordingly. The call is read-only and
+takes no arguments.`
+}
+
+// Schema 实现 rig.Tool。
+func (t *listTool) Schema() map[string]any {
+	return toolutil.ObjectSchema(map[string]any{})
+}
+
+// Invoke 实现 rig.Tool。
+func (t *listTool) Invoke(ctx context.Context, call rig.ToolCall) (rig.ToolResult, error) {
+	if err := ctx.Err(); err != nil {
+		return rig.ToolResult{}, err
+	}
+	var a struct{}
+	if err := toolutil.DecodeArgs(call, &a); err != nil {
+		return rig.ToolResult{}, err
+	}
+	repo, err := t.ops.repository(ctx)
+	if err != nil {
+		return toolutil.ErrorResultf("%s: %v", ToolList, err), nil
+	}
+	worktrees, err := t.ops.listWorktrees(ctx, repo.workspace)
+	if err != nil {
+		return toolutil.ErrorResultf("%s: %v", ToolList, err), nil
+	}
+	var builder strings.Builder
+	writer := tabwriter.NewWriter(&builder, 0, 4, 2, ' ', 0)
+	fmt.Fprintln(writer, "PATH\tBRANCH\tHEAD\tSTATE")
+	for _, worktree := range worktrees {
+		fmt.Fprintf(writer, "%s\t%s\t%s\t%s\n",
+			worktree.path, displayBranch(worktree.branch), shortCommit(worktree.head), worktreeState(worktree, repo.top))
+	}
+	_ = writer.Flush()
+	return toolutil.TextResult(toolutil.TruncateBytes(strings.TrimSuffix(builder.String(), "\n"), maxOutputBytes, "\n[truncated: output exceeded the worktree tool limit]")), nil
+}
+
+// worktree 是一条解析后的 "git worktree list --porcelain" 记录。
+type worktree struct {
+	path           string
+	head           string
+	branch         string
+	branchRef      string
+	detached       bool
+	bare           bool
+	locked         bool
+	lockReason     string
+	prunable       bool
+	prunableReason string
+}
+
+// listWorktrees 运行并解析 "git worktree list --porcelain"。
+func (o *operations) listWorktrees(ctx context.Context, dir string) ([]worktree, error) {
+	raw, err := o.gitOutput(ctx, dir, "worktree", "list", "--porcelain")
+	if err != nil {
+		return nil, err
+	}
+	return parseWorktreePorcelain(raw), nil
+}
+
+// parseWorktreePorcelain 解析 "git worktree list --porcelain" 输出的块格式。
+func parseWorktreePorcelain(raw string) []worktree {
+	worktrees := make([]worktree, 0, 4)
+	var current *worktree
+	flush := func() {
+		if current != nil && current.path != "" {
+			worktrees = append(worktrees, *current)
+		}
+		current = nil
+	}
+	for _, line := range strings.Split(raw, "\n") {
+		line = strings.TrimSuffix(line, "\r")
+		if strings.TrimSpace(line) == "" {
+			flush()
+			continue
+		}
+		if current == nil {
+			current = &worktree{}
+		}
+		switch {
+		case strings.HasPrefix(line, "worktree "):
+			current.path = strings.TrimPrefix(line, "worktree ")
+		case strings.HasPrefix(line, "HEAD "):
+			current.head = strings.TrimPrefix(line, "HEAD ")
+		case strings.HasPrefix(line, "branch "):
+			ref, _ := strings.CutPrefix(line, "branch ")
+			current.branchRef = ref
+			current.branch, _ = strings.CutPrefix(ref, "refs/heads/")
+		case line == "detached":
+			current.detached = true
+		case line == "bare":
+			current.bare = true
+		case strings.HasPrefix(line, "locked"):
+			current.locked = true
+			reason, _ := strings.CutPrefix(line, "locked")
+			current.lockReason = strings.TrimSpace(reason)
+		case strings.HasPrefix(line, "prunable"):
+			current.prunable = true
+			reason, _ := strings.CutPrefix(line, "prunable")
+			current.prunableReason = strings.TrimSpace(reason)
+		}
+	}
+	flush()
+	return worktrees
+}
+
+// findWorktree 返回路径匹配 target 的已登记 worktree。
+func findWorktree(worktrees []worktree, target string) (worktree, bool) {
+	want := canonicalPath(target)
+	for _, worktree := range worktrees {
+		if canonicalPath(worktree.path) == want {
+			return worktree, true
+		}
+	}
+	return worktree{}, false
+}
+
+// canonicalPath 返回便于比较的绝对路径：尽可能解析符号链接并清理结果（Windows 上
+// 大小写折叠）。
+func canonicalPath(path string) string {
+	path = strings.TrimSpace(path)
+	if path == "" {
+		return ""
+	}
+	if real, err := filepath.EvalSymlinks(path); err == nil {
+		path = real
+	}
+	path = filepath.Clean(path)
+	if runtime.GOOS == "windows" {
+		path = strings.ToLower(path)
+	}
+	return path
+}
+
+// samePath 判断两个路径是否指向同一位置。
+func samePath(a, b string) bool {
+	return canonicalPath(a) != "" && canonicalPath(a) == canonicalPath(b)
+}
+
+// displayBranch 把分离头 worktree 的分支渲染为 "(detached)"。
+func displayBranch(branch string) string {
+	if strings.TrimSpace(branch) == "" {
+		return "(detached)"
+	}
+	return branch
+}
+
+// shortCommit 为表格输出截短一个提交哈希。
+func shortCommit(commit string) string {
+	commit = strings.TrimSpace(commit)
+	if commit == "" {
+		return "-"
+	}
+	if len(commit) > 12 {
+		return commit[:12]
+	}
+	return commit
+}
+
+// worktreeState 为表格输出渲染一个 worktree 的标志位。
+func worktreeState(worktree worktree, repoTop string) string {
+	states := make([]string, 0, 4)
+	if samePath(worktree.path, repoTop) {
+		states = append(states, "main")
+	} else if strings.Contains(filepath.ToSlash(worktree.path), "/"+managedDir+"/") {
+		states = append(states, "managed")
+	}
+	if worktree.bare {
+		states = append(states, "bare")
+	}
+	if worktree.detached {
+		states = append(states, "detached")
+	}
+	if worktree.locked {
+		states = append(states, "locked")
+	}
+	if worktree.prunable {
+		states = append(states, "prunable")
+	}
+	if len(states) == 0 {
+		return "linked"
+	}
+	return strings.Join(states, ",")
+}

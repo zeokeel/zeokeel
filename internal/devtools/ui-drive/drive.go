@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/egoist/mygo/ui"
+	cordis "github.com/zeokeel/zeokeel-kernel"
 
 	"github.com/zeokeel/zeokeel/internal/contracts"
 )
@@ -540,16 +541,58 @@ func (d *drive) openSettingsFromNeutralScreen() bool {
 	return d.uiRoot.Navigator().SettingsOpen()
 }
 
-// goalChipLabel returns the current goal chip's status label (目标 / 目标已暂停 /
-// 目标已完成 / 目标已放弃), or "" when no chip is shown.
+// goalChipLabel returns the current goal dock's status label (目标进行中 /
+// 等待继续 / 目标已暂停 / 目标受阻 / 目标已完成), or "" when no dock is shown.
 func (d *drive) goalChipLabel() string {
 	for _, text := range d.texts() {
 		switch strings.TrimSpace(text) {
-		case "目标", "目标已暂停", "目标已完成", "目标已放弃":
+		case "目标进行中", "等待继续", "目标已暂停", "目标受阻", "目标已完成":
 			return strings.TrimSpace(text)
 		}
 	}
 	return ""
+}
+
+// goalService returns the assembled durable per-session goal backend.
+func (d *drive) goalService() contracts.GoalService {
+	if d.root == (cordis.Context{}) {
+		return nil
+	}
+	goals, _ := d.root.Get(contracts.KeyGoal)
+	return goals
+}
+
+// currentGoal is the driven session's goal snapshot.
+func (d *drive) currentGoal() (contracts.Goal, bool) {
+	goals := d.goalService()
+	if goals == nil || d.sessionID == "" {
+		return contracts.Goal{}, false
+	}
+	return goals.Goal(d.sessionID)
+}
+
+// seedGoal replaces the driven session's goal with a fresh armed one.
+func (d *drive) seedGoal(objective string) error {
+	d.clearGoal()
+	goals := d.goalService()
+	if goals == nil {
+		return fmt.Errorf("no goal backend in the driven product")
+	}
+	if d.sessionID == "" {
+		return fmt.Errorf("no active session to own the goal")
+	}
+	_, err := goals.CreateGoal(context.Background(), d.sessionID, objective, 0)
+	return err
+}
+
+// clearGoal removes the driven session's goal record (compare-and-set).
+func (d *drive) clearGoal() {
+	goal, ok := d.currentGoal()
+	if !ok {
+		return
+	}
+	_, _ = d.goalService().ClearGoal(context.Background(), d.sessionID,
+		contracts.GoalRef{ID: goal.ID, Revision: goal.Revision})
 }
 
 // paletteTailTexts returns the last labels of the frame for failure evidence.

@@ -9,8 +9,10 @@ import (
 	"github.com/zeokeel/zeokeel/internal/modules/appinfo"
 	"github.com/zeokeel/zeokeel/internal/modules/approvals"
 	"github.com/zeokeel/zeokeel/internal/modules/automation"
+	"github.com/zeokeel/zeokeel/internal/modules/goal"
 	"github.com/zeokeel/zeokeel/internal/modules/hosttools"
 	"github.com/zeokeel/zeokeel/internal/modules/importer"
+	"github.com/zeokeel/zeokeel/internal/modules/insights"
 	"github.com/zeokeel/zeokeel/internal/modules/memory"
 	"github.com/zeokeel/zeokeel/internal/modules/modelcatalog"
 	"github.com/zeokeel/zeokeel/internal/modules/sandbox"
@@ -24,6 +26,7 @@ import (
 	"github.com/zeokeel/zeokeel/internal/ui/approval"
 	automationui "github.com/zeokeel/zeokeel/internal/ui/automation"
 	"github.com/zeokeel/zeokeel/internal/ui/home"
+	insightsui "github.com/zeokeel/zeokeel/internal/ui/insights"
 	"github.com/zeokeel/zeokeel/internal/ui/interaction"
 	"github.com/zeokeel/zeokeel/internal/ui/plugins"
 	"github.com/zeokeel/zeokeel/internal/ui/rightpanel"
@@ -66,12 +69,14 @@ func Registry() *module.Registry {
 	mustRegister(registry, memory.Module())
 	mustRegister(registry, sandbox.Module())
 	mustRegister(registry, toolkit.Module())
+	mustRegister(registry, goal.Module())
 	mustRegister(registry, agent.Module())
 	mustRegister(registry, automation.Module())
 	mustRegister(registry, update.Module())
 	mustRegister(registry, importer.Module())
 	mustRegister(registry, acp.Module())
 	mustRegister(registry, modelcatalog.Module())
+	mustRegister(registry, insights.Module())
 	mustRegister(registry, hosttools.Module())
 	mustRegister(registry, home.Module())
 	mustRegister(registry, about.Module())
@@ -85,6 +90,7 @@ func Registry() *module.Registry {
 	mustRegister(registry, approval.Module())
 	mustRegister(registry, rightpanel.Module())
 	mustRegister(registry, automationui.Module())
+	mustRegister(registry, insightsui.Module())
 	mustRegister(registry, plugins.Module())
 	mustRegister(registry, GroupModule())
 	return registry

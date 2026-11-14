@@ -262,6 +262,9 @@ func buildTaskCard(c *ui.Context, t *design.Tokens, service contracts.Automation
 				if permission := strings.TrimSpace(task.Permission); permission != "" {
 					meta = append(meta, st.tr("权限：", "Permission: ")+automationPermissionLabel(st, permission))
 				}
+				if task.NewSessionPerRun {
+					meta = append(meta, st.tr("每次新建会话", "New session each run"))
+				}
 				if len(meta) > 0 {
 					design.Apply(ui.Text(c, strings.Join(meta, " · ")), t.Font(design.TypeXXS)).
 						TextColor(t.LabelTertiary).MaxLines(1).Ellipsis("…")
@@ -375,21 +378,48 @@ func buildTaskRowMenu(c *ui.Context, t *design.Tokens, runtime contracts.UIRunti
 	})
 }
 
-// runStatusLabel renders one run status label.
-// runStatusLabel names a finished run. The backend's success status means the
-// prompt was delivered to a fresh session, not that the agent's work succeeded:
-// the label says 已投递 (sent) so the UI does not claim an outcome it cannot see.
+// runStatusLabel names one run state. Delivered and completed are distinct
+// states: the prompt reached the conversation, but the run may still be
+// executing (or its outcome may be unknown after a restart), so the UI never
+// claims a result it cannot see.
 func runStatusLabel(st *state, status string) string {
-	if status == contracts.AutomationRunFailure {
+	switch status {
+	case contracts.AutomationRunDelivered:
+		return st.tr("已投递", "Delivered")
+	case contracts.AutomationRunSuccess:
+		return st.tr("已完成", "Completed")
+	case contracts.AutomationRunFailure:
 		return st.tr("失败", "Failed")
+	case contracts.AutomationRunInterrupted:
+		return st.tr("已中断", "Interrupted")
 	}
-	return st.tr("已投递", "Sent")
+	if trimmed := strings.TrimSpace(status); trimmed != "" {
+		return trimmed
+	}
+	return st.tr("未知", "Unknown")
 }
 
-// automationRunOutcomeHint explains that a successful delivery says nothing
-// about the session's result.
+// automationRunOutcomeHint explains the delivered (still running / unknown)
+// state: the automation only knows the prompt was accepted.
 func automationRunOutcomeHint(st *state) string {
 	return st.tr("结果由会话决定", "The result depends on that session")
+}
+
+// runStatusKind maps one run status to the product's shared status vocabulary,
+// so the run badge uses the same anatomy as every other status badge.
+func runStatusKind(status string) uikit.StatusKind {
+	switch status {
+	case contracts.AutomationRunDelivered:
+		return uikit.StatusRunning
+	case contracts.AutomationRunSuccess:
+		return uikit.StatusSuccess
+	case contracts.AutomationRunFailure:
+		return uikit.StatusError
+	case contracts.AutomationRunInterrupted:
+		return uikit.StatusInterrupted
+	default:
+		return uikit.StatusUnknown
+	}
 }
 
 // automationRunSummary renders one run record's summary for the UI. The
@@ -413,32 +443,76 @@ func automationRunSummary(st *state, summary string) string {
 	return trimmed
 }
 
-// runStatusKind maps one run status to the product's shared status vocabulary,
-// so the run badge uses the same anatomy as every other status badge.
-func runStatusKind(status string) uikit.StatusKind {
-	if status == contracts.AutomationRunFailure {
-		return uikit.StatusError
+// automationRunDetail renders one run record's visible line: the terminal error
+// (or interruption cause) first, then the run summary. A plain user
+// cancellation stays silent: the neutral badge already says 已中断.
+func automationRunDetail(st *state, record contracts.AutomationRunRecord) string {
+	if errText := strings.TrimSpace(record.Error); errText != "" {
+		if record.Status == contracts.AutomationRunInterrupted && isAutomationCancellation(errText) {
+			return ""
+		}
+		return automationRawErrorText(st, errText)
 	}
-	return uikit.StatusSuccess
+	return automationRunSummary(st, record.Summary)
+}
+
+// isAutomationCancellation reports whether an interruption cause is just the
+// backend's cancellation spelling (which the badge already conveys).
+func isAutomationCancellation(text string) bool {
+	switch strings.ToLower(strings.TrimSpace(text)) {
+	case "cancelled", "canceled", "context canceled", "context cancelled":
+		return true
+	default:
+		return false
+	}
+}
+
+// automationRunSessionID resolves the conversation one record was delivered to:
+// the dedicated field first, then the legacy summary spelling.
+func automationRunSessionID(record contracts.AutomationRunRecord) string {
+	if sessionID := strings.TrimSpace(record.SessionID); sessionID != "" {
+		return sessionID
+	}
+	return contracts.AutomationRunSessionID(record.Summary)
+}
+
+// automationDurationLabel renders a run duration compactly (numeric, so it needs
+// no localization).
+func automationDurationLabel(milliseconds int64) string {
+	if milliseconds <= 0 {
+		return ""
+	}
+	duration := time.Duration(milliseconds) * time.Millisecond
+	switch {
+	case duration < time.Second:
+		return fmt.Sprintf("%dms", milliseconds)
+	case duration < time.Minute:
+		return fmt.Sprintf("%.1fs", duration.Seconds())
+	case duration < time.Hour:
+		return fmt.Sprintf("%dm%02ds", int(duration.Minutes()), int(duration.Seconds())%60)
+	default:
+		return fmt.Sprintf("%dh%02dm", int(duration.Hours()), int(duration.Minutes())%60)
+	}
 }
 
 // buildTaskHistory is the task card's run-history disclosure: the latest run
-// summary stays visible, and the native Collapsible lists the recent runs
-// (newest first).
+// state stays visible (delivered vs completed is the first distinction), and the
+// native Collapsible lists the recent runs (newest first) with their delivery
+// and completion times.
 func buildTaskHistory(c *ui.Context, t *design.Tokens, st *state, task contracts.AutomationTask) {
 	ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(design.Space2).Children(func() {
 		if len(task.RunHistory) > 0 {
 			latest := task.RunHistory[0]
 			uikit.StatusBadge(c, t, runStatusKind(latest.Status), runStatusLabel(st, latest.Status))
-			design.Apply(ui.Text(c, firstNonEmpty(automationRunSummary(st, latest.Summary), "—")),
-				t.Font(design.TypeXXS)).
+			detail := automationRunDetail(st, latest)
+			design.Apply(ui.Text(c, firstNonEmpty(detail, "—")), t.Font(design.TypeXXS)).
 				TextColor(t.LabelTertiary).Grow(1).MaxLines(1).Ellipsis("…").
-				Tooltip(strings.TrimSpace(latest.Summary))
-			if latest.Status != contracts.AutomationRunFailure {
+				Tooltip(strings.TrimSpace(firstNonEmpty(latest.Error, latest.Summary)))
+			if latest.Status == contracts.AutomationRunDelivered {
 				design.Apply(ui.Text(c, automationRunOutcomeHint(st)), t.Font(design.TypeXXS)).
 					TextColor(t.LabelTertiary).NoWrap()
 			}
-			if sessionID := automationRunSessionID(latest.Summary); sessionID != "" {
+			if sessionID := automationRunSessionID(latest); sessionID != "" {
 				st.buildOpenSessionButton(c, t, sessionID)
 			}
 		} else {
@@ -453,22 +527,34 @@ func buildTaskHistory(c *ui.Context, t *design.Tokens, st *state, task contracts
 		}
 		for _, record := range task.RunHistory {
 			record := record
-			ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(design.Space2).Children(func() {
-				started := firstNonEmpty(uikit.FormatDateTime(st.locale, record.StartedAt), "—")
-				design.Apply(ui.Text(c, started), t.MonoText(design.TypeXXS)).
-					TextColor(t.LabelTertiary).NoWrap()
-				uikit.StatusBadge(c, t, runStatusKind(record.Status), runStatusLabel(st, record.Status))
-				design.Apply(ui.Text(c, firstNonEmpty(automationRunSummary(st, record.Summary), "—")),
-					t.Font(design.TypeXXS)).
-					TextColor(t.LabelSecondary).Grow(1).MaxLines(1).Ellipsis("…").
-					Tooltip(strings.TrimSpace(record.Summary))
-				if record.Status != contracts.AutomationRunFailure {
-					design.Apply(ui.Text(c, automationRunOutcomeHint(st)), t.Font(design.TypeXXS)).
+			ui.Column(c).FillWidth().Gap(design.Space1).Children(func() {
+				ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(design.Space2).Children(func() {
+					started := firstNonEmpty(uikit.FormatDateTime(st.locale, record.StartedAt), "—")
+					design.Apply(ui.Text(c, started), t.MonoText(design.TypeXXS)).
 						TextColor(t.LabelTertiary).NoWrap()
+					uikit.StatusBadge(c, t, runStatusKind(record.Status), runStatusLabel(st, record.Status))
+					design.Apply(ui.Text(c, firstNonEmpty(automationRunDetail(st, record), "—")),
+						t.Font(design.TypeXXS)).
+						TextColor(t.LabelSecondary).Grow(1).MaxLines(1).Ellipsis("…").
+						Tooltip(strings.TrimSpace(firstNonEmpty(record.Error, record.Summary)))
+					if sessionID := automationRunSessionID(record); sessionID != "" {
+						st.buildOpenSessionButton(c, t, sessionID)
+					}
+				})
+				// Delivery and completion are separate facts: show them apart so
+				// a long-running or never-settled run is not mistaken for a
+				// finished one.
+				if record.CompletedAt.IsZero() {
+					design.Apply(ui.Text(c, st.tr("等待会话完成", "Waiting for the session to finish")),
+						t.Font(design.TypeXXS)).TextColor(t.LabelTertiary).NoWrap()
+					return
 				}
-				if sessionID := automationRunSessionID(record.Summary); sessionID != "" {
-					st.buildOpenSessionButton(c, t, sessionID)
+				completed := st.tr("完成：", "Completed: ") + firstNonEmpty(uikit.FormatDateTime(st.locale, record.CompletedAt), "—")
+				if duration := automationDurationLabel(record.DurationMS); duration != "" {
+					completed += " · " + st.tr("耗时：", "Duration: ") + duration
 				}
+				design.Apply(ui.Text(c, completed), t.Font(design.TypeXXS)).
+					TextColor(t.LabelTertiary).NoWrap()
 			})
 		}
 	})
@@ -514,11 +600,15 @@ func buildCreateForm(c *ui.Context, t *design.Tokens, service contracts.Automati
 					FillWidth().MinHeight(design.Space6 * 4)
 			})
 			ui.Field(c, st.tr("运行计划", "Schedule"), func() {
-				ui.TextInput(c, &st.formSchedule).
-					Placeholder("*/5 * * * * " + st.tr("或", "or") + " every 60s").FillWidth()
+				ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(design.Space2).Children(func() {
+					ui.TextInput(c, &st.formSchedule).
+						Placeholder("*/5 * * * * " + st.tr("或", "or") + " daily 09:00:00 Asia/Shanghai").
+						FillWidth()
+					buildScheduleTemplateMenu(c, st)
+				})
 			}).Description(st.tr(
-				"支持 */N * * * *（每 N 分钟）、M H * * *（每天 HH:MM）、@hourly、@daily、every <N>s、after <N>s。",
-				"Supports */N * * * * (every N minutes), M H * * * (daily at HH:MM), @hourly, @daily, every <N>s, after <N>s.")).
+				"支持 5 字段 cron（如 cron 0 9 * * 1-5 Asia/Shanghai）、daily/weekly/at 选择器，以及旧表达式 */N * * * *、M H * * *、@hourly、@daily、every <N>s、after <N>s。",
+				"Supports five-field cron (e.g. cron 0 9 * * 1-5 Asia/Shanghai), daily/weekly/at selectors, and the legacy forms */N * * * *, M H * * *, @hourly, @daily, every <N>s, after <N>s.")).
 				Error(st.scheduleErr)
 			if st.schedulePreview != "" {
 				design.Apply(ui.Text(c, st.schedulePreview), t.Font(design.TypeXXS)).
@@ -537,7 +627,14 @@ func buildCreateForm(c *ui.Context, t *design.Tokens, service contracts.Automati
 			})
 			ui.Field(c, st.tr("权限", "Permission"), func() {
 				buildPermissionSelector(c, st)
-			})
+			}).Description(st.tr(
+				"默认全局跟随当前权限；选「所有权限」即无人值守（不会等待审批）。只读/工作区可写在需要审批的工具上可能停下来等人。",
+				"Global default follows the current permission; All permissions means unattended (no approval wait). Read-only/workspace-write may wait for approval on tools that need it."))
+			ui.Field(c, st.tr("运行会话", "Run session"), func() {
+				ui.Switch(c, &st.formNewSessionPerRun).Label(st.tr("每次新建会话", "New session each run"))
+			}).Description(st.tr(
+				"默认后续运行投递到首次运行创建并绑定的会话；开启后每次运行都新建会话。",
+				"Runs are delivered to the conversation the first run creates; enable this to start a new conversation every run."))
 			ui.Field(c, st.tr("启用", "Enabled"), func() {
 				ui.Switch(c, &st.formEnabled).Label(st.tr("启用任务", "Enable task"))
 			})
@@ -564,13 +661,14 @@ func buildCreateForm(c *ui.Context, t *design.Tokens, service contracts.Automati
 					}
 				}
 				task := contracts.AutomationTask{
-					Name:        name,
-					Prompt:      prompt,
-					Model:       strings.TrimSpace(st.formModel),
-					Schedule:    schedule,
-					WorkspaceID: strings.TrimSpace(st.formWorkspaceID),
-					Permission:  strings.TrimSpace(st.formPermission),
-					Enabled:     st.formEnabled,
+					Name:             name,
+					Prompt:           prompt,
+					Model:            strings.TrimSpace(st.formModel),
+					Schedule:         schedule,
+					WorkspaceID:      strings.TrimSpace(st.formWorkspaceID),
+					Permission:       strings.TrimSpace(st.formPermission),
+					NewSessionPerRun: st.formNewSessionPerRun,
+					Enabled:          st.formEnabled,
 				}
 				var err error
 				if strings.TrimSpace(st.formEditID) != "" {
@@ -581,6 +679,7 @@ func buildCreateForm(c *ui.Context, t *design.Tokens, service contracts.Automati
 					updated.Schedule = task.Schedule
 					updated.WorkspaceID = task.WorkspaceID
 					updated.Permission = task.Permission
+					updated.NewSessionPerRun = task.NewSessionPerRun
 					updated.Enabled = task.Enabled
 					_, err = service.Update(context.Background(), updated)
 				} else {
@@ -614,6 +713,7 @@ func (st *state) resetForm() {
 	st.formWorkspaceID = ""
 	st.formWorkspaceName = ""
 	st.formPermission = ""
+	st.formNewSessionPerRun = false
 	st.formEnabled = true
 	st.formErr = ""
 	st.formEditID = ""
@@ -643,9 +743,31 @@ func automationScheduleLabel(st *state, schedule contracts.AutomationSchedule) s
 	case contracts.AutomationScheduleHourly:
 		return st.tr("每小时", "Every hour")
 	case contracts.AutomationScheduleDaily:
-		hour, minute, _ := schedule.HourMinute()
-		return st.tr(fmt.Sprintf("每天 %02d:%02d", hour, minute),
-			fmt.Sprintf("Daily at %02d:%02d", hour, minute))
+		hour, minute, second, _, _ := schedule.TimeOfDay()
+		clock := formatAutomationClockLabel(hour, minute, second)
+		return withScheduleZone(st, schedule,
+			st.tr(fmt.Sprintf("每天 %s", clock), fmt.Sprintf("Daily at %s", clock)))
+	case contracts.AutomationScheduleWeekly:
+		hour, minute, second, _, _ := schedule.TimeOfDay()
+		clock := formatAutomationClockLabel(hour, minute, second)
+		weekdays := schedule.Weekdays()
+		zhDays := make([]string, 0, len(weekdays))
+		enDays := make([]string, 0, len(weekdays))
+		for _, weekday := range weekdays {
+			zhDays = append(zhDays, automationWeekdayZh(weekday))
+			enDays = append(enDays, automationWeekdayEn(weekday))
+		}
+		zh := fmt.Sprintf("每周%s %s", strings.Join(zhDays, "、"), clock)
+		en := fmt.Sprintf("Weekly on %s at %s", strings.Join(enDays, ", "), clock)
+		return withScheduleZone(st, schedule, st.tr(zh, en))
+	case contracts.AutomationScheduleCron:
+		expression := schedule.CronExpression()
+		return withScheduleZone(st, schedule,
+			st.tr("Cron "+expression, "Cron "+expression))
+	case contracts.AutomationScheduleOnceAt:
+		instant, _ := schedule.At()
+		when := uikit.FormatDateTime(st.locale, instant)
+		return st.tr(when+" 运行一次", "Once at "+when)
 	case contracts.AutomationScheduleEverySeconds:
 		seconds := schedule.IntervalSeconds()
 		return st.tr(fmt.Sprintf("每 %d 秒", seconds), fmt.Sprintf("Every %d seconds", seconds))
@@ -656,6 +778,72 @@ func automationScheduleLabel(st *state, schedule contracts.AutomationSchedule) s
 	default:
 		return schedule.String()
 	}
+}
+
+// withScheduleZone appends the wall-clock time zone when it is not the product
+// default (the default is implied and would only add noise).
+func withScheduleZone(st *state, schedule contracts.AutomationSchedule, label string) string {
+	zone := schedule.TimeZone()
+	if zone == "" || zone == contracts.AutomationDefaultTimeZone {
+		return label
+	}
+	if st.english() {
+		return label + " (" + zone + ")"
+	}
+	return label + "（" + zone + "）"
+}
+
+// formatAutomationClockLabel renders HH:MM, adding seconds only when set.
+func formatAutomationClockLabel(hour, minute, second int) string {
+	if second == 0 {
+		return fmt.Sprintf("%02d:%02d", hour, minute)
+	}
+	return fmt.Sprintf("%02d:%02d:%02d", hour, minute, second)
+}
+
+// automationWeekdayZh renders one ISO weekday (Monday=1) in Chinese (the
+// numeral only; callers add the 周 prefix through the schedule wording).
+func automationWeekdayZh(weekday int) string {
+	names := [...]string{"一", "二", "三", "四", "五", "六", "日"}
+	if weekday < 1 || weekday > 7 {
+		return fmt.Sprintf("%d", weekday)
+	}
+	return names[weekday-1]
+}
+
+// automationWeekdayEn renders one ISO weekday (Monday=1) in English.
+func automationWeekdayEn(weekday int) string {
+	names := [...]string{"Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"}
+	if weekday < 1 || weekday > 7 {
+		return fmt.Sprintf("%d", weekday)
+	}
+	return names[weekday-1]
+}
+
+// buildScheduleTemplateMenu inserts one canonical schedule template into the
+// form (the field stays free text; the template is a starting point). It
+// includes the DSH selectors and the legacy forms so both stay discoverable.
+func buildScheduleTemplateMenu(c *ui.Context, st *state) {
+	templates := []struct {
+		zh, en string
+		spec   string
+	}{
+		{"每 N 分钟", "Every N minutes", "*/5 * * * *"},
+		{"每小时", "Every hour", "@hourly"},
+		{"每天", "Daily", "daily 09:00:00.000 " + contracts.AutomationDefaultTimeZone},
+		{"每周", "Weekly", "weekly 09:00:00.000 " + contracts.AutomationDefaultTimeZone + " 1"},
+		{"自定义 Cron", "Custom cron", "cron 0 9 * * 1-5 " + contracts.AutomationDefaultTimeZone},
+		{"固定间隔", "Fixed interval", "every 300s"},
+		{"一次", "Once", "after 3600s"},
+	}
+	ui.PopoverMenuButton(c, st.tr("计划模板", "Templates"), func(menu *ui.Menu) {
+		for _, template := range templates {
+			template := template
+			if menu.Item(st.tr(template.zh, template.en)).Chosen() {
+				st.formSchedule = template.spec
+			}
+		}
+	}).Tooltip(st.tr("插入一个计划模板作为起点", "Insert a schedule template as a starting point"))
 }
 
 // automationSchedulePreview composes the valid-draft preview line: the next run
@@ -817,6 +1005,7 @@ func openEditForm(st *state, task contracts.AutomationTask) {
 	st.formWorkspaceID = task.WorkspaceID
 	st.formWorkspaceName = ""
 	st.formPermission = normalizeAutomationPermission(task.Permission)
+	st.formNewSessionPerRun = task.NewSessionPerRun
 	st.formEnabled = task.Enabled
 }
 
@@ -850,17 +1039,6 @@ func (st *state) taskRunning(task contracts.AutomationTask) bool {
 		return false
 	}
 	return true
-}
-
-// automationRunSessionID extracts the session id from the backend's run
-// summary ("ran in chat session <id>"); other summaries carry no session.
-func automationRunSessionID(summary string) string {
-	trimmed := strings.TrimSpace(summary)
-	const prefix = "ran in chat session "
-	if len(trimmed) <= len(prefix) || !strings.EqualFold(trimmed[:len(prefix)], prefix) {
-		return ""
-	}
-	return strings.TrimSpace(trimmed[len(prefix):])
 }
 
 // buildOpenSessionButton renders the history row's link into the session the run

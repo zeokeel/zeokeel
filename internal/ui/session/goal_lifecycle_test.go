@@ -1,12 +1,11 @@
 package session_test
 
-// TDD tests for the goal lifecycle UI: complete/abandon actions in the header
-// chip's popover, their confirmations, the two slash commands and
-// auto-continue suppression.
+// Goal v2 /goal dialog and command-palette tests: creating a goal writes the
+// active session, editing keeps the goal id/revision (and can raise the round
+// cap), localized GoalService errors stay in the dialog, and the complete/clear
+// commands act through the durable service.
 
 import (
-	"errors"
-	"sync"
 	"testing"
 
 	"github.com/egoist/mygo/ui"
@@ -14,181 +13,201 @@ import (
 	"github.com/zeokeel/zeokeel/internal/contracts"
 )
 
-// lifecycleTracker is a GoalTracker + GoalPauser + GoalLifecycler fake.
-type lifecycleTracker struct {
-	*pauseTracker
-
-	mu            sync.Mutex
-	completeCalls int
-	abandonCalls  int
-	editCalls     int
-	lifecycleFail bool
-}
-
-func newLifecycleTracker() *lifecycleTracker {
-	return &lifecycleTracker{pauseTracker: &pauseTracker{}}
-}
-
-// transition moves an active/paused goal to status, notifying the handler.
-func (l *lifecycleTracker) transition(status string) bool {
-	l.pauseTracker.mu.Lock()
-	had := l.pauseTracker.id != ""
-	fail := l.lifecycleFail
-	var (
-		handler func(contracts.Goal, bool)
-		goal    contracts.Goal
-	)
-	if had && !fail {
-		l.pauseTracker.status = status
-		handler = l.pauseTracker.handler
-		goal = contracts.Goal{ID: l.pauseTracker.id, Text: l.pauseTracker.text, Status: status}
+func openGoalDialogFromDock(t *testing.T, h *harness, tester *ui.Tester) {
+	t.Helper()
+	openGoalActions(t, h, tester, "")
+	if tester.HasText("编辑目标") {
+		h.click(tester, "编辑目标")
+		return
 	}
-	l.pauseTracker.mu.Unlock()
-	if had && !fail && handler != nil {
-		handler(goal, true)
+	if tester.HasText("Edit goal") {
+		h.click(tester, "Edit goal")
+		return
 	}
-	return had && !fail
+	t.Fatalf("goal edit entry missing; texts = %v", tester.Texts())
 }
 
-func (l *lifecycleTracker) Complete() bool {
-	l.mu.Lock()
-	l.completeCalls++
-	l.mu.Unlock()
-	return l.transition(contracts.GoalStatusCompleted)
-}
+func TestGoalDialogCreatesGoalForActiveSession(t *testing.T) {
+	h, goals := newGoalHarness(t, goalChat())
+	tester := h.tester()
+	tester.Frame()
 
-func (l *lifecycleTracker) Abandon() bool {
-	l.mu.Lock()
-	l.abandonCalls++
-	l.mu.Unlock()
-	return l.transition(contracts.GoalStatusAbandoned)
-}
+	h.typeSlash(tester)
+	h.click(tester, "设置目标")
+	h.assertTexts(tester, "设置目标", "目标内容", "保存", "取消")
+	h.assertNoTexts(tester, "删除目标记录", "自动续跑上限（轮）")
 
-func (l *lifecycleTracker) Edit(text string) (string, error) {
-	l.mu.Lock()
-	l.editCalls++
-	l.mu.Unlock()
-	l.pauseTracker.mu.Lock()
-	id := l.pauseTracker.id
-	l.pauseTracker.mu.Unlock()
-	if id == "" {
-		return "", errors.New("no goal")
+	focusDialogInput(t, tester, "目标内容")
+	tester.Type("Ship release")
+	tester.Frame()
+	h.click(tester, "保存")
+	tester.Frame()
+
+	creates := goals.creates()
+	if len(creates) != 1 {
+		t.Fatalf("CreateGoal calls = %+v, want one", creates)
 	}
-	l.pauseTracker.setGoal(id, text, contracts.GoalStatusActive)
-	return id, nil
-}
-
-func (l *lifecycleTracker) lifecycleCalls() (complete, abandon, edit int) {
-	l.mu.Lock()
-	defer l.mu.Unlock()
-	return l.completeCalls, l.abandonCalls, l.editCalls
-}
-
-// --- header chip ------------------------------------------------------------
-
-func TestGoalChipLifecycleComplete(t *testing.T) {
-	chat := autoContinueChat()
-	goal := newLifecycleTracker()
-	h, tester := newGoalPauseHarness(t, chat, nil, goal)
-	goal.setGoal("g1", "ship it", contracts.GoalStatusActive)
-	tester.Frame()
-	openGoalActions(t, h, tester, "目标")
-	h.assertTexts(tester, "完成目标", "结束目标（保留记录）", "暂停目标", "删除目标记录")
-
-	h.click(tester, "完成目标")
-	if complete, _, _ := goal.lifecycleCalls(); complete != 1 {
-		t.Fatalf("Complete calls = %d", complete)
+	if creates[0].sessionID != "sess-goal" || creates[0].objective != "Ship release" {
+		t.Fatalf("CreateGoal call = %+v, want the active session and the typed objective", creates[0])
 	}
-	tester.Frame()
-	h.assertTexts(tester, "目标已完成", "ship it")
-	openGoalActions(t, h, tester, "目标已完成")
-	h.assertTexts(tester, "删除目标记录")
-	h.assertNoTexts(tester, "完成目标", "结束目标（保留记录）", "暂停目标", "继续目标")
+	h.assertNoTexts(tester, "目标内容")
+	h.assertTexts(tester, "目标进行中", "Ship release")
 }
 
-func TestGoalChipLifecycleAbandon(t *testing.T) {
-	chat := autoContinueChat()
-	goal := newLifecycleTracker()
-	h, tester := newGoalPauseHarness(t, chat, nil, goal)
-	goal.setGoal("g1", "ship it", contracts.GoalStatusActive)
+func TestGoalDialogEmptySaveDisabled(t *testing.T) {
+	h, goals := newGoalHarness(t, goalChat())
+	tester := h.tester()
 	tester.Frame()
-	openGoalActions(t, h, tester, "目标")
-	h.click(tester, "结束目标（保留记录）")
-	// Ending keeps the record; the dialog explains the difference.
-	h.assertTexts(tester, "结束目标", "取消", "确认结束")
-	h.click(tester, "确认结束")
-	if _, abandon, _ := goal.lifecycleCalls(); abandon != 1 {
-		t.Fatalf("Abandon calls = %d", abandon)
+
+	h.typeSlash(tester)
+	h.click(tester, "设置目标")
+	h.click(tester, "保存")
+	if creates := goals.creates(); len(creates) != 0 {
+		t.Fatalf("empty goal was created: %+v", creates)
 	}
-	tester.Frame()
-	h.assertTexts(tester, "目标已放弃", "ship it")
-	openGoalActions(t, h, tester, "目标已放弃")
-	h.assertTexts(tester, "删除目标记录")
-	h.assertNoTexts(tester, "完成目标", "结束目标（保留记录）", "暂停目标")
+	h.assertTexts(tester, "保存", "取消")
 }
 
-func TestGoalChipLifecycleHiddenWithoutLifecycler(t *testing.T) {
-	chat := autoContinueChat()
-	goal := &pauseTracker{}
-	h, tester := newGoalPauseHarness(t, chat, nil, goal)
-	goal.setGoal("g1", "ship it", contracts.GoalStatusActive)
+func TestGoalDialogEditsExistingGoalKeepingRef(t *testing.T) {
+	h, goals := newGoalHarness(t, goalChat())
+	seeded := goals.seed("sess-goal", "Ship release")
+	tester := h.tester()
 	tester.Frame()
-	openGoalActions(t, h, tester, "目标")
-	h.assertTexts(tester, "暂停目标", "删除目标记录")
-	h.assertNoTexts(tester, "完成目标", "结束目标（保留记录）")
+
+	openGoalDialogFromDock(t, h, tester)
+	h.assertTexts(tester, "设置目标", "自动续跑上限（轮）", "保存", "取消")
+	if !tester.HasText("Ship release") {
+		t.Fatalf("the dialog did not prefill the current objective; texts = %v", tester.Texts())
+	}
+
+	focusDialogInput(t, tester, "目标内容")
+	tester.Key(ui.Cmd, ui.KeyA)
+	tester.Key(0, ui.KeyBackspace)
+	tester.Type("Ship v2")
+	tester.Frame()
+	h.click(tester, "保存")
+	tester.Frame()
+
+	updates := goals.updates()
+	if len(updates) != 1 {
+		t.Fatalf("UpdateGoal calls = %+v, want one edit", updates)
+	}
+	update := updates[0]
+	if update.update.Action != contracts.GoalActionEdit ||
+		update.update.Objective != "Ship v2" {
+		t.Fatalf("edit update = %+v, want an objective edit", update.update)
+	}
+	if update.ref.ID != seeded.ID || update.ref.Revision != seeded.Revision {
+		t.Fatalf("edit ref = %+v, want the current id/revision %+v", update.ref, seeded)
+	}
+	if got := goals.wantGoal("sess-goal"); got.Objective != "Ship v2" || got.ID != seeded.ID {
+		t.Fatalf("goal after edit = %+v, want the same id with the new objective", got)
+	}
+	h.assertTexts(tester, "Ship v2")
 }
 
-func TestGoalChipLifecycleFailureDanger(t *testing.T) {
-	chat := autoContinueChat()
-	goal := newLifecycleTracker()
-	goal.lifecycleFail = true
-	h, tester := newGoalPauseHarness(t, chat, nil, goal)
-	goal.setGoal("g1", "ship it", contracts.GoalStatusActive)
+func TestGoalDialogRaisesCapThenResume(t *testing.T) {
+	h, goals := newGoalHarness(t, goalChat())
+	goals.seedBlocked("sess-goal", contracts.GoalBlockedCodeRoundLimit,
+		"the goal reached its automatic continuation round limit (3/3)", 3, 3)
+	tester := h.tester()
 	tester.Frame()
-	openGoalActions(t, h, tester, "目标")
-	h.click(tester, "完成目标")
+
+	openGoalDialogFromDock(t, h, tester)
+	focusDialogInput(t, tester, "自动续跑上限（轮）")
+	tester.Key(ui.Cmd, ui.KeyA)
+	tester.Key(0, ui.KeyBackspace)
+	tester.Type("10")
 	tester.Frame()
-	h.assertTexts(tester, "完成目标失败")
+	h.click(tester, "保存")
+	tester.Frame()
+
+	updates := goals.updates()
+	if len(updates) != 1 || updates[0].update.Action != contracts.GoalActionEdit ||
+		updates[0].update.MaxGoalRounds != 10 {
+		t.Fatalf("cap edit = %+v, want MaxGoalRounds 10", updates)
+	}
+	if got := goals.wantGoal("sess-goal"); got.Phase != contracts.GoalPhaseBlocked || got.MaxGoalRounds != 10 {
+		t.Fatalf("goal after cap edit = %+v, want still blocked with cap 10", got)
+	}
+
+	// The raised cap makes the human continue action valid again.
+	h.click(tester, "继续目标")
+	tester.Frame()
+	if got := goals.wantGoal("sess-goal"); got.Phase != contracts.GoalPhaseActive ||
+		got.Activation != contracts.GoalActivationArmed || got.MaxGoalRounds != 10 {
+		t.Fatalf("goal after continue = %+v, want active+armed with cap 10", got)
+	}
 }
 
-func TestGoalChipLifecycleEnglish(t *testing.T) {
-	chat := autoContinueChat()
-	goal := newLifecycleTracker()
-	h, tester := newGoalPauseHarness(t, chat, nil, goal)
-	goal.setGoal("g1", "ship it", contracts.GoalStatusActive)
-	h.ui.Locale().SetLanguage("en")
+func TestGoalDialogConflictIsLocalized(t *testing.T) {
+	h, goals := newGoalHarness(t, goalChat())
+	goals.mu.Lock()
+	goals.createErr = contracts.ErrGoalConflict
+	goals.mu.Unlock()
+	tester := h.tester()
 	tester.Frame()
-	h.assertTexts(tester, "Goal")
-	openGoalActions(t, h, tester, "Goal")
-	h.assertTexts(tester, "Complete goal", "End goal (keep record)", "Pause goal", "Delete goal record")
-	h.click(tester, "Complete goal")
+
+	h.typeSlash(tester)
+	h.click(tester, "设置目标")
+	focusDialogInput(t, tester, "目标内容")
+	tester.Type("Ship release")
 	tester.Frame()
-	h.assertTexts(tester, "Goal completed", "ship it")
-	openGoalActions(t, h, tester, "Goal completed")
-	h.assertTexts(tester, "Delete goal record")
-	h.assertNoTexts(tester, "Complete goal", "End goal (keep record)", "Pause goal")
+	h.click(tester, "保存")
+	h.assertTexts(tester, "保存目标失败：当前会话已有未完成目标，请先编辑或完成它。")
+	h.assertTexts(tester, "保存", "取消")
 }
 
-// --- slash commands ---------------------------------------------------------
-
-func TestGoalLifecycleCommandsRegisteredAndEnabled(t *testing.T) {
-	chat := autoContinueChat()
-	goal := newLifecycleTracker()
-	h, tester := newGoalPauseHarness(t, chat, nil, goal)
-	goal.setGoal("g1", "ship it", contracts.GoalStatusActive)
+func TestGoalDialogStaleRefIsLocalizedAndRefreshes(t *testing.T) {
+	h, goals := newGoalHarness(t, goalChat())
+	goals.seed("sess-goal", "Ship release")
+	tester := h.tester()
 	tester.Frame()
 
-	wanted := []struct{ id, title, hint string }{
+	openGoalDialogFromDock(t, h, tester)
+	// Another human/tool change lands between opening and saving: the answer's
+	// revision is stale and must be rejected, not overwrite the newer state.
+	goals.mu.Lock()
+	goals.updateErr = contracts.ErrGoalStaleRef
+	goals.mu.Unlock()
+	h.click(tester, "保存")
+	h.assertTexts(tester, "保存目标失败：目标已被其他操作更新，请重试。")
+}
+
+func TestGoalDialogDeleteRecordOpensClearConfirmation(t *testing.T) {
+	h, goals := newGoalHarness(t, goalChat())
+	goals.seed("sess-goal", "Ship release")
+	tester := h.tester()
+	tester.Frame()
+
+	openGoalDialogFromDock(t, h, tester)
+	h.click(tester, "删除目标记录")
+	h.assertNoTexts(tester, "目标内容")
+	h.assertTexts(tester, "清除目标", "取消", "确认清除")
+	h.click(tester, "确认清除")
+	tester.Frame()
+	if _, ok := goals.Goal("sess-goal"); ok {
+		t.Fatal("the goal survived the dialog's confirmed delete")
+	}
+}
+
+func TestGoalCommandsRegisteredAndGated(t *testing.T) {
+	h, goals := newGoalHarness(t, goalChat())
+	goals.seed("sess-goal", "Ship release")
+	tester := h.tester()
+	tester.Frame()
+
+	for _, want := range []struct{ id, title, hint string }{
+		{"zeokeel.session.goal", "设置目标", "为当前会话创建或编辑长期目标"},
 		{"zeokeel.session.goal.complete", "完成目标", "将当前目标标记为已完成"},
-		{"zeokeel.session.goal.abandon", "放弃目标", "放弃当前目标"},
-	}
-	for _, want := range wanted {
+		{"zeokeel.session.goal.clear", "清除目标", "删除当前目标及其记录（需确认）"},
+	} {
 		command := findSessionCommand(t, h, want.id)
 		if command.Title != want.title || command.Hint != want.hint {
 			t.Fatalf("%s = %q/%q, want %q/%q", want.id, command.Title, command.Hint, want.title, want.hint)
 		}
 		if command.Enabled == nil || !command.Enabled() {
-			t.Fatalf("%s is disabled with an active goal and a lifecycler", want.id)
+			t.Fatalf("%s is disabled with an active goal", want.id)
 		}
 	}
 	count := 0
@@ -201,99 +220,58 @@ func TestGoalLifecycleCommandsRegisteredAndEnabled(t *testing.T) {
 		t.Fatalf("session commands = %d, want 14", count)
 	}
 
-	// Completed goals disable both commands; a tracker without the lifecycle
-	// half keeps them disabled too.
-	goal.setGoal("g1", "ship it", contracts.GoalStatusCompleted)
-	tester.Frame()
-	for _, want := range wanted {
-		command := findSessionCommand(t, h, want.id)
-		if command.Enabled != nil && command.Enabled() {
-			t.Fatalf("%s enabled for a completed goal", want.id)
-		}
-	}
-	bare := &pauseTracker{}
-	h2, tester2 := newGoalPauseHarness(t, autoContinueChat(), nil, bare)
-	bare.setGoal("g1", "ship it", contracts.GoalStatusActive)
-	tester2.Frame()
-	if command := findSessionCommand(t, h2, "zeokeel.session.goal.complete"); command.Enabled != nil && command.Enabled() {
-		t.Fatal("complete command enabled without a lifecycler")
-	}
-}
-
-func TestGoalLifecycleCommandsRun(t *testing.T) {
-	chat := autoContinueChat()
-	goal := newLifecycleTracker()
-	h, tester := newGoalPauseHarness(t, chat, nil, goal)
-	goal.setGoal("g1", "ship it", contracts.GoalStatusActive)
-	tester.Frame()
-
+	// A complete goal disables complete; clear stays available; a product
+	// without the goal backend disables the whole family.
 	complete := findSessionCommand(t, h, "zeokeel.session.goal.complete")
 	if err := complete.Run(); err != nil {
 		t.Fatalf("complete Run: %v", err)
 	}
-	if completeCalls, _, _ := goal.lifecycleCalls(); completeCalls != 1 {
-		t.Fatalf("Complete calls = %d", completeCalls)
-	}
 	tester.Frame()
+	if got := goals.wantGoal("sess-goal"); got.Phase != contracts.GoalPhaseComplete {
+		t.Fatalf("phase after the complete command = %q, want complete", got.Phase)
+	}
+	if command := findSessionCommand(t, h, "zeokeel.session.goal.complete"); command.Enabled != nil && command.Enabled() {
+		t.Fatal("complete command enabled for a complete goal")
+	}
 	h.assertTexts(tester, "目标已完成")
 
-	// Failure surfaces in DangerText.
-	goal2 := newLifecycleTracker()
-	goal2.lifecycleFail = true
-	h2, tester2 := newGoalPauseHarness(t, autoContinueChat(), nil, goal2)
-	goal2.setGoal("g1", "ship it", contracts.GoalStatusActive)
-	tester2.Frame()
-	abandon := findSessionCommand(t, h2, "zeokeel.session.goal.abandon")
-	if err := abandon.Run(); err != nil {
-		t.Fatalf("abandon Run: %v", err)
-	}
-	tester2.Frame()
-	h2.assertTexts(tester2, "放弃目标失败")
-}
-
-func TestGoalAutoContinueSkipsCompletedAndAbandoned(t *testing.T) {
-	for _, status := range []string{contracts.GoalStatusCompleted, contracts.GoalStatusAbandoned} {
-		status := status
-		t.Run(status, func(t *testing.T) {
-			chat := autoContinueChat()
-			goal := newLifecycleTracker()
-			_, tester := newGoalPauseHarness(t, chat, autoContinueSettings(true), goal)
-			goal.setGoal("g1", "ship it", status)
-			tester.Frame()
-			settleRun(t, chat, tester)
-			if sends := autoSends(chat); len(sends) != 0 {
-				t.Fatalf("auto-continue ran for a %s goal: %v", status, sends)
-			}
-		})
+	bare := newHarness(t, goalChat())
+	bare.tester().Frame()
+	for _, id := range []string{"zeokeel.session.goal", "zeokeel.session.goal.complete", "zeokeel.session.goal.clear"} {
+		command := findSessionCommand(t, bare, id)
+		if command.Enabled != nil && command.Enabled() {
+			t.Fatalf("%s enabled without the goal backend", id)
+		}
 	}
 }
 
-// TestGoalDialogEditsExistingGoal covers AUDIT-P3-16: saving the /goal dialog
-// for an existing goal edits it in place (same ID, auto-continue budget kept)
-// instead of creating a new goal.
-func TestGoalDialogEditsExistingGoal(t *testing.T) {
-	chat := permissionChat()
-	goal := newLifecycleTracker()
-	goal.setGoal("g1", "旧目标", contracts.GoalStatusActive)
-	h := newCommandDialogHarness(t, chat, "zh", goal, &fakePlanBridger{}, &fakeMemory{})
+func TestGoalClearCommandOpensConfirmation(t *testing.T) {
+	h, goals := newGoalHarness(t, goalChat())
+	goals.seed("sess-goal", "Ship release")
 	tester := h.tester()
 	tester.Frame()
-	command := findSessionCommand(t, h, "zeokeel.session.goal")
+
+	command := findSessionCommand(t, h, "zeokeel.session.goal.clear")
 	if err := command.Run(); err != nil {
-		t.Fatalf("run goal command: %v", err)
+		t.Fatalf("clear Run: %v", err)
 	}
 	tester.Frame()
-	focusDialogInput(t, tester, "目标内容")
-	tester.Key(ui.Cmd, ui.KeyA)
-	tester.Type("新目标")
+	h.assertTexts(tester, "清除目标", "取消", "确认清除")
+	h.click(tester, "确认清除")
 	tester.Frame()
-	h.click(tester, "保存")
+	if _, ok := goals.Goal("sess-goal"); ok {
+		t.Fatal("the clear command left the goal in place")
+	}
+}
+
+func TestGoalDialogEnglishCopy(t *testing.T) {
+	h, goals := newGoalHarness(t, goalChat())
+	goals.seed("sess-goal", "Ship release")
+	h.ui.Locale().SetLanguage("en")
+	tester := h.tester()
 	tester.Frame()
-	complete, abandon, edit := goal.lifecycleCalls()
-	if complete != 0 || abandon != 0 || edit != 1 {
-		t.Fatalf("lifecycle calls = complete %d, abandon %d, edit %d; want only one edit", complete, abandon, edit)
-	}
-	if _, text, _, _ := goal.Get(); text != "新目标" {
-		t.Fatalf("goal text = %q, want 新目标", text)
-	}
+
+	openGoalActions(t, h, tester, "Goal active")
+	h.click(tester, "Edit goal")
+	h.assertTexts(tester, "Goal", "Goal text", "Round cap", "Save", "Cancel", "Delete goal record")
 }

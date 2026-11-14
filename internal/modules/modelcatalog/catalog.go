@@ -53,6 +53,12 @@ type Model struct {
 	Temperature *float64 `json:"temperature,omitempty"`
 	TopP        *float64 `json:"topP,omitempty"`
 	MaxTokens   int      `json:"maxTokens,omitempty"`
+	// InputPricePerMillion / CachedInputPricePerMillion / OutputPricePerMillion
+	// are optional per-million token prices used for the context cost estimate
+	// (0 = not configured; the UI never renders an unknown price as free).
+	InputPricePerMillion       float64 `json:"inputPricePerMillion,omitempty"`
+	CachedInputPricePerMillion float64 `json:"cachedInputPricePerMillion,omitempty"`
+	OutputPricePerMillion      float64 `json:"outputPricePerMillion,omitempty"`
 }
 
 // Config is the module's typed assembly config.
@@ -129,18 +135,21 @@ func newServiceWithSettings(cfg Config, logger contracts.Logger, settings contra
 	rows := make([]contracts.ModelInfo, 0, len(cfg.Models))
 	for _, model := range cfg.Models {
 		rows = append(rows, contracts.ModelInfo{
-			ID:              model.ID,
-			Name:            model.Name,
-			Note:            model.Note,
-			ContextWindow:   model.ContextWindow,
-			BaseURL:         model.BaseURL,
-			APIKey:          model.APIKey,
-			Family:          model.Family,
-			DefaultThinking: model.DefaultThinking,
-			ThinkingModes:   model.ThinkingModes,
-			Temperature:     model.Temperature,
-			TopP:            model.TopP,
-			MaxTokens:       model.MaxTokens,
+			ID:                         model.ID,
+			Name:                       model.Name,
+			Note:                       model.Note,
+			ContextWindow:              model.ContextWindow,
+			BaseURL:                    model.BaseURL,
+			APIKey:                     model.APIKey,
+			Family:                     model.Family,
+			DefaultThinking:            model.DefaultThinking,
+			ThinkingModes:              model.ThinkingModes,
+			Temperature:                model.Temperature,
+			TopP:                       model.TopP,
+			MaxTokens:                  model.MaxTokens,
+			InputPricePerMillion:       model.InputPricePerMillion,
+			CachedInputPricePerMillion: model.CachedInputPricePerMillion,
+			OutputPricePerMillion:      model.OutputPricePerMillion,
 		})
 	}
 	return &service{baseline: contracts.SanitizeModelInfoList(rows), logger: logger, settings: settings}

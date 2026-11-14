@@ -9,6 +9,8 @@ import (
 	"time"
 
 	"github.com/egoist/mygo/ui"
+
+	"github.com/zeokeel/zeokeel/internal/contracts"
 )
 
 // stableTranscriptRect returns the rect of the "消息操作" control (the ⋯ entry
@@ -182,8 +184,12 @@ func (d *drive) runHSessionSteps() {
 			c.shot("message-actions-copy-done")
 		})
 
-	d.step("queue-popover-cancel", "session", "队列：排队弹层可取消",
-		"运行中点「排队」→ 队列弹层列出待发提示 → 点「取消」→ 队列清空", func(c *check) {
+	d.step("queue-popover-cancel", "session", "队列：后端 inbox 排队弹层可取消",
+		"运行中点「排队」→ 后端 PromptQueue 入队（UI 只读）→ 队列弹层列出待发提示 → 点「取消排队」→ 后端队列清空", func(c *check) {
+			if _, ok := d.chat().(contracts.PromptQueue); !ok {
+				c.skipped = "当前后端未实现 contracts.PromptQueue（task-10）"
+				return
+			}
 			d.server.SetMode(scriptSlowAnswer)
 			defer d.server.SetMode(scriptAnswer)
 			d.resetToSession()

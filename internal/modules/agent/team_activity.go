@@ -25,6 +25,11 @@ type trackedTeamTool struct {
 	inner   rig.Tool
 	tracker *teamTracker
 	manager *rigteam.Manager
+	// resumeSend handles send_message/team-send targets that are HISTORICAL
+	// teammates (no live manager member): the durable child session cold-resumes
+	// in the background and the tool reports the message as delivered. It is
+	// nil in focused tests that wrap a single tool.
+	resumeSend func(ctx context.Context, ref, message string) (handled bool, err error)
 }
 
 var (
@@ -55,9 +60,54 @@ func (t *trackedTeamTool) PendingNotices() []string {
 
 // Invoke implements rig.Tool.
 func (t *trackedTeamTool) Invoke(ctx context.Context, call rig.ToolCall) (rig.ToolResult, error) {
+	// send_message (and the legacy/native team send aliases) to a historical
+	// teammate cold-resumes its durable child session; a live member keeps the
+	// Rig manager path unchanged.
+	if t.resumeSend != nil && isTeamSendToolName(t.Name()) {
+		ref, message := teamSendTargetAndMessage(call.Arguments)
+		if ref != "" && message != "" {
+			handled, resumeErr := t.resumeSend(ctx, ref, message)
+			if handled {
+				result := rig.ToolResult{Content: fmt.Sprintf("send_message: delivered to %s (cold-resumed from the durable child session)", ref)}
+				if resumeErr != nil {
+					result = rig.ToolResult{Content: "send_message: " + resumeErr.Error(), IsError: true}
+				}
+				t.record(call, result, nil)
+				return result, nil
+			}
+		}
+	}
 	result, err := t.inner.Invoke(ctx, call)
 	t.record(call, result, err)
 	return result, err
+}
+
+// isTeamSendToolName reports whether a team tool delivers a message to a member.
+func isTeamSendToolName(name string) bool {
+	switch strings.TrimSpace(name) {
+	case rigteam.ToolSend, rigteam.ToolSendMessage:
+		return true
+	default:
+		return false
+	}
+}
+
+// teamSendTargetAndMessage extracts the target/message of a send tool call.
+func teamSendTargetAndMessage(arguments string) (ref, message string) {
+	args := teamToolArgs(arguments)
+	for _, key := range []string{"target", "id", "name", "agent", "member"} {
+		if value := strings.TrimSpace(teamArgString(args, key)); value != "" {
+			ref = value
+			break
+		}
+	}
+	for _, key := range []string{"message", "prompt"} {
+		if value := strings.TrimSpace(teamArgString(args, key)); value != "" {
+			message = value
+			break
+		}
+	}
+	return ref, message
 }
 
 // record appends one bounded activity row for the invocation and reconciles the

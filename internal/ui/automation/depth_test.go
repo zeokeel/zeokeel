@@ -173,7 +173,7 @@ func TestAutomationScheduleValidationAndPreview(t *testing.T) {
 	tester := h.tester()
 	h.click(tester, "新建任务")
 	h.assertTexts(tester,
-		"支持 */N * * * *（每 N 分钟）、M H * * *（每天 HH:MM）、@hourly、@daily、every <N>s、after <N>s。")
+		"支持 5 字段 cron（如 cron 0 9 * * 1-5 Asia/Shanghai）、daily/weekly/at 选择器，以及旧表达式 */N * * * *、M H * * *、@hourly、@daily、every <N>s、after <N>s。")
 
 	fillCreateForm(t, h, tester, "计划任务", "p", "not-a-cron")
 	h.assertTexts(tester, "运行计划无效：请检查格式与取值。")
@@ -236,7 +236,8 @@ func completeRun(service *fakeAutomation, taskID, sessionID string) {
 		now := time.Now().UTC()
 		task.LastRun = now
 		task.RunHistory = append([]contracts.AutomationRunRecord{{
-			StartedAt: now, FinishedAt: now, Status: contracts.AutomationRunSuccess,
+			ID: "run-finished", StartedAt: now, DeliveredAt: now, CompletedAt: now,
+			Status: contracts.AutomationRunSuccess, SessionID: sessionID,
 			Summary: "ran in chat session " + sessionID,
 		}}, task.RunHistory...)
 		service.tasks[index] = task
@@ -265,7 +266,9 @@ func TestRunNowShowsPendingThenDeliveredAndSessionLink(t *testing.T) {
 	completeRun(service, "task-1", "sess-9")
 	tester.Frame()
 	h.assertNoTexts(tester, "运行中")
-	h.assertTexts(tester, "已投递", "结果由会话决定", "打开会话")
+	// The backend settled the run: the card reports completion, not delivery.
+	h.assertTexts(tester, "已完成", "打开会话")
+	h.assertNoTexts(tester, "已投递", "结果由会话决定")
 
 	h.click(tester, "打开会话")
 	if got := chat.activeSession(); got != "sess-9" {

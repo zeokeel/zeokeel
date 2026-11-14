@@ -48,22 +48,49 @@ func (l *fakeLogger) contains(fragment string) bool {
 
 // chatCall is one recorded chat execution.
 type chatCall struct {
-	Title  string
-	Prompt string
+	SessionID string
+	Title     string
+	Prompt    string
 }
 
-// fakeChat is a contracts.ChatService test double that records NewSession/Send.
+// fakeSession is one chat session's read model inside fakeChat.
+type fakeSession struct {
+	title    string
+	running  bool
+	err      string
+	messages []contracts.ChatMessage
+}
+
+// fakeChat is a contracts.ChatService test double that records NewSession/Send
+// and models a running session like the agent backend: Send marks the session
+// running and notifies subscribers, and finish/Complete expose the terminal
+// state. With hold unset Send completes immediately (a fast mocked run).
 type fakeChat struct {
 	mu            sync.Mutex
 	next          int
-	sessions      map[string]string
+	sessions      map[string]*fakeSession
 	calls         chan chatCall
+	subscribers   map[uint64]func(string)
+	nextSub       uint64
+	hold          bool
+	sends         int
 	newSessionErr error
 	sendErr       error
 }
 
 func newFakeChat() *fakeChat {
-	return &fakeChat{sessions: map[string]string{}, calls: make(chan chatCall, 64)}
+	return &fakeChat{
+		sessions:    map[string]*fakeSession{},
+		calls:       make(chan chatCall, 64),
+		subscribers: map[uint64]func(string){},
+	}
+}
+
+// setHold makes following sends stay running until finish is called.
+func (c *fakeChat) setHold(hold bool) {
+	c.mu.Lock()
+	c.hold = hold
+	c.mu.Unlock()
 }
 
 func (c *fakeChat) setSendError(err error) {
@@ -72,12 +99,105 @@ func (c *fakeChat) setSendError(err error) {
 	c.mu.Unlock()
 }
 
+// sessionCount reports how many sessions the fake knows.
+func (c *fakeChat) sessionCount() int {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return len(c.sessions)
+}
+
+// sendCount reports how many prompts were accepted.
+func (c *fakeChat) sendCount() int {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.sends
+}
+
+// seedSession registers a chat session the fake should know about (a restart
+// test reconstructing a conversation from durable state).
+func (c *fakeChat) seedSession(sessionID, title string, running bool) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.sessions[sessionID] = &fakeSession{title: title, running: running}
+}
+
+// sessionTitle returns one session's title ("" when unknown).
+func (c *fakeChat) sessionTitle(sessionID string) string {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if session, ok := c.sessions[sessionID]; ok {
+		return session.title
+	}
+	return ""
+}
+
+// subscriberCount reports the live chat-session subscribers.
+func (c *fakeChat) subscriberCount() int {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return len(c.subscribers)
+}
+
+// finish settles one running session like the agent's run settle: the trailing
+// assistant message carries the error (kind) and the session stops running.
+func (c *fakeChat) finish(sessionID, errText, errorKind string) {
+	c.mu.Lock()
+	session, ok := c.sessions[sessionID]
+	if !ok {
+		c.mu.Unlock()
+		return
+	}
+	session.running = false
+	session.err = errText
+	message := contracts.ChatMessage{Role: contracts.ChatRoleAssistant}
+	if errText != "" {
+		message.Error = errText
+		message.ErrorKind = errorKind
+	}
+	session.messages = append(session.messages, message)
+	c.mu.Unlock()
+	c.notify(sessionID)
+}
+
+// complete settles a session successfully.
+func (c *fakeChat) complete(sessionID string) { c.finish(sessionID, "", "") }
+
+// fail settles a session with a failed turn.
+func (c *fakeChat) fail(sessionID, message string) {
+	c.finish(sessionID, message, contracts.MessageErrorKindOther)
+}
+
+// interrupt settles a session with a user cancellation.
+func (c *fakeChat) interrupt(sessionID string) {
+	c.finish(sessionID, "cancelled", contracts.MessageErrorKindCancelled)
+}
+
 func (c *fakeChat) Config() contracts.ChatConfig { return contracts.ChatConfig{} }
 
-func (c *fakeChat) Sessions() []contracts.ChatSessionInfo { return nil }
+func (c *fakeChat) Sessions() []contracts.ChatSessionInfo {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	infos := make([]contracts.ChatSessionInfo, 0, len(c.sessions))
+	for id, session := range c.sessions {
+		infos = append(infos, contracts.ChatSessionInfo{
+			ID: id, Title: session.title, Running: session.running,
+			MessageCount: len(session.messages),
+		})
+	}
+	return infos
+}
 
-func (c *fakeChat) Session(string) (contracts.ChatSession, bool) {
-	return contracts.ChatSession{}, false
+func (c *fakeChat) Session(sessionID string) (contracts.ChatSession, bool) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	session, ok := c.sessions[sessionID]
+	if !ok {
+		return contracts.ChatSession{}, false
+	}
+	return contracts.ChatSession{
+		ID: sessionID, Title: session.title, Running: session.running,
+		Error: session.err, Messages: append([]contracts.ChatMessage(nil), session.messages...),
+	}, true
 }
 
 func (c *fakeChat) ActiveSession() string { return "" }
@@ -92,31 +212,84 @@ func (c *fakeChat) NewSession(title string) (string, error) {
 	}
 	c.next++
 	id := fmt.Sprintf("sess-%d", c.next)
-	c.sessions[id] = title
+	c.sessions[id] = &fakeSession{title: title}
 	return id, nil
 }
 
-func (c *fakeChat) DeleteSession(string) error { return nil }
+func (c *fakeChat) DeleteSession(sessionID string) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	delete(c.sessions, sessionID)
+	return nil
+}
 
 func (c *fakeChat) Send(sessionID, prompt string) error {
 	c.mu.Lock()
-	sendErr := c.sendErr
-	title := c.sessions[sessionID]
-	c.mu.Unlock()
-	if sendErr != nil {
-		return sendErr
+	session, ok := c.sessions[sessionID]
+	if !ok {
+		c.mu.Unlock()
+		return fmt.Errorf("fakeChat: unknown session %q", sessionID)
 	}
+	if session.running {
+		c.mu.Unlock()
+		return fmt.Errorf("fakeChat: session %q is already running", sessionID)
+	}
+	if c.sendErr != nil {
+		err := c.sendErr
+		c.mu.Unlock()
+		return err
+	}
+	title := session.title
+	hold := c.hold
+	if hold {
+		session.running = true
+	} else {
+		session.messages = append(session.messages, contracts.ChatMessage{Role: contracts.ChatRoleAssistant})
+	}
+	c.sends++
 	select {
-	case c.calls <- chatCall{Title: title, Prompt: prompt}:
+	case c.calls <- chatCall{SessionID: sessionID, Title: title, Prompt: prompt}:
 	default:
 	}
+	c.mu.Unlock()
+	c.notify(sessionID)
 	return nil
 }
 
 func (c *fakeChat) Cancel(string) error { return nil }
 
-func (c *fakeChat) Subscribe(func(string)) (func(), error) {
-	return func() {}, nil
+func (c *fakeChat) Subscribe(fn func(string)) (func(), error) {
+	if fn == nil {
+		return func() {}, nil
+	}
+	c.mu.Lock()
+	c.nextSub++
+	id := c.nextSub
+	c.subscribers[id] = fn
+	c.mu.Unlock()
+	var once sync.Once
+	return func() {
+		once.Do(func() {
+			c.mu.Lock()
+			delete(c.subscribers, id)
+			c.mu.Unlock()
+		})
+	}, nil
+}
+
+// notify calls every chat subscriber outside the fake's lock.
+func (c *fakeChat) notify(sessionID string) {
+	c.mu.Lock()
+	listeners := make([]func(string), 0, len(c.subscribers))
+	for _, listener := range c.subscribers {
+		listeners = append(listeners, listener)
+	}
+	c.mu.Unlock()
+	for _, listener := range listeners {
+		if listener != nil {
+			listener(sessionID)
+		}
+	}
 }
 
 // newTestService builds a service directly and closes its ticker on cleanup.

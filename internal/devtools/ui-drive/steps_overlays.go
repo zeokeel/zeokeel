@@ -404,13 +404,18 @@ func (d *drive) runOverlaySteps() {
 		})
 
 	d.step("overlay-goal", "session", "浮层：goal 目标（输入框上方目标条 + 目标对话框）",
-		"GoalTracker.Set → 输入框上方出现目标条；点 ⋯ 目标操作打开动作菜单（暂停/完成/放弃/清除）；/goal 对话框取消在左/保存在右", func(c *check) {
+		"GoalService.CreateGoal → 输入框上方出现目标条（阶段/轮次/自动续跑）；点 ⋯ 目标操作打开动作菜单（暂停/继续/完成/编辑/清除）；暂停后继续恢复；/goal 对话框取消在左/保存在右", func(c *check) {
 			d.resetToSession()
-			tracker := d.uiRoot.GoalTracker()
-			if _, err := tracker.Set(context.Background(), "完成 Q4 发布清单并更新文档"); err != nil {
-				c.failf("GoalTracker.Set 失败：%v", err)
+			goals := d.goalService()
+			if goals == nil {
+				c.failf("产品没有 GoalService（contracts.KeyGoal）")
 				return
 			}
+			if err := d.seedGoal("完成 Q4 发布清单并更新文档"); err != nil {
+				c.failf("创建目标失败：%v", err)
+				return
+			}
+			defer d.clearGoal()
 			d.drain(3)
 			status := d.goalChipLabel()
 			if status == "" {
@@ -418,46 +423,46 @@ func (d *drive) runOverlaySteps() {
 				return
 			}
 			c.note("目标状态标签=%q", status)
+			goal, ok := d.currentGoal()
+			c.require(ok, "创建后 GoalService.Goal() 没有目标")
+			c.require(goal.MaxGoalRounds == contracts.DefaultMaxGoalRounds,
+				"新建目标的轮次上限=%d，期望 %d", goal.MaxGoalRounds, contracts.DefaultMaxGoalRounds)
+			c.require(goal.Activation == contracts.GoalActivationArmed, "新建目标未 armed")
+			c.require(c.has("0/256 轮"), "目标条没有显示自动续跑轮次 0/256")
 			c.shot("overlay-goal-dock")
+
 			// The dock's ⋯ entry opens the goal actions menu.
 			if !c.click("目标操作") {
 				return
 			}
 			d.drain(2)
-			if !c.has("暂停目标") && !c.has("继续目标") {
-				c.failf("目标 chip 没有打开目标动作菜单")
+			c.mustText("暂停目标", "完成目标", "编辑目标", "清除目标记录")
+			c.shot("overlay-goal-menu")
+
+			if !c.click("暂停目标") {
 				return
 			}
-			c.shot("overlay-goal-menu")
-			// H-series goal semantics: ending keeps the record, deleting removes
-			// it — two distinct menu rows, not two adjacent danger siblings.
-			c.require(c.has("结束目标（保留记录）"), "目标菜单缺少「结束目标（保留记录）」")
-			c.require(c.has("删除目标记录"), "目标菜单缺少「删除目标记录」")
-			if c.has("暂停目标") {
-				if !c.click("暂停目标") {
-					return
-				}
-				d.drain(2)
-				if _, _, status, ok := tracker.Get(); !ok || status != contracts.GoalStatusPaused {
-					c.failf("暂停目标后 GoalTracker 状态=%q（ok=%v）", status, ok)
-				}
-				if !c.has("目标已暂停") {
-					c.warnf("暂停目标后 chip 没有显示「目标已暂停」（当前 chip=%q）", d.goalChipLabel())
-				}
-				c.shot("overlay-goal-paused")
-				// Resume through the same dock menu.
-				if !c.click("目标操作") {
-					return
-				}
-				d.drain(2)
-				if c.has("继续目标") {
-					if !c.click("继续目标") {
-						return
-					}
-					d.drain(2)
-				}
+			d.drain(2)
+			goal, ok = d.currentGoal()
+			c.require(ok && goal.Phase == contracts.GoalPhasePaused,
+				"暂停目标后 GoalService phase=%q（ok=%v），期望 paused", goal.Phase, ok)
+			c.require(d.has("目标已暂停"), "暂停目标后目标条没有显示「目标已暂停」")
+			c.shot("overlay-goal-paused")
+
+			// 继续目标 resumes through the human path (the dock button appears
+			// while the goal is paused/disarmed).
+			if !c.click("继续目标") {
+				return
 			}
-			// The /goal dialog is reachable through the slash command surface.
+			d.drain(2)
+			goal, ok = d.currentGoal()
+			c.require(ok && goal.Phase == contracts.GoalPhaseActive &&
+				goal.Activation == contracts.GoalActivationArmed,
+				"继续目标后 goal=%+v（ok=%v），期望 active+armed", goal, ok)
+			c.require(d.has("目标进行中"), "继续目标后目标条没有显示「目标进行中」")
+
+			// The /goal dialog is reachable through the slash command surface; an
+			// existing goal opens as edit (objective + round cap).
 			if err := d.focusComposer(); err != nil {
 				c.failf("%v", err)
 				return
@@ -475,7 +480,7 @@ func (d *drive) runOverlaySteps() {
 				return
 			}
 			d.drain(2)
-			c.mustText("删除目标记录", "保存", "取消")
+			c.mustText("自动续跑上限（轮）", "删除目标记录", "保存", "取消")
 			save, okSave := d.find("保存")
 			cancel, okCancel := d.find("取消")
 			if okSave && okCancel {
@@ -487,12 +492,10 @@ func (d *drive) runOverlaySteps() {
 			c.shot("overlay-goal-dialog")
 			d.key(0, ui.KeyEscape)
 			d.drain(2)
-			c.require(!c.has("删除目标记录"), "Esc 未关闭目标对话框")
-			if _, _, _, ok := tracker.Get(); !ok {
+			c.require(!c.has("自动续跑上限（轮）"), "Esc 未关闭目标对话框")
+			if _, ok := d.currentGoal(); !ok {
 				c.failf("关闭目标对话框后目标被意外清除")
 			}
-			tracker.Clear()
-			d.drain(2)
 		})
 
 }
