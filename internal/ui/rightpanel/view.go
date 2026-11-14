@@ -35,19 +35,30 @@ func buildPanel(c *ui.Context, t *design.Tokens, workspace contracts.WorkspaceSe
 	root := ui.Column(c).FillWidth().Grow(1)
 	root.Label(cfg.titleLabel(st.locale))
 	root.Children(func() {
-		buildTabStrip(c, t, st)
+		activeTab := buildTabStrip(c, t, st)
 		st.clampTab()
-		if fileIndex, ok := st.activeFileIndex(); ok {
-			buildFileTabPage(c, t, workspace, st, fileIndex)
-			return
-		}
-		switch st.tab {
-		case pageFiles:
-			buildFilesPage(c, t, workspace, artifacts, st)
-		case pageTerminal:
-			buildTerminalPage(c, t, terminal, st)
-		default:
-			buildGuidePage(c, t, st)
+		// The page under the strip is the chosen tab's content, so it is the
+		// tab panel of ARIA's Tabs pattern (mygo RoleTabPanel): named after the
+		// tab it shows, with the tab pointing back through Controls, so a screen
+		// reader can move between a tab and its content.
+		panel := ui.Column(c).FillWidth().Grow(1).
+			Role(ui.RoleTabPanel).Label(st.tabLabel(st.tab))
+		panel.Children(func() {
+			if fileIndex, ok := st.activeFileIndex(); ok {
+				buildFileTabPage(c, t, workspace, st, fileIndex)
+				return
+			}
+			switch st.tab {
+			case pageFiles:
+				buildFilesPage(c, t, workspace, artifacts, st)
+			case pageTerminal:
+				buildTerminalPage(c, t, terminal, st)
+			default:
+				buildGuidePage(c, t, st)
+			}
+		})
+		if activeTab.Valid() {
+			activeTab.Controls(panel)
 		}
 	})
 }
@@ -56,19 +67,25 @@ func buildPanel(c *ui.Context, t *design.Tokens, workspace contracts.WorkspaceSe
 // fixed view pages above and the opened file documents below (V10). The rows
 // are separate native tab lists (a document tab and a view tab are different
 // levels of navigation and never share a row); each row owns only its own
-// choice and maps it back to the active tab index.
-func buildTabStrip(c *ui.Context, t *design.Tokens, st *state) {
+// choice and maps it back to the active tab index. It returns the element of
+// the chosen tab, or the zero element when the tab rows show none, so the
+// caller can point it at the tab panel with Controls.
+func buildTabStrip(c *ui.Context, t *design.Tokens, st *state) ui.Element {
 	st.clampTab()
-	buildViewTabStrip(c, t, st)
-	buildDocumentTabStrip(c, t, st)
+	activeTab := buildViewTabStrip(c, t, st)
+	if tab := buildDocumentTabStrip(c, t, st); tab.Valid() {
+		activeTab = tab
+	}
 	st.revealTab = false
+	return activeTab
 }
 
 // buildViewTabStrip renders the fixed view pages (开始/文件/命令) as the
 // underline tab language: 13 DIP labels, the chosen one semibold with a 2 DIP
 // accent underline, on a strip with one hairline underneath. Visiting a page
-// takes the index from the native tab list (keyboard and pointer alike).
-func buildViewTabStrip(c *ui.Context, t *design.Tokens, st *state) {
+// takes the index from the native tab list (keyboard and pointer alike). It
+// returns the chosen tab's element when a fixed page is chosen.
+func buildViewTabStrip(c *ui.Context, t *design.Tokens, st *state) ui.Element {
 	// TabsBase clamps its bound index into range, so a document tab (an index
 	// past the fixed pages) is mirrored as "no view page chosen"; the row's
 	// own Changed is the only real user choice.
@@ -78,6 +95,7 @@ func buildViewTabStrip(c *ui.Context, t *design.Tokens, st *state) {
 	}
 	viewTabs := ui.TabsBase(c, &st.viewTab, pageFixedCount)
 	viewTabs.List.Label(st.tr("视图页面", "View pages"))
+	var activeTab ui.Element
 	ui.Column(c).FillWidth().Shrink(0).BorderWidth(0, 0, 1, 0).BorderColor(t.BorderL2).
 		Children(func() {
 			strip := ui.ScrollHorizontal(c).FillWidth().Shrink(0)
@@ -85,7 +103,10 @@ func buildViewTabStrip(c *ui.Context, t *design.Tokens, st *state) {
 			strip.Children(func() {
 				viewTabs.List.Gap(design.Space2).AlignItems(ui.Center).Children(func() {
 					for index := 0; index < pageFixedCount; index++ {
-						buildUnderlineTab(c, t, viewTabs, index, st.tabLabel(index), st.tab == index)
+						tab := buildUnderlineTab(c, t, viewTabs, index, st.tabLabel(index), st.tab == index)
+						if st.tab == index {
+							activeTab = tab
+						}
 					}
 				})
 			})
@@ -93,16 +114,17 @@ func buildViewTabStrip(c *ui.Context, t *design.Tokens, st *state) {
 	if viewTabs.List.Changed() && st.viewTab >= 0 && st.viewTab < pageFixedCount {
 		st.tab = st.viewTab
 	}
+	return activeTab
 }
 
 // buildDocumentTabStrip renders the opened files on their own underline row,
 // below the view pages: one tab per file, the active one carrying the accent
 // underline and every tab its close action. The row only exists while a file
-// is open.
-func buildDocumentTabStrip(c *ui.Context, t *design.Tokens, st *state) {
+// is open. It returns the chosen document tab's element when a file is chosen.
+func buildDocumentTabStrip(c *ui.Context, t *design.Tokens, st *state) ui.Element {
 	docCount := len(st.fileTabs)
 	if docCount == 0 {
-		return
+		return ui.Element{}
 	}
 	st.docTab = -1
 	if index, ok := st.activeFileIndex(); ok {
@@ -111,6 +133,7 @@ func buildDocumentTabStrip(c *ui.Context, t *design.Tokens, st *state) {
 	docTabs := ui.TabsBase(c, &st.docTab, docCount)
 	docTabs.List.Label(st.tr("打开的文件", "Open files"))
 	closing := -1
+	var activeTab ui.Element
 	ui.Column(c).FillWidth().Shrink(0).BorderWidth(0, 0, 1, 0).BorderColor(t.BorderL2).
 		Children(func() {
 			strip := ui.ScrollHorizontal(c).FillWidth().Shrink(0)
@@ -118,18 +141,22 @@ func buildDocumentTabStrip(c *ui.Context, t *design.Tokens, st *state) {
 			strip.Children(func() {
 				docTabs.List.Gap(design.Space1).AlignItems(ui.Center).Children(func() {
 					for index := range st.fileTabs {
-						buildDocumentTab(c, t, st, docTabs, index, &closing)
+						tab := buildDocumentTab(c, t, st, docTabs, index, &closing)
+						if st.tab == pageFixedCount+index {
+							activeTab = tab
+						}
 					}
 				})
 			})
 		})
 	if closing >= 0 {
 		st.closeTab(pageFixedCount + closing)
-		return
+		return ui.Element{}
 	}
 	if docTabs.List.Changed() && st.docTab >= 0 && st.docTab < docCount {
 		st.tab = pageFixedCount + st.docTab
 	}
+	return activeTab
 }
 
 // buildUnderlineTab builds one view-page tab: the underline vocabulary used by
@@ -137,7 +164,7 @@ func buildDocumentTabStrip(c *ui.Context, t *design.Tokens, st *state) {
 // a 2 DIP accent underline). The 2 DIP border is reserved on every tab so the
 // row does not jump when the choice moves. The underline is an element border,
 // not a hand-drawn line.
-func buildUnderlineTab(c *ui.Context, t *design.Tokens, tabs ui.TabsParts, index int, label string, active bool) {
+func buildUnderlineTab(c *ui.Context, t *design.Tokens, tabs ui.TabsParts, index int, label string, active bool) ui.Element {
 	tab := tabs.Tab(index).AlignItems(ui.Center).Height(design.Space8).
 		PaddingX(design.Space3).
 		BorderWidth(0, 0, 2, 0).BorderColor(ui.Transparent)
@@ -152,13 +179,14 @@ func buildUnderlineTab(c *ui.Context, t *design.Tokens, tabs ui.TabsParts, index
 		design.Apply(ui.Text(c, label), t.Font(design.TypeXS)).
 			FontWeight(weight).TextColor(ink).MaxLines(1).Ellipsis("…").NoWrap()
 	})
+	return tab
 }
 
 // buildDocumentTab builds one opened file's tab in the same underline
 // vocabulary, with the base name, the full path as its tooltip and the close
 // action. The active document tab is scrolled into view when a file opens.
 func buildDocumentTab(c *ui.Context, t *design.Tokens, st *state, tabs ui.TabsParts,
-	index int, closing *int) {
+	index int, closing *int) ui.Element {
 	path := st.fileTabs[index].path
 	active := st.tab == pageFixedCount+index
 	label := st.tabLabel(pageFixedCount + index)
@@ -193,6 +221,7 @@ func buildDocumentTab(c *ui.Context, t *design.Tokens, st *state, tabs ui.TabsPa
 			OnClick: func() { *closing = index },
 		})
 	})
+	return tab
 }
 
 // --- guide page -------------------------------------------------------------

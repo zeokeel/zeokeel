@@ -2163,10 +2163,13 @@ func (s *service) run(ctx context.Context, sessionID string, cfg contracts.ChatC
 		MaxTokens:     generation.MaxTokens,
 		Tools:         runTools,
 		// The tombstone guard is outermost: a session deleted mid-run must drop
-		// its late history write before it can spill or reach the store.
-		History:         s.guardedHistory(s.spilledHistory(history)),
-		Gate:            s.gate(sessionID),
-		ContextBudget:   cfg.ContextBudget,
+		// its late history write before it reaches the store.
+		History:       s.guardedHistory(history),
+		Gate:          s.gate(sessionID),
+		ContextBudget: cfg.ContextBudget,
+		// Oversized tool results are spilled by Rig before the tool message is
+		// recorded (rig.SpillPolicy); the product only resolves the directory.
+		Spill:           s.spillPolicy(ctx),
 		Logger:          s.logger,
 		CheckpointStore: s.guardedCheckpointStore(s.checkpointStore()),
 	}

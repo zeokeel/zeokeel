@@ -880,3 +880,17 @@ v0.2.12 的 package-macos job 在 GitHub Ubuntu runner 上构建 libdmg-hfsplus 
 
 - **变更**：`zeokeel-rig v0.16.0 → v0.16.1`。修复 Windows ACL 探测 `0xC0000005`：`winWindowsDirectory` 把 `GetWindowsDirectoryW(lpBuffer, uSize)` 参数传反，容量 260（0x104）被当成输出缓冲区指针并写入，probe helper 以 exit status 2 崩溃，沙箱 runner fail closed —— Windows 上 `pwsh`/`job_start`/`terminal_*` 全部不可用（v0.2.29 起）。同一 rig 版本还修复：Windows `terminal_*` 的遗留早退（v0.16.0 的 ConPTY 实现不可达，删除后走 ConPTY/pipe 回退）、Windows 10 上缺失 `GetTempPath2W` 导致的探测 panic（先 `Find` 再 `Call`，回退 `GetTempPathW`）。ZeoKeel 侧无代码改动，公共 API 无破坏性变更。
 - **验证**：本仓库 `gofmt`、`go build ./...`、`go vet ./...`、`go test ./...`（CGO_ENABLED=0）PASS；`GOOS=windows/amd64`、`GOOS=windows/arm64` 交叉构建 PASS。rig v0.16.1 tag 工作流全量 CI（含 clean-room `go get` + `go mod verify`）PASS，新增 Windows 运行时回归测试 `TestWindowsRuntimeKnownFolders`。本次无 UI/行为改动，未跑 `scripts/verify.sh` 全量。
+
+## 0.2.34 草案（2026-11-14：mygo v0.9.0 + rig v0.16.2 + 官方化替换）
+
+- **依赖升级**：`mygo v0.8.3 → v0.9.0`（唯一 breaking 是 `sqlite.LibraryPath`/`MYGO_SQLITE_LIBRARY` 移除，产品未使用；新增 6 个传递依赖：`ProtonMail/go-crypto`、`cloudflare/circl`、`klauspost/compress`、`ulikunitz/xz`、`digitalxero.dev/rpm`、`x/crypto`，均为 mygo 传递依赖，`CGO_ENABLED=0` 构建通过）；`zeokeel-rig v0.16.1 → v0.16.2`（新增 `internal/procattr.HideWindow`：所有子进程 spawn 隐藏 Windows 控制台窗口，修复 Windows 每次工具调用弹黑窗；ConPTY `STARTUPINFOEX` 同步隐藏；无公共 API / 模型可见变更；补 rig 源级覆盖测试，任何未来 spawn 忘记准备都会失败）。
+- **官方化替换**（能不自己写就不自己写；逐项先写测试再实现）：
+  - **spill**：自写 `internal/modules/agent/spill.go`（258 行：32 KiB 阈值、2 KiB 头、中文 marker、100 文件清理、History 包装）→ `rig.SpillPolicy`（产品只保留落盘目录求值，`AgentSpec.Spill`；文件 258→64 行）。行为变化：模型看到 rig 摘要（`[tool result spilled to file]` + 绝对路径 + 字节数 + 240 B preview），同轮后续请求不再携带全文；旧会话里的中文指针不再被 rig 识别（文件仍可人工打开）。
+  - **hosttools**：自写 `ask_user`/`plan_review`/`exit_plan_mode`/`goal` → `rig/tools/hosttools`（工具名与排序不变；`present` 是产品内容 artifact，保留；`plan_review` 参数 `plan`→`content`；`goal` 增加 rig 生命周期 `update`，经 `contracts.GoalPauser`/`GoalLifecycler` 适配；headless 仍不注册 plan 对；删除旧 `plan` 参数兼容 shim 与仓库内种子改用 `content`）。
+  - **手动压缩**：补 `Fallback: compact.WindowCompactor{}`，预算扣除 system prompt（与自动路径一致）。
+  - **openpath**：两处手写 `xdg-open`/`open`/`explorer` → `mygo.Shell.OpenPath`（保留测试 seam）。
+  - **退出**：`OnBeforeQuit` 处理 `QuitEvent.SessionEnding`（OS 注销/关机），同步收尾并 flush 日志。
+  - **mygo v0.9 能力接入**：命令面板 `ListState.Choose`；壳层 a11y landmark + 右栏 tabpanel（`Controls(panel)`）；`editor.LanguageForText`；runstatus `c.Key`；菜单键/Shift+F10 打开选中行菜单测试；Focus 自动 reveal 回归测试（composer 重聚焦、检视器关闭回归焦点两处证明滚动不变，不需要 `PreventScroll`）。
+- **测试（TDD）**：每项先补/改失败测试再实现。新增：rig `internal/procattr` 覆盖率 + 平台测试；`TestPaletteFilterChangeChoosesFirstVisibleRow`、`TestPaletteReopenForgetsPreviousChosenCommand`、`TestShellLandmarks`、`TestTabPanelIsNamedAndLinkedToItsTab`、`TestEditorForReadsLanguageFromShebang`、`TestComposerRefocusKeepsScroll`、`TestInspectorCloseFocusReturnKeepsScroll`、`TestWorkspaceFileRowMenuKeyOpensRowMenu`、`TestSessionListMenuKeyOpensChosenRowMenu`、`TestRunStatusStatusRowsHaveDistinctKeys`、`TestGoalStoreUpdateMapsLifecycle`；重写 spill/compact/regression spill 测试。
+- **验证**：`gofmt`、`go build ./...`（`CGO_ENABLED=0` 与 `GOOS=windows/amd64`）、`go vet ./...`、`go tool mygo vet .`、`go test ./... -count=1`、`designlint --strict --baseline` 0 new、`scripts/design-check.sh` 6/6、`go mod verify`、`go tool mygo migrate-ui`（干净副本，无产品文件需要迁移）PASS。
+- **残余**：Windows 控制台修复需真机复核（本环境 Linux；rig 侧用 Windows-only 测试 + `GOOS=windows` 交叉 vet 验证）；`goal update=blocked` 在 rig schema 中仍暴露但产品无 blocked 生命周期，返回可读错误；旧 spill 指针兼容性如上。

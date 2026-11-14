@@ -111,7 +111,9 @@ func TestShortcutLabelsMatchCommands(t *testing.T) {
 }
 
 // TestGuideHasNoDuplicatePaneHeading pins B7/P3-8: the pane's name lives on its
-// view tab only — the body no longer repeats it as an H2.
+// view tab only — the body no longer repeats it as an H2. The tab panel carries
+// the same name as its tab for assistive technology (mygo RoleTabPanel, as
+// ARIA's Tabs pattern asks), so one non-panel name is allowed.
 func TestGuideHasNoDuplicatePaneHeading(t *testing.T) {
 	h := newHarness(t, harnessOptions{})
 	tester := h.tester()
@@ -121,6 +123,10 @@ func TestGuideHasNoDuplicatePaneHeading(t *testing.T) {
 		if text == "开始" {
 			count++
 		}
+	}
+	if _, ok := tester.AccessByRole(ui.RoleTabPanel, "开始"); ok {
+		// The tab panel's accessible name is not a painted heading.
+		count--
 	}
 	if count != 1 {
 		t.Fatalf("guide pane shows its name %d times, want one (the tab); texts = %v", count, tester.Texts())

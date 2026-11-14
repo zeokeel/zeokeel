@@ -135,6 +135,63 @@ func TestThemeFollowsTextScale(t *testing.T) {
 	}
 }
 
+// TestShellLandmarks covers the window's landmark roles (mygo v0.9.0
+// RoleBanner/RoleMain/RoleComplementary/RoleContentInfo): screen readers can
+// jump to the top bar, the main content, the two side panels and the status
+// area, and each landmark carries a name.
+func TestShellLandmarks(t *testing.T) {
+	r := newTestRoot(t)
+	mustScreen(t, r, textScreen("session", "会话", "body-session", 10))
+	mustSlot(t, r, textSlotItem(contracts.SlotScreenHeader, "hdr", "screen-title", 10))
+	mustSlot(t, r, textSlotItem(contracts.SlotSessionPanelRight, "pane", "inspector-pane", 10))
+	mustSlot(t, r, textSlotItem(contracts.SlotScreenFooter, "status", "status-line", 10))
+	tt := newTestTester(t, r, 1280, 800)
+	tt.Frame()
+	r.SetRightPanelOpen(true)
+	tt.Frame()
+
+	assertLandmark := func(role ui.Role, name string) {
+		t.Helper()
+		if _, ok := tt.AccessByRole(role, name); !ok {
+			t.Fatalf("missing landmark role %d named %q; texts = %v", role, name, tt.Texts())
+		}
+	}
+	assertLandmark(ui.RoleBanner, "顶栏")
+	assertLandmark(ui.RoleMain, "主内容")
+	assertLandmark(ui.RoleComplementary, "侧栏")
+	assertLandmark(ui.RoleComplementary, "右侧栏")
+	assertLandmark(ui.RoleContentInfo, "状态栏")
+
+	// Every landmark of the accessibility tree carries a name, so a screen
+	// reader's landmark list is a list of names rather than anonymous groups.
+	for _, info := range tt.AccessAll() {
+		switch info.Role {
+		case ui.RoleBanner, ui.RoleMain, ui.RoleComplementary, ui.RoleContentInfo:
+			if info.Name == "" {
+				t.Errorf("landmark role %d has no accessible name (bounds %+v)", info.Role, info.Bounds)
+			}
+		}
+	}
+	if !tt.HasText("inspector-pane") || !tt.HasText("status-line") {
+		t.Fatalf("landmark frame lost its content; texts = %v", tt.Texts())
+	}
+
+	// The collapsed rail is the same sidebar landmark, so the name stays.
+	r.SetSidebarCollapsed(true)
+	tt.Frame()
+	assertLandmark(ui.RoleComplementary, "侧栏")
+
+	// A narrow window shows the inspector as the modal drawer; its content is
+	// the same named complementary landmark, inside the named dialog.
+	r.SetSidebarCollapsed(false)
+	tt.SetSize(900, 700)
+	tt.Frame()
+	if _, ok := tt.AccessByRole(ui.RoleDialog, "检查器"); !ok {
+		t.Fatalf("narrow inspector is not the named dialog; texts = %v", tt.Texts())
+	}
+	assertLandmark(ui.RoleComplementary, "右侧栏")
+}
+
 // requireAnnouncement asserts one of the last frame's announcements contains
 // want. Announcements accumulate over the tester's frames.
 func requireAnnouncement(t *testing.T, tt *ui.Tester, want string) {

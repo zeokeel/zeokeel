@@ -257,3 +257,32 @@ func TestRunStatusStop(t *testing.T) {
 		t.Fatalf("stop calls = %d, want 1", stopped)
 	}
 }
+
+// TestRunStatusStatusRowsHaveDistinctKeys: the generating row carries a stable
+// Key (the v0.9.0 RoleStatus is read whole again when its text changes, and the
+// key keeps that status on one element across frames). The key includes the
+// caller's KeyPrefix, so several run-status areas in one scope (a message
+// footer's per message) do not collide; the Tester builds in strict mode and
+// panics on a duplicate key.
+func TestRunStatusStatusRowsHaveDistinctKeys(t *testing.T) {
+	tt := ui.NewTester(func(c *ui.Context) {
+		tokens := design.Of(c)
+		ui.Column(c).FillWidth().FillHeight().Background(tokens.BgBase).Children(func() {
+			uikit.RunStatus(c, uikit.RunStatusOptions{Running: true, KeyPrefix: "message-a", StatusLabel: "甲"})
+			uikit.RunStatus(c, uikit.RunStatusOptions{Running: true, KeyPrefix: "message-b", StatusLabel: "乙"})
+		})
+	}, 480, 200)
+	tt.Frame()
+	if _, ok := tt.AccessByRole(ui.RoleStatus, "甲"); !ok {
+		t.Fatalf("first status row missing; texts = %v", tt.Texts())
+	}
+	if _, ok := tt.AccessByRole(ui.RoleStatus, "乙"); !ok {
+		t.Fatalf("second status row missing; texts = %v", tt.Texts())
+	}
+	// The status text change keeps one element per area: the same two statuses
+	// are still reachable after a rebuild.
+	tt.Frame()
+	if _, ok := tt.AccessByRole(ui.RoleStatus, "乙"); !ok {
+		t.Fatalf("status row lost after a rebuild; texts = %v", tt.Texts())
+	}
+}

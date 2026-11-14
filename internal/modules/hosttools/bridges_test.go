@@ -72,9 +72,9 @@ func TestPlanToolsUsePlanBridge(t *testing.T) {
 	uiRoot.PlanReviewer().SetPlanHandler(func(review contracts.PlanReview) { reviews <- review })
 	product := loadBridgeProduct(t, uiRoot, true)
 
-	content := product.callOK(t, ToolPlanReview, `{"plan":"# Release plan\n1. test"}`)
-	if !strings.Contains(content, "reviewing") {
-		t.Fatalf("plan_review content = %q", content)
+	content := product.callOK(t, ToolPlanReview, `{"content":"# Release plan\n1. test"}`)
+	if content != "reviewing" {
+		t.Fatalf("plan_review content = %q, want reviewing", content)
 	}
 	review := <-reviews
 	if review.State != "reviewing" || review.Content != "# Release plan\n1. test" {
@@ -84,10 +84,10 @@ func TestPlanToolsUsePlanBridge(t *testing.T) {
 		t.Fatalf("plan state after review = %q", state)
 	}
 
-	if content := product.callOK(t, ToolExitPlanMode, `{"action":"status"}`); content != "plan mode: reviewing" {
+	if content := product.callOK(t, ToolExitPlanMode, `{"action":"status"}`); content != "reviewing" {
 		t.Fatalf("status content = %q", content)
 	}
-	if content := product.callOK(t, ToolExitPlanMode, `{"action":"approve"}`); content != "plan mode: approved" {
+	if content := product.callOK(t, ToolExitPlanMode, `{"action":"approve"}`); content != "approved" {
 		t.Fatalf("approve content = %q", content)
 	}
 	review = <-reviews
@@ -100,7 +100,7 @@ func TestPlanToolsUsePlanBridge(t *testing.T) {
 	if content := product.callError(t, ToolExitPlanMode, `{"action":"approve"}`); !strings.Contains(content, "no plan is under review") {
 		t.Fatalf("second approve = %q", content)
 	}
-	if content := product.callError(t, ToolExitPlanMode, `{"action":"bogus"}`); !strings.Contains(content, "unknown plan action") {
+	if content := product.callError(t, ToolExitPlanMode, `{"action":"bogus"}`); !strings.Contains(content, "unknown action") {
 		t.Fatalf("bogus content = %q", content)
 	}
 }
@@ -144,8 +144,8 @@ func TestGoalToolUsesGoalTrackerBridge(t *testing.T) {
 	product := loadBridgeProduct(t, uiRoot, true)
 
 	content := product.callOK(t, ToolGoal, `{"action":"set","text":"Ship v0.5"}`)
-	if !strings.Contains(content, "goal-1") || !strings.Contains(content, "Ship v0.5") {
-		t.Fatalf("goal set content = %q", content)
+	if content != "goal-1" {
+		t.Fatalf("goal set content = %q, want the goal id", content)
 	}
 	id, text, status, ok := uiRoot.GoalTracker().Get()
 	if !ok || id != "goal-1" || text != "Ship v0.5" || status != "active" {
@@ -156,11 +156,8 @@ func TestGoalToolUsesGoalTrackerBridge(t *testing.T) {
 		t.Fatalf("goal set event = %+v", event)
 	}
 
-	if content := product.callOK(t, ToolGoal, `{"action":"get"}`); content != "goal goal-1 [active]: Ship v0.5" {
+	if content := product.callOK(t, ToolGoal, `{"action":"get"}`); content != "id: goal-1\ntext: Ship v0.5\nstatus: active" {
 		t.Fatalf("goal get content = %q", content)
-	}
-	if content := product.callOK(t, ToolGoal, `{"action":"status"}`); !strings.Contains(content, "Ship v0.5") {
-		t.Fatalf("goal status content = %q", content)
 	}
 	if content := product.callOK(t, ToolGoal, `{"action":"clear"}`); content != "goal cleared" {
 		t.Fatalf("goal clear content = %q", content)
@@ -172,7 +169,7 @@ func TestGoalToolUsesGoalTrackerBridge(t *testing.T) {
 	if event.ok {
 		t.Fatalf("goal clear event = %+v, want ok=false", event)
 	}
-	if content := product.callOK(t, ToolGoal, `{"action":"get"}`); content != "no goal is set" {
+	if content := product.callOK(t, ToolGoal, `{"action":"get"}`); content != "no goal set" {
 		t.Fatalf("goal get after clear = %q", content)
 	}
 }

@@ -173,7 +173,7 @@ func TestNonInteractiveProductOmitsPlanTools(t *testing.T) {
 		}
 	}
 	// The remaining tools keep working in a headless product.
-	if content := product.callOK(t, ToolGoal, `{"action":"get"}`); content != "no goal is set" {
+	if content := product.callOK(t, ToolGoal, `{"action":"get"}`); content != "no goal set" {
 		t.Fatalf("headless goal get = %q", content)
 	}
 	if content := product.callOK(t, ToolPresent, `{"title":"t","content":"c"}`); !strings.Contains(content, "artifact-1") {
@@ -217,8 +217,10 @@ func TestAskUserWithInjectedAsker(t *testing.T) {
 	host.Asker = asker
 	product := loadProduct(t, host, true)
 
+	// Rig returns the raw answer (the hand-written tool prefixed it with
+	// "user answered: ").
 	content := product.callOK(t, ToolAskUser, `{"question":"Which database?","options":["sqlite","postgres"]}`)
-	if !strings.Contains(content, "postgres") {
+	if content != "postgres" {
 		t.Fatalf("ask_user content = %q, want the injected answer", content)
 	}
 	asked := asker.Asked()
@@ -251,79 +253,90 @@ func TestPlanReviewAndExitPlanMode(t *testing.T) {
 	if content := product.callError(t, ToolExitPlanMode, `{"action":"approve"}`); !strings.Contains(content, "no plan is under review") {
 		t.Fatalf("approve without plan = %q", content)
 	}
-	content := product.callOK(t, ToolPlanReview, `{"plan":"# Release plan\n1. test\n2. ship"}`)
-	if !strings.Contains(content, "reviewing") {
+	// The Rig plan_review tool takes the plan as "content".
+	content := product.callOK(t, ToolPlanReview, `{"content":"# Release plan\n1. test\n2. ship"}`)
+	if content != "reviewing" {
 		t.Fatalf("plan_review content = %q, want reviewing", content)
 	}
 	// Reviewing is not approval: status reports reviewing, then approve applies.
 	content = product.callOK(t, ToolExitPlanMode, `{"action":"status"}`)
-	if content != "plan mode: reviewing" {
-		t.Fatalf("status content = %q, want plan mode: reviewing", content)
+	if content != "reviewing" {
+		t.Fatalf("status content = %q, want reviewing", content)
 	}
 	content = product.callOK(t, ToolExitPlanMode, `{"action":"approve"}`)
-	if content != "plan mode: approved" {
-		t.Fatalf("approve content = %q, want plan mode: approved", content)
+	if content != "approved" {
+		t.Fatalf("approve content = %q, want approved", content)
 	}
 	if content := product.callError(t, ToolExitPlanMode, `{"action":"cancel"}`); !strings.Contains(content, "no plan is under review") {
 		t.Fatalf("cancel after approval = %q", content)
 	}
-	if content := product.callError(t, ToolExitPlanMode, `{"action":"bogus"}`); !strings.Contains(content, "unknown plan action") {
+	if content := product.callError(t, ToolExitPlanMode, `{"action":"bogus"}`); !strings.Contains(content, "unknown action") {
 		t.Fatalf("bogus action = %q", content)
 	}
-	// Attempting to approve/exit plan mode with no plan controller connected is
-	// a tool error, not an activation failure.
+	// A review with no plan controller connected is a tool error, not an
+	// activation failure.
 	empty := loadProduct(t, &hostcaps.Host{}, true)
-	if content := empty.callError(t, ToolPlanReview, `{"plan":"# x"}`); !strings.Contains(content, "no plan controller") {
+	if content := empty.callError(t, ToolPlanReview, `{"content":"# x"}`); !strings.Contains(content, "rig.PlanController") {
 		t.Fatalf("plan_review without controller = %q", content)
+	}
+	if content := empty.callError(t, ToolExitPlanMode, `{"action":"status"}`); !strings.Contains(content, "rig.PlanController") {
+		t.Fatalf("exit_plan_mode without controller = %q", content)
 	}
 }
 
 func TestGoalTool(t *testing.T) {
 	product := loadProduct(t, nil, true)
 
-	if content := product.callOK(t, ToolGoal, `{"action":"get"}`); content != "no goal is set" {
+	if content := product.callOK(t, ToolGoal, `{"action":"get"}`); content != "no goal set" {
 		t.Fatalf("goal get on empty = %q", content)
 	}
+	// Rig's goal set returns the goal id only; get renders the full record.
 	content := product.callOK(t, ToolGoal, `{"action":"set","text":"Ship v0.4"}`)
-	if !strings.Contains(content, "goal-1") || !strings.Contains(content, "Ship v0.4") {
-		t.Fatalf("goal set content = %q", content)
+	if content != "goal-1" {
+		t.Fatalf("goal set content = %q, want the goal id", content)
 	}
 	// State persists between tool calls (the same in-memory store).
 	content = product.callOK(t, ToolGoal, `{"action":"get"}`)
-	if content != "goal goal-1 [active]: Ship v0.4" {
+	if content != "id: goal-1\ntext: Ship v0.4\nstatus: active" {
 		t.Fatalf("goal get content = %q", content)
-	}
-	content = product.callOK(t, ToolGoal, `{"action":"status"}`)
-	if !strings.Contains(content, "Ship v0.4") {
-		t.Fatalf("goal status content = %q", content)
 	}
 	if content := product.callError(t, ToolGoal, `{"action":"set"}`); !strings.Contains(content, "text is required") {
 		t.Fatalf("goal set without text = %q", content)
 	}
+	// The product does not implement rig.GoalUpdater yet, so Rig's "update"
+	// action degrades to a readable error instead of touching the lifecycle.
+	if content := product.callError(t, ToolGoal, `{"action":"update","update":"complete"}`); !strings.Contains(content, "does not support lifecycle updates") {
+		t.Fatalf("goal update without GoalUpdater = %q", content)
+	}
 	if content := product.callOK(t, ToolGoal, `{"action":"clear"}`); content != "goal cleared" {
 		t.Fatalf("goal clear = %q", content)
 	}
-	if content := product.callOK(t, ToolGoal, `{"action":"get"}`); content != "no goal is set" {
+	if content := product.callOK(t, ToolGoal, `{"action":"get"}`); content != "no goal set" {
 		t.Fatalf("goal get after clear = %q", content)
 	}
-	if content := product.callError(t, ToolGoal, `{"action":"bogus"}`); !strings.Contains(content, "action must be one of") {
+	if content := product.callOK(t, ToolGoal, `{"action":"clear"}`); content != "no goal to clear" {
+		t.Fatalf("goal clear when no goal is set = %q", content)
+	}
+	if content := product.callError(t, ToolGoal, `{"action":"bogus"}`); !strings.Contains(content, "unknown action") {
 		t.Fatalf("goal bogus action = %q", content)
 	}
 }
 
 func TestMissingCapabilitiesAreToolErrors(t *testing.T) {
 	product := loadProduct(t, &hostcaps.Host{}, true)
-	cases := map[string]string{
-		ToolAskUser:      `{"question":"q"}`,
-		ToolPresent:      `{"title":"t","content":"c"}`,
-		ToolPlanReview:   `{"plan":"# p"}`,
-		ToolExitPlanMode: `{"action":"status"}`,
-		ToolGoal:         `{"action":"get"}`,
+	cases := map[string]struct {
+		arguments string
+		want      string
+	}{
+		ToolAskUser:      {`{"question":"q"}`, "did not provide a rig.Asker"},
+		ToolPresent:      {`{"title":"t","content":"c"}`, "no artifact presenter"},
+		ToolPlanReview:   {`{"content":"# p"}`, "did not provide a rig.PlanController"},
+		ToolExitPlanMode: {`{"action":"status"}`, "did not provide a rig.PlanController"},
+		ToolGoal:         {`{"action":"get"}`, "did not provide a rig.GoalStore"},
 	}
-	for name, arguments := range cases {
-		content := product.callError(t, name, arguments)
-		if !strings.Contains(content, "no ") || !strings.Contains(content, "available") {
-			t.Fatalf("%s missing capability = %q, want a readable unavailable message", name, content)
+	for name, test := range cases {
+		if content := product.callError(t, name, test.arguments); !strings.Contains(content, test.want) {
+			t.Fatalf("%s missing capability = %q, want %q", name, content, test.want)
 		}
 	}
 }

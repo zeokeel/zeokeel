@@ -1,134 +1,149 @@
 package hosttools
 
+// The model-facing host tools. Most of the catalog is the official Rig host-tool
+// set (github.com/zeokeel/zeokeel-rig/tools/hosttools): ask_user, plan_review,
+// exit_plan_mode and goal. present stays product-owned because ZeoKeel's present
+// is a content artifact (title + body -> contracts.ArtifactPresenter), while
+// Rig's present declares existing files for a FilePresenter; the two must not
+// share a name.
+//
+// The product exposes exactly five host tools. The catalog below is a
+// name-filtered view of the Rig catalog: Rig's DSH goal trio (get_goal,
+// create_goal, update_goal), present_artifact and Rig's file present are
+// deliberately not advertised. Tool names are hard-coded elsewhere (the agent
+// system prompt, the plan-mode whitelist, UI tool cards and snapshot seeds), so
+// they are stable identifiers, not an implementation detail.
+
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"strings"
 
 	rig "github.com/zeokeel/zeokeel-rig"
+	righosttools "github.com/zeokeel/zeokeel-rig/tools/hosttools"
 
 	hostcaps "github.com/zeokeel/zeokeel/internal/hosttools"
 )
 
 // Model-facing host tool names. They are stable identifiers shared with the
-// rest of the agent tool catalog.
+// rest of the agent tool catalog; the Rig-provided names come from the Rig
+// constants so the two can never drift.
 const (
-	ToolAskUser      = "ask_user"
+	ToolAskUser      = righosttools.ToolAskUser
 	ToolPresent      = "present"
-	ToolPlanReview   = "plan_review"
-	ToolExitPlanMode = "exit_plan_mode"
-	ToolGoal         = "goal"
+	ToolPlanReview   = righosttools.ToolPlanReview
+	ToolExitPlanMode = righosttools.ToolExitPlanMode
+	ToolGoal         = righosttools.ToolGoal
 )
 
-// newTools builds the full host-tool catalog bound to capabilities. Every tool
-// is constructed; a missing capability becomes a readable tool error instead of
-// silently changing the catalog.
-func newTools(capabilities hostcaps.Host) []rig.Tool {
-	return []rig.Tool{
-		&askUserTool{asker: capabilities.Asker},
-		&presentTool{presenter: capabilities.Presenter},
-		&planReviewTool{plan: capabilities.Plan},
-		&exitPlanModeTool{plan: capabilities.Plan},
-		&goalTool{goals: capabilities.Goals},
-	}
-}
+// rigHostToolNames are the Rig host tools this product registers, in Rig
+// catalog order. Anything else Rig returns is filtered out.
+var rigHostToolNames = []string{ToolAskUser, ToolPlanReview, ToolExitPlanMode, ToolGoal}
 
-// toolListFor returns the tools one product registers: interactive products
-// get the full catalog, non-interactive (headless/ACP) products omit the
-// plan-review pair. A plan can only leave "reviewing" through a user decision
-// (exit_plan_mode approve/cancel), which a headless run can never obtain, so
-// exposing plan_review there would make the model submit a plan and stall with
-// the task silently unfinished. The remaining tools keep their behavior;
-// ask_user already degrades to a readable "no interactive UI" error.
-func toolListFor(capabilities hostcaps.Host, interactive bool) []rig.Tool {
-	tools := newTools(capabilities)
-	if interactive {
-		return tools
+// planReviewToolNames are the tools whose state machine needs a live user
+// decision; non-interactive products omit them.
+var planReviewToolNames = []string{ToolPlanReview, ToolExitPlanMode}
+
+// newTools builds the host-tool catalog bound to capabilities. Non-interactive
+// (headless/ACP) products omit the plan-review pair: a plan can only leave
+// "reviewing" through a user decision (exit_plan_mode approve/cancel), which a
+// headless run can never obtain, so exposing plan_review there would make the
+// model submit a plan and stall with the task silently unfinished. ask_user and
+// the remaining tools keep their behavior; a missing capability becomes a
+// readable model-facing tool error instead of failing activation.
+func newTools(capabilities hostcaps.Host, interactive bool) []rig.Tool {
+	wanted := make(map[string]bool, len(rigHostToolNames))
+	for _, name := range rigHostToolNames {
+		wanted[name] = true
 	}
-	headless := make([]rig.Tool, 0, len(tools))
-	for _, tool := range tools {
-		switch tool.Name() {
-		case ToolPlanReview, ToolExitPlanMode:
+	if !interactive {
+		for _, name := range planReviewToolNames {
+			delete(wanted, name)
+		}
+	}
+	tools := make([]rig.Tool, 0, len(rigHostToolNames))
+	for _, tool := range righosttools.Tools(rigHostOptions(capabilities, interactive)) {
+		if !wanted[tool.Name()] {
 			continue
 		}
-		headless = append(headless, tool)
+		tools = append(tools, tool)
 	}
-	return headless
+	return append(tools, &presentTool{presenter: capabilities.Presenter})
 }
 
-// --- ask_user ---------------------------------------------------------------
-
-type askUserTool struct {
-	asker hostcaps.Asker
-}
-
-func (t *askUserTool) Name() string { return ToolAskUser }
-
-func (t *askUserTool) Description() string {
-	return "Ask the user a clarifying question and wait for their answer. " +
-		"Use it when a decision belongs to the user (requirements, destructive actions, ambiguous scope). " +
-		"Interactive sessions return the answer directly; sessions without a UI report that no interactive UI is available, " +
-		"in which case ask the question in your final message instead."
-}
-
-func (t *askUserTool) Schema() map[string]any {
-	return objectSchema(map[string]any{
-		"question": stringProperty("The question to ask the user."),
-		"options":  stringArrayProperty("Optional suggested answers."),
-	}, "question")
-}
-
-func (t *askUserTool) Invoke(ctx context.Context, call rig.ToolCall) (rig.ToolResult, error) {
-	var args struct {
-		Question string   `json:"question"`
-		Options  []string `json:"options"`
+// rigHostOptions maps the product's host capability seam onto the Rig host-tool
+// options. hostcaps.Asker and hostcaps.GoalStore already have the Rig method
+// sets, so they are passed straight through; hostcaps.PlanController has no
+// context in its methods (the old hand-written tool checked cancellation before
+// calling it), so Rig's context-carrying PlanController goes through an
+// adapter. Root is left empty: none of the registered tools resolves workspace
+// files (present is our own content-artifact tool, not Rig's file presenter).
+func rigHostOptions(capabilities hostcaps.Host, interactive bool) righosttools.Options {
+	options := righosttools.Options{
+		Asker:       capabilities.Asker,
+		Goal:        capabilities.Goals,
+		Interactive: interactive,
 	}
-	if err := decodeArguments(call, &args); err != nil {
-		return rig.ToolResult{}, err
+	if capabilities.Plan != nil {
+		options.Plan = rigPlanController{plan: capabilities.Plan}
 	}
+	return options
+}
+
+// rigPlanController adapts the product PlanController seam to Rig's
+// context-carrying PlanController.
+type rigPlanController struct {
+	plan hostcaps.PlanController
+}
+
+// State implements rig.PlanController.
+func (c rigPlanController) State() string { return c.plan.State() }
+
+// Review implements rig.PlanController.
+func (c rigPlanController) Review(ctx context.Context, content string) (string, error) {
 	if err := contextError(ctx); err != nil {
-		return rig.ToolResult{}, err
+		return "", err
 	}
-	if strings.TrimSpace(args.Question) == "" {
-		return errorResult("ask_user: question is required"), nil
-	}
-	if t.asker == nil {
-		return noInteractiveResult(), nil
-	}
-	answer, err := t.asker.Ask(ctx, strings.TrimSpace(args.Question), args.Options)
-	if err != nil {
-		if contextErr := contextError(ctx); contextErr != nil {
-			return rig.ToolResult{}, contextErr
-		}
-		if errors.Is(err, hostcaps.ErrNoInteractive) {
-			return noInteractiveResult(), nil
-		}
-		return errorResult("ask_user: %v", err), nil
-	}
-	return rig.ToolResult{Content: "user answered: " + answer}, nil
+	return c.plan.Review(content)
 }
 
-func noInteractiveResult() rig.ToolResult {
-	return errorResult("ask_user: no interactive UI is available in this session; " +
-		"put the question in your final message instead and wait for the user's reply")
+// Exit implements rig.PlanController.
+func (c rigPlanController) Exit(ctx context.Context, action string) (string, error) {
+	if err := contextError(ctx); err != nil {
+		return "", err
+	}
+	return c.plan.Exit(action)
 }
+
+// Compile-time checks: the product capability interfaces are assignable to the
+// Rig interfaces without wrappers (the Plan and file-presenter halves do need
+// adapters and are therefore not asserted here).
+var (
+	_ rig.Asker     = hostcaps.Asker(nil)
+	_ rig.GoalStore = hostcaps.GoalStore(nil)
+)
 
 // --- present ----------------------------------------------------------------
 
+// presentTool presents a finished content artifact to the user. It is
+// product-owned: the host records the artifact (contracts.ArtifactPresenter)
+// and returns its id.
 type presentTool struct {
 	presenter hostcaps.Presenter
 }
 
+// Name implements rig.Tool.
 func (t *presentTool) Name() string { return ToolPresent }
 
+// Description implements rig.Tool.
 func (t *presentTool) Description() string {
 	return "Present a finished artifact (a report, plan, diff summary or any Markdown text) to the user. " +
 		"Use it when the result is something the user should look at as a distinct deliverable rather than chat prose. " +
 		"The host records the artifact and returns its id."
 }
 
+// Schema implements rig.Tool.
 func (t *presentTool) Schema() map[string]any {
 	return objectSchema(map[string]any{
 		"title":   stringProperty("Short title of the artifact."),
@@ -136,6 +151,7 @@ func (t *presentTool) Schema() map[string]any {
 	}, "title", "content")
 }
 
+// Invoke implements rig.Tool.
 func (t *presentTool) Invoke(ctx context.Context, call rig.ToolCall) (rig.ToolResult, error) {
 	var args struct {
 		Title   string `json:"title"`
@@ -161,165 +177,6 @@ func (t *presentTool) Invoke(ctx context.Context, call rig.ToolCall) (rig.ToolRe
 		return errorResult("present: %v", err), nil
 	}
 	return rig.ToolResult{Content: fmt.Sprintf("presented artifact %s: %s", artifactID, strings.TrimSpace(args.Title))}, nil
-}
-
-// --- plan_review ------------------------------------------------------------
-
-type planReviewTool struct {
-	plan hostcaps.PlanController
-}
-
-func (t *planReviewTool) Name() string { return ToolPlanReview }
-
-func (t *planReviewTool) Description() string {
-	return "Submit a plan for the user's review before executing it. Markdown, starting with a heading that names the plan. " +
-		"Reviewing is not approval: the user (or the host on their behalf) approves or cancels it through exit_plan_mode. " +
-		"Use it for multi-step or irreversible work; skip it for trivial tasks."
-}
-
-func (t *planReviewTool) Schema() map[string]any {
-	return objectSchema(map[string]any{
-		"plan": stringProperty("The complete plan as Markdown, starting with a \"#\" heading that names it."),
-	}, "plan")
-}
-
-func (t *planReviewTool) Invoke(ctx context.Context, call rig.ToolCall) (rig.ToolResult, error) {
-	var args struct {
-		Plan string `json:"plan"`
-	}
-	if err := decodeArguments(call, &args); err != nil {
-		return rig.ToolResult{}, err
-	}
-	if err := contextError(ctx); err != nil {
-		return rig.ToolResult{}, err
-	}
-	if strings.TrimSpace(args.Plan) == "" {
-		return errorResult("plan_review: plan is required"), nil
-	}
-	if t.plan == nil {
-		return errorResult("plan_review: no plan controller is available in this product"), nil
-	}
-	verdict, err := t.plan.Review(args.Plan)
-	if err != nil {
-		if contextErr := contextError(ctx); contextErr != nil {
-			return rig.ToolResult{}, contextErr
-		}
-		return errorResult("plan_review: %v", err), nil
-	}
-	return rig.ToolResult{Content: fmt.Sprintf(
-		"plan submitted for review (state: %s); use exit_plan_mode with approve, cancel or status", verdict)}, nil
-}
-
-// --- exit_plan_mode ---------------------------------------------------------
-
-type exitPlanModeTool struct {
-	plan hostcaps.PlanController
-}
-
-func (t *exitPlanModeTool) Name() string { return ToolExitPlanMode }
-
-func (t *exitPlanModeTool) Description() string {
-	return "Leave plan mode after a plan review: apply the user's decision. " +
-		"action=approve leaves plan mode and starts executing the reviewed plan, action=cancel cancels the plan and stays in planning, " +
-		"action=status reports the current plan state without changing it."
-}
-
-func (t *exitPlanModeTool) Schema() map[string]any {
-	return objectSchema(map[string]any{
-		"action": enumProperty("The decision to apply.", "approve", "cancel", "status"),
-	}, "action")
-}
-
-func (t *exitPlanModeTool) Invoke(ctx context.Context, call rig.ToolCall) (rig.ToolResult, error) {
-	var args struct {
-		Action string `json:"action"`
-	}
-	if err := decodeArguments(call, &args); err != nil {
-		return rig.ToolResult{}, err
-	}
-	if err := contextError(ctx); err != nil {
-		return rig.ToolResult{}, err
-	}
-	if strings.TrimSpace(args.Action) == "" {
-		return errorResult("exit_plan_mode: action is required (approve, cancel or status)"), nil
-	}
-	if t.plan == nil {
-		return errorResult("exit_plan_mode: no plan controller is available in this product"), nil
-	}
-	state, err := t.plan.Exit(args.Action)
-	if err != nil {
-		if contextErr := contextError(ctx); contextErr != nil {
-			return rig.ToolResult{}, contextErr
-		}
-		return errorResult("exit_plan_mode: %v", err), nil
-	}
-	return rig.ToolResult{Content: "plan mode: " + state}, nil
-}
-
-// --- goal -------------------------------------------------------------------
-
-type goalTool struct {
-	goals hostcaps.GoalStore
-}
-
-func (t *goalTool) Name() string { return ToolGoal }
-
-func (t *goalTool) Description() string {
-	return "Set, inspect or clear the session goal (the long-running objective shown above the conversation). " +
-		"action=set replaces the goal text and returns its id, action=get (or status) reports the goal, action=clear removes it. " +
-		"Use it to keep one explicit objective across many turns."
-}
-
-func (t *goalTool) Schema() map[string]any {
-	return objectSchema(map[string]any{
-		"action": enumProperty("The goal operation.", "set", "get", "clear", "status"),
-		"text":   stringProperty("New goal text (required for action=set)."),
-	}, "action")
-}
-
-func (t *goalTool) Invoke(ctx context.Context, call rig.ToolCall) (rig.ToolResult, error) {
-	var args struct {
-		Action string `json:"action"`
-		Text   string `json:"text"`
-	}
-	if err := decodeArguments(call, &args); err != nil {
-		return rig.ToolResult{}, err
-	}
-	if err := contextError(ctx); err != nil {
-		return rig.ToolResult{}, err
-	}
-	if t.goals == nil {
-		return errorResult("goal: no goal store is available in this product"), nil
-	}
-	action := strings.ToLower(strings.TrimSpace(args.Action))
-	switch action {
-	case "set":
-		text := strings.TrimSpace(args.Text)
-		if text == "" {
-			return errorResult("goal: text is required for action=set"), nil
-		}
-		id, err := t.goals.Set(text)
-		if err != nil {
-			if contextErr := contextError(ctx); contextErr != nil {
-				return rig.ToolResult{}, contextErr
-			}
-			return errorResult("goal: %v", err), nil
-		}
-		return rig.ToolResult{Content: fmt.Sprintf("goal set (%s): %s", id, text)}, nil
-	case "get", "status":
-		id, text, status, ok := t.goals.Get()
-		if !ok {
-			return rig.ToolResult{Content: "no goal is set"}, nil
-		}
-		return rig.ToolResult{Content: fmt.Sprintf("goal %s [%s]: %s", id, status, text)}, nil
-	case "clear":
-		if t.goals.Clear() {
-			return rig.ToolResult{Content: "goal cleared"}, nil
-		}
-		return rig.ToolResult{Content: "no goal is set"}, nil
-	default:
-		return errorResult("goal: action must be one of set, get, clear, status"), nil
-	}
 }
 
 // --- shared helpers ---------------------------------------------------------
@@ -365,16 +222,4 @@ func objectSchema(properties map[string]any, required ...string) map[string]any 
 
 func stringProperty(description string) map[string]any {
 	return map[string]any{"type": "string", "description": description}
-}
-
-func stringArrayProperty(description string) map[string]any {
-	return map[string]any{
-		"type":        "array",
-		"description": description,
-		"items":       map[string]any{"type": "string"},
-	}
-}
-
-func enumProperty(description string, values ...string) map[string]any {
-	return map[string]any{"type": "string", "description": description, "enum": values}
 }

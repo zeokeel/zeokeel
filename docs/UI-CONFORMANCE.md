@@ -14,7 +14,7 @@
 | 窗口骨架 | `Row + Sidebar + Grow 主列 + Split` | layout.md / sidebar.md / split.md | 壳层用 `ui.Split`（可拖拽、`SplitReset` 复位、宽度存 host settings），不要再写固定宽度算术 |
 | 可拖分栏 | `Split/SplitPercent/SplitReset` | split.md | 侧栏/右栏宽度必须可拖且持久化 |
 | 抽屉/浮层 | `ui.Overlay` + `Row…Modal()` + `Role(RoleDialog)` + `PressedOutside` + `OverlayShortcut(Esc)` | overlays.md「A drawer on the right」 | 自绘 drawer 必须走这个 recipe（Esc/焦点陷阱/焦点归还） |
-| 长列表/日志/会话 | `ui.List` + `ListState`（Key/Selected/FollowEnd/HoldPlace/Label/**Header**） | list.md | 集合行不再用 `Scroll`+全量循环；测试用 `Rows`/`ItemKey`；分组列表用 `Header` 段头+计数（任务板），选中行用 `Selected`/`Submitted` 展开详情，详情渲染在列表**下方**的独立面板（选中行有 accent 背景，详情放行内会不可读） |
+| 长列表/日志/会话 | `ui.List` + `ListState`（Key/Selected/FollowEnd/HoldPlace/Label/Header/Choose） | list.md | 集合行不再用 `Scroll`+全量循环；测试用 `Rows`/`ItemKey`；分组列表用 `Header` 段头+计数（任务板），选中行用 `Selected`/`Submitted` 展开详情，详情渲染在列表**下方**的独立面板（选中行有 accent 背景，详情放行内会不可读） |
 | 表格 | `ui.Table` / `TableColumn` / `CellSelect` | table.md | 多列可排序数据用 Table，不用 Row 手排 |
 | 树/大纲 | `ui.Outline[T]` / `ui.Tree` / `OutlineState` | outline.md / tree.md | 工作区/文件树用 Outline |
 | 菜单 | `PopoverMenuButton` / `PopoverMenuButtonOptions{At,Self,Open}` / `MenuItem.Danger/Radio/ID/Subtitle/Trailing/Content/MaxWidth` / `MenuBase` | menu-button.md / context-menu.md | 行尾⋯菜单右对齐；删除项 `Danger()`；单选 `Radio()`；稳定选择 `ID()`；自绘菜单迁移 `MenuBase` |
@@ -29,6 +29,8 @@
 | 差异 | `editor.DiffState` + `editor.DiffView`（`ParsePatch`/`SetPatch`，词级/折叠/审查） | diff-viewer.md / code-editor.md | 不手写逐行 diff 文本 |
 | 终端/选择 | `ui.Select`（shell）；`ScrollState` 贴底跟随 | select.md / scroll.md | 选择器用官方 Select；日志跟随 end |
 | 文本语义 | `Selectable`（错误/ID/命令可复制）；`RoleHeading/Level`；`RoleAlert`；`c.Announce` | text.md / accessibility.md | 错误与诊断文本可复制；页面/分组有标题层级；异步结果播报 |
+| 无障碍 landmark | `RoleMain` / `RoleBanner` / `RoleComplementary` / `RoleContentInfo` / `RoleTabPanel` + `Label`；tab 用 `Controls(panel)` 关联 | accessibility.md | 壳层顶带/主区/侧栏/右栏/状态栏与右栏预览面板必须带；只加语义、不改视觉 |
+| 代码高亮 | `editor.LanguageFor(path)` / `editor.LanguageForText(filename, text)` | code-editor.md | 文件预览按扩展名；无扩展名或脚本用 `LanguageForText`（按 shebang 识别） |
 | 主题/偏好 | `Theme`（从 `ui.LightTheme/DarkTheme` 派生）；`Theme.InactiveAccent`；`Preferences.TextScale/ReduceMotion` | styling.md / windows.md | 品牌主题显式设置 `InactiveAccent`；`design.Of` 接 `TextScale` |
 | 图标 | `ui.Icon` + `ui.SVG`/`MustParseSVG`；一套图标网格 | icon.md | 不加 emoji/Unicode 图标；新增图标必须过 `internal/icons` 测试（网格/描边） |
 | 加载/进度 | `Spinner` / `Progress` | spinner.md / progress.md | 耗时操作给进度或 spinner，不只文字 |
@@ -90,6 +92,8 @@
    - 新交互：`ui.NewTester` 帧测试（键盘 ↑↓/Enter/Tab/Esc、焦点归还、a11y role）
    - 新界面：`go run ./internal/devtools/ui-snapshot <dir>` 生成 1280/1024/暗色快照并看图
    - 涉及 `InactiveAccent`、菜单、Markdown 行为时，抓 active/inactive 双态
+   - 程序化 `Focus()` 会把元素滚入视野（v0.9.0 行为）；不需要改变滚动的焦点变化用
+     `Focus(ui.FocusOptions{PreventScroll: true})`，且须有帧测试证据（先有反证）
 6. **收口**：删除被替换的手写逻辑与死代码；若确实要偏离官方，在代码注释里写清理由
    （例：composer 动作行不用 `ui.Toolbar` 是因为溢出菜单会吞掉发送按钮）。
 

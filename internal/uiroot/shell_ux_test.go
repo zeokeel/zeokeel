@@ -1,6 +1,7 @@
 package uiroot
 
 import (
+	"strconv"
 	"testing"
 
 	"github.com/egoist/mygo/ui"
@@ -213,5 +214,68 @@ func TestSettingsNavGroups(t *testing.T) {
 
 	if err := r.OpenSettingsPage("missing-page"); err == nil {
 		t.Fatalf("OpenSettingsPage(missing-page) succeeded, want an error")
+	}
+}
+
+// TestInspectorCloseFocusReturnKeepsScroll covers the v0.9.0 Focus reveal
+// behavior (mygo ui/input.go: Focus scrolls the containers around the element
+// as little as shows it) on the inspector's focus return: closing the drawer
+// hands the keyboard back to the top-band toggle, which is outside the screen
+// body, so the conversation the user scrolled must stay where they left it.
+func TestInspectorCloseFocusReturnKeepsScroll(t *testing.T) {
+	r := newTestRoot(t)
+	mustScreen(t, r, contracts.ScreenSpec{
+		ID: sessionScreenID, Title: "会话", Order: 10,
+		Build: func(c *ui.Context) {
+			ui.Scroll(c).FillWidth().Grow(1).Children(func() {
+				ui.Column(c).FillWidth().Children(func() {
+					for i := 0; i < 60; i++ {
+						ui.Text(c, "filler-"+strconv.Itoa(i)).Height(20)
+					}
+				})
+			})
+		},
+	})
+	mustSlot(t, r, textSlotItem(contracts.SlotSessionPanelRight, "pane", "inspector-pane", 10))
+	mustSlot(t, r, textSlotItem(contracts.SlotScreenHeader, "hdr", "screen-title", 10))
+	tt := newTestTester(t, r, 900, 700)
+	tt.Frame()
+
+	// Scroll the conversation, then open the inspector drawer.
+	unscrolled, ok := tt.Find("filler-10")
+	if !ok {
+		t.Fatalf("body marker missing; texts = %v", tt.Texts())
+	}
+	tt.Scroll(500, 400, 0, 400)
+	tt.Frame()
+	before, ok := tt.Find("filler-10")
+	if !ok {
+		t.Fatalf("scrolled body marker missing; texts = %v", tt.Texts())
+	}
+	if before.Y >= unscrolled.Y {
+		t.Fatalf("the body did not scroll: marker Y %v (was %v)", before.Y, unscrolled.Y)
+	}
+	tt.Key(ui.Cmd|ui.Alt, ui.KeyI)
+	tt.Frame()
+	if _, ok := tt.AccessByRole(ui.RoleDialog, "检查器"); !ok {
+		t.Fatalf("narrow window did not show the inspector drawer; texts = %v", tt.Texts())
+	}
+
+	// Escape closes the drawer and returns the focus to the header toggle.
+	tt.Key(0, ui.KeyEscape)
+	tt.Frame()
+	tt.Frame()
+	if r.RightPanelOpen() {
+		t.Fatal("Escape did not close the inspector drawer")
+	}
+	if info, ok := tt.AccessByRole(ui.RoleButton, "打开右侧栏"); !ok || !info.Focused {
+		t.Fatalf("focus after close = %+v (present=%v), want the inspector toggle", info, ok)
+	}
+	after, ok := tt.Find("filler-10")
+	if !ok {
+		t.Fatalf("body marker missing after closing the drawer; texts = %v", tt.Texts())
+	}
+	if after.Y != before.Y {
+		t.Fatalf("returning the focus to the header moved the scrolled body: marker Y %v -> %v", before.Y, after.Y)
 	}
 }

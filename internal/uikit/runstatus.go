@@ -103,7 +103,19 @@ func RunStatus(c *ui.Context, o RunStatusOptions) {
 		if strings.TrimSpace(label) == "" {
 			label = T(o.Locale, "生成中", "Generating")
 		}
-		ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(design.Space2).
+		// The status row has a stable identity: v0.9 reads a RoleStatus whole
+		// again whenever its text changes (aria-atomic, docs/ui/accessibility.md),
+		// and screen readers tell the new status from the old by the element.
+		// Without a Key an element built earlier in the same area (a spinner or
+		// a queue row appearing before it, say) would shift the status to
+		// another node, which assistive technology reads as a new status. The
+		// prefix keeps several run-status areas in one scope distinct (a message
+		// footer's area per message).
+		statusKey := "runstatus"
+		if prefix := strings.TrimSpace(o.KeyPrefix); prefix != "" {
+			statusKey = "runstatus/" + prefix
+		}
+		ui.Row(c.Key(statusKey)).FillWidth().AlignItems(ui.Center).Gap(design.Space2).
 			Role(ui.RoleStatus).Label(label).Children(func() {
 			ui.Spinner(c).Label(label)
 			design.Apply(ui.Text(c, label), t.TextMuted(design.TypeXS))

@@ -529,9 +529,23 @@ func runDesktop(opts Options) error {
 	// A quit (Cmd+Q, tray/OS quit, SIGINT/SIGTERM) runs the teardown before
 	// mygo closes the windows, so the assembly is unloaded while the UI thread
 	// and the window still exist.
-	mygo.App.OnBeforeQuit(func(*mygo.QuitEvent) {
-		logger.Printf("%s: quit requested", appName)
+	//
+	// When the OS ends the session (logout, restart, shutdown), mygo says so on
+	// the event: the quit cannot be canceled and the process may end as soon as
+	// this listener returns, so the teardown has to finish synchronously and the
+	// log file is flushed before returning.
+	mygo.App.OnBeforeQuit(func(e *mygo.QuitEvent) {
+		if e.SessionEnding {
+			logger.Printf("%s: OS session ending; tearing down synchronously", appName)
+		} else {
+			logger.Printf("%s: quit requested", appName)
+		}
 		shutdown()
+		if e.SessionEnding {
+			// Run returns too late to flush on this path: the OS ends the
+			// process right after the quit listeners return.
+			_ = logger.Close()
+		}
 	})
 	// Closing the last window quits the product. The listener must exist for
 	// mygo to report the close instead of starting a nested quit; during the

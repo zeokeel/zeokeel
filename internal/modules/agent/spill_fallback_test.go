@@ -1,50 +1,47 @@
 package agent
 
 // ZK-13 regression: headless/ACP sessions have no registered workspace, so the
-// spill fallback must use the product data directory instead of resending
-// oversized tool results inline forever.
+// spill policy must resolve the product data directory instead of resending
+// oversized tool results inline forever. With neither a workspace nor a data
+// directory there is no product directory to resolve; Rig then falls back to its
+// own temp directory (rig/agent/spill.go), which these tests pin only as "not a
+// crash / still a policy".
 
 import (
 	"context"
-	"os"
 	"path/filepath"
-	"strings"
 	"testing"
-
-	rigtools "github.com/zeokeel/zeokeel-rig/tools"
 )
 
-func TestSpillDirFallsBackToDataDir(t *testing.T) {
-	dataDir := t.TempDir()
-	svc := newService(Config{}, rigtools.NewRegistry(), newFakeSettings(nil),
-		&fakeLogger{}, newFakeStore(), fakeApprovals{})
-	svc.dataDir = dataDir
+func TestSpillPolicyFallsBackToDataDir(t *testing.T) {
+	svc, _, dataDir := newSpillService(t)
 
-	dir := svc.spillDir(context.Background())
-	if dir == "" {
-		t.Fatal("spillDir = \"\", want the data-dir fallback")
+	policy := svc.spillPolicy(context.Background())
+	if policy == nil {
+		t.Fatal("spillPolicy = nil, want a policy")
 	}
-	if !strings.HasPrefix(dir, dataDir+string(filepath.Separator)) {
-		t.Fatalf("spillDir = %q, want it under the data dir %q", dir, dataDir)
+	wantDir := filepath.Join(dataDir, ".zeokeel", "tool-results")
+	if policy.Dir != wantDir {
+		t.Fatalf("spill dir = %q, want the data-dir fallback %q", policy.Dir, wantDir)
 	}
+	if !filepath.IsAbs(policy.Dir) {
+		t.Fatalf("spill dir = %q, want an absolute path", policy.Dir)
+	}
+	if policy.ThresholdBytes != spillThresholdBytes || policy.MaxFiles != spillKeepFiles {
+		t.Fatalf("spill policy = %+v, want %d bytes / %d files", policy, spillThresholdBytes, spillKeepFiles)
+	}
+}
 
-	inner := &recordingHistory{}
-	history := newSpillHistory(inner, svc.spillDir, &fakeLogger{})
-	full := strings.Repeat("result", spillThresholdBytes)
-	if err := history.Append(context.Background(), "sess-1", toolMessage(full)); err != nil {
-		t.Fatalf("Append: %v", err)
+// TestSpillDirWithoutWorkspaceOrDataDir pins the empty resolution: the product
+// has no directory to offer, so the policy leaves Dir empty and Rig uses its own
+// temp directory (rig/agent/spill.go) instead of the product writing inline.
+func TestSpillDirWithoutWorkspaceOrDataDir(t *testing.T) {
+	svc := newService(Config{}, nil, newFakeSettings(nil), &fakeLogger{}, newFakeStore(), fakeApprovals{})
+	if dir := svc.spillDir(context.Background()); dir != "" {
+		t.Fatalf("spillDir without workspace/data dir = %q, want empty", dir)
 	}
-	persisted := inner.persisted()[0].Text()
-	if !strings.Contains(persisted, spillDetectMarker) {
-		t.Fatalf("persisted text lacks the spill marker: %q", persisted[:min(len(persisted), 120)])
-	}
-	start := strings.Index(persisted, spillMarkerPrefix)
-	end := strings.Index(persisted, spillMarkerSuffix)
-	if start < 0 || end < start {
-		t.Fatalf("persisted text has no spill path: %q", persisted[:min(len(persisted), 200)])
-	}
-	path := persisted[start+len(spillMarkerPrefix) : end]
-	if _, err := os.Stat(path); err != nil {
-		t.Fatalf("spill file %q: %v", path, err)
+	policy := svc.spillPolicy(context.Background())
+	if policy == nil || policy.Dir != "" {
+		t.Fatalf("spillPolicy = %+v, want a policy with an empty Dir", policy)
 	}
 }

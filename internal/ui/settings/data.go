@@ -6,10 +6,8 @@ package settings
 // dialog), so it works headlessly in tests without a desktop backend.
 
 import (
-	"errors"
 	"fmt"
 	"os"
-	"os/exec"
 	"runtime"
 	"sort"
 	"strings"
@@ -37,24 +35,11 @@ const (
 // save dialog; tests replace them (same pattern as the session export's
 // ExportSaver) so no desktop backend is needed.
 var (
-	// OpenPathFunc opens one path in the platform file manager.
+	// OpenPathFunc opens one path in the platform file manager. The platform
+	// behavior is the framework's (mygo.Shell.OpenPath); tests replace this
+	// seam to stay headless.
 	OpenPathFunc = func(path string) error {
-		path = strings.TrimSpace(path)
-		if path == "" {
-			return errors.New("empty path")
-		}
-		command := "xdg-open"
-		switch runtime.GOOS {
-		case "darwin":
-			command = "open"
-		case "windows":
-			command = "explorer"
-		}
-		cmd := exec.Command(command, path)
-		if err := cmd.Start(); err != nil {
-			return err
-		}
-		return cmd.Process.Release()
+		return mygo.Shell.OpenPath(strings.TrimSpace(path))
 	}
 
 	// ExportSessionsSaver is the sessions-export seam: the default opens the

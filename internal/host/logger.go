@@ -92,6 +92,7 @@ func (l *Logger) Close() error {
 	}
 	l.closeOnce.Do(func() {
 		if l.file == nil {
+			l.logger = nil
 			return
 		}
 		if err := l.file.Sync(); err != nil {
@@ -100,6 +101,11 @@ func (l *Logger) Close() error {
 		if err := l.file.Close(); err != nil && l.closeErr == nil {
 			l.closeErr = err
 		}
+		// Stop writing into the closed file. An OS-session-end quit flushes the
+		// log from its quit listener; the teardown that runs after it must not
+		// append to a closed file.
+		l.file = nil
+		l.logger = nil
 	})
 	return l.closeErr
 }

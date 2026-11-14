@@ -7,6 +7,7 @@ package uikit_test
 // send/queue/stop position and the slots.
 
 import (
+	"strconv"
 	"strings"
 	"testing"
 
@@ -324,5 +325,65 @@ func TestComposerFocusOption(t *testing.T) {
 	}
 	if st.focus {
 		t.Fatal("Focus flag was not cleared after being honored")
+	}
+}
+
+// TestComposerRefocusKeepsScroll covers the v0.9.0 Focus reveal behavior: Focus
+// now scrolls the element's containers as little as shows it (mygo ui/input.go).
+// The shell's one-shot Focus flag hands the keyboard back to the input after an
+// accepted send; when the composer is already in view, that programmatic focus
+// must not move the view the user has scrolled.
+func TestComposerRefocusKeepsScroll(t *testing.T) {
+	st := &composerTestState{draft: "hello"}
+	tt := ui.NewTester(func(c *ui.Context) {
+		tokens := design.Of(c)
+		ui.Scroll(c).FillWidth().FillHeight().Children(func() {
+			ui.Column(c).FillWidth().Children(func() {
+				for i := 0; i < 40; i++ {
+					design.Apply(ui.Text(c, "filler-"+strconv.Itoa(i)),
+						tokens.TextMuted(design.TypeXS)).Height(20)
+				}
+				uikit.ComposerShell(c, uikit.ComposerShellOptions{
+					Key:         "test.composer",
+					Draft:       &st.draft,
+					Placeholder: "输入消息…",
+					SendEnabled: true,
+					Send: func() bool {
+						st.sent++
+						return true
+					},
+					Focus: &st.focus,
+				})
+			})
+		})
+	}, 900, 400)
+	tt.Frame()
+	// The composer sits below the tall filler; scroll so it is in view.
+	tt.Scroll(450, 300, 0, 500)
+	tt.Frame()
+	before, ok := tt.AccessByRole(ui.RoleTextField, "输入消息…")
+	if !ok {
+		t.Fatalf("composer input missing; texts = %v", tt.Texts())
+	}
+	if bottom := before.Bounds.Y + before.Bounds.H; bottom > 400 {
+		t.Fatalf("composer input is not in view after scrolling: bottom = %v (bounds %+v)", bottom, before.Bounds)
+	}
+
+	// Clicking send moves the focus to the control; the shell then hands it back
+	// to the input on the next frame.
+	if err := tt.Click("发送"); err != nil {
+		t.Fatalf("click send: %v", err)
+	}
+	tt.Frame()
+	tt.Frame()
+	if st.sent != 1 {
+		t.Fatalf("send calls = %d, want 1", st.sent)
+	}
+	after, _ := tt.AccessByRole(ui.RoleTextField, "输入消息…")
+	if !after.Focused {
+		t.Fatalf("focus did not return to the composer input: %+v", after)
+	}
+	if after.Bounds != before.Bounds {
+		t.Fatalf("refocusing the composer moved the view: input at %+v, before %+v", after.Bounds, before.Bounds)
 	}
 }

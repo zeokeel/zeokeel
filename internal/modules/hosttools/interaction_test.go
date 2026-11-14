@@ -125,7 +125,7 @@ func TestAskUserUsesProvidedInteractionBridge(t *testing.T) {
 	if outcome.err != nil {
 		t.Fatalf("ask_user: %v", outcome.err)
 	}
-	if outcome.result.IsError || outcome.result.Content != "user answered: postgres" {
+	if outcome.result.IsError || outcome.result.Content != "postgres" {
 		t.Fatalf("ask_user result = %+v", outcome.result)
 	}
 }

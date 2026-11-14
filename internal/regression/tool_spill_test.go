@@ -1,23 +1,22 @@
 package regression
 
 // Adversarial audit: spilling oversized tool results into the persisted history.
-// >32KiB tool results are saved to <workspace>/.zeokeel/tool-results/ and the
-// persisted message keeps a 2KiB head + the file path; the live run still sends
-// the full text to the model; without a workspace the product data directory is
-// the fallback (headless/ACP sessions), and only a missing directory falls back
-// to the full text; the transform is idempotent and prunes the directory to 100
-// files.
+//
+// The product configures Rig's SpillPolicy (rig/context.go, applied by the Rig
+// agent before it records a tool message): results over 32 KiB are written to
+// <workspace>/.zeokeel/tool-results/ and the model sees Rig's stable summary
+// (prefix, absolute path, byte count and a short preview) instead; without a
+// workspace the product data directory is the fallback (headless/ACP sessions).
+// The framework owns writing, naming, summarizing and prune-to-100; the product
+// only resolves the directory. These tests drive a real agent run end to end.
 
 import (
 	"context"
 	"os"
 	"path/filepath"
 	"strings"
-	"sync"
 	"sync/atomic"
 	"testing"
-	"unsafe"
-	_ "unsafe"
 
 	rig "github.com/zeokeel/zeokeel-rig"
 
@@ -42,20 +41,27 @@ func (t hugeTool) Invoke(context.Context, rig.ToolCall) (rig.ToolResult, error) 
 	return rig.ToolResult{Content: t.content}, nil
 }
 
-// spillPathFromText extracts the path from a persisted spill pointer.
+// spillPathFromText extracts the absolute path from Rig's spill summary:
+//
+//	[tool result spilled to file]
+//	path: <absolute path>
+//	bytes: <n>
+//	preview: <first bytes with newlines as spaces>
 func spillPathFromText(t *testing.T, text string) string {
 	t.Helper()
-	const marker = "[完整结果: "
-	start := strings.Index(text, marker)
-	if start < 0 {
-		t.Fatalf("persisted message lacks the spill pointer: %q", text[:minInt(len(text), 120)])
+	if !rig.IsSpilledToolResult(text) {
+		t.Fatalf("persisted message lacks Rig's spill summary: %q", text[:minInt(len(text), 120)])
 	}
-	rest := text[start+len(marker):]
-	end := strings.Index(rest, "]")
-	if end < 0 {
-		t.Fatalf("malformed spill pointer in %q", text)
+	for _, line := range strings.Split(text, "\n") {
+		if path, ok := strings.CutPrefix(line, "path: "); ok {
+			if path == "" {
+				t.Fatalf("spill summary carries an empty path: %q", text)
+			}
+			return path
+		}
 	}
-	return rest[:end]
+	t.Fatalf("malformed spill summary: %q", text)
+	return ""
 }
 
 // minInt is a small helper for bounded slices.
@@ -67,8 +73,8 @@ func minInt(a, b int) int {
 }
 
 // TestToolSpillRoundTrip drives a real agent run whose tool returns 40KiB:
-// the persisted history carries the head + path, the file holds the full text,
-// and the live run's next provider request still carries the full result.
+// the persisted history carries Rig's summary and path, the file holds the full
+// text, and the follow-up provider request carries the summary, not the payload.
 func TestToolSpillRoundTrip(t *testing.T) {
 	h := newHarness(t)
 	workspaceRoot := t.TempDir()
@@ -108,29 +114,37 @@ func TestToolSpillRoundTrip(t *testing.T) {
 	if len(persisted) >= len(payload) {
 		t.Fatalf("persisted tool text was not spilled (%d bytes)", len(persisted))
 	}
-	if !strings.HasPrefix(persisted, payload[:2<<10]) {
-		t.Fatalf("persisted head is not the first 2KiB of the result")
+	if !strings.Contains(persisted, "bytes: "+itoa(int64(len(payload)))) {
+		t.Fatalf("spill summary does not report the spilled byte count: %q", persisted)
 	}
 	path := spillPathFromText(t, persisted)
-	if !strings.HasPrefix(path, filepath.Join(workspaceRoot, ".zeokeel", "tool-results")) &&
-		!strings.HasPrefix(path, filepath.Join(workspaceRoot, ".zeokeel", "tool-results")+string(filepath.Separator)) {
-		t.Fatalf("spill file %q is outside the workspace tool-results dir", path)
+	spillDir := filepath.Join(workspaceRoot, ".zeokeel", "tool-results")
+	if !strings.HasPrefix(path, spillDir+string(filepath.Separator)) {
+		t.Fatalf("spill file %q is outside the workspace tool-results dir %q", path, spillDir)
 	}
 	content, err := os.ReadFile(path)
 	if err != nil || string(content) != payload {
 		t.Fatalf("spill file content = %d bytes (err %v), want the full %d-byte payload", len(content), err, len(payload))
 	}
 	info, err := os.Stat(path)
-	if err != nil || info.Mode().Perm() != 0o644 {
-		t.Fatalf("spill file mode = %v (err %v)", info.Mode(), err)
+	if err != nil {
+		t.Fatalf("stat spill file: %v", err)
 	}
-	// The live run's follow-up provider request still carries the full result.
+	if info.Mode().Perm() != 0o600 {
+		t.Fatalf("spill file mode = %v, want 0600 (Rig creates spill files private)", info.Mode().Perm())
+	}
+	// The live run's follow-up provider request carries the summary, not the
+	// payload: spilling is what keeps an oversized result out of later rounds.
 	bodies := harness.bodiesAfter(0)
 	if len(bodies) < 2 {
 		t.Fatalf("provider requests = %d, want at least 2", len(bodies))
 	}
-	if !strings.Contains(string(bodies[1].Body), payload) {
-		t.Fatalf("the live run did not send the full tool result to the model")
+	followUp := string(bodies[1].Body)
+	if strings.Contains(followUp, payload) {
+		t.Fatalf("the follow-up request still carries the full tool result")
+	}
+	if !strings.Contains(followUp, rig.SpillSummaryPrefix) {
+		t.Fatalf("the follow-up request does not carry Rig's spill summary")
 	}
 }
 
@@ -169,8 +183,8 @@ func TestToolSpillNoWorkspaceFallback(t *testing.T) {
 		t.Fatalf("persisted tool text = %d bytes, want it spilled (%d-byte payload)",
 			len(persisted), len(payload))
 	}
-	if !strings.Contains(persisted, "[完整结果: ") {
-		t.Fatalf("data-dir fallback wrote no spill pointer: %q", persisted[:minInt(len(persisted), 120)])
+	if !rig.IsSpilledToolResult(persisted) {
+		t.Fatalf("data-dir fallback wrote no spill summary: %q", persisted[:minInt(len(persisted), 120)])
 	}
 	path := spillPathFromText(t, persisted)
 	dataSpillDir := filepath.Join(harness.h.dataDir, ".zeokeel", "tool-results")
@@ -181,118 +195,5 @@ func TestToolSpillNoWorkspaceFallback(t *testing.T) {
 	if err != nil || string(content) != payload {
 		t.Fatalf("spill file content = %d bytes (err %v), want the full %d-byte payload",
 			len(content), err, len(payload))
-	}
-}
-
-// The spill transform itself is unexported; the audit reaches it through
-// test-only linknames to cover the idempotent and prune paths cheaply.
-
-//go:linkname auditNewSpillHistory github.com/zeokeel/zeokeel/internal/modules/agent.newSpillHistory
-func auditNewSpillHistory(inner rig.History, dir func(context.Context) string, logger contracts.Logger) unsafe.Pointer
-
-//go:linkname auditSpillAppend github.com/zeokeel/zeokeel/internal/modules/agent.(*spillHistory).Append
-func auditSpillAppend(history unsafe.Pointer, ctx context.Context, sessionID string, messages ...rig.Message) error
-
-// auditSpillLogger records the fallback warning.
-type auditSpillLogger struct {
-	mu       sync.Mutex
-	messages []string
-}
-
-func (l *auditSpillLogger) Printf(format string, args ...any) {
-	l.mu.Lock()
-	l.messages = append(l.messages, format)
-	l.mu.Unlock()
-}
-
-// auditHistory is a capturing rig.History.
-type auditHistory struct{ appended []rig.Message }
-
-func (h *auditHistory) Load(context.Context, string) ([]rig.Message, error) { return nil, nil }
-func (h *auditHistory) Append(_ context.Context, _ string, messages ...rig.Message) error {
-	h.appended = append(h.appended, messages...)
-	return nil
-}
-
-// TestToolSpillIdempotentAndFallback covers the transform seams: already-spilled
-// messages and small/non-tool messages are untouched, and a missing workspace
-// directory falls back to the full text with a warning.
-func TestToolSpillIdempotentAndFallback(t *testing.T) {
-	payload := strings.Repeat("C", 40<<10)
-	dir := t.TempDir()
-	inner := &auditHistory{}
-	logger := &auditSpillLogger{}
-	history := auditNewSpillHistory(inner, func(context.Context) string { return dir }, logger)
-	if history == nil {
-		t.Fatal("newSpillHistory returned nil")
-	}
-	ctx := context.Background()
-
-	// First append spills; the second append of the same pointer is untouched.
-	original := rig.NewMessage(rig.RoleTool, payload)
-	if err := auditSpillAppend(history, ctx, "s1", original); err != nil {
-		t.Fatalf("append spill: %v", err)
-	}
-	spilled := inner.appended[0].Text()
-	if len(spilled) >= len(payload) || !strings.Contains(spilled, "[完整结果: ") {
-		t.Fatalf("first append did not spill: %d bytes", len(spilled))
-	}
-	if err := auditSpillAppend(history, ctx, "s1", rig.NewMessage(rig.RoleTool, spilled)); err != nil {
-		t.Fatalf("append already spilled: %v", err)
-	}
-	if again := inner.appended[1].Text(); again != spilled {
-		t.Fatalf("already-spilled message was transformed again")
-	}
-
-	// Small and non-tool messages pass through unchanged.
-	small := rig.NewMessage(rig.RoleTool, "small result")
-	user := rig.NewMessage(rig.RoleUser, payload)
-	if err := auditSpillAppend(history, ctx, "s1", small, user); err != nil {
-		t.Fatalf("append pass-through: %v", err)
-	}
-	if inner.appended[2].Text() != "small result" || inner.appended[3].Text() != payload {
-		t.Fatalf("pass-through messages were transformed")
-	}
-
-	// No workspace directory: full text + warning.
-	fallback := &auditHistory{}
-	fallbackLogger := &auditSpillLogger{}
-	plain := auditNewSpillHistory(fallback, func(context.Context) string { return "" }, fallbackLogger)
-	if err := auditSpillAppend(plain, ctx, "s2", rig.NewMessage(rig.RoleTool, payload)); err != nil {
-		t.Fatalf("append fallback: %v", err)
-	}
-	if fallback.appended[0].Text() != payload {
-		t.Fatalf("fallback did not keep the full text")
-	}
-	if len(fallbackLogger.messages) == 0 || !strings.Contains(fallbackLogger.messages[0], "no current workspace") {
-		t.Fatalf("fallback warning = %v, want a no-workspace warning", fallbackLogger.messages)
-	}
-}
-
-// TestToolSpillPruneCapsFiles covers the 100-file retention: 105 distinct large
-// results leave at most 100 files behind.
-func TestToolSpillPruneCapsFiles(t *testing.T) {
-	dir := t.TempDir()
-	inner := &auditHistory{}
-	history := auditNewSpillHistory(inner, func(context.Context) string { return dir }, &auditSpillLogger{})
-	ctx := context.Background()
-	for index := 0; index < 105; index++ {
-		payload := strings.Repeat("D", 34<<10) + itoa(int64(index))
-		if err := auditSpillAppend(history, ctx, "s-prune", rig.NewMessage(rig.RoleTool, payload)); err != nil {
-			t.Fatalf("append %d: %v", index, err)
-		}
-	}
-	entries, err := os.ReadDir(dir)
-	if err != nil {
-		t.Fatalf("read spill dir: %v", err)
-	}
-	files := 0
-	for _, entry := range entries {
-		if strings.HasSuffix(entry.Name(), ".txt") {
-			files++
-		}
-	}
-	if files > 100 {
-		t.Fatalf("spill dir kept %d files, want at most 100", files)
 	}
 }

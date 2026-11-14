@@ -180,18 +180,17 @@ func (r *Root) togglePalette() {
 	r.paletteOpen = !r.paletteOpen
 	r.paletteQuery = ""
 	r.paletteFilter = ""
-	r.paletteSelected = 0
 	r.paletteCount = 0
-	if r.paletteOpen {
-		// The palette is a transient overlay: its list state must not outlive
-		// one opening. A reused ListState follows the previous opening's chosen
-		// item into the new list and writes that old index back into the
-		// selection while the frame builds, which left a reopened palette with
-		// no visible chosen row while Enter still ran one (fix round SH-02).
-		// The reset happens here, at the frame boundary, never while the list
-		// of the closing frame is still building.
-		r.paletteList = ui.ListState{}
-	}
+	// The choice starts from the first match (and a close forgets it with the
+	// rest of the transient state). Choose is the framework's "the app chose
+	// this row": it also forgets the previous opening's chosen command, which
+	// the List would otherwise follow by Key into the new rows and write back
+	// as an old index, leaving a reopened palette with no visible chosen row
+	// while Enter still ran one (fix round SH-02). Selected must be set first:
+	// Choose does nothing without it. The rest of the list state is the
+	// palette's transient overlay state and is reused, not zeroed.
+	r.paletteList.Selected = &r.paletteSelected
+	r.paletteList.Choose(0)
 	r.requestFrame()
 }
 

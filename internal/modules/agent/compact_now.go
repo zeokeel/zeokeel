@@ -71,7 +71,14 @@ func (s *service) CompactNow(ctx context.Context, sessionID string) (contracts.C
 		var provider rig.Provider
 		provider, err = s.newProvider(cfg, s.thinkingParamsForSession(sessionID, cfg.Model))
 		if err == nil {
-			compactor = compact.LLMCompactor{Provider: provider, Model: cfg.Model}
+			compactor = compact.LLMCompactor{
+				Provider: provider,
+				Model:    cfg.Model,
+				// Same fallback as the automatic path: a failed/empty summary
+				// falls back to deterministic window compaction instead of
+				// failing the command.
+				Fallback: compact.WindowCompactor{},
+			}
 		}
 	}
 	if err != nil || compactor == nil {
@@ -80,7 +87,12 @@ func (s *service) CompactNow(ctx context.Context, sessionID string) (contracts.C
 		}
 		return contracts.CompactResult{}, fmt.Errorf("%w: %v", contracts.ErrCompactUnavailable, err)
 	}
-	compacted, err := compactor.Compact(ctx, sessionID, messages, cfg.ContextBudget)
+	// Charge the system prompt against the same context budget the automatic
+	// path uses (rig/agent/agent.go prepareContext: budget-systemPromptTokens).
+	// The manual path does not rebuild the full run prompt, so this deducts the
+	// configured system prompt only.
+	budget := cfg.ContextBudget - rig.EstimateTextTokens(cfg.SystemPrompt)
+	compacted, err := compactor.Compact(ctx, sessionID, messages, budget)
 	if err != nil {
 		return contracts.CompactResult{}, fmt.Errorf("agent: compact session %q: %w", sessionID, err)
 	}

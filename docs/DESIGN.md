@@ -161,13 +161,13 @@
 | `Badge` | 状态/类型/计数 pill | 只表达信息，不做普通元数据装饰；禁用全宽胶囊条 |
 | `Icon` / `Image` / `Avatar` | 图标/图片/头像 | 图标只从 `internal/icons` + `ui.Icon`；不许 emoji/Unicode/手写 SVG |
 | `Themed` / `c.Theme()` / `Theme.Space(n)` / `Theme.Rem(n)` | 局部主题/间距/字号单位 | 颜色与间距只从这里取；不许硬编码 |
-| a11y API（`Role` / `Label` / `ActiveDescendant` / `AccessSelected` / `AccessDisabled` / `Announce`） | 无障碍语义 | 自绘元素必须补 role+name+state；异步结果 `c.Announce` |
+| a11y API（`Role` / `Label` / `ActiveDescendant` / `AccessSelected` / `AccessDisabled` / `Announce`） | 无障碍语义 | 自绘元素必须补 role+name+state；异步结果 `c.Announce`；壳层分区与右栏 tabpanel 必须补 `RoleMain`/`RoleBanner`/`RoleComplementary`/`RoleContentInfo`/`RoleTabPanel` + `Label`（tab 用 `Controls(panel)` 关联） |
 
 #### H. 编辑器 / 差异 / 富文本 / 图表（按需）
 
 | 组件/API | 用途 | 本项目规则 |
 |---|---|---|
-| `ui/editor.View` + `State` / `Buffer` | 代码查看/编辑 | 文件预览/源码用 editor；不许自己格式化代码 |
+| `ui/editor.View` + `State` / `Buffer` | 代码查看/编辑 | 文件预览/源码用 editor；不许自己格式化代码；语言用 `editor.LanguageFor` / `editor.LanguageForText`（无扩展名脚本按 shebang） |
 | `ui/editor.DiffView` + `DiffState` | 并排/统一 diff | 变更/审阅用 DiffView；不许逐行画 diff |
 | `ui/richtext.Editor` / `Document` | 富文本编辑 | 只在需要格式/附件时用；只读展示用 markdown |
 | `ui/chart` | headless 图表原语 | 需要趋势图时用；颜色/字体走 token |
@@ -188,6 +188,7 @@
 10. **危险确认与 Esc 安全默认**：不可逆动作必须 `uikit.ConfirmDanger`（安全动作 Default）；审批无 Default；「Esc 拒绝」等承诺必须在窗口级成立，不能因焦点在侧栏而失效（AP-24）。
 11. **强调色预算**：每屏 ≤2 Accent 填充、≤1 primary、≤2 红色元素；状态徽章只用 `uikit.StatusBadge`（AP-20/AP-21）。
 12. **字号与度量纪律**：11px 禁成句；控件高度只用 32/36/40/44（禁 38）；圆角语义见 §5.4；表面 ramp 见 §5.1（AP-22/AP-23）。
+13. **Focus 会滚入视野**：程序化 `Focus()`/`AutoFocus()` 会把元素滚入最近的滚动容器（mygo v0.9.0）；「焦点换位但滚动不该动」的场景用 `Focus(ui.FocusOptions{PreventScroll: true})`，并补帧测试（要有反证：去掉选项时测试失败）。
 
 ### 1.4 选用决策顺序
 

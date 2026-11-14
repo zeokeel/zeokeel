@@ -620,7 +620,7 @@ func TestP1ApprovalToolsAndPersistence(t *testing.T) {
 	tester.Frame()
 	select {
 	case result := <-answerCh:
-		if result.IsError || result.Content != "user answered: sqlite" {
+		if result.IsError || result.Content != "sqlite" {
 			t.Fatalf("ask_user result = %+v", result)
 		}
 	case <-time.After(5 * time.Second):
@@ -668,7 +668,7 @@ func TestP1ApprovalToolsAndPersistence(t *testing.T) {
 	go func() {
 		result, invokeErr := toolkit.Invoke(context.Background(), rig.ToolCall{
 			ID: "plan-1", Name: "plan_review",
-			Arguments: `{"plan":"# 发布计划\n1. 测试\n2. 发布"}`,
+			Arguments: `{"content":"# 发布计划\n1. 测试\n2. 发布"}`,
 		})
 		if invokeErr != nil {
 			result = rig.ToolResult{IsError: true, Content: invokeErr.Error()}

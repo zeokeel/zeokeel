@@ -155,7 +155,12 @@ func (r *Root) sidebarExpanded(c *ui.Context) {
 		selected = defaultScreenID(screens)
 	}
 	column := ui.Column(c).FillHeight().Background(t.BgSidebar).
-		BorderWidth(0, 1, 0, 0).BorderColor(t.BorderL3)
+		BorderWidth(0, 1, 0, 0).BorderColor(t.BorderL3).
+		// The sidebar is a complementary landmark (mygo RoleComplementary, as
+		// HTML's aside): screen readers can jump to the navigation apart from
+		// the main content. Named because a window can have several
+		// complementary landmarks (the inspector is the other one).
+		Role(ui.RoleComplementary).Label(r.tr("侧栏", "Sidebar"))
 	changed := false
 	column.Children(func() {
 		// Brand row: the mark, the wordmark and the collapse control (Cmd+B is
@@ -221,7 +226,8 @@ func (r *Root) sidebarRail(c *ui.Context) {
 	column := ui.Column(c).Width(design.SidebarRailWidth).FillHeight().
 		AlignItems(ui.Center).Gap(design.Space1).
 		Padding(design.Space3, 0, design.Space3, 0).
-		Label(r.tr("主导航", "Main navigation")).
+		Label(r.tr("侧栏", "Sidebar")).
+		Role(ui.RoleComplementary).
 		FocusGroup(ui.Vertical)
 	design.Apply(column, func(el ui.Element) ui.Element {
 		return el.Background(t.BgSidebar).BorderWidth(0, 1, 0, 0).BorderColor(t.BorderL3)
@@ -382,7 +388,17 @@ func (r *Root) screen(c *ui.Context) {
 		// (contentHeader); the body only contributes its own content and its
 		// footer status.
 		r.safeBuild(c, spec.Build)
-		r.slot(c, contracts.SlotScreenFooter)
+		if r.hasAnySlot(contracts.SlotScreenFooter) {
+			// The screen footer is the window's status area, so it is the
+			// contentinfo landmark (mygo RoleContentInfo, as HTML's footer). Only
+			// wrapped when a screen really contributes status content, so a
+			// screen without one adds no empty landmark and no extra layout box.
+			ui.Column(c).FillWidth().Shrink(0).
+				Role(ui.RoleContentInfo).Label(r.tr("状态栏", "Status bar")).
+				Children(func() {
+					r.slot(c, contracts.SlotScreenFooter)
+				})
+		}
 	})
 }
 
@@ -391,24 +407,29 @@ func (r *Root) screen(c *ui.Context) {
 // window shows the inspector as a modal drawer over the content instead.
 func (r *Root) contentArea(c *ui.Context) {
 	main := func() {
-		ui.Column(c).FillHeight().Grow(1).Shrink(1).MinWidth(0).Children(func() {
-			// The band keeps the whole window width: the drawer covers its
-			// right-hand utilities while it is open, and narrowing the band
-			// itself would squeeze the screen title and the agent entries into
-			// the space the drawer already covers.
-			r.contentHeader(c)
-			body := ui.Column(c).FillHeight().Grow(1).Shrink(1).MinWidth(design.Space0)
-			// A drawer covers the right edge of the window instead of docking,
-			// so the screen body reserves its width: the composer and its
-			// send/stop controls stay fully visible to the left of the drawer
-			// instead of hanging half-way under it (report R3). The scrim still
-			// marks the drawer as modal, so the reserved band is visibly not
-			// interactive.
-			if r.rightPanelDrawerOpen(c) {
-				body = body.Padding(design.Space0, design.InspectorWidth, design.Space0, design.Space0)
-			}
-			body.Children(func() { r.screen(c) })
-		})
+		ui.Column(c).FillHeight().Grow(1).Shrink(1).MinWidth(0).
+			// The main landmark (mygo RoleMain): the window's main content, apart
+			// from its top bar and sidebars. The docked inspector is a sibling
+			// pane of this column, so it is not part of it.
+			Role(ui.RoleMain).Label(r.tr("主内容", "Main content")).
+			Children(func() {
+				// The band keeps the whole window width: the drawer covers its
+				// right-hand utilities while it is open, and narrowing the band
+				// itself would squeeze the screen title and the agent entries into
+				// the space the drawer already covers.
+				r.contentHeader(c)
+				body := ui.Column(c).FillHeight().Grow(1).Shrink(1).MinWidth(design.Space0)
+				// A drawer covers the right edge of the window instead of docking,
+				// so the screen body reserves its width: the composer and its
+				// send/stop controls stay fully visible to the left of the drawer
+				// instead of hanging half-way under it (report R3). The scrim still
+				// marks the drawer as modal, so the reserved band is visibly not
+				// interactive.
+				if r.rightPanelDrawerOpen(c) {
+					body = body.Padding(design.Space0, design.InspectorWidth, design.Space0, design.Space0)
+				}
+				body.Children(func() { r.screen(c) })
+			})
 	}
 	if !r.inspectorDocked(c) {
 		main()
@@ -493,10 +514,15 @@ func (r *Root) inspectorDockedPane(c *ui.Context) {
 	// host only paints the docked surface and the divider so the tab strip can
 	// sit flush at the top of the column, DSH-style.
 	ui.Column(c).FillHeight().Background(t.BgSidebar).
-		BorderWidth(1, 0, 0, 0).BorderColor(t.BorderL3).Children(func() {
-		r.dockedInspectorHeader(c, t)
-		r.slot(c, contracts.SlotSessionPanelRight)
-	})
+		BorderWidth(1, 0, 0, 0).BorderColor(t.BorderL3).
+		// The docked inspector is the window's second complementary landmark
+		// (the sidebar is the first): the panel stands apart from the main
+		// content and completes it, as HTML's aside.
+		Role(ui.RoleComplementary).Label(r.tr("右侧栏", "Right sidebar")).
+		Children(func() {
+			r.dockedInspectorHeader(c, t)
+			r.slot(c, contracts.SlotSessionPanelRight)
+		})
 }
 
 // dockedInspectorHeader draws the docked inspector's title row with its own
@@ -541,17 +567,22 @@ func (r *Root) contentHeader(c *ui.Context) {
 	}
 	t := design.Of(c)
 	ui.Column(c).FillWidth().Background(t.BgSidebar).
-		BorderWidth(0, 0, 1, 0).BorderColor(t.BorderL2).Children(func() {
-		r.screenHeaderRow(c, t)
-		if r.hasScreenSlot(contracts.SlotScreenTabs) {
-			// The tabs row rides directly under the header row: one surface, one
-			// bottom border, no line between the two rows.
-			ui.Row(c).FillWidth().Height(design.Space8).PaddingX(design.Space5).
-				AlignItems(ui.Stretch).Children(func() {
-				r.renderScreenSlot(c, contracts.SlotScreenTabs)
-			})
-		}
-	})
+		BorderWidth(0, 0, 1, 0).BorderColor(t.BorderL2).
+		// The window's top bar is the banner landmark (mygo RoleBanner), as
+		// HTML's header: the screen title and the host's chrome controls in one
+		// landmark a screen reader can jump to.
+		Role(ui.RoleBanner).Label(r.tr("顶栏", "Top bar")).
+		Children(func() {
+			r.screenHeaderRow(c, t)
+			if r.hasScreenSlot(contracts.SlotScreenTabs) {
+				// The tabs row rides directly under the header row: one surface, one
+				// bottom border, no line between the two rows.
+				ui.Row(c).FillWidth().Height(design.Space8).PaddingX(design.Space5).
+					AlignItems(ui.Stretch).Children(func() {
+					r.renderScreenSlot(c, contracts.SlotScreenTabs)
+				})
+			}
+		})
 }
 
 // screenHeaderRow draws the band's 40 DIP row: the screen's title area (it takes
@@ -689,23 +720,31 @@ func (r *Root) inspectorDrawer(c *ui.Context) {
 				Padding(design.Space4).
 				Role(ui.RoleDialog).Label(r.tr("检查器", "Inspector"))
 			panel.Children(func() {
-				ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(design.Space2).Children(func() {
-					design.Apply(ui.Text(c, r.tr("检查器", "Inspector")), t.Font(design.TypeS)).
-						FontWeight(600).TextColor(t.LabelPrimary).Grow(1)
-					// No Tooltip: a keyboard-focused tooltip is an overlay with its
-					// own Escape handler (mygo tooltip.go), and it would take the
-					// first Escape before this drawer's OverlayShortcut could close
-					// it. Label keeps the button named for assistive technology.
-					closeLabel := r.tr("关闭右侧栏", "Close inspector")
-					close := ui.Button(c, "").Label(closeLabel)
-					close.Children(func() {
-						ui.Icon(c, icons.Close()).Size(16, 16).TextColor(t.LabelSecondary)
+				// Inside the dialog the inspector content is the same
+				// complementary landmark the docked pane is (the drawer is the
+				// narrow window's form of the right sidebar), so the landmark
+				// list reads the same on both layouts.
+				ui.Column(c).FillWidth().FillHeight().
+					Role(ui.RoleComplementary).Label(r.tr("右侧栏", "Right sidebar")).
+					Children(func() {
+						ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(design.Space2).Children(func() {
+							design.Apply(ui.Text(c, r.tr("检查器", "Inspector")), t.Font(design.TypeS)).
+								FontWeight(600).TextColor(t.LabelPrimary).Grow(1)
+							// No Tooltip: a keyboard-focused tooltip is an overlay with its
+							// own Escape handler (mygo tooltip.go), and it would take the
+							// first Escape before this drawer's OverlayShortcut could close
+							// it. Label keeps the button named for assistive technology.
+							closeLabel := r.tr("关闭右侧栏", "Close inspector")
+							close := ui.Button(c, "").Label(closeLabel)
+							close.Children(func() {
+								ui.Icon(c, icons.Close()).Size(16, 16).TextColor(t.LabelSecondary)
+							})
+							if close.Clicked() {
+								r.setRightPanelOpen(false, true)
+							}
+						})
+						r.slot(c, contracts.SlotSessionPanelRight)
 					})
-					if close.Clicked() {
-						r.setRightPanelOpen(false, true)
-					}
-				})
-				r.slot(c, contracts.SlotSessionPanelRight)
 			})
 			if panel.PressedOutside() || back.OverlayShortcut(0, ui.KeyEscape) {
 				r.setRightPanelOpen(false, true)
@@ -771,7 +810,16 @@ func (r *Root) palette(c *ui.Context) {
 			needle := strings.ToLower(strings.TrimSpace(r.paletteQuery))
 			if r.paletteFilter != needle {
 				r.paletteFilter = needle
-				r.paletteSelected = 0
+				// A new filter starts from the first visible match. Choose tells
+				// the native List that the app chose the row: writing *Selected
+				// alone loses to the List's Key memory, which keeps the command
+				// chosen in the previous frame chosen and moves the index with
+				// its item as the filtered rows reorder (mygo list.go Choose;
+				// the same key memory that produced the SH-02 invisible target).
+				// Selected is set before the first list build; Choose does
+				// nothing without it.
+				r.paletteList.Selected = &r.paletteSelected
+				r.paletteList.Choose(0)
 			}
 			matches := make([]contracts.CommandSpec, 0, 16)
 			seen := make(map[string]bool, 16)
@@ -803,15 +851,18 @@ func (r *Root) palette(c *ui.Context) {
 				return
 			}
 			r.paletteCount = len(matches)
-			if r.paletteSelected >= len(matches) {
-				r.paletteSelected = len(matches) - 1
-			}
-			if r.paletteSelected < 0 {
-				r.paletteSelected = 0
-			}
 			r.paletteList.Key = func(row int) any { return matches[row].ID }
 			r.paletteList.Label = func(row int) string { return matches[row].Title }
 			r.paletteList.Selected = &r.paletteSelected
+			// Keep the fallback clamp (Enabled changes can shrink the rows
+			// without any filter change), but make it an app choice through
+			// Choose as well: the stale Key memory must not move the choice to
+			// another command's row while the index is only being repaired.
+			if r.paletteSelected >= len(matches) {
+				r.paletteList.Choose(len(matches) - 1)
+			} else if r.paletteSelected < 0 {
+				r.paletteList.Choose(0)
+			}
 			// The search field keeps the keyboard focus while the list shows the
 			// choice; ActiveDescendant points assistive technology at the row
 			// the arrows are on (mygo accessibility.md: a list box a text field
@@ -865,15 +916,15 @@ func (r *Root) palette(c *ui.Context) {
 					r.runPaletteCommand(cmd)
 				}
 			}).MaxHeight(320)
-			// A List drops a choice whose item left the list and writes -1 back
-			// (mygo list.md: the choice is gone with its item). A command
-			// palette always chooses some row, so fall back to the first match
-			// and repaint once: otherwise the list paints no chosen row while
-			// Enter still runs one, which is exactly the invisible target the
-			// fix round's SH-02 reported (the selected command of a previous
-			// open can be filtered out by its Enabled state).
+			// A List follows the chosen command by Key and drops it when its item
+			// left the list, writing -1 back during this build (mygo list.md: the
+			// choice is gone with its item); a command's Enabled state can take
+			// its row out between frames. A command palette always chooses some
+			// row, so Choose the first match and repaint once: otherwise the list
+			// paints no chosen row while Enter still runs one, which is exactly
+			// the invisible target the fix round's SH-02 reported.
 			if r.paletteSelected < 0 || r.paletteSelected >= len(matches) {
-				r.paletteSelected = 0
+				r.paletteList.Choose(0)
 				c.Invalidate()
 			}
 			if activeRow.Valid() {

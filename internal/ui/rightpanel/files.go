@@ -528,7 +528,11 @@ func (st *state) editorFor(path string, data []byte) *editor.State {
 		return state
 	}
 	buffer := editor.NewBuffer(string(data))
-	buffer.SetLanguage(editor.LanguageFor(path))
+	// LanguageForText, not LanguageFor: the already-read content lets a file
+	// without a telling extension pick its language from a shebang line (a
+	// #!/bin/bash script), as the official editor does; unknown files still
+	// fall back to plain text.
+	buffer.SetLanguage(editor.LanguageForText(path, string(data)))
 	state := &editor.State{
 		Buffer:      buffer,
 		ReadOnly:    true,

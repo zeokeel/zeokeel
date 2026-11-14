@@ -2,15 +2,17 @@
 //
 // It puts the product-side agent tools into the shared ZeoKeel Rig tool
 // registry (provided by the toolkit module as contracts.KeyToolkit): ask_user,
-// present, plan_review, exit_plan_mode and goal. These tools are not part of
-// the pure toolset SDK because they need process capabilities — a UI to ask the
-// user, an artifact presenter, plan-review state and a goal store (see
-// internal/hosttools). The legacy in-memory "team" stub was removed: the agent
-// module registers the real rig team tools (team_*, spawn_team, spawn_teammate,
-// ...) against contracts.KeyTeam, so keeping the stub only misled the model
-// into spawning members that never ran.
+// present, plan_review, exit_plan_mode and goal. ask_user, plan_review,
+// exit_plan_mode and goal are the official Rig host tools
+// (github.com/zeokeel/zeokeel-rig/tools/hosttools), wired to this product's
+// process capabilities through the internal/hosttools seam; present stays
+// product-owned because it presents a content artifact rather than declaring
+// files. The legacy in-memory "team" stub was removed: the agent module
+// registers the real rig team tools (team_*, spawn_team, spawn_teammate, ...)
+// against contracts.KeyTeam, so keeping the stub only misled the model into
+// spawning members that never ran.
 //
-// Interactive products (the desktop app) register all six. Non-interactive
+// Interactive products (the desktop app) register all five. Non-interactive
 // products (headless/ACP) cannot show a question or get a plan approved by a
 // user, so they omit the plan-review pair entirely — a plan submitted there
 // could never leave "reviewing" — and ask_user reports that no interactive UI
@@ -24,10 +26,12 @@ package hosttools
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	cordis "github.com/zeokeel/zeokeel-kernel"
 	"github.com/zeokeel/zeokeel-kernel/module"
+	rig "github.com/zeokeel/zeokeel-rig"
 
 	"github.com/zeokeel/zeokeel/internal/contracts"
 	hostcaps "github.com/zeokeel/zeokeel/internal/hosttools"
@@ -94,7 +98,7 @@ func ModuleWithHost(host *hostcaps.Host) *module.Descriptor[Config] {
 			capabilities.Asker = nil
 		}
 
-		for _, tool := range toolListFor(capabilities, cfg.Interactive) {
+		for _, tool := range newTools(capabilities, cfg.Interactive) {
 			if err := registry.Register(tool); err != nil {
 				return fmt.Errorf("%s: register %q: %w", ModuleID, tool.Name(), err)
 			}
@@ -113,8 +117,9 @@ func ModuleWithHost(host *hostcaps.Host) *module.Descriptor[Config] {
 }
 
 // uiPlanController adapts the host's contracts.PlanReviewer to the host-tools
-// PlanController seam. Review has no context in that seam (the tool checks the
-// caller's context before invoking it), so the adapter uses Background.
+// PlanController seam. Review has no context in that seam (the Rig adapter
+// checks the caller's context before invoking it), so the adapter uses
+// Background.
 type uiPlanController struct {
 	reviewer contracts.PlanReviewer
 }
@@ -134,7 +139,7 @@ func (p uiPlanController) Exit(action string) (string, error) {
 
 // uiGoalTrackerStore adapts the host's contracts.GoalTracker to the host-tools
 // GoalStore seam. The goal tool has no context in that seam, so Set uses
-// Background; the tool checks the caller's context before invoking it.
+// Background; the Rig goal tool checks the caller's context before invoking it.
 type uiGoalTrackerStore struct {
 	tracker contracts.GoalTracker
 }
@@ -152,4 +157,57 @@ func (s uiGoalTrackerStore) Get() (id, text, status string, ok bool) {
 // Clear implements hostcaps.GoalStore.
 func (s uiGoalTrackerStore) Clear() bool {
 	return s.tracker.Clear()
+}
+
+// Update implements rig.GoalUpdater: the model-facing lifecycle half of the
+// goal tool. The desktop goal bridge implements contracts.GoalPauser and
+// contracts.GoalLifecycler; a store that cannot express an action returns a
+// readable error instead of reporting a change that did not happen.
+func (s uiGoalTrackerStore) Update(_ context.Context, action rig.GoalUpdateAction, text string) (string, error) {
+	switch action {
+	case rig.GoalComplete:
+		lifecycler, ok := s.tracker.(contracts.GoalLifecycler)
+		if !ok {
+			return "", errors.New("the host goal store cannot complete goals")
+		}
+		if !lifecycler.Complete() {
+			return "", errors.New("no active or paused goal to complete")
+		}
+	case rig.GoalPause:
+		pauser, ok := s.tracker.(contracts.GoalPauser)
+		if !ok {
+			return "", errors.New("the host goal store cannot pause goals")
+		}
+		if !pauser.Pause() {
+			return "", errors.New("no active goal to pause")
+		}
+	case rig.GoalResume:
+		pauser, ok := s.tracker.(contracts.GoalPauser)
+		if !ok {
+			return "", errors.New("the host goal store cannot resume goals")
+		}
+		if !pauser.Resume() {
+			return "", errors.New("no paused goal to resume")
+		}
+	case rig.GoalEdit:
+		lifecycler, ok := s.tracker.(contracts.GoalLifecycler)
+		if !ok {
+			return "", errors.New("the host goal store cannot edit goals")
+		}
+		if _, err := lifecycler.Edit(text); err != nil {
+			return "", err
+		}
+	case rig.GoalBlocked:
+		// The product's goal lifecycle is active/paused/completed/abandoned;
+		// "blocked" is a DSH phase it does not model. Say so rather than
+		// mapping it onto another state.
+		return "", errors.New("blocked is not part of this product's goal lifecycle; use complete, pause or edit")
+	default:
+		return "", fmt.Errorf("unknown goal update %q", action)
+	}
+	_, _, status, ok := s.tracker.Get()
+	if !ok {
+		return "", errors.New("the goal was cleared while updating it")
+	}
+	return status, nil
 }

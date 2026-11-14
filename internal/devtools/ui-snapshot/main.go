@@ -431,7 +431,7 @@ func main() {
 		go func() {
 			_, _ = toolkit.Invoke(a.toolContext(context.Background()), rig.ToolCall{
 				ID: "plan-snapshot", Name: "plan_review",
-				Arguments: `{"plan":"# 发布计划\n\n1. 运行全量测试\n2. 更新文档与截图\n3. 打 tag 并发布"}`,
+				Arguments: `{"content":"# 发布计划\n\n1. 运行全量测试\n2. 更新文档与截图\n3. 打 tag 并发布"}`,
 			})
 		}()
 		for attempts := 0; attempts < 50; attempts++ {

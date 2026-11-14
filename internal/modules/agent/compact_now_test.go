@@ -6,9 +6,11 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"testing"
 
 	rig "github.com/zeokeel/zeokeel-rig"
+	"github.com/zeokeel/zeokeel-rig/session/compact"
 	rigtools "github.com/zeokeel/zeokeel-rig/tools"
 
 	"github.com/zeokeel/zeokeel/internal/contracts"
@@ -137,5 +139,69 @@ func TestCompactNowSaveFailure(t *testing.T) {
 	store.replaceErr = errors.New("disk full")
 	if _, err := svc.CompactNow(context.Background(), sessionID); !errors.Is(err, contracts.ErrCompactSave) {
 		t.Fatalf("CompactNow(save failure) = %v, want ErrCompactSave", err)
+	}
+}
+
+// TestCompactNowBudgetDeductsSystemPrompt pins the budget alignment with the
+// automatic path (rig/agent/agent.go prepareContext deducts the system prompt
+// from the same ContextBudget).
+func TestCompactNowBudgetDeductsSystemPrompt(t *testing.T) {
+	const systemPrompt = "You are a careful coding assistant."
+	compactor := &fakeCompactor{messages: compactTestMessages(2)}
+	svc, store, sessionID := newCompactService(t,
+		Config{ContextBudget: 1000, SystemPrompt: systemPrompt}, compactor, nil)
+	_ = store.ReplaceHistory(context.Background(), sessionID, compactTestMessages(4))
+	if _, err := svc.CompactNow(context.Background(), sessionID); err != nil {
+		t.Fatalf("CompactNow: %v", err)
+	}
+	want := 1000 - rig.EstimateTextTokens(systemPrompt)
+	if compactor.budget != want {
+		t.Fatalf("compactor budget = %d, want %d (ContextBudget - system prompt tokens)", compactor.budget, want)
+	}
+}
+
+// failingSummaryProvider fails every summary request, so the manual path's
+// LLMCompactor must fall back to the deterministic WindowCompactor instead of
+// reporting the compaction as unavailable.
+type failingSummaryProvider struct{}
+
+func (failingSummaryProvider) Name() string { return "failing-summary" }
+
+func (failingSummaryProvider) Stream(context.Context, rig.Request) (rig.Stream, error) {
+	return nil, errors.New("summary model down")
+}
+
+func TestCompactNowFallsBackToWindowCompactor(t *testing.T) {
+	store := newFakeStore()
+	svc := newService(Config{ContextBudget: 20000}, rigtools.NewRegistry(),
+		newFakeSettings(nil), &fakeLogger{}, store, fakeApprovals{})
+	svc.providerFactory = func(contracts.ChatConfig) (rig.Provider, error) {
+		return failingSummaryProvider{}, nil
+	}
+	sessionID, err := svc.NewSession("")
+	if err != nil {
+		t.Fatalf("NewSession: %v", err)
+	}
+	before := make([]rig.Message, 0, 12)
+	for index := 0; index < 12; index++ {
+		before = append(before, rig.NewMessage(rig.RoleUser, fmt.Sprintf(
+			"turn %d: a fairly long user message about the ongoing task %d", index, index)))
+	}
+	if err := store.ReplaceHistory(context.Background(), sessionID, before); err != nil {
+		t.Fatalf("ReplaceHistory: %v", err)
+	}
+	result, err := svc.CompactNow(context.Background(), sessionID)
+	if err != nil {
+		t.Fatalf("CompactNow with a failing summary model = %v, want the window fallback", err)
+	}
+	if result.Replaced != 12 || result.Saved >= result.Replaced {
+		t.Fatalf("result = %+v, want 12 messages reduced by the window fallback", result)
+	}
+	loaded, err := store.History().Load(context.Background(), sessionID)
+	if err != nil {
+		t.Fatalf("load history: %v", err)
+	}
+	if !strings.Contains(fixMessageTexts(loaded), compact.SummaryPrefix) {
+		t.Fatalf("fallback history has no window summary: %q", fixMessageTexts(loaded))
 	}
 }

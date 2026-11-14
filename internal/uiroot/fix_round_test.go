@@ -89,8 +89,9 @@ func TestPaletteKeepsChosenRowVisibleAfterReopen(t *testing.T) {
 // TestPaletteReopenStartsFromFirstRow covers the stale-list half of SH-02: a
 // reused ListState follows the previous opening's chosen item and writes its
 // old index back into the palette selection while the reopened frame builds, so
-// the visible first row was not the row Enter acted on. The palette now resets
-// its list state on every open, and the painted choice is row 0.
+// the visible first row was not the row Enter acted on. Opening the palette is
+// an app choice of row 0 through ListState.Choose, which forgets the previous
+// opening's chosen key, and the painted choice is row 0.
 func TestPaletteReopenStartsFromFirstRow(t *testing.T) {
 	r := newTestRoot(t)
 	mustScreen(t, r, textScreen("home", "首页", "body-home", 10))
@@ -123,6 +124,97 @@ func TestPaletteReopenStartsFromFirstRow(t *testing.T) {
 	}
 	if got := accentPixels(tt); got < 5000 {
 		t.Fatalf("reopened palette paints no chosen row: accent pixels = %d", got)
+	}
+}
+
+// TestPaletteFilterChangeChoosesFirstVisibleRow covers the Choose half of the
+// palette's choice model (mygo ListState.Choose): a filter change is an app
+// choice of the first visible match. Writing the index alone loses to the
+// List's Key memory, which keeps the command chosen before the filter chosen
+// and moves the index with it as rows come back above it (the SH-02 class of
+// invisible target: Enter would run a row other than the painted first one).
+func TestPaletteFilterChangeChoosesFirstVisibleRow(t *testing.T) {
+	r := newTestRoot(t)
+	mustScreen(t, r, textScreen("home", "首页", "body-home", 10))
+	ran := make(map[string]bool)
+	for i, title := range []string{"Alpha", "Beta", "Gamma", "Delta", "Epsilon"} {
+		title, i := title, i
+		mustCommand(t, r, contracts.CommandSpec{ID: fmt.Sprintf("cmd-%d", i), Title: title,
+			Order: i * 10, Run: func() error { ran[title] = true; return nil }})
+	}
+	tt := newTestTester(t, r, 1200, 800)
+	tt.Frame()
+	r.togglePalette()
+	tt.Frame()
+
+	// Filter to the commands with an "e": Beta is the first visible match.
+	tt.Type("e")
+	tt.Frame()
+	if r.paletteSelected != 0 {
+		t.Fatalf("paletteSelected after filtering = %d, want the first match Beta (0)", r.paletteSelected)
+	}
+
+	// Clearing the query brings Alpha back above Beta. The app chooses row 0
+	// again; without Choose the List would follow the chosen command's key and
+	// leave the choice on Beta, now row 1.
+	tt.Key(ui.Cmd, ui.KeyA)
+	tt.Key(0, ui.KeyBackspace)
+	tt.Frame()
+	if r.paletteSelected != 0 {
+		t.Fatalf("paletteSelected after clearing the filter = %d, want the first row Alpha (0)", r.paletteSelected)
+	}
+	if got := accentPixels(tt); got < 5000 {
+		t.Fatalf("filtered palette paints no chosen row: accent pixels = %d (a row is about 19k)", got)
+	}
+	// Enter runs the row the user sees.
+	tt.Key(0, ui.KeyEnter)
+	tt.Frame()
+	requireNoText(t, tt, "命令面板")
+	if !ran["Alpha"] || ran["Beta"] || ran["Gamma"] || ran["Delta"] || ran["Epsilon"] {
+		t.Fatalf("Enter ran %v, want only the visible first row Alpha", ran)
+	}
+}
+
+// TestPaletteReopenForgetsPreviousChosenCommand covers the List's key memory
+// across openings: the command chosen last (a filtered row 0) keeps its key, so
+// a reopened palette that only wrote *Selected would have the List follow that
+// key to its new row. Opening is an app choice of row 0 through Choose, and
+// Enter runs that visible row.
+func TestPaletteReopenForgetsPreviousChosenCommand(t *testing.T) {
+	r := newTestRoot(t)
+	mustScreen(t, r, textScreen("home", "首页", "body-home", 10))
+	ran := make(map[string]bool)
+	for i, title := range []string{"Alpha", "Beta", "Gamma"} {
+		title, i := title, i
+		mustCommand(t, r, contracts.CommandSpec{ID: fmt.Sprintf("cmd-%d", i), Title: title,
+			Order: i * 10, Run: func() error { ran[title] = true; return nil }})
+	}
+	tt := newTestTester(t, r, 1200, 800)
+	tt.Frame()
+	r.togglePalette()
+	tt.Frame()
+	// Filter to Gamma, the only match, so the chosen command's key is row 0.
+	tt.Type("Gamma")
+	tt.Frame()
+	if r.paletteSelected != 0 {
+		t.Fatalf("paletteSelected with one match = %d, want 0", r.paletteSelected)
+	}
+	tt.Key(0, ui.KeyEscape)
+	tt.Frame()
+	requireNoText(t, tt, "命令面板")
+
+	// Reopened without the filter, Gamma is now the third row: the fresh choice
+	// stays on the first row, Alpha.
+	r.togglePalette()
+	tt.Frame()
+	if r.paletteSelected != 0 {
+		t.Fatalf("reopened palette followed the previous chosen command to row %d, want 0", r.paletteSelected)
+	}
+	tt.Key(0, ui.KeyEnter)
+	tt.Frame()
+	requireNoText(t, tt, "命令面板")
+	if !ran["Alpha"] || ran["Beta"] || ran["Gamma"] {
+		t.Fatalf("Enter after reopen ran %v, want only the first row Alpha", ran)
 	}
 }
 

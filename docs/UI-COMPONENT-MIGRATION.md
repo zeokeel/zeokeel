@@ -131,3 +131,19 @@ tabs 下划线、思考/工具行 trigger、toast parts、附件 chip、设置�
   `Label=角色+序号`（避免 Markdown 源泄漏进 a11y 树）、`FollowEnd` 流式跟随、
   折叠 `HoldPlace`、`ScrollToEnd` 回到最新、首帧用 `chatListSeen` 防闪烁）；长会话
   只构建可见行，旧的「加载更早」有界窗口被 List 虚拟化取代。
+
+## 4. mygo v0.9.0 增量（2026-11-14）
+
+v0.8.3 → v0.9.0 升级时逐项核对（证据见 `.cache/upgrade-review/mygo.md`）。
+
+| 项 | 状态 | 说明 |
+|---|---|---|
+| 命令面板选择 | ✅ 已迁移 | 过滤/重开用 `ListState.Choose(0)` 代替直接写 `Selected` + 夹取，消除「按 key 记住上一行」导致的选择漂移 |
+| 壳层 landmark | ✅ 已接入 | `RoleBanner`/`RoleMain`/`RoleComplementary`（侧栏+右栏）/`RoleContentInfo` + Label；右栏 tabpanel 用 `RoleTabPanel`+`Label`+`Controls(panel)` |
+| 文件语言识别 | ✅ 已迁移 | `editor.LanguageForText(path, data)`（无扩展名脚本按 shebang） |
+| 运行状态行 | ✅ 已加固 | `RoleStatus` 行加稳定 `c.Key`（v0.9 整段朗读语义下防元素错位） |
+| Focus 自动 reveal | ✅ 已回归验证 | composer 重聚焦、检视器关闭归还焦点两处帧测试断言滚动偏移不变；设置深链/文件 tab 走 `ScrollIntoView` 非焦点路径，无需 `PreventScroll` |
+| 菜单键打开选中行菜单 | ✅ 补测试 | sidebar/rightpanel 用 `ui.KeyContextMenu` 与 `Shift+F10` 断言 |
+| `SplitButton` | ⏸ 不迁移 | 产品没有「同一动作 + 菜单」控件；composer 保持独立按钮（无删除收益） |
+| `ScrollbarStyle` / markdown `CodeLink` / `ClipboardOptions.Concealed` / `Power.KeepRunning` / `ClearWindowStates` | ⏸ 未采用 | 属新增功能而非替换自写代码；需要产品/设计决定 |
+| 命令面板行 `ButtonBase`→`RowClicked` | ⏸ 保留自绘 | 行角色 button→listitem 会改变 a11y 语义，已在 §2 登记为刻意偏离 |
