@@ -4,6 +4,32 @@ All notable changes to ZeoKeel are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/) and the project adheres to
 [Semantic Versioning](https://semver.org/).
 
+## [0.2.34] - 2026-11-14
+
+框架升级与官方化收口：mygo v0.9.0、rig v0.16.2（修复 Windows 每次工具调用弹控制台窗口），并把能交给框架的自写代码换掉。
+
+### Changed
+
+- **mygo v0.8.3 → v0.9.0**：唯一 breaking 是 `sqlite.LibraryPath`/`MYGO_SQLITE_LIBRARY` 移除（产品未使用，库走 `modernc.org/sqlite`）；`ui`/`editor`/`markdown`/`richtext` 无导出符号删除；新增 6 个 mygo 传递依赖（crypto/circl/compress/xz/rpm/x-crypto），`CGO_ENABLED=0` 构建通过。接入：命令面板 `ListState.Choose`、壳层 a11y landmark（Banner/Main/Complementary/ContentInfo）与右栏 `RoleTabPanel`+`Controls(panel)`、`editor.LanguageForText`、runstatus 稳定 `c.Key`。
+- **zeokeel-rig v0.16.1 → v0.16.2**：rig 新增 `internal/procattr.HideWindow`，所有 `exec.Command` 子进程（shell/pwsh/job/terminal/MCP/LSP/PTC/沙箱 helper）在 Windows 上隐藏控制台窗口，ConPTY 同步隐藏；修复 Windows 每次工具调用弹黑窗。无公共 API/模型可见变更。
+
+### Removed（能不自己写就不自己写；每项先补回归测试再实现）
+
+- 自写 spill（258 行）→ `rig.SpillPolicy`：产品只保留落盘目录求值（64 行）。模型看到 rig 摘要（路径+字节数+240 B preview），同轮后续请求不再携带全文；旧会话的中文指针不再被 rig 识别（文件仍可人工打开）。
+- 自写 `ask_user`/`plan_review`/`exit_plan_mode`/`goal` → `rig/tools/hosttools`：工具名与顺序不变；`present`（内容 artifact）保留；`plan_review` 参数 `plan`→`content`；`goal` 增加 rig 生命周期 `update`（经 `contracts.GoalPauser`/`GoalLifecycler` 适配，`blocked` 返回可读错误）；headless 仍不注册 plan 对。
+- 两处手写 `xdg-open`/`open`/`explorer` → `mygo.Shell.OpenPath`（保留测试 seam）。
+
+### Fixed
+
+- 手动 `/compact`：补 `WindowCompactor` fallback，预算扣除 system prompt（与自动压缩一致）。
+- 退出：`OnBeforeQuit` 处理 `QuitEvent.SessionEnding`（注销/关机），同步收尾并 flush 日志。
+
+### 验证
+
+- 本仓库：`gofmt`、`go build ./...`（含 `CGO_ENABLED=0` 与 `GOOS=windows/amd64`）、`go vet ./...`、`go tool mygo vet .`、`go test ./... -count=1`（43 包）、受影响包 `-race`；`designlint --strict --baseline` 0 new、`scripts/design-check.sh` 6/6、`go mod verify`、`ui-snapshot` 96 PNG（视觉无变化）。
+- rig v0.16.2：release workflow 全绿（CI + tag verify + clean-room smoke），已发布。
+- 已知限制：Windows 控制台窗口行为需真机复核（CI 仅交叉编译）；`goal update=blocked` 无产品生命周期，返回可读错误。
+
 ## [0.2.33] - 2026-11-12
 
 Windows 沙箱 ACL 探测崩溃的修复（升级 rig v0.16.1）：Windows 上所有命令工具与终端恢复可用。

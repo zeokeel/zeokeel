@@ -881,7 +881,7 @@ v0.2.12 的 package-macos job 在 GitHub Ubuntu runner 上构建 libdmg-hfsplus 
 - **变更**：`zeokeel-rig v0.16.0 → v0.16.1`。修复 Windows ACL 探测 `0xC0000005`：`winWindowsDirectory` 把 `GetWindowsDirectoryW(lpBuffer, uSize)` 参数传反，容量 260（0x104）被当成输出缓冲区指针并写入，probe helper 以 exit status 2 崩溃，沙箱 runner fail closed —— Windows 上 `pwsh`/`job_start`/`terminal_*` 全部不可用（v0.2.29 起）。同一 rig 版本还修复：Windows `terminal_*` 的遗留早退（v0.16.0 的 ConPTY 实现不可达，删除后走 ConPTY/pipe 回退）、Windows 10 上缺失 `GetTempPath2W` 导致的探测 panic（先 `Find` 再 `Call`，回退 `GetTempPathW`）。ZeoKeel 侧无代码改动，公共 API 无破坏性变更。
 - **验证**：本仓库 `gofmt`、`go build ./...`、`go vet ./...`、`go test ./...`（CGO_ENABLED=0）PASS；`GOOS=windows/amd64`、`GOOS=windows/arm64` 交叉构建 PASS。rig v0.16.1 tag 工作流全量 CI（含 clean-room `go get` + `go mod verify`）PASS，新增 Windows 运行时回归测试 `TestWindowsRuntimeKnownFolders`。本次无 UI/行为改动，未跑 `scripts/verify.sh` 全量。
 
-## 0.2.34 草案（2026-11-14：mygo v0.9.0 + rig v0.16.2 + 官方化替换）
+## 0.2.34（2026-11-14：mygo v0.9.0 + rig v0.16.2 + 官方化替换）
 
 - **依赖升级**：`mygo v0.8.3 → v0.9.0`（唯一 breaking 是 `sqlite.LibraryPath`/`MYGO_SQLITE_LIBRARY` 移除，产品未使用；新增 6 个传递依赖：`ProtonMail/go-crypto`、`cloudflare/circl`、`klauspost/compress`、`ulikunitz/xz`、`digitalxero.dev/rpm`、`x/crypto`，均为 mygo 传递依赖，`CGO_ENABLED=0` 构建通过）；`zeokeel-rig v0.16.1 → v0.16.2`（新增 `internal/procattr.HideWindow`：所有子进程 spawn 隐藏 Windows 控制台窗口，修复 Windows 每次工具调用弹黑窗；ConPTY `STARTUPINFOEX` 同步隐藏；无公共 API / 模型可见变更；补 rig 源级覆盖测试，任何未来 spawn 忘记准备都会失败）。
 - **官方化替换**（能不自己写就不自己写；逐项先写测试再实现）：
