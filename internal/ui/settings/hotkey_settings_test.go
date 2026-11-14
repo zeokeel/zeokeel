@@ -24,7 +24,7 @@ func TestAppearanceGlobalHotkeyDefaultsEmpty(t *testing.T) {
 
 	h.assertTexts(tester, "全局热键", "组合键 输入", "录入")
 	joined := strings.Join(tester.Texts(), " ")
-	for _, want := range []string{"留空关闭", "直接按组合键", "点页脚「应用」并重启后生效"} {
+	for _, want := range []string{"留空关闭", "点「应用」并重启后生效"} {
 		if !strings.Contains(joined, want) {
 			t.Fatalf("hotkey help does not mention %q; texts = %v", want, tester.Texts())
 		}
@@ -92,7 +92,7 @@ func TestAppearanceGlobalHotkeyEnglish(t *testing.T) {
 
 	h.assertTexts(tester, "Global hotkey", "Shortcut input", "Record")
 	joined := strings.Join(tester.Texts(), " ")
-	for _, want := range []string{"Leave empty to disable", "Press Record and press the combination", "after Apply and a restart"} {
+	for _, want := range []string{"Empty disables it", "after Apply and a restart"} {
 		if !strings.Contains(joined, want) {
 			t.Fatalf("hotkey help does not mention %q; texts = %v", want, tester.Texts())
 		}

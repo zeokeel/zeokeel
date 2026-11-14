@@ -97,9 +97,7 @@ func buildSkillsPage(c *ui.Context, t *design.Tokens, kctx cordis.Context, st *s
 		// edge (uikit.PageHeaderAction); the shell's footer owns explicit saves.
 		uikit.PageHeaderAction(c,
 			localized(locale, "技能", "Skills"),
-			localized(locale,
-				"从工作区技能目录（/skills、.agents/skills、.zeokeel/skills）、配置目录与 dataDir/skills 中发现的 SKILL.md 技能；工作区优先。",
-				"SKILL.md skills discovered in the workspace skill directories (/skills, .agents/skills, .zeokeel/skills), the configured directories and dataDir/skills; the workspace wins."),
+			"",
 			func(c *ui.Context) {
 				if editor != nil {
 					if design.Apply(ui.PrimaryButton(c, localized(locale, "新建技能", "New skill")),

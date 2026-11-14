@@ -59,11 +59,8 @@ func TestBehaviorPageWorkStepsDefaults(t *testing.T) {
 
 	h.assertTexts(tester,
 		"工作步骤", "工作步骤展示", "工作步骤收起时机",
-		"选择希望看到多少工具调用细节。默认：标准。",
 		"简洁", "标准", "详细", "完全展开",
 		"回答结束后", "下次有新消息时",
-		"标准：一行状态 + 实时细节，回答结束后折叠",
-		"完全展开：不折叠不分组，全部展开",
 	)
 	requireSegmentChecked(t, tester, "标准")
 	requireSegmentChecked(t, tester, "回答结束后")
@@ -200,11 +197,8 @@ func TestBehaviorPageWorkStepsEnglish(t *testing.T) {
 
 	h.assertTexts(tester,
 		"Work details", "When to collapse work details",
-		"Choose how much tool-call detail to see. Default: standard.",
 		"Compact", "Standard", "Detailed", "Verbose",
 		"After the answer", "On the next message",
-		"One status line + live details, folded after the answer",
-		"Everything expanded, never folded or grouped",
 	)
 	h.assertNoTexts(tester, "工作步骤", "标准：")
 	requireSegmentChecked(t, tester, "Standard")

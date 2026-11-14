@@ -220,9 +220,7 @@ func buildBehaviorPage(c *ui.Context, runtime contracts.UIRuntime,
 	sandboxService contracts.SandboxService) {
 	t := design.Of(c)
 	ui.Column(c).FillWidth().Gap(design.Space4).Children(func() {
-		uikit.PageHeader(c, localized(locale, "行为", "Behavior"), localized(locale,
-			"代理的默认权限与工具行为；修改立即生效。",
-			"Default agent permissions and tool behavior; changes apply immediately."))
+		uikit.PageHeader(c, localized(locale, "行为", "Behavior"), "")
 		uikit.Section(c, localized(locale, "默认代理权限", "Default agent permission"), func(*ui.Context) {
 			current := agentPermissionMode(store.Get(contracts.SettingAgentPermission, ""))
 			ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(design.Space2).Children(func() {
@@ -255,16 +253,6 @@ func buildBehaviorPage(c *ui.Context, runtime contracts.UIRuntime,
 					}
 				}).Tooltip(localized(locale, "选择默认权限模式", "Choose the default permission mode"))
 			})
-			ui.Column(c).FillWidth().Gap(design.Space1).PaddingY(design.Space1).Children(func() {
-				for _, choice := range behaviorPermissions {
-					uikit.Bullet(c, localized(locale, choice.zh, choice.en)+localized(locale, "：", ": ")+
-						localized(locale, choice.meaningZh, choice.meaningEn))
-				}
-			})
-			design.Apply(ui.Text(c, localized(locale,
-				"修改立即生效（与会话「会话设置」菜单的权限模式共用）。",
-				"Changes apply immediately (shared with the session toolbar).")),
-				t.TextMuted(design.TypeXXS)).MaxLines(2)
 		})
 		// OS sandbox: the always-on kernel-level file-effect enforcement that
 		// lets the agent gate auto-allow shell tools. It sits next to the
@@ -276,10 +264,6 @@ func buildBehaviorPage(c *ui.Context, runtime contracts.UIRuntime,
 		// the daily permission choice; it is a display preference, not a
 		// low-frequency knob.
 		uikit.Section(c, localized(locale, "工作步骤", "Work details"), func(*ui.Context) {
-			design.Apply(ui.Text(c, localized(locale,
-				"选择希望看到多少工具调用细节。默认：标准。",
-				"Choose how much tool-call detail to see. Default: standard.")),
-				t.TextMuted(design.TypeXS)).MaxLines(2)
 			modeIndex := workStepsModeIndex(contracts.NormalizeWorkStepsMode(
 				store.Get(contracts.SettingWorkStepsMode, "")))
 			ui.Field(c, localized(locale, "工作步骤展示", "Work details"), func() {
@@ -288,12 +272,6 @@ func buildBehaviorPage(c *ui.Context, runtime contracts.UIRuntime,
 					workStepsModeLabels(locale)...) {
 					saveBehaviorSetting(st, runtime, store, locale,
 						contracts.SettingWorkStepsMode, workStepsModeValue(modeIndex))
-				}
-			})
-			ui.Column(c).FillWidth().Gap(design.Space1).PaddingY(design.Space1).Children(func() {
-				for _, choice := range workStepsModeChoices {
-					uikit.Bullet(c, localized(locale, choice.zh, choice.en)+
-						localized(locale, "：", ": ")+localized(locale, choice.meaningZh, choice.meaningEn))
 				}
 			})
 			collapseIndex := workStepsCollapseIndex(contracts.NormalizeWorkStepsCollapse(
@@ -306,9 +284,7 @@ func buildBehaviorPage(c *ui.Context, runtime contracts.UIRuntime,
 						saveBehaviorSetting(st, runtime, store, locale,
 							contracts.SettingWorkStepsCollapse, workStepsCollapseValue(collapseIndex))
 					}
-				}).Description(localized(locale,
-				"「回答结束后」在本次回答完成时收起；「下次有新消息时」保留到新消息出现。",
-				"\"After the answer\" folds when this answer completes; \"On the next message\" keeps them open until the next message arrives."))
+				})
 		})
 		// Progressive disclosure (settings-complexity audit P4): only the daily
 		// permission choice and the work-details preference stay visible; the
@@ -353,8 +329,8 @@ func buildBehaviorPage(c *ui.Context, runtime contracts.UIRuntime,
 							saveAgentsFile(st, store, locale)
 						}
 					}).Description(localized(locale,
-						"运行时从当前工作区读取并注入系统提示；重启/下次运行生效；留空关闭。",
-						"Read from the current workspace at run time and appended to the system prompt; takes effect on the next run; empty disables it."))
+						"留空关闭；下次运行生效。",
+						"Empty disables it; applies on the next run."))
 				})
 			})
 		})

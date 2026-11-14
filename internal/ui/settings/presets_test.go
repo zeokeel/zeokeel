@@ -36,7 +36,7 @@ func TestPresetsPageBuiltInDefaults(t *testing.T) {
 	tester.Frame()
 	openPresetsPage(t, h, tester)
 
-	h.assertTexts(tester, "预设", "提示词预设", "内置默认", "保存后自定义生效",
+	h.assertTexts(tester, "预设", "内置默认",
 		"简洁回答", "代码审查", "逐步推理", "恢复内置默认")
 	if got := store.get(contracts.SettingPromptPresets); got != "" {
 		t.Fatalf("built-in defaults wrote settings: %q", got)
@@ -157,7 +157,7 @@ func TestPresetsPageEnglish(t *testing.T) {
 		t.Fatalf("click Presets: %v", err)
 	}
 	tester.Frame()
-	h.assertTexts(tester, "Prompt presets", "Built-in defaults", "Restore built-in defaults", "Add")
+	h.assertTexts(tester, "Built-in defaults", "Restore built-in defaults", "Add")
 }
 
 var errSettingsWrite = errors.New("settings write failed")

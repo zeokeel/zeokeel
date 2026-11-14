@@ -19,7 +19,7 @@ func TestAppearanceCloseToTrayDefaultsOffAndPersists(t *testing.T) {
 	h.click(tester, "模型")
 	h.click(tester, "外观")
 
-	h.assertTexts(tester, "桌面集成", "关闭时最小化到托盘", "需要系统托盘支持")
+	h.assertTexts(tester, "桌面集成", "关闭时最小化到托盘", "重启应用生效")
 
 	h.click(tester, "关闭时最小化到托盘")
 	if got := store.get(contracts.SettingCloseToTray); got != "true" {
@@ -53,7 +53,7 @@ func TestAppearanceCloseToTrayEnglish(t *testing.T) {
 	h.click(tester, "Model")
 	h.click(tester, "Appearance")
 
-	h.assertTexts(tester, "Desktop integration", "Close to system tray", "Requires system tray support")
+	h.assertTexts(tester, "Desktop integration", "Close to system tray", "Takes effect after a restart")
 	h.click(tester, "Close to system tray")
 	if got := h.settings.get(contracts.SettingCloseToTray); got != "true" {
 		t.Fatalf("%s = %q after enabling, want true", contracts.SettingCloseToTray, got)

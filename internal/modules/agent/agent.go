@@ -406,8 +406,14 @@ type sessionState struct {
 	updatedAt   time.Time
 	messages    []contracts.ChatMessage
 	running     bool
-	err         string
-	cancel      context.CancelFunc
+	// waiting marks a running turn whose model request has produced no output
+	// yet (no text/reasoning delta and no tool call). The sidebar renders it as
+	// 等待回复 instead of 运行中. It is set when the run starts, cleared by the
+	// first output event and always by finish; it is never true without
+	// running.
+	waiting bool
+	err     string
+	cancel  context.CancelFunc
 	// assistant is the index of the streaming assistant placeholder, or -1.
 	assistant int
 	// compacting marks an in-flight manual compaction (/compact): Send and
@@ -1313,6 +1319,24 @@ func (s *service) SetSessionArchived(sessionID string, archived bool) error {
 	return nil
 }
 
+// setSessionUnread persists one session's unread completion flag, mirroring the
+// pin/archive settings rows: "true" while a background completion is unseen,
+// "false" once the user opens the session or a new run starts. Best effort (a
+// failed write is logged but never breaks the run); callers must not hold s.mu
+// because the settings store is foreign code.
+func (s *service) setSessionUnread(sessionID string, unread bool) {
+	if s.settings == nil {
+		return
+	}
+	value := "false"
+	if unread {
+		value = "true"
+	}
+	if err := s.settings.Set(contracts.SessionUnreadSettingKey(sessionID), value); err != nil {
+		s.logger.Printf("[agent] persist unread flag of session %s: %v", sessionID, err)
+	}
+}
+
 // sessionPinned reads one session's persisted pin flag ("false" when absent or
 // when no settings service is wired).
 func sessionPinned(settings contracts.SettingsService, sessionID string) bool {
@@ -1328,6 +1352,15 @@ func sessionArchived(settings contracts.SettingsService, sessionID string) bool 
 		return false
 	}
 	return settings.Get(contracts.SessionArchivedSettingKey(sessionID), "false") == "true"
+}
+
+// sessionUnread reads one session's persisted unread completion flag ("false"
+// when absent or when no settings service is wired).
+func sessionUnread(settings contracts.SettingsService, sessionID string) bool {
+	if settings == nil {
+		return false
+	}
+	return settings.Get(contracts.SessionUnreadSettingKey(sessionID), "false") == "true"
 }
 
 // sessionOrigin reads one session's persisted provenance ("" for a user
@@ -1589,6 +1622,10 @@ func (s *service) DeleteSession(sessionID string) error {
 	// with the session. The settings row is best effort (the session is already
 	// gone; a failed cleanup must not fail the delete).
 	s.clearAllowedToolsRow(sessionID)
+	// The unread row cannot be removed (SettingsService has no delete API), so
+	// clear it to "false" exactly like the pin/archive setters do; the deleted
+	// session never lists again either way.
+	s.setSessionUnread(sessionID, false)
 	if cleaner, ok := s.taskBoard.(contracts.TaskBoardCleaner); ok {
 		if err := cleaner.RemoveTaskBoardForSession(sessionID); err != nil {
 			s.logger.Printf("[agent] remove task board for session %s: %v", sessionID, err)
@@ -1633,20 +1670,28 @@ func (s *service) Session(sessionID string) (contracts.ChatSession, bool) {
 // Sessions lists sessions, newest updated first.
 func (s *service) Sessions() []contracts.ChatSessionInfo {
 	s.mu.Lock()
-	defer s.mu.Unlock()
 	infos := make([]contracts.ChatSessionInfo, 0, len(s.sessions))
 	for _, state := range s.sessions {
 		infos = append(infos, contracts.ChatSessionInfo{
 			ID:           state.id,
 			WorkspaceID:  state.workspaceID,
 			Title:        state.title,
-			Pinned:       sessionPinned(s.settings, state.id),
-			Archived:     sessionArchived(s.settings, state.id),
 			MessageCount: len(state.messages),
 			Running:      state.running,
+			Waiting:      state.waiting,
 			UpdatedAt:    state.updatedAt,
-			Origin:       sessionOrigin(s.settings, state.id),
 		})
+	}
+	settings := s.settings
+	s.mu.Unlock()
+	// The persisted flags are read after unlocking: they live in the settings
+	// store, and a store call must not run while holding s.mu (the same reason
+	// the pin/archive setters release the lock before writing).
+	for index := range infos {
+		infos[index].Pinned = sessionPinned(settings, infos[index].ID)
+		infos[index].Archived = sessionArchived(settings, infos[index].ID)
+		infos[index].Unread = sessionUnread(settings, infos[index].ID)
+		infos[index].Origin = sessionOrigin(settings, infos[index].ID)
 	}
 	sort.SliceStable(infos, func(i, j int) bool {
 		if !infos[i].UpdatedAt.Equal(infos[j].UpdatedAt) {
@@ -1673,6 +1718,11 @@ func (s *service) SetActiveSession(sessionID string) error {
 	}
 	s.active = sessionID
 	s.mu.Unlock()
+	// Opening a session consumes its unread completion: the user is looking at
+	// the reply now. This runs after the active switch (not under s.mu) so a
+	// finish racing with this call sees the new active session and does not
+	// mark it unread after this clear.
+	s.setSessionUnread(sessionID, false)
 	s.notify(sessionID)
 	return nil
 }
@@ -1777,6 +1827,9 @@ func (s *service) send(sessionID, prompt string, attachments []contracts.Attachm
 	)
 	state.assistant = len(state.messages) - 1
 	state.running = true
+	// The request is in flight but the model has not produced anything yet:
+	// the sidebar shows 等待回复 until the first output event arrives.
+	state.waiting = true
 	state.err = ""
 	state.updatedAt = now
 	// A session created while no workspace was open binds the workspace that
@@ -1800,6 +1853,12 @@ func (s *service) send(sessionID, prompt string, attachments []contracts.Attachm
 		cancel()
 		return fmt.Errorf("agent: unknown chat session %q", sessionID)
 	}
+
+	// A new run supersedes a background completion the user has not opened yet:
+	// the session is producing output again, so its unread flag is cleared here
+	// (finish marks it again only if the run ends while another session is
+	// active).
+	s.setSessionUnread(sessionID, false)
 
 	if s.store != nil {
 		if err := s.store.CreateSession(runCtx, sessionID, title); err != nil {
@@ -1921,11 +1980,18 @@ func (s *service) Regenerate(sessionID string) error {
 	state.messages = truncated
 	state.assistant = len(state.messages) - 1
 	state.running = true
+	// Same waiting window as Send: nothing has streamed yet.
+	state.waiting = true
 	state.err = ""
 	state.updatedAt = now
 	runCtx, cancel := context.WithCancel(context.Background())
 	state.cancel = cancel
 	s.mu.Unlock()
+
+	// Same as Send: retrying a turn is the user re-engaging with this session,
+	// so a background completion flag is cleared when the run starts. If the
+	// durable rewind below fails the session only stays idle and not unread.
+	s.setSessionUnread(sessionID, false)
 
 	// The retried turn gets the same reference expansion the original Send did:
 	// the read model keeps the original prompt, so expand it again for the model.
@@ -1956,6 +2022,7 @@ func (s *service) Regenerate(sessionID string) error {
 				current.messages = previous
 				current.assistant = previousAssistant
 				current.running = false
+				current.waiting = false
 				current.cancel = nil
 				current.err = previousErr
 				current.updatedAt = previousUpdatedAt
@@ -2287,6 +2354,15 @@ func (s *service) handleEvent(ctx context.Context, sessionID, workspaceRoot stri
 		s.mu.Unlock()
 		return
 	}
+	// The first model output of the run ends the "waiting for a reply" window:
+	// the request is no longer silent, so the sidebar switches from 等待回复 to
+	// 运行中. Usage events do not count (no output yet). A new run can only
+	// start after the previous finish settled, so a late event can never clear
+	// a newer run's flag.
+	switch event.Type {
+	case rig.EventTextDelta, rig.EventReasoningDelta, rig.EventToolCall:
+		state.waiting = false
+	}
 	if message := state.assistantMessage(); message != nil {
 		switch event.Type {
 		case rig.EventTextDelta:
@@ -2476,6 +2552,10 @@ func (s *service) finishWithReason(sessionID string, ctx context.Context, runErr
 	if errText != "" {
 		state.err = errText
 	}
+	// A settled run is never waiting, whatever the outcome: clear it together
+	// with the read-model updates (running itself stays set until the history
+	// write below settles).
+	state.waiting = false
 	state.updatedAt = time.Now()
 	// running/cancel stay set for now: a new run must not start while the
 	// interrupted turn below is still being written.
@@ -2489,12 +2569,34 @@ func (s *service) finishWithReason(sessionID string, ctx context.Context, runErr
 	}
 
 	s.mu.Lock()
+	markUnread := false
 	if current, exists := s.sessions[sessionID]; exists {
 		current.running = false
+		current.waiting = false
 		current.cancel = nil
 		current.updatedAt = time.Now()
+		// A run that finished while the user was looking at another session
+		// leaves an unread completion behind (the active session is being
+		// watched, so it never does). Persist it after unlocking: the settings
+		// store must not be called under s.mu.
+		markUnread = s.active != sessionID
 	}
 	s.mu.Unlock()
+	if markUnread {
+		s.setSessionUnread(sessionID, true)
+		// The settings write above runs outside s.mu, so SetActiveSession, Send
+		// and DeleteSession may have cleared the row between the mark and the
+		// write (each clears after changing the state under the lock). Re-check
+		// once so a user action racing the settle always wins; an invalidation
+		// after this check writes its own "false" last.
+		s.mu.Lock()
+		current, exists := s.sessions[sessionID]
+		stale := !exists || s.active == sessionID || current.running
+		s.mu.Unlock()
+		if stale {
+			s.setSessionUnread(sessionID, false)
+		}
+	}
 	s.notify(sessionID)
 	if runErr != nil && !errors.Is(runErr, context.Canceled) && !errors.Is(runErr, context.DeadlineExceeded) {
 		s.logger.Printf("[agent] session %s run failed: %v", sessionID, runErr)

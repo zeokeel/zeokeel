@@ -122,7 +122,20 @@ type ChatSessionInfo struct {
 	Archived     bool
 	MessageCount int
 	Running      bool
-	UpdatedAt    time.Time
+	// Waiting marks a running session whose model request has not produced any
+	// output yet: the user sent a prompt and is waiting for the first reply
+	// token/tool call. It is only meaningful while Running; a finished run is
+	// never Waiting. The sidebar uses it to tell 等待回复 from an actively
+	// streaming 运行中 run.
+	Waiting bool
+	// Unread marks a run that finished while the user was not looking at the
+	// session: the reply arrived in the background and has not been viewed yet.
+	// Becoming the active session (SetActiveSession) or starting the next run
+	// clears it. It is persisted through SessionUnreadSettingKey, so a reply
+	// that arrives while the app is closed behind another session survives a
+	// restart.
+	Unread    bool
+	UpdatedAt time.Time
 	// Origin records who created the session: "" (a user session), "automation"
 	// (an automation-run session) or "subagent" (a child conversation once
 	// child sessions become durable). Sidebar surfaces hide non-user origins.
@@ -358,6 +371,14 @@ type SessionRegenerator interface {
 // flag (pins and archives both live in settings, not in the schema).
 func SessionArchivedSettingKey(sessionID string) string {
 	return "session." + sessionID + ".archived"
+}
+
+// SessionUnreadSettingKey is the settings row storing a session's unread
+// completion flag ("true" when a run finished while the session was not the
+// active one). The agent writes it on completion and clears it when the session
+// is opened (SetActiveSession) or a new run starts.
+func SessionUnreadSettingKey(sessionID string) string {
+	return "session." + sessionID + ".unread"
 }
 
 // SessionArchiver is the optional half of the chat service that archives or

@@ -41,7 +41,7 @@ func TestMCPPageEmptyState(t *testing.T) {
 	tester.Frame()
 	openMCPPage(t, h, tester)
 
-	h.assertTexts(tester, "MCP", "通过 Streamable HTTP 或 stdio 连接 MCP 服务器；修改后重启生效（stdio 子进程在启动时拉起）。",
+	h.assertTexts(tester, "MCP",
 		"MCP 服务器", "还没有配置 MCP 服务器", "添加服务器", "名称", "URL", "添加")
 }
 
@@ -168,7 +168,6 @@ func TestMCPPageEnglishCopy(t *testing.T) {
 
 	h.click(tester, "MCP")
 	h.assertTexts(tester,
-		"Connect MCP servers over Streamable HTTP or stdio; changes apply after a restart (stdio subprocesses start on launch).",
 		"MCP servers", "Add server", "Name", "URL", "Add", "Server actions")
 	h.assertNoTexts(tester, "添加服务器", "服务器操作")
 }
@@ -222,7 +221,7 @@ func TestMCPPageWorkspaceOptInToggle(t *testing.T) {
 	tester.Frame()
 	openMCPPage(t, h, tester)
 
-	h.assertTexts(tester, "工作区 MCP", "读取工作区 mcp.json", "当前没有打开工作区")
+	h.assertTexts(tester, "工作区 MCP", "读取工作区 mcp.json", "打开工作区并重启后读取其 mcp.json")
 	if got := store.get(contracts.SettingMCPWorkspaceOptIn); got != "" {
 		t.Fatalf("default opt-in = %q, want unset/off", got)
 	}

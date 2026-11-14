@@ -20,11 +20,9 @@ func TestBehaviorPageDefaultsWorkspace(t *testing.T) {
 	tester.Frame()
 	h.click(tester, "行为")
 	// The default is workspace-write: normal in-workspace file edits need no
-	// prompt. Exactly the three presets are listed, in preset order.
+	// prompt. The three presets live in the permission menu.
 	h.assertTexts(tester, "行为", "默认代理权限", "当前：工作区可写",
-		"只读", "工作区可写", "所有权限",
-		"只自动允许只读与信息类工具，其他操作会询问",
-		"工作区内的文件读写自动允许，其他操作询问", "修改立即生效")
+		"工作区可写")
 	h.assertNoTexts(tester, "完全访问", "从不")
 	if raw := store.get(contracts.SettingAgentPermission); raw != "" {
 		t.Fatalf("defaults wrote the permission row: %q", raw)
@@ -112,10 +110,7 @@ func TestBehaviorPageEnglishCopy(t *testing.T) {
 	tester.Frame()
 	h.click(tester, "Behavior")
 	h.assertTexts(tester, "Behavior", "Default agent permission", "Current: Workspace-write",
-		"Read-only", "Workspace-write", "All permissions",
-		"Auto-allow read-only and informational tools; ask for the rest",
-		"Auto-allow workspace file reads and writes; ask for the rest",
-		"Changes apply immediately")
+		"Workspace-write")
 	h.assertNoTexts(tester, "Ask", "Full access", "Never")
 	h.click(tester, "Workspace-write")
 	h.click(tester, "All permissions")

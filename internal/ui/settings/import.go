@@ -63,9 +63,7 @@ func buildImportPage(c *ui.Context, t *design.Tokens, kctx cordis.Context, runti
 	importer, hasImporter := kctx.Get(contracts.KeyImporter)
 
 	ui.Column(c).FillWidth().Gap(design.Space4).Children(func() {
-		uikit.PageHeader(c, localized(locale, "导入", "Import"), localized(locale,
-			"从 DSH 桌面版把会话和工作区搬过来：选好它的数据目录，先扫描预览，确认后再导入。扫描不会改动任何数据。",
-			"Bring your sessions and workspaces over from DSH desktop: pick its data directory, scan to preview, then import. Scanning changes nothing."))
+		uikit.PageHeader(c, localized(locale, "导入", "Import"), "")
 		if !hasImporter {
 			uikit.EmptyState(c, localized(locale,
 				"导入服务未启用", "Import service is not enabled"))
@@ -86,9 +84,7 @@ func buildImportPage(c *ui.Context, t *design.Tokens, kctx cordis.Context, runti
 					st.dirErr = ""
 					st.importErr = ""
 				}
-			}).Description(localized(locale,
-				"DSH 桌面版的数据目录；先扫描预览，再导入。",
-				"The DSH desktop data directory; scan to preview, then import."))
+			})
 			ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(design.Space2).Children(func() {
 				if design.Apply(ui.Button(c, localized(locale, "浏览…", "Browse…")),
 					t.SecondaryButton()).Tooltip(localized(locale,

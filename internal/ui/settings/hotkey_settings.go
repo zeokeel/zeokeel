@@ -258,8 +258,8 @@ func buildGlobalHotkeySection(c *ui.Context, t *design.Tokens, state *appearance
 				}
 			})
 		}).Description(localized(locale,
-			"留空关闭。点「录入」后直接按组合键，或输入如 Ctrl + Shift + Space；点页脚「应用」并重启后生效。",
-			"Leave empty to disable. Press Record and press the combination, or type e.g. Ctrl + Shift + Space; it applies after Apply and a restart.")).
+			"留空关闭；点「应用」并重启后生效。",
+			"Empty disables it; applies after Apply and a restart.")).
 			Error(state.hotkeyError)
 		if state.capturing {
 			design.Apply(ui.Text(c, localized(locale, "按下组合键，Esc 取消",

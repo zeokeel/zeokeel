@@ -130,9 +130,7 @@ func memoryTimestamp(locale contracts.LocaleService, created time.Time) string {
 func buildMemoryPage(c *ui.Context, t *design.Tokens, kctx cordis.Context,
 	st *memoryPageState, settingsStore contracts.SettingsService, locale contracts.LocaleService) {
 	ui.Column(c).FillWidth().Gap(design.Space4).Children(func() {
-		uikit.PageHeader(c, localized(locale, "记忆", "Memory"), localized(locale,
-			"查看、搜索与管理所有工作区的记忆；列表会标注每条记忆的作用域。",
-			"Browse, search and manage memories of every workspace; each row shows its scope."))
+		uikit.PageHeader(c, localized(locale, "记忆", "Memory"), "")
 		store, hasStore := kctx.Get(contracts.KeyMemory)
 		if !hasStore || store == nil {
 			uikit.EmptyState(c, localized(locale, "未启用记忆后端", "Memory backend not enabled"))
@@ -273,9 +271,7 @@ func buildMemoryPage(c *ui.Context, t *design.Tokens, kctx cordis.Context,
 				if input.Submitted() {
 					add()
 				}
-			}).Description(localized(locale,
-				"添加一条记忆（作用域使用配置的默认值）；新记忆会追加到列表末尾。",
-				"Adds one memory (scope: the configured default); it appears at the end of the list."))
+			})
 			if st.notice != "" && st.noticeErr {
 				uikit.ErrorLine(c, st.notice)
 			}
@@ -385,8 +381,8 @@ func buildMemoryConsolidationPanel(c *ui.Context, t *design.Tokens, store contra
 	}
 	uikit.Section(c, localized(locale, "整理策略", "Consolidation policy"), func(*ui.Context) {
 		design.Apply(ui.Text(c, localized(locale,
-			"按策略确定性整理（不调用模型）：过期删除 + 超限保留最新；0 或留空表示不限制。保存后立即整理，应用启动和每次写入记忆时也会自动按该策略整理。",
-			"Deterministic consolidation (no model call): drop expired entries, then keep the newest up to the cap; 0 or empty means unlimited. Applied on save, on app start and after every memory write.")),
+			"0 或留空表示不限制；保存后立即整理。",
+			"0 or empty means unlimited; consolidation runs on save.")),
 			t.TextMuted(design.TypeXXS)).MaxLines(2)
 		ui.Row(c).FillWidth().Gap(design.Space3).AlignItems(ui.Start).Children(func() {
 			ui.Column(c).FillWidth().Grow(1).Children(func() {
@@ -658,9 +654,7 @@ func buildMemoryExtractionPanel(c *ui.Context, t *design.Tokens, kctx cordis.Con
 			"Enable model extraction (extract memories from recent chats; calls the model)")
 		ui.Form(c, func() {
 			if switchField(c, toggleLabel,
-				localized(locale,
-					"调用当前服务商，读取最近 20 条消息，最多写入 5 条记忆；仅手动触发，不做后台定时提取。",
-					"Calls the current provider, reads the recent 20 messages and stores at most 5 memories; manual trigger only, no background extraction."),
+				"",
 				&enabled) {
 				value := ""
 				if enabled {
@@ -815,16 +809,11 @@ func buildMemoryEditDialog(c *ui.Context, t *design.Tokens, updater contracts.Me
 		}).Children(func() {
 			design.Apply(ui.Text(c, localized(locale, "编辑记忆", "Edit memory")),
 				t.Font(design.TypeL)).FontWeight(600).TextColor(t.LabelPrimary)
-			design.Apply(ui.Text(c, localized(locale,
-				"保存后保持原 ID、创建时间与作用域。",
-				"Saving keeps the same ID, creation time and scope.")),
-				t.TextMuted(design.TypeXS)).MaxLines(2)
 			ui.Field(c, localized(locale, "编辑内容", "Edit text"), func() {
 				ui.TextArea(c, &st.editText).
 					Label(inputLabel(locale, localized(locale, "编辑内容", "Edit text"))).
 					FillWidth().MinHeight(design.Space6 * 4).AutoFocus()
-			}).Description(localized(locale, "这条记忆的新内容。",
-				"The memory's new text."))
+			})
 			if st.editErr != "" {
 				uikit.ErrorLine(c, st.editErr)
 			}

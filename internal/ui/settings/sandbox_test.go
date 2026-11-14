@@ -51,8 +51,7 @@ func TestBehaviorPageSandboxAlwaysOn(t *testing.T) {
 	tester.Frame()
 	h.click(tester, "行为")
 	h.assertTexts(tester, "OS 沙箱", "状态：", "已启用（平台：linux）",
-		"只读 → 只读", "工作区可写 → 工作区", "所有权限 → 不包装",
-		"自动放行", "不可关闭", "fail closed")
+		"不可关闭")
 	// There is no enable/disable control anymore.
 	h.assertNoTexts(tester, "启用 OS 沙箱")
 	if raw := h.settings.Get("sandbox.os", ""); raw != "" {
@@ -68,7 +67,7 @@ func TestBehaviorPageSandboxUnavailable(t *testing.T) {
 	tester := h.tester()
 	tester.Frame()
 	h.click(tester, "行为")
-	h.assertTexts(tester, "本机不可用：bwrap not found", "fail closed")
+	h.assertTexts(tester, "本机不可用：bwrap not found")
 	h.assertNoTexts(tester, "启用 OS 沙箱")
 }
 
@@ -79,7 +78,7 @@ func TestBehaviorPageSandboxWithoutService(t *testing.T) {
 	tester := h.tester()
 	tester.Frame()
 	h.click(tester, "行为")
-	h.assertTexts(tester, "OS 沙箱", "未加载 sandbox 模块", "fail closed")
+	h.assertTexts(tester, "OS 沙箱", "未加载 sandbox 模块")
 }
 
 // TestBehaviorPageSandboxEnglish covers the English copy and status line.
@@ -91,7 +90,6 @@ func TestBehaviorPageSandboxEnglish(t *testing.T) {
 	h.click(tester, "Behavior")
 	h.assertTexts(tester, "OS sandbox",
 		"On (platform: darwin)",
-		"Read-only → Read-only", "Workspace-write → Workspace", "All permissions → Not wrapped",
-		"auto-allowed", "fail closed", "not configurable")
+		"not configurable")
 	h.assertNoTexts(tester, "Enable OS sandbox")
 }

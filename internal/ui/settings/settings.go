@@ -186,9 +186,7 @@ type shortcutsState struct {
 func buildShortcutsPage(c *ui.Context, t *design.Tokens, title string, store contracts.SettingsService,
 	runtime contracts.UIRuntime, locale contracts.LocaleService, st *shortcutsState) {
 	ui.Column(c).FillWidth().Gap(design.Space4).Children(func() {
-		uikit.PageHeader(c, title, localized(locale,
-			"键盘快捷键参考；下面两项桌面快捷键可修改并立即生效。",
-			"Keyboard reference; the two desktop shortcuts below are editable and apply immediately."))
+		uikit.PageHeader(c, title, "")
 		uikit.Section(c, localized(locale, "桌面快捷键", "Desktop shortcuts"), func(*ui.Context) {
 			// H23: restoring the defaults is a page action, not a form row: it
 			// sits at the section's top right, away from the editable fields.
@@ -543,9 +541,7 @@ type diagnosticsState struct {
 func buildDiagnosticsPage(c *ui.Context, t *design.Tokens, state *diagnosticsState,
 	rows, keys []diagnosticRow, modules []contracts.ModuleInfo, locale contracts.LocaleService) {
 	ui.Column(c).FillWidth().Gap(design.Space4).Children(func() {
-		uikit.PageHeader(c, localized(locale, "诊断", "Diagnostics"), localized(locale,
-			"运行时与存储信息（只读）；可复制后附在问题报告里。",
-			"Read-only runtime and storage details; copy them into a bug report."))
+		uikit.PageHeader(c, localized(locale, "诊断", "Diagnostics"), "")
 		uikit.Section(c, localized(locale, "运行时信息", "Runtime information"), func(*ui.Context) {
 			// The property sheet is one shape everywhere (DESIGN.md §5.2
 			// PropertySheet): a 160 DIP label column, the value left-aligned on
@@ -1328,9 +1324,7 @@ func buildPage(c *ui.Context, runtime contracts.UIRuntime, state *moduleState, c
 	state.syncFromConfig(c, chat, store)
 	effective := effectiveChatConfig(chat, store)
 	ui.Column(c).FillWidth().Gap(design.Space4).Children(func() {
-		uikit.PageHeader(c, labels.title, localized(locale,
-			"模型列表的改动即时生效；下方「提示词与运行参数」由页脚保存。",
-			"Model-list changes apply immediately; the section below is stored by the footer's Save."))
+		uikit.PageHeader(c, labels.title, "")
 
 		// One page owns the model configuration: every row carries its own
 		// provider connection and one row is the default model.
@@ -1439,9 +1433,7 @@ func buildAppearancePage(c *ui.Context, state *appearanceState, store contracts.
 	theme contracts.ThemeService, locale contracts.LocaleService, labels buildAppearanceLabels) {
 	t := design.Of(c)
 	ui.Column(c).FillWidth().Gap(design.Space4).Children(func() {
-		uikit.PageHeader(c, labels.title, localized(locale,
-			"主题、语言与桌面集成即时生效；全局热键点页脚「应用」并重启后生效。",
-			"Theme, language and desktop integration apply immediately; the global hotkey applies after Apply and a restart."))
+		uikit.PageHeader(c, labels.title, "")
 
 		uikit.Section(c, localized(locale, "主题", "Theme"), func(*ui.Context) {
 			if buildSegmentedControl(c, t, &state.themeMode, labels.themeLabel,
@@ -1452,10 +1444,6 @@ func buildAppearancePage(c *ui.Context, state *appearanceState, store contracts.
 				applyThemeModeSelection(state, store, theme, locale)
 				c.Invalidate()
 			}
-			design.Apply(ui.Text(c, localized(locale,
-				"修改立即生效；跟随系统由桌面外观决定（需要桌面支持）。",
-				"Changes apply immediately; System follows the desktop appearance (desktop support required).")),
-				t.TextMuted(design.TypeXXS)).MaxLines(2)
 		})
 
 		uikit.Section(c, localized(locale, "语言", "Language"), func(*ui.Context) {
@@ -1468,26 +1456,21 @@ func buildAppearancePage(c *ui.Context, state *appearanceState, store contracts.
 				state.status = localized(locale, "语言已切换", "Language switched")
 				state.statusErr = false
 			}
-			design.Apply(ui.Text(c, localized(locale,
-				"界面文案与日期格式随语言切换，立即生效。",
-				"Interface copy and date formats follow the language and apply immediately.")),
-				t.TextMuted(design.TypeXXS))
 		})
 
 		uikit.Section(c, localized(locale, "桌面集成", "Desktop integration"), func(*ui.Context) {
 			ui.Form(c, func() {
 				if switchField(c,
 					localized(locale, "开机自启动", "Launch at login"),
-					localized(locale, "登录时自动启动 ZeoKeel（Linux XDG autostart）。",
-						"Start ZeoKeel automatically when you log in (Linux XDG autostart)."),
+					"",
 					&state.autostart) {
 					applyDesktopSetting(state, store, contracts.SettingAutostart,
 						fmt.Sprintf("%t", state.autostart), locale)
 				}
 				if switchField(c,
 					localized(locale, "关闭时最小化到托盘", "Close to system tray"),
-					localized(locale, "需要系统托盘支持；修改后重启应用生效。",
-						"Requires system tray support; takes effect after restart."),
+					localized(locale, "修改后重启应用生效。",
+						"Takes effect after a restart."),
 					&state.closeToTray) {
 					applyDesktopSetting(state, store, contracts.SettingCloseToTray,
 						fmt.Sprintf("%t", state.closeToTray), locale)

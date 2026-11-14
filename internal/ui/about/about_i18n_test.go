@@ -91,7 +91,7 @@ func TestAboutEnglishAndLanguageSwitch(t *testing.T) {
 	}
 	h := &aboutHarness{root: uiRoot, tester: tester}
 	h.click("Architecture notes")
-	if !tester.HasText("The UI is built from native mygo controls; there is no browser or webview.") {
+	if !tester.HasText("The UI is built from native mygo controls; modules contribute UI through injection points.") {
 		t.Fatalf("expanding Architecture notes did not reveal the notes; texts = %v", tester.Texts())
 	}
 
@@ -105,7 +105,7 @@ func TestAboutEnglishAndLanguageSwitch(t *testing.T) {
 	}
 	for _, want := range []string{"设置", "关于", "关于 ZeoKeel", "构建信息",
 		"开发信息", "架构说明", "名称", "版本", "提交", "构建时间",
-		"UI 是 mygo 原生控件，没有浏览器/webview。"} {
+		"UI 是 mygo 原生控件；模块通过注入点贡献界面。"} {
 		if !tester.HasText(want) {
 			t.Fatalf("Chinese About frame missing %q; texts = %v", want, tester.Texts())
 		}

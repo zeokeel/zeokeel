@@ -108,9 +108,7 @@ func buildDataPrivacyPage(c *ui.Context, t *design.Tokens, kctx cordis.Context,
 	sessions, hasSessionList := dataSessionList(chat)
 
 	ui.Column(c).FillWidth().Gap(design.Space4).Children(func() {
-		uikit.PageHeader(c, localized(locale, DataPrivacyPageTitle, "Data & privacy"), localized(locale,
-			"数据目录、会话导出/清除与诊断报告。",
-			"Data directory, session export/clear and a diagnostic report."))
+		uikit.PageHeader(c, localized(locale, DataPrivacyPageTitle, "Data & privacy"), "")
 
 		if st.notice != "" {
 			if st.noticeErr {
@@ -164,10 +162,6 @@ func buildDataPrivacyPage(c *ui.Context, t *design.Tokens, kctx cordis.Context,
 					c.Invalidate()
 				}
 			})
-			design.Apply(ui.Text(c, localized(locale,
-				"设置、会话与记忆都保存在这个目录。",
-				"Settings, sessions and memories are stored in this directory.")),
-				t.TextMuted(design.TypeXXS))
 		})
 
 		uikit.Section(c, localized(locale, "会话数据", "Session data"), func(*ui.Context) {
@@ -220,8 +214,8 @@ func buildDataPrivacyPage(c *ui.Context, t *design.Tokens, kctx cordis.Context,
 			}
 		}, func(*ui.Context) {
 			design.Apply(ui.Text(c, localized(locale,
-				"导出应用版本、数据目录、会话数与设置项（API key 不会写入）。",
-				"Export the app version, data directory, session count and settings (the API key is never written).")),
+				"API key 不会写入。",
+				"The API key is never written.")),
 				t.TextMuted(design.TypeXXS)).MaxLines(2)
 		})
 

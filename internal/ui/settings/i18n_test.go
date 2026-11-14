@@ -73,7 +73,7 @@ func TestSettingsEnglishPagesAndLanguageSwitch(t *testing.T) {
 	// Appearance page.
 	h.click(tester, "Appearance")
 	h.assertTexts(tester, "Appearance", "Theme", "Appearance mode", "Light", "Dark", "System",
-		"Changes apply immediately", "Language", "Interface language", "Apply")
+		"Language", "Interface language", "Apply")
 
 	// Shortcuts page.
 	h.click(tester, "Shortcuts")

@@ -28,7 +28,7 @@ func TestModelPageEmptyStateNamesDefaultModel(t *testing.T) {
 	tester.Frame()
 	h.click(tester, "模型")
 
-	h.assertTexts(tester, "还没有模型", "当前默认模型", "gpt-4o-mini", "添加模型行后可覆盖")
+	h.assertTexts(tester, "还没有模型", "默认模型", "gpt-4o-mini")
 }
 
 // fakePlugins is a scripted contracts.PluginsService: the MCP settings page

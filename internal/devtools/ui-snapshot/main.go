@@ -1206,6 +1206,91 @@ func main() {
 		a.ui.Navigator().CloseSettings()
 		a.tester.Frame()
 	}
+	// Session-row live detail (the sidebar's state vocabulary): a run waiting
+	// for the model's first output, a run streaming its answer, and a finished
+	// reply the user has not opened. They run on background sessions while the
+	// previously active conversation stays selected, so every row state shows
+	// in one frame.
+	if liveChat, liveErr := a.root.Require(contracts.KeyChat); liveErr == nil {
+		mainActive := liveChat.ActiveSession()
+		unreadID, waitID, runID := "", "", ""
+		// 1) A finished run in the background: unread until the user opens it.
+		if id, newErr := liveChat.NewSession("后台完成的发布检查"); newErr == nil {
+			unreadID = id
+			_ = liveChat.SetActiveSession(mainActive)
+			if sendErr := liveChat.Send(unreadID, "整理发布前的检查清单"); sendErr == nil {
+				waitIdle(liveChat, unreadID, 10*time.Second)
+			}
+		}
+		// 2) A request hanging before its first event: 等待回复.
+		hangStarted := server.SetHang()
+		if id, newErr := liveChat.NewSession("等待回复的会话"); newErr == nil {
+			waitID = id
+			_ = liveChat.SetActiveSession(mainActive)
+			if sendErr := liveChat.Send(waitID, "先不要回复，等我确认"); sendErr == nil {
+				select {
+				case <-hangStarted:
+				case <-time.After(5 * time.Second):
+					fail("hang request", fmt.Errorf("request did not reach the server"))
+				}
+			}
+		}
+		// 3) A streaming run: the slow reply emits its reasoning and first text,
+		// then parks, so the row is Running but no longer Waiting.
+		server.SetSlow()
+		if id, newErr := liveChat.NewSession("运行中的会话"); newErr == nil {
+			runID = id
+			_ = liveChat.SetActiveSession(mainActive)
+			if sendErr := liveChat.Send(runID, "慢慢检查当前工作目录，然后告诉我"); sendErr == nil {
+				deadline := time.Now().Add(5 * time.Second)
+				for time.Now().Before(deadline) {
+					a.tester.Frame()
+					streaming := false
+					for _, info := range liveChat.Sessions() {
+						if info.ID == runID && info.Running && !info.Waiting {
+							streaming = true
+						}
+					}
+					if streaming {
+						break
+					}
+					time.Sleep(10 * time.Millisecond)
+				}
+			}
+		}
+		if mainActive != "" {
+			_ = liveChat.SetActiveSession(mainActive)
+		}
+		// Show the states in the conversation surface, not over whatever
+		// screen happened to be open last.
+		if err := a.ui.Navigator().Push("session"); err != nil {
+			fmt.Println("push session for sidebar states:", err)
+		}
+		a.tester.Frame()
+		a.render(outDir + "/p2-sidebar-states.png")
+		server.ReleaseHang()
+		server.ReleaseSlow()
+		if waitID != "" {
+			waitIdle(liveChat, waitID, 10*time.Second)
+		}
+		if runID != "" {
+			waitIdle(liveChat, runID, 10*time.Second)
+		}
+		a.tester.Frame()
+		a.render(outDir + "/p2-sidebar-unread.png")
+		// Leave the sidebar as the next frames expect it: drop the fixture
+		// sessions and return to the user's conversation.
+		for _, id := range []string{unreadID, waitID, runID} {
+			if id != "" {
+				_ = liveChat.DeleteSession(id)
+			}
+		}
+		if mainActive != "" {
+			_ = liveChat.SetActiveSession(mainActive)
+		}
+		a.tester.Frame()
+	}
+
 	// Narrow-window and dark-theme evidence: the responsive shell and the dark
 	// theme are part of the design review, so each snapshot run renders them
 	// too (the desktop default window is 1512x944).
@@ -1587,8 +1672,15 @@ type scriptedServer struct {
 	srv     *httptest.Server
 	calls   atomic.Int64
 	slow    atomic.Bool
+	hang    atomic.Bool
 	mu      sync.Mutex
 	release chan struct{}
+
+	// hangStarted closes when the hung request reaches the server; hangRelease
+	// finishes it. Used to capture the sidebar's "waiting for the reply" state:
+	// the request is in flight but has emitted no event yet.
+	hangStarted chan struct{}
+	hangRelease chan struct{}
 }
 
 func newScriptedServer() *scriptedServer {
@@ -1630,12 +1722,55 @@ func (s *scriptedServer) slowRelease() <-chan struct{} {
 	return s.release
 }
 
+// SetHang makes the next model request park before it emits any event, so a
+// frame can show a session that is Running but Waiting for the reply. The
+// returned channel closes when the request has reached the server.
+func (s *scriptedServer) SetHang() <-chan struct{} {
+	started := make(chan struct{})
+	s.mu.Lock()
+	s.hangStarted = started
+	s.hangRelease = make(chan struct{})
+	s.mu.Unlock()
+	s.hang.Store(true)
+	return started
+}
+
+// ReleaseHang finishes a hung request with the ordinary scripted answer.
+func (s *scriptedServer) ReleaseHang() {
+	s.hang.Store(false)
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.hangRelease != nil {
+		close(s.hangRelease)
+		s.hangRelease = nil
+	}
+	s.hangStarted = nil
+}
+
 func (s *scriptedServer) handle(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		w.WriteHeader(http.StatusNoContent)
 		return
 	}
 	w.Header().Set("Content-Type", "text/event-stream")
+	// A hung request parks before its first event: the sidebar shows the
+	// "waiting for the reply" state, not the streaming one.
+	if s.hang.CompareAndSwap(true, false) {
+		s.mu.Lock()
+		started, release := s.hangStarted, s.hangRelease
+		s.mu.Unlock()
+		if started != nil {
+			close(started)
+		}
+		select {
+		case <-release:
+		case <-time.After(30 * time.Second):
+		}
+		emitScriptedReasoning(w, scriptedReasoning)
+		emitScriptedAnswer(w)
+		fmt.Fprint(w, "data: [DONE]\n\n")
+		return
+	}
 	// The approval run is the first model request; a slow run always follows it.
 	if s.slow.Load() && s.calls.Load() > 0 {
 		s.calls.Add(1)

@@ -221,7 +221,6 @@ func TestArchivePageEnglishCopy(t *testing.T) {
 	tester.Frame()
 	h.click(tester, "Archived")
 	h.assertTexts(tester, "Archived sessions",
-		"Archived sessions stay out of the sidebar",
 		"Old plan", "2 messages", "Nov 8, 2026 1:30 PM", "Restore", "Archived session actions")
 }
 

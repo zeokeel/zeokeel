@@ -15,7 +15,7 @@ func TestNotificationsPageDefaultsOn(t *testing.T) {
 	tester := h.tester()
 	tester.Frame()
 	h.click(tester, "通知")
-	h.assertTexts(tester, "通知", "显示通知气泡", "关闭后导出、更新等提示不再以气泡显示")
+	h.assertTexts(tester, "通知", "显示通知气泡")
 	if raw := store.get(contracts.SettingNotifications); raw != "" {
 		t.Fatalf("defaults wrote the notification row: %q", raw)
 	}
@@ -49,8 +49,7 @@ func TestNotificationsPageEnglishCopy(t *testing.T) {
 	tester := h.tester()
 	tester.Frame()
 	h.click(tester, "Notifications")
-	h.assertTexts(tester, "Notifications", "Show notification toasts",
-		"When off, export and update notices stay in the app instead of showing toasts")
+	h.assertTexts(tester, "Notifications", "Show notification toasts")
 	h.click(tester, "Show notification toasts")
 	if raw := store.get(contracts.SettingNotifications); raw != "false" {
 		t.Fatalf("English toggle wrote %q, want false", raw)

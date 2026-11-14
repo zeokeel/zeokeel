@@ -510,7 +510,7 @@ func TestMemoryExtractToggleDefaultOff(t *testing.T) {
 	extractor := &fakeMemoryExtractor{}
 	h, tester := memoryExtractHarness(t, memoryExtractChat(), settingsStore, store, extractor)
 	h.assertTexts(tester, "模型提取", "启用模型提取（从最近对话提取记忆，会调用模型）",
-		"最近 20 条消息", "最多写入 5 条记忆", "从当前会话提取")
+		"从当前会话提取")
 	if raw := settingsStore.get(contracts.SettingMemoryExtractEnabled); raw != "" {
 		t.Fatalf("defaults wrote memory.extract: %q", raw)
 	}
@@ -625,7 +625,7 @@ func TestMemoryExtractEnglishCopy(t *testing.T) {
 	tester.Frame()
 	h.click(tester, "Memory")
 	h.assertTexts(tester, "Model extraction", "Enable model extraction",
-		"Extract from current session", "recent 20 messages", "at most 5")
+		"Extract from current session")
 	h.click(tester, "Extract from current session")
 	waitMemoryText(t, tester, "Added 2 memories")
 }
@@ -965,7 +965,7 @@ func TestMemoryPageAddCopyMatchesStoreOrder(t *testing.T) {
 	store := newWorkspaceMemoryStore()
 	h := memoryPageHarness(t, store)
 	tester := h.tester()
-	h.assertTexts(tester, "添加一条记忆（作用域使用配置的默认值）；新记忆会追加到列表末尾。")
+	h.assertTexts(tester, "添加记忆", "记忆内容")
 	if tester.HasText("列表顶部") {
 		t.Fatalf("stale copy still claims the top of the list: %v", tester.Texts())
 	}

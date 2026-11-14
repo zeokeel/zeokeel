@@ -47,26 +47,9 @@ func sandboxStatusKind(status contracts.SandboxStatus, failed bool) uikit.Status
 	return uikit.StatusSuccess
 }
 
-// sandboxModeBullets explains how the default permission mode maps onto the OS
-// profile. The mapping is the mode's file-effect meaning.
-var sandboxModeBullets = []struct{ zh, en string }{
-	{
-		zh: "只读 → 只读：只能读取，不能写入或删除。",
-		en: "Read-only → Read-only: read only, no writes or deletes.",
-	},
-	{
-		zh: "工作区可写 → 工作区：工作区内可写，工作区外只读。",
-		en: "Workspace-write → Workspace: writable inside the workspace, read-only outside.",
-	},
-	{
-		zh: "所有权限 → 不包装：不启用 OS 限制，退回完全按审批模式运行。",
-		en: "All permissions → Not wrapped: no OS confinement, back to approval-only behavior.",
-	},
-}
-
 // buildSandboxSection renders the always-on OS sandbox section: the live status
-// line, the permission-mode mapping and the shell/fail-closed note. There is no
-// switch; a stripped assembly without the module renders the unavailable state.
+// line and the always-on/restart note. There is no switch; a stripped assembly
+// without the module renders the unavailable state.
 func buildSandboxSection(c *ui.Context, locale contracts.LocaleService, service contracts.SandboxService) {
 	t := design.Of(c)
 	uikit.Section(c, localized(locale, "OS 沙箱", "OS sandbox"), func(*ui.Context) {
@@ -77,14 +60,13 @@ func buildSandboxSection(c *ui.Context, locale contracts.LocaleService, service 
 			status.Reason = localized(locale, "未加载 sandbox 模块", "sandbox module is not mounted")
 		}
 		buildSandboxStatusRow(c, t, locale, status)
-		ui.Column(c).FillWidth().Gap(design.Space1).PaddingY(design.Space1).Children(func() {
-			for _, bullet := range sandboxModeBullets {
-				uikit.Bullet(c, localized(locale, bullet.zh, bullet.en))
-			}
-		})
+		// The one sentence keeps the two consequences a user cannot infer from
+		// the status row: shell tools need no approval while the sandbox is
+		// available, and a host without it fails commands instead of running
+		// them unconfined. The mode mapping itself stays in the select's labels.
 		design.Apply(ui.Text(c, localized(locale,
-			"始终启用、不可关闭：由操作系统在内核层限制工具的文件写入与删除；它不是容器，读取与网络不受限制。可用时 shell 类工具（bash、终端、后台任务等）自动放行，不再弹出审批；本机不可用时命令会失败（fail closed）。修改权限模式在下次构建工具时生效，无需重启。",
-			"Always on and not configurable: the OS enforces tool file writes and deletes (it is not a container, so reads and network stay unconfined). When available, shell-family tools (bash, terminals, background jobs) are auto-allowed without an approval prompt; when unavailable on this host, commands fail closed. Changing the permission mode applies on the next tool build; no restart is needed.")),
+			"始终启用、不可关闭；可用时 shell 类工具自动放行，不可用时命令失败；修改权限模式下次构建工具时生效。",
+			"Always on and not configurable; shell tools are auto-allowed when available and fail closed when not; a permission-mode change applies on the next tool build.")),
 			t.TextMuted(design.TypeXXS))
 	})
 }

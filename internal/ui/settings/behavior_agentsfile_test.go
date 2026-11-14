@@ -19,7 +19,7 @@ func TestBehaviorPageAgentsFileDefaultsToAGENTSmd(t *testing.T) {
 	h.click(tester, "行为")
 	expandMoreConversationSettings(t, tester, "更多对话设置")
 	h.assertTexts(tester, "工作区指令文件",
-		"运行时从当前工作区读取并注入系统提示；重启/下次运行生效")
+		"留空关闭；下次运行生效")
 	if raw := store.get(contracts.SettingAgentsFile); raw != "" {
 		t.Fatalf("defaults wrote the agents-file row: %q", raw)
 	}
@@ -72,5 +72,5 @@ func TestBehaviorPageAgentsFileEnglish(t *testing.T) {
 	h.click(tester, "Behavior")
 	expandMoreConversationSettings(t, tester, "More conversation settings")
 	h.assertTexts(tester, "Workspace instructions file",
-		"Read from the current workspace at run time and appended to the system prompt; takes effect on the next run; empty disables it")
+		"Empty disables it; applies on the next run")
 }

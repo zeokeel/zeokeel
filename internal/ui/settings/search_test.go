@@ -40,9 +40,7 @@ func TestSearchPageRendersConfiguredState(t *testing.T) {
 	openSearchPage(t, h, tester)
 
 	h.assertTexts(tester, "搜索", "搜索后端", "已配置", "API Key 已设置",
-		"搜索端点", "API Key",
-		"web_search 工具调用的搜索后端",
-		"修改后下一次 web_search 调用生效")
+		"搜索端点", "API Key")
 	// Saving an untouched form keeps the stored rows.
 	h.click(tester, "保存")
 	h.assertTexts(tester, "已保存")
@@ -118,8 +116,7 @@ func TestSearchPageEnglishCopy(t *testing.T) {
 
 	h.click(tester, "Search")
 	h.assertTexts(tester, "Search", "Search backend", "Configured",
-		"Search endpoint", "Save",
-		"Changes apply to the next web_search call")
+		"Search endpoint", "Save")
 	h.assertNoTexts(tester, "搜索后端", "已配置")
 
 	// Switch back: the page title and copy return to Chinese on the next frame.

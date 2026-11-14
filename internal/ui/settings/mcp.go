@@ -278,9 +278,7 @@ func buildMCPPage(c *ui.Context, kctx cordis.Context, st *mcpState, locale contr
 	}
 
 	ui.Column(c).FillWidth().Gap(design.Space4).Children(func() {
-		uikit.PageHeader(c, MCPPageTitle, localized(locale,
-			"通过 Streamable HTTP 或 stdio 连接 MCP 服务器；修改后重启生效（stdio 子进程在启动时拉起）。",
-			"Connect MCP servers over Streamable HTTP or stdio; changes apply after a restart (stdio subprocesses start on launch)."))
+		uikit.PageHeader(c, MCPPageTitle, "")
 		if !hasStore || store == nil {
 			uikit.Section(c, localized(locale, "设置存储未启用", "Settings store not enabled"), func(*ui.Context) {
 				uikit.EmptyState(c, localized(locale,
@@ -377,16 +375,14 @@ func buildMCPPage(c *ui.Context, kctx cordis.Context, st *mcpState, locale contr
 							st.transport = transportValue(choice)
 							stdio = st.transport == mcpTransportStdio
 						}
-					}).Description(localized(locale, "HTTP 用 URL 连接；STDIO 启动本地子进程。",
-						"HTTP connects by URL; STDIO starts a local subprocess."))
+					})
 				})
 				ui.Column(c).FillWidth().Grow(1).Children(func() {
 					ui.Field(c, localized(locale, "名称", "Name"), func() {
 						ui.TextInput(c, &st.name).
 							Label(inputLabel(locale, localized(locale, "名称", "Name"))).
 							Placeholder(localized(locale, "例如：files", "For example: files")).FillWidth()
-					}).Description(localized(locale, "在服务器列表中显示的名称。",
-						"The name shown in the server list."))
+					})
 				})
 			})
 			if stdio {
@@ -400,8 +396,7 @@ func buildMCPPage(c *ui.Context, kctx cordis.Context, st *mcpState, locale contr
 								ui.TextInput(c, &st.command).
 									Label(inputLabel(locale, localized(locale, "命令", "Command"))).
 									Placeholder(localized(locale, "例如：npx", "For example: npx")).FillWidth()
-							}).Description(localized(locale, "启动子进程的可执行文件。",
-								"The executable that starts the subprocess."))
+							})
 						})
 						ui.Column(c).FillWidth().Grow(2).Children(func() {
 							ui.Field(c, localized(locale, "参数", "Arguments"), func() {
@@ -410,8 +405,8 @@ func buildMCPPage(c *ui.Context, kctx cordis.Context, st *mcpState, locale contr
 									Placeholder(localized(locale,
 										"空格分隔，例如：-y server-github",
 										"Space-separated, e.g. -y server-github")).FillWidth()
-							}).Description(localized(locale, "按空格拆分为参数列表。",
-								"Split on spaces into the argument list."))
+							}).Description(localized(locale, "空格分隔。",
+								"Space-separated."))
 						})
 					})
 					ui.Field(c, localized(locale, "环境变量", "Environment"), func() {
@@ -428,16 +423,15 @@ func buildMCPPage(c *ui.Context, kctx cordis.Context, st *mcpState, locale contr
 						if envInput.Changed() {
 							st.envErr = ""
 						}
-					}).Description(localized(locale, "传给子进程的环境变量；每行一个 KEY=VALUE，值可以包含空格。",
-						"Environment variables passed to the subprocess; one KEY=VALUE per line, values may contain spaces.")).
+					}).Description(localized(locale, "每行一个 KEY=VALUE；值可以包含空格。",
+						"One KEY=VALUE per line; values may contain spaces.")).
 						Error(st.envErr)
 				})
 			} else {
 				ui.Field(c, "URL", func() {
 					ui.TextInput(c, &st.url).Label(inputLabel(locale, "URL")).
 						Placeholder("https://mcp.example.com/mcp").FillWidth()
-				}).Description(localized(locale, "Streamable HTTP 端点。",
-					"The Streamable HTTP endpoint."))
+				})
 			}
 			// The optional per-server timeout applies to both transports: one
 			// request/handshake bound, blank (or 0) keeps the toolkit default.
@@ -446,8 +440,8 @@ func buildMCPPage(c *ui.Context, kctx cordis.Context, st *mcpState, locale contr
 					Label(inputLabel(locale, localized(locale, "超时 (ms)", "Timeout (ms)"))).
 					Placeholder(localized(locale, "留空 = 默认 30 秒", "Blank = default 30s")).FillWidth()
 			}).Description(localized(locale,
-				"单次请求/握手的超时时间（毫秒）；0 或留空使用默认 30 秒。",
-				"Timeout for one request/handshake in milliseconds; 0 or blank uses the default 30s."))
+				"毫秒；0 或留空使用默认 30 秒。",
+				"Milliseconds; 0 or blank uses the default 30s."))
 			// The form's own result line sits between the fields and the actions.
 			statusBadgesRow(c, t, st.status, st.statusErr)
 			if st.testStatus != "" {
@@ -527,17 +521,17 @@ func buildMCPPage(c *ui.Context, kctx cordis.Context, st *mcpState, locale contr
 	})
 }
 
-// mcpWorkspaceHint describes the workspace file the opt-in reads.
+// mcpWorkspaceHint names the workspace file the opt-in reads and when it applies.
 func mcpWorkspaceHint(st *mcpState, locale contracts.LocaleService) string {
 	if root := strings.TrimSpace(st.workspaceRoot); root != "" {
 		path := filepath.Join(root, "mcp.json")
 		return localized(locale,
-			"当前工作区："+root+"；启动时读取 "+path+" 中的额外服务器，修改后重启生效。",
-			"Current workspace: "+root+"; extra servers are read from "+path+" on launch, after a restart.")
+			"启动时读取 "+path+"；修改后重启生效。",
+			"Extra servers are read from "+path+" on launch; restart to apply changes.")
 	}
 	return localized(locale,
-		"当前没有打开工作区；打开工作区并重启后读取其 mcp.json。",
-		"No workspace is open; open one and restart to read its mcp.json.")
+		"打开工作区并重启后读取其 mcp.json。",
+		"Open a workspace and restart to read its mcp.json.")
 }
 
 // transportDisplay maps the stored transport to the selector's display text.

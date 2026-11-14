@@ -266,9 +266,7 @@ func lspWorkspaceOptIn(raw string) bool {
 func buildLSPPage(c *ui.Context, store contracts.SettingsService, st *lspState, locale contracts.LocaleService) {
 	t := design.Of(c)
 	ui.Column(c).FillWidth().Gap(design.Space4).Children(func() {
-		uikit.PageHeader(c, "LSP", localized(locale,
-			"可选的语言服务器（可配置多个）；仅活动服务器在启动时拉起，重启生效，其能力以 lsp_* 工具提供。",
-			"Optional language servers (multiple allowed); only the active server starts at launch. Restart to apply; capabilities are exposed as lsp_* tools."))
+		uikit.PageHeader(c, "LSP", "")
 		if store == nil {
 			uikit.Section(c, localized(locale, "设置存储未启用", "Settings store not enabled"), func(*ui.Context) {
 				uikit.EmptyState(c, localized(locale, "设置存储未启用，无法保存语言服务器。",
@@ -320,8 +318,8 @@ func buildLSPPage(c *ui.Context, store contracts.SettingsService, st *lspState, 
 					localized(locale, "读取工作区 LSP 配置（.zeokeel/lsp.json）",
 						"Read workspace LSP config (.zeokeel/lsp.json)"),
 					localized(locale,
-						"仓库中的 .zeokeel/lsp.json 可声明语言服务器命令；默认关闭，开启后重启生效；设置页中的配置优先。",
-						"The repository's .zeokeel/lsp.json can declare language-server commands; off by default, restart to apply; settings-page configuration wins."),
+						"默认关闭；开启后重启生效；设置页配置优先。",
+						"Off by default; restart to apply; settings-page configuration wins."),
 					&allow) {
 					value := ""
 					if allow {
@@ -349,16 +347,14 @@ func buildLSPPage(c *ui.Context, store contracts.SettingsService, st *lspState, 
 						ui.TextInput(c, &st.name).
 							Label(inputLabel(locale, localized(locale, "名称", "Name"))).
 							Placeholder(localized(locale, "例如 go", "e.g. go")).FillWidth()
-					}).Description(localized(locale, "活动服务器的唯一名称。",
-						"A unique name for the active server."))
+					})
 				})
 				ui.Column(c).FillWidth().Grow(1).Children(func() {
 					ui.Field(c, localized(locale, "命令", "Command"), func() {
 						ui.TextInput(c, &st.command).
 							Label(inputLabel(locale, localized(locale, "命令", "Command"))).
 							Placeholder(localized(locale, "例如 gopls", "e.g. gopls")).FillWidth()
-					}).Description(localized(locale, "启动语言服务器的可执行文件。",
-						"The executable that starts the language server."))
+					})
 				})
 			})
 			ui.Row(c).FillWidth().Gap(design.Space3).AlignItems(ui.Start).Children(func() {
@@ -368,8 +364,8 @@ func buildLSPPage(c *ui.Context, store contracts.SettingsService, st *lspState, 
 							Label(inputLabel(locale, localized(locale, "参数", "Arguments"))).
 							Placeholder(localized(locale, "空格分隔，例如 serve -rpc.trace",
 								"Space-separated, e.g. serve -rpc.trace")).FillWidth()
-					}).Description(localized(locale, "按空格拆分为参数列表。",
-						"Split on spaces into the argument list."))
+					}).Description(localized(locale, "空格分隔。",
+						"Space-separated."))
 				})
 				ui.Column(c).FillWidth().Grow(1).Children(func() {
 					ui.Field(c, localized(locale, "工作目录", "Working directory"), func() {
@@ -385,8 +381,8 @@ func buildLSPPage(c *ui.Context, store contracts.SettingsService, st *lspState, 
 					Label(inputLabel(locale, localized(locale, "语言 ID", "Language ID"))).
 					Placeholder(localized(locale, "例如 go、python", "e.g. go, python")).FillWidth()
 			}).Description(localized(locale,
-				"重启后生效；工具名前缀为 lsp_（如 lsp_hover）。",
-				"Applies after a restart; tools are prefixed lsp_ (e.g. lsp_hover)."))
+				"重启后生效。",
+				"Applies after a restart."))
 			statusBadgesRow(c, t, st.status, st.statusErr)
 			uikit.DialogFooter(c, []uikit.DialogAction{{
 				Label: localized(locale, "添加", "Add"), Primary: true,

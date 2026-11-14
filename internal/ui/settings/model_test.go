@@ -100,7 +100,7 @@ func TestModelDialogCheckSuccessUsesStoredKeyAndSavesNothing(t *testing.T) {
 	tester := openModelPage(t, h)
 	openEditModal(t, h, tester, "deepseek-chat")
 
-	h.assertTexts(tester, "测试连接", "测试连接使用当前输入，不会保存。")
+	h.assertTexts(tester, "测试连接")
 	requireCheckButton(t, tester, "测试连接", false)
 	h.click(tester, "测试连接")
 	waitModelCheckText(t, h, tester, "连接正常")
@@ -226,7 +226,7 @@ func TestModelDialogCheckEnglishCopy(t *testing.T) {
 	tester.Frame()
 	h.click(tester, "Add model")
 	tester.Frame()
-	h.assertTexts(tester, "Test connection", "The connection test uses the current input and saves nothing.")
+	h.assertTexts(tester, "Test connection")
 	h.click(tester, "Provider menu")
 	h.click(tester, "DeepSeek")
 	tester.Frame()

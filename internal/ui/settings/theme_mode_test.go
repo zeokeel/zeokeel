@@ -20,8 +20,7 @@ func TestAppearanceThemeModeDefaultLightAndSwitching(t *testing.T) {
 	h.click(tester, "模型")
 	h.click(tester, "外观")
 
-	h.assertTexts(tester, "主题", "浅色", "深色", "跟随系统",
-		"修改立即生效", "跟随系统由桌面外观决定")
+	h.assertTexts(tester, "主题", "浅色", "深色", "跟随系统")
 
 	h.click(tester, "深色")
 	if !h.uiRoot.Theme().Dark() {
@@ -87,8 +86,7 @@ func TestAppearanceThemeModeEnglish(t *testing.T) {
 	h.click(tester, "Model")
 	h.click(tester, "Appearance")
 
-	h.assertTexts(tester, "Theme", "Light", "Dark", "System",
-		"Changes apply immediately", "follows the desktop appearance")
+	h.assertTexts(tester, "Theme", "Light", "Dark", "System")
 	h.click(tester, "Dark")
 	if !h.uiRoot.Theme().Dark() {
 		t.Fatal("selecting Dark did not switch the host theme")

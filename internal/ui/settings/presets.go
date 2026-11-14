@@ -368,9 +368,7 @@ func buildPresetsPage(c *ui.Context, store contracts.SettingsService, st *preset
 	st.load(store, locale)
 	st.loadAgentPresets(store)
 	ui.Column(c).FillWidth().Gap(design.Space4).Children(func() {
-		uikit.PageHeader(c, localized(locale, PresetsPageTitle, "Presets"), localized(locale,
-			"提示词预设：可插入对话输入框的提示词/人设模板；修改后立即保存。",
-			"Prompt presets: prompt/persona templates the conversation composer can insert; edits save immediately."))
+		uikit.PageHeader(c, localized(locale, PresetsPageTitle, "Presets"), "")
 
 		if st.parseErr != "" {
 			uikit.ErrorLine(c, localized(locale,
@@ -393,7 +391,7 @@ func buildPresetsPage(c *ui.Context, store contracts.SettingsService, st *preset
 		}, func(*ui.Context) {
 			if st.usingLegacy {
 				design.Apply(ui.Text(c, localized(locale,
-					"内置默认（保存后自定义生效）", "Built-in defaults (save to customize)")),
+					"内置默认", "Built-in defaults")),
 					t.TextMuted(design.TypeXXS))
 			}
 			if len(st.presets) == 0 {
@@ -446,15 +444,13 @@ func buildPresetsPage(c *ui.Context, store contracts.SettingsService, st *preset
 					st.addPreset(store, locale)
 					c.Invalidate()
 				}
-			}).Description(localized(locale, "在对话输入框的预设菜单中显示的名称。",
-				"The name shown in the conversation composer's preset menu."))
+			})
 			ui.Field(c, localized(locale, "提示词", "Prompt"), func() {
 				ui.TextArea(c, &st.prompt).
 					Label(inputLabel(locale, localized(locale, "预设提示词", "Preset prompt"))).
 					Placeholder(localized(locale, "输入要插入的提示词…", "Prompt text to insert…")).
 					MinHeight(72).FillWidth()
-			}).Description(localized(locale, "插入到对话输入框的文本。",
-				"The text inserted into the conversation composer."))
+			})
 			ui.Row(c).FillWidth().Justify(ui.End).Children(func() {
 				uikit.DialogFooter(c, []uikit.DialogAction{{
 					Label: localized(locale, "添加", "Add"), Primary: true,
@@ -491,10 +487,6 @@ func buildPresetsPage(c *ui.Context, store contracts.SettingsService, st *preset
 				c.Invalidate()
 			}
 		}, func(*ui.Context) {
-			design.Apply(ui.Text(c, localized(locale,
-				"人设会追加到系统提示末尾；工具允许列表为空表示不过滤；模型是会话默认值（会话覆盖优先）。",
-				"Persona is appended to the system prompt; an empty tool allowlist keeps every tool; model is the session default (a session override wins).")),
-				t.TextMuted(design.TypeXXS)).MaxLines(3)
 			if len(st.agentPresets) == 0 {
 				uikit.EmptyState(c, localized(locale, "还没有代理预设", "No agent presets yet"))
 			}
@@ -689,22 +681,19 @@ func buildAgentPresetDialog(c *ui.Context, t *design.Tokens, store contracts.Set
 				if name.Submitted() {
 					submitted = true
 				}
-			}).Description(localized(locale, "在代理预设列表中显示的名称。",
-				"The name shown in the agent preset list."))
+			})
 			ui.Field(c, localized(locale, "人设", "Persona"), func() {
 				ui.TextArea(c, &st.agentPersona).
 					Label(inputLabel(locale, localized(locale, "人设", "Persona"))).
 					Placeholder(localized(locale, "追加到系统提示的人设前缀",
 						"Persona prefix appended to the system prompt")).
 					MinHeight(design.Space6 * 2).FillWidth()
-			}).Description(localized(locale, "追加到系统提示末尾的一段文字。",
-				"Text appended to the end of the system prompt."))
+			})
 			ui.Field(c, localized(locale, "人设提示词", "Persona prompt"), func() {
 				ui.TextArea(c, &st.agentPrompt).
 					Label(inputLabel(locale, localized(locale, "人设提示词", "Persona prompt"))).
 					MinHeight(design.Space6 * 2).FillWidth()
-			}).Description(localized(locale, "该人设默认使用的系统提示词。",
-				"The system prompt this persona uses by default."))
+			})
 			ui.Field(c, localized(locale, "允许工具", "Allowed tools"), func() {
 				// Tools are tokens: the official TokenField shows them as chips
 				// (Enter or comma adds one, Backspace removes the last) instead of

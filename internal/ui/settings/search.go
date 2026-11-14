@@ -48,9 +48,7 @@ func buildSearchPage(c *ui.Context, kctx cordis.Context, st *searchState, locale
 	store, hasStore := kctx.Get(contracts.KeySettings)
 
 	ui.Column(c).FillWidth().Gap(design.Space4).Children(func() {
-		uikit.PageHeader(c, localized(locale, SearchPageTitle, "Search"), localized(locale,
-			"web_search 工具调用的搜索后端；留空表示未配置，工具调用时会提示缺少搜索后端。",
-			"Search backend used by the web_search tool; leaving it empty means unconfigured — a web_search call then reports the missing backend."))
+		uikit.PageHeader(c, localized(locale, SearchPageTitle, "Search"), "")
 		if !hasStore || store == nil {
 			uikit.Section(c, localized(locale, "设置存储未启用", "Settings store not enabled"), func(*ui.Context) {
 				uikit.EmptyState(c, localized(locale,
@@ -84,8 +82,8 @@ func buildSearchPage(c *ui.Context, kctx cordis.Context, st *searchState, locale
 					Label(inputLabel(locale, localized(locale, "搜索端点", "Search endpoint"))).
 					Placeholder("https://search.example.com/search").FillWidth()
 			}).Description(localized(locale,
-				"接收查询并返回结果的 http(s) 端点；留空表示未配置（模型调用 web_search 时会收到未配置错误）。",
-				"The http(s) endpoint that receives queries and returns results; empty means unconfigured (a web_search call then reports the missing backend)."))
+				"留空表示未配置；web_search 调用会报错。",
+				"Empty means unconfigured; a web_search call then fails."))
 			ui.Field(c, "API Key", func() {
 				ui.TextInput(c, &st.apiKey).Label(inputLabel(locale, "API Key")).
 					Password().
@@ -94,10 +92,6 @@ func buildSearchPage(c *ui.Context, kctx cordis.Context, st *searchState, locale
 						"The API key is sent as Authorization: Bearer; leave blank to keep it")).FillWidth()
 			}).Description(localized(locale, "只保存在本机；留空保持已设置的密钥。",
 				"Stored locally only; leave blank to keep the configured key."))
-			design.Apply(ui.Text(c, localized(locale,
-				"修改后下一次 web_search 调用生效，无需重启。",
-				"Changes apply to the next web_search call; no restart needed.")),
-				t.TextMuted(design.TypeXXS)).MaxLines(2)
 		})
 
 		// H1: the save action lives in the host's fixed footer; the body keeps

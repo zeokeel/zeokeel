@@ -122,7 +122,7 @@ func TestSkillsPageRendersSkills(t *testing.T) {
 	tester := h.tester()
 
 	h.assertTexts(tester,
-		"技能", "从工作区技能目录（/skills、.agents/skills、.zeokeel/skills）、配置目录与 dataDir/skills 中发现的 SKILL.md 技能；工作区优先。",
+		"技能",
 		"/data/skills", "/work/proj/skills", "额外技能目录", "应用",
 		"alpha", "Alpha 技能说明", "global · alpha/SKILL.md",
 		"beta", "global · beta/SKILL.md", "查看内容", "刷新")

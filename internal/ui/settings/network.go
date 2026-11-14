@@ -42,9 +42,7 @@ func newNetworkState() *networkState { return &networkState{} }
 func buildNetworkPage(c *ui.Context, store contracts.SettingsService, st *networkState, locale contracts.LocaleService) {
 	t := design.Of(c)
 	ui.Column(c).FillWidth().Gap(design.Space4).Children(func() {
-		uikit.PageHeader(c, localized(locale, NetworkPageTitle, "Network"), localized(locale,
-			"出站 HTTP(S) 代理；保存后重启应用生效。",
-			"Outbound HTTP(S) proxy; restart the app to apply changes."))
+		uikit.PageHeader(c, localized(locale, NetworkPageTitle, "Network"), "")
 
 		if !st.loaded {
 			st.loaded = true
@@ -76,8 +74,8 @@ func buildNetworkPage(c *ui.Context, store contracts.SettingsService, st *networ
 			}).Description(localized(locale, "逗号分隔的直连主机列表。",
 				"Comma-separated hosts that connect directly."))
 			design.Apply(ui.Text(c, localized(locale,
-				"代理设置由进程启动时应用；修改后需要重启应用生效。",
-				"The proxy is applied when the process starts; restart the app to apply changes.")),
+				"修改后需要重启应用生效。",
+				"Restart the app to apply changes.")),
 				t.TextMuted(design.TypeXXS)).MaxLines(2)
 		})
 

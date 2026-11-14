@@ -101,9 +101,7 @@ func buildArchivePage(c *ui.Context, t *design.Tokens, kctx cordis.Context,
 	archiver, canArchive := chat.(contracts.SessionArchiver)
 
 	ui.Column(c).FillWidth().Gap(design.Space4).Children(func() {
-		uikit.PageHeader(c, localized(locale, "归档", "Archived"), localized(locale,
-			"归档的会话不显示在侧栏；可以在这里恢复、删除或重新打开。",
-			"Archived sessions stay out of the sidebar; restore, delete or reopen them here."))
+		uikit.PageHeader(c, localized(locale, "归档", "Archived"), "")
 		if st.openErr != "" {
 			uikit.ErrorLine(c, st.openErr)
 		}

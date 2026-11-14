@@ -521,6 +521,19 @@ uikit.ToolRow(c, uikit.ToolRowOptions{
 
 **语义不可降级**：error 不得用 warning 或普通文本；审批动词不得中性化（「允许/拒绝/提交」不写成「确定/取消」）；`cancelled` 不得画成红色失败。
 
+**侧栏会话行的运行细节（2026-11-14）**：会话行不拼状态徽章，用「行首图标 + 行尾状态词/未读点」表达真实运行态（数据来自 `contracts.ChatSessionInfo.Running/Waiting/Unread`，不伪造）：
+
+| 状态 | 行首 | 行尾 | 说明 |
+|---|---|---|---|
+| 等待回复 `Running && Waiting` | `icons.Clock` | `等待回复`（`TypeXXXS` 微标签） | 已发送、模型尚无任何输出 |
+| 运行中 `Running && !Waiting` | `ui.Spinner` | `运行中`（`TypeXXXS`） | 已有文本/推理/工具事件 |
+| 后台完成未读 `Unread` | 会话 glyph | 8 DIP `Accent` 圆点 | 标题 `WeightMedium`；行无障碍名带「未读回复」 |
+| 折叠的工作区/未分组分组 | 展开箭头 + 文件夹 | 子会话状态汇总（全等待=等待回复，否则运行中；仅未读=圆点）+ 静默计数 | 分组展开时状态由子行承担 |
+
+状态词是行内微标签，不是 Badge（避免「中性底 + 状态字」拼法，AP-21）；未读点不是唯一信息载体，`ListState.Label`/行无障碍名同时给出文字。当前会话行不再常显 ⋯（hover/focus 或右键显示），把宽度留给标题与状态。
+
+**树行的前置位（2026-11-14，对齐 DSH 侧栏）**：工作区与工作区内的会话共用同一行解剖——`[选中 2px 左条][层级缩进][一个 16px leading slot][gap]`——leading slot 里放工作区的文件夹（hover 时换成 disclosure chevron，DSH 的 folder→chevron 交换）或会话的运行 glyph（Clock/Spinner/Message）。嵌套会话只缩进 `Space3`（12 DIP），不再多占一格箭头列，因此所有行都以图标开头、标题左缘只有一级小幅缩进（`sidebar.buildTreeRowPrefix`，mygo `OutlineState.Prefix` 实现；`Outline` 仍保留原生树语义、展开/收起、键盘与 a11y）。
+
 ### 5.3 字号（type scale，`design.TypeRole`）
 
 | Role | size/line/weight | 用途 |

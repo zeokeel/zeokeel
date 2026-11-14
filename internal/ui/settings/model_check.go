@@ -213,10 +213,7 @@ func buildCatalogCheckRow(c *ui.Context, t *design.Tokens, runtime contracts.UIR
 	check *modelCheckState, baseURL, apiKey string, locale contracts.LocaleService) {
 	baseURL = strings.TrimRight(strings.TrimSpace(baseURL), "/")
 	ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(design.Space2).Children(func() {
-		design.Apply(ui.Text(c, localized(locale,
-			"测试连接使用当前输入，不会保存。",
-			"The connection test uses the current input and saves nothing.")),
-			t.TextMuted(design.TypeXXS)).Grow(1).MaxLines(1)
+		ui.Spacer(c).Grow(1)
 		label := localized(locale, "测试连接", "Test connection")
 		busyLabel := localized(locale, "测试中…", "Testing…")
 		disabled := baseURL == ""

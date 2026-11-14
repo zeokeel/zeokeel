@@ -1281,6 +1281,12 @@ func (r *Root) settingsNavColumn(c *ui.Context, t *design.Tokens, selected *stri
 				Label(r.tr("搜索设置", "Search settings")).
 				Placeholder(r.tr("搜索设置…", "Search settings…")).FillWidth()
 		})
+		// The navigation scrolls under this hairline: without it a partially
+		// scrolled section title (常用) sat clipped against the search field
+		// with no boundary saying the list had moved.
+		ui.Column(c).FillWidth().PaddingX(design.Space3).Children(func() {
+			ui.Divider(c)
+		})
 		ui.Sidebar(c, selected, func() {
 			var scrollTarget ui.Element
 			addPages := func(pages []contracts.SettingsPageSpec) {

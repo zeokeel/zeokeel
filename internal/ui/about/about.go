@@ -107,9 +107,7 @@ func buildAboutPage(c *ui.Context, info contracts.AppInfo, title string,
 	locale contracts.LocaleService, devOpen *bool) {
 	heading := firstNonEmpty(title, uikit.T(locale, "关于", "About")) + " " + info.Name
 	ui.Column(c).FillWidth().Gap(design.Space3).Children(func() {
-		uikit.PageHeader(c, heading, uikit.T(locale,
-			"版本与构建信息；开发说明在下方折叠。",
-			"Version and build information; the development notes are folded below."))
+		uikit.PageHeader(c, heading, "")
 		uikit.Section(c, uikit.T(locale, "构建信息", "Build information"), func(c *ui.Context) {
 			buildPropertySheet(c, []uikit.KeyValue{
 				{Key: uikit.T(locale, "名称", "Name"), Value: aboutValue(locale, info.Name)},
@@ -125,14 +123,8 @@ func buildAboutPage(c *ui.Context, info contracts.AppInfo, title string,
 			}
 			ui.Collapsible(c, uikit.T(locale, "架构说明", "Architecture notes"), devOpen, func() {
 				uikit.Bullet(c, uikit.T(locale,
-					"UI 是 mygo 原生控件，没有浏览器/webview。",
-					"The UI is built from native mygo controls; there is no browser or webview."))
-				uikit.Bullet(c, uikit.T(locale,
-					"模块通过注入点贡献界面，宿主只负责布局与帧。",
-					"Modules contribute UI through injection points; the host owns layout and frames."))
-				uikit.Bullet(c, uikit.T(locale,
-					"注册随模块激活生效，注销随 kernel effect 逆序撤销。",
-					"Registrations activate with the module and are disposed in reverse order by kernel effects."))
+					"UI 是 mygo 原生控件；模块通过注入点贡献界面。",
+					"The UI is built from native mygo controls; modules contribute UI through injection points."))
 			})
 		})
 	})

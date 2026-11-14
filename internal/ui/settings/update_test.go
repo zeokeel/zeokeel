@@ -135,7 +135,7 @@ func TestUpdatePageWithoutBackend(t *testing.T) {
 	tester := h.tester()
 	tester.Frame()
 	h.click(tester, "更新")
-	h.assertTexts(tester, "更新", "检查更新并查看最新版本", "当前版本", "dev", "更新服务未启用")
+	h.assertTexts(tester, "更新", "当前版本", "dev", "更新服务未启用")
 	// The description mentions 检查更新; the action button itself must be absent.
 	if got := exactTextCount(tester.Texts(), "检查更新"); got != 0 {
 		t.Fatalf("检查更新 button labels = %d, want 0; texts = %v", got, tester.Texts())
@@ -224,8 +224,8 @@ func TestUpdateFeedUnconfiguredIsExplainedNotPromised(t *testing.T) {
 	tester := openUpdatePage(t, h)
 	h.assertNoTexts(tester, "下载安装包", "下次启动安装")
 	h.click(tester, "检查更新")
-	waitForText(t, tester, "当前构建未启用更新")
-	h.assertTexts(tester, "更新未启用", "官方发布渠道")
+	waitForText(t, tester, "当前构建未配置更新源")
+	h.assertTexts(tester, "更新未启用")
 	h.assertNoTexts(tester, "update.feedURL", "检查更新失败",
 		"下载更新", "下载安装包", "安装并在下次启动生效", "下次启动安装")
 	// The action disappears once the build is known to be unconfigured.

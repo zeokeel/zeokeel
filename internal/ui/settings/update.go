@@ -149,17 +149,13 @@ func buildUpdatePage(c *ui.Context, t *design.Tokens, kctx cordis.Context, runti
 		if st.unavailable {
 			// A build without a release feed cannot check, download or install:
 			// say so instead of offering an action that always fails.
-			uikit.PageHeader(c, localized(locale, "更新", "Update"), localized(locale,
-				"当前构建未启用更新。",
-				"Updates are not enabled in this build."))
+			uikit.PageHeader(c, localized(locale, "更新", "Update"), "")
 		} else {
 			// The page's only primary action (check now) sits at the header's
 			// right edge; the page writes nothing, so there is no footer save.
 			uikit.PageHeaderAction(c,
 				localized(locale, "更新", "Update"),
-				localized(locale,
-					"检查更新并查看最新版本。",
-					"Check for updates and view the latest version."),
+				"",
 				func(c *ui.Context) {
 					if !hasUpdate {
 						return
@@ -201,8 +197,8 @@ func buildUpdatePage(c *ui.Context, t *design.Tokens, kctx cordis.Context, runti
 		if st.unavailable {
 			uikit.Section(c, localized(locale, "更新未启用", "Updates not enabled"), func(*ui.Context) {
 				design.Apply(ui.Text(c, localized(locale,
-					"当前构建未启用更新：没有配置更新源，因此无法检查、下载或安装新版本。请通过官方发布渠道获取新版本。",
-					"This build does not enable updates: no release feed is configured, so new versions cannot be checked, downloaded or installed. Get new versions from the official release channel.")),
+					"当前构建未配置更新源，无法检查、下载或安装新版本。",
+					"This build has no release feed configured, so new versions cannot be checked, downloaded or installed.")),
 					t.Font(design.TypeXS)).TextColor(t.LabelSecondary).MaxLines(4)
 			})
 			return

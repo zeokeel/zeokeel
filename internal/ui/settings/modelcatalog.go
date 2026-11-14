@@ -312,9 +312,7 @@ func buildCatalogProviderField(c *ui.Context, locale contracts.LocaleService, pr
 			c.Invalidate()
 			return
 		}
-	}).Description(localized(locale,
-		"选择常用服务商可预填接口地址与示例模型 ID；其他兼容接口请选择自定义。",
-		"A common provider prefills the endpoint and an example model id; choose Custom for any other compatible service."))
+	})
 }
 
 // buildCatalogBaseURLField renders the shared Base URL input. Typing an
@@ -329,9 +327,7 @@ func buildCatalogBaseURLField(c *ui.Context, locale contracts.LocaleService, pro
 		if input.Changed() {
 			*providerID = catalogProviderFromURL(*baseURL)
 		}
-	}).Description(localized(locale,
-		"OpenAI 兼容接口地址，例如 https://api.deepseek.com/v1。",
-		"An OpenAI-compatible endpoint, for example https://api.deepseek.com/v1."))
+	})
 }
 
 // buildCatalogContextWindowField renders the shared context-window number
@@ -388,18 +384,7 @@ func buildModelCatalogSection(c *ui.Context, runtime contracts.UIRuntime, store 
 				}
 				if len(models) == 0 {
 					if ok {
-						// The composer can still have an effective model: the
-						// assembly's default. Name it here so the page and the
-						// composer chip tell the same story (FR-26).
-						empty := localized(locale,
-							"还没有模型。添加后，对话输入框的模型菜单会展示它。",
-							"No models yet. Add one and the composer's model menu shows it.")
-						if model := strings.TrimSpace(effectiveModel); model != "" {
-							empty += " " + localized(locale,
-								"当前默认模型：「"+model+"」来自装配，添加模型行后可覆盖。",
-								"The current default model, \""+model+"\", comes from the assembly; add a model row to override it.")
-						}
-						uikit.EmptyState(c, empty)
+						uikit.EmptyState(c, localized(locale, "还没有模型", "No models yet"))
 					}
 				} else {
 					// The models are a collection: the official List keys the rows
@@ -611,10 +596,6 @@ func buildCatalogAddDialog(c *ui.Context, t *design.Tokens, runtime contracts.UI
 		}).Children(func() {
 			design.Apply(ui.Text(c, localized(locale, "添加模型", "Add model")),
 				t.Font(design.TypeL)).FontWeight(design.WeightSemibold).TextColor(t.LabelPrimary)
-			design.Apply(ui.Text(c, localized(locale,
-				"添加后会立即加入模型列表并出现在对话的模型菜单中。",
-				"The model joins the list and the composer's model menu immediately.")),
-				t.TextMuted(design.TypeXS)).MaxLines(1)
 
 			ui.Row(c).FillWidth().Gap(design.Space3).AlignItems(ui.Start).Children(func() {
 				ui.Column(c).FillWidth().Grow(1).Children(func() {
@@ -629,9 +610,7 @@ func buildCatalogAddDialog(c *ui.Context, t *design.Tokens, runtime contracts.UI
 						if input.Changed() {
 							c.Invalidate()
 						}
-					}).Description(localized(locale,
-						"服务商提供的模型 ID，例如 deepseek-chat。",
-						"The model ID the provider exposes, for example deepseek-chat."))
+					})
 				})
 			})
 			ui.Row(c).FillWidth().Gap(design.Space3).AlignItems(ui.Start).Children(func() {
@@ -679,8 +658,8 @@ func buildCatalogAddDialog(c *ui.Context, t *design.Tokens, runtime contracts.UI
 							c.Invalidate()
 						}
 					}).Description(localized(locale,
-						"决定内置的思考模式；按模型 ID 自动推断，可手动修改。",
-						"Selects the built-in thinking modes; inferred from the model ID, editable."))
+						"决定内置的思考模式。",
+						"Selects the built-in thinking modes."))
 				})
 				ui.Column(c).FillWidth().Grow(1).Justify(ui.End).Children(func() {
 					hint := localized(locale, "对话输入框默认使用该模型。",

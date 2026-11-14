@@ -21,7 +21,7 @@ func TestNetworkPageDefaults(t *testing.T) {
 	h.click(tester, "网络")
 
 	h.assertTexts(tester, "网络", "当前生效", "代理地址", "NO_PROXY", "直连",
-		"代理设置由进程启动时应用", "保存")
+		"修改后需要重启应用生效", "保存")
 }
 
 // TestNetworkPageSaveWritesSettings types a proxy and a NO_PROXY list into the
@@ -119,7 +119,7 @@ func TestNetworkPageEnglish(t *testing.T) {
 	h.click(tester, "Network")
 
 	h.assertTexts(tester, "Network", "Currently applied", "Proxy URL", "NO_PROXY",
-		"Direct", "The proxy is applied when the process starts", "Save")
+		"Direct", "Restart the app to apply changes", "Save")
 	h.click(tester, "Save")
 	h.assertTexts(tester, "Saved")
 }

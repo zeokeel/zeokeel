@@ -78,8 +78,11 @@ func (b *behaviorHarness) storedPermission() string {
 func TestBehaviorPermissionPageWrites(t *testing.T) {
 	harness := startBehaviorUI(t, false)
 	harness.openSettingsPage(t, "行为")
+	// The page shows the current mode; the three presets live in its popover
+	// (the explanatory bullets that used to repeat their names were removed as
+	// redundant copy).
 	requireHasTexts(t, harness.tester, "行为", "默认代理权限", "当前：工作区可写",
-		"只读", "工作区可写", "所有权限")
+		"工作区可写")
 
 	// Select all permissions through the popover.
 	harness.click(t, "工作区可写")

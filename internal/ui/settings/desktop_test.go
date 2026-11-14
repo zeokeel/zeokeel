@@ -25,7 +25,7 @@ func TestAppearanceDesktopIntegrationDefaultsAndWrites(t *testing.T) {
 	h.click(tester, "外观")
 
 	h.assertTexts(tester, "桌面集成", "开机自启动", "关闭时最小化到托盘",
-		"登录时自动启动", "重启应用生效")
+		"重启应用生效")
 	h.assertNoTexts(tester, "单实例运行")
 
 	// Default autostart is off: the first click turns it on.
@@ -81,8 +81,7 @@ func TestAppearanceDesktopIntegrationEnglish(t *testing.T) {
 	h.click(tester, "Appearance")
 
 	h.assertTexts(tester, "Desktop integration", "Launch at login",
-		"Close to system tray", "Start ZeoKeel automatically when you log in",
-		"takes effect after restart")
+		"Close to system tray", "Takes effect after a restart")
 	h.assertNoTexts(tester, "Single instance")
 	h.click(tester, "Launch at login")
 	h.assertTexts(tester, "Desktop integration updated")

@@ -91,10 +91,6 @@ func buildSkillsEditorDialogs(c *ui.Context, t *design.Tokens, st *skillsState,
 			}).Children(func() {
 				design.Apply(ui.Text(c, localized(locale, "新建技能", "New skill")),
 					t.Font(design.TypeL)).FontWeight(600).TextColor(t.LabelPrimary)
-				design.Apply(ui.Text(c, localized(locale,
-					"技能保存为 dataDir/skills/<名称>/SKILL.md。",
-					"Skills are saved as dataDir/skills/<name>/SKILL.md.")),
-					t.TextMuted(design.TypeXS)).MaxLines(2)
 				// The dialog's first field takes the focus and Enter submits, as
 				// in every desktop form: the audit found every settings dialog
 				// needed a click on the field and then on the button.
@@ -103,22 +99,19 @@ func buildSkillsEditorDialogs(c *ui.Context, t *design.Tokens, st *skillsState,
 					ui.TextInput(c, &st.draftName).
 						Label(inputLabel(locale, localized(locale, "名称", "Name"))).
 						FillWidth().AutoFocus().OnTextKey(uikit.EnterTo(submit))
-				}).Description(localized(locale, "技能目录名，也是技能菜单中的名称。",
-					"The skill's directory and menu name."))
+				})
 				ui.Field(c, localized(locale, "描述", "Description"), func() {
 					ui.TextInput(c, &st.draftDescription).
 						Label(inputLabel(locale, localized(locale, "描述", "Description"))).
 						FillWidth().OnTextKey(uikit.EnterTo(func() {
 						createSkillFromDraft(c, editor, st, locale)
 					}))
-				}).Description(localized(locale, "给模型看的一句话说明。",
-					"One sentence the model sees in the skill menu."))
+				})
 				ui.Field(c, localized(locale, "内容", "Body"), func() {
 					ui.TextArea(c, &st.draftBody).
 						Label(inputLabel(locale, localized(locale, "内容", "Body"))).
 						FillWidth().MinHeight(design.Space6 * 5)
-				}).Description(localized(locale, "SKILL.md 的 Markdown 正文。",
-					"The Markdown body of SKILL.md."))
+				})
 				if st.editErr != "" {
 					uikit.ErrorLine(c, st.editErr)
 				}
@@ -145,8 +138,7 @@ func buildSkillsEditorDialogs(c *ui.Context, t *design.Tokens, st *skillsState,
 				design.Apply(ui.Text(c, localized(locale, "名称：", "Name: ")+st.editName),
 					t.Font(design.TypeXS)).FontWeight(600).TextColor(t.LabelPrimary)
 				design.Apply(ui.Text(c, localized(locale,
-					"名称不可修改；保存会重写 dataDir/skills/<名称>/SKILL.md。",
-					"Name cannot be changed; saving rewrites dataDir/skills/<name>/SKILL.md.")),
+					"名称不可修改。", "The name cannot be changed.")),
 					t.TextMuted(design.TypeXXS)).MaxLines(2)
 				ui.Field(c, localized(locale, "描述", "Description"), func() {
 					ui.TextInput(c, &st.editDescription).
@@ -155,14 +147,12 @@ func buildSkillsEditorDialogs(c *ui.Context, t *design.Tokens, st *skillsState,
 						OnTextKey(uikit.EnterTo(func() {
 							updateSkillFromDraft(c, editor, st, locale)
 						}))
-				}).Description(localized(locale, "给模型看的一句话说明。",
-					"One sentence the model sees in the skill menu."))
+				})
 				ui.Field(c, localized(locale, "内容", "Body"), func() {
 					ui.TextArea(c, &st.editBody).
 						Label(inputLabel(locale, localized(locale, "内容", "Body"))).
 						FillWidth().MinHeight(design.Space6 * 5)
-				}).Description(localized(locale, "SKILL.md 的 Markdown 正文。",
-					"The Markdown body of SKILL.md."))
+				})
 				if st.editErr != "" {
 					uikit.ErrorLine(c, st.editErr)
 				}

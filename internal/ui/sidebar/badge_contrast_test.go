@@ -3,8 +3,9 @@ package sidebar_test
 // Regression test for the unified selection language (V1): the chosen session
 // row is the quiet persistent selection — the BgSelected 12% tint with a 2px
 // Accent left stripe and LabelPrimary text — not mygo's saturated accent fill.
-// The row's content, its badges and the stripe must all stay readable on that
-// tint in both themes.
+// The row's content and the stripe must stay readable on that tint in both
+// themes; the live run detail (spinner + state label) sits at the row end
+// without painting a saturated block.
 
 import (
 	"testing"
@@ -31,8 +32,8 @@ func colorNear(got [3]uint32, want [4]uint8) bool {
 
 // TestSelectedSessionRowUsesQuietSelection covers the V1 selection model in both
 // themes: the chosen row is the selection tint, the left stripe is the accent,
-// and the running badge keeps the resting neutral fill (the old on-accent fill
-// was for the retired full-accent row).
+// and the running state is carried by the row-end spinner + label rather than a
+// saturated badge.
 func TestSelectedSessionRowUsesQuietSelection(t *testing.T) {
 	for _, tc := range []struct {
 		name string
@@ -67,43 +68,37 @@ func TestSelectedSessionRowUsesQuietSelection(t *testing.T) {
 			if !ok {
 				t.Fatalf("chosen session title is not in the frame; texts = %v", tester.Texts())
 			}
-			badge, ok := tester.Find("运行中")
-			if !ok {
-				t.Fatalf("running badge is not in the frame; texts = %v", tester.Texts())
+			if _, ok := tester.Find("运行中"); !ok {
+				t.Fatalf("running state is not in the frame; texts = %v", tester.Texts())
 			}
 			img := tester.Image()
-
-			// The chosen row's content starts at the found label's left edge:
-			// the 2 DIP accent stripe is its first child, then the row gap and
-			// the title's start padding (the message glyph and its text follow).
-			barX := int(title.X) + 1
 			barY := int(title.Y + title.H/2)
-			br, bg, bb, _ := img.At(barX, barY).RGBA()
-			bar := [3]uint32{br >> 8, bg >> 8, bb >> 8}
-			if !colorNear(bar, rgbOf(tokens.Accent)) {
-				t.Fatalf("selection stripe at (%d,%d) = #%02x%02x%02x, want the accent",
-					barX, barY, bar[0], bar[1], bar[2])
+
+			// The chosen row's content starts at the row's left edge: the 2 DIP
+			// accent stripe is its first child, then the row gap and the title's
+			// start padding (the message glyph and its text follow). Scan from
+			// the sidebar edge to the title for the first accent pixel, so the
+			// assertion does not depend on the current glyph/gap metrics.
+			barX := -1
+			for x := 0; x < int(title.X); x++ {
+				r, g, b, _ := img.At(x, barY).RGBA()
+				if colorNear([3]uint32{r >> 8, g >> 8, b >> 8}, rgbOf(tokens.Accent)) {
+					barX = x
+					break
+				}
+			}
+			if barX < 0 {
+				t.Fatalf("no accent selection stripe on the chosen row at y=%d; texts = %v", barY, tester.Texts())
 			}
 
 			// The row fill: the BgSelected tint over the sidebar, not the accent.
-			rowX := int(title.X) + 9
+			rowX := barX + 6
 			rr, rg, rb, _ := img.At(rowX, barY).RGBA()
-			row := [3]uint32{rr >> 8, rg >> 8, rb >> 8}
+			fill := [3]uint32{rr >> 8, rg >> 8, rb >> 8}
 			rowTint := tokens.BgSelected.Over(tokens.BgSidebar)
-			if !colorNear(row, rgbOf(rowTint)) {
+			if !colorNear(fill, rgbOf(rowTint)) {
 				t.Fatalf("chosen row fill at (%d,%d) = #%02x%02x%02x, want the BgSelected tint",
-					rowX, barY, row[0], row[1], row[2])
-			}
-
-			// The badge keeps the resting neutral fill over the selected tint.
-			bx := int(badge.X) - 3
-			by := int(badge.Y + badge.H/2)
-			xr, xg, xb, _ := img.At(bx, by).RGBA()
-			fill := [3]uint32{xr >> 8, xg >> 8, xb >> 8}
-			bgFill := tokens.BgHover.Over(rowTint)
-			if !colorNear(fill, rgbOf(bgFill)) {
-				t.Fatalf("chosen running badge fill = #%02x%02x%02x at (%d,%d), want the neutral badge fill",
-					fill[0], fill[1], fill[2], bx, by)
+					rowX, barY, fill[0], fill[1], fill[2])
 			}
 		})
 	}

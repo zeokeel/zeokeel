@@ -122,18 +122,45 @@ func TestWorkspaceTreeGroupsAndIndent(t *testing.T) {
 		t.Fatalf("group order = one:%d two:%d ungrouped:%d; texts = %v", one, two, ungrouped, texts)
 	}
 
-	// Nested session rows are indented below their workspace header.
-	headerRect, ok := tester.Find("未分组")
+	// The session rows are the header's tree children: the outline keeps the
+	// native tree semantics (the header expands and holds rows at depth 1), and
+	// the visual indent is one small step drawn by the row prefix (see the
+	// sidebar snapshots; the accessible rows span the full width, so their
+	// boxes cannot measure text indent).
+	header, ok := tester.AccessByRole(ui.RoleTreeItem, "未分组")
 	if !ok {
-		t.Fatalf("未分组 header missing; texts = %v", texts)
+		t.Fatalf("未分组 header missing; access = %v", tester.AccessAll())
 	}
-	sessionRect, ok := tester.Find("D 会话")
+	if !header.Expandable || !header.Expanded {
+		t.Fatalf("未分组 header expandable=%v expanded=%v, want an open branch", header.Expandable, header.Expanded)
+	}
+	if _, ok := tester.AccessByRole(ui.RoleTreeItem, "D 会话"); !ok {
+		t.Fatalf("D 会话 is not a tree row; access = %v", tester.AccessAll())
+	}
+}
+
+func TestWorkspaceTreeLeadingGlyphOpensSession(t *testing.T) {
+	chat := &fakeChat{sessions: []contracts.ChatSessionInfo{
+		{ID: "s1", Title: "A 会话", WorkspaceID: "w1"},
+		{ID: "s2", Title: "B 会话", WorkspaceID: "w1"},
+	}, active: "s2"}
+	ws := newFakeWorkspace(contracts.Workspace{ID: "w1", Name: "项目一"}).
+		withCurrent(contracts.Workspace{ID: "w1", Name: "项目一"})
+	h := newHarnessWithWorkspace(t, chat, sidebar.Config{}, ws)
+	tester := h.tester()
+	tester.Frame()
+
+	row, ok := tester.AccessByRole(ui.RoleTreeItem, "A 会话")
 	if !ok {
-		t.Fatalf("D 会话 missing; texts = %v", texts)
+		t.Fatalf("A 会话 row missing; access = %v", tester.AccessAll())
 	}
-	if sessionRect.X <= headerRect.X {
-		t.Fatalf("session row x=%.1f is not indented past the workspace header x=%.1f",
-			sessionRect.X, headerRect.X)
+	// The leading block is the stripe, the level indent and the conversation
+	// glyph: a click on the glyph opens the session like the title does.
+	tester.ClickAt(row.Bounds.X+24, row.Bounds.Y+row.Bounds.H/2)
+	tester.Frame()
+	tester.Frame()
+	if got := chat.ActiveSession(); got != "s1" {
+		t.Fatalf("active session after clicking the leading glyph = %q, want s1", got)
 	}
 }
 
@@ -142,10 +169,11 @@ func TestWorkspaceTreeCountsAndCurrentBadge(t *testing.T) {
 	h := newHarnessWithWorkspace(t, treeChat(), sidebar.Config{}, workspace)
 	tester := h.tester()
 
-	// The current workspace name appears as the row's accessible label and the
-	// row's text: two labels, one visual row. The header no longer repeats it.
-	if got := countText(tester, "项目一"); got != 2 {
-		t.Fatalf("当前工作区 name labels = %d, want 2 (row label + row text); texts = %v", got, tester.Texts())
+	// The current workspace name appears as the row's accessible label, the
+	// ButtonBase's label and the visible text: three labels, one visual row.
+	// The header no longer repeats it.
+	if got := countText(tester, "项目一"); got != 3 {
+		t.Fatalf("当前工作区 name labels = %d, want 3 (row label + button label + text); texts = %v", got, tester.Texts())
 	}
 	// Group counts: 项目一=2, 项目二=1, 未分组=2 (empty + unknown workspace id).
 	h.assertTexts(tester, "2", "1")

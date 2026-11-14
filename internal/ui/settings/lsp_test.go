@@ -233,7 +233,7 @@ func TestLSPWorkspaceConfigEnglishCopy(t *testing.T) {
 	tester.Frame()
 	h.click(tester, "LSP")
 	label := "Read workspace LSP config (.zeokeel/lsp.json)"
-	h.assertTexts(tester, "Workspace configuration", label, "off by default", "Risk")
+	h.assertTexts(tester, "Workspace configuration", label, "Off by default", "Risk")
 	h.click(tester, label)
 	if raw := store.get(contracts.SettingLSPWorkspaceConfig); raw != "allow" {
 		t.Fatalf("English toggle wrote %q, want allow", raw)

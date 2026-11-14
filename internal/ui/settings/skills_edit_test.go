@@ -402,7 +402,7 @@ func TestSkillsEditEnglish(t *testing.T) {
 	h.assertTexts(tester, "Skill actions")
 	h.click(tester, "Skill actions")
 	h.click(tester, "Edit skill")
-	h.assertTexts(tester, "Edit skill", "Name cannot be changed", "Save", "Cancel")
+	h.assertTexts(tester, "Edit skill", "The name cannot be changed", "Save", "Cancel")
 	h.click(tester, "Save")
 	if got := editor.updated(); len(got) != 1 || got[0].Name != "alpha" {
 		t.Fatalf("English UpdateSkill calls = %+v", got)

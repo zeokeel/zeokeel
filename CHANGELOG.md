@@ -4,6 +4,20 @@ All notable changes to ZeoKeel are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/) and the project adheres to
 [Semantic Versioning](https://semver.org/).
 
+## [0.2.35] - 2026-11-14
+
+### Added
+
+- **侧栏会话行运行细节**：会话列表现在区分「等待回复」（已发送、模型尚无输出：行首 Clock + 行尾状态）、「运行中」（行首 Spinner + 状态词）与「运行结束但未查看」（行尾 Accent 圆点、标题加重、无障碍名读「未读回复」）；折叠的工作区/未分组分组行汇总组内子会话的等待/运行/未读状态。`contracts.ChatSessionInfo` 新增 `Waiting`/`Unread`；未读持久化在 `session.<id>.unread`，打开会话、开始新 run、删除会话时清除。
+- `ui-snapshot` 新增挂起/慢响应服务器模式与 `p2-sidebar-states`、`p2-sidebar-unread` 两张证据帧。
+
+### Changed
+
+- **侧栏视觉与密度**：新对话改为左对齐的列表首行；会话行高 32（树行档位）；工作区分组计数由 Badge 改为静默数字，折叠组显示状态汇总；选中行的 ⋯ 改为 hover/focus 显示；页脚设置行加 hairline 分隔；会话行状态词占用行尾空间后重新分配标题宽度。
+- **工作区树行对齐 DSH**：改用 `OutlineState.Prefix` 自绘行前置位——工作区文件夹（hover 换 disclosure chevron）与会话运行图标共用同一个 16px leading slot，嵌套会话只缩进 12 DIP；选中左条仍在行左缘。原生树语义、展开/收起、键盘与 a11y 不变。
+- **设置页文案降噪**：20 个设置页删除页头副标题，删除/压缩复述控件名的 Description 与行为、OS 沙箱、通知、数据、MCP、更新、记忆、关于等页的解释性散文与 bullets；保留格式/单位/留空含义、重启生效与安全/不可逆警告。设置导航在搜索框下加 hairline 滚动边界。
+- **验证**：`gofmt`、`go build ./...`（含 `CGO_ENABLED=0`）、`go vet ./...`、`go tool mygo vet .`、`go test ./... -count=1` 全绿；`designlint --strict --baseline` 0 error/0 warn/0 new；`scripts/design-check.sh` 6/6 PASS；`ui-snapshot` 106 steps / 105 PNGs 全量重生成并人工复核 `p2-sidebar-states` / `p2-sidebar-unread` / `narrow/dark-session` / `p2-appearance` / `p2-behavior`。
+
 ## [0.2.34] - 2026-11-14
 
 框架升级与官方化收口：mygo v0.9.0、rig v0.16.2（修复 Windows 每次工具调用弹控制台窗口），并把能交给框架的自写代码换掉。

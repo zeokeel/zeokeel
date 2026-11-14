@@ -195,8 +195,7 @@ func TestMCPTransportEnglishCopy(t *testing.T) {
 	h.uiRoot.Locale().SetLanguage("en")
 	tester.Frame()
 	h.click(tester, "MCP")
-	h.assertTexts(tester, "HTTP", "stdio", "npx -y server-github",
-		"Connect MCP servers over Streamable HTTP or stdio; changes apply after a restart (stdio subprocesses start on launch).")
+	h.assertTexts(tester, "HTTP", "stdio", "npx -y server-github")
 
 	// The transport-aware add form: a fresh (empty) list keeps the selector
 	// unambiguous in the frame.

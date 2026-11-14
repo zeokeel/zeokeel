@@ -50,17 +50,13 @@ type notificationsState struct {
 func buildNotificationsPage(c *ui.Context, runtime contracts.UIRuntime,
 	store contracts.SettingsService, locale contracts.LocaleService, st *notificationsState) {
 	ui.Column(c).FillWidth().Gap(design.Space4).Children(func() {
-		uikit.PageHeader(c, localized(locale, "通知", "Notifications"), localized(locale,
-			"应用内提示气泡；修改立即生效。提示只在窗口内显示：应用在后台或最小化时不会弹出系统通知。",
-			"In-app toast bubbles; changes apply immediately. Toasts show inside the window only: no system notification appears while the app is in the background or minimized."))
+		uikit.PageHeader(c, localized(locale, "通知", "Notifications"), "")
 		uikit.Section(c, localized(locale, "通知气泡", "Notification toasts"), func(*ui.Context) {
 			ui.Form(c, func() {
 				enabled := notificationsSettingEnabled(store.Get(contracts.SettingNotifications, ""))
 				if switchField(c,
 					localized(locale, "显示通知气泡", "Show notification toasts"),
-					localized(locale,
-						"关闭后导出、更新等提示不再以气泡显示，仍可在界面内查看状态。",
-						"When off, export and update notices stay in the app instead of showing toasts."),
+					"",
 					&enabled) {
 					if err := store.Set(contracts.SettingNotifications, fmt.Sprintf("%t", enabled)); err != nil {
 						st.status = localized(locale, "保存失败：", "Save failed: ") + err.Error()

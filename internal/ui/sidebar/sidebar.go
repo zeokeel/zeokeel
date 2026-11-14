@@ -144,6 +144,12 @@ type paneState struct {
 	workspaceDeleteName string
 	workspaceDeleteErr  string
 
+	// hoveredTreeGroup is the workspace group whose row the pointer is over in
+	// the last frame. The row prefix draws the folder/chevron swap from it: the
+	// prefix is built before the row content, so the content records the hover
+	// for the next frame (hover changes always request one).
+	hoveredTreeGroup string
+
 	// screens lists the registered screens so the sidebar can offer a
 	// generic navigation item for every module screen it does not own (the
 	// session list is the sidebar's own screen). Home is no longer a sidebar
@@ -347,12 +353,15 @@ func buildPrimary(c *ui.Context, t *design.Tokens, chat contracts.ChatService,
 				button = design.Apply(ui.PrimaryButton(c, ""), t.PrimaryButton()).
 					FillWidth().Label(label)
 			}
+			// The action reads as the first row of the source list, not as a
+			// centered dialog button: its glyph and label sit at the start like
+			// the navigation and session rows below, so the column has one
+			// left-aligned reading edge.
 			button.Children(func() {
-				ui.Row(c).FillWidth().AlignItems(ui.Center).Justify(ui.Center).
-					Gap(design.Space2).Children(func() {
+				ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(design.Space2).Children(func() {
 					ui.Icon(c, icons.NewChat()).Size(design.IconSizeS, design.IconSizeS).TextColor(iconColor)
 					design.Apply(ui.Text(c, label), t.Text(design.TypeBody)).
-						FontWeight(500).TextColor(textColor)
+						FontWeight(design.WeightMedium).TextColor(textColor).MaxLines(1)
 				})
 			})
 			if button.Clicked() {
@@ -1049,10 +1058,32 @@ func buildWorkspaceTree(
 	}
 
 	// The outline keys its rows by item (workspace item or session ID). Rows
-	// are named by the text inside them (mygo's list semantics): a group row by
-	// its ButtonBase label, a session row by its title, so the row's accessible
-	// name and the pointer click target are the visual text.
-	state.tree.List.Label = nil
+	// are named by the session title plus its live state (sessionRowLabel) and
+	// by a workspace plus the state inside it, so assistive technology and
+	// type-ahead hear what the spinner and dot show. The Label callback also
+	// remembers the row being built: mygo's row Prefix is told the depth and
+	// whether the item branches, not which item it is, and the prefix draws the
+	// chosen stripe and the session's leading glyph from that row.
+	prefixRow := -1
+	state.tree.List.Label = func(row int) string {
+		if row < 0 || row >= len(rows) {
+			return ""
+		}
+		prefixRow = row
+		item := rows[row]
+		if isWorkspaceTreeKey(item) {
+			return workspaceGroupLabel(state, tree, item)
+		}
+		if session, ok := tree.sessions[item]; ok {
+			return sessionRowLabel(state, session)
+		}
+		return ""
+	}
+	state.tree.Prefix = func(row ui.OutlineRow) {
+		buildTreeRowPrefix(c, t, state, tree, rows, prefixRow, active, row, func(item string) {
+			openSession(chat, nav, runtime, state, item)
+		})
+	}
 	state.tree.List.Selected = &state.treeRow
 	var outline ui.Element
 	// The native chosen-row fill is painted from the theme's accent: build the
@@ -1070,7 +1101,7 @@ func buildWorkspaceTree(
 			}
 			session := tree.sessions[item]
 			buildSessionRow(c, t, chat, nav, runtime, state, session,
-				session.ID == active, rowOf[item] == state.treeRow, 28)
+				session.ID == active, rowOf[item] == state.treeRow, design.RowCompactHeight, true)
 		})
 	})
 	if outline.Submitted() && state.treeRow >= 0 && state.treeRow < state.tree.Rows() {
@@ -1241,10 +1272,22 @@ func buildWorkspaceGroupRow(c *ui.Context, t *design.Tokens, chat contracts.Chat
 	count := tree.counts[key]
 	current := key != ungroupedWorkspaceKey && workspaceIDFromTreeKey(key) == tree.current
 	c.Key("workspace/" + key)
-	row := ui.ButtonBase(c).FillWidth().Height(32).PaddingX(design.Space2).
+	// The folder (and the chevron while hovered) is drawn by the row prefix,
+	// in the one leading slot every tree row shares; the content starts at the
+	// title like the session rows' titles do.
+	// Grow, not FillWidth: the row prefix already spent the leading slot, and a
+	// 100%-width child would overflow it and squeeze the row-end actions.
+	row := ui.ButtonBase(c).Grow(1).Shrink(1).Height(design.RowCompactHeight).PaddingEnd(design.Space2).
 		Radius(design.RadiusSM).Label(name)
 	// The row action buttons stay out of the way until the row is hovered,
-	// focused or the current workspace, as the session rows' action does.
+	// focused or the current workspace, as the session rows' action does. The
+	// prefix (built before this content) reads the hover from the previous
+	// frame to swap the folder for the disclosure chevron.
+	if row.Hovered() {
+		state.hoveredTreeGroup = key
+	} else if state.hoveredTreeGroup == key {
+		state.hoveredTreeGroup = ""
+	}
 	revealed := current || row.Hovered() || row.FocusWithin()
 	if ws, ok := tree.workspace[key]; ok {
 		if root := strings.TrimSpace(ws.Root); root != "" {
@@ -1253,13 +1296,6 @@ func buildWorkspaceGroupRow(c *ui.Context, t *design.Tokens, chat contracts.Chat
 	}
 	row.Children(func() {
 		ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(design.Space2).Children(func() {
-			icon := icons.Folder()
-			iconColor := t.LabelSecondary
-			if current {
-				icon = icons.FolderOpen()
-				iconColor = t.Accent
-			}
-			ui.Icon(c, icon).Size(design.IconSizeS, design.IconSizeS).TextColor(iconColor)
 			textColor := t.LabelSecondary
 			if current {
 				textColor = t.LabelPrimary
@@ -1268,8 +1304,32 @@ func buildWorkspaceGroupRow(c *ui.Context, t *design.Tokens, chat contracts.Chat
 			// so a long single-token workspace name cannot push the row's
 			// count/actions (⋯/⊕) outside the 280-DIP sidebar.
 			design.Apply(ui.Text(c, name), t.Text(design.TypeXS)).
-				FontWeight(500).TextColor(textColor).Grow(1).MinWidth(design.Space0).MaxLines(1).Ellipsis("…")
-			design.Apply(ui.Badge(c, strconv.Itoa(count)), t.Badge())
+				FontWeight(design.WeightMedium).TextColor(textColor).Grow(1).MinWidth(design.Space0).MaxLines(1).Ellipsis("…")
+			// A folded group still says what is happening inside it, so a
+			// running or unread conversation is findable without unfolding
+			// every workspace. An open group leaves that to its rows.
+			if !state.tree.Open.Has(key) {
+				running, waiting, unread := groupLiveState(tree, key)
+				switch {
+				case running:
+					label := state.T("运行中", "Running")
+					if waiting {
+						label = state.T("等待回复", "Waiting")
+					}
+					ui.Row(c).Shrink(0).AlignItems(ui.Center).Gap(design.Space1).Children(func() {
+						ui.Spinner(c).Label(label).Size(design.Space3, design.Space3)
+						design.Apply(ui.Text(c, label), t.Text(design.TypeXXS)).
+							TextColor(t.LabelSecondary).MaxLines(1)
+					})
+				case unread:
+					ui.Box(c).Size(design.Space2, design.Space2).Radius(design.RadiusMax).
+						Background(t.Accent).Shrink(0)
+				}
+			}
+			// The count is metadata, not a status: a quiet number at the row
+			// end reads faster than a pill per group.
+			design.Apply(ui.Text(c, strconv.Itoa(count)), t.Font(design.TypeXXS)).
+				TextColor(t.LabelTertiary).Shrink(0)
 			if workspace != nil && key != ungroupedWorkspaceKey {
 				buildWorkspaceRowActions(c, t, workspace, runtime, state, tree, key, name, revealed)
 				buildWorkspaceNewChatAction(c, t, workspace, chat, nav, runtime, state, key, name, revealed)
@@ -1385,6 +1445,167 @@ func buildWorkspaceRowActions(c *ui.Context, t *design.Tokens, workspace contrac
 		ui.PopoverMenuButtonOptions{At: ui.AnchorBottomEnd, Self: ui.AnchorTopEnd})
 }
 
+// workspaceGroupLabel is a group row's accessible name: its workspace plus the
+// live state of the conversations inside it, so a folded group's spinner and
+// dot are spoken as words too.
+func workspaceGroupLabel(state *paneState, tree *workspaceTreeGroups, key string) string {
+	label := tree.labels[key]
+	// An open group shows its conversations' states on their own rows; only a
+	// folded group aggregates them on the group row.
+	if state.tree.Open.Has(key) {
+		return label
+	}
+	running, waiting, unread := groupLiveState(tree, key)
+	switch {
+	case running && waiting:
+		return label + "，" + state.T("等待回复", "waiting for a reply")
+	case running:
+		return label + "，" + state.T("运行中", "running")
+	case unread:
+		return label + "，" + state.T("未读回复", "unread reply")
+	default:
+		return label
+	}
+}
+
+// groupLiveState reports whether any conversation inside a workspace group is
+// running or carries an unread reply, and whether every running conversation is
+// still waiting for its first output. A folded group uses it to keep those
+// states visible at the group row.
+func groupLiveState(tree *workspaceTreeGroups, key string) (running, waiting, unread bool) {
+	runningCount, waitingCount := 0, 0
+	for _, id := range tree.children[key] {
+		session, ok := tree.sessions[id]
+		if !ok {
+			continue
+		}
+		if session.Running {
+			runningCount++
+			if session.Waiting {
+				waitingCount++
+			}
+		}
+		if session.Unread {
+			unread = true
+		}
+	}
+	running = runningCount > 0
+	waiting = running && waitingCount == runningCount
+	return
+}
+
+// buildTreeRowPrefix draws the shared leading anatomy of one workspace-tree
+// row: the chosen-row accent stripe, the level indent, the row's one leading
+// slot, and the gap before the title. A workspace shows its folder there (and
+// the disclosure chevron while the pointer rests on that slot); a conversation
+// shows its live glyph. Every row therefore starts with an icon at the front,
+// and a nested row indents one small step, as the DSH sidebar does.
+func buildTreeRowPrefix(c *ui.Context, t *design.Tokens, state *paneState,
+	tree *workspaceTreeGroups, rows []string, prefixRow int, active string,
+	row ui.OutlineRow, openItem func(item string)) {
+	if prefixRow < 0 || prefixRow >= len(rows) {
+		return
+	}
+	item := rows[prefixRow]
+	session, isSession := tree.sessions[item]
+	selected := isSession && prefixRow == state.treeRow
+
+	if isSession {
+		// The session's stripe, indent, glyph and gap form one leading block,
+		// so a click anywhere at the row front opens the conversation exactly
+		// as a click on its title does.
+		lead := ui.Row(c).Height(design.RowCompactHeight).Shrink(0).AlignItems(ui.Center)
+		lead.Children(func() {
+			// The chosen row's 2 DIP stripe sits at the row's edge, before the
+			// indent: the native selection fill spans the whole row, and the
+			// stripe stays the persistent navigation mark.
+			stripe := ui.Box(c).Width(selectedBarWidth).Height(design.RowCompactHeight).Shrink(0)
+			if selected {
+				stripe = stripe.Background(t.Accent)
+			}
+			if row.Depth > 0 {
+				ui.Box(c).Width(float32(row.Depth) * design.Space3).Shrink(0)
+			}
+			sessionLeadingGlyph(c, t, state, session,
+				prefixRow == state.treeRow || session.ID == active)
+			ui.Box(c).Width(design.Space2).Shrink(0)
+		})
+		if openItem != nil {
+			lead.ObserveInput(func(ev ui.InputEvent) {
+				if ev.Kind != ui.InputPointerUp || ev.Button != 0 {
+					return
+				}
+				openItem(item)
+			})
+		}
+		return
+	}
+
+	// A workspace shows its folder in the same leading slot; the disclosure
+	// chevron replaces it while the row is hovered, as the DSH sidebar swaps
+	// them. The transparent stripe keeps the folder in line with the session
+	// glyphs.
+	if selected {
+		ui.Box(c).Width(selectedBarWidth).Height(design.RowCompactHeight).
+			Background(t.Accent).Shrink(0)
+	} else {
+		ui.Box(c).Width(selectedBarWidth).Height(design.RowCompactHeight).Shrink(0)
+	}
+	if row.Depth > 0 {
+		ui.Box(c).Width(float32(row.Depth) * design.Space3).Shrink(0)
+	}
+	current := keyIsCurrentWorkspace(tree, item)
+	arrow := row.Arrow().Size(design.IconSizeS, design.IconSizeS).Center().Shrink(0)
+	hovered := arrow.Hovered() || state.hoveredTreeGroup == item
+	arrow.Children(func() {
+		if hovered {
+			icon := icons.ChevronRight()
+			if row.Open {
+				icon = icons.ChevronDown()
+			}
+			ui.Icon(c, icon).Size(design.IconSizeS, design.IconSizeS).TextColor(t.LabelSecondary)
+			return
+		}
+		icon := icons.Folder()
+		color := t.LabelSecondary
+		if row.Open {
+			icon = icons.FolderOpen()
+		}
+		if current {
+			color = t.Accent
+		}
+		ui.Icon(c, icon).Size(design.IconSizeS, design.IconSizeS).TextColor(color)
+	})
+	ui.Box(c).Width(design.Space2).Shrink(0)
+}
+
+// keyIsCurrentWorkspace reports whether a workspace key is the current one;
+// the synthetic ungrouped group never is.
+func keyIsCurrentWorkspace(tree *workspaceTreeGroups, key string) bool {
+	return isWorkspaceTreeKey(key) && key != ungroupedWorkspaceKey &&
+		workspaceIDFromTreeKey(key) == tree.current
+}
+
+// sessionLeadingGlyph draws a conversation's leading glyph: the run's phase
+// (clock while waiting for the first output, spinner while the answer streams)
+// or the conversation mark when idle. emphasized accents it for the chosen or
+// active conversation.
+func sessionLeadingGlyph(c *ui.Context, t *design.Tokens, state *paneState,
+	session contracts.ChatSessionInfo, emphasized bool) {
+	iconColor := t.LabelSecondary
+	if emphasized {
+		iconColor = t.Accent
+	}
+	switch {
+	case session.Running && session.Waiting:
+		ui.Icon(c, icons.Clock()).Size(design.IconSizeS, design.IconSizeS).TextColor(iconColor)
+	case session.Running:
+		ui.Spinner(c).Label(state.T("运行中", "Running")).Size(design.IconSizeS, design.IconSizeS)
+	default:
+		ui.Icon(c, icons.Message()).Size(design.IconSizeS, design.IconSizeS).TextColor(iconColor)
+	}
+}
+
 // outlineItemRow returns the row an outline item shows in the last built pass,
 // or -1 when it does not show.
 func outlineItemRow(state *ui.OutlineState[string], item string) int {
@@ -1423,7 +1644,7 @@ func buildFlatSessionList(c *ui.Context, t *design.Tokens, chat contracts.ChatSe
 		state.sessionRow = -1
 	}
 	state.sessionList.Key = func(row int) any { return sessions[row].ID }
-	state.sessionList.Label = func(row int) string { return state.sessionTitle(sessions[row]) }
+	state.sessionList.Label = func(row int) string { return sessionRowLabel(state, sessions[row]) }
 	state.sessionList.Selected = &state.sessionRow
 	var list ui.Element
 	// Same local theme as the workspace tree: the native chosen-row fill is the
@@ -1431,7 +1652,7 @@ func buildFlatSessionList(c *ui.Context, t *design.Tokens, chat contracts.ChatSe
 	ui.Themed(c, sessionSelectionTheme(t)).Background(ui.Transparent).FillWidth().Children(func() {
 		list = ui.List(c, &state.sessionList, len(sessions)).Rows(func(row ui.ListRow) {
 			buildSessionRow(row.Context, t, chat, nav, runtime, state, sessions[row.Index],
-				sessions[row.Index].ID == active, row.Index == state.sessionRow, 36)
+				sessions[row.Index].ID == active, row.Index == state.sessionRow, design.ControlHeight, false)
 		})
 	})
 	if list.Submitted() && state.sessionRow >= 0 && state.sessionRow < len(sessions) {
@@ -1666,7 +1887,8 @@ func visibleMessageHits(hits []contracts.MessageSearchHit, hidden map[string]boo
 // right-click, as mygo recommends.
 func buildSessionRow(c *ui.Context, t *design.Tokens, chat contracts.ChatService,
 	nav contracts.Navigator, runtime contracts.UIRuntime, state *paneState,
-	session contracts.ChatSessionInfo, active, chosen bool, height float32) {
+	session contracts.ChatSessionInfo, active, chosen bool, height float32,
+	leadingInPrefix bool) {
 	label := state.sessionTitle(session)
 	renamer, _ := chat.(contracts.SessionRenamer)
 	forker, _ := chat.(contracts.SessionForker)
@@ -1724,19 +1946,29 @@ func buildSessionRow(c *ui.Context, t *design.Tokens, chat contracts.ChatService
 	}
 
 	c.Key("session/" + session.ID)
-	content := ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(design.Space1)
+	// Grow, not FillWidth: in the tree the row prefix already spent the
+	// leading slot, so a 100%-width child would overflow the row and squeeze
+	// the row-end actions (the flat list has no prefix, where Grow fills the
+	// row just the same).
+	content := ui.Row(c).Grow(1).Shrink(1).AlignItems(ui.Center).Gap(design.Space1)
 	// The menu control is built always (so assistive technology describes it)
 	// but stays invisible and out of the pointer's way until the row is
-	// hovered, focused or chosen, as mygo's IgnoreInput pattern for a row
-	// action asks.
-	revealed := active || chosen || content.Hovered() || content.FocusWithin()
+	// hovered or focused, as mygo's IgnoreInput pattern for a row action asks.
+	// The chosen row is not special: its live status word needs the row-end
+	// room more than an always-visible ⋯ does, and a right-click opens the
+	// same menu.
+	revealed := content.Hovered() || content.FocusWithin()
 	content.Children(func() {
-		// The persistent selection's accent stripe, full row height. The slot is
-		// built on every row (transparent when resting) so the chosen row's
-		// title does not shift when the selection moves.
-		bar := ui.Box(c).Width(selectedBarWidth).Height(height).Shrink(0)
-		if chosen {
-			bar = bar.Background(t.Accent)
+		if !leadingInPrefix {
+			// The flat fallback list has no row prefix: the persistent
+			// selection's accent stripe and the conversation glyph are the
+			// row's own first children. The stripe is built on every row
+			// (transparent when resting) so the title does not shift when the
+			// selection moves.
+			bar := ui.Box(c).Width(selectedBarWidth).Height(height).Shrink(0)
+			if chosen {
+				bar = bar.Background(t.Accent)
+			}
 		}
 		// The title area is the click target that opens the session. The List
 		// row also selects on a click; observing the pointer here gives the
@@ -1744,10 +1976,16 @@ func buildSessionRow(c *ui.Context, t *design.Tokens, chat contracts.ChatService
 		// Enter and a double click stay the native List's Submitted.
 		title := ui.Row(c).FillWidth().Height(height).AlignItems(ui.Center).
 			Gap(design.Space2).
+			PaddingEnd(design.Space1).Radius(design.RadiusSM)
+		if leadingInPrefix {
+			// The prefix already paid the stripe, the indent and the glyph:
+			// the title needs only the gap after the leading slot.
+			title = title.PaddingStart(design.Space1)
+		} else {
 			// The stripe and the row gap are paid for here, so the title's text
 			// keeps the same inset as a resting row's.
-			PaddingStart(design.Space3 - selectedBarWidth - design.Space1).
-			PaddingEnd(design.Space3).Radius(design.RadiusSM)
+			title = title.PaddingStart(design.Space3 - selectedBarWidth - design.Space1)
+		}
 		title.ObserveInput(func(ev ui.InputEvent) {
 			if ev.Kind != ui.InputPointerUp || ev.Button != 0 {
 				return
@@ -1755,37 +1993,32 @@ func buildSessionRow(c *ui.Context, t *design.Tokens, chat contracts.ChatService
 			openSession(chat, nav, runtime, state, session.ID)
 		})
 		title.Children(func() {
-			// Every conversation keeps the message glyph, also the current
-			// one: NewChat belongs to the new-session action only (the same
-			// glyph for two meanings was one of the fix-round findings). The
-			// current conversation is carried by the accent icon, its bold
-			// title and the chosen row's tint + left stripe.
-			icon := icons.Message()
-			iconColor := t.LabelSecondary
-			if chosen || active {
-				iconColor = t.Accent
+			// The leading glyph carries the run's phase: a clock while the
+			// prompt waits for the model's first output (the reply has not
+			// started), the spinner once the answer streams, and the
+			// conversation glyph when idle. In the tree the row prefix draws it,
+			// in the shared leading slot; the flat fallback draws it here. The
+			// state word sits at the row end, so the title keeps most of its
+			// width.
+			if !leadingInPrefix {
+				sessionLeadingGlyph(c, t, state, session, chosen || active)
 			}
-			ui.Icon(c, icon).Size(design.IconSizeS, design.IconSizeS).TextColor(iconColor)
 			titleText := design.Apply(ui.Text(c, label), t.Text(design.TypeS)).
 				TextColor(t.LabelPrimary).Grow(1).MinWidth(design.Space0).MaxLines(1).Ellipsis("…")
-			if active || chosen {
-				titleText = titleText.FontWeight(500)
+			// A background answer that has not been read yet reads as a
+			// slightly stronger title, so the row is findable by scanning even
+			// before the unread dot registers.
+			if active || chosen || session.Unread {
+				titleText = titleText.FontWeight(design.WeightMedium)
 			}
-			// The chosen row is the quiet selection tint, not the accent fill,
-			// so its badges keep the resting badge look (SH-03's on-accent fill
-			// was for the old full-blue row).
-			badge := func(label string) {
-				design.Apply(ui.Badge(c, label), t.Badge())
-			}
+			// Pinned is a stable property, not a run state, so it keeps the
+			// quiet badge; the live run state moved to the row end (see below).
 			if session.Pinned {
-				badge(state.T("置顶", "Pinned"))
+				design.Apply(ui.Badge(c, state.T("置顶", "Pinned")), t.Badge())
 			}
 			// The active session is already carried by the accent icon and the
 			// selected row; a 当前 badge was redundant and stole width from the
 			// title.
-			if session.Running {
-				badge(state.T("运行中", "Running"))
-			}
 		})
 		menuLabel := state.T("会话操作：", "Session actions: ") + label
 		c.Key("session/" + session.ID + "/menu")
@@ -1806,8 +2039,59 @@ func buildSessionRow(c *ui.Context, t *design.Tokens, chat contracts.ChatService
 		more.PopoverMenuButton(menu, ui.PopoverMenuButtonOptions{
 			At: ui.AnchorBottomEnd, Self: ui.AnchorTopEnd,
 		})
+		// The row's live detail: the state word while the model works (等待回复
+		// before its first output, 运行中 after), or one accent dot for a
+		// finished reply the user has not opened yet. It is the last child, so
+		// it stays put at the row end when the hover-only menu appears, and the
+		// title keeps the row's reading edge.
+		sessionLiveStatus(c, t, state, session)
 	})
 	content.ContextMenu(menu)
+}
+
+// sessionLiveStatus draws a session row's live detail at its end: the run
+// state while the model is working, or the unread mark of a reply that arrived
+// in the background. The detail belongs at the row end so the title keeps the
+// column's one left-aligned reading edge.
+func sessionLiveStatus(c *ui.Context, t *design.Tokens, state *paneState,
+	session contracts.ChatSessionInfo) {
+	if session.Running {
+		label := state.T("运行中", "Running")
+		if session.Waiting {
+			label = state.T("等待回复", "Waiting")
+		}
+		// The leading spinner carries the motion; this micro label keeps the
+		// state readable when motion is reduced or the frame is still, without
+		// taking a session title's last characters.
+		design.Apply(ui.Text(c, label), t.Font(design.TypeXXXS)).
+			TextColor(t.LabelSecondary).MaxLines(1).Shrink(0)
+		return
+	}
+	if !session.Unread {
+		return
+	}
+	// The dot is the visible mark; sessionRowLabel carries the words for
+	// assistive technology and list type-ahead, so the state is never
+	// color-only.
+	ui.Box(c).Size(design.Space2, design.Space2).Radius(design.RadiusMax).
+		Background(t.Accent).Shrink(0)
+}
+
+// sessionRowLabel is the row's accessible name and type-ahead text: the
+// session title plus its live state, in the words the row's glyphs and dot
+// cannot speak.
+func sessionRowLabel(state *paneState, session contracts.ChatSessionInfo) string {
+	label := state.sessionTitle(session)
+	switch {
+	case session.Running && session.Waiting:
+		return label + "，" + state.T("等待回复", "waiting for a reply")
+	case session.Running:
+		return label + "，" + state.T("运行中", "running")
+	case session.Unread:
+		return label + "，" + state.T("未读回复", "unread reply")
+	default:
+		return label
+	}
 }
 
 // openSession activates a session, makes its workspace current and opens the
@@ -1887,24 +2171,34 @@ func buildFooter(c *ui.Context, t *design.Tokens, chat contracts.ChatService,
 		return
 	}
 
-	ui.Column(c).FillWidth().Gap(design.Space1).
-		Padding(design.Space2, design.Space3, design.Space2, design.Space3).
-		Children(func() {
-			c.Key("sidebar/footer/settings")
-			settingsRow := ui.ButtonBase(c).FillWidth().Height(36).PaddingX(design.Space3).
-				Radius(design.RadiusSM).Label(label)
-			settingsRow = rowTint(t, settingsRow, false)
-			settingsRow.Children(func() {
-				ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(design.Space2).Children(func() {
-					ui.Icon(c, icons.Sliders()).Size(16, 16).TextColor(t.LabelSecondary)
-					design.Apply(ui.Text(c, label), t.Text(design.TypeS)).TextColor(t.LabelSecondary)
-				})
-			})
-			if settingsRow.Clicked() {
-				nav.ToggleSettings()
-				runtime.Invalidate()
-			}
+	// The footer is a docked section, not a floating last row: a hairline
+	// closes the scrolling list above it, and the settings row keeps the same
+	// 36-DIP height and inset as the navigation rows so the column has one
+	// alignment.
+	ui.Column(c).FillWidth().Children(func() {
+		ui.Column(c).FillWidth().PaddingX(design.Space3).Children(func() {
+			ui.Divider(c)
 		})
+		ui.Row(c).FillWidth().
+			Padding(design.Space2, design.Space3, design.Space2, design.Space3).
+			Children(func() {
+				c.Key("sidebar/footer/settings")
+				settingsRow := ui.ButtonBase(c).FillWidth().Height(design.ControlHeight).
+					PaddingX(design.Space3).Radius(design.RadiusSM).Label(label)
+				settingsRow = rowTint(t, settingsRow, false)
+				settingsRow.Children(func() {
+					ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(design.Space2).Children(func() {
+						ui.Icon(c, icons.Sliders()).Size(design.IconSizeS, design.IconSizeS).
+							TextColor(t.LabelSecondary)
+						design.Apply(ui.Text(c, label), t.Text(design.TypeS)).TextColor(t.LabelSecondary)
+					})
+				})
+				if settingsRow.Clicked() {
+					nav.ToggleSettings()
+					runtime.Invalidate()
+				}
+			})
+	})
 }
 
 // buildRenameDialog renders the rename Modal on the window-level overlay slot.

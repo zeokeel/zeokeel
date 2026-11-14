@@ -468,10 +468,6 @@ func buildCatalogEditDialog(c *ui.Context, t *design.Tokens, runtime contracts.U
 		}).Children(func() {
 			design.Apply(ui.Text(c, localized(locale, "编辑模型", "Edit model")),
 				t.Font(design.TypeL)).FontWeight(600).TextColor(t.LabelPrimary)
-			design.Apply(ui.Text(c, localized(locale,
-				"保存后立即生效，包括服务商连接。",
-				"Changes, including the provider connection, apply immediately.")),
-				t.TextMuted(design.TypeXS)).MaxLines(1)
 
 			// The form can grow past a short window when the advanced group is
 			// expanded, so the fields scroll in a bounded body (design.
@@ -593,10 +589,6 @@ func buildCatalogEditDialog(c *ui.Context, t *design.Tokens, runtime contracts.U
 							})
 						})
 					})
-					design.Apply(ui.Text(c, localized(locale,
-						"系列决定内置思考模式；「跟随系列默认」跟随系列。",
-						"The family selects the built-in modes; Family default follows it.")),
-						t.TextMuted(design.TypeXS)).MaxLines(1)
 
 					hint := localized(locale, "对话输入框默认使用该模型。",
 						"The composer uses it as its default model.")
