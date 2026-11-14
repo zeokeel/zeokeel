@@ -94,7 +94,7 @@
 | Workspace Changes/diff | ✅ | rightpanel changes + WorkspaceDiffer | 未提交变更列表、状态 badge、diff 折叠/截断 |
 | Trajectory/工具时间线 | ✅ | session Trajectory tab | 轨迹卡片/工具调用时间线 |
 | Tool cards | ✅ | `internal/ui/toolcards` | rig 工具卡 + todo/team_task 卡 + demo/兜底；MCP 动态工具走 session 兜底 |
-| Markdown 渲染 | ✅ | mygo ui/markdown | 消息/技能/更新 notes/artifact/plan 预览；mygo v0.8.3 的 GitHub alerts/mention/reference 与流式解析 |
+| Markdown 渲染 | ✅ | mygo ui/markdown | 消息/技能/更新 notes/artifact/plan 预览；mygo v0.9.0 的 GitHub alerts/mention/reference 与流式解析 |
 | Reasoning 展示 | ✅ | session buildAssistantMessage | 折叠 Reasoning 文本 + **流式「思考中…」预览（尾部 120 rune、最多两行，结束自动消失）** |
 | 消息级操作（复制/重试/用量） | ✅ | session 元信息 ⋯ 菜单 + 导出 | **一条紧凑元信息行**（时间 + `用时/tokens` 紧凑单位 + 单一 ⋯）：复制消息/重新生成/用量明细子菜单（时长/输入/输出/缓存/上下文预算，全紧凑值）；折叠轮的摘要行与元信息共用一行；**同一回合的连续助手步骤合并为一条过程摘要（工具数合计，默认折叠，只展开最终结果）**；**最新回复正文底部有常显「复制」按钮**；**工作步骤展示四档（简洁/标准/详细/完全展开，默认标准）+ 收起时机（回答结束后/下次有新消息，默认回答结束后）**；失败轮保留错误行+重试；**Markdown/JSONL 导出不再含评分字段**（消息反馈功能已移除） |
 | `@` mentions | ✅ | session buildMentionMenu + agent references | 工作区文件 + 会话分组（@session，排除当前/过滤/上限 8）；agent 侧展开注入 |

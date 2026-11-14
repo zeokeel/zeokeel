@@ -1,11 +1,11 @@
-# UI 官方一致性清单（mygo v0.8.3）
+# UI 官方一致性清单（mygo v0.9.0）
 
-这份清单把 `design-guide` 与 mygo v0.8.3 的官方能力映射到本仓库的用法，目的是让
+这份清单把 `design-guide` 与 mygo v0.9.0 的官方能力映射到本仓库的用法，目的是让
 下一次 UI 改动的第一步是「查官方文档/组件」，而不是「先手搓一个」。新增/修改 UI 时
 先对照本表，再读官方文档。
 
-官方源：`/root/go/pkg/mod/github.com/egoist/mygo@v0.8.3/`（`docs/ui/*.md`、
-`examples/*`、`ui/` 源码）。**不要用 v0.7.x 的行号/语义**；升级时先 `go get` 再复核。
+官方源：`go list -m -f '{{.Dir}}' github.com/egoist/mygo` 指向的模块目录（当前 v0.9.0；
+`docs/ui/*.md`、`examples/*`、`ui/` 源码）。**不要用旧版本的行号/语义**；升级时先 `go get` 再复核。
 
 ## 1. 官方标准件速查（按场景）
 
@@ -18,6 +18,7 @@
 | 表格 | `ui.Table` / `TableColumn` / `CellSelect` | table.md | 多列可排序数据用 Table，不用 Row 手排 |
 | 树/大纲 | `ui.Outline[T]` / `ui.Tree` / `OutlineState` | outline.md / tree.md | 工作区/文件树用 Outline |
 | 菜单 | `PopoverMenuButton` / `PopoverMenuButtonOptions{At,Self,Open}` / `MenuItem.Danger/Radio/ID/Subtitle/Trailing/Content/MaxWidth` / `MenuBase` | menu-button.md / context-menu.md | 行尾⋯菜单右对齐；删除项 `Danger()`；单选 `Radio()`；稳定选择 `ID()`；自绘菜单迁移 `MenuBase` |
+| 按钮+相关动作菜单 | `ui.SplitButton` / `ui.PrimarySplitButton`（`SplitButtonParts{Button, Arrow}`） | split-button.md | 主操作带常用变体（保存/另存为、运行/运行方式）；菜单项复用 context menu 语义与 `Chosen()` |
 | 右键菜单 | `Element.ContextMenu(menu)` / `ContextMenuBase` / `Context.SetMenuPresentation(ui.PopoverMenus)` | context-menu.md | 同一 menu 同时供右键与⋯；窗口在 `Root.view` 统一自绘菜单外观 |
 | 命令面板 | `SearchField + List + ActiveDescendant` | accessibility.md / list.md | 列表要有 `Label`，搜索框指向选中行 |
 | 建议菜单（slash/@） | `RoleListBox` + `RoleOption.Checked` + `PositionInSet` + 输入框 `ActiveDescendant` | accessibility.md「Suggestions」 | 不再用无 role 的按钮行 |
@@ -79,7 +80,7 @@
 ## 2. 写 UI 的固定流程
 
 1. **先查表**：本条功能在官方有没有标准件？有就先用官方组件/API，禁止先手搓。
-2. **读源码确认签名**：`docs/ui/<file>.md` 与 `ui/*.go` 可能不同步，以 v0.8.3 源码为准。
+2. **读源码确认签名**：`docs/ui/<file>.md` 与 `ui/*.go` 可能不同步，以 v0.9.0 源码为准。
 3. **实现**：在 view 回调内 build；状态归模块实例；控件身份用 `c.Key`；跨线程走
    `UIRuntime.Post`；不要在 build 里做 I/O（缓存 + 显式刷新，见 memory/files 页）。
 4. **可访问性**：每个无文本控件 `Label`；页面标题 heading；列表/建议菜单补 role 与
@@ -88,7 +89,7 @@
    - `go build ./... && go vet ./... && go test ./... -count=1`
    - 新交互：`ui.NewTester` 帧测试（键盘 ↑↓/Enter/Tab/Esc、焦点归还、a11y role）
    - 新界面：`go run ./internal/devtools/ui-snapshot <dir>` 生成 1280/1024/暗色快照并看图
-   - 涉及 v0.8 行为（`InactiveAccent`、菜单、Markdown）时，抓 active/inactive 双态
+   - 涉及 `InactiveAccent`、菜单、Markdown 行为时，抓 active/inactive 双态
 6. **收口**：删除被替换的手写逻辑与死代码；若确实要偏离官方，在代码注释里写清理由
    （例：composer 动作行不用 `ui.Toolbar` 是因为溢出菜单会吞掉发送按钮）。
 

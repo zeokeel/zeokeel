@@ -1,7 +1,7 @@
 {
   "version": 1,
   "source": {
-    "mygo": "v0.8.3",
+    "mygo": "v0.9.0",
     "entries": "internal/uikit",
     "design_doc": "docs/DESIGN.md",
     "lint_doc": "docs/DESIGN-LINT.md"
@@ -789,7 +789,7 @@
       ],
       "what": "uikit.IconButton 内核：在 ui.ButtonBase 上实现唯一图标按钮外观与状态",
       "owner": "uikit",
-      "reason": "mygo v0.8.3 无官方 IconButton；入口组件集中实现（DESIGN.md §6.3/§7.1）",
+      "reason": "mygo v0.9.0 无官方 IconButton；入口组件集中实现（DESIGN.md §6.3/§7.1）",
       "until": "2027-06-30"
     },
     {

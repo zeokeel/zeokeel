@@ -1,6 +1,6 @@
 package uikit_test
 
-// Headless tests for the shared icon button: mygo v0.8.3 has no official icon
+// Headless tests for the shared icon button: mygo v0.9.0 has no official icon
 // button, so uikit.IconButton is a ButtonBase with the product's one look. The
 // tests drive the real interaction (pointer, Tab, Enter/Space, disabled) and
 // sample the rendered frame, because the hover/selected fills and the danger

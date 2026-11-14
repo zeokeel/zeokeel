@@ -2,7 +2,7 @@
 
 > **给 AI coding agent 与 reviewer 的可执行设计契约。** 本文件不是设计原则散文，而是「写 UI 前必须查表、写完后必须能被检查」的硬约束集合。
 >
-> **版本锚定**：`github.com/egoist/mygo v0.8.3`（见 [../go.mod](../go.mod)）。本文的组件目录、API 签名与规则都以该版本源码 + `docs/ui/*.md` 实测为准；升级 mygo 时按 §8.4 重核。
+> **版本锚定**：`github.com/egoist/mygo v0.9.0`（见 [../go.mod](../go.mod)）。本文的组件目录、API 签名与规则都以该版本源码 + `docs/ui/*.md` 实测为准；升级 mygo 时按 §8.4 重核。
 >
 > **文件分工**：
 > - 本文 = 唯一契约入口（组件目录 / 场景映射 / 反模式 / 最小示例 / token / 入口组件 / 白名单 / 维护）。
@@ -46,8 +46,8 @@
 
 ### 0.4 版本锚定
 
-- 官方事实来源：`/root/go/pkg/mod/github.com/egoist/mygo@v0.8.3/` 的 `docs/ui/*.md`（87 篇 = 25 篇指南 + 62 篇组件文档）与 `ui/` 源码。
-- 文档与源码冲突时**以 v0.8.3 源码为准**；`docs/ui` 中的能力缺口见 §7.4。
+- 官方事实来源：`go list -m -f '{{.Dir}}' github.com/egoist/mygo` 指向的模块目录（当前 v0.9.0）里的 `docs/ui/*.md`（88 篇 = v0.8.3 的 87 篇 + 新增 `split-button.md`）与 `ui/` 源码。
+- 文档与源码冲突时**以 v0.9.0 源码为准**；`docs/ui` 中的能力缺口见 §7.4。
 - 本仓库当前依赖的是 mygo 的通用 `ui` 包。若未来依赖升级、引入更细的组件分类（例如 agent 客户端专用组件族），只需替换 §1.2、附录 A 的 `source` 与组件行，**三层约束结构不变**。
 
 ### 0.5 术语
@@ -55,7 +55,7 @@
 | 术语 | 含义 |
 |---|---|
 | 官方件 | `github.com/egoist/mygo/ui` 包及其子包（`ui/markdown`、`ui/editor`、`ui/richtext`、`ui/chart`）提供的组件 |
-| 最短调用（本项目版 ZeroOptions） | 只传必需参数、不做额外 fluent 配置的构造调用。v0.8.3 的 widget 默认取主题外观，**最短调用即设计默认** |
+| 最短调用（本项目版 ZeroOptions） | 只传必需参数、不做额外 fluent 配置的构造调用。v0.9.0 的 widget 默认取主题外观，**最短调用即设计默认** |
 | token | `internal/design` 的语义颜色/字号/间距/圆角/阴影/布局度量；唯一 hex 来源是 `internal/brand` |
 | 预设 | `internal/design/components.go` 的组件样式（PrimaryButton/SecondaryButton/DangerButton/Panel/Composer/Badge/…） |
 | 入口组件 | 对官方件的薄组合，锁定某类 Agent surface 的语义/状态/骨架；见 §6.3 与 [AGENT-SURFACES.md](AGENT-SURFACES.md) |
@@ -76,7 +76,7 @@
 | 官方控件层 | `github.com/egoist/mygo/ui`（+子包） | 62 个组件的交互/焦点/键盘/a11y 语义 | 有官方件就**不许重造**；只设度量、不覆写原生状态色 |
 | 入口层 | `internal/uikit`（目标新增） | Agent surface 入口组件（§6.3） | 场景内**只能从入口进入**；入口内部组合官方件 + token |
 
-### 1.2 官方组件目录（按用途；API 以 v0.8.3 源码为准）
+### 1.2 官方组件目录（按用途；API 以 v0.9.0 源码为准）
 
 > 官方文档路径均在 mygo 模块的 `docs/ui/<name>.md`。表中「本项目规则」是硬约束，不是建议。
 
@@ -109,6 +109,7 @@
 | 组件/API | 用途 | 本项目规则 |
 |---|---|---|
 | `Button` / `PrimaryButton` / `ButtonBase` | 普通/主操作/无外观按钮 | 主操作 `ui.PrimaryButton` + `t.PrimaryButton()`（36 高；页面唯一主操作可用 `t.PrimaryButtonLarge()` 40）；次操作 `ui.Button` + `t.SecondaryButton()`；禁用主操作 `t.DisabledPrimary()`（中性面 + tertiary 文字，**不许 50% accent**）；危险用 `t.DangerButton()`；都**不许覆写背景色** |
+| `SplitButton` / `PrimarySplitButton` | 按钮+相关动作菜单（一个控件两段：主段执行、箭头开菜单） | 主操作有常用变体时用（如「保存 / 另存为…」）；菜单项复用 context menu 语义与 `Chosen()` |
 | `Toggle` / `ToggleGroup` | 保持按下的按钮（非开关） | 只用于 press 语义（评分、格式）；**开关必须 `ui.Switch`** |
 | `MenuButton` / `PopoverMenuButton` | 按钮+菜单（系统/窗口内绘制） | 行尾「⋯」与溢出菜单用 `PopoverMenuButton`；`Danger()`/`Radio()`/`ID()` 按语义用 |
 | `Menu` / `MenuItem` / `ContextMenu` / `MenuBase` | 右键/下拉菜单 | 菜单项一律 `MenuItem`；同一菜单供右键与「⋯」复用；编辑项用 `m.EditItems()` |
@@ -133,7 +134,7 @@
 
 | 组件/API | 用途 | 本项目规则 |
 |---|---|---|
-| `List` + `ListState` / `ListRow` | 虚拟化列表（任意长度、行高可变） | **所有集合的唯一选择**（transcript/轨迹/记忆/日志/文件/设置列表/侧栏）；`Key` 稳定、`Label` 供 a11y、流式 `FollowEnd`、折叠 `HoldPlace` |
+| `List` + `ListState` / `ListRow` | 虚拟化列表（任意长度、行高可变） | **所有集合的唯一选择**（transcript/轨迹/记忆/日志/文件/设置列表/侧栏）；`Key` 稳定、`Label` 供 a11y、流式 `FollowEnd`、折叠 `HoldPlace`、程序选择行 `ListState.Choose` |
 | `Table` + `TableColumn` | 虚拟化表格（排序/列宽/单元格选择） | 多列可排序数据用 Table；不许 Row 手排 |
 | `Outline` + `OutlineState[K]` | 虚拟化树/大纲 | 文件树、工作区树、可展开层级用 Outline；小树可用 `Tree` |
 | `Tree` / `TreeBase` | 静态小树 | 只用于小规模固定树；大集合用 Outline |
@@ -314,7 +315,7 @@
 
 ### 4.1 原则
 
-1. **最短调用即设计默认**：v0.8.3 的 widget 构造后即取主题外观；`*Base` 才是"无外观、只保留交互"。
+1. **最短调用即设计默认**：v0.9.0 的 widget 构造后即取主题外观；`*Base` 才是"无外观、只保留交互"。
 2. **带 options/state 的组件零值即默认**：`editor.State`、`markdown.Options`、`richtext.EditorOptions` 不要堆配置。
 3. **本项目只加"度量封装"**：`design.Apply(el, t.PrimaryButton())` 这类只改尺寸/圆角/字重的预设可以加；**改颜色/背景的覆写不可以**。
 4. **先默认，确有需求再升级**：需要非默认外观时，先查 §6 预设与入口组件，最后才走 §7 自绘流程。
@@ -654,7 +655,7 @@ uikit.ToolRow(c, uikit.ToolRowOptions{
 
 ### 7.2 新增自绘/新组件的偏离流程
 
-1. **先查**：官方 v0.8.3 是否有组件/`*Base`？本项目是否有预设/入口？→ 有则禁止自绘。
+1. **先查**：官方 v0.9.0 是否有组件/`*Base`？本项目是否有预设/入口？→ 有则禁止自绘。
 2. **写理由**：在代码注释里写清「官方为什么不够」（可访问性/交互语义/布局约束），引用官方文档路径。
 3. **登记**：同 PR 更新本文 §7.1、[UI-COMPONENT-MIGRATION.md](UI-COMPONENT-MIGRATION.md) §3 与 [DESIGN-LINT.md](DESIGN-LINT.md) 的 `design-allowlist`（lint 白名单）。
 4. **补测试**：帧测试覆盖键盘/焦点/状态/role；新视觉有快照。
@@ -670,7 +671,7 @@ uikit.ToolRow(c, uikit.ToolRowOptions{
 
 ### 7.4 官方不存在的 API（禁止发明）
 
-| 容易误用 | v0.8.3 事实 | 正确做法 |
+| 容易误用 | v0.9.0 事实 | 正确做法 |
 |---|---|---|
 | `ui.DialogFooter` | 不存在（本仓库 `uikit.DialogFooter` 是应用层封装） | 用 `uikit.DialogFooter`；官方 footer 写法是 `Row + Justify(End)` |
 | `Button.Default` / `Element.Default` | 不存在 | Modal 里用 `uikit.DialogFooter` 的 `Default`（仅无输入）或 `EnterTo`/`OnTextKey`/`OverlayShortcut` |
@@ -745,7 +746,7 @@ go run ./internal/devtools/ui-snapshot .cache/ui-conformance   # 生成 PNG 并�
 - [DESIGN-REVIEW.md](DESIGN-REVIEW.md) 是 2026-11-08 / mygo v0.7.4 的历史报告，其中 P0/P1 多数已修复（硬编码色、uikit 未接 design、Toggle 当开关、toast 自绘等）。现状以本文件 + 代码 + 测试为准。
 - [UI-FIX-STATUS-v0.8.3.md](UI-FIX-STATUS-v0.8.3.md) §1 的「Approval DialogFooter（Deny 默认焦点/Enter=拒绝）」与现状不符：现行审批**没有默认动作**（真实事故修订，见 `internal/ui/approval` 注释与 `TestApprovalFooterHasNoDefaultAction`）；transcript 也早已是 `ui.List` 虚拟化，不是 200 条有界窗口。
 
-### 8.4 mygo 升级流程（v0.8.x → 新版本）
+### 8.4 mygo 升级流程（v0.9.x → 新版本）
 
 1. 读新版本 mygo 模块内的 `docs/ui/migration.md` 与 release notes；`go get github.com/egoist/mygo@<version>`。
 2. `go tool mygo migrate-ui .` 预览 → `-write` 应用（需 Go 1.24+ tool 指令；当前 go.mod 未声明，见 DESIGN-LINT §5）。
@@ -781,7 +782,7 @@ go run ./internal/devtools/ui-snapshot .cache/ui-conformance   # 生成 PNG 并�
 ```json
 {
   "version": 1,
-  "source": { "mygo": "v0.8.3", "entries": "internal/uikit", "design_doc": "docs/DESIGN.md", "lint_doc": "docs/DESIGN-LINT.md" },
+  "source": { "mygo": "v0.9.0", "entries": "internal/uikit", "design_doc": "docs/DESIGN.md", "lint_doc": "docs/DESIGN-LINT.md" },
   "components": [
     { "id": "agent.tool-row", "entry": "uikit.ToolRow", "package": "internal/uikit",
       "states": ["running", "success", "error", "cancelled", "unknown"],
@@ -802,7 +803,7 @@ go run ./internal/devtools/ui-snapshot .cache/ui-conformance   # 生成 PNG 并�
   "allowlist": [
     { "id": "chrome.icon-buttons", "paths": ["internal/uiroot"], "rules": ["DS-06"],
       "what": "壳层图标按钮（rail/展开折叠/设置/关闭）", "owner": "uiroot",
-      "reason": "mygo v0.8.3 无官方 IconButton；待 uikit.IconButton 收敛",
+      "reason": "mygo v0.9.0 无官方 IconButton；待 uikit.IconButton 收敛",
       "until": "2027-06-30" }
   ]
 }
@@ -810,9 +811,9 @@ go run ./internal/devtools/ui-snapshot .cache/ui-conformance   # 生成 PNG 并�
 
 **同步规则**：`go test ./internal/design/...` 的 conformance 测试校验 registry schema、allowlist 有效性（owner/reason/until）、虚构 API；registry ↔ 本文表格的逐行镜像比对仍待 Phase 3（DS-08）。**新增/迁移入口组件时必须同 PR 更新 registry 与本文 §6.3。**
 
-## 附录 B：官方组件文档索引（mygo v0.8.3）
+## 附录 B：官方组件文档索引（mygo v0.9.0）
 
-按 §1.2 类别可直接打开：`accessibility` `accordion` `alert-dialog` `autocomplete` `avatar` `badge` `breadcrumbs` `button` `calendar` `chart` `checkbox` `code-editor` `collapsible` `color-picker` `combobox` `context-menu` `custom-widgets` `date-input` `decimal-input` `dialog` `diff-viewer` `drag-and-drop` `drawing` `editable-text` `find-bar` `form` `grid` `grid-view` `history-buttons` `icon` `image` `input` `inspector` `layout` `link` `list` `markdown` `menu-button` `meter` `number-input` `outline` `overlays` `popover` `progress` `radio` `range-slider` `rating` `rich-text-editor` `right-to-left` `scroll` `search-field` `segmented` `select` `shaders` `sidebar` `slider` `spinner` `split` `stepper` `styling` `switch` `table` `tabs` `testing` `text` `text-input` `time-input` `toast` `toggle` `token-field` `toolbar` `tooltip` `transitions` `tree` `video` `views` `web-view` `windows`。
+按 §1.2 类别可直接打开：`accessibility` `accordion` `alert-dialog` `autocomplete` `avatar` `badge` `breadcrumbs` `button` `calendar` `chart` `checkbox` `code-editor` `collapsible` `color-picker` `combobox` `context-menu` `custom-widgets` `date-input` `decimal-input` `dialog` `diff-viewer` `drag-and-drop` `drawing` `editable-text` `find-bar` `form` `grid` `grid-view` `history-buttons` `icon` `image` `input` `inspector` `layout` `link` `list` `markdown` `menu-button` `meter` `number-input` `outline` `overlays` `popover` `progress` `radio` `range-slider` `rating` `rich-text-editor` `right-to-left` `scroll` `search-field` `segmented` `select` `shaders` `sidebar` `slider` `spinner` `split` `split-button` `stepper` `styling` `switch` `table` `tabs` `testing` `text` `text-input` `time-input` `toast` `toggle` `token-field` `toolbar` `tooltip` `transitions` `tree` `video` `views` `web-view` `windows`。
 
 指南类：`README` `accessibility` `custom-widgets` `layout` `migration` `motion` `navigation` `overlays` `performance` `rendering` `styling` `testing` `transitions` `transforms` `windows`。
 

@@ -435,7 +435,7 @@ func TestCommandPaletteShortcut(t *testing.T) {
 		requireNoText(t, tt, "打开设置")
 	}
 	// Choosing a command closes the palette and runs it. The row is a native
-	// button whose accessible name is the command title; v0.8.3's strict
+	// button whose accessible name is the command title; v0.9.0's strict
 	// Tester.Click cannot pick it by text (the title is rendered more than once
 	// inside the row), so query the access tree and click the button's bounds.
 	info, ok := tt.AccessByRole(ui.RoleButton, "其他命令")

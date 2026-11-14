@@ -2,7 +2,7 @@ package uikit
 
 // The product's one icon-only button: a bare glyph in a square hit target of
 // at least design.IconSizeL, named for assistive technology and, when it says
-// more than the name, described by a Tooltip. mygo v0.8.3 has no official icon
+// more than the name, described by a Tooltip. mygo v0.9.0 has no official icon
 // button (DESIGN.md §6.3/§7.4), so this entry component wraps ui.ButtonBase:
 // the base owns the pointer, the keyboard (Enter and Space), the focus, the
 // theme's focus ring and `Disabled`; this file owns the one product look for

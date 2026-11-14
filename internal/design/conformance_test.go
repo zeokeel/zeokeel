@@ -230,7 +230,7 @@ func TestDesignRegistryValidation(t *testing.T) {
 	registry := func(version int, allow string) string {
 		return fmt.Sprintf(`{
 			"version": %d,
-			"source": {"mygo": "v0.8.3", "entries": "internal/uikit"},
+			"source": {"mygo": "v0.9.0", "entries": "internal/uikit"},
 			"components": [{"id": "c1", "entry": "uikit.X", "package": "internal/uikit"}],
 			"scenarios": [{"id": "s1", "entry": "uikit.Y", "forbid": ["Card"]}],
 			"anti_patterns": [{"id": "AP-01", "rule": "DS-01", "message": "m"}],
@@ -386,13 +386,13 @@ func TestDesignBaselineIsValid(t *testing.T) {
 }
 
 // TestNoInventedOfficialAPI is DS-08's anti-fabrication check: the source must
-// not call the mygo APIs that do not exist in v0.8.3 (docs/DESIGN.md §7.4,
+// not call the mygo APIs that do not exist in v0.9.0 (docs/DESIGN.md §7.4,
 // AP-14). The application-level uikit.DialogFooter is fine; ui.DialogFooter
 // is not.
 func TestNoInventedOfficialAPI(t *testing.T) {
 	root := repoRoot(t)
 	// Selector names under github.com/egoist/mygo/ui that do not exist in
-	// v0.8.3 (docs/DESIGN.md §7.4 lists the common mistakes).
+	// v0.9.0 (docs/DESIGN.md §7.4 lists the common mistakes).
 	forbiddenSelectors := map[string]bool{
 		"DialogFooter":   true,
 		"Markdown":       true,
@@ -405,7 +405,7 @@ func TestNoInventedOfficialAPI(t *testing.T) {
 	}
 	problems := scanMygoUISelectors(t, root, forbiddenSelectors)
 	if len(problems) > 0 {
-		t.Fatalf("source uses APIs that mygo v0.8.3 does not have (DESIGN.md §7.4 / AP-14):\n  %s", strings.Join(problems, "\n  "))
+		t.Fatalf("source uses APIs that mygo v0.9.0 does not have (DESIGN.md §7.4 / AP-14):\n  %s", strings.Join(problems, "\n  "))
 	}
 	// docs/DESIGN.md §7.4 must keep documenting every name we police, so the
 	// check and the document cannot drift.
@@ -471,7 +471,7 @@ func scanMygoUISelectors(t *testing.T, root string, forbidden map[string]bool) [
 			switch x := n.(type) {
 			case *ast.SelectorExpr:
 				if id, ok := x.X.(*ast.Ident); ok && uiAlias[id.Name] && forbidden[x.Sel.Name] {
-					problems = append(problems, fmt.Sprintf("%s:%d: ui.%s does not exist in mygo v0.8.3", rel, fset.Position(x.Pos()).Line, x.Sel.Name))
+					problems = append(problems, fmt.Sprintf("%s:%d: ui.%s does not exist in mygo v0.9.0", rel, fset.Position(x.Pos()).Line, x.Sel.Name))
 				}
 			case *ast.CallExpr:
 				sel, ok := x.Fun.(*ast.SelectorExpr)

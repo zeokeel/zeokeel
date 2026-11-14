@@ -9,7 +9,7 @@
 
 ## 1. 项目概览
 
-**ZeoKeel**：Go 桌面 AI Agent 客户端，UI 由 `github.com/egoist/mygo v0.8.3` 的**原生控件**绘制（无 HTML/CSS/JS/webview）。当前依赖见 [go.mod](go.mod)。
+**ZeoKeel**：Go 桌面 AI Agent 客户端，UI 由 `github.com/egoist/mygo v0.9.0` 的**原生控件**绘制（无 HTML/CSS/JS/webview）。当前依赖见 [go.mod](go.mod)。
 
 ```
 cmd/zeokeel             入口（desktop / headless / acp 产品）
@@ -130,7 +130,7 @@ make ci                                   # build+vet+test；全量用 make veri
 - **线程**：UI 构建/绘制/输入/回调都在主线程；`*ui.Context` 不出 build；后台结果回 UI 用 `UIRuntime.Post`；`Invalidate` 只请求重绘。
 - **模块边界**：不 import 其他模块实现/uiroot/host；跨模块用 contracts 服务或稳定命令 ID（如 `rightpanel.team.open`）。
 - **不自造标准件**：官方有 `List/Modal/AlertDialog/Overlay/Popover/Menu/SearchField/Form/Field/Switch/Checkbox/Radio/Select/Tabs/Collapsible/Toast/Scroll/Split/Sidebar/Table/Outline/GridView/editor/markdown` 等，必须用。
-- **不虚构 API**：v0.8.3 没有 `ui.DialogFooter`、`Button.Default`、`ui.Markdown`、`ui.DatePicker`、`ui.CommandPalette`（见 DESIGN.md §7.4）。
+- **不虚构 API**：v0.9.0 没有 `ui.DialogFooter`、`Button.Default`、`ui.Markdown`、`ui.DatePicker`、`ui.CommandPalette`（见 DESIGN.md §7.4）。
 - **不加依赖**：新增第三方 UI/图标/样式库前必须说明理由并获得确认；不引入第二套设计系统。
 - **不做未请求的功能**：不加导航/统计/装饰性面板来"让界面看起来完整"。
 
@@ -149,7 +149,7 @@ make ci                                   # build+vet+test；全量用 make veri
 
 | 需求 | 去哪 |
 |---|---|
-| 官方组件是否存在/怎么用 | mygo 源码内 `docs/ui/<name>.md`（v0.8.3，用 `go list -m -f '{{.Dir}}' github.com/egoist/mygo` 定位）+ [docs/UI-CONFORMANCE.md](docs/UI-CONFORMANCE.md) §1 |
+| 官方组件是否存在/怎么用 | mygo 源码内 `docs/ui/<name>.md`（v0.9.0，用 `go list -m -f '{{.Dir}}' github.com/egoist/mygo` 定位）+ [docs/UI-CONFORMANCE.md](docs/UI-CONFORMANCE.md) §1 |
 | 某场景该用哪个组件 | [docs/DESIGN.md](docs/DESIGN.md) §2 |
 | 写错了会怎样 | [docs/DESIGN.md](docs/DESIGN.md) §3 反模式 + [docs/DESIGN-LINT.md](docs/DESIGN-LINT.md) §2 |
 | token 取值 | `internal/design/tokens.go` / `components.go` |

@@ -1,10 +1,10 @@
-# 官方组件迁移清单（mygo v0.8.3）
+# 官方组件迁移清单（mygo v0.9.0）
 
 > 目标：把 ZeoKeel 中「官方已有标准件却仍自绘/手搓」的 UI 逐项替换为
-> `mygo v0.8.3` 官方推荐用法，同时保留有明确理由的自绘项（accessibility /
+> `mygo v0.9.0` 官方推荐用法，同时保留有明确理由的自绘项（accessibility /
 > 交互语义无法用官方控件表达时）。
 >
-> 官方源：`/root/go/pkg/mod/github.com/egoist/mygo@v0.8.3/docs/ui/*.md`。
+> 官方源：`go list -m -f '{{.Dir}}' github.com/egoist/mygo` 指向的模块目录（当前 v0.9.0）的 `docs/ui/*.md`。
 > 规则与组件速查见 [UI-CONFORMANCE.md](UI-CONFORMANCE.md)；已完成的官方化
 > 修复证据见 [UI-FIX-STATUS-v0.8.3.md](UI-FIX-STATUS-v0.8.3.md)。
 
