@@ -4,6 +4,20 @@ All notable changes to ZeoKeel are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/) and the project adheres to
 [Semantic Versioning](https://semver.org/).
 
+## [0.2.37] - 2026-11-15
+
+依赖维护发布：rig 从 v0.16.3 内树 fork 切回已发布模块 **v0.17.1**，删除 `third_party/zeokeel-rig` 与 `replace`。
+
+### Changed
+
+- **rig v0.16.3 fork → v0.17.1（已发布）**：v0.17.1 已包含 Windows 沙盒并发 ACL 修复（v0.16.5）与多会话 Goal Revision API（`hosttools.Options.GoalRevision`、`GoalRevisionStore.CurrentGoal(ctx)`、目标轮次 256）。ZeoKeel 的 DSH goal 三件套仍由产品 `internal/hosttools/goaltools.go` 自实现，不实现 `GoalRevisionStore`，因此 v0.17.1 的接口 breaking 不影响本产品；模型可见工具面与行为不变。
+- 删除 `third_party/zeokeel-rig`（v0.16.3 源码快照）与 `go.mod` 的 `replace`；`go.sum` 记录已发布 v0.17.1 校验和，干净 checkout 直接从模块代理构建。
+
+### 验证
+
+- `gofmt`、`go build ./...`、`go vet ./...`、`go mod verify`、`go test ./... -count=1` 全绿；`GOOS=windows GOARCH=amd64 go build ./...` 通过。
+- 无用户可见行为变化；v0.2.36 的功能与 Windows ACL 修复保持不变。
+
 ## [0.2.36] - 2026-11-15
 
 长时任务严格对齐 DSH（设计见 [docs/plans/long-task-dsh-alignment.md](docs/plans/long-task-dsh-alignment.md)，差距分析见 [docs/research/long-task/](docs/research/long-task/)）。
@@ -59,7 +73,7 @@ All notable changes to ZeoKeel are documented here. The format follows
 - job 完成通知不带 exit code（rig v0.16.2 无公开 accessor；读 job_output 会消费模型输出游标），因此 `execution/job_finished` 只记 DSH 状态/kind。
 - 执行域：job/terminal 在**同一应用进程内**跨工作区/权限/沙盒重建保持存活并可继续操作；进程退出/崩溃后无法重连（OS 子进程随应用结束；DSH jobs 同样不跨重启），durable execution 事件只供审计/回看且无完整输出，缺 finish/close = 结束未知。未做 systemd/launchd 常驻服务，托盘不可用时关窗仍「确认后退出」。
 - OS 通知平台受限：macOS 需打包应用；纯 Xvfb/无 dbus 环境自动降级为应用内 toast；无会话的通知只把窗口带到前台。
-- rig 使用 **v0.16.3 内树 fork**（`third_party/zeokeel-rig` + replace；Windows 并发修复；tag `v0.16.3` 已推送 GitHub，但 goproxy.cn 尚未索引，故暂用 fork 保干净构建）；`/data/zeokeel-rig` 的 v0.17.0 候选改动保留本地 tag、未发布、产品不消费（DSH goal 三件套由产品 hosttools 自实现，模型面兼容）。
+- rig 使用已发布 **v0.17.1**（无 fork/replace）；Windows 并发 ACL 修复与 Goal Revision API 均来自已发布模块；DSH goal 三件套仍由产品 hosttools 自实现，不实现 `GoalRevisionStore`，接口变更不影响产品。
 - Windows 并发 ACL 修复的 Win32 运行时行为（命名 mutex/SetFileSecurityW/OpenMutex、真实并发 helper）尚未在 Windows 实机验证；需用 rig `RIG_WINDOWS_SANDBOX_TEST=1` 跑并发回归。
 
 ### Verification

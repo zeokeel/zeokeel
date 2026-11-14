@@ -1,4 +1,4 @@
-> 附（2026-11-15 后续）：Windows sandbox 并发写修复使用 rig v0.16.3（tag 已推送 GitHub、goproxy.cn 未索引）内树 fork（`third_party/zeokeel-rig` + replace），仍无 sibling 依赖、干净 checkout 可构建；DSH 语义不变。Win32 运行时行为待 Windows 实机验证。
+> 附（2026-11-15 后续）：Windows sandbox 并发写修复已随 rig v0.17.1 发布；产品直接 require v0.17.1（无 fork/replace），干净 checkout 可构建；DSH 语义不变。Win32 运行时行为待 Windows 实机验证。
 # 05 · 长时任务严格对齐 DSH：最终独立审计（第二轮复审计 + D1–D3 收尾复核）
 
 > 日期：2026-11-15 · 角色：**独立审计员（adversarial verifier）**，非实施者

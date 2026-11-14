@@ -33,6 +33,7 @@
 | **第七轮：Insights 洞察页** | 新后端模块 + UI 一级入口：7/30 天 tokens/成本/会话/工具/模型/工作区聚合（model_call 主源、旧 usage 回退不重复；有界读取+缓存+截断明示；未知价只计 UnpricedCalls）；Table/List/KPI，无自绘图表；点击会话打开 | `internal/contracts/insights.go`、`internal/modules/insights/`、`internal/ui/insights/`、`internal/assembly/`、`internal/ui/sidebar/` | 模块聚合/日期/无价/空/缓存单测 + UI 帧测试 + uimodtest E2E + snapshot `p2-insights{,-dark}.png` |
 | **第七轮：冷恢复 UI** | 历史 teammate/子代理 Resumable 行「历史 · 可继续」+「继续」；子会话冷恢复输入框（发送/已发送等待/最新回复/错误本地化）；只读历史不变 | `internal/ui/session/agentsurface.go`、`internal/devtools` | 帧测试 7 项 + uimodtest 真实重启 E2E + snapshot `p2-cold-resume*.png` |
 | **第八轮：压缩审计 archive** | 手动 /compact 替换前 durable `compact_archive`（完整 rig messages；2MiB/200 条上限/truncated 元数据）；失败 fail-closed 保留历史；溢出恢复同样归档；ContextInspector 只暴露元数据，重启可审计 | `internal/modules/agent/compact_archive.go`、`compact_now.go`、`context_recovery.go`、`observability.go`、contracts | archive/失败/双上限/重启测试 + `-race` |
+| **第十二轮：rig v0.17.1 发布接入** | rig v0.17.1 发布到 main（v0.16.5 Windows 修复 + Goal Revision API）；产品切回已发布模块并删除 `third_party/zeokeel-rig`/replace | `go.mod`、`go.sum`、docs | `go test ./...`、Windows 交叉 build、干净 checkout 构建 |
 | **第十一轮：Windows 沙盒并发写修复** | rig v0.16.3（`0515026`，tag 已推送 GitHub、goproxy.cn 未索引）：跨进程命名 mutex + per-grant marker + per-workspace 状态文件；并发 grant 各自加/撤自己的 capability ACE，最后一个恢复原始 descriptor；崩溃 grant 自愈；产品以内树 fork `third_party/zeokeel-rig` + replace 消费，保持干净构建；Win32 行为待 Windows 实机验证 | `/data/zeokeel-rig`、`third_party/zeokeel-rig`、`go.mod` | rig 纯状态机 9 测试 + Windows 交叉 build/vet + 产品全量 go test + Windows 交叉 build |
 | **第十轮：执行域持久化** | 所有 `(root,mode,sandbox)` build 保留到模块 unload（切工作区/权限/沙盒重建不再 CloseAll）；job_*/terminal_* 按 ID 路由 owner build（新任务用当前策略），job_list/terminal_list 合并同 root builds，通知从所有 builds drain；durable execution 生命周期事件（审计，不含输出；跨 app 重启不重连） | `internal/modules/toolkit/execution_routing.go`、`rebind.go`、`contracts/execution.go` | 新增 9 个路由/生命周期测试 + 旧测试新语义 + `-race` + 全量 go test |
 | **第九轮：W1 干净构建** | 产品回退已发布 rig v0.16.2（无 replace），DSH goal 三件套产品自实现（`goaltools.go`），模型面 schema 不变；干净目录构建通过 | `internal/hosttools/goaltools.go`、`internal/modules/hosttools/`、`go.mod/go.sum` | clean dir `go build ./...` + goal/agent/hosttools/assembly 测试 |
@@ -80,7 +81,7 @@
 6. **Stop 后 inbox**：只在人类手势（切回/Send/Enqueue）时 drain，无后台定时器；`ChatSession.Interrupted` 的继续只聚焦 composer，不自动重发。
 7. **审批 fail-closed**：agent gate 在无 approvals 服务时已 fail-closed（deny + 可读错误）；无 approvals 时提示词策略为 workspace。shipped 桌面/headless(auto+pin)/ACP 不受影响；rig v0.16.2 的 gate error 会中止整个 run（非单工具拒绝），仅自定义 embedder 可达。
 8. **编排**：workflow/ralph 已注册、委派预算已对齐；sync subagent 仍阻塞当前 run（长任务建议异步 team）；ralph 为实验性、默认暴露但 guidance 限定显式请求。
-9. **rig**：产品使用 **v0.16.3 内树 fork**（`third_party/zeokeel-rig` + replace；Windows sandbox 并发修复，tag 已推送 GitHub 但 goproxy.cn 未索引），干净 checkout 可构建；DSH goal 三件套由产品 `internal/hosttools/goaltools.go` 自实现；本地 rig v0.17.0 候选改动保留 tag、不发布、不消费。Win32 并发 ACL 行为待 Windows 实机验证。
+9. **rig**：产品使用已发布 **v0.17.1**（无 fork/replace；含 Windows sandbox 并发 ACL 修复与 Goal Revision API）；DSH goal 三件套由产品 `internal/hosttools/goaltools.go` 自实现，接口变更不影响产品。Win32 并发 ACL 行为待 Windows 实机验证。
 10. **平台**：OS 通知 macOS 需打包应用、无 dbus 环境降级；通知点击在会话已删时只置前。
 
 ---

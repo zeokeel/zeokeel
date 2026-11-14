@@ -910,3 +910,8 @@ v0.2.12 的 package-macos job 在 GitHub Ubuntu runner 上构建 libdmg-hfsplus 
 - **Windows 沙盒并发写修复（rig v0.16.3）**：跨进程命名 mutex + per-grant marker + per-workspace 状态文件协调 ACL grant/restore；并发 helper 只加/撤自己的 capability ACE，最后一个恢复原始 descriptor，崩溃 grant 自愈；read-only 不改 workspace ACL。产品以 `third_party/zeokeel-rig` 内树 fork + replace 消费，保持干净 checkout 构建；rig tag `v0.16.3` 已推送 GitHub，goproxy.cn 尚未索引。
 - **验证**：`gofmt` 空；`go build ./...`、`go vet ./...`、`go tool mygo vet .`、`go mod verify` 通过；`go test ./... -count=1` 46 包全绿；`GOOS=windows GOARCH=amd64 go build/vet ./...` 通过；干净目录（无 sibling）`-mod=readonly` 构建通过；`designlint --strict --baseline` 480 files 0 new；`scripts/design-check.sh` 6/6；`ui-drive` 93/93 PASS；`ui-snapshot` 120 PNG 人工复核。
 - **已知边界**：Win32 ACL 运行时行为需 Windows 实机验证（rig `RIG_WINDOWS_SANDBOX_TEST=1`）；自动压缩 run 中兜底仍 inferred；执行域跨 app 重启不重连；cold resume 为一问一答；rig v0.17.0 候选改动未发布、产品不消费。详见 CHANGELOG Known limitations。
+
+## 0.2.37（2026-11-15：rig v0.17.1 接入）
+
+- **依赖**：产品从 rig v0.16.3 内树 fork（`third_party/zeokeel-rig` + replace）切回已发布 **v0.17.1**；删除 3.9 MB 源码快照与 `replace`，`go.sum` 记录官方校验和。v0.17.1 已包含 v0.16.5 的 Windows 沙盒并发 ACL 修复与 Goal Revision API；产品仍自实现 DSH goal 三件套，不实现 `GoalRevisionStore`，接口变更无影响。
+- **验证**：`gofmt` 空；`go build ./...`、`go vet ./...`、`go mod verify`、`GOOS=windows GOARCH=amd64 go vet ./...` 通过；`go test ./... -count=1` 全绿；`designlint --strict --baseline` 0 new；`scripts/design-check.sh` 6/6；干净目录（无 `.git`/`.cache`/fork，`GOPROXY=off`）`go build ./...` 与 Windows 交叉构建通过；无用户可见行为变化。
